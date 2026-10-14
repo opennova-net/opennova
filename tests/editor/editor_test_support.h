@@ -32,6 +32,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/terrain_heights_document.h>
+#include <editor/model/edit.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirements.h>
 #include <base/io/json.h>
@@ -239,6 +240,28 @@ inline bool write_bytes(const std::string &path, const std::vector<uint8_t> &byt
 	if (!out) return false;
 	out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
 	return static_cast<bool>(out);
+}
+
+// The edit factories: a Set of one field of a record, and an edit of another operation about a
+// record (an Add, Remove, Duplicate or Move: under `parent`, 0 the row, at `position` among its
+// owner's collection of the record's kind, SIZE_MAX the end), Edit's defaults otherwise.
+inline opennova::editor::Edit set_edit(const opennova::editor::NodeAddress &address, std::string field,
+		opennova::editor::Value value) {
+	opennova::editor::Edit edit;
+	edit.address = address;
+	edit.field = std::move(field);
+	edit.value = std::move(value);
+	return edit;
+}
+inline opennova::editor::Edit op_edit(opennova::editor::EditOperation operation,
+		const opennova::editor::NodeAddress &address, opennova::editor::NodeId parent = 0,
+		size_t position = SIZE_MAX) {
+	opennova::editor::Edit edit;
+	edit.operation = operation;
+	edit.address = address;
+	edit.parent = parent;
+	edit.position = position;
+	return edit;
 }
 
 // A sound bank minted through the engine's writer (formats/lwf) holding a set of each name, each with one

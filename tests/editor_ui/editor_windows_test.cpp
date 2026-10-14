@@ -1014,14 +1014,7 @@ struct LayoutPreview {
 	void pumping() { ui.pump = [this] { shell.pump(ui.windows, v); }; }
 };
 
-// A Set of one field.
-Edit set_edit(const NodeAddress &address, const char *field, Value value) {
-	Edit edit;
-	edit.address = address;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
+using editor_test::set_edit;
 
 // S13 V2, V5: the canvas through the menu's viewport view in the Preview window, on the null
 // backend (its rules are its portable half's, tests/editor/canvas_test.cpp: preview/canvas_gesture,

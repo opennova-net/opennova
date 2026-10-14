@@ -42,13 +42,7 @@ NodeAddress row_address(const Document &document, size_t index) {
 	return {document.rows()[index]->id, node_kind(DefRecordKind::Item), 0};
 }
 
-Edit set(NodeAddress address, const std::string &field, Value value) {
-	Edit edit;
-	edit.address = address;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
+using editor_test::set_edit;
 
 std::string item(const char *name, int id, const char *type) {
 	return std::string("begin \"") + name + "\"\nid " + std::to_string(id) + "\ntype " + type + "\nend\n";
@@ -124,33 +118,33 @@ int test_refusals() {
 	                  pilot = row_address(document, 4);
 	Diagnostic error;
 	// Off its id.
-	TEST_EXPECT(!document.apply(set(insertion, "id", int64_t(100500)), error));
+	TEST_EXPECT(!document.apply(set_edit(insertion, "id", int64_t(100500)), error));
 	TEST_EXPECT(error.code() == "catalog.reserved_refused" && error.field == "id" && error.row_id == insertion.row &&
 	            error.record == "Insertion point" && error.severity == DiagnosticSeverity::Error);
 	TEST_EXPECT(error.message.find("106094") != std::string::npos && error.message.find("Insertion point") != std::string::npos);
 	TEST_EXPECT(item_at(document, 1).id == 106094 && !document.dirty());
 	// Its kind changed.
-	TEST_EXPECT(!document.apply(set(insertion, "type", int64_t(DEF_ITEM_TYPE_DECORATION)), error));
+	TEST_EXPECT(!document.apply(set_edit(insertion, "type", int64_t(DEF_ITEM_TYPE_DECORATION)), error));
 	TEST_EXPECT(error.code() == "catalog.reserved_refused" && error.field == "type");
 	TEST_EXPECT(item_at(document, 1).type == DEF_ITEM_TYPE_MARKER);
 	// Another kind onto a start's id.
-	TEST_EXPECT(!document.apply(set(crate, "id", int64_t(106001)), error));
+	TEST_EXPECT(!document.apply(set_edit(crate, "id", int64_t(106001)), error));
 	TEST_EXPECT(error.code() == "catalog.reserved_refused" && error.field == "id" && error.row_id == crate.row);
 	TEST_EXPECT(error.message.find("decoration") != std::string::npos);
 	// In one batch, the id and the kind set together: the step as a whole is what is checked.
-	TEST_EXPECT(document.apply(std::vector<Edit>{set(crate, "type", int64_t(DEF_ITEM_TYPE_MARKER)), set(crate, "id", int64_t(106001))},
+	TEST_EXPECT(document.apply(std::vector<Edit>{set_edit(crate, "type", int64_t(DEF_ITEM_TYPE_MARKER)), set_edit(crate, "id", int64_t(106001))},
 	                           error));
 	TEST_EXPECT(item_at(document, 2).id == 106001);
 	document.undo();
 	// Every other field of a reserved item is free.
-	TEST_EXPECT(document.apply(set(insertion, "display_name", std::string("Start")), error));
-	TEST_EXPECT(document.apply(set(insertion, "hp", int64_t(5)), error));
+	TEST_EXPECT(document.apply(set_edit(insertion, "display_name", std::string("Start")), error));
+	TEST_EXPECT(document.apply(set_edit(insertion, "hp", int64_t(5)), error));
 	// An id the engine keeps for a model or an actor is a warning, not a refusal.
-	TEST_EXPECT(document.apply(set(crate, "id", int64_t(100185)), error) && item_at(document, 2).id == 100185);
-	TEST_EXPECT(document.apply(set(pilot, "id", int64_t(101281)), error) && item_at(document, 4).id == 101281);
+	TEST_EXPECT(document.apply(set_edit(crate, "id", int64_t(100185)), error) && item_at(document, 2).id == 100185);
+	TEST_EXPECT(document.apply(set_edit(pilot, "id", int64_t(101281)), error) && item_at(document, 4).id == 101281);
 	// A mismatch the file had (retail's own 102044 powerup) stays editable, and may stay mismatched.
-	TEST_EXPECT(document.apply(set(pack, "hp", int64_t(50)), error));
-	TEST_EXPECT(document.apply(set(pack, "type", int64_t(DEF_ITEM_TYPE_PERSON)), error));
+	TEST_EXPECT(document.apply(set_edit(pack, "hp", int64_t(50)), error));
+	TEST_EXPECT(document.apply(set_edit(pack, "type", int64_t(DEF_ITEM_TYPE_PERSON)), error));
 	// A copy of a reserved item takes an id of its own.
 	Edit duplicate;
 	duplicate.operation = EditOperation::Duplicate;
@@ -269,11 +263,11 @@ int test_session() {
 	TEST_EXPECT(document && document->rows().size() == 4);
 	if (!document || document->rows().size() != 4) return 1;
 	const ActionOutcome refused =
-	        editor_test::handle_to_end(session, request::edit_record(items, set(row_address(*document, 3), "id", int64_t(100700))));
+	        editor_test::handle_to_end(session, request::edit_record(items, set_edit(row_address(*document, 3), "id", int64_t(100700))));
 	TEST_EXPECT(refused.refused && !refused.findings.empty() && refused.findings.front().code() == "catalog.reserved_refused" &&
 	            refused.findings.front().field == "id");
 	TEST_EXPECT(item_at(*document, 3).id == 106094 && !document->dirty());
-	TEST_EXPECT(editor_test::handle_to_end(session, request::edit_record(items, set(row_address(*document, 3), "hp", int64_t(9)))).done());
+	TEST_EXPECT(editor_test::handle_to_end(session, request::edit_record(items, set_edit(row_address(*document, 3), "hp", int64_t(9)))).done());
 	TEST_EXPECT(editor_test::handle_to_end(session, request::save(items)).done());
 	editor_test::handle_to_end(session, request::close_document(items));
 

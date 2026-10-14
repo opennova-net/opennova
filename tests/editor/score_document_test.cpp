@@ -16,6 +16,7 @@
 #include "common/file_io.h"
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
+#include "editor/editor_test_support.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -33,13 +34,7 @@ bool has_code(const std::vector<Diagnostic> &findings, const char *code) {
 	return std::any_of(findings.begin(), findings.end(), [&](const Diagnostic &d) { return d.code() == code; });
 }
 
-Edit set_edit(const NodeAddress &at, const char *field, Value value) {
-	Edit edit;
-	edit.address = at;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
+using editor_test::set_edit;
 
 const ScoreBlockRow *block_named(const ScoreDocument &document, const std::string &name) {
 	for (const auto &row : document.rows())

@@ -58,13 +58,7 @@ constexpr NodeKind kLine = node_kind(DialogBankKind::Line);
 
 std::string repo() { return test_paths_repo_root(__FILE__); }
 
-Edit set_edit(NodeAddress address, const char *field, Value value) {
-	Edit edit;
-	edit.address = address;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
+using editor_test::set_edit;
 
 bool has_code(const std::vector<Diagnostic> &findings, const char *code) {
 	return std::any_of(findings.begin(), findings.end(), [&](const Diagnostic &d) { return d.code() == code; });

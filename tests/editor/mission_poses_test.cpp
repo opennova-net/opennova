@@ -115,13 +115,7 @@ std::vector<uint8_t> people_mission() {
 	return bytes;
 }
 
-Edit set_of(const NodeAddress &record, const char *field, Value value) {
-	Edit edit;
-	edit.address = record;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
+using editor_test::set_edit;
 
 // A session over a project holding the people, their catalog and clips, the mission open and its
 // viewport followed through the fake devices.
@@ -344,18 +338,18 @@ static int test_poses() {
 	// (the warmup's count); a transform posing nothing again.
 	{
 		const size_t runs = poses.runs();
-		rig.session.handle(request::edit_record(kMission, set_of(rows[0], "x", 12.5)));
+		rig.session.handle(request::edit_record(kMission, set_edit(rows[0], "x", 12.5)));
 		TEST_EXPECT(rig.session.outcome().done());
 		rig.pump();
 		TEST_EXPECT(rig.last() == ViewportAction::Update && poses.runs() == runs);
 		const uint32_t stamp = pose_of(1)->stamp;
-		rig.session.handle(request::edit_record(kMission, set_of(rows[1], "waypoint_id", int64_t(0))));
+		rig.session.handle(request::edit_record(kMission, set_edit(rows[1], "waypoint_id", int64_t(0))));
 		TEST_EXPECT(rig.session.outcome().done());
 		rig.pump();
 		TEST_EXPECT(rig.last() == ViewportAction::Update && poses.runs() == runs + 1);
 		TEST_EXPECT(pose_of(1)->state == 43 && std::string(pose_of(1)->because) == "idle" && pose_of(1)->stamp != stamp);
 		const int32_t phase = pose_of(0)->pose.phase;
-		rig.session.handle(request::edit_record(kMission, set_of(rows[0], "id", int64_t(0))));
+		rig.session.handle(request::edit_record(kMission, set_edit(rows[0], "id", int64_t(0))));
 		TEST_EXPECT(rig.session.outcome().done());
 		rig.pump();
 		TEST_EXPECT(pose_of(0)->updates == 11 && pose_of(0)->pose.phase != phase);

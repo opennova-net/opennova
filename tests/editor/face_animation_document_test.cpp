@@ -27,6 +27,7 @@
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include "editor/editor_test_support.h"
 
 using namespace opennova;
 using namespace opennova::editor;
@@ -43,13 +44,7 @@ std::vector<uint8_t> person() {
 	return test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/grm/person.grm");
 }
 
-Edit set_edit(NodeAddress address, const char *field, Value value) {
-	Edit edit;
-	edit.address = address;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
+using editor_test::set_edit;
 
 bool has_code(const std::vector<Diagnostic> &findings, const char *code) {
 	return std::any_of(findings.begin(), findings.end(), [&](const Diagnostic &d) { return d.code() == code; });

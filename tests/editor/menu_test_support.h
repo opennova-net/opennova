@@ -7,6 +7,8 @@
 
 #include <editor/documents/mnu_document.h>
 
+#include "editor/editor_test_support.h"
+
 namespace menu_test {
 
 // The native window (or part) a nested address names, found down its path in the screen as the
@@ -41,21 +43,13 @@ inline opennova::editor::NodeAddress child_of(const opennova::editor::Document &
 	return {};
 }
 
-inline opennova::editor::Edit set_edit(const opennova::editor::NodeAddress &address, const char *field,
-                                       opennova::editor::Value value) {
-	opennova::editor::Edit edit;
-	edit.address = address;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
-
 // One batch: the window's APPEARANCE row `row` made an IMAGE row showing `texture`.
 inline std::vector<opennova::editor::Edit> image_edits(const opennova::editor::Document &document,
                                                        const opennova::editor::NodeAddress &window,
                                                        const std::string &texture, size_t row = 0) {
 	const opennova::editor::NodeAddress appearance = child_of(document, window, "appearance", row);
-	return {set_edit(appearance, "type", std::string("IMAGE")), set_edit(appearance, "value", texture)};
+	return {editor_test::set_edit(appearance, "type", std::string("IMAGE")),
+	        editor_test::set_edit(appearance, "value", texture)};
 }
 
 } // namespace menu_test

@@ -57,21 +57,12 @@ constexpr NodeKind kScreen = node_kind(MenuKind::Screen);
 constexpr NodeKind kWindow = node_kind(MenuKind::Window);
 
 using editor_test::NoProcess;
-
-Edit set(NodeAddress address, const char *field, Value value) { return menu_test::set_edit(address, field, std::move(value)); }
-
-Edit op(EditOperation operation, NodeAddress address, NodeId parent = 0, size_t position = SIZE_MAX) {
-	Edit edit;
-	edit.operation = operation;
-	edit.address = address;
-	edit.parent = parent;
-	edit.position = position;
-	return edit;
-}
+using editor_test::op_edit;
+using editor_test::set_edit;
 
 // One keystroke in the inspector: a Set folded into the field's open edit group.
 Edit typed(NodeAddress address, const char *field, const char *value) {
-	Edit edit = set(address, field, std::string(value));
+	Edit edit = set_edit(address, field, std::string(value));
 	edit.coalesce = true;
 	return edit;
 }
@@ -152,50 +143,50 @@ int structure_and_save() {
 	TEST_EXPECT(text_of(*document, root, "font.name") == "%DEF_FONTNAME_LG%");
 	// The John Smith edit: the title text, then a new button under the root window.
 	Diagnostic error;
-	TEST_EXPECT(document->apply(set(title, "string.value", std::string("John Smith's Game")), error));
+	TEST_EXPECT(document->apply(set_edit(title, "string.value", std::string("John Smith's Game")), error));
 	// A screen holds every root window: a window added to the screen is a second root.
-	TEST_EXPECT(document->apply(op(EditOperation::Add, {screen().id, kWindow, 0}), error));
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Add, {screen().id, kWindow, 0}), error));
 	TEST_EXPECT(window_names(*document, screen()) == std::vector<std::string>({"MAIN", "TITLE", "EXIT", "WINDOW1"}));
 	TEST_EXPECT(document->collections_of({screen().id, kScreen, 0})[0].ids.size() == 2 &&
 	            depth_of(*document, {screen().id, kWindow, document->last_added()}) == 0);
 	document->undo();
-	TEST_EXPECT(document->apply(op(EditOperation::Add, {screen().id, kWindow, 0}, root.child), error));
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Add, {screen().id, kWindow, 0}, root.child), error));
 	const NodeAddress later{screen().id, kWindow, document->last_added()};
 	TEST_EXPECT(window_names(*document, screen()) == std::vector<std::string>({"MAIN", "TITLE", "EXIT", "WINDOW1"}));
-	TEST_EXPECT(document->apply(set(later, "name", std::string("LATER")), error));
-	TEST_EXPECT(document->apply(set(later, "type", std::string("button")), error));
-	TEST_EXPECT(document->apply(set(later, "string.value", std::string("Later")), error));
-	TEST_EXPECT(document->apply(set(later, "position.left", int64_t(340)), error) &&
-	            document->apply(set(later, "position.top", int64_t(420)), error));
-	TEST_EXPECT(document->apply(set(later, "position.right", int64_t(460)), error));
+	TEST_EXPECT(document->apply(set_edit(later, "name", std::string("LATER")), error));
+	TEST_EXPECT(document->apply(set_edit(later, "type", std::string("button")), error));
+	TEST_EXPECT(document->apply(set_edit(later, "string.value", std::string("Later")), error));
+	TEST_EXPECT(document->apply(set_edit(later, "position.left", int64_t(340)), error) &&
+	            document->apply(set_edit(later, "position.top", int64_t(420)), error));
+	TEST_EXPECT(document->apply(set_edit(later, "position.right", int64_t(460)), error));
 	// Element text takes any character (the writer escapes '<' and '&'); a quote in an
 	// attribute value is a blocking serialize issue on the record and field that hold it.
-	TEST_EXPECT(document->apply(set(later, "string.value", std::string("<b> & c")), error) && document->serialize().ok());
-	TEST_EXPECT(document->apply(set(later, "name", std::string("LA\"TER")), error));
+	TEST_EXPECT(document->apply(set_edit(later, "string.value", std::string("<b> & c")), error) && document->serialize().ok());
+	TEST_EXPECT(document->apply(set_edit(later, "name", std::string("LA\"TER")), error));
 	const SerializeResult quoted = document->serialize();
 	TEST_EXPECT(!quoted.ok() && quoted.issues[0].blocks && quoted.issues[0].message.find("quote") != std::string::npos);
 	TEST_EXPECT(quoted.issues[0].field == "name" && quoted.issues[0].locator == document->locator(later) &&
 	            quoted.issues[0].record == "STARTUP/MAIN/LA\"TER");
-	TEST_EXPECT(document->apply(set(later, "name", std::string("LATER")), error));
-	TEST_EXPECT(document->apply(set(later, "string.value", std::string("Later")), error) && document->serialize().ok());
+	TEST_EXPECT(document->apply(set_edit(later, "name", std::string("LATER")), error));
+	TEST_EXPECT(document->apply(set_edit(later, "string.value", std::string("Later")), error) && document->serialize().ok());
 	// A nested child (named WINDOW1: no other window has that name now), then the button
 	// moved to the front of its siblings.
-	TEST_EXPECT(document->apply(op(EditOperation::Add, {0, kWindow, 0}, later.child), error));
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Add, {0, kWindow, 0}, later.child), error));
 	const NodeAddress nested{screen().id, kWindow, document->last_added()};
 	TEST_EXPECT(window_names(*document, screen()) == std::vector<std::string>({"MAIN", "TITLE", "EXIT", "LATER", "WINDOW1"}));
 	TEST_EXPECT(depth_of(*document, nested) == 2 && document->window_index(nested) == 4);
-	TEST_EXPECT(document->apply(op(EditOperation::Move, later, 0, 0), error));
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Move, later, 0, 0), error));
 	TEST_EXPECT(window_names(*document, screen()) == std::vector<std::string>({"MAIN", "LATER", "WINDOW1", "TITLE", "EXIT"}));
 	TEST_EXPECT(sibling_place(*document, later).first == 0 && document->window_index(nested) == 2);
 	// Duplicate carries the subtree, right after the original, every name made unique (B6);
 	// Remove takes it away; a screen keeps one root window.
-	TEST_EXPECT(document->apply(op(EditOperation::Duplicate, later, 0, 1), error));
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Duplicate, later, 0, 1), error));
 	TEST_EXPECT(window_names(*document, screen()) ==
 	            std::vector<std::string>({"MAIN", "LATER", "WINDOW1", "LATER2", "WINDOW2", "TITLE", "EXIT"}));
 	TEST_EXPECT(document->identities_match());
-	TEST_EXPECT(document->apply(op(EditOperation::Remove, {screen().id, kWindow, document->last_added()}), error));
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Remove, {screen().id, kWindow, document->last_added()}), error));
 	TEST_EXPECT(window_names(*document, screen()).size() == 5 && document->identities_match());
-	TEST_EXPECT(!document->apply(op(EditOperation::Remove, root), error) && error.message.find("one root") != std::string::npos);
+	TEST_EXPECT(!document->apply(op_edit(EditOperation::Remove, root), error) && error.message.find("one root") != std::string::npos);
 	// Undo the removal, redo it, then save and reparse.
 	document->undo();
 	TEST_EXPECT(window_names(*document, screen())[3] == "LATER2");
@@ -212,7 +203,7 @@ int structure_and_save() {
 	TEST_EXPECT(reparsed.screens[0].roots[0].children[1].string_data.value == "John Smith's Game");
 	// A second screen from the top-level kind, then a window found on its own screen and gone to
 	// by its locator (S12 D3).
-	TEST_EXPECT(document->apply(op(EditOperation::Add, {0, kScreen, 0}), error) && document->rows().size() == 2);
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Add, {0, kScreen, 0}), error) && document->rows().size() == 2);
 	TEST_EXPECT(document->collections_of({document->rows()[1]->id, kScreen, 0})[0].ids.size() == 1);
 	NodeAddress exit, elsewhere;
 	TEST_EXPECT(find_definition(AssetGraph(), *document, "EXIT", exit,
@@ -253,12 +244,12 @@ int validation() {
 	TEST_EXPECT(font && font->reference == ReferenceKind::Font);
 	if (!font) return 1;
 	const FieldUse font_use = document->field_on(exit, *font);
-	TEST_EXPECT(edit({set(exit, "font.name", std::string("%NOPE%"))}) && has_code(view.findings.diagnostics, "reference.missing"));
+	TEST_EXPECT(edit({set_edit(exit, "font.name", std::string("%NOPE%"))}) && has_code(view.findings.diagnostics, "reference.missing"));
 	TEST_EXPECT(reference_status(*view.findings.graph, font_use, std::string("%NOPE%")) ==
 			ReferenceStatus::Missing);
 	TEST_EXPECT(reference_status(*view.findings.graph, font_use,
 						std::string("%DEF_FONTNAME_LG%")) == ReferenceStatus::Present);
-	TEST_EXPECT(edit({set(exit, "font.name", std::string("nofont.fnt"))}) && has_code(view.findings.diagnostics, "reference.missing"));
+	TEST_EXPECT(edit({set_edit(exit, "font.name", std::string("nofont.fnt"))}) && has_code(view.findings.diagnostics, "reference.missing"));
 	// An APPEARANCE's value is a texture when its TYPE is IMAGE (field_on).
 	const NodeAddress row = child_of(*document, exit, "appearance");
 	const FieldSchema *value = nullptr;
@@ -270,22 +261,22 @@ int validation() {
 	TEST_EXPECT(image.reference == ReferenceKind::MenuTexture);
 	TEST_EXPECT(reference_status(*view.findings.graph, image, std::string("missing.tga")) ==
 			ReferenceStatus::Missing);
-	TEST_EXPECT(edit({set(exit, "string.type", std::string("ID")), set(exit, "string.value", std::string("NO_SUCH_ID"))}) &&
+	TEST_EXPECT(edit({set_edit(exit, "string.type", std::string("ID")), set_edit(exit, "string.value", std::string("NO_SUCH_ID"))}) &&
 	            has_code(view.findings.diagnostics, "reference.missing"));
 	// An ACTION: a new row is POP_SCREEN; a SCREEN action names a menu file.
-	TEST_EXPECT(edit({op(EditOperation::Add, {exit.row, menu_kind("action"), 0}, exit.child)}));
+	TEST_EXPECT(edit({op_edit(EditOperation::Add, {exit.row, menu_kind("action"), 0}, exit.child)}));
 	const NodeAddress action = child_of(*document, exit, "action");
 	TEST_EXPECT(text_of(*document, action, "type") == "POP_SCREEN");
-	TEST_EXPECT(edit({set(action, "type", std::string("SCREEN")), set(action, "file", std::string("other.mnu"))}) &&
+	TEST_EXPECT(edit({set_edit(action, "type", std::string("SCREEN")), set_edit(action, "file", std::string("other.mnu"))}) &&
 	            has_code(view.findings.diagnostics, "reference.missing"));
 	// A SCREEN action with no FILE: an error on that action's file field.
-	TEST_EXPECT(edit({set(action, "file", std::string())}));
+	TEST_EXPECT(edit({set_edit(action, "file", std::string())}));
 	bool on_the_field = false;
 	for (const Diagnostic &d : view.findings.diagnostics)
 		on_the_field = on_the_field || (d.code() == "menu.unserializable" && d.field == "file" && d.child_id == action.child &&
 		                                d.row_id == action.row && d.record_kind == action.kind);
 	TEST_EXPECT(on_the_field);
-	TEST_EXPECT(edit({set(action, "file", std::string("other.mnu"))}));
+	TEST_EXPECT(edit({set_edit(action, "file", std::string("other.mnu"))}));
 	TEST_EXPECT(!reference_choices(*view.findings.graph, font_use).empty()); // the project's fonts
 	// Build waits on the unsaved prompt over the edited menu; its Save writes the menu and
 	// then builds: the missing texture, string id and menu are listed and gate nothing (S14).
@@ -354,7 +345,7 @@ int windows_at_depth() {
 	const std::string original = document->serialize().text;
 	Diagnostic error;
 	// Indent: EXIT into TITLE (B1: the position is an index among TITLE's children).
-	Edit move = op(EditOperation::Move, exit, title.child, 0);
+	Edit move = op_edit(EditOperation::Move, exit, title.child, 0);
 	TEST_EXPECT(document->apply(move, error));
 	TEST_EXPECT(depth_of(*document, exit) == 2 && document->window_index(exit) == 2);
 	TEST_EXPECT(document->ancestors(exit) == std::vector<NodeAddress>({screen_address, root, title}));
@@ -375,8 +366,8 @@ int windows_at_depth() {
 	move.parent = exit.child;
 	move.position = 0;
 	TEST_EXPECT(!document->apply(move, error) && error.code() == "document.collection");
-	TEST_EXPECT(!document->apply(op(EditOperation::Move, root, title.child, 0), error));
-	TEST_EXPECT(document->apply(op(EditOperation::Add, {0, kScreen, 0}), error));
+	TEST_EXPECT(!document->apply(op_edit(EditOperation::Move, root, title.child, 0), error));
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Add, {0, kScreen, 0}), error));
 	const NodeId other_root = document->window_at(*document->rows()[1], 0);
 	move.address = exit;
 	move.parent = other_root;
@@ -393,7 +384,7 @@ int windows_at_depth() {
 	// An unset edge is left out: Clear unsets it and keeps the value, Write writes that
 	// value again (a Set of the same value leaves it out, a Set of another writes it).
 	TEST_EXPECT(document->present(exit, "position.left"));
-	Edit clear = op(EditOperation::Clear, exit);
+	Edit clear = op_edit(EditOperation::Clear, exit);
 	clear.field = "position.left";
 	TEST_EXPECT(document->apply(clear, error) && !document->present(exit, "position.left"));
 	mnu::Document cleared;
@@ -410,9 +401,9 @@ int windows_at_depth() {
 	clear.field = "name";
 	TEST_EXPECT(!document->apply(clear, error) && error.message == "This field is always written.");
 	const uint64_t left_out = document->revision();
-	TEST_EXPECT(document->apply(set(exit, "position.left", latent), error) && !document->present(exit, "position.left") &&
+	TEST_EXPECT(document->apply(set_edit(exit, "position.left", latent), error) && !document->present(exit, "position.left") &&
 	            document->revision() == left_out); // the value it holds: no step
-	Edit write = op(EditOperation::Write, exit);
+	Edit write = op_edit(EditOperation::Write, exit);
 	write.field = "position.left";
 	TEST_EXPECT(document->apply(write, error) && document->present(exit, "position.left"));
 	TEST_EXPECT(document->serialize().text == original && document->revision() != left_out);
@@ -434,7 +425,7 @@ int windows_at_depth() {
 	// The session repairs the selection: a removed window gives way to its owner.
 	EditorRequest select = request::select_record(document->path(), exit);
 	editor_test::handle_to_end(session, select);
-	EditorRequest remove = request::edit_record(document->path(), op(EditOperation::Remove, exit));
+	EditorRequest remove = request::edit_record(document->path(), op_edit(EditOperation::Remove, exit));
 	editor_test::handle_to_end(session, remove);
 	const SessionView &view = session.view();
 	TEST_EXPECT(view.documents.selection.primary == root &&
@@ -443,7 +434,7 @@ int windows_at_depth() {
 	TEST_EXPECT(view.documents.selection.primary == root && window_of(*document, exit));
 	// A window added inside TITLE is selected.
 	EditorRequest add = request::edit_record(
-			document->path(), op(EditOperation::Add, { 0, kWindow, 0 }, title.child));
+			document->path(), op_edit(EditOperation::Add, { 0, kWindow, 0 }, title.child));
 	editor_test::handle_to_end(session, add);
 	TEST_EXPECT(session.last_edit_ok() &&
 			view.documents.selection.primary.child == document->last_added() &&
@@ -455,8 +446,8 @@ int windows_at_depth() {
 	const uint64_t gesture = next_edit_gesture();
 	for (const int64_t left : {130, 140, 150}) {
 		EditorRequest drag = request::edit_record(document->path(),
-				std::vector<Edit>{ set(title, "position.left", left),
-						set(title, "position.right", left + 200) });
+				std::vector<Edit>{ set_edit(title, "position.left", left),
+						set_edit(title, "position.right", left + 200) });
 		for (Edit &edit : drag.edits) edit.gesture = gesture;
 		editor_test::handle_to_end(session, drag);
 		TEST_EXPECT(session.last_edit_ok());
@@ -528,37 +519,37 @@ int every_list() {
 		const NodeKind kind = collection.spec.kind;
 		const bool part = token == "list_box" || token == "spinup" || token == "spindown" || token == "scrollbar";
 		auto step = [&](const Edit &edit) { return document.apply(edit, error) && document.identities_match(); };
-		TEST_EXPECT(step(op(EditOperation::Add, {back.row, kind, 0}, back.child)));
+		TEST_EXPECT(step(op_edit(EditOperation::Add, {back.row, kind, 0}, back.child)));
 		const NodeAddress first = child_of(document, back, token.c_str());
 		TEST_EXPECT(first.child && document.address_at(document.locator(first)) == first);
 		if (part) {
 			// One part at most; the toggle leaves it out and keeps it; Remove takes it.
-			TEST_EXPECT(!document.apply(op(EditOperation::Duplicate, first, 0, 1), error));
+			TEST_EXPECT(!document.apply(op_edit(EditOperation::Duplicate, first, 0, 1), error));
 			const std::string written = document.serialize().text;
-			TEST_EXPECT(step(set(back, token.c_str(), int64_t(0))) && document.serialize().text != written &&
+			TEST_EXPECT(step(set_edit(back, token.c_str(), int64_t(0))) && document.serialize().text != written &&
 			            !document.present(first, std::string()) && text_of(document, back, token.c_str()) == "0");
-			TEST_EXPECT(step(set(back, token.c_str(), int64_t(1))) && document.serialize().text == written);
+			TEST_EXPECT(step(set_edit(back, token.c_str(), int64_t(1))) && document.serialize().text == written);
 			// Moved to a window that has none (MAIN) and back; never into one that has one.
-			TEST_EXPECT(step(op(EditOperation::Move, first, main.child, 0)) && child_of(document, main, token.c_str()) == first &&
+			TEST_EXPECT(step(op_edit(EditOperation::Move, first, main.child, 0)) && child_of(document, main, token.c_str()) == first &&
 			            !child_of(document, back, token.c_str()).child && document.serialize().text != written);
 			if (token == "spinup" || token == "spindown")
-				TEST_EXPECT(!document.apply(op(EditOperation::Move, first, spin.child, 0), error) &&
+				TEST_EXPECT(!document.apply(op_edit(EditOperation::Move, first, spin.child, 0), error) &&
 				            error.message.find("already holds") != std::string::npos);
-			TEST_EXPECT(step(op(EditOperation::Move, first, back.child, 0)) && child_of(document, back, token.c_str()) == first &&
+			TEST_EXPECT(step(op_edit(EditOperation::Move, first, back.child, 0)) && child_of(document, back, token.c_str()) == first &&
 			            document.serialize().text == written);
-			TEST_EXPECT(step(op(EditOperation::Remove, first)) && !child_of(document, back, token.c_str()).child);
+			TEST_EXPECT(step(op_edit(EditOperation::Remove, first)) && !child_of(document, back, token.c_str()).child);
 		} else {
-			TEST_EXPECT(step(op(EditOperation::Duplicate, first, 0, 1)));
+			TEST_EXPECT(step(op_edit(EditOperation::Duplicate, first, 0, 1)));
 			const NodeAddress copy{back.row, kind, document.last_added()};
-			TEST_EXPECT(step(op(EditOperation::Move, first, 0, SIZE_MAX)));
+			TEST_EXPECT(step(op_edit(EditOperation::Move, first, 0, SIZE_MAX)));
 			std::vector<NodeId> ids;
 			for (const Document::Collection &now : document.collections_of(back))
 				if (now.spec.kind == kind) ids = now.ids;
 			TEST_EXPECT(!ids.empty() && ids.front() == copy.child && ids.back() == first.child);
 			// Reparented into MAIN and back into BACK.
-			TEST_EXPECT(step(op(EditOperation::Move, copy, main.child, 0)) && document.ancestors(copy).back() == main);
-			TEST_EXPECT(step(op(EditOperation::Move, copy, back.child, 0)) && document.ancestors(copy).back() == back);
-			TEST_EXPECT(step(op(EditOperation::Remove, first)) && document.address_at(document.locator(copy)) == copy);
+			TEST_EXPECT(step(op_edit(EditOperation::Move, copy, main.child, 0)) && document.ancestors(copy).back() == main);
+			TEST_EXPECT(step(op_edit(EditOperation::Move, copy, back.child, 0)) && document.ancestors(copy).back() == back);
+			TEST_EXPECT(step(op_edit(EditOperation::Remove, first)) && document.address_at(document.locator(copy)) == copy);
 		}
 		TEST_EXPECT(document.serialize().ok());
 		while (document.can_undo()) document.undo();
@@ -566,18 +557,18 @@ int every_list() {
 	}
 	// A leaf reparented: BACK's first HOTKEY into MAIN, then back.
 	const NodeAddress hotkey = child_of(document, back, "hotkey");
-	TEST_EXPECT(document.apply(op(EditOperation::Move, hotkey, main.child, 0), error) && document.identities_match());
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Move, hotkey, main.child, 0), error) && document.identities_match());
 	TEST_EXPECT(document.ancestors(hotkey).back() == main && text_of(document, hotkey, "value") == "VK_ESCAPE" &&
 	            text_of(document, hotkey, "virtual") == "1");
 	TEST_EXPECT(window_of(document, main)->hotkeys.size() == 1 && window_of(document, back)->hotkeys.size() == 1);
 	// A leaf goes only into a collection of its own kind: a HOTKEY is not an ACTION, a
 	// table cell only into a row.
-	TEST_EXPECT(!document.apply(op(EditOperation::Add, {back.row, menu_kind("item"), 0}, back.child), error));
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Add, {back.row, menu_kind("item"), 0}, back.child), error));
 	document.undo();
 	TEST_EXPECT(document.serialize().text == original);
 	// A leaf added into an absent block authors it: an ITEM on BACK writes an ITEMS.
 	TEST_EXPECT(!window_of(document, back)->items.present);
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {back.row, menu_kind("items.item"), 0}, back.child), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {back.row, menu_kind("items.item"), 0}, back.child), error));
 	const NodeAddress item{back.row, menu_kind("items.item"), document.last_added()};
 	TEST_EXPECT(window_of(document, back)->items.present && document.present(item, std::string()));
 	// Where the new record sits is the core's index of the committed screen (Document::path_in, S13
@@ -591,7 +582,7 @@ int every_list() {
 	for (const FieldSchema &field : document.fields(item.kind))
 		if (field.id == "text") text = field;
 	TEST_EXPECT(document.field_on(item, text).applies == Applicability::Ignored);
-	TEST_EXPECT(document.apply(set(back, "items", int64_t(0)), error) && !document.present(item, std::string()) &&
+	TEST_EXPECT(document.apply(set_edit(back, "items", int64_t(0)), error) && !document.present(item, std::string()) &&
 	            window_of(document, back)->items.items.size() == 1);
 	document.undo();
 	document.undo();
@@ -610,7 +601,7 @@ int every_list() {
 	TEST_EXPECT(document.field_on(cell, cell_text).reference == ReferenceKind::MenuTexture &&
 	            document.field_on(cell, cell_text).applies == Applicability::Reads);
 	// A table cell edit survives a save and a reload (the rows are the ITEMS as written).
-	TEST_EXPECT(document.apply(set(cell, "text", std::string("y.tga")), error) && document.save(error));
+	TEST_EXPECT(document.apply(set_edit(cell, "text", std::string("y.tga")), error) && document.save(error));
 	MnuDocument reloaded;
 	TEST_EXPECT(load(reloaded, path) && reloaded.serialize().text == document.serialize().text);
 	NodeAddress results_again;
@@ -633,12 +624,12 @@ int defaults_survive() {
 	Diagnostic error;
 	for (const Document::Collection &collection : document.collections_of(back))
 		if (collection.ids.empty())
-			TEST_EXPECT(document.apply(op(EditOperation::Add, {back.row, collection.spec.kind, 0}, back.child), error));
+			TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {back.row, collection.spec.kind, 0}, back.child), error));
 	const NodeAddress row = child_of(document, back, "items.row");
 	const NodeAddress element = child_of(document, back, "element");
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {back.row, menu_kind("item"), 0}, row.child), error));
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {back.row, menu_kind("attribute"), 0}, element.child), error));
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {back.row, menu_kind("element"), 0}, element.child), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {back.row, menu_kind("item"), 0}, row.child), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {back.row, menu_kind("attribute"), 0}, element.child), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {back.row, menu_kind("element"), 0}, element.child), error));
 	// The defaults: a new ACTION is POP_SCREEN, a SOUND is MOUSEIN over MOUSE_OVER, a window
 	// is named uniquely.
 	TEST_EXPECT(text_of(document, child_of(document, back, "action"), "type") == "POP_SCREEN");
@@ -647,10 +638,10 @@ int defaults_survive() {
 	TEST_EXPECT(text_of(document, child_of(document, back, "attribute"), "name") == "PLAYERLIST" &&
 	            text_of(document, child_of(document, element, "attribute"), "name") == "NAME");
 	// A window keeps only PLAYERLIST and SERVERLIST, read by presence, and its known extras.
-	TEST_EXPECT(!document.apply(set(child_of(document, back, "attribute"), "name", std::string("NAME")), error));
-	TEST_EXPECT(!document.apply(set(child_of(document, back, "attribute"), "value", std::string("1")), error));
-	TEST_EXPECT(!document.apply(set(element, "tag", std::string("NOT_READ")), error));
-	TEST_EXPECT(document.apply(set(child_of(document, element, "element"), "tag", std::string("ANY_NAME")), error));
+	TEST_EXPECT(!document.apply(set_edit(child_of(document, back, "attribute"), "name", std::string("NAME")), error));
+	TEST_EXPECT(!document.apply(set_edit(child_of(document, back, "attribute"), "value", std::string("1")), error));
+	TEST_EXPECT(!document.apply(set_edit(element, "tag", std::string("NOT_READ")), error));
+	TEST_EXPECT(document.apply(set_edit(child_of(document, element, "element"), "tag", std::string("ANY_NAME")), error));
 	TEST_EXPECT(document.identities_match() && document.serialize().ok() && document.save(error));
 	MnuDocument reloaded;
 	TEST_EXPECT(load(reloaded, path) && reloaded.issues().empty() && reloaded.identities_match());
@@ -722,7 +713,7 @@ int copy_and_paste() {
 			session.last_edit_ok() && view.documents.clipboard.compare(0, 3, "\xEF\xBB\xBF") == 0);
 	// Into a second screen's root: the names are free there.
 	Diagnostic error;
-	TEST_EXPECT(document->apply(op(EditOperation::Add, {0, kScreen, 0}), error));
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Add, {0, kScreen, 0}), error));
 	const Node *second = document->rows()[1].get();
 	const NodeId second_root = document->window_at(*second, 0);
 	editor_test::handle_to_end(session, request::paste(document->path(), PasteAt{second->id, second_root, 0}));
@@ -783,7 +774,7 @@ int copy_and_paste() {
 	editor_test::handle_to_end(session, request::undo(document->path()));
 	TEST_EXPECT(document->serialize().text == two_screens);
 	// A paste that is not a menu's clipboard is refused.
-	Edit foreign = op(EditOperation::Paste, {document->rows()[0]->id, kWindow, 0}, document->window_at(*document->rows()[0], 0));
+	Edit foreign = op_edit(EditOperation::Paste, {document->rows()[0]->id, kWindow, 0}, document->window_at(*document->rows()[0], 0));
 	foreign.value = std::string("key=value");
 	TEST_EXPECT(!document->apply(foreign, error));
 	return 0;
@@ -878,7 +869,7 @@ int copy_between_encodings() {
 			find_definition(AssetGraph(), to, "MAIN", main));
 	const std::string payload = from.copy({cafe});
 	TEST_EXPECT(!payload.empty() && payload.find("Caf\xC3\xA9") != std::string::npos);
-	Edit paste = op(EditOperation::Paste, {main.row, kWindow, 0}, main.child, 0);
+	Edit paste = op_edit(EditOperation::Paste, {main.row, kWindow, 0}, main.child, 0);
 	paste.value = payload;
 	Diagnostic error;
 	TEST_EXPECT(to.apply(paste, error));
@@ -887,7 +878,7 @@ int copy_between_encodings() {
 	            text_of(to, copied, "string.value") == "Caf\xC3\xA9");
 	// And back into the code-page menu's roots, as its own byte (its name taken there).
 	const std::string back = to.copy({copied});
-	Edit again = op(EditOperation::Paste, {from.rows()[0]->id, kWindow, 0}, 0, 0);
+	Edit again = op_edit(EditOperation::Paste, {from.rows()[0]->id, kWindow, 0}, 0, 0);
 	again.value = back;
 	TEST_EXPECT(from.apply(again, error));
 	NodeAddress returned;
@@ -923,17 +914,17 @@ int texts_in_their_code_page() {
 	TEST_EXPECT(text_of(cp, cafe, "string.value") == "Caf\xC3\xA9" && window_of(cp, cafe)->string_data.value == "Caf\xE9");
 	TEST_EXPECT(text_of(wide, main, "string.value") == "Caf\xC3\xA9");
 	Diagnostic error;
-	TEST_EXPECT(cp.apply(set(cafe, "string.value", std::string("Na\xC3\xAFve")), error) &&
+	TEST_EXPECT(cp.apply(set_edit(cafe, "string.value", std::string("Na\xC3\xAFve")), error) &&
 	            window_of(cp, cafe)->string_data.value == "Na\xEFve" && text_of(cp, cafe, "string.value") == "Na\xC3\xAFve");
-	TEST_EXPECT(!cp.apply(set(cafe, "string.value", std::string("\xE2\x9C\x93 done")), error) &&
+	TEST_EXPECT(!cp.apply(set_edit(cafe, "string.value", std::string("\xE2\x9C\x93 done")), error) &&
 	            error.message.find("Windows-1252") != std::string::npos);
 	// The window NAME is 128 bytes with its terminator: 127 characters in either encoding.
 	std::string e_acute;
 	for (int i = 0; i < 127; ++i) e_acute += "\xC3\xA9";
-	TEST_EXPECT(cp.apply(set(cafe, "name", e_acute), error) && window_of(cp, cafe)->name.size() == 127);
-	TEST_EXPECT(!cp.apply(set(cafe, "name", e_acute + "\xC3\xA9"), error) && error.message == "The text is too long.");
-	TEST_EXPECT(wide.apply(set(main, "name", e_acute), error) && window_of(wide, main)->name.size() == 254);
-	TEST_EXPECT(!wide.apply(set(main, "name", e_acute + "\xC3\xA9"), error));
+	TEST_EXPECT(cp.apply(set_edit(cafe, "name", e_acute), error) && window_of(cp, cafe)->name.size() == 127);
+	TEST_EXPECT(!cp.apply(set_edit(cafe, "name", e_acute + "\xC3\xA9"), error) && error.message == "The text is too long.");
+	TEST_EXPECT(wide.apply(set_edit(main, "name", e_acute), error) && window_of(wide, main)->name.size() == 254);
+	TEST_EXPECT(!wide.apply(set_edit(main, "name", e_acute + "\xC3\xA9"), error));
 	// The box over a menu's text counts characters too.
 	const FieldSchema *name = nullptr;
 	for (const FieldSchema &field : MnuDocument::schema(kWindow))
@@ -958,7 +949,7 @@ int copy_selection_shapes() {
 	TEST_EXPECT(!alone.empty() && document.copy({results, caption}) == alone && document.copy({caption, results}) == alone);
 	Diagnostic error;
 	const NodeAddress up = child_of(document, spin, "spinup");
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {up.row, kWindow, 0}, up.child), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {up.row, kWindow, 0}, up.child), error));
 	const NodeAddress held{up.row, kWindow, document.last_added()};
 	TEST_EXPECT(window_of(document, held) && window_of(document, held)->name == "WINDOW1" && document.ancestors(held).back() == up);
 	const std::string payload = document.copy({held});
@@ -966,10 +957,10 @@ int copy_selection_shapes() {
 	TEST_EXPECT(document.copy({spin, held}) == document.copy({spin}) && !document.copy({spin}).empty());
 	// The name the part's window holds is taken: a new root is WINDOW2, a pasted copy WINDOW2
 	// too (the new root undone first).
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {up.row, kWindow, 0}), error) &&
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {up.row, kWindow, 0}), error) &&
 	            window_of(document, {up.row, kWindow, document.last_added()})->name == "WINDOW2");
 	document.undo();
-	Edit paste = op(EditOperation::Paste, {up.row, kWindow, 0}, 0, SIZE_MAX);
+	Edit paste = op_edit(EditOperation::Paste, {up.row, kWindow, 0}, 0, SIZE_MAX);
 	paste.value = payload;
 	TEST_EXPECT(document.apply(paste, error) && document.identities_match() &&
 	            window_of(document, {up.row, kWindow, document.last_added()})->name == "WINDOW2");
@@ -988,7 +979,7 @@ int duplicate_screen() {
 	TEST_EXPECT(find_definition(
 			AssetGraph(), document, "BACK", back)); // the original's places are built
 	Diagnostic error;
-	TEST_EXPECT(document.apply(op(EditOperation::Duplicate, {document.rows()[0]->id, kScreen, 0}, 0, 1), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Duplicate, {document.rows()[0]->id, kScreen, 0}, 0, 1), error));
 	TEST_EXPECT(document.rows().size() == 2 && document.identities_match());
 	auto second = [&]() -> const Node & { return *document.rows()[1]; };
 	const NodeAddress root{second().id, kWindow, document.window_at(second(), 0)};
@@ -999,10 +990,10 @@ int duplicate_screen() {
 	const NodeAddress hotkey = child_of(document, {second().id, kWindow, document.window_at(second(), 1)}, "hotkey");
 	TEST_EXPECT(hotkey.child && text_of(document, hotkey, "value") == "VK_ESCAPE" &&
 	            document.address_at(document.locator(hotkey)) == hotkey);
-	TEST_EXPECT(document.apply(set(root, "name", std::string("COPY")), error));
+	TEST_EXPECT(document.apply(set_edit(root, "name", std::string("COPY")), error));
 	NodeAddress found;
 	TEST_EXPECT(find_definition(AssetGraph(), document, "COPY", found) && found == root);
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {second().id, kWindow, 0}, root.child), error) &&
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {second().id, kWindow, 0}, root.child), error) &&
 	            document.ancestors({second().id, kWindow, document.last_added()}).back() == root && document.identities_match());
 	TEST_EXPECT(text_of(document, back, "name") == "BACK" && text_of(document, root, "name") == "COPY");
 	return 0;
@@ -1023,7 +1014,7 @@ int typed_add_and_screen_copy() {
 	NodeAddress main;
 	TEST_EXPECT(find_definition(AssetGraph(), document, "MAIN", main));
 	Diagnostic error;
-	Edit add = op(EditOperation::Add, {row, kWindow, 0}, main.child);
+	Edit add = op_edit(EditOperation::Add, {row, kWindow, 0}, main.child);
 	add.field = "type";
 	add.value = std::string("button");
 	TEST_EXPECT(document.apply(add, error) && document.identities_match());
@@ -1032,8 +1023,8 @@ int typed_add_and_screen_copy() {
 	            text_of(document, made, "type") == "button" && document.ancestors(made).back() == main);
 	document.undo();
 	TEST_EXPECT(document.serialize().text == original && !document.can_undo());
-	TEST_EXPECT(document.apply(op(EditOperation::Duplicate, {row, kScreen, 0}, 0, 1), error));
-	TEST_EXPECT(document.apply(op(EditOperation::Duplicate, {row, kScreen, 0}, 0, 2), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Duplicate, {row, kScreen, 0}, 0, 1), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Duplicate, {row, kScreen, 0}, 0, 2), error));
 	TEST_EXPECT(document.rows().size() == 3 && document.rows()[0]->name() == "OPTIONS" &&
 	            document.rows()[1]->name() == "OPTIONS2" && document.rows()[2]->name() == "OPTIONS3");
 	TEST_EXPECT(window_names(document, *document.rows()[1]) == window_names(document, *document.rows()[0]));
@@ -1043,13 +1034,13 @@ int typed_add_and_screen_copy() {
 	TEST_EXPECT(document.serialize().text == original && !document.dirty());
 	// The two copies in one batch (S13 D7): the second is named beside the first, as the batch left
 	// the rows (prepare_duplicate), and two new screens take two names.
-	TEST_EXPECT(document.apply({op(EditOperation::Duplicate, {row, kScreen, 0}, 0, 1),
-	                            op(EditOperation::Duplicate, {row, kScreen, 0}, 0, 2)},
+	TEST_EXPECT(document.apply({op_edit(EditOperation::Duplicate, {row, kScreen, 0}, 0, 1),
+	                            op_edit(EditOperation::Duplicate, {row, kScreen, 0}, 0, 2)},
 	                           error));
 	TEST_EXPECT(document.rows().size() == 3 && document.rows()[1]->name() == "OPTIONS2" &&
 	            document.rows()[2]->name() == "OPTIONS3" && document.identities_match());
 	document.undo();
-	TEST_EXPECT(document.apply({op(EditOperation::Add, {0, kScreen, 0}), op(EditOperation::Add, {0, kScreen, 0})}, error));
+	TEST_EXPECT(document.apply({op_edit(EditOperation::Add, {0, kScreen, 0}), op_edit(EditOperation::Add, {0, kScreen, 0})}, error));
 	TEST_EXPECT(document.rows().size() == 3 && document.rows()[1]->name() != document.rows()[2]->name());
 	document.undo();
 	TEST_EXPECT(document.serialize().text == original && !document.dirty());
@@ -1069,15 +1060,15 @@ int screens_stay_found() {
 	const NodeAddress only{document.rows()[0]->id, kScreen, 0};
 	const uint64_t revision = document.revision();
 	Diagnostic error;
-	TEST_EXPECT(!document.apply(op(EditOperation::Remove, only), error) && error.code() == "document.structure" &&
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Remove, only), error) && error.code() == "document.structure" &&
 	            error.message.find("at least one screen") != std::string::npos);
 	TEST_EXPECT(document.rows().size() == 1 && document.revision() == revision && !document.can_undo() && !document.dirty());
 	// A second screen: the name its identity gives it while free, and then the first may go.
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {0, kScreen, 0}), error) && document.rows().size() == 2);
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {0, kScreen, 0}), error) && document.rows().size() == 2);
 	const std::string by_identity = "SCREEN" + std::to_string(document.last_added());
 	TEST_EXPECT(document.rows()[1]->name() == by_identity);
-	TEST_EXPECT(document.apply(op(EditOperation::Remove, only), error) && document.rows().size() == 1);
-	TEST_EXPECT(!document.apply(op(EditOperation::Remove, {document.rows()[0]->id, kScreen, 0}), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, only), error) && document.rows().size() == 1);
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Remove, {document.rows()[0]->id, kScreen, 0}), error));
 	document.undo();
 	TEST_EXPECT(document.rows().size() == 2 && document.rows()[0]->name() == "OPTIONS");
 
@@ -1094,7 +1085,7 @@ int screens_stay_found() {
 	TEST_EXPECT(editor_test::write_text(again, text));
 	MnuDocument reread;
 	TEST_EXPECT(load(reread, again));
-	TEST_EXPECT(reread.apply(op(EditOperation::Add, {0, kScreen, 0}), error) && reread.rows().size() == 2);
+	TEST_EXPECT(reread.apply(op_edit(EditOperation::Add, {0, kScreen, 0}), error) && reread.rows().size() == 2);
 	TEST_EXPECT(reread.last_added() == document.rows()[1]->id);
 	TEST_EXPECT(reread.rows()[1]->name() == "SCREEN2" && reread.rows()[0]->name() == lowered);
 	return 0;
@@ -1118,44 +1109,44 @@ int nested_lists() {
 	auto owner = [&](const NodeAddress &record) { return document.ancestors(record).back(); };
 	// A table cell between rows.
 	const NodeAddress row = child_of(document, results, "items.row");
-	TEST_EXPECT(step(op(EditOperation::Add, {results.row, menu_kind("items.row"), 0}, results.child)));
+	TEST_EXPECT(step(op_edit(EditOperation::Add, {results.row, menu_kind("items.row"), 0}, results.child)));
 	const NodeAddress other_row{results.row, menu_kind("items.row"), document.last_added()};
 	const NodeAddress cell = child_of(document, row, "item", 1);
-	TEST_EXPECT(step(op(EditOperation::Move, cell, other_row.child, 0)) && owner(cell) == other_row &&
+	TEST_EXPECT(step(op_edit(EditOperation::Move, cell, other_row.child, 0)) && owner(cell) == other_row &&
 	            text_of(document, cell, "text") == "x.tga" && window_of(document, results)->items.rows[0].cells.size() == 1);
-	TEST_EXPECT(step(op(EditOperation::Move, cell, row.child, SIZE_MAX)) && owner(cell) == row &&
-	            child_of(document, row, "item", 1) == cell && step(op(EditOperation::Remove, other_row)));
+	TEST_EXPECT(step(op_edit(EditOperation::Move, cell, row.child, SIZE_MAX)) && owner(cell) == row &&
+	            child_of(document, row, "item", 1) == cell && step(op_edit(EditOperation::Remove, other_row)));
 	// An element's attribute and element between two extra elements.
 	const NodeKind element_kind = menu_kind("element"), attribute_kind = menu_kind("attribute");
-	TEST_EXPECT(step(op(EditOperation::Add, {back.row, element_kind, 0}, back.child)));
+	TEST_EXPECT(step(op_edit(EditOperation::Add, {back.row, element_kind, 0}, back.child)));
 	const NodeAddress one{back.row, element_kind, document.last_added()};
-	TEST_EXPECT(step(op(EditOperation::Add, {back.row, element_kind, 0}, back.child)));
+	TEST_EXPECT(step(op_edit(EditOperation::Add, {back.row, element_kind, 0}, back.child)));
 	const NodeAddress two{back.row, element_kind, document.last_added()};
-	TEST_EXPECT(step(op(EditOperation::Add, {back.row, attribute_kind, 0}, one.child)));
+	TEST_EXPECT(step(op_edit(EditOperation::Add, {back.row, attribute_kind, 0}, one.child)));
 	const NodeAddress attribute{back.row, attribute_kind, document.last_added()};
-	TEST_EXPECT(step(op(EditOperation::Add, {back.row, element_kind, 0}, one.child)));
+	TEST_EXPECT(step(op_edit(EditOperation::Add, {back.row, element_kind, 0}, one.child)));
 	const NodeAddress inner{back.row, element_kind, document.last_added()};
 	for (const NodeAddress &record : {attribute, inner}) {
-		TEST_EXPECT(step(op(EditOperation::Move, record, two.child, 0)) && owner(record) == two);
-		TEST_EXPECT(step(op(EditOperation::Move, record, one.child, 0)) && owner(record) == one);
+		TEST_EXPECT(step(op_edit(EditOperation::Move, record, two.child, 0)) && owner(record) == two);
+		TEST_EXPECT(step(op_edit(EditOperation::Move, record, one.child, 0)) && owner(record) == one);
 	}
 	// Into a window: an attribute NAME, a PLAYERLIST with a value and an element tagged
 	// ANY_NAME are refused (the tag kept as the reader keeps it, upper case) ...
 	TEST_EXPECT(text_of(document, attribute, "name") == "NAME");
-	TEST_EXPECT(!document.apply(op(EditOperation::Move, attribute, back.child, 0), error) &&
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Move, attribute, back.child, 0), error) &&
 	            error.message.find("PLAYERLIST and SERVERLIST attributes") != std::string::npos);
-	TEST_EXPECT(step(set(attribute, "name", std::string("PLAYERLIST"))) && step(set(attribute, "value", std::string("1"))));
-	TEST_EXPECT(!document.apply(op(EditOperation::Move, attribute, back.child, 0), error) &&
+	TEST_EXPECT(step(set_edit(attribute, "name", std::string("PLAYERLIST"))) && step(set_edit(attribute, "value", std::string("1"))));
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Move, attribute, back.child, 0), error) &&
 	            error.message.find("no value") != std::string::npos);
-	TEST_EXPECT(step(set(inner, "tag", std::string("any_name"))) && text_of(document, inner, "tag") == "ANY_NAME");
-	TEST_EXPECT(!document.apply(op(EditOperation::Move, inner, back.child, 0), error) &&
+	TEST_EXPECT(step(set_edit(inner, "tag", std::string("any_name"))) && text_of(document, inner, "tag") == "ANY_NAME");
+	TEST_EXPECT(!document.apply(op_edit(EditOperation::Move, inner, back.child, 0), error) &&
 	            error.message.find("keeps only these elements") != std::string::npos);
 	TEST_EXPECT(owner(attribute) == one && owner(inner) == one);
 	// ... a PLAYERLIST with none and a TARGET move in.
-	Edit clear = op(EditOperation::Clear, attribute);
+	Edit clear = op_edit(EditOperation::Clear, attribute);
 	clear.field = "value";
-	TEST_EXPECT(step(clear) && step(op(EditOperation::Move, attribute, back.child, 0)) && owner(attribute) == back);
-	TEST_EXPECT(step(set(inner, "tag", std::string("TARGET"))) && step(op(EditOperation::Move, inner, back.child, 0)) &&
+	TEST_EXPECT(step(clear) && step(op_edit(EditOperation::Move, attribute, back.child, 0)) && owner(attribute) == back);
+	TEST_EXPECT(step(set_edit(inner, "tag", std::string("TARGET"))) && step(op_edit(EditOperation::Move, inner, back.child, 0)) &&
 	            owner(inner) == back);
 	const SerializeResult edited = document.serialize();
 	TEST_EXPECT(edited.ok());
@@ -1190,27 +1181,27 @@ int shipped_shape_edits() {
 	// place keeps its layout; an image for the default state is a row of its own beside
 	// the custom hook, the color and the typeless placeholder, which nothing rewrites.
 	const NodeAddress disabled = child_of(document, back, "appearance", 3);
-	TEST_EXPECT(document.apply(set(disabled, "value", std::string("back2.tga")), error));
+	TEST_EXPECT(document.apply(set_edit(disabled, "value", std::string("back2.tga")), error));
 	TEST_EXPECT(appearances()[3].value == "back2.tga" && appearances()[3].has_map_state && appearances()[3].map_state == 2);
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {back.row, menu_kind("appearance"), 0}, back.child), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {back.row, menu_kind("appearance"), 0}, back.child), error));
 	const NodeAddress added{back.row, menu_kind("appearance"), document.last_added()};
-	TEST_EXPECT(document.apply(std::vector<Edit>{set(added, "type", std::string("IMAGE")),
-	                                             set(added, "value", std::string("video.tga"))},
+	TEST_EXPECT(document.apply(std::vector<Edit>{set_edit(added, "type", std::string("IMAGE")),
+	                                             set_edit(added, "value", std::string("video.tga"))},
 	                           error));
 	TEST_EXPECT(appearances().size() == 5 && appearances()[0].type == "custom" && appearances()[4].value == "video.tga");
-	TEST_EXPECT(document.apply(op(EditOperation::Remove, added), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, added), error));
 	TEST_EXPECT(appearances().size() == 4 && appearances()[0].type == "custom" && appearances()[1].type == "color" &&
 	            appearances()[2].type.empty());
 
 	// B4: the HOTKEY rows are records with their own VIRTUAL flag.
 	const NodeAddress escape = child_of(document, back, "hotkey");
 	TEST_EXPECT(text_of(document, escape, "value") == "VK_ESCAPE" && text_of(document, escape, "virtual") == "1");
-	TEST_EXPECT(document.apply(set(escape, "value", std::string("VK_RETURN")), error));
+	TEST_EXPECT(document.apply(set_edit(escape, "value", std::string("VK_RETURN")), error));
 	TEST_EXPECT(hotkeys().size() == 2 && hotkeys()[0].value == "VK_RETURN" && hotkeys()[0].virtual_key);
 	TEST_EXPECT(hotkeys()[1].value == "B" && !hotkeys()[1].virtual_key);
-	TEST_EXPECT(document.apply(op(EditOperation::Remove, escape), error) && hotkeys().size() == 1 && hotkeys()[0].value == "B");
-	TEST_EXPECT(document.apply(op(EditOperation::Add, {back.row, menu_kind("hotkey"), 0}, back.child, 0), error));
-	TEST_EXPECT(document.apply(set({back.row, menu_kind("hotkey"), document.last_added()}, "value", std::string("Q")), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Remove, escape), error) && hotkeys().size() == 1 && hotkeys()[0].value == "B");
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {back.row, menu_kind("hotkey"), 0}, back.child, 0), error));
+	TEST_EXPECT(document.apply(set_edit({back.row, menu_kind("hotkey"), document.last_added()}, "value", std::string("Q")), error));
 	TEST_EXPECT(hotkeys().size() == 2 && hotkeys()[0].value == "Q" && !hotkeys()[0].virtual_key);
 	document.undo(); document.undo(); document.undo(); // back to VK_RETURN (virtual) + B
 	TEST_EXPECT(hotkeys().size() == 2 && hotkeys()[0].virtual_key && hotkeys()[1].value == "B");
@@ -1222,12 +1213,12 @@ int shipped_shape_edits() {
 	TEST_EXPECT(!document.get(screen, "text_rsrc", none) && !document.get(screen, "cursor.file", none));
 	TEST_EXPECT(text_of(document, root, "text_rsrc") == "menutxt.BIN" && text_of(document, root, "cursor.file") == "newarow1.tga");
 	TEST_EXPECT(text_of(document, root, "cursor.flags") == "STANDARD_TRANSPARENT");
-	TEST_EXPECT(document.apply(set(root, "text_rsrc", std::string("options.bin")), error));
-	TEST_EXPECT(document.apply(set(root, "cursor.flags", std::string("STANDARD")), error));
-	TEST_EXPECT(document.apply(set(root, "cursor.file", std::string("arrow2.tga")), error));
+	TEST_EXPECT(document.apply(set_edit(root, "text_rsrc", std::string("options.bin")), error));
+	TEST_EXPECT(document.apply(set_edit(root, "cursor.flags", std::string("STANDARD")), error));
+	TEST_EXPECT(document.apply(set_edit(root, "cursor.file", std::string("arrow2.tga")), error));
 	// The text table takes the schema's width (64 with the terminator).
-	TEST_EXPECT(!document.apply(set(root, "text_rsrc", std::string(64, 'a')), error));
-	TEST_EXPECT(document.apply(set(root, "text_rsrc", std::string(63, 'a')), error));
+	TEST_EXPECT(!document.apply(set_edit(root, "text_rsrc", std::string(64, 'a')), error));
+	TEST_EXPECT(document.apply(set_edit(root, "text_rsrc", std::string(63, 'a')), error));
 	document.undo();
 	TEST_EXPECT(document.save(error));
 	mnu::Document reparsed;
@@ -1243,10 +1234,10 @@ int shipped_shape_edits() {
 	// A Set of the value an unauthored field reads authors nothing: BACK has no RIGHT, no
 	// GROUP, no STRING.
 	const std::string before = document.serialize().text;
-	TEST_EXPECT(document.apply(set(back, "position.right", std::stoll(text_of(document, back, "position.right"))), error));
+	TEST_EXPECT(document.apply(set_edit(back, "position.right", std::stoll(text_of(document, back, "position.right"))), error));
 	TEST_EXPECT(document.serialize().text == before);
-	TEST_EXPECT(document.apply(set(back, "group", int64_t(0)), error) && document.serialize().text == before);
-	TEST_EXPECT(document.apply(set(back, "string.value", std::string()), error) && document.serialize().text == before);
+	TEST_EXPECT(document.apply(set_edit(back, "group", int64_t(0)), error) && document.serialize().text == before);
+	TEST_EXPECT(document.apply(set_edit(back, "string.value", std::string()), error) && document.serialize().text == before);
 	return 0;
 }
 
@@ -1284,7 +1275,7 @@ int typed_clear_and_retype() {
 	// A gesture's edits build on each other instead (S9g), the whole gesture one step.
 	const uint64_t gesture = next_edit_gesture();
 	for (const char *value : {"back.tg", "", "tab_new.tga"}) {
-		Edit edit = set(image, "value", std::string(value));
+		Edit edit = set_edit(image, "value", std::string(value));
 		edit.gesture = gesture;
 		TEST_EXPECT(document.apply(edit, error));
 	}
@@ -1417,23 +1408,23 @@ int blank_menu_edits() {
 	// changes nothing, so nothing is recorded. Likewise the only root and the only screen.
 	TEST_EXPECT(sibling_place(*document, exit) == std::make_pair(size_t(1), size_t(2)));
 	TEST_EXPECT(sibling_place(*document, root) == std::make_pair(size_t(0), size_t(1)));
-	TEST_EXPECT(document->apply(op(EditOperation::Move, exit, 0, 2), error) && !document->dirty() && !document->can_undo());
-	TEST_EXPECT(document->apply(op(EditOperation::Move, exit, 0, 1), error) && !document->dirty() && !document->can_undo());
-	TEST_EXPECT(document->apply(op(EditOperation::Move, root, 0, 1), error) && !document->dirty() && !document->can_undo());
-	TEST_EXPECT(document->apply(op(EditOperation::Move, screen, 0, 1), error) && !document->dirty() && !document->can_undo());
-	TEST_EXPECT(document->apply(op(EditOperation::Move, exit, 0, 0), error) && document->dirty() && document->can_undo());
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Move, exit, 0, 2), error) && !document->dirty() && !document->can_undo());
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Move, exit, 0, 1), error) && !document->dirty() && !document->can_undo());
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Move, root, 0, 1), error) && !document->dirty() && !document->can_undo());
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Move, screen, 0, 1), error) && !document->dirty() && !document->can_undo());
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Move, exit, 0, 0), error) && document->dirty() && document->can_undo());
 	document->undo();
 	TEST_EXPECT(!document->dirty() && window_names(*document, *document->rows()[0])[2] == "EXIT");
 
 	// B2 on the blank root: MAIN's only row is the custom hook; an image row added beside it
 	// and removed leaves it as it was.
-	TEST_EXPECT(document->apply(op(EditOperation::Add, {row.id, menu_kind("appearance"), 0}, root.child), error));
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Add, {row.id, menu_kind("appearance"), 0}, root.child), error));
 	const NodeAddress image{row.id, menu_kind("appearance"), document->last_added()};
-	TEST_EXPECT(document->apply(std::vector<Edit>{set(image, "type", std::string("IMAGE")),
-	                                              set(image, "value", std::string("logo.tga"))},
+	TEST_EXPECT(document->apply(std::vector<Edit>{set_edit(image, "type", std::string("IMAGE")),
+	                                              set_edit(image, "value", std::string("logo.tga"))},
 	                            error));
 	TEST_EXPECT(window_of(*document, root)->appearances.size() == 2 && window_of(*document, root)->appearances[0].type == "custom");
-	TEST_EXPECT(document->apply(op(EditOperation::Remove, image), error));
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Remove, image), error));
 	const auto &kept = window_of(*document, root)->appearances;
 	TEST_EXPECT(kept.size() == 1 && kept[0].type == "custom" && kept[0].state == "default" && kept[0].value.empty());
 
@@ -1445,7 +1436,7 @@ int blank_menu_edits() {
 	TEST_EXPECT(document);
 	EditorRequest edit = request::edit_record(document->path(), Edit());
 	const NodeAddress main_window{document->rows()[0]->id, kWindow, document->window_at(*document->rows()[0], 0)};
-	edit.edits = {set(main_window, "text_rsrc", std::string("mytext.bin"))};
+	edit.edits = {set_edit(main_window, "text_rsrc", std::string("mytext.bin"))};
 	editor_test::handle_to_end(session, edit);
 	editor_test::handle_to_end(session, request::save_all());
 	TEST_EXPECT(!has_code(view.findings.diagnostics, "reference.missing"));
@@ -1710,7 +1701,7 @@ bool own_values(const MnuDocument &document, const NodeAddress &address, const s
 			sweep_fail(totals, label + " " + field.id, "the field does not read");
 			return false;
 		}
-		edits.push_back(set(address, field.id.c_str(), value));
+		edits.push_back(set_edit(address, field.id.c_str(), value));
 	}
 	return true;
 }
@@ -1794,23 +1785,23 @@ void sweep_structure(MnuDocument &document, const std::string &label, const std:
 			if (is_part(token)) {
 				// Left out and written again, then moved to a window of its screen that has
 				// none (never into the part itself).
-				if (!step(token + " off", set(owner.address, token.c_str(), int64_t(0)))) continue;
-				if (!step(token + " on", set(owner.address, token.c_str(), int64_t(1)))) continue;
+				if (!step(token + " off", set_edit(owner.address, token.c_str(), int64_t(0)))) continue;
+				if (!step(token + " on", set_edit(owner.address, token.c_str(), int64_t(1)))) continue;
 				if (lacks != empty.end() && lacks->second.address.row == owner.address.row &&
 				    window_of(document, lacks->second.address) && !inside(document, lacks->second.address, record))
-					step(token + " moved", op(EditOperation::Move, record, lacks->second.address.child, 0));
+					step(token + " moved", op_edit(EditOperation::Move, record, lacks->second.address.child, 0));
 				continue;
 			}
-			if (!step(token + " duplicated", op(EditOperation::Duplicate, record, 0, 1))) continue;
+			if (!step(token + " duplicated", op_edit(EditOperation::Duplicate, record, 0, 1))) continue;
 			const NodeAddress copy{record.row, kind, document.last_added()};
 			if (lacks != empty.end() && lacks->second.address.row == record.row && lacks->second.address.child &&
 			    lacks->second.address.child != record.child)
-				step(token + " reparented", op(EditOperation::Move, copy, lacks->second.address.child, 0));
+				step(token + " reparented", op_edit(EditOperation::Move, copy, lacks->second.address.child, 0));
 			else
-				step(token + " moved", op(EditOperation::Move, copy, 0, SIZE_MAX));
+				step(token + " moved", op_edit(EditOperation::Move, copy, 0, SIZE_MAX));
 		} else if (lacks != empty.end()) {
 			const NodeAddress owner = lacks->second.address;
-			step(token + " added", op(EditOperation::Add, {owner.row, kind, 0}, owner.child ? owner.child : owner.row));
+			step(token + " added", op_edit(EditOperation::Add, {owner.row, kind, 0}, owner.child ? owner.child : owner.row));
 		}
 	}
 	// The edited menu reads back after a save as it was written.
@@ -2006,7 +1997,7 @@ int changes_since_save() {
 	TEST_EXPECT(find_definition(AssetGraph(), *document, "EXIT", exit) &&
 			find_definition(AssetGraph(), *document, "TITLE", title));
 	Diagnostic error;
-	Edit clear = op(EditOperation::Clear, exit);
+	Edit clear = op_edit(EditOperation::Clear, exit);
 	clear.field = "position.left";
 	TEST_EXPECT(document->apply(clear, error) && document->field_changed(exit, "position.left"));
 	TEST_EXPECT(document->record_change(exit) == Change::Changed && document->record_change(root) == Change::Unchanged);
@@ -2017,7 +2008,7 @@ int changes_since_save() {
 	document->undo();
 	document->undo();
 	TEST_EXPECT(!document->dirty());
-	Edit write = op(EditOperation::Write, exit);
+	Edit write = op_edit(EditOperation::Write, exit);
 	write.field = "group";
 	TEST_EXPECT(document->apply(write, error) && document->field_changed(exit, "group"));
 	back = document->revert_edits(exit, "group");
@@ -2025,7 +2016,7 @@ int changes_since_save() {
 	TEST_EXPECT(document->apply(back, error) && !document->field_changed(exit, "group") && !document->present(exit, "group"));
 	document->undo();
 	document->undo();
-	TEST_EXPECT(document->apply(op(EditOperation::Move, exit, 0, 0), error));
+	TEST_EXPECT(document->apply(op_edit(EditOperation::Move, exit, 0, 0), error));
 	TEST_EXPECT(document->record_change(root) == Change::Changed && document->record_change(exit) == Change::Unchanged &&
 	            document->record_change(title) == Change::Unchanged && document->record_change(screen_address) == Change::Unchanged);
 	return 0;
@@ -2058,12 +2049,12 @@ int colours_and_flags() {
 	                       "font.selected_bg", "font.disabled_fg", "font.disabled_bg"})
 		TEST_EXPECT(schema(exit, id).color == FieldColor::HexArgb && schema(exit, id).reference == ReferenceKind::StyleVar);
 	Diagnostic error;
-	TEST_EXPECT(document->apply(set(exit, "font.default_fg", std::string("%DEF_TEXTCOLOR%")), error));
+	TEST_EXPECT(document->apply(set_edit(exit, "font.default_fg", std::string("%DEF_TEXTCOLOR%")), error));
 	const NodeAddress appearance = child_of(*document, exit, "appearance");
-	TEST_EXPECT(document->apply({set(appearance, "type", std::string("COLOR")), set(appearance, "value", std::string("FF102030"))},
+	TEST_EXPECT(document->apply({set_edit(appearance, "type", std::string("COLOR")), set_edit(appearance, "value", std::string("FF102030"))},
 	                            error));
 	TEST_EXPECT(schema(appearance, "value").color == FieldColor::HexArgb);
-	TEST_EXPECT(document->apply(set(appearance, "type", std::string("IMAGE")), error));
+	TEST_EXPECT(document->apply(set_edit(appearance, "type", std::string("IMAGE")), error));
 	TEST_EXPECT(schema(appearance, "value").color == FieldColor::None &&
 	            schema(appearance, "value").reference == ReferenceKind::MenuTexture);
 	const FieldSchema &flags = *schema(appearance, "flags").schema, &cursor = *schema(exit, "cursor.flags").schema;
@@ -2075,15 +2066,15 @@ int colours_and_flags() {
 	for (const FieldChoice &choice : cursor.choices)
 		transparent = transparent || (choice.name == "STANDARD_TRANSPARENT" && choice.value == 0x300651);
 	TEST_EXPECT(transparent);
-	TEST_EXPECT(document->apply(set(exit, "cursor.flags", std::string("STANDARD|NATIVE2X")), error) &&
+	TEST_EXPECT(document->apply(set_edit(exit, "cursor.flags", std::string("STANDARD|NATIVE2X")), error) &&
 	            text_of(*document, exit, "cursor.flags") == "STANDARD|NATIVE2X");
 	// Picking "Not written" clears it: the file leaves the element out again.
-	TEST_EXPECT(document->apply({set(exit, "cursor.file", std::string("cursor.tga")),
-	                             set(appearance, "flags", std::string("NOCHECKDEPTH"))},
+	TEST_EXPECT(document->apply({set_edit(exit, "cursor.file", std::string("cursor.tga")),
+	                             set_edit(appearance, "flags", std::string("NOCHECKDEPTH"))},
 	                            error));
 	std::string text = document->serialize().text;
 	TEST_EXPECT(text.find("STANDARD|NATIVE2X") != std::string::npos && text.find("NOCHECKDEPTH") != std::string::npos);
-	TEST_EXPECT(document->apply({set(exit, "cursor.flags", cursor.choices[0].name), set(appearance, "flags", flags.choices[0].name)},
+	TEST_EXPECT(document->apply({set_edit(exit, "cursor.flags", cursor.choices[0].name), set_edit(appearance, "flags", flags.choices[0].name)},
 	                            error));
 	text = document->serialize().text;
 	TEST_EXPECT(text_of(*document, exit, "cursor.flags").empty() && text_of(*document, appearance, "flags").empty() &&

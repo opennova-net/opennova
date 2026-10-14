@@ -174,13 +174,7 @@ NodeAddress first_of(const Document &document, MissionKind kind) {
 	return rows.empty() ? NodeAddress() : NodeAddress{ rows.front()->id, rows.front()->kind, 0 };
 }
 
-Edit set_of(const NodeAddress &record, const char *field, Value value) {
-	Edit edit;
-	edit.address = record;
-	edit.field = field;
-	edit.value = std::move(value);
-	return edit;
-}
+using editor_test::set_edit;
 
 bool near(double a, double b, double slack = 1e-3) { return std::fabs(a - b) <= slack; }
 
@@ -246,14 +240,14 @@ static int test_change_sets() {
 	const uint64_t builds = viewport->builds();
 	size_t read = viewport->scene().rows_read();
 	// An entity's x: an Update, the one row read, the build generation standing.
-	rig.session.handle(request::edit_record(kMission, set_of(item, "x", 123.5)));
+	rig.session.handle(request::edit_record(kMission, set_edit(item, "x", 123.5)));
 	TEST_EXPECT(rig.session.outcome().done());
 	rig.pump();
 	TEST_EXPECT(rig.last() == ViewportAction::Update && viewport->builds() == builds);
 	TEST_EXPECT(viewport->scene().rows_read() == read + 1 && viewport->scene().entity(item.row)->x == 123.5);
 	read = viewport->scene().rows_read();
 	// An event's field: Keep, nothing read.
-	rig.session.handle(request::edit_record(kMission, set_of(event, "delay", int64_t(3))));
+	rig.session.handle(request::edit_record(kMission, set_edit(event, "delay", int64_t(3))));
 	TEST_EXPECT(rig.session.outcome().done());
 	rig.pump();
 	TEST_EXPECT(rig.last() == ViewportAction::Keep && viewport->scene().rows_read() == read);
@@ -269,7 +263,7 @@ static int test_change_sets() {
 	TEST_EXPECT(rig.last() == ViewportAction::Rebuild && viewport->builds() == builds + 1);
 	TEST_EXPECT(viewport->scene().entities().size() == 13);
 	// The header's terrain: a Rebuild.
-	rig.session.handle(request::edit_record(kMission, set_of(mission, "terrain", std::string("Bmap"))));
+	rig.session.handle(request::edit_record(kMission, set_edit(mission, "terrain", std::string("Bmap"))));
 	TEST_EXPECT(rig.session.outcome().done());
 	rig.pump();
 	TEST_EXPECT(rig.last() == ViewportAction::Rebuild && viewport->scene().header().terrain == "Bmap");
@@ -305,7 +299,7 @@ static int test_rebuild_held_for_a_gesture() {
 	const uint64_t builds = viewport->builds();
 	// A move under a gesture: Updates.
 	const uint64_t gesture = next_edit_gesture();
-	Edit move = set_of(item, "x", 50.0);
+	Edit move = set_edit(item, "x", 50.0);
 	move.gesture = gesture;
 	rig.session.handle(request::edit_record(kMission, move));
 	rig.pump();
@@ -641,7 +635,7 @@ static int test_area_handles() {
 			gathered.requests[0].kind == EditorRequestKind::EditRecord && gathered.requests[0].edits.size() == 2 &&
 			gathered.requests[0].edits[0].field == "x_min" && gathered.requests[0].edits[1].field == "y_min");
 	// Its flags bound z: the top dragged up 30 px raises z_max.
-	rig.session.handle(request::edit_record(kMission, set_of(zone, "flags", int64_t(opennova::bms::AreaTrigger::kFlagConstrainZ))));
+	rig.session.handle(request::edit_record(kMission, set_edit(zone, "flags", int64_t(opennova::bms::AreaTrigger::kFlagConstrainZ))));
 	TEST_EXPECT(rig.session.outcome().done());
 	rig.pump();
 	TEST_EXPECT(viewport->scene().area(zone.row) && viewport->scene().area(zone.row)->constrains_z);
@@ -776,7 +770,7 @@ static int test_sphere_picking() {
 	TEST_EXPECT(asked > 0 && read > 0);
 	const NodeAddress some_item = first_of(*rig.document(), MissionKind::Item);
 	const uint64_t serial = viewport->scene().serial();
-	rig.session.handle(request::edit_record(kMission, set_of(some_item, "x", 77.25)));
+	rig.session.handle(request::edit_record(kMission, set_edit(some_item, "x", 77.25)));
 	TEST_EXPECT(rig.session.outcome().done());
 	rig.pump();
 	TEST_EXPECT(viewport->scene().serial() != serial); // the cache asked over the scene moved, not skipped
@@ -788,7 +782,7 @@ static int test_sphere_picking() {
 	const Document *catalog = records_of(*rig.session.document_for("defs/items.def"));
 	NodeAddress pump_row;
 	TEST_EXPECT(catalog && find_definition(AssetGraph(), *catalog, "106100", pump_row));
-	rig.session.handle(request::edit_record("defs/items.def", set_of(pump_row, "scale_q16", 3.0)));
+	rig.session.handle(request::edit_record("defs/items.def", set_edit(pump_row, "scale_q16", 3.0)));
 	TEST_EXPECT(rig.session.outcome().done());
 	rig.pump();
 	const double scaled = mission_item_bound_radius(radius_q16, true, 3 * 65536, false, 0);
@@ -1722,7 +1716,7 @@ static int test_tweaking_commands() {
 	// Framing everything on a mission spread wide (one pump 6 km east): its densest place, not the
 	// middle of its box, which is empty ground 3 km out.
 	rig.session.handle(request::select_record(kMission, NodeAddress()));
-	rig.session.handle(request::edit_record(kMission, set_of(a, "x", 6000.0)));
+	rig.session.handle(request::edit_record(kMission, set_edit(a, "x", 6000.0)));
 	rig.pump();
 	gathered.requests.clear();
 	TEST_EXPECT(viewport->command(rig.context(), "frame", {}, gathered, error) && editor_test::serve(rig.session, gathered.requests));
