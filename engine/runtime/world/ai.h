@@ -1132,28 +1132,39 @@ public:
     // state selection (every 16, authority) -> body-heading turn -> slope slide (every 8)
     // -> rotate root delta by heading -> integrate + gravity/ground (every 2).
     void tick_infantry(AiEntity &e, World &world, uint32_t logic_tick);
-    // THE ORG1 TICK OF A STILL BODY: what tick_infantry runs for a live, unhidden NPC body that
-    // stands where its spawn stood it, for a caller outside the world's entity update (the
-    // editor's mission view runs it for each such body of `world` in pool order). It runs, in
-    // tick_infantry's order:
+    // THE ORG1 TICK OF A STILL BODY: what tick_infantry runs for a live NPC body that stands where
+    // its spawn stood it, for a caller outside the world's entity update (the editor's mission view
+    // runs it for each such body of `world` in pool order). It runs, in tick_infantry's order:
+    // - the motor copy's health hydrated from the registry (tick_infantry's, ahead of the death
+    //   selection);
     // - the motor head (infantry_org1_motor_head over the system's root motion and ring heads);
-    // - on the authority's think ticks, the think of a still body (infantry_org1_still_think on
-    //   the slot's alert byte and the guard flag, which the guard leg drops where the .adm
-    //   authors no guard [orig: @0x4BD1B8]) and then the think's attention tail (the ride link,
-    //   the idle facing fan, the stop fix-up, the attention scan, the head look and its look
-    //   idles [orig: @0x4BD87E..0x4BE7FD]);
-    // - the heading chase: the body, the legs and the look [orig: @0x4BE8FD..0x4BEBD9];
+    // - on the authority's think ticks, unless the body is airborne without the climb order
+    //   (infantry_think's exit [orig: @0x4BAA57..0x4BAA66]), the think of a still body
+    //   (infantry_org1_still_think on the slot's alert byte and the guard flag, which the guard
+    //   leg drops where the .adm authors no guard [orig: @0x4BD1B8]) and then the think's
+    //   attention tail (the ride link, the idle facing fan, the stop fix-up, the attention scan,
+    //   the head look and its look idles [orig: @0x4BD87E..0x4BE7FD]);
+    // - the heading chase: the body, the legs and the look, its pitch store and its +-90 degree
+    //   clamp about the body [orig: @0x4BE8FD..0x4BEBE7, @0x4BEF97, @0x4BEFC5..0x4BEFED];
     // - the eye restamp (infantry_restamp_eye) [orig: @0x4BF078..0x4BF14C];
     // - and the registry mirror (finish_infantry_tick).
     // Returns the motor head's frame (its event word, what the body's sound block reads, and its
-    // capsule). It skips what a body that stands does not run or does not show: the death edge and the
-    // corpse leg; the slope pass (a standing body only decays toward level, where it spawns); the
-    // attachment, the carrier ride and the steep-ground slide; the think's route, command and
-    // combat legs and the selection's other substitutions (no route, order, target or hit: the
+    // capsule). A body outside the contract runs nothing and returns an empty frame: one hidden at
+    // its init (the respawn zone of another team; the game's update returns before the head
+    // [orig: @0x4B9A03]), a dead one, one mounted on a seat, one attached to a parent's point.
+    // It skips what a body that stands does not run or does not show: the epilog screen's gate
+    // and the respawn unhide [orig: @0x4B998C, @0x4B99DB]; the secondary-fire latch clear
+    // [orig: @0x4B99B8]; the saved-live-pose stamp [orig: @0x4B9A53..0x4B9A6E]; the death edge
+    // and the corpse leg; the slope pass (a standing body only decays toward level, where it
+    // spawns); the carrier ride and the steep-ground slide; the think's route, command and combat
+    // legs and the selection's other substitutions (no route, order, target or hit: the
     // perception's threats, the reactions and the no-target arm's walk to a seen enemy's aim
     // point [orig: @0x4BC34B..0x4BC4BE] are the world's); the recoil, spread and torso roll (zero
     // for a body that never fires and stands level); the sound and fire passes; the root
-    // integrate, gravity and the resolver (the body stays where its spawn stood it).
+    // integrate, gravity and the resolver. The body therefore stays where its spawn stood it,
+    // where the game's integrates its clip's root motion (an idle's sway moves it a little in X
+    // and Y, the resolver standing it again), so the bearings, distances and head-look pitch the
+    // attention measures from it differ slightly from the game's.
     // [orig: Entity_UpdateInfantryAI @0x4B9910]
     RootMotionFrame tick_still_body(AiEntity &e, World &world, uint32_t logic_tick);
     // The infantry combat pass (org1 riflemen; world-wac-ai-re §17.1-17.3/17.5, D-AI-4):

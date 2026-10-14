@@ -4,6 +4,9 @@
 // See docs/world/world-wac-ai-re.md section 36 (D-INF-26).
 #include <runtime/world/infantry_internal.h>
 
+#include <algorithm>
+#include <limits>
+
 #include <base/io/bam.h>
 #include <runtime/world/world.h>
 
@@ -216,25 +219,39 @@ bool infantry_org1_still_think(InfantryState &inf, const IRootMotionSource *sour
 RootMotionFrame AiSystem::tick_still_body(AiEntity &e, World &world, uint32_t logic_tick) {
     InfantryState &inf = e.inf;
     Entity *self = world.registry.get(e.handle);
+    const uint32_t flags = self != nullptr ? (self->flags | self->engine_flags) : 0u;
+    // Outside the contract: hidden at its init [orig: @0x4B9A03], dead, seated, or attached to a
+    // parent's point.
+    if (self == nullptr || (flags & (1u | kEntityFlagDead)) != 0 || self->mounted ||
+            (self->attach_parent.valid() && self->attach_bone != 0))
+        return RootMotionFrame{};
+    // The motor copy's health from the registry, as tick_infantry hydrates it.
+    e.health = self->health;
+    if (self->health_max > 0)
+        inf.max_health = static_cast<int16_t>(
+                std::min(self->health_max, static_cast<int32_t>(std::numeric_limits<int16_t>::max())));
+    if (e.health <= 0) return RootMotionFrame{};
     // [orig: Entity_UpdateInfantryAI @0x4B9A14..0x4B9A48]
     RootMotionFrame frame;
     const bool have_clip = infantry_org1_motor_head(inf, root_motion, anim_rings, frame);
-    // The think on the authority's think ticks: the still body's selection, then the
-    // attention tail after it. [orig: the gate @0x4BA970; @0x4BD87E..0x4BE7FD]
-    const uint32_t flags = self != nullptr ? (self->flags | self->engine_flags) : 0u;
+    // The think on the authority's think ticks, unless airborne without the climb order: the
+    // still body's selection, then the attention tail after it. [orig: the gate @0x4BA970; the
+    // airborne exit @0x4BAA57..0x4BAA66; @0x4BD87E..0x4BE7FD]
     const bool guarding = (flags & kEntityFlagMounted) != 0;
-    if (is_authority && infantry_org1_still_think(inf, root_motion, logic_tick, e.net_id, guarding,
-                                                  e.slot.bytes()[AiSlot::kAlertByte])) {
-        // The guard leg drops the flag of a guarding body whose .adm authors no
-        // guard. [orig: @0x4BD19B..0x4BD1BB, the store @0x4BD1B8]
-        if (guarding && self != nullptr &&
+    const bool airborne = (flags & kEntityFlagAiClimb) == 0 && (flags & kEntityFlagInAir) != 0;
+    if (is_authority && !airborne &&
+            infantry_org1_still_think(inf, root_motion, logic_tick, e.net_id, guarding,
+                                      e.slot.bytes()[AiSlot::kAlertByte])) {
+        // The guard leg drops the flag of a guarding body whose .adm authors no guard.
+        // [orig: @0x4BD19B..0x4BD1BB, the store @0x4BD1B8]
+        if (guarding &&
                 (root_motion == nullptr || !root_motion->has_clip(inf.adm_id, anim_state::kGuard))) {
             self->flags &= ~kEntityFlagMounted;
             self->engine_flags &= ~kEntityFlagMounted;
         }
         infantry_attention_think(*this, e, world, infantry_org1_key(logic_tick, e.net_id));
     }
-    // [orig: @0x4BE8FD..0x4BEBD9]
+    // [orig: @0x4BE8FD..0x4BEBE7, @0x4BEF97, @0x4BEFC5..0x4BEFED]
     infantry_org1_heading_chase(e, self, infantry_org1_key(logic_tick, e.net_id));
     if (have_clip) infantry_restamp_eye(e, world, frame);
     finish_infantry_tick(e, world);
