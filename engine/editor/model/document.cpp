@@ -105,6 +105,10 @@ size_t Document::row_index(NodeId id) const {
 	return again == row_positions_.end() ? rows_.size() : again->second;
 }
 
+const std::vector<std::shared_ptr<const Node>> &Document::staged_rows() const {
+	return staged_ ? staged_->rows() : rows_;
+}
+
 const Node *Document::row(NodeId id) const {
 	const size_t index = row_index(id);
 	return index < rows_.size() ? rows_[index].get() : nullptr;

@@ -519,6 +519,10 @@ protected:
 		(void)field;
 		return false;
 	}
+	// The rows as the batch staging its edits has left them so far (StagedRows::rows), rows() outside a batch: what
+	// a type's hook that runs inside a batch (accept_list_edit, after_add) reads where the other rows decide (the
+	// parts above an avatar combination's nationality).
+	const std::vector<std::shared_ptr<const Node>> &staged_rows() const;
 	// An optional field left out of the file (Edit Clear, `present` false) or written again
 	// (Edit Write, `present` true), its latent value kept either way (the base has checked
 	// that the schema calls the field optional). The default refuses.
