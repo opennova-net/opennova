@@ -9,6 +9,7 @@
 // having to launch retail every iteration.
 
 #include <net/npwire/nw_session_framing.h>
+#include <net/npwire/flat_tlv.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_ping.h>
 
@@ -1151,6 +1152,148 @@ int test_server_hello_full_field_set_has_retail_order() {
 
 } // namespace
 
+// The flat-TLV walk as NapiNP_ReadTLV reads it (D-NET-412): only an empty name ends it. A
+// name with no NUL in the body is the bytes to the end, size cut; a size prefix cut by the end
+// reads 0 with the cursor left where the size would be; a value that runs past the end keeps its
+// declared size and value pointer with the cursor left at the value, so the next read takes a
+// name from the value's own bytes.
+// [orig: NapiNP_ReadTLV @0x61DBE0 - @0x61DC1E..0x61DC24, @0x61DCAA..0x61DCB6,
+//  @0x61DCCD..0x61DCD5, @0x61DCEA, @0x61DCF7, @0x61DD00..0x61DD10, @0x61DD20]
+int test_flat_tlv_read_hands_back_every_field() {
+	using opennova::FlatTlvField;
+	using opennova::kFlatTlvEnd;
+	using opennova::read_flat_tlv;
+	FlatTlvField field;
+	// An overrunning value: "AB", size 5, two bytes there.
+	const std::vector<uint8_t> overrun = { 'A', 'B', 0, 0x05, 0x00, 'x', 'y' };
+	TEST_EXPECT(read_flat_tlv(overrun.data(), overrun.size(), 0, field) == 5);
+	TEST_EXPECT(field.name == "AB" && field.size == 5 && field.present == 2 &&
+			field.value == overrun.data() + 5);
+	// The next read takes "xy" as a name with no NUL: the bytes to the end, size cut.
+	TEST_EXPECT(read_flat_tlv(overrun.data(), overrun.size(), 5, field) == overrun.size());
+	TEST_EXPECT(field.name == "xy" && field.size == 0 && field.present == 0);
+	TEST_EXPECT(
+			read_flat_tlv(overrun.data(), overrun.size(), overrun.size(), field) == kFlatTlvEnd);
+	// A size prefix cut by the end reads 0, the cursor left at the size's one byte.
+	const std::vector<uint8_t> cut = { 'P', 'M', 0, 0x07 };
+	TEST_EXPECT(read_flat_tlv(cut.data(), cut.size(), 0, field) == 3);
+	TEST_EXPECT(field.name == "PM" && field.size == 0 && field.present == 0 &&
+			field.value == cut.data() + 3);
+	// An empty name, and a name whose NUL is the body's last byte (its size cut).
+	const std::vector<uint8_t> empty = { 0, 'C', 'I', 0, 0x00, 0x00 };
+	TEST_EXPECT(read_flat_tlv(empty.data(), empty.size(), 0, field) == kFlatTlvEnd);
+	const std::vector<uint8_t> last = { 'C', 'I', 0 };
+	TEST_EXPECT(read_flat_tlv(last.data(), last.size(), 0, field) == last.size());
+	TEST_EXPECT(field.name == "CI" && field.size == 0);
+	return 0;
+}
+
+// The 0x41, 0x42 and 0x82 walks end at an empty name, where ours stepped over it; and they
+// handle the field a short size or an overrunning value leaves, where ours stopped before it.
+// [orig: NapiNPProtocol_HandleClientHello @0x621544; NapiNPProtocol_HandleClientJoin @0x62B907;
+//  NapiNP_HandleServerJoinResponse @0x629A15..0x629A18 -> @0x629CA4; the CU bounds read the
+//  declared length @0x62BBE7 / @0x629B93]
+int test_hello_and_auth_walks_end_only_at_an_empty_name() {
+	const std::vector<uint8_t> empty_name = { 0x00, 0x00, 0x00 };
+	// 0x41: the PM after an empty name is never read.
+	std::vector<uint8_t> hello;
+	append_field(hello, "CI", { 0x11, 0x00, 0x00, 0x00 });
+	hello.insert(hello.end(), empty_name.begin(), empty_name.end());
+	append_field(hello, "PM", { 0x07, 0x00, 0x00, 0x00 });
+	ClientHello parsed_hello;
+	TEST_EXPECT(parse_client_hello(hello.data(), hello.size(), parsed_hello));
+	TEST_EXPECT(parsed_hello.ci == 0x11u && parsed_hello.pm == 0u);
+	// 0x41: a PM whose size is cut loads its value pointer's byte (zero past the end).
+	std::vector<uint8_t> cut;
+	append_field(cut, "CI", { 0x11, 0x00, 0x00, 0x00 });
+	cut.insert(cut.end(), { 'P', 'M', 0x00, 0x07 });
+	TEST_EXPECT(parse_client_hello(cut.data(), cut.size(), parsed_hello));
+	TEST_EXPECT(parsed_hello.ci == 0x11u && parsed_hello.pm == 7u);
+	// 0x41: a CI claiming eight bytes with four there is still loaded.
+	const std::vector<uint8_t> long_ci = { 'C', 'I', 0x00, 0x08, 0x00, 0x05, 0x00, 0x00, 0x00 };
+	TEST_EXPECT(parse_client_hello(long_ci.data(), long_ci.size(), parsed_hello));
+	TEST_EXPECT(parsed_hello.ci == 5u);
+
+	// 0x42: the HK after an empty name is never read.
+	std::vector<uint8_t> auth;
+	append_field(auth, "CK", { 0xEF, 0xBE, 0xAD, 0xDE });
+	auth.insert(auth.end(), empty_name.begin(), empty_name.end());
+	append_field(auth, "HK", { 0x44, 0x33, 0x22, 0x11 });
+	ClientAuth parsed_auth;
+	TEST_EXPECT(parse_client_auth(auth.data(), auth.size(), parsed_auth));
+	TEST_EXPECT(parsed_auth.ck == 0xDEADBEEFu && parsed_auth.hk == 0u);
+	// 0x42: a CU declaring 2048 bytes with ten there is dropped by the walk's bound, which
+	// reads the declared length; one declaring 2047 keeps it, zero past the datagram.
+	std::vector<uint8_t> long_cu;
+	append_field(long_cu, "CK", {0xEF, 0xBE, 0xAD, 0xDE});
+	long_cu.insert(long_cu.end(), {'C', 'U', 0x00, 0x00, 0x08});
+	for (int i = 0; i < 10; ++i) long_cu.push_back(0x03);
+	TEST_EXPECT(!parse_client_auth(long_cu.data(), long_cu.size(), parsed_auth));
+	long_cu[long_cu.size() - 12] = 0xFF; // the CU's size, now 2047
+	long_cu[long_cu.size() - 11] = 0x07;
+	TEST_EXPECT(parse_client_auth(long_cu.data(), long_cu.size(), parsed_auth));
+	TEST_EXPECT(parsed_auth.cu.size() >= 1 && parsed_auth.cu[0].size() == 2047u &&
+			parsed_auth.cu[0][9] == 0x03 && parsed_auth.cu[0][10] == 0x00);
+
+	// 0x82: 64 CUs, an empty name, then a 65th: the walk ended at the name, so it accepts.
+	std::vector<uint8_t> accept;
+	append_field(accept, "CI", { 0x04, 0x00, 0x00, 0x00 });
+	append_field(accept, "CK", { 0xEF, 0xBE, 0xAD, 0xDE });
+	append_field(accept, "CR", { 0x01, 0x00, 0x00, 0x00 });
+	std::vector<uint8_t> past_empty = accept;
+	for (int i = 0; i < 64; ++i)
+		append_field(past_empty, "CU", { 0x01 });
+	past_empty.insert(past_empty.end(), empty_name.begin(), empty_name.end());
+	append_field(past_empty, "CU", { 0x01 });
+	ServerAuth server;
+	TEST_EXPECT(parse_server_auth(past_empty.data(), past_empty.size(), server));
+	TEST_EXPECT(server.cr == 1u);
+	// 0x82: a CU declaring 2048 bytes that the datagram cuts is dropped by its bound.
+	std::vector<uint8_t> cut_cu = accept;
+	cut_cu.insert(cut_cu.end(), { 'C', 'U', 0x00, 0x00, 0x08, 0x03, 'N', 0x00 });
+	TEST_EXPECT(!parse_server_auth(cut_cu.data(), cut_cu.size(), server));
+	// 0x82: a cut CU under the bound reads its inner chunk with zero past the end: the
+	// chunk [type 3]["N"][len 2]["x" and the zero that ends the datagram's copy].
+	std::vector<uint8_t> short_cu = accept;
+	short_cu.insert(
+			short_cu.end(), { 'C', 'U', 0x00, 0x07, 0x00, 0x03, 'N', 0x00, 0x02, 0x00, 'x' });
+	TEST_EXPECT(parse_server_auth(short_cu.data(), short_cu.size(), server));
+	TEST_EXPECT(server.cr == 1u && server.cu.size() == 1 && server.cu[0].first == "N" &&
+			server.cu[0].second == "x");
+	return 0;
+}
+
+// An overlapping CU chain cannot allocate past retail's slots (D-NET-412 review): every CU
+// in a run of "CU\0" + an overrunning size re-reads the next one from its value, so the walk
+// meets one CU per five bytes. The bounds run inside the walk: a declared length of 2048 or
+// more, or a 65th CU, ends it and fails the parse (the 0x42 dropped unanswered), so the walk
+// holds at most 64 slots of under 2048 bytes.
+// [orig: NapiNPProtocol_HandleClientJoin @0x62B750 - @0x62BBE7..0x62BBFA, the copy @0x62BC0B]
+int test_client_auth_cu_chain_is_bounded_inside_the_walk() {
+	const auto chain = [](size_t count, uint8_t lo, uint8_t hi) {
+		std::vector<uint8_t> bytes;
+		for (size_t i = 0; i < count; ++i) bytes.insert(bytes.end(), {'C', 'U', 0x00, lo, hi});
+		return bytes;
+	};
+	ClientAuth parsed;
+	// 800 CUs each declaring 65535: the first one ends the walk.
+	const std::vector<uint8_t> huge = chain(800, 0xFF, 0xFF);
+	TEST_EXPECT(!parse_client_auth(huge.data(), huge.size(), parsed));
+	TEST_EXPECT(parsed.cu.empty());
+	// 65 CUs each declaring 2047: the 65th ends the walk, after 64 slots.
+	const std::vector<uint8_t> sixty_five = chain(65, 0xFF, 0x07);
+	TEST_EXPECT(!parse_client_auth(sixty_five.data(), sixty_five.size(), parsed));
+	TEST_EXPECT(parsed.cu.size() == 64u);
+	// 64 of them parse, each slot its declared 2047 bytes and no more.
+	const std::vector<uint8_t> sixty_four = chain(64, 0xFF, 0x07);
+	TEST_EXPECT(parse_client_auth(sixty_four.data(), sixty_four.size(), parsed));
+	TEST_EXPECT(parsed.cu.size() == 64u);
+	size_t held = 0;
+	for (const std::vector<uint8_t> &cu : parsed.cu) held += cu.size();
+	TEST_EXPECT(held == 64u * 2047u);
+	return 0;
+}
+
 int main() {
 	if (test_client_hello_roundtrip() != 0) return 1;
 	if (test_client_hello_minimal() != 0) return 1;
@@ -1172,6 +1315,11 @@ int main() {
 	if (test_server_auth_rejection_roundtrip() != 0) return 1;
 	if (test_server_auth_requires_no_field() != 0) return 1;
 	if (test_server_auth_cu_walk_bounds() != 0) return 1;
+	if (test_flat_tlv_read_hands_back_every_field() != 0)
+		return 1;
+	if (test_hello_and_auth_walks_end_only_at_an_empty_name() != 0)
+		return 1;
+	if (test_client_auth_cu_chain_is_bounded_inside_the_walk() != 0) return 1;
 	if (test_cu_writers_leave_out_an_entry_of_2048_bytes() != 0) return 1;
 	if (test_server_hello_requires_no_hk() != 0) return 1;
 	if (test_server_hello_ut_is_nonzero_gated() != 0) return 1;

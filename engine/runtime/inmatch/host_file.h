@@ -58,16 +58,14 @@ GameConfig host_screen_default_config();
 // through its read (apply_host_dialog_control); opennova-serve maps the
 // game.cfg block onto it (host_config.h host_session_settings). The defaults
 // are the cfg table's [orig: the MULTIPLAYER table @0x833050 -- mpmaxplayers
-// "64" @0x833278, mpuselineupqueue "1" @0x833290, mplineupqueuesize "100"
-// @0x8332A8; the rest of the block zeroed by Config_SetDefaults' memset
-// @0x54D039..0x54D046, mp_gametype among it].
+// "64" @0x833278; the rest of the block zeroed by Config_SetDefaults' memset
+// @0x54D039..0x54D046, mp_gametype among it]; the lineup queue's words ride
+// the config (GameConfig::use_lineup_queue / lineup_queue_size).
 struct HostScreenState {
 	GameConfig config = host_screen_default_config();
 	int32_t player_limit = 64;       // MAX_PLAYERS [orig: dword_2550AAC]
 	bool serve_and_play = true;      // SERVERTYPE 0 [orig: dword_2550AB8]
 	int32_t game_type_setting = 0;   // [orig: dword_2550AA8, game.cfg mp_gametype]
-	int32_t use_lineup_queue = 1;    // [orig: dword_2550AB0]
-	int32_t lineup_queue_size = 100; // [orig: dword_2550AB4]
 };
 
 // The result of one read: what the file changed and what it named that

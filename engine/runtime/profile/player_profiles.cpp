@@ -301,14 +301,10 @@ std::string PlayerProfiles::name_changed(std::string text) {
 	// @0x66195c].
 	if (rename(text)) return text;
 	// One character off the edit and nothing more: the cut's set finds the
-	// chain detached [orig: @0x55fc4d, the set @0x55fc6d; @0x6469a2]. Retail's
-	// edit holds one byte per character; ours holds the edit's UTF-8, so a
-	// complete multi-byte sequence at the end is that one character.
-	size_t lead = text.size() - 1;
-	while (lead > 0 && (static_cast<unsigned char>(text[lead]) & 0xC0) == 0x80) --lead;
-	const auto b = static_cast<unsigned char>(text[lead]);
-	const size_t seq = b >= 0xF0 && b < 0xF8 ? 4 : b >= 0xE0 ? 3 : b >= 0xC0 ? 2 : 1;
-	text.resize(seq == text.size() - lead ? lead : text.size() - 1);
+	// chain detached [orig: @0x55fc4d, the set @0x55fc6d; @0x6469a2]. The edit
+	// holds one byte per character, the code page's: the record's name is the
+	// page's bytes, as the embedder hands them over (D-NET-661).
+	text.pop_back();
 	return text;
 }
 

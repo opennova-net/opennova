@@ -61,13 +61,33 @@ bool Server_PcidBanned(const NapiNPServerCtx &ctx, std::string_view pcid);
 // A joiner's name on banned.txt, compared exactly (strcmp), the code-31 refusal.
 // [orig: Server_ValidatePlayerJoinRequest @0x512989..0x5129CB, the refusal @0x512A6C]
 bool Server_NameBanned(const NapiNPServerCtx &ctx, std::string_view name);
-// The game-layer join's two ban legs, past the cookie's NAMEINFO / PCID / duplicate-PCID legs
-// (not ported, D-NET-295): a joiner on a NovaWorld session (the host has a local address)
-// whose decrypted PCID is listed is refused 29; in a session, a listed name is refused 31.
-// 0 admits. [orig: Server_ValidatePlayerJoinRequest — the local-address block
-//  @0x5125F2..0x512956, LinkedList_FindByName @0x512737 -> code 29 @0x512751; the session test
+// The game-layer join's ban and duplicate legs, past the cookie's NAMEINFO / PCID decrypt
+// legs (codes 23 / 24 / 25, not ported): on a NovaWorld session (the host has a local
+// address), a joiner whose decrypted PCID is listed is refused 29; then, with game.cfg's
+// mphostpuntplayerswithsamepcids set and the joiner's PCID decrypted (`pcid_decrypted`, the
+// cookie load's answer: retail's walk reaches the leg only past its own decrypt), a PCID
+// that more than one of the session's connections holds (case-insensitively, the joiner
+// counted) flags every OTHER remote connection holding it for the next 0x79 boundary's kick
+// (Server_KickDuplicatePcids), writes the _inout.txt REJECTING line for every holder, and
+// refuses the joiner 30; in a session, a listed name is refused 31. 0 admits.
+// [orig: Server_ValidatePlayerJoinRequest — the local-address block @0x5125F2..0x512956,
+//  LinkedList_FindByName @0x512737 -> code 29 @0x512751; the duplicate leg: the cfg word
+//  @0x512771..0x512778, NapiSession_CountPlayersByName(ctx, 1, pcid) @0x51278D (> 1
+//  @0x512795), the walk over ctx+0x24 @0x51279E..0x51287C (Napi_StrCaseEqual @0x5127CF, not
+//  the joiner @0x5127DF, a connection that is not the local one @0x5127E3..0x5127F1, the flag
+//  @0x5127F3, the /INOUT line @0x5127F7..0x512865), code 30 @0x512890; the session test
 //  @0x51297D, the name walk @0x512989..0x5129CB -> code 31 @0x512A6C]
-uint32_t Server_ValidateJoinBans(const NapiNPServerCtx &ctx, const NapiNPConnection &conn);
+uint32_t Server_ValidateJoinBans(NapiNPServerCtx &ctx, NapiNPConnection &conn, bool pcid_decrypted);
+// The S2C 0x79 boundary's kick of the connections the join validator flagged (nothing off the
+// boundary, `quality_boundary` false): each flagged remote connection latches {DS its role, DC 2,
+// 0, 0, "N.C:SPTWNTBP[<its PCID>]", DPC 0, ""} when no record is latched yet and is marked for the
+// next protocol pump's teardown. A misnomer in the IDB: no spawn or ban is involved. [orig:
+// CNapiServer_DisconnectPendingSpawnBans @0x4C9290 — the walk over ctx+0x24
+//  @0x4C92CB..0x4C93F3, the flag @0x4C92F5, the connection and not-local tests
+//  @0x4C92FE..0x4C930F, sprintf("N.C:SPTWNTBP[%s]", node+0x250) @0x4C9333..0x4C9340, the role
+//  @0x4C9355..0x4C9375, DC 2 @0x4C938B, the latch-if-!valid @0x4C93BB..0x4C93D5,
+//  CNapiNPConnection_RequestDisconnect @0x4C93DD; called by Server_TickUpdate @0x51E20C]
+void Server_KickDuplicatePcids(NapiNPServerCtx &ctx, bool quality_boundary);
 // A source address on banned.txt, the protocol join's family-14 reason-3 refusal.
 // [orig: CNapiNetwork_ValidateJoinRequest @0x4C6203..0x4C6217]
 bool Server_AddressBanned(const NapiNPServerCtx &ctx, uint32_t address);

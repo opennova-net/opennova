@@ -13,7 +13,7 @@ namespace opennova {
 enum class DropReason {
 	Logout,    // explicit GOODBYE / /api/logout / client politely left
 	Timeout,   // last_seen_ms exceeded the heartbeat window
-	Replaced,  // a new HELLO from the same addr/id evicted the prior entry
+	Replaced,  // a new HELLO at the addr evicted a prior entry with no live connection
 	Shutdown,  // server is stopping
 };
 
@@ -53,7 +53,9 @@ public:
 
 	// Verbs the listener threads call when a HELLO/JOIN/SESSION/GOODBYE
 	// packet has been recognised. These wrap the registry and fire the
-	// appropriate lifecycle callback.
+	// appropriate lifecycle callback. A Hello naming another identity at an
+	// Active row re-names it and fires nothing (no Hello ends a live
+	// connection); at a Handshaking row it replaces the row (Replaced).
 	void notify_handshake(Connection conn);
 	// The per-connection verbs are address-keyed: two retail processes both
 	// ship ci=0x00000001 (G.7), so the reported id cannot pick the connection

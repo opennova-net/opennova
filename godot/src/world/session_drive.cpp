@@ -675,7 +675,7 @@ void SessionDrive::sync_nw_host_roster(opennova::NwuHostRole &p_host, const Ref<
 		} else {
 			player.slot = slot.slot;
 			player.connection_id = slot.connection_id;
-			player.player_name = opennova::to_std(slot.player_name);
+			player.player_name = opennova::utf8_to_retail_text(opennova::to_std(slot.player_name));
 			player.ip_and_port = opennova::to_std(slot.ip_and_port);
 			player.pcid = opennova::to_std(slot.pcid);
 		}
@@ -867,7 +867,9 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 			p_opts->get_host_session()->get_serve_and_play()) {
 		opennova::HostPlayerSlot self;
 		self.slot = 0;
-		self.player_name = opennova::to_std(p_opts->get_player_name());
+		// The host's own name as its roster carries it, the page's bytes (D-NET-661).
+		self.player_name =
+				opennova::utf8_to_retail_text(opennova::to_std(p_opts->get_player_name()));
 		self.ip_and_port = opennova::peer_addr_to_string(opennova::PeerAddr{});
 		self.pcid = login_pcid; // the host's own player's PCID is its login cookie
 		// Its PlayerTeam / PlayerType are the match's, as for any added player.

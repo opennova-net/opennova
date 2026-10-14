@@ -96,6 +96,48 @@ int test_handshake_replacing_existing_addr_fires_replaced() {
 	return 0;
 }
 
+// D-NET-630: a Hello naming another identity at a live (Active) row ends nothing: retail's
+// Hello handler creates and destroys no connection. The row keeps its id, state, keys and
+// clocks and takes the Hello's identity, so that identity's 0x42 can replace it.
+// [orig: NapiNPProtocol_HandleClientHello @0x6213B0; NapiNPProtocol_HandleClientJoin
+//  @0x62BEBA..0x62BF06]
+int test_hello_of_another_identity_keeps_a_live_row() {
+	ConnectionManager mgr(5000);
+	std::vector<DropReason> lost;
+	int added = 0;
+	mgr.on_lost([&](const Connection &, DropReason reason) { lost.push_back(reason); });
+	mgr.on_added([&](const Connection &) { ++added; });
+
+	const PeerAddr addr{ 0x7F000001u, 9100 };
+	mgr.notify_handshake(handshake(0x10, addr.ip, addr.port, 100));
+	mgr.notify_active_addr(addr, "live", "client-scrk", "server-scrk");
+	mgr.notify_seen_addr(addr, 150);
+	Connection stray = handshake(0x20, addr.ip, addr.port, 200);
+	stray.pn = "NOVAWORLDUDPX";
+	mgr.notify_handshake(stray);
+
+	const auto row = mgr.registry().find_by_addr(addr);
+	TEST_EXPECT(lost.empty());
+	TEST_EXPECT(added == 1);
+	TEST_EXPECT(mgr.registry().size() == 1);
+	TEST_EXPECT(row.has_value());
+	TEST_EXPECT(row->id == 0x10);
+	TEST_EXPECT(row->state == ConnectionState::Active);
+	TEST_EXPECT(row->client_scrk == "client-scrk" && row->server_scrk == "server-scrk");
+	TEST_EXPECT(row->identity == "live");
+	TEST_EXPECT(row->created_ms == 100 && row->last_seen_ms == 150);
+	// The row's Hello identity now names the stray Hello, which a following 0x42 must match;
+	// the session keeps the protocol its 0x42 established, which its 0x43s are classified by.
+	TEST_EXPECT(row->reported_id == 0x20 && row->pn == "NOVAWORLDUDPX");
+	TEST_EXPECT(row->session_pn == "NOVAWORLDUDP");
+	// The live connection's own identity, Hello'd again, re-names it back, still live.
+	mgr.notify_handshake(handshake(0x10, addr.ip, addr.port, 300));
+	const auto back = mgr.registry().find_by_addr(addr);
+	TEST_EXPECT(lost.empty() && back.has_value() && back->reported_id == 0x10 &&
+			back->pn == "NOVAWORLDUDP" && back->state == ConnectionState::Active);
+	return 0;
+}
+
 int test_repeated_hello_preserves_synthetic_identity_and_active_state() {
 	ConnectionManager mgr(5000);
 	std::vector<DropReason> lost;
@@ -195,6 +237,8 @@ int main() {
 	if (test_logout_fires_lost_with_logout_reason() != 0) return 1;
 	if (test_tick_drops_expired_with_timeout_reason() != 0) return 1;
 	if (test_handshake_replacing_existing_addr_fires_replaced() != 0) return 1;
+	if (test_hello_of_another_identity_keeps_a_live_row() != 0)
+		return 1;
 	if (test_repeated_hello_preserves_synthetic_identity_and_active_state() != 0) return 1;
 	if (test_shutdown_evicts_all_with_shutdown_reason() != 0) return 1;
 	if (test_notify_active_promotes_state() != 0) return 1;
