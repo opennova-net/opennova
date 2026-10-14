@@ -100,7 +100,7 @@ public:
 		// The gate tag echoed in ClientAuth NA: the title's, or the mount's gt.ssc's
 		// (title_gate_tag), copied into the connection's parameters at the connect.
 		// [orig: CNapiGameSession_ConnectToNovaWorld @0x4d494f - Napi_CopyString(params,
-		//  stru_B5FF50.protocol, 64), handed to CNapiGameSession_InitNPConnection @0x4d49b8]
+		//  g_GateManager.protocol, 64), handed to CNapiGameSession_InitNPConnection @0x4d49b8]
 		std::string na;
 
 		// ClientHello identity. The real NovaWorld server VALIDATES four fields
@@ -702,7 +702,7 @@ ClientAuth make_client_auth(const ClientSession::Config &cfg, std::string_view c
 // and the host-registration (host) connection carry this same set — retail
 // builds it once in CNapiGameSession_ConnectToNovaWorld, which serves both
 // directions. `gate_tag` is the const protocol/gate tag (our ClientAuth `na`,
-// the title's or gt.ssc's, stru_B5FF50.protocol); the rest come straight from the
+// the title's or gt.ssc's, g_GateManager.protocol); the rest come straight from the
 // gate response (ProcessResponse @ 0x4ced20) and are empty against the
 // permissive OpenNova gate.
 struct NovaWorldJoinCu {
@@ -710,7 +710,7 @@ struct NovaWorldJoinCu {
 	// BuildDateAndTime: the title's lobby BDAT (TitleIdentity::lobby_bdat).
 	// [orig: CNapiGameSession_ConnectToNovaWorld @0x4d479d]
 	std::string build_date_and_time;
-	std::string gate_tag;        // GateTag  <- stru_B5FF50.protocol (== na)
+	std::string gate_tag;        // GateTag  <- g_GateManager.protocol (== na)
 	std::string met_tag;         // MetTag   <- gate VAR METLABEL  (byte_B5F4BC)
 	std::string udp_code1;       // UdpCode1 <- gate VAR UDPCODE1  (byte_B5F8E8)
 	std::string udp_code2;       // UdpCode2 <- gate VAR UDPCODE2  (byte_B5F908)

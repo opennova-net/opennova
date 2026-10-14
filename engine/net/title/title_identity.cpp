@@ -45,7 +45,7 @@ TitleIdentity jo_row() {
 	t.pn = "JOINTOPERATIONS";
 	// QUuid(0xB074D646, 0x81F9, 0x475F, 0x92,0xDA,0xDE,0xA7,0x24,0x7F,0x14,0x68): QUuid's first
 	// three components occupy native little-endian memory, and PG copies those 16 bytes.
-	// [orig: the static initializer @0x7937a0 into dword_B5CBB8; CNapiNetwork_Init
+	// [orig: the static initializer @0x7937a0 into g_GameProtocolGuid; CNapiNetwork_Init
 	//  @0x4ca7a4..0x4ca7af -> NapiNPVarBlock_Copy(proto+0x11C)]
 	t.guid = std::array<uint8_t, 16>{0x46, 0xD6, 0x74, 0xB0, 0xF9, 0x81, 0x5F, 0x47,
 	                                 0x92, 0xDA, 0xDE, 0xA7, 0x24, 0x7F, 0x14, 0x68};

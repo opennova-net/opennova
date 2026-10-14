@@ -158,7 +158,7 @@ bool decode_gate_tag_file(const std::vector<uint8_t> &bytes, const char *key_cha
 // must be complete.
 // [orig: CNapiGateManager_InitDefaults @0x4d1460 (Napi_CopyString(this+76, "jop:cus2", 64)
 //  @0x4d14b6); Game_InitSubsystems @0x4a7149..0x4a714e -> Mission_LoadEncryptedConfig
-//  @0x4cdcd0 over the gate manager stru_B5FF50 - FileSystem_SetSearchLooseFirst(1) @0x4cdcf4,
+//  @0x4cdcd0 over g_GateManager - FileSystem_SetSearchLooseFirst(1) @0x4cdcf4,
 //  FileSystem_FileExists("gt.ssc") @0x4cdcfe]
 std::string title_gate_tag(const TitleIdentity &title, const ResourceIndex *mount);
 

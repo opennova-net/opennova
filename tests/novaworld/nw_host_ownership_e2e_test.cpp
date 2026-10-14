@@ -164,6 +164,8 @@ opennova::serve::ListerOptions lister_options(const Service &service, bool with_
 std::string fetch_host_key(const Service &service) {
 	opennova::LobbyHttpFlow flow;
 	opennova::LobbyHttpContext ctx;
+	ctx.title = &kJo;
+	ctx.gate_tag = kJo.gate_tag;
 	ctx.startup_url = "http://127.0.0.1:" + std::to_string(service.http.bound_port()) +
 	                  "/nwprepare.dll?ver1=[VER1]&ver2=[VER2]&cc=[CC]&gt=[GT]&url=jop_2_start.htm";
 	flow.set_context(ctx);
