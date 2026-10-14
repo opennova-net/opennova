@@ -9,6 +9,7 @@ import UsersSection from '../pages/admin/UsersSection.vue';
 import ServerStatusSection from '../pages/admin/ServerStatusSection.vue';
 import ConnectionsSection from '../pages/admin/ConnectionsSection.vue';
 import HostedSection from '../pages/admin/HostedSection.vue';
+import CdKeysSection from '../pages/admin/CdKeysSection.vue';
 import { requireUser } from './guards';
 
 // A page only a logged-in visitor may open sets `meta: { requiresUser: true }`
@@ -31,7 +32,8 @@ const router = createRouter({
         { path: 'users', component: UsersSection },
         { path: 'server', component: ServerStatusSection },
         { path: 'connections', component: ConnectionsSection },
-        { path: 'hosted', component: HostedSection }
+        { path: 'hosted', component: HostedSection },
+        { path: 'cd-keys', component: CdKeysSection }
       ]
     }
   ],

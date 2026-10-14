@@ -62,6 +62,7 @@ const sections: AdminSection[] = [
   { to: '/admin/server', label: 'Server Status' },
   { to: '/admin/connections', label: 'Connections' },
   { to: '/admin/hosted', label: 'Hosted servers' },
+  { to: '/admin/cd-keys', label: 'CD keys' },
 ];
 
 const route = useRoute();
