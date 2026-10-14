@@ -135,7 +135,7 @@ struct ServerConfig {
 	// of the browser until an update's key names the owner, and ended with
 	// ServerStopHosting (MsgCode 200) when it names none. Off by default: such a
 	// host is listed with no owner, as opennova-serve without --credentials and
-	// opennova-nw-lister without an account list. Service policy
+	// a game host on no account list. Service policy
 	// (LobbySession::set_require_host_key).
 	bool require_host_key = false;
 

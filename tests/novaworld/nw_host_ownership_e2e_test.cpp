@@ -10,9 +10,9 @@
 // in the ClientHostUpdate that first carries the full Host list, and again in a
 // re-host's kept list after an NWU reconnect.
 //
-//   * opennova-nw-lister's Lister with an account (its --credentials): the gate,
+//   * opennova-serve's Lister with an account (its --credentials): the gate,
 //     the NWU session, the EPASK login, /NWHost.dll's HOSTKEY, the host leg and
-//     its first update; the row's host_user_id is that account, and host_keys
+//     its mission start's update; the row's host_user_id is that account, and host_keys
 //     holds the key's hash claimed for the row's RID;
 //   * the Lister with no account lists with no owner when the service is not
 //     strict; the strict service never lists it and ends its hosting with
@@ -90,7 +90,7 @@ void log_sink(opennova::io::LogLevel level, const char *message) {
 
 // A ListingSource standing in for a game server: fixed columns, no players,
 // and the host leg's last outcome kept for the test.
-class FixedSource final : public opennova::nw_lister::ListingSource {
+class FixedSource final : public opennova::serve::ListingSource {
 public:
 	explicit FixedSource(std::string name) { registration_.server_name = std::move(name); }
 	bool start(int &) override { return true; }
@@ -113,10 +113,14 @@ private:
 	HostRegistration registration_;
 };
 
-// A Lister on a synthetic clock, 10 ms a pass.
+// A Lister on a synthetic clock, 10 ms a pass. Once it hosts, the game server
+// behind it starts its mission: the mission start's update publishes the whole
+// Host list, the HostKey with it, as opennova-serve's Server::bind_listing runs
+// it (the host result publishes nothing, D-NET-465).
 struct ListerRun {
-	opennova::nw_lister::Lister &lister;
+	opennova::serve::Lister &lister;
 	uint32_t now = 0;
+	bool mission_started = false;
 
 	// Pass until `done` holds or the lister finishes; `each` runs every pass.
 	bool until(const std::function<bool()> &done, const std::function<void()> &each = {},
@@ -124,6 +128,10 @@ struct ListerRun {
 		for (int i = 0; i < rounds && !done(); ++i) {
 			now += 10;
 			const bool running = lister.tick(now);
+			if (running && !mission_started && lister.hosting()) {
+				mission_started = true;
+				lister.publish_server_info();
+			}
 			if (each) each();
 			if (!running) break;
 			std::this_thread::sleep_for(2ms);
@@ -132,8 +140,8 @@ struct ListerRun {
 	}
 };
 
-opennova::nw_lister::ListerOptions lister_options(const Service &service, bool with_account) {
-	opennova::nw_lister::ListerOptions options;
+opennova::serve::ListerOptions lister_options(const Service &service, bool with_account) {
+	opennova::serve::ListerOptions options;
 	options.master_host = "127.0.0.1";
 	options.master_gate_port = service.gate.bound_port();
 	if (with_account) {
@@ -304,12 +312,12 @@ private:
 	std::vector<ClientSession::Notice> notices_;
 };
 
-// The Lister with an account: its listing is the account's once its first
-// update carries the key it fetched, which host_keys holds as a hash claimed for
-// the row's RID. Its stop deregisters.
+// The Lister with an account: its listing is the account's once its mission
+// start's update carries the key it fetched, which host_keys holds as a hash
+// claimed for the row's RID. Its stop deregisters.
 void lister_with_account(Service &service) {
 	FixedSource source("Owned Lister");
-	opennova::nw_lister::Lister lister(lister_options(service, true), source, nullptr);
+	opennova::serve::Lister lister(lister_options(service, true), source, nullptr);
 	expect(lister.start(), "lister: starts");
 	ListerRun run{lister};
 	const bool hosting = run.until([&] { return lister.hosting(); });
@@ -330,7 +338,7 @@ void lister_with_account(Service &service) {
 		expect(mine.size() == 1 && mine[0].rid == lobby->rid, "lister: the account lists one server");
 	}
 	lister.stop();
-	expect(lister.exit_code() == opennova::nw_lister::kExitStopped, "lister: a stop exits 0");
+	expect(lister.exit_code() == opennova::serve::kExitStopped, "lister: a stop exits 0");
 	expect(wait_for([&] { return !service.row("Owned Lister"); }), "lister: the stop deregisters");
 }
 
@@ -338,7 +346,7 @@ void lister_with_account(Service &service) {
 // update's empty HostKey names nobody).
 void anonymous_lister_listed(Service &service) {
 	FixedSource source("Anonymous Lister");
-	opennova::nw_lister::Lister lister(lister_options(service, false), source, nullptr);
+	opennova::serve::Lister lister(lister_options(service, false), source, nullptr);
 	expect(lister.start(), "anonymous: starts");
 	ListerRun run{lister};
 	expect(run.until([&] { return lister.hosting(); }), "anonymous: hosts");
@@ -358,15 +366,15 @@ void anonymous_lister_listed(Service &service) {
 // nobody.
 void anonymous_lister_stopped(Service &strict) {
 	FixedSource source("Refused Lister");
-	opennova::nw_lister::Lister lister(lister_options(strict, false), source, nullptr);
+	opennova::serve::Lister lister(lister_options(strict, false), source, nullptr);
 	expect(lister.start(), "strict lister: starts");
 	bool ever_listed = false;
 	ListerRun run{lister};
 	run.until([&] { return lister.finished(); },
 	          [&] { ever_listed = ever_listed || !hostdb::list_hosts(*strict.pool.acquire()).empty(); });
 	expect(lister.finished(), "strict lister: finishes");
-	expect(lister.exit_code() == opennova::nw_lister::kExitStoppedByService,
-	       "strict lister: the service stopped its hosting");
+	expect(lister.exit_code() == opennova::serve::kExitStoppedByService,
+			"strict lister: the service stopped its hosting");
 	expect(!source.hosting && source.failure == kNeedToLogin,
 	       "strict lister: with NWUSERVERMSGCODE_NEEDTOLOGIN");
 	expect(!ever_listed, "strict lister: never in the browser");

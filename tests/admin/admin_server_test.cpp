@@ -1,6 +1,6 @@
 // The remote-admin server (net/admin/admin_server.h) and its console
 // (runtime/inmatch/admin_console.h), driven by the CLIENT half (net/admin/admin_protocol.h, the
-// codec opennova-nw-lister's admin feed speaks) over in-memory bytes: the challenge, the login
+// codec the service's admin link speaks) over in-memory bytes: the challenge, the login
 // and its prefix rules, the QUERY report, every verb's replies in order and its side effects on
 // a host with two remote players, the rights gates and the usage mismatch, and the framing
 // edges. The witness record is docs/net/novaworld-net-re.md §6.9.

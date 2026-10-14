@@ -308,7 +308,7 @@ int main() {
 						return lister_exit != -1;
 					},
 					10s);
-			expect(lister_exit == opennova::nw_lister::kExitStoppedByService,
+			expect(lister_exit == opennova::serve::kExitStoppedByService,
 					"the server's lister stops on the service's word");
 			expect(nw_service_test::wait_for([&] {
 				return !opennova::hostdb::find_host_by_rid(*service.pool.acquire(), rid);

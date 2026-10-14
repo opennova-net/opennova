@@ -4124,13 +4124,13 @@ if(BUILD_NOVAWORLD_HTTP)
 
     # The listing's owner end to end (host_keys, migration 0009): two in-process
     # services (the HTTP, NW UDP and gate listeners over one pooled SQLite file
-    # each, one with ONNET_REQUIRE_HOST_KEY) and opennova-nw-lister's Lister with
+    # each, one with ONNET_REQUIRE_HOST_KEY) and opennova-serve's Lister with
     # and without an account, plus hand-driven host sessions for the NWU
     # reconnect and a second connection presenting a listed key. Its packet
     # windows are protocol assertions, so it runs serially.
     add_executable(nw_host_ownership_e2e_test novaworld/nw_host_ownership_e2e_test.cpp)
     target_link_libraries(nw_host_ownership_e2e_test PRIVATE
-        opennova_novaworld_server_core opennova_nw_lister_core opennova_novaworld_service)
+        opennova_novaworld_server_core opennova_serve_core opennova_novaworld_service)
     target_include_directories(nw_host_ownership_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(nw_host_ownership_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_test(NAME nw_host_ownership_e2e COMMAND nw_host_ownership_e2e_test)
@@ -4755,7 +4755,7 @@ set_tests_properties(opennova_serve_server_command_push PROPERTIES RUN_SERIAL TR
 # opennova-serve's remote-admin server (ADR 0051 PR5b) over real loopback TCP, with a LAN joiner
 # in a synthetic two-map rotation: the login, PLAYER LIST, the MISSION verbs (ADD ONESHOT at a
 # position, SETNEXT, CYCLE, the one-shot's removal), SET and game.cfg's save, CHAT SEND as S2C
-# 0x14, PLAYER BAN on a LAN host, opennova-nw-lister's admin feed, QUIT, and the working
+# 0x14, PLAYER BAN on a LAN host, QUIT, and the working
 # directory's admin.cfg, admin_log.txt and banned.txt. No retail data.
 add_executable(opennova_serve_admin_test serve/opennova_serve_admin_test.cpp)
 target_link_libraries(opennova_serve_admin_test PRIVATE opennova_serve_core)
@@ -4775,7 +4775,7 @@ add_test(NAME nwu_demux COMMAND nwu_demux_test)
 add_executable(nwu_lobby_connect_test novaworld/nwu_lobby_connect_test.cpp)
 target_link_libraries(nwu_lobby_connect_test PRIVATE opennova_net)
 add_test(NAME nwu_lobby_connect COMMAND nwu_lobby_connect_test)
-# The NWU lobby driver's own draws (no Environment::random_u32, as opennova-nw-lister runs):
+# The NWU lobby driver's own draws (no Environment::random_u32, as opennova-serve's lister runs):
 # 32 sessions opened on 32 threads at once share no client index or key.
 add_executable(nwu_lobby_draws_test novaworld/nwu_lobby_draws_test.cpp)
 target_link_libraries(nwu_lobby_draws_test PRIVATE opennova_net Threads::Threads)
@@ -4789,31 +4789,22 @@ target_link_libraries(opennova_serve_status_console_test PRIVATE opennova_serve_
 target_include_directories(opennova_serve_status_console_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME opennova_serve_status_console COMMAND opennova_serve_status_console_test)
 
-# opennova-nw-lister (apps/nw_lister): the listing JSON + credentials readers; then the app's Lister end to
-# end over real loopback UDP against the real NwUdpListener and an in-test gate (the row, a roster
-# edit keeping the other slot, the refresh, the stop).
-add_executable(novaworld_nw_lister_listing_test novaworld/nw_lister_listing_test.cpp)
-target_link_libraries(novaworld_nw_lister_listing_test PRIVATE opennova_nw_lister_core)
-add_test(NAME novaworld_nw_lister_listing COMMAND novaworld_nw_lister_listing_test)
-add_executable(nw_lister_e2e_test
-    novaworld/nw_lister_e2e_test.cpp
+# opennova-serve's NovaWorld listing driver (apps/serve/lister.h): its inputs (the destination
+# policy: loopback and any host off NovaLogic's domain, novaworld.net behind --allow-public, ADR
+# 0051 d6; the --credentials reader); then the Lister end to end over real loopback UDP against
+# the real NwUdpListener and an in-test gate (the host result publishing nothing, the mission
+# start's update, a roster edit keeping the other slot, the refresh, the stop).
+add_executable(opennova_serve_lister_options_test serve/opennova_serve_lister_options_test.cpp)
+target_link_libraries(opennova_serve_lister_options_test PRIVATE opennova_serve_core)
+add_test(NAME opennova_serve_lister_options COMMAND opennova_serve_lister_options_test)
+add_executable(opennova_serve_lister_e2e_test
+    serve/opennova_serve_lister_e2e_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
-target_link_libraries(nw_lister_e2e_test
-    PRIVATE opennova_nw_lister_core opennova_novaworld_service opennova_runtime)
-target_include_directories(nw_lister_e2e_test PRIVATE ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
-add_test(NAME nw_lister_e2e COMMAND nw_lister_e2e_test)
-set_tests_properties(nw_lister_e2e PROPERTIES RUN_SERIAL TRUE)
-# The --admin poll thread against the engine's remote-admin server over loopback TCP (the login it
-# decrypts, the three commands, the QUIT).
-add_executable(nw_lister_admin_feed_test novaworld/nw_lister_admin_feed_test.cpp)
-target_link_libraries(nw_lister_admin_feed_test PRIVATE opennova_nw_lister_core)
-add_test(NAME nw_lister_admin_feed COMMAND nw_lister_admin_feed_test)
-# The destination policies: nw-lister's loopback-only, and opennova-serve's loopback and any host
-# off NovaLogic's domain, novaworld.net behind --allow-public (ADR 0051 d6).
-add_executable(nw_lister_destination_policy_test novaworld/nw_lister_destination_policy_test.cpp)
-target_link_libraries(nw_lister_destination_policy_test PRIVATE opennova_nw_lister_core)
-add_test(NAME nw_lister_destination_policy COMMAND nw_lister_destination_policy_test)
+target_link_libraries(opennova_serve_lister_e2e_test PRIVATE opennova_serve_core opennova_novaworld_service)
+target_include_directories(opennova_serve_lister_e2e_test PRIVATE ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+add_test(NAME opennova_serve_lister_e2e COMMAND opennova_serve_lister_e2e_test)
+set_tests_properties(opennova_serve_lister_e2e PROPERTIES RUN_SERIAL TRUE)
 
 # P5 — the headless CLIENT runtime (inmatch::ClientRuntime / Client_ProcessNetworkFrame). Always-on
 # in-process round-trip (client_runtime <-> np server legs <-> Server_TickUpdate + apply_in_match_c2s)

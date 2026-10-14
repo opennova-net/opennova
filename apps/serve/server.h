@@ -50,7 +50,7 @@
 #include <net/npwire/datagram_demux.h>
 
 #include "admin_tcp_server.h"
-#include "listing.h" // nw_lister::Credentials
+#include "credentials.h"
 #include "net_datagram_socket.h"
 #include "net_sockets.h"
 #include "server_logs.h"
@@ -62,11 +62,9 @@
 #include <string>
 #include <vector>
 
-namespace opennova::nw_lister {
-class Lister;
-}
-
 namespace opennova::serve {
+
+class Lister;
 
 struct ServeOptions {
 	std::string resource_dir; // --resource-dir
@@ -81,7 +79,7 @@ struct ServeOptions {
 	// network type).
 	std::optional<uint16_t> port;
 	bool log_debug = false;   // --log-debug
-	// NovaWorld listing (ADR 0051 d6), in opennova-nw-lister's spellings. With a gate host the
+	// NovaWorld listing (ADR 0051 d6). With a gate host the
 	// network type is game.cfg's `networkconnecttype` (1, NovaWorld, by default), as retail's
 	// dead auto-host takes it; without one the server serves LAN (D-NET-358). Loopback and any
 	// host off NovaLogic's domain are reachable by default; novaworld.net needs --allow-public.
@@ -89,7 +87,7 @@ struct ServeOptions {
 	uint16_t master_gate_port = GATE_DEFAULT_PORT; // --master-gate-port
 	bool allow_public = false;                     // --allow-public
 	std::string credentials_path;                  // --credentials FILE
-	nw_lister::Credentials credentials;            // main() loads it and masks every value
+	Credentials credentials; // main() loads it and masks every value
 	LogSwitches log_switches; // /PROFILE <path>, /PUNT.TXT, /PUNTLOG, /CHEATLOG (server_logs.h)
 };
 
@@ -173,7 +171,7 @@ public:
 	// given and game.cfg's networkconnecttype is 1.
 	bool novaworld() const { return novaworld_; }
 	// The NovaWorld listing's lister (null when not listing).
-	nw_lister::Lister *lister() { return lister_.get(); }
+	Lister *lister() { return lister_.get(); }
 	// The exit code the lister had finished with when stop() tore it down, -1 when it had not
 	// finished (or there was none): a lister that finishes in the frame whose mission exit stops
 	// the server is gone before the caller can read it.
@@ -246,7 +244,7 @@ private:
 	// The one socket under the game's protocol and the NWU session (D-NET-346).
 	std::unique_ptr<DatagramDemux> demux_;
 	std::unique_ptr<ServeListing> listing_;
-	std::unique_ptr<nw_lister::Lister> lister_;
+	std::unique_ptr<Lister> lister_;
 	int last_lister_exit_ = -1;
 	uint16_t bound_port_ = 0;
 	bool running_ = false;

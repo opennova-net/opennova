@@ -13,7 +13,7 @@ namespace opennova::serve {
 
 using io::LogLevel;
 
-void ServeListing::bind(inmatch::HostRole &role, mission::MissionKernel &kernel, nw_lister::Lister &lister) {
+void ServeListing::bind(inmatch::HostRole &role, mission::MissionKernel &kernel, Lister &lister) {
 	role_ = &role;
 	kernel_ = &kernel;
 	lister_ = &lister;

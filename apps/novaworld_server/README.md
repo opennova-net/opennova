@@ -252,10 +252,7 @@ HostKey is unwitnessed.
   rebuilt without one), so such a host is listed with no owner until the first
   `ClientHostUpdate` that carries the key (the full `Host` list a stock host sends at
   its mission's start, its host result publishing nothing, D-NET-465; the game and
-  `opennova-serve` do the same, and opennova-nw-lister, which runs no match, sends it
-  right after the host result and at each mission change its source reports, D-NET-488).
-  A key backs one
-  listed server at a time: another connection
+  `opennova-serve` do the same). A key backs one listed server at a time: another connection
   presenting it while that listing lives links to no account. A dropped connection
   parks its lobby state and RID (`kParkedLobbyTtlMs`, 240 s), and its re-host after the
   NWU reconnect (`CurrentlyHosting=1`) re-sends its kept `Host` list, key included, so
@@ -300,7 +297,7 @@ HostKey is unwitnessed.
     ends the match at the next exit check and returns to the menu).
 
   Off (the default), such a host is listed with no owner, so `opennova-serve` without
-  `--credentials` and `opennova-nw-lister` without an account keep listing.
+  `--credentials` and a game host on no account keep listing.
 
 | Route | Access | Replies |
 | --- | --- | --- |
@@ -878,7 +875,7 @@ unchanged bytes), `GET /api/me/hosts` and `GET /api/admin/hosts`; and
 `nw_host_ownership_e2e`
 ([`tests/novaworld/nw_host_ownership_e2e_test.cpp`](../../tests/novaworld/nw_host_ownership_e2e_test.cpp),
 `BUILD_NOVAWORLD_HTTP` only) runs two in-process services, one strict, against
-opennova-nw-lister's `Lister` with and without an account and hand-driven host
+opennova-serve's `Lister` with and without an account and hand-driven host
 sessions (the NWU reconnect, a second connection presenting a listed key). Both e2e
 tests build their service from
 [`tests/novaworld/nw_service_harness.h`](../../tests/novaworld/nw_service_harness.h).

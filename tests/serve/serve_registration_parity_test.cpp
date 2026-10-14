@@ -157,14 +157,6 @@ int main() {
 		CHECK(names(players) == kSlot);
 	}
 
-	{
-		// The live source's server starts missions: the host result publishes nothing and each
-		// mission start publishes both lists in full (Server::bind_listing), as a stock host's
-		// does (D-NET-465). [orig: Game_StartMission @0x5248c6..0x524903]
-		const serve::ServeListing source(HostRegistration{}, {});
-		CHECK(source.starts_missions());
-	}
-
 	if (failures != 0) {
 		std::printf("serve_registration_parity: %d failure(s)\n", failures);
 		return 1;

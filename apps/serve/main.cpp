@@ -9,7 +9,7 @@
 #include "status_console.h"
 
 #include "console_log.h"
-#include "listing.h"
+#include "credentials.h"
 
 #include <base/io/log.h>
 #include <runtime/world/tick_accumulator.h>
@@ -41,7 +41,7 @@ HANDLE g_done = nullptr; // set once the server stopped (and deregistered)
 
 // Closing the console window, a logoff or a shutdown ends the process when
 // this returns; hold it (Windows allows about 5 s) so the loop can stop the
-// session and deregister from NovaWorld first, as opennova-nw-lister does.
+// session and deregister from NovaWorld first.
 BOOL WINAPI on_console_ctrl(DWORD type) {
 	g_stop.store(true);
 	if ((type == CTRL_CLOSE_EVENT || type == CTRL_LOGOFF_EVENT || type == CTRL_SHUTDOWN_EVENT) && g_done)
@@ -127,16 +127,16 @@ int main(int argc, char **argv) {
 		return 2;
 	}
 	// The log sink masks every registered secret, so an account name, a
-	// password or a session tag never reaches the console (opennova-nw-lister's).
-	nw_lister::install_console_log(std::string(), options.log_debug);
+	// password or a session tag never reaches the console (console_log.h).
+	serve::install_console_log(std::string(), options.log_debug);
 	if (!options.credentials_path.empty()) {
-		if (!nw_lister::load_credentials(options.credentials_path, options.credentials, error)) {
+		if (!serve::load_credentials(options.credentials_path, options.credentials, error)) {
 			io::logf(io::LogLevel::kError, "opennova-serve: --credentials: %s", error.c_str());
 			return 2;
 		}
-		const nw_lister::Credentials &c = options.credentials;
-		for (const std::string *secret : {&c.user, &c.pass, &c.admin_user, &c.admin_pass})
-			nw_lister::add_log_secret(*secret);
+		const serve::Credentials &c = options.credentials;
+		for (const std::string *secret : { &c.user, &c.pass })
+			serve::add_log_secret(*secret);
 	}
 	// Installed before the boot, so a stop during a long load or the
 	// NovaWorld hosting stops cleanly.

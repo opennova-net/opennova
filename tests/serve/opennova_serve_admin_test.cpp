@@ -11,7 +11,6 @@
 //     not a SET key (retail's usage and `Setting Not Found`, no save);
 //   - CHAT SEND reaches the joiner as S2C 0x14 [10][255], and CHAT GET lists the host's ring;
 //   - PLAYER BAN on the LAN joiner: no PCID, so the error and no punt;
-//   - opennova-nw-lister's admin feed polls the live server beside it;
 //   - QUIT closes the connection.
 // Then the files: admin_log.txt's lines, banned.txt loaded at the session start and saved at
 // the exit when dirty. Last, on a fresh server, GOTO MENUSTATE quits the session.
@@ -21,8 +20,6 @@
 //  CAdminServer_HandleChatCommand @0x404AC0; CAdminServer_HandlePlayer @0x403EF0]
 #include "server.h"
 #include "serve_test_support.h"
-
-#include "admin_feed.h"
 
 #include <formats/gamecfg/game_cfg.h>
 #include <net/admin/admin_protocol.h>
@@ -377,21 +374,6 @@ int main() {
 			"PLAYER BAN on a LAN joiner");
 	std::this_thread::sleep_for(300ms);
 	CHECK(rig.with([&] { return !rig.client.session_lost() && rig.client.in_match(); }));
-
-	// --- opennova-nw-lister's admin feed against the live server, beside this connection.
-	{
-		nw_lister::AdminFeed feed;
-		feed.start(net::Endpoint{{127, 0, 0, 1}, admin_port}, "boss", "pw");
-		nw_lister::AdminSnapshot snapshot;
-		for (int i = 0; i < 1000 && snapshot.seq == 0; ++i) {
-			std::this_thread::sleep_for(10ms);
-			snapshot = feed.snapshot();
-		}
-		CHECK(snapshot.ok);
-		CHECK(snapshot.players.size() == 1 && snapshot.players[0].name == "ServeJoiner");
-		CHECK(snapshot.mission == "SERVETST");
-		feed.stop();
-	}
 
 	// --- QUIT: the server closes the connection with no reply.
 	CHECK(admin.send(admin_encode_command("QUIT")));

@@ -189,7 +189,7 @@ int main() {
 				return lister_exit != -1;
 			},
 			10s));
-	CHECK(lister_exit == nw_lister::kExitStoppedByService);
+	CHECK(lister_exit == serve::kExitStoppedByService);
 	bool still_listed = false;
 	for (const auto &h : listener.snapshot_hosted()) still_listed = still_listed || h.lobby.rid == rid;
 	CHECK(!still_listed);
