@@ -63,11 +63,14 @@ bool decrypt_join_cookie_field(const JoinCookiePairs &cookie, const std::string 
 // "<local>SQUADINFO" the squad id (the leading dword when the out-length
 // reaches 4, else 0), then the squad name and tag as the next two strings, each
 // bounded by the decrypted length. A field that does not decrypt leaves its
-// values untouched. The caller gates it on a remote connection with a local
-// address (a NovaWorld session).
+// values untouched. True when the PCID decrypted: the join validator's own
+// PCID leg, whose failure refuses the joiner (code 25, not ported) before its
+// duplicate-PCID leg runs. The caller gates it on a remote connection with a
+// local address (a NovaWorld session).
 // [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 — the gate @0x512ca2 /
-//  @0x512cdc, PCID @0x512cf9..0x512d39, SQUADINFO @0x512d55..0x512e50]
-void load_join_account(const JoinCookiePairs &cookie, const std::string &local_address,
+//  @0x512cdc, PCID @0x512cf9..0x512d39, SQUADINFO @0x512d55..0x512e50;
+//  Server_ValidatePlayerJoinRequest @0x5126FE..0x512720 (the PCID decrypt, 25)]
+bool load_join_account(const JoinCookiePairs &cookie, const std::string &local_address,
 		const SessionIdRing &key_table, JoinAccount &account);
 
 } // namespace opennova

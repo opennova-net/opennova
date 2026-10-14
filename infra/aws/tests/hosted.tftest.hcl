@@ -8,7 +8,7 @@
 # admin ports, the service role's policy and the outputs app deploy reads; the
 # data volume takes the snapshot's size; the policy pins a launch to the
 # template's machine type, IMDSv2, gp3 volumes of at most 16 GiB and
-# Canonical's images, and the machine role holds Session
+# the template's own image, and the machine role holds Session
 # Manager's five actions alone (applied against the mocks, so the template's
 # ARN the policy names is known); a burstable machine type is refused.
 
@@ -164,10 +164,10 @@ run "hosted_policy" {
       for st in data.aws_iam_policy_document.hosted_service[0].statement : st
       if st.sid == "LaunchHostedMachineImage" && length([
         for c in st.condition : c
-        if c.test == "StringEquals" && c.variable == "ec2:Owner" && contains(c.values, "099720109477")
+        if c.test == "StringEquals" && c.variable == "ec2:ImageID" && length(c.values) == 1 && contains(c.values, aws_launch_template.hosted[0].image_id)
       ]) == 1
     ]) == 1
-    error_message = "a launch's image must be Canonical's"
+    error_message = "a launch's image must be the template's own"
   }
   assert {
     condition     = length(aws_iam_role_policy.hosted_machine_ssm) == 1
@@ -182,6 +182,29 @@ run "hosted_policy" {
       "ssmmessages:OpenDataChannel",
     ])
     error_message = "the machine role holds Session Manager's five actions alone"
+  }
+}
+
+# A newer Canonical image moves neither the template (ignore_changes) nor the
+# policy's image pin: both keep the image the template has in state.
+run "new_canonical_image" {
+  command = plan
+  variables {
+    hosted_data_snapshot_id = "snap-0123456789abcdef0"
+    vpc_id                  = "vpc-0123456789abcdef0"
+    subnet_id               = "subnet-0123456789abcdef0"
+  }
+  override_data {
+    target = data.aws_ami.hosted[0]
+    values = { id = "ami-0fedcba9876543210", root_device_name = "/dev/sda1" }
+  }
+  assert {
+    condition = aws_launch_template.hosted[0].image_id == "ami-0123456789abcdef0" && flatten([
+      for st in data.aws_iam_policy_document.hosted_service[0].statement : [
+        for c in st.condition : c.values if c.variable == "ec2:ImageID"
+      ]
+    ]) == ["ami-0123456789abcdef0"]
+    error_message = "a new Canonical image must move neither the template nor the policy"
   }
 }
 

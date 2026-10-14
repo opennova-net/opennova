@@ -300,9 +300,13 @@ int test_name_rules() {
     p.current().flags = playersav::kRecordFlagNoName;
     TEST_EXPECT(p.name_changed("Bob!?") == "Bob!");
     TEST_EXPECT(p.current().name == "Bob" && p.current().flags == playersav::kRecordFlagNoName);
-    // A refused non-ASCII last character goes whole: "José" cuts to "Jos".
-    TEST_EXPECT(p.name_changed("Jos\xC3\xA9") == "Jos");
-    TEST_EXPECT(p.name_changed("A\xE2\x82\xAC") == "A");
+    // The edit holds the name as code-page bytes, one per character (D-NET-661):
+    // a refused cp1252 'é' or '€' last character goes as its one byte, and the
+    // two bytes of a UTF-8 'é' are two characters ("Ã©"), of which only the last
+    // comes off.
+    TEST_EXPECT(p.name_changed("Jos\xE9") == "Jos");
+    TEST_EXPECT(p.name_changed("A\x80") == "A");
+    TEST_EXPECT(p.name_changed("Ab\xC3\xA9") == "Ab\xC3");
     TEST_EXPECT(p.current().name == "Bob");
     p.current().name.clear();
     p.current().flags = 0;

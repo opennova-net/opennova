@@ -666,19 +666,17 @@ void handle_client_hello(NapiNPServerCtx &ctx, const PeerAddr &peer,
 // [orig: NapiNPProtocol_HandleClientJoin @0x62b750]
 void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
                         const std::vector<uint8_t> &body, HandleResult &out) {
-	ClientAuth auth;
-	if (!parse_client_auth(body.data(), body.size(), auth)) return;
-	if (!ctx.is_authority || ctx.np_protocol.host_running == 0) return;
 	// The CU bounds end the retail TLV walk, before its envelope: a CU of 2048 bytes or more, or
 	// a 65th (every CU counts), and on the socket pass that leg returns without queuing the 0x42,
-	// so it is dropped unanswered. The JFC 9 / 10 rejections behind the test run only on the
-	// queued pass, which never sees it.
+	// so it is dropped unanswered. parse_client_auth runs them inside its walk and fails the
+	// parse. The JFC 9 / 10 rejections behind the test run only on the queued pass, which never
+	// sees it.
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750 - the length bound @0x62BBEB..0x62BBF1,
 	//  the count bound @0x62BBF7..0x62BBFA, the socket-pass return @0x62C32A..0x62C331, the
 	//  queued-pass rejections @0x62C344 / @0x62C359]
-	for (size_t i = 0; i < auth.cu.size(); ++i) {
-		if (auth.cu[i].size() >= kCuSlotBytes || i >= kCuSlots) return;
-	}
+	ClientAuth auth;
+	if (!parse_client_auth(body.data(), body.size(), auth)) return;
+	if (!ctx.is_authority || ctx.np_protocol.host_running == 0) return;
 	// Only the NVS/PN/PG/PV1 envelope is silent. The subsequent server-side
 	// gates answer a CR=0 ServerAuth, in this order, before retry/replacement.
 	// [orig: NapiNPProtocol_HandleClientJoin @0x62b750, gates @0x62bdf2]
@@ -748,8 +746,8 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	// plus, while the session's lineup queue is on, its positive size (game_settings +0xC4 / +0xC8
 	// at ctx+0xF2C / +0xF30, stock 1 / 100; @0x4c6220..0x4c623f). The reject is the CR=0 0x82 with
 	// the validate-callback family JFC=14 and reason JFP=4, or JFP=5 under that same lineup test
-	// (@0x4c6241..0x4c624e, the JFP 5 store @0x4c624c). Ours adds the positive spectator-only
-	// slots and keys JFP 5 on them instead (GameConfig::join_capacity, D-NET-403).
+	// (@0x4c6241..0x4c624e, the JFP 5 store @0x4c624e): GameConfig::join_capacity and
+	// lineup_queue_open. The spectator limit never widens this gate.
 	// Spectator-specific validation (codes 14/15/16) is NOT this leg: it runs at the game-layer
 	// 0x00 join message and punts through the connection-description record
 	// (server_message_dispatch.cpp).
@@ -768,10 +766,12 @@ void handle_client_join(NapiNPServerCtx &ctx, const PeerAddr &peer,
 		reject_client_join(auth, peer, 14, 3, out);
 		return;
 	}
+	// The count against the capacity is a signed compare [orig: `cmp [esi+2Ch], ecx; jl`
+	//  @0x4C623C..0x4C623F].
 	const uint32_t occupied = occupied_player_count(ctx);
-	if (occupied >= ctx.config.join_capacity()) { // [orig: @0x4C6220..0x4C623F]
+	if (static_cast<int32_t>(occupied) >= ctx.config.join_capacity()) {
 		reject_client_join(auth, peer, 14,
-				ctx.config.spectator_slots > 0 ? 5u : 4u, out);
+				ctx.config.lineup_queue_open() ? 5u : 4u, out); // [orig: @0x4C6241..0x4C624E]
 		return;
 	}
 
