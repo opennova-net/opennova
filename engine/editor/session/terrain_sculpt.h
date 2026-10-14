@@ -60,13 +60,15 @@ public:
 	// stroke's step or as one of its own; `followed` takes the missions the landing moved. False, with why, where a bake
 	// fails (its regions stay due).
 	bool settle(const std::string &path, std::string &error, std::vector<std::string> *followed = nullptr);
-	// The worker waited on until it holds no job, queued or running (a test's, a command line's wait): what it finished
+	// The worker waited on until it holds no job, queued or running (a test's wait: no app calls it): what it finished
 	// lands at the next poll, which starts the next one due. Unlike settle, it lands nothing and starts nothing. A job a
 	// test holds counts as none (the worker has it, its bake not begun).
 	void wait_idle();
 	// A test's hold (test-only): while `hold` is set, a job the worker takes waits there before its bake runs, until the
 	// hold is let go (null) or the session closes, whose cancel the bake then meets at its first node; each job that
-	// came back cancelled while it was set is counted in it.
+	// came back cancelled while it was set is counted in it. A settle of the held job's file (its Save) waits
+	// for the bake the hold keeps from starting, so it never returns: a test lets the hold go before anything settles
+	// that file (else ctest's timeout ends the hang).
 	void hold_for_test(BakeTestHold *hold);
 	// Whether a bake runs or is due for `path`, and its words for the pane's bake line ("" none).
 	std::string bake_words(const std::string &path) const;

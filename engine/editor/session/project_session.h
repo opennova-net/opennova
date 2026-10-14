@@ -27,7 +27,7 @@ struct SessionView;
 struct ValidationStats;
 struct ViewportMouse;
 
-// The one open project and everything the editor does to it (ADR 0046 d9): open and
+// The one open project and everything the editor does to it (ADR 0046 S13 A2): open and
 // create, scan and evaluate, create-missing, build, play. Portable: the embedder hands it
 // the process seam and the store its preferences live in and drains its view; a test drives
 // it the same way. Requests come in typed (EditorRequest), the view goes out (SessionView).
@@ -113,11 +113,11 @@ public:
 	// validation they left due run to its end, and the check of which files its rows are about are the
 	// game's own data (S15) (a test, a command line).
 	void run_operations();
-	// The terrain sculpt's worker waited on until it holds no bake, queued or running (a test's, a command line's
-	// wait; TerrainSculpt::wait_idle): what it finished lands at the next poll, which starts the next one due.
+	// The terrain sculpt's worker waited on until it holds no bake, queued or running (a test's wait: no app calls
+	// it; TerrainSculpt::wait_idle): what it finished lands at the next poll, which starts the next one due.
 	void wait_for_bakes();
 	// A test's hold on that worker (test-only; TerrainSculpt::hold_for_test): a bake it takes waits before it runs
-	// until the hold is let go (null) or the session closes.
+	// until the hold is let go (null) or the session closes; a Save of that file meanwhile never returns.
 	void hold_bakes_for_test(BakeTestHold *hold);
 	// `operation` started in the slot as a request starts one: its id, 0 while another runs (a
 	// test's, for an operation no request starts yet: one that cannot be cancelled, one that

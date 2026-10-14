@@ -315,8 +315,8 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_session.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/run/play_start.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/run/run_directory.cpp
-    # session — the one open project and everything the editor does to it (ADR 0046 d9):
-    # the facade and its parts (S13 A2: the core, the open documents, the Problems rows, Play,
+    # session — the one open project and everything the editor does to it (ADR 0046 S13 A2):
+    # the facade and its parts (the core, the open documents, the Problems rows, Play,
     # imports, renames, the unsaved guard, the navigation history, the preferences over their
     # store), what Problems shows of its findings and offers to do about them, the request and
     # query tables (S13 A4, A5) and their wire forms (session_json, view_json), the selection

@@ -1679,7 +1679,9 @@ static int test_selection_repair() {
 // state; an undo back to the checkpoint is unchanged again; saved_value reads a field as the
 // saved file holds it (S11e: the inspector's tooltip) and revert_edits gives it its saved
 // value and presence back as one undoable batch; a save moves the baseline; and a clean
-// document whose file holds other bytes than it writes needs a rewrite.
+// document whose file holds other bytes than it writes needs a rewrite. These are the Document
+// base's, no type overriding them (model/document.h), so the fake document pins them for every
+// record type; editor_document_contract_test's check_real_change holds each type's files to them.
 static int test_changes_since_save() {
 	using Change = Document::RecordChange;
 	Loaded fake;

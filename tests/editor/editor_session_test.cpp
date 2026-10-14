@@ -1,4 +1,4 @@
-// Pins the project session (ADR 0046 d9) over a fake process platform: the request
+// Pins the project session (ADR 0046 S13 A2) over a fake process platform: the request
 // kinds it serves and the ones it leaves to the shell, the view it rewrites (a new
 // project's checklist, create-missing, the stepped build, Play on a good build, the
 // child's exit, the log tail), the editor settings it keeps, and the feature toggle
