@@ -468,7 +468,6 @@ io::JsonValue EffectViewport::body_json(const ViewportInput &) const {
 	// The spawn on the preview clock, and what the scene holds now.
 	JsonValue play = JsonValue::make_object();
 	play.set("tick", json_number(playback_.tick()));
-	play.set("cycle_start", json_number(playback_.cycle_start()));
 	play.set("age", json_number(playback_.age()));
 	play.set("pre_aged", json_number(playback_.pre_aged()));
 	play.set("spawns", json_number(double(playback_.spawns())));

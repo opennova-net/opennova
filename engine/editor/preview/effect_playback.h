@@ -57,10 +57,9 @@ public:
 	// The spawn now playing (none: the effect died, or spawns nothing) and what the last spawn came to.
 	bool alive() const;
 	particle::EffectSpawnStatus last_status() const { return last_status_; }
-	// The clock tick the spawn counts its age from, its age at the tick played, the ticks it was pre-aged
-	// by, and how many spawns were made since the scene opened.
-	int32_t cycle_start() const { return cycle_start_; }
-	int32_t age() const { return schedule_.tick() - cycle_start_; }
+	// The spawn's age at the tick played (it spawns once, on tick 0), the ticks it was pre-aged by, and how many
+	// spawns were made since the scene opened.
+	int32_t age() const { return schedule_.tick(); }
 	uint32_t pre_aged() const { return pre_aged_; }
 	uint64_t spawns() const { return spawns_; }
 	int32_t tick() const { return schedule_.tick(); }
@@ -69,8 +68,8 @@ public:
 	uint64_t serial() const { return serial_; }
 
 private:
-	// A spawn at the clock's tick `tick`, pre-aged by `age` ticks (bounded), counted from tick - age.
-	void spawn_(int32_t tick, int32_t age);
+	// The one spawn as it stands at the clock's tick `tick`: pre-aged by its age then (bounded), spawned on tick 0.
+	void spawn_(int32_t tick);
 
 	std::shared_ptr<particle::EffectScene> scene_;
 	std::string effect_;
@@ -79,7 +78,6 @@ private:
 	particle::EffectSpawnStatus last_status_ = particle::EffectSpawnStatus::InvalidHandle;
 	EffectSchedule schedule_;
 	EffectTimedSpawns timed_; // none: the one spawn stands, made again at a jump
-	int32_t cycle_start_ = 0;
 	uint32_t pre_aged_ = 0;
 	uint64_t spawns_ = 0;
 	uint64_t serial_ = 0;

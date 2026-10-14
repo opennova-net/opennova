@@ -109,7 +109,7 @@ int test_playback() {
 	once.open(closure.config, "Puff");
 	EffectPlayOptions options;
 	once.play_to(0, options);
-	TEST_EXPECT(once.alive() && once.spawns() == 1 && once.cycle_start() == 0 && once.age() == 0 &&
+	TEST_EXPECT(once.alive() && once.spawns() == 1 && once.age() == 0 &&
 	            once.last_status() == particle::EffectSpawnStatus::Spawned);
 	// A tick at a time to its death: spawned once, as the game spawns an effect once per event, dead it stays.
 	int32_t died = -1;
@@ -136,16 +136,16 @@ int test_playback() {
 		TEST_EXPECT(a.particles[i].position.x == b.particles[i].position.x && a.particles[i].position.y == b.particles[i].position.y);
 	// A step back: a jump, spawned again pre-aged by its age at the tick sought.
 	once.play_to(5, options);
-	TEST_EXPECT(once.alive() && once.spawns() == 2 && once.pre_aged() == 5 && once.cycle_start() == 0);
+	TEST_EXPECT(once.alive() && once.spawns() == 2 && once.pre_aged() == 5);
 	once.play_to(7, options);
 	once.play_to(6, options);
-	TEST_EXPECT(once.alive() && once.spawns() == 3 && once.pre_aged() == 6 && once.cycle_start() == 0);
+	TEST_EXPECT(once.alive() && once.spawns() == 3 && once.pre_aged() == 6);
 	// A jump past its life: older than it lives, nothing stands.
 	EffectPlayback far;
 	far.open(closure.config, "Puff");
 	far.play_to(0, options);
 	far.play_to(1000, options);
-	TEST_EXPECT(!far.alive() && far.spawns() == 2 && far.cycle_start() == 0);
+	TEST_EXPECT(!far.alive() && far.spawns() == 2);
 	// The wind: GLOBALWIND particles drift with the mission header's.
 	const particle::EffectClosure windy_closure = particle::effect_closure(
 	        {document("w.ptl", effect_text("Windy", "Drift") + particle_text("Drift", 1.0f, 30.0f, 2.0f, "", "", "GLOBALWIND") +
@@ -332,8 +332,7 @@ int test_session() {
 	editor_test::handle_to_end(rig.session,
 	                           request::edit_record(rig.second, TextDocument::replace(text->span_at(0, 0), "\n")));
 	rig.pump();
-	TEST_EXPECT(viewport->opens() == opens + 1 && viewport->playback().cycle_start() == viewport->playback().tick() - age &&
-	            device->last() == ViewportAction::Rebuild);
+	TEST_EXPECT(viewport->opens() == opens + 1 && device->last() == ViewportAction::Rebuild);
 	// The symbol moved with the edit (the graph reads the open document through the reader).
 	const GraphSymbol *moved = nullptr;
 	for (const GraphSymbol *symbol : rig.view().findings.graph->symbols_of_kind(ReferenceKind::Particle))
