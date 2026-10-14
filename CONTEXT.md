@@ -473,7 +473,7 @@ _Avoid_: server config, server.cfg, dedicated.cfg
 **Hosted server**:
 An `opennova-serve` that an approved account starts from the NovaWorld site (ADR 0053):
 one per account, each on a **machine** of its own, running the published
-`opennova-serve` image over the licensed game data. It lists on our NovaWorld under a
+`opennova-serve` image over the **data set** its owner picks. It lists on our NovaWorld under a
 service account of its own, and its owner administers it from the site, through the
 service only. It stays up until its owner stops it.
 _Avoid_ (for this product only; the words keep their meanings elsewhere): hosted host,
@@ -487,11 +487,25 @@ _Avoid_: host, server (for the VM), box, node; "instance" alone (say "EC2 instan
 when naming the AWS resource)
 
 **Title**:
-A NovaLogic game identity (JO, DFX2, BHD...) — near-identical engine skins over different
-data and configuration. OpenNova currently ships title-agnostic; per-title products are a
-recorded future option, so new code must not hardcode title identity where a named
-constant or config read is equally easy (ADR 0015).
+A NovaLogic game identity (JO, DFX2, DFX, BHD...): near-identical engines over different
+data and configuration. Titles are in scope as data (ADR 0055, superseding ADR 0015's
+clause in part): a title is a `gameprofile` game id (`jo`, `dfx2`) whose wire and NovaWorld
+identity is one `TitleIdentity` row in `engine/net/title` (the in-match and lobby hellos,
+the gate tag and its `gt.ssc` key chain, the web flow, the in-match differences). OpenNova
+stays one title-agnostic program, and no code outside that table hardcodes a title's
+identity. A title with an unwitnessed field is refused where the field is needed, never
+filled with JO's value.
 _Avoid_: game (when you mean the identity, not the running program)
+
+**Data set**:
+The game data a **hosted server** runs on, with the title it speaks and the expansions it
+allows (ADR 0055): Joint Operations (`jop_2_consumer`, the base game or `jox01`), Delta
+Force Xtreme 2 (`dfx2_consumer`), or OpenNova's own data (`opennova_0_consumer`, JO's wire
+identity in a lobby of its own). Each maps to one `games` row, its lobby. A deployment says
+where each data set's files are, and the site offers only those it has; on a **machine** it
+is the `opennova-data` volume mounted at `/opt/game`.
+_Avoid_: game (for the data), install (a retail install is where a data set's files come
+from), snapshot (one deployment's copy of a data set)
 
 **Required resources**:
 The resource set the engine hard-requires by name at boot (menu set, game strings, music
