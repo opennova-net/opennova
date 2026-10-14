@@ -473,6 +473,12 @@ bool SessionCore::close_project() {
 	}
 	problems().clear();
 	if (!view_.project.open) return true;
+	// Past the unsaved-changes prompt's Discard, the documents go before the workspace is remembered, as Quit's
+	// do: the project reopens without them, their edits dropped.
+	if (guard().discarding()) {
+		documents().close_all();
+		documents().update_view();
+	}
 	remember_workspace(); // what it reopens with (the UX round's project lane)
 	const std::string title = view_.project.document->title;
 	const std::shared_ptr<const ProjectDocument> closing = view_.project.document;
@@ -1349,6 +1355,8 @@ void SessionCore::quit() {
 	}
 	save_recent_items();
 	remember_workspace(); // what the project reopens with (the UX round's project lane)
+	// A Stop asked for is seen through first: closing the editor lets its game go.
+	play().finish_stop();
 	view_.dialogs.quit_requested = true;
 	touch(ViewConcern::Project);
 }

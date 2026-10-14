@@ -490,6 +490,17 @@ void PlayController::stop() {
 	core_.touch(ViewConcern::Run);
 }
 
+void PlayController::finish_stop() {
+	if (play_.state() != PlayState::Stopping) return;
+	play_.force();
+	const int64_t until = core_.platform().now_ms() + kPlayQuitWaitMs;
+	while (true) {
+		poll();
+		if (play_.state() == PlayState::Stopped || core_.platform().now_ms() >= until) return;
+		core_.platform().sleep_ms(kPlayWaitStepMs);
+	}
+}
+
 void PlayController::poll() {
 	const PlayState before = play_.state();
 	const PlayState now = play_.poll();

@@ -3747,6 +3747,53 @@ static int test_rescan_keeps_what_did_not_change() {
 	session.run_operations();
 	TEST_EXPECT(!session.outcome().done() && v.project.open && v.documents.open.size() == open &&
 	            session.document_for(project.items_path) == again && again->dirty());
+	// A Discard ahead of a switch that goes through drops the documents before the workspace is remembered, as
+	// Quit's does: the project reopens without them (it reopened with the discarded document, #1121 review).
+	const std::string first_root = project.root;
+	session.handle(request::new_project((std::filesystem::path(first_root).parent_path() / "other").generic_string(), "Other"));
+	TEST_EXPECT(v.dialogs.unsaved_prompt.open && v.dialogs.unsaved_prompt.action == EditorRequestKind::NewProject);
+	session.handle(request::resolve_unsaved(UnsavedChoice::Discard));
+	session.run_operations();
+	TEST_EXPECT(v.project.open && v.project.root != first_root);
+	session.handle(request::open_project(first_root));
+	session.run_operations();
+	TEST_EXPECT(v.project.open && v.project.root == first_root && v.documents.open.empty());
+	return 0;
+}
+
+// #1121 review: a Stop asked for is seen through by a Quit (the deadline's kill now), since closing the editor lets
+// its game go: a game that ignored the stop request (no window to take WM_CLOSE) does not outlive the editor.
+// A game running unasked keeps running.
+static int test_quit_finishes_a_stop() {
+	editor_test::TempProjectDir dir("opennova_editor_session_quit_stop");
+	FakePlatform platform;
+	platform.terminate_exits = false; // the game takes no stop request
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	const SessionView &v = session.view();
+	session.handle(request::new_project(dir.file("project"), "Quit stop"));
+	session.run_operations();
+	editor_test::create_missing_files(session);
+	const std::string runtime = dir.file("runtime/opennova.exe");
+	TEST_EXPECT(editor_test::write_text(runtime, "MZ"));
+	PlayLauncher launcher;
+	launcher.executable = runtime;
+	session.set_launcher_source(editor_test::fixed_launcher(launcher));
+	session.handle(request::play());
+	session.run_operations();
+	TEST_EXPECT(v.activity.play_state == PlayState::Running && platform.running.size() == 1);
+	session.handle(request::stop_play());
+	session.poll();
+	TEST_EXPECT(v.activity.play_state == PlayState::Stopping && platform.running.size() == 1);
+	session.handle(request::quit());
+	TEST_EXPECT(v.dialogs.quit_requested && v.activity.play_state == PlayState::Stopped && platform.running.empty() &&
+	            std::find(platform.log.begin(), platform.log.end(), "kill 500") != platform.log.end());
+	// Unasked, the game keeps running past a Quit.
+	session.handle(request::play());
+	session.run_operations();
+	TEST_EXPECT(v.activity.play_state == PlayState::Running);
+	session.handle(request::quit());
+	TEST_EXPECT(v.activity.play_state == PlayState::Running && platform.running.size() == 1);
 	return 0;
 }
 
@@ -4936,6 +4983,7 @@ int main() {
 	failures += test_prompt_words_from_the_table();
 	failures += test_no_request_validates();
 	failures += test_play_launches_one_answer();
+	failures += test_quit_finishes_a_stop();
 #ifdef NDEBUG
 	failures += test_reentry_keeps_the_outer_outcome();
 #endif

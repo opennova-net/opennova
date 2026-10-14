@@ -310,13 +310,18 @@ def cmd_request(args: argparse.Namespace) -> int:
         # The tool awaits the operation the request starts (an open, a refresh, an import, a rename, a
         # build) and the validation after it (S13 A3); its answer carries what it came to. Its own
         # deadline falls before this call's, so a wait that runs out answers timed_out.
+        # A wait past the tool's own is followed through the operation query to the end (follow_operation).
         request["wait"] = True
-        request["wait_ms"] = int(max(args.timeout - 5.0, 1.0) * 1000)
-    payload = client_of(args).call("editor_request", request, timeout=args.timeout)
+        request["wait_ms"] = int(min(max(args.timeout - 5.0, 1.0), REQUEST_WAIT_MAX_S) * 1000)
+    started = time.monotonic()
+    client = client_of(args)
+    payload = client.call("editor_request", request, timeout=min(args.timeout, REQUEST_WAIT_MAX_S + 30.0))
     if payload.get("isError"):
         print(text_of(payload), file=sys.stderr)
         return EXIT_NOT_READ
     answer = payload.get("structuredContent", {})
+    if args.wait and answer.get("timed_out"):
+        answer = follow_operation(client, answer, started + args.timeout)
     print_json(answer)
     # `ok` only says the request read; the outcome says whether it happened, and what the
     # operation it started came to (when waited on) whether that ended done. A wait that ran out
@@ -520,10 +525,46 @@ def cmd_export(args: argparse.Namespace) -> int:
 
 # How long `play stop` reads the run section for the game to leave (the session kills it after 5 s).
 STOP_WAIT_S = 15.0
+# The editor_request tool's own wait at most (EditorMcpCatalog.REQUEST_WAIT_MAX_MS): a longer wait_ms is held to it,
+# the answer then timed_out, and the caller follows the operation query from there (follow_operation).
+REQUEST_WAIT_MAX_S = 290.0
 
 
 def run_section(client: GameMcp) -> dict:
     return client.structured("editor_state", {"sections": ["run"]}).get("run", {})
+
+
+def wait_stopped(client: GameMcp, seconds: float) -> dict:
+    """The run section read until the game has left (state stopped) or `seconds` pass: a stop_play's request
+    is polite (the game's window asked to close), and the session's kill comes after its deadline."""
+    deadline = time.monotonic() + seconds
+    run = run_section(client)
+    while run.get("state") != "stopped" and time.monotonic() < deadline:
+        time.sleep(0.25)
+        run = run_section(client)
+    return run
+
+
+def follow_operation(client: GameMcp, answer: dict, deadline: float) -> dict:
+    """An editor_request answer whose wait ran out at the tool's own (timed_out), followed through the operation
+    query to the operation's end and the validation after it, until `deadline` (time.monotonic()): the answer as
+    a wait to the end gives it (operation: what it came to), or still timed_out."""
+    operation = int((answer.get("outcome") or {}).get("operation", 0) or 0)
+    while time.monotonic() < deadline:
+        state = client.structured("editor_query", {"query": "operation"})
+        running = state.get("operation") or {}
+        settled = not (state.get("validation") or {}).get("running", False)
+        if operation and running.get("running") and int(running.get("id", 0)) == operation:
+            settled = False
+        if settled:
+            if operation:
+                last = state.get("last_operation") or {}
+                answer["operation"] = last if int(last.get("id", 0)) == operation else {}
+            answer.pop("timed_out", None)
+            answer.pop("validation", None)
+            return answer
+        time.sleep(1.0)
+    return answer
 
 
 def cmd_play(args: argparse.Namespace) -> int:
@@ -578,11 +619,7 @@ def cmd_play(args: argparse.Namespace) -> int:
         if payload.get("isError"):
             print(text_of(payload), file=sys.stderr)
             return EXIT_NOT_READ
-        deadline = time.monotonic() + min(args.timeout, STOP_WAIT_S)
-        run = run_section(client)
-        while run.get("state") != "stopped" and time.monotonic() < deadline:
-            time.sleep(0.25)
-            run = run_section(client)
+        run = wait_stopped(client, min(args.timeout, STOP_WAIT_S))
         print_json(run)
         return EXIT_OK if run.get("state") == "stopped" else EXIT_NOT_DONE
     print_json(run_section(client))
@@ -623,6 +660,10 @@ def cmd_stop(args: argparse.Namespace) -> int:
     if (args.url or port_open(port)) and (not pid or serves_pid(client, pid, "editor")):
         try:
             client.call("editor_request", {"kind": "stop_play"}, timeout=30)
+            # The stop request is polite (a game with no window to close, or one still loading, ignores it): the
+            # game is waited for until the session's deadline kill has ended it, so the quit below, which lets a
+            # running game go, never leaves it with its port and its lease.
+            wait_stopped(client, STOP_WAIT_S)
         except GameMcpError:
             pass  # no game running, or the editor is already leaving
         try:

@@ -93,7 +93,7 @@ def request(client: GameMcp, kind: str, wait_s: float = 0.0, **fields) -> dict:
     body = {"kind": kind, **fields}
     if wait_s > 0:
         body["wait"] = True
-        body["wait_ms"] = int(wait_s * 1000)
+        body["wait_ms"] = int(min(wait_s, editor_mcp.REQUEST_WAIT_MAX_S) * 1000)
     started = time.monotonic()
     payload = client.call("editor_request", body, timeout=wait_s + 60 if wait_s > 0 else 120)
     if payload.get("isError"):
@@ -103,18 +103,9 @@ def request(client: GameMcp, kind: str, wait_s: float = 0.0, **fields) -> dict:
     expect(outcome.get("done", False), f"{kind} was not done: {json.dumps(outcome)}")
     if answer.get("timed_out"):
         # The tool's wait is at most its own (under five minutes): an operation still running past it (a whole
-        # install's import) is followed through the operation query to its end, within wait_s.
-        operation = int(outcome.get("operation", 0) or 0)
-        deadline = started + wait_s
-        while time.monotonic() < deadline:
-            state = client.structured("editor_query", {"query": "operation"})
-            running = state.get("operation") or {}
-            if not running.get("running") or int(running.get("id", 0)) != operation:
-                last = state.get("last_operation") or {}
-                answer["operation"] = last if int(last.get("id", 0)) == operation else {}
-                answer.pop("timed_out", None)
-                break
-            time.sleep(1.0)
+        # install's import) is followed through the operation query to its end and the validation after it,
+        # within wait_s.
+        answer = editor_mcp.follow_operation(client, answer, started + wait_s)
     expect(not answer.get("timed_out"), f"{kind} did not end within {wait_s:.0f} s")
     ended = answer.get("operation") or {}
     expect(ended.get("end", "done") == "done", f"{kind}'s operation ended {ended.get('end')}: {json.dumps(ended)}")

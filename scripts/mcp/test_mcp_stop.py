@@ -53,8 +53,11 @@ class Endpoint:
                     if endpoint.pid is not None:
                         result["_meta"] = {"pid": endpoint.pid}
                 else:
-                    endpoint.calls.append((message["params"]["name"], message["params"].get("arguments", {})))
-                    result = {"content": [], "structuredContent": {}}
+                    name = message["params"]["name"]
+                    endpoint.calls.append((name, message["params"].get("arguments", {})))
+                    # The run section: no game running (a stop_play waits for it gone before quit).
+                    held = {"run": {"state": "stopped"}} if name == "editor_state" else {}
+                    result = {"content": [], "structuredContent": held}
                 body = json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
@@ -123,9 +126,9 @@ class EditorStopTest(StopCase):
         pid_file = self.pid_file(self.b)
         code, _ = self.stop("--pid-file", pid_file)
         self.assertEqual(code, 0)
-        self.assertEqual([name for name, _ in self.b.calls], ["editor_request", "editor_request"])
+        self.assertEqual([name for name, _ in self.b.calls], ["editor_request", "editor_state", "editor_request"])
         self.assertEqual(self.b.calls[0][1], {"kind": "stop_play"})
-        self.assertEqual(self.b.calls[1][1], {"kind": "quit"})
+        self.assertEqual(self.b.calls[2][1], {"kind": "quit"})
         self.assertEqual(self.a.calls, [])
         self.assertFalse(Path(pid_file).exists())
 

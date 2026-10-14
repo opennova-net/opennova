@@ -31,6 +31,10 @@ void PlaySession::stop() {
 	platform_.terminate(pid_);
 }
 
+void PlaySession::force() {
+	if (state_ == PlayState::Stopping) stop_requested_ms_ = platform_.now_ms() - kPlayStopDeadlineMs;
+}
+
 PlayState PlaySession::poll() {
 	if (state_ == PlayState::Stopped) return state_;
 	if (!platform_.is_running(pid_)) {
