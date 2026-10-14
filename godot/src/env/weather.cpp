@@ -186,36 +186,50 @@ void Weather::republish_globals() {
 	// With no mission behind it, no local player hashes the rings: the
 	// registers hold no other picture's pair.
 	if (_bound_sim() == nullptr) {
-		ObjectData::set_weather_ctrl_registers(0, 0);
+		_write_ctrl_registers(0, 0);
 	}
 }
 
 void Weather::publish_absent() {
-	ObjectData::set_weather_ctrl_registers(0, 0);
-	ObjectData::clear_weather_rings();
+	_write_ctrl_registers(0, 0);
+	_write_rings(nullptr);
+}
+
+void Weather::_write_global(
+		RenderingServer *p_rs, const StringName &p_name, const Variant &p_value) {
+	++global_writes_;
+	p_rs->global_shader_parameter_set(p_name, p_value);
+}
+
+void Weather::_write_ctrl_registers(int32_t p_flicker, int32_t p_swing) {
+	++global_writes_;
+	ObjectData::set_weather_ctrl_registers(p_flicker, p_swing);
+}
+
+void Weather::_write_rings(const opennova::env::WeatherOscillator *p_oscillator) {
+	++global_writes_;
+	if (p_oscillator != nullptr) {
+		ObjectData::set_weather_rings(*p_oscillator);
+	} else {
+		ObjectData::clear_weather_rings();
+	}
 }
 
 void Weather::_write_globals(MissionEnvironment *p_env) {
-	++global_writes_;
 	const opennova::env::WeatherShaderGlobals globals =
 			opennova::env::build_weather_shader_globals(p_env->state(),
 					runtime_, p_env->is_underwater_view());
 	RenderingServer *rs = RenderingServer::get_singleton();
-	rs->global_shader_parameter_set("opennova_sun_light",
-			to_vector3(globals.base.sun_light));
-	rs->global_shader_parameter_set("opennova_sky_ambient",
-			to_vector3(globals.base.sky_ambient));
-	rs->global_shader_parameter_set("opennova_env_light_block",
-			to_vector3(globals.base.light_block));
-	rs->global_shader_parameter_set("opennova_fog_color",
-			to_vector3(globals.base.fog_color));
-	rs->global_shader_parameter_set("opennova_sun_direction",
+	_write_global(rs, "opennova_sun_light", to_vector3(globals.base.sun_light));
+	_write_global(rs, "opennova_sky_ambient", to_vector3(globals.base.sky_ambient));
+	_write_global(rs, "opennova_env_light_block", to_vector3(globals.base.light_block));
+	_write_global(rs, "opennova_fog_color", to_vector3(globals.base.fog_color));
+	_write_global(rs, "opennova_sun_direction",
 			Vector3(globals.base.sun_direction.x, globals.base.sun_direction.y,
 					globals.base.sun_direction.z));
-	rs->global_shader_parameter_set("opennova_fog_end", globals.base.fog_end);
-	rs->global_shader_parameter_set("opennova_fog_start",
-			globals.base.fog_start);
-	rs->global_shader_parameter_set("opennova_fog_type", globals.base.fog_type);
+	_write_global(rs, "opennova_fog_end", globals.base.fog_end);
+	_write_global(rs, "opennova_fog_start", globals.base.fog_start);
+	_write_global(rs, "opennova_fog_type", globals.base.fog_type);
 	// The HUD cache's per-frame CTRL publication: the local player's position
 	// hashed into the wave rings lands in the global FLICKER (amp ring) and
 	// SWING (osc ring) registers every model's CTRL tracks read (retail
@@ -223,12 +237,12 @@ void Weather::_write_globals(MissionEnvironment *p_env) {
 	// The rings for the models that hash their own position, then the local
 	// player's pair as the frame default (retail's HUD/viewmodel legs).
 	const opennova::env::WeatherOscillator &osc = runtime_.core().oscillator;
-	ObjectData::set_weather_rings(osc);
+	_write_rings(&osc);
 	Simulation *sim = _bound_sim();
 	int32_t pos_q16[3];
 	if (sim != nullptr && sim->local_player_position_q16(pos_q16)) {
 		const uint8_t slot = osc.ring_slot(pos_q16[0], pos_q16[1], pos_q16[2]);
-		ObjectData::set_weather_ctrl_registers(osc.amp_ring[slot], osc.osc_ring[slot]);
+		_write_ctrl_registers(osc.amp_ring[slot], osc.osc_ring[slot]);
 	}
 }
 
