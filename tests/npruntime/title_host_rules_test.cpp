@@ -1,19 +1,24 @@
 // The host rules a session runs by its title (docs/titles/dfx2-vs-jo-re.md §7, DFX2-8..DFX2-19):
 // the cfg block's table names the session's title, and dfx2.exe's caps, built-in score table and
-// fanfare pair, round-end linger, deploy protection, and its want of a medic revive, heal and the
-// downed-state resend each branch on it. Jointops.exe's values stand beside each.
+// fanfare pair, round-end linger, deploy protection, and its want of a medic revive, heal, the
+// downed-state resend and the death's revive window each branch on it. Jointops.exe's values stand
+// beside each.
 #include <base/gameprofile/game_type.h>
 #include <base/gameprofile/gameprofile.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/host_settings.h>
+#include <net/npwire/ingame_message_id.h>
+#include <runtime/inmatch/loopback_channel.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_medic.h>
 #include <runtime/inmatch/server_spawn.h>
+#include <runtime/inmatch/server_tick.h>
 #include <runtime/inmatch/session_status.h>
 #include <runtime/world/world.h>
 
 #include "common/test_expect.h"
+#include "conn_fixture.h"
 
 #include <cstdio>
 #include <memory>
@@ -145,6 +150,77 @@ int no_revive_heal_or_downed_resend() {
 	return 0;
 }
 
+// A teammate killed by an enemy: Jointops.exe opens the 120-second revive window and sends its
+// same-team Medic the S2C 0x54 downed record; dfx2.exe stores 0 in both arms, so no window, no
+// 0x54 and a zero downed byte (DFX2-20). [orig: GameEvent_PlayerDeath @0x516f4f, the 0x54 gate
+//  @0x517385] [orig: GameEvent_PlayerDeath @0x51419b, the gate @0x5145cb (dfx2.exe)]
+int no_revive_window_at_death() {
+	for (const int title : {kJo, kDfx2}) {
+		auto storage = std::make_unique<world::World>();
+		world::World &w = *storage;
+		w.rules.title = title;
+		w.rules.mp_session = true;
+		w.registry.configure_pool(0, 4);
+		w.tables.class_attribute_flags[(8u - 1u) & 0xFu] |= world::MissionTables::kCharAttrMedic;
+		const auto person = [&](uint8_t team, uint8_t klass) {
+			world::Entity e;
+			e.kind = world::EntityKind::Organic;
+			e.player_class = klass;
+			e.team = team;
+			e.health = 100;
+			e.alive = true;
+			e.flags = world::kEntityFlagPlayer;
+			e.engine_flags = world::kEntityFlagPlayer;
+			e.has_item_def = true;
+			return w.registry.spawn(0, e);
+		};
+		const world::EntityHandle victim = person(1, 7);
+		const world::EntityHandle medic = person(1, 8);
+		const world::EntityHandle killer = person(2, 7);
+		w.match.upsert_player({victim, 0, "Victim"});
+		w.match.upsert_player({medic, 1, "Medic"});
+		w.match.upsert_player({killer, 2, "Killer"});
+		replication::LoopbackChannel victim_wire, medic_wire, killer_wire;
+		NapiNPServerCtx ctx;
+		ctx.world = &w;
+		ctx.is_authority = 1;
+		ctx.is_in_session = 1;
+		ctx.config.game_type = game_type::kTeamDeathmatch;
+		std::vector<NapiNPConnection> &roster = ctx.np_protocol.connection_list;
+		roster.push_back(conn_fixture::make_conn(1, 1, &victim_wire,
+				replication::TransportMode::Client, victim, true));
+		roster.push_back(conn_fixture::make_conn(2, 1, &medic_wire,
+				replication::TransportMode::Client, medic, true));
+		roster.push_back(conn_fixture::make_conn(3, 1, &killer_wire,
+				replication::TransportMode::Client, killer, true));
+		const uint8_t teams[] = {1, 1, 2};
+		for (size_t i = 0; i < roster.size(); ++i) {
+			roster[i].assigned_team = teams[i];
+			roster[i].assigned_team_valid = true;
+			roster[i].reply.player_slot = static_cast<uint8_t>(i);
+			roster[i].admission_stage = GameAdmissionStage::Complete;
+			roster[i].link.last_deploy_tick = w.logic_tick;
+			roster[i].link.last_deploy_tick_valid = true;
+		}
+		Server_TickUpdate(ctx); // the first frame's one-second service
+		replication::Datagram dg;
+		while (medic_wire.client_recv(dg)) {}
+		world::RoundDeath d;
+		d.victim = victim;
+		d.killer = killer;
+		d.victim_handle = victim.packed;
+		d.killer_handle = killer.packed;
+		w.round_sim.deaths.push_back(d);
+		Server_TickUpdate(ctx);
+		TEST_EXPECT(roster[0].link.downed_revive_seconds == (title == kDfx2 ? 0u : 120u));
+		int downed = 0;
+		while (medic_wire.client_recv(dg))
+			if (dg.tag == s2c::PLAYER_DOWNED_STATE) ++downed;
+		TEST_EXPECT(downed == (title == kDfx2 ? 0 : 1));
+	}
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -153,6 +229,7 @@ int main() {
 	if (round_end_linger() != 0) return 1;
 	if (deploy_protection() != 0) return 1;
 	if (no_revive_heal_or_downed_resend() != 0) return 1;
+	if (no_revive_window_at_death() != 0) return 1;
 	std::printf("OK: title host rules\n");
 	return 0;
 }
