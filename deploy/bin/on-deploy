@@ -31,9 +31,10 @@
 #                                 earlier backups stay in S3
 #   backup now|list               trigger / list the sqlite backups
 #   state push|pull [--force]     terraform state <-> 1Password document; each
-#                                 refuses to replace a state that is not older
-#                                 than the one it brings, or one of another
-#                                 lineage, unless --force
+#                                 checks both sides against the checkout's
+#                                 record of its last sync and refuses to drop
+#                                 a change (or a state of another lineage)
+#                                 unless --force
 #   hosted status [--deployment NAME]
 #                                 this deployment's hosted game server machines
 #   hosted data-snapshot          the hosted servers' game data, once: the Joint
@@ -563,19 +564,54 @@ state_lineage() {
   jq -r '.lineage // ""' "$1" 2>/dev/null || true
 }
 
+# A state file's digest: the sha256 of its state as jq writes it, keys sorted
+# and terraform_version left out (terraform stamps that at every write, so a
+# no-change apply under a newer terraform holds the same state in other
+# bytes). A file that is no JSON is digested as it is.
+state_digest() {
+  if jq empty "$1" >/dev/null 2>&1; then
+    jq -S 'if type == "object" then del(.terraform_version) else . end' "$1"
+  else
+    cat "$1"
+  fi | sha256sum | cut -d' ' -f1
+}
+
+# The base a checkout recorded at its last sync with the vault (a digest), or
+# nothing when it has none or the file holds no digest.
+state_base() {
+  local base=""
+  [ ! -f "$1" ] || base="$(head -n 1 "$1" 2>/dev/null || true)"
+  case "$base" in
+    *[!0-9a-f]*) base="" ;;
+  esac
+  [ "${#base}" -eq 64 ] || base=""
+  printf '%s' "$base"
+}
+
 cmd_state() {
   require_op
   # Optional args let other stacks reuse this:
   #   state <pull|push> [--force] [doc] [tfdir]
-  # Defaults target the AWS stack (tfstate / infra/aws). Both directions fetch
-  # the vault's document to the tmpfs and compare it with the local state
-  # first; without --force each refuses to replace a state that is not older:
-  #   pull refuses a local state of a higher serial than the vault's (an apply
-  #     whose push never ran), or of the same serial and other content;
-  #   push refuses a vault state of the same or a higher serial (another
-  #     operator's newer apply) unless the two files are identical, when there
-  #     is nothing to push;
+  # Defaults target the AWS stack (tfstate / infra/aws).
+  #
+  # Every pull or push that goes through records, beside the state, the digest
+  # (state_digest) of the vault document this checkout is now in step with:
+  # terraform.tfstate.vault-sha256, the base. Both directions fetch the vault's
+  # document to the tmpfs and compare three ways, so two checkouts that started
+  # from one vault state are told apart however their serials ran. Without
+  # --force:
+  #   when the local state and the vault's have BOTH changed since the base,
+  #     both directions refuse: the two diverged, and either would drop work;
+  #   pull refuses when the local state alone changed (an apply whose push
+  #     never ran): push it;
+  #   push refuses when the vault's alone changed (another operator's push):
+  #     pull it;
+  #   with no base recorded (a checkout from before the base, or one whose
+  #     state came from elsewhere), the serials decide: pull refuses a local
+  #     serial at or above the vault's, push a vault serial at or above the
+  #     local one;
   #   both refuse two states of different lineages.
+  # A local state and a vault document that hold the same state are left alone.
   # Only a vault with no document of that title reads as a first run (pull) or
   # as one to create (push); any other failure stops, so no command goes on
   # with a state of unknown age and no push makes a second document.
@@ -585,7 +621,10 @@ cmd_state() {
   local doc="${1:-tfstate}"
   local tfdir="${2:-$TF_DIR}"
   local statefile="$tfdir/terraform.tfstate"
-  local fetched="$SECRETS_DIR/state-vault.tfstate" local_serial remote_serial local_lineage remote_lineage
+  local basefile="$statefile.vault-sha256"
+  local fetched="$SECRETS_DIR/state-vault.tfstate"
+  local base="" local_digest remote_digest local_changed=0 remote_changed=0
+  local local_serial remote_serial local_lineage remote_lineage
   case "$action" in
     pull|push) ;;
     *) die "unknown: state $action (try: pull|push)" ;;
@@ -596,7 +635,9 @@ cmd_state() {
     if [ "$action" = pull ]; then
       log "no remote state yet (first run)"
     else
-      op document create "$statefile" --title "$doc" --vault "$VAULT" >/dev/null
+      op document create "$statefile" --title "$doc" --vault "$VAULT" >/dev/null \
+        || die "creating vault document '$doc' failed; nothing was pushed (run state push again once the vault answers)"
+      state_digest "$statefile" > "$basefile"
       log "state pushed (a new document)."
     fi
     return
@@ -607,33 +648,52 @@ cmd_state() {
   rm -f "$fetched"
   op document get "$doc" --vault "$VAULT" --out-file "$fetched" --force >/dev/null \
     || { rm -f "$fetched"; die "reading vault document '$doc' failed. Refusing to go on with a state of unknown age (run again once the vault answers)"; }
-  if [ -f "$statefile" ] && cmp -s "$fetched" "$statefile"; then
-    rm -f "$fetched"
-    log "$statefile and vault document '$doc' are the same; nothing to $action."
+  if [ ! -f "$statefile" ]; then
+    # A pull into a checkout with no state: nothing local to lose.
+    mkdir -p "$(dirname "$statefile")"
+    mv -f "$fetched" "$statefile"
+    state_digest "$statefile" > "$basefile"
+    log "wrote $statefile"
     return
   fi
-  if [ -f "$statefile" ] && [ "$force" -eq 0 ]; then
+  local_digest="$(state_digest "$statefile")"
+  remote_digest="$(state_digest "$fetched")"
+  if [ "$local_digest" = "$remote_digest" ]; then
+    rm -f "$fetched"
+    printf '%s\n' "$local_digest" > "$basefile"
+    log "$statefile and vault document '$doc' hold the same state; nothing to $action."
+    return
+  fi
+  local refusal=""
+  if [ "$force" -eq 0 ]; then
     local_serial="$(state_serial "$statefile")"
     remote_serial="$(state_serial "$fetched")"
     local_lineage="$(state_lineage "$statefile")"
     remote_lineage="$(state_lineage "$fetched")"
-    # Two lineages (both named) that differ: two different states, never two
-    # versions of one. A file that names none is no state, and the serials decide.
+    base="$(state_base "$basefile")"
+    if [ -n "$base" ]; then
+      [ "$local_digest" = "$base" ] || local_changed=1
+      [ "$remote_digest" = "$base" ] || remote_changed=1
+    fi
     if [ -n "$local_lineage" ] && [ -n "$remote_lineage" ] && [ "$local_lineage" != "$remote_lineage" ]; then
-      rm -f "$fetched"
-      die "$statefile (lineage $local_lineage) and vault document '$doc' (lineage $remote_lineage) are different states, not versions of one. Find out which is this stack's; then state $action --force"
+      # Two lineages (both named) that differ: two different states, never two
+      # versions of one. A file that names none is no state; the rules below decide.
+      refusal="$statefile (lineage $local_lineage) and vault document '$doc' (lineage $remote_lineage) are different states, not versions of one. Find out which is this stack's; then state $action --force"
+    elif [ -n "$base" ] && [ "$local_changed" -eq 1 ] && [ "$remote_changed" -eq 1 ]; then
+      refusal="$statefile (serial $local_serial) and vault document '$doc' (serial $remote_serial) have BOTH changed since this checkout last synced: two histories from one state, and either direction would drop the other's work. Merge them by hand (terraform state rm/import here until this checkout holds both, then state push --force), or keep one side whole: state push --force (this checkout's) or state pull --force (the vault's)"
+    elif [ -n "$base" ] && [ "$action" = pull ] && [ "$local_changed" -eq 1 ]; then
+      refusal="$statefile (serial $local_serial) changed since this checkout last synced, and vault document '$doc' did not: an apply whose push never ran? Push it (state push), or discard it (state pull --force)"
+    elif [ -n "$base" ] && [ "$action" = push ] && [ "$remote_changed" -eq 1 ]; then
+      refusal="vault document '$doc' (serial $remote_serial) changed since this checkout last synced (another operator's push), and $statefile did not: pull it (state pull), then run again"
+    elif [ -z "$base" ] && [ "$action" = pull ] && [ "$local_serial" -ge "$remote_serial" ]; then
+      refusal="$statefile (serial $local_serial) is not older than vault document '$doc' (serial $remote_serial), and this checkout has no record of its last sync ($basefile) to tell whose changed. If only this checkout's changed, push it (state push); if both did, merge them by hand and state push --force; to take the vault's, state pull --force"
+    elif [ -z "$base" ] && [ "$action" = push ] && [ "$remote_serial" -ge "$local_serial" ]; then
+      refusal="vault document '$doc' (serial $remote_serial) is not older than $statefile (serial $local_serial), and this checkout has no record of its last sync ($basefile) to tell whose changed. If only the vault's changed, take it (state pull --force); if both did, merge them by hand and state push --force"
     fi
-    if [ "$action" = pull ] && [ "$local_serial" -ge "$remote_serial" ]; then
-      rm -f "$fetched"
-      if [ "$local_serial" -gt "$remote_serial" ]; then
-        die "the local $statefile (serial $local_serial) is newer than vault document '$doc' (serial $remote_serial): an apply whose push never ran? Push it (state push), or overwrite it (state pull --force)"
-      fi
-      die "the local $statefile and vault document '$doc' are both serial $local_serial with different content. Compare them; then state push --force or state pull --force"
-    fi
-    if [ "$action" = push ] && [ "$remote_serial" -ge "$local_serial" ]; then
-      rm -f "$fetched"
-      die "vault document '$doc' (serial $remote_serial) is not older than the local $statefile (serial $local_serial), and they differ: another operator's apply? Pull it (state pull), or overwrite it (state push --force)"
-    fi
+  fi
+  if [ -n "$refusal" ]; then
+    rm -f "$fetched"
+    die "$refusal"
   fi
   if [ "$action" = pull ]; then
     mkdir -p "$(dirname "$statefile")"
@@ -641,9 +701,11 @@ cmd_state() {
     log "wrote $statefile"
   else
     rm -f "$fetched"
-    op document edit "$doc" "$statefile" --vault "$VAULT" >/dev/null
+    op document edit "$doc" "$statefile" --vault "$VAULT" >/dev/null \
+      || die "pushing to vault document '$doc' failed; the vault keeps its copy, and $statefile stays ahead of it (run state push again once the vault answers)"
     log "state pushed."
   fi
+  state_digest "$statefile" > "$basefile"
 }
 
 # ---------------------------------------------------------------------------

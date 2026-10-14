@@ -101,25 +101,36 @@ Then plan and apply:
 Terraform state is stored as a 1Password document (`tfstate`), pulled before and
 pushed after each run, so any operator with vault access can deploy. `infra apply` and
 `infra destroy` push whatever state Terraform leaves, a failed run's too (it can have
-changed resources and written a newer serial), then exit with Terraform's code.
+changed resources and written a newer serial), then exit with Terraform's code; a failed
+run is named before that push, so a push that is then refused is not read as success.
 
-Both directions read the vault's copy first and compare it with
-`infra/aws/terraform.tfstate`. Identical files are left alone. Otherwise, without
-`--force`:
+Every pull or push that goes through records, beside the state, the vault document this
+checkout is now in step with: `infra/aws/terraform.tfstate.vault-sha256` (gitignored),
+the base. Both directions read the vault's copy first and compare the local state and
+the vault's with that base, so two checkouts that started from the same vault state are
+told apart however their serials ran. The states are compared, not the bytes: keys
+sorted and `terraform_version` left out, since Terraform stamps that at every write.
+Two copies that hold the same state are left alone. Otherwise, without `--force`:
 
-- A pull refuses a local state with a higher serial than the vault's (an apply whose
-  push never ran: `./deploy/run.sh state push` it), or with the same serial and other
-  content.
-- A push refuses when the vault's serial is the same or higher (another operator's
-  apply: `state pull` it first).
-- Both refuse two states of different lineages (Terraform's id for one state, kept
-  through every serial): they are different states, not versions of one.
+- **Both changed since the base:** pull and push both refuse. The two diverged (say two
+  operators applied from the same state, or your apply failed part-way while someone
+  else pushed), and either direction would drop the other's work. Merge them by hand
+  (`terraform state rm`/`import` in this checkout until it holds both, then `state push
+  --force`), or keep one side whole with `state push --force` or `state pull --force`.
+- **Only the local state changed** (an apply whose push never ran): a pull refuses;
+  `./deploy/run.sh state push` it.
+- **Only the vault's changed** (another operator's push): a push refuses; `state pull`
+  it, then run again.
+- **No base recorded** (a checkout from before the base existed): the serials decide. A
+  pull refuses a local serial at or above the vault's, a push a vault serial at or above
+  the local one, and both say they cannot tell whose changed.
+- **Different lineages** (Terraform's id for one state, kept through every serial):
+  both refuse; they are different states, not versions of one.
 
-`state pull --force` and `state push --force` overwrite the other side once you know
-which copy is right. The vault's document is found by its title in the vault's item
-listing; only a vault with no `tfstate` document reads as a first run (a pull) or as
-one to create (a push), and any other vault failure stops the command, so nothing runs
-on a state of unknown age and no push makes a second document.
+The vault's document is found by its title in the vault's item listing. Only a vault
+with no `tfstate` document reads as a first run (a pull) or as one to create (a push).
+A listing that fails or comes back empty, or any other vault failure, stops the command,
+so nothing runs on a state of unknown age and no push makes a second document.
 
 Review the plan: after the first apply, pin `ami_id` in `infra/aws/terraform.tfvars` so AMI
 drift never replaces your instance and releases the EIP.
