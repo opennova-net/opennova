@@ -91,8 +91,14 @@ bool PreviewWindow::stands_aside() const {
 	// With no project open, for the welcome page (aside_for_welcome).
 	if (aside_for_welcome(view, welcome_asked_)) return true;
 	if (!view.project.open) return false;
-	// The author's ask (the Windows menu's tick) holds for the document active then.
+	// The author's ask (the Windows menu's tick) holds for the document active then; one that came with the
+	// document's 2D map beside it (the Map tool's) goes as the map is put away.
 	if (!shown_for_.empty() && shown_for_ != view.documents.active) shown_for_.clear();
+	if (!shown_for_.empty()) {
+		if (view.documents.beside == shown_for_) asked_with_map_ = true;
+		else if (asked_with_map_) shown_for_.clear();
+	}
+	if (shown_for_.empty()) asked_with_map_ = false;
 	if (!shown_for_.empty()) return false;
 	const bool aside = preview_stands_aside(view);
 	if (!aside && !preview_feeds_table(view)) return false;
@@ -111,8 +117,13 @@ bool PreviewWindow::stands_aside() const {
 }
 
 void PreviewWindow::show_anyway() {
-	if (!workspace_.view().project.open) welcome_asked_ = true;
-	else shown_for_ = workspace_.view().documents.active;
+	const SessionView &view = workspace_.view();
+	if (!view.project.open) {
+		welcome_asked_ = true;
+		return;
+	}
+	shown_for_ = view.documents.active;
+	asked_with_map_ = !view.documents.beside.empty() && view.documents.beside == shown_for_;
 }
 
 ViewportView *PreviewWindow::view_of(const std::string &path, ViewportKind kind) {
