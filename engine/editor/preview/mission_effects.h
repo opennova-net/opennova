@@ -78,8 +78,9 @@ public:
 	const std::vector<DefinitionSpawn> &shot_spawns() const { return spawns_; }
 	// Whether the group spawn `spawn` made lives now.
 	bool shot_alive(size_t spawn) const;
-	// The scene played to the clock's tick `tick` (EffectSchedule, its slots held standing), `frustum` the view's
-	// (preview_view_frustum; none: every emitter advances).
+	// The scene played to the clock's tick `tick` (EffectSchedule, its slots held standing),
+	// `frustum` the view's (scene_pass_view_frustum, the world pass's planes; none: every emitter
+	// advances).
 	void play_to(int32_t tick, const particle::ParticleViewFrustum &frustum = {});
 	// Nothing held, nothing played (the layer off, no mission).
 	void close();
