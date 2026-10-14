@@ -514,6 +514,21 @@ public:
 	}
 	const std::vector<uint8_t> &cd_cookie() const { return cd_cookie_; }
 
+	// The CD-key ids the C2S 0x00 JOIN leads with in a LAN session, each sent only
+	// when set: retail's registry CDKIID decoded to its wire form (g_CDKeyInfo +16;
+	// a stock DFX2 has no writer of the +0x810 CDKIIDEXP1, so it sends that one
+	// empty). A DFX2 LAN host refuses a join without a CDKIID it can decode (codes
+	// 10..13, DFX2-13). Unset (empty) sends neither, a JO install with no key. The
+	// account's activation is a later slice's; until then the embedder supplies a
+	// configured or test value (net/novacrypto/cdkey.h make_wire_key).
+	// [orig: NapiNP_WriteClientAuthPayload @0x42a180 - @0x42a1d4 / @0x42a20d]
+	void set_cd_key_ids(cdkey::WireKeys ids) { cd_key_ids_ = std::move(ids); }
+	const cdkey::WireKeys &cd_key_ids() const { return cd_key_ids_; }
+	// The LAN session fact the JOIN's CD-key leg tests [orig: is_in_session && transport_mode
+	// == 2 @0x42a1cb]: a joiner is in session; a NovaWorld join is the one carrying the .joi
+	// APPID (set_app_id), so no APPID is a LAN join, as the 0x42's APPID leg reads it.
+	bool lan_session() const { return app_id_ == "0" || app_id_.empty(); }
+
 	// The process's character-attribute table (inmatch/charattr_table.h): the
 	// sixteen rows loaded from charattr.def at boot and their disable latches.
 	// S2C 0x41 zeroes and disables a property and S2C 0x42 sets the latches,
@@ -859,6 +874,11 @@ private:
 	// [orig: Game_StartMission @0x525767 / NapiNPClientMsg_TeamAssign @0x431a35 ->
 	//  NetPacket_SendLoadoutSubmit @0x42cdc0]
 	LoadoutSubmit build_profile_loadout_submit(uint8_t team, bool alternate) const;
+	// The 0x2F class byte for a kit of `profile_class`: the class itself, or, for a title whose
+	// submit ignores it (DFX2-12), 8, or 7 when the host's BMS header (S2C 0x0B) names a mission
+	// of type 2. [orig: NetPacket_SendLoadoutSubmit @0x42ceae] [orig: @0x42ec1f..0x42ec3e
+	//  (dfx2.exe), byte_A6FB3A = the header's +0x22A]
+	uint8_t loadout_wire_class(uint8_t profile_class) const;
 
 	std::vector<uint8_t> build_client_hello();
 	std::vector<uint8_t> build_client_auth();
@@ -910,6 +930,7 @@ private:
 	NapiPrng *key_prng_ = nullptr;
 	std::string player_name_;
 	const TitleIdentity *title_ = nullptr; // set_title
+	cdkey::WireKeys cd_key_ids_; // set_cd_key_ids
 	JoinRole join_role_ = JoinRole::Player;
 	std::string spectator_password_;
 	std::string server_password_;

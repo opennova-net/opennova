@@ -184,9 +184,12 @@ public:
 	void observe_frame_statistics(int32_t frames_last_second, int32_t cpu_percent) override;
 
 private:
-	void reset_state(const inmatch::GameConfig &config, bool serve_and_play, bool in_session);
-	// The rule words the world reads at tick time, from the session config.
-	void apply_rule_words(const inmatch::GameConfig &config, bool serve_and_play, bool in_session);
+	void reset_state(const inmatch::GameConfig &config, bool serve_and_play, bool in_session,
+			const TitleIdentity *title);
+	// The rule words the world reads at tick time, from the session config and the title the
+	// session speaks (null: JO's).
+	void apply_rule_words(const inmatch::GameConfig &config, bool serve_and_play, bool in_session,
+			const TitleIdentity *title);
 	// The context's spawn-time body bind over this role's kernel
 	// (NapiNPServerCtx::bind_spawned_body), installed after a bring-up's own spawn.
 	void install_spawned_body_bind();

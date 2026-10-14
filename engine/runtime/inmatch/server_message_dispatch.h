@@ -19,6 +19,10 @@ class World;
 struct EntityHandle;
 }
 
+namespace opennova {
+struct TitleIdentity; // net/title/title_identity.h
+}
+
 // P8 — the reactive in-match gameplay-message reply path.
 // This is the faithful translation of the gameplay-layer C2S dispatch table [orig: g_NPMsgInfoServer
 // @0x82B5D8 → NapiNPServerMsg_0x0NN]: a 0x43 SESSION packet carries gameplay messages, each routed to
@@ -45,10 +49,13 @@ using MissionMetadataBlob = std::array<uint8_t, 180>;
 // Build the session-owned S2C 0x64 raw content. The two random regions and
 // nonzero session id are minted once by create_session; callers then retain the
 // returned block for every chunk request. `mp_session_peer` is the host's
-// connection mode (false for a dedicated host, whose own slot +36 drops).
+// connection mode (false for a dedicated host, whose own slot +36 drops);
+// `title` the title the session speaks, whose rules-word bits the +44 word
+// takes (DFX2-18; null: JO's).
 // [orig: Client_BuildMissionDataRequestBlock (ex sub_51E880) @0x51E880 +
 // CNapiGameSession_InitRandomSeedOrRequest @0x51E8F0]
-MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool mp_session_peer);
+MissionMetadataBlob build_mission_metadata_blob(const GameConfig &config, bool mp_session_peer,
+		const TitleIdentity *title);
 
 // The recipient's S2C 0x7B session summary (its name and PCID, the server
 // name, the advertised mission, the map file, the game type, the expansion).
@@ -82,13 +89,15 @@ std::vector<uint8_t> build_spawn_wave_status_body(
 // it resolved to `target_zone`. Returns the private 0x5A/0x61/frontier bundle
 // for the owning connection; callers decide whether it is returned reactively
 // or staged on a transport.
-// `server_log` is the /PROFILE recorder (null = off), which marks the deploy.
+// `server_log` is the /PROFILE recorder (null = off), which marks the deploy;
+// `title` the title the session speaks (null: JO's), whose deploy writes its
+// own state byte (DFX2-11).
 // [orig: Server_DeployPlayer deploy leg @0x517740, its handle argument
 //  tested @0x51786B]
 std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 		const GameConfig &config, NapiNPConnection &conn,
 		world::World &world, world::EntityHandle target_zone, uint16_t requested_handle,
-		ServerLogRecorder *server_log = nullptr);
+		ServerLogRecorder *server_log = nullptr, const TitleIdentity *title = nullptr);
 
 // Dispatch the decoded in-match gameplay `messages` for `conn` to their reply handlers and return the
 // reactive replies to frame onto the connection. Caches the joiner's pre-spawn C2S 0x0C pose into

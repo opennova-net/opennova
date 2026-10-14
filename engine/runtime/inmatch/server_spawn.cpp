@@ -17,6 +17,7 @@
 #include <base/gameprofile/game_type.h>
 #include <base/io/strutil.h>
 #include <net/npwire/ingame_encode.h>     // encode_team_assign
+#include <net/title/title_identity.h>  // title_in_match (the join's state byte, DFX2-11)
 #include <runtime/inmatch/punt_log.h>     // the punt table the round init clears
 #include <runtime/inmatch/server_log_recorder.h> // the /PROFILE PDEF of a player add
 #include <runtime/inmatch/server_squad.h> // Server_DissolveSquadOf
@@ -481,7 +482,11 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	// overlay bit both ride the per-frame 0x0A writer, which only a session runs
 	// [orig: g_NapiNPCtx.is_in_session (+0x58) gates Server_TickUpdate's
 	// replication loop], so the single player is never held.
-	if (world.zones.has_spawn_zone() && (!is_host_own || world.rules.mp_session)) {
+	// A DFX2 join writes 0x13 whatever the mission: every joiner undeployed (DFX2-11)
+	// [orig: Server_OnPlayerJoin @0x517717 (dfx2.exe)].
+	const TitleInMatch &title_rules = title_in_match(ctx.np_protocol.identity);
+	if ((world.zones.has_spawn_zone() || title_rules.join_state_fixed) &&
+			(!is_host_own || world.rules.mp_session)) {
 		conn.link.respawn_pending = true;
 		if (!conn.link.spectator) {
 			if (world::Entity *pe = world.registry.get(h)) pe->flags |= 1u;
@@ -499,10 +504,12 @@ world::EntityHandle Server_BuildPlayerInfoAndAdd(NapiNPServerCtx &ctx, NapiNPCon
 	//  Server_OnPlayerJoin @0x51A680 @0x51a882 (620), @0x51a878 (bot 0)]
 	if (world::Entity *pe = world.registry.get(h)) pe->damage_state = 620;
 	// The join writes the whole +89912 state byte: bit 1 (the pre-round loadout
-	// latch) iff the pre-round timer runs, and zeroes the +356 armory cooldown on
-	// the first state-6 entry. [orig: Server_OnPlayerJoin @0x51a6d3/@0x51a6e2
-	//  (byte = 1, or 3 while g_PreRoundDelayTimer); slot[89] = 0 @0x51a752]
-	conn.link.preround_loadout_latch = world.preround_delay_seconds != 0;
+	// latch) iff the pre-round timer runs, always for DFX2's 0x13 (DFX2-11), and
+	// zeroes the +356 armory cooldown on the first state-6 entry.
+	// [orig: Server_OnPlayerJoin @0x51a6d3/@0x51a6e2 (byte = 1, or 3 while
+	//  g_PreRoundDelayTimer); slot[89] = 0 @0x51a752] [orig: @0x517717 (dfx2.exe)]
+	conn.link.preround_loadout_latch =
+			world.preround_delay_seconds != 0 || title_rules.join_state_fixed;
 	conn.link.armory_reuse_seconds = 0;
 	// SetGameState(10) then sets 0x04 (the frontier hint) and clears 0x08 (the
 	// refused-touch hold); the join also zeroes the +100360 stamp.
@@ -1118,7 +1125,7 @@ void Server_ProcessSpectatorRespawnRequests(NapiNPServerCtx &ctx, world::World &
 		// raises, placement, reset and private replies, before the 0x32.
 		std::vector<ProtocolMessage> deployment = Server_ReleasePlayerDeployment(
 				ctx.config, conn, world, world::EntityHandle{request}, request,
-				ctx.logs.profile);
+				ctx.logs.profile, ctx.np_protocol.identity);
 		if (conn.link.transport != nullptr) {
 			for (ProtocolMessage &message : deployment)
 				conn.link.transport->host_send(

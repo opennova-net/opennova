@@ -74,10 +74,16 @@ std::vector<uint8_t> build_join_padding_echo(
 
 // Retail NapiNP_WriteClientAuthPayload @0x42a180 writes EXP when an expansion
 // is active, followed by VERSIONCRCSTRING. Base-game captures therefore contain
-// only the latter; expansion hosts require both.
+// only the latter; expansion hosts require both. In a LAN session the CD-key
+// ids lead them, each only when set: the joiner's registry key decoded (a DFX2
+// LAN host checks them, DFX2-13; JO's sends them alike and its host ignores
+// them). The same code in both titles.
+// [orig: NapiNP_WriteClientAuthPayload @0x42a1cb..0x42a235] [orig: @0x42c25b..0x42c2c5
+//  (dfx2.exe)]
 std::vector<uint8_t> build_join_request(
 		std::string_view expansion, int32_t expansion_version_checksum,
-		const std::vector<uint8_t> &cd_cookie) {
+		const std::vector<uint8_t> &cd_cookie, bool lan_session,
+		const cdkey::WireKeys &cd_key_ids) {
 	std::vector<uint8_t> body;
 	// One flat TLV: [name\0][LE16 size][size bytes]. A string value carries
 	// its NUL inside the size; a binary value is emitted as-is.
@@ -91,6 +97,10 @@ std::vector<uint8_t> build_join_request(
 		append_binary_tlv(name, reinterpret_cast<const uint8_t *>(with_nul.data()),
 		                  with_nul.size());
 	};
+	if (lan_session) {
+		if (!cd_key_ids.cdkiid.empty()) append_string_tlv("CDKIID", cd_key_ids.cdkiid);
+		if (!cd_key_ids.exp1.empty()) append_string_tlv("CDKIIDEXP1", cd_key_ids.exp1);
+	}
 	if (!expansion.empty()) append_string_tlv("EXP", expansion);
 	// The checksum rides as SIGNED decimal — retail formats its
 	// g_ExpansionChecksum with "%ld", so a CRC with bit 31 set goes out
@@ -338,12 +348,12 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// Server_ValidatePlayerJoinRequest checks and produces H:0x03 DS=1,DC=2. The validated four are
 	// LITERAL constants of the 1.7.5.7 binary, not capture-specific values (witness 2026-07-24):
 	// BN==1 (DC=2 @0x512155), VN==2 (DC=3), MBN==20042002 (DC=4; the 0x131D112 immediate),
-	// SOPD==180 (DC=8) — any client of this patch must send exactly these; do not "unpin" them.
+	// SOPD==180 (DC=8) — the joiner's net config defaults, which the title row carries
+	// (TitleJoinBuild; JO's and DFX2's agree) [orig: NapiNetConfig_Init @0x4c3570].
 	// BT is the account ban state (1/2 reject, DC=6/7; 0 for LAN). The rest are stored/display
 	// only (@0x4c7260 SetVersionString/SetCountryCode/TZB). VERSIONSTRING is the binary's own
-	// sprintf("V%i.%i.%i.%i", ...), the title's profile's version text (JO's 1, 7, 5, 7); the
-	// four pinned constants are JO's binary's [orig:
-	// Game_ParseCommandLineAndInit @0x4a7d81 into byte_B4C0B0, copied @0x569b5c]; COUNTRYCODE
+	// sprintf("V%i.%i.%i.%i", ...), the title's profile's version text (JO's 1, 7, 5, 7)
+	// [orig: Game_ParseCommandLineAndInit @0x4a7d81 into byte_B4C0B0, copied @0x569b5c]; COUNTRYCODE
 	// is the install's CC.BIN, omitted when empty
 	// [orig: @0x569b70; the strlen gate @0x4c385a] (D-NET-296).
 	// [wire: retail-lan-host-join-session ClientAuth; orig: NapiNetConfig_LoadFromConnTags
@@ -357,14 +367,17 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// the APPID tag into that same field and the BT tag into char_name —
 	// NapiNetConfig_LoadFromConnTags @0x4c7260 — then
 	// Server_ValidatePlayerJoinRequest @0x512100 compares it @0x5122c5]
+	// The four build values are the title's (TitleJoinBuild: its net config's defaults, which
+	// each title's host checks against its own), the same for JO and DFX2.
+	const TitleJoinBuild &build = title_join_build(title_);
 	for (const auto &field : {
-			std::pair<const char *, const char *>{"BT", "0"},
-			std::pair<const char *, const char *>{"VN", "2"},
-			std::pair<const char *, const char *>{"BN", "1"},
-			std::pair<const char *, const char *>{"DB", "0"},
-			std::pair<const char *, const char *>{"MBN", "20042002"},
-			std::pair<const char *, const char *>{"SOPD", "180"},
-			std::pair<const char *, const char *>{"VERSIONSTRING",
+			std::pair<const char *, std::string>{"BT", "0"},
+			std::pair<const char *, std::string>{"VN", std::to_string(build.vn)},
+			std::pair<const char *, std::string>{"BN", std::to_string(build.bn)},
+			std::pair<const char *, std::string>{"DB", "0"},
+			std::pair<const char *, std::string>{"MBN", std::to_string(build.mbn)},
+			std::pair<const char *, std::string>{"SOPD", std::to_string(build.sopd)},
+			std::pair<const char *, std::string>{"VERSIONSTRING",
 					gameprofile::gameprofile_by_id(title_->game_id)->version_text},
 	}) {
 		auth.cu.push_back(make_client_cu_chunk(2, field.first, field.second));
@@ -1045,7 +1058,7 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 						vfs_expansion_version_checksum(
 								expansion_version_root_,
 								advertised_expansion_),
-						cd_cookie_)));
+						cd_cookie_, lan_session(), cd_key_ids_)));
 		io::logf(io::LogLevel::kInfo,
 				"np joiner: 0x00 JOIN CD identity cookie = %zu bytes",
 				cd_cookie_.size());

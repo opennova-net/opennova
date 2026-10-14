@@ -194,6 +194,10 @@ std::vector<ProtocolMessage> Server_HandleMedicRequest(const std::string *format
 	return replies;
 }
 
+std::string chat_squad_tag_text(const std::string &tag, bool wrapped) {
+	return wrapped ? "<ch>" + tag + "<co>" : tag;
+}
+
 bool chat_text_is_int_triplet(const std::string &text) {
 	int values[3] = {0, 0, 0};
 	const char *cursor = text.c_str();
@@ -232,8 +236,9 @@ std::vector<ProtocolMessage> Server_HandleChatMessage(NapiNPServerCtx &ctx,
 			channel != 4 && channel != 11 && channel != 2)
 		return replies;
 	std::string formatted = sender.reply.player_name;              // slot+40 @0x5138FE
-	// The squad-name suffix (slot+100572 -> the clan/squad node name +81)
-	// [orig: @0x513903..0x513930]: squads are not modeled on this host.
+	// The squad-tag suffix (slot+100572 -> the squad node's tag +81, chat_squad_tag_text)
+	// [orig: @0x513903..0x513930]: the squad list (Server_PlayerAdd's node, the S2C 0x6A
+	// family) is not modeled on this host, so no sender has one.
 	if (channel == 2) {
 		const int location = nearest_location_index(world, *sender_entity);
 		if (const std::string *label = location_label(ctx, world, location)) {

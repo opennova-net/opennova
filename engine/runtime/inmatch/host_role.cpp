@@ -9,6 +9,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h> // DisconnectEvent
+#include <net/title/title_identity.h> // title_in_match (the rules word's bits, DFX2-18)
 #include <runtime/inmatch/host_session.h>
 #include <runtime/inmatch/mission_rotation.h>
 #include <runtime/inmatch/null_datagram_socket.h>
@@ -84,7 +85,8 @@ static bool rules_in_session(const inmatch::HostConfig &host_cfg) {
 // The shared bring-up preamble: a fresh loopback + owner over the kernel's
 // world and mission, the rule words the world reads at tick time, and the
 // is_in_session fact.
-void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_play, bool in_session) {
+void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_play, bool in_session,
+		const TitleIdentity *title) {
 	mission::MissionKernel &kernel = *kernel_;
 	state.client_runtime.reset();
     local_round_reset_seen_ = kernel.local.round_reset_revision;
@@ -96,11 +98,11 @@ void HostRole::reset_state(const inmatch::GameConfig &config, bool serve_and_pla
 	state.host_owner.ctx.mission_text_loaded = false;
 	state.host_owner.ctx.rotation = rotation_;
 	map_change = HostMapChange{};
-	apply_rule_words(config, serve_and_play, in_session);
+	apply_rule_words(config, serve_and_play, in_session, title);
 }
 
 void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_and_play,
-		bool in_session) {
+		bool in_session, const TitleIdentity *title) {
 	mission::MissionKernel &kernel = *kernel_;
 	kernel.world.rules.fat_bullets = config.fat_bullets != 0;
 	kernel.world.rules.one_shot_kill = config.one_shot_kill != 0;
@@ -114,8 +116,11 @@ void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_an
 	// of one (SP: TEAM_CHOOSE 0x4, NoFriendlyFire 0x200 and 0x4000), and the S2C
 	// 0x64 +44 dword on a joiner. The SP launcher's own mpattrib (0x3A06) never
 	// reaches it [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51E94B..
-	//  0x51E957; the scope-zero floor's `test g_RulesFlags,10000h` @0x4dbd15].
-	const uint32_t rules_word = in_session ? config.mp_attributes : kSpRulesWord;
+	//  0x51E957; the scope-zero floor's `test g_RulesFlags,10000h` @0x4dbd15]. A DFX2
+	// authority then ORs the scope-zero bit 0x10000 into the word, in a session or out
+	// (DFX2-18) [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51b89e (dfx2.exe)].
+	const uint32_t rules_word = (in_session ? config.mp_attributes : kSpRulesWord) |
+			title_in_match(title).rules_word_bits;
 	kernel.world.rules.mpattrib = rules_word;
 	kernel.world.rules.hit_feedback = config.hit_feedback;
 	kernel.world.rules.auto_scope_zero =
@@ -160,6 +165,8 @@ void HostRole::make_client_runtime(uint32_t game_type) {
 	state.client_runtime->set_profile(kernel.world.profile);
 	state.client_runtime->view().set_game_type(game_type);
 	state.client_runtime->view().set_mp_session(kernel.world.rules.mp_session);
+	// The title the session speaks: the host's own view reads its loopback bodies by it.
+	state.client_runtime->view().set_title(state.host_owner.ctx.np_protocol.identity);
 	if (item_catalog_)
 		state.client_runtime->view().set_item_catalog(item_catalog_);
 }
@@ -201,7 +208,7 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 	mission::MissionKernel &kernel = *kernel_;
 	const inmatch::GameConfig config = singleplayer_game_config(
 			game_type::for_mission_attribs(kernel.mission.header.attrib_flags), profile);
-	reset_state(config, /*serve_and_play=*/true, /*in_session=*/false);
+	reset_state(config, /*serve_and_play=*/true, /*in_session=*/false, /*title=*/nullptr);
 	state.host_owner.host_loopback = &state.host_loop;
 	inmatch::HostConfig host_cfg;
 	host_cfg.config = config;
@@ -224,7 +231,8 @@ void HostRole::bring_up_singleplayer(const playersav::ProfileRecord *profile) {
 void HostRole::bring_up(const HostBringup &bringup) {
 	mission::MissionKernel &kernel = *kernel_;
 	const inmatch::HostConfig &host_cfg = bringup.host_cfg;
-	reset_state(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg));
+	reset_state(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg),
+			host_cfg.title);
 	state.host_owner.host_loopback = &state.host_loop;
 	NapiNPServerCtx &ctx = state.host_owner.ctx;
 	inmatch::set_server_text(ctx, bringup.server_text);
@@ -269,7 +277,8 @@ void HostRole::bring_up_next_mission(const HostBringup &bringup) {
 	ctx.mission = &kernel.mission;
 	ctx.rotation = rotation_;
 	ctx.host_client = nullptr;
-	apply_rule_words(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg));
+	apply_rule_words(host_cfg.config, host_cfg.serve_and_play, rules_in_session(host_cfg),
+			host_cfg.title);
 	kernel.world.crt_rand = map_change.crt_rand;
 	inmatch::set_server_text(ctx, bringup.server_text);
 	ctx.terrain_til_data = bringup.terrain_til_data;
