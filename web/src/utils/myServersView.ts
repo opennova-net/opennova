@@ -10,7 +10,8 @@ import type { MyServer } from '../types/myServers';
 //   error   - the first read failed;
 //   hidden  - the account is not approved to host and has no live server;
 //   live    - the account's server is live (its status, console and Stop);
-//   off     - approved, but the service runs no hosted servers;
+//   off     - approved, but the service runs no hosted servers (or offers
+//             no game to start one of);
 //   start   - approved and nothing live: the one Start (Try again after a
 //             failure), above the last server when there was one.
 // A live server shows whatever the approval or the service say: the service
@@ -21,7 +22,7 @@ export function hostedView(data: MyHostedServerResponse | null, failed: boolean)
   if (!data) return failed ? 'error' : 'loading';
   if (data.server?.live) return 'live';
   if (!data.can_host) return 'hidden';
-  if (!data.enabled) return 'off';
+  if (!data.enabled || data.data_sets.length === 0) return 'off';
   return 'start';
 }
 

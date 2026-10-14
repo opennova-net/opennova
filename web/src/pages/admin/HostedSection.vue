@@ -85,7 +85,8 @@
               <th scope="row" class="px-4 py-3 text-left font-medium">
                 <span class="break-words">{{ s.settings.game_name || 'Unnamed' }}</span>
                 <span class="block text-xs font-normal text-ink-muted">
-                  {{ s.settings.expansion === 'jox01' ? 'Escalation' : 'Joint Operations' }}
+                  {{ s.game_display_name || s.settings.game }}
+                  <template v-if="s.settings.expansion"> · {{ s.expansion_display_name || s.settings.expansion }}</template>
                   · {{ s.settings.max_players }} players
                 </span>
               </th>

@@ -18,6 +18,8 @@ import type {
   ConsoleLog,
   ConsoleMission,
   ConsolePlayer,
+  HostedDataSet,
+  HostedExpansionOption,
   HostedServer,
   HostedServerReply,
   HostedSettings,
@@ -28,7 +30,7 @@ import type {
   RotationEntryAction,
   StartSettings,
 } from '../types/hostedServer';
-import { FIELD_RULES, MISSIONS_MAX, isSettingsField, type SettingsField } from '../utils/hostedSettings';
+import { FIELD_RULES, INT_FIELDS, MISSIONS_MAX, isSettingsField, type SettingsField } from '../utils/hostedSettings';
 
 // The server's `error` codes these routes answer with, plus `network` (no
 // reply at all) and `unknown` (a reply this client does not recognise).
@@ -175,22 +177,62 @@ function serverOrNull(value: unknown): HostedServer | null | undefined {
   return isHostedServer(value) ? value : undefined;
 }
 
+// One expansion of a data set, or null when the entry is malformed.
+function parseExpansion(value: unknown): HostedExpansionOption | null {
+  const v = value as Partial<HostedExpansionOption> | null;
+  if (typeof v !== 'object' || v === null || typeof v.code !== 'string' || typeof v.name !== 'string') return null;
+  return { code: v.code, name: v.name };
+}
+
+// One offered data set, or null when the entry is malformed (no name, no
+// expansion, a range that is no pair of whole numbers): the form never offers
+// a game it could not check.
+function parseDataSet(value: unknown): HostedDataSet | null {
+  const v = value as Partial<Record<keyof HostedDataSet, unknown>> | null;
+  if (typeof v !== 'object' || v === null) return null;
+  if (typeof v.game !== 'string' || v.game === '' || typeof v.display_name !== 'string') return null;
+  if (!Array.isArray(v.expansions)) return null;
+  const expansions = v.expansions.map(parseExpansion);
+  if (expansions.length === 0 || expansions.some((e) => e === null)) return null;
+  const limitsIn = v.limits as Record<string, { min?: unknown; max?: unknown } | null> | undefined;
+  if (typeof limitsIn !== 'object' || limitsIn === null) return null;
+  const limits = {} as HostedDataSet['limits'];
+  for (const field of INT_FIELDS) {
+    const range = limitsIn[field];
+    const min = range?.min;
+    const max = range?.max;
+    if (!Number.isInteger(min) || !Number.isInteger(max) || (min as number) > (max as number)) return null;
+    limits[field] = { min: min as number, max: max as number };
+  }
+  const missions = Array.isArray(v.default_missions)
+    ? v.default_missions.filter((m): m is string => typeof m === 'string')
+    : [];
+  return {
+    game: v.game,
+    display_name: v.display_name,
+    expansions: expansions as HostedExpansionOption[],
+    default_missions: missions,
+    limits,
+  };
+}
+
 // GET /api/me/server: whether hosting is on, the account's approval, the
-// service's rotation and the account's server (live, else its last one).
+// data sets a start may pick and the account's server (live, else its last
+// one).
 export async function fetchMyHostedServer(signal?: AbortSignal): Promise<HostedResult<MyHostedServerResponse>> {
   try {
     const res = await apiClient.get<unknown>('/me/server', { signal });
-    const data = res.data as Partial<MyHostedServerResponse> | null;
+    const data = res.data as Partial<Record<keyof MyHostedServerResponse, unknown>> | null;
     const server = serverOrNull(data?.server);
     if (typeof data?.enabled !== 'boolean' || typeof data.can_host !== 'boolean' || server === undefined) {
       return malformed(res.status);
     }
-    const defaults = Array.isArray(data.default_missions)
-      ? data.default_missions.filter((m): m is string => typeof m === 'string')
+    const dataSets = Array.isArray(data.data_sets)
+      ? data.data_sets.map(parseDataSet).filter((d): d is HostedDataSet => d !== null)
       : [];
     return {
       ok: true,
-      value: { enabled: data.enabled, can_host: data.can_host, default_missions: defaults, server },
+      value: { enabled: data.enabled, can_host: data.can_host, data_sets: dataSets, server },
     };
   } catch (err) {
     return { ok: false, error: describeHostedError(err) };

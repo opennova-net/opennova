@@ -14,7 +14,7 @@
       The server plays these maps in order and then starts over; the first is the map it starts on.
       <template v-if="offered.length > 0">
         Choose from the {{ offered.length }} mission{{ offered.length === 1 ? '' : 's' }} this service
-        offers, up to {{ MISSIONS_MAX }}.
+        offers for the game, up to {{ MISSIONS_MAX }}.
       </template>
       <template v-else>
         This service offers no list of maps, so type each map's name, up to {{ MISSIONS_MAX }}.
@@ -139,15 +139,15 @@
 <script setup lang="ts">
 // The rotation editor of the hosted server form: an ordered list of mission
 // file names (the first the starting map), picked from the service's own list
-// (GET /api/me/server default_missions) or, when it names none, typed by file
-// name. Each mission is in the rotation at most once (the form dedupes the
+// for the picked game (GET /api/me/server, its data set's default_missions)
+// or, when it names none, typed by file name. Each mission is in the rotation at most once (the form dedupes the
 // rotation it starts from), so a mission's name keys its row and its ids.
 import { computed, nextTick, ref } from 'vue';
 import { isMissionName, MISSION_STEM_MAX, MISSIONS_MAX, uniqueMissions } from '../utils/hostedSettings';
 
 const props = defineProps<{
   modelValue: string[];
-  // The service's missions; empty when it names none.
+  // The service's missions for the picked game; empty when it names none.
   available: string[];
   // The prefix of every id inside.
   baseId: string;

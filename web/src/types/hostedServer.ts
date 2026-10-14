@@ -14,13 +14,18 @@ export type HostedState =
   | 'stopped'
   | 'failed';
 
-// '' is base Joint Operations, 'jox01' Escalation (the server runs /exp jox01).
-export type HostedExpansion = '' | 'jox01';
+// An expansion's code, as the server's /exp takes it: '' for the data set's
+// base game ('jox01', Escalation, for Joint Operations). The data set names
+// the ones it allows (HostedDataSet.expansions).
+export type HostedExpansion = string;
 
 // The owner's settings, as stored (hosted_settings.h HostedSettings). The
-// backend range-checks each one (check_settings); utils/hostedSettings.ts
-// mirrors those rules.
+// backend range-checks each one (check_settings) against the server's data
+// set; utils/hostedSettings.ts mirrors those rules.
 export interface HostedSettings {
+  // The data set the server runs: its games slug, the lobby it lists in
+  // ('jop_2_consumer', 'dfx2_consumer', 'opennova_0_consumer').
+  game: string;
   game_name: string;
   max_players: number;
   // '' for none.
@@ -38,9 +43,43 @@ export interface HostedSettings {
 }
 
 // POST /api/me/server/start's body: every field but game_name may be left out
-// (the backend's default), and missions defaults to the service's
-// ONNET_HOSTED_MISSIONS.
+// (the backend's default): game defaults to the first data set the service
+// offers, and missions to that data set's rotation (its "missions" in
+// ONNET_HOSTED_DATA_SETS).
 export type StartSettings = Pick<HostedSettings, 'game_name'> & Partial<Omit<HostedSettings, 'game_name'>>;
+
+// The whole-number settings, each with its range per data set.
+export type HostedIntField = 'max_players' | 'time_limit' | 'kill_limit' | 'max_score' | 'respawn' | 'start_delay';
+
+// A whole-number setting's range, both ends included.
+export interface SettingRange {
+  min: number;
+  max: number;
+}
+
+// One expansion a data set allows: its code ('' for the base game) and the
+// name the page shows.
+export interface HostedExpansionOption {
+  code: HostedExpansion;
+  name: string;
+}
+
+// A data set the service offers hosted servers of (hosted/data_sets.h): the
+// game folder a server mounts, the title it speaks and the lobby it lists in.
+export interface HostedDataSet {
+  // Its games slug, the value of HostedSettings.game.
+  game: string;
+  display_name: string;
+  // The base game ('') first.
+  expansions: HostedExpansionOption[];
+  // The deployment's rotation for it (its "missions" in ONNET_HOSTED_DATA_SETS),
+  // which a start naming no missions takes, and the missions the rotation
+  // picker offers; empty when none is configured, and a start must then name
+  // its own.
+  default_missions: string[];
+  // The host screen's ranges, per setting.
+  limits: Record<HostedIntField, SettingRange>;
+}
 
 // The listing the server's service account holds now.
 export interface HostedListing {
@@ -71,6 +110,10 @@ export interface HostedServer {
   // Any state but stopped and failed.
   live: boolean;
   settings: HostedSettings;
+  // The names the service gives the server's game and expansion ("Joint
+  // Operations", "Escalation (jox01)" or "Joint Operations (base game)").
+  game_display_name: string;
+  expansion_display_name: string;
   // Crash restarts counted toward the limit (3 in the restart window).
   restarts: number;
   // Why it failed, in the service's words; null unless it did.
@@ -87,14 +130,14 @@ export interface HostedServer {
 
 // GET /api/me/server.
 export interface MyHostedServerResponse {
-  // The service runs hosted servers (ONNET_HOSTED_PROVIDER is not none).
+  // The service runs hosted servers (ONNET_HOSTED_PROVIDER is not none, and
+  // it offers at least one data set).
   enabled: boolean;
   // An admin approved this account for a hosted server.
   can_host: boolean;
-  // The service's configured rotation (ONNET_HOSTED_MISSIONS), which a start
-  // naming no missions takes; empty when none is configured, and a start must
-  // then name its own.
-  default_missions: string[];
+  // The data sets a start may pick, in the service's order (the first is a
+  // start's default); only the ones this deployment configured.
+  data_sets: HostedDataSet[];
   // The account's live server, else its newest ended one, else null.
   server: HostedServer | null;
 }
