@@ -11,8 +11,7 @@ extends GutTest
 ## with what the game holds, play_debug fires an event and sets a variable through the game's rows, and the game's
 ## refusal reaches Output in its words.
 
-const EDITOR_SCENE := "res://editor/editor_root.tscn"
-const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const IDLE_GAME := "res://tests/authoring/live_idle_game.gd"
 const MISSION := "missions/logic.bms"
 
@@ -26,17 +25,8 @@ var _controls: DebugControlTable = null
 
 
 func before_each() -> void:
-	var packed := load(EDITOR_SCENE) as PackedScene
-	assert_not_null(packed, "the editor scene loads (the editor-enabled variant is loaded)")
-	if packed == null:
-		return
-	_app = packed.instantiate()
-	_seam = EditorSeam.new(_app)
-	var settings_dir := OS.get_cache_dir().path_join("opennova editor live %d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
-	_dirs.append(settings_dir)
-	_app.set("settings_path", settings_dir.path_join("editor_settings.json"))
-	add_child_autofree(_app)
+	_seam = await EditorFixture.boot(self, "live", _dirs)
+	_app = _seam.app if _seam != null else null
 
 
 func after_each() -> void:
@@ -51,10 +41,7 @@ func after_each() -> void:
 		while _seam.get_play_state() != "stopped" and Time.get_ticks_msec() < deadline:
 			await get_tree().create_timer(0.05).timeout
 			_app.pump()
-	_app = null
-	for dir in _dirs:
-		TestFs.remove_dir_recursive(dir)
-	_dirs.clear()
+	await EditorFixture.teardown(self, _dirs)
 
 
 # A request through the wire seam, settled.

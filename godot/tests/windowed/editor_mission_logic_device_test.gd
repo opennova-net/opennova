@@ -13,8 +13,7 @@ extends GutTest
 ## - A group's colour drawn: coloured by group, the window's own picture holds the walker's group's ring colour
 ##   (the editor's palette, mission_overlay.h's mission_group_rgb) about its mark; coloured by team, it does not.
 
-const EDITOR_SCENE := "res://editor/editor_root.tscn"
-const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const FIXTURES := "res://../fixtures/"
 const TERRAIN_TEXTURES := ["mnml_c", "mnml_dm", "mnml_dc1", "mnml_dc2", "mnml_dc3", "mnml_dmd", "mnml_d1", "mnml_t"]
 const MISSION_PATH := "missions/synth_logic.bms"
@@ -25,29 +24,12 @@ var _seam: RefCounted = null
 
 
 func before_each() -> void:
-	# The ImGui context past its first frames before the editor attaches to it (see editor_device_test.gd).
-	for _frame in 3:
-		await get_tree().process_frame
-	var packed := load(EDITOR_SCENE) as PackedScene
-	assert_not_null(packed, "the editor scene loads (the editor-enabled variant is loaded)")
-	if packed == null:
-		return
-	_app = packed.instantiate()
-	_seam = EditorSeam.new(_app)
-	var settings_dir := OS.get_cache_dir().path_join("opennova editor mission logic device %d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
-	_dirs.append(settings_dir)
-	_app.set("settings_path", settings_dir.path_join("editor_settings.json"))
-	add_child_autofree(_app)
-	await get_tree().process_frame
+	_seam = await EditorFixture.boot(self, "mission logic device", _dirs, 3)
+	_app = _seam.app if _seam != null else null
 
 
 func after_each() -> void:
-	_app = null
-	for dir in _dirs:
-		TestFs.remove_dir_recursive(dir)
-	_dirs.clear()
-	await get_tree().process_frame
+	await EditorFixture.teardown(self, _dirs)
 
 
 func _state() -> Dictionary:

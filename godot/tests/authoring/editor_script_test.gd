@@ -17,8 +17,7 @@ extends GutTest
 ## over the reserved rect and the pointer and keys it owns there need the workspace drawn
 ## (tests/windowed/editor_script_device_test.gd).
 
-const EDITOR_SCENE := "res://editor/editor_root.tscn"
-const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const McpTestClient := preload("res://tests/mcp/mcp_test_client.gd")
 const SCRIPT := "scripts/text_document.wac"
 const CREDITS := "menus/nlist.kda"
@@ -32,17 +31,8 @@ var _client: RefCounted = null
 
 
 func before_each() -> void:
-	var packed := load(EDITOR_SCENE) as PackedScene
-	assert_not_null(packed, "the editor scene loads (the editor-enabled variant is loaded)")
-	if packed == null:
-		return
-	_app = packed.instantiate()
-	_seam = EditorSeam.new(_app)
-	var settings_dir := OS.get_cache_dir().path_join("opennova editor script %d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
-	_dirs.append(settings_dir)
-	_app.set("settings_path", settings_dir.path_join("editor_settings.json"))
-	add_child_autofree(_app)
+	_seam = await EditorFixture.boot(self, "script", _dirs)
+	_app = _seam.app if _seam != null else null
 
 
 func after_each() -> void:
@@ -50,11 +40,8 @@ func after_each() -> void:
 		_client.close()
 		_client = null
 	_service = null
-	_app = null
 	McpLogHub.instance = null
-	for dir in _dirs:
-		TestFs.remove_dir_recursive(dir)
-	_dirs.clear()
+	await EditorFixture.teardown(self, _dirs)
 
 
 func _fixture(relative: String) -> PackedByteArray:

@@ -11,8 +11,7 @@ extends GutTest
 ## frame_us, unit_us, total_us), each label's units and time, and the three longest units: the
 ## measurement the first-picture budget and the stepped placement (D5) are read against.
 
-const EDITOR_SCENE := "res://editor/editor_root.tscn"
-const EditorSeam := preload("res://tests/authoring/editor_seam.gd")
+const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const MISSION := "ASH_I1gA.bms"
 ## How long the picture's build may stand still (no unit run) before it counts as a hang: the build
 ## takes as long as it takes while it moves (the import's settle is the seam's, likewise by progress).
@@ -26,25 +25,12 @@ var _seam: RefCounted = null
 func before_each() -> void:
 	if RetailData.install().is_empty():
 		return
-	var packed := load(EDITOR_SCENE) as PackedScene
-	assert_not_null(packed, "the editor scene loads (the editor-enabled variant is loaded)")
-	if packed == null:
-		return
-	_app = packed.instantiate()
-	_seam = EditorSeam.new(_app)
-	var settings_dir := OS.get_cache_dir().path_join("opennova editor retail mission viewport %d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
-	_dirs.append(settings_dir)
-	_app.set("settings_path", settings_dir.path_join("editor_settings.json"))
-	add_child_autofree(_app)
+	_seam = await EditorFixture.boot(self, "retail mission viewport", _dirs)
+	_app = _seam.app if _seam != null else null
 
 
 func after_each() -> void:
-	_app = null
-	for dir in _dirs:
-		TestFs.remove_dir_recursive(dir)
-	_dirs.clear()
-	await get_tree().process_frame
+	await EditorFixture.teardown(self, _dirs)
 
 
 func _state(path: String) -> Dictionary:
