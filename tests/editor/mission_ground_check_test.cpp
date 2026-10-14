@@ -125,7 +125,7 @@ std::vector<uint8_t> crate_anchored_at(double height) {
 
 // The catalog: a crate, the crate anchored 0.25 up, the crate anchored 1.5 up (over its 1-unit top), the
 // synth house (a 4-unit body under a roof slab to 4.4), a player-controlled truck (cveh), a rifleman (org1),
-// a statue (a person of org0's class, which has no motor), a bird (org1), a marker.
+// a statue (a person of org0's class, which has no motor), a bird (org1), a marker, a person naming no table.
 constexpr const char *kItems =
 		"begin \"Null\"\nid 100000\ntype marker\nend\n"
 		"begin \"Crate\"\nid 101001\ntype decoration\ngraphic crate\nend\n"
@@ -139,9 +139,13 @@ constexpr const char *kItems =
 		"move_function org0\nattrib: aidata\nend\n"
 		"begin \"Bird\"\nid 101008\ntype person\ngraphic shed\nanim_def people\nai_function org1\nmove_function org1\n"
 		"attrib: aidata\nend\n"
-		"begin \"Flag\"\nid 101009\ntype marker\nend\n";
-constexpr const char *kPeopleAdm = "anim_reset\t\"idle\"\r\nanim_idle\t\"idle\" \"walk\"\r\nanim_idle_2\t\"idle\"\r\n"
-								   "anim_walk_forward\t\"walk\"\r\nanim_guard\t\"walk\"\r\n"
+		"begin \"Flag\"\nid 101009\ntype marker\nend\n"
+		"begin \"Mute\"\nid 101010\ntype person\ngraphic shed\nai_function org1\nmove_function org1\n"
+		"attrib: aidata\nend\n";
+// The people's table: its idle row three entries, so that a body's two serves at its init (the secondary's, then the
+// primary's) move the variant the next body of the table plays.
+constexpr const char *kPeopleAdm = "anim_reset\t\"idle\"\r\nanim_idle\t\"idle\" \"walk\" \"idle\"\r\n"
+								   "anim_idle_2\t\"idle\"\r\nanim_walk_forward\t\"walk\"\r\nanim_guard\t\"walk\"\r\n"
 								   "anim_idle_look\t\"walk\"\r\nanim_idle_2_look\t\"walk\"\r\n";
 
 // The terrain's height at (x, y), the column the game's probe writes.
@@ -700,6 +704,8 @@ static std::unique_ptr<AttendReference> attend_reference(const MissionViewport &
 	w.registry.for_each_in_pool(0, [&](const world::Entity &entity) {
 		if (const MissionEntityMark *mark = out->world.mark_of(entity, viewport.scene().entities()))
 			rows[entity.handle.packed] = mark->row;
+		// No table but a posed person's own.
+		if (world::AiEntity *body = w.ai.for_handle(entity.handle)) body->inf.adm_id = -1;
 	});
 	for (const auto &row : rows)
 		if (const MissionPose *pose = viewport.poses().pose(row.second))
@@ -722,12 +728,14 @@ static int test_people_attend() {
 	s.records = [](const opennova::terrain::TerrainHeightField &field, const Places &at, double) {
 		const double px = at.land[2][0], py = at.land[2][1];
 		using K = mission::EntityKind;
-		std::vector<Placed> placed(5);
-		placed[0] = { K::Organic, 101006, px, py, terrain_height(field, px, py), 0, 90, 1, 2, 40 };
-		placed[1] = { K::Organic, 101006, px + 1.5, py, terrain_height(field, px + 1.5, py), 0, 270, 1, 0, 40 };
-		placed[2] = { K::Organic, 101006, px, py + 2.5, terrain_height(field, px, py + 2.5), 0, 180, 1, 0, 40 };
-		placed[3] = { K::Organic, 101006, px + 16.0, py, terrain_height(field, px + 16.0, py), 0, 270, 1, 0, 40 };
-		placed[4] = { K::Item, 101001, px + 8.0, py, terrain_height(field, px + 8.0, py) };
+		std::vector<Placed> placed(6);
+		// Ahead of the riflemen a person whose item names no table: spawned with its AI slot, posed by nothing.
+		placed[0] = { K::Organic, 101010, px - 6.0, py, terrain_height(field, px - 6.0, py), 0, 90, 1, 0, 40 };
+		placed[1] = { K::Organic, 101006, px, py, terrain_height(field, px, py), 0, 90, 1, 2, 40 };
+		placed[2] = { K::Organic, 101006, px + 1.5, py, terrain_height(field, px + 1.5, py), 0, 270, 1, 0, 40 };
+		placed[3] = { K::Organic, 101006, px, py + 2.5, terrain_height(field, px, py + 2.5), 0, 180, 1, 0, 40 };
+		placed[4] = { K::Organic, 101006, px + 16.0, py, terrain_height(field, px + 16.0, py), 0, 270, 1, 0, 40 };
+		placed[5] = { K::Item, 101001, px + 8.0, py, terrain_height(field, px + 8.0, py) };
 		return placed;
 	};
 	TEST_EXPECT(s.open());
@@ -759,6 +767,14 @@ static int test_people_attend() {
 	std::unique_ptr<AttendReference> reference = attend_reference(*viewport(), s, files, ground);
 	TEST_EXPECT(reference && reference->played.size() == 4);
 	if (!reference) return 1;
+	// At the start each played body stands in the pose the poses gave it: the unposed person ahead, its item naming no
+	// table, has no channel and served no ring.
+	for (const auto &body : reference->played) {
+		const world::InfantryBodyPose *now = viewport()->people().pose(body.first);
+		const MissionPose *spawned = viewport()->poses().pose(body.first);
+		TEST_EXPECT(now && spawned && now->state == spawned->pose.state && now->variant == spawned->pose.variant &&
+				now->phase == spawned->pose.phase);
+	}
 	bool looked = false, look_idle = false, turned = false;
 	const NodeId red = reference->played.front().first;
 	MissionPeople::Look first;

@@ -70,9 +70,13 @@ bool MissionPeople::start_world_(const MissionPoses &poses) {
 	w.ai.root_motion = poses.motion();
 	w.ai.anim_rings = world::AnimVariantRings();
 	w.logic_tick = 0;
-	// Each posed person's table as the poses registered it; then every pool-0 row's organic init in pool order, the
-	// ring heads served as the game's load serves them [orig: Entity_SpawnFromBMSRecord @0x40E9F0 ->
-	// Entity_InitOrganicAI @0x4BFCC0, in pool order; mission::MissionKernel::boot's organic_init].
+	// Each posed person's table as the poses registered it, every other body none (no table: no channel, no ring
+	// served); then every pool-0 row's organic init in pool order, the ring heads served as the game's load serves them
+	// [orig: Entity_SpawnFromBMSRecord @0x40E9F0 -> Entity_InitOrganicAI @0x4BFCC0, in pool order;
+	// mission::MissionKernel::boot's organic_init].
+	w.registry.for_each_in_pool(0, [&](const world::Entity &row) {
+		if (world::AiEntity *body = w.ai.for_handle(row.handle)) body->inf.adm_id = -1;
+	});
 	for (const MissionPose &pose : poses.poses()) {
 		const auto found = fresh->bodies.find(pose.row);
 		if (found == fresh->bodies.end()) continue;
