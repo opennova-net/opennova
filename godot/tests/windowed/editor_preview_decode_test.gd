@@ -3,12 +3,13 @@ extends GutTest
 ## The particle and definition previews draw the game's content as the game draws it (ADR 0046 "The preview
 ## background", its follow-up). Every engine shader writes the D3D9 gamma-domain numbers, and the game shows them
 ## through exactly one display decode: the FrameFx terminal its WorldEnvironment carries, which the particle
-## renderer composes last behind its passes on the camera. A preview with no WorldEnvironment carries its decode on
-## its scenario (DisplayDecode); the particle renderer's camera compositor replaced it there, so while particles drew
-## the effect's and the definition's pictures showed their numbers encoded once more than the game's (a particle and
-## a model brighter than the game draws them). Each preview's picture is read here against the game's frame: the
-## game world's own render nodes (the ClearColor WorldEnvironment, FrameFx, the MissionEnvironment with no .env the
-## previews light by, the EffectWorld and an ObjectModel) over the same files, seen through the preview's camera.
+## renderer composes last behind its passes on the camera. Each 3D preview carries the game
+## world's ClearColor and FrameFx rows for it; a FrameFx with no WorldEnvironment beside it
+## installs no terminal, and the picture showed its numbers encoded once more than the game's (a
+## particle and a model brighter than the game draws them). Each preview's picture is read here
+## against the game's frame: the game world's own render nodes (the ClearColor WorldEnvironment,
+## FrameFx, the MissionEnvironment with no .env the previews light by, the EffectWorld and an
+## ObjectModel) over the same files, seen through the preview's camera.
 
 const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const CRATE := "res://../fixtures/threedi/synth/crate.3di"

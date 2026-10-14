@@ -11,12 +11,14 @@
 
 namespace godot {
 
-// The editor's preview background (the Preview background preference, editor/session/preview_background.h) as a
-// preview's device draws it behind its picture: the editor's tool, not the game's look. Each colour goes in as it
-// shows on screen: a 2D picture draws its numbers as they are, and a 3D picture's are the gamma-domain numbers
-// every engine shader writes, which its one display decode (render/frame_fx.h, DisplayDecode) shows as they are,
-// particles drawing or not (the particle renderer composes its passes around the decode).
-// Dark leaves each picture's own (a 3D picture's clear colour, `own` for a 2D one).
+// The editor's preview background (the Preview background preference,
+// editor/session/preview_background.h) as a preview's device draws it behind its picture: the
+// editor's tool, not the game's look. Each colour goes in as it shows on screen: a 2D picture draws
+// its numbers as they are, and a 3D picture's are the gamma-domain numbers every engine shader
+// writes, which its one display decode (the FrameFx terminal on the game world's ClearColor,
+// authoring/preview_frame_effects.h) shows as they are, particles drawing or not (the particle
+// renderer composes its passes ahead of the decode). Dark leaves each picture's own (a 3D picture's
+// clear colour, `own` for a 2D one).
 
 // The background's uniforms and `vec3 preview_backdrop(float down, vec2 pixel)` (`down` 0 at the picture's top
 // edge, 1 at its bottom; `pixel` the picture's pixel, the checker's squares counted from its top left), for a

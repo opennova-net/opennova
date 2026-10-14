@@ -32,6 +32,25 @@ static func read(device: SubViewport, rect_name: String) -> Dictionary:
 	return {"material": rect.material, "shown": rect.visible, "quad": false}
 
 
+## A 3D picture's one display decode, as the game's frame takes it: the game world's ClearColor
+## and FrameFx beside its scene, FrameFx's terminal installed on the ClearColor. A FrameFx with no
+## WorldEnvironment in its scope installs none, and the view shows its gamma-domain numbers
+## encoded once more than the game's (the windowed editor_preview_background_test and
+## editor_preview_decode_test read the colours).
+static func check_decode(test: GutTest, device: SubViewport, kind: String) -> void:
+	var frames: Array[Node] = []
+	if device != null:
+		frames = device.find_children("*", "FrameFx", true, false)
+	test.assert_eq(frames.size(), 1, "%s's device carries the game's FrameFx" % kind)
+	if frames.size() != 1:
+		return
+	var report: Dictionary = (frames[0] as FrameFx).get_backend_report()
+	test.assert_true(
+		bool(report.get("terminal_compositor_installed", false)),
+		"%s's view takes FrameFx's terminal decode on its ClearColor" % kind
+	)
+
+
 ## The default and then each background, the device drawing each after the next pump.
 static func check_each(test: GutTest, app: Node, seam: RefCounted, path: String, kind: String, rect_name := "") -> void:
 	var first := true
@@ -47,6 +66,8 @@ static func check_each(test: GutTest, app: Node, seam: RefCounted, path: String,
 		test.assert_false(drawn.is_empty(), "%s's device draws a backdrop" % kind)
 		if drawn.is_empty():
 			return
+		if background == "grey" and bool(drawn["quad"]):
+			check_decode(test, app.get_viewport_device(path, kind), kind)
 		var material := drawn["material"] as ShaderMaterial
 		test.assert_not_null(material, "%s's backdrop is a shader" % kind)
 		if material == null:
