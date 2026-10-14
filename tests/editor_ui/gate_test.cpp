@@ -53,31 +53,6 @@ std::string status_name(const OperationStatus &status) {
 	return std::string(operation_kind_row(status.kind).token) + (status.cancellable ? " (cancellable)" : " (not cancellable)");
 }
 
-bool modal_open(const char *title) {
-	const ImGuiWindow *window = ImGui::FindWindowByName(title);
-	return window && window->Active;
-}
-
-// The point along `x` in [top, bottom] where the mouse hovers the item `id`, found moving down.
-bool hover_find(Ui &ui, ImGuiID id, float x, float top, float bottom, ImVec2 &at) {
-	for (float y = top; y < bottom; y += 2.0f) {
-		ui.mouse(x, y);
-		if (GImGui->HoveredId == id) {
-			at = ImVec2(x, y);
-			return true;
-		}
-	}
-	return false;
-}
-
-int factory_index(const char *role, AssetKind kind) {
-	for (size_t i = 0; i < blank_factory_count(); ++i) {
-		const BlankFactory *factory = blank_factory_at(i);
-		if (std::string(factory->role) == role && factory->kind == kind) return static_cast<int>(i);
-	}
-	return -1;
-}
-
 // A field of the menu's TITLE window renamed: an unsaved edit, an undo step.
 bool rename_title(MnuDocument &document, const char *name) {
 	Edit rename;

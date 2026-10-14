@@ -51,16 +51,6 @@ const ImGuiWindow *card_of(NodeId event) {
 	return nullptr;
 }
 
-// A popup's child, as ImGui names it: the popup's window, then "<child>_<its id>".
-ImGuiID popup_child(ImGuiID popup, const char *child) {
-	char popup_name[32];
-	std::snprintf(popup_name, sizeof(popup_name), "##Popup_%08x", popup);
-	const ImGuiID popup_window = ImHashStr(popup_name);
-	char name[96];
-	std::snprintf(name, sizeof(name), "%s/%s_%08X", popup_name, child, ImHashStr(child, 0, popup_window));
-	return ImHashStr(name);
-}
-
 void show_logic(MissionRun &run) {
 	window_requests::show_logic(run.ui.windows, run.path, true);
 	run.settle();

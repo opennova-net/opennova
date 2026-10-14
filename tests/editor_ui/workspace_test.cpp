@@ -138,11 +138,6 @@ void type_into(Ui &ui, ImGuiID field, const char *text) {
 	ui.frames(2);
 }
 
-bool modal_open(const char *title) {
-	const ImGuiWindow *window = ImGui::FindWindowByName(title);
-	return window && window->Active;
-}
-
 ImGuiTabBar *document_tabs() { return GImGui->TabBars.GetByKey(item_id(Ui::window_id("Document"), {"documents"})); }
 
 // Where a tab of the bar is: its row, from its offset and width.
@@ -159,29 +154,6 @@ ImVec2 close_button(const ImGuiTabBar &bar, const std::string &path) {
 	const ImGuiStyle &style = ImGui::GetStyle();
 	const float size = ImGui::GetFontSize();
 	return ImVec2(rect.Max.x - style.FramePadding.x - size * 0.5f, rect.Min.y + style.FramePadding.y + size * 0.5f);
-}
-
-// The point in [top, bottom] along `x` where the mouse hovers the item `id` (a row of a
-// list), found moving the mouse down; false when none does.
-bool hover_find(Ui &ui, ImGuiID id, float x, float top, float bottom, ImVec2 &at) {
-	for (float y = top; y < bottom; y += 2.0f) {
-		ui.mouse(x, y);
-		if (GImGui->HoveredId == id) {
-			at = ImVec2(x, y);
-			return true;
-		}
-	}
-	return false;
-}
-
-// The factory at its index in the blank factories' table, the index the New menu's entry
-// is pushed with.
-int factory_index(const char *role, AssetKind kind) {
-	for (size_t i = 0; i < blank_factory_count(); ++i) {
-		const BlankFactory *factory = blank_factory_at(i);
-		if (std::string(factory->role) == role && factory->kind == kind) return static_cast<int>(i);
-	}
-	return -1;
 }
 
 std::shared_ptr<MnuDocument> edited(std::shared_ptr<MnuDocument> document) {
@@ -1926,11 +1898,6 @@ void test_import_dialog_held_rows() {
 	CHECK(logged_frame(ui).find("Import 2 files") != std::string::npos, "Replace existing files checks every held row");
 	ui.activate(item_id(dialog, {"Replace existing files"}));
 	CHECK(logged_frame(ui).find("Import 1 file") != std::string::npos, "and unchecks them");
-}
-
-std::string lowered(std::string text) {
-	for (char &c : text) c = char(std::tolower(static_cast<unsigned char>(c)));
-	return text;
 }
 
 // The Preview window over a real session as the Shell drives it: after each frame the requests

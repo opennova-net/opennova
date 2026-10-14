@@ -70,6 +70,7 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/menu_test_support.h"
 #include "editor/test_platform.h"
 #include "editor/viewport_test_support.h"
 
@@ -195,11 +196,7 @@ int64_t field_of(const Document &document, const NodeAddress &address, const cha
 																						  : -1;
 }
 
-NodeAddress named(const Document &document, const char *name) {
-	NodeAddress address;
-	find_definition(AssetGraph(), document, name, address);
-	return address;
-}
+using menu_test::named;
 
 // A window's four edges: left, top, right, bottom.
 std::vector<int64_t> edges(const Document &document, const NodeAddress &window) {

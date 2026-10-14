@@ -20,11 +20,6 @@ namespace editor_ui_test {
 
 namespace {
 
-std::string lowered(std::string text) {
-	for (char &c : text) c = char(std::tolower(static_cast<unsigned char>(c)));
-	return text;
-}
-
 // The workspace over a session: each frame's requests served as the Shell serves them, the devices
 // following the viewports.
 struct ClipRun {

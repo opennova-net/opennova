@@ -107,11 +107,6 @@ void open_picker(Ui &ui, const PickerProject &project, const char *field, const 
 	}
 }
 
-void press(Ui &ui, ImGuiKey key) {
-	ui.key(key, true);
-	ui.key(key, false);
-}
-
 // Frames with a Files row's path dragged (an outside source holding it while the button is
 // down), the mouse wherever the test put it.
 void drag_frames(Ui &ui, const std::string &path, int count) {

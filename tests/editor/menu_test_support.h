@@ -6,6 +6,8 @@
 #include <vector>
 
 #include <editor/documents/mnu_document.h>
+#include <editor/graph/asset_graph.h>
+#include <editor/graph/reference_queries.h>
 
 #include "editor/editor_test_support.h"
 
@@ -41,6 +43,13 @@ inline opennova::editor::NodeAddress child_of(const opennova::editor::Document &
 		if (std::string(document.kind_token(collection.spec.kind)) == token && index < collection.ids.size())
 			return {owner.row, collection.spec.kind, collection.ids[index]};
 	return {};
+}
+
+// A record by the name it defines (a window's, a style's): find_definition over no graph.
+inline opennova::editor::NodeAddress named(const opennova::editor::Document &document, const char *name) {
+	opennova::editor::NodeAddress address;
+	opennova::editor::find_definition(opennova::editor::AssetGraph(), document, name, address);
+	return address;
 }
 
 // One batch: the window's APPEARANCE row `row` made an IMAGE row showing `texture`.

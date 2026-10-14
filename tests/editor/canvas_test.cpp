@@ -76,6 +76,7 @@
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 #include "editor/editor_test_support.h"
+#include "editor/menu_test_support.h"
 #include "editor/test_platform.h"
 
 using namespace opennova::editor;
@@ -259,11 +260,7 @@ struct NoFiles final : opennova::FileSource {
 	uint64_t stamp(const std::string &) const override { return 0; }
 };
 
-NodeAddress named(const Document &document, const char *name) {
-	NodeAddress address;
-	find_definition(AssetGraph(), document, name, address);
-	return address;
-}
+using menu_test::named;
 
 // A window by name wherever it sits, a part's too.
 NodeAddress walked(const Document &document, const Node &row, const char *name) {

@@ -462,6 +462,24 @@ inline size_t count_code(const std::vector<opennova::editor::Diagnostic> &findin
 	return n;
 }
 
+// A scanned file of the project as a hand-made scan holds it.
+inline opennova::editor::AssetEntry file_entry(const std::string &name, const std::string &path,
+		opennova::editor::AssetKind kind) {
+	opennova::editor::AssetEntry entry;
+	entry.logical_name = name;
+	entry.relative_path = path;
+	entry.kind = kind;
+	return entry;
+}
+
+// The finding a required file the project lacks makes (requirement.missing, about its role).
+inline opennova::editor::Diagnostic missing_finding(const char *role, const char *name) {
+	opennova::editor::Diagnostic d = finding_of(opennova::editor::DiagnosticSeverity::Error, "requirement.missing",
+			std::string("Missing required file ") + name + ".");
+	d.subject = opennova::editor::RequirementSubject{role, name};
+	return d;
+}
+
 // What the game install makes of the files at `paths`, as its validation keys them (OriginalData, the game's
 // own data's baseline, ready): every finding of `rows` about one of them, by the file's logical name.
 inline opennova::editor::OriginalData originals_of(const std::vector<opennova::editor::Diagnostic> &rows,

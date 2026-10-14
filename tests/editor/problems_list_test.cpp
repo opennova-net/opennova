@@ -48,25 +48,14 @@ RequirementRow missing_row(const char *role, const char *name, AssetKind kind) {
 	return row;
 }
 
-Diagnostic missing_finding(const char *role, const char *name) {
-	Diagnostic d = editor_test::finding_of(DiagnosticSeverity::Error, "requirement.missing",
-	                                       std::string("Missing required file ") + name + ".");
-	d.subject = RequirementSubject{role, name};
-	return d;
-}
+using editor_test::missing_finding;
 
 Diagnostic finding(DiagnosticSeverity severity, const char *code, const char *message,
                    const char *file = "", const char *field = "") {
 	return editor_test::finding_of(severity, code, message, file, field);
 }
 
-AssetEntry file_entry(const std::string &name, const std::string &path, AssetKind kind) {
-	AssetEntry entry;
-	entry.logical_name = name;
-	entry.relative_path = path;
-	entry.kind = kind;
-	return entry;
-}
+using editor_test::file_entry;
 
 // Two required files the project lacks, each made by a factory (the game data has
 // gametext.bin; a spare string table and two menus could stand in for them), a catalog error

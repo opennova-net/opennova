@@ -68,11 +68,6 @@ bool goes_to(const std::vector<EditorRequest> &requests, const std::string &path
 	return open && open->path == path && open->locator == locator && open->field == field;
 }
 
-void press(Ui &ui, ImGuiKey key) {
-	ui.key(key, true);
-	ui.key(key, false);
-}
-
 // The project's finder (one modal over its scopes, its id "###project_find" whatever its title).
 const ImGuiWindow *finder() {
 	if (GImGui->OpenPopupStack.Size != 1 || !GImGui->OpenPopupStack[0].Window) return nullptr;

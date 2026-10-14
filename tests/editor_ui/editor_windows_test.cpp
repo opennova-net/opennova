@@ -1514,11 +1514,7 @@ RequirementRow missing_row(const char *role, const char *name, AssetKind kind, b
 	return row;
 }
 
-Diagnostic missing_finding(const char *role, const char *name) {
-	Diagnostic d = editor_test::finding_of(DiagnosticSeverity::Error, "requirement.missing", std::string("Missing required file ") + name + ".");
-	d.subject = RequirementSubject{role, name};
-	return d;
-}
+using editor_test::missing_finding;
 
 constexpr const char *kGametext = "Missing required file gametext.bin";
 constexpr const char *kMainMenu = "Missing required file main.mnu";

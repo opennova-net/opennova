@@ -11,6 +11,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -21,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include <editor/blank/blank_factory.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mnu_document.h>
 #include <editor/graph/reference_queries.h>
@@ -39,6 +41,7 @@
 #include <editor/ui/editor_windows.h>
 #include "../editor/anim_test_support.h"
 #include "../editor/editor_test_support.h"
+#include "../editor/menu_test_support.h"
 #include "../editor/test_platform.h"
 #include "../devtools/imgui_null_backend.h"
 #include "common/file_io.h"
@@ -383,6 +386,64 @@ inline ImGuiID document_tab_id(const std::string &path) {
 	return ImHashStr(("###" + path).c_str(), 0, bar);
 }
 
+// A key pressed and let go.
+inline void press(Ui &ui, ImGuiKey key) {
+	ui.key(key, true);
+	ui.key(key, false);
+}
+
+// A right click at `at`: the frame after it, its text.
+inline std::string right_click(Ui &ui, ImVec2 at) {
+	ui.mouse(at.x, at.y);
+	ui.button(true, ImGuiMouseButton_Right);
+	ui.button(false, ImGuiMouseButton_Right);
+	return logged_frame(ui);
+}
+
+// The point along `x` in [top, bottom] where the mouse hovers the item `id`, found moving down.
+inline bool hover_find(Ui &ui, ImGuiID id, float x, float top, float bottom, ImVec2 &at) {
+	for (float y = top; y < bottom; y += 2.0f) {
+		ui.mouse(x, y);
+		if (GImGui->HoveredId == id) {
+			at = ImVec2(x, y);
+			return true;
+		}
+	}
+	return false;
+}
+
+// Whether the window (a modal) titled `title` was drawn in the last frame.
+inline bool modal_open(const char *title) {
+	const ImGuiWindow *window = ImGui::FindWindowByName(title);
+	return window && window->Active;
+}
+
+// A popup's child, as ImGui names it: the popup's window, then "<child>_<its id>".
+inline ImGuiID popup_child(ImGuiID popup, const char *child) {
+	char popup_name[32];
+	std::snprintf(popup_name, sizeof(popup_name), "##Popup_%08x", popup);
+	const ImGuiID popup_window = ImHashStr(popup_name);
+	char name[96];
+	std::snprintf(name, sizeof(name), "%s/%s_%08X", popup_name, child, ImHashStr(child, 0, popup_window));
+	return ImHashStr(name);
+}
+
+// The index of the blank factory of `role` and `kind` in the blank factories' table (-1: none): the
+// index the New menu's entry is pushed with.
+inline int factory_index(const char *role, AssetKind kind) {
+	for (size_t i = 0; i < blank_factory_count(); ++i) {
+		const BlankFactory *factory = blank_factory_at(i);
+		if (std::string(factory->role) == role && factory->kind == kind) return static_cast<int>(i);
+	}
+	return -1;
+}
+
+// `text` in lower case.
+inline std::string lowered(std::string text) {
+	for (char &c : text) c = char(std::tolower(static_cast<unsigned char>(c)));
+	return text;
+}
+
 // Two root windows; MAIN holds BACK (a HOTKEY, two ACTIONs, a SOUND), PANEL (holding the
 // list CHOICES, whose scrollbar part holds INPART) and TITLE.
 inline constexpr const char *kMenu =
@@ -427,19 +488,8 @@ inline std::shared_ptr<MnuDocument> load_menu(const editor_test::TempProjectDir 
 	return document;
 }
 
-inline NodeAddress named(const Document &document, const char *name) {
-	NodeAddress address;
-	find_definition(AssetGraph(), document, name, address);
-	return address;
-}
-
-inline AssetEntry file_entry(const std::string &name, const std::string &path, AssetKind kind) {
-	AssetEntry entry;
-	entry.logical_name = name;
-	entry.relative_path = path;
-	entry.kind = kind;
-	return entry;
-}
+using editor_test::file_entry;
+using menu_test::named;
 
 // An open project with one menu, the active document.
 inline SessionView menu_view(const std::shared_ptr<MnuDocument> &document) {
