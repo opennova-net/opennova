@@ -24,8 +24,12 @@ frame the text takes, in a scratch folder outside the repo; nothing of theirs is
   mesh, a vertex every 2 texels at 1 unit a texel with the world's origin at the map's centre (the
   terrain importer's island layout), textured with the set's colour map and detail map (linked as files,
   not copied), the sea a plane at the set's water height (12). Its point attributes, taken from the
-  set's surface map (the track), its foliage map (codes 253 and 254) and the clearing at the track's
-  north end, say where palms, undergrowth, grass, ferns and bushes grow. The other scenes stand on
+  set's surface map (the track and the camp's paths), its foliage map (codes 253 and 254) and the
+  clearing at the track's north end, say where palms, undergrowth, grass, ferns and bushes grow; the
+  track and the paths keep the colour map's own paint, darkened as wet ground. The camp's hut, tower,
+  sandbags, crates, barrels and radio stand where Indigo Shore's building list (`assets/onjo_m1.bms`)
+  puts them, at its heights and yaws (a model turned by minus the record's yaw), so the paths and mud
+  painted into the colour map meet them. The other scenes stand on
   noise-displaced grids of their own (a wet jungle floor, a beach). The geometry nodes group
   `screens_scatter` places the foliage models over a ground by a named attribute.
 - **Weather and grade.** `screens_rain` (thin streaks at random in a box before the camera, none
@@ -43,7 +47,7 @@ frame the text takes, in a scratch folder outside the repo; nothing of theirs is
 | Scene | Master (size) | Game file | What it is | Text |
 |---|---|---|---|---|
 | `onmnbg` | `art/onjo1/menu/src/onmnbg.png` (1600 x 1200) | `assets/onmnbg.tga`, 800 x 600 (`../menu/SOURCES.md`) | The main menu's background: the camp at dusk in the rain, the soldier in profile with his carbine before the guard tower, the hut's lit door and lamplight, palms over it all; the left third dark and calm for the menu's buttons. | A small `OPENNOVA` mark top right (Barlow Condensed Black, 20-pixel capitals, grey); the menu draws its own title. |
-| `onjo_m1` | `assets/art/onjo_m1.png` (800 x 600) | `onjo_m1.pcx` (`format pcx`, `palette median_cut`, as `expansions/onjo1/art/onjo1_m1.png.import`) | The loading image of "Indigo Shore" (`onjo_m1.bms`): the island on a rainy day, looking north up the track from south of the camp to the hut and the guard tower in the clearing, palms both sides. The lower centre is the muddy track, calm for the game's continue line and bar. | Laid out as `onjo1_m1.png`: `INDIGO SHORE` (Barlow Condensed SemiBold, 44-pixel capitals, white) from (95, 135), `OPENNOVA` (Barlow Semi Condensed SemiBold, 16, amber, letter-spaced) below it, and `A REBEL CAMP ON THE ISLAND. CLEAR IT AND GET OUT.` (Barlow Semi Condensed Medium, 11, light grey) at y 485. |
+| `onjo_m1` | `assets/art/onjo_m1.png` (800 x 600) | `onjo_m1.pcx` (`format pcx`, `palette median_cut`, as `expansions/onjo1/art/onjo1_m1.png.import`) | The loading image of "Indigo Shore" (`onjo_m1.bms`): the island on a rainy day, looking north from a rise beside the track down its last stretch into the camp: the clearing's trampled floor, the hut, the sandbag walls and the stacked crates, palms both sides. The lower centre is the muddy track, calm for the game's continue line and bar. | Laid out as `onjo1_m1.png`: `INDIGO SHORE` (Barlow Condensed SemiBold, 44-pixel capitals, white) from (95, 135), `OPENNOVA` (Barlow Semi Condensed SemiBold, 16, amber, letter-spaced) below it, and `A REBEL CAMP ON THE ISLAND. CLEAR IT AND GET OUT.` (Barlow Semi Condensed Medium, 11, light grey) at y 485. |
 | `loading` | `assets/art/loading.png` (800 x 600) | `loading.pcx` (`format pcx`, `palette median_cut`) | The boot splash the game shows while it starts: palms against a dark night sky over a misty jungle. | Our mark, centred: `OPEN` in white and `NOVA` in amber (Barlow Condensed Black, 64-pixel capitals), a thin amber rule beneath with a four-point star at its middle (meshes in the scene). |
 | `jo_Epil` | `assets/art/jo_Epil.png` (800 x 600) | `jo_Epil.tga` (`format tga24`) | The single-player win screen's backdrop: dawn on the north beach, the sun just over a calm sea and its path on the water, a leaning palm, the soldier at the water's edge looking out. The upper middle is plain sky for the score lines the game draws. | None. |
 | `jo_Epil2` | `assets/art/jo_Epil2.png` (800 x 600) | `jo_Epil2.tga` (`format tga24`) | The lose screen's backdrop: the dark, wet jungle floor at night in the rain, the carbine dropped on its side in a puddle with a cold light's reflection beside it, the jungle out of focus behind (depth of field on the carbine). | None. |
