@@ -14,7 +14,9 @@
 #include <net/novacrypto/nwu.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/nwu_lobby_session.h>
+#include <net/napi/tlv.h>
 #include <net/npwire/nw_session_framing.h>
+#include <net/npwire/protocol_message.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 
@@ -86,13 +88,32 @@ struct Rig {
 	MemorySocket gate;
 	MemorySocket session;
 	std::vector<std::string> fatals;
+	// The session as the last fatal found it (the driver drops a poll failure's connection once
+	// the hook returns).
+	bool had_session_at_fatal = false;
+	ClientSession::State state_at_fatal = ClientSession::State::Idle;
+	int lobby_state_at_fatal = -1;
+	uint32_t flags_at_fatal = 0;
+	uint32_t jfc_at_fatal = 0;
+	uint32_t jfp_at_fatal = 0;
 	NwuLobbySession lobby;
 
 	Rig() : lobby(hooks(), NwuLobbySession::Environment{}) {}
 
 	NwuLobbySession::Hooks hooks() {
 		NwuLobbySession::Hooks out;
-		out.on_fatal = [this](const std::string &message) { fatals.push_back(message); };
+		out.on_fatal = [this](const std::string &message) {
+			fatals.push_back(message);
+			const ClientSession *s = lobby.session();
+			had_session_at_fatal = s != nullptr;
+			if (s == nullptr)
+				return;
+			state_at_fatal = s->state();
+			lobby_state_at_fatal = s->lobby_state();
+			flags_at_fatal = s->session_flags();
+			jfc_at_fatal = s->join_fail_code();
+			jfp_at_fatal = s->join_fail_param();
+		};
 		return out;
 	}
 
@@ -213,16 +234,16 @@ void check_state_one_give_up() {
 
 	rig.lobby.tick(10 + SESSION_PERIODIC_UPDATE_TIMEOUT_MS + 1);
 	CHECK(rig.fatals == std::vector<std::string>{ "NWEC42" });
-	CHECK(session.lobby_state() == 0 && session.session_flags() == 0);
+	CHECK(rig.had_session_at_fatal && rig.lobby_state_at_fatal == 0 && rig.flags_at_fatal == 0);
+	CHECK(rig.lobby.session() == nullptr);
 	CHECK(rig.count(SESSION_OPCODE_CLIENT_HELLO) == hellos);
 
 	const std::vector<uint8_t> reply = server_hello_to(first_hello);
 	CHECK(!reply.empty());
-	CHECK(!session.takes_server_hello(reply.data(), reply.size()));
 	CHECK(!rig.lobby.claims(kServer, reply.data(), reply.size()));
 	rig.session.inbound.push_back({ kServer, reply });
 	rig.lobby.tick(10 + SESSION_PERIODIC_UPDATE_TIMEOUT_MS + 2 + SESSION_CONNECT_RETRANSMIT_MS);
-	CHECK(session.state() == ClientSession::State::Hello);
+	CHECK(rig.lobby.session() == nullptr);
 	CHECK(rig.count(SESSION_OPCODE_CLIENT_AUTH) == 0);
 	CHECK(rig.count(SESSION_OPCODE_CLIENT_HELLO) == hellos);
 	CHECK(rig.fatals.size() == 1);
@@ -269,8 +290,8 @@ void check_verify_give_up() {
 	rig.lobby.tick(up_at + SESSION_CONNECT_VERIFY_TIMEOUT_MS + 1);
 	CHECK(rig.fatals == std::vector<std::string>{ "NWEC46" });
 	CHECK(rig.count(SESSION_OPCODE_CLIENT_GOODBYE) >= 1);
-	CHECK(session.state() == ClientSession::State::Closed);
-	CHECK(session.lobby_state() == 0);
+	CHECK(rig.state_at_fatal == ClientSession::State::Closed && rig.lobby_state_at_fatal == 0);
+	CHECK(rig.lobby.session() == nullptr);
 	for (const auto &dg : rig.session.sent) {
 		uint8_t op = 0;
 		std::vector<uint8_t> body;
@@ -304,8 +325,9 @@ void check_rejected_connect() {
 	rig.session.inbound.push_back({ kServer, server_reject_to(auth, 14, 2) });
 	rig.lobby.tick(200);
 	CHECK(rig.fatals == std::vector<std::string>{ "NWEC43" });
-	CHECK(session.join_fail_code() == 14 && session.join_fail_param() == 2);
-	CHECK(session.state() == ClientSession::State::Closed && session.lobby_state() == 0);
+	CHECK(rig.jfc_at_fatal == 14 && rig.jfp_at_fatal == 2);
+	CHECK(rig.state_at_fatal == ClientSession::State::Closed && rig.lobby_state_at_fatal == 0);
+	CHECK(rig.lobby.session() == nullptr);
 	CHECK(rig.count(SESSION_OPCODE_CLIENT_GOODBYE) == 0);
 	const std::size_t hellos = rig.count(SESSION_OPCODE_CLIENT_HELLO);
 	const std::size_t auths = rig.count(SESSION_OPCODE_CLIENT_AUTH);
@@ -317,6 +339,171 @@ void check_rejected_connect() {
 	rig.lobby.close();
 }
 
+// The service's 0x83 to a connection up since `auth_dg`'s accept (server_auth_to's SCRK): the
+// next packet (seq 1) with one lobby container `name` carrying `fields`.
+std::vector<uint8_t> server_statement_to(const std::vector<uint8_t> &auth_dg, const char *name,
+		const std::vector<std::pair<std::string, std::string>> &fields) {
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientAuth auth;
+	if (!decode(auth_dg, opcode, body) || opcode != SESSION_OPCODE_CLIENT_AUTH ||
+			!parse_client_auth(body.data(), body.size(), auth))
+		return {};
+	NapiMessage container;
+	container.name = name;
+	for (const auto &field : fields) {
+		NapiField f;
+		f.name = field.first;
+		f.data.assign(field.second.begin(), field.second.end());
+		container.fields.push_back(f);
+	}
+	std::vector<NapiMessage> stream{ container };
+	std::vector<uint8_t> stream_bytes(napi_stream_size(stream));
+	std::size_t stream_size = 0;
+	if (napi_stream_encode(stream, stream_bytes.data(), stream_bytes.size(), &stream_size) != 0)
+		return {};
+	stream_bytes.resize(stream_size);
+	ProtocolMessage record;
+	record.flags.raw = stream_size > 0xFFu ? 0x40u : 0x20u;
+	record.flags.len16 = stream_size > 0xFFu;
+	record.flags.len8 = stream_size <= 0xFFu;
+	record.tag = 0;
+	record.full_tag = 0;
+	record.length = static_cast<uint32_t>(stream_size);
+	record.payload = std::move(stream_bytes);
+	ProtocolPacketHeader hdr;
+	hdr.session_id = auth.ck;
+	hdr.seq_num = 1;
+	hdr.ack_count = 0;
+	hdr.connection_flags = 0;
+	std::vector<uint8_t> packet;
+	if (!encode_protocol_packet_plaintext(hdr, { record }, "servercrypt", packet))
+		return {};
+	return nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+}
+
+// A first connect up to its verify: the 0x81 at 100, the accepting 0x82 at 200. Returns the 0x42
+// the 0x82 answered (empty when the connect did not get that far).
+std::vector<uint8_t> bring_to_verify(Rig &rig) {
+	rig.start(10);
+	if (rig.lobby.session() == nullptr)
+		return {};
+	rig.session.inbound.push_back(
+			{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
+	rig.lobby.tick(100);
+	const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
+	if (auth.empty())
+		return {};
+	rig.session.inbound.push_back({ kServer, server_auth_to(auth) });
+	rig.lobby.tick(200);
+	return auth;
+}
+
+// A verify the service rejects (ServerVerifyResult Success=0): the rejection runs the connect's
+// abort, the connection tearing down with its 0x46 burst, and drops the session to state 0, so
+// the verify poll ends and the connection wait reports the session not up, NWEC48, once: the
+// session's own error is not reported while the poll runs. The driver then drops the connection.
+// [orig: CNapiGameSession_HandleConnectVerifyResponse @0x4d5800 - CNapiGameSession_PumpConnection
+//  @0x4D0A40 called @0x4d58ac, SetState(0) @0x4d58e1; CNapiGameSession_PollConnectPhase2
+//  @0x4D4D70 - the states @0x4D4D90..0x4D4D9E; CGameSession_WaitForNWUConnection @0x4D1230 - bit 2
+//  @0x4D1332, -23 @0x4D1381; CNapiGameSession_ResetToDisconnected @0x4D0890]
+void check_verify_rejected() {
+	Rig rig;
+	const std::vector<uint8_t> auth = bring_to_verify(rig);
+	CHECK(!auth.empty() && rig.lobby.session() != nullptr && rig.fatals.empty());
+	if (auth.empty() || rig.lobby.session() == nullptr)
+		return;
+	CHECK(rig.lobby.session()->state() == ClientSession::State::Verifying);
+	CHECK(rig.count(SESSION_OPCODE_CLIENT_GOODBYE) == 0);
+	const std::vector<uint8_t> reject =
+			server_statement_to(auth, "ServerVerifyResult", { { "Success", "0" } });
+	CHECK(!reject.empty());
+	rig.session.inbound.push_back({ kServer, reject });
+	rig.lobby.tick(300);
+	CHECK(rig.fatals == std::vector<std::string>{ "NWEC48" });
+	CHECK(rig.lobby_state_at_fatal == 0 && rig.flags_at_fatal == 0);
+	CHECK(rig.count(SESSION_OPCODE_CLIENT_GOODBYE) >= 1);
+	for (const auto &dg : rig.session.sent) {
+		uint8_t op = 0;
+		std::vector<uint8_t> body;
+		if (decode(dg.second, op, body) && op == SESSION_OPCODE_CLIENT_GOODBYE)
+			CHECK(dg.first == kServer);
+	}
+	CHECK(rig.lobby.session() == nullptr);
+	const std::size_t sent = rig.session.sent.size();
+	rig.lobby.tick(300 + SESSION_CONNECT_VERIFY_TIMEOUT_MS + 1);
+	CHECK(rig.fatals.size() == 1);
+	CHECK(rig.session.sent.size() == sent);
+	rig.lobby.close();
+}
+
+// The validation wait's -20: a session that left state 1 for a state outside 2..4 with no give-up
+// (the service accepts the 0x82 and closes the connection in the same receive batch, its goodbye
+// tearing the connection down to state 0) reports NWEC45, once.
+// [orig: CGameSession_WaitForNWUValidation @0x4D0F20 - the states @0x4D1137..0x4D114A, -20
+//  @0x4D1196]
+void check_not_verifying() {
+	Rig rig;
+	rig.start(10);
+	CHECK(rig.lobby.session() != nullptr);
+	if (rig.lobby.session() == nullptr)
+		return;
+	rig.session.inbound.push_back(
+			{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
+	rig.lobby.tick(100);
+	const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
+	CHECK(!auth.empty());
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientAuth parsed;
+	CHECK(decode(auth, opcode, body) && parse_client_auth(body.data(), body.size(), parsed));
+	const DisconnectEvent stop = make_disconnect_event(1, 2, 0, 0, "", 0, "NP.S:PT:STOP");
+	rig.session.inbound.push_back({ kServer, server_auth_to(auth) });
+	rig.session.inbound.push_back({ kServer,
+			nw_encode_outbound(
+					SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(parsed.ck, stop)) });
+	rig.lobby.tick(200);
+	CHECK(rig.fatals == std::vector<std::string>{ "NWEC45" });
+	CHECK(rig.lobby_state_at_fatal == 0);
+	CHECK(rig.lobby.session() == nullptr);
+	rig.lobby.tick(200 + SESSION_CONNECT_POLL_TIMEOUT_MS + 1);
+	CHECK(rig.fatals.size() == 1);
+	rig.lobby.close();
+}
+
+// The reset drops the connection: a first connect given up in state 1 while its 0x42 is
+// outstanding takes no late accepting 0x82, so nothing advances after the reported NWEC42 (no
+// 0x43, no further report, no session), whatever the owner goes on ticking.
+// [orig: CNapiGameSession_ResetToDisconnected @0x4D0890 - the connection's destroy 0x62A4B0
+//  @0x4D08A7, the session inactive @0x4D092E]
+void check_late_accept_after_give_up() {
+	Rig rig;
+	rig.start(10);
+	CHECK(rig.lobby.session() != nullptr);
+	if (rig.lobby.session() == nullptr)
+		return;
+	rig.session.inbound.push_back(
+			{ kServer, server_hello_to(rig.last(SESSION_OPCODE_CLIENT_HELLO)) });
+	rig.lobby.tick(100);
+	const std::vector<uint8_t> auth = rig.last(SESSION_OPCODE_CLIENT_AUTH);
+	CHECK(!auth.empty());
+	rig.lobby.tick(10 + SESSION_PERIODIC_UPDATE_TIMEOUT_MS + 1);
+	CHECK(rig.fatals == std::vector<std::string>{ "NWEC42" });
+	CHECK(rig.state_at_fatal == ClientSession::State::Auth);
+	CHECK(rig.lobby.session() == nullptr);
+	const std::vector<uint8_t> late = server_auth_to(auth);
+	CHECK(!rig.lobby.claims(kServer, late.data(), late.size()));
+	rig.session.inbound.push_back({ kServer, late });
+	const std::size_t sent = rig.session.sent.size();
+	for (uint32_t t = 20100; t <= 20100 + 2 * SESSION_CONNECT_VERIFY_TIMEOUT_MS; t += 1000)
+		rig.lobby.tick(t);
+	CHECK(rig.lobby.session() == nullptr);
+	CHECK(rig.count(SESSION_OPCODE_PROTOCOL_MESSAGE) == 0);
+	CHECK(rig.session.sent.size() == sent);
+	CHECK(rig.fatals.size() == 1);
+	rig.lobby.close();
+}
+
 } // namespace
 
 int main() {
@@ -324,6 +511,9 @@ int main() {
 	check_state_one_give_up();
 	check_verify_give_up();
 	check_rejected_connect();
+	check_verify_rejected();
+	check_not_verifying();
+	check_late_accept_after_give_up();
 	if (failures != 0) {
 		std::printf("nwu_lobby_connect: %d failure(s)\n", failures);
 		return 1;

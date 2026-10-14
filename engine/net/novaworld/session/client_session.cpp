@@ -1101,7 +1101,14 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 				notices_.push_back(std::move(notice));
 			}
 		} else {
-			// The rejection drops the word and the state to 0 [orig: @0x4d58ac..0x4d58de].
+			// The rejection runs the connect's abort (the connection, up since its 0x82, tears
+			// down with its 0x46 burst into `out`, and the probe stops), then drops the word and
+			// the state to 0. A first connect's connection wait then finds the session not up and
+			// reports NWEC48 (NwuLobbySession::poll_connect).
+			// [orig: CNapiGameSession_HandleConnectVerifyResponse @0x4d5800 -
+			//  CNapiGameSession_PumpConnection @0x4D0A40 called @0x4d58ac, the word
+			//  @0x4d58b1..0x4d58d8, SetState(0) @0x4d58de..0x4d58e1]
+			abort_connect(out);
 			session_role_ = kSessionRoleNone;
 			set_lobby_state(0);
 			fail("ServerVerifyResult rejected (Success=" + success + ")");

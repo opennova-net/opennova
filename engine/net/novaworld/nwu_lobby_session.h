@@ -47,9 +47,12 @@ public:
 		std::function<void(const RxInfo &)> on_received;
 		// The session advanced: the owner maps ClientSession::State onto its own states.
 		std::function<void()> on_session_state;
-		// Fatal: a gate response naming no UDPNOVAWORLD, a session error, or a give-up of the
-		// first connect (novaworld_connect_error_tag's NWEC). The message is the retail NWEC tag
-		// when one is witnessed for the failure.
+		// Fatal: a gate response failing the gate (NWEC25), a session error once the first
+		// connect's poll has ended, or a give-up or failure of that poll
+		// (novaworld_connect_error_tag's NWEC), which reports any session error while it runs.
+		// After a poll failure the driver has dropped the connection (session() is null once the
+		// hook returns). The message is the retail NWEC tag when one is witnessed for the
+		// failure.
 		std::function<void(const std::string &)> on_fatal;
 		// Recoverable decode noise on the gate socket (a bad envelope or response).
 		std::function<void(const std::string &)> on_soft_error;
@@ -197,8 +200,8 @@ private:
 	bool poll_connect();
 	// A give-up: the session's abort, its sends out.
 	void abort_connect();
-	// A connect wait's failure: the session's reset (a connection still up tears down) and the
-	// code's NWEC to on_fatal.
+	// A connect wait's failure: the session's reset (a connection still up tears down), the
+	// code's NWEC to on_fatal, then the connection dropped (session() null from here).
 	void fail_connect(int code);
 
 	Hooks hooks_;

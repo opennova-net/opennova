@@ -313,10 +313,15 @@ void NwuLobbySession::abort_connect() {
 }
 
 // The reset the connect waits run on a failure: a connection still up tears down (its burst out),
-// the poll's flag and the give-up word clear, and the menu shows the code's NWEC.
+// the poll's flag and the give-up word clear, the menu shows the code's NWEC, and the connection,
+// its enumerator and its protocol are destroyed with the session marked inactive, so a late
+// datagram (a 0x82 answering a 0x42 the give-up left outstanding) finds no connection to advance.
+// The session goes after the hook returns (one that closed the driver already dropped it).
 // [orig: CNapiGameSession_ResetToDisconnected @0x4D0890 - CNapiNPConnection_RequestDisconnect
-//  @0x4D08A1, +0x12C..+0x138 = 0 @0x4D08E4..0x4D08F6; UI_ProcessLANSessionStateMachine
-//  @0x558DE0 - the error leg @0x55915F..0x559160 -> UI_ShowNovaWorldConnectError @0x5584A0]
+//  @0x4D08A1, the connection's destroy 0x62A4B0 @0x4D08A7, the protocol's 0x62B500 @0x4D08B8,
+//  +0x12C..+0x138 = 0 @0x4D08E4..0x4D08F6, the session inactive @0x4D092E;
+//  UI_ProcessLANSessionStateMachine @0x558DE0 - the error leg @0x55915F..0x559160 ->
+//  UI_ShowNovaWorldConnectError @0x5584A0]
 void NwuLobbySession::fail_connect(int code) {
 	connect_poll_ = ConnectPoll::Done;
 	connect_timed_out_ = false;
@@ -327,6 +332,9 @@ void NwuLobbySession::fail_connect(int code) {
 		send(dg);
 	if (hooks_.on_fatal)
 		hooks_.on_fatal(novaworld_connect_error_tag(code));
+	session_.reset();
+	targets_.clear();
+	nw_peer_ = PeerAddr{};
 }
 
 // The first connect's poll, one wait per tick as the menu runs one state per frame: the connect
@@ -607,7 +615,16 @@ void NwuLobbySession::poll_session() {
 		if (hooks_.on_received) hooks_.on_received(rx);
 		for (const auto &dg : replies) send(dg);
 		if (!rx.ok) {
-			if (hooks_.on_fatal) hooks_.on_fatal(session_->last_error());
+			// While the first connect's poll runs, the poll reports the failure with the menu's
+			// NWEC (a rejected verify leaves the session down: the connection wait's NWEC48),
+			// as retail's menu shows the connect's errors only through its waits.
+			// [orig: UI_ProcessLANSessionStateMachine @0x558DE0 - the error leg
+			//  @0x55915F..0x559160; CGameSession_WaitForNWUConnection @0x4D1230 - bit 2
+			//  @0x4D1332, -23 @0x4D1381]
+			const bool polling =
+					connect_poll_ == ConnectPoll::Connect || connect_poll_ == ConnectPoll::Verify;
+			if (!polling && hooks_.on_fatal)
+				hooks_.on_fatal(session_->last_error());
 			return;
 		}
 		if (hooks_.on_session_state) hooks_.on_session_state();
