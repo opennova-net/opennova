@@ -144,8 +144,10 @@ MissionHuskFrame mission_husk_frame(const MissionShotDeath &death, int32_t clock
 // (DI-07's: the terrain, the char map, the tiles, the water; held by the caller, read again only where the key moves),
 // its entities (the scene's: each record's pool, index, row and item), each item's bound (metres) and each row's
 // title, and each person as the view draws it (MissionShotPerson).
+class MissionPoses;
+
 // A person as the mission view draws it: how far its spawn stands its origin over its record (MissionPose's lift,
-// metres) and its channels as they play now (MissionPeople's, at the clock).
+// metres) and its spawn's channels (MissionPose's, what it plays before the people start).
 struct MissionShotPerson {
 	double lift = 0.0;
 	const world::InfantryState *channels = nullptr;
@@ -160,8 +162,13 @@ struct MissionShotsSetup {
 	std::unordered_map<int64_t, float> bounds;
 	std::unordered_map<NodeId, std::string> titles;
 	// The row's person (false: no posed person of the row): read at the load for its lift (the key moves with the
-	// poses), and on each tick for its channels.
+	// poses), and on each tick for its spawn's channels.
 	std::function<bool(NodeId row, MissionShotPerson &out)> person;
+	// The people as the view plays them: MissionPeople over `poses` from the clock's tick `people_from` (the view's
+	// started_at). The run plays its own copy on to each tick it steps, so a round fired on a past tick meets each
+	// person as the view showed it on that tick, its spawn pose before the people started.
+	const MissionPoses *poses = nullptr;
+	int32_t people_from = 0;
 };
 
 class MissionShots {
