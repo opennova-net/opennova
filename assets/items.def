@@ -115,6 +115,59 @@ begin "Map centerpoint"
 	type marker
 end
 
+begin "snd: jungle lp [300m]"
+	id 106120
+	type marker
+	move_function envs
+	soundloop_1 LPNV_ONJNGL_D1
+	soundloop_2 LPNV_ONJNGL_D1
+	soundloop_3 LPNV_ONJNGL_N1
+	soundloop_4 LPNV_ONJNGL_N1
+end
+
+begin "snd: beach surf lp [400m] + tide [128m]"
+	id 106121
+	type marker
+	move_function envs
+	soundloop_1 LPNV_ONBEACH1
+	soundloop_2 LPNV_ONBEACH1
+	soundloop_3 LPNV_ONBEACH1
+	soundloop_4 LPNV_ONBEACH1
+	ai_function envs
+	dawnshot ENV_ONTIDE1 5 3
+	dayshot ENV_ONTIDE1 5 3
+	duskshot ENV_ONTIDE1 5 3
+	nightshot ENV_ONTIDE1 5 3
+end
+
+begin "snd: gnats lp [30m]"
+	id 106122
+	type marker
+	move_function envs
+	soundloop_1 LPNV_ONGNATS
+	soundloop_2 LPNV_ONGNATS
+	soundloop_3 LPNV_ONGNATS
+	soundloop_4 LPNV_ONGNATS
+end
+
+begin "snd: birds (1-shots) [250m]"
+	id 106123
+	type marker
+	ai_function envs
+	dawnshot ENV_ONBIRD1 5 21
+	dayshot ENV_ONBIRD1 6 24
+	duskshot ENV_ONBIRD1 8 34
+end
+
+begin "snd: frogs (1-shots) [180m]"
+	id 106124
+	type marker
+	ai_function envs
+	dawnshot ENV_ONFROG1 20 5
+	duskshot ENV_ONFROG1 15 6
+	nightshot ENV_ONFROG1 11 7
+end
+
 begin "Coconut palm"
 	graphic onpalm1
 	id 100013

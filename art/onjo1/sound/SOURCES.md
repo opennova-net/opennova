@@ -1,8 +1,8 @@
 # `art/onjo1/sound/` sources
 
-Every game sound in `assets/` is OpenNova's own, made on 2026-10-05 and 2026-10-06 from the CC0
-files below (cut, layered, filtered, levelled) or synthesised (procedural noise,
-clicks and glides, no source). The carbine's six (`onar15*.wav`) are the exception: they are
+Every game sound in `assets/` is OpenNova's own, made on 2026-10-05 and 2026-10-06 (the menu
+sounds and the jungle ambience on 2026-10-14) from the CC0 files below (cut, layered, filtered,
+levelled) or synthesised (procedural noise, clicks and glides, no source). The carbine's six (`onar15*.wav`) are the exception: they are
 mixed from the sounds of Infima Games' Tactical FPS Animations, the pack the carbine and its clips
 come from (`art/on_ar15/README.md`), used under the maintainer's licence for the pack (2026-10-13).
 The pistol's five (`onpist*.wav`) are the other exception: they are cut from the sounds of
@@ -18,10 +18,11 @@ length, loudness, spectrum and variation count only (`README.md`).
 
 ## Source files
 
-Every third-party file is CC0 1.0, downloaded 2026-10-05 (the death, fall, landing, parachute and rain sources, and those of the engine's own sets (the water entries, the thunder and the drowning), 2026-10-06), and kept as downloaded under `sources/`.
+Every third-party file is CC0 1.0, downloaded 2026-10-05 (the death, fall, landing, parachute and rain sources, and those of the engine's own sets (the water entries, the thunder and the drowning), 2026-10-06; the jungle ambience's, 2026-10-14), and kept as downloaded under `sources/`.
 
 | File under `sources/` | Title | Author | Page | Licence |
 |---|---|---|---|---|
+| `freesound/fs381721_AlanCat.ogg` | Frogs2a.wav | AlanCat | [freesound.org/s/381721](https://freesound.org/s/381721/) | CC0 1.0 |
 | `freesound/fs384871_Ali_6868.ogg` | Left Gravel Footstep 2 | Ali_6868 | [freesound.org/s/384871](https://freesound.org/s/384871/) | CC0 1.0 |
 | `freesound/fs384872_Ali_6868.ogg` | Left Gravel Footstep 3 | Ali_6868 | [freesound.org/s/384872](https://freesound.org/s/384872/) | CC0 1.0 |
 | `freesound/fs384873_Ali_6868.ogg` | Left Gravel Footstep 1 | Ali_6868 | [freesound.org/s/384873](https://freesound.org/s/384873/) | CC0 1.0 |
@@ -42,22 +43,27 @@ Every third-party file is CC0 1.0, downloaded 2026-10-05 (the death, fall, landi
 | `freesound/fs447928_Breviceps.ogg` | Muddy Boots | Breviceps | [freesound.org/s/447928](https://freesound.org/s/447928/) | CC0 1.0 |
 | `freesound/fs447929_Breviceps.ogg` | Step on a slug (Splat!) 1 | Breviceps | [freesound.org/s/447929](https://freesound.org/s/447929/) | CC0 1.0 |
 | `freesound/fs447930_Breviceps.ogg` | Step on a slug (Splat!) 2 | Breviceps | [freesound.org/s/447930](https://freesound.org/s/447930/) | CC0 1.0 |
+| `freesound/fs462863_Breviceps.ogg` | Common toad (Bufo bufo) | Breviceps | [freesound.org/s/462863](https://freesound.org/s/462863/) | CC0 1.0 |
+| `freesound/fs535815_Breviceps.ogg` | Black Cockatoo (Calyptorhynchus banksii) | Breviceps | [freesound.org/s/535815](https://freesound.org/s/535815/) | CC0 1.0 |
 | `freesound/fs870604_CHallSmith.ogg` | Wild Cloth Movement for Foley | CHallSmith | [freesound.org/s/870604](https://freesound.org/s/870604/) | CC0 1.0 |
 | `freesound/fs861369_ChristopherJngs.ogg` | Splashing Footsteps Shallow Water | ChristopherJngs | [freesound.org/s/861369](https://freesound.org/s/861369/) | CC0 1.0 |
 | `freesound/fs438636_craigsmith.ogg` | G39-19-Parachute Swish Snap.wav | craigsmith | [freesound.org/s/438636](https://freesound.org/s/438636/) | CC0 1.0 |
 | `freesound/fs486068_craigsmith.ogg` | R12-29-Gun Shot through Window.wav | craigsmith | [freesound.org/s/486068](https://freesound.org/s/486068/) | CC0 1.0 |
 | `freesound/fs675951_craigsmith.ogg` | S31-15 Shooting gallery; hitting metal targets.wav | craigsmith | [freesound.org/s/675951](https://freesound.org/s/675951/) | CC0 1.0 |
 | `freesound/fs675955_craigsmith.ogg` | S20-02 Rifle ricochets.wav | craigsmith | [freesound.org/s/675955](https://freesound.org/s/675955/) | CC0 1.0 |
+| `freesound/fs528060_csaszi.ogg` | Flies swarm | csaszi | [freesound.org/s/528060](https://freesound.org/s/528060/) | CC0 1.0 |
 | `freesound/fs811077_DangerLaef.ogg` | Solo Skydive Interior Plane and Freefall | DangerLaef | [freesound.org/s/811077](https://freesound.org/s/811077/) | CC0 1.0 |
 | `freesound/fs272376_danhelbling.ogg` | Feet Land On Gravel.wav | danhelbling | [freesound.org/s/272376](https://freesound.org/s/272376/) | CC0 1.0 |
 | `freesound/fs132901_EchoCinematics.ogg` | Jump Into Gravel.MP3 | EchoCinematics | [freesound.org/s/132901](https://freesound.org/s/132901/) | CC0 1.0 |
 | `freesound/fs434978_felix.blume.ogg` | Water Splash | felix.blume | [freesound.org/s/434978](https://freesound.org/s/434978/) | CC0 1.0 |
+| `freesound/fs510984_felix.blume.ogg` | Close recording of the waves on the beach, in Thailand | felix.blume | [freesound.org/s/510984](https://freesound.org/s/510984/) | CC0 1.0 |
 | `freesound/fs581125_Fission9.ogg` | Distant Thunder 4 | Fission9 | [freesound.org/s/581125](https://freesound.org/s/581125/) | CC0 1.0 |
 | `freesound/fs390730_FunWithSound.ogg` | Glass Tinkle 2.mp3 | FunWithSound | [freesound.org/s/390730](https://freesound.org/s/390730/) | CC0 1.0 |
 | `freesound/fs390731_FunWithSound.ogg` | Glass Tinkle 1.mp3 | FunWithSound | [freesound.org/s/390731](https://freesound.org/s/390731/) | CC0 1.0 |
 | `freesound/fs390732_FunWithSound.ogg` | Glass Tinkle 3.mp3 | FunWithSound | [freesound.org/s/390732](https://freesound.org/s/390732/) | CC0 1.0 |
 | `freesound/fs390735_FunWithSound.ogg` | Glass Tinkle 4.mp3 | FunWithSound | [freesound.org/s/390735](https://freesound.org/s/390735/) | CC0 1.0 |
 | `freesound/fs654044_hetsumani.ogg` | Man making drown noises | hetsumani | [freesound.org/s/654044](https://freesound.org/s/654044/) | CC0 1.0 |
+| `freesound/fs662970_IanFSA.ogg` | Mosquito 1 Edit.wav | IanFSA | [freesound.org/s/662970](https://freesound.org/s/662970/) | CC0 1.0 |
 | `freesound/fs701647_IENBA.ogg` | Fabric Flapping | IENBA | [freesound.org/s/701647](https://freesound.org/s/701647/) | CC0 1.0 |
 | `freesound/fs395331_ihitokage.ogg` | Body falling on the ground 1 | ihitokage | [freesound.org/s/395331](https://freesound.org/s/395331/) | CC0 1.0 |
 | `freesound/fs138478_JustInvoke.ogg` | Bullet Blood 1 | JustInvoke | [freesound.org/s/138478](https://freesound.org/s/138478/) | CC0 1.0 |
@@ -67,17 +73,22 @@ Every third-party file is CC0 1.0, downloaded 2026-10-05 (the death, fall, landi
 | `freesound/fs481075_khenshom.ogg` | Foley - Cotton clothes rustling - Fabric movement sound.wav | khenshom | [freesound.org/s/481075](https://freesound.org/s/481075/) | CC0 1.0 |
 | `freesound/fs481081_khenshom.ogg` | Foley - Jeans - Rustling - Fabric movement sound.wav | khenshom | [freesound.org/s/481081](https://freesound.org/s/481081/) | CC0 1.0 |
 | `freesound/fs361772_kingsrow.ogg` | 2016-10-06 Thunder Crack.wav | kingsrow | [freesound.org/s/361772](https://freesound.org/s/361772/) | CC0 1.0 |
+| `freesound/fs242851_knufds.ogg` | Tree Frogs | knufds | [freesound.org/s/242851](https://freesound.org/s/242851/) | CC0 1.0 |
+| `freesound/fs450537_kyles.ogg` | Amazon jungle night crickets awesome loop.flac | kyles | [freesound.org/s/450537](https://freesound.org/s/450537/) | CC0 1.0 |
 | `freesound/fs504626_leonelmail.ogg` | BODY FALL - V HVY - DIRT | leonelmail | [freesound.org/s/504626](https://freesound.org/s/504626/) | CC0 1.0 |
 | `freesound/fs840628_loganzsound.ogg` | Closeup Thunder Strike 01 | loganzsound | [freesound.org/s/840628](https://freesound.org/s/840628/) | CC0 1.0 |
 | `freesound/fs182263_martian.ogg` | Foley bullet hit metal 02.wav | martian | [freesound.org/s/182263](https://freesound.org/s/182263/) | CC0 1.0 |
 | `freesound/fs789388_modusmogulus.ogg` | Bullet impact ground (subsonic) SFX | modusmogulus | [freesound.org/s/789388](https://freesound.org/s/789388/) | CC0 1.0 |
+| `freesound/fs423711_myrinvp.ogg` | Jungle, Tropical birds and insects | myrinvp | [freesound.org/s/423711](https://freesound.org/s/423711/) | CC0 1.0 |
 | `freesound/fs513249_nickmaysoundmusic.ogg` | Spring Distant thunderstorm suburban birds wind single rumble - short | nickmaysoundmusic | [freesound.org/s/513249](https://freesound.org/s/513249/) | CC0 1.0 |
 | `freesound/fs513250_nickmaysoundmusic.ogg` | Spring Distant thunderstorm suburban birds wind single rumble - medium | nickmaysoundmusic | [freesound.org/s/513250](https://freesound.org/s/513250/) | CC0 1.0 |
+| `freesound/fs653743_nonamethefish.ogg` | Peruvian Amazon birds frogs daytime | nonamethefish | [freesound.org/s/653743](https://freesound.org/s/653743/) | CC0 1.0 |
 | `freesound/fs144444_pushkin.ogg` | bullet impacts | pushkin | [freesound.org/s/144444](https://freesound.org/s/144444/) | CC0 1.0 |
 | `freesound/fs166944_qubodup.ogg` | Grunts of pain by military soldiers.flac | qubodup | [freesound.org/s/166944](https://freesound.org/s/166944/) | CC0 1.0 |
 | `freesound/fs442773_qubodup.ogg` | Big Water Splash | qubodup | [freesound.org/s/442773](https://freesound.org/s/442773/) | CC0 1.0 |
 | `freesound/fs565716_ralph.whitehead.ogg` | Footsteps Walking On Wooden Floor Medium Pace.wav | ralph.whitehead | [freesound.org/s/565716](https://freesound.org/s/565716/) | CC0 1.0 |
 | `freesound/fs565720_ralph.whitehead.ogg` | Footsteps Walking On Gravel Stones Medium Pace.wav | ralph.whitehead | [freesound.org/s/565720](https://freesound.org/s/565720/) | CC0 1.0 |
+| `freesound/fs460466_ramblinglibrarian.ogg` | Koel-01-44k.wav | ramblinglibrarian | [freesound.org/s/460466](https://freesound.org/s/460466/) | CC0 1.0 |
 | `freesound/fs798649_randbsoundbites.ogg` | The Last gasp before death | randbsoundbites | [freesound.org/s/798649](https://freesound.org/s/798649/) | CC0 1.0 |
 | `freesound/fs200990_rayjensen.ogg` | rayjensen - thunder-crack 41k 16bit mono.wav | rayjensen | [freesound.org/s/200990](https://freesound.org/s/200990/) | CC0 1.0 |
 | `freesound/fs396801_scorpion67890.ogg` | Male Death 4 | scorpion67890 | [freesound.org/s/396801](https://freesound.org/s/396801/) | CC0 1.0 |
@@ -89,6 +100,8 @@ Every third-party file is CC0 1.0, downloaded 2026-10-05 (the death, fall, landi
 | `freesound/fs398040_swordofkings128.ogg` | water swimming 5 | swordofkings128 | [freesound.org/s/398040](https://freesound.org/s/398040/) | CC0 1.0 |
 | `freesound/fs398041_swordofkings128.ogg` | water swimming 4 | swordofkings128 | [freesound.org/s/398041](https://freesound.org/s/398041/) | CC0 1.0 |
 | `freesound/fs530152_tbsounddesigns.ogg` | POOL CANONBALL DIVE 4 | tbsounddesigns | [freesound.org/s/530152](https://freesound.org/s/530152/) | CC0 1.0 |
+| `freesound/fs870782_TheKingOfGeeks360.ogg` | Miscellaneous Birds - Livingstone's Turaco, Take 2 | TheKingOfGeeks360 | [freesound.org/s/870782](https://freesound.org/s/870782/) | CC0 1.0 |
+| `freesound/fs874260_TheKingOfGeeks360.ogg` | Hornbills - Red-billed Hornbills; Duet Calling | TheKingOfGeeks360 | [freesound.org/s/874260](https://freesound.org/s/874260/) | CC0 1.0 |
 | `freesound/fs157835_Tonsofpaperbrokenpen.ogg` | Guy retching water and gasping for air.wav | Tonsofpaperbrokenpen | [freesound.org/s/157835](https://freesound.org/s/157835/) | CC0 1.0 |
 | `freesound/fs169931_u3190.ogg` | Gasp Inhale | u3190 | [freesound.org/s/169931](https://freesound.org/s/169931/) | CC0 1.0 |
 | `freesound/fs610998_unfa.ogg` | Medium Male Pain Grunts | unfa | [freesound.org/s/610998](https://freesound.org/s/610998/) | CC0 1.0 |
@@ -317,3 +330,21 @@ Each file in `assets/`, what it was made from and how (PCM mono; the rate and bi
 | `ondrown1.wav` | 22050 Hz 8-bit | 2.700 s | -10.8 dB | simonjeffery13 [#752733](https://freesound.org/s/752733/) @0.95s (a man drowning under water); cut 2.70 s, band 0.06-3 kHz |
 | `ondrown2.wav` | 22050 Hz 8-bit | 3.550 s | -6.8 dB | simonjeffery13 [#752733](https://freesound.org/s/752733/) @4.10s (a man drowning under water); cut 3.55 s, band 0.06-3 kHz |
 | `ondrown3.wav` | 22050 Hz 8-bit | 2.800 s | -7.3 dB | hetsumani [#654044](https://freesound.org/s/654044/) @0.00s (a man making drowning noises), 1.3 s, band 60 Hz-1.5 kHz (muffled), then simonjeffery13 [#752733](https://freesound.org/s/752733/) @5.75s (drowning under water), 1.9 s at -4 dB from 0.9 s, band 60 Hz-3 kHz |
+| `onmnovr1.wav` | 22050 Hz 16-bit | 0.215 s | -14.9 dB | synthesised: the menu hover, a soft thump (a sine gliding 95 to 55 Hz with its octave, 45 ms decay) under a bright electronic chirp (partials at 1, 1.5, 2 and 3 times a fundamental gliding 4.3 to 4.8 kHz, a 58 Hz flutter, a flat body and a 50 ms release), low-passed 9 kHz; peak -3 dBFS, a retail menu wave's level (master in `masters/`) |
+| `onmncmb1.wav` | 22050 Hz 16-bit | 0.215 s | -16.2 dB | synthesised: a combo's move, a firmer thump (110 to 60 Hz, 50 ms decay) under the hover's chirp an octave up and cut to 0.10 s (6.3 to 7.1 kHz, a 70 Hz flutter) 11 dB down, as retail's set plays its hover whirr at 2.0; peak -3 dBFS (master in `masters/`) |
+| `onmnsel1.wav` | 22050 Hz 16-bit | 0.377 s | -21.9 dB | synthesised: a select, a two-stroke latch (band noise 2.5 to 10 kHz, 12 and 14 ms decays at 0 and 55 ms, a softer third at 115 ms) over a confirm tone (F5, with partials at 2, 3 and 4.2 times it, 85 ms decay, from 12 ms) and a low thump (85 to 50 Hz, 60 ms decay); peak -3 dBFS (master in `masters/`) |
+| `onmnval1.wav` | 22050 Hz 16-bit | 0.122 s | -23.0 dB | synthesised: a value change, a ratchet tick (a damped 750 Hz ping, 14 ms, under a band-noise click at 0.9 to 4 kHz, 6 ms) and a softer second tick (820 Hz, 1 to 4.5 kHz) 45 ms later; peak -4 dBFS (master in `masters/`) |
+| `onambjd1.wav` | 22050 Hz 8-bit | 16.000 s | -14.3 dB | nonamethefish [#653743](https://freesound.org/s/653743/) @12.0s (an Amazon day: insects, birds, frogs; high-pass 250 Hz, 4th order) with myrinvp [#423711](https://freesound.org/s/423711/) @6.0s (tropical birds and insects; high-pass 400 Hz, 4th order) 4 dB under it; 17 s each, the last second crossfaded (equal power) into the start so the 16.0 s loop has no seam; raised toward retail's -13.8 dB RMS (`LpJg1`) under a look-ahead limiter at -0.3 dBFS |
+| `onambjn1.wav` | 22050 Hz 8-bit | 14.000 s | -12.8 dB | kyles [#450537](https://freesound.org/s/450537/) @61.0s (Amazon night crickets; high-pass 300 Hz, 4th order) with AlanCat [#381721](https://freesound.org/s/381721/) @2.0s (frog croaks; high-pass 250 Hz) 7 dB under it; 15 s each, looped as `onambjd1.wav`, 14.0 s; raised toward retail's -12.2 dB RMS (`lpJgN2` to `N7`) under the limiter |
+| `onambsf1.wav` | 11025 Hz 16-bit | 10.800 s | -9.5 dB | felix.blume [#510984](https://freesound.org/s/510984/) @108.8s (waves on a beach in Thailand), two waves from one trough to the next but one, high-pass 40 Hz, low-pass 4 kHz, +4 dB under 250 Hz; the following second crossfaded into the start, a 10.8 s loop; raised toward retail's -9.3 dB RMS (`LPBEACH4`) under the limiter |
+| `ongnat1.wav` | 11025 Hz 8-bit | 9.800 s | -14.9 dB | csaszi [#528060](https://freesound.org/s/528060/) @2.5s (a fly swarm; high-pass 220 Hz, 4th order) with IanFSA [#662970](https://freesound.org/s/662970/) @1.0s (a mosquito; high-pass 300 Hz) 9 dB under it; 10.8 s each, looped as `onambjd1.wav`, 9.8 s; raised toward retail's -14.7 dB RMS (`LPswarm1`) under the limiter |
+| `onbird1.wav` | 22050 Hz 16-bit | 2.870 s | -16.6 dB | ramblinglibrarian [#460466](https://freesound.org/s/460466/) @0.08s, a koel's two calls; high-pass 600 Hz (4th order), faded over its last 0.12 s; peak -0.3 dBFS |
+| `onbird2.wav` | 22050 Hz 16-bit | 1.920 s | -18.1 dB | TheKingOfGeeks360 [#870782](https://freesound.org/s/870782/) @0.48s, a turaco's five calls; high-pass 500 Hz, faded over its last 0.08 s; peak -0.3 dBFS |
+| `onbird3.wav` | 22050 Hz 16-bit | 1.660 s | -15.6 dB | Breviceps [#535815](https://freesound.org/s/535815/) @0.00s, a black cockatoo's two screeches; high-pass 700 Hz, faded over its last 0.08 s; peak -0.3 dBFS |
+| `onbird4.wav` | 22050 Hz 16-bit | 2.600 s | -15.4 dB | TheKingOfGeeks360 [#874260](https://freesound.org/s/874260/) @0.20s, two hornbills calling; high-pass 600 Hz, faded over its last 0.25 s; peak -0.3 dBFS |
+| `onfrog1.wav` | 22050 Hz 8-bit | 3.030 s | -15.7 dB | AlanCat [#381721](https://freesound.org/s/381721/) @3.52s, three croaks; high-pass 250 Hz (4th order), faded over its last 0.08 s; peak -0.3 dBFS, then limited (0.8 ms look-ahead) 1.9 dB toward retail's -7.5 dB loudest 50 ms (`ToadN`) |
+| `onfrog2.wav` | 22050 Hz 8-bit | 2.400 s | -11.0 dB | knufds [#242851](https://freesound.org/s/242851/) @20.0s, a tree frog's trill; high-pass 1.2 kHz, faded over its last 0.3 s; peak -0.3 dBFS, then limited 2.1 dB toward the same |
+| `onfrog3.wav` | 22050 Hz 8-bit | 2.400 s | -20.5 dB | Breviceps [#462863](https://freesound.org/s/462863/) @1.58s, a toad's two croaks; high-pass 200 Hz, faded over its last 0.1 s; peak -0.3 dBFS |
+| `ontide1.wav` | 22050 Hz 16-bit | 5.200 s | -10.5 dB | felix.blume [#510984](https://freesound.org/s/510984/) @31.0s, one wave from trough to trough; high-pass 60 Hz, +3 dB above 1.5 kHz, faded in over 0.3 s and out over 0.8 s; peak -0.3 dBFS, then limited 3.7 dB toward retail's -7.3 dB loudest 50 ms (`tide1` to `7`) |
+| `ontide2.wav` | 22050 Hz 16-bit | 4.500 s | -10.5 dB | felix.blume [#510984](https://freesound.org/s/510984/) @68.2s, one wave; made as `ontide1.wav`, limited 2.8 dB |
+| `ontide3.wav` | 22050 Hz 16-bit | 6.000 s | -11.1 dB | felix.blume [#510984](https://freesound.org/s/510984/) @138.6s, one wave; made as `ontide1.wav`, limited 2.9 dB |

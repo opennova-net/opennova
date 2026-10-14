@@ -2,7 +2,8 @@
 
 The sources of the base game's sounds (`assets/`): the footsteps, deaths, falls
 and parachute the infantry sound profile plays, the impacts the carbine's
-round plays on each surface, and the cues the engine plays by names of its own.
+round plays on each surface, the cues the engine plays by names of its own, the
+menus' sounds and the jungle ambience. The music is in `../music/`.
 Every game file is our own: cut, layered and processed from CC0 recordings, or
 synthesised. The original game's sounds are reference only: extracted to a
 scratch folder outside the repo, measured and never committed or imported.
@@ -26,7 +27,9 @@ scratch folder outside the repo, measured and never committed or imported.
   variation counts are measured; its audio never enters the repo.
 - **The game formats the original uses**: PCM mono, 22050 Hz 8-bit for steps
   and soft hits, 44100 Hz 8-bit for hard hits, 22050 Hz 16-bit for the bullet
-  pass, the rate and depth retail ships each counterpart in.
+  pass and the menu sounds, 22050 Hz 8-bit for the jungle beds and the frogs,
+  11025 Hz for the surf (16-bit) and the gnats (8-bit), the rate and depth
+  retail ships each counterpart in.
 - **Names fit the archive**: at most 15 characters with `.wav`, starting `on`.
 - The processing scripts are throwaway; the sources plus the exported wavs are
   the truth, and `SOURCES.md` says in words what each export is.
@@ -194,6 +197,70 @@ JO:CA ships none of `PU_EXIT_CONFIRM` (the Exit Mission key), `HEADSHOTTONE`
 (the score fanfare's tone, and each step of a win epilog's score counter) and
 `TEXT_END` (the counter reaching its value): the original plays silence there.
 
+### The menu bank (`menu.lwf`)
+
+The menus name their sounds by set, each control a `SOUND` row (`state="mousein"
+trigger="MOUSE_OVER"`, `state="selected" trigger="CLICK_SELECT"`) naming the bank
+`menu.lwf`, which loads at the profile selector (docs/audio/lwf-dbf-sound-re.md,
+"Bank slots and load order"). JO:CA's menus name four: `MOUSE_OVER` (148 rows),
+`CLICK_SELECT` (149), `CLICK_VALUE` (150, the sliders and spinners) and
+`MOVER_COMBO` (102, a combo's rows), and `CLICK_JOIN` four times. Every set: set pitch
+0xFFFF, no jitter, cull range 10000, flags 0; every layer flags 0xF, min distance 0.
+
+| Set | Layer (falloff): wave, volume (clamp) | Waves |
+|---|---|---|
+| `MOUSE_OVER` | 1000: `MSOVR_2`, 80; 300: `MSOVRB_2`, 65 | 0.215 s, a low thump (90 % under 250 Hz), loudest 50 ms -14.8 dB; 0.203 s, a bright electronic whirr (84 % above 4 kHz), -11.9 dB |
+| `CLICK_SELECT` | 1000: `SELECTA1`, 160; 300: `SELECTB1`, 130 (150) | 0.377 s, four broadband clatters, -20.6 dB; 0.261 s, a decaying harmonic tone (its peak 0.71 kHz), -12.7 dB |
+| `CLICK_VALUE` | 1000: `CLIKVAL1`, 150 | 0.122 s, a click (centroid 1.3 kHz), -20.4 dB |
+| `MOVER_COMBO` | 300: `MSOVRB_2` at 0x1FFFE (2.0), 55; 300: `MSOVR_2`, 80 | the hover's two waves, its whirr an octave up |
+| `CLICK_JOIN` | 1000: `JOIN_1`, 145 | 0.57 s, a tone (99 % at 250 Hz to 1 kHz), -4.1 dB |
+
+The rest are `CLICK_NEWPAGE` (`NPAGE_1` and `NPAGEB_1`), `NEW_SCREEN` and
+`RETURN` (`NULL.WAV`, silence) and the player screen's `VOICE_n` previews. Every
+menu wave is 22050 Hz 16-bit mono and none is normalised (peaks -2.5 to -7.1
+dBFS). A set's layers sound at once, so a set is its layers mixed at their
+volumes: loudest 50 ms -21.6 dB (`MOUSE_OVER`), -17.7 (`CLICK_SELECT`), -25.0
+(`CLICK_VALUE`) and -23.1 (`MOVER_COMBO`), centroids 4.3, 3.5, 1.3 and 1.2 kHz.
+
+### The jungle ambience
+
+A placed `snd:` marker (an items.def `type marker` item with `move_function
+envs`) plays a set by the time of day: `soundloop_1` to `_4` are the morning,
+day, evening and night loops, cut at 4, 10, 17 and 21 h and crossfaded over about
+five game minutes, a loop the layer's member 0 alone at its falloff; and
+`dawnshot`, `dayshot`, `duskshot` and `nightshot` a one-shot set, a member
+picked at random each time, every base plus up to range seconds (the two
+numbers after the name) (docs/audio/lwf-dbf-sound-re.md, "Placed ambient
+markers"; docs/world/world-wac-ai-re.md, "Regional sounds"). JO:CA's jungle
+markers in `ITEMS.DEF` and the sets they name in `game.lwf`:
+
+| Marker | Loops (`soundloop_1` to `_4`) | Shots (base, range in s) |
+|---|---|---|
+| `snd: Rainforest Lp1 [300m]` (and Lp2 to Lp7) | `LPNV_RAINFOREST1`, `LPNV_RAINFOREST1`, `LPNV_RAINFOR_N1`, `LPNV_RAINFOR_N1` | |
+| `snd: Beach lp1 [400m], and one shots (ENV_TIDE1) [128m]` | `lpnv_beach_lp1` all day | `ENV_TIDE1` at dawn, day, dusk and night: 5, 3 |
+| `snd: CRIT-BUG Gnats Lp [30m]` | `LPNV_GNATS` all day | |
+| `snd: CRIT-BIRD RainF Maccaw [250m]` | | `ENV_MACCAW`: dawn 5, 21; day 6, 24; dusk 8, 34 |
+| `snd: CRIT-BIRD RainF Parrot [200m]` | | `ENV_PARROT`: dawn 4, 25; day 4, 25; dusk 8, 25 |
+| `snd: CRIT Toad night 1-Shots [180m]` | | `ENV_PM_TOAD`: dawn 20, 5; dusk 15, 6; night 11, 7 |
+| `snd: CRIT Tree Frog1 night (1-shots) [150m]` | | `ENV_PM_TFROG1`: dawn 25, 5; dusk 19, 7; night 10, 5 |
+
+| Set | Layer (falloff), flags | Members, volume (clamp) | Waves |
+|---|---|---|---|
+| `LPNV_RAINFOREST1` (to 7) | 300, 0xF | 1, 220 (95) | `LpJg1` to `7`: 7.8 to 22.0 s, 22050 Hz 8-bit, peak -0.1 dBFS, RMS -11.3 to -20.2 dB (`LpJg1` -13.8), centroid 2.9 to 5.8 kHz (`LpJg1` 4.7, 84 % above 4 kHz): insects and birds |
+| `LPNV_RAINFOR_N1`; `_N2` to `_N7` | 300, 0xF | 1, 95 (255); 1, 255 (95) | `lpJgN1` to `7`: 7.7 to 15.3 s, 8-bit, RMS -12.3 (`N1`), -10.1 to -15.1 (`N2` to `N7`, mean -11.9), centroid 3.5 to 5.8 kHz: insects |
+| `LPNV_BEACH_LP1`, `_LP2` | 400, 0x40F | 1, 160 (60) | `LPBEACH4`, `5`: 5.35, 6.42 s, 11025 Hz 16-bit, one wave each; RMS -9.1, -9.5 dB, centroid 0.57, 0.54 kHz (36 % under 250 Hz) |
+| `LPNV_GNATS` | 30, 0xF | 1, 80 | `LPswarm1`: 9.84 s, 11025 Hz 8-bit, RMS -14.7 dB, centroid 1.2 kHz (68 % at 250 Hz to 1 kHz) |
+| `ENV_TIDE1` (`_TIDE2`) | 128, 0xF | `NULL` at 0 (0), then 4 (3) at 100 (200), jitter 0x170A | `tide1` to `7`: 3.0 to 6.5 s, 22050 Hz 16-bit, a wash each; loudest 50 ms -6.9 to -7.6 dB, centroid 1.2 to 2.9 kHz |
+| `ENV_MACCAW` | 250, 0xF | 8, 164 | `mccw1` to `8`: 1.7 to 4.2 s, 22050 Hz 16-bit; loudest -7.9 to -14.8 dB (mean -11.0), centroid 1.3 to 3.2 kHz |
+| `ENV_WREN` | 200, 0xF | 8, 155 | `wren1` to `8`: 1.7 to 2.4 s, 16-bit; loudest -9.9 to -13.7 dB (mean -11.7), centroid 5.0 to 6.6 kHz |
+| `ENV_PARROT` | 200, 0xF | `NULL` at 0, then 3 at 125, 125, 45 | `parrt1` to `3`: 0.87 to 1.18 s, 16-bit |
+| `ENV_PM_TOAD` | 180, 0xF | 3, 115 | `ToadN1` to `3`: 1.07 to 3.33 s, 22050 Hz 8-bit; loudest -7.0 to -7.5 dB, centroid 1.45 kHz |
+| `ENV_PM_TFROG1` | 150, 0xF | `NULL` at 0, then 2 at 135 | `tfrogA1`, `A2`: 4.58, 2.37 s, 8-bit; loudest -8.4, -7.4 dB, centroid 2.0, 1.7 kHz |
+| `ENV_FROGGY` | 80, 0xF | 3 at 105, then `NULL` at 0 (0) | `froggy1` to `3`: 1.1 to 2.1 s, 11025 Hz 8-bit, a 2.2 kHz trill; loudest -5.1 to -5.8 dB |
+
+Every loop and one-shot is peak-normalised (0 to -0.6 dBFS), and a silent
+`NULL` member is the chance a shot plays nothing.
+
 ### What the engine does with an impact table
 
 In `AmmoDef_ParseProperty @ 0x40A2D0`, a `none` hit effect skips the effect intern (@ 0x40A51A) with no log; any other
@@ -254,6 +321,15 @@ Measured the same way (means per family; retail's in brackets):
 | Surfacing breaths | 2 | 1.64, 0.54 s (1.64, 0.54) | 0.7, 0.5 kHz (1.6, 1.0) | -5.0, -7.6 dB (-6.1, -7.6) |
 | Surfacing gasps | 2 | 2.34, 3.32 s (2.34, 3.32) | 0.8, 0.9 kHz (0.9, 0.5) | -6.5, -3.5 dB (-6.5, -3.5) |
 | Drowning | 3 | 2.70 to 3.55 s (1.72 to 3.65) | 0.26 to 0.64 kHz (0.26 to 0.33) | -3.3 to -4.3 dB (-3.7 to -4.3) |
+| Menu hover; combo move | 1; 1 | 0.215 s (0.215) | 4.5; 1.0 kHz (the sets mixed 4.3; 1.2) | -11.3; -10.5 dB (the layers -14.8 and -11.9) |
+| Menu select | 1 | 0.377 s (0.377 and 0.261) | 2.8 kHz (mixed 3.5) | -14.7 dB (-20.6 and -12.7) |
+| Menu value | 1 | 0.122 s (0.122) | 1.5 kHz (1.3) | -19.4 dB (-20.4) |
+| Jungle bed, day; night | 1; 1 | 16.0; 14.0 s (7.8 to 22.0; 7.7 to 15.3) | 4.7; 5.7 kHz (4.7; 3.5 to 5.8) | -14.3; -12.8 dB RMS (-13.8; -11.9) |
+| Surf on the beach | 1 | 10.8 s, two waves (5.35 and 6.42, one wave) | 0.73 kHz (0.57) | -9.5 dB RMS (-9.1) |
+| Gnats | 1 | 9.8 s (9.84) | 1.1 kHz (1.2) | -14.9 dB RMS (-14.7) |
+| Day birds | 4 | 1.66 to 2.87 s (1.7 to 4.2) | 1.3 to 3.5 kHz (1.3 to 6.6) | -6.1 to -11.1 dB (-7.9 to -14.8) |
+| Night frogs | 3 | 2.40 to 3.03 s (1.07 to 4.58) | 1.6 to 3.0 kHz (1.45 to 2.2) | -7.0 to -8.4 dB (-7.0 to -8.4) |
+| Tide washes | 3 | 4.5 to 6.0 s (3.0 to 6.5) | 0.8 to 1.4 kHz (1.2 to 2.9) | -7.9 to -8.4 dB (-6.9 to -7.6) |
 
 The member volumes below match each family's loudness to retail's: retail's
 volume times the ratio of the two families' loudest-50 ms RMS, at most 255;
@@ -433,3 +509,48 @@ hmetal `ON_IMP_ARMOR`; flesh `ON_IMP_FLESH`; player `ON_IMP_PLAYER`; zip
 (the dirt set, as the original's default ammo `AT_NULL` does), so a hit on an
 object of no material, or on terrain of class 0, is heard. Every hit effect is
 `none` until the game has its own particles.
+
+## The menu bank and the ambience sets (to author)
+
+The waves are in `assets/`; the sets are still to be authored in the editor (a
+new `menu.lwf` beside `game.lwf`, and new sets in `game.lwf`), with these
+values. Each copies its retail counterpart's layers, falloff, flags and member
+count, and each member's volume is retail's volume times the ratio of the two
+waves' loudness, as above (the loops by whole-file RMS, the one-shots and the
+menu sounds by the loudest 50 ms; a menu set against its retail set's layers
+mixed). A clamp scales with its volume. Every set: set pitch 0xFFFF, no set
+jitter, cull range 10000, set flags 0; every layer min distance 0; every member
+pitch 0xFFFF and clamp 255 unless noted.
+
+`menu.lwf`, one layer a set (our one wave holds what retail's two layers do):
+
+| Set | Layer (falloff) | Member | Volume | Retail |
+|---|---|---|---|---|
+| `MOUSE_OVER` | 1000, flags 0xF | `onmnovr1` | 78 | `MSOVR_2` 80 and `MSOVRB_2` 65, mixed -21.6 dB; ours -11.3 dB |
+| `CLICK_SELECT` | 1000, flags 0xF | `onmnsel1` | 181 | `SELECTA1` 160 and `SELECTB1` 130 (150), mixed -17.7 dB; ours -14.7 dB |
+| `CLICK_VALUE` | 1000, flags 0xF | `onmnval1` | 134 | `CLIKVAL1` 150, -25.0 dB at its volume; ours -19.4 dB |
+| `MOVER_COMBO` | 300, flags 0xF | `onmncmb1` | 60 | `MSOVRB_2` at 2.0 55 and `MSOVR_2` 80, mixed -23.1 dB; ours -10.5 dB |
+
+`game.lwf`:
+
+| Set | Layer (falloff), flags | Members, volume (clamp), jitter | Retail it is levelled against |
+|---|---|---|---|
+| `LPNV_ONJNGL_D1` | 300, 0xF | `onambjd1` 234 (101) | `LPNV_RAINFOREST1`: `LpJg1` 220 (95) at -13.8 dB RMS; ours -14.3 |
+| `LPNV_ONJNGL_N1` | 300, 0xF | `onambjn1` 255 (105) | `LPNV_RAINFOR_N2` to `N7`: 255 (95) at -11.9 dB RMS (mean); ours -12.8 (against `N1`'s 95 (255) at -12.3 it would be 100 (255)) |
+| `LPNV_ONBEACH1` | 400, 0x40F | `onambsf1` 169 (63) | `LPNV_BEACH_LP1`: `LPBEACH4` 160 (60) at -9.1 dB RMS; ours -9.5 |
+| `LPNV_ONGNATS` | 30, 0xF | `ongnat1` 82 | `LPNV_GNATS`: `LPswarm1` 80 at -14.7 dB RMS; ours -14.9 |
+| `ENV_ONBIRD1` | 250, 0xF | `onbird1` 93, `onbird2` 165, `onbird3` 142, `onbird4` 118 | `ENV_MACCAW`: 164 at -11.0 dB loudest (mean); ours -6.1, -11.1, -9.8, -8.2 |
+| `ENV_ONFROG1` | 180, 0xF | `onfrog1` 133, `onfrog2` 124, `onfrog3` 113, `onnull` 0 (0) | `ENV_PM_TOAD`: 115 at -7.1 dB loudest; ours -8.4, -7.8, -7.0; the silent member as `ENV_PM_TFROG1` and `ENV_FROGGY` |
+| `ENV_ONTIDE1` | 128, 0xF | `onnull` 0 (0); `ontide1` 113 (226), `ontide2` 110 (221), `ontide3` 107 (213), jitter 0x170A | `ENV_TIDE1`: `NULL` 0 (0), then 100 (200), jitter 0x170A, at -7.3 dB loudest; ours -8.4, -8.1, -7.9 |
+
+A loop's marker plays its layer's member 0 alone, so each loop set holds the one
+wave. The markers that would play them (items.def, `type marker`,
+`move_function envs`), timed as the retail markers above:
+
+| Marker | Loops (`soundloop_1` to `_4`) | Shots (base, range in s) |
+|---|---|---|
+| `snd: ON Jungle Lp [300m]` | `LPNV_ONJNGL_D1`, `LPNV_ONJNGL_D1`, `LPNV_ONJNGL_N1`, `LPNV_ONJNGL_N1` | |
+| `snd: ON Beach Lp [400m] + tide shots [128m]` | `LPNV_ONBEACH1` all day | `ENV_ONTIDE1` at dawn, day, dusk and night: 5, 3 |
+| `snd: ON Gnats Lp [30m]` | `LPNV_ONGNATS` all day | |
+| `snd: ON Birds [250m]` | | `ENV_ONBIRD1`: dawn 5, 21; day 6, 24; dusk 8, 34 |
+| `snd: ON Frogs night [180m]` | | `ENV_ONFROG1`: dawn 20, 5; dusk 15, 6; night 11, 7 |
