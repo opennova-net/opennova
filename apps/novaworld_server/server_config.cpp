@@ -104,12 +104,15 @@ ServerConfig ServerConfig::from_env() {
 	if (auto v = getenv_safe("ONNET_HOSTED_PROVIDER")) c.hosted_provider = v;
 	c.hosted_cap = getenv_int("ONNET_HOSTED_CAP", c.hosted_cap);
 	if (auto v = getenv_safe("ONNET_HOSTED_SERVE_BIN")) c.hosted_serve_bin = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_RESOURCE_DIR")) c.hosted_resource_dir = v;
-	c.hosted_loose_root = getenv_bool("ONNET_HOSTED_LOOSE_ROOT", c.hosted_loose_root);
 	if (auto v = getenv_safe("ONNET_HOSTED_WORK_DIR")) c.hosted_work_dir = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_MISSIONS")) c.hosted_missions = split_list(v);
+	{
+		const char *sets = getenv_safe("ONNET_HOSTED_DATA_SETS");
+		const char *templates = getenv_safe("ONNET_HOSTED_EC2_LAUNCH_TEMPLATES");
+		if (!hosted::parse_data_set_configs(sets ? sets : "", templates ? templates : "", c.hosted_data_sets,
+					c.hosted_data_sets_error))
+			c.hosted_data_sets.clear();
+	}
 	if (auto v = getenv_safe("ONNET_HOSTED_EC2_REGION")) c.hosted_ec2_region = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_EC2_LAUNCH_TEMPLATE")) c.hosted_ec2_launch_template = v;
 	if (auto v = getenv_safe("ONNET_HOSTED_EC2_SUBNET")) c.hosted_ec2_subnet = v;
 	if (auto v = getenv_safe("ONNET_HOSTED_DEPLOYMENT")) c.hosted_deployment = v;
 	if (auto v = getenv_safe("ONNET_HOSTED_SERVE_IMAGE")) c.hosted_serve_image = v;

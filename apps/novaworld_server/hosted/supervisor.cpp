@@ -39,8 +39,10 @@ Supervisor::~Supervisor() { stop(); }
 
 void Supervisor::start() {
 	if (running_.exchange(true)) return;
-	std::printf("[hosted] supervisor: provider %s, cap %d, servers list on %s:%u\n",
-			provider_.name(), config_.cap, config_.master_host.c_str(),
+	std::string games;
+	for (const DataSet &d : config_.data_sets) games += (games.empty() ? "" : ", ") + d.game;
+	std::printf("[hosted] supervisor: provider %s, cap %d, data sets %s, servers list on %s:%u\n",
+			provider_.name(), config_.cap, games.empty() ? "(none)" : games.c_str(), config_.master_host.c_str(),
 			static_cast<unsigned>(config_.master_gate_port));
 	try {
 		reconcile(steady_now_ms());
@@ -287,6 +289,14 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 		return;
 	}
 
+	// Its data set, which the deployment may have stopped offering since the
+	// request (no restart mends that).
+	const DataSet *data_set = find_data_set(config_.data_sets, s.settings.game);
+	if (!data_set) {
+		finish(db, s, State::Failed, "its game (" + loggable(s.settings.game, 64) + ") is no longer hosted here");
+		return;
+	}
+
 	// The service account, with a new password at every start.
 	const std::string username = service_username(s.id);
 	const std::string nw_password = random_secret(kServicePasswordChars);
@@ -310,7 +320,7 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 	inputs.admin_password = admin_password;
 	inputs.master_host = config_.master_host;
 	inputs.master_gate_port = config_.master_gate_port;
-	const LaunchSpec spec = render_launch(s.settings, inputs);
+	const LaunchSpec spec = render_launch(s.settings, *data_set, inputs);
 
 	std::string error;
 	const std::optional<std::string> machine = provider_.launch(spec, error);

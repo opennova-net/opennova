@@ -1,10 +1,11 @@
 #pragma once
 
 // The cloud MachineProvider (ONNET_HOSTED_PROVIDER=ec2; ADR 0053): one EC2
-// machine per hosted server, launched from the deployment's launch template
-// (infra/aws, "Hosted game servers": a stock Ubuntu image, the machine type, the
-// game data's private encrypted snapshot as a second volume, the game security
-// group, the machine's instance profile, IMDSv2 required, and
+// machine per hosted server, launched from its data set's launch template
+// (ONNET_HOSTED_EC2_LAUNCH_TEMPLATES; infra/aws, "Hosted game servers": one per
+// data set, each a stock Ubuntu image, the machine type, that data set's
+// private encrypted snapshot as a second volume, the game security group, the
+// machine's instance profile, IMDSv2 required, and
 // InstanceInitiatedShutdownBehavior=terminate), running opennova-serve in its
 // container (machine/user_data.sh). A machine is terminated at its server's
 // end, never stopped, so each launch has a new public address.
@@ -16,8 +17,8 @@
 // lacks what is read) is logged and handled here, never thrown, but by
 // list_tagged.
 //
-//   launch      run-instances: the launch template's default version, the
-//               subnet, one machine, the tags opennova:hosted=1,
+//   launch      run-instances: the spec's data set's launch template, its
+//               default version, the subnet, one machine, the tags opennova:hosted=1,
 //               opennova:deployment=<ONNET_HOSTED_DEPLOYMENT>,
 //               opennova:server-id=<id> and Name on the machine and its
 //               volumes, a client token (the CLI's own retries of the call
@@ -62,6 +63,7 @@
 
 #include "bootstrap.h"
 #include "command_runner.h"
+#include "data_sets.h"
 #include "machine_provider.h"
 
 #include <cstdint>
@@ -77,7 +79,9 @@ namespace opennova::novaworld_server::hosted {
 struct Ec2Config {
 	std::string aws_cli = "/usr/local/bin/aws"; // ONNET_HOSTED_AWS_CLI: absolute, run as given
 	std::string region;                         // ONNET_HOSTED_EC2_REGION
-	std::string launch_template;                // ONNET_HOSTED_EC2_LAUNCH_TEMPLATE (lt-...)
+	// The data sets it runs, each with its launch_template (lt-...;
+	// ONNET_HOSTED_EC2_LAUNCH_TEMPLATES).
+	std::vector<DataSet> data_sets;
 	std::string subnet;                         // ONNET_HOSTED_EC2_SUBNET (subnet-...)
 	std::string deployment;                     // ONNET_HOSTED_DEPLOYMENT: the tag that scopes every call
 	std::string serve_image;                    // ONNET_HOSTED_SERVE_IMAGE, pinned at deploy

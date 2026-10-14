@@ -3664,6 +3664,7 @@ add_executable(hosted_supervisor_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/web_session.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/admin_link.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/data_sets.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/local_process_provider.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/owner_file.cpp
@@ -3694,6 +3695,7 @@ add_executable(hosted_admin_link_test
     novaworld/hosted_admin_link_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/admin_link.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/data_sets.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp)
 target_link_libraries(hosted_admin_link_test
     PRIVATE opennova_novaworld_service opennova_app_common Threads::Threads)
@@ -3721,6 +3723,7 @@ add_executable(hosted_ec2_provider_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/bootstrap.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/command_runner.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/ec2_provider.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/data_sets.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/owner_file.cpp)
 target_link_libraries(hosted_ec2_provider_test PRIVATE opennova_net Threads::Threads)
@@ -3743,6 +3746,7 @@ set_tests_properties(hosted_ec2_provider PROPERTIES TIMEOUT 120)
 add_executable(hosted_console_commands_test
     novaworld/hosted_console_commands_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/console_commands.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/data_sets.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp)
 target_link_libraries(hosted_console_commands_test PRIVATE opennova_net)
 target_include_directories(hosted_console_commands_test PRIVATE

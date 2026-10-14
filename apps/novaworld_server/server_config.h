@@ -1,5 +1,7 @@
 #pragma once
 
+#include "hosted/data_sets.h"
+
 #include <net/novaworld/connection/manager.h>
 #include <net/novaworld/gate_probe.h>
 #include <cstdint>
@@ -164,31 +166,33 @@ struct ServerConfig {
 	// process on this machine (LocalProcessProvider), for development and the
 	// tests; "ec2" runs each on an EC2 machine of its own (Ec2Provider, the
 	// settings below). ONNET_HOSTED_PROVIDER; any other value is "none", with a
-	// warning.
+	// warning, as is a provider no data set is configured for.
 	std::string hosted_provider = "none";
 	// ONNET_HOSTED_CAP: the most hosted servers live at once, across every
 	// account (each account has one at most).
 	int hosted_cap = 5;
-	// The local provider's opennova-serve binary (ONNET_HOSTED_SERVE_BIN), the
-	// game data it serves (ONNET_HOSTED_RESOURCE_DIR, its --resource-dir;
-	// ONNET_HOSTED_LOOSE_ROOT=1 adds --loose-root for a directory with no
-	// archives) and the root of the servers' working directories
-	// (ONNET_HOSTED_WORK_DIR). The first two are required for "local".
+	// The local provider's opennova-serve binary (ONNET_HOSTED_SERVE_BIN,
+	// required for "local") and the root of the servers' working directories
+	// (ONNET_HOSTED_WORK_DIR).
 	std::string hosted_serve_bin;
-	std::string hosted_resource_dir;
-	bool hosted_loose_root = false;
 	std::string hosted_work_dir = "backend/data/hosted";
-	// ONNET_HOSTED_MISSIONS: the rotation a start takes when its request names
-	// none (comma-separated .bms names, the first the starting map). Empty: a
-	// start must name its missions.
-	std::vector<std::string> hosted_missions;
+	// The data sets (hosted/data_sets.h), merged from ONNET_HOSTED_DATA_SETS (a
+	// JSON object keyed by data set: its default rotation, "missions", the
+	// first the starting map; the local provider's game folder,
+	// "resource_dir", and "loose_root" for one with no archives) and
+	// ONNET_HOSTED_EC2_LAUNCH_TEMPLATES (a JSON object, data set -> its launch
+	// template). The provider offers the ones it has the data of; none offered
+	// is hosting off.
+	std::vector<hosted::DataSetConfig> hosted_data_sets;
+	// Why those two did not read (a boot warning; hosting off); "" when they did.
+	std::string hosted_data_sets_error;
 
 	// The ec2 provider's (hosted/ec2_provider.h), each set by the deploy
 	// toolbox's `app deploy` from the Terraform outputs (DEPLOY.md, "Hosted game
 	// servers"); every one is required for "ec2". The region
-	// (ONNET_HOSTED_EC2_REGION), the launch template
-	// (ONNET_HOSTED_EC2_LAUNCH_TEMPLATE) and the subnet (ONNET_HOSTED_EC2_SUBNET)
-	// a machine launches from; the deployment tag every call is scoped to
+	// (ONNET_HOSTED_EC2_REGION) and the subnet (ONNET_HOSTED_EC2_SUBNET) a
+	// machine launches in (its launch template is its data set's, above); the
+	// deployment tag every call is scoped to
 	// (ONNET_HOSTED_DEPLOYMENT); the serve image, pinned
 	// (ONNET_HOSTED_SERVE_IMAGE); this service's PRIVATE address
 	// (ONNET_HOSTED_SERVICE_ADDRESS: where the machines fetch their bootstrap
@@ -199,7 +203,6 @@ struct ServerConfig {
 	// user-data template, hosted/machine/user_data.sh, which the server image
 	// ships at the default path; a run outside the image names its own).
 	std::string hosted_ec2_region;
-	std::string hosted_ec2_launch_template;
 	std::string hosted_ec2_subnet;
 	std::string hosted_deployment;
 	std::string hosted_serve_image;

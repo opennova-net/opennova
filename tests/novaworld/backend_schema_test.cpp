@@ -293,12 +293,13 @@ int test_web_sessions_migration_over_existing_accounts() {
 	TEST_EXPECT(db.query("SELECT name FROM pragma_table_info('players') WHERE name = 'role';").empty());
 
 	const auto second = run_migrations(db, migrations);
-	TEST_EXPECT(second.applied.size() == 5);
+	TEST_EXPECT(second.applied.size() >= 6);
 	TEST_EXPECT(second.applied[0] == "0008_web_sessions_and_roles.sql");
 	TEST_EXPECT(second.applied[1] == "0009_host_keys.sql");
 	TEST_EXPECT(second.applied[2] == "0010_credentials_generation.sql");
 	TEST_EXPECT(second.applied[3] == "0011_hosted_servers.sql");
 	TEST_EXPECT(second.applied[4] == "0012_hosted_server_console.sql");
+	TEST_EXPECT(second.applied.back() == "0014_hosted_server_game.sql");
 	const auto roles = db.query("SELECT COUNT(*), SUM(role = 'player'), SUM(kind = 'player'), "
 	                            "SUM(can_host) FROM players;");
 	TEST_EXPECT(roles[0].as_int(0).value() == 5);
@@ -306,6 +307,50 @@ int test_web_sessions_migration_over_existing_accounts() {
 	TEST_EXPECT(roles[0].as_int(2).value() == 5);
 	TEST_EXPECT(roles[0].as_int(3).value() == 0);
 	TEST_EXPECT(db.query("SELECT 1 FROM web_sessions;").empty());
+	return 0;
+}
+
+// 0014 over a database whose hosted servers ran before it (every one on Joint
+// Operations' data): the migrations up to 0012 with a hosted server written,
+// then the full set, which gives that row the game 'jop_2_consumer'; a new row
+// names its own.
+int test_hosted_server_game_migration() {
+	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
+	const auto migrations = source_dir / "backend" / "migrations";
+	test_temp::TempDir before_0013("backend_schema_pre0013");
+	for (const auto &e : std::filesystem::directory_iterator(migrations)) {
+		if (e.path().extension() == ".sql" && e.path().filename().string() < "0013") {
+			std::filesystem::copy_file(e.path(), before_0013.path / e.path().filename());
+		}
+	}
+	Database db(":memory:");
+	const auto first = run_migrations(db, before_0013.path);
+	TEST_EXPECT(first.applied.size() == 12);
+	TEST_EXPECT(db.query("SELECT name FROM pragma_table_info('hosted_servers') WHERE name = 'game';").empty());
+	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
+	        "VALUES ('host_before', 'x', '0e140001', '1', 'HostBefore');");
+	db.exec("INSERT INTO hosted_servers (owner_user_id, state, game_name, max_players, time_limit, kill_limit, "
+	        "max_score, respawn, start_delay, missions) "
+	        "SELECT id, 'stopped', 'Before', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players WHERE username = 'host_before';");
+
+	const auto second = run_migrations(db, migrations);
+	TEST_EXPECT(!second.applied.empty() && second.applied.back() == "0014_hosted_server_game.sql");
+	const auto rows = db.query("SELECT game FROM hosted_servers WHERE game_name = 'Before';");
+	TEST_EXPECT(rows.size() == 1 && rows[0].as_text(0).value() == "jop_2_consumer");
+	db.exec("INSERT INTO hosted_servers (owner_user_id, state, game, game_name, max_players, time_limit, "
+	        "kill_limit, max_score, respawn, start_delay, missions) "
+	        "SELECT id, 'stopped', 'dfx2_consumer', 'After', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players "
+	        "WHERE username = 'host_before';");
+	const auto after = db.query("SELECT game FROM hosted_servers WHERE game_name = 'After';");
+	TEST_EXPECT(after.size() == 1 && after[0].as_text(0).value() == "dfx2_consumer");
+	// The column takes no NULL.
+	bool refused = false;
+	try {
+		db.exec("UPDATE hosted_servers SET game = NULL WHERE game_name = 'After';");
+	} catch (const opennova::db::SqliteError &) {
+		refused = true;
+	}
+	TEST_EXPECT(refused);
 	return 0;
 }
 
@@ -439,7 +484,8 @@ int main() {
 	if (test_web_sessions_migration_over_existing_accounts() != 0) return 1;
 	if (test_host_keys_and_account_deletes() != 0) return 1;
 	if (test_credentials_generation() != 0) return 1;
+	if (test_hosted_server_game_migration() != 0) return 1;
 	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs, "
-	            "web sessions + roles, host keys, credentials generation)\n");
+	            "web sessions + roles, host keys, credentials generation, hosted server games)\n");
 	return 0;
 }

@@ -15,10 +15,22 @@ namespace opennova::novaworld_server::hosted {
 
 namespace {
 
-std::optional<SettingsRefusal> out_of_range(const char *field, int value, int min, int max) {
-	if (value >= min && value <= max) return std::nullopt;
+std::optional<SettingsRefusal> out_of_range(const char *field, int value, const SettingRange &range) {
+	if (value >= range.min && value <= range.max) return std::nullopt;
 	return SettingsRefusal{ field,
-		"must be " + std::to_string(min) + " to " + std::to_string(max) };
+		"must be " + std::to_string(range.min) + " to " + std::to_string(range.max) };
+}
+
+// The expansion rule's words: `is "" (the base game) or "jox01"`.
+std::string expansion_rule(const DataSet &data_set) {
+	std::string out = "is";
+	for (size_t i = 0; i < data_set.expansions.size(); ++i) {
+		const Expansion &e = data_set.expansions[i];
+		out += i == 0 ? " " : (i + 1 == data_set.expansions.size() ? " or " : ", ");
+		out += "\"" + e.code + "\"";
+		if (e.code.empty()) out += " (the base game)";
+	}
+	return out;
 }
 
 // A host-file value: quoted, in the host's code page (check_settings has
@@ -43,7 +55,9 @@ bool is_mission_file_name(std::string_view name) {
 	return true;
 }
 
-std::optional<SettingsRefusal> check_settings(const HostedSettings &s) {
+std::optional<SettingsRefusal> check_settings(const HostedSettings &s, const std::vector<DataSet> &offered) {
+	const DataSet *data_set = find_data_set(offered, s.game);
+	if (!data_set) return SettingsRefusal{ "game", "is no game this service hosts" };
 	{
 		std::string bytes;
 		if (has_control_byte(s.game_name) || has_c1_control(s.game_name))
@@ -67,15 +81,14 @@ std::optional<SettingsRefusal> check_settings(const HostedSettings &s) {
 			return SettingsRefusal{ "game_password",
 				"takes printable ASCII with no space or double quote" };
 	}
-	if (auto r = out_of_range("max_players", s.max_players, kMaxPlayersMin, kMaxPlayersMax)) return r;
-	if (auto r = out_of_range("time_limit", s.time_limit, kTimeLimitMin, kTimeLimitMax)) return r;
-	if (auto r = out_of_range("kill_limit", s.kill_limit, kKillLimitMin, kKillLimitMax)) return r;
-	if (auto r = out_of_range("max_score", s.max_score, kMaxScoreMin, kMaxScoreMax)) return r;
-	if (auto r = out_of_range("respawn", s.respawn, kRespawnMin, kRespawnMax)) return r;
-	if (auto r = out_of_range("start_delay", s.start_delay, kStartDelayMin, kStartDelayMax)) return r;
-	if (!s.expansion.empty() && s.expansion != kExpansionEscalation)
-		return SettingsRefusal{ "expansion",
-			std::string("is \"\" (Joint Operations) or \"") + kExpansionEscalation + "\"" };
+	const HostLimits &limits = data_set->limits;
+	if (auto r = out_of_range("max_players", s.max_players, limits.max_players)) return r;
+	if (auto r = out_of_range("time_limit", s.time_limit, limits.time_limit)) return r;
+	if (auto r = out_of_range("kill_limit", s.kill_limit, limits.kill_limit)) return r;
+	if (auto r = out_of_range("max_score", s.max_score, limits.max_score)) return r;
+	if (auto r = out_of_range("respawn", s.respawn, limits.respawn)) return r;
+	if (auto r = out_of_range("start_delay", s.start_delay, limits.start_delay)) return r;
+	if (!find_expansion(*data_set, s.expansion)) return SettingsRefusal{ "expansion", expansion_rule(*data_set) };
 	if (s.missions.empty()) return SettingsRefusal{ "missions", "names no mission" };
 	if (s.missions.size() > kMissionsMax)
 		return SettingsRefusal{ "missions",
@@ -163,9 +176,10 @@ std::string render_credentials(const std::string &username, const std::string &p
 	return "NOVAWORLD_USER=" + username + "\nNOVAWORLD_PASS=" + password + "\n";
 }
 
-LaunchSpec render_launch(const HostedSettings &settings, const RenderInputs &in) {
+LaunchSpec render_launch(const HostedSettings &settings, const DataSet &data_set, const RenderInputs &in) {
 	LaunchSpec spec;
 	spec.server_id = in.server_id;
+	spec.data_set = data_set.game;
 	spec.files.push_back({ kHostFileName, render_host_file(settings, in.server_id), true });
 	spec.files.push_back({ kGameCfgFileName, render_game_cfg(in.plan), false });
 	spec.files.push_back({ kAdminCfgFileName, render_admin_cfg(in.plan, in.admin_password), true });
@@ -173,7 +187,7 @@ LaunchSpec render_launch(const HostedSettings &settings, const RenderInputs &in)
 			render_credentials(in.service_username, in.service_password), true });
 	spec.serve_args = { "/HOST", kHostFileName, "--credentials", kCredentialsFileName,
 		"--master-host", in.master_host, "--master-gate-port",
-		std::to_string(in.master_gate_port) };
+		std::to_string(in.master_gate_port), "/game", data_set.title };
 	if (!settings.expansion.empty()) {
 		spec.serve_args.push_back("/exp");
 		spec.serve_args.push_back(settings.expansion);

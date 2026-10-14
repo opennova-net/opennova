@@ -1,8 +1,11 @@
 // The hosted servers' supervisor and what it stands on (apps/novaworld_server/
-// hosted, migration 0011), on a migrated SQLite file with a FakeProvider
-// (hosted_fake_provider.h) and a hand-stepped clock: the owner's settings and
-// their range checks, the files rendered from them (read back by the formats'
-// own readers), the service accounts (minted, refused by the website, hidden,
+// hosted, migrations 0011 and 0014), on a migrated SQLite file with a
+// FakeProvider (hosted_fake_provider.h) and a hand-stepped clock: the data sets
+// (the catalog, the two variables' reads, what each provider offers, a server
+// whose data set is no longer offered), the owner's settings and their checks
+// against the data set's limits and expansions, the files and the arguments
+// rendered from them (read back by the formats' own readers; /game per data
+// set), the service accounts (minted, refused by the website, hidden,
 // reserved, their password set again at every start, deleted at the end), the
 // start request's checks (approval, one live server per account, the global
 // cap), every transition of the lifecycle with its event, the stop (the push,
@@ -20,8 +23,10 @@
 // opennova-serve it runs (`--resource-dir ...` makes it the fake server): the
 // working directory rendered from scratch with its secret files owner-only and
 // deleted at terminate, an environment that keeps a planted secret out, the
-// argv, the exit code, terminate and the tags; and its children outliving the
-// supervisor's thread to get an orderly stop from the provider. Compiles the
+// argv per data set (its folder, --loose-root as configured, a data set with
+// no folder refused), the exit code, terminate and the tags; and its children
+// outliving the supervisor's thread to get an orderly stop from the provider.
+// Compiles the
 // server's auth.cpp, web_session.cpp and the hosted sources directly, so it
 // runs on every build.
 
@@ -34,6 +39,7 @@
 #include "hosted_fake_provider.h"
 #include "web_session.h"
 
+#include <base/gameprofile/gameprofile.h>
 #include <base/io/cp1252.h>
 #include <base/io/file_io.h>
 #include <base/proc/child_process.h>
@@ -86,6 +92,7 @@ std::string g_self;
 
 hosted::HostedSettings valid_settings() {
 	hosted::HostedSettings s;
+	s.game = hosted::kDataSetJointOperations;
 	s.game_name = "Hosted Test";
 	s.missions = { "servetst.bms", "second.bms" };
 	return s;
@@ -187,6 +194,7 @@ struct Rig {
 		config.restart_limit = 2;
 		config.restart_backoff_ms = 3000;
 		config.stop_timeout_ms = 60000;
+		config.data_sets = hosted::known_data_sets();
 		make_supervisor();
 	}
 	void make_supervisor() {
@@ -208,7 +216,7 @@ struct Rig {
 		auto db = pool.acquire();
 		const int64_t user = make_player(*db, owner, true);
 		if (user == 0) return 0;
-		const auto r = hosted::request_server(*db, user, settings, config.cap);
+		const auto r = hosted::request_server(*db, user, settings, config.data_sets, config.cap);
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	}
 	// A request walked to running, listed under `rid`: its machine's id.
@@ -244,10 +252,12 @@ struct Rig {
 // --- the settings and the renders ---------------------------------------------
 
 int test_settings_rules() {
+	const std::vector<hosted::DataSet> &offered = hosted::known_data_sets();
+	const auto check = [&offered](const hosted::HostedSettings &c) { return hosted::check_settings(c, offered); };
 	hosted::HostedSettings s = valid_settings();
-	TEST_EXPECT(!hosted::check_settings(s));
-	auto refused = [](hosted::HostedSettings bad, const char *field) {
-		const auto r = hosted::check_settings(bad);
+	TEST_EXPECT(!check(s));
+	auto refused = [&check](hosted::HostedSettings bad, const char *field) {
+		const auto r = check(bad);
 		if (!r || r->field != field)
 			std::fprintf(stderr, "  want a refusal of %s, got %s\n", field, r ? r->field.c_str() : "none");
 		return r && r->field == field;
@@ -260,9 +270,9 @@ int test_settings_rules() {
 	TEST_EXPECT(refused(with([](auto &c) { c.game_name = ""; }), "game_name"));
 	TEST_EXPECT(refused(with([](auto &c) { c.game_name = "   "; }), "game_name"));
 	TEST_EXPECT(refused(with([](auto &c) { c.game_name = std::string(32, 'n'); }), "game_name"));
-	TEST_EXPECT(!hosted::check_settings(with([](auto &c) { c.game_name = std::string(31, 'n'); })));
+	TEST_EXPECT(!check(with([](auto &c) { c.game_name = std::string(31, 'n'); })));
 	// 31 characters of two UTF-8 bytes each are 31 cp1252 bytes.
-	TEST_EXPECT(!hosted::check_settings(with([](auto &c) {
+	TEST_EXPECT(!check(with([](auto &c) {
 		c.game_name.clear();
 		for (int i = 0; i < 31; ++i) c.game_name += "\xC3\xA9";
 	})));
@@ -273,7 +283,7 @@ int test_settings_rules() {
 	TEST_EXPECT(refused(with([](auto &c) { c.game_password = std::string(17, 'p'); }), "game_password"));
 	TEST_EXPECT(refused(with([](auto &c) { c.game_password = "has space"; }), "game_password"));
 	TEST_EXPECT(refused(with([](auto &c) { c.game_password = "q\"uote"; }), "game_password"));
-	TEST_EXPECT(!hosted::check_settings(with([](auto &c) { c.game_password = "Secret!16-chars."; })));
+	TEST_EXPECT(!check(with([](auto &c) { c.game_password = "Secret!16-chars."; })));
 	TEST_EXPECT(refused(with([](auto &c) { c.max_players = 1; }), "max_players"));
 	TEST_EXPECT(refused(with([](auto &c) { c.max_players = 65; }), "max_players"));
 	TEST_EXPECT(refused(with([](auto &c) { c.time_limit = 0; }), "time_limit"));
@@ -282,13 +292,51 @@ int test_settings_rules() {
 	TEST_EXPECT(refused(with([](auto &c) { c.respawn = -1; }), "respawn"));
 	TEST_EXPECT(refused(with([](auto &c) { c.start_delay = 301; }), "start_delay"));
 	TEST_EXPECT(refused(with([](auto &c) { c.expansion = "jox02"; }), "expansion"));
-	TEST_EXPECT(!hosted::check_settings(with([](auto &c) { c.expansion = "jox01"; })));
+	TEST_EXPECT(!check(with([](auto &c) { c.expansion = "jox01"; })));
+	// The game: one the service offers, whose expansions and limits the rest take.
+	TEST_EXPECT(refused(with([](auto &c) { c.game.clear(); }), "game"));
+	TEST_EXPECT(refused(with([](auto &c) { c.game = "jop_3_consumer"; }), "game"));
+	TEST_EXPECT(!check(with([](auto &c) { c.game = hosted::kDataSetDeltaForceXtreme2; })));
+	TEST_EXPECT(!check(with([](auto &c) { c.game = hosted::kDataSetOpenNova; })));
+	TEST_EXPECT(refused(with([](auto &c) {
+		c.game = hosted::kDataSetDeltaForceXtreme2;
+		c.expansion = "jox01";
+	}), "expansion"));
+	TEST_EXPECT(refused(with([](auto &c) {
+		c.game = hosted::kDataSetOpenNova;
+		c.expansion = "jox01";
+	}), "expansion"));
+	{
+		// Only the deployment's: a known data set it does not offer is refused.
+		std::vector<hosted::DataSet> jo_only = { *hosted::find_data_set(offered, hosted::kDataSetJointOperations) };
+		hosted::HostedSettings dfx2 = s;
+		dfx2.game = hosted::kDataSetDeltaForceXtreme2;
+		const auto r = hosted::check_settings(dfx2, jo_only);
+		TEST_EXPECT(r && r->field == "game");
+		TEST_EXPECT(!hosted::check_settings(s, jo_only));
+		// A data set's own limits: a narrower row refuses what Joint Operations' takes.
+		jo_only[0].limits.max_players = { 2, 16 };
+		hosted::HostedSettings big = s;
+		big.max_players = 32;
+		const auto too_many = hosted::check_settings(big, jo_only);
+		TEST_EXPECT(too_many && too_many->field == "max_players" && too_many->reason == "must be 2 to 16");
+		TEST_EXPECT(hosted::check_settings(big, offered) == std::nullopt);
+		hosted::HostedSettings escalation = s;
+		escalation.game = hosted::kDataSetDeltaForceXtreme2;
+		escalation.expansion = "jox01";
+		const auto no_exp = hosted::check_settings(escalation, offered);
+		TEST_EXPECT(no_exp && no_exp->reason == "is \"\" (the base game)");
+		escalation.game = hosted::kDataSetJointOperations;
+		escalation.expansion = "jox02";
+		const auto two = hosted::check_settings(escalation, offered);
+		TEST_EXPECT(two && two->reason == "is \"\" (the base game) or \"jox01\"");
+	}
 	TEST_EXPECT(refused(with([](auto &c) { c.missions.clear(); }), "missions"));
 	TEST_EXPECT(refused(with([](auto &c) { c.missions.assign(33, "map.bms"); }), "missions"));
 	TEST_EXPECT(refused(with([](auto &c) { c.missions = { "../up.bms" }; }), "missions"));
 	TEST_EXPECT(refused(with([](auto &c) { c.missions = { "map.txt" }; }), "missions"));
 	TEST_EXPECT(refused(with([](auto &c) { c.missions = { "two words.bms" }; }), "missions"));
-	TEST_EXPECT(!hosted::check_settings(with([](auto &c) { c.missions = { "ASH_G11A.BMS", "x-y_1.bms" }; })));
+	TEST_EXPECT(!check(with([](auto &c) { c.missions = { "ASH_G11A.BMS", "x-y_1.bms" }; })));
 
 	TEST_EXPECT(hosted::split_missions(hosted::join_missions(s.missions)) == s.missions);
 	TEST_EXPECT(hosted::split_missions("").empty());
@@ -361,15 +409,137 @@ int test_renders() {
 	in.master_host = "203.0.113.5";
 	in.master_gate_port = 7597;
 	s.expansion = "jox01";
-	const hosted::LaunchSpec spec = hosted::render_launch(s, in);
+	const auto &known = hosted::known_data_sets();
+	const hosted::LaunchSpec spec =
+			hosted::render_launch(s, *hosted::find_data_set(known, hosted::kDataSetJointOperations), in);
 	TEST_EXPECT(spec.server_id == 12 && spec.files.size() == 4);
+	TEST_EXPECT(spec.data_set == "jop_2_consumer");
 	for (const auto &f : spec.files) {
 		const bool secret = f.name != "game.cfg"; // the host file carries the game password
 		TEST_EXPECT(f.secret == secret);
 	}
 	const std::vector<std::string> args = { "/HOST", "server.host", "--credentials", "credentials.txt",
-		"--master-host", "203.0.113.5", "--master-gate-port", "7597", "/exp", "jox01" };
+		"--master-host", "203.0.113.5", "--master-gate-port", "7597", "/game", "jo", "/exp", "jox01" };
 	TEST_EXPECT(spec.serve_args == args);
+
+	// Each data set speaks its own title; OpenNova's data speaks Joint Operations'.
+	s.expansion.clear();
+	s.game = hosted::kDataSetDeltaForceXtreme2;
+	const hosted::LaunchSpec dfx2 =
+			hosted::render_launch(s, *hosted::find_data_set(known, hosted::kDataSetDeltaForceXtreme2), in);
+	TEST_EXPECT(dfx2.data_set == "dfx2_consumer");
+	const std::vector<std::string> dfx2_args = { "/HOST", "server.host", "--credentials", "credentials.txt",
+		"--master-host", "203.0.113.5", "--master-gate-port", "7597", "/game", "dfx2" };
+	TEST_EXPECT(dfx2.serve_args == dfx2_args);
+	s.game = hosted::kDataSetOpenNova;
+	const hosted::LaunchSpec on = hosted::render_launch(s, *hosted::find_data_set(known, hosted::kDataSetOpenNova), in);
+	TEST_EXPECT(on.data_set == "opennova_0_consumer");
+	TEST_EXPECT(on.serve_args.size() == 10 && on.serve_args[8] == "/game" && on.serve_args[9] == "jo");
+	return 0;
+}
+
+// --- the data sets ----------------------------------------------------------------
+
+// A server whose data set the deployment stopped offering after its request
+// fails at its launch, before any account or machine: no restart mends that.
+int test_game_no_longer_offered() {
+	Rig rig("hosted_game_gone");
+	hosted::HostedSettings settings = valid_settings();
+	settings.game = hosted::kDataSetDeltaForceXtreme2;
+	const int64_t id = rig.request("gone_owner", settings);
+	TEST_EXPECT(id > 0);
+	TEST_EXPECT(rig.server(id)->settings.game == "dfx2_consumer");
+	rig.config.data_sets = { *hosted::find_data_set(hosted::known_data_sets(), hosted::kDataSetJointOperations) };
+	rig.make_supervisor();
+	rig.tick(); // -> provisioning
+	rig.tick(); // -> failed
+	const auto row = rig.server(id);
+	TEST_EXPECT(row && row->state == State::Failed);
+	TEST_EXPECT(row && row->failure_reason == "its game (dfx2_consumer) is no longer hosted here");
+	TEST_EXPECT(rig.fake.launches == 0 && row && !row->service_user_id);
+	return 0;
+}
+
+int test_data_sets() {
+	// The catalog: Joint Operations first, each title a gameprofile code
+	// opennova-serve's /game takes, the base game first among its expansions.
+	const auto &known = hosted::known_data_sets();
+	TEST_EXPECT(known.size() == 3);
+	TEST_EXPECT(known[0].game == "jop_2_consumer" && known[1].game == "dfx2_consumer" &&
+			known[2].game == "opennova_0_consumer");
+	for (const hosted::DataSet &d : known) {
+		TEST_EXPECT(opennova::gameprofile::gameprofile_by_code(d.title.c_str()) != nullptr);
+		TEST_EXPECT(!d.display_name.empty() && !d.expansions.empty() && d.expansions[0].code.empty());
+		TEST_EXPECT(d.limits.max_players.min >= 2 && d.limits.max_players.min <= d.limits.max_players.max);
+		TEST_EXPECT(d.missions.empty() && d.resource_dir.empty() && d.launch_template.empty());
+	}
+	TEST_EXPECT(known[0].title == "jo" && known[1].title == "dfx2" && known[2].title == "jo");
+	TEST_EXPECT(known[0].expansions.size() == 2 && known[0].expansions[1].code == "jox01");
+	TEST_EXPECT(known[1].expansions.size() == 1 && known[2].expansions.size() == 1);
+	TEST_EXPECT(hosted::find_expansion(known[0], "jox01") && !hosted::find_expansion(known[1], "jox01"));
+	TEST_EXPECT(!hosted::find_data_set(known, "jop_2") && !hosted::find_data_set(known, ""));
+
+	// The two variables, merged by data set.
+	std::vector<hosted::DataSetConfig> configs;
+	std::string error;
+	TEST_EXPECT(hosted::parse_data_set_configs(
+			"{\"jop_2_consumer\":{\"missions\":[\"a.bms\",\"B-2.BMS\"],\"resource_dir\":\"C:/JO\",\"loose_root\":false},"
+			"\"dfx2_consumer\":{\"resource_dir\":\"/data/dfx2\",\"loose_root\":true}}",
+			"{\"jop_2_consumer\":\"lt-0123456789abcdef0\",\"opennova_0_consumer\":\"lt-0fedcba9876543210\"}", configs,
+			error));
+	TEST_EXPECT(error.empty() && configs.size() == 3);
+	const auto config_of = [&configs](const char *game) -> const hosted::DataSetConfig * {
+		for (const auto &c : configs) {
+			if (c.game == game) return &c;
+		}
+		return nullptr;
+	};
+	const auto *jo = config_of("jop_2_consumer");
+	TEST_EXPECT(jo && jo->missions == std::vector<std::string>({ "a.bms", "B-2.BMS" }) && jo->resource_dir == "C:/JO" &&
+			!jo->loose_root && jo->launch_template == "lt-0123456789abcdef0");
+	const auto *dfx2 = config_of("dfx2_consumer");
+	TEST_EXPECT(dfx2 && dfx2->missions.empty() && dfx2->loose_root && dfx2->launch_template.empty());
+	const auto *on = config_of("opennova_0_consumer");
+	TEST_EXPECT(on && on->resource_dir.empty() && on->launch_template == "lt-0fedcba9876543210");
+	// Unset, both are empty objects.
+	TEST_EXPECT(hosted::parse_data_set_configs("", " ", configs, error) && configs.empty());
+	// Anything else is refused, naming what.
+	const auto refused = [&](const char *sets, const char *templates, const char *names) {
+		std::vector<hosted::DataSetConfig> out;
+		std::string why;
+		const bool ok = hosted::parse_data_set_configs(sets, templates, out, why);
+		if (ok || why.find(names) == std::string::npos)
+			std::fprintf(stderr, "  want a refusal naming '%s', got '%s'\n", names, why.c_str());
+		return !ok && why.find(names) != std::string::npos;
+	};
+	TEST_EXPECT(refused("not json", "", "ONNET_HOSTED_DATA_SETS is no JSON"));
+	TEST_EXPECT(refused("[]", "", "ONNET_HOSTED_DATA_SETS is no JSON object"));
+	TEST_EXPECT(refused("{\"jop_3\":{}}", "", "no data set"));
+	TEST_EXPECT(refused("{\"jop_2_consumer\":[]}", "", "jop_2_consumer is no JSON object"));
+	TEST_EXPECT(refused("{\"jop_2_consumer\":{\"missions\":\"a.bms\"}}", "", "missions is no list"));
+	TEST_EXPECT(refused("{\"jop_2_consumer\":{\"missions\":[\"../a.bms\"]}}", "", "no .bms file name"));
+	TEST_EXPECT(refused("{\"jop_2_consumer\":{\"resource_dir\":1}}", "", "resource_dir is no string"));
+	TEST_EXPECT(refused("{\"jop_2_consumer\":{\"loose_root\":\"1\"}}", "", "loose_root is no true or false"));
+	TEST_EXPECT(refused("{\"jop_2_consumer\":{\"mission\":[]}}", "", "'mission'"));
+	TEST_EXPECT(refused("", "{\"dfx2_consumer\":7}", "ONNET_HOSTED_EC2_LAUNCH_TEMPLATES.dfx2_consumer is no string"));
+	TEST_EXPECT(refused("", "{\"dfx3_consumer\":\"lt-0123456789abcdef0\"}", "ONNET_HOSTED_EC2_LAUNCH_TEMPLATES names"));
+
+	// What each provider offers: the data sets it has the data of, in the
+	// catalog's order, with the config's values.
+	TEST_EXPECT(hosted::parse_data_set_configs(
+			"{\"dfx2_consumer\":{\"resource_dir\":\"/data/dfx2\",\"loose_root\":true,\"missions\":[\"d.bms\"]},"
+			"\"jop_2_consumer\":{\"missions\":[\"a.bms\"],\"resource_dir\":\"C:/JO\"},"
+			"\"opennova_0_consumer\":{\"missions\":[\"o.bms\"]}}",
+			"{\"opennova_0_consumer\":\"lt-0fedcba9876543210\"}", configs, error));
+	const auto local = hosted::offered_data_sets("local", configs);
+	TEST_EXPECT(local.size() == 2 && local[0].game == "jop_2_consumer" && local[1].game == "dfx2_consumer");
+	TEST_EXPECT(local[0].resource_dir == "C:/JO" && local[0].missions == std::vector<std::string>{ "a.bms" });
+	TEST_EXPECT(local[1].loose_root && local[1].title == "dfx2" && local[1].limits.max_players.max == 64);
+	const auto ec2 = hosted::offered_data_sets("ec2", configs);
+	TEST_EXPECT(ec2.size() == 1 && ec2[0].game == "opennova_0_consumer" &&
+			ec2[0].launch_template == "lt-0fedcba9876543210" && ec2[0].missions == std::vector<std::string>{ "o.bms" });
+	TEST_EXPECT(hosted::offered_data_sets("none", configs).empty());
+	TEST_EXPECT(hosted::offered_data_sets("fake", configs).empty());
 	return 0;
 }
 
@@ -457,27 +627,28 @@ int test_requests() {
 	auto lease = rig.pool.acquire();
 	Database &db = *lease;
 	const auto settings = valid_settings();
+	const std::vector<hosted::DataSet> &offered = hosted::known_data_sets();
 	const int64_t unapproved = make_player(db, "req_unapproved", false);
-	TEST_EXPECT(hosted::request_server(db, unapproved, settings, 3).outcome ==
+	TEST_EXPECT(hosted::request_server(db, unapproved, settings, offered, 3).outcome ==
 			hosted::RequestOutcome::NotApproved);
-	TEST_EXPECT(hosted::request_server(db, 999999, settings, 3).outcome == hosted::RequestOutcome::NoSuchUser);
+	TEST_EXPECT(hosted::request_server(db, 999999, settings, offered, 3).outcome == hosted::RequestOutcome::NoSuchUser);
 	const auto service = nws::upsert_service_account(db, "srv-500", "pw");
-	TEST_EXPECT(hosted::request_server(db, service.id, settings, 3).outcome ==
+	TEST_EXPECT(hosted::request_server(db, service.id, settings, offered, 3).outcome ==
 			hosted::RequestOutcome::NoSuchUser);
 	const int64_t banned = make_player(db, "req_banned", true);
 	nws::UpdateUserParams ban;
 	ban.account_status = "banned";
 	TEST_EXPECT(nws::update_user(db, banned, ban).ok);
-	TEST_EXPECT(hosted::request_server(db, banned, settings, 3).outcome == hosted::RequestOutcome::NotApproved);
+	TEST_EXPECT(hosted::request_server(db, banned, settings, offered, 3).outcome == hosted::RequestOutcome::NotApproved);
 
 	// One live server per account.
 	const int64_t a = make_player(db, "req_a", true);
 	hosted::HostedSettings unchecked = settings;
 	unchecked.missions.clear();
-	TEST_EXPECT(hosted::request_server(db, a, unchecked, 3).outcome == hosted::RequestOutcome::InvalidSettings);
-	const auto first = hosted::request_server(db, a, settings, 3);
+	TEST_EXPECT(hosted::request_server(db, a, unchecked, offered, 3).outcome == hosted::RequestOutcome::InvalidSettings);
+	const auto first = hosted::request_server(db, a, settings, offered, 3);
 	TEST_EXPECT(first.outcome == hosted::RequestOutcome::Created && first.id > 0);
-	const auto second = hosted::request_server(db, a, settings, 3);
+	const auto second = hosted::request_server(db, a, settings, offered, 3);
 	TEST_EXPECT(second.outcome == hosted::RequestOutcome::AlreadyLive && second.id == first.id);
 	// The index holds it too, whatever writes the row.
 	bool refused = false;
@@ -494,20 +665,28 @@ int test_requests() {
 	const auto row = hosted::find_server(db, first.id);
 	TEST_EXPECT(row && row->state == State::Requested && row->owner_user_id == a);
 	TEST_EXPECT(row->settings.missions == settings.missions && row->settings.game_name == settings.game_name);
+	TEST_EXPECT(row->settings.game == "jop_2_consumer");
+	// A game the deployment does not offer is refused here too.
+	hosted::HostedSettings dfx2 = settings;
+	dfx2.game = hosted::kDataSetDeltaForceXtreme2;
+	const std::vector<hosted::DataSet> jo_only = { offered[0] };
+	const int64_t e = make_player(db, "req_e", true);
+	TEST_EXPECT(hosted::request_server(db, e, dfx2, jo_only, 3).outcome == hosted::RequestOutcome::InvalidSettings);
+	TEST_EXPECT(!hosted::latest_server_of(db, e));
 
 	// The cap counts every live server.
 	const int64_t b = make_player(db, "req_b", true);
 	const int64_t c = make_player(db, "req_c", true);
 	const int64_t d = make_player(db, "req_d", true);
-	TEST_EXPECT(hosted::request_server(db, b, settings, 3).outcome == hosted::RequestOutcome::Created);
-	const auto third = hosted::request_server(db, c, settings, 3);
+	TEST_EXPECT(hosted::request_server(db, b, settings, offered, 3).outcome == hosted::RequestOutcome::Created);
+	const auto third = hosted::request_server(db, c, settings, offered, 3);
 	TEST_EXPECT(third.outcome == hosted::RequestOutcome::Created);
 	TEST_EXPECT(hosted::count_live(db) == 3);
-	TEST_EXPECT(hosted::request_server(db, d, settings, 3).outcome == hosted::RequestOutcome::AtCapacity);
+	TEST_EXPECT(hosted::request_server(db, d, settings, offered, 3).outcome == hosted::RequestOutcome::AtCapacity);
 	// An ended server frees its place, and its owner may start again.
 	TEST_EXPECT(hosted::transition(db, third.id, State::Requested, State::Failed, "test"));
-	TEST_EXPECT(hosted::request_server(db, d, settings, 3).outcome == hosted::RequestOutcome::Created);
-	TEST_EXPECT(hosted::request_server(db, c, settings, 4).outcome == hosted::RequestOutcome::Created);
+	TEST_EXPECT(hosted::request_server(db, d, settings, offered, 3).outcome == hosted::RequestOutcome::Created);
+	TEST_EXPECT(hosted::request_server(db, c, settings, offered, 4).outcome == hosted::RequestOutcome::Created);
 	TEST_EXPECT(hosted::latest_server_of(db, c)->state == State::Requested);
 	TEST_EXPECT(hosted::list_servers(db, 10).size() == 5);
 
@@ -562,9 +741,10 @@ int test_lifecycle_and_stop() {
 		const auto *cfg = rig.fake.file(machine, "game.cfg");
 		TEST_EXPECT(cfg && contains(cfg->content, std::to_string(40000 + id)));
 		const std::vector<std::string> args = { "/HOST", "server.host", "--credentials",
-			"credentials.txt", "--master-host", "127.0.0.1", "--master-gate-port", "7597", "/exp",
-			"jox01" };
+			"credentials.txt", "--master-host", "127.0.0.1", "--master-gate-port", "7597", "/game", "jo",
+			"/exp", "jox01" };
 		TEST_EXPECT(rig.fake.machines.at(machine).spec.serve_args == args);
+		TEST_EXPECT(rig.fake.machines.at(machine).spec.data_set == "jop_2_consumer");
 	}
 
 	rig.tick(); // still Pending
@@ -1286,10 +1466,15 @@ int test_local_provider() {
 	const fs::path data = temp.path / "data dir";
 	const fs::path work = temp.path / "work";
 	fs::create_directories(data);
+	const fs::path dfx2_data = temp.path / "dfx2 data";
+	fs::create_directories(dfx2_data);
 	hosted::LocalProcessConfig config;
 	config.serve_binary = g_self;
-	config.resource_dir = data.u8string();
-	config.loose_root = true;
+	// Two data sets: Joint Operations' a loose folder, Delta Force Xtreme 2's not.
+	config.data_sets = { hosted::known_data_sets()[0], hosted::known_data_sets()[1] };
+	config.data_sets[0].resource_dir = data.u8string();
+	config.data_sets[0].loose_root = true;
+	config.data_sets[1].resource_dir = dfx2_data.u8string();
 	config.work_dir = work.u8string();
 	hosted::LocalProcessProvider provider(config);
 	TEST_EXPECT(std::string(provider.name()) == "local");
@@ -1298,6 +1483,7 @@ int test_local_provider() {
 
 	hosted::LaunchSpec spec;
 	spec.server_id = 7;
+	spec.data_set = hosted::kDataSetJointOperations;
 	spec.files = { { "server.host", "GameName \"x\"\r\n", false }, { "credentials.txt", "NOVAWORLD_PASS=s\n", true } };
 	spec.serve_args = { "/HOST", "server.host", "--marker", "two words" };
 	// A file a previous start left is gone: the directory is rendered from scratch.
@@ -1320,6 +1506,10 @@ int test_local_provider() {
 #endif
 	TEST_EXPECT(provider.describe(*id).state == hosted::MachineState::Running);
 	TEST_EXPECT(provider.describe(*id).address == "127.0.0.1");
+	TEST_EXPECT(provider.command_of(*id) ==
+			(std::vector<std::string>{ fs::absolute(fs::u8path(g_self)).u8string(), "--resource-dir",
+					fs::absolute(data).u8string(), "--loose-root", "/HOST", "server.host", "--marker", "two words" }));
+	TEST_EXPECT(provider.command_of("local-0-0").empty());
 	const auto tagged = provider.list_tagged();
 	TEST_EXPECT(tagged.size() == 1 && tagged[0].machine_id == *id && tagged[0].server_id == 7);
 
@@ -1364,6 +1554,24 @@ int test_local_provider() {
 	TEST_EXPECT(provider.describe(*running).state == hosted::MachineState::Gone);
 	spec.server_id = 8;
 	TEST_EXPECT(provider.launch(spec, error).has_value());
+	// Another data set's server runs over that data set's folder, as it is
+	// configured (no --loose-root here).
+	hosted::LaunchSpec other = spec;
+	other.server_id = 10;
+	other.data_set = hosted::kDataSetDeltaForceXtreme2;
+	const auto dfx2 = provider.launch(other, error);
+	TEST_EXPECT(dfx2.has_value());
+	if (dfx2) {
+		TEST_EXPECT(provider.command_of(*dfx2) ==
+				(std::vector<std::string>{ fs::absolute(fs::u8path(g_self)).u8string(), "--resource-dir",
+						fs::absolute(dfx2_data).u8string(), "/HOST", "server.host", "--marker", "two words" }));
+		provider.terminate(*dfx2);
+	}
+	// A data set it has no folder for refuses the launch.
+	other.server_id = 11;
+	other.data_set = hosted::kDataSetOpenNova;
+	TEST_EXPECT(!provider.launch(other, error) && contains(error, "opennova_0_consumer"));
+	TEST_EXPECT(!fs::exists(provider.server_dir(11)));
 
 	// Missing configuration and a bad file name refuse the launch (a server of
 	// its own: server 8's directory is in use).
@@ -1386,19 +1594,22 @@ int test_children_outlive_the_supervisor_thread() {
 	opennova::db::run_migrations(*pool.acquire(), fs::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations");
 	const int64_t owner = make_player(*pool.acquire(), "thread_owner", true);
 	TEST_EXPECT(owner > 0);
-	const auto request = hosted::request_server(*pool.acquire(), owner, valid_settings(), 5);
+	const auto request =
+			hosted::request_server(*pool.acquire(), owner, valid_settings(), hosted::known_data_sets(), 5);
 	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
 	const fs::path data = temp.path / "data";
 	fs::create_directories(data);
 	hosted::LocalProcessConfig config;
 	config.serve_binary = g_self;
-	config.resource_dir = data.u8string();
-	config.loose_root = true;
+	config.data_sets = { hosted::known_data_sets()[0] };
+	config.data_sets[0].resource_dir = data.u8string();
+	config.data_sets[0].loose_root = true;
 	config.work_dir = (temp.path / "work").u8string();
 	fs::path marker;
 	{
 		hosted::LocalProcessProvider provider(config);
 		hosted::SupervisorConfig supervision;
+		supervision.data_sets = config.data_sets;
 		supervision.tick_interval_ms = 20;
 		supervision.listing_timeout_ms = 10 * 60 * 1000;
 		{
@@ -1442,6 +1653,8 @@ int main(int argc, char **argv) {
 	const Case cases[] = {
 		{ "settings_rules", test_settings_rules },
 		{ "renders", test_renders },
+		{ "data_sets", test_data_sets },
+		{ "game_no_longer_offered", test_game_no_longer_offered },
 		{ "service_accounts", test_service_accounts },
 		{ "requests", test_requests },
 		{ "lifecycle_and_stop", test_lifecycle_and_stop },

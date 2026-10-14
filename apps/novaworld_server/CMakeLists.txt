@@ -5,6 +5,10 @@ set(NOVAWORLD_SERVER_CORE_SOURCES
     server_config.cpp
     gate_listener.cpp
     nw_udp_listener.cpp
+    # The hosted servers' data sets and settings, Crow-free: server_config.cpp
+    # reads the data sets (ONNET_HOSTED_DATA_SETS) on every build.
+    hosted/data_sets.cpp
+    hosted/hosted_settings.cpp
 )
 
 if(BUILD_NOVAWORLD_HTTP)
@@ -31,7 +35,6 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/ec2_provider.cpp
         hosted/hosted_repository.cpp
         hosted/hosted_routes.cpp
-        hosted/hosted_settings.cpp
         hosted/local_process_provider.cpp
         hosted/owner_file.cpp
         hosted/supervisor.cpp

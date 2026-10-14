@@ -123,6 +123,8 @@ namespace hosted_ns = opennova::novaworld_server::hosted;
 // declares it before the HTTP listener, so the store outlives the route; the
 // provider alone is reset at the shutdown.
 struct HostedMachines {
+	// The data sets the provider offers (hosted/data_sets.h); the supervisor's.
+	std::vector<hosted_ns::DataSet> data_sets;
 	std::unique_ptr<hosted_ns::CommandRunner> runner;
 	std::unique_ptr<hosted_ns::BootstrapStore> bootstrap;
 	std::vector<hosted_ns::Ipv4Cidr> bootstrap_cidrs;
@@ -131,8 +133,10 @@ struct HostedMachines {
 	std::unique_ptr<hosted_ns::MachineProvider> provider;
 };
 
-// The ec2 provider, or nothing with a boot warning naming what it lacks.
-void make_ec2_machines(const opennova::novaworld_server::ServerConfig &config, HostedMachines &m) {
+// The ec2 provider over `data_sets`, or nothing with a boot warning naming what
+// it lacks.
+void make_ec2_machines(const opennova::novaworld_server::ServerConfig &config,
+                       std::vector<hosted_ns::DataSet> data_sets, HostedMachines &m) {
 	using opennova::novaworld_server::loggable;
 	const auto off = [](const std::string &why) {
 		std::fprintf(stderr, "[boot] WARN hosted servers: the ec2 provider %s; hosting off\n", why.c_str());
@@ -185,7 +189,7 @@ void make_ec2_machines(const opennova::novaworld_server::ServerConfig &config, H
 	}
 	ec2.aws_cli = config.hosted_aws_cli;
 	ec2.region = config.hosted_ec2_region;
-	ec2.launch_template = config.hosted_ec2_launch_template;
+	ec2.data_sets = data_sets;
 	ec2.subnet = config.hosted_ec2_subnet;
 	ec2.deployment = config.hosted_deployment;
 	ec2.serve_image = config.hosted_serve_image;
@@ -205,41 +209,64 @@ void make_ec2_machines(const opennova::novaworld_server::ServerConfig &config, H
 	std::string admitted;
 	for (const hosted_ns::Ipv4Cidr &cidr : m.bootstrap_cidrs)
 		admitted += (admitted.empty() ? "" : ", ") + hosted_ns::ipv4_cidr_text(cidr);
-	std::printf("[boot] hosted servers: ec2 in %s, launch template %s, subnet %s, deployment %s, image %s\n",
-	            ec2.region.c_str(), ec2.launch_template.c_str(), ec2.subnet.c_str(), ec2.deployment.c_str(),
+	std::printf("[boot] hosted servers: ec2 in %s, subnet %s, deployment %s, image %s\n",
+	            ec2.region.c_str(), ec2.subnet.c_str(), ec2.deployment.c_str(),
 	            loggable(ec2.serve_image, 255).c_str());
+	for (const hosted_ns::DataSet &d : ec2.data_sets)
+		std::printf("[boot] hosted servers: data set %s from launch template %s\n", d.game.c_str(),
+		            loggable(d.launch_template).c_str());
 	std::printf("[boot] hosted servers: the bootstrap route answers %s alone\n", admitted.c_str());
 	auto provider = std::make_unique<hosted_ns::Ec2Provider>(std::move(ec2), *m.runner, *m.bootstrap);
 	m.ec2 = provider.get();
 	m.provider = std::move(provider);
+	m.data_sets = std::move(data_sets);
 }
 
-// The hosted servers' machines ONNET_HOSTED_PROVIDER names; no provider when
-// hosting is off ("none", an unknown name, or a provider missing what it
-// needs; each but "none" logged as a warning).
+// The hosted servers' machines ONNET_HOSTED_PROVIDER names, over the data sets
+// it offers; no provider when hosting is off ("none", an unknown name, data
+// sets that did not read or none the provider has the data of, or a provider
+// missing what it needs; each but "none" logged as a warning).
 HostedMachines make_hosted_machines(const opennova::novaworld_server::ServerConfig &config) {
+	using opennova::novaworld_server::loggable;
 	HostedMachines m;
 	if (config.hosted_provider == "none") return m;
-	if (config.hosted_provider == "ec2") {
-		make_ec2_machines(config, m);
-		return m;
-	}
-	if (config.hosted_provider != "local") {
+	if (config.hosted_provider != "local" && config.hosted_provider != "ec2") {
 		std::fprintf(stderr, "[boot] WARN hosted servers: unknown ONNET_HOSTED_PROVIDER '%s'; hosting off\n",
-		             opennova::novaworld_server::loggable(config.hosted_provider).c_str());
+		             loggable(config.hosted_provider).c_str());
 		return m;
 	}
-	if (config.hosted_serve_bin.empty() || config.hosted_resource_dir.empty()) {
+	if (!config.hosted_data_sets_error.empty()) {
+		std::fprintf(stderr, "[boot] WARN hosted servers: %s; hosting off\n",
+		             loggable(config.hosted_data_sets_error, 300).c_str());
+		return m;
+	}
+	std::vector<hosted_ns::DataSet> data_sets =
+			hosted_ns::offered_data_sets(config.hosted_provider, config.hosted_data_sets);
+	if (data_sets.empty()) {
+		std::fprintf(stderr, "[boot] WARN hosted servers: the %s provider has no data set (%s); hosting off\n",
+		             config.hosted_provider.c_str(),
+		             config.hosted_provider == "ec2" ? "ONNET_HOSTED_EC2_LAUNCH_TEMPLATES names none"
+		                                             : "ONNET_HOSTED_DATA_SETS gives none a resource_dir");
+		return m;
+	}
+	if (config.hosted_provider == "ec2") {
+		make_ec2_machines(config, std::move(data_sets), m);
+		return m;
+	}
+	if (config.hosted_serve_bin.empty()) {
 		std::fprintf(stderr, "[boot] WARN hosted servers: the local provider needs "
-		                     "ONNET_HOSTED_SERVE_BIN and ONNET_HOSTED_RESOURCE_DIR; hosting off\n");
+		                     "ONNET_HOSTED_SERVE_BIN; hosting off\n");
 		return m;
 	}
+	for (const hosted_ns::DataSet &d : data_sets)
+		std::printf("[boot] hosted servers: data set %s from %s%s\n", d.game.c_str(),
+		            loggable(d.resource_dir, 260).c_str(), d.loose_root ? " (loose)" : "");
 	hosted_ns::LocalProcessConfig local;
 	local.serve_binary = config.hosted_serve_bin;
-	local.resource_dir = config.hosted_resource_dir;
-	local.loose_root = config.hosted_loose_root;
+	local.data_sets = data_sets;
 	local.work_dir = config.hosted_work_dir;
 	m.provider = std::make_unique<hosted_ns::LocalProcessProvider>(std::move(local));
+	m.data_sets = std::move(data_sets);
 	return m;
 }
 #endif
@@ -474,6 +501,7 @@ int main() {
 		// address, so the listing records the machine's own public one.
 		hosted_config.master_host = hosted_machines.ec2 ? config.public_host : "127.0.0.1";
 		hosted_config.master_gate_port = gate.bound_port();
+		hosted_config.data_sets = hosted_machines.data_sets;
 		// A cloud machine boots (EC2, cloud-init, docker, the fetch) and pulls
 		// its image before it lists: the ec2 provider's own clocks.
 		if (hosted_machines.ec2) {

@@ -10,7 +10,9 @@
 //                 (minted at the first start, its password set again at every
 //                 one), a new admin password, the provider's plan, the files
 //                 rendered from scratch (hosted_settings.h) and the machine
-//                 launched
+//                 launched on the server's data set (data_sets.h; one this
+//                 service no longer offers fails the server, which no restart
+//                 mends)
 //   booting       until the machine runs opennova-serve
 //   listing       until the server's listing appears (a listed RID with one of
 //                 the service account's HostKeys claimed)
@@ -64,6 +66,7 @@
 // ended on the next pass. Each pass leases its own pooled connection.
 
 #include "admin_link.h"
+#include "data_sets.h"
 #include "hosted_repository.h"
 #include "machine_provider.h"
 
@@ -92,6 +95,9 @@ struct SupervisorConfig {
 	// (loopback for the local provider, ONNET_PUBLIC_HOST otherwise).
 	std::string master_host = "127.0.0.1";
 	uint16_t master_gate_port = GATE_DEFAULT_PORT;
+	// The data sets the provider offers (offered_data_sets): a server's game
+	// picks its title (/game) and the data its machine mounts.
+	std::vector<DataSet> data_sets;
 	// The pass cadence. The rest is service policy.
 	uint64_t tick_interval_ms = 1000;
 	uint64_t boot_timeout_ms = 5 * 60 * 1000;

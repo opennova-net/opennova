@@ -5,8 +5,8 @@
 // runs one opennova-serve for one hosted server; it is a machine, never a host
 // (CONTEXT.md). The supervisor renders everything the server needs into a
 // provider-neutral LaunchSpec; a provider adds only what is its own (the
-// opennova-serve binary, where the game data is, how the files reach the
-// machine) and reports what it runs.
+// opennova-serve binary, where each data set's game data is, how the files
+// reach the machine) and reports what it runs.
 //
 // Providers: LocalProcessProvider (local_process_provider.h, a child process on
 // the service's own machine, for development and the tests), and Ec2Provider
@@ -31,11 +31,14 @@ struct LaunchFile {
 };
 
 // Everything a machine needs to run hosted server `server_id`, rendered from
-// scratch at every start: the working directory's files and opennova-serve's
-// arguments, relative to that directory. The provider puts the binary and its
-// --resource-dir (and --loose-root) in front.
+// scratch at every start: the data set it mounts (data_sets.h, by its game),
+// the working directory's files and opennova-serve's arguments, relative to
+// that directory. The provider resolves the data set to its own data (the
+// local provider's --resource-dir and --loose-root, which it puts in front of
+// the arguments with the binary; the ec2 provider's launch template).
 struct LaunchSpec {
 	int64_t server_id = 0;
+	std::string data_set;
 	std::vector<LaunchFile> files;
 	std::vector<std::string> serve_args;
 };

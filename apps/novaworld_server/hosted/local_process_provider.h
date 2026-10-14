@@ -6,11 +6,12 @@
 // (ONNET_HOSTED_WORK_DIR/server-<id>). A launch deletes that directory, writes
 // the LaunchSpec's files there from scratch, and runs
 //
-//   <ONNET_HOSTED_SERVE_BIN> --resource-dir <ONNET_HOSTED_RESOURCE_DIR>
+//   <ONNET_HOSTED_SERVE_BIN> --resource-dir <the data set's resource_dir>
 //       [--loose-root] <the spec's arguments>
 //
 // there through base/proc/child_process.h (an argv array, no shell; the child's
-// output appended to console.log beside the files). The ports are free ones
+// output appended to console.log beside the files), the data set's folder and
+// loose_root from ONNET_HOSTED_DATA_SETS (data_sets.h). The ports are free ones
 // probed on loopback, admin.cfg admits 127.0.0.1, and the service reaches the
 // machine at 127.0.0.1.
 //
@@ -34,6 +35,7 @@
 // opennova-serve deregisters; TerminateProcess on Windows) and kills it after
 // the grace. So a service restart finds none and relaunches its live servers.
 
+#include "data_sets.h"
 #include "machine_provider.h"
 
 #include <base/proc/child_process.h>
@@ -54,8 +56,9 @@ namespace opennova::novaworld_server::hosted {
 
 struct LocalProcessConfig {
 	std::string serve_binary; // ONNET_HOSTED_SERVE_BIN
-	std::string resource_dir; // ONNET_HOSTED_RESOURCE_DIR (--resource-dir)
-	bool loose_root = false;  // ONNET_HOSTED_LOOSE_ROOT (--loose-root: a directory with no archives)
+	// The data sets it runs, each with its resource_dir (--resource-dir) and
+	// loose_root (--loose-root: a directory with no archives).
+	std::vector<DataSet> data_sets;
 	std::string work_dir;     // ONNET_HOSTED_WORK_DIR: the servers' working directories
 };
 
@@ -81,12 +84,16 @@ public:
 
 	// Server `server_id`'s working directory.
 	std::filesystem::path server_dir(int64_t server_id) const;
+	// The command line machine `machine_id` runs (its argv; no secret is in it,
+	// the credentials are files); empty for a machine it does not run.
+	std::vector<std::string> command_of(const std::string &machine_id);
 	// The console log beside the files.
 	static constexpr const char *kConsoleLogName = "console.log";
 
 private:
 	struct Machine {
 		int64_t server_id = 0;
+		std::vector<std::string> argv;
 		proc::ChildProcess process;
 		std::vector<std::filesystem::path> secret_files; // deleted at terminate()
 	};
