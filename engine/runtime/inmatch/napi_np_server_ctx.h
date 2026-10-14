@@ -19,6 +19,7 @@
 #include <runtime/inmatch/server_files.h>      // ServerLogs (the /PROFILE and punt log devices)
 #include <runtime/replication/net_quality.h>   // the CNetQuality window (the host send half)
 #include <runtime/world/entity.h>              // world::EntityHandle (the deployable spawner seam)
+#include <runtime/world/match.h>               // world::MatchStats (the host slot's stats)
 
 // Forward declarations — the runtime holds non-owning pointers to the authoritative world and
 // the in-match replication seam. No World/codec headers are pulled into this header, and there
@@ -132,6 +133,33 @@ struct ServerTextTable {
 	// [orig: GameText_GetString("server", "C2Blue" / "C2Red") @0x51902E / @0x51909C].
 	std::string change_to_blue_format;
 	std::string change_to_red_format;
+	// STRSRV19 ("Host"): a Serve Only host's own slot-0 name (HostSlotRow) [orig:
+	// Server_InitNewRoundState @0x51C9CD; CNapiGameSession_BuildAndCreateSession @0x5696EE].
+	std::string host_name;
+};
+
+// A Serve Only host's own player-slot row, slot 0 of retail's table: the
+// authority's local row (+4 active, +5 local) with no net player (+28 clear),
+// which this port keeps beside the connection list because no connection holds
+// it. The session's round init keeps it active and names it Server/STRSRV19;
+// the session create's PlayerSession_InitFromProfile then writes it again from
+// the session's own net config: the name, which for a host that is not a
+// session peer is STRSRV19 too, the team from the net config's side byte
+// (cfg side_req: 1 or 2 is taken, anything else is 1 for a slot that is no
+// spectator), and the class from the host's player profile's side class.
+// Its hidden owner-0 body is not modeled (D-NET-352).
+// [orig: Server_InitNewRoundState @0x51C99A..0x51CA3C (active, local, the name
+//  @0x51C9C3..0x51C9D8); CNapiGameSession_BuildAndCreateSession @0x5696E2..0x5696FE
+//  (the net config name), @0x5697C3 (jsp[60] = side_req); CNapiGameSession_CreateSession
+//  @0x4C9C9A..0x4C9CCE (a non-peer jumps into the call), @0x4C9952..0x4C996C (the class);
+//  PlayerSession_InitFromProfile @0x50CA80 — the team @0x50CA92..0x50CAB8, the name
+//  @0x50CB53, +416 @0x50CB72, the class +0x15EDC @0x50CB7C]
+struct HostSlotRow {
+	bool active = false;
+	std::string name;             // +0x28
+	uint8_t team = 0;             // +0x1A0
+	int32_t player_class = 0;     // +0x15EDC, the admin tables' Class column
+	world::MatchStats stats;      // +0x48 CPlayerStats: Kills (5) and Deaths (7)
 };
 
 struct NapiNPServerCtx {
@@ -369,13 +397,13 @@ struct NapiNPServerCtx {
 	// world::Match owns the round-over latch. The client retains the 0x1D header
 	// that starts its end-round board transaction. [orig: §5.2/§5.68]
 
-	// Deterministic server-key source (reimpl-only). The original mints the per-connection server
-	// SCRK / SK randomly at the 0x42 join (make_dev_scrk / make_session_key). For golden
-	// 0x82 byte-parity these must be reproducible, so the default leaves `forced` false (random,
-	// exactly as retail) and a golden test seed-injects the captured values — mirroring the P1
-	// SessionStartup "pass in, don't sample" determinism approach.
+	// Deterministic server-key source (reimpl-only). The original draws the per-connection
+	// server SK and then its SCRK from the manager's PRNG at the 0x42 join
+	// (manager_connection_keys). For golden 0x82 byte-parity these must be reproducible, so the
+	// default leaves `forced` false (drawn, exactly as retail) and a golden test seed-injects
+	// the captured values — mirroring the P1 SessionStartup "pass in, don't sample" approach.
 	struct ServerKeyMint {
-		bool forced = false;       // false => mint randomly (retail behavior)
+		bool forced = false;       // false => draw from the manager PRNG (retail behavior)
 		std::string server_scrk;   // forced ServerAuth.scrk (61 chars)
 		uint32_t server_sk = 0;    // forced ServerAuth.sk
 	};
@@ -509,6 +537,14 @@ struct NapiNPServerCtx {
 	//  Chat_CheckFloodControl's table @0xB3B788].
 	std::vector<ServerConsoleLine> console_chat;
 	ChatFloodTable console_chat_flood{};
+	// That host's chat display buffer, the lines CHAT GET lists, and its wrap: the
+	// bold label font the embedder loads and the chat box's width
+	// (server_console.h) [orig: byte_B3FE3C, 40 x 128].
+	ChatDisplayBuffer console_chat_display;
+	ChatDisplayWrap console_chat_wrap;
+	// A Serve Only host's own slot 0 (HostSlotRow); inactive on a listen host,
+	// whose loopback connection holds slot 0.
+	HostSlotRow host_slot;
 
 	// All members are complete + movable now that the unique_ptr<GameServerRuntime> is gone (P8), so the
 	// compiler-default special members suffice.

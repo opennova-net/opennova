@@ -724,7 +724,7 @@ void emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
 	// and the live entity cannot disagree.
 	if (world != nullptr) {
 		(void)Server_ReservePlayerTeam(cfg, /*is_in_session=*/true, roster, conn, *world,
-				ctx != nullptr ? ctx->rotation : nullptr);
+				ctx != nullptr ? ctx->rotation : nullptr, ctx != nullptr ? &ctx->host_slot : nullptr);
 	}
 
 	// The both-direction send-holdoff dictation (H:0x00 mask 8 / CS field 3)
@@ -856,7 +856,7 @@ SessionVars host_session_vars(const GameConfig &cfg) {
 std::vector<ProtocolMessage> build_spawn_pump_metadata(
 		const GameConfig &config, NapiNPConnection &conn,
 		const std::vector<NapiNPConnection> &roster, world::World *world,
-		const HostRotation *rotation) {
+		const HostRotation *rotation, const HostSlotRow *host_slot) {
 	std::vector<ProtocolMessage> messages;
 	const uint8_t capacity = static_cast<uint8_t>(
 			config.total_player_slot_capacity());
@@ -872,7 +872,7 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 		team = entity != nullptr
 				? entity->team
 				: Server_ReservePlayerTeam(
-						config, /*is_in_session=*/true, roster, conn, *world, rotation);
+						config, /*is_in_session=*/true, roster, conn, *world, rotation, host_slot);
 	}
 
 	// Exact CNapiServer_ProcessPendingPlayerSpawns ordering from the retail LAN
@@ -1946,6 +1946,11 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				for (ProtocolMessage &m : chat) replies.push_back(std::move(m));
 				break;
 			}
+			case c2s::ADMIN_NETLOG_COMMAND: // [orig: NapiNPServerMsg_HandleConsoleLine @0x5199D0]
+				if (inputs.server_ctx != nullptr) // a peer's console line (server_console.h)
+					Server_HandleConsoleCommandMessage(*inputs.server_ctx, conn, msg.payload,
+							io::host_milliseconds_for_logic_tick(now_tick), replies);
+				break;
 			case c2s::LOADED_MODEL_PAGE_REPLY: { // [orig: NapiNPServerMsg_0x03D @0x500EC0]
 				// Authority-gated; the body is never read: the handler stamps the
 				// host frame clock onto the player slot (+97560 = dword_A87060).

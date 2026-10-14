@@ -37,7 +37,16 @@ struct LanDiscoveryServer {
 // 0x41 JointOperations identity as the existing direct-peer join path. The
 // caller owns broadcast/socket policy. `client_index` is the CI the replies
 // echo; it must be non-zero (the announce builder omits a zero CI entirely).
-std::vector<uint8_t> build_lan_discovery_probe(uint32_t client_index);
+// `target_ip` / `target_port` are the datagram's own destination, which the
+// announce writes as EIP / EPN, each only when nonzero: the address in
+// PeerAddr's packing (0xFFFFFFFF for the LAN broadcast) and the port as a plain
+// number, so an enumerator sends each port its own datagram.
+// [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 - EIP @0x61fcf5..0x61fd19,
+//  EPN @0x61fd23..0x61fd47, the SendTo to the same pair @0x61fdd3..0x61fdde;
+//  CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - one announce per port
+//  @0x629241..0x629268]
+std::vector<uint8_t> build_lan_discovery_probe(uint32_t client_index, uint32_t target_ip,
+                                               uint32_t target_port);
 
 // Decode a complete NWU datagram and project a 0x81 ServerHello into the LAN
 // browser model. `client_index` is the browse window's CI: retail resolves the
@@ -96,31 +105,43 @@ enum class LanRowChange : uint8_t {
 	kAdded,
 };
 
-// The LAN browse window over the retail game-server UDP range: one probe
+// The LAN browse window over the retail game-server UDP range: one connection
 // identity per window (retail keeps its connection identity across the
-// enumerator's re-announce pumps, so every burst repeats the same bytes),
-// the 30-second window, the 3-second re-announce cadence, the reply filter
+// enumerator's re-announce pumps, so every burst repeats the same bytes), one
+// announce per port carrying that port and the enumerate address as its EIP /
+// EPN, the 30-second window, the 3-second re-announce cadence, the reply filter
 // (the browsed port range, a usable source address, our CI, a retail-identity
 // 0x81), the 32-row cap, and first-sighting rows: retail's row table keys on
 // the session id and a repeat sighting adds and updates nothing, so a row
 // keeps the counts it was first seen with for the whole window. The embedder
-// owns the socket: it sends `probe()` to every port in the range on begin and
-// whenever `advance` reports an announce due, feeds every received datagram
+// owns the socket: it sends `probe(port)` to every port in the range on begin
+// and whenever `advance` reports an announce due, feeds every received datagram
 // to `accept_reply`, and stops when `advance` returns false.
 // [orig: UI_ProcessLANSessionStateMachine @0x558de0 — the key hit @0x5593c4
-//  falls through to the next node, the miss @0x5593e3 appends @0x5593fa..0x559521]
+//  falls through to the next node, the miss @0x5593e3 appends @0x5593fa..0x559521;
+//  CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - the port walk
+//  @0x629241..0x629268, each announce to (enumerator+4, port)]
 class LanDiscoveryBrowser {
 public:
 	// Begins a window under `connect_type` (kLanConnectType*): only a session whose
-	// P2 admits it lists (lan_session_admits_connect_type). False (nothing changes)
-	// on an invalid port range or a zero client index.
-	bool begin(uint32_t client_index, int port_min, int port_max, int connect_type);
+	// P2 admits it lists (lan_session_admits_connect_type). `enumerate_ip` is the
+	// destination every announce goes to, in PeerAddr's packing (0xFFFFFFFF for the
+	// LAN broadcast, the resolved address on a direct browse; 0 writes no EIP).
+	// False (nothing changes) on an invalid port range or a zero client index.
+	// [orig: CNapiGameSession_InitTransportConnection @0x4c9e10 - -1 on a LAN browse
+	//  @0x4c9eab, the resolved address on a direct one @0x4c9eb5..0x4c9ec3, stored
+	//  to enumerator+4 @0x4c9f0b]
+	bool begin(uint32_t client_index, uint32_t enumerate_ip, int port_min, int port_max,
+	           int connect_type);
 	void stop();
 	bool browsing() const { return browsing_; }
 	int port_min() const { return port_min_; }
 	int port_max() const { return port_max_; }
 	uint32_t client_index() const { return client_index_; }
-	const std::vector<uint8_t> &probe() const { return probe_; }
+	uint32_t enumerate_ip() const { return enumerate_ip_; }
+	// The announce to `port`: this window's CI, with the enumerate address and the
+	// port as its EIP / EPN (build_lan_discovery_probe).
+	std::vector<uint8_t> probe(int port) const;
 
 	// One outer frame: false once the window has expired (the browse is
 	// stopped); `announce_due` is set when a re-announce burst falls due this
@@ -135,10 +156,10 @@ public:
 	const std::vector<LanDiscoveryRow> &servers() const { return servers_; }
 
 private:
-	std::vector<uint8_t> probe_;
 	std::vector<LanDiscoveryRow> servers_;
 	std::unordered_map<std::string, size_t> index_by_endpoint_;
 	uint32_t client_index_ = 0;
+	uint32_t enumerate_ip_ = 0;
 	int connect_type_ = kLanConnectTypeLan;
 	int port_min_ = 0;
 	int port_max_ = 0;

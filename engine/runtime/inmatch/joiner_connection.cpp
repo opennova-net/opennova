@@ -192,14 +192,25 @@ JoinerConnection::JoinerConnection(std::string player_name,
 }
 
 std::vector<uint8_t> JoinerConnection::start() {
-	conn_.client_scrk = make_dev_scrk();
-	// Fresh per-connection numeric key, like the per-connection key material
-	// retail regenerates on connect: a CONSTANT ck would alias a quick
-	// reconnect from the same endpoint to the host's same-(CI,CK) retransmit
-	// echo (stale auth material) instead of a fresh node. CI stays 1 — the
-	// first connection node's index. A zero draw is drawn again, zero being no key.
-	// [orig: CNapiNPConnection_InitFromSession @0x6263F4 -> NapiNP_GenerateSessionKey]
-	client_key_ = make_session_key(session_key_draw_);
+	// Fresh per-connection key material, the CK and then the SCRK, from the manager's
+	// PRNG (D-NET-524): a CONSTANT ck would alias a quick reconnect from the same
+	// endpoint to the host's same-(CI,CK) retransmit echo (stale auth material)
+	// instead of a fresh node.
+	// [orig: CNapiNPConnection_InitFromSession @0x6263f4 -> NapiNP_GenerateSessionKey
+	//  @0x61ea70 (the CK, stored @0x6263fb), then CNapiNPConnection_GenerateTxKey
+	//  @0x61dfe0 @0x626401]
+	const ConnectionKeys keys =
+			key_prng_ != nullptr ? generate_connection_keys(*key_prng_) : manager_connection_keys();
+	client_key_ = keys.key;
+	conn_.client_scrk = keys.scrk;
+	// The CI: a join from a discovered session goes on with the browse's connection
+	// and its index; a dial without one creates its connection, which takes the
+	// process's next index (D-NET-521).
+	// [orig: CNapiNetwork_StartClientConnection @0x4ca160 (the enumerator's connection
+	//  ctx+0xE60); CNapiNPConnection_Create @0x62b282..0x62b296]
+	client_index_ = discovered_.present && discovered_.client_index != 0
+			? discovered_.client_index
+			: next_connection_index();
 	server_hk_ = 0;
 	server_password_required_ = false;
 	conn_.server_sk = 0;
@@ -290,14 +301,23 @@ std::vector<uint8_t> JoinerConnection::start() {
 std::vector<uint8_t> JoinerConnection::build_client_hello() {
 	// The browse and connect legs use the same retail JO identity. The callsign
 	// belongs in ClientAuth.NA (not CO) and is later echoed into the organic-spawn
-	// named organic record by the host.
-	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO,
-	                          client_hello_to_bytes(make_jointoperations_client_hello(client_index_)));
+	// named organic record by the host. A dial without a row announces to the dialed
+	// host, whose address and port the announce writes as its EIP / EPN.
+	// [orig: NapiNPSession_SendAnnouncePacket @0x61fa00 - @0x61fcf5..0x61fd47;
+	//  CNapiGameSession_InitTransportConnection @0x4c9ec3 (the resolved address)]
+	ClientHello hello = make_jointoperations_client_hello(client_index_);
+	hello.eip = host_address_.ip;
+	hello.epn = host_address_.port;
+	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 }
 
 std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	ClientAuth auth = make_jointoperations_client_auth(
 			client_index_, client_key_, server_hk_, player_name_, conn_.client_scrk);
+	// The session record's address and port: the host the reply came from.
+	// [orig: CNapiNPConnection_InitFromSession @0x6263ae..0x6263b7]
+	auth.sip = host_address_.ip;
+	auth.spn = host_address_.port;
 	// [orig: CNapiNPConnection_SendClientJoin @0x61fe20, SF & 1 gates PW]
 	if (server_password_required_) auth.pw = server_password_;
 	// Lifecycle trace (kInfo -> MCP log ring): the APPID join token (decoded .joi

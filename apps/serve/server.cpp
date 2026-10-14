@@ -14,10 +14,12 @@
 #include <formats/mission/bms.h>
 #include <formats/rtxt/rtxt.h>
 #include <net/npwire/net_ports.h>
+#include <runtime/hud/hud_math.h> // hud_label_font_choice (HUD_InitAllFonts)
 #include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/map_change.h>
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/server_ban_lists.h>
+#include <runtime/inmatch/server_console.h> // the chat display wrap
 #include <runtime/mission/mission_sidecars.h>
 #include <runtime/mission/runtime_boot.h>
 
@@ -64,6 +66,8 @@ const char kUsage[] =
 		"  /PROFILE <path>  record each mission to <path>.sph (retail's server log)\n"
 		"  /PUNTLOG, /PUNT.TXT, /CHEATLOG\n"
 		"                   log punts to _PUNT.TXT, start _CHEAT.TXT (the working directory)\n"
+		"  /NETLOG          start the net log, _NETLOG.TXT (the remote admin's CMD NETLOG\n"
+		"                   toggles it)\n"
 		"The server reads and writes game.cfg in the directory it runs from (the process's\n"
 		"working directory, as retail), with the host file's settings over it, and marks\n"
 		"itself running there with activesrvr.txt, which a clean exit deletes. A nonzero\n"
@@ -196,7 +200,10 @@ Server::Server(ServeOptions options) : options_(std::move(options)) {
 	config_.set_lan_switch(options_.lan_switch);
 }
 
-Server::~Server() { stop(); }
+Server::~Server() {
+	stop();
+	if (chat_font_valid_) fnt::fnt_free(&chat_font_);
+}
 
 bool Server::start(std::string &error, const std::atomic<bool> *cancel) {
 	return begin(error, cancel) && start_session(error);
@@ -517,6 +524,7 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 	}
 	// No device stages run between the phases on a headless host.
 	if (!inmatch::start_host_mission(boot_, inmatch::HostStartDevice{}, error)) return false;
+	select_chat_font();
 	++missions_played_;
 	io::logf(io::LogLevel::kInfo,
 			"opennova-serve: '%s' (%s) up: %d entities, terrain %s, WAC %s, %u player slot(s)",
@@ -524,6 +532,34 @@ bool Server::boot_mission(bool next_mission, std::string &error) {
 			kernel_->terrain_store.valid() ? "loaded" : "absent",
 			kernel_->wac_loaded ? "loaded" : "absent", config.player_slot_limit());
 	return true;
+}
+
+// Every mission start reloads the HUD fonts for the display's width: game.cfg's video_res
+// when it parses, else the defaults' desktop width. The bold slot is the chat display's wrap
+// font, and with no hud.def mounted the chat box's width is 4. A font that does not read
+// leaves the slot empty, and no line wraps.
+// [orig: Game_StartMission @0x525A9A -> HUD_InitAllFonts @0x51EE20 (the bold name by the
+//  width @0x51EE7E..0x51EEE4, HUD_LoadFontIntoSlot @0x51EF3F); Config_ParseSettingsLine
+//  @0x5512F4..0x551303 (video_res into outWidth); Chat_AddMessageChannel1 @0x498673..0x4986AC]
+void Server::select_chat_font() {
+	int32_t width = options_.desktop_width;
+	int32_t parsed_width = 0;
+	int32_t parsed_height = 0;
+	if (gamecfg::parse_resolution_dimensions(config_.cfg().video_res, parsed_width, parsed_height))
+		width = parsed_width;
+	const std::string name = hud::hud_label_font_choice(width).bold_fnt;
+	if (name != chat_font_name_) {
+		if (chat_font_valid_) fnt::fnt_free(&chat_font_);
+		chat_font_ = fnt::fnt_font_t{};
+		chat_font_valid_ = false;
+		chat_font_name_ = name;
+		std::vector<uint8_t> bytes;
+		if (index_.read_file(name, bytes))
+			chat_font_valid_ = fnt::fnt_parse(bytes.data(), bytes.size(), &chat_font_) == fnt::FNT_OK;
+	}
+	inmatch::NapiNPServerCtx &ctx = role_->state.host_owner.ctx;
+	ctx.console_chat_wrap.font = chat_font_valid_ ? &chat_font_ : nullptr;
+	ctx.console_chat_wrap.width = inmatch::kChatDisplayWidthNoHudDef;
 }
 
 // The authority's mission exit, as the main frame and the Post Menu route it:
@@ -760,6 +796,8 @@ void Server::stop() {
 	// The shutdown's banned.txt save, gated on the list and its dirty word
 	// [orig: Game_ShutdownSubsystems @0x4A539D -> j_BanList_SaveToFile @0x508E20].
 	if (exit_tail && role_) inmatch::Server_SaveAddressBanList(role_->state.host_owner.ctx);
+	// Its network's: the net log stops and flushes [orig: @0x4A5398 NapiLib_Shutdown].
+	if (exit_tail) log_devices_.close(role_ ? role_->state.host_owner.ctx.np_protocol.host_run_duration_ms : 0u);
 	// The admin server's sockets close with the process.
 	if (admin_tcp_) admin_tcp_->close();
 	if (role_) role_->set_socket(nullptr);
@@ -855,6 +893,10 @@ void Server::bind_admin_console() {
 							  : std::string();
 	};
 	seams.characters = &characters_;
+	// CMD SAVENFO names the mission's items.def rows.
+	seams.items_table = [this]() -> const def::DefItemsFile * {
+		return kernel_ ? kernel_->items_table() : nullptr;
+	};
 	// GOTO MENUSTATE's input action 3 on this host: exit reason 1; the active connection's
 	// disconnect drops nothing, as a Serve Only host has no client connection. The next frame's
 	// mission exit takes the router's reason-1 arm, which destroys the session; with no menu

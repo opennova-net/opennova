@@ -8,12 +8,16 @@
 
 namespace opennova {
 
-std::vector<uint8_t> build_lan_discovery_probe(uint32_t client_index) {
+std::vector<uint8_t> build_lan_discovery_probe(uint32_t client_index, uint32_t target_ip,
+                                               uint32_t target_port) {
 	// Retail LAN enumeration uses the ordinary JO game-session identity built
 	// by CNapiNetwork_Init [orig: NapiNPSession_SendAnnouncePacket @0x61fa00;
 	// CNapiNetwork_Init @0x4ca4a0]. This helper lives in the neutral wire layer;
-	// no matchmaking/service configuration participates in discovery.
-	const ClientHello hello = make_jointoperations_client_hello(client_index);
+	// no matchmaking/service configuration participates in discovery. The
+	// announce names its own destination [orig: @0x61fcf5..0x61fd47].
+	ClientHello hello = make_jointoperations_client_hello(client_index);
+	hello.eip = target_ip;
+	hello.epn = target_port;
 	return nw_encode_outbound(SESSION_OPCODE_CLIENT_HELLO, client_hello_to_bytes(hello));
 }
 
@@ -97,8 +101,8 @@ bool lan_session_admits_connect_type(int connect_type, uint32_t server_flags) {
 	return true;
 }
 
-bool LanDiscoveryBrowser::begin(uint32_t client_index, int port_min, int port_max,
-                                int connect_type) {
+bool LanDiscoveryBrowser::begin(uint32_t client_index, uint32_t enumerate_ip, int port_min,
+                                int port_max, int connect_type) {
 	if (client_index == 0 || port_min < 1 || port_max > 65535 || port_min > port_max) return false;
 	stop();
 	servers_.clear();
@@ -107,14 +111,19 @@ bool LanDiscoveryBrowser::begin(uint32_t client_index, int port_min, int port_ma
 	// across the enumerator's re-announce pumps, so every burst repeats the
 	// same probe bytes.
 	client_index_ = client_index;
+	enumerate_ip_ = enumerate_ip;
 	connect_type_ = connect_type;
-	probe_ = build_lan_discovery_probe(client_index);
 	port_min_ = port_min;
 	port_max_ = port_max;
 	browse_elapsed_s_ = 0.0;
 	announce_elapsed_s_ = 0.0;
 	browsing_ = true;
 	return true;
+}
+
+std::vector<uint8_t> LanDiscoveryBrowser::probe(int port) const {
+	return build_lan_discovery_probe(client_index_, enumerate_ip_,
+	                                 static_cast<uint32_t>(port < 0 ? 0 : port));
 }
 
 void LanDiscoveryBrowser::stop() {

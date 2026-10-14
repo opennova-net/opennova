@@ -8,6 +8,7 @@
 #include <runtime/inmatch/napi_np_connection.h>
 
 #include <net/npwire/ingame_decode.h>     // OrganicSpawnBatch / PlayerExtendedUplink / EntityPacketSubHeader
+#include <net/npwire/nw_session_framing.h> // NapiPrng (the key material's PRNG)
 #include <net/npwire/protocol_message.h>  // ProtocolMessage
 #include <net/npwire/session_hello.h>     // DisconnectEvent
 #include <net/npwire/session_vars.h>      // SessionVars (the 0x60 server-info list)
@@ -237,8 +238,24 @@ public:
 		uint32_t host_key = 0;
 		bool password_required = false;
 		std::string expansion; // the 0x81 SUS2, echoed in the C2S JOIN EXP TLV
+		// The browse's connection index (its 0x41s' CI): the join goes on with the
+		// enumerator's connection, so its 0x42 carries the same CI. 0 = unknown, and
+		// the join takes a fresh one (next_connection_index).
+		// [orig: CNapiNetwork_StartClientConnection @0x4ca160 - the connection
+		//  ctx+0xE60 whose enumerator found the session @0x4ca1dd..0x4ca1ee]
+		uint32_t client_index = 0;
 	};
 	void set_discovered_session(DiscoveredSession session) { discovered_ = std::move(session); }
+	// The connection's peer, the host the connect sends to (the dialed endpoint; zero for a
+	// socketless joiner). A discovered session's record holds the reply's source, which the
+	// 0x42 writes as SIP / SPN; a dial without a row announces to it, and the 0x41 writes its
+	// own destination as EIP / EPN. Each tag only when nonzero. Configure before start().
+	// [orig: CNapiNPConnection_InitFromSession @0x626320 - session+0x18 / +0x1C to conn+0x30 /
+	//  +0x34 @0x6263ae..0x6263b7 (SendClientJoin's SIP / SPN @0x6201a9) and to the peer
+	//  conn+0x158 / +0x15C @0x6263c3..0x6263dc; NapiNPSession_SendAnnouncePacket @0x61fa00 -
+	//  EIP / EPN from its destination @0x61fcf5..0x61fd47; the direct join's resolved address
+	//  CNapiGameSession_InitTransportConnection @0x4c9eb5..0x4c9ec3]
+	void set_host_address(const PeerAddr &host) { host_address_ = host; }
 
 	// Feed one inbound datagram (off the socket, CRC envelope intact). Returns the reply datagrams +
 	// any surfaced 0x0A bodies + whether this datagram learned H.
@@ -782,8 +799,11 @@ public:
 	// This connection's own numeric key (ClientAuth.CK; fresh per start()) — the
 	// receiver-local key a host's 0x84 resend request addresses us by.
 	uint32_t client_key() const { return client_key_; }
-	// The draw start() makes the CK from (unset, make_session_key's own); a test injects zeros.
-	void set_session_key_draw(std::function<uint32_t()> draw) { session_key_draw_ = std::move(draw); }
+	// This connection's index (the 0x41 / 0x42 CI; chosen by start()).
+	uint32_t client_index() const { return client_index_; }
+	// The PRNG start() draws the CK and the SCRK from (null, the default: the process's
+	// manager PRNG, manager_connection_keys); a test injects a seeded one.
+	void set_key_prng(NapiPrng *prng) { key_prng_ = prng; }
 	uint32_t monotonic_milliseconds32() const {
 		return static_cast<uint32_t>(monotonic_milliseconds_() & 0xFFFFFFFFu);
 	}
@@ -878,9 +898,9 @@ private:
 	void on_host_disconnect(const DisconnectEvent &event);
 	void fail(std::string reason);
 
-	uint32_t client_index_ = 1;
+	uint32_t client_index_ = 0; // start(): the row's browse CI, else next_connection_index()
 	uint32_t client_key_ = 1;
-	std::function<uint32_t()> session_key_draw_;
+	NapiPrng *key_prng_ = nullptr;
 	std::string player_name_;
 	JoinRole join_role_ = JoinRole::Player;
 	std::string spectator_password_;
@@ -904,6 +924,7 @@ private:
 
 	uint32_t server_hk_ = 0;    // ServerHello.hk — echoed in ClientAuth.hk (transient)
 	DiscoveredSession discovered_; // the browse row's 0x81 record (survives start())
+	PeerAddr host_address_{};      // the connection's peer (set_host_address; survives start())
 	// Pre-session UDP legs are reliable-by-retransmit in retail. Cache the already-framed bytes so
 	// retrying never regenerates identity/session material (especially ClientAuth CK/SCRK).
 	MonotonicMilliseconds monotonic_milliseconds_;

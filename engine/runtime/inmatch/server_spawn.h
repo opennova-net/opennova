@@ -44,9 +44,13 @@ inline constexpr uint16_t kRetailPlayerMinEntitySlot = world::kRetailPlayerMinEn
 // [orig: Server_AssignPlayerTeam @0x4fe310 writes playerSlot+416 before
 // NetPacket_WriteSlotAssignment @0x502b30 reads it; byte_82F240 / byte_82F241
 // @0x4FE408, @0x4FE456, @0x4FE492, @0x4FE507, @0x4FE543, @0x4FE56D]
+// The balance tally counts every active slot's team but the joiner's, so a
+// Serve Only host's own slot 0 (`host_slot`, its team 1 from the session
+// create) counts there too (D-NET-352). [orig: @0x4FE5BD..0x4FE5DE]
 uint8_t Server_ReservePlayerTeam(const GameConfig &config, bool is_in_session,
 		const std::vector<NapiNPConnection> &roster, NapiNPConnection &conn,
-		const world::World &world, const HostRotation *rotation = nullptr);
+		const world::World &world, const HostRotation *rotation = nullptr,
+		const HostSlotRow *host_slot = nullptr);
 
 // Reserve the first free fixed roster-table row before S2C 0x04 advertises it.
 // Existing player bindings and other pre-spawn reservations both occupy rows;

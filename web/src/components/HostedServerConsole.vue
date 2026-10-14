@@ -212,7 +212,7 @@
         :aria-labelledby="ids.chat"
         @scroll="chatSticky.onScroll"
       >
-        <li v-for="(line, index) in chat" :key="index" class="break-words">{{ line }}</li>
+        <li v-for="(line, index) in chat" :key="index" class="whitespace-pre-wrap break-words">{{ line }}</li>
       </ol>
       <form v-if="isOwner" class="space-y-2" @submit.prevent="onSendChat">
         <label :for="ids.chatInput" class="block text-xs font-medium uppercase tracking-wider text-ink-muted">

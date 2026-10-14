@@ -43,8 +43,10 @@ uint32_t monotonic_milliseconds() {
 
 SessionStartup make_session_startup(const HostConfig &cfg) {
 	SessionStartup startup;
-	// [orig: NapiNPProtocol_StartServer @0x62B5F5 -> NapiNP_GenerateSessionKey]
-	startup.host_key = cfg.host_key != 0 ? cfg.host_key : make_session_key();
+	// The host key, from the manager's PRNG (D-NET-524).
+	// [orig: NapiNPProtocol_StartServer @0x62b5e0 - NapiNP_GenerateSessionKey on the
+	//  protocol's manager @0x62b5f3..0x62b5f5, stored @0x62b5fc]
+	startup.host_key = cfg.host_key != 0 ? cfg.host_key : manager_session_key();
 	startup.host_start_tick =
 			cfg.host_start_tick != 0 ? cfg.host_start_tick : monotonic_milliseconds();
 	if (cfg.session_seed_id != 0) {
@@ -363,6 +365,13 @@ void host_session_pump(HostOwner &owner, opennova::IDatagramSocket &sock,
 	// [orig: Game_ProcessMainFrame -- Server_TickUpdate @0x5266B6, then
 	//  Entity_UpdateAllEntities @0x52674B]
 	Server_RouteFrameTailEdges(owner.ctx);
+	// The manager's pump flushes the net log once its interval has passed
+	// [orig: NapiNPManager_Pump @0x62AC98 -> NapiLog_FlushIfExpired @0x62F2F0].
+	if (owner.ctx.logs.net != nullptr)
+		owner.ctx.logs.net->flush_if_expired(owner.ctx.np_protocol.host_run_duration_ms);
+	// The chat display's timers step down once a logic tick
+	// [orig: Input_DecrementCooldownTimers @0x5267A6].
+	chat_display_tick(owner.ctx.console_chat_display);
 
 	// (5) A dedicated host registers no type-2 local client. If its embedder nevertheless supplied a
 	// loopback channel, defensively drain it so that unused input cannot accumulate. A serve-and-play

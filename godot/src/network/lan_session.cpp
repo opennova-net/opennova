@@ -1,13 +1,18 @@
 #include "network/lan_session.h"
 
+#include <godot_cpp/classes/ip.hpp>
 #include <godot_cpp/core/error_macros.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
+#include <godot_cpp/variant/packed_string_array.hpp>
 
 #include "util/data_format.h"
 #include "util/string_convert.h"
 
-#include <base/os_random/os_random.h>
+#include <net/novaworld/lobby_vars.h> // resolve_address_without_dns
+#include <net/npwire/nw_session_framing.h> // next_connection_index
+#include <net/npwire/peer_addr.h>
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -18,7 +23,7 @@ namespace {
 
 constexpr const char *DEFAULT_BROADCAST = "255.255.255.255";
 
-Ref<LanServerRow> row_record(const opennova::LanDiscoveryRow &row) {
+Ref<LanServerRow> row_record(const opennova::LanDiscoveryRow &row, uint32_t client_index) {
 	// Retail hosts advertise the typed server name in the host's single-byte
 	// codepage (cp1252), never UTF-8.
 	Ref<LanServerRow> out = LanServerRow::make(
@@ -32,7 +37,31 @@ Ref<LanServerRow> row_record(const opennova::LanDiscoveryRow &row) {
 	out->set_expansion(opennova::to_gd(row.server.expansion));
 	out->set_host_key(static_cast<int64_t>(row.server.host_key));
 	out->set_password_required(row.server.password_required);
+	// The browse's connection, which a join from this row goes on with (D-NET-521).
+	out->set_client_index(static_cast<int64_t>(client_index));
 	return out;
+}
+
+// The enumerate address of the browse destination, as the transport resolves it
+// (the engine's resolve_address_without_dns carries the witness): the broadcast
+// literal is the broadcast (0xFFFFFFFF), else the platform's inet_addr, else its
+// name lookup, in PeerAddr's packing; 0 when nothing resolves, and the
+// announces then write no EIP (net/npwire/lan_discovery.h, D-NET-520).
+uint32_t enumerate_address(const String &p_target) {
+	const uint32_t address = opennova::resolve_address_without_dns(opennova::to_std(p_target));
+	if (address != 0) return address;
+	IP *ip = IP::get_singleton();
+	if (ip == nullptr) return 0;
+	const PackedStringArray octets = ip->resolve_hostname(p_target, IP::TYPE_IPV4).split(".");
+	if (octets.size() != 4) return 0;
+	std::array<uint8_t, 4> bytes{};
+	for (int i = 0; i < 4; ++i) {
+		if (!octets[i].is_valid_int()) return 0;
+		const int64_t value = octets[i].to_int();
+		if (value < 0 || value > 255) return 0;
+		bytes[static_cast<size_t>(i)] = static_cast<uint8_t>(value);
+	}
+	return opennova::peer_addr_from_octets(bytes, 0).ip;
 }
 
 } // namespace
@@ -54,6 +83,7 @@ void LanSession::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("stop"), &LanSession::stop);
 	ClassDB::bind_method(D_METHOD("get_servers"), &LanSession::get_servers);
 	ClassDB::bind_method(D_METHOD("is_browsing"), &LanSession::is_browsing);
+	ClassDB::bind_method(D_METHOD("get_client_index"), &LanSession::get_client_index);
 
 	ADD_SIGNAL(MethodInfo("servers_changed", PropertyInfo(Variant::ARRAY, "servers")));
 	// The browse window expired (the 30 s gate): the LAN screen re-enables its
@@ -74,7 +104,8 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 
 	const String target = destination.strip_edges();
 	if (target.is_empty() ||
-			!browser_.begin(opennova::os_random_nonzero_u32(), port_min, port_max, connect_type)) {
+			!browser_.begin(opennova::next_connection_index(), enumerate_address(target), port_min,
+					port_max, connect_type)) {
 		emit_error("LAN browse destination or port range is invalid");
 		return static_cast<int>(ERR_INVALID_PARAMETER);
 	}
@@ -96,7 +127,6 @@ int LanSession::start_browsing(const String &destination, int port_min, int port
 	}
 	socket_->set_broadcast_enabled(true);
 
-	probe_ = to_packed_bytes(browser_.probe());
 	browse_target_ = target;
 
 	Error first_send_error = OK;
@@ -119,13 +149,15 @@ int LanSession::send_probe_burst(Error &first_send_error) {
 	if (!socket_.is_valid()) {
 		return sent;
 	}
+	// One announce per port, each naming its own destination as EIP / EPN
+	// (LanDiscoveryBrowser::probe).
 	for (int port = browser_.port_min(); port <= browser_.port_max(); ++port) {
 		const Error destination_error = socket_->set_dest_address(browse_target_, port);
 		if (destination_error != OK) {
 			if (first_send_error == OK) first_send_error = destination_error;
 			continue;
 		}
-		const Error send_error = socket_->put_packet(probe_);
+		const Error send_error = socket_->put_packet(to_packed_bytes(browser_.probe(port)));
 		if (send_error == OK) {
 			++sent;
 		} else if (first_send_error == OK) {
@@ -184,7 +216,7 @@ void LanSession::poll_replies() {
 void LanSession::rebuild_rows() {
 	servers_.clear();
 	for (const opennova::LanDiscoveryRow &row : browser_.servers())
-		servers_.push_back(row_record(row));
+		servers_.push_back(row_record(row, browser_.client_index()));
 	emit_signal("servers_changed", get_servers());
 }
 

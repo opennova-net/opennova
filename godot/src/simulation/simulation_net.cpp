@@ -12,6 +12,7 @@
 #include "simulation/deploy_rows.h" // the DEATH screen's zone / list rows
 #include "object/character_join_profile.h" // the two-side character selection record
 #include "network/host_session_options.h" // the hosted-session request record
+#include "network/join_target.h" // the join request the discovered session comes from
 #include "util/string_convert.h"
 
 #include <cmath>
@@ -292,6 +293,13 @@ bool Simulation::enable_host_listen_on(const Ref<UdpPump> &p_pump) {
 	return true;
 }
 
+bool Simulation::is_host_listening() const {
+	const opennova::inmatch::RoleKind kind = session_.kind();
+	return kind == opennova::inmatch::RoleKind::ListenHost ||
+			kind == opennova::inmatch::RoleKind::DedicatedHost ||
+			net_.lan_host_pending;
+}
+
 int Simulation::get_host_listen_port() const {
 	return (is_host_listening() && net_.pump.is_valid()) ? net_.pump->local_port() : 0;
 }
@@ -533,13 +541,16 @@ void Simulation::set_join_cd_cookie(const PackedByteArray &p_cookie) {
 	install_join_cd_cookie();
 }
 
-void Simulation::set_join_discovered_session(bool p_present, int64_t p_host_key,
-		bool p_password_required, const String &p_expansion) {
+void Simulation::set_join_discovered_session(const Ref<JoinTarget> &p_target) {
 	opennova::inmatch::JoinerConnection::DiscoveredSession session;
-	session.present = p_present;
-	session.host_key = static_cast<uint32_t>(p_host_key);
-	session.password_required = p_password_required;
-	session.expansion = opennova::to_std(p_expansion);
+	if (p_target.is_valid()) {
+		session.present = p_target->get_discovered_session();
+		session.host_key = static_cast<uint32_t>(p_target->get_session_host_key());
+		session.password_required = p_target->get_session_password_required();
+		session.expansion = opennova::to_std(p_target->get_expansion());
+		// The browse's CI, which the join goes on with (D-NET-521).
+		session.client_index = static_cast<uint32_t>(p_target->get_session_client_index());
+	}
 	net_.join_discovered_session = std::move(session);
 	// Applied to a live joiner runtime now and on each (re)load in enable_join.
 	if (runtime_) runtime_->set_discovered_session(net_.join_discovered_session);
@@ -891,6 +902,7 @@ Dictionary Simulation::get_joiner_network_diagnostics() const {
 	out["freeze_suspected"] = d.freeze_suspected;
 	out["in_match"] = d.in_match;
 	out["deployed"] = d.deployed;
+	out["client_index"] = static_cast<int64_t>(d.client_index);
 	if (d.present) {
 		out["stage"] = opennova::to_gd(d.stage);
 		Dictionary crc;

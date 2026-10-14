@@ -17,6 +17,7 @@
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -261,7 +262,7 @@ bool run_discovered_row_join_skips_the_hello() {
 	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostClient,
 			inmatch::SocketMode::Socketless, 0x0FE0E114u);
 	// The browse: one probe, one 0x81, projected into the row record.
-	const std::vector<uint8_t> probe = build_lan_discovery_probe(0x00C0FFEEu);
+	const std::vector<uint8_t> probe = build_lan_discovery_probe(0x00C0FFEEu, 0xFFFFFFFFu, 32768u);
 	const inmatch::HandleResult browse = inmatch::handle_server_datagram(
 			host, scanner, probe.data(), probe.size(), 0);
 	LanDiscoveryServer row;
@@ -302,6 +303,191 @@ bool run_discovered_row_join_skips_the_hello() {
 	inmatch::ClientRuntime bare("BareJoiner", [&now_ms] { return now_ms; });
 	return expect(is_opcode(bare.start(), SESSION_OPCODE_CLIENT_HELLO),
 	              "a bare dial (no row record) still sends the 0x41 first");
+}
+
+// The flat-TLV field names of a body, in wire order.
+std::vector<std::string> field_names(const std::vector<uint8_t> &body) {
+	std::vector<std::string> names;
+	std::size_t pos = 0;
+	while (pos < body.size()) {
+		FlatTlvField field;
+		const std::size_t next = read_flat_tlv(body.data(), body.size(), pos, field);
+		if (next == kFlatTlvEnd) break;
+		names.emplace_back(field.name);
+		pos = next;
+	}
+	return names;
+}
+
+// `name` is directly followed by `after` among `names`.
+bool follows(const std::vector<std::string> &names, std::string_view name, std::string_view after) {
+	for (std::size_t i = 0; i + 1 < names.size(); ++i)
+		if (names[i] == name) return names[i + 1] == after;
+	return false;
+}
+
+// D-NET-520: the connect writes the JO build string as PV3 and names its peer. A dial without a
+// row announces to the dialed host, so its 0x41 writes that address and port as EIP / EPN; the
+// 0x42 writes the session record's address and port (the reply's source, the same host) as SIP /
+// SPN, and PV3 right after PV2, from a dial and from a discovered row alike. A joiner with no
+// host (socketless) writes none of the four.
+// [orig: CNapiNetwork_Init @0x4ca4a0 - PV3 into proto+0x1AC @0x4ca8bb..0x4ca8c2;
+//  NapiNPSession_SendAnnouncePacket @0x61fa00 - PV3 @0x61fc68..0x61fc9a, EIP / EPN
+//  @0x61fcf5..0x61fd47; CNapiNPConnection_InitFromSession @0x6263ae..0x6263b7;
+//  CNapiNPConnection_SendClientJoin @0x61fe20 - PV3 @0x620088..0x6200ba, SIP @0x6201a9]
+bool run_connect_writes_pv3_and_its_peer() {
+	const std::string pv3 = "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42";
+	const PeerAddr host_addr{ 0x0A01A8C0u, 32786 }; // 192.168.1.10:32786 in PeerAddr's packing
+	uint64_t now_ms = 0;
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+
+	inmatch::JoinerConnection dial("DialPeer", [&now_ms] { return now_ms; });
+	dial.set_host_address(host_addr);
+	const std::vector<uint8_t> hello_datagram = dial.start();
+	ClientHello hello;
+	if (!expect(nw_decode_inbound(hello_datagram.data(), hello_datagram.size(), opcode, body) &&
+						opcode == SESSION_OPCODE_CLIENT_HELLO &&
+						parse_client_hello(body.data(), body.size(), hello),
+				"pv3/peer: a dial's first datagram is the 0x41"))
+		return false;
+	if (!expect(hello.pv3 == pv3 && follows(field_names(body), "PV2", "PV3"),
+				"pv3/peer: the 0x41 carries the build string as PV3 after PV2"))
+		return false;
+	if (!expect(hello.eip == host_addr.ip && hello.epn == 32786u,
+				"pv3/peer: the dial's 0x41 names the dialed host as EIP / EPN"))
+		return false;
+	ServerHello reply = build_server_hello(hello, 0x0A01A8C0u, 32786);
+	reply.hk = 0x0FE0E117u;
+	const std::vector<uint8_t> reply_datagram =
+			nw_encode_outbound(SESSION_OPCODE_SERVER_HELLO, server_hello_to_bytes(reply));
+	const inmatch::JoinerConnection::PollResult joined =
+			dial.handle_datagram(reply_datagram.data(), reply_datagram.size());
+	ClientAuth auth;
+	if (!expect(joined.outbound.size() == 1 &&
+						nw_decode_inbound(joined.outbound[0].data(), joined.outbound[0].size(),
+								opcode, body) &&
+						opcode == SESSION_OPCODE_CLIENT_AUTH &&
+						parse_client_auth(body.data(), body.size(), auth),
+				"pv3/peer: the 0x81 draws the dial's 0x42"))
+		return false;
+	if (!expect(auth.pv3 == pv3 && follows(field_names(body), "PV2", "PV3") &&
+						follows(field_names(body), "PV3", "CI"),
+				"pv3/peer: the 0x42 carries PV3 between PV2 and CI"))
+		return false;
+	if (!expect(auth.sip == host_addr.ip && auth.spn == 32786u,
+				"pv3/peer: the dial's 0x42 names the session's host as SIP / SPN"))
+		return false;
+
+	inmatch::JoinerConnection row("RowPeer", [&now_ms] { return now_ms; });
+	inmatch::JoinerConnection::DiscoveredSession session;
+	session.present = true;
+	session.host_key = 0x0FE0E117u;
+	row.set_discovered_session(session);
+	row.set_host_address(host_addr);
+	const std::vector<uint8_t> row_first = row.start();
+	ClientAuth row_auth;
+	if (!expect(nw_decode_inbound(row_first.data(), row_first.size(), opcode, body) &&
+						opcode == SESSION_OPCODE_CLIENT_AUTH &&
+						parse_client_auth(body.data(), body.size(), row_auth) &&
+						row_auth.pv3 == pv3 && row_auth.sip == host_addr.ip &&
+						row_auth.spn == 32786u,
+				"pv3/peer: a row's 0x42 carries PV3 and the row's host as SIP / SPN"))
+		return false;
+
+	inmatch::JoinerConnection socketless("NoPeer", [&now_ms] { return now_ms; });
+	const std::vector<uint8_t> bare = socketless.start();
+	ClientHello bare_hello;
+	const bool decoded = nw_decode_inbound(bare.data(), bare.size(), opcode, body) &&
+			parse_client_hello(body.data(), body.size(), bare_hello);
+	const std::vector<std::string> names = decoded ? field_names(body) : std::vector<std::string>{};
+	return expect(decoded && bare_hello.pv3 == pv3 &&
+					std::find(names.begin(), names.end(), "EIP") == names.end() &&
+					std::find(names.begin(), names.end(), "EPN") == names.end(),
+			"pv3/peer: a joiner with no host writes PV3 but no EIP / EPN");
+}
+
+// D-NET-521: one connection enumerates and joins. The connection counter pre-increments and
+// steps over 0; a LAN browse takes the process's next index for its 0x41s, and the join from a
+// row it discovered goes on with that connection: its first datagram is a 0x42 with the browse's
+// CI, which the host's 0x82 echoes and the joiner accepts. A dial without a row creates its own
+// connection and takes the next index.
+// [orig: CNapiNPConnection_Create @0x62acb0 - @0x62b282..0x62b296; CNapiNetwork_StartClientConnection
+//  @0x4ca160 (the connection ctx+0xE60 whose enumerator found the session @0x4ca1dd..0x4ca1ee) ->
+//  CNapiNPConnection_InitFromSession @0x626320]
+bool run_one_connection_index_per_join() {
+	uint32_t counter = 0xFFFFFFFEu;
+	const uint32_t last = advance_connection_index(counter);
+	const uint32_t wrapped = advance_connection_index(counter);
+	if (!expect(last == 0xFFFFFFFFu && wrapped == 1u && counter == 1u,
+	            "one index: the counter steps over 0 to 1"))
+		return false;
+
+	const PeerAddr joiner_peer{0x0100007Fu, 32790};
+	inmatch::NapiNPServerCtx host;
+	inmatch::test::bring_up_host(host, inmatch::ConnectionMode::HostClient,
+	                             inmatch::SocketMode::Socketless, 0x0FE0E119u);
+	LanDiscoveryBrowser browser;
+	if (!expect(browser.begin(next_connection_index(), 0xFFFFFFFFu, 32768, 32768,
+	                          kLanConnectTypeLan),
+	            "one index: the browse begins"))
+		return false;
+	const uint32_t browse_ci = browser.client_index();
+	const std::vector<uint8_t> probe = browser.probe(32768);
+	const inmatch::HandleResult browse =
+			inmatch::handle_server_datagram(host, joiner_peer, probe.data(), probe.size(), 0);
+	LanDiscoveryServer row;
+	if (!expect(browse.outbound.size() == 1 &&
+	                    parse_lan_discovery_reply(browse.outbound[0].data(),
+	                                              browse.outbound[0].size(), browse_ci, row),
+	            "one index: the browse's 0x81 answers its CI"))
+		return false;
+
+	uint64_t now_ms = 0;
+	inmatch::JoinerConnection join("OneConnection", [&now_ms] { return now_ms; });
+	inmatch::JoinerConnection::DiscoveredSession session;
+	session.present = true;
+	session.host_key = row.host_key;
+	session.password_required = row.password_required;
+	session.client_index = browse_ci;
+	join.set_discovered_session(session);
+	const std::vector<uint8_t> first = join.start();
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	ClientAuth auth;
+	if (!expect(nw_decode_inbound(first.data(), first.size(), opcode, body) &&
+	                    opcode == SESSION_OPCODE_CLIENT_AUTH &&
+	                    parse_client_auth(body.data(), body.size(), auth) &&
+	                    auth.ci == browse_ci && join.client_index() == browse_ci,
+	            "one index: the row's join sends a 0x42 with the browse's CI"))
+		return false;
+	const inmatch::HandleResult admitted =
+			inmatch::handle_server_datagram(host, joiner_peer, first.data(), first.size(), 1);
+	ServerAuth sa;
+	if (!expect(!admitted.outbound.empty() &&
+	                    nw_decode_inbound(admitted.outbound[0].data(),
+	                                      admitted.outbound[0].size(), opcode, body) &&
+	                    opcode == SESSION_OPCODE_SERVER_AUTH &&
+	                    parse_server_auth(body.data(), body.size(), sa) && sa.cr == 1u &&
+	                    sa.ci == browse_ci,
+	            "one index: the host's 0x82 echoes the browse's CI"))
+		return false;
+	join.handle_datagram(admitted.outbound[0].data(), admitted.outbound[0].size());
+	if (!expect(join.phase() == inmatch::JoinerConnection::Phase::Driving,
+	            "one index: the joiner accepts the 0x82 for its CI"))
+		return false;
+
+	// The process's counter as it stands, and the index the next connection takes.
+	uint32_t expected = next_connection_index();
+	advance_connection_index(expected);
+	inmatch::JoinerConnection dial("FreshConnection", [&now_ms] { return now_ms; });
+	const std::vector<uint8_t> hello_datagram = dial.start();
+	ClientHello hello;
+	return expect(nw_decode_inbound(hello_datagram.data(), hello_datagram.size(), opcode, body) &&
+	                      opcode == SESSION_OPCODE_CLIENT_HELLO &&
+	                      parse_client_hello(body.data(), body.size(), hello) &&
+	                      hello.ci == expected && dial.client_index() == expected,
+	              "one index: a dial without a row takes the process's next index");
 }
 
 // A flat-TLV body with every field named `unwanted` left out, the rest as written.
@@ -379,16 +565,39 @@ bool run_server_hello_needs_no_hk() {
 			"the LAN browser lists an HK-less 0x81 with host key 0");
 }
 
-// D-NET-438: the joiner's CK is a session key, drawn until nonzero: a draw of {0, 0, 9} joins
-// with CK 9 (a zero was once mapped to 1).
-// [orig: CNapiNPConnection_InitFromSession @0x6263F4 -> NapiNP_GenerateSessionKey @0x61EA70,
-//  jz @0x61EAC3]
-bool run_zero_client_key_is_drawn_again() {
+// The SCRK the manager LCG's mod-32 walk gives after a key whose last byte is `key`'s: x' = 17x
+// + 1 (mod 32) for 63 draws, the NUL slot 31 appending nothing.
+std::string scrk_after_key(uint32_t key) {
+	static constexpr char kCharset[] = "0123456789BCDFGHJKLMNPQRSTVWXYZ";
+	std::string out;
+	uint32_t x = key & 31u;
+	for (int i = 0; i < 63; ++i) {
+		x = (17u * x + 1u) & 31u;
+		if (x != 31u) out.push_back(kCharset[x]);
+	}
+	return out;
+}
+
+// A key whose bytes follow b' = 49b + 1 (mod 256), the LCG's byte draws.
+bool key_bytes_chain(uint32_t key) {
+	for (int shift = 24; shift > 0; shift -= 8) {
+		const uint32_t b = (key >> shift) & 0xFFu;
+		if (((49u * b + 1u) & 0xFFu) != ((key >> (shift - 8)) & 0xFFu)) return false;
+	}
+	return true;
+}
+
+// D-NET-524: the joiner draws its CK and then its SCRK from the manager's LCG. Seeded so the CK
+// is RR's captured 0x4667b839, the 0x42 carries that CK and the 61-character SCRK the LCG walks
+// next; the default (the process's manager) gives a CK whose bytes chain and an SCRK that
+// follows it. (D-NET-438's redraw of a zero key stays ported; the LCG never yields one.)
+// [orig: CNapiNPConnection_InitFromSession @0x6263f4 -> NapiNP_GenerateSessionKey @0x61ea70,
+//  then CNapiNPConnection_GenerateTxKey @0x61dfe0 @0x626401]
+bool run_client_keys_draw_from_the_manager_lcg() {
 	uint64_t now_ms = 0;
-	inmatch::JoinerConnection joiner("ZeroKeyJoiner", [&now_ms] { return now_ms; });
-	const uint32_t draws[] = {0u, 0u, 9u};
-	std::size_t next = 0;
-	joiner.set_session_key_draw([&]() { return draws[next++]; });
+	NapiPrng prng(0x55u);
+	inmatch::JoinerConnection joiner("LcgJoiner", [&now_ms] { return now_ms; });
+	joiner.set_key_prng(&prng);
 	inmatch::JoinerConnection::DiscoveredSession session;
 	session.present = true;
 	session.host_key = 0x0FE0E115u;
@@ -397,11 +606,26 @@ bool run_zero_client_key_is_drawn_again() {
 	uint8_t opcode = 0;
 	std::vector<uint8_t> body;
 	ClientAuth auth;
-	return expect(nw_decode_inbound(first.data(), first.size(), opcode, body) &&
-				opcode == SESSION_OPCODE_CLIENT_AUTH &&
-				parse_client_auth(body.data(), body.size(), auth) && next == 3 &&
-				joiner.client_key() == 9u && auth.ck == 9u,
-			"a zero CK draw is drawn again: the 0x42 carries the third draw's 9");
+	if (!expect(nw_decode_inbound(first.data(), first.size(), opcode, body) &&
+	                    opcode == SESSION_OPCODE_CLIENT_AUTH &&
+	                    parse_client_auth(body.data(), body.size(), auth),
+	            "lcg: the joiner's first datagram is its 0x42"))
+		return false;
+	if (!expect(auth.ck == 0x4667B839u && joiner.client_key() == 0x4667B839u &&
+	                    auth.scrk == "BCXYGH01LM45QR89VWDFZJK23NP67STBCXYGH01LM45QR89VWDFZJK23NP67S" &&
+	                    joiner.client_scrk() == auth.scrk && prng.draws() == 67u,
+	            "lcg: the seeded CK then SCRK ride the 0x42"))
+		return false;
+
+	inmatch::JoinerConnection fresh("ManagerJoiner", [&now_ms] { return now_ms; });
+	fresh.set_discovered_session(session);
+	const std::vector<uint8_t> second = fresh.start();
+	ClientAuth fresh_auth;
+	return expect(nw_decode_inbound(second.data(), second.size(), opcode, body) &&
+	                      parse_client_auth(body.data(), body.size(), fresh_auth) &&
+	                      fresh_auth.ck != 0 && key_bytes_chain(fresh_auth.ck) &&
+	                      fresh_auth.scrk == scrk_after_key(fresh_auth.ck),
+	              "lcg: the manager's CK chains its bytes and its SCRK follows it");
 }
 
 // D-NET-437: the joiner reads any 0x82 from its host, no field required. One whose CI or CK is
@@ -947,7 +1171,9 @@ int main() {
 	if (!run_dropped_hello_and_auth_recover()) return 1;
 	if (!run_unanswered_client_join_fails_after_30000_ms()) return 1;
 	if (!run_discovered_row_join_skips_the_hello()) return 1;
-	if (!run_zero_client_key_is_drawn_again()) return 1;
+	if (!run_connect_writes_pv3_and_its_peer()) return 1;
+	if (!run_one_connection_index_per_join()) return 1;
+	if (!run_client_keys_draw_from_the_manager_lcg()) return 1;
 	if (!run_server_hello_needs_no_hk()) return 1;
 	if (!run_server_auth_acceptance_follows_retail()) return 1;
 	if (!run_cs_block_drives_the_joiner_ceiling_and_intervals()) return 1;

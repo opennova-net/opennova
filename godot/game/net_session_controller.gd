@@ -216,7 +216,8 @@ func _start_lan_join(target: JoinTarget) -> void:
 
 # NovaWorld rows and direct --lan-join targets do not carry ServerHello.P2.
 # Query the resolved game endpoint itself before authentication, using the same
-# 0x7F/0x81 enumerator exchange as the LAN browser. A silent/non-enumerating
+# 0x41/0x81 enumerator exchange as the LAN browser; the row it finds is the
+# join's discovered session (D-NET-521). A silent/non-enumerating
 # endpoint falls back to the ordinary player join after a short bounded wait.
 func _begin_spectator_preflight(target: JoinTarget) -> void:
 	_spectator_probe_serial += 1
@@ -287,6 +288,14 @@ func _finish_spectator_preflight(probe: LanSession, target: JoinTarget,
 			target.server_name = row.server_name
 		if target.game_type < 0:
 			target.game_type = row.gametype
+		# The row is the join's discovered session: the join goes on with the
+		# browse's connection, straight to the 0x42 with the row's HK and SF and
+		# the browse's CI, so the only 0x41s are the browse's (D-NET-521; the
+		# engine's JoinerConnection::DiscoveredSession carries the witness).
+		target.discovered_session = true
+		target.session_host_key = row.host_key
+		target.session_password_required = row.password_required
+		target.session_client_index = row.client_index
 	_cancel_spectator_probe()
 	if target.entry_step(true) == JoinTarget.ENTRY_PROMPT:
 		_show_join_role_prompt(target)

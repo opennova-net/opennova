@@ -22,6 +22,10 @@ namespace opennova::gamecfg {
 struct GameCfg;
 }
 
+namespace opennova::def {
+struct DefItemsFile;
+}
+
 namespace opennova::inmatch {
 
 struct NapiNPServerCtx;
@@ -69,8 +73,8 @@ public:
 		// own); null reads as no rotation and an empty catalog.
 		RotationAdmin *rotation = nullptr;
 		// A listen host's chat window display lines, oldest first (CHAT GET's walk of slots
-		// 40..1): its HUD's word-wrapped ring. A host with no client reads the context's CHAT
-		// ring instead (`console_chat`, server_console.h; D-NET-372).
+		// 40..1): its HUD's word-wrapped ring. A host with no client reads the context's own
+		// display buffer instead (`console_chat_display`, server_console.h).
 		std::function<std::vector<std::string>()> chat_window;
 		// A listen host's flood refusal echoed into its HUD window (Chat_AddMessageChannel1). A
 		// host with no client sends through Server_SendConsoleChat, which posts the sent line,
@@ -82,6 +86,17 @@ public:
 		std::function<std::string(std::string_view section, std::string_view key)> game_text;
 		// The avatar registry PETERRABBIT SEXCHANGE picks its two combos from.
 		const CharacterRegistry *characters = nullptr;
+		// CMD VERSION's two texts, the binary's version and its title, each printed at its
+		// start [orig: Game_ParseCommandLineAndInit @0x4A7D30..0x4A7D3C (the title
+		//  off_8154D8), @0x4A7D75..0x4A7D90 ("V%i.%i.%i.%i" into byte_B4C0B0)].
+		std::string version_text;
+		std::string title_text;
+		// A listen host's SYSTEM ring (Chat_AddMessageChannel2), which CMD VERSION posts to.
+		// A host with no client shows no SYSTEM ring (its status page reads the CHAT ring, CHAT
+		// GET the CHAT display), so no embedder of that host sets it.
+		std::function<void(const std::string &text, uint32_t argb)> system_message;
+		// The mission's items.def rows, which CMD SAVENFO's dump names (null: none loaded).
+		std::function<const def::DefItemsFile *()> items_table;
 	};
 
 	AdminConsole(NapiNPServerCtx &ctx, Seams seams);
@@ -95,6 +110,10 @@ public:
 	bool dispatch(const AdminSession &session, std::string_view line,
 			std::vector<std::string> &replies) override;
 	std::string status_report() override;
+
+	// CMD's local arms (Client_ProcessLocalCommand): true when one takes the line, which then
+	// goes no further (the `pb_` lines, SAVEKEYS, SAVENFO, VERSION).
+	bool local_command(const std::string &line);
 
 private:
 	using Args = std::vector<std::string>;

@@ -876,7 +876,9 @@ bool check_listen_host_installs_local_character_profile() {
 			connection.char_vars.char_class[1] == 7 &&
 			connection.char_vars.avatar[0] == 3 &&
 			connection.char_vars.avatar[1] == 9,
-			"listen-host type-2 connection receives both selected characters");
+			"listen-host type-2 connection receives both selected characters") &&
+			expect(!owner.ctx.host_slot.active,
+					"a listen host's slot 0 is its loopback's: no connectionless host row");
 }
 
 // A dedicated host (mode 1) starts the server but registers no local client connection.
@@ -886,11 +888,19 @@ bool check_dedicated_host_has_no_local_client() {
 	opennova::inmatch::set_transport_mode(ctx, SocketMode::Lan);
 	opennova::inmatch::GameConfig settings;
 	settings.max_players = 16;
+	ctx.server_text.host_name = "Host";
 	opennova::inmatch::create_session(ctx, settings, opennova::inmatch::SessionStartup{}, nullptr);
 	if (!expect(ctx.np_protocol.host_running == 1, "dedicated host running")) return false;
 	if (!expect(ctx.np_protocol.connection_list.empty(), "no local client on a dedicated host"))
 		return false;
-	return true;
+	// Its own slot 0 is a connectionless row: the round init's, then the session create's
+	// PlayerSession_InitFromProfile (STRSRV19; the side byte -1 gives team 1; a fresh
+	// profile's side class 8) (D-NET-352).
+	// [orig: Server_InitNewRoundState @0x51C99A..0x51CA3C; PlayerSession_InitFromProfile
+	//  @0x50CA80]
+	const opennova::inmatch::HostSlotRow &host = ctx.host_slot;
+	return expect(host.active && host.name == "Host" && host.team == 1 && host.player_class == 8,
+			"a dedicated host keeps its own connectionless slot 0");
 }
 
 // Production serve mode is a true HostOnly session: supplying the adapter's loopback must not
@@ -915,6 +925,15 @@ bool check_production_serve_mode_has_no_phantom_and_mints_startup() {
 	            "production serve mode registers no type-2 phantom player")) return false;
 	if (!expect(owner.ctx.np_protocol.host_key != 0,
 	            "production startup mints a nonzero host key")) return false;
+	// D-NET-524: the host key is the manager LCG's four byte draws, so its bytes follow
+	// b' = 49b + 1 (mod 256). [orig: NapiNPProtocol_StartServer @0x62b5f5 ->
+	//  NapiNP_GenerateSessionKey @0x61ea70; NapiPRNG_NextInRange @0x62e450]
+	const uint32_t hk = owner.ctx.np_protocol.host_key;
+	bool hk_chains = true;
+	for (int shift = 24; shift > 0; shift -= 8)
+		hk_chains = hk_chains && ((49u * ((hk >> shift) & 0xFFu) + 1u) & 0xFFu) ==
+				((hk >> (shift - 8)) & 0xFFu);
+	if (!expect(hk_chains, "the host key's bytes follow the manager LCG")) return false;
 	if (!expect(owner.ctx.np_protocol.host_start_tick != 0,
 	            "production startup records a nonzero monotonic start tick")) return false;
 	if (!expect(owner.ctx.np_protocol.session_seed_id >= 100000 &&

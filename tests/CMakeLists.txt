@@ -3777,6 +3777,13 @@ target_link_libraries(session_hello_roundtrip_test PRIVATE opennova_net)
 target_include_directories(session_hello_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME session_hello_roundtrip COMMAND session_hello_roundtrip_test)
 
+# D-NET-524 — the session key material's generator, the NAPI manager's LCG
+add_executable(napi_prng_test novaworld/napi_prng_test.cpp)
+target_link_libraries(napi_prng_test PRIVATE opennova_net)
+target_include_directories(napi_prng_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(napi_prng_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
+add_test(NAME napi_prng COMMAND napi_prng_test)
+
 # Phase D — LobbySession dispatch tests
 add_executable(lobby_session_test novaworld/lobby_session_test.cpp)
 target_link_libraries(lobby_session_test PRIVATE opennova_novaworld_service opennova_net)
@@ -4661,6 +4668,21 @@ add_executable(npruntime_punt_log_test npruntime/punt_log_test.cpp)
 target_link_libraries(npruntime_punt_log_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_punt_log_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_punt_log COMMAND npruntime_punt_log_test)
+
+# The console's headless arms (inmatch/server_console.h): the net log _NETLOG.TXT (its lines,
+# the flush, the truncating first open), the NETLOG / STAT handler, the authority's C2S 0x04
+# and its S2C 0x06 echo, and SAVENFO's debug.nfo text (D-NET-371).
+add_executable(npruntime_net_log_test npruntime/net_log_test.cpp)
+target_link_libraries(npruntime_net_log_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_net_log_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_net_log COMMAND npruntime_net_log_test)
+
+# The chat display buffer of a host with no client (inmatch/server_console.h): the wrap at the
+# 4-unit chat box over a synthetic font, the slots, the timers and CHAT GET's walk (D-NET-372).
+add_executable(npruntime_chat_display_test npruntime/chat_display_test.cpp)
+target_link_libraries(npruntime_chat_display_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_chat_display_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_chat_display COMMAND npruntime_chat_display_test)
 add_executable(npruntime_squad_relay_test npruntime/squad_relay_test.cpp)
 target_link_libraries(npruntime_squad_relay_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_squad_relay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

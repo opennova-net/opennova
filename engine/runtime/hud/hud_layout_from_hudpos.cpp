@@ -107,10 +107,12 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 	// by a separate hud.def `chat_message x1 y1 x2 y2` / `sys_message` parser
 	// [orig: File_ParseASCIIFile("hud.def", cb, 0x2A5A8EAD) @0x5be210..0x5be228,
 	// the callback @0x5bb7a0, stores @0x5bb7d1/@0x5bb7ed/@0x5bb825/@0x5bb841],
-	// and JO:CA ships no hud.def — the rows stay 0, the width is 4, and the
-	// wrapper returns 1 at the first character, so a retail chat line never
-	// wraps. chat_box_present stays false for the same result; a hud.def-equipped
-	// title needs a formats/def reader (the file is SCR-encoded, key 0x2A5A8EAD).
+	// and JO:CA ships no hud.def — the rows stay 0 and the width is 4, which
+	// still splits a line that begins with a space, or with a glyph of extent 3
+	// or less followed by a space [orig: HUD_WordWrapText @0x580980].
+	// chat_box_present stays false, so the client does not wrap (D-HUD-58); a
+	// hud.def-equipped title needs a formats/def reader (the file is SCR-encoded,
+	// key 0x2A5A8EAD).
 	out.sys_text = pos_record2(hud.sys_text[0], hud.sys_text[1]);
 	out.squad_orders = pos_record2(hud.orders[0], hud.orders[1]);
 	// BREATHTIME x, y, align: three fields, no hidden dword; an unauthored

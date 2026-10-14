@@ -52,6 +52,7 @@ JoinerNetworkDiagnostics joiner_network_diagnostics(const ClientRuntime *runtime
 	out.retained_outbound = static_cast<uint32_t>(runtime->retained_outbound_depth());
 	out.in_match = runtime->in_match();
 	out.deployed = runtime->is_deployed();
+	out.client_index = runtime->joiner_client_index();
 	out.stage = runtime->admission_stage_name();
 	const JoinerConnection::ChallengeDiagnostics challenges = runtime->challenge_diagnostics();
 	out.entity_checksum_seen = challenges.entity_checksum_seen;

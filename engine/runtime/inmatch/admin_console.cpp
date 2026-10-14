@@ -18,6 +18,7 @@
 
 #include <cstdio>
 #include <string>
+#include <string_view>
 
 namespace opennova::inmatch {
 
@@ -655,16 +656,64 @@ void AdminConsole::handle_weapon(const Args &args, std::vector<std::string> &rep
 	replies.emplace_back("OK - Weapon availbility changed.");
 }
 
-// The host's own console line. A session peer queues it to its own server as reliable C2S
-// 0x04; an authority that is not a peer runs its arms in order until one takes it.
-// Client_ProcessLocalCommand's commands, the NETLOG toggle and NapiClientCmd_ParseAndExecute's
-// input bindings are not modeled (D-NET-371); its one-second guard compares the tick with the
-// last stamp minus 1000, so it never drops a line.
+// Client_ProcessLocalCommand's arms a host reaches with no client of its own: each takes a
+// line its prefix opens. PunkBuster's command hook comes first in retail and is not modeled
+// (D-NET-371). A `pb_` line, behind one leading '/' or '\\', is taken whatever PunkBuster's
+// state: retail hands it to the PunkBuster module (`pb_sv_` to its server half, any other to
+// its client half), each a call that does nothing with no PunkBuster context, and returns 1.
+// The WAC overlay toggles by name are not modeled (D-NET-371); SAVEKEYS is
+// taken here, its keylist.key dump of the profile's binding table not modeled, nor is the arm
+// past VERSION, which out of a session matches the line's CRC against the binding table and
+// queues its input action (D-NET-710). SAVENFO writes debug.nfo (entity_usage_text); VERSION posts
+// "Version <version>  - <title>" to the SYSTEM ring in white with the 930-tick life.
+// [orig: Client_ProcessLocalCommand @0x520BF0 — sub_4D7F00 @0x520C2A; the `pb_` arm
+//  @0x520C3B..0x520CB6: the '/' or '\\' skip @0x520C3B..0x520C45, strnicmp(.., "pb_", 3)
+//  @0x520C50 (the string @0x7CCF84), "sv_" @0x520C6B, the PunkBuster calls @0x520C94 /
+//  @0x520CC9 (0x4DA3F0 / 0x4D7ED0, each a no-op with no context 0xB608F4), return 1; the
+//  WAC overlays @0x520CF1, SAVEKEYS @0x520D10 (KeyBinding_DumpAllToFile @0x54C0A0), SAVENFO
+//  @0x520D4B (Entity_DumpUsageStatistics("debug.nfo") @0x520D5C), VERSION @0x520D8E (the
+//  format @0x7D00AC, Chat_AddMessageChannel2(.., -1, 930) @0x520DC2), the binding CRC
+//  @0x520DF2..0x520E5B]
+bool AdminConsole::local_command(const std::string &line) {
+	const size_t skip = !line.empty() && (line[0] == '/' || line[0] == '\\') ? 1 : 0;
+	if (strutil::starts_with_icase(std::string_view(line).substr(skip), "pb_")) return true;
+	if (strutil::starts_with_icase(line, "SAVEKEYS")) return true;
+	if (strutil::starts_with_icase(line, "SAVENFO")) {
+		const char *name = "debug.nfo";
+		const std::string file = entity_usage_file_name(name);
+		const def::DefItemsFile *items = seams_.items_table ? seams_.items_table() : nullptr;
+		if (ctx_.world != nullptr && ctx_.logs.files != nullptr && !file.empty()) {
+			// fopen("w+"): text mode, each '\n' on the disk a CR LF [orig: @0x40E6B2].
+			std::string text;
+			for (const char c : entity_usage_text(*ctx_.world, items, name)) {
+				if (c == '\n') text += '\r';
+				text += c;
+			}
+			(void)ctx_.logs.files->write(file, text, /*append=*/false);
+		}
+		return true;
+	}
+	if (strutil::starts_with_icase(line, "VERSION")) {
+		const std::string text = "Version " + seams_.version_text + "  - " + seams_.title_text;
+		if (seams_.system_message) seams_.system_message(text, 0xFFFFFFFFu);
+		return true;
+	}
+	return false;
+}
+
+// The host's own console line: Client_ProcessLocalCommand's arms first; then a session peer
+// queues the line to its own server as reliable C2S 0x04, whose authority half echoes back as
+// S2C 0x06 whatever NETLOG does not take (Server_HandleConsoleCommandMessage); an authority that
+// is not a peer runs the NETLOG handler (a `STAT` prefix taken whole; NETLOG toggling the net
+// log and going on), Server_HandleBanPuntCommand, then NapiClientCmd_ParseAndExecute, whose
+// debug commands and key-binding queue are not modeled (D-NET-710). Its one-second guard compares the tick
+// with the last stamp minus 1000, so it never drops a line.
 // [orig: Client_ProcessConsoleCommand @0x520E80 — the guard, Client_ProcessLocalCommand
-//  @0x520BF0, the peer's QueueReliableMessage(4) with NetPacket_WriteNullableString @0x42A430,
-//  the authority's Server_HandleAdminNetlogCommand @0x5175D0 (a `STAT` prefix taken whole),
+//  @0x520EEC, the peer's QueueReliableMessage(4) with NetPacket_WriteNullableString @0x42A430,
+//  the authority's Server_HandleAdminNetlogCommand(line, 0) @0x5175D0,
 //  Server_HandleBanPuntCommand(line, 0) @0x50B380, NapiClientCmd_ParseAndExecute @0x4329C0]
 void AdminConsole::console_command(const std::string &line) {
+	if (local_command(line)) return;
 	if (ctx_.is_mp_session_peer != 0) {
 		if (seams_.host_client != nullptr) {
 			std::vector<uint8_t> body(line.begin(), line.end());
@@ -674,7 +723,8 @@ void AdminConsole::console_command(const std::string &line) {
 		return;
 	}
 	if (ctx_.is_authority == 0) return;
-	if (!tokenize_quoted(line).empty() && strutil::starts_with_icase(line, "STAT")) return;
+	std::vector<ProtocolMessage> no_slot_replies;
+	if (Server_HandleAdminNetlogCommand(ctx_, line, nullptr, no_slot_replies)) return;
 	Server_HandleBanPuntCommand(ctx_, line);
 }
 
@@ -749,7 +799,7 @@ void AdminConsole::chat_send(std::string text) {
 	}
 	if (Server_SendConsoleChat(ctx_, hud::kChatDispatchGlobal, text, main_frame_) ==
 			hud::ChatSendResult::Flooded)
-		server_console_post(ctx_.console_chat, text, hud::chat_dispatch_flood_color(hud::kChatDispatchGlobal));
+		server_console_add(ctx_, text, hud::chat_dispatch_flood_color(hud::kChatDispatchGlobal));
 }
 
 // [orig: CAdminServer_HandleChatCommand @0x404AC0 — GET @0x404B0F..0x404BB3 (the window's 40
@@ -758,15 +808,14 @@ void AdminConsole::chat_send(std::string text) {
 //  buffer with no bound, D-NET-362, then `OK - Chat sent.` whatever the sender did)]
 void AdminConsole::handle_chat(const Args &args, std::vector<std::string> &replies) {
 	if (!args.empty() && ieq(args[0], "GET")) {
-		// A host with no client reads its CHAT ring, oldest first: the raw lines, where retail
-		// lists the window's word-wrapped display lines (D-NET-372); a listen host reads its
-		// HUD's window through the seam.
-		std::vector<std::string> window;
+		// A host with no client reads its own display buffer (chat_display_get); a listen
+		// host reads its HUD's window through the seam.
 		if (ctx_.is_mp_session_peer == 0) {
-			for (const ServerConsoleLine &line : ctx_.console_chat) window.push_back(line.text);
-		} else if (seams_.chat_window) {
-			window = seams_.chat_window();
+			replies.push_back(chat_display_get(ctx_.console_chat_display));
+			return;
 		}
+		std::vector<std::string> window;
+		if (seams_.chat_window) window = seams_.chat_window();
 		std::string out;
 		for (const std::string &line : window)
 			if (!line.empty()) out += line + "\r\n";

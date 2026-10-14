@@ -41,6 +41,12 @@ int32_t Server_CalcTeamImbalance(const NapiNPServerCtx &ctx) {
 		if (team == 1) ++imbalance;
 		else if (team == 2) --imbalance;
 	}
+	// A Serve Only host's own slot 0, an active row with no connection (D-NET-352).
+	// [orig: Server_CalcTeamImbalance @0x4FCAE0 (+4 @0x4FCB10, +416 @0x4FCB19)]
+	if (ctx.host_slot.active) {
+		if (ctx.host_slot.team == 1) ++imbalance;
+		else if (ctx.host_slot.team == 2) --imbalance;
+	}
 	return imbalance;
 }
 

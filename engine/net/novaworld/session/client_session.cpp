@@ -172,8 +172,9 @@ ClientSession::Config ClientSession::Config::jointoperations() {
 
 ClientSession::ClientSession() : ClientSession(Config{}) {}
 
-// The per-session SCRK is retail's random 63-draw key (one generator in the tree,
-// nw_session_framing.h). [orig: CNapiNPConnection_GenerateTxKey @0x61dfe0]
+// The per-session SCRK in the 63-draw generator's shape, from the CSPRNG (make_dev_scrk);
+// retail draws it from the manager's LCG (generate_tx_key), which this lobby leg has not
+// moved to yet (D-NET-524's residual). [orig: CNapiNPConnection_GenerateTxKey @0x61dfe0]
 ClientSession::ClientSession(Config config)
 	: cfg_(std::move(config)),
 	  client_scrk_(make_dev_scrk()) {}
