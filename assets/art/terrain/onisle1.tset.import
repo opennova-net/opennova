@@ -4,6 +4,7 @@
     "onisle1_heightmap.png",
     "onisle1_colormap.png",
     "onisle1_detail.png",
+    "onisle1_tiles.png",
     "onisle1_surface.png",
     "onisle1_foliage.png"
   ],
@@ -18,12 +19,13 @@
     "onisle1_dt.tga",
     "onisle1_dm.tga",
     "onisle1_d1.tga",
+    "onisle1_t.tga",
     "onisle1.til",
     "onisle1_m.pcx",
     "onisle1_f.pcx",
     "onisle1.trn"
   ],
   "schema_version": 1,
-  "source_hash": "5015552bbba7fab5",
+  "source_hash": "2e7c6642aa87453b",
   "version": 1
 }
