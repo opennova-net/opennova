@@ -86,7 +86,7 @@ std::string make_activation(std::string_view wire_key, std::string_view fingerpr
 // False where the client's decode fails (its status -3).
 // [orig: CDKey_WriteActivationFromNWACT @0x411e30 (dfx2.exe): the fingerprint @0x411ebb,
 //  the copy @0x411eca, NapiNP_EncryptStringWithPRNG @0x411ee9, CDKey_Decode under
-//  off_812EE8 @0x411f11, the decoded value stored at +16 @0x411f37]
+//  off_812EE8 @0x411f0a, the decoded value stored at +16 @0x411f37]
 bool read_activation(std::string_view nwact, std::string_view fingerprint, std::string &wire_key);
 
 // The two CD-key values a player carries: the CDKIID and CDKIIDEXP1 its join

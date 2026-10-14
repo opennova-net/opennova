@@ -163,6 +163,11 @@ int activation_negatives() {
 	// The wire key itself is no NWACT (it is A-P under the wire chain, not the registry's).
 	TEST_EXPECT(!cdkey::read_activation(kWire, kFingerprint, wire));
 	std::string serial;
+	// A value that decodes past the client's 0x800-byte buffer is refused, one that fits is not.
+	TEST_EXPECT(!cdkey::decode_wire_key(cdkey::make_wire_key(std::string(0x800, 'S')), serial));
+	TEST_EXPECT(cdkey::decode_wire_key(cdkey::make_wire_key(std::string(0x800 - 12, 'S')), serial));
+	TEST_EXPECT(!cdkey::read_activation(cdkey::make_activation(std::string(0x800, 'S'), kFingerprint),
+			kFingerprint, wire));
 	TEST_EXPECT(!cdkey::decode_wire_key("", serial));
 	TEST_EXPECT(!cdkey::decode_wire_key("QQQQ", serial));
 	TEST_EXPECT(!cdkey::decode_wire_key(std::string(kWire).substr(2), serial));

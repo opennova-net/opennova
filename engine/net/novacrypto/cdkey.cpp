@@ -5,11 +5,18 @@
 
 #include <base/io/strutil.h>
 
+#include <cstddef>
 #include <cstdint>
 
 namespace opennova::cdkey {
 
 namespace {
+
+// The decoded value's buffer every CD-key decode hands NapiNP_DecodeEncryptedString: a
+// value that would decode to more bytes is refused, as the original refuses it.
+// [orig: CDKey_ReadRegistry @0x411c65 (dfx2.exe), CDKey_WriteActivationFromNWACT
+//  @0x411ef6 (dfx2.exe), the join check @0x50f412 and @0x50f4e1 (dfx2.exe): 0x800 each]
+constexpr size_t kDecodeRoom = 0x800;
 
 // The PRNG the mix steps, {state, multiplier, counter}: the state seeded with
 // the fingerprint's key seed, the multiplier NWU's.
@@ -135,7 +142,7 @@ std::string make_wire_key(std::string_view serial) {
 bool decode_wire_key(std::string_view wire_key, std::string &serial) {
 	serial.clear();
 	std::vector<uint8_t> plaintext;
-	if (!decode_key_chain(std::string(wire_key), kDfx2WireChain, plaintext))
+	if (!decode_key_chain(std::string(wire_key), kDfx2WireChain, plaintext, kDecodeRoom))
 		return false;
 	serial.assign(plaintext.begin(), plaintext.end());
 	return true;
@@ -154,7 +161,7 @@ bool read_activation(std::string_view nwact, std::string_view fingerprint, std::
 	// [orig: CDKey_Decode @0x411af0 (dfx2.exe): NapiNP_DecodeEncryptedString under the
 	//  descriptor's +20 chain @0x411b38]
 	std::vector<uint8_t> plaintext;
-	if (!decode_key_chain(registry, kDfx2RegistryChain, plaintext))
+	if (!decode_key_chain(registry, kDfx2RegistryChain, plaintext, kDecodeRoom))
 		return false;
 	wire_key = c_string_of(plaintext);
 	return true;
@@ -167,7 +174,7 @@ LanJoinVerdict check_lan_join(
 	if (joiner.cdkiid.empty())
 		return LanJoinVerdict::MissingKey;
 	// [orig: @0x50f40d..0x50f42c (dfx2.exe): CDKey_DecodeWireJoinChain, code 11 @0x50f433]
-	if (!decode_key_chain(joiner.cdkiid, kDfx2WireChain, plaintext))
+	if (!decode_key_chain(joiner.cdkiid, kDfx2WireChain, plaintext, kDecodeRoom))
 		return LanJoinVerdict::UndecodableKey;
 	// [orig: @0x50f449..0x50f462 (dfx2.exe): the host's own, when it has one, code 12 @0x50f469]
 	if (!host.cdkiid.empty() && strutil::iequals(host.cdkiid, joiner.cdkiid))
@@ -182,7 +189,7 @@ LanJoinVerdict check_lan_join(
 	if (joiner.exp1.empty())
 		return LanJoinVerdict::Accepted;
 	// [orig: @0x50f4dc..0x50f4fb (dfx2.exe): the decode under off_812F00, code 11]
-	if (!decode_key_chain(joiner.exp1, kDfx2Exp1Chain, plaintext))
+	if (!decode_key_chain(joiner.exp1, kDfx2Exp1Chain, plaintext, kDecodeRoom))
 		return LanJoinVerdict::UndecodableKey;
 	// [orig: @0x50f501..0x50f51a (dfx2.exe): the host's own CDKIIDEXP1, code 12]
 	if (!host.exp1.empty() && strutil::iequals(host.exp1, joiner.exp1))
