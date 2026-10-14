@@ -11,6 +11,10 @@
 #include <runtime/replication/entity_wire_bridge.h>
 #include <runtime/inmatch/session_transport.h>
 
+namespace opennova {
+struct TitleIdentity; // net/title/title_identity.h
+}
+
 namespace opennova::replication {
 
 // In-match message tags (the inner-message tag, not the session opcode) are the
@@ -96,7 +100,8 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
                          uint32_t game_type = 0,
                          std::size_t max_frame_body_bytes = 0,
                          int32_t server_fps = 0,
-                         int32_t server_cpu_percent = 0);
+                         int32_t server_cpu_percent = 0,
+                         const TitleIdentity *title = nullptr);
 
 // The same frame, built but NOT sent: every per-recipient state advance (phase,
 // age, cache, watermark) happens here and the 0x0A body lands in `frame_out`.
@@ -114,12 +119,24 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
 // the sub-block carries as min(share, 0xFF), compared unsigned, so a negative
 // share crosses as 0xFF [orig: Server_TickUpdate @0x51D7EA..0x51D7FB ->
 // g_ServerCpuPct; NetPacket_WritePlayerState @0x4FFA76..0x4FFA7C].
+// `title` is the title the host speaks (null: JO's), whose 0x0A objective body
+// carries the co-op checkpoint after its four values (DFX2-1).
 bool build_connection_s2c(const world::World &w, Connection &conn,
                           const std::vector<GameEntitySnapshot> &ents,
                           std::vector<uint8_t> &frame_out,
                           uint32_t game_type = 0,
                           std::size_t max_frame_body_bytes = 0,
                           int32_t server_fps = 0,
-                          int32_t server_cpu_percent = 0);
+                          int32_t server_cpu_percent = 0,
+                          const TitleIdentity *title = nullptr);
+
+// The co-op checkpoint a DFX2 host's 0x0A objective body carries (DFX2-1): the
+// pool-3 slot of the newest player-route marker the authority marked done in a
+// co-op round, kCoopCheckpointNone (0xFFFF) outside co-op and after the round
+// reset. The seam the world's checkpoint tracking (DFX2-9) fills; until then it
+// answers 0xFFFF, the reset value, for every round.
+// [orig: g_CoopCheckpointSlot (dfx2.exe), read by NetPacket_WritePlayerState
+//  @0x4fcd99 (dfx2.exe)]
+uint32_t coop_checkpoint_slot(const world::World &world);
 
 } // namespace opennova::replication

@@ -8,6 +8,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
+#include <net/title/title_identity.h>
 
 #include <functional>
 #include <utility>
@@ -207,8 +208,34 @@ void ParityTraceBuilder::emit_decoded(
 		emit_message(message, ts_of(message.frame_index));
 }
 
+const TitleIdentity *handshake_title(const std::vector<uint8_t> &raw) {
+	std::vector<uint8_t> stripped(raw.size());
+	size_t stripped_len = 0;
+	if (napi_envelope_decode(
+				raw.data(), raw.size(), stripped.data(), stripped.size(), &stripped_len) != 0 ||
+			stripped_len == 0)
+		return nullptr;
+	stripped.resize(stripped_len);
+	const uint8_t opcode = stripped[0];
+	std::vector<uint8_t> body(stripped.begin() + 1, stripped.end());
+	if (!body.empty()) nwu_encrypt(body.data(), body.size(), SESSION_NWU_KEY);
+	std::string pn;
+	if (opcode == SESSION_OPCODE_CLIENT_HELLO) {
+		ClientHello value;
+		if (parse_client_hello(body.data(), body.size(), value)) pn = value.pn;
+	} else if (opcode == SESSION_OPCODE_CLIENT_AUTH) {
+		ClientAuth value;
+		if (parse_client_auth(body.data(), body.size(), value)) pn = value.pn;
+	} else if (opcode == SESSION_OPCODE_SERVER_HELLO) {
+		ServerHello value;
+		if (parse_server_hello(body.data(), body.size(), value)) pn = value.pn;
+	}
+	return pn.empty() ? nullptr : title_identity_by_protocol_name(pn);
+}
+
 void ParityTraceBuilder::emit_handshake(
 		int frame, uint64_t ts_ns, int src_port, int dst_port, const std::vector<uint8_t> &raw) {
+	if (const TitleIdentity *title = handshake_title(raw)) title_ = title;
 	std::vector<uint8_t> stripped(raw.size());
 	size_t stripped_len = 0;
 	if (napi_envelope_decode(
@@ -350,7 +377,8 @@ void ParityTraceBuilder::emit_message(const InGameMessage &message, uint64_t ts_
 	};
 	FrameUpdate frame;
 	const bool clean = decode_frame_update(message.payload.data(), message.payload.size(), class_of,
-			frame, game_type::is_objective(game_type_));
+			frame, frame_objective_body(game_type::is_objective(game_type_),
+					title_in_match(title_).objective_checkpoint));
 	ParityFrameState out;
 	out.frame = message.frame_index;
 	out.ts_ns = ts_ns;

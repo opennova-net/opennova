@@ -73,8 +73,10 @@ void start_mission_state(NapiNPServerCtx &ctx, const GameConfig &config) {
 }
 
 // The config the session serves from: the resolved send period, the
-// mission-data block, the advertised name, cap and flag words.
-void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config) {
+// mission-data block (its rules word the session title's, `title`), the
+// advertised name, cap and flag words.
+void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config,
+		const TitleIdentity *title) {
 	// Resolve the session-selected retail default once at session creation so
 	// every later connection, settings record, and countdown reads the same
 	// concrete period. A caller-supplied override wins verbatim.
@@ -86,7 +88,7 @@ void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config) {
 	ctx.config.send_holdoff_ticks =
 			config.effective_send_holdoff_ticks(transport_fallback);
 	ctx.mission_metadata_blob =
-			build_mission_metadata_blob(ctx.config, ctx.is_mp_session_peer != 0);
+			build_mission_metadata_blob(ctx.config, ctx.is_mp_session_peer != 0, title);
 	ctx.np_protocol.session_name = config.server_name; // "HOST STARTED \"%s\"" log name
 	// The MP TLV (the 0x82 and the LAN discovery 0x81) carries the session's
 	// cap, never the slot limit's dedicated slot [orig: protocol +0x524 =
@@ -104,7 +106,7 @@ void resolve_mission_config(NapiNPServerCtx &ctx, const GameConfig &config) {
 
 void continue_session(NapiNPServerCtx &ctx, const GameConfig &config) {
 	start_mission_state(ctx, config);
-	resolve_mission_config(ctx, config);
+	resolve_mission_config(ctx, config, ctx.np_protocol.identity);
 	// The exit the round end stored is spent: the main frame read it before
 	// the map change [orig: Game_ProcessMainFrame @0x526806..0x526867].
 	ctx.mission_exit_reason = 0;
@@ -155,7 +157,8 @@ CreateSessionResult create_session(NapiNPServerCtx &ctx, const GameConfig &confi
 		(void)ctx.world->crt_rand.next();
 	}
 	ctx.is_in_session = 1; // gates the whole replication loop (+0x58)
-	resolve_mission_config(ctx, config);
+	// The title the start installs below (start_server) builds the block.
+	resolve_mission_config(ctx, config, startup.title);
 
 	if (ctx.is_authority) {
 		start_server(ctx, startup);

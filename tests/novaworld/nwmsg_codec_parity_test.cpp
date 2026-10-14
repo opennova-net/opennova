@@ -21,6 +21,8 @@
 #include <net/npwire/ingame_body_codec.h>
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_message_catalog.h>
+#include <net/title/title_identity.h>
+#include <base/gameprofile/gameprofile.h>
 
 #include <formats/def/def.h>
 #include <runtime/replication/item_replication_catalog.h>
@@ -435,7 +437,8 @@ int retail_leg(const Corpus &corpus, const rep::ItemReplicationCatalog &authored
 			++bad;
 		}
 	}
-	IngameBodyCodecContext ctx = IngameBodyCodecContext::for_game_type(*corpus.game_types.begin());
+	IngameBodyCodecContext ctx = IngameBodyCodecContext::for_session(
+			*corpus.game_types.begin(), title_identity(gameprofile::GAME_JO));
 	ctx.class_of = [&real](uint16_t id) {
 		const auto c = real.resolve_wire_entity_class(id);
 		return c ? *c : EntityClass::Unknown;
@@ -465,7 +468,8 @@ int main(int argc, char **argv) {
 
 	const rep::ItemReplicationCatalog authored = authored_catalog();
 	TEST_EXPECT(authored.valid());
-	IngameBodyCodecContext ctx = IngameBodyCodecContext::for_game_type(*corpus.game_types.begin());
+	IngameBodyCodecContext ctx = IngameBodyCodecContext::for_session(
+			*corpus.game_types.begin(), title_identity(gameprofile::GAME_JO));
 	std::set<uint16_t> unknown_ids;
 	ctx.class_of = [&authored, &unknown_ids](uint16_t id) {
 		const auto c = authored.resolve_wire_entity_class(id);

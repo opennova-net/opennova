@@ -2004,8 +2004,8 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				// The leg takes the zone's handle; its placement resolves it (D-NET-592)
 				// [orig: SpawnWaveList_TickEntry, the Server_DeployPlayer call @0x52A3C0].
 				std::vector<ProtocolMessage> deployment =
-						Server_ReleasePlayerDeployment(ctx.config, conn, world,
-								release.zone, release.zone.packed, ctx.logs.profile);
+						Server_ReleasePlayerDeployment(ctx.config, conn, world, release.zone,
+								release.zone.packed, ctx.logs.profile, ctx.np_protocol.identity);
 				for (ProtocolMessage &message : deployment)
 					conn.link.transport->host_send(
 							message.tag, std::move(message.payload),
@@ -2389,7 +2389,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			conn.frame_update_staged = replication::build_connection_s2c(
 					world, conn.link, ents, conn.staged_frame_update, ctx.config.game_type,
 					conn.type == NapiNPConnection::kTypeServerSide ? kMaxFrameUpdateBodyBytes : 0,
-					ctx.stats_avg_fps, ctx.stats_cpu_percent);
+					ctx.stats_avg_fps, ctx.stats_cpu_percent, ctx.np_protocol.identity);
 		}
 	}
 	// Queue the frames just built, retail's per-slot send.

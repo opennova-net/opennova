@@ -16,6 +16,7 @@
 //  g_NPMsgInfoServer @0x82B5D8 (C2S, host side)]
 
 #include <net/npwire/entity_class.h>
+#include <net/npwire/ingame_decode.h> // FrameObjectiveBody
 
 #include <cstddef>
 #include <cstdint>
@@ -24,17 +25,22 @@
 
 namespace opennova {
 
+struct TitleIdentity; // net/title/title_identity.h
+
 // Session state a body's layout depends on but the body does not carry.
 struct IngameBodyCodecContext {
 	// S2C 0x0A / C2S 0x0C compact records: wire type id -> record class
 	// (built from items.def). Empty resolves nothing, so those bodies fail closed.
 	std::function<EntityClass(uint16_t)> class_of;
-	// g_GameType & 0x20000: the 0x0A sub-block-3 objective body.
-	bool objective_gametype = false;
+	// g_GameType & 0x20000 and the title's co-op checkpoint: the 0x0A sub-block-3
+	// objective body.
+	FrameObjectiveBody objective_body = FrameObjectiveBody::None;
 	// (g_GameType & ~0x20000) == 0x10020: the 0x0F waypoint tail.
 	bool waypoint_gametype = false;
 
-	static IngameBodyCodecContext for_game_type(uint32_t game_type);
+	// The session a capture or a host runs: its game type and the title it speaks
+	// (null runs JO's, title_in_match).
+	static IngameBodyCodecContext for_session(uint32_t game_type, const TitleIdentity *title);
 };
 
 enum class BodyDecode : uint8_t {

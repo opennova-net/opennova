@@ -205,8 +205,8 @@ struct NapiNPServerCtx {
 
 	// [§5.2a] The advertised weapon-restriction set (S2C 0x66). The original reads a 255-entry
 	// restriction table (unused6 @0x24D5600); weapon_restrictions holds only the RESTRICTED
-	// (index,value) entries (value 0 or 2); empty = no restrictions -> 0x66 emits a single count byte 0
-	// (golden frame 160).
+	// (index,value) entries (value 0 or the title's armory-only value, TitleInMatch); empty = no
+	// restrictions -> 0x66 emits a single count byte 0 (golden frame 160).
 	std::vector<std::pair<uint8_t, uint8_t>> weapon_restrictions;
 
 	// [orig +0x1198] the SendFiltered send mask (preserved name). Present but the
@@ -426,6 +426,12 @@ struct NapiNPServerCtx {
 	// [orig: ctx+0x1194 — CNapiNetwork_RandomizeTimeout @0x4c4da3, read back
 	//  by sub_4C4DB0 @0x4c4db0 (Server_DrawStatusScreen @0x50a7fa)]
 	uint32_t novaworld_app_id = 0;
+	// The host's own CD-key ids, the wire forms its registry key decodes to: a DFX2 LAN host
+	// refuses a joiner sending either (code 12, server_join_check.h). Empty for a host that
+	// holds none, opennova-serve's. [orig: g_CDKeyInfo +16 (g_CDKeyInfoWireCdkiid) and +0x810
+	//  (g_CDKeyInfoWireExp1), read by Server_ValidatePlayerJoinRequest @0x50f458 / @0x50f510
+	//  (dfx2.exe)]
+	cdkey::WireKeys host_cd_keys;
 	// Every connection the host's NapiNP layer brought up since the server
 	// started, the host's own local connection included: the status page's
 	// total logins.

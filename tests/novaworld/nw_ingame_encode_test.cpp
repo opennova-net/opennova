@@ -926,7 +926,7 @@ int test_frame_update_roundtrip() {
 		std::vector<uint8_t> wire = encode_frame_update(in);
 		FrameUpdate out;
 		EXPECT(decode_frame_update(wire.data(), wire.size(), class_of, out,
-		                           /*is_objective_gametype=*/true));
+		                           FrameObjectiveBody::Values));
 		EXPECT(out.complete && out.consumed == wire.size());
 		EXPECT(out.objective.present && out.objective.state[0] == 0x11223344 &&
 		       out.objective.state[1] == -2 && out.objective.state[2] == 0x55667788 &&

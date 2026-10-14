@@ -554,6 +554,9 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu,
 			w.u32(uint32_t(fu.objective.state[1]));
 			w.u32(uint32_t(fu.objective.state[2]));
 			w.u32(uint32_t(fu.objective.state[3]));
+			// A DFX2 host's co-op checkpoint (DFX2-1) [orig: NetPacket_WritePlayerState
+			//  @0x4fcd84..0x4fcd9b (dfx2.exe)].
+			if (fu.objective.has_coop_checkpoint) w.u32(fu.objective.coop_checkpoint);
 		}
 		break;
 	}

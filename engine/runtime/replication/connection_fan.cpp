@@ -13,6 +13,7 @@
 #include <base/gameprofile/game_type.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/wire_handle.h>
+#include <net/title/title_identity.h>        // title_in_match (the 0x0A co-op checkpoint, DFX2-1)
 #include <runtime/world/geom.h>              // to_fixed
 #include <runtime/world/vehicle_mount.h>
 
@@ -92,6 +93,10 @@ struct FrameHeaderState {
 	uint32_t owned_zone_mask = 0;
 	FrameEnv env{};
 	FrameMountAmmo mount_ammo{};
+	// The title's co-op checkpoint after the objective values (DFX2-1), and its value
+	// (coop_checkpoint_slot).
+	bool coop_checkpoint_present = false;
+	uint32_t coop_checkpoint = kCoopCheckpointNone;
 };
 
 // The per-frame S2C 0x0A field-driven §5.9 frame: a 12-byte position anchor, the phase-selected header
@@ -188,6 +193,10 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		fu.objective.state[1] = static_cast<int32_t>(subgoals.lost);
 		fu.objective.state[2] = static_cast<int32_t>(subgoals.show_win);
 		fu.objective.state[3] = static_cast<int32_t>(subgoals.show_lose);
+		// A DFX2 host's fifth value, g_CoopCheckpointSlot (DFX2-1) [orig:
+		//  NetPacket_WritePlayerState @0x4fcd84..0x4fcd9b (dfx2.exe)].
+		fu.objective.has_coop_checkpoint = hdr.coop_checkpoint_present;
+		fu.objective.coop_checkpoint = hdr.coop_checkpoint;
 		break;
 	}
 
@@ -966,7 +975,8 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 
 // Header wire size for a given flags2, mirroring encode_frame_update: 12-B anchor +
 // 2 flag bytes + the phase sub-block (0 weapon 11 B / 1 timer 6 B / 2 env 11 B /
-// 3 gametype 0/16 B, selected by the off-wire objective gate) + the 7-B local tail +
+// 3 gametype 0/16 B, selected by the off-wire objective gate, 20 B with a DFX2
+// host's co-op checkpoint) + the 7-B local tail +
 // the conditional phase-8 mount record (2 B on foot / 6 B mounted) + the 1-B
 // event-loop terminator.
 std::size_t frame_header_bytes(uint8_t flags2, uint32_t game_type,
@@ -976,7 +986,13 @@ std::size_t frame_header_bytes(uint8_t flags2, uint32_t game_type,
 	case 0: bytes = 12 + 2 + 11 + 7 + 1; break;
 	case 1: bytes = 12 + 2 + 6 + 7 + 1; break;
 	case 2: bytes = 12 + 2 + 11 + 7 + 1; break;
-	default: bytes = 12 + 2 + (opennova::game_type::is_objective(game_type) ? 16 : 0) + 7 + 1; break;
+	default:
+		bytes = 12 + 2 +
+				(opennova::game_type::is_objective(game_type)
+								? (hdr.coop_checkpoint_present ? 20 : 16)
+								: 0) +
+				7 + 1;
+		break;
 	}
 	if ((flags2 & kFrameFlags2RouteMask) == kFrameFlags2MountedAmmoRoute)
 		bytes += hdr.mount_ammo.mount_handle == wire_handle::kInvalid ? 2u : 6u;
@@ -1095,10 +1111,11 @@ bool emit_connection_s2c(const world::World &w, Connection &conn,
                          uint32_t game_type,
                          std::size_t max_frame_body_bytes,
                          int32_t server_fps,
-                         int32_t server_cpu_percent) {
+                         int32_t server_cpu_percent,
+                         const TitleIdentity *title) {
 	std::vector<uint8_t> frame;
 	if (!build_connection_s2c(w, conn, ents, frame, game_type, max_frame_body_bytes,
-	                          server_fps, server_cpu_percent))
+	                          server_fps, server_cpu_percent, title))
 		return false;
 	devtools::ProfileLap lap(w.profile);
 	conn.transport->host_send(s2c::PER_FRAME_UPDATE, std::move(frame),
@@ -1113,7 +1130,8 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
                           uint32_t game_type,
                           std::size_t max_frame_body_bytes,
                           int32_t server_fps,
-                          int32_t server_cpu_percent) {
+                          int32_t server_cpu_percent,
+                          const TitleIdentity *title) {
 	devtools::ProfileLap lap(w.profile);
 	if (conn.transport == nullptr) return false;
 	const world::Entity *owned = owned_entity_for_emit(w, conn);
@@ -1206,6 +1224,8 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 			std::min<uint32_t>(env.overcast_blend_q16() >> 8, 0xFFu));
 	hs.env.env_param = static_cast<uint8_t>(env.precipitation_kind);
 	hs.mount_ammo.present = (flags2 & kFrameFlags2RouteMask) == kFrameFlags2MountedAmmoRoute;
+	hs.coop_checkpoint_present = title_in_match(title).objective_checkpoint;
+	hs.coop_checkpoint = coop_checkpoint_slot(w);
 	if (conn.owned_entity.valid()) {
 		if (const world::Entity *own = w.registry.get(conn.owned_entity)) {
 			// +360 and +368 are zero unless entity Flags bit1 is set; +364 is
@@ -1307,6 +1327,15 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 	if (w.rules.hit_feedback)
 		conn.hud_hit_feedback_serial = owned->hud_hit_feedback_serial;
 	return true;
+}
+
+uint32_t coop_checkpoint_slot(const world::World &) {
+	// The authority's checkpoint tracking (DFX2-9: the co-op player-route markers
+	// marked done as their linked events fire, the round reset's 0xFFFF) is the
+	// world's to keep; until it keeps the slot, every round reads as reset.
+	// [orig: Server_ResetRoundCounters @0x513ffd (dfx2.exe) stores 0xFFFF;
+	//  EventTrigger_MarkCoopCheckpoint @0x4534a0 (dfx2.exe) the slot]
+	return kCoopCheckpointNone;
 }
 
 } // namespace opennova::replication
