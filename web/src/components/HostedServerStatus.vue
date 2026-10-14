@@ -70,23 +70,27 @@
         <span class="font-semibold">{{ stateLabel(server.state) }}.</span>
         {{ stateDescription(server.state) }}
         <template v-if="server.state === 'failed' && server.failure_reason">
-          The service's note: {{ server.failure_reason }}.
+          Reason: {{ server.failure_reason }}.
         </template>
-        <template v-if="server.state === 'stopping'">This takes up to a minute.</template>
       </p>
       <p v-if="server.live && server.restarts > 0" class="text-sm text-warn">
-        The service restarted it {{ server.restarts }} time{{ server.restarts === 1 ? '' : 's' }} after a crash.
-        After 3 restarts without an hour of running in between, the next crash ends it as failed.
+        It crashed and was restarted {{ server.restarts === 1 ? 'once' : `${server.restarts} times` }}.
       </p>
     </section>
 
-    <!-- The listing the server's NovaWorld account holds. -->
+    <!-- The listing the server's NovaWorld account holds, with the owner's
+         pushes to it (the account's listed servers, GET /api/me/hosts) that
+         the console below lacks. -->
     <section v-if="server.live" class="space-y-3" :aria-labelledby="ids.listing">
       <h3 :id="ids.listing" class="text-lg font-semibold text-ink">Listing</h3>
       <div v-if="server.listing" class="space-y-3 rounded-panel border border-border p-4">
         <dl class="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
           <dt class="text-ink-muted">Name</dt>
           <dd class="break-words text-ink">{{ server.listing.server_name || server.settings.game_name }}</dd>
+          <template v-if="listing?.msg">
+            <dt class="text-ink-muted">Message</dt>
+            <dd class="break-words text-ink">{{ listing.msg }}</dd>
+          </template>
           <dt class="text-ink-muted">Mission</dt>
           <dd class="break-words text-ink">{{ server.listing.mission_name || 'No mission yet' }}</dd>
           <dt class="text-ink-muted">Players</dt>
@@ -94,19 +98,23 @@
           <dt class="text-ink-muted">Address</dt>
           <dd class="break-all font-mono text-ink">{{ server.listing.host_ip }}:{{ server.listing.host_port }}</dd>
         </dl>
-        <p class="text-sm text-ink-muted">
-          Players find it in the NovaWorld server browser. Its players, rotation and chat are in the console
-          below; renaming it and its message:
-          <RouterLink to="/me/servers" class="text-accent hover:text-ink-bright">My servers</RouterLink>.
-        </p>
+        <p class="text-sm text-ink-muted">Players find it in the server browser.</p>
       </div>
       <p v-else-if="server.state === 'running'" class="text-sm text-warn">
-        Not listed right now. If its listing stays gone for about a minute, the service ends the server as
-        failed.
+        It is not in the server browser right now.
       </p>
       <p v-else class="text-sm text-ink-muted">
-        Not listed yet: it appears in the server browser once the game server is up.
+        It shows up in the server browser once it is ready.
       </p>
+      <MyServerCard
+        v-if="listing"
+        :key="listing.rid"
+        embedded
+        :server="listing"
+        :now="now"
+        @changed="emit('listing-changed')"
+        @session-ended="emit('session-ended')"
+      />
     </section>
 
     <!-- The settings it was started with. -->
@@ -198,8 +206,7 @@
     >
       <h3 :id="ids.stop" class="text-lg font-semibold text-danger">Stop the server</h3>
       <p class="text-sm text-ink-muted">
-        Ends the match for everyone on it and shuts its machine down. Its settings stay on this page, so you
-        can start it again.
+        Ends the match for everyone on it. Its settings stay here, so you can start it again.
       </p>
       <button
         v-if="!confirmingStop"
@@ -240,15 +247,17 @@
 <script setup lang="ts">
 // One hosted server as its owner sees it: where it is in its life
 // (requested -> provisioning -> booting -> listing -> running, then stopping
-// -> stopped, or failed), its listing, its settings, its console while it
-// runs (HostedServerConsole, in the page's console queue), its timeline and,
-// while it is live, the owner's stop (POST /api/me/server/stop). The page
-// (HostedServerPage) polls and hands the server in.
+// -> stopped, or failed), its listing with the owner's pushes its console
+// lacks (MyServerCard, embedded), its settings, its console while it runs
+// (HostedServerConsole, in the page's console queue), its timeline and, while
+// it is live, the owner's stop (POST /api/me/server/stop). The page
+// (MyServersPage) polls and hands the server and its listing in.
 import { computed, nextTick, ref, watch } from 'vue';
-import { RouterLink } from 'vue-router';
 import HostedServerConsole from './HostedServerConsole.vue';
+import MyServerCard from './MyServerCard.vue';
 import { stopHostedServer, type HostedError } from '../api/hostedServer';
 import type { HostedEvent, HostedServer } from '../types/hostedServer';
+import type { MyServer } from '../types/myServers';
 import { FIELD_LABELS } from '../utils/hostedSettings';
 import {
   START_STEPS,
@@ -262,6 +271,9 @@ const props = defineProps<{
   server: HostedServer;
   // The page's clock (ms), for the "ago" times.
   now: number;
+  // The server's own listing among the account's listed servers, while it is
+  // live and listed; null otherwise.
+  listing?: MyServer | null;
 }>();
 
 const emit = defineEmits<{
@@ -271,8 +283,10 @@ const emit = defineEmits<{
   (e: 'refused', error: HostedError): void;
   // The console was refused because the server is not running any more.
   (e: 'console-gone'): void;
-  // The console was refused the session.
+  // The console or a push to the listing was refused the session.
   (e: 'session-ended'): void;
+  // A push to the listing may have changed it: read the listings again.
+  (e: 'listing-changed'): void;
 }>();
 
 const ids = computed(() => {
@@ -382,10 +396,7 @@ async function confirmStop() {
     stopButton.value?.focus();
     return;
   }
-  status.value =
-    result.value?.state === 'stopped'
-      ? 'Your server has stopped.'
-      : 'Stopping your server: the match ends and its machine shuts down. This page follows it.';
+  status.value = result.value?.state === 'stopped' ? 'Your server has stopped.' : 'Stopping your server.';
   emit('stopped', result.value);
   // The stop section goes with the stopping state: the keyboard goes to the
   // card's heading.

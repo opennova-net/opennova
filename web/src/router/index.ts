@@ -4,7 +4,6 @@ import LoginPage from '../pages/LoginPage.vue';
 import RegisterPage from '../pages/RegisterPage.vue';
 import LobbyPage from '../pages/LobbyPage.vue';
 import MyServersPage from '../pages/MyServersPage.vue';
-import HostedServerPage from '../pages/HostedServerPage.vue';
 import AdminLayout from '../pages/admin/AdminLayout.vue';
 import UsersSection from '../pages/admin/UsersSection.vue';
 import ServerStatusSection from '../pages/admin/ServerStatusSection.vue';
@@ -22,7 +21,8 @@ const router = createRouter({
     { path: '/register', component: RegisterPage },
     { path: '/lobby', component: LobbyPage },
     { path: '/me/servers', component: MyServersPage, meta: { requiresUser: true } },
-    { path: '/me/server', component: HostedServerPage, meta: { requiresUser: true } },
+    // The hosted server's page before it joined My servers: old links land there.
+    { path: '/me/server', redirect: '/me/servers' },
     {
       path: '/admin',
       component: AdminLayout,

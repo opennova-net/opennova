@@ -104,7 +104,7 @@ function messageFor(code: HostedErrorCode, field?: SettingsField, retryAfterSeco
     case 'not_approved':
       return 'Your account is not approved to host a server, or is no longer active.';
     case 'already_live':
-      return 'You already have a hosted server. It is shown below.';
+      return 'You already have a hosted server running.';
     case 'at_capacity':
       return 'Every hosted server place on this service is taken. Try again later.';
     case 'no_live_server':

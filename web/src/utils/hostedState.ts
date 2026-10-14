@@ -15,14 +15,14 @@ export const STATE_LABELS: Record<HostedState, string> = {
 };
 
 export const STATE_DESCRIPTIONS: Record<HostedState, string> = {
-  requested: 'Your request is queued; the service picks it up within a few seconds.',
-  provisioning: 'The service is preparing the server: its NovaWorld account, its files and its machine.',
-  booting: 'The machine is starting the game server.',
-  listing: 'The game server runs and is listing itself on NovaWorld.',
-  running: 'Listed on NovaWorld: players can find it in the server browser and join.',
-  stopping: 'Ending the match and shutting the machine down.',
-  stopped: 'The server has stopped and its machine is gone.',
-  failed: 'The server failed and its machine is gone.',
+  requested: 'Your server is in line to start.',
+  provisioning: 'Your server is being set up.',
+  booting: 'Your server is starting up.',
+  listing: 'Your server is almost ready.',
+  running: 'Players can find it in the server browser and join.',
+  stopping: 'Your server is shutting down.',
+  stopped: 'Your server has stopped.',
+  failed: 'Something went wrong and your server shut down.',
 };
 
 // A state's name, for any text the service sent ('' and an unknown state
