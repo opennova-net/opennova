@@ -90,14 +90,15 @@ namespace {
 // @0x4BAA4B..0x4BAA66], which moves the chain from 0xc35a881f8f092209
 // (reverting that one commit restores it).
 // The org1 update then runs nothing for a body with no animation channel
-// [orig: Entity_UpdateInfantryAI @0x4B9931..0x4B993B]. The synthetic people
-// name no table, so they would stand and the chain would cover no think
-// (0x00436028504af8e0); the chain instead mounts them one, the minted
-// soldier.adm over idle.bad and walk.bad as the mission's infantry default.
-// Their channels now play those clips, which moves the chain from
-// 0xa22209beb52b4e4f; with the table mounted the exit itself moves nothing
-// (reverting it gives the same value).
-constexpr uint64_t kSyntheticDigest = 0x13615d98d5dd49e9ULL;
+// [orig: Entity_UpdateInfantryAI @0x4B9931..0x4B993B], and an item naming no
+// table registers none. The synthetic people named no item, so they would
+// stand and the chain would cover no think (0x00436028504af8e0); the chain
+// instead gives them an items.def row naming the minted soldier.adm (over
+// idle.bad and walk.bad), and the player's row the same. Their channels now
+// play those clips, which moves the chain from 0xa22209beb52b4e4f; with every
+// person naming its table the exit itself moves nothing (reverting it gives
+// the same value).
+constexpr uint64_t kSyntheticDigest = 0x517e7adde3a32d91ULL;
 constexpr int kSyntheticTicks = 240;
 
 struct Digest {
@@ -179,6 +180,15 @@ using test_mission::synthetic_mission;
 
 // The kernel's assets for the synthetic mission: the minted soldier.adm (its
 // idle and walk rows) over the minted idle.bad and walk.bad, read from fixtures/.
+// The people's item names it (`anim_def soldier`), as the player's does (the
+// rows CRLF-terminated, as a shipped items.def's are).
+constexpr int kPeopleTypeId = 2001; // items.def 102001
+constexpr const char *kPeopleItems =
+		"begin \"Null\"\r\nid 100000\r\ntype marker\r\nend\r\n"
+		"begin \"Synthetic soldier\"\r\nid 102001\r\ntype person\r\nanim_def soldier\r\nend\r\n"
+		"begin \"Player #1, Single player\"\r\n"
+		"id 105310\r\ntype person\r\nanim_def soldier\r\nend\r\n";
+
 struct PeopleClips final : FileSource {
 	std::map<std::string, std::vector<uint8_t>> files; // by lower-case name
 	bool read(const std::string &name, std::vector<uint8_t> &out) const override {
@@ -195,9 +205,10 @@ struct PeopleClips final : FileSource {
 bool synthetic_chain(int ticks, uint64_t &out, std::string &error) {
 	std::map<std::string, std::string> files;
 	files["synth.wac"] = "if elapse(1) then set(v1,1) endif\nif elapse(2) then inc(v1) endif\n";
-	// The people's table, the mission's infantry default: every body holds its
+	files["items.def"] = kPeopleItems;
+	// The people's table, the one their item names: every body holds its
 	// animation channel and runs the org1 update (one without runs nothing,
-	// world::infantry_has_anim_channel).
+	// world::infantry_has_anim_channel). No configured default stands in.
 	auto clips = std::make_shared<PeopleClips>();
 	for (const char *name : {"soldier.adm", "idle.bad", "walk.bad"}) {
 		clips->files[name] = test_io::read_file(test_paths_fixture(std::string("anim/") + name));
@@ -214,9 +225,10 @@ bool synthetic_chain(int ticks, uint64_t &out, std::string &error) {
 	const assets::AssetStore store(&index);
 	ms::MissionKernel kernel;
 	kernel.set_assets(&store);
-	kernel.open_document(synthetic_mission(), "synth", source_over(&files));
+	bms::File mission = synthetic_mission();
+	for (bms::Entity &person : mission.organics) person.type_id = kPeopleTypeId;
+	kernel.open_document(std::move(mission), "synth", source_over(&files));
 	ms::KernelBootOptions options;
-	options.infantry_adm = "soldier.adm";
 	if (!kernel.boot(options, error)) return false;
 	if (kernel.root_motion.clip_count(0) == 0) {
 		error = "the people's table registered no clips";

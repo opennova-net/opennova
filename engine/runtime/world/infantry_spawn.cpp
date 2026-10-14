@@ -144,7 +144,9 @@ OrganicSpawnBody organic_spawn_pose(const OrganicSpawnFacts &facts, uint32_t net
     inf.adm_id = adm_id;
     begin_spawn_channels(inf, organic_spawn_state(facts, source, adm_id), source, rings);
     OrganicSpawnBody out;
-    if (source != nullptr && adm_id >= 0) {
+    // The warmup runs only for a body holding its animation channel.
+    // [orig: Entity_WarmUpOrganicAnimation @0x4B8B32..0x4B8B39]
+    if (infantry_has_anim_channel(inf, source)) {
         RootMotionFrame frame{};
         out.rise = warm_up_channels(inf, net_id, facts.parented, *source, rings, frame);
         out.capsule_bottom = frame.capsule_bottom;
@@ -199,8 +201,10 @@ void initialize_organic_ai(World &world, Entity &entity) {
                          ai.anim_rings);
 
     // Entity_WarmUpOrganicAnimation @0x4B8B20: secondary then primary,
-    // net-ID permutation, vertical root motion only, one final ground solve.
-    if (ai.root_motion != nullptr && inf.adm_id >= 0) {
+    // net-ID permutation, vertical root motion only, one final ground solve;
+    // only for a body holding its animation channel. [orig: the channel test
+    // @0x4B8B32..0x4B8B39]
+    if (infantry_has_anim_channel(inf, ai.root_motion)) {
         RootMotionFrame frame{};
         const bool parented = entity.mount_target.valid();
         body->pos[2] = io::bam_add(body->pos[2],

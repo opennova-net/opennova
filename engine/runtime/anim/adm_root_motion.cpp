@@ -32,6 +32,12 @@ int AdmRootMotion::parse_adm(const RigFiles *files, const std::string &adm_name,
 	// Several states usually share one clip (walk_* dirs, idles): cache parsed tracks by
 	// resolved .bad name so each file is read + parsed once per .adm.
 	std::unordered_map<std::string, Track> by_file;
+	// A clip with no frames (or a short root record) is dropped here, where the
+	// game registers every token whose .bad loaded [orig: AnimMap_LoadAdmFile
+	// @0x40CC40 -> AnimMap_RegisterBoneNode @0x40C2D0]: a table whose RESET row
+	// names only such clips reports no animation channel here
+	// (world::infantry_has_anim_channel) where the game holds one. No shipped
+	// .bad is affected.
 	auto track_for = [&](const std::string &value) -> const Track * {
 		// The file a table token's load opens: its stem plus .bad (bad_file_name).
 		const std::string bad_name = bad_file_name(value);

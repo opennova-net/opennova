@@ -138,6 +138,15 @@ func _anim_root() -> ResourceRoot:
 	return root
 
 
+# The people's table, for a rig whose organics must think (a command-125 board):
+# a body with no table holds no animation channel, and the org1 update runs
+# nothing for it (world::infantry_has_anim_channel). The fixture's US01.adm
+# authors RESET, the idle and the emplaced rows.
+func _install_people_table(sim: Simulation) -> void:
+	assert_gt(sim.set_infantry_anim_map(_anim_root(), "US01.adm"), 0,
+			"the people's table registers its clips")
+
+
 func _aimed_shot_available(sim: Simulation) -> bool:
 	return sim.get_local_player_weapon_state().aimed_shot_available
 
@@ -422,6 +431,7 @@ func test_local_round_damages_enemy_mounted_on_rotated_emplaced_gun() -> void:
 			"id 101294", "id 101294\n  graphic mount"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
+	_install_people_table(sim)
 	sim.resolve_item_traits(item_db)
 	assert_gte(sim.resolve_collision_instances(item_db), 2,
 			"precondition: both enemies use authored posed COBJ collision")
@@ -577,6 +587,7 @@ func test_mounted_rendered_head_matrix_matches_collision_and_authoritative_shot(
 			"id 101294", "id 101294\n  graphic mount\n  phrase_set 6"))
 	_install_native_seat_table(sim, dir, item_db, PackedInt32Array([1294]))
 	assert_true(sim.load_from_mission_data(md))
+	_install_people_table(sim)
 	sim.resolve_item_traits(item_db)
 	# The render-side witness model keeps its own rig objects; the sim no
 	# longer reads them (native-only pose sources).

@@ -239,7 +239,11 @@ void configured_fallback(Assets &assets) {
 	h.boot(true, true, "soldier.adm");
 	CHECK(h.player_adm() != 0);
 	CHECK(strutil::iequals(h.kernel->root_motion.adm_name(h.player_adm()), "US01.adm"));
-	for (uint16_t type : {43, 44, 45, 46}) CHECK(h.kernel->adm_id_for_runtime_type(type) == 0);
+	// A table the load cannot open (missing.adm with no default.adm, unusable.adm)
+	// takes the configured map; an item naming none (types 43, 46) registers none
+	// [orig: Entity_SpawnFromItemDef @0x452571, the empty animDef skips the load].
+	for (uint16_t type : {44, 45}) CHECK(h.kernel->adm_id_for_runtime_type(type) == 0);
+	for (uint16_t type : {43, 46}) CHECK(h.kernel->adm_id_for_runtime_type(type) == -1);
 	CHECK(h.kernel->install_infantry_anim("soldier.adm") > 0);
 	CHECK(h.kernel->install_infantry_anim(mission::kDefaultInfantryAdm) == 0);
 	CHECK(h.kernel->world.ai.root_motion != nullptr);
