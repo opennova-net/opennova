@@ -200,9 +200,10 @@ public:
 	// The .adm registry id a decoded Player/Infantry row of `type_id` grounds
 	// on (items.def anim_def through the infantry adm index) — the replication twin
 	// of resolve_new_infantry_adm_ids (AnimMap_RegisterEntity's spawn half
-	// [orig: @0x40bb60]); -1 = the item names no table (an empty anim_def: no
-	// channel, as the game's registrars skip it), or neither a model map nor
-	// the configured default is available (the row stays chase-only). Cached
+	// [orig: @0x40bb60]); -1 = no channel: the item names no table (an empty
+	// anim_def, which the game's registrars skip), its table opened without a
+	// RESET row (the registration frees the channel), or neither a model map
+	// nor the configured default is available (the row stays chase-only). Cached
 	// per type so late-joining peers and respawns cost one map lookup; -2
 	// before the infantry sources are armed (rearm_infantry_adm) so nothing
 	// is stamped early.
