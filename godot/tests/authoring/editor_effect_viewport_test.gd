@@ -5,7 +5,8 @@ extends GutTest
 ## the preview clock), and its device draws that scene through the game's particle renderer
 ## (authoring/preview_effects) in an offscreen SubViewport, the graphic read from the project's files; the
 ## renderer compiles the live particles into its draw list; the viewport's camera and grid reach the
-## device at the next pump; another effect of the file shown is a scene anew on the same device.
+## device at the next pump, the grid in the opaque pass under the particles; another effect of the file shown is a
+## scene anew on the same device.
 
 const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const PreviewBackgroundChecks := preload("res://tests/authoring/preview_background_checks.gd")
@@ -98,6 +99,13 @@ func test_an_open_particle_file_plays_through_the_particle_renderer() -> void:
 	var grid := _grid()
 	assert_not_null(grid)
 	assert_true(grid.visible, "the grid shows by default")
+	# The grid in the scene's opaque pass (no transparency, its depth written): the particle renderer's passes run
+	# after it, so the particles in front of a line draw over it rather than under it.
+	var grid_material := grid.mesh.surface_get_material(0) as BaseMaterial3D if grid.mesh != null else null
+	assert_not_null(grid_material, "the grid's material")
+	if grid_material != null:
+		assert_eq(grid_material.transparency, BaseMaterial3D.TRANSPARENCY_DISABLED, "the grid drawn opaque, under the particles")
+		assert_eq(grid_material.depth_draw_mode, BaseMaterial3D.DEPTH_DRAW_OPAQUE_ONLY, "its depth written")
 	assert_true(_seam.done({"kind": "set_viewport", "path": PTL,
 			"viewport": {"kind": "effect", "options": {"grid": false}, "camera": {"distance": 3.0, "target": [0, 0, 0]}}}))
 	_app.pump()

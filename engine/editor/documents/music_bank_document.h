@@ -22,7 +22,8 @@ namespace opennova::editor {
 // order, each its name, its block size and its chunks of byte-paired stereo at 22050 a second. The music script
 // beside it plays a stream by its place in that order [orig: AudioVM_Op_Play @ 0x672CB0; AudioVM_StartSound @
 // 0x671ff0], so a stream moved or removed changes what the script plays. Every shipped bank reads into the
-// document and writes back byte for byte (the chunks' audio areas held as the bank's encoder left them).
+// document and writes back byte for byte (the chunks' audio areas held as the bank's encoder left them). A stream's
+// audio is made from a wave (MusicStreamAudioEdit, the music_stream_audio request), one undo step.
 
 enum class MusicBankKind : NodeKind { Bank = 0, Stream = 1 };
 constexpr NodeKind node_kind(MusicBankKind kind) { return static_cast<NodeKind>(kind); }
@@ -51,6 +52,14 @@ struct MusicBankRow : TableRow {
 
 const RecordTable &music_bank_table();
 
+// A stream's audio a music bank takes as one edit (an Apply edit's payload, "music_bank.stream_audio", on a stream's
+// address): its new chunks, made from a wave (music_stream_audio_from_wave), and what they were made from in words.
+struct MusicStreamAudioEdit final : EditPayload {
+	std::shared_ptr<const std::vector<sbf::SbfChunk>> chunks;
+	std::string words;
+	const char *token() const override { return "music_bank.stream_audio"; }
+};
+
 class MusicBankDocument : public TableDocument {
 public:
 	const RecordTable &table() const override { return music_bank_table(); }
@@ -75,7 +84,31 @@ protected:
 	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id, const std::vector<std::shared_ptr<const Node>> &rows,
 	                                std::string &error) override;
 	bool accept_step(const EditStep &step, const StagedRows &rows, StepRefusal &refusal) const override;
+	// A MusicStreamAudioEdit on a stream: its chunks replaced by the payload's (shared, never copied); the same audio
+	// changes nothing.
+	bool apply_payload(Node &row, const NodeAddress &address, const EditPayload &payload,
+	                   std::shared_ptr<const FileState> &state, const IdAllocator &allocate, bool &changed,
+	                   std::string &error) override;
 };
+
+// A wave's audio as a stream's chunks (the music_stream_audio request): its samples made byte-paired stereo at 22050 a
+// second as the stream plays them (lwf::wave_stereo_pcm16: one channel on both sides, two kept, another rate
+// resampled as the wave importer resamples), the wave's full scale the stream's (an offset byte's whole range at
+// shift 0, which the decoder sounds at half the 16-bit range), encoded chunk by chunk (sbf::sbf_encode_stream).
+// `out.words` says what it was made from ("tone.wav (16-bit PCM, mono, 44100 Hz: the channel on both sides, resampled to 22050 Hz),
+// 2.0 s"). False, with `why`, for a wave that does not read, holds no sample, or has more than two channels.
+bool music_stream_audio_from_wave(const std::string &wave_name, const std::vector<uint8_t> &wave, MusicStreamAudioEdit &out,
+                                  std::string &why);
+
+// A new stream's name from the wave it is made from: the file's stem upper case, what is not plain ASCII an
+// underscore, its first 16 characters (the index's slot).
+std::string music_stream_name_of(const std::string &wave_name);
+
+// The batch that gives a stream `audio`, one undo step: an Apply on the stream at `place`; or, `place` -1, a new
+// stream added at the end of the bank and its audio set on what the Add made (batch_made). `name` (not empty): the
+// stream's name set in the same step.
+std::vector<Edit> music_stream_audio_edits(const MusicBankDocument &bank, int place, const std::string &name,
+                                           std::shared_ptr<const MusicStreamAudioEdit> audio);
 
 // The stream at `place` of the bank `bytes` hold as the preview player sounds it: its chunks decoded (each byte a
 // sample at its channel's shift, left and right in turn [orig: AudioChannel_ComputeMixCoefficients @ 0x7BD4B0;

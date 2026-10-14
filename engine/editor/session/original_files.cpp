@@ -41,28 +41,6 @@ std::string without_numbers(const std::string &text) {
 	return out;
 }
 
-// The game install's files as the project imports them (assets/install_view.h: as the game is served
-// them, with `/exp` for a project that builds on an installed expansion and under the project's names
-// for one that builds as an expansion), by logical name.
-class InstallFiles final : public FileSource {
-public:
-	explicit InstallFiles(std::unique_ptr<InstallView> view) : view_(std::move(view)) {}
-	bool read(const std::string &name, std::vector<uint8_t> &out) const override {
-		const InstallFile *file = view_->find(name);
-		return file && view_->read(*file, out);
-	}
-	uint64_t stamp(const std::string &name) const override { return view_->find(name) ? 1 : 0; }
-	// A file's size as stored, without reading it; 0 when it cannot be told.
-	uint64_t size_of(const std::string &name) const {
-		const InstallFile *file = view_->find(name);
-		return file ? view_->size(*file) : 0;
-	}
-	const InstallView &view() const { return *view_; }
-
-private:
-	std::unique_ptr<InstallView> view_;
-};
-
 } // namespace
 
 std::string original_finding_key(const Diagnostic &d) {
@@ -91,7 +69,10 @@ std::string original_finding_key(const Diagnostic &d) {
 // and project checks (nothing of the session's), its steps' time.
 struct OriginalFiles::Run {
 	std::shared_ptr<const ProjectDocument> document;
-	std::shared_ptr<InstallFiles> files;
+	// The game install's files as the project imports them (assets/install_view.h: as the game is served them, with
+	// `/exp` for a project that builds on an installed expansion and under the project's names for one that builds as
+	// an expansion), by logical name.
+	std::shared_ptr<InstallFileSource> files;
 	ProjectPaths paths;
 	std::vector<std::string> names; // the install's files as the game serves them
 	size_t scanned = 0;              // of those, typed into the scan
@@ -185,7 +166,7 @@ bool OriginalFiles::step(uint64_t bytes) {
 			publish(std::move(none));
 			return true;
 		}
-		run_->files = std::make_shared<InstallFiles>(std::move(game));
+		run_->files = std::make_shared<InstallFileSource>(std::move(game));
 		run_->paths = ProjectPaths::for_root(install_);
 		run_->paths.files = run_->files;
 		for (const InstallFile &file : run_->files->view().files()) run_->names.push_back(file.name);

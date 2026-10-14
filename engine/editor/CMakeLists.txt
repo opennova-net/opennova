@@ -122,6 +122,7 @@ add_library(opennova_editor STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/music_script_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/credits_type.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/particle_type.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/documents/particle_token_slots.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/particle_keys.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/document_types.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/documents/project_checks.cpp

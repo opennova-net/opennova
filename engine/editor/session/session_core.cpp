@@ -16,6 +16,7 @@
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/install_check.h>
+#include <editor/assets/install_view.h>
 #include <editor/assets/project_scan.h>
 #include <editor/blank/create_missing.h>
 #include <editor/documents/document_types.h>
@@ -457,6 +458,7 @@ OperationOutcome SessionCore::absorb_open(OpenOperation &open) {
 	view_.activity.runtime_executable = play().resolve_runtime_executable();
 	imports().set_install_files(std::move(open.install_files()), std::move(open.base_files()));
 	problems().set_base_layer(open.take_base_layer()); // an expansion's base game under the graph
+	problems().set_base_files(base_game_files(base_game(), *view_.project.document)); // and under its files
 	read_install_expansions(); // the project's install's, before its requirements weigh them
 	absorb_refresh(open.refresh());
 	restore_workspace(); // the documents it was left with (the UX round's project lane)

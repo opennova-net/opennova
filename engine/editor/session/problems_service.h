@@ -122,6 +122,9 @@ public:
 	void set_open(const std::vector<std::shared_ptr<const DocumentBase>> &documents) {
 		assets_->set_open(documents);
 	}
+	// An expansion's base game under the project's files (ProjectAssetSource::set_base; null for none): what the
+	// previews, the terrain tools' reads and the project checks read of a name the project lacks, as the game does.
+	void set_base_files(std::shared_ptr<const FileSource> files) { assets_->set_base(std::move(files)); }
 	// The last build's own findings, Problems rows until the next build starts or the project closes.
 	void set_build_findings(std::vector<Diagnostic> findings) { build_findings_ = std::move(findings); }
 	void clear_build_findings() { build_findings_.clear(); }

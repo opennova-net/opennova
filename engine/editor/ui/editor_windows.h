@@ -187,6 +187,11 @@ private:
 	// The texture a Replace with image... pick is for (S18), and the files the OS dropped, held for the
 	// item they land on (drop_files) for `frames` more end_frames.
 	std::string replace_target_;
+	// The music bank stream a ...from a wave pick is for: its bank, and its place ("" a new stream at the end).
+	struct StreamPick {
+		std::string bank, place;
+	};
+	StreamPick stream_pick_;
 	int brought_ = 0; // the HeldModal last brought forward (bring_modal_forward)
 	struct Dropped {
 		std::vector<std::string> paths;

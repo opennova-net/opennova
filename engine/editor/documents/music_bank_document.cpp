@@ -2,13 +2,17 @@
 // through the engine's reader and its save through the engine's writer from the row alone, and its findings.
 #include "music_bank_document.h"
 
+#include <cctype>
 #include <cmath>
+#include <cstdio>
 
 #include <base/io/fixed.h>
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
 #include <editor/model/staged_rows.h>
+#include <editor/project/project_files.h>
+#include <formats/lwf/wav_source.h>
 
 namespace opennova::editor {
 
@@ -179,7 +183,8 @@ MusicBankRow::MusicBankRow() { kind = kBank; }
 
 RecordHandle MusicBankRow::record() const { return {kBank, const_cast<MusicBankRow *>(this)}; }
 
-// The chunks are shared and never edited: a step holds them once, so they count for nothing here.
+// The chunks are shared from one version of the row to the next and never edited in place (a stream's new audio
+// replaces its chunks whole, MusicStreamAudioEdit): a step holds them once, so they count for nothing here.
 size_t MusicBankRow::footprint() const {
 	size_t bytes = sizeof(*this) + footprint_of(streams) + ids_footprint();
 	for (const MusicBankStream &stream : streams) bytes += footprint_of(stream.name);
@@ -314,6 +319,112 @@ bool MusicBankDocument::accept_step(const EditStep &, const StagedRows &staged, 
 	if (staged.rows().size() == 1) return true;
 	refusal.message = "A music bank keeps its one row.";
 	return false;
+}
+
+namespace {
+
+bool same_audio(const std::vector<SbfChunk> &a, const std::vector<SbfChunk> &b) {
+	if (a.size() != b.size()) return false;
+	for (size_t i = 0; i < a.size(); ++i)
+		if (a[i].scale_a != b[i].scale_a || a[i].scale_b != b[i].scale_b || a[i].audio != b[i].audio) return false;
+	return true;
+}
+
+} // namespace
+
+bool MusicBankDocument::apply_payload(Node &row, const NodeAddress &address, const EditPayload &payload,
+                                      std::shared_ptr<const FileState> &, const IdAllocator &, bool &changed,
+                                      std::string &error) {
+	const auto *audio = dynamic_cast<const MusicStreamAudioEdit *>(&payload);
+	if (!audio || !audio->chunks) {
+		error = "A music bank takes a stream's audio, and nothing else, as a change of its own.";
+		return false;
+	}
+	if (row.kind != kBank || address.kind != kStream || !address.child) {
+		error = "A stream's audio is set on a stream.";
+		return false;
+	}
+	MusicBankRow &bank = static_cast<MusicBankRow &>(row);
+	const size_t place = stream_place(bank, address.child);
+	if (place >= bank.streams.size()) {
+		error = "The stream no longer exists.";
+		return false;
+	}
+	MusicBankStream &stream = bank.streams[place];
+	changed = !stream.chunks || (stream.chunks != audio->chunks && !same_audio(*stream.chunks, *audio->chunks));
+	if (changed) stream.chunks = audio->chunks;
+	return true;
+}
+
+bool music_stream_audio_from_wave(const std::string &wave_name, const std::vector<uint8_t> &wave, MusicStreamAudioEdit &out,
+                                  std::string &why) {
+	// The wave's full scale is the stream's: an offset byte's 127 steps at shift 0, which the decoder sounds at
+	// +-127 * 128 (sbf_decode_sample: half the 16-bit range), so a wave at full scale streams at the loudest a stream
+	// plays, never clipped.
+	constexpr float kStreamFullScale = float(127 * 128) / 32767.0f;
+	std::vector<int16_t> pcm;
+	lwf::WaveFormat format;
+	if (!lwf::wave_stereo_pcm16(wave, SBF_SAMPLE_RATE, kStreamFullScale, pcm, why, &format)) return false;
+	const SbfStream stream = sbf_encode_stream(std::string(), pcm.data(), pcm.size());
+	out.chunks = std::make_shared<const std::vector<SbfChunk>>(stream.chunks);
+	// What was made of it: its channels and its rate as the stream plays them.
+	std::string made;
+	if (format.channels == 1) made = "the channel on both sides";
+	if (format.rate != uint32_t(SBF_SAMPLE_RATE))
+		made += (made.empty() ? "" : ", ") + std::string("resampled to ") + std::to_string(SBF_SAMPLE_RATE) + " Hz";
+	char seconds[32];
+	std::snprintf(seconds, sizeof(seconds), "%.1f s", double(pcm.size() / SBF_CHANNELS) / double(SBF_SAMPLE_RATE));
+	out.words = basename_of(wave_name) + " (" + lwf::wave_format_words(format) + (made.empty() ? "" : ": " + made) + "), " +
+	            seconds;
+	return true;
+}
+
+std::string music_stream_name_of(const std::string &wave_name) {
+	std::string stem = basename_of(wave_name);
+	const size_t dot = stem.find_last_of('.');
+	if (dot != std::string::npos && dot > 0) stem.resize(dot);
+	std::string name;
+	for (const unsigned char c : stem) {
+		if (name.size() == SBF_STREAM_NAME_MAX) break;
+		name.push_back(c < 0x20 || c > 0x7E ? '_' : char(std::toupper(c)));
+	}
+	return name;
+}
+
+std::vector<Edit> music_stream_audio_edits(const MusicBankDocument &bank, int place, const std::string &name,
+                                           std::shared_ptr<const MusicStreamAudioEdit> audio) {
+	std::vector<Edit> edits;
+	const MusicBankRow *row = bank.bank_row();
+	if (!row) return edits;
+	NodeAddress stream{row->id, kStream, 0};
+	if (place < 0) {
+		// A new stream at the end, named in its Add; its audio set on what the Add made.
+		Edit add;
+		add.operation = EditOperation::Add;
+		add.address = stream;
+		if (!name.empty()) {
+			add.field = "name";
+			add.value = name;
+		}
+		edits.push_back(std::move(add));
+		stream.child = batch_made(0);
+	} else {
+		if (row->ids.lists.empty() || size_t(place) >= row->ids.lists[0].size()) return {};
+		stream.child = row->ids.lists[0][size_t(place)].id;
+		if (!name.empty()) {
+			Edit rename;
+			rename.address = stream;
+			rename.field = "name";
+			rename.value = name;
+			edits.push_back(std::move(rename));
+		}
+	}
+	Edit apply;
+	apply.operation = EditOperation::Apply;
+	apply.address = stream;
+	apply.payload = std::move(audio);
+	edits.push_back(std::move(apply));
+	return edits;
 }
 
 // --- the findings ------------------------------------------------------------------------------------

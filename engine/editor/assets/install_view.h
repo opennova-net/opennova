@@ -2,9 +2,12 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
+#include <base/vfs/file_source.h>
 #include <base/vfs/vfs.h>
 #include <editor/assets/import_choice.h>
 #include <editor/project/project_document.h>
@@ -93,5 +96,30 @@ private:
 // The import choice of an install's file (ImportChoice::install): the member it is served by, and the
 // name the project gets where it differs (ImportChoice::as).
 ImportChoice install_choice(const std::string &root, const InstallFile &file);
+
+// An install's files as a FileSource, by the name the project gets (a path names its file by its last part): what
+// the fold of the game's own data validates (session/original_files), and an expansion project's base game under its
+// files (base_game_files). A file's stamp is fixed while the view is: the install does not change under the editor.
+// Its reads are taken one at a time (the mount holds its archives open, and a device may read beside the session).
+class InstallFileSource final : public FileSource {
+public:
+	explicit InstallFileSource(std::unique_ptr<InstallView> view) : view_(std::move(view)) {}
+	bool read(const std::string &name, std::vector<uint8_t> &out) const override;
+	uint64_t stamp(const std::string &name) const override;
+	// A file's size as stored, without reading it; 0 when it cannot be told.
+	uint64_t size_of(const std::string &name) const;
+	const InstallView &view() const { return *view_; }
+
+private:
+	const InstallFile *find_(const std::string &name) const;
+	std::unique_ptr<InstallView> view_;
+	mutable std::mutex reading_;
+};
+
+// An expansion project's base game as the game mounts it below the expansion's pair [orig: PFF_OpenAllArchives @
+// 0x4a4310, slots 2..4] (base_install_spec over `base`, SessionCore::base_game(): the install's base game, or the
+// base game's project's export), the files the project's own are read over (ProjectAssetSource::set_base); null for a
+// standalone project, and where the base does not mount.
+std::shared_ptr<const InstallFileSource> base_game_files(const std::string &base, const ProjectDocument &document);
 
 } // namespace opennova::editor

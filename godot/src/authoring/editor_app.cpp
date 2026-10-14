@@ -625,6 +625,10 @@ void EditorApp::show_picker(PickPurpose p_purpose, bool p_directory) {
 			picker_->set_title("Replace the texture with an image");
 			filters.push_back("*.png, *.tga, *.pcx ; Images");
 			break;
+		case PickPurpose::MusicStreamWave:
+			picker_->set_title("Make the music stream from a wave");
+			filters.push_back("*.wav ; Waves");
+			break;
 		case PickPurpose::None:
 			break;
 	}

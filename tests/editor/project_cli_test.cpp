@@ -372,6 +372,31 @@ static int test_imports() {
 	return 0;
 }
 
+// An image of the project's own tree imported with the project named "." (the command run in the project's folder):
+// the dry run's destination is where the import writes it (the file's own place, never the project's top), and the
+// command's exit says the import went through.
+static int test_import_inside_the_project() {
+	test_temp::TempDir dir("opennova_editor_project_cli_inside");
+	const std::string root = dir.file("Inside");
+	const std::string capture = dir.file("capture.txt");
+	std::string text;
+	TEST_EXPECT(run({"new", root}) == 0);
+	TEST_EXPECT(test_io::write_file(root + "/art/x/src/y.png", test_png::gradient_png(4, 4, 7)));
+	std::error_code ec;
+	const fs::path was = fs::current_path(ec);
+	fs::current_path(fs::u8path(root), ec);
+	TEST_EXPECT(!ec);
+	const int dry = run_capture(capture, {"import", ".", "art/x/src/y.png", "--replace", "--dry-run", "--rows"}, text);
+	const bool planned_in_place = text.find("-> art/x/src/y.png") != std::string::npos;
+	const int real = run_capture(capture, {"import", ".", "art/x/src/y.png", "--replace"}, text);
+	const bool imported_in_place = text.find("imported art/x/src/y.png\n") != std::string::npos;
+	fs::current_path(was, ec);
+	TEST_EXPECT(dry == 0 && planned_in_place);
+	TEST_EXPECT(real == 0 && imported_in_place);
+	TEST_EXPECT(!fs::exists(fs::u8path(root + "/y.png")) && fs::is_regular_file(fs::u8path(root + "/art/x/src/y.png.import")));
+	return 0;
+}
+
 // import --with-dependencies copies the files a source needs, found beside it, and names the
 // ones found nowhere; --dry-run prints the plan (each file taken, where it goes, what wanted
 // it, where it comes from; what is not found; what is not followed) and writes nothing;
@@ -777,6 +802,7 @@ int main() {
 	failures += test_one_game_install();
 	failures += test_older_local_settings();
 	failures += test_imports();
+	failures += test_import_inside_the_project();
 	failures += test_import_with_dependencies();
 	failures += test_dry_run_writes_nothing();
 	failures += test_scene_textures();
