@@ -16,7 +16,6 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
-#include <thread>
 #include <vector>
 
 #ifdef _WIN32
@@ -1031,8 +1030,11 @@ static int test_export() {
 	// Again over its own export: what the person added there kept (and said), a file of the export they
 	// changed replaced by the build's (and said), the record naming the export's own files alone.
 	TEST_EXPECT(editor_test::write_text(request.export_dir + "/notes.txt", "mine"));
-	std::this_thread::sleep_for(std::chrono::milliseconds(20)); // a last write after the record's
 	TEST_EXPECT(editor_test::write_text(request.export_dir + "/intro.bik", "changed"));
+	// Its last write after the record's, set two seconds past it (a coarse-stamp file system keeps two).
+	const fs::file_time_type recorded = fs::last_write_time(request.export_dir + "/" + kExportRecordFileName, ec);
+	fs::last_write_time(request.export_dir + "/intro.bik", recorded + std::chrono::seconds(2), ec);
+	TEST_EXPECT(!ec);
 	shipped = export_build(request);
 	std::vector<std::string> with_notes = expected;
 	with_notes.push_back("notes.txt");
