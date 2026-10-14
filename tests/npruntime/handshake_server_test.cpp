@@ -3243,8 +3243,10 @@ bool run_lineup_joiner_past_the_rows_is_held_not_dropped() {
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 			kHostKey, nullptr, settings);
 	ctx.world = &world;
+	// A SCRK a stock client can send: the 0x42's SCRK lands in a 64-byte buffer, 63 characters
+	// [orig: NapiNPProtocol_HandleClientJoin - SCRK's `push 40h` @0x62BC40, the copy @0x62BC4B].
 	const std::string client_scrk =
-			"QUEUEDJOINERSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
+			"QUEUEDJOINSCRK0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789AB";
 	const PeerAddr first_peer{0x0100007Fu, 32401};
 	const PeerAddr second_peer{0x0100007Fu, 32402};
 	std::string first_scrk;
