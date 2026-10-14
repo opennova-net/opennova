@@ -557,9 +557,14 @@ void test_cycle() {
 void test_defaults() {
     // The static single-player page blob the double-NUL copy takes whole
     // [orig: 0x833BF8 @ 0x5246be].
-    auto def = weapon_kit_default();
+    auto def = weapon_kit_default(opennova::gameprofile::GAME_JO);
     CHECK(def.size() == 8 && def[0].name == "WPN_M4AUTO" && def[1].name == "WPN_M4" &&
-          def[7].name == "WPN_KNIFE");
+          def[2].name == "WPN_colt45" && def[7].name == "WPN_KNIFE");
+    // dfx2.exe's page names WPN_MK23 where JO's names WPN_colt45
+    // [orig: the page at 0x832368 @0x52188f (dfx2.exe)].
+    auto dfx2 = weapon_kit_default(opennova::gameprofile::GAME_DFX2);
+    CHECK(dfx2.size() == 8 && dfx2[0].name == "WPN_M4AUTO" && dfx2[1].name == "WPN_M4" &&
+          dfx2[2].name == "WPN_MK23" && dfx2[3].name == "WPN_AT4" && dfx2[7].name == "WPN_KNIFE");
     CHECK(def[3].name == "WPN_AT4" && def[3].ammo_primary == -1 && def[3].flags == -1);
     auto knife = weapon_kit_knife_fallback();
     CHECK(knife.size() == 1 && knife[0].name == "WPN_KNIFE");

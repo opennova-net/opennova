@@ -79,11 +79,13 @@ struct WeaponKitEntry {
     int32_t flags = -1;
 };
 
-// The engine defaults: the profile-less spawn kit (the static single-player page
-// blob, playersav::default_single_player_page) and the everything-filtered
-// fallback [orig: the page at 0x833BF8 @ 0x5246be/@ 0x5519e4; the {"WPN_KNIFE",
-// "-1","-1","-1"} synthesis @ 0x40f899].
-std::vector<WeaponKitEntry> weapon_kit_default();
+// The engine defaults: the profile-less spawn kit, the static single-player page
+// blob `title` (gameprofile::GameId) compiles in (Jointops.exe's is
+// playersav::default_single_player_page; dfx2.exe's names WPN_MK23 for
+// WPN_colt45), and the everything-filtered fallback [orig: the page at 0x833BF8
+// @ 0x5246be/@ 0x5519e4; the {"WPN_KNIFE", "-1","-1","-1"} synthesis @ 0x40f899]
+// [orig: the page at 0x832368 @0x52188f/@0x54ec2a (dfx2.exe)].
+std::vector<WeaponKitEntry> weapon_kit_default(int title);
 std::vector<WeaponKitEntry> weapon_kit_knife_fallback();
 
 // The SP mission-load filter [orig: Mission_LoadBMSFile @ 0x40f7ae..0x40f95c]: keep

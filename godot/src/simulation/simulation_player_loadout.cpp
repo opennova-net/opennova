@@ -496,7 +496,7 @@ Ref<PlayerInventory> Simulation::get_local_player_inventory() const {
 TypedArray<WeaponKitEntry> Simulation::get_local_player_loadout() const {
 	TypedArray<WeaponKitEntry> out;
 	const std::vector<opennova::world::WeaponKitEntry> kit =
-			kernel_->local.loadout.spawn_kit_set ? kernel_->local.loadout.spawn_kit : opennova::world::weapon_kit_default();
+			kernel_->local.loadout.spawn_kit_set ? kernel_->local.loadout.spawn_kit : opennova::world::weapon_kit_default(kernel_->world.rules.title);
 	for (const opennova::world::WeaponKitEntry &entry : kit) {
 		Ref<WeaponKitEntry> row;
 		row.instantiate();

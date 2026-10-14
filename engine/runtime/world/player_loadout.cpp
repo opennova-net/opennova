@@ -85,7 +85,7 @@ void local_loadout_sync_damage_classes(World &world,
     if (e == nullptr) return;
     e->ammo_damage_class.assign(world.tables.ammo.entries.size(), 0);
     const std::vector<WeaponKitEntry> kit =
-            loadout.spawn_kit_set ? loadout.spawn_kit : weapon_kit_default();
+            loadout.spawn_kit_set ? loadout.spawn_kit : weapon_kit_default(world.rules.title);
     weapon_kit_build_damage_classes(kit, world.tables.weapons,
             world.tables.ammo.entries.size(), e->ammo_damage_class);
 }
@@ -100,7 +100,7 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     local_loadout_sync_damage_classes(world, loadout);
     if (table.empty()) return;
     const std::vector<WeaponKitEntry> kit =
-            loadout.spawn_kit_set ? loadout.spawn_kit : weapon_kit_default();
+            loadout.spawn_kit_set ? loadout.spawn_kit : weapon_kit_default(world.rules.title);
     inventory.reset(table);
     const std::vector<std::string> display =
             weapon_kit_expand_display_list(kit, table);

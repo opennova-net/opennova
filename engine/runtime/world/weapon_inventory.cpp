@@ -5,6 +5,7 @@
 
 #include <cstdio>
 
+#include <base/gameprofile/gameprofile.h>
 #include <base/io/strutil.h>
 #include <formats/playersav/weapon_sav.h>
 
@@ -100,12 +101,21 @@ void weapon_availability_apply_pairs(
     }
 }
 
-std::vector<WeaponKitEntry> weapon_kit_default() {
+std::vector<WeaponKitEntry> weapon_kit_default(int title) {
     // [orig: Buffer_CopyUntilDoubleNull(restrictionData, 0x833BF8, 2048)
     //  @ 0x5246be / @ 0x5519e4 — the profile-less spawn kit: the whole static
     //  page blob (eight "<name> -1 -1 -1" rows) the double-NUL copy takes, the
     //  page a fresh profile's single-player page is seeded from]
     std::vector<WeaponKitEntry> kit;
+    if (title == gameprofile::GAME_DFX2) {
+        // dfx2.exe compiles in its own page, WPN_MK23 where Jointops.exe's names
+        // WPN_colt45 [orig: Buffer_CopyUntilDoubleNull(restrictionData, 0x832368,
+        //  2048) @0x52188f / @0x54ec2a, the profile's copy @0x548f67 (dfx2.exe)]
+        for (const char *name : {"WPN_M4AUTO", "WPN_M4", "WPN_MK23", "WPN_AT4",
+                 "WPN_GRENADEFB", "WPN_GRENADEHE", "WPN_GRENADESM", "WPN_KNIFE"})
+            kit.push_back(WeaponKitEntry{name, -1, -1, -1});
+        return kit;
+    }
     for (const playersav::KitEntry &e : playersav::default_single_player_page().entries)
         kit.push_back(WeaponKitEntry{e.name, e.ammo_primary, e.ammo_secondary, e.flags});
     return kit;

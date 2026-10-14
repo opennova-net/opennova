@@ -154,7 +154,7 @@ void build_joiner_loadout_kit(const world::World &world,
 	{
 		const std::vector<world::WeaponKitEntry> &resident =
 				loadout.spawn_kit_set ? loadout.spawn_kit
-				                      : world::weapon_kit_default();
+				                      : world::weapon_kit_default(world.rules.title);
 		for (const world::WeaponKitEntry &entry : resident) {
 			const int adm = world.tables.weapons.index_of(entry.name.c_str());
 			if (adm < 0) continue; // [orig: the AvatarDef_FindByName gate @0x42cf0b]
