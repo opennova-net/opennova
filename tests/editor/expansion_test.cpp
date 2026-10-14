@@ -836,7 +836,10 @@ static int test_override_table() {
 	                                                   { "Client", { "STRCLI01" } } })) &&
 	            test_io::write_file(root + "/gametext.bin",
 	                                     table_bytes({ { "WepDes", { "WEP_OVER", "WEP_BASE" } },
-	                                                   { "Client", { "STRCLI01", "STRCLI04" } } })));
+	                                                   { "Client", { "STRCLI01", "STRCLI04" } },
+	                                                   { "Keys", { "Ctrl-" } } })) &&
+	            test_io::write_file(root + "/keyhelp.bin",
+	                                     table_bytes({ { "Keys", { "Ctrl-" } }, { "Text", { "CAMERA" } } })));
 	editor_test::handle_to_end(session, request::rescan());
 	const auto found_in = [&](const char *key, const char *scope, const char *table) {
 		std::string file;
@@ -872,6 +875,13 @@ static int test_override_table() {
 	};
 	TEST_EXPECT(reads("GAMETEXT.BIN", "KeyPress", "STRKEYPRESS_YES") == 1 && reads("GAMETEXT.BIN", "item", "text_default") == 1 &&
 	            reads("GAME.BIN", "Menu", "CHARCLASS_ENGINEER") >= 1 && reads("GAMEERR.BIN", "MP Errors", "ERR5") >= 1);
+	// The key-help getter reads keyhelp.bin, gating on gametext.bin's table alone [orig: KeyHelp_GetStringWithFallback
+	// @ 0x51ED40, g_TextKeyHelp @ 0x51ED65]: its Keys and Text reads are keyhelp.bin's, never gametext.bin's, and a
+	// string of the name in gametext.bin is read by none of them.
+	TEST_EXPECT(reads("KEYHELP.BIN", "Keys", "Ctrl-") == 2 && reads("KEYHELP.BIN", "Text", "CAMERA") == 1 &&
+	            reads("GAMETEXT.BIN", "Keys", "Ctrl-") == 0 && reads("GAMETEXT.BIN", "Text", "CAMERA") == 0);
+	TEST_EXPECT(code_reads("Ctrl-", "keyhelp.bin") == 2 && code_reads("CAMERA", "keyhelp.bin") == 1 &&
+	            code_reads("Ctrl-", "gametext.bin") == 0);
 	// The name changed: the table of the new name is the one read first.
 	ProjectSettingsChange renamed;
 	renamed.expansion = "jxk";
