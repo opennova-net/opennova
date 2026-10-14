@@ -6,9 +6,11 @@
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 namespace opennova::devtools {
 namespace {
@@ -30,12 +32,16 @@ constexpr float kMaxZoom = 60.0f;
 constexpr float kTraceChannelHeight = 20.0f;
 constexpr int kTraceChannels = 5;
 
-const char *const kActionNames[wa::kCount] = {
-		"IDLE", "EMPTYIDLE", "FIRE", "RECOIL", "RELOAD", "EMPTY",
-		"SWITCHTO", "SWITCHFROM", "SWITCHRANK", "SCOPEUP", "SCOPEDOWN", "OVERHEATED"};
-
+// An action's name as the window shows it: the FSM's own suffix, upper-cased.
 const char *action_name(int id) {
-	return (id >= 0 && id < wa::kCount) ? kActionNames[id] : "?";
+	static const std::array<std::string, wa::kCount> kNames = [] {
+		std::array<std::string, wa::kCount> names;
+		for (int i = 0; i < wa::kCount; ++i) {
+			names[static_cast<size_t>(i)] = strutil::to_upper(world::kWeaponActionSuffixes[i]);
+		}
+		return names;
+	}();
+	return (id >= 0 && id < wa::kCount) ? kNames[static_cast<size_t>(id)].c_str() : "?";
 }
 
 const char *phase_name(uint8_t phase) {
@@ -222,7 +228,7 @@ void WeaponWindow::format_rows() {
 	for (int id = 0; id < wa::kCount; ++id) {
 		const WeaponActionRow &row = definition_.actions[id];
 		RowText &text = texts_[static_cast<size_t>(id)];
-		text.label = kActionNames[id];
+		text.label = action_name(id);
 		if (!definition_.valid) {
 			text.timing.clear();
 			continue;
@@ -579,7 +585,7 @@ void WeaponWindow::draw_dope_sheet(float height) {
 			ImGui::SetTooltip("%s%s\nDELAYSTART %d  (%.0f ms)\nDELAYEND   %d  (%.0f ms)\n"
 							  "clip %s%d ticks\n\ndrag the divider or the right edge to retime\n"
 							  "double-click to frame",
-					kActionNames[id], row.authored ? "" : "  (not authored)", row.delay_start,
+					action_name(id), row.authored ? "" : "  (not authored)", row.delay_start,
 					row.delay_start * kMsPerTick, row.delay_end, row.delay_end * kMsPerTick,
 					row.clip_ticks > 0 ? "" : "unresolved, ", row.clip_ticks);
 		}
@@ -630,7 +636,7 @@ void WeaponWindow::draw_dope_sheet(float height) {
 					if (next_end != row.delay_end) request_delay_edit(id, DelayLeg::End, next_end);
 				}
 				ImGui::SetTooltip("%s  %s\nDELAYSTART %d  (%.0f ms)\nDELAYEND   %d  (%.0f ms)",
-						kActionNames[id], handle == 1 ? "delaystart" : "delayend", next_start,
+						action_name(id), handle == 1 ? "delaystart" : "delayend", next_start,
 						next_start * kMsPerTick, next_end, next_end * kMsPerTick);
 			}
 			if (ImGui::IsItemDeactivated() && drag_action_ == id && drag_handle_ == handle) {
@@ -1095,7 +1101,7 @@ void WeaponWindow::draw_properties() {
 	}
 
 	ImGui::Separator();
-	ImGui::Text("%s", kActionNames[id]);
+	ImGui::Text("%s", action_name(id));
 	ImGui::SameLine();
 	if (row.authored) {
 		ImGui::TextDisabled("authored as \"%s\"", row.authored_name.c_str());

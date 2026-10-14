@@ -1,12 +1,13 @@
 #include <runtime/devtools/log_window.h>
 
 #include <base/io/log_ring.h>
+#include <base/io/strutil.h>
 
 #include <imgui.h>
 
-#include <algorithm>
-#include <cctype>
 #include <cstdio>
+#include <string_view>
+#include <utility>
 
 namespace opennova::devtools {
 
@@ -27,16 +28,6 @@ ImVec4 level_color(LogWindow::Level level) {
 		default:
 			return ImGui::GetStyleColorVec4(ImGuiCol_Text);
 	}
-}
-
-bool contains_ci(const std::string &haystack, const std::string &needle) {
-	if (needle.empty()) return true;
-	const auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(),
-			[](char a, char b) {
-				return std::tolower(static_cast<unsigned char>(a)) ==
-						std::tolower(static_cast<unsigned char>(b));
-			});
-	return it != haystack.end();
 }
 
 }  // namespace
@@ -105,7 +96,8 @@ void LogWindow::set_text_filter(const std::string &filter) {
 }
 
 bool LogWindow::passes(const Row &row) const {
-	return (level_mask_ & (1u << row.level)) != 0 && contains_ci(row.text, text_filter_);
+	return (level_mask_ & (1u << row.level)) != 0 &&
+			strutil::ifind(row.text, text_filter_) != std::string_view::npos;
 }
 
 void LogWindow::refilter() {
