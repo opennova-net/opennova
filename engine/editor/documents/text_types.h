@@ -36,7 +36,7 @@ std::string reader_sentence(std::string message);
 // The text type: the file is its text, but gt.ssc, which the game reads by its name decoded under a
 // key chain [orig: Mission_LoadEncryptedConfig @ 0x4cdcd0]: the document shows the tag decoded and
 // Save writes it back encoded, as the game's own codec does (net/novacrypto/pubcrypto.h,
-// encode_key_chain, kGateTagFile and kGateTagKeys). Every text kind no structured type edits yet is held by it (the deep-integration
+// encode_key_chain and kGateTagFile; the key chain Joint Operations' TitleIdentity::gate_tag_keys). Every text kind no structured type edits yet is held by it (the deep-integration
 // plan's DI-06, "every text file opens in the editor": a configuration, a text, the other defs, a NovaWorld
 // screen; a kind the build leaves out, a mission text, is none of its: every kind a type edits packs,
 // assets/asset_kinds; a kind a structured type edits is that type's, as the environment is the
