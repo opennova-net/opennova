@@ -45,7 +45,6 @@
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/inmatch/server_files.h>
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
@@ -116,8 +115,9 @@ inline constexpr int32_t kChatDisplayStagger = 186;  // [orig: dword_B3FF38 + 18
 inline constexpr int kChatDisplayWidthNoHudDef = 4;
 
 struct ChatDisplayBuffer {
-	// Slot k (1..40) at byte (k - 1) * 128, slot 40 the oldest.
-	std::array<uint8_t, kChatDisplaySlotCount * kChatDisplaySlotBytes> bytes{};
+	// Slot k (1..40) at byte (k - 1) * 128, slot 40 the oldest. Held off the context's own
+	// storage: the 5 KiB would sit inline in every NapiNPServerCtx, which tests keep on the stack.
+	std::vector<uint8_t> bytes = std::vector<uint8_t>(kChatDisplaySlotCount * kChatDisplaySlotBytes, 0);
 };
 // The wrap's font (g_hudLabelFontBold: the bold Arial HUD_InitAllFonts picks by
 // the display's width; null, a font that did not load: no line wraps) and the
