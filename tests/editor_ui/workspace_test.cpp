@@ -8,9 +8,8 @@
 // name each a tab, an inactive tab closed, a view's confirmation outliving its hidden tab
 // and closing with its document, thirty tabs all reachable through the tab list); the
 // welcome view and File > New project...; the project settings over a real session (one
-// Apply for every setting, a write that fails keeping the dialog open on every retry, a
-// partial failure retried against the settings in effect, the dialog closing with its
-// project and a late Browse... dropped); the File, Edit and Build menus; the menu bar's
+// Apply for every setting, a write that fails keeping the dialog open on every retry, the
+// dialog closing with its project and a late Browse... dropped); the File, Edit and Build menus; the menu bar's
 // right end (what the session said, the unsaved files, the counts, the build or the game,
 // the buttons; never over the menus); a canvas whose picture fills it read through ImGui (the
 // right button apart from a press, the keys a camera flies by, a line of text drawn); Files (its folders, the file count, the kind hidden
@@ -760,9 +759,8 @@ void test_welcome_view() {
 // File > Project settings... over a real session: the fields are the dialog's until Apply,
 // which raises one ApplyProjectSettings naming every setting, and the session writes what
 // differs from the settings in effect. A setting it could not write keeps the dialog open
-// saying why, on every Apply that fails again; one it wrote is in effect from then on, so a
-// name changed back after a partial failure is written back (the dialog never compares with
-// what it opened with); once none fails it closes. A Browse... fills the field it asked for.
+// saying why, on every Apply that fails again; once none fails it closes. A Browse... fills the
+// field it asked for.
 // The dialog is its project's: another project opened while it is open closes it, raising
 // nothing, and a Browse... answered after that is dropped. Cancel changes nothing; a source
 // run shows the runtime it drives, no field.
@@ -801,7 +799,9 @@ void test_project_settings() {
 	CHECK(!modal_open("Project settings") && v.activity.status == "No setting changed.", "nothing changed: written nothing, closed");
 
 	// A runtime typed; the editor's settings cannot be written (a folder stands where their
-	// file is written first): the dialog stays, saying why, however often it is applied.
+	// file is written first): the dialog stays, saying why, however often it is applied. What
+	// the session writes then (a partial write, a name changed back written back) is
+	// tests/editor/editor_session_test.cpp test_project_settings's.
 	std::error_code ec;
 	std::filesystem::create_directories(settings_file + ".tmp", ec);
 	CHECK(only_workspace(choose_served(ui, session, "File", {"Project settings..."})) && modal_open("Project settings"),
@@ -815,36 +815,18 @@ void test_project_settings() {
 		requests = serve(ui, session);
 		CHECK(one(requests, EditorRequestKind::ApplyProjectSettings) &&
 						newest_event(v, ViewEventKind::SettingsApplied).tag ==
-								requests[0].settings.serial &&
-						v.project.settings_result.failures.size() == 1 &&
-						v.project.runtime_setting.empty(),
-				"the runtime is not written");
+								requests[0].settings.serial,
+				"the Apply's event carries its serial");
 		CHECK(modal_open("Project settings") && logged_frame(ui).find("cannot create") != std::string::npos,
 		      "the dialog stays open, saying why, on every Apply that fails");
 	}
-	// A new name too: the name is written, the runtime is not. The name changed back is
-	// written back: the name in effect is Harbor now.
-	type_into(ui, item_id(dialog, {"Name"}), "Harbor");
-	ui.activate(item_id(dialog, {"Apply"}));
-	serve(ui, session);
-	ProjectDocument on_disk;
-	Diagnostic error;
-	CHECK(v.project.document->title == "Harbor" && v.project.runtime_setting.empty() && modal_open("Project settings") &&
-	              open_project(armory, on_disk, error) && on_disk.title == "Harbor",
-	      "a partial failure: the name written, the runtime not, the dialog open");
-	type_into(ui, item_id(dialog, {"Name"}), "Armory");
-	ui.activate(item_id(dialog, {"Apply"}));
-	serve(ui, session);
-	CHECK(v.project.document->title == "Armory" && open_project(armory, on_disk, error) && on_disk.title == "Armory" &&
-	              modal_open("Project settings"),
-	      "the name changed back is written back");
-	// The settings writable again: the runtime is written, and the dialog closes.
+	// The settings writable again: the dialog closes.
 	std::filesystem::remove_all(settings_file + ".tmp", ec);
 	ui.activate(item_id(dialog, {"Apply"}));
 	serve(ui, session);
-	CHECK(!modal_open("Project settings") && v.project.runtime_setting == "C:/tools/opennova.exe" && v.project.document->title == "Armory" &&
-	              v.project.settings_result.failures.empty(),
-	      "none failed: done");
+	CHECK(!modal_open("Project settings") && v.project.runtime_setting == "C:/tools/opennova.exe", "none failed: done");
+	ProjectDocument on_disk;
+	Diagnostic error;
 
 	// Browse...: the shell's answer fills the field it asked for (an answer for another field
 	// is dropped), the workspace's.
