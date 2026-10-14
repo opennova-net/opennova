@@ -13,6 +13,8 @@ weapon "WPN_ON_AR15"
 	ammobucket 1
 	loadout_selectable 1
 	round_type AMMO_ON_556
+	loadout_menu_textid WEAP_SHORT_ON_AR15
+	loadout_menu_ttdesc WEAP_DESC_ON_AR15
 	loadout_menu_icon m_onar15.tga
 	animadm on_ar15
 	launchuserpoint bullet
@@ -33,10 +35,10 @@ weapon "WPN_ON_AR15"
 	charfilter gunner
 	teamfilter blue
 	teamfilter red
-	flags auto
-	flags whileswimming
-	flags sighted
-	flags nocardswitch
+	flags Sighted
+	flags Auto
+	flags WhileSwimming
+	flags NoCardSwitch
 	error 0.0165 0.2 0.25 0.0165 0.032 0.047
 	weaponweight 5.5
 	clipweight 1.5
@@ -57,9 +59,13 @@ weapon "WPN_ON_AR15"
 		soundsetend GS_ONAR15
 		delayend 4
 		function wpn_std_fire
+		particle Effect_ONAR15MF
+		particleuserpoint mflash01
 	end
 	action "recoil"
 		function wpn_std_recoil
+		particle Effect_ONAR15Cas
+		particleuserpoint bcasing
 	end
 	action "reload"
 		anim anim_wpn_reload
@@ -91,6 +97,7 @@ weapon "WPN_ON_AR15"
 		function wpn_std_switchrank
 	end
 end
+
 weapon "WPN_ON_PISTOL"
 	clipsize 15
 	startrounds 45
@@ -101,6 +108,8 @@ weapon "WPN_ON_PISTOL"
 	maxclips 3
 	loadout_selectable 1
 	round_type AMMO_ON_9MM
+	loadout_menu_textid WEAP_SHORT_ON_PISTOL
+	loadout_menu_ttdesc WEAP_DESC_ON_PISTOL
 	loadout_menu_icon m_onpist.tga
 	animadm on_pist
 	launchuserpoint bullet
@@ -121,9 +130,9 @@ weapon "WPN_ON_PISTOL"
 	charfilter gunner
 	teamfilter blue
 	teamfilter red
-	flags whileswimming
-	flags sighted
-	flags nocardswitch
+	flags Sighted
+	flags WhileSwimming
+	flags NoCardSwitch
 	error 0.05 0.2 0.25 0.05 0.1 0.15
 	weaponweight 2.5
 	clipweight 1
@@ -144,9 +153,13 @@ weapon "WPN_ON_PISTOL"
 		soundsetend GS_ONPIST
 		delayend 10
 		function wpn_std_fire
+		particle Effect_ONPistMF
+		particleuserpoint mflash01
 	end
 	action "recoil"
 		function wpn_std_recoil
+		particle Effect_ONPistCas
+		particleuserpoint bcasing
 	end
 	action "reload"
 		anim anim_wpn_reload

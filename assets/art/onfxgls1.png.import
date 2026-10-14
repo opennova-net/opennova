@@ -1,0 +1,13 @@
+{
+  "importer": "image",
+  "options": {
+    "format": "tga",
+    "size": "32x32"
+  },
+  "outputs": [
+    "onfxgls1.tga"
+  ],
+  "schema_version": 1,
+  "source_hash": "9e946df6cf92b494",
+  "version": 3
+}
