@@ -107,7 +107,8 @@ opennova_add_editor_test(project_validation MIXED)
 # at a time (progress only rising, finished once, cancelled leaving nothing, the view a run to the
 # end makes), a Save scanning and validating its one file, a stale import refused without writing.
 # Retail leg (OPENNOVA_JO_DIR): a project of the JO install's files opened a step at a time at the
-# editor's budget, its polls and wall time, and the base layer a dependency mount would build.
+# editor's budget, its polls and wall time, and the install as the base layer under an expansion
+# project's graph.
 opennova_add_editor_test(long_operations MIXED)
 
 # The document types' project checks (S13 V9): a type's own check across the project's files,

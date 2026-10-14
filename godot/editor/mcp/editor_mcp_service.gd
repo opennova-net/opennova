@@ -1,7 +1,7 @@
 class_name EditorMcpService
 extends McpEndpointService
 
-## The OpenNova Editor's MCP endpoint (`opennova-editor`, ADR 0046 d10): the same
+## The OpenNova Editor's MCP endpoint (`opennova-editor`, ADR 0046 S6d): the same
 ## loopback Streamable-HTTP transport the game runs (godot/game/mcp/), started by
 ## `--mcp-port <n>` on the editor's command line or by a test on port 0, over the
 ## editor's wire seam (EditorApp.request_json / query_json, ADR 0046 S13 A5). The editor loads

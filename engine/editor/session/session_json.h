@@ -22,7 +22,7 @@
 
 namespace opennova::editor {
 
-// The session's wire form (ADR 0046 d10, the editor MCP): a request from JSON, and the
+// The session's wire form (ADR 0046 S6d, the editor MCP; S13 A5): a request from JSON, and the
 // view, a document, a record and the findings as JSON. Portable on purpose: the
 // editor's MCP transport marshals nothing itself, a command line can print the same
 // records, and one ctest pins every token both ways.

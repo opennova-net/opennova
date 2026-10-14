@@ -1,4 +1,4 @@
-// The session's wire form (ADR 0046 d10, the editor MCP): every request kind, edit
+// The session's wire form (ADR 0046 S6d, the editor MCP): every request kind, edit
 // operation, pick purpose, unsaved choice, selection mode, severity and Problems scope and
 // grouping has a token that reads back; a request survives the JSON round trip with its
 // edits in the batch form (S13 A5: each record by its identity in the document the request

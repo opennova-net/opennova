@@ -85,7 +85,7 @@
     collection its own references name by index, S13 D8's Record references, resolved within the
     file), the one resolver behind the badges, the
     pickers and the Problems rows, the reference queries a document's fields ask, a base layer's names
-    (a read-only dependency mount's), and the rename transaction; what other files make of what one
+    (an expansion project's base game's), and the rename transaction; what other files make of what one
     defines, one `use_checks` row per asset kind, and what a stylesheet line's value is used as
     (`style_value_use`, from the menus' uses of it); and `project_validation`, the one pass over the
     project's files: the graph's update, each file's own findings, the use checks, the graph's

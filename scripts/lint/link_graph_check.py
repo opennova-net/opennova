@@ -116,7 +116,7 @@ FORBIDDEN: list[tuple[str, list[str], list[str], set[str]]] = [
     ),
     (
         "the runtime GDExtension variant (the game, the Play child) never links the "
-        "editor core (ADR 0046 d4): only opennova_editor_gdext does",
+        "editor core (ADR 0046 d2): only opennova_editor_gdext does",
         ["opennova", "opennova_bindings"],
         ["opennova_editor"],
         {"opennova", "opennova_bindings"},  # defined only in the godot/src CMake root

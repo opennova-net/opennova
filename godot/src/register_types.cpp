@@ -485,7 +485,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(ImGuiPassNode);
 	GDREGISTER_CLASS(DevTools);
 #if OPENNOVA_EDITOR
-	// The OpenNova Editor's shell (ADR 0046 d4): the editor-enabled variant only, so
+	// The OpenNova Editor's shell (ADR 0046 d2): the editor-enabled variant only, so
 	// nothing the game ships depends on the editor. The script device's control and its
 	// colours (S13 V10) with it.
 	GDREGISTER_CLASS(EditorApp);

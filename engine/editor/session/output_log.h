@@ -8,7 +8,7 @@
 
 namespace opennova::editor {
 
-// What the editor said and what the running game says, oldest first (ADR 0046 d10, S13 A1): the
+// What the editor said and what the running game says, oldest first (ADR 0046 d11, S13 A1): the
 // Output window's lines and the view JSON's output pages. Past kMaxLines the oldest line drops.
 // Every line keeps an absolute index (first_index() counts the lines ever dropped or cleared), so a
 // client that pages by an absolute cursor neither skips nor repeats a line while new ones arrive.

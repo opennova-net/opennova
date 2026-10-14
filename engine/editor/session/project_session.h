@@ -27,7 +27,7 @@ struct SessionView;
 struct ValidationStats;
 struct ViewportMouse;
 
-// The one open project and everything the editor does to it (ADR 0046 d10): open and
+// The one open project and everything the editor does to it (ADR 0046 d9): open and
 // create, scan and evaluate, create-missing, build, play. Portable: the embedder hands it
 // the process seam and the store its preferences live in and drains its view; a test drives
 // it the same way. Requests come in typed (EditorRequest), the view goes out (SessionView).

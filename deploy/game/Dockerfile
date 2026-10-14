@@ -30,7 +30,7 @@ RUN scripts/build_godot_web.sh --release --build-dir /build
 # --- the exporting editor's own extension -------------------------------------
 # The headless editor that exports is a source run: it loads the plain linux.debug
 # row of opennova.gdextension, the editor-enabled library (the superset, ADR 0046
-# d4), so every script's classes resolve while it imports the project.
+# d2), so every script's classes resolve while it imports the project.
 FROM ubuntu:24.04 AS native
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

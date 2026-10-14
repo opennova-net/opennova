@@ -3060,15 +3060,15 @@ LayerFile layer_file(const std::string &name, AssetKind kind, const std::string 
 
 } // namespace
 
-// The base layer (S13 D3, ADR 0046 d10: a read-only dependency mount; project assets win): a
-// lookup tries the project, then the base, whose files the project has one of the name of are
-// hidden (their names with them); the base resolves what the project lacks, a stylesheet's
-// variables included; it makes no edge and no finding (a reference in it to nothing, a file of it
-// that does not read); choices lists the base's names after the project's, each name once, the
-// names a lookup finds before those none does: a variable the project defines only in a
-// stylesheet the game never reads is the base's live one, and a base stylesheet the game never
-// reads offers its variables inert. Set and taken away, and a file added under it, the graph
-// equals a fresh one over the same base.
+// The base layer (S13 D3, ADR 0046 d10, "An expansion's base game under its graph": an expansion
+// project's base game; project assets win): a lookup tries the project, then the base, whose files
+// the project has one of the name of are hidden (their names with them); the base resolves what the
+// project lacks, a stylesheet's variables included; it makes no edge and no finding (a reference in
+// it to nothing, a file of it that does not read); choices lists the base's names after the
+// project's, each name once, the names a lookup finds before those none does: a variable the
+// project defines only in a stylesheet the game never reads is the base's live one, and a base
+// stylesheet the game never reads offers its variables inert. Set and taken away, and a file added
+// under it, the graph equals a fresh one over the same base.
 static int test_base_layer() {
 	std::vector<LayerFile> files;
 	files.push_back(layer_file("menu_style.mns", AssetKind::MenuStyle,

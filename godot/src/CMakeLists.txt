@@ -47,7 +47,7 @@ option(OPENNOVA_DEVTOOLS "Build the game's in-engine dev-tool windows (Dear ImGu
 if(GODOTCPP_TARGET STREQUAL "template_release" OR EMSCRIPTEN)
     set(OPENNOVA_DEVTOOLS OFF)
 endif()
-# Two GDExtension variants from one source tree (ADR 0046 d4): the runtime-only
+# Two GDExtension variants from one source tree (ADR 0046 d2): the runtime-only
 # `libopennova.*` the game and the Play child ship, and the editor-enabled
 # `libopennova_editor.*` the OpenNova Editor ships (and every source run loads, as
 # the superset). OFF builds the runtime variant alone.
@@ -395,7 +395,7 @@ set_target_properties(
 )
 # gersemi: on
 
-# The editor-enabled variant (ADR 0046 d4): the same bindings plus the authoring
+# The editor-enabled variant (ADR 0046 d2): the same bindings plus the authoring
 # layer (godot/src/authoring) and the editor core, with the ImGui pass always
 # attachable. `libopennova_editor.*`; selected by the `opennova_editor` feature tag
 # and by the plain rows of opennova.gdextension (source runs load the superset).

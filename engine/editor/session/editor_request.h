@@ -17,7 +17,7 @@
 
 namespace opennova::editor {
 
-// What the editor's windows and menus ask for (ADR 0046 d10): typed requests out of the
+// What the editor's windows and menus ask for (ADR 0046 d11): typed requests out of the
 // UI, drained by the project session (the portable kinds) or by the shell (the kinds
 // only an OS can serve: a native dialog, a file manager). A request carries plain
 // fields, never a callback, so a test can enqueue and inspect it. Each kind is one row of

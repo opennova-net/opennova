@@ -10,7 +10,7 @@
 
 namespace opennova::editor {
 
-// The editor's one managed game child (ADR 0046 d8/d10): Stopped, Running, or Stopping
+// The editor's one managed game child (ADR 0046 d8): Stopped, Running, or Stopping
 // after a stop request until the child is gone or the deadline forces it (PlayState). One
 // child at a time: a start while another runs is refused. poll() is non-blocking and is
 // what moves the machine; the UI calls it every frame, the CLI in a loop. The project

@@ -15,7 +15,7 @@
 
 namespace opennova::editor {
 
-// Everything the editor's windows draw (ADR 0046 d10): the records in. The session owns
+// Everything the editor's windows draw (ADR 0046 d11): the records in. The session owns
 // one and rewrites it as the project changes; the windows read it by const reference
 // every frame and never reach into the session. Since S13 V4 it is an aggregate of sub-views,
 // one per part of what it shows (session/view/): the project, the documents, the findings, the
