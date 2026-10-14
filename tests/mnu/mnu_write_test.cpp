@@ -18,6 +18,7 @@
 
 #include <base/vfs/vfs.h>
 #include <formats/mnu/mnu.h>
+#include <formats/mnu/mnu_layout.h>
 #include <formats/mnu/mnu_schema.h>
 
 #include "common/file_io.h"
@@ -122,7 +123,7 @@ const char *const kCanonicalPretty =
     "      <NAME>f.fnt</NAME>\n"
     "      <DEFAULT_FG>FF000001</DEFAULT_FG>\n"
     "      <MOUSEOVER_BG>%DEF_BG%</MOUSEOVER_BG>\n"
-    "      <DISABLED_FG>3</DISABLED_FG>\n"
+    "      <DISABLED_FG>00000003</DISABLED_FG>\n"
     "    </FONT>\n"
     "    <STRING type=\"ID\" justify=\"CENTER\" vjustify=\"BOTTOM\" edge=\"4\" WRAP>KEY</STRING>\n"
     "    <TOGGLE_STRING type=\"ID\">ALT</TOGGLE_STRING>\n"
@@ -306,7 +307,7 @@ const char *const kCanonicalCompact =
     "<APPEARANCE type=\"IMAGE\" state=\"MOUSEOVER\" map_state=\"1\" height=\"24\" flags=\"STANDARD_TRANSPARENT|ALPHATEST\">b&amp;c&lt;d>.tga"
     "</APPEARANCE><TEXT_RSRC>menutxt.BIN</TEXT_RSRC><PRIVATE_DATA>p</PRIVATE_DATA><CURSOR><FILE>c.tga"
     "</FILE><FLAGS>STANDARD</FLAGS></CURSOR><FONT><NAME>f.fnt</NAME><DEFAULT_FG>FF000001</DEFAULT_FG>"
-    "<MOUSEOVER_BG>%DEF_BG%</MOUSEOVER_BG><DISABLED_FG>3</DISABLED_FG></FONT>"
+    "<MOUSEOVER_BG>%DEF_BG%</MOUSEOVER_BG><DISABLED_FG>00000003</DISABLED_FG></FONT>"
     "<STRING type=\"ID\" justify=\"CENTER\" vjustify=\"BOTTOM\" edge=\"4\" WRAP>KEY</STRING>"
     "<TOGGLE_STRING type=\"ID\">ALT</TOGGLE_STRING><SOUND state=\"MOUSEIN\" trigger=\"MOUSE_OVER\">menu.lwf"
     "</SOUND><ITEMS MULTISELECT>"
@@ -434,9 +435,9 @@ mnu::Document minted() {
 	w.toggle_string.type = "ID";
 	w.toggle_string.value = "ALT";
 	w.font.name = "f.fnt";
-	w.font.default_fg = "FF000001";
-	w.font.mouseover_bg = "%DEF_BG%";
-	w.font.disabled_fg = "3";
+	w.font.default_fg = mnu::color_of("FF000001");
+	w.font.mouseover_bg = mnu::color_of("%DEF_BG%");
+	w.font.disabled_fg = mnu::color_of("3"); // written as the word's eight digits
 	w.frame.stencil = "s.tga";
 	w.frame.has_stencil_size = w.frame.has_insetx = true;
 	w.frame.stencil_size = 8;
@@ -780,7 +781,11 @@ const std::vector<CorpusEdit> &corpus_edits() {
 	     }},
 	    {"every ITEM's text changed and a row added", [](mnu::Document &d) {
 		     each_window(d, [](mnu::Window &w) {
-			     for (mnu::Item &i : w.items.items) i.text += "+";
+			     // A COLOR item's text is its colour: another word.
+			     for (mnu::Item &i : w.items.items) {
+				     if (mnu::item_color_type(i.type)) i.color = mnu::color_of("FF102030");
+				     else i.text += "+";
+			     }
 			     // A row of the kind the window's type reads (a TABLE's are ROWs of cells).
 			     if (w.items.present && mnu::schema_reads(w.type, "items.item") == mnu::SchemaApplies::Reads) {
 				     mnu::Item extra;

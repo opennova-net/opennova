@@ -1,6 +1,9 @@
 #include <formats/mnu/mnu_layout.h>
 
+#include <base/io/cp1252.h>
 #include <base/io/strutil.h>
+#include <formats/mns/mns.h>
+#include <formats/mnu/mnu_xml.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -100,49 +103,61 @@ RectEdges adjust_rect_to_text_size(const RectEdges &rect, int text_w,
 	return r;
 }
 
-// [orig: CRT_wcstoxl @ 0x76e93b in base 16, unsigned: the whitespace skip, the
-// sign, the "0x" prefix, the digits, ULONG_MAX on overflow (not negated), and
-// -value for '-']
-std::uint32_t color_value(const std::string &text) {
+namespace {
+
+// The model's narrow text as the wide characters the game reads: a Unicode menu's UTF-8, else the code page's
+// bytes, each its cp1252 character (retail_text_to_utf8's rule).
+std::u32string wide_of(const std::string &text) {
+	std::u32string out;
+	if (!is_valid_utf8(text)) {
+		for (const char c : text) out.push_back(cp1252_decode_byte(static_cast<std::uint8_t>(c)));
+		return out;
+	}
+	for (size_t i = 0; i < text.size();) {
+		const unsigned char c = static_cast<unsigned char>(text[i]);
+		size_t len = 1;
+		char32_t cp = c;
+		if (c >= 0x80) {
+			len = (c & 0xE0) == 0xC0 ? 2 : (c & 0xF0) == 0xE0 ? 3 : 4;
+			cp = c & (len == 2 ? 0x1F : len == 3 ? 0x0F : 0x07);
+			for (size_t k = 1; k < len; ++k) cp = (cp << 6) | (static_cast<unsigned char>(text[i + k]) & 0x3F);
+		}
+		out.push_back(cp);
+		i += len;
+	}
+	return out;
+}
+
+} // namespace
+
+// [orig: CRT_wcstoxl @ 0x76e93b in base 16, unsigned: the iswspace skip, the sign, the "0x" prefix after a zero
+// digit, CRT_wchartodigit's digits and the Latin letters, ULONG_MAX on overflow and then -value for '-']
+// (mnu_xml::wcstoul, the reader's own port of it).
+std::uint32_t color_value(const std::u32string &text) {
+	return static_cast<std::uint32_t>(mnu_xml::wcstoul(text, 16));
+}
+
+std::uint32_t color_value(const std::string &text) { return color_value(wide_of(text)); }
+
+bool color_reads_whole(const std::u32string &text, size_t *digits_read) {
 	size_t i = 0;
-	while (i < text.size() && (text[i] == ' ' || (text[i] >= '\t' && text[i] <= '\r'))) ++i;
-	bool negative = false;
-	if (i < text.size() && (text[i] == '+' || text[i] == '-')) {
-		negative = text[i] == '-';
-		++i;
+	while (i < text.size() && mnu_xml::is_space(text[i])) ++i;
+	if (i < text.size() && (text[i] == '+' || text[i] == '-')) ++i;
+	if (i + 1 < text.size() && mnu_xml::wchartodigit(text[i]) == 0 && (text[i + 1] == 'x' || text[i + 1] == 'X'))
+		i += 2;
+	size_t digits = 0;
+	for (; i < text.size(); ++i, ++digits) {
+		const char32_t c = text[i];
+		const int digit = mnu_xml::wchartodigit(c);
+		if (digit < 0 && !((c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) break;
 	}
-	if (i + 1 < text.size() && text[i] == '0' && (text[i + 1] == 'x' || text[i + 1] == 'X')) i += 2;
-	uint64_t value = 0;
-	bool overflow = false;
-	for (; i < text.size(); ++i) {
-		const char c = text[i];
-		int digit = 0;
-		if (c >= '0' && c <= '9') digit = c - '0';
-		else if (c >= 'a' && c <= 'f') digit = c - 'a' + 10;
-		else if (c >= 'A' && c <= 'F') digit = c - 'A' + 10;
-		else break;
-		if (!overflow) value = value * 16u + static_cast<uint64_t>(digit);
-		if (value > 0xFFFFFFFFull) overflow = true;
-	}
-	if (overflow) return 0xFFFFFFFFu;
-	const uint32_t word = static_cast<uint32_t>(value);
-	return negative ? static_cast<uint32_t>(0u - word) : word;
+	if (digits_read) *digits_read = digits;
+	while (i < text.size() && mnu_xml::is_space(text[i])) ++i;
+	return digits > 0 && i == text.size();
 }
 
 bool color_reads_whole(const std::string &text, size_t *digits_read) {
-	size_t i = 0;
-	const auto blank = [&](size_t at) { return text[at] == ' ' || (text[at] >= '\t' && text[at] <= '\r'); };
-	while (i < text.size() && blank(i)) ++i;
-	if (i < text.size() && (text[i] == '+' || text[i] == '-')) ++i;
-	if (i + 1 < text.size() && text[i] == '0' && (text[i + 1] == 'x' || text[i + 1] == 'X')) i += 2;
-	size_t digits = 0;
-	for (; i < text.size(); ++i, ++digits) {
-		const char c = text[i];
-		if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) break;
-	}
-	if (digits_read) *digits_read = digits;
-	while (i < text.size() && blank(i)) ++i;
-	return digits > 0 && i == text.size();
+	return color_reads_whole(wide_of(text), digits_read);
 }
 
 std::string color_text(std::uint32_t word) {
@@ -152,8 +167,30 @@ std::string color_text(std::uint32_t word) {
 }
 
 // [orig: wcstoul base 16 @ 0x64bd10; forced opaque @ 0x64b220]
-std::uint32_t item_color_argb(const std::string &hex_text) {
-	return color_value(hex_text) | 0xFF000000u;
+std::uint32_t item_color_argb(std::uint32_t word) {
+	return word | 0xFF000000u;
+}
+
+Color color_of(const std::string &text) { return color_of(wide_of(text), text); }
+
+Color color_of(const std::u32string &text, const std::string &narrow) {
+	Color color;
+	color.present = true;
+	if (mns::is_variable_reference(narrow)) color.var = mns::variable_name(narrow);
+	else color.argb = color_value(text);
+	return color;
+}
+
+std::string color_word(const Color &color) {
+	return color.var.empty() ? color_text(color.argb) : "%" + color.var + "%";
+}
+
+std::string appearance_text(const Appearance &row) {
+	return appearance_color_type(row.type) ? color_word(row.color) : row.value;
+}
+
+std::string item_text(const Item &item) {
+	return item_color_type(item.type) ? color_word(item.color) : item.text;
 }
 
 }  // namespace opennova::mnu

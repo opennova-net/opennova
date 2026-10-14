@@ -388,8 +388,9 @@ enum class MenuFrameNoteCode : uint16_t {
 	AppearanceStateUnknown, // a STATE the parse does not know: the row sets nothing
 	AppearanceCustom,       // CUSTOM: the shell's draw hook; the compile draws nothing for it
 	AppearanceReplaced,     // a later row of the same state and type replaces this row's value
-	ColorUnparsed,          // a COLOR, OUTLINE or FONT colour the hex read stops short in
-	ColorTransparent,       // a COLOR or OUTLINE of fewer than eight digits: it reads alpha 0
+	ColorUnparsed,          // a COLOR, OUTLINE or FONT colour's stylesheet value the hex read stops short in
+	ColorTransparent,       // a COLOR or OUTLINE that reads alpha 0: a word of alpha 0, or a stylesheet value of
+	                        // fewer than eight digits
 	StyleVarUnresolved,     // a whole-value %VAR% the shell's list lacks: kept literal
 	TableCellsDeferred,     // a table's ITEMS IMAGEROW row, not drawn (D-MNU-13)
 	TableCellsCustom,       // a CUSTOM_DRAW column: the menu's code draws its cells; the compile, none
@@ -913,7 +914,7 @@ private:
 	void note_(MenuFrameNoteCode code, const std::string &subject, const char *list, int record,
 			const char *field) const;
 	void note_var_(const std::string &value, const char *list, int record, const char *field) const;
-	void note_color_(const std::string &value, bool keeps_alpha, const char *list, int record,
+	void note_color_(const mnu::Color &color, bool keeps_alpha, const char *list, int record,
 			const char *field) const;
 	// One APPEARANCE row as build_state_passes reads it: a STATE or TYPE the parse does not
 	// know, CUSTOM, a value a later row of its state and type replaces, its colour or
@@ -927,7 +928,9 @@ private:
 	void note_window_loads_(const mnu::Window &w);
 	int32_t band_height_(const std::string &name, uint32_t flags) const;
 	std::string resolve_var(const std::string &value) const;
-	uint32_t resolve_text_color(const std::string &value) const;
+	// A colour's word: a reference's stylesheet value as wcstoul reads it, else the word held.
+	uint32_t resolve_color(const mnu::Color &color) const;
+	uint32_t resolve_text_color(const mnu::Color &color) const;
 	ResolvedText resolve_text_value(const std::string *table, const std::string &type,
 			const std::string &raw) const;
 	int32_t intern_texture(const std::string &name);

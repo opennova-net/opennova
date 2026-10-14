@@ -91,19 +91,24 @@ RectEdges adjust_rect_to_text_size(const RectEdges &rect, int text_w,
 // --- Colors -----------------------------------------------------------------
 
 // A color the parse reads with wcstoul(text, 16) [orig: CRT_wcstoxl @ 0x76e93b
-// through the APPEARANCE COLOR / OUTLINE arm @ 0x648562 and the spin ITEM
-// @ 0x64bd10]: leading whitespace, an optional sign, an optional 0x, then hex
-// digits up to the first other character (a partly valid value keeps its valid
-// prefix); no digit reads 0 ('#' is not accepted); a value past 32 bits
-// saturates to 0xFFFFFFFF; '-' negates. The result is the 0xAARRGGBB word as it
-// stands, so six digits leave alpha 0.
+// through the APPEARANCE COLOR arm @ 0x64864b and its OUTLINE arm @ 0x648562, the
+// FONT colours @ 0x648d14..0x648e64 and the spin ITEM @ 0x64bd10] over the wide text:
+// leading spaces (iswspace: the CRT's table, 0xA0 among them, and the platform's
+// Unicode spaces, mnu_xml::is_space), an optional sign, an optional 0x, then hex
+// digits (CRT_wchartodigit's Unicode decimal digits and the Latin letters) up to the
+// first other character (a partly valid value keeps its valid prefix); no digit reads
+// 0 ('#' is not accepted); a value past 32 bits saturates to 0xFFFFFFFF, which '-'
+// then negates (so "-100000000" reads 1). The result is the 0xAARRGGBB word as it
+// stands, so six digits leave alpha 0. The narrow form reads the model's text: a
+// Unicode menu's UTF-8, else the code page's bytes (retail_text_to_utf8's rule).
+std::uint32_t color_value(const std::u32string &text);
 std::uint32_t color_value(const std::string &text);
 
-// Whether color_value reads the whole text [orig: CRT_wcstoxl @ 0x76e93b through the
-// APPEARANCE COLOR / OUTLINE arm @ 0x648562 and the FONT colours @ 0x648d14..0x648e64]:
-// leading blanks, a sign, 0x, then hex digits to the end (trailing blanks read nothing
-// more); false when no digit is read or another character stops it. `digits_read`, when
-// given, is how many hex digits the read took.
+// Whether color_value reads the whole text: leading spaces, a sign, 0x, then hex
+// digits to the end (trailing spaces read nothing more); false when no digit is read
+// or another character stops it. `digits_read`, when given, is how many hex digits the
+// read took.
+bool color_reads_whole(const std::u32string &text, size_t *digits_read = nullptr);
 bool color_reads_whole(const std::string &text, size_t *digits_read = nullptr);
 
 // The 0xAARRGGBB word as the text color_value reads back whole: eight upper-case hex digits, no
@@ -112,6 +117,18 @@ std::string color_text(std::uint32_t word);
 
 // type="color" on a spin ITEM: the same word forced opaque [orig:
 // CSpinListWnd_Render @ 0x64b220 (color | 0xFF000000)].
-std::uint32_t item_color_argb(const std::string &hex_text);
+std::uint32_t item_color_argb(std::uint32_t word);
+
+// A colour element's text as the model holds it (Color, mnu.h), present: a text that is one
+// %NAME% (mns::is_variable_reference) the reference, any other the word color_value reads.
+Color color_of(const std::string &text);
+// The same of the wide text a menu's reader holds (`narrow` its narrow form, the model's).
+Color color_of(const std::u32string &text, const std::string &narrow);
+// The text a colour is written as: the reference's %NAME%, else color_text's eight digits.
+std::string color_word(const Color &color);
+// The element text an APPEARANCE row and an ITEM write and a menu shows of them: a colour's
+// color_word where the TYPE holds one (appearance_color_type, item_color_type), else the text.
+std::string appearance_text(const Appearance &row);
+std::string item_text(const Item &item);
 
 }  // namespace opennova::mnu

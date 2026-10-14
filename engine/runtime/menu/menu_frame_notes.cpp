@@ -141,17 +141,26 @@ void MenuFrameCompiler::note_var_(const std::string &value, const char *list, in
 	}
 }
 
-// A colour as the parse reads it: wcstoul over the text after %VAR% (a partly valid
-// value keeps its valid prefix, garbage reads 0); an APPEARANCE COLOR / OUTLINE keeps the
-// word's alpha, so fewer than eight digits (six, typically) leave it 0, while eight
-// digits with an alpha of 00 are taken as written; a FONT colour is forced opaque by the
-// text sink [orig: CFontCache_DrawTextScaled @ 0x653170].
-void MenuFrameCompiler::note_color_(const std::string &value, bool alpha_forced,
+// A colour as the parse reads it [orig: CRT_wcstoxl @ 0x76e93b]. A word the model holds
+// (the reader noted a text it did not read whole); a reference reads its stylesheet value
+// (a partly valid value keeps its valid prefix, garbage reads 0). An APPEARANCE COLOR /
+// OUTLINE keeps the word's alpha, so a word of alpha 0 (a stylesheet value of fewer than
+// eight digits, six typically; a word read so) draws transparent, while a stylesheet value
+// of eight digits with an alpha of 00 is taken as written; a FONT colour is forced opaque by
+// the text sink [orig: CFontCache_DrawTextScaled @ 0x653170].
+void MenuFrameCompiler::note_color_(const mnu::Color &color, bool alpha_forced,
 		const char *list, int record, const char *field) const {
-	if (value.empty()) {
+	if (!color.present) {
 		return;
 	}
-	if (mns::is_variable_reference(value) && resolve_var(value) == value) {
+	if (color.var.empty()) {
+		if (!alpha_forced && (color.argb >> 24) == 0u) {
+			note_(Code::ColorTransparent, mnu::color_word(color), list, record, field);
+		}
+		return;
+	}
+	const std::string value = mnu::color_word(color);
+	if (resolve_var(value) == value) {
 		note_(Code::StyleVarUnresolved, value, list, record, field);
 		return;
 	}
@@ -203,7 +212,7 @@ void MenuFrameCompiler::note_appearance_row_(const std::vector<mnu::Appearance> 
 	if (image) {
 		note_var_(ap.value, list, record, field("value"));
 	} else {
-		note_color_(ap.value, false, list, record, field("value"));
+		note_color_(ap.color, false, list, record, field("value"));
 	}
 }
 

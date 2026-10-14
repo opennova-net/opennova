@@ -75,7 +75,7 @@ void position_contract() {
 }
 
 void text_adjust_contract() {
-	// [orig: CStaticWnd_AdjustRectToTextSize @ 0x6575f0] — the authored point is the
+	// [orig: CStaticWnd_AdjustRectToTextSize @ 0x6575f0] \u2014 the authored point is the
 	// anchor the JUSTIFY/VJUSTIFY flags align to.
 	opennova::mnu::RectEdges base;
 	base.left = 100;
@@ -115,6 +115,18 @@ void color_contract() {
 	check(opennova::mnu::color_value("  0xFF") == 0xFFu, "whitespace and 0x are skipped");
 	check(opennova::mnu::color_value("123456789") == 0xFFFFFFFFu, "past 32 bits saturates");
 	check(opennova::mnu::color_value("-1") == 0xFFFFFFFFu, "'-' negates");
+	// The saturation comes first, then the sign [orig: @ 0x76eaf5, then @ 0x76eb1b].
+	check(opennova::mnu::color_value("-100000000") == 1u && opennova::mnu::color_value("-1FFFFFFFF") == 1u,
+			"past 32 bits saturates, then '-' negates");
+	// The CRT's classes over the wide text [orig: CRT_wchartodigit @ 0x77fd43; _iswctype_l @ 0x77f52f, _SPACE]: a
+	// Unicode decimal digit is a digit, a no-break or ideographic space a leading space; the narrow form reads a
+	// Unicode menu's UTF-8, else the code page's bytes.
+	check(opennova::mnu::color_value(std::u32string(U"\u3000\u0661F")) == 0x1Fu, "an Arabic-Indic one after U+3000");
+	check(opennova::mnu::color_value(std::u32string(U"\uFF11\uFF10")) == 0x10u, "fullwidth digits");
+	check(opennova::mnu::color_value(std::string("\xE3\x80\x80" "FF")) == 0xFFu, "UTF-8: U+3000 is a space");
+	check(opennova::mnu::color_value(std::string("\xA0" "FF")) == 0xFFu, "a code page's 0xA0 is a space");
+	check(opennova::mnu::color_reads_whole(std::u32string(U"\u0661\u0662")), "Unicode digits read whole");
+	check(!opennova::mnu::color_reads_whole(std::u32string(U"\u00B2")), "a superscript is no digit");
 	check(opennova::mnu::color_value("") == 0u, "nothing reads 0");
 	// The word written back as the text the reader takes whole.
 	check(opennova::mnu::color_text(0xFF102030u) == "FF102030", "eight upper-case digits");
@@ -125,11 +137,35 @@ void color_contract() {
 		      "read back whole as the word");
 
 	// [orig: wcstoul base 16 @ 0x64bd10, forced opaque @ 0x64b220].
-	check(opennova::mnu::item_color_argb("C08040") == 0xFFC08040u,
+	check(opennova::mnu::item_color_argb(opennova::mnu::color_value("C08040")) == 0xFFC08040u,
 			"RRGGBB parses base-16 forced opaque");
-	check(opennova::mnu::item_color_argb("0") == 0xFF000000u, "zero stays opaque black");
-	check(opennova::mnu::item_color_argb("not-a-color") == 0xFF000000u,
+	check(opennova::mnu::item_color_argb(0u) == 0xFF000000u, "zero stays opaque black");
+	check(opennova::mnu::item_color_argb(opennova::mnu::color_value("not-a-color")) == 0xFF000000u,
 			"a non-hex string reads 0 like wcstoul");
+
+	// The model's colour (mnu::Color): one %NAME% stays the reference, any other text the word
+	// read; written back as the reference or the word's eight digits.
+	const opennova::mnu::Color var = opennova::mnu::color_of("%DEF_TEXT_FG%");
+	check(var.present && var.var == "DEF_TEXT_FG" && opennova::mnu::color_word(var) == "%DEF_TEXT_FG%",
+			"a whole %NAME% is the reference");
+	const opennova::mnu::Color six = opennova::mnu::color_of("FFba58");
+	check(six.present && six.var.empty() && six.argb == 0x00FFBA58u && opennova::mnu::color_word(six) == "00FFBA58",
+			"six digits: the word of alpha 0, written as eight upper-case digits");
+	check(opennova::mnu::color_of("FF%X%").var.empty() && opennova::mnu::color_of("FF%X%").argb == 0xFFu,
+			"a %NAME% inside a longer text is no reference: the word read up to it");
+	check(opennova::mnu::color_of("%A B%").var.empty(), "a name the expansion stops inside is none");
+	opennova::mnu::Appearance row;
+	row.value = "7f7F0000";
+	opennova::mnu::set_appearance_type(row, "OUTLINE");
+	check(row.value.empty() && row.color.argb == 0x7F7F0000u && opennova::mnu::appearance_text(row) == "7F7F0000",
+			"a row made a colour reads its text as the word");
+	opennova::mnu::set_appearance_type(row, "IMAGE");
+	check(!row.color.present && row.value == "7F7F0000", "a colour row made an image holds the word's text");
+	opennova::mnu::Item item;
+	item.text = "%TRIM_COLOR%";
+	opennova::mnu::set_item_type(item, "COLOR");
+	check(item.text.empty() && item.color.var == "TRIM_COLOR" && opennova::mnu::item_text(item) == "%TRIM_COLOR%",
+			"an item made a colour keeps its reference");
 }
 
 } // namespace

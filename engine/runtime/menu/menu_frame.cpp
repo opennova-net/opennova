@@ -99,12 +99,20 @@ std::string MenuFrameCompiler::resolve_var(const std::string &value) const {
 	return it == style_vars_.end() ? value : it->second;
 }
 
+// A colour as the parse reads it: the word the model holds, or a reference's
+// stylesheet value through wcstoul(text, 16) [orig: CRT_wcstoxl @ 0x76e93b after
+// NapiXML_ExpandVariablesInText @ 0x63a000]; an unresolved reference reads its own
+// text, 0.
+uint32_t MenuFrameCompiler::resolve_color(const mnu::Color &color) const {
+	return color.var.empty() ? color.argb : mnu::color_value(resolve_var(mnu::color_word(color)));
+}
+
 // A FONT color: wcstoul(text, 16) [orig: the FONT arm @ 0x648d14..0x648e64]; the
 // text sink forces alpha 0xFF (menus never pass the 0x10000 keep-alpha flag)
-// [orig: CFontCache_DrawTextScaled @ 0x653170]. An absent or unparsed value
-// keeps the zeroed ctor field: opaque black.
-uint32_t MenuFrameCompiler::resolve_text_color(const std::string &value) const {
-	return mnu::color_value(resolve_var(value)) | 0xFF000000u;
+// [orig: CFontCache_DrawTextScaled @ 0x653170]. An absent value keeps the
+// zeroed ctor field: opaque black.
+uint32_t MenuFrameCompiler::resolve_text_color(const mnu::Color &color) const {
+	return (color.present ? resolve_color(color) : 0u) | 0xFF000000u;
 }
 
 // String content resolution: type=="id" looks the value up through the widget's
@@ -263,11 +271,11 @@ void MenuFrameCompiler::build_state_passes(
 		pass.present = true;
 		if (iequals(ap.type, "color")) {
 			pass.has_color = true;
-			pass.color = mnu::color_value(resolve_var(ap.value));
+			pass.color = resolve_color(ap.color);
 		} else if (iequals(ap.type, "outline")) {
 			// [orig: OUTLINE=8 -> CUIElement_DrawOutlineRect @ 0x647fc0]
 			pass.has_outline = true;
-			pass.outline = mnu::color_value(resolve_var(ap.value));
+			pass.outline = resolve_color(ap.color);
 		} else if (iequals(ap.type, "image")) {
 			// [orig: IMAGE=2 -> stretched into the element rect @ 0x647e40; the
 			// handle is 0 when the load fails, @ 0x6485c8]
@@ -500,7 +508,7 @@ void MenuFrameCompiler::resolve_node_(int index) {
 			} else if (spin && iequals(item.type, "color")) {
 				visual.kind = WidgetNode::ItemVisual::kColor;
 				// [orig: CSpinListWnd_Render @ 0x64b220 — forced opaque]
-				visual.color = mnu::item_color_argb(resolve_var(item.text));
+				visual.color = mnu::item_color_argb(resolve_color(item.color));
 			} else {
 				visual.kind = WidgetNode::ItemVisual::kText;
 				visual.text = resolve_text_value(table, item.type, item.text).text;

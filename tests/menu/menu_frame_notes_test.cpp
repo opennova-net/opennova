@@ -15,6 +15,7 @@
 
 #include <formats/fnt/fnt.h>
 #include <formats/mnu/mnu.h>
+#include <formats/mnu/mnu_layout.h>
 
 #include "common/test_expect.h"
 #include "common/test_font.h"
@@ -57,11 +58,12 @@ Window window(WindowType type, const char *name, int left, int top, int right, i
 	return w;
 }
 
+// A row as the reader holds it: the text `value` under TYPE `type` (a colour's the word read, mnu::color_of).
 Appearance appearance(const char *state, const char *type, const char *value) {
 	Appearance a;
 	a.state = state;
-	a.type = type;
 	a.value = value;
+	opennova::mnu::set_appearance_type(a, type);
 	return a;
 }
 
@@ -251,19 +253,20 @@ static int test_configure_notes() {
 		Window root = window(WindowType::Static, "ROOT", 0, 0, 100, 20);
 		root.appearances = {appearance("HOVER", "COLOR", "FF00FF00"), appearance("DEFAULT", "SPARKLE", "x"),
 		                    appearance("DEFAULT", "", ""), appearance("MOUSEOVER", "CUSTOM", ""),
-		                    appearance("DEFAULT", "COLOR", "FFZZ0000"), appearance("DEFAULT", "COLOR", "FF0000"),
+		                    appearance("DEFAULT", "COLOR", "%ZZ%"), appearance("DEFAULT", "COLOR", "FF0000"),
 		                    appearance("SELECTED", "OUTLINE", "%NOPE%"), appearance("DISABLED", "COLOR", "%GREY%"),
-		                    appearance("MOUSEOVER", "COLOR", "00FF0000")};
-		root.font.default_fg = "red";
-		rig.configure(root, {}, {{"GREY", "FF808080"}});
+		                    appearance("MOUSEOVER", "COLOR", "%HALF%")};
+		root.font.default_fg = opennova::mnu::color_of("%RED%");
+		rig.configure(root, {}, {{"GREY", "FF808080"}, {"ZZ", "FFZZ0000"}, {"RED", "red"}, {"HALF", "00FF0000"}});
 		const std::vector<MenuFrameNote> &notes = rig.compiler.build_notes();
-		// Six digits leave the alpha 0; eight with an alpha of 00 are taken as written.
+		// A word of alpha 0 (six digits read leave it 0) draws transparent; a stylesheet value of eight
+		// digits with an alpha of 00 is taken as written.
 		TEST_EXPECT(count(notes, Code::ColorTransparent) == 1);
 		TEST_EXPECT(is(find(notes, Code::AppearanceStateUnknown), 0, "appearance", 0, "state", "HOVER"));
 		TEST_EXPECT(is(find(notes, Code::AppearanceCustom), 0, "appearance", 3, "type", "mouseover"));
 		// Two DEFAULT COLOR rows: the later one's value is the one read.
 		TEST_EXPECT(is(find(notes, Code::AppearanceReplaced), 0, "appearance", 4, "value", "default color"));
-		TEST_EXPECT(is(find(notes, Code::ColorTransparent), 0, "appearance", 5, "value", "FF0000"));
+		TEST_EXPECT(is(find(notes, Code::ColorTransparent), 0, "appearance", 5, "value", "00FF0000"));
 		TEST_EXPECT(count(notes, Code::StyleVarUnresolved) == 1);
 		TEST_EXPECT(is(find(notes, Code::StyleVarUnresolved), 0, "appearance", 6, "value", "%NOPE%"));
 		TEST_EXPECT(count(notes, Code::ColorUnparsed) == 2);
@@ -276,17 +279,20 @@ static int test_configure_notes() {
 	}
 	{
 		// A name the game's expansion stops inside (a space), or an empty one ("%%"), is no
-		// variable: the value is read as the colour it is, never looked up; blanks and a sign
-		// around eight digits still read whole (wcstoul).
+		// variable: the value is read as the colour it is, never looked up (the word 0, which the
+		// reader notes, transparent here); blanks and a sign around eight digits still read whole
+		// (wcstoul).
 		Rig rig;
 		Window root = window(WindowType::Static, "ROOT", 0, 0, 100, 20);
 		root.appearances = {appearance("DEFAULT", "COLOR", "%A B%"), appearance("MOUSEOVER", "COLOR", "%%"),
 		                    appearance("SELECTED", "COLOR", " +FF00FF00 ")};
+		TEST_EXPECT(root.appearances[0].color.var.empty() && root.appearances[0].color.argb == 0u);
+		TEST_EXPECT(root.appearances[2].color.argb == 0xFF00FF00u);
 		rig.configure(root, {}, {{"A B", "FF808080"}});
 		const std::vector<MenuFrameNote> &notes = rig.compiler.build_notes();
 		TEST_EXPECT(count(notes, Code::StyleVarUnresolved) == 0);
-		TEST_EXPECT(count(notes, Code::ColorUnparsed) == 2 && count(notes, Code::ColorTransparent) == 0);
-		TEST_EXPECT(is(find(notes, Code::ColorUnparsed), 0, "appearance", 0, "value", "%A B%"));
+		TEST_EXPECT(count(notes, Code::ColorUnparsed) == 0 && count(notes, Code::ColorTransparent) == 2);
+		TEST_EXPECT(is(find(notes, Code::ColorTransparent), 0, "appearance", 0, "value", "00000000"));
 	}
 	{
 		Rig rig;

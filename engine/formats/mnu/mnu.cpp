@@ -4,6 +4,7 @@
 #include <formats/mnu/mnu.h>
 
 #include <formats/mns/mns.h>
+#include <formats/mnu/mnu_layout.h>
 #include <formats/mnu/mnu_schema.h>
 #include <formats/mnu/mnu_xml.h>
 #include <formats/rtxt/rtxt.h>
@@ -12,6 +13,7 @@
 #include <cctype>
 #include <fstream>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <set>
 #include <sstream>
@@ -281,6 +283,9 @@ private:
   // A number (the element's text, or `attr`'s token) that holds a %NAME%: a note on it,
   // fatal where retail reads it; the model keeps the number read here. True when it does.
   bool variable_number(const Node &node, const Attribute *attr, const Text &text);
+  // A colour element's text (the node's), as the model holds it (color_of over the wide text the
+  // parse reads), with a note on a text the parse reads otherwise than whole.
+  Color color(const Node &node);
   // A singleton element: the earlier one of the tag (if any) is noted as replaced
   // (merge == false) or merged; true when this is the first.
   bool singleton(ReadScope &frame, const Node &node, const char *tag, bool merge);
@@ -312,6 +317,11 @@ private:
   SourceEncoding encoding_;
   std::map<const void *, std::string> reasons_;
   std::set<const void *> fatal_;
+  // A read element of which retail reads part of the text (a colour's): its note.
+  std::map<const Node *, std::string> text_notes_;
+  // Each FONT colour's element by its window's element and the colour's place in the FONT, so a later
+  // one (of any FONT of that window) takes the earlier's note with it.
+  std::map<std::pair<const Node *, size_t>, const Node *> font_colour_nodes_;
   bool reads_ = true; // retail reads what is being read now
   // A GLB_TABLE's browser reads its tables' HEADER FIELDs (read_column) [orig: @ 0x65dac0].
   bool glb_header_fields_ = false;
@@ -536,6 +546,32 @@ bool TreeReader::variable_number(const Node &node, const Attribute *attr, const 
   else
     because(item, what + ": retail does not read it here (the menu model reads " + read_here + ").");
   return true;
+}
+
+// A colour's text [orig: CRT_wcstoxl @ 0x76e93b through the FONT arm @ 0x648d14..0x648e64, the APPEARANCE
+// COLOR / OUTLINE arm @ 0x648562 and CUISpinList_ParseXMLDefinition @ 0x64bd10]: the model holds one %NAME% as
+// the reference and any other text as the word wcstoul reads of it (color_of). A %NAME% inside a longer text is
+// read from the variable's value in retail (the expansion runs over the whole menu first [orig:
+// NapiXML_ExpandVariablesInText @ 0x63a000]), which the model cannot hold: noted, fatal where retail reads it,
+// as a number's (D-MNU-1). Characters the read stops at (a '#', a word past its digits, no digit at all) are
+// noted as not read: the model holds the word read.
+Color TreeReader::color(const Node &node) {
+  const std::string text = narrow(node.text);
+  const Color read = color_of(node.text, text);
+  if (!read.var.empty()) return read;
+  const std::string word = color_text(read.argb);
+  const std::string tag = "<" + mnu_xml::ascii(node.tag) + ">";
+  if (mns::holds_variable_reference(text)) {
+    text_notes_[&node] = tag + " holds a stylesheet variable inside a colour ('" + text +
+                         "'): retail reads the variable's value there, which the menu model cannot hold (it reads " +
+                         word + " here).";
+    if (reads_) fatal_.insert(&node);
+  } else if (!color_reads_whole(node.text)) {
+    text_notes_[&node] = tag + "'s colour '" + text + "' reads as " + word +
+                         ": retail's read stops at the first character that is no hex digit, and the rest is "
+                         "left out.";
+  }
+  return read;
 }
 
 bool TreeReader::singleton(ReadScope &frame, const Node &node, const char *tag, bool merge) {
@@ -1020,8 +1056,13 @@ bool TreeReader::read_appearance(const Node &node, Appearance &out, const char *
   if (number_attr(node, "MAP_STATE", number)) { out.map_state = number; out.has_map_state = true; }
   if (number_attr(node, "HEIGHT", number)) { out.height = number; out.has_height = true; }
   out.flags = flags_attr(node, "FLAGS");
-  out.value = narrow(node.text);
-  return !node.attributes.empty() && known_token(out.state, kAppearanceStates);
+  // A row of no attribute or of a STATE the parse does not know stops it before its TYPE switch [orig: E_FAIL @
+  // 0x648514, the switch @ 0x64853f]: its text is never read. Else the text is a colour for COLOR / OUTLINE
+  // (wcstoul @ 0x64864b, @ 0x648562), any other TYPE's texture name.
+  const bool kept = !node.attributes.empty() && known_token(out.state, kAppearanceStates);
+  if (!appearance_color_type(out.type)) out.value = narrow(node.text);
+  else if (kept) out.color = color(node);
+  return kept;
 }
 
 // [orig: @ 0x648909] STATE and TRIGGER are both required; LOOP is compared and
@@ -1075,20 +1116,28 @@ void TreeReader::read_font(const Node &node, Font &font) {
   for (const Attribute &a : node.attributes)
     because(&a, "FONT attributes are not read (NAME and the colors are child elements); " +
                     mnu_xml::ascii(a.name) + " is left out.");
+  static const std::pair<const char *, Color Font::*> kColours[] = {
+      {"DEFAULT_FG", &Font::default_fg},   {"DEFAULT_BG", &Font::default_bg},   {"DISABLED_FG", &Font::disabled_fg},
+      {"DISABLED_BG", &Font::disabled_bg}, {"SELECTED_FG", &Font::selected_fg}, {"SELECTED_BG", &Font::selected_bg},
+      {"MOUSEOVER_FG", &Font::mouseover_fg}, {"MOUSEOVER_BG", &Font::mouseover_bg}};
   for (const auto &child_ptr : node.children) {
     const Node &c = *child_ptr;
-    std::string *slot = nullptr;
-    if (tag_is(c, "NAME")) slot = &font.name;
-    else if (tag_is(c, "DEFAULT_FG")) slot = &font.default_fg;
-    else if (tag_is(c, "DEFAULT_BG")) slot = &font.default_bg;
-    else if (tag_is(c, "DISABLED_FG")) slot = &font.disabled_fg;
-    else if (tag_is(c, "DISABLED_BG")) slot = &font.disabled_bg;
-    else if (tag_is(c, "SELECTED_FG")) slot = &font.selected_fg;
-    else if (tag_is(c, "SELECTED_BG")) slot = &font.selected_bg;
-    else if (tag_is(c, "MOUSEOVER_FG")) slot = &font.mouseover_fg;
-    else if (tag_is(c, "MOUSEOVER_BG")) slot = &font.mouseover_bg;
-    if (slot) {
-      *slot = text_of(c);
+    if (tag_is(c, "NAME")) {
+      font.name = text_of(c);
+      continue;
+    }
+    for (size_t k = 0; k < std::size(kColours); ++k) {
+      if (!tag_is(c, kColours[k].first)) continue;
+      // A later element of a colour replaces the earlier (of this FONT or an earlier one of the window), and its
+      // note.
+      const std::pair<const Node *, size_t> key{node.parent, k};
+      if (const Node *earlier = font_colour_nodes_[key]) {
+        text_notes_.erase(earlier);
+        fatal_.erase(earlier);
+      }
+      font_colour_nodes_[key] = &c;
+      c.read = true;
+      font.*kColours[k].second = color(c);
     }
   }
 }
@@ -1206,7 +1255,9 @@ void TreeReader::read_item(const Node &node, Item &item, bool cell, WindowType t
   } else {
     not_read(node, "COLUMN", type);
   }
-  item.text = text_of(node);
+  // A spin list's COLOR item's text is a colour (wcstoul base 16 @ 0x64bd10), any other its text.
+  if (item_color_type(item.type)) item.color = color(node);
+  else item.text = text_of(node);
 }
 
 // ITEMS: the LIST form (JUSTIFY, VJUSTIFY, MULTISELECT; ITEM and APPEARANCE rows),
@@ -1553,6 +1604,10 @@ std::string note_locator(const Node &node) {
 // repeated element merged into the first, or a replaced one, is content retail parses).
 void TreeReader::sweep(const mnu_xml::Document &xml, std::vector<ParseNote> &notes) const {
   std::function<void(const Node &, bool)> visit = [&](const Node &node, bool covered) {
+    const auto text_note = text_notes_.find(&node);
+    if (node.read && text_note != text_notes_.end())
+      notes.push_back({node.line, mnu_xml::path_key(node), text_note->second, fatal_.count(&node) != 0,
+                       note_locator(node)});
     if (!node.read && (!covered || fatal_.count(&node))) {
       const auto reason = reasons_.find(&node);
       notes.push_back({node.line, mnu_xml::path_key(node),
@@ -1651,6 +1706,34 @@ const char *const *item_types_for(WindowType type, bool cell) {
   if (cell || type == WindowType::Table) return kCellItemTypes;
   if (type == WindowType::SpinList) return kSpinListItemTypes;
   return kListItemTypes;
+}
+
+bool appearance_color_type(const std::string &type) { return iequals(type, "COLOR") || iequals(type, "OUTLINE"); }
+
+bool item_color_type(const std::string &type) { return iequals(type, "COLOR"); }
+
+void set_appearance_type(Appearance &row, const std::string &type) {
+  const bool was = appearance_color_type(row.type), is = appearance_color_type(type);
+  if (was && !is) {
+    row.value = color_word(row.color);
+    row.color = Color();
+  } else if (!was && is) {
+    row.color = color_of(row.value);
+    row.value.clear();
+  }
+  row.type = type;
+}
+
+void set_item_type(Item &item, const std::string &type) {
+  const bool was = item_color_type(item.type), is = item_color_type(type);
+  if (was && !is) {
+    item.text = color_word(item.color);
+    item.color = Color();
+  } else if (!was && is) {
+    item.color = color_of(item.text);
+    item.text.clear();
+  }
+  item.type = type;
 }
 
 bool known_token(const std::string &token, const char *const *tokens) {
@@ -1888,7 +1971,10 @@ private:
            list(a.roots, b.roots, "window", [this](const Window &x, const Window &y) { return window(x, y); });
   }
   bool appearance(const Appearance &a, const Appearance &b) {
-    return same(a.state == b.state, "state") && same(a.type == b.type, "type") && same(a.value == b.value, "value") &&
+    // The row's text as written (appearance_text): a colour row's word or reference, any other's name; the slot the
+    // TYPE does not write is latent (a code-built row's colour reads back authored).
+    return same(a.state == b.state, "state") && same(a.type == b.type, "type") &&
+           same(appearance_text(a) == appearance_text(b), "value") &&
            same(a.has_map_state == b.has_map_state && a.map_state == b.map_state, "map_state") &&
            same(a.has_height == b.has_height && a.height == b.height, "height") && same(a.flags == b.flags, "flags");
   }
@@ -1896,7 +1982,8 @@ private:
     return list(a, b, name, [this](const Appearance &x, const Appearance &y) { return appearance(x, y); });
   }
   bool item(const Item &a, const Item &b) {
-    return same(a.type == b.type, "type") && same(a.value == b.value, "value") && same(a.text == b.text, "text") &&
+    return same(a.type == b.type, "type") && same(a.value == b.value, "value") &&
+           same(item_text(a) == item_text(b), "text") &&
            same(a.justify == b.justify, "justify") && same(a.vjustify == b.vjustify, "vjustify") &&
            same(a.justify_offset == b.justify_offset, "justify_offset") &&
            same(a.vjustify_offset == b.vjustify_offset, "vjustify_offset") &&
