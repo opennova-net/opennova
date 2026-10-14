@@ -147,23 +147,22 @@ bool choose_token(const std::vector<Choice> &choices, std::string &text, std::st
 
 // --- the colours --------------------------------------------------------------------------------------
 
+// Whether the model can hold a colour's text: not a %NAME% inside a longer text, which the game reads from the
+// variable's value there [orig: NapiXML_ExpandVariablesInText @ 0x63a000] (the reader's fatal note, D-MNU-1).
+bool colour_holdable(const std::string &text, std::string &error) {
+	if (mns::is_variable_reference(text) || !mns::holds_variable_reference(text)) return true;
+	error = "The game reads a stylesheet variable inside a colour from its value there, which the menu cannot hold: "
+	        "name one whole, %NAME%.";
+	return false;
+}
+
 // A colour's text, as the game reads it into the model (mnu::color_of): one %NAME% stays the reference the
-// stylesheet fills; any other text must be hex digits the read takes whole [orig: CRT_wcstoxl @ 0x76e93b], or the
-// game would read another word than the text shows; a %NAME% inside a longer text is read from the variable's
-// value there [orig: NapiXML_ExpandVariablesInText @ 0x63a000], which the menu cannot hold (D-MNU-1). The field
-// shows the colour as the menu writes it (mnu::color_word): the reference, or eight upper-case hex digits.
+// stylesheet fills; any other text is the word the read takes of it [orig: CRT_wcstoxl @ 0x76e93b], its valid
+// prefix or 0 ('#FF0000' and 'red' read 0), which the field then shows as the menu writes it (mnu::color_word: the
+// reference, or eight upper-case hex digits). The game never fails on such a text; a %NAME% inside one alone is
+// refused (colour_holdable).
 bool colour_from_text(const std::string &text, mnu::Color &out, std::string &error) {
-	if (!mns::is_variable_reference(text)) {
-		if (mns::holds_variable_reference(text)) {
-			error = "The game reads a stylesheet variable inside a colour from its value there, which the menu cannot "
-			        "hold: name one whole, %NAME%.";
-			return false;
-		}
-		if (!mnu::color_reads_whole(text)) {
-			error = "A colour is hex digits, AARRGGBB (six, RRGGBB, read alpha 0), or one stylesheet variable, %NAME%.";
-			return false;
-		}
-	}
+	if (!colour_holdable(text, error)) return false;
 	out = mnu::color_of(text);
 	return true;
 }
@@ -452,7 +451,10 @@ bool appearance_type_set(void *r, const Value &value, std::string &error) {
 	static const std::vector<Choice> choices = appearance_type_choices();
 	std::string token = std::get<std::string>(value);
 	if (!choose_token(choices, token, error)) return false;
-	mnu::set_appearance_type(AP(r), token);
+	mnu::Appearance &row = AP(r);
+	if (mnu::appearance_color_type(token) && !mnu::appearance_color_type(row.type) && !colour_holdable(row.value, error))
+		return false;
+	mnu::set_appearance_type(row, token);
 	return true;
 }
 bool appearance_type_get(void *r, Value &out) {
@@ -548,7 +550,10 @@ bool item_type_set(void *r, const Value &value, std::string &error) {
 	static const std::vector<Choice> choices = token_choices(mnu::kItemTypes);
 	std::string token = std::get<std::string>(value);
 	if (!choose_token(choices, token, error)) return false;
-	mnu::set_item_type(IT(r), token);
+	mnu::Item &item = IT(r);
+	if (mnu::item_color_type(token) && !mnu::item_color_type(item.type) && !colour_holdable(item.text, error))
+		return false;
+	mnu::set_item_type(item, token);
 	return true;
 }
 bool item_type_get(void *r, Value &out) {
@@ -1661,6 +1666,20 @@ MenuContext menu_context(const RecordHandle &record, const RecordOwners &owners)
 
 mnu::SchemaApplies menu_list_reads(const RecordHandle &owner, const RecordOwners &owners, size_t list) {
 	return list_reads_in(menu_context(owner, owners), list_token(owner.kind, list));
+}
+
+const char *const *menu_type_tokens(const RecordHandle &record, const RecordOwners &owners) {
+	const NodeKind kind = record.kind;
+	const bool cell = kind == kind_index("item");
+	const bool items_row = kind == kind_index("items.appearance");
+	if (!cell && kind != kind_index("items.item") && !items_row && kind != kind_index("appearance") &&
+	    kind != kind_index("shuttle") && kind != kind_index("scrollup") && kind != kind_index("scrolldown"))
+		return nullptr;
+	if (!cell && kind != kind_index("items.item") && !items_row) return mnu::kAppearanceTypes;
+	const MenuContext context = menu_context(record, owners);
+	const mnu::WindowType form = context.window ? context.window->type : mnu::WindowType::Window;
+	if (items_row) return form == mnu::WindowType::Table ? mnu::kTableAppearanceTypes : mnu::kAppearanceTypes;
+	return mnu::item_types_for(form, cell);
 }
 
 Applicability menu_applicability(mnu::SchemaApplies applies) {

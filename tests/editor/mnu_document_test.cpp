@@ -2018,22 +2018,28 @@ int colours_and_flags() {
 	Diagnostic error;
 	TEST_EXPECT(document->apply(set_edit(exit, "font.default_fg", std::string("%DEF_TEXTCOLOR%")), error));
 	// S27: a colour is held as the game reads it (mnu::Color): one %NAME% the reference, any other text the word
-	// wcstoul reads of it, shown as the menu writes it (eight upper-case hex digits); a text the read would not
-	// take whole, or a %NAME% inside one, is refused; Set "" leaves a FONT colour out.
+	// wcstoul reads of it (its valid prefix, or 0), shown as the menu writes it (eight upper-case hex digits); a
+	// %NAME% inside a longer text alone is refused (the game reads the variable's value there, D-MNU-1); Set ""
+	// leaves a FONT colour out.
 	TEST_EXPECT(text_of(*document, exit, "font.default_fg") == "%DEF_TEXTCOLOR%");
 	TEST_EXPECT(document->apply(set_edit(exit, "font.default_bg", std::string("ffba58")), error) &&
 	            text_of(*document, exit, "font.default_bg") == "00FFBA58");
-	TEST_EXPECT(!document->apply(set_edit(exit, "font.default_bg", std::string("#FF0000")), error));
+	TEST_EXPECT(document->apply(set_edit(exit, "font.default_bg", std::string("#FF0000")), error) &&
+	            text_of(*document, exit, "font.default_bg") == "00000000");
+	TEST_EXPECT(document->apply(set_edit(exit, "font.default_bg", std::string("FF00ff00zz")), error) &&
+	            text_of(*document, exit, "font.default_bg") == "FF00FF00");
 	TEST_EXPECT(!document->apply(set_edit(exit, "font.default_bg", std::string("FF%DEF_TEXTCOLOR%")), error));
-	TEST_EXPECT(text_of(*document, exit, "font.default_bg") == "00FFBA58");
+	TEST_EXPECT(text_of(*document, exit, "font.default_bg") == "FF00FF00");
 	TEST_EXPECT(document->apply(set_edit(exit, "font.default_bg", std::string("")), error) &&
 	            !window_of(*document, exit)->font.default_bg.present);
 	const NodeAddress appearance = child_of(*document, exit, "appearance");
 	TEST_EXPECT(document->apply({set_edit(appearance, "type", std::string("COLOR")), set_edit(appearance, "value", std::string("FF102030"))},
 	                            error));
 	TEST_EXPECT(schema(appearance, "value").color == FieldColor::HexArgb);
-	TEST_EXPECT(text_of(*document, appearance, "value") == "FF102030" &&
-	            !document->apply(set_edit(appearance, "value", std::string("red")), error));
+	TEST_EXPECT(text_of(*document, appearance, "value") == "FF102030");
+	TEST_EXPECT(document->apply(set_edit(appearance, "value", std::string("red")), error) &&
+	            text_of(*document, appearance, "value") == "00000000");
+	TEST_EXPECT(document->apply(set_edit(appearance, "value", std::string("FF102030")), error));
 	// A TYPE changed reads the row's text as the new TYPE does: the colour's word is the name an IMAGE reads.
 	TEST_EXPECT(document->apply(set_edit(appearance, "type", std::string("IMAGE")), error) &&
 	            text_of(*document, appearance, "value") == "FF102030");
@@ -2071,6 +2077,78 @@ int colours_and_flags() {
 // lookup returns) key on the load generation as well: two screens named A (the first shadowed),
 // then the file loaded again in place as A and B, at the same revision and with the same row
 // identities, answer from the new file.
+// S27 (the #1142 trunk review): a row's or an item's TYPE takes a token its parse knows where it sits (a LIST's
+// ITEM an ID alone, a spin list's ID / IMAGE / COLOR, a TABLE cell's ID / BITMAP [orig: CListWnd_ParseXMLDefinition
+// @ 0x645b0f..0x645b26; CUISpinList_ParseXMLDefinition @ 0x64bd10; CTableWnd_ParseXMLContentDefinition @
+// 0x6427d0]), and offers only those; a TYPE made a colour reads the text as the colour, refusing a %NAME% inside
+// it as the text's own Set does (D-MNU-1); a colour <-> name change undoes to the bytes it had.
+int item_types_by_form() {
+	test_temp::TempDir dir("opennova_menu_item_types_test");
+	const std::string path = dir.file("options.mnu");
+	TEST_EXPECT(test_io::write_text(path, kShippedShape));
+	MnuDocument document;
+	TEST_EXPECT(load(document, path));
+	NodeAddress back, spin, results;
+	TEST_EXPECT(find_definition(AssetGraph(), document, "BACK", back) &&
+	            find_definition(AssetGraph(), document, "SPIN", spin) &&
+	            find_definition(AssetGraph(), document, "RESULTS", results));
+	const std::string original = document.serialize().text;
+	Diagnostic error;
+	const auto offered = [&](const NodeAddress &at) {
+		std::vector<std::string> names;
+		for (const FieldSchema &field : document.fields(at.kind)) {
+			if (field.id != "type") continue;
+			std::vector<FieldChoice> own;
+			for (const FieldChoice &choice : document.choices_on(at, document.field_on(at, field), own))
+				names.push_back(choice.name);
+		}
+		return names;
+	};
+	const NodeAddress spin_item = child_of(document, spin, "items.item");
+	TEST_EXPECT(offered(spin_item) == (std::vector<std::string>{"", "ID", "IMAGE", "COLOR"}));
+	// The spin list's ITEM made a COLOR reads "One" as the colour the read takes (0); undone, it is "One" again.
+	TEST_EXPECT(document.apply(set_edit(spin_item, "type", std::string("color")), error) &&
+	            text_of(document, spin_item, "type") == "COLOR" && text_of(document, spin_item, "text") == "00000000");
+	document.undo();
+	TEST_EXPECT(document.serialize().text == original && text_of(document, spin_item, "text") == "One");
+	// A %NAME% inside the text: refused by the TYPE made a colour, alone or in one batch with the text.
+	TEST_EXPECT(document.apply(set_edit(spin_item, "text", std::string("x%A%")), error));
+	TEST_EXPECT(!document.apply(set_edit(spin_item, "type", std::string("COLOR")), error));
+	document.undo();
+	TEST_EXPECT(!document.apply({set_edit(spin_item, "text", std::string("x%A%")), set_edit(spin_item, "type", std::string("COLOR"))},
+	                            error));
+	TEST_EXPECT(document.serialize().text == original);
+	// A TABLE cell reads ID and BITMAP: COLOR is none there.
+	const NodeAddress row = child_of(document, results, "items.row");
+	const NodeAddress cell = child_of(document, row, "item");
+	TEST_EXPECT(offered(cell) == (std::vector<std::string>{"", "ID", "BITMAP"}));
+	TEST_EXPECT(!document.apply(set_edit(cell, "type", std::string("COLOR")), error) &&
+	            error.message.find("ID, BITMAP") != std::string::npos);
+	// A LIST's ITEM reads ID alone: a COLOR would be its label's text, the TYPE none.
+	TEST_EXPECT(document.apply(set_edit(back, "type", std::string("list")), error));
+	TEST_EXPECT(document.apply(op_edit(EditOperation::Add, {back.row, menu_kind("items.item"), 0}, back.child), error));
+	const NodeAddress list_item{back.row, menu_kind("items.item"), document.last_added()};
+	TEST_EXPECT(offered(list_item) == (std::vector<std::string>{"", "ID"}));
+	TEST_EXPECT(document.apply(set_edit(list_item, "text", std::string("Play")), error));
+	TEST_EXPECT(!document.apply(set_edit(list_item, "type", std::string("COLOR")), error) &&
+	            text_of(document, list_item, "text") == "Play");
+	TEST_EXPECT(document.apply(set_edit(list_item, "type", std::string("id")), error) &&
+	            text_of(document, list_item, "type") == "ID");
+	while (document.can_undo()) document.undo();
+	// A colour row made an image holds the word as its name; undone, the colour again, byte for byte.
+	NodeAddress colour_row;
+	for (size_t i = 0; i < 4; ++i) {
+		const NodeAddress a = child_of(document, back, "appearance", i);
+		if (text_of(document, a, "type") == "COLOR") colour_row = a;
+	}
+	TEST_EXPECT(colour_row.child && text_of(document, colour_row, "value") == "FF00FF00");
+	TEST_EXPECT(document.apply(set_edit(colour_row, "type", std::string("IMAGE")), error) &&
+	            text_of(document, colour_row, "value") == "FF00FF00");
+	document.undo();
+	TEST_EXPECT(text_of(document, colour_row, "type") == "COLOR" && document.serialize().text == original);
+	return 0;
+}
+
 int memos_follow_a_load_in_place() {
 	test_temp::TempDir dir("opennova_menu_load_in_place");
 	const std::string path = dir.file("twice.mnu");
@@ -2143,7 +2221,7 @@ int parts_in_words() {
 
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
-	return parts_in_words() || memos_follow_a_load_in_place() || colours_and_flags() || changes_since_save() || structure_and_save() || validation() || windows_at_depth() || every_list() || defaults_survive() ||
+	return parts_in_words() || memos_follow_a_load_in_place() || colours_and_flags() || item_types_by_form() || changes_since_save() || structure_and_save() || validation() || windows_at_depth() || every_list() || defaults_survive() ||
 	       window_index_matches_the_compiler() || copy_and_paste() || duplicate_selection() || copy_between_encodings() ||
 	       texts_in_their_code_page() ||
 	       copy_selection_shapes() || duplicate_screen() || typed_add_and_screen_copy() || screens_stay_found() ||

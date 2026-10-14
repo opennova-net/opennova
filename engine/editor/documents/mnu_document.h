@@ -136,6 +136,8 @@ protected:
 	// Whether the record's window type reads the field (and an ACTION's verb, an extra
 	// element's tag), and what it references given the record's other fields.
 	void refine_field(const NodeAddress &address, FieldUse &use) const override;
+	// A row's or an item's TYPE offers the tokens its parse knows where the record sits (menu_type_tokens).
+	bool record_choices(const NodeAddress &address, const FieldUse &use, std::vector<FieldChoice> &out) const override;
 	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
 	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
 	           Diagnostic &error) override;
@@ -152,7 +154,7 @@ protected:
 	// refused), its width counted in the game's characters (the reader narrows every text to the code
 	// page); a name the reader would not keep where the record sits is refused: a window keeps only
 	// its PLAYERLIST and SERVERLIST attributes, which take no value, and only the extra elements its
-	// parses read at its top level.
+	// parses read at its top level; a row's or an item's TYPE only a token its parse knows there.
 	bool set_value(Node &row, const Located &at, size_t field, const Value &value, std::string &error) override;
 	bool set_written(Node &row, const Located &at, size_t field, bool present, std::string &error) override;
 	// A screen keeps a root window (a Remove of its last, a Move of its last elsewhere); a part goes

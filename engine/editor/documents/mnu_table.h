@@ -65,6 +65,13 @@ MenuContext menu_context(const RecordHandle &record, const RecordOwners &owners)
 mnu::SchemaApplies menu_list_reads(const RecordHandle &owner, const RecordOwners &owners, size_t list);
 // The format's answer as the editor's.
 Applicability menu_applicability(mnu::SchemaApplies applies);
+// The TYPE tokens a row's or an item's parse knows where the record sits (nullptr-ended, none for any
+// other record): an ITEM's its form's [orig: CListWnd_ParseXMLDefinition @ 0x645770, the compare @
+// 0x645b0f..0x645b26: a LIST's ID alone; CUISpinList_ParseXMLDefinition @ 0x64bd10: ID, IMAGE, COLOR;
+// CTableWnd_ParseXMLContentDefinition @ 0x6427d0: a cell's ID, BITMAP] (mnu::item_types_for), an ITEMS
+// APPEARANCE's a TABLE's IMAGEROW too [orig: @ 0x642816], any other APPEARANCE row's the window's
+// (mnu::kAppearanceTypes). The reader holds any other token as none; so does the game.
+const char *const *menu_type_tokens(const RecordHandle &record, const RecordOwners &owners);
 // The colour a field's text holds by what it names (the format's rule: a style colour's hex word).
 FieldColor menu_reference_colour(ReferenceKind reference);
 

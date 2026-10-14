@@ -463,6 +463,14 @@ std::string line_path(const std::string &line) {
 // Exactly one path: a field set to another value changes that field and nothing else, but for the two
 // couplings the format has: a block's toggle decides whether its members are written, and a BODY's draw
 // kind and its three flags stay in step.
+// Whether a row's (`value`) or an item's (`text`) TYPE holds a colour.
+bool colour_type(const RecordHandle &record, const std::string &text_field) {
+	Value type;
+	if (!get(record, "type", type)) return false;
+	const std::string &token = std::get<std::string>(type);
+	return text_field == "value" ? mnu::appearance_color_type(token) : mnu::item_color_type(token);
+}
+
 bool test_no_field_aliases_another() {
 	mnu::Document doc = every_element();
 	const std::vector<std::string> before = snapshot(doc);
@@ -504,8 +512,10 @@ bool test_no_field_aliases_another() {
 				                       (path == "display" || path == "custom_draw" || path == "bitmap_draw" ||
 				                        path == "bitmap_text");
 				// A row's or an item's TYPE set reads its text as the new TYPE does (mnu::set_appearance_type,
-				// set_item_type): a texture name made a colour is written as the word the read takes of it.
-				const bool retyped_text = on_record && field.id == "type" && (path == "value" || path == "text");
+				// set_item_type): a texture name made a colour is written as the word the read takes of it, and
+				// only a change between a colour and a text does that.
+				const bool retyped_text = on_record && field.id == "type" && (path == "value" || path == "text") &&
+				                          colour_type(records[r].record, path) != colour_type(target.record, path);
 				CHECK(self || member || draw_kind || retyped_text,
 				      target.key << " " << field.id << " also changed " << after[i]);
 			}
