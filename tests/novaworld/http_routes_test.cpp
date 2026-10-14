@@ -1742,7 +1742,8 @@ public:
 	// The ClientHostUpdate that first carries the HostKey, as a stock host's at its mission's
 	// start (the key names the listing's owner), pumped while it goes out and is ACKed.
 	void present_key(const std::string &key) {
-		session_.send_host_update({{0, "HostKey", key}}, {});
+		session_.set_host_list_vars({ { 0, "HostKey", key } });
+		session_.send_host_update();
 		pump_until(300, [] { return false; });
 	}
 

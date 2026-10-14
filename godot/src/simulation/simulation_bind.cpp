@@ -202,6 +202,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_local_player_look", "dx_px", "dy_px"), &Simulation::add_local_player_look);
 	ClassDB::bind_method(D_METHOD("set_local_player_mouse", "sensitivity", "invert_y"), &Simulation::set_local_player_mouse);
 	ClassDB::bind_method(D_METHOD("flip_local_player_mouse"), &Simulation::flip_local_player_mouse);
+	ClassDB::bind_method(D_METHOD("toggle_join_lock"), &Simulation::toggle_join_lock);
 	ClassDB::bind_method(D_METHOD("step_local_player_mouse_scale", "param_value", "negative"),
 			&Simulation::step_local_player_mouse_scale);
 	ClassDB::bind_method(D_METHOD("request_local_player_stance", "stance"), &Simulation::request_local_player_stance);

@@ -221,7 +221,8 @@ public:
 	// The update that first carries the key (a stock host's at its mission's
 	// start), which also lands it in the session's kept Host list.
 	void present_key(const std::string &key) {
-		session_.send_host_update({{0, "HostKey", key}}, {});
+		session_.set_host_list_vars({ { 0, "HostKey", key } });
+		session_.send_host_update();
 		drive([] { return false; }, 4);
 	}
 
