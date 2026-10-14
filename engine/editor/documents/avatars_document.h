@@ -133,7 +133,8 @@ private:
 		std::unordered_set<NodeId> unbound;
 	};
 	const Order &order() const;
-	// The first part of a kind above the nationality row `nationality` ("" for none).
+	// The first part of a kind above the nationality row `nationality` ("" for none), in the rows as the batch has
+	// left them.
 	std::string first_part(int kind, NodeId nationality) const;
 	size_t reader_stops_line_ = 0;
 	mutable Order order_;

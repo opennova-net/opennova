@@ -281,6 +281,22 @@ int test_order() {
 	TEST_EXPECT(facts.inert && facts.inert_reason.find("no nationality stands below it") != std::string::npos);
 	std::printf("order: a combination binds the last part of a name above it, and a save keeps every part where it stood\n");
 
+	// One batch moves a nationality below the parts and adds a division and a combination in it: the combination is
+	// checked against, and takes, the parts above the nationality where the batch has put it.
+	const std::string above_none = "nationality N00 AV_NAT_US\r\n{\r\n}\r\ndefine head H\r\n{\r\n}\r\ndefine body B\r\n{\r\n}\r\n";
+	AvatarsDocument moving;
+	TEST_EXPECT(moving.load_bytes(bytes_of(above_none), "Avatars.def", AssetKind::AvatarDefs, "jo", error) &&
+	            moving.rows().size() == 3 && moving.rows()[0]->kind == kNationality);
+	const NodeId us = moving.rows()[0]->id;
+	const std::vector<Edit> batch{editor_test::op_edit(EditOperation::Move, {us, kNationality, 0}),
+	                              editor_test::op_edit(EditOperation::Add, {us, kDivision, 0}),
+	                              editor_test::op_edit(EditOperation::Add, {us, kCombo, 0}, batch_made(1))};
+	TEST_EXPECT(moving.apply(batch, error) && moving.rows()[2]->id == us);
+	const SerializeResult moved = moving.serialize();
+	TEST_EXPECT(moved.ok() && moved.text.find("define body B") < moved.text.find("nationality 0") &&
+	            moved.text.find("\t\tcombo 1 H B\r\n") != std::string::npos);
+	std::printf("order: a batch's combination takes the parts above its nationality where the batch moved it\n");
+
 	// Parts added past the reader's 512: the text a save writes stops the game's reader, the finding refusing a build.
 	std::string near;
 	for (int i = 0; i < 511; ++i) near += "define head H" + std::to_string(i) + "\r\n";

@@ -583,7 +583,8 @@ std::shared_ptr<Node> AvatarsDocument::make_node(NodeKind kind, NodeId, const st
 }
 
 std::string AvatarsDocument::first_part(int kind, NodeId nationality) const {
-	for (const auto &node : rows()) {
+	// The rows as the batch has left them: a nationality it added or moved stands where it now does.
+	for (const auto &node : staged_rows()) {
 		if (node && node->id == nationality) break;
 		const AvatarPartRecord *p = part_row(node);
 		if (p && p->kind == kind) return p->name;
