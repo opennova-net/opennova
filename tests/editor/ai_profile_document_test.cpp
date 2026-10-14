@@ -144,6 +144,25 @@ int test_type_keys() {
 		Value mine, read;
 		TEST_EXPECT(document.get(at, row.key, mine) && back.get(back_at, row.key, read) && mine == read);
 	}
+	// Every type change saves a file that reads back as it was saved: the record is the file's as the game reads it.
+	const std::string ground = "type\tGROUND\r\nview_dist\t500\r\npatrol_speed\t3\r\nprimary_weap\tAI_LAW\r\n";
+	for (const int32_t type : {0, aip::kTypeHelo, aip::kTypeOrganic}) {
+		AiProfileDocument changed;
+		TEST_EXPECT(changed.load_bytes(bytes_of(ground), "ai/g.aip", AssetKind::AiProfile, "jo", error));
+		Edit retype;
+		retype.address = {changed.rows()[0]->id, kProfile, 0};
+		retype.field = "type";
+		retype.value = int64_t(type);
+		TEST_EXPECT(changed.apply(retype, error));
+		const std::string once = changed.serialize().text;
+		AiProfileDocument again;
+		TEST_EXPECT(again.load_bytes(bytes_of(once), "ai/g.aip", AssetKind::AiProfile, "jo", error));
+		const std::string twice = again.serialize().text;
+		if (once != twice)
+			std::printf("  type %d: saved %zu bytes [%s], read and saved again %zu bytes [%s]\n", int(type), once.size(),
+			            once.c_str(), twice.size(), twice.c_str());
+		TEST_EXPECT(once == twice);
+	}
 	std::printf("type keys: another type's key refused, a type change clearing the keys the new type does not read\n");
 	return 0;
 }

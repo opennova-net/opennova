@@ -190,9 +190,11 @@ bool set_key(const aip::KeyRow &row, aip::Profile &p, const Value &value, std::s
 	}
 	// A new type's reader reads none of another type's keys, and keeps none of a subtype word of the other type
 	// [orig: AIProfile_ParseProperty @ 0x45DF15..0x45DF2F; the subtype words @ 0x45E887 (GROUND), @ 0x45FA63 (HELO)]:
-	// the profile becomes what the file then holds as the game reads it, which the writer puts down: the loader's
-	// zeroed record [orig: AIProfile_LoadOrFind @ 0x45FE09] of the new type, each key the type reads as it stood
-	// (a speed both types read moving to the new type's member), a value the type has no word for none.
+	// the profile becomes what the file then holds as the game reads it, which the writer puts down. The loader's
+	// zeroed record [orig: AIProfile_LoadOrFind @ 0x45FE09] of the new type reads each line the old profile's
+	// writer puts down (its words, value_words) through the new type's arm, a key the new type does not read none
+	// (a speed both read moving to the new type's member as its words read there; given back, the old type reads
+	// the same words again).
 	if (row.unit == aip::Unit::Type && stored != p.type) {
 		const aip::Profile was = p;
 		aip::Profile made;
@@ -204,7 +206,9 @@ bool set_key(const aip::KeyRow &row, aip::Profile &p, const Value &value, std::s
 				continue;
 			}
 			const int32_t held = other.get ? other.get(was) : 0;
-			if (held != 0 && other.set && !aip::value_words(other, stored, held).empty()) other.set(made, held);
+			if (held == 0 || !other.set) continue;
+			const std::vector<std::string> words = aip::value_words(other, was.type, held);
+			if (!words.empty()) other.set(made, aip::read_value(other, stored, words, 0));
 		}
 		p = made;
 		return true;
@@ -306,7 +310,10 @@ bool AiProfileDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std
 	auto notes = std::make_shared<textlayout::Notes>();
 	std::vector<aip::UnreadLine> unread;
 	auto row = std::make_shared<AiProfileRow>();
-	row->profile = aip::parse_profile(bytes.data(), bytes.size(), *notes, &unread);
+	// The loader hands a single NUL for an empty file (Document's load): an empty profile, of no type and no line, as
+	// a profile of no type saves.
+	const size_t size = bytes.size() == 1 && bytes[0] == 0 ? 0 : bytes.size();
+	row->profile = aip::parse_profile(bytes.data(), size, *notes, &unread);
 	const std::string text(bytes.begin(), bytes.end());
 	for (const aip::UnreadLine &line : unread) {
 		std::string why;
