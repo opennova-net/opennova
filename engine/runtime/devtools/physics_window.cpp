@@ -1,5 +1,7 @@
 #include <runtime/devtools/physics_window.h>
 
+#include <runtime/devtools/ui_kit.h>
+
 #include <imgui.h>
 
 #include <cstdio>
@@ -82,7 +84,7 @@ void PhysicsWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 				static_cast<long long>(authored), static_cast<int>(hitbox_record_.report.organics.size()));
 	}
 	if (!snapshot_.valid) {
-		ImGui::TextUnformatted("No collision state pushed (load a mission).");
+		ui_kit::empty_state("No collision state pushed (load a mission).");
 		return;
 	}
 

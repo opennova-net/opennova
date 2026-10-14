@@ -1,5 +1,6 @@
 #include <runtime/devtools/rays_window.h>
 #include <base/io/tick_rate.h>
+#include <runtime/devtools/ui_kit.h>
 
 #include <imgui.h>
 
@@ -66,7 +67,7 @@ void RaysWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	if (ImGui::Checkbox("Show in Game view", &layer_on)) pass.set_overlay_enabled(overlay_layer_, layer_on);
 	if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) ImGui::SetTooltip("%s", overlay_layer_.tooltip());
 	if (!snapshot_.valid) {
-		ImGui::TextUnformatted("No ray capture pushed (load a mission).");
+		ui_kit::empty_state("No ray capture pushed (load a mission).");
 		return;
 	}
 

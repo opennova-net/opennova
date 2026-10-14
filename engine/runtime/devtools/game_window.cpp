@@ -2,6 +2,7 @@
 
 #include <runtime/devtools/debug_control_ids.h>
 #include <runtime/devtools/overlay_canvas.h>
+#include <runtime/devtools/ui_kit.h>
 
 #include <imgui.h>
 
@@ -91,13 +92,13 @@ void GameWindow::draw_toolbar() {
 		ImGui::BeginDisabled(!transport_ok || !enabled);
 		if (ImGui::Button(label)) request_transport(verb);
 		ImGui::EndDisabled();
-		if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_ForTooltip)) {
-			if (!transport_ok && transport != nullptr && !transport->reason.empty()) {
-				ImGui::SetTooltip("%s", transport->reason.c_str());
-			} else if (status_.transport_locked && std::string(verb) != "resume") {
-				ImGui::SetTooltip("A network session keeps ticking: pause and step are refused.");
+		ui_kit::tooltip_lazy([&] {
+			if (!transport_ok && transport != nullptr && !transport->reason.empty()) return transport->reason;
+			if (status_.transport_locked && std::string(verb) != "resume") {
+				return std::string("A network session keeps ticking: pause and step are refused.");
 			}
-		}
+			return std::string();
+		});
 		ImGui::SameLine();
 	};
 	transport_button(status_.playing ? "Pause" : "Paused", "pause", status_.playing);
@@ -109,9 +110,7 @@ void GameWindow::draw_toolbar() {
 	ImGui::BeginDisabled(scripts == nullptr || !scripts->writable);
 	if (ImGui::Checkbox("Scripts paused", &scripts_paused)) request_scripts_paused(scripts_paused);
 	ImGui::EndDisabled();
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_ForTooltip)) {
-		ImGui::SetTooltip("Pause the mission's WAC scripts while the rest of the world runs.");
-	}
+	ui_kit::tooltip("Pause the mission's WAC scripts while the rest of the world runs.");
 	ImGui::SameLine();
 
 	const ControlState *leave = board_.state(control_id::kRuntimeReturnToMenu);
@@ -210,11 +209,9 @@ void GameWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 		request_spectator(spectator);
 	}
 	ImGui::EndDisabled();
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled)) {
-		ImGui::SetTooltip(spectator_available_
-				? "Detach the local player and unlock the free camera. Enter Play, then hold right mouse and use WASD/Q/E to fly."
-				: "Spectator switching requires a local authority player.");
-	}
+	ui_kit::tooltip(spectator_available_
+			? "Detach the local player and unlock the free camera. Enter Play, then hold right mouse and use WASD/Q/E to fly."
+			: "Spectator switching requires a local authority player.");
 	draw_toolbar();
 	ImGui::Separator();
 	if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !ImGui::GetIO().WantTextInput &&

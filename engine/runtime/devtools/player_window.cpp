@@ -1,6 +1,7 @@
 #include <runtime/devtools/player_window.h>
 
 #include <runtime/devtools/debug_control_ids.h>
+#include <runtime/devtools/ui_kit.h>
 
 #include <imgui.h>
 
@@ -93,7 +94,7 @@ void PlayerWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	(void)pass;
 	(void)frame_index;
 	if (!snapshot_.valid || !snapshot_.report.valid) {
-		ImGui::TextDisabled("No local player (load a mission, or spectate).");
+		ui_kit::empty_state("No local player (load a mission, or spectate).");
 	} else {
 		const world::inspect::LocalPlayerReport &r = snapshot_.report;
 		ImGui::TextUnformatted(body_text_.c_str());
@@ -156,9 +157,7 @@ void PlayerWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	ImGui::SameLine();
 	if (ImGui::Button("Deploy at zone")) request_deploy_pick(deploy_zone_edit_);
 	ImGui::EndDisabled();
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_ForTooltip)) {
-		ImGui::SetTooltip("One deployment pick while the deploy screen is owed (0 = the default spawn).");
-	}
+	ui_kit::tooltip("One deployment pick while the deploy screen is owed (0 = the default spawn).");
 	const ControlState *crew = board_.state(control_id::kCrewLocalPlayer);
 	ImGui::BeginDisabled(crew == nullptr || !crew->writable);
 	ImGui::SetNextItemWidth(90.0f);
