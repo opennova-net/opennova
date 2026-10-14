@@ -57,15 +57,15 @@ weapon "WPN_ON_AR15"
 	action "fire"
 		anim anim_wpn_fire
 		soundsetend GS_ONAR15
-		delayend 4
-		function wpn_std_fire
 		particle Effect_ONAR15MF
 		particleuserpoint mflash01
+		delayend 4
+		function wpn_std_fire
 	end
 	action "recoil"
-		function wpn_std_recoil
 		particle Effect_ONAR15Cas
 		particleuserpoint bcasing
+		function wpn_std_recoil
 	end
 	action "reload"
 		anim anim_wpn_reload
@@ -116,6 +116,7 @@ weapon "WPN_ON_PISTOL"
 	hudicon h_onpist.tga
 	gfx1 on_pist
 	gfx3 onpist_3
+	special_hold 2
 	category 2
 	ammoclass CLASS_ON9MM 1
 	crosshair onxhair.tga
@@ -151,15 +152,15 @@ weapon "WPN_ON_PISTOL"
 	action "fire"
 		anim anim_wpn_fire
 		soundsetend GS_ONPIST
-		delayend 10
-		function wpn_std_fire
 		particle Effect_ONPistMF
 		particleuserpoint mflash01
+		delayend 10
+		function wpn_std_fire
 	end
 	action "recoil"
-		function wpn_std_recoil
 		particle Effect_ONPistCas
 		particleuserpoint bcasing
+		function wpn_std_recoil
 	end
 	action "reload"
 		anim anim_wpn_reload
