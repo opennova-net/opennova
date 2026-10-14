@@ -57,6 +57,8 @@ inline void configure_mixed(int &argc, char **argv) {
     std::printf("Selected test cases: %s\n", selected() ? "synthetic + retail compatibility" : "synthetic");
 }
 
+// The variable's value as getenv gives it: in the ANSI code page on Windows, not UTF-8, and so
+// every root and file path below (tests/common/file_io.h says why).
 inline std::string env_or_empty(const char *name) {
     const char *value = std::getenv(name);
     return (value != nullptr && value[0] != '\0') ? std::string(value) : std::string();

@@ -113,6 +113,8 @@ static const char *test_paths_repo_root(const char *file_path) {
     return result;
 }
 
+// The system temp directory as getenv gives it: in the ANSI code page on Windows, not UTF-8
+// (tests/common/file_io.h says why). test_temp::TempDir (temp_dir.h) is the UTF-8 one.
 static const char *test_paths_temp_dir(void) {
 #ifdef _WIN32
     const char *tmp = getenv("TEMP");
@@ -146,6 +148,6 @@ inline std::string test_paths_unique(const char *stem, const char *ext = "") {
 // The committed fixture at `rel` under the repo's fixtures/ ("terrain/tmap/Tmap.trn"), the root
 // found from this header's own place in the tree.
 inline std::string test_paths_fixture(const std::string &rel) {
-	return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + rel;
+    return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + rel;
 }
 #endif
