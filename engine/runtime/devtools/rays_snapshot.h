@@ -6,6 +6,8 @@
 // unloaded).
 #pragma once
 
+#include <runtime/devtools/capture_table.h>
+
 #include <cstdint>
 
 namespace opennova::devtools {
@@ -37,19 +39,13 @@ inline constexpr float kRayCategoryColors[kRayCategoryCount][3] = {
 	{1.0f, 1.0f, 1.0f},    // Pick
 };
 
-struct RaysCategoryCount {
-	const char *name = "";
-	int32_t held = 0;    // events currently in the ring (<= the ring cap)
-	uint64_t total = 0;  // lifetime recorded — overwrite never hides throughput
-};
-
 struct RaysSnapshot {
 	bool valid = false;
 	uint64_t logic_tick = 0;
 	bool recording = false;   // CollisionWorld ray capture enabled
 	uint32_t category_mask = kRayCategoryMaskAll; // bit i = draw category i
 	int32_t ttl_ticks = 0;           // the capture's fade window
-	RaysCategoryCount categories[kRayCategoryCount];
+	CaptureCount categories[kRayCategoryCount];
 };
 
 }  // namespace opennova::devtools

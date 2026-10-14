@@ -550,6 +550,7 @@ if(OPENNOVA_DEVTOOLS)
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_dev_tools.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/control_board.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/capture_table.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/entity_overlay.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/ai_overlay.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/collision_overlay.cpp
