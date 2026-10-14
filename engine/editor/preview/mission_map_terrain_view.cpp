@@ -4,6 +4,9 @@
 #include <cstddef>
 #include <initializer_list>
 
+#include <formats/trn/charmap_legend.h>
+#include <runtime/terrain_query/surface_type_map.h>
+
 namespace opennova::editor {
 
 namespace {
@@ -160,6 +163,42 @@ void med_flatness_map(const uint16_t *atlas, std::vector<uint32_t> &out) {
 		}
 }
 
+namespace {
+
+// A class's legend colour as a picture word.
+uint32_t legend_pixel(int surface) {
+	const CharmapLegendColour &c = surface >= 0 && surface < kCharmapLegendCount ? kCharmapLegend[surface] : kCharmapLegendRest;
+	return kOpaque | (uint32_t(c.r) << 16) | (uint32_t(c.g) << 8) | uint32_t(c.b);
+}
+
+// The class the char map sampler reads at atlas texel (x, z) [terrain::surface_type_at_fixed: the texel shifted down
+// by the sample shift, class 1 past the map].
+int surface_class_at(const uint8_t *classes, int width, int height, int shift, int x, int z) {
+	if (!classes || width <= 0 || height <= 0) return 1;
+	const int sx = x >> shift, sz = z >> shift;
+	if (sx < 0 || sx >= width || sz < 0 || sz >= height) return 1;
+	return classes[size_t(width) * size_t(sz) + size_t(sx)];
+}
+
+} // namespace
+
+void surface_class_map(const uint8_t *classes, int width, int height, std::vector<uint32_t> &out) {
+	constexpr int kSide = 1024;
+	out.assign(size_t(kSide) * kSide, 0);
+	const int shift = terrain::detail::surface_sample_shift(width);
+	for (int z = 0; z < kSide; ++z)
+		for (int x = 0; x < kSide; ++x)
+			out[size_t(z) * kSide + size_t(x)] = legend_pixel(surface_class_at(classes, width, height, shift, x, z));
+}
+
+MissionMapAtlasRect surface_atlas_rect(int width, int x, int y, int region_width, int region_height) {
+	constexpr int kSide = 1024;
+	if (width <= 0 || width > kSide) return {0, 0, kSide, kSide};
+	const int shift = terrain::detail::surface_sample_shift(width);
+	return {std::clamp(x << shift, 0, kSide), std::clamp(y << shift, 0, kSide), std::clamp((x + region_width) << shift, 0, kSide),
+	        std::clamp((y + region_height) << shift, 0, kSide)};
+}
+
 void med_water_overlay(const uint16_t *atlas, int32_t water_1616, std::vector<uint32_t> &pixels) {
 	if (!atlas || pixels.size() < size_t(1024) * 1024) return;
 	const uint32_t water = uint32_t(water_1616 >> 15);
@@ -171,9 +210,9 @@ void med_water_overlay(const uint16_t *atlas, int32_t water_1616, std::vector<ui
 }
 
 void MissionMapTerrainView::follow(MissionMapBackground background, bool water, const uint16_t *atlas, uint64_t revision,
-                                   int32_t water_1616) {
+                                   int32_t water_1616, const MissionMapSurface &surface, bool terrain) {
 	const bool moved = !followed_ || background != background_ || water != water_ || atlas != atlas_ ||
-	                   revision != revision_ || water_1616 != water_1616_;
+	                   revision != revision_ || water_1616 != water_1616_ || surface != surface_ || terrain != terrain_;
 	if (!moved) return;
 	followed_ = true;
 	background_ = background;
@@ -181,17 +220,44 @@ void MissionMapTerrainView::follow(MissionMapBackground background, bool water, 
 	atlas_ = atlas;
 	revision_ = revision;
 	water_1616_ = water_1616;
+	surface_ = surface;
+	terrain_ = terrain;
 	make_();
+}
+
+void MissionMapTerrainView::patch_surface(const MissionMapSurface &surface, const std::vector<MissionMapAtlasRect> &regions) {
+	if (!followed_ || background_ != MissionMapBackground::Surface || picture_.size() != size_t(1024) * 1024 ||
+	    surface.classes != surface_.classes || surface.width != surface_.width || surface.height != surface_.height)
+		return;
+	surface_ = surface;
+	if (regions.empty()) return;
+	constexpr int kSide = 1024;
+	const int shift = terrain::detail::surface_sample_shift(surface.width);
+	for (const MissionMapAtlasRect &rect : regions) {
+		const int x0 = std::max(rect.x0, 0), y0 = std::max(rect.y0, 0), x1 = std::min(rect.x1, kSide), y1 = std::min(rect.y1, kSide);
+		if (x0 >= x1 || y0 >= y1) continue;
+		for (int z = y0; z < y1; ++z)
+			for (int x = x0; x < x1; ++x)
+				picture_[size_t(z) * kSide + size_t(x)] =
+						legend_pixel(surface_class_at(surface.classes, surface.width, surface.height, shift, x, z));
+		dirty_.push_back({x0, y0, x1, y1});
+	}
+	++serial_;
+	++patched_;
 }
 
 void MissionMapTerrainView::make_() {
 	picture_.clear();
+	// The surface classes: the char map's, over a terrain read whatever its heights.
+	if (background_ == MissionMapBackground::Surface && terrain_)
+		surface_class_map(surface_.classes, surface_.width, surface_.height, picture_);
 	if (atlas_) {
 		switch (background_) {
 		case MissionMapBackground::Height: nile_height_map(atlas_, 1024, 1024, picture_); break;
 		case MissionMapBackground::Delta: nile_delta_map(atlas_, 1024, 1024, picture_); break;
 		case MissionMapBackground::Flatness: med_flatness_map(atlas_, picture_); break;
 		case MissionMapBackground::Colour:
+		case MissionMapBackground::Surface:
 		case MissionMapBackground::None:
 		case MissionMapBackground::kCount: break;
 		}
@@ -267,6 +333,7 @@ void MissionMapTerrainView::patch(const uint16_t *atlas, const std::vector<Missi
 				}
 			break;
 		case MissionMapBackground::Colour:
+		case MissionMapBackground::Surface:
 		case MissionMapBackground::None:
 		case MissionMapBackground::kCount: return;
 		}

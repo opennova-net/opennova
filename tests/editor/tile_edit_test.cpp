@@ -53,6 +53,22 @@ struct FlatSpace final : TerrainBrushSpace {
 	double height(TerrainPoint) const override { return 0.0; }
 };
 
+// A map's picture: two pixels a metre, the mission's origin at pixel (100, 100).
+struct ScaledSpace final : TerrainBrushSpace {
+	bool pointer_ground(float x, float y, TerrainPoint &at, double &height) const override {
+		at = TerrainPoint{(double(x) - 100.0) / 2.0, (double(y) - 100.0) / 2.0};
+		height = 0.0;
+		return true;
+	}
+	bool to_picture(TerrainPoint at, double, float &x, float &y) const override {
+		x = float(at.x * 2.0 + 100.0);
+		y = float(at.y * 2.0 + 100.0);
+		return true;
+	}
+	double height(TerrainPoint) const override { return 0.0; }
+	bool planar() const override { return true; }
+};
+
 struct Recorder final : CanvasRequests {
 	std::vector<EditorRequest> requests;
 	std::string words;
@@ -228,6 +244,30 @@ int test_tiles_in_a_mission() {
 	TEST_EXPECT(plan_tile_drop(view, drop, out, error) && serve(session, out));
 	TEST_EXPECT(document->file().entries.back().tile_index == 7 && document->file().entries.back().x_fixed == (16 << 16) &&
 	            document->file().entries.back().z_fixed == (48 << 16));
+	// At a ground point (mission metres) the stamp lands there whatever the picture's scale (a map at two pixels a
+	// metre), where the same numbers as a point of the picture land elsewhere; a tile's drag likewise. Undone.
+	ScaledSpace scaled;
+	TerrainViewContext scaled_view{context, scaled, m};
+	ViewportDrop on_ground = drop;
+	on_ground.ground = true;
+	on_ground.x = 52.0f;
+	on_ground.y = 70.0f;
+	on_ground.snap = 0.0f;
+	TEST_EXPECT(plan_tile_drop(scaled_view, on_ground, out, error) && serve(session, out));
+	TEST_EXPECT(document->file().entries.back().x_fixed == (52 << 16) && document->file().entries.back().z_fixed == (70 << 16));
+	session.handle(request::undo(m));
+	on_ground.ground = false;
+	TEST_EXPECT(plan_tile_drop(scaled_view, on_ground, out, error) && serve(session, out));
+	TEST_EXPECT(document->file().entries.back().x_fixed != (52 << 16));
+	session.handle(request::undo(m));
+	ViewportDrag to_ground = drag;
+	to_ground.ground = true;
+	to_ground.x = 64.0f;
+	to_ground.y = 96.0f;
+	TEST_EXPECT(plan_tile_drag(scaled_view, to_ground, out, error) && serve(session, out));
+	TEST_EXPECT(document->file().entries.front().x_fixed == (64 << 16) && document->file().entries.front().z_fixed == (96 << 16));
+	session.handle(request::undo(m));
+	TEST_EXPECT(document->file().entries.front().x_fixed == (200 << 16));
 	// Delete: the selected tile removed, the selection emptied.
 	ViewportCommand remove;
 	remove.name = "tile_delete";

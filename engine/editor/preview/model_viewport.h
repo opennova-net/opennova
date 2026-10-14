@@ -86,7 +86,7 @@ std::string model_camera_change(const OrbitCamera &camera);
 // The options on the wire (the envelope's `options`, a SetViewport's): {lod ("auto" or a level),
 // ctrl {register: value}, overlays {user_points, lights, pivots}, rig_model, bones, snap,
 // sound {mute, surface, body, female, profile}, damage {state, item}, first_person {view, character,
-// action}, fire {target, surface, range, enemy}}.
+// action, weapon}, fire {target, surface, range, enemy}}.
 io::JsonValue model_options_to_json(const ModelViewportOptions &options);
 
 // A model's viewport (ADR 0046 S10p2, S10p6, S13 V5; ViewportKind::Model): the model document at its

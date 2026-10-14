@@ -238,11 +238,17 @@ int test_script_plays_streams() {
 	const TextDocument *text = text_of(*session.document_base_for("gamemus.bin"));
 	TEST_EXPECT(text != nullptr);
 	if (!text) return 1;
-	const size_t at = text->text().find("play sound_1\n");
-	TEST_EXPECT(at != std::string::npos);
+	// Opened beside its bank, its plays read by the bank's stream names (stream 1 its TONE01), written back as they were.
+	const size_t at = text->text().find("play TONE01\n");
+	TEST_EXPECT(at != std::string::npos && text->text().find("play sound_1\n") == std::string::npos &&
+	            text->text().find("bind sound_1 \"TONE01\"") != std::string::npos);
+	TEST_EXPECT(std::none_of(text->issues().begin(), text->issues().end(), [](const SourceIssue &issue) { return issue.blocks; }));
 	if (at == std::string::npos) return 1;
+	const SerializeResult same = text->serialize();
+	const std::vector<uint8_t> stored = test_io::read_file(root + "/gamemus.bin");
+	TEST_EXPECT(same.ok() && std::string(stored.begin(), stored.end()) == same.text);
 	editor_test::handle_to_end(session, request::edit_record("gamemus.bin",
-	                                                         TextDocument::replace(text->span_at(at + 5, 7), "sound_20")));
+	                                                         TextDocument::replace(text->span_at(at + 5, 6), "sound_20")));
 	bool warned = false;
 	for (const Diagnostic &d : session.view().findings.diagnostics)
 		warned = warned || (d.code() == "reference.missing" && d.severity == DiagnosticSeverity::Warning &&

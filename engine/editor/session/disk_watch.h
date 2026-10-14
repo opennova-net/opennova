@@ -32,7 +32,9 @@ inline constexpr size_t kDiskRoundFiles = 256;
 // are its, under its own rule, and join what a check reads. What is ready is read again alone, as an
 // operation (SessionCore::start_changed_refresh: the sources it touches imported again, the scan updated
 // for those files, the open documents of them read again, Output naming each file that came back); an
-// open document with unsaved edits whose file changed keeps them, its conflict raised at once.
+// open document with unsaved edits whose file changed keeps them, its conflict raised at once. While a
+// gesture is open (a terrain stroke's samples, a drag) what is ready waits for the check after it ends: the
+// refresh would hold the documents its samples edit, the busy gate refusing them mid-gesture.
 class DiskWatch {
 public:
 	explicit DiskWatch(SessionCore &core);

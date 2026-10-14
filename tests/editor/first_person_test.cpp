@@ -122,8 +122,8 @@ struct GunProject {
 		const AssetEntry *entry = scan ? scan->find(name) : nullptr;
 		return entry ? entry->relative_path : "defs/" + name;
 	}
-	bool write_weapons(const std::string &flags) {
-		if (!test_io::write_text(root + "/" + at("weapon.def"), test_io::crlf(weapons(flags)))) return false;
+	bool write_weapons(const std::string &flags, const std::string &more = std::string()) {
+		if (!test_io::write_text(root + "/" + at("weapon.def"), test_io::crlf(weapons(flags) + more))) return false;
 		editor_test::handle_to_end(session, request::rescan());
 		while (session.view().activity.validation.running) session.poll();
 		return true;
@@ -397,6 +397,50 @@ int test_no_first_person() {
 	return 0;
 }
 
+// Two weapons sharing one map (a smoke grenade on the frag's table): the first that pairs it shows, and the view's
+// weapon option picks the other, its gfx1 the gun, its view record and its actions the view's; a weapon that does
+// not play the map shows the first and says so; the option's refusals.
+int test_two_weapons_share_a_map() {
+	GunProject project;
+	TEST_EXPECT(project.made);
+	if (!project.made) return 1;
+	const std::string smoke = "weapon \"WPN_SMOKE\"\n\tclipsize 1\n\tanimadm gun\n\tgfx1 arms\n\tpos 10 0 -100 0 0 0\n"
+	                          "\taction \"idle\"\n\t\tanim anim_wpn_idle\n\t\tfunction wpn_std_idle\n\tend\n"
+	                          "\taction \"fire\"\n\t\tanim anim_wpn_fire\n\t\tdelaystart 80\n\t\tfunction wpn_std_fire\n\tend\nend\n";
+	TEST_EXPECT(project.write_weapons("\tflags auto\n", smoke) && project.select("anim_wpn_fire"));
+	JsonValue shown;
+	const JsonValue *fp = project.first_person_json(shown);
+	TEST_EXPECT(fp && fp->is_object());
+	if (!fp || !fp->is_object()) return 1;
+	const JsonValue *weapons = fp->get("weapons");
+	TEST_EXPECT(weapons && weapons->array.size() == 2 && weapons->array[0].string == "WPN_TEST" &&
+	            weapons->array[1].string == "WPN_SMOKE");
+	TEST_EXPECT(fp->get_string("weapon", "") == "WPN_TEST" && fp->get_string("gun", "") == "gun" &&
+	            fp->get_string("weapon_note", "x").empty());
+	// The other weapon: its gun, its view record, its actions; the rig plays on its model.
+	TEST_EXPECT(project.first_person(R"({"weapon": "wpn_smoke"})"));
+	fp = project.first_person_json(shown);
+	TEST_EXPECT(fp && fp->get_string("weapon", "") == "WPN_SMOKE" && fp->get_string("gun", "") == "arms" &&
+	            fp->get("pos") && fp->get("pos")->array.size() == 3 && fp->get("pos")->array[2].number == -100.0 &&
+	            fp->get_string("weapon_note", "x").empty());
+	const ModelViewport *model = project.viewport();
+	TEST_EXPECT(model && model->first_person().active() && model->rig().model == "arms.3di" && model->rig().record == "WPN_SMOKE");
+	const WeaponActionRun *fire = model ? run_of(model->first_person(), "fire") : nullptr;
+	TEST_EXPECT(fire && fire->delay_start == 80);
+	TEST_EXPECT(shown.get("options") && shown.get("options")->get("first_person") &&
+	            shown.get("options")->get("first_person")->get_string("weapon", "") == "wpn_smoke");
+	// A weapon that does not play the map: the first shows, and the view says so.
+	TEST_EXPECT(project.first_person(R"({"weapon": "WPN_NONE"})"));
+	fp = project.first_person_json(shown);
+	TEST_EXPECT(fp && fp->get_string("weapon", "") == "WPN_TEST" &&
+	            fp->get_string("weapon_note", "").rfind("WPN_NONE does not play GUN.adm", 0) == 0);
+	TEST_EXPECT(!project.first_person(R"({"weapon": 3})"));
+	TEST_EXPECT(project.first_person(R"({"weapon": ""})"));
+	fp = project.first_person_json(shown);
+	TEST_EXPECT(fp && fp->get_string("weapon", "") == "WPN_TEST" && fp->get_string("weapon_note", "x").empty());
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -404,6 +448,7 @@ int main() {
 	TEST_EXPECT(test_actions_and_their_sets() == 0);
 	TEST_EXPECT(test_the_eye() == 0);
 	TEST_EXPECT(test_no_first_person() == 0);
+	TEST_EXPECT(test_two_weapons_share_a_map() == 0);
 	std::printf("editor_first_person OK\n");
 	return 0;
 }

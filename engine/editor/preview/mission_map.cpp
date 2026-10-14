@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <unordered_set>
 #include <variant>
 
@@ -23,6 +24,7 @@
 #include <editor/preview/terrain_view_commands.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/mission.h>
+#include <formats/trn/charmap_legend.h>
 #include <runtime/hud/hud_map_view.h>
 #include <runtime/hud/hud_math.h>
 #include <runtime/mission/mission_sidecars.h>
@@ -215,6 +217,7 @@ const char *mission_map_background_token(MissionMapBackground background) {
 	case MissionMapBackground::Height: return "height";
 	case MissionMapBackground::Delta: return "delta";
 	case MissionMapBackground::Flatness: return "flatness";
+	case MissionMapBackground::Surface: return "surface";
 	case MissionMapBackground::None: return "none";
 	case MissionMapBackground::kCount: break;
 	}
@@ -285,7 +288,7 @@ bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions 
 				return false;
 		} else if (name == "background") {
 			if (!read_json_token(member.value, mission_map_background_from_token, out.background,
-						error, "options.background is colour, height, delta, flatness or none."))
+						error, "options.background is colour, height, delta, flatness, surface or none."))
 				return false;
 		} else if (name == "grid" || name == "text" || name == "stick" || name == "water") {
 			bool &into = name == "grid" ? out.grid : name == "text" ? out.text : name == "stick" ? out.stick : out.water;
@@ -302,9 +305,10 @@ bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions 
 		}
 	}
 	// Water is the original mission editor's over its heights' views; the colour map shows the commander map's own
-	// (its water cut as the game's map cuts it): asked over the colour map or none it is refused, and a background
-	// taken back to them drops it.
-	if (out.water && (out.background == MissionMapBackground::Colour || out.background == MissionMapBackground::None)) {
+	// (its water cut as the game's map cuts it): asked over the colour map, the surface classes or none it is refused,
+	// and a background taken back to them drops it.
+	if (out.water && out.background != MissionMapBackground::Height && out.background != MissionMapBackground::Delta &&
+	    out.background != MissionMapBackground::Flatness) {
 		const JsonValue *asked = json.get("water");
 		if (asked && asked->is_bool() && asked->boolean) {
 			error = "options.water lays the original mission editor's water over the height, delta or flatness background; "
@@ -798,7 +802,17 @@ bool MissionMapViewport::follow_terrain_view_(const SessionView &view) {
 		}
 		if (ground.water()) water = int32_t(ground.water_height() * io::kFp16OneD);
 	}
-	terrain_view_.follow(background, options_.water, atlas, revision, water);
+	// The surface classes: the char map as the game's load keeps it (patched in place by a stroke, its revision the
+	// ground's surface_revision).
+	MissionMapSurface surface;
+	bool terrain = false;
+	if (background == MissionMapBackground::Surface) {
+		const MissionGround &ground = followed_terrain(view);
+		terrain = ground.terrain();
+		const terrain::SurfaceTypeMap classes = ground.surface_sampler();
+		surface = MissionMapSurface{classes.data, classes.width, classes.height, ground.surface_revision()};
+	}
+	terrain_view_.follow(background, options_.water, atlas, revision, water, surface, terrain);
 	return terrain_view_.serial() != before;
 }
 
@@ -863,6 +877,24 @@ ViewportAction MissionMapViewport::follow_(const ViewportInput &input, PreviewCl
 			terrain_view_.patch(field->heightmap, heights, terrain_.heights_revision());
 			if (terrain_view_.serial() != serial) moved_ = true;
 		}
+	// The char map's patches made again in the Surface background (its surface revision the ground's after them).
+	if (options_.background == MissionMapBackground::Surface && terrain_.terrain()) {
+		const terrain::SurfaceTypeMap classes = terrain_.surface_sampler();
+		std::vector<MissionMapAtlasRect> surfaces;
+		bool whole = false;
+		for (const TerrainPatch &patch : stroke_.patches().patches)
+			if (patch.plane == TerrainPlane::Surface) {
+				whole = whole || patch.whole;
+				for (const RasterRegion &region : patch.regions)
+					surfaces.push_back(surface_atlas_rect(classes.width, region.x, region.y, region.width, region.height));
+			}
+		if (!surfaces.empty() && !whole) {
+			const uint64_t serial = terrain_view_.serial();
+			terrain_view_.patch_surface(MissionMapSurface{classes.data, classes.width, classes.height, terrain_.surface_revision()},
+			                            surfaces);
+			if (terrain_view_.serial() != serial) moved_ = true;
+		}
+	}
 	// Out of a stroke, the heights' picture takes the scale their lowest and highest give it now (kept while one went,
 	// S25; an undo's, a redo's or a landing's patch settled at once): a scan of them only where a patch moved them.
 	if (!stroking)
@@ -1195,6 +1227,32 @@ io::JsonValue MissionMapViewport::body_json(const ViewportInput &input) const {
 	out.set("outlines", std::move(outlines));
 	// What the device drew: the terrain read (the surface), the pass's terrain triangles, sprites and labels.
 	out.set("surface", JsonValue::make_bool(surface_));
+	// The Surface background's legend: each class the char map holds, its colour and its share of the map's texels.
+	if (options_.background == MissionMapBackground::Surface) {
+		JsonValue legend = JsonValue::make_array();
+		if (terrain_.terrain()) {
+			const terrain::SurfaceTypeMap classes = terrain_.surface_sampler();
+			std::vector<size_t> counts(256, 0);
+			const size_t texels = classes.data ? size_t(classes.width) * size_t(classes.height) : 0;
+			for (size_t i = 0; i < texels; ++i) ++counts[classes.data[i]];
+			if (!classes.data) counts[1] = 1; // no char map: class 1 everywhere
+			const double total = texels ? double(texels) : 1.0;
+			for (int surface = 0; surface < 256; ++surface) {
+				if (!counts[size_t(surface)]) continue;
+				const CharmapLegendColour &c =
+						surface < kCharmapLegendCount ? kCharmapLegend[surface] : kCharmapLegendRest;
+				char rgb[8];
+				std::snprintf(rgb, sizeof(rgb), "%02X%02X%02X", c.r, c.g, c.b);
+				JsonValue row = JsonValue::make_object();
+				row.set("class", json_number(surface));
+				row.set("name", json_string(mission_surface_words(surface)));
+				row.set("rgb", json_string(rgb));
+				row.set("share", json_number(double(counts[size_t(surface)]) / total));
+				legend.push(std::move(row));
+			}
+		}
+		out.set("legend", std::move(legend));
+	}
 	out.set("drawn", drawn_);
 	const int route = mission_map_route(scene_);
 	out.set("route", route >= 0 ? json_number(scene_.paths()[size_t(route)].index) : JsonValue());

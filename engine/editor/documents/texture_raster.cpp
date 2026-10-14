@@ -90,8 +90,9 @@ uint32_t png_palette_entries(const std::vector<uint8_t> &bytes) {
 }
 
 // A PNG of 8-bit samples (an import's source image; IHDR's bit depth at byte 24, its colour type at 25): a true-colour
-// one (2, 6) its texels as RGBA; a palette one (3) its indices and its palette; a grey one (0) its levels. A PNG of
-// another depth (a heightmap's 16-bit grey, lane A's) is no plane a texture's brush paints.
+// one its texels in its own channels (2 RGB, 6 RGBA: written again in that form, never an RGB source widened to RGBA);
+// a palette one (3) its indices and its palette; a grey one (0) its levels. A PNG of another depth (a heightmap's
+// 16-bit grey, lane A's) is no plane a texture's brush paints.
 bool read_png(const std::vector<uint8_t> &bytes, RasterState &out) {
 	if (bytes.size() < 26 || !png::is_png(bytes) || bytes[24] != 8) return false;
 	const uint8_t colour = bytes[25];
@@ -103,8 +104,15 @@ bool read_png(const std::vector<uint8_t> &bytes, RasterState &out) {
 		RgbaImage image;
 		IndexedImage8 indexed;
 		if (!png::decode_png(bytes, image, error, &indexed) || image.empty() || !indexed.indices.empty()) return false;
-		side->png_colour = 6;
-		out.planes.push_back(RasterPlane::from_bytes(RasterFormat::Rgba8, image.width, image.height, image.pixels.data()));
+		if (colour == 6) {
+			out.planes.push_back(RasterPlane::from_bytes(RasterFormat::Rgba8, image.width, image.height, image.pixels.data()));
+		} else {
+			// R, G, B alone: the decoder's opaque alpha is no channel of the file.
+			const size_t count = size_t(image.width) * size_t(image.height);
+			std::vector<uint8_t> rgb(count * 3);
+			for (size_t i = 0; i < count; ++i) std::copy_n(&image.pixels[i * 4], 3, &rgb[i * 3]);
+			out.planes.push_back(RasterPlane::from_bytes(RasterFormat::Rgb8, image.width, image.height, rgb.data()));
+		}
 	} else if (colour == 3) {
 		RgbaImage image;
 		IndexedImage8 indexed;
@@ -166,6 +174,7 @@ public:
 		if (side && side->form == TextureSide::Form::Png)
 			return side->png_colour == 3 ? "Writes it as an 8-bit palette PNG"
 			       : side->png_colour == 0 ? "Writes it as an 8-bit grey PNG"
+			       : side->png_colour == 2 ? "Writes it as an 8-bit RGB PNG"
 			                               : "Writes it as an 8-bit RGBA PNG";
 		return std::string();
 	}
@@ -279,6 +288,7 @@ bool write_texture_state(const RasterState &state, std::vector<uint8_t> &out, st
 		                                                      side->palette.data(), side->png_entries,
 		                                                      side->png_alpha.data(), uint32_t(side->png_alpha.size()))
 		      : side->png_colour == 0 ? png::encode_png_gray(texels.data(), uint32_t(width), uint32_t(height))
+		      : side->png_colour == 2 ? png::encode_png_rgb(texels.data(), uint32_t(width), uint32_t(height))
 		                              : png::encode_png_rgba(texels.data(), uint32_t(width), uint32_t(height));
 		if (out.empty()) error = "The PNG writer made nothing of it.";
 		return !out.empty();

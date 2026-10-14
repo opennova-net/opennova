@@ -147,7 +147,8 @@ constexpr RequestField kFields[] = {
 			"it, its by from where the gesture's samples took the handle, one undo step in all; end "
 			"false keeps the gesture open for the next sample (true when left out). Any other request "
 			"on the document, another gesture, or 10 s with no sample ends it; a token no gesture of "
-			"the document's holds is refused." },
+			"the document's holds is refused. A terrain tile's drag (handle tile) may go to ground [x, y] "
+			"instead, mission metres (x east, y north), no point of the picture between." },
 	{ F::Command, "command", J::Object,
 			"A command in a viewport, {name, ids?, kind?, by?, at?, mode?, item?, handle?, field?, value?}: any "
 			"canvas's click (at its point, "
@@ -182,7 +183,8 @@ constexpr RequestField kFields[] = {
 			"the one the document shows in). The viewport plans what it makes, one batch, one undo "
 			"step; one that takes no drop refuses it (a menu's, a model's). A mission's model no item "
 			"draws: its item made in the item catalog first (a decoration or a building as its parts "
-			"say), then placed, an undo step in each file." },
+			"say), then placed, an undo step in each file. A terrain tile's stamp (reference tile, name its "
+			"cell) may be let go at ground [x, y] instead of at, mission metres (x east, y north)." },
 	{ F::Workspace, "workspace", J::Object,
 			"What the windows show of their own, changed (the workspace section shows it): {<part>: {<member>: "
 			"value, ...}, focus?}, each part and member left out as it is; the parts and their members are "

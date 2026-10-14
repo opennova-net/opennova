@@ -164,6 +164,11 @@ static int test_music() {
 	TEST_EXPECT(blank_companion(*find_blank_factory_for_role("gamemus_sbf"), "GAMEMUS.SBF", project, companion) ==
 	                    find_blank_factory_for_role("gamemus_bin") &&
 	            companion == "GAMEMUS.BIN");
+	// The script takes the made bank's own name and case, never the manifest's: menumus.sbf -> menumus.bin.
+	TEST_EXPECT(blank_companion(*find_blank_factory_for_role("menumus_sbf"), "menumus.sbf", project, companion) &&
+	            companion == "menumus.bin");
+	TEST_EXPECT(blank_companion(*find_blank_factory_for_role("gamemus_sbf"), "music/GameMus.Sbf", project, companion) &&
+	            companion == "GameMus.bin");
 	for (const char *role : {"menumus_bin", "gamemus_bin"}) {
 		const bool mission = std::string(role) == "gamemus_bin";
 		const std::vector<uint8_t> script = blank_of(mission ? "GAMEMUS.BIN" : "MENUMUS.BIN", AssetKind::MusicScript, role);

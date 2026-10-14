@@ -374,6 +374,8 @@ def viewport_of(args: argparse.Namespace) -> dict:
             drag["by"] = parse_pair(args.by, "--by")
         if args.to is not None:
             drag["to"] = parse_pair(args.to, "--to")
+        if args.ground is not None:
+            drag["ground"] = parse_pair(args.ground, "--ground")
     if args.end is not None:
         drag["end"] = args.end == "true"
     drop: dict = {}
@@ -383,6 +385,8 @@ def viewport_of(args: argparse.Namespace) -> dict:
     if args.op == "drop":
         if args.at is not None:
             drop["at"] = parse_pair(args.at, "--at")
+        if args.ground is not None:
+            drop["ground"] = parse_pair(args.ground, "--ground")
         if args.to is not None:
             drop["to"] = parse_pair(args.to, "--to")
         if args.snap is not None:
@@ -421,9 +425,9 @@ def viewport_of(args: argparse.Namespace) -> dict:
         request["drag"] = drag
     elif drag:
         raise GameMcpError(EXIT_NOT_READ, "--id, --handle, --gesture and --end are op drag's")
-    # Each of --by, --to, --at and --snap only where its op sends it: never read and dropped.
-    takes = {"drag": ("by", "to", "snap"), "drop": ("at", "to", "snap"), "command": ("by", "at")}
-    given = [name for name in ("by", "to", "at", "snap") if getattr(args, name) is not None]
+    # Each of --by, --to, --at, --ground and --snap only where its op sends it: never read and dropped.
+    takes = {"drag": ("by", "to", "ground", "snap"), "drop": ("at", "ground", "to", "snap"), "command": ("by", "at")}
+    given = [name for name in ("by", "to", "at", "ground", "snap") if getattr(args, name) is not None]
     stray = [name for name in given if name not in takes.get(args.op, ())]
     if stray:
         ops = "; ".join(f"--{name} is op " + " or ".join(f"{op}'s" for op, names in takes.items() if name in names)
@@ -956,6 +960,10 @@ def build_parser() -> argparse.ArgumentParser:
                                                      "resize, DX,DY design units")
     viewport.add_argument("--to", default=None, help="drag: X,Y, the point of the picture the handle goes to; drop: "
                                                      "a box's other corner (a mission's area, --reference area)")
+    viewport.add_argument("--ground", default=None,
+                          help="drag (a terrain tile's, --handle tile) and drop (a tile's stamp, --reference tile): "
+                               "X,Y a point of the ground in mission metres (x east, y north) in place of a point "
+                               "of the picture")
     viewport.add_argument("--snap", type=float, default=None,
                           help="drag: a menu's grid of 8 when not 0, a model's or a mission's grid in metres, a "
                                "mission's yaw in degrees (0, free, by default); drop: a mission's grid in metres")

@@ -346,6 +346,64 @@ static int test_weapon_name() {
 	return 0;
 }
 
+// A weapon's HUD name: a key of gametext.bin's WepDes section is a use of the weapon of its name (the HUD reads the
+// weapon's name there by its id), so Uses list it and a rename of the weapon renames the key, its own use (a loadout
+// label naming the same key) following; a WepDes key no weapon has makes no finding; a key of the new name already in
+// WepDes refuses the rename, naming gametext.bin.
+static int test_weapon_hud_text() {
+	Project project("opennova_rename_weapon_text");
+	const std::string weapons = project.path("weapon.def");
+	TEST_EXPECT(project.write(weapons, "weapon \"GUN_A\"\nloadout_menu_textid GUN_A\nend\n"));
+	project.rescan();
+	const std::string table_path = project.path("gametext.bin");
+	editor_test::handle_to_end(project.session, request::open_document(table_path));
+	Document *table = project.session.document_for(table_path);
+	TEST_EXPECT(table != nullptr);
+	if (!table) return 1;
+	NodeId wepdes = 0;
+	for (const auto &row : table->rows())
+		if (row->name() == "WepDes") wepdes = row->id;
+	TEST_EXPECT(wepdes != 0);
+	for (const char *key : {"GUN_A", "AMMO_X", "GUN_Z"}) {
+		EditorRequest add = request::edit_record(table->path(), Edit());
+		add.edits[0].operation = EditOperation::Add;
+		add.edits[0].address = {wepdes, table->kind_from_name("string"), 0};
+		editor_test::handle_to_end(project.session, add);
+		EditorRequest set = request::edit_record(table->path(), Edit());
+		set.edits[0].address = {wepdes, table->kind_from_name("string"), table->last_added()};
+		set.edits[0].field = "key";
+		set.edits[0].value = std::string(key);
+		editor_test::handle_to_end(project.session, set);
+	}
+	editor_test::handle_to_end(project.session, request::save(table_path));
+	project.rescan();
+	const GraphSymbol *gun = project.defined(ReferenceKind::Weapon, "GUN_A", weapons);
+	TEST_EXPECT(gun != nullptr);
+	if (!gun) return 1;
+	// The key is a use of the weapon, which Uses list; the key no weapon has makes no finding.
+	const GraphEdge *hud = edge_to(project.graph(), table_path, ReferenceKind::Weapon, "GUN_A");
+	TEST_EXPECT(hud && project.graph().resolve(*hud) == ReferenceStatus::Present && hud->field == "key");
+	const std::vector<const GraphEdge *> users = project.graph().users_of(*gun);
+	TEST_EXPECT(std::any_of(users.begin(), users.end(), [&](const GraphEdge *edge) { return edge->source == table_path; }));
+	const GraphEdge *ammo = edge_to(project.graph(), table_path, ReferenceKind::Weapon, "AMMO_X");
+	TEST_EXPECT(ammo && ammo->optional && project.graph().missing().empty());
+	// A key of the new name in WepDes already: refused, naming the table.
+	TEST_EXPECT(refused(project.preview(*gun, "GUN_Z"), "rename.exists", table_path));
+	// Renamed: the definition, the key and the loadout label naming the key.
+	const DialogsView::RenamePreview &plan = project.preview(*gun, "GUN_B");
+	for (const Diagnostic &d : plan.refusals) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(plan.refusals.empty() && sites_in(plan, table_path) == 1 && sites_in(plan, weapons) == 2);
+	TEST_EXPECT(project.rename(*gun, "GUN_B"));
+	TEST_EXPECT(project.defined(ReferenceKind::Weapon, "GUN_B", weapons));
+	const GraphSymbol *text = project.defined(ReferenceKind::TextId, "GUN_B", table_path);
+	TEST_EXPECT(text && text->scope == "GAMETEXT.BIN/WepDes" && !project.defined(ReferenceKind::TextId, "GUN_A", table_path));
+	const GraphEdge *label = edge_to(project.graph(), weapons, ReferenceKind::TextId, "GUN_B");
+	TEST_EXPECT(label && project.graph().resolve(*label) == ReferenceStatus::Present);
+	const GraphEdge *followed = edge_to(project.graph(), table_path, ReferenceKind::Weapon, "GUN_B");
+	TEST_EXPECT(followed && project.graph().resolve(*followed) == ReferenceStatus::Present && project.graph().missing().empty());
+	return 0;
+}
+
 // An ammo's name: the weapon's round follows.
 static int test_ammo_name() {
 	Project project("opennova_rename_ammo");
@@ -754,6 +812,7 @@ int main() {
 	failures += test_style_variable_in_any_text();
 	failures += test_string_key();
 	failures += test_weapon_name();
+	failures += test_weapon_hud_text();
 	failures += test_ammo_name();
 	failures += test_powerup_name();
 	failures += test_item_id_in_mission();

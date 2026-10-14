@@ -111,6 +111,9 @@ const BlankFactory k_factories[] = {
 	  "the deploy screen (DEATH): the spawn list the game fills, and Leave Mission with its question", false },
 	{ "mp_menu", AssetKind::Menu, make_blank_mp_menu,
 	  "the multiplayer screen the game comes back to (NW_MULTI_PLAYER) with its Back button, on Esc", false },
+	{ "pre_menu", AssetKind::Menu, make_blank_pre_menu,
+	  "the join screen (PRE_GAME_MENU): its status box and Cancel (on Esc), the password and spectate panels and their "
+	  "Back and Accept, each hidden until the join shows it", false },
 	{ "font_arials18", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
 	{ "font_arial22", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
 	{ "font_couri20b", AssetKind::Font, make_blank_font, "the built-in bitmap font", false },
@@ -154,6 +157,19 @@ const BlankFactory k_factories[] = {
 	  "gamemus_bin" },
 	{ "gamemus_bin", AssetKind::MusicScript, make_blank_game_music_script,
 	  "a mission's music script: one section that plays no stream, and the handler the round's end runs", false },
+	// An expansion's in their place, under its M<name> and G<name> names [orig: Expansion_LoadAssets @
+	// 0x4a4906..0x4a494a]: the same pairs, each bank made with its script of its stem (blank_companion).
+	{ "expansion_menumus_sbf", AssetKind::MusicBank, make_blank_music_bank,
+	  "the expansion's shell music bank, no stream yet, made with its script (M<name>.bin), which plays none", false,
+	  nullptr, 0, "expansion_menumus_bin" },
+	{ "expansion_menumus_bin", AssetKind::MusicScript, make_blank_menu_music_script,
+	  "the expansion's shell music script: one section that plays no stream", false },
+	{ "expansion_gamemus_sbf", AssetKind::MusicBank, make_blank_music_bank,
+	  "the expansion's mission music bank, no stream yet, made with its script (G<name>.bin), which plays none", false,
+	  nullptr, 0, "expansion_gamemus_bin" },
+	{ "expansion_gamemus_bin", AssetKind::MusicScript, make_blank_game_music_script,
+	  "the expansion's mission music script: one section that plays no stream, and the handler the round's end runs",
+	  false },
 	{ "pi_idle_bad", AssetKind::Animation, make_blank_animation,
 	  "the player preview's idle clip: one bone at rest", false },
 	{ "dt1rst_bad", AssetKind::Animation, make_blank_animation,
@@ -230,6 +246,23 @@ const BlankFactory k_factories[] = {
 };
 
 const size_t k_factory_count = sizeof(k_factories) / sizeof(k_factories[0]);
+
+// A role companion's name: the made file's stem with the companion row's extension, in the case the made file
+// writes its own extension (menumus.sbf -> menumus.bin, MENUMUS.SBF -> MENUMUS.BIN, an expansion's Mjxm.sbf ->
+// Mjxm.bin): a music bank and its script are one stem the game opens twice [orig: AudioVM_InitMenuMusicStreaming @
+// 0x56aa60; Expansion_LoadAssets @ 0x4a4798, the M<n>/G<n> names].
+std::string companion_name(const std::string &made, const std::string &row_name) {
+	const size_t slash = made.find_last_of("/\\");
+	const std::string file = slash == std::string::npos ? made : made.substr(slash + 1);
+	const size_t made_dot = file.rfind('.'), row_dot = row_name.rfind('.');
+	if (made_dot == std::string::npos || row_dot == std::string::npos) return row_name;
+	const std::string made_extension = file.substr(made_dot + 1);
+	std::string extension = row_name.substr(row_dot + 1);
+	bool lower = false;
+	for (const char c : made_extension) lower = lower || (c >= 'a' && c <= 'z');
+	extension = lower ? strutil::to_lower(extension) : strutil::to_upper(extension);
+	return file.substr(0, made_dot + 1) + extension;
+}
 
 } // namespace
 
@@ -320,7 +353,7 @@ const BlankFactory *blank_companion(const BlankFactory &factory, const std::stri
 		const gameprofile::RequiredResource *row = gameprofile::gameprofile_required_resource_by_role(factory.companion);
 		const BlankFactory *companion = find_blank_factory_for_role(factory.companion);
 		if (!row || !companion) return nullptr;
-		name = row->name;
+		name = companion_name(made, row->name);
 		return companion;
 	}
 	if (factory.kind == AssetKind::AnimationMap) {

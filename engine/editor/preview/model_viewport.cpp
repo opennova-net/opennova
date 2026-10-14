@@ -86,7 +86,7 @@ assets::Model with_user_points(const assets::Model &read, const std::vector<thre
 
 bool same_rig(const PreviewRig &a, const PreviewRig &b) {
 	return a.model == b.model && a.table == b.table && a.clip == b.clip && a.source == b.source &&
-	       a.pairing.file == b.pairing.file && a.pairing.locator == b.pairing.locator;
+	       a.pairing.file == b.pairing.file && a.pairing.locator == b.pairing.locator && a.weapons == b.weapons;
 }
 
 // A colour on the wire: "RRGGBB".
@@ -901,7 +901,8 @@ ViewportAction ModelViewport::follow_animation_(const ViewportInput &input, cons
 	}
 	const std::string file = io::utf8_file_name(document.path());
 	PreviewRig rig = view.findings.graph
-			? resolve_preview_rig(*view.findings.graph, *view.project.scan, file, document.kind(), options_.rig_model)
+			? resolve_preview_rig(*view.findings.graph, *view.project.scan, file, document.kind(), options_.rig_model,
+			                      options_.first_person.weapon)
 			: PreviewRig();
 	if (rig.model.empty()) {
 		rig_ = rig;

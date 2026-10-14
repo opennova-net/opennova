@@ -2774,6 +2774,27 @@ void test_preview_steps_aside() {
 	run.open("missions/synth_logic.bms");
 	ui.frames(3);
 	CHECK(preview_item->stands_aside() && !preview->Active, "another document made active between: aside again");
+	// The Map tool's ask (document.map with focus "preview", as the 3D view's Map raises it): the map beside the
+	// mission; the map put away (map false), the Preview stands aside again, never left showing the kind shown before.
+	session.handle(request::set_workspace(R"({"document": {"map": true}, "focus": "preview"})"));
+	run.settle();
+	ui.frames(3);
+	CHECK(!preview_item->stands_aside() && preview->Active && v.documents.preview_shown == ViewportKind::Map,
+	      "the Map tool: the mission's map beside it");
+	session.handle(request::set_workspace(R"({"document": {"map": false}})"));
+	run.settle();
+	ui.frames(3);
+	CHECK(preview_item->stands_aside() && !preview->Active, "the map put away: aside again");
+	// The Windows menu's tick with no map stands as before (the kind shown before), the map off or not.
+	preview_item->show_anyway();
+	ui.frames(3);
+	session.handle(request::set_workspace(R"({"document": {"map": false}})"));
+	run.settle();
+	ui.frames(3);
+	CHECK(!preview_item->stands_aside() && preview->Active, "ticked with no map: it stays");
+	run.open("items.def");
+	run.open("missions/synth_logic.bms");
+	ui.frames(3);
 	// Floated off the dockspace (another monitor), it never steps aside: it frees no room.
 	preview_item->show_anyway();
 	ui.frames(3);

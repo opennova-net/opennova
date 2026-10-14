@@ -504,8 +504,18 @@ bool present(const JsonValue *requirement) {
 	return requirement && requirement->get_string("state", "") == "present";
 }
 
+// The project's files as the session's scan lists them (every file the walk visited), by path.
+std::set<std::string> project_files(const Cli &cli) {
+	std::set<std::string> out;
+	if (const editor::AssetScan *scan = cli.session.view().project.scan.get())
+		for (const auto &visit : scan->visits())
+			if (!visit.first.empty()) out.insert(visit.first);
+	return out;
+}
+
 // The role --role names, else every required row the project does not meet (the requirements as
-// the project opened), made from scratch; then the requirements again.
+// the project opened), made from scratch; then the requirements again. Every file it made is counted and
+// named, the ones made with an asked file (a music bank's script, a menu's pointer) among them.
 int run_create_missing(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	JsonValue before, after;
 	if (!answer_of(cli, row, before)) return 2;
@@ -517,6 +527,7 @@ int run_create_missing(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 			if (requirement.get_bool("required", false) && !present(&requirement))
 				roles.push_back(requirement.get_string("role", ""));
 	}
+	const std::set<std::string> files_before = project_files(cli);
 	const JsonValue outcome = send(cli, editor::request::create_missing(roles));
 	if (!answer_of(cli, row, after)) return 2;
 	// Complete when the request was done and every role asked for is met now; a role no row has is
@@ -524,19 +535,18 @@ int run_create_missing(Cli &cli, const CliVerbRow &row, const CliArgs &args) {
 	bool complete = done(outcome);
 	std::vector<std::string> lines;
 	size_t created = 0;
+	for (const std::string &file : project_files(cli))
+		if (!files_before.count(file)) {
+			++created;
+			lines.push_back("created " + file);
+		}
 	for (const std::string &role : roles) {
 		const JsonValue *now = requirement_of(after, role);
 		if (!now) {
 			complete = false;
 			continue;
 		}
-		if (present(now)) {
-			if (!present(requirement_of(before, role))) {
-				++created;
-				lines.push_back("created " + now->get_string("asset", ""));
-			}
-			continue;
-		}
+		if (present(now)) continue;
 		complete = false;
 		lines.push_back(now->get_string("name", "") +
 		                (now->get_string("state", "") == "wrong_kind" ? " is still of the wrong kind" : " is still missing"));

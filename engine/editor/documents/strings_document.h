@@ -5,6 +5,7 @@
 #include <vector>
 
 #include <editor/assets/asset_registry.h>
+#include <editor/graph/graph_edge.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/document.h>
 #include <editor/model/finding_code_row.h>
@@ -98,6 +99,13 @@ bool is_strings_kind(AssetKind kind);
 // empty name is an error, a name an earlier section has a warning (a section lookup never
 // reaches it).
 std::vector<Diagnostic> validate_strings_file(const DocumentBase &document);
+// A string table's references no field's value is (DocumentType::record_references): a key of gametext.bin's WepDes
+// section is the text the HUD shows for the weapon of that id [orig: HUD_DrawWeaponAmmoAndName @ 0x593b7f,
+// GameText_GetString("WepDes", weapondef+20)], so each key there (the first section of the name, the one a lookup
+// reads) is a use of the weapon of its name, at its key: Go to and Uses follow it, and a rename of the weapon takes
+// the key with it (and the key's own uses, a loadout label naming it: plan_symbol_rename_project). A key no weapon
+// has makes no finding (the section holds an ammo's and a loadout label's names too).
+void strings_references(const Document &document, Extracted &out);
 // A string id no table defines, added to the table its scope names (ADR 0046 DI-15,
 // DocumentType::define_symbol): a key in the section the lookup reads, or a new section of that name.
 bool define_string_id(const DocumentBase &document, const ReferenceSubject &missing, PlannedFix &out);

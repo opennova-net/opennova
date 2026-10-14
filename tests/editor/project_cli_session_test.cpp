@@ -376,6 +376,11 @@ static int test_verbs_answer_as_the_session() {
 		TEST_EXPECT(bare_saved.restore());
 		const Ran ran = run(scratch, { "create-missing", bare, "--json" });
 		TEST_EXPECT(ran.code == 0 && same(parsed(ran.out), expected));
+		// The words count and name every file made, the script made with an asked music bank among them.
+		const Ran music = run(scratch, { "create-missing", bare, "--role", "menumus_sbf" });
+		TEST_EXPECT(music.code == 0 && music.out.find("2 files created") != std::string::npos &&
+		            music.out.find("MENUMUS.SBF") != std::string::npos && music.out.find("MENUMUS.BIN") != std::string::npos);
+		if (music.out.find("2 files created") == std::string::npos) std::fprintf(stderr, "%s", music.out.c_str());
 	}
 
 	// import: the plan of a menu with the files it needs, a dry run (opened without the import

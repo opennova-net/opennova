@@ -83,12 +83,16 @@ void EffectSchedule::reset() {
 	jump_ = true;
 }
 
+bool EffectSchedule::jumps_to(int32_t tick) const {
+	tick = std::max(tick, 0);
+	return !(played_ && !jump_ && tick >= tick_ && tick - tick_ <= int32_t(particle::kEffectAdvanceTickLimit));
+}
+
 bool EffectSchedule::play_to(particle::EffectScene &scene, int32_t tick, const particle::ParticleViewFrustum &frustum,
 		EffectTimedSpawns &timed, const Make &make, const Jumped &jumped) {
 	tick = std::max(tick, 0);
 	timed.made.resize(timed.ticks.size(), false);
-	const bool continuous = played_ && !jump_ && tick >= tick_ && tick - tick_ <= int32_t(particle::kEffectAdvanceTickLimit);
-	if (!continuous) {
+	if (jumps_to(tick)) {
 		// A jump: the scene emptied, what the owner holds standing made again, each timed spawn due made again at its
 		// age then.
 		scene.reset_runtime_state();

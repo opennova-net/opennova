@@ -18,6 +18,11 @@ namespace opennova::editor {
 // several chunks, one laid out otherwise) is held read only: a finding, which blocks its Save. Its
 // findings are the compiler's.
 std::unique_ptr<DocumentBase> make_music_script_document();
+// The bank beside a music script (DocumentType::companions, read alone: its <stem>.sbf, the bank the game opens with
+// it [orig: AudioVM_OpenMusicContext @ 0x6722A0]) read before the script: its streams' names, in their order, which
+// the script's MUS text names its plays by (`play GAMINT` in place of `play sound_1`) where so named it writes the
+// script back as it is. No bank there, or one that does not read: the plays by their places.
+void read_music_script_bank(DocumentBase &document, const CompanionFile &bank);
 std::vector<Diagnostic> validate_music_script_file(const DocumentBase &document);
 // What a music script names (DocumentType::references): each play's stream of its bank by its place (formats/mus
 // mus_compile_plays), the bank the script's name made .SBF (mus_bank_name: GAMEMUS.BIN's GAMEMUS.SBF), at the play's

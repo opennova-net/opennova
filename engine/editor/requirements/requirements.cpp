@@ -22,21 +22,21 @@ bool requirement_phase_enabled(const ProjectDocument &doc, int phase) {
 }
 
 bool requirement_multiplayer_only(const std::string &role) {
-	for (const char *only : { "mp_menu", "gamemus_sbf", "gamemus_bin", "expansion_gamemus_sbf", "expansion_gamemus_bin" })
-		if (role == only) return true;
-	return false;
+	return role == "mp_menu" || role == "pre_menu";
 }
 
 namespace {
 
 // Whether the project's checklist has the manifest's row: its phase on (requirement_phase_enabled), and a
-// multiplayer-only row's Multiplayer feature on; mp.mnu on Multiplayer alone.
+// multiplayer-only row's Multiplayer feature on; mp.mnu and pre.mnu on Multiplayer alone.
 bool requirement_row_enabled(const ProjectDocument &doc, const RequiredResource &resource) {
 	const std::string role = resource.role ? resource.role : "";
 	// mp.mnu is the shell's: the startup screen's NW_MULTI_PLAYER and NW_ACTIVATE controls load it with no
 	// mission [orig: sub_555890 @0x5558c7, @0x5558e5 -> sub_5557A0 -> UI_EnterNovaWorldMenu @0x5588fa], so
 	// Multiplayer alone puts it on the checklist, whatever the manifest's phase.
-	if (role == "mp_menu") return doc.features.multiplayer;
+	// pre.mnu likewise: a join from the shell's multiplayer screens loads it before any mission [orig: sub_5693E0 @
+	// 0x5693e0, the load @ 0x56944a].
+	if (role == "mp_menu" || role == "pre_menu") return doc.features.multiplayer;
 	if (!requirement_phase_enabled(doc, resource.phase)) return false;
 	return doc.features.multiplayer || !requirement_multiplayer_only(role);
 }

@@ -37,7 +37,7 @@ std::string model_file(const AssetScan &scan, const std::string &target) {
 PreviewRigFiles::PreviewRigFiles(std::shared_ptr<const StampedFiles> files) { index.mount_source(std::move(files)); }
 
 PreviewRig resolve_preview_rig(const AssetGraph &graph, const AssetScan &scan, const std::string &file, AssetKind kind,
-                               const std::string &chosen) {
+                               const std::string &chosen, const std::string &weapon) {
 	PreviewRig rig;
 	// A rig's files go by name, as the game finds them: the scan's first file of the name, which
 	// the graph's queries take by its path.
@@ -45,27 +45,50 @@ PreviewRig resolve_preview_rig(const AssetGraph &graph, const AssetScan &scan, c
 		const AssetEntry *entry = scan.find(name);
 		return entry ? entry->relative_path : name;
 	};
-	// The model a record pairs with `table` (preview_model_fields, the first that names a model of the project),
-	// written into `out`; false where none does.
+	// The model a record that names `table` pairs with it (preview_model_fields, the first that names a model of the
+	// project), or "".
+	const auto model_of = [&](const GraphEdge &edge) {
+		const std::vector<GraphEdge const *> record_edges = graph.references_of(edge.source);
+		for (const char *field : preview_model_fields(edge.field))
+			for (const GraphEdge *graphic : record_edges) {
+				if (graphic->record != edge.record || graphic->kind != ReferenceKind::Model || graphic->field != field) continue;
+				const std::string model = model_file(scan, graphic->target);
+				if (!model.empty()) return model;
+			}
+		return std::string();
+	};
+	// The model a record pairs with `table`, written into `out` with the weapons that could (their animadm the table's,
+	// their gfx1 a model): the first record that pairs it, or the weapon `weapon` names among those; false where none
+	// does.
 	const auto paired = [&](const std::string &table, PreviewRig &out) {
+		const GraphEdge *first = nullptr, *named = nullptr;
+		std::string first_model, named_model;
+		out.weapons.clear();
 		for (const GraphEdge *edge : graph.referrers_of_file(path_of(table))) {
 			if (edge->kind != ReferenceKind::AnimationMap) continue;
-			const std::vector<GraphEdge const *> record_edges = graph.references_of(edge->source);
-			for (const char *field : preview_model_fields(edge->field))
-				for (const GraphEdge *graphic : record_edges) {
-					if (graphic->record != edge->record || graphic->kind != ReferenceKind::Model || graphic->field != field) continue;
-					const std::string model = model_file(scan, graphic->target);
-					if (model.empty()) continue;
-					out.model = model;
-					out.source = io::utf8_file_name(edge->source) + ": " + edge->record;
-					out.pairing = usage_target(scan, *edge);
-					out.record_file = edge->source;
-					out.record = edge->record;
-					out.record_field = edge->field;
-					return true;
-				}
+			const std::string model = model_of(*edge);
+			if (model.empty()) continue;
+			if (!first) {
+				first = edge;
+				first_model = model;
+			}
+			if (edge->field != "animadm") continue;
+			if (std::find(out.weapons.begin(), out.weapons.end(), edge->record) == out.weapons.end())
+				out.weapons.push_back(edge->record);
+			if (!named && !weapon.empty() && strutil::iequals(edge->record, weapon)) {
+				named = edge;
+				named_model = model;
+			}
 		}
-		return false;
+		const GraphEdge *edge = named ? named : first;
+		if (!edge) return false;
+		out.model = named ? named_model : first_model;
+		out.source = io::utf8_file_name(edge->source) + ": " + edge->record;
+		out.pairing = usage_target(scan, *edge);
+		out.record_file = edge->source;
+		out.record = edge->record;
+		out.record_field = edge->field;
+		return true;
 	};
 	if (kind == AssetKind::AnimationMap) {
 		rig.table = file;

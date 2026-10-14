@@ -185,6 +185,12 @@ struct SymbolRenamePlan {
 	std::string old_name; // as defined
 	std::string new_name; // as the definition takes it (a use takes it as its kind spells a name there)
 	std::vector<RenameSite> sites;
+	// The definitions a use among the sites holds of its own, renamed with it (a gametext.bin WepDes key, the HUD's
+	// name of the weapon of its key): each by its file, record place and field, its own uses sites too.
+	struct Carried {
+		std::string file, locator, field;
+	};
+	std::vector<Carried> carried;
 	std::vector<Diagnostic> refusals;
 	bool ok() const { return refusals.empty(); }
 };
@@ -199,7 +205,10 @@ struct SymbolRenamePlan {
 // environment); a site whose field cannot hold the new name (too long for its width, or not a
 // number where the field is one: an item id). A use in a document with unsaved edits is planned
 // like any other: the session asks to save them before the commit (which reads the files on
-// disk) runs. A use of a style variable is written %NAME% (the kind's spell), any other the name.
+// disk) runs. A use of a style variable is written %NAME% (the kind's spell), any other the name. A use that
+// defines a name of its own as it names this one (a gametext.bin WepDes key, a use of the weapon of its name:
+// documents/strings_document's strings_references) carries that definition: renamed with it, its own uses are sites
+// too (a loadout label naming the key), refused as this name's are (a definition of the new name in its scope).
 SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGraph &graph, const GraphSymbol &symbol,
                                             const std::string &new_name);
 
