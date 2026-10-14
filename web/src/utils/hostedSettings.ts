@@ -60,8 +60,8 @@ export const FIELD_LABELS: Record<SettingsField, string> = {
 // Each field's rule in a sentence, for a refusal the backend gave on a field
 // (400 invalid_settings names it): never the backend's own text.
 export const FIELD_RULES: Record<SettingsField, string> = {
-  game_name: `A server name is 1 to ${GAME_NAME_MAX} characters of the game's Windows-1252 text, with no double quote or control character.`,
-  game_password: `A game password is up to ${GAME_PASSWORD_MAX} printable ASCII characters, with no space or double quote.`,
+  game_name: `A server name is 1 to ${GAME_NAME_MAX} characters, with no double quote. Use only standard letters, numbers and punctuation.`,
+  game_password: `A game password is up to ${GAME_PASSWORD_MAX} plain letters, numbers and punctuation marks, with no space or double quote.`,
   max_players: `Max players is ${INT_RULES.max_players.min} to ${INT_RULES.max_players.max}.`,
   time_limit: `The time limit is ${INT_RULES.time_limit.min} to ${INT_RULES.time_limit.max} minutes.`,
   kill_limit: `The kill limit is ${INT_RULES.kill_limit.min} to ${INT_RULES.kill_limit.max}.`,
@@ -70,7 +70,7 @@ export const FIELD_RULES: Record<SettingsField, string> = {
   start_delay: `The pre-round delay is ${INT_RULES.start_delay.min} to ${INT_RULES.start_delay.max} seconds.`,
   team_ff: 'Friendly fire is on or off.',
   expansion: 'The expansion is base Joint Operations or Escalation.',
-  missions: `A rotation is 1 to ${MISSIONS_MAX} mission file names of letters, digits, _ and -, each ending in .bms.`,
+  missions: `A rotation is 1 to ${MISSIONS_MAX} maps. Pick maps from the list.`,
 };
 
 export function isSettingsField(value: unknown): value is SettingsField {
@@ -180,7 +180,7 @@ function missionsProblem(missions: string[]): string | null {
   }
   const bad = missions.find((m) => !isMissionName(m));
   if (bad !== undefined) {
-    return `“${bad}” is not a mission file name: up to ${MISSION_STEM_MAX} letters, digits, _ and -, then .bms.`;
+    return `“${bad}” is not a map name. Pick maps from the list.`;
   }
   return null;
 }

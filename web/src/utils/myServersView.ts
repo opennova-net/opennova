@@ -36,16 +36,31 @@ export function startKind(last: HostedServer | null): StartKind {
 
 // The account's listed servers split in two: the live hosted server's own
 // listing, which the hosted section shows with its controls, and every server
-// the account hosts itself. A hosted server's listing never shows among the
-// others: a listing's hosted_server_id is set only while that server is live,
-// and an account has at most one, so a listing whose server the hosted
-// section does not show yet (the two reads a poll apart) waits for the next.
+// the account hosts itself. The hosted listing is the row with the RID the
+// hosted read names, else the row naming the live server's id. A hosted
+// server's listing never shows among the others: a listing's
+// hosted_server_id is set only while that server is live, and an account has
+// at most one, so a listing whose server the hosted section does not show
+// yet (the two reads a poll apart) waits for the next read.
 export function splitListings(
   hosts: readonly MyServer[] | null,
   hosted: HostedServer | null,
 ): { hostedListing: MyServer | null; others: MyServer[] | null } {
   if (hosts === null) return { hostedListing: null, others: null };
-  const liveId = hosted?.live ? hosted.id : null;
-  const hostedListing = liveId === null ? null : (hosts.find((h) => h.hosted_server_id === liveId) ?? null);
-  return { hostedListing, others: hosts.filter((h) => h.hosted_server_id == null) };
+  let hostedListing: MyServer | null = null;
+  if (hosted?.live) {
+    const rid = hosted.listing?.rid;
+    hostedListing =
+      (rid !== undefined ? hosts.find((h) => h.rid === rid) : undefined) ??
+      hosts.find((h) => h.hosted_server_id === hosted.id) ??
+      null;
+  }
+  return { hostedListing, others: hosts.filter((h) => h !== hostedListing && h.hosted_server_id == null) };
+}
+
+// Whether the listings name a live hosted server the hosted read does not
+// show (another tab or device started one): the hosted read is then stale.
+export function listingsOutrunHosted(hosts: readonly MyServer[], hosted: HostedServer | null): boolean {
+  const shownId = hosted?.live ? hosted.id : null;
+  return hosts.some((h) => h.hosted_server_id != null && h.hosted_server_id !== shownId);
 }

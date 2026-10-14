@@ -14,7 +14,7 @@
           {{ server.settings.game_name || 'Unnamed server' }}
         </h2>
         <p class="mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-muted">
-          <span :class="stateBadgeClass(server.state)">{{ stateLabel(server.state) }}</span>
+          <span :class="stateBadgeClass(server.state)">{{ ownerStateLabel(server.state) }}</span>
           <span>{{ expansionLabel }}</span>
         </p>
       </div>
@@ -48,8 +48,8 @@
       <h3 :id="ids.progress" class="text-lg font-semibold text-ink">State</h3>
       <ol v-if="stepIndex >= 0" class="flex flex-col gap-2 sm:flex-row sm:gap-1">
         <li
-          v-for="(step, index) in START_STEPS"
-          :key="step"
+          v-for="(step, index) in OWNER_START_STEPS"
+          :key="step.label"
           class="flex items-center gap-2 sm:flex-1 sm:flex-col sm:items-stretch"
           :aria-current="index === stepIndex ? 'step' : undefined"
         >
@@ -59,7 +59,7 @@
             :class="stepBarClass(index)"
           ></span>
           <span class="text-xs" :class="index === stepIndex ? 'font-semibold text-ink' : 'text-ink-muted'">
-            {{ stateLabel(step) }}<span class="sr-only">{{ stepSuffix(index) }}</span>
+            {{ step.label }}<span class="sr-only">{{ stepSuffix(index) }}</span>
           </span>
         </li>
       </ol>
@@ -67,11 +67,8 @@
         class="rounded-panel border p-3 text-sm"
         :class="stateNoteClass"
       >
-        <span class="font-semibold">{{ stateLabel(server.state) }}.</span>
+        <span class="font-semibold">{{ ownerStateLabel(server.state) }}.</span>
         {{ stateDescription(server.state) }}
-        <template v-if="server.state === 'failed' && server.failure_reason">
-          Reason: {{ server.failure_reason }}.
-        </template>
       </p>
       <p v-if="server.live && server.restarts > 0" class="text-sm text-warn">
         It crashed and was restarted {{ server.restarts === 1 ? 'once' : `${server.restarts} times` }}.
@@ -80,23 +77,23 @@
 
     <!-- The listing the server's NovaWorld account holds, with the owner's
          pushes to it (the account's listed servers, GET /api/me/hosts) that
-         the console below lacks. -->
+         the console below lacks, while it runs. -->
     <section v-if="server.live" class="space-y-3" :aria-labelledby="ids.listing">
       <h3 :id="ids.listing" class="text-lg font-semibold text-ink">Listing</h3>
-      <div v-if="server.listing" class="space-y-3 rounded-panel border border-border p-4">
+      <div v-if="shownListing" class="space-y-3 rounded-panel border border-border p-4">
         <dl class="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-[auto_1fr]">
           <dt class="text-ink-muted">Name</dt>
-          <dd class="break-words text-ink">{{ server.listing.server_name || server.settings.game_name }}</dd>
-          <template v-if="listing?.msg">
+          <dd class="break-words text-ink">{{ shownListing.name }}</dd>
+          <template v-if="shownListing.message">
             <dt class="text-ink-muted">Message</dt>
-            <dd class="break-words text-ink">{{ listing.msg }}</dd>
+            <dd class="break-words text-ink">{{ shownListing.message }}</dd>
           </template>
           <dt class="text-ink-muted">Mission</dt>
-          <dd class="break-words text-ink">{{ server.listing.mission_name || 'No mission yet' }}</dd>
+          <dd class="break-words text-ink">{{ shownListing.mission || 'No mission yet' }}</dd>
           <dt class="text-ink-muted">Players</dt>
-          <dd class="text-ink">{{ server.listing.players }} of {{ server.listing.max_players }}</dd>
+          <dd class="text-ink">{{ shownListing.players }} of {{ shownListing.maxPlayers }}</dd>
           <dt class="text-ink-muted">Address</dt>
-          <dd class="break-all font-mono text-ink">{{ server.listing.host_ip }}:{{ server.listing.host_port }}</dd>
+          <dd class="break-all font-mono text-ink">{{ shownListing.address }}</dd>
         </dl>
         <p class="text-sm text-ink-muted">Players find it in the server browser.</p>
       </div>
@@ -107,7 +104,7 @@
         It shows up in the server browser once it is ready.
       </p>
       <MyServerCard
-        v-if="listing"
+        v-if="listing && server.state === 'running'"
         :key="listing.rid"
         embedded
         :server="listing"
@@ -175,7 +172,7 @@
     <!-- Every transition, oldest first. -->
     <section v-if="events.length > 0" class="space-y-3" :aria-labelledby="ids.timeline">
       <h3 :id="ids.timeline" class="text-lg font-semibold text-ink">Timeline</h3>
-      <details :open="server.live">
+      <details>
         <summary class="cursor-pointer text-sm text-accent hover:text-ink-bright">
           {{ events.length }} event{{ events.length === 1 ? '' : 's' }}, oldest first
         </summary>
@@ -260,7 +257,9 @@ import type { HostedEvent, HostedServer } from '../types/hostedServer';
 import type { MyServer } from '../types/myServers';
 import { FIELD_LABELS } from '../utils/hostedSettings';
 import {
-  START_STEPS,
+  OWNER_START_STEPS,
+  ownerStateLabel,
+  ownerStepIndex,
   stateBadgeClass,
   stateDescription,
   stateLabel,
@@ -312,6 +311,32 @@ const showPassword = ref(false);
 
 const events = computed<HostedEvent[]>(() => props.server.events ?? []);
 
+// The listing as shown: the account's listed row when the page has it (read
+// every few seconds, so a rename shows soon), else the hosted read's.
+const shownListing = computed(() => {
+  const row = props.listing ?? null;
+  const own = props.server.listing;
+  if (row) {
+    return {
+      name: row.server_name || own?.server_name || props.server.settings.game_name,
+      message: row.msg,
+      mission: row.mission_name || own?.mission_name || '',
+      players: row.players,
+      maxPlayers: row.max_players,
+      address: `${row.host_ip}:${row.host_port}`,
+    };
+  }
+  if (!own) return null;
+  return {
+    name: own.server_name || props.server.settings.game_name,
+    message: '',
+    mission: own.mission_name,
+    players: own.players,
+    maxPlayers: own.max_players,
+    address: `${own.host_ip}:${own.host_port}`,
+  };
+});
+
 // The stop's "stopping" line lasts until the server has ended (its state then
 // says so itself).
 watch(
@@ -326,7 +351,7 @@ const expansionLabel = computed(() =>
 );
 
 // The start step the server is on, or -1 once it is stopping or has ended.
-const stepIndex = computed(() => START_STEPS.indexOf(props.server.state));
+const stepIndex = computed(() => ownerStepIndex(props.server.state));
 
 function stepBarClass(index: number): string {
   if (index < stepIndex.value) return 'bg-online';

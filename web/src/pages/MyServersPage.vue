@@ -34,7 +34,7 @@
       <p v-if="pageError" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
         {{ pageError }}
       </p>
-      <p v-if="pollTrouble" class="text-xs text-warn">
+      <p v-if="pollTrouble && view !== 'hidden'" class="text-xs text-warn">
         The last refresh did not get through; this page keeps trying.
       </p>
 
@@ -47,14 +47,15 @@
 
       <template v-else>
         <!-- The hosted server (GET /api/me/server): an approved account's one
-             Start, or its live server with its one Stop. -->
-        <section v-if="view !== 'hidden'" class="space-y-8" aria-label="Your hosted server">
-          <div v-if="view === 'error'" class="space-y-3 rounded-panel border border-border bg-panel p-6">
-            <h2 class="text-lg font-semibold text-ink">Your hosted server could not be loaded</h2>
-            <p class="text-sm text-ink-muted">Refresh to try again.</p>
-          </div>
-
-          <template v-else-if="view === 'live' && hosted?.server">
+             Start, or its live server with its one Stop. A first read that
+             failed shows nothing here (the account may not be approved): the
+             page's alert says it, and the read is retried. -->
+        <section
+          v-if="view === 'live' || view === 'off' || view === 'start'"
+          class="space-y-8"
+          aria-label="Your hosted server"
+        >
+          <template v-if="view === 'live' && hosted?.server">
             <p v-if="!hosted.enabled" class="rounded-panel border border-warn/40 bg-warn/10 p-4 text-sm text-warn">
               Hosting is switched off right now, so your server may stop working.
             </p>
@@ -70,7 +71,7 @@
               @refused="onRefused"
               @console-gone="onConsoleGone"
               @session-ended="onSessionEnded"
-              @listing-changed="refreshListSoon"
+              @listing-changed="onListingChanged"
             />
           </template>
 
@@ -130,11 +131,13 @@
 //
 // Polling, each read its own: the hosted server every few seconds while it
 // moves between states on its own (requested to running, and a stop), backing
-// off to a minute while it runs, none once it has ended, a hidden tab skipping
-// its polls and refreshing when shown again; the listings every
-// LIST_POLL_SECONDS. The running server's console (HostedServerConsole) makes
-// its admitted calls through this page's one console queue, so no two of them
-// overlap (the service runs one console request per account at once).
+// off to a minute while it runs, none once it has ended, but read again when
+// the tab is shown and when the listings name a hosted server it does not
+// show (one started elsewhere); the listings every LIST_POLL_SECONDS. A hidden
+// tab skips both reads' polls and catches up when shown again. The running
+// server's console (HostedServerConsole) makes its admitted calls through
+// this page's one console queue, so no two of them overlap (the service runs
+// one console request per account at once).
 import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import HostedServerStatus from '../components/HostedServerStatus.vue';
@@ -147,7 +150,7 @@ import { useSession } from '../composables/useSession';
 import type { HostedServer, MyHostedServerResponse } from '../types/hostedServer';
 import type { MyServer } from '../types/myServers';
 import { isTransitioning } from '../utils/hostedState';
-import { hostedView, splitListings, startKind } from '../utils/myServersView';
+import { hostedView, listingsOutrunHosted, splitListings, startKind } from '../utils/myServersView';
 
 const { user, refresh: refreshSession } = useSession();
 const route = useRoute();
@@ -173,6 +176,10 @@ const hostedLoading = ref(false);
 const listLoading = ref(false);
 const hostedError = ref('');
 const listError = ref('');
+// A start or stop the service refused for a reason the page then re-reads
+// (the form or card that showed it goes with the re-read): kept here until
+// the next refresh, start or stop.
+const hostedNotice = ref('');
 const loadedAt = ref<number | null>(null);
 const now = ref(Date.now());
 const pageStatus = ref('');
@@ -183,11 +190,13 @@ const statusCard = ref<{ focusHeading: () => void } | null>(null);
 const formKey = ref(0);
 
 const loading = computed(() => hostedLoading.value || listLoading.value);
-// Both reads can fail alike (no connection): their message once.
-const pageError = computed(() =>
-  hostedError.value === listError.value ? hostedError.value : [hostedError.value, listError.value].filter(Boolean).join(' '),
-);
 const view = computed(() => hostedView(hosted.value, hostedError.value !== '' && !hostedLoading.value));
+// Each message once (both reads can fail alike, with no connection); the
+// hosted read's failures say nothing to an account without a hosted section.
+const pageError = computed(() => {
+  const messages = [hostedNotice.value, view.value === 'hidden' ? '' : hostedError.value, listError.value];
+  return messages.filter((m, i) => m !== '' && messages.indexOf(m) === i).join(' ');
+});
 const listings = computed(() => splitListings(servers.value, hosted.value?.server ?? null));
 const firstLoading = computed(
   () => view.value === 'loading' || (servers.value === null && (listError.value === '' || listLoading.value)),
@@ -199,6 +208,7 @@ async function onSessionEnded() {
 }
 
 function refresh() {
+  hostedNotice.value = '';
   void loadHosted(false);
   void loadList(false);
 }
@@ -207,6 +217,7 @@ function refresh() {
 // The hosted server.
 
 let hostedTimer: ReturnType<typeof setTimeout> | undefined;
+let hostedSoonTimer: ReturnType<typeof setTimeout> | undefined;
 let hostedInFlight: AbortController | null = null;
 let runningDelay = RUNNING_POLL_FIRST_MS;
 let retryDelay = RETRY_POLL_FIRST_MS;
@@ -310,6 +321,7 @@ function dropHostedInFlight() {
 // the page follows it from there.
 async function onStarted(server: HostedServer | null) {
   hostedError.value = '';
+  hostedNotice.value = '';
   pageStatus.value = 'Your server is starting.';
   if (server && hosted.value) {
     hosted.value = { ...hosted.value, server };
@@ -324,6 +336,7 @@ async function onStarted(server: HostedServer | null) {
 
 function onHostedStopped(server: HostedServer | null) {
   hostedError.value = '';
+  hostedNotice.value = '';
   pageStatus.value = '';
   if (server && hosted.value) {
     // The stop's reply carries no timeline: keep the one shown.
@@ -337,11 +350,14 @@ function onHostedStopped(server: HostedServer | null) {
 }
 
 // A refusal that means this page's picture is out of date: read it again.
+// The re-read takes the form away (already_live), or the whole section
+// (not_approved), so the page keeps the refusal's sentence.
 function onRefused(error: HostedError) {
   if (error.code === 'unauthorized') {
     void onSessionEnded();
     return;
   }
+  if (error.code === 'already_live' || error.code === 'not_approved') hostedNotice.value = error.message;
   if (
     error.code === 'already_live' ||
     error.code === 'not_approved' ||
@@ -360,8 +376,27 @@ function onConsoleGone() {
   void loadHosted(true);
 }
 
+// A shown tab reads the hosted server at once unless a poll is already
+// due (one that came due while it was hidden did not read), and the listings
+// when a poll was skipped meanwhile.
 function onVisibility() {
-  if (!document.hidden && !hostedTimer && hosted.value?.server?.live) void loadHosted(true);
+  if (document.hidden) return;
+  if (!hostedTimer) void loadHosted(true);
+  if (listMissed) {
+    listMissed = false;
+    void loadList(true);
+  }
+}
+
+// A push to the hosted server's listing: its name and the like come back
+// with the server's next update, so look at both reads again shortly.
+function onListingChanged() {
+  refreshListSoon();
+  if (hostedSoonTimer) clearTimeout(hostedSoonTimer);
+  hostedSoonTimer = setTimeout(() => {
+    hostedSoonTimer = undefined;
+    void loadHosted(true);
+  }, 1500);
 }
 
 // ---------------------------------------------------------------------------
@@ -370,6 +405,8 @@ function onVisibility() {
 let listTimer: ReturnType<typeof setInterval> | undefined;
 let listSoonTimer: ReturnType<typeof setTimeout> | undefined;
 let listInFlight: AbortController | null = null;
+// A poll came due while the tab was hidden: the tab reads the list when shown.
+let listMissed = false;
 
 // `background` keeps the list (and says nothing) on a failed poll; an
 // asked-for refresh shows the failure.
@@ -392,6 +429,9 @@ async function loadList(background: boolean) {
     if (!background || servers.value === null) listError.value = '';
     servers.value = result.value;
     loadedAt.value = now.value;
+    // A hosted server this page does not show is live (started from another
+    // tab or device): the hosted read is stale, so its start would be too.
+    if (listingsOutrunHosted(result.value, hosted.value?.server ?? null)) void loadHosted(true);
     return;
   }
   if (result.error.code === 'unauthorized') {
@@ -429,6 +469,10 @@ onMounted(() => {
   refresh();
   listTimer = setInterval(() => {
     now.value = Date.now();
+    if (document.hidden) {
+      listMissed = true;
+      return;
+    }
     void loadList(true);
   }, LIST_POLL_SECONDS * 1000);
   document.addEventListener('visibilitychange', onVisibility);
@@ -437,6 +481,7 @@ onMounted(() => {
 onUnmounted(() => {
   unmounted = true;
   clearHostedPoll();
+  if (hostedSoonTimer) clearTimeout(hostedSoonTimer);
   if (listTimer) clearInterval(listTimer);
   if (listSoonTimer) clearTimeout(listSoonTimer);
   document.removeEventListener('visibilitychange', onVisibility);
