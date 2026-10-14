@@ -255,34 +255,36 @@ and restart the server only on an exit it did not ask for (ADR 0053 d6).
 `.github/workflows/serve-image.yml` publishes as `ghcr.io/<owner>/opennova-serve`
 (tagged `sha-<short>`, the branch, and `latest` on master). It is the server the hosted
 game servers run (ADR 0053): each hosted server's EC2 machine pulls it at the digest the
-service's deploy pinned and runs it as below, with `/opt/jo` the game data volume
-(`apps/novaworld_server/hosted/machine/user_data.sh`; DEPLOY.md, "Hosted game servers").
+service's deploy pinned and runs it as below, with `/opt/game` the game data volume of the
+server's data set (`apps/novaworld_server/hosted/machine/user_data.sh`; DEPLOY.md, "Hosted
+game servers") and `/game <code>` naming its title.
 
 The image holds the binary and no game data. No retail byte goes into it, ever: the game
-data is a licensed Joint Operations install you mount yourself.
+data is a game folder you mount yourself, a licensed Joint Operations or Delta Force Xtreme 2
+install or OpenNova's own data, with `/game` naming its title (`jo` or `dfx2`).
 
 | Path | What | Mount |
 |---|---|---|
-| `/opt/jo` | The install, as `--resource-dir` takes it (`resource.pff`, `localres.pff`, `language.pff`, the loose files the server reads, `expansion/jox01/` for `/exp jox01`). The entrypoint names it. | read-only (`:ro`) |
+| `/opt/game` | The game folder, as `--resource-dir` takes it (`resource.pff`, `localres.pff`, `language.pff`, the loose files the server reads, and for Joint Operations `expansion/jox01/` for `/exp jox01`). The entrypoint names it. | read-only (`:ro`) |
 | `/srv/serve` | The working directory (above): `game.cfg`, `activesrvr.txt`, `admin.cfg`, `admin_log.txt`, `banned.txt`, `banlist.txt` and the logs, and by convention the host file and the `--credentials` file. | a writable volume |
 
 ```bash
 docker build -f apps/serve/Dockerfile -t opennova-serve .     # from the repo root
 docker run --rm --network host \
-  -v "<JO install>:/opt/jo:ro" -v "<state dir>:/srv/serve" \
+  -v "<JO install>:/opt/game:ro" -v "<state dir>:/srv/serve" \
   ghcr.io/<owner>/opennova-serve /HOST /srv/serve/server.host \
-  /exp jox01 --master-host <gate> --credentials /srv/serve/credentials.txt
+  /game jo /exp jox01 --master-host <gate> --credentials /srv/serve/credentials.txt
 ```
 
-- **Arguments.** The entrypoint is `opennova-serve --resource-dir /opt/jo`, and the
+- **Arguments.** The entrypoint is `opennova-serve --resource-dir /opt/game`, and the
   arguments after the image name are the rest of the command line (Usage above). With
   none, they are `/HOST /srv/serve/server.host`; arguments you give replace that default,
   so they name `/HOST` too. A later `--resource-dir` overrides the entrypoint's, and
-  `--loose-root` serves a directory of loose files mounted at `/opt/jo`. `--help` prints
+  `--loose-root` serves a directory of loose files mounted at `/opt/game`. `--help` prints
   the usage.
 - **User.** The server runs as UID and GID 10001, never as root. A fresh named volume at
   `/srv/serve` takes that ownership from the image; a host directory needs it first
-  (`chown 10001:10001 <state dir>`). The install needs only to be readable.
+  (`chown 10001:10001 <state dir>`). The game folder needs only to be readable.
 - **Ports.** The image declares UDP 32768-32787, `game.cfg`'s stock LAN server window
   (whose first port also heads the NovaWorld window), and TCP 32800, the remote-admin
   port the hosted servers set as `remote_admin_port` (the stock 0 opens none). The

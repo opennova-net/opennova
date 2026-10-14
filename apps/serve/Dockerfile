@@ -3,12 +3,14 @@
 #   docker build -f apps/serve/Dockerfile -t opennova-serve .
 #
 # The image holds the server binary and nothing of the game: no retail byte,
-# ever (ADR 0053 d3). The game data is a licensed Joint Operations install,
-# mounted read-only at /opt/jo. The server keeps its files (game.cfg,
-# admin.cfg, admin_log.txt, the ban lists, the logs) in its working directory
-# (ADR 0051 d2), /srv/serve, a writable volume. A run:
+# ever (ADR 0053 d3). The game data, a data set (a licensed Joint Operations
+# or Delta Force Xtreme 2 install, or OpenNova's own data), is mounted
+# read-only at /opt/game, and `/game <code>` in the arguments names its title.
+# The server keeps its files (game.cfg, admin.cfg, admin_log.txt, the ban
+# lists, the logs) in its working directory (ADR 0051 d2), /srv/serve, a
+# writable volume. A run:
 #   docker run --rm --network host \
-#     -v <JO install>:/opt/jo:ro -v <state dir>:/srv/serve \
+#     -v <game folder>:/opt/game:ro -v <state dir>:/srv/serve \
 #     ghcr.io/<owner>/opennova-serve /HOST /srv/serve/server.host [serve args]
 # apps/serve/README.md ("Container image") has the contract.
 
@@ -39,12 +41,12 @@ FROM ubuntu:24.04 AS runtime
 
 # A fixed non-root user, so a host directory mounted at /srv/serve can be
 # handed to it by number (chown 10001:10001). A fresh named volume copies the
-# image's ownership of /srv/serve and needs nothing. /opt/jo is only the mount
-# point: the image ships it empty.
+# image's ownership of /srv/serve and needs nothing. /opt/game is only the
+# mount point: the image ships it empty.
 RUN groupadd --system --gid 10001 serve \
     && useradd --system --uid 10001 --gid serve --home-dir /srv/serve \
         --no-create-home --shell /usr/sbin/nologin serve \
-    && mkdir -p /opt/jo /srv/serve \
+    && mkdir -p /opt/game /srv/serve \
     && chown serve:serve /srv/serve
 
 COPY --from=build /src/build/apps/serve/opennova-serve /usr/local/bin/opennova-serve
@@ -61,12 +63,12 @@ VOLUME ["/srv/serve"]
 # only from the NovaWorld service.
 EXPOSE 32768-32787/udp 32800/tcp
 
-# The install is a fixed mount, so the entrypoint names it; a later
+# The game folder is a fixed mount, so the entrypoint names it; a later
 # --resource-dir in the arguments wins, and --loose-root mounts a directory of
 # loose files there. The default arguments serve the host file the state
 # volume holds; any arguments given replace them, so they name /HOST too.
 # serve installs its own SIGINT/SIGTERM handlers (a clean stop deregisters
 # from NovaWorld), so it stops cleanly as PID 1 too; `docker run --init` (the
 # compose files' `init: true`) works as for the NovaWorld server image.
-ENTRYPOINT ["/usr/local/bin/opennova-serve", "--resource-dir", "/opt/jo"]
+ENTRYPOINT ["/usr/local/bin/opennova-serve", "--resource-dir", "/opt/game"]
 CMD ["/HOST", "/srv/serve/server.host"]

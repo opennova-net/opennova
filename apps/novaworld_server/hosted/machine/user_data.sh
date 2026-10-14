@@ -9,8 +9,10 @@
 #
 #   1. reserves serve's two ports, then installs docker (held, so no
 #      unattended upgrade restarts it under the server);
-#   2. mounts the game data volume (the private snapshot's, labelled
-#      opennova-jo) read-only at /opt/jo;
+#   2. mounts the game data volume read-only at /opt/game: the private
+#      snapshot of the server's data set (Joint Operations, Delta Force
+#      Xtreme 2 or OpenNova's own), labelled opennova-data, which that data
+#      set's launch template carries;
 #   3. fetches the server's bootstrap bundle from the service over the private
 #      network, once, with the one-time token below: the working directory's
 #      files (the secret ones among them), opennova-serve's arguments and the
@@ -42,8 +44,8 @@ umask 077
 BOOTSTRAP_URL='@OPENNOVA_BOOTSTRAP_URL@'
 BOOTSTRAP_TOKEN='@OPENNOVA_BOOTSTRAP_TOKEN@'
 
-readonly DATA_LABEL=opennova-jo
-readonly DATA_DIR=/opt/jo
+readonly DATA_LABEL=opennova-data
+readonly DATA_DIR=/opt/game
 readonly WORK_DIR=/srv/serve
 readonly CONF_DIR=/etc/opennova
 readonly RUN_DIR=/run/opennova
@@ -88,6 +90,7 @@ done
 [ -e "/dev/disk/by-label/$DATA_LABEL" ] || end_machine "no volume labelled $DATA_LABEL"
 mkdir -p "$DATA_DIR"
 mount -t ext4 -o ro,noload,nodev,nosuid,noexec "LABEL=$DATA_LABEL" "$DATA_DIR"
+# The boot's three archives, which every data set ships.
 for archive in resource.pff localres.pff language.pff; do
   [ -n "$(find "$DATA_DIR" -maxdepth 1 -type f -iname "$archive" -print -quit)" ] \
     || end_machine "the data volume holds no $archive"
@@ -159,7 +162,7 @@ done
 cat > /usr/local/sbin/opennova-serve-run <<'RUN'
 #!/bin/bash
 # opennova-serve in its container (opennova-serve.service's ExecStart): the game
-# data read-only at /opt/jo, the working directory at /srv/serve, the machine's
+# data read-only at /opt/game, the working directory at /srv/serve, the machine's
 # own network (NovaWorld takes the server's address from its session's
 # datagrams), and the arguments and the image the bootstrap bundle named. It
 # runs as UID 10001 with no capability and no way to gain one (no setuid), so
@@ -172,7 +175,7 @@ mapfile -d '' -t args < /etc/opennova/serve.args
 exec /usr/bin/docker run --rm --name opennova-serve --network host --user 10001:10001 \
   --cap-drop ALL --security-opt no-new-privileges \
   --stop-timeout 60 --log-driver journald \
-  --mount type=bind,source=/opt/jo,target=/opt/jo,readonly \
+  --mount type=bind,source=/opt/game,target=/opt/game,readonly \
   --mount type=bind,source=/srv/serve,target=/srv/serve \
   "$image" "${args[@]}"
 RUN
