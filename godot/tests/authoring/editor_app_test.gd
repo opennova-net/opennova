@@ -1,6 +1,6 @@
 extends GutTest
 
-## The OpenNova Editor's shell (ADR 0046 d4/d10) booted headless from its scene: the
+## The OpenNova Editor's shell (ADR 0046 d11) booted headless from its scene: the
 ## editor-enabled GDExtension variant is what a source run loads, the typed seam
 ## creates a project, fills its checklist, builds it, and Play starts the game on the
 ## build (the Godot binary at this checkout, headless and self-quitting) through the

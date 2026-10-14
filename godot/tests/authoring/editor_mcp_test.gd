@@ -493,7 +493,7 @@ func test_request_table_on_the_wire() -> void:
 	assert_eq(String(parts.get("card", {}).get("properties", {}).get("path", {}).get("type", "")), "string", str(parts.get("card")))
 	assert_eq(String(parts.get("build_result", {}).get("properties", {}).get("open", {}).get("type", "")), "boolean")
 	assert_eq(parts.get("focus", {}).get("enum", []), table.get("focus", []))
-	# Review X19 and X13: the import checks are whole numbers, as import_preview's rows say them; a text carries the
+	# The import checks are whole numbers, as import_preview's rows say them; a text carries the
 	# longest its window's field holds.
 	var import_members: Dictionary = parts.get("import", {}).get("properties", {})
 	assert_eq(String(import_members.get("check", {}).get("items", {}).get("type", "")), "integer", str(import_members.get("check")))
