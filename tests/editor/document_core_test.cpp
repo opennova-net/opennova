@@ -775,7 +775,8 @@ struct IndexBank : Node {
 // ModelRegister reference on a user's "reg" field, so its "register" kind is the collection that
 // reference names (graph/reference_kinds: every register of the file, in the file's order); the
 // type renumbers the users (or, `renumbers` false, keeps the base's renumber_references, which
-// refuses).
+// refuses). A bank's "drop" is a Set that removes that many registers from the front (a Set its type
+// says reshapes, as a menu window's TYPE does), read as no value.
 class IndexDocument : public Document {
 public:
 	explicit IndexDocument(bool renumbers = true) : renumbers_(renumbers) {}
@@ -791,7 +792,7 @@ public:
 		return {{{kRegister, "Registers", "name"}, row.collections[0]}, {{kUser, "Users", ""}, row.collections[1]}};
 	}
 	const std::vector<FieldSchema> &fields(NodeKind kind) const override {
-		static const std::vector<FieldSchema> bank = {{"name", FieldType::Text, 32}};
+		static const std::vector<FieldSchema> bank = {{"name", FieldType::Text, 32}, {"drop", FieldType::Integer}};
 		static const std::vector<FieldSchema> reg = {{"name", FieldType::Text, 16}};
 		static const std::vector<FieldSchema> user = [] {
 			FieldSchema field{"reg", FieldType::Integer};
@@ -861,7 +862,10 @@ protected:
 		const auto *number = std::get_if<int64_t>(&value);
 		const size_t i = address.child ? index_in(bank, address) : SIZE_MAX;
 		if (!address.child && field == "name" && text) bank.title = *text;
-		else if (i != SIZE_MAX && address.kind == kRegister && field == "name" && text) bank.registers[i] = *text;
+		else if (!address.child && field == "drop" && number && *number >= 0 && size_t(*number) <= bank.registers.size()) {
+			bank.registers.erase(bank.registers.begin(), bank.registers.begin() + std::ptrdiff_t(*number));
+			bank.collections[0].erase(bank.collections[0].begin(), bank.collections[0].begin() + std::ptrdiff_t(*number));
+		} else if (i != SIZE_MAX && address.kind == kRegister && field == "name" && text) bank.registers[i] = *text;
 		else if (i != SIZE_MAX && address.kind == kUser && field == "reg" && number) bank.users[i] = *number;
 		else {
 			error = "Unknown field.";
@@ -869,6 +873,7 @@ protected:
 		}
 		return true;
 	}
+	bool set_reshapes(NodeKind kind, const std::string &field) const override { return kind == kBank && field == "drop"; }
 	bool edit_collection(Node &node, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                     std::string &error) override {
 		auto &bank = static_cast<IndexBank &>(node);
@@ -2008,7 +2013,8 @@ static int test_record_index() {
 // moves the collection's records has the type renumber what names them in the same step: a Remove
 // in the middle shifts the later references, its undo giving both back and its redo both again; a
 // Remove of a register a user names is refused, nothing committed; a Move, a Duplicate and an Add
-// at the front renumber; an Add at the end moves no index and asks the type nothing; a batch's
+// at the front renumber, as does a Set its type says reshapes; an Add at the end moves no index and asks
+// the type nothing; a batch's
 // later edit names the registers as the renumbering left them; the index counts every register of
 // the file in its order, across rows, so a row moved renumbers too; a type that keeps the base's
 // renumber_references refuses an edit that moves an index; and a type whose schema names no
@@ -2073,6 +2079,17 @@ static int test_record_references() {
 	            past.serialize().text == "B one\nR r1\nR r2\nR r3\nU 8\nU 3\n");
 	past.undo();
 	TEST_EXPECT(past.serialize().text == dangling && !past.can_undo());
+	// A Set its type says reshapes renumbers as a Remove does: dropping r0, which a user names, is
+	// refused; dropping it where none does moves every user's index with its register.
+	TEST_EXPECT(!document.apply(set_edit({row(0).id, kBank, 0}, "drop", int64_t(1)), error) &&
+	            error.message == "A user reads this register." && document.serialize().text == text);
+	const std::string droppable = "B one\nR r0\nR r1\nR r2\nU 1\nU 2\n";
+	IndexDocument dropped;
+	TEST_EXPECT(dropped.load_bytes(bytes_of(droppable), "drop.fake", AssetKind::Model, "jo", error));
+	TEST_EXPECT(dropped.apply(set_edit({dropped.rows()[0]->id, kBank, 0}, "drop", int64_t(1)), error) &&
+	            dropped.serialize().text == "B one\nR r1\nR r2\nU 0\nU 1\n" && dropped.renumbered == 1);
+	dropped.undo();
+	TEST_EXPECT(dropped.serialize().text == droppable && !dropped.can_undo());
 	// A batch: the Remove, then a Set naming register 2 as the Remove left them (r3); one step.
 	TEST_EXPECT(document.apply({op_edit(EditOperation::Remove, reg(1)), set_edit(user(0), "reg", int64_t(2))}, error) &&
 	            document.serialize().text == "B one\nR r0\nR r2\nR r3\nU 2\nU 1\nU 2\nU 1\n");

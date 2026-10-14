@@ -511,8 +511,9 @@ protected:
 	                       std::string &error) = 0;
 	// Whether a Set of `field` on a record of `kind` may change which records its row holds (a menu window's TYPE
 	// drops what the new type does not read, with their identities, and reads a TARGET into the other type's list):
-	// the batch numbers a record it made (its identity 0) and indexes the row again for the edits after it. The
-	// default: a Set changes a value alone.
+	// the batch numbers a record it made (its identity 0), indexes the row again for the edits after it, and
+	// renumbers what names its records by place as it does after a structural edit (renumber, renumber_place_lists).
+	// The default: a Set changes a value alone.
 	virtual bool set_reshapes(NodeKind kind, const std::string &field) const {
 		(void)kind;
 		(void)field;
