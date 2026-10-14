@@ -1043,6 +1043,7 @@ public:
 	// per-slot vars), keyed by roster slot; the host's own (`own`) takes the gate binding's identity.
 	struct HostPeerSlot {
 		int slot = 0;
+		uint32_t connection_id = 0; // the add's connection: a re-join is a new one
 		bool own = false;
 		String player_name, ip_and_port, pcid; // "a.b.c.d:port"; the decrypted PUBPCID or ""
 		String team, type; // the match's PlayerTeam / PlayerType ("%ld")
@@ -1067,6 +1068,7 @@ public:
 			uint32_t p_ip_packed, uint16_t p_port, const String &p_join_ticket)>;
 	void set_novaworld_join_tickets(bool p_armed, PlayerEnterRequestHook p_hook);
 	bool apply_player_enter_result(uint32_t p_connection_id, bool p_success, int32_t p_msg_code);
+	int toggle_join_lock(); // lockgame (inmatch::Server_ToggleJoinLock): 1 locked, 0 open, -1 none
 	// The hosted-session request (network/host_session_options.h): every
 	// user-facing field lands; the sim-owned fields (the mission header blob,
 	// the score tables) are untouched. Call BEFORE loading a mission.

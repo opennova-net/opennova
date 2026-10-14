@@ -110,6 +110,7 @@ std::vector<HostPlayerSlot> ServeListing::wanted_roster(const std::map<int, Host
 			continue;
 		HostPlayerSlot slot;
 		slot.slot = static_cast<int>(c.reply.player_slot);
+		slot.connection_id = c.connection_id;
 		slot.player_name = c.player_name;
 		slot.ip_and_port = peer_addr_to_string(c.peer);
 		slot.pcid = c.account.pcid;

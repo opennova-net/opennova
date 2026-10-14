@@ -14,8 +14,11 @@
 namespace opennova {
 
 // What a roster sync does to the published roster: the slots to remove (gone, or now another
-// player's: its name, address or PCID differs), the players to add, and the kept players whose
-// PlayerTeam / PlayerType alone changed.
+// player's: its connection, name, address or PCID differs, a leave and a re-join between two
+// syncs included), the players to add, and the kept players whose PlayerTeam / PlayerType alone
+// changed.
+// [orig: Server_PlayerRemove — ClientHostPlayerRemoved @0x51b5f3; Server_PlayerAdd —
+//  ClientHostPlayerAdded @0x51d4b5]
 struct RosterSync {
 	std::vector<int> removed;
 	std::vector<HostPlayerSlot> added;
@@ -80,6 +83,13 @@ public:
 	// [orig: Game_StartMission @0x5248c6..0x524903 — the marks @0x5248e4 / @0x5248ef,
 	//  Lobby_UpdateServerInfo @0x5248f5, CPlayerManager_RebuildLists(1) @0x524903]
 	void publish_mission_start();
+	// The server-info update outside the refresh and the mission start, the join lock's toggle's
+	// (inmatch::Server_ToggleJoinLock through its embedder's hook): the Host list's columns into
+	// the session's list, then in state 6 the lists' changed vars, and the status heartbeat where
+	// no NWU session is in use. Nothing while the role is idle.
+	// [orig: Lobby_UpdateServerInfo @0x4fe8c0, its tail CPlayerManager_RebuildLists(0) @0x4ff63a;
+	//  Server_ToggleJoinLock's call @0x50d762]
+	void update_server_info();
 	// Route one session notice. True when the notice was a host-direction one.
 	bool handle_notice(const ClientSession::Notice &notice);
 
@@ -132,14 +142,9 @@ private:
 	HostRegistration host_cfg() const;
 	void send_host_request(uint32_t currently_hosting);
 	void handle_host_result(const ClientSession::Notice &notice);
-	// The server-info update: the lists' changed vars (and the status heartbeat where no NWU
-	// session is in use). [orig: Lobby_UpdateServerInfo @0x4fe8c0, its tail
-	//  CPlayerManager_RebuildLists(0) @0x4ff63a]
-	void update_server_info();
 	// Both lists marked changed, the server-info update, then in state 6 the full lists and the
 	// marks cleared: the block a mission start and a re-host's result share.
 	void republish_lists();
-	void send_host_update(bool full);
 	void send_status_blob();
 
 	NwuLobbySession &lobby_;

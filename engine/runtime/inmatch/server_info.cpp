@@ -48,4 +48,14 @@ void read_session_listing_columns(
 	r.server_message = config.custom_text;
 }
 
+bool Server_ToggleJoinLock(NapiNPServerCtx &ctx) {
+	// [orig: `cmp g_ServerJoinLocked, eax(0); sete al; mov g_ServerJoinLocked, eax`
+	//  @0x50D750..0x50D75D]
+	ctx.join_locked = !ctx.join_locked;
+	// [orig: `push 0; call Lobby_UpdateServerInfo` @0x50D758 / @0x50D762]
+	if (ctx.on_update_server_info)
+		ctx.on_update_server_info();
+	return ctx.join_locked;
+}
+
 } // namespace opennova::inmatch

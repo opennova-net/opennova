@@ -68,9 +68,23 @@ void NwuHostRole::tick(uint32_t now_ms) {
 	}
 }
 
+// The Host list's columns go into the session's list in any session state, a refresh in an NWU
+// outage's included, so a re-host's request carries the outage's last one; the tail's send goes in
+// state 6 alone (ClientSession::send_host_update), writing the changed vars of a changed list. The
+// PlayerList's writers SetOrCreate theirs at once (set_player_slot, clear_player_slot,
+// set_player_vars). Retail's gates are its in-session and NovaWorld-transport tests, which the
+// role's hosting leg stands for.
+// [orig: Lobby_UpdateServerInfo @0x4fe8c0 — `cmp is_in_session, 0` @0x4fe8d8, `cmp
+//  transport_mode, 1` @0x4fe8e5, the first SetOrCreate @0x4fe911 with no session-state test; its
+//  tail CPlayerManager_RebuildLists(0) @0x4ff63a, `cmp [esi+0x11c], 6` @0x4d4593; the refresh's
+//  call Server_TickUpdate @0x51d943]
 void NwuHostRole::update_server_info() {
-	if (phase_ != Phase::Hosting) return;
-	send_host_update(/*full=*/false);
+	if (phase_ == Phase::Idle)
+		return;
+	if (ClientSession *session = lobby_.session()) {
+		session->set_host_list_vars(make_host_var_list(host_cfg(), lobby_text_, /*full=*/true));
+		session->send_host_update(/*include_all=*/false);
+	}
 	send_status_blob();
 }
 
@@ -95,10 +109,13 @@ void NwuHostRole::publish_mission_start() {
 //  @0x4d5c71, Lobby_UpdateServerInfo(0) @0x4d5c78, the state-6 test @0x4d5c80..0x4d5c87,
 //  CNapiGameSession_SendHostUpdate(1) @0x4d5c8c, the marks cleared @0x4d5c95 / @0x4d5c9e]
 void NwuHostRole::republish_lists() {
-	if (ClientSession *session = lobby_.session()) session->mark_host_lists();
+	ClientSession *session = lobby_.session();
+	if (session != nullptr)
+		session->mark_host_lists();
 	update_server_info();
-	// The state-6 test is send_host_update's, as it is for every send.
-	send_host_update(/*full=*/true);
+	// CPlayerManager_RebuildLists(1): the whole lists, in state 6 alone (the session's test).
+	if (session != nullptr)
+		session->send_host_update(/*include_all=*/true);
 }
 
 // The host-direction notices (ServerHostResult, ServerStopHosting, ServerCommand,
@@ -225,7 +242,8 @@ void NwuHostRole::sync_roster(const std::vector<HostPlayerSlot> &wanted) {
 RosterSync plan_roster_sync(const std::map<int, HostPlayerSlot> &current,
                             const std::vector<HostPlayerSlot> &wanted) {
 	const auto same_player = [](const HostPlayerSlot &a, const HostPlayerSlot &b) {
-		return a.player_name == b.player_name && a.ip_and_port == b.ip_and_port && a.pcid == b.pcid;
+		return a.connection_id == b.connection_id && a.player_name == b.player_name &&
+				a.ip_and_port == b.ip_and_port && a.pcid == b.pcid;
 	};
 	RosterSync sync;
 	for (const auto &entry : current) {
@@ -315,28 +333,6 @@ void NwuHostRole::send_host_request(uint32_t currently_hosting) {
 	if (!session->request_hosting(host_cfg(), static_cast<int>(currently_hosting))) return;
 	register_started_ms_ = lobby_.clock_ms();
 	phase_ = Phase::Requested;
-}
-
-// Every update goes in state 6 alone: CPlayerManager_RebuildLists tests it ahead of its send (the
-// refresh's, the mission start's, the server-info update's tail) and the host result's includeAll
-// send has its own test, so with a re-host's request out (state 5) no update leaves until its
-// result. The server-info update SetOrCreates the whole Host list into the session's, which sets
-// the bit of each var whose value changed; the PlayerList's writers SetOrCreate theirs at once
-// (set_player_slot, clear_player_slot, set_player_vars). includeAll at a mission start and a
-// re-host's result writes both lists whole; any other update writes only a list whose changed
-// flag is set and only its vars whose bit is set (ClientSession::send_host_update).
-// [orig: Lobby_UpdateServerInfo @0x4fe8c0 (the Host SetOrCreates from @0x4fe911);
-//  CPlayerManager_RebuildLists @0x4d4590: `cmp [esi+0x11c], 6` @0x4d4593, the flag test
-//  @0x4d459c..0x4d45ac; CNapiGameSession_HandleHostVerifyResponse @0x4d59d0 (the test
-//  @0x4d5c80..0x4d5c87); CNapiGameSession_SendHostUpdate @0x4d3860 (updateFlag to both lists
-//  @0x4d38b0 / @0x4d38c5)]
-void NwuHostRole::send_host_update(bool full) {
-	ClientSession *session = lobby_.session();
-	if (session == nullptr || !session->is_verified() ||
-			session->host_state() != ClientSession::HostState::Established)
-		return;
-	session->set_host_list_vars(make_host_var_list(host_cfg(), lobby_text_, /*full=*/true));
-	session->send_host_update(full);
 }
 
 } // namespace opennova

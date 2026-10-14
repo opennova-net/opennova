@@ -109,6 +109,10 @@ struct HostRegistration {
 // [orig: Server_PlayerAdd @0x51d421..0x51d4aa]
 struct HostPlayerSlot {
 	int slot = 0;
+	// The add's own identity, not a var: the in-match connection the player was added for. A
+	// leave and a re-join into the same slot is a new connection, so a roster sync sends both the
+	// removal and the add, as retail's remove and add each send theirs (plan_roster_sync).
+	uint32_t connection_id = 0;
 	std::string player_name;   // PlayerName
 	std::string ip_and_port;   // PlayerIpAndPort ("a.b.c.d:port")
 	std::string pcid;          // PlayerPCID

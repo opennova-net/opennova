@@ -4,9 +4,10 @@
 // the header's name, the header's climate, the published cap, the join lock,
 // the skins and tracers rules, the password and the round clock), so a map
 // change, a rename or a lock reaches the next update (D-NET-373); the session
-// settings apply's allowcustomskins copy.
+// settings apply's allowcustomskins copy; the join lock's toggle, which runs
+// the update at once, and its clear at the round init (D-NET-659).
 // [orig: Lobby_UpdateServerInfo @0x4FE8C0; Game_ApplySessionSettingsToGlobals
-//  @0x551C22]
+//  @0x551C22; Server_ToggleJoinLock @0x50D750]
 #include <base/gameprofile/game_type.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <formats/mission/bms.h>
@@ -14,6 +15,7 @@
 #include <runtime/inmatch/host_config.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/inmatch/server_info.h>
+#include <runtime/inmatch/server_spawn.h> // Server_InitNewRoundState
 #include <runtime/world/world.h>
 
 #include <cstdio>
@@ -152,6 +154,31 @@ void test_columns_follow_the_session() {
 	CHECK(r.game_type.empty());
 }
 
+// The lockgame toggle: the lock flips, then the server-info update runs at once through the
+// context's hook and reads the new lock (the Locked column); no hook, the lock flips alone. The
+// round init clears it (D-NET-659).
+// [orig: Server_ToggleJoinLock @0x50D750..0x50D767; Server_InitNewRoundState @0x51CAAA]
+void test_join_lock_toggle() {
+	inmatch::NapiNPServerCtx ctx;
+	CHECK(inmatch::Server_ToggleJoinLock(ctx) && ctx.join_locked);
+	CHECK(!inmatch::Server_ToggleJoinLock(ctx) && !ctx.join_locked);
+	int updates = 0;
+	bool listed_locked = false;
+	ctx.on_update_server_info = [&] {
+		++updates;
+		HostRegistration r;
+		inmatch::read_session_listing_columns(r, ctx, hud::GameTextLookup{});
+		listed_locked = r.locked;
+	};
+	CHECK(inmatch::Server_ToggleJoinLock(ctx));
+	CHECK(updates == 1 && listed_locked);
+	CHECK(!inmatch::Server_ToggleJoinLock(ctx));
+	CHECK(updates == 2 && !listed_locked);
+	ctx.join_locked = true;
+	inmatch::Server_InitNewRoundState(ctx);
+	CHECK(!ctx.join_locked);
+}
+
 // The session settings apply copies the cfg's allowcustomskins into the session's word.
 void test_skins_from_the_cfg() {
 	gamecfg::GameCfg cfg;
@@ -166,6 +193,7 @@ void test_skins_from_the_cfg() {
 int main() {
 	test_columns_follow_the_session();
 	test_skins_from_the_cfg();
+	test_join_lock_toggle();
 	if (failures == 0)
 		std::printf("server_info: OK\n");
 	return failures == 0 ? 0 : 1;

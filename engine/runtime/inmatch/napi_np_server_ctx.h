@@ -151,7 +151,16 @@ struct NapiNPServerCtx {
 	// LE octet packing (the same as BanList_ParseIPEntry @0x4fd5c9); banlist.txt's
 	// PCIDs and banned.txt's names refuse at the game-layer join (codes 29 / 31).
 	// [orig: CNapiNetwork_ValidateJoinRequest @0x4c61b0, the compare @0x4c6210]
+	// The join lock (g_ServerJoinLocked): its writers are the lockgame toggle
+	// (Server_ToggleJoinLock, server_info.h) and the round init's clear.
+	// [orig: the validate's test @0x4C61C3; Server_ToggleJoinLock @0x50D75D;
+	//  Server_InitNewRoundState @0x51CAAA]
 	bool join_locked = false;
+	// The server-info update a toggle runs at once (Lobby_UpdateServerInfo(0)): a NovaWorld
+	// embedder installs it while its session hosts the match; empty, nothing runs, as retail's
+	// update returns outside a NovaWorld session. [orig: Server_ToggleJoinLock @0x50D762;
+	//  Lobby_UpdateServerInfo's gates @0x4FE8D8..0x4FE8FA]
+	std::function<void()> on_update_server_info;
 	ServerBanLists bans;
 	GameConfig config;             // [orig g_NapiNPCtx.game_settings @+0xE68 + the scattered g_* rule globals]
 	NapiNPProtocol np_protocol;    // [orig +0xE5C] (pointer in the original; embedded here)

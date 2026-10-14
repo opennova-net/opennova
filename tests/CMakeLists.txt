@@ -4609,7 +4609,8 @@ add_test(NAME npruntime_server_status_feed COMMAND npruntime_server_status_feed_
 
 # The NovaWorld listing's columns off the live session (inmatch/server_info.h, D-NET-373):
 # the server name and message, the game type's text, the mission's title and climate, the
-# published cap, the join lock, the skins and tracers rules, the password and the round clock.
+# published cap, the join lock, the skins and tracers rules, the password and the round clock;
+# the join lock's toggle and its update at once (D-NET-659).
 add_executable(npruntime_server_info_test npruntime/server_info_test.cpp)
 target_link_libraries(npruntime_server_info_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_server_info_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

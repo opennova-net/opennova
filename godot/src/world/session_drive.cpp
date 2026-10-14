@@ -676,6 +676,7 @@ void SessionDrive::sync_nw_host_roster(opennova::NwuHostRole &p_host, const Ref<
 			self_listed = true;
 		} else {
 			player.slot = slot.slot;
+			player.connection_id = slot.connection_id;
 			player.player_name = opennova::to_std(slot.player_name);
 			player.ip_and_port = opennova::to_std(slot.ip_and_port);
 			player.pcid = opennova::to_std(slot.pcid);
@@ -828,6 +829,17 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 				game_text_lookup(live_client != nullptr ? live_client->get_gametext()
 														: Ref<RtxtStringFile>()));
 	});
+	// The join lock's toggle runs the server-info update at once (D-NET-659), through the hosting
+	// session's role; the hook resolves the session node by identity on every call.
+	// [orig: Server_ToggleJoinLock @0x50D750 -> Lobby_UpdateServerInfo(0) @0x50D762]
+	if (opennova::inmatch::NapiNPServerCtx *ctx = sim->host_ctx()) {
+		ctx->on_update_server_info = [columns_client_id]() {
+			NovaWorldClient *live =
+					Object::cast_to<NovaWorldClient>(ObjectDB::get_instance(columns_client_id));
+			if (live != nullptr)
+				live->host_role().update_server_info();
+		};
+	}
 	const std::string login_pcid = client->get_login_pcid();
 	sim->set_novaworld_registration(opennova::cp1252_to_gd(host.gsid()), host.app_id(), host.cookie_keys(),
 			opennova::to_gd(login_pcid));
@@ -889,6 +901,8 @@ void SessionDrive::unbind_nw_host() {
 	// to a session it is leaving.
 	Ref<Simulation> sim = world_->get_sim();
 	if (sim.is_valid()) {
+		if (opennova::inmatch::NapiNPServerCtx *ctx = sim->host_ctx())
+			ctx->on_update_server_info = nullptr;
 		sim->set_novaworld_join_tickets(false, Simulation::PlayerEnterRequestHook());
 		sim->set_novaworld_registration(String(), 0, opennova::SessionIdRing{}, String());
 	}

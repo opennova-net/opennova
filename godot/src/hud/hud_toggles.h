@@ -54,6 +54,7 @@ public:
 		EVENT_MOUSE_FLIPPED = opennova::hud::hud_toggle_event::kMouseFlipped,
 		EVENT_MOUSE_SCALE_STEPPED = opennova::hud::hud_toggle_event::kMouseScaleStepped,
 		EVENT_MOUSE_SCALE_NEGATIVE = opennova::hud::hud_toggle_event::kMouseScaleNegative,
+		EVENT_JOIN_LOCK_TOGGLED = opennova::hud::hud_toggle_event::kJoinLockToggled,
 	};
 	// The special-key legs' result bits (engine hud_special_key).
 	enum SpecialKey {
@@ -94,6 +95,7 @@ public:
 		ROW_TOGGLE_SERVER = opennova::hud::kRowToggleServer,
 		ROW_FLIP_MOUSE = opennova::hud::kRowFlipMouse,
 		ROW_MOUSE_SCALE = opennova::hud::kRowMouseScale,
+		ROW_LOCK_GAME = opennova::hud::kRowLockGame,
 		ROW_COUNT = opennova::hud::kHudToggleRowCount,
 	};
 
@@ -103,8 +105,9 @@ public:
 	// `authority` / `mp_session_peer` are the connection mode's two bits (the
 	// ToggleServer row, the map-legend gate and the playerlist reroute);
 	// `mouse_scale_negative` is the mousescale fire's sign bit
-	// (ControlsModel.is_token_fire_signed).
-	int poll(int p_rows_down, bool p_chorded, bool p_active,
+	// (ControlsModel.is_token_fire_signed). The bits are the engine's unsigned
+	// 32-bit word, EVENT_JOIN_LOCK_TOGGLED its top bit, so the result is 64-bit.
+	int64_t poll(int p_rows_down, bool p_chorded, bool p_active,
 			bool p_in_session, bool p_objective_game, bool p_local_alive = true,
 			bool p_authority = false, bool p_mp_session_peer = false,
 			bool p_mouse_scale_negative = false);
