@@ -36,6 +36,8 @@ public class ServerInfoTests
     [InlineData("https://opennova.net", "https://opennova.net/api/server-info")]
     [InlineData("https://opennova.net/", "https://opennova.net/api/server-info")]
     [InlineData(" http://127.0.0.1:8080 ", "http://127.0.0.1:8080/api/server-info")]
+    [InlineData("http://localhost:8080", "http://localhost:8080/api/server-info")]
+    [InlineData("http://192.168.1.20:8080", "http://192.168.1.20:8080/api/server-info")]
     [InlineData("https://example.com/nw", "https://example.com/nw/api/server-info")]
     public void EndpointFor_AddsTheRoute(string serviceUrl, string expected)
     {
@@ -48,9 +50,45 @@ public class ServerInfoTests
     [InlineData("opennova.net")]
     [InlineData("ftp://opennova.net")]
     [InlineData("https://opennova.net/?x=1")]
-    public void EndpointFor_RefusesWhatIsNotAnHttpUrl(string? serviceUrl)
+    [InlineData("http://opennova.net")]            // http only to this computer or a private network
+    [InlineData("http://evil.example/sub/")]
+    [InlineData("http://203.0.113.10:8080")]
+    [InlineData("http://nas.lan:8080")]             // a name proves nothing about where it points
+    [InlineData("https://user:pw@opennova.net")]    // no user name or password
+    [InlineData("http://user@127.0.0.1:8080")]
+    public void EndpointFor_RefusesWhatIsNotAServiceUrl(string? serviceUrl)
     {
         Assert.Null(ServerInfo.EndpointFor(serviceUrl));
+    }
+
+    [Theory]
+    [InlineData("http://127.0.0.1:8080", true)]
+    [InlineData("https://localhost", true)]
+    [InlineData("http://10.1.2.3", true)]
+    [InlineData("https://opennova.net", false)]
+    [InlineData("https://203.0.113.10", false)]
+    [InlineData("not a url", false)]
+    public void IsLocalService(string serviceUrl, bool local)
+    {
+        Assert.Equal(local, ServerInfo.IsLocalService(serviceUrl));
+    }
+
+    [Theory]
+    [InlineData("54.162.79.147", true)]
+    [InlineData("127.0.0.1", false)]
+    [InlineData("10.0.0.1", false)]
+    [InlineData("172.16.0.1", false)]
+    [InlineData("172.31.255.255", false)]
+    [InlineData("172.32.0.1", true)]
+    [InlineData("192.168.0.1", false)]
+    [InlineData("169.254.1.1", false)]
+    [InlineData("100.64.0.1", false)]
+    [InlineData("100.128.0.1", true)]
+    [InlineData("0.0.0.0", false)]
+    [InlineData("224.0.0.1", false)]
+    public void Ipv4_IsPublic(string text, bool isPublic)
+    {
+        Assert.Equal(isPublic, Ipv4.IsPublic(text));
     }
 
     [Theory]
@@ -147,8 +185,60 @@ public class OpenNovaAddressSourceTests
         settings.ServiceUrl = "http://127.0.0.1:8080";
         client.Result = "127.0.0.1";
 
-        await source.ResolveAsync(CancellationToken.None);
+        var resolved = await source.ResolveAsync(CancellationToken.None);
 
         Assert.Equal("http://127.0.0.1:8080/api/server-info", client.LastEndpoint?.AbsoluteUri);
+        Assert.Equal(new ResolvedAddress("127.0.0.1", FromCache: false), resolved);
+    }
+
+    [Theory]
+    [InlineData("127.0.0.1")]
+    [InlineData("10.0.0.1")]
+    [InlineData("169.254.1.1")]
+    [InlineData("192.168.0.1")]
+    public async Task ARemoteServiceCannotPointNovaWorldAtThisMachineOrTheLan(string address)
+    {
+        var (source, client, settings, saves) = Make();
+        client.Result = address;
+
+        Assert.Null(await source.ResolveAsync(CancellationToken.None));
+        Assert.Null(settings.CachedOpenNovaAddress);
+        Assert.Equal(0, saves());
+
+        // Nor through a cached address a local service gave earlier.
+        settings.CachedOpenNovaAddress = address;
+        Assert.Null(await source.ResolveAsync(CancellationToken.None));
+
+        // A service on this computer or the LAN may.
+        settings.ServiceUrl = "http://192.168.1.20:8080";
+        Assert.Equal(new ResolvedAddress(address, FromCache: false), await source.ResolveAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AReplyInACharsetDotNetCannotDecode_FallsBackToTheCache()
+    {
+        var (source, client, settings, _) = Make();
+        settings.CachedOpenNovaAddress = "198.51.100.7";
+        client.Throws = new InvalidOperationException("The character set provided in ContentType is invalid.");
+
+        Assert.Equal(new ResolvedAddress("198.51.100.7", FromCache: true), await source.ResolveAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AnUnusableServiceUrl_UsesTheCacheWithoutAsking()
+    {
+        var (source, client, settings, _) = Make();
+        settings.ServiceUrl = "http://evil.example";
+        settings.CachedOpenNovaAddress = "198.51.100.7";
+        client.Result = "203.0.113.99";
+
+        Assert.Equal(new ResolvedAddress("198.51.100.7", FromCache: true), await source.ResolveAsync(CancellationToken.None));
+        Assert.Null(client.LastEndpoint);
+    }
+
+    [Fact]
+    public void TheHttpClient_CapsTheReply()
+    {
+        Assert.Equal(64 * 1024, HttpServerInfoClient.MaxReplyBytes);
     }
 }

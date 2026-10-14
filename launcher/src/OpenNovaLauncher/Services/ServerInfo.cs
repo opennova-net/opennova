@@ -16,15 +16,17 @@ public static class ServerInfo
     public const string RoutePath = "api/server-info";
 
     /// <summary>
-    /// The route's URL under <paramref name="serviceUrl"/> (an absolute http or https
-    /// URL: the site, or a service's own port such as http://127.0.0.1:8080), or null
-    /// when it is not one.
+    /// The route's URL under <paramref name="serviceUrl"/>, or null when that is not a
+    /// service URL the launcher asks: an absolute https URL, or http only to this computer
+    /// or a private network (<see cref="IsLocalService"/>: a local stack such as
+    /// http://127.0.0.1:8080); never with a user name, password, query or fragment.
     /// </summary>
     public static Uri? EndpointFor(string? serviceUrl)
     {
         if (string.IsNullOrWhiteSpace(serviceUrl) ||
             !Uri.TryCreate(serviceUrl.Trim(), UriKind.Absolute, out var baseUri) ||
-            (baseUri.Scheme != Uri.UriSchemeHttp && baseUri.Scheme != Uri.UriSchemeHttps) ||
+            (baseUri.Scheme != Uri.UriSchemeHttps && !(baseUri.Scheme == Uri.UriSchemeHttp && IsLocalService(baseUri))) ||
+            !string.IsNullOrEmpty(baseUri.UserInfo) ||
             !string.IsNullOrEmpty(baseUri.Query) || !string.IsNullOrEmpty(baseUri.Fragment))
         {
             return null;
@@ -32,6 +34,24 @@ public static class ServerInfo
 
         var root = baseUri.AbsoluteUri.EndsWith('/') ? baseUri : new Uri(baseUri.AbsoluteUri + "/");
         return new Uri(root, RoutePath);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="serviceUrl"/> names a service on this computer or a private
+    /// network: <c>localhost</c> or an IPv4 literal in an <see cref="Ipv4.IsLocal"/> range.
+    /// Only such a service may answer a non-public NovaWorld address.
+    /// </summary>
+    public static bool IsLocalService(string? serviceUrl)
+    {
+        return !string.IsNullOrWhiteSpace(serviceUrl) &&
+               Uri.TryCreate(serviceUrl.Trim(), UriKind.Absolute, out var uri) &&
+               IsLocalService(uri);
+    }
+
+    private static bool IsLocalService(Uri uri)
+    {
+        return string.Equals(uri.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+               (uri.HostNameType == UriHostNameType.IPv4 && Ipv4.IsLocal(uri.Host));
     }
 
     /// <summary>
@@ -73,11 +93,18 @@ public interface IServerInfoClient
 
 public sealed class HttpServerInfoClient : IServerInfoClient, IDisposable
 {
+    /// <summary>The largest reply read; the route's is a few dozen bytes.</summary>
+    public const int MaxReplyBytes = 64 * 1024;
+
     private readonly HttpClient _httpClient;
 
     public HttpServerInfoClient()
     {
-        _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+        _httpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromSeconds(10),
+            MaxResponseContentBufferSize = MaxReplyBytes,
+        };
         var version = typeof(HttpServerInfoClient).Assembly.GetName().Version?.ToString(3) ?? "0";
         _httpClient.DefaultRequestHeaders.UserAgent.Add(new ProductInfoHeaderValue("OpenNova-Launcher", version));
         _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));

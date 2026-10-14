@@ -176,6 +176,20 @@ jobs:
           # the foreground (game_mcp.BehindLaunch; docs/mcp.md "Launching").
           python -B -m unittest discover -s scripts/mcp -p "test_*.py"
 
+      # The OpenNova Launcher's xunit suite (launcher/, ADR 0054): here, the
+      # required `test` check gates it; package-launcher-windows.yml runs it
+      # again before it packages the exe.
+      - name: Set up .NET (launcher)
+        if: env.CODE == 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Launcher tests (.NET)
+        if: env.CODE == 'true'
+        shell: bash
+        run: dotnet test launcher/OpenNovaLauncher.sln -c Release --nologo
+
       # cl/link on PATH for the Ninja generator (the VS generator found them by
       # itself; vcvars prepends the VC bin dir, and CMake's Ninja compiler search
       # takes the first compiler in PATH order); sccache in front of cl for the

@@ -17,6 +17,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
     private readonly NotifyIcon _notifyIcon;
     private readonly ContextMenuStrip _menu;
     private readonly ToolStripMenuItem _statusItem;
+    private readonly ToolStripMenuItem _serviceItem;
     private readonly ToolStripMenuItem _foreignItem;
     private readonly ToolStripMenuItem _openNovaItem;
     private readonly ToolStripMenuItem _novaLogicItem;
@@ -39,6 +40,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _addressSource = new OpenNovaAddressSource(_serverInfoClient, _settings, () => _settingsStore.Save(_settings));
 
         _statusItem = new ToolStripMenuItem { Enabled = false };
+        _serviceItem = new ToolStripMenuItem { Enabled = false, Visible = false };
         _foreignItem = new ToolStripMenuItem(string.Empty, null, OnRemoveForeignClicked) { Visible = false };
         _openNovaItem = new ToolStripMenuItem("OpenNova NovaWorld", null, OnOpenNovaClicked)
         {
@@ -58,6 +60,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _menu.Items.AddRange(new ToolStripItem[]
         {
             _statusItem,
+            _serviceItem,
             _foreignItem,
             new ToolStripSeparator(),
             _openNovaItem,
@@ -122,6 +125,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
         _statusItem.Text = _state is null ? "Cannot read the hosts file" : "Now: " + Describe(_state);
         _statusItem.ToolTipText = _stateError;
 
+        // A service other than the default always shows, so a changed setting is never silent.
+        var customService = !string.Equals(_settings.ServiceUrl, ServerInfo.DefaultServiceUrl, StringComparison.Ordinal);
+        _serviceItem.Visible = customService;
+        _serviceItem.Text = "OpenNova service: " + _settings.ServiceUrl;
+
         _openNovaItem.Checked = mode == NovaWorldMode.OpenNova;
         _novaLogicItem.Checked = mode == NovaWorldMode.NovaLogic;
         _customItem.Checked = mode == NovaWorldMode.Custom;
@@ -146,7 +154,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
         NovaWorldMode.OpenNova => $"OpenNova NovaWorld ({state.Address})",
         NovaWorldMode.NovaLogic => "NovaLogic NovaWorld",
         NovaWorldMode.Custom => $"custom address {state.Address}",
-        _ => "a hand-edited launcher block (pick a mode to fix it)",
+        NovaWorldMode.OldLauncher => $"an older launcher's entry ({state.Address}); pick a mode to refresh it",
+        _ => "a hand-edited launcher block; pick a mode to fix it",
     };
 
     private static string ShortName(HostsState state) => state.Mode switch
@@ -154,9 +163,11 @@ internal sealed class TrayApplicationContext : ApplicationContext
         NovaWorldMode.OpenNova => "OpenNova NovaWorld",
         NovaWorldMode.NovaLogic => "NovaLogic NovaWorld",
         NovaWorldMode.Custom => $"custom address {state.Address}",
+        NovaWorldMode.OldLauncher => $"older launcher entry {state.Address}",
         _ => "hand-edited hosts block",
     };
 
+    // async void: every failure ends here as a message, never as an unhandled exception.
     private async void OnOpenNovaClicked(object? sender, EventArgs e)
     {
         if (_busy)
@@ -182,6 +193,10 @@ internal sealed class TrayApplicationContext : ApplicationContext
                     "Using the saved address",
                     $"{_settings.ServiceUrl} did not answer, so the launcher used OpenNova's last known address, {resolved.Address}.");
             }
+        }
+        catch (Exception ex)
+        {
+            ShowError($"The switch to OpenNova NovaWorld failed: {ex.Message}");
         }
         finally
         {
@@ -230,7 +245,8 @@ internal sealed class TrayApplicationContext : ApplicationContext
     {
         var url = InputDialog.Ask(
             Program.ProductName,
-            "The OpenNova service the launcher asks for its NovaWorld address (/api/server-info is added). " +
+            "The OpenNova service the launcher asks for its NovaWorld address (/api/server-info is added): " +
+            "https, or http to this computer or a private network. " +
             $"Leave it empty for {ServerInfo.DefaultServiceUrl}:",
             _settings.ServiceUrl);
         if (url is null)
@@ -245,12 +261,21 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
         if (ServerInfo.EndpointFor(url) is null)
         {
-            ShowError($"'{url}' is not an http or https URL such as {ServerInfo.DefaultServiceUrl}.");
+            ShowError(
+                $"'{url}' is not a service URL the launcher uses: an https URL such as {ServerInfo.DefaultServiceUrl}, " +
+                "or http to this computer or a private network address (http://127.0.0.1:8080), with no user name or password.");
             return;
         }
 
-        _settings.ServiceUrl = url;
-        SaveSettings();
+        if (!string.Equals(url, _settings.ServiceUrl, StringComparison.Ordinal))
+        {
+            // The saved address came from the old service.
+            _settings.ServiceUrl = url;
+            _settings.CachedOpenNovaAddress = null;
+            SaveSettings();
+        }
+
+        UpdateMenu();
     }
 
     private void OnRemoveForeignClicked(object? sender, EventArgs e)
@@ -338,17 +363,17 @@ internal sealed class TrayApplicationContext : ApplicationContext
 
     /// <summary>
     /// At start: when the hosts file is on OpenNova and the service now names another
-    /// address (the server moved), rewrite the block with it.
+    /// address (the server moved), rewrite the block with it and say so.
     /// </summary>
     private async Task RefreshOpenNovaAddressAsync()
     {
-        if (_state is not { Mode: NovaWorldMode.OpenNova, HasForeignLines: false })
-        {
-            return;
-        }
-
         try
         {
+            if (_state is not { Mode: NovaWorldMode.OpenNova, HasForeignLines: false })
+            {
+                return;
+            }
+
             var resolved = await _addressSource.ResolveAsync(CancellationToken.None);
             if (_busy || resolved is null || resolved.FromCache)
             {
@@ -366,8 +391,9 @@ internal sealed class TrayApplicationContext : ApplicationContext
             RefreshState();
             ShowBalloon("OpenNova NovaWorld moved", $"The hosts file now sends NovaWorld to OpenNova's new address, {resolved.Address}.");
         }
-        catch (Exception ex) when (IsIoFailure(ex))
+        catch (Exception ex)
         {
+            // A refresh that fails leaves the hosts file as it was; the menu still switches.
             Debug.WriteLine($"[Hosts] Address refresh failed: {ex.Message}");
         }
     }
@@ -386,14 +412,15 @@ internal sealed class TrayApplicationContext : ApplicationContext
         }
         catch (Exception ex) when (IsIoFailure(ex))
         {
-            ShowError($"Could not save the launcher's settings to {_settingsStore.SettingsPath}: {ex.Message}");
+            ShowError($"Could not save the launcher's settings to {_settingsStore.Location}: {ex.Message}");
         }
     }
 
-    private static string HostsWriteFailed(Exception ex) =>
-        $"Windows did not let the launcher change the hosts file: {ex.Message}{Environment.NewLine}{Environment.NewLine}" +
-        "Security software can lock it. Windows Defender may report the change as SettingsModifier:Win32/HostsFileHijack; " +
-        "see the launcher's README.";
+    private static string HostsWriteFailed(Exception ex) => ex is HostsFileException
+        ? ex.Message
+        : $"Windows did not let the launcher change the hosts file: {ex.Message}{Environment.NewLine}{Environment.NewLine}" +
+          "Security software can lock it. Windows Defender may report the change as SettingsModifier:Win32/HostsFileHijack; " +
+          "see the launcher's README.";
 
     private static bool IsIoFailure(Exception ex) => ex is IOException or UnauthorizedAccessException or SecurityException;
 

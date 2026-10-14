@@ -1,25 +1,57 @@
 using System.Text;
+using Microsoft.Win32;
 
 namespace OpenNova.Launcher.Hosts;
 
 public interface IHostsFileStore
 {
     bool Exists { get; }
+
+    /// <summary>The file's text; a <see cref="HostsFileException"/> when the launcher must not edit it.</summary>
     string Read();
-    void Write(string contents);
+
+    /// <summary>
+    /// Replaces the file's text with <paramref name="contents"/>, provided it still holds
+    /// <paramref name="expected"/> (what <see cref="Read"/> returned; empty for no file);
+    /// otherwise throws <see cref="HostsFileChangedException"/> and writes nothing.
+    /// </summary>
+    void Write(string contents, string expected);
+}
+
+/// <summary>A hosts file the launcher will not edit; the message says why, for the user.</summary>
+public class HostsFileException : IOException
+{
+    public HostsFileException(string message)
+        : base(message)
+    {
+    }
+}
+
+/// <summary>Another program changed the hosts file between the launcher's read and its write.</summary>
+public sealed class HostsFileChangedException : HostsFileException
+{
+    public HostsFileChangedException()
+        : base("Another program changed the hosts file while the launcher was writing it, so nothing was written. Try again.")
+    {
+    }
 }
 
 /// <summary>
-/// Reads and writes %SystemRoot%\System32\drivers\etc\hosts.
+/// Reads and writes the hosts file the Windows resolver reads: <c>hosts</c> in the
+/// Tcpip <c>DataBasePath</c> (%SystemRoot%\System32\drivers\etc by default).
 /// <list type="bullet">
 /// <item>The text is read and written as Latin-1, which maps every byte to one
-/// character and back, so lines the launcher does not own keep their exact bytes
-/// whatever code page (or UTF-8) they were written in. The launcher's own lines
-/// are ASCII.</item>
-/// <item>A write is atomic: the new text lands in a temp file in the same
-/// directory, which then replaces the hosts file in one step
-/// (<see cref="File.Replace(string, string, string?, bool)"/>), keeping the file
-/// it replaced as <see cref="BackupPath"/>.</item>
+/// character and back, so lines the launcher does not own keep their exact bytes in
+/// any single-byte code page or UTF-8. A UTF-16 file (a byte-order mark) or one holding
+/// NUL bytes is refused: appending ASCII to it would corrupt it.</item>
+/// <item>A write first checks the file still holds what the launcher read, so a
+/// program that rewrote it meanwhile (Docker Desktop, say) is not overwritten.</item>
+/// <item>The first write keeps the file as it was before the launcher ever wrote it as
+/// <see cref="OriginalPath"/>, never replaced afterwards.</item>
+/// <item>A write is atomic: the new text lands, flushed to disk, in a temp file in the
+/// same directory, which then replaces the hosts file in one step
+/// (<see cref="File.Replace(string, string, string?, bool)"/>), keeping the file it
+/// replaced as <see cref="BackupPath"/>.</item>
 /// <item>A ReadOnly attribute is cleared for the write and put back after it, and
 /// transient IO failures (another program holding the file) are retried.</item>
 /// </list>
@@ -30,7 +62,7 @@ public sealed class HostsFileStore : IHostsFileStore
     private const int RetryDelayMilliseconds = 250;
 
     public HostsFileStore()
-        : this(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "drivers", "etc", "hosts"))
+        : this(DefaultHostsPath())
     {
     }
 
@@ -44,24 +76,67 @@ public sealed class HostsFileStore : IHostsFileStore
     /// <summary>The hosts file as it was before the launcher's last write.</summary>
     public string BackupPath => HostsPath + ".opennova-launcher.bak";
 
+    /// <summary>The hosts file as it was before the launcher's first write.</summary>
+    public string OriginalPath => HostsPath + ".opennova-launcher.orig";
+
     public bool Exists => File.Exists(HostsPath);
+
+    /// <summary>
+    /// The resolver's hosts file: <c>DataBasePath</c> under
+    /// HKLM\SYSTEM\CurrentControlSet\Services\Tcpip\Parameters (an admin-only key),
+    /// else %SystemRoot%\System32\drivers\etc.
+    /// </summary>
+    public static string DefaultHostsPath()
+    {
+        var directory = Path.Combine(Environment.SystemDirectory, "drivers", "etc");
+        try
+        {
+            using var key = Registry.LocalMachine.OpenSubKey(@"SYSTEM\CurrentControlSet\Services\Tcpip\Parameters");
+            if (key?.GetValue("DataBasePath") is string configured && !string.IsNullOrWhiteSpace(configured))
+            {
+                var expanded = Environment.ExpandEnvironmentVariables(configured.Trim());
+                if (Path.IsPathFullyQualified(expanded))
+                {
+                    directory = expanded;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or UnauthorizedAccessException or IOException)
+        {
+            // The default directory, as Windows uses without the value.
+        }
+
+        return Path.Combine(directory, "hosts");
+    }
 
     public string Read()
     {
-        return WithRetries(() => Encoding.Latin1.GetString(File.ReadAllBytes(HostsPath)));
+        return WithRetries(() => Decode(File.ReadAllBytes(HostsPath)));
     }
 
-    public void Write(string contents)
+    public void Write(string contents, string expected)
     {
         ArgumentNullException.ThrowIfNull(contents);
+        ArgumentNullException.ThrowIfNull(expected);
         var bytes = Encoding.Latin1.GetBytes(contents);
         WithRetries(() =>
         {
-            var directory = Path.GetDirectoryName(HostsPath) ?? throw new IOException("The hosts path has no directory.");
-            var tempPath = Path.Combine(directory, $"hosts.{Guid.NewGuid():N}.tmp");
+            var exists = File.Exists(HostsPath);
+            var current = exists ? Decode(File.ReadAllBytes(HostsPath)) : string.Empty;
+            if (!string.Equals(current, expected, StringComparison.Ordinal))
+            {
+                throw new HostsFileChangedException();
+            }
 
+            var directory = Path.GetDirectoryName(HostsPath) ?? throw new IOException("The hosts path has no directory.");
+            if (exists && !File.Exists(OriginalPath))
+            {
+                File.Copy(HostsPath, OriginalPath, overwrite: false);
+            }
+
+            var tempPath = Path.Combine(directory, $"hosts.{Guid.NewGuid():N}.tmp");
             var wasReadOnly = false;
-            if (File.Exists(HostsPath))
+            if (exists)
             {
                 var attributes = File.GetAttributes(HostsPath);
                 wasReadOnly = (attributes & FileAttributes.ReadOnly) != 0;
@@ -73,10 +148,15 @@ public sealed class HostsFileStore : IHostsFileStore
 
             try
             {
-                File.WriteAllBytes(tempPath, bytes);
-                if (File.Exists(HostsPath))
+                using (var stream = new FileStream(tempPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 {
-                    File.Replace(tempPath, HostsPath, BackupPath, ignoreMetadataErrors: true);
+                    stream.Write(bytes);
+                    stream.Flush(flushToDisk: true);
+                }
+
+                if (exists)
+                {
+                    ReplaceKeepingAFile(tempPath);
                 }
                 else
                 {
@@ -85,15 +165,64 @@ public sealed class HostsFileStore : IHostsFileStore
             }
             finally
             {
-                TryDelete(tempPath);
-                if (wasReadOnly && File.Exists(HostsPath))
+                // With no hosts file in place the temp file holds the only new copy: keep it.
+                if (File.Exists(HostsPath))
                 {
-                    File.SetAttributes(HostsPath, File.GetAttributes(HostsPath) | FileAttributes.ReadOnly);
+                    TryDelete(tempPath);
+                    if (wasReadOnly)
+                    {
+                        File.SetAttributes(HostsPath, File.GetAttributes(HostsPath) | FileAttributes.ReadOnly);
+                    }
                 }
             }
 
             return true;
         });
+    }
+
+    // File.Replace can fail after moving the hosts file to the backup and before moving
+    // the new file in (ERROR_UNABLE_TO_MOVE_REPLACEMENT_2), leaving no hosts file: then
+    // finish the move, or put the backup back.
+    private void ReplaceKeepingAFile(string tempPath)
+    {
+        try
+        {
+            File.Replace(tempPath, HostsPath, BackupPath, ignoreMetadataErrors: true);
+        }
+        catch (IOException) when (!File.Exists(HostsPath))
+        {
+            if (File.Exists(tempPath))
+            {
+                File.Move(tempPath, HostsPath);
+            }
+            else if (File.Exists(BackupPath))
+            {
+                File.Copy(BackupPath, HostsPath);
+                throw;
+            }
+            else
+            {
+                throw;
+            }
+        }
+    }
+
+    private static string Decode(byte[] bytes)
+    {
+        if (bytes.Length >= 2 && ((bytes[0] == 0xFF && bytes[1] == 0xFE) || (bytes[0] == 0xFE && bytes[1] == 0xFF)))
+        {
+            throw new HostsFileException(
+                "The hosts file is saved as UTF-16 (Unicode), which the launcher does not edit, so it was left unchanged. " +
+                "Save it as ANSI or UTF-8 in an elevated editor and try again.");
+        }
+
+        if (Array.IndexOf(bytes, (byte)0) >= 0)
+        {
+            throw new HostsFileException(
+                "The hosts file holds NUL bytes, so the launcher left it unchanged. Check it in an elevated editor.");
+        }
+
+        return Encoding.Latin1.GetString(bytes);
     }
 
     private static T WithRetries<T>(Func<T> operation)
@@ -104,7 +233,7 @@ public sealed class HostsFileStore : IHostsFileStore
             {
                 return operation();
             }
-            catch (IOException) when (attempt < MaxAttempts)
+            catch (IOException ex) when (ex is not HostsFileException && attempt < MaxAttempts)
             {
                 Thread.Sleep(RetryDelayMilliseconds);
             }

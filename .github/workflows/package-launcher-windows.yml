@@ -82,6 +82,10 @@ jobs:
           if ($text -notmatch 'requestedExecutionLevel level="requireAdministrator"') {
             throw "The launcher exe's manifest does not ask for elevation"
           }
+          # The exe is unsigned: the run's log states both hashes.
+          foreach ($file in @("dist/opennova-launcher-windows.zip", $exe)) {
+            Write-Host "SHA-256 $((Get-FileHash -Algorithm SHA256 -LiteralPath $file).Hash)  $(Split-Path -Leaf $file)"
+          }
 
       # Upload the zip directly, without a second archive wrapper.
       - name: Upload launcher zip

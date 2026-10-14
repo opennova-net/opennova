@@ -119,8 +119,10 @@ comment) and `opennova-launcher-windows-v<version>.zip` (on tagged releases):
 `opennova-launcher.exe` and its README. It is a tray app that switches a stock
 Joint Operations install between OpenNova's NovaWorld, NovaLogic's NovaWorld and
 an address you enter, by managing one block in the Windows hosts file; the game's
-files stay stock. It needs administrator rights, since the hosts file does. See
-[launcher/README.md](launcher/README.md).
+files stay stock. It needs administrator rights, since the hosts file does. The
+exe is unsigned, so releases also carry the zip's SHA-256
+(`opennova-launcher-windows-v<version>.zip.sha256`) to check before running it.
+See [launcher/README.md](launcher/README.md).
 
 ## Documentation
 

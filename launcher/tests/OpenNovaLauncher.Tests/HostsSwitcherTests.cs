@@ -12,11 +12,26 @@ public class HostsSwitcherTests
     {
         public string? Text { get; set; }
         public int Writes { get; private set; }
+
+        /// <summary>Rewrites the file this many times between a read and the next write, as another program would.</summary>
+        public int ConcurrentRewrites { get; set; }
+
         public bool Exists => Text is not null;
         public string Read() => Text ?? throw new FileNotFoundException();
 
-        public void Write(string contents)
+        public void Write(string contents, string expected)
         {
+            if (ConcurrentRewrites > 0)
+            {
+                ConcurrentRewrites--;
+                Text += "10.9.9.9 docker.internal\r\n";
+            }
+
+            if (!string.Equals(Text ?? string.Empty, expected, StringComparison.Ordinal))
+            {
+                throw new HostsFileChangedException();
+            }
+
             Writes++;
             Text = contents;
         }
@@ -133,5 +148,38 @@ public class HostsSwitcherTests
 
         Assert.Throws<ArgumentException>(() => switcher.Switch(NovaWorldMode.Custom, address, removeForeign: false));
         Assert.Equal(Stock, store.Text);
+    }
+
+    [Fact]
+    public void ARewriteByAnotherProgram_IsKeptAndTheSwitchStartsOver()
+    {
+        var (switcher, store, _) = Make();
+        store.ConcurrentRewrites = 1;
+
+        Assert.True(switcher.Switch(NovaWorldMode.OpenNova, "54.162.79.147", removeForeign: false));
+
+        Assert.Contains("10.9.9.9 docker.internal", store.Text, StringComparison.Ordinal);
+        Assert.Equal(NovaWorldMode.OpenNova, switcher.ReadState().Mode);
+    }
+
+    [Fact]
+    public void ARewriteThatNeverStops_IsRefused()
+    {
+        var (switcher, store, _) = Make();
+        store.ConcurrentRewrites = 10;
+
+        Assert.Throws<HostsFileChangedException>(() => switcher.Switch(NovaWorldMode.OpenNova, "54.162.79.147", removeForeign: false));
+        Assert.Equal(NovaWorldMode.NovaLogic, switcher.ReadState().Mode);
+    }
+
+    [Fact]
+    public void ARewriteDuringAnAgreedForeignRemoval_IsRefusedNotRetried()
+    {
+        var (switcher, store, _) = Make(Stock + "10.1.1.1 gs.novaworld.net\r\n");
+        store.ConcurrentRewrites = 1;
+
+        Assert.Throws<HostsFileChangedException>(() => switcher.Switch(NovaWorldMode.OpenNova, "54.162.79.147", removeForeign: true));
+        Assert.Contains("10.1.1.1 gs.novaworld.net", store.Text, StringComparison.Ordinal);
+        Assert.Equal(0, store.Writes);
     }
 }

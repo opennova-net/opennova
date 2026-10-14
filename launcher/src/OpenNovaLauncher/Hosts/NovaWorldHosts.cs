@@ -10,14 +10,16 @@ public static class NovaWorldHosts
     /// <c>gs.novaworld.net</c>, the gate host, UDP 7597. Retail Joint Operations
     /// (JO:CA's Jointops.exe) fills its gate config with it [orig:
     /// CNapiGateManager_InitDefaults @ 0x4d1460, +8; the string @ 0x7cc368], and
-    /// dfx2.exe's twin sets the same host [orig: @0x4d1680 (dfx2.exe)]. The gate's
-    /// reply names the service by address (POSTIPADDRESS, UDPNOVAWORLD and the
-    /// STARTUPURL the login, HOSTKEY and NWJoin pages hang off), so nothing after
-    /// the gate needs a name. Not here: <c>novaworld.net</c>, the base gate
-    /// default InitDefaults overwrites before any lookup [orig:
-    /// CNapiGateManager_Init @ 0x633f90, +64]; <c>www.novaworld2.com</c>, the patch
-    /// URL outside NovaWorld's flow; <c>assets.novaworld.net</c>, the icon host the
-    /// menu templates name, which the OpenNova service does not serve.
+    /// dfx2.exe's twin sets the same host [orig: @0x4d1680 (dfx2.exe)]. JO:CA's image
+    /// names two other NovaWorld hosts, left alone here: <c>novaworld.net</c>, the base
+    /// gate default InitDefaults overwrites before any lookup [orig:
+    /// CNapiGateManager_Init @ 0x633f90, +64], and <c>www.novaworld2.com</c>, the patch
+    /// URL outside NovaWorld's flow. The gate's reply names the service by address
+    /// (POSTIPADDRESS, UDPNOVAWORLD and the STARTUPURL the login, HOSTKEY and NWJoin
+    /// pages hang off), so nothing after the gate needs a name; a retail run through the
+    /// hosts file is still to be observed (ADR 0054 d2). Also left alone:
+    /// <c>assets.novaworld.net</c>, the icon host the menu templates name, which the
+    /// OpenNova service does not serve, so the icons come from NovaLogic in every mode.
     /// </summary>
     public const string GateHost = "gs.novaworld.net";
 

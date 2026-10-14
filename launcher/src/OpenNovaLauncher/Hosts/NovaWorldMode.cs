@@ -13,8 +13,15 @@ public enum NovaWorldMode
     Custom,
 
     /// <summary>
-    /// The block holds something no switch writes (a name missing or repeated, two
-    /// addresses, an unusable address): edited by hand. A switch rewrites it.
+    /// A well-formed block with no mode line: the one the retired launcher (before
+    /// ADR 0054) wrote. Any switch rewrites it with its mode.
+    /// </summary>
+    OldLauncher,
+
+    /// <summary>
+    /// A block no switch writes: damaged markers, a line of the user's inside it, a name
+    /// missing or repeated, two addresses, an unusable address, an unknown mode line.
+    /// A switch rewrites it, keeping the user's lines.
     /// </summary>
     Unrecognized,
 }
@@ -38,10 +45,10 @@ public static class ModeDetector
     public const string CustomTag = "custom";
 
     /// <summary>
-    /// The mode <paramref name="document"/> is in for <paramref name="hostnames"/>: none
-    /// mapped in the block is NovaLogic; each mapped once, all to one usable address,
-    /// is OpenNova under the <see cref="OpenNovaTag"/> mode line and Custom otherwise;
-    /// anything else is Unrecognized.
+    /// The mode <paramref name="document"/> is in for <paramref name="hostnames"/>: no
+    /// block, or one mapping nothing, is NovaLogic; an intact block mapping each name
+    /// once, all to one usable address, is OpenNova or Custom by its mode line and
+    /// OldLauncher with none; anything else is Unrecognized.
     /// </summary>
     public static HostsState Detect(HostsDocument document, IReadOnlyList<string> hostnames)
     {
@@ -49,13 +56,18 @@ public static class ModeDetector
         ArgumentNullException.ThrowIfNull(hostnames);
 
         var foreign = document.ForeignLinesFor(hostnames);
+        var unrecognized = new HostsState(NovaWorldMode.Unrecognized, null, foreign);
+        if (!document.ManagedBlockIntact)
+        {
+            return unrecognized;
+        }
+
         var managed = document.ManagedRedirects;
         if (managed.Count == 0)
         {
             return new HostsState(NovaWorldMode.NovaLogic, null, foreign);
         }
 
-        var unrecognized = new HostsState(NovaWorldMode.Unrecognized, null, foreign);
         var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         string? address = null;
         foreach (var redirect in managed)
@@ -80,9 +92,13 @@ public static class ModeDetector
             return unrecognized;
         }
 
-        var mode = string.Equals(document.ManagedMode, OpenNovaTag, StringComparison.Ordinal)
-            ? NovaWorldMode.OpenNova
-            : NovaWorldMode.Custom;
-        return new HostsState(mode, address, foreign);
+        var mode = document.ManagedMode switch
+        {
+            null => NovaWorldMode.OldLauncher,
+            OpenNovaTag => NovaWorldMode.OpenNova,
+            CustomTag => NovaWorldMode.Custom,
+            _ => NovaWorldMode.Unrecognized,
+        };
+        return new HostsState(mode, mode == NovaWorldMode.Unrecognized ? null : address, foreign);
     }
 }

@@ -3,17 +3,24 @@ using System.Text;
 namespace OpenNova.Launcher.Hosts;
 
 /// <summary>
-/// Pure (no IO) model of a Windows hosts file with one launcher-managed block.
-/// Everything outside the block's markers is preserved character for character;
-/// the block is the launcher's alone and is rewritten as a unit:
+/// Pure (no IO) model of a Windows hosts file with one launcher-managed block:
 /// <code>
 /// # >>> OpenNova Launcher managed block - do not edit between markers >>>
 /// # mode: opennova
 /// 203.0.113.10 gs.novaworld.net
 /// # &lt;&lt;&lt; OpenNova Launcher managed block &lt;&lt;&lt;
 /// </code>
-/// The mode line names the choice the block was written for, so the tray can
-/// tell OpenNova's address from a custom one without asking the network.
+/// The mode line names the choice the block was written for, so the tray can tell
+/// OpenNova's address from a custom one without asking the network.
+/// <para>
+/// The block holds only the lines the launcher writes: the mode line, blank lines and
+/// <c>&lt;IPv4&gt; &lt;managed hostname&gt;</c>, which it rewrites as a unit. Every other
+/// line keeps its text and line ending: a line found inside the markers is kept,
+/// after the block, and a block whose end marker is gone ends at its first line that
+/// is not the launcher's. Either marks the block not intact. A file that ends without
+/// a newline still does after the block is added or removed, and adding then removing
+/// the block gives back the original text.
+/// </para>
 /// </summary>
 public sealed class HostsDocument
 {
@@ -23,11 +30,13 @@ public sealed class HostsDocument
 
     private readonly IReadOnlyList<RawLine> _outsideLines;
     private readonly bool _hasBlock;
-    private readonly int _blockIndex;          // insertion index into _outsideLines when _hasBlock
-    private readonly bool _appendSeparator;    // emit a blank line before the block
+    private readonly int _blockIndex;        // insertion index into _outsideLines when _hasBlock
+    private readonly bool _separator;        // one empty line before the block, the block's own
+    private readonly bool _intact;           // the block parsed as one the launcher wrote
     private readonly string? _mode;
     private readonly IReadOnlyList<HostsRedirect> _managedRedirects;
     private readonly string _lineEnding;
+    private readonly bool _noFinalNewline;
 
     private readonly record struct RawLine(string Text, string Ending);
 
@@ -35,22 +44,33 @@ public sealed class HostsDocument
         IReadOnlyList<RawLine> outsideLines,
         bool hasBlock,
         int blockIndex,
-        bool appendSeparator,
+        bool separator,
+        bool intact,
         string? mode,
         IReadOnlyList<HostsRedirect> managedRedirects,
-        string lineEnding)
+        string lineEnding,
+        bool noFinalNewline)
     {
         _outsideLines = outsideLines;
         _hasBlock = hasBlock;
         _blockIndex = blockIndex;
-        _appendSeparator = appendSeparator;
+        _separator = separator;
+        _intact = intact;
         _mode = mode;
         _managedRedirects = managedRedirects;
         _lineEnding = lineEnding;
+        _noFinalNewline = noFinalNewline;
     }
 
     /// <summary>Whether the document holds a managed block (possibly an empty one).</summary>
     public bool HasManagedBlock => _hasBlock;
+
+    /// <summary>
+    /// False when the block was not as the launcher writes it: its end marker missing,
+    /// a stray end marker, a second block, a second mode line, or a line of the user's
+    /// inside it.
+    /// </summary>
+    public bool ManagedBlockIntact => !_hasBlock || _intact;
 
     /// <summary>The block's mode line, or null when it has none.</summary>
     public string? ManagedMode => _mode;
@@ -58,44 +78,56 @@ public sealed class HostsDocument
     /// <summary>The hostname to address lines inside the block, in file order.</summary>
     public IReadOnlyList<HostsRedirect> ManagedRedirects => _managedRedirects;
 
+    /// <summary>Parses hosts-file text, with the launcher's hostnames as the managed set.</summary>
+    public static HostsDocument Parse(string? text) => Parse(text, NovaWorldHosts.Names);
+
     /// <summary>
-    /// Parses hosts-file text. An empty string yields an empty document (a hosts
-    /// file that does not exist yet). Duplicated or broken markers are tolerated:
-    /// every managed region collapses into one block at the first marker.
+    /// Parses hosts-file text. An empty string yields an empty document (a hosts file
+    /// that does not exist yet). Only <c>&lt;IPv4&gt; &lt;name&gt;</c> lines naming one of
+    /// <paramref name="managedHostnames"/> belong to the block; damaged markers are
+    /// tolerated and collapse into one block at the first marker.
     /// </summary>
-    public static HostsDocument Parse(string? text)
+    public static HostsDocument Parse(string? text, IEnumerable<string> managedHostnames)
     {
+        var lookup = BuildHostnameLookup(managedHostnames);
         var lines = SplitLines(text ?? string.Empty);
         var lineEnding = DominantLineEnding(lines);
+        var noFinalNewline = lines.Count > 0 && lines[^1].Ending.Length == 0;
+
+        var lastEnd = -1;
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (lines[i].Text.Trim() == EndMarker)
+            {
+                lastEnd = i;
+            }
+        }
 
         var outside = new List<RawLine>();
         var managed = new List<HostsRedirect>();
         string? mode = null;
         int? blockIndex = null;
-        var absorbedSeparator = false;
+        var separator = false;
+        var intact = true;
         var inBlock = false;
 
-        // Anchors the block at the current position. One blank line directly
-        // before the first marker is the block's own separator, so removing the
-        // block gives back the file as it was before the block was added.
+        // Anchors the block at the current position. One empty line directly before
+        // the first marker is the block's own separator (the launcher writes it), so
+        // removing the block gives back the file as it was before the block was added.
         void AnchorBlock()
         {
-            if (blockIndex.HasValue)
-            {
-                return;
-            }
-
-            if (outside.Count > 0 && string.IsNullOrWhiteSpace(outside[^1].Text))
+            if (outside.Count > 0 && outside[^1].Text.Length == 0)
             {
                 outside.RemoveAt(outside.Count - 1);
-                absorbedSeparator = true;
+                separator = true;
             }
 
             blockIndex = outside.Count;
         }
 
-        foreach (var line in lines)
+        for (var i = 0; i < lines.Count; i++)
         {
+            var line = lines[i];
             var trimmed = line.Text.Trim();
             if (inBlock)
             {
@@ -103,13 +135,39 @@ public sealed class HostsDocument
                 {
                     inBlock = false;
                 }
+                else if (trimmed == BeginMarker)
+                {
+                    intact = false;
+                }
+                else if (trimmed.Length == 0)
+                {
+                    // A blank line inside the block is the launcher's to drop.
+                }
                 else if (trimmed.StartsWith(ModePrefix, StringComparison.Ordinal))
                 {
-                    mode ??= trimmed[ModePrefix.Length..].Trim();
+                    if (mode is null)
+                    {
+                        mode = trimmed[ModePrefix.Length..].Trim();
+                    }
+                    else
+                    {
+                        intact = false;
+                    }
                 }
-                else if (trimmed != BeginMarker)
+                else if (TryParseOwnRedirect(trimmed, lookup, out var redirect))
                 {
-                    managed.AddRange(ParseRedirects(trimmed));
+                    managed.Add(redirect);
+                }
+                else
+                {
+                    // A line the launcher never writes: the user's, kept after the block.
+                    // With no end marker after it, the block ended on the line above.
+                    intact = false;
+                    outside.Add(line);
+                    if (i > lastEnd)
+                    {
+                        inBlock = false;
+                    }
                 }
 
                 continue;
@@ -117,29 +175,49 @@ public sealed class HostsDocument
 
             if (trimmed == BeginMarker)
             {
+                if (blockIndex.HasValue)
+                {
+                    intact = false;   // a second block: its lines join the first
+                }
+                else
+                {
+                    AnchorBlock();
+                }
+
                 inBlock = true;
-                AnchorBlock();
                 continue;
             }
 
             if (trimmed == EndMarker)
             {
                 // A stray end marker with no begin marker: managed debris.
-                AnchorBlock();
+                intact = false;
+                if (!blockIndex.HasValue)
+                {
+                    AnchorBlock();
+                }
+
                 continue;
             }
 
             outside.Add(line);
         }
 
+        if (inBlock)
+        {
+            intact = false;   // the end marker is missing
+        }
+
         return new HostsDocument(
             outside,
             hasBlock: blockIndex.HasValue,
             blockIndex: blockIndex ?? outside.Count,
-            appendSeparator: absorbedSeparator,
+            separator: separator,
+            intact: intact,
             mode: mode,
             managedRedirects: managed,
-            lineEnding: lineEnding);
+            lineEnding: lineEnding,
+            noFinalNewline: noFinalNewline);
     }
 
     /// <summary>
@@ -159,7 +237,7 @@ public sealed class HostsDocument
     /// <summary>
     /// A document whose managed block holds exactly <paramref name="redirects"/> under
     /// the mode line <paramref name="mode"/> (none when null). An existing block is
-    /// replaced in place; otherwise the block is appended after a blank line.
+    /// replaced where it is; otherwise the block is appended after an empty line.
     /// </summary>
     public HostsDocument WithManagedBlock(string? mode, IReadOnlyList<HostsRedirect> redirects)
     {
@@ -167,17 +245,16 @@ public sealed class HostsDocument
 
         if (_hasBlock)
         {
-            return new HostsDocument(_outsideLines, true, _blockIndex, _appendSeparator, mode, redirects.ToArray(), _lineEnding);
+            return new HostsDocument(_outsideLines, true, _blockIndex, _separator, true, mode, redirects.ToArray(), _lineEnding, _noFinalNewline);
         }
 
-        var appendSeparator = _outsideLines.Count > 0 && !string.IsNullOrWhiteSpace(_outsideLines[^1].Text);
-        return new HostsDocument(_outsideLines, true, _outsideLines.Count, appendSeparator, mode, redirects.ToArray(), _lineEnding);
+        return new HostsDocument(_outsideLines, true, _outsideLines.Count, _outsideLines.Count > 0, true, mode, redirects.ToArray(), _lineEnding, _noFinalNewline);
     }
 
-    /// <summary>A document with no managed block.</summary>
+    /// <summary>A document with no managed block; lines kept from inside it stay.</summary>
     public HostsDocument WithoutManagedBlock()
     {
-        return new HostsDocument(_outsideLines, false, _outsideLines.Count, false, null, Array.Empty<HostsRedirect>(), _lineEnding);
+        return new HostsDocument(_outsideLines, false, _outsideLines.Count, false, true, null, Array.Empty<HostsRedirect>(), _lineEnding, _noFinalNewline);
     }
 
     /// <summary>
@@ -204,70 +281,65 @@ public sealed class HostsDocument
             outside.Add(_outsideLines[i]);
         }
 
-        return new HostsDocument(outside, _hasBlock, blockIndex, _appendSeparator, _mode, _managedRedirects, _lineEnding);
+        return new HostsDocument(outside, _hasBlock, blockIndex, _separator, _intact, _mode, _managedRedirects, _lineEnding, _noFinalNewline);
     }
 
     /// <summary>
-    /// The document's text. Lines outside the markers keep their own text and line
-    /// ending, so a document without a block renders as it was parsed. The block's
-    /// lines use the document's dominant line ending (CRLF when mixed or empty); a
-    /// last line with no line ending gets one when the block follows it.
+    /// The document's text. Lines outside the markers keep their text and line ending;
+    /// the block's lines use the document's dominant line ending (CRLF when mixed or
+    /// empty). When the parsed text ended without a newline, so does this one.
     /// </summary>
     public string Render()
     {
-        if (!_hasBlock && _outsideLines.Count == 0)
-        {
-            return string.Empty;
-        }
-
-        var blockLast = _hasBlock && _blockIndex >= _outsideLines.Count;
-        var builder = new StringBuilder();
+        var parts = new List<RawLine>();
         for (var i = 0; i < _outsideLines.Count; i++)
         {
             if (_hasBlock && i == _blockIndex)
             {
-                AppendBlock(builder);
+                AddBlock(parts);
             }
 
             var line = _outsideLines[i];
-            builder.Append(line.Text);
-            if (line.Ending.Length > 0)
-            {
-                builder.Append(line.Ending);
-            }
-            else if (i < _outsideLines.Count - 1 || blockLast)
-            {
-                builder.Append(_lineEnding);
-            }
+            parts.Add(line.Ending.Length > 0 ? line : line with { Ending = _lineEnding });
         }
 
-        if (blockLast)
+        if (_hasBlock && _blockIndex >= _outsideLines.Count)
         {
-            AppendBlock(builder);
+            AddBlock(parts);
+        }
+
+        var builder = new StringBuilder();
+        for (var i = 0; i < parts.Count; i++)
+        {
+            builder.Append(parts[i].Text);
+            if (!(_noFinalNewline && i == parts.Count - 1))
+            {
+                builder.Append(parts[i].Ending);
+            }
         }
 
         return builder.ToString();
     }
 
-    private void AppendBlock(StringBuilder builder)
+    private void AddBlock(List<RawLine> parts)
     {
-        if (_appendSeparator)
+        if (_separator)
         {
-            builder.Append(_lineEnding);
+            parts.Add(new RawLine(string.Empty, _lineEnding));
         }
 
-        builder.Append(BeginMarker).Append(_lineEnding);
+        parts.Add(new RawLine(BeginMarker, _lineEnding));
         if (!string.IsNullOrEmpty(_mode))
         {
-            builder.Append(ModePrefix).Append(_mode).Append(_lineEnding);
+            parts.Add(new RawLine(ModePrefix + _mode, _lineEnding));
         }
 
         foreach (var redirect in _managedRedirects)
         {
-            builder.Append(redirect.IPv4).Append(' ').Append(redirect.Hostname).Append(_lineEnding);
+            parts.Add(new RawLine(redirect.IPv4 + " " + redirect.Hostname, _lineEnding));
         }
 
-        builder.Append(EndMarker).Append(_lineEnding);
+        parts.Add(new RawLine(EndMarker, _lineEnding));
     }
 
     private static List<RawLine> SplitLines(string text)
@@ -302,14 +374,23 @@ public sealed class HostsDocument
         return lf > crlf ? "\n" : "\r\n";
     }
 
-    // "<address> <name> [<name> ...] [# comment]": one redirect per name.
-    private static IEnumerable<HostsRedirect> ParseRedirects(string trimmedLine)
+    // Exactly what the launcher writes: "<dotted quad> <managed name>", nothing else.
+    private static bool TryParseOwnRedirect(string trimmedLine, HashSet<string> managedHostnames, out HostsRedirect redirect)
     {
-        var tokens = EffectiveTokens(trimmedLine);
-        for (var i = 1; i < tokens.Length; i++)
+        redirect = default;
+        if (trimmedLine.Contains('#'))
         {
-            yield return new HostsRedirect(tokens[i], tokens[0]);
+            return false;
         }
+
+        var tokens = trimmedLine.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (tokens.Length != 2 || !Ipv4.TryParse(tokens[0], out _) || !managedHostnames.Contains(tokens[1]))
+        {
+            return false;
+        }
+
+        redirect = new HostsRedirect(tokens[1], tokens[0]);
+        return true;
     }
 
     private static string[] EffectiveTokens(string lineText)

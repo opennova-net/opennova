@@ -11,12 +11,13 @@ internal static class Program
     {
         ApplicationConfiguration.Initialize();
 
-        // One tray icon per session: two would race on the hosts file.
-        using var instanceMutex = new Mutex(initiallyOwned: true, @"Local\OpenNovaLauncher", out var createdNew);
+        // One launcher per computer, across sessions: two would race on the hosts file.
+        using var instanceMutex = new Mutex(initiallyOwned: true, @"Global\OpenNovaLauncher", out var createdNew);
         if (!createdNew)
         {
             MessageBox.Show(
-                "OpenNova Launcher is already running. Its icon is in the notification area.",
+                "OpenNova Launcher is already running on this computer. Its icon is in the notification area " +
+                "(or in another signed-in user's).",
                 ProductName,
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Information);

@@ -187,6 +187,16 @@ jobs:
           mv -- dist/opennova-apps-windows.zip "dist/opennova-apps-windows-${GITHUB_REF_NAME}.zip"
           mv -- dist/opennova-launcher-windows.zip "dist/opennova-launcher-windows-${GITHUB_REF_NAME}.zip"
 
+      # The launcher's exe is unsigned, so the release states the zip's hash for a
+      # player to check before running it elevated (launcher/README.md).
+      - name: SHA-256 of the launcher zip
+        shell: bash
+        working-directory: dist
+        run: |
+          zip="opennova-launcher-windows-${GITHUB_REF_NAME}.zip"
+          sha256sum "$zip" > "$zip.sha256"
+          cat "$zip.sha256"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -195,5 +205,6 @@ jobs:
             dist/opennova-blender-addon-windows-${{ github.ref_name }}.zip
             dist/opennova-apps-windows-${{ github.ref_name }}.zip
             dist/opennova-launcher-windows-${{ github.ref_name }}.zip
+            dist/opennova-launcher-windows-${{ github.ref_name }}.zip.sha256
           fail_on_unmatched_files: true
           generate_release_notes: true

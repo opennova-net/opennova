@@ -47,18 +47,29 @@ public class HostsDocumentTests
         Assert.Equal("203.0.113.10", redirect.IPv4);
     }
 
-    [Fact]
-    public void Parse_LineWithSeveralNames_GivesOneRedirectEach()
+    [Theory]
+    [InlineData("198.51.100.1 gs.novaworld.net novaworld.net")]
+    [InlineData("198.51.100.1 gs.novaworld.net # note")]
+    [InlineData("10.0.0.5 nas.lan")]
+    [InlineData("# a comment of the user's")]
+    public void Parse_LinesTheLauncherNeverWrites_AreKeptAfterTheBlock(string line)
     {
-        var text = HostsDocument.BeginMarker + "\r\n" +
-                   "198.51.100.1 gs.novaworld.net novaworld.net # note\r\n" +
-                   HostsDocument.EndMarker + "\r\n";
+        var text = HostsDocument.BeginMarker + "\r\n# mode: opennova\r\n203.0.113.10 gs.novaworld.net\r\n" +
+                   line + "\r\n" + HostsDocument.EndMarker + "\r\n";
 
-        var redirects = HostsDocument.Parse(text).ManagedRedirects;
+        var document = HostsDocument.Parse(text);
 
-        Assert.Equal(
-            new[] { new HostsRedirect("gs.novaworld.net", "198.51.100.1"), new HostsRedirect("novaworld.net", "198.51.100.1") },
-            redirects);
+        Assert.False(document.ManagedBlockIntact);
+        Assert.Equal(new[] { new HostsRedirect("gs.novaworld.net", "203.0.113.10") }, document.ManagedRedirects);
+        Assert.Equal(Block() + line + "\r\n", document.WithManagedBlock(Mode, SingleRedirect).Render());
+        Assert.Equal(line + "\r\n", document.WithoutManagedBlock().Render());
+    }
+
+    [Fact]
+    public void Parse_IntactBlock_IsIntact()
+    {
+        Assert.True(HostsDocument.Parse("127.0.0.1 localhost\r\n\r\n" + Block()).ManagedBlockIntact);
+        Assert.True(HostsDocument.Parse("127.0.0.1 localhost\r\n").ManagedBlockIntact);
     }
 
     [Fact]
@@ -157,11 +168,12 @@ public class HostsDocumentTests
     }
 
     [Fact]
-    public void Render_LastLineWithoutNewline_GetsOneBeforeTheBlock()
+    public void Render_FileWithoutFinalNewline_StillEndsWithoutOne()
     {
-        var rendered = HostsDocument.Parse("127.0.0.1 localhost").WithManagedBlock(Mode, SingleRedirect).Render();
+        var added = HostsDocument.Parse("127.0.0.1 localhost").WithManagedBlock(Mode, SingleRedirect).Render();
 
-        Assert.Equal("127.0.0.1 localhost\r\n\r\n" + Block(), rendered);
+        Assert.Equal("127.0.0.1 localhost\r\n\r\n" + Block()[..^2], added);
+        Assert.Equal("127.0.0.1 localhost", HostsDocument.Parse(added).WithoutManagedBlock().Render());
     }
 
     [Fact]
@@ -183,6 +195,7 @@ public class HostsDocumentTests
 
         var document = HostsDocument.Parse(corrupted);
         Assert.Single(document.ManagedRedirects);
+        Assert.False(document.ManagedBlockIntact);
 
         Assert.Equal("127.0.0.1 localhost\r\n" + Block(), document.WithManagedBlock(Mode, SingleRedirect).Render());
     }

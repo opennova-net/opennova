@@ -56,4 +56,26 @@ public static class Ipv4
     {
         return TryParse(text, out var octets) && octets[0] != 0 && octets[0] < 224;
     }
+
+    /// <summary>
+    /// A dotted quad in a range that only reaches this computer or its own network:
+    /// loopback (127.0.0.0/8), the private ranges (10.0.0.0/8, 172.16.0.0/12,
+    /// 192.168.0.0/16), link-local (169.254.0.0/16) or carrier-grade NAT (100.64.0.0/10).
+    /// </summary>
+    public static bool IsLocal(string? text)
+    {
+        if (!TryParse(text, out var o))
+        {
+            return false;
+        }
+
+        return o[0] == 127 || o[0] == 10 ||
+               (o[0] == 172 && o[1] >= 16 && o[1] <= 31) ||
+               (o[0] == 192 && o[1] == 168) ||
+               (o[0] == 169 && o[1] == 254) ||
+               (o[0] == 100 && o[1] >= 64 && o[1] <= 127);
+    }
+
+    /// <summary>A usable address outside every <see cref="IsLocal"/> range.</summary>
+    public static bool IsPublic(string? text) => IsUsable(text) && !IsLocal(text);
 }

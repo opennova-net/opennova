@@ -8,7 +8,7 @@ public class ModeDetectorTests
     private static readonly string[] Names = { "gs.novaworld.net" };
 
     private static HostsState Detect(string text, IReadOnlyList<string>? names = null)
-        => ModeDetector.Detect(HostsDocument.Parse(text), names ?? Names);
+        => ModeDetector.Detect(HostsDocument.Parse(text, names ?? Names), names ?? Names);
 
     private static string Block(string? mode, params string[] lines)
         => HostsDocument.BeginMarker + "\r\n" +
@@ -49,16 +49,48 @@ public class ModeDetectorTests
         Assert.Equal("54.162.79.147", state.Address);
     }
 
-    [Theory]
-    [InlineData(ModeDetector.CustomTag)]
-    [InlineData(null)]
-    [InlineData("something-else")]
-    public void OtherBlocks_AreCustom(string? mode)
+    [Fact]
+    public void CustomTaggedBlock_IsCustom()
     {
-        var state = Detect(Block(mode, "127.0.0.1 gs.novaworld.net"));
+        var state = Detect(Block(ModeDetector.CustomTag, "127.0.0.1 gs.novaworld.net"));
 
         Assert.Equal(NovaWorldMode.Custom, state.Mode);
         Assert.Equal("127.0.0.1", state.Address);
+    }
+
+    [Fact]
+    public void BlockWithNoModeLine_IsTheOldLaunchers()
+    {
+        var state = Detect("127.0.0.1 localhost\r\n\r\n" + Block(null, "54.162.79.147 gs.novaworld.net"));
+
+        Assert.Equal(NovaWorldMode.OldLauncher, state.Mode);
+        Assert.Equal("54.162.79.147", state.Address);
+    }
+
+    [Fact]
+    public void UnknownModeLine_IsUnrecognized()
+    {
+        var state = Detect(Block("something-else", "127.0.0.1 gs.novaworld.net"));
+
+        Assert.Equal(NovaWorldMode.Unrecognized, state.Mode);
+        Assert.Null(state.Address);
+    }
+
+    [Theory]
+    [InlineData("# mode: opennova\r\n54.162.79.147 gs.novaworld.net\r\n")]                       // no end marker
+    [InlineData("# mode: opennova\r\n54.162.79.147 gs.novaworld.net\r\n10.0.0.5 nas.lan\r\n")] // and a user line
+    public void DamagedBlocks_AreUnrecognized(string body)
+    {
+        Assert.Equal(NovaWorldMode.Unrecognized, Detect(HostsDocument.BeginMarker + "\r\n" + body).Mode);
+    }
+
+    [Fact]
+    public void AUserLineInsideAnIntactPairOfMarkers_IsUnrecognizedUntilASwitch()
+    {
+        var state = Detect(Block(ModeDetector.OpenNovaTag, "54.162.79.147 gs.novaworld.net", "10.0.0.5 nas.lan"));
+
+        Assert.Equal(NovaWorldMode.Unrecognized, state.Mode);
+        Assert.False(state.HasForeignLines);
     }
 
     [Fact]

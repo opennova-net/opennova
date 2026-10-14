@@ -1,4 +1,5 @@
 using System.Text;
+using Microsoft.Win32;
 using OpenNova.Launcher.Hosts;
 using OpenNova.Launcher.Services;
 using Xunit;
@@ -16,7 +17,7 @@ public sealed class FileStoreTests : IDisposable
 
     public void Dispose()
     {
-        foreach (var file in Directory.EnumerateFiles(_directory))
+        foreach (var file in Directory.EnumerateFileSystemEntries(_directory))
         {
             File.SetAttributes(file, FileAttributes.Normal);
         }
@@ -24,40 +25,49 @@ public sealed class FileStoreTests : IDisposable
         Directory.Delete(_directory, recursive: true);
     }
 
-    [Fact]
-    public void HostsWrite_KeepsEveryByteAndBacksUpTheReplacedFile()
+    private string Hosts(byte[] bytes)
     {
         var path = Path.Combine(_directory, "hosts");
+        File.WriteAllBytes(path, bytes);
+        return path;
+    }
+
+    [Fact]
+    public void HostsWrite_KeepsEveryByteTheOriginalAndTheLastVersion()
+    {
         // cp1252 and UTF-8 bytes in comments must survive a launcher write untouched.
         var original = Encoding.ASCII.GetBytes("# caf")
             .Concat(new byte[] { 0xE9, 0x20, 0xC3, 0xA9, 0x0D, 0x0A })
             .Concat(Encoding.ASCII.GetBytes("127.0.0.1 localhost\r\n"))
             .ToArray();
-        File.WriteAllBytes(path, original);
-        var store = new HostsFileStore(path);
-
+        var store = new HostsFileStore(Hosts(original));
         var switcher = new HostsSwitcher(store, new NoFlush());
-        switcher.Switch(NovaWorldMode.OpenNova, "203.0.113.10", removeForeign: false);
 
-        var written = File.ReadAllBytes(path);
-        Assert.Equal(original, written.Take(original.Length).ToArray());
+        switcher.Switch(NovaWorldMode.OpenNova, "203.0.113.10", removeForeign: false);
+        var opennova = File.ReadAllBytes(store.HostsPath);
+        Assert.Equal(original, opennova.Take(original.Length).ToArray());
         Assert.Equal(original, File.ReadAllBytes(store.BackupPath));
         Assert.Equal(NovaWorldMode.OpenNova, switcher.ReadState().Mode);
 
+        switcher.Switch(NovaWorldMode.Custom, "127.0.0.1", removeForeign: false);
         switcher.Switch(NovaWorldMode.NovaLogic, null, removeForeign: false);
-        Assert.Equal(original, File.ReadAllBytes(path));
-        Assert.Equal(written, File.ReadAllBytes(store.BackupPath));
-        Assert.Equal(new[] { "hosts", "hosts.opennova-launcher.bak" }, Directory.EnumerateFiles(_directory).Select(Path.GetFileName).Order());
+
+        Assert.Equal(original, File.ReadAllBytes(store.HostsPath));
+        Assert.NotEqual(opennova, File.ReadAllBytes(store.BackupPath));
+        // The .orig is the file before the launcher's first write, and stays so.
+        Assert.Equal(original, File.ReadAllBytes(store.OriginalPath));
+        Assert.Equal(
+            new[] { "hosts", "hosts.opennova-launcher.bak", "hosts.opennova-launcher.orig" },
+            Directory.EnumerateFiles(_directory).Select(Path.GetFileName).Order());
     }
 
     [Fact]
     public void HostsWrite_KeepsTheReadOnlyAttribute()
     {
-        var path = Path.Combine(_directory, "hosts");
-        File.WriteAllText(path, "127.0.0.1 localhost\r\n");
+        var path = Hosts(Encoding.ASCII.GetBytes("127.0.0.1 localhost\r\n"));
         File.SetAttributes(path, FileAttributes.ReadOnly);
 
-        new HostsFileStore(path).Write("127.0.0.1 localhost\r\n10.0.0.1 example\r\n");
+        new HostsFileStore(path).Write("127.0.0.1 localhost\r\n10.0.0.1 example\r\n", "127.0.0.1 localhost\r\n");
 
         Assert.True(File.GetAttributes(path).HasFlag(FileAttributes.ReadOnly));
         Assert.Equal("127.0.0.1 localhost\r\n10.0.0.1 example\r\n", File.ReadAllText(path));
@@ -69,16 +79,119 @@ public sealed class FileStoreTests : IDisposable
         var store = new HostsFileStore(Path.Combine(_directory, "hosts"));
 
         Assert.False(store.Exists);
-        store.Write("10.0.0.1 example\r\n");
+        store.Write("10.0.0.1 example\r\n", string.Empty);
 
         Assert.Equal("10.0.0.1 example\r\n", store.Read());
         Assert.False(File.Exists(store.BackupPath));
+        Assert.False(File.Exists(store.OriginalPath));
+    }
+
+    [Fact]
+    public void HostsWrite_OverAFileThatChanged_WritesNothing()
+    {
+        var path = Hosts(Encoding.ASCII.GetBytes("127.0.0.1 localhost\r\n10.9.9.9 docker.internal\r\n"));
+
+        Assert.Throws<HostsFileChangedException>(() => new HostsFileStore(path).Write("x\r\n", "127.0.0.1 localhost\r\n"));
+
+        Assert.Equal("127.0.0.1 localhost\r\n10.9.9.9 docker.internal\r\n", File.ReadAllText(path));
+        Assert.Single(Directory.EnumerateFiles(_directory));
+    }
+
+    [Theory]
+    [InlineData(new byte[] { 0xFF, 0xFE, (byte)'1', 0, (byte)'\r', 0, (byte)'\n', 0 })]  // UTF-16 LE
+    [InlineData(new byte[] { 0xFE, 0xFF, 0, (byte)'1', 0, (byte)'\r', 0, (byte)'\n' })]  // UTF-16 BE
+    [InlineData(new byte[] { (byte)'1', 0, (byte)'2', (byte)'\n' })]                     // a NUL byte
+    public void HostsInAnEncodingTheLauncherDoesNotEdit_IsRefusedAndLeftAlone(byte[] bytes)
+    {
+        var path = Hosts(bytes);
+        var switcher = new HostsSwitcher(new HostsFileStore(path), new NoFlush());
+
+        Assert.Throws<HostsFileException>(() => switcher.ReadState());
+        Assert.Throws<HostsFileException>(() => switcher.Switch(NovaWorldMode.OpenNova, "203.0.113.10", removeForeign: false));
+
+        Assert.Equal(bytes, File.ReadAllBytes(path));
+    }
+
+    [Fact]
+    public void HostsWrite_ThatFails_LeavesTheFileAndNoTempFile()
+    {
+        var path = Hosts(Encoding.ASCII.GetBytes("127.0.0.1 localhost\r\n"));
+        var store = new HostsFileStore(path);
+        // File.Replace fails when the backup path is a directory.
+        Directory.CreateDirectory(store.BackupPath);
+
+        Assert.NotNull(Record.Exception(() => store.Write("x\r\n", "127.0.0.1 localhost\r\n")));
+
+        Assert.Equal("127.0.0.1 localhost\r\n", File.ReadAllText(path));
+        Assert.Empty(Directory.EnumerateFiles(_directory, "hosts.*.tmp"));
+    }
+
+    [Fact]
+    public void HostsWrite_WhileLocked_FailsCleanly_AndASharedReaderDoesNotBlockIt()
+    {
+        var path = Hosts(Encoding.ASCII.GetBytes("127.0.0.1 localhost\r\n"));
+        var store = new HostsFileStore(path);
+
+        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            Assert.NotNull(Record.Exception(() => store.Write("x\r\n", "127.0.0.1 localhost\r\n")));
+        }
+
+        Assert.Equal("127.0.0.1 localhost\r\n", File.ReadAllText(path));
+        Assert.Empty(Directory.EnumerateFiles(_directory, "hosts.*.tmp"));
+
+        // The DNS client and editors hold it open for reading with sharing.
+        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete))
+        {
+            store.Write("x\r\n", "127.0.0.1 localhost\r\n");
+        }
+
+        Assert.Equal("x\r\n", File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void DnsFlush_RunsIpconfigFromSystem32ByItsFullPath()
+    {
+        Assert.Equal(Path.Combine(Environment.SystemDirectory, "ipconfig.exe"), DnsCacheFlusher.IpconfigPath);
+        Assert.True(Path.IsPathFullyQualified(DnsCacheFlusher.IpconfigPath));
+    }
+
+    [Fact]
+    public void DefaultHostsPath_IsTheResolversHostsFile()
+    {
+        var path = HostsFileStore.DefaultHostsPath();
+
+        Assert.True(Path.IsPathFullyQualified(path));
+        Assert.Equal("hosts", Path.GetFileName(path));
+    }
+
+    private sealed class NoFlush : IDnsCacheFlusher
+    {
+        public void Flush()
+        {
+        }
+    }
+}
+
+public sealed class SettingsStoreTests : IDisposable
+{
+    private readonly string _keyPath = @"Software\OpenNova-LauncherTests\" + Guid.NewGuid().ToString("N");
+
+    public void Dispose()
+    {
+        Registry.CurrentUser.DeleteSubKeyTree(_keyPath, throwOnMissingSubKey: false);
+    }
+
+    [Fact]
+    public void TheDefaultStore_IsAnAdminOnlyMachineKey()
+    {
+        Assert.Equal(@"HKEY_LOCAL_MACHINE\SOFTWARE\OpenNova\Launcher", new LauncherSettingsStore().Location);
     }
 
     [Fact]
     public void Settings_RoundTrip()
     {
-        var store = new LauncherSettingsStore(Path.Combine(_directory, "settings"));
+        var store = new LauncherSettingsStore(Registry.CurrentUser, _keyPath);
         store.Save(new LauncherSettings
         {
             ServiceUrl = "http://127.0.0.1:8080",
@@ -91,28 +204,28 @@ public sealed class FileStoreTests : IDisposable
         Assert.Equal("http://127.0.0.1:8080", loaded.ServiceUrl);
         Assert.Equal("54.162.79.147", loaded.CachedOpenNovaAddress);
         Assert.Equal("192.168.1.20", loaded.CustomAddress);
+
+        loaded.CustomAddress = null;
+        store.Save(loaded);
+        Assert.Null(store.Load().CustomAddress);
     }
 
     [Fact]
-    public void Settings_MissingOrBrokenOrInvalid_GiveTheDefaults()
+    public void Settings_MissingOrInvalid_GiveTheDefaults()
     {
-        var store = new LauncherSettingsStore(_directory);
+        var store = new LauncherSettingsStore(Registry.CurrentUser, _keyPath);
         Assert.Equal(ServerInfo.DefaultServiceUrl, store.Load().ServiceUrl);
 
-        File.WriteAllText(store.SettingsPath, "{ not json");
-        Assert.Equal(ServerInfo.DefaultServiceUrl, store.Load().ServiceUrl);
+        using (var key = Registry.CurrentUser.CreateSubKey(_keyPath))
+        {
+            key.SetValue("ServiceUrl", "http://evil.example");
+            key.SetValue("OpenNovaAddress", "0.0.0.0");
+            key.SetValue("CustomAddress", 42, RegistryValueKind.DWord);
+        }
 
-        File.WriteAllText(store.SettingsPath, "{\"serviceUrl\":\"opennova\",\"cachedOpenNovaAddress\":\"0.0.0.0\",\"customAddress\":\"x\"}");
         var loaded = store.Load();
         Assert.Equal(ServerInfo.DefaultServiceUrl, loaded.ServiceUrl);
         Assert.Null(loaded.CachedOpenNovaAddress);
         Assert.Null(loaded.CustomAddress);
-    }
-
-    private sealed class NoFlush : IDnsCacheFlusher
-    {
-        public void Flush()
-        {
-        }
     }
 }
