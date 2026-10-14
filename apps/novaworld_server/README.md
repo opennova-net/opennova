@@ -663,10 +663,12 @@ their sender; the reads are not.
 the OpenNova Launcher ([`launcher/`](../../launcher/README.md), ADR 0054) writes into a
 player's hosts file for `gs.novaworld.net`. The site's domain is behind Cloudflare's
 proxy, so DNS cannot give that address. The route is public and read-only (the address
-is public anyway); with `ONNET_PUBLIC_HOST` not a dotted quad it answers 503
-`{"error":"no_public_ipv4"}`, since a hosts line names an address. In prod it is reached
-as `https://<domain>/api/server-info` through the portal's nginx, like every `/api`
-route. The route harness's `server_info` case pins both answers.
+is public anyway: the gate hands it to every client); it answers 503
+`{"error":"no_public_ipv4"}` when `ONNET_PUBLIC_HOST` is not a dotted quad (a hosts line
+names an address) or is one no client can be sent to (0.0.0.0/8, multicast,
+240.0.0.0/4). In prod it is reached as `https://<domain>/api/server-info` through the
+portal's nginx, like every `/api` route. The route harness's `server_info` case pins both
+answers.
 
 ## Configuration
 

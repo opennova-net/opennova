@@ -2342,8 +2342,8 @@ int test_unknown_path_404(Harness &h) {
 // GET /api/server-info, the OpenNova Launcher's route: the configured public_host
 // (the address the gate advertises) with no credential, never cached; the Secure
 // listener, which trusts no proxy, answers it as well. A listener whose
-// public_host is a hostname answers 503 no_public_ipv4: a hosts line names an
-// address.
+// public_host is a hostname answers 503 no_public_ipv4 (a hosts line names an
+// address), and so does one whose public_host no client can be sent to.
 int test_server_info(Harness &h) {
 	for (const uint16_t port : { h.port, h.secure_port }) {
 		const auto reply = h.send_to(port, "GET", "/api/server-info", { from_ip("198.51.100.91") });
@@ -2356,19 +2356,24 @@ int test_server_info(Harness &h) {
 		TEST_EXPECT(header_value(reply, "Content-Type") == "application/json");
 	}
 
-	opennova::ConnectionManager manager;
-	nws::ServerConfig config;
-	config.public_host = "nw.example.test";
-	config.http_port = 0;
-	config.web_dist_dir = h.temp_root / "web_dist";
-	config.templates_dir = h.temp_root / "templates";
-	config.static_dir = h.temp_root / "static";
-	nws::HttpListener named(manager, h.pool, h.sessions);
-	TEST_EXPECT(named.start(config));
-	const auto refused = h.send_to(named.bound_port(), "GET", "/api/server-info");
-	named.stop();
-	TEST_EXPECT(refused.transport_ok && refused.code == 503);
-	TEST_EXPECT(body_text(refused) == "{\"error\":\"no_public_ipv4\"}");
+	for (const char *public_host : { "nw.example.test", "0.0.0.0", "0.1.2.3", "224.0.0.1",
+				 "240.0.0.1", "255.255.255.255" }) {
+		opennova::ConnectionManager manager;
+		nws::ServerConfig config;
+		config.public_host = public_host;
+		config.http_port = 0;
+		config.web_dist_dir = h.temp_root / "web_dist";
+		config.templates_dir = h.temp_root / "templates";
+		config.static_dir = h.temp_root / "static";
+		nws::HttpListener listener(manager, h.pool, h.sessions);
+		TEST_EXPECT(listener.start(config));
+		const auto refused = h.send_to(listener.bound_port(), "GET", "/api/server-info");
+		listener.stop();
+		if (refused.code != 503)
+			std::fprintf(stderr, "  %s: %s\n", public_host, describe(refused).c_str());
+		TEST_EXPECT(refused.transport_ok && refused.code == 503);
+		TEST_EXPECT(body_text(refused) == "{\"error\":\"no_public_ipv4\"}");
+	}
 	return 0;
 }
 

@@ -1052,9 +1052,12 @@ void HttpListener::register_public_api_routes() {
 	// advertises as POSTIPADDRESS. The site's domain is behind Cloudflare's proxy,
 	// so DNS cannot give it. Read-only and unauthenticated (the address is
 	// public); 503 when public_host is no dotted quad, which no hosts line can
-	// name.
+	// name, or one no client can be sent to: 0.0.0.0/8, multicast and 240.0.0.0/4
+	// (the launcher refuses those too).
 	CROW_ROUTE(app, "/api/server-info")([host = public_host_]() {
-		if (!hosted::parse_ipv4(host))
+		const auto address = hosted::parse_ipv4(host);
+		const uint32_t first_octet = address ? *address >> 24 : 0;
+		if (first_octet == 0 || first_octet >= 224)
 			return json_error(503, "no_public_ipv4");
 		crow::json::wvalue out;
 		out["novaworld_ip"] = host;
