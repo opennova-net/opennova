@@ -5,7 +5,9 @@
 // carries comment banners and tab-alignment art the editor intentionally
 // normalizes). The contract proven here is: (1) the writer is lossless over the
 // model and (2) deterministic — parse->write->parse->write yields a
-// byte-identical second write. Plus a from-scratch construction case.
+// byte-identical second write. Plus a from-scratch construction case, and the
+// order the game binds a combo's parts by (each nationality written where it
+// stood among the parts, D-PLAYERINFO-35).
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -176,10 +178,57 @@ int check_authored() {
     return 0;
 }
 
+// The order the game binds by (D-PLAYERINFO-35): a combo binds the last part of its name and kind defined above it
+// [orig: CAvatarDefs_ParseConfigLine @ 0x57a830..0x57a8d3, each scan up to g_AvatarPartCount], so a combo between two
+// heads of one name binds the earlier and one after both the later. The reader keeps where each nationality stands
+// among the parts (parts_below), the writer puts it there, and the text read again binds every combo as the file did;
+// a model whose nationalities stand higher than the one before them is no file's order, refused.
+int check_order() {
+    const std::string text =
+            "define head HEAD_A\r\n{\r\n\tgraphic\ta1.3di\r\n}\r\n"
+            "define body BODY_A\r\n{\r\n\tgraphic\tb.3di\r\n}\r\n"
+            "nationality 0 AV_US\r\n{\r\n\tdivision 0 AV_D0\r\n\t{\r\n\t\tcombo 1 HEAD_A BODY_A\r\n\t}\r\n}\r\n"
+            "define head HEAD_A\r\n{\r\n\tgraphic\ta2.3di\r\n}\r\n"
+            "nationality 1 AV_UK\r\n{\r\n\tdivision 0 AV_D0\r\n\t{\r\n\t\tcombo 1 HEAD_A BODY_A\r\n\t}\r\n}\r\n"
+            "define arms ARMS_A\r\n{\r\n\tgraphic\tarms.3di\r\n}\r\n";
+    const auto bound = [](const AvatarsFile &f, size_t nationality) {
+        return std::string(f.nationalities[nationality].divisions[0].combos[0].head.graphic);
+    };
+    AvatarsFile file;
+    TEST_EXPECT(avatars_parse_memory(text.data(), text.size(), &file) == 0);
+    TEST_EXPECT(file.parts_count == 4 && file.nationalities_count == 2);
+    TEST_EXPECT(file.nationalities[0].parts_below == 2 && file.nationalities[1].parts_below == 1);
+    TEST_EXPECT(bound(file, 0) == "a1.3di" && bound(file, 1) == "a2.3di");
+    const std::string out = written(file);
+    const size_t us = out.find("nationality 0"), uk = out.find("nationality 1"), second = out.find("a2.3di"),
+                 arms = out.find("define arms");
+    TEST_EXPECT(us != std::string::npos && us < second && second < uk && uk < arms && arms != std::string::npos);
+    AvatarsFile again;
+    TEST_EXPECT(avatars_parse_memory(out.data(), out.size(), &again) == 0 && avatars_equal(again, file));
+    TEST_EXPECT(bound(again, 0) == "a1.3di" && bound(again, 1) == "a2.3di");
+    TEST_EXPECT(written(again) == out);
+    avatars_free(&again);
+    // Every part above both (a model built in code): each combo binds the later head.
+    file.nationalities[0].parts_below = file.nationalities[1].parts_below = 0;
+    const std::string first = written(file);
+    TEST_EXPECT(first.find("define arms") < first.find("nationality 0"));
+    TEST_EXPECT(avatars_parse_memory(first.data(), first.size(), &again) == 0 && bound(again, 0) == "a2.3di");
+    avatars_free(&again);
+    // No file's order: a nationality higher than the one before it, or below more parts than there are.
+    file.nationalities[1].parts_below = 1;
+    TEST_EXPECT(written(file) == "<refused>");
+    file.nationalities[0].parts_below = file.nationalities[1].parts_below = 5;
+    TEST_EXPECT(written(file) == "<refused>");
+    avatars_free(&file);
+    std::printf("order: each nationality written below the parts above it, every combo binding as the file did\n");
+    return 0;
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
     const std::string root = test_paths_repo_root(__FILE__);
     if (check_roundtrip(root + "/fixtures/avatars/synth_avatars.def") != 0) return 1;
+    if (check_order() != 0) return 1;
 
     // --- From-scratch construction (the writer never depends on parsed input) ---
     AvatarPart parts[2];
