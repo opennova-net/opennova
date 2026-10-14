@@ -133,8 +133,8 @@ std::vector<HostRosterSlot> list_roster(db::Database &db, uint32_t host_rid);
 bool apply_status_blob(db::Database &db, const LobbyStatusBlob &blob);
 
 std::vector<HostRow>   list_hosts(db::Database &db);
-// Hosts for one game slug (active_hosts.game == game) so /jop_2.gsb and
-// /dfx2_0.gsb don't cross-contaminate. Uses idx_active_hosts_game.
+// Hosts for one lobby (active_hosts.game, the listing's LobbyName, == game)
+// so each game's .gsb lists its own alone. Uses idx_active_hosts_game.
 std::vector<HostRow>   list_hosts_by_game(db::Database &db, const std::string &game);
 // The listings one account hosted (host_user_id), oldest first.
 std::vector<HostRow>   list_hosts_by_owner(db::Database &db, int64_t user_id);
@@ -208,13 +208,24 @@ bool listing_owned_by(db::Database &db, uint32_t rid, int64_t user_id);
 // kHostKeyIdleSeconds goes. Returns how many went. Throws db::SqliteError.
 std::size_t prune_host_keys(db::Database &db);
 
+// What a game's listing shows in a column its host reported nothing for: the
+// game's own values, its `games` row's ver1 and exp_bits
+// (apps/novaworld_server/catalog_repository.h), the GSB route serving it
+// passes them.
+struct GsbGameDefaults {
+	std::string ver1;
+	std::string exp_bits;
+};
+
 // Project one stored host (plus its roster) onto the GSB browser row the
 // retail IB3 browser reads: every FLDS column carries the host-reported
-// value, and the row tail carries the roster's PlayerName list, whose u16
-// count the browser adds to its player total
+// value (VER1 and Expbits, when it reported none, the game's), and the row
+// tail carries the roster's PlayerName list, whose u16 count the browser adds
+// to its player total
 // [orig: NapiGameList_ProcessEncryptedResponse @0x63dafc..0x63db96].
 GsbServerEntry gsb_entry_from_host(const HostRow &host,
-                                   const std::vector<HostRosterSlot> &roster);
+                                   const std::vector<HostRosterSlot> &roster,
+                                   const GsbGameDefaults &game);
 
 } // namespace hostdb
 

@@ -409,7 +409,8 @@ HostRow row_from_lobby(const LobbyState &lobby,
 }
 
 GsbServerEntry gsb_entry_from_host(const HostRow &h,
-                                   const std::vector<HostRosterSlot> &roster) {
+                                   const std::vector<HostRosterSlot> &roster,
+                                   const GsbGameDefaults &game) {
 	GsbServerEntry e;
 	e.rid = h.rid;      // host id — the GSB row's first u32 (the join rid)
 	e.ip  = h.host_ip;  // row dword1: the ping-target IPv4 retail's browser formats
@@ -441,10 +442,9 @@ GsbServerEntry gsb_entry_from_host(const HostRow &h,
 	e.mod          = h.mod;
 	e.pix          = or_default(h.pix, e.pix);
 	e.pb_server    = or_default(h.pb_server, e.pb_server);
-	const bool dfx2 = h.game == "dfx2_consumer";
-	e.ver1         = or_default(h.ver1, dfx2 ? "1" : "3");
+	e.ver1         = or_default(h.ver1, game.ver1);
 	e.exp          = h.exp;
-	e.exp_bits     = or_default(h.exp_bits, dfx2 ? "1" : "3");
+	e.exp_bits     = or_default(h.exp_bits, game.exp_bits);
 	e.joicon2      = or_default(h.joicon2, e.joicon2);
 	e.player_names.reserve(roster.size());
 	for (const auto &s : roster) {

@@ -115,9 +115,9 @@ int main() {
 	TEST_EXPECT(row_a->skins == "Y");
 	TEST_EXPECT(row_a->tracers == "N");
 
-	// Per-game GSB filter: the JO slug returns both; the DFX2 slug does not.
+	// Per-game GSB filter: the JO lobby returns both; the DFX2 lobby does not.
 	TEST_EXPECT(opennova::hostdb::list_hosts_by_game(db, "jop_2_consumer").size() == 2);
-	TEST_EXPECT(opennova::hostdb::list_hosts_by_game(db, "dfx2_consumer").empty());
+	TEST_EXPECT(opennova::hostdb::list_hosts_by_game(db, "dfx2_0_consumer").empty());
 
 	// The indexed PlayerList lands in host_roster, one row per slot.
 	auto roster = opennova::hostdb::list_roster(db, a.rid);
@@ -128,8 +128,19 @@ int main() {
 
 	// The GSB projection carries the stored columns and the roster names, and
 	// the parsed blob's player total counts them (the retail browser adds the
-	// row's u16 name count to its total).
-	auto entry = opennova::hostdb::gsb_entry_from_host(*row_a, roster);
+	// row's u16 name count to its total). The host reported no VER1 or
+	// Expbits, so those are its game's (the games row the route passes).
+	auto entry = opennova::hostdb::gsb_entry_from_host(*row_a, roster, { "3", "3" });
+	TEST_EXPECT(entry.ver1 == "3" && entry.exp_bits == "3");
+	{
+		const auto dfx2 = opennova::hostdb::gsb_entry_from_host(*row_a, roster, { "1", "1" });
+		TEST_EXPECT(dfx2.ver1 == "1" && dfx2.exp_bits == "1");
+		auto reported = *row_a;
+		reported.ver1 = "7";
+		reported.exp_bits = "2";
+		const auto own = opennova::hostdb::gsb_entry_from_host(reported, roster, { "1", "1" });
+		TEST_EXPECT(own.ver1 == "7" && own.exp_bits == "2");
+	}
 	TEST_EXPECT(entry.rid == a.rid);
 	TEST_EXPECT(entry.ip == "10.0.0.7");
 	TEST_EXPECT(entry.time_left == "45");
@@ -258,6 +269,58 @@ int main() {
 	TEST_EXPECT(opennova::hostdb::list_players(db, a.rid).empty());
 	TEST_EXPECT(opennova::hostdb::list_hosts(db).size() == 1);
 
-	std::printf("OK: host register -> list round-trip (rid minting, roster, GSB projection, status blob, re-send)\n");
+	// A DFX2 host's lists: DFXCATEGORY1 after LAN on both, and PBServer always
+	// "0" (dfx2-vs-jo-re.md DFX2-7) [orig: @0x4d0e8a..0x4d0eb1, @0x4d0faf..0x4d0fd5,
+	// @0x4fc4db (dfx2.exe)]. The var no browser column names is ignored, as
+	// any unknown var is; the listing lands under its LobbyName, dfx2_0_consumer,
+	// and the status blob carrying the same var still refreshes it.
+	{
+		NapiMessage in;
+		in.name = "ClientHostRequest";
+		in.children.push_back(make_client_var_list("HostSetup", {
+			{"LobbyName", "dfx2_0_consumer"}, {"ServerName", "DFX2 Srv"}, {"Msg", ""},
+			{"MaxPlayers", "100"}, {"Password", "0"}, {"Dedicated", "1"}, {"AppId", "4100"},
+			{"AccessCodeList", ""}, {"PLoad", ""}, {"Exp", ""}, {"LAN", "0"},
+			{"DFXCATEGORY1", "0"}, {"ReconnectCounter", "0"},
+		}));
+		in.children.push_back(make_client_var_list("Host", {
+			{"LobbyName", "dfx2_0_consumer"}, {"ServerName", "DFX2 Srv"}, {"Msg", ""},
+			{"MaxPlayers", "100"}, {"AppId", "4100"}, {"PLoad", ""}, {"Exp", ""}, {"LAN", "0"},
+			{"DFXCATEGORY1", "0"}, {"HostKey", "HK-DFX2"}, {"PCIDKey", "16777300"},
+			{"Players", "0"}, {"PBServer", "0"}, {"Port", "-1"},
+		}));
+		in.children.push_back(make_indexed_var_list("PlayerList", {}));
+		LobbyState d;
+		const auto rd = sess.dispatch(in, d, "10.0.0.20", 40000);
+		TEST_EXPECT(rd.label == "ClientHostRequest");
+		TEST_EXPECT(d.rid != 0);
+		const auto row = opennova::hostdb::find_host_by_rid(db, d.rid);
+		TEST_EXPECT(row.has_value());
+		TEST_EXPECT(row->game == "dfx2_0_consumer");
+		TEST_EXPECT(row->server_name == "DFX2 Srv");
+		TEST_EXPECT(row->max_players == 100);
+		TEST_EXPECT(row->pb_server == "0");
+		const auto dfx2 = opennova::hostdb::list_hosts_by_game(db, "dfx2_0_consumer");
+		TEST_EXPECT(dfx2.size() == 1 && dfx2[0].rid == d.rid);
+		TEST_EXPECT(opennova::hostdb::list_hosts_by_game(db, "jop_2_consumer").size() == 1);
+		const auto entry = opennova::hostdb::gsb_entry_from_host(*row, {}, { "1", "1" });
+		TEST_EXPECT(entry.pb_server == "0" && entry.ver1 == "1" && entry.exp_bits == "1");
+
+		opennova::LobbyStatusBlob blob;
+		blob.lobby_name = "dfx2_0_consumer";
+		blob.host_key = "HK-DFX2";
+		blob.host_vars = { { "LobbyName", "dfx2_0_consumer" }, { "ServerName", "DFX2 Posted" },
+			{ "LAN", "0" }, { "DFXCATEGORY1", "0" }, { "Players", "3" }, { "PBServer", "0" } };
+		blob.send_player_names = false;
+		opennova::LobbyStatusBlob parsed;
+		TEST_EXPECT(opennova::lobby_update_parse(opennova::lobby_update_build(blob), parsed));
+		TEST_EXPECT(opennova::hostdb::apply_status_blob(db, parsed));
+		const auto posted = opennova::hostdb::find_host_by_rid(db, d.rid);
+		TEST_EXPECT(posted.has_value() && posted->server_name == "DFX2+Posted");
+		TEST_EXPECT(posted->player_count == 3 && posted->pb_server == "0");
+		opennova::hostdb::remove_host_by_rid(db, d.rid);
+	}
+
+	std::printf("OK: host register -> list round-trip (rid minting, roster, GSB projection, status blob, re-send, DFX2 lists)\n");
 	return 0;
 }
