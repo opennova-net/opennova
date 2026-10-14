@@ -30,7 +30,7 @@ extends GutTest
 ## edit_in_viewport), a menu's through the John Smith flow and a model's camera and clock;
 ## editor_menu_preview and editor_model_preview are gone.
 
-const EDITOR_SCENE := "res://editor/editor_root.tscn"
+const EditorFixture := preload("res://tests/authoring/editor_fixture.gd")
 const McpTestClient := preload("res://tests/mcp/mcp_test_client.gd")
 const CATALOG: Array[String] = [
 	"editor_state", "editor_request", "editor_query", "editor_viewport", "editor_screenshot", "editor_logs",
@@ -43,16 +43,10 @@ var _client: RefCounted = null
 
 
 func before_each() -> void:
-	var packed := load(EDITOR_SCENE) as PackedScene
-	assert_not_null(packed, "the editor scene loads (the editor-enabled variant is loaded)")
-	if packed == null:
+	var seam: RefCounted = await EditorFixture.boot(self, "mcp", _dirs)
+	if seam == null:
 		return
-	_app = packed.instantiate()
-	var settings_dir := OS.get_cache_dir().path_join("opennova editor mcp %d" % Time.get_ticks_usec())
-	assert_eq(DirAccess.make_dir_recursive_absolute(settings_dir), OK)
-	_dirs.append(settings_dir)
-	_app.set("settings_path", settings_dir.path_join("editor_settings.json"))
-	add_child_autofree(_app)
+	_app = seam.app
 	_service = add_child_autofree(EditorMcpService.new())
 	assert_eq(_service.setup(_app, 0), OK)
 	assert_true(_service.is_running())
@@ -74,9 +68,7 @@ func after_each() -> void:
 	_app = null
 	_service = null
 	McpLogHub.instance = null
-	for dir in _dirs:
-		TestFs.remove_dir_recursive(dir)
-	_dirs.clear()
+	await EditorFixture.teardown(self, _dirs)
 
 
 ## Play's state straight from the app's wire seam (the client may be gone): "stopped" when none.
