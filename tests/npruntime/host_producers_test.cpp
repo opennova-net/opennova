@@ -1526,6 +1526,7 @@ bool check_player_enter_hook() {
 		inmatch::NapiNPConnection conn = conn_fixture::make_conn(
 				id, 1, &t, ns::TransportMode::Client, w::EntityHandle{}, false);
 		conn.phase = inmatch::ConnectionPhase::Joined;
+		conn.join_ticket_validation = true; // its 0x01 entered state 3
 		conn.peer = PeerAddr{0x0100007Fu, port};
 		conn.join_validated_host_ms = 0;
 		conn.join_identity_pairs = {{"PCID", "42"}, {"PUBJOINTICKET", "T-" + std::to_string(id)}};
@@ -1588,7 +1589,20 @@ bool check_player_enter_hook() {
 		return false;
 	f.ctx.np_protocol.host_run_duration_ms += 0x1D4C1u;
 	inmatch::Server_CheckPlayerTimeouts(f.ctx);
-	return expect(conn_by_id(23).host_disconnect_sent, "the unarmed validation deadline reaps");
+	if (!expect(conn_by_id(23).host_disconnect_sent, "the unarmed validation deadline reaps"))
+		return false;
+	// A joiner whose 0x01 entered state 6 (no ticket gate) is never visited, however long it
+	// waits [orig: the 0x01 @0x512FAF..0x512FB3; the watchdog's states 3 / 4 @0x4C8B7C, @0x4C8BD4].
+	ns::UdpSessionTransport t_e(ns::UdpSessionTransport::Role::Host);
+	joined(24, t_e, 4004);
+	conn_by_id(24).join_ticket_validation = false;
+	conn_by_id(24).join_validated_host_ms = 0;
+	f.ctx.novaworld_join_tickets_armed = true;
+	f.ctx.np_protocol.host_run_duration_ms += 0x1D4C1u;
+	inmatch::Server_CheckPlayerTimeouts(f.ctx);
+	return expect(!conn_by_id(24).host_disconnect_sent && !conn_by_id(24).player_enter_requested &&
+	                      requests.size() == 3,
+	        "a state-6 joiner is neither announced nor reaped");
 }
 
 // --------------------------------------------------------------------------

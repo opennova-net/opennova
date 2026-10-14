@@ -510,6 +510,21 @@ inline void set_server_text(NapiNPServerCtx &ctx, ServerTextTable text) {
 	ctx.server_text = std::move(text);
 }
 
+// The join-ticket gate: in session, on the NovaWorld transport, join tickets
+// required. A joiner's C2S 0x01 enters NetPlayer game state 3 (the validation
+// the timeout watchdog runs) only under it, else state 6; the validator's
+// code-28 leg reads the same three words (D-NET-702). Ours carries retail's
+// two ticket words (the NovaWorld session's +0x4FC the 0x01 tests and its
+// +0x120 bit 0x40 the watchdog tests) as the one novaworld_join_tickets_armed.
+// [orig: the C2S 0x01 handler @0x512ED0 - is_in_session @0x512F87, the
+//  transport @0x512F90, dword_B604DC @0x512F99, state 3 @0x512FA2..0x512FA6,
+//  state 6 @0x512FAF..0x512FB3; Server_ValidatePlayerJoinRequest
+//  @0x5128E2..0x5128F8]
+inline bool join_tickets_required(const NapiNPServerCtx &ctx) {
+	return ctx.is_in_session != 0 && ctx.transport_mode == NetworkType::NovaWorld &&
+			ctx.novaworld_join_tickets_armed;
+}
+
 // The host's local address: "PUB" while it is in a session on the NovaWorld
 // transport; false (no address, no cookie lookups) otherwise.
 // [orig: CNapiNetwork_GetLocalAddress @0x4C4F60 — the gate @0x4c4f75, the copy

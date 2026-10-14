@@ -622,6 +622,14 @@ struct NapiNPConnection {
 	// [orig: NapiNPPlayer+0x4D - its one writer Server_ValidatePlayerJoinRequest
 	//  @0x5127F3, its one reader CNapiServer_DisconnectPendingSpawnBans @0x4C92F5]
 	bool duplicate_pcid_kick_pending = false;
+	// NetPlayer game state 3: the C2S 0x01 met the join-ticket gate
+	// (join_tickets_required), so the timeout watchdog validates this joiner;
+	// any other 0x01 enters state 6, which the watchdog never visits, so a
+	// joiner the spawn pump holds past the cap is never reaped by it.
+	// [orig: the C2S 0x01 handler - state 3 @0x512FA2..0x512FA6, state 6
+	//  @0x512FAF..0x512FB3; CNapiNetwork_CheckPlayerTimeouts - states 3 / 4 alone
+	//  @0x4C8B7C, @0x4C8BD4]
+	bool join_ticket_validation = false;
 	// NetPlayer game state 4 (the NovaWorld ticket wait): the
 	// ClientPlayerEnterRequest went to the service; admitted = its result was
 	// success (state 6), and the spawn pump holds the player until then. The

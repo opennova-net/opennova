@@ -1168,6 +1168,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					conn.admission_stage = GameAdmissionStage::Rejected;
 					return {};
 				}
+				// State 3 under the ticket gate, else state 6 [orig: @0x512F87..0x512FB3].
+				conn.join_ticket_validation =
+						inputs.server_ctx != nullptr && join_tickets_required(*inputs.server_ctx);
 				std::vector<uint8_t> challenge = build_tag02_push(now_tick);
 				conn.admission_padding_x = read_u32_le(challenge.data());
 				conn.admission_padding_y = read_u32_le(challenge.data() + 4);

@@ -3289,11 +3289,39 @@ bool run_lineup_joiner_past_the_rows_is_held_not_dropped() {
 		if (c.peer == first_peer) first = &c;
 		if (c.peer == second_peer) second = &c;
 	}
-	return expect(first != nullptr && first->phase >= inmatch::ConnectionPhase::PlayerAdded &&
-	                      second != nullptr &&
-	                      second->phase < inmatch::ConnectionPhase::PlayerAdded &&
-	                      inmatch::connection_count(ctx) == 2 && second_held_nag,
-	        "the pump adds the first and holds the second, re-sending it the S2C 0x03 {00}");
+	if (!expect(first != nullptr && first->phase >= inmatch::ConnectionPhase::PlayerAdded &&
+	                    second != nullptr &&
+	                    second->phase < inmatch::ConnectionPhase::PlayerAdded &&
+	                    inmatch::connection_count(ctx) == 2 && second_held_nag,
+	            "the pump adds the first and holds the second, re-sending it the S2C 0x03 {00}"))
+		return false;
+
+	// On a LAN host the second joiner's 0x01 entered state 6, so the join watchdog never visits
+	// it: past 120 s it is still connected and still re-sent the 0x03.
+	// [orig: the C2S 0x01 handler @0x512FAF..0x512FB3; CNapiNetwork_CheckPlayerTimeouts - states
+	//  3 / 4 alone @0x4C8B7C, @0x4C8BD4]
+	ctx.np_protocol.host_run_duration_ms = 0x1D4C0u + 2000u;
+	inmatch::Server_CheckPlayerTimeouts(ctx);
+	advance_to_periodic_second(world);
+	const std::vector<inmatch::TickOut> later_out = inmatch::tick_connections(ctx, 16, 7);
+	bool still_nagged = false;
+	for (const inmatch::TickOut &tick : later_out) {
+		if (!(tick.peer == second_peer)) continue;
+		for (const std::vector<uint8_t> &datagram : tick.outbound) {
+			ProtocolPacketHeader header;
+			std::vector<ProtocolMessage> messages;
+			if (!decode_s2c(datagram, second_scrk, header, messages)) continue;
+			const ProtocolMessage *nag = find_reply(messages, 0x03);
+			if (nag != nullptr && nag->payload == std::vector<uint8_t>{0x00}) still_nagged = true;
+		}
+	}
+	second = nullptr;
+	for (const inmatch::NapiNPConnection &c : ctx.np_protocol.connection_list)
+		if (c.peer == second_peer) second = &c;
+	return expect(second != nullptr && !second->join_ticket_validation &&
+	                      !second->host_disconnect_sent && inmatch::connection_count(ctx) == 2 &&
+	                      still_nagged,
+	        "past 120 s the held LAN joiner is still connected and still re-sent the 0x03");
 }
 
 // A Serve Only host (D-NET-400) advertises, admits and publishes its session cap; only the

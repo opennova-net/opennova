@@ -1198,10 +1198,10 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 	}
 }
 
-// The join-phase validation watchdog, once per periodic second, over every
-// accepted 0x42 that has not completed its admission (NetPlayer game states
-// 3 and 4); the receive-silence reap never fires for a peer that keeps
-// sending, so these are absolute deadlines from the validation stamp.
+// The join-phase validation watchdog, once per periodic second, over the
+// joiners whose 0x01 entered NetPlayer state 3 (join_ticket_validation) and
+// are not yet added (states 3 and 4); a state-6 / 7 joiner is never visited.
+// These are absolute deadlines from the validation stamp.
 //   state 3, armed:    announce the joiner to the NovaWorld service as a
 //                      ClientPlayerEnterRequest and enter state 4;
 //   state 3, no arm:   after 120 s the chat-coded punt 42 "N.C:NONWTOVALU";
@@ -1220,7 +1220,7 @@ void Server_CheckPlayerTimeouts(NapiNPServerCtx &ctx) {
 	const bool armed = ctx.novaworld_join_tickets_armed;
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.type != NapiNPConnection::kTypeServerSide ||
-				conn.phase < ConnectionPhase::Joined ||
+				!conn.join_ticket_validation || // [orig: @0x4C8B7C, @0x4C8BD4]
 				conn.phase >= ConnectionPhase::PlayerAdded ||
 				conn.host_disconnect_sent)
 			continue;
