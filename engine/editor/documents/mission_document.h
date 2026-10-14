@@ -336,8 +336,8 @@ private:
 bool is_mission_kind(AssetKind kind);
 
 // The SSN a new entity takes over `rows` (an Add, a Duplicate, a paste's copy told apart): one past
-// the largest the rows hold, never the player's 10000 (mission::ssn_after) [bms-event-runtime-re.md
-// 7.3: the single-player lookups take 10000 for the player].
+// the largest the rows hold, skipping none, as the original editor allocates (mission::ssn_after,
+// D-MIS-10).
 int32_t next_free_ssn(const std::vector<std::shared_ptr<const Node>> &rows);
 // The record type of the markers a teleport, an effect and a teammate's pickup find by their wp_number [orig:
 // EventAction_SpawnParticleEffect @0x4540e0, `result[20] == 6088`].
