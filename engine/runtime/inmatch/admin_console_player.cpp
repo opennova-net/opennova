@@ -60,12 +60,6 @@ std::vector<const NapiNPConnection *> active_slots(const NapiNPServerCtx &ctx) {
 	return out;
 }
 
-// The slot's local byte (+5): the host's own loopback connection.
-bool slot_is_local(const NapiNPConnection &conn) {
-	return conn.type == NapiNPConnection::kTypeClientSide ||
-	       conn.link.mode == replication::TransportMode::Loopback;
-}
-
 world::Entity *slot_entity(const NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
 	return ctx.world != nullptr ? ctx.world->registry.get(conn.link.owned_entity) : nullptr;
 }

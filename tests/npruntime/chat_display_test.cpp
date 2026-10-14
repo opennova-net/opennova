@@ -51,7 +51,7 @@ struct TestFont {
 constexpr uint32_t kWhite = 0xFFFFFFFFu;
 
 int32_t timer_of(const inmatch::ChatDisplayBuffer &b, size_t slot) {
-	const uint8_t *p = b.bytes.data() + (slot - 1) * inmatch::kChatDisplaySlotBytes +
+	const uint8_t *p = b.data() + (slot - 1) * inmatch::kChatDisplaySlotBytes +
 			inmatch::kChatDisplayTimerOffset;
 	return static_cast<int32_t>(p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24));
 }

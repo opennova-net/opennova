@@ -45,10 +45,12 @@
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/inmatch/server_files.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <ctime>
 #include <functional>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -114,10 +116,26 @@ inline constexpr int32_t kChatDisplayStagger = 186;  // [orig: dword_B3FF38 + 18
 // The chat box with no hud.def: both rows 0, 0 - (0 - 4).
 inline constexpr int kChatDisplayWidthNoHudDef = 4;
 
-struct ChatDisplayBuffer {
-	// Slot k (1..40) at byte (k - 1) * 128, slot 40 the oldest. Held off the context's own
-	// storage: the 5 KiB would sit inline in every NapiNPServerCtx, which tests keep on the stack.
-	std::vector<uint8_t> bytes = std::vector<uint8_t>(kChatDisplaySlotCount * kChatDisplaySlotBytes, 0);
+// Slot k (1..40) at byte (k - 1) * 128, slot 40 the oldest: the 5 KiB held off the context's
+// own storage (it would sit inline in every NapiNPServerCtx, which tests keep on the stack), a
+// fixed-size array that copies whole.
+class ChatDisplayBuffer {
+public:
+	static constexpr size_t kBytes = kChatDisplaySlotCount * kChatDisplaySlotBytes;
+	using Bytes = std::array<uint8_t, kBytes>;
+	ChatDisplayBuffer() : bytes_(std::make_unique<Bytes>()) {}
+	ChatDisplayBuffer(const ChatDisplayBuffer &other) : bytes_(std::make_unique<Bytes>(*other.bytes_)) {}
+	ChatDisplayBuffer &operator=(const ChatDisplayBuffer &other) {
+		*bytes_ = *other.bytes_;
+		return *this;
+	}
+	uint8_t *data() { return bytes_->data(); }
+	const uint8_t *data() const { return bytes_->data(); }
+	static constexpr size_t size() { return kBytes; }
+	void clear() { bytes_->fill(0); }
+
+private:
+	std::unique_ptr<Bytes> bytes_;
 };
 // The wrap's font (g_hudLabelFontBold: the bold Arial HUD_InitAllFonts picks by
 // the display's width; null, a font that did not load: no line wraps) and the
@@ -146,6 +164,14 @@ std::string chat_display_get(const ChatDisplayBuffer &buffer);
 // Chat_AddMessageChannel1 on a host with no client: the raw ring's line and
 // the display buffer's, over the context's wrap (the dispatcher's 930 life).
 void server_console_add(NapiNPServerCtx &ctx, const std::string &text, uint32_t argb);
+
+// Chat_ClearAllChannels on a host with no client: the raw CHAT ring and its
+// display buffer emptied, which every mission start does once its BMS has
+// loaded (the boot calls it; the other rings it zeroes are a client's).
+// [orig: Chat_ClearAllChannels @0x497D30 (the raw ring 0xB3EA38 and the display
+//  buffer 0xB3FE3C, 0x1400 bytes each, @0x497D3E / @0x497D54), from
+//  Game_StartMission @0x524A10]
+void server_console_clear(NapiNPServerCtx &ctx);
 
 // Chat_DispatchToChannel on a host with no client: the channel picks the sink
 // and colour (hud/feed_format.h chat_channel_sink / chat_channel_color); a

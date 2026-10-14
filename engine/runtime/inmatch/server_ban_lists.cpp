@@ -34,12 +34,6 @@ NapiNPConnection *slot_at(NapiNPServerCtx &ctx, int32_t index) {
 	return nullptr;
 }
 
-// The slot's local byte (+5): the host's own loopback connection.
-bool slot_is_local(const NapiNPConnection &conn) {
-	return conn.type == NapiNPConnection::kTypeClientSide ||
-	       conn.link.mode == replication::TransportMode::Loopback;
-}
-
 // CNapiNPConnection_SendChatMessage(connection, "", 33, detail): the disconnect description
 // with reason 33. [orig: CNapiNPConnection_SendChatMessage @0x4C7EF0]
 void punt(NapiNPConnection &conn, const char *detail) {

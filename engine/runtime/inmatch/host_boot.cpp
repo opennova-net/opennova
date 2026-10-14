@@ -9,6 +9,7 @@
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/integrity_sources.h>
+#include <runtime/inmatch/server_console.h>
 #include <runtime/inmatch/server_log_recorder.h>
 #include <runtime/inmatch/session_status.h>
 
@@ -177,6 +178,12 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	if (request.items != nullptr) kernel.set_items_table(request.items);
 	kernel.wire_header_world = request.wire_header_world;
 	kernel.open_document(std::move(request.mission), basename, files);
+
+	// The chat rings start every mission empty, once its BMS has loaded: on a
+	// map change CHAT GET and the status page list none of the last map's lines.
+	// [orig: Game_StartMission @0x524A10 -> Chat_ClearAllChannels @0x497D30; the
+	//  start's only earlier exit is the BMS load's failure @0x5247A7]
+	if (request.host != nullptr) server_console_clear(request.host->state.host_owner.ctx);
 
 	// The terrain field (the embedder's parsed documents, else the kernel's
 	// file entry), the placed tiles over it and the tileset's .TSD table: the

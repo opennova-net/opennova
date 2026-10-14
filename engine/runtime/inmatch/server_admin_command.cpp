@@ -47,13 +47,6 @@ bool slot_in_game(const NapiNPConnection &conn) {
 	       conn.link.owned_entity.valid();
 }
 
-// The host's own slot (retail's slot+5 "local player" byte): the in-process
-// type-2 loopback node.
-bool slot_is_local(const NapiNPConnection &conn) {
-	return conn.type == NapiNPConnection::kTypeClientSide ||
-	       conn.link.mode == replication::TransportMode::Loopback;
-}
-
 // PlayerState_GetByIndex: an index outside [0, capacity) is no slot, so a
 // large one never wraps onto a low slot through the byte compare below
 // (D-NET-387) [orig: @0x500850..0x500861].

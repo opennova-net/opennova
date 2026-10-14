@@ -308,6 +308,10 @@ int main() {
 					rotation_line(3, "SERVETST.BMS", "() () () <CURRENT MISSION> <>"),
 			"the inserted one-shot and the SETNEXT mark");
 	CHECK(rig.with([&] { return server.rotation().setnext_latch && server.rotation().list.alt_cursor == 2; }));
+	// A line in the chat rings ahead of the map change, which the next mission start empties
+	// [orig: Game_StartMission @0x524A10 -> Chat_ClearAllChannels @0x497D30].
+	check_eq(admin.one("CHAT SEND before the cycle"), "OK - Chat sent.", "CHAT SEND ahead of the cycle");
+	check_eq(admin.one("CHAT GET"), "before the cycle \r\n", "CHAT GET ahead of the cycle");
 	check_eq(admin.one("MISSION CYCLE"), "OK - Server is cycling...", "MISSION CYCLE");
 	// The joiner is back once it plays on the next map's file (its reload starts at the S2C 0x25).
 	CHECK(rig.wait([&] {
@@ -321,8 +325,12 @@ int main() {
 		CHECK(rig.ctx().config.mission_file == "SERVETS2.BMS");
 		CHECK(rig.client.map_file() == "SERVETS2.BMS");
 		CHECK(server.rotation().setnext_latch);
+		CHECK(rig.ctx().console_chat.empty());
 		return 0;
 	});
+	check_eq(admin.one("CHAT GET"), "", "the map change emptied the display buffer");
+	check_eq(admin.one("CHAT SEND after the cycle"), "OK - Chat sent.", "CHAT SEND on the next map");
+	check_eq(admin.one("CHAT GET"), "after the cycle \r\n", "CHAT GET lists the next map's line alone");
 	check_eq(admin.one("MISSION CYCLE"), "OK - Server is cycling...", "the second CYCLE");
 	CHECK(rig.wait([&] {
 		return server.missions_played() == 3 && rig.client.map_file() == "SERVETST.BMS" &&

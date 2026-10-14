@@ -32,11 +32,11 @@ void server_console_post(std::vector<ServerConsoleLine> &ring, const std::string
 namespace {
 
 uint8_t *display_slot(ChatDisplayBuffer &buffer, size_t k) {
-	return buffer.bytes.data() + (k - 1) * kChatDisplaySlotBytes;
+	return buffer.data() + (k - 1) * kChatDisplaySlotBytes;
 }
 
 const uint8_t *display_slot(const ChatDisplayBuffer &buffer, size_t k) {
-	return buffer.bytes.data() + (k - 1) * kChatDisplaySlotBytes;
+	return buffer.data() + (k - 1) * kChatDisplaySlotBytes;
 }
 
 } // namespace
@@ -59,10 +59,13 @@ void chat_display_post(ChatDisplayBuffer &buffer, const ChatDisplayWrap &wrap,
 	}
 	const size_t kept = std::min(count, kChatDisplaySlotCount);
 	std::memset(display_slot(buffer, 1), 0, kept * kChatDisplaySlotBytes);
-	int32_t timer = life;
-	const int32_t previous = io::read_s32_le(display_slot(buffer, 2) + kChatDisplayTimerOffset);
-	if (timer < previous + kChatDisplayStagger) timer = previous + kChatDisplayStagger;
-	io::write_u32_le(display_slot(buffer, 1) + kChatDisplayTimerOffset, static_cast<uint32_t>(timer));
+	// Slot 2's timer plus 186, added as the dword it is and compared signed
+	// [orig: `add eax, 0BAh` then the signed compare with the life @0x498722..0x498734].
+	const uint32_t staggered = io::read_u32_le(display_slot(buffer, 2) + kChatDisplayTimerOffset) +
+			static_cast<uint32_t>(kChatDisplayStagger);
+	const uint32_t timer =
+			static_cast<int32_t>(staggered) > life ? staggered : static_cast<uint32_t>(life);
+	io::write_u32_le(display_slot(buffer, 1) + kChatDisplayTimerOffset, timer);
 	// The segments, the first into slot `count`, the last into slot 1.
 	const char *text_bytes = message.c_str();
 	size_t cursor = 0;
@@ -87,15 +90,16 @@ void chat_display_post(ChatDisplayBuffer &buffer, const ChatDisplayWrap &wrap,
 
 void chat_display_tick(ChatDisplayBuffer &buffer) {
 	for (size_t k = 1; k <= kChatDisplaySlotCount; ++k) {
+		// A nonzero dword steps down by one, wrapping as `add ecx, -1` does.
 		uint8_t *timer = display_slot(buffer, k) + kChatDisplayTimerOffset;
-		const int32_t value = io::read_s32_le(timer);
-		if (value != 0) io::write_u32_le(timer, static_cast<uint32_t>(value - 1));
+		const uint32_t value = io::read_u32_le(timer);
+		if (value != 0) io::write_u32_le(timer, value - 1u);
 	}
 }
 
 std::string chat_display_get(const ChatDisplayBuffer &buffer) {
 	std::string out;
-	const uint8_t *end = buffer.bytes.data() + buffer.bytes.size();
+	const uint8_t *end = buffer.data() + ChatDisplayBuffer::size();
 	for (size_t k = kChatDisplaySlotCount; k >= 1; --k) {
 		const uint8_t *begin = display_slot(buffer, k);
 		const uint8_t *nul = std::find(begin, end, uint8_t{0});
@@ -109,6 +113,11 @@ std::string chat_display_get(const ChatDisplayBuffer &buffer) {
 void server_console_add(NapiNPServerCtx &ctx, const std::string &text, uint32_t argb) {
 	server_console_post(ctx.console_chat, text, argb);
 	chat_display_post(ctx.console_chat_display, ctx.console_chat_wrap, text, argb, kChatDisplayLife);
+}
+
+void server_console_clear(NapiNPServerCtx &ctx) {
+	ctx.console_chat.clear();
+	ctx.console_chat_display.clear();
 }
 
 void server_console_dispatch(NapiNPServerCtx &ctx, int channel, const std::string &text) {
@@ -284,12 +293,6 @@ void NetLog::shutdown(uint32_t now_ms) {
 }
 
 namespace {
-
-// The slot's local byte (+5): the host's own client connection.
-bool slot_is_local(const NapiNPConnection &conn) {
-	return conn.type == NapiNPConnection::kTypeClientSide ||
-	       conn.link.mode == replication::TransportMode::Loopback;
-}
 
 // The chat throttle's interval, which the console line's shares [orig: the
 // slot's +100360 word, `last + 1000` @0x519A36].
