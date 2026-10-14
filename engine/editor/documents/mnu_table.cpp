@@ -1709,15 +1709,18 @@ void retype_record(const RecordHandle &record, RecordIds &ids, const std::string
 	}
 	// The token a row's TYPE keeps where both forms read it: an ITEM's by the ITEMS form [orig: @ 0x6457b6, 0x64bd57,
 	// 0x642816], an ITEMS APPEARANCE's by whether the form is a TABLE's.
+	// A TYPE left out reads the row's text as no TYPE does (mnu::set_item_type, set_appearance_type): a spin list's
+	// COLOR item made a LIST's row is its colour's text.
 	if (record.kind == kind_index("items.item") || record.kind == kind_index("item")) {
 		const bool cell = record.kind == kind_index("item");
-		std::string &type = record.as<mnu::Item>().type;
-		if (!mnu::known_token(type, mnu::item_types_for(from, cell)) || !mnu::known_token(type, mnu::item_types_for(to, cell)))
-			type.clear();
+		mnu::Item &item = record.as<mnu::Item>();
+		if (!mnu::known_token(item.type, mnu::item_types_for(from, cell)) ||
+		    !mnu::known_token(item.type, mnu::item_types_for(to, cell)))
+			mnu::set_item_type(item, std::string());
 	} else if (record.kind == kind_index("items.appearance")) {
-		std::string &type = record.as<mnu::Appearance>().type;
-		if (!mnu::known_token(type, items_appearance_types(from)) || !mnu::known_token(type, items_appearance_types(to)))
-			type.clear();
+		mnu::Appearance &row = record.as<mnu::Appearance>();
+		if (!mnu::known_token(row.type, items_appearance_types(from)) || !mnu::known_token(row.type, items_appearance_types(to)))
+			mnu::set_appearance_type(row, std::string());
 	}
 	const std::vector<TableList> &lists = menu_table().kind(record.kind)->lists();
 	for (size_t l = 0; l < lists.size() && l < ids.lists.size(); ++l) {
