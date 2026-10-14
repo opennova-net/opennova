@@ -37,7 +37,8 @@
 // first of a GAMETYPE's lines clears the row's list; a name the table has, its value a byte), `VAR "name" n`
 // (a name the table has, its value a word) and `EXP_FANFARE a b` (two bytes, kept when both are other than 0
 // and the second is the greater); FIELD, VAR and EXP_FANFARE take three tokens, GAMETYPE two; anything else
-// is read for nothing.
+// is read for nothing. A GAMETYPE line of a name no row has selects none, and the FIELD and VAR lines after it
+// are read for nothing [orig: `if (currentGameType)` @ 0x52DB7C, @ 0x52DC05].
 //
 // The row index is chosen from the session's g_GameType [orig: ScoreConfig_LoadScoringTableForGameType @
 // 0x52D300], and the defaults' writer puts the rows down in that ladder's order:
@@ -57,11 +58,12 @@
 // guard drops it. The writer puts row 2 down first under index 0 (`if (!i) i = 2` @ 0x52CF4C), so the
 // shipped file's two COOP blocks are both row 2's, and its blocks stand in the ladder's order.
 //
-// This lib models the file: its blocks as the reader takes them, in the file's order, each with its FIELD
-// entries (a list, in order) and its VAR values, the version and the fanfare; the in-memory row image and the
-// defaults the file is read over are the runtime's (inmatch::load_session_score_config, which still scans the
-// text itself). The writer is ScoreConfig_SaveFile's form, and the shipped score.ini is that writer's output
-// byte for byte.
+// This lib models the file: its blocks as the reader takes them, in the file's order, each the row its
+// GAMETYPE line selects with its FIELD entries (a list, in order, the 34 the row holds) and its VAR values, each
+// entry by its id in its name table, the version and the fanfare; the in-memory row image and the defaults the
+// file is read over are the runtime's (inmatch::load_session_score_config, which still scans the text itself).
+// No spelling of the file's is kept: the writer is ScoreConfig_SaveFile's form, which puts down each name from
+// its table by the id, and the shipped score.ini is that writer's output byte for byte.
 #pragma once
 
 #include <cstdint>
@@ -72,19 +74,21 @@
 namespace opennova {
 namespace score {
 
-// A FIELD or a VAR line's entry: its name (as the file writes it) and its value (a FIELD's the byte the row
-// holds, a VAR's the word).
+// A FIELD or a VAR line's entry: its id in its name table (field_names / var_names: the row holds the id, and the
+// writer puts down the table's name of it [orig: ScoreConfig_SaveFile @ 0x52CFC0..0x52CFF5, @ 0x52D030..0x52D06B])
+// and its value (a FIELD's the byte the row holds, a VAR's the word).
 struct Entry {
-	std::string name;
+	int32_t id = 0;
 	int32_t value = 0;
 };
 
-// One `GAMETYPE "NAME"` block: its FIELD entries in the file's order (two of a name both kept: the reader
-// appends each), its VAR values (one per name, the last line's: the reader writes the word again).
+// One `GAMETYPE "NAME"` block: the row its name selects (0..11, game_type_row; the writer puts down the row's own
+// name [orig: @ 0x52CF81]), its FIELD entries in the file's order (two of an id both kept: the reader appends
+// each, up to the row's 34), its VAR values (one per id, the last line's: the reader writes the word again).
 struct GameTypeBlock {
-	std::string name;
-	std::vector<Entry> fields; // FIELD statements, authored order
-	std::vector<Entry> vars;   // VAR statements, authored order (one per name)
+	int row = 2;
+	std::vector<Entry> fields; // the row's FIELD list, in order
+	std::vector<Entry> vars;   // one per id
 };
 
 struct File {
@@ -115,9 +119,11 @@ struct Name {
 };
 const std::vector<Name> &field_names();
 const std::vector<Name> &var_names();
-// A name's id in its table, -1 for none.
+// A name's id in its table, -1 for none; an id's name in its table, null for none.
 int32_t field_id(std::string_view name);
 int32_t var_id(std::string_view name);
+const char *field_name(int32_t id);
+const char *var_name(int32_t id);
 // The game types' rows' names, by row index [orig: GameType_CreateDefaultSettings @ 0x52DD00]: TDM 1, COOP
 // 2, ... DM 11; row 0 has none the writer puts down.
 const std::vector<std::string> &game_type_names();
@@ -129,21 +135,25 @@ int game_type_row(std::string_view name);
 bool exp_fanfare_kept(const File &file);
 
 // The file as ScoreConfig_LoadFile reads it (the lines and tokens above): VERSION the file's (0 for none); at
-// version 40 every GAMETYPE line a block, its FIELD and VAR lines whose name the tables have its entries, the
-// pair its EXP_FANFARE lines store; every other line read for nothing, and at any other version every line but
-// VERSION (no block, the defaults' fanfare: the game reads none of the file and writes its defaults over it). Never fails on a text (the game reads any); false only for no data.
+// version 40 every GAMETYPE line of a row's name a block, its FIELD lines whose name the table has its entries
+// up to the row's 34 [orig: sub_52CD70 @ 0x52CD81, `count >= 34` refuses] and its VAR lines', the pair its
+// EXP_FANFARE lines store; every other line read for nothing, and at any other version every line but VERSION
+// (no block, the defaults' fanfare: the game reads none of the file and writes its defaults over it). Never
+// fails on a text (the game reads any); false only for no data.
 bool parse(const uint8_t *data, size_t size, File &out, std::string &error);
 
 // The file's text as ScoreConfig_SaveFile @ 0x52CDD0 writes it, from the model alone (ADR 0003): its header,
 // `VERSION 40` (the model's version: a File's own is the game's 40, a file read at another keeps it),
-// `EXP_FANFARE a b`, the FIELD names in a comment block, then each block after two blank lines, its FIELD lines
-// in the document's order and, after a blank one, its VAR lines in the VAR table's order, each line ending CR LF
-// (File_WriteLineToHandle @ 0x437010). A block of more than 34 FIELD lines is written whole: the reader drops the
-// lines past its row's 34 (sub_52CD70 @ 0x52CD70), which a file may hold. False with the reason for a block or an
-// entry no line of the reader's reads (a name the tables lack, a name holding a quote).
+// `EXP_FANFARE a b`, the FIELD names in a comment block, then each block after two blank lines, its row's name,
+// its FIELD lines in the model's order and, after a blank one, its VAR lines in the VAR table's order, each name
+// the table's of its id and each line ending CR LF (File_WriteLineToHandle @ 0x437010). The text read again is
+// the model (parse, equal); false with the reason, nothing written, for a model it would not be: a row or an id
+// the tables lack, more FIELD entries than a row's 34, two VAR entries of an id, a fanfare pair other than the
+// defaults' 0 0 the reader's gate refuses (exp_fanfare_kept), blocks or a pair at a version other than 40 (the
+// reader takes none of them).
 bool write(const File &file, std::vector<uint8_t> &out, std::string &error);
 
-// Value lookups by NAME, without case.
+// Value lookups by an entry's name, without case (its table's id).
 const GameTypeBlock *block_at(const File &file, int row);
 int32_t var_value(const GameTypeBlock &block, std::string_view name, int32_t fallback);
 int32_t field_value(const GameTypeBlock &block, std::string_view name, int32_t fallback);
