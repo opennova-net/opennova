@@ -238,7 +238,17 @@
   `std::random_device` left in `engine/`
   is the narrow exception: the CBIN writer's fresh XOR key (`formats/cbin`, a credits
   file with no preserved key) is written in the clear in the file's own header, so it
-  only obfuscates and is neither a secret nor an id, and formats cannot link base. Do
+  only obfuscates and is neither a secret nor an id, and formats cannot link base. The
+  second named exception is the game protocol's wire-parity values, which retail derives
+  from the NAPI manager's 16-bit LCG or the protocol's connection counter: the host key
+  (HK), each connection's SK / CK and SCRK, and the CI (`net/npwire/nw_session_framing.h`:
+  `manager_session_key`, `manager_connection_keys`, `next_connection_index`; D-NET-524,
+  D-NET-521). They stay on the LCG and the counter by the maintainer's decision of
+  2026-10-14 ("retail LCG everywhere"), predictable as retail's are (net-re §8, D-NET-524
+  records the cost): never move them back to the CSPRNG. Everything else stays on
+  `os_random`: the NovaWorld service's values (HOSTKEY, the service's SK / SCRK, cookies,
+  salts, tags and ids) and the NovaWorld lobby client's (its CI, CK and SCRK; D-NET-704
+  tracks retail's LCG there and waits on the maintainer). Do
   not hand-roll a new byte reader; migrate existing per-lib copies on-touch
   (delegate the body, keep the local signature, gated on that lib's byte-exact roundtrip tests).
   The 16.16 / 2.14 scales are `io/fixed.h`'s `kFp16One` (float), `kFp16OneD`

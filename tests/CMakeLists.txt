@@ -78,11 +78,11 @@ add_test(NAME os_random COMMAND os_random_test)
 # The child-process seam (base/proc): a child from an argv array with no shell, run
 # against the test binary itself (its path is the argument; `--child <mode>` makes it
 # the child): exit codes (unsigned on Windows), every argument whole, the working
-# directory, stdin and the output file, terminate and kill, the refusals, the
-# environment, the identity and process_liveness, release (past the starter's
-# kill-on-close job), on Windows the polite stop of a window child started behind and
-# the paths past MAX_PATH, and on POSIX the released child's own session and no
-# inherited descriptor.
+# directory, stdin, the output file and the error file, terminate and kill, the
+# refusals, the environment, the identity and process_liveness, release (past the
+# starter's kill-on-close job), on Windows the polite stop of a window child started
+# behind and the paths past MAX_PATH, and on POSIX the released child's own session
+# and no inherited descriptor.
 add_executable(child_process_test proc/child_process_test.cpp)
 target_link_libraries(child_process_test PRIVATE opennova_base)
 if(WIN32)
@@ -667,20 +667,13 @@ target_link_libraries(score_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(score_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(score_roundtrip COMMAND score_roundtrip_test)
 
-# The modeled layout of a line-oriented text file (formats/textlayout): a line's parts, a file generated
-# over its notes (a value, a set, a key anew, records swapped, gone and added), the writer's form without.
-add_executable(text_layout_test textlayout/text_layout_test.cpp)
-target_link_libraries(text_layout_test PRIVATE opennova_formats)
-target_include_directories(text_layout_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME text_layout COMMAND text_layout_test)
-
-# The AI profiles' writer over the file's modeled layout (formats/aip, textlayout): a minted profile in
-# the writer's form, an authored file written again as it was, one value one line; --retail: every
-# shipped profile byte for byte.
-add_executable(aip_noted_test aip/aip_noted_test.cpp)
-target_link_libraries(aip_noted_test PRIVATE opennova_base opennova_formats)
-target_include_directories(aip_noted_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(aip_noted COMMAND aip_noted_test)
+# The AI profiles' writer (formats/aip): a minted profile in the writer's form byte for byte, written and
+# read again the same profile, each unit's shortest word; --retail: every shipped profile written from its
+# model reads back as that model.
+add_executable(aip_write_test aip/aip_write_test.cpp)
+target_link_libraries(aip_write_test PRIVATE opennova_base opennova_formats)
+target_include_directories(aip_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(aip_write COMMAND aip_write_test)
 
 # game.cfg: the minted fixtures/gamecfg/synth_game.cfg (Game_SaveConfig's
 # layout through gamecfg::write), its byte-exact load/write round trip, and the
@@ -4644,6 +4637,15 @@ target_link_libraries(npruntime_server_status_feed_test PRIVATE opennova_net ope
 target_include_directories(npruntime_server_status_feed_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_server_status_feed COMMAND npruntime_server_status_feed_test)
 
+# The NovaWorld listing's columns off the live session (inmatch/server_info.h, D-NET-373):
+# the server name and message, the game type's text, the mission's title and climate, the
+# published cap, the join lock, the skins and tracers rules, the password and the round clock;
+# the join lock's toggle and its update at once (D-NET-659).
+add_executable(npruntime_server_info_test npruntime/server_info_test.cpp)
+target_link_libraries(npruntime_server_info_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_server_info_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_server_info COMMAND npruntime_server_info_test)
+
 # The /PROFILE server log (inmatch/server_log_recorder.h, net/npwire/serverlog_encode.h,
 # formats/sph): the record writers against the decoder, a synthetic session recorded to
 # memory and decoded back, and the file name rule with its numbered rotation.
@@ -4658,6 +4660,21 @@ add_executable(npruntime_punt_log_test npruntime/punt_log_test.cpp)
 target_link_libraries(npruntime_punt_log_test PRIVATE opennova_runtime)
 target_include_directories(npruntime_punt_log_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME npruntime_punt_log COMMAND npruntime_punt_log_test)
+
+# The console's headless arms (inmatch/server_console.h): the net log _NETLOG.TXT (its lines,
+# the flush, the truncating first open), the NETLOG / STAT handler, the authority's C2S 0x04
+# and its S2C 0x06 echo, and SAVENFO's debug.nfo text (D-NET-371).
+add_executable(npruntime_net_log_test npruntime/net_log_test.cpp)
+target_link_libraries(npruntime_net_log_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_net_log_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_net_log COMMAND npruntime_net_log_test)
+
+# The chat display buffer of a host with no client (inmatch/server_console.h): the wrap at the
+# 4-unit chat box over a synthetic font, the slots, the timers and CHAT GET's walk (D-NET-372).
+add_executable(npruntime_chat_display_test npruntime/chat_display_test.cpp)
+target_link_libraries(npruntime_chat_display_test PRIVATE opennova_net opennova_runtime)
+target_include_directories(npruntime_chat_display_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME npruntime_chat_display COMMAND npruntime_chat_display_test)
 add_executable(npruntime_squad_relay_test npruntime/squad_relay_test.cpp)
 target_link_libraries(npruntime_squad_relay_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(npruntime_squad_relay_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
@@ -4761,7 +4778,7 @@ set_tests_properties(opennova_serve_server_command_push PROPERTIES RUN_SERIAL TR
 # opennova-serve's remote-admin server (ADR 0051 PR5b) over real loopback TCP, with a LAN joiner
 # in a synthetic two-map rotation: the login, PLAYER LIST, the MISSION verbs (ADD ONESHOT at a
 # position, SETNEXT, CYCLE, the one-shot's removal), SET and game.cfg's save, CHAT SEND as S2C
-# 0x14, PLAYER BAN on a LAN host, opennova-nw-lister's admin feed, QUIT, and the working
+# 0x14, PLAYER BAN on a LAN host, a second session beside the first, QUIT, and the working
 # directory's admin.cfg, admin_log.txt and banned.txt. No retail data.
 add_executable(opennova_serve_admin_test serve/opennova_serve_admin_test.cpp)
 target_link_libraries(opennova_serve_admin_test PRIVATE opennova_serve_core)
@@ -4776,7 +4793,12 @@ add_test(NAME serve_registration_parity COMMAND serve_registration_parity_test)
 add_executable(nwu_demux_test novaworld/nwu_demux_test.cpp)
 target_link_libraries(nwu_demux_test PRIVATE opennova_net)
 add_test(NAME nwu_demux COMMAND nwu_demux_test)
-# The NWU lobby driver's own draws (no Environment::random_u32, as opennova-nw-lister runs):
+# The first NovaWorld connect's give-ups (D-NET-571): the NWU lobby driver's poll over its
+# session, each give-up's stopped probe and its NWEC.
+add_executable(nwu_lobby_connect_test novaworld/nwu_lobby_connect_test.cpp)
+target_link_libraries(nwu_lobby_connect_test PRIVATE opennova_net)
+add_test(NAME nwu_lobby_connect COMMAND nwu_lobby_connect_test)
+# The NWU lobby driver's own draws (no Environment::random_u32, as opennova-serve's lister runs):
 # 32 sessions opened on 32 threads at once share no client index or key.
 add_executable(nwu_lobby_draws_test novaworld/nwu_lobby_draws_test.cpp)
 target_link_libraries(nwu_lobby_draws_test PRIVATE opennova_net Threads::Threads)
@@ -4790,31 +4812,22 @@ target_link_libraries(opennova_serve_status_console_test PRIVATE opennova_serve_
 target_include_directories(opennova_serve_status_console_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME opennova_serve_status_console COMMAND opennova_serve_status_console_test)
 
-# opennova-nw-lister (apps/nw_lister): the listing JSON + credentials readers; then the app's Lister end to
-# end over real loopback UDP against the real NwUdpListener and an in-test gate (the row, a roster
-# edit keeping the other slot, the refresh, the stop).
-add_executable(novaworld_nw_lister_listing_test novaworld/nw_lister_listing_test.cpp)
-target_link_libraries(novaworld_nw_lister_listing_test PRIVATE opennova_nw_lister_core)
-add_test(NAME novaworld_nw_lister_listing COMMAND novaworld_nw_lister_listing_test)
-add_executable(nw_lister_e2e_test
-    novaworld/nw_lister_e2e_test.cpp
+# opennova-serve's NovaWorld listing driver (apps/serve/lister.h): its inputs (the destination
+# policy: loopback and any host off NovaLogic's domain, novaworld.net behind --allow-public, ADR
+# 0051 d6; the --credentials reader); then the Lister end to end over real loopback UDP against
+# the real NwUdpListener and an in-test gate (the host result publishing nothing, the mission
+# start's update, a roster edit keeping the other slot, the refresh, the stop).
+add_executable(opennova_serve_lister_options_test serve/opennova_serve_lister_options_test.cpp)
+target_link_libraries(opennova_serve_lister_options_test PRIVATE opennova_serve_core)
+add_test(NAME opennova_serve_lister_options COMMAND opennova_serve_lister_options_test)
+add_executable(opennova_serve_lister_e2e_test
+    serve/opennova_serve_lister_e2e_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/nw_udp_listener.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
-target_link_libraries(nw_lister_e2e_test
-    PRIVATE opennova_nw_lister_core opennova_novaworld_service opennova_runtime)
-target_include_directories(nw_lister_e2e_test PRIVATE ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
-add_test(NAME nw_lister_e2e COMMAND nw_lister_e2e_test)
-set_tests_properties(nw_lister_e2e PROPERTIES RUN_SERIAL TRUE)
-# The --admin poll thread against the engine's remote-admin server over loopback TCP (the login it
-# decrypts, the three commands, the QUIT).
-add_executable(nw_lister_admin_feed_test novaworld/nw_lister_admin_feed_test.cpp)
-target_link_libraries(nw_lister_admin_feed_test PRIVATE opennova_nw_lister_core)
-add_test(NAME nw_lister_admin_feed COMMAND nw_lister_admin_feed_test)
-# The destination policies: nw-lister's loopback-only, and opennova-serve's loopback and any host
-# off NovaLogic's domain, novaworld.net behind --allow-public (ADR 0051 d6).
-add_executable(nw_lister_destination_policy_test novaworld/nw_lister_destination_policy_test.cpp)
-target_link_libraries(nw_lister_destination_policy_test PRIVATE opennova_nw_lister_core)
-add_test(NAME nw_lister_destination_policy COMMAND nw_lister_destination_policy_test)
+target_link_libraries(opennova_serve_lister_e2e_test PRIVATE opennova_serve_core opennova_novaworld_service)
+target_include_directories(opennova_serve_lister_e2e_test PRIVATE ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+add_test(NAME opennova_serve_lister_e2e COMMAND opennova_serve_lister_e2e_test)
+set_tests_properties(opennova_serve_lister_e2e PROPERTIES RUN_SERIAL TRUE)
 
 # P5 — the headless CLIENT runtime (inmatch::ClientRuntime / Client_ProcessNetworkFrame). Always-on
 # in-process round-trip (client_runtime <-> np server legs <-> Server_TickUpdate + apply_in_match_c2s)
@@ -5064,10 +5077,13 @@ target_link_libraries(def_write_hudpos_test PRIVATE opennova_base opennova_forma
 target_include_directories(def_write_hudpos_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(def_write_hudpos COMMAND def_write_hudpos_test)
 
-add_executable(def_noted_write_test def/def_noted_write_test.cpp)
-target_link_libraries(def_noted_write_test PRIVATE opennova_base opennova_formats)
-target_include_directories(def_noted_write_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(def_noted_write COMMAND def_noted_write_test)
+# The def writers' own form (formats/def): a minted record byte for byte and read back as itself, the
+# writer's reals the shortest that read back; --retail: every catalog written from its model reads back as
+# that model, one field changed changes one line, and its reals are the shortest.
+add_executable(def_write_form_test def/def_write_form_test.cpp)
+target_link_libraries(def_write_form_test PRIVATE opennova_base opennova_formats)
+target_include_directories(def_write_form_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(def_write_form COMMAND def_write_form_test)
 
 # The capture-point labels: the map-overlay slot walk and the marker types 8/9.
 add_executable(hud_capture_labels_test hud/hud_capture_labels_test.cpp)
