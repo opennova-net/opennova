@@ -285,6 +285,10 @@ void ProjectSession::wait_for_bakes() {
 	impl_->sculpt.wait_idle();
 }
 
+void ProjectSession::hold_bakes_for_test(BakeTestHold *hold) {
+	impl_->sculpt.hold_for_test(hold);
+}
+
 uint64_t ProjectSession::start_operation(std::unique_ptr<SessionOperation> operation) {
 	return impl_->core.start_operation(std::move(operation));
 }

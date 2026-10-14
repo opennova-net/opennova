@@ -21,6 +21,7 @@ class OriginalFiles;
 class PreferencesStore;
 class SessionOperation;
 class Viewports;
+struct BakeTestHold;
 struct PollBudget;
 struct SessionView;
 struct ValidationStats;
@@ -115,6 +116,9 @@ public:
 	// The terrain sculpt's worker waited on until it holds no bake, queued or running (a test's, a command line's
 	// wait; TerrainSculpt::wait_idle): what it finished lands at the next poll, which starts the next one due.
 	void wait_for_bakes();
+	// A test's hold on that worker (test-only; TerrainSculpt::hold_for_test): a bake it takes waits before it runs
+	// until the hold is let go (null) or the session closes.
+	void hold_bakes_for_test(BakeTestHold *hold);
 	// `operation` started in the slot as a request starts one: its id, 0 while another runs (a
 	// test's, for an operation no request starts yet: one that cannot be cancelled, one that
 	// reads or writes what a build does not).

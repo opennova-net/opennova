@@ -19,6 +19,13 @@ namespace opennova::editor {
 
 class SessionCore;
 
+// A test's hold on the terrain sculpt's worker (TerrainSculpt::hold_for_test; test-only: neither the Shell nor a command
+// line sets one). The test owns it, so what came of the job it held reads after the session is gone: how many of the
+// jobs that ran while it was set came back cancelled.
+struct BakeTestHold {
+	size_t cancelled = 0;
+};
+
 // The terrain sculpt's baker (ADR 0046 S25, the heights lane): the session's own thread that bakes the heights a
 // stroke changed with the TrnGen port's region bake (formats/cpt/trngen/terrain_region_bake.h), so that every tile
 // the stroke did not reach keeps its bytes and the remade ones are the bytes a whole bake of the sculpted input makes.
@@ -54,8 +61,13 @@ public:
 	// fails (its regions stay due).
 	bool settle(const std::string &path, std::string &error, std::vector<std::string> *followed = nullptr);
 	// The worker waited on until it holds no job, queued or running (a test's, a command line's wait): what it finished
-	// lands at the next poll, which starts the next one due. Unlike settle, it lands nothing and starts nothing.
+	// lands at the next poll, which starts the next one due. Unlike settle, it lands nothing and starts nothing. A job a
+	// test holds counts as none (the worker has it, its bake not begun).
 	void wait_idle();
+	// A test's hold (test-only): while `hold` is set, a job the worker takes waits there before its bake runs, until the
+	// hold is let go (null) or the session closes, whose cancel the bake then meets at its first node; each job that
+	// came back cancelled while it was set is counted in it.
+	void hold_for_test(BakeTestHold *hold);
 	// Whether a bake runs or is due for `path`, and its words for the pane's bake line ("" none).
 	std::string bake_words(const std::string &path) const;
 	// The bakes made since the session started (a test's count), and the bakes started (each lands, fails or is
@@ -110,6 +122,8 @@ private:
 	std::string running_path_;
 	bool running_seed_ = false; // the job running is a seed (no stroke stops it; closing the session does)
 	size_t landed_ = 0, started_ = 0;
+	BakeTestHold *test_hold_ = nullptr; // hold_for_test's
+	bool held_ = false;                 // the worker holds its job for it
 	// The seeds made: each file's bake state from the input its tiles were made from (a .cpt's atlas, an image's
 	// heights as read), its texels' hash and the locks it was baked under, the last few files' within a byte budget;
 	// an image's with the whole .cpt its bake made (what its first landing lays under the strokes' regions).

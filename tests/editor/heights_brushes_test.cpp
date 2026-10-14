@@ -14,16 +14,15 @@
 #include <editor/session/project_session.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/terrain_heights_plan.h>
+#include <editor/session/terrain_sculpt.h>
 #include <editor/session/view/session_view.h>
 #include <formats/cpt/cpt_io.h>
 #include <formats/png/png_encode.h>
 
-#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <memory>
 #include <string>
-#include <thread>
 #include <vector>
 
 #include "common/file_io.h"
@@ -335,8 +334,8 @@ struct SeedRig {
 		cpt = v.project.scan->find("Tmap.cpt")->relative_path;
 		session.handle(request::open_document(m));
 	}
-	// One sample of a Raise in the mission's view; seconds it took to serve.
-	double sample(double x, double y, bool end) {
+	// One sample of a Raise in the mission's view.
+	void sample(double x, double y, bool end) {
 		TerrainStrokeAsk ask;
 		ask.plane = TerrainPlane::Heights;
 		ask.brush.tool = TerrainTool::Raise;
@@ -346,9 +345,7 @@ struct SeedRig {
 		ask.points = {{x, y}};
 		ask.gesture = 9191;
 		ask.end = end;
-		const auto start = std::chrono::steady_clock::now();
 		session.handle(request::terrain_stroke(m, ask));
-		return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
 	}
 	const TerrainHeightsDocument *heights() {
 		for (const auto &document : session.view().documents.open)
@@ -359,21 +356,24 @@ struct SeedRig {
 
 // The seed (the first bake's state) made in the background as Sculpt is picked over the mission's terrain, before
 // its heights file opens: a stroke started while it runs is served at once, its bake landing after it, the same
-// bytes a stroke whose seed is made at its end lands.
+// bytes a stroke whose seed is made at its end lands. The seed is held on the worker (a test's hold) while the strokes
+// are served: each is served with the seed still the worker's and not begun (a stroke that waited for it would never
+// return), its regions left due for the bake after it.
 int test_seed() {
+	BakeTestHold hold;
 	SeedRig early("opennova_editor_heights_seed_early");
+	early.session.hold_bakes_for_test(&hold);
 	early.session.handle(request::set_workspace(R"({"terrain_brush": {"tool": "raise"}})"));
 	early.session.poll();
 	const SessionView &v = early.session.view();
 	TEST_EXPECT(v.documents.preparing == early.cpt);
-	const bool seeding = !v.documents.preparing.empty();
-	double slowest = early.sample(-200.0, 200.0, false);
-	slowest = std::max(slowest, early.sample(-196.0, 200.0, false));
-	slowest = std::max(slowest, early.sample(-192.0, 200.0, true));
+	early.session.wait_for_bakes(); // the worker holds the seed
+	early.sample(-200.0, 200.0, false);
+	early.sample(-196.0, 200.0, false);
+	early.sample(-192.0, 200.0, true);
 	TEST_EXPECT(early.session.outcome().done() && early.heights() && early.heights()->dirty());
-	TEST_EXPECT(slowest < 1.0);
-	std::printf("  seed: the strokes served in at most %.3f s, the seed %s\n", slowest,
-	            seeding && !v.documents.preparing.empty() ? "still running" : "done");
+	TEST_EXPECT(v.documents.preparing == early.cpt && early.heights() && !early.heights()->heights().unbaked.empty());
+	early.session.hold_bakes_for_test(nullptr);
 	TEST_EXPECT(editor_test::heights_settled(early.session, early.cpt));
 
 	// The same strokes with no seed made ahead (the file's seed made as the stroke ends).
@@ -387,19 +387,21 @@ int test_seed() {
 	return 0;
 }
 
-// The session closed while a seed runs (the project or the editor closed as Sculpt is picked): the seed stops at its
-// next node, so the close does not wait out the bake of the whole file.
+// The session closed while a seed runs (the project or the editor closed as Sculpt is picked): the close cancels it
+// and the seed stops at its next node (the bake's cancel between nodes: tests/cpt/trngen_region_bake_test), so the
+// close does not wait out the bake of the whole file. The seed is held on the worker until the close (a test's hold):
+// the worker's when the session goes, its bake begun under the close's cancel, it comes back cancelled.
 int test_close_during_seed() {
+	BakeTestHold hold;
 	auto rig = std::make_unique<SeedRig>("opennova_editor_heights_seed_close");
+	rig->session.hold_bakes_for_test(&hold);
 	rig->session.handle(request::set_workspace(R"({"terrain_brush": {"tool": "raise"}})"));
 	rig->session.poll();
 	TEST_EXPECT(rig->session.view().documents.preparing == rig->cpt);
-	std::this_thread::sleep_for(std::chrono::milliseconds(50));
-	const auto start = std::chrono::steady_clock::now();
+	rig->session.wait_for_bakes(); // the worker holds the seed
 	rig.reset();
-	const double took = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-	TEST_EXPECT(took < 1.5); // left to run, Tmap's seed takes some 4.5 s more (Release)
-	std::printf("close: the session closed in %.3f s during its seed, the seed stopped\n", took);
+	TEST_EXPECT(hold.cancelled == 1);
+	std::printf("close: the session closed during its seed, the seed came back cancelled\n");
 	return 0;
 }
 
