@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Package the native apps under apps/ for Windows: build every app (Release)
-# and zip the executables flat, with the NovaWorld server's migrations and seed,
-# opennova-nw-lister's example listing and opennova-serve's example host file
-# beside them and a README.txt naming each tool.
+# and zip the executables flat, with the NovaWorld server's migrations and seed
+# and opennova-serve's example host file beside them and a README.txt naming
+# each tool.
 #
 #   scripts/package_apps.sh [out.zip]
 #
@@ -15,7 +15,7 @@ build="$root/build/apps-package"
 
 # The apps/ directory of each shipped executable. An app in apps/<dir> builds
 # target opennova_<dir> as opennova-<dir, kebab-cased> (DEVELOPING.md).
-apps=(3di extract lan_probe novaworld_server nw_lister parity serve wire)
+apps=(3di extract lan_probe novaworld_server parity serve wire)
 
 # The static MSVC runtime keeps the zip free of a VC++ runtime install, and a
 # separate build tree keeps it apart from development builds. No app links the
@@ -69,13 +69,6 @@ opennova-novaworld-server.exe
     environment variables, listed in apps/novaworld_server/README.md in the
     repository.
 
-opennova-nw-lister.exe
-    Lists one server on a NovaWorld master without running the game: the
-    name, map, players and settings come from a JSON file it re-reads
-    (listing.example.json), or from the game server's remote-admin port
-    with --admin. Stopping it removes the row. It sends to 127.0.0.0/8
-    only unless given --allow-public.
-
 opennova-parity.exe
     The retail-LAN parity verdict: compares the run folders of one parity
     case (retail against retail twice, then OpenNova as client, host or
@@ -101,7 +94,6 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
     z.writestr("README.txt", readme.replace("\n", "\r\n"))
     for exe in exes:
         z.write(exe, os.path.basename(exe))
-    z.write(os.path.join(root, "apps", "nw_lister", "listing.example.json"), "listing.example.json")
     z.write(os.path.join(root, "apps", "serve", "example.host"), "example.host")
     for sub in ("migrations", "seed"):
         src = os.path.join(root, "backend", sub)

@@ -68,10 +68,9 @@ public:
 	// CNapiNPConnection_TeardownActiveConnection @0x6253C0 -> SendDisconnectPacket @0x61F2A0]
 	void disconnect();
 	// The mission start's server-info update: the source's columns and roster at once, then both
-	// lists in full (NwuHostRole::publish_mission_start). An embedder whose source starts missions
-	// runs it at each one; for a source without missions the lister runs it at its host result
-	// and the update again at each mission change the source shows it
-	// (ListingSource::starts_missions, D-NET-488). Nothing while not hosting.
+	// lists in full (NwuHostRole::publish_mission_start). The embedder runs it at each mission
+	// start; the host result publishes nothing (D-NET-465). Nothing while not hosting.
+	// [orig: Game_StartMission @0x5248c6..0x524903]
 	void publish_server_info();
 
 	int exit_code() const { return exit_code_; }
