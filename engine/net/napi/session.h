@@ -44,7 +44,20 @@ enum class SessionState : int {
 // (0x4E20) value is the SEPARATE periodic-update background timeout [orig: ProcessPeriodicUpdate
 // @0x4d4400] — kept below as its own named constant (the old 20000 here mis-cited the connect poll).
 constexpr uint32_t SESSION_CONNECT_TIMEOUT_MS = 60000u;          // 0xEA60 — ConnectOrHost poll
+// The periodic update's give-up: a first connect (the hosting/playing word 0) still in state 1
+// this long after the state's entry stamp is aborted (NwuLobbySession).
+// [orig: CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - the word and state tests
+//  @0x4D4483..0x4D4499, the compare @0x4D44A3 against the stamp CGameSession_SetState
+//  @0x4CE140 stores @0x4CE1D5]
 constexpr uint32_t SESSION_PERIODIC_UPDATE_TIMEOUT_MS = 20000u;  // 0x4E20 — ProcessPeriodicUpdate
+// The first connect's two polls: the connect poll gives up this long after the connect's stamp,
+// the verify poll this long after the validation wait's re-stamp.
+// [orig: CNapiGameSession_PollConnectPhase1 @0x4D4C30 - the 0x7530 compare @0x4D4C6A against
+//  the stamp CNapiGameSession_ConnectToNovaWorld @0x4D4640 stores @0x4D4BD5;
+//  CNapiGameSession_PollConnectPhase2 @0x4D4D70 - the 0x4E20 compare @0x4D4DB1 against the
+//  re-stamp CGameSession_WaitForNWUValidation @0x4D0F20 stores @0x4D120C]
+constexpr uint32_t SESSION_CONNECT_POLL_TIMEOUT_MS = 30000u; // 0x7530
+constexpr uint32_t SESSION_CONNECT_VERIFY_TIMEOUT_MS = 20000u; // 0x4E20
 // The per-session HostSetup/Host "AppId": (GetTickCount() + rand()) % 0x2328 + 1000, minted once
 // per host registration. It is NOT a timeout (the old SESSION_TIMEOUT_RANDOM_* name misread the
 // function): its only readers are the two var-list builders, the server status screen, the
@@ -171,6 +184,14 @@ std::string novaworld_host_error_tag(int msg_code);
 // [orig: UI_ProcessLANSessionStateMachine @0x558de0 — state 1 switch @0x558ec6..0x55901b,
 //  state 3 switch @0x5590c5..0x559109]
 std::string novaworld_gate_error_tag(int gate_result, bool response_phase);
+// The NovaWorld connect's error dialog over the connect legs' codes: a code from -23 to -1 shows
+// NWEC(25 - code) (-15 the connect poll's timeout NWEC40, -17 the state-1 give-up NWEC42, -18 a
+// connection down NWEC43, -20 a session not connecting NWEC45, -21 the verify poll's timeout
+// NWEC46, -23 a session not up NWEC48), anything else NWEC17.
+// [orig: UI_ShowNovaWorldConnectError @0x5584A0 - the bias `add eax, 17h` @0x5584A4, the
+//  23-entry jump table @0x5586F8 (code -23 -> NWEC48 @0x5586C7 .. code -1 -> NWEC26 @0x5584B7),
+//  the default NWEC17 @0x5586DF; called by UI_ProcessLANSessionStateMachine @0x558DE0 @0x559160]
+std::string novaworld_connect_error_tag(int code);
 
 // The error-display fallback: a null or empty tag shows the "CVUNKNOWN" menutxt entry.
 // [orig: sub_5583E0 @0x5583e0]

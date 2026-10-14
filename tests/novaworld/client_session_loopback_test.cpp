@@ -868,15 +868,84 @@ void test_client_correlates_handshake_echoes() {
 	               out.size() == 1 && server_decode_inbound(out[0], opcode, body) &&
 	               parse_client_auth(body.data(), body.size(), rejected_auth),
 	       "reject leg reaches Auth");
+	// D-NET-453: a CR 0 0x82 keeps JFC (1 when absent), JFP and JFS on the connection and drops
+	// it to its down state with no teardown: no error, no reply, no RCNT read.
+	// [orig: NapiNP_HandleServerJoinResponse @0x629840 - @0x629CD8..0x629CF6, the store
+	//  @0x629F95; RCNT only on accept @0x629E2E]
 	ServerAuth bare_reject = build_server_auth(rejected_auth, 0x7F000001u, 5000, 0, "");
 	bare_reject.cr = 0;
+	bare_reject.rcnt = 7;
 	const std::vector<uint8_t> bare_reject_datagram = server_encode_outbound(
 			SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(bare_reject));
 	out.clear();
-	expect(!rejected.handle_datagram(bare_reject_datagram.data(), bare_reject_datagram.size(), out) &&
-	               rejected.state() == ClientSession::State::Error &&
-	               rejected.last_error() == "ServerAuth rejected (cr=0)",
-	       "lobby ServerAuth with CR 0 and no JFC, JFP or JFS rejects");
+	expect(rejected.handle_datagram(
+				   bare_reject_datagram.data(), bare_reject_datagram.size(), out) &&
+					out.empty() && rejected.state() == ClientSession::State::Closed &&
+					rejected.connection_down() && !rejected.disconnected_by_peer() &&
+					rejected.last_error().empty(),
+			"lobby ServerAuth with CR 0 drops the connection to its down state, no error");
+	expect(rejected.join_fail_code() == 1 && rejected.join_fail_param() == 0 &&
+					rejected.join_fail_string().empty(),
+			"a CR 0 0x82 without JFC, JFP or JFS keeps JFC 1, JFP 0 and no JFS");
+	expect(rejected.reconnect_count() == 0, "a rejecting 0x82's RCNT is not read");
+
+	ClientSession detailed(cfg);
+	const std::vector<uint8_t> detailed_hello = detailed.start();
+	ClientHello detailed_client_hello;
+	expect(server_decode_inbound(detailed_hello, opcode, body) &&
+					parse_client_hello(body.data(), body.size(), detailed_client_hello),
+			"detailed reject parses lobby ClientHello");
+	const std::vector<uint8_t> detailed_server_hello = server_encode_outbound(
+			SESSION_OPCODE_SERVER_HELLO,
+			server_hello_to_bytes(build_server_hello(detailed_client_hello, 0x7F000001u, 5000)));
+	out.clear();
+	ClientAuth detailed_auth;
+	expect(detailed.handle_datagram(
+				   detailed_server_hello.data(), detailed_server_hello.size(), out) &&
+					out.size() == 1 && server_decode_inbound(out[0], opcode, body) &&
+					parse_client_auth(body.data(), body.size(), detailed_auth),
+			"detailed reject reaches Auth");
+	ServerAuth full = build_server_auth(detailed_auth, 0x7F000001u, 5000, 0, "");
+	full.cr = 0;
+	full.jfc = 14;
+	full.jfp = 4;
+	full.jfs = std::string(80, 'J');
+	const std::vector<uint8_t> full_datagram =
+			server_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(full));
+	out.clear();
+	expect(detailed.handle_datagram(full_datagram.data(), full_datagram.size(), out) &&
+					detailed.state() == ClientSession::State::Closed &&
+					detailed.join_fail_code() == 14 && detailed.join_fail_param() == 4 &&
+					detailed.join_fail_string() == std::string(63, 'J'),
+			"a CR 0 0x82 keeps its JFC and JFP, and its JFS to 63 characters");
+
+	// The accepting 0x82's RCNT is the one kept. [orig: @0x629E2E]
+	ClientSession accepting(cfg);
+	const std::vector<uint8_t> accepting_hello = accepting.start();
+	ClientHello accepting_client_hello;
+	expect(server_decode_inbound(accepting_hello, opcode, body) &&
+					parse_client_hello(body.data(), body.size(), accepting_client_hello),
+			"accept parses lobby ClientHello");
+	const std::vector<uint8_t> accepting_server_hello = server_encode_outbound(
+			SESSION_OPCODE_SERVER_HELLO,
+			server_hello_to_bytes(build_server_hello(accepting_client_hello, 0x7F000001u, 5000)));
+	out.clear();
+	ClientAuth accepting_auth;
+	expect(accepting.handle_datagram(
+				   accepting_server_hello.data(), accepting_server_hello.size(), out) &&
+					out.size() == 1 && server_decode_inbound(out[0], opcode, body) &&
+					parse_client_auth(body.data(), body.size(), accepting_auth),
+			"accept reaches Auth");
+	ServerAuth counted =
+			build_server_auth(accepting_auth, 0x7F000001u, 5000, 0x1234u, "ACCEPTSCRK");
+	counted.rcnt = 5;
+	const std::vector<uint8_t> counted_datagram =
+			server_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(counted));
+	out.clear();
+	expect(accepting.handle_datagram(counted_datagram.data(), counted_datagram.size(), out) &&
+					accepting.state() == ClientSession::State::Verifying &&
+					accepting.reconnect_count() == 5 && !accepting.connection_down(),
+			"an accepting 0x82's RCNT is kept");
 }
 
 // A flat-TLV body with every field named `unwanted` left out, the rest as written.
@@ -1477,8 +1546,82 @@ void test_reconnect_join_timeout() {
 	expect(resends.size() == 6 && resends[0] == probe_at + 3001 && resends[5] == probe_at + 6 * 3001,
 	       "join timeout: the 0x42 re-sends every > 3000 ms");
 	expect(closed_at == probe_at + 20001, "join timeout: the leg gives up past 20000 ms");
+	// D-NET-453: the give-up keeps JFC 2, JFP 0 and an empty JFS on the down connection.
+	// [orig: CNapiNPConnection_PumpStateMachine @0x6292E0 - @0x629525..0x629539]
+	expect(client.join_fail_code() == 2 && client.join_fail_param() == 0 &&
+					client.join_fail_string().empty(),
+			"join timeout: the down connection keeps JFC 2, JFP 0 and no JFS");
 	expect(reprobe_at == probe_at + 21002 && client.reconnecting(),
 	       "join timeout: probing resumes past hello + 1000 + 20000");
+}
+
+// D-NET-453: a re-join the service rejects (CR 0) drops the connection to its down state with no
+// teardown and no error: the session stays reconnecting, keeps the rejecting 0x82's JFC / JFP /
+// JFS and not its RCNT, sends nothing more on that leg, and its reconnect tail reopens the probe
+// window once the schedule's next check passes (the re-join's 0x81 + 1000 + 20000 ms).
+// [orig: NapiNP_HandleServerJoinResponse @0x629840 - @0x629CD8..0x629CF6, the store @0x629F95,
+//  RCNT on accept only @0x629E2E; CNapiNPConnection_PumpStateMachine @0x6292E0 - the reconnect
+//  tail's gates @0x629487..0x6294A5, a down state reopening the window @0x629632..0x629676]
+void test_reconnect_rejoin_rejected() {
+	MiniServer server;
+	ClientSession::Config cfg;
+	cfg.client_index = 0x0000003Au;
+	cfg.client_key = 0x3A3A3A3Au;
+	inject_reconnect_keys(cfg, 0x54545400u);
+	ClientSession client(cfg);
+	if (!expect(bring_up(server, client), "rejected re-join: session reaches Verified"))
+		return;
+	const uint32_t rcnt_before = client.reconnect_count();
+	const DisconnectEvent stop = make_disconnect_event(1, 2, 0, 0, "", 0, "NP.S:PT:STOP");
+	const auto goodbye = server_encode_outbound(
+			SESSION_OPCODE_SERVER_GOODBYE, server_goodbye_to_bytes(cfg.client_key, stop));
+	std::vector<std::vector<uint8_t>> out;
+	client.handle_datagram(goodbye.data(), goodbye.size(), out);
+	const uint32_t probe_at = pump_until_probe(client, 1, 5000, out);
+	if (!expect(probe_at != 0, "rejected re-join: the probe goes out"))
+		return;
+	const auto hello = server.respond(out[0]);
+	std::vector<std::vector<uint8_t>> joined;
+	client.handle_datagram(hello.data(), hello.size(), joined);
+	ClientAuth rejoin;
+	uint8_t opcode = 0;
+	std::vector<uint8_t> body;
+	if (!expect(joined.size() == 1 && client.state() == ClientSession::State::Auth &&
+						server_decode_inbound(joined[0], opcode, body) &&
+						parse_client_auth(body.data(), body.size(), rejoin),
+				"rejected re-join: the ServerHello sends the 0x42"))
+		return;
+	ServerAuth reject = build_server_auth(rejoin, 0x7F000001u, 5000, 0, "");
+	reject.cr = 0;
+	reject.jfc = 14;
+	reject.jfp = 3;
+	reject.jfs = "banned";
+	reject.rcnt = 9;
+	const auto reject_datagram =
+			server_encode_outbound(SESSION_OPCODE_SERVER_AUTH, server_auth_to_bytes(reject));
+	std::vector<std::vector<uint8_t>> rejected;
+	client.set_clock_ms(probe_at + 10);
+	expect(client.handle_datagram(reject_datagram.data(), reject_datagram.size(), rejected) &&
+					rejected.empty() && client.state() == ClientSession::State::Closed &&
+					client.connection_down() && client.reconnecting(),
+			"rejected re-join: the CR 0 0x82 drops the connection down, still reconnecting");
+	expect(client.join_fail_code() == 14 && client.join_fail_param() == 3 &&
+					client.join_fail_string() == "banned" &&
+					client.reconnect_count() == rcnt_before,
+			"rejected re-join: JFC / JFP / JFS kept, RCNT not read");
+	uint32_t reprobe_at = 0;
+	std::size_t joins_after = 0;
+	for (uint32_t t = probe_at + 11; t <= probe_at + 25000 && reprobe_at == 0; ++t) {
+		client.set_clock_ms(t);
+		std::vector<std::vector<uint8_t>> pumped;
+		client.pump(pumped);
+		joins_after += count_opcode(pumped, SESSION_OPCODE_CLIENT_AUTH);
+		if (count_opcode(pumped, SESSION_OPCODE_CLIENT_HELLO) != 0)
+			reprobe_at = t;
+	}
+	expect(joins_after == 0, "rejected re-join: no 0x42 re-send from the down connection");
+	expect(reprobe_at == probe_at + 21002 && client.reconnecting(),
+			"rejected re-join: probing resumes past hello + 1000 + 20000");
 }
 
 // A reconnect takes a 0x81 only while its enumerator probes: inside a probe window, never ahead
@@ -1870,6 +2013,7 @@ int main() {
 	test_reconnect_rehost();
 	test_host_update_writes_changed_lists();
 	test_reconnect_join_timeout();
+	test_reconnect_rejoin_rejected();
 	test_reconnect_takes_a_hello_only_while_probing();
 	test_reconnect_verified_word();
 

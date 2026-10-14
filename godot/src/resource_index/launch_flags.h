@@ -67,6 +67,10 @@ public:
 	// to the project, else the process's working directory (a packaged runtime's own).
 	static String working_dir();
 
+	// The whole parsed set, for a C++ consumer that reads several switches at once (the
+	// NovaWorld connect's command line, NovaWorldClient::start).
+	static opennova::LaunchFlags parsed() { return parse(); }
+
 	// Tests substitute the launch token list; the real runtime parses its own
 	// command line (engine + user args).
 	static void set_args_override(const PackedStringArray &args);

@@ -3,6 +3,7 @@
 #include <base/resource_index/boot_policy.h>
 
 #include <base/gameprofile/gameprofile.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
 
@@ -30,6 +31,38 @@ std::string value_after(const std::vector<std::string> &args, const char *flag) 
     for (std::size_t i = 0; i + 1 < args.size(); ++i)
         if (strutil::iequals(args[i], flag)) value = strutil::trim(args[i + 1]);
     return value;
+}
+
+// The NovaWorld switches as the game's one walk over its tokens reads them, in the walk's order:
+// at each token every switch is tested in turn, and a switch with a next token steps onto it, so
+// the switches after it test that value token in place of the switch (`/USEJUNCTION
+// /UDPNOVAWORLD 1.2.3.4` reads "/UDPNOVAWORLD" as the junction word, atol 0, and keeps no
+// entry), and the walk goes on past it. Each value is the token as it stands (no trim); the last
+// one stands, the /UDPNOVAWORLD entries keeping the first six to 31 characters, a seventh's token
+// stepped over all the same. /GLSVSSRIMS and /GLSVSSAGRMS step over their values here, which
+// nothing keeps (D-NET-707). The switches outside this block keep the shared walk (D-GAMECFG-7).
+// [orig: Game_ParseCommandLineAndInit @0x4a7310 - "/UDPNOVAWORLD" @0x4A74F1 (the next token
+//  @0x4A7503..0x4A750C, the count test @0x4A750E..0x4A7516, Napi_CopyString(.., 0x20)
+//  @0x4A751C..0x4A7528, the position reloaded @0x4A7536), "/GLSVSSRIMS" @0x4A753A,
+//  "/GLSVSSAGRMS" @0x4A756F, "/POSTIPADDRESS" @0x4A75A4..0x4A75CF, "/POSTPORTNUMBER"
+//  @0x4A75D4..0x4A75FE, "/USEJUNCTION" @0x4A7603..0x4A762D, "/CLEARJUNCTION"
+//  @0x4A7632..0x4A765C]
+void parse_novaworld_switches(const std::vector<std::string> &args, LaunchFlags &f) {
+    for (std::size_t i = 0; i < args.size(); ++i) {
+        const auto takes = [&](const char *flag) {
+            if (!strutil::iequals(args[i], flag) || i + 1 >= args.size()) return false;
+            ++i;
+            return true;
+        };
+        if (takes(kLaunchFlagUdpNovaWorld) && f.udp_novaworld.size() < kLaunchUdpNovaWorldMax)
+            f.udp_novaworld.push_back(args[i].substr(0, kLaunchUdpNovaWorldChars));
+        takes("/GLSVSSRIMS");
+        takes("/GLSVSSAGRMS");
+        if (takes(kLaunchFlagPostIpAddress)) f.post_ip_address = args[i];
+        if (takes(kLaunchFlagPostPortNumber)) f.post_port_number = io::retail_atol(args[i].c_str());
+        if (takes(kLaunchFlagUseJunction)) f.use_junction = io::retail_atol(args[i].c_str());
+        if (takes(kLaunchFlagClearJunction)) f.clear_junction = io::retail_atol(args[i].c_str());
+    }
 }
 
 // `/mod` and `/exp` share one arm of the game's walk [orig:
@@ -97,6 +130,7 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     f.no_hud = has_flag(args, kLaunchFlagNoHud); // [orig: @0x4A79F6..0x4A7A09]
     f.no_reload = has_flag(args, kLaunchFlagNoReload); // [orig: @0x4A76D7..0x4A76E9]
     f.lan = has_flag(args, kLaunchFlagLan); // [orig: @0x4A74D9..0x4A74EB]
+    parse_novaworld_switches(args, f);
     return f;
 }
 
