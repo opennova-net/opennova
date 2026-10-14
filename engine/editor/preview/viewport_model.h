@@ -47,7 +47,8 @@ const char *viewport_status_token(ViewportStatus status);
 std::string viewport_change(ViewportKind kind, const char *member, io::JsonValue value);
 
 // A SetViewport's clock member, {playing, rate, time_ms, ticks} each optional, set on `clock`: every
-// member checked before any applies; false, nothing changed, with `error` naming the member and what
+// member checked before any applies, and a seek by time_ms or ticks alone moving the other with it at the
+// game's 62.5 ticks a second (a tick 16 ms); false, nothing changed, with `error` naming the member and what
 // it takes (a viewport's change applies it with its other members, ViewportModel::apply; a pathless
 // change of the clock alone, Viewports::set_clock).
 bool set_preview_clock(const io::JsonValue &json, PreviewClock &clock, std::string &error);

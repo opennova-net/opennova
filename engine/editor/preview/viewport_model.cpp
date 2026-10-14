@@ -97,12 +97,18 @@ bool read_clock(const JsonValue &json, Common &out, std::string &error) {
 	return true;
 }
 
-// The clock's members read (read_clock) set on `clock`.
+// The clock's members read (read_clock) set on `clock`. A seek of the one clock by either of its counts moves the
+// other with it at the game's logic rate (io::kTickHz, a tick 16 ms): what reads the ticks (a clip, a first-person
+// clip, an effect) and what reads the milliseconds (a model's part animations, a menu's caret) show the same moment.
 void apply_clock(const Common &common, PreviewClock &clock) {
 	if (common.playing_set) clock.set_playing(common.playing);
 	if (common.rate_set) clock.set_rate(common.rate);
 	if (common.time_ms >= 0) clock.seek_ms(uint32_t(common.time_ms));
 	if (common.ticks >= 0) clock.seek_ticks(int32_t(common.ticks));
+	else if (common.time_ms >= 0)
+		clock.seek_ticks(int32_t(std::fmin(std::floor(double(common.time_ms) * io::kTickHz / 1000.0), double(INT32_MAX))));
+	if (common.ticks >= 0 && common.time_ms < 0)
+		clock.seek_ms(uint32_t(std::fmin(std::round(double(common.ticks) * 1000.0 / io::kTickHz), double(UINT32_MAX))));
 }
 
 } // namespace
