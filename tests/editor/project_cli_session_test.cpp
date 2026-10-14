@@ -274,7 +274,7 @@ const char *const kFontMenu =
 // token names it again, its query a row of the query table whose token names it again and whose
 // args the query takes, and the usage listing every verb.
 static int test_verb_table() {
-	editor_test::TempProjectDir dir("opennova_project_cli_table");
+	test_temp::TempDir dir("opennova_project_cli_table");
 	const std::string root = dir.file("Table");
 	TEST_EXPECT(run(dir.root(), { "new", root }).code == 0);
 	Headless headless;
@@ -322,16 +322,16 @@ static int test_verb_table() {
 // command line prints the session's JSON and makes none of its own), for all nine verbs: every run
 // starts from the same files.
 static int test_verbs_answer_as_the_session() {
-	editor_test::TempProjectDir dir("opennova_project_cli_parity");
+	test_temp::TempDir dir("opennova_project_cli_parity");
 	const std::string scratch = dir.root(), root = dir.file("Parity"), out = dir.file("out");
 	TEST_EXPECT(run(scratch, { "new", root, "--title", "Parity" }).code == 0);
 	TEST_EXPECT(run(scratch, { "create-missing", root }).code == 0);
 	// A menu the render check notes, an import source, and a menu naming a font beside it outside.
-	TEST_EXPECT(editor_test::write_text(root + "/menus/extra.mnu", kTitleMenu));
-	TEST_EXPECT(editor_test::write_bytes(dir.file("logo.png"), test_png::gradient_png(8, 8)));
+	TEST_EXPECT(test_io::write_text(root + "/menus/extra.mnu", kTitleMenu));
+	TEST_EXPECT(test_io::write_file(dir.file("logo.png"), test_png::gradient_png(8, 8)));
 	TEST_EXPECT(run(scratch, { "import", root, dir.file("logo.png") }).code == 0);
-	TEST_EXPECT(editor_test::write_text(dir.file("art/a.mnu"), kFontMenu));
-	TEST_EXPECT(editor_test::write_text(dir.file("art/arial99.fnt"), "fnt"));
+	TEST_EXPECT(test_io::write_text(dir.file("art/a.mnu"), kFontMenu));
+	TEST_EXPECT(test_io::write_text(dir.file("art/arial99.fnt"), "fnt"));
 	TEST_EXPECT(run(scratch, { "status", root }).code == 0); // the import pass has run: the files settle
 	const Saved saved(root, dir.file("Parity.saved"));
 	const auto fresh = [&]() {
@@ -500,13 +500,13 @@ static int test_verbs_answer_as_the_session() {
 // it; an edit alone is said to end with the run, and the file keeps its bytes; one held on the
 // unsaved-changes prompt goes on when a resolve_unsaved later in the array answers it.
 static int test_request_and_query_verbs() {
-	editor_test::TempProjectDir dir("opennova_project_cli_wire");
+	test_temp::TempDir dir("opennova_project_cli_wire");
 	const std::string scratch = dir.root(), root = dir.file("Wire");
 	TEST_EXPECT(run(scratch, { "new", root, "--title", "Wire" }).code == 0);
 	TEST_EXPECT(run(scratch, { "create-missing", root }).code == 0);
 
 	// A source the next open's import pass would import: none of the refusals below runs it.
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/logo.png", test_png::gradient_png(8, 8)));
+	TEST_EXPECT(test_io::write_file(root + "/art/logo.png", test_png::gradient_png(8, 8)));
 	TEST_EXPECT(mark_for_import(root + "/art/logo.png"));
 	const std::string imported_dir = root + "/.opennova/imported";
 	TEST_EXPECT(!fs::exists(imported_dir));
@@ -639,7 +639,7 @@ static int test_install() {
 			fs::current_path(saved, ignored);
 		}
 	} const restore;
-	editor_test::TempProjectDir dir("opennova_project_cli_install");
+	test_temp::TempDir dir("opennova_project_cli_install");
 	const std::string scratch = dir.root(), root = dir.file("Install"), install = dir.file("Joint Ops");
 	std::error_code ec;
 	fs::create_directories(install, ec);
@@ -702,7 +702,7 @@ static int test_install() {
 // through; the build's own check of the files (a name no archive stores) fails it and is said before
 // the verdict, the build refused too; an archive in the project is listed, the build leaving it out.
 static int test_validate_follows_the_gate() {
-	editor_test::TempProjectDir dir("opennova_project_cli_gate");
+	test_temp::TempDir dir("opennova_project_cli_gate");
 	const std::string scratch = dir.root(), root = dir.file("Gate");
 	TEST_EXPECT(run(scratch, { "new", root, "--title", "Gate" }).code == 0);
 	TEST_EXPECT(run(scratch, { "create-missing", root }).code == 0);
@@ -726,7 +726,7 @@ static int test_validate_follows_the_gate() {
 		TEST_EXPECT(listed.code == 0);
 		TEST_EXPECT(listed.out.find("warning build.archive_in_project: extra.pff is an archive") != std::string::npos);
 	}
-	TEST_EXPECT(editor_test::write_text(root + "/scripts/a_name_far_too_long.wac", "// a script\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/scripts/a_name_far_too_long.wac", "// a script\r\n"));
 	const Ran ran = run(scratch, { "validate", root });
 	TEST_EXPECT(ran.code == 1);
 	TEST_EXPECT(ran.out.find("error build.name_unstorable: The game cannot store a_name_far_too_long.wac") != std::string::npos);
@@ -742,7 +742,7 @@ static int test_retail_install_import() {
 	const std::string install = retail::install();
 	if (install.empty())
 		return retail::skip_leg("OPENNOVA_JO_DIR (a project imported from the game install, its Problems through query)");
-	editor_test::TempProjectDir dir("opennova_project_cli_retail");
+	test_temp::TempDir dir("opennova_project_cli_retail");
 	const std::string scratch = dir.root(), root = dir.file("Retail");
 	TEST_EXPECT(run(scratch, { "new", root, "--title", "Retail" }).code == 0);
 	Ran ran = run(scratch, { "import", root, "--install", install, "--entry", "main.mnu", "--entry", "menu_style.mns",
@@ -774,7 +774,7 @@ static int test_retail_expansion_build() {
 		return retail::skip_leg("OPENNOVA_JO_DIR (an expansion project built over the game install's jox01)");
 	if (!fs::is_regular_file(install + "/expansion/jox01/jox01.pff"))
 		return retail::skip_leg("the game install's expansion jox01 (an expansion project built over it)");
-	editor_test::TempProjectDir dir("opennova_project_cli_retail_expansion");
+	test_temp::TempDir dir("opennova_project_cli_retail_expansion");
 	const std::string scratch = dir.root(), root = dir.file("Mod");
 	TEST_EXPECT(run(scratch, { "new", root, "--title", "Retail Mod", "--expansion", "jxm", "--builds-on", "jox01" }).code == 0);
 	Ran ran = run(scratch, { "import", root, "--install", install, "--entry", "jxm.bin", "--entry", "main.mnu", "--entry",

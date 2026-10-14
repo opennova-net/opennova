@@ -90,7 +90,7 @@ int test_pieces() {
 }
 
 struct Rig {
-	editor_test::TempProjectDir dir{"opennova_editor_texture_game_view"};
+	test_temp::TempDir dir{"opennova_editor_texture_game_view"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -131,9 +131,9 @@ int test_session() {
 	std::vector<uint8_t> tga;
 	std::string error;
 	TEST_EXPECT(opennova::tga::tga_write_rgba32(rgba.data(), 16, 16, tga, error) &&
-	            editor_test::write_bytes(rig.root() + "/textures/crate.tga", tga));
+	            test_io::write_file(rig.root() + "/textures/crate.tga", tga));
 	const std::string scene = rig.dir.file("scene");
-	TEST_EXPECT(editor_test::write_text(scene + "/crate.o3d",
+	TEST_EXPECT(test_io::write_text(scene + "/crate.o3d",
 	                                    "o3d 2\nmodel CRATE\nmaterial VS_PHONGT\ntexture crate.tga 1 0\nlod 0\npart 0 0 0 0\n"
 	                                    "mesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
 	ImportChoice model;

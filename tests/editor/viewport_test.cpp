@@ -324,7 +324,7 @@ private:
 
 // What a device takes as its viewport follows the session.
 static int test_actions() {
-	editor_test::TempProjectDir dir("opennova_editor_viewport_actions");
+	test_temp::TempDir dir("opennova_editor_viewport_actions");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -413,7 +413,7 @@ static int test_actions() {
 	TEST_EXPECT(!bytes.empty());
 	bytes.push_back('\r');
 	bytes.push_back('\n');
-	TEST_EXPECT(editor_test::write_bytes(style, bytes));
+	TEST_EXPECT(test_io::write_file(style, bytes));
 	session.handle(request::rescan());
 	session.run_operations();
 	from = device->taken.size();
@@ -424,7 +424,7 @@ static int test_actions() {
 	TEST_EXPECT(white != std::string::npos && sheet.find("DEF_TEXT_FG") < white);
 	sheet.replace(white, 8, "FF00FF00");
 	sheet += "\r\n"; // another size: the scan reads the file again whatever its clock's tick
-	TEST_EXPECT(editor_test::write_text(style, sheet));
+	TEST_EXPECT(test_io::write_text(style, sheet));
 	session.handle(request::rescan());
 	session.run_operations();
 	from = device->taken.size();
@@ -447,7 +447,7 @@ static int test_actions() {
 
 	// A model: its options are an Update (the picture stands, the state applied again), as is an
 	// edit only its overlays show.
-	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+	TEST_EXPECT(test_io::write_file(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::open_document("models/armory.3di"));
@@ -544,7 +544,7 @@ static int test_clock() {
 	TEST_EXPECT(clock.ticks() >= 16 && clock.heard_from(-1, seen) == 12 && seen == clock.tick_seeks());
 	TEST_EXPECT(clock.heard_from(17, seen) == 17);
 
-	editor_test::TempProjectDir dir("opennova_editor_viewport_clock");
+	test_temp::TempDir dir("opennova_editor_viewport_clock");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -552,7 +552,7 @@ static int test_clock() {
 	session.handle(request::new_project(dir.file("project"), "Clock Test"));
 	session.run_operations();
 	editor_test::create_missing_files(session);
-	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+	TEST_EXPECT(test_io::write_file(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::open_document("main.mnu"));
@@ -576,7 +576,7 @@ static int test_clock() {
 // Two menus open, each its own viewport and its own options; the Preview back on the first shows
 // its own, and no device is made again.
 static int test_two_menus() {
-	editor_test::TempProjectDir dir("opennova_editor_viewport_menus");
+	test_temp::TempDir dir("opennova_editor_viewport_menus");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -621,7 +621,7 @@ static int test_two_menus() {
 // that makes the picture again at the camera it kept. A canvas asking for a device has it at the
 // next pump.
 static int test_device_cache() {
-	editor_test::TempProjectDir dir("opennova_editor_viewport_cache");
+	test_temp::TempDir dir("opennova_editor_viewport_cache");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -633,7 +633,7 @@ static int test_device_cache() {
 	std::vector<std::string> paths;
 	for (int i = 0; i < 5; ++i) {
 		paths.push_back("models/m" + std::to_string(i) + ".3di");
-		TEST_EXPECT(editor_test::write_bytes(view.project.root + "/" + paths.back(), armory));
+		TEST_EXPECT(test_io::write_file(view.project.root + "/" + paths.back(), armory));
 	}
 	session.handle(request::rescan());
 	session.run_operations();
@@ -704,7 +704,7 @@ static int test_device_cache() {
 // target of the kind the Preview window shows alone (the menu's while a menu is shown), a headless
 // one every kind's.
 static int test_cache_rounds() {
-	editor_test::TempProjectDir dir("opennova_editor_viewport_rounds");
+	test_temp::TempDir dir("opennova_editor_viewport_rounds");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -717,7 +717,7 @@ static int test_cache_rounds() {
 	std::vector<std::string> paths;
 	for (int i = 0; i < 5; ++i) {
 		paths.push_back("models/m" + std::to_string(i) + ".3di");
-		TEST_EXPECT(editor_test::write_bytes(view.project.root + "/" + paths.back(), armory));
+		TEST_EXPECT(test_io::write_file(view.project.root + "/" + paths.back(), armory));
 	}
 	session.handle(request::rescan());
 	session.run_operations();
@@ -746,13 +746,13 @@ static int test_cache_rounds() {
 	// A workspace's cache (set_pin_all_targets(false)), over a project of its own: the Preview window
 	// showing the menu, its target given a device and the model's not; showing the model, the model's
 	// too (the menu's kept). A headless cache (the default) gives both kinds' targets one.
-	editor_test::TempProjectDir pin_dir("opennova_editor_viewport_pins");
+	test_temp::TempDir pin_dir("opennova_editor_viewport_pins");
 	ProjectSession pins(platform, preferences);
 	const SessionView &pinned = pins.view();
 	pins.handle(request::new_project(pin_dir.file("project"), "Pins"));
 	pins.run_operations();
 	editor_test::create_missing_files(pins);
-	TEST_EXPECT(editor_test::write_bytes(pinned.project.root + "/models/armory.3di", armory));
+	TEST_EXPECT(test_io::write_file(pinned.project.root + "/models/armory.3di", armory));
 	pins.handle(request::rescan());
 	pins.run_operations();
 	pins.handle(request::open_document("models/armory.3di"));
@@ -789,7 +789,7 @@ static int test_cache_rounds() {
 // (a refused one moves nothing); syncs with nothing asked move no viewport's state, the clock or
 // the concern.
 static int test_state_moves() {
-	editor_test::TempProjectDir dir("opennova_editor_viewport_state");
+	test_temp::TempDir dir("opennova_editor_viewport_state");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -798,7 +798,7 @@ static int test_state_moves() {
 	session.handle(request::new_project(dir.file("project"), "State"));
 	session.run_operations();
 	editor_test::create_missing_files(session);
-	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+	TEST_EXPECT(test_io::write_file(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
 	session.run_operations();
 	const auto moves = [&]() { return view.revisions.of(ViewConcern::Viewports); };
@@ -878,7 +878,7 @@ static int test_state_moves() {
 // The envelope: every member, a page of its items (and its notes by the same page), a model's camera,
 // and the kind's empty viewport where none is kept.
 static int test_envelope() {
-	editor_test::TempProjectDir dir("opennova_editor_viewport_envelope");
+	test_temp::TempDir dir("opennova_editor_viewport_envelope");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -951,7 +951,7 @@ static int test_envelope() {
 			whole.get("items")->array[1].get_string("name", "?"));
 
 	// A model's: pixels, its camera with the field of view, its body's level, registers and animation.
-	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+	TEST_EXPECT(test_io::write_file(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
 	session.run_operations();
 	TEST_EXPECT(editor_test::empty_viewport_json(view, ViewportKind::Model).get_string("reason", "") == "no_model");
@@ -1000,7 +1000,7 @@ static int test_envelope() {
 // as it was. A drag and a command planned by the viewport (the MCP's) and served: one undo step
 // each; a drag the session refuses as it is served answers false, the menu as it was.
 static int test_requests() {
-	editor_test::TempProjectDir dir("opennova_editor_viewport_requests");
+	test_temp::TempDir dir("opennova_editor_viewport_requests");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1110,7 +1110,7 @@ static int test_requests() {
 
 // One undo step per gesture, through a real session.
 static int test_gestures() {
-	editor_test::TempProjectDir dir("opennova_editor_viewport_gestures");
+	test_temp::TempDir dir("opennova_editor_viewport_gestures");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1118,8 +1118,8 @@ static int test_gestures() {
 	const SessionView &view = session.view();
 	session.handle(request::new_project(dir.file("project"), "Gestures"));
 	session.run_operations();
-	TEST_EXPECT(editor_test::write_text(view.project.root + "/layout.mnu", kLayoutMenu));
-	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+	TEST_EXPECT(test_io::write_text(view.project.root + "/layout.mnu", kLayoutMenu));
+	TEST_EXPECT(test_io::write_file(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::open_document("layout.mnu"));
@@ -1272,7 +1272,7 @@ static int test_gestures() {
 // menu read again is everything (Unknown), configured again; SECOND's window made unwritable takes
 // the picture away (the game would read none of the menu), and undone makes it again.
 static int test_menu_change_sets() {
-	editor_test::TempProjectDir dir("opennova_editor_viewport_change_sets");
+	test_temp::TempDir dir("opennova_editor_viewport_change_sets");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1281,7 +1281,7 @@ static int test_menu_change_sets() {
 	session.handle(request::new_project(dir.file("project"), "Change Sets"));
 	session.run_operations();
 	editor_test::create_missing_files(session);
-	TEST_EXPECT(editor_test::write_text(view.project.root + "/two.mnu", kTwoScreens));
+	TEST_EXPECT(test_io::write_text(view.project.root + "/two.mnu", kTwoScreens));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::open_document("two.mnu"));
@@ -1379,7 +1379,7 @@ static int test_menu_change_sets() {
 // first, its own HEIGHT the first load: no note) and that undone configure it again; a stylesheet
 // variable FIRST alone names configures it, one THIRD alone names does not.
 static int test_menu_shared_texture() {
-	editor_test::TempProjectDir dir("opennova_editor_viewport_shared_texture");
+	test_temp::TempDir dir("opennova_editor_viewport_shared_texture");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1388,8 +1388,8 @@ static int test_menu_shared_texture() {
 	session.handle(request::new_project(dir.file("project"), "Shared Texture"));
 	session.run_operations();
 	editor_test::create_missing_files(session);
-	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/sheet.tga", tga(64, 80)));
-	TEST_EXPECT(editor_test::write_text(view.project.root + "/shared.mnu",
+	TEST_EXPECT(test_io::write_file(view.project.root + "/sheet.tga", tga(64, 80)));
+	TEST_EXPECT(test_io::write_text(view.project.root + "/shared.mnu",
 			image_screen("FIRST", "ONE", 20, "DEF_TEXT_FG") + image_screen("SECOND", "TWO", 24) +
 					image_screen("THIRD", "TRE", 40, "TRIM_COLOR")));
 	session.handle(request::rescan());
@@ -1484,7 +1484,7 @@ static int test_menu_shared_texture() {
 // document only), and the gesture's end builds once. A model marker's drag (a user point's place) is
 // an Update a sample, never a Rebuild: the overlays follow the live rows over the scene that stands.
 static int test_gesture_holds_rebuild() {
-	editor_test::TempProjectDir dir("opennova_editor_viewport_gesture_hold");
+	test_temp::TempDir dir("opennova_editor_viewport_gesture_hold");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1492,8 +1492,8 @@ static int test_gesture_holds_rebuild() {
 	const SessionView &view = session.view();
 	session.handle(request::new_project(dir.file("project"), "Gesture Hold"));
 	session.run_operations();
-	TEST_EXPECT(editor_test::write_text(view.project.root + "/layout.mnu", kLayoutMenu));
-	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+	TEST_EXPECT(test_io::write_text(view.project.root + "/layout.mnu", kLayoutMenu));
+	TEST_EXPECT(test_io::write_file(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::open_document("layout.mnu"));
@@ -1686,7 +1686,7 @@ static int test_hold_needs_a_picture() {
 // only as the caret's half of the blink changes: twice a blink at most, never once a frame, never
 // with no edit box focused, never while the clock stands.
 static int test_menu_clock() {
-	editor_test::TempProjectDir dir("opennova_editor_viewport_menu_clock");
+	test_temp::TempDir dir("opennova_editor_viewport_menu_clock");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1695,7 +1695,7 @@ static int test_menu_clock() {
 	session.handle(request::new_project(dir.file("project"), "Menu Clock"));
 	session.run_operations();
 	editor_test::create_missing_files(session);
-	TEST_EXPECT(editor_test::write_text(view.project.root + "/two.mnu", kTwoScreens));
+	TEST_EXPECT(test_io::write_text(view.project.root + "/two.mnu", kTwoScreens));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::open_document("two.mnu"));
@@ -1807,14 +1807,14 @@ static int test_retail_animated_menu() {
 	const MountedFiles files(vfs);
 	opennova::menu::MenuStyleSource style;
 	const std::map<std::string, std::string> &vars = style.vars(files);
-	editor_test::TempProjectDir scratch("opennova_viewport_retail_clock");
+	test_temp::TempDir scratch("opennova_viewport_retail_clock");
 	size_t menus = 0, screens = 0;
 	for (const auto &location : vfs.list_files()) {
 		const std::string &name = location.logical_name;
 		if (name.size() < 4 || retail::lower_ascii(name.substr(name.size() - 4)) != ".mnu") continue;
 		std::vector<uint8_t> stored;
 		const std::string at = scratch.file(name.c_str());
-		if (!vfs.read_file_raw(name, stored) || !editor_test::write_bytes(at, stored)) continue;
+		if (!vfs.read_file_raw(name, stored) || !test_io::write_file(at, stored)) continue;
 		MnuDocument document;
 		Diagnostic error;
 		if (!document.load(at, name, AssetKind::Menu, "jo", error) || document.blocked()) continue;
@@ -1866,7 +1866,7 @@ static int test_retail_animated_menu() {
 // an Update folded until the document moves; the frame's budget (two units a frame), and two builds in
 // one frame sharing it, the most recently used device's first, one unit a frame in all.
 static int test_builds() {
-	editor_test::TempProjectDir dir("opennova_editor_viewport_builds");
+	test_temp::TempDir dir("opennova_editor_viewport_builds");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1876,7 +1876,7 @@ static int test_builds() {
 	session.handle(request::new_project(dir.file("project"), "Builds"));
 	session.run_operations();
 	editor_test::create_missing_files(session);
-	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+	TEST_EXPECT(test_io::write_file(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
 	session.run_operations();
 	const std::string path = "models/armory.3di";
@@ -2100,7 +2100,7 @@ static int test_follow_reads() {
 // model's device untouched and the capacity not reached; most_recently_used is the device used last;
 // a device holds no picture until its first build ends.
 static int test_kind_limit() {
-	editor_test::TempProjectDir dir("opennova_editor_viewport_kind_limit");
+	test_temp::TempDir dir("opennova_editor_viewport_kind_limit");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2117,7 +2117,7 @@ static int test_kind_limit() {
 	session.handle(request::new_project(dir.file("project"), "Kind Limit"));
 	session.run_operations();
 	editor_test::create_missing_files(session);
-	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+	TEST_EXPECT(test_io::write_file(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
 	session.run_operations();
 	editor_test::FakeDevice fresh;
@@ -2160,7 +2160,7 @@ static int test_kind_limit() {
 // third mission given one gives up the least recently used mission's, the model's untouched and the
 // cache's capacity not reached.
 static int test_mission_devices() {
-	editor_test::TempProjectDir dir("opennova_editor_viewport_mission_devices");
+	test_temp::TempDir dir("opennova_editor_viewport_mission_devices");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2172,8 +2172,8 @@ static int test_mission_devices() {
 	const std::vector<uint8_t> mission =
 			test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms");
 	for (const char *name : { "a.bms", "b.bms", "c.bms" })
-		TEST_EXPECT(editor_test::write_bytes(view.project.root + "/missions/" + name, mission));
-	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+		TEST_EXPECT(test_io::write_file(view.project.root + "/missions/" + name, mission));
+	TEST_EXPECT(test_io::write_file(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::open_document("missions/a.bms"));
@@ -2246,7 +2246,7 @@ static int test_mission_devices() {
 // model drawn together take turns; alone, a device renders every frame and its state is published
 // once; a device whose draw asked nothing is left out.
 static int test_scene_state_arbitration() {
-	editor_test::TempProjectDir dir("opennova_editor_viewport_arbitration");
+	test_temp::TempDir dir("opennova_editor_viewport_arbitration");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -2260,7 +2260,7 @@ static int test_scene_state_arbitration() {
 	session.handle(request::new_project(dir.file("project"), "Arbitration"));
 	session.run_operations();
 	editor_test::create_missing_files(session);
-	TEST_EXPECT(editor_test::write_bytes(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
+	TEST_EXPECT(test_io::write_file(view.project.root + "/models/armory.3di", test_io::read_file(synth("armory.3di"))));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::open_document("models/armory.3di"));

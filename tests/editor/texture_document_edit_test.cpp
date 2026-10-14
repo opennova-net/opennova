@@ -189,7 +189,7 @@ const TextureDocument *texture_of(ProjectSession &session, const std::string &pa
 }
 
 int test_session() {
-	editor_test::TempProjectDir dir{"opennova_editor_texture_edit"};
+	test_temp::TempDir dir{"opennova_editor_texture_edit"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -200,14 +200,14 @@ int test_session() {
 	const std::vector<uint8_t> image = graded(8, 8);
 	std::vector<uint8_t> upside = tga32(image, 8, 8);
 	upside[17] |= 0x20;
-	TEST_EXPECT(editor_test::write_bytes(root + "/textures/a.tga", tga32(image, 8, 8)) &&
-	            editor_test::write_bytes(root + "/textures/up.tga", upside));
+	TEST_EXPECT(test_io::write_file(root + "/textures/a.tga", tga32(image, 8, 8)) &&
+	            test_io::write_file(root + "/textures/up.tga", upside));
 	const std::vector<uint8_t> png = encode_png_rgba(image.data(), 8, 8);
 	ImportSidecar record;
 	record.importer = "image";
 	record.version = kImageImporterVersion;
 	Diagnostic error;
-	TEST_EXPECT(editor_test::write_bytes(root + "/art/src.png", png) &&
+	TEST_EXPECT(test_io::write_file(root + "/art/src.png", png) &&
 	            save_import_sidecar(root + "/art/src.png" + kImportSidecarSuffix, record, error));
 	editor_test::handle_to_end(session, request::rescan());
 	session.run_operations();

@@ -58,16 +58,16 @@ const ScriptCompletion *item(const ScriptCompletions &completions, const std::st
 constexpr const char *kScript = "; the walk\r\nIF ssn\r\nIF SSNdead \r\nTHEN Gkill \r\nIF SSNarea 7, 20\r\nIF SSNdead SSN_\r\nEND\r\n";
 
 int test_assist() {
-	editor_test::TempProjectDir dir("opennova_script_assist");
+	test_temp::TempDir dir("opennova_script_assist");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Scripts"));
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
-	TEST_EXPECT(editor_test::write_bytes(root + "/missions/logic.bms",
+	TEST_EXPECT(test_io::write_file(root + "/missions/logic.bms",
 	                                     test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/bms/synth_logic.bms")));
-	TEST_EXPECT(editor_test::write_text(root + "/missions/logic.wac", kScript));
+	TEST_EXPECT(test_io::write_text(root + "/missions/logic.wac", kScript));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("missions/logic.wac"));
 	const SessionView &view = session.view();
@@ -168,8 +168,8 @@ int test_assist() {
 	// TT_ offers the keys of the table the mission reads: its own logic.bin where it has one, else
 	// medmssn.bin, never both [orig: TextResource_LoadMissionTextBin @0x51ed90] (S15).
 	const std::string fixtures = std::string(test_paths_repo_root(__FILE__)) + "/fixtures/";
-	TEST_EXPECT(editor_test::write_bytes(root + "/medmssn.bin", test_io::read_file(fixtures + "rtxt/synth_mission.bin")));
-	TEST_EXPECT(editor_test::write_bytes(root + "/missions/logic.bin", test_io::read_file(fixtures + "bms/synth_logic.bin")));
+	TEST_EXPECT(test_io::write_file(root + "/medmssn.bin", test_io::read_file(fixtures + "rtxt/synth_mission.bin")));
+	TEST_EXPECT(test_io::write_file(root + "/missions/logic.bin", test_io::read_file(fixtures + "bms/synth_logic.bin")));
 	editor_test::handle_to_end(session, request::rescan());
 	std::set<std::string> own_keys;
 	std::string only_medmssn;

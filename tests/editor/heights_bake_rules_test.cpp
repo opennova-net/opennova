@@ -36,8 +36,6 @@ using namespace opennova::editor;
 
 namespace {
 
-std::string fixture(const char *relative) { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + relative; }
-
 // A mission on Tmap (under `environment`) holding one building (or `kind` of `type`) at each point (mission units), at
 // z 4.
 std::vector<uint8_t> mission_at(const std::vector<std::pair<float, float>> &points,
@@ -84,7 +82,7 @@ struct RoughInput : RasterEditPayload {
 
 // A project with Tmap, its .trn and missions on it.
 struct Rig {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -94,10 +92,10 @@ struct Rig {
 		editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Rules"));
 		const SessionView &v = session.view();
 		root = v.project.root;
-		editor_test::write_bytes(root + "/terrain/Tmap.cpt", test_io::read_file(fixture("terrain/tmap/Tmap.cpt")));
-		editor_test::write_bytes(root + "/terrain/Tmap.trn", test_io::read_file(fixture("terrain/tmap/Tmap.trn")));
-		editor_test::write_text(root + "/day.env", "env");
-		for (const auto &[file, points] : missions) editor_test::write_bytes(root + "/missions/" + file, mission_at(points));
+		test_io::write_file(root + "/terrain/Tmap.cpt", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt")));
+		test_io::write_file(root + "/terrain/Tmap.trn", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn")));
+		test_io::write_text(root + "/day.env", "env");
+		for (const auto &[file, points] : missions) test_io::write_file(root + "/missions/" + file, mission_at(points));
 		editor_test::set_missions(session, true);
 		editor_test::handle_to_end(session, request::rescan());
 		session.run_operations(); // the references read: the graph the follows find the missions by
@@ -335,7 +333,7 @@ int test_drag_defers() {
 int test_locked_stays_closed() {
 	Rig rig("opennova_editor_heights_rules_locked");
 	for (const char *file : {"/missions/m.bms", "/missions/free.bms"})
-		editor_test::write_bytes(rig.root + file, mission_at({{-200.0f, 200.0f}}, mission::EntityKind::Item, 106102));
+		test_io::write_file(rig.root + file, mission_at({{-200.0f, 200.0f}}, mission::EntityKind::Item, 106102));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	rig.session.run_operations();
 	const std::string m = rig.path_of("m.bms"), free = rig.path_of("free.bms");
@@ -365,11 +363,11 @@ int test_locked_stays_closed() {
 // another .cpt is left closed, and the open missions the lock op counts route the same.
 int test_env_routing() {
 	Rig rig("opennova_editor_heights_rules_env");
-	editor_test::write_text(rig.root + "/away.env", "polytrn_polydata Away.cpt\r\n");
-	editor_test::write_bytes(rig.root + "/missions/here.bms", mission_at({{-200.0f, 200.0f}}));
-	editor_test::write_bytes(rig.root + "/missions/away.bms",
+	test_io::write_text(rig.root + "/away.env", "polytrn_polydata Away.cpt\r\n");
+	test_io::write_file(rig.root + "/missions/here.bms", mission_at({{-200.0f, 200.0f}}));
+	test_io::write_file(rig.root + "/missions/away.bms",
 	                         mission_at({{-200.0f, 200.0f}}, mission::EntityKind::Building, 100701, "away"));
-	editor_test::write_bytes(rig.root + "/missions/near.bms",
+	test_io::write_file(rig.root + "/missions/near.bms",
 	                         mission_at({{-200.0f, 200.0f}}, mission::EntityKind::Building, 100701, "away"));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	rig.session.run_operations();
@@ -446,7 +444,7 @@ int test_flatten_off_terrain() {
 	if (!heights) return 1;
 	CptFile shipped;
 	std::string why;
-	const std::vector<uint8_t> bytes = test_io::read_file(fixture("terrain/tmap/Tmap.cpt"));
+	const std::vector<uint8_t> bytes = test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt"));
 	TEST_EXPECT(load_cpt(bytes.data(), bytes.size(), shipped, why));
 	// The edge texel under the disc's strongest weight keeps its height (the target is its own), none goes to 0.
 	bool zeroed = false;

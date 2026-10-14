@@ -386,13 +386,13 @@ int test_move_preview_and_event_move() {
 // The two queries over a session: the event's form, the types, an add planned and applied through
 // edit_record, a refusal answered, a record's uses.
 int test_wire() {
-	editor_test::TempProjectDir dir("opennova_mission_logic_wire");
+	test_temp::TempDir dir("opennova_mission_logic_wire");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Logic"));
 	editor_test::create_missing_files(session);
-	TEST_EXPECT(editor_test::write_bytes(session.view().project.root + "/missions/logic.bms", fixture_bytes()));
+	TEST_EXPECT(test_io::write_file(session.view().project.root + "/missions/logic.bms", fixture_bytes()));
 	editor_test::handle_to_end(session, request::rescan());
 	editor_test::handle_to_end(session, request::open_document("missions/logic.bms"));
 	const Document *document = session.document_for("missions/logic.bms");

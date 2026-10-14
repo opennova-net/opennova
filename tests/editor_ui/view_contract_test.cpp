@@ -362,11 +362,11 @@ void test_every_view() {
 // Two open catalogs in the Document window: a view each, whose filter (its model's) is its own (the
 // one view a type shared before S13 V3 filtered every open catalog by the text typed into one).
 void test_a_view_per_document() {
-	editor_test::TempProjectDir dir("opennova_editor_view_per_document");
+	test_temp::TempDir dir("opennova_editor_view_per_document");
 	const auto load_catalog = [&](const char *file, const char *relative, const char *text) {
 		auto document = std::make_shared<DefCatalogDocument>();
 		Diagnostic error;
-		CHECK(editor_test::write_text(dir.file(file), text), "catalog fixture");
+		CHECK(test_io::write_text(dir.file(file), text), "catalog fixture");
 		CHECK(document->load(dir.file(file), relative, AssetKind::ItemDefs, "jo", error), error.message.c_str());
 		return document;
 	};

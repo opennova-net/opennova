@@ -474,15 +474,15 @@ inline constexpr const char *kMenu =
         "</SCREEN>\r\n";
 
 // kMenu written as `file` in the fixture's folder and loaded as the project's `relative`.
-inline std::shared_ptr<MnuDocument> menu_at(const editor_test::TempProjectDir &dir, const char *file, const char *relative) {
+inline std::shared_ptr<MnuDocument> menu_at(const test_temp::TempDir &dir, const char *file, const char *relative) {
 	auto document = std::make_shared<MnuDocument>();
 	Diagnostic error;
-	CHECK(editor_test::write_text(dir.file(file), kMenu), "menu fixture");
+	CHECK(test_io::write_text(dir.file(file), kMenu), "menu fixture");
 	CHECK(document->load(dir.file(file), relative, AssetKind::Menu, "jo", error), error.message.c_str());
 	return document;
 }
 
-inline std::shared_ptr<MnuDocument> load_menu(const editor_test::TempProjectDir &dir) {
+inline std::shared_ptr<MnuDocument> load_menu(const test_temp::TempDir &dir) {
 	std::shared_ptr<MnuDocument> document = menu_at(dir, "options.mnu", "options.mnu");
 	CHECK(!document->blocked() && document->issues().empty() && document->rows().size() == 1, "the menu reads clean");
 	return document;
@@ -658,23 +658,23 @@ struct HandViewports {
 // A project for the Preview window: a new project's files (main.mnu among them), a skinned
 // model and its clips from the Blender add-on's scene texts with a catalog item pairing the
 // two, and armory.3di (user points).
-inline bool preview_project(ProjectSession &session, const editor_test::TempProjectDir &dir) {
+inline bool preview_project(ProjectSession &session, const test_temp::TempDir &dir) {
 	if (!session.handle(request::new_project(dir.file("project"), "Preview"))) return false;
 	session.run_operations();
 	editor_test::create_missing_files(session);
 	const SessionView &v = session.view();
 	const std::string repo = test_paths_repo_root(__FILE__);
 	const std::string source = dir.file("source");
-	if (!editor_test::write_bytes(source + "/skinned.o3d", test_io::read_file(repo + "/fixtures/threedi/o3d/skinned.o3d")) ||
-	    !editor_test::write_text(source + "/skin.o3a", editor_test::kSkinClips))
+	if (!test_io::write_file(source + "/skinned.o3d", test_io::read_file(repo + "/fixtures/threedi/o3d/skinned.o3d")) ||
+	    !test_io::write_text(source + "/skin.o3a", editor_test::kSkinClips))
 		return false;
 	EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 	import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}};
 	session.handle(import);
 	session.run_operations();
-	if (!editor_test::write_text(v.project.root + "/defs/items.def",
+	if (!test_io::write_text(v.project.root + "/defs/items.def",
 	                             "begin \"Skinned Thing\"\nid 100200\ntype building\ngraphic skinned\nanim_def skin\nend\n") ||
-	    !editor_test::write_bytes(v.project.root + "/models/armory.3di",
+	    !test_io::write_file(v.project.root + "/models/armory.3di",
 	                              test_io::read_file(repo + "/fixtures/threedi/synth/armory.3di")))
 		return false;
 	session.handle(request::rescan());
@@ -762,7 +762,7 @@ inline ImGuiID import_table_item(const char *table, int index, const char *label
 // test's devices. After each frame the requests the windows raised go to the session (kept, for a test to take;
 // a set_workspace among them, served there as the Shell serves it), and the devices follow the viewports.
 struct MissionRun {
-	editor_test::TempProjectDir dir;
+	test_temp::TempDir dir;
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -779,7 +779,7 @@ struct MissionRun {
 		editor_test::create_missing_files(session);
 		const SessionView &v = session.view();
 		const std::string repo = test_paths_repo_root(__FILE__);
-		if (!editor_test::write_bytes(v.project.root + "/missions/logic.bms",
+		if (!test_io::write_file(v.project.root + "/missions/logic.bms",
 		                              test_io::read_file(repo + "/fixtures/bms/synth_logic.bms")))
 			return false;
 		session.handle(request::rescan());

@@ -249,7 +249,7 @@ bool body_draw(
 
 // Every list a query serves comes a page at a time, and the pages make the list.
 static int test_paging() {
-	editor_test::TempProjectDir dir("opennova_editor_query_paging");
+	test_temp::TempDir dir("opennova_editor_query_paging");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -354,7 +354,7 @@ static int test_paging() {
 // the build's own check of the files, which no Problems row shows; and the build then refused, as
 // the gate said.
 static int test_build_gate() {
-	editor_test::TempProjectDir dir("opennova_editor_query_build_gate");
+	test_temp::TempDir dir("opennova_editor_query_build_gate");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -401,7 +401,7 @@ static int test_build_gate() {
 	TEST_EXPECT(!gate.get_bool("blocked", true));
 	// S14: a missing reference (a particle's texture the project lacks: a warning among the Problems
 	// rows, S26 A8) is listed and blocks nothing; the build then lands with the row still there.
-	TEST_EXPECT(editor_test::write_text(dir.file("project/fx.ptl"),
+	TEST_EXPECT(test_io::write_text(dir.file("project/fx.ptl"),
 			"[particledef]\n{\n\tid = puff;\n\tgraphic1 = nowhere.tga, additive;\n}\n"));
 	session.handle(request::rescan());
 	session.run_operations();
@@ -421,8 +421,8 @@ static int test_build_gate() {
 	// graphic naming the project's text file) is its own finding; the loader finds nothing it loads
 	// there, as for a missing name, so it gates only where its kind's missing name does (the gate
 	// follows retail): a texture's does not, and it is listed.
-	TEST_EXPECT(editor_test::write_text(dir.file("project/notes.txt"), "a note\n") &&
-			editor_test::write_text(dir.file("project/fx.ptl"),
+	TEST_EXPECT(test_io::write_text(dir.file("project/notes.txt"), "a note\n") &&
+			test_io::write_text(dir.file("project/fx.ptl"),
 					"[particledef]\n{\n\tid = puff;\n\tgraphic1 = notes.txt, additive;\n}\n"));
 	session.handle(request::rescan());
 	session.run_operations();
@@ -450,11 +450,11 @@ static int test_build_gate() {
 		std::vector<uint8_t> tga;
 		std::string why;
 		TEST_EXPECT(opennova::tga::tga_write_rgb24(rgba.data(), 1024, 1024, tga, why) &&
-				editor_test::write_bytes(dir.file("project/terrain/island_c.tga"), tga) &&
-				editor_test::write_bytes(dir.file("project/terrain/island.cpt"), std::vector<uint8_t>(1, 0)));
+				test_io::write_file(dir.file("project/terrain/island_c.tga"), tga) &&
+				test_io::write_file(dir.file("project/terrain/island.cpt"), std::vector<uint8_t>(1, 0)));
 	}
-	TEST_EXPECT(editor_test::write_text(dir.file("project/terrain/island.trn"), kIslandTrn) &&
-			editor_test::write_text(dir.file("project/day.env"), "env"));
+	TEST_EXPECT(test_io::write_text(dir.file("project/terrain/island.trn"), kIslandTrn) &&
+			test_io::write_text(dir.file("project/day.env"), "env"));
 	session.handle(request::rescan());
 	session.run_operations();
 	session.handle(request::create_file("first.bms", "", { { "terrain", "island" }, { "environment", "day" } }));
@@ -469,7 +469,7 @@ static int test_build_gate() {
 	TEST_EXPECT(gate.get_bool("blocked", false) && gate.get_number("count", 0.0) == 1.0 &&
 			gate.get("blocking")->array[0].get_string("code", "") == "reference.missing" &&
 			gate.get("blocking")->array[0].get_string("message", "").find("refuses to start the mission") != std::string::npos);
-	TEST_EXPECT(editor_test::write_text(dir.file("project/terrain/island.trn"), kIslandTrn));
+	TEST_EXPECT(test_io::write_text(dir.file("project/terrain/island.trn"), kIslandTrn));
 	session.handle(request::rescan());
 	session.run_operations();
 	gate = ask(session, "build_gate");
@@ -489,7 +489,7 @@ static int test_build_gate() {
 	TEST_EXPECT(!gate.get_bool("blocked", true) && archives == 1);
 	// A name no archive stores: refused by the build's own check, a Problems row before any build (the
 	// refusal's count, Problems' and Show them agree).
-	TEST_EXPECT(editor_test::write_text(dir.file("project/scripts/a_name_far_too_long.wac"), "// a script\r\n"));
+	TEST_EXPECT(test_io::write_text(dir.file("project/scripts/a_name_far_too_long.wac"), "// a script\r\n"));
 	session.handle(request::rescan());
 	session.run_operations();
 	// (The scan's name rule and the plan's word on the file say it each.)
@@ -517,13 +517,13 @@ static int test_build_gate() {
 // game reads on (catalog.invalid_input, an items.def value that is no number) gates no closed file, the
 // modder's included; only an open one with unsaved edits.
 static int test_build_gate_shipped() {
-	editor_test::TempProjectDir dir("opennova_editor_query_build_gate_shipped");
+	test_temp::TempDir dir("opennova_editor_query_build_gate_shipped");
 	const std::string shipped = "weapon Shipped\r\nweapon Second\r\nend\r\n";
 	const std::string install = dir.file("install");
 	const opennova::pff::PffWriteEntry entries[] = {
 		{ "weapon.def", reinterpret_cast<const uint8_t *>(shipped.data()), uint32_t(shipped.size()), 0, 0, 0 },
 	};
-	TEST_EXPECT(editor_test::write_text(install + "/readme.txt", "an install"));
+	TEST_EXPECT(test_io::write_text(install + "/readme.txt", "an install"));
 	TEST_EXPECT(opennova::pff::pff_write_archive((install + "/resource.pff").c_str(), opennova::pff::PFF_FORMAT_PFF3,
 						entries, 1) == opennova::pff::PFF_WRITE_OK);
 	NoProcess platform;
@@ -537,7 +537,7 @@ static int test_build_gate_shipped() {
 	if (!weapons) return 1;
 	const std::string relative = weapons->relative_path;
 	const std::string file = dir.file("project") + "/" + relative;
-	TEST_EXPECT(editor_test::write_text(file, shipped));
+	TEST_EXPECT(test_io::write_text(file, shipped));
 	editor_test::set_game_install(session, install);
 	editor_test::handle_to_end(session, request::rescan());
 	const auto invalid_rows = [&session, &relative](const char *code = "catalog.reader_stops") {
@@ -554,7 +554,7 @@ static int test_build_gate_shipped() {
 	TEST_EXPECT(invalid_rows() == 1 && original.count(relative) == 1 && bytes.reads() == 1);
 	TEST_EXPECT(!gate.get_bool("blocked", true) && gate.get_number("count", -1.0) == 0.0);
 	// Changed by a byte: the modder's file, the row listed there too; the build lands.
-	TEST_EXPECT(editor_test::write_text(file, shipped + "\r\n"));
+	TEST_EXPECT(test_io::write_text(file, shipped + "\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	gate = ask(session, "build_gate");
 	TEST_EXPECT(invalid_rows() == 1 && !gate.get_bool("blocked", true) && gate.get_number("count", -1.0) == 0.0);
@@ -576,8 +576,8 @@ static int test_build_gate_shipped() {
 	TEST_EXPECT(items != nullptr);
 	if (!items) return 1;
 	const std::string items_path = items->relative_path;
-	TEST_EXPECT(editor_test::write_text(file, "weapon Shipped\r\nend\r\n") &&
-	            editor_test::write_text(dir.file("project") + "/" + items_path,
+	TEST_EXPECT(test_io::write_text(file, "weapon Shipped\r\nend\r\n") &&
+	            test_io::write_text(dir.file("project") + "/" + items_path,
 	                                    "begin \"Modded\"\r\nid 100001\r\nhp twelve\r\nend\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	Diagnostic unread;
@@ -599,7 +599,7 @@ static int test_build_gate_shipped() {
 // An offset, a cursor or a limit out of range, a member the query does not take, one it needs
 // left out, a wrongly typed one and an unknown query: each refused, naming the query.
 static int test_refusals() {
-	editor_test::TempProjectDir dir("opennova_editor_query_refusals");
+	test_temp::TempDir dir("opennova_editor_query_refusals");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -657,7 +657,7 @@ static int test_refusals() {
 // shows those answer_problems shows for the query with that param set, and other than the
 // default's; an empty severity list shows nothing; a token the query does not know is refused.
 static int test_problems_params() {
-	editor_test::TempProjectDir dir("opennova_editor_query_problems");
+	test_temp::TempDir dir("opennova_editor_query_problems");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -776,7 +776,7 @@ static int test_problems_params() {
 // The state by section, and `since`: a section comes back only when a concern it follows moved
 // after the revision a client last read, and a change moves its own concerns alone.
 static int test_state_since() {
-	editor_test::TempProjectDir dir("opennova_editor_query_state");
+	test_temp::TempDir dir("opennova_editor_query_state");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -890,7 +890,7 @@ static int test_state_since() {
 // The catalog: every request kind with its fields and doc, every field, every query with its params
 // (as its row declares them), every section and every concern, from the tables themselves.
 static int test_catalog() {
-	editor_test::TempProjectDir dir("opennova_editor_query_catalog");
+	test_temp::TempDir dir("opennova_editor_query_catalog");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1072,7 +1072,7 @@ static int test_catalog() {
 // test): the tree, the batch by label in one undo step, the refusals, the list replaced, the
 // findings by source, the render check's render; and the menu every read finds.
 static int test_menu_reads_and_batches() {
-	editor_test::TempProjectDir dir("opennova_editor_query_menus");
+	test_temp::TempDir dir("opennova_editor_query_menus");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1470,7 +1470,7 @@ static int test_menu_reads_and_batches() {
 // The wire's other edits: a record's fields given back their saved value, a fix's edit that opens
 // its document first, and a request no document names the records of.
 static int test_wire_edits() {
-	editor_test::TempProjectDir dir("opennova_editor_query_wire_edits");
+	test_temp::TempDir dir("opennova_editor_query_wire_edits");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1549,7 +1549,7 @@ static int test_wire_edits() {
 // and removed by its batch is neither `added` nor `made` (the selection kept as the edit found
 // it); of two made, one removed, the other's label named alone.
 static int test_rows_on_the_wire() {
-	editor_test::TempProjectDir dir("opennova_editor_query_rows");
+	test_temp::TempDir dir("opennova_editor_query_rows");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1629,7 +1629,7 @@ static int test_rows_on_the_wire() {
 // check compiled it (the menu_render query's answer); a document by its logical name; a model's
 // marker hit at its picture pixel, and its render refused.
 static int test_viewport_query() {
-	editor_test::TempProjectDir dir("opennova_editor_query_viewport");
+	test_temp::TempDir dir("opennova_editor_query_viewport");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1775,7 +1775,7 @@ static int test_viewport_query() {
 	TEST_EXPECT(ask(session, "viewport", R"({"op": "state", "path": "main.mnu"})").get_string("status", "") == "ready");
 
 	// A model: a marker hit at the pixel its item says; its render refused.
-	TEST_EXPECT(editor_test::write_bytes(session.view().project.root + "/models/armory.3di",
+	TEST_EXPECT(test_io::write_file(session.view().project.root + "/models/armory.3di",
 			test_io::read_file(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/armory.3di")));
 	session.handle(request::rescan());
 	session.run_operations();
@@ -1807,7 +1807,7 @@ static int test_viewport_query() {
 // undo step, the field's document still the active one); a finding titles its record and its field in
 // the same words whether its file is open or closed (record_title, field_title).
 static int test_plain_words() {
-	editor_test::TempProjectDir dir("opennova_editor_query_plain_words");
+	test_temp::TempDir dir("opennova_editor_query_plain_words");
 	NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1874,8 +1874,8 @@ static int test_plain_words() {
 	std::vector<uint8_t> bytes;
 	std::string error;
 	TEST_EXPECT(opennova::rtxt::write(table, bytes, error) &&
-	            editor_test::write_bytes(view.project.root + "/" + gametext->relative_path, bytes) &&
-	            editor_test::write_text(view.project.root + "/" + weapons->relative_path,
+	            test_io::write_file(view.project.root + "/" + gametext->relative_path, bytes) &&
+	            test_io::write_text(view.project.root + "/" + weapons->relative_path,
 	                                    "weapon \"Gun\"\nloadout_menu_textid WPN_ONE\nend\n"));
 	session.handle(request::rescan());
 	session.run_operations();

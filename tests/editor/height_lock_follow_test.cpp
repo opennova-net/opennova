@@ -35,8 +35,6 @@ using namespace opennova::editor;
 
 namespace {
 
-std::string fixture(const char *relative) { return std::string(test_paths_repo_root(__FILE__)) + "/fixtures/" + relative; }
-
 // A mission on Tmap holding one building at each point (mission units).
 std::vector<uint8_t> mission_at(const std::vector<std::pair<float, float>> &points) {
 	bms::File file;
@@ -84,22 +82,22 @@ int32_t change_at(const TrnConfig &trn, int32_t scale, const std::vector<uint16_
 }
 
 int test_follow() {
-	editor_test::TempProjectDir dir("opennova_editor_height_lock_follow");
+	test_temp::TempDir dir("opennova_editor_height_lock_follow");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Follow"));
 	const SessionView &v = session.view();
 	const std::string root = v.project.root;
-	const std::vector<uint8_t> cpt_bytes = test_io::read_file(fixture("terrain/tmap/Tmap.cpt"));
-	const std::vector<uint8_t> trn_bytes = test_io::read_file(fixture("terrain/tmap/Tmap.trn"));
-	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/Tmap.cpt", cpt_bytes));
-	TEST_EXPECT(editor_test::write_bytes(root + "/terrain/Tmap.trn", trn_bytes));
-	TEST_EXPECT(editor_test::write_text(root + "/day.env", "env"));
+	const std::vector<uint8_t> cpt_bytes = test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt"));
+	const std::vector<uint8_t> trn_bytes = test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn"));
+	TEST_EXPECT(test_io::write_file(root + "/terrain/Tmap.cpt", cpt_bytes));
+	TEST_EXPECT(test_io::write_file(root + "/terrain/Tmap.trn", trn_bytes));
+	TEST_EXPECT(test_io::write_text(root + "/day.env", "env"));
 	// Under the stroke at mission (-200, 200) and far from it (300, -300).
-	TEST_EXPECT(editor_test::write_bytes(root + "/missions/open.bms", mission_at({{-200.0f, 200.0f}, {300.0f, -300.0f}, {-201.0f, 199.0f}})));
-	TEST_EXPECT(editor_test::write_bytes(root + "/missions/closed.bms", mission_at({{-199.0f, 201.0f}})));
-	TEST_EXPECT(editor_test::write_bytes(root + "/missions/away.bms", mission_at({{300.0f, -300.0f}})));
+	TEST_EXPECT(test_io::write_file(root + "/missions/open.bms", mission_at({{-200.0f, 200.0f}, {300.0f, -300.0f}, {-201.0f, 199.0f}})));
+	TEST_EXPECT(test_io::write_file(root + "/missions/closed.bms", mission_at({{-199.0f, 201.0f}})));
+	TEST_EXPECT(test_io::write_file(root + "/missions/away.bms", mission_at({{300.0f, -300.0f}})));
 	editor_test::set_missions(session, true);
 	editor_test::handle_to_end(session, request::rescan());
 	// The project's references read (the graph the follow finds the missions by): the operations and the validation

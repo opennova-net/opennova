@@ -343,7 +343,7 @@ void test_script_uses() {
 	const MissionDocument *mission = run.mission();
 	if (!mission) return;
 	const SessionView &v = run.session.view();
-	CHECK(editor_test::write_text(v.project.root + "/missions/logic.wac", "if event(1) then set(v7,1) endif\r\n"), "the script written");
+	CHECK(test_io::write_text(v.project.root + "/missions/logic.wac", "if event(1) then set(v7,1) endif\r\n"), "the script written");
 	run.session.handle(request::rescan());
 	run.session.run_operations();
 	show_logic(run);

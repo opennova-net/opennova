@@ -287,8 +287,8 @@ int64_t edge(const Document &document, const NodeAddress &window, const char *fi
 }
 
 static int test_on_a_menu() {
-	editor_test::TempProjectDir dir("opennova_menu_arrange_test");
-	TEST_EXPECT(editor_test::write_text(dir.file("arrange.mnu"), kMenu));
+	test_temp::TempDir dir("opennova_menu_arrange_test");
+	TEST_EXPECT(test_io::write_text(dir.file("arrange.mnu"), kMenu));
 	MnuDocument document;
 	Diagnostic error;
 	TEST_EXPECT(document.load(dir.file("arrange.mnu"), "arrange.mnu", AssetKind::Menu, "jo", error));

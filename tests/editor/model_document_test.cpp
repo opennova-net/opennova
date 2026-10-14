@@ -89,9 +89,9 @@ int untouched_saves() {
 }
 
 int edits() {
-	editor_test::TempProjectDir dir("opennova_model_document_test");
+	test_temp::TempDir dir("opennova_model_document_test");
 	const std::vector<uint8_t> original = test_io::read_file(synth_dir() + "/armory.3di");
-	TEST_EXPECT(!original.empty() && editor_test::write_bytes(dir.file("armory.3di"), original));
+	TEST_EXPECT(!original.empty() && test_io::write_file(dir.file("armory.3di"), original));
 	ModelDocument document;
 	TEST_EXPECT(load(document, dir.file("armory.3di"), "armory.3di"));
 	const ModelRow *row = document.model_row();
@@ -209,7 +209,7 @@ int part_animations() {
 }
 
 int validation() {
-	editor_test::TempProjectDir dir("opennova_model_validation_test");
+	test_temp::TempDir dir("opennova_model_validation_test");
 	const std::string root = dir.file("Game");
 	ProjectDocument project;
 	Diagnostic created;
@@ -227,7 +227,7 @@ int validation() {
 		TEST_EXPECT(document.apply(set_edit({row->id, kUserPoint, document.last_added()}, "name",
 		                               std::string("sitex") + std::to_string(i)), error));
 	}
-	TEST_EXPECT(editor_test::write_bytes(root + "/armory.3di", serialized(document)));
+	TEST_EXPECT(test_io::write_file(root + "/armory.3di", serialized(document)));
 	const AssetScan scan = scan_project_assets(paths, project);
 	AssetGraph graph;
 	ValidationCache cache;

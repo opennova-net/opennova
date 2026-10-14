@@ -1,9 +1,7 @@
 #pragma once
-// Shared plumbing for the editor core tests: a throwaway project directory under the
-// system temp directory (std::filesystem::temp_directory_path, so no env read of our
-// own) that is wiped on construction and destruction (through the system's paths, so a tree past
-// MAX_PATH goes too), a file writer, a tree's digest, every missing
-// required file of a session's project created, the project settings applied, a request and the
+// Shared plumbing for the editor core tests (a throwaway project directory and a file's bytes and text,
+// read and written, are tests/common's: test_temp::TempDir and test_io, included here): a tree's digest,
+// every missing required file of a session's project created, the project settings applied, a request and the
 // operation it starts run to their end, the session polled through its terrain bakes to a state, an
 // operation that holds the documents, the edit factories, sound banks and TGAs minted, a JSON text
 // parsed, a finding made by its code's token with what it is about and the findings of a code looked up.
@@ -14,7 +12,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
-#include <fstream>
 #include <memory>
 #include <string>
 #include <system_error>
@@ -22,11 +19,6 @@
 #include <variant>
 #include <vector>
 
-#ifdef _WIN32
-#include <process.h>
-#else
-#include <unistd.h>
-#endif
 
 #include <base/io/hash.h>
 #include <base/io/os_path.h>
@@ -47,6 +39,9 @@
 #include <editor/session/view/session_view.h>
 #include <formats/lwf/lwf.h>
 #include <formats/tga/tga.h>
+
+#include "common/file_io.h"
+#include "common/temp_dir.h"
 
 namespace editor_test {
 
@@ -204,47 +199,6 @@ struct HoldingOperation : opennova::editor::SessionOperation {
 	opennova::editor::OperationOutcome finish(opennova::editor::SessionCore &) override { return {}; }
 };
 
-// The process's own suffix to a temporary directory's name: two runs of a test at once (a parallel
-// ctest beside another worktree's, an agent's beside a person's) share the system temp directory,
-// and each wipes its directory on construction and destruction, so a name both used would have one
-// run delete the other's project mid-test.
-inline std::string process_suffix() {
-#ifdef _WIN32
-	return "_" + std::to_string(_getpid());
-#else
-	return "_" + std::to_string(getpid());
-#endif
-}
-
-// `name` and every path it gives are UTF-8 (the editor's paths), turned into the system's own
-// through base/io/os_path.h, not the editor's conversions under test.
-struct TempProjectDir {
-	std::filesystem::path path;
-
-	explicit TempProjectDir(const char *name) {
-		path = std::filesystem::temp_directory_path() / opennova::io::os_path(std::string(name) + process_suffix());
-		std::error_code ec;
-		std::filesystem::remove_all(opennova::editor::system_path(root()), ec);
-		std::filesystem::create_directories(path, ec);
-	}
-	~TempProjectDir() {
-		std::error_code ec;
-		std::filesystem::remove_all(opennova::editor::system_path(root()), ec);
-	}
-	std::string root() const { return opennova::io::utf8_generic_path(path); }
-	std::string file(const char *relative) const { return opennova::io::utf8_join(root(), relative); }
-};
-
-// A file written at the UTF-8 `path`, its folders made.
-inline bool write_bytes(const std::string &path, const std::vector<uint8_t> &bytes) {
-	std::error_code ec;
-	std::filesystem::create_directories(opennova::io::os_path(path).parent_path(), ec);
-	std::ofstream out(opennova::io::os_path(path), std::ios::binary);
-	if (!out) return false;
-	out.write(reinterpret_cast<const char *>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
-	return static_cast<bool>(out);
-}
-
 // A JSON text parsed (a null value when it does not parse).
 inline opennova::io::JsonValue parsed(const std::string &text) {
 	opennova::io::JsonValue out;
@@ -355,36 +309,6 @@ inline std::vector<uint8_t> wave_bank_of(const std::vector<std::string> &sets) {
 	std::string error;
 	lwf::encode_lwf(bank, out, error);
 	return out;
-}
-
-// `text` with every line ending in CR LF, the last one included: the one break the retail walk of a
-// .def, .trn or .env file splits at, which drops the last byte of a line left without it
-// [orig: File_ParseASCIIFile @0x53D8C7..0x53D8F5; engine/base/io/ascii_config.h]. A test writes such
-// a file's text with LF and stages it through this (the GUT suite's TestFs.crlf).
-inline std::string crlf(const std::string &text) {
-	std::string lf;
-	for (size_t i = 0; i < text.size(); ++i)
-		if (!(text[i] == '\r' && i + 1 < text.size() && text[i + 1] == '\n')) lf += text[i];
-	if (!lf.empty() && lf.back() != '\n') lf += '\n';
-	std::string out;
-	for (const char c : lf) {
-		if (c == '\n') out += '\r';
-		out += c;
-	}
-	return out;
-}
-
-// A text as a file named `name` holds it: a .def, .trn or .env with CR LF line ends (crlf above).
-inline std::string staged(const std::string &name, const std::string &text) {
-	std::string extension = name.size() >= 4 ? name.substr(name.size() - 4) : std::string();
-	for (char &c : extension) c = char(std::tolower(static_cast<unsigned char>(c)));
-	return extension == ".def" || extension == ".trn" || extension == ".env" ? crlf(text) : text;
-}
-
-// A text file written at `path` (staged above).
-inline bool write_text(const std::string &path, const std::string &text) {
-	const std::string bytes = staged(path, text);
-	return write_bytes(path, std::vector<uint8_t>(bytes.begin(), bytes.end()));
 }
 
 // A test device's ground (the height at a point of the viewport's space, z up): where the segment

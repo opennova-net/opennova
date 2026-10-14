@@ -1331,7 +1331,7 @@ int test_validation() {
 // the minted mission, an entity in another pool than its item's TYPE places it in is a warning on the
 // record, read through the graph (the item symbol's value, its TYPE).
 int test_pool_check() {
-	editor_test::TempProjectDir dir("opennova_mission_pool_check");
+	test_temp::TempDir dir("opennova_mission_pool_check");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1339,7 +1339,7 @@ int test_pool_check() {
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
 	const std::string repo = test_paths_repo_root(__FILE__);
-	TEST_EXPECT(editor_test::write_bytes(root + "/defs/items.def", test_io::read_file(repo + "/fixtures/def/items.def")));
+	TEST_EXPECT(test_io::write_file(root + "/defs/items.def", test_io::read_file(repo + "/fixtures/def/items.def")));
 	// The minted mission with the armory (a building) placed among the items.
 	int64_t own_item = 0;
 	{
@@ -1351,7 +1351,7 @@ int test_pool_check() {
 		file.items[0].type_id = 106101 - mission::kItemIdOffset;
 		std::vector<uint8_t> out;
 		TEST_EXPECT(bms::write(file, out, message));
-		TEST_EXPECT(editor_test::write_bytes(root + "/missions/pools.bms", out));
+		TEST_EXPECT(test_io::write_file(root + "/missions/pools.bms", out));
 	}
 	editor_test::handle_to_end(session, request::rescan());
 	size_t pool = 0;
@@ -1388,7 +1388,7 @@ int test_pool_check() {
 // its new name), and the renamed mission's set resolves under the new names; a stale file of the new
 // name and an imported companion refuse it.
 int test_rename_companions() {
-	editor_test::TempProjectDir dir("opennova_mission_rename_companions");
+	test_temp::TempDir dir("opennova_mission_rename_companions");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
@@ -1396,9 +1396,9 @@ int test_rename_companions() {
 	editor_test::create_missing_files(session);
 	const std::string root = session.view().project.root;
 	const std::string repo = test_paths_repo_root(__FILE__);
-	TEST_EXPECT(editor_test::write_bytes(root + "/missions/walk.bms", fixture_bytes()));
-	TEST_EXPECT(editor_test::write_bytes(root + "/missions/walk.bin", test_io::read_file(repo + "/fixtures/bms/synth_logic.bin")));
-	TEST_EXPECT(editor_test::write_text(root + "/missions/walk.wac", "; the walk\r\n"));
+	TEST_EXPECT(test_io::write_file(root + "/missions/walk.bms", fixture_bytes()));
+	TEST_EXPECT(test_io::write_file(root + "/missions/walk.bin", test_io::read_file(repo + "/fixtures/bms/synth_logic.bin")));
+	TEST_EXPECT(test_io::write_text(root + "/missions/walk.wac", "; the walk\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	const SessionView &view = session.view();
 	const AssetGraph &graph = *view.findings.graph;
@@ -1421,7 +1421,7 @@ int test_rename_companions() {
 	TEST_EXPECT(!plan_rename(ProjectPaths::for_root(root), *view.project.scan, graph, "walk.bms", "a_name_far_too_long.bms").ok());
 	// A file the game would find by the new name, of no mission (a stale script), refuses the rename:
 	// the renamed mission would take it as its own.
-	TEST_EXPECT(editor_test::write_text(root + "/missions/jog.wac", "; a stale one\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/missions/jog.wac", "; a stale one\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	{
 		const RenamePlan stale = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "walk.bms", "jog.bms");
@@ -1449,7 +1449,7 @@ int test_rename_companions() {
 	// A companion the import pass makes (the loading image, out of a PNG source) refuses the rename:
 	// the next import would make it again under the old name; its source is the file to rename.
 	{
-		TEST_EXPECT(editor_test::write_bytes(root + "/art/run.png", test_png::gradient_png(8, 8)));
+		TEST_EXPECT(test_io::write_file(root + "/art/run.png", test_png::gradient_png(8, 8)));
 		const Importer *importer = importer_for(root + "/art/run.png");
 		TEST_EXPECT(importer);
 		if (!importer) return 1;
@@ -1476,14 +1476,14 @@ int test_rename_companions() {
 // the game reads <stem>.lwf only beside <stem>.dbf (S14 R4), so the mission's dialog sounds name no
 // file: the bank is not the mission's (no use of it, no companion of a rename); with a .dbf it is.
 int test_mission_named_like_a_bank() {
-	editor_test::TempProjectDir dir("opennova_mission_named_like_a_bank");
+	test_temp::TempDir dir("opennova_mission_named_like_a_bank");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Banks"));
 	const std::string root = session.view().project.root;
-	TEST_EXPECT(editor_test::write_bytes(root + "/missions/menu.bms", fixture_bytes()));
-	TEST_EXPECT(editor_test::write_text(root + "/sounds/menu.lwf", "lwf"));
+	TEST_EXPECT(test_io::write_file(root + "/missions/menu.bms", fixture_bytes()));
+	TEST_EXPECT(test_io::write_text(root + "/sounds/menu.lwf", "lwf"));
 	editor_test::handle_to_end(session, request::rescan());
 	const SessionView &view = session.view();
 	const auto sounds = [&view]() -> const GraphEdge * {
@@ -1507,7 +1507,7 @@ int test_mission_named_like_a_bank() {
 	RenamePlan plan = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "menu.bms", "walk.bms");
 	TEST_EXPECT(plan.ok() && !takes_bank(plan));
 	// With its dialog bank, the bank of its name is its dialog's sounds.
-	TEST_EXPECT(editor_test::write_text(root + "/missions/menu.dbf", "dbf"));
+	TEST_EXPECT(test_io::write_text(root + "/missions/menu.dbf", "dbf"));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(sounds() && view.findings.graph->resolve(*sounds()) == ReferenceStatus::Present && users() == 1);
 	plan = plan_rename(ProjectPaths::for_root(root), *view.project.scan, *view.findings.graph, "menu.bms", "walk.bms");
@@ -1528,14 +1528,14 @@ int test_mission_named_like_a_bank() {
 // readers cut it (S14 R4): op.v2.bms's script is op.wac, which no note calls unused, a rename takes
 // it, and Play mission from op.wac starts op.v2.bms.
 int test_mission_first_dot() {
-	editor_test::TempProjectDir dir("opennova_mission_first_dot");
+	test_temp::TempDir dir("opennova_mission_first_dot");
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session(platform, preferences);
 	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Dots"));
 	const std::string root = session.view().project.root;
-	TEST_EXPECT(editor_test::write_bytes(root + "/missions/op.v2.bms", fixture_bytes()));
-	TEST_EXPECT(editor_test::write_text(root + "/missions/op.wac", "; the op\r\n"));
+	TEST_EXPECT(test_io::write_file(root + "/missions/op.v2.bms", fixture_bytes()));
+	TEST_EXPECT(test_io::write_text(root + "/missions/op.wac", "; the op\r\n"));
 	editor_test::handle_to_end(session, request::rescan());
 	const SessionView &view = session.view();
 	const GraphEdge *script = edge_to_file(*view.findings.graph, "missions/op.v2.bms", ReferenceKind::Script);

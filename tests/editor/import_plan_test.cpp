@@ -83,14 +83,14 @@ std::vector<uint8_t> chunk_file() {
 static int test_plan_folder() {
 	Project project("opennova_editor_plan_folder");
 	const std::string root = project.root();
-	TEST_EXPECT(editor_test::write_text(root + "/fonts/have.fnt", "fnt"));
+	TEST_EXPECT(test_io::write_text(root + "/fonts/have.fnt", "fnt"));
 	project.session.handle(request::rescan());
 	project.session.run_operations();
 	const std::string art = project.dir.file("art");
-	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("BUTTON", "GO", font("arial99") + image("logo.tga")) +
+	TEST_EXPECT(test_io::write_text(art + "/a.mnu", screen("A", window("BUTTON", "GO", font("arial99") + image("logo.tga")) +
 	                                                                    window("STATIC", "KEEP", font("have")))));
-	TEST_EXPECT(editor_test::write_text(art + "/arial99.fnt", "fnt") && editor_test::write_text(art + "/LOGO.TGA", "tga") &&
-	            editor_test::write_text(art + "/unused.pcx", "pcx"));
+	TEST_EXPECT(test_io::write_text(art + "/arial99.fnt", "fnt") && test_io::write_text(art + "/LOGO.TGA", "tga") &&
+	            test_io::write_text(art + "/unused.pcx", "pcx"));
 	const auto before = snapshot(project.dir.path);
 	const ImportPlan plan = project.plan({{art + "/a.mnu", {}}});
 	TEST_EXPECT(snapshot(project.dir.path) == before);
@@ -121,10 +121,10 @@ static int test_plan_folder() {
 
 	// A font through a variable only the stylesheet the selection brings defines (the game
 	// reads menu_style.mns), and a texture whose name the archives cannot store.
-	TEST_EXPECT(editor_test::write_text(art + "/b.mnu", screen("B", window("STATIC", "LOGO", font("%FONT_X%") +
+	TEST_EXPECT(test_io::write_text(art + "/b.mnu", screen("B", window("STATIC", "LOGO", font("%FONT_X%") +
 	                                                                                     image("a_long_texture_name.tga")))));
-	TEST_EXPECT(editor_test::write_text(art + "/menu_style.mns", "FONT_X styled.fnt\r\n"));
-	TEST_EXPECT(editor_test::write_text(art + "/styled.fnt", "fnt") && editor_test::write_text(art + "/a_long_texture_name.tga", "tga"));
+	TEST_EXPECT(test_io::write_text(art + "/menu_style.mns", "FONT_X styled.fnt\r\n"));
+	TEST_EXPECT(test_io::write_text(art + "/styled.fnt", "fnt") && test_io::write_text(art + "/a_long_texture_name.tga", "tga"));
 	const ImportPlan styled = project.plan({{art + "/b.mnu", {}}, {art + "/menu_style.mns", {}}});
 	const ImportPlanRow *font_row = row_named(styled, "styled.fnt");
 	TEST_EXPECT(font_row && font_row->state == State::Found && font_row->needed_by.file == "b.mnu" &&
@@ -138,8 +138,8 @@ static int test_plan_folder() {
 	TEST_EXPECT(!not_followed(styled, ReferenceKind::StyleVar) && styled.undefined.empty() && styled.rows.size() == 4);
 
 	// A menu found that does not read: taken, its references not looked for, said once.
-	TEST_EXPECT(editor_test::write_text(art + "/c.mnu", screen("C", window("BUTTON", "GO", go_to("broken.mnu", "X")))));
-	TEST_EXPECT(editor_test::write_bytes(art + "/broken.mnu", {0xFF, 0xFE, 0x41}));
+	TEST_EXPECT(test_io::write_text(art + "/c.mnu", screen("C", window("BUTTON", "GO", go_to("broken.mnu", "X")))));
+	TEST_EXPECT(test_io::write_file(art + "/broken.mnu", {0xFF, 0xFE, 0x41}));
 	const ImportPlan broken = project.plan({{art + "/c.mnu", {}}});
 	size_t unreadable = 0;
 	for (const Diagnostic &d : broken.diagnostics) unreadable += d.code() == "import.unreadable" && d.asset == "broken.mnu" ? 1 : 0;
@@ -195,16 +195,16 @@ static int test_plan_game_install() {
 	                       {"shared.pcx", "same"},
 	                       {"retail.mnu", screen("RETAIL", window("STATIC", "R", font("arial99") + image("logo.tga")))}}));
 	const std::string art = project.dir.file("art");
-	TEST_EXPECT(editor_test::write_text(art + "/a.mnu",
+	TEST_EXPECT(test_io::write_text(art + "/a.mnu",
 	                                    screen("A", window("BUTTON", "GO", font("arial99") + image("logo.tga")) +
 	                                                    window("STATIC", "SHARED", image("shared.pcx")) +
 	                                                    window("STATIC", "GONE", image("nowhere.tga")) +
 	                                                    window("STATIC", "GONE2", image("nowhere.tga")))));
-	TEST_EXPECT(editor_test::write_text(art + "/logo.tga", "folder tga") && editor_test::write_text(art + "/shared.pcx", "same"));
+	TEST_EXPECT(test_io::write_text(art + "/logo.tga", "folder tga") && test_io::write_text(art + "/shared.pcx", "same"));
 	// A loose logo.tga beside the install's archive, as the folder's: a stock launch reads
 	// the archive's (the loose file wins only under /d) [orig: FileSystem_OpenFile @
 	// 0x75b1c0, the gate @ 0x75b1e5], so the install's rival still differs.
-	TEST_EXPECT(editor_test::write_text(install + "/logo.tga", "folder tga"));
+	TEST_EXPECT(test_io::write_text(install + "/logo.tga", "folder tga"));
 	const auto before = snapshot(project.dir.path);
 	const ImportPlan plan = project.plan({{art + "/a.mnu", {}}}, true, install);
 	TEST_EXPECT(snapshot(project.dir.path) == before);
@@ -257,7 +257,7 @@ static int test_plan_scene() {
 	fs::create_directories(scene, ec);
 	const fs::path fixture = fs::path(__FILE__).parent_path().parent_path().parent_path() / "fixtures" / "threedi" / "o3d" / "spinner.o3d";
 	fs::copy_file(fixture, scene + "/spinner.o3d", ec);
-	TEST_EXPECT(!ec && editor_test::write_text(scene + "/SPINNER.TGA", "tga")); // spinner.o3d names spinner.tga and glow.tga
+	TEST_EXPECT(!ec && test_io::write_text(scene + "/SPINNER.TGA", "tga")); // spinner.o3d names spinner.tga and glow.tga
 	const auto before = snapshot(project.dir.path);
 	const ImportPlan plan = project.plan({{scene + "/spinner.o3d", {}}});
 	TEST_EXPECT(snapshot(project.dir.path) == before);
@@ -274,7 +274,7 @@ static int test_plan_scene() {
 	const ImportPlanRow *glow = row_named(plan, "glow.tga");
 	TEST_EXPECT(glow && glow->state == State::NotFound && glow->needed_by.file == "spinner.3di");
 	// The .dds beside it: a diffuse row loads it.
-	TEST_EXPECT(editor_test::write_text(scene + "/glow.dds", "dds"));
+	TEST_EXPECT(test_io::write_text(scene + "/glow.dds", "dds"));
 	const ImportPlan with_dds = project.plan({{scene + "/spinner.o3d", {}}});
 	const ImportPlanRow *dds = row_named(with_dds, "glow.dds");
 	TEST_EXPECT(with_dds.rows.size() == 3 && !row_named(with_dds, "glow.tga") && dds && dds->state == State::Found);
@@ -287,9 +287,9 @@ static int test_plan_scene() {
 static int test_plan_cycle_and_cap() {
 	Project project("opennova_editor_plan_cycle");
 	const std::string art = project.dir.file("art");
-	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("BUTTON", "GO", font("fa") + go_to("b.mnu", "B")))));
-	TEST_EXPECT(editor_test::write_text(art + "/b.mnu", screen("B", window("BUTTON", "BACK", font("fb") + go_to("a.mnu", "A")))));
-	TEST_EXPECT(editor_test::write_text(art + "/fa.fnt", "fnt") && editor_test::write_text(art + "/fb.fnt", "fnt"));
+	TEST_EXPECT(test_io::write_text(art + "/a.mnu", screen("A", window("BUTTON", "GO", font("fa") + go_to("b.mnu", "B")))));
+	TEST_EXPECT(test_io::write_text(art + "/b.mnu", screen("B", window("BUTTON", "BACK", font("fb") + go_to("a.mnu", "A")))));
+	TEST_EXPECT(test_io::write_text(art + "/fa.fnt", "fnt") && test_io::write_text(art + "/fb.fnt", "fnt"));
 	const ImportPlan plan = project.plan({{art + "/a.mnu", {}}});
 	TEST_EXPECT(!plan.truncated && plan.rows.size() == 4);
 	size_t menus = 0;
@@ -302,7 +302,7 @@ static int test_plan_cycle_and_cap() {
 	for (const ImportPlanRow &row : capped.rows) taken += row.selected ? 1 : 0;
 	TEST_EXPECT(capped.truncated && taken == 2 && capped.rows.size() == 2);
 	// The cap binds the selection too, followed or not: three fonts, room for two.
-	TEST_EXPECT(editor_test::write_text(art + "/fc.fnt", "fnt"));
+	TEST_EXPECT(test_io::write_text(art + "/fc.fnt", "fnt"));
 	const std::vector<ImportChoice> fonts = {{art + "/fa.fnt", {}}, {art + "/fb.fnt", {}}, {art + "/fc.fnt", {}}};
 	for (const bool follow : {true, false}) {
 		const ImportPlan roots = project.plan(fonts, follow, std::string(), 2);
@@ -311,7 +311,7 @@ static int test_plan_cycle_and_cap() {
 	}
 	// And a converter's outputs, which come together: a clip set's table and clip with room
 	// for one take neither; after a font, room for two takes the font alone.
-	TEST_EXPECT(editor_test::write_text(art + "/walk.o3a",
+	TEST_EXPECT(test_io::write_text(art + "/walk.o3a",
 	                                    "o3a 1\nadm CHECK.adm\nrow anim_reset \"walk\"\nclip walk\nfps 30\nflags 0x1\nframes 1\n"
 	                                    "bone -1 0 0 0 0.5 \"BN01 Pelvis\"\n k 0 0 0 1\n k 0 0 0 1\n"
 	                                    "event 0 0 0 0x0 0.9 1.7\nevent 0 0 0 0x0 0.9 1.7\n"));
@@ -350,13 +350,13 @@ static int test_plan_not_followed() {
 		TEST_EXPECT(opennova::mission::set_header_string(mission, "terrain", "island", error));
 		std::vector<uint8_t> bytes;
 		TEST_EXPECT(opennova::bms::write(mission, bytes, error));
-		TEST_EXPECT(editor_test::write_bytes(art + "/m.bms", bytes));
+		TEST_EXPECT(test_io::write_file(art + "/m.bms", bytes));
 	}
-	TEST_EXPECT(editor_test::write_text(art + "/island.trn", terrain_text("island")) &&
-	            editor_test::write_text(art + "/island.cpt", "cpt") && editor_test::write_text(art + "/island_c.tga", "tga") &&
-	            editor_test::write_text(art + "/m.dbf", "dbf"));
-	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("BUTTON", "GO", go_to("a.mnu", "A")))));
-	TEST_EXPECT(editor_test::write_text(art + "/items.def", "begin \"Boom\"\nid 100100\ntype building\nsounddeath boom\nend\n"));
+	TEST_EXPECT(test_io::write_text(art + "/island.trn", terrain_text("island")) &&
+	            test_io::write_text(art + "/island.cpt", "cpt") && test_io::write_text(art + "/island_c.tga", "tga") &&
+	            test_io::write_text(art + "/m.dbf", "dbf"));
+	TEST_EXPECT(test_io::write_text(art + "/a.mnu", screen("A", window("BUTTON", "GO", go_to("a.mnu", "A")))));
+	TEST_EXPECT(test_io::write_text(art + "/items.def", "begin \"Boom\"\nid 100100\ntype building\nsounddeath boom\nend\n"));
 	const ImportPlan plan = project.plan({{art + "/m.bms", {}}, {art + "/a.mnu", {}}, {art + "/items.def", {}}});
 	const ImportPlanRow *terrain = row_named(plan, "island.trn");
 	TEST_EXPECT(terrain && terrain->state == State::Found && terrain->kind == AssetKind::Terrain &&
@@ -377,8 +377,8 @@ static int test_plan_not_followed() {
 	// Needed by in a modder's words: the definition's record by its kind and name, its field by the label the
 	// definitions give it (def_words), never the key as written.
 	const std::string vehicles = project.dir.file("vehicles");
-	TEST_EXPECT(editor_test::write_text(vehicles + "/items.def", "begin \"Dune Buggy\"\nid 100200\ntype building\ndefault_aip buggy.aip\nend\n") &&
-	            editor_test::write_text(vehicles + "/buggy.aip", "aip"));
+	TEST_EXPECT(test_io::write_text(vehicles + "/items.def", "begin \"Dune Buggy\"\nid 100200\ntype building\ndefault_aip buggy.aip\nend\n") &&
+	            test_io::write_text(vehicles + "/buggy.aip", "aip"));
 	const ImportPlan worded = project.plan({{vehicles + "/items.def", {}}});
 	const ImportPlanRow *profile = row_named(worded, "buggy.aip");
 	TEST_EXPECT(profile && profile->needed_by.file == "items.def" && profile->needed_by.field == "default_aip");
@@ -389,14 +389,14 @@ static int test_plan_not_followed() {
 	// place's items.def (its anim_def beside its graphic), as the model preview plays it.
 	{
 		const std::string rigs = project.dir.file("rigs");
-		TEST_EXPECT(editor_test::write_text(rigs + "/items.def",
+		TEST_EXPECT(test_io::write_text(rigs + "/items.def",
 		                                    "begin \"Rifleman\"\nid 100300\ntype building\ngraphic onjo\nanim_def onjo.adm\nend\n") &&
-		            editor_test::write_text(rigs + "/onjo.adm", "adm") && editor_test::write_text(rigs + "/other.adm", "adm"));
+		            test_io::write_text(rigs + "/onjo.adm", "adm") && test_io::write_text(rigs + "/other.adm", "adm"));
 		std::vector<uint8_t> model;
 		std::string unread;
 		TEST_EXPECT(opennova::io::read_file_bytes(std::string(test_paths_repo_root(__FILE__)) + "/fixtures/threedi/synth/armory.3di",
 		                                          model, unread));
-		TEST_EXPECT(editor_test::write_bytes(rigs + "/onjo.3di", model));
+		TEST_EXPECT(test_io::write_file(rigs + "/onjo.3di", model));
 		const ImportPlan rigged = project.plan({{rigs + "/onjo.3di", {}}});
 		const ImportPlanRow *table = row_named(rigged, "onjo.adm");
 		TEST_EXPECT(table && table->state == State::Found && table->kind == AssetKind::AnimationMap &&
@@ -415,9 +415,9 @@ static int test_plan_not_followed() {
 		TEST_EXPECT(opennova::mission::set_header_string(mission, "terrain", "island", error));
 		TEST_EXPECT(opennova::mission::set_header_string(mission, "environment", "day", error));
 		TEST_EXPECT(opennova::mission::write_mis_text(mission, text, error));
-		TEST_EXPECT(editor_test::write_text(art + "/m.mis", text));
+		TEST_EXPECT(test_io::write_text(art + "/m.mis", text));
 	}
-	TEST_EXPECT(editor_test::write_text(art + "/day.env", "env"));
+	TEST_EXPECT(test_io::write_text(art + "/day.env", "env"));
 	// A mission text (S14: its own kind, which the game never reads): taken, what it names listed
 	// as not followed by its kind.
 	const ImportPlan text_plan = project.plan({ { art + "/m.mis", {} } });
@@ -429,8 +429,8 @@ static int test_plan_not_followed() {
 		TEST_EXPECT(d.code() != "import.unreadable");
 	// A face names its textures (S18: read by the graph), followed: its base texture found beside it; a wave
 	// names nothing.
-	TEST_EXPECT(editor_test::write_text(art + "/head.grm", "basetexture face.tga\r\n") &&
-	            editor_test::write_text(art + "/face.tga", "tga") && editor_test::write_text(art + "/boom.wav", "RIFF"));
+	TEST_EXPECT(test_io::write_text(art + "/head.grm", "basetexture face.tga\r\n") &&
+	            test_io::write_text(art + "/face.tga", "tga") && test_io::write_text(art + "/boom.wav", "RIFF"));
 	const ImportPlan face_plan = project.plan({{art + "/head.grm", {}}, {art + "/boom.wav", {}}});
 	TEST_EXPECT(!not_followed(face_plan, ReferenceKind::None, AssetKind::FaceAnimation) && row_named(face_plan, "head.grm"));
 	const ImportPlanRow *base = row_named(face_plan, "face.tga");
@@ -440,8 +440,8 @@ static int test_plan_not_followed() {
 	// A script is followed whole (S14): the script its RUN names (by the name written, the kind's
 	// extension reaching the file) and the wave it plays, each found beside it; nothing of it not
 	// followed.
-	TEST_EXPECT(editor_test::write_text(art + "/m.wac", "If true(bluekills) then\r\n\twave \"boom.wav\"\r\nendif\r\nRUN other\r\n") &&
-	            editor_test::write_text(art + "/other.wac", "; the other\r\n"));
+	TEST_EXPECT(test_io::write_text(art + "/m.wac", "If true(bluekills) then\r\n\twave \"boom.wav\"\r\nendif\r\nRUN other\r\n") &&
+	            test_io::write_text(art + "/other.wac", "; the other\r\n"));
 	const ImportPlan script_plan = project.plan({{art + "/m.wac", {}}});
 	const ImportPlanRow *run = row_named(script_plan, "other.wac"), *played = row_named(script_plan, "boom.wav");
 	TEST_EXPECT(run && run->state == State::Found && run->kind == AssetKind::Script && run->needed_by.file == "m.wac" &&
@@ -487,9 +487,9 @@ static int test_references_unread() {
 static int test_plan_competition() {
 	Project project("opennova_editor_plan_competition");
 	const std::string a = project.dir.file("a"), b = project.dir.file("b");
-	TEST_EXPECT(editor_test::write_text(a + "/a.mnu", screen("A", window("STATIC", "LOGO", image("logo.pcx")))));
-	TEST_EXPECT(editor_test::write_text(b + "/b.mnu", screen("B", window("STATIC", "LOGO", image("logo.pcx")))));
-	TEST_EXPECT(editor_test::write_text(a + "/logo.pcx", "pcx of a") && editor_test::write_text(b + "/logo.pcx", "pcx of b"));
+	TEST_EXPECT(test_io::write_text(a + "/a.mnu", screen("A", window("STATIC", "LOGO", image("logo.pcx")))));
+	TEST_EXPECT(test_io::write_text(b + "/b.mnu", screen("B", window("STATIC", "LOGO", image("logo.pcx")))));
+	TEST_EXPECT(test_io::write_text(a + "/logo.pcx", "pcx of a") && test_io::write_text(b + "/logo.pcx", "pcx of b"));
 	const ImportPlan plan = project.plan({{a + "/a.mnu", {}}, {b + "/b.mnu", {}}});
 	const ImportPlanRow *logo = row_named(plan, "logo.pcx");
 	TEST_EXPECT(plan.rows.size() == 3 && logo && logo->state == State::Found && logo->found_in == "the folder " + a &&
@@ -500,7 +500,7 @@ static int test_plan_competition() {
 	const ImportPlanRow *picked = row_named(chosen, "logo.pcx");
 	TEST_EXPECT(chosen.rows.size() == 2 && picked && picked->state == State::Selected && picked->rivals.size() == 1 &&
 	            picked->rivals[0].found_in == "the folder " + b && picked->rivals[0].differs);
-	TEST_EXPECT(editor_test::write_text(b + "/logo.pcx", "pcx of a"));
+	TEST_EXPECT(test_io::write_text(b + "/logo.pcx", "pcx of a"));
 	const ImportPlan same = project.plan({{a + "/a.mnu", {}}, {b + "/b.mnu", {}}});
 	const ImportPlanRow *twin = row_named(same, "logo.pcx");
 	TEST_EXPECT(twin && twin->rivals.size() == 1 && !twin->rivals[0].differs);
@@ -518,9 +518,9 @@ static int test_plan_material_sources() {
 	                           "texture other.nq8 1 17\nlod 0\npart 0 0 0 0\nmesh 0 0\n"
 	                           "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n";
 	const std::string scene = project.dir.file("scene");
-	TEST_EXPECT(editor_test::write_text(scene + "/relief.o3d", relief) && editor_test::write_text(scene + "/ready.mdt", "mdt") &&
-	            editor_test::write_bytes(scene + "/field.nq8", chunk_file()) &&
-	            editor_test::write_text(scene + "/other.nq8", "no chunk here"));
+	TEST_EXPECT(test_io::write_text(scene + "/relief.o3d", relief) && test_io::write_text(scene + "/ready.mdt", "mdt") &&
+	            test_io::write_file(scene + "/field.nq8", chunk_file()) &&
+	            test_io::write_text(scene + "/other.nq8", "no chunk here"));
 	const ImportPlan beside = project.plan({{scene + "/relief.o3d", {}}});
 	const ImportPlanRow *ready = row_named(beside, "ready.mdt");
 	const ImportPlanRow *field = row_named(beside, "field.nq8");
@@ -533,7 +533,7 @@ static int test_plan_material_sources() {
 	const std::vector<uint8_t> chunk = chunk_file();
 	TEST_EXPECT(write_pff(install + "/resource.pff", {{"ready.mdt", "mdt"}, {"field.nq8", std::string(chunk.begin(), chunk.end())}}));
 	const std::string bare = project.dir.file("bare");
-	TEST_EXPECT(editor_test::write_text(bare + "/relief.o3d", relief));
+	TEST_EXPECT(test_io::write_text(bare + "/relief.o3d", relief));
 	const ImportPlan plan = project.plan({{bare + "/relief.o3d", {}}}, true, install);
 	for (const char *name : {"ready.mdt", "field.nq8"}) {
 		const ImportPlanRow *row = row_named(plan, name);
@@ -570,16 +570,16 @@ static int test_plan_material_sources() {
 static int test_plan_stylesheets() {
 	Project project("opennova_editor_plan_stylesheets");
 	const std::string root = project.root();
-	TEST_EXPECT(editor_test::write_text(root + "/menus/menu_style.mns", "FONT_X old.fnt\r\nVAR_Y gone.fnt\r\n") &&
-	            editor_test::write_text(root + "/menus/brand.mns", "FONT_X brand.fnt\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/menus/menu_style.mns", "FONT_X old.fnt\r\nVAR_Y gone.fnt\r\n") &&
+	            test_io::write_text(root + "/menus/brand.mns", "FONT_X brand.fnt\r\n"));
 	project.session.handle(request::rescan());
 	project.session.run_operations();
 	const std::string art = project.dir.file("art");
-	TEST_EXPECT(editor_test::write_text(art + "/menu_style.mns", "FONT_X base.fnt\r\n"));
-	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("STATIC", "X", font("%FONT_X%")) +
+	TEST_EXPECT(test_io::write_text(art + "/menu_style.mns", "FONT_X base.fnt\r\n"));
+	TEST_EXPECT(test_io::write_text(art + "/a.mnu", screen("A", window("STATIC", "X", font("%FONT_X%")) +
 	                                                                    window("STATIC", "Y", font("%VAR_Y%")))));
 	for (const char *name : {"base.fnt", "brand.fnt", "gone.fnt", "old.fnt"})
-		TEST_EXPECT(editor_test::write_text(art + "/" + name, "fnt"));
+		TEST_EXPECT(test_io::write_text(art + "/" + name, "fnt"));
 	const ImportPlan plan = project.plan({{art + "/menu_style.mns", {}}, {art + "/a.mnu", {}}});
 	const ImportPlanRow *brand = row_named(plan, "brand.fnt");
 	TEST_EXPECT(brand && brand->state == State::Found && brand->needed_by.file == "a.mnu" &&
@@ -595,7 +595,7 @@ static int test_plan_stylesheets() {
 static int test_plan_missing_lookups() {
 	Project project("opennova_editor_plan_missing_lookups");
 	const std::string a = project.dir.file("a"), b = project.dir.file("b");
-	TEST_EXPECT(editor_test::write_text(a + "/glow.o3d",
+	TEST_EXPECT(test_io::write_text(a + "/glow.o3d",
 	                                    "o3d 2\nmodel GLOW\nmaterial FF_ST_OP\ntexture glow.tga 1 0\ntexture glow.tga 1 1\n"
 	                                    "lod 0\npart 0 0 0 0\nmesh 0 0\nv 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\n"
 	                                    "v 0 1 0 0 0 1 0 1\nt 0 1 2\n"));
@@ -603,8 +603,8 @@ static int test_plan_missing_lookups() {
 	const ImportPlanRow *missing = row_named(alone, "glow.tga");
 	TEST_EXPECT(alone.rows.size() == 2 && missing && missing->state == State::NotFound &&
 	            missing->needed_by.loader_arg == 0);
-	TEST_EXPECT(editor_test::write_text(b + "/b.mnu", screen("B", window("STATIC", "GLOW", image("glow.dds")))) &&
-	            editor_test::write_text(b + "/glow.dds", "dds"));
+	TEST_EXPECT(test_io::write_text(b + "/b.mnu", screen("B", window("STATIC", "GLOW", image("glow.dds")))) &&
+	            test_io::write_text(b + "/glow.dds", "dds"));
 	const ImportPlan both = project.plan({{a + "/glow.o3d", {}}, {b + "/b.mnu", {}}});
 	const ImportPlanRow *dds = row_named(both, "glow.dds");
 	const ImportPlanRow *still = row_named(both, "glow.tga");
@@ -627,8 +627,8 @@ static int test_plan_kinds() {
 	const std::string install = project.dir.file("install");
 	TEST_EXPECT(write_pff(install + "/resource.pff", {{"labels.bin", std::string(table.begin(), table.end())}}));
 	const std::string art = project.dir.file("art");
-	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("STATIC", "TEXT", "<TEXT_RSRC>labels.bin</TEXT_RSRC>\r\n"))));
-	TEST_EXPECT(editor_test::write_text(art + "/labels.bin", "raw bytes"));
+	TEST_EXPECT(test_io::write_text(art + "/a.mnu", screen("A", window("STATIC", "TEXT", "<TEXT_RSRC>labels.bin</TEXT_RSRC>\r\n"))));
+	TEST_EXPECT(test_io::write_text(art + "/labels.bin", "raw bytes"));
 	const ImportPlan selected = project.plan({{art + "/a.mnu", {}}, {art + "/labels.bin", {}}});
 	size_t raw = 0, lost = 0;
 	for (const ImportPlanRow &row : selected.rows) {
@@ -650,8 +650,8 @@ static int test_plan_kinds() {
 static int test_plan_native_png() {
 	Project project("opennova_editor_plan_native_png");
 	const std::string art = project.dir.file("art");
-	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("STATIC", "LOGO", image("logo.png")))) &&
-	            editor_test::write_bytes(art + "/logo.png", test_png::gradient_png(4, 4)));
+	TEST_EXPECT(test_io::write_text(art + "/a.mnu", screen("A", window("STATIC", "LOGO", image("logo.png")))) &&
+	            test_io::write_file(art + "/logo.png", test_png::gradient_png(4, 4)));
 	const ImportPlan plan = project.plan({{art + "/a.mnu", {}}});
 	const ImportPlanRow *logo = row_named(plan, "logo.png");
 	TEST_EXPECT(logo && logo->state == State::Found && logo->kind == AssetKind::Texture && logo->source.native);
@@ -664,7 +664,7 @@ static int test_plan_native_png() {
 	const AssetEntry *png = view.project.scan->find("logo.png");
 	TEST_EXPECT(png && png->kind == AssetKind::Texture && !fs::exists(fs::path(root) / (png->relative_path + kImportSidecarSuffix)));
 	TEST_EXPECT(view.findings.graph->resolve(ReferenceKind::MenuTexture, "logo.png") == ReferenceStatus::Present);
-	TEST_EXPECT(editor_test::write_bytes(art + "/badge.png", test_png::gradient_png(4, 4, 7)));
+	TEST_EXPECT(test_io::write_file(art + "/badge.png", test_png::gradient_png(4, 4, 7)));
 	const ImportResult authored = import_assets({{art + "/badge.png", {}}}, ProjectPaths::for_root(root), *view.project.document, false);
 	TEST_EXPECT(authored.imported.size() == 1 && fs::exists(fs::path(root) / (authored.imported[0] + kImportSidecarSuffix)));
 	return 0;
@@ -675,8 +675,8 @@ static int test_plan_native_png() {
 static int test_plan_relative_path() {
 	Project project("opennova_editor_plan_relative");
 	const std::string art = project.dir.file("art");
-	TEST_EXPECT(editor_test::write_text(art + "/a.mnu", screen("A", window("STATIC", "GO", font("arial99")))) &&
-	            editor_test::write_text(art + "/arial99.fnt", "fnt"));
+	TEST_EXPECT(test_io::write_text(art + "/a.mnu", screen("A", window("STATIC", "GO", font("arial99")))) &&
+	            test_io::write_text(art + "/arial99.fnt", "fnt"));
 	std::error_code ec;
 	const fs::path was = fs::current_path(ec);
 	fs::current_path(art, ec);
@@ -756,9 +756,9 @@ static int test_plan_steps() {
 	for (int i = 0; i < 8; ++i) {
 		const std::string name = "big" + std::to_string(i) + ".tga";
 		windows += window("STATIC", ("W" + std::to_string(i)).c_str(), image(name));
-		TEST_EXPECT(editor_test::write_text(art + "/" + name, std::string(size_t(1) << 20, 't')));
+		TEST_EXPECT(test_io::write_text(art + "/" + name, std::string(size_t(1) << 20, 't')));
 	}
-	TEST_EXPECT(editor_test::write_text(art + "/big.mnu", screen("BIG", windows)));
+	TEST_EXPECT(test_io::write_text(art + "/big.mnu", screen("BIG", windows)));
 	ImportPlanner big({{art + "/big.mnu", {}}}, true, paths, *v.project.document, *v.project.scan, *v.findings.graph,
 			std::string());
 	size_t big_steps = 1;
@@ -875,8 +875,8 @@ static int test_plan_mission_closure() {
 	                       {"other.ptl", "[effectdef]\n{\n\tid = OTHER;\n\tpdefs = p;\n}\n\n[particledef]\n{\n\tid = p;\n}\n"}}));
 	// The music banks the game streams loose from its root (the manifest's, found there), and a
 	// save beside them, which is the player's, never the game's.
-	TEST_EXPECT(editor_test::write_text(install + "/menumus.sbf", "menu music") &&
-	            editor_test::write_text(install + "/GAMEMUS.SBF", "game music") && editor_test::write_text(install + "/player.sav", "save"));
+	TEST_EXPECT(test_io::write_text(install + "/menumus.sbf", "menu music") &&
+	            test_io::write_text(install + "/GAMEMUS.SBF", "game music") && test_io::write_text(install + "/player.sav", "save"));
 	ImportChoice mission;
 	mission.path = install;
 	mission.entry = "m.bms";
@@ -1054,7 +1054,7 @@ static int test_plan_shadowed() {
 		std::string error;
 		TEST_EXPECT(opennova::bms::write(mission, mission_bytes, error));
 	}
-	TEST_EXPECT(editor_test::write_text(project.root() + "/items.def", "begin \"Mine\"\nid 100200\ntype building\nend\n"));
+	TEST_EXPECT(test_io::write_text(project.root() + "/items.def", "begin \"Mine\"\nid 100200\ntype building\nend\n"));
 	project.session.handle(request::rescan());
 	project.session.run_operations();
 	TEST_EXPECT(write_pff(install + "/localres.pff", {{"m.bms", std::string(mission_bytes.begin(), mission_bytes.end())},

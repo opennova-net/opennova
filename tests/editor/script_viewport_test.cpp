@@ -543,7 +543,7 @@ int test_reveal_after_hidden_byte() {
 // --- through a session -------------------------------------------------------------------------------
 
 struct ScriptRig {
-	editor_test::TempProjectDir dir{"opennova_editor_script_viewport"};
+	test_temp::TempDir dir{"opennova_editor_script_viewport"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -574,13 +574,13 @@ bool make_project(ScriptRig &rig) {
 	if (!opennova::rtxt::write(table, strings, error)) return false;
 	const std::string root = rig.root();
 	const bool written =
-	        editor_test::write_text(root + "/" + rig.script, repo_file("wac/text_document.wac")) &&
-	        editor_test::write_text(root + "/particles/effects.ptl", repo_file("particle/synth_minimal_effect.ptl")) &&
-	        editor_test::write_text(root + "/defs/ammo.def",
+	        test_io::write_text(root + "/" + rig.script, repo_file("wac/text_document.wac")) &&
+	        test_io::write_text(root + "/particles/effects.ptl", repo_file("particle/synth_minimal_effect.ptl")) &&
+	        test_io::write_text(root + "/defs/ammo.def",
 	                                "ammo AT_CONTRACT\nmax_age 1.5\nend\nammo ammo_satchel\nmax_age 2\nend\n") &&
-	        editor_test::write_bytes(root + "/strings/text_document.bin", strings) &&
-	        editor_test::write_text(root + "/menus/nlist.kda", repo_file("cbin/synth_nlist.kda")) &&
-	        editor_test::write_bytes(root + "/sounds/game.lwf", editor_test::sound_bank_of({"EXPLO_BASE"}));
+	        test_io::write_file(root + "/strings/text_document.bin", strings) &&
+	        test_io::write_text(root + "/menus/nlist.kda", repo_file("cbin/synth_nlist.kda")) &&
+	        test_io::write_file(root + "/sounds/game.lwf", editor_test::sound_bank_of({"EXPLO_BASE"}));
 	editor_test::handle_to_end(rig.session, request::rescan());
 	return written;
 }

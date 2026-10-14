@@ -39,7 +39,6 @@ using opennova::io::JsonValue;
 
 namespace {
 
-using mission_test::fixture;
 
 // Files by name (any case), each write moving its stamp.
 struct GroundFiles final : opennova::FileSource {
@@ -130,8 +129,8 @@ using mission_test::tile_at;
 
 std::shared_ptr<GroundFiles> tmap_files() {
 	auto files = std::make_shared<GroundFiles>();
-	files->put("Tmap.trn", test_io::read_file(fixture("terrain/tmap/Tmap.trn")));
-	files->put("Tmap.cpt", test_io::read_file(fixture("terrain/tmap/Tmap.cpt")));
+	files->put("Tmap.trn", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn")));
+	files->put("Tmap.cpt", test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.cpt")));
 	files->put("Tmap_m.pcx", charmap());
 	files->put("Tmap_f.pcx", foliage_map());
 	return files;
@@ -393,7 +392,7 @@ int test_retail_overlays() {
 // Terrain_Init @ 0x60FCFD; PolyTrn_LoadTerrainConfig @ 0x60E6DC..0x60E6E5]).
 int test_named_files() {
 	auto files = tmap_files();
-	const std::vector<uint8_t> tmap = test_io::read_file(fixture("terrain/tmap/Tmap.trn"));
+	const std::vector<uint8_t> tmap = test_io::read_file(test_paths_fixture("terrain/tmap/Tmap.trn"));
 	std::string other(tmap.begin(), tmap.end());
 	other += "\r\npolytrn_tileinfo own.lit\r\n";
 	files->put("Tother.trn", std::vector<uint8_t>(other.begin(), other.end()));

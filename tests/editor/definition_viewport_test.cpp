@@ -147,7 +147,7 @@ const char *kWeapons = "weapon \"W_FX\"\r\n\tgfx3 fxpump\r\nend\r\n";
 const char *kAmmo = "ammo AMMO_FX\r\nvelocity 900\r\nfrndlytrcrid 704\r\nend\r\nammo AMMO_PLAIN\r\nvelocity 800\r\nend\r\n";
 
 struct DefinitionRig {
-	editor_test::TempProjectDir dir{"opennova_editor_definition_viewport"};
+	test_temp::TempDir dir{"opennova_editor_definition_viewport"};
 	editor_test::NoProcess platform;
 	MemoryPreferencesStore preferences;
 	ProjectSession session{platform, preferences};
@@ -163,21 +163,21 @@ struct DefinitionRig {
 		root = session.view().project.root;
 		// The soldier's rig and clips, imported as the add-on writes them.
 		const std::string source = dir.file("source");
-		bool ok = editor_test::write_bytes(source + "/skinned.o3d",
+		bool ok = test_io::write_file(source + "/skinned.o3d",
 		                                   test_io::read_file(repo() + "/fixtures/threedi/o3d/skinned.o3d")) &&
-		          editor_test::write_text(source + "/skin.o3a", soldier_clips());
+		          test_io::write_text(source + "/skin.o3a", soldier_clips());
 		EditorRequest import = request::of(EditorRequestKind::ImportFiles);
 		import.imports = {{source + "/skinned.o3d", {}}, {source + "/skin.o3a", {}}};
 		session.handle(import);
 		session.run_operations();
-		ok = ok && editor_test::write_bytes(root + "/models/fxpump.3di", pump_bytes()) &&
-		     editor_test::write_bytes(root + "/models/fxwreck.3di", wreck_bytes()) &&
-		     editor_test::write_text(root + "/particles/fx.ptl", particles()) &&
-		     editor_test::write_bytes(root + "/sounds/game.lwf", editor_test::wave_bank_of({"EXPLO_PUMP"})) &&
-		     editor_test::write_bytes(root + "/sounds/explo_pump.wav", test_io::read_file(repo() + "/fixtures/lwf/tone.wav")) &&
-		     editor_test::write_text(root + "/defs/items.def", editor_test::crlf(kItems)) &&
-		     editor_test::write_text(root + "/defs/weapon.def", kWeapons) &&
-		     editor_test::write_text(root + "/defs/ammo.def", kAmmo);
+		ok = ok && test_io::write_file(root + "/models/fxpump.3di", pump_bytes()) &&
+		     test_io::write_file(root + "/models/fxwreck.3di", wreck_bytes()) &&
+		     test_io::write_text(root + "/particles/fx.ptl", particles()) &&
+		     test_io::write_file(root + "/sounds/game.lwf", editor_test::wave_bank_of({"EXPLO_PUMP"})) &&
+		     test_io::write_file(root + "/sounds/explo_pump.wav", test_io::read_file(repo() + "/fixtures/lwf/tone.wav")) &&
+		     test_io::write_text(root + "/defs/items.def", test_io::crlf(kItems)) &&
+		     test_io::write_text(root + "/defs/weapon.def", kWeapons) &&
+		     test_io::write_text(root + "/defs/ammo.def", kAmmo);
 		editor_test::handle_to_end(session, request::rescan());
 		while (session.view().activity.validation.running) session.poll();
 		made = ok;

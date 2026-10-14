@@ -191,7 +191,7 @@ static int test_memory_store_round_trips() {
 // compat reader): read as the defaults, the warning naming the file and everything it held, now gone,
 // and written again as a new file by the next save.
 static int test_file_store_writes_the_settings_file() {
-	editor_test::TempProjectDir dir("opennova_editor_preferences_file");
+	test_temp::TempDir dir("opennova_editor_preferences_file");
 	const std::string path = dir.file("a/b/editor_settings.json");
 	FilePreferencesStore store(path);
 	Diagnostic error;
@@ -205,10 +205,10 @@ static int test_file_store_writes_the_settings_file() {
 	// A user's file as this editor writes it: read as it is. One an editor before S13 A4 wrote: set
 	// aside, read as the defaults, the warning naming the file and each thing it held.
 	const std::string users = dir.file("user/editor_settings.json");
-	TEST_EXPECT(editor_test::write_text(users, kSettingsFile));
+	TEST_EXPECT(test_io::write_text(users, kSettingsFile));
 	TEST_EXPECT(FilePreferencesStore(users).load(loaded, error) && same(loaded, every_preference()));
 	const std::string older_editor = dir.file("user/older_editor_settings.json");
-	TEST_EXPECT(editor_test::write_text(older_editor, kSchemaOneFile));
+	TEST_EXPECT(test_io::write_text(older_editor, kSchemaOneFile));
 	loaded = every_preference();
 	Diagnostic finding;
 	TEST_EXPECT(FilePreferencesStore(older_editor).load(loaded, finding) &&
@@ -229,7 +229,7 @@ static int test_file_store_writes_the_settings_file() {
 	// list ignored (its items of whichever game); the next save writes the items per game in its
 	// place, S15's key gone.
 	const std::string s15 = dir.file("user/s15_editor_settings.json");
-	TEST_EXPECT(editor_test::write_text(s15, kS15File));
+	TEST_EXPECT(test_io::write_text(s15, kS15File));
 	Preferences kept = every_preference();
 	kept.recent_items.clear();
 	kept.preview_background = PreviewBackground::Grey; // S15's file has no background: the default
@@ -243,7 +243,7 @@ static int test_file_store_writes_the_settings_file() {
 	// An item that is no whole number a double holds exactly is skipped, never cast: a fraction, one
 	// past 2^53 either way (-2^63 among them: its cast would give it back), a string; a game left
 	// with none is no game.
-	TEST_EXPECT(editor_test::write_text(dir.file("odd.json"),
+	TEST_EXPECT(test_io::write_text(dir.file("odd.json"),
 			"{\"schema_version\": 2, \"recent_items_by_game\": {\"jo\": [1.5, 1e300, -9223372036854775808, "
 			"9007199254740992, \"7\", 12, -3], \"dfx\": [0.25], \"\": [4], \"tc\": 5}}"));
 	TEST_EXPECT(FilePreferencesStore(dir.file("odd.json")).load(loaded, error) && loaded.recent_items.size() == 1 &&
@@ -253,33 +253,33 @@ static int test_file_store_writes_the_settings_file() {
 	// brings the files it needs reads as on; a newer schema is set aside too (it held nothing);
 	// a file that is not JSON is an error.
 	TEST_EXPECT(FilePreferencesStore(dir.file("missing.json")).load(loaded, error) && same(loaded, Preferences()));
-	TEST_EXPECT(editor_test::write_text(dir.file("bare.json"), "{\"schema_version\": 2}"));
+	TEST_EXPECT(test_io::write_text(dir.file("bare.json"), "{\"schema_version\": 2}"));
 	TEST_EXPECT(FilePreferencesStore(dir.file("bare.json")).load(loaded, error) && loaded.import_dependencies &&
 	            loaded.game_install.empty() &&
 	            loaded.preview_background == PreviewBackground::Grey);
 	// Each background by its token; a word none has, or a value that is no word, reads as the default.
 	for (const PreviewBackground background : kPreviewBackgrounds) {
-		TEST_EXPECT(editor_test::write_text(dir.file("background.json"),
+		TEST_EXPECT(test_io::write_text(dir.file("background.json"),
 				std::string("{\"schema_version\": 2, \"preview_background\": \"") +
 						preview_background_token(background) + "\"}"));
 		TEST_EXPECT(FilePreferencesStore(dir.file("background.json")).load(loaded, error) &&
 		            loaded.preview_background == background);
 	}
 	for (const char *odd : { "\"purple\"", "\"Grey\"", "3", "true" }) {
-		TEST_EXPECT(editor_test::write_text(dir.file("background.json"),
+		TEST_EXPECT(test_io::write_text(dir.file("background.json"),
 				std::string("{\"schema_version\": 2, \"preview_background\": ") + odd + "}"));
 		loaded.preview_background = PreviewBackground::Dark;
 		TEST_EXPECT(FilePreferencesStore(dir.file("background.json")).load(loaded, error) &&
 		            loaded.preview_background == PreviewBackground::Grey);
 	}
-	TEST_EXPECT(editor_test::write_text(dir.file("newer.json"), "{\"schema_version\": 99}"));
+	TEST_EXPECT(test_io::write_text(dir.file("newer.json"), "{\"schema_version\": 99}"));
 	Diagnostic newer;
 	TEST_EXPECT(FilePreferencesStore(dir.file("newer.json")).load(loaded, newer) &&
 			same(loaded, Preferences()) &&
 			newer.code() == "editor_settings.schema_version.unsupported" &&
 			newer.message.find("(schema 99; this editor reads schema 2)") != std::string::npos &&
 			newer.message.find("what it held is gone: nothing.") != std::string::npos);
-	TEST_EXPECT(editor_test::write_text(dir.file("broken.json"), "not json"));
+	TEST_EXPECT(test_io::write_text(dir.file("broken.json"), "not json"));
 	TEST_EXPECT(!FilePreferencesStore(dir.file("broken.json")).load(loaded, error) && error.code() == "editor_settings.json");
 
 	// A file that cannot be written (its path a directory) is an error, the file untouched.
@@ -295,9 +295,9 @@ static int test_file_store_writes_the_settings_file() {
 // notice that named them is gone). A file holding them reads every other preference as it is, no warning;
 // the next save writes the file without them, byte for byte this editor's.
 static int test_file_store_ignores_the_shared_play_settings() {
-	editor_test::TempProjectDir dir("opennova_editor_preferences_retired_play");
+	test_temp::TempDir dir("opennova_editor_preferences_retired_play");
 	const std::string path = dir.file("editor_settings.json");
-	TEST_EXPECT(editor_test::write_text(path, kRetiredPlayFile));
+	TEST_EXPECT(test_io::write_text(path, kRetiredPlayFile));
 	FilePreferencesStore store(path);
 	Preferences loaded;
 	Diagnostic finding;
@@ -356,13 +356,13 @@ static int test_editor_preferences() {
 
 	// A store that cannot be read: the defaults, and why. One that set aside what it kept: the
 	// defaults, and the warning. A load with nothing to say clears what an earlier one said.
-	editor_test::TempProjectDir dir("opennova_editor_preferences_unreadable");
-	TEST_EXPECT(editor_test::write_text(dir.file("bad.json"), "not json"));
+	test_temp::TempDir dir("opennova_editor_preferences_unreadable");
+	TEST_EXPECT(test_io::write_text(dir.file("bad.json"), "not json"));
 	FilePreferencesStore bad(dir.file("bad.json"));
 	EditorPreferences unread(bad);
 	TEST_EXPECT(!unread.load(error) && error.code() == "editor_settings.json" &&
 			same(unread.values(), Preferences()));
-	TEST_EXPECT(editor_test::write_text(dir.file("aside.json"), "{\"schema_version\": 1}"));
+	TEST_EXPECT(test_io::write_text(dir.file("aside.json"), "{\"schema_version\": 1}"));
 	FilePreferencesStore aside(dir.file("aside.json"));
 	EditorPreferences set_aside(aside);
 	TEST_EXPECT(set_aside.load(error) && error.severity == DiagnosticSeverity::Warning &&
@@ -377,7 +377,7 @@ static int test_editor_preferences() {
 // file store's session writes the settings file; one that cannot be read is a finding, the
 // defaults in effect, and one set aside a warning, the next save writing a new file.
 static int test_session_over_a_store() {
-	editor_test::TempProjectDir dir("opennova_editor_preferences_session");
+	test_temp::TempDir dir("opennova_editor_preferences_session");
 	editor_test::NoProcess platform;
 	{
 		MemoryPreferencesStore store(every_preference());
@@ -423,7 +423,7 @@ static int test_session_over_a_store() {
 		            stored.recent_projects.front() == session.view().project.root);
 	}
 	{
-		TEST_EXPECT(editor_test::write_text(dir.file("bad.json"), "not json"));
+		TEST_EXPECT(test_io::write_text(dir.file("bad.json"), "not json"));
 		FilePreferencesStore store(dir.file("bad.json"));
 		ProjectSession session(platform, store);
 		const SessionView &v = session.view();
@@ -437,7 +437,7 @@ static int test_session_over_a_store() {
 		// nothing of it in effect (no game install, no recent project); a project then opens, done,
 		// and its save of the recent projects writes this editor's schema over it.
 		const std::string path = dir.file("older/editor_settings.json");
-		TEST_EXPECT(editor_test::write_text(path, kSchemaOneFile));
+		TEST_EXPECT(test_io::write_text(path, kSchemaOneFile));
 		FilePreferencesStore store(path);
 		ProjectSession session(platform, store);
 		const SessionView &v = session.view();
@@ -461,7 +461,7 @@ static int test_session_over_a_store() {
 		// effect and nothing said (S26: the notice is gone), no finding; a project opened then plays in the
 		// OpenNova runtime and saves first.
 		const std::string path = dir.file("shared/editor_settings.json");
-		TEST_EXPECT(editor_test::write_text(path, kRetiredPlayFile));
+		TEST_EXPECT(test_io::write_text(path, kRetiredPlayFile));
 		FilePreferencesStore store(path);
 		ProjectSession session(platform, store);
 		const SessionView &v = session.view();

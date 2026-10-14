@@ -31,7 +31,7 @@ static const RequirementRow *row_named(const RequirementReport &report, const ch
 }
 
 static int test_row_set_follows_the_manifest_and_features() {
-	editor_test::TempProjectDir dir("opennova_editor_requirements_rows_test");
+	test_temp::TempDir dir("opennova_editor_requirements_rows_test");
 	ProjectDocument doc;
 	Diagnostic error;
 	TEST_EXPECT(create_project(dir.file("R"), "R", "jo", doc, error));
@@ -121,8 +121,8 @@ static int test_row_set_follows_the_manifest_and_features() {
 		return found;
 	};
 	TEST_EXPECT(feature_off(menu_only).empty());
-	TEST_EXPECT(editor_test::write_text(paths.root + "/missions/a.bms", "x") &&
-	            editor_test::write_text(paths.root + "/missions/b.bms", "x"));
+	TEST_EXPECT(test_io::write_text(paths.root + "/missions/a.bms", "x") &&
+	            test_io::write_text(paths.root + "/missions/b.bms", "x"));
 	const AssetScan with_missions_in = scan_project_assets(paths, doc);
 	const RequirementReport off = evaluate_requirements(doc, with_missions_in);
 	TEST_EXPECT(feature_off(off).size() == 1 && feature_off(off)[0]->severity == DiagnosticSeverity::Warning &&
@@ -134,15 +134,15 @@ static int test_row_set_follows_the_manifest_and_features() {
 }
 
 static int test_files_satisfy_rows_by_name_and_kind() {
-	editor_test::TempProjectDir dir("opennova_editor_requirements_files_test");
+	test_temp::TempDir dir("opennova_editor_requirements_files_test");
 	ProjectDocument doc;
 	Diagnostic error;
 	TEST_EXPECT(create_project(dir.file("F"), "F", "jo", doc, error));
 	const ProjectPaths paths = ProjectPaths::for_root(dir.file("F"));
-	TEST_EXPECT(editor_test::write_text(paths.root + "/ui/Main.MNU", "<MENU/>"));       // case differs: still it
-	TEST_EXPECT(editor_test::write_text(paths.root + "/text/gametext.bin", "RTXT...."));
-	TEST_EXPECT(editor_test::write_text(paths.root + "/text/vmacros.bin", "not a string table"));
-	TEST_EXPECT(editor_test::write_text(paths.root + "/defs/items.def", "begin\nend\n"));
+	TEST_EXPECT(test_io::write_text(paths.root + "/ui/Main.MNU", "<MENU/>"));       // case differs: still it
+	TEST_EXPECT(test_io::write_text(paths.root + "/text/gametext.bin", "RTXT...."));
+	TEST_EXPECT(test_io::write_text(paths.root + "/text/vmacros.bin", "not a string table"));
+	TEST_EXPECT(test_io::write_text(paths.root + "/defs/items.def", "begin\nend\n"));
 
 	const RequirementReport report = evaluate_requirements(doc, scan_project_assets(paths, doc));
 	const RequirementRow *menu = row_named(report, "main.mnu");
@@ -212,7 +212,7 @@ static int test_words_cover_the_manifest() {
 // expansion forms, every one optional and in the manifest's place; none for a standalone project. The
 // blanks make its table and its version text.
 static int test_expansion_rows() {
-	editor_test::TempProjectDir dir("opennova_editor_requirements_expansion_test");
+	test_temp::TempDir dir("opennova_editor_requirements_expansion_test");
 	ProjectDocument doc;
 	Diagnostic error;
 	TEST_EXPECT(create_project(dir.file("X"), "Escalation Two", "jo", doc, error, ProjectExpansion{ "jxm", "" }));
