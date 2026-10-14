@@ -1222,7 +1222,7 @@ bool decode_world_state_load(const uint8_t *body, size_t len, WorldStateLoad &ou
 			WorldStateWaypoint w;
 			w.slot_id = c.u16();
 			w.name_id = c.u16();
-			w.pad     = c.u8();
+			w.done    = c.u8();
 			out.waypoints.push_back(w);
 			if (!c.ok) return false;
 		}

@@ -2,6 +2,7 @@
 
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/visible_players.h>
+#include <net/title/title_identity.h> // title_in_match (the 0x0F done records, DFX2-9)
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/entity.h>
 
@@ -132,6 +133,16 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			ws.roll_bam = static_cast<int32_t>(static_cast<uint32_t>(static_cast<uint16_t>(wsl.roll)) << 16);
 			ws.waypoints_set = game_type::is_waypoint_family(game_type_);
 			ws.waypoints = wsl.waypoints;
+			// A DFX2 joiner's checkpoint resets here and follows the route's done
+			// records, the last one's slot kept (DFX2-9).
+			// [orig: NapiNPClientMsg_0x00F @0x42fe82, @0x42ffe7..0x42fffc (dfx2.exe)]
+			ws.waypoint_done_stored = title_in_match(title_).objective_checkpoint;
+			if (ws.waypoint_done_stored) {
+				state_.coop_checkpoint = kCoopCheckpointNone;
+				for (const WorldStateWaypoint &wp : ws.waypoints)
+					if (wp.done != 0)
+						state_.coop_checkpoint = static_cast<uint32_t>(static_cast<int16_t>(wp.slot_id));
+			}
 			++ws.revision;
 			// The HUD blank rides the death screen, not the spawn: only with
 			// g_DeathScreenActive up does the 0x0F force the live declutter

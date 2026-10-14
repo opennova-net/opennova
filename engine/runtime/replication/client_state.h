@@ -955,6 +955,9 @@ struct ClientWorldStateLoad {
 	// carries no records and the local track is left alone.
 	bool waypoints_set = false;
 	std::vector<WorldStateWaypoint> waypoints;
+	// The title's handler stores each record's done byte onto its marker (DFX2-9;
+	// JO's discards it). [orig: NapiNPClientMsg_0x00F @0x42fff0 (dfx2.exe)]
+	bool waypoint_done_stored = false;
 };
 
 // The connection quality the client itself measures: the last completed S2C
@@ -1215,8 +1218,10 @@ struct ClientState {
 	// A DFX2 host's co-op checkpoint, the objective body's fifth value: the pool-3
 	// slot of the newest player-route marker its authority marked done, 0xFFFF
 	// outside co-op (DFX2-1). The revision advances when the value changes, the
-	// edge on which retail's joiner marks its waypoints done.
-	// [orig: NapiNPClientMsg_0x00A @0x431e0b..0x431e62 (dfx2.exe) -> g_ClientCoopCheckpointSlot]
+	// edge on which retail's joiner marks its waypoints done. A DFX2 0x0F resets it
+	// to 0xFFFF and takes its newest done record's slot, its revision unmoved.
+	// [orig: NapiNPClientMsg_0x00A @0x431e0b..0x431e62 (dfx2.exe) -> g_ClientCoopCheckpointSlot;
+	//  NapiNPClientMsg_0x00F @0x42fe82, @0x42fffc (dfx2.exe)]
 	std::uint32_t coop_checkpoint = 0xFFFFu;
 	std::uint64_t coop_checkpoint_revision = 0;
 	ClientEnvironmentState environment;

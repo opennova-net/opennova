@@ -319,6 +319,22 @@ void WaypointTrack::skip_done(const WaypointCycleContext &ctx) {
     } while (cur && current != start && cur->done);
 }
 
+void WaypointTrack::mark_done_through(uint32_t slot, const WaypointCycleContext &ctx) {
+    bool found = false;
+    for (size_t i = entries.size(); i-- > 0;) {
+        WaypointEntry &entry = entries[i];
+        if (found) {
+            entry.done = true; // [orig: @0x431e57 (dfx2.exe)]
+        } else if (entry.pool == 3 && static_cast<uint32_t>(entry.node) == slot) {
+            // [orig: Pool_GetIndexFromPtr(3, entry) @0x431e2e, the compare @0x431e36,
+            //  the store @0x431e45 (dfx2.exe)]
+            entry.done = true;
+            found = true;
+        }
+    }
+    skip_done(ctx); // [orig: SpawnPoint_SkipBlocked @0x4db3c0 from @0x431e62 (dfx2.exe)]
+}
+
 // The current-waypoint slice of the per-frame HUD info rebuild, plus the
 // mission-scripted show gate. [orig: HUD_BuildEntityInfo @ 0x4b88b7..0x4b8914
 // (hudInfo+373 number, +400/404/408 position) + g_ShowWaypoints @ 0x27238BC]

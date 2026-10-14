@@ -103,6 +103,7 @@ int main_impl() {
 		w::WaypointEntry waypoint;
 		waypoint.node = 12;
 		waypoint.name_id = 0;
+		waypoint.done = true; // a marker the round already completed
 		world.script.waypoints.entries.push_back(waypoint);
 	}
 	{
@@ -263,7 +264,9 @@ int main_impl() {
 						// pool [orig: writer @0x502f35/@0x502f45, reader @0x42e4a3].
 						state.waypoints[0].slot_id == 0x000C &&
 						state.waypoints[0].name_id == 0 &&
-						state.waypoints[0].pad == 0,
+						// The marker's done byte (entity+536), which a DFX2
+						// joiner stores [orig: @0x502f5f; @0x50008f (dfx2.exe)].
+						state.waypoints[0].done == 1,
 				"0x0F carries 00TRg's blue-route waypoint record")) {
 			return 1;
 		}

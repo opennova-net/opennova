@@ -275,7 +275,9 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	for (const world::WaypointEntry *entry : waypoints) {
 		put_u16(b, static_cast<uint16_t>(entry->node));
 		put_u16(b, static_cast<uint16_t>(entry->name_id));
-		b.push_back(0);
+		// The marker's done byte: a DFX2 joiner stores it, JO's skips it.
+		// [orig: `mov al, [eax+218h]` @0x502f5f; @0x50008f (dfx2.exe)]
+		b.push_back(entry->done ? 1u : 0u);
 	}
 	// LOCATION NAMES [orig: NetPacket_WriteWorldStateLoad0x0F @0x502D10 tail — u16 count +
 	// cstrings from g_LocationNames (64-B stride), registered at BMS spawn of def-type 2044

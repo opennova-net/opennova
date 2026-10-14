@@ -133,8 +133,8 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 // The co-op checkpoint a DFX2 host's 0x0A objective body carries (DFX2-1): the
 // pool-3 slot of the newest player-route marker the authority marked done in a
 // co-op round, kCoopCheckpointNone (0xFFFF) outside co-op and after the round
-// reset. The seam the world's checkpoint tracking (DFX2-9) fills; until then it
-// answers 0xFFFF, the reset value, for every round.
+// reset: World::script.coop_checkpoint_slot, which the world's checkpoint
+// tracking (DFX2-9) keeps.
 // [orig: g_CoopCheckpointSlot (dfx2.exe), read by NetPacket_WritePlayerState
 //  @0x4fcd99 (dfx2.exe)]
 uint32_t coop_checkpoint_slot(const world::World &world);

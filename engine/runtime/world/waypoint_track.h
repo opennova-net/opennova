@@ -148,6 +148,13 @@ public:
     // [orig: SpawnPoint_SkipBlocked @ 0x4de310]
     void skip_done(const WaypointCycleContext &ctx = {});
 
+    // A DFX2 joiner's new co-op checkpoint (S2C 0x0A's fifth objective value,
+    // DFX2-9): walking from the last entry down, the entry whose pool-3 slot is
+    // `slot` and every entry before it are marked done, then current skips past
+    // done entries. A slot no entry holds (the reset's 0xFFFF) marks nothing.
+    // [orig: NapiNPClientMsg_0x00A @0x431e0d..0x431e62 (dfx2.exe)]
+    void mark_done_through(uint32_t slot, const WaypointCycleContext &ctx = {});
+
 private:
     void cycle(bool backward, const WaypointCycleContext &ctx, int depth);
     // The KOTH re-step's guard: the entry the last cycle landed on
