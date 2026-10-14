@@ -22,9 +22,9 @@ namespace opennova::editor {
 // pass (trn.h); its sector grid's rows, at most 16, each a row's sixteen sector ids; and its foliage
 // definitions, at most four [orig: Terrain_ParseConfigCallback @ 0x60F330, `dword_31BC900 < 4`]. Each map
 // and texture names a file through the loader of its role (the asset graph's edges, each a Go to), the
-// definitions' models too. What the reader reads otherwise than written is a source finding of its line
-// (terrain_source_issues); what the game refuses or ignores in the record is a finding with its fix
-// (validate_terrain_file).
+// definitions' models too. What the reader reads otherwise than written is a source finding of its line (the
+// parse's, from formats/trn trn_source_issues); what the game refuses or ignores in the record is a finding with
+// its fix (validate_terrain_file).
 //
 // A terrain an import makes (S20: a terrain set's images, ImportSource `<stem>.tset`) is the import's: it
 // opens, but no edit is taken (DocumentSet's rule for every import output: document.imported); its

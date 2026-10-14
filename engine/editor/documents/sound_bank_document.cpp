@@ -454,7 +454,7 @@ bool SoundBankDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std
 		issues.push_back({false, 0, std::string(), std::string(),
 		                  "The bank holds " + std::to_string(file.trigger_count) +
 		                          " trigger records, which the game reads and never uses [orig: SoundBank_OpenFile @ "
-		                          "0x75cb7a]: a save keeps their count and writes each record zero."});
+		                          "0x75cb7a]: the bank's model holds none, so a save writes none."});
 	// The first wave of each name: a member names its wave by its name, which the save finds the
 	// first of, as the bank's own lookups do.
 	std::unordered_map<std::string, size_t> first_of;

@@ -39,8 +39,11 @@ constexpr FindingCodeEntry<MenuFinding> kFindingEntries[] = {
 	  game_stops_code("menu.invalid_input",
 	                  "the game crashes or hangs reading it: a SCREEN action with no FILE copies a null name [orig: "
 	                  "PFF_FindEntry @ 0x7685f3], a table's MIN_ITEM_HEIGHT of 0 divides by zero [orig: "
-	                  "CTableWnd_RecalcLayout @ 0x63f26b], an empty value a consumer tokenizes reaches the CRT's invalid "
-	                  "parameter handler, a SCREEN with no NAME copies a null name [orig: @ 0x639791]") },
+	                  "CTableWnd_RecalcLayout @ 0x63f26b], an empty value a consumer compares reaches the CRT's invalid "
+	                  "parameter handler, which ends the game, none registered [orig: the wcstok of no token compared, "
+	                  "CUIButtonWidget_ParseXMLAttributes @ 0x657d88 -> CRT_wcsicmp @ 0x77087f -> _invalid_parameter @ "
+	                  "0x76dfef; CRT_init_pointers @ 0x76e65b], a SCREEN with no NAME copies a null name [orig: @ "
+	                  "0x639791]") },
 	// Kept on save with the file's look (master's text layout, D-MNU-22), as a catalog's is: no Rewrite drops it.
 	{ MenuFinding::IgnoredInput, { "menu.ignored_input" } },
 	{ MenuFinding::Unserializable, { "menu.unserializable", FindingFix::None, nullptr, true } },
