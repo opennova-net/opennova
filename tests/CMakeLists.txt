@@ -3781,6 +3781,7 @@ add_test(NAME session_hello_roundtrip COMMAND session_hello_roundtrip_test)
 add_executable(napi_prng_test novaworld/napi_prng_test.cpp)
 target_link_libraries(napi_prng_test PRIVATE opennova_net)
 target_include_directories(napi_prng_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(napi_prng_test PRIVATE FIXTURE_DIR="${CMAKE_SOURCE_DIR}/fixtures/novaworld")
 add_test(NAME napi_prng COMMAND napi_prng_test)
 
 # Phase D — LobbySession dispatch tests

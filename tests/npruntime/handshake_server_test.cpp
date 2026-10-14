@@ -2773,6 +2773,7 @@ bool run_host_server_keys_draw_from_the_manager_lcg() {
 	inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 			kHostKey, nullptr, config);
 	uint16_t port = 30990;
+	uint32_t previous_sk = 0;
 	for (int join = 0; join < 3; ++join) {
 		const PeerAddr peer{0x0100007Fu, port++};
 		const std::string name = "LcgJoiner" + std::to_string(join);
@@ -2801,6 +2802,16 @@ bool run_host_server_keys_draw_from_the_manager_lcg() {
 		}
 		if (!expect(sa.scrk == walk && sa.scrk.size() == ((sa.sk & 31u) == 31u ? 62u : 61u),
 		            "lcg: the SCRK is the walk that follows the SK, 61 or 62 characters")) return false;
+		// One stream across the joins: the next SK's first byte is the previous SK's last byte
+		// 64 steps on along the low byte's cycle b' = 49b + 1 (its SCRK's 63 draws between),
+		// so a joiner can compute the next joiner's SK, as on retail's host.
+		if (join > 0) {
+			uint32_t b = previous_sk & 0xFFu;
+			for (int i = 0; i < 64; ++i) b = (49u * b + 1u) & 0xFFu;
+			if (!expect((sa.sk >> 24) == b,
+			            "lcg: each join's SK continues the one manager stream")) return false;
+		}
+		previous_sk = sa.sk;
 	}
 	return true;
 }

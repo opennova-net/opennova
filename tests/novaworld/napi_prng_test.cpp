@@ -15,6 +15,7 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <fstream>
 #include <string>
 
 using opennova::ConnectionKeys;
@@ -124,16 +125,66 @@ int test_every_scrk_is_sixty_one_or_sixty_two() {
 	return 0;
 }
 
-// The process's manager draws the same shapes, keys and SCRKs alike.
-int test_manager_draws_follow_the_lcg() {
+// `b` stepped `steps` times along the low byte's own cycle b' = 49b + 1 (mod 256), a single
+// 256-cycle: every draw's low byte follows the one before it, whatever the range drawn.
+uint32_t low_byte_after(uint32_t b, int steps) {
+	b &= 0xFFu;
+	for (int i = 0; i < steps; ++i)
+		b = (49u * b + 1u) & 0xFFu;
+	return b;
+}
+
+// The process's manager is one stream. Its keys and SCRKs keep their shapes, and each key's
+// first byte is fixed by the last byte drawn before it: one step after a host key's last byte,
+// 64 after a connection's key (its SCRK's 63 draws between them), so f^64(SK & 0xFF) is the
+// next connection's SK, exactly. A generator seeded afresh per connection fails this.
+int test_manager_draws_are_one_stream() {
 	const uint32_t host_key = opennova::manager_session_key();
 	TEST_EXPECT(host_key != 0 && bytes_chain(host_key));
-	const ConnectionKeys keys = opennova::manager_connection_keys();
-	TEST_EXPECT(bytes_chain(keys.key));
-	TEST_EXPECT(keys.scrk == scrk_after(keys.key));
-	// The draws continue one stream: the next key's first byte follows this SCRK's last draw
-	// only mod 32, so check its own chain.
-	TEST_EXPECT(bytes_chain(opennova::manager_session_key()));
+	const ConnectionKeys first = opennova::manager_connection_keys();
+	TEST_EXPECT(bytes_chain(first.key));
+	TEST_EXPECT(first.scrk == scrk_after(first.key));
+	TEST_EXPECT((first.key >> 24) == low_byte_after(host_key, 1));
+	const ConnectionKeys second = opennova::manager_connection_keys();
+	TEST_EXPECT(bytes_chain(second.key) && second.scrk == scrk_after(second.key));
+	TEST_EXPECT((second.key >> 24) == low_byte_after(first.key, 64));
+	const uint32_t next_key = opennova::manager_session_key();
+	TEST_EXPECT((next_key >> 24) == low_byte_after(second.key, 64));
+	return 0;
+}
+
+// The committed retail captures' play keys, the first 16 characters of each session's client
+// and server SCRK (fixtures/novaworld/run_*/manifest.txt): each is how the generator's SCRK
+// begins after some state, a run of the fixed order, the NUL slot's skip included.
+int test_retail_play_keys_are_runs_of_the_cycle() {
+	const char *const runs[] = { "run_20260426_113242", "run_20260426_120102",
+		"run_20260426_120859" };
+	const std::string names[] = { "client_play_key = ", "server_play_key = " };
+	int seen = 0;
+	for (const char *run : runs) {
+		std::ifstream in(std::string(FIXTURE_DIR) + "/" + run + "/manifest.txt");
+		TEST_EXPECT(in.good());
+		std::string line;
+		while (std::getline(in, line)) {
+			if (!line.empty() && line.back() == '\r')
+				line.pop_back();
+			for (const std::string &name : names) {
+				if (line.compare(0, name.size(), name) != 0)
+					continue;
+				const std::string prefix = line.substr(name.size());
+				TEST_EXPECT(prefix.size() == 16);
+				bool found = false;
+				// Seeds 0..31 start the SCRK at each of the 32 slots (17 is invertible mod 32).
+				for (uint32_t seed = 0; seed < 32 && !found; ++seed) {
+					NapiPrng prng(seed);
+					found = opennova::generate_tx_key(prng).compare(0, prefix.size(), prefix) == 0;
+				}
+				TEST_EXPECT(found);
+				++seen;
+			}
+		}
+	}
+	TEST_EXPECT(seen == 6);
 	return 0;
 }
 
@@ -148,7 +199,9 @@ int main() {
 		return 1;
 	if (test_every_scrk_is_sixty_one_or_sixty_two() != 0)
 		return 1;
-	if (test_manager_draws_follow_the_lcg() != 0)
+	if (test_manager_draws_are_one_stream() != 0)
+		return 1;
+	if (test_retail_play_keys_are_runs_of_the_cycle() != 0)
 		return 1;
 	std::printf("OK: the NAPI manager LCG's keys and SCRKs\n");
 	return 0;
