@@ -594,10 +594,74 @@ int test_add_maps() {
 	return 0;
 }
 
+// A stroke goes on across another program's save: while a stroke's gesture is open over the wire, the check that finds a
+// file changed outside holds it (no refresh starts, the file waits), so the stroke's next samples are served, never
+// refused by a refresh holding the documents; the check after the gesture ends reads the file again.
+int test_stroke_across_outside_save() {
+	test_temp::TempDir dir("opennova_editor_terrain_map_paint_outside");
+	editor_test::FakePlatform platform;
+	platform.clock = 10000;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Outside"));
+	const SessionView &v = session.view();
+	const std::string root = v.project.root;
+	for (const char *name : {"Tmap.trn", "Tmap.cpt", "Tmap_m.pcx", "Tmap_f.pcx"})
+		TEST_EXPECT(test_io::write_file(root + "/terrain/" + name, test_io::read_file(test_paths_fixture(std::string("terrain/tmap/") + name))));
+	TEST_EXPECT(test_io::write_text(root + "/day.env", "env") && test_io::write_text(root + "/notes.txt", "one"));
+	TEST_EXPECT(editor_test::backdate_tree(root, std::chrono::seconds(60)));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::set_missions(session, true);
+	editor_test::handle_to_end(session, request::create_file("m.bms", "mission", {{"terrain", "Tmap.trn"}, {"environment", "day.env"}}));
+	const std::string m = v.project.scan->find("m.bms")->relative_path;
+	session.handle(request::open_document(m));
+	editor_test::handle_to_end(session, request::refresh_changed_sources());
+	TEST_EXPECT(v.project.outside_waiting == 0);
+
+	// The first sample over the wire begins the gesture.
+	TerrainStrokeAsk ask;
+	ask.plane = TerrainPlane::Surface;
+	ask.brush.tool = TerrainTool::Surface;
+	ask.brush.surface = 5;
+	ask.brush.radius = 0.0f;
+	ask.brush_named = kBrushTool | kBrushSurface | kBrushRadius;
+	ask.points = {{-256.0, 256.0}};
+	ask.wire = true;
+	ask.gesture = 0;
+	ask.end = false;
+	session.handle(request::terrain_stroke(m, ask));
+	const uint64_t gesture = session.outcome().gesture;
+	TEST_EXPECT(session.outcome().done() && gesture != 0 && !v.documents.gestures.empty());
+	// Another program saves a project file (settled at once): the check holds it while the gesture is open.
+	TEST_EXPECT(test_io::write_text(root + "/notes.txt", "two") &&
+	            editor_test::backdate(root + "/notes.txt", std::chrono::seconds(30)));
+	session.handle(request::refresh_changed_sources(true));
+	TEST_EXPECT(session.outcome().operation == 0);
+	TEST_EXPECT(v.project.outside_waiting >= 1);
+	// The stroke goes on: its next samples are served, the gesture still open.
+	ask.gesture = gesture;
+	ask.points = {{-240.0, 256.0}};
+	session.handle(request::terrain_stroke(m, ask));
+	for (const Diagnostic &d : session.outcome().findings) std::fprintf(stderr, "  %s: %s\n", d.code().c_str(), d.message.c_str());
+	TEST_EXPECT(session.outcome().done() && session.outcome().gesture == gesture && !v.documents.gestures.empty());
+	session.handle(request::refresh_changed_sources());
+	TEST_EXPECT(session.outcome().operation == 0);
+	ask.points = {{-224.0, 256.0}};
+	ask.end = true;
+	session.handle(request::terrain_stroke(m, ask));
+	TEST_EXPECT(session.outcome().done() && v.documents.gestures.empty());
+	// The gesture ended: the next check reads the file again.
+	editor_test::handle_to_end(session, request::refresh_changed_sources());
+	TEST_EXPECT(session.outcome().operation != 0 && v.project.outside_waiting == 0);
+	std::printf("outside save: a stroke's gesture goes on while the change waits; the check after it reads the file\n");
+	return 0;
+}
+
 } // namespace
 
 int main() {
-	const int failures = test_routing() + test_strokes() + test_imported_source() + test_add_maps();
+	const int failures = test_routing() + test_strokes() + test_imported_source() + test_add_maps() +
+	                     test_stroke_across_outside_save();
 	if (failures == 0) std::printf("editor_terrain_map_paint: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }
