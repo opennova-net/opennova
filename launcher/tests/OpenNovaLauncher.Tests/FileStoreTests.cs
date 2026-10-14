@@ -175,11 +175,21 @@ public sealed class FileStoreTests : IDisposable
 
 public sealed class SettingsStoreTests : IDisposable
 {
-    private readonly string _keyPath = @"Software\OpenNova-LauncherTests\" + Guid.NewGuid().ToString("N");
+    private const string ParentPath = @"Software\OpenNova-LauncherTests";
+    private readonly string _keyPath = ParentPath + @"\" + Guid.NewGuid().ToString("N");
 
     public void Dispose()
     {
         Registry.CurrentUser.DeleteSubKeyTree(_keyPath, throwOnMissingSubKey: false);
+        try
+        {
+            // The parent goes with the last test's key; DeleteSubKey refuses one that still has children.
+            Registry.CurrentUser.DeleteSubKey(ParentPath, throwOnMissingSubKey: false);
+        }
+        catch (InvalidOperationException)
+        {
+            // Another test's key is still there.
+        }
     }
 
     [Fact]
