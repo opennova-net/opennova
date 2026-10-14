@@ -1991,7 +1991,7 @@
         </POSITION>
         <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
         <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
-        <STRING justify="LEFT" vjustify="TOP" edge="8"></STRING>
+        <STRING justify="LEFT" vjustify="TOP" edge="8">OpenNova's own small game. Indigo Shore: clear a rebel camp on a rainy island, alone or as a co-op team over your network. Pre-1.0 and experimental.</STRING>
         <SCROLLBAR>
           <POSITION>
             <LEFT>356</LEFT>

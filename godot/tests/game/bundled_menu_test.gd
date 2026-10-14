@@ -221,6 +221,10 @@ func test_the_bundled_mods_screen_lists_the_base_game_and_its_expansions() -> vo
 	assert_eq(driver.get_widget_items(avail), PackedStringArray(
 			["Joint Operations: Typhoon Rising", "Unnamed Expansion", "Test Storm"]))
 	assert_eq(driver.selected_row(avail), 0, "the base game running is highlighted")
+	# With the base game running the populate describes no row, so MOD_DESC keeps the
+	# screen's own text: the base game's description is options.mnu's.
+	assert_true(driver.get_widget_text(driver.widget_id("MOD_DESC")).begins_with("OpenNova's own"),
+			"the base game is described by the text the screen authors")
 	# The Mods list is a tab of the whole options screen, as the original's is: one
 	# ACCEPT writes the options' words and switches the game only when the pick is
 	# another than the one running (Options_HandleAcceptOrBack's two legs).

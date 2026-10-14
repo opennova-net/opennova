@@ -11,7 +11,7 @@
   "features": {
     "menu": true,
     "mission": true,
-    "multiplayer": false
+    "multiplayer": true
   },
   "project_id": "6005389a-e567-433c-a67a-fd391db575a3",
   "schema_version": 2,
