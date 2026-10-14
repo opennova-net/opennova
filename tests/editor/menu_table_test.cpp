@@ -814,6 +814,11 @@ mnu::Window window_of_every_type() {
 	mnu::Item image = w.items.items[0];
 	image.type = "IMAGE";
 	w.items.items.push_back(image);
+	// A spin list's COLOR item: another form reads its colour's text as the row's text.
+	mnu::Item colour = w.items.items[0];
+	mnu::set_item_type(colour, "COLOR");
+	colour.color = mnu::color_of("FFba58");
+	w.items.items.push_back(colour);
 	mnu::Appearance row = w.items.appearances[0];
 	row.type = "IMAGEROW";
 	w.items.appearances.push_back(row);
