@@ -46,6 +46,79 @@ func _profile_with_set(set_name: String, wav: String) -> LwfData:
 	return d
 
 
+# A bank of one set, one layer and three members (the first two naming one member
+# record, all three one single), laid out as formats/lwf's writer lays one out and its
+# stale bytes zero: header 28, single 52, multi header 20, set 80, layer 48, two
+# member records 28 each, one 256-byte path slot.
+func _shared_record_bank() -> PackedByteArray:
+	var b := PackedByteArray()
+	b.resize(540)
+	# Header: size, 'LWF1', one single, no trigger, the multi header, the string pool.
+	for pair in [[0, 28], [4, 0x4C574631], [8, 1], [12, 0], [16, 80], [20, 284]]:
+		b.encode_u32(pair[0], pair[1])
+	b = _with_text(b, 28, "A")
+	b.encode_u32(28 + 48, 284) # the single's path slot
+	for pair in [[80, 20], [84, 1], [88, 100]]:
+		b.encode_u32(pair[0], pair[1])
+	b.encode_u32(100, 80)
+	b = _with_text(b, 104, "ONE")
+	b.encode_u32(128, 0xFFFF) # pitch base
+	b.encode_u32(136, 1) # one layer
+	b.encode_u32(140, 180) # at the layer table
+	b.encode_u16(180, 3) # three members
+	b.encode_u16(184, 100) # falloff
+	b.encode_u32(188, 0x0E) # random, internal, external
+	for pair in [[196, 228], [200, 228], [204, 256]]:
+		b.encode_u32(pair[0], pair[1])
+	for record in [[228, 200], [256, 150]]:
+		b.encode_u32(record[0], 0) # single 0
+		b.encode_u32(record[0] + 4, 0x10000) # unity pitch
+		b.encode_u32(record[0] + 12, record[1]) # volume
+		b.encode_u32(record[0] + 16, 255) # clamp
+	b = _with_text(b, 284, "a.wav")
+	return b
+
+
+# `b` with `text`'s ASCII bytes at `at`.
+func _with_text(b: PackedByteArray, at: int, text: String) -> PackedByteArray:
+	var ascii := text.to_ascii_buffer()
+	for i in ascii.size():
+		b[at + i] = ascii[i]
+	return b
+
+
+func _member_values(lwf: LwfData, key: String) -> Array:
+	var out := []
+	var layer := ((lwf.get_set(0).get("layers", []) as Array)[0]) as Dictionary
+	for member in layer.get("members", []):
+		out.append((member as Dictionary).get(key))
+	return out
+
+
+# LwfData writes its model (opennova::lwf::File) alone, edited or not: a bank whose stale
+# bytes are zero comes back byte for byte from its fields, and an edit of a member whose
+# record or single another member shares copies it for the edited member alone.
+func test_lwf_data_writes_its_model_and_copies_a_shared_record() -> void:
+	var bank := _shared_record_bank()
+	var lwf := LwfData.new()
+	assert_true(lwf.load_bytes(bank), "the bank reads: %s" % lwf.get_last_error())
+	assert_eq(_member_values(lwf, "volume"), [200, 200, 150], "two members name one record")
+	assert_eq(lwf.to_bytes(), bank, "the bank from its fields, byte for byte")
+	lwf.set_member_field(0, 0, 0, "volume", 50)
+	assert_eq(_member_values(lwf, "volume"), [50, 200, 150], "the shared record copied for the edited member")
+	lwf.set_member_field(0, 0, 2, "name", "B")
+	assert_eq(_member_values(lwf, "name"), ["A", "A", "B"], "the shared single copied for the edited member")
+	assert_eq(_member_values(lwf, "wav_path"), ["a.wav", "a.wav", "a.wav"], "the copy keeps the single's file")
+	var again := LwfData.new()
+	assert_true(again.load_bytes(lwf.to_bytes()), "the edited bank reads back")
+	assert_eq(again.get_set(0), lwf.get_set(0), "the edited bank reads back as its model")
+	lwf.set_layer_field(0, 0, "selection_mode", LwfData.SELECTION_SEQUENTIAL)
+	assert_eq(int(((lwf.get_set(0).get("layers", []) as Array)[0] as Dictionary).get("selection_mode", -1)),
+			LwfData.SELECTION_SEQUENTIAL, "a layer field set in place")
+	assert_true(bool(((lwf.get_set(0).get("layers", []) as Array)[0] as Dictionary).get("internal", false)),
+			"its other flags kept")
+
+
 func test_menu_audio_routes_its_pooled_players_to_sfx() -> void:
 	var samples := PackedByteArray()
 	samples.resize(32)

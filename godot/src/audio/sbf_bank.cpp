@@ -14,6 +14,8 @@
 
 #include <cstdlib>
 #include <cstring>
+#include <string>
+#include <vector>
 
 using namespace godot;
 using namespace opennova::sbf;
@@ -55,6 +57,11 @@ void SbfBank::load_from_path(const String &p_path) {
 	}
 	source_path = p_path;
 	_file_bytes = PackedByteArray();
+	_model = SbfFile();
+	_model_read = false;
+	_modeled = false;
+	_model_error.clear();
+	_dirty = false;
 
 	if (!read_nova_payload_file(p_path, _file_bytes)) {
 		UtilityFunctions::push_warning("SbfBank: could not open ", p_path);
@@ -73,6 +80,18 @@ void SbfBank::load_from_path(const String &p_path) {
 	_opened = true;
 }
 
+bool SbfBank::_ensure_model() const {
+	if (!_model_read) {
+		_model_read = true;
+		_model = SbfFile();
+		_modeled = sbf_read_bank(_file_bytes.ptr(), (size_t)_file_bytes.size(), _model, _model_error);
+	}
+	if (!_modeled) {
+		UtilityFunctions::push_warning("SbfBank: ", source_path, " has no model to edit or write: ", _model_error.c_str());
+	}
+	return _modeled;
+}
+
 Ref<SbfBank> SbfBank::create_empty() {
 	Ref<SbfBank> bank;
 	bank.instantiate();
@@ -89,8 +108,13 @@ Ref<SbfBank> SbfBank::create_empty() {
 	bank->_arc.entries = nullptr;
 	bank->source_path = String();
 	bank->_file_bytes = PackedByteArray();
-	// _opened lights up the mutation API; _dirty steers the saver to the
-	// re-encode (build_encoded_bytes) path rather than raw passthrough.
+	// The model of a bank made in code: no stream, its chunks' unread tails 0x80 as
+	// sbf_encode_chunk pads them (the minted banks' rule, SbfTail::Silence).
+	bank->_model = SbfFile();
+	bank->_model.tail = SbfTail::Silence;
+	bank->_model_read = true;
+	bank->_modeled = true;
+	// _opened lights up the mutation API; a new bank is unsaved.
 	bank->_opened = true;
 	bank->_dirty = true;
 	return bank;
@@ -182,21 +206,12 @@ Ref<SbfAudioStream> SbfBank::get_stream_at(int p_index) {
 	return stream;
 }
 
-Error SbfBank::set_entry_pcm(int p_index, const PackedFloat32Array &p_samples) {
-	if (!_opened) {
-		return ERR_UNCONFIGURED;
-	}
-	if (p_index < 0 || (uint32_t)p_index >= _arc.header.entry_count) {
-		return ERR_INVALID_PARAMETER;
-	}
+namespace {
 
-	// Convert float [-1, 1] to int16 with clamp; the encoder consumes int16
-	// and re-derives the per-chunk scale via sbf_pick_scale.
-	const int n = p_samples.size();
-	Vector<int16_t> int16_samples;
-	int16_samples.resize(n);
-	int16_t *dst = int16_samples.ptrw();
-	for (int i = 0; i < n; ++i) {
+// Floats in [-1, 1] as the encoder's int16, clamped.
+std::vector<int16_t> int16_from(const PackedFloat32Array &p_samples) {
+	std::vector<int16_t> out((size_t)p_samples.size());
+	for (int64_t i = 0; i < p_samples.size(); ++i) {
 		float f = p_samples[i];
 		if (f < -1.0f) {
 			f = -1.0f;
@@ -204,10 +219,27 @@ Error SbfBank::set_entry_pcm(int p_index, const PackedFloat32Array &p_samples) {
 		if (f > 1.0f) {
 			f = 1.0f;
 		}
-		dst[i] = (int16_t)(f * 32767.0f);
+		out[(size_t)i] = (int16_t)(f * 32767.0f);
 	}
+	return out;
+}
 
-	_entry_pcm_overrides[p_index] = int16_samples;
+} // namespace
+
+Error SbfBank::set_entry_pcm(int p_index, const PackedFloat32Array &p_samples) {
+	if (!_opened) {
+		return ERR_UNCONFIGURED;
+	}
+	if (p_index < 0 || (uint32_t)p_index >= _arc.header.entry_count) {
+		return ERR_INVALID_PARAMETER;
+	}
+	if (!_ensure_model() || (size_t)p_index >= _model.streams.size()) {
+		return ERR_UNAVAILABLE;
+	}
+	// The stream's chunks encoded from the samples; its name and block size stay.
+	const std::vector<int16_t> pcm = int16_from(p_samples);
+	SbfStream &stream = _model.streams[(size_t)p_index];
+	stream.chunks = sbf_encode_stream(stream.name, pcm.data(), pcm.size()).chunks;
 	_dirty = true;
 	return OK;
 }
@@ -216,97 +248,30 @@ Error SbfBank::build_encoded_bytes(PackedByteArray &out) const {
 	if (!_opened) {
 		return ERR_UNCONFIGURED;
 	}
-
-	const uint32_t n = _arc.header.entry_count;
-
-	// Per-entry PCM int16 storage: override or decoded original.
-	Vector<Vector<int16_t>> entries_pcm;
-	entries_pcm.resize(n);
-	Vector<String> names;
-	names.resize(n);
-
-	for (uint32_t i = 0; i < n; ++i) {
-		char name_buf[SBF_NAME_SIZE + 1] = { 0 };
-		std::memcpy(name_buf, _arc.entries[i].name, SBF_NAME_SIZE);
-		names.write[i] = String(name_buf);
-
-		const HashMap<int, Vector<int16_t>>::ConstIterator it = _entry_pcm_overrides.find((int)i);
-		if (it != _entry_pcm_overrides.end()) {
-			entries_pcm.write[i] = it->value;
-			continue;
-		}
-
-		// No override: decode original chunk bytes from the in-memory archive.
-		// sbf_open_memory leaves the archive in memory mode; sbf_read_raw
-		// only works for file-backed archives, so we copy the raw bytes
-		// directly from _file_bytes via the entry's data_offset/total_size.
-		const SbfRawEntry &entry = _arc.entries[i];
-		const int total_bytes = (int)entry.total_size;
-		if (total_bytes <= 0) {
-			entries_pcm.write[i] = Vector<int16_t>();
-			continue;
-		}
-		const int64_t off = (int64_t)entry.data_offset;
-		if (off < 0 || off + total_bytes > _file_bytes.size()) {
-			return ERR_FILE_CORRUPT;
-		}
-		const uint8_t *raw = _file_bytes.ptr() + off;
-		// Decode capacity: at most one int16 per audio byte (less for the
-		// 8-byte chunk headers, but using total_bytes is a safe upper bound).
-		Vector<int16_t> dec;
-		dec.resize(total_bytes);
-		const int got = sbf_decode_all(raw, (size_t)total_bytes, dec.ptrw(), dec.size());
-		if (got < 0) {
-			return ERR_FILE_CORRUPT;
-		}
-		dec.resize(got);
-		entries_pcm.write[i] = dec;
+	if (!_ensure_model()) {
+		return ERR_UNAVAILABLE;
 	}
-
-	// Marshal into the C-style argument arrays expected by sbf_encode_file.
-	// CharString instances must outlive the const char* pointers.
-	Vector<CharString> name_storage;
-	name_storage.resize(n);
-	Vector<const char *> name_ptrs;
-	name_ptrs.resize(n);
-	Vector<const int16_t *> pcm_ptrs;
-	pcm_ptrs.resize(n);
-	Vector<size_t> pcm_counts;
-	pcm_counts.resize(n);
-	for (uint32_t i = 0; i < n; ++i) {
-		name_storage.write[i] = names[i].utf8();
-		name_ptrs.write[i] = name_storage[i].get_data();
-		pcm_ptrs.write[i] = entries_pcm[i].ptr();
-		pcm_counts.write[i] = (size_t)entries_pcm[i].size();
+	std::vector<uint8_t> bytes;
+	std::string error;
+	if (!sbf_write_bank(_model, bytes, error)) {
+		UtilityFunctions::push_warning("SbfBank: the bank cannot be written: ", error.c_str());
+		return ERR_INVALID_DATA;
 	}
-
-	uint8_t *buf = nullptr;
-	size_t buf_size = 0;
-	const int rc = sbf_encode_file(name_ptrs.ptr(), n,
-			pcm_ptrs.ptr(), pcm_counts.ptr(),
-			&buf, &buf_size);
-	if (rc != 0 || buf == nullptr) {
-		if (buf) {
-			sbf_free(buf);
-		}
-		return ERR_BUG;
-	}
-
-	out = to_packed_bytes(buf, buf_size);
-	sbf_free(buf);
+	out = to_packed_bytes(bytes);
 	return OK;
 }
 
-// --- Phase E: bank-edit ops ----------------------------------------------
+// --- Bank-edit ops ----------------------------------------------------------
 //
-// These mutate the in-memory entry table + override map. The saver's
-// re-encode path (build_encoded_bytes) walks _arc.header.entry_count and
-// reads the override map keyed by current index, so swapping/shifting
-// requires both the entries[] array and the override map to stay in sync.
+// These mutate the in-memory entry table (the names and sizes the bank lists) and
+// the bank's model (what the saver writes), the two kept in the same order.
 
 Error SbfBank::add_entry(const String &p_name, const PackedFloat32Array &p_samples) {
 	if (!_opened) {
 		return ERR_UNCONFIGURED;
+	}
+	if (!_ensure_model()) {
+		return ERR_UNAVAILABLE;
 	}
 	const uint32_t n = _arc.header.entry_count;
 	const uint32_t new_n = n + 1;
@@ -332,10 +297,9 @@ Error SbfBank::add_entry(const String &p_name, const PackedFloat32Array &p_sampl
 		std::memcpy(slot.name, src, (size_t)copy_len);
 	}
 
-	// total_size / block_size: build_encoded_bytes recomputes layout from the
-	// override-derived chunk count, so a placeholder consistent with the
-	// number of chunks here is enough. block_size = SBF_CHUNK_TOTAL is the
-	// invariant every observed SBF holds.
+	// total_size / block_size: the writer lays the bank out from the model, so the
+	// listed sizes only need to agree with the stream's chunk count. block_size =
+	// SBF_CHUNK_TOTAL is the invariant every observed SBF holds.
 	const int sample_count = p_samples.size();
 	int chunk_count = 0;
 	if (sample_count > 0) {
@@ -344,41 +308,19 @@ Error SbfBank::add_entry(const String &p_name, const PackedFloat32Array &p_sampl
 	slot.block_size = SBF_CHUNK_TOTAL;
 	slot.total_size = (uint32_t)(chunk_count * SBF_CHUNK_TOTAL);
 	slot.sample_length_hint = 0;
-	slot.data_offset = 0; // re-encoder fills this when building bytes.
+	slot.data_offset = 0; // the writer lays the bank out.
 
 	_arc.header.entry_count = new_n;
 
-	// Convert float -> int16 and store as override at the new slot's index.
-	Vector<int16_t> int16_samples;
-	int16_samples.resize(sample_count);
-	int16_t *dst = int16_samples.ptrw();
-	for (int i = 0; i < sample_count; ++i) {
-		float f = p_samples[i];
-		if (f < -1.0f) {
-			f = -1.0f;
-		}
-		if (f > 1.0f) {
-			f = 1.0f;
-		}
-		dst[i] = (int16_t)(f * 32767.0f);
-	}
-	_entry_pcm_overrides[(int)n] = int16_samples;
+	// The stream in the model: the slot's name, its chunks encoded from the samples.
+	const std::vector<int16_t> pcm = int16_from(p_samples);
+	_model.streams.push_back(sbf_encode_stream(std::string(slot.name, (size_t)copy_len), pcm.data(), pcm.size()));
 	_dirty = true;
 	return OK;
 }
 
 Error SbfBank::save_to_path(const String &p_path) {
-	if (!is_dirty()) {
-		// Lossless passthrough: copy original source bytes through.
-		PackedByteArray bytes = get_raw_file_bytes();
-		if (bytes.is_empty()) return ERR_FILE_CANT_OPEN;
-		Ref<FileAccess> fa = FileAccess::open(p_path, FileAccess::WRITE);
-		if (fa.is_null()) return ERR_CANT_OPEN;
-		fa->store_buffer(bytes);
-		return OK;
-	}
-	// Re-encode path (Phase D / SBF F2): walk current entry table + override
-	// PCM map, rebuild the byte stream from scratch.
+	// The bank from its model alone, edited or not (ADR 0003).
 	PackedByteArray out_bytes;
 	Error err = build_encoded_bytes(out_bytes);
 	if (err != OK) return err;

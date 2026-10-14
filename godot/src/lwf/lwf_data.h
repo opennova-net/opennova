@@ -17,46 +17,46 @@ namespace godot {
 class ResourceRoot;
 
 // GDExtension wrapper over opennova::lwf (engine/formats/lwf). Parses a NovaLogic .lwf
-// sound-profile and exposes its Sound Set -> Layer -> Member hierarchy as an
-// editable Godot Array-of-Dictionary tree for format tooling.
+// sound-profile into its model (opennova::lwf::File) and exposes its Sound Set ->
+// Layer -> Member hierarchy as Godot Dictionary views of that model for format tooling.
 //
-// Save fidelity: the original bytes are retained; an open->save with NO edits
-// writes them verbatim (byte-exact). Once edited, save re-normalizes the tree
-// (dedup the shared singles table, rebuild playlists/sndparms + string pool)
-// and encodes via opennova::lwf::encode_lwf — a valid, canonical .lwf.
+// The model is the one thing an edit changes and a save writes: every save is
+// opennova::lwf::encode_lwf over the model's fields alone (ADR 0003), edited or not,
+// never the bytes the bank was read from. An edit sets the model's fields; a member's
+// record or single that other members share is copied for the one edited first, so no
+// other member changes. A layer is edited in place: formats/lwf's reader sizes the layer
+// table by the sets' layer counts, so one set names each layer.
 //
-// Dictionary shapes (all keys present on read; field semantics grilled vs
-// Jointops.exe -- see engine/formats/lwf/lwf.h for the [orig:, see docs/audio/lwf-dbf-sound-re.md] anchors):
+// Dictionary shapes (views; field semantics grilled vs Jointops.exe -- see
+// engine/formats/lwf/lwf.h for the [orig:, see docs/audio/lwf-dbf-sound-re.md] anchors):
 //   set:    { name:String, target_id:int, pitch_base:int, pitch_random_range:int,
-//             set_flags:int, layer_count:int, layers:Array[layer] }
+//             set_flags:int, layers:Array[layer] }
 //   layer:  { selection_mode:int, falloff_radius:int, min_distance:int,
 //             looping/directional/heading/preload/stoppable/internal/external/
-//             reverb/rapid:bool, member_count:int, members:Array[member] }
+//             reverb/rapid:bool, members:Array[member] }
 //   member: { name:String, wav_path:String, value_hi:int,
 //             base_pitch:float, rand_pitch:float, volume:int, clamp_volume:int }
+// (value_hi is the single's volume byte at +33 shifted up a byte, as the old u16 view held it.)
 class LwfData : public RefCounted {
 	GDCLASS(LwfData, RefCounted)
 
 private:
-	Array sets_;                    // editable tree (live; getters deep-copy)
-	PackedByteArray original_bytes_; // for byte-exact save when unmodified
-	// The parsed structs behind the tree (the runtime read seam, engine_file());
-	// stale once the tree is edited, rebuilt from it on the next read.
+	// The bank's model: what every view shows, every edit changes and every save writes.
 	opennova::lwf::File file_;
-	bool file_stale_ = false;
 	String source_path_;
 	String last_error_;
 	bool loaded_ = false;
 	bool modified_ = false;
 
-	bool decode_into_tree(const PackedByteArray &bytes);
-	PackedByteArray encode_current(String &r_error) const;
-	// Re-normalize the editable tree into a canonical opennova::lwf::File:
-	// dedup the shared singles table, then rebuild multis/playlists/sndparms
-	// (the fold both save and the runtime read seam share).
-	void build_file_from_tree(opennova::lwf::File &r_file) const;
+	bool decode(const PackedByteArray &bytes);
+	PackedByteArray encode(String &r_error) const;
 
-	// Live (shared-ref) accessors into sets_; empty container on bad index.
+	// The model's index of a set's layer, a layer's member and a member's single, the
+	// member's and the single's made the edited member's own first (a copy of a record
+	// another member names); -1 on a bad index.
+	int own_playlist(int p_si, int p_li);
+	int own_sndparm(int p_si, int p_li, int p_mi);
+	int own_single(int p_si, int p_li, int p_mi);
 
 protected:
 	static void _bind_methods();
@@ -106,11 +106,9 @@ public:
 	int get_set_count() const;
 	Dictionary get_set(int p_si) const;
 	// C++-side seam (not bound): the sound profile as the engine's formats/lwf
-	// structs. Unedited, the parse result itself; after an edit the tree is
-	// re-normalized into it (the same fold save writes). The runtime sound
-	// bank (audio/sound_bank) reads sets/layers/members through this rather
-	// than the Dictionary tree.
-	const opennova::lwf::File &engine_file();
+	// structs, the model itself. The runtime sound bank (audio/sound_bank) reads
+	// sets/layers/members through this rather than the Dictionary views.
+	const opennova::lwf::File &engine_file() const { return file_; }
 
 	// --- scalar edits ---
 	void set_set_field(int p_si, const String &p_key, const Variant &p_value);
