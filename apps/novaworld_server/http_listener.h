@@ -1,6 +1,7 @@
 #pragma once
 
 #include "auth.h"
+#include "hosted/bootstrap.h"
 
 #include <net/novacrypto/epask.h>
 
@@ -16,6 +17,8 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace opennova {
 class ConnectionManager;
@@ -32,7 +35,8 @@ namespace hosted { class AdminLinks; }
 
 // Crow-backed HTTP listener. start() registers six route families, each in
 // its own registrar (bodies in http_listener.cpp, the listed servers' in
-// host_routes.cpp):
+// host_routes.cpp), and, with the ec2 provider, the cloud machines' bootstrap
+// route (hosted/bootstrap_route.h, outside /api/):
 //   admin REST API      — /api/admin/* + dev host inject, for the Bearer
 //                         ADMIN_API_TOKEN or an admin-role website session
 //   public JSON API     — /api/* for the web portal, with the website's
@@ -72,6 +76,15 @@ public:
 	// (hosted/console_routes.h). Set before start(); they must outlive the HTTP
 	// listener. Null answers every console command 503.
 	void set_admin_links(hosted::AdminLinks *links) { admin_links_ = links; }
+
+	// The cloud machines' bootstrap route (hosted/bootstrap_route.h, POST
+	// /hosted/bootstrap/<id>): registered only with a store, answering only TCP
+	// peers inside `admitted`. Set before start(); the store must outlive the
+	// HTTP listener.
+	void set_hosted_bootstrap(hosted::BootstrapStore *store, std::vector<hosted::Ipv4Cidr> admitted) {
+		bootstrap_store_ = store;
+		bootstrap_admitted_ = std::move(admitted);
+	}
 
 	HttpListener(const HttpListener &) = delete;
 	HttpListener &operator=(const HttpListener &) = delete;
@@ -183,6 +196,10 @@ private:
 	// The console routes' admin links (set_admin_links); null in tests that do
 	// not wire them.
 	hosted::AdminLinks *admin_links_ = nullptr;
+	// The bootstrap route's tokens and networks (set_hosted_bootstrap); null:
+	// no route.
+	hosted::BootstrapStore *bootstrap_store_ = nullptr;
+	std::vector<hosted::Ipv4Cidr> bootstrap_admitted_;
 	// config.public_host, set in start() before Crow runs (host_url() /
 	// gsb_url()).
 	std::string public_host_;

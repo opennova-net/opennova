@@ -9,9 +9,9 @@
 // machine) and reports what it runs.
 //
 // Providers: LocalProcessProvider (local_process_provider.h, a child process on
-// the service's own machine, for development and the tests), and the cloud one
-// that comes with the infrastructure (an Ec2Provider fetching the LaunchSpec as
-// its bootstrap bundle). The state-machine tests drive a fake
+// the service's own machine, for development and the tests), and Ec2Provider
+// (ec2_provider.h, an EC2 machine per server that fetches the LaunchSpec as its
+// bootstrap bundle, bootstrap.h). The state-machine tests drive a fake
 // (tests/novaworld/hosted_fake_provider.h).
 
 #include <cstdint>
@@ -86,7 +86,9 @@ public:
 	// gone already is no error.
 	virtual void terminate(const std::string &machine_id) = 0;
 	// Every machine the provider runs for hosted servers (reconciliation at the
-	// service's boot).
+	// service's boot, and the periodic sweep). A provider that cannot tell (a
+	// cloud listing that failed) throws std::runtime_error rather than answer
+	// short, so the supervisor ends nothing on it.
 	virtual std::vector<TaggedMachine> list_tagged() = 0;
 };
 

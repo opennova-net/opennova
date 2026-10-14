@@ -41,6 +41,7 @@
 #include "template_engine.h"
 #include "web_session.h"
 
+#include <base/io/base64.h>
 #include <base/io/cp1252.h>
 #include <base/io/crt_rand.h>
 #include <base/io/sha256.h>
@@ -119,6 +120,10 @@ struct Harness {
 	// The first listener's admin links (the console routes run their commands on
 	// them); the console case syncs them by hand.
 	opennova::novaworld_server::hosted::AdminLinks *links = nullptr;
+	// The bootstrap route's tokens: the first listener's (it admits 127.0.0.0/8, the
+	// harness's own address) and the third's (it admits 10.0.0.0/8 alone).
+	opennova::novaworld_server::hosted::BootstrapStore *bootstrap = nullptr;
+	opennova::novaworld_server::hosted::BootstrapStore *fresh_bootstrap = nullptr;
 
 	// Every connect, send and recv waits at most `timeout_ms`.
 	net::HttpReply send(const char *method, const std::string &path,
@@ -4007,6 +4012,81 @@ bool in_order(const std::vector<std::string> &lines, const std::vector<std::stri
 // routes and their one wider read; the refusals before running, with no link
 // and while stopping; and every line the server was sent checked against the
 // curated shapes.
+// The cloud machines' bootstrap route (hosted/bootstrap_route.h): POST
+// /hosted/bootstrap/<id> with the token, from the address the token is bound to, answers
+// the bundle once, uncacheable; every refusal (no token, a wrong one, another server's id,
+// another address, a spent token) is the one 404 and leaves a live token unspent. The third
+// listener admits 10.0.0.0/8 alone, so the harness (127.0.0.1) is refused there before its
+// token is read, whatever X-Real-IP says; and nothing of it lives under /api/.
+int test_hosted_bootstrap_route(Harness &h) {
+	namespace hosted = opennova::novaworld_server::hosted;
+	hosted::BootstrapBundle bundle;
+	bundle.server_id = 42;
+	bundle.image = "ghcr.io/opennova-net/opennova-serve:sha-abc1234";
+	bundle.spec.server_id = 42;
+	bundle.spec.files.push_back({ "admin.cfg", "svc hunter2hunter2 7F\r\nip_restrict = 10.44.0.10\r\n", true });
+	bundle.spec.files.push_back({ "game.cfg", "version = \"29\"\n", false });
+	bundle.spec.serve_args = { "/HOST", "server.host", "/exp", "jox01" };
+	const std::string token = h.bootstrap->issue(bundle);
+	TEST_EXPECT(h.bootstrap->bind(token, "i-0aaaaaaaaaaaaaaa1", "127.0.0.1"));
+	const std::string auth = "Authorization: Bearer " + token;
+	const std::string path = "/hosted/bootstrap/42";
+	const auto refused = [](const net::HttpReply &reply) {
+		if (reply.code != 404) std::fprintf(stderr, "  %s\n", describe(reply).c_str());
+		return reply.transport_ok && reply.code == 404 && body_text(reply) == "{\"error\":\"not_found\"}" &&
+				header_value(reply, "Cache-Control") == "no-store";
+	};
+
+	TEST_EXPECT(refused(h.send("POST", path)));
+	TEST_EXPECT(refused(h.send("POST", path, { "Authorization: Bearer " + std::string(48, 'A') })));
+	TEST_EXPECT(refused(h.send("POST", path, { "Authorization: " + token })));
+	TEST_EXPECT(refused(h.send("POST", "/hosted/bootstrap/43", { auth })));
+	// An id past the server ids' range (2^63).
+	TEST_EXPECT(refused(h.send("POST", "/hosted/bootstrap/9223372036854775808", { auth })));
+	// The third listener: outside its networks, whatever a proxy header claims.
+	TEST_EXPECT(refused(h.send_to(h.fresh_port, "POST", path, { auth, "X-Real-IP: 10.1.2.3" })));
+	// Not under /api/, and no GET.
+	for (const auto &[method, where] : { std::pair<const char *, const char *>{ "POST", "/api/hosted/bootstrap/42" },
+				 { "GET", "/hosted/bootstrap/42" } }) {
+		const auto reply = h.send(method, where, { auth });
+		TEST_EXPECT(reply.transport_ok && reply.code != 200);
+		TEST_EXPECT(body_text(reply).find("content_base64") == std::string::npos);
+	}
+	TEST_EXPECT(h.bootstrap->live_tokens() == 1);
+
+	// The fetch: the bundle, once.
+	auto reply = h.send("POST", path, { auth });
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
+	TEST_EXPECT(header_value(reply, "Content-Type") == "application/json");
+	const auto json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && json["server_id"].i() == 42 && str(json["image"]) == bundle.image);
+	TEST_EXPECT(json["args"].size() == 4 && str(json["args"][3]) == "jox01");
+	TEST_EXPECT(json["files"].size() == 2 && str(json["files"][0]["name"]) == "admin.cfg");
+	TEST_EXPECT(json["files"][0]["secret"].b() && !json["files"][1]["secret"].b());
+	const std::string &admin_cfg = bundle.spec.files[0].content;
+	TEST_EXPECT(str(json["files"][0]["content_base64"]) ==
+			opennova::io::base64_encode(reinterpret_cast<const uint8_t *>(admin_cfg.data()), admin_cfg.size()));
+	TEST_EXPECT(refused(h.send("POST", path, { auth })));
+	TEST_EXPECT(h.bootstrap->live_tokens() == 0 && !h.bootstrap->awaiting_fetch("i-0aaaaaaaaaaaaaaa1"));
+
+	// A token bound to another machine's address: refused here, and left live for it.
+	const std::string other = h.bootstrap->issue(bundle);
+	TEST_EXPECT(h.bootstrap->bind(other, "i-0bbbbbbbbbbbbbbb2", "127.0.0.2"));
+	TEST_EXPECT(refused(h.send("POST", path, { "Authorization: Bearer " + other })));
+	TEST_EXPECT(h.bootstrap->live_tokens() == 1);
+	h.bootstrap->forget_machine("i-0bbbbbbbbbbbbbbb2");
+
+	// The third listener's own token, bound to the harness's address: still refused there,
+	// before the token is read, so it stays live.
+	const std::string fresh = h.fresh_bootstrap->issue(bundle);
+	TEST_EXPECT(h.fresh_bootstrap->bind(fresh, "i-0ccccccccccccccc3", "127.0.0.1"));
+	TEST_EXPECT(refused(h.send_to(h.fresh_port, "POST", path, { "Authorization: Bearer " + fresh })));
+	TEST_EXPECT(h.fresh_bootstrap->live_tokens() == 1);
+	h.fresh_bootstrap->forget_machine("i-0ccccccccccccccc3");
+	return 0;
+}
+
 int test_hosted_console_routes(Harness &h) {
 	namespace hosted = opennova::novaworld_server::hosted;
 	const std::string password = "ConsoleRoutesAdminPw0123456789";
@@ -4415,6 +4495,7 @@ int run(Harness &h) {
 		{ "hosted_server_routes", test_hosted_server_routes },
 		{ "hosted_listing_owner", test_hosted_listing_owner },
 		{ "hosted_console_routes", test_hosted_console_routes },
+		{ "hosted_bootstrap_route", test_hosted_bootstrap_route },
 		{ "host_text_utf8", test_host_text_utf8 },
 		{ "name_and_value_rules", test_name_and_value_rules },
 		{ "template_names_refused", test_template_names_refused },
@@ -4516,9 +4597,15 @@ int main() {
 		// The console routes' admin links (the console case syncs them by hand),
 		// declared before the listener so they outlive it.
 		opennova::novaworld_server::hosted::AdminLinks links(&pool);
+		// The bootstrap route's tokens, likewise declared before the listeners: the first
+		// listener answers the harness's own address, the third only 10.0.0.0/8.
+		opennova::novaworld_server::hosted::BootstrapStore bootstrap;
+		opennova::novaworld_server::hosted::BootstrapStore fresh_bootstrap;
 		nws::HttpListener http(manager, pool, sessions);
 		http.set_nw_udp_listener(&nw_udp);
 		http.set_admin_links(&links);
+		http.set_hosted_bootstrap(&bootstrap,
+				{ *opennova::novaworld_server::hosted::parse_ipv4_cidr("127.0.0.0/8") });
 		TEST_EXPECT(http.start(config));
 		TEST_EXPECT(http.bound_port() != 0);
 
@@ -4572,6 +4659,8 @@ int main() {
 		fresh_config.trusted_proxies = { "10.255.0.1" };
 		fresh_config.api_proxy_only = true;
 		nws::HttpListener fresh_http(manager, pool, sessions);
+		fresh_http.set_hosted_bootstrap(&fresh_bootstrap,
+				{ *opennova::novaworld_server::hosted::parse_ipv4_cidr("10.0.0.0/8") });
 		TEST_EXPECT(fresh_http.start(fresh_config));
 		TEST_EXPECT(fresh_http.bound_port() != 0);
 
@@ -4580,6 +4669,8 @@ int main() {
 		harness.retail_root = retail_root;
 		harness.fresh_port = fresh_http.bound_port();
 		harness.links = &links;
+		harness.bootstrap = &bootstrap;
+		harness.fresh_bootstrap = &fresh_bootstrap;
 		rc = run(harness);
 		// Join the Crow threads before the pool and the TempDir go, then the
 		// NW UDP listener the push routes held.
