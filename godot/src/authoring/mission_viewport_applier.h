@@ -293,6 +293,11 @@ private:
 			const opennova::editor::MissionPeople &people);
 	// A person's model posed by its body (a clip at its playhead, or two blended).
 	void pose_body_(ObjectModel &model, const opennova::world::InfantryBodyPose &body);
+	// A person's model turned and bent as its body in the people's world faces and looks (S27): the body's
+	// own the model's root, its aim overlay on the bones, through the game's presenter's one rule
+	// (EntityPresenter::aim_apply over the overlay the present rows write); no overlay where the people play
+	// without a world.
+	void aim_body_(ObjectModel &model, const opennova::editor::MissionPeople &people, opennova::editor::NodeId row);
 	// The people as they play their clips now (MissionViewport::people), posed again whenever they played on.
 	void play_people_(const opennova::editor::MissionViewport &mission);
 	uint64_t people_serial_ = UINT64_MAX; // the viewport's people's serial last posed

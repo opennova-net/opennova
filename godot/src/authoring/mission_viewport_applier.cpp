@@ -6,6 +6,7 @@
 #include <godot_cpp/classes/mesh_instance3d.hpp>
 #include <godot_cpp/core/math.hpp>
 #include <godot_cpp/variant/aabb.hpp>
+#include <godot_cpp/variant/packed_float32_array.hpp>
 #include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/classes/viewport.hpp>
@@ -29,7 +30,9 @@
 #include <editor/session/view/session_view.h>
 #include <formats/env/env.h>
 #include <formats/env/env_weather.h>
+#include <runtime/inmatch/client_replica_present.h>
 #include <runtime/world/infantry.h>
+#include <runtime/world/present_rows.h>
 #include <runtime/environment/environment_state.h>
 #include <runtime/environment/weather_runtime.h>
 #include <runtime/renderer/render_order.h>
@@ -49,6 +52,7 @@
 #include "render/frame_fx.h"
 #include "render/object_lod_frame.h"
 #include "render/scene_overlay_compositor.h"
+#include "simulation/entity_presenter.h"
 #include "terrain/foliage_frame_stats.h"
 #include "terrain/terrain_tile_info.h"
 #include "util/string_convert.h"
@@ -773,6 +777,7 @@ void MissionViewportApplier::pose_people_(const MissionScene &scene, const openn
 		// Its body as it plays now (S23 C), its spawn's before it plays.
 		const opennova::world::InfantryBodyPose *body = people.pose(entry.first);
 		pose_body_(*model, body ? *body : pose->pose);
+		aim_body_(*model, people, entry.first);
 		placed.posed_model = placed.model;
 		placed.pose_stamp = pose->stamp;
 	}
@@ -801,8 +806,26 @@ void MissionViewportApplier::play_people_(const opennova::editor::MissionViewpor
 		Placed &placed = entry.second;
 		const opennova::world::InfantryBodyPose *body = people.pose(entry.first);
 		if (body == nullptr || placed.model == 0 || placed.posed_model != placed.model) continue;
-		if (ObjectModel *model = model_of_(placed)) pose_body_(*model, *body);
+		if (ObjectModel *model = model_of_(placed)) {
+			pose_body_(*model, *body);
+			aim_body_(*model, people, entry.first);
+		}
 	}
+}
+
+void MissionViewportApplier::aim_body_(ObjectModel &model, const opennova::editor::MissionPeople &people,
+		opennova::editor::NodeId row) {
+	opennova::anim::AimOverlayAngles angles[opennova::anim::kOverlayClassCount];
+	if (!people.aim_overlay(row, angles)) {
+		model.clear_aim_overlay();
+		return;
+	}
+	// The body row the present rows write for it, through the presenter's one rule (the root basis the body's).
+	PackedFloat32Array record;
+	record.resize(opennova::world::PF_STRIDE);
+	record.fill(0.0f);
+	opennova::inmatch::write_present_overlay(record.ptrw(), angles);
+	EntityPresenter::aim_apply(&model, record, 0, true);
 }
 
 void MissionViewportApplier::flush_shadows_(const MissionScene &scene) {

@@ -4,27 +4,93 @@
 
 #include <base/io/fixed.h>
 #include <editor/preview/mission_poses.h>
+#include <editor/preview/mission_world.h>
 #include <editor/preview/model_preview_rig.h>
 #include <runtime/world/infantry_sound.h>
 #include <runtime/anim/adm_root_motion.h>
+#include <runtime/world/angle.h>
 #include <runtime/world/entity_spawn.h>
 #include <runtime/world/physics_class_table.h>
+#include <runtime/world/pose_inputs.h>
 
 namespace opennova::editor {
+
+struct MissionPeople::PeopleWorld {
+	std::unique_ptr<MissionWorld> mission;
+	world::World::Snapshot loaded; // as loaded, before the inits
+	uint64_t serial = 0;           // the floors' world's it was loaded from
+	std::unordered_map<NodeId, world::EntityHandle> bodies; // every posed person's
+	std::unordered_map<uint16_t, NodeId> rows;              // a body's row, by its handle
+};
+
+MissionPeople::MissionPeople() = default;
+MissionPeople::~MissionPeople() = default;
 
 void MissionPeople::clear() {
 	people_.clear();
 	rows_.clear();
 	rings_ = world::AnimVariantRings();
 	events_.clear();
+	world_.reset();
 	started_ = false;
 	++serial_;
+}
+
+bool MissionPeople::in_world() const {
+	return world_ != nullptr;
+}
+
+bool MissionPeople::start_world_(const MissionPoses &poses) {
+	const uint64_t serial = poses.floor_serial();
+	if (serial == 0) {
+		world_.reset();
+		return false;
+	}
+	if (!world_ || world_->serial != serial) {
+		auto fresh = std::make_unique<PeopleWorld>();
+		fresh->mission = poses.load_floor_world();
+		if (!fresh->mission) {
+			world_.reset();
+			return false;
+		}
+		fresh->serial = serial;
+		// The load as it stands before the inits, the bodies' AI with it (World::restore rewinds both).
+		fresh->mission->world.ai.capture_spawn_baseline();
+		fresh->loaded = fresh->mission->world.snapshot();
+		world_ = std::move(fresh);
+	} else {
+		world_->mission->world.restore(world_->loaded);
+	}
+	world::World &w = world_->mission->world;
+	w.ai.root_motion = poses.motion();
+	w.ai.anim_rings = world::AnimVariantRings();
+	w.logic_tick = 0;
+	world_->bodies.clear();
+	world_->rows.clear();
+	// Every posed person's body initialized in pool order over the poses' tables, the ring heads served as the
+	// game's load serves them [orig: Entity_SpawnFromBMSRecord @0x40E9F0 -> Entity_InitOrganicAI @0x4BFCC0, in pool
+	// order].
+	for (const MissionPose &pose : poses.poses()) {
+		if (pose.status != "posed" || pose.adm_id < 0) continue;
+		const auto found = poses.floor_bodies().find(pose.row);
+		if (found == poses.floor_bodies().end()) continue;
+		world::Entity *entity = w.registry.get(found->second);
+		world::AiEntity *body = w.ai.for_handle(found->second);
+		if (entity == nullptr || body == nullptr) continue;
+		body->inf.active = true;
+		body->inf.adm_id = pose.adm_id;
+		world::initialize_organic_ai(w, *entity);
+		world_->bodies[pose.row] = found->second;
+		world_->rows[found->second.packed] = pose.row;
+	}
+	return true;
 }
 
 void MissionPeople::reset(const MissionPoses &poses, int32_t tick) {
 	people_.clear();
 	rows_.clear();
 	events_.clear();
+	const bool in_world = start_world_(poses);
 	for (const MissionPose &pose : poses.poses()) {
 		if (pose.status != "posed" || pose.adm_id < 0) continue;
 		// Only a body on the org1 physics row runs the head: an org0 body's update is a nullsub, its channels
@@ -40,6 +106,17 @@ void MissionPeople::reset(const MissionPoses &poses, int32_t tick) {
 		person.ssn = pose.ssn;
 		person.alert = pose.alert;
 		person.guarding = pose.guarding;
+		if (in_world) {
+			const auto body = world_->bodies.find(pose.row);
+			const world::AiEntity *ai = body != world_->bodies.end() ? world_->mission->world.ai.for_handle(body->second)
+			                                                         : nullptr;
+			const world::Entity *entity = ai ? world_->mission->world.registry.get(body->second) : nullptr;
+			// A body the init hid (in another team's respawn zone) exits its update before the head [orig:
+			// Entity_UpdateInfantryAI @0x4B9A03].
+			if (ai == nullptr || entity == nullptr || ((entity->flags | entity->engine_flags) & 1u) != 0) continue;
+			person.body = body->second;
+			person.pose = world::infantry_body_pose(ai->inf);
+		}
 		rows_[pose.row] = people_.size();
 		people_.push_back(std::move(person));
 	}
@@ -54,8 +131,9 @@ void MissionPeople::reset(const MissionPoses &poses, int32_t tick) {
 }
 
 bool MissionPeople::run_to(const MissionPoses &poses, int32_t tick) {
-	if (!started_ || poses.serial() != poses_serial_ || poses.generation() != poses_generation_ || tick < tick_ ||
-			tick - tick_ > kCatchUpTicks) {
+	const uint64_t floors = world_ ? world_->serial : 0;
+	if (!started_ || poses.serial() != poses_serial_ || poses.generation() != poses_generation_ ||
+			poses.floor_serial() != floors || tick < tick_ || tick - tick_ > kCatchUpTicks) {
 		reset(poses, tick);
 		return true;
 	}
@@ -68,6 +146,21 @@ bool MissionPeople::run_to(const MissionPoses &poses, int32_t tick) {
 		++tick_;
 		// The game's tick: its first frame runs at 1 (MissionKernel::boot), the clock's first tick past the start.
 		const uint32_t game_tick = uint32_t(tick_ - started_at_);
+		if (world_) {
+			// Each played body's update in pool order, as the game's entity update runs pool 0 [orig:
+			// Entity_UpdateAllEntities @0x4C2460..0x4C2472].
+			world::World &w = world_->mission->world;
+			w.logic_tick = game_tick;
+			for (Person &person : people_) {
+				world::AiEntity *body = w.ai.for_handle(person.body);
+				if (body == nullptr) continue;
+				const world::RootMotionFrame frame = w.ai.tick_still_body(*body, w, game_tick);
+				const uint32_t word = body->inf.last_events;
+				if (word != 0)
+					events_.push_back(Event{ person.row, tick_, word, body->inf.clip_phase, frame.capsule_bottom });
+			}
+			continue;
+		}
 		for (Person &person : people_) {
 			world::RootMotionFrame frame;
 			world::infantry_org1_motor_head(person.channels, motion, rings_, frame);
@@ -79,7 +172,10 @@ bool MissionPeople::run_to(const MissionPoses &poses, int32_t tick) {
 					person.channels, motion, game_tick, person.ssn, person.guarding, person.alert);
 		}
 	}
-	for (Person &person : people_) person.pose = world::infantry_body_pose(person.channels);
+	for (Person &person : people_) {
+		const world::InfantryState *played = channels(person.row);
+		if (played) person.pose = world::infantry_body_pose(*played);
+	}
 	// The last kCatchUpTicks ticks' words kept.
 	const int32_t oldest = tick_ - kCatchUpTicks;
 	events_.erase(events_.begin(),
@@ -95,7 +191,36 @@ const world::InfantryBodyPose *MissionPeople::pose(NodeId row) const {
 
 const world::InfantryState *MissionPeople::channels(NodeId row) const {
 	const auto found = rows_.find(row);
-	return found == rows_.end() ? nullptr : &people_[found->second].channels;
+	if (found == rows_.end()) return nullptr;
+	const Person &person = people_[found->second];
+	if (!world_) return &person.channels;
+	const world::AiEntity *body = world_->mission->world.ai.for_handle(person.body);
+	return body ? &body->inf : nullptr;
+}
+
+bool MissionPeople::aim_overlay(NodeId row, anim::AimOverlayAngles out[anim::kOverlayClassCount]) const {
+	if (!world_) return false;
+	const auto found = world_->bodies.find(row);
+	if (found == world_->bodies.end()) return false;
+	const world::World &w = world_->mission->world;
+	const world::AiEntity *body = w.ai.for_handle(found->second);
+	const world::Entity *entity = w.registry.get(found->second);
+	if (body == nullptr || entity == nullptr) return false;
+	anim::compute_aim_overlay_angles(world::aim_overlay_inputs_for(*body, *entity), out);
+	return true;
+}
+
+bool MissionPeople::look(NodeId row, Look &out) const {
+	if (!world_) return false;
+	const auto found = world_->bodies.find(row);
+	if (found == world_->bodies.end()) return false;
+	const world::AiEntity *body = world_->mission->world.ai.for_handle(found->second);
+	if (body == nullptr) return false;
+	out.body_yaw = world::mission_yaw_deg_from_bam_heading(body->inf.body_heading);
+	out.look_yaw = world::mission_yaw_deg_from_bam_heading(body->heading);
+	const auto target = world_->rows.find(body->inf.head_look_target.packed);
+	out.target = body->inf.head_look_target.valid() && target != world_->rows.end() ? target->second : 0;
+	return true;
 }
 
 io::JsonValue mission_body_json(const world::InfantryBodyPose &body, int32_t tick) {

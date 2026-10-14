@@ -76,6 +76,8 @@ void MissionPoses::clear() {
 	floor_world_.reset();
 	floor_bodies_.clear();
 	floor_key_ = 0;
+	floor_mission_.reset();
+	floor_ground_ = nullptr;
 }
 
 const MissionPose *MissionPoses::pose(NodeId row) const {
@@ -209,6 +211,13 @@ int32_t mission_pose_floor_clearance(MissionWorld &world, world::EntityHandle bo
 	return feet - ground;
 }
 
+std::unique_ptr<MissionWorld> MissionPoses::load_floor_world() const {
+	if (!floor_world_ || !floor_mission_ || !floor_ground_) return nullptr;
+	auto world = std::make_unique<MissionWorld>();
+	world->load(floor_files_, *floor_mission_, *floor_ground_);
+	return world;
+}
+
 bool MissionPoses::floor_files_moved() const {
 	return floor_files_ && source_ && floor_files_->stamped->stamps().moved(*source_);
 }
@@ -271,10 +280,11 @@ bool MissionPoses::stand(const MissionScene &scene, const MissionPeopleFloor &fl
 				key = mix(key, mark.stamp);
 			}
 			if (!floor_world_ || key != floor_key_) {
-				bms::File thinned = *floor.mission;
-				mission_world_thin(thinned, scene.entities(), keep);
+				floor_mission_ = std::make_unique<bms::File>(*floor.mission);
+				mission_world_thin(*floor_mission_, scene.entities(), keep);
+				floor_ground_ = floor.ground;
 				floor_world_ = std::make_unique<MissionWorld>();
-				floor_world_->load(floor_files_, thinned, *floor.ground);
+				floor_world_->load(floor_files_, *floor_mission_, *floor.ground);
 				floor_bodies_.clear();
 				floor_world_->world.registry.for_each_in_pool(0, [&](const world::Entity &entity) {
 					if (const MissionEntityMark *mark =
@@ -282,6 +292,7 @@ bool MissionPoses::stand(const MissionScene &scene, const MissionPeopleFloor &fl
 						floor_bodies_[mark->row] = entity.handle;
 				});
 				floor_key_ = key;
+				++floor_serial_;
 			}
 			world = floor_world_.get();
 		}

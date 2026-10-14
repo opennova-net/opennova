@@ -1619,6 +1619,8 @@ io::JsonValue MissionViewport::body_json(const ViewportInput &input) const {
 	people.set("playing", json_number(double(people_.playing())));
 	people.set("tick", json_number(people_.tick()));
 	people.set("started_at", json_number(people_.started_at()));
+	// Whether they play in a world of their own, the attention looking about it (S27).
+	people.set("world", JsonValue::make_bool(people_.in_world()));
 	body.set("people", std::move(people));
 	body.set("ground", JsonValue::make_bool(ground_));
 	body.set("missing", json_number(double(missing_.size())));
@@ -1686,8 +1688,19 @@ io::JsonValue MissionViewport::items_json(const ViewportInput &input) const {
 			if (const MissionPose *pose = poses_.pose(entity.row)) {
 				JsonValue posed = mission_pose_json(*pose);
 				// And its body as it plays now (S23 C), on the clock's tick the people stand at.
-				if (const world::InfantryBodyPose *body = people_.pose(entity.row))
-					posed.set("now", mission_body_json(*body, people_.tick()));
+				if (const world::InfantryBodyPose *body = people_.pose(entity.row)) {
+					JsonValue now = mission_body_json(*body, people_.tick());
+					// Where it faces and looks, in the people's world (S27).
+					MissionPeople::Look look;
+					if (people_.look(entity.row, look)) {
+						JsonValue facing = JsonValue::make_object();
+						facing.set("body_yaw", json_number(look.body_yaw));
+						facing.set("look_yaw", json_number(look.look_yaw));
+						if (look.target) facing.set("target", json_number(double(look.target)));
+						now.set("look", std::move(facing));
+					}
+					posed.set("now", std::move(now));
+				}
 				item.set("pose", std::move(posed));
 			}
 			// Its item's particle slot as the start attaches it (DI-31).

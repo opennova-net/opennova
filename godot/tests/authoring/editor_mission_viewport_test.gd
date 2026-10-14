@@ -1441,6 +1441,17 @@ func test_people_play_their_clips() -> void:
 		if int(now["playing"].get("phase", -1)) != int(mark["pose"]["playing"].get("phase", -1)):
 			played += 1
 	assert_eq(played, 1, "the guard played on from its spawn")
+	# S27: in a world of their own (the mission's floors' world), each played person's model carries its body's aim
+	# overlay as the game's presenter draws it.
+	assert_true(people.has("world"), str(people))
+	if bool(people.get("world", false)):
+		for row: Variant in state.get("items", []):
+			var mark: Dictionary = row
+			if String(mark.get("kind", "")) != "organic" or mark.get("pose", {}).get("now", {}).is_empty():
+				continue
+			var model := _person_model(mark)
+			if model != null:
+				assert_false(model.get_aim_overlay().is_empty(), String(mark.get("name", "")) + ": its aim overlay")
 	# A seek back to the start: at their spawn again.
 	assert_true(_change({"kind": "mission", "clock": {"ticks": 0}}))
 	for _frame in 3:

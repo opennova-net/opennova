@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -10,6 +11,7 @@
 #include <base/io/tick_rate.h>
 #include <editor/model/node.h>
 #include <editor/preview/preview_clip_sounds.h>
+#include <runtime/anim/aim_overlay.h>
 #include <runtime/world/infantry.h>
 
 namespace opennova::editor {
@@ -17,26 +19,38 @@ namespace opennova::editor {
 class MissionPoses;
 
 // A mission's people playing their clips (ADR 0046 S23 C): each person its spawn poses (MissionPoses, DI-38) whose
-// item's move_function binds the org1 physics row ticked on from its spawn by the game's own org1 motor head
-// (world::infantry_org1_motor_head: the primary's state copied into the secondary's request, then the AnimMap dual
-// update), one tick a tick of the preview clock, from the tick of the clock it was posed at, the first the game's
-// tick 1; another row's body (org0, whose update is a nullsub) stands as its warmup left it. Each tick's event word is
-// what the body's sound block and its fire pass read that tick (the mission view hears the people's footsteps and
-// foley with Listen on). After the head the think of a still body runs on the body's think ticks
-// (world::infantry_org1_still_think, S27: the tick plus 36 times its SSN a multiple of 16): a guard holds its guard,
-// and a person whose record carries an alert_state turns from its idle to idle_2 at its first think [orig:
-// Entity_UpdateInfantryAI @0x4BD2F0..0x4BD31C]. The editor's choice beside the game's: the think's legs that read the
-// world do not run (no perception takes a target; no attention scan looks at a neighbour, which plays the look idles
-// 125 / 126 / 141 where the .adm authors them, or sees an enemy or a corpse; no idle facing turns a person from its
-// teammates; the picture has no simulation, DI-31), so a person plays the state its first think selected on and on
-// (an idle's variants as its ring serves them), the clock's ticks standing in for the world's; a route's walker, whom
-// the game walks along its route, stands frozen at its spawn pose rather than walking in place (the maintainer's S26
-// ruling).
+// item's move_function binds the org1 physics row ticked on from its spawn, one tick a tick of the preview clock, from
+// the tick of the clock it was posed at, the first the game's tick 1; another row's body (org0, whose update is a
+// nullsub) stands as its init left it. Each tick's event word is what the body's sound block and its fire pass read
+// that tick (the mission view hears the people's footsteps and foley with Listen on).
+// - Where the mission's floors' world stands (MissionPoses::floor_serial: a mission and its terrain read), the people
+//   play in a world of their own, the same records loaded again over the same files and ground (S27): every posed
+//   person's body there initialized by the game's own organic init in pool order over the poses' tables
+//   (world::initialize_organic_ai), and each played body ticked in pool order by the game's tick of a still body
+//   (world::AiSystem::tick_still_body: the motor head; on its think ticks the think of a still body, an alert_state's
+//   person turning from its idle to idle_2 at its first, a guard holding guard, and the think's attention tail, which
+//   looks at a neighbour within its scan (the look idles 125 / 126 / 141 where the .adm authors them, the head look),
+//   turns an idle_2 person away from a teammate close by and alerts on an enemy or a corpse it sees; the heading
+//   chase; the eye restamp) [orig: Entity_UpdateInfantryAI @0x4B9910]. The device draws each body's aim overlay
+//   (aim_overlay) as the game's presenter does.
+// - Else the motor head (world::infantry_org1_motor_head) and the still body's think (world::infantry_org1_still_think)
+//   alone, over channels of the people's own.
+// The editor's choice beside the game's: what the still body's tick does not run (the perception's targets and the
+// combat that follows, an enemy within the scan alerting a person the game's perception would have engaged; the root
+// integrate and the ground solve, a person standing where its spawn stood it; the picture has no simulation, DI-31),
+// the clock's ticks standing in for the world's; a route's walker, whom the game walks along its route, stands frozen at
+// its spawn pose rather than walking in place (the maintainer's S26 ruling), its body in the world only for the
+// others to look at.
 class MissionPeople {
 public:
 	// A jump of the clock longer than this many ticks (a seek, the Shell held up, a clock gone back) starts the people
 	// again from their spawn at the clock rather than playing the jump through.
 	static constexpr int32_t kCatchUpTicks = io::kTicksPerSecondInt;
+
+	MissionPeople();
+	~MissionPeople();
+	MissionPeople(const MissionPeople &) = delete;
+	MissionPeople &operator=(const MissionPeople &) = delete;
 
 	// An event word a body's channel read on a tick: whose, on which of the clock's ticks, the word, the body's playhead
 	// (its clip's tick) and the capsule's bottom under its origin (16.16, its footsteps' height below it).
@@ -59,6 +73,20 @@ public:
 	const world::InfantryBodyPose *pose(NodeId row) const;
 	// Its channels as they play now (null: no posed person of the row), what the Shoot tool's world poses its rig by.
 	const world::InfantryState *channels(NodeId row) const;
+	// Whether the people play in a world of their own (the floors' world loaded again for them).
+	bool in_world() const;
+	// A posed person's body in that world as the game's presenter draws it: its aim overlay's nine classes, the body's
+	// own the model's root (world::aim_overlay_inputs_for, anim::compute_aim_overlay_angles) [orig:
+	// Entity_BuildBoneTransformMatrices @0x4B1290]. False: no world, or no body of the row.
+	bool aim_overlay(NodeId row, anim::AimOverlayAngles out[anim::kOverlayClassCount]) const;
+	// Where it faces and looks (in the world, false without): the body's yaw and the look's (the entity's), whole
+	// mission degrees, and the row it looks at (0: none).
+	struct Look {
+		double body_yaw = 0.0;
+		double look_yaw = 0.0;
+		NodeId target = 0;
+	};
+	bool look(NodeId row, Look &out) const;
 	// The event words of the last kCatchUpTicks ticks played, in tick order.
 	const std::vector<Event> &events() const { return events_; }
 	// The clock's tick the people stand at, the tick they were started at, how many play; a serial that moves with
@@ -71,13 +99,17 @@ public:
 private:
 	struct Person {
 		NodeId row = 0;
-		world::InfantryState channels;
+		world::InfantryState channels; // without a world
 		world::InfantryBodyPose pose;
 		// What its think reads (MissionPose's): its SSN, its AI slot's alert byte, whether it guards.
 		int ssn = 0;
 		uint8_t alert = 0;
 		bool guarding = false;
+		world::EntityHandle body; // in the world
 	};
+	struct PeopleWorld; // the people's world, its load as it stood before the inits, its bodies by row
+	bool start_world_(const MissionPoses &poses);
+	std::unique_ptr<PeopleWorld> world_;
 	std::vector<Person> people_;
 	std::unordered_map<NodeId, size_t> rows_;
 	world::AnimVariantRings rings_;
