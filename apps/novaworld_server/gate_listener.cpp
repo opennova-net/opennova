@@ -47,7 +47,13 @@ namespace {
 // state -9 ("NO NW POST IP" / "NO NW POST PORT") without them, unless the
 // junction bypass is set. The host posts its status blob there
 // [orig: Lobby_UpdateServerInfo @0x4ff62c], so it names this listener.
+//
+// LobbyName and the startupurl's `url=` page are the probe's games row's
+// (lobby_name, start_page): JO's row answers "jop_2_consumer" and
+// "jop_2_start.htm", the bytes this reply always carried.
 struct GateResponseFields {
+	std::string lobby_name;
+	std::string start_page;
 	std::string public_host;
 	uint16_t post_port = 0;      // this listener's port
 	uint16_t nw_udp_port = 0;
@@ -71,7 +77,7 @@ std::string build_gate_response(const GateResponseFields &f) {
 
 	std::ostringstream os;
 	os << "GATEPROTOCOL \"1.0\"\r\n";
-	append_var(os, "LobbyName", "jop_2_consumer");
+	append_var(os, "LobbyName", f.lobby_name);
 	append_var(os, "POSTIPADDRESS", f.public_host);
 	append_var(os, "POSTIPPORT", std::to_string(f.post_port));
 	if (!f.met_ip.empty()) {
@@ -87,7 +93,7 @@ std::string build_gate_response(const GateResponseFields &f) {
 	append_var(os, "udpcode2", "xyz");
 	append_var(os, "startupurl",
 	           "http://" + f.public_host + ":" + std::to_string(f.http_port) +
-	           "/nwprepare.dll?ver1=[VER1]&ver2=[VER2]&cc=[CC]&gt=[GT]&url=jop_2_start.htm");
+	           "/nwprepare.dll?ver1=[VER1]&ver2=[VER2]&cc=[CC]&gt=[GT]&url=" + f.start_page);
 	append_var(os, "usejunction", "0");
 	append_var(os, "clearjunction", "0");
 	append_var(os, "ReflectedIpAddress", f.reflected_ip);
@@ -98,16 +104,6 @@ std::string build_gate_response(const GateResponseFields &f) {
 		append_var(os, "GLSVSSAGRMS", std::to_string(f.glsvss_agrms));
 	}
 	return os.str();
-}
-
-// Per memory `reference_gate_tags.md`:
-//   `jopd:cus4` = jodemo (Joint Operations demo)
-//   `jop:cus2`  = retail Joint Operations
-// Both share LobbyName `jop_2_consumer`. Reject anything else for now.
-bool is_known_tag(const std::string &tag) {
-	return tag == "jopd:cus4"
-	    || tag == "jop:cus2"
-	    || tag == "dfx2:0:cus:buffy";
 }
 
 } // namespace
@@ -157,14 +153,30 @@ bool GateListener::start(const ServerConfig &config) {
 	glsvss_agrms_   = config.glsvss_agrms;
 
 	// The receive thread's own connection (Database is single-threaded),
-	// leased here so a database that cannot be opened stops the boot.
+	// leased here so a database that cannot be opened stops the boot. The
+	// games catalogue is read on it once, before the thread exists.
 	std::optional<db::ConnectionPool::Lease> db_conn;
 	if (db_pool_) {
 		try {
 			db_conn.emplace(db_pool_->acquire());
+			games_ = catalog::GameCatalog::load(**db_conn);
 		} catch (const db::SqliteError &e) {
 			std::fprintf(stderr, "[gate] db open failed: %s\n", e.what());
 			return false;
+		}
+	}
+	if (games_.empty()) {
+		std::fprintf(stderr, "[gate] WARN no games rows: every probe goes unanswered\n");
+	}
+	for (const catalog::GameRow &g : games_.games()) {
+		std::printf("[gate] lobby %s answers tag %s (url=%s)\n", loggable(g.lobby_name).c_str(),
+		            loggable(g.gate_tag).c_str(), loggable(g.start_page).c_str());
+	}
+	for (const catalog::GateTagAlias &alias : catalog::kGateTagAliases) {
+		if (const catalog::GameRow *g = games_.by_gate_tag(alias.tag)) {
+			std::printf("[gate] lobby %s answers tag %s (alias of %s)\n",
+			            loggable(g->lobby_name).c_str(), std::string(alias.tag).c_str(),
+			            std::string(alias.answers_as).c_str());
 		}
 	}
 
@@ -254,7 +266,8 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 		                       ? plain.size() - 1 : plain.size();
 		std::string tag(reinterpret_cast<const char *>(plain.data()), tag_len);
 
-		if (!is_known_tag(tag)) {
+		const catalog::GameRow *game = games_.by_gate_tag(tag);
+		if (game == nullptr) {
 			std::fprintf(stderr, "[gate] %s:%u — unknown tag '%s'; ignoring\n",
 					opennova::net::endpoint_to_string(from).c_str(), from.port,
 					loggable(tag).c_str());
@@ -278,6 +291,8 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 		// gateway behind a bridge). Empty/0 => advertise the observed source
 		// (the prod path).
 		GateResponseFields fields;
+		fields.lobby_name     = game->lobby_name;
+		fields.start_page     = game->start_page;
 		fields.public_host    = public_host_;
 		fields.post_port      = bound_port_;
 		fields.nw_udp_port    = nw_udp_port_;
@@ -311,8 +326,8 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 		const int sent = opennova::net::udp_send_to(socket.get(), from,
 		                                            reply.data(), reply.size());
 		if (sent > 0) {
-			std::printf("[gate] %s:%u tag=%s -> %d bytes\n", client_ip.c_str(), from.port,
-					loggable(tag).c_str(), sent);
+			std::printf("[gate] %s:%u tag=%s lobby=%s -> %d bytes\n", client_ip.c_str(), from.port,
+					loggable(tag).c_str(), loggable(game->lobby_name).c_str(), sent);
 		} else {
 			std::fprintf(stderr, "[gate] %s:%u send failed\n",
 			             client_ip.c_str(), from.port);

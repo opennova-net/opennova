@@ -3498,16 +3498,20 @@ add_test(NAME gate_server_loopback COMMAND gate_server_loopback_test)
 
 # The real GateListener on port 0 over loopback UDP: the port start() reports is
 # the one that answers a probe and the one the reply advertises as POSTIPPORT,
-# and a second listener on that port fails start() (same listener-source recipe
-# as the NW UDP e2e tests below).
+# a second listener on that port fails start(), and each gate tag's reply
+# carries its games row's lobby (the repo's migrations and games seed; JO's
+# reply byte for byte), an unknown tag none (same listener-source recipe as the
+# NW UDP e2e tests below).
 add_executable(gate_listener_test
     novaworld/gate_listener_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/catalog_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/gate_listener.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/server_config.cpp)
 target_link_libraries(gate_listener_test PRIVATE opennova_novaworld_service opennova_app_common)
 target_include_directories(gate_listener_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+target_compile_definitions(gate_listener_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME gate_listener COMMAND gate_listener_test)
 
 add_executable(gsb_roundtrip_test novaworld/gsb_roundtrip_test.cpp)

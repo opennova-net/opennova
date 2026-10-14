@@ -128,8 +128,19 @@ int main() {
 
 	// The GSB projection carries the stored columns and the roster names, and
 	// the parsed blob's player total counts them (the retail browser adds the
-	// row's u16 name count to its total).
-	auto entry = opennova::hostdb::gsb_entry_from_host(*row_a, roster);
+	// row's u16 name count to its total). The host reported no VER1 or
+	// Expbits, so those are its game's (the games row the route passes).
+	auto entry = opennova::hostdb::gsb_entry_from_host(*row_a, roster, { "3", "3" });
+	TEST_EXPECT(entry.ver1 == "3" && entry.exp_bits == "3");
+	{
+		const auto dfx2 = opennova::hostdb::gsb_entry_from_host(*row_a, roster, { "1", "1" });
+		TEST_EXPECT(dfx2.ver1 == "1" && dfx2.exp_bits == "1");
+		auto reported = *row_a;
+		reported.ver1 = "7";
+		reported.exp_bits = "2";
+		const auto own = opennova::hostdb::gsb_entry_from_host(reported, roster, { "1", "1" });
+		TEST_EXPECT(own.ver1 == "7" && own.exp_bits == "2");
+	}
 	TEST_EXPECT(entry.rid == a.rid);
 	TEST_EXPECT(entry.ip == "10.0.0.7");
 	TEST_EXPECT(entry.time_left == "45");

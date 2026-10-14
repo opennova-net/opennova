@@ -1,5 +1,7 @@
 #pragma once
 
+#include "catalog_repository.h"
+
 #include <net/novaworld/db/sqlite.h>
 #include <net_sockets.h>
 
@@ -26,6 +28,12 @@ struct ServerConfig;
 // the blob is told apart from a probe by its "HostKey =" preamble before
 // the NWU tag decrypt runs.
 //
+// One lobby per title: the probe's tag selects its `games` row
+// (catalog::GameCatalog::by_gate_tag), which supplies the reply's LobbyName
+// and its startupurl's `url=` start page; a tag no row (nor alias) answers to
+// gets no reply. start() loads the catalog once from its leased connection,
+// so the receive thread answers a probe without touching SQLite.
+//
 // Runs on its own thread. start() returns immediately; the listener stays
 // up until stop() is called or the destructor runs. Designed to be cheap
 // to instantiate and own — main() owns one per process.
@@ -38,20 +46,22 @@ public:
 	GateListener &operator=(const GateListener &) = delete;
 
 	// Optional unknown-message tracker. When set, gate probes carrying a
-	// tag we don't recognize (not jop:cus2 / jopd:cus4 / dfx2 variants) are
-	// recorded (deduped) for /api/unknowns. Null is safe.
+	// tag no games row answers to are recorded (deduped) for /api/unknowns.
+	// Null is safe.
 	void set_unknown_tracker(opennova::UnknownTracker *tracker) { tracker_ = tracker; }
 
-	// Optional DB pool. When set, start() leases one connection and hands it
-	// to the receive thread for its lifetime, and a received host-status blob
-	// refreshes the active_hosts row that owns its HostKey on it
-	// (hostdb::apply_status_blob).
+	// Optional DB pool. When set, start() leases one connection, reads the
+	// games catalogue on it and hands it to the receive thread for its
+	// lifetime, and a received host-status blob refreshes the active_hosts row
+	// that owns its HostKey on it (hostdb::apply_status_blob). Without a pool
+	// the catalogue is empty and every probe goes unanswered.
 	void set_db_pool(opennova::db::ConnectionPool *pool) { db_pool_ = pool; }
 
-	// Bind the UDP socket, lease the thread's DB connection and spawn the
-	// receive loop, which owns both until stop(). Returns false if the socket
-	// couldn't be bound (port in use, perms, etc.) or the connection couldn't
-	// be opened — main() should treat that as fatal.
+	// Bind the UDP socket, lease the thread's DB connection, load the games
+	// catalogue and spawn the receive loop, which owns the socket and the
+	// connection until stop(). Returns false if the socket couldn't be bound
+	// (port in use, perms, etc.) or the connection couldn't be opened or read
+	// — main() should treat that as fatal.
 	bool start(const ServerConfig &config);
 
 	// Signal stop and join the worker thread. Idempotent.
@@ -60,6 +70,9 @@ public:
 	// The port start() bound and the receive loop serves (the OS's pick when
 	// the configured port is 0); the gate response advertises it as POSTIPPORT.
 	uint16_t bound_port() const { return bound_port_; }
+
+	// The games catalogue start() loaded (the lobbies the gate answers for).
+	const catalog::GameCatalog &games() const { return games_; }
 
 private:
 	void run_loop(opennova::net::ScopedSocket socket,
@@ -90,6 +103,9 @@ private:
 	int         glsvss_agrms_ = 0;
 	opennova::UnknownTracker *tracker_ = nullptr;
 	opennova::db::ConnectionPool *db_pool_ = nullptr;
+	// Loaded in start(), before the receive thread exists, and never written
+	// after: the thread reads it without a lock.
+	catalog::GameCatalog games_;
 };
 
 } // namespace opennova::novaworld_server

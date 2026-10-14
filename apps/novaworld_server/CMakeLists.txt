@@ -3,6 +3,7 @@
 # tests drive the listeners in-process; the exe is main.cpp over it.
 set(NOVAWORLD_SERVER_CORE_SOURCES
     server_config.cpp
+    catalog_repository.cpp
     gate_listener.cpp
     nw_udp_listener.cpp
 )
@@ -14,7 +15,6 @@ if(BUILD_NOVAWORLD_HTTP)
         template_engine.cpp
         session_store.cpp
         auth.cpp
-        catalog_repository.cpp
         rate_limiter.cpp
         web_access.cpp
         web_session.cpp

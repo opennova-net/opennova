@@ -23,6 +23,42 @@ using opennova::db::run_migrations;
 
 namespace {
 
+// The games rows as the seed wrote them before migration 0013 (no title, JO's
+// pfid NULL): what every deployment's database held then. A test that builds
+// an older schema writes these, since today's seed names columns it lacks.
+constexpr const char *kGamesSeedBefore0013 =
+		"INSERT OR IGNORE INTO games (slug, display_name, lobby_name, gate_tag, start_page, "
+		"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid) VALUES "
+		"('jop_2_consumer', 'Joint Operations', 'jop_2_consumer', 'jop:cus2', 'jop_2_start.htm', "
+		"'jop_2_host1.htm', 'jop_2.gsb?a=1', NULL, '3', '2345', '3', NULL), "
+		"('dfx2_consumer', 'Delta Force Xtreme 2', 'dfx2_consumer', 'dfx2:0:cus:buffy', "
+		"'dfx2_0_start.htm', 'dfx2_0_host1.htm', 'dfx2_0.gsb?a=1', 'NWJoin.dll?pfid=38', '1', "
+		"'9013', "
+		"'1', '38');";
+
+// The repo's migrations whose file names sort before `before` (e.g. "0008"),
+// copied into `dir`.
+void copy_migrations_before(const std::filesystem::path &migrations, const std::string &before,
+		const std::filesystem::path &dir) {
+	for (const auto &e : std::filesystem::directory_iterator(migrations)) {
+		if (e.path().extension() == ".sql" && e.path().filename().string() < before) {
+			std::filesystem::copy_file(e.path(), dir / e.path().filename());
+		}
+	}
+}
+
+// Every seed file in file-name order, as the server's apply_seed() runs them.
+void apply_seeds(Database &db, const std::filesystem::path &seed_dir) {
+	std::vector<std::filesystem::path> seeds;
+	for (const auto &e : std::filesystem::directory_iterator(seed_dir)) {
+		if (e.path().extension() == ".sql")
+			seeds.push_back(e.path());
+	}
+	std::sort(seeds.begin(), seeds.end());
+	for (const auto &p : seeds)
+		db.exec_script(test_io::read_file_text(p.string()));
+}
+
 int test_migrations_create_expected_tables() {
 	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
 	const auto migrations = source_dir / "backend" / "migrations";
@@ -81,12 +117,23 @@ int test_seed_populates_games() {
 		db.exec_script(test_io::read_file_text(p.string()));
 	}
 
-	auto games = db.query("SELECT slug, gate_tag FROM games ORDER BY slug;");
-	TEST_EXPECT(games.size() == 2);
+	auto games =
+			db.query("SELECT slug, gate_tag, title, lobby_name, pfid FROM games ORDER BY slug;");
+	TEST_EXPECT(games.size() == 3);
 	TEST_EXPECT(games[0].as_text(0).value() == "dfx2_consumer");
 	TEST_EXPECT(games[0].as_text(1).value() == "dfx2:0:cus:buffy");
+	TEST_EXPECT(games[0].as_text(2).value() == "dfx2");
+	TEST_EXPECT(games[0].as_text(4).value() == "38");
 	TEST_EXPECT(games[1].as_text(0).value() == "jop_2_consumer");
 	TEST_EXPECT(games[1].as_text(1).value() == "jop:cus2");
+	TEST_EXPECT(games[1].as_text(2).value() == "jo");
+	TEST_EXPECT(games[1].as_text(3).value() == "jop_2_consumer");
+	TEST_EXPECT(games[1].as_text(4).value() == "28");
+	TEST_EXPECT(games[2].as_text(0).value() == "opennova_0_consumer");
+	TEST_EXPECT(games[2].as_text(1).value() == "opennova:0");
+	TEST_EXPECT(games[2].as_text(2).value() == "jo");
+	TEST_EXPECT(games[2].as_text(3).value() == "opennova_0_consumer");
+	TEST_EXPECT(games[2].as_text(4).value() == "28");
 
 	auto players = db.query(
 		"SELECT username, pcid, nwh, nwhandle FROM players ORDER BY username;"
@@ -164,7 +211,7 @@ int test_seed_is_idempotent() {
 	}
 
 	auto games = db.query("SELECT COUNT(*) FROM games;");
-	TEST_EXPECT(games[0].as_int(0).value() == 2);
+	TEST_EXPECT(games[0].as_int(0).value() == 3);
 	auto foo = db.query(
 		"SELECT pcid, nwh, nwhandle, account_status FROM players "
 		"WHERE username='foo';"
@@ -266,39 +313,32 @@ int test_web_sessions_and_roles() {
 }
 
 // 0008 over a database that already holds accounts (every deployment before
-// it): the migrations up to 0007 and the seed, then the full set, which
-// applies 0008 (and 0009 to 0012 after it) and gives every existing
-// account the 'player' role, and (0011) the 'player' kind with no hosting
-// approval.
+// it): the migrations up to 0007 and the seed of the time (the games rows
+// before 0013, then the dev accounts), then the full set, which applies 0008
+// (and 0009 on after it) and gives every existing account the 'player' role,
+// and (0011) the 'player' kind with no hosting approval.
 int test_web_sessions_migration_over_existing_accounts() {
 	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
 	const auto migrations = source_dir / "backend" / "migrations";
 	const auto seed_dir = source_dir / "backend" / "seed";
 	test_temp::TempDir before_0008("backend_schema_pre0008");
-	for (const auto &e : std::filesystem::directory_iterator(migrations)) {
-		if (e.path().extension() == ".sql" && e.path().filename().string() < "0008") {
-			std::filesystem::copy_file(e.path(), before_0008.path / e.path().filename());
-		}
-	}
+	copy_migrations_before(migrations, "0008", before_0008.path);
 
 	Database db(":memory:");
 	const auto first = run_migrations(db, before_0008.path);
 	TEST_EXPECT(first.applied.size() == 7);
-	std::vector<std::filesystem::path> seeds;
-	for (const auto &e : std::filesystem::directory_iterator(seed_dir)) {
-		if (e.path().extension() == ".sql") seeds.push_back(e.path());
-	}
-	std::sort(seeds.begin(), seeds.end());
-	for (const auto &p : seeds) db.exec_script(test_io::read_file_text(p.string()));
+	db.exec_script(kGamesSeedBefore0013);
+	db.exec_script(test_io::read_file_text((seed_dir / "0002_dev_users.sql").string()));
 	TEST_EXPECT(db.query("SELECT name FROM pragma_table_info('players') WHERE name = 'role';").empty());
 
 	const auto second = run_migrations(db, migrations);
-	TEST_EXPECT(second.applied.size() == 5);
+	TEST_EXPECT(second.applied.size() == 6);
 	TEST_EXPECT(second.applied[0] == "0008_web_sessions_and_roles.sql");
 	TEST_EXPECT(second.applied[1] == "0009_host_keys.sql");
 	TEST_EXPECT(second.applied[2] == "0010_credentials_generation.sql");
 	TEST_EXPECT(second.applied[3] == "0011_hosted_servers.sql");
 	TEST_EXPECT(second.applied[4] == "0012_hosted_server_console.sql");
+	TEST_EXPECT(second.applied[5] == "0013_games_title.sql");
 	const auto roles = db.query("SELECT COUNT(*), SUM(role = 'player'), SUM(kind = 'player'), "
 	                            "SUM(can_host) FROM players;");
 	TEST_EXPECT(roles[0].as_int(0).value() == 5);
@@ -307,6 +347,89 @@ int test_web_sessions_migration_over_existing_accounts() {
 	TEST_EXPECT(roles[0].as_int(3).value() == 0);
 	TEST_EXPECT(db.query("SELECT 1 FROM web_sessions;").empty());
 	return 0;
+}
+
+// The OpenNova row, every column as the hosted-titles program decided it: its
+// own tag, LobbyName and .gsb; JO's wire identity (title, version pair, pfid)
+// and JO's pages; no expansion (the base bit alone).
+int expect_opennova_row(Database &db) {
+	const auto on = db.query(
+			"SELECT display_name, lobby_name, gate_tag, title, start_page, host_page, gsb_path, "
+			"join_lan_url IS NULL, ver1, ver2, exp_bits, pfid FROM games "
+			"WHERE slug = 'opennova_0_consumer';");
+	TEST_EXPECT(on.size() == 1);
+	TEST_EXPECT(on[0].as_text(0).value() == "OpenNova");
+	TEST_EXPECT(on[0].as_text(1).value() == "opennova_0_consumer");
+	TEST_EXPECT(on[0].as_text(2).value() == "opennova:0");
+	TEST_EXPECT(on[0].as_text(3).value() == "jo");
+	TEST_EXPECT(on[0].as_text(4).value() == "jop_2_start.htm");
+	TEST_EXPECT(on[0].as_text(5).value() == "jop_2_host1.htm");
+	TEST_EXPECT(on[0].as_text(6).value() == "opennova_0.gsb?a=1");
+	TEST_EXPECT(on[0].as_int(7).value() == 1);
+	TEST_EXPECT(on[0].as_text(8).value() == "3");
+	TEST_EXPECT(on[0].as_text(9).value() == "2345");
+	TEST_EXPECT(on[0].as_text(10).value() == "1");
+	TEST_EXPECT(on[0].as_text(11).value() == "28");
+	return 0;
+}
+
+// 0013 on a fresh database: the column, and the seed after it (the boot's
+// order) writes every row with its title, the OpenNova row among them.
+int test_games_title_fresh() {
+	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
+	Database db(":memory:");
+	run_migrations(db, source_dir / "backend" / "migrations");
+	TEST_EXPECT(
+			db.query("SELECT name FROM pragma_table_info('games') WHERE name = 'title';").size() ==
+			1);
+	apply_seeds(db, source_dir / "backend" / "seed");
+	const auto titles = db.query("SELECT slug, title FROM games ORDER BY slug;");
+	TEST_EXPECT(titles.size() == 3);
+	TEST_EXPECT(titles[0].as_text(1).value() == "dfx2");
+	TEST_EXPECT(titles[1].as_text(1).value() == "jo");
+	TEST_EXPECT(titles[2].as_text(1).value() == "jo");
+	return expect_opennova_row(db);
+}
+
+// 0013 over a database at 0012 (every deployment before it): the migrations
+// up to 0012 and the seed of the time, then the boot's order, the full set
+// (0013 first among what it applies) and today's seed. The rows already there
+// keep their ids and take their titles (JO's its pfid 28), the accounts keep
+// their game access, and the seed adds the OpenNova row.
+int test_games_title_over_0012() {
+	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
+	const auto migrations = source_dir / "backend" / "migrations";
+	const auto seed_dir = source_dir / "backend" / "seed";
+	test_temp::TempDir before_0013("backend_schema_pre0013");
+	copy_migrations_before(migrations, "0013", before_0013.path);
+
+	Database db(":memory:");
+	TEST_EXPECT(run_migrations(db, before_0013.path).applied.size() == 12);
+	db.exec_script(kGamesSeedBefore0013);
+	db.exec_script(test_io::read_file_text((seed_dir / "0002_dev_users.sql").string()));
+	TEST_EXPECT(
+			db.query("SELECT name FROM pragma_table_info('games') WHERE name = 'title';").empty());
+	const auto ids = db.query("SELECT id FROM games ORDER BY slug;");
+	TEST_EXPECT(ids.size() == 2);
+
+	const auto second = run_migrations(db, migrations);
+	TEST_EXPECT(!second.applied.empty() && second.applied[0] == "0013_games_title.sql");
+	apply_seeds(db, seed_dir);
+
+	const auto games = db.query("SELECT slug, id, title, pfid FROM games ORDER BY slug;");
+	TEST_EXPECT(games.size() == 3);
+	TEST_EXPECT(games[0].as_text(0).value() == "dfx2_consumer");
+	TEST_EXPECT(games[0].as_int(1).value() == ids[0].as_int(0).value());
+	TEST_EXPECT(games[0].as_text(2).value() == "dfx2");
+	TEST_EXPECT(games[0].as_text(3).value() == "38");
+	TEST_EXPECT(games[1].as_text(0).value() == "jop_2_consumer");
+	TEST_EXPECT(games[1].as_int(1).value() == ids[1].as_int(0).value());
+	TEST_EXPECT(games[1].as_text(2).value() == "jo");
+	TEST_EXPECT(games[1].as_text(3).value() == "28");
+	TEST_EXPECT(games[2].as_text(0).value() == "opennova_0_consumer");
+	TEST_EXPECT(db.query("SELECT 1 FROM player_game_access WHERE game_slug = 'jop_2_consumer';")
+						.size() == 5);
+	return expect_opennova_row(db);
 }
 
 // 0010: a new account starts at credentials generation 0, a retail login's
@@ -437,9 +560,13 @@ int main() {
 	if (test_foreign_keys_enforced() != 0) return 1;
 	if (test_web_sessions_and_roles() != 0) return 1;
 	if (test_web_sessions_migration_over_existing_accounts() != 0) return 1;
+	if (test_games_title_fresh() != 0)
+		return 1;
+	if (test_games_title_over_0012() != 0)
+		return 1;
 	if (test_host_keys_and_account_deletes() != 0) return 1;
 	if (test_credentials_generation() != 0) return 1;
 	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs, "
-	            "web sessions + roles, host keys, credentials generation)\n");
+				"web sessions + roles, games titles, host keys, credentials generation)\n");
 	return 0;
 }
