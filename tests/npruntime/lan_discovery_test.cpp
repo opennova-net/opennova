@@ -31,6 +31,8 @@ static int failures = 0;
 namespace {
 
 constexpr uint32_t kBrowseCi = 0x00C0FFEEu;
+// The LAN browse's enumerate address, the broadcast (PeerAddr's packing of 255.255.255.255).
+constexpr uint32_t kBroadcast = 0xFFFFFFFFu;
 
 // A game-server 0x81 carrying the retail JO identity, as a whole datagram.
 std::vector<uint8_t> server_reply(const std::string &name, uint32_t players,
@@ -74,25 +76,85 @@ std::vector<uint8_t> without_field(const std::vector<uint8_t> &datagram, std::st
 
 void test_begin_validates_the_range_and_fixes_one_identity() {
     opennova::LanDiscoveryBrowser b;
-    CHECK(!b.begin(7, 0, 100, kLanConnectTypeLan));
-    CHECK(!b.begin(7, 32768, 32760, kLanConnectTypeLan));
-    CHECK(!b.begin(7, 1, 70000, kLanConnectTypeLan));
-    CHECK(!b.begin(0, kRetailLanPortMin, kRetailLanPortMax, kLanConnectTypeLan)); // a zero CI is omitted on the wire
+    CHECK(!b.begin(7, kBroadcast, 0, 100, kLanConnectTypeLan));
+    CHECK(!b.begin(7, kBroadcast, 32768, 32760, kLanConnectTypeLan));
+    CHECK(!b.begin(7, kBroadcast, 1, 70000, kLanConnectTypeLan));
+    CHECK(!b.begin(0, kBroadcast, kRetailLanPortMin, kRetailLanPortMax, kLanConnectTypeLan)); // a zero CI is omitted on the wire
     CHECK(!b.browsing());
-    CHECK(b.begin(7, kRetailLanPortMin, kRetailLanPortMax, kLanConnectTypeLan));
+    CHECK(b.begin(7, kBroadcast, kRetailLanPortMin, kRetailLanPortMax, kLanConnectTypeLan));
     CHECK(b.browsing());
     CHECK(b.client_index() == 7);
-    CHECK(!b.probe().empty());
-    const std::vector<uint8_t> first = b.probe();
+    CHECK(!b.probe(kRetailLanPortMin).empty());
+    const std::vector<uint8_t> first = b.probe(kRetailLanPortMin);
     bool due = false;
     b.advance(1.0, due);
-    CHECK(b.probe() == first); // the identity holds across the window
-    CHECK(b.probe() == opennova::build_lan_discovery_probe(7));
+    CHECK(b.probe(kRetailLanPortMin) == first); // the identity holds across the window
+    CHECK(b.probe(kRetailLanPortMin) ==
+          opennova::build_lan_discovery_probe(7, kBroadcast, kRetailLanPortMin));
+}
+
+// D-NET-520: one announce per port, each naming its own destination: the enumerate address
+// as EIP and the port as EPN, with the JO build string as PV3. Only the EPN differs between
+// two ports' announces. A zero enumerate address writes no EIP.
+// [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290c0 - the port walk
+//  @0x629241..0x629268; NapiNPSession_SendAnnouncePacket @0x61fa00 - PV3 @0x61fc68..0x61fc9a,
+//  EIP @0x61fcf5..0x61fd19, EPN @0x61fd23..0x61fd47; CNapiGameSession_InitTransportConnection
+//  @0x4c9eab (-1 on a LAN browse)]
+void test_each_port_gets_an_announce_naming_its_destination() {
+    opennova::LanDiscoveryBrowser b;
+    CHECK(b.begin(9, kBroadcast, 32768, 32770, kLanConnectTypeLan));
+    CHECK(b.enumerate_ip() == 0xFFFFFFFFu);
+    for (int port = 32768; port <= 32770; ++port) {
+        uint8_t opcode = 0;
+        std::vector<uint8_t> body;
+        const std::vector<uint8_t> probe = b.probe(port);
+        ClientHello hello;
+        CHECK(nw_decode_inbound(probe.data(), probe.size(), opcode, body));
+        CHECK(opcode == SESSION_OPCODE_CLIENT_HELLO);
+        CHECK(parse_client_hello(body.data(), body.size(), hello));
+        CHECK(hello.ci == 9u);
+        CHECK(hello.eip == 0xFFFFFFFFu);
+        CHECK(hello.epn == static_cast<uint32_t>(port));
+        CHECK(hello.pv3 == "CONSUMER RELEASE 1.7.5.7 [8165168.8165140] Jul 21 2009 18:54:42");
+    }
+    CHECK(b.probe(32768) != b.probe(32769));
+
+    // A direct browse announces to the resolved address (127.0.0.1 in PeerAddr's packing).
+    opennova::LanDiscoveryBrowser direct;
+    CHECK(direct.begin(9, 0x0100007Fu, 32786, 32786, kLanConnectTypeLan));
+    ClientHello to_host;
+    {
+        uint8_t opcode = 0;
+        std::vector<uint8_t> body;
+        const std::vector<uint8_t> probe = direct.probe(32786);
+        CHECK(nw_decode_inbound(probe.data(), probe.size(), opcode, body) &&
+              parse_client_hello(body.data(), body.size(), to_host));
+    }
+    CHECK(to_host.eip == 0x0100007Fu && to_host.epn == 32786u);
+
+    // No enumerate address: the announce carries EPN alone.
+    opennova::LanDiscoveryBrowser unresolved;
+    CHECK(unresolved.begin(9, 0u, 32768, 32768, kLanConnectTypeLan));
+    uint8_t opcode = 0;
+    std::vector<uint8_t> body;
+    const std::vector<uint8_t> probe = unresolved.probe(32768);
+    CHECK(nw_decode_inbound(probe.data(), probe.size(), opcode, body));
+    bool eip = false;
+    bool epn = false;
+    for (std::size_t pos = 0; pos < body.size();) {
+        FlatTlvField field;
+        const std::size_t next = read_flat_tlv(body.data(), body.size(), pos, field);
+        if (next == kFlatTlvEnd) break;
+        if (field.name == "EIP") eip = true;
+        if (field.name == "EPN") epn = true;
+        pos = next;
+    }
+    CHECK(!eip && epn);
 }
 
 void test_window_and_announce_cadence() {
     opennova::LanDiscoveryBrowser b;
-    CHECK(b.begin(1, kRetailLanPortMin, kRetailLanPortMax, kLanConnectTypeLan));
+    CHECK(b.begin(1, kBroadcast, kRetailLanPortMin, kRetailLanPortMax, kLanConnectTypeLan));
     bool due = false;
     int announces = 0;
     int frames = 0;
@@ -115,7 +177,7 @@ void test_window_and_announce_cadence() {
 
 void test_window_boundary_is_strictly_greater_than_thirty_seconds() {
     opennova::LanDiscoveryBrowser b;
-    CHECK(b.begin(1, kRetailLanPortMin, kRetailLanPortMax, kLanConnectTypeLan));
+    CHECK(b.begin(1, kBroadcast, kRetailLanPortMin, kRetailLanPortMax, kLanConnectTypeLan));
     bool due = false;
     CHECK(b.advance(30.0, due)); // exactly 30000 ms: `> 0x7530` is false, still browsing
     CHECK(b.browsing());
@@ -125,7 +187,7 @@ void test_window_boundary_is_strictly_greater_than_thirty_seconds() {
 
 void test_announce_clock_restarts_from_zero_not_the_overshoot() {
     opennova::LanDiscoveryBrowser b;
-    CHECK(b.begin(1, kRetailLanPortMin, kRetailLanPortMax, kLanConnectTypeLan));
+    CHECK(b.begin(1, kBroadcast, kRetailLanPortMin, kRetailLanPortMax, kLanConnectTypeLan));
     bool due = false;
     CHECK(b.advance(2.9, due));
     CHECK(!due);
@@ -172,7 +234,7 @@ void test_reply_filter_matches_retail_admission() {
 
 void test_replies_are_filtered_and_listed_at_first_sighting() {
     opennova::LanDiscoveryBrowser b;
-    CHECK(b.begin(kBrowseCi, 32768, 32775, kLanConnectTypeLan));
+    CHECK(b.begin(kBrowseCi, kBroadcast, 32768, 32775, kLanConnectTypeLan));
     const std::vector<uint8_t> alpha = server_reply("Alpha", 3, 32);
     // Outside the browsed range, an unusable source, or a foreign packet: no row.
     CHECK(b.accept_reply(alpha.data(), alpha.size(), "192.168.1.10", 32776) == opennova::LanRowChange::kNone);
@@ -212,13 +274,13 @@ void test_replies_are_filtered_and_listed_at_first_sighting() {
     // A stopped browser accepts nothing; a new window starts empty.
     b.stop();
     CHECK(b.accept_reply(alpha.data(), alpha.size(), "192.168.1.10", 32768) == opennova::LanRowChange::kNone);
-    CHECK(b.begin(2, 32768, 32775, kLanConnectTypeLan));
+    CHECK(b.begin(2, kBroadcast, 32768, 32775, kLanConnectTypeLan));
     CHECK(b.servers().empty());
 }
 
 void test_window_lists_at_most_thirty_two_hosts() {
     opennova::LanDiscoveryBrowser b;
-    CHECK(b.begin(kBrowseCi, 32768, 32768, kLanConnectTypeLan));
+    CHECK(b.begin(kBrowseCi, kBroadcast, 32768, 32768, kLanConnectTypeLan));
     const std::vector<uint8_t> reply = server_reply("Many", 1, 8);
     for (int i = 1; i <= 40; ++i) {
         const std::string ip = "10.0.0." + std::to_string(i);
@@ -242,19 +304,19 @@ void test_browse_admits_only_its_network_type() {
     const std::vector<uint8_t> net_host = server_reply("Net", 1, 8, 2, kBrowseCi, 0xA04u);
     const std::vector<uint8_t> bare_host = server_reply("Bare", 1, 8, 2, kBrowseCi, 0x0u);
     opennova::LanDiscoveryBrowser lan;
-    CHECK(lan.begin(kBrowseCi, 32768, 32775, kLanConnectTypeLan));
+    CHECK(lan.begin(kBrowseCi, kBroadcast, 32768, 32775, kLanConnectTypeLan));
     CHECK(lan.accept_reply(nw_host.data(), nw_host.size(), "10.0.0.1", 32768) == LanRowChange::kNone);
     CHECK(lan.accept_reply(net_host.data(), net_host.size(), "10.0.0.2", 32768) == LanRowChange::kNone);
     CHECK(lan.accept_reply(lan_host.data(), lan_host.size(), "10.0.0.3", 32768) == LanRowChange::kAdded);
     CHECK(lan.accept_reply(bare_host.data(), bare_host.size(), "10.0.0.4", 32768) == LanRowChange::kAdded);
     CHECK(lan.servers().size() == 2);
     opennova::LanDiscoveryBrowser nw;
-    CHECK(nw.begin(kBrowseCi, 32768, 32775, kLanConnectTypeNovaWorld));
+    CHECK(nw.begin(kBrowseCi, kBroadcast, 32768, 32775, kLanConnectTypeNovaWorld));
     CHECK(nw.accept_reply(lan_host.data(), lan_host.size(), "10.0.0.3", 32768) == LanRowChange::kNone);
     CHECK(nw.accept_reply(nw_host.data(), nw_host.size(), "10.0.0.1", 32768) == LanRowChange::kAdded);
     // A filtered session takes no slot: 32 NovaWorld hosts on the LAN screen leave room.
     opennova::LanDiscoveryBrowser capped;
-    CHECK(capped.begin(kBrowseCi, 32768, 32768, kLanConnectTypeLan));
+    CHECK(capped.begin(kBrowseCi, kBroadcast, 32768, 32768, kLanConnectTypeLan));
     for (int i = 1; i <= 40; ++i) {
         capped.accept_reply(nw_host.data(), nw_host.size(), "10.1.0." + std::to_string(i), 32768);
     }
@@ -277,7 +339,7 @@ void test_reply_without_sf_is_listed() {
     CHECK(out.current_players == 2 && out.max_players == 16);
     CHECK(!out.password_required);
     opennova::LanDiscoveryBrowser b;
-    CHECK(b.begin(kBrowseCi, 32768, 32775, kLanConnectTypeLan));
+    CHECK(b.begin(kBrowseCi, kBroadcast, 32768, 32775, kLanConnectTypeLan));
     CHECK(b.accept_reply(sf_less.data(), sf_less.size(), "192.168.1.20", 32768) == LanRowChange::kAdded);
     CHECK(b.servers().size() == 1);
     // P2 still gates it: an SF-less NovaWorld-transport host is not listed on the LAN screen.
@@ -291,6 +353,7 @@ void test_reply_without_sf_is_listed() {
 
 int main() {
     test_begin_validates_the_range_and_fixes_one_identity();
+    test_each_port_gets_an_announce_naming_its_destination();
     test_window_and_announce_cadence();
     test_window_boundary_is_strictly_greater_than_thirty_seconds();
     test_announce_clock_restarts_from_zero_not_the_overshoot();

@@ -81,6 +81,11 @@ func test_browser_discovers_live_host_without_pre_auth_mission_metadata() -> voi
 		assert_ne(flags & JoinTarget.FLAG_SPECTATOR_PASSWORD, 0,
 				"ServerHello.P2 advertises the spectator-password prompt")
 		assert_eq(row.expansion, "jox01")
+		# The row carries the browse's connection index, which a join from it goes
+		# on with (D-NET-521).
+		assert_gt(browser.get_client_index(), 0, "the browse took a connection index")
+		assert_eq(row.client_index, browser.get_client_index(),
+				"the row carries the browse's CI")
 		assert_eq(row.session_id, "",
 				"an unmodeled SUS1 is omitted instead of fabricated")
 		assert_false("mission" in row,
@@ -213,6 +218,65 @@ func test_duplicate_replies_from_one_endpoint_collapse_to_one_row() -> void:
 
 	browser.stop()
 	responder.close()
+
+
+# D-NET-521: the browse row's CI rides the join end to end. JoinTarget.from_lan_row
+# carries it as session_client_index, Simulation.set_join_discovered_session (the seam
+# SessionDrive's join calls with its target) hands it to the joiner's discovered
+# session, and the joiner's 0x42 goes out under it: the host echoes that CI in its
+# 0x82, which the joiner accepts.
+func test_browse_row_ci_reaches_the_joiner_connection() -> void:
+	var host := Simulation.new()
+	var host_options := HostSessionOptions.new()
+	host_options.server_name = "Row CI LAN"
+	host_options.game_type = 0x30020
+	host_options.max_players = 4
+	host.configure_host_session(host_options)
+	assert_true(host.enable_host_listen(0))
+	assert_true(host.load_from_mission_data(_mission()))
+	var port := host.get_host_listen_port()
+	assert_gt(port, 0)
+
+	var browser := LanSession.new()
+	add_child_autofree(browser)
+	assert_eq(browser.start_browsing("127.0.0.1", port, port), OK)
+	var rows: Array = []
+	for _i in range(180):
+		host.step()
+		await get_tree().process_frame
+		rows = browser.get_servers()
+		if not rows.is_empty():
+			break
+		OS.delay_msec(2)
+	browser.stop()
+	assert_eq(rows.size(), 1, "the browse lists the host")
+	if rows.size() != 1:
+		return
+	var row: LanServerRow = rows[0]
+	assert_gt(row.client_index, 0)
+	var target := JoinTarget.from_lan_row(row)
+	assert_eq(target.session_client_index, row.client_index,
+			"the join target carries the browse's CI")
+
+	var joiner := Simulation.new()
+	joiner.set_join_discovered_session(target)
+	assert_true(joiner.enable_join("127.0.0.1", port, "RowCiJoiner"))
+	joiner.poll_join_preload()
+	assert_eq(int(joiner.get_joiner_network_diagnostics()["client_index"]), row.client_index,
+			"the joiner's connection goes on with the browse's CI")
+	var accepted := false
+	for _i in range(180):
+		host.step()
+		joiner.poll_join_preload()
+		# Phase 3 is Driving, 4 InMatch (5 is Error): the host's 0x82 for this CI was
+		# accepted.
+		var phase := joiner.get_joiner_phase()
+		if phase == 3 or phase == 4:
+			accepted = true
+			break
+		OS.delay_msec(2)
+	assert_true(accepted, "the host's 0x82 echoes the browse's CI and the joiner takes it")
+	assert_eq(int(joiner.get_joiner_network_diagnostics()["client_index"]), row.client_index)
 
 
 func test_invalid_port_range_fails_without_browsing() -> void:

@@ -18,6 +18,7 @@
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <net/npwire/lan_discovery.h>
+#include <net/npwire/peer_addr.h>
 #include <runtime/inmatch/client_runtime.h>
 #include <runtime/inmatch/mission_exit.h>
 #include <runtime/inmatch/napi_np_connection.h>
@@ -182,7 +183,8 @@ int main() {
 		net::ScopedSocket browse(net::udp_bind(0, &browse_port));
 		CHECK(browse.is_valid());
 		const uint32_t ci = 0x1234;
-		const std::vector<uint8_t> probe = build_lan_discovery_probe(ci);
+		const std::vector<uint8_t> probe = build_lan_discovery_probe(
+				ci, peer_addr_from_octets(server_ep.ip, server_ep.port).ip, server_ep.port);
 		net::udp_send_to(browse.get(), server_ep, probe.data(), probe.size());
 		LanDiscoveryServer found;
 		bool answered = false;

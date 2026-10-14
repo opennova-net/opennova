@@ -369,13 +369,13 @@ struct NapiNPServerCtx {
 	// world::Match owns the round-over latch. The client retains the 0x1D header
 	// that starts its end-round board transaction. [orig: §5.2/§5.68]
 
-	// Deterministic server-key source (reimpl-only). The original mints the per-connection server
-	// SCRK / SK randomly at the 0x42 join (make_dev_scrk / make_session_key). For golden
-	// 0x82 byte-parity these must be reproducible, so the default leaves `forced` false (random,
-	// exactly as retail) and a golden test seed-injects the captured values — mirroring the P1
-	// SessionStartup "pass in, don't sample" determinism approach.
+	// Deterministic server-key source (reimpl-only). The original draws the per-connection
+	// server SK and then its SCRK from the manager's PRNG at the 0x42 join
+	// (manager_connection_keys). For golden 0x82 byte-parity these must be reproducible, so the
+	// default leaves `forced` false (drawn, exactly as retail) and a golden test seed-injects
+	// the captured values — mirroring the P1 SessionStartup "pass in, don't sample" approach.
 	struct ServerKeyMint {
-		bool forced = false;       // false => mint randomly (retail behavior)
+		bool forced = false;       // false => draw from the manager PRNG (retail behavior)
 		std::string server_scrk;   // forced ServerAuth.scrk (61 chars)
 		uint32_t server_sk = 0;    // forced ServerAuth.sk
 	};

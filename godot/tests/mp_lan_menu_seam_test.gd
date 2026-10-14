@@ -501,6 +501,7 @@ func test_lan_join_emits_selected_server() -> void:
 	biggy.expansion = "jox01"
 	biggy.host_key = 0x0FE0E112
 	biggy.password_required = true
+	biggy.client_index = 0x2A
 	session.servers_changed.emit([biggy])
 	var lan_list := driver.widget_id("LAN_GAME_LIST")
 	driver.set_widget_items(lan_list, PackedStringArray(["biggy (1/4)"]))
@@ -527,6 +528,10 @@ func test_lan_join_emits_selected_server() -> void:
 	assert_true(target.discovered_session, "a LAN row's join connects from its session record")
 	assert_eq(target.session_host_key, 0x0FE0E112, "the row's HK rides the join target")
 	assert_true(target.session_password_required, "the row's SF rides the join target")
+	# The join goes on with the browse's connection, its 0x42 carrying the browse's
+	# CI (D-NET-521).
+	assert_eq(target.session_client_index, 0x2A, "the browse's CI rides the join target")
+	assert_eq(JoinTarget.new().session_client_index, 0, "a bare dial knows no browse CI")
 	assert_false(JoinTarget.new().discovered_session, "a bare dial sends the 0x41 first")
 
 

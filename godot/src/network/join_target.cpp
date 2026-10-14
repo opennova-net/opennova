@@ -23,6 +23,8 @@ Ref<JoinTarget> JoinTarget::from_lan_row(const Ref<LanServerRow> &p_row) {
 	target->discovered_session_ = true;
 	target->session_host_key_ = p_row->get_host_key();
 	target->session_password_required_ = p_row->get_password_required();
+	// The join goes on with the browse's connection and its CI (D-NET-521).
+	target->session_client_index_ = p_row->get_client_index();
 	return target;
 }
 
@@ -56,6 +58,7 @@ void JoinTarget::_bind_methods() {
 	JOIN_TARGET_PROPERTY(Variant::BOOL, discovered_session)
 	JOIN_TARGET_PROPERTY(Variant::INT, session_host_key)
 	JOIN_TARGET_PROPERTY(Variant::BOOL, session_password_required)
+	JOIN_TARGET_PROPERTY(Variant::INT, session_client_index)
 #undef JOIN_TARGET_PROPERTY
 	ClassDB::bind_method(D_METHOD("has_join_proxy"), &JoinTarget::has_join_proxy);
 	ClassDB::bind_method(D_METHOD("has_team_password"), &JoinTarget::has_team_password);

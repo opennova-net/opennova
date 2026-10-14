@@ -80,6 +80,7 @@ class WeaponDef;      // one weapon.def row as a typed record (object/weapon_def
 class CharacterJoinProfile; // the two-side character selection (object/character_join_profile.h)
 class FpViewmodelSpec;      // the first-person submit spec (simulation/fp_viewmodel_spec.h)
 class HostSessionOptions;   // the hosted-session request (network/host_session_options.h)
+class JoinTarget;           // the join request (network/join_target.h)
 class PlayerLocalView;      // the local view-state snapshot (simulation/player_local_view.h)
 struct NvgLaserSource;      // one NVG laser candidate (simulation/fire_presenter.h)
 class PlayerAimOverlay;     // the local per-segment aim overlay (simulation/player_aim_overlay.h)
@@ -1024,12 +1025,7 @@ public:
 	// can't bind. _on hosts on a NovaWorld session's bound pump instead (one socket, D-NET-346).
 	bool enable_host_listen(int p_port);
 	bool enable_host_listen_on(const Ref<UdpPump> &p_pump);
-	bool is_host_listening() const {
-		const opennova::inmatch::RoleKind kind = session_.kind();
-		return kind == opennova::inmatch::RoleKind::ListenHost ||
-				kind == opennova::inmatch::RoleKind::DedicatedHost ||
-				net_.lan_host_pending;
-	}
+	bool is_host_listening() const;
 	int get_host_listen_port() const;  // the bound UDP port (0 when not listening)
 	int get_host_peer_count() const;   // joiners in handshake or admitted
 	// The gate registration's GSID (0x81 SUS1), AppId (the status page's key), cookie-key table (the
@@ -1179,7 +1175,9 @@ public:
 	// NovaWorld-issued NAMEINFO/PCID/SQUADINFO/JOINTICKET the host validates
 	// (codes 23/24/25/28). Empty for LAN. Retained across runtime rebuilds.
 	void set_join_cd_cookie(const PackedByteArray &p_cookie);
-	void set_join_discovered_session(bool, int64_t, bool, const String &); // the row's 0x81 (C++)
+	// The browse row's 0x81 record the join connects with (HK, SF, expansion and the
+	// browse's CI), built from the join target; a null target clears it.
+	void set_join_discovered_session(const Ref<JoinTarget> &p_target);
 	// The install root whose loose expansion/<name>/version.txt feeds the JOIN
 	// VERSIONCRCSTRING checksum (D-NET-166). Empty keeps the golden "0".
 	// Retained across runtime rebuilds like the character data.

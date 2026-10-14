@@ -97,6 +97,10 @@ public:
 	void set_session_host_key(int64_t p_value) { session_host_key_ = p_value; }
 	bool get_session_password_required() const { return session_password_required_; }
 	void set_session_password_required(bool p_value) { session_password_required_ = p_value; }
+	// The browse's connection index the join goes on with (its 0x42's CI); 0 = none,
+	// the join taking a fresh one (JoinerConnection::DiscoveredSession::client_index).
+	int64_t get_session_client_index() const { return session_client_index_; }
+	void set_session_client_index(int64_t p_value) { session_client_index_ = p_value; }
 
 	int get_port() const { return port_; }
 	void set_port(int p_port) { port_ = p_port; }
@@ -190,6 +194,7 @@ private:
 	bool discovered_session_ = false;
 	int64_t session_host_key_ = 0;
 	bool session_password_required_ = false;
+	int64_t session_client_index_ = 0;
 	bool role_explicit_ = false;
 	String proxy_node_;
 	String proxy_relay_;

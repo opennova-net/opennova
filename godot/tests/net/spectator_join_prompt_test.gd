@@ -24,6 +24,43 @@ func _target(flags: int) -> JoinTarget:
 	return target
 
 
+# D-NET-521: a bare target (no flag word) enumerates first, and the row that
+# enumeration finds becomes the join's discovered session: the join goes on with
+# the browse's connection, straight to the 0x42 with the row's HK, SF and the
+# browse's CI, so the only 0x41s are the browse's. A row with spectators prompts,
+# so no world load starts here.
+func test_preflight_row_becomes_the_discovered_session() -> void:
+	var layer := Control.new()
+	add_child_autofree(layer)
+	var controller := _controller(layer)
+	var target := JoinTarget.new()
+	target.host_ip = "127.0.0.1"
+	target.port = 32768
+	assert_eq(target.entry_step(false), JoinTarget.ENTRY_PREFLIGHT,
+			"a target with no flag word enumerates first")
+	assert_false(target.discovered_session)
+	controller.join_lan_server(target)
+	# The preflight browse runs as the controller's SpectatorPreflight LanSession;
+	# its row arrives through the browser's own signal.
+	var probe := controller.get_node_or_null("SpectatorPreflight") as LanSession
+	assert_not_null(probe, "the bare target starts the preflight browse")
+	if probe == null:
+		return
+	var row := LanServerRow.make("Preflight Host", "127.0.0.1", 32768)
+	row.server_flags = JoinTarget.FLAG_ALLOW_SPECTATORS
+	row.host_key = 0x0FE0E118
+	row.password_required = true
+	row.client_index = 7
+	probe.servers_changed.emit([row])
+	assert_true(target.discovered_session, "the preflight row is the join's discovered session")
+	assert_eq(target.session_host_key, 0x0FE0E118, "the row's HK rides the join")
+	assert_true(target.session_password_required, "the row's SF rides the join")
+	assert_eq(target.session_client_index, 7, "the join carries the browse's CI")
+	assert_eq(target.server_flags, JoinTarget.FLAG_ALLOW_SPECTATORS)
+	assert_not_null(layer.get_node_or_null("JoinRolePrompt"),
+			"the row's spectator flag asks the role question")
+
+
 func test_discovered_spectator_host_prompts_before_joining() -> void:
 	var layer := Control.new()
 	add_child_autofree(layer)
