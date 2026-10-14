@@ -239,7 +239,7 @@ func test_clear_asset_cache_drops_every_entry() -> void:
 func _prepare_veg_fixture(filename: String) -> ResourceRoot:
 	var root := _fixture_root()
 	assert_eq(DirAccess.make_dir_recursive_absolute(root), OK)
-	_copy_file(ProjectSettings.globalize_path(SOURCE_OBJECT), root.path_join(filename))
+	TestFs.copy(self, ProjectSettings.globalize_path(SOURCE_OBJECT), root.path_join(filename))
 	var resource_root := ResourceRoot.new()
 	assert_eq(resource_root.set_root_dir(root), OK)
 	return resource_root
@@ -262,14 +262,3 @@ func _add_triangle_surface(mesh: ArrayMesh, x_offset: float) -> void:
 
 func _fixture_root() -> String:
 	return OS.get_cache_dir().path_join("opennova_foliage_dispatcher_assets_test")
-
-
-func _copy_file(src: String, dst: String) -> void:
-	var bytes := FileAccess.get_file_as_bytes(src)
-	assert_gt(bytes.size(), 0, "Fixture copy source should contain bytes: %s" % src)
-	var file := FileAccess.open(dst, FileAccess.WRITE)
-	assert_not_null(file, "Fixture copy destination should open: %s" % dst)
-	if file == null:
-		return
-	file.store_buffer(bytes)
-	file.close()

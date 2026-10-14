@@ -27,21 +27,13 @@ func before_each() -> void:
 					w.call("button", "ABORT_CANCEL", 310), " HIDDEN")
 			+ w.call("window", "ABORTRETRY_WRAPPER", 400,
 					w.call("button", "BACK", 410) + w.call("button", "ACCEPT", 440), " HIDDEN"))
-	_write(dir.path_join("pre.mnu"),
+	TestFs.write_bytes(self, dir.path_join("pre.mnu"),
 			MenuDriverFixture.screen_xml("PRE_GAME_MENU", body).to_utf8_buffer())
-	_write(dir.path_join("menutxt.bin"), RtxtStringFile.new().to_byte_array())
+	TestFs.write_bytes(self, dir.path_join("menutxt.bin"), RtxtStringFile.new().to_byte_array())
 
 
 func after_all() -> void:
 	PresenterFixture.unstage(TMP_DIR, PackedStringArray(STAGED))
-
-
-func _write(path: String, bytes: PackedByteArray) -> void:
-	var file := FileAccess.open(path, FileAccess.WRITE)
-	assert_not_null(file)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
 
 
 func _open() -> PreGameMenuPresenter:
@@ -98,7 +90,7 @@ func test_cancel_clicks_once_a_frame_after_the_events() -> void:
 			w.call("window", "ERROR_WRAPPER", 200,
 					w.call("multiline_edit", "MESSAGES", 5, "", " READONLY"), " HIDDEN")
 			+ w.call("window", "ABORT_WRAPPER", 300, w.call("button", "ABORT_CANCEL", 0), " HIDDEN"))
-	_write(ProjectSettings.globalize_path(TMP_DIR).path_join("pre.mnu"),
+	TestFs.write_bytes(self, ProjectSettings.globalize_path(TMP_DIR).path_join("pre.mnu"),
 			MenuDriverFixture.screen_xml("PRE_GAME_MENU", body).to_utf8_buffer())
 	# The join screen fits its frame to the window, and the GUT runner's own
 	# panel covers a headless run's 64x64 window: an 800x600 one puts Cancel

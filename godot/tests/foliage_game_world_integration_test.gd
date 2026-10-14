@@ -166,22 +166,11 @@ func _stage_runtime_fixture() -> void:
 	for source in [TestFs.TMAP_FIXTURE_DIR, TestFs.BOOT_FIXTURE_DIR]:
 		var source_dir := ProjectSettings.globalize_path(source)
 		for filename in DirAccess.get_files_at(source_dir):
-			_copy_file(source_dir.path_join(filename), root.path_join(filename))
-	_copy_file(ProjectSettings.globalize_path(ENV_FIXTURE), root.path_join("full_00.env"))
+			TestFs.copy(self, source_dir.path_join(filename), root.path_join(filename))
+	TestFs.copy(self, ProjectSettings.globalize_path(ENV_FIXTURE), root.path_join("full_00.env"))
 	var model_source := ProjectSettings.globalize_path(MODEL_FIXTURE)
-	_copy_file(model_source, root.path_join("bush1.3di"))
-	_copy_file(model_source, root.path_join("bush2.3di"))
-
-
-func _copy_file(source: String, destination: String) -> void:
-	var bytes := FileAccess.get_file_as_bytes(source)
-	assert_gt(bytes.size(), 0, "Fixture source should contain bytes: %s" % source)
-	var file := FileAccess.open(destination, FileAccess.WRITE)
-	assert_not_null(file, "Fixture destination should open: %s" % destination)
-	if file == null:
-		return
-	file.store_buffer(bytes)
-	file.close()
+	TestFs.copy(self, model_source, root.path_join("bush1.3di"))
+	TestFs.copy(self, model_source, root.path_join("bush2.3di"))
 
 
 func _fixture_root() -> String:
