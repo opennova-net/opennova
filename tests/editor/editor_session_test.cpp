@@ -3105,10 +3105,11 @@ static int test_optional_rows() {
 	return 0;
 }
 
-// S11b: create missing makes the files its roles name and nothing else: none named makes
-// nothing; a file put in place since the last refresh (the Problems row still says it is
-// missing) is found first, refused and left as it is, of the right kind or the wrong one;
-// a role no requirement of the project has is refused.
+// S11b: create missing as the session serves it: none named makes nothing, said in the status; the
+// roles named are made, said in Output; a file put in place since the last refresh (the Problems row
+// still says it is missing) is refused and left as it is, and the refresh after it sees the file. Which
+// roles it makes and which it refuses (a file there, of the wrong kind, a role no requirement of the
+// project has) is create_missing_test's test_single_role_and_wrong_kind.
 static int test_create_missing_roles() {
 	editor_test::TempProjectDir dir("opennova_editor_session_create_roles");
 	FakePlatform platform;
@@ -3139,21 +3140,9 @@ static int test_create_missing_roles() {
 	session.handle(keyhelp);
 	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "create_missing.exists"));
 	session.run_operations(); // the validation the scan it read left due
-	std::string io_error, text;
+	std::string io_error;
 	TEST_EXPECT(opennova::io::read_file_bytes(root + "/strings/keyhelp.bin", after, io_error) && after == table);
 	TEST_EXPECT(!finding_about(v.findings.diagnostics, "requirement.missing", "keyhelp.bin")); // the refresh after it sees the file
-	// A file of the wrong kind put in place since: refused, never overwritten.
-	TEST_EXPECT(editor_test::write_text(root + "/vmacros.bin", "raw bytes"));
-	EditorRequest vmacros = request::create_missing({"vmacros"});
-	session.handle(vmacros);
-	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "create_missing.wrong_kind"));
-	TEST_EXPECT(opennova::io::read_file_text(root + "/vmacros.bin", text, io_error) && text == "raw bytes");
-	TEST_EXPECT(!fs::exists(root + "/strings/vmacros.bin"));
-	// A mission row with missions off: no such requirement of this project.
-	EditorRequest ammo = request::create_missing({"ammo_def"});
-	session.handle(ammo);
-	TEST_EXPECT(!session.outcome().done() && has_code(session.outcome().findings, "create_missing.unknown"));
-	TEST_EXPECT(!fs::exists(root + "/defs/ammo.def"));
 	return 0;
 }
 
