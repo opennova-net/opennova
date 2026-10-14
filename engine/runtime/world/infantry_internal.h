@@ -39,6 +39,12 @@ bool infantry_drag_corpse(AiEntity &, World &);
 // (scan every 256 ticks, or every 32 while the entity is the scripted voice
 // speaker). [orig: Entity_UpdateInfantryAI @0x4BD87E..0x4BE7FD]
 void infantry_attention_think(AiSystem &ai, AiEntity &e, World &world, uint32_t key);
+// The org1 heading chase every tick of a body not mounted at its head: the body
+// heading a quarter of the way to the target (clamped), the legs re-planted and
+// chased, the look toward the aim. Defined in infantry.cpp; the still body's tick
+// shares it. [orig: Entity_UpdateInfantryAI @0x4BE8FD..0x4BEBE7, the look's pitch store
+// @0x4BEF97, its +-90 degree clamp about the body @0x4BEFC5..0x4BEFED]
+void infantry_org1_heading_chase(AiEntity &e, const Entity *ent, uint32_t key);
 
 // Per-tick attachment sample, resolved before think and consumed before root motion.
 // [orig: Entity_UpdateInfantryAI @0x4B9910, entity+0x184/+0x364]
