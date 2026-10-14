@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <new>
+#include <string>
 #include <vector>
 
 namespace opennova::mus {
@@ -131,6 +132,15 @@ uint32_t mus_vm_pc(const MusVM *vm) {
 
 static Intrinsic resolve_method(const char *name);
 
+/* The current section's name: the section's label (mus_section_label), "Section_N" where the file names it none. */
+static void set_current_section(MusVM *vm, uint32_t index) {
+    const std::string label = mus_section_label(vm->script, index);
+    const size_t n = label.size() < sizeof(vm->current_section_name) ? label.size()
+                                                                     : sizeof(vm->current_section_name) - 1;
+    memcpy(vm->current_section_name, label.data(), n);
+    vm->current_section_name[n] = 0;
+}
+
 int mus_vm_load_script(MusVM *vm, const MusScript *s) {
     if (!vm || !s) return -1;
     // A fresh context owns fresh storage. Existing compiled operands retain the
@@ -159,12 +169,8 @@ int mus_vm_load_script(MusVM *vm, const MusScript *s) {
        initial_pc = section_table[entry_section_index] (@0x672FB5..0x672FC3). */
     vm->pc = 0;
     if (s->section_count > 0 && s->entry_section_index < s->section_count) {
-        const MusSection *entry = &s->sections[s->entry_section_index];
-        vm->pc = entry->code_offset;
-        size_t n = strlen(entry->name);
-        if (n >= sizeof(vm->current_section_name)) n = sizeof(vm->current_section_name) - 1;
-        memcpy(vm->current_section_name, entry->name, n);
-        vm->current_section_name[n] = 0;
+        vm->pc = s->sections[s->entry_section_index].code_offset;
+        set_current_section(vm, s->entry_section_index);
     }
     return 0;
 }
@@ -192,6 +198,7 @@ void mus_vm_unload_script(MusVM *vm) {
     vm->csp = 0;
     vm->halt_latch = 0;
     vm->current_section_name[0] = 0;
+    vm->methods.clear();
 }
 
 void mus_vm_pause(MusVM *vm) {
@@ -637,8 +644,8 @@ static void op_enter  (MusVM *vm) {
          lea ecx,[ecx*4]; sub ebp,ecx      ; POP N dwords off the data stack
          mov ebx,LocalsBase; add ebx,[instance+0x3C]
          loop: copy N dwords from the popped stack region to locals[frame + i*4]
-       The frame offset is instance[+0x3C] (== the chunk's string_section_size
-       field, 0x20 in every MDEdit chunk), added as the chunk holds it (0 is a
+       The frame offset is instance[+0x3C] (== the chunk's frame_base field,
+       0x20 in every MDEdit chunk), added as the chunk holds it (0 is a
        frame at the locals' start): MusScript.locals_frame_offset.
        D-MUS-6 (a.k.a. D-NEW-2): the original POPS the N args (`sub ebp,N*4`); we mirror with
        `vm->sp -= n`. (We guard sp >= n; the original does not bounds-check.) */
@@ -665,12 +672,8 @@ static void op_done(MusVM *vm) {
        to the entry section's code_offset and halting. */
     if (vm->script && vm->script->section_count > 0
         && vm->script->entry_section_index < vm->script->section_count) {
-        const MusSection *entry = &vm->script->sections[vm->script->entry_section_index];
-        vm->pc = entry->code_offset;
-        size_t n = strlen(entry->name);
-        if (n >= sizeof(vm->current_section_name)) n = sizeof(vm->current_section_name) - 1;
-        memcpy(vm->current_section_name, entry->name, n);
-        vm->current_section_name[n] = 0;
+        vm->pc = vm->script->sections[vm->script->entry_section_index].code_offset;
+        set_current_section(vm, vm->script->entry_section_index);
     }
     vm->halt_latch = 1;
 }
@@ -678,12 +681,8 @@ static void op_done(MusVM *vm) {
 static void op_setstate(MusVM *vm) {
     int sidx = read_u8(vm);
     if (vm->script && (uint32_t)sidx < vm->script->section_count) {
-        const MusSection *sec = &vm->script->sections[sidx];
-        vm->pc = sec->code_offset;
-        size_t n = strlen(sec->name);
-        if (n >= sizeof(vm->current_section_name)) n = sizeof(vm->current_section_name) - 1;
-        memcpy(vm->current_section_name, sec->name, n);
-        vm->current_section_name[n] = 0;
+        vm->pc = vm->script->sections[sidx].code_offset;
+        set_current_section(vm, (uint32_t)sidx);
         if (vm->hooks.on_section_entered) {
             vm->hooks.on_section_entered(vm->hooks.user, vm->current_section_name);
         }
@@ -981,14 +980,9 @@ static void check_section_transition(MusVM *vm) {
     if (!vm->script || !vm->script->sections) return;
     for (uint32_t i = 0; i < vm->script->section_count; ++i) {
         if (vm->script->sections[i].code_offset == vm->pc) {
-            const char *name = vm->script->sections[i].name;
-            if (!section_name_eq_local(vm->current_section_name, name)) {
-                size_t n = strlen(name);
-                if (n >= sizeof(vm->current_section_name)) {
-                    n = sizeof(vm->current_section_name) - 1;
-                }
-                memcpy(vm->current_section_name, name, n);
-                vm->current_section_name[n] = 0;
+            const std::string name = mus_section_label(vm->script, i);
+            if (!section_name_eq_local(vm->current_section_name, name.c_str())) {
+                set_current_section(vm, i);
                 if (vm->hooks.on_section_entered) {
                     vm->hooks.on_section_entered(vm->hooks.user,
                                                  vm->current_section_name);
@@ -1121,15 +1115,9 @@ void mus_vm_set_var(MusVM *vm, uint8_t var_index, int32_t value) {
 int mus_vm_jump_to_section(MusVM *vm, const char *name) {
     if (!vm || !vm->script || !name) return -1;
     for (uint32_t i = 0; i < vm->script->section_count; ++i) {
-        if (section_name_eq_local(vm->script->sections[i].name, name)) {
-            const MusSection *sec = &vm->script->sections[i];
-            vm->pc = sec->code_offset;
-            size_t n = strlen(sec->name);
-            if (n >= sizeof(vm->current_section_name)) {
-                n = sizeof(vm->current_section_name) - 1;
-            }
-            memcpy(vm->current_section_name, sec->name, n);
-            vm->current_section_name[n] = 0;
+        if (section_name_eq_local(mus_section_label(vm->script, i).c_str(), name)) {
+            vm->pc = vm->script->sections[i].code_offset;
+            set_current_section(vm, i);
             if (vm->hooks.on_section_entered) {
                 vm->hooks.on_section_entered(vm->hooks.user, vm->current_section_name);
             }

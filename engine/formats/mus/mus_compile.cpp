@@ -656,7 +656,7 @@ struct Compiler {
         }
         MusVariable &v = variables[variable_count++];
         memset(&v, 0, sizeof(v));
-        strncpy(v.name, name, MUS_INTRINSIC_NAME_SIZE - 1);
+        strncpy(v.name, name, MUS_GLOBAL_NAME_SIZE - 1);
         v.byte_offset = byte_offset;
         return (int)(variable_count - 1);
     }
@@ -1541,7 +1541,7 @@ int Compiler::parse_top_decl(const char **err) {
         lex.advance();
         if (lex.cur_kind == Tok::Ident) lex.advance();   /* type token */
         if (lex.cur_kind == Tok::Ident) {
-            char name[MUS_INTRINSIC_NAME_SIZE];
+            char name[MUS_GLOBAL_NAME_SIZE];
             strncpy(name, lex.cur_text, sizeof(name) - 1);
             name[sizeof(name) - 1] = 0;
             uint32_t off = 64;
@@ -1651,7 +1651,7 @@ int Compiler::finalize(const char **err) {
     if (!out.variables) { *err = "OOM"; return -1; }
     out.variable_count = (uint32_t)(16 + variable_count);
     for (uint32_t k = 0; k < 16; ++k) {
-        snprintf(out.variables[k].name, MUS_INTRINSIC_NAME_SIZE, "Var%02u", k);
+        snprintf(out.variables[k].name, MUS_GLOBAL_NAME_SIZE, "Var%02u", k);
         out.variables[k].byte_offset = 4 * k;
     }
     if (variable_count > 0) memcpy(out.variables + 16, variables, variable_count * sizeof(MusVariable));
@@ -1917,6 +1917,10 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
     }
     for (uint32_t k = 0; k < name_count; ++k)
         if (strnlen(table->intrinsic_names[k], MUS_METHOD_NAME_SIZE) == MUS_METHOD_NAME_SIZE) return -5;
+    /* The strings `pushstr` reads [orig: AudioVM_Op_PushStr @ 0x672836]: the model holds their count alone, so a
+       script holding any cannot be written as the game reads it (-6). */
+    for (uint32_t i = 0; i < script_count; ++i)
+        if (scripts[i]->string_count != 0) return -6;
 
     uint8_t *buf = NULL;
     size_t   cap = 0, used = 0;
@@ -1995,12 +1999,12 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
         ch.section_table_offset = rel(sec_tab_at);
         ch.section_count        = s->section_count;
         ch.entry_section_index  = s->entry_section_index;
-        ch.debug_info_offset    = rel(debug_info_at);
-        ch.debug_info_count     = 0;
-        ch.string_section_offset = rel(str_at);
+        ch.strings_offset       = rel(debug_info_at);   /* the code's end: MDEdit's empty string table */
+        ch.string_count         = 0;
+        ch.debug_offset         = rel(str_at);
         /* +0x3C doubles as the `enter` frame base (instance[+0x3C], added as it is [orig: AudioVM_Op_Enter @
            0x672C39]); 0x20 in every MDEdit file. */
-        ch.string_section_size  = s->locals_frame_offset;
+        ch.frame_base           = s->locals_frame_offset;
         /* +0x40 the MessageHandler entry, +0x44 the code's start [orig: AudioVM_FixupPointers @ 0x672495 /
            @ 0x6724a1]. */
         ch.message_handler_offset = s->has_message_handler ? bc_rel + s->message_handler_offset : 0;

@@ -97,9 +97,7 @@ PackedStringArray MusicScript::get_section_names(const StringName &p_script_name
 		}
 		const MusScript &s = _mf.scripts[i];
 		for (uint32_t j = 0; j < s.section_count; ++j) {
-			char sec_buf[MUS_SECTION_NAME_SIZE + 1] = { 0 };
-			std::memcpy(sec_buf, s.sections[j].name, MUS_SECTION_NAME_SIZE);
-			out.push_back(String(sec_buf));
+			out.push_back(String(mus_section_label(&s, j).c_str()));
 		}
 		break;
 	}
@@ -213,8 +211,8 @@ namespace {
 
 // What the game reads of a script, the same in two parsed files: the method-name table it
 // resolves the `method` calls through, and each program's name, code, sections, entry, the
-// globals' and locals' sizes, the `enter` frame base and the MessageHandler entry (mus.h
-// carries each field's witness).
+// globals' and locals' sizes, the `enter` frame base, the MessageHandler entry and the count
+// of the strings `pushstr` reads (mus.h carries each field's witness).
 bool same_as_read(const MusFile &a, const MusFile &b) {
 	if (a.intrinsic_count != b.intrinsic_count || a.header.chunk_count != b.header.chunk_count) {
 		return false;
@@ -231,7 +229,7 @@ bool same_as_read(const MusFile &a, const MusFile &b) {
 				(x.code_size && std::memcmp(x.code, y.code, x.code_size) != 0) ||
 				x.section_count != y.section_count || x.entry_section_index != y.entry_section_index ||
 				x.globals_size != y.globals_size || x.locals_size != y.locals_size ||
-				x.locals_frame_offset != y.locals_frame_offset ||
+				x.locals_frame_offset != y.locals_frame_offset || x.string_count != y.string_count ||
 				x.has_message_handler != y.has_message_handler ||
 				(x.has_message_handler && x.message_handler_offset != y.message_handler_offset)) {
 			return false;

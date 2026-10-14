@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <string>
+
 namespace opennova::mus {
 
 /* Witnessed: Jointops.exe!AudioVM_LoadScriptFile @ 0x00672D20 (magic compare vs 'SCR0' 0x30524353).
@@ -43,7 +45,7 @@ static uint32_t smallest_after(uint32_t lo, const uint32_t *cands, size_t n,
     return best;
 }
 
-/* MDEdit-authored MUS files carry an editor debug section at MU01 + `string_section_offset`: the 256-byte
+/* MDEdit-authored MUS files carry an editor debug section at MU01 + `debug_offset`: the 256-byte
    source path, then a 0x50-byte header of five tables, each a chunk-relative offset and a count after the
    entry size (+0 entry size, 48; +4/+8 the sections, +0xC/+0x10 the globals, +0x14/+0x18 the functions'
    parameters, +0x1C/+0x20 the functions, +0x24/+0x28 the lines; the rest zero), then the tables themselves.
@@ -71,8 +73,8 @@ static void parse_debug_export(const uint8_t *data, size_t size,
                                uint32_t chunk_off,
                                const MusChunkHeader *ch,
                                MusScript *out) {
-    if (ch->string_section_offset == 0) return;
-    uint64_t base64 = (uint64_t)chunk_off + ch->string_section_offset;
+    if (ch->debug_offset == 0) return;
+    uint64_t base64 = (uint64_t)chunk_off + ch->debug_offset;
     if (base64 + 256 > size) return;
     uint32_t base = (uint32_t)base64;
     /* The path slot: tolerate leading NULs, copy up to the first NUL after them. */
@@ -111,7 +113,7 @@ static void parse_debug_export(const uint8_t *data, size_t size,
     const uint64_t lines_at = line_count ? table_at(0x24, line_count, 8) : 0;
     const size_t name_max = entry_size - 0x10;
 
-    /* Section-name entries, by the section table's order: the editor's labels over the "Section_N" ones. */
+    /* Section-name entries, by the section table's order: the editor's labels (an empty one stays empty). */
     if (sections_at) {
         const uint32_t named = section_count < out->section_count ? section_count : out->section_count;
         for (uint32_t i = 0; i < named; ++i) {
@@ -127,7 +129,7 @@ static void parse_debug_export(const uint8_t *data, size_t size,
         for (uint32_t i = 0; i < var_count; ++i) {
             const uint8_t *e = data + vars_at + (uint64_t)i * entry_size;
             out->variables[i].byte_offset = rd32(e);
-            copy_name(out->variables[i].name, MUS_INTRINSIC_NAME_SIZE, e + 0x10, name_max);
+            copy_name(out->variables[i].name, MUS_GLOBAL_NAME_SIZE, e + 0x10, name_max);
         }
     }
     if (locals_at) {
@@ -177,9 +179,12 @@ static int parse_chunk(const uint8_t *data, size_t size, uint32_t chunk_off,
     out->locals_size         = ch.locals_size;
     out->entry_section_index = ch.entry_section_index;
     /* `enter` frame base = instance[+0x3C] (witnessed @ AudioVM_Op_Enter
-       0x672C20), which is the chunk's string_section_size field. MDEdit emits
-       0x20; carry it through so the VM matches the binary for any chunk. */
-    out->locals_frame_offset = ch.string_section_size;
+       0x672C20), the chunk's frame_base field. MDEdit emits 0x20; carry it
+       through so the VM matches the binary for any chunk. */
+    out->locals_frame_offset = ch.frame_base;
+    /* The strings `pushstr` reads [orig: AudioVM_Op_PushStr @ 0x672836]: their
+       count alone (the writer refuses a script holding any). */
+    out->string_count = ch.string_count;
 
     /* Section table: section_count uint32 chunk-relative entry-PCs. We
        normalise these to bytecode-relative offsets (subtract bytecode_offset)
@@ -199,9 +204,9 @@ static int parse_chunk(const uint8_t *data, size_t size, uint32_t chunk_off,
             /* Convert chunk-relative -> bytecode-relative. */
             if (code_off >= ch.bytecode_offset) code_off -= ch.bytecode_offset;
             out->sections[i].code_offset = code_off;
-            /* Stripped runtime files carry no debug-info names; synthesize
-               "Section_N" so callers always see a populated name field. */
-            snprintf(out->sections[i].name, MUS_SECTION_NAME_SIZE, "Section_%u", i);
+            /* The name is the debug table's (parse_debug_export), empty where the
+               file has none: the game reads no label (mus_section_label names one
+               for display). */
         }
     }
 
@@ -215,8 +220,8 @@ static int parse_chunk(const uint8_t *data, size_t size, uint32_t chunk_off,
         uint32_t chunk_max = (uint32_t)(size - chunk_off);
         uint32_t cands[] = {
             ch.section_table_offset,
-            ch.debug_info_offset,
-            ch.string_section_offset,
+            ch.strings_offset,
+            ch.debug_offset,
         };
         uint32_t end = smallest_after(ch.bytecode_offset, cands,
                                       sizeof(cands) / sizeof(cands[0]),
@@ -351,20 +356,17 @@ int mus_open(MusFile *out, const char *path) {
     return rc;
 }
 
-/* Null-terminating compare bounded to MUS_NAME_SIZE. Treats either side's NUL
-   as end-of-string so the on-disk null-padded form matches a regular C string. */
-static int name_eq_n(const char *a, const char *b, size_t n) {
-    for (size_t i = 0; i < n; ++i) {
-        if (a[i] != b[i]) return 0;
-        if (a[i] == 0) return 1;
-    }
-    return 1;
+std::string mus_section_label(const MusScript *s, uint32_t index) {
+    if (!s || index >= s->section_count) return std::string();
+    const char *name = s->sections[index].name;
+    if (name[0]) return std::string(name, strnlen(name, MUS_SECTION_NAME_SIZE));
+    return "Section_" + std::to_string(index);
 }
 
 const MusSection *mus_find_section(const MusScript *s, const char *name) {
     if (!s || !name) return NULL;
     for (uint32_t i = 0; i < s->section_count; ++i) {
-        if (name_eq_n(s->sections[i].name, name, MUS_NAME_SIZE)) {
+        if (mus_section_label(s, i) == name) {
             return &s->sections[i];
         }
     }

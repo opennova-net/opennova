@@ -1380,16 +1380,28 @@ static int decompile_into_buf(const MusScript *script,
 
 }   /* anonymous namespace */
 
+/* The script with each section its label (mus_section_label): the text names a section the file names none
+   "Section_N". A shallow copy: only the sections are the copy's. */
+static int decompile_labelled(const MusScript *script, const char *const *sbf_names, uint32_t sbf_name_count,
+                              char *out_text, size_t out_capacity) {
+    if (!script) return -1;
+    std::vector<MusSection> labelled(script->sections, script->sections + script->section_count);
+    for (uint32_t i = 0; i < script->section_count; ++i)
+        snprintf(labelled[i].name, MUS_SECTION_NAME_SIZE, "%s", mus_section_label(script, i).c_str());
+    MusScript view = *script;
+    view.sections = labelled.empty() ? NULL : labelled.data();
+    return decompile_into_buf(&view, sbf_names, sbf_name_count, out_text, out_capacity);
+}
+
 int mus_decompile(const MusScript *script, char *out_text, size_t out_capacity) {
-    return decompile_into_buf(script, NULL, 0, out_text, out_capacity);
+    return decompile_labelled(script, NULL, 0, out_text, out_capacity);
 }
 
 int mus_decompile_with_names(const MusScript *script,
                                         const char *const *sbf_names,
                                         uint32_t sbf_name_count,
                                         char *out_text, size_t out_capacity) {
-    return decompile_into_buf(script, sbf_names, sbf_name_count,
-                              out_text, out_capacity);
+    return decompile_labelled(script, sbf_names, sbf_name_count, out_text, out_capacity);
 }
 
 } // namespace opennova::mus

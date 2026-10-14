@@ -653,7 +653,72 @@ static int test_parse_method_table(void) {
     return 1;
 }
 
+/* A section the file names none keeps no name in the model (the game reads no label) and is written so; its label,
+   "Section_N", is for display alone (mus_section_label: the decompiler's text, the VM's section names). A script
+   holding strings `pushstr` reads [orig: AudioVM_Op_PushStr @ 0x672836] is not written (-6): the model holds their
+   count alone. */
+static int test_unnamed_sections_and_strings(void) {
+    const char *src = "script test\nsection Begin\n{\n  done\n}\nsection Next\n{\n  done\n}\n";
+    MusScript script = {};
+    int err_line = 0, err_col = 0;
+    const char *err_msg = NULL;
+    CHECK(mus_compile(src, &script, &err_line, &err_col, &err_msg) == 0, "compile");
+    CHECK(script.section_count == 2, "two sections");
+    script.sections[1].name[0] = 0;
+    const MusScript *one[1] = {&script};
+    MusFile mf = {};
+    std::vector<uint8_t> bytes;
+    CHECK(encode_and_open(one, 1, mf, bytes) == 0, "write a script with an unnamed section");
+    const MusScript &back = mf.scripts[0];
+    const bool named = strcmp(back.sections[0].name, "Begin") == 0 && back.sections[1].name[0] == 0 &&
+                       mus_section_label(&back, 0) == "Begin" && mus_section_label(&back, 1) == "Section_1" &&
+                       mus_find_section(&back, "Section_1") == &back.sections[1];
+    std::string text;
+    const int needed = mus_decompile(&back, NULL, 0);
+    if (needed > 0) {
+        text.assign((size_t)needed + 1, '\0');
+        mus_decompile(&back, &text[0], text.size());
+    }
+    MusVM *vm = mus_vm_create();
+    mus_vm_load_script(vm, &back);
+    const bool jumped = mus_vm_jump_to_section(vm, "Section_1") == 0 &&
+                        strcmp(mus_vm_current_section(vm), "Section_1") == 0;
+    mus_vm_destroy(vm);
+    std::vector<uint8_t> again;
+    {
+        const MusScript *read[1] = {&back};
+        MusFile mf2 = {};
+        const bool same = encode_and_open(read, 1, mf2, again) == 0 && again == bytes;
+        mus_close(&mf2);
+        CHECK(same, "the unnamed section writes back unnamed");
+    }
+    mus_close(&mf);
+    CHECK(named, "the model keeps the name empty; the label is Section_1");
+    CHECK(text.find("section Section_1") != std::string::npos, "the text names it by its label");
+    CHECK(jumped, "the VM names and finds it by its label");
+
+    /* The chunk's string count (+0x34) made 1: read, and the writer refuses it. */
+    std::vector<uint8_t> strings = bytes;
+    uint32_t chunk = 0;
+    memcpy(&chunk, &strings[0x2C], 4);   /* the chunk table's one entry, past the 44-byte header */
+    const uint32_t count = 1;
+    memcpy(&strings[chunk + 0x34], &count, 4);
+    mf = {};
+    CHECK(mus_open_memory(&mf, strings.data(), strings.size()) == 0 && mf.scripts[0].string_count == 1,
+          "a chunk holding a string reads its count");
+    const MusScript *held[1] = {&mf.scripts[0]};
+    uint8_t *buf = NULL;
+    size_t size = 0;
+    const int rc = mus_encode_file(held, 1, &buf, &size);
+    mus_free(buf);
+    mus_close(&mf);
+    CHECK(rc == -6, "and is not written: the model holds no string");
+    mus_script_free(&script);
+    return 1;
+}
+
 int main(void) {
+    RUN_TEST(test_unnamed_sections_and_strings);
     RUN_TEST(test_encode_model_fields);
     RUN_TEST(test_parse_method_table);
     RUN_TEST(test_function_rules);
