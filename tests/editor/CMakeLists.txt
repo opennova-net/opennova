@@ -673,6 +673,10 @@ opennova_add_editor_test(ai_profile MIXED SOURCES ai_profile_document_test.cpp)
 # rewriting one value's span, a key added where the line-ordered reader reads it, a value the reader takes otherwise
 # refused, the particle_keys query; --retail: the install's particle files, each key's text at its span.
 opennova_add_editor_test(particle_keys MIXED)
+
+# The particle type's project check: an effect's particle and a particle's curve table that no particle file the game
+# loads defines (every file's names, without case; the gore set the project picks), each a warning at the name.
+opennova_add_editor_test(particle_project_check)
 # The HUD effects document (ADR 0046 S23 B): hudfx.def's model lines, the one the game reads, the game's failure
 # where the HUD model is that line, a long name's run, an edit's one line, the blank. JO ships none.
 opennova_add_editor_test(hudfx SOURCES hudfx_document_test.cpp)

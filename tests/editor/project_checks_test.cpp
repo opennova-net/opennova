@@ -198,8 +198,9 @@ void print_rows(const std::vector<Diagnostic> &rows) {
 } // namespace
 
 // The registry: the menu type's project check is the render check, the mission type's the ground check (DI-28; the
-// sound lane's wave check is a wave's own finding since round S23, the wave a document), and no other registered type
-// has one (document_types.cpp's static_asserts:
+// sound lane's wave check is a wave's own finding since round S23, the wave a document), the tile placement's and the
+// particle type's their own (the names inside the particle files resolved across them all), and no other registered
+// type has one (document_types.cpp's static_asserts:
 // a type may have none, and no two name one check). A stand-in put in place after they
 // were made is followed at their next update, which makes its check and runs it once; gone, its
 // check goes with it and so do its findings, the update saying the rows moved.
@@ -211,7 +212,8 @@ static int test_registry() {
 			return 1;
 		const DocumentTypeId at = static_cast<DocumentTypeId>(id);
 		TEST_EXPECT((type->project_check != nullptr) ==
-				(at == DocumentTypeId::Menu || at == DocumentTypeId::Mission || at == DocumentTypeId::TilePlacement));
+				(at == DocumentTypeId::Menu || at == DocumentTypeId::Mission || at == DocumentTypeId::TilePlacement ||
+						at == DocumentTypeId::Particles));
 	}
 	(void)probe_type();
 	g_probe = Probe();
@@ -219,10 +221,10 @@ static int test_registry() {
 	TEST_EXPECT(menu_render_check(&checks) != nullptr && menu_render_check(nullptr) == nullptr);
 	TEST_EXPECT(checks.of(DocumentTypeId::None) == nullptr);
 	TEST_EXPECT(mission_ground_check(&checks) != nullptr && mission_ground_check(nullptr) == nullptr);
-	TEST_EXPECT(checks.of(DocumentTypeId::TilePlacement) != nullptr);
+	TEST_EXPECT(checks.of(DocumentTypeId::TilePlacement) != nullptr && checks.of(DocumentTypeId::Particles) != nullptr);
 	for (size_t id = 1; id <= kDocumentTypeCount; ++id)
 		if (static_cast<DocumentTypeId>(id) != DocumentTypeId::Menu && static_cast<DocumentTypeId>(id) != DocumentTypeId::Mission &&
-		    static_cast<DocumentTypeId>(id) != DocumentTypeId::TilePlacement)
+		    static_cast<DocumentTypeId>(id) != DocumentTypeId::TilePlacement && static_cast<DocumentTypeId>(id) != DocumentTypeId::Particles)
 			TEST_EXPECT(checks.of(static_cast<DocumentTypeId>(id)) == nullptr);
 	Project project("opennova_editor_project_checks_registry");
 	TEST_EXPECT(project.make({ { "defs/items.def", item("Alpha", 5) } }));
