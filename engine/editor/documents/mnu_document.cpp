@@ -242,7 +242,8 @@ template <class T> size_t list_content(const std::vector<T> &items) {
 }
 
 size_t content(const mnu::Appearance &appearance) {
-	return footprint_of(appearance.state) + footprint_of(appearance.type) + footprint_of(appearance.value);
+	return footprint_of(appearance.state) + footprint_of(appearance.type) + footprint_of(appearance.value) +
+	       footprint_of(appearance.color.var);
 }
 
 size_t content(const mnu::Sound &sound) {
@@ -255,7 +256,7 @@ size_t content(const mnu::Action &action) {
 }
 
 size_t content(const mnu::Item &item) {
-	return footprint_of(item.type) + footprint_of(item.value) + footprint_of(item.text) +
+	return footprint_of(item.type) + footprint_of(item.value) + footprint_of(item.text) + footprint_of(item.color.var) +
 	       footprint_of(item.justify) + footprint_of(item.vjustify) + footprint_of(item.justify_offset) +
 	       footprint_of(item.vjustify_offset);
 }
@@ -308,10 +309,10 @@ size_t content(const mnu::Window &window) {
 	         footprint_of(label.justify_offset) + footprint_of(label.vjustify_offset) + footprint_of(label.value);
 	bytes += footprint_of(window.toggle_string.type) + footprint_of(window.toggle_string.value);
 	const mnu::Font &font = window.font;
-	for (const std::string *text :
-	     {&font.name, &font.default_fg, &font.default_bg, &font.mouseover_fg, &font.mouseover_bg,
-	      &font.selected_fg, &font.selected_bg, &font.disabled_fg, &font.disabled_bg})
-		bytes += footprint_of(*text);
+	bytes += footprint_of(font.name);
+	for (const mnu::Color *colour : {&font.default_fg, &font.default_bg, &font.mouseover_fg, &font.mouseover_bg,
+	                                 &font.selected_fg, &font.selected_bg, &font.disabled_fg, &font.disabled_bg})
+		bytes += footprint_of(colour->var);
 	bytes += footprint_of(window.frame.stencil) + footprint_of(window.frame.brush) +
 	         footprint_of(window.frame.monogram);
 	bytes += footprint_of(window.cursor.file);

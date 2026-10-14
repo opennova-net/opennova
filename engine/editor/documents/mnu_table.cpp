@@ -12,6 +12,8 @@
 #include <utility>
 
 #include <base/io/strutil.h>
+#include <formats/mns/mns.h>
+#include <formats/mnu/mnu_layout.h>
 #include <formats/mnu/mnu_schema.h>
 
 namespace opennova::editor {
@@ -123,6 +125,74 @@ Entry number_text(const char *path, std::string *(*slot)(void *), bool zero_none
 	e.type = Type::Integer;
 	e.numeric = true;
 	e.zero_none = zero_none;
+	return e;
+}
+
+// A token the parse compares (without case), as its table spells it: false, with `error`, for another,
+// which is none the parse reads.
+bool choose_token(const std::vector<Choice> &choices, std::string &text, std::string &error) {
+	const Choice *match = nullptr;
+	for (const Choice &choice : choices)
+		if (iequals(text, choice.name)) match = &choice;
+	if (!match) {
+		std::string tokens;
+		for (const Choice &choice : choices)
+			if (*choice.name) tokens += std::string(tokens.empty() ? "" : ", ") + choice.name;
+		error = "The game reads one of " + tokens + (choices.front().name[0] ? "." : ", or none.");
+		return false;
+	}
+	text = match->name;
+	return true;
+}
+
+// --- the colours --------------------------------------------------------------------------------------
+
+// A colour's text, as the game reads it into the model (mnu::color_of): one %NAME% stays the reference the
+// stylesheet fills; any other text must be hex digits the read takes whole [orig: CRT_wcstoxl @ 0x76e93b], or the
+// game would read another word than the text shows; a %NAME% inside a longer text is read from the variable's
+// value there [orig: NapiXML_ExpandVariablesInText @ 0x63a000], which the menu cannot hold (D-MNU-1). The field
+// shows the colour as the menu writes it (mnu::color_word): the reference, or eight upper-case hex digits.
+bool colour_from_text(const std::string &text, mnu::Color &out, std::string &error) {
+	if (!mns::is_variable_reference(text)) {
+		if (mns::holds_variable_reference(text)) {
+			error = "The game reads a stylesheet variable inside a colour from its value there, which the menu cannot "
+			        "hold: name one whole, %NAME%.";
+			return false;
+		}
+		if (!mnu::color_reads_whole(text)) {
+			error = "A colour is hex digits, AARRGGBB (six, RRGGBB, read alpha 0), or one stylesheet variable, %NAME%.";
+			return false;
+		}
+	}
+	out = mnu::color_of(text);
+	return true;
+}
+
+// A FONT colour: its text, "" where none is authored (the element left out: Set "" leaves it out).
+template <mnu::Color mnu::Font::*Slot> bool font_colour_get(void *r, Value &out) {
+	const mnu::Color &colour = W(r).font.*Slot;
+	out = colour.present ? mnu::color_word(colour) : std::string();
+	return true;
+}
+template <mnu::Color mnu::Font::*Slot> bool font_colour_set(void *r, const Value &value, std::string &error) {
+	const std::string &text = std::get<std::string>(value);
+	mnu::Color &colour = W(r).font.*Slot;
+	if (text.empty()) {
+		colour = mnu::Color();
+		return true;
+	}
+	return colour_from_text(text, colour, error);
+}
+template <mnu::Color mnu::Font::*Slot> bool font_colour_present(void *r) { return (W(r).font.*Slot).present; }
+template <mnu::Color mnu::Font::*Slot> Entry font_colour(const char *path) {
+	Entry e;
+	e.path = path;
+	e.type = Type::Text;
+	e.width = 128;
+	e.presence = Presence::NonEmpty;
+	e.custom_get = &font_colour_get<Slot>;
+	e.custom_set = &font_colour_set<Slot>;
+	e.custom_present = &font_colour_present<Slot>;
 	return e;
 }
 
@@ -269,14 +339,16 @@ std::vector<Entry> window_entries() {
 	out.push_back(text("cursor.file", 64, [](void *r) { return &W(r).cursor.file; }, Presence::NonEmpty));
 	out.push_back(material_flags("cursor.flags", [](void *r) { return &W(r).cursor.flags; }));
 	out.push_back(text("font.name", 64, [](void *r) { return &W(r).font.name; }, Presence::NonEmpty));
-	out.push_back(text("font.default_fg", 32, [](void *r) { return &W(r).font.default_fg; }, Presence::NonEmpty));
-	out.push_back(text("font.default_bg", 32, [](void *r) { return &W(r).font.default_bg; }, Presence::NonEmpty));
-	out.push_back(text("font.mouseover_fg", 32, [](void *r) { return &W(r).font.mouseover_fg; }, Presence::NonEmpty));
-	out.push_back(text("font.mouseover_bg", 32, [](void *r) { return &W(r).font.mouseover_bg; }, Presence::NonEmpty));
-	out.push_back(text("font.selected_fg", 32, [](void *r) { return &W(r).font.selected_fg; }, Presence::NonEmpty));
-	out.push_back(text("font.selected_bg", 32, [](void *r) { return &W(r).font.selected_bg; }, Presence::NonEmpty));
-	out.push_back(text("font.disabled_fg", 32, [](void *r) { return &W(r).font.disabled_fg; }, Presence::NonEmpty));
-	out.push_back(text("font.disabled_bg", 32, [](void *r) { return &W(r).font.disabled_bg; }, Presence::NonEmpty));
+	// The eight colours, each the word the FONT arm reads or the stylesheet variable it names [orig:
+	// CUIElement_ParseXMLDefinition @ 0x648d14..0x648e64].
+	out.push_back(font_colour<&mnu::Font::default_fg>("font.default_fg"));
+	out.push_back(font_colour<&mnu::Font::default_bg>("font.default_bg"));
+	out.push_back(font_colour<&mnu::Font::mouseover_fg>("font.mouseover_fg"));
+	out.push_back(font_colour<&mnu::Font::mouseover_bg>("font.mouseover_bg"));
+	out.push_back(font_colour<&mnu::Font::selected_fg>("font.selected_fg"));
+	out.push_back(font_colour<&mnu::Font::selected_bg>("font.selected_bg"));
+	out.push_back(font_colour<&mnu::Font::disabled_fg>("font.disabled_fg"));
+	out.push_back(font_colour<&mnu::Font::disabled_bg>("font.disabled_bg"));
 	// STRING [orig: CUIButtonWidget_ParseXMLAttributes @ 0x657c30].
 	out.push_back(toggle("string", [](void *r) { return &W(r).string_data.present; }));
 	out.push_back(text("string.type", 16, [](void *r) { return &W(r).string_data.type; }, Presence::NonEmpty,
@@ -374,13 +446,46 @@ std::vector<Choice> appearance_type_choices() {
 			c.push_back({mnu::kTableAppearanceTypes[i], int64_t(c.size())});
 	return c;
 }
+// A row's TYPE: set, its text is read as the new TYPE reads it (mnu::set_appearance_type: a colour's word is the
+// text an IMAGE names, a name the colour the read takes of it), as the game reads the row's text under it.
+bool appearance_type_set(void *r, const Value &value, std::string &error) {
+	static const std::vector<Choice> choices = appearance_type_choices();
+	std::string token = std::get<std::string>(value);
+	if (!choose_token(choices, token, error)) return false;
+	mnu::set_appearance_type(AP(r), token);
+	return true;
+}
+bool appearance_type_get(void *r, Value &out) {
+	out = AP(r).type;
+	return true;
+}
+bool appearance_type_present(void *r) { return !AP(r).type.empty(); }
+// A row's text: a COLOR's or an OUTLINE's colour (colour_from_text), any other TYPE's texture name.
+bool appearance_value_get(void *r, Value &out) {
+	out = mnu::appearance_text(AP(r));
+	return true;
+}
+bool appearance_value_set(void *r, const Value &value, std::string &error) {
+	mnu::Appearance &row = AP(r);
+	if (!mnu::appearance_color_type(row.type)) {
+		row.value = std::get<std::string>(value);
+		return true;
+	}
+	return colour_from_text(std::get<std::string>(value), row.color, error);
+}
 std::vector<Entry> appearance_entries() {
+	Entry type = text("type", 16, nullptr, Presence::NonEmpty, appearance_type_choices());
+	type.custom_get = &appearance_type_get;
+	type.custom_set = &appearance_type_set;
+	type.custom_present = &appearance_type_present;
+	Entry value = text("value", 128, nullptr, Presence::Always);
+	value.custom_get = &appearance_value_get;
+	value.custom_set = &appearance_value_set;
 	return {
 	        text("state", 16, [](void *r) { return &AP(r).state; }, Presence::NonEmpty,
 	             token_choices(mnu::kAppearanceStates, {}, 0)),
-	        text("type", 16, [](void *r) { return &AP(r).type; }, Presence::NonEmpty,
-	             appearance_type_choices()),
-	        text("value", 128, [](void *r) { return &AP(r).value; }, Presence::Always),
+	        type,
+	        value,
 	        number("map_state", [](void *r) { return &AP(r).map_state; }, [](void *r) { return &AP(r).has_map_state; }),
 	        number("height", [](void *r) { return &AP(r).height; }, [](void *r) { return &AP(r).has_height; }),
 	        material_flags("flags", [](void *r) { return &AP(r).flags; }),
@@ -438,12 +543,44 @@ std::vector<Entry> datasource_entries() {
 }
 
 mnu::Item &IT(void *r) { return *static_cast<mnu::Item *>(r); }
+// An ITEM's TYPE: set, its text is read as the new TYPE reads it (mnu::set_item_type), as for a row's.
+bool item_type_set(void *r, const Value &value, std::string &error) {
+	static const std::vector<Choice> choices = token_choices(mnu::kItemTypes);
+	std::string token = std::get<std::string>(value);
+	if (!choose_token(choices, token, error)) return false;
+	mnu::set_item_type(IT(r), token);
+	return true;
+}
+bool item_type_get(void *r, Value &out) {
+	out = IT(r).type;
+	return true;
+}
+bool item_type_present(void *r) { return !IT(r).type.empty(); }
+// An ITEM's text: a COLOR item's colour (colour_from_text), any other's text.
+bool item_text_get(void *r, Value &out) {
+	out = mnu::item_text(IT(r));
+	return true;
+}
+bool item_text_set(void *r, const Value &value, std::string &error) {
+	mnu::Item &item = IT(r);
+	if (!mnu::item_color_type(item.type)) {
+		item.text = std::get<std::string>(value);
+		return true;
+	}
+	return colour_from_text(std::get<std::string>(value), item.color, error);
+}
 std::vector<Entry> item_entries() {
+	Entry type = text("type", 16, nullptr, Presence::NonEmpty, token_choices(mnu::kItemTypes));
+	type.custom_get = &item_type_get;
+	type.custom_set = &item_type_set;
+	type.custom_present = &item_type_present;
+	Entry item_text = text("text", 1024, nullptr, Presence::Always);
+	item_text.custom_get = &item_text_get;
+	item_text.custom_set = &item_text_set;
 	return {
-	        text("type", 16, [](void *r) { return &IT(r).type; }, Presence::NonEmpty,
-	             token_choices(mnu::kItemTypes)),
+	        type,
 	        number_text("value", [](void *r) { return &IT(r).value; }, true),
-	        text("text", 1024, [](void *r) { return &IT(r).text; }, Presence::Always),
+	        item_text,
 	        text("justify", 16, [](void *r) { return &IT(r).justify; }, Presence::NonEmpty, justify_choices()),
 	        number_text("justify_offset", [](void *r) { return &IT(r).justify_offset; }),
 	        text("vjustify", 16, [](void *r) { return &IT(r).vjustify; }, Presence::NonEmpty,
@@ -715,17 +852,9 @@ bool entry_set(const Entry &e, const Entry *block, void *record, const Value &va
 			normalized = mnu::ui_material_flags_text(word);
 		} else if (!e.open && !e.choices.empty()) {
 			// A token the parse compares (without case), held as its table spells it; another is none the parse reads.
-			const Choice *match = nullptr;
-			for (const Choice &choice : e.choices)
-				if (iequals(text, choice.name)) match = &choice;
-			if (!match) {
-				std::string tokens;
-				for (const Choice &choice : e.choices)
-					if (*choice.name) tokens += std::string(tokens.empty() ? "" : ", ") + choice.name;
-				error = "The game reads one of " + tokens + (e.choices.front().name[0] ? "." : ", or none.");
-				return false;
-			}
-			normalized = std::string(match->name);
+			std::string token = text;
+			if (!choose_token(e.choices, token, error)) return false;
+			normalized = token;
 		}
 	}
 	Value current;

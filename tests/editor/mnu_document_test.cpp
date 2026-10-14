@@ -2017,11 +2017,26 @@ int colours_and_flags() {
 		TEST_EXPECT(schema(exit, id).color == FieldColor::HexArgb && schema(exit, id).reference == ReferenceKind::StyleVar);
 	Diagnostic error;
 	TEST_EXPECT(document->apply(set_edit(exit, "font.default_fg", std::string("%DEF_TEXTCOLOR%")), error));
+	// S27: a colour is held as the game reads it (mnu::Color): one %NAME% the reference, any other text the word
+	// wcstoul reads of it, shown as the menu writes it (eight upper-case hex digits); a text the read would not
+	// take whole, or a %NAME% inside one, is refused; Set "" leaves a FONT colour out.
+	TEST_EXPECT(text_of(*document, exit, "font.default_fg") == "%DEF_TEXTCOLOR%");
+	TEST_EXPECT(document->apply(set_edit(exit, "font.default_bg", std::string("ffba58")), error) &&
+	            text_of(*document, exit, "font.default_bg") == "00FFBA58");
+	TEST_EXPECT(!document->apply(set_edit(exit, "font.default_bg", std::string("#FF0000")), error));
+	TEST_EXPECT(!document->apply(set_edit(exit, "font.default_bg", std::string("FF%DEF_TEXTCOLOR%")), error));
+	TEST_EXPECT(text_of(*document, exit, "font.default_bg") == "00FFBA58");
+	TEST_EXPECT(document->apply(set_edit(exit, "font.default_bg", std::string("")), error) &&
+	            !window_of(*document, exit)->font.default_bg.present);
 	const NodeAddress appearance = child_of(*document, exit, "appearance");
 	TEST_EXPECT(document->apply({set_edit(appearance, "type", std::string("COLOR")), set_edit(appearance, "value", std::string("FF102030"))},
 	                            error));
 	TEST_EXPECT(schema(appearance, "value").color == FieldColor::HexArgb);
-	TEST_EXPECT(document->apply(set_edit(appearance, "type", std::string("IMAGE")), error));
+	TEST_EXPECT(text_of(*document, appearance, "value") == "FF102030" &&
+	            !document->apply(set_edit(appearance, "value", std::string("red")), error));
+	// A TYPE changed reads the row's text as the new TYPE does: the colour's word is the name an IMAGE reads.
+	TEST_EXPECT(document->apply(set_edit(appearance, "type", std::string("IMAGE")), error) &&
+	            text_of(*document, appearance, "value") == "FF102030");
 	TEST_EXPECT(schema(appearance, "value").color == FieldColor::None &&
 	            schema(appearance, "value").reference == ReferenceKind::MenuTexture);
 	const FieldSchema &flags = *schema(appearance, "flags").schema, &cursor = *schema(exit, "cursor.flags").schema;
