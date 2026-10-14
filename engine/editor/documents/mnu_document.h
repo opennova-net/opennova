@@ -152,10 +152,12 @@ protected:
 	bool read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const override;
 	// A text stored as the model holds it (a code-page menu's in Windows-1252, a character it lacks
 	// refused), its width counted in the game's characters (the reader narrows every text to the code
-	// page); a name the reader would not keep where the record sits is refused: a window keeps only
-	// its PLAYERLIST and SERVERLIST attributes, which take no value, and only the extra elements its
-	// parses read at its top level; a row's or an item's TYPE only a token its parse knows there.
+	// page). A window's TYPE makes the window what the new type reads of it (menu_set_window_type): what
+	// only one of the two types reads goes, the records with their identities. A row's or an item's TYPE
+	// takes only a token its parse knows where the record sits (menu_type_tokens).
 	bool set_value(Node &row, const Located &at, size_t field, const Value &value, std::string &error) override;
+	// A window's TYPE: its Set may drop records.
+	bool set_reshapes(NodeKind kind, const std::string &field) const override;
 	bool set_written(Node &row, const Located &at, size_t field, bool present, std::string &error) override;
 	// A screen keeps a root window (a Remove of its last, a Move of its last elsewhere); a part goes
 	// only where its window has none; a window takes an attribute or an extra element only as it

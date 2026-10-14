@@ -46,6 +46,20 @@ size_t menu_children_list();
 // A window held apart, as a window's or a screen's list of windows takes it (a clipboard window).
 DetachedRecord menu_window_record(const mnu::Window &window);
 
+// A window's TYPE set (ADR 0046 S27): the window becomes what the game reads of it after the change. The factory
+// builds the widget its TYPE names and that widget's parse chain reads the window's elements [orig:
+// CUIScene_CreateWidgetByType @ 0x64f630; the chains, mnu::schema_reads], and the writer puts down what the old type
+// reads (formats/mnu mnu_write), so what the new type reads of the window is what both types read: a field, a list
+// or a part both read keeps (a latent value too, mnu.h's presence contract); the rest goes, a field as the zeroed
+// record holds it, a list's records with their identities (`ids`, the window's own). An ITEM's TYPE and an ITEMS
+// APPEARANCE's keep a token both types' forms read [orig: CListWnd_ParseXMLDefinition @ 0x645770;
+// CUISpinList_ParseXMLDefinition @ 0x64bd10; CTableWnd_ParseXMLContentDefinition @ 0x6427d0]; a TARGET a GLB_TABLE
+// and a GOPHER read into members of their own goes over as the other's arm reads it (its new records' identities
+// 0, which the batch numbers). The child windows,
+// which the base parse creates under every type [orig: CUIElement_ParseXMLDefinition @ 0x649772..0x649789], and the
+// parts kept are their own types' and stay as they are.
+void menu_set_window_type(const RecordHandle &window, RecordIds &ids, mnu::WindowType type);
+
 // A record of a screen (never the screen itself) as the format's paths read it, from the records it
 // lies in: the nearest window or part at or above it (a window's own), the element path from that
 // window to the record's list ("" for a window or a part), whether the lists above it are read, the

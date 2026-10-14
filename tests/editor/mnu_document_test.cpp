@@ -13,7 +13,7 @@
 // list kind, undone byte for byte and read back after a save), a SKIP-LEG per root. S9p1:
 // a parse note on input retail ignores warns, one on input retail crashes or hangs on
 // blocks the menu and the build. S13 D5: a screen's or a window's NAME set is its own edit, and
-// Rename everywhere rewrites its uses.
+// Rename everywhere rewrites its uses. S27: a window's TYPE set makes the window what the new type reads.
 #include <editor/documents/mnu_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/validation_cache.h>
@@ -583,15 +583,20 @@ int every_list() {
 	const Document::RecordPath back_path = document.path_in(*document.row(back.row), back.child);
 	TEST_EXPECT(!back_path.empty() && item_path.size() == back_path.size() + 1 &&
 	            item_path[back_path.size()].index == 0);
-	// ... which BACK made a button again does not read (flagged).
+	// The block left out keeps its rows (mnu.h's presence contract) ...
 	FieldSchema text;
 	for (const FieldSchema &field : document.fields(item.kind))
 		if (field.id == "text") text = field;
 	TEST_EXPECT(document.field_on(item, text).applies == Applicability::Reads);
-	TEST_EXPECT(document.apply(set_edit(back, "type", std::string("button")), error));
-	TEST_EXPECT(document.field_on(item, text).applies == Applicability::Ignored);
 	TEST_EXPECT(document.apply(set_edit(back, "items", int64_t(0)), error) && !document.present(item, std::string()) &&
 	            window_of(document, back)->items.items.size() == 1);
+	TEST_EXPECT(document.apply(set_edit(back, "items", int64_t(1)), error) && document.present(item, std::string()));
+	// ... and BACK made a button again, which reads no ITEMS, holds none: the type change drops what the new type
+	// does not read (S27).
+	TEST_EXPECT(document.apply(set_edit(back, "type", std::string("button")), error) && document.identities_match());
+	Document::Placement gone;
+	TEST_EXPECT(!document.placement(item, gone) && !window_of(document, back)->items.present &&
+	            window_of(document, back)->items.items.empty());
 	while (document.can_undo()) document.undo();
 	TEST_EXPECT(document.serialize().text == original);
 	// The spin list's arrows are parts; a table's cells sit in its rows.
@@ -1257,6 +1262,61 @@ int typed_clear_and_retype() {
 	document.end_edit_group();
 	document.undo();
 	TEST_EXPECT(document.serialize().text == original && !document.can_undo());
+	return 0;
+}
+
+// A window's TYPE set (ADR 0046 S27): the window becomes what the new type's widget reads of it, in one step. A LIST
+// made a TABLE keeps its STRING, its ACTION, its SCROLLBAR and its child window (each with its identity) and loses its
+// ITEMS rows (a TABLE's are ROW cells), the identities in the native tree's shape and a later edit of the batch finding
+// a record that stays; made a STATIC it loses the SCROLLBAR and the ITEMS; the undos give every record back with its
+// identity; a GLB_TABLE made a GOPHER reads its TARGET as the gopher's, a record with an identity of its own; the save
+// reads back as the document holds it.
+int type_change_reads_as_the_game() {
+	test_temp::TempDir dir("opennova_menu_type_change");
+	const std::string path = dir.file("types.mnu");
+	TEST_EXPECT(test_io::write_text(
+			path, menu_test::screen(
+			              "MAIN", menu_test::window("list", "PICK",
+			                                        "<ACTION TYPE=\"POP_SCREEN\"></ACTION>\r\n<STRING>Pick</STRING>\r\n"
+			                                        "<ITEMS MULTISELECT><ITEM>one</ITEM><ITEM>two</ITEM></ITEMS>\r\n"
+			                                        "<SCROLLBAR>" + menu_test::image("bar.tga") + "</SCROLLBAR>\r\n" +
+			                                                menu_test::window("static", "INNER", "<STRING>In</STRING>\r\n")) +
+			                              menu_test::window("glb_table", "BROWSER", "<TARGET>http://list</TARGET>\r\n"))));
+	MnuDocument document;
+	TEST_EXPECT(load(document, path) && !document.blocked() && document.identities_match());
+	const NodeAddress pick = menu_test::named(document, "PICK"), inner = menu_test::named(document, "INNER"),
+	                  browser = menu_test::named(document, "BROWSER");
+	const NodeAddress action = child_of(document, pick, "action"), scrollbar = child_of(document, pick, "scrollbar"),
+	                  first = child_of(document, pick, "items.item", 0), second = child_of(document, pick, "items.item", 1);
+	TEST_EXPECT(pick.child && inner.child && browser.child && action.child && scrollbar.child && first.child && second.child);
+	const auto holds = [&](const NodeAddress &address) {
+		Document::Placement at;
+		return document.placement(address, at);
+	};
+	Diagnostic error;
+	TEST_EXPECT(document.apply({set_edit(pick, "type", std::string("table")), set_edit(action, "target", std::string("BACK"))},
+	                           error));
+	TEST_EXPECT(document.identities_match() && holds(action) && holds(scrollbar) && holds(inner) && !holds(first) &&
+	            !holds(second));
+	const mnu::Window *table = window_of(document, pick);
+	TEST_EXPECT(table && table->type == mnu::WindowType::Table && table->items.present && table->items.multiselect &&
+	            table->items.items.empty() && table->string_data.value == "Pick" && table->actions[0].target == "BACK");
+	TEST_EXPECT(document.apply(set_edit(pick, "type", std::string("static")), error) && document.identities_match());
+	TEST_EXPECT(holds(action) && holds(inner) && !holds(scrollbar) && !window_of(document, pick)->items.present);
+	document.undo();
+	document.undo();
+	TEST_EXPECT(document.identities_match() && holds(first) && holds(second) && holds(scrollbar) &&
+	            window_of(document, pick)->type == mnu::WindowType::List && window_of(document, pick)->items.items.size() == 2);
+	// The TARGET a GLB_TABLE keeps its last of, a GOPHER keeps each of [orig: CLanGameBrowser_ParseExtendedXMLDefinition @
+	// 0x65dac0; CGopherWnd_ParseXMLDefinition @ 0x65b130].
+	TEST_EXPECT(document.apply(set_edit(browser, "type", std::string("gopher")), error) && document.identities_match());
+	const NodeAddress target = child_of(document, browser, "gopher_targets");
+	TEST_EXPECT(target.child && target.child != browser.child && holds(target) &&
+	            text_of(document, target, "value") == "http://list" && !window_of(document, browser)->has_glb_target);
+	TEST_EXPECT(document.save(error));
+	mnu::Document reparsed;
+	std::string message;
+	TEST_EXPECT(mnu::parse_file(path, reparsed, message) && mnu::equal(reparsed, document.native()));
 	return 0;
 }
 
@@ -2226,7 +2286,7 @@ int main(int argc, char **argv) {
 	       texts_in_their_code_page() ||
 	       copy_selection_shapes() || duplicate_screen() || typed_add_and_screen_copy() || screens_stay_found() ||
 	       nested_lists() || shipped_shape_edits() ||
-	       typed_clear_and_retype() || parse_notes() || blank_menu_edits() || name_is_its_own_edit() ||
+	       typed_clear_and_retype() || type_change_reads_as_the_game() || parse_notes() || blank_menu_edits() || name_is_its_own_edit() ||
 	       lookup_matches_the_runtime() ||
 	       retail_sweep();
 }

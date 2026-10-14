@@ -788,6 +788,17 @@ bool MnuDocument::set_value(Node &node, const Located &at, size_t field, const V
 	// the game would show as other characters); a Unicode menu keeps the UTF-8.
 	const TableKind &table_kind = *menu_table().kind(at.record.kind);
 	const FieldSchema &schema = table_kind.fields()[field];
+	// A window's TYPE: the token as the field takes it, then the window as the new type's widget reads it
+	// (menu_set_window_type), what that type does not read gone with its identities.
+	if (menu_shape(at.record.kind) == mnu::SchemaShape::Window && schema.id == "type") {
+		mnu::Window &window = at.record.as<mnu::Window>();
+		const mnu::WindowType was = window.type;
+		if (!TableDocument::set_value(node, at, field, value, error)) return false;
+		const mnu::WindowType type = window.type;
+		window.type = was;
+		menu_set_window_type(at.record, *at.ids, type);
+		return true;
+	}
 	Value stored = value;
 	// A row's or an item's TYPE: a token its parse knows where the record sits, as the table spells it; the game
 	// holds any other as none (a LIST's ITEM of TYPE COLOR shows its text as a label [orig:
@@ -840,6 +851,10 @@ bool MnuDocument::set_value(Node &node, const Located &at, size_t field, const V
 // place: a field written again reads what it read while left out.
 bool MnuDocument::set_written(Node &node, const Located &at, size_t field, bool present, std::string &error) {
 	return TableDocument::set_written(node, at, field, present, error);
+}
+
+bool MnuDocument::set_reshapes(NodeKind kind, const std::string &field) const {
+	return menu_shape(kind) == mnu::SchemaShape::Window && field == "type";
 }
 
 bool MnuDocument::accept_list_edit(const Node &node, const ListChange &change, std::string &error) const {
