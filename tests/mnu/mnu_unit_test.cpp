@@ -269,7 +269,7 @@ bool test_text_elements() {
         "JUSTIFY and EDGE carry over; WRAP");
   CHECK(w.toggle_string.present && w.toggle_string.type == "ID" && w.toggle_string.value == "ALT", "TOGGLE_STRING");
   CHECK(w.private_data == "p1", "PRIVATE_DATA");
-  CHECK(w.font.name == "a.fnt" && w.font.default_fg == "FF0000", "FONTs merge");
+  CHECK(w.font.name == "a.fnt" && w.font.default_fg.present && w.font.default_fg.argb == 0x00FF0000u, "FONTs merge");
   CHECK(noted(notes, "/FONT@NAME") && noted(notes, "/CURSOR@FILE"), "attribute forms are noted");
   CHECK(w.cursor.file == "c.tga", "CURSOR FILE");
   CHECK(fixed_point(doc), "fixed point");
@@ -951,7 +951,8 @@ bool test_every_element_fixed_point() {
   w.actions = {action};
   w.string_data = {true, "ID", "CENTER", "BOTTOM", "7", "", true, 0, true, "KEY"};
   w.toggle_string = {true, "ID", "ALT"};
-  w.font = {"f.fnt", "1", "2", "3", "4", "5", "6", "7", "8"};
+  w.font = {"f.fnt", mnu::color_of("1"), mnu::color_of("2"), mnu::color_of("3"), mnu::color_of("4"),
+            mnu::color_of("5"), mnu::color_of("6"), mnu::color_of("7"), mnu::color_of("8")};
   w.frame.stencil = "s.tga";
   w.frame.has_stencil_size = w.frame.has_insetx = w.frame.has_insety = true;
   w.frame.brush = "b.tga";
@@ -1190,6 +1191,65 @@ bool test_source_encoding() {
 
 }  // namespace
 
+// The colours as the parses read them [orig: CRT_wcstoxl @ 0x76e93b through the FONT arm @ 0x648d14..0x648e64, the
+// APPEARANCE COLOR / OUTLINE arm @ 0x648562 and CUISpinList_ParseXMLDefinition @ 0x64bd10]: a whole %NAME% held
+// as the reference, any other text as the word read, written back as eight upper-case digits; a text the read stops
+// short in noted (the rest is left out), a %NAME% inside a longer text noted fatal (D-MNU-1, as a number's); a
+// replaced FONT colour's note goes with it; a texture row's and a text item's text stay text.
+bool test_colors_as_read() {
+  mnu::Document doc;
+  std::vector<mnu::ParseNote> notes;
+  CHECK(parse(screen_of("type=\"spinlist\" name=\"S\"",
+                        std::string(kPos) +
+                            "<APPEARANCE state=\"default\" type=\"color\">%TRIM_COLOR%</APPEARANCE>"
+                            "<APPEARANCE state=\"mouseover\" type=\"outline\">7f7F0000</APPEARANCE>"
+                            "<APPEARANCE state=\"selected\" type=\"image\">x.tga</APPEARANCE>"
+                            "<FONT><DEFAULT_FG>FFba58</DEFAULT_FG><DISABLED_FG>#FF0000</DISABLED_FG>"
+                            "<MOUSEOVER_FG>zz</MOUSEOVER_FG><MOUSEOVER_FG>FF00FF00</MOUSEOVER_FG></FONT>"
+                            "<ITEMS><ITEM type=\"color\" value=\"16777215\">FFFFFF</ITEM><ITEM>FFFFFF</ITEM></ITEMS>"),
+              doc, &notes),
+        "parse");
+  const mnu::Window &w = root(doc);
+  CHECK(w.appearances.size() == 3 && w.appearances[0].color.var == "TRIM_COLOR" && w.appearances[0].value.empty(),
+        "a COLOR row's %NAME% is the reference");
+  CHECK(w.appearances[1].color.argb == 0x7F7F0000u && w.appearances[2].value == "x.tga" &&
+            !w.appearances[2].color.present,
+        "an OUTLINE's word; an IMAGE's name");
+  CHECK(w.font.default_fg.argb == 0x00FFBA58u && w.font.disabled_fg.argb == 0u &&
+            w.font.mouseover_fg.argb == 0xFF00FF00u && !w.font.selected_fg.present,
+        "the FONT's words, the later MOUSEOVER_FG kept, an absent one absent");
+  CHECK(w.items.items.size() == 2 && w.items.items[0].color.argb == 0x00FFFFFFu && w.items.items[0].text.empty() &&
+            w.items.items[1].text == "FFFFFF",
+        "a COLOR item's word; an ID-less item's text");
+  CHECK(noted(notes, "/FONT/DISABLED_FG"), "a colour the read stops short in is noted");
+  size_t mouseover_notes = 0;
+  for (const mnu::ParseNote &n : notes) {
+    CHECK(!n.fatal, "no colour note here is fatal");
+    if (n.key.find("MOUSEOVER_FG") != std::string::npos) ++mouseover_notes;
+  }
+  CHECK(mouseover_notes == 0, "the replaced MOUSEOVER_FG's note goes with it");
+  const std::string written = mnu::serialize(doc);
+  CHECK(written.find("<DEFAULT_FG>00FFBA58</DEFAULT_FG>") != std::string::npos &&
+            written.find(">%TRIM_COLOR%</APPEARANCE>") != std::string::npos &&
+            written.find(">7F7F0000</APPEARANCE>") != std::string::npos &&
+            written.find(">00FFFFFF</ITEM>") != std::string::npos && written.find(">FFFFFF</ITEM>") != std::string::npos,
+        "written as eight upper-case digits, the reference as authored, a text as it is");
+  CHECK(fixed_point(doc), "fixed point");
+
+  // A %NAME% inside a longer colour: the game reads the variable's value there, fatal where it reads it.
+  mnu::Document partial;
+  notes.clear();
+  CHECK(parse(screen_of("type=\"static\" name=\"P\"",
+                        std::string(kPos) + "<FONT><DEFAULT_FG>FF%A%</DEFAULT_FG></FONT>"),
+              partial, &notes),
+        "parse");
+  CHECK(root(partial).font.default_fg.var.empty() && root(partial).font.default_fg.argb == 0xFFu, "the word read");
+  bool fatal = false;
+  for (const mnu::ParseNote &n : notes) fatal = fatal || (n.fatal && n.key.find("DEFAULT_FG") != std::string::npos);
+  CHECK(fatal, "noted fatal");
+  return true;
+}
+
 int main() {
   int failed = 0;
 #define RUN_TEST(name)                     \
@@ -1211,6 +1271,7 @@ int main() {
   RUN_TEST(test_position_rules);
   RUN_TEST(test_action_rules);
   RUN_TEST(test_text_elements);
+  RUN_TEST(test_colors_as_read);
   RUN_TEST(test_parts);
   RUN_TEST(test_scroll_rules);
   RUN_TEST(test_list_rules);

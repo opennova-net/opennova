@@ -90,6 +90,21 @@ struct Position {
   int height() const { return has_bottom && has_top ? bottom - top : 0; }
 };
 
+// A colour, as the menu's parses read a colour element's text: wcstoul(text, 16) [orig: CRT_wcstoxl @ 0x76e93b
+// through the FONT arm of CUIElement_ParseXMLDefinition @ 0x648d14..0x648e64, its APPEARANCE COLOR / OUTLINE arm @
+// 0x648562 and a spin list's COLOR ITEM, CUISpinList_ParseXMLDefinition @ 0x64bd10], over the text the game's
+// whole-menu %NAME% expansion left [orig: NapiXML_ExpandVariablesInText @ 0x63a000]. A text that is one %NAME% stays
+// the reference (ADR 0005: `var` the name as authored, the stylesheet's value read where the colour is used); any
+// other text is the word the parse reads of it, `argb` (a %NAME% inside a longer text is noted, as a number's is).
+// Written back as the reference's %NAME%, else as eight upper-case hex digits (color_text, mnu_layout.h).
+struct Color {
+  bool present = false;  // the element authored (a FONT colour); an APPEARANCE's or an ITEM's is its text
+  std::string var;       // a whole %NAME%: NAME; "" for a word
+  std::uint32_t argb = 0;
+  bool operator==(const Color &o) const { return present == o.present && var == o.var && argb == o.argb; }
+  bool operator!=(const Color &o) const { return !(*this == o); }
+};
+
 // One APPEARANCE row (also SHUTTLE / SCROLLUP / SCROLLDOWN and the ITEMS rows).
 // Every attribute holds what retail reads: STATE and TYPE the token its walk keeps, as
 // its table spells it (kAppearanceStates, ...), a TYPE the parse does not know none (it
@@ -97,7 +112,8 @@ struct Position {
 struct Appearance {
   std::string state;     // DEFAULT / DISABLED / MOUSEOVER / SELECTED
   std::string type;      // IMAGE / COLOR / CUSTOM / OUTLINE (IMAGEROW in a TABLE's ITEMS); "" none
-  std::string value;     // the element text: a texture name or a color
+  std::string value;     // the element text where TYPE is no colour: a texture name
+  Color color;           // the element text where TYPE is COLOR or OUTLINE (appearance_color_type)
   bool has_map_state = false;
   int map_state = -1;    // Sprite sheet row index (-1 = not a sprite sheet)
   bool has_height = false;
@@ -169,6 +185,18 @@ inline constexpr const char *kListItemTypes[] = {"ID", nullptr};
 inline constexpr const char *kSpinListItemTypes[] = {"ID", "IMAGE", "COLOR", nullptr};
 inline constexpr const char *kCellItemTypes[] = {"ID", "BITMAP", nullptr};
 const char *const *item_types_for(WindowType type, bool cell);
+
+// Whether an APPEARANCE of this TYPE holds a colour (COLOR, OUTLINE) [orig: @ 0x648562], and an ITEM
+// one (COLOR, which the spin list's parse alone sets) [orig: CUISpinList_ParseXMLDefinition @ 0x64bd10];
+// any other holds its text.
+bool appearance_color_type(const std::string &type);
+bool item_color_type(const std::string &type);
+// A row's TYPE set, its text kept as the new TYPE reads it: the colour text a row held read as the
+// texture name, a name read as the colour the parse reads of it (color_of), as a menu holding the
+// row's text under the new TYPE reads.
+struct Item;
+void set_appearance_type(Appearance &row, const std::string &type);
+void set_item_type(Item &item, const std::string &type);
 // A HEADER's primary sort key, one slot under either name [orig: @ 0x6431f2 / 0x643228];
 // the writer puts the first down.
 inline constexpr const char *kPrimarySortTokens[] = {"PRIMARY_SORT", "DEFAULT_SORT", nullptr};
@@ -205,23 +233,25 @@ struct ToggleString {
   std::string value;
 };
 
-// Font specification with colors for different states.
+// Font specification with colors for different states: the FONT's NAME and its eight colour
+// elements, each the word the parse reads (Color) [orig: CUIElement_ParseXMLDefinition @
+// 0x648d14..0x648e64, the words at the element's +0x7c..+0x98].
 struct Font {
-  std::string name;          // Font filename (e.g., "Gunpl22b.fnt")
-  std::string default_fg;    // Default foreground color (hex)
-  std::string default_bg;    // Default background color (hex)
-  std::string mouseover_fg;  // Hover foreground color
-  std::string mouseover_bg;  // Hover background color
-  std::string selected_fg;   // Selected/pressed foreground color
-  std::string selected_bg;   // Selected/pressed background color
-  std::string disabled_fg;   // Disabled foreground color
-  std::string disabled_bg;   // Disabled background color
+  std::string name;  // Font filename (e.g., "Gunpl22b.fnt")
+  Color default_fg;  // Default foreground color
+  Color default_bg;  // Default background color
+  Color mouseover_fg;  // Hover foreground color
+  Color mouseover_bg;  // Hover background color
+  Color selected_fg;   // Selected/pressed foreground color
+  Color selected_bg;   // Selected/pressed background color
+  Color disabled_fg;   // Disabled foreground color
+  Color disabled_bg;   // Disabled background color
 
   // True when no child element is authored.
   bool empty() const {
-    return name.empty() && default_fg.empty() && default_bg.empty() &&
-           mouseover_fg.empty() && mouseover_bg.empty() && selected_fg.empty() &&
-           selected_bg.empty() && disabled_fg.empty() && disabled_bg.empty();
+    return name.empty() && !default_fg.present && !default_bg.present && !mouseover_fg.present &&
+           !mouseover_bg.present && !selected_fg.present && !selected_bg.present && !disabled_fg.present &&
+           !disabled_bg.present;
   }
 };
 
@@ -235,7 +265,8 @@ struct Font {
 struct Item {
   std::string type;     // ID / IMAGE / COLOR (spin list) / BITMAP (table cell); "" none
   std::string value;    // VALUE, the decimal of the number read; "" 0
-  std::string text;     // the element text: display text, a key or a texture name
+  std::string text;     // the element text where TYPE is not COLOR: display text, a key or a texture name
+  Color color;          // a spin list COLOR item's text (item_color_type)
   std::string justify;  // JUSTIFY: LEFT / CENTER / RIGHT; "" none
   std::string vjustify; // VJUSTIFY: TOP / CENTER / BOTTOM; "" none
   std::string justify_offset;  // a JUSTIFY of another token: the x offset's decimal; "" none

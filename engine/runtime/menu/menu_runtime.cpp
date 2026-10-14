@@ -7,6 +7,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
+#include <formats/mnu/mnu_layout.h>
 #include <formats/rtxt/rtxt.h>
 #include <runtime/menu/menu_edit.h>
 #include <runtime/menu/options_policy.h>
@@ -726,7 +727,7 @@ std::vector<std::string> MenuRuntime::get_widget_items(int id) const {
 	if (state != nullptr && state->has_items) return state->items;
 	std::vector<std::string> out;
 	if (const mnu::Items *items = menu_items_container(index_.window(id)))
-		for (const mnu::Item &item : items->items) out.push_back(item.text);
+		for (const mnu::Item &item : items->items) out.push_back(mnu::item_text(item));
 	return out;
 }
 

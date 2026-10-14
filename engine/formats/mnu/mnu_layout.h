@@ -112,6 +112,16 @@ std::string color_text(std::uint32_t word);
 
 // type="color" on a spin ITEM: the same word forced opaque [orig:
 // CSpinListWnd_Render @ 0x64b220 (color | 0xFF000000)].
-std::uint32_t item_color_argb(const std::string &hex_text);
+std::uint32_t item_color_argb(std::uint32_t word);
+
+// A colour element's text as the model holds it (Color, mnu.h), present: a text that is one
+// %NAME% (mns::is_variable_reference) the reference, any other the word color_value reads.
+Color color_of(const std::string &text);
+// The text a colour is written as: the reference's %NAME%, else color_text's eight digits.
+std::string color_word(const Color &color);
+// The element text an APPEARANCE row and an ITEM write and a menu shows of them: a colour's
+// color_word where the TYPE holds one (appearance_color_type, item_color_type), else the text.
+std::string appearance_text(const Appearance &row);
+std::string item_text(const Item &item);
 
 }  // namespace opennova::mnu

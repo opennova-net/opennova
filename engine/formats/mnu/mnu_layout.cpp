@@ -1,6 +1,7 @@
 #include <formats/mnu/mnu_layout.h>
 
 #include <base/io/strutil.h>
+#include <formats/mns/mns.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -152,8 +153,28 @@ std::string color_text(std::uint32_t word) {
 }
 
 // [orig: wcstoul base 16 @ 0x64bd10; forced opaque @ 0x64b220]
-std::uint32_t item_color_argb(const std::string &hex_text) {
-	return color_value(hex_text) | 0xFF000000u;
+std::uint32_t item_color_argb(std::uint32_t word) {
+	return word | 0xFF000000u;
+}
+
+Color color_of(const std::string &text) {
+	Color color;
+	color.present = true;
+	if (mns::is_variable_reference(text)) color.var = mns::variable_name(text);
+	else color.argb = color_value(text);
+	return color;
+}
+
+std::string color_word(const Color &color) {
+	return color.var.empty() ? color_text(color.argb) : "%" + color.var + "%";
+}
+
+std::string appearance_text(const Appearance &row) {
+	return appearance_color_type(row.type) ? color_word(row.color) : row.value;
+}
+
+std::string item_text(const Item &item) {
+	return item_color_type(item.type) ? color_word(item.color) : item.text;
 }
 
 }  // namespace opennova::mnu

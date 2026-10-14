@@ -3,6 +3,7 @@
 // model alone (D-MNU-22): no original tool writes a menu, so the layout is OpenNova's own.
 // docs/mnu/menu-re.md ("The writer") has the rules with their witnesses.
 #include <formats/mnu/mnu.h>
+#include <formats/mnu/mnu_layout.h>
 #include <formats/mnu/mnu_schema.h>
 
 #include <algorithm>
@@ -178,7 +179,7 @@ void Words::appearance(const Appearance &a, const char *tag, std::vector<Written
 	put_int(e.attributes, "map_state", a.has_map_state, a.map_state);
 	put_int(e.attributes, "height", a.has_height, a.height);
 	put_flags(e.attributes, "flags", a.flags);
-	e.text = a.value;
+	e.text = appearance_text(a);
 	out.push_back(std::move(e));
 }
 
@@ -191,7 +192,7 @@ WrittenElement Words::item(const Item &i, bool cell, WindowType type) {
 	put_justification(e.attributes, "vjustify", i.vjustify, i.vjustify_offset, kVJustify);
 	put_bare(e.attributes, "PAIRS_LIST", !cell && reads(type, "items.item.pairs_list") && i.pairs_list);
 	if (cell) put_int(e.attributes, "column", i.has_column, i.column);
-	e.text = i.text;
+	e.text = item_text(i);
 	return e;
 }
 
@@ -412,8 +413,9 @@ void Words::window_elements(const Window &w, std::vector<WrittenElement> &out) {
 	const Font &font = w.font;
 	if (!font.empty()) {
 		WrittenElement e = element("FONT", WrittenForm::Container);
-		const std::pair<const char *, const std::string *> slots[] = {
-		    {"NAME", &font.name},
+		if (!font.name.empty()) e.children.push_back(leaf("NAME", font.name));
+		// Each colour authored, as color_word writes it: its %NAME%, else eight upper-case hex digits.
+		const std::pair<const char *, const Color *> slots[] = {
 		    {"DEFAULT_FG", &font.default_fg},
 		    {"DEFAULT_BG", &font.default_bg},
 		    {"MOUSEOVER_FG", &font.mouseover_fg},
@@ -424,7 +426,7 @@ void Words::window_elements(const Window &w, std::vector<WrittenElement> &out) {
 		    {"DISABLED_BG", &font.disabled_bg},
 		};
 		for (const auto &slot : slots)
-			if (!slot.second->empty()) e.children.push_back(leaf(slot.first, *slot.second));
+			if (slot.second->present) e.children.push_back(leaf(slot.first, color_word(*slot.second)));
 		out.push_back(std::move(e));
 	}
 	const String &s = w.string_data;

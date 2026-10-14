@@ -125,11 +125,35 @@ void color_contract() {
 		      "read back whole as the word");
 
 	// [orig: wcstoul base 16 @ 0x64bd10, forced opaque @ 0x64b220].
-	check(opennova::mnu::item_color_argb("C08040") == 0xFFC08040u,
+	check(opennova::mnu::item_color_argb(opennova::mnu::color_value("C08040")) == 0xFFC08040u,
 			"RRGGBB parses base-16 forced opaque");
-	check(opennova::mnu::item_color_argb("0") == 0xFF000000u, "zero stays opaque black");
-	check(opennova::mnu::item_color_argb("not-a-color") == 0xFF000000u,
+	check(opennova::mnu::item_color_argb(0u) == 0xFF000000u, "zero stays opaque black");
+	check(opennova::mnu::item_color_argb(opennova::mnu::color_value("not-a-color")) == 0xFF000000u,
 			"a non-hex string reads 0 like wcstoul");
+
+	// The model's colour (mnu::Color): one %NAME% stays the reference, any other text the word
+	// read; written back as the reference or the word's eight digits.
+	const opennova::mnu::Color var = opennova::mnu::color_of("%DEF_TEXT_FG%");
+	check(var.present && var.var == "DEF_TEXT_FG" && opennova::mnu::color_word(var) == "%DEF_TEXT_FG%",
+			"a whole %NAME% is the reference");
+	const opennova::mnu::Color six = opennova::mnu::color_of("FFba58");
+	check(six.present && six.var.empty() && six.argb == 0x00FFBA58u && opennova::mnu::color_word(six) == "00FFBA58",
+			"six digits: the word of alpha 0, written as eight upper-case digits");
+	check(opennova::mnu::color_of("FF%X%").var.empty() && opennova::mnu::color_of("FF%X%").argb == 0xFFu,
+			"a %NAME% inside a longer text is no reference: the word read up to it");
+	check(opennova::mnu::color_of("%A B%").var.empty(), "a name the expansion stops inside is none");
+	opennova::mnu::Appearance row;
+	row.value = "7f7F0000";
+	opennova::mnu::set_appearance_type(row, "OUTLINE");
+	check(row.value.empty() && row.color.argb == 0x7F7F0000u && opennova::mnu::appearance_text(row) == "7F7F0000",
+			"a row made a colour reads its text as the word");
+	opennova::mnu::set_appearance_type(row, "IMAGE");
+	check(!row.color.present && row.value == "7F7F0000", "a colour row made an image holds the word's text");
+	opennova::mnu::Item item;
+	item.text = "%TRIM_COLOR%";
+	opennova::mnu::set_item_type(item, "COLOR");
+	check(item.text.empty() && item.color.var == "TRIM_COLOR" && opennova::mnu::item_text(item) == "%TRIM_COLOR%",
+			"an item made a colour keeps its reference");
 }
 
 } // namespace

@@ -4,6 +4,7 @@
 #include "util/string_convert.h"
 
 #include <base/io/strutil.h>
+#include <formats/mnu/mnu_layout.h>
 #include <runtime/menu/options_policy.h>
 
 #include <godot_cpp/classes/file_access.hpp>
@@ -24,6 +25,11 @@ using opennova::to_std;
 // (runtime/menu menu_items_container: a combo's LIST_BOX rows, any other list's
 // own ITEMS block).
 using opennova::menu::menu_items_container;
+
+// A FONT colour as the menu file writes it (mnu::color_word), "" where none is authored.
+String color_to_gd(const opennova::mnu::Color &color) {
+	return color.present ? to_gd(opennova::mnu::color_word(color)) : String();
+}
 
 } // namespace
 
@@ -259,7 +265,7 @@ String MnuDocument::get_item_text(int p_id, int p_index) const {
 	if (items == nullptr || p_index < 0 || p_index >= static_cast<int>(items->items.size())) {
 		return String();
 	}
-	return to_gd(items->items[p_index].text);
+	return to_gd(opennova::mnu::item_text(items->items[p_index]));
 }
 
 String MnuDocument::get_item_value(int p_id, int p_index) const {
@@ -282,21 +288,21 @@ String MnuDocument::get_widget_color(int p_id, int p_slot) const {
 	const opennova::mnu::Font &f = w->font;
 	switch (p_slot) {
 		case COLOR_DEFAULT_FG:
-			return to_gd(f.default_fg);
+			return color_to_gd(f.default_fg);
 		case COLOR_DEFAULT_BG:
-			return to_gd(f.default_bg);
+			return color_to_gd(f.default_bg);
 		case COLOR_MOUSEOVER_FG:
-			return to_gd(f.mouseover_fg);
+			return color_to_gd(f.mouseover_fg);
 		case COLOR_MOUSEOVER_BG:
-			return to_gd(f.mouseover_bg);
+			return color_to_gd(f.mouseover_bg);
 		case COLOR_SELECTED_FG:
-			return to_gd(f.selected_fg);
+			return color_to_gd(f.selected_fg);
 		case COLOR_SELECTED_BG:
-			return to_gd(f.selected_bg);
+			return color_to_gd(f.selected_bg);
 		case COLOR_DISABLED_FG:
-			return to_gd(f.disabled_fg);
+			return color_to_gd(f.disabled_fg);
 		case COLOR_DISABLED_BG:
-			return to_gd(f.disabled_bg);
+			return color_to_gd(f.disabled_bg);
 		default:
 			return String();
 	}
@@ -310,7 +316,7 @@ String MnuDocument::get_widget_texture(int p_id, int p_slot) const {
 	const char *state = state_for_slot(p_slot);
 	for (const auto &app : w->appearances) {
 		if (opennova::strutil::iequals(app.state, state)) {
-			return to_gd(app.value);
+			return to_gd(opennova::mnu::appearance_text(app));
 		}
 	}
 	return String();
