@@ -198,7 +198,8 @@ struct MissionShots::Run : MissionWorld {
 	std::vector<MissionShotEvent> pending;
 	// Each posed person's handle (packed) and row, whose channels each tick plays.
 	std::vector<std::pair<uint16_t, NodeId>> people;
-	// The people played on to the run's tick, as the view played them (begun once the run reaches their start).
+	// The people played on to the run's tick, as the view played them (begun once the run reaches
+	// their start).
 	MissionPeople playing;
 	bool playing_begun = false;
 };
@@ -371,9 +372,9 @@ void MissionShots::step_() {
 	// @ 0x529310].
 	world.logic_tick = uint32_t(tick_);
 	world.out.fire_sounds.tick();
-	// The people as the view played them on this tick: the run's own MissionPeople, begun where the view's began and
-	// played on to the tick (never more than its catch-up at a call, which would begin it again), the spawn pose
-	// before.
+	// The people as the view played them on this tick: the run's own MissionPeople, begun where the
+	// view's began and played on to the tick (never more than its catch-up at a call, which would
+	// begin it again), the spawn pose before.
 	const bool begun = setup_.poses != nullptr && tick >= setup_.people_from;
 	if (begun) {
 		if (!run.playing_begun) {
@@ -381,15 +382,19 @@ void MissionShots::step_() {
 			run.playing_begun = true;
 		}
 		while (run.playing.tick() < tick)
-			run.playing.run_to(*setup_.poses, std::min(tick, run.playing.tick() + MissionPeople::kCatchUpTicks));
+			run.playing.run_to(*setup_.poses,
+					std::min(tick, run.playing.tick() + MissionPeople::kCatchUpTicks));
 	}
 	for (const auto &[handle, row] : run.people) {
 		MissionShotPerson person;
 		world::AiEntity *body = world.ai.for_handle(world::EntityHandle{ handle });
-		if (!body || !setup_.person || !setup_.person(row, person)) continue;
+		if (!body || !setup_.person || !setup_.person(row, person))
+			continue;
 		const world::InfantryState *channels = begun ? run.playing.channels(row) : nullptr;
-		if (!channels) channels = person.channels;
-		if (channels) play_channels(*body, *channels);
+		if (!channels)
+			channels = person.channels;
+		if (channels)
+			play_channels(*body, *channels);
 	}
 	// The scars' rings as they stand, and the trail's cursor: what this tick writes is told apart.
 	std::vector<uint32_t> cursors;

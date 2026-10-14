@@ -56,9 +56,10 @@ inline constexpr float kMissionFramePitch = 0.610865f;
 // project lacks the .env the header names or its fog is off. A framing stands no farther (CP10's fog ends
 // at 325 m: framed 400 m off, the picture was the fog's colour alone, as a game camera there would show it).
 float mission_fog_reach(const FileSource &files, const MissionSceneHeader &header);
-// The fog a mission's world starts under: its distance, the level the start's 255-tick settle leaves (the input the
-// world pass's far plane takes, renderer::scene_far_plane, whatever the .env: with none, the earlier passes' over the
-// engine's own), and mission_fog_reach's framing reach (0 as it says).
+// The fog a mission's world starts under: its distance, the level the start's 255-tick settle
+// leaves (the input the world pass's far plane takes, renderer::scene_far_plane, whatever the .env:
+// with none, the earlier passes' over the engine's own), and mission_fog_reach's framing reach (0
+// as it says).
 struct MissionFog {
 	float distance = 0.0f;
 	float reach = 0.0f;

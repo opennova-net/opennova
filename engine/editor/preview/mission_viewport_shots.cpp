@@ -87,8 +87,8 @@ bool MissionViewport::follow_shots_(const ViewportInput &input, const Document &
 		setup.bounds = items_.radii();
 		for (const MissionEntityMark &mark : scene_.entities())
 			if (mark.pool != MissionPool::Marker) setup.titles[mark.row] = record_title(view, document, mark.row);
-		// Each person as the view draws it: its spawn's lift and channels, the people played as the view plays them
-		// from their start (each round meets them as they stood on its own tick).
+		// Each person as the view draws it: its spawn's lift and channels, the people played as the
+		// view plays them from their start (each round meets them as they stood on its own tick).
 		setup.person = [this](NodeId row, MissionShotPerson &out) {
 			const MissionPose *pose = poses_.pose(row);
 			if (!pose || pose->status != "posed") return false;

@@ -1,7 +1,8 @@
-// The views the editor's effect schedule tests a NOVISNOUPDATE emitter against (editor/preview/effect_schedule):
-// the orbit camera's own planes, and the world pass's (renderer::kScenePassNearZ, renderer::scene_far_plane of the
-// fog distance) a mission's view takes, so an emitter past the fog stands outside it as the game's does, whatever
-// the orbit camera's far plane.
+// The views the editor's effect schedule tests a NOVISNOUPDATE emitter against
+// (editor/preview/effect_schedule): the orbit camera's own planes, and the world pass's
+// (renderer::kScenePassNearZ, renderer::scene_far_plane of the fog distance) a mission's view
+// takes, so an emitter past the fog stands outside it as the game's does, whatever the orbit
+// camera's far plane.
 
 #include <cstdio>
 
@@ -15,10 +16,12 @@ using namespace opennova::editor;
 
 namespace {
 
-// Whether a sphere at `at` of `radius` stands inside every plane (particle::emitter_bounds_visible's test).
+// Whether a sphere at `at` of `radius` stands inside every plane
+// (particle::emitter_bounds_visible's test).
 bool inside(const particle::ParticleViewFrustum &frustum, const PreviewVec3 &at, float radius) {
 	for (const auto &plane : frustum.planes)
-		if (plane[0] * at.x + plane[1] * at.y + plane[2] * at.z + plane[3] < -radius) return false;
+		if (plane[0] * at.x + plane[1] * at.y + plane[2] * at.z + plane[3] < -radius)
+			return false;
 	return true;
 }
 
@@ -42,7 +45,8 @@ int test_world_pass_planes() {
 	TEST_EXPECT(!inside(world, ahead(camera, far_z + 5.0f), 1.0f));
 	// Its radius reaches back across the far plane.
 	TEST_EXPECT(inside(world, ahead(camera, far_z + 0.5f), 1.0f));
-	// The orbit camera's own view keeps the emitter past the fog inside, and one past 500 m outside.
+	// The orbit camera's own view keeps the emitter past the fog inside, and one past 500 m
+	// outside.
 	const particle::ParticleViewFrustum orbit = preview_view_frustum(camera, 1280, 720);
 	TEST_EXPECT(inside(orbit, ahead(camera, far_z + 5.0f), 1.0f));
 	TEST_EXPECT(!inside(orbit, ahead(camera, camera.far_plane + 5.0f), 1.0f));
@@ -62,6 +66,7 @@ int test_world_pass_planes() {
 
 int main() {
 	const int failed = test_world_pass_planes();
-	if (failed == 0) std::printf("effect schedule: the world pass's view, its far plane the fog's\n");
+	if (failed == 0)
+		std::printf("effect schedule: the world pass's view, its far plane the fog's\n");
 	return failed == 0 ? 0 : 1;
 }

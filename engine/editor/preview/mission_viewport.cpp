@@ -44,21 +44,24 @@
 namespace opennova::editor {
 
 MissionFog mission_fog(const FileSource &files, const MissionSceneHeader &header) {
-	// The environment as the mission's load makes it: the terrain's .trn, overcast.def, then the .env over them,
-	// the header's overrides over that (env::load_mission_env_config); with no .env named, or none there, the
-	// earlier passes over the engine's own, as the device's load leaves it.
+	// The environment as the mission's load makes it: the terrain's .trn, overcast.def, then the
+	// .env over them, the header's overrides over that (env::load_mission_env_config); with no .env
+	// named, or none there, the earlier passes over the engine's own, as the device's load leaves
+	// it.
 	env::MissionEnv loaded;
 	const bool read = env::load_mission_env_config(files, header.terrain, header.environment,
-			env::bms_env_overrides_from_header(header.attrib_flags, header.water_override, header.fog_override,
-					header.fog_color, header.water_color, header.water_murk),
+			env::bms_env_overrides_from_header(header.attrib_flags, header.water_override,
+					header.fog_override, header.fog_color, header.water_color, header.water_murk),
 			loaded);
 	const env::Config &config = loaded.config;
 	MissionFog out;
 	out.distance = env::EnvScalarChannels::settled_fog_level(config.fog_level);
-	if (header.environment.empty() || !read) return out;
+	if (header.environment.empty() || !read)
+		return out;
 	const env::FogParams fog = env::compute_fog_params(config.fog_type, out.distance, 0.0f);
 	// Half its end: type 1's linear haze (from the eye) half thick there, type 2's start, type 3's past it.
-	if (fog.enabled && fog.end > 0.0f) out.reach = fog.end * 0.5f;
+	if (fog.enabled && fog.end > 0.0f)
+		out.reach = fog.end * 0.5f;
 	return out;
 }
 
@@ -403,8 +406,10 @@ void MissionViewport::follow_effects_(const SessionView &view, const PreviewCloc
 	// The Shoot tool's impacts in the same scene (DI-23).
 	effects_.set_shot_spawns(shot_spawns_());
 	const ViewportState picture = size();
-	// The view the game's effects test a NOVISNOUPDATE emitter against: the world pass's, its far plane the fog's.
-	effects_.play_to(clock.ticks(), scene_pass_view_frustum(camera_, picture.width, picture.height, fog_distance_));
+	// The view the game's effects test a NOVISNOUPDATE emitter against: the world pass's, its far
+	// plane the fog's.
+	effects_.play_to(clock.ticks(),
+			scene_pass_view_frustum(camera_, picture.width, picture.height, fog_distance_));
 }
 
 void MissionViewport::take_fog_(const FileSource &files) {
@@ -617,7 +622,8 @@ ViewportAction MissionViewport::follow_(const ViewportInput &input, PreviewClock
 		return picture_.built(FileStamps());
 	}
 	if (delta.header || delta.reshaped) {
-		if (delta.header) take_fog_(files);
+		if (delta.header)
+			take_fog_(files);
 		options_moved_ = false;
 		heights_built_(view, *document);
 		return ViewportAction::Rebuild;

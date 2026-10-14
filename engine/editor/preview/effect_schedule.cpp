@@ -35,7 +35,8 @@ PreviewVec3 combine(const PreviewVec3 &a, float scale, const PreviewVec3 &b, flo
 }
 
 // The six planes at `camera`'s eye and axes, `near_z` and `far_z` ahead of it.
-particle::ParticleViewFrustum view_frustum(const OrbitCamera &camera, int width, int height, float near_z, float far_z) {
+particle::ParticleViewFrustum view_frustum(
+		const OrbitCamera &camera, int width, int height, float near_z, float far_z) {
 	particle::ParticleViewFrustum out;
 	if (width <= 0 || height <= 0) return out;
 	PreviewVec3 right, up, back;
@@ -59,15 +60,17 @@ particle::ParticleViewFrustum view_frustum(const OrbitCamera &camera, int width,
 
 } // namespace
 
-particle::ParticleViewFrustum preview_view_frustum(const OrbitCamera &camera, int width, int height) {
+particle::ParticleViewFrustum preview_view_frustum(
+		const OrbitCamera &camera, int width, int height) {
 	return view_frustum(camera, width, height, camera.near_plane, camera.far_plane);
 }
 
-particle::ParticleViewFrustum scene_pass_view_frustum(const OrbitCamera &camera, int width, int height,
-		float fog_distance) {
-	if (!(fog_distance > 0.0f)) return particle::ParticleViewFrustum();
-	return view_frustum(
-			camera, width, height, renderer::kScenePassNearZ, renderer::scene_far_plane(fog_distance));
+particle::ParticleViewFrustum scene_pass_view_frustum(
+		const OrbitCamera &camera, int width, int height, float fog_distance) {
+	if (!(fog_distance > 0.0f))
+		return particle::ParticleViewFrustum();
+	return view_frustum(camera, width, height, renderer::kScenePassNearZ,
+			renderer::scene_far_plane(fog_distance));
 }
 
 void EffectSchedule::hold(int32_t tick) {

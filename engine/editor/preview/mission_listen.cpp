@@ -254,14 +254,20 @@ void MissionListen::remix_(bool keep_loops) {
 		mix_.mixer().add_marker(at, 0, source.stagger, 0, marker_keys_[size_t(source.marker)].data(),
 				marker_sets_[size_t(source.marker)]);
 	}
-	if (!keep_loops) return;
-	// Each item's loop registered again as its entity update last registered it, in the order of their ticks, so a
-	// held clock keeps it heard (the update registers it again only on a later tick), its lifetime from that tick.
+	if (!keep_loops)
+		return;
+	// Each item's loop registered again as its entity update last registered it, in the order of
+	// their ticks, so a held clock keeps it heard (the update registers it again only on a later
+	// tick), its lifetime from that tick.
 	std::vector<const MissionScriptEmitter *> again;
-	for (const auto &entry : held) again.push_back(&entry.second.last);
+	for (const auto &entry : held)
+		again.push_back(&entry.second.last);
 	std::stable_sort(again.begin(), again.end(),
-			[](const MissionScriptEmitter *a, const MissionScriptEmitter *b) { return a->tick < b->tick; });
-	for (const MissionScriptEmitter *emitter : again) register_item_(*emitter);
+			[](const MissionScriptEmitter *a, const MissionScriptEmitter *b) {
+				return a->tick < b->tick;
+			});
+	for (const MissionScriptEmitter *emitter : again)
+		register_item_(*emitter);
 }
 
 void MissionListen::register_item_(const MissionScriptEmitter &emitter) {
@@ -311,7 +317,8 @@ void MissionListen::play_to(int32_t tick, const PreviewVec3 &listener, double ho
 	script_.set_hours(hours);
 	script_.run_to(tick);
 	// A step back of the clock: the sources register again from the start, as at the mission's.
-	if (!mix_.has_mixer() || tick < mixed_tick_) remix_(false);
+	if (!mix_.has_mixer() || tick < mixed_tick_)
+		remix_(false);
 	mix_.mixer().set_time_of_day_hours(float(hours));
 	// The items' loops the script's entity update registered, each at its tick; then the cohorts the ticks since visit
 	// [orig: Entity_UpdateAllEntities @ 0x4c225a].

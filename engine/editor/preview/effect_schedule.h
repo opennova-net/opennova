@@ -18,15 +18,16 @@ namespace opennova::editor {
 // advance, frozen until seen again [orig: CParticleEmitter_AdvanceFrame @ 0x5e6588..0x5e65f3, the engine's
 // particle::emitter_advance]. No planes (every emitter advances) for a device of no size.
 particle::ParticleViewFrustum preview_view_frustum(const OrbitCamera &camera, int width, int height);
-// The same view with the world pass's near and far planes in place of the orbit camera's: renderer::kScenePassNearZ
-// and renderer::scene_far_plane of `fog_distance` (the fog level the scene draws under), the planes the game's camera
-// holds when its effects test a NOVISNOUPDATE emitter (GameWorld's scene environment leg, Camera3D's frustum to
-// EffectWorld's set_view_frustum), so an emitter past the fog is outside, as retail's clip test puts a point whose
-// depth less its radius passes the current fog distance [orig: Viewport_TransformAndClipPoint @ 0x4115e0, the fog
-// test @ 0x411644]. A mission's view, whose world draws under its fog. No planes for a device of no size, or no fog
-// distance known yet (0).
-particle::ParticleViewFrustum scene_pass_view_frustum(const OrbitCamera &camera, int width, int height,
-		float fog_distance);
+// The same view with the world pass's near and far planes in place of the orbit camera's:
+// renderer::kScenePassNearZ and renderer::scene_far_plane of `fog_distance` (the fog level the
+// scene draws under), the planes the game's camera holds when its effects test a NOVISNOUPDATE
+// emitter (GameWorld's scene environment leg, Camera3D's frustum to EffectWorld's
+// set_view_frustum), so an emitter past the fog is outside, as retail's clip test puts a point
+// whose depth less its radius passes the current fog distance [orig: Viewport_TransformAndClipPoint
+// @ 0x4115e0, the fog test @ 0x411644]. A mission's view, whose world draws under its fog. No
+// planes for a device of no size, or no fog distance known yet (0).
+particle::ParticleViewFrustum scene_pass_view_frustum(
+		const OrbitCamera &camera, int width, int height, float fog_distance);
 
 // The timed spawns an effect scene plays (a definition's, a mission's shots'): each one's clock tick, and whether it
 // was made since the scene last emptied (as long as `ticks`; its owner sizes both).

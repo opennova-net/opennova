@@ -147,8 +147,8 @@ PreviewSceneLayers::Moved PreviewSceneLayers::mount(
 			return moved;
 		}
 		moved.layer[kEnvironment] = layer_files_[kEnvironment].moved(*source);
-		// The .env the terrain's load reads is the planned one's (the key of the terrain built or building; the built
-		// one's stays empty until a build ends).
+		// The .env the terrain's load reads is the planned one's (the key of the terrain built or
+		// building; the built one's stays empty until a build ends).
 		moved.layer[kTerrain] = layer_files_[kTerrain].moved_but(
 				*source, { planned_terrain_.environment, opennova::env::kOvercastFile });
 		moved.layer[kEntities] = layer_files_[kEntities].moved(*source);

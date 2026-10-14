@@ -54,8 +54,8 @@ void EffectPlayback::spawn_(int32_t tick) {
 void EffectPlayback::play_to(int32_t tick, const EffectPlayOptions &options, const particle::ParticleViewFrustum &frustum) {
 	if (!scene_) return;
 	scene_->set_global_wind(particle::mission_wind_vector(options.wind_speed, options.wind_direction));
-	// A jump: the effect spawned again at its age then, its one spawn's on tick 0 (older than it lives, nothing
-	// stands).
+	// A jump: the effect spawned again at its age then, its one spawn's on tick 0 (older than it
+	// lives, nothing stands).
 	const auto jumped = [&](int32_t at) { spawn_(at); };
 	if (schedule_.play_to(*scene_, tick, frustum, timed_, EffectSchedule::Make(), jumped)) ++serial_;
 }

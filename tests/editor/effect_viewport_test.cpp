@@ -110,7 +110,7 @@ int test_playback() {
 	EffectPlayOptions options;
 	once.play_to(0, options);
 	TEST_EXPECT(once.alive() && once.spawns() == 1 && once.age() == 0 &&
-	            once.last_status() == particle::EffectSpawnStatus::Spawned);
+			once.last_status() == particle::EffectSpawnStatus::Spawned);
 	// A tick at a time to its death: spawned once, as the game spawns an effect once per event, dead it stays.
 	int32_t died = -1;
 	for (int32_t tick = 1; tick <= 60 && died < 0; ++tick) {

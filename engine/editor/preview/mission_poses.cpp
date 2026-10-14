@@ -214,12 +214,13 @@ bool MissionPoses::floor_files_moved() const {
 bool MissionPoses::stand(const MissionScene &scene, const MissionPeopleFloor &floor) {
 	const auto fixed = [](double units) { return int32_t(std::lround(units * io::kFp16OneD)); };
 	const terrain::TerrainHeightField *terrain = floor.ground ? floor.ground->height_field() : floor.terrain;
-	// The mission's world the solve probes: the posed people, and the items and buildings within reach of their
-	// candidates (a pool-0 body's slice reaches its bound and 4.0 u past it to a candidate's bound [orig:
-	// Entity_BuildProximityListsFromPools @0x4B8F02..0x4B8F0B], two units more over the static table's padded radius
-	// word; an item of no known bound within kMissionFloorReach), every other record loaded empty in its place.
-	// The files the floors read noted afresh where one moved, the world built or not (else the move stands and the people
-	// are stood again every frame).
+	// The mission's world the solve probes: the posed people, and the items and buildings within
+	// reach of their candidates (a pool-0 body's slice reaches its bound and 4.0 u past it to a
+	// candidate's bound [orig: Entity_BuildProximityListsFromPools @0x4B8F02..0x4B8F0B], two units
+	// more over the static table's padded radius word; an item of no known bound within
+	// kMissionFloorReach), every other record loaded empty in its place. The files the floors read
+	// noted afresh where one moved, the world built or not (else the move stands and the people are
+	// stood again every frame).
 	if (source_ && (!floor_files_ || floor_files_moved())) {
 		floor_files_ = std::make_shared<MissionFiles>(source_);
 		floor_world_.reset();
@@ -251,13 +252,17 @@ bool MissionPoses::stand(const MissionScene &scene, const MissionPeopleFloor &fl
 			return false;
 		};
 		if (!people.empty()) {
-			// The world made again only where what it holds moved: the records it keeps (each one's row, place, item,
-			// transform and stamp), its ground, the files it reads. A drag of a record no person reaches keeps it.
-			const auto mix = [](uint64_t hash, uint64_t value) { return io::fnv1a64_bytes(hash, &value, sizeof(value)); };
+			// The world made again only where what it holds moved: the records it keeps (each one's
+			// row, place, item, transform and stamp), its ground, the files it reads. A drag of a
+			// record no person reaches keeps it.
+			const auto mix = [](uint64_t hash, uint64_t value) {
+				return io::fnv1a64_bytes(hash, &value, sizeof(value));
+			};
 			uint64_t key = mix(io::kFnv1a64Offset, floor.ground->revision());
 			key = mix(key, uint64_t(scene.entities().size()));
 			for (const MissionEntityMark &mark : scene.entities()) {
-				if (!keep(mark)) continue;
+				if (!keep(mark))
+					continue;
 				key = mix(key, mark.row);
 				key = mix(key, uint64_t(uint32_t(mark.index)));
 				key = mix(key, uint64_t(mark.item));
@@ -270,7 +275,8 @@ bool MissionPoses::stand(const MissionScene &scene, const MissionPeopleFloor &fl
 				floor_world_->load(floor_files_, thinned, *floor.ground);
 				floor_bodies_.clear();
 				floor_world_->world.registry.for_each_in_pool(0, [&](const world::Entity &entity) {
-					if (const MissionEntityMark *mark = floor_world_->mark_of(entity, scene.entities()))
+					if (const MissionEntityMark *mark =
+									floor_world_->mark_of(entity, scene.entities()))
 						floor_bodies_[mark->row] = entity.handle;
 				});
 				floor_key_ = key;

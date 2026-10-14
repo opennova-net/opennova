@@ -85,16 +85,17 @@ inline constexpr float kMissionTurns[] = { 0.0f, 5.0f, 15.0f, 45.0f, 90.0f };
 bool operator==(const MissionViewportOptions &a, const MissionViewportOptions &b);
 inline bool operator!=(const MissionViewportOptions &a, const MissionViewportOptions &b) { return !(a == b); }
 
-// The wire form: {show: {terrain, sky, water, models, shadows, foliage, effects, lights}, marks: {items,
-// buildings, markers, organics, areas, paths, labels, links}, color_by (team or group), mark_range, stick, time
-// (null: the mission's start time), tool (its token), item, path, snap, turn, palette, overlay (none, surfaces or
-// foliage), legend (the overlay's legend open), ammo, listen {on}}.
+// The wire form: {show: {terrain, sky, water, models, shadows, foliage, effects, lights}, marks:
+// {items, buildings, markers, organics, areas, paths, labels, links}, color_by (team or group),
+// mark_range, stick, time (null: the mission's start time), tool (its token), item, path, snap,
+// turn, palette, overlay (none, surfaces or foliage), legend (the overlay's legend open), ammo,
+// listen {on}}.
 io::JsonValue mission_options_to_json(const MissionViewportOptions &options);
 // A SetViewport's options member set over `held`: every member checked before any applies; false,
 // nothing changed, with `error` naming the member and what it takes.
 bool mission_options_from_json(const io::JsonValue &json, MissionViewportOptions &held, std::string &error);
-// The Listen's own: {on}; read over `held`, the member optional (false, nothing changed, with `error` naming the
-// member, for another member or a value it does not take).
+// The Listen's own: {on}; read over `held`, the member optional (false, nothing changed, with
+// `error` naming the member, for another member or a value it does not take).
 io::JsonValue mission_listen_options_to_json(const MissionListenOptions &options);
 bool mission_listen_options_from_json(const io::JsonValue &json, MissionListenOptions &held, std::string &error);
 
