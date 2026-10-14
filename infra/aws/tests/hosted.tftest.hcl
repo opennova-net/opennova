@@ -8,7 +8,7 @@
 # admin ports, the service role's policy and the outputs app deploy reads; the
 # data volume takes the snapshot's size; the policy pins a launch to the
 # template's machine type, IMDSv2, gp3 volumes of at most 16 GiB and
-# Canonical's images, and the machine role holds Session
+# the template's own image, and the machine role holds Session
 # Manager's five actions alone (applied against the mocks, so the template's
 # ARN the policy names is known); a burstable machine type is refused.
 
@@ -164,10 +164,10 @@ run "hosted_policy" {
       for st in data.aws_iam_policy_document.hosted_service[0].statement : st
       if st.sid == "LaunchHostedMachineImage" && length([
         for c in st.condition : c
-        if c.test == "StringEquals" && c.variable == "ec2:Owner" && contains(c.values, "099720109477")
+        if c.test == "StringEquals" && c.variable == "ec2:ImageID" && length(c.values) == 1 && contains(c.values, aws_launch_template.hosted[0].image_id)
       ]) == 1
     ]) == 1
-    error_message = "a launch's image must be Canonical's"
+    error_message = "a launch's image must be the template's own"
   }
   assert {
     condition     = length(aws_iam_role_policy.hosted_machine_ssm) == 1

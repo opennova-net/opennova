@@ -21,7 +21,7 @@
 #   - the service role's policy (the one instance profile the service instance
 #     carries, aws_iam_role.backup): launch only from this template, only the
 #     template's machine type with IMDSv2 required, gp3 volumes of at most
-#     hosted_max_volume_gb and Canonical's images, with this deployment's tags;
+#     hosted_max_volume_gb and the template's own image, with this deployment's tags;
 #     tag only at launch, end only machines carrying both tags, describe, and
 #     pass the machine role.
 #
@@ -44,9 +44,6 @@ locals {
   # The largest volume a launch may make: the root volume, and the data volume
   # (the snapshot's size, 2 GiB for a JO:CA install).
   hosted_max_volume_gb = max(16, var.hosted_root_volume_gb, try(data.aws_ebs_snapshot.hosted[0].volume_size, 0))
-  # Canonical, the stock Ubuntu images' owner; var.hosted_ami_id's own owner
-  # when one is named.
-  hosted_image_owner = "099720109477"
 }
 
 data "aws_caller_identity" "hosted" {
@@ -322,7 +319,7 @@ data "aws_iam_policy_document" "hosted_service" {
   # larger than the template's; IfExists, so a request whose context lacks a
   # key is not refused for that, though the template names both for every
   # volume), its network interface, the template's own
-  # subnet, security group and snapshot, and a Canonical image. RunInstances
+  # subnet, security group and snapshot, and the template's own image. RunInstances
   # on these creates nothing without the machine statement above. The snapshot
   # is encrypted with the AWS-managed aws/ebs key, whose key policy admits
   # every principal of the account through EBS: no KMS grant here (a
@@ -352,10 +349,16 @@ data "aws_iam_policy_document" "hosted_service" {
     actions   = ["ec2:RunInstances"]
     resources = ["${local.hosted_arn_prefix}::image/*"]
 
+    # The template's image by id. Not ec2:Owner: for Canonical's public Ubuntu
+    # images EC2 puts the owner alias "amazon" in that key, not Canonical's
+    # account (decoded from a refused launch, 2026-10-14), so an owner pin
+    # refused every launch. The template's image_id is the one in state
+    # (ignore_changes keeps it across new Canonical releases), so this moves
+    # with a -replace of the template and with nothing else.
     condition {
       test     = "StringEquals"
-      variable = "ec2:Owner"
-      values   = [var.hosted_ami_id != "" ? data.aws_ami.hosted[0].owner_id : local.hosted_image_owner]
+      variable = "ec2:ImageID"
+      values   = [aws_launch_template.hosted[0].image_id]
     }
   }
 
