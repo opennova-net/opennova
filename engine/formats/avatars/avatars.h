@@ -11,7 +11,9 @@
  * into the combo and drops the referenced part names (docs/playerinfo/avatars-re.md
  * D-PLAYERINFO-4). This authoring model keeps the head/body/arms NAME
  * references for writing, but also stores parse-time resolved snapshots so
- * consumers see the same duplicate/forward-reference behavior as the original.
+ * consumers see the same duplicate/forward-reference behavior as the original,
+ * and where each nationality stands among the parts, which decides what its
+ * combos' names bind (AvatarNationality::parts_below, D-PLAYERINFO-35).
  */
 
 #pragma once
@@ -124,6 +126,13 @@ typedef struct AvatarNationality {
     int has_alignment;        /* whether an `alignment` line was present */
     AvatarDivision *divisions;
     size_t divisions_count;
+    /* Where the nationality stands among the parts: how many of the file's parts (its last ones) are defined
+     * below its line. A combo binds the last part of its name and kind among the parts defined above it, the
+     * walk's part count at the combo line [orig: CAvatarDefs_ParseConfigLine @ 0x57a830..0x57a8d3, each scan
+     * up to g_AvatarPartCount], and no part is defined inside a nationality's block, so this is what its combos
+     * bind (D-PLAYERINFO-35). 0: every part above it (a model built in code). The writer puts each nationality
+     * after the parts above it; the nationalities' counts never grow down the file. */
+    size_t parts_below;
 } AvatarNationality;
 
 /* ========================================================================= */
@@ -156,12 +165,16 @@ void avatars_free(AvatarsFile *file);
  * file is witnessed, so the form is OpenNova's). On success returns 0 and
  * sets *out_data (malloc'd, NUL-terminated) and *out_size (length excluding the
  * NUL). Free with avatars_free_buffer(). The write is deterministic, from
- * the model alone: every id its decimal, every name as the model holds it; a
+ * the model alone: every id its decimal, every name as the model holds it, the
+ * parts in order with each nationality after the parts above it
+ * (AvatarNationality::parts_below), so every combo binds the part it bound; a
  * parse->write->parse->write round-trip is byte-identical on the second write.
  * Returns 2, writing nothing, when a combo line would hold an empty name ahead
  * of a filled one (its head ahead of its body, its body ahead of its arms):
  * the game's tokenizer reads the `""` it would be written as as no token, so
- * the later names would read back shifted. */
+ * the later names would read back shifted. Returns 3, writing nothing, when the
+ * nationalities' places are no file's order: a parts_below past the part count,
+ * or past the nationality before it's. */
 int avatars_write(const AvatarsFile *file, char **out_data, size_t *out_size);
 void avatars_free_buffer(char *data);
 
