@@ -425,6 +425,22 @@ void MnuDocument::refine_field(const NodeAddress &address, FieldUse &out) const 
 	// 0x63a000; ADR 0005].
 	if (out.reference == ReferenceKind::None && field.type == FieldType::Text)
 		out.variable_through = ReferenceKind::MenuText;
+	// A row's or an item's TYPE: the tokens its parse knows where it sits (a LIST's ITEM an ID alone).
+	if (field.id == "type" && menu_type_tokens(at.record, at.owners())) out.own_choices = true;
+}
+
+bool MnuDocument::record_choices(const NodeAddress &address, const FieldUse &use, std::vector<FieldChoice> &out) const {
+	const Node *node = address.child ? row(address.row) : nullptr;
+	Located at;
+	if (!node || node->kind != kScreen || !locate(*node, address.child, at) || at.is_row() ||
+	    at.record.kind != address.kind || use.schema->id != "type")
+		return false;
+	const char *const *tokens = menu_type_tokens(at.record, at.owners());
+	if (!tokens) return false;
+	out.clear();
+	for (const FieldChoice &choice : use.schema->choices)
+		if (choice.name.empty() || mnu::known_token(choice.name, tokens)) out.push_back(choice);
+	return true;
 }
 
 void MnuDocument::refine_symbol(const NodeAddress &address, SymbolFacts &facts) const {
@@ -773,6 +789,26 @@ bool MnuDocument::set_value(Node &node, const Located &at, size_t field, const V
 	const TableKind &table_kind = *menu_table().kind(at.record.kind);
 	const FieldSchema &schema = table_kind.fields()[field];
 	Value stored = value;
+	// A row's or an item's TYPE: a token its parse knows where the record sits, as the table spells it; the game
+	// holds any other as none (a LIST's ITEM of TYPE COLOR shows its text as a label [orig:
+	// CListWnd_ParseXMLDefinition @ 0x645b0f..0x645b26, the label @ 0x645c1b..0x645c6f]), which the editor would show
+	// as the TYPE it is not: refused.
+	if (const char *const *tokens = schema.id == "type" ? menu_type_tokens(at.record, at.owners()) : nullptr) {
+		const auto *text = std::get_if<std::string>(&value);
+		if (text && !text->empty()) {
+			const char *match = nullptr;
+			std::string known;
+			for (size_t i = 0; tokens[i]; ++i) {
+				if (strutil::iequals(*text, tokens[i])) match = tokens[i];
+				known += std::string(known.empty() ? "" : ", ") + tokens[i];
+			}
+			if (!match) {
+				error = "Here the game reads one of " + known + ", or none.";
+				return false;
+			}
+			stored = std::string(match);
+		}
+	}
 	if (const auto *text = std::get_if<std::string>(&value); text && schema.type == FieldType::Text) {
 		size_t characters = 0;
 		if (code_page_model()) {
