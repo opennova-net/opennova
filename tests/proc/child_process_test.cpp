@@ -3,7 +3,8 @@
 // it the child). Exit codes (unsigned: a Windows code past 0x7FFFFFFF reads as it
 // is), every argument reaching the child as it was given (spaces, quotes,
 // backslashes, an empty one), the working directory, stdin at end of file, stdout
-// and stderr appended to the output file, poll while it runs, terminate (a
+// and stderr appended to the output file (stderr to an error file of its own,
+// owner-only on POSIX, when one is named), poll while it runs, terminate (a
 // windowless child still ends) and kill, the refusals (a missing program, a
 // missing working directory, a second spawn while one runs), the environment
 // (inherited by default, else exactly what the options name: a planted variable
@@ -320,6 +321,40 @@ int test_working_dir_stdin_and_output(const fs::path &dir) {
 		const auto lines = read_lines(dir / "both.txt");
 		TEST_EXPECT(lines.size() == 3);
 		TEST_EXPECT(lines[0] == "before" && lines[1] == "to stdout" && lines[2] == "to stderr");
+	}
+	{
+		// An error file: stderr lands there, appended to what it held, apart
+		// from stdout's file; on POSIX it is created owner-only.
+		{
+			std::ofstream seed(dir / "err.txt", std::ios::binary);
+			seed << "before\n";
+		}
+		ChildProcess p;
+		SpawnOptions options = child({ "stderr" }, (dir / "out.txt").u8string());
+		options.error_path = (dir / "err.txt").u8string();
+		std::string error;
+		TEST_EXPECT(p.spawn(options, error));
+		TEST_EXPECT(p.wait(20000) == 0u);
+		TEST_EXPECT(read_lines(dir / "out.txt") == std::vector<std::string>{ "to stdout" });
+		TEST_EXPECT(
+				read_lines(dir / "err.txt") == (std::vector<std::string>{ "before", "to stderr" }));
+#ifndef _WIN32
+		ChildProcess fresh;
+		SpawnOptions fresh_options = child({ "stderr" }, (dir / "out_fresh.txt").u8string());
+		fresh_options.error_path = (dir / "err_fresh.txt").u8string();
+		TEST_EXPECT(fresh.spawn(fresh_options, error));
+		TEST_EXPECT(fresh.wait(20000) == 0u);
+		const fs::perms others = fs::perms::group_all | fs::perms::others_all;
+		TEST_EXPECT((fs::status(dir / "err_fresh.txt").permissions() & others) == fs::perms::none);
+#endif
+	}
+	{
+		// An error file that cannot open: nothing starts.
+		ChildProcess p;
+		SpawnOptions options = child({ "stderr" }, (dir / "out_refused.txt").u8string());
+		options.error_path = (dir / "no such dir" / "err.txt").u8string();
+		std::string error;
+		TEST_EXPECT(!p.spawn(options, error) && !error.empty() && !p.started());
 	}
 	{
 		// No output file: the output is discarded and the child still runs.

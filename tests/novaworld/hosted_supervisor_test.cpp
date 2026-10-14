@@ -1012,6 +1012,48 @@ int test_reconciliation() {
 	return 0;
 }
 
+// A provider that cannot list its machines (a cloud listing that failed) has
+// nothing ended or launched again on that: at the boot every live row resumes
+// with its grace, and a sweep that fails leaves its pass to step the servers;
+// the next sweep that lists ends the stray.
+int test_unlisted_provider() {
+	Rig rig("hosted_unlisted");
+	const int64_t kept = rig.request("unl_kept");
+	const std::string kept_machine = rig.to_running(kept, 9301);
+	TEST_EXPECT(!kept_machine.empty());
+	hostdb::remove_host_by_rid(*rig.pool.acquire(), 9301); // the boot clears the listings
+	const std::string stray = rig.fake.adopt(4343);
+	rig.fake.fail_list = true;
+	rig.make_supervisor();
+	rig.advance(1000);
+	const int launches = rig.fake.launches;
+	rig.sup->reconcile(rig.now);
+	TEST_EXPECT(!rig.fake.was_terminated(stray) && !rig.fake.was_terminated(kept_machine));
+	TEST_EXPECT(rig.state(kept) == State::Running && rig.fake.launches == launches);
+	// Its health checks wait out the resumed server's grace, as after a boot that listed.
+	for (int i = 0; i < 2; ++i) {
+		rig.advance(rig.config.health_interval_ms);
+		rig.tick();
+	}
+	TEST_EXPECT(rig.state(kept) == State::Running);
+
+	// A sweep that fails: the pass still steps the servers (a new request is picked up).
+	const int64_t fresh = rig.request("unl_fresh");
+	TEST_EXPECT(fresh != 0);
+	rig.advance(rig.config.orphan_sweep_interval_ms);
+	rig.tick();
+	TEST_EXPECT(rig.state(fresh) == State::Provisioning && !rig.fake.was_terminated(stray));
+
+	// Listing again: the next sweep ends the stray, and the kept server, listed, runs on.
+	rig.fake.fail_list = false;
+	TEST_EXPECT(list_as(*rig.pool.acquire(), *rig.server(kept)->service_user_id, 9302));
+	rig.advance(rig.config.orphan_sweep_interval_ms);
+	rig.tick();
+	TEST_EXPECT(rig.fake.was_terminated(stray) && !rig.fake.was_terminated(kept_machine));
+	TEST_EXPECT(rig.state(kept) == State::Running);
+	return 0;
+}
+
 // A provider that knows a machine's address only once it boots (a cloud
 // machine): the launch's describe names none, and the next describe writes it,
 // so the running server's admin link has its target.
@@ -1410,6 +1452,7 @@ int main(int argc, char **argv) {
 		{ "owner_changes", test_owner_changes },
 		{ "reconciliation", test_reconciliation },
 		{ "reconcile_provisioning_gone", test_reconcile_provisioning_gone },
+		{ "unlisted_provider", test_unlisted_provider },
 		{ "console_ring", test_console_ring },
 		{ "admin_links_follow_running", test_admin_links_follow_running },
 		{ "address_after_launch", test_address_after_launch },

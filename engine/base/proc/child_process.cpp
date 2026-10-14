@@ -572,8 +572,9 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 		command_line += quote_argument(io::widen_utf8(options.argv[i]));
 	}
 
-	// The two handles the child gets, inheritable, and the attribute list that
-	// hands it those alone (every other inheritable handle stays here).
+	// The handles the child gets (its input, its output and, when the options
+	// name one, its error file), inheritable, and the attribute list that hands
+	// it those alone (every other inheritable handle stays here).
 	SECURITY_ATTRIBUTES inheritable{};
 	inheritable.nLength = sizeof(inheritable);
 	inheritable.bInheritHandle = TRUE;
@@ -585,15 +586,28 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 			: CreateFileW(io::os_path(options.output_path).c_str(), FILE_APPEND_DATA,
 					  FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &inheritable, OPEN_ALWAYS,
 					  FILE_ATTRIBUTE_NORMAL, nullptr);
+	HANDLE err = INVALID_HANDLE_VALUE;
 	auto close_std = [&] {
 		if (in != INVALID_HANDLE_VALUE) CloseHandle(in);
 		if (out != INVALID_HANDLE_VALUE) CloseHandle(out);
+		if (err != INVALID_HANDLE_VALUE) CloseHandle(err);
 	};
 	if (in == INVALID_HANDLE_VALUE || out == INVALID_HANDLE_VALUE) {
 		error = windows_error(in == INVALID_HANDLE_VALUE ? "opening NUL" : "opening the output file",
 				GetLastError());
 		close_std();
 		return false;
+	}
+	// Standard error: its own file when the options name one, else the output's handle.
+	if (!options.error_path.empty()) {
+		err = CreateFileW(io::os_path(options.error_path).c_str(), FILE_APPEND_DATA,
+				FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, &inheritable, OPEN_ALWAYS,
+				FILE_ATTRIBUTE_NORMAL, nullptr);
+		if (err == INVALID_HANDLE_VALUE) {
+			error = windows_error("opening the error file", GetLastError());
+			close_std();
+			return false;
+		}
 	}
 	SIZE_T attributes_size = 0;
 	InitializeProcThreadAttributeList(nullptr, 1, 0, &attributes_size);
@@ -604,9 +618,10 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 		close_std();
 		return false;
 	}
-	HANDLE inherited[2] = { in, out };
+	HANDLE inherited[3] = { in, out, err };
+	const size_t inherited_count = err != INVALID_HANDLE_VALUE ? 3 : 2;
 	if (!UpdateProcThreadAttribute(attributes, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, inherited,
-				sizeof(inherited), nullptr, nullptr)) {
+				inherited_count * sizeof(HANDLE), nullptr, nullptr)) {
 		error = windows_error("UpdateProcThreadAttribute", GetLastError());
 		DeleteProcThreadAttributeList(attributes);
 		close_std();
@@ -618,7 +633,7 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 	startup.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
 	startup.StartupInfo.hStdInput = in;
 	startup.StartupInfo.hStdOutput = out;
-	startup.StartupInfo.hStdError = out;
+	startup.StartupInfo.hStdError = err != INVALID_HANDLE_VALUE ? err : out;
 	if (options.behind) {
 		// Its first window shown without activation (a GUI child's first
 		// ShowWindow takes this in place of the one it asks for).
@@ -783,6 +798,18 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 		if (out_fd >= 0) ::close(out_fd);
 		return false;
 	}
+	// Standard error: its own file when the options name one, else the output's descriptor.
+	const int err_fd = options.error_path.empty()
+			? -1
+			: above_standard(::open(
+					  options.error_path.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600));
+	if (!options.error_path.empty() && err_fd < 0) {
+		error = std::string("opening the error file: ") + std::strerror(errno);
+		::close(in_fd);
+		::close(out_fd);
+		return false;
+	}
+	const int stderr_fd = err_fd >= 0 ? err_fd : out_fd;
 	// The child reports a failed exec through this pipe; a successful exec
 	// closes it (close-on-exec), and the parent reads end of file.
 	int report[2] = { -1, -1 };
@@ -790,6 +817,7 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 		error = std::string("pipe: ") + std::strerror(errno);
 		::close(in_fd);
 		::close(out_fd);
+		if (err_fd >= 0) ::close(err_fd);
 		return false;
 	}
 	::fcntl(report[0], F_SETFD, FD_CLOEXEC);
@@ -798,7 +826,7 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 	report[1] = above_standard(report[1]);
 	if (report[0] < 0 || report[1] < 0) {
 		error = "pipe: no descriptor past the standard three";
-		for (const int fd : { in_fd, out_fd, report[0], report[1] }) {
+		for (const int fd : { in_fd, out_fd, err_fd, report[0], report[1] }) {
 			if (fd >= 0) ::close(fd);
 		}
 		return false;
@@ -842,7 +870,7 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 		sigset_t none;
 		sigemptyset(&none);
 		::sigprocmask(SIG_SETMASK, &none, nullptr);
-		if (::dup2(in_fd, 0) < 0 || ::dup2(out_fd, 1) < 0 || ::dup2(out_fd, 2) < 0) fail(errno);
+		if (::dup2(in_fd, 0) < 0 || ::dup2(out_fd, 1) < 0 || ::dup2(stderr_fd, 2) < 0) fail(errno);
 		if (cwd != nullptr && ::chdir(cwd) != 0) fail(errno);
 		// Every descriptor past the standard three but the report pipe goes.
 		bool closed = false;
@@ -866,6 +894,7 @@ bool ChildProcess::spawn(const SpawnOptions &options, std::string &error) {
 	pthread_sigmask(SIG_SETMASK, &saved, nullptr);
 	::close(in_fd);
 	::close(out_fd);
+	if (err_fd >= 0) ::close(err_fd);
 	::close(report[1]);
 	if (pid < 0) {
 		::close(report[0]);
