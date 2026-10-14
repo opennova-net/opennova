@@ -63,15 +63,19 @@ require_op() {
   op whoami >/dev/null 2>&1 || die "1Password auth failed (check OP_SERVICE_ACCOUNT_TOKEN)"
 }
 
-# Whether vault $VAULT holds an item titled $1 (of category $2, say Document,
-# when given). Asked by title in the vault's listing, never read off an error's
-# wording; a listing that fails, or one jq cannot read, stops the command.
+# Whether vault $VAULT holds an item titled $1. Asked by title in the vault's
+# listing, never read off an error's wording; a listing that fails, comes back
+# empty (the deploy vault is never empty: its own items are in it) or is not a
+# JSON array stops the command, so no vault hiccup reads as an absent item.
 vault_has_item() {
-  local title="$1" category="${2:-}" list rc=0
-  local args=(item list --vault "$VAULT" --format json)
-  [ -z "$category" ] || args+=(--categories "$category")
-  list="$(op "${args[@]}")" || die "listing vault '$VAULT' failed. Refusing to go on with its items unknown (run again once the vault answers)"
-  printf '%s' "${list:-[]}" | jq -e --arg t "$title" 'any(.[]; .title==$t)' >/dev/null || rc=$?
+  local title="$1" list rc=0
+  list="$(op item list --vault "$VAULT" --format json)" \
+    || die "listing vault '$VAULT' failed. Refusing to go on with its items unknown (run again once the vault answers)"
+  [ -n "$list" ] \
+    || die "listing vault '$VAULT' came back empty. Refusing to go on with its items unknown (run again once the vault answers)"
+  printf '%s' "$list" \
+    | jq -e --arg t "$title" 'if type == "array" then any(.[]; .title == $t) else error("no array") end' \
+      >/dev/null 2>&1 || rc=$?
   case "$rc" in
     0) return 0 ;;
     1) return 1 ;;
@@ -159,19 +163,27 @@ hosted_snapshot_var() {
     log "hosted game servers: off (no 'hosted' item in vault '$VAULT')"
     return
   fi
-  value="$(op read "op://$VAULT/hosted/data_snapshot_id")"     || die "reading op://$VAULT/hosted/data_snapshot_id failed. Refusing to run terraform with hosting unknown (fix the vault access or the item's field, or delete the 'hosted' item to turn hosting off)"
+  value="$(op read "op://$VAULT/hosted/data_snapshot_id")" \
+    || die "reading op://$VAULT/hosted/data_snapshot_id failed. Refusing to run terraform with hosting unknown (fix the vault access or the item's field, or delete the 'hosted' item to turn hosting off)"
   export TF_VAR_hosted_data_snapshot_id="$value"
   log "hosted game servers: data snapshot '${value:-<empty>}' (vault item 'hosted')"
 }
 
 # After `terraform apply|destroy` exited $2: push the state it left (a failed
 # run with no local state has none to push), then exit with terraform's code.
+# A failed run is named before its push, so a push that is then refused (or
+# succeeds) never reads as the run's success.
 tf_push_after() {
   local action="$1" rc="$2"
-  if [ "$rc" -eq 0 ] || [ -f "$TF_DIR/terraform.tfstate" ]; then
-    cmd_state push
+  if [ "$rc" -ne 0 ]; then
+    if [ ! -f "$TF_DIR/terraform.tfstate" ]; then
+      err "terraform $action exited $rc; it left no state to push"
+      exit "$rc"
+    fi
+    err "terraform $action exited $rc; pushing the state it left"
   fi
-  [ "$rc" -eq 0 ] || { err "terraform $action exited $rc"; exit "$rc"; }
+  cmd_state push
+  [ "$rc" -eq 0 ] || exit "$rc"
 }
 
 cmd_infra() {
@@ -580,7 +592,7 @@ cmd_state() {
   esac
   log "${action}ing state: vault document '$doc' / $statefile…"
   [ "$action" = pull ] || [ -f "$statefile" ] || die "no local state at $statefile"
-  if ! vault_has_item "$doc" Document; then
+  if ! vault_has_item "$doc"; then
     if [ "$action" = pull ]; then
       log "no remote state yet (first run)"
     else
