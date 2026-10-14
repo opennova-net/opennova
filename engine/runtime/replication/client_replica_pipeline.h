@@ -16,6 +16,10 @@
 #include <runtime/replication/item_replication_catalog.h>
 #include <runtime/inmatch/session_transport.h>
 
+namespace opennova {
+struct TitleIdentity; // net/title/title_identity.h
+}
+
 namespace opennova::world {
 class IRootMotionSource;
 struct WeaponTable;
@@ -449,6 +453,12 @@ public:
 	// True once a folded 0x08 / 0x7B (or set_game_type) wrote the word.
 	bool game_type_known() const { return game_type_known_; }
 
+	// The title the session speaks (net/title/title_identity.h; null: JO's), whose
+	// edits to the in-match bodies the folds follow: the 0x0A objective body's
+	// co-op checkpoint (DFX2-1) and the 0x66 armory-only value (DFX2-10).
+	void set_title(const TitleIdentity *title) { title_ = title; }
+	const TitleIdentity *title() const { return title_; }
+
 	// The 0x1D header-form discriminator's session half: retail reads
 	// g_NapiNPCtx.is_in_session; a joiner is always in-session, while the
 	// listen host's loopback replica passes world.mp_session (retail SP never
@@ -637,6 +647,7 @@ private:
 	std::size_t unknown_tags_ = 0;
 	std::size_t malformed_bodies_ = 0;
 	uint32_t game_type_ = 0;
+	const TitleIdentity *title_ = nullptr; // set_title
 	bool game_type_known_ = false;
 	bool mp_session_ = false;
 	bool authority_recipient_ = false;

@@ -5,6 +5,7 @@
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/replication_model.h>
 #include <net/npwire/visible_players.h>
+#include <net/title/title_identity.h>
 
 // The body codec registry [orig: the per-tag handlers of g_NPMsgInfoClient
 // @0x82AE28 (S2C) and g_NPMsgInfoServer @0x82B5D8 (C2S)]. Each entry names the
@@ -13,12 +14,15 @@
 
 namespace opennova {
 
-IngameBodyCodecContext IngameBodyCodecContext::for_game_type(uint32_t game_type) {
+IngameBodyCodecContext IngameBodyCodecContext::for_session(uint32_t game_type,
+		const TitleIdentity *title) {
 	IngameBodyCodecContext ctx;
-	// The two off-wire gates the decoders take [orig: the 0x0A objective body
+	// The off-wire gates the decoders take [orig: the 0x0A objective body
 	// gate g_GameType & 0x20000; the 0x0F waypoint gate
-	// (g_GameType & 0xFFFDFFFF) == 0x10020] (net-re §5.9, §5.29).
-	ctx.objective_gametype = (game_type & 0x20000u) != 0;
+	// (g_GameType & 0xFFFDFFFF) == 0x10020] (net-re §5.9, §5.29), and the
+	// title's co-op checkpoint after the objective values (DFX2-1).
+	ctx.objective_body = frame_objective_body((game_type & 0x20000u) != 0,
+			title_in_match(title).objective_checkpoint);
 	ctx.waypoint_gametype = (game_type & ~0x20000u) == 0x10020u;
 	return ctx;
 }
@@ -55,7 +59,7 @@ Result with_bytes(Result r, std::vector<uint8_t> bytes) {
 
 Result s_frame_update(const uint8_t *b, size_t n, const IngameBodyCodecContext &ctx) {
 	FrameUpdate fu;
-	const bool ok = decode_frame_update(b, n, ctx.class_of, fu, ctx.objective_gametype);
+	const bool ok = decode_frame_update(b, n, ctx.class_of, fu, ctx.objective_body);
 	return with_bytes(counted(ok && fu.complete, fu.consumed, n), encode_frame_update(fu));
 }
 

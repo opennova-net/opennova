@@ -971,13 +971,34 @@ struct FrameTimerBlock {
 // The 0x0A header's sub-block case 3 (`flags2 & 3 == 3`) — objective-gametype
 // state (4× i32, 16 B), present ONLY when the host's `g_GameType & 0x20000` bit is
 // set. That gate is NOT on the wire, so decode_frame_update reads the body only
-// when its `is_objective_gametype` hint is set. First witnessed in probe3 (Co-op,
+// when its `objective` layout names one. First witnessed in probe3 (Co-op,
 // g_GameType 0x30020). [orig: NapiNPClientMsg_0x00A gate @ 0x430361, body
 // @ 0x430363..0x4303D0]
+// A DFX2 host writes a fifth u32 after the four, the co-op checkpoint (DFX2-1): the pool-3 slot
+// of the newest player-route marker the authority marked done, 0xFFFF outside co-op, which its
+// joiner compares with its copy and walks its waypoint list on a change. JO's writer and reader
+// stop at four. The fifth is title-gated, not on the wire either (FrameObjectiveBody).
+// [orig: NetPacket_WritePlayerState @0x4fcd84..0x4fcd9b (dfx2.exe) <- g_CoopCheckpointSlot;
+//  NapiNPClientMsg_0x00A @0x431dee..0x431e62 (dfx2.exe) -> g_ClientCoopCheckpointSlot]
+inline constexpr uint32_t kCoopCheckpointNone = 0xFFFFu;
+
 struct FrameObjectiveBlock {
-	bool     present = false;   // true iff all 16 objective bytes decoded (hint on + sub_block 3)
+	bool     present = false;   // true iff the objective body decoded (gate on + sub_block 3)
 	int32_t  state[4] = {0, 0, 0, 0}; // → dword_AC86F4/F0/EC/E8
+	bool     has_coop_checkpoint = false;             // the fifth value rides (DFX2-1)
+	uint32_t coop_checkpoint = kCoopCheckpointNone;   // valid iff has_coop_checkpoint
 };
+
+// The sub-block-3 objective body a host writes, two off-wire facts: none when its g_GameType
+// lacks 0x20000, else the four values, and the co-op checkpoint after them when the title's
+// writer appends it (TitleInMatch::objective_checkpoint, DFX2-1).
+enum class FrameObjectiveBody : uint8_t { None, Values, ValuesAndCheckpoint };
+inline constexpr FrameObjectiveBody frame_objective_body(bool objective_gametype,
+		bool title_checkpoint) {
+	return !objective_gametype ? FrameObjectiveBody::None
+	       : title_checkpoint  ? FrameObjectiveBody::ValuesAndCheckpoint
+	                           : FrameObjectiveBody::Values;
+}
 
 // The 0x0A conditional mounted-weapon ammo record (`flags2 & 0xF == 8`). The
 // handle is the recipient's mount target; when present the two words mirror the
@@ -1043,17 +1064,19 @@ struct FrameUpdate {
 // stops, leaving everything decoded so far in `out` (out.complete=false,
 // out.consumed = bytes walked) so callers can render partial state + the failure
 // point. [orig: NapiNPClientMsg_0x00A @ 0x42FEC0]
-// `is_objective_gametype` gates the sub-block-3 objective body (16 B): the host
-// only emits it when `g_GameType & 0x20000` is set — a gate not on the wire, so
-// the caller supplies it (e.g. from the 0x7B `extra` field = g_GameType). Default
-// false (correct for every non-objective capture).
+// `objective` is the sub-block-3 body's layout: the host emits the body only when
+// `g_GameType & 0x20000` is set and a DFX2 host appends the co-op checkpoint — two
+// gates not on the wire, so the caller supplies them (the 0x7B `extra` field =
+// g_GameType; the session's title). Default None (correct for every non-objective
+// capture).
 // `authority_recipient` is the listen host's own player parsing its loopback
 // frame: the walk returns after the anchor, flags1, phase byte, and the phase-0
 // block — retail's local client never reads a tail, records, or rounds
 // [orig: NapiNPClientMsg_0x00A local return @0x430174].
 bool decode_frame_update(const uint8_t *body, size_t len,
                          const std::function<EntityClass(uint16_t)> &class_of,
-                         FrameUpdate &out, bool is_objective_gametype = false,
+                         FrameUpdate &out,
+                         FrameObjectiveBody objective = FrameObjectiveBody::None,
                          bool authority_recipient = false);
 
 // ===========================================================================

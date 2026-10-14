@@ -2043,7 +2043,7 @@ bool check_script_change_reaches_the_same_frame() {
 		decoded = opennova::decode_frame_update(
 				dg.body.data(), dg.body.size(),
 				[](uint16_t) { return opennova::EntityClass::Player; }, frame,
-				/*is_objective_gametype=*/false, /*authority_recipient=*/true);
+				opennova::FrameObjectiveBody::None, /*authority_recipient=*/true);
 	}
 	return expect(decoded && frame.anchor_x == opennova::world::to_fixed(40.0f),
 	              "the script pass's move reaches this frame's 0x0A anchor");

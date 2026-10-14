@@ -63,6 +63,43 @@ struct TitlePages {
 	const char *server_list = nullptr;       // the GSB feed ("<name>?a=1")
 };
 
+// The in-match code's per-title branches: the host and joiner code the JO-family executables share,
+// edited at a few constants and tests (docs/titles/dfx2-vs-jo-re.md §7, the §8 catalog). Each
+// field names its catalog row. The defaults are JO's, the row every other title is read against.
+struct TitleInMatch {
+	// DFX2-1: S2C 0x0A's objective sub-block (g_GameType & 0x20000) carries a fifth u32 after the
+	// four objective values, the co-op checkpoint, which the joiner reads.
+	bool objective_checkpoint = false;
+	// DFX2-2: S2C 0x0F's flags bit 0 is set whether or not the mission has spawn zones.
+	bool spawn_zone_flag_always = false;
+	// DFX2-10: the weapon availability value that means "armory only" (JO 2, DFX2 3); the other of
+	// 2 and 3 is the mission's default. S2C 0x66 carries the 0 entries and this value's.
+	int32_t armory_only_availability = 2;
+	// DFX2-11: the join writes the slot state byte 0x13 (undeployed, with the pre-round loadout
+	// latch) whatever the mission and the pre-round timer, and every deploy writes 3 (the latch).
+	bool join_state_fixed = false;
+	// DFX2-12: the joiner's C2S 0x2F class byte is 8 (rifleman), or 7 (gunner) in a mission of
+	// type 2, whatever the profile's class.
+	bool loadout_class_fixed = false;
+	// DFX2-13: a LAN host's join check tests the joiner's CDKIID and CDKIIDEXP1 (codes 10..13,
+	// net/novacrypto/cdkey.h check_lan_join).
+	bool lan_cd_key_check = false;
+	// DFX2-14: the relayed chat wraps the sender's squad tag in <ch> and <co>.
+	bool chat_squad_tag_wrapped = false;
+	// DFX2-18: the bits the mission-data block's rules word (+44) is ORed with.
+	uint32_t rules_word_bits = 0;
+};
+
+// The build-environment values a joiner's 0x42 ClientAuth carries as CU tags and a host's join
+// check requires, each failing with its own code: BN (2), VN (3), MBN (4), SOPD (8). The joiner
+// sends the values its own executable compiles in; the host compares against its own.
+struct TitleJoinBuild {
+	int32_t bn = 0;
+	int32_t vn = 0;
+	int32_t mbn = 0;
+	int32_t sopd = 0;
+};
+
 struct TitleIdentity {
 	int game_id = -1; // gameprofile::GameId
 
@@ -78,6 +115,11 @@ struct TitleIdentity {
 	const char *pv1 = nullptr;
 	const char *pv2 = nullptr;
 	std::optional<TitleBuild> build; // PV3
+	// The 0x42's build-environment CU values and the host's join check on them.
+	std::optional<TitleJoinBuild> join_build;
+	// The in-match code's branches (witnessed per title: a row without them is refused by its
+	// session part, never read with JO's).
+	std::optional<TitleInMatch> in_match;
 
 	// --- The NovaWorld session (NOVAWORLDUDP) connection CNapiGameSession_InitNPConnection makes.
 	const char *lobby_pv1 = nullptr;
@@ -126,6 +168,12 @@ const TitleIdentity *resolve_title_identity(std::string_view game_code, std::str
 // "the <code> title's <part> identity is not witnessed yet: <fields>" for a part `title` leaves
 // incomplete, empty for a complete one.
 std::string title_identity_refusal(const TitleIdentity &title, TitleIdentityPart part);
+
+// The in-match branches a session's title takes, and its 0x42 build values. A host or joiner
+// brought up with no title (an in-process test that skips the hello, which a host with no title
+// never answers) runs JO's, the row the in-match port was witnessed on first.
+const TitleInMatch &title_in_match(const TitleIdentity *title);
+const TitleJoinBuild &title_join_build(const TitleIdentity *title);
 
 // ---- the gate tag ----------------------------------------------------------------------------
 

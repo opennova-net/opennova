@@ -175,14 +175,16 @@ bool run_fanout_and_per_connection_anchor() {
 		const auto player_class = [](uint16_t) { return nw::EntityClass::Player; };
 		nw::FrameUpdate phase0;
 		nw::decode_frame_update(self_dg0.body.data(), self_dg0.body.size(), player_class,
-		                        phase0, false, /*authority_recipient=*/true);
+		                        phase0, nw::FrameObjectiveBody::None,
+		                        /*authority_recipient=*/true);
 		if (!expect(phase0.complete && phase0.weapon.present && phase0.records.empty() &&
 		                    phase0.round_events.empty() && !phase0.local_tail_present,
 		            "the local parser folds the phase-0 block and reads nothing after it"))
 			return false;
 		nw::FrameUpdate phase1;
 		nw::decode_frame_update(self_dg.body.data(), self_dg.body.size(), player_class,
-		                        phase1, false, /*authority_recipient=*/true);
+		                        phase1, nw::FrameObjectiveBody::None,
+		                        /*authority_recipient=*/true);
 		if (!expect(phase1.complete && !phase1.weapon.present && phase1.records.empty() &&
 		                    !phase1.local_tail_present,
 		            "the 14-byte frame decodes complete with no sub-block")) return false;
@@ -700,7 +702,7 @@ bool run_0a_subblock_phase_cycle() {
 	nw::FrameUpdate objective_fu;
 	if (!expect(nw::decode_frame_update(objective_dg.body.data(), objective_dg.body.size(),
 	                    ns::class_for_type_id, objective_fu,
-	                    /*is_objective_gametype=*/true),
+	                    nw::FrameObjectiveBody::Values),
 	            "objective 0x0A frame decodes with the session hint")) return false;
 	if (!expect(objective_fu.flags2 == 3 && objective_fu.objective.present,
 	            "co-op phase 3 carries the required 16-byte objective block")) return false;

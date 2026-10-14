@@ -9,6 +9,7 @@
 #include <base/gameprofile/game_type.h>
 #include <net/npwire/ingame_message_id.h>
 #include <net/npwire/wire_handle.h>
+#include <net/title/title_identity.h>          // title_in_match (the 0x0A checkpoint, DFX2-1)
 #include <base/io/bam.h>                      // wrapped retail pitch chase
 
 #include <algorithm>
@@ -746,7 +747,9 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 	// so we apply whatever decoded cleanly (out.complete reflects a clean terminator).
 	decode_frame_update(body.data(), body.size(),
 	                    [this](uint16_t tid) { return classify(tid); }, fu,
-	                    game_type::is_objective(game_type_), authority_recipient_);
+	                    frame_objective_body(game_type::is_objective(game_type_),
+	                            title_in_match(title_).objective_checkpoint),
+	                    authority_recipient_);
 
 	state_.anchor_x = fu.anchor_x;
 	state_.anchor_y = fu.anchor_y;
@@ -854,6 +857,14 @@ void ClientReplicaPipeline::apply_frame_update(const std::vector<uint8_t> &body)
 		state_.objective_show_win = static_cast<uint32_t>(fu.objective.state[2]);
 		state_.objective_show_lose = static_cast<uint32_t>(fu.objective.state[3]);
 		++state_.objective_updates_applied;
+		// The checkpoint is kept on a change only; the waypoint walk it drives is the
+		// world's (DFX2-9) [orig: NapiNPClientMsg_0x00A @0x431e0b (dfx2.exe), the compare with
+		//  g_ClientCoopCheckpointSlot].
+		if (fu.objective.has_coop_checkpoint &&
+				fu.objective.coop_checkpoint != state_.coop_checkpoint) {
+			state_.coop_checkpoint = fu.objective.coop_checkpoint;
+			++state_.coop_checkpoint_revision;
+		}
 	}
 	if (fu.env.present) {
 		state_.environment.present = true;

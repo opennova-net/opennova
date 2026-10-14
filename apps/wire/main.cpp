@@ -42,6 +42,7 @@
 #include <net/npwire/session_hello.h>
 #include <net/npwire/session_keys.h>
 #include <net/npwire/wire_capture.h>
+#include <net/title/title_identity.h>
 
 #include <base/pcapio/pcap_reader.h>
 
@@ -168,6 +169,19 @@ std::unordered_map<uint16_t, EntityClass> g_item_class;
 uint32_t g_game_type = 0;
 inline bool gt_is_waypoint() { return game_type::is_waypoint_family(g_game_type); }
 inline bool gt_is_objective() { return game_type::is_objective(g_game_type); }
+
+// The session's title: `--game <code>`, else the PN the capture's first session
+// hello names (wire::handshake_title), else JO's. A DFX2 host's 0x0A objective
+// body carries the co-op checkpoint after the four values (DFX2-1).
+const TitleIdentity *g_title = nullptr;
+bool g_title_fixed = false; // --game given: the handshake does not override it
+inline FrameObjectiveBody gt_objective_body() {
+	return frame_objective_body(gt_is_objective(), title_in_match(g_title).objective_checkpoint);
+}
+void learn_title(const std::vector<uint8_t> &raw) {
+	if (g_title_fixed || g_title != nullptr) return;
+	g_title = wire::handshake_title(raw);
+}
 
 const char *class_name(EntityClass c) {
 	switch (c) {
@@ -810,7 +824,7 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 	};
 	FrameUpdate fu;
 	const bool ok = decode_frame_update(body.data(), body.size(), class_of, fu,
-	                                    gt_is_objective());
+	                                    gt_objective_body());
 
 	std::printf("        [0x0A] refs=(0x%08x,0x%08x,0x%08x) flags1=0x%02x "
 	            "flags2=0x%02x sub=%u%s\n",
@@ -838,7 +852,12 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 		            unsigned(fu.env.tod_fixed), unsigned(fu.env.quake_ticks),
 		            unsigned(fu.env.cloud_scroll), unsigned(fu.env.rain_pct),
 		            unsigned(fu.env.overcast), unsigned(fu.env.env_param));
-	if (fu.objective.present)
+	if (fu.objective.present && fu.objective.has_coop_checkpoint)
+		std::printf("            objective: %d %d %d %d checkpoint=0x%08x\n",
+		            fu.objective.state[0], fu.objective.state[1],
+		            fu.objective.state[2], fu.objective.state[3],
+		            unsigned(fu.objective.coop_checkpoint));
+	else if (fu.objective.present)
 		std::printf("            objective: %d %d %d %d\n",
 		            fu.objective.state[0], fu.objective.state[1],
 		            fu.objective.state[2], fu.objective.state[3]);
@@ -1811,6 +1830,14 @@ int main(int argc, char *argv[]) {
 		const char *a = argv[i];
 		if (std::strcmp(a, "--items") == 0 && i + 1 < argc) {
 			items_path = argv[++i];
+		} else if (std::strcmp(a, "--game") == 0 && i + 1 < argc) {
+			std::string why;
+			g_title = resolve_title_identity(argv[++i], why);
+			if (g_title == nullptr) {
+				std::fprintf(stderr, "--game: %s\n", why.c_str());
+				return 1;
+			}
+			g_title_fixed = true;
 		} else if (std::strcmp(a, "--hexcap-max") == 0 && i + 1 < argc) {
 			const long v = std::strtol(argv[++i], nullptr, 10);
 			if (v > 0) g_hexcap_max = static_cast<size_t>(v);
@@ -1851,7 +1878,7 @@ int main(int argc, char *argv[]) {
 		             "usage: opennova-wire <capture-path> [--items <items.def>] [--stream] "
 		             "[--histogram] [--coverage] [--sequencing] [--parity-events] "
 		             "[--scenario-events] "
-		             "[--max-frames N] [--skip N] "
+		             "[--max-frames N] [--skip N] [--game <code>] "
 		             "[0xNN ...]\n"
 		             "       path is a .pcap / .pcapng (parsed natively)\n"
 		             "       --histogram emits one machine-readable 'HIST <dir> "
@@ -1875,6 +1902,9 @@ int main(int argc, char *argv[]) {
 		             "       or a hexcap text file (one '<srcport> <frame> "
 		             "<hex>' per line)\n"
 		             "       --hexcap-max N widens the per-dump byte cap (default 48)\n"
+		             "       --game names the session's title (jo, dfx2), whose edits\n"
+		             "       to the in-match bodies the decode follows; default: the\n"
+		             "       PN of the capture's first session hello, else jo\n"
 		             "       --items gives a JO items.def "
 		             "(plaintext or SCR-encrypted with the JO/DFX2 key)\n"
 		             "       so type_ids in 0x0D/0x20 records show as names\n");
@@ -1908,6 +1938,7 @@ int main(int argc, char *argv[]) {
 		wire::ParityTraceBuilder parity_trace(parity_printer, &g_item_class);
 		auto decode_and_print = [&](const net::PcapDatagram &pk) {
 			frame_timestamps[pk.frame_index] = pk.ts_nanos;
+			learn_title(pk.payload);
 			opennova::CaptureDatagram cd;
 			cd.frame_index = pk.frame_index;
 			cd.src_port = pk.srcport;
@@ -1973,6 +2004,7 @@ int main(int argc, char *argv[]) {
 		}
 		for (auto &pk : pkts) {
 			frame_timestamps[pk.frame_index] = pk.ts_nanos;
+			learn_title(pk.payload);
 			Datagram d;
 			d.srcport = pk.srcport;
 			d.dstport = pk.dstport;
