@@ -97,6 +97,18 @@ void test_flags_parse_case_insensitively_with_values() {
     CHECK(junction.use_junction == 0 && junction.clear_junction == 2);
     CHECK(parse_launch_flags({"game.exe"}).use_junction == -1);
     CHECK(parse_launch_flags({"game.exe", "/CLEARJUNCTION"}).clear_junction == -1);
+    // The one walk: a switch steps onto its value token, which the switches after it in the
+    // walk's order test in place of the switch, and the walk goes on past it. So a value token
+    // that names an earlier switch is only a value, one that names a later switch is that
+    // switch too, and a token is kept as it stands (no trim) [orig: Game_ParseCommandLineAndInit
+    // @0x4a7310 - the order @0x4A74F1..0x4A7632, the value stepped onto @0x4A7503..0x4A750C,
+    // @0x4A761E..0x4A7620].
+    const LaunchFlags walked = parse_launch_flags({"game.exe", "/USEJUNCTION", "/UDPNOVAWORLD", "1.2.3.4"});
+    CHECK(walked.use_junction == 0 && walked.udp_novaworld.empty());
+    const LaunchFlags chained = parse_launch_flags({"game.exe", "/POSTPORTNUMBER", "/USEJUNCTION", "5"});
+    CHECK(chained.post_port_number == 0 && chained.use_junction == 5);
+    const LaunchFlags spaced = parse_launch_flags({"game.exe", "/UDPNOVAWORLD", " 1.2.3.4 ", "/POSTIPADDRESS", " nw "});
+    CHECK((spaced.udp_novaworld == std::vector<std::string>{" 1.2.3.4 "}) && spaced.post_ip_address == " nw ");
 }
 
 // `/mod` is `/exp`: one arm of the game's walk, the value token stepped over,

@@ -144,18 +144,20 @@ struct LaunchFlags {
     // @0x5514B1..0x5514BA].
     bool lan = false;
     // /POSTIPADDRESS <address> and /POSTPORTNUMBER <n>, each the whole token in any case and
-    // its next token, the last one standing: the address the game resolves (DNS on; one that
-    // does not resolve overrides nothing) and the port's CRT atol (0 overrides nothing), which
-    // the NovaWorld gate response takes over its own POSTIPADDRESS / POSTIPPORT
-    // (NwuLobbySession::CommandLine). "" / 0 when absent.
+    // its next token as it stands, the last one standing: the address the game resolves (DNS
+    // on; one that does not resolve overrides nothing) and the port's CRT atol (0 overrides
+    // nothing), which the NovaWorld gate response takes over its own POSTIPADDRESS / POSTIPPORT
+    // (NwuLobbySession::CommandLine). "" / 0 when absent. These and the switches below are read
+    // in one walk in the game's order, a switch's value token being what the switches after it
+    // test (parse_launch_flags).
     // [orig: Game_ParseCommandLineAndInit @0x4a7310 - "/POSTIPADDRESS" @0x4A75A4,
     //  Napi_ResolveAddress(token, 1) @0x4A75C7 into dword_B4C6B0 @0x4A75CF; "/POSTPORTNUMBER"
     //  @0x4A75D4, _atol @0x4A75F6 into dword_B4C6B4 @0x4A75FE]
     std::string post_ip_address;
     int post_port_number = 0;
     // /UDPNOVAWORLD <address>, the whole token in any case: its next token is stepped over and,
-    // while fewer than kLaunchUdpNovaWorldMax are kept, kept to kLaunchUdpNovaWorldChars
-    // characters, in order; the NovaWorld connect probes these in place of the gate's entries
+    // while fewer than kLaunchUdpNovaWorldMax are kept, kept as it stands to
+    // kLaunchUdpNovaWorldChars characters, in order; the NovaWorld connect probes these in place of the gate's entries
     // and counts the NWU session in use for them (NwuLobbySession::CommandLine).
     // [orig: Game_ParseCommandLineAndInit @0x4a7310 - "/UDPNOVAWORLD" @0x4A74F1, the next token
     //  stepped onto @0x4A7503..0x4A750C, the count test dword_B4C71C < 6 @0x4A750E..0x4A7516,
