@@ -325,6 +325,8 @@ private:
 	uint64_t spent_overwrite_ = 0;
 	uint64_t writing_over_ = 0;
 	std::vector<int32_t> base_heights_;
+	// Each entity's lock and base as the last names_file_text wrote them, for names_file_written to keep.
+	std::vector<MissionNamesFile::Lock> written_locks_;
 	uint64_t names_state_ = 0;
 	mutable Lookups lookups_;
 	std::shared_ptr<const MissionItemClasses> item_classes_;

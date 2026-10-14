@@ -8,6 +8,7 @@
 // original editor's wav list.
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <map>
@@ -1062,6 +1063,78 @@ int test_names_file_entities() {
 	return 0;
 }
 
+// A locked entity's base (D-MIS-4; the #1121 review, M4): one locked in the editor takes the ground under it at its
+// first save, and the write keeps it, so a save after a sculpt writes it again unchanged, never the new ground; a base
+// its .mis gives as 0 is a base, kept, never the ground's.
+int test_names_base_kept() {
+	bms::File file = names_mission();
+	for (const int32_t ssn : {9001, 9002}) {
+		bms::Entity entity = mission::new_entity(mission::EntityKind::Item, 106102, ssn);
+		entity.x = bms::to_fixed_16_16(ssn == 9001 ? 10.0 : 20.0);
+		entity.y = bms::to_fixed_16_16(-5.0);
+		entity.z = bms::to_fixed_16_16(30.0);
+		file.items.push_back(entity);
+	}
+	mission::sync_counts(file);
+	const size_t count = file.items.size() + file.buildings.size() + file.markers.size() + file.organics.size();
+	const std::vector<int32_t> ground(count, bms::to_fixed_16_16(4.0));
+	std::vector<int32_t> sculpted = ground;
+	for (int32_t &height : sculpted) height += bms::to_fixed_16_16(1.0);
+	// The extra_bheight of the item section of an SSN.
+	const auto base_of = [](const std::string &text, int32_t ssn) -> int64_t {
+		const size_t at = text.find("\n  id " + std::to_string(ssn) + "\r");
+		const size_t base = at == std::string::npos ? std::string::npos : text.find("\n  extra_bheight ", at);
+		if (base == std::string::npos) return INT64_MIN;
+		return std::stoll(text.substr(base + 17, text.find('\r', base + 1) - base - 17));
+	};
+	std::string error, text, again;
+	std::vector<uint8_t> bms_bytes;
+	TEST_EXPECT(bms::write(file, bms_bytes, error));
+	std::unique_ptr<Document> document = read_with(bms_bytes, beside(nullptr));
+	TEST_EXPECT(document != nullptr);
+	if (!document) return 1;
+	auto &m = dynamic_cast<MissionDocument &>(*document);
+	const Node *locked = nullptr;
+	for (const Node *row : m.rows_of(MissionKind::Item))
+		if (static_cast<const EntityRow &>(*row).native.id == 9001) locked = row;
+	TEST_EXPECT(locked != nullptr);
+	if (!locked) return 1;
+	Edit lock;
+	lock.operation = EditOperation::Set;
+	lock.address = {locked->id, locked->kind, 0};
+	lock.field = "height_lock";
+	lock.value = int64_t(1);
+	TEST_EXPECT(apply_edits(*document, {lock}));
+	m.set_base_heights(ground);
+	TEST_EXPECT(save_text(m, beside(nullptr), text) && base_of(text, 9001) == bms::to_fixed_16_16(4.0));
+	m.names_file_written(true, fingerprint_of(bytes_of(text)), std::string());
+	const std::vector<uint8_t> first = bytes_of(text);
+	m.set_base_heights(sculpted);
+	TEST_EXPECT(save_text(m, beside(&first), again) && base_of(again, 9001) == bms::to_fixed_16_16(4.0));
+	if (base_of(again, 9001) != bms::to_fixed_16_16(4.0))
+		std::printf("  the second save's base: %lld\n", static_cast<long long>(base_of(again, 9001)));
+
+	// A .mis that locks SSN 9001 on a base of 0: read, then saved over the ground, its base stays 0.
+	bms::File zero = file;
+	for (bms::Entity &entity : zero.items)
+		if (entity.id == 9001) {
+			entity.mis_height_lock = 1;
+			entity.mis_extra_bheight = 0;
+		}
+	std::string zero_text;
+	const mission::MisNames none;
+	TEST_EXPECT(mission::write_mis_text(zero, zero_text, error, &ground, &none) && base_of(zero_text, 9001) == 0);
+	const std::vector<uint8_t> zero_bytes = bytes_of(zero_text);
+	document = read_with(bms_bytes, &zero_bytes);
+	TEST_EXPECT(document != nullptr);
+	if (!document) return 1;
+	auto &z = dynamic_cast<MissionDocument &>(*document);
+	TEST_EXPECT(z.names_file().found == MissionNamesFile::Found::Matched);
+	z.set_base_heights(ground);
+	TEST_EXPECT(save_text(z, beside(&zero_bytes), again) && base_of(again, 9001) == 0);
+	return 0;
+}
+
 // Copy, Cut and Paste carry an event's name and an area's description (m1).
 int test_names_clipboard() {
 	const bms::File plain = names_mission();
@@ -1648,6 +1721,7 @@ int main() {
 	if (test_row_names() != 0) return 1;
 	if (test_names_file() != 0) return 1;
 	if (test_names_file_entities() != 0) return 1;
+	if (test_names_base_kept() != 0) return 1;
 	if (test_names_clipboard() != 0) return 1;
 	if (test_names_file_session() != 0) return 1;
 	if (test_names_file_original() != 0) return 1;

@@ -594,8 +594,8 @@ bool MissionDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::
 			if (take) {
 				row->native.mis_height_lock = entity_at < names.kept_locks.size() ? names.kept_locks[entity_at] : 0;
 				// A locked entity's base as the .mis keeps it, absolute (D-MIS-4).
-				if (row->native.mis_height_lock != 0 && entity_at < names.kept_bases.size())
-					row->native.mis_extra_bheight = names.kept_bases[entity_at];
+				if (row->native.mis_height_lock != 0 && entity_at < names.kept_bases.size() && names.kept_bases[entity_at])
+					row->native.mis_extra_bheight = *names.kept_bases[entity_at];
 			}
 			++entity_at;
 			shape(*row);
@@ -726,7 +726,7 @@ bool MissionDocument::names_file_due(const CompanionFile &now) {
 
 bool MissionDocument::names_file_text(std::string &text) {
 	std::string error;
-	const bool made = mission_names_text(*this, &base_heights_, text, error);
+	const bool made = mission_names_text(*this, &base_heights_, text, error, &written_locks_);
 	// The unlocked entities past the heights handed (all of them where the terrain did not read): written height locked
 	// at their heights (mission::write_mis_text, D-MIS-17), listed.
 	names_left_.locked.clear();
@@ -748,6 +748,7 @@ bool MissionDocument::names_file_text(std::string &text) {
 	if (!made) {
 		names_left_.unwritten = error;
 		writing_over_ = 0;
+		written_locks_.clear();
 	}
 	return made;
 }
@@ -757,6 +758,7 @@ void MissionDocument::names_file_written(bool ok, uint64_t fingerprint, const st
 	if (!ok) {
 		names_left_.unwritten = "the file system would not write it (" + error + ")";
 		writing_over_ = 0;
+		written_locks_.clear();
 		return;
 	}
 	// Written from the mission: its names the mission's now. Write it from the mission is spent by the write it
@@ -769,6 +771,11 @@ void MissionDocument::names_file_written(bool ok, uint64_t fingerprint, const st
 	written.fingerprint = fingerprint;
 	written.kept = mission_names(*this);
 	written.kept_locks = mission_locks(*this);
+	// Each entity's lock and base as written: the base a locked one took kept with it, the next save's (D-MIS-4).
+	written.locks = std::move(written_locks_);
+	written_locks_.clear();
+	for (const MissionNamesFile::Lock &lock : written.locks)
+		written.kept_bases.push_back(lock.lock != 0 ? std::optional<int32_t>(lock.base) : std::nullopt);
 	// What it holds, as a read of it would hold it: the names and the events' lines it was written with.
 	written.names = written.kept;
 	for (const Node *row : rows_of(K::Event)) written.events.push_back(static_cast<const EventRow &>(*row).native);
