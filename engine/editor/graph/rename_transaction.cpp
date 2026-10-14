@@ -729,6 +729,58 @@ SymbolRenamePlan plan_symbol_rename_project(const AssetScan &scan, const AssetGr
 		}
 		sites.push_back({std::move(site), edge->address.kind});
 	}
+	// A use that defines a name of its own as it names this one (a gametext.bin WepDes key: the HUD's name of the weapon
+	// of its key): that name is renamed with it, so its own uses follow it (a loadout label naming the key), each a
+	// site; a definition of the new name where that name's lookup finds it refuses the rename as this name's does.
+	const size_t named = sites.size();
+	for (size_t i = 1; i < named; ++i) {
+		const RenameSite carrier = sites[i].first;
+		if (carrier.span.line) continue;
+		const GraphSymbol *own = graph.symbol_at(carrier.file, carrier.locator, carrier.field);
+		if (!own || own == &symbol || own->display != carrier.before) continue;
+		plan.carried.push_back({own->file, own->locator, own->field});
+		const ReferenceKindRow &own_row = reference_row(own->kind);
+		const std::string own_what = std::string(own_row.phrase) + " '" + own->display + "'";
+		if (graph_names::symbol_name(own->kind, new_name) != own->name)
+			for (const GraphSymbol *other : graph.symbols_named(own->kind, new_name))
+				if (other != own && graph_names::upper(other->scope) == graph_names::upper(own->scope)) {
+					plan.refusals.push_back(refusal(CoreFinding::RenameExists,
+					                                carrier.file + " defines " + own_what + " with " + what + ", renamed with it, and " +
+					                                        other->file + " already defines " + own_row.phrase + " '" +
+					                                        other->display + "'" +
+					                                        (own->scope.empty() ? "" : " in " + own->scope) + ".",
+					                                other->file, other->field));
+					break;
+				}
+		for (const GraphEdge *edge : graph.users_of(*own)) {
+			const bool listed = std::any_of(sites.begin(), sites.end(), [&](const std::pair<RenameSite, NodeKind> &site) {
+				return site.first.file == edge->source && site.first.locator == edge->locator && site.first.field == edge->field;
+			});
+			if (listed) continue;
+			const std::string where = edge->record.empty() ? edge->source : "'" + edge->record + "' in " + edge->source;
+			const AssetEntry *source = find_asset(scan, edge->source);
+			if (!graph.rewrites(*edge) || !source || !edge->key_prefix.empty() || edge->name_offset || !edge->fallback.empty()) {
+				plan.refusals.push_back(refusal(CoreFinding::RenameSite,
+				                                where + " names " + own_what + ", renamed with " + what +
+				                                        ", and the editor cannot rewrite that use yet.",
+				                                edge->source, edge->field));
+				continue;
+			}
+			RenameSite site;
+			site.file = edge->source;
+			site.kind = source->kind;
+			site.record = edge->record;
+			site.record_title = edge->record_title;
+			site.record_kind = edge->address.kind;
+			site.locator = edge->locator;
+			site.field = edge->field;
+			site.span = edge->span;
+			site.before = edge->value;
+			site.after = own_row.spell == NameSpelling::StyleVariable ? "%" + new_name + "%" : new_name;
+			site.target = own->file;
+			sites.push_back({std::move(site), edge->address.kind});
+		}
+	}
 	// Every site's field can hold the new value: within its width, a number where it is one. A
 	// text's span takes any name the game's code page holds; what its text reads back is checked
 	// as it is rewritten (check_symbol_rename).
@@ -900,11 +952,15 @@ bool stage_symbol_file(const ProjectPaths &paths, const ProjectDocument &project
                        const std::vector<std::shared_ptr<const DocumentBase>> &open, const std::string &file,
                        const std::vector<const RenameSite *> &sites, std::unique_ptr<DocumentBase> &staged,
                        std::vector<Diagnostic> &findings) {
-	// A use still reaches the renamed definition: the one the graph's lookup returns for it (through
-	// its fallback where its value finds nothing).
+	// A use still reaches the renamed definition, or one the plan carries with it: the one the graph's lookup returns
+	// for it (through its fallback where its value finds nothing).
 	const auto reaches = [&](const GraphEdge &edge) {
 		const GraphSymbol *found = graph.symbol_reached(edge);
-		return found && found->file == plan.file && found->locator == plan.locator && found->field == plan.field;
+		if (!found) return false;
+		if (found->file == plan.file && found->locator == plan.locator && found->field == plan.field) return true;
+		return std::any_of(plan.carried.begin(), plan.carried.end(), [&](const SymbolRenamePlan::Carried &carried) {
+			return found->file == carried.file && found->locator == carried.locator && found->field == carried.field;
+		});
 	};
 	const AssetEntry *asset = find_asset(scan, file);
 	const DocumentType *type = asset ? document_type_for(asset->kind) : nullptr;

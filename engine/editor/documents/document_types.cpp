@@ -105,8 +105,9 @@ constexpr DocumentType kTypes[] = {
 	{ DocumentTypeId::Catalog, "catalog", make_catalog, validate_catalog_file,
 			DefCatalogDocument::schema, catalog_finding_codes, nullptr, nullptr, catalog_references,
 			catalog_record_label, nullptr, nullptr, nullptr, nullptr, nullptr, define_catalog_symbol },
+	// A key of gametext.bin's WepDes section is a use of the weapon of its name (the HUD's name of it).
 	{ DocumentTypeId::Strings, "strings", make_strings, validate_strings_file,
-			StringsDocument::schema, strings_finding_codes, nullptr, nullptr, nullptr, nullptr, nullptr,
+			StringsDocument::schema, strings_finding_codes, nullptr, nullptr, strings_references, nullptr, nullptr,
 			nullptr, nullptr, nullptr, nullptr, define_string_id },
 	// The menu: its parts by what they do (an action, a look, a sound), never "Action 1" (the plain-words
 	// lane).
