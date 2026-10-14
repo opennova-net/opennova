@@ -47,7 +47,7 @@ bool same_pose(const MissionPose &a, const MissionPose &b) {
 	const world::InfantryBodyPose &p = a.pose, &q = b.pose;
 	return a.item == b.item && a.status == b.status && a.ai_function == b.ai_function && a.adm == b.adm &&
 			a.ai_slot == b.ai_slot && a.state == b.state && a.updates == b.updates && a.rise == b.rise &&
-			a.ssn == b.ssn && a.alert == b.alert && a.guarding == b.guarding &&
+			a.ssn == b.ssn && a.alert == b.alert && a.guarding == b.guarding && a.route == b.route &&
 			a.clip == b.clip &&
 			a.source_clip == b.source_clip && p.state == q.state && p.phase == q.phase && p.variant == q.variant &&
 			p.parked == q.parked && p.blending == q.blending && p.source_state == q.source_state &&
@@ -76,8 +76,10 @@ void MissionPoses::clear() {
 	floor_world_.reset();
 	floor_bodies_.clear();
 	floor_key_ = 0;
-	floor_mission_.reset();
 	floor_ground_ = nullptr;
+	people_mission_.reset();
+	people_marks_.clear();
+	people_key_ = 0;
 }
 
 const MissionPose *MissionPoses::pose(NodeId row) const {
@@ -212,10 +214,14 @@ int32_t mission_pose_floor_clearance(MissionWorld &world, world::EntityHandle bo
 	return feet - ground;
 }
 
-std::unique_ptr<MissionWorld> MissionPoses::load_floor_world() const {
-	if (!floor_world_ || !floor_mission_ || !floor_ground_) return nullptr;
+std::unique_ptr<MissionWorld> MissionPoses::load_people_world(std::map<NodeId, world::EntityHandle> &bodies) const {
+	bodies.clear();
+	if (!people_mission_ || !floor_ground_ || !floor_files_) return nullptr;
 	auto world = std::make_unique<MissionWorld>();
-	world->load(floor_files_, *floor_mission_, *floor_ground_);
+	world->load(floor_files_, *people_mission_, *floor_ground_);
+	world->world.registry.for_each_in_pool(0, [&](const world::Entity &entity) {
+		if (const MissionEntityMark *mark = world->mark_of(entity, people_marks_)) bodies[mark->row] = entity.handle;
+	});
 	return world;
 }
 
@@ -281,11 +287,11 @@ bool MissionPoses::stand(const MissionScene &scene, const MissionPeopleFloor &fl
 				key = mix(key, mark.stamp);
 			}
 			if (!floor_world_ || key != floor_key_) {
-				floor_mission_ = std::make_unique<bms::File>(*floor.mission);
-				mission_world_thin(*floor_mission_, scene.entities(), keep);
+				bms::File thinned = *floor.mission;
+				mission_world_thin(thinned, scene.entities(), keep);
 				floor_ground_ = floor.ground;
 				floor_world_ = std::make_unique<MissionWorld>();
-				floor_world_->load(floor_files_, *floor_mission_, *floor.ground);
+				floor_world_->load(floor_files_, thinned, *floor.ground);
 				floor_bodies_.clear();
 				floor_world_->world.registry.for_each_in_pool(0, [&](const world::Entity &entity) {
 					if (const MissionEntityMark *mark =
@@ -296,7 +302,57 @@ bool MissionPoses::stand(const MissionScene &scene, const MissionPeopleFloor &fl
 				++floor_serial_;
 			}
 			world = floor_world_.get();
+			// The people's own world's records (S27): every person, every respawn zone, every item and building
+			// within the scan's reach of a posed person.
+			const def::DefItemsFile *items = floor_files_->items_read ? &floor_files_->items : nullptr;
+			const auto spawn_point = [&](int64_t item) {
+				const def::DefItemDef *row = items ? mission::find_item_def(*items, int(item)) : nullptr;
+				return row != nullptr && (row->attrib & world::kItemAttribSpawnPoint) != 0;
+			};
+			const double scan = 20.0 * std::sqrt(3.0);
+			const auto keep_people = [&](const MissionEntityMark &mark) {
+				if (mark.pool == MissionPool::Organic) return true;
+				if (mark.pool != MissionPool::Item && mark.pool != MissionPool::Building) return false;
+				if (spawn_point(mark.item)) return true;
+				const double own = bound(mark.item);
+				for (const MissionEntityMark *person : people) {
+					const double reach = scan + own + bound(person->item) + kMissionFloorPad + 2.0;
+					const double dx = mark.x - person->x, dy = mark.y - person->y, dz = mark.z - person->z;
+					if (dx * dx + dy * dy + dz * dz <= reach * reach) return true;
+				}
+				return false;
+			};
+			uint64_t people_key = mix(key, floor_serial_);
+			for (const MissionEntityMark &mark : scene.entities()) {
+				if (!keep_people(mark)) continue;
+				people_key = mix(people_key, mark.row);
+				people_key = mix(people_key, uint64_t(uint32_t(mark.index)));
+				people_key = mix(people_key, uint64_t(mark.item));
+				people_key = mix(people_key, mark.stamp);
+				if (mark.pool != MissionPool::Organic) continue;
+				// What the people's spawn and think read of their records beside the stamp's fields.
+				people_key = mix(people_key, uint64_t(uint32_t(mark.route)));
+				people_key = mix(people_key, uint64_t(uint32_t(mark.ssn)));
+				people_key = mix(people_key, uint64_t(uint32_t(mark.alert)));
+				people_key = mix(people_key, uint64_t(uint32_t(mark.team)));
+			}
+			if (!people_mission_ || people_key != people_key_) {
+				people_mission_ = std::make_unique<bms::File>(*floor.mission);
+				mission_world_thin(*people_mission_, scene.entities(), keep_people);
+				people_marks_ = scene.entities();
+				people_key_ = people_key;
+				++people_serial_;
+			}
 		}
+	}
+	// No world made (no terrain, no mission, no person posed): none stands.
+	if (world == nullptr) {
+		floor_world_.reset();
+		floor_bodies_.clear();
+		floor_ground_ = nullptr;
+		people_mission_.reset();
+		people_marks_.clear();
+		people_key_ = 0;
 	}
 	const std::map<NodeId, world::EntityHandle> none;
 	const std::map<NodeId, world::EntityHandle> &bodies = world ? floor_bodies_ : none;
@@ -414,6 +470,7 @@ void pose_person(const PersonDefinition &definition, const PersonRecord &record,
 	pose.ssn = record.ssn;
 	pose.alert = pose.ai_slot ? record.alert : 0;
 	pose.guarding = (facts.flags & world::kEntityFlagMounted) != 0;
+	pose.route = facts.route ? facts.route_channel : 0;
 	pose.state = world::organic_spawn_state(facts, &motion, adm_id);
 	pose.because = because_of(facts, pose.state);
 	pose.updates = world::organic_warmup_updates(uint32_t(record.ssn)) + 1;

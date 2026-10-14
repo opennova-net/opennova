@@ -52,6 +52,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/entity_spawn.h>
+#include <runtime/world/pose_inputs.h>
 #include <runtime/world/world.h>
 #include <editor/preview/mission_world.h>
 
@@ -669,22 +670,64 @@ static int test_people_floors() {
 	return 0;
 }
 
-// S27: where the mission's floors' world stands, the people play in a world of their own (MissionPeople): three
-// riflemen of one team on the level land, a red one with a teammate a unit and a half east and a calm one two and
-// a half units north, their sight 40 units, their table authoring the look idles. Each played body is, every tick,
-// the one a world of the same records gives after the game's organic init in pool order and as many of the still
-// body's ticks (world::AiSystem::tick_still_body) from the game's tick 1; over 600 ticks a look target and a look
-// idle show and the red one's body turns from its teammate; the device's aim overlay and the wire's look follow.
+// S27: where the mission's floors' world stands, the people play in a world of their own (MissionPeople): riflemen of
+// one team on the level land, a red one with a teammate a unit and a half east and a calm one two and a half units
+// north, a fourth sixteen units east beyond a crate at the midpoint (more than seven units from both: the floors'
+// world leaves it out, the people's keeps it), their sight 40 units, their table authoring the look idles. Each played
+// body is, every tick, the one the game's world of the whole mission gives (the composed mission loaded unthinned,
+// every pool-0 row initialized in pool order as the kernel's boot does, each played body ticked in pool order by the
+// still body's tick from the game's tick 1), its aim overlay the reference body's own; over the ticks a look target, a
+// look idle and the red one's turn show. A seek back starts them again from their inits, again equal to a fresh
+// reference.
+struct AttendReference {
+	opennova::editor::MissionWorld world;
+	std::vector<std::pair<NodeId, opennova::world::EntityHandle>> played; // pool order
+	uint32_t ticked = 0;
+};
+
+static std::unique_ptr<AttendReference> attend_reference(const MissionViewport &viewport, Session &s,
+		const std::shared_ptr<MissionFiles> &files, const MissionGround &ground) {
+	namespace world = opennova::world;
+	auto out = std::make_unique<AttendReference>();
+	const auto *document =
+			dynamic_cast<const MissionDocument *>(records_of(*s.session.document_for(kMission)));
+	bms::File composed;
+	if (!document || !document->compose(composed)) return nullptr;
+	out->world.load(files, composed, ground);
+	world::World &w = out->world.world;
+	w.ai.root_motion = viewport.poses().motion();
+	std::map<uint16_t, NodeId> rows;
+	w.registry.for_each_in_pool(0, [&](const world::Entity &entity) {
+		if (const MissionEntityMark *mark = out->world.mark_of(entity, viewport.scene().entities()))
+			rows[entity.handle.packed] = mark->row;
+	});
+	for (const auto &row : rows)
+		if (const MissionPose *pose = viewport.poses().pose(row.second))
+			if (pose->status == "posed" && pose->adm_id >= 0)
+				if (world::AiEntity *body = w.ai.for_handle(world::EntityHandle{ row.first }))
+					body->inf.adm_id = pose->adm_id;
+	w.registry.for_each_in_pool(0, [&](const world::Entity &entity) {
+		world::initialize_organic_ai(w, *w.registry.get(entity.handle));
+	});
+	w.registry.for_each_in_pool(0, [&](const world::Entity &entity) {
+		const auto row = rows.find(entity.handle.packed);
+		if (row != rows.end() && viewport.people().pose(row->second)) out->played.push_back({ row->second, entity.handle });
+	});
+	return out;
+}
+
 static int test_people_attend() {
 	namespace world = opennova::world;
 	Session s("opennova_editor_mission_people_attend");
 	s.records = [](const opennova::terrain::TerrainHeightField &field, const Places &at, double) {
 		const double px = at.land[2][0], py = at.land[2][1];
 		using K = mission::EntityKind;
-		std::vector<Placed> placed(3);
+		std::vector<Placed> placed(5);
 		placed[0] = { K::Organic, 101006, px, py, terrain_height(field, px, py), 0, 90, 1, 2, 40 };
 		placed[1] = { K::Organic, 101006, px + 1.5, py, terrain_height(field, px + 1.5, py), 0, 270, 1, 0, 40 };
 		placed[2] = { K::Organic, 101006, px, py + 2.5, terrain_height(field, px, py + 2.5), 0, 180, 1, 0, 40 };
+		placed[3] = { K::Organic, 101006, px + 16.0, py, terrain_height(field, px + 16.0, py), 0, 270, 1, 0, 40 };
+		placed[4] = { K::Item, 101001, px + 8.0, py, terrain_height(field, px + 8.0, py) };
 		return placed;
 	};
 	TEST_EXPECT(s.open());
@@ -700,69 +743,81 @@ static int test_people_attend() {
 	};
 	TEST_EXPECT(viewport() != nullptr);
 	if (!viewport()) return 1;
-	const MissionPoses &poses = viewport()->poses();
-	const MissionPeople &people = viewport()->people();
-	TEST_EXPECT(poses.posed() == 3 && poses.floor_serial() != 0 && people.in_world() && people.playing() == 3);
-	if (!people.in_world()) return 1;
-	// The reference: the same records loaded again, each body initialized in pool order over the poses' tables.
-	std::unique_ptr<MissionWorld> reference = poses.load_floor_world();
+	TEST_EXPECT(viewport()->poses().posed() == 4 && viewport()->poses().people_serial() != 0 &&
+			viewport()->people().in_world() && viewport()->people().playing() == 4);
+	if (!viewport()->people().in_world()) return 1;
+	// The reference's files and ground: the project's files as the load reads them, Tmap read the same.
+	auto files = std::make_shared<MissionFiles>(s.session.view().findings.assets);
+	MissionGround ground;
+	{
+		MissionSceneHeader header;
+		header.terrain = "Tmap";
+		auto memory = std::make_shared<MemoryFiles>();
+		put_rig(*memory);
+		ground.follow(memory, 1, header, "ground");
+	}
+	std::unique_ptr<AttendReference> reference = attend_reference(*viewport(), s, files, ground);
+	TEST_EXPECT(reference && reference->played.size() == 4);
+	if (!reference) return 1;
+	bool looked = false, look_idle = false, turned = false;
+	const NodeId red = reference->played.front().first;
+	MissionPeople::Look first;
+	TEST_EXPECT(viewport()->people().look(red, first));
+	const auto run = [&](int frames) -> int {
+		const int32_t start = viewport()->people().started_at();
+		for (int frame = 0; frame < frames; ++frame) {
+			s.session.advance(1.0 / 62.5);
+			devices.sync(s.session);
+			TEST_EXPECT(viewport()->people().started_at() == start);
+			world::World &w = reference->world.world;
+			const uint32_t now = uint32_t(viewport()->people().tick() - start);
+			for (; reference->ticked < now; ++reference->ticked) {
+				w.logic_tick = reference->ticked + 1;
+				for (const auto &body : reference->played)
+					w.ai.tick_still_body(*w.ai.for_handle(body.second), w, reference->ticked + 1);
+			}
+			for (const auto &body : reference->played) {
+				const world::AiEntity &expected = *w.ai.for_handle(body.second);
+				const world::InfantryBodyPose *pose = viewport()->people().pose(body.first);
+				MissionPeople::Look look;
+				TEST_EXPECT(pose && viewport()->people().look(body.first, look));
+				const world::InfantryBodyPose want = world::infantry_body_pose(expected.inf);
+				TEST_EXPECT(pose->state == want.state && pose->phase == want.phase && pose->variant == want.variant &&
+						pose->blending == want.blending && pose->weight == want.weight);
+				TEST_EXPECT(look.body_yaw == world::mission_yaw_deg_from_bam_heading(expected.inf.body_heading) &&
+						look.look_yaw == world::mission_yaw_deg_from_bam_heading(expected.heading));
+				// The device's overlay is the reference body's own.
+				opennova::anim::AimOverlayAngles angles[opennova::anim::kOverlayClassCount];
+				opennova::anim::AimOverlayAngles want_angles[opennova::anim::kOverlayClassCount];
+				TEST_EXPECT(viewport()->people().aim_overlay(body.first, angles));
+				opennova::anim::compute_aim_overlay_angles(
+						world::aim_overlay_inputs_for(expected, *w.registry.get(body.second)), want_angles);
+				for (int c = 0; c < opennova::anim::kOverlayClassCount; ++c)
+					TEST_EXPECT(angles[c].yaw == want_angles[c].yaw && angles[c].pitch == want_angles[c].pitch &&
+							angles[c].roll == want_angles[c].roll);
+				looked = looked || look.target != 0;
+				look_idle = look_idle || pose->state == world::anim_state::kIdleLook ||
+						pose->state == world::anim_state::kIdle2Look;
+				if (body.first == red) turned = turned || look.body_yaw != first.body_yaw;
+			}
+		}
+		return 0;
+	};
+	TEST_EXPECT(run(400) == 0);
+	TEST_EXPECT(reference->ticked >= 390);
+	std::printf("  people attend: %u ticks, looked %d, look idle %d, turned %d\n", reference->ticked, int(looked),
+			int(look_idle), int(turned));
+	TEST_EXPECT(looked && look_idle && turned);
+	// A seek back: the people start again from their inits, as a fresh world of the mission does.
+	s.session.handle(request::set_viewport(kMission, R"({"kind": "mission", "clock": {"ticks": 0}})"));
+	TEST_EXPECT(s.session.outcome().done());
+	devices.sync(s.session);
+	reference = attend_reference(*viewport(), s, files, ground);
 	TEST_EXPECT(reference != nullptr);
 	if (!reference) return 1;
-	world::World &w = reference->world;
-	w.ai.root_motion = poses.motion();
-	std::vector<std::pair<NodeId, world::EntityHandle>> bodies;
-	for (const MissionPose &pose : poses.poses()) {
-		const auto found = poses.floor_bodies().find(pose.row);
-		TEST_EXPECT(pose.status == "posed" && found != poses.floor_bodies().end());
-		if (found == poses.floor_bodies().end()) return 1;
-		world::AiEntity *body = w.ai.for_handle(found->second);
-		TEST_EXPECT(body != nullptr);
-		if (!body) return 1;
-		body->inf.active = true;
-		body->inf.adm_id = pose.adm_id;
-		world::initialize_organic_ai(w, *w.registry.get(found->second));
-		bodies.push_back({ pose.row, found->second });
-	}
-	const int32_t start = people.started_at();
-	uint32_t played = 0;
-	bool looked = false, look_idle = false, turned = false;
-	const double spawn_yaw = world::mission_yaw_deg_from_bam_heading(w.ai.for_handle(bodies[0].second)->inf.body_heading);
-	for (int frame = 0; frame < 600; ++frame) {
-		s.session.advance(1.0 / 62.5);
-		devices.sync(s.session);
-		TEST_EXPECT(viewport()->people().started_at() == start);
-		const uint32_t now = uint32_t(viewport()->people().tick() - start);
-		for (; played < now; ++played) {
-			w.logic_tick = played + 1;
-			for (const auto &body : bodies) w.ai.tick_still_body(*w.ai.for_handle(body.second), w, played + 1);
-		}
-		for (const auto &body : bodies) {
-			const world::AiEntity &expected = *w.ai.for_handle(body.second);
-			const world::InfantryBodyPose *pose = viewport()->people().pose(body.first);
-			MissionPeople::Look look;
-			TEST_EXPECT(pose && viewport()->people().look(body.first, look));
-			if (!pose) return 1;
-			const world::InfantryBodyPose want = world::infantry_body_pose(expected.inf);
-			TEST_EXPECT(pose->state == want.state && pose->phase == want.phase && pose->variant == want.variant &&
-					pose->blending == want.blending && pose->weight == want.weight);
-			TEST_EXPECT(look.body_yaw == world::mission_yaw_deg_from_bam_heading(expected.inf.body_heading) &&
-					look.look_yaw == world::mission_yaw_deg_from_bam_heading(expected.heading));
-			looked = looked || look.target != 0;
-			look_idle = look_idle || pose->state == world::anim_state::kIdleLook ||
-					pose->state == world::anim_state::kIdle2Look;
-		}
-		MissionPeople::Look red;
-		if (viewport()->people().look(bodies[0].first, red)) turned = turned || red.body_yaw != spawn_yaw;
-	}
-	TEST_EXPECT(played >= 590);
-	std::printf("  people attend: %u ticks, looked %d, look idle %d, turned %d\n", played, int(looked), int(look_idle),
-			int(turned));
-	TEST_EXPECT(looked && look_idle && turned);
-	// The device's overlay for each body; the wire's look.
-	for (const auto &body : bodies) {
-		opennova::anim::AimOverlayAngles angles[opennova::anim::kOverlayClassCount];
-		TEST_EXPECT(viewport()->people().aim_overlay(body.first, angles));
-	}
+	TEST_EXPECT(run(200) == 0);
+	TEST_EXPECT(reference->ticked >= 190);
+	// The wire's look and the summary's world.
 	const opennova::io::JsonValue envelope = viewport_to_json(s.session.view(), *viewport(), JsonPage());
 	const opennova::io::JsonValue *summary = envelope.get("body") ? envelope.get("body")->get("people") : nullptr;
 	TEST_EXPECT(summary && summary->get("world") && summary->get("world")->boolean);
@@ -772,7 +827,7 @@ static int test_people_attend() {
 			if (const opennova::io::JsonValue *pose = item.get("pose"))
 				if (const opennova::io::JsonValue *now = pose->get("now"))
 					facing += now->get("look") && now->get("look")->get("body_yaw") ? 1 : 0;
-	TEST_EXPECT(facing == 3);
+	TEST_EXPECT(facing == 4);
 	std::printf("test_people_attend passed\n");
 	return 0;
 }
