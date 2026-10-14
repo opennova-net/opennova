@@ -171,7 +171,8 @@ public:
 	String get_item_text(int p_id, int p_index) const;
 	String get_item_value(int p_id, int p_index) const;
 
-	String get_widget_color(int p_id, int p_slot) const; // raw string, preserves %VAR%
+	// A FONT colour as the menu writes it (mnu::color_word: its %VAR%, else eight hex digits), "" for none.
+	String get_widget_color(int p_id, int p_slot) const;
 
 	String get_widget_texture(int p_id, int p_slot) const;
 

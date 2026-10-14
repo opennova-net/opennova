@@ -91,14 +91,16 @@ struct Position {
 };
 
 // A colour, as the menu's parses read a colour element's text: wcstoul(text, 16) [orig: CRT_wcstoxl @ 0x76e93b
-// through the FONT arm of CUIElement_ParseXMLDefinition @ 0x648d14..0x648e64, its APPEARANCE COLOR / OUTLINE arm @
-// 0x648562 and a spin list's COLOR ITEM, CUISpinList_ParseXMLDefinition @ 0x64bd10], over the text the game's
-// whole-menu %NAME% expansion left [orig: NapiXML_ExpandVariablesInText @ 0x63a000]. A text that is one %NAME% stays
-// the reference (ADR 0005: `var` the name as authored, the stylesheet's value read where the colour is used); any
-// other text is the word the parse reads of it, `argb` (a %NAME% inside a longer text is noted, as a number's is).
-// Written back as the reference's %NAME%, else as eight upper-case hex digits (color_text, mnu_layout.h).
+// through the FONT arm of CUIElement_ParseXMLDefinition @ 0x648d14..0x648e64, its APPEARANCE COLOR arm @ 0x64864b
+// and OUTLINE arm @ 0x648562 and a spin list's COLOR ITEM, CUISpinList_ParseXMLDefinition @ 0x64bd10], over the text
+// the game's whole-menu %NAME% expansion left [orig: NapiXML_ExpandVariablesInText @ 0x63a000]. A text that is one
+// %NAME% stays the reference (ADR 0005: `var` the name as authored, the stylesheet's value read where the colour is
+// used); any other text is the word the parse reads of it, `argb` (a %NAME% inside a longer text is noted, as a
+// number's is). Written back as the reference's %NAME%, else as eight upper-case hex digits (color_text,
+// mnu_layout.h). `present` is a FONT colour's alone (its element authored or left out); a row's or an item's colour
+// is its text, written with it whatever `present` holds, and compared by what it writes (mnu::equal).
 struct Color {
-  bool present = false;  // the element authored (a FONT colour); an APPEARANCE's or an ITEM's is its text
+  bool present = false;  // a FONT colour's element authored
   std::string var;       // a whole %NAME%: NAME; "" for a word
   std::uint32_t argb = 0;
   bool operator==(const Color &o) const { return present == o.present && var == o.var && argb == o.argb; }
@@ -186,9 +188,10 @@ inline constexpr const char *kSpinListItemTypes[] = {"ID", "IMAGE", "COLOR", nul
 inline constexpr const char *kCellItemTypes[] = {"ID", "BITMAP", nullptr};
 const char *const *item_types_for(WindowType type, bool cell);
 
-// Whether an APPEARANCE of this TYPE holds a colour (COLOR, OUTLINE) [orig: @ 0x648562], and an ITEM
-// one (COLOR, which the spin list's parse alone sets) [orig: CUISpinList_ParseXMLDefinition @ 0x64bd10];
-// any other holds its text.
+// Whether an APPEARANCE of this TYPE holds a colour (COLOR, OUTLINE) [orig: the window's COLOR arm @
+// 0x64864b and OUTLINE arm @ 0x648562; a LIST's rows @ 0x645f0a / 0x645fdf, a TABLE's @ 0x642fef /
+// 0x643011, a scroll's @ 0x64cac4 / 0x64cb45], and an ITEM one (COLOR, which the spin list's parse alone
+// sets) [orig: CUISpinList_ParseXMLDefinition @ 0x64bd10]; any other holds its text.
 bool appearance_color_type(const std::string &type);
 bool item_color_type(const std::string &type);
 // A row's TYPE set, its text kept as the new TYPE reads it: the colour text a row held read as the
@@ -266,7 +269,11 @@ struct Item {
   std::string type;     // ID / IMAGE / COLOR (spin list) / BITMAP (table cell); "" none
   std::string value;    // VALUE, the decimal of the number read; "" 0
   std::string text;     // the element text where TYPE is not COLOR: display text, a key or a texture name
-  Color color;          // a spin list COLOR item's text (item_color_type)
+  // A spin list COLOR item's text (item_color_type). The spin list also keeps that text as the row's
+  // entry string [orig: CSpinListWnd_InsertItem @ 0x64c213], so a word written back as eight digits
+  // ("FFFFFF" as "00FFFFFF") changes that string too; nothing reads it (the crosshair colour goes
+  // by the row's VALUE [orig: @ 0x555221, @ 0x55ac75; @ 0x554cec, @ 0x55d45b]).
+  Color color;
   std::string justify;  // JUSTIFY: LEFT / CENTER / RIGHT; "" none
   std::string vjustify; // VJUSTIFY: TOP / CENTER / BOTTOM; "" none
   std::string justify_offset;  // a JUSTIFY of another token: the x offset's decimal; "" none

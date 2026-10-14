@@ -82,6 +82,9 @@ bool parse(const Text &text, Document &out, std::string &error);
 // iswspace [orig: CRT_iswctype @ 0x77f5b1]: the CRT's table below 0x100 (0x09-0x0D,
 // 0x20 and 0xA0), the platform's Unicode spaces above it.
 bool is_space(char32_t c);
+// CRT_wchartodigit @ 0x77fd43: a decimal digit's value (ASCII and the Unicode digit blocks it
+// knows: Arabic-Indic .. Mongolian, the fullwidth digits), -1 for any other character.
+int wchartodigit(char32_t c);
 // CRT_wcsicmp @ 0x77085b's keyword compare: equal after folding A-Z only.
 bool iequals(const Text &a, const char *ascii);
 // CRT_wcstoxl @ 0x76e93b (wcstol / wcstoul): leading iswspace skipped, a sign, "0x"

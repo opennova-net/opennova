@@ -1247,6 +1247,31 @@ bool test_colors_as_read() {
   bool fatal = false;
   for (const mnu::ParseNote &n : notes) fatal = fatal || (n.fatal && n.key.find("DEFAULT_FG") != std::string::npos);
   CHECK(fatal, "noted fatal");
+
+  // A row of a STATE the parse does not know stops it before its TYPE switch [orig: @ 0x648514]: its colour is never
+  // read, so a %NAME% in it is no fatal note; a later FONT's colour replaces an earlier FONT's, and its note.
+  mnu::Document unread;
+  notes.clear();
+  CHECK(parse(screen_of("type=\"static\" name=\"U\"",
+                        std::string(kPos) + "<FONT><DEFAULT_FG>FF%A%</DEFAULT_FG></FONT>"
+                                            "<FONT><DEFAULT_FG>FF0000</DEFAULT_FG></FONT>"
+                                            "<APPEARANCE state=\"hover\" type=\"color\">FF%A%</APPEARANCE>"),
+              unread, &notes),
+        "parse");
+  for (const mnu::ParseNote &n : notes) CHECK(!n.fatal, "neither the unread row nor the replaced FONT colour is fatal");
+  CHECK(root(unread).font.default_fg.argb == 0x00FF0000u, "the later FONT's colour");
+
+  // A code-built COLOR row of a default colour writes its word and reads back as the same row.
+  mnu::Document built = unread;
+  mnu::Appearance row;
+  row.state = "DEFAULT";
+  row.type = "COLOR";
+  built.screens.at(0).roots.at(0).appearances = {row};
+  mnu::Document back;
+  notes.clear();
+  CHECK(parse(mnu::serialize(built), back, &notes), "parse the built row");
+  std::string where;
+  CHECK(mnu::equal(built, back, &where), "the built row reads back as itself");
   return true;
 }
 

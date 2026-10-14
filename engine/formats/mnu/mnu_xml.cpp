@@ -44,14 +44,7 @@ const NamedEntity kNamedEntities[] = {
 
 char32_t fold(char32_t c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
 
-// CRT_wchartodigit @ 0x77fd43: ASCII and the Unicode decimal digit blocks it knows.
-int digit_value(char32_t c) {
-	static const char32_t kZeros[] = {0x30, 0x660, 0x6F0, 0x966, 0x9E6, 0xA66, 0xAE6, 0xB66, 0xC66,
-	                                  0xCE6, 0xD66, 0xE50, 0xED0, 0xF20, 0x1040, 0x17E0, 0x1810, 0xFF10};
-	for (char32_t zero : kZeros)
-		if (c >= zero && c < zero + 10) return int(c - zero);
-	return -1;
-}
+int digit_value(char32_t c) { return wchartodigit(c); }
 
 // CRT_wcstoxl @ 0x76e93b over a NUL-terminated view: returns the unsigned
 // accumulator with the sign and overflow flags, as the CRT does before its final
@@ -322,6 +315,15 @@ bool parse(const Text &text, Document &out, std::string &error) {
 	out.notes.clear();
 	Reader reader(text, out);
 	return reader.run(error);
+}
+
+// CRT_wchartodigit @ 0x77fd43: ASCII and the Unicode decimal digit blocks it knows.
+int wchartodigit(char32_t c) {
+	static const char32_t kZeros[] = {0x30, 0x660, 0x6F0, 0x966, 0x9E6, 0xA66, 0xAE6, 0xB66, 0xC66,
+	                                  0xCE6, 0xD66, 0xE50, 0xED0, 0xF20, 0x1040, 0x17E0, 0x1810, 0xFF10};
+	for (char32_t zero : kZeros)
+		if (c >= zero && c < zero + 10) return int(c - zero);
+	return -1;
 }
 
 bool is_space(char32_t c) {

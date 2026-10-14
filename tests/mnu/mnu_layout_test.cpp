@@ -75,7 +75,7 @@ void position_contract() {
 }
 
 void text_adjust_contract() {
-	// [orig: CStaticWnd_AdjustRectToTextSize @ 0x6575f0] — the authored point is the
+	// [orig: CStaticWnd_AdjustRectToTextSize @ 0x6575f0] \u2014 the authored point is the
 	// anchor the JUSTIFY/VJUSTIFY flags align to.
 	opennova::mnu::RectEdges base;
 	base.left = 100;
@@ -115,6 +115,18 @@ void color_contract() {
 	check(opennova::mnu::color_value("  0xFF") == 0xFFu, "whitespace and 0x are skipped");
 	check(opennova::mnu::color_value("123456789") == 0xFFFFFFFFu, "past 32 bits saturates");
 	check(opennova::mnu::color_value("-1") == 0xFFFFFFFFu, "'-' negates");
+	// The saturation comes first, then the sign [orig: @ 0x76eaf5, then @ 0x76eb1b].
+	check(opennova::mnu::color_value("-100000000") == 1u && opennova::mnu::color_value("-1FFFFFFFF") == 1u,
+			"past 32 bits saturates, then '-' negates");
+	// The CRT's classes over the wide text [orig: CRT_wchartodigit @ 0x77fd43; _iswctype_l @ 0x77f52f, _SPACE]: a
+	// Unicode decimal digit is a digit, a no-break or ideographic space a leading space; the narrow form reads a
+	// Unicode menu's UTF-8, else the code page's bytes.
+	check(opennova::mnu::color_value(std::u32string(U"\u3000\u0661F")) == 0x1Fu, "an Arabic-Indic one after U+3000");
+	check(opennova::mnu::color_value(std::u32string(U"\uFF11\uFF10")) == 0x10u, "fullwidth digits");
+	check(opennova::mnu::color_value(std::string("\xE3\x80\x80" "FF")) == 0xFFu, "UTF-8: U+3000 is a space");
+	check(opennova::mnu::color_value(std::string("\xA0" "FF")) == 0xFFu, "a code page's 0xA0 is a space");
+	check(opennova::mnu::color_reads_whole(std::u32string(U"\u0661\u0662")), "Unicode digits read whole");
+	check(!opennova::mnu::color_reads_whole(std::u32string(U"\u00B2")), "a superscript is no digit");
 	check(opennova::mnu::color_value("") == 0u, "nothing reads 0");
 	// The word written back as the text the reader takes whole.
 	check(opennova::mnu::color_text(0xFF102030u) == "FF102030", "eight upper-case digits");
