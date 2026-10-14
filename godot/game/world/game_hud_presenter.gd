@@ -1282,6 +1282,13 @@ func _apply_toggle_events(events: int) -> void:
 		var line := HudToggles.mouse_scale_toast(Strings.get_table(Strings.TABLE_GAMETEXT), scale)
 		if _game_hud != null and not line.is_empty():
 			_game_hud.push_message(line)
+	# The authority's join lock (engine hud_toggles.h kJoinLockToggled): the toggle
+	# runs the NovaWorld server-info update itself, then the Misc toast names the
+	# new lock.
+	if events & HudToggles.EVENT_JOIN_LOCK_TOGGLED and look_sim != null:
+		var locked: int = look_sim.toggle_join_lock()
+		if locked >= 0:
+			_post_misc_toast("STRMISC_LOCKGAME_ON" if locked == 1 else "STRMISC_LOCKGAME_OFF")
 	if events & HudToggles.EVENT_BRIEFING_PAGES_RESET and _game_hud != null:
 		_game_hud.cycle_briefing_page(0, false)
 	if events & HudToggles.EVENT_SCOREBOARD_PAGE_RESET and _game_hud != null:
