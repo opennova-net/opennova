@@ -2,6 +2,11 @@
 
 #include <algorithm>
 #include <cstdio>
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <unistd.h>
+#endif
 #include <filesystem>
 #include <system_error>
 #include <utility>
@@ -449,6 +454,21 @@ bool expansion_base_files(const std::string &install, const std::string &build_d
 
 // --- the copy cache filled over the editor's frames (C16) ---------------------------------------------------
 
+namespace {
+
+// What `file` holds handed to the disk, not only to the OS's cache: a copy is put in place and recorded once it is
+// there whole.
+bool flush_to_disk(std::FILE *file) {
+	if (std::fflush(file) != 0) return false;
+#ifdef _WIN32
+	return _commit(_fileno(file)) == 0;
+#else
+	return fsync(fileno(file)) == 0;
+#endif
+}
+
+} // namespace
+
 struct InstallCopyFill::State {
 	struct Copy {
 		std::string name;
@@ -549,7 +569,8 @@ bool InstallCopyFill::step(uint64_t budget) {
 			fs::remove(system_path(partial), ec);
 			const std::string from = utf8_of(path_of(s.install) / path_of(copy.name));
 			s.in = io::fopen_utf8(from.c_str(), "rb");
-			s.out = s.in ? io::fopen_utf8(partial.c_str(), "wb") : nullptr;
+			// Made new (never written through a name another file stands behind), as a build's copies are.
+			s.out = s.in ? io::create_new_file(partial) : nullptr;
 			if (!s.in || !s.out) return s.fail("could not open " + (s.in ? partial : from));
 			s.file_done = 0;
 		}
@@ -562,8 +583,10 @@ bool InstallCopyFill::step(uint64_t budget) {
 		s.done += read;
 		left -= std::min<uint64_t>(left, read ? read : 1);
 		if (s.file_done < copy.size) continue;
-		// The file whole: put in its place and recorded, the record written, so a fill stopped after it keeps it.
-		const bool closed = std::fclose(s.out) == 0;
+		// The file whole: on the disk, then put in its place and recorded, the record written, so a fill stopped after
+		// it (or the machine) keeps it whole.
+		const bool flushed = flush_to_disk(s.out);
+		const bool closed = std::fclose(s.out) == 0 && flushed;
 		s.out = nullptr;
 		std::fclose(s.in);
 		s.in = nullptr;

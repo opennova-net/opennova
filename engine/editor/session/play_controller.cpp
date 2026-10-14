@@ -220,6 +220,16 @@ std::unique_ptr<InstallCopyFill> PlayController::copy_fill(const PlayIntent &int
 	// The base game start stages from: the runtime's, the session's base game; Strict Play's, the install itself
 	// (one that plays over a base game's export stages that export's files, never the cache).
 	const bool in_install = plays_in_install(intent.mode);
+	// What start refuses at once copies nothing first: a mission gone, no runtime (the OpenNova runtime's), no program
+	// in the install (Strict Play's).
+	std::error_code ec;
+	if (!intent.mission.empty() && mission_file(intent.mission).empty()) return nullptr;
+	if (!in_install) {
+		const std::string executable = resolve_runtime_executable();
+		if (executable.empty() || !fs::is_regular_file(system_path(executable), ec)) return nullptr;
+	} else if (!fs::is_regular_file(system_path(join_path(core_.game_install(), kInstallExecutable)), ec)) {
+		return nullptr;
+	}
 	const std::string base = core_.base_game();
 	if (in_install && !(base.empty() || base == core_.game_install())) return nullptr;
 	const std::string install = in_install ? core_.game_install() : base;

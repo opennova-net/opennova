@@ -970,7 +970,9 @@ static int test_strict_play() {
 	session.run_operations();
 	TEST_EXPECT(platform.spawns == before_cancel);
 	TEST_EXPECT(v.activity.play_state == PlayState::Stopped);
-	TEST_EXPECT(output_has(v, "Cancelled the build."));
+	// The build is published by then: it is absorbed, the session's last build, the Play starting nothing.
+	TEST_EXPECT(output_has(v, "Play cancelled while the game install's files were copied for the expansion"));
+	TEST_EXPECT(v.activity.last_operation.end == OperationEnd::Cancelled && fs::is_directory(v.activity.last_build->build_dir));
 	{
 		std::error_code ec;
 		for (const auto &entry : fs::recursive_directory_iterator(opennova::io::os_path(dir.file("project/.opennova")), ec))
@@ -986,6 +988,38 @@ static int test_strict_play() {
 		TEST_EXPECT(!fs::equivalent(copied_run + "/" + archive, install + "/" + archive, ec) &&
 		            fs::hard_link_count(opennova::io::os_path(copied_run + "/" + archive), ec) >= 2); // the cache's copy
 	}
+	session.handle(request::stop_play());
+	session.poll();
+	session.poll();
+	TEST_EXPECT(v.activity.play_state == PlayState::Stopped);
+	// The copies failing (the cache's folder a file, nothing can be written there): no game, a play.install_copy row,
+	// the operation ended failed and the status line saying so.
+	const std::string copy_cache = dir.file("project/.opennova/install_copy");
+	{
+		std::error_code ec;
+		fs::remove_all(opennova::io::os_path(copy_cache), ec);
+	}
+	TEST_EXPECT(editor_test::write_text(copy_cache, "not a folder"));
+	const int before_failure = platform.spawns;
+	session.handle(request::play());
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == before_failure);
+	TEST_EXPECT(std::any_of(v.findings.diagnostics.begin(), v.findings.diagnostics.end(),
+	                        [](const Diagnostic &d) { return d.code() == "play.install_copy"; }));
+	TEST_EXPECT(v.activity.last_operation.end == OperationEnd::Failed &&
+	            v.activity.status == "The game was not started; see Problems.");
+	// What the Play refuses at once copies nothing first: an install without its program.
+	{
+		std::error_code ec;
+		fs::remove(opennova::io::os_path(copy_cache), ec);
+		fs::rename(opennova::io::os_path(install + "/Jointops.exe"), opennova::io::os_path(install + "/Jointops.away"), ec);
+	}
+	session.handle(request::play());
+	TEST_EXPECT(!copies_seen());
+	session.run_operations();
+	TEST_EXPECT(platform.spawns == before_failure && !fs::exists(copy_cache) &&
+	            std::any_of(v.findings.diagnostics.begin(), v.findings.diagnostics.end(),
+	                        [](const Diagnostic &d) { return d.code() == "play.install_missing"; }));
 	return 0;
 }
 

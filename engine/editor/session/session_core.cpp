@@ -246,9 +246,16 @@ bool SessionCore::cancel_operation(bool asked) {
 	}
 	const std::string noun = operation_kind_row(running->kind()).noun;
 	const bool plan = running->kind() == OperationKind::ImportPlan;
+	const bool finishes = running->finishes_on_cancel();
 	if (!operations_.cancel()) {
 		if (asked) refuse_now(CoreFinding::OperationNotCancellable, "This cannot be cancelled now: wait for " + noun + " to finish.");
 		return false;
+	}
+	// One whose cancel lets it finish (what it made stays: a published build) is finished now, before what asked
+	// the cancel (a close, a quit, another project) goes on; its finish says what came of it.
+	if (finishes) {
+		finish_operation();
+		return true;
 	}
 	// An import's plan cancelled: the dialog plans no more (a plan that takes its place says so again).
 	if (plan && view_.dialogs.import_preview.planning) {

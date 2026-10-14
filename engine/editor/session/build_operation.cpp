@@ -81,16 +81,27 @@ OperationOutcome BuildOperation::finish(SessionCore &core) {
 	BuildReport report = run_.report();
 	report.seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started_).count();
 	const ExportReport *shipped = export_run_ ? &export_run_->report() : export_refused_.get();
-	// A Play whose copies failed starts no game: its staging would copy the rest in one frame. (One cancelled is
-	// the whole operation's cancel, which finishes nothing.)
+	// A Play whose copies failed or were cancelled starts no game (its staging would copy the rest in one frame); the
+	// build it waited on is absorbed all the same, the session's last build (finishes_on_cancel).
 	PlayIntent play = play_;
 	const bool failed = fill_ && fill_->failed();
-	if (failed) play.wanted = false;
+	const bool cancelled = fill_planned_ && cancelled_;
+	if (failed || cancelled) play.wanted = false;
 	OperationOutcome outcome = core.absorb_build(report, gate_, play, export_, shipped);
-	if (failed)
-		core.report(make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
-		                         "The game was not started: the game install's files could not be copied for the expansion (" +
-		                                 fill_->reason() + ")."));
+	if (failed) {
+		const Diagnostic refused = make_finding(CoreFinding::PlayInstallCopy, DiagnosticSeverity::Error,
+		                                        "The game was not started: the game install's files could not be copied "
+		                                        "for the expansion (" + fill_->reason() + ").");
+		core.report(refused);
+		outcome.findings.push_back(refused);
+		outcome.end = OperationEnd::Failed;
+		core.view().activity.status = "The game was not started; see Problems.";
+	} else if (cancelled) {
+		core.note("Play cancelled while the game install's files were copied for the expansion: the build is kept, and "
+		          "the copies made are kept for the next Play.");
+		outcome.end = OperationEnd::Cancelled;
+		core.view().activity.status = "Play cancelled.";
+	}
 	return outcome;
 }
 

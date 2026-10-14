@@ -71,6 +71,9 @@ public:
 	bool step(const StepBudget &budget) override;
 	OperationProgress progress() const override;
 	void cancel() override;
+	// A cancel while the Play's copies run lets it finish: the build is published, and the session's last build
+	// must name it (an older one may be pruned); the Play starts nothing.
+	bool finishes_on_cancel() const override { return fill_planned_ && run_.done() && run_.report().ok; }
 	// A Play joining starts the game when the build lands, in the mission it names; an Export joining
 	// copies the build where it names (a Build adds nothing).
 	void join(const EditorRequest &request) override;

@@ -105,8 +105,9 @@ bool expansion_base_files(const std::string &install, const std::string &build_d
 // directories' volume will not link the install's files (`link` refuses a probe), each file the game only reads
 // that the cache lacks as the install's file stands, copied a slice of bytes at a time (the build's operation
 // steps it once the build lands, BuildOperation), so prepare_expansion_run then links every one from the cache
-// at once. Each is copied beside its place and put there whole, the cache's record written after each: a fill
-// cancelled or failed part way leaves every file the record trusts whole, and the staging copies the rest.
+// at once. Each is copied beside its place (a file made new), handed to the disk and put there whole, the cache's
+// record written after each: a fill cancelled or failed part way leaves every file the record trusts whole, and
+// the next Play's fill copies what is left (the Play it ran for starts no game).
 class InstallCopyFill {
 public:
 	InstallCopyFill();

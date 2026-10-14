@@ -119,6 +119,10 @@ bool OperationSlot::finish(SessionCore &core) {
 bool OperationSlot::cancel() {
 	if (!operation_ || !operation_->cancellable()) return false;
 	operation_->cancel();
+	if (operation_->finishes_on_cancel()) {
+		done_ = true; // finished as the cancel is asked (SessionCore::cancel_operation)
+		return true;
+	}
 	last_ = OperationOutcome{id_, operation_->kind(), OperationEnd::Cancelled, {}};
 	operation_.reset();
 	id_ = 0;
