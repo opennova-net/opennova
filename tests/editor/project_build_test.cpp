@@ -1924,9 +1924,10 @@ static int test_deep_output_root() {
 	return 0;
 }
 
-// Several projects building into one folder (Build to folder; the review's M6): each build names its project
-// in its record, reuses, prunes and replaces only its own project's builds, and says how many of the others'
-// it left. Another project's build of the same files is left as it is: the build is refused, saying so.
+// Several projects building into one folder (a build's out_dir: the command line's --out, the editor
+// MCP's): each build names its project in its record, reuses, prunes and replaces only its own project's
+// builds, and says how many of the others' it left. Another project's build of the same files is left as it
+// is: the build is refused, saying so.
 static int test_shared_folder() {
 	Project a("opennova_editor_build_shared_a"), b("opennova_editor_build_shared_b");
 	TEST_EXPECT(a.create() && a.fill() && b.create() && b.fill());

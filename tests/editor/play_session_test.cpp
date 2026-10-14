@@ -41,7 +41,7 @@ static bool write_empty_archive(const std::string &path) {
 	return opennova::pff::pff_write_archive(path.c_str(), opennova::pff::PFF_FORMAT_PFF3, nullptr, 0) == opennova::pff::PFF_WRITE_OK;
 }
 
-// A game started behind (review X12: BehindStarts, what the Shell's process platform does each pump): the
+// A game started behind (BehindStarts, what the Shell's process platform does each pump): the
 // foreground lock serves only while it starts, until its first window went back once or kLockMs passed; its shown
 // windows go back each pump until one is the foreground window (the person brought it forward: let go, never
 // pushed back again), it exits, or kTendMs passed.

@@ -2678,7 +2678,7 @@ static int test_play_mission() {
 		TEST_EXPECT(play_mission_for(view) == "Second.BMS");
 		view.documents.active = "strings/second.bin";
 		TEST_EXPECT(play_mission_for(view) == "Second.BMS");
-		// The dialog's sounds are the mission's only beside its dialog bank (review F5).
+		// The dialog's sounds are the mission's only beside its dialog bank (S14 R4).
 		view.documents.active = "second.pwf";
 		TEST_EXPECT(play_mission_for(view).empty());
 		AssetEntry bank;
@@ -2699,8 +2699,7 @@ static int test_play_mission() {
 		TEST_EXPECT(play_mission_for(view).empty());
 	}
 
-	// A mission whose name holds a space: the game's report names it whole, the row on its file
-	// (review F11).
+	// A mission whose name holds a space: the game's report names it whole, the row on its file.
 	TEST_EXPECT(editor_test::write_bytes(root + "/missions/my map.bms", mission_bytes));
 	session.handle(request::rescan());
 	session.run_operations();
@@ -4768,7 +4767,7 @@ static int test_no_request_validates() {
 	TEST_EXPECT(!v.dialogs.import_preview.open);
 	TEST_EXPECT(after_an_edit(request::set_import_dependencies(false)));
 	TEST_EXPECT(!v.project.import_dependencies && !v.dialogs.import_preview.open);
-	// An import naming nothing is refused (review F14), after the validation all the same.
+	// An import naming nothing is refused (import.request), after the validation all the same.
 	TEST_EXPECT(after_an_edit(request::import_files({})));
 	TEST_EXPECT(has_code(session.outcome().findings, "import.request") && !v.dialogs.import_preview.open);
 	// Refused before its rename (no requirement has the role).
