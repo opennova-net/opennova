@@ -786,11 +786,12 @@ its **group**.
 _Avoid_: description, summary, event label
 
 **Base layer**:
-What a read-only dependency mount (a game install a project builds on) gives the project's
-asset graph: its files and the names they define, read once and never edited. A lookup by name
-tries the project first, then the base layer, whose file of a name the project also has is
+What an expansion project's base game (the install's, or a base project's export) gives the
+project's asset graph: its files and the names they define, read once and never edited. A lookup by
+name tries the project first, then the base layer, whose file of a name the project also has is
 hidden with the names it defines (project assets win); the base layer makes no reference and no
-finding of its own. No project mounts one (ADR 0046 S14: a project imports what it needs).
+finding of its own. A standalone project has none and imports what it needs (ADR 0046 S14, "No
+dependency mount"; "An expansion's base game under its graph").
 _Avoid_: second graph (one graph, the base under it), import (an import copies files in; the
 base layer only answers names)
 
