@@ -150,8 +150,9 @@ cp infra/aws/deployment.tfvars.example infra/aws/prod.tfvars
 ```
 
 It holds no secret, so committing it keeps every operator on the same knobs. Never name
-it `terraform.tfvars`: Terraform loads that file into every workspace (staging would
-take prod's Elastic IP), so the toolbox refuses to run while one exists.
+it `terraform.tfvars` or `*.auto.tfvars` (or their `.json` forms): Terraform loads those
+into every workspace (staging would take prod's Elastic IP), so the toolbox refuses to
+run while one exists in `infra/aws/`.
 
 For prod set `service_eip_allocation_id` to the allocation id of the Elastic IP retail
 clients use (`./deploy/run.sh aws ec2 describe-addresses`). Terraform reads that address
@@ -169,10 +170,16 @@ its own and never adopts one: its plan stops too when an allocation id reaches i
 ./deploy/run.sh infra apply                    # plans again, applies exactly that plan
 ```
 
-`infra apply` refuses a plan that destroys or replaces an Elastic IP, the database or a
-bucket; read the plan, then `infra apply --allow-destroy` if that is meant. The
-database also carries `prevent_destroy` and deletion protection. Further arguments pass
-through (`infra apply -replace=aws_instance.service`). Other `infra` commands:
+`infra apply` saves its plan to a file and applies that file, never a plan made again.
+It refuses a plan that destroys or replaces what no apply makes again or what the
+service runs on: an Elastic IP or its association, the service instance or its network
+interface, the database, a bucket. Read the plan, then `infra apply --allow-destroy` if
+that is meant. A plan that would make prod a new Elastic IP is refused whatever the
+flags. On prod it then prints what the plan does (`N to create, N to update, N to
+replace...`) and applies the saved plan only once you type `yes`; `--yes` answers for
+you, and a run with no terminal (a script) refuses without it. The database also carries
+`prevent_destroy` and deletion protection. Further arguments pass through (`infra apply
+--allow-destroy -replace=aws_instance.service`). Other `infra` commands:
 `state-rm ADDRESS` (forget a resource, keep its object), `import ADDRESS ID`, `output`,
 `list`, and `destroy` (refused for prod).
 
@@ -619,13 +626,16 @@ Stripe up in test mode first (staging, `stripe-test`), then in live mode (prod,
 - **A shell.** `./deploy/run.sh app shell` (Session Manager; the toolbox carries the
   plugin). `./deploy/run.sh db psql` opens psql as the service's role there; `db psql -c
   'SELECT ...'` runs one statement.
-- **Replacing the host.** It keeps no state: `./deploy/run.sh infra apply
-  -replace=aws_instance.service` makes a new one, which takes the network interface and
-  the Elastic IP and converges to the current release at its first boot (5 minutes or
-  so; the service is down meanwhile, the hosted servers keep running on their machines
-  and list again). An OS upgrade is the same replace (the host ignores newer images
-  otherwise); a changed first-boot script (`deploy/host/service-user-data.sh`) shows in
-  the plan as a replacement.
+- **Replacing the service instance.** It keeps no state: `./deploy/run.sh infra apply
+  --allow-destroy -replace=aws_instance.service` makes a new one, which takes the network
+  interface and the Elastic IP and converges to the current release at its first boot
+  (5 minutes or so; the service is down meanwhile, the hosted servers keep running on
+  their machines and list again). An OS upgrade is the same replace (the instance
+  ignores newer images otherwise). A changed first-boot script
+  (`deploy/host/service-user-data.sh`) or converge unit (`opennova-converge.service`),
+  a comment included, is the instance's user data, so it shows in the plan as a
+  replacement, and `infra apply` refuses that plan until you take the replacement on
+  purpose, at a quiet time, with `--allow-destroy`.
 - **Changing a secret.** Edit the vault, `secrets sync`, `app converge`. A new
   `database_password` takes `db bootstrap` (it sets the role's password) between the sync
   and the converge.
@@ -687,10 +697,12 @@ old CDKIID re-mints). Rehearse it on a staging deployment first (with Stripe tes
    `./deploy/run.sh aws ec2 describe-addresses --allocation-ids <id>`.
 5. `./deploy/run.sh infra plan`, and read it: the network resources move (no subnet,
    VPC or route table is destroyed); the old instance, its security group, key pair and
-   backup role go; the host, its interface, the database and the rest are added; the
-   Elastic IP is not destroyed (an `aws_eip_association` takes it); the DNS records'
-   content is unchanged. Then `infra apply` (the database takes 10 to 15 minutes; the
-   old instance goes, and the address moves to the new interface).
+   backup role go; the service instance, its interface, the database and the rest are
+   added; the Elastic IP is not destroyed (an `aws_eip_association` takes it); the DNS
+   records' content is unchanged. Then `infra apply --allow-destroy` (the old instance
+   is an instance it destroys: check that the list it prints before asking names nothing
+   else, then type `yes`; the database takes 10 to 15 minutes; the old instance goes,
+   and the address moves to the new interface).
 6. `secrets sync`, then `db bootstrap`.
 7. `./deploy/run.sh app deploy --tag sha-<server> --game-tag sha-<game> --serve-tag
    sha-<serve> --hostd-tag sha-<serve>`: the server's first boot applies every migration
@@ -704,7 +716,8 @@ included> --key-name <a key pair, if you need the old toolbox's SSH>`), move the
 to it (`aws ec2 associate-address --allocation-id <id> --instance-id <it>
 --allow-reassociation`), and set the zone's SSL/TLS mode back to "Flexible" (the old
 nginx serves :80). The old SQLite database is on the image. The Elastic IP is never
-released either way; moving it back to the new host is `infra apply` (its association).
+released either way; moving it back to the new service instance is `infra apply
+--allow-destroy` (it replaces the association).
 
 ### Smoke tests
 

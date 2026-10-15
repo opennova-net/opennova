@@ -10,8 +10,10 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
   - `secrets init|check|sync [--prune]`: the vault's generated secrets and Stripe
     placeholders, the checks (Stripe's forms and modes among them), the copy to SSM;
   - `infra plan|apply|destroy|state-rm|import|output|list`: Terraform in the
-    deployment's workspace, its state a 1Password document; `apply` refuses a plan that
-    destroys an Elastic IP, the database or a bucket unless `--allow-destroy`;
+    deployment's workspace, its state a 1Password document; `apply` applies the plan it
+    saved, refuses one that destroys or replaces an Elastic IP or its association, the
+    service instance or its interface, the database or a bucket unless
+    `--allow-destroy`, and on prod asks for `yes` (or `--yes`) first;
   - `app deploy|releases|rollback|converge|status|restart|down|logs|shell`: releases
     (bundles in S3, the images pinned by digest) converged on the host through SSM,
     CloudWatch logs, a Session Manager shell;

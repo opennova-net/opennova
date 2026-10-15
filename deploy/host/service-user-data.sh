@@ -20,9 +20,11 @@
 #      current release, so a new host serves what the old one did with no
 #      operator step (deploy/host/converge.sh).
 #
-# The host keeps no state of its own: replacing it
-# (`./deploy/run.sh infra apply -replace=aws_instance.service`) runs this again
-# on a new one. Each step's line reaches /var/log/cloud-init-output.log.
+# The instance keeps no state of its own: replacing it
+# (`./deploy/run.sh infra apply --allow-destroy -replace=aws_instance.service`)
+# runs this again on a new one. Each step's line reaches
+# /var/log/cloud-init-output.log. This file (a comment included) is the
+# instance's user data: a change to it is a new instance (infra/aws/service.tf).
 
 set -euo pipefail
 umask 022

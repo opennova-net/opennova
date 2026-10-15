@@ -24,10 +24,14 @@
 #                                 (/opennova/NAME/secret/*); --prune deletes the
 #                                 ones the vault no longer names
 #   infra plan [args...]          terraform plan in the deployment's workspace
-#   infra apply [--allow-destroy] [args...]
-#                                 plan, then apply that plan; refuses a plan that
-#                                 destroys an Elastic IP, a database or a bucket
-#                                 unless --allow-destroy
+#   infra apply [--allow-destroy] [--yes] [args...]
+#                                 plan to a file, then apply that plan; refuses a
+#                                 plan that destroys or replaces the service
+#                                 instance, its network interface, an Elastic IP
+#                                 or its association, a database or a bucket
+#                                 unless --allow-destroy, and any plan that
+#                                 makes prod an Elastic IP; on prod it applies
+#                                 the saved plan only after --yes or a typed yes
 #   infra destroy                 (not prod) destroy the deployment's stack
 #   infra state-rm ADDRESS...     forget resources (their objects stay)
 #   infra import ADDRESS ID       adopt an existing object
@@ -706,12 +710,19 @@ hosted_snapshot_var() {
 
 tf() { terraform -chdir="$TF_DIR" "$@"; }
 
-# init, and the deployment's workspace. terraform.tfvars is refused: Terraform
-# would load it into every workspace.
+# init, and the deployment's workspace. The var-files Terraform loads on its
+# own (terraform.tfvars[.json], *.auto.tfvars[.json]) are refused: Terraform
+# would load them into every workspace, so one holding prod's Elastic IP would
+# hand it to staging. A deployment's knobs live in infra/aws/<deployment>.tfvars,
+# which the toolbox passes to that deployment's runs alone.
 TF_VAR_ARGS=()
 tf_init() {
-  [ ! -f "$TF_DIR/terraform.tfvars" ] \
-    || die "infra/aws/terraform.tfvars exists: Terraform loads it into EVERY workspace (staging would take prod's settings, its Elastic IP among them). Move it to infra/aws/prod.tfvars (DEPLOY.md, section 3)"
+  local f stray=()
+  for f in "$TF_DIR"/terraform.tfvars "$TF_DIR"/terraform.tfvars.json "$TF_DIR"/*.auto.tfvars*; do
+    [ ! -e "$f" ] || stray+=("infra/aws/${f##*/}")
+  done
+  [ "${#stray[@]}" -eq 0 ] \
+    || die "${stray[*]}: Terraform loads such a file into EVERY workspace (staging would take prod's settings, its Elastic IP among them). Move its settings into infra/aws/<deployment>.tfvars (prod.tfvars for prod; DEPLOY.md, section 3)"
   tf init -input=false >/dev/null
   tf workspace select -or-create "$TF_WORKSPACE_NAME" >/dev/null
   if [ -f "$TFVARS" ]; then
@@ -748,29 +759,71 @@ tf_push_after() {
   [ "$rc" -eq 0 ] || exit "$rc"
 }
 
-# The types whose destruction loses what no apply makes again: the Elastic IP
-# retail clients use, the database, the operations bucket.
-PRECIOUS_TYPES='["aws_eip","aws_db_instance","aws_s3_bucket"]'
+# A change to prod goes ahead only on purpose: with --yes ($2 = 1), or once the
+# operator types yes at the prompt. With no terminal to ask on and no --yes it
+# refuses. Another deployment goes ahead unasked.
+stdin_is_terminal() { [ -t 0 ]; }
+confirm_prod() {
+  local what="$1" yes="$2" answer=""
+  [ "$DEP" = prod ] || return 0
+  if [ "$yes" -eq 1 ]; then
+    log "prod: $what (--yes)"
+    return 0
+  fi
+  stdin_is_terminal || die "prod: refusing to $what without --yes (no terminal to ask on); nothing was changed"
+  printf '\033[1;33m[deploy]\033[0m prod: %s? Type yes to go on: ' "$what" >&2
+  IFS= read -r answer || answer=""
+  [ "$answer" = yes ] || die "prod: not confirmed; nothing was changed"
+}
 
-# infra apply: plan to a file, refuse a plan that destroys (or replaces) a
-# precious resource unless --allow-destroy, then apply exactly that plan.
+# The types whose destruction (or replacement) loses what no apply makes again,
+# or takes the service down: the Elastic IP retail clients use and its
+# association, the service instance and the network interface that holds its
+# fixed private address, the database, the operations bucket.
+PRECIOUS_TYPES='["aws_eip","aws_eip_association","aws_network_interface","aws_instance","aws_db_instance","aws_s3_bucket"]'
+
+# infra apply: plan to a file, and refuse a plan that destroys (or replaces) a
+# precious resource unless --allow-destroy, and any plan that makes prod an
+# Elastic IP (prod adopts the address retail clients use; service.tf's
+# preconditions stop such a plan first). On prod, show what the plan does and
+# apply that saved plan only after --yes or a typed yes; elsewhere apply it.
+# The plan applied is the one shown, never a new one.
 infra_apply() {
-  local allow_destroy=0 args=() plan="$SECRETS_DIR/tfplan" doomed rc=0 a
+  local allow_destroy=0 yes=0 args=() plan="$SECRETS_DIR/tfplan" plan_json doomed made summary rc=0 a
   for a in "$@"; do
     case "$a" in
       --allow-destroy) allow_destroy=1 ;;
+      --yes) yes=1 ;;
       *) args+=("$a") ;;
     esac
   done
   tf_op plan -input=false -out="$plan" "${TF_VAR_ARGS[@]}" ${args[@]+"${args[@]}"} \
     || die "the plan failed; nothing was applied"
-  doomed="$(tf show -json "$plan" | jq -r --argjson types "$PRECIOUS_TYPES" \
-    '[.resource_changes[]? | select((.change.actions | index("delete")) and (.type as $t | $types | index($t))) | .address] | join(" ")')" \
-    || die "reading the plan failed; nothing was applied"
+  # Held in memory: the plan's JSON carries the stack's sensitive values.
+  plan_json="$(tf show -json "$plan")" || { rm -f "$plan"; die "reading the plan failed; nothing was applied"; }
+  doomed="$(jq -r --argjson types "$PRECIOUS_TYPES" \
+    '[.resource_changes[]? | select((.change.actions | index("delete")) and (.type as $t | $types | index($t))) | .address] | join(" ")' <<<"$plan_json")" \
+    || { rm -f "$plan"; die "reading the plan failed; nothing was applied"; }
+  made="$(jq -r '[.resource_changes[]? | select(.type == "aws_eip" and (.change.actions | index("create"))) | .address] | join(" ")' <<<"$plan_json")" \
+    || { rm -f "$plan"; die "reading the plan failed; nothing was applied"; }
+  summary="$(jq -r '[.resource_changes[]? | .change.actions
+      | if index("delete") and index("create") then "replace"
+        elif . == ["create"] then "create" elif . == ["update"] then "update"
+        elif . == ["delete"] then "destroy" elif . == ["forget"] then "forget" else empty end]
+    | group_by(.) | map("\(length) to \(.[0])") | join(", ")' <<<"$plan_json")" \
+    || { rm -f "$plan"; die "reading the plan failed; nothing was applied"; }
+  plan_json=""
+  if [ "$DEP" = prod ] && [ -n "$made" ]; then
+    rm -f "$plan"
+    die "the plan makes prod a new Elastic IP ($made). Refusing whatever the flags: prod adopts the address retail clients use (service_eip_allocation_id in infra/aws/prod.tfvars; DEPLOY.md, \"The var-file\")"
+  fi
   if [ -n "$doomed" ] && [ "$allow_destroy" -eq 0 ]; then
     rm -f "$plan"
     die "the plan destroys or replaces $doomed. Refusing: check the plan above, then infra apply --allow-destroy if that is meant"
   fi
+  log "the plan: ${summary:-no resource changes}${doomed:+; it destroys or replaces $doomed (--allow-destroy)}"
+  # A refusal exits; the EXIT trap removes the saved plan.
+  [ -z "$summary" ] || confirm_prod "apply this saved plan as it stands (nothing is planned again)" "$yes"
   tf_op apply -input=false "$plan" || rc=$?
   rm -f "$plan"
   tf_push_after apply "$rc"
