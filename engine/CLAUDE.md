@@ -171,7 +171,7 @@
   Namespace `opennova`. Native consumers link the static group targets directly;
   no shared-library/FFI export surface is maintained.
 - Language: C++17 throughout (ADR 0043 d14). `engine/` carries no `.c` source
-  and no `extern "C"`; the vendored C (miniz, bcrypt, sqlite) lives under
+  and no `extern "C"`; the vendored C (miniz, bcrypt) lives under
   `third_party/`. The format libs that were C APIs keep their C NAMES inside
   `namespace opennova::<lib>` — `opennova::pff::pff_open`,
   `opennova::def::DefWeaponDef`, `opennova::threedi::Threedi3di3`,
@@ -201,9 +201,11 @@
   the four-group partition acyclic), `opennova_base` (vfs, resource_index, gameprofile,
   pcapio, os_random, proc), `opennova_net` (novacrypto, napi, npwire, admin + novaworld session/gate —
   the wire), `opennova_runtime` (the rest of runtime/, including `inmatch` and
-  `replication`), and `opennova_novaworld_service` (the service alone — the ONLY
-  target linking `opennova_sqlite`; the Godot layer (`godot/src`) links
-  `opennova_runtime`, which PUBLIC-links `opennova_net`, never the service).
+  `replication`), and `opennova_novaworld_service` (the service alone, defined only
+  with the root option `OPENNOVA_NOVAWORLD_SERVICE` — the ONLY target linking
+  `opennova_pq`, the INTERFACE target over the system libpq (`find_package(PostgreSQL)`);
+  the Godot layer (`godot/src`) links `opennova_runtime`, which PUBLIC-links
+  `opennova_net`, never the service).
   `opennova_io` stays header-only INTERFACE. Since ADR 0046 a sixth STATIC group
   target, `opennova_editor` (`editor/`), links `opennova_runtime` and is linked only
   by the editor-enabled GDExtension variant, `apps/project` and the tests. PUBLIC
@@ -211,7 +213,7 @@
   links io, base links formats (base deliberately sits ABOVE formats because vfs
   parses pff/scr/bfc1), net links base, runtime links net, the service links net;
   `link_graph_check.py` forbids `opennova_net -> opennova_runtime` and keeps the
-  sqlite containment. The ADR 0024 family groups are deleted as subsumed; ADR
+  libpq containment (`opennova_pq`). The ADR 0024 family groups are deleted as subsumed; ADR
   0020's terrain seam is include-level (`scripts/lint/include_graph_check.py` —
   for inmatch/replication/wac/mission/world the `runtime/terrain/` prefix is fully
   forbidden; the seam is terrain_query's `<runtime/terrain_query/...>` headers),

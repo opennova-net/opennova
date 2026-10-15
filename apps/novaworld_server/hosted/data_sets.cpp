@@ -141,16 +141,11 @@ const Expansion *find_expansion(const DataSet &data_set, std::string_view code) 
 	return nullptr;
 }
 
-bool parse_data_set_configs(std::string_view data_sets_json, std::string_view launch_templates_json,
-		std::vector<DataSetConfig> &out, std::string &error) {
+bool parse_data_set_configs(std::string_view data_sets_json, std::vector<DataSetConfig> &out, std::string &error) {
 	out.clear();
 	static constexpr const char *kDataSets = "ONNET_HOSTED_DATA_SETS";
-	static constexpr const char *kTemplates = "ONNET_HOSTED_EC2_LAUNCH_TEMPLATES";
 	io::JsonValue sets;
-	io::JsonValue templates;
-	if (!parse_object(data_sets_json, kDataSets, sets, error) ||
-			!parse_object(launch_templates_json, kTemplates, templates, error))
-		return false;
+	if (!parse_object(data_sets_json, kDataSets, sets, error)) return false;
 	for (const io::JsonMember &m : sets.object) {
 		const std::string where = std::string(kDataSets) + "." + loggable(m.key, 64);
 		if (!m.value.is_object()) {
@@ -194,15 +189,6 @@ bool parse_data_set_configs(std::string_view data_sets_json, std::string_view la
 			}
 		}
 	}
-	for (const io::JsonMember &m : templates.object) {
-		if (!m.value.is_string()) {
-			error = std::string(kTemplates) + "." + loggable(m.key, 64) + " is no string";
-			return false;
-		}
-		DataSetConfig *c = config_for(out, m.key, kTemplates, error);
-		if (!c) return false;
-		c->launch_template = m.value.string;
-	}
 	return true;
 }
 
@@ -217,13 +203,12 @@ std::vector<DataSet> offered_data_sets(
 		if (!config) continue;
 		bool has_data = false;
 		if (provider == "local") has_data = !config->resource_dir.empty();
-		if (provider == "ec2") has_data = !config->launch_template.empty();
+		if (provider == "ec2") has_data = true; // every cloud machine mounts every named data set
 		if (!has_data) continue;
 		DataSet offered = known;
 		offered.missions = config->missions;
 		offered.resource_dir = config->resource_dir;
 		offered.loose_root = config->loose_root;
-		offered.launch_template = config->launch_template;
 		out.push_back(std::move(offered));
 	}
 	return out;

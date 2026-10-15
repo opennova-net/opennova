@@ -1,5 +1,5 @@
-// The NovaWorld service's HTTP routes, driven in-process: a SQLite file in the
-// run's temp directory under backend/migrations (plus the games seed), the
+// The NovaWorld service's HTTP routes, driven in-process: a database of the
+// run's own (common/test_database.h: backend/migrations plus the games seed), the
 // Crow HttpListener from opennova_novaworld_server_core on port 0 (the OS
 // picks; the harness reads the port back from bound_port()), and requests sent
 // through apps/common's http_exchange to 127.0.0.1. Built only
@@ -19,20 +19,25 @@
 //
 // The listener and the test share one db::ConnectionPool, the way main() wires
 // the server: each Crow handler leases a connection for its request, and the
-// test thread leases its own for every direct read or write. A file rather
-// than a shared-cache in-memory URI: Crow runs handlers on several threads at
-// once, and shared cache's SQLITE_LOCKED skips the busy timeout a WAL file's
-// writers wait on.
+// test thread leases its own for every direct read or write.
 
 #include "admin_tcp_server.h"
 #include <net/title/title_identity.h>
 #include <base/gameprofile/gameprofile.h>
 #include "auth.h"
+#include "billing/billing.h"
+#include "billing/billing_repository.h"
+#include "billing/billing_routes.h"
+#include "billing/entitlement.h"
+#include "novaworld/billing_fake_stripe.h"
+#include "health.h"
 #include "hosted/admin_link.h"
 #include "hosted/console_commands.h"
 #include "hosted/hosted_repository.h"
+#include "hosted/limits_hold.h"
+#include "hosted/stats_repository.h"
 #include "hosted/supervisor.h"
-#include "hosted_fake_provider.h"
+#include "hosted_fake_driver.h"
 #include "http_cookies.h"
 #include "http_listener.h"
 #include "net_http.h"
@@ -54,7 +59,7 @@
 #include <net/napi/session.h>
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/connection/manager.h>
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/gsb.h>
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/http_login.h>
@@ -63,11 +68,13 @@
 
 #include "common/file_io.h"
 #include "common/temp_dir.h"
+#include "common/test_database.h"
 #include "common/test_expect.h"
 
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <chrono>
 #include <cstdint>
@@ -81,6 +88,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -96,6 +104,10 @@ namespace nws = opennova::novaworld_server;
 using opennova::db::ConnectionPool;
 
 namespace {
+
+// The harness watchdog's hand-stepped clock and its watched loop's counter.
+std::atomic<uint64_t> g_watch_clock_ms{ 0 };
+std::atomic<uint64_t> g_watch_turns{ 0 };
 
 constexpr const char *kAdminToken = "harness-admin-token";
 // The one page in the templates root: the menu URLs the listener fills in.
@@ -127,10 +139,16 @@ struct Harness {
 	// The first listener's admin links (the console routes run their commands on
 	// them); the console case syncs them by hand.
 	opennova::novaworld_server::hosted::AdminLinks *links = nullptr;
-	// The bootstrap route's tokens: the first listener's (it admits 127.0.0.0/8, the
-	// harness's own address) and the third's (it admits 10.0.0.0/8 alone).
-	opennova::novaworld_server::hosted::BootstrapStore *bootstrap = nullptr;
-	opennova::novaworld_server::hosted::BootstrapStore *fresh_bootstrap = nullptr;
+	// The first listener's stall watchdog (GET /healthz): its clock and its one
+	// watched loop's counter are the test's (g_watch_clock_ms, g_watch_turns).
+	nws::Watchdog *watchdog = nullptr;
+	// The first listener's billing over an in-memory Stripe (the Secure
+	// listener runs with none: billing off).
+	billing_fake::FakeStripeApi *stripe = nullptr;
+	nws::billing::Billing *billing = nullptr;
+	// The first listener's hosted servers' limits hold (no supervisor sets it
+	// here: the billing admin case does by hand).
+	nws::hosted::LimitsHold *limits_hold = nullptr;
 
 	// Every connect, send and recv waits at most `timeout_ms`.
 	net::HttpReply send(const char *method, const std::string &path,
@@ -512,10 +530,13 @@ int64_t make_account(Harness &h, const std::string &username, const std::string 
 
 // A HOSTKEY recorded for `user` the way /NWHost.dll records one for its retail
 // login: at the account's credentials generation now. True when recorded.
+bool record_key_for(opennova::db::Database &db, const std::string &key, int64_t user) {
+	const auto account = nws::get_user_by_id(db, user);
+	return account && opennova::hostdb::record_host_key(db, key, user, account->credentials_gen);
+}
+
 bool record_key_for(Harness &h, const std::string &key, int64_t user) {
-	auto conn = h.pool.acquire();
-	const auto account = nws::get_user_by_id(*conn, user);
-	return account && opennova::hostdb::record_host_key(*conn, key, user, account->credentials_gen);
+	return record_key_for(*h.pool.acquire(), key, user);
 }
 
 // The site role an admin gives an account (PUT /api/admin/users/<id> with the
@@ -537,7 +558,7 @@ int64_t admin_count(Harness &h) {
 // An integer the session row of `token` answers `select` with (-1: no row).
 int64_t session_scalar(Harness &h, const std::string &token, const std::string &select) {
 	const auto rows = h.pool.acquire()->query(
-			"SELECT " + select + " FROM web_sessions WHERE token_hash = ?;",
+			"SELECT " + select + " FROM web_sessions WHERE token_hash = $1;",
 			{opennova::db::BindValue(nws::web_session_token_hash(token))});
 	return rows.empty() ? -1 : rows.front().as_int(0).value_or(-1);
 }
@@ -564,7 +585,7 @@ int test_login_sets_session_cookie(Harness &h) {
 	TEST_EXPECT(cookies[0] == std::string(nws::kWebSessionCookie) + "=" + token + kCookieTail);
 
 	const auto rows = h.pool.acquire()->query(
-			"SELECT token_hash, ip FROM web_sessions WHERE user_id = ?;",
+			"SELECT token_hash, ip FROM web_sessions WHERE user_id = $1;",
 			{opennova::db::BindValue(id)});
 	TEST_EXPECT(rows.size() == 1);
 	TEST_EXPECT(rows[0].as_text(0).value() == opennova::io::sha256_hex(opennova::io::sha256(token)));
@@ -693,7 +714,7 @@ int test_login_refuses_inactive_accounts(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 401);
 	TEST_EXPECT(body_text(reply) == "{\"error\":\"invalid_credentials\"}");
 	TEST_EXPECT(h.pool.acquire()->query(
-			"SELECT 1 FROM web_sessions WHERE user_id IN (?, ?);",
+			"SELECT 1 FROM web_sessions WHERE user_id IN ($1, $2);",
 			{opennova::db::BindValue(banned), opennova::db::BindValue(disabled)}).empty());
 
 	const std::string token = login_token(h, "10.3.0.2", "web_later", "pw-later");
@@ -744,8 +765,8 @@ int test_me_requires_live_session(Harness &h) {
 	TEST_EXPECT(header_values(reply, "Set-Cookie").empty()); // fresh: nothing to renew
 
 	h.pool.acquire()->exec(
-			"UPDATE web_sessions SET expires_at = datetime('now', '-1 seconds') "
-			"WHERE token_hash = ?;",
+			"UPDATE web_sessions SET expires_at = (now() + interval '-1 seconds') "
+			"WHERE token_hash = $1;",
 			{opennova::db::BindValue(nws::web_session_token_hash(token))});
 	reply = h.send("GET", "/api/me", {with_session(token)});
 	TEST_EXPECT(reply.transport_ok && reply.code == 401);
@@ -764,8 +785,8 @@ int test_session_slides(Harness &h) {
 	TEST_EXPECT(!token.empty());
 	auto age = [&h, &token](const char *last_seen) {
 		h.pool.acquire()->exec(
-				std::string("UPDATE web_sessions SET last_seen_at = datetime('now', '") + last_seen +
-						"'), expires_at = datetime('now', '+1 days') WHERE token_hash = ?;",
+				std::string("UPDATE web_sessions SET last_seen_at = (now() + interval '") + last_seen +
+						"'), expires_at = (now() + interval '+1 days') WHERE token_hash = $1;",
 				{opennova::db::BindValue(nws::web_session_token_hash(token))});
 	};
 
@@ -774,14 +795,14 @@ int test_session_slides(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	TEST_EXPECT(header_value(reply, "Set-Cookie") ==
 	            std::string(nws::kWebSessionCookie) + "=" + token + kCookieTail);
-	TEST_EXPECT(session_scalar(h, token, "expires_at > datetime('now', '+29 days')") == 1);
-	TEST_EXPECT(session_scalar(h, token, "last_seen_at >= datetime('now', '-5 seconds')") == 1);
+	TEST_EXPECT(session_scalar(h, token, "expires_at > (now() + interval '+29 days')") == 1);
+	TEST_EXPECT(session_scalar(h, token, "last_seen_at >= (now() + interval '-5 seconds')") == 1);
 
 	age("-10 seconds");
 	reply = h.send("GET", "/api/me", {with_session(token)});
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	TEST_EXPECT(header_values(reply, "Set-Cookie").empty());
-	TEST_EXPECT(session_scalar(h, token, "expires_at < datetime('now', '+2 days')") == 1);
+	TEST_EXPECT(session_scalar(h, token, "expires_at < (now() + interval '+2 days')") == 1);
 
 	// A player's session refused by an admin route still slid.
 	age("-120 seconds");
@@ -789,7 +810,7 @@ int test_session_slides(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 403);
 	TEST_EXPECT(header_value(reply, "Set-Cookie") ==
 	            std::string(nws::kWebSessionCookie) + "=" + token + kCookieTail);
-	TEST_EXPECT(session_scalar(h, token, "expires_at > datetime('now', '+29 days')") == 1);
+	TEST_EXPECT(session_scalar(h, token, "expires_at > (now() + interval '+29 days')") == 1);
 	return 0;
 }
 
@@ -929,6 +950,9 @@ int test_admin_routes_table(Harness &h) {
 		{"POST", "/api/admin/cd-keys/999999/assign", "{\"username\":\"web_table_player\"}"},
 		{"POST", "/api/admin/cd-keys/999999/revoke", ""},
 		{"POST", "/api/admin/cd-keys/999999/activations", "{\"nwpssk\":\"ABCDEFGHIJKLMNOPQRSTUVW\"}"},
+		{"GET", "/api/admin/billing", ""},
+		{"POST", "/api/admin/billing/reconcile", ""},
+		{"POST", "/api/admin/billing/link", "{\"user_id\":1,\"stripe_customer_id\":\"cus_never\"}"},
 	};
 	const auto users_before = nws::list_users(*h.pool.acquire()).size();
 	const auto status_before = nws::get_server_status(*h.pool.acquire());
@@ -1308,13 +1332,9 @@ int test_untrusted_proxy_header_ignored(Harness &h) {
 // generation.
 constexpr uint32_t kConcurrentRid = 2000;
 constexpr int kConcurrentRegistrations = 16;
-// The host writes run back to back, each re-taking the write lock moments after
-// the last COMMIT, and SQLite's busy handler polls (1 ms sleeps growing to
-// 100 ms) rather than queueing, so a registration's BEGIN IMMEDIATE can starve
-// behind the whole run. The pool keeps the server's busy timeout, so that run
-// must fit inside it: at synchronous=FULL every commit fsynced the WAL, and on
-// a loaded disk (WSL2's, under a parallel build) the run once outlasted 5 s
-// and 13 of the 16 registrations failed "database is locked".
+// The host writes run back to back, each taking the writer lock moments after
+// the last COMMIT; a registration's Transaction queues on that lock between
+// them, within the server's own lock timeout, which the pool keeps.
 constexpr int kHostGenerations = 40;
 // The case checks that the replies are each request's own and consistent, not
 // how fast they come: the bcrypt registrations queue behind Crow's few workers
@@ -1541,7 +1561,7 @@ HostFetch fetch_nwhost(Harness &h, const std::string &cookies) {
 
 // The account host_keys records for `key` (by its hash), nullopt when none.
 std::optional<int64_t> key_owner(Harness &h, const std::string &key) {
-	const auto rows = h.pool.acquire()->query("SELECT user_id FROM host_keys WHERE key_hash = ?;",
+	const auto rows = h.pool.acquire()->query("SELECT user_id FROM host_keys WHERE key_hash = $1;",
 	                                          {opennova::db::BindValue(opennova::hostdb::host_key_hash(key))});
 	if (rows.empty()) return std::nullopt;
 	return rows.front().as_int(0);
@@ -1575,7 +1595,7 @@ int test_nwhost_records_owner(Harness &h) {
 	TEST_EXPECT(opennova::hostdb::is_host_key(owned.key));
 	TEST_EXPECT(key_owner(h, owned.key) == id);
 	TEST_EXPECT(h.pool.acquire()
-	                    ->query("SELECT 1 FROM host_keys WHERE key_hash = ?;",
+	                    ->query("SELECT 1 FROM host_keys WHERE key_hash = $1;",
 	                            {opennova::db::BindValue(owned.key)})
 	                    .empty());
 	const auto pinned = fetch_nwhost(h, "PERSISTENTEXPRESSLOGINDATA=pin-host-owner");
@@ -2340,7 +2360,7 @@ int test_dfx2_activation(Harness &h) {
 	};
 	const auto live_wire_key = [&h](int64_t user) {
 		const auto rows = h.pool.acquire()->query("SELECT wire_key, created_by FROM cd_keys WHERE "
-												  "user_id = ? AND revoked_at IS NULL;",
+												  "user_id = $1 AND revoked_at IS NULL;",
 				{ opennova::db::BindValue(user) });
 		return rows.size() == 1
 				? rows[0].as_text(0).value_or("") + "|" + rows[0].as_text(1).value_or("")
@@ -2380,7 +2400,7 @@ int test_dfx2_activation(Harness &h) {
 	TEST_EXPECT(h.pool.acquire()
 						->query("SELECT COUNT(*) FROM cd_key_activations a JOIN cd_keys k ON k.id "
 								"= a.key_id "
-								"WHERE k.user_id = ?;",
+								"WHERE k.user_id = $1;",
 								{ opennova::db::BindValue(player) })
 						.front()
 						.as_int(0)
@@ -2412,7 +2432,7 @@ int test_dfx2_activation(Harness &h) {
 			h.send("POST",
 					 "/api/admin/cd-keys/" +
 							 std::to_string(h.pool.acquire()
-											 ->query("SELECT id FROM cd_keys WHERE user_id = ?;",
+											 ->query("SELECT id FROM cd_keys WHERE user_id = $1;",
 													 { opennova::db::BindValue(player) })
 											 .front()
 											 .as_int(0)
@@ -2924,13 +2944,13 @@ int test_owner_host_push(Harness &h) {
 
 	// The route reads the live claim, not the row: a row that names Alice with no key of hers
 	// claimed for it is a 404 at the route.
-	h.pool.acquire()->exec("UPDATE active_hosts SET host_user_id = ? WHERE rid = ?;",
+	h.pool.acquire()->exec("UPDATE active_hosts SET host_user_id = $1 WHERE rid = $2;",
 	                       {BindValue(alice), BindValue(static_cast<int64_t>(anon->rid))});
 	TEST_EXPECT(!opennova::hostdb::listing_owned_by(*h.pool.acquire(), anon->rid, alice));
 	reply = command(alice_s, anon_rid, rename);
 	TEST_EXPECT(reply.transport_ok && reply.code == 404);
 	TEST_EXPECT(body_text(reply) == body_text(free_command));
-	h.pool.acquire()->exec("UPDATE active_hosts SET host_user_id = NULL WHERE rid = ?;",
+	h.pool.acquire()->exec("UPDATE active_hosts SET host_user_id = NULL WHERE rid = $1;",
 	                       {BindValue(static_cast<int64_t>(anon->rid))});
 	// The push-time check: a key of Alice's claimed for the anonymous host's RID passes the
 	// route's look-up, but that connection never presented it (its lobby names no owner), so the
@@ -2948,7 +2968,7 @@ int test_owner_host_push(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 404);
 	TEST_EXPECT(body_text(reply) == body_text(free_command));
 	TEST_EXPECT(theirs.wait_notice(Notice::Kind::Command, 500) == nullptr);
-	h.pool.acquire()->exec("DELETE FROM host_keys WHERE key_hash = ?;",
+	h.pool.acquire()->exec("DELETE FROM host_keys WHERE key_hash = $1;",
 	                       {BindValue(opennova::hostdb::host_key_hash(stray))});
 
 	// The bucket, per account: Dave's runs dry (the stop draws on it too); Alice's is her own.
@@ -3505,7 +3525,7 @@ int test_header_values_cannot_split(Harness &h) {
 	// A stored nwhandle, and expansion bits an admin set: the retail login's
 	// relay and completion. /api/register refuses the handle itself.
 	auto set_handle = [&h](const std::string &username, const std::string &handle) {
-		h.pool.acquire()->exec("UPDATE players SET nwhandle = ? WHERE username = ?;",
+		h.pool.acquire()->exec("UPDATE players SET nwhandle = $1 WHERE username = $2;",
 				{ opennova::db::BindValue(handle), opennova::db::BindValue(username) });
 	};
 	reply = h.send("POST", "/api/register", { kJson, kCsrf, from_ip("10.41.0.1") },
@@ -3656,10 +3676,16 @@ int test_reset_during_login(Harness &h) {
 	const int64_t id = make_account(h, "race_user", "pw-race");
 	TEST_EXPECT(id > 0);
 	const std::vector<std::string> pin = { "Cookie: PERSISTENTEXPRESSLOGINDATA=pin-race-user" };
+	// Another connection's write: on a thread of its own, since the seam runs
+	// on the login's thread, which holds the login's lease (one per thread).
 	auto reset = [&h](int64_t user_id) {
-		nws::UpdateUserParams p;
-		p.password_plaintext = "pw-race";
-		return nws::update_user(*h.pool.acquire(), user_id, p).ok;
+		bool ok = false;
+		std::thread([&h, user_id, &ok] {
+			nws::UpdateUserParams p;
+			p.password_plaintext = "pw-race";
+			ok = nws::update_user(*h.pool.acquire(), user_id, p).ok;
+		}).join();
+		return ok;
 	};
 	auto generation = [&h, id] {
 		return nws::get_user_by_id(*h.pool.acquire(), id)->credentials_gen;
@@ -3669,7 +3695,7 @@ int test_reset_during_login(Harness &h) {
 	};
 	auto rows = [&h, id](const std::string &table) {
 		return h.pool.acquire()
-				->query("SELECT COUNT(*) FROM " + table + " WHERE user_id = ?;",
+				->query("SELECT COUNT(*) FROM " + table + " WHERE user_id = $1;",
 						{ opennova::db::BindValue(id) })
 				.front()
 				.as_int(0)
@@ -3736,13 +3762,13 @@ net::HttpReply join(Harness &h, const std::vector<std::string> &cookies) {
 // no row). Each join from the harness replaces the one row its address keeps.
 int64_t joined_user(Harness &h) {
 	const auto rows =
-			h.pool.acquire()->query("SELECT user_id FROM host_players WHERE host_rid = ?;",
+			h.pool.acquire()->query("SELECT user_id FROM host_players WHERE host_rid = $1;",
 					{ opennova::db::BindValue(static_cast<int64_t>(kJoinRid)) });
 	return rows.empty() ? -1 : rows.front().as_int(0).value_or(0);
 }
 
 void forget_joins(Harness &h) {
-	h.pool.acquire()->exec("DELETE FROM host_players WHERE host_rid = ?;",
+	h.pool.acquire()->exec("DELETE FROM host_players WHERE host_rid = $1;",
 			{ opennova::db::BindValue(static_cast<int64_t>(kJoinRid)) });
 }
 
@@ -3857,7 +3883,7 @@ int test_join_identity(Harness &h) {
 			{ std::pair<const char *, const char *>{
 					  "banned", "This NovaWorld account has been banned. NWEC11" },
 					{ "disabled", "This NovaWorld account is restricted. NWEC12" } }) {
-		h.pool.acquire()->exec("UPDATE players SET account_status = ? WHERE id = ?;",
+		h.pool.acquire()->exec("UPDATE players SET account_status = $1 WHERE id = $2;",
 				{ opennova::db::BindValue(std::string(status)), opennova::db::BindValue(other) });
 		forget_joins(h);
 		reply = join(h, { other_tag });
@@ -3869,7 +3895,7 @@ int test_join_identity(Harness &h) {
 		TEST_EXPECT(joined_user(h) == -1);
 		TEST_EXPECT(account_page_anonymous(h, { "Cookie: " + other_tag }));
 	}
-	h.pool.acquire()->exec("UPDATE players SET account_status = 'active' WHERE id = ?;",
+	h.pool.acquire()->exec("UPDATE players SET account_status = 'active' WHERE id = $1;",
 			{ opennova::db::BindValue(other) });
 	forget_joins(h);
 	TEST_EXPECT(identified(join(h, { other_tag })));
@@ -4054,14 +4080,14 @@ int test_login_row_kept_alive(Harness &h) {
 	const std::string tag = "LOGINSESSIONTAG=" + set_cookie_value(logged_in, "LOGINSESSIONTAG");
 	auto age = [&h, id](const char *ago) {
 		h.pool.acquire()->exec(
-				std::string("UPDATE active_user_sessions SET last_seen_at = datetime('now', '") +
-						ago + "') WHERE user_id = ?;",
+				std::string("UPDATE active_user_sessions SET last_seen_at = (now() + interval '") +
+						ago + "') WHERE user_id = $1;",
 				{ opennova::db::BindValue(id) });
 	};
 	auto fresh_row = [&h, id] {
 		return !h.pool.acquire()
-						->query("SELECT 1 FROM active_user_sessions WHERE user_id = ? "
-								"AND last_seen_at >= datetime('now', '-5 seconds');",
+						->query("SELECT 1 FROM active_user_sessions WHERE user_id = $1 "
+								"AND last_seen_at >= (now() + interval '-5 seconds');",
 								{ opennova::db::BindValue(id) })
 						.empty();
 	};
@@ -4115,9 +4141,9 @@ int test_host_tag_serves_once(Harness &h) {
 }
 
 // A database failure's reply is its error code and nothing else: the
-// SqliteError's text names the failing statement ("exec: INSERT INTO players
-// ..."), its extended code and its wait, and goes to the server log alone. A
-// trigger fails each route's write the way any SqliteError does: POST
+// db::Error's text names its SQLSTATE, the server's message and the failing
+// statement ("— INSERT INTO players ..."), and goes to the server log alone. A
+// trigger fails each route's write the way any db::Error does: POST
 // /api/register (the public route, create_user's db_error), PUT
 // /api/admin/server-status and POST /api/admin/hosts (its upsert_failed).
 // Nothing lands.
@@ -4127,9 +4153,11 @@ int test_db_failure_reply_carries_code_alone(Harness &h) {
 		{ "harness_fail_server_status", "server_status" },
 		{ "harness_fail_active_hosts", "active_hosts" },
 	};
+	h.pool.acquire()->exec("CREATE FUNCTION harness_fail() RETURNS trigger LANGUAGE plpgsql AS "
+						   "$$BEGIN RAISE EXCEPTION 'harness forced failure'; END$$;");
 	for (const auto &t : triggers) {
 		h.pool.acquire()->exec(std::string("CREATE TRIGGER ") + t[0] + " BEFORE INSERT ON " + t[1] +
-				" BEGIN SELECT RAISE(ABORT, 'harness forced failure'); END;");
+				" FOR EACH ROW EXECUTE FUNCTION harness_fail();");
 	}
 	auto refused = [](const net::HttpReply &reply, const char *want) {
 		if (reply.transport_ok && reply.code == 500 && body_text(reply) == want)
@@ -4150,10 +4178,65 @@ int test_db_failure_reply_carries_code_alone(Harness &h) {
 			"{\"error\":\"upsert_failed\"}"));
 
 	for (const auto &t : triggers)
-		h.pool.acquire()->exec(std::string("DROP TRIGGER ") + t[0] + ";");
+		h.pool.acquire()->exec(std::string("DROP TRIGGER ") + t[0] + " ON " + t[1] + ";");
+	h.pool.acquire()->exec("DROP FUNCTION harness_fail();");
 	TEST_EXPECT(nws::list_users(*h.pool.acquire()).size() == users_before);
 	TEST_EXPECT(nws::get_server_status(*h.pool.acquire()).message == status_before.message);
 	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM active_hosts WHERE rid = 4343;").empty());
+	return 0;
+}
+
+// GET /healthz (health.h): outside /api, so a listener whose /api/ refuses the
+// harness (a proxy it is not) still answers it; "ok" while the stall watchdog
+// finds its loops moving and main()'s checks coming, 503 "stalled" (no detail)
+// once its watched loop has not moved for the stall time, or no check came for
+// that long, and "ok" again as soon as the loop moves. A listener with no
+// watchdog answers "ok".
+int test_healthz(Harness &h) {
+	const auto expect_reply = [&h](int code, const char *body) {
+		const net::HttpReply reply = h.send("GET", "/healthz");
+		if (reply.code != code || body_text(reply) != body)
+			std::fprintf(stderr, "  /healthz: %s, want %d %s\n", describe(reply).c_str(), code, body);
+		return reply.code == code && body_text(reply) == body &&
+				header_value(reply, "Cache-Control") == "no-store";
+	};
+	const uint64_t stall = nws::Watchdog::kStallMs;
+	TEST_EXPECT(h.watchdog->check().empty());
+	TEST_EXPECT(expect_reply(200, "ok"));
+	auto reply = h.send_to(h.fresh_port, "GET", "/healthz");
+	TEST_EXPECT(reply.code == 200 && body_text(reply) == "ok");
+	TEST_EXPECT(h.send_to(h.fresh_port, "GET", "/api/health").code == 403);
+	reply = h.send_to(h.secure_port, "GET", "/healthz");
+	TEST_EXPECT(reply.code == 200 && body_text(reply) == "ok");
+
+	// The loop stands still: healthy until the stall time, then stalled, by name.
+	g_watch_clock_ms += stall - 1;
+	TEST_EXPECT(h.watchdog->check().empty());
+	TEST_EXPECT(expect_reply(200, "ok"));
+	g_watch_clock_ms += 1;
+	TEST_EXPECT(h.watchdog->check() == "harness loop");
+	TEST_EXPECT(expect_reply(503, "stalled"));
+	// It moves: healthy at once, before main()'s next check.
+	++g_watch_turns;
+	TEST_EXPECT(expect_reply(200, "ok"));
+	TEST_EXPECT(h.watchdog->check().empty());
+	// main()'s own loop stands still: no check for the stall time is stalled too,
+	// whatever the loops do.
+	g_watch_clock_ms += stall;
+	++g_watch_turns;
+	TEST_EXPECT(expect_reply(503, "stalled"));
+	TEST_EXPECT(h.watchdog->check().empty());
+	TEST_EXPECT(expect_reply(200, "ok"));
+	// The heartbeat line's shape.
+	nws::Heartbeat beat;
+	beat.nw_sessions = 3;
+	beat.hosted_failed = 1;
+	TEST_EXPECT(nws::heartbeat_line(beat) ==
+			"{\"heartbeat\":{\"nw_sessions\":3,\"listed_hosts\":0,\"hosted_live\":0,\"hosted_failed\":1,"
+			"\"machines_lost\":0,\"launch_failures\":0,\"billing_sync_age_s\":-1,\"webhook_rejects\":0,"
+			"\"limits_held\":0}}");
+	beat.limits_held = 1;
+	TEST_EXPECT(nws::heartbeat_line(beat).find(",\"limits_held\":1}}") != std::string::npos);
 	return 0;
 }
 
@@ -4166,73 +4249,99 @@ std::string error_of_reply(const net::HttpReply &reply) {
 
 // Every hosted row still stopping, ended as the supervisor would end it (the
 // harness runs none), so the cases after see no live server.
+void end_stopping_servers(opennova::db::Database &db) {
+	db.exec("UPDATE hosted_servers SET state = 'stopped' WHERE state = 'stopping';");
+}
+
 void end_stopping_servers(Harness &h) {
-	h.pool.acquire()->exec("UPDATE hosted_servers SET state = 'stopped' WHERE state = 'stopping';");
+	end_stopping_servers(*h.pool.acquire());
 }
 
 // The hosted servers' routes (hosted/hosted_routes.h; the harness listener runs
-// them with ONNET_HOSTED_PROVIDER set, a cap of 2 and two offered data sets,
+// them with ONNET_HOSTED_PROVIDER set, a cap of 4 and two offered data sets,
 // Joint Operations' with the default rotation "default.bms" and Delta Force
 // Xtreme 2's with its own, and no supervisor, so rows stay where the routes
 // put them): the session and CSRF refusals, the data sets the owner's view
-// lists, the approval (PUT /api/admin/users/<id>/can-host, admin only), the
-// settings' refusals (the game among them), the start (on the first data set
-// when it names none, and on Delta Force Xtreme 2's with its rotation), one
-// live server per account, the default rotation, the cap, the owner's stop,
-// the fleet view and the admin's stops (admin only, never the admin
-// password), and a listener with hosting off.
+// lists, the comp grant (PUT /api/admin/users/<id>/comp-servers, admin only),
+// the settings' refusals (the game among them), the starts (on the first data
+// set when it names none, and on Delta Force Xtreme 2's with its rotation) up
+// to the account's hosting entitlement (server_limit with its counts past it,
+// a stopping server counting), the cap and `full`, another account's id
+// answering 404, the owner's stop by id (409 not_live once ended), the
+// own-machine add-on (no_own_machine without one), the list's order (the live
+// servers, then the newest 10 ended), the fleet view and the admin's stops
+// (admin only, never the admin password), and a listener with hosting off.
 int test_hosted_server_routes(Harness &h) {
 	namespace hosted = opennova::novaworld_server::hosted;
-	const int64_t ana = make_account(h, "hosted_ana", "pw-hosted-ana");
-	const int64_t ben = make_account(h, "hosted_ben", "pw-hosted-ben");
-	const int64_t cy = make_account(h, "hosted_cy", "pw-hosted-cy");
-	const int64_t dee = make_account(h, "hosted_dee", "pw-hosted-dee");
-	TEST_EXPECT(ana > 0 && ben > 0 && cy > 0 && dee > 0);
-	const std::string ana_s = login_token(h, "10.51.0.1", "hosted_ana", "pw-hosted-ana");
-	const std::string ben_s = login_token(h, "10.51.0.2", "hosted_ben", "pw-hosted-ben");
-	const std::string cy_s = login_token(h, "10.51.0.3", "hosted_cy", "pw-hosted-cy");
-	const std::string dee_s = login_token(h, "10.51.0.4", "hosted_dee", "pw-hosted-dee");
-	TEST_EXPECT(!ana_s.empty() && !ben_s.empty() && !cy_s.empty() && !dee_s.empty());
+	namespace billing = opennova::novaworld_server::billing;
+	struct Owner {
+		int64_t id = 0;
+		std::string session;
+	};
+	const auto owner = [&h](const char *name, const char *ip) {
+		Owner o;
+		o.id = make_account(h, name, std::string("pw-") + name);
+		o.session = login_token(h, ip, name, std::string("pw-") + name);
+		return o;
+	};
+	const Owner ana = owner("hosted_ana", "10.51.0.1");
+	const Owner ben = owner("hosted_ben", "10.51.0.2");
+	const Owner cy = owner("hosted_cy", "10.51.0.3");
+	const Owner dee = owner("hosted_dee", "10.51.0.4");
+	const Owner eve = owner("hosted_eve", "10.51.0.5");
+	const Owner fay = owner("hosted_fay", "10.51.0.6");
+	const Owner gus = owner("hosted_gus", "10.51.0.7");
+	for (const Owner *o : { &ana, &ben, &cy, &dee, &eve, &fay, &gus }) TEST_EXPECT(o->id > 0 && !o->session.empty());
 	// The start / stop bucket (HostedRoutes::kStartStopPerUser) is 6 per account,
 	// then one every 20 s, and a request refused before it (logged out, no CSRF
-	// header) draws nothing. Ana draws exactly six below (not approved, the
-	// start, already_live, three stops), Dee five (the refused settings), Ben and
-	// Cy one or two: add a draw to one of them and it must move to a new account.
+	// header) draws nothing. Ana draws exactly six below (three starts, three
+	// stops), Dee six (the refused settings, then not_entitled), the others fewer:
+	// add a draw to one of them and it must move to a new account.
 
-	auto start = [&h](const std::string &session, const std::string &body, bool csrf = true) {
-		std::vector<std::string> headers = { kJson, with_session(session) };
+	auto start = [&h](const Owner &o, const std::string &body, bool csrf = true) {
+		std::vector<std::string> headers = { kJson, with_session(o.session) };
 		if (csrf) headers.push_back(kCsrf);
-		return h.send("POST", "/api/me/server/start", headers, body);
+		return h.send("POST", "/api/me/servers", headers, body);
 	};
-	auto stop = [&h](const std::string &session, bool csrf = true) {
-		std::vector<std::string> headers = { with_session(session) };
+	auto stop = [&h](const Owner &o, int64_t id, bool csrf = true) {
+		std::vector<std::string> headers = { with_session(o.session) };
 		if (csrf) headers.push_back(kCsrf);
-		return h.send("POST", "/api/me/server/stop", headers);
+		return h.send("POST", "/api/me/servers/" + std::to_string(id) + "/stop", headers);
 	};
-	auto me = [&h](const std::string &session) {
-		return h.send("GET", "/api/me/server", { with_session(session) });
+	auto list = [&h](const Owner &o) { return h.send("GET", "/api/me/servers", { with_session(o.session) }); };
+	auto one = [&h](const Owner &o, int64_t id) {
+		return h.send("GET", "/api/me/servers/" + std::to_string(id), { with_session(o.session) });
 	};
-	auto approve = [&h](int64_t id, const std::string &body, std::vector<std::string> headers) {
+	auto grant = [&h](int64_t id, const std::string &body, std::vector<std::string> headers) {
 		headers.push_back(kJson);
-		return h.send("PUT", "/api/admin/users/" + std::to_string(id) + "/can-host", headers, body);
+		return h.send("PUT", "/api/admin/users/" + std::to_string(id) + "/comp-servers", headers, body);
+	};
+	const auto entitlement_is = [](const crow::json::rvalue &json, int64_t max, int64_t used, int64_t own,
+										int64_t own_used, bool can_start, const char *source) {
+		if (!json || !json.has("entitlement")) return false;
+		const auto &e = json["entitlement"];
+		return e["max_servers"].i() == max && e["used"].i() == used && e["own_machines"].i() == own &&
+				e["own_used"].i() == own_used && e["can_start"].b() == can_start && str(e["source"]) == source;
 	};
 	const std::string settings =
 			"{\"game_name\":\"Ana's Server\",\"max_players\":16,\"missions\":[\"first.bms\",\"second.bms\"]}";
 
 	// Logged out: 401; no CSRF header on a state change: 403, before any bucket.
-	TEST_EXPECT(h.send("GET", "/api/me/server").code == 401);
-	TEST_EXPECT(h.send("POST", "/api/me/server/start", { kJson, kCsrf }, settings).code == 401);
-	TEST_EXPECT(h.send("POST", "/api/me/server/stop", { kCsrf }).code == 401);
-	auto reply = start(ana_s, settings, /*csrf=*/false);
+	TEST_EXPECT(h.send("GET", "/api/me/servers").code == 401);
+	TEST_EXPECT(h.send("GET", "/api/me/servers/1").code == 401);
+	TEST_EXPECT(h.send("POST", "/api/me/servers", { kJson, kCsrf }, settings).code == 401);
+	TEST_EXPECT(h.send("POST", "/api/me/servers/1/stop", { kCsrf }).code == 401);
+	auto reply = start(ana, settings, /*csrf=*/false);
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
-	reply = stop(ana_s, /*csrf=*/false);
+	reply = stop(ana, 1, /*csrf=*/false);
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
 
-	// Not approved yet.
-	reply = me(ana_s);
+	// No hosting entitlement yet, no server.
+	reply = list(ana);
 	auto json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && !json["can_host"].b());
-	TEST_EXPECT(json["server"].t() == crow::json::type::Null);
+	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && !json["full"].b());
+	TEST_EXPECT(entitlement_is(json, 0, 0, 0, 0, false, "none"));
+	TEST_EXPECT(json["servers"].t() == crow::json::type::List && json["servers"].size() == 0);
 	// The data sets the provider offers, in the service's order (Joint
 	// Operations first; OpenNova's has no folder here, so it is not offered):
 	// each one's game, name, expansions, rotation (the missions the site's
@@ -4256,26 +4365,9 @@ int test_hosted_server_routes(Harness &h) {
 	}
 	TEST_EXPECT(!json.has("default_missions"));
 	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
-	reply = start(ana_s, settings);
-	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_approved");
-
-	// The approval: admin only (the token, or an admin session with the CSRF header).
-	TEST_EXPECT(approve(ana, "{\"can_host\":true}", {}).code == 401);
-	TEST_EXPECT(approve(ana, "{\"can_host\":true}", { with_session(ana_s), kCsrf }).code == 403);
-	reply = approve(ana, "{}", { kBearer });
-	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "missing_field");
-	reply = approve(ana, "{\"can_host\":1}", { kBearer });
-	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
-	TEST_EXPECT(approve(999999, "{\"can_host\":true}", { kBearer }).code == 404);
-	reply = approve(ana, "{\"can_host\":true}", { kBearer });
-	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 200 && json && json["user"]["can_host"].b());
-	for (const int64_t id : { ben, cy }) TEST_EXPECT(approve(id, "{\"can_host\":true}", { kBearer }).code == 200);
-	reply = me(ana_s);
-	TEST_EXPECT(crow::json::load(body_text(reply))["can_host"].b());
 
 	// Settings the backend refuses (hosted_supervisor has every rule): a field and why,
-	// a mistyped field, no JSON. Checked before the approval, so dee needs none.
+	// a mistyped field, no JSON. Checked before the entitlement, so dee needs none.
 	struct Refused {
 		const char *body;
 		const char *error;
@@ -4290,18 +4382,18 @@ int test_hosted_server_routes(Harness &h) {
 		{ "not json", "invalid_json", "" },
 	};
 	for (const Refused &r : refused) {
-		reply = start(dee_s, r.body);
+		reply = start(dee, r.body);
 		json = crow::json::load(body_text(reply));
 		if (reply.code != 400 || error_of_reply(reply) != r.error)
 			std::fprintf(stderr, "  %s -> %s\n", r.body, describe(reply).c_str());
 		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == r.error);
 		if (*r.field) TEST_EXPECT(json && str(json["field"]) == r.field && json.has("message"));
 	}
+	// A valid start with no entitlement.
+	reply = start(dee, settings);
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_entitled");
 	// The game: one the service offers (OpenNova's is known, but not offered
-	// here), whose expansions the expansion names. A bucket of its own (Eve's).
-	const int64_t eve = make_account(h, "hosted_eve", "pw-hosted-eve");
-	const std::string eve_s = login_token(h, "10.51.0.5", "hosted_eve", "pw-hosted-eve");
-	TEST_EXPECT(eve > 0 && !eve_s.empty());
+	// here), whose expansions the expansion names; own_machine a flag.
 	const Refused game_refused[] = {
 		{ "{\"game\":\"jop_3_consumer\",\"game_name\":\"x\",\"missions\":[\"a.bms\"]}", "invalid_settings", "game" },
 		{ "{\"game\":\"opennova_0_consumer\",\"game_name\":\"x\",\"missions\":[\"a.bms\"]}", "invalid_settings",
@@ -4309,9 +4401,10 @@ int test_hosted_server_routes(Harness &h) {
 		{ "{\"game\":\"dfx2_consumer\",\"game_name\":\"x\",\"expansion\":\"jox01\"}", "invalid_settings",
 				"expansion" },
 		{ "{\"game\":7,\"game_name\":\"x\"}", "invalid_field", "" },
+		{ "{\"game_name\":\"x\",\"own_machine\":1}", "invalid_field", "" },
 	};
 	for (const Refused &r : game_refused) {
-		reply = start(eve_s, r.body);
+		reply = start(eve, r.body);
 		json = crow::json::load(body_text(reply));
 		if (reply.code != 400 || error_of_reply(reply) != r.error)
 			std::fprintf(stderr, "  %s -> %s\n", r.body, describe(reply).c_str());
@@ -4319,13 +4412,33 @@ int test_hosted_server_routes(Harness &h) {
 		if (*r.field) TEST_EXPECT(json && str(json["field"]) == r.field && json.has("message"));
 	}
 
-	// The start: 202 with the server, requested, and its first event.
-	reply = start(ana_s, settings);
+	// The comp grant: admin only (the token, or an admin session with the CSRF
+	// header), a whole number 0..16.
+	TEST_EXPECT(grant(ana.id, "{\"comp_servers\":1}", {}).code == 401);
+	TEST_EXPECT(grant(ana.id, "{\"comp_servers\":1}", { with_session(ana.session), kCsrf }).code == 403);
+	reply = grant(ana.id, "{}", { kBearer });
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "missing_field");
+	for (const char *bad : { "{\"comp_servers\":true}", "{\"comp_servers\":1.5}", "{\"comp_servers\":17}",
+				 "{\"comp_servers\":-1}", "{\"comp_servers\":\"2\"}" }) {
+		reply = grant(ana.id, bad, { kBearer });
+		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+	}
+	TEST_EXPECT(grant(999999, "{\"comp_servers\":1}", { kBearer }).code == 404);
+	reply = grant(ana.id, "{\"comp_servers\":2}", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["user"]["comp_servers"].i() == 2 &&
+			json["user"]["max_servers"].i() == 2);
+	for (const Owner *o : { &ben, &cy, &fay, &gus })
+		TEST_EXPECT(grant(o->id, "{\"comp_servers\":1}", { kBearer }).code == 200);
+	TEST_EXPECT(entitlement_is(crow::json::load(body_text(list(ana))), 2, 0, 0, 0, true, "comp"));
+
+	// Two starts: 202 with each server, requested, on a shared machine.
+	reply = start(ana, settings);
 	json = crow::json::load(body_text(reply));
 	if (reply.code != 202) std::fprintf(stderr, "  start: %s\n", describe(reply).c_str());
 	TEST_EXPECT(reply.code == 202 && json && str(json["server"]["state"]) == "requested");
-	const int64_t ana_server = json["server"]["id"].i();
-	TEST_EXPECT(json["server"]["live"].b());
+	const int64_t ana_first = json["server"]["id"].i();
+	TEST_EXPECT(json["server"]["live"].b() && !json["server"]["own_machine"].b());
 	TEST_EXPECT(str(json["server"]["settings"]["game_name"]) == "Ana's Server");
 	// No game named: the first the service offers, with its names.
 	TEST_EXPECT(str(json["server"]["settings"]["game"]) == "jop_2_consumer");
@@ -4335,116 +4448,204 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(json["server"]["settings"]["missions"].size() == 2);
 	TEST_EXPECT(str(json["server"]["settings"]["missions"][0]) == "first.bms");
 	TEST_EXPECT(json["server"]["listing"].t() == crow::json::type::Null);
-	reply = me(ana_s);
+	reply = one(ana, ana_first);
 	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(json && json["server"]["id"].i() == ana_server);
+	TEST_EXPECT(reply.code == 200 && json && json["server"]["id"].i() == ana_first);
 	TEST_EXPECT(json["server"]["events"].size() == 1);
 	TEST_EXPECT(str(json["server"]["events"][0]["from"]).empty() &&
 			str(json["server"]["events"][0]["to"]) == "requested");
-
-	// One live server per account.
-	reply = start(ana_s, settings);
-	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "already_live");
-	TEST_EXPECT(json["server_id"].i() == ana_server);
-	// The default rotation when none is named, then the cap (2).
-	reply = start(ben_s, "{\"game_name\":\"Ben's\"}");
+	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
+	// The second takes the default rotation when it names none.
+	reply = start(ana, "{\"game_name\":\"Ana's Second\"}");
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 202 && json["server"]["settings"]["missions"].size() == 1);
 	TEST_EXPECT(str(json["server"]["settings"]["missions"][0]) == "default.bms");
-	const int64_t ben_server = json["server"]["id"].i();
-	reply = start(cy_s, "{\"game_name\":\"Cy's\"}");
-	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "at_capacity");
-
-	// The fleet view: admin only; it names the owner and never the admin password.
-	h.pool.acquire()->exec("UPDATE hosted_servers SET admin_password = 'planted-admin-secret' WHERE id = ?;",
-			{ opennova::db::BindValue(ana_server) });
-	TEST_EXPECT(h.send("GET", "/api/admin/hosted").code == 401);
-	TEST_EXPECT(h.send("GET", "/api/admin/hosted", { with_session(ana_s) }).code == 403);
-	reply = h.send("GET", "/api/admin/hosted", { kBearer });
+	const int64_t ana_second = json["server"]["id"].i();
+	// The third: every server the grant allows is live.
+	reply = start(ana, settings);
 	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 200 && json && json["cap"].i() == 2 && json["live"].i() == 2);
-	TEST_EXPECT(json["enabled"].b() && str(json["provider"]) == "local");
-	TEST_EXPECT(body_text(reply).find("planted-admin-secret") == std::string::npos);
-	bool seen = false;
-	for (const auto &s : json["servers"]) {
-		if (s["id"].i() != ana_server) continue;
-		seen = true;
-		TEST_EXPECT(s["owner"]["id"].i() == ana && str(s["owner"]["username"]) == "hosted_ana");
-		TEST_EXPECT(s["service_account"].t() == crow::json::type::Null);
-		TEST_EXPECT(str(s["state"]) == "requested");
-		TEST_EXPECT(str(s["settings"]["game"]) == "jop_2_consumer" &&
-				str(s["game_display_name"]) == "Joint Operations");
-	}
-	TEST_EXPECT(seen);
-	TEST_EXPECT(body_text(me(ana_s)).find("planted-admin-secret") == std::string::npos);
-
-	// The owner's stop: stopping, again stopping, then (the row ended) nothing to stop.
-	reply = stop(ana_s);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_limit");
+	TEST_EXPECT(json && json["max_servers"].i() == 2 && json["used"].i() == 2 && json.has("message"));
+	reply = list(ana);
 	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 202 && str(json["server"]["state"]) == "stopping");
-	reply = stop(ana_s);
-	TEST_EXPECT(reply.code == 202 && str(crow::json::load(body_text(reply))["server"]["state"]) == "stopping");
-	TEST_EXPECT(opennova::novaworld_server::hosted::transition(*h.pool.acquire(), ana_server,
-			hosted::State::Stopping, hosted::State::Stopped, "ended by the test"));
-	reply = stop(ana_s);
-	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_live_server");
-	json = crow::json::load(body_text(me(ana_s)));
-	TEST_EXPECT(str(json["server"]["state"]) == "stopped" && !json["server"]["live"].b());
-	TEST_EXPECT(json["server"]["events"].size() == 3);
-	TEST_EXPECT(json["server"]["ended_at"].t() == crow::json::type::String);
-	// Its place is free again: Cy takes it with a Delta Force Xtreme 2 server,
-	// which takes that game's default rotation.
-	reply = start(cy_s, "{\"game\":\"dfx2_consumer\",\"game_name\":\"Cy's\"}");
+	TEST_EXPECT(entitlement_is(json, 2, 2, 0, 0, true, "comp") && json["servers"].size() == 2);
+	TEST_EXPECT(json["servers"][0]["id"].i() == ana_first && json["servers"][1]["id"].i() == ana_second);
+	TEST_EXPECT(!json["servers"][0].has("events"));
+
+	// The cap (4): two more fill it, and the next start finds it full.
+	reply = start(ben, "{\"game_name\":\"Ben's\"}");
+	TEST_EXPECT(reply.code == 202);
+	const int64_t ben_server = crow::json::load(body_text(reply))["server"]["id"].i();
+	reply = start(cy, "{\"game\":\"dfx2_consumer\",\"game_name\":\"Cy's\"}");
 	json = crow::json::load(body_text(reply));
 	if (reply.code != 202) std::fprintf(stderr, "  dfx2 start: %s\n", describe(reply).c_str());
+	// Delta Force Xtreme 2's server takes that game's default rotation.
 	TEST_EXPECT(reply.code == 202 && str(json["server"]["settings"]["game"]) == "dfx2_consumer");
 	TEST_EXPECT(str(json["server"]["game_display_name"]) == "Delta Force Xtreme 2");
 	TEST_EXPECT(json["server"]["settings"]["missions"].size() == 2 &&
 			str(json["server"]["settings"]["missions"][0]) == "dfx2_a.bms");
 	const int64_t cy_server = json["server"]["id"].i();
+	TEST_EXPECT(crow::json::load(body_text(list(ana)))["full"].b());
+	reply = start(fay, "{\"game_name\":\"Fay's\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "at_capacity");
+
+	// Another account's server, by id: 404, as no server's is.
+	for (const int64_t id : { ana_first, int64_t{ 999999 } }) {
+		reply = one(ben, id);
+		TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+	}
+	reply = stop(ben, ana_first);
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), ana_first)->state == hosted::State::Requested);
+
+	// A stopping server still counts: Ben's stop, then his start is server_limit.
+	reply = stop(ben, ben_server);
+	TEST_EXPECT(reply.code == 202 && str(crow::json::load(body_text(reply))["server"]["state"]) == "stopping");
+	reply = start(ben, "{\"game_name\":\"Ben's again\"}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_limit" && json["used"].i() == 1 &&
+			json["max_servers"].i() == 1);
+
+	// The fleet view: admin only; it names the owner and never the admin password.
+	h.pool.acquire()->exec("UPDATE hosted_servers SET admin_password = 'planted-admin-secret' WHERE id = $1;",
+			{ opennova::db::BindValue(ana_first) });
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted").code == 401);
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted", { with_session(ana.session) }).code == 403);
+	reply = h.send("GET", "/api/admin/hosted", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["cap"].i() == 4 && json["live"].i() == 4);
+	TEST_EXPECT(json["enabled"].b() && str(json["provider"]) == "local");
+	TEST_EXPECT(body_text(reply).find("planted-admin-secret") == std::string::npos);
+	bool seen = false;
+	for (const auto &s : json["servers"]) {
+		if (s["id"].i() != ana_first) continue;
+		seen = true;
+		TEST_EXPECT(s["owner"]["id"].i() == ana.id && str(s["owner"]["username"]) == "hosted_ana");
+		TEST_EXPECT(s["service_account"].t() == crow::json::type::Null);
+		TEST_EXPECT(str(s["state"]) == "requested" && !s["own_machine"].b());
+	}
+	TEST_EXPECT(seen);
+	TEST_EXPECT(body_text(list(ana)).find("planted-admin-secret") == std::string::npos);
+	TEST_EXPECT(body_text(one(ana, ana_first)).find("planted-admin-secret") == std::string::npos);
+
+	// The owner's stop by id: stopping, again stopping, then (the row ended) 409
+	// not_live; the list shows the live one first, then the ended one.
+	reply = stop(ana, ana_first);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && str(json["server"]["state"]) == "stopping");
+	reply = stop(ana, ana_first);
+	TEST_EXPECT(reply.code == 202 && str(crow::json::load(body_text(reply))["server"]["state"]) == "stopping");
+	TEST_EXPECT(hosted::transition(*h.pool.acquire(), ana_first, hosted::State::Stopping, hosted::State::Stopped,
+			"ended by the test"));
+	reply = stop(ana, ana_first);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
+	json = crow::json::load(body_text(one(ana, ana_first)));
+	TEST_EXPECT(str(json["server"]["state"]) == "stopped" && !json["server"]["live"].b());
+	TEST_EXPECT(json["server"]["events"].size() == 3);
+	TEST_EXPECT(json["server"]["ended_at"].t() == crow::json::type::String);
+	json = crow::json::load(body_text(list(ana)));
+	TEST_EXPECT(json["servers"].size() == 2 && json["servers"][0]["id"].i() == ana_second &&
+			json["servers"][1]["id"].i() == ana_first && entitlement_is(json, 2, 1, 0, 0, true, "comp"));
+	end_stopping_servers(h); // Ben's
+
+	// The own-machine add-on: none without it (a comp grant buys no machine),
+	// then a tier with one machine paid for, and the start on it.
+	reply = start(fay, "{\"game_name\":\"Fay's own\",\"own_machine\":true}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "no_own_machine");
 	{
-		const auto cy_row = hosted::find_server(*h.pool.acquire(), cy_server);
-		TEST_EXPECT(cy_row && cy_row->settings.game == "dfx2_consumer");
+		auto db = h.pool.acquire();
+		const int64_t period_end = billing::unix_now() + 30 * 24 * 60 * 60;
+		billing::SubscriptionRow tier;
+		tier.stripe_subscription_id = "sub_routes_fay_tier";
+		tier.stripe_customer_id = "cus_routes_fay";
+		tier.user_id = fay.id;
+		tier.status = "active";
+		tier.item = billing::ItemKind::Tier;
+		tier.price_id = "price_routes_tier1";
+		tier.tier = 1;
+		tier.current_period_end = period_end;
+		billing::upsert_subscription(*db, tier);
+		billing::SubscriptionRow machine = tier;
+		machine.stripe_subscription_id = "sub_routes_fay_machine";
+		machine.item = billing::ItemKind::OwnMachine;
+		machine.price_id = "price_routes_own";
+		machine.tier = 0;
+		billing::upsert_subscription(*db, machine);
+	}
+	TEST_EXPECT(entitlement_is(crow::json::load(body_text(list(fay))), 1, 0, 1, 0, true, "tier"));
+	reply = start(fay, "{\"game_name\":\"Fay's own\",\"own_machine\":true}");
+	json = crow::json::load(body_text(reply));
+	if (reply.code != 202) std::fprintf(stderr, "  own-machine start: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 202 && json["server"]["own_machine"].b());
+	const int64_t fay_server = json["server"]["id"].i();
+	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), fay_server)->own_machine);
+	TEST_EXPECT(entitlement_is(crow::json::load(body_text(list(fay))), 1, 1, 1, 1, true, "tier"));
+
+	// The list's ended servers: the newest 10, after the live ones.
+	{
+		auto db = h.pool.acquire();
+		for (int i = 0; i < 12; ++i) {
+			db->exec("INSERT INTO hosted_servers (owner_user_id, state, game_name, max_players, time_limit, "
+					 "kill_limit, max_score, respawn, start_delay, missions, ended_at) "
+					 "VALUES ($1, 'stopped', $2, 8, 30, 50, 5, 5, 0, 'a.bms', now());",
+					{ opennova::db::BindValue(gus.id), opennova::db::BindValue("Gus ended " + std::to_string(i)) });
+		}
+		db->exec("INSERT INTO hosted_servers (owner_user_id, state, game_name, max_players, time_limit, "
+				 "kill_limit, max_score, respawn, start_delay, missions) "
+				 "VALUES ($1, 'running', 'Gus live', 8, 30, 50, 5, 5, 0, 'a.bms');",
+				{ opennova::db::BindValue(gus.id) });
+	}
+	json = crow::json::load(body_text(list(gus)));
+	TEST_EXPECT(json && json["servers"].size() == 11);
+	if (json && json["servers"].size() == 11) {
+		TEST_EXPECT(str(json["servers"][0]["settings"]["game_name"]) == "Gus live" && json["servers"][0]["live"].b());
+		for (size_t i = 1; i < 11; ++i) {
+			TEST_EXPECT(str(json["servers"][i]["settings"]["game_name"]) == "Gus ended " + std::to_string(12 - i));
+			TEST_EXPECT(!json["servers"][i]["live"].b());
+		}
 	}
 
 	// The admin's stops: one server (404 for none, 409 for an ended one), and the kill switch.
 	auto admin_stop = [&h](const std::string &id, std::vector<std::string> headers) {
 		return h.send("POST", "/api/admin/hosted/" + id + "/stop", headers);
 	};
-	TEST_EXPECT(admin_stop(std::to_string(cy_server), { with_session(cy_s), kCsrf }).code == 403);
+	TEST_EXPECT(admin_stop(std::to_string(cy_server), { with_session(cy.session), kCsrf }).code == 403);
 	TEST_EXPECT(admin_stop("999999", { kBearer }).code == 404);
-	reply = admin_stop(std::to_string(ana_server), { kBearer });
+	reply = admin_stop(std::to_string(ana_first), { kBearer });
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
 	reply = admin_stop(std::to_string(cy_server), { kBearer });
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 202 && str(json["server"]["state"]) == "stopping");
 	TEST_EXPECT(str(json["server"]["owner"]["username"]) == "hosted_cy");
-	TEST_EXPECT(h.send("POST", "/api/admin/hosted/stop-all", { with_session(ben_s), kCsrf }).code == 403);
+	TEST_EXPECT(h.send("POST", "/api/admin/hosted/stop-all", { with_session(ben.session), kCsrf }).code == 403);
 	reply = h.send("POST", "/api/admin/hosted/stop-all", { kBearer });
-	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["stopping"].i() == 1);
+	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["stopping"].i() == 3);
 	reply = h.send("POST", "/api/admin/hosted/stop-all", { kBearer });
 	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["stopping"].i() == 0);
-	const auto ben_row = hosted::find_server(*h.pool.acquire(), ben_server);
-	TEST_EXPECT(ben_row && ben_row->state == hosted::State::Stopping);
+	const auto second_row = hosted::find_server(*h.pool.acquire(), ana_second);
+	TEST_EXPECT(second_row && second_row->state == hosted::State::Stopping);
 	end_stopping_servers(h);
+	{
+		auto db = h.pool.acquire();
+		db->exec("DELETE FROM billing_subscriptions WHERE stripe_subscription_id LIKE 'sub_routes_fay_%';");
+	}
 
 	// Hosting off (the Secure listener runs with ONNET_HOSTED_PROVIDER none): 503.
 	std::string token;
 	{
 		auto conn = h.pool.acquire();
-		const auto user = nws::get_user_by_id(*conn, dee);
-		const auto minted = nws::create_web_session(*conn, dee, user->credentials_gen, "127.0.0.1", "harness");
+		const auto user = nws::get_user_by_id(*conn, dee.id);
+		const auto minted = nws::create_web_session(*conn, dee.id, user->credentials_gen, "127.0.0.1", "harness");
 		TEST_EXPECT(minted.has_value());
 		token = *minted;
 	}
-	reply = h.send_to(h.secure_port, "POST", "/api/me/server/start",
+	reply = h.send_to(h.secure_port, "POST", "/api/me/servers",
 			{ kJson, kCsrf, with_cookie(nws::kWebSessionHostCookie, token) }, "{\"game_name\":\"x\"}");
 	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "hosting_disabled");
-	reply = h.send_to(h.secure_port, "GET", "/api/me/server",
-			{ with_cookie(nws::kWebSessionHostCookie, token) });
+	reply = h.send_to(h.secure_port, "GET", "/api/me/servers", { with_cookie(nws::kWebSessionHostCookie, token) });
 	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 200 && json && !json["enabled"].b() && json["data_sets"].size() == 0);
+	TEST_EXPECT(reply.code == 200 && json && !json["enabled"].b() && !json["full"].b() &&
+			json["data_sets"].size() == 0);
 	return 0;
 }
 
@@ -4453,8 +4654,8 @@ int test_hosted_server_routes(Harness &h) {
 // it (a key /NWHost.dll recorded for that account, presented by a hand-driven
 // host), and its owner's GET /api/me/hosts carries it with its hosted server,
 // the owner's ServerCommand reaches it while another account's is a 404, and
-// the admin view names the owner. An admin withdraws the owner's approval
-// through the route and one supervisor pass (a fake provider) moves the server
+// the admin view names the owner. An admin withdraws the owner's comp grant
+// through the route and one supervisor pass (a fake machine driver) moves the server
 // to stopping; a stopping server takes no command (409 server_stopping), and
 // the owner's and the admin's stop on the listing are the hosted server's stop
 // (no ServerStopHosting reaches the host, the supervisor's to send). The
@@ -4468,7 +4669,7 @@ int test_hosted_listing_owner(Harness &h) {
 	using Notice = PushHost::Notice;
 	const int64_t owner = make_account(h, "listing_owner", "pw-listing-owner");
 	TEST_EXPECT(owner > 0 && make_account(h, "listing_other", "pw-listing-other") > 0);
-	TEST_EXPECT(nws::set_can_host(*h.pool.acquire(), owner, true).ok);
+	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), owner, 1).ok);
 	const std::string owner_s = login_token(h, "10.52.0.1", "listing_owner", "pw-listing-owner");
 	const std::string other_s = login_token(h, "10.52.0.2", "listing_other", "pw-listing-other");
 	TEST_EXPECT(!owner_s.empty() && !other_s.empty());
@@ -4478,7 +4679,8 @@ int test_hosted_listing_owner(Harness &h) {
 	settings.game = hosted::kDataSetJointOperations;
 	settings.game_name = "Hosted Owner Test";
 	settings.missions = { "a.bms" };
-	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, hosted::known_data_sets(), 10);
+	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, hosted::known_data_sets(), 10,
+			opennova::novaworld_server::billing::unix_now());
 	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
 	const int64_t server_id = request.id;
 	const std::string service_name = nws::service_username(server_id);
@@ -4508,7 +4710,7 @@ int test_hosted_listing_owner(Harness &h) {
 	TEST_EXPECT(json["hosts"][0]["hosted_server_id"].i() == server_id);
 	reply = h.send("GET", "/api/me/hosts", { with_session(other_s) });
 	TEST_EXPECT(crow::json::load(body_text(reply))["hosts"].size() == 0);
-	reply = h.send("GET", "/api/me/server", { with_session(owner_s) });
+	reply = h.send("GET", "/api/me/servers/" + std::to_string(server_id), { with_session(owner_s) });
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(json && json["server"]["listing"]["rid"].i() == static_cast<int64_t>(rid));
 
@@ -4540,23 +4742,23 @@ int test_hosted_listing_owner(Harness &h) {
 	}
 	TEST_EXPECT(seen);
 
-	// An admin withdraws the owner's approval (the route), and the supervisor's
-	// next pass (here one hand-driven pass over a fake provider) stops the server.
-	reply = h.send("PUT", "/api/admin/users/" + std::to_string(owner) + "/can-host", { kBearer, kJson },
-			"{\"can_host\":false}");
-	TEST_EXPECT(reply.code == 200 && !crow::json::load(body_text(reply))["user"]["can_host"].b());
+	// An admin withdraws the owner's comp grant (the route), and the supervisor's
+	// next pass (here one hand-driven pass over a fake machine driver) stops the server.
+	reply = h.send("PUT", "/api/admin/users/" + std::to_string(owner) + "/comp-servers", { kBearer, kJson },
+			"{\"comp_servers\":0}");
+	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["user"]["max_servers"].i() == 0);
 	{
-		hosted_test::FakeProvider fake;
+		hosted_test::FakeDriver fake;
 		hosted::Supervisor supervisor(h.pool, fake, hosted::SupervisorConfig{});
 		supervisor.tick(1000);
 		TEST_EXPECT(fake.launches == 0);
 	}
 	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), server_id)->state == hosted::State::Stopping);
-	json = crow::json::load(body_text(h.send("GET", "/api/me/server", { with_session(owner_s) })));
+	json = crow::json::load(body_text(h.send("GET", "/api/me/servers/" + std::to_string(server_id), { with_session(owner_s) })));
 	TEST_EXPECT(json && str(json["server"]["state"]) == "stopping");
 	const auto &events = json["server"]["events"];
 	TEST_EXPECT(events.size() >= 2 &&
-			str(events[events.size() - 1]["detail"]).find("approval to host was withdrawn") != std::string::npos);
+			str(events[events.size() - 1]["detail"]).find("hosting entitlement allows 0 hosted servers") != std::string::npos);
 
 	// A stopping server takes no more commands; the stops on its listing are the
 	// hosted server's: no ServerStopHosting goes out (the supervisor's to send).
@@ -4585,7 +4787,7 @@ int test_hosted_listing_owner(Harness &h) {
 	reply = h.send("GET", "/api/admin/users", { kBearer });
 	TEST_EXPECT(reply.code == 200 && body_text(reply).find(service_name) == std::string::npos);
 	const std::string service_path = "/api/admin/users/" + std::to_string(service.id);
-	TEST_EXPECT(h.send("PUT", service_path + "/can-host", { kBearer, kJson }, "{\"can_host\":true}").code == 404);
+	TEST_EXPECT(h.send("PUT", service_path + "/comp-servers", { kBearer, kJson }, "{\"comp_servers\":1}").code == 404);
 	TEST_EXPECT(h.send("PUT", service_path, { kBearer, kJson }, "{\"nwhandle\":\"Taken\"}").code == 404);
 	TEST_EXPECT(h.send("DELETE", service_path, { kBearer }).code == 404);
 	reply = h.send("POST", "/api/register", { kJson, kCsrf, from_ip("10.52.0.11") },
@@ -4851,6 +5053,414 @@ bool in_order(const std::vector<std::string> &lines, const std::vector<std::stri
 	return next == want.size();
 }
 
+// The machine agents' routes (hosted/agent_route.h) are the internal listener's
+// alone: the public listener answers neither the bootstrap nor the sync (nor the
+// old per-server bootstrap path), under /api/ or not, with anything a machine
+// could read as an answer.
+int test_no_agent_routes_on_public_listener(Harness &h) {
+	const std::string auth = "Authorization: Bearer " + std::string(48, 'A');
+	const std::string hello = "{\"protocol\":1,\"agent_version\":\"test\"}";
+	for (const char *path : { "/hosted/machines/1/bootstrap", "/hosted/machines/1/sync", "/hosted/bootstrap/1",
+				 "/api/hosted/machines/1/sync" }) {
+		const auto reply = h.send("POST", path, { auth, kJson }, hello);
+		if (reply.code == 200) std::fprintf(stderr, "  %s: %s\n", path, describe(reply).c_str());
+		TEST_EXPECT(reply.transport_ok && reply.code != 200);
+		const std::string body = body_text(reply);
+		TEST_EXPECT(body.find("agent_secret") == std::string::npos && body.find("desired") == std::string::npos);
+	}
+	return 0;
+}
+
+// The admin's fleet routes (hosted/fleet_routes.h) over fleet rows made by hand
+// (no supervisor): the fleet view's machines (kind, state, type, slots and the
+// slots used, the public address, the month's egress; no credential of the
+// agent's) and servers (the owner with its support tier, the machine and slot,
+// the game port, the listed players, null where there are none), its `owner`
+// and `state` filters, one server with its events and its machine, and the
+// machines' moves: a drain and an end (each again answered the same, an end
+// past a drain, a drain past an end refused not_live), a fleet roll draining
+// every machine that takes servers; admin only.
+int test_admin_fleet_routes(Harness &h) {
+	namespace hosted = opennova::novaworld_server::hosted;
+	namespace billing = opennova::novaworld_server::billing;
+	const int64_t ana = make_account(h, "fleet_ana", "pw-fleet-ana");
+	const int64_t ben = make_account(h, "fleet_ben", "pw-fleet-ben");
+	TEST_EXPECT(ana > 0 && ben > 0 && nws::set_comp_servers(*h.pool.acquire(), ana, 2).ok);
+	{
+		billing::SubscriptionRow tier;
+		tier.stripe_subscription_id = "sub_fleet_ben";
+		tier.stripe_customer_id = "cus_fleet_ben";
+		tier.user_id = ben;
+		tier.status = "active";
+		tier.item = billing::ItemKind::Tier;
+		tier.price_id = "price_htier2";
+		tier.tier = 2;
+		tier.current_period_end = billing::unix_now() + 30 * 24 * 60 * 60;
+		billing::upsert_subscription(*h.pool.acquire(), tier);
+	}
+	const std::string ana_s = login_token(h, "10.53.0.1", "fleet_ana", "pw-fleet-ana");
+	TEST_EXPECT(!ana_s.empty());
+	auto db = h.pool.acquire();
+
+	// A ready shared machine (its agent reported once) and the servers: Ana's on
+	// its slot 0, running and listed with 5 players; Ana's second, waiting; Ben's
+	// ended, where it last ran on slot 1.
+	const auto machine = hosted::create_machine(*db, { "local", hosted::MachineKind::Shared, 4, "opennova-serve:local", 0 });
+	hosted::LaunchedMachine launched;
+	launched.cloud_id = "local-fleet-1";
+	launched.private_address = "10.0.1.7";
+	launched.public_address = "198.51.100.7";
+	launched.instance_type = "t3a.large";
+	launched.template_version = "lt-0fleet:3";
+	TEST_EXPECT(hosted::mark_launched(*db, machine.id, launched));
+	TEST_EXPECT(hosted::record_sync(*db, machine.id, "test-agent", {}).has_value());
+	hosted::HostedSettings settings;
+	settings.game = hosted::kDataSetJointOperations;
+	settings.game_name = "Fleet Routes";
+	settings.missions = { "a.bms" };
+	const auto start = [&](int64_t owner) {
+		const auto r = hosted::request_server(*db, owner, settings, hosted::known_data_sets(), 50, billing::unix_now());
+		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
+	};
+	const int64_t running = start(ana);
+	const int64_t waiting = start(ana);
+	const int64_t ended = start(ben);
+	TEST_EXPECT(running > 0 && waiting > 0 && ended > 0);
+	TEST_EXPECT(hosted::assign_slot(*db, running, machine.id, 0, 32768) == 1);
+	TEST_EXPECT(hosted::assign_slot(*db, ended, machine.id, 1, 32769) == 1);
+	for (const auto &[from, to] : { std::pair<hosted::State, hosted::State>{ hosted::State::Requested, hosted::State::Provisioning },
+				 { hosted::State::Provisioning, hosted::State::Booting }, { hosted::State::Booting, hosted::State::Listing },
+				 { hosted::State::Listing, hosted::State::Running } })
+		TEST_EXPECT(hosted::transition(*db, running, from, to, "by the test"));
+	TEST_EXPECT(hosted::transition(*db, ended, hosted::State::Requested, hosted::State::Stopped, "by the test"));
+	const auto service = nws::upsert_service_account(*db, nws::service_username(running), "pw-fleet-service");
+	TEST_EXPECT(service.ok);
+	hosted::set_service_account(*db, running, service.id);
+	const std::string key = "AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIIIJJJJKKKKLLLL";
+	TEST_EXPECT(record_key_for(*db, key, service.id));
+	const uint32_t rid = 0x0F1EE7u;
+	{
+		opennova::hostdb::HostRow row;
+		row.rid = rid;
+		row.gsid = "GSID-fleet";
+		row.game = "jop_2_consumer";
+		row.server_name = "Fleet Routes";
+		row.host_ip = row.peer_ip = "198.51.100.7";
+		row.host_port = row.peer_port = 32768;
+		row.player_count = 5;
+		row.max_players = 32;
+		row.host_user_id = opennova::hostdb::claim_host_key(*db, key, rid);
+		opennova::hostdb::upsert_host(*db, row);
+	}
+
+	// Admin only.
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted").code == 401);
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted", { with_session(ana_s) }).code == 403);
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted/" + std::to_string(running), { with_session(ana_s) }).code == 403);
+	TEST_EXPECT(h.send("POST", "/api/admin/fleet/roll", { with_session(ana_s), kCsrf }).code == 403);
+	TEST_EXPECT(h.send("POST", "/api/admin/fleet/machines/" + std::to_string(machine.id) + "/drain",
+						{ with_session(ana_s), kCsrf })
+						.code == 403);
+
+	auto reply = h.send("GET", "/api/admin/hosted", { kBearer });
+	auto json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && json["cap"].i() == 4);
+	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
+	TEST_EXPECT(body_text(reply).find(machine.bootstrap_token) == std::string::npos);
+	TEST_EXPECT(body_text(reply).find("agent_secret") == std::string::npos && body_text(reply).find("bootstrap_token") == std::string::npos);
+	bool machine_seen = false;
+	for (const auto &m : json["machines"]) {
+		if (m["id"].i() != machine.id) continue;
+		machine_seen = true;
+		TEST_EXPECT(str(m["kind"]) == "shared" && str(m["state"]) == "ready" && str(m["instance_type"]) == "t3a.large");
+		TEST_EXPECT(m["slots"].i() == 4 && m["slots_used"].i() == 1 && str(m["public_address"]) == "198.51.100.7");
+		TEST_EXPECT(m["egress_bytes_month"].t() == crow::json::type::Number && m["egress_bytes_month"].i() == 0);
+		TEST_EXPECT(str(m["template_version"]) == "lt-0fleet:3" && m["reserved_for"].t() == crow::json::type::Null);
+		TEST_EXPECT(m["bootstrapped"].t() == crow::json::type::False);
+	}
+	TEST_EXPECT(machine_seen);
+	const auto server_in = [](const crow::json::rvalue &list, int64_t id) -> const crow::json::rvalue * {
+		for (const auto &s : list) {
+			if (s["id"].i() == id) return &s;
+		}
+		return nullptr;
+	};
+	const crow::json::rvalue *r = server_in(json["servers"], running);
+	TEST_EXPECT(r != nullptr);
+	if (r) {
+		TEST_EXPECT((*r)["owner"]["id"].i() == ana && str((*r)["owner"]["username"]) == "fleet_ana");
+		TEST_EXPECT((*r)["owner"]["tier"].t() == crow::json::type::Null); // a comp grant, no tier
+		TEST_EXPECT((*r)["machine_ref"].i() == machine.id && (*r)["slot"].i() == 0 && (*r)["game_port"].i() == 32768);
+		TEST_EXPECT((*r)["players"].i() == 5 && (*r)["listing"]["rid"].i() == static_cast<int64_t>(rid));
+		TEST_EXPECT(str((*r)["state"]) == "running" && (*r)["generation"].i() == 1);
+	}
+	const crow::json::rvalue *w = server_in(json["servers"], waiting);
+	TEST_EXPECT(w != nullptr);
+	if (w) {
+		TEST_EXPECT((*w)["machine_ref"].t() == crow::json::type::Null && (*w)["slot"].t() == crow::json::type::Null);
+		TEST_EXPECT((*w)["game_port"].t() == crow::json::type::Null && (*w)["players"].t() == crow::json::type::Null);
+	}
+	const crow::json::rvalue *e = server_in(json["servers"], ended);
+	TEST_EXPECT(e != nullptr);
+	if (e) {
+		TEST_EXPECT((*e)["owner"]["tier"].i() == 2 && (*e)["machine_ref"].i() == machine.id && (*e)["slot"].i() == 1);
+		TEST_EXPECT(!(*e)["live"].b());
+	}
+
+	// The filters: an owner by username, the live or the ended ones.
+	const auto ids = [&h](const std::string &query) {
+		std::vector<int64_t> out;
+		const auto got = h.send("GET", "/api/admin/hosted" + query, { kBearer });
+		const auto list = crow::json::load(body_text(got));
+		if (got.code != 200 || !list) return std::vector<int64_t>{ -1 };
+		for (const auto &s : list["servers"]) out.push_back(s["id"].i());
+		return out;
+	};
+	auto has = [](const std::vector<int64_t> &list, int64_t id) {
+		return std::find(list.begin(), list.end(), id) != list.end();
+	};
+	auto of_ana = ids("?owner=fleet_ana");
+	TEST_EXPECT(of_ana.size() == 2 && has(of_ana, running) && has(of_ana, waiting));
+	TEST_EXPECT(ids("?owner=fleet_nobody").empty());
+	auto ana_live = ids("?owner=fleet_ana&state=live");
+	TEST_EXPECT(ana_live.size() == 2);
+	auto ben_ended = ids("?owner=fleet_ben&state=ended");
+	TEST_EXPECT(ben_ended == std::vector<int64_t>{ ended });
+	TEST_EXPECT(ids("?owner=fleet_ben&state=live").empty());
+	TEST_EXPECT(!has(ids("?state=live"), ended) && !has(ids("?state=ended"), running));
+	reply = h.send("GET", "/api/admin/hosted?state=sleeping", { kBearer });
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+
+	// One server, with its events and its machine.
+	reply = h.send("GET", "/api/admin/hosted/" + std::to_string(running), { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["server"]["id"].i() == running);
+	TEST_EXPECT(json["server"]["events"].size() == 5 && json["machine"]["id"].i() == machine.id);
+	TEST_EXPECT(str(json["server"]["owner"]["username"]) == "fleet_ana" && json["machine"]["slots_used"].i() == 1);
+	reply = h.send("GET", "/api/admin/hosted/" + std::to_string(waiting), { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json["machine"].t() == crow::json::type::Null);
+	reply = h.send("GET", "/api/admin/hosted/999999", { kBearer });
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+
+	// The machines' moves.
+	const std::string machine_path = "/api/admin/fleet/machines/" + std::to_string(machine.id);
+	reply = h.send("POST", machine_path + "/drain", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && str(json["machine"]["state"]) == "draining" &&
+			str(json["machine"]["end_reason"]) == "drained by an admin");
+	reply = h.send("POST", machine_path + "/drain", { kBearer });
+	TEST_EXPECT(reply.code == 202 && str(crow::json::load(body_text(reply))["machine"]["state"]) == "draining");
+	reply = h.send("POST", machine_path + "/end", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && str(json["machine"]["state"]) == "ending");
+	TEST_EXPECT(h.send("POST", machine_path + "/end", { kBearer }).code == 202);
+	reply = h.send("POST", machine_path + "/drain", { kBearer });
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
+	TEST_EXPECT(h.send("POST", "/api/admin/fleet/machines/999999/end", { kBearer }).code == 404);
+	TEST_EXPECT(h.send("POST", "/api/admin/fleet/machines/999999/drain", { kBearer }).code == 404);
+	TEST_EXPECT(hosted::transition_machine(*db, machine.id, hosted::FleetMachineState::Ending,
+			hosted::FleetMachineState::Ended, "by the test"));
+	reply = h.send("POST", machine_path + "/end", { kBearer });
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
+
+	// A roll drains every machine that takes servers, none other.
+	const auto booting = hosted::create_machine(*db, { "local", hosted::MachineKind::Shared, 4, "opennova-serve:local", 0 });
+	launched.cloud_id = "local-fleet-2";
+	TEST_EXPECT(hosted::mark_launched(*db, booting.id, launched));
+	const auto failed = hosted::create_machine(*db, { "local", hosted::MachineKind::Own, 1, "opennova-serve:local", 0 });
+	TEST_EXPECT(hosted::transition_machine(*db, failed.id, hosted::FleetMachineState::Launching,
+			hosted::FleetMachineState::Failed, "by the test"));
+	reply = h.send("POST", "/api/admin/fleet/roll", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && json && json["draining"].i() == 1 && json["machines"].size() == 1 &&
+			json["machines"][0].i() == booting.id);
+	TEST_EXPECT(hosted::find_machine(*db, booting.id)->state == hosted::FleetMachineState::Draining);
+	TEST_EXPECT(hosted::find_machine(*db, booting.id)->end_reason == "rolled by an admin");
+	TEST_EXPECT(hosted::find_machine(*db, failed.id)->state == hosted::FleetMachineState::Failed);
+	reply = h.send("POST", "/api/admin/fleet/roll", { kBearer });
+	TEST_EXPECT(reply.code == 202 && crow::json::load(body_text(reply))["draining"].i() == 0);
+
+	// Leave no live server or machine for the cases after.
+	TEST_EXPECT(hosted::transition_machine(*db, booting.id, hosted::FleetMachineState::Draining,
+			hosted::FleetMachineState::Ended, "by the test"));
+	opennova::hostdb::remove_host_by_rid(*db, rid);
+	for (const int64_t id : { running, waiting }) hosted::request_stop(*db, id, "by the test");
+	end_stopping_servers(*db);
+	TEST_EXPECT(nws::delete_service_account(*db, service.id).ok);
+	db->exec("DELETE FROM billing_subscriptions WHERE stripe_subscription_id = 'sub_fleet_ben';");
+	return 0;
+}
+
+// The stats routes (hosted/stats_routes.h) over samples written by hand at this
+// minute (no sampler runs here): the owner's one server (every key of the
+// reply, the live view with its listing's players and its newest sample's CPU,
+// the summary, a point a minute for 1h with ISO timestamps), another account's
+// server a 404, the account's servers together and the fleet's (no live view,
+// no server_id), the admin's routes (a player's session refused), the ranges
+// (24h by default, 400 for another), no-store; and /api/me/servers/stats and
+// /api/admin/hosted/stats never read as a server id.
+int test_hosted_stats_routes(Harness &h) {
+	namespace hosted = opennova::novaworld_server::hosted;
+	namespace billing = opennova::novaworld_server::billing;
+	const int64_t owner = make_account(h, "stats_owner", "pw-stats-owner");
+	const int64_t other = make_account(h, "stats_other", "pw-stats-other");
+	TEST_EXPECT(owner > 0 && other > 0);
+	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), owner, 2).ok);
+	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), other, 1).ok);
+	const std::string owner_s = login_token(h, "10.54.0.1", "stats_owner", "pw-stats-owner");
+	const std::string other_s = login_token(h, "10.54.0.2", "stats_other", "pw-stats-other");
+	TEST_EXPECT(!owner_s.empty() && !other_s.empty());
+	auto db = h.pool.acquire();
+	hosted::HostedSettings settings;
+	settings.game = hosted::kDataSetJointOperations;
+	settings.game_name = "Stats Routes";
+	settings.missions = { "a.bms" };
+	const auto start = [&](int64_t who) {
+		const auto r = hosted::request_server(*db, who, settings, hosted::known_data_sets(), 50, billing::unix_now());
+		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
+	};
+	const int64_t running = start(owner);
+	const int64_t ended = start(owner);
+	const int64_t others = start(other);
+	TEST_EXPECT(running > 0 && ended > 0 && others > 0);
+	for (const auto &[from, to] : { std::pair<hosted::State, hosted::State>{ hosted::State::Requested, hosted::State::Provisioning },
+				 { hosted::State::Provisioning, hosted::State::Booting }, { hosted::State::Booting, hosted::State::Listing },
+				 { hosted::State::Listing, hosted::State::Running } })
+		TEST_EXPECT(hosted::transition(*db, running, from, to, "by the test"));
+	TEST_EXPECT(hosted::transition(*db, ended, hosted::State::Requested, hosted::State::Stopped, "by the test"));
+	// Its listing: 4 players, a mission, the round's clock (TimeLeft, whole minutes).
+	const auto service = nws::upsert_service_account(*db, nws::service_username(running), "pw-stats-service");
+	TEST_EXPECT(service.ok);
+	hosted::set_service_account(*db, running, service.id);
+	const std::string key = "LLLLKKKKJJJJIIIIHHHHGGGGFFFFEEEEDDDDCCCCBBBBAAAA";
+	TEST_EXPECT(record_key_for(*db, key, service.id));
+	const uint32_t rid = 0x05A75u;
+	{
+		opennova::hostdb::HostRow row;
+		row.rid = rid;
+		row.gsid = "GSID-stats";
+		row.game = "jop_2_consumer";
+		row.server_name = "Stats Routes";
+		row.mission_name = "Cliff Hanger";
+		row.game_type = "DM";
+		row.time_left = "12";
+		row.host_ip = row.peer_ip = "198.51.100.9";
+		row.host_port = row.peer_port = 32768;
+		row.player_count = 4;
+		row.max_players = 32;
+		row.host_user_id = opennova::hostdb::claim_host_key(*db, key, rid);
+		opennova::hostdb::upsert_host(*db, row);
+	}
+	// The minutes: the running server's last two, the ended one's earlier, the
+	// other account's, on an empty slate (an earlier case's hand-driven
+	// supervisor pass sampled the servers live then).
+	db->exec("DELETE FROM hosted_server_samples;");
+	db->exec("DELETE FROM hosted_server_hourly;");
+	const int64_t now = billing::unix_now();
+	const int64_t minute = now - now % 60;
+	// (The unique players written once per server, so an hour's edge between the
+	// two minutes counts them once either way.)
+	const auto put = [&](int64_t id, int64_t at, int64_t players, int64_t egress, int64_t unique) {
+		hosted::ServerSample s;
+		s.server_id = id;
+		s.at = at;
+		s.state = "running";
+		s.players = players;
+		s.max_players = 32;
+		s.cpu_percent = 30.0;
+		s.memory_bytes = 64 << 20;
+		s.egress_bytes = egress;
+		hosted::insert_sample(*db, s);
+		hosted::rollup_hour(*db, id, at, unique);
+	};
+	put(running, minute, 4, 1000, 2);
+	put(running, minute - 60, 4, 1000, 0);
+	put(ended, minute - 120, 1, 10, 1);
+	put(others, minute, 9, 5, 1);
+	const auto stats = [&h](const std::string &path, const std::vector<std::string> &headers) {
+		const auto reply = h.send("GET", path, headers);
+		return std::make_pair(reply, crow::json::load(body_text(reply)));
+	};
+	const std::string one = "/api/me/servers/" + std::to_string(running) + "/stats";
+
+	TEST_EXPECT(h.send("GET", one + "?range=1h").code == 401);
+	auto [reply, json] = stats(one + "?range=1h", { with_session(owner_s) });
+	if (reply.code != 200) std::fprintf(stderr, "  %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 200 && json && header_value(reply, "Cache-Control") == "no-store");
+	TEST_EXPECT(json["server_id"].i() == running && str(json["range"]) == "1h");
+	const auto &live = json["live"];
+	TEST_EXPECT(str(live["state"]) == "running" && live["uptime_seconds"].t() == crow::json::type::Number);
+	TEST_EXPECT(live["players"].i() == 4 && live["max_players"].i() == 32 && str(live["mission"]) == "Cliff Hanger");
+	TEST_EXPECT(str(live["game_type"]) == "DM" && live["time_left"].i() == 12 * 60);
+	TEST_EXPECT(live["scene"].t() == crow::json::type::Null && live["link_state"].t() == crow::json::type::Null);
+	TEST_EXPECT(std::fabs(live["cpu_percent"].d() - 30.0) < 1e-9 && live["memory_bytes"].i() == (64 << 20));
+	const auto &summary = json["summary"];
+	TEST_EXPECT(summary["live_seconds"].i() == 120 && summary["running_seconds"].i() == 120);
+	TEST_EXPECT(std::fabs(summary["availability"].d() - 1.0) < 1e-9 && summary["restarts"].i() == 0);
+	TEST_EXPECT(summary["peak_players"].i() == 4 && std::fabs(summary["avg_players"].d() - 4.0) < 1e-9);
+	TEST_EXPECT(std::fabs(summary["player_hours"].d() - 8.0 / 60) < 1e-9 && summary["unique_players"].i() == 2);
+	// The month's egress: both minutes', unless a month began between them.
+	TEST_EXPECT(summary["missions"].i() == 0 && summary["egress_bytes"].i() == 2000 &&
+			summary["egress_bytes_month"].i() >= 1000 && summary["egress_bytes_month"].i() <= 2000);
+	TEST_EXPECT(summary["approximate"].size() == 2 && str(summary["approximate"][0]) == "unique_players" &&
+			str(summary["approximate"][1]) == "missions");
+	const auto &series = json["series"];
+	TEST_EXPECT(series["step_seconds"].i() == 60 && series["points"].size() == 60);
+	if (series["points"].size() == 60) {
+		const auto &last = series["points"][59];
+		TEST_EXPECT(str(last["t"]) == hosted::iso_utc(minute) && str(last["t"]).size() == 20 && str(last["t"]).back() == 'Z');
+		TEST_EXPECT(std::fabs(last["players"].d() - 4.0) < 1e-9 && last["running"].b() && last["egress_bytes"].i() == 1000);
+		TEST_EXPECT(last["max_players"].i() == 32 && std::fabs(last["cpu_percent"].d() - 30.0) < 1e-9);
+		const auto &empty = series["points"][0];
+		TEST_EXPECT(empty["players"].t() == crow::json::type::Null && !empty["running"].b() &&
+				empty["egress_bytes"].t() == crow::json::type::Null && empty["cpu_percent"].t() == crow::json::type::Null);
+	}
+	// 24h by default; another range refused.
+	std::tie(reply, json) = stats(one, { with_session(owner_s) });
+	TEST_EXPECT(reply.code == 200 && str(json["range"]) == "24h" && json["series"]["step_seconds"].i() == 300 &&
+			json["series"]["points"].size() == 288);
+	std::tie(reply, json) = stats(one + "?range=2h", { with_session(owner_s) });
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+	// Another account's server is no server of the caller's; an ended one has no live view.
+	std::tie(reply, json) = stats(one, { with_session(other_s) });
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+	std::tie(reply, json) = stats("/api/me/servers/" + std::to_string(ended) + "/stats?range=1h", { with_session(owner_s) });
+	TEST_EXPECT(reply.code == 200 && json["live"].t() == crow::json::type::Null && json["summary"]["live_seconds"].i() == 60);
+
+	// The account's servers together, and the 7d range from the rollups.
+	std::tie(reply, json) = stats("/api/me/servers/stats?range=1h", { with_session(owner_s) });
+	TEST_EXPECT(reply.code == 200 && json && !json.has("server_id") && json["live"].t() == crow::json::type::Null);
+	TEST_EXPECT(json["summary"]["live_seconds"].i() == 180 && json["summary"]["peak_players"].i() == 4 &&
+			json["summary"]["egress_bytes"].i() == 2010);
+	std::tie(reply, json) = stats("/api/me/servers/stats?range=7d", { with_session(owner_s) });
+	TEST_EXPECT(reply.code == 200 && json["series"]["step_seconds"].i() == 3600 && json["series"]["points"].size() == 168);
+	// Totals over the rollups: the hours' peaks added up, approximately.
+	TEST_EXPECT(json["summary"]["egress_bytes"].i() == 2010 && json["summary"]["approximate"].size() == 4);
+	TEST_EXPECT(h.send("GET", "/api/me/servers/stats").code == 401);
+
+	// The admin's: one server and the fleet (a player's session refused).
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted/stats", { with_session(owner_s) }).code == 403);
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted/" + std::to_string(running) + "/stats", { with_session(owner_s) }).code == 403);
+	std::tie(reply, json) = stats("/api/admin/hosted/stats?range=1h", { kBearer });
+	TEST_EXPECT(reply.code == 200 && json && !json.has("server_id") && json["live"].t() == crow::json::type::Null);
+	TEST_EXPECT(json["summary"]["live_seconds"].i() == 240 && json["summary"]["peak_players"].i() == 13);
+	std::tie(reply, json) = stats("/api/admin/hosted/stats?range=30d", { kBearer });
+	TEST_EXPECT(reply.code == 200 && json["series"]["points"].size() == 180 && json["summary"]["approximate"].size() == 4);
+	std::tie(reply, json) = stats("/api/admin/hosted/" + std::to_string(others) + "/stats?range=1h", { kBearer });
+	TEST_EXPECT(reply.code == 200 && json["server_id"].i() == others && json["summary"]["peak_players"].i() == 9);
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted/999999/stats", { kBearer }).code == 404);
+	// The fleet view still answers at /api/admin/hosted/<id>.
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted/" + std::to_string(running), { kBearer }).code == 200);
+
+	// Leave no live server for the cases after.
+	opennova::hostdb::remove_host_by_rid(*db, rid);
+	for (const int64_t id : { running, others }) hosted::request_stop(*db, id, "by the test");
+	end_stopping_servers(*db);
+	TEST_EXPECT(nws::delete_service_account(*db, service.id).ok);
+	return 0;
+}
+
 // The console routes (hosted/console_routes.h) over a real admin link
 // (hosted/admin_link.h) to a scripted remote-admin server on loopback
 // (FakeAdminConsole), the hosted row put in running by hand (no supervisor):
@@ -4867,81 +5477,6 @@ bool in_order(const std::vector<std::string> &lines, const std::vector<std::stri
 // routes and their one wider read; the refusals before running, with no link
 // and while stopping; and every line the server was sent checked against the
 // curated shapes.
-// The cloud machines' bootstrap route (hosted/bootstrap_route.h): POST
-// /hosted/bootstrap/<id> with the token, from the address the token is bound to, answers
-// the bundle once, uncacheable; every refusal (no token, a wrong one, another server's id,
-// another address, a spent token) is the one 404 and leaves a live token unspent. The third
-// listener admits 10.0.0.0/8 alone, so the harness (127.0.0.1) is refused there before its
-// token is read, whatever X-Real-IP says; and nothing of it lives under /api/.
-int test_hosted_bootstrap_route(Harness &h) {
-	namespace hosted = opennova::novaworld_server::hosted;
-	hosted::BootstrapBundle bundle;
-	bundle.server_id = 42;
-	bundle.image = "ghcr.io/opennova-net/opennova-serve:sha-abc1234";
-	bundle.spec.server_id = 42;
-	bundle.spec.files.push_back({ "admin.cfg", "svc hunter2hunter2 7F\r\nip_restrict = 10.44.0.10\r\n", true });
-	bundle.spec.files.push_back({ "game.cfg", "version = \"29\"\n", false });
-	bundle.spec.serve_args = { "/HOST", "server.host", "/exp", "jox01" };
-	const std::string token = h.bootstrap->issue(bundle);
-	TEST_EXPECT(h.bootstrap->bind(token, "i-0aaaaaaaaaaaaaaa1", "127.0.0.1"));
-	const std::string auth = "Authorization: Bearer " + token;
-	const std::string path = "/hosted/bootstrap/42";
-	const auto refused = [](const net::HttpReply &reply) {
-		if (reply.code != 404) std::fprintf(stderr, "  %s\n", describe(reply).c_str());
-		return reply.transport_ok && reply.code == 404 && body_text(reply) == "{\"error\":\"not_found\"}" &&
-				header_value(reply, "Cache-Control") == "no-store";
-	};
-
-	TEST_EXPECT(refused(h.send("POST", path)));
-	TEST_EXPECT(refused(h.send("POST", path, { "Authorization: Bearer " + std::string(48, 'A') })));
-	TEST_EXPECT(refused(h.send("POST", path, { "Authorization: " + token })));
-	TEST_EXPECT(refused(h.send("POST", "/hosted/bootstrap/43", { auth })));
-	// An id past the server ids' range (2^63).
-	TEST_EXPECT(refused(h.send("POST", "/hosted/bootstrap/9223372036854775808", { auth })));
-	// The third listener: outside its networks, whatever a proxy header claims.
-	TEST_EXPECT(refused(h.send_to(h.fresh_port, "POST", path, { auth, "X-Real-IP: 10.1.2.3" })));
-	// Not under /api/, and no GET.
-	for (const auto &[method, where] : { std::pair<const char *, const char *>{ "POST", "/api/hosted/bootstrap/42" },
-				 { "GET", "/hosted/bootstrap/42" } }) {
-		const auto reply = h.send(method, where, { auth });
-		TEST_EXPECT(reply.transport_ok && reply.code != 200);
-		TEST_EXPECT(body_text(reply).find("content_base64") == std::string::npos);
-	}
-	TEST_EXPECT(h.bootstrap->live_tokens() == 1);
-
-	// The fetch: the bundle, once.
-	auto reply = h.send("POST", path, { auth });
-	TEST_EXPECT(reply.transport_ok && reply.code == 200);
-	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
-	TEST_EXPECT(header_value(reply, "Content-Type") == "application/json");
-	const auto json = crow::json::load(body_text(reply));
-	TEST_EXPECT(json && json["server_id"].i() == 42 && str(json["image"]) == bundle.image);
-	TEST_EXPECT(json["args"].size() == 4 && str(json["args"][3]) == "jox01");
-	TEST_EXPECT(json["files"].size() == 2 && str(json["files"][0]["name"]) == "admin.cfg");
-	TEST_EXPECT(json["files"][0]["secret"].b() && !json["files"][1]["secret"].b());
-	const std::string &admin_cfg = bundle.spec.files[0].content;
-	TEST_EXPECT(str(json["files"][0]["content_base64"]) ==
-			opennova::io::base64_encode(reinterpret_cast<const uint8_t *>(admin_cfg.data()), admin_cfg.size()));
-	TEST_EXPECT(refused(h.send("POST", path, { auth })));
-	TEST_EXPECT(h.bootstrap->live_tokens() == 0 && !h.bootstrap->awaiting_fetch("i-0aaaaaaaaaaaaaaa1"));
-
-	// A token bound to another machine's address: refused here, and left live for it.
-	const std::string other = h.bootstrap->issue(bundle);
-	TEST_EXPECT(h.bootstrap->bind(other, "i-0bbbbbbbbbbbbbbb2", "127.0.0.2"));
-	TEST_EXPECT(refused(h.send("POST", path, { "Authorization: Bearer " + other })));
-	TEST_EXPECT(h.bootstrap->live_tokens() == 1);
-	h.bootstrap->forget_machine("i-0bbbbbbbbbbbbbbb2");
-
-	// The third listener's own token, bound to the harness's address: still refused there,
-	// before the token is read, so it stays live.
-	const std::string fresh = h.fresh_bootstrap->issue(bundle);
-	TEST_EXPECT(h.fresh_bootstrap->bind(fresh, "i-0ccccccccccccccc3", "127.0.0.1"));
-	TEST_EXPECT(refused(h.send_to(h.fresh_port, "POST", path, { "Authorization: Bearer " + fresh })));
-	TEST_EXPECT(h.fresh_bootstrap->live_tokens() == 1);
-	h.fresh_bootstrap->forget_machine("i-0ccccccccccccccc3");
-	return 0;
-}
-
 int test_hosted_console_routes(Harness &h) {
 	namespace hosted = opennova::novaworld_server::hosted;
 	const std::string password = "ConsoleRoutesAdminPw0123456789";
@@ -4950,7 +5485,7 @@ int test_hosted_console_routes(Harness &h) {
 	const int64_t owner = make_account(h, "console_owner", "pw-console-owner");
 	const int64_t admin = make_account(h, "console_admin", "pw-console-admin");
 	TEST_EXPECT(owner > 0 && admin > 0 && make_account(h, "console_other", "pw-console-other") > 0);
-	TEST_EXPECT(nws::set_can_host(*h.pool.acquire(), owner, true).ok);
+	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), owner, 1).ok);
 	TEST_EXPECT(set_role(h, admin, "admin"));
 	const std::string owner_s = login_token(h, "10.53.0.1", "console_owner", "pw-console-owner");
 	const std::string other_s = login_token(h, "10.53.0.2", "console_other", "pw-console-other");
@@ -4971,26 +5506,29 @@ int test_hosted_console_routes(Harness &h) {
 		return json && json.has("result") ? str(json["result"]) : std::string("<none>");
 	};
 
-	// No server yet; then one, not running yet; then running with no link.
-	auto reply = get("/api/me/server/players", as_owner);
-	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_live_server");
+	// No such server; then one, not running yet; then running with no link.
+	auto reply = get("/api/me/servers/999999/players", as_owner);
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
 	hosted::HostedSettings settings;
 	settings.game = hosted::kDataSetJointOperations;
 	settings.game_name = "Console Test";
 	settings.missions = { "alpha.bms" };
-	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, hosted::known_data_sets(), 10);
+	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, hosted::known_data_sets(), 10,
+			opennova::novaworld_server::billing::unix_now());
 	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
 	const int64_t id = request.id;
 	const std::string base = "/api/admin/hosted/" + std::to_string(id);
-	reply = get("/api/me/server/players", as_owner);
+	// The owner's routes name the server by its id.
+	const std::string me = "/api/me/servers/" + std::to_string(id);
+	reply = get(me + "/players", as_owner);
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_not_running");
 	{
 		auto db = h.pool.acquire();
-		db->exec("UPDATE hosted_servers SET state = 'running', machine_address = '127.0.0.1' WHERE id = ?;",
+		db->exec("UPDATE hosted_servers SET state = 'running', machine_address = '127.0.0.1' WHERE id = $1;",
 				{ opennova::db::BindValue(id) });
 		hosted::set_admin_login(*db, id, fake.port(), "svc", password);
 	}
-	reply = get("/api/me/server/players", as_owner);
+	reply = get(me + "/players", as_owner);
 	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "admin_unavailable");
 	hosted::AdminLinkTarget target;
 	target.host = "127.0.0.1";
@@ -5005,23 +5543,25 @@ int test_hosted_console_routes(Harness &h) {
 
 	// Logged out: 401; a POST without the CSRF header: 403, an admin session's too, before
 	// anything is read; the proxy-only listener answers no one but its proxy.
-	TEST_EXPECT(get("/api/me/server/players", {}).code == 401);
-	TEST_EXPECT(post("/api/me/server/players/1/punt", {}).code == 401);
-	reply = post("/api/me/server/players/1/punt", { with_session(owner_s) });
+	TEST_EXPECT(get(me + "/players", {}).code == 401);
+	TEST_EXPECT(post(me + "/players/1/punt", {}).code == 401);
+	reply = post(me + "/players/1/punt", { with_session(owner_s) });
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
 	reply = post(base + "/players/1/punt", { with_session(admin_s) });
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
-	reply = h.send_to(h.fresh_port, "GET", "/api/me/server/players", as_owner);
+	reply = h.send_to(h.fresh_port, "GET", me + "/players", as_owner);
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "proxy_required");
-	reply = h.send_to(h.fresh_port, "POST", "/api/me/server/chat", { with_session(owner_s), kCsrf, kJson },
+	reply = h.send_to(h.fresh_port, "POST", me + "/chat", { with_session(owner_s), kCsrf, kJson },
 			"{\"text\":\"hi\"}");
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "proxy_required");
-	// Another account reaches no server: the owner's routes name none, its session resolves it.
-	reply = get("/api/me/server/players", { with_session(other_s) });
-	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_live_server");
-	reply = post("/api/me/server/players/1/punt", { with_session(other_s), kCsrf });
-	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_live_server");
-	TEST_EXPECT(get("/api/me/server/console", { with_session(other_s) }).code == 404);
+	// Another account reaches no server of the owner's: its id answers not_found,
+	// as no server's does (never a 403 that would tell it exists).
+	reply = get(me + "/players", { with_session(other_s) });
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+	reply = post(me + "/players/1/punt", { with_session(other_s), kCsrf });
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+	reply = get(me + "/console", { with_session(other_s) });
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
 	// Nor do the owners reach the admin's routes.
 	TEST_EXPECT(get(base + "/players", { with_session(other_s) }).code == 403);
 	TEST_EXPECT(get(base + "/players", { with_session(owner_s) }).code == 403);
@@ -5029,7 +5569,7 @@ int test_hosted_console_routes(Harness &h) {
 	TEST_EXPECT(post(base + "/players/1/punt", { with_session(owner_s), kCsrf }).code == 403);
 
 	// The reads.
-	reply = get("/api/me/server/players", as_owner);
+	reply = get(me + "/players", as_owner);
 	auto json = crow::json::load(body_text(reply));
 	if (reply.code != 200) std::fprintf(stderr, "  players: %s\n", describe(reply).c_str());
 	TEST_EXPECT(reply.code == 200 && json && json["players"].size() == 2);
@@ -5037,30 +5577,30 @@ int test_hosted_console_routes(Harness &h) {
 	TEST_EXPECT(str(json["players"][0]["name"]) == "Ann" && json["players"][0]["team"].i() == 1);
 	TEST_EXPECT(json["players"][0]["kills"].i() == 5 && json["players"][1]["ping"].i() == 55);
 	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
-	reply = get("/api/me/server/missions", as_owner);
+	reply = get(me + "/missions", as_owner);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["missions"].size() == 2);
 	TEST_EXPECT(str(json["missions"][1]["file"]) == "BRAVO.BMS" && str(json["missions"][1]["title"]) == "Bravo Ridge");
-	reply = get("/api/me/server/rotation", as_owner);
+	reply = get(me + "/rotation", as_owner);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["rotation"].size() == 1 && json["rotation"][0]["current"].b());
 
 	// Hostile replies: names holding a control byte and a cp1252 letter, lines that are
 	// no row; the JSON stays valid and the parsers keep what parses.
 	fake.set_hostile(true);
-	reply = get("/api/me/server/players", as_owner);
+	reply = get(me + "/players", as_owner);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["players"].size() == 2);
 	TEST_EXPECT(json && str(json["players"][0]["name"]) == "Ev\x01l" && str(json["players"][1]["name"]) == "Caf\xC3\xA9");
-	reply = get("/api/me/server/rotation", as_owner);
+	reply = get(me + "/rotation", as_owner);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["rotation"].size() == 1 &&
 			str(json["rotation"][0]["file"]) == "ALPHA.BMS");
-	reply = get("/api/me/server/missions", as_owner);
+	reply = get(me + "/missions", as_owner);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["missions"].size() == 1 && json["missions"][0]["index"].i() == 7 &&
 			str(json["missions"][0]["title"]) == "Odd (title)");
-	reply = get("/api/me/server/chat", as_owner);
+	reply = get(me + "/chat", as_owner);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["lines"].size() == 2 && str(json["lines"][0]) == "\x01" "ctl" &&
 			str(json["lines"][1]) == "\xC3\xA9t\xC3\xA9");
@@ -5069,66 +5609,66 @@ int test_hosted_console_routes(Harness &h) {
 	// Arguments outside their rules: refused before anything is sent or any token drawn.
 	const size_t lines_before = fake.lines().size();
 	struct Refused {
-		const char *path;
+		std::string path;
 		const char *body;
 		const char *error; // "" for any 400
 	};
 	const std::string long_mission = "{\"mission\":\"" + std::string(33, 'm') + ".bms\"}";
 	const std::string long_text = "{\"text\":\"" + std::string(60, 'x') + "\"}";
 	const Refused refusals[] = {
-		{ "/api/me/server/players/0/punt", "{}", "invalid_slot" },
-		{ "/api/me/server/players/256/ban", "{}", "invalid_slot" },
-		{ "/api/me/server/rotation/32/remove", "{}", "invalid_index" },
-		{ "/api/me/server/rotation/256/next", "{}", "invalid_index" },
-		{ "/api/me/server/rotation", "{\"mission\":\"../x.bms\"}", "invalid_mission" },
-		{ "/api/me/server/rotation", "{\"mission\":\"a.bms 1 0 ONESHOT\"}", "invalid_mission" },
-		{ "/api/me/server/rotation", "{\"mission\":\".bms\"}", "invalid_mission" },
-		{ "/api/me/server/rotation", long_mission.c_str(), "invalid_mission" },
-		{ "/api/me/server/rotation", "{\"mission\":\"a\\u0000.bms\"}", "" },
-		{ "/api/me/server/rotation", "{\"mission\":\"a\\u0085.bms\"}", "invalid_mission" },
-		{ "/api/me/server/rotation", "{\"mission\":\"a\\t.bms\"}", "invalid_mission" },
-		{ "/api/me/server/rotation", "{\"mission\":\"a\\u007f.bms\"}", "invalid_mission" },
-		{ "/api/me/server/rotation", "{}", "missing_field" },
-		{ "/api/me/server/rotation", "{\"mission\":1}", "invalid_field" },
-		{ "/api/me/server/rotation", "{\"mission\":\"a.bms\",\"swap_sides\":1}", "invalid_field" },
-		{ "/api/me/server/chat", "{\"text\":\"two\\nlines\"}", "invalid_text" },
-		{ "/api/me/server/chat", "{\"text\":\"a\\u0000b\"}", "" },
-		{ "/api/me/server/chat", "{\"text\":\"a\\u0085b\"}", "invalid_text" },
-		{ "/api/me/server/chat", "{\"text\":\"a\\tb\"}", "invalid_text" },
-		{ "/api/me/server/chat", "{\"text\":\"a\\u007fb\"}", "invalid_text" },
-		{ "/api/me/server/chat", "{\"text\":\"\\ud83d\\ude00\"}", "invalid_text" },
-		{ "/api/me/server/chat", "{\"text\":\"   \"}", "invalid_text" },
-		{ "/api/me/server/chat", long_text.c_str(), "invalid_text" },
-		{ "/api/me/server/chat", "{}", "missing_field" },
-		{ "/api/me/server/chat", "not json", "invalid_json" },
+		{ me + "/players/0/punt", "{}", "invalid_slot" },
+		{ me + "/players/256/ban", "{}", "invalid_slot" },
+		{ me + "/rotation/32/remove", "{}", "invalid_index" },
+		{ me + "/rotation/256/next", "{}", "invalid_index" },
+		{ me + "/rotation", "{\"mission\":\"../x.bms\"}", "invalid_mission" },
+		{ me + "/rotation", "{\"mission\":\"a.bms 1 0 ONESHOT\"}", "invalid_mission" },
+		{ me + "/rotation", "{\"mission\":\".bms\"}", "invalid_mission" },
+		{ me + "/rotation", long_mission.c_str(), "invalid_mission" },
+		{ me + "/rotation", "{\"mission\":\"a\\u0000.bms\"}", "" },
+		{ me + "/rotation", "{\"mission\":\"a\\u0085.bms\"}", "invalid_mission" },
+		{ me + "/rotation", "{\"mission\":\"a\\t.bms\"}", "invalid_mission" },
+		{ me + "/rotation", "{\"mission\":\"a\\u007f.bms\"}", "invalid_mission" },
+		{ me + "/rotation", "{}", "missing_field" },
+		{ me + "/rotation", "{\"mission\":1}", "invalid_field" },
+		{ me + "/rotation", "{\"mission\":\"a.bms\",\"swap_sides\":1}", "invalid_field" },
+		{ me + "/chat", "{\"text\":\"two\\nlines\"}", "invalid_text" },
+		{ me + "/chat", "{\"text\":\"a\\u0000b\"}", "" },
+		{ me + "/chat", "{\"text\":\"a\\u0085b\"}", "invalid_text" },
+		{ me + "/chat", "{\"text\":\"a\\tb\"}", "invalid_text" },
+		{ me + "/chat", "{\"text\":\"a\\u007fb\"}", "invalid_text" },
+		{ me + "/chat", "{\"text\":\"\\ud83d\\ude00\"}", "invalid_text" },
+		{ me + "/chat", "{\"text\":\"   \"}", "invalid_text" },
+		{ me + "/chat", long_text.c_str(), "invalid_text" },
+		{ me + "/chat", "{}", "missing_field" },
+		{ me + "/chat", "not json", "invalid_json" },
 	};
 	for (const Refused &r : refusals) {
 		reply = post(r.path, as_owner_post, r.body);
 		const bool ok = reply.code == 400 && (*r.error == '\0' || error_of_reply(reply) == r.error);
-		if (!ok) std::fprintf(stderr, "  %s %s -> %s\n", r.path, r.body, describe(reply).c_str());
+		if (!ok) std::fprintf(stderr, "  %s %s -> %s\n", r.path.c_str(), r.body, describe(reply).c_str());
 		TEST_EXPECT(ok);
 	}
 	TEST_EXPECT(fake.lines().size() == lines_before);
 
 	// The writes, eight of them: the owner's bucket.
-	reply = post("/api/me/server/players/1/punt", as_owner_post);
+	reply = post(me + "/players/1/punt", as_owner_post);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && str(json["result"]) == "punted" && json["slot"].i() == 1);
-	reply = post("/api/me/server/players/9/kill", as_owner_post);
+	reply = post(me + "/players/9/kill", as_owner_post);
 	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "player_not_found");
-	reply = post("/api/me/server/players/1/ban", as_owner_post);
+	reply = post(me + "/players/1/ban", as_owner_post);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && str(json["result"]) == "banned" && json["listed"].b());
-	reply = post("/api/me/server/players/2/ban", as_owner_post);
+	reply = post(me + "/players/2/ban", as_owner_post);
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "no_pcid");
 	TEST_EXPECT(body_text(reply).find("Bob") == std::string::npos);
-	reply = post("/api/me/server/players/2/swap", as_owner_post);
+	reply = post(me + "/players/2/swap", as_owner_post);
 	TEST_EXPECT(reply.code == 200 && result_of(reply) == "swapped");
-	reply = post("/api/me/server/chat", as_owner_post, "{\"text\":\"hello from the site\"}");
+	reply = post(me + "/chat", as_owner_post, "{\"text\":\"hello from the site\"}");
 	TEST_EXPECT(reply.code == 200 && result_of(reply) == "sent");
-	reply = post("/api/me/server/rotation", as_owner_post, "{\"mission\":\"bravo.bms\",\"swap_sides\":true}");
+	reply = post(me + "/rotation", as_owner_post, "{\"mission\":\"bravo.bms\",\"swap_sides\":true}");
 	TEST_EXPECT(reply.code == 200 && result_of(reply) == "added");
-	reply = post("/api/me/server/rotation", as_owner_post, "{\"mission\":\"nope.bms\"}");
+	reply = post(me + "/rotation", as_owner_post, "{\"mission\":\"nope.bms\"}");
 	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "mission_not_found");
 	// The exact lines the server received for them.
 	TEST_EXPECT(in_order(fake.lines(), { "PLAYER PUNT 1", "PLAYER KILL 9", "PLAYER BAN 1", "PLAYER BAN 2",
@@ -5137,12 +5677,12 @@ int test_hosted_console_routes(Harness &h) {
 	// The bucket runs dry (one token every 2 s after eight).
 	bool limited = false;
 	for (int i = 0; i < 12 && !limited; ++i) {
-		reply = post("/api/me/server/rotation/cycle", as_owner_post);
+		reply = post(me + "/rotation/cycle", as_owner_post);
 		limited = reply.code == 429;
 	}
 	TEST_EXPECT(limited && error_of_reply(reply) == "rate_limited" && has_header(reply, "Retry-After"));
 	// The chat window has the line (a read: another bucket).
-	reply = get("/api/me/server/chat", as_owner);
+	reply = get(me + "/chat", as_owner);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["lines"].size() == 1 &&
 			str(json["lines"][0]).find("hello from the site") != std::string::npos);
@@ -5217,10 +5757,10 @@ int test_hosted_console_routes(Harness &h) {
 	fake.delay("PLAYER LIST", 800);
 	net::HttpReply slow;
 	const size_t sent_before = fake.lines().size();
-	std::thread first([&] { slow = get("/api/me/server/players", as_owner); });
+	std::thread first([&] { slow = get(me + "/players", as_owner); });
 	const bool in_flight = wait_until([&] { return sent_since(sent_before, "PLAYER LIST"); }, 3000);
 	const auto busy_started = std::chrono::steady_clock::now();
-	const net::HttpReply second = get("/api/me/server/missions", as_owner);
+	const net::HttpReply second = get(me + "/missions", as_owner);
 	const auto busy_took = std::chrono::steady_clock::now() - busy_started;
 	first.join();
 	TEST_EXPECT(in_flight && slow.code == 200);
@@ -5232,14 +5772,14 @@ int test_hosted_console_routes(Harness &h) {
 	const size_t edit_before = fake.lines().size();
 	std::thread editing([&] { edit = post(base + "/rotation/0/remove", { kBearer }); });
 	const bool editing_now = wait_until([&] { return sent_since(edit_before, "MISSION LIST"); }, 3000);
-	const net::HttpReply racing = post("/api/me/server/rotation/1/remove", as_owner_post);
+	const net::HttpReply racing = post(me + "/rotation/1/remove", as_owner_post);
 	editing.join();
 	fake.delay("", 0);
 	TEST_EXPECT(editing_now && racing.code == 409 && error_of_reply(racing) == "rotation_busy");
 	TEST_EXPECT(edit.code == 200 && fake.rotation().size() == 1);
 
 	// The console: the writes recorded with their sender, the reads not, no password.
-	reply = get("/api/me/server/console", as_owner);
+	reply = get(me + "/console", as_owner);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && str(json["link"]["state"]) == "up");
 	bool owner_punt = false;
@@ -5266,7 +5806,7 @@ int test_hosted_console_routes(Harness &h) {
 	TEST_EXPECT(owner_punt && punt_reply && admin_kill && !read_recorded);
 	TEST_EXPECT(body_text(reply).find(password) == std::string::npos);
 	// Past the last id: nothing but a status line the link's poll may have added since.
-	reply = get("/api/me/server/console?after=" + std::to_string(last_id), as_owner);
+	reply = get(me + "/console?after=" + std::to_string(last_id), as_owner);
 	json = crow::json::load(body_text(reply));
 	bool past_last = reply.code == 200 && json;
 	if (past_last) {
@@ -5276,11 +5816,11 @@ int test_hosted_console_routes(Harness &h) {
 	TEST_EXPECT(past_last);
 	// limit=0 reads one line; limit=9999 every line from the oldest (fewer than 200 here, so
 	// the default read's too); after=abc is no after.
-	reply = get("/api/me/server/console?limit=0", as_owner);
+	reply = get(me + "/console?limit=0", as_owner);
 	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["lines"].size() == 1);
 	TEST_EXPECT(total > 0 && total < 200); // ConsoleRoutes::kConsoleLinesShown
 	for (const char *query : { "?limit=9999", "?after=abc" }) {
-		reply = get(std::string("/api/me/server/console") + query, as_owner);
+		reply = get((me + "/console") + query, as_owner);
 		json = crow::json::load(body_text(reply));
 		TEST_EXPECT(reply.code == 200 && json && json["lines"].size() >= total &&
 				json["lines"][0]["id"].i() == first_id);
@@ -5296,11 +5836,11 @@ int test_hosted_console_routes(Harness &h) {
 
 	// Stopping: refused before the link, the console still read.
 	TEST_EXPECT(hosted::request_stop(*h.pool.acquire(), id, "stopped by the test"));
-	reply = get("/api/me/server/players", as_owner);
+	reply = get(me + "/players", as_owner);
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_stopping");
 	reply = post(base + "/players/1/punt", { kBearer });
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_stopping");
-	TEST_EXPECT(get("/api/me/server/console", as_owner).code == 200);
+	TEST_EXPECT(get(me + "/console", as_owner).code == 200);
 
 	// The end: the link down, the row ended.
 	h.links->sync({});
@@ -5308,10 +5848,659 @@ int test_hosted_console_routes(Harness &h) {
 			"ended by the test"));
 	reply = get(base + "/players", { kBearer });
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
-	reply = get("/api/me/server/players", as_owner);
-	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_live_server");
+	reply = get(me + "/players", as_owner);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
+	// Its console log still reads.
+	TEST_EXPECT(get(me + "/console", as_owner).code == 200);
 	TEST_EXPECT(set_role(h, admin, "player")); // the cases after count no admin of this one's
 	fake.stop();
+	return 0;
+}
+
+// ---- support tiers (billing) --------------------------------------------------
+
+// The harness's billing (billing/billing.h) runs over the in-memory Stripe
+// (novaworld/billing_fake_stripe.h) with the settings below, its worker driven
+// by hand (billing_pass); the Secure listener runs with none (billing off).
+constexpr const char *kWebhookSecret = "whsec_harnesswebhooksecret";
+constexpr const char *kSiteUrl = "https://site.example";
+
+billing_fake::FakeStripeApi::Price harness_price(const char *id, int64_t amount) {
+	billing_fake::FakeStripeApi::Price p;
+	p.id = id;
+	p.unit_amount = amount;
+	return p;
+}
+
+void billing_pass(Harness &h) { h.billing->sync().pass(nws::billing::unix_now()); }
+
+// A Stripe-Signature header for `body` at `t` under `secret`, as Stripe signs:
+// the hex HMAC-SHA256 of "<t>.<body>".
+std::string stripe_signature(const std::string &body, int64_t t, const std::string &secret = kWebhookSecret) {
+	const std::string signed_text = std::to_string(t) + "." + body;
+	return "Stripe-Signature: t=" + std::to_string(t) +
+			",v1=" + opennova::io::sha256_hex(opennova::io::hmac_sha256(secret, signed_text));
+}
+
+std::string event_body(const std::string &id, const std::string &customer, bool livemode = false) {
+	return "{\"id\":\"" + id + "\",\"object\":\"event\",\"type\":\"customer.subscription.updated\",\"livemode\":" +
+			(livemode ? "true" : "false") + ",\"created\":" + std::to_string(nws::billing::unix_now()) +
+			",\"data\":{\"object\":{\"id\":\"sub_x\",\"object\":\"subscription\",\"customer\":\"" + customer + "\"}}}";
+}
+
+// The tiers (public), the account's billing, checkout and the portal: the
+// session and CSRF refusals, the item's rules (an own machine needs a tier, a
+// tier while one grants is already_subscribed), the Checkout session's settings
+// (the customer made once with its idempotency key and the account's metadata,
+// the previous open session expired, the return URLs, the terms, the life), the
+// sync after a checkout, the portal, the buckets, prices that do not check out
+// (503 billing_misconfigured), Stripe unreachable (502), and billing off.
+int test_billing_routes(Harness &h) {
+	namespace billing = opennova::novaworld_server::billing;
+	using billing::StripeRequest;
+	const int64_t ana = make_account(h, "bill_ana", "pw-bill-ana");
+	const int64_t bea = make_account(h, "bill_bea", "pw-bill-bea");
+	const int64_t cy = make_account(h, "bill_cy", "pw-bill-cy");
+	TEST_EXPECT(ana > 0 && bea > 0 && cy > 0);
+	const std::string ana_s = login_token(h, "10.61.0.1", "bill_ana", "pw-bill-ana");
+	const std::string bea_s = login_token(h, "10.61.0.2", "bill_bea", "pw-bill-bea");
+	const std::string cy_s = login_token(h, "10.61.0.3", "bill_cy", "pw-bill-cy");
+	TEST_EXPECT(!ana_s.empty() && !bea_s.empty() && !cy_s.empty());
+	auto post = [&h](const std::string &path, const std::string &session, const std::string &body = {},
+						 bool csrf = true) {
+		std::vector<std::string> headers = { kJson, with_session(session) };
+		if (csrf) headers.push_back(kCsrf);
+		return h.send("POST", path, headers, body);
+	};
+	auto me = [&h](const std::string &session) { return h.send("GET", "/api/me/billing", { with_session(session) }); };
+
+	// The tiers: public, with Stripe's amounts once the prices check out.
+	auto reply = h.send("GET", "/api/billing/tiers");
+	auto json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && str(json["currency"]) == "usd");
+	TEST_EXPECT(json["tiers"].size() == 3);
+	if (json && json["tiers"].size() == 3) {
+		for (int i = 0; i < 3; ++i) {
+			TEST_EXPECT(json["tiers"][i]["tier"].i() == i + 1 && json["tiers"][i]["max_servers"].i() == i + 1);
+			TEST_EXPECT(json["tiers"][i]["amount"].i() == 500 * (i + 1) && str(json["tiers"][i]["interval"]) == "month");
+		}
+	}
+	TEST_EXPECT(json["own_machine"]["amount"].i() == 4500 && str(json["own_machine"]["interval"]) == "month");
+	// Billing off: the tiers with no amount, no add-on; the rest 503.
+	reply = h.send_to(h.secure_port, "GET", "/api/billing/tiers");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && !json["enabled"].b() && json["tiers"].size() == 3 &&
+			json["tiers"][0]["amount"].t() == crow::json::type::Null &&
+			json["own_machine"].t() == crow::json::type::Null);
+
+	// The account's billing: a session; nothing yet.
+	TEST_EXPECT(h.send("GET", "/api/me/billing").code == 401);
+	reply = me(ana_s);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && json["max_servers"].i() == 0 &&
+			json["comp_servers"].i() == 0 && json["own_machines"].i() == 0 && json["used"].i() == 0 &&
+			json["stopping"].i() == 0);
+	TEST_EXPECT(!json["can_start"].b() && !json["can_manage"].b() && json["can_subscribe"].b());
+	TEST_EXPECT(json["subscription"].t() == crow::json::type::Null &&
+			json["own_machine_subscription"].t() == crow::json::type::Null);
+	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
+
+	// Checkout's refusals: logged out, no CSRF header, the body (Bea's bucket).
+	TEST_EXPECT(h.send("POST", "/api/billing/checkout", { kJson, kCsrf }, "{\"item\":\"tier1\"}").code == 401);
+	reply = post("/api/billing/checkout", ana_s, "{\"item\":\"tier1\"}", /*csrf=*/false);
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
+	reply = post("/api/billing/checkout", bea_s, "not json");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_json");
+	for (const char *bad : { "{}", "{\"item\":\"tier4\"}", "{\"item\":2}", "{\"item\":\"premium\"}" }) {
+		reply = post("/api/billing/checkout", bea_s, bad);
+		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_item");
+	}
+	TEST_EXPECT(h.stripe->count(StripeRequest::Method::Post, "/v1/customers") == 0);
+
+	// Ana's checkouts (her bucket: 6). The add-on first needs a tier.
+	reply = post("/api/billing/checkout", ana_s, "{\"item\":\"own_machine\"}");
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_eligible");
+	reply = post("/api/billing/checkout", ana_s, "{\"item\":\"tier1\"}");
+	json = crow::json::load(body_text(reply));
+	if (reply.code != 200) std::fprintf(stderr, "  checkout: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 200 && json && str(json["url"]).rfind("https://checkout.stripe.com/", 0) == 0);
+	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
+	const auto customer = billing::customer_of(*h.pool.acquire(), ana);
+	TEST_EXPECT(customer && !customer->open_checkout_session.empty());
+	const std::string first_session = customer ? customer->open_checkout_session : std::string();
+	{
+		std::lock_guard<std::mutex> lock(h.stripe->mu);
+		const auto &made = h.stripe->customers[customer->stripe_customer_id];
+		TEST_EXPECT(made.metadata.at(billing::kMetaInstance) == h.billing->instance_id() &&
+				made.metadata.at(billing::kMetaUserId) == std::to_string(ana) &&
+				made.metadata.at(billing::kMetaUsername) == "bill_ana");
+		bool keyed = false;
+		for (const StripeRequest &r : h.stripe->requests) {
+			if (r.method == StripeRequest::Method::Post && r.path == "/v1/customers")
+				keyed = r.idempotency_key == "opennova-" + h.billing->instance_id() + "-customer-" + std::to_string(ana);
+		}
+		TEST_EXPECT(keyed);
+		const auto &session = h.stripe->checkout_sessions[first_session];
+		TEST_EXPECT(session.customer == customer->stripe_customer_id && session.price_id == "price_htier1");
+		TEST_EXPECT(session.success_url ==
+				std::string(kSiteUrl) + "/me/support?checkout=success&session_id={CHECKOUT_SESSION_ID}");
+		TEST_EXPECT(session.cancel_url == std::string(kSiteUrl) + "/me/support?checkout=cancel");
+		TEST_EXPECT(session.client_reference_id == std::to_string(ana));
+		TEST_EXPECT(session.subscription_metadata.at(billing::kMetaInstance) == h.billing->instance_id());
+		const int64_t life = session.expires_at - billing::unix_now();
+		TEST_EXPECT(life > 3500 && life <= 3600);
+		bool terms = false;
+		for (const auto &[k, v] : session.params) terms = terms || (k == "consent_collection[terms_of_service]" && v == "required");
+		TEST_EXPECT(terms);
+	}
+	// Again: the same customer, the previous session expired.
+	reply = post("/api/billing/checkout", ana_s, "{\"item\":\"tier1\"}");
+	TEST_EXPECT(reply.code == 200);
+	const std::string second_session = billing::customer_of(*h.pool.acquire(), ana)->open_checkout_session;
+	TEST_EXPECT(second_session != first_session);
+	TEST_EXPECT(h.stripe->count(StripeRequest::Method::Post, "/v1/customers") == 1);
+	{
+		std::lock_guard<std::mutex> lock(h.stripe->mu);
+		TEST_EXPECT(h.stripe->checkout_sessions[first_session].status == "expired");
+	}
+
+	// She pays (Stripe makes the subscription); the success page's sync shows it.
+	TEST_EXPECT(!h.stripe->complete_checkout(second_session).empty());
+	reply = post("/api/me/billing/sync", ana_s);
+	json = crow::json::load(body_text(reply));
+	if (reply.code != 200) std::fprintf(stderr, "  sync: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 200 && json && json["max_servers"].i() == 1 && json["can_start"].b());
+	TEST_EXPECT(json["subscription"]["tier"].i() == 1 && str(json["subscription"]["status"]) == "active" &&
+			json["subscription"]["entitled"].b() && !json["subscription"]["cancel_at_period_end"].b());
+	const std::string period_end = str(json["subscription"]["current_period_end"]);
+	TEST_EXPECT(period_end.size() == 20 && period_end[10] == 'T' && period_end.back() == 'Z');
+	TEST_EXPECT(json["can_manage"].b() && !json["can_subscribe"].b());
+	// A tier while one grants: the portal changes it. The add-on now may start.
+	reply = post("/api/billing/checkout", ana_s, "{\"item\":\"tier2\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "already_subscribed");
+	reply = post("/api/billing/checkout", ana_s, "{\"item\":\"own_machine\"}");
+	TEST_EXPECT(reply.code == 200);
+	// The portal, returning to the support page.
+	reply = post("/api/billing/portal", ana_s);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && str(json["url"]).rfind("https://billing.stripe.com/", 0) == 0);
+	{
+		std::lock_guard<std::mutex> lock(h.stripe->mu);
+		TEST_EXPECT(!h.stripe->portal_sessions.empty() &&
+				h.stripe->portal_sessions.back().return_url == std::string(kSiteUrl) + "/me/support");
+	}
+	reply = post("/api/billing/portal", bea_s);
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_billing_account");
+	reply = post("/api/me/billing/sync", bea_s);
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_billing_account");
+	// The sync bucket: 3 at once (Ana spent one).
+	TEST_EXPECT(post("/api/me/billing/sync", ana_s).code == 200);
+	TEST_EXPECT(post("/api/me/billing/sync", ana_s).code == 200);
+	reply = post("/api/me/billing/sync", ana_s);
+	TEST_EXPECT(reply.code == 429 && has_header(reply, "Retry-After"));
+	// Ana's checkout bucket is spent too (six draws).
+	TEST_EXPECT(post("/api/billing/checkout", ana_s, "{\"item\":\"tier1\"}").code == 429);
+
+	// Prices that do not check out: checkout pauses (Cy's bucket).
+	{
+		std::lock_guard<std::mutex> lock(h.stripe->mu);
+		h.stripe->prices["price_htier2"].interval = "year";
+	}
+	TEST_EXPECT(h.billing->sync().validate_prices() && !h.billing->sync().status().prices_ok);
+	reply = post("/api/billing/checkout", cy_s, "{\"item\":\"tier2\"}");
+	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "billing_misconfigured");
+	TEST_EXPECT(!crow::json::load(body_text(h.send("GET", "/api/billing/tiers")))["enabled"].b());
+	TEST_EXPECT(!crow::json::load(body_text(me(cy_s)))["can_subscribe"].b());
+	{
+		std::lock_guard<std::mutex> lock(h.stripe->mu);
+		h.stripe->prices["price_htier2"].interval = "month";
+	}
+	TEST_EXPECT(h.billing->sync().validate_prices() && h.billing->sync().status().prices_ok);
+	// Stripe unreachable: 502, nothing kept.
+	h.stripe->fail_next(billing::StripeReply::Outcome::Unreachable);
+	reply = post("/api/billing/checkout", cy_s, "{\"item\":\"tier2\"}");
+	TEST_EXPECT(reply.code == 502 && error_of_reply(reply) == "stripe_unavailable");
+	TEST_EXPECT(!billing::customer_of(*h.pool.acquire(), cy));
+
+	// Billing off (the Secure listener): every account route 503 billing_disabled.
+	std::string token;
+	{
+		auto conn = h.pool.acquire();
+		const auto user = nws::get_user_by_id(*conn, cy);
+		const auto minted = nws::create_web_session(*conn, cy, user->credentials_gen, "127.0.0.1", "harness");
+		TEST_EXPECT(minted.has_value());
+		token = *minted;
+	}
+	const std::string cookie = with_cookie(nws::kWebSessionHostCookie, token);
+	reply = h.send_to(h.secure_port, "GET", "/api/me/billing", { cookie });
+	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "billing_disabled");
+	for (const char *path : { "/api/billing/checkout", "/api/billing/portal", "/api/me/billing/sync" }) {
+		reply = h.send_to(h.secure_port, "POST", path, { kJson, kCsrf, cookie }, "{\"item\":\"tier1\"}");
+		TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "billing_disabled");
+	}
+	return 0;
+}
+
+// Checkout never sells twice what a paid session the webhook has not brought
+// yet already sold: the previous session read from Stripe first, and once
+// complete, the customer synced and the checkout judged again (a tier:
+// already_subscribed; the add-on: own_machine_limit once the account has an own
+// machine for every server it may run, several fine below that). A previous
+// session Stripe no longer knows is no obstacle; one Stripe cannot be asked
+// about refuses (502) with nothing made.
+int test_billing_checkout_guard(Harness &h) {
+	namespace billing = opennova::novaworld_server::billing;
+	using billing::StripeRequest;
+	const int64_t dot = make_account(h, "chk_dot", "pw-chk-dot");
+	const int64_t fay = make_account(h, "chk_fay", "pw-chk-fay");
+	TEST_EXPECT(dot > 0 && fay > 0);
+	const std::string dot_s = login_token(h, "10.62.0.1", "chk_dot", "pw-chk-dot");
+	const std::string fay_s = login_token(h, "10.62.0.2", "chk_fay", "pw-chk-fay");
+	TEST_EXPECT(!dot_s.empty() && !fay_s.empty());
+	auto checkout = [&h](const std::string &session, const char *item) {
+		return h.send("POST", "/api/billing/checkout", { kJson, kCsrf, with_session(session) },
+				std::string("{\"item\":\"") + item + "\"}");
+	};
+	auto open_session = [&h](int64_t user) {
+		const auto customer = billing::customer_of(*h.pool.acquire(), user);
+		return customer ? customer->open_checkout_session : std::string();
+	};
+	auto session_reads = [&h](const std::string &id) {
+		return h.stripe->count(StripeRequest::Method::Get, "/v1/checkout/sessions/" + id);
+	};
+
+	// Dot pays for tier 1; before any sync, a checkout of tier 2 reads the
+	// paid session, syncs her customer and refuses: she has a tier.
+	auto reply = checkout(dot_s, "tier1");
+	TEST_EXPECT(reply.code == 200);
+	const std::string paid_tier = open_session(dot);
+	TEST_EXPECT(!h.stripe->complete_checkout(paid_tier).empty());
+	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), dot, billing::unix_now()).max_servers == 0);
+	reply = checkout(dot_s, "tier2");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "already_subscribed");
+	TEST_EXPECT(session_reads(paid_tier) == 1);
+	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), dot, billing::unix_now()).max_servers == 1);
+	// Her own machine: one, which tier 1's one server fills; paid, a second is
+	// refused through the same sync.
+	reply = checkout(dot_s, "own_machine");
+	TEST_EXPECT(reply.code == 200);
+	const std::string paid_machine = open_session(dot);
+	TEST_EXPECT(paid_machine != paid_tier && !h.stripe->complete_checkout(paid_machine).empty());
+	reply = checkout(dot_s, "own_machine");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "own_machine_limit");
+	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), dot, billing::unix_now()).own_machines == 1);
+	// From the cache now, with no Stripe call.
+	const size_t reads = session_reads(paid_machine);
+	reply = checkout(dot_s, "own_machine");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "own_machine_limit");
+	TEST_EXPECT(session_reads(paid_machine) == reads);
+
+	// Fay on tier 3: own machines one at a time below its three servers. A
+	// previous session Stripe could not be asked about refuses; one it no
+	// longer knows does not.
+	const std::string fay_cus = h.stripe->add_customer({ { billing::kMetaInstance, h.billing->instance_id() },
+			{ billing::kMetaUserId, std::to_string(fay) }, { billing::kMetaUsername, "chk_fay" } });
+	h.stripe->add_subscription(fay_cus, "price_htier3", 1, "active", billing::unix_now() + 30 * 86400);
+	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), fay_cus, billing::unix_now()) ==
+			billing::SyncOutcome::Synced);
+	TEST_EXPECT(checkout(fay_s, "own_machine").code == 200);
+	TEST_EXPECT(!h.stripe->complete_checkout(open_session(fay)).empty());
+	reply = checkout(fay_s, "own_machine");
+	TEST_EXPECT(reply.code == 200);
+	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), fay, billing::unix_now()).own_machines == 1);
+	const std::string pending = open_session(fay);
+	const size_t sessions_before = h.stripe->count(StripeRequest::Method::Post, "/v1/checkout/sessions");
+	h.stripe->fail_next(billing::StripeReply::Outcome::Unreachable);
+	reply = checkout(fay_s, "own_machine");
+	TEST_EXPECT(reply.code == 502 && error_of_reply(reply) == "stripe_unavailable");
+	TEST_EXPECT(open_session(fay) == pending &&
+			h.stripe->count(StripeRequest::Method::Post, "/v1/checkout/sessions") == sessions_before);
+	billing::set_open_checkout_session(*h.pool.acquire(), fay, "cs_test_gone");
+	reply = checkout(fay_s, "own_machine");
+	TEST_EXPECT(reply.code == 200 && open_session(fay) != "cs_test_gone");
+
+	// A customer row of the other mode (the key went from live to test): no
+	// customer this key can use; a new one replaces it, and the checkout goes on.
+	const int64_t gil = make_account(h, "chk_gil", "pw-chk-gil");
+	const std::string gil_s = login_token(h, "10.62.0.3", "chk_gil", "pw-chk-gil");
+	TEST_EXPECT(gil > 0 && !gil_s.empty());
+	TEST_EXPECT(billing::insert_customer(*h.pool.acquire(), gil, "cus_livemodegil", /*livemode=*/true));
+	reply = checkout(gil_s, "tier1");
+	TEST_EXPECT(reply.code == 200);
+	const auto gil_customer = billing::customer_of(*h.pool.acquire(), gil);
+	TEST_EXPECT(gil_customer && gil_customer->stripe_customer_id != "cus_livemodegil" && !gil_customer->livemode &&
+			!gil_customer->open_checkout_session.empty());
+	TEST_EXPECT(!billing::customer_by_id(*h.pool.acquire(), "cus_livemodegil"));
+
+	// Two checkouts of one account at once (two tabs): while the first is
+	// inside Stripe the second answers 409 checkout_in_progress; once it is
+	// done, the next one runs.
+	const int64_t hal = make_account(h, "chk_hal", "pw-chk-hal");
+	const std::string hal_s = login_token(h, "10.62.0.4", "chk_hal", "pw-chk-hal");
+	TEST_EXPECT(hal > 0 && !hal_s.empty());
+	h.stripe->close_gate();
+	net::HttpReply first;
+	std::thread tab([&] {
+		first = h.send("POST", "/api/billing/checkout", { kJson, kCsrf, with_session(hal_s) },
+				"{\"item\":\"tier1\"}", 15000);
+	});
+	const bool inside = h.stripe->wait_at_gate(1, std::chrono::seconds(10));
+	net::HttpReply second;
+	if (inside) second = checkout(hal_s, "tier2");
+	h.stripe->open_gate();
+	tab.join();
+	TEST_EXPECT(inside && second.code == 409 && error_of_reply(second) == "checkout_in_progress");
+	TEST_EXPECT(first.code == 200);
+	TEST_EXPECT(checkout(hal_s, "tier1").code == 200);
+	return 0;
+}
+
+// POST /api/billing/webhook: no session and no CSRF header, the signature its
+// credential. Missing, wrong, stale and several-v1 signatures; a body past
+// 1 MiB (413); a signed body that is no event (400 invalid_json); an event of the
+// other mode dropped (200); an event recorded once however often delivered,
+// its customer synced by the worker's next pass into the account's billing;
+// the refusals counted for the heartbeat; billing off (503).
+int test_billing_webhook(Harness &h) {
+	namespace billing = opennova::novaworld_server::billing;
+	const int64_t dee = make_account(h, "bill_dee", "pw-bill-dee");
+	const std::string dee_s = login_token(h, "10.62.0.1", "bill_dee", "pw-bill-dee");
+	TEST_EXPECT(dee > 0 && !dee_s.empty());
+	// Dee's customer and her tier 3, as a checkout left them, not synced yet.
+	const std::string cus = h.stripe->add_customer({ { billing::kMetaInstance, h.billing->instance_id() },
+			{ billing::kMetaUserId, std::to_string(dee) }, { billing::kMetaUsername, "bill_dee" } });
+	TEST_EXPECT(billing::insert_customer(*h.pool.acquire(), dee, cus, false));
+	h.stripe->add_subscription(cus, "price_htier3", 1, "active", billing::unix_now() + 30 * 86400);
+	TEST_EXPECT(crow::json::load(body_text(h.send("GET", "/api/me/billing", { with_session(dee_s) })))["max_servers"]
+						.i() == 0);
+
+	auto deliver = [&h](const std::string &body, const std::vector<std::string> &extra) {
+		std::vector<std::string> headers = { kJson };
+		headers.insert(headers.end(), extra.begin(), extra.end());
+		return h.send("POST", "/api/billing/webhook", headers, body);
+	};
+	const uint64_t rejects_before = h.billing->webhook_rejects();
+	const int64_t now = billing::unix_now();
+	const std::string body = event_body("evt_harness_1", cus);
+	auto reply = deliver(body, {});
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "bad_signature");
+	reply = deliver(body, { stripe_signature(body, now, "whsec_notthesecret") });
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "bad_signature");
+	reply = deliver(body, { stripe_signature(body, now - 400) });
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "bad_signature");
+	reply = deliver(body, { "Stripe-Signature: t=" + std::to_string(now) + ",v1=nothex" });
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "bad_signature");
+	const std::string not_event = "{\"id\":\"evt_x\"}";
+	reply = deliver(not_event, { stripe_signature(not_event, now) });
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_json");
+	TEST_EXPECT(h.billing->webhook_rejects() == rejects_before + 5);
+	const std::string huge(billing::BillingRoutes::kWebhookMaxBytes + 1, 'x');
+	reply = deliver(huge, { stripe_signature(huge, now) });
+	TEST_EXPECT(reply.code == 413);
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM billing_events WHERE event_id = 'evt_harness_1';").empty());
+
+	// Signed: received, recorded once however often it comes, with no session and no CSRF header.
+	for (int i = 0; i < 2; ++i) {
+		reply = deliver(body, { stripe_signature(body, now) });
+		TEST_EXPECT(reply.code == 200 && body_text(reply) == "{\"received\":true}");
+	}
+	// Several v1 signatures (a secret's roll): any one matching passes.
+	const std::string second = event_body("evt_harness_2", cus);
+	const std::string both = stripe_signature(second, now) + ",v1=" + std::string(64, '0');
+	TEST_EXPECT(deliver(second, { both }).code == 200);
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM billing_events WHERE customer_id = $1;",
+					{ opennova::db::BindValue(cus) }).size() == 2);
+	// An event of the other mode: answered, dropped.
+	const std::string live = event_body("evt_harness_live", cus, /*livemode=*/true);
+	TEST_EXPECT(deliver(live, { stripe_signature(live, now) }).code == 200);
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM billing_events WHERE event_id = 'evt_harness_live';").empty());
+
+	// The worker's next pass reads Dee's customer back: her tier 3.
+	billing_pass(h);
+	auto json = crow::json::load(body_text(h.send("GET", "/api/me/billing", { with_session(dee_s) })));
+	TEST_EXPECT(json && json["max_servers"].i() == 3 && json["subscription"]["tier"].i() == 3);
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM billing_events WHERE customer_id = $1 AND outcome = 'synced';",
+					{ opennova::db::BindValue(cus) }).size() == 2);
+
+	// Billing off: 503.
+	reply = h.send_to(h.secure_port, "POST", "/api/billing/webhook", { kJson, stripe_signature(body, now) }, body);
+	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "billing_disabled");
+	return 0;
+}
+
+// The admin's billing view, its reconcile and relink: admin only; the mode,
+// the price check, the last reconcile, the pending count, the subscriptions
+// with their accounts, the webhook log, the orphans a reconcile found (another
+// instance's subscription) and their relink to an account (its metadata
+// stamped, the account's entitlement from it), and the account delete refused
+// while a subscription grants.
+int test_billing_admin(Harness &h) {
+	namespace billing = opennova::novaworld_server::billing;
+	const int64_t eli = make_account(h, "bill_eli", "pw-bill-eli");
+	const std::string eli_s = login_token(h, "10.63.0.1", "bill_eli", "pw-bill-eli");
+	TEST_EXPECT(eli > 0 && !eli_s.empty());
+	TEST_EXPECT(h.send("GET", "/api/admin/billing").code == 401);
+	TEST_EXPECT(h.send("GET", "/api/admin/billing", { with_session(eli_s) }).code == 403);
+	TEST_EXPECT(h.send("POST", "/api/admin/billing/reconcile", { with_session(eli_s), kCsrf }).code == 403);
+
+	// Another instance's customer with a granting tier: an orphan once reconciled.
+	const std::string foreign = h.stripe->add_customer({ { billing::kMetaInstance, "another-instance" },
+			{ billing::kMetaUserId, "424242" }, { billing::kMetaUsername, "bill_eli" } });
+	const std::string orphan_sub =
+			h.stripe->add_subscription(foreign, "price_htier2", 1, "active", billing::unix_now() + 30 * 86400);
+	auto reply = h.send("POST", "/api/admin/billing/reconcile", { kBearer });
+	TEST_EXPECT(reply.code == 202 && str(crow::json::load(body_text(reply))["reconcile"]) == "requested");
+	billing_pass(h);
+	reply = h.send("GET", "/api/admin/billing", { kBearer });
+	auto json = crow::json::load(body_text(reply));
+	if (reply.code != 200) std::fprintf(stderr, "  admin billing: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && str(json["mode"]) == "test" &&
+			json["prices_ok"].b());
+	TEST_EXPECT(json["prices_error"].t() == crow::json::type::Null &&
+			json["last_reconcile_error"].t() == crow::json::type::Null);
+	TEST_EXPECT(str(json["last_reconcile_at"]).size() == 20 && json["pending_events"].i() == 0);
+	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
+	bool ana_row = false;
+	for (const auto &row : json["subscriptions"]) {
+		if (str(row["username"]) != "bill_ana" || str(row["item"]) != "tier") continue;
+		ana_row = row["tier"].i() == 1 && row["entitled"].b() && str(row["status"]) == "active" &&
+				str(row["stripe_customer_id"]).rfind("cus_", 0) == 0 && row["user_id"].t() == crow::json::type::Number &&
+				str(row["current_period_end"]).size() == 20;
+	}
+	TEST_EXPECT(ana_row);
+	bool logged = false;
+	for (const auto &e : json["recent_events"]) {
+		logged = logged || (str(e["event_id"]) == "evt_harness_1" && str(e["outcome"]) == "synced" &&
+								   str(e["received_at"]).size() == 20);
+	}
+	TEST_EXPECT(logged);
+	bool listed = false;
+	for (const auto &o : json["orphans"]) {
+		listed = listed || (str(o["stripe_subscription_id"]) == orphan_sub && str(o["stripe_customer_id"]) == foreign &&
+								   str(o["username_hint"]) == "bill_eli" && str(o["status"]) == "active");
+	}
+	TEST_EXPECT(listed);
+	TEST_EXPECT(json["duplicates"].t() == crow::json::type::List && json["duplicates"].size() == 0);
+	TEST_EXPECT(json["unknown_prices"].t() == crow::json::type::List && json["unknown_prices"].size() == 0);
+
+	// A subscription of ours selling a price no list names: listed once a
+	// reconcile reads it, gone once it is canceled.
+	{
+		const auto ana = nws::get_user_by_username(*h.pool.acquire(), "bill_ana");
+		const auto ana_customer = ana ? billing::customer_of(*h.pool.acquire(), ana->id) : std::nullopt;
+		TEST_EXPECT(ana_customer.has_value());
+		const std::string unlisted = h.stripe->add_subscription(ana_customer->stripe_customer_id, "price_hunlisted", 1,
+				"active", billing::unix_now() + 30 * 86400);
+		TEST_EXPECT(h.send("POST", "/api/admin/billing/reconcile", { kBearer }).code == 202);
+		billing_pass(h);
+		json = crow::json::load(body_text(h.send("GET", "/api/admin/billing", { kBearer })));
+		TEST_EXPECT(json && json["unknown_prices"].size() == 1 && str(json["unknown_prices"][0]) == "price_hunlisted");
+		{
+			std::lock_guard<std::mutex> lock(h.stripe->mu);
+			h.stripe->subscriptions[unlisted].status = "canceled";
+		}
+		TEST_EXPECT(h.send("POST", "/api/admin/billing/reconcile", { kBearer }).code == 202);
+		billing_pass(h);
+		json = crow::json::load(body_text(h.send("GET", "/api/admin/billing", { kBearer })));
+		TEST_EXPECT(json && json["unknown_prices"].size() == 0);
+	}
+	TEST_EXPECT(!json["limits_hold"].b() && json["limits_hold_reason"].t() == crow::json::type::Null);
+	TEST_EXPECT(json["limits_hold_owners"].i() == 0 && json["limits_hold_servers"].i() == 0);
+
+	// The hosted servers' limits hold: shown with the stops it keeps back. A
+	// reconcile alone leaves it to the supervisor (it releases after a clean
+	// one); the override arms the supervisor's next pass.
+	TEST_EXPECT(h.limits_hold->hold("a pass would stop 9 server(s) of 3 of 4 owners", { 11, 12, 13 }, 9, 0) ==
+			nws::hosted::LimitsHold::Held::Now);
+	json = crow::json::load(body_text(h.send("GET", "/api/admin/billing", { kBearer })));
+	TEST_EXPECT(json && json["limits_hold"].b() &&
+			str(json["limits_hold_reason"]) == "a pass would stop 9 server(s) of 3 of 4 owners");
+	TEST_EXPECT(json["limits_hold_owners"].i() == 3 && json["limits_hold_servers"].i() == 9);
+	auto reconcile = [&h](const std::string &body) {
+		return h.send("POST", "/api/admin/billing/reconcile", { kBearer, kJson }, body);
+	};
+	reply = reconcile("");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && json && str(json["reconcile"]) == "requested" && !json["force_limits"].b());
+	TEST_EXPECT(h.limits_hold->held() && !h.limits_hold->take_force());
+	reply = reconcile("{\"force_limits\":\"yes\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+	reply = reconcile("not json");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_json");
+	TEST_EXPECT(!h.limits_hold->take_force());
+	reply = reconcile("{\"force_limits\":true}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && json && str(json["reconcile"]) == "requested" && json["force_limits"].b());
+	TEST_EXPECT(h.limits_hold->take_force() && h.limits_hold->held());
+	TEST_EXPECT(h.limits_hold->clear());
+	billing_pass(h);
+
+	// The relink: its checks, then the orphan made Eli's.
+	auto link = [&h](const std::string &body) {
+		return h.send("POST", "/api/admin/billing/link", { kBearer, kJson }, body);
+	};
+	TEST_EXPECT(link("{}").code == 400 && error_of_reply(link("{}")) == "missing_field");
+	reply = link("{\"user_id\":\"1\",\"stripe_customer_id\":\"cus_x\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+	reply = link("{\"user_id\":1,\"stripe_customer_id\":\"sub_x\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+	reply = link("{\"user_id\":999999,\"stripe_customer_id\":\"" + foreign + "\"}");
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+	reply = link("{\"user_id\":" + std::to_string(eli) + ",\"stripe_customer_id\":\"cus_nosuch\"}");
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+	reply = link("{\"user_id\":" + std::to_string(eli) + ",\"stripe_customer_id\":\"" + foreign + "\"}");
+	json = crow::json::load(body_text(reply));
+	if (reply.code != 200) std::fprintf(stderr, "  link: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 200 && json && str(json["outcome"]) == "synced" && json["user_id"].i() == eli);
+	{
+		std::lock_guard<std::mutex> lock(h.stripe->mu);
+		const auto &meta = h.stripe->customers[foreign].metadata;
+		TEST_EXPECT(meta.at(billing::kMetaInstance) == h.billing->instance_id() &&
+				meta.at(billing::kMetaUserId) == std::to_string(eli));
+	}
+	json = crow::json::load(body_text(h.send("GET", "/api/me/billing", { with_session(eli_s) })));
+	TEST_EXPECT(json && json["max_servers"].i() == 2 && json["subscription"]["tier"].i() == 2);
+
+	// The account delete waits for the subscription's end.
+	reply = h.send("DELETE", "/api/admin/users/" + std::to_string(eli), { kBearer });
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "active_subscription");
+	TEST_EXPECT(nws::get_user_by_id(*h.pool.acquire(), eli).has_value());
+	{
+		std::lock_guard<std::mutex> lock(h.stripe->mu);
+		h.stripe->subscriptions[orphan_sub].status = "canceled";
+	}
+	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), foreign, billing::unix_now()) ==
+			billing::SyncOutcome::Synced);
+	TEST_EXPECT(h.send("DELETE", "/api/admin/users/" + std::to_string(eli), { kBearer }).code == 204);
+	// Billing off: the view says so, with the limits hold; a reconcile is 503,
+	// an override still goes through.
+	reply = h.send_to(h.secure_port, "GET", "/api/admin/billing", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && !json["enabled"].b() && !json["limits_hold"].b() &&
+			!json.has("subscriptions"));
+	reply = h.send_to(h.secure_port, "POST", "/api/admin/billing/reconcile", { kBearer });
+	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "billing_disabled");
+	reply = h.send_to(h.secure_port, "POST", "/api/admin/billing/reconcile", { kBearer, kJson }, "{\"force_limits\":true}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && json && str(json["reconcile"]) == "off" && json["force_limits"].b());
+	return 0;
+}
+
+// GET /api/admin/users/<id> and the users list's entitlement: admin only; the
+// profile, the entitlement in full, the servers and the billing ids (the
+// customer and each subscription); 404 for no such player and for a hosted
+// server's service account.
+int test_admin_user_detail(Harness &h) {
+	namespace billing = opennova::novaworld_server::billing;
+	const auto ana = nws::get_user_by_username(*h.pool.acquire(), "bill_ana");
+	TEST_EXPECT(ana.has_value());
+	const std::string path = "/api/admin/users/" + std::to_string(ana->id);
+	TEST_EXPECT(h.send("GET", path).code == 401);
+	const std::string ana_s = login_token(h, "10.64.0.1", "bill_ana", "pw-bill-ana");
+	TEST_EXPECT(h.send("GET", path, { with_session(ana_s) }).code == 403);
+	auto reply = h.send("GET", path, { kBearer });
+	auto json = crow::json::load(body_text(reply));
+	if (reply.code != 200) std::fprintf(stderr, "  user detail: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 200 && json && str(json["user"]["username"]) == "bill_ana");
+	TEST_EXPECT(json["user"]["comp_servers"].i() == 0 && json["user"]["max_servers"].i() == 1);
+	TEST_EXPECT(body_text(reply).find("password_hash") == std::string::npos);
+	const auto &e = json["entitlement"];
+	TEST_EXPECT(e["max_servers"].i() == 1 && str(e["source"]) == "tier" && e["tier"].i() == 1 &&
+			e["comp_servers"].i() == 0 && e["tier_servers"].i() == 1 && e["own_machines"].i() == 0 &&
+			e["can_start"].b());
+	TEST_EXPECT(json["servers"].t() == crow::json::type::List && json["servers"].size() == 0);
+	const auto customer = billing::customer_of(*h.pool.acquire(), ana->id);
+	TEST_EXPECT(customer && !json["billing"]["livemode"].b() &&
+			str(json["billing"]["stripe_customer_id"]) == customer->stripe_customer_id);
+	TEST_EXPECT(json["billing"]["subscriptions"].size() >= 1);
+	bool tier = false;
+	for (const auto &s : json["billing"]["subscriptions"])
+		tier = tier || (str(s["item"]) == "tier" && s["tier"].i() == 1 && s["entitled"].b() &&
+							   s["quantity"].i() == 1 && str(s["stripe_subscription_id"]).rfind("sub_", 0) == 0);
+	TEST_EXPECT(tier);
+	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
+	// No such player, and a service account: 404.
+	TEST_EXPECT(h.send("GET", "/api/admin/users/999999", { kBearer }).code == 404);
+	const auto service = nws::upsert_service_account(*h.pool.acquire(), "srv-31337", "pw-detail-service");
+	TEST_EXPECT(service.ok);
+	reply = h.send("GET", "/api/admin/users/" + std::to_string(service.id), { kBearer });
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+	TEST_EXPECT(nws::delete_service_account(*h.pool.acquire(), service.id).ok);
+	// A comped account with no billing: its ids null.
+	const auto bea = nws::get_user_by_username(*h.pool.acquire(), "bill_bea");
+	TEST_EXPECT(bea && nws::set_comp_servers(*h.pool.acquire(), bea->id, 3).ok);
+	json = crow::json::load(body_text(h.send("GET", "/api/admin/users/" + std::to_string(bea->id), { kBearer })));
+	TEST_EXPECT(json && json["entitlement"]["max_servers"].i() == 3 && str(json["entitlement"]["source"]) == "comp" &&
+			json["entitlement"]["tier"].t() == crow::json::type::Null && json["entitlement"]["tier_servers"].i() == 0 &&
+			json["billing"]["stripe_customer_id"].t() == crow::json::type::Null &&
+			json["billing"]["subscriptions"].size() == 0);
+
+	// The list carries each one's entitlement, live servers and tier status.
+	json = crow::json::load(body_text(h.send("GET", "/api/admin/users", { kBearer })));
+	bool ana_seen = false;
+	bool bea_seen = false;
+	for (const auto &u : json["users"]) {
+		if (str(u["username"]) == "bill_ana") {
+			ana_seen = u["entitlement"]["max_servers"].i() == 1 && str(u["entitlement"]["source"]) == "tier" &&
+					u["entitlement"]["tier"].i() == 1 && u["live_servers"].i() == 0 &&
+					str(u["subscription_status"]) == "active" && u["max_servers"].i() == 1;
+		}
+		if (str(u["username"]) == "bill_bea") {
+			bea_seen = u["entitlement"]["max_servers"].i() == 3 && str(u["entitlement"]["source"]) == "comp" &&
+					u["subscription_status"].t() == crow::json::type::Null && u["comp_servers"].i() == 3;
+		}
+	}
+	TEST_EXPECT(ana_seen && bea_seen);
+	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), bea->id, 0).ok);
+	// An id past 32 bits names no account (it is never cut down to another's).
+	const std::string wide = std::to_string((int64_t{ 1 } << 32) + ana->id);
+	reply = h.send("PUT", "/api/admin/users/" + wide, { kBearer, kJson }, "{\"nwh\":\"7\"}");
+	TEST_EXPECT(reply.code == 404);
+	TEST_EXPECT(h.send("PUT", "/api/admin/users/" + wide + "/game-access", { kBearer, kJson },
+						"{\"game_slug\":\"jop_2_consumer\",\"status\":\"active\",\"exp_bits\":\"3\"}")
+						.code != 200);
+	TEST_EXPECT(h.send("DELETE", "/api/admin/users/" + wide, { kBearer }).code == 404);
+	TEST_EXPECT(nws::get_user_by_id(*h.pool.acquire(), ana->id)->nwh == ana->nwh);
 	return 0;
 }
 
@@ -5351,12 +6540,20 @@ int run(Harness &h) {
 		{ "dfx2_activation", test_dfx2_activation },
 		{ "unknown_path_404", test_unknown_path_404 },
 		{ "server_info", test_server_info },
+		{ "healthz", test_healthz },
 		{ "admin_host_push", test_admin_host_push },
 		{ "owner_host_push", test_owner_host_push },
 		{ "hosted_server_routes", test_hosted_server_routes },
 		{ "hosted_listing_owner", test_hosted_listing_owner },
 		{ "hosted_console_routes", test_hosted_console_routes },
-		{ "hosted_bootstrap_route", test_hosted_bootstrap_route },
+		{ "admin_fleet_routes", test_admin_fleet_routes },
+		{ "hosted_stats_routes", test_hosted_stats_routes },
+		{ "no_agent_routes_on_public_listener", test_no_agent_routes_on_public_listener },
+		{ "billing_routes", test_billing_routes },
+		{ "billing_checkout_guard", test_billing_checkout_guard },
+		{ "billing_webhook", test_billing_webhook },
+		{ "billing_admin", test_billing_admin },
+		{ "admin_user_detail", test_admin_user_detail },
 		{ "host_text_utf8", test_host_text_utf8 },
 		{ "name_and_value_rules", test_name_and_value_rules },
 		{ "template_names_refused", test_template_names_refused },
@@ -5385,27 +6582,21 @@ int run(Harness &h) {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
 	TEST_EXPECT(net::startup() == 0);
 	int rc = 1;
 	{
 		const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
-		// Declared first, so it outlives the pool and the listener: the database
-		// file and its WAL siblings go only once every connection is closed.
+		// Declared first, so they outlive the pool and the listener.
 		test_temp::TempDir temp("http_routes");
-		// The server's own busy timeout (kDefaultBusyTimeoutMs), unlike
-		// db_concurrency_test's stress margin: a write that holds the lock past
+		// Migrated, then the games seed alone: no dev users, so the players
+		// table starts empty.
+		test_db::TestDatabase database({ /*migrate=*/true, /*seed_games=*/true });
+		// The server's own lock timeout (kDefaultLockTimeoutMs), unlike
+		// db_concurrency_test's stress margin: a write that waits on a lock past
 		// it fails here as it would in production.
-		ConnectionPool pool(temp.path / "novaworld.db");
-		{
-			auto boot = pool.acquire();
-			const auto migrated =
-					opennova::db::run_migrations(*boot, source_dir / "backend" / "migrations");
-			TEST_EXPECT(!migrated.applied.empty());
-			// The games seed alone: no dev users, so the players table starts empty.
-			boot->exec_script(test_io::read_file_text(
-					(source_dir / "backend" / "seed" / "0001_games.sql").string()));
-		}
+		ConnectionPool pool(database.options());
 
 		nws::ServerConfig config;
 		config.public_host = "127.0.0.1";
@@ -5436,12 +6627,12 @@ int main() {
 		config.trusted_proxies = {"127.0.0.1"};
 		config.api_proxy_only = true;
 		// The hosted servers' routes run (no supervisor: rows stay where the routes
-		// put them), with a cap of 2 and two data sets, each with a default
+		// put them), with a cap of 4 and two data sets, each with a default
 		// rotation: Joint Operations and Delta Force Xtreme 2 (the local
 		// provider's folders, never read here). OpenNova's names no folder, so
 		// the local provider does not offer it.
 		config.hosted_provider = "local";
-		config.hosted_cap = 2;
+		config.hosted_cap = 4;
 		config.hosted_data_sets =
 				"{\"dfx2_consumer\":{\"missions\":[\"dfx2_a.bms\",\"dfx2_b.bms\"],\"resource_dir\":\"unused-dfx2\"},"
 				"\"jop_2_consumer\":{\"missions\":[\"default.bms\"],\"resource_dir\":\"unused-jo\"},"
@@ -5464,15 +6655,38 @@ int main() {
 		// The console routes' admin links (the console case syncs them by hand),
 		// declared before the listener so they outlive it.
 		opennova::novaworld_server::hosted::AdminLinks links(&pool);
-		// The bootstrap route's tokens, likewise declared before the listeners: the first
-		// listener answers the harness's own address, the third only 10.0.0.0/8.
-		opennova::novaworld_server::hosted::BootstrapStore bootstrap;
-		opennova::novaworld_server::hosted::BootstrapStore fresh_bootstrap;
+		// GET /healthz's watchdog on a hand-stepped clock, watching one loop whose
+		// counter the healthz case moves; declared before the listener so it
+		// outlives it.
+		nws::Watchdog watchdog(nws::Watchdog::kStallMs, [] { return g_watch_clock_ms.load(); });
+		watchdog.watch("harness loop", [] { return g_watch_turns.load(); });
+		// Billing over the in-memory Stripe, its worker's passes the cases' own (no
+		// thread): the first one here checks the prices and reconciles (nothing yet).
+		billing_fake::FakeStripeApi stripe;
+		stripe.now = nws::billing::unix_now(); // the periods Checkout starts are real ones
+		stripe.add_price(harness_price("price_htier1", 500));
+		stripe.add_price(harness_price("price_htier2", 1000));
+		stripe.add_price(harness_price("price_htier3", 1500));
+		stripe.add_price(harness_price("price_hown", 4500));
+		nws::billing::BillingConfig billing_config;
+		billing_config.secret_key = "sk_test_harnesskey";
+		billing_config.webhook_secret = kWebhookSecret;
+		billing_config.site_url = kSiteUrl;
+		billing_config.tier_prices[1] = { "price_htier1" };
+		billing_config.tier_prices[2] = { "price_htier2" };
+		billing_config.tier_prices[3] = { "price_htier3" };
+		billing_config.own_machine_prices = { "price_hown" };
+		TEST_EXPECT(nws::billing::check_billing_config(billing_config).empty());
+		nws::billing::Billing billing_service(billing_config, stripe, pool, nws::billing::instance_id(*pool.acquire()));
+		billing_service.sync().pass(nws::billing::unix_now());
+		TEST_EXPECT(billing_service.sync().status().prices_ok);
+		nws::hosted::LimitsHold limits_hold;
 		nws::HttpListener http(manager, pool, sessions);
 		http.set_nw_udp_listener(&nw_udp);
 		http.set_admin_links(&links);
-		http.set_hosted_bootstrap(&bootstrap,
-				{ *opennova::novaworld_server::hosted::parse_ipv4_cidr("127.0.0.0/8") });
+		http.set_watchdog(&watchdog);
+		http.set_billing(&billing_service);
+		http.set_limits_hold(&limits_hold);
 		TEST_EXPECT(http.start(config));
 		TEST_EXPECT(http.bound_port() != 0);
 
@@ -5526,8 +6740,6 @@ int main() {
 		fresh_config.trusted_proxies = { "10.255.0.1" };
 		fresh_config.api_proxy_only = true;
 		nws::HttpListener fresh_http(manager, pool, sessions);
-		fresh_http.set_hosted_bootstrap(&fresh_bootstrap,
-				{ *opennova::novaworld_server::hosted::parse_ipv4_cidr("10.0.0.0/8") });
 		TEST_EXPECT(fresh_http.start(fresh_config));
 		TEST_EXPECT(fresh_http.bound_port() != 0);
 
@@ -5536,8 +6748,10 @@ int main() {
 		harness.retail_root = retail_root;
 		harness.fresh_port = fresh_http.bound_port();
 		harness.links = &links;
-		harness.bootstrap = &bootstrap;
-		harness.fresh_bootstrap = &fresh_bootstrap;
+		harness.watchdog = &watchdog;
+		harness.stripe = &stripe;
+		harness.billing = &billing_service;
+		harness.limits_hold = &limits_hold;
 		rc = run(harness);
 		// Join the Crow threads before the pool and the TempDir go, then the
 		// NW UDP listener the push routes held.

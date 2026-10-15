@@ -11,7 +11,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/npwire/cs_config.h>
 #include <net_sockets.h>
 #include <net/novaworld/connection/registry.h>  // PeerAddr / PeerAddrHash
@@ -123,12 +123,12 @@ public:
 	explicit NwUdpListener(ConnectionManager &manager);
 	~NwUdpListener();
 
-	// Optional DB pool. When set, start() leases one connection (returning
-	// false when it cannot be opened) and hands it to the receive thread for
-	// its lifetime, which gives it to the lobby session to persist host state
-	// to active_hosts / host_players (Phase I.2/I.3); erase_lobby_state leases
-	// its own, since it also runs on the main thread (the ConnectionManager's
-	// on_lost from tick(), and stop()).
+	// Optional DB pool. When set, the receive thread leases one connection for
+	// its lifetime (start() waits for it, returning false when it cannot be
+	// opened) and gives it to the lobby session to persist host state to
+	// active_hosts / host_players (Phase I.2/I.3); erase_lobby_state, which
+	// also runs on the main thread (the ConnectionManager's on_lost from
+	// tick(), and stop()), writes on the calling thread's own connection.
 	void set_db_pool(opennova::db::ConnectionPool *pool) { db_pool_ = pool; }
 
 	// Forward the reflect-endpoint override (the client's NovaWorld session
@@ -155,6 +155,11 @@ public:
 	// Actual port selected by start(), including an OS-assigned port when the
 	// configured value is zero.
 	uint16_t bound_port() const { return bound_port_; }
+
+	// The receive loop's turns so far (one per receive, which waits at most a
+	// pump period): the stall watchdog's progress counter (health.h).
+	// Thread-safe.
+	uint64_t loop_turns() const { return loop_turns_.load(std::memory_order_relaxed); }
 
 	// Snapshot of every connection that has issued a ClientHostRequest
 	// (and therefore appears in the lobby browser). Thread-safe.
@@ -218,7 +223,13 @@ public:
 	// concurrent retail processes both send ci=0x00000001, so the second
 	// AUTH overwrote the first's per-connection state. PeerAddr is the
 	// only reliable per-process key for loopback testing.
-	void erase_lobby_state(const PeerAddr &peer, const char *reason);
+	//
+	// The rows go on `db`, the calling thread's own connection, when the
+	// caller has it to hand; with none, on the one the calling thread holds
+	// its lease on (ConnectionPool::leased_by_this_thread: the on_lost sink
+	// runs on the receive thread for a GOODBYE or a replacing Hello, and on
+	// main for a timeout or the shutdown), else on one leased for the call.
+	void erase_lobby_state(const PeerAddr &peer, const char *reason, db::Database *db = nullptr);
 
 private:
 	void run_loop(opennova::net::ScopedSocket socket,
@@ -245,6 +256,7 @@ private:
 	std::thread worker_;
 	std::atomic<bool> running_{false};
 	std::atomic<bool> stop_requested_{false};
+	std::atomic<uint64_t> loop_turns_{0};
 	uint16_t bound_port_ = 0;
 	// public_host:http_port, the NovaworldWebDomainNameAndPortNumber CU value
 	// (no scheme — the client adds "http://"), with the HTTP port the config

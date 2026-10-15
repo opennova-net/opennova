@@ -1,7 +1,9 @@
 # Base compose for the OpenNova NovaWorld stack: the C++ server (gate UDP,
-# NW UDP, HTTP) plus the nginx web portal. SQLite lives in the nw_data
-# volume. Overlays add dev (published ports, dev env) or prod (host
-# networking, GHCR images, backup sidecar) on top of this file.
+# NW UDP, HTTP) plus the nginx web portal. The server keeps no state of its
+# own: its database is PostgreSQL, named by DATABASE_URL (a libpq URI) with
+# DATABASE_PASSWORD beside it. Overlays add dev (published ports, dev env, a
+# local postgres) or prod (host networking, GHCR images, the managed
+# database, backup sidecar) on top of this file.
 #
 # Run from this directory, e.g.:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
@@ -22,11 +24,19 @@ services:
     # (pid_namespaces(7)), so a second `docker kill -s TERM` could not end a
     # stuck shutdown. The overlays inherit it.
     init: true
-    volumes:
-      - nw_data:/data
+    # The server's only writes are temporary files (the Stripe calls' and the
+    # ec2 provider's owner-only scratch directories): memory, never the image.
+    tmpfs:
+      - /tmp
     environment:
       ONNET_PUBLIC_HOST: ${ONNET_PUBLIC_HOST:-127.0.0.1}
-      DATABASE_PATH: /data/novaworld.db
+      # The database (apps/novaworld_server/README.md "Database"): the libpq
+      # URI, the role's password kept apart from it (a secret; the URI is
+      # not), and the most connections the server opens (unset: 16). Unset,
+      # the URI is the server's local default.
+      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-}
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-}
       # The website session (apps/novaworld_server/README.md): the cookie's
       # Secure flag for an https site, the proxy whose X-Real-IP names the
@@ -43,12 +53,12 @@ services:
       # (unset: on); apps/novaworld_server/README.md "CD keys (DFX2 activation)".
       ONNET_CD_KEY_AUTO_MINT: ${ONNET_CD_KEY_AUTO_MINT:-}
       # Hosted game servers (apps/novaworld_server/README.md "Hosted servers"):
-      # the deploy toolbox's `app deploy` sets the provider and every ec2
-      # setting from the Terraform outputs, the launch template of each data
-      # set among them (ONNET_HOSTED_EC2_LAUNCH_TEMPLATES, a JSON object by data
-      # set; DEPLOY.md "Hosted game servers"); unset, hosting is off. The cap
-      # and each data set's default rotation (ONNET_HOSTED_DATA_SETS, a JSON
-      # object by data set) are the operator's (app.prod.env).
+      # a deployed host gets the provider and every ec2 setting from Terraform's
+      # infra.env: the two launch templates by machine kind
+      # (ONNET_HOSTED_EC2_LAUNCH_TEMPLATES, {"shared","own"}) and the data sets
+      # every machine mounts with their default rotations (ONNET_HOSTED_DATA_SETS,
+      # a JSON object by data set; DEPLOY.md "Hosted game servers"); unset,
+      # hosting is off. The cap is the operator's (app.prod.env).
       ONNET_HOSTED_PROVIDER: ${ONNET_HOSTED_PROVIDER:-none}
       ONNET_HOSTED_CAP: ${ONNET_HOSTED_CAP:-}
       ONNET_HOSTED_DATA_SETS: ${ONNET_HOSTED_DATA_SETS:-}
@@ -57,8 +67,24 @@ services:
       ONNET_HOSTED_EC2_SUBNET: ${ONNET_HOSTED_EC2_SUBNET:-}
       ONNET_HOSTED_DEPLOYMENT: ${ONNET_HOSTED_DEPLOYMENT:-}
       ONNET_HOSTED_SERVE_IMAGE: ${ONNET_HOSTED_SERVE_IMAGE:-}
-      ONNET_HOSTED_SERVICE_ADDRESS: ${ONNET_HOSTED_SERVICE_ADDRESS:-}
       ONNET_HOSTED_BOOTSTRAP_CIDRS: ${ONNET_HOSTED_BOOTSTRAP_CIDRS:-}
+      # Billing, the monthly support tiers over Stripe (apps/novaworld_server/
+      # README.md "Billing (monthly support tiers)"): on only when the set is
+      # complete and well-formed, else a boot warning and billing off. The key
+      # and the webhook secret are secrets (the vault's stripe-test or
+      # stripe-live item); the price ids are comma lists (the first sold, the
+      # rest grandfathered); ONNET_SITE_URL is the site's origin, where Checkout
+      # and the portal return.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_TIER1: ${STRIPE_PRICE_TIER1:-}
+      STRIPE_PRICE_TIER2: ${STRIPE_PRICE_TIER2:-}
+      STRIPE_PRICE_TIER3: ${STRIPE_PRICE_TIER3:-}
+      STRIPE_PRICE_OWN_MACHINE: ${STRIPE_PRICE_OWN_MACHINE:-}
+      ONNET_SITE_URL: ${ONNET_SITE_URL:-}
+      ONNET_STRIPE_CURL: ${ONNET_STRIPE_CURL:-}
+      ONNET_BILLING_AUTOMATIC_TAX: ${ONNET_BILLING_AUTOMATIC_TAX:-}
+      ONNET_BILLING_RECONCILE_MINUTES: ${ONNET_BILLING_RECONCILE_MINUTES:-}
 
   web:
     image: ${WEB_IMAGE:-opennova-web:local}
@@ -86,6 +112,3 @@ services:
       context: ../..
       dockerfile: deploy/game/Dockerfile
     restart: unless-stopped
-
-volumes:
-  nw_data:

@@ -2,6 +2,7 @@
 
 #include <base/io/strutil.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <string>
 #include <string_view>
@@ -66,7 +67,10 @@ ServerConfig ServerConfig::from_env() {
 	c.nw_udp_port   = getenv_u16("ONNET_NW_UDP_PORT",   c.nw_udp_port);
 	c.http_port     = getenv_u16("ONNET_HTTP_PORT",     c.http_port);
 
-	if (auto v = getenv_safe("DATABASE_PATH"))       c.database_path = v;
+	if (auto v = getenv_safe("DATABASE_URL"))        c.database_url = v;
+	if (auto v = getenv_safe("DATABASE_PASSWORD"))   c.database_password = v;
+	c.database_pool_max = static_cast<size_t>(
+			std::max<uint64_t>(1, getenv_u64("DATABASE_POOL_MAX", c.database_pool_max)));
 	if (auto v = getenv_safe("MIGRATIONS_DIR"))      c.migrations_dir = v;
 	if (auto v = getenv_safe("SEED_DIR"))            c.seed_dir = v;
 	c.seed_dev_users = getenv_bool("SEED_DEV_USERS", c.seed_dev_users);
@@ -107,15 +111,6 @@ ServerConfig ServerConfig::from_env() {
 	if (auto v = getenv_safe("ONNET_HOSTED_SERVE_BIN")) c.hosted_serve_bin = v;
 	if (auto v = getenv_safe("ONNET_HOSTED_WORK_DIR")) c.hosted_work_dir = v;
 	if (auto v = getenv_safe("ONNET_HOSTED_DATA_SETS")) c.hosted_data_sets = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_EC2_LAUNCH_TEMPLATES")) c.hosted_ec2_launch_templates = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_EC2_REGION")) c.hosted_ec2_region = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_EC2_SUBNET")) c.hosted_ec2_subnet = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_DEPLOYMENT")) c.hosted_deployment = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_SERVE_IMAGE")) c.hosted_serve_image = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_SERVICE_ADDRESS")) c.hosted_service_address = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_BOOTSTRAP_CIDRS")) c.hosted_bootstrap_cidrs = split_list(v);
-	if (auto v = getenv_safe("ONNET_HOSTED_AWS_CLI")) c.hosted_aws_cli = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_MACHINE_SCRIPT")) c.hosted_machine_script = v;
 
 	return c;
 }

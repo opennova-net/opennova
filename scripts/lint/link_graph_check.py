@@ -11,12 +11,13 @@ The old ~400-target graph's per-format and terrain-seam rules moved to the
 include-level lint (scripts/lint/include_graph_check.py); what survives at
 TARGET level are the two structural seams:
 
-  1. sqlite containment (Shape A guardrail): opennova_novaworld_service is the
-     ONLY library that links opennova_sqlite. Any target whose transitive link
-     closure reaches opennova_sqlite must either be the service itself or link
-     the service DIRECTLY (its declared consumers: apps/novaworld_server and
-     the service tests). Everything else — the engine groups, the godot
-     adapter, the other apps/tests — is a violation.
+  1. libpq containment (Shape A guardrail, once sqlite's): the service
+     opennova_novaworld_service is the ONLY library that links opennova_pq
+     (the interface target over the system libpq). Any target whose
+     transitive link closure reaches opennova_pq must either be the service
+     itself or link the service DIRECTLY (its declared consumers:
+     apps/novaworld_server and the service tests). Everything else — the
+     engine groups, the godot adapter, the other apps/tests — is a violation.
 
   2. Forbidden edges: the game net stack never links the service leg (the
      service sits ABOVE opennova_net), and the godot adapter links
@@ -58,7 +59,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 
 # Where the files-mode walk looks for CMake files. Vendored submodules are
-# excluded except the ones the tree actually builds (sqlite/bcrypt/imgui).
+# excluded except the ones the tree actually builds (bcrypt/imgui/miniz/rgbcx).
 SCAN_ROOTS = (
     "CMakeLists.txt",
     "engine",
@@ -66,7 +67,6 @@ SCAN_ROOTS = (
     "tests",
     "tools",
     "godot/src",
-    "third_party/sqlite",
     "third_party/bcrypt",
     "third_party/imgui",
     "third_party/miniz",
@@ -75,12 +75,16 @@ SCAN_ROOTS = (
 
 # --- The rules -------------------------------------------------------------
 
-SQLITE_TARGET = "opennova_sqlite"
+PQ_TARGET = "opennova_pq"
 SERVICE_TARGET = "opennova_novaworld_service"
-SQLITE_RULE_REASON = (
-    "sqlite containment (Shape A guardrail): only opennova_novaworld_service "
-    "links opennova_sqlite; consumers must link the service target directly"
+PQ_RULE_REASON = (
+    "libpq containment (Shape A guardrail): only opennova_novaworld_service "
+    "links opennova_pq; consumers must link the service target directly"
 )
+# Defined only when the build turns OPENNOVA_NOVAWORLD_SERVICE on (the repo
+# root's option, off by default): a graphviz dump of a tree configured without
+# it lacks them, which vacates no rule. The files walk always sees them.
+SERVICE_GATED = {PQ_TARGET, SERVICE_TARGET}
 
 # (reason, from-targets, to-targets, targets allowed to be absent from the
 # graph without a warning — e.g. the adapter target lives in the godot/src
@@ -278,18 +282,18 @@ def find_path(edges: dict[str, set[str]], start: str, goals: set[str]) -> list[s
     return None
 
 
-def check_sqlite_containment(edges: dict[str, set[str]]) -> list[str]:
-    """Every target reaching opennova_sqlite must be the service itself or a
+def check_pq_containment(edges: dict[str, set[str]]) -> list[str]:
+    """Every target reaching opennova_pq must be the service itself or a
     DIRECT linker of the service (its declared exclusive consumers)."""
     violations: list[str] = []
     for target in sorted(edges):
-        if target in (SQLITE_TARGET, SERVICE_TARGET):
+        if target in (PQ_TARGET, SERVICE_TARGET):
             continue
         if SERVICE_TARGET in edges.get(target, ()):
-            continue  # a declared service consumer — sqlite rides the service
-        path = find_path(edges, target, {SQLITE_TARGET})
+            continue  # a declared service consumer — libpq rides the service
+        path = find_path(edges, target, {PQ_TARGET})
         if path:
-            violations.append(f"{' -> '.join(path)}  [{SQLITE_RULE_REASON}]")
+            violations.append(f"{' -> '.join(path)}  [{PQ_RULE_REASON}]")
     return violations
 
 
@@ -323,7 +327,8 @@ def main() -> int:
             # A renamed/deleted target silently vacates its rule — surface
             # that, except for targets that legitimately live in the other
             # CMake root / behind a build option.
-            if name not in known and name not in optional and name not in warned:
+            gated = name in SERVICE_GATED and source != "files"
+            if name not in known and name not in optional and not gated and name not in warned:
                 warned.add(name)
                 print(f"[linkgraph] WARNING: rule target '{name}' not in the "
                       f"{source} graph (renamed? update link_graph_check.py)")
@@ -332,15 +337,12 @@ def main() -> int:
             if path:
                 violations.append(f"{' -> '.join(path)}  [{reason}]")
 
-    if SQLITE_TARGET not in known and SQLITE_TARGET not in warned:
-        warned.add(SQLITE_TARGET)
-        print(f"[linkgraph] WARNING: rule target '{SQLITE_TARGET}' not in the "
-              f"{source} graph (renamed? update link_graph_check.py)")
-    if SERVICE_TARGET not in known and SERVICE_TARGET not in warned:
-        warned.add(SERVICE_TARGET)
-        print(f"[linkgraph] WARNING: rule target '{SERVICE_TARGET}' not in the "
-              f"{source} graph (renamed? update link_graph_check.py)")
-    violations.extend(check_sqlite_containment(edges))
+    for name in (PQ_TARGET, SERVICE_TARGET):
+        if name not in known and name not in warned and source == "files":
+            warned.add(name)
+            print(f"[linkgraph] WARNING: rule target '{name}' not in the "
+                  f"{source} graph (renamed? update link_graph_check.py)")
+    violations.extend(check_pq_containment(edges))
 
     edge_count = sum(len(v) for v in edges.values())
     print(f"[linkgraph] source {source}: {len(known)} targets, {edge_count} edges, "

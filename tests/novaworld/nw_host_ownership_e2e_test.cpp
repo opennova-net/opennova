@@ -1,7 +1,7 @@
-// The listing's owner end to end (host_keys, migration 0009), through the
+// The listing's owner end to end (host_keys), through the
 // service's real listeners in-process (nw_service_harness.h: the Crow
 // HttpListener with the retail NW*.dll pages, the NwUdpListener and the
-// GateListener over one pooled SQLite file, on loopback ports the OS picks).
+// GateListener over one pooled database, on loopback ports the OS picks).
 // Two such services run side by side, one with ONNET_REQUIRE_HOST_KEY.
 // Built only with BUILD_NOVAWORLD_HTTP (the HTTP layer is Linux-only).
 //
@@ -441,7 +441,7 @@ void strict_flow(Service &strict) {
 
 	// The account's keys revoked (an admin password reset deletes them): the
 	// next re-host's key names nobody, and the request is refused.
-	strict.pool.acquire()->exec("DELETE FROM host_keys WHERE user_id = ?;",
+	strict.pool.acquire()->exec("DELETE FROM host_keys WHERE user_id = $1;",
 	                            {opennova::db::BindValue(strict.owner_id)});
 	rehost = host.reconnect([&] { return !strict.row("Strict Owned"); });
 	expect(rehost == ClientSession::HostState::Failed, "strict revoked: the re-host is refused");
@@ -487,7 +487,8 @@ void lenient_thief_unlinked(Service &service) {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
 	opennova::io::set_log_sink(&log_sink);
 	if (net::startup() != 0) {
 		std::fprintf(stderr, "FAIL: net::startup\n");
@@ -495,11 +496,9 @@ int main() {
 	}
 	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
 	{
-		// Declared first, so the databases' files go only once every
-		// connection is closed.
 		test_temp::TempDir temp("nw_host_ownership");
-		Service lenient(temp.path / "lenient.db");
-		Service strict(temp.path / "strict.db");
+		Service lenient;
+		Service strict;
 		const bool up = lenient.start(source_dir, temp.path, /*require_host_key=*/false) &&
 		                strict.start(source_dir, temp.path, /*require_host_key=*/true);
 		expect(up, "both services start");

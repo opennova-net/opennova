@@ -10,10 +10,11 @@
 #     which PUBLIC-links this — never the service.
 #
 #   opennova_novaworld_service — the server-side lobby/persistence leg of
-#     novaworld. GUARDRAIL (non-negotiable): sqlite containment is
-#     linker-enforced — this is the ONLY target in the tree that links
-#     opennova_sqlite (scripts/lint/link_graph_check.py pins it). Consumers:
-#     apps/novaworld_server and the service tests.
+#     novaworld, defined only with OPENNOVA_NOVAWORLD_SERVICE (the repo root's
+#     option; godot/src never sets it). GUARDRAIL (non-negotiable): libpq
+#     containment is linker-enforced — this is the ONLY target in the tree
+#     that links opennova_pq (scripts/lint/link_graph_check.py pins it).
+#     Consumers: apps/novaworld_server and the service tests.
 #
 # Wire compatibility holds for every protocol lib exactly as before
 # (engine/CLAUDE.md; witness record docs/net/novaworld-net-re.md; ADRs
@@ -103,24 +104,33 @@ set_target_properties(opennova_net PROPERTIES
 )
 
 # service — the server-side lobby/persistence leg: lobby sessions and updates,
-# host repository, connection registry/manager, unknown tracker, sqlite. The
-# ONLY target that links sqlite (see the guardrail note at the top).
-add_library(opennova_novaworld_service STATIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/lobby_session.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/host_repository.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/unknown_tracker.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/connection/registry.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/connection/manager.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/db/sqlite.cpp
-)
+# host repository, connection registry/manager, unknown tracker, the database
+# (PostgreSQL through libpq, db/database.h). The ONLY target that links
+# opennova_pq (see the guardrail note at the top). Only when the service builds.
+if(OPENNOVA_NOVAWORLD_SERVICE)
+    # The system libpq (libpq-dev to build, libpq5 to run), behind one
+    # interface target the containment lint can name.
+    find_package(PostgreSQL REQUIRED)
+    add_library(opennova_pq INTERFACE)
+    target_link_libraries(opennova_pq INTERFACE PostgreSQL::PostgreSQL)
 
-target_link_libraries(opennova_novaworld_service
-    PUBLIC opennova_net
-    PRIVATE opennova_sqlite
-)
+    add_library(opennova_novaworld_service STATIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/lobby_session.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/host_repository.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/unknown_tracker.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/connection/registry.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/connection/manager.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/db/database.cpp
+    )
 
-target_compile_features(opennova_novaworld_service PUBLIC cxx_std_17)
+    target_link_libraries(opennova_novaworld_service
+        PUBLIC opennova_net
+        PRIVATE opennova_pq
+    )
 
-set_target_properties(opennova_novaworld_service PROPERTIES
-    POSITION_INDEPENDENT_CODE ON
-)
+    target_compile_features(opennova_novaworld_service PUBLIC cxx_std_17)
+
+    set_target_properties(opennova_novaworld_service PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+    )
+endif()

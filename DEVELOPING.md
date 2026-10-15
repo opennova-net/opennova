@@ -9,8 +9,11 @@ deploying your own instance to the cloud see [DEPLOY.md](DEPLOY.md).
 
 ## Prerequisites
 
-- **CMake 3.24+** (the pinned SQLite and Dear ImGui fetches use 3.24 options) and a
+- **CMake 3.24+** (the pinned rgbcx and Dear ImGui fetches use 3.24 options) and a
   **C++17** compiler (MSVC, Clang, or GCC).
+- **libpq** (`libpq-dev` on Debian/Ubuntu; only for the NovaWorld server, Linux), and a
+  PostgreSQL 17 server for its tests and local runs (`scripts/dev_postgres.sh` runs one in
+  Docker).
 - **Godot 4.6.1** (only for Godot work). Set `GODOT_BIN` to the binary, or drop it in `.godot-bin/`.
 - **Docker** (Docker Desktop on Windows/macOS) to run the NovaWorld servers locally.
 - **.NET 8 SDK** (only for the switcher, Windows).
@@ -61,10 +64,15 @@ cmake --build build --config Release
 ctest --test-dir build --output-on-failure -C Release
 ```
 
-When you are working on the NovaWorld server, configure with `-DBUILD_NOVAWORLD_HTTP=ON`
-(it fetches Asio + Crow and adds the HTTP/API layer to `apps/novaworld_server`, which
-otherwise builds with only its UDP listeners; it is OFF by default so the
-Windows/macOS hot path stays lean), and scope `ctest` to the net stack:
+When you are working on the NovaWorld server (Linux only), configure with
+`-DOPENNOVA_NOVAWORLD_SERVICE=ON -DBUILD_NOVAWORLD_HTTP=ON`: the first defines the
+service, `apps/novaworld_server` and their tests, the second fetches Asio + Crow and adds
+the HTTP/API layer to the server, which otherwise builds with only its UDP listeners.
+Both are OFF by default, so the game and tool builds stay lean. The service's database
+tests make their databases on a PostgreSQL server named by
+`-DOPENNOVA_TEST_PG=<uri>`, and without one they skip (which `--suite core` fails):
+`scripts/dev_postgres.sh up` starts a local one in Docker and prints the value. Then scope
+`ctest` to the net stack:
 
 ```bash
 ctest --test-dir build --output-on-failure -R "gate|lobby|novaworld|napi|nwu|crypto|pubcrypto|epask|url_cipher|session|gsb|protocol_message"
@@ -163,7 +171,8 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 | web UI (Vite) | `http://localhost:5173` | the Vue site with **hot-reload**; Vite proxies `/api` to the server |
 | game (web build) | `http://localhost:8090` | the browser build of the game (`deploy/game/`, ADR 0049), single player only |
 
-The Docker dev override sets the dev values: `ADMIN_API_TOKEN=dev-admin-token`, the seeded
+The Docker dev override adds the server's database (a `postgres` service, its data in the
+`pg_data` volume) and sets the dev values: `ADMIN_API_TOKEN=dev-admin-token`, the seeded
 test accounts, and machine-specific defaults for `ONNET_PUBLIC_HOST` and
 `ONNET_CLIENT_REFLECT_IP`; set those two explicitly before retail host/join tests. Use `127.0.0.1` only when the retail client and
 server run on the same Windows host, and use the reachable LAN IP for second-machine tests.
@@ -171,7 +180,7 @@ Sanity check and DB reset:
 
 ```bash
 curl http://127.0.0.1:8080/api/health
-docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v   # wipe the SQLite volume
+docker compose -f docker-compose.yml -f docker-compose.dev.yml down -v   # wipe the pg_data volume
 ```
 
 ### Fast iteration
@@ -188,23 +197,28 @@ Avoid rebuilding images to test changes:
   game's web build. Hitting
   `http://localhost:8080/` shows an "API server" note, which is expected; the dev UI is at `:5173`.
 
-**Without Docker**, build and run the server binary directly. It reads its config from
-env vars (`apps/novaworld_server/server_config.cpp`), and the defaults boot a fresh
-checkout from the repo root with no setup:
+**Without Docker** (Linux), build and run the server binary directly. It reads its config
+from env vars (`apps/novaworld_server/server_config.cpp`); its database is a local
+PostgreSQL that `scripts/dev_postgres.sh up` starts in Docker (and prints the settings
+for), and the other defaults boot a fresh checkout from the repo root:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_NOVAWORLD_HTTP=ON
+scripts/dev_postgres.sh up      # opennova-dev-postgres on 127.0.0.1:5432
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOPENNOVA_NOVAWORLD_SERVICE=ON -DBUILD_NOVAWORLD_HTTP=ON \
+    -DOPENNOVA_TEST_PG=postgresql://novaworld:dev@127.0.0.1:5432/postgres
 cmake --build build --config Release --target opennova_novaworld_server
 # run from the repo root so the default relative paths resolve:
-ONNET_PUBLIC_HOST=127.0.0.1 ADMIN_API_TOKEN=dev-admin-token ./build/apps/novaworld_server/opennova-novaworld-server
+DATABASE_PASSWORD=dev ONNET_PUBLIC_HOST=127.0.0.1 ADMIN_API_TOKEN=dev-admin-token \
+    ./build/apps/novaworld_server/opennova-novaworld-server
 ```
 
-On Windows multi-config generators, the executable is under the selected config directory
-and has `.exe`, for example `build/apps/novaworld_server/Release/opennova-novaworld-server.exe`.
+`scripts/dev_postgres.sh down` stops the database and keeps its data;
+`scripts/dev_postgres.sh reset` deletes the data too.
 
 Overridable env vars (defaults in parentheses): `ONNET_PUBLIC_HOST` (`127.0.0.1`),
 `ONNET_GATE_UDP_PORT` (`7597`), `ONNET_NW_UDP_PORT` (`64206`), `ONNET_HTTP_PORT` (`8080`),
-`DATABASE_PATH` (`backend/data/state.db`), `MIGRATIONS_DIR`, `SEED_DIR`, `WEB_DIST_DIR`,
+`DATABASE_URL` (`postgresql://novaworld@127.0.0.1:5432/novaworld`), `DATABASE_PASSWORD`
+(unset), `DATABASE_POOL_MAX` (`16`), `MIGRATIONS_DIR`, `SEED_DIR`, `WEB_DIST_DIR`,
 `TEMPLATES_DIR`, `STATIC_DIR`, `ADMIN_API_TOKEN` (unset = admin API closed).
 
 ### The headless game server

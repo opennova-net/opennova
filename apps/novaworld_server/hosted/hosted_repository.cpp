@@ -1,5 +1,8 @@
 #include "hosted_repository.h"
 
+#include "billing/entitlement.h"
+#include "fleet_repository.h"
+
 #include <net/novaworld/host_repository.h>
 
 #include <array>
@@ -15,14 +18,12 @@ constexpr std::array<const char *, 8> kStateNames = {
 	"requested", "provisioning", "booting", "listing", "running", "stopping", "stopped", "failed",
 };
 
-// The SQL test for a live row.
-constexpr const char *kLiveSql = "state NOT IN ('stopped', 'failed')";
-
 constexpr const char *kServerColumns =
 		"id, owner_user_id, service_user_id, state, game_name, max_players, game_password, "
 		"time_limit, kill_limit, max_score, respawn, start_delay, team_ff, expansion, missions, "
 		"provider, machine_id, machine_address, admin_port, restarts, "
-		"failure_reason, created_at, updated_at, running_at, ended_at, game";
+		"failure_reason, created_at, updated_at, running_at, ended_at, game, own_machine, "
+		"machine_ref, slot, game_port, generation, serve_image";
 
 BindValue optional_id(std::optional<int64_t> id) {
 	if (!id) return BindValue(std::monostate{});
@@ -48,7 +49,7 @@ HostedServer row_to_server(const db::Row &r) {
 	st.expansion = r.as_text(13).value_or("");
 	st.missions = split_missions(r.as_text(14).value_or(""));
 	s.provider = r.as_text(15).value_or("");
-	s.machine_id = r.as_text(16).value_or("");
+	s.container = r.as_text(16).value_or("");
 	s.machine_address = r.as_text(17).value_or("");
 	s.admin_port = static_cast<int>(r.as_int(18).value_or(0));
 	s.restarts = static_cast<int>(r.as_int(19).value_or(0));
@@ -58,7 +59,17 @@ HostedServer row_to_server(const db::Row &r) {
 	s.running_at = r.as_text(23).value_or("");
 	s.ended_at = r.as_text(24).value_or("");
 	st.game = r.as_text(25).value_or("");
+	s.own_machine = r.as_int(26).value_or(0) != 0;
+	s.machine_ref = r.as_int(27);
+	s.slot = static_cast<int>(r.as_int(28).value_or(-1));
+	s.game_port = static_cast<int>(r.as_int(29).value_or(0));
+	s.generation = r.as_int(30).value_or(0);
+	s.serve_image = r.as_text(31).value_or("");
 	return s;
+}
+
+int count_of(const std::vector<db::Row> &rows) {
+	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
 }
 
 std::vector<HostedServer> query_servers(
@@ -72,7 +83,7 @@ std::vector<HostedServer> query_servers(
 void insert_event(db::Database &db, int64_t id, const std::string &from, const std::string &to,
 		const std::string &detail) {
 	db.exec("INSERT INTO hosted_server_events (server_id, from_state, to_state, detail) "
-			"VALUES (?, ?, ?, ?);",
+			"VALUES ($1, $2, $3, $4);",
 			{ BindValue(id), BindValue(from), BindValue(to), BindValue(detail) });
 }
 
@@ -92,40 +103,55 @@ std::optional<State> state_from_name(std::string_view name) {
 
 bool is_live(State state) { return state != State::Stopped && state != State::Failed; }
 
-RequestResult request_server(db::Database &db, int64_t owner_user_id,
-		const HostedSettings &settings, const std::vector<DataSet> &offered, int cap) {
+RequestResult request_server(db::Database &db, int64_t owner_user_id, const HostedSettings &settings,
+		const std::vector<DataSet> &offered, int cap, int64_t now, bool own_machine, const PlacementPolicy *fleet) {
 	RequestResult out;
 	if (check_settings(settings, offered)) {
 		out.outcome = RequestOutcome::InvalidSettings;
 		return out;
 	}
 	db::Transaction tx(db);
-	const auto user = db.query("SELECT can_host, account_status FROM players "
-							   "WHERE id = ? AND kind = 'player';",
+	const auto user = db.query("SELECT account_status FROM players WHERE id = $1 AND kind = 'player';",
 			{ BindValue(owner_user_id) });
 	if (user.empty()) {
 		out.outcome = RequestOutcome::NoSuchUser;
 		return out;
 	}
-	if (user.front().as_int(0).value_or(0) == 0 || user.front().as_text(1).value_or("") != "active") {
-		out.outcome = RequestOutcome::NotApproved;
+	if (user.front().as_text(0).value_or("") != "active") {
+		out.outcome = RequestOutcome::NotEntitled;
 		return out;
 	}
-	const auto live = db.query(std::string("SELECT id FROM hosted_servers WHERE owner_user_id = ? AND ") +
-					kLiveSql + " LIMIT 1;",
-			{ BindValue(owner_user_id) });
-	if (!live.empty()) {
-		out.outcome = RequestOutcome::AlreadyLive;
-		out.id = live.front().as_int(0).value_or(0);
+	// The entitlement read in the transaction, which holds the writer lock: no
+	// other start lands between its count and this row.
+	const billing::Entitlement entitlement = billing::entitlement_of(db, owner_user_id, now);
+	if (entitlement.max_servers == 0) {
+		out.outcome = RequestOutcome::NotEntitled;
 		return out;
 	}
-	if (count_live(db) >= cap) {
+	if (!entitlement.can_start) {
+		out.outcome = RequestOutcome::PastDue;
+		return out;
+	}
+	out.max_servers = entitlement.max_servers;
+	out.used = count_live_of(db, owner_user_id);
+	if (out.used >= entitlement.max_servers) {
+		out.outcome = RequestOutcome::AtLimit;
+		return out;
+	}
+	if (own_machine && count_own_live_of(db, owner_user_id) >= entitlement.own_machines) {
+		out.outcome = RequestOutcome::NoOwnMachine;
+		return out;
+	}
+	if (count_live(db) >= cap || (fleet && !fleet_has_room(db, *fleet, own_machine))) {
 		out.outcome = RequestOutcome::AtCapacity;
 		return out;
 	}
-	db.exec("INSERT INTO hosted_servers (owner_user_id, state, game, game_name, max_players, "
+	const auto inserted = db.query(
+			"INSERT INTO hosted_servers (owner_user_id, state, game, game_name, max_players, "
 			"game_password, time_limit, kill_limit, max_score, respawn, start_delay, team_ff, "
-			"expansion, missions) VALUES (?, 'requested', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
+			"expansion, missions, own_machine) "
+			"VALUES ($1, 'requested', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) "
+			"RETURNING id;",
 			{ BindValue(owner_user_id), BindValue(settings.game), BindValue(settings.game_name),
 					BindValue(static_cast<int64_t>(settings.max_players)),
 					BindValue(settings.game_password),
@@ -134,9 +160,10 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id,
 					BindValue(static_cast<int64_t>(settings.max_score)),
 					BindValue(static_cast<int64_t>(settings.respawn)),
 					BindValue(static_cast<int64_t>(settings.start_delay)),
-					BindValue(static_cast<int64_t>(settings.team_ff ? 1 : 0)),
-					BindValue(settings.expansion), BindValue(join_missions(settings.missions)) });
-	out.id = db.last_insert_rowid();
+					BindValue(db::Bool{ settings.team_ff }),
+					BindValue(settings.expansion), BindValue(join_missions(settings.missions)),
+					BindValue(db::Bool{ own_machine }) });
+	out.id = inserted.front().as_int(0).value_or(0);
 	insert_event(db, out.id, "", state_name(State::Requested), "requested by its owner");
 	tx.commit();
 	out.outcome = RequestOutcome::Created;
@@ -145,7 +172,7 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id,
 
 std::optional<AdminLogin> admin_login_of(db::Database &db, int64_t id) {
 	const auto rows = db.query("SELECT admin_port, admin_user, admin_password FROM hosted_servers "
-							   "WHERE id = ? AND admin_user <> '';",
+							   "WHERE id = $1 AND admin_user <> '';",
 			{ BindValue(id) });
 	if (rows.empty()) return std::nullopt;
 	AdminLogin login;
@@ -156,38 +183,81 @@ std::optional<AdminLogin> admin_login_of(db::Database &db, int64_t id) {
 }
 
 std::optional<HostedServer> find_server(db::Database &db, int64_t id) {
-	auto rows = query_servers(db, "WHERE id = ? LIMIT 1;", { BindValue(id) });
+	auto rows = query_servers(db, "WHERE id = $1 LIMIT 1;", { BindValue(id) });
 	if (rows.empty()) return std::nullopt;
 	return std::move(rows.front());
 }
 
-std::optional<HostedServer> latest_server_of(db::Database &db, int64_t owner_user_id) {
-	auto rows = query_servers(db,
-			std::string("WHERE owner_user_id = ? ORDER BY (") + kLiveSql + ") DESC, id DESC LIMIT 1;",
-			{ BindValue(owner_user_id) });
+std::optional<HostedServer> owned_server(db::Database &db, int64_t id, int64_t owner_user_id) {
+	auto rows = query_servers(db, "WHERE id = $1 AND owner_user_id = $2 LIMIT 1;",
+			{ BindValue(id), BindValue(owner_user_id) });
 	if (rows.empty()) return std::nullopt;
 	return std::move(rows.front());
+}
+
+std::vector<HostedServer> live_servers_of(db::Database &db, int64_t owner_user_id) {
+	return query_servers(db, std::string("WHERE owner_user_id = $1 AND ") + kLiveServerSql + " ORDER BY id;",
+			{ BindValue(owner_user_id) });
+}
+
+std::vector<HostedServer> list_servers_of(db::Database &db, int64_t owner_user_id, size_t ended_limit) {
+	std::vector<HostedServer> out = live_servers_of(db, owner_user_id);
+	for (HostedServer &s : query_servers(db,
+				 std::string("WHERE owner_user_id = $1 AND NOT (") + kLiveServerSql + ") ORDER BY id DESC LIMIT $2;",
+				 { BindValue(owner_user_id), BindValue(static_cast<int64_t>(ended_limit)) }))
+		out.push_back(std::move(s));
+	return out;
+}
+
+int count_live_of(db::Database &db, int64_t owner_user_id) {
+	return count_of(db.query(
+			std::string("SELECT COUNT(*) FROM hosted_servers WHERE owner_user_id = $1 AND ") + kLiveServerSql + ";",
+			{ BindValue(owner_user_id) }));
+}
+
+int count_own_live_of(db::Database &db, int64_t owner_user_id) {
+	return count_of(db.query(std::string("SELECT COUNT(*) FROM hosted_servers WHERE owner_user_id = $1 "
+										 "AND own_machine AND ") +
+					kLiveServerSql + ";",
+			{ BindValue(owner_user_id) }));
 }
 
 std::vector<HostedServer> list_live(db::Database &db) {
-	return query_servers(db, std::string("WHERE ") + kLiveSql + " ORDER BY id;", {});
+	return query_servers(db, std::string("WHERE ") + kLiveServerSql + " ORDER BY id;", {});
 }
 
 std::vector<HostedServer> list_servers(db::Database &db, size_t limit) {
-	return query_servers(db, std::string("ORDER BY (") + kLiveSql + ") DESC, id DESC LIMIT ?;",
+	return query_servers(db, std::string("ORDER BY (") + kLiveServerSql + ") DESC, id DESC LIMIT $1;",
 			{ BindValue(static_cast<int64_t>(limit)) });
 }
 
+std::vector<HostedServer> list_fleet_servers(
+		db::Database &db, std::optional<int64_t> owner_user_id, ServerFilter filter, size_t limit) {
+	std::string where = owner_user_id ? "WHERE owner_user_id = $2" : "WHERE TRUE";
+	if (filter == ServerFilter::Live) where += std::string(" AND ") + kLiveServerSql;
+	if (filter == ServerFilter::Ended) where += std::string(" AND NOT (") + kLiveServerSql + ")";
+	std::vector<BindValue> binds = { BindValue(static_cast<int64_t>(limit)) };
+	if (owner_user_id) binds.push_back(BindValue(*owner_user_id));
+	return query_servers(db, where + " ORDER BY (" + kLiveServerSql + ") DESC, id DESC LIMIT $1;", binds);
+}
+
 int count_live(db::Database &db) {
-	const auto rows = db.query(std::string("SELECT COUNT(*) FROM hosted_servers WHERE ") + kLiveSql + ";");
+	const auto rows = db.query(std::string("SELECT COUNT(*) FROM hosted_servers WHERE ") + kLiveServerSql + ";");
+	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
+}
+
+int count_failed_since(db::Database &db, int64_t seconds) {
+	const auto rows = db.query("SELECT COUNT(*) FROM hosted_servers WHERE state = 'failed' "
+							   "AND ended_at > now() - make_interval(secs => $1);",
+			{ BindValue(seconds) });
 	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
 }
 
 std::vector<HostedEvent> list_events(db::Database &db, int64_t id, size_t limit) {
 	std::vector<HostedEvent> out;
 	const auto rows = db.query("SELECT id, from_state, to_state, detail, at FROM ("
-							   "SELECT * FROM hosted_server_events WHERE server_id = ? "
-							   "ORDER BY id DESC LIMIT ?) ORDER BY id;",
+							   "SELECT * FROM hosted_server_events WHERE server_id = $1 "
+							   "ORDER BY id DESC LIMIT $2) AS newest ORDER BY id;",
 			{ BindValue(id), BindValue(static_cast<int64_t>(limit)) });
 	out.reserve(rows.size());
 	for (const auto &r : rows) {
@@ -206,24 +276,22 @@ bool transition(db::Database &db, int64_t id, State from, State to, const std::s
 		TransitionOptions options) {
 	const std::string to_name = state_name(to);
 	db::Transaction tx(db);
-	db.exec("UPDATE hosted_servers SET state = ?, updated_at = CURRENT_TIMESTAMP, "
-			"restarts = restarts + ?, "
-			"machine_id = CASE WHEN ? THEN '' ELSE machine_id END, "
-			"machine_address = CASE WHEN ? THEN '' ELSE machine_address END, "
-			"running_at = CASE WHEN ? = 'running' THEN CURRENT_TIMESTAMP ELSE running_at END, "
-			"ended_at = CASE WHEN ? IN ('stopped', 'failed') THEN CURRENT_TIMESTAMP ELSE ended_at END, "
-			"failure_reason = CASE WHEN ? = 'failed' THEN ? ELSE failure_reason END "
-			"WHERE id = ? AND state = ?;",
+	db.exec("UPDATE hosted_servers SET state = $1, updated_at = now(), "
+			"restarts = restarts + $2, "
+			"machine_id = CASE WHEN $3 THEN '' ELSE machine_id END, "
+			"machine_address = CASE WHEN $3 THEN '' ELSE machine_address END, "
+			"running_at = CASE WHEN $1 = 'running' THEN now() ELSE running_at END, "
+			"ended_at = CASE WHEN $1 IN ('stopped', 'failed') THEN now() ELSE ended_at END, "
+			"failure_reason = CASE WHEN $1 = 'failed' THEN $4 ELSE failure_reason END "
+			"WHERE id = $5 AND state = $6;",
 			{ BindValue(to_name), BindValue(static_cast<int64_t>(options.count_restart ? 1 : 0)),
-					BindValue(static_cast<int64_t>(options.clear_machine ? 1 : 0)),
-					BindValue(static_cast<int64_t>(options.clear_machine ? 1 : 0)),
-					BindValue(to_name), BindValue(to_name), BindValue(to_name), BindValue(detail),
+					BindValue(db::Bool{ options.clear_machine }), BindValue(detail),
 					BindValue(id), BindValue(std::string(state_name(from))) });
 	if (db.changes() == 0) return false;
 	insert_event(db, id, state_name(from), to_name, detail);
 	if (options.end_service_account) {
 		db.exec("DELETE FROM players WHERE kind = 'service' AND id = "
-				"(SELECT service_user_id FROM hosted_servers WHERE id = ?);",
+				"(SELECT service_user_id FROM hosted_servers WHERE id = $1);",
 				{ BindValue(id) });
 	}
 	tx.commit();
@@ -231,20 +299,20 @@ bool transition(db::Database &db, int64_t id, State from, State to, const std::s
 }
 
 bool reset_restarts(db::Database &db, int64_t id) {
-	db.exec("UPDATE hosted_servers SET restarts = 0, updated_at = CURRENT_TIMESTAMP "
-			"WHERE id = ? AND state = 'running' AND restarts > 0;",
+	db.exec("UPDATE hosted_servers SET restarts = 0, updated_at = now() "
+			"WHERE id = $1 AND state = 'running' AND restarts > 0;",
 			{ BindValue(id) });
 	return db.changes() > 0;
 }
 
 bool request_stop(db::Database &db, int64_t id, const std::string &detail) {
 	db::Transaction tx(db);
-	const auto rows = db.query("SELECT state FROM hosted_servers WHERE id = ?;", { BindValue(id) });
+	const auto rows = db.query("SELECT state FROM hosted_servers WHERE id = $1;", { BindValue(id) });
 	if (rows.empty()) return false;
 	const auto state = state_from_name(rows.front().as_text(0).value_or(""));
 	if (!state || !is_live(*state) || *state == State::Stopping) return false;
-	db.exec("UPDATE hosted_servers SET state = 'stopping', updated_at = CURRENT_TIMESTAMP "
-			"WHERE id = ? AND state = ?;",
+	db.exec("UPDATE hosted_servers SET state = 'stopping', updated_at = now() "
+			"WHERE id = $1 AND state = $2;",
 			{ BindValue(id), BindValue(std::string(state_name(*state))) });
 	if (db.changes() == 0) return false;
 	insert_event(db, id, state_name(*state), state_name(State::Stopping), detail);
@@ -255,12 +323,12 @@ bool request_stop(db::Database &db, int64_t id, const std::string &detail) {
 size_t request_stop_all(db::Database &db, const std::string &detail) {
 	size_t stopped = 0;
 	db::Transaction tx(db);
-	for (const auto &r : db.query(std::string("SELECT id, state FROM hosted_servers WHERE ") + kLiveSql +
+	for (const auto &r : db.query(std::string("SELECT id, state FROM hosted_servers WHERE ") + kLiveServerSql +
 					 " AND state <> 'stopping';")) {
 		const int64_t id = r.as_int(0).value_or(0);
 		const std::string from = r.as_text(1).value_or("");
-		db.exec("UPDATE hosted_servers SET state = 'stopping', updated_at = CURRENT_TIMESTAMP "
-				"WHERE id = ? AND state = ?;",
+		db.exec("UPDATE hosted_servers SET state = 'stopping', updated_at = now() "
+				"WHERE id = $1 AND state = $2;",
 				{ BindValue(id), BindValue(from) });
 		if (db.changes() == 0) continue;
 		insert_event(db, id, from, state_name(State::Stopping), detail);
@@ -271,22 +339,27 @@ size_t request_stop_all(db::Database &db, const std::string &detail) {
 }
 
 void set_service_account(db::Database &db, int64_t id, std::optional<int64_t> user_id) {
-	db.exec("UPDATE hosted_servers SET service_user_id = ?, updated_at = CURRENT_TIMESTAMP "
-			"WHERE id = ?;",
+	db.exec("UPDATE hosted_servers SET service_user_id = $1, updated_at = now() "
+			"WHERE id = $2;",
 			{ optional_id(user_id), BindValue(id) });
 }
 
 void set_machine(db::Database &db, int64_t id, const std::string &provider,
-		const std::string &machine_id, const std::string &address) {
-	db.exec("UPDATE hosted_servers SET provider = ?, machine_id = ?, machine_address = ?, "
-			"updated_at = CURRENT_TIMESTAMP WHERE id = ?;",
-			{ BindValue(provider), BindValue(machine_id), BindValue(address), BindValue(id) });
+		const std::string &container, const std::string &address) {
+	db.exec("UPDATE hosted_servers SET provider = $1, machine_id = $2, machine_address = $3, "
+			"updated_at = now() WHERE id = $4;",
+			{ BindValue(provider), BindValue(container), BindValue(address), BindValue(id) });
+}
+
+void set_serve_image(db::Database &db, int64_t id, const std::string &image) {
+	db.exec("UPDATE hosted_servers SET serve_image = $1, updated_at = now() WHERE id = $2;",
+			{ BindValue(image), BindValue(id) });
 }
 
 void set_admin_login(db::Database &db, int64_t id, int admin_port, const std::string &user,
 		const std::string &password) {
-	db.exec("UPDATE hosted_servers SET admin_port = ?, admin_user = ?, admin_password = ?, "
-			"updated_at = CURRENT_TIMESTAMP WHERE id = ?;",
+	db.exec("UPDATE hosted_servers SET admin_port = $1, admin_user = $2, admin_password = $3, "
+			"updated_at = now() WHERE id = $4;",
 			{ BindValue(static_cast<int64_t>(admin_port)), BindValue(user), BindValue(password),
 					BindValue(id) });
 }
@@ -295,22 +368,23 @@ void append_console(db::Database &db, int64_t server_id, const std::vector<Conso
 	if (lines.empty()) return;
 	db::Transaction tx(db);
 	for (const ConsoleLine &line : lines) {
-		db.exec("INSERT INTO hosted_server_console (server_id, kind, actor, text, at) VALUES (?, ?, ?, ?, ?);",
+		db.exec("INSERT INTO hosted_server_console (server_id, kind, actor, text, at) "
+				"VALUES ($1, $2, $3, $4, $5);",
 				{ BindValue(server_id), BindValue(line.kind), BindValue(line.actor), BindValue(line.text),
 						BindValue(line.at) });
 	}
 	// The ring: everything older than the newest `keep` goes.
-	db.exec("DELETE FROM hosted_server_console WHERE server_id = ? AND id <= ("
-			"SELECT id FROM hosted_server_console WHERE server_id = ? ORDER BY id DESC LIMIT 1 OFFSET ?);",
-			{ BindValue(server_id), BindValue(server_id), BindValue(static_cast<int64_t>(keep)) });
+	db.exec("DELETE FROM hosted_server_console WHERE server_id = $1 AND id <= ("
+			"SELECT id FROM hosted_server_console WHERE server_id = $1 ORDER BY id DESC LIMIT 1 OFFSET $2);",
+			{ BindValue(server_id), BindValue(static_cast<int64_t>(keep)) });
 	tx.commit();
 }
 
 std::vector<ConsoleLine> list_console(db::Database &db, int64_t server_id, int64_t after_id, size_t limit) {
 	std::vector<ConsoleLine> out;
 	const auto rows = db.query("SELECT id, kind, actor, text, at FROM ("
-							   "SELECT * FROM hosted_server_console WHERE server_id = ? AND id > ? "
-							   "ORDER BY id DESC LIMIT ?) ORDER BY id;",
+							   "SELECT * FROM hosted_server_console WHERE server_id = $1 AND id > $2 "
+							   "ORDER BY id DESC LIMIT $3) AS newest ORDER BY id;",
 			{ BindValue(server_id), BindValue(after_id), BindValue(static_cast<int64_t>(limit)) });
 	out.reserve(rows.size());
 	for (const auto &r : rows) {
@@ -327,7 +401,7 @@ std::vector<ConsoleLine> list_console(db::Database &db, int64_t server_id, int64
 
 std::optional<uint32_t> listing_rid_of(db::Database &db, int64_t account_user_id) {
 	const auto rows = db.query("SELECT h.rid FROM active_hosts h JOIN host_keys k "
-							   "ON k.claimed_rid = h.rid WHERE k.user_id = ? "
+							   "ON k.claimed_rid = h.rid WHERE k.user_id = $1 "
 							   "ORDER BY h.created_at DESC, h.rid DESC LIMIT 1;",
 			{ BindValue(account_user_id) });
 	if (rows.empty()) return std::nullopt;
@@ -336,7 +410,7 @@ std::optional<uint32_t> listing_rid_of(db::Database &db, int64_t account_user_id
 
 std::optional<HostedAccount> hosted_server_of_account(db::Database &db, int64_t account_user_id) {
 	const auto rows = db.query("SELECT id, owner_user_id, state FROM hosted_servers "
-							   "WHERE service_user_id = ? ORDER BY id DESC LIMIT 1;",
+							   "WHERE service_user_id = $1 ORDER BY id DESC LIMIT 1;",
 			{ BindValue(account_user_id) });
 	if (rows.empty()) return std::nullopt;
 	HostedAccount out;
@@ -349,8 +423,8 @@ std::optional<HostedAccount> hosted_server_of_account(db::Database &db, int64_t 
 std::vector<int64_t> listing_accounts_of(db::Database &db, int64_t user_id) {
 	std::vector<int64_t> out{ user_id };
 	for (const auto &r : db.query(std::string("SELECT service_user_id FROM hosted_servers "
-											  "WHERE owner_user_id = ? AND service_user_id IS NOT NULL AND ") +
-						 kLiveSql + " ORDER BY id;",
+											  "WHERE owner_user_id = $1 AND service_user_id IS NOT NULL AND ") +
+						 kLiveServerSql + " ORDER BY id;",
 				 { BindValue(user_id) })) {
 		if (const auto account = r.as_int(0)) out.push_back(*account);
 	}

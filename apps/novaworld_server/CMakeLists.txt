@@ -5,12 +5,16 @@ set(NOVAWORLD_SERVER_CORE_SOURCES
     server_config.cpp
     catalog_repository.cpp
     gate_listener.cpp
+    # The stall watchdog and the heartbeat line (GET /healthz reads the first).
+    health.cpp
     nw_udp_listener.cpp
 )
 
 if(BUILD_NOVAWORLD_HTTP)
     list(APPEND NOVAWORLD_SERVER_CORE_SOURCES
         http_listener.cpp
+        # The admin's user routes (moved out of http_listener.cpp whole).
+        admin_user_routes.cpp
         host_routes.cpp
         # CD keys (migration 0015): the keys, the DFX2 activations, their routes.
         cd_keys.cpp
@@ -22,23 +26,47 @@ if(BUILD_NOVAWORLD_HTTP)
         web_access.cpp
         web_session.cpp
         # Hosted servers (ADR 0053, proposed): the supervisor, its rows and
-        # renders, the local and the EC2 MachineProviders (the AWS CLI runner,
-        # the cloud machines' bootstrap tokens and route), the admin link and
-        # its console routes.
+        # renders, the admin link and its console routes, the per-server stats
+        # (samples, hourly rollups, their routes); the fleet (its rows,
+        # placement on the machines' slots, the local and the EC2 machine
+        # drivers, the AWS CLI through apps/common's command runner, the
+        # machine agents' routes on the internal listener, its settings).
         hosted/admin_link.cpp
-        hosted/bootstrap.cpp
-        hosted/bootstrap_route.cpp
-        hosted/command_runner.cpp
+        hosted/agent_protocol.cpp
+        hosted/agent_route.cpp
         hosted/console_commands.cpp
         hosted/console_routes.cpp
         hosted/data_sets.cpp
-        hosted/ec2_provider.cpp
+        hosted/ec2_machine_driver.cpp
+        hosted/fleet_config.cpp
+        hosted/fleet_repository.cpp
+        hosted/fleet_routes.cpp
         hosted/hosted_repository.cpp
         hosted/hosted_routes.cpp
         hosted/hosted_settings.cpp
-        hosted/local_process_provider.cpp
+        hosted/internal_listener.cpp
+        hosted/local_machine_driver.cpp
+        hosted/net_cidr.cpp
         hosted/owner_file.cpp
+        hosted/placement.cpp
+        hosted/stats_repository.cpp
+        hosted/stats_routes.cpp
+        hosted/stats_sampler.cpp
         hosted/supervisor.cpp
+        # Billing (monthly support tiers over Stripe Checkout and the Customer
+        # Portal): the settings, the billing tables and the hosting entitlement
+        # read from them, the sync worker keeping them in step with Stripe,
+        # the curl transport (apps/common/command_runner.h, its config file
+        # owner-only through hosted/owner_file.cpp), the typed client and the
+        # webhook signature.
+        billing/billing_config.cpp
+        billing/billing_repository.cpp
+        billing/billing_routes.cpp
+        billing/billing_sync.cpp
+        billing/entitlement.cpp
+        billing/stripe_api.cpp
+        billing/stripe_client.cpp
+        billing/stripe_signature.cpp
     )
 endif()
 
@@ -49,7 +77,7 @@ target_include_directories(opennova_novaworld_server_core
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# The service target (the one sqlite consumer), the wire group (gate/session
+# The service target (the one libpq consumer), the wire group (gate/session
 # legs, npwire, napi, novacrypto — opennova_net), and the runtime group for
 # the in-match host session the JO listener hosts peers through
 # (runtime/inmatch, ADR 0043 d4).
@@ -82,8 +110,8 @@ endif()
 
 add_executable(opennova_novaworld_server main.cpp)
 
-# The service edge is direct as well: the sqlite-containment lint
-# (scripts/lint/link_graph_check.py) wants every target that reaches sqlite to
+# The service edge is direct as well: the libpq-containment lint
+# (scripts/lint/link_graph_check.py) wants every target that reaches libpq to
 # list opennova_novaworld_service itself.
 target_link_libraries(opennova_novaworld_server
     PRIVATE

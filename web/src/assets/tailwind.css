@@ -23,6 +23,18 @@
   --warn: 234 179 5; /* #EAB305 warnings / pending */
   --online: 74 222 128; /* #4ADE80 online / success */
 
+  /* Charts and meters (components/charts/, AllowanceMeter). The site is dark
+     only, so these are its one set. A series mark is the accent's hue
+     stepped into the dark lightness band (OKLCH L 0.48-0.67, >= 3:1 on the
+     panel), validated with the dataviz skill's validate_palette.js against
+     #1D2024 and #161820; the context line (a limit beside the series) is the
+     de-emphasis gray; grid and axis are hairlines one and two steps off the
+     panel. */
+  --chart-series: 201 128 64; /* #C98040 the series (slot 1) */
+  --chart-context: 107 114 128; /* #6B7280 de-emphasis: limits, context */
+  --chart-grid: 45 51 57; /* #2D3339 gridlines */
+  --chart-axis: 60 65 74; /* #3C414A baseline / axis rule */
+
   background-color: rgb(var(--surface));
   color: rgb(var(--ink));
 }

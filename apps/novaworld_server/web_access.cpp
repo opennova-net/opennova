@@ -3,6 +3,8 @@
 #include "http_cookies.h"
 #include "server_config.h"
 
+#include <base/io/sha256.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <utility>
@@ -135,13 +137,7 @@ bool WebAccess::bearer_authorized(const crow::request &req) const {
 	if (admin_token_.empty()) return false;
 	const std::string auth = req.get_header_value("Authorization");
 	if (auth.rfind("Bearer ", 0) != 0) return false;
-	const std::string presented = auth.substr(7);
-	if (presented.size() != admin_token_.size()) return false;
-	unsigned diff = 0;
-	for (size_t i = 0; i < presented.size(); ++i) {
-		diff |= static_cast<unsigned>(presented[i]) ^ static_cast<unsigned>(admin_token_[i]);
-	}
-	return diff == 0;
+	return io::constant_time_equal(std::string_view(auth).substr(7), admin_token_);
 }
 
 RouteAccess WebAccess::require_user(const crow::request &req) {
@@ -158,7 +154,7 @@ RouteAccess WebAccess::require_user(const crow::request &req) {
 	std::optional<WebSessionLookup> session;
 	try {
 		session = resolve_web_session(*pool_.acquire(), token);
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] WARN web session lookup failed: %s\n", e.what());
 		access.refusal = json_error(500, "db_error");
 		return access;
@@ -201,8 +197,8 @@ int64_t WebAccess::take_login_address(LoginRoute route, const std::string &ip) {
 	                          RateLimiter::Clock::now());
 }
 
-int64_t WebAccess::begin_password_check(LoginRoute route, const std::string &username,
-                                        const std::string &ip, LoginTicket &ticket) {
+int64_t WebAccess::begin_password_check(db::Database &db, LoginRoute route,
+		const std::string &username, const std::string &ip, LoginTicket &ticket) {
 	const auto now = RateLimiter::Clock::now();
 	const std::string name = username.substr(0, kUsernameMaxBytes);
 	ticket = LoginTicket{};
@@ -211,8 +207,8 @@ int64_t WebAccess::begin_password_check(LoginRoute route, const std::string &use
 	if (const int64_t wait = login_failures_per_user_ip_.take(ticket.pair_key, now)) return wait;
 	bool known = false;
 	try {
-		known = is_known_login_address(*pool_.acquire(), name, ticket.known_address);
-	} catch (const db::SqliteError &e) {
+		known = is_known_login_address(db, name, ticket.known_address);
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] WARN login address lookup failed: %s\n", e.what());
 	}
 	if (!known) {
@@ -226,13 +222,13 @@ int64_t WebAccess::begin_password_check(LoginRoute route, const std::string &use
 }
 
 void WebAccess::password_accepted(
-		const LoginTicket &ticket, int64_t user_id, int64_t credentials_gen) {
+		db::Database &db, const LoginTicket &ticket, int64_t user_id, int64_t credentials_gen) {
 	const auto now = RateLimiter::Clock::now();
 	login_failures_per_user_ip_.refund(ticket.pair_key, now);
 	if (!ticket.username_key.empty()) login_failures_per_user_.refund(ticket.username_key, now);
 	try {
-		record_login_address(*pool_.acquire(), user_id, credentials_gen, ticket.known_address);
-	} catch (const db::SqliteError &e) {
+		record_login_address(db, user_id, credentials_gen, ticket.known_address);
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] WARN login address record failed: %s\n", e.what());
 	}
 }
@@ -275,15 +271,15 @@ crow::response WebAccess::login(const crow::request &req) {
 		std::printf("[http] /api/login rate-limited for %s\n", loggable(ip).c_str());
 		return too_many_requests(wait);
 	}
-	LoginTicket ticket;
-	if (const int64_t wait = begin_password_check(LoginRoute::Web, username, ip, ticket)) {
-		std::printf("[http] /api/login rate-limited for user '%s' from %s\n",
-		            loggable(username).c_str(), loggable(ip).c_str());
-		return too_many_requests(wait);
-	}
-
 	try {
 		auto db_conn = pool_.acquire();
+		LoginTicket ticket;
+		if (const int64_t wait =
+						begin_password_check(*db_conn, LoginRoute::Web, username, ip, ticket)) {
+			std::printf("[http] /api/login rate-limited for user '%s' from %s\n",
+					loggable(username).c_str(), loggable(ip).c_str());
+			return too_many_requests(wait);
+		}
 		const auto user = authenticate_user(*db_conn, username, password);
 		if (!user) {
 			std::printf("[http] /api/login refused from %s: bad credentials\n",
@@ -298,7 +294,7 @@ crow::response WebAccess::login(const crow::request &req) {
 					loggable(ip).c_str(), static_cast<long long>(user->id));
 			return json_error(401, "invalid_credentials");
 		}
-		password_accepted(ticket, user->id, user->credentials_gen);
+		password_accepted(*db_conn, ticket, user->id, user->credentials_gen);
 		if (user->account_status != "active") {
 			std::printf("[http] /api/login refused: user %lld status=%s\n",
 			            static_cast<long long>(user->id), loggable(user->account_status).c_str());
@@ -321,7 +317,7 @@ crow::response WebAccess::login(const crow::request &req) {
 		res.add_header("Set-Cookie", session_cookie(*token, kWebSessionLifetimeSeconds));
 		res.set_header("Cache-Control", "no-store");
 		return res;
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] /api/login failed: %s\n", e.what());
 		return json_error(500, "db_error");
 	}
@@ -335,7 +331,7 @@ crow::response WebAccess::logout(const crow::request &req) {
 	if (!has_csrf_header(req)) return json_error(403, "csrf_header_required");
 	try {
 		delete_web_session(*pool_.acquire(), session_token(req));
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] /api/logout failed: %s\n", e.what());
 		return json_error(500, "db_error");
 	}

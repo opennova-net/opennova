@@ -16,7 +16,6 @@ on:
       - 'engine/net/npwire/**'
       - 'apps/common/**'
       - 'backend/**'
-      - 'third_party/sqlite/**'
       - 'third_party/bcrypt/**'
       - 'web/**'
       - 'tests/novacrypto/**'

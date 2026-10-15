@@ -5,6 +5,7 @@
 #
 #   export OP_SERVICE_ACCOUNT_TOKEN=ops_...
 #   ./deploy/run.sh secrets check
+#   OPENNOVA_DEPLOYMENT=staging ./deploy/run.sh infra plan   # or --deployment staging
 
 services:
   deploy:
@@ -12,18 +13,24 @@ services:
       context: .
       dockerfile: Dockerfile
     image: opennova-deploy:local
+    # The toolbox's downloads are x86_64 builds (deploy/Dockerfile); an arm64
+    # machine runs it emulated.
+    platform: linux/amd64
     working_dir: /workspace
     volumes:
       - ../:/workspace
-      # Lets `on-deploy aws ...` run the official amazon/aws-cli image as a
-      # sibling container (the AWS CLI can't run natively on this Alpine base).
+      # `app deploy` resolves image tags to digests and `hosted data-snapshot`
+      # builds its helper image, on the operator's docker.
       - /var/run/docker.sock:/var/run/docker.sock
     tmpfs:
-      - /run/secrets
+      - /run/secrets:mode=0700
     environment:
       OP_SERVICE_ACCOUNT_TOKEN: ${OP_SERVICE_ACCOUNT_TOKEN:?set OP_SERVICE_ACCOUNT_TOKEN to your 1Password service-account token}
       OP_VAULT: ${OP_VAULT:-OpenNova-Deploy}
-      # Lets the toolbox drive the remote docker engine over SSH.
-      TARGET_HOST: ${TARGET_HOST:-}
+      # The deployment the commands act on (prod, staging); --deployment overrides it.
+      OPENNOVA_DEPLOYMENT: ${OPENNOVA_DEPLOYMENT:-prod}
+      # The GHCR owner of the published images (default: the vault's ghcr/owner,
+      # else opennova-net).
+      GHCR_OWNER: ${GHCR_OWNER:-}
     stdin_open: true
     tty: true

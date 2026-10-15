@@ -1,57 +1,166 @@
-# Prod overlay: pull the published GHCR images (no build on the target),
-# use host networking so the game UDP ports are reachable directly, and
-# inject the vault-sourced app secrets. Layered on docker-compose.yml.
+# Prod overlay, layered on docker-compose.yml: the stack a deployment's service
+# host runs (prod and staging alike). Never run by hand: the host's converge
+# (deploy/host/converge.sh) runs it from the release bundle, through
+# /usr/local/sbin/opennova-compose, with four env files, later ones overriding
+# earlier ones:
+#   ../env/app.prod.env        the committed non-secret values
+#   /run/opennova/infra.env    what Terraform knows (SSM /opennova/<deployment>/infra.env):
+#                              ONNET_PUBLIC_HOST, ONNET_SITE_URL, the hosted
+#                              machines' settings, AWS_REGION, the log group
+#   ../env/release.env         the release's images, pinned by digest
+#   /run/opennova/secret.env   the vault's secrets (secrets sync; SSM .../secret/*)
 #
-# Driven remotely by the deploy toolbox over DOCKER_HOST=ssh://; the
-# operator never SSHes by hand.
+# The NovaWorld server runs on the host's network (the retail UDP ports and
+# 8080 straight on the Elastic IP; a bridge would rewrite the source ports the
+# listings take). The portal's nginx and the web build share a bridge network,
+# `edge`: nginx at a fixed address (its X-Real-IP is the one the server trusts,
+# ONNET_TRUSTED_PROXIES in app.prod.env) reaches the server through the host
+# gateway and the web build by name. Every service logs to CloudWatch
+# (/opennova/<deployment>/service, a stream per service; ./deploy/run.sh app logs).
+
+networks:
+  edge:
+    driver: bridge
+    ipam:
+      config:
+        # nginx's address (.10) lies outside the range docker hands out, so no
+        # other container can take it first.
+        - subnet: 172.30.0.0/24
+          ip_range: 172.30.0.128/25
+          gateway: 172.30.0.1
 
 services:
   novaworld:
-    image: ${SERVER_IMAGE:?set SERVER_IMAGE to the ghcr.io/...:tag to deploy}
-    pull_policy: always
+    image: ${SERVER_IMAGE:?set SERVER_IMAGE (release.env)}
     build: !reset null
     network_mode: host
-    # The base compose's `environment:` block takes ONNET_PUBLIC_HOST,
-    # ADMIN_API_TOKEN and the website session settings (ONNET_COOKIE_SECURE,
-    # ONNET_TRUSTED_PROXIES, ONNET_API_PROXY_ONLY) from the toolbox's --env-file pair: the committed
-    # app.prod.env and the vault-injected secrets. Its `init: true` holds here
-    # too: Docker's init is PID 1, so a second SIGTERM reaches the server.
+    # The image's own user; named here so no override runs the server as root
+    # (the host's metadata fence admits this UID alone besides root).
+    user: "10002"
+    # The server's graceful shutdown (sessions, hosted servers' admin links)
+    # before compose kills it.
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "--max-time", "2", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 60s
+    # The database (RDS, infra/aws/database.tf): its URL from Terraform
+    # (verify-full against the image's pinned RDS CA bundle), its password from
+    # the vault. Required here, so a host missing either never starts a server
+    # that cannot reach its data.
+    #
+    # The fleet (infra/aws/fleet.tf): the internal listener on the host's fixed
+    # private address (the machines' hostd), the fleet's knobs and the EC2
+    # settings (infra.env), the serve and hostd images (release.env, pinned by
+    # digest). Named here whether or not the base file names them too.
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL (infra.env; infra apply)}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?set DATABASE_PASSWORD (secret.env; secrets sync)}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-16}
+      ONNET_INTERNAL_HTTP_BIND: ${ONNET_INTERNAL_HTTP_BIND:-}
+      ONNET_FLEET_SHARED_SLOTS: ${ONNET_FLEET_SHARED_SLOTS:-}
+      ONNET_FLEET_MAX_SHARED: ${ONNET_FLEET_MAX_SHARED:-}
+      ONNET_FLEET_MAX_OWN: ${ONNET_FLEET_MAX_OWN:-}
+      ONNET_FLEET_IDLE_MINUTES: ${ONNET_FLEET_IDLE_MINUTES:-}
+      ONNET_HOSTED_HOSTD_IMAGE: ${ONNET_HOSTED_HOSTD_IMAGE:-}
+      ONNET_HOSTED_SERVE_IMAGE: ${ONNET_HOSTED_SERVE_IMAGE:-}
+      ONNET_HOSTED_PROVIDER: ${ONNET_HOSTED_PROVIDER:-none}
+      ONNET_HOSTED_EC2_REGION: ${ONNET_HOSTED_EC2_REGION:-}
+      ONNET_HOSTED_EC2_LAUNCH_TEMPLATES: ${ONNET_HOSTED_EC2_LAUNCH_TEMPLATES:-}
+      ONNET_HOSTED_EC2_SUBNET: ${ONNET_HOSTED_EC2_SUBNET:-}
+      ONNET_HOSTED_DEPLOYMENT: ${ONNET_HOSTED_DEPLOYMENT:-}
+      ONNET_HOSTED_BOOTSTRAP_CIDRS: ${ONNET_HOSTED_BOOTSTRAP_CIDRS:-}
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:?set AWS_REGION (infra.env)}
+        awslogs-group: ${OPENNOVA_LOG_GROUP:?set OPENNOVA_LOG_GROUP (infra.env)}
+        awslogs-stream: novaworld
+        mode: non-blocking
+        max-buffer-size: 4m
 
   web:
-    image: ${WEB_IMAGE:?set WEB_IMAGE to the ghcr.io/...:tag to deploy}
-    pull_policy: always
+    image: ${WEB_IMAGE:?set WEB_IMAGE (release.env)}
     build: !reset null
-    network_mode: host
-    # The baked nginx.conf proxies to host.docker.internal:8080 (a Docker Desktop
-    # name). Under host networking on Linux that doesn't resolve and nginx
-    # [emerg]-exits. The server shares the host netns and listens on :8080, so map
-    # the name to the loopback so nginx reaches it.
+    networks:
+      edge:
+        ipv4_address: 172.30.0.10
+    # 443 alone, over TLS with the Cloudflare Origin CA certificate (Cloudflare
+    # verifies it: "Full (strict)"); the security group admits Cloudflare's
+    # ranges alone. No port 80.
+    ports:
+      - "443:443"
+    # The baked nginx.conf proxies /api/ to host.docker.internal:8080: the host
+    # (where the server listens), through the bridge's gateway.
     extra_hosts:
-      - "host.docker.internal:127.0.0.1"
+      - "host.docker.internal:host-gateway"
+    # The origin certificate and its key (infra/aws/edge.tf, through SSM
+    # .../tls/*), which the entrypoint writes to this tmpfs; and edge
+    # authentication, on: nginx forwards /api/ only with the header our zone's
+    # Transform Rule stamps. Required, so a host missing either never serves.
+    environment:
+      ORIGIN_TLS_CERT: ${ORIGIN_TLS_CERT:?set ORIGIN_TLS_CERT (SSM .../tls/; infra apply)}
+      ORIGIN_TLS_KEY: ${ORIGIN_TLS_KEY:?set ORIGIN_TLS_KEY (SSM .../tls/; infra apply)}
+      EDGE_AUTH_SECRET: ${EDGE_AUTH_SECRET:?set EDGE_AUTH_SECRET (secrets init, then secrets sync)}
+      EDGE_AUTH_SECRET_PREVIOUS: ${EDGE_AUTH_SECRET_PREVIOUS:-}
+      ORIGIN_TLS_DIR: /run/tls
+    tmpfs:
+      - /run/tls:mode=0700,size=1m
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:?set AWS_REGION (infra.env)}
+        awslogs-group: ${OPENNOVA_LOG_GROUP:?set OPENNOVA_LOG_GROUP (infra.env)}
+        awslogs-stream: web
+        mode: non-blocking
+        max-buffer-size: 4m
 
-  # The web build's site listens on :8090, which the security group keeps
-  # private; the web service above proxies game.<domain> to it.
+  # The web build's site (:8090 on the edge network alone); the portal's nginx
+  # proxies game.<domain> to it by name.
   game:
-    image: ${GAME_IMAGE:?set GAME_IMAGE to the ghcr.io/...:tag to deploy}
-    pull_policy: always
+    image: ${GAME_IMAGE:?set GAME_IMAGE (release.env)}
     build: !reset null
-    network_mode: host
+    networks:
+      - edge
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:?set AWS_REGION (infra.env)}
+        awslogs-group: ${OPENNOVA_LOG_GROUP:?set OPENNOVA_LOG_GROUP (infra.env)}
+        awslogs-stream: game
+        mode: non-blocking
+        max-buffer-size: 4m
 
-  # Nightly SQLite snapshot -> S3, plus the on-demand backup/list/restore the
-  # deploy toolbox runs. AWS creds come from the instance IAM role (IMDSv2);
-  # no keys in the container. Reads the DB from the shared nw_data volume.
+  # The database's dumps (deploy/backup: pg_dump -Fc to S3 nightly, plus the
+  # toolbox's `backup now|list|restore` and `db reset-db`'s dump), kept 90
+  # days under BACKUP_PREFIX (novaworld/ for prod, novaworld-<deployment>/
+  # otherwise) in the operations bucket, independent of the RDS instance (whose
+  # own point-in-time recovery covers 14 days). Built on the service instance
+  # from the release bundle's copy of deploy/backup, on a base pinned by digest
+  # (deploy/backup/Dockerfile); the image pins the RDS CA bundle where
+  # DATABASE_URL's sslrootcert names it. The instance's network and root: the
+  # instance role (IMDSv2) gives it S3, the metadata fence admits root.
   backup:
-    image: ${BACKUP_IMAGE:-opennova-backup:local}
+    image: opennova-backup:local
     build:
       context: ../backup
       dockerfile: Dockerfile
     restart: unless-stopped
     network_mode: host
-    volumes:
-      # rw so `restore` can write the db back (server must be down first);
-      # backup/list only read.
-      - nw_data:/data
     environment:
-      DATABASE_PATH: /data/novaworld.db
-      BACKUP_BUCKET: ${BACKUP_BUCKET:?set BACKUP_BUCKET (the backups S3 bucket from terraform output)}
-      BACKUP_PREFIX: ${BACKUP_PREFIX:-novaworld}
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL (infra.env; infra apply)}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?set DATABASE_PASSWORD (secret.env; secrets sync)}
+      BACKUP_BUCKET: ${BACKUP_BUCKET:?set BACKUP_BUCKET (infra.env)}
+      BACKUP_PREFIX: ${BACKUP_PREFIX:?set BACKUP_PREFIX (infra.env)}
+      AWS_REGION: ${AWS_REGION:?set AWS_REGION (infra.env)}
+      AWS_DEFAULT_REGION: ${AWS_REGION:?set AWS_REGION (infra.env)}
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:?set AWS_REGION (infra.env)}
+        awslogs-group: ${OPENNOVA_LOG_GROUP:?set OPENNOVA_LOG_GROUP (infra.env)}
+        awslogs-stream: backup
+        mode: non-blocking
+        max-buffer-size: 4m

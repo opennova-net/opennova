@@ -1,9 +1,10 @@
-// The logged-in account's hosted server (apps/novaworld_server/README.md,
-// "Hosted servers"; hosted/hosted_routes.cpp): GET /api/me/server, POST
-// /api/me/server/start and POST /api/me/server/stop. The session cookie
-// authenticates them and `apiClient` sends the CSRF header both POSTs need.
-// Below them, the console routes (hosted/console_routes.cpp), the owner's and
-// the admin's.
+// The logged-in account's hosted servers (apps/novaworld_server/README.md,
+// "Hosted servers"; hosted/hosted_routes.cpp): GET /api/me/servers (the
+// hosting entitlement, the data sets and the servers), GET
+// /api/me/servers/<id>, POST /api/me/servers (a start) and POST
+// /api/me/servers/<id>/stop. The session cookie authenticates them and
+// `apiClient` sends the CSRF header both POSTs need. Below them, the console
+// routes (hosted/console_routes.cpp), the owner's and the admin's.
 //
 // Each call answers a HostedResult (a ConsoleResult) instead of throwing, with
 // the server's `error` code mapped to a message the owner can act on. The
@@ -18,12 +19,13 @@ import type {
   ConsoleLog,
   ConsoleMission,
   ConsolePlayer,
+  EntitlementSource,
   HostedDataSet,
   HostedExpansionOption,
   HostedServer,
-  HostedServerReply,
+  HostedServersResponse,
   HostedSettings,
-  MyHostedServerResponse,
+  HostingEntitlement,
   PlayerAction,
   PlayerActionReply,
   RotationEntry,
@@ -43,10 +45,13 @@ export type HostedErrorCode =
   | 'invalid_json'
   | 'invalid_field'
   | 'invalid_settings'
-  | 'not_approved'
-  | 'already_live'
+  | 'not_entitled'
+  | 'payment_past_due'
+  | 'server_limit'
+  | 'no_own_machine'
   | 'at_capacity'
-  | 'no_live_server'
+  | 'not_found'
+  | 'not_live'
   | 'db_error'
   | 'network'
   | 'unknown';
@@ -61,6 +66,10 @@ export interface HostedError {
   retryAfterSeconds?: number;
   // invalid_settings: the setting the server refused.
   field?: SettingsField;
+  // server_limit: the account's entitlement and how many of its servers are
+  // live, when the reply said.
+  maxServers?: number;
+  used?: number;
 }
 
 export type HostedResult<T> = { ok: true; value: T } | { ok: false; error: HostedError };
@@ -74,43 +83,82 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<HostedErrorCode>([
   'invalid_json',
   'invalid_field',
   'invalid_settings',
-  'not_approved',
-  'already_live',
+  'not_entitled',
+  'payment_past_due',
+  'server_limit',
+  'no_own_machine',
   'at_capacity',
-  'no_live_server',
+  'not_found',
+  'not_live',
   'db_error',
 ]);
 
-function messageFor(code: HostedErrorCode, field?: SettingsField, retryAfterSeconds?: number): string {
+// The refusals a support tier (or its add-on) answers: the page shows a link
+// to the account's support tier page beside their message.
+const SUPPORT_TIER_CODES: ReadonlySet<HostedErrorCode> = new Set<HostedErrorCode>([
+  'not_entitled',
+  'payment_past_due',
+  'server_limit',
+  'no_own_machine',
+]);
+
+export function linksToSupportTier(code: HostedErrorCode): boolean {
+  return SUPPORT_TIER_CODES.has(code);
+}
+
+// Why a stop does not free a place at once (the service counts a stopping
+// server as live until its machine reports it gone).
+export const STOPPING_STILL_COUNTS =
+  'A stopping server still counts toward your limit until it has stopped, in about a minute.';
+
+// "1 server", "3 servers".
+function servers(n: number): string {
+  return `${n} server${n === 1 ? '' : 's'}`;
+}
+
+function messageFor(
+  code: HostedErrorCode,
+  extra: { field?: SettingsField; retryAfterSeconds?: number; maxServers?: number } = {},
+): string {
   switch (code) {
     case 'unauthorized':
-      return 'Your session has ended. Log in again to manage your hosted server.';
+      return 'Your session has ended. Log in again to manage your hosted servers.';
     case 'csrf_header_required':
       return 'The server refused the request as not coming from this site. Reload the page and try again.';
     case 'proxy_required':
       return 'The server refused a request that did not come through this site. Reload the page and try again.';
     case 'hosting_disabled':
-      return 'This NovaWorld service is not running hosted servers right now.';
+      return 'NovaWorld is not running hosted servers right now.';
     case 'rate_limited':
-      return retryAfterSeconds !== undefined
-        ? `Too many starts and stops. Try again in ${formatRetryAfter(retryAfterSeconds)}.`
+      return extra.retryAfterSeconds !== undefined
+        ? `Too many starts and stops. Try again in ${formatRetryAfter(extra.retryAfterSeconds)}.`
         : 'Too many starts and stops. Try again in a little while.';
     case 'invalid_json':
       return 'The server could not read the request. Reload the page and try again.';
     case 'invalid_field':
       return 'The server could not read one of the settings. Reload the page and try again.';
     case 'invalid_settings':
-      return field
-        ? `The server refused the settings. ${FIELD_RULES[field]}`
+      return extra.field
+        ? `The server refused the settings. ${FIELD_RULES[extra.field]}`
         : 'The server refused the settings. Check them and try again.';
-    case 'not_approved':
-      return 'Your account is not approved to host a server, or is no longer active.';
-    case 'already_live':
-      return 'You already have a hosted server running.';
+    case 'not_entitled':
+      return 'Hosting a server needs a support tier.';
+    case 'payment_past_due':
+      return "Your support tier's last payment did not go through, so new servers can't start. Your running servers keep running while Stripe retries the card.";
+    case 'server_limit':
+      return `${
+        extra.maxServers !== undefined
+          ? `You may run ${servers(extra.maxServers)} at once, and all of them are live.`
+          : 'All the servers you may run at once are live.'
+      } Stop one, or move to a bigger support tier. ${STOPPING_STILL_COUNTS}`;
+    case 'no_own_machine':
+      return 'Each of your own machines already runs a server. Start this one on a shared machine, or add another own machine.';
     case 'at_capacity':
-      return 'Every hosted server place on this service is taken. Try again later.';
-    case 'no_live_server':
-      return 'You have no hosted server running to stop.';
+      return 'Every hosted server place on NovaWorld is taken right now. Try again later.';
+    case 'not_found':
+      return 'That hosted server no longer exists. Refresh the list.';
+    case 'not_live':
+      return 'That hosted server has already ended.';
     case 'db_error':
       return 'The server hit a database error. Try again shortly.';
     case 'network':
@@ -120,6 +168,8 @@ function messageFor(code: HostedErrorCode, field?: SettingsField, retryAfterSeco
   }
 }
 
+const isCount = (v: unknown): v is number => Number.isInteger(v) && (v as number) >= 0;
+
 // Any failure of these calls, as a HostedError.
 export function describeHostedError(err: unknown): HostedError {
   if (isAxiosError(err)) {
@@ -127,7 +177,7 @@ export function describeHostedError(err: unknown): HostedError {
     if (!response) {
       return { code: 'network', status: null, message: messageFor('network') };
     }
-    const data = response.data as { error?: unknown; field?: unknown } | undefined;
+    const data = response.data as { error?: unknown; field?: unknown; max_servers?: unknown; used?: unknown } | undefined;
     const serverCode = typeof data?.error === 'string' ? data.error : '';
     const code: HostedErrorCode = KNOWN_CODES.has(serverCode)
       ? (serverCode as HostedErrorCode)
@@ -140,15 +190,19 @@ export function describeHostedError(err: unknown): HostedError {
     const field = code === 'invalid_settings' && isSettingsField(named) ? named : undefined;
     const retryAfterSeconds =
       code === 'rate_limited' ? parseRetryAfter(response.headers?.['retry-after']) : undefined;
+    const maxServers = code === 'server_limit' && isCount(data?.max_servers) ? data.max_servers : undefined;
+    const used = code === 'server_limit' && isCount(data?.used) ? data.used : undefined;
     return {
       code,
       status: response.status,
       message:
         code === 'unknown'
           ? `${messageFor('unknown')} (HTTP ${response.status})`
-          : messageFor(code, field, retryAfterSeconds),
+          : messageFor(code, { field, retryAfterSeconds, maxServers }),
       ...(field !== undefined ? { field } : {}),
       ...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
+      ...(maxServers !== undefined ? { maxServers } : {}),
+      ...(used !== undefined ? { used } : {}),
     };
   }
   return { code: 'unknown', status: null, message: messageFor('unknown') };
@@ -158,7 +212,7 @@ function malformed(status: number): HostedResult<never> {
   return { ok: false, error: { code: 'unknown', status, message: messageFor('unknown') } };
 }
 
-function isHostedServer(value: unknown): value is HostedServer {
+export function isHostedServer(value: unknown): value is HostedServer {
   const v = value as Partial<HostedServer> | null;
   return (
     typeof v === 'object' &&
@@ -166,15 +220,31 @@ function isHostedServer(value: unknown): value is HostedServer {
     typeof v.id === 'number' &&
     typeof v.state === 'string' &&
     typeof v.live === 'boolean' &&
+    typeof v.own_machine === 'boolean' &&
     typeof v.settings === 'object' &&
     v.settings !== null &&
     Array.isArray((v.settings as Partial<HostedSettings>).missions)
   );
 }
 
-function serverOrNull(value: unknown): HostedServer | null | undefined {
-  if (value === null) return null;
-  return isHostedServer(value) ? value : undefined;
+const SOURCES: ReadonlySet<unknown> = new Set<EntitlementSource>(['none', 'tier', 'comp']);
+
+// The entitlement, or null when any count is missing or not a whole number
+// (the page never offers a start it could not count).
+function parseEntitlement(value: unknown): HostingEntitlement | null {
+  const v = value as Partial<Record<keyof HostingEntitlement, unknown>> | null;
+  if (typeof v !== 'object' || v === null) return null;
+  const { max_servers: max, used, own_machines: own, own_used: ownUsed, can_start: canStart, source } = v;
+  if (!isCount(max) || !isCount(used) || !isCount(own) || !isCount(ownUsed)) return null;
+  if (typeof canStart !== 'boolean' || !SOURCES.has(source)) return null;
+  return {
+    max_servers: max,
+    used,
+    own_machines: own,
+    own_used: ownUsed,
+    can_start: canStart,
+    source: source as EntitlementSource,
+  };
 }
 
 // One expansion of a data set, or null when the entry is malformed.
@@ -216,15 +286,25 @@ function parseDataSet(value: unknown): HostedDataSet | null {
   };
 }
 
-// GET /api/me/server: whether hosting is on, the account's approval, the
-// data sets a start may pick and the account's server (live, else its last
-// one).
-export async function fetchMyHostedServer(signal?: AbortSignal): Promise<HostedResult<MyHostedServerResponse>> {
+// GET /api/me/servers: whether hosting is on (and full), the account's
+// hosting entitlement, the data sets a start may pick and the account's
+// servers (the live ones, then its newest ended ones). A reply whose
+// entitlement or any server is malformed is refused whole: the page never
+// counts servers it could not read.
+export async function fetchMyServers(signal?: AbortSignal): Promise<HostedResult<HostedServersResponse>> {
   try {
-    const res = await apiClient.get<unknown>('/me/server', { signal });
-    const data = res.data as Partial<Record<keyof MyHostedServerResponse, unknown>> | null;
-    const server = serverOrNull(data?.server);
-    if (typeof data?.enabled !== 'boolean' || typeof data.can_host !== 'boolean' || server === undefined) {
+    const res = await apiClient.get<unknown>('/me/servers', { signal });
+    const data = res.data as Partial<Record<keyof HostedServersResponse, unknown>> | null;
+    if (typeof data !== 'object' || data === null) return malformed(res.status);
+    const entitlement = parseEntitlement(data.entitlement);
+    const list = data.servers;
+    if (
+      typeof data.enabled !== 'boolean' ||
+      typeof data.full !== 'boolean' ||
+      entitlement === null ||
+      !Array.isArray(list) ||
+      !list.every(isHostedServer)
+    ) {
       return malformed(res.status);
     }
     const dataSets = Array.isArray(data.data_sets)
@@ -232,51 +312,62 @@ export async function fetchMyHostedServer(signal?: AbortSignal): Promise<HostedR
       : [];
     return {
       ok: true,
-      value: { enabled: data.enabled, can_host: data.can_host, data_sets: dataSets, server },
+      value: { enabled: data.enabled, full: data.full, entitlement, data_sets: dataSets, servers: list },
     };
   } catch (err) {
     return { ok: false, error: describeHostedError(err) };
   }
 }
 
-async function postForServer(path: string, body?: StartSettings): Promise<HostedResult<HostedServer | null>> {
+async function forServer(request: () => Promise<{ status: number; data: unknown }>): Promise<HostedResult<HostedServer>> {
   try {
-    const res = await apiClient.post<unknown>(path, body);
-    const server = serverOrNull((res.data as Partial<HostedServerReply> | null)?.server);
-    if (server === undefined) return malformed(res.status);
+    const res = await request();
+    const server = (res.data as { server?: unknown } | null)?.server;
+    if (!isHostedServer(server)) return malformed(res.status);
     return { ok: true, value: server };
   } catch (err) {
     return { ok: false, error: describeHostedError(err) };
   }
 }
 
-// POST /api/me/server/start: the account's server, requested (202), with
-// these settings. The service's supervisor takes it from there.
-export function startHostedServer(settings: StartSettings): Promise<HostedResult<HostedServer | null>> {
-  return postForServer('/me/server/start', settings);
+// GET /api/me/servers/<id>: one of the account's servers, with its events;
+// 404 not_found for any id that is not the account's.
+export function fetchMyServer(id: number, signal?: AbortSignal): Promise<HostedResult<HostedServer>> {
+  return forServer(() => apiClient.get<unknown>(`/me/servers/${id}`, { signal }));
 }
 
-// POST /api/me/server/stop: the account's live server to stopping (202; also
-// when it already was), or stopped when the supervisor finished it meanwhile.
-export function stopHostedServer(): Promise<HostedResult<HostedServer | null>> {
-  return postForServer('/me/server/stop');
+// POST /api/me/servers: a new server, requested (202), with these settings,
+// on one of the account's own machines when `ownMachine`. The service's
+// supervisor takes it from there.
+export function startHostedServer(settings: StartSettings, ownMachine = false): Promise<HostedResult<HostedServer>> {
+  return forServer(() => apiClient.post<unknown>('/me/servers', { ...settings, own_machine: ownMachine }));
+}
+
+// POST /api/me/servers/<id>/stop: the server to stopping (202; also when it
+// already was), or stopped when the supervisor finished it meanwhile; 409
+// not_live once it has ended.
+export function stopHostedServer(id: number): Promise<HostedResult<HostedServer>> {
+  return forServer(() => apiClient.post<unknown>(`/me/servers/${id}/stop`));
 }
 
 // ---------------------------------------------------------------------------
 // The console routes (hosted/console_routes.cpp; README "Hosted servers", the
-// console routes). The owner's act on the account's own running server, which
-// its session resolves (`apiClient`, which sends the CSRF header every POST
-// needs); the admin's name the server (`adminClient`: an admin session or the
-// stored Bearer token). The service runs at most one console request per
-// account at once (an admin session's account; the Bearer token counts as one
-// account) and answers a second 429 console_busy at once, so a page sends
-// every one of these calls the service admits through its one ConsoleQueue
-// (utils/consoleQueue.ts); the console log's read, which it does not admit,
-// keeps out of it.
+// console routes). The owner's act on one of the account's own servers, by id
+// (`apiClient`, which sends the CSRF header every POST needs; another
+// account's id answers 404 not_found); the admin's on any server
+// (`adminClient`: an admin session or the stored Bearer token). The service
+// runs at most one console request per account at once (an admin session's
+// account; the Bearer token counts as one account) and answers a second 429
+// console_busy at once, so a page sends every one of these calls the service
+// admits through its one ConsoleQueue (utils/consoleQueue.ts); the console
+// log's read, which it does not admit, keeps out of it.
 
-// Where a console call goes: the owner's own server, or server `id` for an
-// admin.
-export type ConsoleTarget = { kind: 'owner' } | { kind: 'admin'; id: number };
+// Where a console call goes: server `id`, through the owner's routes or the
+// admin's.
+export interface ConsoleTarget {
+  kind: 'owner' | 'admin';
+  id: number;
+}
 
 // The chat text a server line keeps: cp1252 characters, after the text is
 // trimmed (console_commands.h kChatTextMaxBytes).
@@ -292,8 +383,6 @@ export type ConsoleErrorCode =
   | 'forbidden'
   | 'csrf_header_required'
   | 'proxy_required'
-  | 'no_live_server'
-  | 'no_server'
   | 'not_found'
   | 'not_live'
   | 'server_stopping'
@@ -346,8 +435,6 @@ const KNOWN_CONSOLE_CODES: ReadonlySet<string> = new Set<ConsoleErrorCode>([
   'forbidden',
   'csrf_header_required',
   'proxy_required',
-  'no_live_server',
-  'no_server',
   'not_found',
   'not_live',
   'server_stopping',
@@ -383,8 +470,6 @@ const KNOWN_CONSOLE_CODES: ReadonlySet<string> = new Set<ConsoleErrorCode>([
 // its server again rather than keep asking its console.
 export function isConsoleGone(code: ConsoleErrorCode): boolean {
   return (
-    code === 'no_live_server' ||
-    code === 'no_server' ||
     code === 'not_found' ||
     code === 'not_live' ||
     code === 'server_stopping' ||
@@ -403,17 +488,13 @@ function consoleMessageFor(
     case 'unauthorized':
       return target.kind === 'admin'
         ? 'Your admin credentials were refused. Log in again or enter the admin token.'
-        : 'Your session has ended. Log in again to manage your hosted server.';
+        : 'Your session has ended. Log in again to manage your hosted servers.';
     case 'forbidden':
       return 'This account is not an admin.';
     case 'csrf_header_required':
       return 'The server refused the request as not coming from this site. Reload the page and try again.';
     case 'proxy_required':
       return 'The server refused a request that did not come through this site. Reload the page and try again.';
-    case 'no_live_server':
-      return 'You have no hosted server running.';
-    case 'no_server':
-      return 'You have no hosted server.';
     case 'not_found':
       return 'That hosted server no longer exists. Refresh the list.';
     case 'not_live':
@@ -535,8 +616,10 @@ function consoleClient(target: ConsoleTarget): AxiosInstance {
 }
 
 // A route under the target's server: `players`, `rotation/3/next`, ...
-function consolePath(target: ConsoleTarget, rest: string): string {
-  return target.kind === 'admin' ? `/hosted/${target.id}/${rest}` : `/me/server/${rest}`;
+// (relative to the client's base: /api for the owner's, /api/admin for the
+// admin's).
+export function consolePath(target: ConsoleTarget, rest: string): string {
+  return target.kind === 'admin' ? `/hosted/${target.id}/${rest}` : `/me/servers/${target.id}/${rest}`;
 }
 
 function malformedConsole(status: number, target: ConsoleTarget): ConsoleResult<never> {
@@ -665,8 +748,9 @@ export function fetchConsoleChat(target: ConsoleTarget, signal?: AbortSignal): P
 // GET .../console: the console ring's lines with an id past `after`, the
 // newest `limit` of them (at most CONSOLE_KEEP), oldest first, and the link's
 // status. It reads the service's database alone: no command reaches the
-// server, and the service admits it outside the one-request-per-account rule,
-// so it needs no turn in the page's console queue.
+// server (an ended server's log reads too), and the service admits it outside
+// the one-request-per-account rule, so it needs no turn in the page's console
+// queue.
 export async function fetchConsoleLog(
   target: ConsoleTarget,
   query: { after?: number; limit?: number },

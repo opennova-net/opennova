@@ -1,10 +1,10 @@
 // The page's one hosted-console queue (utils/consoleQueue.ts). A page with a
-// console (MyServersPage, the admin's HostedSection) makes it in its setup
-// with provideConsoleQueue, and every console panel inside it takes that one
-// with useConsoleQueue, so all of the page's admitted console calls run one at
-// a time: the service answers an account's second concurrent console request
-// 429 console_busy. Each console polls under its own scope, and drops its
-// waiting polls when it closes (ConsoleQueue.cancel).
+// console (the server page, pages/servers/ServerDetailLayout.vue) makes it in
+// its setup with provideConsoleQueue, and every console panel inside it takes
+// that one with useConsoleQueue, so all of the page's admitted console calls
+// run one at a time: the service answers an account's second concurrent
+// console request 429 console_busy. Each console polls under its own scope,
+// and drops its waiting polls when it closes (ConsoleQueue.cancel).
 
 import { inject, onUnmounted, provide, type InjectionKey } from 'vue';
 import { ConsoleQueue } from '../utils/consoleQueue';

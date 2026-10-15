@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Package the native apps under apps/ for Windows: build every app (Release)
-# and zip the executables flat, with the NovaWorld server's migrations and seed
-# and opennova-serve's example host file beside them and a README.txt naming
-# each tool.
+# and zip the executables flat, with opennova-serve's example host file beside
+# them and a README.txt naming each tool. The NovaWorld server is not one of
+# them: it is Linux-only and ships as its container image (deploy/).
 #
 #   scripts/package_apps.sh [out.zip]
 #
@@ -15,13 +15,12 @@ build="$root/build/apps-package"
 
 # The apps/ directory of each shipped executable. An app in apps/<dir> builds
 # target opennova_<dir> as opennova-<dir, kebab-cased> (DEVELOPING.md).
-apps=(3di extract lan_probe novaworld_server parity serve wire)
+apps=(3di extract lan_probe parity serve wire)
 
 # The static MSVC runtime keeps the zip free of a VC++ runtime install, and a
 # separate build tree keeps it apart from development builds. No app links the
 # dev tools or the editor's windows, so they (and the Dear ImGui fetch they
-# bring) stay off. The server builds without BUILD_NOVAWORLD_HTTP: the HTTP
-# portal ships only in the Linux container image.
+# bring) stay off.
 cmake -S "$root" -B "$build" -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DOPENNOVA_DEVTOOLS=OFF \
     -DOPENNOVA_EDITOR=OFF > /dev/null
@@ -44,9 +43,11 @@ root, out, exes = sys.argv[1], sys.argv[2], sys.argv[3:]
 readme = """\
 OpenNova apps for Windows x64 (pre-1.0, experimental)
 
-Command-line tools and the NovaWorld server, built from
+Command-line tools and the headless game server, built from
 https://github.com/opennova-net/opennova. No game data is included. Each
-tool prints its usage when run with no arguments or --help.
+tool prints its usage when run with no arguments or --help. The NovaWorld
+server runs on Linux only: self-hosters run its container stack (deploy/ in
+the repository), on Windows through Docker Desktop.
 
 opennova-3di.exe
     Builds a .3di model from .o3d scene text and writes one back as text;
@@ -60,14 +61,6 @@ opennova-extract.exe
 opennova-lan-probe.exe
     Waits for a LAN game host to answer the discovery probe and reports
     whether it is ready. It never joins the game.
-
-opennova-novaworld-server.exe
-    The NovaWorld server: the gate (UDP 7597) and session (UDP 64206)
-    listeners. The web portal and HTTP routes are only in the Linux container
-    image. Run it from this folder: it applies backend\\migrations and
-    backend\\seed and keeps its database under backend\\data. Settings are
-    environment variables, listed in apps/novaworld_server/README.md in the
-    repository.
 
 opennova-parity.exe
     The retail-LAN parity verdict: compares the run folders of one parity
@@ -95,10 +88,5 @@ with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
     for exe in exes:
         z.write(exe, os.path.basename(exe))
     z.write(os.path.join(root, "apps", "serve", "example.host"), "example.host")
-    for sub in ("migrations", "seed"):
-        src = os.path.join(root, "backend", sub)
-        for name in sorted(os.listdir(src)):
-            if name.endswith(".sql"):
-                z.write(os.path.join(src, name), f"backend/{sub}/{name}")
 print("wrote", out)
 EOF

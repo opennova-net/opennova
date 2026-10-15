@@ -1,9 +1,9 @@
 #pragma once
 
 // A file only the service's own account may read, written from scratch: the
-// hosted servers' secret files (LocalProcessProvider's working directories)
-// and the cloud provider's per-launch user-data (Ec2Provider, which carries a
-// bootstrap token). Platform plumbing, not a port.
+// hosted servers' secret files (the local machine driver's slot directories)
+// and the EC2 machine driver's per-launch user-data (Ec2MachineDriver, which
+// carries a machine's one-time bootstrap token). Platform plumbing, not a port.
 
 #include <filesystem>
 #include <string>

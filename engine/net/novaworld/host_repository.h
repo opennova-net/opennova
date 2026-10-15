@@ -1,6 +1,6 @@
 #pragma once
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/gsb.h>
 #include <net/novaworld/lobby_session.h>      // LobbyState, HostRosterSlot
 #include <net/novaworld/lobby_update.h>       // LobbyStatusBlob
@@ -35,7 +35,7 @@ namespace opennova {
 //     at most one host at a time so the unique-by-peer index is enough)
 //   server boot        -> clear_all() (drop stale rows from prev run)
 //
-// The listing's owner (host_keys, migration 0009; service policy, the retail
+// The listing's owner (host_keys; service policy, the retail
 // service's own check is unwitnessed): /NWHost.dll records each HOSTKEY it
 // mints with the account the request's retail login names (record_host_key),
 // the lobby session claims the key a connection presents (its first
@@ -182,7 +182,7 @@ inline constexpr std::size_t kHostKeysPerUser = 20;
 // server's players.credentials_gen) its retail login was made under, tested
 // by the insert itself, so a password reset or a ban committed since leaves
 // the key unrecorded. A key that is no HOSTKEY records nothing. Throws
-// db::SqliteError.
+// db::Error.
 bool record_host_key(
 		db::Database &db, std::string_view key, int64_t user_id, int64_t credentials_gen);
 
@@ -192,7 +192,10 @@ bool record_host_key(
 // claimed by another RID that is still listed (a key backs one listing at a
 // time; a parked connection's re-host keeps its RID and so its claim, and a key
 // whose listing is gone can be claimed again). A claim moves last_used_at
-// forward. Throws db::SqliteError.
+// forward and releases the account's other keys claimed for the RID, in one
+// transaction, so an account holds one claim per RID (a connection that stops
+// and hosts again under its RID presents the fresh key its host page minted).
+// Throws db::Error.
 std::optional<int64_t> claim_host_key(db::Database &db, std::string_view key, uint32_t rid);
 
 // Whether the listing under `rid` is `user_id`'s now: listed (its active_hosts
@@ -200,12 +203,12 @@ std::optional<int64_t> claim_host_key(db::Database &db, std::string_view key, ui
 // the rule host_user_id's writes follow, read live rather than as of the row's
 // last write, so a reset, an inactive status or a delete (each takes the
 // account's keys) answers false at once. The owner's push routes ask it
-// (apps/novaworld_server/host_routes.h). Throws db::SqliteError.
+// (apps/novaworld_server/host_routes.h). Throws db::Error.
 bool listing_owned_by(db::Database &db, uint32_t rid, int64_t user_id);
 
 // The main tick's sweep: every key a listed server holds counts as used (at
 // most once per kHostKeyTouchSeconds), then every key unused for
-// kHostKeyIdleSeconds goes. Returns how many went. Throws db::SqliteError.
+// kHostKeyIdleSeconds goes. Returns how many went. Throws db::Error.
 std::size_t prune_host_keys(db::Database &db);
 
 // What a game's listing shows in a column its host reported nothing for: the

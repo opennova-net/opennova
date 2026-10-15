@@ -5,7 +5,7 @@
 # opennova_formats, which PRIVATE-links this target; nothing else in the tree
 # includes miniz.h.
 # The engine itself carries no C sources (ADR 0043 d14), so the C toolchain
-# exists for this leaf, bcrypt and sqlite alone. Bump by replacing miniz.c and
+# exists for this leaf and bcrypt alone. Bump by replacing miniz.c and
 # miniz.h together.
 
 add_library(opennova_miniz STATIC

@@ -2,22 +2,27 @@ name: Serve image
 
 # Builds and publishes the headless game server's container image to GHCR:
 # ghcr.io/<owner>/opennova-serve (apps/serve/Dockerfile), the server the hosted
-# game servers run (ADR 0053). It holds no retail byte: the game data (the
-# server's data set) is mounted at /opt/game (apps/serve/README.md, "Container
-# image"). Nothing deploys it yet. Tags, permissions and the PR behaviour (build, never push) follow the
+# game servers run (ADR 0053), with the machine agent opennova-hostd beside it
+# (apps/hostd; each machine copies it out). It holds no retail byte: the game
+# data (the server's data set) is mounted at /opt/game (apps/serve/README.md,
+# "Container image"). Nothing deploys it yet. Tags, permissions and the PR behaviour (build, never push) follow the
 # NovaWorld images (novaworld-images.yml).
 
 on:
   push:
     branches: [master]
-    # Everything opennova-serve links: every engine group (base, formats,
-    # runtime, net), apps/common and the third-party libs
+    # Everything opennova-serve and opennova-hostd link: every engine group
+    # (base, formats, runtime, net), apps/common, the service's half of the
+    # agent protocol and the third-party libs
     # those groups link, plus the CMake root and the build context's ignore
     # list. Master's image so follows every engine change a hosted server runs.
     paths:
       - 'engine/**'
       - 'apps/serve/**'
+      - 'apps/hostd/**'
       - 'apps/common/**'
+      - 'apps/novaworld_server/hosted/agent_protocol.*'
+      - 'apps/novaworld_server/hosted/slots.h'
       - 'third_party/bcrypt/**'
       - 'third_party/miniz/**'
       - 'third_party/rgbcx/**'
@@ -33,7 +38,10 @@ on:
   pull_request:
     paths:
       - 'apps/serve/**'
+      - 'apps/hostd/**'
       - 'apps/common/**'
+      - 'apps/novaworld_server/hosted/agent_protocol.*'
+      - 'apps/novaworld_server/hosted/slots.h'
       - 'CMakeLists.txt'
       - '.dockerignore'
       - '.github/workflows/net-linux.yml'
@@ -98,6 +106,7 @@ jobs:
         with:
           context: .
           file: apps/serve/Dockerfile
+          build-args: OPENNOVA_VERSION=${{ github.sha }}
           load: true
           tags: opennova-serve:ci
           cache-from: type=gha,scope=opennova-serve
@@ -105,12 +114,18 @@ jobs:
       # The run contract, with no game data: the usage exits 0; a start with
       # no install mounted runs as the image's user (10001) in /srv/serve,
       # whose first act empties admin_log.txt there (a fresh named volume
-      # takes the image's ownership), then fails the mount with exit 1.
+      # takes the image's ownership), then fails the mount with exit 1. The
+      # machine agent is there to copy out, reporting this commit as its build.
       - name: Smoke-run serve image
         run: |
           set -euo pipefail
           image=opennova-serve:ci
           docker run --rm "$image" --help
+          hostd_version="$(docker run --rm --entrypoint /usr/local/bin/opennova-hostd "$image" --version)"
+          if [ "$hostd_version" != "opennova-hostd ${{ github.sha }}" ]; then
+            echo "::error::the image's opennova-hostd reports '$hostd_version'"
+            exit 1
+          fi
           docker volume create serve-smoke >/dev/null
           code=0
           docker run --rm -v serve-smoke:/srv/serve "$image" || code=$?
@@ -131,6 +146,7 @@ jobs:
         with:
           context: .
           file: apps/serve/Dockerfile
+          build-args: OPENNOVA_VERSION=${{ github.sha }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

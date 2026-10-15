@@ -1,5 +1,5 @@
 // End-to-end: register hosts through the real LobbySession dispatch against
-// a real (in-memory) sqlite DB, then read them back through host_repository —
+// a real (migrated, per-run) database, then read them back through host_repository —
 // the exact path /api/lobbies, /api/hosts, and /jop_2.gsb all query.
 //
 // Guards:
@@ -13,11 +13,13 @@
 //   * the POST status blob (Lobby_UpdateServerInfo heartbeat) refreshes the
 //     row that owns its HostKey.
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/gsb.h>
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/lobby_session.h>
 #include <net/novaworld/lobby_update.h>
+
+#include "common/test_database.h"
 
 #include <cstdio>
 #include <string>
@@ -69,11 +71,12 @@ NapiMessage make_host_request(const std::string &app_id, const std::string &serv
 
 } // namespace
 
-int main() {
-	opennova::db::Database db(":memory:");
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
 	// The real migrations, so the schema (FKs, indexes, cascade) matches
 	// production exactly.
-	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
+	test_db::TestDatabase scratch;
+	opennova::db::Database db = scratch.open();
 
 	LobbySession sess;
 	sess.set_database(&db);

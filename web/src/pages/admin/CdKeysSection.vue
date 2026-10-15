@@ -182,7 +182,7 @@
                 </button>
               </td>
               <td class="whitespace-nowrap px-4 py-3 text-xs text-ink-muted">
-                <time :datetime="isoOf(k.created_at)">{{ localOf(k.created_at) }}</time>
+                <RelativeTime :value="k.created_at" :now="now" />
                 <span class="block">{{ creatorLabel(k.created_by) }}</span>
               </td>
               <td class="whitespace-nowrap px-4 py-3 text-right">
@@ -224,7 +224,7 @@
       <ActivationTable :activations="keyPanel.activations" empty="This key has activated no machine." />
       <form v-if="keyPanel.key.state !== 'revoked'" class="space-y-2" @submit.prevent="activate">
         <label for="cd-activate-nwpssk" class="block text-sm text-ink">
-          Activate a machine by hand: its NWPSSK (23 letters, from the game's login or the server log)
+          Activate a machine by hand: its fingerprint (NWPSSK, 23 letters, from the game's login or the server log)
         </label>
         <div class="flex flex-wrap gap-2">
           <input
@@ -241,7 +241,7 @@
             :disabled="busy || !NWPSSK_SHAPE.test(manualNwpssk.trim().toUpperCase())"
             class="rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:opacity-40"
           >
-            Get NWACT
+            Get its activation code
           </button>
         </div>
         <div v-if="manualNwact" class="space-y-1">
@@ -308,9 +308,8 @@ import {
   revokeCdKey,
 } from '../../api/cdKeys';
 import { listUsers } from '../../api/users';
-import { describeAdminError } from '../../api/admin';
 import type { CdKey, CdKeyAccountResponse, CdKeyActivation, CdKeyListResponse, CdKeyState } from '../../types/cdKeys';
-import { isoOf, localOf } from '../../utils/utcTime';
+import RelativeTime from '../../components/RelativeTime.vue';
 
 const MAX_GENERATE = 100;
 const PAGE = 50;
@@ -333,8 +332,8 @@ const ActivationTable = defineComponent({
                 h('tr', { class: 'text-left text-xs uppercase tracking-wider text-ink-muted' }, [
                   h('th', { scope: 'col', class: 'px-2 py-2' }, 'When'),
                   h('th', { scope: 'col', class: 'px-2 py-2' }, 'Key'),
-                  h('th', { scope: 'col', class: 'px-2 py-2' }, 'Machine (NWPSSK)'),
-                  h('th', { scope: 'col', class: 'px-2 py-2' }, 'NWACT'),
+                  h('th', { scope: 'col', class: 'px-2 py-2' }, 'Machine fingerprint (NWPSSK)'),
+                  h('th', { scope: 'col', class: 'px-2 py-2' }, 'Activation code (NWACT)'),
                 ]),
               ]),
               h(
@@ -342,7 +341,7 @@ const ActivationTable = defineComponent({
                 { class: 'divide-y divide-border text-ink' },
                 props.activations.map((a) =>
                   h('tr', { key: a.id, class: 'align-top' }, [
-                    h('td', { class: 'whitespace-nowrap px-2 py-2 text-xs text-ink-muted' }, localOf(a.created_at)),
+                    h('td', { class: 'whitespace-nowrap px-2 py-2 text-xs text-ink-muted' }, [h(RelativeTime, { value: a.created_at, now: Date.now() })]),
                     h('td', { class: 'whitespace-nowrap px-2 py-2 font-mono text-xs' }, a.serial),
                     h('td', { class: 'px-2 py-2 font-mono text-xs' }, a.nwpssk),
                     h('td', { class: 'max-w-md break-all px-2 py-2 font-mono text-xs text-ink-muted' }, a.nwact),
@@ -355,6 +354,8 @@ const ActivationTable = defineComponent({
 });
 
 const list = ref<CdKeyListResponse | null>(null);
+// The page's clock, for the relative times.
+const now = ref(Date.now());
 const loading = ref(false);
 const busy = ref(false);
 const message = ref<string | null>(null);
@@ -412,6 +413,7 @@ function fail(text: string) {
 
 async function load() {
   loading.value = true;
+  now.value = Date.now();
   const result = await fetchCdKeys({
     title: filterTitle.value,
     state: filterState.value,
@@ -534,15 +536,17 @@ async function lookUpAccount() {
   busy.value = true;
   try {
     const users = await listUsers();
-    const user = users.find((u) => u.username.toLowerCase() === name.toLowerCase());
+    if (!users.ok) {
+      fail(users.error.message);
+      return;
+    }
+    const user = users.value.find((u) => u.username.toLowerCase() === name.toLowerCase());
     if (!user) {
       accountPanel.value = null;
       fail(`No player account is named ${name}.`);
       return;
     }
     await openAccount(user.id);
-  } catch (err) {
-    fail(describeAdminError(err).message);
   } finally {
     busy.value = false;
   }

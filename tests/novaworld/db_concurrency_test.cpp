@@ -1,4 +1,4 @@
-// Several threads on one database file and one db::ConnectionPool, the way
+// Several threads on one database and one db::ConnectionPool, the way
 // opennova-novaworld-server runs them (issue #981). Registrations (the
 // /api/register write, create_user, each on a connection leased for the call
 // as a Crow handler leases one) race two writers per host: the NW UDP lobby
@@ -26,34 +26,29 @@
 //     rising counter the status blob does not carry, so a blob fold that wrote
 //     back a row it had read before a newer UDP write landed shows to a
 //     reader as the counter falling;
-//   * no write fails (SQLITE_BUSY included: writers wait on the busy timeout),
-//     and each host ends on one of its writers' last generations.
-//
-// A file, not a shared-cache in-memory URI: shared cache locks per table and
-// its SQLITE_LOCKED skips the busy timeout, and the production journal (WAL)
-// needs a file.
+//   * no write fails (a writer waits on the writer lock and the row locks,
+//     within the lock timeout), and each host ends on one of its writers'
+//     last generations.
 
 #include "auth.h"
 
 #include <base/io/log.h>
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/lobby_session.h>
 #include <net/novaworld/lobby_update.h>
 
 #include "client_var_fixture.h"
+#include "common/test_database.h"
 #include "common/test_expect.h"
-#include "common/test_paths.h"
 
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
 #include <exception>
-#include <filesystem>
 #include <map>
 #include <mutex>
 #include <optional>
-#include <random>
 #include <set>
 #include <string>
 #include <thread>
@@ -75,13 +70,16 @@ constexpr int kUsersPerRegistrar = 5;
 constexpr int kHosts = 3;
 constexpr int kGenerationsPerWriter = 50;
 constexpr int kReaders = 3;
-// The pool's busy timeout, raised from the server's 5 s to 60 s as a deliberate
-// stress margin: this test runs every writer flat out at once, and SQLite's
-// polling busy handler can starve one writer behind the others' back-to-back
-// commits for longer than 5 s on a loaded host (a CI runner, WSL2's virtual
-// disk under a parallel build). What it asks is that no write is lost or
+// The connections' lock timeout, raised from the server's 5 s to 60 s as a
+// deliberate stress margin: this test runs every writer flat out at once, all
+// of them queued on the one writer lock, on what may be a loaded host (a CI
+// runner under a parallel build). What it asks is that no write is lost or
 // mixed, not how long one waits; the route harness keeps the server's 5 s.
-constexpr int kBusyTimeoutMs = 60000;
+// The statement timeout rises above it: the writer lock is taken by one
+// statement (pg_advisory_xact_lock), which the server's 15 s would cut first.
+constexpr int kLockTimeoutMs = 60000;
+constexpr int kStatementTimeoutMs = 90000;
+static_assert(kLockTimeoutMs < kStatementTimeoutMs, "a lock wait must end at the lock timeout");
 
 // Everything a worker thread reports, checked by main() after the join.
 struct Failures {
@@ -342,12 +340,11 @@ void register_users(ConnectionPool &pool, int registrar, const std::atomic<bool>
 	}
 }
 
-int run(const std::filesystem::path &db_path) {
-	ConnectionPool pool(db_path, kBusyTimeoutMs);
+int run(const opennova::db::ConnectOptions &options) {
+	ConnectionPool pool(options);
 	std::vector<uint32_t> rids;
 	{
 		auto boot = pool.acquire();
-		opennova::db::run_migrations(*boot, OPENNOVA_SOURCE_DIR "/backend/migrations");
 		// Every host exists (UDP generation 0) before a reader looks.
 		for (int h = 0; h < kHosts; ++h) {
 			const uint32_t rid = 7000 + static_cast<uint32_t>(h);
@@ -445,19 +442,16 @@ int run(const std::filesystem::path &db_path) {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
 	opennova::io::set_log_sink(&record_warnings);
-	auto dir = std::filesystem::temp_directory_path() /
-	           test_paths_unique("opennova_db_concurrency_test");
-	std::random_device rd;
-	dir /= std::to_string(std::mt19937_64(rd())());
-	std::filesystem::create_directories(dir);
-
+	test_db::TestDatabase scratch;
+	auto options = scratch.options();
+	options.lock_timeout_ms = kLockTimeoutMs;
+	options.statement_timeout_ms = kStatementTimeoutMs;
 	// run() closes every connection (the pool and its leases) before the
-	// directory goes: Windows will not delete an open database's WAL/SHM files.
-	const int rc = run(dir / "novaworld.db");
-	std::error_code ec;
-	std::filesystem::remove_all(dir, ec);
+	// database is dropped.
+	const int rc = run(options);
 	if (rc != 0) return rc;
 	std::printf("OK: pooled connections keep ids, rosters and rows consistent "
 	            "(%d registrars, %d hosts x 2 writers x %d generations, %d readers)\n",

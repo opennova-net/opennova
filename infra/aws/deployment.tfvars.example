@@ -1,0 +1,70 @@
+# A deployment's Terraform variables: the NON-SECRET knobs.
+#
+# The toolbox passes infra/aws/<deployment>.tfvars to every `infra` run of that
+# deployment (prod.tfvars for prod, staging.tfvars for --deployment staging):
+#   cp infra/aws/deployment.tfvars.example infra/aws/prod.tfvars
+# It holds no secret, so committing it keeps every operator on the same knobs.
+# Never name it terraform.tfvars: Terraform would load that one into EVERY
+# workspace (staging would then adopt prod's Elastic IP), so the toolbox refuses
+# to run while one exists.
+#
+# The secrets come from the vault as TF_VAR_* at run time
+# (deploy/env/terraform.env.tpl): cloudflare_api_token, cloudflare_zone_id,
+# cloudflare_domain and the rest. Leave them out of this file (a value here
+# would override the vault's).
+
+region        = "us-east-1"
+instance_type = "c7i.large"
+
+# Prod: the allocation id of the Elastic IP retail clients use (the single-host
+# stack's; ./deploy/run.sh aws ec2 describe-addresses). Terraform adopts it and
+# never manages it. Leave it out for a deployment that gets an address of its
+# own (staging).
+# service_eip_allocation_id = "eipalloc-0123456789abcdef0"
+
+# The two availability zones, pinned once the stack exists (public a keeps the
+# zone the single-host stack's subnet was made in; ./deploy/run.sh infra output
+# public_subnet_ids, then aws ec2 describe-subnets).
+# azs = ["us-east-1a", "us-east-1b"]
+
+# The service instance's fixed private address in public subnet a (10.44.0.<n>).
+# service_private_ip_host = 10
+
+# The database (database.tf): PostgreSQL 17 on RDS. Its master password comes
+# from the vault (item rds, rds-<deployment> off prod); bump the version to send
+# a changed one to RDS.
+# db_instance_class          = "db.t4g.micro"
+# db_master_password_version = 1
+
+# allowed_cidrs   = ["0.0.0.0/0"] # the retail ports and the game machines' slots
+# ops_bucket_name = "opennova-backups"
+# ami_id          = ""            # empty: Canonical's newest Ubuntu 24.04 at the host's creation
+
+# Cloudflare: domain + zone id come from the vault, NOT this file. Only the
+# proxied toggle lives here.
+cloudflare_web_proxied = true
+
+# Email Routing (email.tf, prod's): the local parts that forward to the vault's
+# email/forward_to (support@<domain> by default).
+# email_routes = ["support"]
+
+# The fleet (fleet.tf; DEPLOY.md "Hosted game servers"). The data snapshots
+# (hosted_data_snapshots, one per data set) come from the vault (item `hosted`,
+# fields data_snapshot_id_<slug>), not this file: hosting is off without one.
+# shared_instance_type   = "t3a.large"   # unlimited CPU credits; x86_64, no t2
+# own_instance_type      = "c7a.medium"
+# shared_slots           = 12            # K servers per shared machine (1..32)
+# fleet_max_shared       = 2
+# fleet_max_own          = 2
+# fleet_idle_minutes     = 30
+# machine_root_volume_gb = 16
+# hosted_ami_id          = ""            # empty: Canonical's newest Ubuntu 24.04
+# hosted_deployment      = ""            # empty: the stack's resource name
+
+# Alarms and budgets (observability.tf). The alert address comes from the vault
+# (item alerts, field email).
+# budget_monthly_usd         = 250
+# budget_egress_gb           = 1500
+# cost_anomaly_monitor       = true      # false if the account has one already
+# cost_anomaly_threshold_usd = 20
+# log_retention_days         = 30

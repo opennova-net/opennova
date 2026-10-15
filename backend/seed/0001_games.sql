@@ -3,8 +3,8 @@
 -- LobbyName, the startupurl, the GLSVSS leg), the .gsb list the browser
 -- fetches and the game its listings land under. Applied at every boot after
 -- the migrations, so a row added here reaches every database. Idempotent via
--- INSERT OR IGNORE on the UNIQUE slug and gate_tag: a row already present is
--- left as it is (migration 0013 brings the older rows' values up to these).
+-- ON CONFLICT DO NOTHING on the UNIQUE slug and gate_tag: a row already present
+-- is left as it is (a change to one is a migration's UPDATE).
 --
 -- `title` is the engine's game profile code the row's clients speak
 -- (engine/base/gameprofile). `startup_query` is the startupurl after
@@ -19,7 +19,7 @@
 -- none requires, and that an account with no access row of its own owns:
 -- bit 0 the base game, bit 1 JO's jox01; DFX2 and ON have no expansion.
 
-INSERT OR IGNORE INTO games (
+INSERT INTO games (
     slug, display_name, lobby_name, gate_tag, title,
     start_page, host_page, gsb_path,
     join_lan_url, ver1, ver2, exp_bits, pfid,
@@ -39,4 +39,5 @@ INSERT OR IGNORE INTO games (
     ('opennova_0_consumer', 'OpenNova',             'opennova_0_consumer', 'opennova:0', 'jo',
      'jop_2_start.htm',  'jop_2_host1.htm',  'opennova_0.gsb?a=1',
      NULL, '3', '2345', '1', '28',
-     'ver1=[VER1]&ver2=[VER2]&cc=[CC]&gt=[GT]&url=jop_2_start.htm', '', 0, 0);
+     'ver1=[VER1]&ver2=[VER2]&cc=[CC]&gt=[GT]&url=jop_2_start.htm', '', 0, 0)
+ON CONFLICT DO NOTHING;

@@ -493,20 +493,70 @@ its reader; `opennova-serve` reads it (`engine/runtime/inmatch/host_file.h`).
 _Avoid_: server config, server.cfg, dedicated.cfg
 
 **Hosted server**:
-An `opennova-serve` that an approved account starts from the NovaWorld site (ADR 0053):
-one per account, each on a **machine** of its own, running the published
-`opennova-serve` image over the **data set** its owner picks. It lists on our NovaWorld under a
-service account of its own, and its owner administers it from the site, through the
-service only. It stays up until its owner stops it.
+An `opennova-serve` that an account starts from the NovaWorld site (ADR 0053): as many
+live at once as the account's **hosting entitlement** allows, each in a **slot** of a
+**machine** (a **shared machine**, or an **own machine** with the add-on), running the
+published `opennova-serve` image as a container over the **data set** its owner picks.
+It lists on our NovaWorld under a service account of its own, at its slot's game port,
+and its owner administers it from the site, by its id, through the service only. It
+stays up until its owner stops it (or the entitlement no longer covers it); a move to
+another machine (its machine lost, drained or ended) costs it no restart.
 _Avoid_ (for this product only; the words keep their meanings elsewhere): hosted host,
 game host, instance, dedicated server
 
+**Support tier**:
+The monthly Stripe subscription that supports the project and sets an account's
+**hosting entitlement**: tier 1, 2 or 3, one, two or three **hosted servers**
+(`apps/novaworld_server/billing/`). Its prices come from the service's configuration,
+never from code. The own-machine add-on is a subscription of its own beside it.
+_Avoid_: plan, package, premium, donation, membership
+
+**Hosting entitlement**:
+How many **hosted servers** an account may have live at once: the larger of its
+**support tier**'s servers and an admin's comp grant (`players.comp_servers`, 0..16),
+plus how many of them may run on an own machine (the add-on's quantity, while a tier
+grants). Only an active player's account has one; a support tier whose payment is past
+due keeps the servers but starts no new one. Read from the service's cache of Stripe,
+whether or not billing is configured (`billing/entitlement.h`).
+_Avoid_: quota, allowance (in code; the site's meter may say "N of M servers used"), approval
+(the retired admin flag)
+
 **Machine**:
-The virtual machine a **hosted server** runs on, one per server (an EC2 instance,
-ADR 0053), which the NovaWorld service launches and terminates. Never "host": that word
-is the authoritative session side alone (**Host / Joiner**).
-_Avoid_: host, server (for the VM), box, node; "instance" alone (say "EC2 instance"
+A virtual machine **hosted servers** run on, one to K of them, each in a **slot** of its
+own (an EC2 instance, ADR 0053; a stand-in on the service's own machine for development):
+a **shared machine** or an **own machine**. The NovaWorld service launches it from the
+launch template of its kind, places servers on it, and ends it (`fleet_machines`:
+launching, booting, ready, draining, ending, ended or failed, and lost while its agent is
+silent); **opennova-hostd** runs its containers. Never "host": that word is the
+authoritative session side alone (**Host / Joiner**).
+_Avoid_: host, server (for the VM), box, node, pod; "instance" alone (say "EC2 instance"
 when naming the AWS resource)
+
+**Shared machine**:
+A **machine** that packs up to K **hosted servers** of any account (`ONNET_FLEET_SHARED_SLOTS`,
+12 to start), one per **slot**; servers go to the fullest one with a free slot, and one
+with no server left ends after a while.
+_Avoid_: pool, pod, cluster node
+
+**Own machine**:
+A **machine** that runs exactly one **hosted server**, its owner's, with the own-machine
+add-on (a paid monthly subscription beside the **support tier**): launched for that server,
+reserved for it (one slot, slot 0), and ended when it stops.
+_Avoid_: dedicated machine, dedicated server (retail's Serve Only term), private host
+
+**Slot**:
+One **hosted server**'s position on a **machine** (`hosted/slots.h`): slot k is the game's
+UDP port 32768 + k (open to everyone), the remote admin's TCP port 32800 + k (open to the
+service alone), the container's user 10001 + k and the working directory
+`/srv/slots/slot-k`. Two live servers never hold one slot.
+_Avoid_: seat, position (for the place on the machine), player slot (that is a match's)
+
+**opennova-hostd**:
+The machine agent (`apps/hostd`, target `opennova_hostd`): one per **machine**, it
+redeems the machine's one-time bootstrap token, then syncs with the service's internal
+listener every few seconds, reporting each container (its state, CPU, memory, its slot's
+egress) and running the containers the reply wants. It decides nothing itself.
+_Avoid_: daemon, node agent, kubelet
 
 **Title**:
 A NovaLogic game identity (JO, DFX2, DFX, BHD...): near-identical engines over different
@@ -524,8 +574,9 @@ The game data a **hosted server** runs on, with the title it speaks and the expa
 allows (ADR 0055): Joint Operations (`jop_2_consumer`, the base game or `jox01`), Delta
 Force Xtreme 2 (`dfx2_consumer`), or OpenNova's own data (`opennova_0_consumer`, JO's wire
 identity in a lobby of its own). Each maps to one `games` row, its lobby. A deployment says
-where each data set's files are, and the site offers only those it has; on a **machine** it
-is the `opennova-data` volume mounted at `/opt/game`.
+where each data set's files are, and the site offers only those it has; every cloud
+**machine** mounts each one read-only at `/opt/game/<data set>` (its own volume, labelled
+`od-<slug>`), and a server's container sees its own at `/opt/game`.
 _Avoid_: game (for the data), install (a retail install is where a data set's files come
 from), snapshot (one deployment's copy of a data set)
 

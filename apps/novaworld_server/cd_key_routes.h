@@ -1,6 +1,6 @@
 #pragma once
 
-// The CD keys' routes (cd_keys.h, migration 0015). The admin's /api routes,
+// The CD keys' routes (cd_keys.h). The admin's /api routes,
 // each behind WebAccess::require_admin (and ONNET_API_PROXY_ONLY like every
 // /api route):
 //
@@ -27,7 +27,7 @@
 #include "cd_keys.h"
 #include "web_access.h"
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 
 #include <crow.h>
 

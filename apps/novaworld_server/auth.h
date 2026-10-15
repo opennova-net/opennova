@@ -2,7 +2,7 @@
 
 #include "loggable.h"
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -34,15 +34,16 @@ struct UserRecord {
 	std::string nwh;
 	std::string nwhandle;
 	std::string account_status = "active";
-	std::string role = "player"; // players.role: "player" or "admin" (migration 0008)
-	// players.kind (migration 0011): "player" for an account a person registered,
+	std::string role = "player"; // players.role: "player" or "admin"
+	// players.kind: "player" for an account a person registered,
 	// "service" for a hosted server's own account (srv-<id>), which the website's
 	// login refuses and the admin users list hides.
 	std::string kind = "player";
-	// players.can_host (migration 0011): an admin approved the account for a
-	// hosted server.
-	bool can_host = false;
-	// players.credentials_gen (migration 0010), bumped by every update that ends
+	// players.comp_servers: the hosted servers an admin granted the account
+	// (0..16); its hosting entitlement is the larger of this and its support
+	// tier's servers (billing/entitlement.h).
+	int comp_servers = 0;
+	// players.credentials_gen, bumped by every update that ends
 	// the account's logins (update_revokes_sessions). What a login grants (a
 	// website session, a retail login's session row and pin, a known address)
 	// records the generation its password check read and counts only while the
@@ -108,7 +109,7 @@ std::optional<UserRecord> get_user_by_id(opennova::db::Database &db, int64_t id)
 // account is still at the credentials_gen the row was made under, so a
 // password reset or a status other than 'active' ends it even where nothing
 // deleted the row. nullopt for an empty or unknown tag. The account's status
-// is the caller's to check. Throws db::SqliteError.
+// is the caller's to check. Throws db::Error.
 std::optional<UserRecord> get_user_by_login_session_tag(
 		opennova::db::Database &db, const std::string &session_tag);
 
@@ -130,7 +131,7 @@ MutationResult update_server_status(opennova::db::Database &db,
 // it), written only while the account is active and still at
 // `credentials_gen`, the generation its password check (or pin) read, both
 // tested by the insert itself: false, with nothing written, once a reset or a
-// status change has committed since. Throws db::SqliteError.
+// status change has committed since. Throws db::Error.
 bool register_active_user_session(opennova::db::Database &db, int64_t user_id,
 		int64_t credentials_gen, const std::string &username, const std::string &session_tag,
 		const std::string &persistent_id, const std::string &remote_ip,
@@ -198,14 +199,15 @@ MutationResult update_user(opennova::db::Database &db, int64_t id,
 bool update_revokes_sessions(const UpdateUserParams &p);
 
 // The addresses an account logged in from with the right password, kept 30
-// days (login_addresses, migration 0008): the login brake's per-username cap
+// days (login_addresses): the login brake's per-username cap
 // spares them, so a stranger's failed logins cannot keep the owner out.
 // `address` is the brake's address key (rate_limiter.h address_key, an IPv6
 // address grouped to its /64). record_login_address remembers one only while
 // the account is still at `credentials_gen`, the generation its password check
-// read (false, nothing written, otherwise). Each throws db::SqliteError on a
+// read (false, nothing written, otherwise). Each throws db::Error on a
 // database failure.
 inline constexpr int kLoginAddressDays = 30;
+inline constexpr int64_t kLoginAddressSeconds = int64_t{ kLoginAddressDays } * 24 * 60 * 60;
 inline constexpr size_t kLoginAddressesPerUser = 32;
 bool record_login_address(opennova::db::Database &db, int64_t user_id, int64_t credentials_gen,
 		const std::string &address);
@@ -217,7 +219,7 @@ size_t prune_login_addresses(opennova::db::Database &db);
 // `username` the admin role, once. While any account is an admin it does
 // nothing, so a later boot can neither re-promote a deliberately demoted
 // admin nor promote whoever registered the name after the first admin was
-// made. Throws db::SqliteError on a database failure.
+// made. Throws db::Error on a database failure.
 struct BootstrapAdminResult {
 	enum class Outcome { Promoted, AdminExists, NoSuchAccount };
 	Outcome outcome = Outcome::NoSuchAccount;
@@ -236,7 +238,7 @@ uint64_t password_verifications();
 // (the race credentials_gen closes). Unset in the server.
 void set_password_accepted_hook(std::function<void(int64_t user_id)> hook);
 
-// --- Hosted servers' accounts (players.kind, players.can_host; migration 0011) ---
+// --- Hosted servers' accounts (players.kind, players.comp_servers) ---
 
 // The prefix of every service account's username and handle: "srv-" and the
 // hosted server's id. Reserved, case aside, so no person registers or renames
@@ -245,9 +247,10 @@ inline constexpr const char *kServiceUsernamePrefix = "srv-";
 bool is_service_username(std::string_view name);
 std::string service_username(int64_t hosted_server_id);
 
-// Sets a player's approval for a hosted server (players.can_host). not_found
-// for an unknown id and for a service account; a database failure is db_error.
-MutationResult set_can_host(opennova::db::Database &db, int64_t id, bool can_host);
+// Sets an admin's grant of hosted servers to a player (players.comp_servers):
+// invalid_field outside 0..16 (billing/tiers.h kMaxCompServers), not_found for an
+// unknown id and for a service account; a database failure is db_error.
+MutationResult set_comp_servers(opennova::db::Database &db, int64_t id, int comp_servers);
 
 // The supervisor's account for a hosted server: creates the service account
 // `username` (kind 'service', its handle the same, a random free PCID) with

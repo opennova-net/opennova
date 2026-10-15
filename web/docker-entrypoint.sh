@@ -24,6 +24,49 @@ fi
 chmod 640 "$HTPASSWD_FILE"
 chown nginx:nginx "$HTPASSWD_FILE"
 
+# Origin TLS (DEPLOY.md): with ORIGIN_TLS_CERT and ORIGIN_TLS_KEY set (each a
+# PEM, base64 on one line, as the host's env file carries them: the Cloudflare
+# Origin CA certificate infra/aws/edge.tf makes), both servers listen on 443
+# with them, and Cloudflare verifies this origin ("Full (strict)"). The two are
+# written to ORIGIN_TLS_DIR (a tmpfs in the prod overlay), the key owner-only.
+# Neither set: plain 80, as a local run of the image wants. One alone stops
+# the container.
+LISTEN_FILE="/etc/nginx/listen.conf"
+TLS_DIR="${ORIGIN_TLS_DIR:-/run/tls}"
+
+if [ -n "${ORIGIN_TLS_CERT:-}" ] && [ -n "${ORIGIN_TLS_KEY:-}" ]; then
+    mkdir -p "$TLS_DIR"
+    chmod 700 "$TLS_DIR"
+    old_umask="$(umask)"
+    umask 077
+    if ! printf '%s' "$ORIGIN_TLS_CERT" | base64 -d > "$TLS_DIR/origin.crt" 2>/dev/null \
+        || ! grep -q 'BEGIN CERTIFICATE' "$TLS_DIR/origin.crt"; then
+        echo "ERROR: ORIGIN_TLS_CERT is no base64 PEM certificate" >&2
+        exit 1
+    fi
+    if ! printf '%s' "$ORIGIN_TLS_KEY" | base64 -d > "$TLS_DIR/origin.key" 2>/dev/null \
+        || ! grep -q 'PRIVATE KEY' "$TLS_DIR/origin.key"; then
+        echo "ERROR: ORIGIN_TLS_KEY is no base64 PEM private key" >&2
+        exit 1
+    fi
+    umask "$old_umask"
+    {
+        printf 'listen 443 ssl;\n'
+        printf 'http2 on;\n'
+        printf 'ssl_certificate %s/origin.crt;\n' "$TLS_DIR"
+        printf 'ssl_certificate_key %s/origin.key;\n' "$TLS_DIR"
+        printf 'ssl_protocols TLSv1.2 TLSv1.3;\n'
+        printf 'ssl_session_cache shared:origin:1m;\n'
+    } > "$LISTEN_FILE"
+    echo "origin TLS: ON (:443, the Origin CA certificate)" >&2
+elif [ -n "${ORIGIN_TLS_CERT:-}" ] || [ -n "${ORIGIN_TLS_KEY:-}" ]; then
+    echo "ERROR: ORIGIN_TLS_CERT and ORIGIN_TLS_KEY go together" >&2
+    exit 1
+else
+    printf 'listen 80;\n' > "$LISTEN_FILE"
+    echo "origin TLS: OFF (:80; ORIGIN_TLS_CERT unset)" >&2
+fi
+
 # Edge authentication (DEPLOY.md): with EDGE_AUTH_SECRET set, this nginx forwards
 # /api/ only for requests carrying X-OpenNova-Edge: <secret>, which a Cloudflare
 # Transform Rule on this zone adds, so a request that reached this origin's port
@@ -84,6 +127,7 @@ if [ -n "${EDGE_AUTH_SECRET:-}" ]; then
     done
     {
         printf 'map_hash_bucket_size %s;\n' "$bucket"
+        # shellcheck disable=SC2016  # nginx's variables, written as they are
         printf 'map $http_x_opennova_edge $opennova_edge_refused {\n    default 1;\n'
         for secret in $secrets; do
             printf '    "%s" 0;\n' "$secret"

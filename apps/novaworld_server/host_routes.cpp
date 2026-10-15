@@ -304,7 +304,7 @@ crow::response HostRoutes::admin_hosts(const crow::request &req) {
 			}
 			entries.push_back(std::move(e));
 		}
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] GET /api/admin/hosts failed: %s\n", e.what());
 		return json_error(500, "db_error");
 	}
@@ -373,7 +373,7 @@ crow::response HostRoutes::admin_stop(const crow::request &req, uint64_t rid) {
 			if (hosted_server && hosted::is_live(hosted_server->state))
 				return stop_hosted(*db_conn, rid32, hosted_server->server_id, "stopped by an admin from its listing");
 		}
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/admin/hosts/%llu/stop lookup failed: %s\n",
 				static_cast<unsigned long long>(rid), e.what());
 		return json_error(500, "db_error");
@@ -449,7 +449,7 @@ crow::response HostRoutes::owner_hosts(const crow::request &req) {
 			e["roster"] = std::move(roster);
 			hosts.push_back(std::move(e));
 		}
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] GET /api/me/hosts failed: %s\n", e.what());
 		return json_error(500, "db_error");
 	}
@@ -501,7 +501,7 @@ crow::response HostRoutes::push_as_owner(const WebSessionUser &user, uint64_t ri
 				return json_error(409, "server_stopping", "this hosted server is being stopped");
 			}
 		}
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] owner %s lookup failed: %s\n", what, e.what());
 		return json_error(500, "db_error");
 	}

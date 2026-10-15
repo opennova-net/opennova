@@ -356,11 +356,15 @@ jobs:
             exit 1
           fi
 
-  # The same build on Linux, configured with the NovaWorld server's HTTP layer
-  # ON (the deploy target's flag set; it adds the Crow sources to the server
-  # target and changes no other object), so this job also covers the net leg
-  # .github/workflows/net-linux.yml runs for the NovaWorld images workflow.
-  # The two share the linux-root compiler cache.
+  # The same build on Linux, configured with the NovaWorld service and its
+  # HTTP layer ON (the deploy target's flag set: the service target, the
+  # server app and their tests, which the Windows jobs leave out; the Crow
+  # sources join the server target and change no other object), so this job
+  # also covers the net leg .github/workflows/net-linux.yml runs for the
+  # NovaWorld images workflow. The two share the linux-root compiler cache.
+  # The service's database tests make a database per case on the PostgreSQL
+  # service container below (OPENNOVA_TEST_PG); without it they skip, which
+  # the core suite fails.
   test-linux:
     runs-on: ubuntu-latest
     needs: [changes]
@@ -372,12 +376,29 @@ jobs:
       CMAKE_GENERATOR: Ninja
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       # The root CMake project builds without godot-cpp or GUT, so the
       # submodules stay uninitialized.
       - uses: actions/checkout@v4
         with:
           lfs: false   # scoped below: the tests read fixtures/ only
+
+      # The service's client library (libpq; CMake's FindPostgreSQL).
+      - name: Install libpq
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpq-dev
 
       - name: Pull Git LFS assets (fixtures/ only)
         shell: bash
@@ -393,7 +414,10 @@ jobs:
 
       - name: Build and test
         shell: bash
-        run: scripts/build.sh --no-godot --suite core --cmake-arg -DBUILD_NOVAWORLD_HTTP=ON
+        run: >-
+          scripts/build.sh --no-godot --suite core
+          --cmake-arg -DOPENNOVA_NOVAWORLD_SERVICE=ON --cmake-arg -DBUILD_NOVAWORLD_HTTP=ON
+          --cmake-arg -DOPENNOVA_TEST_PG=postgresql://postgres:postgres@127.0.0.1:5432/postgres
 
       - name: sccache stats
         if: always()
@@ -510,7 +534,7 @@ jobs:
           flavour: web-gdext
           mode: restore
 
-      # The image's CMake predates the sqlite fetch's options.
+      # The image's CMake predates the rgbcx fetch's options.
       - name: Install CMake + Ninja
         run: pip install --no-cache-dir "cmake>=3.28,<4" ninja
 
@@ -982,8 +1006,9 @@ jobs:
     uses: ./.github/workflows/package-blender-windows.yml
 
   # The native apps (opennova-3di, opennova-extract, opennova-lan-probe,
-  # opennova-parity, opennova-serve, opennova-wire and the NovaWorld server)
-  # in one zip, built for PRs and tagged releases alike.
+  # opennova-parity, opennova-serve and opennova-wire) in one zip, built for
+  # PRs and tagged releases alike. The NovaWorld server is Linux-only (its
+  # container image).
   package-apps-windows:
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
@@ -1039,7 +1064,7 @@ jobs:
               `| Runtime: opennova.exe with the placeholder menu; PLAY RETAIL plays your own Joint Operations install | [opennova-game-windows.zip](${process.env.GAME_URL}) |`,
               `| Editor: opennova-editor.exe with the runtime it plays a project with (experimental) | [opennova-editor-windows.zip](${process.env.EDITOR_URL}) |`,
               `| Blender 5.0+ add-on for Windows: import/export .3di models and their .adm/.bad animations; install the zip from disk | [opennova-blender-addon-windows.zip](${process.env.BLENDER_URL}) |`,
-              `| Apps: opennova-3di, opennova-extract, opennova-lan-probe, opennova-parity, opennova-serve (the headless game server), opennova-wire and the NovaWorld server (gate and session listeners) | [opennova-apps-windows.zip](${process.env.APPS_URL}) |`,
+              `| Apps: opennova-3di, opennova-extract, opennova-lan-probe, opennova-parity, opennova-serve (the headless game server) and opennova-wire | [opennova-apps-windows.zip](${process.env.APPS_URL}) |`,
               `| Switcher: opennova-switcher.exe, a tray app that switches retail Joint Operations between OpenNova's NovaWorld and NovaLogic's through the hosts file; run it as administrator | [opennova-switcher-windows.zip](${process.env.SWITCHER_URL}) |`,
               '',
               'Downloading requires a GitHub login. Artifacts are removed after 90 days. This comment updates on each successful build.',

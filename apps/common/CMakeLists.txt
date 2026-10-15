@@ -1,5 +1,6 @@
 add_library(opennova_app_common STATIC
     admin_tcp_server.cpp
+    command_runner.cpp   # a command-line tool from an argv array, no shell (base/proc)
     net_http.cpp
     net_sockets.cpp
 )

@@ -11,7 +11,7 @@
 #include <net/napi/tlv.h>
 #include <net/novacrypto/nwu.h>
 #include <net/novaworld/connection/manager.h>
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/lobby_session.h>
 #include <net/npwire/cs_config.h>
@@ -37,6 +37,7 @@
 #include <cstring>
 #include <deque>
 #include <exception>
+#include <future>
 #include <iterator>
 #include <mutex>
 #include <optional>
@@ -391,24 +392,32 @@ bool NwUdpListener::start(const ServerConfig &config) {
 
 	// The receive thread's own connection (Database is single-threaded): the
 	// lobby session's host persistence and the maintenance lookup run on it.
-	// Leased here so a database that cannot be opened stops the boot.
-	std::optional<db::ConnectionPool::Lease> db_conn;
-	if (db_pool_) {
-		try {
-			db_conn.emplace(db_pool_->acquire());
-		} catch (const db::SqliteError &e) {
-			std::fprintf(stderr, "[nwudp] db open failed: %s\n", e.what());
-			return false;
-		}
-	}
-
+	// The thread leases it itself (a lease stays on the thread that acquired
+	// it), and start() waits for the lease, so a database that cannot be
+	// opened stops the boot.
 	stop_requested_.store(false);
-	initialize_jo_host();
-	running_.store(true);
-	worker_ = std::thread([this, socket = std::move(socket),
-	                       db_conn = std::move(db_conn)]() mutable {
+	std::promise<bool> leased;
+	std::future<bool> lease_taken = leased.get_future();
+	worker_ = std::thread([this, socket = std::move(socket), leased = std::move(leased)]() mutable {
+		std::optional<db::ConnectionPool::Lease> db_conn;
+		if (db_pool_) {
+			try {
+				db_conn.emplace(db_pool_->acquire());
+			} catch (const db::Error &e) {
+				std::fprintf(stderr, "[nwudp] db open failed: %s\n", e.what());
+				leased.set_value(false);
+				return;
+			}
+		}
+		initialize_jo_host();
+		leased.set_value(true);
 		run_loop(std::move(socket), std::move(db_conn));
 	});
+	if (!lease_taken.get()) {
+		worker_.join();
+		return false;
+	}
+	running_.store(true);
 	std::printf("[nwudp] listening on UDP :%u\n",
 	            static_cast<unsigned>(bound_port_));
 	return true;
@@ -421,7 +430,7 @@ void NwUdpListener::stop() {
 	reset_per_run_state("listener-stop");
 }
 
-void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason) {
+void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason, db::Database *db) {
 	bool was_hosting = false;
 	uint32_t rid = 0;
 	{
@@ -451,21 +460,28 @@ void NwUdpListener::erase_lobby_state(const PeerAddr &peer, const char *reason) 
 
 	// Phase I.2: drop the matching row(s) from active_hosts +
 	// host_players. Hosting peer is keyed by RID (drops the host row);
-	// joining peer's own host_players entry is keyed by peer addr. The
-	// connection is leased here, not the receive thread's: this runs on that
-	// thread and on the main thread alike.
+	// joining peer's own host_players entry is keyed by peer addr. On the
+	// calling thread's own connection (this runs on the receive thread and
+	// on main alike): the caller's, else the one its lease holds, else one
+	// leased for the call.
 	if (db_pool_) {
 		try {
-			auto db_conn = db_pool_->acquire();
+			std::optional<db::ConnectionPool::Lease> lease;
+			if (db == nullptr)
+				db = db_pool_->leased_by_this_thread();
+			if (db == nullptr) {
+				lease.emplace(db_pool_->acquire());
+				db = lease->get();
+			}
 			// The DB key MUST be the same spelling add_player stored, or
 			// remove_player_by_peer stops matching and host_players rows leak
 			// until the host row cascades. Both sides now render through
 			// peer_addr_ip_to_string, so they cannot drift apart.
 			const std::string ip_key = peer_addr_ip_to_string(peer);
 			if (was_hosting && rid != 0) {
-				hostdb::remove_host_by_rid(*db_conn, rid);
+				hostdb::remove_host_by_rid(*db, rid);
 			}
-			hostdb::remove_player_by_peer(*db_conn, ip_key, peer.port);
+			hostdb::remove_player_by_peer(*db, ip_key, peer.port);
 		} catch (const std::exception &e) {
 			std::fprintf(stderr, "[lobby] WARN db cleanup on erase_lobby_state: %s\n", e.what());
 		}
@@ -634,6 +650,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 	uint8_t rx[4096];
 	bool receive_batch_active = false;
 	while (!stop_requested_.load()) {
+		loop_turns_.fetch_add(1, std::memory_order_relaxed);
 		if (!receive_batch_active) {
 			const auto now = PumpClock::now();
 			if (now >= next_pump) {
@@ -862,7 +879,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			// Any non-identical auth for this endpoint is a new logical
 			// connection. Retire its prior lobby/DB state before installing a
 			// fresh key set and fresh sequence frontier.
-			erase_lobby_state(peer, "reauth");
+			erase_lobby_state(peer, "reauth", db_conn ? db_conn->get() : nullptr);
 
 			// A re-join that counted a disconnect takes back the identity its dropped
 			// connection parked; any other join from the address discards it.
@@ -1225,7 +1242,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			// erase_lobby_state via main.cpp's wiring (G.6).
 			// Belt-and-braces erase here too in case the handler isn't
 			// installed.
-			erase_lobby_state(peer, "goodbye");
+			erase_lobby_state(peer, "goodbye", db_conn ? db_conn->get() : nullptr);
 			break;
 		}
 

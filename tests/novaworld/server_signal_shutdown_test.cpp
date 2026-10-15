@@ -1,12 +1,12 @@
 // opennova-novaworld-server stops in order on SIGINT (Ctrl+C) and on SIGTERM
-// (what `docker stop` sends). The real binary runs as a child process on a
-// SQLite file in this run's temp directory under backend/migrations, with every
-// port 0: the OS picks each one as the listener binds it, and the test reads the
-// HTTP port back from the "[http] listening on :<port>" line. Once it is ready it
-// gets the signal, and it must exit 0 within the deadline, having logged its
-// shutdown legs in order (the HTTP listener, then the gate and NW UDP receive
-// threads) and closed every database connection: the WAL file goes with the
-// last close, and a process killed instead leaves it behind.
+// (what `docker stop` sends). The real binary runs as a child process on an
+// empty database of its own (common/test_database.h), which it migrates from
+// backend/migrations, with every port 0: the OS picks each one as the listener
+// binds it, and the test reads the HTTP port back from the "[http] listening on
+// :<port>" line. Once it is ready it gets the signal, and it must exit 0 within
+// the deadline, having logged its shutdown legs in order (the HTTP listener,
+// then the gate and NW UDP receive threads) and closed every database
+// connection: none is left on its database once it has exited.
 //
 // With the HTTP layer (the server built with BUILD_NOVAWORLD_HTTP, as the Linux
 // image is) the test first waits for Crow to answer, then holds a half-sent
@@ -39,6 +39,7 @@
 
 #include "common/file_io.h"
 #include "common/temp_dir.h"
+#include "common/test_database.h"
 #include "common/test_expect.h"
 
 #include <chrono>
@@ -95,7 +96,7 @@ struct ServerProcess {
 	}
 
 	// `binary` with exactly `env` as its environment (nothing inherited, so a
-	// shell's ONNET_* or DATABASE_PATH cannot leak in), run in `cwd`.
+	// shell's ONNET_* or DATABASE_* cannot leak in), run in `cwd`.
 	bool spawn(const std::string &binary, const std::vector<std::string> &env,
 	           const std::string &cwd, const std::string &log_path) {
 		// Everything the child touches is built before the fork: between fork
@@ -194,17 +195,17 @@ bool logged_in_order(const std::string &log, const std::vector<const char *> &li
 	return true;
 }
 
-// The server's environment: every port 0 (the OS picks each one), the database
-// in the temp directory, the repo's migrations and seed, and web roots that do
-// not exist (the HTTP layer serves its API and 404s the rest).
-std::vector<std::string> server_env(const test_temp::TempDir &temp, const std::string &db_path) {
+// The server's environment: every port 0 (the OS picks each one), the test's
+// database, the repo's migrations and seed, and web roots that do not exist
+// (the HTTP layer serves its API and 404s the rest).
+std::vector<std::string> server_env(const test_temp::TempDir &temp, const std::string &db_url) {
 	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
 	return {
 		"ONNET_PUBLIC_HOST=127.0.0.1",
 		"ONNET_GATE_UDP_PORT=0",
 		"ONNET_NW_UDP_PORT=0",
 		"ONNET_HTTP_PORT=0",
-		"DATABASE_PATH=" + db_path,
+		"DATABASE_URL=" + db_url,
 		"MIGRATIONS_DIR=" + (source_dir / "backend" / "migrations").string(),
 		"SEED_DIR=" + (source_dir / "backend" / "seed").string(),
 		"WEB_DIST_DIR=" + temp.file("web_dist"),
@@ -244,11 +245,37 @@ uint16_t logged_port(const std::string &log, const std::string &prefix) {
 	return port > 0 && port <= 65535 ? static_cast<uint16_t>(port) : 0;
 }
 
+// The connections the server left on its database, waited out for a moment (a
+// backend leaves pg_stat_activity just after its client closes).
+int64_t connections_left(const test_db::TestDatabase &database) {
+	opennova::db::Database admin(test_db::options_for(test_db::server_url()));
+	int64_t left = -1;
+	for (int i = 0; i < 50; ++i) {
+		left = admin.query("SELECT COUNT(*) FROM pg_stat_activity WHERE datname = $1;",
+				{ opennova::db::BindValue(database.name()) })[0]
+					   .as_int(0)
+					   .value_or(-1);
+		if (left == 0) break;
+		std::this_thread::sleep_for(std::chrono::milliseconds(40));
+	}
+	return left;
+}
+
+// backend/migrations' files: what a fresh database's boot applies.
+size_t migration_count() {
+	size_t count = 0;
+	for (const auto &e : std::filesystem::directory_iterator(
+				 std::filesystem::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations"))
+		if (e.path().extension() == ".sql") ++count;
+	return count;
+}
+
 int exercise_shutdown(ServerProcess &server, const std::string &binary,
-                      const test_temp::TempDir &temp, const std::string &log_path,
-                      int signal_number) {
-	const std::string db_path = temp.file("novaworld.db");
-	if (!boot(server, binary, server_env(temp, db_path), temp, log_path)) return 1;
+                      const test_temp::TempDir &temp, const test_db::TestDatabase &database,
+                      const std::string &log_path, int signal_number) {
+	if (!boot(server, binary, server_env(temp, database.conninfo()), temp, log_path)) return 1;
+	TEST_EXPECT(read_text(log_path).find("[boot] migrations: " + std::to_string(migration_count()) +
+					" applied, 0 skipped") != std::string::npos);
 
 #ifdef OPENNOVA_HTTP_ENABLED
 	const uint16_t http_port = logged_port(read_text(log_path), kHttpLine);
@@ -292,10 +319,9 @@ int exercise_shutdown(ServerProcess &server, const std::string &binary,
 		"[nwudp] loop exiting",
 		"==== opennova-novaworld-server stopped ====",
 	}));
-	// Every connection closed: the last close checkpoints the WAL and removes it.
-	TEST_EXPECT(std::filesystem::exists(db_path));
-	TEST_EXPECT(!std::filesystem::exists(db_path + "-wal"));
-	std::printf("  exit 0 %lld ms after the signal, shutdown in order, WAL closed\n",
+	// Every connection closed.
+	TEST_EXPECT(connections_left(database) == 0);
+	std::printf("  exit 0 %lld ms after the signal, shutdown in order, connections closed\n",
 	            static_cast<long long>(exit_ms));
 	return 0;
 }
@@ -316,9 +342,9 @@ bool catches(pid_t pid, int signal_number) {
 // shutdown pending (as a stuck one would be), and the second signal ends the
 // process at once.
 int exercise_second_signal(ServerProcess &server, const std::string &binary,
-                           const test_temp::TempDir &temp, const std::string &log_path,
-                           int signal_number) {
-	std::vector<std::string> env = server_env(temp, temp.file("novaworld.db"));
+                           const test_temp::TempDir &temp, const test_db::TestDatabase &database,
+                           const std::string &log_path, int signal_number) {
+	std::vector<std::string> env = server_env(temp, database.conninfo());
 	env.push_back("TICK_INTERVAL_MS=60000");
 	if (!boot(server, binary, env, temp, log_path)) return 1;
 	TEST_EXPECT(catches(server.pid, signal_number));
@@ -403,9 +429,9 @@ int session_web_domain(uint16_t port, std::string &web_domain) {
 // Every port 0: what the server advertises names the ports its listeners
 // bound, read back from their "listening" lines. Then the signal stops it.
 int exercise_sibling_ports(ServerProcess &server, const std::string &binary,
-                           const test_temp::TempDir &temp, const std::string &log_path,
-                           int signal_number) {
-	if (!boot(server, binary, server_env(temp, temp.file("novaworld.db")), temp, log_path)) return 1;
+                           const test_temp::TempDir &temp, const test_db::TestDatabase &database,
+                           const std::string &log_path, int signal_number) {
+	if (!boot(server, binary, server_env(temp, database.conninfo()), temp, log_path)) return 1;
 	const std::string log = read_text(log_path);
 	const uint16_t gate_port = logged_port(log, kGateLine);
 	const uint16_t nw_port = logged_port(log, kNwUdpLine);
@@ -451,18 +477,20 @@ int exercise_sibling_ports(ServerProcess &server, const std::string &binary,
 }
 
 using Exercise = int (*)(ServerProcess &, const std::string &, const test_temp::TempDir &,
-                         const std::string &, int);
+                         const test_db::TestDatabase &, const std::string &, int);
 
 int run_case(const std::string &binary, Exercise exercise, int signal_number, const char *name) {
-	// The TempDir outlives the child: ServerProcess is destroyed (and the child
-	// killed, on failure) before the directory goes.
+	// The TempDir and the database outlive the child: ServerProcess is
+	// destroyed (and the child killed, on failure) before they go. The
+	// database is empty: the server migrates and seeds it at boot.
 	test_temp::TempDir temp((std::string("nw_signal_") + name).c_str());
+	const test_db::TestDatabase database({ /*migrate=*/false });
 	const std::string log_path = temp.file("server.log");
 	std::printf("%s:\n", name);
 	int rc = 0;
 	{
 		ServerProcess server;
-		rc = exercise(server, binary, temp, log_path, signal_number);
+		rc = exercise(server, binary, temp, database, log_path, signal_number);
 	}
 	if (rc != 0) {
 		std::fprintf(stderr, "FAIL: %s\n---- server log ----\n%s---- end ----\n", name,
@@ -474,6 +502,7 @@ int run_case(const std::string &binary, Exercise exercise, int signal_number, co
 } // namespace
 
 int main(int argc, char **argv) {
+	test_db::init(argc, argv);
 	if (argc < 2) {
 		std::fprintf(stderr, "usage: %s <opennova-novaworld-server>\n", argv[0]);
 		return 2;
