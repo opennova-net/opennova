@@ -6447,6 +6447,15 @@ int test_admin_user_detail(Harness &h) {
 	}
 	TEST_EXPECT(ana_seen && bea_seen);
 	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), bea->id, 0).ok);
+	// An id past 32 bits names no account (it is never cut down to another's).
+	const std::string wide = std::to_string((int64_t{ 1 } << 32) + ana->id);
+	reply = h.send("PUT", "/api/admin/users/" + wide, { kBearer, kJson }, "{\"nwh\":\"7\"}");
+	TEST_EXPECT(reply.code == 404);
+	TEST_EXPECT(h.send("PUT", "/api/admin/users/" + wide + "/game-access", { kBearer, kJson },
+						"{\"game_slug\":\"jop_2_consumer\",\"status\":\"active\",\"exp_bits\":\"3\"}")
+						.code != 200);
+	TEST_EXPECT(h.send("DELETE", "/api/admin/users/" + wide, { kBearer }).code == 404);
+	TEST_EXPECT(nws::get_user_by_id(*h.pool.acquire(), ana->id)->nwh == ana->nwh);
 	return 0;
 }
 

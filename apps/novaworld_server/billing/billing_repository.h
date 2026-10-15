@@ -15,6 +15,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -81,6 +82,9 @@ std::vector<SubscriptionRow> subscriptions_of_customer(db::Database &db, const s
 std::optional<SubscriptionRow> find_subscription(db::Database &db, const std::string &stripe_subscription_id);
 // Every subscription row, newest status first (the admin's overview).
 std::vector<SubscriptionRow> list_subscriptions(db::Database &db);
+// Every subscription row with an account, by account, each account's in
+// subscriptions_of's order (the admin's users list, in one read).
+std::map<int64_t, std::vector<SubscriptionRow>> subscriptions_by_account(db::Database &db);
 // Every subscription of the customer still not ended (any status but canceled
 // and incomplete_expired) whose id is not in `keep` goes to `status` (a
 // customer Stripe deleted: canceled), each with its status_since moved; how

@@ -187,6 +187,16 @@ std::vector<SubscriptionRow> list_subscriptions(db::Database &db) {
 	return query_subscriptions(db, "ORDER BY status_since DESC, stripe_subscription_id;", {});
 }
 
+std::map<int64_t, std::vector<SubscriptionRow>> subscriptions_by_account(db::Database &db) {
+	std::map<int64_t, std::vector<SubscriptionRow>> out;
+	for (SubscriptionRow &row : query_subscriptions(db,
+				 "WHERE user_id IS NOT NULL ORDER BY user_id, updated_at DESC, stripe_subscription_id;", {})) {
+		const int64_t user = *row.user_id;
+		out[user].push_back(std::move(row));
+	}
+	return out;
+}
+
 size_t end_subscriptions_of_customer(db::Database &db, const std::string &stripe_customer_id,
 		const std::vector<std::string> &keep, const std::string &status) {
 	size_t ended = 0;

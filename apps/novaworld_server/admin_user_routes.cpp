@@ -8,6 +8,7 @@
 #include "http_json.h"
 
 #include <cstdio>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -35,9 +36,8 @@ crow::json::wvalue entitlement_json(const billing::Entitlement &e, bool full) {
 	return out;
 }
 
-} // namespace
-
-crow::json::wvalue user_to_json(db::Database &db, const UserRecord &u) {
+// A user row as JSON with its entitlement's server count already read.
+crow::json::wvalue user_json(const UserRecord &u, int max_servers) {
 	crow::json::wvalue e;
 	e["id"]       = u.id;
 	e["username"] = u.username;
@@ -47,8 +47,14 @@ crow::json::wvalue user_to_json(db::Database &db, const UserRecord &u) {
 	e["account_status"] = u.account_status;
 	e["role"]     = u.role;
 	e["comp_servers"] = u.comp_servers;
-	e["max_servers"] = billing::entitlement_of(db, u.id, billing::unix_now()).max_servers;
+	e["max_servers"] = max_servers;
 	return e;
+}
+
+} // namespace
+
+crow::json::wvalue user_to_json(db::Database &db, const UserRecord &u) {
+	return user_json(u, billing::entitlement_of(db, u.id, billing::unix_now()).max_servers);
 }
 
 void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
@@ -57,19 +63,34 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	// GET /api/admin/users — list every player (no password_hash), each with
 	// its hosting entitlement ({max_servers, source, tier}), its live hosted
 	// servers (live_servers) and its support tier's Stripe status
-	// (subscription_status, null for none).
+	// (subscription_status, null for none). Three reads whatever the count:
+	// the accounts, every subscription and every live server.
 	CROW_ROUTE(app, "/api/admin/users").methods("GET"_method)(
 	    [this](const crow::request &req) {
 		auto caller = access_.require_admin(req);
 		if (caller.refusal) return std::move(*caller.refusal);
 		auto db_conn = pool_.acquire();
+		db::ReadSnapshot snapshot(*db_conn);
 		const int64_t now = billing::unix_now();
+		const auto subscriptions = billing::subscriptions_by_account(*db_conn);
+		static const std::vector<billing::SubscriptionRow> kNoSubscriptions;
+		std::map<int64_t, int> live;
+		for (const hosted::HostedServer &s : hosted::list_live(*db_conn)) {
+			if (s.owner_user_id) ++live[*s.owner_user_id];
+		}
 		std::vector<crow::json::wvalue> arr;
 		for (const auto &u : list_users(*db_conn)) {
-			crow::json::wvalue e = user_to_json(*db_conn, u);
-			const billing::Entitlement entitlement = billing::entitlement_of(*db_conn, u.id, now);
+			billing::AccountFacts facts;
+			facts.kind = u.kind;
+			facts.account_status = u.account_status;
+			facts.comp_servers = u.comp_servers;
+			const auto rows = subscriptions.find(u.id);
+			const billing::Entitlement entitlement =
+					billing::entitlement_from(facts, rows == subscriptions.end() ? kNoSubscriptions : rows->second, now);
+			crow::json::wvalue e = user_json(u, entitlement.max_servers);
 			e["entitlement"] = entitlement_json(entitlement, false);
-			e["live_servers"] = hosted::count_live_of(*db_conn, u.id);
+			const auto owned = live.find(u.id);
+			e["live_servers"] = owned == live.end() ? 0 : owned->second;
 			if (entitlement.status.empty())
 				e["subscription_status"] = nullptr;
 			else
@@ -169,7 +190,7 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	// (billing/entitlement.h): Stripe would bill an account that is gone, so it
 	// is canceled first.
 	CROW_ROUTE(app, "/api/admin/users/<int>").methods("DELETE"_method)(
-	    [this](const crow::request &req, int id) {
+	    [this](const crow::request &req, int64_t id) {
 		auto caller = access_.require_admin(req);
 		if (caller.refusal) return std::move(*caller.refusal);
 		auto db_conn = pool_.acquire();
@@ -195,7 +216,7 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	// left untouched. password (plaintext) triggers a fresh bcrypt hash; role
 	// takes "player" or "admin" (anything else is a 400 invalid_field).
 	CROW_ROUTE(app, "/api/admin/users/<int>").methods("PUT"_method)(
-	    [this](const crow::request &req, int id) {
+	    [this](const crow::request &req, int64_t id) {
 		auto caller = access_.require_admin(req);
 		if (caller.refusal) return std::move(*caller.refusal);
 		auto body = JsonBody::parse(req.body);
@@ -265,7 +286,7 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 
 	// PUT /api/admin/users/<id>/game-access — per-game expansion/access gate.
 	CROW_ROUTE(app, "/api/admin/users/<int>/game-access").methods("PUT"_method)(
-	    [this](const crow::request &req, int id) {
+	    [this](const crow::request &req, int64_t id) {
 		auto caller = access_.require_admin(req);
 		if (caller.refusal) return std::move(*caller.refusal);
 		auto body = JsonBody::parse(req.body);
