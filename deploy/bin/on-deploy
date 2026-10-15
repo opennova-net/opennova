@@ -643,12 +643,17 @@ secrets_sync() {
       --value "file://$value_file" --overwrite >/dev/null \
       || { rm -f "$value_file"; die "writing $SSM_PREFIX/secret/$RT_NAME failed"; }
     rm -f "$value_file"
+    # The deployment's tag, as on everything the stack makes (put-parameter
+    # takes no tags with --overwrite).
+    aws ssm add-tags-to-resource --resource-type Parameter --resource-id "$SSM_PREFIX/secret/$RT_NAME" \
+      --tags "Key=opennova:deployment,Value=$(hosted_deployment_tag)" >/dev/null \
+      || die "tagging $SSM_PREFIX/secret/$RT_NAME failed"
     synced+=("$RT_NAME")
     log "  $RT_NAME"
   done < "$tpl"
   # What SSM holds that the vault no longer names.
   local names name stale=()
-  names="$(aws ssm get-parameters-by-path --path "$SSM_PREFIX/secret/" --recursive \
+  names="$(aws ssm get-parameters-by-path --path "$SSM_PREFIX/secret" --recursive \
              --query 'Parameters[].Name' --output text)" || die "listing $SSM_PREFIX/secret/ failed"
   for name in $names; do
     name="${name##*/}"

@@ -147,6 +147,18 @@ run "adopted_eip" {
     error_message = "the outputs name the adopted address and the fixed private one"
   }
   assert {
+    condition = (
+      length(aws_ec2_tag.service_eip) == 1 && aws_ec2_tag.service_eip[0].key == "opennova:deployment" &&
+      aws_ec2_tag.service_eip[0].value == "opennova-server" &&
+      aws_instance.service.root_block_device[0].tags["opennova:deployment"] == "opennova-server"
+    )
+    error_message = "the adopted address and the instance's root volume carry the deployment's tag"
+  }
+  assert {
+    condition     = aws_iam_role.service.permissions_boundary == "arn:aws:iam::123456789012:policy/opennova-role-boundary"
+    error_message = "the service role carries the stack's role boundary"
+  }
+  assert {
     condition     = length(aws_network_interface.service.private_ips) == 1 && contains(aws_network_interface.service.private_ips, "10.44.0.10") && aws_network_interface.service.subnet_id == aws_subnet.public["a"].id
     error_message = "the network interface holds 10.44.0.10 in public subnet a"
   }

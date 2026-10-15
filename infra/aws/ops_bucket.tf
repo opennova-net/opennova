@@ -1,6 +1,5 @@
 # ---------------------------------------------------------------------------
-# The operations bucket and the account's S3 public access block, both
-# account-wide: prod (the default workspace) owns them, another deployment
+# The operations bucket, account-wide: prod (the default workspace) owns it, another deployment
 # uses them by name. The bucket holds, per deployment, the release bundles
 # (releases/<deployment>/<id>.tar.gz and its manifest <id>.json, which `app
 # deploy` uploads and the host's converge downloads) and the database dumps
@@ -8,14 +7,16 @@
 # otherwise). Its name is the one the single-host stack's backups bucket had.
 # ---------------------------------------------------------------------------
 
-# The account-wide S3 public access block: every bucket here is private.
-resource "aws_s3_account_public_access_block" "this" {
-  count = local.manage_shared ? 1 : 0
+# The account-wide S3 public access block is not OpenNova's: the account holds
+# other projects, and an account-wide switch here would undo theirs. Forgotten,
+# never destroyed (the setting stays as it is); the ops bucket's own block keeps
+# it private.
+removed {
+  from = aws_s3_account_public_access_block.this
 
-  block_public_acls       = true
-  block_public_policy     = true
-  ignore_public_acls      = true
-  restrict_public_buckets = true
+  lifecycle {
+    destroy = false
+  }
 }
 
 resource "aws_s3_bucket" "ops" {

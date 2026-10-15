@@ -68,7 +68,11 @@ data "aws_partition" "current" {}
 
 locals {
   account_id = data.aws_caller_identity.current.account_id
-  partition  = data.aws_partition.current.partition
+  # Every role the stack makes carries this boundary (infra/aws/iam/opennova-role-boundary.json,
+  # made by an admin, outside Terraform): the deploy user may create and change opennova-* roles
+  # only under it, so no role it writes can hold more than OpenNova's own resources.
+  role_boundary_arn = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/opennova-role-boundary"
+  partition         = data.aws_partition.current.partition
 
   # The host's fixed private address in public subnet a.
   service_private_ip = cidrhost(local.public_subnets.a.cidr, var.service_private_ip_host)
@@ -165,6 +169,15 @@ data "aws_eip" "service" {
   }
 }
 
+# The adopted address carries the deployment's tag like everything the stack
+# makes (the provider's default tags reach only resources Terraform manages).
+resource "aws_ec2_tag" "service_eip" {
+  count       = local.adopt_eip ? 1 : 0
+  resource_id = data.aws_eip.service[0].id
+  key         = "opennova:deployment"
+  value       = local.hosted_deployment
+}
+
 # Another deployment gets one of its own. Prod never makes one: its address is
 # the one retail clients use, so a prod plan that names none stops here rather
 # than give prod a new address (and re-point the association at it).
@@ -248,8 +261,10 @@ resource "aws_instance" "service" {
     encrypted             = true
     delete_on_termination = true
 
+    # A root volume takes no provider default tags: the deployment's, spelled out.
     tags = merge(var.tags, {
-      Name = "${local.name}-service"
+      Name                  = "${local.name}-service"
+      "opennova:deployment" = local.hosted_deployment
     })
   }
 
@@ -290,8 +305,9 @@ data "aws_iam_policy_document" "ec2_assume_role" {
 }
 
 resource "aws_iam_role" "service" {
-  name               = "${local.name}-service"
-  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
+  name                 = "${local.name}-service"
+  assume_role_policy   = data.aws_iam_policy_document.ec2_assume_role.json
+  permissions_boundary = local.role_boundary_arn
 
   tags = merge(var.tags, {
     Name = "${local.name}-service"

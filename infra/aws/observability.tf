@@ -329,10 +329,8 @@ resource "aws_cloudwatch_metric_alarm" "healthz" {
 # Explorer sees the tag once it is an active cost allocation tag (DEPLOY.md,
 # "Budgets"); until then these budgets read zero.
 locals {
-  budget_tag_filter = [
-    for d in concat([local.hosted_deployment], [for o in var.edge_other_deployments : "${var.instance_name}-${o}"]) :
-    format("user:opennova:deployment$%s", d)
-  ]
+  opennova_deployment_tags = concat([local.hosted_deployment], [for o in var.edge_other_deployments : "${var.instance_name}-${o}"])
+  budget_tag_filter        = [for d in local.opennova_deployment_tags : format("user:opennova:deployment$%s", d)]
 }
 
 resource "aws_budgets_budget" "monthly_cost" {
@@ -392,10 +390,19 @@ resource "aws_budgets_budget" "egress" {
 }
 
 resource "aws_ce_anomaly_monitor" "services" {
-  count             = local.manage_shared && var.cost_anomaly_monitor ? 1 : 0
-  name              = "opennova-services"
-  monitor_type      = "DIMENSIONAL"
-  monitor_dimension = "SERVICE"
+  count        = local.manage_shared && var.cost_anomaly_monitor ? 1 : 0
+  name         = "opennova-services"
+  monitor_type = "CUSTOM"
+  # OpenNova's deployments' tag alone: the account holds other projects, whose
+  # anomalies are not OpenNova's to email (and an account-wide AWS-services
+  # monitor is one per account).
+  monitor_specification = jsonencode({
+    Tags = {
+      Key          = "opennova:deployment"
+      Values       = local.opennova_deployment_tags
+      MatchOptions = ["EQUALS"]
+    }
+  })
 }
 
 resource "aws_ce_anomaly_subscription" "email" {
