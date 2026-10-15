@@ -1,12 +1,10 @@
-// The tool kit (ADR 0046 d11): the small pieces the windows on the pass draw with, the game's dev
-// tools and the OpenNova Editor's alike. A row of controls that wraps whole controls instead of running
+// The tool kit (ADR 0046 d11): the small pieces the windows on the pass draw with. A row of controls that wraps whole controls instead of running
 // past the window's edge; a button whose tooltip says what it does, or while it cannot act, why not; the
 // tools of a list's selected record; a path's field with its Browse...; a filter box; a control over a
 // value its owner holds; text cut to its cell with the whole of it in a tooltip; the one tooltip every
 // window's hover text goes through; and what a view shows when it has nothing to list.
 //
-// The editor's kit (editor/ui/ui_kit.h) is this one plus the marks of the editor's own types. ImGui-free
-// like every window's header: ui_kit.cpp draws, built with the pass (OPENNOVA_IMGUI).
+// ImGui-free like every window's header: ui_kit.cpp draws, built with the pass.
 #pragma once
 
 #include <algorithm>

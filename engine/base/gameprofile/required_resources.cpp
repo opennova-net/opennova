@@ -284,7 +284,7 @@ const RequiredResource k_required_resources[] = {
       "[orig: UI_EnterNovaWorldMenu @ 0x5588fa -> CUIScene_SelectNodeByName @ 0x558953]", "mp_menu" },
     { "pre.mnu", BOOT_PHASE_MISSION, RES_REQUIRED, 0,
       "missing -> a join's own screen (the PreMenu) selects no PRE_GAME_MENU: no status line, no Cancel",
-      "[orig: sub_5693E0 @ 0x5693e0 (the PreMenu init), the load @ 0x56944a; UI_ShowPreGameMenuByState @ 0x568d10]",
+      "[orig: PreMenu_Init @ 0x5693e0, the load @ 0x56944a; UI_ShowPreGameMenuByState @ 0x568d10]",
       "pre_menu" },
     { "hudfx.def", BOOT_PHASE_MISSION, RES_OPTIONAL, 0,
       "silent skip",
