@@ -240,6 +240,73 @@ crow::response BillingRoutes::me_billing(const crow::request &req) {
 	}
 }
 
+std::optional<crow::response> BillingRoutes::judge_checkout(db::Database &db, const WebSessionUser &user, int item) {
+	const auto account = get_user_by_id(db, user.id);
+	if (!account || account->kind != "player" || account->account_status != "active") {
+		log_account(user, "checkout", "not_eligible (account)");
+		return json_error(403, "not_eligible", "this account cannot subscribe");
+	}
+	const int64_t now = unix_now();
+	const std::vector<SubscriptionRow> rows = subscriptions_of(db, user.id);
+	const bool granting_tier = tier_grants(rows, now);
+	if (item > 0 && granting_tier) {
+		log_account(user, "checkout", "already_subscribed");
+		return json_error(409, "already_subscribed", "this account has a support tier; change it in the portal");
+	}
+	if (item == 0 && !granting_tier) {
+		log_account(user, "checkout", "not_eligible (no tier)");
+		return json_error(403, "not_eligible", "an own machine needs a support tier first");
+	}
+	if (item == 0) {
+		AccountFacts facts;
+		facts.kind = account->kind;
+		facts.account_status = account->account_status;
+		facts.comp_servers = account->comp_servers;
+		// Each own machine holds one of the servers the account may run: more
+		// machines than servers buys nothing.
+		const Entitlement e = entitlement_from(facts, rows, now);
+		if (e.own_machines >= e.max_servers) {
+			log_account(user, "checkout", "own_machine_limit");
+			return json_error(409, "own_machine_limit", "this account has an own machine for every server it may run");
+		}
+	}
+	return std::nullopt;
+}
+
+std::optional<crow::response> BillingRoutes::settle_previous_session(const WebSessionUser &user,
+		const CustomerRow &customer, int item) {
+	StripeClient &client = billing_->client();
+	const std::string &id = customer.open_checkout_session;
+	StripeResult<CheckoutSession> previous = client.get_checkout_session(id);
+	if (previous.ok() && previous.value->status == "open") {
+		if (client.expire_checkout_session(id).ok()) return std::nullopt;
+		// Not expired: it completed (or expired) meanwhile; read again.
+		previous = client.get_checkout_session(id);
+	}
+	if (!previous.ok()) {
+		// Stripe knows no such session (in this mode): nothing was sold through it.
+		if (previous.error.kind == StripeError::Kind::Rejected && previous.error.status == 404) return std::nullopt;
+		log_account(user, "checkout",
+				std::string("the previous session unread: ") + stripe_error_kind_name(previous.error.kind));
+		return stripe_unavailable();
+	}
+	if (previous.value->status != "complete") return std::nullopt;
+	// Paid for, and maybe not synced yet (the webhook on its way, a second
+	// tab): the customer read back from Stripe now, then judged again.
+	try {
+		auto db_conn = pool_.acquire();
+		if (billing_->sync().sync_customer(*db_conn, customer.stripe_customer_id, unix_now()) ==
+				SyncOutcome::Unreachable) {
+			log_account(user, "checkout", "stripe_unavailable (the previous session's sync)");
+			return stripe_unavailable();
+		}
+		return judge_checkout(*db_conn, user, item);
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[http] POST /api/billing/checkout failed: %s\n", e.what());
+		return json_error(500, "db_error");
+	}
+}
+
 // POST /api/billing/checkout — {"item": "tier1" | "tier2" | "tier3" |
 // "own_machine"}: a Stripe Checkout session for it, {"url"} to send the browser
 // to. In order: require_user (401, 403 without the CSRF header), 503
@@ -247,13 +314,18 @@ crow::response BillingRoutes::me_billing(const crow::request &req) {
 // invalid_json / invalid_item, 503 billing_misconfigured while the prices do
 // not check out, 403 not_eligible for an account that is not an active
 // player's or (the add-on) has no tier granting, 409 already_subscribed when a
-// tier grants already (the portal changes it), 502 stripe_unavailable. The
-// account's previous open session is expired first; its Stripe customer is made
+// tier grants already (the portal changes it), 409 own_machine_limit for the
+// add-on when the account has an own machine for every server it may run
+// (each add-on checkout sells one; several are fine below that), 502
+// stripe_unavailable. Then the account's previous session
+// (settle_previous_session): an open one is expired; a complete one has the
+// customer synced from Stripe now and the rules judged again, so a payment the
+// webhook has not brought yet is never sold twice. Its Stripe customer is made
 // at its first checkout (the idempotency key opennova-<instance>-customer-<id>,
-// so a retry answers the same one). The session asks for the terms of service,
-// lives kCheckoutLifeS, returns to /me/support?checkout=success&session_id=...
-// or ?checkout=cancel, and stamps the instance and the account on the session
-// and on the subscription it makes.
+// so a retry answers the same one). The session asks for the terms of
+// service, lives kCheckoutLifeS from just before it is made, returns to
+// /me/support?checkout=success&session_id=... or ?checkout=cancel, and stamps
+// the instance and the account on the session and on the subscription it makes.
 crow::response BillingRoutes::checkout(const crow::request &req) {
 	auto access = access_.require_user(req);
 	if (access.refusal) return std::move(*access.refusal);
@@ -272,24 +344,10 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 	if (!billing_->sync().status().prices_ok)
 		return json_error(503, "billing_misconfigured", "the support tiers' prices are being checked; try again later");
 	const std::string price = *item > 0 ? tier_price_for_sale(config, *item) : own_machine_price_for_sale(config);
-	const int64_t now = unix_now();
 	std::optional<CustomerRow> customer;
 	try {
 		auto db_conn = pool_.acquire();
-		const auto account = get_user_by_id(*db_conn, user.id);
-		if (!account || account->kind != "player" || account->account_status != "active") {
-			log_account(user, "checkout", "not_eligible (account)");
-			return json_error(403, "not_eligible", "this account cannot subscribe");
-		}
-		const bool granting_tier = tier_grants(subscriptions_of(*db_conn, user.id), now);
-		if (*item > 0 && granting_tier) {
-			log_account(user, "checkout", "already_subscribed");
-			return json_error(409, "already_subscribed", "this account has a support tier; change it in the portal");
-		}
-		if (*item == 0 && !granting_tier) {
-			log_account(user, "checkout", "not_eligible (no tier)");
-			return json_error(403, "not_eligible", "an own machine needs a support tier first");
-		}
+		if (auto refusal = judge_checkout(*db_conn, user, *item)) return std::move(*refusal);
 		customer = customer_of(*db_conn, user.id);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/billing/checkout failed: %s\n", e.what());
@@ -297,6 +355,9 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 	}
 	// Stripe, outside any transaction.
 	StripeClient &client = billing_->client();
+	if (customer && !customer->open_checkout_session.empty()) {
+		if (auto refusal = settle_previous_session(user, *customer, *item)) return std::move(*refusal);
+	}
 	if (!customer) {
 		const auto made = client.create_customer(user.id, user.username, billing_->instance_id(),
 				"opennova-" + billing_->instance_id() + "-customer-" + std::to_string(user.id));
@@ -313,10 +374,6 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 			return json_error(500, "db_error");
 		}
 		if (!customer) return json_error(500, "db_error");
-	}
-	if (!customer->open_checkout_session.empty()) {
-		// Already complete or expired: Stripe refuses, which is fine.
-		client.expire_checkout_session(customer->open_checkout_session);
 	}
 	CheckoutCreate create;
 	create.customer = customer->stripe_customer_id;
@@ -341,7 +398,8 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 	try {
 		set_open_checkout_session(*pool_.acquire(), user.id, session.value->id);
 	} catch (const db::Error &e) {
-		// The session stands; only the next checkout's expiry of it is lost.
+		// The session stands; the next checkout cannot settle it (expire it, or
+		// see it paid).
 		std::fprintf(stderr, "[http] POST /api/billing/checkout: the open session not kept: %s\n", e.what());
 	}
 	log_account(user, "checkout", "session for " + *item_text);

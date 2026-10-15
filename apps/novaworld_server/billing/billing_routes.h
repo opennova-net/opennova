@@ -31,6 +31,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 
 namespace opennova::novaworld_server::billing {
@@ -83,6 +84,14 @@ private:
 	crow::response me_billing_reply(db::Database &db, int64_t user_id);
 	// The limits hold's fields of GET /api/admin/billing.
 	void limits_hold_json(crow::json::wvalue &out) const;
+	// Checkout's rules for the account as the cache has it (checkout's
+	// comment): its refusal, or nullopt when it may go on.
+	std::optional<crow::response> judge_checkout(db::Database &db, const WebSessionUser &user, int item);
+	// The account's previous session before a new one (checkout's comment):
+	// expired while open; once complete, the customer synced from Stripe and
+	// the checkout judged again. Its refusal, or nullopt. No transaction open.
+	std::optional<crow::response> settle_previous_session(const WebSessionUser &user, const CustomerRow &customer,
+			int item);
 
 	WebAccess &access_;
 	db::ConnectionPool &pool_;

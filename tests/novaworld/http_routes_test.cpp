@@ -6080,6 +6080,86 @@ int test_billing_routes(Harness &h) {
 	return 0;
 }
 
+// Checkout never sells twice what a paid session the webhook has not brought
+// yet already sold: the previous session read from Stripe first, and once
+// complete, the customer synced and the checkout judged again (a tier:
+// already_subscribed; the add-on: own_machine_limit once the account has an own
+// machine for every server it may run, several fine below that). A previous
+// session Stripe no longer knows is no obstacle; one Stripe cannot be asked
+// about refuses (502) with nothing made.
+int test_billing_checkout_guard(Harness &h) {
+	namespace billing = opennova::novaworld_server::billing;
+	using billing::StripeRequest;
+	const int64_t dot = make_account(h, "chk_dot", "pw-chk-dot");
+	const int64_t fay = make_account(h, "chk_fay", "pw-chk-fay");
+	TEST_EXPECT(dot > 0 && fay > 0);
+	const std::string dot_s = login_token(h, "10.62.0.1", "chk_dot", "pw-chk-dot");
+	const std::string fay_s = login_token(h, "10.62.0.2", "chk_fay", "pw-chk-fay");
+	TEST_EXPECT(!dot_s.empty() && !fay_s.empty());
+	auto checkout = [&h](const std::string &session, const char *item) {
+		return h.send("POST", "/api/billing/checkout", { kJson, kCsrf, with_session(session) },
+				std::string("{\"item\":\"") + item + "\"}");
+	};
+	auto open_session = [&h](int64_t user) {
+		const auto customer = billing::customer_of(*h.pool.acquire(), user);
+		return customer ? customer->open_checkout_session : std::string();
+	};
+	auto session_reads = [&h](const std::string &id) {
+		return h.stripe->count(StripeRequest::Method::Get, "/v1/checkout/sessions/" + id);
+	};
+
+	// Dot pays for tier 1; before any sync, a checkout of tier 2 reads the
+	// paid session, syncs her customer and refuses: she has a tier.
+	auto reply = checkout(dot_s, "tier1");
+	TEST_EXPECT(reply.code == 200);
+	const std::string paid_tier = open_session(dot);
+	TEST_EXPECT(!h.stripe->complete_checkout(paid_tier).empty());
+	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), dot, billing::unix_now()).max_servers == 0);
+	reply = checkout(dot_s, "tier2");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "already_subscribed");
+	TEST_EXPECT(session_reads(paid_tier) == 1);
+	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), dot, billing::unix_now()).max_servers == 1);
+	// Her own machine: one, which tier 1's one server fills; paid, a second is
+	// refused through the same sync.
+	reply = checkout(dot_s, "own_machine");
+	TEST_EXPECT(reply.code == 200);
+	const std::string paid_machine = open_session(dot);
+	TEST_EXPECT(paid_machine != paid_tier && !h.stripe->complete_checkout(paid_machine).empty());
+	reply = checkout(dot_s, "own_machine");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "own_machine_limit");
+	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), dot, billing::unix_now()).own_machines == 1);
+	// From the cache now, with no Stripe call.
+	const size_t reads = session_reads(paid_machine);
+	reply = checkout(dot_s, "own_machine");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "own_machine_limit");
+	TEST_EXPECT(session_reads(paid_machine) == reads);
+
+	// Fay on tier 3: own machines one at a time below its three servers. A
+	// previous session Stripe could not be asked about refuses; one it no
+	// longer knows does not.
+	const std::string fay_cus = h.stripe->add_customer({ { billing::kMetaInstance, h.billing->instance_id() },
+			{ billing::kMetaUserId, std::to_string(fay) }, { billing::kMetaUsername, "chk_fay" } });
+	h.stripe->add_subscription(fay_cus, "price_htier3", 1, "active", billing::unix_now() + 30 * 86400);
+	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), fay_cus, billing::unix_now()) ==
+			billing::SyncOutcome::Synced);
+	TEST_EXPECT(checkout(fay_s, "own_machine").code == 200);
+	TEST_EXPECT(!h.stripe->complete_checkout(open_session(fay)).empty());
+	reply = checkout(fay_s, "own_machine");
+	TEST_EXPECT(reply.code == 200);
+	TEST_EXPECT(billing::entitlement_of(*h.pool.acquire(), fay, billing::unix_now()).own_machines == 1);
+	const std::string pending = open_session(fay);
+	const size_t sessions_before = h.stripe->count(StripeRequest::Method::Post, "/v1/checkout/sessions");
+	h.stripe->fail_next(billing::StripeReply::Outcome::Unreachable);
+	reply = checkout(fay_s, "own_machine");
+	TEST_EXPECT(reply.code == 502 && error_of_reply(reply) == "stripe_unavailable");
+	TEST_EXPECT(open_session(fay) == pending &&
+			h.stripe->count(StripeRequest::Method::Post, "/v1/checkout/sessions") == sessions_before);
+	billing::set_open_checkout_session(*h.pool.acquire(), fay, "cs_test_gone");
+	reply = checkout(fay_s, "own_machine");
+	TEST_EXPECT(reply.code == 200 && open_session(fay) != "cs_test_gone");
+	return 0;
+}
+
 // POST /api/billing/webhook: no session and no CSRF header, the signature its
 // credential. Missing, wrong, stale and several-v1 signatures; a body past
 // 1 MiB (413); a signed body that is no event (400 invalid_json); an event of the
@@ -6402,6 +6482,7 @@ int run(Harness &h) {
 		{ "hosted_stats_routes", test_hosted_stats_routes },
 		{ "no_agent_routes_on_public_listener", test_no_agent_routes_on_public_listener },
 		{ "billing_routes", test_billing_routes },
+		{ "billing_checkout_guard", test_billing_checkout_guard },
 		{ "billing_webhook", test_billing_webhook },
 		{ "billing_admin", test_billing_admin },
 		{ "admin_user_detail", test_admin_user_detail },
