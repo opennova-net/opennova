@@ -261,18 +261,21 @@ int64_t connections_left(const test_db::TestDatabase &database) {
 	return left;
 }
 
+// backend/migrations' files: what a fresh database's boot applies.
+size_t migration_count() {
+	size_t count = 0;
+	for (const auto &e : std::filesystem::directory_iterator(
+				 std::filesystem::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations"))
+		if (e.path().extension() == ".sql") ++count;
+	return count;
+}
+
 int exercise_shutdown(ServerProcess &server, const std::string &binary,
                       const test_temp::TempDir &temp, const test_db::TestDatabase &database,
                       const std::string &log_path, int signal_number) {
 	if (!boot(server, binary, server_env(temp, database.conninfo()), temp, log_path)) return 1;
-	// Every file in backend/migrations applied, none skipped (a fresh database).
-	size_t migrations = 0;
-	for (const auto &e : std::filesystem::directory_iterator(
-				 std::filesystem::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations")) {
-		if (e.path().extension() == ".sql") ++migrations;
-	}
-	TEST_EXPECT(migrations > 0 && read_text(log_path).find("[boot] migrations: " + std::to_string(migrations) +
-											 " applied, 0 skipped") != std::string::npos);
+	TEST_EXPECT(read_text(log_path).find("[boot] migrations: " + std::to_string(migration_count()) +
+					" applied, 0 skipped") != std::string::npos);
 
 #ifdef OPENNOVA_HTTP_ENABLED
 	const uint16_t http_port = logged_port(read_text(log_path), kHttpLine);

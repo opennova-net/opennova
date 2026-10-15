@@ -28,7 +28,8 @@ if(BUILD_NOVAWORLD_HTTP)
         # Hosted servers (ADR 0053, proposed): the supervisor, its rows and
         # renders, the local and the EC2 MachineProviders (the cloud machines'
         # bootstrap tokens and route; the AWS CLI runs through apps/common's
-        # command runner), the admin link and its console routes.
+        # command runner), the admin link and its console routes; the fleet's
+        # pieces (its rows).
         hosted/admin_link.cpp
         hosted/agent_protocol.cpp
         hosted/bootstrap.cpp
@@ -37,6 +38,7 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/console_routes.cpp
         hosted/data_sets.cpp
         hosted/ec2_provider.cpp
+        hosted/fleet_repository.cpp
         hosted/hosted_repository.cpp
         hosted/hosted_routes.cpp
         hosted/hosted_settings.cpp

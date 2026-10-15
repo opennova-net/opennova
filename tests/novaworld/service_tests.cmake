@@ -574,3 +574,25 @@ target_include_directories(hosted_agent_protocol_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 add_test(NAME hosted_agent_protocol COMMAND hosted_agent_protocol_test)
+
+# The fleet in the database (apps/novaworld_server/hosted/fleet_repository.h, migration
+# 0003_fleet.sql): a machine's row and its one-time token (its SHA-256 alone), every lifecycle
+# move a compare-and-set, the bootstrap's redeem, the agent's secret, a sync's report and its
+# slots' rows, the silent machines, and the slots the live servers hold (assigned once, the
+# generation moving on, let go, read back for placement). Compiles the hosted sources it needs
+# directly, so it runs on every service build.
+add_executable(hosted_fleet_repository_test
+    novaworld/hosted_fleet_repository_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/agent_protocol.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/data_sets.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/fleet_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/placement.cpp)
+target_link_libraries(hosted_fleet_repository_test
+    PRIVATE opennova_novaworld_service opennova_app_common Threads::Threads)
+target_include_directories(hosted_fleet_repository_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+target_compile_definitions(hosted_fleet_repository_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+opennova_add_pg_test(hosted_fleet_repository COMMAND hosted_fleet_repository_test)

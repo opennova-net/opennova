@@ -83,7 +83,7 @@ int test_migrations_create_expected_tables() {
 	// Expected tables from the backend migration set.
 	const std::vector<std::string> expected = {
 		"active_hosts", "active_user_sessions", "billing_customers", "billing_events",
-		"billing_subscriptions", "cd_key_activations", "cd_keys",
+		"billing_subscriptions", "cd_key_activations", "cd_keys", "fleet_machines", "fleet_slot_reports",
 		"games", "host_keys", "host_players", "host_roster", "hosted_server_console", "hosted_server_events",
 		"hosted_servers", "login_addresses",
 		"player_game_access",
@@ -107,8 +107,8 @@ int test_migrations_create_expected_tables() {
 								"WHERE table_schema = 'public' AND data_type = 'boolean' ORDER BY 1;");
 	const std::vector<std::string> expected_flags = {
 		"billing_customers.livemode", "billing_events.livemode", "billing_subscriptions.cancel_at_period_end",
-		"billing_subscriptions.livemode", "hosted_servers.own_machine", "hosted_servers.team_ff",
-		"server_status.maintenance_enabled",
+		"billing_subscriptions.livemode", "fleet_slot_reports.oom", "hosted_servers.own_machine",
+		"hosted_servers.team_ff", "server_status.maintenance_enabled",
 	};
 	TEST_EXPECT(flags.size() == expected_flags.size());
 	for (size_t i = 0; i < flags.size() && i < expected_flags.size(); ++i)
