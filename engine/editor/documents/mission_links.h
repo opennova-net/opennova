@@ -1,0 +1,207 @@
+#pragma once
+
+// What a mission's logic names in its space (ADR 0046 S24, In the views): for an event, a trigger or an
+// action, the records its parameters name as the game finds them, and the distances its triggers test;
+// for the whole mission, how many events name each record. The views draw them (preview/
+// mission_link_shapes): a line from what an event's triggers watch to what its actions act on, the
+// records rung where they stand, a distance trigger's reach about its subject, and a badge on each mark
+// some event names.
+//
+// What a parameter names is the game's reading of it (formats/mission/mission_params.h; mission_uses.h
+// reads it the same way): an Entity parameter the first record holding the SSN in the lookups' pool
+// order [orig: EntityPool_FindByNetId @0x4f0a20; MissionDocument::entity_holder], a Zone the first area
+// trigger of the id in file order [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000, the scan
+// @0x453077; MissionDocument::zone_holder], a Path the waypoint path of the number, a stop of it by its
+// number (-1 the nearest: no one stop), a Group the group of the index and the entities that carry it
+// (group 0 names none [docs/mission/bms-event-runtime-re.md 3a]), an Event the event of the index, a
+// teleport target the first pool-3 marker of record type 6088 whose wp_number is the value [orig: the
+// pool-3 scans of EventAction_TeleportEntityToSpawn @0x43dfe0..0x43e003 and Entity_TeleportTeamToSpawn
+// @0x43d3b0..0x43d3cf], an effect's marker number every such marker [orig: EventAction_SpawnParticleEffect
+// @0x4540e0, `result[20] == 6088`] and a teammate's the first [orig: HeliLift_SpawnPickup, the pool-3
+// scan; docs/mission/bms-event-runtime-re.md 7.5 row 39]. A value nothing holds (the player's SSN 10000,
+// which no record carries; a zone no area has) names no record and is said so by an empty `record`.
+
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <vector>
+
+#include <editor/documents/mission_sentence.h>
+#include <editor/model/value.h>
+#include <formats/mission/mission_params.h>
+
+namespace opennova::editor {
+
+class MissionDocument;
+
+// One parameter of a trigger or an action and what it names: the record (an entity's, an area's, a
+// path's or an event's row; a group's record on the mission row; empty where nothing holds the value),
+// and the rows it reaches through it: a group's members (every entity carrying the group, in the rows'
+// order), a path's stops (the markers its stops name, in its order), a stop's marker, the markers a
+// marker number names. A trigger's links are its subjects (what it watches), an action's its targets
+// (what it acts on).
+struct MissionLink {
+	NodeAddress from; // the trigger or the action
+	bool action = false;
+	int slot = 0; // 0 for param1
+	mission::ParamKind kind = mission::ParamKind::Unused;
+	int64_t value = 0;
+	NodeAddress record;
+	std::vector<NodeId> rows;
+};
+
+// A distance a trigger tests between two entities, as the game measures it: the straight 3D distance
+// (x, y and height) between the two entities' positions, whole metres [orig: Entity_CheckProximity
+// @0x4f14c0, sqrt(dx^2 + dy^2 + dz^2) over the 16.16 positions @0x4f1569..0x4f159f; the trigger's
+// third parameter shifted << 16 at the call @0x453879]: within it for sub-type 43 (near); within it with
+// nothing between them for 44 (a line of sight) [orig: Entity_CheckLineOfSightInRange @0x4f15e0, the
+// same distance @0x4f1695..0x4f16cd, then the ray]; 45 (sees) measures between the two models' bound
+// centres, then the ray, then the second within 30 degrees either side of the first's heading, seen from
+// above [orig: Entity_CheckLineOfSight @0x4f17c0, the centres @0x4f1876..0x4f18dd, the cone
+// @0x4f195f..0x4f1989, `cmp eax, 15555540h` @0x4f1984]. The subject is the first entity (param1),
+// the other the second (param2), each its holder's row (0 where none holds the SSN); a subject that is a
+// player's SSN (no record holds one) is the player, whose place the editor knows only as the mission's
+// start markers (mission_player_starts).
+struct MissionReach {
+	NodeAddress from; // the trigger
+	NodeId subject = 0, other = 0;
+	bool player = false; // the subject is a player
+	// The whole metres the game compares: the call shifts param3 << 16 into a 32-bit word [orig: `shl esi, 10h`
+	// @0x453879], which keeps its low 16 bits as a signed count, and the compare is signed [orig:
+	// Entity_CheckProximity @0x4f15b9, `setle`]: a param3 of 32768..65535 is negative, no distance within it.
+	int64_t metres = 0;
+	bool sight = false; // nothing may stand between them (44, 45)
+	bool facing = false; // the other within kMissionSeesHalfAngle of the subject's heading (45)
+	bool centres = false; // measured between the models' bound centres, not the positions (45)
+};
+// Half of what a sees trigger's subject sees across, degrees: 0x15555540 of the binary angle's 2^32 a
+// turn [orig: Entity_CheckLineOfSight @0x4f17c0, the compare @0x4f1984].
+inline constexpr double kMissionSeesHalfAngle = 30.0;
+// The markers the player starts at (what a distance trigger about the player is drawn about): the start markers
+// of the type the single player deploys at under the mission's mode (world::start_marker_types for team 1: the
+// primary's where the mission holds one, else the fallback's, as Play from here places them:
+// runtime/mission/player_start.h) [orig: Server_PositionPlayerForSpawn @0x50CF60], in their order; none for a
+// mode with no start of team 1.
+std::vector<NodeId> mission_player_starts(const MissionDocument &document);
+
+// What a logic record names: for an event, what each of its triggers and actions names, in their order;
+// for a trigger or an action, what it names alone, `event` its event. None for a record of another
+// kind.
+struct MissionLinks {
+	NodeAddress event;
+	std::vector<MissionLink> links;
+	std::vector<MissionReach> reaches;
+	bool any() const { return !links.empty() || !reaches.empty(); }
+};
+// The rows of the entities that carry a group, in the rows' order (every pool's; none for group 0, which names no
+// group); and the members of the groups `records` carry or are (an entity's group, a group's record), each once, in
+// the rows' order: what Select group members selects.
+std::vector<NodeId> mission_group_rows(const MissionDocument &document, int64_t group);
+std::vector<NodeAddress> mission_group_members(const MissionDocument &document, const std::vector<NodeAddress> &records);
+// The group a record names as a member or is (an entity's group, a group record's index); -1 for neither.
+int64_t mission_group_of(const MissionDocument &document, const NodeAddress &record);
+// The record of the group of an index on the mission row (empty for none: no mission row, or past the 64).
+NodeAddress mission_group_address(const MissionDocument &document, int64_t group);
+// The group "Add to group > New group" hands out (S24): the lowest of 1..63 that no entity carries, no event's
+// trigger or action names (a group the game fills at run time, a ChangeGroup's target) and the mission gives no
+// name; -1 for none.
+int64_t mission_fresh_group(const MissionDocument &document);
+
+// What a mark's record offers a new event or the selected one (S24, the views' right-click menu): the record
+// itself (an area, an entity) and, for an entity in a group, that group too, each with what it is to a parameter
+// (its kind and its value: mission_record_value). In that order.
+struct MissionSubject {
+	NodeAddress record;
+	mission::ParamKind kind = mission::ParamKind::Unused;
+	int64_t value = 0;
+};
+std::vector<MissionSubject> mission_subjects(const MissionDocument &document, const NodeAddress &record);
+// The types of trigger (`actions` false) or action whose parameters take a subject of `kind` (some slot of the
+// type's row is of the kind), in logic_types' order, each with the first such slot: what "Use in the selected
+// event" offers.
+struct MissionTypeSlot {
+	const LogicType *type = nullptr;
+	int slot = 0;
+};
+std::vector<MissionTypeSlot> mission_types_taking(mission::ParamKind kind, bool actions);
+
+// What a trigger's or an action's parameter takes when it is picked in the views (S24 pick mode, the workspace's
+// document `pick`): its kind and its label ("Zone"), what to click for it in words ("an area", "an entity in a
+// group"), and for a stop the path whose stops it takes (the record's Path parameter; -1 none). A slot of a kind
+// no mark gives (an event, a number, a dialog) takes no click: `marks` false. For a path, the record's slot of a
+// stop of it (its type's row's PathNode slot, which a stop clicked for the path sets too; -1 none); for a marker
+// number, whether every marker of it serves (an effect plays at each) or the first alone (a teleport, a pickup).
+struct MissionPickSlot {
+	mission::ParamKind kind = mission::ParamKind::Unused;
+	std::string label;
+	std::string what;
+	int64_t path = -1;
+	int node_slot = -1;
+	bool every_marker = false;
+	bool marks = false;
+};
+// False for a record that is no trigger or action of the document, or a slot past 3.
+bool mission_pick_slot(const MissionDocument &document, const NodeAddress &record, int slot, MissionPickSlot &out);
+// The value a mark's record (an entity's or an area's row) gives the slot, as the game reads the parameter: an
+// entity its SSN, an area its zone id, an entity in a group its group (group 0 none), a stop's marker its path's
+// number (the first path whose stops name it) or for a stop slot its place among the record's path's stops (one
+// of the 32 a path's record holds), a numbered marker (record type 6088) its wp_number. False where the record
+// fills none; with `refusal` the words why where it holds a value that names another record: an entity whose
+// SSN an earlier pool holds ("SSN 55 names Hostage #55, which the game finds first"), an area whose zone id an
+// earlier area holds, a numbered marker after the first of its number where the first alone serves, a stop past
+// the path's 32 slots.
+bool mission_pick_value(const MissionDocument &document, const MissionPickSlot &slot, const NodeAddress &record,
+		int64_t &value, std::string *refusal = nullptr);
+// For a path slot with a stop slot (MissionPickSlot::node_slot), the place a marker's record gives that stop slot
+// along with its path: its place among the stops of the path mission_pick_value gives (one of its 32 slots).
+// False for no such slot or place.
+bool mission_pick_node(const MissionDocument &document, const MissionPickSlot &slot, const NodeAddress &record,
+		int64_t &place);
+// What a record dropped on a field naming records of the mission gives it (S24, a record dragged from an outline
+// line, the Inspector's heading or a board card): an entity's SSN for an entity reference, an area's zone id for a
+// zone, a group's index for a group, a waypoint path's number for a path, an event's index for an event. False for
+// a record of another kind than the reference names (an entity on a zone, an entity on a group), and, with
+// `refusal` the words why, for an entity whose SSN an earlier pool holds or an area whose zone id an earlier area
+// holds: its value names that other record ("SSN 55 names Hostage #55, which the game finds first").
+bool mission_record_value(const MissionDocument &document, const NodeAddress &record, ReferenceKind kind, int64_t &value,
+		std::string *refusal = nullptr);
+// The field a slot is set through ("param1" .. "param4").
+const char *mission_param_field(int slot);
+
+// The rows a revealed record is framed by in the views (S24, a Go to or a Problems row landing in the 3D view and
+// the map): an entity or an area itself; a path its stops' markers; a group its members; a stop its marker; an
+// event, a trigger or an action every row it names (mission_links: what its parameters name and the subjects of its
+// distances). None for a record with no place.
+std::vector<NodeId> mission_reveal_rows(const MissionDocument &document, const NodeAddress &record);
+
+// Whether a record is an event, a trigger or an action of a mission.
+bool mission_logic_record(const NodeAddress &record);
+MissionLinks mission_links(const MissionDocument &document, const NodeAddress &record);
+
+// How many events name each record (any of their triggers' or actions' parameters naming it as above):
+// entities, areas and paths by row, groups by index, events by row. A group's members are not named by
+// it (the group is). Made once per state of the document (its identity, load and revision).
+class MissionLinkCounts {
+public:
+	// The counts for `document` as it stands now (made again only when it moved).
+	void follow(const MissionDocument &document);
+	// How many events name the row (0 for none, or a row no event names), and those events' rows in their
+	// order: what a badge counts and its hover lists (S24).
+	size_t events(NodeId row) const;
+	const std::vector<NodeId> &namers(NodeId row) const;
+	// How many events name the group of this index.
+	size_t group_events(int64_t group) const;
+	// The rows some event names, for the views' badges.
+	size_t named() const { return rows_.size(); }
+	// How many times it counted (for the tests).
+	size_t made() const { return made_; }
+
+private:
+	uint64_t identity_ = 0, load_ = 0, revision_ = 0;
+	bool held_ = false;
+	std::vector<std::pair<NodeId, std::vector<NodeId>>> rows_; // sorted by row: the events naming it
+	std::vector<size_t> groups_;
+	size_t made_ = 0;
+};
+
+} // namespace opennova::editor

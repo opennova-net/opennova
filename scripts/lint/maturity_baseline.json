@@ -27,6 +27,7 @@
     "runtime/world/inspect_local_player.cpp",
     "runtime/world/collision_debug_rows.cpp",
     "runtime/inmatch/net_debug_report.cpp",
+    "editor/",
     "formats/def/def_schema.cpp",
     "formats/def/def_schema_records.cpp",
     "formats/def/def_schema_properties.cpp",

@@ -1,0 +1,8 @@
+; The editor's text document fixture (ADR 0046 S13 D9): an operand of each catalog lookup.
+If true(bluekills) then
+	fxrain FX_Buildup
+	sound2tgt SS_EXPLO_BASE, 4
+	ammoarea AMMO_AT_CONTRACT 8
+	ammo2tgt(ammo_satchel, 3)
+	ssnname 1 TT_MISSION_START
+endif

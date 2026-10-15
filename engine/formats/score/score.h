@@ -6,9 +6,7 @@
 // rules (the VERSION 40 gate, reset-and-replace on a duplicate GAMETYPE
 // section, the 34-FIELD cap) on top of world::default_match_score_values. It
 // is the owner-to-be: that function reading its rows through score::parse.
-// The editor's score table reads and writes the file through it (the editor
-// trunk, PR #665). Consumed by tests/score/score_roundtrip_test.cpp on master
-// until then (scripts/lint/orphan_header_check.py).
+// The editor's score table reads and writes the file through it.
 //
 // One text file read loose by its bare name from the game's folder (`VERSION 40` in retail JO). The
 // game types' default settings are made first, twelve FIXED 452-BYTE ROWS [orig:

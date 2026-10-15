@@ -5061,8 +5061,9 @@ add_test(NAME script_debug_report COMMAND script_debug_report_test)
 add_executable(counting_datagram_socket_test npwire/counting_datagram_socket_test.cpp)
 target_link_libraries(counting_datagram_socket_test PRIVATE opennova_net)
 add_test(NAME counting_datagram_socket COMMAND counting_datagram_socket_test)
-# The tool kit the F3 windows draw with (devtools/ui_kit.h): built with the pass.
-if(OPENNOVA_DEVTOOLS)
+# The tool kit both products' windows draw with (devtools/ui_kit.h): built with
+# the pass, so it runs in the editor-only flavour as well.
+if(OPENNOVA_IMGUI)
     add_executable(devtools_ui_kit_test devtools/ui_kit_test.cpp)
     target_link_libraries(devtools_ui_kit_test PRIVATE opennova_runtime opennova_imgui)
     add_test(NAME devtools_ui_kit COMMAND devtools_ui_kit_test)
@@ -5169,3 +5170,7 @@ add_executable(hud_capture_labels_test hud/hud_capture_labels_test.cpp)
 target_link_libraries(hud_capture_labels_test PRIVATE opennova_runtime)
 target_compile_features(hud_capture_labels_test PRIVATE cxx_std_17)
 add_test(NAME hud_capture_labels COMMAND hud_capture_labels_test)
+
+# The OpenNova Editor's rows (ADR 0046): tests/editor/CMakeLists.txt, one opennova_add_editor_test per
+# executable; their executables and working directory stay this folder's.
+add_subdirectory(editor)

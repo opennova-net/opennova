@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Link-graph seam check over the Shape A target graph.
 
-The engine builds as five STATIC group targets plus two leaves
+The engine builds as six STATIC group targets plus two leaves
 (engine/CMakeLists.txt): opennova_formats, opennova_base, opennova_runtime,
-opennova_net, opennova_novaworld_service (+ the header-only opennova_io and
+opennova_net, opennova_novaworld_service, opennova_editor (the OpenNova
+Editor's core above runtime, ADR 0046) (+ the header-only opennova_io and
 the opennova_crt STATIC leaf, the retail-parity CRT rand stream both formats
 and runtime link).
 The old ~400-target graph's per-format and terrain-seam rules moved to the
@@ -37,7 +38,9 @@ Graph source, best available first (override with --source):
             (what the pre-build CI lint step falls back to). Simple
             single-assignment set() variables (e.g. TARGET_NAME)
             are substituted so variable-named targets stay visible to
-            the walk.
+            the walk, and tests/editor's opennova_add_editor_test /
+            opennova_add_editor_executable rows are read as the
+            functions build them.
 
 Soft mode (default) always exits 0. --enforce makes violations exit 1.
 """
@@ -104,6 +107,20 @@ FORBIDDEN: list[tuple[str, list[str], list[str], set[str]]] = [
         [SERVICE_TARGET],
         {"opennova"},  # defined only in the godot/src CMake root
     ),
+    (
+        "the OpenNova Editor's core sits ABOVE the engine (ADR 0046 d3): no engine "
+        "group target links opennova_editor, so the game never carries editor code",
+        ["opennova_formats", "opennova_base", "opennova_net", "opennova_runtime", SERVICE_TARGET],
+        ["opennova_editor"],
+        set(),
+    ),
+    (
+        "the runtime GDExtension variant (the game, the Play child) never links the "
+        "editor core (ADR 0046 d2): only opennova_editor_gdext does",
+        ["opennova", "opennova_bindings"],
+        ["opennova_editor"],
+        {"opennova", "opennova_bindings"},  # defined only in the godot/src CMake root
+    ),
 ]
 
 LINK_KEYWORDS = {
@@ -117,6 +134,11 @@ DOT_EDGE = re.compile(r'^\s*"(node\d+)"\s*->\s*"(node\d+)"')
 TLL_CALL = re.compile(r"target_link_libraries\s*\(([^)]*)\)", re.DOTALL)
 TARGET_DEF = re.compile(r"add_(?:library|executable)\s*\(\s*([A-Za-z0-9_.\-]+)")
 SET_CALL = re.compile(r"set\s*\(\s*([A-Za-z0-9_]+)\s+([^)]+)\)", re.DOTALL)
+# tests/editor/CMakeLists.txt's rows: opennova_add_editor_test(<stem> [MIXED] [NAME <name>]
+# [SOURCES ...] [LIBS ...]) builds <name, else editor_<stem>>_test linked against LIBS (else
+# opennova_editor); opennova_add_editor_executable(<target> SOURCES ... LIBS ...) builds <target>.
+EDITOR_TEST_CALL = re.compile(r"\bopennova_add_editor_(test|executable)\s*\(([^)]*)\)", re.DOTALL)
+EDITOR_TEST_KEYWORDS = {"MIXED", "SERIAL", "NAME", "TIMEOUT", "SOURCES", "LIBS"}
 
 
 def graph_from_graphviz(build_dir: Path) -> tuple[dict[str, set[str]], set[str]] | None:
@@ -175,6 +197,23 @@ def substitute_simple_vars(text: str) -> str:
     return text
 
 
+def editor_test_target(kind: str, tokens: list[str]) -> tuple[str, list[str]]:
+    """(target, links) of one opennova_add_editor_test / _executable call, as the
+    function in tests/editor/CMakeLists.txt makes them."""
+    values: dict[str, list[str]] = {}
+    key = ""
+    for token in tokens[1:]:
+        if token in EDITOR_TEST_KEYWORDS:
+            key = token
+            values.setdefault(key, [])
+        elif key:
+            values[key].append(token)
+    if kind == "executable":
+        return tokens[0], values.get("LIBS", [])
+    name = (values.get("NAME") or ["editor_" + tokens[0]])[0]
+    return name + "_test", values.get("LIBS") or ["opennova_editor"]
+
+
 def graph_from_files() -> tuple[dict[str, set[str]], set[str]]:
     """(edges, known targets) parsed from the repo's own CMake files."""
     edges: dict[str, set[str]] = {}
@@ -204,6 +243,18 @@ def graph_from_files() -> tuple[dict[str, set[str]], set[str]]:
                 continue  # unresolved variable-named target (foreach loops)
             for dep in deps:
                 if dep in LINK_KEYWORDS or "$" in dep or '"' in dep:
+                    continue
+                edges.setdefault(target, set()).add(dep)
+        for m in EDITOR_TEST_CALL.finditer(text):
+            tokens = m.group(2).split()
+            if not tokens:
+                continue
+            target, deps = editor_test_target(m.group(1), tokens)
+            if "$" in target or '"' in target:
+                continue  # the functions' own bodies (a variable-named target)
+            known.add(target)
+            for dep in deps:
+                if "$" in dep or '"' in dep:
                     continue
                 edges.setdefault(target, set()).add(dep)
     return edges, known

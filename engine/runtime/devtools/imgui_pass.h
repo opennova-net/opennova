@@ -5,8 +5,11 @@
 // context (created by its ImGui bridge) and the frame bracket (call
 // draw_frame between the bridge's NewFrame and Render).
 //
-// The game's F3 workspace (game_dev_tools.h) owns the pass; it is compiled
-// only with OPENNOVA_DEVTOOLS. Escape follows GameWindow's Play/Interact policy.
+// The pass compiles with OPENNOVA_IMGUI (either product, ADR 0046 d11): the
+// game's F3 workspace (game_dev_tools.h, OPENNOVA_DEVTOOLS only) owns one, the
+// OpenNova Editor's workspace (editor/ui/editor_windows.h) another, and both
+// products' windows draw with the tool kit beside it (ui_kit.h). Escape
+// follows GameWindow's Play/Interact policy.
 //
 // Ownership: a pass is a plain object its composer owns; there is no
 // process-wide instance. Windows are registered once and live as long as the

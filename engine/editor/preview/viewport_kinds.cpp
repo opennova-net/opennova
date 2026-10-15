@@ -1,0 +1,341 @@
+#include <editor/preview/viewport_kinds.h>
+
+#include <cctype>
+#include <cstring>
+#include <iterator>
+#include <vector>
+
+#include <editor/model/document.h>
+#include <editor/preview/definition_viewport.h>
+#include <editor/preview/effect_viewport.h>
+#include <editor/preview/environment_viewport.h>
+#include <editor/preview/font_viewport.h>
+#include <editor/preview/terrain_viewport.h>
+#include <editor/preview/hud_viewport.h>
+#include <editor/preview/menu_viewport.h>
+#include <editor/preview/mission_map.h>
+#include <editor/preview/mission_viewport.h>
+#include <editor/preview/model_viewport.h>
+#include <editor/preview/script_viewport.h>
+#include <editor/preview/texture_viewport.h>
+#include <editor/session/view/documents_view.h>
+
+namespace opennova::editor {
+
+namespace {
+
+using T = DocumentTypeId;
+
+// The menu's: a menu's screen, which its stylesheets and string tables feed. The model's: a model,
+// or a clip or an animation table played on its rig's model.
+constexpr ViewportFeed kMenuFeeds[] = {
+	{ T::Menu, true },
+	{ T::Styles, false },
+	{ T::Strings, false },
+};
+constexpr ViewportFeed kModelFeeds[] = {
+	{ T::Model, true },
+	{ T::Animation, true },
+	{ T::AnimationMap, true },
+};
+// The script device's (S13 V10): every text type (S13 D9), its text as it stands, the Document tab's
+// main view; the HUD layout's text too (DI-20), its HUD the Preview window's.
+constexpr ViewportFeed kScriptFeeds[] = {
+	{ T::Script, true },
+	{ T::MusicScript, true },
+	{ T::Credits, true },
+	{ T::Shader, true },
+	{ T::Text, true },
+	{ T::Particles, true },
+	{ T::HudLayout, true },
+};
+
+// The mission's (S14): a mission, the Document tab's main view; the rows as they stand (a mission
+// that cannot be written still shows).
+constexpr ViewportFeed kMissionFeeds[] = {
+	{ T::Mission, true },
+};
+
+// The texture's (S18): a texture, the Document tab's main view, and the Preview window's for a texture
+// Files selects (open or not).
+constexpr ViewportFeed kTextureFeeds[] = {
+	{ T::Texture, true },
+};
+
+// The effect's (DI-14): a particle file's effect, the Preview window's while the file is active (its
+// Document tab is its text's script device); its text as the game would read it were it saved now.
+constexpr ViewportFeed kEffectFeeds[] = {
+	{ T::Particles, true },
+};
+
+// The HUD's (DI-20): a HUD layout, the Preview window's, read as Save would write it (the device reads it
+// through the project's files, the open document standing in for its file).
+constexpr ViewportFeed kHudFeeds[] = {
+	{ T::HudLayout, true },
+};
+
+// The definition's (DI-21): a definition table's selected record, the Preview window's beside the table, the
+// record as it stands (the catalog's row is the record the game's parser makes) and what it names read from
+// the project's files as the game would read them were they saved now.
+constexpr ViewportFeed kDefinitionFeeds[] = {
+	{ T::Catalog, true },
+};
+
+// The environment's (DI-19b): an environment, the Document tab's main view beside its records, read as Save
+// would write it (the device reads it through the project's files, the open document standing in for its
+// file); the Shell keeps two of its devices at most (each holds a terrain).
+constexpr ViewportFeed kEnvironmentFeeds[] = {
+	{ T::Environment, true },
+};
+
+// The terrain's (DI-30b): a terrain, the Document tab's main view beside its records, read as Save would write it
+// (the device reads it through the project's files, the open document standing in for its file); the Shell keeps
+// two of its devices at most (each holds a terrain).
+constexpr ViewportFeed kTerrainFeeds[] = {
+	{ T::Terrain, true },
+};
+
+// The font's (round S23 lane A): a font, the Document tab's main view beside its glyphs, its rows as they stand.
+constexpr ViewportFeed kFontFeeds[] = {
+	{ T::Font, true },
+};
+
+// The map's (S23 C): a mission's 2D map, the Preview window's beside its 3D view; the rows as they stand (as the 3D
+// view reads them), each pin redrawn as a drag goes. The Shell keeps one of its devices (the Preview window shows one
+// map; each holds a terrain), so the cache's four leave the two 3D views theirs.
+constexpr ViewportFeed kMapFeeds[] = {
+	{ T::Mission, true },
+};
+
+// The model's scene waits for a gesture's end (built anew over frames: a drag shows its markers
+// over the scene that stands); the menu's screen is configured again as a drag goes (S13 V8); the
+// mission's waits too (a drag is Updates alone: its entities move in place), and the Shell keeps two
+// of its devices at most (each holds a terrain and the mission's models). A menu's screen and a
+// definition's record are each one row of the document, the selection's: a screen a page of the menu, a
+// record one of the table's records picked one after another.
+// A kind that draws the editor's preview background behind its picture.
+constexpr ViewportKindRow on_backdrop(ViewportKindRow row) {
+	row.backdrop = true;
+	return row;
+}
+
+constexpr ViewportKindRow kRows[] = {
+	{ ViewportKind::Menu, ViewportRole::Preview, true, true, false, kMenuFeeds, std::size(kMenuFeeds),
+			MenuViewport::make, true, 0, false, true },
+	on_backdrop({ ViewportKind::Model, ViewportRole::Preview, true, false, true, kModelFeeds, std::size(kModelFeeds),
+			ModelViewport::make }),
+	{ ViewportKind::Script, ViewportRole::Main, false, false, false, kScriptFeeds, std::size(kScriptFeeds),
+			ScriptViewport::make, false },
+	{ ViewportKind::Mission, ViewportRole::Main, false, false, true, kMissionFeeds, std::size(kMissionFeeds),
+			MissionViewport::make, true, 2 },
+	on_backdrop({ ViewportKind::Texture, ViewportRole::Main, false, false, false, kTextureFeeds, std::size(kTextureFeeds),
+			TextureViewport::make, true, 0, true }),
+	on_backdrop({ ViewportKind::Effect, ViewportRole::Preview, true, false, false, kEffectFeeds, std::size(kEffectFeeds),
+			EffectViewport::make }),
+	on_backdrop({ ViewportKind::Hud, ViewportRole::Preview, true, false, false, kHudFeeds, std::size(kHudFeeds),
+			HudViewport::make }),
+	on_backdrop({ ViewportKind::Definition, ViewportRole::Preview, false, true, false, kDefinitionFeeds,
+			std::size(kDefinitionFeeds), DefinitionViewport::make }),
+	{ ViewportKind::Environment, ViewportRole::Main, true, false, false, kEnvironmentFeeds, std::size(kEnvironmentFeeds),
+			EnvironmentViewport::make, true, 2 },
+	{ ViewportKind::Terrain, ViewportRole::Main, true, false, false, kTerrainFeeds, std::size(kTerrainFeeds),
+			TerrainViewport::make, true, 2 },
+	on_backdrop({ ViewportKind::Font, ViewportRole::Main, false, false, false, kFontFeeds, std::size(kFontFeeds),
+			FontViewport::make }),
+	{ ViewportKind::Map, ViewportRole::Preview, false, false, false, kMapFeeds, std::size(kMapFeeds),
+			MissionMapViewport::make, true, 1 },
+};
+
+static_assert(std::size(kRows) == kViewportKindCount, "every ViewportKind has exactly one row");
+
+// One row per kind in the enum's order, each with a make and a type it shows.
+constexpr bool rows_well_formed() {
+	for (size_t i = 0; i < kViewportKindCount; ++i) {
+		const ViewportKindRow &row = kRows[i];
+		if (row.kind != static_cast<ViewportKind>(i) || !row.make || !row.feed_count) return false;
+		bool shows = false;
+		for (size_t f = 0; f < row.feed_count; ++f) {
+			if (row.feeds[f].type == T::None) return false;
+			shows = shows || row.feeds[f].shows;
+		}
+		if (!shows) return false;
+	}
+	return true;
+}
+static_assert(rows_well_formed(),
+		"the viewport kinds follow ViewportKind's order, each with a make and a type it shows");
+
+// Two kinds of `role` that a document type reaches both (`shows_only`: as what they show; else as
+// what they show or what feeds them): none, for the static_asserts below.
+constexpr bool kinds_apart(ViewportRole role, bool shows_only) {
+	for (size_t i = 0; i < kViewportKindCount; ++i)
+		for (size_t j = i + 1; j < kViewportKindCount; ++j) {
+			if (kRows[i].role != role || kRows[j].role != role) continue;
+			for (size_t a = 0; a < kRows[i].feed_count; ++a)
+				for (size_t b = 0; b < kRows[j].feed_count; ++b) {
+					if (shows_only && (!kRows[i].feeds[a].shows || !kRows[j].feeds[b].shows)) continue;
+					if (kRows[i].feeds[a].type == kRows[j].feeds[b].type) return false;
+				}
+		}
+	return true;
+}
+// The Preview window shows one kind for a type; a type's Document tab has one main view.
+static_assert(kinds_apart(ViewportRole::Preview, false), "a document type feeds one Preview-role viewport kind at most");
+static_assert(kinds_apart(ViewportRole::Main, true), "a document type is shown by one Main-role viewport kind at most");
+
+const DocumentBase *open_at(const DocumentsView &documents, const std::string &path) {
+	for (const auto &document : documents.open)
+		if (document && document->path() == path) return document.get();
+	return nullptr;
+}
+
+} // namespace
+
+const ViewportKindRow &viewport_kind_row(ViewportKind kind) {
+	const size_t index = static_cast<size_t>(kind);
+	return kRows[index < kViewportKindCount ? index : 0];
+}
+
+bool viewport_kind_shows(ViewportKind kind, DocumentTypeId type) {
+	if (kind == ViewportKind::kCount) return false;
+	const ViewportKindRow &row = viewport_kind_row(kind);
+	for (size_t i = 0; i < row.feed_count; ++i)
+		if (row.feeds[i].type == type && row.feeds[i].shows) return true;
+	return false;
+}
+
+ViewportKind main_viewport_kind(DocumentTypeId type) {
+	for (const ViewportKindRow &row : kRows)
+		if (row.role == ViewportRole::Main && viewport_kind_shows(row.kind, type)) return row.kind;
+	return ViewportKind::kCount;
+}
+
+ViewportKind default_viewport_kind(DocumentTypeId type) {
+	// A type whose Document tab is a picture of its own (a Main-role kind a canvas draws: a mission's 3D view) is read
+	// through it; else through the Preview-role kind that shows it, else its Main-role kind (a text's script device).
+	const ViewportKind main = main_viewport_kind(type);
+	if (main != ViewportKind::kCount && viewport_kind_row(main).canvas) return main;
+	const ViewportKind preview = preview_kind_of(type);
+	return viewport_kind_shows(preview, type) ? preview : main;
+}
+
+bool viewport_kind_beside_picture(ViewportKind kind) {
+	if (kind == ViewportKind::kCount) return false;
+	const ViewportKindRow &row = viewport_kind_row(kind);
+	if (row.role != ViewportRole::Preview) return false;
+	bool any = false;
+	for (size_t i = 0; i < row.feed_count; ++i) {
+		if (!row.feeds[i].shows) continue;
+		const ViewportKind main = main_viewport_kind(row.feeds[i].type);
+		if (main == ViewportKind::kCount || !viewport_kind_row(main).canvas) return false;
+		any = true;
+	}
+	return any;
+}
+
+ViewportKind preview_kind_of(DocumentTypeId type) {
+	for (const ViewportKindRow &row : kRows) {
+		if (row.role != ViewportRole::Preview) continue;
+		for (size_t i = 0; i < row.feed_count; ++i)
+			if (row.feeds[i].type == type) return row.kind;
+	}
+	return ViewportKind::kCount;
+}
+
+std::string viewport_shown_types() {
+	std::vector<std::string> named;
+	for (const ViewportKindRow &row : kRows)
+		for (size_t f = 0; f < row.feed_count; ++f) {
+			if (!row.feeds[f].shows) continue;
+			// The type in the words of the first asset kind it opens ("Animation map").
+			for (size_t k = 0; k < kAssetKindCount; ++k) {
+				const AssetKindRow &kind = asset_kind_row(static_cast<AssetKind>(k));
+				if (kind.document != row.feeds[f].type) continue;
+				std::string label = kind.label;
+				for (char &c : label) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+				const bool vowel = !label.empty() && std::strchr("aeiou", label[0]) != nullptr;
+				named.push_back((vowel ? "an " : "a ") + label);
+				break;
+			}
+		}
+	std::string out;
+	for (size_t i = 0; i < named.size(); ++i)
+		out += (i == 0 ? "" : i + 1 == named.size() ? " or " : ", ") + named[i];
+	return out;
+}
+
+ViewportKind file_preview_kind(DocumentTypeId type) {
+	for (const ViewportKindRow &row : kRows)
+		if (row.files && viewport_kind_shows(row.kind, type)) return row.kind;
+	return ViewportKind::kCount;
+}
+
+ViewportKind preview_kind(const DocumentsView &documents, ViewportKind last) {
+	// The file Files selects, while it leads and is not the active document (its tab shows it).
+	if (documents.files_lead) {
+		const ViewportKind files = file_preview_kind(documents.file_selected.type);
+		if (files != ViewportKind::kCount && !documents.previews[files].path.empty() &&
+				documents.previews[files].path != documents.active)
+			return files;
+	}
+	// A kind that shows beside its document's own picture (a mission's map) shows only where it was asked for (the Map
+	// tool's ask, while that document stays active); the Windows menu's tick keeps the kind shown before (S15).
+	const auto asked = [&](ViewportKind kind) {
+		return !viewport_kind_beside_picture(kind) ||
+		       (!documents.beside.empty() && documents.beside == documents.active && documents.previews[kind].path == documents.active);
+	};
+	if (!asked(last)) last = ViewportKind::kCount;
+	ViewportKind kind = last;
+	if (const DocumentBase *active = open_at(documents, documents.active)) {
+		const ViewportKind fed = preview_kind_of(asset_kind_row(active->kind()).document);
+		if (fed != ViewportKind::kCount && asked(fed)) kind = fed;
+	}
+	// A files kind the Preview window showed stays only while Files leads.
+	if (kind != ViewportKind::kCount && viewport_kind_row(kind).role != ViewportRole::Preview) kind = ViewportKind::kCount;
+	// What each has to show: the view keeps a kind's target until its document closes.
+	if (kind != ViewportKind::kCount && !documents.previews[kind].path.empty()) return kind;
+	// The active document's kind has nothing to show yet (a definition table with no record selected, DI-21):
+	// the one shown last, while it has something.
+	if (kind != last && last != ViewportKind::kCount && viewport_kind_row(last).role == ViewportRole::Preview &&
+	    !documents.previews[last].path.empty())
+		return last;
+	for (const ViewportKindRow &row : kRows)
+		if (row.role == ViewportRole::Preview && !documents.previews[row.kind].path.empty() && asked(row.kind)) return row.kind;
+	return ViewportKind::kCount;
+}
+
+void update_preview_targets(DocumentsView &documents) {
+	// Another document made active: Files no longer leads.
+	if (documents.active != documents.previews_active) {
+		documents.files_lead = false;
+		documents.previews_active = documents.active;
+	}
+	// The Map tool's ask holds while its document stays active.
+	if (documents.beside != documents.active) documents.beside.clear();
+	const DocumentBase *shown = open_at(documents, documents.active);
+	for (size_t i = 0; i < kViewportKindCount; ++i) {
+		const auto kind = static_cast<ViewportKind>(i);
+		const ViewportKindRow &row = viewport_kind_row(kind);
+		PreviewTarget &target = documents.previews[kind];
+		if (row.role != ViewportRole::Preview) {
+			// A files kind's: the file Files selects, where the kind draws its type.
+			const bool selected = row.files && !documents.file_selected.path.empty() &&
+					viewport_kind_shows(kind, documents.file_selected.type);
+			target = selected ? PreviewTarget{ documents.file_selected.path, 0 } : PreviewTarget();
+			continue;
+		}
+		// The active document, when the kind shows its type: a kind that shows a row of it follows
+		// the row a selection lands in, and keeps the one it had while none is selected.
+		if (shown && viewport_kind_shows(kind, asset_kind_row(shown->kind()).document)) {
+			if (!row.part) target = {shown->path(), 0};
+			else if (documents.selection.primary.row) target = {shown->path(), documents.selection.primary.row};
+		}
+		// A target whose document closed, or whose row is gone, clears.
+		const DocumentBase *document = open_at(documents, target.path);
+		const Document *records = document ? records_of(*document) : nullptr;
+		if (!document || (row.part && (!records || !records->row(target.part)))) target = PreviewTarget();
+	}
+	documents.preview_shown = preview_kind(documents, documents.preview_shown);
+}
+
+} // namespace opennova::editor
