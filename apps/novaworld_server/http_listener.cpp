@@ -1217,8 +1217,8 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			const std::string &peer = req.remote_ip_address;
 			LoginTicket ticket;
 			if (impl_->access.take_login_address(LoginRoute::Retail, peer) != 0 ||
-			    impl_->access.begin_password_check(LoginRoute::Retail, login_name, peer, ticket) !=
-			            0) {
+					impl_->access.begin_password_check(
+							*db_conn, LoginRoute::Retail, login_name, peer, ticket) != 0) {
 				std::fprintf(stderr,
 						"[http] POST /NWLogin.dll rate-limited for user '%s' from %s\n",
 						loggable(login_name).c_str(), loggable(peer).c_str());
@@ -1227,7 +1227,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			user = authenticate_user(*db_conn, login_name, login_password);
 			if (user) {
 				resolution = "epask-auth";
-				impl_->access.password_accepted(ticket, user->id, user->credentials_gen);
+				impl_->access.password_accepted(*db_conn, ticket, user->id, user->credentials_gen);
 			} else {
 				// Bad credentials → render the failure template (jop_2_main.htm
 				// per retail's form `failure` arg) with a "Invalid username or

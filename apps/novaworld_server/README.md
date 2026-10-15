@@ -26,12 +26,16 @@ session handshake, the browser/host/play container services, and the legacy
 - **Every thread has its own database connection.** A `db::Database` is used by
   one thread at a time: its row counts, its error text and any open transaction
   belong to the connection. `main()` owns one `db::ConnectionPool` on
-  `DATABASE_URL` (at most `DATABASE_POOL_MAX` connections); the main thread and
-  the gate and NW UDP receive threads each hold a connection for their lifetime
-  (the listeners lease theirs in `start()`, so a database that cannot be reached
-  stops the boot), each HTTP request leases one for the handler, and
-  `erase_lobby_state` (run from the NW UDP thread and from the main thread's
-  `on_lost`) leases one per call. A `db::Error` carries the server's SQLSTATE
+  `DATABASE_URL` (at most `DATABASE_POOL_MAX` connections). A thread holds one
+  lease at a time, and code holding one hands its `db::Database&` to what it calls
+  (a second lease on one thread can wait on itself once the pool is out; a debug
+  build asserts it). The gate and NW UDP receive threads each lease a connection
+  for their lifetime (each thread leases its own, and `start()` waits for it, so a
+  database that cannot be reached stops the boot); the main thread holds one for
+  the boot's work and one for its tick loop, and none while it starts or stops the
+  listeners and workers; each HTTP request leases one for the handler; and
+  `erase_lobby_state` (the `on_lost` sink, run on the NW UDP thread and on the main
+  thread) writes on the calling thread's own. A `db::Error` carries the server's SQLSTATE
   (`unique_violation()`, `lock_timeout()`, `connection_lost()`) and its text
   names the failing statement, never a bound value, so it goes to the server
   log alone: a reply to a database failure carries only its error code
@@ -53,7 +57,7 @@ session handshake, the browser/host/play container services, and the legacy
   per packet.
 - **Each listener's `start()` holds its port before the boot goes on.** The gate and
   NW UDP listeners bind their socket in `start()` and move it into the receive
-  thread (with the thread's lease), so the port they report is the one they serve,
+  thread (which leases its connection), so the port they report is the one they serve,
   also with port 0 (the OS's pick). The HTTP listener's `start()` returns once Crow
   serves (Crow's first tick tells it, with the port Crow bound). A bind that fails
   stops the boot.
@@ -71,11 +75,11 @@ session handshake, the browser/host/play container services, and the legacy
   PID namespace's init (pid_namespaces(7)), so the compose files run it under
   Docker's init (`init: true`), which is PID 1 and forwards both signals; a bare
   `docker run` of the image needs `--init` for the same. The tick loop sees the flag
-  within one tick and stops in order: the HTTP listener (Crow's threads joined, a
-  held-open request included), then the gate and NW UDP receive threads (each
-  returns its lease), then the connections (`Shutdown`). As `main()` returns, its
-  locals go in reverse declaration order, so the main lease and then the pool
-  (declared first) close last. The HTTP
+  within one tick and stops in order: the main loop's lease back to the pool, the
+  HTTP listener (Crow's threads joined, a held-open request included), then the
+  gate and NW UDP receive threads (each returns its lease), then the connections
+  (`Shutdown`). As `main()` returns, its locals go in reverse declaration order, so
+  the pool (declared first) closes last. The HTTP
   listener clears Crow's own signal set (`signal_clear()`), which would otherwise
   take both signals and stop only Crow.
 

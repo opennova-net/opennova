@@ -157,11 +157,13 @@ public:
 	// hands the ticket's tokens back and remembers the address for the
 	// account, unless the account has left `credentials_gen`, the generation
 	// the password check read, since (record_login_address); a wrong password
-	// keeps the tokens spent.
+	// keeps the tokens spent. Both run on `db`, the login's own connection (a
+	// thread holds one lease at a time).
 	int64_t take_login_address(LoginRoute route, const std::string &ip);
-	int64_t begin_password_check(LoginRoute route, const std::string &username,
-	                             const std::string &ip, LoginTicket &ticket);
-	void password_accepted(const LoginTicket &ticket, int64_t user_id, int64_t credentials_gen);
+	int64_t begin_password_check(db::Database &db, LoginRoute route, const std::string &username,
+			const std::string &ip, LoginTicket &ticket);
+	void password_accepted(
+			db::Database &db, const LoginTicket &ticket, int64_t user_id, int64_t credentials_gen);
 
 	// POST /api/register's per-address brake: 0, or the Retry-After seconds.
 	int64_t take_register(const std::string &ip);

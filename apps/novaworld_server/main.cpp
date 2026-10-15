@@ -364,29 +364,33 @@ int main() {
 	db_options.url = config.database_url;
 	db_options.password = config.database_password;
 	// Every thread that touches the database owns its connection (Database is
-	// single-threaded): this thread, the gate's and the NW UDP listener's
-	// receive threads each hold one for their lifetime (the listeners lease
-	// theirs in start(), which fails the boot when the connect does); each HTTP
-	// request and each erase_lobby_state call leases one for the call. The pool
-	// outlives every listener (declared first, destroyed last).
+	// single-threaded), and a thread holds one lease at a time (database.h):
+	// this thread holds one for the boot's work, none while it starts and
+	// stops the listeners and workers (each leases its own, some of them on
+	// this thread), and one for the main loop; the gate's and the NW UDP
+	// listener's receive threads each lease one for their lifetime (start()
+	// waits for it, failing the boot when the connect does); each HTTP
+	// request leases one for the call, and erase_lobby_state writes on the
+	// calling thread's. The pool outlives every listener (declared first,
+	// destroyed last).
 	std::unique_ptr<db::ConnectionPool> db_pool;
-	std::optional<db::ConnectionPool::Lease> main_lease;
+	std::optional<db::ConnectionPool::Lease> boot_lease;
 	try {
 		db_pool = std::make_unique<db::ConnectionPool>(db_options, config.database_pool_max);
-		main_lease.emplace(db_pool->acquire());
+		boot_lease.emplace(db_pool->acquire());
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[boot] FATAL: open db failed: %s\n", e.what());
 		return 1;
 	}
-	db::Database &dbh = **main_lease;
+	db::Database &boot_db = **boot_lease;
 
 	// The migrations and the seeds under one hold of the migration lock.
 	try {
-		const db::SessionLock migrating(dbh, db::kMigrationLock);
-		auto r = db::run_migrations(dbh, config.migrations_dir);
+		const db::SessionLock migrating(boot_db, db::kMigrationLock);
+		auto r = db::run_migrations(boot_db, config.migrations_dir);
 		std::printf("[boot] migrations: %zu applied, %zu skipped\n",
 		            r.applied.size(), r.skipped.size());
-		apply_seed(dbh, config.seed_dir, config.seed_dev_users);
+		apply_seed(boot_db, config.seed_dir, config.seed_dev_users);
 	} catch (const std::exception &e) {
 		std::fprintf(stderr, "[boot] FATAL: migrations failed: %s\n", e.what());
 		return 1;
@@ -398,7 +402,7 @@ int main() {
 	if (!config.bootstrap_admin.empty()) {
 		const std::string name = loggable(config.bootstrap_admin);
 		try {
-			const auto result = bootstrap_admin(dbh, config.bootstrap_admin);
+			const auto result = bootstrap_admin(boot_db, config.bootstrap_admin);
 			switch (result.outcome) {
 			case BootstrapAdminResult::Outcome::Promoted:
 				std::printf("[boot] bootstrap admin: '%s' is now the first admin; remove "
@@ -441,14 +445,14 @@ int main() {
 	// surviving retail process will fail anyway, so its prior row is
 	// dead state).
 	try {
-		hostdb::clear_all(dbh);
+		hostdb::clear_all(boot_db);
 		std::printf("[boot] active_hosts + host_players + host key claims cleared (previous-run cleanup)\n");
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[boot] WARN active_hosts clear: %s\n", e.what());
 	}
 #ifdef OPENNOVA_HTTP_ENABLED
 	try {
-		clear_all_active_user_sessions(dbh);
+		clear_all_active_user_sessions(boot_db);
 		std::printf("[boot] active_user_sessions cleared (previous-run cleanup)\n");
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[boot] WARN active_user_sessions clear: %s\n", e.what());
@@ -517,7 +521,8 @@ int main() {
 	// Billing (the monthly support tiers; billing/): on only when its settings
 	// are complete. Declared before the HTTP listener, whose routes use it; its
 	// sync worker starts once the listeners serve.
-	BillingStack billing_stack = make_billing(billing::billing_config_from_env(), *db_pool, dbh);
+	BillingStack billing_stack =
+			make_billing(billing::billing_config_from_env(), *db_pool, boot_db);
 	SessionStore sessions;
 	HttpListener http(manager, *db_pool, sessions);
 	http.set_unknown_tracker(&unknown_tracker);
@@ -532,6 +537,11 @@ int main() {
 	http.set_admin_links(admin_links.get());
 	// A start's at_capacity and the list's `full` ask the fleet's planner.
 	http.set_fleet_placement(hosted_fleet.fleet.placement);
+#endif
+	// The boot's work is done: the listeners and workers below lease their own
+	// connections, some of them on this thread, which then holds none.
+	boot_lease.reset();
+#ifdef OPENNOVA_HTTP_ENABLED
 	if (!http.start(listening)) {
 		std::fprintf(stderr, "[boot] FATAL: HTTP listener start failed\n");
 		return 1;
@@ -617,8 +627,22 @@ int main() {
 	}
 #endif
 
+	// The main loop's connection: the heartbeat's counts, the unknown-message
+	// flush, the sweeps, and the lobby cleanup for a connection the manager's
+	// tick drops (erase_lobby_state, on this thread's lease). Released before
+	// the shutdown below, which stops the threads (leasing on this one).
+	int exit_code = 0;
+	std::optional<db::ConnectionPool::Lease> main_lease;
+	try {
+		main_lease.emplace(db_pool->acquire());
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[boot] FATAL: the main loop's connection: %s\n", e.what());
+		exit_code = 1;
+	}
+
 	install_signal_handlers();
-	std::printf("[boot] ready. Ctrl+C to stop.\n");
+	if (main_lease)
+		std::printf("[boot] ready. Ctrl+C to stop.\n");
 
 	// --- Main loop: tick the connection manager ---------------------------
 	uint64_t last_host_sweep_ms = 0;
@@ -627,7 +651,8 @@ int main() {
 	uint64_t launch_failures_reported = 0;
 	uint64_t webhook_rejects_reported = 0;
 #endif
-	while (!g_shutdown.load()) {
+	while (main_lease && !g_shutdown.load()) {
+		db::Database &dbh = **main_lease;
 		std::this_thread::sleep_for(
 			std::chrono::milliseconds(config.tick_interval_ms));
 		using namespace std::chrono;
@@ -735,11 +760,14 @@ int main() {
 		}
 	}
 
-	// The HTTP listener first (Crow's threads joined: no request still holds a
-	// lease), then the gate and NW UDP receive threads (each returns its lease
-	// as it exits), then the connections. As main() returns, its locals are
-	// destroyed in reverse declaration order, so main_lease and then the pool
-	// (declared first) go last, closing every connection.
+	// This thread's lease first (what stops below leases on this thread: the
+	// NW UDP listener's stop() and the manager's shutdown clean up their lobby
+	// rows), then the HTTP listener (Crow's threads joined: no request still
+	// holds a lease), then the gate and NW UDP receive threads (each returns
+	// its lease as it exits), then the connections. As main() returns, its
+	// locals are destroyed in reverse declaration order, so the pool (declared
+	// first) goes last, closing every connection.
+	main_lease.reset();
 #ifdef OPENNOVA_HTTP_ENABLED
 	// The supervisor's thread first (no pass runs from here on), then the admin
 	// links while their servers still run (each logged-in session ends with
@@ -782,5 +810,5 @@ int main() {
 	nwudp.stop();
 	manager.shutdown();
 	std::printf("==== opennova-novaworld-server stopped ====\n");
-	return 0;
+	return exit_code;
 }

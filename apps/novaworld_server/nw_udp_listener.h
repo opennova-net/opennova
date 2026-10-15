@@ -123,12 +123,12 @@ public:
 	explicit NwUdpListener(ConnectionManager &manager);
 	~NwUdpListener();
 
-	// Optional DB pool. When set, start() leases one connection (returning
-	// false when it cannot be opened) and hands it to the receive thread for
-	// its lifetime, which gives it to the lobby session to persist host state
-	// to active_hosts / host_players (Phase I.2/I.3); erase_lobby_state leases
-	// its own, since it also runs on the main thread (the ConnectionManager's
-	// on_lost from tick(), and stop()).
+	// Optional DB pool. When set, the receive thread leases one connection for
+	// its lifetime (start() waits for it, returning false when it cannot be
+	// opened) and gives it to the lobby session to persist host state to
+	// active_hosts / host_players (Phase I.2/I.3); erase_lobby_state, which
+	// also runs on the main thread (the ConnectionManager's on_lost from
+	// tick(), and stop()), writes on the calling thread's own connection.
 	void set_db_pool(opennova::db::ConnectionPool *pool) { db_pool_ = pool; }
 
 	// Forward the reflect-endpoint override (the client's NovaWorld session
@@ -223,7 +223,13 @@ public:
 	// concurrent retail processes both send ci=0x00000001, so the second
 	// AUTH overwrote the first's per-connection state. PeerAddr is the
 	// only reliable per-process key for loopback testing.
-	void erase_lobby_state(const PeerAddr &peer, const char *reason);
+	//
+	// The rows go on `db`, the calling thread's own connection, when the
+	// caller has it to hand; with none, on the one the calling thread holds
+	// its lease on (ConnectionPool::leased_by_this_thread: the on_lost sink
+	// runs on the receive thread for a GOODBYE or a replacing Hello, and on
+	// main for a timeout or the shutdown), else on one leased for the call.
+	void erase_lobby_state(const PeerAddr &peer, const char *reason, db::Database *db = nullptr);
 
 private:
 	void run_loop(opennova::net::ScopedSocket socket,

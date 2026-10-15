@@ -530,10 +530,13 @@ int64_t make_account(Harness &h, const std::string &username, const std::string 
 
 // A HOSTKEY recorded for `user` the way /NWHost.dll records one for its retail
 // login: at the account's credentials generation now. True when recorded.
+bool record_key_for(opennova::db::Database &db, const std::string &key, int64_t user) {
+	const auto account = nws::get_user_by_id(db, user);
+	return account && opennova::hostdb::record_host_key(db, key, user, account->credentials_gen);
+}
+
 bool record_key_for(Harness &h, const std::string &key, int64_t user) {
-	auto conn = h.pool.acquire();
-	const auto account = nws::get_user_by_id(*conn, user);
-	return account && opennova::hostdb::record_host_key(*conn, key, user, account->credentials_gen);
+	return record_key_for(*h.pool.acquire(), key, user);
 }
 
 // The site role an admin gives an account (PUT /api/admin/users/<id> with the
@@ -3673,10 +3676,16 @@ int test_reset_during_login(Harness &h) {
 	const int64_t id = make_account(h, "race_user", "pw-race");
 	TEST_EXPECT(id > 0);
 	const std::vector<std::string> pin = { "Cookie: PERSISTENTEXPRESSLOGINDATA=pin-race-user" };
+	// Another connection's write: on a thread of its own, since the seam runs
+	// on the login's thread, which holds the login's lease (one per thread).
 	auto reset = [&h](int64_t user_id) {
-		nws::UpdateUserParams p;
-		p.password_plaintext = "pw-race";
-		return nws::update_user(*h.pool.acquire(), user_id, p).ok;
+		bool ok = false;
+		std::thread([&h, user_id, &ok] {
+			nws::UpdateUserParams p;
+			p.password_plaintext = "pw-race";
+			ok = nws::update_user(*h.pool.acquire(), user_id, p).ok;
+		}).join();
+		return ok;
 	};
 	auto generation = [&h, id] {
 		return nws::get_user_by_id(*h.pool.acquire(), id)->credentials_gen;
@@ -4237,8 +4246,12 @@ std::string error_of_reply(const net::HttpReply &reply) {
 
 // Every hosted row still stopping, ended as the supervisor would end it (the
 // harness runs none), so the cases after see no live server.
+void end_stopping_servers(opennova::db::Database &db) {
+	db.exec("UPDATE hosted_servers SET state = 'stopped' WHERE state = 'stopping';");
+}
+
 void end_stopping_servers(Harness &h) {
-	h.pool.acquire()->exec("UPDATE hosted_servers SET state = 'stopped' WHERE state = 'stopping';");
+	end_stopping_servers(*h.pool.acquire());
 }
 
 // The hosted servers' routes (hosted/hosted_routes.h; the harness listener runs
@@ -5121,7 +5134,7 @@ int test_admin_fleet_routes(Harness &h) {
 	TEST_EXPECT(service.ok);
 	hosted::set_service_account(*db, running, service.id);
 	const std::string key = "AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIIIJJJJKKKKLLLL";
-	TEST_EXPECT(record_key_for(h, key, service.id));
+	TEST_EXPECT(record_key_for(*db, key, service.id));
 	const uint32_t rid = 0x0F1EE7u;
 	{
 		opennova::hostdb::HostRow row;
@@ -5270,7 +5283,7 @@ int test_admin_fleet_routes(Harness &h) {
 			hosted::FleetMachineState::Ended, "by the test"));
 	opennova::hostdb::remove_host_by_rid(*db, rid);
 	for (const int64_t id : { running, waiting }) hosted::request_stop(*db, id, "by the test");
-	end_stopping_servers(h);
+	end_stopping_servers(*db);
 	TEST_EXPECT(nws::delete_service_account(*db, service.id).ok);
 	db->exec("DELETE FROM billing_subscriptions WHERE stripe_subscription_id = 'sub_fleet_ben';");
 	return 0;
@@ -5290,7 +5303,8 @@ int test_hosted_stats_routes(Harness &h) {
 	const int64_t owner = make_account(h, "stats_owner", "pw-stats-owner");
 	const int64_t other = make_account(h, "stats_other", "pw-stats-other");
 	TEST_EXPECT(owner > 0 && other > 0);
-	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), owner, 2).ok && nws::set_comp_servers(*h.pool.acquire(), other, 1).ok);
+	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), owner, 2).ok);
+	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), other, 1).ok);
 	const std::string owner_s = login_token(h, "10.54.0.1", "stats_owner", "pw-stats-owner");
 	const std::string other_s = login_token(h, "10.54.0.2", "stats_other", "pw-stats-other");
 	TEST_EXPECT(!owner_s.empty() && !other_s.empty());
@@ -5317,7 +5331,7 @@ int test_hosted_stats_routes(Harness &h) {
 	TEST_EXPECT(service.ok);
 	hosted::set_service_account(*db, running, service.id);
 	const std::string key = "LLLLKKKKJJJJIIIIHHHHGGGGFFFFEEEEDDDDCCCCBBBBAAAA";
-	TEST_EXPECT(record_key_for(h, key, service.id));
+	TEST_EXPECT(record_key_for(*db, key, service.id));
 	const uint32_t rid = 0x05A75u;
 	{
 		opennova::hostdb::HostRow row;
@@ -5439,7 +5453,7 @@ int test_hosted_stats_routes(Harness &h) {
 	// Leave no live server for the cases after.
 	opennova::hostdb::remove_host_by_rid(*db, rid);
 	for (const int64_t id : { running, others }) hosted::request_stop(*db, id, "by the test");
-	end_stopping_servers(h);
+	end_stopping_servers(*db);
 	TEST_EXPECT(nws::delete_service_account(*db, service.id).ok);
 	return 0;
 }
