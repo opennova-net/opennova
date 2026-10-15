@@ -7,12 +7,10 @@ ImGui context and calls `draw_frame` once per frame between `NewFrame` and
 
 The Game viewport and Stats window start open; the other inspection windows
 open through the Windows menu (grouped World / Simulation / Render / Network /
-Tools, ImGui's demo under Help) or a world pick. Dear ImGui, the pass, its
-overlay canvas and the tool kit compile with `OPENNOVA_IMGUI`, on when either
-product wants ImGui (the OpenNova Editor's windows sit on the same pass, ADR
-0046 d11); the game's windows compile only with `OPENNOVA_DEVTOOLS`, which is
-off for release GDExtensions and the web build. The frame-stats board remains
-available in every flavour.
+Tools, ImGui's demo under Help) or a world pick. Dear ImGui, the pass and the
+windows compile only with `OPENNOVA_DEVTOOLS`, which is off for release
+GDExtensions and the web build. The frame-stats board remains available in
+every flavour.
 
 What is here:
 
@@ -31,8 +29,8 @@ What is here:
 
 ## The tool kit
 
-`ui_kit.h` (`devtools::ui_kit`, ImGui-free) is the one set of pieces both
-products' windows draw with: `WrapRow` (a row that wraps whole controls) with
+`ui_kit.h` (`devtools::ui_kit`, ImGui-free) is the one set of pieces the
+windows on the pass draw with: `WrapRow` (a row that wraps whole controls) with
 the measures it takes, `tool` (a button whose tooltip says what it does, or
 while it cannot act, why not; a disabled one never acts), `check`,
 `row_tools` (a list's Add / Duplicate / Remove / Up / Down), `path_field`,
@@ -41,8 +39,7 @@ control over a value its owner holds), `fit` / `fit_middle` / `clipped_text`
 (text cut to its cell), `tooltip` (every window's hover text, a disabled
 item's too), `empty_state` and `note`. A window never hand-rolls a disabled
 button's reason (`BeginDisabled` + `IsItemHovered` + `SetTooltip`): `tool` or
-`tooltip` carries it. The editor's kit (`editor/ui/ui_kit.h`) is this one plus
-the marks of the editor's own types; it never declares a name this kit has.
+`tooltip` carries it.
 
 ## The control board
 
