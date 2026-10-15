@@ -972,7 +972,9 @@ the known addresses and the credentials generation below.
 
 Every source but `main.cpp` builds as the static library
 `opennova_novaworld_server_core` (mirroring `opennova_serve_core`); the exe is
-`main.cpp` over it. The HTTP sources (`http_listener`, `host_routes`, `cd_keys`,
+`main.cpp` over it. All of it, the service target and their tests exist only with
+`OPENNOVA_NOVAWORLD_SERVICE=ON` (the root CMake option, off by default; the Linux CI
+jobs and the server image turn it on). The HTTP sources (`http_listener`, `host_routes`, `cd_keys`,
 `cd_key_routes`, `web_access`,
 `web_session`, `rate_limiter`, `template_engine`, `session_store`, `auth`, and the
 hosted servers' `hosted/`) join the core only under

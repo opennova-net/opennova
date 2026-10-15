@@ -61,10 +61,12 @@ cmake --build build --config Release
 ctest --test-dir build --output-on-failure -C Release
 ```
 
-When you are working on the NovaWorld server, configure with `-DBUILD_NOVAWORLD_HTTP=ON`
-(it fetches Asio + Crow and adds the HTTP/API layer to `apps/novaworld_server`, which
-otherwise builds with only its UDP listeners; it is OFF by default so the
-Windows/macOS hot path stays lean), and scope `ctest` to the net stack:
+When you are working on the NovaWorld server (Linux only), configure with
+`-DOPENNOVA_NOVAWORLD_SERVICE=ON -DBUILD_NOVAWORLD_HTTP=ON`: the first defines the
+service, `apps/novaworld_server` and their tests, the second fetches Asio + Crow and adds
+the HTTP/API layer to the server, which otherwise builds with only its UDP listeners.
+Both are OFF by default, so the game and tool builds stay lean. Then scope `ctest` to the
+net stack:
 
 ```bash
 ctest --test-dir build --output-on-failure -R "gate|lobby|novaworld|napi|nwu|crypto|pubcrypto|epask|url_cipher|session|gsb|protocol_message"
@@ -193,14 +195,11 @@ env vars (`apps/novaworld_server/server_config.cpp`), and the defaults boot a fr
 checkout from the repo root with no setup:
 
 ```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_NOVAWORLD_HTTP=ON
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DOPENNOVA_NOVAWORLD_SERVICE=ON -DBUILD_NOVAWORLD_HTTP=ON
 cmake --build build --config Release --target opennova_novaworld_server
 # run from the repo root so the default relative paths resolve:
 ONNET_PUBLIC_HOST=127.0.0.1 ADMIN_API_TOKEN=dev-admin-token ./build/apps/novaworld_server/opennova-novaworld-server
 ```
-
-On Windows multi-config generators, the executable is under the selected config directory
-and has `.exe`, for example `build/apps/novaworld_server/Release/opennova-novaworld-server.exe`.
 
 Overridable env vars (defaults in parentheses): `ONNET_PUBLIC_HOST` (`127.0.0.1`),
 `ONNET_GATE_UDP_PORT` (`7597`), `ONNET_NW_UDP_PORT` (`64206`), `ONNET_HTTP_PORT` (`8080`),

@@ -2,7 +2,8 @@ name: Net stack (Linux)
 
 # The Linux net leg the NovaWorld images and serve image workflows gate their
 # image builds on:
-# the standalone novaworld server with the Crow HTTP layer ON plus the
+# the standalone novaworld server (OPENNOVA_NOVAWORLD_SERVICE) with the Crow
+# HTTP layer ON plus the
 # net-scoped ctests, on the deploy target's OS and flag set, and a Linux
 # compile of the mission-kernel embedders (extract, wire, opennova-serve) with
 # the kernel's ungated ctests. ci.yml's test-linux job builds the same tree (same
@@ -45,9 +46,11 @@ jobs:
           mode: restore
 
       # The configure scripts/build.sh runs for ci.yml's test-linux (its
-      # --cmake-arg adds the HTTP flag), so the cached objects match.
-      - name: Configure (BUILD_NOVAWORLD_HTTP=ON)
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_NOVAWORLD_HTTP=ON
+      # --cmake-args add the service and HTTP flags), so the cached objects match.
+      - name: Configure (OPENNOVA_NOVAWORLD_SERVICE=ON, BUILD_NOVAWORLD_HTTP=ON)
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DOPENNOVA_NOVAWORLD_SERVICE=ON -DBUILD_NOVAWORLD_HTTP=ON
 
       - name: Build server + net tests + the kernel embedders
         run: |

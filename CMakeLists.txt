@@ -7,8 +7,23 @@ if(POLICY CMP0168)
     cmake_policy(SET CMP0168 NEW)
 endif()
 
+# The NovaWorld service (the server-side lobby and persistence leg: the
+# opennova_novaworld_service target, apps/novaworld_server and their tests)
+# builds only when asked. It runs on Linux (the server image, the Linux CI
+# jobs); the game, the tools and opennova-serve never need it.
+option(OPENNOVA_NOVAWORLD_SERVICE
+    "Build the NovaWorld service (opennova_novaworld_service, apps/novaworld_server, their tests)" OFF)
+# Its HTTP layer: Crow and Asio, fetched at configure time.
+option(BUILD_NOVAWORLD_HTTP "Fetch + build Crow for the novaworld HTTP layer" OFF)
+if(BUILD_NOVAWORLD_HTTP AND NOT OPENNOVA_NOVAWORLD_SERVICE)
+    message(FATAL_ERROR "BUILD_NOVAWORLD_HTTP is the NovaWorld service's HTTP layer: "
+        "configure with -DOPENNOVA_NOVAWORLD_SERVICE=ON as well")
+endif()
+
 # Vendored dependencies used by the native network stack.
-add_subdirectory(third_party/sqlite)
+if(OPENNOVA_NOVAWORLD_SERVICE)
+    add_subdirectory(third_party/sqlite)
+endif()
 add_subdirectory(third_party/bcrypt)
 # Vendored miniz: the BFC1 container decoder's inflate (engine/formats/bfc1).
 add_subdirectory(third_party/miniz)
@@ -27,7 +42,6 @@ endif()
 add_subdirectory(engine)
 
 # Optional standalone HTTP frontend for the novaworld server.
-option(BUILD_NOVAWORLD_HTTP "Fetch + build Crow for the novaworld HTTP layer" OFF)
 if(BUILD_NOVAWORLD_HTTP)
     include(FetchContent)
     FetchContent_Declare(asio
@@ -53,7 +67,9 @@ add_subdirectory(apps/common)
 add_subdirectory(apps/3di)
 add_subdirectory(apps/extract)
 add_subdirectory(apps/lan_probe)
-add_subdirectory(apps/novaworld_server)
+if(OPENNOVA_NOVAWORLD_SERVICE)
+    add_subdirectory(apps/novaworld_server)
+endif()
 add_subdirectory(apps/parity)
 add_subdirectory(apps/serve)
 add_subdirectory(apps/wire)

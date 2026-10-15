@@ -27,8 +27,8 @@ COPY . .
 # Configure the whole tree (cheap) but compile only the server target and its
 # lib deps: the engine groups and apps/common, with no HTTP layer and no Godot.
 # The configure is .github/workflows/net-linux.yml's, which builds and tests
-# opennova_serve on Linux, minus its BUILD_NOVAWORLD_HTTP (serve never links
-# the service).
+# opennova_serve on Linux, minus its NovaWorld service flags (serve never
+# links the service).
 RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
     && cmake --build build --target opennova_serve
 

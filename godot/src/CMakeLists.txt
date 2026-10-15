@@ -30,12 +30,6 @@ set(GODOTCPP_BUILD_PROFILE "${CMAKE_CURRENT_SOURCE_DIR}/godot_cpp_profile.json"
     CACHE PATH "godot-cpp build profile (generated)" FORCE)
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${GODOTCPP_BUILD_PROFILE}")
 add_subdirectory(../../third_party/godot-cpp godot-cpp)
-# sqlite is only needed to DEFINE the novaworld service target inside engine/;
-# the extension links opennova_runtime (which PUBLIC-links the wire-only
-# opennova_net: codec + session/gate legs; the in-match session and
-# replication live in runtime/, ADR 0043 d4), NEVER opennova_novaworld_service,
-# so no sqlite or service code ends up in the binary.
-add_subdirectory(../../third_party/sqlite opennova_sqlite)
 # Vendored miniz: the BFC1 container decoder's inflate (engine/formats/bfc1).
 add_subdirectory(../../third_party/miniz opennova_miniz)
 # rgbcx: the authoring DXT encoder (engine/runtime/renderer/dxt_encode), which the
@@ -51,7 +45,11 @@ endif()
 if(OPENNOVA_DEVTOOLS)
     add_subdirectory(../../third_party/imgui opennova_imgui)
 endif()
-# The engine (Shape A group targets — see engine/CMakeLists.txt).
+# The engine (Shape A group targets — see engine/CMakeLists.txt). The extension
+# links opennova_runtime (which PUBLIC-links the wire-only opennova_net: codec +
+# session/gate legs; the in-match session and replication live in runtime/,
+# ADR 0043 d4), never the NovaWorld service, which this root never defines
+# (OPENNOVA_NOVAWORLD_SERVICE stays off here).
 add_subdirectory(../../engine opennova_engine)
 
 set(TARGET_NAME "opennova")

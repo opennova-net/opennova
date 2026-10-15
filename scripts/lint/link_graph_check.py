@@ -78,6 +78,10 @@ SQLITE_RULE_REASON = (
     "sqlite containment (Shape A guardrail): only opennova_novaworld_service "
     "links opennova_sqlite; consumers must link the service target directly"
 )
+# Defined only when the build turns OPENNOVA_NOVAWORLD_SERVICE on (the repo
+# root's option, off by default): a graphviz dump of a tree configured without
+# it lacks them, which vacates no rule. The files walk always sees them.
+SERVICE_GATED = {SQLITE_TARGET, SERVICE_TARGET}
 
 # (reason, from-targets, to-targets, targets allowed to be absent from the
 # graph without a warning — e.g. the adapter target lives in the godot/src
@@ -272,7 +276,8 @@ def main() -> int:
             # A renamed/deleted target silently vacates its rule — surface
             # that, except for targets that legitimately live in the other
             # CMake root / behind a build option.
-            if name not in known and name not in optional and name not in warned:
+            gated = name in SERVICE_GATED and source != "files"
+            if name not in known and name not in optional and not gated and name not in warned:
                 warned.add(name)
                 print(f"[linkgraph] WARNING: rule target '{name}' not in the "
                       f"{source} graph (renamed? update link_graph_check.py)")
@@ -281,14 +286,11 @@ def main() -> int:
             if path:
                 violations.append(f"{' -> '.join(path)}  [{reason}]")
 
-    if SQLITE_TARGET not in known and SQLITE_TARGET not in warned:
-        warned.add(SQLITE_TARGET)
-        print(f"[linkgraph] WARNING: rule target '{SQLITE_TARGET}' not in the "
-              f"{source} graph (renamed? update link_graph_check.py)")
-    if SERVICE_TARGET not in known and SERVICE_TARGET not in warned:
-        warned.add(SERVICE_TARGET)
-        print(f"[linkgraph] WARNING: rule target '{SERVICE_TARGET}' not in the "
-              f"{source} graph (renamed? update link_graph_check.py)")
+    for name in (SQLITE_TARGET, SERVICE_TARGET):
+        if name not in known and name not in warned and source == "files":
+            warned.add(name)
+            print(f"[linkgraph] WARNING: rule target '{name}' not in the "
+                  f"{source} graph (renamed? update link_graph_check.py)")
     violations.extend(check_sqlite_containment(edges))
 
     edge_count = sum(len(v) for v in edges.values())

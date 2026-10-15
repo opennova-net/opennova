@@ -13,6 +13,7 @@
 #                    skips the suite attestation (scripts/ci/test_suites.py),
 #                    which needs every selected test in the report
 #   --cmake-arg ARG  pass ARG to the root configure (repeatable), e.g.
+#                    -DOPENNOVA_NOVAWORLD_SERVICE=ON and
 #                    -DBUILD_NOVAWORLD_HTTP=ON as CI's Linux job does
 #
 # The root tree configures once: later runs go straight to the build, which
