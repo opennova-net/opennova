@@ -100,7 +100,7 @@ describe('the start, the stop and one server', () => {
     if (result.ok) return;
     expect(result.error).toMatchObject({ code: 'server_limit', status: 409, maxServers: 2, used: 2 });
     expect(result.error.message).toContain('You may run 2 servers at once');
-    expect(result.error.message).toContain('your slot frees up in about a minute');
+    expect(result.error.message).toContain('counts toward your limit until it has stopped, in about a minute');
     expect(linksToSupportTier(result.error.code)).toBe(true);
   });
 

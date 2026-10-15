@@ -94,7 +94,7 @@ describe('ServersPage', () => {
     expect(wrapper.get('#servers-allowance').text()).toBe('3 of 3 servers used');
     expect(wrapper.findAll('a').some((a) => a.text() === 'Start a server')).toBe(false);
     expect(wrapper.text()).toContain('All 3 servers you may run are live.');
-    expect(wrapper.text()).toContain('your slot frees up in about a minute');
+    expect(wrapper.text()).toContain('counts toward your limit until it has stopped, in about a minute');
   });
 
   it('says why a past-due account cannot start', async () => {

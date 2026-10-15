@@ -109,7 +109,7 @@ export function linksToSupportTier(code: HostedErrorCode): boolean {
 // Why a stop does not free a place at once (the service counts a stopping
 // server as live until its machine reports it gone).
 export const STOPPING_STILL_COUNTS =
-  'A stopping server still counts until it has stopped: your slot frees up in about a minute.';
+  'A stopping server still counts toward your limit until it has stopped, in about a minute.';
 
 // "1 server", "3 servers".
 function servers(n: number): string {
