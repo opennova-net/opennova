@@ -533,6 +533,9 @@ int main() {
 	// listener, whose routes run commands on them, so they outlive it.
 	std::unique_ptr<hosted::AdminLinks> admin_links;
 	if (hosted_provider) admin_links = std::make_unique<hosted::AdminLinks>(db_pool.get());
+	// The hosted servers' limits hold (hosted/limits_hold.h): the supervisor
+	// sets it, the admin's billing reconcile clears it; it outlives both.
+	hosted::LimitsHold limits_hold;
 	std::unique_ptr<hosted::Supervisor> supervisor;
 	listening.hosted_provider = hosted_provider ? hosted_provider->name() : "none";
 	// Billing (the monthly support tiers; billing/): on only when its settings
@@ -544,6 +547,7 @@ int main() {
 	http.set_unknown_tracker(&unknown_tracker);
 	http.set_watchdog(&watchdog);
 	http.set_billing(billing_stack.billing.get());
+	http.set_limits_hold(&limits_hold);
 	// The admin host routes push ServerCommand / ServerStopHosting through the
 	// NW UDP listener, which outlives this one (stopped after it below).
 	http.set_nw_udp_listener(&nwudp);
@@ -602,6 +606,7 @@ int main() {
 			       HostPushResult::Queued;
 		});
 		supervisor->set_admin_links(admin_links.get());
+		supervisor->set_limits_hold(&limits_hold);
 		supervisor->start();
 	}
 	// The billing worker: its first pass reconciles with Stripe and checks the prices.

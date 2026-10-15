@@ -372,6 +372,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->cd_keys.configure(config);
 	impl_->cd_keys.register_routes(impl_->app);
 	impl_->billing.set_billing(billing_);
+	impl_->billing.set_limits_hold(limits_hold_);
 	impl_->billing.register_routes(impl_->app);
 	if (bootstrap_store_ != nullptr)
 		hosted::register_bootstrap_route(impl_->app, *bootstrap_store_, bootstrap_admitted_);

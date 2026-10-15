@@ -12,10 +12,13 @@
 // refusal is an error code with our own message, never Stripe's or the
 // database's text. No Stripe call runs inside a db::Transaction. Behind
 // ONNET_API_PROXY_ONLY like every /api route (the webhook too: Stripe reaches it
-// through the site's proxy). The HttpListener owns one.
+// through the site's proxy). An admin's reconcile also clears the hosted
+// servers' limits hold (hosted/limits_hold.h), billing on or off, and the
+// admin's view shows it. The HttpListener owns one.
 
 #include "billing.h"
 #include "billing_repository.h"
+#include "hosted/limits_hold.h"
 #include "rate_limiter.h"
 #include "web_access.h"
 
@@ -59,6 +62,8 @@ public:
 
 	// Before register_routes(); null: billing off. It must outlive the routes.
 	void set_billing(Billing *billing) { billing_ = billing; }
+	// The hosted servers' limits hold (null: none); it must outlive the routes.
+	void set_limits_hold(hosted::LimitsHold *hold) { limits_hold_ = hold; }
 	void register_routes(WebApp &app);
 
 private:
@@ -77,6 +82,7 @@ private:
 	WebAccess &access_;
 	db::ConnectionPool &pool_;
 	Billing *billing_ = nullptr;
+	hosted::LimitsHold *limits_hold_ = nullptr;
 	RateLimiter checkout_per_user_{ kCheckoutPerUser };
 	RateLimiter sync_per_user_{ kSyncPerUser };
 };

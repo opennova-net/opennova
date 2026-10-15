@@ -186,6 +186,18 @@ bool contains(const std::string &text, const std::string &part) {
 	return text.find(part) != std::string::npos;
 }
 
+// Whether the server was stopped with `part` in its stop's event: stopping, or
+// already stopped (a server with no machine yet finishes its stop in the pass
+// that asked it).
+bool stopped_with(Database &db, int64_t id, const std::string &part) {
+	const auto row = hosted::find_server(db, id);
+	if (!row || (row->state != State::Stopping && row->state != State::Stopped)) return false;
+	for (const auto &e : hosted::list_events(db, id, 100)) {
+		if (e.to_state == "stopping" && contains(e.detail, part)) return true;
+	}
+	return false;
+}
+
 // The value of `key=` in the credentials file's text.
 std::string credential(const std::string &text, const std::string &key) {
 	const std::string prefix = key + "=";
@@ -1191,8 +1203,7 @@ int test_owner_changes() {
 	const int64_t withdrawn = rig.request("owner_withdrawn");
 	TEST_EXPECT(nws::set_comp_servers(*rig.pool.acquire(), *rig.server(withdrawn)->owner_user_id, 0).ok);
 	rig.tick();
-	TEST_EXPECT(rig.state(withdrawn) == State::Stopping);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), withdrawn), "no hosting entitlement left"));
+	TEST_EXPECT(stopped_with(*rig.pool.acquire(), withdrawn, "hosting entitlement allows 0 hosted servers"));
 	rig.tick();
 	TEST_EXPECT(rig.state(withdrawn) == State::Stopped && rig.fake.launches == 2);
 
@@ -1209,7 +1220,7 @@ int test_owner_changes() {
 	subscribe(*rig.pool.acquire(), subscriber, 1, "canceled", "sub_owner");
 	rig.tick();
 	TEST_EXPECT(rig.state(revoked) == State::Stopping);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), revoked), "no hosting entitlement left"));
+	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), revoked), "hosting entitlement allows 0 hosted servers"));
 
 	// The three stopping servers still count against the rig's cap (3): their
 	// listings end (as the stop's push takes them down), the stops finish, and
@@ -1232,8 +1243,11 @@ int test_owner_changes() {
 	TEST_EXPECT(nws::set_comp_servers(*rig.pool.acquire(), *rig.server(crashed)->owner_user_id, 0).ok);
 	rig.advance(rig.config.restart_backoff_ms);
 	rig.tick();
-	TEST_EXPECT(rig.state(crashed) == State::Stopping && rig.fake.launches == launches);
-	TEST_EXPECT(nws::get_user_by_id(*rig.pool.acquire(), service)->credentials_gen == generation);
+	TEST_EXPECT(stopped_with(*rig.pool.acquire(), crashed, "hosting entitlement allows 0 hosted servers") &&
+			rig.fake.launches == launches);
+	// No new credentials: the account is untouched, or gone with the stop's end.
+	const auto account = nws::get_user_by_id(*rig.pool.acquire(), service);
+	TEST_EXPECT(!account || account->credentials_gen == generation);
 	rig.tick();
 	TEST_EXPECT(rig.state(crashed) == State::Stopped);
 	return 0;
@@ -1254,11 +1268,139 @@ int test_limit_at_provisioning() {
 	TEST_EXPECT(rig.state(older) == State::Provisioning && rig.state(newer) == State::Provisioning);
 	TEST_EXPECT(nws::set_comp_servers(*rig.pool.acquire(), owner, 1).ok);
 	rig.tick();
-	TEST_EXPECT(rig.state(older) == State::Booting && rig.state(newer) == State::Stopping);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), newer), "hosting entitlement allows 1 hosted server"));
+	TEST_EXPECT(rig.state(older) == State::Booting &&
+			stopped_with(*rig.pool.acquire(), newer, "hosting entitlement allows 1 hosted server"));
 	TEST_EXPECT(rig.fake.launches == 1);
 	rig.tick();
 	TEST_EXPECT(rig.state(newer) == State::Stopped && rig.state(older) == State::Booting);
+	return 0;
+}
+
+// The owner's own-machine add-on in the billing cache, `quantity` machines.
+void subscribe_machines(Database &db, int64_t user, int64_t quantity, const std::string &id) {
+	namespace billing = opennova::novaworld_server::billing;
+	billing::SubscriptionRow row;
+	row.stripe_subscription_id = id;
+	row.stripe_customer_id = "cus_" + id;
+	row.user_id = user;
+	row.status = "active";
+	row.item = billing::ItemKind::OwnMachine;
+	row.price_id = "price_own";
+	row.quantity = quantity;
+	row.current_period_end = kWall + 30 * 24 * 60 * 60;
+	billing::upsert_subscription(db, row);
+}
+
+// The owners' limits (the supervisor's enforce_limits, each pass's first act):
+// a tier lowered stops the newest servers past it, the oldest kept, the event
+// naming the tier; a past-due tier keeps every server while a start is refused
+// (PastDue); the add-on lowered stops the newest on own machines; a canceled
+// tier stops them all; a stopping server counts toward neither.
+int test_owner_limits() {
+	Rig rig("hosted_limits");
+	rig.config.cap = 20;
+	rig.make_supervisor();
+	auto db = rig.pool.acquire();
+	// Tier 3: three servers.
+	const int64_t ana = make_player(*db, "lim_ana", 0);
+	subscribe(*db, ana, 3, "active", "sub_lim_ana");
+	const int64_t a1 = rig.request_as(ana);
+	const int64_t a2 = rig.request_as(ana);
+	const int64_t a3 = rig.request_as(ana);
+	TEST_EXPECT(a1 > 0 && a2 > a1 && a3 > a2);
+	rig.tick(); // all three picked up
+	TEST_EXPECT(rig.state(a1) == State::Provisioning && rig.state(a3) == State::Provisioning);
+	// Tier 1 now: the two newest stop, the oldest launches.
+	subscribe(*db, ana, 1, "active", "sub_lim_ana");
+	rig.tick();
+	TEST_EXPECT(stopped_with(*db, a3, "its owner's support tier allows 1 hosted server") &&
+			stopped_with(*db, a2, "its owner's support tier allows 1 hosted server") &&
+			!stopped_with(*db, a3, "hosted servers"));
+	TEST_EXPECT(rig.state(a1) == State::Booting);
+	// The stopping ones count toward nothing: a pass stops no more.
+	rig.tick();
+	TEST_EXPECT(rig.state(a1) == State::Booting);
+	TEST_EXPECT(!rig.sup->limits_held());
+
+	// Past due: the servers stay, a start is refused.
+	const int64_t ben = make_player(*db, "lim_ben", 0);
+	subscribe(*db, ben, 2, "active", "sub_lim_ben");
+	const int64_t b1 = rig.request_as(ben);
+	const int64_t b2 = rig.request_as(ben);
+	TEST_EXPECT(b1 > 0 && b2 > b1);
+	rig.tick();
+	subscribe(*db, ben, 2, "past_due", "sub_lim_ben");
+	rig.tick();
+	TEST_EXPECT(hosted::is_live(rig.state(b1)) && rig.state(b1) != State::Stopping);
+	TEST_EXPECT(hosted::is_live(rig.state(b2)) && rig.state(b2) != State::Stopping);
+	TEST_EXPECT(hosted::request_server(*db, ben, valid_settings(), rig.config.data_sets, rig.config.cap, rig.wall)
+						.outcome == hosted::RequestOutcome::PastDue);
+	// Canceled: they stop.
+	subscribe(*db, ben, 2, "canceled", "sub_lim_ben");
+	rig.tick();
+	TEST_EXPECT(stopped_with(*db, b1, "hosting entitlement allows 0 hosted servers"));
+	TEST_EXPECT(stopped_with(*db, b2, "hosting entitlement allows 0 hosted servers"));
+
+	// The add-on: two machines, then one; the newest on an own machine stops,
+	// the shared one stays.
+	const int64_t cy = make_player(*db, "lim_cy", 0);
+	subscribe(*db, cy, 3, "active", "sub_lim_cy");
+	subscribe_machines(*db, cy, 2, "sub_lim_cy_machines");
+	const auto own = [&](bool on_own) {
+		const auto r = hosted::request_server(*db, cy, valid_settings(), rig.config.data_sets, rig.config.cap,
+				rig.wall, on_own);
+		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
+	};
+	const int64_t c1 = own(true);
+	const int64_t c2 = own(false);
+	const int64_t c3 = own(true);
+	TEST_EXPECT(c1 > 0 && c2 > c1 && c3 > c2);
+	TEST_EXPECT(own(true) == 0); // a fourth: every server the tier allows is live
+	rig.tick();
+	subscribe_machines(*db, cy, 1, "sub_lim_cy_machines");
+	rig.tick();
+	TEST_EXPECT(stopped_with(*db, c3, "own-machine add-on covers 1 machine"));
+	TEST_EXPECT(hosted::is_live(rig.state(c1)) && rig.state(c1) != State::Stopping);
+	TEST_EXPECT(hosted::is_live(rig.state(c2)) && rig.state(c2) != State::Stopping);
+	return 0;
+}
+
+// The brake on the brake: a pass that would stop the servers of more owners
+// than max(2, half the owners) stops none, logs, and holds until it is cleared
+// (an admin's billing reconcile); cleared while the cause stands, it holds
+// again; once the cause is down to one owner, the clear lets that one's stop
+// through.
+int test_mass_stop_hold() {
+	Rig rig("hosted_hold");
+	auto db = rig.pool.acquire();
+	const int64_t a = rig.request("hold_a");
+	const int64_t b = rig.request("hold_b");
+	const int64_t c = rig.request("hold_c");
+	TEST_EXPECT(a > 0 && b > 0 && c > 0);
+	rig.tick();
+	for (const int64_t id : { a, b, c })
+		TEST_EXPECT(nws::set_comp_servers(*db, *rig.server(id)->owner_user_id, 0).ok);
+	rig.tick();
+	TEST_EXPECT(rig.sup->limits_held() && !rig.sup->limits_hold_reason().empty());
+	for (const int64_t id : { a, b, c }) TEST_EXPECT(rig.state(id) != State::Stopping && hosted::is_live(rig.state(id)));
+	// Cleared while all three still lapse: held again.
+	rig.sup->clear_limits_hold();
+	rig.tick();
+	TEST_EXPECT(rig.sup->limits_held());
+	for (const int64_t id : { a, b, c }) TEST_EXPECT(rig.state(id) != State::Stopping);
+	// Two restored: still held until cleared.
+	for (const int64_t id : { a, b })
+		TEST_EXPECT(nws::set_comp_servers(*db, *rig.server(id)->owner_user_id, 1).ok);
+	rig.tick();
+	TEST_EXPECT(rig.sup->limits_held() && rig.state(c) != State::Stopping);
+	// A shared hold (main's), cleared as the admin route clears it.
+	hosted::LimitsHold shared;
+	rig.sup->set_limits_hold(&shared);
+	TEST_EXPECT(!rig.sup->limits_held());
+	rig.tick();
+	TEST_EXPECT(stopped_with(*db, c, "hosting entitlement allows 0 hosted servers"));
+	TEST_EXPECT(rig.state(a) != State::Stopping && rig.state(b) != State::Stopping);
+	TEST_EXPECT(!shared.held());
 	return 0;
 }
 
@@ -1787,6 +1929,8 @@ int main(int argc, char **argv) {
 		{ "timeouts_and_health", test_timeouts_and_health },
 		{ "owner_changes", test_owner_changes },
 		{ "limit_at_provisioning", test_limit_at_provisioning },
+		{ "owner_limits", test_owner_limits },
+		{ "mass_stop_hold", test_mass_stop_hold },
 		{ "reconciliation", test_reconciliation },
 		{ "reconcile_provisioning_gone", test_reconcile_provisioning_gone },
 		{ "unlisted_provider", test_unlisted_provider },

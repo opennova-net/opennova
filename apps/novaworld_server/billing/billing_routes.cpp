@@ -483,6 +483,9 @@ crow::response BillingRoutes::admin_billing(const crow::request &req) {
 	else
 		out["last_reconcile_at"] = nullptr;
 	text_or_null(out, "last_reconcile_error", status.last_reconcile_error);
+	// The hosted servers' limits hold: an admin's reconcile clears it.
+	out["limits_hold"] = limits_hold_ != nullptr && limits_hold_->held();
+	text_or_null(out, "limits_hold_reason", limits_hold_ != nullptr ? limits_hold_->reason() : std::string());
 	try {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
@@ -533,10 +536,15 @@ crow::response BillingRoutes::admin_billing(const crow::request &req) {
 }
 
 // POST /api/admin/billing/reconcile — a full reconcile on the worker's next
-// pass, now: 202 {"reconcile": "requested"}. require_admin; 503 billing_disabled.
+// pass, now: 202 {"reconcile": "requested"}. It clears the hosted servers'
+// limits hold first, so the supervisor's next pass judges the owners' limits
+// again (after the reconcile, when it lands first). require_admin; 503
+// billing_disabled (the hold cleared all the same).
 crow::response BillingRoutes::admin_reconcile(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal) return std::move(*caller.refusal);
+	if (limits_hold_ != nullptr && limits_hold_->clear())
+		std::printf("[hosted] the owners' limits hold cleared by an admin's reconcile\n");
 	if (billing_ == nullptr) return disabled();
 	billing_->sync().request_reconcile();
 	std::printf("[billing] reconcile asked for by an admin\n");

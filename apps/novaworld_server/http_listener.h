@@ -32,7 +32,7 @@ struct ServerConfig;
 class SessionStore;
 class NwUdpListener;
 class Watchdog;
-namespace hosted { class AdminLinks; }
+namespace hosted { class AdminLinks; class LimitsHold; }
 namespace billing { class Billing; }
 namespace catalog { struct GameRow; }
 
@@ -100,6 +100,11 @@ public:
 	// listener. Null: billing is off, and those routes answer billing_disabled
 	// (GET /api/billing/tiers answers {"enabled": false}).
 	void set_billing(billing::Billing *billing) { billing_ = billing; }
+
+	// The hosted servers' limits hold (hosted/limits_hold.h), which the admin's
+	// billing reconcile clears and its billing view shows. Set before start();
+	// it must outlive the HTTP listener. Null: none.
+	void set_limits_hold(hosted::LimitsHold *hold) { limits_hold_ = hold; }
 
 	// The cloud machines' bootstrap route (hosted/bootstrap_route.h, POST
 	// /hosted/bootstrap/<id>): registered only with a store, answering only TCP
@@ -225,6 +230,8 @@ private:
 	const Watchdog *watchdog_ = nullptr;
 	// The billing routes' billing (set_billing); null: billing off.
 	billing::Billing *billing_ = nullptr;
+	// The hosted servers' limits hold (set_limits_hold); null: none.
+	hosted::LimitsHold *limits_hold_ = nullptr;
 	// The bootstrap route's tokens and networks (set_hosted_bootstrap); null:
 	// no route.
 	hosted::BootstrapStore *bootstrap_store_ = nullptr;

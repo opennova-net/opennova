@@ -34,6 +34,7 @@
 #include "hosted/admin_link.h"
 #include "hosted/console_commands.h"
 #include "hosted/hosted_repository.h"
+#include "hosted/limits_hold.h"
 #include "hosted/supervisor.h"
 #include "hosted_fake_provider.h"
 #include "http_cookies.h"
@@ -146,6 +147,9 @@ struct Harness {
 	// listener runs with none: billing off).
 	billing_fake::FakeStripeApi *stripe = nullptr;
 	nws::billing::Billing *billing = nullptr;
+	// The first listener's hosted servers' limits hold (no supervisor sets it
+	// here: the billing admin case does by hand).
+	nws::hosted::LimitsHold *limits_hold = nullptr;
 
 	// Every connect, send and recv waits at most `timeout_ms`.
 	net::HttpReply send(const char *method, const std::string &path,
@@ -4739,7 +4743,7 @@ int test_hosted_listing_owner(Harness &h) {
 	TEST_EXPECT(json && str(json["server"]["state"]) == "stopping");
 	const auto &events = json["server"]["events"];
 	TEST_EXPECT(events.size() >= 2 &&
-			str(events[events.size() - 1]["detail"]).find("no hosting entitlement left") != std::string::npos);
+			str(events[events.size() - 1]["detail"]).find("hosting entitlement allows 0 hosted servers") != std::string::npos);
 
 	// A stopping server takes no more commands; the stops on its listing are the
 	// hosted server's: no ServerStopHosting goes out (the supervisor's to send).
@@ -5854,6 +5858,18 @@ int test_billing_admin(Harness &h) {
 	}
 	TEST_EXPECT(listed);
 	TEST_EXPECT(json["duplicates"].t() == crow::json::type::List && json["duplicates"].size() == 0);
+	TEST_EXPECT(!json["limits_hold"].b() && json["limits_hold_reason"].t() == crow::json::type::Null);
+
+	// The hosted servers' limits hold: shown, and cleared by an admin's reconcile.
+	TEST_EXPECT(h.limits_hold->hold("a pass would stop 9 server(s) of 3 of 4 owners"));
+	json = crow::json::load(body_text(h.send("GET", "/api/admin/billing", { kBearer })));
+	TEST_EXPECT(json && json["limits_hold"].b() &&
+			str(json["limits_hold_reason"]) == "a pass would stop 9 server(s) of 3 of 4 owners");
+	TEST_EXPECT(h.send("POST", "/api/admin/billing/reconcile", { kBearer }).code == 202);
+	TEST_EXPECT(!h.limits_hold->held());
+	json = crow::json::load(body_text(h.send("GET", "/api/admin/billing", { kBearer })));
+	TEST_EXPECT(json && !json["limits_hold"].b());
+	billing_pass(h);
 
 	// The relink: its checks, then the orphan made Eli's.
 	auto link = [&h](const std::string &body) {
@@ -6142,11 +6158,13 @@ int main(int argc, char **argv) {
 		nws::billing::Billing billing_service(billing_config, stripe, pool, nws::billing::instance_id(*pool.acquire()));
 		billing_service.sync().pass(nws::billing::unix_now());
 		TEST_EXPECT(billing_service.sync().status().prices_ok);
+		nws::hosted::LimitsHold limits_hold;
 		nws::HttpListener http(manager, pool, sessions);
 		http.set_nw_udp_listener(&nw_udp);
 		http.set_admin_links(&links);
 		http.set_watchdog(&watchdog);
 		http.set_billing(&billing_service);
+		http.set_limits_hold(&limits_hold);
 		http.set_hosted_bootstrap(&bootstrap,
 				{ *opennova::novaworld_server::hosted::parse_ipv4_cidr("127.0.0.0/8") });
 		TEST_EXPECT(http.start(config));
@@ -6217,6 +6235,7 @@ int main(int argc, char **argv) {
 		harness.watchdog = &watchdog;
 		harness.stripe = &stripe;
 		harness.billing = &billing_service;
+		harness.limits_hold = &limits_hold;
 		rc = run(harness);
 		// Join the Crow threads before the pool and the TempDir go, then the
 		// NW UDP listener the push routes held.

@@ -24,16 +24,26 @@
 //                 process; health_misses failed checks in a row end the
 //                 machine and fail the server
 //   stopping      asked for by the owner, an admin or the supervisor itself (an
-//                 owner's account deleted or no longer active, or its hosting
-//                 entitlement down to no server, billing/entitlement.h: a
-//                 comp grant withdrawn, a support tier canceled; read every
-//                 pass and again right before a start mints credentials): the
+//                 owner's account deleted or no longer active, read every pass
+//                 and again right before a start mints credentials, or a
+//                 server past its owner's entitlement, below): the
 //                 ServerStopHosting push to the listing, then the machine ended
 //                 by the supervisor once the listing has left the browser, or
 //                 stop_timeout_ms after the push; opennova-serve exiting in this
 //                 state (with any code) ends the stop too, never a restart
 //   stopped       a stop's end
 //   failed        the restarts used up, or a fault no restart mends
+//
+// The owners' limits: every pass opens by stopping what an owner's hosting
+// entitlement no longer covers (enforce_limits): its newest live servers past
+// the entitlement's servers, then its newest on own machines past the add-on's,
+// a stopping one counting toward neither, each with an event its owner reads
+// ("its owner's support tier allows 1 hosted server"). An entitlement is read
+// from the billing cache whether or not billing is configured, and a past_due
+// tier keeps its servers. A pass that would stop more owners' servers than
+// max(2, half the owners with live servers) stops none: it logs an ERROR and
+// holds (limits_held) until an admin's reconcile clears it, so a cache gone wrong
+// never mass-stops payers.
 //
 // A stop is the supervisor's own act, never read from an exit code: while the
 // server should run, opennova-serve exiting with ANY code (0 for its
@@ -73,6 +83,7 @@
 #include "billing/entitlement.h"
 #include "data_sets.h"
 #include "hosted_repository.h"
+#include "limits_hold.h"
 #include "machine_provider.h"
 
 #include <net/novaworld/db/database.h>
@@ -161,6 +172,13 @@ public:
 	// those since its last line). Thread-safe.
 	uint64_t launch_failures() const { return launch_failures_.load(std::memory_order_relaxed); }
 
+	// The owners' limits' hold (the class comment, limits_hold.h): set before
+	// start(); it must outlive the supervisor. Null: the supervisor's own.
+	void set_limits_hold(LimitsHold *hold) { hold_ = hold != nullptr ? hold : &own_hold_; }
+	bool limits_held() const { return hold_->held(); }
+	std::string limits_hold_reason() const { return hold_->reason(); }
+	void clear_limits_hold();
+
 private:
 	// What a pass remembers of a live server between passes (the database holds
 	// the rest): since when it has been in its state, the health misses, and the
@@ -198,9 +216,12 @@ private:
 	// A transition the pass made, logged and mirrored in `rt`.
 	bool move(db::Database &db, const HostedServer &server, Runtime &rt, uint64_t now_ms, State to,
 			const std::string &detail, TransitionOptions options = {});
-	// Whether the owner may keep the server: its account exists, is active and
-	// has a hosting entitlement of at least one server.
+	// Whether the owner may keep the server: its account exists and is active
+	// (the entitlement is enforce_limits').
 	bool owner_active(db::Database &db, const HostedServer &server, std::string &why);
+	// Stops the servers past their owners' entitlements (the class comment);
+	// the ids it stopped.
+	std::set<int64_t> enforce_limits(db::Database &db, const std::vector<HostedServer> &live);
 	// Ends every machine the provider runs that no live row in `live` names
 	// (`when` labels the log line); the ids of the ones it keeps.
 	std::set<std::string> end_untracked(const std::vector<HostedServer> &live, const char *when);
@@ -227,6 +248,9 @@ private:
 	std::atomic<bool> running_{ false };
 	std::atomic<uint64_t> pass_turns_{ 0 };
 	std::atomic<uint64_t> launch_failures_{ 0 };
+
+	LimitsHold own_hold_;
+	LimitsHold *hold_ = &own_hold_;
 };
 
 } // namespace opennova::novaworld_server::hosted

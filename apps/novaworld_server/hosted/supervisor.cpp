@@ -4,6 +4,7 @@
 #include "hosted_settings.h"
 #include "loggable.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <exception>
@@ -159,6 +160,14 @@ void Supervisor::tick(uint64_t now_ms) {
 	auto lease = pool_.acquire();
 	db::Database &db = *lease;
 	std::vector<HostedServer> live = list_live(db);
+	// The servers this pass stopped for their owners' limits: stepped from the
+	// next pass on, as stopping (their rows here hold the state before it).
+	std::set<int64_t> limited;
+	try {
+		limited = enforce_limits(db, live);
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[hosted] WARN the owners' limits: %s\n", e.what());
+	}
 	if (now_ms - last_orphan_sweep_ms_ >= config_.orphan_sweep_interval_ms) {
 		// A machine no live row names (a launch whose row write failed, a row
 		// ended while its machine lived on) is ended between the boots too.
@@ -173,6 +182,7 @@ void Supervisor::tick(uint64_t now_ms) {
 	std::set<int64_t> seen;
 	for (const HostedServer &s : live) {
 		seen.insert(s.id);
+		if (limited.count(s.id) != 0) continue;
 		Runtime &rt = runtimes_[s.id];
 		if (rt.since_ms == 0 || rt.state != s.state) {
 			// A state this pass did not set (a route's stop, a new request, or a
@@ -232,12 +242,78 @@ bool Supervisor::owner_active(db::Database &db, const HostedServer &s, std::stri
 		why = "its owner's account is " + loggable(owner->account_status, 32);
 		return false;
 	}
-	// The entitlement is the brake (ADR 0053 d6): none left, the server stops.
-	if (billing::entitlement_of(db, *s.owner_user_id, config_.wall_clock_s()).max_servers == 0) {
-		why = "its owner has no hosting entitlement left";
-		return false;
-	}
 	return true;
+}
+
+std::set<int64_t> Supervisor::enforce_limits(db::Database &db, const std::vector<HostedServer> &live) {
+	// The owners' live servers not already stopping, oldest first (list_live
+	// orders by id).
+	std::map<int64_t, std::vector<const HostedServer *>> by_owner;
+	for (const HostedServer &s : live) {
+		if (s.owner_user_id && s.state != State::Stopping) by_owner[*s.owner_user_id].push_back(&s);
+	}
+	struct Stop {
+		int64_t id;
+		std::string detail;
+	};
+	std::vector<Stop> stops;
+	size_t owners = 0;
+	size_t owners_stopped = 0;
+	const int64_t wall = config_.wall_clock_s();
+	for (const auto &[owner_id, servers] : by_owner) {
+		// An account gone or no longer active is owner_active's, with its own words.
+		const auto owner = get_user_by_id(db, owner_id);
+		if (!owner || owner->account_status != "active") continue;
+		++owners;
+		const billing::Entitlement e = billing::entitlement_of(db, owner_id, wall);
+		std::set<int64_t> chosen;
+		// The newest past the entitlement's servers.
+		const size_t max = static_cast<size_t>(std::max(e.max_servers, 0));
+		for (size_t i = servers.size(); i > max; --i) {
+			chosen.insert(servers[i - 1]->id);
+			stops.push_back({ servers[i - 1]->id, limit_detail(e) });
+		}
+		// Of the rest, the newest on own machines past the add-on's.
+		std::vector<const HostedServer *> own;
+		for (const HostedServer *s : servers) {
+			if (s->own_machine && chosen.count(s->id) == 0) own.push_back(s);
+		}
+		const size_t own_max = static_cast<size_t>(std::max(e.own_machines, 0));
+		for (size_t i = own.size(); i > own_max; --i) {
+			chosen.insert(own[i - 1]->id);
+			stops.push_back({ own[i - 1]->id, "its owner's own-machine add-on covers " +
+								std::to_string(e.own_machines) + " machine" + (e.own_machines == 1 ? "" : "s") });
+		}
+		if (!chosen.empty()) ++owners_stopped;
+	}
+	if (stops.empty()) return {};
+	// The brake on the brake: a pass that would stop more owners' servers than
+	// max(2, half the owners) reads as the cache gone wrong (a lost sync, a
+	// mass expiry), not as that many owners lapsing at once; it holds until an
+	// admin's reconcile clears it.
+	const size_t threshold = std::max<size_t>(2, owners / 2);
+	if (owners_stopped > threshold) {
+		const std::string reason = "a pass would stop " + std::to_string(stops.size()) + " server(s) of " +
+				std::to_string(owners_stopped) + " of " + std::to_string(owners) + " owners";
+		if (hold_->hold(reason)) {
+			std::fprintf(stderr, "[hosted] ERROR the owners' limits held: %s; nothing stopped until an admin "
+								 "reconciles billing\n",
+					reason.c_str());
+		}
+		return {};
+	}
+	if (hold_->held()) return {};
+	std::set<int64_t> stopped;
+	for (const Stop &stop : stops) {
+		if (!request_stop(db, stop.id, stop.detail)) continue;
+		stopped.insert(stop.id);
+		std::printf("[hosted] server %lld: -> stopping (%s)\n", static_cast<long long>(stop.id), stop.detail.c_str());
+	}
+	return stopped;
+}
+
+void Supervisor::clear_limits_hold() {
+	if (hold_->clear()) std::printf("[hosted] the owners' limits hold cleared\n");
 }
 
 void Supervisor::step(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
@@ -302,7 +378,8 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 	// Its place under the owner's entitlement, read again (a tier lowered, a
 	// grant cut since the request): the owner's live servers not stopping keep
 	// their places oldest first, and one past the entitlement's servers is
-	// stopped rather than started.
+	// stopped rather than started (not while the limits are held: the cache is
+	// then in doubt).
 	const billing::Entitlement entitlement =
 			billing::entitlement_of(db, *s.owner_user_id, config_.wall_clock_s());
 	int rank = 0;
@@ -310,7 +387,7 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 		if (other.id == s.id) break;
 		if (other.state != State::Stopping) ++rank;
 	}
-	if (rank >= entitlement.max_servers) {
+	if (rank >= entitlement.max_servers && !limits_held()) {
 		const std::string limit = limit_detail(entitlement);
 		if (request_stop(db, s.id, limit)) {
 			std::printf("[hosted] server %lld: provisioning -> stopping (%s)\n", static_cast<long long>(s.id),

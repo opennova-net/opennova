@@ -428,6 +428,21 @@ server runs one data set its owner picks. Everything here is service policy.
   minted) its place is read again: its owner's live servers that are not stopping keep
   their places oldest first, and one past the entitlement is stopped instead
   (`its owner's support tier allows N hosted servers`).
+- **The owners' limits.** Every supervisor pass opens by stopping what an owner's hosting
+  entitlement no longer covers (`Supervisor::enforce_limits`; an account deleted or not
+  active is the stop's own case, below): its newest live servers past the entitlement's
+  servers (a tier lowered at its period's end, a comp grant cut, a tier canceled or
+  unpaid), then its newest own-machine servers past the add-on's quantity, a stopping
+  server counting toward neither, each stop's event naming why (`its owner's support
+  tier allows 1 hosted server`, `its owner's own-machine add-on covers 1 machine`). A
+  past-due tier keeps its servers (no new one starts). The brake on the brake: a pass
+  that would stop the servers of more owners than max(2, half the owners with live
+  servers) reads as the billing cache gone wrong, not as that many owners lapsing at
+  once, so it stops none, logs `[hosted] ERROR the owners' limits held: ...` and holds
+  (no limit stop, and no start refused for its place) until an admin's billing reconcile
+  (`POST /api/admin/billing/reconcile`) clears it; `GET /api/admin/billing` shows it
+  (`limits_hold`, `limits_hold_reason`). Cleared while its cause stands, the next pass
+  holds again.
 - **The supervisor** (`hosted/supervisor.*`) is a thread of its own, started once the gate
   has its port; each pass (every second) leases a pooled connection and walks every live
   row: `requested` → `provisioning` (the service account, a new admin password, the
@@ -439,9 +454,8 @@ server runs one data set its owner picks. Everything here is service policy.
   next pass.
 - **A stop** is the supervisor's own act: the row goes to `stopping` (asked by the owner
   or an admin, or by the supervisor when the owner's account is deleted or no longer
-  active or its hosting entitlement is down to no server, a comp grant withdrawn or a
-  support tier canceled or unpaid: the brake, read every pass and again right before a
-  start mints credentials), the supervisor pushes `ServerStopHosting` to the listing (the sysop punt's
+  active, read every pass and again right before a start mints credentials, or for the
+  owners' limits above), the supervisor pushes `ServerStopHosting` to the listing (the sysop punt's
   MsgCode 7, scoped to the service account), and ends the machine itself once the
   listing has left the browser, or 60 s after the push. `opennova-serve` exiting while
   the row is `stopping`, whatever its code, finishes the stop and is never restarted.
@@ -847,8 +861,8 @@ compose stack takes the test-mode set from the vault through
 | `POST /api/billing/portal` | a website session, the CSRF header | 429 (the checkout bucket); 404 `no_billing_account`; 502 `stripe_unavailable`; 200 `{"url"}` |
 | `POST /api/me/billing/sync` | a website session, the CSRF header | the account's customer read back from Stripe now (the success page's, before the webhook comes); 429 past its bucket (3, then one every 10 s); 404 `no_billing_account`; 502 `stripe_unavailable`; else as `GET /api/me/billing` |
 | `POST /api/billing/webhook` | Stripe's signature | above |
-| `GET /api/admin/billing` | admin | `{"enabled", "mode" ("test" \| "live"), "prices_ok", "prices_error", "last_reconcile_at" (ISO or null), "last_reconcile_error", "pending_events", "subscriptions" (each row with an account: `user_id`, `username`, `stripe_customer_id`, `stripe_subscription_id`, `item`, `tier`, `quantity`, `status`, `entitled`, `current_period_end`, `cancel_at_period_end`), "duplicates" (account ids), "orphans" (`stripe_customer_id`, `stripe_subscription_id`, `username_hint`, `status`), "recent_events" (the newest 50: `event_id`, `type`, `received_at`, `outcome`)}; `Cache-Control: no-store` |
-| `POST /api/admin/billing/reconcile` | admin | a full reconcile on the worker's next pass, at once: 202 `{"reconcile": "requested"}` |
+| `GET /api/admin/billing` | admin | `{"enabled", "mode" ("test" \| "live"), "prices_ok", "prices_error", "last_reconcile_at" (ISO or null), "last_reconcile_error", "pending_events", "subscriptions" (each row with an account: `user_id`, `username`, `stripe_customer_id`, `stripe_subscription_id`, `item`, `tier`, `quantity`, `status`, `entitled`, `current_period_end`, `cancel_at_period_end`), "duplicates" (account ids), "orphans" (`stripe_customer_id`, `stripe_subscription_id`, `username_hint`, `status`), "recent_events" (the newest 50: `event_id`, `type`, `received_at`, `outcome`), "limits_hold" and "limits_hold_reason" (the hosted servers' limits hold, "Hosted servers" above)}; `Cache-Control: no-store` |
+| `POST /api/admin/billing/reconcile` | admin | a full reconcile on the worker's next pass, at once: 202 `{"reconcile": "requested"}`; it clears the hosted servers' limits hold first (with billing off too, then answering 503) |
 | `POST /api/admin/billing/link` | admin | `{"user_id", "stripe_customer_id"}`: the customer (an orphan's) made the account's, its metadata stamped with this instance and the account, then synced; 400 `invalid_json`, `missing_field`, `invalid_field`; 404 `not_found` (no such player, or a customer Stripe does not know); 502; 200 `{"user_id", "stripe_customer_id", "outcome"}` |
 
 `DELETE /api/admin/users/<id>` answers 409 `active_subscription` while a subscription of
@@ -1238,7 +1252,7 @@ every build; it compiles `auth`, `web_session` and `hosted/` straight in) drives
 settings' rules and renders, the service accounts, the request's checks and every
 transition on a fake provider and a hand-stepped clock (the stops, any exit while
 stopping, the crash restarts, their limit and the restart window, the timeouts, the
-health checks, the owners' changes including a withdrawn comp grant and a canceled support tier, the reconciliation (a
+health checks, the owners' changes including a withdrawn comp grant and a canceled support tier, the owners' limits (a tier lowered, past due, the add-on cut) and their mass-stop hold, the reconciliation (a
 `provisioning` row whose machine is gone among it) and the periodic sweep, the console
 ring's cap, and the admin links following the running servers), then
 `LocalProcessProvider` against the test binary itself as its
