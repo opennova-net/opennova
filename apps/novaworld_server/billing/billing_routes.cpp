@@ -458,22 +458,40 @@ crow::response BillingRoutes::webhook(const crow::request &req) {
 	return json_reply(200, out);
 }
 
-// GET /api/admin/billing — require_admin; 503 billing_disabled; {"enabled",
-// "mode" ("test" | "live"), "prices_ok", "prices_error" (null when ok),
-// "last_reconcile_at" (ISO, null before one completed), "last_reconcile_error"
-// (null when the last completed), "pending_events" (events not synced yet),
-// "subscriptions" (every row with an account: admin_subscription_json plus
-// user_id, username, stripe_customer_id), "duplicates" (accounts with two
-// granting tiers), "orphans" ({stripe_customer_id, stripe_subscription_id,
-// username_hint, status}), "recent_events" (the newest kEventsShown: event_id,
-// type, received_at (ISO), outcome)}. Cache-Control: no-store.
+// The hosted servers' limits hold (hosted/limits_hold.h) on an admin's view:
+// "limits_hold", "limits_hold_reason" (null when not held), and the stops it
+// keeps back as the supervisor's last pass counted them, "limits_hold_owners"
+// and "limits_hold_servers" (0 when not held).
+void BillingRoutes::limits_hold_json(crow::json::wvalue &out) const {
+	const hosted::LimitsHold::View hold = limits_hold_ != nullptr ? limits_hold_->view() : hosted::LimitsHold::View{};
+	out["limits_hold"] = hold.held;
+	text_or_null(out, "limits_hold_reason", hold.reason);
+	out["limits_hold_owners"] = static_cast<int64_t>(hold.owners);
+	out["limits_hold_servers"] = static_cast<int64_t>(hold.servers);
+}
+
+// GET /api/admin/billing — require_admin; {"enabled", "mode" ("test" |
+// "live"), "prices_ok", "prices_error" (null when ok), "last_reconcile_at"
+// (ISO, null before one completed), "last_reconcile_error" (null when the last
+// completed), "pending_events" (events not synced yet), "subscriptions" (every
+// row with an account: admin_subscription_json plus user_id, username,
+// stripe_customer_id), "duplicates" (accounts with two granting tiers),
+// "orphans" ({stripe_customer_id, stripe_subscription_id, username_hint,
+// status}), "recent_events" (the newest kEventsShown: event_id, type,
+// received_at (ISO), outcome)} with the limits hold (limits_hold_json). With
+// billing off, {"enabled": false} and the limits hold alone (the hold reads the
+// cache billing on or off). Cache-Control: no-store.
 crow::response BillingRoutes::admin_billing(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal) return std::move(*caller.refusal);
-	if (billing_ == nullptr) return disabled();
+	crow::json::wvalue out;
+	limits_hold_json(out);
+	if (billing_ == nullptr) {
+		out["enabled"] = false;
+		return no_store(json_reply(200, out));
+	}
 	const SyncStatus status = billing_->sync().status();
 	const int64_t now = unix_now();
-	crow::json::wvalue out;
 	out["enabled"] = true;
 	out["mode"] = billing_->config().live() ? "live" : "test";
 	out["prices_ok"] = status.prices_ok;
@@ -483,9 +501,6 @@ crow::response BillingRoutes::admin_billing(const crow::request &req) {
 	else
 		out["last_reconcile_at"] = nullptr;
 	text_or_null(out, "last_reconcile_error", status.last_reconcile_error);
-	// The hosted servers' limits hold: an admin's reconcile clears it.
-	out["limits_hold"] = limits_hold_ != nullptr && limits_hold_->held();
-	text_or_null(out, "limits_hold_reason", limits_hold_ != nullptr ? limits_hold_->reason() : std::string());
 	try {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
@@ -535,20 +550,38 @@ crow::response BillingRoutes::admin_billing(const crow::request &req) {
 	return no_store(json_reply(200, out));
 }
 
-// POST /api/admin/billing/reconcile — a full reconcile on the worker's next
-// pass, now: 202 {"reconcile": "requested"}. It clears the hosted servers'
-// limits hold first, so the supervisor's next pass judges the owners' limits
-// again (after the reconcile, when it lands first). require_admin; 503
-// billing_disabled (the hold cleared all the same).
+// POST /api/admin/billing/reconcile — no body or {}: a full reconcile on the
+// worker's next pass, now: 202 {"reconcile": "requested", "force_limits":
+// false}. The hosted servers' limits hold releases itself after a clean one
+// when the same owners are still past their entitlements (hosted/limits_hold.h).
+// {"force_limits": true}: the reconcile, and the supervisor's next pass applies
+// the stops the hold keeps back past the brake, once ("force_limits": true;
+// logged). require_admin; 400 invalid_json, invalid_field (force_limits not
+// true or false). With billing off there is nothing to reconcile: 503
+// billing_disabled, but an override still applies (the hold reads the cache
+// billing on or off): 202 {"reconcile": "off", "force_limits": true}.
 crow::response BillingRoutes::admin_reconcile(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal) return std::move(*caller.refusal);
-	if (limits_hold_ != nullptr && limits_hold_->clear())
-		std::printf("[hosted] the owners' limits hold cleared by an admin's reconcile\n");
-	if (billing_ == nullptr) return disabled();
+	auto body = JsonBody::parse(req.body.empty() ? std::string("{}") : req.body);
+	if (!body) return json_error(400, "invalid_json");
+	const bool force = body->flag("force_limits").value_or(false);
+	if (body->wrong_type()) return json_error(400, "invalid_field", "force_limits is true or false");
+	if (billing_ == nullptr && !force) return disabled();
+	if (force && limits_hold_ != nullptr) {
+		limits_hold_->force_next_pass();
+		const hosted::LimitsHold::View hold = limits_hold_->view();
+		std::printf("[hosted] an admin's override: the next pass applies the owners' limits past the brake (held: %s)\n",
+				hold.held ? hold.reason.c_str() : "no");
+	}
+	crow::json::wvalue out;
+	out["force_limits"] = force;
+	if (billing_ == nullptr) {
+		out["reconcile"] = "off";
+		return json_reply(202, out);
+	}
 	billing_->sync().request_reconcile();
 	std::printf("[billing] reconcile asked for by an admin\n");
-	crow::json::wvalue out;
 	out["reconcile"] = "requested";
 	return json_reply(202, out);
 }

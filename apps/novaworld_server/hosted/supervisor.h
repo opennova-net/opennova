@@ -55,8 +55,12 @@
 // from the billing cache whether or not billing is configured, and a past_due
 // tier keeps its servers. A pass that would stop more owners' servers than
 // max(2, half the owners with live servers) stops none: it logs an ERROR and
-// holds (limits_held) until an admin's reconcile clears it, so a cache gone wrong
-// never mass-stops payers.
+// holds (limits_held, limits_hold.h), so a cache gone wrong never mass-stops
+// payers. While held no limit stops. The hold releases once a full reconcile
+// with Stripe has completed clean after it and the same owners (or some of
+// them) are still past their entitlements, whose stops then apply; an admin's
+// override (POST /api/admin/billing/reconcile {"force_limits": true}) applies
+// them at the next pass.
 //
 // Restarts. A stop is the supervisor's own act, never read from an exit code.
 // What the server itself causes is a crash and counts: while the server should
@@ -245,7 +249,8 @@ public:
 	uint64_t launch_failures() const { return launch_failures_.load(std::memory_order_relaxed); }
 
 	// The owners' limits' hold (the class comment, limits_hold.h): set before
-	// start(); it must outlive the supervisor. Null: the supervisor's own.
+	// start(); it must outlive the supervisor. Null: the supervisor's own. The
+	// heartbeat's limits_held reads it.
 	void set_limits_hold(LimitsHold *hold) { hold_ = hold != nullptr ? hold : &own_hold_; }
 	bool limits_held() const { return hold_->held(); }
 	std::string limits_hold_reason() const { return hold_->reason(); }

@@ -443,10 +443,12 @@ ReconcileReport BillingSync::reconcile_all(int64_t now) {
 	}
 	report.orphans = orphans.size();
 	report.completed = whole;
+	bool prices_ok = false;
 	{
 		std::lock_guard<std::mutex> lock(status_mu_);
 		status_.orphans = std::move(orphans);
 		status_.duplicates = duplicates;
+		prices_ok = status_.prices_ok;
 		if (whole) {
 			status_.last_reconcile_at = now;
 			status_.last_reconcile_error.clear();
@@ -460,6 +462,8 @@ ReconcileReport BillingSync::reconcile_all(int64_t now) {
 				"again, %zu canceled, %zu orphan(s), %zu account(s) with two tiers\n",
 			report.listed, report.written, report.customers_recreated, report.canceled, report.orphans,
 			duplicates.size());
+	// The cache now matches Stripe, read whole under prices that check out.
+	if (whole && prices_ok && on_reconciled_) on_reconciled_();
 	return report;
 }
 

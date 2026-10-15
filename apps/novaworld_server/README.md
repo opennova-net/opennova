@@ -101,14 +101,15 @@ Service policy (`health.*`), what the container runtime and the uptime checks re
   `GET /api/health` stays, a static `{"status":"ok"}` behind the proxy rule.
 - **The heartbeat**, one line on stdout every 60 s, for the log pipeline's metric
   filters:
-  `{"heartbeat":{"nw_sessions":N,"listed_hosts":N,"hosted_live":N,"hosted_failed":N,"machines_lost":N,"launch_failures":N,"billing_sync_age_s":N,"webhook_rejects":N}}`.
+  `{"heartbeat":{"nw_sessions":N,"listed_hosts":N,"hosted_live":N,"hosted_failed":N,"machines_lost":N,"launch_failures":N,"billing_sync_age_s":N,"webhook_rejects":N,"limits_held":N}}`.
   `nw_sessions` counts the NovaWorld UDP sessions, `listed_hosts` the listed servers,
   `hosted_live` the live hosted servers; `hosted_failed` and `launch_failures` count the
   hosted servers that ended failed and the launches that failed since the last line;
   `machines_lost` counts the fleet's machines lost now (their agents silent); `billing_sync_age_s` is the age
   in seconds of the oldest webhook event the billing worker has not synced (0 with none,
-  -1 with billing off) and `webhook_rejects` the webhook deliveries refused since the
-  last line.
+  -1 with billing off), `webhook_rejects` the webhook deliveries refused since the
+  last line, and `limits_held` is 1 while the hosted servers' limits hold is on (0
+  otherwise).
 - **The image runs as UID 10002** (`novaworld`, no home, no shell): the server keeps no
   state in its container and writes only temporary files under `/tmp`.
 
@@ -474,10 +475,15 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   that would stop the servers of more owners than max(2, half the owners with live
   servers) reads as the billing cache gone wrong, not as that many owners lapsing at
   once, so it stops none, logs `[hosted] ERROR the owners' limits held: ...` and holds
-  (no limit stop, and no start refused for its place) until an admin's billing reconcile
-  (`POST /api/admin/billing/reconcile`) clears it; `GET /api/admin/billing` shows it
-  (`limits_hold`, `limits_hold_reason`). Cleared while its cause stands, the next pass
-  holds again.
+  (no limit stop, and no start refused for its place; the heartbeat's `limits_held` is 1).
+  It releases itself once a full billing reconcile has completed with the prices checking
+  out after it took its owners and a pass then finds the same owners (or some of them)
+  still past their entitlements: the cache is confirmed against Stripe, and their stops
+  apply. New owners past theirs meanwhile widen the hold, which then waits for the next
+  reconcile. An admin's override (`POST /api/admin/billing/reconcile` with
+  `{"force_limits": true}`) makes the next pass apply the stops past the brake, once.
+  `GET /api/admin/billing` shows it (`limits_hold`, `limits_hold_reason`,
+  `limits_hold_owners`, `limits_hold_servers`), billing on or off.
 - **The supervisor** (`hosted/supervisor.*`) is a thread of its own, started once the gate
   has its port and the internal listener serves; each pass (every second) leases a
   pooled connection, steps every live machine (below), then walks every live server:
@@ -897,7 +903,8 @@ site. Everything here is service policy (`billing/`).
 Billing is on only when the whole set is complete and well-formed (`REPLACE_ME`, the
 vault's placeholder, counts as unset); otherwise the boot logs `[boot] WARN billing:
 <what is missing>; billing off`, the routes below answer 503 `billing_disabled` (the tiers
-answer `{"enabled": false}`), and the hosting entitlement still reads the cache. The dev
+and the admin's view answer `{"enabled": false}`), and the hosting entitlement still reads
+the cache. The dev
 compose stack takes the test-mode set from the vault through
 `deploy/env/billing.dev.env.tpl` (`op run --env-file=...`).
 
@@ -909,8 +916,8 @@ compose stack takes the test-mode set from the vault through
 | `POST /api/billing/portal` | a website session, the CSRF header | 429 (the checkout bucket); 404 `no_billing_account`; 502 `stripe_unavailable`; 200 `{"url"}` |
 | `POST /api/me/billing/sync` | a website session, the CSRF header | the account's customer read back from Stripe now (the success page's, before the webhook comes); 429 past its bucket (3, then one every 10 s); 404 `no_billing_account`; 502 `stripe_unavailable`; else as `GET /api/me/billing` |
 | `POST /api/billing/webhook` | Stripe's signature | above |
-| `GET /api/admin/billing` | admin | `{"enabled", "mode" ("test" \| "live"), "prices_ok", "prices_error", "last_reconcile_at" (ISO or null), "last_reconcile_error", "pending_events", "subscriptions" (each row with an account: `user_id`, `username`, `stripe_customer_id`, `stripe_subscription_id`, `item`, `tier`, `quantity`, `status`, `entitled`, `current_period_end`, `cancel_at_period_end`), "duplicates" (account ids), "orphans" (`stripe_customer_id`, `stripe_subscription_id`, `username_hint`, `status`), "recent_events" (the newest 50: `event_id`, `type`, `received_at`, `outcome`), "limits_hold" and "limits_hold_reason" (the hosted servers' limits hold, "Hosted servers" above)}; `Cache-Control: no-store` |
-| `POST /api/admin/billing/reconcile` | admin | a full reconcile on the worker's next pass, at once: 202 `{"reconcile": "requested"}`; it clears the hosted servers' limits hold first (with billing off too, then answering 503) |
+| `GET /api/admin/billing` | admin | `{"enabled", "mode" ("test" \| "live"), "prices_ok", "prices_error", "last_reconcile_at" (ISO or null), "last_reconcile_error", "pending_events", "subscriptions" (each row with an account: `user_id`, `username`, `stripe_customer_id`, `stripe_subscription_id`, `item`, `tier`, `quantity`, `status`, `entitled`, `current_period_end`, `cancel_at_period_end`), "duplicates" (account ids), "orphans" (`stripe_customer_id`, `stripe_subscription_id`, `username_hint`, `status`), "recent_events" (the newest 50: `event_id`, `type`, `received_at`, `outcome`), "limits_hold", "limits_hold_reason", "limits_hold_owners" and "limits_hold_servers" (the hosted servers' limits hold and the stops it keeps back, "Hosted servers" above)}; with billing off `{"enabled": false}` and the limits hold alone; `Cache-Control: no-store` |
+| `POST /api/admin/billing/reconcile` | admin | no body or `{}`: a full reconcile on the worker's next pass, at once: 202 `{"reconcile": "requested", "force_limits": false}`; `{"force_limits": true}` also has the supervisor's next pass apply the stops the limits hold keeps back (`"force_limits": true`); 400 `invalid_json`, `invalid_field`; with billing off 503, but an override still applies (202 `{"reconcile": "off", "force_limits": true}`) |
 | `POST /api/admin/billing/link` | admin | `{"user_id", "stripe_customer_id"}`: the customer (an orphan's) made the account's, its metadata stamped with this instance and the account, then synced; 400 `invalid_json`, `missing_field`, `invalid_field`; 404 `not_found` (no such player, or a customer Stripe does not know); 502; 200 `{"user_id", "stripe_customer_id", "outcome"}` |
 
 `DELETE /api/admin/users/<id>` answers 409 `active_subscription` while a subscription of

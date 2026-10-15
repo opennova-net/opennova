@@ -87,6 +87,7 @@ struct Heartbeat {
 	int64_t launch_failures = 0;
 	int64_t billing_sync_age_s = -1;
 	int64_t webhook_rejects = 0;
+	int64_t limits_held = 0; // 1 while the hosted servers' limits hold is on (hosted/limits_hold.h)
 };
 
 // How often main() writes the heartbeat line.

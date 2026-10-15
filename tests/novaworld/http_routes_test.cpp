@@ -4233,7 +4233,10 @@ int test_healthz(Harness &h) {
 	beat.hosted_failed = 1;
 	TEST_EXPECT(nws::heartbeat_line(beat) ==
 			"{\"heartbeat\":{\"nw_sessions\":3,\"listed_hosts\":0,\"hosted_live\":0,\"hosted_failed\":1,"
-			"\"machines_lost\":0,\"launch_failures\":0,\"billing_sync_age_s\":-1,\"webhook_rejects\":0}}");
+			"\"machines_lost\":0,\"launch_failures\":0,\"billing_sync_age_s\":-1,\"webhook_rejects\":0,"
+			"\"limits_held\":0}}");
+	beat.limits_held = 1;
+	TEST_EXPECT(nws::heartbeat_line(beat).find(",\"limits_held\":1}}") != std::string::npos);
 	return 0;
 }
 
@@ -6204,16 +6207,34 @@ int test_billing_admin(Harness &h) {
 	TEST_EXPECT(listed);
 	TEST_EXPECT(json["duplicates"].t() == crow::json::type::List && json["duplicates"].size() == 0);
 	TEST_EXPECT(!json["limits_hold"].b() && json["limits_hold_reason"].t() == crow::json::type::Null);
+	TEST_EXPECT(json["limits_hold_owners"].i() == 0 && json["limits_hold_servers"].i() == 0);
 
-	// The hosted servers' limits hold: shown, and cleared by an admin's reconcile.
-	TEST_EXPECT(h.limits_hold->hold("a pass would stop 9 server(s) of 3 of 4 owners"));
+	// The hosted servers' limits hold: shown with the stops it keeps back. A
+	// reconcile alone leaves it to the supervisor (it releases after a clean
+	// one); the override arms the supervisor's next pass.
+	TEST_EXPECT(h.limits_hold->hold("a pass would stop 9 server(s) of 3 of 4 owners", { 11, 12, 13 }, 9, 0) ==
+			nws::hosted::LimitsHold::Held::Now);
 	json = crow::json::load(body_text(h.send("GET", "/api/admin/billing", { kBearer })));
 	TEST_EXPECT(json && json["limits_hold"].b() &&
 			str(json["limits_hold_reason"]) == "a pass would stop 9 server(s) of 3 of 4 owners");
-	TEST_EXPECT(h.send("POST", "/api/admin/billing/reconcile", { kBearer }).code == 202);
-	TEST_EXPECT(!h.limits_hold->held());
-	json = crow::json::load(body_text(h.send("GET", "/api/admin/billing", { kBearer })));
-	TEST_EXPECT(json && !json["limits_hold"].b());
+	TEST_EXPECT(json["limits_hold_owners"].i() == 3 && json["limits_hold_servers"].i() == 9);
+	auto reconcile = [&h](const std::string &body) {
+		return h.send("POST", "/api/admin/billing/reconcile", { kBearer, kJson }, body);
+	};
+	reply = reconcile("");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && json && str(json["reconcile"]) == "requested" && !json["force_limits"].b());
+	TEST_EXPECT(h.limits_hold->held() && !h.limits_hold->take_force());
+	reply = reconcile("{\"force_limits\":\"yes\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+	reply = reconcile("not json");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_json");
+	TEST_EXPECT(!h.limits_hold->take_force());
+	reply = reconcile("{\"force_limits\":true}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && json && str(json["reconcile"]) == "requested" && json["force_limits"].b());
+	TEST_EXPECT(h.limits_hold->take_force() && h.limits_hold->held());
+	TEST_EXPECT(h.limits_hold->clear());
 	billing_pass(h);
 
 	// The relink: its checks, then the orphan made Eli's.
@@ -6253,8 +6274,17 @@ int test_billing_admin(Harness &h) {
 	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), foreign, billing::unix_now()) ==
 			billing::SyncOutcome::Synced);
 	TEST_EXPECT(h.send("DELETE", "/api/admin/users/" + std::to_string(eli), { kBearer }).code == 204);
-	// Billing off: 503.
-	TEST_EXPECT(h.send_to(h.secure_port, "GET", "/api/admin/billing", { kBearer }).code == 503);
+	// Billing off: the view says so, with the limits hold; a reconcile is 503,
+	// an override still goes through.
+	reply = h.send_to(h.secure_port, "GET", "/api/admin/billing", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && !json["enabled"].b() && !json["limits_hold"].b() &&
+			!json.has("subscriptions"));
+	reply = h.send_to(h.secure_port, "POST", "/api/admin/billing/reconcile", { kBearer });
+	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "billing_disabled");
+	reply = h.send_to(h.secure_port, "POST", "/api/admin/billing/reconcile", { kBearer, kJson }, "{\"force_limits\":true}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && json && str(json["reconcile"]) == "off" && json["force_limits"].b());
 	return 0;
 }
 

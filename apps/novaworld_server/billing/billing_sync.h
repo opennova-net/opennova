@@ -23,7 +23,8 @@
 //     prices are checked at every reconcile (and at the first pass): each one
 //     a recurring monthly price in the key's mode, the one each list sells
 //     active, the ones sold in one currency; else prices_ok is false and
-//     checkout refuses (503 billing_misconfigured).
+//     checkout refuses (503 billing_misconfigured). One that read every
+//     subscription with the prices checking out calls on_reconciled.
 //   - then syncs the customers with an unprocessed event, the longest-waiting
 //     first (kPendingPerPass at most), one sync each: a customer Stripe could
 //     not be asked about waits kBackoffFirstS, doubling to kBackoffMaxS.
@@ -50,6 +51,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace opennova::novaworld_server::billing {
@@ -132,6 +134,11 @@ public:
 	BillingSync(const BillingSync &) = delete;
 	BillingSync &operator=(const BillingSync &) = delete;
 
+	// Called on the worker's thread after each full reconcile that completed
+	// with the prices checking out (the hosted servers' limits hold,
+	// hosted/limits_hold.h, trusts the cache after one). Set before start().
+	void set_on_reconciled(std::function<void()> on_reconciled) { on_reconciled_ = std::move(on_reconciled); }
+
 	// Runs a pass at once, then after every notify() or kIdleWaitMs, on the
 	// worker's own thread until stop().
 	void start();
@@ -178,6 +185,7 @@ private:
 	const BillingConfig &config_;
 	const std::string instance_id_;
 	const Clock clock_;
+	std::function<void()> on_reconciled_;
 
 	mutable std::mutex status_mu_;
 	SyncStatus status_;

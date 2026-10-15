@@ -59,7 +59,7 @@ std::string heartbeat_line(const Heartbeat &b) {
 			"," + field("hosted_live", b.hosted_live) + "," + field("hosted_failed", b.hosted_failed) + "," +
 			field("machines_lost", b.machines_lost) + "," + field("launch_failures", b.launch_failures) + "," +
 			field("billing_sync_age_s", b.billing_sync_age_s) + "," + field("webhook_rejects", b.webhook_rejects) +
-			"}}";
+			"," + field("limits_held", b.limits_held) + "}}";
 }
 
 } // namespace opennova::novaworld_server

@@ -321,6 +321,9 @@ bool Supervisor::owner_active(db::Database &db, const HostedServer &s, std::stri
 }
 
 std::set<int64_t> Supervisor::enforce_limits(db::Database &db, const std::vector<HostedServer> &live) {
+	// The clean reconciles with Stripe so far, read before the cache is: each
+	// one counted landed in what this pass reads.
+	const uint64_t reconciles = hold_->reconciles();
 	// The owners' live servers not already stopping, oldest first (list_live
 	// orders by id).
 	std::map<int64_t, std::vector<const HostedServer *>> by_owner;
@@ -333,7 +336,7 @@ std::set<int64_t> Supervisor::enforce_limits(db::Database &db, const std::vector
 	};
 	std::vector<Stop> stops;
 	size_t owners = 0;
-	size_t owners_stopped = 0;
+	std::set<int64_t> owners_stopped;
 	const int64_t wall = config_.wall_clock_s();
 	for (const auto &[owner_id, servers] : by_owner) {
 		// An account gone or no longer active is owner_active's, with its own words.
@@ -359,25 +362,48 @@ std::set<int64_t> Supervisor::enforce_limits(db::Database &db, const std::vector
 			stops.push_back({ own[i - 1]->id, "its owner's own-machine add-on covers " +
 								std::to_string(e.own_machines) + " machine" + (e.own_machines == 1 ? "" : "s") });
 		}
-		if (!chosen.empty()) ++owners_stopped;
+		if (!chosen.empty()) owners_stopped.insert(owner_id);
 	}
-	if (stops.empty()) return {};
-	// The brake on the brake: a pass that would stop more owners' servers than
-	// max(2, half the owners) reads as the cache gone wrong (a lost sync, a
-	// mass expiry), not as that many owners lapsing at once; it holds until an
-	// admin's reconcile clears it.
-	const size_t threshold = std::max<size_t>(2, owners / 2);
-	if (owners_stopped > threshold) {
-		const std::string reason = "a pass would stop " + std::to_string(stops.size()) + " server(s) of " +
-				std::to_string(owners_stopped) + " of " + std::to_string(owners) + " owners";
-		if (hold_->hold(reason)) {
-			std::fprintf(stderr, "[hosted] ERROR the owners' limits held: %s; nothing stopped until an admin "
-								 "reconciles billing\n",
-					reason.c_str());
-		}
+	// An admin's override (limits_hold.h) is this pass's, whatever it finds.
+	const bool forced = hold_->take_force();
+	if (stops.empty()) {
+		if (forced) std::printf("[hosted] the owners' limits: an admin's override found no server to stop\n");
+		if ((forced && hold_->clear()) || hold_->release_if_confirmed({}, reconciles))
+			std::printf("[hosted] the owners' limits hold released: no server is past its owner's entitlement\n");
 		return {};
 	}
-	if (hold_->held()) return {};
+	const std::string reason = "a pass would stop " + std::to_string(stops.size()) + " server(s) of " +
+			std::to_string(owners_stopped.size()) + " of " + std::to_string(owners) + " owners";
+	// The brake on the brake: a pass that would stop more owners' servers than
+	// max(2, half the owners) reads as the cache gone wrong (a lost sync, a
+	// mass expiry), not as that many owners lapsing at once. It holds every
+	// stop until a clean reconcile with Stripe confirms the cache (then the
+	// same owners' stops apply) or an admin's override applies them.
+	const size_t threshold = std::max<size_t>(2, owners / 2);
+	if (forced) {
+		hold_->clear();
+		std::printf("[hosted] the owners' limits applied past the brake by an admin's override: %s\n", reason.c_str());
+	} else if (hold_->held() || owners_stopped.size() > threshold) {
+		if (!hold_->release_if_confirmed(owners_stopped, reconciles)) {
+			switch (hold_->hold(reason, owners_stopped, stops.size(), reconciles)) {
+				case LimitsHold::Held::Now:
+					std::fprintf(stderr, "[hosted] ERROR the owners' limits held: %s; nothing stopped until a "
+										 "reconcile with Stripe confirms it or an admin applies the stops\n",
+							reason.c_str());
+					break;
+				case LimitsHold::Held::Widened:
+					std::fprintf(stderr, "[hosted] ERROR the owners' limits hold widened: %s; it waits for the next "
+										 "reconcile with Stripe\n",
+							reason.c_str());
+					break;
+				case LimitsHold::Held::Still: break;
+			}
+			return {};
+		}
+		std::printf("[hosted] the owners' limits hold released: a clean reconcile with Stripe confirmed the cache, "
+					"and the same owners are past their entitlements: %s\n",
+				reason.c_str());
+	}
 	std::set<int64_t> stopped;
 	for (const Stop &stop : stops) {
 		if (!request_stop(db, stop.id, stop.detail)) continue;

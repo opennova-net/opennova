@@ -511,7 +511,8 @@ int main() {
 	std::unique_ptr<hosted::AdminLinks> admin_links;
 	if (hosted_driver) admin_links = std::make_unique<hosted::AdminLinks>(db_pool.get());
 	// The hosted servers' limits hold (hosted/limits_hold.h): the supervisor
-	// sets it, the admin's billing reconcile clears it; it outlives both.
+	// sets it, a clean billing reconcile or an admin's override releases it;
+	// it outlives the supervisor, the billing worker and the HTTP listener.
 	hosted::LimitsHold limits_hold;
 	// The supervisor, then the internal listener whose agent routes ask it
 	// what each machine runs (declared after it, so destroyed first).
@@ -523,6 +524,9 @@ int main() {
 	// sync worker starts once the listeners serve.
 	BillingStack billing_stack =
 			make_billing(billing::billing_config_from_env(), *db_pool, boot_db);
+	// A clean reconcile confirms the cache the limits hold doubts.
+	if (billing_stack.billing)
+		billing_stack.billing->sync().set_on_reconciled([&limits_hold] { limits_hold.reconciled(); });
 	SessionStore sessions;
 	HttpListener http(manager, *db_pool, sessions);
 	http.set_unknown_tracker(&unknown_tracker);
@@ -702,6 +706,7 @@ int main() {
 				beat.webhook_rejects = static_cast<int64_t>(rejects - webhook_rejects_reported);
 				webhook_rejects_reported = rejects;
 			}
+			beat.limits_held = limits_hold.held() ? 1 : 0;
 #endif
 			std::printf("%s\n", heartbeat_line(beat).c_str());
 		}

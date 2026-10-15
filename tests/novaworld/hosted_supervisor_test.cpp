@@ -1279,12 +1279,15 @@ int test_owner_limits() {
 }
 
 // The brake on the brake: a pass that would stop the servers of more owners
-// than max(2, half the owners) stops none, logs, and holds until it is cleared
-// (an admin's billing reconcile); cleared while the cause stands, it holds
-// again; once the cause is down to one owner, the clear lets that one's stop
-// through.
+// than max(2, half the owners) stops none, logs, and holds (no limit stops,
+// whatever their count, until it releases); cleared while the cause stands, it
+// holds again. A clean reconcile with Stripe (LimitsHold::reconciled) confirms
+// the cache: the next pass finds some of the same owners still past their
+// entitlements, releases, and stops theirs alone.
 int test_mass_stop_hold() {
 	Rig rig("hosted_hold");
+	hosted::LimitsHold hold;
+	rig.sup->set_limits_hold(&hold);
 	auto db = rig.pool.acquire();
 	const int64_t a = rig.request("hold_a");
 	const int64_t b = rig.request("hold_b");
@@ -1295,25 +1298,104 @@ int test_mass_stop_hold() {
 		TEST_EXPECT(nws::set_comp_servers(*db, *rig.server(id)->owner_user_id, 0).ok);
 	rig.tick();
 	TEST_EXPECT(rig.sup->limits_held() && !rig.sup->limits_hold_reason().empty());
+	TEST_EXPECT(hold.view().owners == 3 && hold.view().servers == 3);
 	for (const int64_t id : { a, b, c }) TEST_EXPECT(rig.state(id) != State::Stopping && hosted::is_live(rig.state(id)));
 	// Cleared while all three still lapse: held again.
 	rig.sup->clear_limits_hold();
 	rig.tick();
 	TEST_EXPECT(rig.sup->limits_held());
 	for (const int64_t id : { a, b, c }) TEST_EXPECT(rig.state(id) != State::Stopping);
-	// Two restored: still held until cleared.
+	// Two restored: one owner past, below the brake, and still held (no
+	// reconcile has confirmed the cache since).
 	for (const int64_t id : { a, b })
 		TEST_EXPECT(nws::set_comp_servers(*db, *rig.server(id)->owner_user_id, 1).ok);
 	rig.tick();
 	TEST_EXPECT(rig.sup->limits_held() && rig.state(c) != State::Stopping);
-	// A shared hold (main's), cleared as the admin route clears it.
-	hosted::LimitsHold shared;
-	rig.sup->set_limits_hold(&shared);
-	TEST_EXPECT(!rig.sup->limits_held());
+	TEST_EXPECT(hold.view().owners == 1 && hold.view().servers == 1);
+	// A clean reconcile: the next pass releases, and the one owner still past
+	// (one of those held) is stopped.
+	hold.reconciled();
 	rig.tick();
+	TEST_EXPECT(!hold.held());
 	TEST_EXPECT(stopped_with(*db, c, "hosting entitlement allows 0 hosted servers"));
 	TEST_EXPECT(rig.state(a) != State::Stopping && rig.state(b) != State::Stopping);
-	TEST_EXPECT(!shared.held());
+	TEST_EXPECT(hold.view().owners == 0 && hold.view().reason.empty());
+	return 0;
+}
+
+// The hold's releases: after a clean reconcile the same owners still past
+// their entitlements are stopped, every one, past the brake; owners past
+// theirs that the hold did not count (after or before a reconcile) widen it,
+// and it waits for the next reconcile; a reconcile that finds no owner past
+// releases it with nothing stopped; an admin's override applies the stops at
+// the next pass, once.
+int test_hold_releases() {
+	Rig rig("hosted_hold_releases");
+	rig.config.cap = 20;
+	rig.config.placement.max_shared = 3; // room for the nine
+	rig.make_supervisor();
+	hosted::LimitsHold hold;
+	rig.sup->set_limits_hold(&hold);
+	auto db = rig.pool.acquire();
+	const auto lapse = [&](const std::vector<int64_t> &ids, int comp) {
+		bool ok = true;
+		for (const int64_t id : ids) ok = nws::set_comp_servers(*db, *rig.server(id)->owner_user_id, comp).ok && ok;
+		return ok;
+	};
+	const auto none_stopping = [&](const std::vector<int64_t> &ids) {
+		for (const int64_t id : ids) {
+			if (rig.state(id) == State::Stopping || !hosted::is_live(rig.state(id))) return false;
+		}
+		return true;
+	};
+	std::vector<int64_t> s;
+	for (const char *name : { "rel_a", "rel_b", "rel_c", "rel_d", "rel_e", "rel_f", "rel_g", "rel_h", "rel_i" })
+		s.push_back(rig.request(name));
+	for (const int64_t id : s) TEST_EXPECT(id > 0);
+	rig.tick();
+
+	// Five of nine owners lapse (the brake: max(2, 4) = 4): held, pass after
+	// pass; a clean reconcile, and the next pass stops all five.
+	TEST_EXPECT(lapse({ s[0], s[1], s[2], s[3], s[4] }, 0));
+	rig.tick();
+	TEST_EXPECT(hold.held() && hold.view().owners == 5 && none_stopping(s));
+	rig.tick();
+	TEST_EXPECT(hold.held() && none_stopping(s));
+	hold.reconciled();
+	rig.tick();
+	TEST_EXPECT(!hold.held());
+	for (int i = 0; i < 5; ++i) TEST_EXPECT(stopped_with(*db, s[i], "hosting entitlement allows 0 hosted servers"));
+	TEST_EXPECT(none_stopping({ s[5], s[6], s[7], s[8] }));
+
+	// Four owners live now (the brake: max(2, 2) = 2). Three lapse: held. A
+	// reconcile lands, then a fourth lapses before the next pass: the hold
+	// widens and waits for the next reconcile.
+	const std::vector<int64_t> rest = { s[5], s[6], s[7], s[8] };
+	TEST_EXPECT(lapse({ s[5], s[6], s[7] }, 0));
+	rig.tick();
+	TEST_EXPECT(hold.held() && hold.view().owners == 3);
+	hold.reconciled();
+	TEST_EXPECT(lapse({ s[8] }, 0));
+	rig.tick();
+	TEST_EXPECT(hold.held() && hold.view().owners == 4 && none_stopping(rest));
+	// Restored, all four, while held: still held (unconfirmed); the next
+	// reconcile finds none past: released, nothing stopped.
+	TEST_EXPECT(lapse(rest, 1));
+	rig.tick();
+	TEST_EXPECT(hold.held() && none_stopping(rest));
+	hold.reconciled();
+	rig.tick();
+	TEST_EXPECT(!hold.held() && none_stopping(rest));
+
+	// The admin's override: held again, then the next pass stops all four past
+	// the brake, and the override is spent.
+	TEST_EXPECT(lapse(rest, 0));
+	rig.tick();
+	TEST_EXPECT(hold.held() && none_stopping(rest));
+	hold.force_next_pass();
+	rig.tick();
+	TEST_EXPECT(!hold.held() && !hold.take_force());
+	for (const int64_t id : rest) TEST_EXPECT(stopped_with(*db, id, "hosting entitlement allows 0 hosted servers"));
 	return 0;
 }
 
@@ -1516,6 +1598,7 @@ int main(int argc, char **argv) {
 		{ "limit_at_provisioning", test_limit_at_provisioning },
 		{ "owner_limits", test_owner_limits },
 		{ "mass_stop_hold", test_mass_stop_hold },
+		{ "hold_releases", test_hold_releases },
 		{ "reconciliation", test_reconciliation },
 		{ "console_ring", test_console_ring },
 		{ "admin_links_follow_running", test_admin_links_follow_running },

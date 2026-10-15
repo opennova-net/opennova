@@ -7,8 +7,9 @@
 // kept) and rebuilt by a reconcile, a customer Stripe could not be asked about
 // left pending with its backoff, a deleted customer's subscriptions canceled, a
 // granting row Stripe no longer knows canceled, two granting tiers listed as a
-// duplicate, and the price check refusing a yearly price and a price of the
-// other mode. Crow-free: compiles the billing sources directly.
+// duplicate, the price check refusing a yearly price and a price of the
+// other mode, and on_reconciled called after a clean reconcile alone.
+// Crow-free: compiles the billing sources directly.
 
 #include "billing/billing_config.h"
 #include "billing/billing_repository.h"
@@ -358,6 +359,33 @@ int test_price_validation() {
 	return 0;
 }
 
+// on_reconciled (the hosted servers' limits hold trusts the cache after it):
+// called after a reconcile that read every subscription with the prices
+// checking out, and after no other: not when Stripe could not be asked, not
+// when a price is wrong.
+int test_on_reconciled() {
+	Rig rig;
+	int calls = 0;
+	rig.sync->set_on_reconciled([&calls] { ++calls; });
+	TEST_EXPECT(rig.sync->reconcile_all(rig.now).completed && calls == 1);
+	rig.fake.fail_next(billing::StripeReply::Outcome::Unreachable);
+	TEST_EXPECT(!rig.sync->reconcile_all(++rig.now).completed && calls == 1);
+	{
+		std::lock_guard<std::mutex> lock(rig.fake.mu);
+		rig.fake.prices["price_tier2"].interval = "year";
+	}
+	TEST_EXPECT(rig.sync->reconcile_all(++rig.now).completed && !rig.sync->status().prices_ok && calls == 1);
+	{
+		std::lock_guard<std::mutex> lock(rig.fake.mu);
+		rig.fake.prices["price_tier2"].interval = "month";
+	}
+	// A pass's reconcile (the worker's own) calls it too.
+	rig.sync->request_reconcile();
+	rig.sync->pass(++rig.now);
+	TEST_EXPECT(rig.sync->status().prices_ok && calls == 2);
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -372,6 +400,7 @@ int main(int argc, char **argv) {
 		{ "reconcile_rebuilds", test_reconcile_rebuilds },
 		{ "backoff_and_deleted", test_backoff_and_deleted },
 		{ "price_validation", test_price_validation },
+		{ "on_reconciled", test_on_reconciled },
 	};
 	for (const Case &c : cases) {
 		std::printf("-- %s\n", c.name);

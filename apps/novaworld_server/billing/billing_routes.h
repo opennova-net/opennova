@@ -8,13 +8,15 @@
 // header authenticates it); and the admin's GET /api/admin/billing, POST
 // /api/admin/billing/reconcile and POST /api/admin/billing/link
 // (require_admin). Without billing (set_billing null) every route answers 503
-// billing_disabled but the tiers, which answer {"enabled": false}. Every
+// billing_disabled but the tiers and the admin's view, which answer
+// {"enabled": false} (the admin's with the limits hold), and an admin's
+// override of the limits hold. Every
 // refusal is an error code with our own message, never Stripe's or the
 // database's text. No Stripe call runs inside a db::Transaction. Behind
 // ONNET_API_PROXY_ONLY like every /api route (the webhook too: Stripe reaches it
-// through the site's proxy). An admin's reconcile also clears the hosted
-// servers' limits hold (hosted/limits_hold.h), billing on or off, and the
-// admin's view shows it. The HttpListener owns one.
+// through the site's proxy). The admin's view shows the hosted servers' limits
+// hold (hosted/limits_hold.h), billing on or off, and an admin's reconcile may
+// carry the override that applies its stops. The HttpListener owns one.
 
 #include "billing.h"
 #include "billing_repository.h"
@@ -78,6 +80,8 @@ private:
 	crow::response admin_link(const crow::request &req);
 	// GET /api/me/billing's body for `user_id`.
 	crow::response me_billing_reply(db::Database &db, int64_t user_id);
+	// The limits hold's fields of GET /api/admin/billing.
+	void limits_hold_json(crow::json::wvalue &out) const;
 
 	WebAccess &access_;
 	db::ConnectionPool &pool_;
