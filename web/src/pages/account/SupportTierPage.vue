@@ -129,7 +129,10 @@
         />
         <p class="text-xs text-ink-muted">
           Prices are monthly in {{ tiers.currency.toUpperCase() }} and renew each month until you cancel. Payment goes
-          through Stripe; NovaWorld never sees your card.
+          through Stripe; NovaWorld never sees your card. Read the
+          <RouterLink to="/terms" class="text-accent hover:text-ink-bright">terms of service</RouterLink> and the
+          <RouterLink to="/refunds" class="text-accent hover:text-ink-bright">refund policy</RouterLink> before you
+          subscribe.
         </p>
       </section>
 
@@ -190,7 +193,7 @@
 // confirmed, then every 30 s with a note that it went through, and drops the
 // query once confirmed; ?checkout=cancel says no payment was taken.
 import { computed, onMounted, onUnmounted, ref } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
 import TierPicker from '../../components/TierPicker.vue';
 import {
   fetchMyBilling,

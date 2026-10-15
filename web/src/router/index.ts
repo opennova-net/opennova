@@ -9,6 +9,9 @@ import NewServerPage from '../pages/account/NewServerPage.vue';
 import AccountPage from '../pages/account/AccountPage.vue';
 import SupportTierPage from '../pages/account/SupportTierPage.vue';
 import SupportPage from '../pages/SupportPage.vue';
+import TermsPage from '../pages/legal/TermsPage.vue';
+import PrivacyPage from '../pages/legal/PrivacyPage.vue';
+import RefundsPage from '../pages/legal/RefundsPage.vue';
 import ServerDetailLayout from '../pages/servers/ServerDetailLayout.vue';
 import ServerOverviewTab from '../pages/servers/ServerOverviewTab.vue';
 import ServerConsoleTab from '../pages/servers/ServerConsoleTab.vue';
@@ -36,6 +39,9 @@ const router = createRouter({
     { path: '/register', component: RegisterPage },
     { path: '/lobby', component: LobbyPage },
     { path: '/support', component: SupportPage },
+    { path: '/terms', component: TermsPage },
+    { path: '/privacy', component: PrivacyPage },
+    { path: '/refunds', component: RefundsPage },
     // The account area.
     {
       path: '/me',

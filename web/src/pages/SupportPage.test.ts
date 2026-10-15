@@ -36,6 +36,10 @@ describe('SupportPage', () => {
     expect(wrapper.text()).toContain('$45 a month for each');
     expect(wrapper.text()).toContain('not the sale of any game');
     expect(wrapper.text()).not.toContain('—');
+    // The terms and the refund policy beside Subscribe.
+    const hrefs = wrapper.findAll('a').map((a) => a.attributes('href'));
+    expect(hrefs).toContain('/terms');
+    expect(hrefs).toContain('/refunds');
   });
 
   it('sends a visitor not logged in to log in, then to their support tier page', async () => {

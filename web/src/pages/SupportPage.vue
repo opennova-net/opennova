@@ -32,6 +32,9 @@
             Prices are monthly in {{ tiers.currency.toUpperCase() }} and renew each month until you cancel, which you
             can do at any time in Stripe's billing portal.
             <template v-if="!user">Subscribing asks you to log in first.</template>
+            Read the <RouterLink to="/terms" class="text-accent hover:text-ink-bright">terms of service</RouterLink>
+            and the <RouterLink to="/refunds" class="text-accent hover:text-ink-bright">refund policy</RouterLink>
+            before you subscribe.
           </p>
         </section>
 
@@ -56,7 +59,7 @@
 // log in first and on to their support tier page (/me/support), where the
 // checkout starts; a logged-in visitor goes there at once.
 import { onMounted, ref } from 'vue';
-import { useRouter } from 'vue-router';
+import { RouterLink, useRouter } from 'vue-router';
 import TierPicker from '../components/TierPicker.vue';
 import { fetchTiers } from '../api/billing';
 import { useSession } from '../composables/useSession';
