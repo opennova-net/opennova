@@ -112,7 +112,7 @@ data "aws_ebs_snapshot" "hosted" {
 resource "aws_security_group" "machines" {
   count       = local.hosted_enabled ? 1 : 0
   name        = "${local.name}-machines"
-  description = "OpenNova hosted game server machines: the slots' game ports to players, their admin ports to the NovaWorld service alone"
+  description = "OpenNova hosted game server machines: slot game ports to players, slot admin ports to the NovaWorld service alone"
   vpc_id      = aws_vpc.main.id
 
   tags = merge(var.tags, {
@@ -126,7 +126,7 @@ resource "aws_vpc_security_group_ingress_rule" "machines_game" {
   for_each = local.hosted_enabled ? toset(var.allowed_cidrs) : toset([])
 
   security_group_id = aws_security_group.machines[0].id
-  description       = "The slots' game UDP (slot k: ${local.slot_game_port}+k)"
+  description       = "Slot game UDP (slot k: ${local.slot_game_port}+k)"
   ip_protocol       = "udp"
   from_port         = local.slot_game_port
   to_port           = local.slot_game_port + var.shared_slots - 1
@@ -137,7 +137,7 @@ resource "aws_vpc_security_group_ingress_rule" "machines_admin" {
   count = local.hosted_enabled ? 1 : 0
 
   security_group_id            = aws_security_group.machines[0].id
-  description                  = "The slots' remote admin from the NovaWorld service alone (slot k: ${local.slot_admin_port}+k)"
+  description                  = "Slot remote admin from the NovaWorld service alone (slot k: ${local.slot_admin_port}+k)"
   ip_protocol                  = "tcp"
   from_port                    = local.slot_admin_port
   to_port                      = local.slot_admin_port + var.shared_slots - 1
@@ -162,7 +162,7 @@ resource "aws_vpc_security_group_ingress_rule" "service_from_machines" {
   count = local.hosted_enabled ? 1 : 0
 
   security_group_id            = aws_security_group.service.id
-  description                  = "The machines' hostd: bootstrap and sync on the service's internal listener (private)"
+  description                  = "Machine hostd: bootstrap and sync on the service internal listener (private)"
   ip_protocol                  = "tcp"
   from_port                    = var.internal_http_port
   to_port                      = var.internal_http_port
@@ -172,9 +172,10 @@ resource "aws_vpc_security_group_ingress_rule" "service_from_machines" {
 # ---- the machine role ---------------------------------------------------------
 
 resource "aws_iam_role" "machine" {
-  count              = local.hosted_enabled ? 1 : 0
-  name               = "${local.name}-machine"
-  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
+  count                = local.hosted_enabled ? 1 : 0
+  name                 = "${local.name}-machine"
+  assume_role_policy   = data.aws_iam_policy_document.ec2_assume_role.json
+  permissions_boundary = local.role_boundary_arn
 
   tags = merge(var.tags, {
     Name = "${local.name}-machine"

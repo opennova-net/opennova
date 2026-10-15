@@ -828,6 +828,11 @@ old CDKIID re-mints). Rehearse it on a staging deployment first (with Stripe tes
    its value is `ops_bucket_name` now).
 4. Request the vCPU quota (section 6) and make the data snapshots again if hosting is on
    (every machine mounts every data set by its label).
+5. Put the deploy user on its least-privilege policies and make the role boundary every
+   role here carries (`infra/aws/iam/README.md`, "Applying"); an apply that creates a role
+   fails without the boundary policy. Run `./deploy/run.sh infra list` first: a downloads
+   certificate still in the state (under the retired `us_east_1` alias) needs an
+   `infra state-rm` before the new code plans.
 
 **The window**
 
