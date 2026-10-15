@@ -64,7 +64,8 @@ std::vector<uint8_t> island_depth8() {
 	return depth;
 }
 
-void test_bake_reads_back() {
+// Returns the island's bytes, which test_bake_pinned pins.
+std::vector<uint8_t> test_bake_reads_back() {
 	TerrainBakeInput input;
 	input.depth8 = island_depth8();
 	input.terrain_name = "Island";
@@ -125,34 +126,32 @@ void test_bake_reads_back() {
 	expect(bad == 0, "every tile is in place, eight strips each, indices and vertices in range (" +
 	                         std::to_string(bad) + " bad)");
 
-	// Again on four threads: the same bytes whatever the thread count and whatever ran before.
+	// Again on another thread count (three where the hardware gives four, as CI's runners do; four elsewhere): the
+	// same bytes whatever the thread count and whatever ran before.
 	std::vector<uint8_t> again;
-	input.threads = 4;
+	const unsigned first_threads = input.threads;
+	input.threads = first_threads == 4 ? 3 : 4;
 	expect(bake_terrain_bytes(input, again, error) && again == bytes,
-	       "a second bake, on four threads, is byte-identical");
+	       "a second bake, on " + std::to_string(input.threads) + " threads against the first's " +
+	               std::to_string(first_threads) + ", is byte-identical");
 
 	TerrainBakeInput wrong;
 	wrong.depth8.assign(16, 0);
-	expect(!bake_terrain_bytes(wrong, bytes, error) && error.find("1024") != std::string::npos,
+	std::vector<uint8_t> refused;
+	expect(!bake_terrain_bytes(wrong, refused, error) && error.find("1024") != std::string::npos,
 	       "a map of another size is refused in words: " + error);
+	return bytes;
 }
 
-// The bake's bytes pinned: the island (8-bit, TrnGen's own path) and rolling hills (16-bit) hashed, as master made
-// them before the region bake (#1062), so a change that shifts any bake's bytes fails here (the byte parity with
-// TrnGen.exe's own .cpt files is the by-hand corpus leg below).
-void test_bake_pinned() {
-	TerrainBakeInput island;
-	island.depth8 = island_depth8();
-	island.terrain_name = "Island";
-	island.creator = "OpenNova";
-	island.version = "opennova";
-	island.threads = 4;
+// The bake's bytes pinned: the island (8-bit, TrnGen's own path; test_bake_reads_back's bake, not baked again) and
+// rolling hills (16-bit) hashed, as master made them before the region bake (#1062), so a change that shifts any
+// bake's bytes fails here (the byte parity with TrnGen.exe's own .cpt files is the by-hand corpus leg below).
+void test_bake_pinned(const std::vector<uint8_t> &island) {
+	expect(io::sha256_hex(island.data(), island.size()) ==
+	               "16f080a9f58e86a309e59c6c5992e346e9e132b48a64de8cf64b7e49f8b71b35",
+	       "the island's .cpt keeps its bytes (sha256)");
 	std::vector<uint8_t> bytes;
 	std::string error;
-	expect(bake_terrain_bytes(island, bytes, error) &&
-	               io::sha256_hex(bytes.data(), bytes.size()) ==
-	                       "16f080a9f58e86a309e59c6c5992e346e9e132b48a64de8cf64b7e49f8b71b35",
-	       "the island's .cpt keeps its bytes (sha256)");
 	TerrainBakeInput hills;
 	hills.depth16.resize(static_cast<size_t>(kDepthSide) * kDepthSide);
 	for (int y = 0; y < kDepthSide; ++y)
@@ -291,8 +290,7 @@ void test_rough_ground_refused() {
 } // namespace
 
 int main(int argc, char **argv) {
-	test_bake_reads_back();
-	test_bake_pinned();
+	test_bake_pinned(test_bake_reads_back());
 	test_bake_16bit();
 	test_refusals();
 	test_rough_ground_refused();

@@ -149,12 +149,17 @@ void test_regions() {
 	std::vector<uint16_t> map = ground();
 	Baked baked = bake_whole(map, none);
 
-	// bake_terrain_state is bake_terrain, keeping its state.
-	std::vector<uint8_t> plain;
+	// bake_terrain_state is bake_terrain, keeping its state, and a cancel never set (TerrainBakeInput::cancel)
+	// changes no byte: the plain bake runs under one, so one comparison holds both.
 	std::string error;
-	expect(bake_terrain_bytes(input_of(map, none), plain, error), "the plain bake: " + error);
-	expect(bytes_of(baked.cpt) == plain, "bake_terrain_state makes bake_terrain's bytes");
-	// A whole bake stops at a cancel (TerrainBakeInput::cancel), between nodes; one never set changes no byte.
+	std::atomic<bool> go{false};
+	TerrainBakeInput unstopped = input_of(map, none);
+	unstopped.cancel = &go;
+	std::vector<uint8_t> plain;
+	expect(bake_terrain_bytes(unstopped, plain, error), "the plain bake, under a cancel never set: " + error);
+	expect(bytes_of(baked.cpt) == plain,
+	       "bake_terrain_state makes bake_terrain's bytes, and a cancel never set changes no byte");
+	// A whole bake stops at a cancel, between nodes.
 	{
 		std::atomic<bool> stop{true};
 		TerrainBakeInput stopped = input_of(map, none);
@@ -163,10 +168,6 @@ void test_regions() {
 		TerrainBakeState none_state;
 		expect(!bake_terrain_state(stopped, none_cpt, none_state, error) && error == "cancelled" && none_state.empty(),
 		       "a cancel stops the whole bake: " + error);
-		std::atomic<bool> go{false};
-		stopped.cancel = &go;
-		std::vector<uint8_t> unstopped;
-		expect(bake_terrain_bytes(stopped, unstopped, error) && unstopped == plain, "a cancel never set changes no byte");
 	}
 	expect(!baked.state.empty() && baked.state.nodes.size() == 341u, "the state holds the 341 nodes");
 	int leaves_drawn = 0;
@@ -261,7 +262,10 @@ void test_threads_cancel_refusals(const Baked &baked) {
 }
 
 // Ground the whole bake refuses (every texel at random over the 16-bit range, D-TERRAIN-22) is refused by a region
-// bake of the whole map too, its state as it was.
+// bake too, its state as it was. The whole bake refuses it at a merge two levels above the leaves, so the changed
+// rect is the texels only the top-left 256 node's 16 leaves tap (inside its edges, which its neighbours' leaves tap
+// too): the leaves and their four parents are remade from the rough ground and the 256 node's merge of those four
+// refuses, as a region bake of the whole map refuses, at a sixteenth of the leaves.
 void test_rough_ground(const Baked &baked) {
 	std::vector<uint16_t> rough(static_cast<size_t>(kDepthSide) * kDepthSide);
 	uint32_t seed = 0x2545F491u;
@@ -271,7 +275,7 @@ void test_rough_ground(const Baked &baked) {
 	}
 	RegionBakeInput input;
 	input.depth16 = &rough;
-	input.dirty = {{0, 0, kDepthSide, kDepthSide}};
+	input.dirty = {{1, 1, 255, 255}};
 	input.threads = TerrainBakeInput::for_hardware();
 	RegionBakeResult out;
 	std::string error;
@@ -282,20 +286,23 @@ void test_rough_ground(const Baked &baked) {
 // A cancel set while the walk runs (an editor's close as its seed bakes): the walk the whole bake runs
 // (process_quadtree) stops at the next node it would start (make_nodes' check between nodes), "cancelled", the
 // nodes made so far kept and none after. The cancel is set as the leaves' level lands (a node count on the walk's
-// node_made), so the next level's first node is where it stops: its 256 leaves filed, no branch made.
+// node_made), so the next level's first node is where it stops: its 16 leaves filed, no branch made. The tree is
+// 256 across (16 leaves under four 128 branches, over the map's top-left corner), not the bake's 1024: the walk
+// takes any tree build_quadtree makes (the size is the bakes' refusal, not the walk's), and a cancel lands only
+// once a whole level is made, so the bake's 256 leaves would make the same claim at sixteen times the cost.
 void test_walk_cancelled_partway() {
 	const std::vector<uint16_t> depth = ground();
 	for (const unsigned threads : {1u, 4u}) {
 		BaseMeshSet base;
 		std::string error;
 		expect(generate_base_terrain_meshes(base, error), "the base meshes: " + error);
-		std::unique_ptr<QuadtreeNode> root = build_quadtree(1024, 64);
+		std::unique_ptr<QuadtreeNode> root = build_quadtree(256, 64);
 		TileFiles files;
 		std::atomic<bool> stop{false};
 		int made = 0;
 		int made_after = 0;
 		QuadtreeContext ctx;
-		ctx.tile_size = 1024;
+		ctx.tile_size = 256;
 		ctx.min_tile_size = 64;
 		ctx.depth_buffer = depth.data();
 		ctx.base = &base;
@@ -303,11 +310,11 @@ void test_walk_cancelled_partway() {
 		ctx.cancel = &stop;
 		ctx.node_made = [&](const QuadtreeNode &) {
 			if (stop.load()) ++made_after;
-			if (++made == 256) stop.store(true);
+			if (++made == 16) stop.store(true);
 		};
 		expect(!process_quadtree(root.get(), ctx, threads, error) && error == "cancelled",
 		       "a cancel set partway stops the walk: " + error);
-		expect(made == 256 && made_after == 0 && files.size() == 256,
+		expect(made == 16 && made_after == 0 && files.size() == 16,
 		       "the walk stops at its next node, the leaves made and no branch (threads " + std::to_string(threads) +
 		           ", made " + std::to_string(made) + ", files " + std::to_string(files.size()) + ")");
 		MeshSimp_FreeAll();
