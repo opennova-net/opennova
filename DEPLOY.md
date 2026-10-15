@@ -703,10 +703,10 @@ are billed per minute even for a public repository, and `maximum_runners` (10 Wi
 The stack is the organization's, not a deployment's: it has no workspaces, the toolbox
 runs it without `--deployment`, its state is the vault document `tfstate-github`, and its
 token is the vault item `github`. Make that token once: a fine-grained personal access
-token with **opennova-net** as its resource owner and the organization permission
-**Self-hosted runners: Read and write** (that permission also covers GitHub-hosted runners
-and runner groups). An org admin makes it, or approves it if the organization reviews
-fine-grained tokens. Then:
+token with **opennova-net** as its resource owner and two organization permissions:
+**Administration: Read and write** (the GitHub-hosted runners) and **Self-hosted runners:
+Read and write** (the runner group). An org admin makes it, or approves it if the
+organization reviews fine-grained tokens. Then:
 
 ```bash
 op item create --vault OpenNova-Deploy --title github --category 'API Credential' \
