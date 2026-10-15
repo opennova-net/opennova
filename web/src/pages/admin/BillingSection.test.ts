@@ -1,7 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import BillingSection from './BillingSection.vue';
-import { fetchAdminBilling, linkBillingCustomer, reconcileBilling } from '../../api/adminBilling';
+import { applyLimitStops, fetchAdminBilling, linkBillingCustomer, reconcileBilling } from '../../api/adminBilling';
 import { fetchTiers } from '../../api/billing';
 import { listUsers } from '../../api/users';
 import { adminBilling, userEntry } from '../../test/adminFixtures';
@@ -12,6 +12,7 @@ vi.mock('../../api/adminBilling', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../api/adminBilling')>()),
   fetchAdminBilling: vi.fn(),
   reconcileBilling: vi.fn(),
+  applyLimitStops: vi.fn(),
   linkBillingCustomer: vi.fn(),
 }));
 vi.mock('../../api/billing', () => ({ fetchTiers: vi.fn() }));
@@ -19,6 +20,7 @@ vi.mock('../../api/users', () => ({ listUsers: vi.fn() }));
 
 const billing = vi.mocked(fetchAdminBilling);
 const reconcile = vi.mocked(reconcileBilling);
+const applyStops = vi.mocked(applyLimitStops);
 const link = vi.mocked(linkBillingCustomer);
 const tiers = vi.mocked(fetchTiers);
 const users = vi.mocked(listUsers);
@@ -106,5 +108,50 @@ describe('BillingSection', () => {
     const wrapper = await mountSection();
     expect(wrapper.text()).toContain('Billing is off');
     expect(wrapper.findAll('tr.billing-tier-row')).toHaveLength(0);
+    expect(wrapper.find('section.limits-hold').exists()).toBe(false);
+  });
+
+  const held = {
+    limits_hold: true,
+    limits_hold_reason: 'a pass would stop 4 server(s) of 3 of 5 owners',
+    limits_hold_owners: 3,
+    limits_hold_servers: 4,
+  };
+
+  it('shows the limits hold with its reason, and applies its stops after a second step', async () => {
+    billing.mockResolvedValue({ ok: true, value: adminBilling(held) });
+    applyStops.mockResolvedValue({ ok: true, value: undefined });
+    const wrapper = await mountSection();
+    const hold = wrapper.get('section.limits-hold');
+    expect(hold.text()).toContain('Hosted server limits are on hold');
+    expect(hold.text()).toContain('4 servers of 3 owners');
+    expect(hold.text()).toContain('a pass would stop 4 server(s) of 3 of 5 owners');
+    expect(hold.text()).toContain('next full read from Stripe');
+    await hold.findAll('button').find((b) => b.text() === 'Apply the stops')!.trigger('click');
+    // The first step asks, naming what stops; nothing is sent yet.
+    expect(applyStops).not.toHaveBeenCalled();
+    const confirm = wrapper.get('section.limits-hold').findAll('button').find((b) => b.text() === 'Stop 4 servers of 3 owners');
+    expect(confirm).toBeDefined();
+    await confirm!.trigger('click');
+    await flushPromises();
+    expect(applyStops).toHaveBeenCalledTimes(1);
+    expect(reconcile).not.toHaveBeenCalled();
+    expect(wrapper.get('[role="status"]').text()).toContain("supervisor's next pass");
+  });
+
+  it('keeps the hold when the second step is declined', async () => {
+    billing.mockResolvedValue({ ok: true, value: adminBilling(held) });
+    const wrapper = await mountSection();
+    await wrapper.get('section.limits-hold').findAll('button').find((b) => b.text() === 'Apply the stops')!.trigger('click');
+    await wrapper.get('section.limits-hold').findAll('button').find((b) => b.text() === 'Keep the hold')!.trigger('click');
+    expect(applyStops).not.toHaveBeenCalled();
+    expect(wrapper.get('section.limits-hold').text()).toContain('Apply the stops');
+  });
+
+  it('shows the limits hold with billing off too', async () => {
+    billing.mockResolvedValue({ ok: true, value: adminBilling({ ...held, enabled: false }) });
+    const wrapper = await mountSection();
+    expect(wrapper.text()).toContain('Billing is off');
+    expect(wrapper.get('section.limits-hold').text()).toContain('no read from Stripe can release it');
   });
 });

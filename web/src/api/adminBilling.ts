@@ -1,6 +1,7 @@
 // The admin's billing overview (apps/novaworld_server/billing/billing_routes.cpp):
-// GET /api/admin/billing, POST /api/admin/billing/reconcile and POST
-// /api/admin/billing/link. Each answers an AdminResult (admin.ts).
+// GET /api/admin/billing (with the hosted servers' limits hold, billing on or
+// off), POST /api/admin/billing/reconcile (and its override of the hold) and
+// POST /api/admin/billing/link. Each answers an AdminResult (admin.ts).
 
 import { adminClient } from './client';
 import { adminCall, adminPost, type AdminResult } from './admin';
@@ -9,6 +10,7 @@ import type { AdminBillingResponse, BillingEvent, BillingOrphan, BillingSubscrip
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : '');
 const strOrNull = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null);
+const count = (v: unknown): number => (Number.isInteger(v) && (v as number) >= 0 ? (v as number) : 0);
 
 function pickRow(value: unknown): BillingSubscriptionRow | null {
   const sub = pickSubscription(value);
@@ -49,6 +51,10 @@ export function parseAdminBilling(data: unknown): AdminBillingResponse | null {
   if (!subscriptions || !orphans || !events) return null;
   return {
     enabled: v.enabled,
+    limits_hold: v.limits_hold === true,
+    limits_hold_reason: strOrNull(v.limits_hold_reason),
+    limits_hold_owners: count(v.limits_hold_owners),
+    limits_hold_servers: count(v.limits_hold_servers),
     mode: v.mode === 'live' ? 'live' : 'test',
     prices_ok: v.prices_ok === true,
     last_reconcile_at: strOrNull(v.last_reconcile_at),
@@ -70,6 +76,20 @@ export function fetchAdminBilling(signal?: AbortSignal): Promise<AdminResult<Adm
 // in the background).
 export function reconcileBilling(): Promise<AdminResult<void>> {
   return adminPost('/billing/reconcile');
+}
+
+// POST /api/admin/billing/reconcile {"force_limits": true}: the read, and the
+// supervisor's next pass applies the stops the limits hold keeps back (once).
+// With billing off only the stops apply.
+export function applyLimitStops(): Promise<AdminResult<void>> {
+  return adminPost('/billing/reconcile', { force_limits: true });
+}
+
+// "3 servers of 2 owners": the stops the limits hold keeps back.
+export function limitsHoldSummary(billing: Pick<AdminBillingResponse, 'limits_hold_owners' | 'limits_hold_servers'>): string {
+  const servers = billing.limits_hold_servers;
+  const owners = billing.limits_hold_owners;
+  return `${servers} server${servers === 1 ? '' : 's'} of ${owners} owner${owners === 1 ? '' : 's'}`;
 }
 
 // POST /api/admin/billing/link: a Stripe customer (an orphan's) linked to an

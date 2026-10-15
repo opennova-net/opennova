@@ -99,6 +99,10 @@ export function subscriptionRow(userId: number, overrides: Partial<BillingSubscr
 export function adminBilling(overrides: Partial<AdminBillingResponse> = {}): AdminBillingResponse {
   return {
     enabled: true,
+    limits_hold: false,
+    limits_hold_reason: null,
+    limits_hold_owners: 0,
+    limits_hold_servers: 0,
     mode: 'test',
     prices_ok: true,
     last_reconcile_at: '2026-10-14T06:00:00Z',

@@ -17,6 +17,16 @@
       {{ problems.join(' ') }}
     </p>
 
+    <div v-if="billing?.limits_hold" role="alert" class="limits-hold space-y-1 rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm">
+      <p class="font-semibold text-danger">Hosted server limits are on hold</p>
+      <p class="text-ink">
+        A pass would stop {{ holdSummary }} for their hosting limits, so none is stopped until a clean read from Stripe
+        confirms them or an admin applies the stops.
+        <RouterLink to="/admin/billing" class="text-accent hover:text-ink-bright">Review it on the Billing page</RouterLink>.
+      </p>
+      <p v-if="billing.limits_hold_reason" class="font-mono text-xs text-ink-muted">{{ billing.limits_hold_reason }}</p>
+    </div>
+
     <dl class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 lg:grid-cols-3">
       <StatTile
         label="Live servers"
@@ -39,13 +49,13 @@
       </StatTile>
       <StatTile
         label="Subscribers"
-        :value="billing ? String(subscribers.total) : 'Unknown'"
-        :detail="billing ? `Tier 1: ${subscribers.byTier[0]}, Tier 2: ${subscribers.byTier[1]}, Tier 3: ${subscribers.byTier[2]}` : billingNote"
+        :value="billingOn ? String(subscribers.total) : billing ? 'Off' : 'Unknown'"
+        :detail="billingOn ? `Tier 1: ${subscribers.byTier[0]}, Tier 2: ${subscribers.byTier[1]}, Tier 3: ${subscribers.byTier[2]}` : billingNote"
       />
       <StatTile
         label="Payments past due"
-        :value="billing ? String(pastDue) : 'Unknown'"
-        :detail="billing ? (pastDue === 0 ? 'Every payment went through' : 'Their servers keep running while Stripe retries') : billingNote"
+        :value="billingOn ? String(pastDue) : billing ? 'Off' : 'Unknown'"
+        :detail="billingOn ? (pastDue === 0 ? 'Every payment went through' : 'Their servers keep running while Stripe retries') : billingNote"
       />
       <StatTile
         label="NovaWorld service"
@@ -68,15 +78,16 @@
 // failing leaves the rest: live servers against the cap and the machines by
 // kind (GET /api/admin/hosted), players on hosted servers now with the fleet's
 // last 24 hours (GET /api/admin/hosted/stats), subscribers by tier and
-// payments past due (GET /api/admin/billing), and the NovaWorld service's
-// maintenance mode (GET /api/admin/server-status). Polled every 30 s.
+// payments past due with a banner while the hosted servers' limits are on
+// hold (GET /api/admin/billing), and the NovaWorld service's maintenance mode
+// (GET /api/admin/server-status). Polled every 30 s.
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import RelativeTime from '../../components/RelativeTime.vue';
 import Sparkline from '../../components/charts/Sparkline.vue';
 import StatTile from '../../components/charts/StatTile.vue';
 import { fetchHostedFleet, fetchServerStatus } from '../../api/admin';
-import { fetchAdminBilling } from '../../api/adminBilling';
+import { fetchAdminBilling, limitsHoldSummary } from '../../api/adminBilling';
 import { fetchFleetStats } from '../../api/hostedStats';
 import { usePolling } from '../../composables/usePolling';
 import type { ServerStatus } from '../../types/admin';
@@ -115,6 +126,8 @@ const subscribers = computed(() => {
   return { total: tiers.length, byTier };
 });
 const pastDue = computed(() => (billing.value?.subscriptions ?? []).filter((s) => s.status === 'past_due').length);
+const holdSummary = computed(() => (billing.value ? limitsHoldSummary(billing.value) : ''));
+const billingOn = computed(() => billing.value?.enabled === true);
 
 const poll = usePolling({
   async read(signal) {

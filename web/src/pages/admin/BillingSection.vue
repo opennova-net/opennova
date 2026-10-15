@@ -18,6 +18,39 @@
     <div v-if="message" aria-hidden="true" class="rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online">{{ message }}</div>
     <div v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">{{ error }}</div>
 
+    <!-- The hosted servers' limits hold, billing on or off. -->
+    <section
+      v-if="billing?.limits_hold"
+      class="limits-hold space-y-3 rounded-panel border border-danger/40 bg-danger/10 p-4 sm:p-6"
+      aria-labelledby="billing-limits-hold"
+    >
+      <h2 id="billing-limits-hold" class="text-lg font-semibold text-danger">Hosted server limits are on hold</h2>
+      <p class="text-sm text-ink">
+        A pass would stop {{ holdSummary }} for their hosting limits: more owners at once than a real lapse would
+        touch. In case the billing cache is wrong, no hosted server stops for its owner's limits while the hold is on.
+      </p>
+      <p v-if="billing.limits_hold_reason" class="font-mono text-xs text-ink-muted">{{ billing.limits_hold_reason }}</p>
+      <p class="text-sm text-ink-muted">
+        <template v-if="billing.enabled">
+          It releases by itself after the next full read from Stripe (Reconcile now starts one): if the same owners are
+          still past their limits then, their servers stop.
+        </template>
+        <template v-else>Billing is off, so no read from Stripe can release it.</template>
+      </p>
+      <div v-if="!confirmingStops" class="flex flex-wrap items-center gap-3">
+        <button type="button" :disabled="busy" :class="dangerButton" @click="confirmingStops = true">Apply the stops</button>
+      </div>
+      <div v-else class="space-y-2 rounded-panel border border-danger/40 bg-panel p-3">
+        <p class="text-sm text-danger">
+          Stop {{ holdSummary }} now, newest first as their limits say? Their matches end for everyone on them.
+        </p>
+        <div class="flex flex-wrap items-center gap-3">
+          <button type="button" :disabled="busy" :class="dangerButton" @click="applyStops">Stop {{ holdSummary }}</button>
+          <button type="button" :disabled="busy" :class="secondaryButton" @click="confirmingStops = false">Keep the hold</button>
+        </div>
+      </div>
+    </section>
+
     <div v-if="billing === null && loading" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
       Loading billing…
     </div>
@@ -227,9 +260,11 @@
 </template>
 
 <script setup lang="ts">
-// /admin/billing: the billing overview (GET /api/admin/billing): the Stripe
-// mode, the prices' check, the last full read from Stripe with "Reconcile
-// now" (POST /api/admin/billing/reconcile), subscribers by tier and the
+// /admin/billing: the billing overview (GET /api/admin/billing): the hosted
+// servers' limits hold with its reason and a two-step "Apply the stops" (POST
+// /api/admin/billing/reconcile {"force_limits": true}), the Stripe mode, the
+// prices' check, the last full read from Stripe with "Reconcile now" (POST
+// /api/admin/billing/reconcile), subscribers by tier and the
 // monthly total at the tiers' prices (GET /api/billing/tiers), the past-due,
 // canceling and doubled accounts, the subscriptions no account owns with
 // their relink (POST /api/admin/billing/link), every subscription, and the
@@ -238,7 +273,14 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import RelativeTime from '../../components/RelativeTime.vue';
 import StatTile from '../../components/charts/StatTile.vue';
-import { fetchAdminBilling, linkBillingCustomer, reconcileBilling, stripeDashboardUrl } from '../../api/adminBilling';
+import {
+  applyLimitStops,
+  fetchAdminBilling,
+  limitsHoldSummary,
+  linkBillingCustomer,
+  reconcileBilling,
+  stripeDashboardUrl,
+} from '../../api/adminBilling';
 import { fetchTiers } from '../../api/billing';
 import { listUsers } from '../../api/users';
 import type { AdminBillingResponse, AdminSubscription, TiersResponse } from '../../types/billing';
@@ -250,8 +292,11 @@ const primaryButton =
   'rounded-control bg-accent px-4 py-2 text-sm font-medium text-on-accent transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50';
 const secondaryButton =
   'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
+const dangerButton =
+  'rounded-control border border-danger/60 px-4 py-2 text-sm font-medium text-danger transition hover:bg-danger/10 disabled:cursor-not-allowed disabled:opacity-40';
 
 const billing = ref<AdminBillingResponse | null>(null);
+const confirmingStops = ref(false);
 const tiers = ref<TiersResponse | null>(null);
 const loading = ref(false);
 const busy = ref(false);
@@ -264,6 +309,7 @@ const live = computed(() => billing.value?.mode === 'live');
 const pastDue = computed(() => (billing.value?.subscriptions ?? []).filter((s) => s.status === 'past_due'));
 const canceling = computed(() => (billing.value?.subscriptions ?? []).filter((s) => s.cancel_at_period_end && s.entitled));
 const revenue = computed(() => billingRevenue(billing.value?.subscriptions ?? [], tiers.value));
+const holdSummary = computed(() => (billing.value ? limitsHoldSummary(billing.value) : ''));
 
 function money(cents: number): string {
   return formatMoney(cents, tiers.value?.currency ?? 'usd');
@@ -311,6 +357,20 @@ async function reconcile() {
     return;
   }
   flash('Reconcile started: Stripe is read again in the background. Refresh in a minute to see it.');
+}
+
+// The second step of "Apply the stops": the supervisor's next pass stops them.
+async function applyStops() {
+  if (busy.value) return;
+  busy.value = true;
+  const result = await applyLimitStops();
+  busy.value = false;
+  confirmingStops.value = false;
+  if (!result.ok) {
+    fail(result.error.message);
+    return;
+  }
+  flash('The stops apply on the supervisor\'s next pass, within a few seconds. Refresh to see the hold gone.');
 }
 
 async function relink(customerId: string) {

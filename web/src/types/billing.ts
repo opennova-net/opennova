@@ -131,9 +131,19 @@ export interface BillingEvent {
   outcome: string;
 }
 
-// GET /api/admin/billing.
+// GET /api/admin/billing. With billing off, `enabled` is false and only the
+// limits hold is read (the rest stays empty).
 export interface AdminBillingResponse {
   enabled: boolean;
+  // The hosted servers' limits hold: a pass would have stopped the servers of
+  // more owners at once than a real lapse would, so no server stops for its
+  // owner's limits until a clean read from Stripe confirms them or an admin
+  // applies the stops.
+  limits_hold: boolean;
+  limits_hold_reason: string | null;
+  // The stops it keeps back, as the supervisor's last pass counted them.
+  limits_hold_owners: number;
+  limits_hold_servers: number;
   // The Stripe key's mode.
   mode: 'test' | 'live';
   // Every configured price is active, monthly and in the key's mode.
