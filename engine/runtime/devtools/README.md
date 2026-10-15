@@ -29,8 +29,8 @@ What is here:
 
 ## The tool kit
 
-`ui_kit.h` (`devtools::ui_kit`, ImGui-free) is the one set of pieces both
-products' windows draw with: `WrapRow` (a row that wraps whole controls) with
+`ui_kit.h` (`devtools::ui_kit`, ImGui-free) is the one set of pieces the
+windows on the pass draw with: `WrapRow` (a row that wraps whole controls) with
 the measures it takes, `tool` (a button whose tooltip says what it does, or
 while it cannot act, why not; a disabled one never acts), `check`,
 `row_tools` (a list's Add / Duplicate / Remove / Up / Down), `path_field`,
@@ -39,8 +39,7 @@ control over a value its owner holds), `fit` / `fit_middle` / `clipped_text`
 (text cut to its cell), `tooltip` (every window's hover text, a disabled
 item's too), `empty_state` and `note`. A window never hand-rolls a disabled
 button's reason (`BeginDisabled` + `IsItemHovered` + `SetTooltip`): `tool` or
-`tooltip` carries it. The editor's kit (`editor/ui/ui_kit.h`) is this one plus
-the marks of the editor's own types; it never declares a name this kit has.
+`tooltip` carries it.
 
 ## The control board
 
