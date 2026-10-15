@@ -4,14 +4,14 @@
 # ---------------------------------------------------------------------------
 #
 # The NovaWorld service launches and ends the machines itself (its EC2 machine
-# driver, through the AWS CLI, with the service host's role); each runs
+# driver, through the AWS CLI, with the service instance's role); each runs
 # opennova-hostd and one opennova-serve container per slot. Two kinds:
 #   shared  var.shared_instance_type (t3a.large, unlimited CPU credits), up to
 #           var.shared_slots servers of any accounts, packed best-fit;
 #   own     var.own_instance_type (c7a.medium), exactly one server, the paid
 #           own-machine add-on.
 # Slot k of a machine: game UDP 32768+k (to players), admin TCP 32800+k (to the
-# service host's security group alone). Every machine mounts every data set's
+# service instance's security group alone). Every machine mounts every data set's
 # snapshot (var.hosted_data_snapshots) as a volume of its own, read-only.
 #
 # This file gives the service what it launches from and the least it may do:
@@ -24,7 +24,7 @@
 #     (ONNET_HOSTED_EC2_LAUNCH_TEMPLATES in infra.env) and hands each launch its
 #     user data;
 #   - the machines' security group: the slots' game ports to players, their
-#     admin ports to the service host alone; and the service host admitting
+#     admin ports to the service instance alone; and the service instance admitting
 #     the machines on its internal port (var.internal_http_port, its second
 #     listener on its fixed private address: hostd's bootstrap and sync);
 #   - the machine role: the five actions Session Manager needs for break-glass
@@ -70,7 +70,7 @@ locals {
 
 # The machines' image: Canonical's newest Ubuntu 24.04 when a launch template
 # is made, or var.hosted_ami_id. The templates ignore later image changes, as
-# the service host does: a new image is a deliberate
+# the service instance does: a new image is a deliberate
 # `infra apply -replace='aws_launch_template.fleet["shared"]'
 # -replace='aws_launch_template.fleet["own"]'`. Running machines keep the image
 # they launched with until they end.
@@ -155,7 +155,7 @@ resource "aws_vpc_security_group_egress_rule" "machines_all" {
   cidr_ipv4         = "0.0.0.0/0"
 }
 
-# The service host admits the machines on its internal port alone: its second
+# The service instance admits the machines on its internal port alone: its second
 # listener, on its fixed private address (ONNET_INTERNAL_HTTP_BIND), where
 # hostd fetches its bootstrap and syncs.
 resource "aws_vpc_security_group_ingress_rule" "service_from_machines" {

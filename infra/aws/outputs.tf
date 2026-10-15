@@ -5,7 +5,7 @@ output "deployment" {
 
 output "instance_id" {
   value       = aws_instance.service.id
-  description = "The service host's instance (disposable: -replace=aws_instance.service makes a new one)"
+  description = "The service instance's id (disposable: -replace=aws_instance.service makes a new one)"
 }
 
 output "public_ip" {
@@ -20,7 +20,7 @@ output "service_eip_allocation_id" {
 
 output "service_private_ip" {
   value       = local.service_private_ip
-  description = "The service host's fixed private address (its network interface's): where hosted machines reach the service (ONNET_INTERNAL_HTTP_BIND) and the address their admin.cfg admits"
+  description = "The service instance's fixed private address (its network interface's): where hosted machines reach the service (ONNET_INTERNAL_HTTP_BIND) and the address their admin.cfg admits"
 }
 
 output "web_domain" {
@@ -50,7 +50,7 @@ output "log_group" {
 
 output "db_endpoint" {
   value       = aws_db_instance.main.address
-  description = "The database's hostname (private: the service host reaches it; DATABASE_URL in infra.env)"
+  description = "The database's hostname (private: the service instance reaches it; DATABASE_URL in infra.env)"
 }
 
 output "db_port" {

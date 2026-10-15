@@ -3,9 +3,9 @@
 # repo root:
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> init -backend=false
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> test
-# PostgreSQL 17 in the private subnets, single-AZ beside the service host,
+# PostgreSQL 17 in the private subnets, single-AZ beside the service instance,
 # never public, encrypted, TLS forced, 14 days of point-in-time recovery, a
-# final snapshot and deletion protection; reached from the service host's
+# final snapshot and deletion protection; reached from the service instance's
 # security group alone; its master password write-only; infra.env hands the
 # server a verify-full URL with no password in it.
 
@@ -122,7 +122,7 @@ run "database" {
   }
   assert {
     condition     = !aws_db_instance.main.publicly_accessible && !aws_db_instance.main.multi_az && aws_db_instance.main.availability_zone == aws_subnet.public["a"].availability_zone
-    error_message = "private, single-AZ, in the service host's zone"
+    error_message = "private, single-AZ, in the service instance's zone"
   }
   assert {
     condition     = aws_db_instance.main.storage_encrypted && aws_db_instance.main.storage_type == "gp3" && aws_db_instance.main.allocated_storage == 20 && aws_db_instance.main.max_allocated_storage == 100
@@ -163,7 +163,7 @@ run "database_wiring" {
 
   assert {
     condition     = aws_vpc_security_group_ingress_rule.db_from_service.referenced_security_group_id == aws_security_group.service.id && aws_vpc_security_group_ingress_rule.db_from_service.security_group_id == aws_security_group.db.id
-    error_message = "the database admits the service host's security group alone"
+    error_message = "the database admits the service instance's security group alone"
   }
   assert {
     condition     = strcontains(aws_ssm_parameter.infra_env.value, "DATABASE_URL='postgresql://novaworld@opennova-server-db.abcdefghijkl.us-east-1.rds.amazonaws.com:5432/novaworld?sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem'\n")

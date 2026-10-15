@@ -21,7 +21,7 @@ locals {
   game_host = local.manage_shared ? "game.${var.cloudflare_domain}" : "game-${local.deployment}.${var.cloudflare_domain}"
 
   # The two availability zones: var.azs, or the region's first two. Public and
-  # private subnet a share the first (the service host and its database), b the
+  # private subnet a share the first (the service instance and its database), b the
   # second.
   azs = length(var.azs) == 2 ? var.azs : slice(data.aws_availability_zones.available.names, 0, 2)
 }

@@ -4,9 +4,9 @@ name: Infra
 # infra/ (formatted, valid, and infra/aws/tests' mock-provider runs, which plan
 # against mocks with no credentials, so nothing reaches AWS or Cloudflare) at
 # the pinned Terraform the toolbox runs, and shellcheck on the deploy toolbox,
-# the service host's first-boot and converge scripts, the portal's entrypoint
+# the service instance's first-boot and converge scripts, the portal's entrypoint
 # and the hosted machines' script. The Terraform reads deploy/host/ (the
-# service host's scripts), so the repo root is mounted. Path-filtered: it runs
+# service instance's scripts), so the repo root is mounted. Path-filtered: it runs
 # when one of those changes.
 
 on:

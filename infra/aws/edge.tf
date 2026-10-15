@@ -16,7 +16,7 @@
 # the zone's, so prod (the default workspace) owns them, naming every
 # deployment's web hostname (var.edge_other_deployments).
 
-# The site's records, all at the service host's Elastic IP: prod's @, www and
+# The site's records, all at the service instance's Elastic IP: prod's @, www and
 # game; another deployment's <deployment> and game-<deployment> (locals.tf).
 # Proxied by default so the site gets Cloudflare TLS.
 resource "cloudflare_record" "web_root" {

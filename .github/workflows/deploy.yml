@@ -7,7 +7,7 @@ name: Deploy
 # each run before it starts, and the role (infra/aws/ci.tf, var.github_deploy)
 # trusts that environment's jobs alone. It pins the images by digest, uploads
 # the release bundle built from the commit this run checks out, points prod's
-# release at it and converges the service host through SSM; an image given no
+# release at it and converges the service instance through SSM; an image given no
 # tag keeps the current release's. The repository variables AWS_DEPLOY_ROLE_ARN
 # (the infra output github_deploy_role_arn) and AWS_REGION name the role.
 # Rolling back is the toolbox's `app rollback` (or a run here with the old

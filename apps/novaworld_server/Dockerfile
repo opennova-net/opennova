@@ -134,7 +134,8 @@ EXPOSE 7597/udp 64206/udp 8080/tcp
 # The server runs as UID 10002, an account of its own with no home and no
 # shell: it keeps no state in the image (the database is PostgreSQL), writes
 # only its temporary files (/tmp, a tmpfs in the compose files) and binds only
-# ports above 1024. The number is fixed so a host's firewall rules can name it.
+# ports above 1024. The number is fixed so the service instance's firewall rules
+# (its metadata fence, deploy/host/service-user-data.sh) can name it.
 RUN useradd --uid 10002 --user-group --no-create-home --home-dir /nonexistent \
         --shell /usr/sbin/nologin novaworld
 USER 10002

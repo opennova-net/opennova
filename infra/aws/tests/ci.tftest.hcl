@@ -6,7 +6,7 @@
 # Off by default. On, the role trusts this repository's production
 # environment alone, and may point the release, upload bundles under its
 # deployment's prefix and send the converge document to the host tagged as its
-# service host, nothing else.
+# service instance, nothing else.
 
 mock_provider "aws" {
   override_during = plan
@@ -162,7 +162,7 @@ run "deploy_role" {
         for c in st.condition : c if c.variable == "ssm:resourceTag/opennova:service" && contains(c.values, "prod")
       ]) == 1
     ]) == 1
-    error_message = "the converge document goes to the host tagged as prod's service host alone"
+    error_message = "the converge document goes to the instance tagged as prod's service instance alone"
   }
   assert {
     condition = alltrue([

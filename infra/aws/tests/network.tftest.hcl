@@ -133,7 +133,7 @@ run "subnets" {
   }
   assert {
     condition     = aws_subnet.private["a"].availability_zone == aws_subnet.public["a"].availability_zone && aws_subnet.private["b"].availability_zone == aws_subnet.public["b"].availability_zone
-    error_message = "private a shares public a's zone (the database beside the service host), b b's"
+    error_message = "private a shares public a's zone (the database beside the service instance), b b's"
   }
   assert {
     condition     = alltrue([for s in aws_subnet.public : s.map_public_ip_on_launch]) && alltrue([for s in aws_subnet.private : !s.map_public_ip_on_launch])

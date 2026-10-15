@@ -173,8 +173,8 @@ through (`infra apply -replace=aws_instance.service`). Other `infra` commands:
 `state-rm ADDRESS` (forget a resource, keep its object), `import ADDRESS ID`, `output`,
 `list`, and `destroy` (refused for prod).
 
-What it makes: the VPC (`10.44.0.0/16`: public subnets a/b for the host and the
-machines, private a/b with no route out for the database), the service host with its
+What it makes: the VPC (`10.44.0.0/16`: public subnets a/b for the service and the
+machines, private a/b with no route out for the database), the service instance with its
 fixed network interface (`10.44.0.10`) and the adopted Elastic IP, its security group
 (the retail ports to everyone, 443 to Cloudflare's ranges alone, the internal port to
 the machines alone, no 22, no 80), the database, the SSM parameters and converge
@@ -345,7 +345,7 @@ required reviewers, and the variables `AWS_DEPLOY_ROLE_ARN` (the infra output
 `github_deploy_role_arn`) and `AWS_REGION`. Run it from the Actions tab with the tags; it
 deploys prod from the commit it runs on. The role may read the deployment's settings,
 upload its release bundles, point its release and send the converge document to its
-service host, and nothing else.
+service instance, and nothing else.
 
 ### The web build (game.<domain>)
 
@@ -426,8 +426,8 @@ with the host's role):
 - **own machines**, `c7a.medium`, exactly one server: the own-machine add-on.
 
 Slot k of a machine is game UDP `32768+k` (to players) and admin TCP `32800+k` (to the
-service host alone); hostd, the agent on each machine, runs one container per slot and
-reports to the service's internal listener (`10.44.0.10:8070`, admitted from the
+service instance alone); hostd, the agent on each machine, runs one container per slot
+and reports to the service's internal listener (`10.44.0.10:8070`, admitted from the
 machines alone). Every machine mounts every data set, read-only. Machines are terminated,
 never stopped. No machine has an SSH key or database credentials; break-glass is Session
 Manager. At most 2 shared and 2 own machines run at once (`fleet_max_shared`,
@@ -469,7 +469,7 @@ label, by which the machine mounts it.
    `data_snapshot_id_<slug>`. With no `hosted` item hosting is off; a broken item stops
    every `infra` run rather than plan hosting away.
 
-3. **Check the vCPU quota.** The service host and the machines share the account's
+3. **Check the vCPU quota.** The service instance and the machines share the account's
    On-Demand Standard instances quota (L-1216C47A): the host's `c7i.large` 2, each
    `t3a.large` 2, each `c7a.medium` 1. The defaults need 8 (2 + 2 x 2 + 2 x 1); a staging
    stack doubles it. Request 32 in the Service Quotas console to leave room for a roll:
@@ -633,7 +633,7 @@ About $90 a month for the service tier before the machines:
 
 | | a month |
 |---|---|
-| the service host, `c7i.large` on demand | $65 |
+| the service instance, `c7i.large` on demand | $65 |
 | its Elastic IP and 30 GiB root volume | $6 |
 | the database, `db.t4g.micro`, 20 GiB gp3, backups | $14 |
 | CloudWatch logs, metrics, alarms; the health check | $4 |

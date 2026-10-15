@@ -27,7 +27,7 @@ instance_type = "c7i.large"
 # public_subnet_ids, then aws ec2 describe-subnets).
 # azs = ["us-east-1a", "us-east-1b"]
 
-# The service host's fixed private address in public subnet a (10.44.0.<host>).
+# The service instance's fixed private address in public subnet a (10.44.0.<n>).
 # service_private_ip_host = 10
 
 # The database (database.tf): PostgreSQL 17 on RDS. Its master password comes

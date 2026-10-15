@@ -2,7 +2,7 @@
 # Observability and budgets (DEPLOY.md, "Operating")
 # ---------------------------------------------------------------------------
 #
-# Logs: the service host's containers (docker's awslogs driver, a stream per
+# Logs: the service instance's containers (docker's awslogs driver, a stream per
 # service) and the machines', 30 days each. Metrics: from the NovaWorld
 # server's heartbeat, a JSON line it logs every 60 s,
 #   {"heartbeat":{"nw_sessions":N,"listed_hosts":N,"hosted_live":N,
@@ -42,7 +42,7 @@ locals {
 
 # ---- logs ---------------------------------------------------------------------
 
-# The service host's containers (deploy/compose/docker-compose.prod.yml).
+# The service instance's containers (deploy/compose/docker-compose.prod.yml).
 # `./deploy/run.sh app logs` reads it.
 resource "aws_cloudwatch_log_group" "service" {
   name              = "/opennova/${local.deployment}/service"
@@ -186,7 +186,7 @@ resource "aws_cloudwatch_metric_alarm" "server" {
 # (same instance, same network interface and address).
 resource "aws_cloudwatch_metric_alarm" "host_recover" {
   alarm_name          = "${local.name}-host-system-check"
-  alarm_description   = "The service host failed its system status check: EC2 recovers it."
+  alarm_description   = "The service instance failed its system status check: EC2 recovers it."
   namespace           = "AWS/EC2"
   metric_name         = "StatusCheckFailed_System"
   dimensions          = { InstanceId = aws_instance.service.id }
@@ -204,7 +204,7 @@ resource "aws_cloudwatch_metric_alarm" "host_recover" {
 # A failed instance status check (the OS): reboot it.
 resource "aws_cloudwatch_metric_alarm" "host_reboot" {
   alarm_name          = "${local.name}-host-instance-check"
-  alarm_description   = "The service host failed its instance status check: EC2 reboots it."
+  alarm_description   = "The service instance failed its instance status check: EC2 reboots it."
   namespace           = "AWS/EC2"
   metric_name         = "StatusCheckFailed_Instance"
   dimensions          = { InstanceId = aws_instance.service.id }
@@ -221,7 +221,7 @@ resource "aws_cloudwatch_metric_alarm" "host_reboot" {
 
 resource "aws_cloudwatch_metric_alarm" "host_cpu" {
   alarm_name          = "${local.name}-host-cpu"
-  alarm_description   = "The service host's CPU stayed above 80% for 15 minutes."
+  alarm_description   = "The service instance's CPU stayed above 80% for 15 minutes."
   namespace           = "AWS/EC2"
   metric_name         = "CPUUtilization"
   dimensions          = { InstanceId = aws_instance.service.id }

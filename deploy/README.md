@@ -23,13 +23,13 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
 - `Dockerfile`, `docker-compose.deploy.yml`: the toolbox image (Debian: the docker CLI
   with compose and buildx, op, Terraform, the AWS CLI v2, the Session Manager plugin;
   each a pinned, checksummed release).
-- `host/`: what runs on the service host. `service-user-data.sh` is its first boot
-  (Docker, the AWS CLI, the metadata fence, the converge unit); `converge.sh` brings it to
-  the deployment's release (Terraform puts it in the SSM converge document; the host runs
-  it at every boot, `app deploy` sends it) and installs the helpers the other commands run
-  there (`opennova-compose`, `opennova-psql`, `opennova-admin-api`).
+- `host/`: what runs on the service instance. `service-user-data.sh` is its first boot
+  (Docker, the AWS CLI, the metadata fence, the converge unit); `converge.sh` brings it
+  to the deployment's release (Terraform puts it in the SSM converge document; the
+  instance runs it at every boot, `app deploy` sends it) and installs the helpers the
+  other commands run there (`opennova-compose`, `opennova-psql`, `opennova-admin-api`).
 - `compose/`: the runtime stack: the base file, the dev overlay (local work) and the prod
-  overlay, which the host runs from each release bundle.
+  overlay, which the instance runs from each release bundle.
 - `env/`: `app.prod.env`, the committed non-secret values every release carries;
   `*.tpl`, the `op://` references (`runtime.env.tpl`: the service's secrets, which
   `secrets sync` copies to SSM; `terraform.env.tpl`: Terraform's; `aws.env.tpl`: the
@@ -41,7 +41,7 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
   the nginx the portal routes `game.<domain>` to.
 
 The only secret an operator handles is `OP_SERVICE_ACCOUNT_TOKEN`. Nothing reaches the
-service host over SSH: it has no key and no port 22.
+service instance over SSH: it has no key and no port 22.
 
 ## Resetting the service database
 

@@ -1,5 +1,5 @@
 [Unit]
-Description=OpenNova: converge the service host to its deployment's release
+Description=OpenNova: converge the service instance to its deployment's release
 After=network-online.target docker.service opennova-fence.service
 Wants=network-online.target
 Requires=docker.service opennova-fence.service

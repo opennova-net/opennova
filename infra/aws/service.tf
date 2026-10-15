@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# The service host (DEPLOY.md, "Operating")
+# The service instance (DEPLOY.md, "Operating")
 # ---------------------------------------------------------------------------
 #
 # One EC2 instance runs the NovaWorld stack with docker compose: the server
@@ -76,6 +76,8 @@ locals {
 
 # ---- the security group -------------------------------------------------------
 
+# Its description keeps the wording it was made with: AWS fixes a group's
+# description for the group's life, so a changed one replaces the group.
 resource "aws_security_group" "service" {
   name        = "${local.name}-service"
   description = "OpenNova NovaWorld service host: the retail ports to everyone, the web to Cloudflare alone"
@@ -136,7 +138,7 @@ resource "aws_network_interface" "service" {
   subnet_id       = aws_subnet.public["a"].id
   private_ips     = [local.service_private_ip]
   security_groups = [aws_security_group.service.id]
-  description     = "OpenNova NovaWorld service host (outlives the instance)"
+  description     = "OpenNova NovaWorld service instance's interface (outlives the instance)"
 
   tags = merge(var.tags, {
     Name = "${local.name}-service"

@@ -5,7 +5,7 @@
 #   locals.tf      the deployment (workspace) and the names derived from it
 #   variables.tf   every input
 #   network.tf     the VPC: public subnets a/b (service, machines), private a/b
-#   service.tf     the service host
+#   service.tf     the service instance
 #   service_ssm.tf what drives the host: SSM parameters and the converge document
 #   database.tf    PostgreSQL 17 on RDS
 #   edge.tf        Cloudflare: DNS, the origin certificate, Full (strict),

@@ -1,7 +1,7 @@
 # A deployment's runtime secrets. `./deploy/run.sh [--deployment NAME] secrets
 # sync` reads each reference below from the vault and writes it to SSM
 # Parameter Store as a SecureString, /opennova/<deployment>/secret/<NAME>; the
-# service host's converge turns them into a memory-only env file for docker
+# service instance's converge turns them into a memory-only env file for docker
 # compose (deploy/host/converge.sh). Edit the vault, not this file.
 #
 # The toolbox fills in @VAULT@ (OP_VAULT, default OpenNova-Deploy), @APP_ITEM@

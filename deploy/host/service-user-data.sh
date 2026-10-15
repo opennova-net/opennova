@@ -1,5 +1,5 @@
 #!/bin/bash
-# The NovaWorld service host's first boot. infra/aws/service.tf renders this
+# The NovaWorld service instance's first boot. infra/aws/service.tf renders this
 # file as the instance's user data, filling in the @...@ values below (this
 # deployment's); cloud-init runs it once, as root, on a stock Ubuntu 24.04
 # image. It

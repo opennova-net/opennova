@@ -5,7 +5,7 @@ variable "region" {
 }
 
 variable "instance_type" {
-  description = "The service host's instance type: the NovaWorld server, the portal's nginx and the web build in docker compose. Never a burstable type (the server's loops run all the time)."
+  description = "The service instance's type: the NovaWorld server, the portal's nginx and the web build in docker compose. Never a burstable type (the server's loops run all the time)."
   type        = string
   default     = "c7i.large"
 
@@ -63,13 +63,13 @@ variable "game_http_port" {
 }
 
 variable "ami_id" {
-  description = "Override the service host's image (an Ubuntu 24.04 x86_64 AMI). Empty: Canonical's newest when the host is made; a later image waits for a deliberate -replace=aws_instance.service."
+  description = "Override the service instance's image (an Ubuntu 24.04 x86_64 AMI). Empty: Canonical's newest when the instance is made; a later image waits for a deliberate -replace=aws_instance.service."
   type        = string
   default     = ""
 }
 
 variable "service_eip_allocation_id" {
-  description = "The Elastic IP the service host takes, by allocation id (eipalloc-...): prod adopts the address retail clients already use, which Terraform then reads and never manages, so no plan can release it. Empty: the deployment gets an address of its own, managed here (staging)."
+  description = "The Elastic IP the service instance takes, by allocation id (eipalloc-...): prod adopts the address retail clients already use, which Terraform then reads and never manages, so no plan can release it. Empty: the deployment gets an address of its own, managed here (staging)."
   type        = string
   default     = ""
 
@@ -80,7 +80,7 @@ variable "service_eip_allocation_id" {
 }
 
 variable "service_private_ip_host" {
-  description = "The service host's fixed private address, as a host number in public subnet a (10 gives 10.44.0.10). Its network interface keeps it across instances; the game machines reach the service's internal listener there."
+  description = "The service instance's fixed private address, as a host number in public subnet a (10 gives 10.44.0.10). Its network interface keeps it across instances; the game machines reach the service's internal listener there."
   type        = number
   default     = 10
 
@@ -91,7 +91,7 @@ variable "service_private_ip_host" {
 }
 
 variable "service_root_volume_gb" {
-  description = "The service host's root volume (the OS, docker, the images of a few releases), in GiB."
+  description = "The service instance's root volume (the OS, docker, the images of a few releases), in GiB."
   type        = number
   default     = 30
 }

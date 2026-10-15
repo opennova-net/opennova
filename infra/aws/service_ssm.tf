@@ -1,5 +1,5 @@
 # ---------------------------------------------------------------------------
-# What drives the service host: SSM (DEPLOY.md, section 4)
+# What drives the service instance: SSM (DEPLOY.md, section 4)
 # ---------------------------------------------------------------------------
 #
 # Under /opennova/<deployment>/:
@@ -57,7 +57,7 @@ resource "aws_ssm_document" "converge" {
 
   content = jsonencode({
     schemaVersion = "2.2"
-    description   = "OpenNova: converge the ${local.deployment} service host to its current release (deploy/host/converge.sh)"
+    description   = "OpenNova: converge the ${local.deployment} service instance to its current release (deploy/host/converge.sh)"
     mainSteps = [{
       action = "aws:runShellScript"
       name   = "converge"
@@ -90,7 +90,7 @@ resource "aws_ssm_parameter" "infra_env" {
 
 resource "aws_ssm_parameter" "release" {
   name        = "${local.ssm_prefix}/release"
-  description = "The release the ${local.deployment} service host runs (./deploy/run.sh app deploy | app rollback)"
+  description = "The release the ${local.deployment} service instance runs (./deploy/run.sh app deploy | app rollback)"
   type        = "String"
   tier        = "Standard"
   value       = "none"

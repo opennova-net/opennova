@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 #
 # 10.44.0.0/16 (var.vpc_cidr) in two availability zones:
-#   public a  10.44.0.0/24   the service host and the game machines
+#   public a  10.44.0.0/24   the service instance and the game machines
 #   public b  10.44.1.0/24   spare capacity for machines
 #   private a 10.44.16.0/24  the database
 #   private b 10.44.17.0/24  the database subnet group's second zone

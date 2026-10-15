@@ -2,8 +2,8 @@
 # The service database: PostgreSQL 17 on RDS (DEPLOY.md, section 3)
 # ---------------------------------------------------------------------------
 #
-# One single-AZ instance in the private subnets, beside the service host (public
-# subnet a's zone), reached from the service host's security group alone. TLS
+# One single-AZ instance in the private subnets, beside the service instance (public
+# subnet a's zone), reached from the service instance's security group alone. TLS
 # is forced (rds.force_ssl); the server and the host's tools verify it against
 # the RDS CA bundle (sslmode=verify-full; the server image pins the bundle,
 # /app/rds-global-bundle.pem). Encrypted gp3 storage that grows on its own up to
@@ -18,6 +18,8 @@
 # or a plan; bump var.db_master_password_version to rotate it. The service's
 # password (DATABASE_PASSWORD) never reaches Terraform at all.
 
+# Its description keeps the wording it was made with: AWS fixes a group's
+# description for the group's life, so a changed one replaces the group.
 resource "aws_security_group" "db" {
   name        = "${local.name}-db"
   description = "OpenNova NovaWorld database: PostgreSQL from the service host alone"
@@ -30,7 +32,7 @@ resource "aws_security_group" "db" {
 
 resource "aws_vpc_security_group_ingress_rule" "db_from_service" {
   security_group_id            = aws_security_group.db.id
-  description                  = "PostgreSQL from the service host"
+  description                  = "PostgreSQL from the service instance"
   ip_protocol                  = "tcp"
   from_port                    = 5432
   to_port                      = 5432

@@ -1,5 +1,5 @@
 #!/bin/bash
-# opennova-converge: brings the NovaWorld service host to its deployment's
+# opennova-converge: brings the NovaWorld service instance to its deployment's
 # current release (DEPLOY.md, section 4).
 #
 # It runs as root, two ways: through SSM Run Command, as the deployment's
@@ -51,7 +51,7 @@ log() { printf '[converge] %s\n' "$*"; }
 die() { printf '[converge] ERROR: %s\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "run it as root"
-[ -r /etc/opennova/host.env ] || die "no /etc/opennova/host.env: this is no service host"
+[ -r /etc/opennova/host.env ] || die "no /etc/opennova/host.env: this is no service instance"
 set -a
 # shellcheck disable=SC1091  # written by the host's first boot
 . /etc/opennova/host.env

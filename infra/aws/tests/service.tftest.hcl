@@ -1,4 +1,4 @@
-# The service host (service.tf, service_ssm.tf), planned against mock
+# The service instance (service.tf, service_ssm.tf), planned against mock
 # providers: offline, no credentials, nothing reaches AWS or Cloudflare. From the
 # repo root (the configuration reads deploy/host/ beside infra/):
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> init -backend=false

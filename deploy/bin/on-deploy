@@ -4,7 +4,7 @@
 # credentials of its own (.github/workflows/deploy.yml). The operator supplies
 # only OP_SERVICE_ACCOUNT_TOKEN; every other secret is read from the 1Password
 # vault at run time into a tmpfs (/run/secrets) that never touches disk. The
-# service host is never reached over SSH: deploys and commands go through SSM.
+# service instance is never reached over SSH: deploys and commands go through SSM.
 #
 # Usage: on-deploy [--deployment NAME] <command> [args...]
 #   --deployment NAME   prod (the default, or OPENNOVA_DEPLOYMENT) or another
@@ -254,7 +254,7 @@ infra_get() {
   printf '%s' "$v"
 }
 
-# The service host's instance: the running one tagged opennova:service=<deployment>.
+# The service instance: the running EC2 instance tagged opennova:service=<deployment>.
 SERVICE_INSTANCE=""
 service_instance() {
   if [ -z "$SERVICE_INSTANCE" ]; then
@@ -263,7 +263,7 @@ service_instance() {
     ids="$(aws ec2 describe-instances \
       --filters "Name=tag:opennova:service,Values=$DEP" "Name=instance-state-name,Values=running" \
       --query 'Reservations[].Instances[].InstanceId' --output text)" \
-      || die "listing the $DEP service host failed"
+      || die "listing the $DEP service instance failed"
     read -r -a found <<<"$ids"
     case "${#found[@]}" in
       1) SERVICE_INSTANCE="${found[0]}" ;;
@@ -302,7 +302,7 @@ ssm_wait() {
   fi
 }
 
-# Run the bash script $2 as root on the service host (AWS-RunShellScript),
+# Run the bash script $2 as root on the service instance (AWS-RunShellScript),
 # allowing it $1 seconds.
 ssm_run() {
   local timeout="$1" script="$2" iid params cid

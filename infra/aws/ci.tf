@@ -8,7 +8,7 @@
 # in its `production` environment (whose required reviewers are the approval
 # gate), and able to do what `app deploy` and `app rollback` do and no more:
 # read the deployment's infra.env, upload and read its release bundles, point
-# its release parameter, find its service host, and run its converge document
+# its release parameter, find its service instance, and run its converge document
 # there. No vault, no Terraform, no secrets: the host reads those itself.
 
 locals {
