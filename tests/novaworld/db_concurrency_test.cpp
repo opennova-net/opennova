@@ -75,7 +75,11 @@ constexpr int kReaders = 3;
 // of them queued on the one writer lock, on what may be a loaded host (a CI
 // runner under a parallel build). What it asks is that no write is lost or
 // mixed, not how long one waits; the route harness keeps the server's 5 s.
+// The statement timeout rises above it: the writer lock is taken by one
+// statement (pg_advisory_xact_lock), which the server's 15 s would cut first.
 constexpr int kLockTimeoutMs = 60000;
+constexpr int kStatementTimeoutMs = 90000;
+static_assert(kLockTimeoutMs < kStatementTimeoutMs, "a lock wait must end at the lock timeout");
 
 // Everything a worker thread reports, checked by main() after the join.
 struct Failures {
@@ -444,6 +448,7 @@ int main(int argc, char **argv) {
 	test_db::TestDatabase scratch;
 	auto options = scratch.options();
 	options.lock_timeout_ms = kLockTimeoutMs;
+	options.statement_timeout_ms = kStatementTimeoutMs;
 	// run() closes every connection (the pool and its leases) before the
 	// database is dropped.
 	const int rc = run(options);

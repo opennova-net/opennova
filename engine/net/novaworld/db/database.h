@@ -23,7 +23,10 @@ namespace opennova::db {
 // and these timeouts (ConnectOptions): a statement that waits on a lock longer
 // than the lock timeout fails 55P03, one that runs longer than the statement
 // timeout fails 57014, and a connection idle inside a transaction for a minute
-// is ended by the server.
+// is ended by the server. The lock timeout stays below the statement timeout:
+// a lock wait is part of its statement (the writer lock is one SELECT
+// pg_advisory_xact_lock), so with the two the other way round the statement
+// timeout ends the wait first and a lock wait never reads lock_timeout().
 inline constexpr int kDefaultLockTimeoutMs = 5000;
 inline constexpr int kDefaultStatementTimeoutMs = 15000;
 inline constexpr int kIdleInTransactionTimeoutMs = 60000;
@@ -100,7 +103,8 @@ using BindValue = std::variant<std::monostate, int64_t, double, std::string, std
 // (postgresql://user@host:port/dbname?sslmode=verify-full&sslrootcert=...),
 // `password` the role's password when the URI names none (kept apart: it is a
 // secret, the URI is not). application_name is what the server's views show
-// for the connection.
+// for the connection. A caller that raises lock_timeout_ms raises
+// statement_timeout_ms above it too (the timeouts above).
 struct ConnectOptions {
 	std::string url;
 	std::string password;
