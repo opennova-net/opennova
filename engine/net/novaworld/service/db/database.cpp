@@ -6,6 +6,7 @@
 #include <libpq-fe.h>
 
 #include <algorithm>
+#include <cassert>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -551,17 +552,55 @@ SessionLock::~SessionLock() {
 // ConnectionPool
 // ----------------------------------------------------------------------------
 
+namespace {
+
+// The calling thread's leases (database.h, ConnectionPool): how many it holds,
+// and its first one's pool and connection.
+struct ThreadLeases {
+	std::size_t held = 0;
+	const ConnectionPool *pool = nullptr;
+	Database *db = nullptr;
+};
+
+thread_local ThreadLeases t_leases;
+
+} // namespace
+
 ConnectionPool::Lease::Lease(ConnectionPool &pool, std::unique_ptr<Database> db)
-	: pool_(&pool), db_(std::move(db)) {}
+	: pool_(&pool), db_(std::move(db)), holder_(std::this_thread::get_id()) {
+	if (t_leases.held++ == 0) {
+		t_leases.pool = &pool;
+		t_leases.db = db_.get();
+	}
+}
 
 ConnectionPool::Lease::~Lease() {
-	if (db_) pool_->release(std::move(db_));
+	if (!db_) return; // moved from
+	assert(holder_ == std::this_thread::get_id() && "a lease ends on the thread that acquired it");
+	if (holder_ == std::this_thread::get_id()) {
+		--t_leases.held;
+		if (t_leases.db == db_.get()) {
+			t_leases.pool = nullptr;
+			t_leases.db = nullptr;
+		}
+	}
+	pool_->release(std::move(db_));
 }
 
 ConnectionPool::ConnectionPool(ConnectOptions options, std::size_t max) :
 		options_(std::move(options)), max_(max == 0 ? 1 : max) {}
 
+std::size_t ConnectionPool::leases_held_by_this_thread() {
+	return t_leases.held;
+}
+
+Database *ConnectionPool::leased_by_this_thread() const {
+	return t_leases.pool == this ? t_leases.db : nullptr;
+}
+
 ConnectionPool::Lease ConnectionPool::acquire() {
+	// One lease per thread (database.h): the caller hands its Database& down.
+	assert(t_leases.held == 0 && "this thread already holds a lease; pass its Database& instead");
 	{
 		std::unique_lock<std::mutex> lock(mu_);
 		const auto deadline =

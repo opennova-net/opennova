@@ -2,9 +2,9 @@
 // migration runner against a real PostgreSQL server (tests/common/
 // test_database.h): binds and the types they read back as, the errors and
 // their SQLSTATE, transactions and savepoints, read snapshots, the pool's
-// bound and its reuse, the writer lock across connections and its timeout, a
-// connection the server ended, and the runner's records, rollback, checksum
-// refusal and database contract.
+// bound and its reuse, each thread's lease, the writer lock across connections
+// and its timeout, a connection the server ended, and the runner's records,
+// rollback, statement timeout, checksum refusal and database contract.
 
 #include <net/novaworld/db/database.h>
 
@@ -14,9 +14,12 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <functional>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -301,6 +304,47 @@ int test_read_snapshot() {
 	return 0;
 }
 
+// A lease held on a thread of its own until the guard ends: a thread holds one
+// lease at a time, so a case that needs a second out at once holds it here.
+// `first` runs on the lease before the constructor returns.
+class HeldLease {
+public:
+	explicit HeldLease(ConnectionPool &pool, std::function<void(Database &)> first = {}) :
+			thread_([this, &pool, first = std::move(first)] {
+				auto lease = pool.acquire();
+				if (first) first(*lease);
+				std::unique_lock<std::mutex> lock(mu_);
+				db_ = lease.get();
+				ready_ = true;
+				cv_.notify_all();
+				cv_.wait(lock, [this] { return released_; });
+			}) {
+		std::unique_lock<std::mutex> lock(mu_);
+		cv_.wait(lock, [this] { return ready_; });
+	}
+	~HeldLease() {
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			released_ = true;
+		}
+		cv_.notify_all();
+		thread_.join();
+	}
+	HeldLease(const HeldLease &) = delete;
+	HeldLease &operator=(const HeldLease &) = delete;
+
+	// The leased connection; its own thread waits while the case reads it.
+	Database *get() const { return db_; }
+
+private:
+	std::mutex mu_;
+	std::condition_variable cv_;
+	bool ready_ = false;
+	bool released_ = false;
+	Database *db_ = nullptr;
+	std::thread thread_; // last: started once the members above exist
+};
+
 int test_connection_pool() {
 	TestDatabase scratch({ /*migrate=*/false });
 	ConnectionPool pool(scratch.options(), 2);
@@ -310,21 +354,22 @@ int test_connection_pool() {
 	{
 		// Two holders at once get two connections to one database.
 		auto a = pool.acquire();
-		auto b = pool.acquire();
 		first = a.get();
+		a->exec("CREATE TABLE t (id bigint PRIMARY KEY);");
+		// Every connection runs in UTC with the service's timeouts.
+		TEST_EXPECT(a->query("SHOW TimeZone;")[0].as_text(0) == "UTC");
+		TEST_EXPECT(a->query("SHOW lock_timeout;")[0].as_text(0) == "5s");
+		TEST_EXPECT(a->query("SHOW statement_timeout;")[0].as_text(0) == "15s");
+		TEST_EXPECT(a->query("SHOW client_encoding;")[0].as_text(0) == "SQL_ASCII");
+		HeldLease b(pool, [](Database &db) {
+			db.exec("INSERT INTO t VALUES (7);");
+			// A transaction left open goes back rolled back.
+			db.begin();
+			db.exec("INSERT INTO t VALUES (8);");
+		});
 		second = b.get();
 		TEST_EXPECT(first != second);
-		a->exec("CREATE TABLE t (id bigint PRIMARY KEY);");
-		b->exec("INSERT INTO t VALUES (7);");
 		TEST_EXPECT(count_rows(*a) == 1);
-		// Every connection runs in UTC with the service's timeouts.
-		TEST_EXPECT(b->query("SHOW TimeZone;")[0].as_text(0) == "UTC");
-		TEST_EXPECT(b->query("SHOW lock_timeout;")[0].as_text(0) == "5s");
-		TEST_EXPECT(b->query("SHOW statement_timeout;")[0].as_text(0) == "15s");
-		TEST_EXPECT(b->query("SHOW client_encoding;")[0].as_text(0) == "SQL_ASCII");
-		// A transaction left open goes back rolled back.
-		b->begin();
-		b->exec("INSERT INTO t VALUES (8);");
 
 		// Both are out: a third holder waits until one comes back.
 		// The waiter's lease is the one that came back, not a third connection.
@@ -348,12 +393,55 @@ int test_connection_pool() {
 		// Released connections are reused, not reopened, and none comes back
 		// with a transaction open.
 		auto c = pool.acquire();
-		auto d = pool.acquire();
+		HeldLease d(pool);
 		TEST_EXPECT(c.get() == first || c.get() == second);
 		TEST_EXPECT(d.get() == first || d.get() == second);
-		TEST_EXPECT(!c->in_transaction() && !d->in_transaction());
+		TEST_EXPECT(!c->in_transaction() && !d.get()->in_transaction());
 		TEST_EXPECT(count_rows(*c) == 1);
 	}
+	return 0;
+}
+
+// The count the one-lease-per-thread assertion reads (a debug build asserts a
+// second acquire() on a thread holding a lease; database.h), and the calling
+// thread's own connection a callback takes (leased_by_this_thread): the
+// lease's own, through a move, from its pool alone, and never another thread's.
+int test_thread_leases() {
+	TestDatabase scratch({ /*migrate=*/false });
+	ConnectionPool pool(scratch.options(), 2);
+	ConnectionPool other(scratch.options(), 1);
+	TEST_EXPECT(ConnectionPool::leases_held_by_this_thread() == 0);
+	TEST_EXPECT(pool.leased_by_this_thread() == nullptr);
+	{
+		auto lease = pool.acquire();
+		TEST_EXPECT(ConnectionPool::leases_held_by_this_thread() == 1);
+		TEST_EXPECT(pool.leased_by_this_thread() == lease.get());
+		TEST_EXPECT(other.leased_by_this_thread() == nullptr);
+		auto moved = std::move(lease);
+		TEST_EXPECT(ConnectionPool::leases_held_by_this_thread() == 1);
+		TEST_EXPECT(pool.leased_by_this_thread() == moved.get());
+
+		std::atomic<bool> own{ false };
+		std::thread elsewhere([&] {
+			const bool none = ConnectionPool::leases_held_by_this_thread() == 0 &&
+					pool.leased_by_this_thread() == nullptr;
+			auto mine = pool.acquire();
+			own = none && ConnectionPool::leases_held_by_this_thread() == 1 &&
+					pool.leased_by_this_thread() == mine.get() && mine.get() != moved.get();
+		});
+		elsewhere.join();
+		TEST_EXPECT(own.load());
+		TEST_EXPECT(ConnectionPool::leases_held_by_this_thread() == 1);
+		TEST_EXPECT(pool.leased_by_this_thread() == moved.get());
+	}
+	TEST_EXPECT(ConnectionPool::leases_held_by_this_thread() == 0);
+	TEST_EXPECT(pool.leased_by_this_thread() == nullptr);
+	{
+		auto lease = other.acquire();
+		TEST_EXPECT(other.leased_by_this_thread() == lease.get());
+		TEST_EXPECT(pool.leased_by_this_thread() == nullptr);
+	}
+	TEST_EXPECT(ConnectionPool::leases_held_by_this_thread() == 0);
 	return 0;
 }
 
@@ -608,6 +696,7 @@ int main(int argc, char **argv) {
 		{ "transactions", test_transactions },
 		{ "read_snapshot", test_read_snapshot },
 		{ "connection_pool", test_connection_pool },
+		{ "thread_leases", test_thread_leases },
 		{ "writer_lock", test_writer_lock },
 		{ "reconnect", test_reconnect },
 		{ "migrations", test_migrations },

@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <variant>
 #include <vector>
 
@@ -265,6 +266,14 @@ private:
 // while fewer than `max` are open, and otherwise waits for a lease to come
 // back, up to kPoolAcquireTimeoutMs, then throws Error. Thread-safe. Must
 // outlive every lease it hands out.
+//
+// A thread holds one lease at a time, from any pool, and a lease stays on the
+// thread that acquired it: code that holds one hands its Database& to what it
+// calls. A second acquire() on a thread already holding a lease can wait on
+// itself (every lease out held by a thread waiting for a second, none coming
+// back), so a debug build (NDEBUG unset) asserts there is none, and that a
+// lease ends on its own thread; a thread that serves for the life of the
+// process acquires its lease itself.
 class ConnectionPool {
 public:
 	class Lease {
@@ -285,6 +294,7 @@ public:
 
 		ConnectionPool *pool_;
 		std::unique_ptr<Database> db_;
+		std::thread::id holder_; // the thread that acquired it
 	};
 
 	explicit ConnectionPool(ConnectOptions options, std::size_t max = kDefaultPoolMax);
@@ -292,8 +302,20 @@ public:
 	ConnectionPool &operator=(const ConnectionPool &) = delete;
 
 	// An idle connection, a newly opened one, or the next one a lease returns.
-	// Throws Error when the open fails or none comes back in time.
+	// Throws Error when the open fails or none comes back in time. Never on a
+	// thread that holds a lease (above).
 	Lease acquire();
+
+	// The leases the calling thread holds, from every pool: 0 or 1 where the
+	// rule above holds.
+	static std::size_t leases_held_by_this_thread();
+
+	// The connection the calling thread holds its lease on, when that lease is
+	// this pool's; else null. For a callback whose caller has no connection to
+	// hand it, which runs on more than one thread (the ConnectionManager's
+	// on_lost fires on whichever thread dropped the connection): it takes that
+	// thread's own connection rather than a second lease.
+	Database *leased_by_this_thread() const;
 
 	const ConnectOptions &options() const { return options_; }
 	std::size_t max() const { return max_; }
