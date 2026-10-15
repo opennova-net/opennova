@@ -1428,9 +1428,9 @@ cmd_github() {
     plan|apply|import|output|list) ;;
     *) die "unknown: github $action (try: plan|apply|import|output|list)" ;;
   esac
-  # The prompt below is prod's (confirm_prod): the organization's runners are
-  # as shared as prod.
-  [ "$DEP" = prod ] || die "github: the runners are the organization's, not a deployment's; run it without --deployment"
+  # The prompt below is prod's (confirm_prod): the organization is as shared
+  # as prod.
+  [ "$DEP" = prod ] || die "github: the stack is the GitHub organization's, not a deployment's; run it without --deployment"
   require_op
   cmd_state pull "$GH_STATE_DOC" "$GH_TF_DIR"
   gh_tf init -input=false >/dev/null
@@ -1441,7 +1441,7 @@ cmd_github() {
       gh_tf_op plan -input=false -out="$plan" ${OPT_REST[@]+"${OPT_REST[@]}"} \
         || die "the plan failed; nothing was applied"
       # A refusal exits; the EXIT trap removes the saved plan.
-      confirm_prod "apply this saved plan to the GitHub organization's runners" "$OPT_YES"
+      confirm_prod "apply this saved plan to the GitHub organization" "$OPT_YES"
       gh_tf_op apply -input=false "$plan" || rc=$?
       rm -f "$plan"
       gh_push_after apply "$rc" ;;
