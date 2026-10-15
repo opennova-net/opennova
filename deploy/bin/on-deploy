@@ -56,6 +56,15 @@
 #   infra state-rm ADDRESS...     forget resources (their objects stay)
 #   infra import ADDRESS ID       adopt an existing object
 #   infra output|list [args...]   terraform output / state list
+#   github plan [args...]         the GitHub organization's CI runners
+#   github apply [--yes] [args...]
+#   github import ADDRESS ID
+#   github output|list [args...]  (infra/github; DEPLOY.md, "CI runners"): one
+#                                 stack for the organization, so no --deployment;
+#                                 its state is the vault document tfstate-github,
+#                                 its token the vault item github. apply plans to
+#                                 a file and applies that plan after --yes or a
+#                                 typed yes
 #   aws <args...>                 the AWS CLI with the vault's credentials
 #   app deploy [--tag T] [--server-tag T] [--web-tag T] [--game-tag T]
 #              [--serve-tag T] [--hostd-tag T] [--no-hosting]
@@ -121,6 +130,9 @@ TF_DIR="$ROOT/infra/aws"
 ENV_DIR="$ROOT/deploy/env"
 COMPOSE_DIR="$ROOT/deploy/compose"
 TF_ENV_TPL="$ENV_DIR/terraform.env.tpl"
+GH_TF_DIR="$ROOT/infra/github"
+GH_ENV_TPL="$ENV_DIR/github.env.tpl"
+GH_STATE_DOC=tfstate-github
 AWS_ENV_TPL="$ENV_DIR/aws.env.tpl"
 RUNTIME_TPL="$ENV_DIR/runtime.env.tpl"
 
@@ -1372,6 +1384,68 @@ cmd_infra() {
 }
 
 # ---------------------------------------------------------------------------
+# github: the organization's CI runners (infra/github)
+# ---------------------------------------------------------------------------
+
+# The stack is the organization's, not a deployment's: one workspace, one
+# state (cmd_state's other-stack form), and the vault item github's token in
+# terraform's environment alone.
+gh_tf() { terraform -chdir="$GH_TF_DIR" "$@"; }
+gh_tf_op() {
+  local env_file
+  env_file="$(render_tpl "$GH_ENV_TPL")"
+  op run --env-file="$env_file" -- terraform -chdir="$GH_TF_DIR" "$@"
+}
+
+# tf_push_after for this stack: push the state a run left, then exit with
+# terraform's code.
+gh_push_after() {
+  local action="$1" rc="$2"
+  if [ "$rc" -ne 0 ]; then
+    if [ ! -f "$GH_TF_DIR/terraform.tfstate" ]; then
+      err "terraform $action exited $rc; it left no state to push"
+      exit "$rc"
+    fi
+    err "terraform $action exited $rc; pushing the state it left"
+  fi
+  cmd_state push "$GH_STATE_DOC" "$GH_TF_DIR"
+  [ "$rc" -eq 0 ] || exit "$rc"
+}
+
+cmd_github() {
+  local action="${1:-plan}" rc=0 plan="$SECRETS_DIR/tfplan"
+  shift || true
+  case "$action" in
+    plan|apply|import|output|list) ;;
+    *) die "unknown: github $action (try: plan|apply|import|output|list)" ;;
+  esac
+  # The prompt below is prod's (confirm_prod): the organization's runners are
+  # as shared as prod.
+  [ "$DEP" = prod ] || die "github: the runners are the organization's, not a deployment's; run it without --deployment"
+  require_op
+  cmd_state pull "$GH_STATE_DOC" "$GH_TF_DIR"
+  gh_tf init -input=false >/dev/null
+  case "$action" in
+    plan) gh_tf_op plan -input=false "$@" ;;
+    apply)
+      take_yes "$@"
+      gh_tf_op plan -input=false -out="$plan" ${OPT_REST[@]+"${OPT_REST[@]}"} \
+        || die "the plan failed; nothing was applied"
+      # A refusal exits; the EXIT trap removes the saved plan.
+      confirm_prod "apply this saved plan to the GitHub organization's runners" "$OPT_YES"
+      gh_tf_op apply -input=false "$plan" || rc=$?
+      rm -f "$plan"
+      gh_push_after apply "$rc" ;;
+    import)
+      [ $# -eq 2 ] || die "github import needs ADDRESS ID"
+      gh_tf_op import -input=false "$1" "$2" || rc=$?
+      gh_push_after import "$rc" ;;
+    output) gh_tf output "$@" ;;
+    list)   gh_tf state list "$@" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # app: releases
 # ---------------------------------------------------------------------------
 
@@ -2280,6 +2354,7 @@ main() {
     secrets) cmd_secrets "$@" ;;
     stripe)  cmd_stripe "$@" ;;
     infra)   cmd_infra "$@" ;;
+    github)  cmd_github "$@" ;;
     aws)     cmd_aws "$@" ;;
     app)     cmd_app "$@" ;;
     db)      cmd_db "$@" ;;

@@ -21,6 +21,14 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
+# The build legs (test-core, test-retail, test-linux, both gdext builds, the
+# Godot package) run on the organization's 16-core runners, windows-16core and
+# ubuntu-16core (infra/github; DEPLOY.md, "CI runners"): the compiles and the
+# ctests are CPU-bound and scale with the cores. They run windows-latest's and
+# ubuntu-latest's images, so their compiler caches serve the jobs left on the
+# standard runners. A pull request from a fork runs everything on the standard
+# runners, so only the organization's own branches spend the larger runners'
+# minutes (they are billed even for a public repository).
 jobs:
   # A pull request that changes only the private docs pointer and markdown
   # builds and tests nothing: no build or test reads those paths, and the lint
@@ -189,7 +197,7 @@ jobs:
   # after the last cache hit. Only the link step changes, so the cache's
   # objects serve either linker.
   test-core:
-    runs-on: windows-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || 'windows-16core' }}
     needs: [changes]
     permissions:
       contents: read
@@ -291,7 +299,7 @@ jobs:
   # retail ctests. It runs whenever the reference data is reachable (not on
   # fork PRs) and blocks the merge like the core leg, through `test`.
   test-retail:
-    runs-on: windows-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || 'windows-16core' }}
     needs: [changes, retail-availability]
     if: needs.changes.outputs.code == 'true' && needs.retail-availability.outputs.available == 'true'
     permissions:
@@ -410,7 +418,7 @@ jobs:
   # service container below (OPENNOVA_TEST_PG); without it they skip, which
   # the core suite fails.
   test-linux:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubuntu-16core' }}
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     permissions:
@@ -488,7 +496,7 @@ jobs:
   # RelWithDebInfo made it a 674 MiB artifact and a compiler cache several
   # times this size.
   build-gdextension-linux:
-    runs-on: ubuntu-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubuntu-16core' }}
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     permissions:
@@ -715,7 +723,7 @@ jobs:
   # after one warm-up only changed engine/ sources recompile. Windows must
   # use Ninja: the Visual Studio generator ignores CMAKE_*_COMPILER_LAUNCHER.
   build-gdextension-windows:
-    runs-on: windows-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || 'windows-16core' }}
     needs: [changes]
     if: needs.changes.outputs.code == 'true'
     permissions:
@@ -920,7 +928,7 @@ jobs:
   # The game archive and the editor archive (the editor plus the runtime it
   # plays a project with).
   package-godot-windows:
-    runs-on: windows-latest
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'windows-latest' || 'windows-16core' }}
     needs: [build-gdextension-windows]
     outputs:
       game_artifact_url: ${{ steps.upload_game.outputs.artifact-url }}

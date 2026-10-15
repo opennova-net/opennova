@@ -688,6 +688,37 @@ means Cloudflare stopped it: the webhook's custom rule skips the WAF's rules
 (section 1). On a plan without some skippable phase or product the apply names it: drop
 it from `cloudflare_webhook_skip_phases` / `_products` in the var-file.
 
+## CI runners
+
+CI's build legs run on two larger GitHub-hosted runners that `infra/github` makes:
+`windows-16core` and `ubuntu-16core` (16 cores, 64 GB). They run the images of
+`windows-latest` and `ubuntu-latest`, so they share compiler caches with the jobs that
+stay on those. They sit in the runner group `opennova-ci`, which only this repository may
+use; it allows public repositories, which GitHub's default group does not.
+`.github/workflows/ci.yml` names them in `runs-on`. A pull request from a fork runs on the
+standard runners, so only the organization's own branches spend minutes. Larger runners
+are billed per minute even for a public repository, and `maximum_runners` (10 Windows,
+5 Linux) caps how many machines run at once.
+
+The stack is the organization's, not a deployment's: it has no workspaces, the toolbox
+runs it without `--deployment`, its state is the vault document `tfstate-github`, and its
+token is the vault item `github`. Make that token once: a fine-grained personal access
+token with **opennova-net** as its resource owner and the organization permission
+**Self-hosted runners: Read and write** (that permission also covers GitHub-hosted runners
+and runner groups). An org admin makes it, or approves it if the organization reviews
+fine-grained tokens. Then:
+
+```bash
+op item create --vault OpenNova-Deploy --title github --category 'API Credential' \
+  'token[password]=<the token>'
+./deploy/run.sh github plan
+./deploy/run.sh github apply            # shows the plan, then asks
+./deploy/run.sh github output           # the runners' names
+```
+
+To change a runner's size or cap, edit `infra/github/variables.tf` and `github apply`. A
+new image replaces the runner.
+
 ## Operating
 
 - **Logs.** `./deploy/run.sh app logs [novaworld|web|game|backup] [--follow] [--since 2h]`
