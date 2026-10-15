@@ -112,7 +112,7 @@ readonly JQ_ENV_LINES
 log "reading $OPENNOVA_SSM_PREFIX/secret/* and tls/*"
 tmp="$(mktemp "$RUN/secret.env.XXXXXX")"
 for path in secret tls; do
-  aws ssm get-parameters-by-path --path "$OPENNOVA_SSM_PREFIX/$path/" --recursive --with-decryption \
+  aws ssm get-parameters-by-path --path "$OPENNOVA_SSM_PREFIX/$path" --recursive --with-decryption \
     --output json > "$RUN/params.$path.json" \
     || die "cannot read $OPENNOVA_SSM_PREFIX/$path/"
   jq -r "$JQ_ENV_LINES" "$RUN/params.$path.json" >> "$tmp" \

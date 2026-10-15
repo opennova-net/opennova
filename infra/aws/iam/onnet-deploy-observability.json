@@ -36,15 +36,22 @@
         "sns:SetTopicAttributes",
         "sns:GetDataProtectionPolicy",
         "sns:Subscribe",
-        "sns:Unsubscribe",
-        "sns:GetSubscriptionAttributes",
-        "sns:SetSubscriptionAttributes",
         "sns:ListSubscriptionsByTopic",
         "sns:TagResource",
         "sns:UntagResource",
         "sns:ListTagsForResource"
       ],
       "Resource": "arn:aws:sns:us-east-1:310045376545:opennova-*"
+    },
+    {
+      "Sid": "AlertsSubscriptionsHaveNoResourceScope",
+      "Effect": "Allow",
+      "Action": [
+        "sns:GetSubscriptionAttributes",
+        "sns:SetSubscriptionAttributes",
+        "sns:Unsubscribe"
+      ],
+      "Resource": "*"
     },
     {
       "Sid": "HealthChecks",

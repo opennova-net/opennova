@@ -653,7 +653,7 @@ secrets_sync() {
   done < "$tpl"
   # What SSM holds that the vault no longer names.
   local names name stale=()
-  names="$(aws ssm get-parameters-by-path --path "$SSM_PREFIX/secret/" --recursive \
+  names="$(aws ssm get-parameters-by-path --path "$SSM_PREFIX/secret" --recursive \
              --query 'Parameters[].Name' --output text)" || die "listing $SSM_PREFIX/secret/ failed"
   for name in $names; do
     name="${name##*/}"

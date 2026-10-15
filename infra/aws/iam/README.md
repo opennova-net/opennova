@@ -60,14 +60,17 @@ which is what keeps EC2 in two policies.
   `logs:DescribeLogGroups`, `cloudwatch:GetMetricData`, `ce:Get*`, `servicequotas:Get*`,
   `ssm:GetCommandInvocation`, ...). They read other projects' metadata too (an instance's user
   data among it), never their data.
-- **Route 53 health checks are the one write IAM cannot scope:** their ARNs carry an id alone
-  and Route 53 has no tag conditions, so `UpdateHealthCheck`, `DeleteHealthCheck` and
-  `ChangeTagsForResource` are on `healthcheck/*` and reach other projects' checks as well. Once
-  prod's and staging's checks exist (`infra output health_check_id`), an admin can narrow
-  `HealthChecks` to their two ARNs.
+- **Two writes IAM cannot scope:**
+  - Route 53 health checks: their ARNs carry an id alone and Route 53 has no tag conditions, so
+    `UpdateHealthCheck`, `DeleteHealthCheck` and `ChangeTagsForResource` are on
+    `healthcheck/*` and reach other projects' checks as well. Once prod's and staging's checks
+    exist (`infra output health_check_id`), an admin can narrow `HealthChecks` to their ARNs.
+  - SNS subscriptions: `GetSubscriptionAttributes`, `SetSubscriptionAttributes` and
+    `Unsubscribe` are authorized against `*`, not the topic (the alerts email subscription
+    Terraform reads and deletes), so they reach other projects' subscriptions as well.
 - **Left out on purpose:** `s3:PutAccountPublicAccessBlock` and
-  `ce:UpdateCostAllocationTagsStatus` (account-wide, no resource scope: the block is already on
-  and the plan leaves it alone, and the cost tag is activated once in the switch below);
+  `ce:UpdateCostAllocationTagsStatus` (account-wide, no resource scope: Terraform no longer
+  manages the account block, and the cost tag is activated once in the switch below);
   `iam:CreatePolicy` and `iam:AttachRolePolicy` (the stack makes inline role policies only);
   ACM and CloudFront (the downloads bucket, its distribution and `launcher_ci` are gone
   already; the one `downloads.opennova.net` certificate left, `cf14fd0e-...`, is not the one the

@@ -86,7 +86,10 @@
         "logs:PutLogEvents",
         "logs:DescribeLogStreams"
       ],
-      "Resource": "arn:aws:logs:us-east-1:310045376545:log-group:/opennova/*"
+      "Resource": [
+        "arn:aws:logs:us-east-1:310045376545:log-group:/opennova/*",
+        "arn:aws:logs:us-east-1:310045376545:log-group:/opennova/*:log-stream:*"
+      ]
     },
     {
       "Sid": "AwsManagedKeysThroughSsmAndEbs",
