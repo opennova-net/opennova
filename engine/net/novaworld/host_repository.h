@@ -192,7 +192,10 @@ bool record_host_key(
 // claimed by another RID that is still listed (a key backs one listing at a
 // time; a parked connection's re-host keeps its RID and so its claim, and a key
 // whose listing is gone can be claimed again). A claim moves last_used_at
-// forward. Throws db::Error.
+// forward and releases the account's other keys claimed for the RID, in one
+// transaction, so an account holds one claim per RID (a connection that stops
+// and hosts again under its RID presents the fresh key its host page minted).
+// Throws db::Error.
 std::optional<int64_t> claim_host_key(db::Database &db, std::string_view key, uint32_t rid);
 
 // Whether the listing under `rid` is `user_id`'s now: listed (its active_hosts

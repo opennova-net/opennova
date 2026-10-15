@@ -88,9 +88,12 @@ constexpr const char *HOST_COLUMNS =
 // status deletes the account's keys and its listing's next write stores no
 // owner (the lobby still holding the id), a deleted account's keys cascade
 // with it (its rows' column is set NULL at once), and a write with no claim
-// behind it (the dev inject) stores none.
+// behind it (the dev inject) stores none. One row, the newest claim's:
+// claim_host_key leaves one of the account's keys per RID, and a scalar
+// subquery naming two would fail the write (21000).
 constexpr const char *HOST_OWNER_VALUE =
-	"(SELECT user_id FROM host_keys WHERE user_id=$34 AND claimed_rid=$35)";
+	"(SELECT user_id FROM host_keys WHERE user_id=$34 AND claimed_rid=$35 "
+	"ORDER BY last_used_at DESC, id DESC LIMIT 1)";
 
 // A host row's binds, $1..$37 in this order; the statements below name them
 // by number.
@@ -510,6 +513,14 @@ std::optional<int64_t> claim_host_key(opennova::db::Database &db, std::string_vi
 	if (db.changes() > 0) {
 		const auto rows = db.query("SELECT user_id FROM host_keys WHERE key_hash = $1;", {str(hash)});
 		if (!rows.empty()) owner = rows.front().as_int(0);
+	}
+	// The account's other keys claimed for this RID let it go: a connection
+	// keeps its RID across a stop, so its next hosting presents the fresh key
+	// the host page minted under the RID the earlier key still names.
+	if (owner) {
+		db.exec("UPDATE host_keys SET claimed_rid = NULL "
+				"WHERE user_id = $1 AND claimed_rid = $2 AND key_hash <> $3;",
+				{ i64(*owner), i64(rid), str(hash) });
 	}
 	tx.commit();
 	return owner;

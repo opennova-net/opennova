@@ -11,7 +11,9 @@
 //   * a claim names the account for a live key of an active account; a key
 //     backs one listed RID at a time, a gone listing frees it, an idle or
 //     revoked key and a banned account claim nothing, a boot's clear_all
-//     releases every claim, and the sweep keeps a listed server's key;
+//     releases every claim, the sweep keeps a listed server's key, and a
+//     claim releases the account's other keys on its RID (a connection that
+//     stops and hosts again under its RID with a fresh key stays owned);
 //   * listing_owned_by (the owner's push routes) holds only for a listed RID
 //     with one of the account's keys claimed for it, read live: a row naming
 //     the account with no claim, or after its keys are revoked, is not its;
@@ -512,6 +514,76 @@ int test_lobby_links() {
 	return 0;
 }
 
+// A connection keeps its RID across a stop, so its next hosting presents the
+// fresh key its host page minted under the RID the earlier key still names:
+// the claim lets the earlier key go (one of the account's keys per RID), and
+// the row's writes keep naming the owner. Two claims on one RID (none
+// claim_host_key leaves) still write: the row takes the newest's account.
+int test_rehost_new_key() {
+	test_db::TestDatabase scratch;
+	opennova::db::Database db = scratch.open();
+	const int64_t alice = make_player(db, "alice");
+
+	// The store: a second key claimed for the RID the first holds.
+	constexpr uint32_t kRid = 0x0A000021u;
+	hostdb::record_host_key(db, key_of('A'), alice, 0);
+	TEST_EXPECT(hostdb::claim_host_key(db, key_of('A'), kRid) == alice);
+	hostdb::record_host_key(db, key_of('B'), alice, 0);
+	TEST_EXPECT(hostdb::claim_host_key(db, key_of('B'), kRid) == alice);
+	TEST_EXPECT(!claimed_rid(db, key_of('A')).has_value());
+	TEST_EXPECT(claimed_rid(db, key_of('B')) == kRid);
+	// Another RID's claim stays.
+	hostdb::record_host_key(db, key_of('C'), alice, 0);
+	TEST_EXPECT(hostdb::claim_host_key(db, key_of('C'), kRid + 1) == alice);
+	TEST_EXPECT(claimed_rid(db, key_of('B')) == kRid && claimed_rid(db, key_of('C')) == kRid + 1);
+
+	hostdb::HostRow row;
+	row.rid = kRid;
+	row.gsid = "GSID-REHOST";
+	row.game = "jop_2_consumer";
+	row.host_ip = "10.0.0.1";
+	row.peer_ip = "10.0.0.1";
+	row.host_user_id = alice;
+	db.exec("UPDATE host_keys SET claimed_rid = $1;", {BindValue(static_cast<int64_t>(kRid))});
+	hostdb::upsert_host(db, row);
+	hostdb::update_host(db, row);
+	TEST_EXPECT(row_owner(db, kRid) == alice);
+	hostdb::clear_all(db);
+
+	// The lobby: host, stop, a fresh key, host again on the same connection.
+	hostdb::record_host_key(db, key_of('D'), alice, 0);
+	LobbySession sess;
+	sess.set_database(&db);
+	LobbyState conn;
+	TEST_EXPECT(answered_hosting(sess.dispatch(fresh_request("First"), conn, "10.0.0.7", 40000)));
+	sess.dispatch(key_update(key_of('D')), conn, "10.0.0.7", 40000);
+	const uint32_t rid = conn.rid;
+	TEST_EXPECT(row_owner(db, rid) == alice);
+	NapiMessage stop;
+	stop.name = "ClientStopHosting";
+	TEST_EXPECT(sess.dispatch(stop, conn, "10.0.0.7", 40000).label == "ClientStopHosting");
+	TEST_EXPECT(!conn.hosting && !hostdb::find_host_by_rid(db, rid).has_value());
+	TEST_EXPECT(claimed_rid(db, key_of('D')) == static_cast<int64_t>(rid));
+
+	hostdb::record_host_key(db, key_of('E'), alice, 0);
+	TEST_EXPECT(answered_hosting(sess.dispatch(fresh_request("Second"), conn, "10.0.0.7", 40000)));
+	TEST_EXPECT(conn.rid == rid);
+	auto r = sess.dispatch(key_update(key_of('E')), conn, "10.0.0.7", 40000);
+	TEST_EXPECT(r.label == "ClientHostUpdate" && r.reply_containers.empty());
+	TEST_EXPECT(conn.host_user_id == alice && conn.owner_key == key_of('E'));
+	TEST_EXPECT(!claimed_rid(db, key_of('D')).has_value());
+	TEST_EXPECT(claimed_rid(db, key_of('E')) == static_cast<int64_t>(rid));
+	TEST_EXPECT(row_owner(db, rid) == alice);
+	sess.dispatch(host_update("Second Renamed"), conn, "10.0.0.7", 40000);
+	sess.dispatch(player_added(1, "joiner"), conn, "10.0.0.7", 40000);
+	const auto listed = hostdb::find_host_by_rid(db, rid);
+	TEST_EXPECT(listed && listed->server_name == "Second Renamed" && listed->player_count == 1);
+	TEST_EXPECT(listed->host_user_id == alice);
+	TEST_EXPECT(hostdb::listing_owned_by(db, rid, alice));
+	TEST_EXPECT(hostdb::list_hosts_by_owner(db, alice).size() == 1);
+	return 0;
+}
+
 // A row names its owner only while one of the owner's keys stands claimed for
 // the row's RID. A revoked key (a password reset or a ban deletes the account's
 // keys) drops the owner at the listing's next write; a deleted account's keys
@@ -680,6 +752,7 @@ int main(int argc, char **argv) {
 	if (test_listing_owned_by() != 0) return 1;
 	if (test_prune() != 0) return 1;
 	if (test_lobby_links() != 0) return 1;
+	if (test_rehost_new_key() != 0) return 1;
 	if (test_owner_needs_live_claim() != 0) return 1;
 	if (test_require_host_key() != 0) return 1;
 	std::printf("OK: host keys (the store, the claims, the sweep, the lobby's links, "
