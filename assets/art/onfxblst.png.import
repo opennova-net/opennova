@@ -1,0 +1,13 @@
+{
+  "importer": "image",
+  "options": {
+    "format": "tga",
+    "size": "128x128"
+  },
+  "outputs": [
+    "onfxblst.tga"
+  ],
+  "schema_version": 1,
+  "source_hash": "3f72efc6b8313a55",
+  "version": 3
+}

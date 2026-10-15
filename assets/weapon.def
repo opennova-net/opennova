@@ -1,0 +1,580 @@
+// Weapon definitions
+
+ammoclass_max_carry CLASS_ON556 1000
+ammoclass_max_carry CLASS_ON9MM 1000
+ammoclass_max_carry CLASS_ON_FRAG 1000
+ammoclass_max_carry CLASS_ON_SMOKE 1000
+weapon "WPN_M4AUTO"
+	clipsize 30
+	startrounds 300
+	targetyawrange 120
+	targetpitchmax 22
+	targetpitchmin 50
+	statid 300
+	maxclips 10
+	ammobucket 1
+	loadout_selectable 1
+	round_type AMMO_ON_556
+	loadout_menu_textid WEAP_SHORT_ON_AR15
+	loadout_menu_ttdesc WEAP_DESC_ON_AR15
+	loadout_menu_icon m_onar15.tga
+	animadm on_ar15
+	launchuserpoint bullet
+	hudicon h_onar15.tga
+	gfx1 on_ar15
+	gfx3 onar15_3
+	category 3
+	ammoclass CLASS_ON556 1
+	crosshair onxhair.tga
+	hudclipgfx 0 0 h_onclip.tga
+	hudrndgfx 6 0 4 0 1 h_onrnd.tga
+	scope_max_mag 2 0
+	weapon_class primary
+	charfilter rifleman
+	charfilter medic
+	charfilter engineer
+	charfilter sniper
+	charfilter gunner
+	teamfilter blue
+	teamfilter red
+	flags Sighted
+	flags Auto
+	flags WhileSwimming
+	flags NoCardSwitch
+	error 0.0165 0.2 0.25 0.0165 0.032 0.047
+	weaponweight 5.5
+	clipweight 1.5
+	pos 25.188 -5.494 -144.952 0 0 0
+	tpos 0.791 11.839 -135.622 0.018 0 8.973
+	action "idle"
+		anim anim_wpn_idle
+		delayend 125
+		function wpn_std_idle
+	end
+	action "emptyidle"
+		anim anim_wpn_idle
+		delayend auto
+		function wpn_std_idle
+	end
+	action "fire"
+		anim anim_wpn_fire
+		soundsetend GS_ONAR15
+		particle Effect_ONAR15MF
+		particleuserpoint mflash01
+		delayend 4
+		function wpn_std_fire
+	end
+	action "recoil"
+		particle Effect_ONAR15Cas
+		particleuserpoint bcasing
+		function wpn_std_recoil
+	end
+	action "reload"
+		anim anim_wpn_reload
+		soundset GF_ONAR15_RL
+		delaystart 164
+		function wpn_std_reload
+	end
+	action "empty"
+		anim anim_wpn_empty
+		soundset DRY_ONAR15
+		delaystart 71
+		function wpn_std_empty
+	end
+	action "switchto"
+		anim anim_wpn_switchto
+		soundset GF_ONAR15_ST
+		delaystart 98
+		function wpn_std_idle
+	end
+	action "switchfrom"
+		anim anim_wpn_switchfrom
+		soundset GF_ONAR15_SF
+		delayend 2
+		function wpn_std_switchfrom
+	end
+	action "switchrank"
+		anim anim_wpn_switchrank
+		delaystart 59
+		function wpn_std_switchrank
+	end
+end
+
+weapon "WPN_colt45"
+	clipsize 15
+	startrounds 45
+	targetyawrange 120
+	targetpitchmax 85
+	targetpitchmin 85
+	statid 201
+	maxclips 3
+	loadout_selectable 1
+	round_type AMMO_ON_9MM
+	loadout_menu_textid WEAP_SHORT_ON_PISTOL
+	loadout_menu_ttdesc WEAP_DESC_ON_PISTOL
+	loadout_menu_icon m_onpist.tga
+	animadm on_pist
+	launchuserpoint bullet
+	hudicon h_onpist.tga
+	gfx1 on_pist
+	gfx3 onpist_3
+	special_hold 2
+	category 2
+	ammoclass CLASS_ON9MM 1
+	crosshair onxhair.tga
+	hudclipgfx 0 0 h_onclip.tga
+	hudrndgfx 7 0 8 0 1 h_onrnd.tga
+	scope_max_mag 2 0
+	weapon_class secondary
+	charfilter rifleman
+	charfilter medic
+	charfilter engineer
+	charfilter sniper
+	charfilter gunner
+	teamfilter blue
+	teamfilter red
+	flags Sighted
+	flags WhileSwimming
+	flags NoCardSwitch
+	error 0.05 0.2 0.25 0.05 0.1 0.15
+	weaponweight 2.5
+	clipweight 1
+	pos -4.332 -3.84 -115.511 0 0 0
+	tpos -32.708 16.642 -102.353 359.74 1.654 359.935
+	action "idle"
+		anim anim_wpn_idle
+		delayend 125
+		function wpn_std_idle
+	end
+	action "emptyidle"
+		anim anim_wpn_idle
+		delayend auto
+		function wpn_std_idle
+	end
+	action "fire"
+		anim anim_wpn_fire
+		soundsetend GS_ONPIST
+		particle Effect_ONPistMF
+		particleuserpoint mflash01
+		delayend 10
+		function wpn_std_fire
+	end
+	action "recoil"
+		particle Effect_ONPistCas
+		particleuserpoint bcasing
+		function wpn_std_recoil
+	end
+	action "reload"
+		anim anim_wpn_reload
+		soundset GF_ONPIST_RL
+		delaystart 183
+		function wpn_std_reload
+	end
+	action "empty"
+		anim anim_wpn_empty
+		soundset DRY_ONPIST
+		delaystart 42
+		function wpn_std_empty
+	end
+	action "switchto"
+		anim anim_wpn_switchto
+		soundset GF_ONPIST_ST
+		delaystart 53
+		function wpn_std_idle
+	end
+	action "switchfrom"
+		anim anim_wpn_switchfrom
+		soundset GF_ONPIST_SF
+		delayend 2
+		function wpn_std_switchfrom
+	end
+	action "switchrank"
+		delaystart 1
+		delayend 1
+		function wpn_std_switchrank
+	end
+end
+
+weapon "WPN_KNIFE"
+	clipsize -1
+	startrounds -1
+	targetyawrange 120
+	targetpitchmax 85
+	targetpitchmin 85
+	statid 100
+	round_type AMMO_ON_KNIFE
+	loadout_menu_textid WEAP_SHORT_KNIFE
+	loadout_menu_ttdesc WEAP_DESC_KNIFE
+	loadout_menu_icon m_onknif.tga
+	animadm on_knif
+	launchuserpoint bullet
+	hudicon h_onknif.tga
+	gfx1 on_knif
+	gfx3 onknif_3
+	special_hold 1
+	attack_anim 1
+	run_anim 1
+	category 1
+	crosshair onxhair.tga
+	charfilter medic
+	charfilter sniper
+	charfilter gunner
+	charfilter rifleman
+	charfilter engineer
+	teamfilter blue
+	flags Underwater
+	flags WhileSwimming
+	pos -4.332 -3.84 -115.511 0 0 0
+	action "idle"
+		anim anim_wpn_idle
+		delayend 125
+		function wpn_std_idle
+	end
+	action "emptyidle"
+		function wpn_std_emptyidle
+	end
+	action "fire"
+		anim anim_wpn_idle
+		soundsetend GS_ONKNIFE
+		function wpn_std_fire
+	end
+	action "recoil"
+		anim anim_wpn_fire
+		delaystart auto
+		function wpn_std_recoil
+	end
+	action "switchto"
+		anim anim_wpn_switchto
+		soundset GF_ONKNIFE_ST
+		delaystart 44
+		function wpn_std_idle
+	end
+	action "switchfrom"
+		anim anim_wpn_switchfrom
+		soundset GF_ONKNIFE_SF
+		delayend 2
+		function wpn_std_switchfrom
+	end
+	action "switchrank"
+		delaystart 1
+		delayend 1
+		function wpn_std_switchrank
+	end
+end
+
+weapon "WPN_KNIFE2"
+	rank 1
+	clipsize -1
+	startrounds -1
+	targetyawrange 120
+	targetpitchmax 85
+	targetpitchmin 85
+	statid 101
+	round_type AMMO_ON_KNIFE
+	loadout_menu_textid WEAP_SHORT_KNIFE
+	loadout_menu_ttdesc WEAP_DESC_KNIFE
+	loadout_menu_icon m_onknif.tga
+	animadm on_knif
+	launchuserpoint bullet
+	hudicon h_onknif.tga
+	gfx1 on_knif
+	gfx3 onknif_3
+	special_hold 1
+	attack_anim 1
+	run_anim 1
+	category 1
+	crosshair onxhair.tga
+	charfilter medic
+	charfilter sniper
+	charfilter gunner
+	charfilter rifleman
+	charfilter engineer
+	teamfilter red
+	flags Underwater
+	flags WhileSwimming
+	pos -4.332 -3.84 -115.511 0 0 0
+	action "idle"
+		anim anim_wpn_idle
+		delayend 125
+		function wpn_std_idle
+	end
+	action "emptyidle"
+		function wpn_std_emptyidle
+	end
+	action "fire"
+		anim anim_wpn_idle
+		soundsetend GS_ONKNIFE
+		function wpn_std_fire
+	end
+	action "recoil"
+		anim anim_wpn_fire
+		delaystart auto
+		function wpn_std_recoil
+	end
+	action "switchto"
+		anim anim_wpn_switchto
+		soundset GF_ONKNIFE_ST
+		delaystart 44
+		function wpn_std_idle
+	end
+	action "switchfrom"
+		anim anim_wpn_switchfrom
+		soundset GF_ONKNIFE_SF
+		delayend 2
+		function wpn_std_switchfrom
+	end
+	action "switchrank"
+		delaystart 1
+		delayend 1
+		function wpn_std_switchrank
+	end
+end
+
+weapon "WPN_GRENADEHE"
+	clipsize 1
+	startrounds 3
+	targetyawrange 120
+	targetpitchmax 85
+	targetpitchmin 85
+	statid 401
+	maxclips 3
+	loadout_selectable 1
+	round_type AMMO_ON_FRAG
+	loadout_menu_textid WEAP_SHORT_GRENADEHE
+	loadout_menu_ttdesc WEAP_DESC_GRENADEHE
+	loadout_menu_icon m_onfrag.tga
+	animadm on_frag
+	launchuserpoint bullet
+	hudicon h_onfrag.tga
+	gfx1 on_frag
+	gfx3 onfrag_3
+	special_hold 3
+	attack_anim 2
+	category 5
+	ammoclass CLASS_ON_FRAG 1
+	crosshair onxhair.tga
+	weapon_class grenade
+	charfilter medic
+	charfilter sniper
+	charfilter gunner
+	charfilter rifleman
+	charfilter engineer
+	teamfilter red
+	teamfilter blue
+	classrounds sniper 2
+	classrounds gunner 3
+	flags Underwater
+	flags NoClipsNoDraw
+	flags OkWhileJumping
+	flags WhileSwimming
+	flags PowerThrow
+	clipweight 1.1
+	pos -4.332 -3.84 -115.511 0 0 0
+	action "idle"
+		anim anim_wpn_idle
+		delayend 125
+		function wpn_std_idle
+	end
+	action "emptyidle"
+		anim anim_wpn_empty_idle
+		delaystart auto
+		function wpn_std_emptyidle
+	end
+	action "fire"
+		anim anim_wpn_fire
+		soundset GF_ONGNADE_THROW
+		delaystart 80
+		delayend auto
+		function wpn_std_fire
+	end
+	action "recoil"
+		anim anim_wpn_recoil
+		delayend auto
+		function wpn_std_recoil
+	end
+	action "reload"
+		anim anim_wpn_reload
+		soundset GF_ONGNADE_ST
+		delayend auto
+		function wpn_std_reload
+	end
+	action "empty"
+		soundset DRY_CLAYSATCH
+		delayend auto
+		function wpn_std_empty
+	end
+	action "switchto"
+		anim anim_wpn_switchto
+		soundset GF_ONGNADE_ST
+		delaystart 88
+		function wpn_std_idle
+	end
+	action "switchfrom"
+		anim anim_wpn_switchfrom
+		soundset GF_ONGNADE_SF
+		delayend 2
+		function wpn_std_switchfrom
+	end
+	action "switchrank"
+		delaystart 1
+		delayend 1
+		function wpn_std_switchrank
+	end
+end
+
+weapon "WPN_GRENADESM"
+	clipsize 1
+	startrounds 3
+	targetyawrange 120
+	targetpitchmax 85
+	targetpitchmin 85
+	statid 402
+	maxclips 3
+	loadout_selectable 1
+	round_type AMMO_ON_SMOKE
+	loadout_menu_textid WEAP_SHORT_GRENADESM
+	loadout_menu_ttdesc WEAP_DESC_GRENADESM
+	loadout_menu_icon m_onsmok.tga
+	animadm on_frag
+	launchuserpoint bullet
+	hudicon h_onsmok.tga
+	gfx1 on_smok
+	gfx3 onsmok_3
+	special_hold 3
+	attack_anim 2
+	category 6
+	ammoclass CLASS_ON_SMOKE 1
+	crosshair onxhair.tga
+	weapon_class grenade
+	charfilter medic
+	charfilter pilot
+	charfilter rifleman
+	charfilter engineer
+	teamfilter red
+	teamfilter blue
+	flags Underwater
+	flags NoClipsNoDraw
+	flags OkWhileJumping
+	flags WhileSwimming
+	flags PowerThrow
+	clipweight 1.1
+	pos -4.332 -3.84 -115.511 0 0 0
+	action "idle"
+		anim anim_wpn_idle
+		delayend 125
+		function wpn_std_idle
+	end
+	action "emptyidle"
+		anim anim_wpn_empty_idle
+		delaystart auto
+		function wpn_std_emptyidle
+	end
+	action "fire"
+		anim anim_wpn_fire
+		soundset GF_ONCNADE_THROW
+		delaystart 80
+		delayend auto
+		function wpn_std_fire
+	end
+	action "recoil"
+		anim anim_wpn_recoil
+		delayend auto
+		function wpn_std_recoil
+	end
+	action "reload"
+		anim anim_wpn_reload
+		soundset GF_ONGNADE_ST
+		delayend auto
+		function wpn_std_reload
+	end
+	action "empty"
+		soundset DRY_CLAYSATCH
+		delayend auto
+		function wpn_std_empty
+	end
+	action "switchto"
+		anim anim_wpn_switchto
+		soundset GF_ONGNADE_ST
+		delaystart 88
+		function wpn_std_idle
+	end
+	action "switchfrom"
+		anim anim_wpn_switchfrom
+		soundset GF_ONGNADE_SF
+		delayend 2
+		function wpn_std_switchfrom
+	end
+	action "switchrank"
+		delaystart 1
+		delayend 1
+		function wpn_std_switchrank
+	end
+end
+
+weapon "WPN_MEDPACK"
+	clipsize -1
+	startrounds -1
+	targetyawrange 120
+	targetpitchmax 85
+	targetpitchmin 85
+	statid 700
+	round_type AMMO_ON_MEDPACK
+	loadout_menu_textid WEAP_SHORT_MEDPACK
+	loadout_menu_ttdesc WEAP_DESC_MEDPACK
+	loadout_menu_icon m_onmedp.tga
+	animadm on_medp
+	launchuserpoint bullet
+	hudicon h_onmedp.tga
+	gfx1 on_medp
+	gfx3 onmedp_3
+	special_hold 1
+	run_anim 1
+	category 9
+	crosshair onxhair.tga
+	charfilter medic
+	teamfilter red
+	teamfilter blue
+	flags Underwater
+	flags WhileSwimming
+	flags QuickSwitch
+	pos -4.332 -3.84 -115.511 0 0 0
+	action "idle"
+		anim anim_wpn_idle
+		delayend 125
+		function wpn_std_idle
+	end
+	action "emptyidle"
+		anim anim_wpn_idle
+		delayend auto
+		function wpn_std_idle
+	end
+	action "fire"
+		anim anim_wpn_fire
+		soundsetend ON_MEDPAK_USE
+		delayend auto
+		function wpn_std_fire
+	end
+	action "recoil"
+		anim anim_wpn_recoil
+		delayend auto
+		function wpn_std_recoil
+	end
+	action "switchto"
+		anim anim_wpn_switchto
+		soundset GF_ONMEDP_ST
+		delaystart 38
+		function wpn_std_idle
+	end
+	action "switchfrom"
+		anim anim_wpn_switchfrom
+		soundset GF_ONMEDP_SF
+		delayend 2
+		function wpn_std_switchfrom
+	end
+	action "switchrank"
+		delaystart 1
+		delayend 1
+		function wpn_std_switchrank
+	end
+end
+

@@ -67,7 +67,7 @@ private:
 	std::deque<RaysRequest> requests_;
 	// Edit state mirrored from every push (these controls display authoritative
 	// state; a click flips locally + queues the request, the next push confirms).
-	uint32_t mask_edit_ = 0x7FFF;
+	uint32_t mask_edit_ = kRayCategoryMaskAll;
 	int32_t ttl_edit_ = 93;
 	// Declared ahead of the layer that reads it.
 	RaysOverlayRecord overlay_record_{};

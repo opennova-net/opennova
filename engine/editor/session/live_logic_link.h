@@ -1,0 +1,94 @@
+#pragma once
+
+// The Shell's link to the running game's MCP endpoint for its mission logic (ADR 0046 S24, Live; session/
+// live_logic.h): while the session asks for it (ProjectSession::live_logic_polling), the link asks the game's
+// game_debug tool for its mission_logic_snapshot about four times a second and hands each answer to the session,
+// and makes the calls play_debug queued, saying what each came to. Everything but the bytes is here: the HTTP
+// requests (POST /mcp, JSON-RPC 2.0, the endpoint's own docs/mcp.md), reading the answers, the one exchange at a
+// time; the embedder gives the byte stream (GameMcpChannel: the Shell's TCP stream to 127.0.0.1,
+// godot/src/authoring/play_logic_link, stepped each frame by the editor app).
+
+#include <cstddef>
+#include <cstdint>
+#include <deque>
+#include <string>
+
+#include <base/io/json.h>
+#include <editor/session/live_logic.h>
+
+namespace opennova::editor {
+
+class ProjectSession;
+
+// A byte stream to the game's endpoint on this machine, the embedder's: each call returns at once but send, which
+// may wait until its bytes are written (a few hundred to the loopback; the Shell's StreamPeerTCP put_data).
+class GameMcpChannel {
+public:
+	enum class State { Closed, Connecting, Connected, Failed };
+	virtual ~GameMcpChannel() = default;
+	// Connects to 127.0.0.1:`port`, closing what was open.
+	virtual void connect(int port) = 0;
+	virtual State state() = 0;
+	// Sends `bytes` whole; false when the stream cannot take them (it is then closed).
+	virtual bool send(const std::string &bytes) = 0;
+	// What has arrived since the last call ("" nothing).
+	virtual std::string receive() = 0;
+	virtual void close() = 0;
+};
+
+// An HTTP response read from the bytes received so far.
+struct GameMcpResponse {
+	int status = 0;
+	std::string session_id; // its Mcp-Session-Id header
+	std::string body;
+	size_t consumed = 0; // the bytes it took
+};
+enum class GameMcpRead { Incomplete, Whole, Malformed };
+
+class LiveLogicLink {
+public:
+	// How often the snapshot is asked while the session polls (its mission's Logic pane shown) and nothing else
+	// waits; none is asked otherwise.
+	static constexpr int64_t kPollMs = 250;
+	// An exchange the game has not answered by then is given up (the stream closed, opened again): a call is
+	// said not answered, the game perhaps still making it.
+	static constexpr int64_t kAnswerMs = 3000;
+	// The game silent this long while polled: the session is told how long (the board says so).
+	static constexpr int64_t kQuietMs = 2000;
+
+	// One step at `now_ms` (the Shell's frame): connects while a game the editor can ask runs and there is
+	// something to ask (the session polls, or a call is queued) and closes otherwise; sends the next exchange when
+	// none waits (a queued call first, else the snapshot when it is due); reads an answer and hands it on. A call
+	// in flight when the stream drops, or when the game ends, is answered as gone.
+	void step(ProjectSession &session, GameMcpChannel &channel, int64_t now_ms);
+	// What the link has done (for the tests; what the person needs to know of it Output says: a call's fate, the
+	// game falling silent): snapshots read, calls answered, exchanges given up or refused.
+	struct Stats {
+		size_t snapshots = 0;
+		size_t calls = 0;
+		size_t failures = 0;
+	};
+	const Stats &stats() const { return stats_; }
+
+private:
+	enum class Waiting { None, Initialize, Snapshot, Call };
+	void reset(GameMcpChannel &channel);
+	void drop_waiting(ProjectSession &session, PlayDebugAnswer answer, const char *words);
+	void answered(ProjectSession &session, const GameMcpResponse &response);
+
+	int port_ = 0;
+	bool initialized_ = false;
+	std::string session_id_;
+	std::string received_;
+	Waiting waiting_ = Waiting::None;
+	PlayDebugCall call_;          // the call waiting, when one is
+	int64_t sent_ms_ = 0;
+	int64_t answered_ms_ = 0; // the game's last answer (or the stream's opening)
+	int64_t next_poll_ms_ = 0;
+	uint64_t calls_after_ = 0;    // the last call taken from the session
+	std::deque<PlayDebugCall> queued_;
+	uint64_t next_id_ = 1;
+	Stats stats_;
+};
+
+} // namespace opennova::editor

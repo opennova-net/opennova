@@ -18,11 +18,16 @@
 #                                          target that links opennova_pq
 #                                          (libpq); defined only with
 #                                          OPENNOVA_NOVAWORLD_SERVICE
+#   opennova_editor             STATIC     editor/* — the OpenNova Editor's portable
+#                                          core (ADR 0046 d3): project, assets,
+#                                          requirements, and the later slices
 #
 # PUBLIC link chain: formats -> io; base -> formats; net -> base;
-# runtime -> net; novaworld_service -> net (+ pq PRIVATE). base sits ABOVE
-# formats deliberately: vfs consumes pff/scr/bfc1; only io is at the bottom.
-# net is wire only and never links runtime (ADR 0043 d4).
+# runtime -> net; novaworld_service -> net (+ pq PRIVATE); editor -> runtime.
+# base sits ABOVE formats deliberately: vfs consumes pff/scr/bfc1; only io is at
+# the bottom. net is wire only and never links runtime (ADR 0043 d4). Nothing
+# below editor links or includes it: the game and the Play child never carry
+# editor code (ADR 0046 d2/d3).
 #
 # Both CMake roots (the repo root and godot/src) add this directory. Only the
 # repo root defines the service target, and only when OPENNOVA_NOVAWORLD_SERVICE
@@ -43,3 +48,4 @@ add_subdirectory(formats)
 add_subdirectory(base)
 add_subdirectory(net)
 add_subdirectory(runtime)
+add_subdirectory(editor)

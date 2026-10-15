@@ -301,12 +301,12 @@ that way: each diffuse and detail texture export writes or copies from a
 `.tga` (an image of the scene, or a `.tga` file an image was loaded from) is
 written as the `.dds` beside the `.3di`, DXT1 for an opaque image and DXT5
 for one with alpha, every level the 2 x 2 box filter of the source's level
-above it, through `opennova-3di texture` (the engine's image import, its
-blocks rgbcx's). The row keeps naming `<stem>.tga`:
+above it, through `opennova-3di texture` (the image import the editor runs
+too, its blocks rgbcx's). The row keeps naming `<stem>.tga`:
 
 - the `.3di` is the same whichever form its textures take, so switching
   forms writes only the textures;
-- under a loose-first search (the `/d` launch) a row naming
+- under a loose-first search (the `/d` launch, the editor's Play) a row naming
   `<stem>.dds` takes the plain path for the loose file, which reads `.tga`,
   `.mdt` and `.pcx` alone, and the texture would not load; a `<stem>.tga` row
   with no loose `.tga` reads the `.dds`;
@@ -565,8 +565,8 @@ reads an existing weapon definition or imported timing.
    until Blender closes, never in the scene, and says when the timing has
    changed since.
 6. **Export Animations** writes `<table>_weapon_edits.txt` beside the table:
-   per entry only the keys to set (ANIM, DELAYSTART, DELAYEND, POS, TPOS),
-   never FUNCTION, sounds, effects or flags. A table without a fire row still
+   per entry only the keys to set (ANIM, DELAYSTART, DELAYEND, POS, TPOS,
+   and FUNCTION for a draw timed by its clip), never sounds, effects or flags. A table without a fire row still
    writes its clips, and no edits. **Merge into weapon.def** sets those keys
    in a copy of a `weapon.def` you pick (`opennova-3di weapon merge`), written
    beside it as `<name>_merged.def` unless you name another file; every other
@@ -577,10 +577,15 @@ reads an existing weapon definition or imported timing.
 | --- | --- |
 | `ON:Shot` | Fire: the shot pose; none means the first frame. Fire's recovery is each entry's target rate, so fire takes no Ready. |
 | `ON:Eject` | Recoil: the casing and refire decision; none means the first frame. |
-| `ON:Active End` | Reload, empty, fire mode, aim in and aim out: the end of the action's active phase; none means Ready, else the clip's end. |
+| `ON:Active End` | Reload, empty, fire mode, aim in and aim out, and a draw timed by its clip: the end of the action's active phase; none means Ready, else the clip's end. |
 | `ON:Ready` | The end of the recovery after that boundary, and an idle's window before the game plays it again; none means the clip's end. |
 
-Draw and holster take no marker: the game paces them on its switch timer.
+The holster takes no marker: the game paces it on its switch timer, about half
+a second, which swaps the next weapon in. A draw without markers is paced the
+same way. A draw with markers is timed by its clip: its row names the idle
+handler (`FUNCTION wpn_std_idle`), which runs on DELAYSTART and then goes to
+idle, where the draw's own handler ignores its delays (REVX02's AT4 draws the
+same way through `wpn_std_reload`, which also refills the magazine).
 Every clip on one action's row must time alike, in seconds: the game plays a
 ring's clips in turn, so any of them may be the one playing. A Ready marker
 may lie past the clip's last frame to hold a recovery; the other markers name
@@ -619,7 +624,7 @@ writes an image as a model's texture file, as export does: a `.dds` (auto, the
 default: DXT1 for an opaque image, DXT5 otherwise; argb: uncompressed, one
 level; the full chain to 1 x 1 unless `--mips none`), or a 32-bit `.tga` or
 `.mdt`, halved while a side exceeds `--max-size`. `--alpha` makes the alpha as
-an image import does (`opaque`, `luminance`, `threshold:N`, `key:#RRGGBB`):
+the editor's import does (`opaque`, `luminance`, `threshold:N`, `key:#RRGGBB`):
 an image whose alpha no shader of its material reads (a bake's stray alpha
 under `FF_ST_OP`) written `--alpha opaque` is DXT1, half DXT5's size. A `.dds`
 whose sides are not powers of two is refused. Converting the textures of an existing model is this, once

@@ -1,6 +1,7 @@
 #include <runtime/devtools/net_window.h>
 
 #include <runtime/devtools/debug_control_ids.h>
+#include <runtime/devtools/ui_kit.h>
 
 #include <base/io/cp1252.h> // cp1252_to_utf8 (a peer's name)
 
@@ -89,7 +90,7 @@ void NetWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	(void)pass;
 	(void)frame_index;
 	if (!snapshot_.valid) {
-		ImGui::TextUnformatted("No session pushed (load a mission).");
+		ui_kit::empty_state("No session pushed (load a mission).");
 		return;
 	}
 	const NetSnapshot &s = snapshot_;
@@ -99,7 +100,7 @@ void NetWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	if (!s.peers.empty() || s.role == StatusRole::ListenServer || s.role == StatusRole::DedicatedServer) {
 		ImGui::SeparatorText("Peers");
 		if (s.peers.empty()) {
-			ImGui::TextDisabled("No remote peers connected.");
+			ui_kit::empty_state("No remote peers connected.");
 		} else if (ImGui::BeginTable("peers", 8,
 						   ImGuiTableFlags_RowBg | ImGuiTableFlags_Borders | ImGuiTableFlags_SizingStretchProp)) {
 			ImGui::TableSetupColumn("slot");

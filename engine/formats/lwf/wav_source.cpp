@@ -285,6 +285,27 @@ std::vector<float> conversion_channel(const WaveSamples &wave, const WaveConvers
 	return mono;
 }
 
+// One channel's samples at `to` samples a second from `from`: kept, or resampled by straight lines between the
+// source's samples.
+std::vector<float> resampled(std::vector<float> channel, uint32_t from, uint32_t to) {
+	if (to == from || channel.empty()) return channel;
+	const size_t frames = std::max<size_t>(1, size_t(std::llround(double(channel.size()) * to / from)));
+	std::vector<float> out(frames);
+	for (size_t i = 0; i < frames; ++i) {
+		const double at = double(i) * from / to;
+		const size_t i0 = std::min(size_t(at), channel.size() - 1), i1 = std::min(i0 + 1, channel.size() - 1);
+		const float t = float(at - double(i0));
+		out[i] = channel[i0] * (1.0f - t) + channel[i1] * t;
+	}
+	return out;
+}
+
+// A sample -1..1 as 16-bit PCM, scaled by `gain` and clamped to full scale.
+int16_t pcm16_of(float sample, float gain) {
+	const float v = std::clamp(sample * gain, -1.0f, 1.0f);
+	return int16_t(std::clamp(std::lround(v * 32767.0f), -32768L, 32767L));
+}
+
 } // namespace
 
 float wave_conversion_peak(const std::vector<uint8_t> &source, const WaveConversion &conversion) {
@@ -318,29 +339,55 @@ bool convert_wave(const std::vector<uint8_t> &source, const WaveConversion &conv
 	}
 	// The rate: kept, or resampled by straight lines between the source's samples.
 	const uint32_t rate = conversion.rate ? conversion.rate : wave.rate;
-	std::vector<float> samples;
-	if (rate == wave.rate) {
-		samples = std::move(mono);
-	} else {
-		const size_t frames = std::max<size_t>(1, size_t(std::llround(double(mono.size()) * rate / wave.rate)));
-		samples.resize(frames);
-		for (size_t i = 0; i < frames; ++i) {
-			const double at = double(i) * wave.rate / rate;
-			const size_t i0 = std::min(size_t(at), mono.size() - 1), i1 = std::min(i0 + 1, mono.size() - 1);
-			const float t = float(at - double(i0));
-			samples[i] = mono[i0] * (1.0f - t) + mono[i1] * t;
-		}
-	}
+	const std::vector<float> samples = resampled(std::move(mono), wave.rate, rate);
 	const int bits = wave_bits_written(wave, conversion);
 	std::vector<uint8_t> data;
 	data.reserve(samples.size() * size_t(bits / 8));
 	for (const float s : samples) {
 		const float v = std::clamp(s * conversion.gain, -1.0f, 1.0f);
 		if (bits == 8) data.push_back(uint8_t(std::clamp(std::lround(v * 127.0f) + 128, 0L, 255L)));
-		else io::append_u16_le(data, uint16_t(int16_t(std::clamp(std::lround(v * 32767.0f), -32768L, 32767L))));
+		else io::append_u16_le(data, uint16_t(pcm16_of(s, conversion.gain)));
 	}
 	// The plain RIFF the game's loader reads, through the format's writer.
 	return wav_write_pcm_mono(data.data(), data.size(), rate, uint16_t(bits), out, error);
+}
+
+bool wave_stereo_pcm16(const std::vector<uint8_t> &source, uint32_t rate, float gain, std::vector<int16_t> &out,
+                       std::string &error, WaveFormat *format) {
+	out.clear();
+	WaveSamples wave;
+	if (!decode_wave_source(source, wave, error)) return false;
+	if (format) *format = wave.format;
+	if (wave.channels > 2) {
+		error = "it has " + std::to_string(wave.channels) + " channels, and stereo is a left and a right: mix it to two first";
+		return false;
+	}
+	if (wave.frames() == 0) {
+		error = "it holds no sample";
+		return false;
+	}
+	if (rate == 0) {
+		error = "no rate to write it at";
+		return false;
+	}
+	if (!(gain >= 0.0f) || !std::isfinite(gain)) {
+		error = "its gain is no number of 0 or more";
+		return false;
+	}
+	// Each channel taken apart (one channel both sides), each at the rate as convert_wave makes it.
+	std::vector<float> sides[2];
+	for (int side = 0; side < 2; ++side) {
+		const uint16_t channel = wave.channels == 1 ? 0 : uint16_t(side);
+		sides[side].resize(wave.frames());
+		for (size_t f = 0; f < sides[side].size(); ++f) sides[side][f] = wave.samples[f * wave.channels + channel];
+		sides[side] = resampled(std::move(sides[side]), wave.rate, rate);
+	}
+	out.resize(sides[0].size() * 2);
+	for (size_t f = 0; f < sides[0].size(); ++f) {
+		out[f * 2] = pcm16_of(sides[0][f], gain);
+		out[f * 2 + 1] = pcm16_of(sides[1][f], gain);
+	}
+	return true;
 }
 
 std::string wave_conversion_words(const WaveSamples &source, const WaveConversion &conversion) {

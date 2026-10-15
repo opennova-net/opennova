@@ -675,7 +675,7 @@ def file_reference(image):
 # keeps its rows naming <stem>.tga and writes <stem>.dds beside the .3di:
 # - the .3di is the same whichever form its textures ship in;
 # - a row naming <stem>.dds takes the plain path once a loose-first search
-#   finds the loose file (the /d launch), and the plain path
+#   finds the loose file (the /d launch, the editor's Play), and the plain path
 #   reads .tga, .mdt and .pcx alone [orig: @ 0x58B4FE..0x58B5AD]: the texture
 #   would not load; a <stem>.tga row with no loose .tga probes the sibling and
 #   loads the .dds;

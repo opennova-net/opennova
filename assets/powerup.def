@@ -1,0 +1,52 @@
+// Powerup definitions
+
+powerup "PU_ONAR15"
+	respawn_time 120
+	weapon WPN_M4AUTO
+	action "pickup"
+	function powerup_pickup
+	soundset GF_ONAR15_ST
+	end
+	action "respawn"
+	function powerup_respawn
+	end
+end
+
+powerup "PU_ONPIST"
+	respawn_time 120
+	weapon WPN_colt45
+	action "pickup"
+	function powerup_pickup
+	soundset GF_ONPIST_ST
+	end
+	action "respawn"
+	function powerup_respawn
+	end
+end
+
+powerup "PU_ONHEALTH"
+	respawn_time 30
+	max_respawns 1
+	hp -1
+	action "pickup"
+	function powerup_pickup
+	soundset ON_HEALTH_UP
+	end
+	action "respawn"
+	function powerup_respawn
+	end
+end
+
+powerup "PU_ONAMMO"
+	respawn_time 100
+	max_respawns 1
+	allammo
+	action "pickup"
+	function powerup_pickup
+	soundset ON_PU_AMMO
+	end
+	action "respawn"
+	function powerup_respawn
+	end
+end
+

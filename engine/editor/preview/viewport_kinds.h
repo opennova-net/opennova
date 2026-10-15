@@ -1,0 +1,121 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string>
+
+#include <editor/assets/asset_kinds.h>
+#include <editor/session/view/viewport_kind.h>
+
+namespace opennova::editor {
+
+class ViewportModel;
+struct DocumentsView;
+
+// The viewport kinds' table (ADR 0046 S13 V5; CONTEXT.md "Viewport"): what each kind of
+// session/view/viewport_kind.h is to the session, a document's picture as the game would draw it,
+// drawn by a device of the Shell's and by a canvas that owns its input, with a state of its own (its
+// options, a camera, its device's size) that a SetViewport request changes, and that its follow
+// derives from its document (viewport_model.h).
+
+// A document type a viewport kind reads, and how: `shows`, a document of the type is what a
+// viewport of the kind draws (its target: a menu, a model, a clip, a table); else the type only
+// feeds it, what its documents hold showing in the picture, so the Preview window keeps showing the
+// kind while one is active (a menu's stylesheets and string tables).
+struct ViewportFeed {
+	DocumentTypeId type = DocumentTypeId::None;
+	bool shows = false;
+};
+
+// One row per ViewportKind, in its order (viewport_kinds.cpp, static_asserted as the request and
+// the asset kinds' tables are): where it is drawn; whether it shows the document as the game would
+// read it were it saved now (its bytes written and read back, so a document that cannot be written
+// shows nothing: the menu's and the model's) or the document as it stands (a text's in the script
+// device, S13 V10; the mission's rows, S14); whether it shows one row of its document, the
+// selection's (a menu's screen: its target moves only when a row of the document is selected and goes
+// with that row); whether its picture made again waits for a gesture open in its document to end (S13
+// V8: a scene built anew, the model's, which the device keeps while the overlays follow the drag; a
+// menu's screen is configured again as the drag goes, its frame redrawn live; a text's control takes
+// every edit live, the script device's); the document types it shows and those that feed it; what
+// makes a viewport of it over the document at a path, its state at the kind's defaults; and whether a
+// canvas draws it, which owns the pointer over its picture (a menu's, a model's: so a point of it
+// names a record, a drag moves one, a command acts on some) or a Control of the Shell's owns it (the
+// script device's, S13 V10: no point of it names anything, nothing is dragged or commanded in it, and
+// the wire refuses a hit on it); and how many devices of the kind the Shell keeps at once (ADR 0046
+// S14, viewport_device_cache.h: a mission's device holds a terrain and the mission's models, so two
+// at most; 0, no limit of the kind's own beside the cache's). A type is shown by one Main-role kind
+// at most and fed by one Preview-role kind at most (static_asserted).
+struct ViewportKindRow {
+	ViewportKind kind = ViewportKind::kCount;
+	ViewportRole role = ViewportRole::Preview;
+	bool as_saved = true;
+	bool part = false;
+	bool holds_for_gesture = false;
+	const ViewportFeed *feeds = nullptr;
+	size_t feed_count = 0;
+	std::unique_ptr<ViewportModel> (*make)(const std::string &path) = nullptr;
+	bool canvas = true;
+	size_t devices = 0;
+	// It draws a file Files selects whether or not its document is open (S18: a texture's, which the
+	// Preview window shows as the file is selected; its viewport reads the project's file while no
+	// document is open at its path): the Preview window shows it for that selection, whatever its role.
+	bool files = false;
+	// The row it shows (a `part` kind's) is a page of its document, so a record picked on another row is
+	// a step of the navigation history (a menu's screen); else a row is a record picked one after another
+	// (a definition table's, DI-21), no step.
+	bool pages = false;
+	// It draws the editor's preview background behind its picture (the Preview background preference,
+	// session/preview_background.h): a picture of the project's own data on no sky of the game's (a model's,
+	// a texture's, an effect's, a HUD's, a definition's). A picture of the game's own sky or screen (a menu's,
+	// a mission's, an environment's, a terrain's) draws the game's, and a text's script device has none.
+	bool backdrop = false;
+};
+
+// A kind's row; Menu's for a value past the last kind.
+const ViewportKindRow &viewport_kind_row(ViewportKind kind);
+// Whether a viewport of `kind` shows a document of `type` (its feeds' `shows`).
+bool viewport_kind_shows(ViewportKind kind, DocumentTypeId type);
+// The Preview-role kind a document of `type` shows in or feeds (the Preview window shows it while
+// such a document is active: a menu, a stylesheet or a string table the menu's, a model, a clip or
+// a table the model's); kCount for none.
+ViewportKind preview_kind_of(DocumentTypeId type);
+// The Main-role kind that shows a document of `type` (its Document tab's main view: a text type's
+// script device, S13 V10); kCount for none.
+ViewportKind main_viewport_kind(DocumentTypeId type);
+// The kind a document of `type` is read and changed through when none is named (S13 V7: the
+// viewport query, a SetViewport, an edit in a viewport): its Main-role kind where a canvas draws it (S23
+// C: a mission's 3D view, beside which the Preview window shows its map), else the Preview-role kind that
+// shows it (the one the Preview window shows while the document is active), else its Main-role kind;
+// kCount for a type no kind shows (a stylesheet feeds the menu's, but shows in none).
+ViewportKind default_viewport_kind(DocumentTypeId type);
+// A Preview-role kind every type of which a Main-role kind's canvas also draws (S23 C: a mission's map beside its 3D
+// view): the Preview window stands aside for such a document until asked, so the workspace gives its viewport a device
+// only as the window draws it (ViewportDeviceCache::sync pins no such target).
+bool viewport_kind_beside_picture(ViewportKind kind);
+// The types a viewport shows, in words, from the kinds' table ("a menu, a model, an animation or an
+// animation map"): what a refusal of a document that shows in none names.
+std::string viewport_shown_types();
+
+// The kind that draws a file Files selects of `type` (ViewportKindRow::files, S18: a texture's);
+// kCount for none.
+ViewportKind file_preview_kind(DocumentTypeId type);
+
+// The kind the Preview window shows over `documents`' targets: while Files leads (a file selected
+// there since the active document last changed, DocumentsView::files_lead) the kind that draws the
+// selected file, unless that file is the active document, which its tab shows; else the active
+// document's (the kind its type shows in or feeds, preview_kind_of), else `last` (the one it showed;
+// kCount before it showed one). When that kind has no target (its document never opened, or closed; a
+// definition table's with no record selected yet), `last` while it has one, else the first Preview-role
+// kind that has one; kCount when none has.
+ViewportKind preview_kind(const DocumentsView &documents, ViewportKind last);
+// What the Preview window follows after a change of the view (the session's touch, before its
+// viewports are tracked): of each Preview-role kind, the active document when the kind shows its
+// type, a kind that shows a row of it the row the selection lands in, keeping the one it had while
+// none is selected; a target whose document closed, or whose row went, cleared; a Main-role kind's
+// empty but a files kind's, which is the file Files selects where the kind draws its type. Files
+// stops leading once another document is made active, and the Map tool's ask (DocumentsView::beside) goes with
+// it. Then the kind it shows (DocumentsView::preview_shown, preview_kind over the one before).
+void update_preview_targets(DocumentsView &documents);
+
+} // namespace opennova::editor

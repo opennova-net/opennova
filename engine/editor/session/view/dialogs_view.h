@@ -1,0 +1,121 @@
+#pragma once
+
+#include <cstdint>
+#include <memory>
+#include <string>
+#include <vector>
+
+#include <editor/assets/import_choice.h>
+#include <editor/model/diagnostic.h>
+#include <editor/model/value.h>
+#include <editor/session/editor_request.h>
+
+namespace opennova::editor {
+
+struct ImportPlan;
+struct RenameSite;
+struct TextureThumbnail;
+
+// What waits on the author, as the view shows it (ADR 0046 S13 V4; the Dialogs concern and
+// Project's quit_requested): the unsaved-changes prompt, the import dialog's preview, the last
+// rename's plan, and whether the editor asked to quit. The import's plan and the rename's sites
+// are shared and never null (a DialogsView made empty holds empty ones), so a header naming the
+// view pulls none of the import plan's or the rename transaction's headers.
+struct DialogsView {
+	// The unsaved-changes prompt, open while a request waits on it: what waits (`action`,
+	// and the path it names: the document a Close or a Reload closes, the directory of a
+	// project to open, the file a rename renames), the files with unsaved edits it lists (what
+	// its Save writes), and whether Discard is offered (not for Build and Play, which pack the
+	// files on disk, nor for an import or a rename, which write over them).
+	struct UnsavedPrompt {
+		bool open = false;
+		EditorRequestKind action = EditorRequestKind::Quit;
+		std::string target;
+		std::vector<std::string> files;
+		bool can_discard = true;
+	};
+	UnsavedPrompt unsaved_prompt;
+	// The import dialog (ADR 0046 S8, S11g), open while an import is previewed: what a listing
+	// offers to choose from (`choices`: a picked archive's members, or every file of the game
+	// install when no file was named), the files chosen (`roots`: the loose files picked, the
+	// files an Import fix names, those chosen from the list), and the plan of importing them
+	// (editor/import/import_plan), with the files they need when `with_dependencies`: its rows
+	// are what the dialog checks, then the files not found, the competing candidates and the
+	// kinds not followed. `changed`: an Import found the files changed since the plan it was
+	// shown, wrote nothing, and this is the plan made again. `all`: every file of the game
+	// install chosen at once (ADR 0046 S14), nothing to choose from and no walk (the closure of
+	// everything is everything; the setting changes nothing of it). Every plan made posts an
+	// ImportPlanned event (view_events.h). `facts`: each choice's kind and size, in the order of
+	// `choices` (the UX round's project lane: the chooser's Kind and Size). `planning`: the plan is being
+	// made (the import plan operation runs; its progress is the activity's operation): `plan` is no plan
+	// yet, and the dialog says so in place of its rows (the demo round's bug 8: "Nothing to import" and
+	// "Import 0 files" while the menu bar said "Planning 975/8144").
+	struct ImportPreview {
+		ImportPreview(); // the plan made, empty
+		bool open = false;
+		std::vector<ImportChoice> choices;
+		std::vector<ImportChoiceFacts> facts;
+		std::vector<ImportChoice> roots;
+		bool with_dependencies = false;
+		bool all = false;
+		std::shared_ptr<const ImportPlan> plan;
+		// Which plan it is (the MCP gaps lane): each plan the session makes for the dialog takes the next of the
+		// session's, never 0, so a row's index (what the workspace's checks name) is read with the plan it
+		// indexes, and a check or an import_files that names another plan is refused, not retargeted.
+		uint64_t plan_serial = 0;
+		bool changed = false;
+		bool planning = false;
+	};
+	ImportPreview import_preview;
+	// What a rename would do (PreviewRename): a name renamed everywhere (`symbol`: its kind, the
+	// file, record and field defining it) or a file renamed, the old and the new name, every site
+	// it rewrites (file, record, field, the value before and after) and why it would be refused.
+	// Every preview bumps `serial`; one that asks the new name posts an AskRename event naming it
+	// (the Rename everywhere dialog opens).
+	struct RenamePreview {
+		RenamePreview(); // the sites made, none
+		uint64_t serial = 0;
+		// The last rename's way back (PreviewRenameBack): its sites only those the rename wrote.
+		bool back = false;
+		bool symbol = false;
+		ReferenceKind kind = ReferenceKind::None;
+		std::string path;
+		std::string locator;
+		std::string field;
+		std::string old_name;
+		std::string new_name;  // as the definition takes it (an item id "0100302" is 100302)
+		std::string requested; // as asked: what a window compares the name it sent with
+		std::shared_ptr<const std::vector<RenameSite>> sites;
+		// A file's rename: the companions renamed with it (a mission's set, ADR 0046 S14), each
+		// "old to new".
+		std::vector<std::string> companions;
+		std::vector<Diagnostic> refusals;
+		// A move's way back (DI-03): the file to the folder it left ("" the top level), under its own name.
+		bool move = false;
+		std::string folder;
+	};
+	RenamePreview rename_preview;
+	// What a Replace or an Edit externally would do to a texture (S18: PreviewTextureSource), open while
+	// the dialog asks before anything is written: the texture, the image a Replace makes it from ("" for an
+	// Edit externally), the options asked over the ones reproducing its stored form (`values`), the stored
+	// forms the texture's extension offers and the one the plan writes, the changes in words, the texture
+	// before and after (in words, and pictures: its thumbnail and the file the import would make), or why it
+	// would be refused. Every preview bumps `serial`.
+	struct TextureSourcePreview {
+		bool open = false;
+		uint64_t serial = 0;
+		std::string texture;
+		std::string image;
+		std::vector<std::pair<std::string, std::string>> values;
+		std::vector<std::string> forms;
+		std::string form;
+		std::vector<std::string> changes;
+		std::string before_words, after_words;
+		std::shared_ptr<const TextureThumbnail> before, after;
+		std::string refusal;
+	};
+	TextureSourcePreview texture_source;
+	bool quit_requested = false;
+};
+
+} // namespace opennova::editor

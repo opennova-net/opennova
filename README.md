@@ -30,6 +30,23 @@ exports 3DI models and their ADM/BAD animations for authoring, using the
 bundled native `opennova-3di` readers and writers. See its documentation for
 round-trip limitations.
 
+The OpenNova Editor (pre-1.0 and experimental, ADR 0046) is a separately exported
+application, `opennova-editor.exe`, for the data of the JO and newer titles, starting with
+Joint Operations. A project is a directory of loose game files, a base game or an
+expansion. A Problems list checks every file the engine expects by name and offers fixes
+(one Fix all makes a blank but bootable game). Each file opens in a tab with its unsaved
+changes marked: the catalogs and other definition tables, string tables, menus and their
+stylesheets, models with their animation clips and tables, missions in a 3D view of their
+terrain with their event logic, terrains (heights, maps and tiles), textures, fonts,
+sounds and music banks, scripts, environments, AI profiles and more. Previews draw a menu
+screen, a model or a mission the way the game does. Imports bring files from a folder, an
+archive or a game install along with the files they need, and convert PNG images, glyph
+sheets, terrain image sets and the Blender add-on's `.o3d` and `.o3a` files. Build packs
+the archives, Play runs the game on them (OpenNova's runtime or the retail executable),
+and Export writes a game folder. An agent can drive it through its own MCP endpoint
+([docs/mcp.md](docs/mcp.md)). Geometry and animation keys are authored in Blender with the
+add-on above (ADR 0047).
+
 ## Build and test
 
 Prerequisites are CMake, a C++17 compiler, Git LFS, and Git submodules. Godot
@@ -99,6 +116,11 @@ CI and tagged releases publish `opennova-game-windows-v<version>.zip`. It
 contains `opennova.exe`, the matching native dependencies, the `assets/`
 placeholder data, and launch instructions. Retail game data is supplied
 separately. Debug builds include the game's dev tools (Insert).
+
+They also publish `opennova-editor-windows-v<version>.zip`: `editor/` holds the
+OpenNova Editor (`opennova-editor.exe`) and `runtime/` the game it plays your project
+with. No Godot install is needed. The editor is pre-1.0 and experimental, and works on
+Joint Operations projects today; what it edits is listed above.
 
 A PR's CI build comment also links `opennova-blender-addon-windows.zip`.
 Tagged [releases](https://github.com/opennova-net/opennova/releases) include

@@ -1,0 +1,603 @@
+# `art/onjo1/sound/`: the base game's sounds
+
+The sources of the base game's sounds (`assets/`): the footsteps, deaths, falls
+and parachute the infantry sound profile plays, the impacts the carbine's
+round plays on each surface, the cues the engine plays by names of its own, the
+menus' sounds and the jungle ambience. The music is in `../music/`.
+Every game file is our own: cut, layered and processed from CC0 recordings, or
+synthesised. The original game's sounds are reference only: extracted to a
+scratch folder outside the repo, measured and never committed or imported.
+
+- `SOURCES.md`: every game file, what it was made from and how; every source
+  file with its author, page and licence.
+- `sources/`: the CC0 originals as downloaded (Freesound's HQ OGG preview of
+  each sound, the stream its page plays; Kenney's Impact Sounds pack).
+- `masters/`: the synthesised sounds at 44.1 kHz 16-bit, before the game
+  format's resample and quantise (a synthesised sound has no other source).
+
+## Rules
+
+- **CC0 1.0 only**, recorded per file in `SOURCES.md`. The one exception is the carbine's six
+  sounds (`onar15*.wav`), mixed from the Infima Games pack the carbine itself comes from
+  (`art/on_ar15/README.md`), at each montage's cue times and volumes; and the pistol's five
+  (`onpist*.wav`), cut from the KINEMATION pack the pistol comes from (`art/on_pist/README.md`).
+  `SOURCES.md` names their files.
+- **Modelled on the original, never taken from it.** The reference is Joint
+  Operations: Combined Arms (Steam). Its sets, formats, lengths, loudness and
+  variation counts are measured; its audio never enters the repo.
+- **The game formats the original uses**: PCM mono, 22050 Hz 8-bit for steps
+  and soft hits, 44100 Hz 8-bit for hard hits, 22050 Hz 16-bit for the bullet
+  pass and the menu sounds, 22050 Hz 8-bit for the jungle beds and the frogs,
+  11025 Hz for the surf (16-bit) and the gnats (8-bit), the rate and depth
+  retail ships each counterpart in.
+- **Names fit the archive**: at most 15 characters with `.wav`, starting `on`.
+- The processing scripts are throwaway; the sources plus the exported wavs are
+  the truth, and `SOURCES.md` says in words what each export is.
+
+## Reference study (JO: Combined Arms)
+
+### Footsteps
+
+The infantry profiles in `SndProf.def` (`SP_JO_SP_PlayerM1`, `AI_JO_M1` and the
+rest) author three of the four footstep pairs the engine picks from
+(`audio::footstep_slot`: feet under water, standing on an entity, snow,
+ground): `SSLFootGND`/`SSRFootGND` `FSP_DIRT_L`/`FSP_DIRT_R`,
+`SSLFootOBJ`/`SSRFootOBJ` `FSP_OBJ_L`/`FSP_OBJ_R`, `SSFootWater` `FS_WATER`. No
+shipped profile (base or `jox01`) authors `SSLFootSnow`/`SSRFootSnow`, so retail's snow steps are
+silent. The sets live in `game.lwf`:
+
+| Set | Members | Member pitch, random range | Volume | Falloff |
+|---|---|---|---|---|
+| `FSP_DIRT_L` / `_R` | 7 / 7 wavs | 0xF0A2 (0.94), 0x11EB / 0x0CCC | 100 | 50 |
+| `FSP_OBJ_L` / `_R` | 4 / 5 | 0xFFFF, 0 / 0x0CCC | 100 | 50 |
+| `FS_WATER` | 6 | 0xFFFF, 0x11EB | 80 | 50 |
+
+Every set: one layer, flags 0xF (heading, internal, external, random), set
+pitch 0xFFFF, cull range 10000. The step wavs are 22050 Hz 8-bit mono PCM,
+peak-normalised to 0 dBFS. Dirt steps run 0.32 to 0.43 s at -14 to -21 dB RMS,
+a heel thump (31 % of the energy under 250 Hz) under a gravel crunch (centroid
+2.3 kHz, 22 % above 4 kHz) that decays to -30 dB in 0.1 to 0.35 s. Object
+steps (0.37 to 0.46 s) are hollower: half the energy at 250 Hz to 1 kHz,
+centroid 1.5 kHz. Water steps are long sloshes, 0.67 to 1.15 s, the peak
+0.1 to 0.4 s in, centroid 1.5 kHz.
+
+The same profiles fill the six anim-driven foley slots (the clips' FOLEY_1 to
+FOLEY_6 bits): `SSAudio1` and `SSAudio2` `FSP_DIRT_R`, `SSAudio3` `FSP_OBJ_L`,
+`SSAudio4` `FS_SWIM` (4 strokes, 0.96 to 1.88 s, volume 90, jitter 0x3333),
+`SSAudio5` `FSP_PRONE` (8 crawl drags, 0.50 to 0.87 s, centroid 2.2 kHz, volume
+60, jitter 0x3FFF) and `SSAudio6` `FSP_PRONE_ROLL` (4 rolls, 1.05 to 1.21 s,
+volume 60, jitter 0x0CCC), all 22050 Hz 8-bit. The rebels' profiles put their
+reload in `SSAudio5`; the player's and the friendly soldiers' put the crawl
+there, which our person clips fire on the crawls. A stance change plays one of
+three global sets by name, whatever the profile: `TO_CROUCH` (2 rustles),
+`TO_PRONE` (1, a drop) and `TO_STAND` (3), 0.47 to 0.72 s, volume 70, jitter
+0x0CCC (0x0F5C on the drop).
+
+### Bullet impacts
+
+`AMMO_CAR15_556MM` and `AMMO_M16_556MM` author the same 23 rows (tags 1 to 23,
+contiguous, which the engine needs: it reads the compacted rows by tag
+position). Hit effects are `Effect_AmHit*` particles (`none` on move and zip);
+the sounds:
+
+| Rows | Set | Layers |
+|---|---|---|
+| move | none | |
+| obj | none (the hit effect alone) | |
+| dirt, snow, packeddirt | `IMP_BULLET_DIRT` | 3 hits; a ricochet layer, 3 of 8 members a ricochet, the rest silent |
+| grass | `imp_bullet_grass` | 3 members over 2 short thumps |
+| cement, stone | `IMP_BULLET_CEMENT` | 8 cracks |
+| water | `IMP_BULLET_WATER` | the step sloshes at 2.5x pitch; grass thumps at 3.5x |
+| railroad, metal | `IMP_BULLET_METAL` | 8 hits; debris, 2 ricochets and 5 silent members |
+| mud, ice | `imp_bullet_mud` | 4 |
+| sand, quicksand | `IMP_BULLET_SAND` | 3 |
+| wood | `IMP_BULLET_WOOD` | 6 hits; 3 splinters and 3 silent members |
+| glass | `IMP_BULLET_GLASS` | 5 |
+| cloth | `IMP_BULLET_CLOTH` | 3 |
+| foliage | `IMP_BULLET_FOLIAGE` | 3 |
+| hmetal | `IMP_BULLET_ARMOR` | 7 hits; 2 ricochets and 5 silent members |
+| flesh / player | `IMP_BULLET_FLESH` / `IMP_BULLET_PLAYER` | 3, the same wavs |
+| zip | `WSH_BULLET_BY2` | 8 passes |
+
+Hard-surface hits are 44100 Hz 8-bit, soft ones (grass, sand, mud, cloth,
+flesh) and the passes 22050 Hz (the passes mostly 16-bit). Lengths: dirt
+0.14 to 0.19 s, cement 0.10 to 0.34 s, metal 0.09 to 0.50 s, wood 0.04 to
+0.10 s, glass 0.34 to 0.64 s, sand 17 ms, ricochets 0.7 to 1.0 s, passes 0.15
+to 0.75 s. They are loud: peak 0 dBFS and the loudest 50 ms window at -2.5
+(metal) to -16 (grass) dB RMS, the metal and armour hits clipped square.
+Spectra: cement and glass are cracks (centroid 5 and 7 kHz), metal a thunk
+under a ring (half the energy under 250 Hz), wood splinters a 8 kHz crackle,
+foliage a thump under a leaf rustle.
+
+### The carbine (WPN_M4AUTO)
+
+Its `weapon.def` actions name `GS_M4` (fire), `GF_M4_RL` (reload), `DRY_OICW`
+(dry fire), `GF_M4_ST` and `GF_M4_SF` (switch to and from); the round's
+`ai_launch` names `GS_M4AI`, the fire others hear. One wav per layer, no
+variation:
+
+| Set | Layer falloff: wav, format, length | Volume (clamp) | Loudest 50 ms |
+|---|---|---|---|
+| `GS_M4` | 150: the close shot, 44100 Hz 16-bit, 0.64 s, centroid 1.3 kHz; 900: the far report, 22050 Hz 16-bit, 1.47 s | 245; 255 (110) | -2.9; -13.9 dB |
+| `GS_M4AI` | the same two at 80 (pitch 1.1) and 800 | 195; 255 (110) | |
+| `GF_M4_RL` | 25: 2.24 s, 22050 Hz 16-bit, 13 clicks (magazine out, in, bolt) | 190 (230) | -8.7 dB |
+| `DRY_OICW` | 25: 0.14 s, 22050 Hz 8-bit, one click (centroid 4.8 kHz) | 255 (180) | -9.0 dB |
+| `GF_M4_ST` / `_SF` | 25: 0.79 s / 0.65 s, 22050 Hz 8-bit, 5 to 7 handling clicks | 130 | -12.5 dB |
+
+### Deaths, falls, landings and the parachute
+
+The player's and the friendly soldiers' profiles (`SP_JO_SP_PlayerM1`,
+`AI_JO_M1`) fill eight more slots: `sounddeath` `BM1_DEATH`, `SSNightDead`
+`BM1_DEATH_K` (the death on a night mission), `SSFallDead` `FALLDEAD2` (a dead
+body landing), `SSFallAlive` `JUMPLAND_DIRT` (a live one landing), and the
+parachute's `ChuteOpen` `PARACHUTE_OPEN`, `ChuteClose` `PARACHUTE_LAND`,
+`ChuteFlap` `PARACHUTE_GLIDE` and `FreeFall` `FREEFALL`; they add `rotor_impact`
+(a rotor striking the body). The rebels' profiles name their own voices
+(`DEATH_INDO_1`, `DEATH_K_INDO_1`) and `FALLDEAD1`. The voices are in the
+localised bank (`gamelocl.lwf`), the rest in `game.lwf`.
+
+The slots play as the engine finds them: an AI body's death plays
+`sounddeath` (`SSNightDead` when the mission enables night vision), but a
+player's body plays the set named `<body>_DEATH` (`_DEATH_K` at night) whatever
+its profile says, `<body>` the avatar's body model, `BM1` for the first
+(`audio::compose_entity_sound_set`; `Entity_GetBodyModelPrefix @ 0x5280F0`), so
+a bank without `BM1_DEATH` leaves the player's death silent. A body that lands
+plays `SSFallAlive`, or `SSFallDead` if the fall killed it or it was already
+dead; a falling player plays `FreeFall` each 64th tick under -0x3000 and the
+chute's three as it opens, flaps and closes.
+
+| Set | Layer (falloff) | Members | Member pitch, jitter | Volume (clamp) | Waves |
+|---|---|---|---|---|---|
+| `BM1_DEATH` | 150 | 8 | 0xE3D6 (0.89), 0x1EB8 | 200 (one 200) | 0.55 to 2.25 s, 22050 Hz 8-bit, death cries; loudest 50 ms -5.4 dB, centroid 1.3 kHz |
+| `BM1_DEATH_K` | 140 | 3 | 0xFFFF, 0 | 200 (200) | 2.37 to 2.54 s, 8-bit, groans and gasps; RMS -16.9, loudest -7.0 dB |
+| `FALLDEAD2` | 100 | 3 | 0xFFFF, 0 | 180 | 0.56 to 0.86 s, 8-bit, a body's thud at once (55 % under 250 Hz); loudest -5.0 dB |
+| `JUMPLAND_DIRT` | 50 | 2 | 0xFFFF, 0x11EB | 108 | 0.53, 0.85 s, 8-bit, boots on dirt; loudest -6.7 dB |
+| `PARACHUTE_OPEN` | 50 | 1 | 0xFFFF, 0 | 210 | 3.52 s, 22050 Hz 16-bit, a swell to the canopy's snap at 1.9 s; RMS -17.0 |
+| `PARACHUTE_LAND` | 50 | 1 | 0xFFFF, 0 | 210 | 2.81 s, 16-bit, a thud as the canopy folds; RMS -24.1, loudest -9.0 dB |
+| `PARACHUTE_GLIDE` | 50 | 7 | 0xB332 (0.70), 0x4CCC | 80 | six 2.40 to 2.61 s flaps and one of 0.71 s, 8-bit, cloth in the wind (70 % at 250 Hz to 1 kHz); RMS -16.9 |
+| `FREEFALL` | 50 | 8 | 0x14CCB (1.30), 0x3333 | 190 | 2.35 to 4.54 s, 16-bit, wind; RMS -17.4, centroid 0.7 kHz |
+
+### The rain
+
+While a mission rains (its script's `rain(pct, s)`), the game plays two loops
+on the local player by these names whatever its profiles say, `LPNV_RAIN_L` 2 m
+to the left of the eye and `LPNV_RAIN_R` 2 m to the right, at the rain's
+percent, quieter under cover (`docs/env/env-tod-re.md`, Precipitation).
+The original's sets in `game.lwf`:
+
+| Set | Layer (falloff) | Members | Member pitch, jitter | Volume (clamp) | Waves |
+|---|---|---|---|---|---|
+| `LPNV_RAIN_L` / `_R` | 300, flags 0xF | 1 / 1 | 0xFFFF, 0 | 180 (255) | `RAINL.WAV` / `RAINR.WAV`: 13.65 s, 22050 Hz 16-bit, steady rain; RMS -24.7 / -23.7 dB, centroid 4.0 / 4.2 kHz, half the energy at 1 to 4 kHz |
+
+### The engine's own sets
+
+The engine plays a set of its own name for an objective shown, a refused
+weapon key, night vision, a water entry, a scripted lightning strike, drowning
+and more, whatever the game's profiles say: 84 names in a registry it resolves
+at mission load and a few literals beside it (all listed, each with the event
+that plays it, in `docs/audio/lwf-dbf-sound-re.md`, "The sets the engine plays
+by name"). A name the banks lack is silence. The original's sets for the ones
+our game can reach (`gamelocl.lwf` holds the `BM1_` voices, `game.lwf` the rest):
+
+| Set | Layer (falloff) | Members | Member pitch, jitter | Volume (clamp) | Waves |
+|---|---|---|---|---|---|
+| `NEW_GOAL` | 40 | 1 | 0xFFFF, 0 | 185 | 0.20 s, 22050 Hz 8-bit, a comms beep, centroid 2.8 kHz; loudest 50 ms -8.7 dB |
+| `START_MISSION` | 1000, flags 0x17 (in order) | 3 | 0xFFFF, 0 | 210 | 8.3 to 9.2 s, 22050 Hz 16-bit, a low sting, 90 % under 250 Hz; loudest -7.6 to -8.6 dB |
+| `DRY_CLAYSATCH` | 50 | 1 | 0x13332 (1.2), 0 | 215 | a dry-fire click (0.34 s, 8-bit); loudest -11.5 dB |
+| `NV_ON` / `NV_OFF` | 20 | 1 / 1 | 0xFFFF, 0 | 160 | 0.10 / 0.11 s, 8-bit, a whine above 4 kHz; loudest -16.6 / -18.1 dB |
+| `GF_SCOPE` | 40 | 1 | 0xCB326 (12.7), 0 | 210 | a 0.07 s rock impact played 12.7 times as fast, a tick; loudest -17.4 dB |
+| `SURFACE_WTR` | 40; 60 | 1; 1 | 0x1CCCA (1.8); 0x16664 (1.4) | 120; 120 | the lake-lapping loop (3.58 s, loudest -13.2 dB) and a swim stroke (1.45 s, -9.9 dB), played faster |
+| `BODYWATER1` | 50; 80 | 2; 1 | 0x1E664 (1.9), 0x19998 (1.6), jitter 0x3D70; 0xE665 (0.9) | 205; 100 | two debris plunges (2.86, 2.91 s, 4-bit ADPCM, 43 and 84 % under 250 Hz; -10.4, -6.6 dB) and a splash (1.90 s, centroid 2.9 kHz; -8.6 dB) |
+| `THUNDER` | 3000; 200, flags 0x20E | 4; 5 | 0xFFFF, 0 (one 0x1997); 0xFFFF, 0x1997 to 0x4CCC | 100 (100); 0 to 40 (0 to 40) | four distant rumbles (3.0 to 6.6 s, two at 11025 Hz, 71 to 84 % under 250 Hz; -3.8 to -5.9 dB) and, near, a silent member, a crack (3.6 s, -6.2 dB) and three sweeteners (1.9 to 2.7 s; -6.1, -17.3, -7.4 dB) |
+| `BM1_SURFACE_BREATH` | 35 | 2 | 0xFFFF, 0 | 110 | 1.64, 0.54 s, 8-bit, breaths; -6.1, -7.6 dB |
+| `BM1_SURFACE_GASP` | 45 | 2 | 0xFFFF, 0 | 110 | 2.34, 3.32 s, gasping; -6.5, -3.5 dB |
+| `BM1_WATER_GAG` | 35 | 3 | 0xFFFF, 0 | 230 | 1.72 to 3.65 s, gurgling under water, centroid 0.26 to 0.33 kHz; -4.3, -3.7, -4.0 dB |
+
+JO:CA ships none of `PU_EXIT_CONFIRM` (the Exit Mission key), `HEADSHOTTONE`
+(the score fanfare's tone, and each step of a win epilog's score counter) and
+`TEXT_END` (the counter reaching its value): the original plays silence there.
+
+### The menu bank (`menu.lwf`)
+
+The menus name their sounds by set, each control a `SOUND` row (`state="mousein"
+trigger="MOUSE_OVER"`, `state="selected" trigger="CLICK_SELECT"`) naming the bank
+`menu.lwf`, which loads at the profile selector (docs/audio/lwf-dbf-sound-re.md,
+"Bank slots and load order"). JO:CA's menus name four: `MOUSE_OVER` (148 rows),
+`CLICK_SELECT` (149), `CLICK_VALUE` (150, the sliders and spinners) and
+`MOVER_COMBO` (102, a combo's rows), and `CLICK_JOIN` four times. Every set: set pitch
+0xFFFF, no jitter, cull range 10000, flags 0; every layer flags 0xF, min distance 0.
+
+| Set | Layer (falloff): wave, volume (clamp) | Waves |
+|---|---|---|
+| `MOUSE_OVER` | 1000: `MSOVR_2`, 80; 300: `MSOVRB_2`, 65 | 0.215 s, a low thump (90 % under 250 Hz), loudest 50 ms -14.8 dB; 0.203 s, a bright electronic whirr (84 % above 4 kHz), -11.9 dB |
+| `CLICK_SELECT` | 1000: `SELECTA1`, 160; 300: `SELECTB1`, 130 (150) | 0.377 s, four broadband clatters, -20.6 dB; 0.261 s, a decaying harmonic tone (its peak 0.71 kHz), -12.7 dB |
+| `CLICK_VALUE` | 1000: `CLIKVAL1`, 150 | 0.122 s, a click (centroid 1.3 kHz), -20.4 dB |
+| `MOVER_COMBO` | 300: `MSOVRB_2` at 0x1FFFE (2.0), 55; 300: `MSOVR_2`, 80 | the hover's two waves, its whirr an octave up |
+| `CLICK_JOIN` | 1000: `JOIN_1`, 145 | 0.57 s, a tone (99 % at 250 Hz to 1 kHz), -4.1 dB |
+
+The rest are `CLICK_NEWPAGE` (`NPAGE_1` and `NPAGEB_1`), `NEW_SCREEN` and
+`RETURN` (`NULL.WAV`, silence) and the player screen's `VOICE_n` previews. Every
+menu wave is 22050 Hz 16-bit mono and none is normalised (peaks -2.5 to -7.1
+dBFS). A set's layers sound at once, so a set is its layers mixed at their
+volumes: loudest 50 ms -21.6 dB (`MOUSE_OVER`), -17.7 (`CLICK_SELECT`), -25.0
+(`CLICK_VALUE`) and -23.1 (`MOVER_COMBO`), centroids 4.3, 3.5, 1.3 and 1.2 kHz.
+
+### The jungle ambience
+
+A placed `snd:` marker (an items.def `type marker` item with `move_function
+envs`) plays a set by the time of day: `soundloop_1` to `_4` are the morning,
+day, evening and night loops, cut at 4, 10, 17 and 21 h and crossfaded over about
+five game minutes, a loop the layer's member 0 alone at its falloff; and
+`dawnshot`, `dayshot`, `duskshot` and `nightshot` a one-shot set, a member
+picked at random each time, every base plus up to range seconds (the two
+numbers after the name) (docs/audio/lwf-dbf-sound-re.md, "Placed ambient
+markers"; docs/world/world-wac-ai-re.md, "Regional sounds"). JO:CA's jungle
+markers in `ITEMS.DEF` and the sets they name in `game.lwf`:
+
+| Marker | Loops (`soundloop_1` to `_4`) | Shots (base, range in s) |
+|---|---|---|
+| `snd: Rainforest Lp1 [300m]` (and Lp2 to Lp7) | `LPNV_RAINFOREST1`, `LPNV_RAINFOREST1`, `LPNV_RAINFOR_N1`, `LPNV_RAINFOR_N1` | |
+| `snd: Beach lp1 [400m], and one shots (ENV_TIDE1) [128m]` | `lpnv_beach_lp1` all day | `ENV_TIDE1` at dawn, day, dusk and night: 5, 3 |
+| `snd: CRIT-BUG Gnats Lp [30m]` | `LPNV_GNATS` all day | |
+| `snd: CRIT-BIRD RainF Maccaw [250m]` | | `ENV_MACCAW`: dawn 5, 21; day 6, 24; dusk 8, 34 |
+| `snd: CRIT-BIRD RainF Parrot [200m]` | | `ENV_PARROT`: dawn 4, 25; day 4, 25; dusk 8, 25 |
+| `snd: CRIT Toad night 1-Shots [180m]` | | `ENV_PM_TOAD`: dawn 20, 5; dusk 15, 6; night 11, 7 |
+| `snd: CRIT Tree Frog1 night (1-shots) [150m]` | | `ENV_PM_TFROG1`: dawn 25, 5; dusk 19, 7; night 10, 5 |
+
+| Set | Layer (falloff), flags | Members, volume (clamp) | Waves |
+|---|---|---|---|
+| `LPNV_RAINFOREST1` (to 7) | 300, 0xF | 1, 220 (95) | `LpJg1` to `7`: 7.8 to 22.0 s, 22050 Hz 8-bit, peak -0.1 dBFS, RMS -11.3 to -20.2 dB (`LpJg1` -13.8), centroid 2.9 to 5.8 kHz (`LpJg1` 4.7, 84 % above 4 kHz): insects and birds |
+| `LPNV_RAINFOR_N1`; `_N2` to `_N7` | 300, 0xF | 1, 95 (255); 1, 255 (95) | `lpJgN1` to `7`: 7.7 to 15.3 s, 8-bit, RMS -12.3 (`N1`), -10.1 to -15.1 (`N2` to `N7`, mean -11.9), centroid 3.5 to 5.8 kHz: insects |
+| `LPNV_BEACH_LP1`, `_LP2` | 400, 0x40F | 1, 160 (60) | `LPBEACH4`, `5`: 5.35, 6.42 s, 11025 Hz 16-bit, one wave each; RMS -9.1, -9.5 dB, centroid 0.57, 0.54 kHz (36 % under 250 Hz) |
+| `LPNV_GNATS` | 30, 0xF | 1, 80 | `LPswarm1`: 9.84 s, 11025 Hz 8-bit, RMS -14.7 dB, centroid 1.2 kHz (68 % at 250 Hz to 1 kHz) |
+| `ENV_TIDE1` (`_TIDE2`) | 128, 0xF | `NULL` at 0 (0), then 4 (3) at 100 (200), jitter 0x170A | `tide1` to `7`: 3.0 to 6.5 s, 22050 Hz 16-bit, a wash each; loudest 50 ms -6.9 to -7.6 dB, centroid 1.2 to 2.9 kHz |
+| `ENV_MACCAW` | 250, 0xF | 8, 164 | `mccw1` to `8`: 1.7 to 4.2 s, 22050 Hz 16-bit; loudest -7.9 to -14.8 dB (mean -11.0), centroid 1.3 to 3.2 kHz |
+| `ENV_WREN` | 200, 0xF | 8, 155 | `wren1` to `8`: 1.7 to 2.4 s, 16-bit; loudest -9.9 to -13.7 dB (mean -11.7), centroid 5.0 to 6.6 kHz |
+| `ENV_PARROT` | 200, 0xF | `NULL` at 0, then 3 at 125, 125, 45 | `parrt1` to `3`: 0.87 to 1.18 s, 16-bit |
+| `ENV_PM_TOAD` | 180, 0xF | 3, 115 | `ToadN1` to `3`: 1.07 to 3.33 s, 22050 Hz 8-bit; loudest -7.0 to -7.5 dB, centroid 1.45 kHz |
+| `ENV_PM_TFROG1` | 150, 0xF | `NULL` at 0, then 2 at 135 | `tfrogA1`, `A2`: 4.58, 2.37 s, 8-bit; loudest -8.4, -7.4 dB, centroid 2.0, 1.7 kHz |
+| `ENV_FROGGY` | 80, 0xF | 3 at 105, then `NULL` at 0 (0) | `froggy1` to `3`: 1.1 to 2.1 s, 11025 Hz 8-bit, a 2.2 kHz trill; loudest -5.1 to -5.8 dB |
+
+Every loop and one-shot is peak-normalised (0 to -0.6 dBFS), and a silent
+`NULL` member is the chance a shot plays nothing.
+
+### What the engine does with an impact table
+
+In `AmmoDef_ParseProperty @ 0x40A2D0`, a `none` hit effect skips the effect intern (@ 0x40A51A) with no log; any other
+name that resolves to nothing clones the engine's stock effect under that name
+or logs "unknown particle id" (@ 0x40A549). The sound resolves by set name
+across the loaded banks at parse (`SoundBank_FindSetByNameAnyBank`
+@ 0x40A573), and the mission start loads the banks (@ 0x52544A) before
+`ammo.def` (@ 0x525495), so a set the banks lack is silence, not a crash.
+
+## What we made
+
+Measured the same way (means per family; retail's in brackets):
+
+| Family | Files | Length | Centroid | Loudest 50 ms |
+|---|---|---|---|---|
+| Ground steps | 7 + 7 | 0.42 s (0.32 to 0.43) | 1.9 kHz (2.3) | -11.5 dB (-10.3) |
+| Snow steps | 4 + 4 | 0.45 s (none in retail) | 1.6 kHz | |
+| Object steps | 4 + 5 | 0.42 s (0.37 to 0.46) | 0.8 kHz (1.5) | -10.9 dB (-10.8) |
+| Water steps | 6 | 0.48 to 0.95 s (0.67 to 1.15) | 1.7 kHz (1.5) | -9.0 dB (-10.4) |
+| Dirt, ricochets | 3, 3 | 0.19 s, 0.90 s | 2.9, 2.2 kHz (1.5, 5.0) | -4.4, -5.2 dB (-4.4, -5.7) |
+| Grass | 3 | 0.11 s (0.05 to 0.11) | 1.1 kHz (1.4) | -11.0 dB (-16.2) |
+| Cement | 8 | 0.24 s (0.10 to 0.34) | 5.4 kHz (5.3) | -7.9 dB (-7.9) |
+| Metal, debris | 8, 1 | 0.30 s, 0.60 s | 2.4, 1.9 kHz (1.3, 2.5) | -4.3, -8.2 dB (-2.5, -8.1) |
+| Armour, ricochets | 7, 2 | 0.40 to 0.55 s, 0.72 s | 2.5, 2.5 kHz (3.1, 3.9) | -4.2, -5.3 dB (-4.1, -5.5) |
+| Mud | 4 | 0.20 to 0.45 s (0.15 to 0.47) | 2.3 kHz (1.5) | -11.6 dB (-12.0) |
+| Sand | 3 | 40 ms (17 ms) | 3.6 kHz (2.5) | -8.9 dB (-8.4) |
+| Wood, splinters | 6, 3 | 0.10 s, 0.26 s | 1.5, 9.0 kHz (2.1, 7.9) | -8.8, -12.5 dB (-7.9, -12.4) |
+| Glass | 5 | 0.40 to 0.55 s (0.34 to 0.64) | 8.1 kHz (7.4) | -5.3 dB (-5.5) |
+| Cloth | 3 | 0.15 s (0.06 to 0.19) | 0.5 kHz (0.7) | -11.9 dB (-11.4) |
+| Foliage | 3 | 0.15 to 0.38 s (0.13 to 0.40) | 6.0 kHz (4.5) | -7.7 dB (-8.4) |
+| Flesh | 3 | 0.14 s (0.02 to 0.14) | 0.5 kHz (1.3) | -8.0 dB (-7.9) |
+| Bullet pass | 8 | 0.16 to 0.72 s (0.15 to 0.75) | 3.7 kHz (4.2) | -6.8 dB (-6.9) |
+| Silent member | 1 | 50 ms | | |
+| Carbine fire, near and far | 1, 1 | 0.64 s, 1.47 s (0.64, 1.47) | 1.7, 1.3 kHz (1.3, 1.8) | -3.0, -8.0 dB (-2.9, -13.9) |
+| Carbine reload | 1 | 2.24 s (2.24) | 3.5 kHz (3.4) | -5.1 dB (-8.7) |
+| Carbine dry fire | 1 | 0.15 s (0.14) | 4.2 kHz (4.8) | -8.0 dB (-9.0) |
+| Carbine switch to, from | 1, 1 | 0.79 s, 0.65 s (0.79, 0.65) | 1.3, 1.5 kHz (3.1, 5.4) | -7.1, -6.9 dB (-12.5, -12.4) |
+| Swim strokes | 4 | 1.3 to 1.8 s (0.96 to 1.88) | 1.5 kHz (1.2) | -8.6 dB (-7.8) |
+| Prone crawl | 8 | 0.58 to 0.73 s (0.50 to 0.87) | 2.4 kHz (2.2) | -12.7 dB (-12.8) |
+| Prone roll | 4 | 1.10 to 1.19 s (1.05 to 1.21) | 1.9 kHz (2.0) | -10.4 dB (-9.9) |
+| Stance changes | 2 + 1 + 3 | 0.48 to 0.72 s (0.47 to 0.72) | 1.9 kHz (1.8) | -15.6 dB RMS (-15.4) |
+| Death cries | 8 | 0.80 to 1.65 s (0.55 to 2.25) | 1.5 kHz (1.3) | -5.5 dB (-5.4) |
+| Deaths at night | 3 | 2.45 s (2.37 to 2.54) | 1.0 kHz (1.3) | -7.1 dB (-7.0) |
+| Dead body landing | 3 | 0.63 to 0.85 s (0.56 to 0.86) | 0.5 kHz (0.9) | -5.4 dB (-5.0) |
+| Landing on the feet | 2 | 0.55, 0.82 s (0.53, 0.85) | 1.0 kHz (1.2) | -6.8 dB (-6.7) |
+| Parachute opening, landing | 1, 1 | 3.65 s, 2.80 s (3.52, 2.81) | 0.8, 0.8 kHz (0.9, 0.8) | -8.6, -8.8 dB (-7.4, -9.0) |
+| Parachute flapping | 6 + 1 | 2.40 to 2.60 s, 0.71 s (2.40 to 2.61, 0.71) | 0.6 kHz (1.0) | -15.8 dB RMS (-16.9) |
+| Free fall | 8 | 2.35 to 4.54 s (2.35 to 4.54) | 0.6 kHz (0.7) | -12.2 dB RMS (-17.4) |
+| Rain, left and right | 1, 1 | 13.65 s (13.65) | 3.5 kHz (4.0, 4.2) | -24.0 dB RMS (-24.7, -23.7) |
+| Objective chirp | 1 | 0.18 s (0.20) | 2.8 kHz (2.8) | -4.4 dB (-8.7) |
+| Exit chirp | 1 | 0.18 s (none in retail) | 2.9 kHz | -4.3 dB |
+| Counter tick, counter stop | 1, 1 | 45 ms, 0.42 s (none in retail) | 2.5, 1.3 kHz | -11.6, -9.0 dB |
+| Night vision on, off | 1, 1 | 0.10, 0.11 s (0.10, 0.11) | 7.1, 6.7 kHz (7.3, 7.9) | -5.1, -5.5 dB (-16.6, -18.1) |
+| Mission-start sting | 3 | 8.33 to 9.24 s (8.33 to 9.24) | 0.13 to 0.16 kHz (0.29 to 0.32) | -5.2 to -6.8 dB (-7.6 to -8.6) |
+| Body plunges, splash | 2, 1 | 2.72, 2.80 s; 1.58 s (2.86, 2.91; 1.90) | 0.4; 1.6 kHz (0.6; 2.9) | -6.6, -9.3; -8.6 dB (-6.6, -10.4; -8.6) |
+| Distant thunder | 4 | 2.97 to 6.65 s (2.97 to 6.65) | 0.16 to 0.30 kHz (0.15 to 0.21) | -3.6 to -5.9 dB (-3.8 to -5.9) |
+| Near thunder | 1 + 3 | 3.60 s; 1.91 to 2.65 s (3.60; 1.91 to 2.65) | 0.47; 0.23 to 0.42 kHz (0.57; 0.68 to 1.37) | -6.2; -5.4 to -9.7 dB (-6.2; -6.1 to -17.3) |
+| Surfacing breaths | 2 | 1.64, 0.54 s (1.64, 0.54) | 0.7, 0.5 kHz (1.6, 1.0) | -5.0, -7.6 dB (-6.1, -7.6) |
+| Surfacing gasps | 2 | 2.34, 3.32 s (2.34, 3.32) | 0.8, 0.9 kHz (0.9, 0.5) | -6.5, -3.5 dB (-6.5, -3.5) |
+| Drowning | 3 | 2.70 to 3.55 s (1.72 to 3.65) | 0.26 to 0.64 kHz (0.26 to 0.33) | -3.3 to -4.3 dB (-3.7 to -4.3) |
+| Menu hover; combo move | 1; 1 | 0.215 s (0.215) | 4.5; 1.0 kHz (the sets mixed 4.3; 1.2) | -11.3; -10.5 dB (the layers -14.8 and -11.9) |
+| Menu select | 1 | 0.377 s (0.377 and 0.261) | 2.8 kHz (mixed 3.5) | -14.7 dB (-20.6 and -12.7) |
+| Menu value | 1 | 0.122 s (0.122) | 1.5 kHz (1.3) | -19.4 dB (-20.4) |
+| Jungle bed, day; night | 1; 1 | 16.0; 14.0 s (7.8 to 22.0; 7.7 to 15.3) | 4.7; 5.7 kHz (4.7; 3.5 to 5.8) | -14.3; -12.8 dB RMS (-13.8; -11.9) |
+| Surf on the beach | 1 | 10.8 s, two waves (5.35 and 6.42, one wave) | 0.73 kHz (0.57) | -9.5 dB RMS (-9.1) |
+| Gnats | 1 | 9.8 s (9.84) | 1.1 kHz (1.2) | -14.9 dB RMS (-14.7) |
+| Day birds | 4 | 1.66 to 2.87 s (1.7 to 4.2) | 1.3 to 3.5 kHz (1.3 to 6.6) | -6.1 to -11.1 dB (-7.9 to -14.8) |
+| Night frogs | 3 | 2.40 to 3.03 s (1.07 to 4.58) | 1.6 to 3.0 kHz (1.45 to 2.2) | -7.0 to -8.4 dB (-7.0 to -8.4) |
+| Tide washes | 3 | 4.5 to 6.0 s (3.0 to 6.5) | 0.8 to 1.4 kHz (1.2 to 2.9) | -7.9 to -8.4 dB (-6.9 to -7.6) |
+
+The member volumes below match each family's loudness to retail's: retail's
+volume times the ratio of the two families' loudest-50 ms RMS, at most 255;
+for the long winds and flaps (`ON_FREEFALL`, `ON_CHUTE_GLIDE`) the ratio of
+their whole-file RMS. The interface cues the original lacks (the exit chirp,
+the counter tick and stop) are levelled with the objective chirp.
+
+## The sets and the profile (`game.lwf`, `SndProf.def`)
+
+Authored in the editor (the sound bank and SndProf.def documents, through
+`edit_record`). Every set: set pitch
+0xFFFF, no set pitch jitter, cull range 10000, set flags 0; every layer flags
+0xF, min distance 0; every member clamp 255 unless noted. "pitch" is the
+member's base, "jitter" its random range, both Q16.
+
+| Set | Layer (falloff) | Members | Pitch | Jitter | Volume |
+|---|---|---|---|---|---|
+| `ON_FS_GND_L` | 50 | `onfsgnd01` to `07` | 0xF0A2 | 0x11EB | 115 |
+| `ON_FS_GND_R` | 50 | `onfsgnd08` to `14` | 0xF0A2 | 0x0CCC | 115 |
+| `ON_FS_SNOW_L` | 50 | `onfssnw1` to `4` | 0xFFFF | 0x11EB | 115 |
+| `ON_FS_SNOW_R` | 50 | `onfssnw5` to `8` | 0xFFFF | 0x0CCC | 115 |
+| `ON_FS_OBJ_L` | 50 | `onfsobj1` to `4` | 0xFFFF | 0 | 100 |
+| `ON_FS_OBJ_R` | 50 | `onfsobj5` to `9` | 0xFFFF | 0x0CCC | 100 |
+| `ON_FS_WATER` | 50 | `onfswat1` to `6` | 0xFFFF | 0x11EB | 68 |
+| `ON_FS_SWIM` | 50 | `onfsswm1` to `4` | 0xFFFF | 0x3333 | 99 |
+| `ON_FS_PRONE` | 50 | `onfsprn1` to `8` | 0xFFFF | 0x3FFF | 60 |
+| `ON_FS_PRONE_ROLL` | 50 | `onfsrol1` to `4` | 0xFFFF | 0x0CCC | 63 |
+| `TO_CROUCH` | 50 | `ontocrh1`, `ontocrh2` | 0xFFFF | 0x0CCC | 70 |
+| `TO_PRONE` | 50 | `ontoprn1` | 0xFFFF | 0x0F5C | 70 |
+| `TO_STAND` | 50 | `ontostd1` to `3` | 0xFFFF | 0x0CCC | 70 |
+| `ON_IMP_DIRT` | 60 | `onimpdrt1` to `3` | 0xFFFF | 0x2666 | 230 |
+| | 90 | `onnull` x5 | 0xFFFF | 0x3333 | 255 |
+| | | `onricodt1` to `3` | 0xFFFF | 0x3333 | 125 |
+| `ON_IMP_GRASS` | 80 | `onimpgrs1` to `3` | 0xFFFF | 0x7FFF | 125 |
+| `ON_IMP_CEMENT` | 100 | `onimpcem1` to `8` | 0xFFFF | 0x2147 | 240 |
+| `ON_IMP_WATER` | 60 | `onfswat1` to `6` (clamp 127) | 0x27FFD | 0 | 98 |
+| | 60 | `onimpgrs1` to `3` | 0x37FFC | 0x7FFF | 63 |
+| `ON_IMP_METAL` | 130 | `onimpmtl1` to `8` | 0xFFFF | 0x1EB8 | 255 |
+| | 100 | `onimpmdb1` | 0xFFFF | 0 | 225 |
+| | | `onnull` x5 | 0xFFFF | 0 | 255 |
+| | | `onricodt1`, `onricodt3` | 0xFFFF | 0x6666 | 205 |
+| `ON_IMP_MUD` | 100 | `onimpmud1` to `4` | 0xFFFF | 0x7FFF | 175 |
+| `ON_IMP_SAND` | 100 | `onimpsnd1` to `3` | 0xFFFF | 0x7FFF | 185 |
+| `ON_IMP_WOOD` | 100 | `onnull` x3 | 0x13332 | 0x3333 | 125 |
+| | | `onwdsplt1` to `3` | 0x13332 | 0x3333 | 125 |
+| | 100 | `onimpwod1` to `6` | 0xFFFF | 0x7FFF | 250 |
+| `ON_IMP_GLASS` | 140 | `onimpgls1` to `5` | 0xFFFF | 0x30A3 | 205 |
+| `ON_IMP_CLOTH` | 80 | `onimpclt1` to `3` | 0xFFFF | 0x4CCC | 240 |
+| `ON_IMP_FOLIAGE` | 100 | `onimplvs1` to `3` | 0xFFFF | 0xE665 | 120 |
+| `ON_IMP_ARMOR` | 100 | `onimparm1` to `7` | 0xFFFF | 0x1997 | 215 |
+| | 130 | `onnull` x5 | 0xFFFF | 0x3333 | 255 |
+| | | `onricohm1`, `onricohm2` | 0xFFFF | 0x3333 | 125 |
+| `ON_IMP_FLESH` | 80 | `onimpfls1` to `3` | 0xFFFF | 0x7FFF | 200 |
+| `ON_IMP_PLAYER` | 100 | `onimpfls1` to `3` | 0xFFFF | 0x7FFF | 200 |
+| `ON_BULLET_BY` | 80 | `onbltby1` to `8` | 0xFFFF | 0x4CCC | 100 |
+| `GS_ONAR15` | 150 | `onar15f1` | 0xFFFF | 0 | 245 |
+| | 900 | `onar15f2` (clamp 110) | 0xFFFF | 0 | 130 |
+| `GS_ONAR15AI` | 80 | `onar15f1` | 0x11998 | 0 | 195 |
+| | 800 | `onar15f2` (clamp 110) | 0xFFFF | 0 | 130 |
+| `GF_ONAR15_RL` | 25 | `onar15rl` (clamp 230) | 0xFFFF | 0 | 207 |
+| `DRY_ONAR15` | 25 | `onar15dry` (clamp 180) | 0xFFFF | 0 | 225 |
+| `GF_ONAR15_ST` | 25 | `onar15st` | 0xFFFF | 0 | 89 |
+| `GF_ONAR15_SF` | 25 | `onar15sf` | 0xFFFF | 0 | 107 |
+| `GS_ONPIST` | 150 | `onpistf1` | 0xFFFF | 0 | 243 |
+| | 900 | `onpistf2` (clamp 110) | 0xFFFF | 0 | 130 |
+| `GS_ONPISTAI` | 80 | `onpistf1` | 0x11998 | 0 | 193 |
+| | 800 | `onpistf2` (clamp 110) | 0xFFFF | 0 | 130 |
+| `GF_ONPIST_RL` | 25 | `onpistrl` (clamp 230) | 0xFFFF | 0 | 255 |
+| `DRY_ONPIST` | 25 | `onar15dry` (clamp 180) | 0x11998 | 0 | 225 |
+| `GF_ONPIST_ST` | 25 | `onpistst` | 0xFFFF | 0 | 125 |
+| `GF_ONPIST_SF` | 25 | `onpistsf` | 0xFFFF | 0 | 139 |
+| `BM1_DEATH` | 150 | `ondeath1` to `8` | 0xE3D6 | 0x1EB8 | 201 |
+| `BM1_DEATH_K` | 140 | `ondeathk1` to `3` (clamp 200) | 0xFFFF | 0 | 202 |
+| `ON_FALLDEAD` | 100 | `onfldead1` to `3` | 0xFFFF | 0 | 188 |
+| `ON_JUMPLAND` | 50 | `onjmplnd1`, `onjmplnd2` | 0xFFFF | 0x11EB | 109 |
+| `ON_CHUTE_OPEN` | 50 | `onchtopn` | 0xFFFF | 0 | 241 |
+| `ON_CHUTE_LAND` | 50 | `onchtlnd` | 0xFFFF | 0 | 205 |
+| `ON_CHUTE_GLIDE` | 50 | `onchtflp1` to `7` | 0xB332 | 0x4CCC | 70 |
+| `ON_FREEFALL` | 50 | `onfrfall1` to `8` | 0x14CCB | 0x3333 | 104 |
+| `LPNV_RAIN_L` | 300 | `onrainl` | 0xFFFF | 0 | 180 |
+| `LPNV_RAIN_R` | 300 | `onrainr` | 0xFFFF | 0 | 180 |
+| `NEW_GOAL` | 40 | `onnewgol` | 0xFFFF | 0 | 113 |
+| `START_MISSION` | 1000, flags 0x17 | `onstmis3`, `onstmis1`, `onstmis2` | 0xFFFF | 0 | 142, 189, 187 |
+| `DRY_CLAYSATCH` | 50 | `onar15dry` | 0x13332 | 0 | 156 |
+| `NV_ON` | 20 | `onnvon` | 0xFFFF | 0 | 43 |
+| `NV_OFF` | 20 | `onnvoff` | 0xFFFF | 0 | 37 |
+| `GF_SCOPE` | 40 | `onimpcem1` | 0xCB326 | 0 | 66 |
+| `PU_EXIT_CONFIRM` | 40 | `onpuexit` | 0xFFFF | 0 | 112 |
+| `HEADSHOTTONE` | 40 | `onscrtck` | 0xFFFF | 0 | 150 |
+| `TEXT_END` | 40 | `ontxtend` | 0xFFFF | 0 | 185 |
+| `SURFACE_WTR` | 40 | `onfswat4` | 0x1CCCA | 0 | 62 |
+| | 60 | `onfsswm2` | 0x16664 | 0 | 101 |
+| `BODYWATER1` | 50 | `onbdwtr1` | 0x1E664 | 0x3D70 | 181 |
+| | | `onbdwtr2` | 0x19998 | 0x3D70 | 205 |
+| | 80 | `onsplsh1` | 0xE665 | 0 | 100 |
+| `THUNDER` | 3000 | `onthdst1`, `onthdst2` (clamp 100) | 0xFFFF | 0 | 100 |
+| | | `onthdst3` (clamp 100) | 0xFFFF | 0x1997 | 99 |
+| | | `onthdst4` (clamp 100) | 0xFFFF | 0 | 98 |
+| | 200, flags 0x20E | `onnull` (clamp 0) | 0xFFFF | 0 | 0 |
+| | | `onthcrk1` (clamp 40) | 0xFFFF | 0x1997 | 40 |
+| | | `onthswt1`, `onthswt2` (clamp 30) | 0xFFFF | 0x3333 | 28, 13 |
+| | | `onthswt3` (clamp 40) | 0xFFFF | 0x4CCC | 40 |
+| `BM1_SURFACE_BREATH` | 35 | `onsrfbr1`, `onsrfbr2` | 0xFFFF | 0 | 97, 110 |
+| `BM1_SURFACE_GASP` | 45 | `onsrfgp1`, `onsrfgp2` | 0xFFFF | 0 | 110 |
+| `BM1_WATER_GAG` | 35 | `ondrown1` to `3` | 0xFFFF | 0 | 230, 220, 222 |
+
+A layer plays one member, chosen at random, and every layer of a set plays at
+once, so a silent `onnull` member is the chance that the second layer adds
+nothing (a ricochet on 3 of 8 dirt hits, as retail). The carbine's sets are
+the ones its `weapon.def` row names (`GS_ONAR15` fire, `GF_ONAR15_RL` reload,
+`DRY_ONAR15` dry fire, `GF_ONAR15_ST` and `GF_ONAR15_SF` switch to and from);
+`GS_ONAR15AI` is for `AMMO_ON_556`'s `ai_launch`, the fire others hear.
+The pistol's sets are laid out as the carbine's (`GS_ONPIST`, `GF_ONPIST_RL`, `DRY_ONPIST`,
+`GF_ONPIST_ST`, `GF_ONPIST_SF`; `GS_ONPISTAI` for `AMMO_ON_9MM`'s `ai_launch`). Its shot sits 1.5 dB
+under the carbine's; its dry fire is the carbine's click played at 1.1; the reload's volume is held at
+255, about 2 dB under the carbine's reload.
+The rain's two sets keep the engine's names, which it plays by name while a
+mission rains; their volume and falloff are the original's, the loops matched
+to its loudness.
+
+The engine's own sets after them keep its names too: the objective chirp as a
+mission shows an objective, the dry click (the carbine's, at 1.2) when a weapon
+key finds nothing to switch to, night vision's whine on and off, the scope's
+tick (a cement crack at 12.7, as the original plays a rock), the exit chirp on
+the Exit Mission key, the counter tick and stop on a won mission's score
+screen, the mission-start sting (in order, one per start) on the start splash,
+which runs only over a mission's own loading image (`<mission>.pcx`; Indigo
+Shore has none), thunder on a script's lightning, and the water entries and
+the drowning. Each copies the original's layers, falloff, member count, pitch
+and jitter; where the original plays a wave of another set faster, ours does
+the same with our counterpart (`SURFACE_WTR` a water step and a swim stroke,
+`DRY_CLAYSATCH` the carbine's dry fire, `GF_SCOPE` a cement hit), and the new
+waves are authored at the pitch the set restores (the plunges slowed 1.75 and
+1.6 times, the splash sped up 1.11). `BODYWATER1` is the entry from the air
+(a plunge and a splash), `SURFACE_WTR` wading in and a swimmer's dive. Every
+engine name the base game cannot reach stays out: the vehicles' and the
+ships', the multiplayer flag, zone, squad and medic cues, glass, powerups that
+heal, a carried goal, a missile lock and the rows the engine never reads.
+
+The infantry profile `on_soldier` in `SndProf.def`, which the player and enemy
+person items name with `sound_profile on_soldier`:
+
+| Slot | Set |
+|---|---|
+| `sounddeath` | `BM1_DEATH` |
+| `SSNightDead` | `BM1_DEATH_K` |
+| `SSFallDead` | `ON_FALLDEAD` |
+| `SSFallAlive` | `ON_JUMPLAND` |
+| `SSLFootGND` / `SSRFootGND` | `ON_FS_GND_L` / `ON_FS_GND_R` |
+| `SSLFootSnow` / `SSRFootSnow` | `ON_FS_SNOW_L` / `ON_FS_SNOW_R` |
+| `SSLFootOBJ` / `SSRFootOBJ` | `ON_FS_OBJ_L` / `ON_FS_OBJ_R` |
+| `SSFootWater` | `ON_FS_WATER` |
+| `SSAudio1`, `SSAudio2` | `ON_FS_GND_R` |
+| `SSAudio3` | `ON_FS_OBJ_L` |
+| `SSAudio4` | `ON_FS_SWIM` |
+| `SSAudio5` | `ON_FS_PRONE` |
+| `SSAudio6` | `ON_FS_PRONE_ROLL` |
+| `ChuteOpen` / `ChuteClose` | `ON_CHUTE_OPEN` / `ON_CHUTE_LAND` |
+| `ChuteFlap` | `ON_CHUTE_GLIDE` |
+| `FreeFall` | `ON_FREEFALL` |
+
+A step plays only where the body's clip authors a foot event (bit 0x1 left,
+0x2 right) on the frame the foot lands, a foley slot where it sets that slot's
+bit (0x20 to 0x400). The death sets keep the engine's names: the player's
+death plays `BM1_DEATH` (`BM1_DEATH_K` at night) by name whatever its profile
+says, so the profile names the same two sets, as the original's player profile
+does, and the rebel cries as the player does. `rotor_impact` stays empty (the
+game has no helicopter yet), and `default` stays empty.
+
+`AMMO_ON_556`'s `effects_table` (`assets/ammo.def`) names the impact sets row by
+row: obj, dirt, snow and packeddirt `ON_IMP_DIRT`; grass `ON_IMP_GRASS`; cement
+and stone `ON_IMP_CEMENT`; water `ON_IMP_WATER`; railroad and metal
+`ON_IMP_METAL`; mud and ice `ON_IMP_MUD`; sand and quicksand `ON_IMP_SAND`;
+wood, glass, cloth, foliage `ON_IMP_WOOD`, `_GLASS`, `_CLOTH`, `_FOLIAGE`;
+hmetal `ON_IMP_ARMOR`; flesh `ON_IMP_FLESH`; player `ON_IMP_PLAYER`; zip
+`ON_BULLET_BY`; move none. Unlike the original's carbine, obj plays a sound
+(the dirt set, as the original's default ammo `AT_NULL` does), so a hit on an
+object of no material, or on terrain of class 0, is heard. Every hit effect is
+`none` until the game has its own particles.
+
+## The menu bank and the ambience sets (to author)
+
+The waves are in `assets/`; the sets are still to be authored in the editor (a
+new `menu.lwf` beside `game.lwf`, and new sets in `game.lwf`), with these
+values. Each copies its retail counterpart's layers, falloff, flags and member
+count, and each member's volume is retail's volume times the ratio of the two
+waves' loudness, as above (the loops by whole-file RMS, the one-shots and the
+menu sounds by the loudest 50 ms; a menu set against its retail set's layers
+mixed). A clamp scales with its volume. Every set: set pitch 0xFFFF, no set
+jitter, cull range 10000, set flags 0; every layer min distance 0; every member
+pitch 0xFFFF and clamp 255 unless noted.
+
+`menu.lwf`, one layer a set (our one wave holds what retail's two layers do):
+
+| Set | Layer (falloff) | Member | Volume | Retail |
+|---|---|---|---|---|
+| `MOUSE_OVER` | 1000, flags 0xF | `onmnovr1` | 78 | `MSOVR_2` 80 and `MSOVRB_2` 65, mixed -21.6 dB; ours -11.3 dB |
+| `CLICK_SELECT` | 1000, flags 0xF | `onmnsel1` | 181 | `SELECTA1` 160 and `SELECTB1` 130 (150), mixed -17.7 dB; ours -14.7 dB |
+| `CLICK_VALUE` | 1000, flags 0xF | `onmnval1` | 134 | `CLIKVAL1` 150, -25.0 dB at its volume; ours -19.4 dB |
+| `MOVER_COMBO` | 300, flags 0xF | `onmncmb1` | 60 | `MSOVRB_2` at 2.0 55 and `MSOVR_2` 80, mixed -23.1 dB; ours -10.5 dB |
+
+`game.lwf`:
+
+| Set | Layer (falloff), flags | Members, volume (clamp), jitter | Retail it is levelled against |
+|---|---|---|---|
+| `LPNV_ONJNGL_D1` | 300, 0xF | `onambjd1` 234 (101) | `LPNV_RAINFOREST1`: `LpJg1` 220 (95) at -13.8 dB RMS; ours -14.3 |
+| `LPNV_ONJNGL_N1` | 300, 0xF | `onambjn1` 255 (105) | `LPNV_RAINFOR_N2` to `N7`: 255 (95) at -11.9 dB RMS (mean); ours -12.8 (against `N1`'s 95 (255) at -12.3 it would be 100 (255)) |
+| `LPNV_ONBEACH1` | 400, 0x40F | `onambsf1` 169 (63) | `LPNV_BEACH_LP1`: `LPBEACH4` 160 (60) at -9.1 dB RMS; ours -9.5 |
+| `LPNV_ONGNATS` | 30, 0xF | `ongnat1` 82 | `LPNV_GNATS`: `LPswarm1` 80 at -14.7 dB RMS; ours -14.9 |
+| `ENV_ONBIRD1` | 250, 0xF | `onbird1` 93, `onbird2` 165, `onbird3` 142, `onbird4` 118 | `ENV_MACCAW`: 164 at -11.0 dB loudest (mean); ours -6.1, -11.1, -9.8, -8.2 |
+| `ENV_ONFROG1` | 180, 0xF | `onfrog1` 133, `onfrog2` 124, `onfrog3` 113, `onnull` 0 (0) | `ENV_PM_TOAD`: 115 at -7.1 dB loudest; ours -8.4, -7.8, -7.0; the silent member as `ENV_PM_TFROG1` and `ENV_FROGGY` |
+| `ENV_ONTIDE1` | 128, 0xF | `onnull` 0 (0); `ontide1` 113 (226), `ontide2` 110 (221), `ontide3` 107 (213), jitter 0x170A | `ENV_TIDE1`: `NULL` 0 (0), then 100 (200), jitter 0x170A, at -7.3 dB loudest; ours -8.4, -8.1, -7.9 |
+
+A loop's marker plays its layer's member 0 alone, so each loop set holds the one
+wave. The markers that would play them (items.def, `type marker`,
+`move_function envs`), timed as the retail markers above:
+
+| Marker | Loops (`soundloop_1` to `_4`) | Shots (base, range in s) |
+|---|---|---|
+| `snd: ON Jungle Lp [300m]` | `LPNV_ONJNGL_D1`, `LPNV_ONJNGL_D1`, `LPNV_ONJNGL_N1`, `LPNV_ONJNGL_N1` | |
+| `snd: ON Beach Lp [400m] + tide shots [128m]` | `LPNV_ONBEACH1` all day | `ENV_ONTIDE1` at dawn, day, dusk and night: 5, 3 |
+| `snd: ON Gnats Lp [30m]` | `LPNV_ONGNATS` all day | |
+| `snd: ON Birds [250m]` | | `ENV_ONBIRD1`: dawn 5, 21; day 6, 24; dusk 8, 34 |
+| `snd: ON Frogs night [180m]` | | `ENV_ONFROG1`: dawn 20, 5; dusk 15, 6; night 11, 7 |
+
+## The gear's sets (proposed for `game.lwf`)
+
+The knife's, the grenades', the medical pouch's and the powerups' sets, for the bank's next edit (the
+waves are in `assets/`, `SOURCES.md` says how each was made). Each copies its original counterpart's
+layers, falloff, member count where we have the waves, pitch and jitter (`GS_KNIFE`, `GF_KNIFE_ST`,
+`GF_KNIFE_SF`, `IMP_KNIFE_*`, `GF_GNADE_ST`, `GF_GNADE_THROW`, `GF_CNADE_THROW`, `EXPLO_FRAG_GREN`,
+`IMP_GREN_*`, `EXPLO_SMOK_GREN`, `MEDPAK_USE`, `GF_SATCHEL_ST`/`_SF`, `HEALTH_UP`, `PU_AMMO`, measured
+as above), and the member volumes match its loudness: the original's volume times the ratio of the
+two families' loudest 50 ms, at most 255 (where the cap holds a quiet family back, the row says so).
+Set pitch 0xFFFF, no set jitter, cull range 10000, layer flags 0xF, member clamp 255 unless noted.
+
+| Set | Layer (falloff) | Members | Pitch | Jitter | Volume | Played by |
+|---|---|---|---|---|---|---|
+| `GS_ONKNIFE` | 50 | `onknfsl1`, `onknfsl2` | 0xFFFF | 0x0F5C | 48 | `WPN_KNIFE`/`WPN_KNIFE2` fire's `soundsetend` (the original's `GS_KNIFE`: two swishes, 50) |
+| `GF_ONKNIFE_ST` | 25 | `onknfst` | 0xFFFF | 0 | 76 | the knife's switchto |
+| `GF_ONKNIFE_SF` | 25 | `onknfsf` | 0x11EB7 | 0 | 47 | the knife's switchfrom |
+| `ON_IMP_KNIFE_FLESH` | 50 | `onknfhf1` to `3` | 0xFFFF | 0x0CCC | 255 | `AMMO_ON_KNIFE`'s `kz_sound` and its flesh and player rows (the original's six stabs, 240) |
+| `ON_IMP_KNIFE_DIRT` | 50 | `onknfhd1`, `onknfhd2` | 0xFFFF | 0 | 110 | its dirt, grass, snow, packeddirt, mud, ice, sand and quicksand rows |
+| `ON_IMP_KNIFE_CEMENT` | 50 | `onknfhm1`, `onknfhm2` | 0x13332 | 0x0CCC | 255 | its cement and stone rows (the metal hits played 1.2 times, held at the cap: ours sit 8 dB under the original's) |
+| `ON_IMP_KNIFE_METAL` | 50 | `onknfhm1`, `onknfhm2` | 0xFFFF | 0x147A | 255 | its railroad, metal and hmetal rows (at the cap, 9 dB under) |
+| `ON_IMP_KNIFE_WOOD` | 50 | `onknfhw1`, `onknfhw2` | 0xFFFF | 0 | 255 | its wood row (at the cap, 10 dB under) |
+| `ON_IMP_KNIFE_CLOTH` | 50 | `onknfhf1` to `3` | 0xE665 | 0 | 200 | its cloth row (the stabs a little lower, as the original's cloth hits are the stabs' kin) |
+| `GF_ONGNADE_ST` | 25 | `onfrgpin` | 0xFFFF | 0 | 99 | the grenades' switchto and reload (the draw's pin pull; the original's `GF_GNADE_ST`, 100) |
+| `GF_ONGNADE_SF` | 25 | `onmedpsf` | 0xFFFF | 0 | 54 | the grenades' switchfrom (a sleeve's rustle; the original plays its `GF_GNADE_ST` here too) |
+| `GF_ONGNADE_THROW` | 25 | `onfrgthr` | 0xFFFF | 0 | 186 | `WPN_GRENADEHE` fire's `soundset` (the swing peaks at 1.28 s, the release at `delaystart` 80) |
+| `GF_ONCNADE_THROW` | 25 | `onfrgthr` | 0x11EB7 | 0 | 115 | `WPN_GRENADESM` fire's `soundset` (the original's own canister throw, 120) |
+| `ON_EXPLO_FRAG` | 200 | `onfrgex1`, `onfrgex2` | 0xFFFF | 0 | 255, 255 | `AMMO_ON_FRAG`'s obj row (the burst) and its underwater rows (the original's `EXPLO_FRAG_GREN`: 245, 225, held at the cap) |
+| | 700 | `onfrgxf1`, `onfrgxf2` (clamp 180) | 0xFFFF | 0x6666 | 255 | the far report |
+| | 20 | `onxpton` (clamp 40) | 0xFFFF | 0 | 255 | the ring in the ears close by |
+| `ON_IMP_GREN_DIRT` | 90 | `onfrgbd1` (clamp 140), `onfrgbd2`, `onfrgbd3` (clamp 120) | 0xFFFF | 0x147A | 242 | the grenades' bounce on dirt, grass, snow, packeddirt, mud, ice, sand and quicksand |
+| `ON_IMP_GREN_STON` | 90 | `onfrgbs1`, `onfrgbs2` (clamp 180) | 0xE665 | 0x35C2 | 164 | on cement and stone |
+| `ON_IMP_GREN_METAL` | 90 | `onfrgbm1`, `onfrgbm2` | 0xB332 | 0x11EB | 255 | on railroad, metal and hmetal |
+| `ON_IMP_GREN_WOOD` | 90 | `onfrgbw1`, `onfrgbw2` | 0xFFFF | 0x0A3D | 255 | on wood (at the cap, 9 dB under the original's) |
+| `ON_EXPLO_SMOKE` | 80 | `onsmkgr1` | 0xFFFF | 0 | 255 | `AMMO_ON_SMOKE`'s obj row: the pop and the 4 s hiss (the original's `EXPLO_SMOK_GREN`, 185, held at the cap) |
+| `ON_MEDPAK_USE` | 35 | `onmedpak` | 0xFFFF | 0 | 120 | `WPN_MEDPACK` fire's `soundsetend` (the original's `MEDPAK_USE`, 90) |
+| `MEDIC_KIT_USE` | 40 | `onmedpak` | 0xFFFF | 0 | 255 | the engine's own name: a medic's heal (S2C 0x3A) plays it at the healed man (the original's, 250) |
+| `GF_ONMEDP_ST` | 25 | `onmedpst` | 0xFFFF | 0 | 213 | the medical pouch's switchto |
+| `GF_ONMEDP_SF` | 25 | `onmedpsf` | 0xFFFF | 0 | 54 | its switchfrom |
+| `ON_HEALTH_UP` | 50 | `onpuhlt1` | 0xFFFF | 0 | 255 | `PU_ONHEALTH`'s pickup `soundset` (the original's `HEALTH_UP`, three layers at 215, 225, 150; ours one) |
+| `ON_PU_AMMO` | 50 | `onpuamm1` | 0xFFFF | 0 | 255 | `PU_ONAMMO`'s pickup `soundset` (the original's `PU_AMMO`, 250 and a chime at 215; ours one) |
+| `PUP_EMPTY` | 60 | `onar15dry` | 0xCCCC | 0x07AE | 150 | the engine's own name: a health powerup walked into at full health (the original's `Sad1`, 125; ours the dry click played at 0.8) |
+
+The grenades' and the knife's rows that hit glass, cloth, foliage, flesh and water name the bullets'
+`ON_IMP_GLASS`, `ON_IMP_CLOTH`, `ON_IMP_FOLIAGE`, `ON_IMP_FLESH` and `ON_IMP_WATER`, as the original's
+grenade names its debris and splash sets there; `DRY_CLAYSATCH` (already in the bank) is the
+grenades' empty click, as the original's.

@@ -1,12 +1,14 @@
 #include <runtime/devtools/log_window.h>
 
 #include <base/io/log_ring.h>
+#include <base/io/strutil.h>
+#include <runtime/devtools/ui_kit.h>
 
 #include <imgui.h>
 
-#include <algorithm>
-#include <cctype>
 #include <cstdio>
+#include <string_view>
+#include <utility>
 
 namespace opennova::devtools {
 
@@ -27,16 +29,6 @@ ImVec4 level_color(LogWindow::Level level) {
 		default:
 			return ImGui::GetStyleColorVec4(ImGuiCol_Text);
 	}
-}
-
-bool contains_ci(const std::string &haystack, const std::string &needle) {
-	if (needle.empty()) return true;
-	const auto it = std::search(haystack.begin(), haystack.end(), needle.begin(), needle.end(),
-			[](char a, char b) {
-				return std::tolower(static_cast<unsigned char>(a)) ==
-						std::tolower(static_cast<unsigned char>(b));
-			});
-	return it != haystack.end();
 }
 
 }  // namespace
@@ -105,7 +97,8 @@ void LogWindow::set_text_filter(const std::string &filter) {
 }
 
 bool LogWindow::passes(const Row &row) const {
-	return (level_mask_ & (1u << row.level)) != 0 && contains_ci(row.text, text_filter_);
+	return (level_mask_ & (1u << row.level)) != 0 &&
+			strutil::ifind(row.text, text_filter_) != std::string_view::npos;
 }
 
 void LogWindow::refilter() {
@@ -131,29 +124,31 @@ void LogWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	(void)pass;
 	(void)frame_index;
 	poll();
+	ui_kit::WrapRow row;
 	for (int level = 0; level < kLevelCount; ++level) {
 		bool on = (level_mask_ & (1u << level)) != 0;
 		ImGui::PushStyleColor(ImGuiCol_Text, level_color(static_cast<Level>(level)));
-		if (ImGui::Checkbox(kLevelNames[level], &on)) {
-			set_level_mask(on ? (level_mask_ | (1u << level)) : (level_mask_ & ~(1u << level)));
-		}
+		const bool changed = ui_kit::check(row, kLevelNames[level], &on, "");
 		ImGui::PopStyleColor();
-		ImGui::SameLine();
+		if (changed) set_level_mask(on ? (level_mask_ | (1u << level)) : (level_mask_ & ~(1u << level)));
 	}
-	ImGui::SetNextItemWidth(200.0f);
-	if (ImGui::InputTextWithHint("##filter", "filter", filter_edit_, sizeof(filter_edit_))) {
+	constexpr float kFilterWidth = 200.0f;
+	row.next(kFilterWidth);
+	if (ui_kit::filter_box("##filter", filter_edit_, sizeof(filter_edit_), "filter", kFilterWidth)) {
 		text_filter_ = filter_edit_;
 		filter_dirty_ = true;
 	}
-	ImGui::SameLine();
-	ImGui::Checkbox("Auto-scroll", &auto_scroll_);
-	ImGui::SameLine();
-	if (ImGui::Button("Clear")) clear();
-	ImGui::SameLine();
-	const bool copy = ImGui::Button("Copy");
-	ImGui::SameLine();
+	ui_kit::check(row, "Auto-scroll", &auto_scroll_, "Follow the newest row.");
+	if (ui_kit::tool(row, "Clear", !rows_.empty(), rows_.empty() ? "Nothing to clear." : "Empty the log.")) {
+		clear();
+	}
+	const bool copy = ui_kit::tool(row, "Copy", !filtered_.empty(),
+			filtered_.empty() ? "Nothing to copy." : "Copy the rows the filters show to the clipboard.");
 	refilter();
-	ImGui::TextDisabled("%d / %d rows", static_cast<int>(filtered_.size()), total_rows());
+	char count[48];
+	std::snprintf(count, sizeof(count), "%d / %d rows", static_cast<int>(filtered_.size()), total_rows());
+	row.next(ui_kit::text_width(count));
+	ImGui::TextDisabled("%s", count);
 	ImGui::Separator();
 
 	if (ImGui::BeginChild("log_rows", ImVec2(0.0f, 0.0f), ImGuiChildFlags_None,

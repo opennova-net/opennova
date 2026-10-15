@@ -298,6 +298,11 @@ target_link_libraries(threedi_collision_3di_test PRIVATE opennova_formats)
 target_include_directories(threedi_collision_3di_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_collision_3di COMMAND threedi_collision_3di_test)
 
+# A chunk whose count, record size or length disagree is refused, never read past.
+add_executable(threedi_malformed_chunk_test threedi/malformed_chunk_test.cpp)
+target_link_libraries(threedi_malformed_chunk_test PRIVATE opennova_formats)
+add_test(NAME threedi_malformed_chunk COMMAND threedi_malformed_chunk_test)
+
 # A collision volume's planes -> its convex solid (threedi_volume_solid.h), on synthetic planes.
 add_executable(threedi_volume_solid_test threedi/volume_solid_test.cpp)
 target_link_libraries(threedi_volume_solid_test PRIVATE opennova_formats)
@@ -4616,6 +4621,13 @@ add_test(NAME script_debug_report COMMAND script_debug_report_test)
 add_executable(counting_datagram_socket_test npwire/counting_datagram_socket_test.cpp)
 target_link_libraries(counting_datagram_socket_test PRIVATE opennova_net)
 add_test(NAME counting_datagram_socket COMMAND counting_datagram_socket_test)
+# The tool kit both products' windows draw with (devtools/ui_kit.h): built with
+# the pass, so it runs in the editor-only flavour as well.
+if(OPENNOVA_IMGUI)
+    add_executable(devtools_ui_kit_test devtools/ui_kit_test.cpp)
+    target_link_libraries(devtools_ui_kit_test PRIVATE opennova_runtime opennova_imgui)
+    add_test(NAME devtools_ui_kit COMMAND devtools_ui_kit_test)
+endif()
 if(OPENNOVA_DEVTOOLS)
     add_executable(devtools_test devtools/devtools_test.cpp)
     target_link_libraries(devtools_test PRIVATE opennova_runtime opennova_imgui)
@@ -4744,3 +4756,7 @@ endif()
 if(OPENNOVA_NOVAWORLD_SERVICE)
     include(novaworld/service_tests.cmake)
 endif()
+
+# The OpenNova Editor's rows (ADR 0046): tests/editor/CMakeLists.txt, one opennova_add_editor_test per
+# executable; their executables and working directory stay this folder's.
+add_subdirectory(editor)

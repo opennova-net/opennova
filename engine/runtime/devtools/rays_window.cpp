@@ -1,9 +1,9 @@
 #include <runtime/devtools/rays_window.h>
 #include <base/io/tick_rate.h>
+#include <runtime/devtools/capture_table.h>
+#include <runtime/devtools/ui_kit.h>
 
 #include <imgui.h>
-
-#include <cstdio>
 
 namespace opennova::devtools {
 
@@ -31,12 +31,7 @@ void RaysWindow::format_rows() {
 		return;
 	}
 	for (int i = 0; i < kRayCategoryCount; ++i) {
-		const RaysCategoryCount &c = snapshot_.categories[static_cast<size_t>(i)];
-		char buf[96];
-		std::snprintf(buf, sizeof(buf), "%s: held %d / total %llu",
-				c.name != nullptr ? c.name : "?", c.held,
-				static_cast<unsigned long long>(c.total));
-		rows_[static_cast<size_t>(i)] = buf;
+		rows_[static_cast<size_t>(i)] = capture_row_text(snapshot_.categories[static_cast<size_t>(i)]);
 	}
 }
 
@@ -62,17 +57,21 @@ bool RaysWindow::take_request(RaysRequest &request) {
 
 void RaysWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	(void)frame_index;
+	ui_kit::WrapRow layers;
 	bool layer_on = overlay_layer_.enabled();
-	if (ImGui::Checkbox("Show in Game view", &layer_on)) pass.set_overlay_enabled(overlay_layer_, layer_on);
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) ImGui::SetTooltip("%s", overlay_layer_.tooltip());
+	if (ui_kit::check(layers, "Show in Game view", &layer_on, overlay_layer_.tooltip())) {
+		pass.set_overlay_enabled(overlay_layer_, layer_on);
+	}
 	if (!snapshot_.valid) {
-		ImGui::TextUnformatted("No ray capture pushed (load a mission).");
+		ui_kit::empty_state("No ray capture pushed (load a mission).");
 		return;
 	}
 
-	ImGui::TextUnformatted(snapshot_.recording ? "(recording)" : "(idle)");
-	ImGui::SameLine();
-	if (ImGui::Button("Clear")) {
+	ui_kit::WrapRow capture;
+	const char *state = snapshot_.recording ? "(recording)" : "(idle)";
+	capture.next(ui_kit::text_width(state));
+	ImGui::TextUnformatted(state);
+	if (ui_kit::tool(capture, "Clear", true, "Drop the captured rays.")) {
 		enqueue_request({RaysRequest::Kind::Clear, 0});
 	}
 	ImGui::Text("logic tick %llu (%.2f s readings)",
@@ -85,53 +84,13 @@ void RaysWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 		ttl_edit_ = ttl_display;
 		enqueue_request({RaysRequest::Kind::SetTtlTicks, ttl_edit_});
 	}
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) {
-		ImGui::SetTooltip("How long a ray stays in the Game view, fading out.");
-	}
+	ui_kit::tooltip("How long a ray stays in the Game view, fading out.");
 	ImGui::SameLine();
 	ImGui::Text("(%.2f s)", static_cast<float>(ttl_edit_) / static_cast<float>(io::kTicksPerSecondInt));
 
-	if (ImGui::SmallButton("All")) {
-		mask_edit_ = kRayCategoryMaskAll;
-		enqueue_request({RaysRequest::Kind::SetCategoryMask,
-				static_cast<int32_t>(mask_edit_)});
-	}
-	ImGui::SameLine();
-	if (ImGui::SmallButton("None")) {
-		mask_edit_ = 0;
-		enqueue_request({RaysRequest::Kind::SetCategoryMask, 0});
-	}
-
-	if (ImGui::BeginTable("ray_categories", 2,
-				ImGuiTableFlags_SizingStretchProp)) {
-		const ImVec2 swatch_size(ImGui::GetFrameHeight(), ImGui::GetFrameHeight());
-		for (int i = 0; i < kRayCategoryCount; ++i) {
-			ImGui::TableNextRow();
-			ImGui::TableNextColumn();
-			ImGui::PushID(i);
-			bool on = (mask_edit_ & (1u << i)) != 0;
-			if (ImGui::Checkbox("##draw", &on)) {
-				mask_edit_ = on ? (mask_edit_ | (1u << i))
-								: (mask_edit_ & ~(1u << i));
-				enqueue_request({RaysRequest::Kind::SetCategoryMask,
-						static_cast<int32_t>(mask_edit_)});
-			}
-			ImGui::SameLine();
-			ImGui::ColorButton("##swatch",
-					ImVec4(kRayCategoryColors[i][0], kRayCategoryColors[i][1],
-							kRayCategoryColors[i][2], 1.0f),
-					ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoPicker,
-					swatch_size);
-			ImGui::SameLine();
-			ImGui::TextUnformatted(snapshot_.categories[static_cast<size_t>(i)].name);
-			ImGui::TableNextColumn();
-			ImGui::Text("held %d / total %llu",
-					snapshot_.categories[static_cast<size_t>(i)].held,
-					static_cast<unsigned long long>(
-							snapshot_.categories[static_cast<size_t>(i)].total));
-			ImGui::PopID();
-		}
-		ImGui::EndTable();
+	if (capture_mask_table("ray_categories", mask_edit_, kRayCategoryMaskAll, snapshot_.categories,
+				kRayCategoryColors, kRayCategoryCount)) {
+		enqueue_request({RaysRequest::Kind::SetCategoryMask, static_cast<int32_t>(mask_edit_)});
 	}
 }
 

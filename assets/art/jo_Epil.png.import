@@ -1,0 +1,12 @@
+{
+  "importer": "image",
+  "options": {
+    "format": "tga24"
+  },
+  "outputs": [
+    "jo_Epil.tga"
+  ],
+  "schema_version": 1,
+  "source_hash": "9834d354402d98fb",
+  "version": 3
+}

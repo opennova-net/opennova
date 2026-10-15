@@ -1,0 +1,75 @@
+<SCREEN>
+  <NAME>VEHICLE</NAME>
+  <MUSICVAR>13</MUSICVAR>
+  <WINDOW type="window" name="MAIN">
+    <POSITION>
+      <LEFT>0</LEFT>
+      <TOP>0</TOP>
+      <RIGHT>800</RIGHT>
+      <BOTTOM>600</BOTTOM>
+    </POSITION>
+    <APPEARANCE type="CUSTOM" state="DEFAULT"></APPEARANCE>
+    <TEXT_RSRC>menutxt.bin</TEXT_RSRC>
+    <CURSOR>
+      <FILE>newarow1.tga</FILE>
+    </CURSOR>
+    <FONT>
+      <NAME>%DEF_FONTNAME%</NAME>
+      <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+      <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+      <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+      <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+    </FONT>
+    <WINDOW type="window" name="VEHICLE_ROOT">
+      <POSITION>
+        <LEFT>224</LEFT>
+        <TOP>40</TOP>
+        <RIGHT>576</RIGHT>
+        <BOTTOM>560</BOTTOM>
+      </POSITION>
+      <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+      <WINDOW type="static" name="TITLE">
+        <POSITION>
+          <LEFT>0</LEFT>
+          <TOP>6</TOP>
+          <RIGHT>352</RIGHT>
+          <BOTTOM>50</BOTTOM>
+        </POSITION>
+        <APPEARANCE state="DEFAULT"></APPEARANCE>
+        <FONT>
+          <NAME>%IMPACT_FONTNAME%</NAME>
+          <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+        </FONT>
+        <STRING justify="CENTER" vjustify="CENTER">VEHICLE</STRING>
+      </WINDOW>
+      <WINDOW type="button" name="CANCEL">
+        <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+        <POSITION>
+          <LEFT>96</LEFT>
+          <TOP>470</TOP>
+          <RIGHT>256</RIGHT>
+          <BOTTOM>504</BOTTOM>
+        </POSITION>
+        <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+        <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+        <FONT>
+          <NAME>%DEF_FONTNAME_LG%</NAME>
+          <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+          <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+          <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+          <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+        </FONT>
+        <STRING justify="CENTER" vjustify="CENTER">CANCEL</STRING>
+        <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+        <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+      </WINDOW>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>

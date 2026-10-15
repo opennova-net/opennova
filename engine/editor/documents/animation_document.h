@@ -1,0 +1,119 @@
+#pragma once
+
+#include <memory>
+#include <string>
+#include <vector>
+
+#include <editor/assets/asset_registry.h>
+#include <editor/model/document.h>
+#include <editor/model/finding_code_row.h>
+#include <formats/bad/bad.h>
+#include <runtime/assets/asset_store.h>
+
+namespace opennova::editor {
+
+// A clip (ADR 0046 S10): a `.bad`, whose engine data the editor changes: the header's
+// version, frame rate and flags, each bone's name, and each frame's event (the hips'
+// ground step, the trigger bits the game fires on that frame, the hips' and the head's
+// heights). The keys and translation rows are the clip's motion, authored in Blender
+// (the `.o3a` import brings a new one): they stay in the immutable parsed base
+// (`assets::parse_bone_animation`) and are written as read. One row, the clip, holds its
+// bones and its events (both fixed: their count is the motion's). serialize() writes
+// from scratch through the engine's writer (bad_write.h); an untouched clip reads back
+// field-equal (ctest anim_retail_rewrite).
+
+enum class AnimationKind : NodeKind { Clip = 0, Bone = 1, Event = 2 };
+constexpr NodeKind node_kind(AnimationKind kind) { return static_cast<NodeKind>(kind); }
+
+struct ClipRow : Node {
+	assets::BoneAnimation base;
+	std::string clip_name;         // the file's stem (the clip has no name of its own)
+	uint32_t version = 1, fps = 30, flags = 0;
+	std::vector<bad::BadBone> bones;
+	std::vector<bad::BadEvent> events;
+	// collections: 0 bones, 1 events.
+
+	ClipRow();
+	std::shared_ptr<Node> clone() const override { return std::make_shared<ClipRow>(*this); }
+	std::string name() const override { return clip_name; }
+	// The clip's own name, bones and events (its base is shared by every version).
+	size_t footprint() const override;
+};
+
+class AnimationDocument : public Document {
+public:
+	// The clip, its row (the file's one, never added), then its bones and frame events.
+	const std::vector<RecordKindRow> &kinds() const override;
+	std::vector<Collection> collections(const Node &row, const NodeAddress &owner) const override;
+	const std::vector<FieldSchema> &fields(NodeKind kind) const override { return schema(kind); }
+	// A kind's fields without a document (DocumentType::fields, S13 V3): the table fields()
+	// answers, the type's own for the process.
+	static const std::vector<FieldSchema> &schema(NodeKind kind);
+	// A bone's parent: none (a root), or one of the clip's bones by name.
+	bool record_choices(const NodeAddress &address, const FieldUse &use,
+			std::vector<FieldChoice> &out) const override;
+	// A frame event by its frame, counted from 0 as the timeline counts it, and what it fires in
+	// words ("Frame 14: right footstep"); the clip and its bones by their names.
+	std::string record_title(const NodeAddress &address) const override;
+	SerializeResult serialize() const override;
+	std::unique_ptr<DocumentBase> snapshot() const override {
+		return std::make_unique<AnimationDocument>(*this);
+	}
+
+	const ClipRow *clip() const;
+
+protected:
+	// An event's trigger word only on a version 1 clip (version 0 events carry none); a
+	// bone's parent chosen among the clip's bones, shown by name (record_choices).
+	void refine_field(const NodeAddress &address, FieldUse &use) const override;
+	bool parse(const std::vector<uint8_t> &bytes, std::vector<std::shared_ptr<Node>> &rows,
+	           std::shared_ptr<const FileState> &state, std::vector<SourceIssue> &issues,
+	           Diagnostic &error) override;
+	bool read(const Node &row, const NodeAddress &address, const std::string &field, Value &out) const override;
+	std::shared_ptr<Node> make_node(NodeKind kind, NodeId id,
+	                                const std::vector<std::shared_ptr<const Node>> &rows,
+	                                std::string &error) override;
+	// The translation flag is refused (the rows it promises are the motion's); version 0
+	// is refused while an event fires a trigger, and a trigger on a version 0 clip.
+	bool set_field(Node &row, const NodeAddress &address, const std::string &field, const Value &value,
+	               std::string &error) override;
+	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
+	                     std::string &error) override;
+	// A clip is one record: a step adding or removing a row is refused.
+	bool accept_step(const EditStep &step, const StagedRows &rows,
+	                 StepRefusal &refusal) const override;
+};
+
+bool is_animation_kind(AssetKind kind);
+
+// A frame event's trigger word in words: each bit the engine reads by what the body does
+// (anim::kAnimEventBits' words: "right footstep, sound 2"), a bit it does not read as
+// "an unread bit (0x10000)"; "" for none.
+std::string animation_trigger_words(uint32_t trigger);
+
+// Whether the clip's record `record` is its end pose: the last of its frame count and one records,
+// which the game blends into but never reads the event of (its trigger never fires).
+bool animation_end_pose(const ClipRow &row, size_t record);
+
+// The clip document type's validator over one clip (DocumentType::validate_file), an open
+// document standing in for its file: a frame rate other than the 30 every retail clip plays at
+// and an event bit the engine does not read are notes, as is an event set on the end pose (it
+// never fires: animation_end_pose); a bone whose parent does not come
+// before it (bad::bad_parent_in_order, the rule the runtime's rig is FK-safe by) is a
+// warning on its parent.
+std::vector<Diagnostic> validate_animation_file(const DocumentBase &document);
+
+// The clip type's own finding codes (DocumentType::findings), each a row of its table
+// (animation_document.cpp, static_asserted into this order): a frame rate other than retail's, a
+// bone whose parent does not come before it, an event bit the engine does not read.
+enum class AnimationFinding {
+	Fps,
+	ParentOrder,
+	TriggerUnknown,
+	EndPoseTrigger,
+	kCount
+};
+const FindingCodeRow &finding_code(AnimationFinding code);
+FindingTable animation_finding_codes();
+
+} // namespace opennova::editor

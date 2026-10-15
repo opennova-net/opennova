@@ -1,0 +1,138 @@
+#pragma once
+
+#include <functional>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include <editor/model/node.h>
+#include <editor/preview/canvas_gesture.h>
+#include <editor/preview/mission_handle_edit.h>
+#include <editor/preview/mission_label_picks.h>
+#include <editor/preview/mission_link_shapes.h>
+#include <editor/preview/mission_options.h>
+#include <editor/preview/mission_scene.h>
+#include <editor/preview/viewport_overlay.h>
+#include <runtime/hud/hud_minimap.h>
+
+namespace opennova::editor {
+
+class ViewportDevice;
+struct MissionViewportOptions;
+struct OrbitCamera;
+
+// What the mission's canvas draws over the device's picture (ADR 0046 S14), as pure functions of
+// the scene, the marks and the pointer into an OverlayList: each shown mark's glyph by its pool (an
+// item a diamond, a building a square, a marker a cross, an organic a dot) ringed in its team's
+// colour, the hovered mark ringed, the selected marks ringed (the primary thicker) and the primary's
+// handles (a line along its heading to the yaw handle's disc, a square above it for the height), an
+// area's footprint (its corners at the ground where a device answers, else at its z_min; its top and
+// bottom too where its flags bound z) with its edge handles when primary (S24: its corners', and its bottom's and
+// top's where its flags bound z), a path's line through its stops (closed unless it does not loop; thick while it
+// or one of its markers is selected; S24: an arrowhead along each segment the way the path goes, each stop's
+// number beside it while the path is selected or with the labels option, a one-stop path ringed), a label
+// beside the hovered and the selected marks (beside the other shown ones with the labels option,
+// decluttered: preview/mission_label_picks), and the marquee. A line with an end behind the near plane is
+// clipped to it. At most kMissionMarksDrawn marks are drawn, the nearest. S15: the selected marks
+// ringed twice over a dark ring (they read on any ground, among thousands of glyphs) and the hovered
+// one ringed wide; the handle the pointer is on (or a drag holds) named beside it with its step ("Turn,
+// 15 deg steps"); an Alt-drag's copies as rings where they go, a line from each original; the Area
+// tool's box on the ground; and on an empty mission, a line saying how to start. S24: the selected event's,
+// trigger's or action's links (preview/mission_link_shapes: what it watches and acts on rung, a line from
+// one to the other, a distance trigger's reach as its sphere) under the marks, and a badge on each drawn
+// mark some event names, with the links option.
+
+inline constexpr uint32_t kMissionItemRgb = 0xFFDC5A;
+inline constexpr uint32_t kMissionBuildingRgb = 0xC0C0C0;
+inline constexpr uint32_t kMissionMarkerRgb = 0x6EDCFF;
+inline constexpr uint32_t kMissionOrganicRgb = 0x7CD67C;
+inline constexpr uint32_t kMissionAreaRgb = 0xFFA028;
+// A team's colour as the game's map draws it (S23 C, witnessed in the game; the original editor's own ring
+// colours are not read): a team-1 marker or person in the HUD
+// palette's light blue, a team-2 one in its salmon, its palette[3] and palette[5] (the fourth and sixth entries) [orig:
+// HUD_InitTeamColorTable @ 0x51f245..0x51f2b3; Render_MinimapSlotBlip @ 0x5be4c5..0x5be4e1], the map's
+// own (runtime/hud/hud_minimap.h).
+inline constexpr uint32_t kMissionBlueRgb = hud::kHudPaletteLightBlue & 0xFFFFFFu;
+inline constexpr uint32_t kMissionRedRgb = hud::kHudPaletteSalmon & 0xFFFFFFu;
+inline constexpr uint32_t kMissionPathRgb = 0xC8C8C8;
+
+// The colour of a team as the game's map draws it (1 light blue, 2 salmon; kMissionPathRgb for the
+// rest, which the overlay rings in no team's colour).
+uint32_t mission_team_rgb(int team);
+// S24: a group's colour in the editor's palette (no game colours a group): 63 hues apart for groups 1 to 63, the
+// golden angle apart from one to the next in three lightness tiers, so neighbours differ and each reads on the
+// ground; 0 for group 0 (none) and any number past the 64 groups.
+uint32_t mission_group_rgb(int group);
+// The ring a mark is drawn with by `by`: its team's (team 1 or 2) or its group's (not 0); false for none.
+bool mission_mark_ring_rgb(MissionColorBy by, int team, int group, uint32_t &rgb);
+// The groups' legend in the picture's top-right corner: "Groups in view", then each group the marks drawn carry
+// (`groups`: its number and how many drawn marks carry it, by number) by `title`, in its colour, at most `most`
+// lines, the rest counted.
+void mission_group_legend(const std::vector<std::pair<int, size_t>> &groups, const std::function<std::string(int)> &title,
+		int width, OverlayList &out, size_t most = 12);
+
+// Where an entity's handles sit: its yaw handle `reach` metres along its heading, its height handle
+// `reach` metres above it.
+PreviewVec3 mission_yaw_handle(const MissionEntityMark &entity, float reach);
+PreviewVec3 mission_height_handle(const MissionEntityMark &entity, float reach);
+// Where an area's handle sits: an edge's middle and a corner at mission height `z` (its anchor's), its bottom's
+// and its top's middle at its z_min and z_max (S24); its middle at `z` for any other handle.
+PreviewVec3 mission_area_handle_point(const MissionAreaMark &area, MissionHandle handle, double z);
+// The handles an area carries as the primary: its four edges and four corners, and its bottom and top where its
+// flags bound z.
+std::vector<MissionHandle> mission_area_handles(const MissionAreaMark &area);
+
+// One frame's input to the overlays.
+struct MissionOverlayInput {
+	const MissionScene *scene = nullptr;
+	const MissionViewportOptions *options = nullptr;
+	const OrbitCamera *camera = nullptr;
+	int width = 0, height = 0;
+	const std::vector<MissionMark> *marks = nullptr;
+	int hover = -1; // the mark under the pointer (-1 none)
+	int primary = -1; // the primary record's mark (-1 none)
+	const std::vector<int> *selected = nullptr; // the other selected records' marks
+	const std::vector<NodeId> *selected_rows = nullptr; // every selected record's row (a path's line thickens)
+	float handle_reach = 0.0f; // metres the primary's handles stand from its anchor
+	const ViewportDevice *device = nullptr; // the ground an area's corners sit on
+	std::function<std::string(const NodeAddress &)> title; // a mark's label (none: no labels)
+	// The labels' last layout, taken again where its candidates and words are this frame's (the
+	// polish: laid out again only when what they read moved); null: laid out every frame.
+	MissionLabelLayout *layout = nullptr;
+	bool marquee = false;
+	CanvasPoint marquee_from, marquee_to;
+	// S15: the pointer; the primary's handle it is on or a drag holds (its words and step beside it),
+	// the snap and the turn a drag takes now, a drag under way.
+	CanvasPoint pointer;
+	bool active_handle = false;
+	MissionHandle handle = MissionHandle::Move;
+	float snap = 0.0f, turn = 0.0f;
+	bool dragging = false;
+	// An Alt-drag's copies: the records it took, as pressed, and how far their copies go (metres east
+	// and north; null none).
+	const std::vector<MissionPressed> *copies = nullptr;
+	double copy_by[2] = { 0.0, 0.0 };
+	// A group turn's pivot (a mission point), drawn while the turn goes.
+	bool pivot = false;
+	double pivot_at[3] = { 0.0, 0.0, 0.0 };
+	// The Area tool's box on the ground (mission points), snapped to `box_snap` metres as its drop is.
+	bool box = false;
+	double box_from[3] = { 0.0, 0.0, 0.0 }, box_to[3] = { 0.0, 0.0, 0.0 };
+	float box_snap = 0.0f;
+	// S24: the selected logic record's links placed in the scene (null none), and how many events name
+	// each mark (by mark index; null or shorter: none).
+	const MissionLinkScene *links = nullptr;
+	const std::vector<size_t> *badges = nullptr;
+	// S24: a group's words in the legend (with options.color_by group; none: "Group N").
+	std::function<std::string(int)> group_title;
+	// S24 pick mode: which marks fill the slot a pick waits for (by mark index; null: no pick), each rung.
+	const std::vector<char> *pick = nullptr;
+};
+OverlayList mission_overlay_shapes(const MissionOverlayInput &in);
+
+// A segment from `a` to `b` projected, its end behind the near plane clipped to it: false when both
+// ends are behind it.
+bool mission_project_segment(const OrbitCamera &camera, int width, int height, const PreviewVec3 &a,
+		const PreviewVec3 &b, CanvasPoint &from, CanvasPoint &to);
+
+} // namespace opennova::editor

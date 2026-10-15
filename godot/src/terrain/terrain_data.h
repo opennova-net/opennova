@@ -100,6 +100,7 @@ private:
 	// Optional live source images retained for runtime surface-input consumers.
 	Ref<Image> heightmap_image;
 	Ref<Image> colormap_image;
+	Ref<ImageTexture> colormap_live_texture; // refresh_colormap_texture's, answered by get_colormap() while it stands
 	Ref<Image> blendmap_image;
 	// Lazy-loaded on first call to get_tileinfo_resource(). Cached keyed by
 	// the source path so an edit to trn.tileinfo re-loads on next request.
@@ -263,7 +264,18 @@ public:
 	// (Terrain::update_colormap_region, update_blendmap_region), never a rebuild. The loaded textures stand: what
 	// reads them (get_colormap: the foliage's tint, the minimap) keeps the map as loaded until the next load.
 	void set_colormap_image(const Ref<Image> &p_image) { colormap_image = p_image; }
+	// The live colour map as a texture (ADR 0046 S25, the foliage's tint after a paint): made, or written again, from the
+	// live image, its mip chain where the loaded map has one; get_colormap() then answers it in place of the loaded
+	// texture until the data is loaded again. Nothing where the data holds no live image. An editor's paint calls it once
+	// its strokes settle (each call uploads the whole map).
+	void refresh_colormap_texture();
 	void set_blendmap_image(const Ref<Image> &p_image) { blendmap_image = p_image; }
+	// The foliage map's codes over a rect of it as an editor's paint left them (ADR 0046 S25; `codes` w x h, row-major,
+	// the top row first): written in place into the codes every foliage lookup reads (get_foliage_index_world,
+	// get_detail_foliage_index_fixed). No change is published (a published change grows every foliage cell again): the
+	// caller drops the cells over the rect's ground (FoliageDispatcher::invalidate_cells). The loaded indexed texture
+	// nothing samples stays as loaded. False, nothing written, for a map of no codes or a rect past it.
+	bool write_foliagemap_rect(int p_x, int p_y, int p_w, int p_h, const uint8_t *p_codes);
 	float get_height(const Vector3 &p_world_pos) const;
 	float get_height_world(const Vector3 &p_world_pos) const;
 	float get_height_world_bilinear(const Vector3 &p_world_pos) const;

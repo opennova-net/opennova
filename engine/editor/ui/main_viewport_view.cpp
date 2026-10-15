@@ -1,0 +1,151 @@
+#include <editor/ui/main_viewport_view.h>
+
+#include <algorithm>
+#include <cfloat>
+#include <cmath>
+
+#include <editor/model/document_base.h>
+#include <editor/session/view/session_view.h>
+#include <editor/ui/editor_requests.h>
+#include <editor/ui/outline_view.h>
+#include <editor/ui/viewport_view.h>
+#include <editor/ui/viewport_views.h>
+
+#include <imgui.h>
+
+namespace opennova::editor {
+
+MainViewportView::MainViewportView(const OutlineSpec &outline, ViewportKind kind, std::unique_ptr<DocumentPane> pane,
+                                   std::unique_ptr<DocumentPane> terrain) :
+		outline_(std::make_unique<OutlineView>(outline)), viewport_(make_viewport_view(kind)), pane_(std::move(pane)),
+		terrain_(std::move(terrain)), kind_(kind) {}
+
+MainViewportView::~MainViewportView() = default;
+
+void MainViewportView::draw(Workspace &workspace, const DocumentBase &document) {
+	// The RevealRecord events its document was sent are the outline's, which shows the selection, and the
+	// viewport's and the pane's, which show the record their way (S24).
+	for (const ViewEvent &event : take_events()) {
+		if (event.kind == ViewEventKind::RevealRecord) {
+			if (viewport_) viewport_->reveal(event);
+			if (pane_) pane_->reveal(event);
+			if (terrain_) terrain_->reveal(event);
+		}
+		outline_->receive(event);
+	}
+	// The outline in a column a third of the tab wide (wide enough to read), the viewport beside it.
+	// The outline's lines select and its tools edit: held back while an operation holds the documents
+	// (S13 A3), as the Document window holds back a view of records; the canvas beside it is not. The
+	// columns' ids are their own: a view of records drawn in the same tab before (the document read
+	// again as another type) leaves an `outline` child whose width a resizable column would keep.
+	// The column keeps the width it was dragged to, within the tab: never narrower than a few words,
+	// never so wide that the viewport beside it loses its own least width (a tab narrowed since, a
+	// window docked smaller than it first drew at; a viewport's toolbar wraps and narrows its
+	// controls down to that width).
+	// S15: the viewport keeps room of its own (24 lines' width in a wide tab, the least in a narrow one,
+	// growing between) however wide the outline is dragged, and until the outline is dragged its width
+	// follows the tab as the tab settles (a resizable child takes its first width once: a tab first
+	// drawn wider than its dock, as a docked window is for its first frames, left the outline a column
+	// of most of the tab and the picture a strip).
+	const float avail = ImGui::GetContentRegionAvail().x;
+	const float least = ImGui::GetFontSize() * 6.0f;
+	const float room = std::clamp(avail - ImGui::GetFontSize() * 30.0f, least, std::max(least, ImGui::GetFontSize() * 24.0f));
+	const float widest = std::max(least, avail - room);
+	const float column = std::clamp(std::max(ImGui::GetFontSize() * 12.0f, avail * 0.3f), least, widest);
+	const bool follow = !column_dragged_ && avail != column_avail_;
+	if (follow) ImGui::SetNextWindowSize(ImVec2(column, 0.0f), ImGuiCond_Always);
+	else ImGui::SetNextWindowSizeConstraints(ImVec2(least, 0.0f), ImVec2(widest, FLT_MAX));
+	ImGui::BeginDisabled(!workspace.view().allows(EditorRequestKind::EditRecord));
+	float width = column;
+	if (ImGui::BeginChild("outline_column", ImVec2(column, 0.0f), ImGuiChildFlags_ResizeX | ImGuiChildFlags_Borders)) {
+		width = ImGui::GetWindowWidth();
+		outline_->draw(workspace, document);
+	}
+	ImGui::EndChild();
+	ImGui::EndDisabled();
+	// A width that moved while the tab stood is the author's drag: kept from then on.
+	if (!follow && column_width_ > 0.0f && avail == column_avail_ && std::fabs(width - column_width_) > 0.5f)
+		column_dragged_ = true;
+	column_width_ = width;
+	column_avail_ = avail;
+	ImGui::SameLine();
+	pane_drawn_ = false;
+	terrain_drawn_ = false;
+	if (ImGui::BeginChild("viewport_column", ImVec2(0.0f, 0.0f))) {
+		const WorkspaceView::DocumentView &shown = workspace.view().workspace.document(document.path());
+		if (terrain_ && shown.terrain) draw_split(workspace, document, *terrain_, shown.logic_split);
+		else if (pane_ && shown.logic) draw_split(workspace, document, *pane_, shown.logic_split);
+		else main_viewport(workspace, document);
+	}
+	ImGui::EndChild();
+}
+
+void MainViewportView::draw_split(Workspace &workspace, const DocumentBase &document, DocumentPane &pane, float share) {
+	const ImVec2 room = ImGui::GetContentRegionAvail();
+	const float em = ImGui::GetFontSize();
+	// Side by side where the column holds both at a readable width, else the canvas above the pane.
+	const bool stacked = room.x < em * 60.0f;
+	const float bar = std::max(4.0f, std::floor(em * 0.3f));
+	const float length = std::max(0.0f, (stacked ? room.y : room.x) - bar);
+	const float least = WorkspaceView::kLogicSplitLeast, most = WorkspaceView::kLogicSplitMost;
+	const float kept = std::clamp(dragged_share_ >= 0.0f ? dragged_share_ : share, least, most);
+	const float canvas = std::floor(length * kept);
+	// (Never while a popup is open: focusing the picture closes it, a picker opened from the pane among them.)
+	if (keys_to_canvas_ && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
+		ImGui::SetNextWindowFocus();
+	keys_to_canvas_ = false;
+	if (ImGui::BeginChild("canvas_column", stacked ? ImVec2(0.0f, canvas) : ImVec2(canvas, 0.0f)))
+		main_viewport(workspace, document);
+	ImGui::EndChild();
+	// The bar between them: dragged, the share follows the pointer, set once as the drag ends.
+	if (!stacked) ImGui::SameLine(0.0f, 0.0f);
+	ImGui::InvisibleButton("logic_split", stacked ? ImVec2(std::max(1.0f, room.x), bar) : ImVec2(bar, std::max(1.0f, room.y)));
+	if (ImGui::IsItemHovered() || ImGui::IsItemActive())
+		ImGui::SetMouseCursor(stacked ? ImGuiMouseCursor_ResizeNS : ImGuiMouseCursor_ResizeEW);
+	if (ImGui::IsItemActive() && length > 0.0f) {
+		const float delta = stacked ? ImGui::GetIO().MouseDelta.y : ImGui::GetIO().MouseDelta.x;
+		dragged_share_ = std::clamp((dragged_share_ >= 0.0f ? dragged_share_ : kept) + delta / length, least, most);
+	}
+	if (ImGui::IsItemDeactivated() && dragged_share_ >= 0.0f) {
+		io::JsonValue members = io::JsonValue::make_object();
+		members.set("path", io::JsonValue::make_string(document.path()));
+		members.set("logic_split", io::JsonValue::make_number(double(dragged_share_)));
+		window_requests::set_workspace(workspace, "document", std::move(members));
+		dragged_share_ = -1.0f;
+	}
+	if (!stacked) ImGui::SameLine(0.0f, 0.0f);
+	const bool terrain = &pane == terrain_.get();
+	if (ImGui::BeginChild(terrain ? "terrain_pane" : "logic_pane", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders)) {
+		pane.draw(workspace, document);
+		(terrain ? terrain_drawn_ : pane_drawn_) = true;
+		// The Terrain pane is the picture's palette: once a click in it is over, with no field taking text, the keys
+		// go back to the picture, so a tool picked there and the view's keys (R, H, V, [ and ]) follow one another.
+		if (terrain && ImGui::IsWindowFocused(ImGuiFocusedFlags_ChildWindows) && ImGui::IsMouseReleased(ImGuiMouseButton_Left) &&
+		    !ImGui::IsAnyItemActive() && !ImGui::GetIO().WantTextInput &&
+		    !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel))
+			keys_to_canvas_ = true;
+	}
+	ImGui::EndChild();
+}
+
+void MainViewportView::rebind(const DocumentBase &document) {
+	outline_->rebind(document);
+	if (pane_) pane_->rebind(document);
+	if (terrain_) terrain_->rebind(document);
+}
+
+bool MainViewportView::main_viewport(Workspace &workspace, const DocumentBase &document) {
+	if (!viewport_) return false;
+	viewport_->draw(workspace, document.path());
+	return true;
+}
+
+OutlineModel *MainViewportView::outline() {
+	return outline_->outline();
+}
+
+void MainViewportView::end_frame(Workspace &workspace) {
+	if (viewport_) viewport_->end_frame(workspace);
+}
+
+} // namespace opennova::editor

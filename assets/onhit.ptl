@@ -1,0 +1,2119 @@
+
+[effectdef]
+{
+	id = Effect_ONHitCloth;
+	pdefs = ONCloth_Puff, ONCloth_Fibres;
+
+}
+
+[effectdef]
+{
+	id = Effect_ONHitDirt;
+	pdefs = ONDirt_Chips, ONDirt_Puff, ONHit_Flash, ONHit_Sparks;
+
+}
+
+[effectdef]
+{
+	id = Effect_ONHitFoliage;
+	pdefs = ONLeaf_Bits, ONLeaf_Twigs, ONLeaf_Puff;
+
+}
+
+[effectdef]
+{
+	id = Effect_ONHitGlass;
+	pdefs = ONGlass_Dust, ONGlass_Shards;
+
+}
+
+[effectdef]
+{
+	id = Effect_ONHitGrass;
+	pdefs = ONHit_FlashSm, ONGrass_Puff, ONGrass_Bits;
+
+}
+
+[effectdef]
+{
+	id = Effect_ONHitMetal;
+	pdefs = ONHit_Core, ONHit_SparksBk, ONHit_Flash, ONHit_Smoke;
+
+}
+
+[effectdef]
+{
+	id = Effect_ONHitObj;
+	pdefs = ONHit_Flash, ONHit_Core, ONHit_SparksBk, ONHit_Smoke;
+
+}
+
+[effectdef]
+{
+	id = Effect_ONHitSand;
+	pdefs = ONSand_Grains, ONSand_Puff, ONHit_FlashSm, ONHit_Sparks;
+
+}
+
+[effectdef]
+{
+	id = Effect_ONHitSnow;
+	pdefs = ONHit_FlashSm, ONSnow_Puff, ONSnow_Bits;
+
+}
+
+[effectdef]
+{
+	id = Effect_ONHitStone;
+	pdefs = ONStone_Puff, ONStone_Chips, ONHit_Flash, ONHit_Sparks, ONHit_Core;
+
+}
+
+[effectdef]
+{
+	id = Effect_ONHitWater;
+	pdefs = ONWater_Column, ONWater_Spray, ONWater_Ring;
+
+}
+
+[effectdef]
+{
+	id = Effect_ONHitWood;
+	pdefs = ONHit_FlashSm, ONWood_Bits, ONWood_Puff;
+
+}
+
+[particledef]
+{
+id	= ONCloth_Fibres;
+flags	=  EMITVECTOR AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.100;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 10.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 6;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.100;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.800;
+	age_adj	= 0.200;
+	alpha	= 1.000;
+	color1	= 168, 164, 150;
+	color2	= 128, 126, 116;
+	color3	= 168, 164, 150;
+	color4	= 128, 126, 116;
+	bump_scale	= 0.000;
+	scale	= 0.060;
+	scale_adj	= 0.020;
+	alpha_func	= ON_FadeLate;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 120.000;
+	speed	= 2.500;
+	speed_adj	= 1.000;
+	elastic	= 0.000;
+	gravity	= 30.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 80.000;
+	spread	= 180.000;
+	spread_skip	= 110.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxcl1.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 168, 164, 150;
+	g1_color2	= 128, 126, 116;
+	g1_color3	= 168, 164, 150;
+	g1_color4	= 128, 126, 116;
+	g1_scale	= 0.060;
+	g1_scale_adj	= 0.020;
+	g1_alpha_func	= ON_FadeLate;
+
+}
+
+[particledef]
+{
+id	= ONCloth_Puff;
+flags	=  AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 15.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 1;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.350;
+	age_adj	= 0.100;
+	alpha	= 0.800;
+	color1	= 150, 148, 138;
+	color2	= 176, 174, 164;
+	color3	= 150, 148, 138;
+	color4	= 176, 174, 164;
+	bump_scale	= 0.000;
+	scale	= 0.550;
+	scale_adj	= 0.150;
+	scale_func	= ON_Grow;
+	alpha_func	= ON_Puff;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 30.000;
+	speed	= 3.000;
+	speed_adj	= 0.800;
+	elastic	= 0.000;
+	gravity	= 0.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 200.000;
+	spread	= 60.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxpuf2.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 150, 148, 138;
+	g1_color2	= 176, 174, 164;
+	g1_color3	= 150, 148, 138;
+	g1_color4	= 176, 174, 164;
+	g1_scale	= 0.550;
+	g1_scale_adj	= 0.150;
+	g1_scale_func	= ON_Grow;
+	g1_alpha_func	= ON_Puff;
+	graphic2 =	onfxpuf1.tga, blend;
+	g2_flip_frames	= 1;
+	g2_flip_rate	= 8;
+	g2_color1	= 150, 148, 138;
+	g2_color2	= 176, 174, 164;
+	g2_color3	= 150, 148, 138;
+	g2_color4	= 176, 174, 164;
+	g2_scale	= 0.550;
+	g2_scale_adj	= 0.150;
+	g2_scale_func	= ON_Grow;
+	g2_alpha_func	= ON_Puff;
+
+}
+
+[particledef]
+{
+id	= ONDirt_Chips;
+flags	=  AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 30.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 1;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.650;
+	age_adj	= 0.150;
+	alpha	= 1.000;
+	color1	= 120, 96, 70;
+	color2	= 98, 78, 58;
+	color3	= 132, 108, 80;
+	color4	= 88, 70, 52;
+	bump_scale	= 0.000;
+	scale	= 0.035;
+	scale_adj	= 0.015;
+	alpha_func	= ON_FadeLate;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 360.000;
+	speed	= 8.000;
+	speed_adj	= 2.000;
+	elastic	= 0.000;
+	gravity	= 150.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 0.000;
+	spread	= 40.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxchp1.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 120, 96, 70;
+	g1_color2	= 98, 78, 58;
+	g1_color3	= 132, 108, 80;
+	g1_color4	= 88, 70, 52;
+	g1_scale	= 0.035;
+	g1_scale_adj	= 0.015;
+	g1_alpha_func	= ON_FadeLate;
+	graphic2 =	onfxchp2.tga, blend;
+	g2_flip_frames	= 1;
+	g2_flip_rate	= 8;
+	g2_color1	= 120, 96, 70;
+	g2_color2	= 98, 78, 58;
+	g2_color3	= 132, 108, 80;
+	g2_color4	= 88, 70, 52;
+	g2_scale	= 0.035;
+	g2_scale_adj	= 0.015;
+	g2_alpha_func	= ON_FadeLate;
+
+}
+
+[particledef]
+{
+id	= ONDirt_Puff;
+flags	=  AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 24.000;
+	emit_rate_adj	= 6.000;
+	emit_delay	= 0.000;
+	emit_burst	= 1;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= -0.300;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.550;
+	age_adj	= 0.150;
+	alpha	= 1.000;
+	color1	= 176, 146, 108;
+	color2	= 150, 126, 96;
+	color3	= 166, 138, 104;
+	color4	= 140, 118, 92;
+	bump_scale	= 0.000;
+	scale	= 0.800;
+	scale_adj	= 0.250;
+	scale_func	= ON_Grow;
+	alpha_func	= ON_Puff;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 40.000;
+	speed	= 3.500;
+	speed_adj	= 1.000;
+	elastic	= 0.000;
+	gravity	= 0.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 250.000;
+	spread	= 14.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxpuf1.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 176, 146, 108;
+	g1_color2	= 150, 126, 96;
+	g1_color3	= 166, 138, 104;
+	g1_color4	= 140, 118, 92;
+	g1_scale	= 0.800;
+	g1_scale_adj	= 0.250;
+	g1_scale_func	= ON_Grow;
+	g1_alpha_func	= ON_Puff;
+	graphic2 =	onfxpuf2.tga, blend;
+	g2_flip_frames	= 1;
+	g2_flip_rate	= 8;
+	g2_color1	= 176, 146, 108;
+	g2_color2	= 150, 126, 96;
+	g2_color3	= 166, 138, 104;
+	g2_color4	= 140, 118, 92;
+	g2_scale	= 0.800;
+	g2_scale_adj	= 0.250;
+	g2_scale_func	= ON_Grow;
+	g2_alpha_func	= ON_Puff;
+
+}
+
+[particledef]
+{
+id	= ONGlass_Dust;
+flags	=  AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 10.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 2;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.500;
+	age_adj	= 0.000;
+	alpha	= 0.700;
+	color1	= 214, 218, 220;
+	color2	= 190, 194, 198;
+	color3	= 214, 218, 220;
+	color4	= 190, 194, 198;
+	bump_scale	= 0.000;
+	scale	= 0.450;
+	scale_adj	= 0.150;
+	scale_func	= ON_Grow;
+	alpha_func	= ON_Puff;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 30.000;
+	speed	= 2.000;
+	speed_adj	= 0.500;
+	elastic	= 0.000;
+	gravity	= 0.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 200.000;
+	spread	= 20.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxpuf2.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 214, 218, 220;
+	g1_color2	= 190, 194, 198;
+	g1_color3	= 214, 218, 220;
+	g1_color4	= 190, 194, 198;
+	g1_scale	= 0.450;
+	g1_scale_adj	= 0.150;
+	g1_scale_func	= ON_Grow;
+	g1_alpha_func	= ON_Puff;
+
+}
+
+[particledef]
+{
+id	= ONGlass_Shards;
+flags	=  EMITVECTOR AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 10.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 5;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 1.000;
+	age_adj	= 0.200;
+	alpha	= 1.000;
+	color1	= 206, 222, 228;
+	color2	= 188, 204, 214;
+	color3	= 206, 222, 228;
+	color4	= 188, 204, 214;
+	bump_scale	= 0.000;
+	scale	= 0.055;
+	scale_adj	= 0.020;
+	alpha_func	= ON_FadeLate;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 90.000;
+	roll_rot_adj	= 60.000;
+	speed	= 4.500;
+	speed_adj	= 1.500;
+	elastic	= 0.000;
+	gravity	= 100.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 0.000;
+	spread	= 180.000;
+	spread_skip	= 95.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxgls1.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 206, 222, 228;
+	g1_color2	= 188, 204, 214;
+	g1_color3	= 206, 222, 228;
+	g1_color4	= 188, 204, 214;
+	g1_scale	= 0.055;
+	g1_scale_adj	= 0.020;
+	g1_alpha_func	= ON_FadeLate;
+
+}
+
+[particledef]
+{
+id	= ONGrass_Bits;
+flags	=  AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 25.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 2;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.800;
+	age_adj	= 0.200;
+	alpha	= 1.000;
+	color1	= 84, 116, 50;
+	color2	= 104, 128, 66;
+	color3	= 70, 98, 42;
+	color4	= 118, 134, 76;
+	bump_scale	= 0.000;
+	scale	= 0.080;
+	scale_adj	= 0.030;
+	alpha_func	= ON_FadeLate;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 360.000;
+	speed	= 6.000;
+	speed_adj	= 2.000;
+	elastic	= 0.000;
+	gravity	= 110.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 40.000;
+	spread	= 40.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxlef2.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 84, 116, 50;
+	g1_color2	= 104, 128, 66;
+	g1_color3	= 70, 98, 42;
+	g1_color4	= 118, 134, 76;
+	g1_scale	= 0.080;
+	g1_scale_adj	= 0.030;
+	g1_alpha_func	= ON_FadeLate;
+	graphic2 =	onfxlef1.tga, blend;
+	g2_flip_frames	= 1;
+	g2_flip_rate	= 8;
+	g2_color1	= 84, 116, 50;
+	g2_color2	= 104, 128, 66;
+	g2_color3	= 70, 98, 42;
+	g2_color4	= 118, 134, 76;
+	g2_scale	= 0.080;
+	g2_scale_adj	= 0.030;
+	g2_alpha_func	= ON_FadeLate;
+
+}
+
+[particledef]
+{
+id	= ONGrass_Puff;
+flags	=  AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 10.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 1;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= -0.200;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.450;
+	age_adj	= 0.100;
+	alpha	= 0.750;
+	color1	= 168, 156, 126;
+	color2	= 150, 142, 114;
+	color3	= 168, 156, 126;
+	color4	= 150, 142, 114;
+	bump_scale	= 0.000;
+	scale	= 0.650;
+	scale_adj	= 0.200;
+	scale_func	= ON_Grow;
+	alpha_func	= ON_Puff;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 30.000;
+	speed	= 2.500;
+	speed_adj	= 0.800;
+	elastic	= 0.000;
+	gravity	= 0.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 250.000;
+	spread	= 10.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxpuf1.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 168, 156, 126;
+	g1_color2	= 150, 142, 114;
+	g1_color3	= 168, 156, 126;
+	g1_color4	= 150, 142, 114;
+	g1_scale	= 0.650;
+	g1_scale_adj	= 0.200;
+	g1_scale_func	= ON_Grow;
+	g1_alpha_func	= ON_Puff;
+	graphic2 =	onfxpuf2.tga, blend;
+	g2_flip_frames	= 1;
+	g2_flip_rate	= 8;
+	g2_color1	= 168, 156, 126;
+	g2_color2	= 150, 142, 114;
+	g2_color3	= 168, 156, 126;
+	g2_color4	= 150, 142, 114;
+	g2_scale	= 0.650;
+	g2_scale_adj	= 0.200;
+	g2_scale_func	= ON_Grow;
+	g2_alpha_func	= ON_Puff;
+
+}
+
+[particledef]
+{
+id	= ONHit_Core;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.100;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 10.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 1;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.100;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.080;
+	age_adj	= 0.000;
+	alpha	= 1.000;
+	color1	= 255, 214, 130;
+	color2	= 255, 250, 235;
+	color3	= 255, 214, 130;
+	color4	= 255, 250, 235;
+	bump_scale	= 0.000;
+	scale	= 0.350;
+	scale_adj	= 0.080;
+	red_func	= ON_Flash;
+	green_func	= ON_Flash;
+	blue_func	= ON_Flash;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 0.000;
+	speed	= 0.000;
+	speed_adj	= 0.000;
+	elastic	= 0.000;
+	gravity	= 0.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 0.000;
+	spread	= 0.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxflsh.tga, additive;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 255, 214, 130;
+	g1_color2	= 255, 250, 235;
+	g1_color3	= 255, 214, 130;
+	g1_color4	= 255, 250, 235;
+	g1_scale	= 0.350;
+	g1_scale_adj	= 0.080;
+	g1_red_func	= ON_Flash;
+	g1_green_func	= ON_Flash;
+	g1_blue_func	= ON_Flash;
+
+}
+
+[particledef]
+{
+id	= ONHit_Flash;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.100;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 10.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 1;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.100;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.060;
+	age_adj	= 0.000;
+	alpha	= 1.000;
+	color1	= 255, 236, 190;
+	color2	= 255, 224, 170;
+	color3	= 255, 236, 190;
+	color4	= 255, 224, 170;
+	bump_scale	= 0.000;
+	scale	= 0.800;
+	scale_adj	= 0.200;
+	red_func	= ON_Flash;
+	green_func	= ON_Flash;
+	blue_func	= ON_Flash;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 0.000;
+	speed	= 0.000;
+	speed_adj	= 0.000;
+	elastic	= 0.000;
+	gravity	= 0.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 0.000;
+	spread	= 0.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxflsh.tga, additive;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 255, 236, 190;
+	g1_color2	= 255, 224, 170;
+	g1_color3	= 255, 236, 190;
+	g1_color4	= 255, 224, 170;
+	g1_scale	= 0.800;
+	g1_scale_adj	= 0.200;
+	g1_red_func	= ON_Flash;
+	g1_green_func	= ON_Flash;
+	g1_blue_func	= ON_Flash;
+
+}
+
+[particledef]
+{
+id	= ONHit_FlashSm;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.100;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 10.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 1;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.100;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.050;
+	age_adj	= 0.000;
+	alpha	= 1.000;
+	color1	= 255, 240, 210;
+	color2	= 255, 230, 190;
+	color3	= 255, 240, 210;
+	color4	= 255, 230, 190;
+	bump_scale	= 0.000;
+	scale	= 0.450;
+	scale_adj	= 0.100;
+	red_func	= ON_Flash;
+	green_func	= ON_Flash;
+	blue_func	= ON_Flash;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 0.000;
+	speed	= 0.000;
+	speed_adj	= 0.000;
+	elastic	= 0.000;
+	gravity	= 0.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 0.000;
+	spread	= 0.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxflsh.tga, additive;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 255, 240, 210;
+	g1_color2	= 255, 230, 190;
+	g1_color3	= 255, 240, 210;
+	g1_color4	= 255, 230, 190;
+	g1_scale	= 0.450;
+	g1_scale_adj	= 0.100;
+	g1_red_func	= ON_Flash;
+	g1_green_func	= ON_Flash;
+	g1_blue_func	= ON_Flash;
+
+}
+
+[particledef]
+{
+id	= ONHit_Smoke;
+flags	=  AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 10.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 2;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.700;
+	age_adj	= 0.150;
+	alpha	= 0.800;
+	color1	= 176, 176, 172;
+	color2	= 140, 140, 136;
+	color3	= 176, 176, 172;
+	color4	= 140, 140, 136;
+	bump_scale	= 0.000;
+	scale	= 0.450;
+	scale_adj	= 0.150;
+	scale_func	= ON_Grow;
+	alpha_func	= ON_Puff;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 30.000;
+	speed	= 2.000;
+	speed_adj	= 0.600;
+	elastic	= 0.000;
+	gravity	= 0.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 150.000;
+	spread	= 25.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxpuf1.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 176, 176, 172;
+	g1_color2	= 140, 140, 136;
+	g1_color3	= 176, 176, 172;
+	g1_color4	= 140, 140, 136;
+	g1_scale	= 0.450;
+	g1_scale_adj	= 0.150;
+	g1_scale_func	= ON_Grow;
+	g1_alpha_func	= ON_Puff;
+	graphic2 =	onfxpuf2.tga, blend;
+	g2_flip_frames	= 1;
+	g2_flip_rate	= 8;
+	g2_color1	= 176, 176, 172;
+	g2_color2	= 140, 140, 136;
+	g2_color3	= 176, 176, 172;
+	g2_color4	= 140, 140, 136;
+	g2_scale	= 0.450;
+	g2_scale_adj	= 0.150;
+	g2_scale_func	= ON_Grow;
+	g2_alpha_func	= ON_Puff;
+
+}
+
+[particledef]
+{
+id	= ONHit_Sparks;
+flags	=  TOPALIGN ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.100;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 20.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 2;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.100;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.140;
+	age_adj	= 0.050;
+	alpha	= 1.000;
+	color1	= 255, 212, 120;
+	color2	= 255, 190, 96;
+	color3	= 255, 212, 120;
+	color4	= 255, 190, 96;
+	bump_scale	= 0.000;
+	scale	= 0.090;
+	scale_adj	= 0.040;
+	scale_func	= ON_Shrink;
+	red_func	= ON_Fade;
+	green_func	= ON_Fade;
+	blue_func	= ON_Fade;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 0.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 0.000;
+	speed	= 14.000;
+	speed_adj	= 4.000;
+	elastic	= 0.000;
+	gravity	= 150.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 30.000;
+	spread	= 35.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxspk1.tga, additive;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 255, 212, 120;
+	g1_color2	= 255, 190, 96;
+	g1_color3	= 255, 212, 120;
+	g1_color4	= 255, 190, 96;
+	g1_scale	= 0.090;
+	g1_scale_adj	= 0.040;
+	g1_scale_func	= ON_Shrink;
+	g1_red_func	= ON_Fade;
+	g1_green_func	= ON_Fade;
+	g1_blue_func	= ON_Fade;
+
+}
+
+[particledef]
+{
+id	= ONHit_SparksBk;
+flags	=  TOPALIGN EMITVECTOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.100;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 20.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 4;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.100;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.350;
+	age_adj	= 0.120;
+	alpha	= 1.000;
+	color1	= 255, 214, 120;
+	color2	= 255, 196, 100;
+	color3	= 255, 214, 120;
+	color4	= 255, 196, 100;
+	bump_scale	= 0.000;
+	scale	= 0.110;
+	scale_adj	= 0.040;
+	scale_func	= ON_Shrink;
+	red_func	= ON_Fade;
+	green_func	= ON_Fade;
+	blue_func	= ON_Fade;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 0.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 0.000;
+	speed	= 10.000;
+	speed_adj	= 4.000;
+	elastic	= 0.000;
+	gravity	= 100.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 40.000;
+	spread	= 180.000;
+	spread_skip	= 125.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxspk1.tga, additive;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 255, 214, 120;
+	g1_color2	= 255, 196, 100;
+	g1_color3	= 255, 214, 120;
+	g1_color4	= 255, 196, 100;
+	g1_scale	= 0.110;
+	g1_scale_adj	= 0.040;
+	g1_scale_func	= ON_Shrink;
+	g1_red_func	= ON_Fade;
+	g1_green_func	= ON_Fade;
+	g1_blue_func	= ON_Fade;
+
+}
+
+[particledef]
+{
+id	= ONLeaf_Bits;
+flags	=  AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 20.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 2;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 1.400;
+	age_adj	= 0.300;
+	alpha	= 1.000;
+	color1	= 72, 110, 46;
+	color2	= 94, 128, 58;
+	color3	= 60, 92, 38;
+	color4	= 108, 126, 64;
+	bump_scale	= 0.000;
+	scale	= 0.090;
+	scale_adj	= 0.040;
+	alpha_func	= ON_FadeLate;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 90.000;
+	roll_rot_adj	= 360.000;
+	speed	= 3.000;
+	speed_adj	= 1.000;
+	elastic	= 0.000;
+	gravity	= 30.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 200.000;
+	spread	= 70.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxlef1.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 72, 110, 46;
+	g1_color2	= 94, 128, 58;
+	g1_color3	= 60, 92, 38;
+	g1_color4	= 108, 126, 64;
+	g1_scale	= 0.090;
+	g1_scale_adj	= 0.040;
+	g1_alpha_func	= ON_FadeLate;
+	graphic2 =	onfxlef2.tga, blend;
+	g2_flip_frames	= 1;
+	g2_flip_rate	= 8;
+	g2_color1	= 72, 110, 46;
+	g2_color2	= 94, 128, 58;
+	g2_color3	= 60, 92, 38;
+	g2_color4	= 108, 126, 64;
+	g2_scale	= 0.090;
+	g2_scale_adj	= 0.040;
+	g2_alpha_func	= ON_FadeLate;
+
+}
+
+[particledef]
+{
+id	= ONLeaf_Puff;
+flags	=  AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 10.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 1;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.400;
+	age_adj	= 0.000;
+	alpha	= 0.600;
+	color1	= 156, 164, 124;
+	color2	= 136, 146, 104;
+	color3	= 156, 164, 124;
+	color4	= 136, 146, 104;
+	bump_scale	= 0.000;
+	scale	= 0.600;
+	scale_adj	= 0.200;
+	scale_func	= ON_Grow;
+	alpha_func	= ON_Puff;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 30.000;
+	speed	= 3.000;
+	speed_adj	= 0.800;
+	elastic	= 0.000;
+	gravity	= 0.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 200.000;
+	spread	= 30.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxpuf2.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 156, 164, 124;
+	g1_color2	= 136, 146, 104;
+	g1_color3	= 156, 164, 124;
+	g1_color4	= 136, 146, 104;
+	g1_scale	= 0.600;
+	g1_scale_adj	= 0.200;
+	g1_scale_func	= ON_Grow;
+	g1_alpha_func	= ON_Puff;
+
+}
+
+[particledef]
+{
+id	= ONLeaf_Twigs;
+flags	=  AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 10.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 2;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 1.000;
+	age_adj	= 0.200;
+	alpha	= 1.000;
+	color1	= 132, 110, 76;
+	color2	= 112, 92, 64;
+	color3	= 132, 110, 76;
+	color4	= 112, 92, 64;
+	bump_scale	= 0.000;
+	scale	= 0.070;
+	scale_adj	= 0.030;
+	alpha_func	= ON_FadeLate;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 360.000;
+	speed	= 5.000;
+	speed_adj	= 2.000;
+	elastic	= 0.000;
+	gravity	= 100.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 30.000;
+	spread	= 50.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxwod2.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 132, 110, 76;
+	g1_color2	= 112, 92, 64;
+	g1_color3	= 132, 110, 76;
+	g1_color4	= 112, 92, 64;
+	g1_scale	= 0.070;
+	g1_scale_adj	= 0.030;
+	g1_alpha_func	= ON_FadeLate;
+	graphic2 =	onfxwod1.tga, blend;
+	g2_flip_frames	= 1;
+	g2_flip_rate	= 8;
+	g2_color1	= 132, 110, 76;
+	g2_color2	= 112, 92, 64;
+	g2_color3	= 132, 110, 76;
+	g2_color4	= 112, 92, 64;
+	g2_scale	= 0.070;
+	g2_scale_adj	= 0.030;
+	g2_alpha_func	= ON_FadeLate;
+
+}
+
+[particledef]
+{
+id	= ONSand_Grains;
+flags	=  AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 30.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 2;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.700;
+	age_adj	= 0.150;
+	alpha	= 1.000;
+	color1	= 240, 214, 160;
+	color2	= 222, 194, 142;
+	color3	= 240, 214, 160;
+	color4	= 222, 194, 142;
+	bump_scale	= 0.000;
+	scale	= 0.022;
+	scale_adj	= 0.010;
+	alpha_func	= ON_FadeLate;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 360.000;
+	speed	= 5.000;
+	speed_adj	= 1.500;
+	elastic	= 0.000;
+	gravity	= 120.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 0.000;
+	spread	= 45.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxchp2.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 240, 214, 160;
+	g1_color2	= 222, 194, 142;
+	g1_color3	= 240, 214, 160;
+	g1_color4	= 222, 194, 142;
+	g1_scale	= 0.022;
+	g1_scale_adj	= 0.010;
+	g1_alpha_func	= ON_FadeLate;
+	graphic2 =	onfxchp1.tga, blend;
+	g2_flip_frames	= 1;
+	g2_flip_rate	= 8;
+	g2_color1	= 240, 214, 160;
+	g2_color2	= 222, 194, 142;
+	g2_color3	= 240, 214, 160;
+	g2_color4	= 222, 194, 142;
+	g2_scale	= 0.022;
+	g2_scale_adj	= 0.010;
+	g2_alpha_func	= ON_FadeLate;
+
+}
+
+[particledef]
+{
+id	= ONSand_Puff;
+flags	=  AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 28.000;
+	emit_rate_adj	= 4.000;
+	emit_delay	= 0.000;
+	emit_burst	= 1;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= -0.400;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.600;
+	age_adj	= 0.150;
+	alpha	= 1.000;
+	color1	= 222, 200, 156;
+	color2	= 206, 186, 146;
+	color3	= 214, 192, 150;
+	color4	= 196, 178, 140;
+	bump_scale	= 0.000;
+	scale	= 1.100;
+	scale_adj	= 0.300;
+	scale_func	= ON_Grow;
+	alpha_func	= ON_Puff;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 30.000;
+	speed	= 4.000;
+	speed_adj	= 1.000;
+	elastic	= 0.000;
+	gravity	= 0.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 250.000;
+	spread	= 12.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxpuf1.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 222, 200, 156;
+	g1_color2	= 206, 186, 146;
+	g1_color3	= 214, 192, 150;
+	g1_color4	= 196, 178, 140;
+	g1_scale	= 1.100;
+	g1_scale_adj	= 0.300;
+	g1_scale_func	= ON_Grow;
+	g1_alpha_func	= ON_Puff;
+	graphic2 =	onfxpuf2.tga, blend;
+	g2_flip_frames	= 1;
+	g2_flip_rate	= 8;
+	g2_color1	= 222, 200, 156;
+	g2_color2	= 206, 186, 146;
+	g2_color3	= 214, 192, 150;
+	g2_color4	= 196, 178, 140;
+	g2_scale	= 1.100;
+	g2_scale_adj	= 0.300;
+	g2_scale_func	= ON_Grow;
+	g2_alpha_func	= ON_Puff;
+
+}
+
+[particledef]
+{
+id	= ONSnow_Bits;
+flags	=  AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 40.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 1;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.750;
+	age_adj	= 0.150;
+	alpha	= 1.000;
+	color1	= 246, 248, 252;
+	color2	= 232, 238, 246;
+	color3	= 246, 248, 252;
+	color4	= 232, 238, 246;
+	bump_scale	= 0.000;
+	scale	= 0.050;
+	scale_adj	= 0.020;
+	alpha_func	= ON_FadeLate;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 180.000;
+	speed	= 4.500;
+	speed_adj	= 1.500;
+	elastic	= 0.000;
+	gravity	= 100.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 20.000;
+	spread	= 40.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxchp2.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 246, 248, 252;
+	g1_color2	= 232, 238, 246;
+	g1_color3	= 246, 248, 252;
+	g1_color4	= 232, 238, 246;
+	g1_scale	= 0.050;
+	g1_scale_adj	= 0.020;
+	g1_alpha_func	= ON_FadeLate;
+	graphic2 =	onfxpuf1.tga, blend;
+	g2_flip_frames	= 1;
+	g2_flip_rate	= 8;
+	g2_color1	= 246, 248, 252;
+	g2_color2	= 232, 238, 246;
+	g2_color3	= 246, 248, 252;
+	g2_color4	= 232, 238, 246;
+	g2_scale	= 0.220;
+	g2_scale_adj	= 0.080;
+	g2_alpha_func	= ON_FadeLate;
+
+}
+
+[particledef]
+{
+id	= ONSnow_Puff;
+flags	=  AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 15.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 1;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.900;
+	age_adj	= 0.200;
+	alpha	= 1.000;
+	color1	= 236, 240, 246;
+	color2	= 222, 228, 238;
+	color3	= 236, 240, 246;
+	color4	= 222, 228, 238;
+	bump_scale	= 0.000;
+	scale	= 0.900;
+	scale_adj	= 0.300;
+	scale_func	= ON_Grow;
+	alpha_func	= ON_Puff;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 20.000;
+	speed	= 2.000;
+	speed_adj	= 0.600;
+	elastic	= 0.000;
+	gravity	= 0.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 220.000;
+	spread	= 15.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxpuf1.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 236, 240, 246;
+	g1_color2	= 222, 228, 238;
+	g1_color3	= 236, 240, 246;
+	g1_color4	= 222, 228, 238;
+	g1_scale	= 0.900;
+	g1_scale_adj	= 0.300;
+	g1_scale_func	= ON_Grow;
+	g1_alpha_func	= ON_Puff;
+	graphic2 =	onfxpuf2.tga, blend;
+	g2_flip_frames	= 1;
+	g2_flip_rate	= 8;
+	g2_color1	= 236, 240, 246;
+	g2_color2	= 222, 228, 238;
+	g2_color3	= 236, 240, 246;
+	g2_color4	= 222, 228, 238;
+	g2_scale	= 0.900;
+	g2_scale_adj	= 0.300;
+	g2_scale_func	= ON_Grow;
+	g2_alpha_func	= ON_Puff;
+
+}
+
+[particledef]
+{
+id	= ONStone_Chips;
+flags	=  AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 20.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 2;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.700;
+	age_adj	= 0.150;
+	alpha	= 1.000;
+	color1	= 176, 172, 164;
+	color2	= 148, 144, 136;
+	color3	= 190, 184, 172;
+	color4	= 132, 128, 122;
+	bump_scale	= 0.000;
+	scale	= 0.030;
+	scale_adj	= 0.015;
+	alpha_func	= ON_FadeLate;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 360.000;
+	speed	= 7.000;
+	speed_adj	= 2.500;
+	elastic	= 0.000;
+	gravity	= 130.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 0.000;
+	spread	= 50.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxchp1.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 176, 172, 164;
+	g1_color2	= 148, 144, 136;
+	g1_color3	= 190, 184, 172;
+	g1_color4	= 132, 128, 122;
+	g1_scale	= 0.030;
+	g1_scale_adj	= 0.015;
+	g1_alpha_func	= ON_FadeLate;
+	graphic2 =	onfxchp2.tga, blend;
+	g2_flip_frames	= 1;
+	g2_flip_rate	= 8;
+	g2_color1	= 176, 172, 164;
+	g2_color2	= 148, 144, 136;
+	g2_color3	= 190, 184, 172;
+	g2_color4	= 132, 128, 122;
+	g2_scale	= 0.030;
+	g2_scale_adj	= 0.015;
+	g2_alpha_func	= ON_FadeLate;
+
+}
+
+[particledef]
+{
+id	= ONStone_Puff;
+flags	=  AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 10.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 2;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.600;
+	age_adj	= 0.150;
+	alpha	= 1.000;
+	color1	= 196, 192, 180;
+	color2	= 172, 168, 158;
+	color3	= 196, 192, 180;
+	color4	= 172, 168, 158;
+	bump_scale	= 0.000;
+	scale	= 0.600;
+	scale_adj	= 0.200;
+	scale_func	= ON_Grow;
+	alpha_func	= ON_Puff;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 30.000;
+	speed	= 2.500;
+	speed_adj	= 0.800;
+	elastic	= 0.000;
+	gravity	= 0.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 250.000;
+	spread	= 15.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxpuf1.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 196, 192, 180;
+	g1_color2	= 172, 168, 158;
+	g1_color3	= 196, 192, 180;
+	g1_color4	= 172, 168, 158;
+	g1_scale	= 0.600;
+	g1_scale_adj	= 0.200;
+	g1_scale_func	= ON_Grow;
+	g1_alpha_func	= ON_Puff;
+	graphic2 =	onfxpuf2.tga, blend;
+	g2_flip_frames	= 1;
+	g2_flip_rate	= 8;
+	g2_color1	= 196, 192, 180;
+	g2_color2	= 172, 168, 158;
+	g2_color3	= 196, 192, 180;
+	g2_color4	= 172, 168, 158;
+	g2_scale	= 0.600;
+	g2_scale_adj	= 0.200;
+	g2_scale_func	= ON_Grow;
+	g2_alpha_func	= ON_Puff;
+
+}
+
+[particledef]
+{
+id	= ONWater_Column;
+flags	=  INITIALYCLIP AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.100;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 50.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 5;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.100;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 1.300;
+	age_adj	= 0.400;
+	alpha	= 0.700;
+	color1	= 232, 240, 244;
+	color2	= 214, 226, 234;
+	color3	= 232, 240, 244;
+	color4	= 214, 226, 234;
+	bump_scale	= 0.000;
+	scale	= 0.260;
+	scale_adj	= 0.080;
+	scale_func	= ON_Grow;
+	alpha_func	= ON_Fade;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 60.000;
+	speed	= 5.500;
+	speed_adj	= 2.000;
+	elastic	= 0.000;
+	gravity	= 120.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 200.000;
+	spread	= 6.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxspl1.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 232, 240, 244;
+	g1_color2	= 214, 226, 234;
+	g1_color3	= 232, 240, 244;
+	g1_color4	= 214, 226, 234;
+	g1_scale	= 0.260;
+	g1_scale_adj	= 0.080;
+	g1_scale_func	= ON_Grow;
+	g1_alpha_func	= ON_Fade;
+
+}
+
+[particledef]
+{
+id	= ONWater_Ring;
+flags	=  YAWANDPITCH AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.500;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 4.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 1;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.500;
+	y_offset	= 0.020;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 1.000;
+	age_adj	= 0.100;
+	alpha	= 0.800;
+	color1	= 236, 242, 248;
+	color2	= 226, 234, 242;
+	color3	= 236, 242, 248;
+	color4	= 226, 234, 242;
+	bump_scale	= 0.000;
+	scale	= 1.000;
+	scale_adj	= 0.150;
+	scale_func	= ON_Ring;
+	alpha_func	= ON_Puff;
+
+	orientation	= 0.000, 90.000, 0.000;
+	orientationadj	= 360.000, 0.000, 0.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 15.000;
+	speed	= 0.000;
+	speed_adj	= 0.000;
+	elastic	= 0.000;
+	gravity	= 0.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 0.000;
+	spread	= 0.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxrng1.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 236, 242, 248;
+	g1_color2	= 226, 234, 242;
+	g1_color3	= 236, 242, 248;
+	g1_color4	= 226, 234, 242;
+	g1_scale	= 1.000;
+	g1_scale_adj	= 0.150;
+	g1_scale_func	= ON_Ring;
+	g1_alpha_func	= ON_Puff;
+
+}
+
+[particledef]
+{
+id	= ONWater_Spray;
+flags	=  INITIALYCLIP AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.100;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 10.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 8;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.100;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.800;
+	age_adj	= 0.200;
+	alpha	= 0.600;
+	color1	= 236, 242, 246;
+	color2	= 220, 230, 238;
+	color3	= 236, 242, 246;
+	color4	= 220, 230, 238;
+	bump_scale	= 0.000;
+	scale	= 0.120;
+	scale_adj	= 0.050;
+	scale_func	= ON_Grow;
+	alpha_func	= ON_Fade;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 120.000;
+	speed	= 4.000;
+	speed_adj	= 1.500;
+	elastic	= 0.000;
+	gravity	= 100.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 40.000;
+	spread	= 40.000;
+	spread_skip	= 10.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxspl1.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 236, 242, 246;
+	g1_color2	= 220, 230, 238;
+	g1_color3	= 236, 242, 246;
+	g1_color4	= 220, 230, 238;
+	g1_scale	= 0.120;
+	g1_scale_adj	= 0.050;
+	g1_scale_func	= ON_Grow;
+	g1_alpha_func	= ON_Fade;
+
+}
+
+[particledef]
+{
+id	= ONWood_Bits;
+flags	=  AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 15.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 2;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.900;
+	age_adj	= 0.200;
+	alpha	= 1.000;
+	color1	= 206, 170, 118;
+	color2	= 182, 146, 100;
+	color3	= 218, 188, 138;
+	color4	= 164, 130, 88;
+	bump_scale	= 0.000;
+	scale	= 0.110;
+	scale_adj	= 0.050;
+	alpha_func	= ON_FadeLate;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 60.000;
+	roll_rot_adj	= 360.000;
+	speed	= 5.000;
+	speed_adj	= 2.000;
+	elastic	= 0.000;
+	gravity	= 110.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 0.000;
+	spread	= 55.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxwod1.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 206, 170, 118;
+	g1_color2	= 182, 146, 100;
+	g1_color3	= 218, 188, 138;
+	g1_color4	= 164, 130, 88;
+	g1_scale	= 0.110;
+	g1_scale_adj	= 0.050;
+	g1_alpha_func	= ON_FadeLate;
+	graphic2 =	onfxwod2.tga, blend;
+	g2_flip_frames	= 1;
+	g2_flip_rate	= 8;
+	g2_color1	= 206, 170, 118;
+	g2_color2	= 182, 146, 100;
+	g2_color3	= 218, 188, 138;
+	g2_color4	= 164, 130, 88;
+	g2_scale	= 0.110;
+	g2_scale_adj	= 0.050;
+	g2_alpha_func	= ON_FadeLate;
+
+}
+
+[particledef]
+{
+id	= ONWood_Puff;
+flags	=  AMBIENTCOLOR ;
+move	=  NORMAL ;
+lod	= 0.000;
+
+	emit_dur	= 0.200;
+	emit_dur_adj	= 0.000;
+	emit_rate	= 10.000;
+	emit_rate_adj	= 0.000;
+	emit_delay	= 0.000;
+	emit_burst	= 2;
+	emit_maxoverride	= 0;
+	emit_dur	= 0.200;
+	y_offset	= 0.000;
+	z_offset	= 0.000;
+	emit_shape	= 0;
+	emit_shape_size	= 0.000, 0.000, 0.000;
+	emit_shape_size_skip	= 0.000, 0.000, 0.000;
+
+	age	= 0.500;
+	age_adj	= 0.100;
+	alpha	= 0.800;
+	color1	= 212, 188, 148;
+	color2	= 194, 172, 136;
+	color3	= 212, 188, 148;
+	color4	= 194, 172, 136;
+	bump_scale	= 0.000;
+	scale	= 0.500;
+	scale_adj	= 0.150;
+	scale_func	= ON_Grow;
+	alpha_func	= ON_Puff;
+
+	orientation	= 0.000, 0.000, 0.000;
+	orientationadj	= 0.000, 0.000, 360.000;
+	yaw_rot	= 0.000;
+	yaw_rot_adj	= 0.000;
+	pitch_rot	= 0.000;
+	pitch_rot_adj	= 0.000;
+	roll_rot	= 0.000;
+	roll_rot_adj	= 30.000;
+	speed	= 2.500;
+	speed_adj	= 0.500;
+	elastic	= 0.000;
+	gravity	= 0.000;
+	gravity_mask	= 1.000, 1.000, 1.000;
+	drag	= 200.000;
+	spread	= 10.000;
+	spread_skip	= 0.000;
+	orbitalspeed	= 0.000;
+	orbitalspeed_adj	= 0.000;
+	orbital_axis	= 0.000, 1.000, 0.000;
+	graphic1 =	onfxpuf2.tga, blend;
+	g1_flip_frames	= 1;
+	g1_flip_rate	= 8;
+	g1_color1	= 212, 188, 148;
+	g1_color2	= 194, 172, 136;
+	g1_color3	= 212, 188, 148;
+	g1_color4	= 194, 172, 136;
+	g1_scale	= 0.500;
+	g1_scale_adj	= 0.150;
+	g1_scale_func	= ON_Grow;
+	g1_alpha_func	= ON_Puff;
+	graphic2 =	onfxpuf1.tga, blend;
+	g2_flip_frames	= 1;
+	g2_flip_rate	= 8;
+	g2_color1	= 212, 188, 148;
+	g2_color2	= 194, 172, 136;
+	g2_color3	= 212, 188, 148;
+	g2_color4	= 194, 172, 136;
+	g2_scale	= 0.500;
+	g2_scale_adj	= 0.150;
+	g2_scale_func	= ON_Grow;
+	g2_alpha_func	= ON_Puff;
+
+}

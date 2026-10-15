@@ -2,6 +2,7 @@
 
 #include <runtime/devtools/debug_control_ids.h>
 #include <runtime/devtools/entities_window.h>
+#include <runtime/devtools/ui_kit.h>
 
 #include <base/io/fixed.h>
 
@@ -265,7 +266,7 @@ void AiWindow::draw_detail_pane() {
 void AiWindow::draw_tables() {
 	ImGui::SeparatorText("Groups");
 	if (group_rows_.empty()) {
-		ImGui::TextDisabled("No groups with members.");
+		ui_kit::empty_state("No groups with members.");
 	} else {
 		// Kill is the kill_group row (the one EntityCommands mutator MCP
 		// drives), queued through the Entities channel and its authority fact.
@@ -282,7 +283,7 @@ void AiWindow::draw_tables() {
 	}
 	ImGui::SeparatorText("Routes");
 	if (channel_rows_.empty()) {
-		ImGui::TextDisabled("No nav channels.");
+		ui_kit::empty_state("No nav channels.");
 	} else {
 		for (const std::string &row : channel_rows_)
 			ImGui::TextUnformatted(row.c_str());
@@ -291,12 +292,12 @@ void AiWindow::draw_tables() {
 
 void AiWindow::draw(ImGuiPass &pass, uint64_t) {
 	// The Game-view layers, toggled here or from the Overlays menu.
+	ui_kit::WrapRow row;
+	row.next(ui_kit::text_width("Game view:"));
 	ImGui::TextUnformatted("Game view:");
 	for (auto &layer : layers_) {
-		ImGui::SameLine();
 		bool on = layer->enabled();
-		if (ImGui::Checkbox(layer->label(), &on)) pass.set_overlay_enabled(*layer, on);
-		if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) ImGui::SetTooltip("%s", layer->tooltip());
+		if (ui_kit::check(row, layer->label(), &on, layer->tooltip())) pass.set_overlay_enabled(*layer, on);
 	}
 	ImGui::TextUnformatted(counters_.c_str());
 	if (!snapshot_.valid) return;

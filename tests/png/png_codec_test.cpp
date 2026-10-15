@@ -197,8 +197,21 @@ int test_png_encode() {
 	TEST_EXPECT(!grey.empty() && grey[24] == 8 && grey[25] == 0 && decode_png_gray(grey, levels, error) &&
 	            levels.width == 5 && levels.max_value == 255 && levels.samples[4] == 19 && levels.samples[8] == 7);
 	TEST_EXPECT(encode_png_gray(nullptr, 5, 2).empty() && encode_png_gray(indices.data(), 0, 2).empty());
-	std::printf("encode: an RGBA image, a palette image (its PLTE, its tRNS) and a grey image written and read back "
-	            "as they were\n");
+	// An RGB image (colour type 2, three samples a pixel): read back as written, opaque.
+	std::vector<uint8_t> rgb;
+	for (size_t i = 0; i < image.pixels.size(); i += 4)
+		rgb.insert(rgb.end(), image.pixels.begin() + std::ptrdiff_t(i), image.pixels.begin() + std::ptrdiff_t(i + 3));
+	const std::vector<uint8_t> three = encode_png_rgb(rgb.data(), 5, 3);
+	TEST_EXPECT(png_header_size(three, width, height) && width == 5 && height == 3 && three[24] == 8 && three[25] == 2);
+	TEST_EXPECT(decode_png(three, back, error) && back.width == 5 && back.height == 3);
+	bool same = back.pixels.size() == image.pixels.size();
+	for (size_t i = 0; same && i < back.pixels.size(); i += 4)
+		same = back.pixels[i] == image.pixels[i] && back.pixels[i + 1] == image.pixels[i + 1] &&
+		       back.pixels[i + 2] == image.pixels[i + 2] && back.pixels[i + 3] == 255;
+	TEST_EXPECT(same);
+	TEST_EXPECT(encode_png_rgb(nullptr, 5, 3).empty() && encode_png_rgb(rgb.data(), 5, 0).empty());
+	std::printf("encode: an RGBA image, an RGB image, a palette image (its PLTE, its tRNS) and a grey image written "
+	            "and read back as they were\n");
 	return 0;
 }
 

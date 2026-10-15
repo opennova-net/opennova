@@ -1,0 +1,1311 @@
+#include <editor/preview/mission_map.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <unordered_set>
+#include <variant>
+
+#include <base/io/fixed.h>
+#include <base/io/hash.h>
+#include <editor/assets/project_asset_source.h>
+#include <editor/graph/asset_graph.h>
+#include <editor/graph/display_names.h>
+#include <editor/documents/mission_document.h>
+#include <editor/model/document.h>
+#include <editor/preview/mission_map_canvas.h>
+#include <editor/preview/mission_overlay.h>
+#include <editor/preview/mission_source.h>
+#include <editor/preview/option_reads.h>
+#include <editor/preview/viewport_device.h>
+#include <editor/session/request_factories.h>
+#include <editor/session/view/session_view.h>
+#include <editor/preview/terrain_brush_spaces.h>
+#include <editor/preview/terrain_view_commands.h>
+#include <formats/mission/bms.h>
+#include <formats/mission/mission.h>
+#include <formats/trn/charmap_legend.h>
+#include <runtime/hud/hud_map_view.h>
+#include <runtime/hud/hud_math.h>
+#include <runtime/mission/mission_sidecars.h>
+
+namespace opennova::editor {
+
+// A SetViewport's camera member, {center?, zoom?}, over `camera`: false, nothing changed, with why.
+bool mission_map_camera_from_json(const io::JsonValue &json, MissionMapCamera &camera, std::string &error);
+
+// On the wire: {center: [x, y], zoom, scale (read only: metres a pixel at the device's size)}.
+io::JsonValue mission_map_camera_to_json(const MissionMapCamera &camera, int width);
+
+// Every entity (the scene's order) then every area, shown or not, so an index is stable within a frame; `footprints`
+// (the scene's entities' order, may be shorter) the entities' models placed.
+std::vector<MissionMapMark> mission_map_marks(const MissionScene &scene, const MissionMapOptions &options,
+		const MissionMapView &view, const std::vector<MissionMapFootprint> *footprints = nullptr);
+
+bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions &held, std::string &error);
+
+namespace {
+
+using io::JsonValue;
+using io::json_number;
+using io::json_string;
+
+// The record type of the commander map grid's origin marker (Map Centerpoint, items.def 102043).
+constexpr int64_t kMapCenterpointType = 2043;
+
+const Document *document_of(const ViewportInput &input) {
+	return input.document ? records_of(*input.document) : nullptr;
+}
+
+const Selection *selection_of(const ViewportInput &input, const Document &document) {
+	const DocumentsView &documents = input.view.documents;
+	return documents.active == document.path() ? &documents.selection : nullptr;
+}
+
+std::string title_of(const SessionView &view, const Document &document, const NodeAddress &record) {
+	const AssetGraph *graph = view.findings.graph.get();
+	if (!graph) return record_display(document, record, nullptr);
+	const GraphNameSource names(*graph);
+	return record_display(document, record, &names);
+}
+
+bool read_bool(const JsonValue &json, const char *member, bool &out, std::string &error) {
+	const JsonValue *value = json.get(member);
+	if (!value) return true;
+	if (!value->is_bool()) {
+		error = std::string(member) + " is true or false.";
+		return false;
+	}
+	out = value->boolean;
+	return true;
+}
+
+// The marks' pixel slack past the picture's edge: a pin half off it still shows.
+constexpr float kOffPicture = 16.0f;
+// The time a follow gives the models' outlines: the first picture's, then a frame's (ADR 0046 S14's budgets for the
+// mission's device: a first picture within 12 ms, 4 ms a frame after).
+constexpr int64_t kOutlinesFirstUs = 12000;
+constexpr int64_t kOutlinesFrameUs = 4000;
+
+} // namespace
+
+// --- the camera and the view ---------------------------------------------------------------------
+
+io::JsonValue mission_map_camera_to_json(const MissionMapCamera &camera, int width) {
+	JsonValue out = JsonValue::make_object();
+	JsonValue center = JsonValue::make_array();
+	center.push(json_number(camera.center[0]));
+	center.push(json_number(camera.center[1]));
+	out.set("center", std::move(center));
+	out.set("zoom", json_number(camera.zoom));
+	out.set("scale", json_number(mission_map_view(camera, std::max(width, 1), 1).scale));
+	return out;
+}
+
+bool mission_map_camera_from_json(const io::JsonValue &json, MissionMapCamera &camera, std::string &error) {
+	if (!json.is_object()) {
+		error = "camera is an object: {center?: [x, y], zoom?}.";
+		return false;
+	}
+	MissionMapCamera out = camera;
+	for (const auto &member : json.object) {
+		if (member.key == "center") {
+			const JsonValue &value = member.value;
+			if (!value.is_array() || value.array.size() != 2 || !value.array[0].is_number() || !value.array[1].is_number() ||
+					!std::isfinite(value.array[0].number) || !std::isfinite(value.array[1].number)) {
+				error = "camera.center is [x, y], mission metres.";
+				return false;
+			}
+			out.center[0] = value.array[0].number;
+			out.center[1] = value.array[1].number;
+		} else if (member.key == "zoom") {
+			const JsonValue &value = member.value;
+			if (!value.is_number() || !(value.number >= kMissionMapZoomMin) || !(value.number <= kMissionMapZoomMax)) {
+				error = "camera.zoom is " + std::to_string(kMissionMapZoomMin).substr(0, 3) + " to " +
+				        std::to_string(int(kMissionMapZoomMax)) + " (the commander map's zoom: metres across = zoom x 327.68).";
+				return false;
+			}
+			out.zoom = float(value.number);
+		} else if (member.key != "scale") {
+			error = "camera takes center and zoom, not " + member.key + ".";
+			return false;
+		}
+	}
+	camera = out;
+	return true;
+}
+
+MissionMapView mission_map_view(const MissionMapCamera &camera, int width, int height, bool flip_180) {
+	MissionMapView view;
+	view.flip_180 = flip_180;
+	view.width = width;
+	view.height = height;
+	view.center[0] = camera.center[0];
+	view.center[1] = camera.center[1];
+	view.zoom = camera.zoom;
+	if (width <= 0 || height <= 0) return view;
+	// The CMAP's render over a payload rect that is the whole picture: the rect into the 1024 x 768 design space,
+	// the zoom's scale over the scaled width x 200 [orig: CMapWindow_HandleEvent @0x549861..0x5498b3 ->
+	// HUD_BuildMapOverlayView mode 4 @0x5a7f29..0x5a803c; hud::CommandMapView::render].
+	hud::CommandMapView cmap;
+	cmap.view.zoom = camera.zoom;
+	hud::HudMinimapInput base;
+	base.surface_w = float(width);
+	base.surface_h = float(height);
+	const int32_t scaled_800 = hud::map_view_design_to_device(800, float(width) / 800.0f);
+	cmap.render(hud::MapViewRect{ 0, 0, width, height }, scaled_800, bms::to_fixed_16_16(camera.center[0]),
+			bms::to_fixed_16_16(camera.center[1]), 0, base);
+	view.scale = base.window_scale > 0.0f ? base.window_scale : 1.0f;
+	// The compile's pixel rect: the design rect back onto the surface, its middle truncated [orig: HUD_DrawMapOverlay
+	// @0x5a63b5..0x5a642e; hud_minimap.cpp make_view].
+	const int x1 = int(hud::scale_axis(base.rect_x1, base.surface_w, hud::kDesignWidth));
+	const int x2 = int(hud::scale_axis(base.rect_x2, base.surface_w, hud::kDesignWidth));
+	const int y1 = int(hud::scale_axis(base.rect_y1, base.surface_h, hud::kDesignHeight));
+	const int y2 = int(hud::scale_axis(base.rect_y2, base.surface_h, hud::kDesignHeight));
+	view.middle_x = float(int((float(x1) + float(x2)) * 0.5f));
+	view.middle_y = float(int((float(y1) + float(y2)) * 0.5f));
+	return view;
+}
+
+void MissionMapView::project(double x, double y, float &px, float &py) const {
+	// Mission 16.16 to the map's pixels, north up: +Y negated [orig: Terrain_FixedPointToWorldFloat @0x607060].
+	const float inv = 1.0f / std::max(scale, 1e-6f);
+	const int32_t dx = int32_t(uint32_t(bms::to_fixed_16_16(x)) - uint32_t(bms::to_fixed_16_16(center[0])));
+	const int32_t dy = int32_t(uint32_t(bms::to_fixed_16_16(y)) - uint32_t(bms::to_fixed_16_16(center[1])));
+	float ox = float(dx) * inv / io::kFp16One, oy = float(dy) * inv * -io::kInvFp16One;
+	// The half turn about the centre (MissionMapView::flip_180): both offsets the other way.
+	if (flip_180) {
+		ox = -ox;
+		oy = -oy;
+	}
+	px = middle_x + ox;
+	py = middle_y + oy;
+}
+
+void MissionMapView::unproject(float px, float py, double &x, double &y) const {
+	double ox = double(px - middle_x), oy = double(py - middle_y);
+	if (flip_180) {
+		ox = -ox;
+		oy = -oy;
+	}
+	x = center[0] + ox * double(scale);
+	y = center[1] - oy * double(scale);
+}
+
+float mission_map_zoom_for(double metres, int width) {
+	(void)width;
+	// Across the picture the map shows zoom x 65536 / 200 metres, whatever its width (the scale's law).
+	return std::clamp(float(metres * 200.0 / io::kFp16OneD), kMissionMapZoomMin, kMissionMapZoomMax);
+}
+
+void mission_map_tile_texels(std::vector<uint8_t> &rgba) {
+	for (size_t i = 3; i < rgba.size(); i += 4) rgba[i] = rgba[i] ? 255 : 0;
+}
+
+// --- the options -----------------------------------------------------------------------------------
+
+bool MissionMapOptions::operator==(const MissionMapOptions &o) const {
+	return items == o.items && buildings == o.buildings && markers == o.markers && organics == o.organics &&
+	       areas == o.areas && paths == o.paths && labels == o.labels && links == o.links && grid == o.grid &&
+	       text == o.text && stick == o.stick && snap == o.snap && color_by == o.color_by && background == o.background &&
+	       water == o.water;
+}
+
+const char *mission_map_background_token(MissionMapBackground background) {
+	switch (background) {
+	case MissionMapBackground::Colour: return "colour";
+	case MissionMapBackground::Height: return "height";
+	case MissionMapBackground::Delta: return "delta";
+	case MissionMapBackground::Flatness: return "flatness";
+	case MissionMapBackground::Surface: return "surface";
+	case MissionMapBackground::None: return "none";
+	case MissionMapBackground::kCount: break;
+	}
+	return "colour";
+}
+
+bool mission_map_background_from_token(const std::string &token, MissionMapBackground &out) {
+	for (size_t i = 0; i < size_t(MissionMapBackground::kCount); ++i)
+		if (token == mission_map_background_token(MissionMapBackground(i))) {
+			out = MissionMapBackground(i);
+			return true;
+		}
+	return false;
+}
+
+io::JsonValue mission_map_options_to_json(const MissionMapOptions &options) {
+	JsonValue marks = JsonValue::make_object();
+	marks.set("items", JsonValue::make_bool(options.items));
+	marks.set("buildings", JsonValue::make_bool(options.buildings));
+	marks.set("markers", JsonValue::make_bool(options.markers));
+	marks.set("organics", JsonValue::make_bool(options.organics));
+	marks.set("areas", JsonValue::make_bool(options.areas));
+	marks.set("paths", JsonValue::make_bool(options.paths));
+	marks.set("labels", JsonValue::make_bool(options.labels));
+	marks.set("links", JsonValue::make_bool(options.links));
+	JsonValue out = JsonValue::make_object();
+	out.set("marks", std::move(marks));
+	out.set("color_by", JsonValue::make_string(mission_color_by_token(options.color_by)));
+	out.set("grid", JsonValue::make_bool(options.grid));
+	out.set("text", JsonValue::make_bool(options.text));
+	out.set("stick", JsonValue::make_bool(options.stick));
+	out.set("snap", json_number(options.snap));
+	out.set("background", JsonValue::make_string(mission_map_background_token(options.background)));
+	out.set("water", JsonValue::make_bool(options.water));
+	return out;
+}
+
+bool mission_map_options_from_json(const io::JsonValue &json, MissionMapOptions &held, std::string &error) {
+	if (!json.is_object()) {
+		error = "options is an object: {marks?, color_by?, grid?, text?, stick?, snap?, background?, water?}.";
+		return false;
+	}
+	MissionMapOptions out = held;
+	for (const auto &member : json.object) {
+		const std::string &name = member.key;
+		if (name == "marks") {
+			if (!member.value.is_object()) {
+				error = "options.marks is an object of the kinds shown.";
+				return false;
+			}
+			for (const auto &mark : member.value.object) {
+				bool *into = mark.key == "items" ? &out.items : mark.key == "buildings" ? &out.buildings
+						: mark.key == "markers" ? &out.markers : mark.key == "organics" ? &out.organics
+						: mark.key == "areas" ? &out.areas : mark.key == "paths" ? &out.paths
+						: mark.key == "labels" ? &out.labels : mark.key == "links" ? &out.links : nullptr;
+				if (!into) {
+					error = "options.marks takes items, buildings, markers, organics, areas, paths, labels and links, not " +
+					        mark.key + ".";
+					return false;
+				}
+				if (!read_json_bool(mark.value, *into, error,
+							"options.marks." + mark.key + " is true or false."))
+					return false;
+			}
+		} else if (name == "color_by") {
+			if (!read_json_token(member.value, mission_color_by_from_token, out.color_by, error,
+						"options.color_by is team or group."))
+				return false;
+		} else if (name == "background") {
+			if (!read_json_token(member.value, mission_map_background_from_token, out.background,
+						error, "options.background is colour, height, delta, flatness, surface or none."))
+				return false;
+		} else if (name == "grid" || name == "text" || name == "stick" || name == "water") {
+			bool &into = name == "grid" ? out.grid : name == "text" ? out.text : name == "stick" ? out.stick : out.water;
+			if (!read_bool(json, name.c_str(), into, error)) return false;
+		} else if (name == "snap") {
+			if (!member.value.is_number() || !(member.value.number >= 0.0) || !(member.value.number <= 1000.0)) {
+				error = "options.snap is metres, 0 (free) to 1000.";
+				return false;
+			}
+			out.snap = float(member.value.number);
+		} else {
+			error = "options takes marks, color_by, grid, text, stick, snap, background and water, not " + name + ".";
+			return false;
+		}
+	}
+	// Water is the original mission editor's over its heights' views; the colour map shows the commander map's own
+	// (its water cut as the game's map cuts it): asked over the colour map, the surface classes or none it is refused,
+	// and a background taken back to them drops it.
+	if (out.water && out.background != MissionMapBackground::Height && out.background != MissionMapBackground::Delta &&
+	    out.background != MissionMapBackground::Flatness) {
+		const JsonValue *asked = json.get("water");
+		if (asked && asked->is_bool() && asked->boolean) {
+			error = "options.water lays the original mission editor's water over the height, delta or flatness background; "
+			        "the colour map shows the commander map's own.";
+			return false;
+		}
+		out.water = false;
+	}
+	held = out;
+	return true;
+}
+
+// --- the marks -------------------------------------------------------------------------------------
+
+uint32_t mission_map_rgb(MissionPool pool, int team, int group, MissionColorBy by) {
+	if (by == MissionColorBy::Group) {
+		if (const uint32_t rgb = mission_group_rgb(group)) return rgb;
+	} else if (team == 1 || team == 2) {
+		return mission_team_rgb(team);
+	}
+	switch (pool) {
+	case MissionPool::Item: return kMissionItemRgb;
+	case MissionPool::Building: return kMissionBuildingRgb;
+	case MissionPool::Marker: return kMissionMarkerRgb;
+	case MissionPool::Organic: return kMissionOrganicRgb;
+	}
+	return kMissionItemRgb;
+}
+
+std::vector<MissionMapMark> mission_map_marks(const MissionScene &scene, const MissionMapOptions &options,
+		const MissionMapView &view, const std::vector<MissionMapFootprint> *footprints) {
+	std::vector<MissionMapMark> out;
+	out.reserve(scene.entities().size() + scene.areas().size());
+	const auto on_picture = [&](float px, float py, float reach) {
+		const float margin = kOffPicture + reach;
+		return px >= -margin && py >= -margin && px <= float(view.width) + margin && py <= float(view.height) + margin;
+	};
+	for (size_t i = 0; i < scene.entities().size(); ++i) {
+		const MissionEntityMark &entity = scene.entities()[i];
+		MissionMapMark mark;
+		mark.record = NodeAddress{ entity.row, entity.kind, 0 };
+		mark.kind = mission_pool_token(entity.pool);
+		mark.pool = entity.pool;
+		mark.team = entity.team;
+		mark.x = entity.x;
+		mark.y = entity.y;
+		mark.entity = int(i);
+		view.project(mark.x, mark.y, mark.px, mark.py);
+		float reach = 0.0f;
+		if (footprints && i < footprints->size() && (*footprints)[i].outline && !(*footprints)[i].hull.empty()) {
+			const MissionMapFootprint &footprint = (*footprints)[i];
+			mark.footprint = &footprint;
+			reach = float((footprint.reach + std::hypot(footprint.centre[0] - entity.x, footprint.centre[1] - entity.y)) /
+					double(view.scale));
+			mark.outlined = float(footprint.reach / double(view.scale)) >= kMissionMapOutlinePx * 0.5f;
+		}
+		const bool kind_on = entity.pool == MissionPool::Item ? options.items
+				: entity.pool == MissionPool::Building ? options.buildings
+				: entity.pool == MissionPool::Marker ? options.markers : options.organics;
+		mark.shown = kind_on && on_picture(mark.px, mark.py, reach);
+		out.push_back(mark);
+	}
+	for (size_t i = 0; i < scene.areas().size(); ++i) {
+		const MissionAreaMark &area = scene.areas()[i];
+		MissionMapMark mark;
+		mark.record = NodeAddress{ area.row, area.kind, 0 };
+		mark.kind = "area";
+		mark.x = (area.min[0] + area.max[0]) * 0.5;
+		mark.y = (area.min[1] + area.max[1]) * 0.5;
+		mark.area = int(i);
+		view.project(mark.x, mark.y, mark.px, mark.py);
+		mark.shown = options.areas && on_picture(mark.px, mark.py, 0.0f);
+		out.push_back(mark);
+	}
+	return out;
+}
+
+int pick_mission_map_mark(const std::vector<MissionMapMark> &marks, const MissionMapView &view, float x, float y) {
+	// A pin first: it is drawn over the wireframes.
+	int best = -1;
+	float best_distance = kMissionPickSlop * kMissionPickSlop;
+	for (size_t i = 0; i < marks.size(); ++i) {
+		const MissionMapMark &mark = marks[i];
+		if (!mark.shown || mark.outlined) continue;
+		const float dx = mark.px - x, dy = mark.py - y, distance = dx * dx + dy * dy;
+		// The later drawn (an area over the entities, a later entity over an earlier) takes a tie.
+		if (distance <= best_distance) {
+			best_distance = distance;
+			best = int(i);
+		}
+	}
+	if (best >= 0) return best;
+	// Then a wireframe: one whose model the point is on, else one whose footprint is within the slop; the smaller
+	// footprint first.
+	double mx = 0.0, my = 0.0;
+	view.unproject(x, y, mx, my);
+	const double slop = double(kMissionPickSlop) * double(view.scale);
+	double best_score = INFINITY, best_area = INFINITY;
+	for (size_t i = 0; i < marks.size(); ++i) {
+		const MissionMapMark &mark = marks[i];
+		if (!mark.shown || !mark.outlined) continue;
+		const double distance = mark.footprint->distance(mx, my);
+		if (distance > slop) continue;
+		const double score = mark.footprint->covers(mx, my) ? 0.0 : distance + slop;
+		if (score < best_score || (score == best_score && mark.footprint->area <= best_area)) {
+			best_score = score;
+			best_area = mark.footprint->area;
+			best = int(i);
+		}
+	}
+	return best;
+}
+
+std::vector<NodeAddress> mission_map_box_records(const std::vector<MissionMapMark> &marks, const MissionMapView &view,
+		CanvasPoint a, CanvasPoint b) {
+	const float x0 = std::min(a.x, b.x), x1 = std::max(a.x, b.x), y0 = std::min(a.y, b.y), y1 = std::max(a.y, b.y);
+	// The box in the mission: its two corners unprojected, each axis's least and most (north up the picture's top is
+	// its north edge; a RotateMap180 map's, its south).
+	double ax = 0.0, ay = 0.0, bx = 0.0, by = 0.0;
+	view.unproject(x0, y0, ax, ay);
+	view.unproject(x1, y1, bx, by);
+	const double west = std::min(ax, bx), east = std::max(ax, bx), south = std::min(ay, by), north = std::max(ay, by);
+	std::vector<NodeAddress> out;
+	for (const MissionMapMark &mark : marks) {
+		if (!mark.shown) continue;
+		const bool taken = mark.outlined ? mark.footprint->meets(west, south, east, north)
+		                                 : mark.px >= x0 && mark.px <= x1 && mark.py >= y0 && mark.py <= y1;
+		if (taken) out.push_back(mark.record);
+	}
+	return out;
+}
+
+bool mission_map_handle_point(const MissionPressed &area, MissionHandle handle, double &x, double &y) {
+	if (!area.area || !(mission_handle_is_edge(handle) || mission_handle_is_corner(handle))) return false;
+	const double mx = (area.min[0] + area.max[0]) * 0.5, my = (area.min[1] + area.max[1]) * 0.5;
+	x = mx;
+	y = my;
+	switch (handle) {
+	case MissionHandle::XMin: x = area.min[0]; break;
+	case MissionHandle::XMax: x = area.max[0]; break;
+	case MissionHandle::YMin: y = area.min[1]; break;
+	case MissionHandle::YMax: y = area.max[1]; break;
+	case MissionHandle::XMinYMin: x = area.min[0], y = area.min[1]; break;
+	case MissionHandle::XMaxYMin: x = area.max[0], y = area.min[1]; break;
+	case MissionHandle::XMaxYMax: x = area.max[0], y = area.max[1]; break;
+	case MissionHandle::XMinYMax: x = area.min[0], y = area.max[1]; break;
+	default: return false;
+	}
+	return true;
+}
+
+int mission_map_route(const MissionScene &scene) {
+	for (size_t i = 0; i < scene.paths().size(); ++i)
+		if (scene.paths()[i].flags & uint32_t(bms::WaypointFlags::PlayerRoute)) return int(i);
+	return -1;
+}
+
+// --- MissionMapViewport ----------------------------------------------------------------------------
+
+MissionMapViewport::MissionMapViewport(std::string path) :
+		ViewportModel(ViewportKind::Map, std::move(path), ViewportState{ 512, 512 }) {}
+
+std::unique_ptr<ViewportModel> MissionMapViewport::make(const std::string &path) {
+	return std::make_unique<MissionMapViewport>(path);
+}
+
+ViewportStatus MissionMapViewport::status() const {
+	return reason_ == Reason::Ready ? ViewportStatus::Ready : ViewportStatus::Empty;
+}
+
+const char *MissionMapViewport::reason() const {
+	switch (reason_) {
+	case Reason::NoProject: return "no_project";
+	case Reason::NoMission: return "no_mission";
+	case Reason::Ready: break;
+	}
+	return "ready";
+}
+
+std::string MissionMapViewport::message() const {
+	switch (reason_) {
+	case Reason::NoProject: return "Open a project to see its missions.";
+	case Reason::NoMission: return "Open a mission to see its map.";
+	case Reason::Ready: break;
+	}
+	return std::string();
+}
+
+std::unique_ptr<CanvasHalf> MissionMapViewport::make_canvas() const {
+	return std::make_unique<MissionMapCanvas>();
+}
+
+std::vector<MissionMapMark> MissionMapViewport::marks(int width, int height) const {
+	if (reason_ != Reason::Ready) return {};
+	return mission_map_marks(scene_, options_, view(width, height), &footprints_);
+}
+
+bool MissionMapViewport::pressed(const NodeAddress &record, MissionPressed &out) const {
+	out = MissionPressed();
+	out.record = record;
+	if (const MissionEntityMark *entity = scene_.entity(record.row)) {
+		out.x = entity->x;
+		out.y = entity->y;
+		out.z = entity->z;
+		out.yaw = entity->yaw;
+		return true;
+	}
+	if (const MissionAreaMark *area = scene_.area(record.row)) {
+		out.area = true;
+		for (int axis = 0; axis < 3; ++axis) {
+			out.min[axis] = area->min[axis];
+			out.max[axis] = area->max[axis];
+		}
+		out.x = (area->min[0] + area->max[0]) * 0.5;
+		out.y = (area->min[1] + area->max[1]) * 0.5;
+		out.z = area->min[2];
+		return true;
+	}
+	return false;
+}
+
+std::vector<MissionPressed> MissionMapViewport::taken(const ViewportContext &context, const Document &document,
+		const NodeAddress &record, size_t &grabbed) const {
+	std::vector<MissionPressed> out;
+	grabbed = 0;
+	MissionPressed own;
+	if (!pressed(record, own)) return out;
+	const Selection *selection = selection_of(context.input, document);
+	// A record not selected moves alone; a selected one takes the selection's entities and areas (the 3D view's move).
+	if (!selection || !selection->holds(record)) {
+		out.push_back(own);
+		return out;
+	}
+	for (const NodeAddress &each : selection->records) {
+		MissionPressed held;
+		if (!pressed(each, held)) continue;
+		if (each == record) grabbed = out.size();
+		out.push_back(held);
+	}
+	return out;
+}
+
+const Document *MissionMapViewport::planned(const ViewportContext &context, std::string &error) const {
+	const Document *document = document_of(context.input);
+	if (reason_ != Reason::Ready || !document || !current(context.input)) {
+		const std::string why = message();
+		error = "The map shows no picture of the mission as it is now" + (why.empty() ? std::string(".") : ": " + why);
+		return nullptr;
+	}
+	return document;
+}
+
+std::string MissionMapViewport::title(const ViewportContext &context, const NodeAddress &record) const {
+	const Document *document = document_of(context.input);
+	return document ? title_of(context.input.view, *document, record) : std::string();
+}
+
+MissionMapCamera MissionMapViewport::framed(const std::vector<NodeId> &of, int width, int height) const {
+	MissionMapCamera out = camera_;
+	double lo[2] = { 0.0, 0.0 }, hi[2] = { 0.0, 0.0 };
+	bool any = false;
+	const auto take = [&](double x, double y) {
+		if (!any) {
+			lo[0] = hi[0] = x;
+			lo[1] = hi[1] = y;
+			any = true;
+			return;
+		}
+		lo[0] = std::min(lo[0], x);
+		lo[1] = std::min(lo[1], y);
+		hi[0] = std::max(hi[0], x);
+		hi[1] = std::max(hi[1], y);
+	};
+	const auto named = [&](NodeId row) { return of.empty() || std::find(of.begin(), of.end(), row) != of.end(); };
+	for (const MissionEntityMark &entity : scene_.entities())
+		if (named(entity.row)) take(entity.x, entity.y);
+	for (const MissionAreaMark &area : scene_.areas())
+		if (named(area.row)) {
+			take(area.min[0], area.min[1]);
+			take(area.max[0], area.max[1]);
+		}
+	if (!any) return out;
+	out.center[0] = (lo[0] + hi[0]) * 0.5;
+	out.center[1] = (lo[1] + hi[1]) * 0.5;
+	// The box with a margin, across the picture's narrower side (zoom is metres across its width).
+	const double across = std::max(hi[0] - lo[0], (hi[1] - lo[1]) * (height > 0 ? double(width) / double(height) : 1.0));
+	out.zoom = mission_map_zoom_for(std::max(across * 1.2, 60.0), width);
+	return out;
+}
+
+std::string MissionMapViewport::camera_change(const MissionMapCamera &camera) const {
+	JsonValue taken = JsonValue::make_object();
+	JsonValue center = JsonValue::make_array();
+	center.push(json_number(camera.center[0]));
+	center.push(json_number(camera.center[1]));
+	taken.set("center", std::move(center));
+	taken.set("zoom", json_number(camera.zoom));
+	return viewport_change(ViewportKind::Map, "camera", std::move(taken));
+}
+
+void MissionMapViewport::follow_ground_(const SessionView &view) {
+	followed_terrain(view);
+	// S25: the placed tiles the device draws over the map, followed by what they hold (the file taken, each record).
+	uint64_t hash = io::kFnv1a64Offset;
+	const auto mix = [&hash](uint64_t value) {
+		for (int i = 0; i < 8; ++i) hash = (hash ^ ((value >> (8 * i)) & 0xFFu)) * io::kFnv1a64Prime;
+	};
+	for (const char c : terrain_.tiles_file()) mix(uint8_t(c));
+	for (const TilOverlayEntry &entry : terrain_.placed().entries) {
+		mix(uint32_t(entry.x_fixed));
+		mix(uint32_t(entry.z_fixed));
+		mix(uint64_t(entry.tile_index) | uint64_t(entry.flags) << 8);
+	}
+	if (hash != tiles_hash_) {
+		tiles_hash_ = hash;
+		++tiles_serial_;
+		moved_ = true;
+	}
+	MissionMapGround ground;
+	ground.terrain = scene_.header().terrain;
+	// The header's RotateMap180: the CMAP turned half a turn (MissionMapView::flip_180).
+	ground.flip_180 = (scene_.header().attrib_flags & 0x20u) != 0;
+	ground.water = terrain_.water();
+	ground.water_height = ground.water ? terrain_.water_height() : 0.0;
+	// The grid's origin: the first marker whose record's type is 2043 (the Map Centerpoint, items.def 102043), as
+	// the game's HUD init scans its pool-3 entities [orig: HUD_InitOverlaySystem @0x5a4999, entity+80 == 2043; the
+	// runtime's promote, mission::kItemIdOffset]. Every record stands in the editor: the game's scan is over the ones
+	// its mode admits, which the map does not know.
+	for (const MissionEntityMark &entity : scene_.entities()) {
+		if (entity.pool != MissionPool::Marker || entity.item != mission::kItemIdOffset + kMapCenterpointType) continue;
+		ground.grid_origin = true;
+		ground.grid_x = entity.x;
+		ground.grid_y = entity.y;
+		break;
+	}
+	if (ground.terrain != ground_.terrain || ground.flip_180 != ground_.flip_180 || ground.water != ground_.water ||
+			ground.water_height != ground_.water_height ||
+			ground.grid_origin != ground_.grid_origin || ground.grid_x != ground_.grid_x || ground.grid_y != ground_.grid_y)
+		moved_ = true;
+	ground_ = std::move(ground);
+}
+
+bool MissionMapViewport::follow_outlines_(const SessionView &view, int64_t budget_us) {
+	// The items the entities name, each once, in the scene's order.
+	std::vector<int64_t> items;
+	items.reserve(scene_.entities().size());
+	{
+		std::unordered_set<int64_t> named;
+		for (const MissionEntityMark &entity : scene_.entities())
+			if (named.insert(entity.item).second) items.push_back(entity.item);
+	}
+	const bool read = outlines_.step(view, items, budget_us);
+	const bool kinds = options_.items != placed_options_.items || options_.buildings != placed_options_.buildings ||
+	                   options_.markers != placed_options_.markers || options_.organics != placed_options_.organics ||
+	                   options_.color_by != placed_options_.color_by;
+	placed_count_ = 0;
+	if (!read && !kinds && scene_.serial() == placed_scene_) return false;
+	placed_scene_ = scene_.serial();
+	placed_options_ = options_;
+	const std::vector<MissionEntityMark> &entities = scene_.entities();
+	const auto shown_kind = [this](const MissionEntityMark &entity) {
+		return entity.pool == MissionPool::Item ? options_.items
+				: entity.pool == MissionPool::Building ? options_.buildings
+				: entity.pool == MissionPool::Marker ? options_.markers : options_.organics;
+	};
+	// Edges placed anew wherever their count or order may move: the outlines read, the kinds shown, the entities
+	// added, removed or in another order, an entity given another model or SCALE.
+	bool anew = read || kinds || placed_.size() != entities.size();
+	for (size_t i = 0; !anew && i < entities.size(); ++i) {
+		const MissionOutlineCache::Item *item = outlines_.item(entities[i].item);
+		const Placed &was = placed_[i];
+		anew = was.row != entities[i].row || was.outline != (item ? item->outline.get() : nullptr) ||
+		       was.scale_q16 != (item ? item->scale_q16 : 0) || was.shown != shown_kind(entities[i]);
+	}
+	if (!anew) {
+		// Each entity moved, turned or of another colour (its team's, its group's) placed again where it stands, its
+		// edges rewritten in place, and the chunks they lie in moved.
+		uint64_t serial = 0;
+		for (size_t i = 0; i < entities.size(); ++i) {
+			const Placed &was = placed_[i];
+			const uint32_t rgb = mission_map_rgb(entities[i].pool, entities[i].team, entities[i].group, options_.color_by);
+			if (was.stamp == entities[i].stamp && was.rgb == rgb) continue;
+			place_entity_(i, outlines_.item(entities[i].item), was.begin);
+			if (!serial) serial = ++outline_serial_;
+			const size_t end = was.begin + was.count;
+			for (size_t chunk = was.begin / kMissionMapLinesChunk; was.count && chunk * kMissionMapLinesChunk < end; ++chunk)
+				chunk_serials_[chunk] = serial;
+			++placed_count_;
+		}
+		return serial != 0;
+	}
+	// Each entity's model placed as it stands; the shown kinds' wireframes, every edge of each placed.
+	placed_.assign(entities.size(), Placed());
+	footprints_.assign(entities.size(), MissionMapFootprint());
+	size_t edges = 0;
+	for (size_t i = 0; i < entities.size(); ++i) {
+		const MissionOutlineCache::Item *item = outlines_.item(entities[i].item);
+		Placed &placed = placed_[i];
+		placed.row = entities[i].row;
+		placed.outline = item ? item->outline.get() : nullptr;
+		placed.scale_q16 = item ? item->scale_q16 : 0;
+		placed.shown = shown_kind(entities[i]);
+		placed.begin = edges;
+		placed.count = placed.outline && placed.shown ? placed.outline->edges.size() / 6 : 0;
+		edges += placed.count;
+	}
+	lines_.assign(edges * 4, 0.0f);
+	line_rgb_.assign(edges, 0);
+	for (size_t i = 0; i < entities.size(); ++i) place_entity_(i, outlines_.item(entities[i].item), placed_[i].begin);
+	placed_count_ = entities.size();
+	const uint64_t serial = ++outline_serial_;
+	chunk_serials_.assign((edges + kMissionMapLinesChunk - 1) / kMissionMapLinesChunk, serial);
+	return true;
+}
+
+void MissionMapViewport::place_entity_(size_t index, const MissionOutlineCache::Item *item, size_t begin) {
+	const MissionEntityMark &entity = scene_.entities()[index];
+	Placed &placed = placed_[index];
+	placed.stamp = entity.stamp;
+	placed.rgb = mission_map_rgb(entity.pool, entity.team, entity.group, options_.color_by);
+	if (!item || !item->outline) {
+		footprints_[index] = MissionMapFootprint();
+		return;
+	}
+	footprints_[index] = mission_map_footprint(item->outline, entity.x, entity.y, double(entity.pitch),
+			double(entity.yaw), double(entity.roll), item->scale_q16);
+	if (!placed.count) return;
+	const MissionMapFootprint &footprint = footprints_[index];
+	const uint32_t rgb = placed.rgb;
+	const std::vector<float> &edges = item->outline->edges;
+	size_t at = begin;
+	for (size_t i = 0; i + 5 < edges.size() && at < begin + placed.count; i += 6, ++at) {
+		double ax, ay, bx, by;
+		footprint.place(&edges[i], ax, ay);
+		footprint.place(&edges[i + 3], bx, by);
+		float *line = &lines_[at * 4];
+		line[0] = float(ax);
+		line[1] = float(ay);
+		line[2] = float(bx);
+		line[3] = float(by);
+		line_rgb_[at] = rgb;
+	}
+}
+
+ViewportAction MissionMapViewport::stop_(Reason reason) {
+	reason_ = reason;
+	detail_.clear();
+	scene_.clear();
+	ground_ = MissionMapGround();
+	surface_ = false;
+	drawn_ = JsonValue();
+	footprints_.clear();
+	lines_.clear();
+	line_rgb_.clear();
+	placed_.clear();
+	chunk_serials_.clear();
+	placed_scene_ = UINT64_MAX;
+	++outline_serial_;
+	shown_none();
+	return picture_.stop();
+}
+
+uint64_t MissionMapViewport::gesture_held_(const ViewportInput &input) const {
+	if (const uint64_t picture = gesture_feeding_(input, picture_reads())) return picture;
+	return gesture_feeding_(input, &terrain_.stamps());
+}
+
+const MissionGround &MissionMapViewport::followed_terrain(const SessionView &view) const {
+	const int reads = terrain_.reads();
+	terrain_.follow(view.findings.assets, view.findings.assets ? view.findings.assets->generation() : 0, scene_.header(),
+	                mission::mission_base_name(path()));
+	// S25, the painting feedback: read whole, it holds an imported terrain's maps as last imported; the paint of their
+	// open sources laid over them.
+	if (terrain_.reads() != reads) lay_open_sources(view, path(), terrain_);
+	return terrain_;
+}
+
+bool MissionMapViewport::follow_terrain_view_(const SessionView &view) {
+	const uint64_t before = terrain_view_.serial();
+	const MissionMapBackground background = options_.background;
+	const uint16_t *atlas = nullptr;
+	uint64_t revision = 0;
+	int32_t water = 0;
+	if (background == MissionMapBackground::Height || background == MissionMapBackground::Delta ||
+	    background == MissionMapBackground::Flatness) {
+		const MissionGround &ground = followed_terrain(view);
+		const terrain::TerrainHeightField *field = ground.height_field();
+		if (field && field->dim == 1024) {
+			atlas = field->heightmap;
+			revision = ground.heights_revision();
+		}
+		if (ground.water()) water = int32_t(ground.water_height() * io::kFp16OneD);
+	}
+	// The surface classes: the char map as the game's load keeps it (patched in place by a stroke, its revision the
+	// ground's surface_revision).
+	MissionMapSurface surface;
+	bool terrain = false;
+	if (background == MissionMapBackground::Surface) {
+		const MissionGround &ground = followed_terrain(view);
+		terrain = ground.terrain();
+		const terrain::SurfaceTypeMap classes = ground.surface_sampler();
+		surface = MissionMapSurface{classes.data, classes.width, classes.height, ground.surface_revision()};
+	}
+	terrain_view_.follow(background, options_.water, atlas, revision, water, surface, terrain);
+	return terrain_view_.serial() != before;
+}
+
+ViewportAction MissionMapViewport::follow_(const ViewportInput &input, PreviewClock &) {
+	const SessionView &view = input.view;
+	if (!view.project.open || !view.findings.assets) return stop_(Reason::NoProject);
+	const Document *document = document_of(input);
+	const std::unique_ptr<MissionSceneSource> source = document ? mission_scene_source(*document) : nullptr;
+	if (!source) return stop_(Reason::NoMission);
+	const FileSource &files = *view.findings.assets;
+	const uint64_t generation = view.findings.assets->generation();
+	const PreviewFollow::Key key;
+	reason_ = Reason::Ready;
+	const auto *rows = input.change == ChangeClass::Changed && input.changes ? std::get_if<RowChanges>(input.changes)
+	                                                                       : nullptr;
+	const bool anew = !picture_.shows() || (input.change != ChangeClass::None && !rows);
+	if (anew) {
+		scene_.read(*source);
+		follow_ground_(view);
+		follow_outlines_(view, kOutlinesFirstUs);
+		follow_terrain_view_(view);
+		picture_.show(key, generation);
+		shown(*document);
+		// S25: the terrain files' states as drawn (a stroke's first patch is against them).
+		std::vector<std::string> drawn;
+		stroke_.follow(view, *document, false, terrain_, files, drawn);
+		stroke_.made();
+		if (!framed_) {
+			// The one change its follow derives: the map over every entity and area.
+			framed_ = true;
+			const ViewportState picture = size();
+			camera_ = framed({}, picture.width, picture.height);
+			state_moved();
+		}
+		moved_ = false;
+		return picture_.built(FileStamps());
+	}
+	// The header as the device last loaded it, before the patch moves it.
+	const MissionSceneHeader before = scene_.header();
+	MissionSceneDelta delta;
+	if (rows) {
+		delta = scene_.patch(*rows, *source);
+		shown(*document);
+	}
+	// S25: a stroke in a terrain file the picture or its ground reads: the ground patched in place and the files' new
+	// stamps taken (no read of them again whole per dab, no Rebuild), the device's patches kept; one that cannot be
+	// patched is read again below as before, its Rebuild held to the stroke's end. A stroke's end over a picture its
+	// device did not patch makes it again.
+	const bool stroking = gesture_held_(input) != 0;
+	std::vector<std::string> patched;
+	if (stroke_.follow(view, *document, stroking, terrain_, *view.findings.assets, patched) && !patched.empty())
+		picture_.restamp(*view.findings.assets, patched);
+	// The heights' patches made again in the background where it shows them (its revision the ground's after them).
+	std::vector<MissionMapAtlasRect> heights;
+	for (const TerrainPatch &patch : stroke_.patches().patches)
+		if (patch.plane == TerrainPlane::Heights)
+			for (const RasterRegion &region : patch.regions)
+				heights.push_back({region.x, region.y, region.x + region.width, region.y + region.height});
+	if (!heights.empty())
+		if (const terrain::TerrainHeightField *field = terrain_.height_field()) {
+			const uint64_t serial = terrain_view_.serial();
+			terrain_view_.patch(field->heightmap, heights, terrain_.heights_revision());
+			if (terrain_view_.serial() != serial) moved_ = true;
+		}
+	// The char map's patches made again in the Surface background (its surface revision the ground's after them).
+	if (options_.background == MissionMapBackground::Surface && terrain_.terrain()) {
+		const terrain::SurfaceTypeMap classes = terrain_.surface_sampler();
+		std::vector<MissionMapAtlasRect> surfaces;
+		bool whole = false;
+		for (const TerrainPatch &patch : stroke_.patches().patches)
+			if (patch.plane == TerrainPlane::Surface) {
+				whole = whole || patch.whole;
+				for (const RasterRegion &region : patch.regions)
+					surfaces.push_back(surface_atlas_rect(classes.width, region.x, region.y, region.width, region.height));
+			}
+		if (!surfaces.empty() && !whole) {
+			const uint64_t serial = terrain_view_.serial();
+			terrain_view_.patch_surface(MissionMapSurface{classes.data, classes.width, classes.height, terrain_.surface_revision()},
+			                            surfaces);
+			if (terrain_view_.serial() != serial) moved_ = true;
+		}
+	}
+	// Out of a stroke, the heights' picture takes the scale their lowest and highest give it now (kept while one went,
+	// S25; an undo's, a redo's or a landing's patch settled at once): a scan of them only where a patch moved them.
+	if (!stroking)
+		if (const terrain::TerrainHeightField *field = terrain_.height_field()) {
+			const uint64_t serial = terrain_view_.serial();
+			terrain_view_.settle(field->heightmap);
+			if (terrain_view_.serial() != serial) moved_ = true;
+		}
+	if (!stroking && stroke_.patched()) {
+		stroke_.made();
+		moved_ = false;
+		return picture_.built(FileStamps());
+	}
+	follow_ground_(view);
+	if (follow_outlines_(view, kOutlinesFrameUs)) moved_ = true;
+	if (follow_terrain_view_(view)) moved_ = true; // S25: the background in place of the colour map
+	// A file the device read moved (the terrain, the HUD's layout and art): the picture made again from the files.
+	if (picture_.follow(key, false, files, generation) == PreviewFollow::Found::Files) {
+		moved_ = false;
+		return picture_.built(FileStamps());
+	}
+	// What the device loaded its ground from moved (the terrain, its tile set, the environment its water and the
+	// terrain's later lines come from): the picture made again over the new one.
+	const MissionSceneHeader &now = scene_.header();
+	if (delta.header && (now.terrain != before.terrain || now.tile_set != before.tile_set || now.environment != before.environment)) {
+		moved_ = false;
+		return ViewportAction::Rebuild;
+	}
+	// The pins are the canvas's: an entity moved, added or removed redraws them with no word to the device. What the
+	// device draws (the camera, the CMAP toggles, the water, the grid's origin) moved: an Update.
+	if (!moved_) return ViewportAction::Keep;
+	moved_ = false;
+	return ViewportAction::Update;
+}
+
+bool MissionMapViewport::takes_(const std::string &member) const {
+	return member == "options" || member == "camera";
+}
+
+bool MissionMapViewport::check_(const io::JsonValue &json, std::string &error) const {
+	MissionMapOptions options = options_;
+	if (const JsonValue *member = json.get("options"); member && !mission_map_options_from_json(*member, options, error))
+		return false;
+	MissionMapCamera camera = camera_;
+	if (const JsonValue *member = json.get("camera"); member && !mission_map_camera_from_json(*member, camera, error))
+		return false;
+	return true;
+}
+
+void MissionMapViewport::apply_(const io::JsonValue &json, PreviewClock &) {
+	std::string error;
+	if (const JsonValue *member = json.get("options")) {
+		MissionMapOptions options = options_;
+		if (mission_map_options_from_json(*member, options, error)) {
+			// The CMAP's toggles are the device's; the marks, stick and the snap the canvas's alone.
+			if (options.grid != options_.grid || options.text != options_.text) moved_ = true;
+			options_ = options;
+		}
+	}
+	if (const JsonValue *member = json.get("camera")) {
+		MissionMapCamera camera = camera_;
+		if (mission_map_camera_from_json(*member, camera, error) && camera != camera_) {
+			camera_ = camera;
+			framed_ = true;
+			moved_ = true;
+		}
+	}
+}
+
+bool MissionMapViewport::report_(const ViewportDeviceReport &report) {
+	picture_.read(report.files);
+	const bool moved = surface_ != report.surface;
+	surface_ = report.surface;
+	drawn_ = report.drawn;
+	return moved;
+}
+
+ViewportHit MissionMapViewport::hit(const ViewportContext &context, float x, float y) const {
+	ViewportHit out;
+	out.current = current(context.input);
+	const Document *document = document_of(context.input);
+	if (reason_ != Reason::Ready || !document) return out;
+	const std::vector<MissionMapMark> shown = marks(context.width, context.height);
+	out.index = pick_mission_map_mark(shown, view(context.width, context.height), x, y);
+	if (out.index < 0) return out;
+	const MissionMapMark &mark = shown[size_t(out.index)];
+	out.id = out.current ? mark.record.row : 0;
+	out.name = title_of(context.input.view, *document, mark.record);
+	out.kind = mark.kind;
+	return out;
+}
+
+std::vector<ViewportHit> MissionMapViewport::box(const ViewportContext &context, float x0, float y0, float x1,
+		float y1) const {
+	std::vector<ViewportHit> out;
+	const Document *document = document_of(context.input);
+	if (reason_ != Reason::Ready || !document || !current(context.input)) return out;
+	const std::vector<MissionMapMark> shown = marks(context.width, context.height);
+	for (const NodeAddress &record :
+			mission_map_box_records(shown, view(context.width, context.height), CanvasPoint{ x0, y0 }, CanvasPoint{ x1, y1 })) {
+		const int index = scene_.mark_index(record.row);
+		if (index < 0 || size_t(index) >= shown.size()) continue;
+		ViewportHit hit;
+		hit.current = true;
+		hit.index = index;
+		hit.id = record.row;
+		hit.name = title_of(context.input.view, *document, record);
+		hit.kind = shown[size_t(index)].kind;
+		out.push_back(std::move(hit));
+	}
+	return out;
+}
+
+bool MissionMapViewport::click_frame(const ViewportContext &context, SelectMode, int &width, int &height,
+		std::string &error) const {
+	if (!planned(context, error)) return false;
+	width = context.width;
+	height = context.height;
+	return true;
+}
+
+bool MissionMapViewport::handle_point(const ViewportContext &context, NodeId id, const std::string &handle, float &x,
+		float &y, std::string &error) const {
+	MissionHandle held_handle = MissionHandle::Move;
+	const bool known = mission_handle_from_token(handle.c_str(), held_handle);
+	if (!known || !(held_handle == MissionHandle::Move || mission_handle_is_edge(held_handle) ||
+	                  mission_handle_is_corner(held_handle))) {
+		error = "The map moves a record (handle move) and an area's edges and corners (x_min, x_max, y_min, y_max, "
+		        "x_min_y_min, x_max_y_min, x_max_y_max, x_min_y_max); its height, heading and an area's bottom and top are "
+		        "the 3D view's.";
+		return false;
+	}
+	if (!planned(context, error)) return false;
+	MissionPressed held;
+	const Document *document = document_of(context.input);
+	if (!pressed(document->address_of(id), held)) {
+		error = "Record " + std::to_string(id) + " is no entity or area of the mission.";
+		return false;
+	}
+	double at[2] = { held.x, held.y };
+	if (held_handle != MissionHandle::Move && !mission_map_handle_point(held, held_handle, at[0], at[1])) {
+		error = "An entity has no " + handle + " handle on the map (move).";
+		return false;
+	}
+	view(context.width, context.height).project(at[0], at[1], x, y);
+	return true;
+}
+
+bool MissionMapViewport::drag(const ViewportContext &context, const ViewportDrag &drag, CanvasRequests &out,
+		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h).
+	const MissionGround &terrain_ground = followed_terrain(context.input.view);
+	const MapBrushSpace terrain_space(view(context.width, context.height), &terrain_ground);
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Map, &terrain_ground};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_drag(terrain, drag, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
+	float hx = 0.0f, hy = 0.0f;
+	if (!handle_point(context, drag.id, drag.handle, hx, hy, error)) return false;
+	const Document *document = planned(context, error);
+	if (!document) return false;
+	if (!context.editable()) {
+		error = context.not_editable();
+		return false;
+	}
+	if (!(drag.snap >= 0.0f)) {
+		error = "The snap is 0 or more.";
+		return false;
+	}
+	if (drag.by && drag.x == 0.0f && drag.y == 0.0f) {
+		if (drag.end && drag.gesture) out.request(request::end_edit(document->path()));
+		return true;
+	}
+	MissionHandle handle = MissionHandle::Move;
+	mission_handle_from_token(drag.handle.c_str(), handle);
+	const MissionMapView shown = view(context.width, context.height);
+	const float x = drag.by ? hx + drag.x : drag.x, y = drag.by ? hy + drag.y : drag.y;
+	double to[2], from[2];
+	shown.unproject(x, y, to[0], to[1]);
+	shown.unproject(hx, hy, from[0], from[1]);
+	const uint64_t gesture = drag.gesture ? drag.gesture : next_edit_gesture();
+	std::vector<Edit> edits;
+	if (handle != MissionHandle::Move) {
+		// An area's edge or corner (S24): as far as the pointer went from where the handle stands, the area alone.
+		MissionPressed area;
+		double hx_m = 0.0, hy_m = 0.0;
+		if (!pressed(document->address_of(drag.id), area) || !mission_map_handle_point(area, handle, hx_m, hy_m)) {
+			error = "Record " + std::to_string(drag.id) + " is no area of the mission.";
+			return false;
+		}
+		const double point[3] = { hx_m + (to[0] - from[0]), hy_m + (to[1] - from[1]), 0.0 };
+		mission_area_handle_edits(*document, area, handle, point, drag.snap, gesture, edits);
+	} else {
+		size_t grabbed = 0;
+		const std::vector<MissionPressed> held = taken(context, *document, document->address_of(drag.id), grabbed);
+		if (held.empty()) {
+			error = "Record " + std::to_string(drag.id) + " is no entity or area of the mission.";
+			return false;
+		}
+		// The record goes as far as the point under the pointer went from the one under its pin: the 3D view's move
+		// (mission_move_edits), the selection with it, its height over the device's ground kept with stick.
+		const double target[2] = { held[grabbed].x + (to[0] - from[0]), held[grabbed].y + (to[1] - from[1]) };
+		if (!mission_move_edits(*document, held, grabbed, target, drag.snap, options_.stick, context.device, gesture, edits)) {
+			error = "The record cannot be moved.";
+			return false;
+		}
+	}
+	const bool wrote = !edits.empty();
+	if (wrote) out.request(request::edit_record(document->path(), std::move(edits)));
+	if (drag.end && (wrote || drag.gesture)) out.request(request::end_edit(document->path()));
+	return true;
+}
+
+bool MissionMapViewport::command(const ViewportContext &context, const std::string &name, const std::vector<NodeId> &ids,
+		CanvasRequests &out, std::string &error) const {
+	if (reason_ != Reason::Ready) {
+		error = message();
+		return false;
+	}
+	MissionMapCamera camera = camera_;
+	if (name == "frame") {
+		// The named records, else the selection, else everything.
+		std::vector<NodeId> of = ids;
+		if (of.empty())
+			if (const Document *document = document_of(context.input))
+				if (const Selection *selection = selection_of(context.input, *document))
+					for (const NodeAddress &record : selection->records) of.push_back(record.row);
+		camera = framed(of, context.width, context.height);
+	} else if (name == "pick") {
+		// S24: the waiting pick given the named record, as a click on its pin gives it.
+		const Document *document = planned(context, error);
+		if (!document) return false;
+		return mission_pick_command(context, *document, ids, out, error);
+	} else if (name == "select_group") {
+		// S24: every entity of the named (else the selected) records' groups, as the 3D view's command.
+		const Document *document = document_of(context.input);
+		const MissionDocument *mission = dynamic_cast<const MissionDocument *>(document);
+		if (!mission || !current(context.input)) {
+			error = "The map shows no mission as it stands.";
+			return false;
+		}
+		const Selection *selection = selection_of(context.input, *document);
+		std::vector<NodeAddress> of;
+		for (const NodeId id : ids) of.push_back(document->address_of(id));
+		if (ids.empty() && selection) of = selection->records;
+		const NodeAddress primary = !ids.empty() ? of.front() : selection ? selection->primary : NodeAddress();
+		return mission_select_group(*mission, of, primary, out, error);
+	} else if (name == "zoom_in" || name == "zoom_out") {
+		// The CMAP's ZOOMIN and ZOOMOUT steps [orig: loc_548230 @0x548230; hud::MapViewPan::zoom_step], over the map's
+		// own range.
+		camera.zoom = std::clamp(camera.zoom * (name == "zoom_in" ? hud::kMapViewZoomInStep : hud::kMapViewZoomOutStep),
+				kMissionMapZoomMin, kMissionMapZoomMax);
+	} else {
+		error = "The map's commands are frame, zoom_in, zoom_out, select_group and pick.";
+		return false;
+	}
+	out.request(request::set_viewport(path(), camera_change(camera)));
+	return true;
+}
+
+bool MissionMapViewport::drop(const ViewportContext &context, const ViewportDrop &drop, CanvasRequests &out,
+		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h).
+	const MissionGround &terrain_ground = followed_terrain(context.input.view);
+	const MapBrushSpace terrain_space(view(context.width, context.height), &terrain_ground);
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Map, &terrain_ground};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_drop(terrain, drop, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
+	return ViewportModel::drop(context, drop, out, error);
+}
+
+bool MissionMapViewport::command_of(const ViewportContext &context, const ViewportCommand &command, CanvasRequests &out,
+		std::string &error) const {
+	// S25: the terrain tools' (terrain_view_commands.h).
+	const MissionGround &terrain_ground = followed_terrain(context.input.view);
+	const MapBrushSpace terrain_space(view(context.width, context.height), &terrain_ground);
+	const TerrainViewContext terrain{context, terrain_space, path(), ViewportKind::Map, &terrain_ground};
+	bool terrain_handled = false;
+	const bool terrain_done = terrain_view_command(terrain, command, out, error, terrain_handled);
+	if (terrain_handled) return terrain_done;
+	if (command.name != "new_event") return ViewportModel::command_of(context, command, out, error);
+	const Document *document = planned(context, error);
+	if (!document) return false;
+	if (command.has_at || !command.by.empty() || !command.item.empty() || !command.handle.empty() || !command.field.empty()) {
+		error = "new_event takes ids (the record) and value (the recipe), nothing else.";
+		return false;
+	}
+	return mission_new_event_command(context, *document, command.ids, command.value, out, error);
+}
+
+io::JsonValue MissionMapViewport::options_json() const {
+	return mission_map_options_to_json(options_);
+}
+
+io::JsonValue MissionMapViewport::camera_json() const {
+	return mission_map_camera_to_json(camera_, size().width);
+}
+
+io::JsonValue MissionMapViewport::body_json(const ViewportInput &input) const {
+	JsonValue out = JsonValue::make_object();
+	if (reason_ != Reason::Ready) return out;
+	const ViewportState picture = size();
+	const MissionMapView shown = view(picture.width, picture.height);
+	out.set("scale", json_number(shown.scale));
+	out.set("across", json_number(double(shown.scale) * double(picture.width)));
+	JsonValue ground = JsonValue::make_object();
+	ground.set("terrain", json_string(ground_.terrain));
+	ground.set("water", JsonValue::make_bool(ground_.water));
+	if (ground_.water) ground.set("water_height", json_number(ground_.water_height));
+	ground.set("grid_origin", ground_.grid_origin ? [&] {
+		JsonValue at = JsonValue::make_array();
+		at.push(json_number(ground_.grid_x));
+		at.push(json_number(ground_.grid_y));
+		return at;
+	}() : JsonValue());
+	out.set("ground", std::move(ground));
+	const std::vector<MissionMapMark> all = marks(picture.width, picture.height);
+	size_t count = 0;
+	for (const MissionMapMark &mark : all) count += mark.shown ? 1 : 0;
+	out.set("shown", json_number(double(count)));
+	// The models seen from above: the wireframes drawn (entities, edges), the model files read, the items still to read.
+	JsonValue outlines = JsonValue::make_object();
+	size_t outlined = 0;
+	for (const MissionMapMark &mark : all) outlined += mark.shown && mark.outlined ? 1 : 0;
+	outlines.set("outlined", json_number(double(outlined)));
+	outlines.set("edges", json_number(double(line_rgb_.size())));
+	outlines.set("files_read", json_number(double(outlines_.files_read())));
+	outlines.set("pending", json_number(double(outlines_.pending())));
+	out.set("outlines", std::move(outlines));
+	// What the device drew: the terrain read (the surface), the pass's terrain triangles, sprites and labels.
+	out.set("surface", JsonValue::make_bool(surface_));
+	// The Surface background's legend: each class the char map holds, its colour and its share of the map's texels.
+	if (options_.background == MissionMapBackground::Surface) {
+		JsonValue legend = JsonValue::make_array();
+		if (terrain_.terrain()) {
+			const terrain::SurfaceTypeMap classes = terrain_.surface_sampler();
+			std::vector<size_t> counts(256, 0);
+			const size_t texels = classes.data ? size_t(classes.width) * size_t(classes.height) : 0;
+			for (size_t i = 0; i < texels; ++i) ++counts[classes.data[i]];
+			if (!classes.data) counts[1] = 1; // no char map: class 1 everywhere
+			const double total = texels ? double(texels) : 1.0;
+			for (int surface = 0; surface < 256; ++surface) {
+				if (!counts[size_t(surface)]) continue;
+				const CharmapLegendColour &c =
+						surface < kCharmapLegendCount ? kCharmapLegend[surface] : kCharmapLegendRest;
+				char rgb[8];
+				std::snprintf(rgb, sizeof(rgb), "%02X%02X%02X", c.r, c.g, c.b);
+				JsonValue row = JsonValue::make_object();
+				row.set("class", json_number(surface));
+				row.set("name", json_string(mission_surface_words(surface)));
+				row.set("rgb", json_string(rgb));
+				row.set("share", json_number(double(counts[size_t(surface)]) / total));
+				legend.push(std::move(row));
+			}
+		}
+		out.set("legend", std::move(legend));
+	}
+	out.set("drawn", drawn_);
+	const int route = mission_map_route(scene_);
+	out.set("route", route >= 0 ? json_number(scene_.paths()[size_t(route)].index) : JsonValue());
+	// The selection the map rings (the document's, shared with the 3D view while the mission is active).
+	JsonValue selected = JsonValue::make_array();
+	if (const Document *document = document_of(input))
+		if (const Selection *selection = selection_of(input, *document))
+			for (const NodeAddress &record : selection->records)
+				if (scene_.entity(record.row) || scene_.area(record.row)) selected.push(json_number(double(record.row)));
+	out.set("selected", std::move(selected));
+	return out;
+}
+
+io::JsonValue MissionMapViewport::items_json(const ViewportInput &input) const {
+	JsonValue out = JsonValue::make_array();
+	const Document *document = document_of(input);
+	if (reason_ != Reason::Ready || !document) return out;
+	const ViewportState picture = size();
+	const Selection *selection = selection_of(input, *document);
+	for (const MissionMapMark &mark : marks(picture.width, picture.height)) {
+		if (!mark.shown) continue;
+		JsonValue row = JsonValue::make_object();
+		row.set("id", json_number(double(mark.record.row)));
+		row.set("kind", json_string(mark.kind));
+		row.set("selected", JsonValue::make_bool(selection && selection->holds(mark.record)));
+		row.set("name", json_string(title_of(input.view, *document, mark.record)));
+		JsonValue at = JsonValue::make_array();
+		at.push(json_number(mark.x));
+		at.push(json_number(mark.y));
+		row.set("at", std::move(at));
+		JsonValue screen = JsonValue::make_array();
+		screen.push(json_number(mark.px));
+		screen.push(json_number(mark.py));
+		row.set("screen", std::move(screen));
+		if (mark.entity >= 0) {
+			row.set("team", json_number(mark.team));
+			row.set("item", json_number(double(scene_.entities()[size_t(mark.entity)].item)));
+			// Its model seen from above: drawn as its wireframe or as its pin, and its footprint's outline.
+			if (mark.footprint) {
+				row.set("outlined", JsonValue::make_bool(mark.outlined));
+				JsonValue hull = JsonValue::make_array();
+				for (size_t i = 0; i + 1 < mark.footprint->hull.size(); i += 2) {
+					JsonValue point = JsonValue::make_array();
+					point.push(json_number(mark.footprint->hull[i]));
+					point.push(json_number(mark.footprint->hull[i + 1]));
+					hull.push(std::move(point));
+				}
+				row.set("footprint", std::move(hull));
+			}
+		}
+		out.push(std::move(row));
+	}
+	return out;
+}
+
+} // namespace opennova::editor

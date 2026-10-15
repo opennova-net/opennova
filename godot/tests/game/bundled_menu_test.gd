@@ -1,6 +1,6 @@
 extends GutTest
 
-## The no-argument boot (ADR 0048): OpenNova's bundled assets/ placeholder menu,
+## The no-argument boot (ADR 0048): OpenNova's bundled game and its main menu,
 ## and its PLAY RETAIL hand-over to a retail install.
 
 const MAIN_GAME_SCENE := preload("res://game/main_game.tscn")
@@ -74,11 +74,45 @@ func test_no_resource_dir_boots_the_bundled_placeholder_menu() -> void:
 	var menu := _shell.get_menu_shell()
 	assert_eq(menu.get_current_menu_file().to_lower(), "main.mnu")
 	var driver := menu.get_driver()
-	for widget_name in ["PLAY_RETAIL", "CHANGE_FOLDER", "EXIT"]:
+	assert_eq(driver.get_current_screen(), "STARTUP")
+	# The original main menu's buttons by its names (SINGLE_PLAYER, LAN_MULTI_PLAYER,
+	# PLAYER_INFO, OPTIONS, EXIT), and ours for a retail install.
+	for widget_name in ["SINGLE_PLAYER", "LAN_MULTI_PLAYER", "PLAYER_INFO", "OPTIONS",
+			"PLAY_RETAIL", "CHANGE_FOLDER", "EXIT"]:
 		assert_true(driver.has_widget(widget_name), "%s is authored" % widget_name)
 	var frame := menu.get_frame()
+	# One mouse sample resolves the screen's claimed pointer.
+	driver.process_mouse(Vector2(400, 300), false)
+	assert_not_null(frame.get_cursor_texture(),
+			"MAIN's pointer newarow1.tga decodes (a plain git blob, never an LFS pointer)")
 	assert_eq(frame.get_unresolved_asset_count(), 0, "every asset the menu names resolves")
 	assert_gt(frame.get_draw_list_stats().glyphs, 0, "the bundled font draws the menu text")
+
+
+# The main menu's buttons reach their screens by their authored actions, as the
+# original's do: the Mods list is a tab of OPTIONS (options.mnu), beside the
+# options' own tabs and the credits, and BACK returns to STARTUP.
+func test_the_bundled_main_menu_reaches_its_screens() -> void:
+	_shell = await _boot()
+	var menu := _shell.get_menu_shell()
+	var driver := menu.get_driver()
+	for target in [["SINGLE_PLAYER", "sp.mnu", "SINGLE_PLAYER", ["IA_LIST", "BRIEFING", "ACCEPT"]],
+			["LAN_MULTI_PLAYER", "mp.mnu", "LAN_MULTI_PLAYER", ["LAN_GAME_LIST", "LAN_SEARCH",
+				"LAN_JOINGAME", "LAN_HOSTGAME", "SELECTED_MISSIONS", "START_GAME"]],
+			["PLAYER_INFO", "player.mnu", "PLAYER_INFO", ["PLAYERNAME", "PLAYERCLASS",
+				"NATIONALITY", "COMBO_LIST", "ACCEPT"]],
+			["OPTIONS", "options.mnu", "OPTIONS", ["RADIO_TAB_MODS", "AVAIL_LIST", "MOD_DESC",
+				"RADIO_TAB_CREDITS", "CREDITS", "CONTROL_MAPPING", "ACCEPT", "BACK"]]]:
+		_press(target[0])
+		await get_tree().process_frame
+		assert_eq(menu.get_current_menu_file().to_lower(), target[1], "%s opens %s" % [target[0], target[1]])
+		assert_eq(driver.get_current_screen(), target[2])
+		for widget_name in target[3]:
+			assert_true(driver.has_widget(widget_name), "%s holds %s" % [target[2], widget_name])
+		driver.pop_screen()
+		await get_tree().process_frame
+		assert_eq(menu.get_current_menu_file().to_lower(), "main.mnu", "back from %s" % target[2])
+		assert_eq(driver.get_current_screen(), "STARTUP")
 
 
 func _temp_dir(label: String) -> String:
@@ -148,6 +182,88 @@ func test_the_bundled_game_mounts_an_expansion_beside_it() -> void:
 	var fallback := BootRootMount.mount_bundled(build)
 	assert_true(fallback != null and fallback.is_runtime_mount() and fallback.get_expansion().is_empty(),
 			"an expansion the folder lacks: the base game")
+
+
+# The base game's Mods screen (options.mnu) over a build with expansions beside
+# it, as the game zip ships one (D-MNU-31): the base game's row first (the key
+# the original game's code looks up, its text where no table names it), then a
+# row per folder under expansion/ in the folder's order (upper-cased names; a
+# name starting with '.' skipped, a folder with no <n>.pff listed and unnamed),
+# each by its <n>.bin's EXP_NAME. A pick describes itself; ACCEPT switches the
+# live root for the run and the menu boots anew over it, the pick kept nowhere.
+func test_the_bundled_mods_screen_lists_the_base_game_and_its_expansions() -> void:
+	var build := _temp_dir("mods")
+	var resources := WorldFixture.shell_archive_entries(self, WorldFixture.SHELL_RESOURCE_FILES)
+	resources.append({"name": "options.mnu", "bytes": FileAccess.get_file_as_bytes(
+			BootRootMount.bundled_project_dir().path_join("options.mnu"))})
+	WorldFixture.stage_shell_archives(self, build, false)
+	WorldFixture.write_pff(self, build.path_join("resource.pff"), resources)
+	var storm := build.path_join("expansion/onx")
+	assert_eq(DirAccess.make_dir_recursive_absolute(storm), OK)
+	WorldFixture.write_pff(self, storm.path_join("onx.pff"),
+			[{"name": "onxonly.txt", "bytes": "the expansion's".to_utf8_buffer()}])
+	WorldFixture.write_pff(self, storm.path_join("onxL.pff"),
+			[{"name": "onx.bin", "bytes": _expansion_info_bin("Test Storm", "A storm.")}])
+	# The loose copy the game ships beside the archives: the text-override table's only source.
+	TestFs.write_bytes(self, storm.path_join("onx.bin"), _expansion_info_bin("Test Storm", "A storm."))
+	assert_eq(DirAccess.make_dir_recursive_absolute(build.path_join("expansion/aab")), OK)
+	assert_eq(DirAccess.make_dir_recursive_absolute(build.path_join("expansion/.hidden")), OK)
+	var root := ResourceRoot.new()
+	assert_eq(root.mount_runtime(build, "", false, "jo"), OK)
+	var shell := MenuShell.new()
+	shell.main_menu_file = "options.mnu"
+	shell.size = Vector2(800, 600)
+	add_child_autofree(shell)
+	assert_true(shell.setup(root), "the build serves the Mods screen")
+	var driver := shell.get_driver()
+	var avail := driver.widget_id("AVAIL_LIST")
+	assert_gte(avail, 0, "the Mods screen's list")
+	assert_eq(driver.get_widget_items(avail), PackedStringArray(
+			["Joint Operations: Typhoon Rising", "Unnamed Expansion", "Test Storm"]))
+	assert_eq(driver.selected_row(avail), 0, "the base game running is highlighted")
+	# With the base game running the populate describes no row, so MOD_DESC keeps the
+	# screen's own text: the base game's description is options.mnu's.
+	assert_true(driver.get_widget_text(driver.widget_id("MOD_DESC")).begins_with("OpenNova's own"),
+			"the base game is described by the text the screen authors")
+	# The Mods list is a tab of the whole options screen, as the original's is: one
+	# ACCEPT writes the options' words and switches the game only when the pick is
+	# another than the one running (Options_HandleAcceptOrBack's two legs).
+	var profile := PlayerProfile.store()
+	var invert_before: int = profile.get_word("invert_mouse")
+	assert_true(profile.set_word("invert_mouse", 0))
+	var invert := driver.widget_id("INVERT_MOUSE")
+	assert_gte(invert, 0, "the options' controls tab is on the Mods screen")
+	driver.set_widget_checked(invert, true)
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	shell.update_menu_frame()
+	assert_eq(profile.get_word("invert_mouse"), 1, "ACCEPT wrote the options' words")
+	assert_eq(String(root.get_expansion()), "", "the game running picked: no switch")
+	assert_false(shell.has_pending_expansion_reload(), "nothing waits to reload")
+	assert_true(profile.set_word("invert_mouse", invert_before))
+	var desc := driver.widget_id("MOD_DESC")
+	driver.select_row(avail, 2, true)
+	assert_eq(driver.get_widget_text(desc), "A storm.", "a pick shows its EXP_DESC")
+	driver.widget_activated.emit(driver.widget_id("ACCEPT"), "ACCEPT")
+	shell.update_menu_frame()
+	assert_eq(String(root.get_expansion()), "onx", "ACCEPT switched the live root")
+	assert_true(root.has_file("onxonly.txt"), "the expansion's archive is served")
+	assert_false(root.get_expansion_override_table().is_empty(),
+			"the reload closed every archive first: the loose <n>.bin is the override table, as at boot")
+	assert_eq(driver.selected_row(driver.widget_id("AVAIL_LIST")), 2,
+			"the menu booted anew highlights the expansion running")
+	var config := ConfigFile.new()
+	assert_false(config.load(STATE_CONFIG_PATH) == OK
+			and config.has_section_key(ResourceDirSettings.SECTION, "expansion"),
+			"the pick is kept nowhere: it lasts the run")
+	root.clear()
+
+
+func _expansion_info_bin(exp_name: String, exp_desc: String) -> PackedByteArray:
+	var table := RtxtStringFile.new()
+	var section := table.add_section("exp_info")
+	table.add_entry("EXP_NAME", exp_name, section, Vector2i.ZERO)
+	table.add_entry("EXP_DESC", exp_desc, section, Vector2i.ZERO)
+	return table.to_byte_array()
 
 
 # EXIT is a named control, as retail's is (retail's ACTION has no quit verb): the
