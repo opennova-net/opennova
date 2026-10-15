@@ -736,6 +736,18 @@ target_link_libraries(update_pff_test PRIVATE opennova_formats)
 target_include_directories(update_pff_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(update_pff COMMAND update_pff_test)
 
+add_executable(update_server_test update/update_server_test.cpp)
+target_link_libraries(update_server_test PRIVATE opennova_net)
+target_include_directories(update_server_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME update_server COMMAND update_server_test)
+
+# opennova-update-tool's core: a packed update built from two synthetic trees and served on a
+# loopback port.
+add_executable(update_tool_test update/update_tool_test.cpp)
+target_link_libraries(update_tool_test PRIVATE opennova_update_tool_core)
+target_include_directories(update_tool_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME update_tool COMMAND update_tool_test)
+
 # Audio sound-set member selection state machine (FIRST/RANDOM/SEQUENTIAL/RANDOM_SEQ),
 # pushed down from sound_bank.gd into engine/runtime/audio.
 add_executable(sound_selector_test audio/sound_selector_test.cpp)

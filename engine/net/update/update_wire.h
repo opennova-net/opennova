@@ -11,9 +11,6 @@
 // A message is a header of CR LF lines closed by an empty line. A request's first line is its
 // verb and arguments, then `ID <n>`. A reply's lines are its verb line and any of `ID <n>`,
 // `SIZE <n>`, `RESULT <n>`; SIZE bytes of payload follow the empty line.
-//
-// STAGED, NOT WIRED: consumed by apps/novaworld_server/update (the listener, ADR 0061 phase 2) and
-// apps/update (phase 3); until those land only tests/update include it.
 
 #include <cstddef>
 #include <cstdint>

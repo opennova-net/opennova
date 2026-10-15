@@ -2,9 +2,6 @@
 
 // SERVER.LST, the gateway's list of update servers. docs/update/updater-re.md §5.
 // [orig: Cupdate2Dlg_ReadServerList @ 0x408070 (UPDATE.EXE)]
-//
-// STAGED, NOT WIRED: consumed by apps/novaworld_server/update (the listener, ADR 0061 phase 2) and
-// apps/update (phase 3); until those land only tests/update include it.
 
 #include <string>
 #include <string_view>

@@ -8,9 +8,6 @@
 // char product[260]. Before them the entries: char name[16]; u32 size; size bytes. An entry
 // named PACKAGEBREAK is followed by char expansion[260] instead of a payload and switches the
 // rest to that expansion's update directory.
-//
-// STAGED, NOT WIRED: consumed by opennova-project update build (ADR 0061 phase 2), apps/update and
-// the service (phases 3 and 4); until those land only tests/update include it.
 
 #include <cstddef>
 #include <cstdint>
