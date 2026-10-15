@@ -734,6 +734,42 @@ void ObjectModel::set_right_hand_collapsed(bool p_collapsed) {
 	}
 }
 
+void ObjectModel::set_body_pose_override(const std::vector<opennova::anim::PoseBone> &p_pose,
+		float p_weight) {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->set_body_pose_override(p_pose, p_weight);
+	}
+	wake_runtime_frame();
+	body_override_ = p_pose;
+	body_override_weight_ = CLAMP(p_weight, 0.0f, 1.0f);
+	body_pose_dirty_ = true;
+	advance_body_animation(0.0);
+}
+
+void ObjectModel::clear_body_pose_override() {
+	for (ObjectModel *linked : live_presentation_links()) {
+		linked->clear_body_pose_override();
+	}
+	if (body_override_weight_ <= 0.0f && body_override_.empty()) {
+		return;
+	}
+	wake_runtime_frame();
+	body_override_.clear();
+	body_override_weight_ = 0.0f;
+	body_pose_dirty_ = true;
+	advance_body_animation(0.0);
+}
+
+bool ObjectModel::eval_body_clip_pose(double p_offset_seconds,
+		std::vector<opennova::anim::PoseBone> &r_pose) const {
+	if (skeletal_.is_null() || anim_key_.is_empty()) {
+		return false;
+	}
+	skeletal_->eval_person_pose(anim_key_, MAX(0.0, anim_time_ + p_offset_seconds), anim_variant_,
+			r_pose);
+	return !r_pose.empty();
+}
+
 // Pose the Skeleton3D from the active main-body clip: advance the playhead
 // while playing, then one native pose write (the whole evaluate-and-write
 // loop lives on SkeletalAnim). write_pose=false advances the clip clock
@@ -753,6 +789,19 @@ void ObjectModel::advance_body_animation(double p_delta, bool p_write_pose) {
 		return;
 	}
 	if (!body_pose_dirty_) {
+		return;
+	}
+	if (body_override_weight_ > 0.0f && !body_override_.empty()) {
+		if (body_override_weight_ >= 1.0f) {
+			skeletal_->write_native_pose(skeleton_, body_override_);
+		} else {
+			std::vector<opennova::anim::PoseBone> clip;
+			std::vector<opennova::anim::PoseBone> mixed;
+			eval_body_clip_pose(0.0, clip);
+			opennova::anim::blend_poses(clip, body_override_, body_override_weight_, mixed);
+			skeletal_->write_native_pose(skeleton_, mixed);
+		}
+		body_pose_dirty_ = false;
 		return;
 	}
 	const bool use_overlay =

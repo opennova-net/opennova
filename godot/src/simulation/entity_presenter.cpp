@@ -1142,6 +1142,39 @@ PackedInt64Array EntityPresenter::profile_present_snapshot(
 	return result;
 }
 
+void EntityPresenter::note_ragdoll_row(ObjectModel *model, int32_t handle, const float *p,
+		int base) {
+	if (!collect_ragdoll_rows_ || model == nullptr || model->get_skeletal_anim().is_null()) {
+		return;
+	}
+	const int32_t anim_state = field_i(p, base, Simulation::PF_ANIM_STATE);
+	if (anim_state < 0) {
+		return;
+	}
+	RagdollRow row;
+	row.model = model;
+	row.handle = handle;
+	row.life = field_i(p, base, Simulation::PF_RESPAWN_REVISION);
+	row.anim_state = anim_state;
+	row.hidden = field_i(p, base, Simulation::PF_HIDDEN) != 0;
+	row.severed = field_i(p, base, Simulation::PF_SECTION_MASK_VALID) != 0 &&
+			(field_i(p, base, Simulation::PF_SECTION_MASK_LO) & 1) != 0;
+	ragdoll_rows_.push_back(row);
+}
+
+void EntityPresenter::set_collect_ragdoll_rows(bool p_collect) {
+	collect_ragdoll_rows_ = p_collect;
+	if (!p_collect) {
+		ragdoll_rows_.clear();
+	}
+}
+
+std::vector<EntityPresenter::RagdollRow> EntityPresenter::take_ragdoll_rows() {
+	std::vector<RagdollRow> out;
+	out.swap(ragdoll_rows_);
+	return out;
+}
+
 void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 		int stride, int64_t layout_revision, const int32_t *door_phases, int64_t door_phase_count,
 		MissionFrameProfile *p_profile) {
@@ -1180,6 +1213,7 @@ void EntityPresenter::present_snapshot_impl(PresentRowsView snap,
 			}
 		}
 		const int base = row.base;
+		note_ragdoll_row(model, row.handle, p, base);
 		uint64_t profile_phase_start = p_profile != nullptr
 				? Time::get_singleton()->get_ticks_usec()
 				: 0;

@@ -4760,3 +4760,16 @@ endif()
 # The OpenNova Editor's rows (ADR 0046): tests/editor/CMakeLists.txt, one opennova_add_editor_test per
 # executable; their executables and working directory stay this folder's.
 add_subdirectory(editor)
+
+# The opt-in ragdoll corpses (ADR 0060): the solver, the set and the death
+# clip reading on a synthetic person rig; ragdoll_us01 on retail's own rig.
+add_executable(ragdoll_test ragdoll/ragdoll_test.cpp)
+target_link_libraries(ragdoll_test PRIVATE opennova_runtime)
+target_include_directories(ragdoll_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ragdoll_test PRIVATE cxx_std_17)
+add_test(NAME ragdoll COMMAND ragdoll_test)
+add_executable(ragdoll_us01_test ragdoll/ragdoll_us01_test.cpp)
+target_link_libraries(ragdoll_us01_test PRIVATE opennova_runtime)
+target_include_directories(ragdoll_us01_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ragdoll_us01_test PRIVATE cxx_std_17)
+opennova_add_gated_test(ragdoll_us01 COMMAND ragdoll_us01_test)

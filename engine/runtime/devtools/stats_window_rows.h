@@ -51,7 +51,7 @@ inline constexpr Slot k_occl[] = {Slot::OCCL_BUILD, Slot::OCCL_PROBE, Slot::OCCL
 inline constexpr Slot k_occl_apply_remainder[] = {Slot::OCCL_BUILDING_QUERY, Slot::OCCL_BUILDING_APPLY, Slot::OCCL_CULL_QUERY, Slot::OCCL_CULL_APPLY, Slot::OCCL_LIGHT_QUERY, Slot::OCCL_LIGHT_APPLY, Slot::OCCL_WATER_APPLY};
 inline constexpr Slot k_env[] = {Slot::WORLD_WEATHER, Slot::WORLD_BLINK, Slot::WORLD_IRIS};
 inline constexpr Slot k_model_runtime_remainder[] = {Slot::MODEL_CLOCK_ANIMATION, Slot::MODEL_PANM, Slot::MODEL_MATERIAL, Slot::MODEL_ORDER_BOUNDS};
-inline constexpr Slot k_world_remainder[] = {Slot::WORLD_RUNTIME, Slot::WORLD_LOCAL_VIEW, Slot::WORLD_FRAMEFX, Slot::WORLD_SCENE_ENV, Slot::WORLD_ENV_NODES, Slot::WORLD_WATER, Slot::WORLD_TERRAIN, Slot::WORLD_FOLIAGE, Slot::WORLD_NETWORK_FRAME, Slot::WORLD_WEATHER, Slot::WORLD_BLINK, Slot::OCCL_BUILD, Slot::OCCL_PROBE, Slot::OCCL_APPLY, Slot::OCCL_GLUE, Slot::WORLD_IRIS, Slot::WORLD_SUN_VEIL, Slot::WORLD_LIGHT, Slot::WORLD_MATERIAL, Slot::WORLD_SLOT_SHADOW, Slot::WORLD_PARTICLES, Slot::WORLD_AUDIO, Slot::WORLD_CLEAR, Slot::WORLD_ENV_CUBE};
+inline constexpr Slot k_world_remainder[] = {Slot::WORLD_RUNTIME, Slot::WORLD_LOCAL_VIEW, Slot::WORLD_FRAMEFX, Slot::WORLD_SCENE_ENV, Slot::WORLD_ENV_NODES, Slot::WORLD_WATER, Slot::WORLD_TERRAIN, Slot::WORLD_FOLIAGE, Slot::WORLD_NETWORK_FRAME, Slot::WORLD_WEATHER, Slot::WORLD_BLINK, Slot::OCCL_BUILD, Slot::OCCL_PROBE, Slot::OCCL_APPLY, Slot::OCCL_GLUE, Slot::WORLD_IRIS, Slot::WORLD_SUN_VEIL, Slot::WORLD_LIGHT, Slot::WORLD_RAGDOLL, Slot::WORLD_MATERIAL, Slot::WORLD_SLOT_SHADOW, Slot::WORLD_PARTICLES, Slot::WORLD_AUDIO, Slot::WORLD_CLEAR, Slot::WORLD_ENV_CUBE};
 inline constexpr Slot k_other_process[] = {Slot::FRAME_PLAYER_BEFORE, Slot::FRAME_WORLD, Slot::FRAME_PLAYER_AFTER, Slot::FRAME_HUD, Slot::FRAME_STATS_SAMPLE, Slot::FRAME_SHELL_CONTROL, Slot::FRAME_ROUND_FLOW, Slot::FRAME_MENU_SHELL, Slot::FRAME_MENU_VIDEO, Slot::FRAME_DEBUG_REFRESH};
 inline constexpr Slot k_engine_frame[] = {Slot::FRAME_PROCESS_CALLBACKS, Slot::FRAME_PHYSICS_CALLBACKS, Slot::FRAME_DEFERRED_FLUSH, Slot::FRAME_DRAW, Slot::FRAME_PACING_INPUT};
 
@@ -194,6 +194,7 @@ inline constexpr StatsRow kRows[] = {
 	{"env", "Env (weather/blink/iris)", 2, RowKind::GROUP, Slot::COUNT, k_env, 3},
 	{"sun_veil", "Sun-veil publication", 2, RowKind::SPAN, Slot::WORLD_SUN_VEIL, nullptr, 0},
 	{"light", "Point-light selection/publication", 2, RowKind::SPAN, Slot::WORLD_LIGHT, nullptr, 0},
+	{"ragdoll", "Ragdoll corpses", 2, RowKind::SPAN, Slot::WORLD_RAGDOLL, nullptr, 0},
 	{"material", "Model runtime", 2, RowKind::SPAN, Slot::WORLD_MATERIAL, nullptr, 0},
 	{"model_clock_animation", "Clocks + animation", 3, RowKind::SPAN, Slot::MODEL_CLOCK_ANIMATION, nullptr, 0},
 	{"model_panm", "PANM transforms", 3, RowKind::SPAN, Slot::MODEL_PANM, nullptr, 0},
@@ -205,7 +206,7 @@ inline constexpr StatsRow kRows[] = {
 	{"audio", "Audio", 2, RowKind::SPAN, Slot::WORLD_AUDIO, nullptr, 0},
 	{"clear", "Frame clear-color publication", 2, RowKind::SPAN, Slot::WORLD_CLEAR, nullptr, 0},
 	{"env_cube", "Environment-cube submission", 2, RowKind::SPAN, Slot::WORLD_ENV_CUBE, nullptr, 0},
-	{"world_remainder", "World orchestration remainder", 2, RowKind::RESIDUAL, Slot::FRAME_WORLD, k_world_remainder, 24},
+	{"world_remainder", "World orchestration remainder", 2, RowKind::RESIDUAL, Slot::FRAME_WORLD, k_world_remainder, 25},
 	{"after", "Player presenter (post)", 1, RowKind::SPAN, Slot::FRAME_PLAYER_AFTER, nullptr, 0},
 	{"hud", "HUD tick", 1, RowKind::SPAN, Slot::FRAME_HUD, nullptr, 0},
 	{"hud_scalars", "Scalars", 2, RowKind::SPAN, Slot::HUD_SCALARS, nullptr, 0},

@@ -184,6 +184,7 @@ add_library(opennova_bindings OBJECT
     simulation/player_local_view.cpp
     simulation/player_weapon_event.cpp
     simulation/destruction_events.cpp
+    simulation/corpse_ragdoll_presenter.cpp
     simulation/debug_pick_card.cpp
     simulation/hitbox_debug_report.cpp
     simulation/hud_view_records.cpp

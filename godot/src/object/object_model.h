@@ -1,6 +1,7 @@
 #pragma once
 
 #include <runtime/anim/remote_body_state.h>
+#include <runtime/anim/skeletal_pose.h>
 #include <runtime/environment/water_mirror.h>
 #include <runtime/renderer/model_controls.h>
 #include <runtime/renderer/model_mesh_prepare.h>
@@ -629,6 +630,9 @@ private:
 	int body_blend_source_variant_ = 0;
 	int last_slot_resolved_ = -1;
 	String last_slot_key_;
+	// The ragdoll pose drawn over the clip (weight 0: none).
+	std::vector<opennova::anim::PoseBone> body_override_;
+	float body_override_weight_ = 0.0f;
 
 	// Third-person aim overlay + the upper-body weapon channel. The nine
 	// per-class deltas live in a fixed array (no Variant container on the
@@ -1306,6 +1310,16 @@ public:
 	float get_body_blend_weight() const { return body_blend_weight_; }
 	int get_body_blend_source_variant() const { return body_blend_source_variant_; }
 	void advance_body_animation(double p_delta, bool p_write_pose = true);
+	// The ragdoll corpse's pose over the body clip (ADR 0060): at weight 1 it
+	// draws alone, below 1 it blends back toward the clip; clear hands the
+	// body back to the clip. Linked presentation copies take it too.
+	void set_body_pose_override(const std::vector<opennova::anim::PoseBone> &p_pose, float p_weight);
+	void clear_body_pose_override();
+	bool has_body_pose_override() const { return body_override_weight_ > 0.0f; }
+	// The body clip's own pose (no overlay) at its playhead plus p_offset
+	// seconds; false when no clip plays.
+	bool eval_body_clip_pose(double p_offset_seconds,
+			std::vector<opennova::anim::PoseBone> &r_pose) const;
 	// Diagnostics: whether a body-pose input changed since the last pose write
 	// (the aim-overlay/weapon-channel dedup fast path pins against this).
 	bool is_body_pose_dirty() const { return body_pose_dirty_; }

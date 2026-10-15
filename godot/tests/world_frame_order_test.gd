@@ -11,7 +11,7 @@ func test_frame_leg_table_is_the_witnessed_order() -> void:
 	assert_eq(Array(GameWorld.frame_leg_names()), [
 		"begin", "session", "local_view", "scene_environment",
 		"environment_nodes", "terrain", "water", "network", "blink",
-		"occlusion", "foliage", "iris", "sun_veil", "lights", "materials", "framefx",
+		"occlusion", "foliage", "iris", "sun_veil", "lights", "ragdolls", "materials", "framefx",
 		"slot_shadows", "particles", "precipitation", "scene_overlay",
 		"screen_effects", "audio", "clear", "environment_cube", "finish",
 	])
@@ -36,6 +36,10 @@ func test_local_view_precedes_every_camera_consumer() -> void:
 	for producer in ["lights", "particles", "precipitation"]:
 		assert_gt(names.find("scene_overlay"), names.find(producer),
 				"the overlay tail gathers what %s published this frame" % producer)
+	assert_gt(names.find("ragdolls"), local_view,
+			"the ragdolls read the avatar the local view posed this frame")
+	assert_lt(names.find("ragdolls"), names.find("materials"),
+			"the ragdolls pose their bodies before the materials leg writes the bones")
 
 
 func test_only_the_session_and_network_rows_stop_the_frame() -> void:
@@ -57,7 +61,7 @@ func test_frozen_pose_replay_keeps_the_camera_producer_order() -> void:
 		"clear",
 	])
 	var live := Array(GameWorld.frame_leg_names())
-	for time_owner in ["session", "environment_nodes", "materials", "audio", "network", "blink"]:
+	for time_owner in ["session", "environment_nodes", "ragdolls", "materials", "audio", "network", "blink"]:
 		assert_true(live.has(time_owner))
 		assert_false(replay.has(time_owner),
 				"the replay omits the time-owning %s leg" % time_owner)

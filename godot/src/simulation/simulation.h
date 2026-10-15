@@ -542,13 +542,13 @@ public:
 	}
 
 private:
-	// The engine's ONE mission boot + state + no-net tick (ADR 0042 d3):
-	// world, systems (AI/WAC/BMS events/collision/occlusion), the sim asset
-	// caches, terrain field store, seat specs, the weapon/ammo tables, and
-	// the local-player frame state all live inside. Recreated per load
-	// (reset_world) and NEVER null after construction; this binding converts
-	// Godot Refs into the kernel's sources and orders device work around it.
+	// The engine's ONE mission boot + state + no-net tick (ADR 0042 d3): world, systems
+	// (AI/WAC/BMS events/collision/occlusion), the sim asset caches, terrain field store, seat
+	// specs, the weapon/ammo tables, and the local-player frame state all live inside. Recreated
+	// per load (reset_world) and NEVER null after construction; this binding converts Godot
+	// Refs into the kernel's sources and orders device work around it.
 	friend class EffectSectionSource; // the effect section gate's kernel reads
+	friend class CorpseRagdollPresenter; // the ragdolls' world reads (ADR 0060)
 	friend class MapViewWindow; // the CMAP waypoint legs (inmatch/client_squad.cpp)
 	friend class CommandMapScreen; // the CMAP tables' roster and sends (menu/command_map_screen.h)
 	std::unique_ptr<opennova::mission::MissionKernel> kernel_;
