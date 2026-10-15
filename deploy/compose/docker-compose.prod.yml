@@ -137,9 +137,10 @@ services:
   # toolbox's `backup now|list|restore` and `db reset-db`'s dump), kept 90
   # days under BACKUP_PREFIX (novaworld/ for prod, novaworld-<deployment>/
   # otherwise) in the operations bucket, independent of the RDS instance (whose
-  # own point-in-time recovery covers 14 days). Built on the host from the
-  # release bundle's copy of deploy/backup; the image pins the RDS CA bundle
-  # where DATABASE_URL's sslrootcert names it. The host's network and root: the
+  # own point-in-time recovery covers 14 days). Built on the service instance
+  # from the release bundle's copy of deploy/backup, on a base pinned by digest
+  # (deploy/backup/Dockerfile); the image pins the RDS CA bundle where
+  # DATABASE_URL's sslrootcert names it. The instance's network and root: the
   # instance role (IMDSv2) gives it S3, the metadata fence admits root.
   backup:
     image: opennova-backup:local

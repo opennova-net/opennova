@@ -7,7 +7,16 @@
 #
 # The PostgreSQL 17 client tools match the server's major version, so a dump
 # taken here restores into the same server or a newer one.
-FROM postgres:17-alpine
+#
+# The service instance builds this image at every converge (the prod overlay's
+# `build:`), so its base is pinned by digest: every instance, a new one
+# included, builds on the same postgres and the same Alpine branch, and a
+# converge never moves it. The tag names what the digest is; a bump moves both
+# (docker buildx imagetools inspect postgres:<version>-alpine<branch>, its
+# Digest line). The packages below come from that branch's repository at
+# build time (its security fixes alone); an instance reuses its build cache
+# until the Dockerfile or the base changes.
+FROM postgres:17.11-alpine3.24@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
 
 # The RDS CA bundle, pinned by its SHA-256 as the server image pins it
 # (apps/novaworld_server/Dockerfile, which says how to bump it), at the same

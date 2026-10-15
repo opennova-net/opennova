@@ -6,7 +6,9 @@ instance: the managed database keeps its own snapshots and point-in-time
 recovery beside them, and a dump restores into a fresh instance as well.
 
 - Runs as a long-lived `backup` service in the prod compose (cron at 03:00 UTC).
-- `postgres:17-alpine`: the client tools match the server's major version.
+- `postgres:17.11-alpine3.24`, pinned by digest (the Dockerfile says how to bump it): the
+  client tools match the server's major version, and every converge builds on the same
+  base.
 - AWS credentials come from the EC2 instance IAM role over IMDSv2; no keys in
   the container.
 - The database comes from `DATABASE_URL` (a libpq URI) and `DATABASE_PASSWORD`,
