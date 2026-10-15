@@ -93,15 +93,21 @@ jobs:
           $log = Join-Path $unpacked "novaworld.log"
           $process = Start-Process -FilePath (Join-Path $unpacked $server) -WorkingDirectory $unpacked `
             -RedirectStandardOutput $log -RedirectStandardError "$log.err" -NoNewWindow -PassThru
+          # The server's threads write the log concurrently, so a read while it runs can hold a
+          # region not yet written (NUL bytes) inside an earlier line: wait for the ready line,
+          # stop the server, then read the log whole with the NULs dropped.
+          $read = { ((Get-Content -Raw -LiteralPath $log -ErrorAction SilentlyContinue) -as [string]) -replace "`0", "" }
           try {
             $deadline = (Get-Date).AddSeconds(30)
             do {
               Start-Sleep -Milliseconds 250
-              $output = Get-Content -Raw -LiteralPath $log -ErrorAction SilentlyContinue
+              $output = & $read
             } until ($output -match '\[boot\] ready' -or $process.HasExited -or (Get-Date) -gt $deadline)
           } finally {
             if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+            $process.WaitForExit()
           }
+          $output = & $read
           Write-Host $output
           Get-Content -Raw -LiteralPath "$log.err" -ErrorAction SilentlyContinue | Write-Host
           if ($output -notmatch '\[boot\] migrations: [1-9]\d* applied') {
