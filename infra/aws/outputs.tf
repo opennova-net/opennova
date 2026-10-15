@@ -30,7 +30,7 @@ output "web_domain" {
 
 output "ops_bucket_name" {
   value       = var.ops_bucket_name
-  description = "The operations bucket: releases/<deployment>/ and backups/<deployment>/"
+  description = "The operations bucket: releases/<deployment>/ and the database dumps (novaworld/, novaworld-<deployment>/)"
 }
 
 output "ssm_prefix" {
@@ -46,6 +46,21 @@ output "converge_document" {
 output "log_group" {
   value       = aws_cloudwatch_log_group.service.name
   description = "The containers' logs (app logs)"
+}
+
+output "db_endpoint" {
+  value       = aws_db_instance.main.address
+  description = "The database's hostname (private: the service host reaches it; DATABASE_URL in infra.env)"
+}
+
+output "db_port" {
+  value       = aws_db_instance.main.port
+  description = "The database's port"
+}
+
+output "db_identifier" {
+  value       = aws_db_instance.main.identifier
+  description = "The database instance (db snapshot; RDS point-in-time restores name it)"
 }
 
 output "vpc_id" {

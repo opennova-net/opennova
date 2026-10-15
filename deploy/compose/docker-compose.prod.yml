@@ -46,6 +46,14 @@ services:
       timeout: 3s
       retries: 3
       start_period: 60s
+    # The database (RDS, infra/aws/database.tf): its URL from Terraform
+    # (verify-full against the image's pinned RDS CA bundle), its password from
+    # the vault. Required here, so a host missing either never starts a server
+    # that cannot reach its data.
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL (infra.env; infra apply)}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?set DATABASE_PASSWORD (secret.env; secrets sync)}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-16}
     logging:
       driver: awslogs
       options:
@@ -89,5 +97,36 @@ services:
         awslogs-region: ${AWS_REGION:?set AWS_REGION (infra.env)}
         awslogs-group: ${OPENNOVA_LOG_GROUP:?set OPENNOVA_LOG_GROUP (infra.env)}
         awslogs-stream: game
+        mode: non-blocking
+        max-buffer-size: 4m
+
+  # The database's dumps (deploy/backup: pg_dump -Fc to S3 nightly, plus the
+  # toolbox's `backup now|list|restore` and `db reset-db`'s dump), kept 90
+  # days under BACKUP_PREFIX (novaworld/ for prod, novaworld-<deployment>/
+  # otherwise) in the operations bucket, independent of the RDS instance (whose
+  # own point-in-time recovery covers 14 days). Built on the host from the
+  # release bundle's copy of deploy/backup; the image pins the RDS CA bundle
+  # where DATABASE_URL's sslrootcert names it. The host's network and root: the
+  # instance role (IMDSv2) gives it S3, the metadata fence admits root.
+  backup:
+    image: opennova-backup:local
+    build:
+      context: ../backup
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL (infra.env; infra apply)}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?set DATABASE_PASSWORD (secret.env; secrets sync)}
+      BACKUP_BUCKET: ${BACKUP_BUCKET:?set BACKUP_BUCKET (infra.env)}
+      BACKUP_PREFIX: ${BACKUP_PREFIX:?set BACKUP_PREFIX (infra.env)}
+      AWS_REGION: ${AWS_REGION:?set AWS_REGION (infra.env)}
+      AWS_DEFAULT_REGION: ${AWS_REGION:?set AWS_REGION (infra.env)}
+    logging:
+      driver: awslogs
+      options:
+        awslogs-region: ${AWS_REGION:?set AWS_REGION (infra.env)}
+        awslogs-group: ${OPENNOVA_LOG_GROUP:?set OPENNOVA_LOG_GROUP (infra.env)}
+        awslogs-stream: backup
         mode: non-blocking
         max-buffer-size: 4m

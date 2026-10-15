@@ -50,7 +50,22 @@
 #   app logs [SERVICE] [--follow] [--since 1h]
 #                                 the containers' logs (CloudWatch)
 #   app shell                     a root shell on the host (Session Manager)
-#   hosted status                 this deployment's hosted game server machines
+#   db bootstrap                  make the service's role and its database
+#                                 (SQL_ASCII, C collation) with the master user,
+#                                 or set the role's password again; idempotent
+#   db psql [-c SQL | -f FILE]    psql as the service's role (interactive without
+#                                 SQL, over Session Manager)
+#   db reset-db --yes-drop-database [--orphan-subscriptions] [--no-backup]
+#                                 dump, then drop and recreate the database and
+#                                 start the server on it (its migrations run);
+#                                 refuses while a subscription grants hosting
+#   db snapshot                   an RDS snapshot of the database, now
+#   backup now|list               dump the database to S3 (novaworld/ for prod,
+#                                 novaworld-NAME/ otherwise) / list the dumps
+#   backup restore KEY --yes-overwrite-database
+#                                 restore a dump over the database (the server
+#                                 is stopped meanwhile)
+#   hosted status                this deployment's hosted game server machines
 #   hosted data-snapshot --data-set SLUG
 #                                 one data set of the hosted servers' game data,
 #                                 once: its game folder mounted at /hosted-data
@@ -82,10 +97,16 @@ log()  { printf '\033[1;36m[deploy]\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31m[deploy:error]\033[0m %s\n' "$*" >&2; }
 die()  { err "$*"; exit 1; }
 
-# Whatever a command leaves in the tmpfs goes when it ends.
+# Whatever a command leaves in the tmpfs goes when it ends, and so does the
+# master password a db command lent the host (db_master_param_put).
+DB_MASTER_PARAM=""
 cleanup() {
   rm -f "$SECRETS_DIR"/item.*.json "$SECRETS_DIR"/value.* "$SECRETS_DIR"/*.rendered \
     "$SECRETS_DIR"/tfplan "$SECRETS_DIR"/aws.env 2>/dev/null || true
+  if [ -n "$DB_MASTER_PARAM" ]; then
+    aws ssm delete-parameter --name "$DB_MASTER_PARAM" >/dev/null 2>&1 \
+      || err "deleting $DB_MASTER_PARAM failed: delete it by hand (aws ssm delete-parameter --name $DB_MASTER_PARAM)"
+  fi
 }
 trap cleanup EXIT
 
@@ -431,7 +452,10 @@ secrets_init() {
   ensure_item "$APP_ITEM" SERVER \
     admin_api_token:gen:24:CONCEALED \
     admin_basic_auth_user:value:admin:STRING \
-    admin_basic_auth_password:gen:16:CONCEALED
+    admin_basic_auth_password:gen:16:CONCEALED \
+    database_password:gen:24:CONCEALED
+  ensure_item "$RDS_ITEM" SECURE_NOTE \
+    master_password:gen:24:CONCEALED
   local specs=()
   mapfile -t specs < <(stripe_placeholder_specs)
   ensure_item stripe-test API_CREDENTIAL "${specs[@]}"
@@ -1036,6 +1060,262 @@ cmd_app() {
 }
 
 # ---------------------------------------------------------------------------
+# db (PostgreSQL 17 on RDS, infra/aws/database.tf) and backup
+# ---------------------------------------------------------------------------
+
+# The master password, lent to the host for one command: a SecureString,
+# /opennova/<deployment>/bootstrap/db-master-password, which the host reads
+# once and cleanup deletes when the command ends. Vault -> tmpfs file ->
+# put-parameter file://: never an argument, never printed.
+db_master_param_put() {
+  require_op
+  local f="$SECRETS_DIR/value.master"
+  op read --no-newline "op://$VAULT/$RDS_ITEM/master_password" > "$f" 2>/dev/null \
+    || { rm -f "$f"; die "reading op://$VAULT/$RDS_ITEM/master_password failed (secrets init makes it)"; }
+  chmod 600 "$f"
+  DB_MASTER_PARAM="$SSM_PREFIX/bootstrap/db-master-password"
+  aws ssm put-parameter --name "$DB_MASTER_PARAM" --type SecureString --tier Standard \
+    --value "file://$f" --overwrite >/dev/null \
+    || { rm -f "$f"; DB_MASTER_PARAM=""; die "writing $SSM_PREFIX/bootstrap/db-master-password failed"; }
+  rm -f "$f"
+}
+
+# The database's names from infra.env, checked before they go into a script.
+db_names() {
+  infra_env_load
+  DB_HOST="$(infra_get OPENNOVA_DB_HOST)"
+  DB_PORT="$(infra_get OPENNOVA_DB_PORT)"
+  DB_NAME="$(infra_get OPENNOVA_DB_NAME)"
+  DB_USER="$(infra_get OPENNOVA_DB_USER)"
+  DB_MASTER="$(infra_get OPENNOVA_DB_MASTER_USER)"
+  [[ "$DB_HOST" =~ ^[a-z0-9.-]+$ ]] || die "infra.env's OPENNOVA_DB_HOST '$DB_HOST' is no hostname"
+  [[ "$DB_PORT" =~ ^[0-9]+$ ]] || die "infra.env's OPENNOVA_DB_PORT '$DB_PORT' is no port"
+  local n
+  for n in "$DB_NAME" "$DB_USER" "$DB_MASTER"; do
+    [[ "$n" =~ ^[a-z_][a-z0-9_]{0,62}$ ]] || die "infra.env names the database identifier '$n', which is no plain name"
+  done
+}
+
+# The SQL that makes the service's role and its database, or sets the role's
+# password again: idempotent. The database is SQL_ASCII with C collation, the
+# only one the server accepts (retail hosts send cp1252 bytes, which it stores
+# byte for byte; its boot refuses any other). The password comes from the
+# container's environment (\getenv), never from the script's text.
+db_bootstrap_sql() {
+  cat <<SQL
+\\getenv app_password NOVAWORLD_PASSWORD
+SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', '$DB_USER', :'app_password')
+  WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$DB_USER') \\gexec
+SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', '$DB_USER', :'app_password') \\gexec
+GRANT $DB_USER TO CURRENT_USER;
+SELECT format('CREATE DATABASE %I OWNER %I TEMPLATE template0 ENCODING %L LC_COLLATE %L LC_CTYPE %L',
+              '$DB_NAME', '$DB_USER', 'SQL_ASCII', 'C', 'C')
+  WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '$DB_NAME') \\gexec
+REVOKE ALL ON DATABASE $DB_NAME FROM PUBLIC;
+GRANT CONNECT, TEMPORARY ON DATABASE $DB_NAME TO $DB_USER;
+\\pset footer off
+SELECT datname AS database, pg_get_userbyid(datdba) AS owner, pg_encoding_to_char(encoding) AS encoding,
+       datcollate AS lc_collate, datctype AS lc_ctype
+  FROM pg_database WHERE datname = '$DB_NAME';
+SQL
+}
+
+# A host script fragment: run the SQL on stdin's heredoc as the master user,
+# in a one-off postgres:17 container on the host's network, the passwords in a
+# 0600 env file in /run (the master's from the lent parameter, the service
+# role's from its secret).
+# shellcheck disable=SC2016  # the host's shell expands these
+db_master_psql_fragment() {
+  local sql="$1"
+  cat <<'HEAD'
+set -a
+. /etc/opennova/host.env
+set +a
+umask 077
+# A new host's first boot may still be installing docker.
+if command -v cloud-init >/dev/null 2>&1; then timeout 1200 cloud-init status --wait >/dev/null 2>&1 || true; fi
+command -v docker >/dev/null 2>&1 || { echo "docker is not installed: the host's first boot failed" >&2; exit 1; }
+ca=/etc/opennova/rds-global-bundle.pem
+[ -s "$ca" ] || { echo "the host has no RDS CA bundle ($ca): app deploy (converge) fetches it" >&2; exit 1; }
+install -d -m 0700 /run/opennova
+env_file="$(mktemp /run/opennova/db-admin.XXXXXX)"
+trap 'rm -f "$env_file"' EXIT
+master_password="$(aws ssm get-parameter --name "$OPENNOVA_SSM_PREFIX/bootstrap/db-master-password" \
+  --with-decryption --query Parameter.Value --output text)"
+app_password="$(aws ssm get-parameter --name "$OPENNOVA_SSM_PREFIX/secret/DATABASE_PASSWORD" \
+  --with-decryption --query Parameter.Value --output text)" \
+  || { echo "no $OPENNOVA_SSM_PREFIX/secret/DATABASE_PASSWORD: run ./deploy/run.sh secrets sync first" >&2; exit 1; }
+printf 'PGPASSWORD=%s\nNOVAWORLD_PASSWORD=%s\n' "$master_password" "$app_password" > "$env_file"
+unset master_password app_password
+HEAD
+  printf 'docker run --rm -i --network host --env-file "$env_file" -v "$ca:/ca.pem:ro" postgres:17-alpine \\\n'
+  printf '  psql "host=%s port=%s dbname=postgres user=%s sslmode=verify-full sslrootcert=/ca.pem" -X -q -v ON_ERROR_STOP=1 <<'"'"'SQL'"'"'\n' \
+    "$DB_HOST" "$DB_PORT" "$DB_MASTER"
+  printf '%s\nSQL\nrm -f "$env_file"\n' "$sql"
+}
+
+db_bootstrap() {
+  [ $# -eq 0 ] || die "unknown: db bootstrap $1"
+  aws_auth
+  db_names
+  log "db bootstrap: role $DB_USER and database $DB_NAME on $DB_HOST (as $DB_MASTER)…"
+  db_master_param_put
+  ssm_run 600 "$(printf '#!/bin/bash\nset -euo pipefail\nexport PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root\n'; \
+    db_master_psql_fragment "$(db_bootstrap_sql)")" \
+    || die "db bootstrap failed (secrets sync first: the role's password is the DATABASE_PASSWORD secret)"
+  log "db bootstrap complete. Deploy (or restart novaworld) to connect with it."
+}
+
+db_psql() {
+  aws_auth
+  if [ $# -eq 0 ]; then
+    log "psql as the service's role on the $DEP host (Session Manager; \\q ends it)…"
+    aws ssm start-session --target "$(service_instance)" --document-name AWS-StartInteractiveCommand \
+      --parameters '{"command":["sudo /usr/local/sbin/opennova-psql"]}'
+    return
+  fi
+  local sql=""
+  case "$1" in
+    -c) [ $# -eq 2 ] || die "db psql -c needs one SQL argument"; sql="$2" ;;
+    -f) [ $# -eq 2 ] || die "db psql -f needs one FILE"; [ -f "$2" ] || die "no file $2"; sql="$(cat "$2")" ;;
+    *) die "unknown: db psql $1 (try: [-c SQL | -f FILE])" ;;
+  esac
+  local b64
+  b64="$(printf '%s\n' "$sql" | base64 -w0)"
+  ssm_run 300 "$(host_script "printf '%s' '$b64' | base64 -d | opennova-psql -X -v ON_ERROR_STOP=1 -f -")"
+}
+
+# The count of subscriptions that grant hosting (active, trialing, past_due),
+# 0 while the billing table does not exist.
+DB_GUARD_SQL="SELECT to_regclass('public.billing_subscriptions') IS NOT NULL AS has_billing \\gset
+\\if :has_billing
+SELECT 'granting=' || count(*) FROM billing_subscriptions WHERE status IN ('active', 'trialing', 'past_due');
+\\else
+SELECT 'granting=0';
+\\endif"
+
+db_reset() {
+  local confirmed=0 orphan=0 backup=1
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --yes-drop-database) confirmed=1; shift ;;
+      --orphan-subscriptions) orphan=1; shift ;;
+      --no-backup) backup=0; shift ;;
+      *) die "unknown: db reset-db $1 (try: --yes-drop-database [--orphan-subscriptions] [--no-backup])" ;;
+    esac
+  done
+  aws_auth
+  db_names
+  log "checking for subscriptions that grant hosting…"
+  local out granting b64
+  b64="$(printf '%s\n' "$DB_GUARD_SQL" | base64 -w0)"
+  out="$(ssm_run 300 "$(host_script "printf '%s' '$b64' | base64 -d | opennova-psql -X -q -At -v ON_ERROR_STOP=1 -f -")")" \
+    || die "the check failed; nothing was changed (a database never bootstrapped wants db bootstrap, not a reset)"
+  granting="$(sed -n 's/^granting=\([0-9][0-9]*\)$/\1/p' <<<"$out" | tail -n 1)"
+  [ -n "$granting" ] || die "the check printed no count; nothing was changed"
+  if [ "$granting" -gt 0 ] && [ "$orphan" -eq 0 ]; then
+    die "$granting subscription(s) (active, trialing or past_due) grant hosting: once billing is live the database is durable. Refusing. (--orphan-subscriptions resets anyway: their customers keep paying with no account linked here, so cancel them in Stripe first)"
+  fi
+  log "db reset-db on $DEP will:"
+  if [ "$backup" -eq 1 ]; then
+    log "  1. dump the database to S3 (as backup now); a failed dump stops here, nothing changed"
+  else
+    log "  1. take NO dump (--no-backup)"
+  fi
+  log "  2. stop novaworld (the site's API and the game service are down until step 4)"
+  log "  3. drop the database $DB_NAME (WITH FORCE) and make it again, empty (SQL_ASCII, C collation, owned by $DB_USER)"
+  log "  4. start novaworld: its first boot applies every migration"
+  log "  ($granting subscription(s) grant hosting now)"
+  [ "$confirmed" -eq 1 ] || die "refusing to drop the database without --yes-drop-database"
+  db_master_param_put
+  local reset_sql script
+  reset_sql="DROP DATABASE IF EXISTS $DB_NAME WITH (FORCE);
+$(db_bootstrap_sql)"
+  # shellcheck disable=SC2016  # the host's shell expands these
+  script="$(host_script \
+    "$([ "$backup" -eq 1 ] && printf 'echo "[reset-db] dumping the database"\nopennova-compose run --rm --no-deps backup /backup/backup.sh')" \
+    'echo "[reset-db] stopping novaworld"' \
+    'opennova-compose stop novaworld' \
+    "trap 'echo \"[reset-db] failed; starting novaworld again\" >&2; opennova-compose start novaworld || true' ERR" \
+    "$(db_master_psql_fragment "$reset_sql")" \
+    'trap - ERR' \
+    'echo "[reset-db] starting novaworld on the empty database"' \
+    'opennova-compose up -d --wait --wait-timeout 300 novaworld' \
+    'docker logs "$(opennova-compose ps -q novaworld | head -n 1)" 2>&1 | grep "\[boot\] migrations:" | tail -n 1')"
+  ssm_run 1800 "$script" || die "db reset-db failed; its output above says where (app status, app logs novaworld)"
+  log "reset-db complete. Every account is gone: make the first site admin again (DEPLOY.md, ONNET_BOOTSTRAP_ADMIN)."
+}
+
+db_snapshot() {
+  [ $# -eq 0 ] || die "unknown: db snapshot $1"
+  aws_auth
+  infra_env_load
+  local id snap
+  id="$(infra_get OPENNOVA_DB_IDENTIFIER)"
+  snap="$id-manual-$(date -u +%Y%m%d-%H%M%S)"
+  aws rds create-db-snapshot --db-instance-identifier "$id" --db-snapshot-identifier "$snap" \
+    --query 'DBSnapshot.[DBSnapshotIdentifier,Status]' --output text \
+    || die "the snapshot was not started"
+  log "snapshot $snap started (minutes): ./deploy/run.sh$DEP_FLAG aws rds wait db-snapshot-available --db-snapshot-identifier $snap"
+}
+
+cmd_db() {
+  local action="${1:-}"
+  shift || true
+  case "$action" in
+    bootstrap) db_bootstrap "$@" ;;
+    psql)      db_psql "$@" ;;
+    reset-db)  db_reset "$@" ;;
+    snapshot)  db_snapshot "$@" ;;
+    *) die "unknown: db $action (try: bootstrap|psql|reset-db|snapshot)" ;;
+  esac
+}
+
+backup_restore() {
+  local key="" confirmed=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --yes-overwrite-database) confirmed=1; shift ;;
+      -*) die "unknown: backup restore $1 (try: KEY --yes-overwrite-database)" ;;
+      *) [ -z "$key" ] || die "backup restore takes one KEY"; key="$1"; shift ;;
+    esac
+  done
+  [ -n "$key" ] || die "backup restore needs the dump's KEY (backup list)"
+  if ! [[ "$key" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || [[ "$key" == *..* ]]; then die "'$key' is no key"; fi
+  aws_auth
+  infra_env_load
+  log "backup restore on $DEP: stop novaworld, restore s3://$(infra_get BACKUP_BUCKET)/$key over the database, start novaworld"
+  [ "$confirmed" -eq 1 ] || die "refusing to overwrite the database without --yes-overwrite-database"
+  # shellcheck disable=SC2016  # the host's shell expands these
+  ssm_run 1800 "$(host_script \
+    'echo "[restore] stopping novaworld"' \
+    'opennova-compose stop novaworld' \
+    "trap 'echo \"[restore] failed; starting novaworld again\" >&2; opennova-compose start novaworld || true' ERR" \
+    "opennova-compose run --rm --no-deps backup /backup/restore.sh '$key'" \
+    'trap - ERR' \
+    'echo "[restore] starting novaworld"' \
+    'opennova-compose up -d --wait --wait-timeout 300 novaworld' \
+    'docker logs "$(opennova-compose ps -q novaworld | head -n 1)" 2>&1 | grep "\[boot\] migrations:" | tail -n 1')" \
+    || die "the restore failed; its output above says where"
+  log "restore complete: $key"
+}
+
+cmd_backup() {
+  local action="${1:-}"
+  shift || true
+  case "$action" in
+    now)
+      ssm_run 1800 "$(host_script 'opennova-compose run --rm --no-deps backup /backup/backup.sh')" ;;
+    list)
+      aws_auth
+      infra_env_load
+      aws s3 ls "s3://$(infra_get BACKUP_BUCKET)/$(infra_get BACKUP_PREFIX)/" --recursive --human-readable ;;
+    restore) backup_restore "$@" ;;
+    *) die "unknown: backup $action (try: now|list|restore)" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
 # state
 # ---------------------------------------------------------------------------
 
@@ -1358,6 +1638,8 @@ main() {
     infra)   cmd_infra "$@" ;;
     aws)     cmd_aws "$@" ;;
     app)     cmd_app "$@" ;;
+    db)      cmd_db "$@" ;;
+    backup)  cmd_backup "$@" ;;
     state)   cmd_state "$@" ;;
     hosted)  cmd_hosted "$@" ;;
     help|-h|--help) usage ;;

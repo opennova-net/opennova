@@ -30,6 +30,12 @@ instance_type = "c7i.large"
 # The service host's fixed private address in public subnet a (10.44.0.<host>).
 # service_private_ip_host = 10
 
+# The database (database.tf): PostgreSQL 17 on RDS. Its master password comes
+# from the vault (item rds, rds-<deployment> off prod); bump the version to send
+# a changed one to RDS.
+# db_instance_class          = "db.t4g.micro"
+# db_master_password_version = 1
+
 # allowed_cidrs   = ["0.0.0.0/0"] # the retail ports and the game machines' slots
 # ops_bucket_name = "opennova-backups"
 # ami_id          = ""            # empty: Canonical's newest Ubuntu 24.04 at the host's creation

@@ -147,9 +147,78 @@ variable "cloudflare_web_proxied" {
 }
 
 variable "ops_bucket_name" {
-  description = "The operations bucket: every deployment's releases (releases/<deployment>/) and database backups (backups/<deployment>/). Prod (the default workspace) owns it; another deployment names the same bucket."
+  description = "The operations bucket: every deployment's releases (releases/<deployment>/) and database dumps (novaworld/ for prod, novaworld-<deployment>/ otherwise). Prod (the default workspace) owns it; another deployment names the same bucket."
   type        = string
   default     = "opennova-backups"
+}
+
+# ---------------------------------------------------------------------------
+# The database (database.tf)
+# ---------------------------------------------------------------------------
+
+variable "db_instance_class" {
+  description = "The database's instance class (PostgreSQL 17 on RDS, single-AZ)."
+  type        = string
+  default     = "db.t4g.micro"
+}
+
+variable "db_master_username" {
+  description = "The database's master user: `db bootstrap` makes the service's own role and database with it, nothing else uses it."
+  type        = string
+  default     = "novaworld_admin"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9_]{0,62}$", var.db_master_username)) && !contains(["postgres", "rdsadmin", "novaworld"], var.db_master_username)
+    error_message = "db_master_username: lowercase letters, digits and '_', not a reserved name or the service's role."
+  }
+}
+
+variable "db_master_password" {
+  description = "The master user's password, from the vault (TF_VAR_db_master_password: item rds, rds-<deployment> off prod; `secrets init` makes it). Write-only: it never enters the state or a plan, and it reaches RDS only when db_master_password_version changes (and at creation)."
+  type        = string
+  sensitive   = true
+  ephemeral   = true
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9]{16,128}$", var.db_master_password))
+    error_message = "db_master_password must be 16 to 128 letters and digits (secrets init makes 48 hex digits)."
+  }
+}
+
+variable "db_master_password_version" {
+  description = "Bump it (in the deployment's var-file) to send a changed db_master_password to RDS."
+  type        = number
+  default     = 1
+}
+
+variable "db_name" {
+  description = "The service's database (`db bootstrap` makes it, C collation)."
+  type        = string
+  default     = "novaworld"
+}
+
+variable "db_user" {
+  description = "The service's own database role (`db bootstrap` makes it; its password is the runtime secret DATABASE_PASSWORD)."
+  type        = string
+  default     = "novaworld"
+}
+
+variable "db_allocated_storage_gb" {
+  description = "The database's initial storage, in GiB (gp3, encrypted)."
+  type        = number
+  default     = 20
+}
+
+variable "db_max_allocated_storage_gb" {
+  description = "The most the database's storage grows to on its own, in GiB."
+  type        = number
+  default     = 100
+}
+
+variable "db_backup_retention_days" {
+  description = "Days of RDS automated backups (point-in-time recovery)."
+  type        = number
+  default     = 14
 }
 
 # ---------------------------------------------------------------------------

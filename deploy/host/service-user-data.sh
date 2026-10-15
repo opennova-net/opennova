@@ -140,6 +140,23 @@ OPENNOVA_CONVERGE_DOCUMENT='$CONVERGE_DOCUMENT'
 ENV
 chmod 0644 /etc/opennova/host.env
 
+# The RDS CA bundle, for the host's own database tools (`db bootstrap`,
+# opennova-psql) to verify the database (sslmode=verify-full): the one the
+# server and backup images pin, by the same SHA-256 (bump it with theirs and
+# converge.sh's). A bundle that does not come, or is not that one, is left
+# for converge, which refuses to go on without it.
+readonly RDS_CA_BUNDLE_SHA256=90a6f1a7978a1b1b096dca6c57511ca48d3b8cf052f8e704baf358f34ea2f21b
+log "fetching the RDS CA bundle"
+if curl -fsSL --retry 5 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
+    -o /etc/opennova/rds-global-bundle.pem.new \
+   && echo "$RDS_CA_BUNDLE_SHA256  /etc/opennova/rds-global-bundle.pem.new" | sha256sum -c - >/dev/null; then
+  chmod 0644 /etc/opennova/rds-global-bundle.pem.new
+  mv -f /etc/opennova/rds-global-bundle.pem.new /etc/opennova/rds-global-bundle.pem
+else
+  rm -f /etc/opennova/rds-global-bundle.pem.new
+  log "the RDS CA bundle did not come, or is not the pinned one (converge tries again)"
+fi
+
 # --- 4. converge -----------------------------------------------------------------------
 # At boot the host runs the converge document's current script, the one `app
 # deploy` runs (no copy here to fall behind it).

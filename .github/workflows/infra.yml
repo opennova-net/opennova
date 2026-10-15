@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       # The toolbox's Terraform (deploy/Dockerfile TERRAFORM_VERSION).
-      TERRAFORM_IMAGE: hashicorp/terraform:1.9.5
+      TERRAFORM_IMAGE: hashicorp/terraform:1.11.4
     steps:
       - uses: actions/checkout@v4
       - name: terraform fmt

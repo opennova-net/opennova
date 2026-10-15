@@ -19,8 +19,10 @@
 #      /opt/opennova/releases/<id>: the compose files, the committed
 #      deploy/env/app.prod.env, release.env (the images, pinned by digest) and
 #      the backup sidecar's build context; /opt/opennova/current points at it;
-#   3. installs the helpers the toolbox's other commands run here over SSM
-#      (opennova-compose) and itself (/usr/local/sbin/opennova-converge);
+#   3. makes sure of the RDS CA bundle the host's database tools verify
+#      against (pinned, as the images pin it), and installs the helpers the toolbox's other commands run here
+#      over SSM (opennova-compose, opennova-psql) and itself
+#      (/usr/local/sbin/opennova-converge);
 #   4. pulls the release's images, then `docker compose up -d`: compose
 #      recreates only the containers whose image or settings changed (a
 #      web-only release never restarts the NovaWorld server), and waits until
@@ -153,6 +155,22 @@ ln -sfn "$dir" "$BASE/current.new"
 mv -Tf "$BASE/current.new" "$BASE/current"
 
 # --- 3. helpers ----------------------------------------------------------------------------
+# The RDS CA bundle the host's own database tools (opennova-psql, the
+# toolbox's db commands) verify against: the one the server and backup images
+# pin, by the same SHA-256 (apps/novaworld_server/Dockerfile says how to bump
+# it; bump it here and in service-user-data.sh with it).
+readonly RDS_CA_BUNDLE_SHA256=90a6f1a7978a1b1b096dca6c57511ca48d3b8cf052f8e704baf358f34ea2f21b
+ca=/etc/opennova/rds-global-bundle.pem
+if ! echo "$RDS_CA_BUNDLE_SHA256  $ca" | sha256sum -c - >/dev/null 2>&1; then
+  log "fetching the RDS CA bundle"
+  curl -fsSL --retry 5 https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem -o "$ca.new" \
+    || die "cannot fetch the RDS CA bundle"
+  echo "$RDS_CA_BUNDLE_SHA256  $ca.new" | sha256sum -c - >/dev/null \
+    || die "the RDS CA bundle is not the pinned one (sha256 $RDS_CA_BUNDLE_SHA256): AWS changed it, bump the pin with the images'"
+  chmod 0644 "$ca.new"
+  mv -f "$ca.new" "$ca"
+fi
+
 install_helper() {
   local tmp
   tmp="$(mktemp)"
@@ -178,6 +196,25 @@ exec env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HO
     -f "$cur/compose/docker-compose.yml" -f "$cur/compose/docker-compose.prod.yml" \
     --env-file "$cur/env/app.prod.env" --env-file /run/opennova/infra.env \
     --env-file "$cur/env/release.env" --env-file /run/opennova/secret.env "$@"
+HELPER
+
+install_helper opennova-psql <<'HELPER'
+#!/bin/bash
+# opennova-psql: psql as the service's own database role (DATABASE_URL from
+# infra.env, DATABASE_PASSWORD from secret.env), in a one-off postgres:17
+# container on the host's network (written by opennova-converge; the toolbox's
+# `db psql` runs it). Arguments go to psql; a terminal gets an interactive one.
+set -euo pipefail
+value() { sed -n "s/^$2='\\(.*\\)'\$/\\1/p" "$1" | tail -n 1; }
+url="$(value /run/opennova/infra.env DATABASE_URL)"
+[ -n "$url" ] || { echo "opennova-psql: infra.env names no DATABASE_URL (run opennova-converge)" >&2; exit 1; }
+PGPASSWORD="$(value /run/opennova/secret.env DATABASE_PASSWORD)"
+export PGPASSWORD
+tty=()
+if [ -t 0 ] && [ -t 1 ]; then tty=(-t); fi
+exec docker run --rm -i "${tty[@]}" --network host -e PGPASSWORD \
+  -v /etc/opennova/rds-global-bundle.pem:/app/rds-global-bundle.pem:ro \
+  postgres:17-alpine psql "$url" "$@"
 HELPER
 
 # --- 4. pull and start ----------------------------------------------------------------

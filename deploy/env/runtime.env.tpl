@@ -16,6 +16,8 @@
 ADMIN_API_TOKEN=op://@VAULT@/@APP_ITEM@/admin_api_token
 ADMIN_BASIC_AUTH_USER=op://@VAULT@/@APP_ITEM@/admin_basic_auth_user
 ADMIN_BASIC_AUTH_PASSWORD=op://@VAULT@/@APP_ITEM@/admin_basic_auth_password
+# The service's database role's password (`db bootstrap` sets it on the role).
+DATABASE_PASSWORD=op://@VAULT@/@APP_ITEM@/database_password
 ONNET_BOOTSTRAP_ADMIN=op://@VAULT@/@APP_ITEM@/bootstrap_admin # optional
 STRIPE_SECRET_KEY=op://@VAULT@/@STRIPE_ITEM@/secret_key # billing
 STRIPE_WEBHOOK_SECRET=op://@VAULT@/@STRIPE_ITEM@/webhook_secret # billing

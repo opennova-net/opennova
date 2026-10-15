@@ -4,8 +4,8 @@
 # uses them by name. The bucket holds, per deployment, the release bundles
 # (releases/<deployment>/<id>.tar.gz and its manifest <id>.json, which `app
 # deploy` uploads and the host's converge downloads) and the database dumps
-# (backups/<deployment>/, the backup sidecar's). Its name is the one the
-# single-host stack's backups bucket had.
+# (the backup sidecar's: novaworld/ for prod, novaworld-<deployment>/
+# otherwise). Its name is the one the single-host stack's backups bucket had.
 # ---------------------------------------------------------------------------
 
 # The account-wide S3 public access block: every bucket here is private.
@@ -52,32 +52,14 @@ resource "aws_s3_bucket_lifecycle_configuration" "ops" {
   count  = local.manage_shared ? 1 : 0
   bucket = aws_s3_bucket.ops[0].id
 
-  # The database dumps (the backup sidecar, backups/<deployment>/): 90 days.
+  # The database dumps, every deployment's (novaworld/, novaworld-<deployment>/;
+  # the single-host stack's SQLite backups under novaworld/ among them): 90 days.
   rule {
     id     = "expire-old-backups"
     status = "Enabled"
 
     filter {
-      prefix = "backups/"
-    }
-
-    expiration {
-      days = 90
-    }
-
-    noncurrent_version_expiration {
-      noncurrent_days = 30
-    }
-  }
-
-  # The single-host stack's SQLite backups (novaworld/), which nothing writes
-  # any more: they go at the end of their 90 days.
-  rule {
-    id     = "expire-sqlite-backups"
-    status = "Enabled"
-
-    filter {
-      prefix = "novaworld/"
+      prefix = "novaworld"
     }
 
     expiration {

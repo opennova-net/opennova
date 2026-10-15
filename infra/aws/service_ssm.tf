@@ -4,9 +4,10 @@
 #
 # Under /opennova/<deployment>/:
 #   infra.env   (String, here) what Terraform knows that the stack needs: the
-#               public address, the site's URL, the hosted machines' settings,
-#               the operations bucket and log group; one KEY='value' per line,
-#               an env file for docker compose
+#               public address, the site's URL, the database's URL (no
+#               password), the hosted machines' settings, the operations bucket
+#               and log group; one KEY='value' per line, an env file for docker
+#               compose
 #   release     (String) the id of the release the host runs; `app deploy` and
 #               `app rollback` write it (Terraform makes it, then leaves its
 #               value alone)
@@ -21,6 +22,10 @@
 locals {
   ssm_prefix = "/opennova/${local.deployment}"
 
+  # The backup sidecar's key prefix, one path segment (it names its dumps after
+  # it: <prefix>/<prefix>-<time>.dump): prod keeps the sidecar's default.
+  backup_prefix = local.manage_shared ? "novaworld" : "novaworld-${local.deployment}"
+
   infra_env = merge(
     {
       OPENNOVA_DEPLOYMENT         = local.deployment
@@ -30,11 +35,12 @@ locals {
       AWS_REGION                  = var.region
       AWS_DEFAULT_REGION          = var.region
       BACKUP_BUCKET               = var.ops_bucket_name
-      BACKUP_PREFIX               = "backups/${local.deployment}"
+      BACKUP_PREFIX               = local.backup_prefix
       ONNET_PUBLIC_HOST           = local.service_public_ip
       OPENNOVA_SERVICE_PRIVATE_IP = local.service_private_ip
       ONNET_SITE_URL              = local.dns_enabled ? "https://${local.web_host}" : ""
     },
+    local.database_env,
     local.hosted_env,
   )
 

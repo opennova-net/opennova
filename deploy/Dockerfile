@@ -21,8 +21,8 @@ ARG OP_VERSION=2.30.3
 ARG OP_SHA256=a16307ebcecb40fd091d7a6ff4f0c380c3c0897c4f4616de2c5d285e57d5ee28
 # Terraform (https://releases.hashicorp.com/terraform/<v>/terraform_<v>_SHA256SUMS).
 # .github/workflows/infra.yml tests with the same version: bump both together.
-ARG TERRAFORM_VERSION=1.9.5
-ARG TERRAFORM_SHA256=9cf727b4d6bd2d4d2908f08bd282f9e4809d6c3071c3b8ebe53558bee6dc913b
+ARG TERRAFORM_VERSION=1.11.4
+ARG TERRAFORM_SHA256=1ce994251c00281d6845f0f268637ba50c0005657eb3cf096b92f753b42ef4dc
 # AWS CLI v2: the release apps/novaworld_server/Dockerfile pins, its sum taken
 # from the release AWS signed.
 ARG AWSCLI_VERSION=2.36.50

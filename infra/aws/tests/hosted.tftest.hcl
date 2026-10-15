@@ -16,6 +16,8 @@
 # and a data set the service does not know are refused.
 
 mock_provider "aws" {
+  override_during = plan
+
   mock_data "aws_availability_zones" {
     defaults = { names = ["us-east-1a", "us-east-1b", "us-east-1c"] }
   }
@@ -34,8 +36,14 @@ mock_provider "aws" {
   mock_data "aws_iam_policy_document" {
     defaults = { json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}" }
   }
-  # Well-formed ARNs for what an applied run hands to an ARN argument (the
-  # provider's own validation reads them).
+  mock_data "aws_eip" {
+    defaults = { id = "eipalloc-0123456789abcdef0", public_ip = "54.162.79.147" }
+  }
+  mock_resource "aws_eip" {
+    defaults = { allocation_id = "eipalloc-0fedcba9876543210", public_ip = "3.3.3.3" }
+  }
+  # Well-formed ARNs and ids for what the configuration hands to an ARN or id
+  # argument (the provider's own validation reads them).
   mock_resource "aws_iam_instance_profile" {
     defaults = { arn = "arn:aws:iam::123456789012:instance-profile/mock" }
   }
@@ -46,20 +54,93 @@ mock_provider "aws" {
     defaults = { arn = "arn:aws:iam::123456789012:role/mock" }
   }
   mock_resource "aws_cloudwatch_log_group" {
-    defaults = { arn = "arn:aws:logs:us-east-1:123456789012:log-group:/opennova/prod/service" }
+    defaults = { arn = "arn:aws:logs:us-east-1:123456789012:log-group:/opennova/prod/mock" }
   }
   mock_resource "aws_ssm_document" {
     defaults = { arn = "arn:aws:ssm:us-east-1:123456789012:document/opennova-server-converge" }
   }
+  mock_resource "aws_sns_topic" {
+    defaults = { arn = "arn:aws:sns:us-east-1:123456789012:opennova-server-alerts" }
+  }
+  mock_resource "aws_db_instance" {
+    defaults = { address = "opennova-server-db.abcdefghijkl.us-east-1.rds.amazonaws.com", port = 5432, id = "db-MOCK" }
+  }
   mock_resource "aws_launch_template" {
     defaults = { arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0123456789abcdef0", id = "lt-0123456789abcdef0" }
   }
+  mock_resource "aws_instance" {
+    defaults = { id = "i-0123456789abcdef0" }
+  }
 }
 
-mock_provider "cloudflare" {}
+# The apply-time mocks, for the one applied run.
+mock_provider "aws" {
+  alias = "applied"
+
+  mock_data "aws_availability_zones" {
+    defaults = { names = ["us-east-1a", "us-east-1b", "us-east-1c"] }
+  }
+  mock_data "aws_ami" {
+    defaults = { id = "ami-0123456789abcdef0", root_device_name = "/dev/sda1" }
+  }
+  mock_data "aws_ebs_snapshot" {
+    defaults = { volume_size = 2 }
+  }
+  mock_data "aws_iam_policy_document" {
+    defaults = { json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}" }
+  }
+  mock_resource "aws_iam_instance_profile" {
+    defaults = { arn = "arn:aws:iam::123456789012:instance-profile/mock" }
+  }
+  mock_resource "aws_iam_role" {
+    defaults = { arn = "arn:aws:iam::123456789012:role/mock" }
+  }
+}
+
+mock_provider "cloudflare" {
+  override_during = plan
+}
+
+# The ids the assertions compare, known at plan.
+override_resource {
+  target          = aws_subnet.public["a"]
+  override_during = plan
+  values          = { id = "subnet-0public0a" }
+}
+override_resource {
+  target          = aws_subnet.public["b"]
+  override_during = plan
+  values          = { id = "subnet-0public0b" }
+}
+override_resource {
+  target          = aws_subnet.private["a"]
+  override_during = plan
+  values          = { id = "subnet-0private0a" }
+}
+override_resource {
+  target          = aws_subnet.private["b"]
+  override_during = plan
+  values          = { id = "subnet-0private0b" }
+}
+override_resource {
+  target          = aws_security_group.service
+  override_during = plan
+  values          = { id = "sg-0service" }
+}
+override_resource {
+  target          = aws_security_group.db
+  override_during = plan
+  values          = { id = "sg-0db" }
+}
+override_resource {
+  target          = aws_network_interface.service
+  override_during = plan
+  values          = { id = "eni-0service" }
+}
 
 # Prod adopts its Elastic IP (service.tf).
 variables {
+  db_master_password        = "0123456789abcdef0123456789abcdef"
   service_eip_allocation_id = "eipalloc-0123456789abcdef0"
 }
 
@@ -156,7 +237,7 @@ run "hosting_on" {
 }
 
 run "hosted_policy" {
-  command = apply
+  command = plan
 
   variables {
     hosted_data_snapshots = {
@@ -168,8 +249,9 @@ run "hosted_policy" {
   # The DFX2 template is a launch template of its own, and its snapshot the
   # largest volume.
   override_resource {
-    target = aws_launch_template.hosted["dfx2_consumer"]
-    values = { arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0fedcba9876543210", id = "lt-0fedcba9876543210" }
+    target          = aws_launch_template.hosted["dfx2_consumer"]
+    override_during = plan
+    values          = { arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0fedcba9876543210", id = "lt-0fedcba9876543210" }
   }
   override_data {
     target = data.aws_ebs_snapshot.hosted["dfx2_consumer"]
@@ -252,7 +334,35 @@ run "hosted_policy" {
 }
 
 # A newer Canonical image moves neither the template (ignore_changes) nor the
-# policy's image pin: both keep the image the template has in state.
+# policy's image pin: both keep the image the template has in state. The
+# template is applied first, alone (targeted: the database, which refuses to be
+# destroyed, never enters the test's state).
+run "template_applied" {
+  command = apply
+
+  variables {
+    hosted_data_snapshots = {
+      jop_2_consumer = "snap-0123456789abcdef0"
+    }
+  }
+
+  plan_options {
+    target = [aws_launch_template.hosted]
+  }
+
+  # Applied with the apply-time mocks (the plan-time ones would hand the apply
+  # values other than its plan's).
+  providers = {
+    aws        = aws.applied
+    cloudflare = cloudflare
+  }
+
+  assert {
+    condition     = aws_launch_template.hosted["jop_2_consumer"].image_id == "ami-0123456789abcdef0"
+    error_message = "the template takes the newest image when it is made"
+  }
+}
+
 run "new_canonical_image" {
   command = plan
   variables {

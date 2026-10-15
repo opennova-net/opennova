@@ -332,7 +332,7 @@ data "aws_iam_policy_document" "service" {
     condition {
       test     = "StringLike"
       variable = "s3:prefix"
-      values   = ["releases/${local.deployment}/*", "backups/${local.deployment}/*"]
+      values   = ["releases/${local.deployment}/*", "${local.backup_prefix}/*"]
     }
   }
 
@@ -348,7 +348,7 @@ data "aws_iam_policy_document" "service" {
     sid       = "WriteBackups"
     effect    = "Allow"
     actions   = ["s3:PutObject", "s3:GetObject", "s3:AbortMultipartUpload"]
-    resources = ["${local.ops_bucket_arn}/backups/${local.deployment}/*"]
+    resources = ["${local.ops_bucket_arn}/${local.backup_prefix}/*"]
   }
 
   statement {
