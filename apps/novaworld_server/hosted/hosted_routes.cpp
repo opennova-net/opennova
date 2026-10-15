@@ -88,11 +88,18 @@ crow::json::wvalue data_set_json(const DataSet &d) {
 	return out;
 }
 
-// The listing a hosted server holds now (its service account's claim), or null.
-void put_listing(crow::json::wvalue &out, db::Database &db, const HostedServer &s) {
+// The listing a hosted server holds now (its service account's claim), or null;
+// the fleet view's `players` beside it with `players_too`.
+void put_listing(crow::json::wvalue &out, db::Database &db, const HostedServer &s, bool players_too = false) {
 	std::optional<hostdb::HostRow> row;
 	if (s.service_user_id) {
 		if (const auto rid = listing_rid_of(db, *s.service_user_id)) row = hostdb::find_host_by_rid(db, *rid);
+	}
+	if (players_too) {
+		if (row)
+			out["players"] = row->player_count;
+		else
+			out["players"] = nullptr;
 	}
 	if (!row) {
 		out["listing"] = nullptr;
@@ -122,6 +129,25 @@ void put_account(crow::json::wvalue &out, const char *key, db::Database &db, std
 	out[key] = std::move(account);
 }
 
+// The fleet view's owner: {id, username, tier (its granting support tier, null
+// for none)}, or null once the account is gone.
+void put_owner(crow::json::wvalue &out, db::Database &db, std::optional<int64_t> id) {
+	const auto user = id ? get_user_by_id(db, *id) : std::nullopt;
+	if (!user) {
+		out["owner"] = nullptr;
+		return;
+	}
+	crow::json::wvalue owner;
+	owner["id"] = user->id;
+	owner["username"] = user->username;
+	const billing::Entitlement entitlement = billing::entitlement_of(db, user->id, billing::unix_now());
+	if (entitlement.tier > 0)
+		owner["tier"] = entitlement.tier;
+	else
+		owner["tier"] = nullptr;
+	out["owner"] = std::move(owner);
+}
+
 // A path's server id; 0 (no server's) past int64.
 int64_t server_id_of(uint64_t id) {
 	return id <= static_cast<uint64_t>(INT64_MAX) ? static_cast<int64_t>(id) : 0;
@@ -144,8 +170,9 @@ void log_owner(const WebSessionUser &user, const char *what, const std::string &
 } // namespace
 
 // A hosted server for its owner (GET /api/me/servers and /api/me/servers/<id>,
-// the start and stop replies) or, with `admin`, for the fleet view: its owner,
-// its service account and its machine besides. Never its admin password.
+// the start and stop replies) or, with `admin`, for the fleet view: its owner
+// (with its tier), its service account, its place in the fleet and its listed
+// players besides. Never its admin password.
 crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool admin) {
 	crow::json::wvalue e;
 	e["id"] = s.id;
@@ -165,14 +192,28 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 	e["updated_at"] = s.updated_at;
 	text_or_null(e, "running_at", s.running_at);
 	text_or_null(e, "ended_at", s.ended_at);
-	put_listing(e, db, s);
+	put_listing(e, db, s, admin);
 	if (admin) {
-		put_account(e, "owner", db, s.owner_user_id);
+		put_owner(e, db, s.owner_user_id);
 		put_account(e, "service_account", db, s.service_user_id);
 		e["provider"] = s.provider;
 		e["machine_id"] = s.machine_id;
 		e["machine_address"] = s.machine_address;
 		e["admin_port"] = s.admin_port;
+		if (s.machine_ref)
+			e["machine_ref"] = *s.machine_ref;
+		else
+			e["machine_ref"] = nullptr;
+		if (s.machine_ref && s.slot >= 0)
+			e["slot"] = s.slot;
+		else
+			e["slot"] = nullptr;
+		if (s.game_port > 0)
+			e["game_port"] = s.game_port;
+		else
+			e["game_port"] = nullptr;
+		e["generation"] = s.generation;
+		text_or_null(e, "serve_image", s.serve_image);
 	}
 	return e;
 }
@@ -203,8 +244,6 @@ void HostedRoutes::register_routes(WebApp &app) {
 			.methods("GET"_method)([this](const crow::request &req, uint64_t id) { return me_server(req, id); });
 	CROW_ROUTE(app, "/api/me/servers/<uint>/stop")
 			.methods("POST"_method)([this](const crow::request &req, uint64_t id) { return me_stop(req, id); });
-	CROW_ROUTE(app, "/api/admin/hosted")
-			.methods("GET"_method)([this](const crow::request &req) { return admin_fleet(req); });
 	CROW_ROUTE(app, "/api/admin/hosted/stop-all")
 			.methods("POST"_method)([this](const crow::request &req) { return admin_stop_all(req); });
 	CROW_ROUTE(app, "/api/admin/hosted/<uint>/stop")
@@ -454,33 +493,6 @@ crow::response HostedRoutes::me_stop(const crow::request &req, uint64_t id) {
 				static_cast<unsigned long long>(id), e.what());
 		return json_error(500, "db_error");
 	}
-}
-
-// GET /api/admin/hosted — the fleet: {"enabled", "provider", "cap", "live" (how
-// many are live), "servers"}, the newest kFleetShown, live ones first, each as
-// GET /api/me/servers' plus "owner" and "service_account" ({id, username} or
-// null), "provider", "machine_id", "machine_address" and "admin_port".
-crow::response HostedRoutes::admin_fleet(const crow::request &req) {
-	auto caller = access_.require_admin(req);
-	if (caller.refusal) return std::move(*caller.refusal);
-	crow::json::wvalue out;
-	try {
-		auto db_conn = pool_.acquire();
-		db::ReadSnapshot snapshot(*db_conn);
-		out["enabled"] = enabled_;
-		out["provider"] = provider_;
-		out["cap"] = cap_;
-		out["live"] = count_live(*db_conn);
-		std::vector<crow::json::wvalue> servers;
-		for (const HostedServer &s : list_servers(*db_conn, kFleetShown)) servers.push_back(server_json(*db_conn, s, true));
-		out["servers"] = std::move(servers);
-	} catch (const db::Error &e) {
-		std::fprintf(stderr, "[http] GET /api/admin/hosted failed: %s\n", e.what());
-		return json_error(500, "db_error");
-	}
-	crow::response res = json_reply(200, out);
-	res.set_header("Cache-Control", "no-store");
-	return res;
 }
 
 // POST /api/admin/hosted/stop-all — the kill switch: every live server goes to

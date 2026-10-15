@@ -8,7 +8,8 @@
 // started since), and the machines' lifecycle: a boot that never reports
 // (failed, its server's restart counted), a lost machine terminated once its
 // agent stays silent, an agent that reports again, a shared machine idle past
-// its time, a drain moving its servers one at a time with no restart counted,
+// its time, a drain moving its servers one at a time with no restart counted, a
+// fleet roll draining every machine that takes servers,
 // an admin's end, and the reconciliation of the driver's machines with the rows
 // (a launch cut short, a cloud machine no row names, a row whose cloud machine
 // is gone, a start whose files went with the service, a listing that fails),
@@ -232,6 +233,39 @@ int test_drain_one_at_a_time() {
 	return 0;
 }
 
+// A fleet roll (POST /api/admin/fleet/roll: drain_machines): every machine that
+// takes servers drains at once, each moving its servers off it to machines
+// launched for them (the draining ones count toward no maximum), no restart
+// counted, and each old machine ends once it holds none.
+int test_roll() {
+	Rig rig("fleet_roll");
+	rig.config.placement.shared_slots = 1; // a machine per server
+	rig.make_supervisor();
+	const int64_t a = rig.request("roll_a");
+	const int64_t b = rig.request("roll_b");
+	TEST_EXPECT(!rig.to_running(a, 3451).empty() && !rig.to_running(b, 3452).empty());
+	const int64_t old_a = rig.machine_of(a);
+	const int64_t old_b = rig.machine_of(b);
+	TEST_EXPECT(old_a != old_b && rig.fake.launches == 2);
+	auto db = rig.pool.acquire();
+	TEST_EXPECT(hosted::drain_machines(*db, "rolled by an admin") == (std::vector<int64_t>{ old_a, old_b }));
+	TEST_EXPECT(hosted::drain_machines(*db, "rolled by an admin").empty());
+	rig.step();
+	TEST_EXPECT(rig.fake.launches == 4);
+	TEST_EXPECT(rig.machine_of(a) != old_a && rig.machine_of(b) != old_b);
+	TEST_EXPECT(rig.walk(a, State::Listing) && rig.walk(b, State::Listing));
+	TEST_EXPECT(list_as(*db, *rig.server(a)->service_user_id, 3453) && list_as(*db, *rig.server(b)->service_user_id, 3454));
+	rig.step();
+	rig.step();
+	TEST_EXPECT(rig.state(a) == State::Running && rig.state(b) == State::Running);
+	for (const int64_t old : { old_a, old_b }) {
+		const auto m = rig.machine(old);
+		TEST_EXPECT(m->state == FleetMachineState::Ended && m->end_reason == "rolled by an admin; drained");
+	}
+	TEST_EXPECT(rig.server(a)->restarts == 0 && rig.server(b)->restarts == 0);
+	return 0;
+}
+
 // An admin's end (the row moved to ending): the next pass terminates it and
 // places its server again, no restart counted.
 int test_admin_end() {
@@ -343,6 +377,7 @@ int main(int argc, char **argv) {
 		{ "lost_reports_again", test_lost_reports_again },
 		{ "idle_scale_in", test_idle_scale_in },
 		{ "drain_one_at_a_time", test_drain_one_at_a_time },
+		{ "roll", test_roll },
 		{ "admin_end", test_admin_end },
 		{ "reconcile_machines", test_reconcile_machines },
 		{ "orphan_sweep", test_orphan_sweep },

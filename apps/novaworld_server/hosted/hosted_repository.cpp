@@ -234,6 +234,16 @@ std::vector<HostedServer> list_servers(db::Database &db, size_t limit) {
 			{ BindValue(static_cast<int64_t>(limit)) });
 }
 
+std::vector<HostedServer> list_fleet_servers(
+		db::Database &db, std::optional<int64_t> owner_user_id, ServerFilter filter, size_t limit) {
+	std::string where = owner_user_id ? "WHERE owner_user_id = $2" : "WHERE TRUE";
+	if (filter == ServerFilter::Live) where += std::string(" AND ") + kLiveSql;
+	if (filter == ServerFilter::Ended) where += std::string(" AND NOT (") + kLiveSql + ")";
+	std::vector<BindValue> binds = { BindValue(static_cast<int64_t>(limit)) };
+	if (owner_user_id) binds.push_back(BindValue(*owner_user_id));
+	return query_servers(db, where + " ORDER BY (" + kLiveSql + ") DESC, id DESC LIMIT $1;", binds);
+}
+
 int count_live(db::Database &db) {
 	const auto rows = db.query(std::string("SELECT COUNT(*) FROM hosted_servers WHERE ") + kLiveSql + ";");
 	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));

@@ -148,6 +148,12 @@ int count_own_live_of(db::Database &db, int64_t owner_user_id);
 std::vector<HostedServer> list_live(db::Database &db);
 // The newest `limit` servers, live ones first (the admin's fleet view).
 std::vector<HostedServer> list_servers(db::Database &db, size_t limit);
+// Which servers the admin's fleet view lists.
+enum class ServerFilter : uint8_t { Live, Ended, All };
+// The newest `limit` servers `filter` takes, live ones first, of `owner_user_id`
+// alone when it is set.
+std::vector<HostedServer> list_fleet_servers(
+		db::Database &db, std::optional<int64_t> owner_user_id, ServerFilter filter, size_t limit);
 int count_live(db::Database &db);
 // The servers that ended failed in the last `seconds` (the heartbeat's
 // hosted_failed).

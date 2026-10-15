@@ -39,6 +39,7 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/ec2_machine_driver.cpp
         hosted/fleet_config.cpp
         hosted/fleet_repository.cpp
+        hosted/fleet_routes.cpp
         hosted/hosted_repository.cpp
         hosted/hosted_routes.cpp
         hosted/hosted_settings.cpp

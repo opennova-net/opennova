@@ -236,6 +236,16 @@ bool machine_reported_within(db::Database &db, int64_t id, int64_t seconds) {
 					.empty();
 }
 
+std::vector<int64_t> drain_machines(db::Database &db, const std::string &reason) {
+	std::vector<int64_t> out;
+	for (const db::Row &r : db.query("UPDATE fleet_machines SET state = 'draining', end_reason = $1 "
+									 "WHERE state IN ('launching', 'booting', 'ready') RETURNING id;",
+				 { BindValue(reason) }))
+		out.push_back(r.as_int(0).value_or(0));
+	std::sort(out.begin(), out.end());
+	return out;
+}
+
 int count_machines(db::Database &db, FleetMachineState state) {
 	const auto rows = db.query("SELECT COUNT(*) FROM fleet_machines WHERE state = $1;",
 			{ BindValue(std::string(fleet_machine_state_text(state))) });

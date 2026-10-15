@@ -120,6 +120,10 @@ std::vector<FleetMachineRow> list_silent_machines(db::Database &db, int64_t seco
 // Whether machine `id`'s agent reported within the last `seconds` (a lost
 // machine's agent reporting again).
 bool machine_reported_within(db::Database &db, int64_t id, int64_t seconds);
+// A fleet roll: every machine that takes servers (launching, booting, ready)
+// moves to draining with `reason`, so the supervisor moves their servers to new
+// machines one machine's server at a time; the ids it moved.
+std::vector<int64_t> drain_machines(db::Database &db, const std::string &reason);
 // How many machines are in `state` (the heartbeat's machines_lost).
 int count_machines(db::Database &db, FleetMachineState state);
 

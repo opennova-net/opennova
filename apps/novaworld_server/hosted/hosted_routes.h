@@ -5,9 +5,9 @@
 // entitlement allows): GET /api/me/servers, GET /api/me/servers/<id>, POST
 // /api/me/servers (a start) and POST /api/me/servers/<id>/stop (require_user,
 // the CSRF header on the two POSTs; another account's id is 404, never 403),
-// and the admin's fleet view
-// GET /api/admin/hosted, its kill switch POST /api/admin/hosted/stop-all and
-// POST /api/admin/hosted/<id>/stop (require_admin). They write requests and
+// and the admin's kill switch POST /api/admin/hosted/stop-all and POST
+// /api/admin/hosted/<id>/stop (require_admin; the fleet view and the
+// machines' routes are fleet_routes.h's). They write requests and
 // stops only (hosted_repository.h); the supervisor does the rest. Every reply
 // is an error code with our own message, never database text. Behind
 // ONNET_API_PROXY_ONLY like every /api route. A start needs the account's
@@ -37,8 +37,11 @@ namespace hosted {
 
 // A hosted server as JSON for its owner (GET /api/me/servers and
 // /api/me/servers/<id>, the start and stop replies, an admin's user page) or,
-// with `admin`, for the fleet view: its owner, its service account and its
-// machine besides. Never its admin password. Without its events.
+// with `admin`, for the fleet view (fleet_routes.h): its owner (with its
+// support tier), its service account, its container and machine address, its
+// place in the fleet (machine_ref, slot, game_port, generation, serve_image)
+// and its listing's players besides. Never its admin password. Without its
+// events.
 crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool admin);
 
 class HostedRoutes {
@@ -46,12 +49,10 @@ public:
 	// Each owner start or stop, per account: 6 at once, then one every 20 s
 	// (service policy: a start costs a machine).
 	static constexpr RateLimiter::Params kStartStopPerUser{ 6, 1.0 / 20, 10000 };
-	// The transitions GET /api/me/servers/<id> shows, the ended servers GET
-	// /api/me/servers lists after the live ones, and the servers the fleet view
-	// lists.
+	// The transitions GET /api/me/servers/<id> shows, and the ended servers GET
+	// /api/me/servers lists after the live ones.
 	static constexpr size_t kEventsShown = 50;
 	static constexpr size_t kEndedShown = 10;
-	static constexpr size_t kFleetShown = 100;
 
 	HostedRoutes(WebAccess &access, db::ConnectionPool &pool) : access_(access), pool_(pool) {}
 
@@ -67,12 +68,16 @@ public:
 	void configure(const ServerConfig &config, const PlacementPolicy &fleet);
 	void register_routes(WebApp &app);
 
+	// What configure decided (the fleet routes report them).
+	bool enabled() const { return enabled_; }
+	const std::string &provider() const { return provider_; }
+	int cap() const { return cap_; }
+
 private:
 	crow::response me_servers(const crow::request &req);
 	crow::response me_server(const crow::request &req, uint64_t id);
 	crow::response me_start(const crow::request &req);
 	crow::response me_stop(const crow::request &req, uint64_t id);
-	crow::response admin_fleet(const crow::request &req);
 	crow::response admin_stop_all(const crow::request &req);
 	crow::response admin_stop(const crow::request &req, uint64_t id);
 

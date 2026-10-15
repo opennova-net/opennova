@@ -5052,6 +5052,227 @@ int test_no_agent_routes_on_public_listener(Harness &h) {
 	return 0;
 }
 
+// The admin's fleet routes (hosted/fleet_routes.h) over fleet rows made by hand
+// (no supervisor): the fleet view's machines (kind, state, type, slots and the
+// slots used, the public address, the month's egress; no credential of the
+// agent's) and servers (the owner with its support tier, the machine and slot,
+// the game port, the listed players, null where there are none), its `owner`
+// and `state` filters, one server with its events and its machine, and the
+// machines' moves: a drain and an end (each again answered the same, an end
+// past a drain, a drain past an end refused not_live), a fleet roll draining
+// every machine that takes servers; admin only.
+int test_admin_fleet_routes(Harness &h) {
+	namespace hosted = opennova::novaworld_server::hosted;
+	namespace billing = opennova::novaworld_server::billing;
+	const int64_t ana = make_account(h, "fleet_ana", "pw-fleet-ana");
+	const int64_t ben = make_account(h, "fleet_ben", "pw-fleet-ben");
+	TEST_EXPECT(ana > 0 && ben > 0 && nws::set_comp_servers(*h.pool.acquire(), ana, 2).ok);
+	{
+		billing::SubscriptionRow tier;
+		tier.stripe_subscription_id = "sub_fleet_ben";
+		tier.stripe_customer_id = "cus_fleet_ben";
+		tier.user_id = ben;
+		tier.status = "active";
+		tier.item = billing::ItemKind::Tier;
+		tier.price_id = "price_htier2";
+		tier.tier = 2;
+		tier.current_period_end = billing::unix_now() + 30 * 24 * 60 * 60;
+		billing::upsert_subscription(*h.pool.acquire(), tier);
+	}
+	const std::string ana_s = login_token(h, "10.53.0.1", "fleet_ana", "pw-fleet-ana");
+	TEST_EXPECT(!ana_s.empty());
+	auto db = h.pool.acquire();
+
+	// A ready shared machine (its agent reported once) and the servers: Ana's on
+	// its slot 0, running and listed with 5 players; Ana's second, waiting; Ben's
+	// ended, where it last ran on slot 1.
+	const auto machine = hosted::create_machine(*db, { "local", hosted::MachineKind::Shared, 4, "opennova-serve:local", 0 });
+	hosted::LaunchedMachine launched;
+	launched.cloud_id = "local-fleet-1";
+	launched.private_address = "10.0.1.7";
+	launched.public_address = "198.51.100.7";
+	launched.instance_type = "t3a.large";
+	launched.template_version = "lt-0fleet:3";
+	TEST_EXPECT(hosted::mark_launched(*db, machine.id, launched));
+	TEST_EXPECT(hosted::record_sync(*db, machine.id, "test-agent", {}).has_value());
+	hosted::HostedSettings settings;
+	settings.game = hosted::kDataSetJointOperations;
+	settings.game_name = "Fleet Routes";
+	settings.missions = { "a.bms" };
+	const auto start = [&](int64_t owner) {
+		const auto r = hosted::request_server(*db, owner, settings, hosted::known_data_sets(), 50, billing::unix_now());
+		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
+	};
+	const int64_t running = start(ana);
+	const int64_t waiting = start(ana);
+	const int64_t ended = start(ben);
+	TEST_EXPECT(running > 0 && waiting > 0 && ended > 0);
+	TEST_EXPECT(hosted::assign_slot(*db, running, machine.id, 0, 32768) == 1);
+	TEST_EXPECT(hosted::assign_slot(*db, ended, machine.id, 1, 32769) == 1);
+	for (const auto &[from, to] : { std::pair<hosted::State, hosted::State>{ hosted::State::Requested, hosted::State::Provisioning },
+				 { hosted::State::Provisioning, hosted::State::Booting }, { hosted::State::Booting, hosted::State::Listing },
+				 { hosted::State::Listing, hosted::State::Running } })
+		TEST_EXPECT(hosted::transition(*db, running, from, to, "by the test"));
+	TEST_EXPECT(hosted::transition(*db, ended, hosted::State::Requested, hosted::State::Stopped, "by the test"));
+	const auto service = nws::upsert_service_account(*db, nws::service_username(running), "pw-fleet-service");
+	TEST_EXPECT(service.ok);
+	hosted::set_service_account(*db, running, service.id);
+	const std::string key = "AAAABBBBCCCCDDDDEEEEFFFFGGGGHHHHIIIIJJJJKKKKLLLL";
+	TEST_EXPECT(record_key_for(h, key, service.id));
+	const uint32_t rid = 0x0F1EE7u;
+	{
+		opennova::hostdb::HostRow row;
+		row.rid = rid;
+		row.gsid = "GSID-fleet";
+		row.game = "jop_2_consumer";
+		row.server_name = "Fleet Routes";
+		row.host_ip = row.peer_ip = "198.51.100.7";
+		row.host_port = row.peer_port = 32768;
+		row.player_count = 5;
+		row.max_players = 32;
+		row.host_user_id = opennova::hostdb::claim_host_key(*db, key, rid);
+		opennova::hostdb::upsert_host(*db, row);
+	}
+
+	// Admin only.
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted").code == 401);
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted", { with_session(ana_s) }).code == 403);
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted/" + std::to_string(running), { with_session(ana_s) }).code == 403);
+	TEST_EXPECT(h.send("POST", "/api/admin/fleet/roll", { with_session(ana_s), kCsrf }).code == 403);
+	TEST_EXPECT(h.send("POST", "/api/admin/fleet/machines/" + std::to_string(machine.id) + "/drain",
+						{ with_session(ana_s), kCsrf })
+						.code == 403);
+
+	auto reply = h.send("GET", "/api/admin/hosted", { kBearer });
+	auto json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && json["cap"].i() == 4);
+	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
+	TEST_EXPECT(body_text(reply).find(machine.bootstrap_token) == std::string::npos);
+	TEST_EXPECT(body_text(reply).find("agent_secret") == std::string::npos && body_text(reply).find("bootstrap_token") == std::string::npos);
+	bool machine_seen = false;
+	for (const auto &m : json["machines"]) {
+		if (m["id"].i() != machine.id) continue;
+		machine_seen = true;
+		TEST_EXPECT(str(m["kind"]) == "shared" && str(m["state"]) == "ready" && str(m["instance_type"]) == "t3a.large");
+		TEST_EXPECT(m["slots"].i() == 4 && m["slots_used"].i() == 1 && str(m["public_address"]) == "198.51.100.7");
+		TEST_EXPECT(m["egress_bytes_month"].t() == crow::json::type::Number && m["egress_bytes_month"].i() == 0);
+		TEST_EXPECT(str(m["template_version"]) == "lt-0fleet:3" && m["reserved_for"].t() == crow::json::type::Null);
+		TEST_EXPECT(m["bootstrapped"].t() == crow::json::type::False);
+	}
+	TEST_EXPECT(machine_seen);
+	const auto server_in = [](const crow::json::rvalue &list, int64_t id) -> const crow::json::rvalue * {
+		for (const auto &s : list) {
+			if (s["id"].i() == id) return &s;
+		}
+		return nullptr;
+	};
+	const crow::json::rvalue *r = server_in(json["servers"], running);
+	TEST_EXPECT(r != nullptr);
+	if (r) {
+		TEST_EXPECT((*r)["owner"]["id"].i() == ana && str((*r)["owner"]["username"]) == "fleet_ana");
+		TEST_EXPECT((*r)["owner"]["tier"].t() == crow::json::type::Null); // a comp grant, no tier
+		TEST_EXPECT((*r)["machine_ref"].i() == machine.id && (*r)["slot"].i() == 0 && (*r)["game_port"].i() == 32768);
+		TEST_EXPECT((*r)["players"].i() == 5 && (*r)["listing"]["rid"].i() == static_cast<int64_t>(rid));
+		TEST_EXPECT(str((*r)["state"]) == "running" && (*r)["generation"].i() == 1);
+	}
+	const crow::json::rvalue *w = server_in(json["servers"], waiting);
+	TEST_EXPECT(w != nullptr);
+	if (w) {
+		TEST_EXPECT((*w)["machine_ref"].t() == crow::json::type::Null && (*w)["slot"].t() == crow::json::type::Null);
+		TEST_EXPECT((*w)["game_port"].t() == crow::json::type::Null && (*w)["players"].t() == crow::json::type::Null);
+	}
+	const crow::json::rvalue *e = server_in(json["servers"], ended);
+	TEST_EXPECT(e != nullptr);
+	if (e) {
+		TEST_EXPECT((*e)["owner"]["tier"].i() == 2 && (*e)["machine_ref"].i() == machine.id && (*e)["slot"].i() == 1);
+		TEST_EXPECT(!(*e)["live"].b());
+	}
+
+	// The filters: an owner by username, the live or the ended ones.
+	const auto ids = [&h](const std::string &query) {
+		std::vector<int64_t> out;
+		const auto got = h.send("GET", "/api/admin/hosted" + query, { kBearer });
+		const auto list = crow::json::load(body_text(got));
+		if (got.code != 200 || !list) return std::vector<int64_t>{ -1 };
+		for (const auto &s : list["servers"]) out.push_back(s["id"].i());
+		return out;
+	};
+	auto has = [](const std::vector<int64_t> &list, int64_t id) {
+		return std::find(list.begin(), list.end(), id) != list.end();
+	};
+	auto of_ana = ids("?owner=fleet_ana");
+	TEST_EXPECT(of_ana.size() == 2 && has(of_ana, running) && has(of_ana, waiting));
+	TEST_EXPECT(ids("?owner=fleet_nobody").empty());
+	auto ana_live = ids("?owner=fleet_ana&state=live");
+	TEST_EXPECT(ana_live.size() == 2);
+	auto ben_ended = ids("?owner=fleet_ben&state=ended");
+	TEST_EXPECT(ben_ended == std::vector<int64_t>{ ended });
+	TEST_EXPECT(ids("?owner=fleet_ben&state=live").empty());
+	TEST_EXPECT(!has(ids("?state=live"), ended) && !has(ids("?state=ended"), running));
+	reply = h.send("GET", "/api/admin/hosted?state=sleeping", { kBearer });
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+
+	// One server, with its events and its machine.
+	reply = h.send("GET", "/api/admin/hosted/" + std::to_string(running), { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["server"]["id"].i() == running);
+	TEST_EXPECT(json["server"]["events"].size() == 5 && json["machine"]["id"].i() == machine.id);
+	TEST_EXPECT(str(json["server"]["owner"]["username"]) == "fleet_ana" && json["machine"]["slots_used"].i() == 1);
+	reply = h.send("GET", "/api/admin/hosted/" + std::to_string(waiting), { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json["machine"].t() == crow::json::type::Null);
+	reply = h.send("GET", "/api/admin/hosted/999999", { kBearer });
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+
+	// The machines' moves.
+	const std::string machine_path = "/api/admin/fleet/machines/" + std::to_string(machine.id);
+	reply = h.send("POST", machine_path + "/drain", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && str(json["machine"]["state"]) == "draining" &&
+			str(json["machine"]["end_reason"]) == "drained by an admin");
+	reply = h.send("POST", machine_path + "/drain", { kBearer });
+	TEST_EXPECT(reply.code == 202 && str(crow::json::load(body_text(reply))["machine"]["state"]) == "draining");
+	reply = h.send("POST", machine_path + "/end", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && str(json["machine"]["state"]) == "ending");
+	TEST_EXPECT(h.send("POST", machine_path + "/end", { kBearer }).code == 202);
+	reply = h.send("POST", machine_path + "/drain", { kBearer });
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
+	TEST_EXPECT(h.send("POST", "/api/admin/fleet/machines/999999/end", { kBearer }).code == 404);
+	TEST_EXPECT(h.send("POST", "/api/admin/fleet/machines/999999/drain", { kBearer }).code == 404);
+	TEST_EXPECT(hosted::transition_machine(*db, machine.id, hosted::FleetMachineState::Ending,
+			hosted::FleetMachineState::Ended, "by the test"));
+	reply = h.send("POST", machine_path + "/end", { kBearer });
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
+
+	// A roll drains every machine that takes servers, none other.
+	const auto booting = hosted::create_machine(*db, { "local", hosted::MachineKind::Shared, 4, "opennova-serve:local", 0 });
+	launched.cloud_id = "local-fleet-2";
+	TEST_EXPECT(hosted::mark_launched(*db, booting.id, launched));
+	const auto failed = hosted::create_machine(*db, { "local", hosted::MachineKind::Own, 1, "opennova-serve:local", 0 });
+	TEST_EXPECT(hosted::transition_machine(*db, failed.id, hosted::FleetMachineState::Launching,
+			hosted::FleetMachineState::Failed, "by the test"));
+	reply = h.send("POST", "/api/admin/fleet/roll", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && json && json["draining"].i() == 1 && json["machines"].size() == 1 &&
+			json["machines"][0].i() == booting.id);
+	TEST_EXPECT(hosted::find_machine(*db, booting.id)->state == hosted::FleetMachineState::Draining);
+	TEST_EXPECT(hosted::find_machine(*db, booting.id)->end_reason == "rolled by an admin");
+	TEST_EXPECT(hosted::find_machine(*db, failed.id)->state == hosted::FleetMachineState::Failed);
+	reply = h.send("POST", "/api/admin/fleet/roll", { kBearer });
+	TEST_EXPECT(reply.code == 202 && crow::json::load(body_text(reply))["draining"].i() == 0);
+
+	// Leave no live server or machine for the cases after.
+	TEST_EXPECT(hosted::transition_machine(*db, booting.id, hosted::FleetMachineState::Draining,
+			hosted::FleetMachineState::Ended, "by the test"));
+	opennova::hostdb::remove_host_by_rid(*db, rid);
+	for (const int64_t id : { running, waiting }) hosted::request_stop(*db, id, "by the test");
+	end_stopping_servers(h);
+	TEST_EXPECT(nws::delete_service_account(*db, service.id).ok);
+	db->exec("DELETE FROM billing_subscriptions WHERE stripe_subscription_id = 'sub_fleet_ben';");
+	return 0;
+}
+
 // The console routes (hosted/console_routes.h) over a real admin link
 // (hosted/admin_link.h) to a scripted remote-admin server on loopback
 // (FakeAdminConsole), the hosted row put in running by hand (no supervisor):
@@ -5962,6 +6183,7 @@ int run(Harness &h) {
 		{ "hosted_server_routes", test_hosted_server_routes },
 		{ "hosted_listing_owner", test_hosted_listing_owner },
 		{ "hosted_console_routes", test_hosted_console_routes },
+		{ "admin_fleet_routes", test_admin_fleet_routes },
 		{ "no_agent_routes_on_public_listener", test_no_agent_routes_on_public_listener },
 		{ "billing_routes", test_billing_routes },
 		{ "billing_webhook", test_billing_webhook },

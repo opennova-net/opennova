@@ -717,7 +717,8 @@ tables). Each server runs one data set its owner picks. Everything here is servi
 The deploy toolbox sets every `ec2` setting from the Terraform outputs (DEPLOY.md,
 "Hosted game servers"); nobody copies an id by hand.
 
-The routes (`hosted/hosted_routes.*`, and the comp grant with the admin user routes), behind
+The routes (`hosted/hosted_routes.*`, the admin's fleet routes `hosted/fleet_routes.*`, and the
+comp grant with the admin user routes), behind
 `ONNET_API_PROXY_ONLY` like every `/api` route. Every refusal is an error code with the
 service's own message, never database text.
 
@@ -728,7 +729,11 @@ service's own message, never database text.
 | `POST /api/me/servers` | a website session, the CSRF header | the settings as JSON (`game_name` required; `game` defaults to the first offered data set and `missions` to that data set's; every other field to its default) and `own_machine` (`true` to run it on an own machine; default `false`, a shared one). 503 `hosting_disabled` with no machine driver; 429 past the account's bucket (6, then one every 20 s, shared with the stop); 400 `invalid_json`, `invalid_field`, or `invalid_settings` with the `field` and why; 403 `not_entitled` with no hosting entitlement (or an account not active), 403 `payment_past_due` while a granting subscription's payment is past due; 409 `server_limit` with `max_servers` and `used` beside the code when every server the account may run is live, 409 `no_own_machine` when each own machine it pays for already runs one, 409 `at_capacity` (`ONNET_HOSTED_CAP` servers live, or the fleet's planner finds it no place: every slot taken, the servers already waiting counted, and the fleet at its maximum machines); 202 `{"server"}`, `requested` |
 | `POST /api/me/servers/<id>/stop` | a website session, the CSRF header | 429 past the bucket; 404 `not_found` for an id that is not the account's; 409 `not_live` once it has ended; 202 `{"server"}`, `stopping` (also when it already was), or `stopped` when the supervisor finished it in between |
 | `PUT /api/admin/users/<id>/comp-servers` | admin | `{"comp_servers": 0..16}`, the admin's grant; 200 `{"user"}` (which carries `comp_servers` and `max_servers`, the entitlement); 400 `invalid_json`, `invalid_field` (no whole number in 0..16) or `missing_field`; 404 for an unknown id or a service account. An entitlement down to no server stops the account's hosted server, as a ban does |
-| `GET /api/admin/hosted` | admin | the fleet: `{"enabled", "provider", "cap", "live", "servers"}`, the newest 100, live first, each as above plus `owner` and `service_account` (`{id, username}` or null), `provider`, `machine_id`, `machine_address` and `admin_port`. Never the admin password |
+| `GET /api/admin/hosted` | admin | the fleet: `{"enabled", "provider", "cap", "live", "machines", "servers"}`. `machines`: the live machines by id, then the newest 10 ended or failed, each `id`, `provider`, `kind` (`shared` or `own`), `state` (`launching`, `booting`, `ready`, `draining`, `ending`, `ended`, `failed`, `lost`), `cloud_id`, `instance_type`, `slots`, `slots_used` (the live servers on it), `private_address`, `public_address`, `bootstrapped`, `agent_version`, `template_version`, `serve_image`, `reserved_for` (an own machine's server, else null), `last_report_at`, `launched_at`, `ready_at`, `ended_at`, `end_reason` and `egress_bytes_month` (0 until the per-server stats count the egress). `servers`: the newest 100 the query takes, live first (`?owner=<username>`: that account's alone, none for an unknown name; `?state=live`, `ended` or `all`, the default; another state 400 `invalid_field`), each as `GET /api/me/servers`' plus `owner` (`{id, username, tier}`, `tier` its granting support tier or null; null once the account is gone), `service_account` (`{id, username}` or null), `provider`, `machine_id` (its container), `machine_address`, `admin_port`, `machine_ref` and `slot` (null with none; an ended server's where it last ran), `game_port` (null before a placement), `generation`, `serve_image` and `players` (its listing's, null when not listed). Never the admin password or an agent's credential; `Cache-Control: no-store` |
+| `GET /api/admin/hosted/<id>` | admin | `{"server", "machine"}`: one server in any state as the fleet view's plus `events` (the newest 50 transitions, oldest first), and the machine it is on or last ran on (as above, or null); 404 `not_found`; `Cache-Control: no-store` |
+| `POST /api/admin/fleet/machines/<id>/drain` | admin | the machine takes no new server and the supervisor moves its servers off it one at a time (no restart counted), then ends it; 202 `{"machine"}` (one draining already included); 404 `not_found`; 409 `not_live` once it is ending or ended |
+| `POST /api/admin/fleet/machines/<id>/end` | admin | the machine to `ending`: the next pass terminates it and places its servers again (no restart counted); its agent is refused from then on; 202 `{"machine"}` (one ending already included); 404 `not_found`; 409 `not_live` once it has ended |
+| `POST /api/admin/fleet/roll` | admin | a fleet roll: every machine that takes servers (launching, booting, ready) drains, its servers moving to machines launched for them, so a new serve image or launch template reaches the fleet; 202 `{"draining": <how many>, "machines": [<their ids>]}` |
 | `POST /api/admin/hosted/<id>/stop` | admin | 404 `not_found`, 409 `not_live`, else 202 `{"server"}` |
 | `POST /api/admin/hosted/stop-all` | admin | the kill switch: every live server to `stopping`; 200 `{"stopping": <how many>}` |
 
@@ -1302,6 +1307,9 @@ every build) the child-process seam against itself; the route harness's
 the starts up to the entitlement (`server_limit` past it, a stopping server counting), the
 own-machine add-on, another account's id answering 404, the list's order, the cap and the
 stops, and the owner rule against a hand-driven host listing as a service account, its
+`admin_fleet_routes` case the fleet view over fleet rows made by hand (the machines, the
+servers' owners with their tiers, slots, ports and players, the `owner` and `state`
+filters), one server with its machine, and the drain, end and roll moves, its
 `no_agent_routes_on_public_listener` case that the public port answers none of the agent
 routes, and its `hosted_console_routes` case the console routes over a real admin link to a
 scripted remote-admin server on loopback (the session, CSRF and owner refusals, every
