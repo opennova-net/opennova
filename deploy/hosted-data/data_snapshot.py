@@ -57,8 +57,7 @@ def volume_label(data_set: str) -> str:
     "od-" and the slug without its "_consumer" suffix and its underscores (jop_2_consumer:
     od-jop2), the service's Ec2MachineDriver::volume_label
     (apps/novaworld_server/hosted/ec2_machine_driver.h, which machine/machine_user_data.sh
-    mounts by): change both or neither. A snapshot made before carries opennova-data, which
-    the machine script finds by the volume's place in the data sets' order instead.
+    mounts by, and by nothing else): change both or neither.
     """
     suffix = "_consumer"
     slug = data_set

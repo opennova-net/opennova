@@ -17,14 +17,11 @@
 #      servers), with no user-namespace remapping: a slot's UID in its
 #      container is the machine's, which the fences and the agent's egress
 #      counters match;
-#   4. mounts every data set's volume (an ext4 file system labelled by
-#      Ec2MachineDriver::volume_label, od-jop2 for jop_2_consumer) read-only at
+#   4. mounts every data set's volume by its label alone (an ext4 file system
+#      deploy/hosted-data labels by Ec2MachineDriver::volume_label, od-jop2 for
+#      jop_2_consumer), waiting for each label to come up, read-only at
 #      /opt/game/<data set>, where the agent binds it into that data set's
-#      containers, and again at every boot. A volume of an older snapshot,
-#      labelled opennova-data whatever its data set, is found by its place in
-#      the data sets' sorted order instead, the order the launch template
-#      attaches them in (/dev/sdf, /dev/sdg, ...: the device by that name where
-#      the kernel has one, else the machine's other disks in their order);
+#      containers, and again at every boot;
 #   5. fences the slots' users (UIDs 10001-10032) off the instance metadata
 #      service (the machine role's credentials, this user-data with its token)
 #      and off the service's internal port (the agents' routes: only the
@@ -63,9 +60,6 @@ readonly SLOT_UIDS=10001-10032
 readonly FIRST_SLOT_UID=10001
 readonly LAST_SLOT_UID=10032
 readonly SLOT_PORTS=32768-32831
-readonly LEGACY_LABEL=opennova-data
-# The launch template's data volumes, in order: /dev/sdf, /dev/sdg, ...
-readonly DEVICE_LETTERS=fghijklmnop
 
 log() { printf 'opennova-machine: %s\n' "$*"; }
 
@@ -106,34 +100,18 @@ if docker info --format '{{json .SecurityOptions}}' | grep -q userns; then
 fi
 
 # --- 4. the data sets ------------------------------------------------------------
-# The machine's disks but its root's, in the kernel's order.
-root_source="$(findmnt -no SOURCE / || true)"
-root_disk="$(lsblk -no PKNAME "$root_source" 2>/dev/null | head -n 1 || true)"
-[ -n "$root_disk" ] || root_disk="$(lsblk -no NAME "$root_source" 2>/dev/null | head -n 1 || true)"
-data_disks() { lsblk -dno NAME,TYPE | awk '$2 == "disk" {print $1}' | grep -vx "$root_disk" | sort -V; }
-wanted="$(wc -w <<<"$DATA_SETS")"
-for _ in $(seq 1 60); do
-  [ "$(data_disks | wc -l)" -ge "$wanted" ] && break
-  sleep 2
-done
-udevadm settle || true
-mapfile -t disks < <(data_disks)
-index=0
+# Each volume by its label: the launch template's volumes come up in their own
+# time, so each label is waited for (two minutes at most).
 for entry in $DATA_SETS; do
   data_set="${entry%%=*}"
   label="${entry#*=}"
-  if [ -e "/dev/disk/by-label/$label" ]; then
-    source="LABEL=$label"
-  else
-    # An older snapshot's volume: by its place in the order, and only one that
-    # carries the old label.
-    device="/dev/sd${DEVICE_LETTERS:$index:1}"
-    [ -b "$device" ] || device="/dev/${disks[$index]:-none}"
-    if ! [ -b "$device" ] || [ "$(blkid -s LABEL -o value "$device" || true)" != "$LEGACY_LABEL" ]; then
-      end_machine "no volume labelled $label, nor one labelled $LEGACY_LABEL in place $index"
-    fi
-    source="UUID=$(blkid -s UUID -o value "$device")"
-  fi
+  for _ in $(seq 1 60); do
+    [ -e "/dev/disk/by-label/$label" ] && break
+    udevadm settle || true
+    sleep 2
+  done
+  [ -e "/dev/disk/by-label/$label" ] || end_machine "no volume labelled $label for data set $data_set"
+  source="LABEL=$label"
   log "mounting data set $data_set ($source)"
   mkdir -p "$GAME_ROOT/$data_set"
   printf '%s %s ext4 ro,noload,nodev,nosuid,noexec,nofail 0 0\n' "$source" "$GAME_ROOT/$data_set" >> /etc/fstab
@@ -149,7 +127,6 @@ for entry in $DATA_SETS; do
     [ -n "$(find "$GAME_ROOT/$data_set" -maxdepth 3 -type f -ipath '*/expansion/jox01/version.txt' -print -quit)" ] \
       || end_machine "data set $data_set holds no expansion/jox01/version.txt"
   fi
-  index=$((index + 1))
 done
 
 # --- 5. the fences ---------------------------------------------------------------

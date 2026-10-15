@@ -437,19 +437,15 @@ int test_machine_script(const std::string &) {
 	// Docker with no user-namespace remapping.
 	TEST_EXPECT(runs_line(script, "install --no-install-recommends docker.io iptables curl"));
 	TEST_EXPECT(runs_line(script, "end_machine \"docker remaps user namespaces\""));
-	// Each data set by its volume's label, read-only, at /opt/game/<data set>, at every boot
-	// too; an older snapshot's volume (opennova-data) by its place in the sorted order: its
-	// device name (/dev/sdf, ...) where the kernel has one, else the other disks' order.
+	// Each data set by its volume's label alone (waited for, the machine ended without it),
+	// read-only, at /opt/game/<data set>, at every boot too: no other label, and nothing
+	// found by a device's name or place.
 	TEST_EXPECT(runs_line(script, "for entry in $DATA_SETS; do"));
-	TEST_EXPECT(runs_line(script, "if [ -e \"/dev/disk/by-label/$label\" ]; then"));
+	TEST_EXPECT(runs_line(script, "[ -e \"/dev/disk/by-label/$label\" ] && break"));
+	TEST_EXPECT(runs_line(script, "[ -e \"/dev/disk/by-label/$label\" ] || end_machine"));
 	TEST_EXPECT(runs_line(script, "source=\"LABEL=$label\""));
-	TEST_EXPECT(runs_line(script, "readonly LEGACY_LABEL=opennova-data"));
-	TEST_EXPECT(std::string(Ec2MachineDriver::kLegacyVolumeLabel) == "opennova-data");
-	TEST_EXPECT(runs_line(script, "readonly DEVICE_LETTERS=fghijklmnop"));
-	TEST_EXPECT(runs_line(script, "device=\"/dev/sd${DEVICE_LETTERS:$index:1}\""));
-	TEST_EXPECT(runs_line(script, "[ -b \"$device\" ] || device=\"/dev/${disks[$index]:-none}\""));
-	TEST_EXPECT(runs_line(script, "= \"$LEGACY_LABEL\" ]"));
-	TEST_EXPECT(runs_line(script, "source=\"UUID=$(blkid -s UUID -o value \"$device\")\""));
+	for (const char *gone : { "opennova-data", "blkid", "/dev/sd", "lsblk", "UUID=" })
+		TEST_EXPECT(script.find(gone) == std::string::npos);
 	TEST_EXPECT(runs_line(
 			script, "printf '%s %s ext4 ro,noload,nodev,nosuid,noexec,nofail 0 0\\n' \"$source\""));
 	TEST_EXPECT(runs_line(script, "readonly GAME_ROOT=/opt/game"));

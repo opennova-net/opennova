@@ -4,9 +4,10 @@
 // an EC2 machine launched from the launch template of its kind
 // (ONNET_HOSTED_EC2_LAUNCH_TEMPLATES, {"shared": "lt-...", "own": "lt-..."};
 // infra/aws/fleet.tf: a stock Ubuntu image, the kind's machine type, every
-// data set's private encrypted snapshot as a volume of its own, attached as
-// /dev/sdf, /dev/sdg, ... in the data sets' sorted order and labelled by
-// volume_label, the machines' security group, their instance profile, IMDSv2
+// data set's private encrypted snapshot as a volume of its own (attached as
+// /dev/sdf, /dev/sdg, ... in the data sets' sorted order), each file system
+// labelled by volume_label, by which alone the machine mounts it, the
+// machines' security group, their instance profile, IMDSv2
 // required and InstanceInitiatedShutdownBehavior=terminate; no user-data).
 // Its user-data is machine/machine_user_data.sh with the machine's values
 // filled in: the service's internal listener, the machine's id and one-time
@@ -134,10 +135,6 @@ public:
 	static constexpr const char *kBlankServeImage = "@OPENNOVA_SERVE_IMAGE@";
 	static constexpr const char *kBlankHostdImage = "@OPENNOVA_HOSTD_IMAGE@";
 	static constexpr const char *kBlankDataSets = "@OPENNOVA_DATA_SETS@";
-	// The label every data set's volume carried before each carried its own
-	// (deploy/hosted-data): the script finds such a volume by its place in the
-	// data sets' order instead.
-	static constexpr const char *kLegacyVolumeLabel = "opennova-data";
 	// EC2's raw user-data cap.
 	static constexpr size_t kMaxUserDataBytes = 16 * 1024;
 	// ONNET_HOSTED_DEPLOYMENT's longest: its client tokens then fit EC2's 64.
