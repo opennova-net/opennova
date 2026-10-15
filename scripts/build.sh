@@ -4,10 +4,14 @@
 # missing classes that engine/ has since added.
 #
 # Usage: scripts/build.sh [--no-godot] [--jobs N] [--suite core|retail|all]
-#                         [--no-test | -R REGEX] [--cmake-arg ARG]...
+#                         [--shard editor|rest] [--no-test | -R REGEX]
+#                         [--cmake-arg ARG]...
 #   --no-godot       skip the Godot addon bootstrap and the GDExtension build
 #                    (library-only iteration; what CI's engine test job runs)
 #   --jobs N         build/test parallelism (default: the machine's CPU count)
+#   --shard NAME     run one of the core suite's two CI shards (editor: the
+#                    rows labelled `editor`, rest: the others; test_suites.py
+#                    SHARDS), attested on its own; the build is the full tree
 #   --no-test        build only; run no ctest
 #   -R REGEX         run only the suite's ctests matching REGEX; a partial run
 #                    skips the suite attestation (scripts/ci/test_suites.py),
@@ -27,8 +31,9 @@ build_godot=1
 suite=all
 run_tests=1
 test_regex=""
+shard=""
 cmake_args=()
-usage="usage: scripts/build.sh [--no-godot] [--jobs N] [--suite core|retail|all] [--no-test | -R REGEX] [--cmake-arg ARG]..."
+usage="usage: scripts/build.sh [--no-godot] [--jobs N] [--suite core|retail|all] [--shard editor|rest] [--no-test | -R REGEX] [--cmake-arg ARG]..."
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -36,6 +41,10 @@ while [[ $# -gt 0 ]]; do
             [[ $# -ge 2 ]] || { echo "$usage" >&2; exit 2; }
             suite="$2"; shift 2 ;;
         --suite=*) suite="${1#--suite=}"; shift ;;
+        --shard)
+            [[ $# -ge 2 ]] || { echo "$usage" >&2; exit 2; }
+            shard="$2"; shift 2 ;;
+        --shard=*) shard="${1#--shard=}"; shift ;;
         --no-godot) build_godot=0; shift ;;
         --jobs)
             [[ $# -ge 2 ]] || { echo "$usage" >&2; exit 2; }
@@ -59,6 +68,11 @@ case "$suite" in
     all) ;;
     *) echo "$usage" >&2; exit 2 ;;
 esac
+case "$shard" in
+    "") ;;
+    editor|rest) [[ "$suite" == core ]] || { echo "--shard splits the core suite only" >&2; exit 2; } ;;
+    *) echo "$usage" >&2; exit 2 ;;
+esac
 
 # Keep a CL=/MP16 (MSVC's extra-options variable) intact through Git Bash's
 # POSIX-path rewrite of the environment (scripts/build_godot.sh says why).
@@ -77,23 +91,24 @@ if [[ ! -f "$root/build/CMakeCache.txt" || ${#cmake_args[@]} -gt 0 ]]; then
 fi
 cmake --build "$root/build" --config Release -j "$jobs"
 
-selection=()
-case "$suite" in
-    core) selection=(-LE '^retail$') ;;
-    retail) selection=(-L '^retail$') ;;
-esac
+# The suite's (or shard's) ctest labels, from the one place that defines them.
+shard_args=(${shard:+--shard "$shard"})
+mapfile -t selection < <(python "$root/scripts/ci/test_suites.py" --suite "$suite" \
+    "${shard_args[@]}" --selection | tr -d '\r')
+name="$suite${shard:+-$shard}"
 if [[ "$run_tests" == "0" ]]; then
     echo "Skipping tests (--no-test)."
 elif [[ -n "$test_regex" ]]; then
-    echo "Running $suite tests matching '$test_regex' (no suite attestation)..."
+    echo "Running $name tests matching '$test_regex' (no suite attestation)..."
     ctest --test-dir "$root/build" --output-on-failure -C Release --parallel "$jobs" \
       -R "$test_regex" "${selection[@]}"
 else
-    echo "Running $suite tests..."
+    echo "Running $name tests..."
     mkdir -p "$root/build/Testing"
-    inventory="$root/build/Testing/$suite-inventory.json"
-    report="$root/build/Testing/ctest-$suite.xml"
-    python "$root/scripts/ci/test_suites.py" --suite "$suite" --build "$root/build" --inventory "$inventory"
+    inventory="$root/build/Testing/$name-inventory.json"
+    report="$root/build/Testing/ctest-$name.xml"
+    python "$root/scripts/ci/test_suites.py" --suite "$suite" "${shard_args[@]}" --build "$root/build" \
+      --inventory "$inventory"
     # Preserve full passing output so missing compatibility legs cannot hide
     # beyond CTest's default truncation limit.
     ctest --test-dir "$root/build" --output-on-failure -C Release --parallel "$jobs" \

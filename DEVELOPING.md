@@ -48,6 +48,8 @@ scripts/build.sh
 - `scripts/build.sh --no-godot` skips the GDExtension for fast library-only iteration.
 - `scripts/build.sh --no-test` builds without running `ctest`; `-R <regex>` runs only the
   matching tests.
+- `scripts/build.sh --suite core --shard editor|rest` runs one of CI's two core shards (the
+  rows labelled `editor`, or the others) with its own attestation.
 - `--jobs N` sets the build parallelism (`scripts/build.sh` and `scripts/build_godot.sh`).
 - Both scripts configure their build tree once and skip that step on later runs; the build
   re-runs CMake by itself when a `CMakeLists.txt` changes.

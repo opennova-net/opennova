@@ -80,10 +80,29 @@ def layout_errors(repo: Path) -> list[str]:
     return errors
 
 
-def ctest_inventory(build: Path, suite: str) -> list[str]:
+# The core suite's CI shards, each on its own runner: the `editor` label
+# (tests/editor/CMakeLists.txt gives it to every row there) and the rest. Every
+# core row has the label or not, so the two partition core by construction.
+SHARDS = {
+    "editor": ["-L", "^editor$", "-LE", "^retail$"],
+    "rest": ["-LE", "^(retail|editor)$"],
+}
+
+
+def ctest_selection(suite: str, shard: str | None = None) -> list[str]:
+    """The ctest label arguments that select a suite, or one core shard of it."""
+    if shard is not None:
+        if suite != "core":
+            raise ValueError("a shard splits the core suite only")
+        return list(SHARDS[shard])
+    if suite == "all":
+        return []
+    return ["-L" if suite == "retail" else "-LE", "^retail$"]
+
+
+def ctest_inventory(build: Path, suite: str, shard: str | None = None) -> list[str]:
     command = ["ctest", "--test-dir", str(build), "-C", "Release", "--show-only=json-v1"]
-    if suite != "all":
-        command += ["-L" if suite == "retail" else "-LE", "^retail$"]
+    command += ctest_selection(suite, shard)
     data = json.loads(subprocess.check_output(command, text=True, encoding="utf-8"))
     return [test["name"] for test in data["tests"]]
 
@@ -181,6 +200,10 @@ def check_log(path: Path, suite: str, *, windowed: bool = False) -> list[str]:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--suite", choices=("core", "retail", "all"), required=True)
+    ap.add_argument("--shard", choices=tuple(SHARDS),
+                    help="one CI shard of the core suite (its ctest selection and inventory)")
+    ap.add_argument("--selection", action="store_true",
+                    help="print the suite's (or shard's) ctest label arguments, one per line")
     ap.add_argument("--godot-config", type=Path)
     ap.add_argument("--inventory", type=Path)
     ap.add_argument("--build", type=Path)
@@ -192,6 +215,12 @@ def main() -> int:
                     help="select only the suite's graphics scripts (tests/windowed/ for core, "
                          "tests/retail/windowed/ for retail); a pending test then fails")
     args = ap.parse_args()
+    if args.shard and args.suite != "core":
+        ap.error("--shard splits the core suite only")
+    if args.selection:
+        for arg in ctest_selection(args.suite, args.shard):
+            print(arg)
+        return 0
     errors = check_roots() if args.require_roots else []
     if args.check_layout:
         errors += layout_errors(REPO)
@@ -209,7 +238,7 @@ def main() -> int:
             args.inventory.write_text(json.dumps({"scripts": expected,
                 "methods": godot_methods(REPO, expected)}, indent=2) + "\n", encoding="utf-8")
     elif args.build and not args.report:
-        expected = ctest_inventory(args.build, args.suite)
+        expected = ctest_inventory(args.build, args.suite, args.shard)
         if not expected:
             errors.append("suite selection is empty")
         if args.inventory:
