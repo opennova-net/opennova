@@ -102,12 +102,12 @@ locals {
   # three stay open on the one Elastic IP; port 8080 stays plain HTTP (the
   # stock NW*.dll and .gsb routes), its /api/ answering the portal's nginx
   # alone (ONNET_API_PROXY_ONLY). The portal's nginx takes Cloudflare's ranges
-  # alone. No SSH.
+  # alone, on 443 (edge.tf: the origin certificate). No SSH, no port 80.
   service_ingress = merge(
     { for c in var.allowed_cidrs : "gate ${c}" => { protocol = "udp", port = var.gate_udp_port, cidr = c, description = "novaworld_gate (the stock clients' fixed UDP port)" } },
     { for c in var.allowed_cidrs : "novaworld ${c}" => { protocol = "udp", port = var.nw_udp_port, cidr = c, description = "NovaWorld UDP (the port the gate announces)" } },
     { for c in var.allowed_cidrs : "game-http ${c}" => { protocol = "tcp", port = var.game_http_port, cidr = c, description = "The stock clients' HTTP routes (NW*.dll, .gsb); /api/ answers nginx alone" } },
-    { for c in local.cloudflare_ipv4 : "web ${c}" => { protocol = "tcp", port = 80, cidr = c, description = "The portal's nginx, from Cloudflare's proxy alone" } },
+    { for c in local.cloudflare_ipv4 : "web ${c}" => { protocol = "tcp", port = 443, cidr = c, description = "The portal's nginx over TLS (Full strict), from Cloudflare's proxy alone" } },
   )
 }
 

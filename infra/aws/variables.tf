@@ -129,7 +129,7 @@ variable "cloudflare_domain" {
 }
 
 variable "edge_auth_secret" {
-  description = "Edge authentication for the portal's /api/ (DEPLOY.md): when set, and while the web records are proxied (cloudflare_web_proxied), a Cloudflare Transform Rule adds X-OpenNova-Edge: <secret> to every request on the web hostnames, and the web container (EDGE_AUTH_SECRET, the same value) answers /api/ only to requests carrying it. Letters and digits, at least 32 (web/docker-entrypoint.sh's rule); lowercase hex in practice (openssl rand -hex 32), since nginx compares it without regard to case. Empty (the default) creates no rule. Sourced from the vault as TF_VAR_edge_auth_secret once enabled; the API token then needs Zone / Transform Rules / Edit. The state holds it in plain text."
+  description = "Edge authentication for the portal's /api/ (DEPLOY.md): a Cloudflare Transform Rule adds X-OpenNova-Edge: <secret> to every request on the web hostnames, and the web container (EDGE_AUTH_SECRET, the same value) answers /api/ only to requests carrying it. Letters and digits, at least 32 (web/docker-entrypoint.sh's rule); lowercase hex in practice (`secrets init` makes 64), since nginx compares it without regard to case. From the vault (TF_VAR_edge_auth_secret: app-prod/edge_auth_secret, the zone's one secret, every deployment's); the API token needs Zone / Transform Rules / Edit. The state holds it in plain text."
   type        = string
   default     = ""
   sensitive   = true
@@ -140,8 +140,26 @@ variable "edge_auth_secret" {
   }
 }
 
+variable "edge_other_deployments" {
+  description = "The deployments besides prod whose web hostnames (<name>.<domain>) the zone's rules cover: edge authentication's header, the webhook's WAF skip. Prod owns the zone's rulesets, so they name every deployment here."
+  type        = list(string)
+  default     = ["staging"]
+}
+
+variable "cloudflare_webhook_skip_phases" {
+  description = "What the Stripe webhook's custom rule skips besides the remaining custom rules: these phases. Drop one the zone's plan does not offer (the apply says which)."
+  type        = list(string)
+  default     = ["http_ratelimit", "http_request_firewall_managed", "http_request_sbfm"]
+}
+
+variable "cloudflare_webhook_skip_products" {
+  description = "And these legacy security products. Drop one the zone's plan does not offer."
+  type        = list(string)
+  default     = ["bic", "hot", "securityLevel", "uaBlock", "zoneLockdown"]
+}
+
 variable "cloudflare_web_proxied" {
-  description = "Whether the web records are proxied through Cloudflare. Proxied gives the site Cloudflare TLS; the portal's port admits Cloudflare's ranges alone, so unproxied records reach nothing."
+  description = "Whether the web records are proxied through Cloudflare: the site's TLS, its origin certificate, edge authentication. The portal's port admits Cloudflare's ranges alone, so unproxied records reach nothing."
   type        = bool
   default     = true
 }

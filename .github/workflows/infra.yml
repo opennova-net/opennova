@@ -2,12 +2,12 @@ name: Infra
 
 # The offline checks of the deploy stack (DEPLOY.md): the Terraform under
 # infra/ (formatted, valid, and infra/aws/tests' mock-provider runs, which plan
-# and apply against mocks with no credentials, so nothing reaches AWS or
-# Cloudflare) at the pinned Terraform the toolbox runs, and shellcheck on the
-# deploy toolbox, the service host's first-boot and converge scripts and the
-# hosted machines' script. The Terraform reads deploy/host/ (the service host's
-# scripts), so the repo root is mounted. Path-filtered: it runs when one of
-# those changes.
+# against mocks with no credentials, so nothing reaches AWS or Cloudflare) at
+# the pinned Terraform the toolbox runs, and shellcheck on the deploy toolbox,
+# the service host's first-boot and converge scripts, the portal's entrypoint
+# and the hosted machines' script. The Terraform reads deploy/host/ (the
+# service host's scripts), so the repo root is mounted. Path-filtered: it runs
+# when one of those changes.
 
 on:
   push:
@@ -16,12 +16,14 @@ on:
       - 'infra/**'
       - 'deploy/**'
       - 'apps/novaworld_server/hosted/machine/**'
+      - 'web/docker-entrypoint.sh'
       - '.github/workflows/infra.yml'
   pull_request:
     paths:
       - 'infra/**'
       - 'deploy/**'
       - 'apps/novaworld_server/hosted/machine/**'
+      - 'web/docker-entrypoint.sh'
       - '.github/workflows/infra.yml'
   workflow_dispatch:
 
@@ -60,5 +62,6 @@ jobs:
             deploy/bin/on-deploy \
             deploy/host/converge.sh \
             deploy/host/service-user-data.sh \
+            web/docker-entrypoint.sh \
             apps/novaworld_server/hosted/machine/user_data.sh \
             apps/novaworld_server/hosted/machine/machine_user_data.sh

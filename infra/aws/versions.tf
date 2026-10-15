@@ -8,7 +8,8 @@
 #   service.tf     the service host
 #   service_ssm.tf what drives the host: SSM parameters and the converge document
 #   database.tf    PostgreSQL 17 on RDS
-#   edge.tf        Cloudflare: DNS records, edge authentication
+#   edge.tf        Cloudflare: DNS, the origin certificate, Full (strict),
+#                  edge authentication, the webhook's WAF skip
 #   ops_bucket.tf  the operations bucket (backups) and the account's S3 block
 #   fleet.tf       the hosted game servers' machines: shared and own launch templates
 #   observability.tf  logs, metrics, alarms, budgets
@@ -33,6 +34,11 @@ terraform {
     }
     cloudflare = {
       source  = "cloudflare/cloudflare"
+      version = "~> 4.0"
+    }
+    # The origin certificate's key (edge.tf).
+    tls = {
+      source  = "hashicorp/tls"
       version = "~> 4.0"
     }
   }

@@ -88,12 +88,27 @@ services:
     networks:
       edge:
         ipv4_address: 172.30.0.10
+    # 443 alone, over TLS with the Cloudflare Origin CA certificate (Cloudflare
+    # verifies it: "Full (strict)"); the security group admits Cloudflare's
+    # ranges alone. No port 80.
     ports:
-      - "80:80"
+      - "443:443"
     # The baked nginx.conf proxies /api/ to host.docker.internal:8080: the host
     # (where the server listens), through the bridge's gateway.
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    # The origin certificate and its key (infra/aws/edge.tf, through SSM
+    # .../tls/*), which the entrypoint writes to this tmpfs; and edge
+    # authentication, on: nginx forwards /api/ only with the header our zone's
+    # Transform Rule stamps. Required, so a host missing either never serves.
+    environment:
+      ORIGIN_TLS_CERT: ${ORIGIN_TLS_CERT:?set ORIGIN_TLS_CERT (SSM .../tls/; infra apply)}
+      ORIGIN_TLS_KEY: ${ORIGIN_TLS_KEY:?set ORIGIN_TLS_KEY (SSM .../tls/; infra apply)}
+      EDGE_AUTH_SECRET: ${EDGE_AUTH_SECRET:?set EDGE_AUTH_SECRET (secrets init, then secrets sync)}
+      EDGE_AUTH_SECRET_PREVIOUS: ${EDGE_AUTH_SECRET_PREVIOUS:-}
+      ORIGIN_TLS_DIR: /run/tls
+    tmpfs:
+      - /run/tls:mode=0700,size=1m
     logging:
       driver: awslogs
       options:

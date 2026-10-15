@@ -454,11 +454,17 @@ stripe_placeholder_specs() {
 secrets_init() {
   require_op
   log "vault '$VAULT', deployment $DEP: adding what is missing (no value is printed or overwritten)…"
-  ensure_item "$APP_ITEM" SERVER \
-    admin_api_token:gen:24:CONCEALED \
-    admin_basic_auth_user:value:admin:STRING \
-    admin_basic_auth_password:gen:16:CONCEALED \
-    database_password:gen:24:CONCEALED
+  # The edge secret is the zone's (one Transform Rule for every deployment's
+  # web hostname): app-prod holds it for all.
+  local app_specs=(admin_api_token:gen:24:CONCEALED admin_basic_auth_user:value:admin:STRING
+                   admin_basic_auth_password:gen:16:CONCEALED database_password:gen:24:CONCEALED)
+  if [ "$APP_ITEM" = app-prod ]; then
+    app_specs+=(edge_auth_secret:gen:32:CONCEALED)
+    ensure_item app-prod SERVER "${app_specs[@]}"
+  else
+    ensure_item "$APP_ITEM" SERVER "${app_specs[@]}"
+    ensure_item app-prod SERVER edge_auth_secret:gen:32:CONCEALED
+  fi
   ensure_item "$RDS_ITEM" SECURE_NOTE \
     master_password:gen:24:CONCEALED
   ensure_item alerts SECURE_NOTE \

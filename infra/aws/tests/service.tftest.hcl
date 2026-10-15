@@ -119,6 +119,7 @@ override_resource {
 }
 
 variables {
+  edge_auth_secret          = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   db_master_password        = "0123456789abcdef0123456789abcdef"
   cloudflare_zone_id        = "0123456789abcdef0123456789abcdef"
   cloudflare_domain         = "example.com"
@@ -161,12 +162,12 @@ run "adopted_eip" {
     error_message = "an encrypted root volume"
   }
   assert {
-    condition     = alltrue([for r in aws_vpc_security_group_ingress_rule.service : r.from_port != 22 && r.to_port != 22])
-    error_message = "no SSH"
+    condition     = alltrue([for r in aws_vpc_security_group_ingress_rule.service : r.from_port != 22 && r.to_port != 22 && r.from_port != 80])
+    error_message = "no SSH, no port 80"
   }
   assert {
-    condition     = length([for r in aws_vpc_security_group_ingress_rule.service : r if r.from_port == 80]) == 2 && alltrue([for r in aws_vpc_security_group_ingress_rule.service : contains(["173.245.48.0/20", "103.21.244.0/22"], r.cidr_ipv4) if r.from_port == 80])
-    error_message = "the web port admits Cloudflare's ranges alone"
+    condition     = length([for r in aws_vpc_security_group_ingress_rule.service : r if r.from_port == 443]) == 2 && alltrue([for r in aws_vpc_security_group_ingress_rule.service : contains(["173.245.48.0/20", "103.21.244.0/22"], r.cidr_ipv4) if r.from_port == 443])
+    error_message = "the web port (443) admits Cloudflare's ranges alone"
   }
   assert {
     condition = (
