@@ -201,6 +201,29 @@ target_include_directories(hosted_console_commands_test PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 add_test(NAME hosted_console_commands COMMAND hosted_console_commands_test)
 
+# The billing seam below the sync worker and the routes (apps/novaworld_server/billing):
+# the webhook signature (a vector computed with Python's hmac, several v1 signatures and
+# secrets, the 300 s boundary either way, every malformed header) and the event envelope;
+# form encoding; CurlStripeApi on a stub CommandRunner (the argv exactly {curl, -q, --config,
+# <file>} with no key in it, the config file's lines, its 0600 mode, its deletion after a
+# success and after a failure, the status split, curl's failures, the retry rules); the typed
+# client's requests, its readers on basil-shaped JSON and its error kinds; the FakeStripeApi
+# (novaworld/billing_fake_stripe.h) the later billing tests drive; and the billing settings'
+# checks. Crow-free and database-free: compiles the billing sources and hosted/owner_file.cpp
+# directly.
+add_executable(billing_stripe_test
+    novaworld/billing_stripe_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/billing_config.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/stripe_api.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/stripe_client.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/stripe_signature.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/owner_file.cpp)
+target_link_libraries(billing_stripe_test PRIVATE opennova_app_common opennova_base Threads::Threads)
+target_include_directories(billing_stripe_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+add_test(NAME billing_stripe COMMAND billing_stripe_test)
+
 # The credential routes' brake: token buckets on a hand-stepped clock and the
 # trusted-proxy client address. The server's rate_limiter.cpp compiled in
 # directly, so it runs on every build.

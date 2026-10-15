@@ -38,6 +38,14 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/local_process_provider.cpp
         hosted/owner_file.cpp
         hosted/supervisor.cpp
+        # Billing (monthly support tiers over Stripe Checkout and the Customer
+        # Portal): the settings, the curl transport (hosted/command_runner.h,
+        # its config file owner-only through hosted/owner_file.cpp), the typed
+        # client and the webhook signature.
+        billing/billing_config.cpp
+        billing/stripe_api.cpp
+        billing/stripe_client.cpp
+        billing/stripe_signature.cpp
     )
 endif()
 
