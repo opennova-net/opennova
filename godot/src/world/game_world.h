@@ -60,6 +60,7 @@
 #include "player/player_viewmodel_def.h"
 #include "render/frame_fx.h"
 #include "resource_index/resource_root.h"
+#include "simulation/corpse_ragdoll_presenter.h"
 #include "simulation/inmatch_session_values.h"
 #include "simulation/player_local_view.h"
 #include "simulation/player_weapon_event.h"
@@ -228,6 +229,12 @@ public:
 	void set_particle_density(int p_density);
 	int get_particle_density() const { return particle_density_; }
 	int get_session_particle_density() const { return session_particle_density_; }
+	// The session's copy of game.cfg NoBlood's ragdoll bit (ADR 0060), and a
+	// dev override of it for the running session; the census probes read.
+	bool is_session_ragdolls() const { return ragdolls_.enabled(); }
+	void set_session_ragdolls(bool p_enabled) { ragdolls_.set_enabled(p_enabled); }
+	// [awake, sleeping, blending back, started since the session began].
+	PackedInt32Array get_ragdoll_counts() const;
 	static int texcompression_level_fresh_profile();
 	static int particle_density_fresh_profile();
 	static int clamp_particle_density(int p_density);
@@ -658,6 +665,7 @@ private:
 	LegResult leg_iris(FrameContext &r_ctx);
 	LegResult leg_sun_veil(FrameContext &r_ctx);
 	LegResult leg_lights(FrameContext &r_ctx);
+	LegResult leg_ragdolls(FrameContext &r_ctx);
 	LegResult leg_materials(FrameContext &r_ctx);
 	LegResult leg_framefx(FrameContext &r_ctx);
 	LegResult leg_slot_shadows(FrameContext &r_ctx);
@@ -859,6 +867,7 @@ private:
 	int session_texcompression_level_ = opennova::renderer::kTexCompressionLevelFreshProfile;
 	int particle_density_ = opennova::renderer::kParticleDensityFreshProfile;
 	int session_particle_density_ = opennova::renderer::kParticleDensityFreshProfile;
+	CorpseRagdollPresenter ragdolls_;
 	void publish_session_render_settings();
 	Color idle_frame_clear_color_ = Color(0, 0, 0);
 	// A shell-injected resource root (main_game hands its boot mount over;

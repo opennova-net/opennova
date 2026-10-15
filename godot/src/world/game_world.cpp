@@ -783,6 +783,9 @@ void GameWorld::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_particle_density"), &GameWorld::get_particle_density);
 	ClassDB::bind_method(D_METHOD("get_session_particle_density"),
 			&GameWorld::get_session_particle_density);
+	ClassDB::bind_method(D_METHOD("is_session_ragdolls"), &GameWorld::is_session_ragdolls);
+	ClassDB::bind_method(D_METHOD("set_session_ragdolls", "enabled"), &GameWorld::set_session_ragdolls);
+	ClassDB::bind_method(D_METHOD("get_ragdoll_counts"), &GameWorld::get_ragdoll_counts);
 	ClassDB::bind_static_method("GameWorld", D_METHOD("texcompression_level_fresh_profile"),
 			&GameWorld::texcompression_level_fresh_profile);
 	ClassDB::bind_static_method("GameWorld", D_METHOD("particle_density_fresh_profile"),

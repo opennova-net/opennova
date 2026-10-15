@@ -332,9 +332,7 @@ void SkeletalAnim::pose_skeleton_deltas(Skeleton3D *p_skeleton, const String &p_
 				p_wpn_variant, p_wpn_prev_variant, p_variant, p_person);
 	} else if (p_person) {
 		std::vector<opennova::anim::PoseBone> native_pose;
-		const std::string key = opennova::to_std(p_key);
-		rig().eval_pose(key, p_playhead_seconds, p_variant, native_pose);
-		rig().pose_person_rows_past_clip(native_pose, rig().clip_file_bones(key, p_variant), nullptr, {});
+		eval_person_pose(p_key, p_playhead_seconds, p_variant, native_pose);
 		pose = pose_to_array(native_pose);
 	} else {
 		pose = eval_pose(p_key, p_playhead_seconds, p_variant);
@@ -434,6 +432,29 @@ void SkeletalAnim::pose_skeleton(Skeleton3D *p_skeleton, const String &p_key,
 			deltas_from_array(p_deltas, table), p_wpn_key, p_wpn_playhead_seconds,
 			p_collapse_right_hand, p_wpn_prev_key, p_wpn_prev_playhead_seconds,
 			p_wpn_weight, p_wpn_variant, p_wpn_prev_variant);
+}
+
+void SkeletalAnim::eval_person_pose(const String &p_key, double p_seconds, int p_variant,
+		std::vector<opennova::anim::PoseBone> &r_pose) const {
+	const std::string key = opennova::to_std(p_key);
+	rig().eval_pose(key, p_seconds, p_variant, r_pose);
+	rig().pose_person_rows_past_clip(r_pose, rig().clip_file_bones(key, p_variant), nullptr, {});
+}
+
+void SkeletalAnim::write_native_pose(Skeleton3D *p_skeleton,
+		const std::vector<opennova::anim::PoseBone> &p_pose) const {
+	if (p_skeleton == nullptr) {
+		return;
+	}
+	const int count = MIN(static_cast<int>(p_pose.size()),
+			static_cast<int>(p_skeleton->get_bone_count()));
+	for (int i = 0; i < count; ++i) {
+		const opennova::anim::PoseBone &b = p_pose[static_cast<size_t>(i)];
+		p_skeleton->set_bone_pose_position(i, Vector3(b.origin.x, b.origin.y, b.origin.z));
+		p_skeleton->set_bone_pose_rotation(i, Quaternion(b.rotation.x, b.rotation.y, b.rotation.z,
+				b.rotation.w));
+		p_skeleton->set_bone_pose_scale(i, Vector3(1, 1, 1));
+	}
 }
 
 void SkeletalAnim::write_pose_to_skeleton(Skeleton3D *p_skeleton,

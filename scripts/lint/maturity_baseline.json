@@ -26,6 +26,8 @@
     "runtime/world/inspect_markers.cpp",
     "runtime/world/inspect_local_player.cpp",
     "runtime/world/collision_debug_rows.cpp",
+    "runtime/ragdoll",
+    "runtime/world/corpse_ragdoll.cpp",
     "runtime/inmatch/net_debug_report.cpp",
     "editor/",
     "formats/def/def_schema.cpp",

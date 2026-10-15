@@ -105,6 +105,15 @@ public:
 	bool is_loaded() const { return rig_ != nullptr; }
 	String get_last_error() const { return last_error_; }
 
+	// The native seams the ragdoll corpses draw through (ADR 0060): the rig
+	// they plan bodies over, a Person's plain clip pose (the no-overlay leg of
+	// pose_skeleton_deltas), and a native pose written straight to a skeleton.
+	const opennova::anim::SkeletalClips &native_rig() const { return rig(); }
+	void eval_person_pose(const String &p_key, double p_seconds, int p_variant,
+			std::vector<opennova::anim::PoseBone> &r_pose) const;
+	void write_native_pose(Skeleton3D *p_skeleton,
+			const std::vector<opennova::anim::PoseBone> &p_pose) const;
+
 	int get_bone_count() const { return static_cast<int>(rig().bone_count()); }
 	PackedStringArray get_clip_keys() const;
 	// [{ name: String, parent_index: int, rest: Transform3D }], parent-local bind pose.
