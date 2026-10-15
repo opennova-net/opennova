@@ -29,10 +29,11 @@ if(BUILD_NOVAWORLD_HTTP)
         # renders, the local and the EC2 MachineProviders (the cloud machines'
         # bootstrap tokens and route; the AWS CLI runs through apps/common's
         # command runner), the admin link and its console routes; the fleet's
-        # pieces (its rows, the local and the EC2 machine drivers, its
-        # settings).
+        # pieces (its rows, the local and the EC2 machine drivers, the machine
+        # agents' routes on the internal listener, its settings).
         hosted/admin_link.cpp
         hosted/agent_protocol.cpp
+        hosted/agent_route.cpp
         hosted/bootstrap.cpp
         hosted/bootstrap_route.cpp
         hosted/console_commands.cpp
@@ -45,6 +46,7 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/hosted_repository.cpp
         hosted/hosted_routes.cpp
         hosted/hosted_settings.cpp
+        hosted/internal_listener.cpp
         hosted/local_machine_driver.cpp
         hosted/local_process_provider.cpp
         hosted/owner_file.cpp

@@ -475,6 +475,22 @@ if(BUILD_NOVAWORLD_HTTP)
     add_dependencies(hosted_local_e2e_test opennova_serve)
     opennova_add_pg_test(hosted_local_e2e COMMAND hosted_local_e2e_test $<TARGET_FILE:opennova_serve>)
     set_tests_properties(hosted_local_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 300)
+
+    # The machine agents' routes (apps/novaworld_server/hosted/agent_route.h) on the internal
+    # listener (hosted/internal_listener.h) on a loopback port over a migrated database, driven
+    # with apps/common's http_exchange against a fake FleetDesiredState: the bootstrap's one
+    # redeem and its refusals, the sync's report, answer and refusals, another protocol
+    # draining the machine, the one bare 404 for everything else, the networks admitted; then
+    # the local machine driver (hosted/local_machine_driver.h) end to end against the routes,
+    # this test binary as its opennova-serve (`--resource-dir ...`).
+    add_executable(hosted_agent_route_test novaworld/hosted_agent_route_test.cpp)
+    target_link_libraries(hosted_agent_route_test PRIVATE
+        opennova_novaworld_server_core opennova_novaworld_service)
+    target_include_directories(hosted_agent_route_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(hosted_agent_route_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    opennova_add_pg_test(hosted_agent_route
+        COMMAND hosted_agent_route_test $<TARGET_FILE:hosted_agent_route_test>)
+    set_tests_properties(hosted_agent_route PROPERTIES TIMEOUT 180)
 endif()
 
 # The server binary's signal shutdown: SIGINT and SIGTERM each run main()'s
