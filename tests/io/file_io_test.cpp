@@ -242,6 +242,18 @@ static int test_path_within() {
 	TEST_EXPECT(!io::path_within(io::os_path(dir.file("abcd")), abc));
 	TEST_EXPECT(!io::path_within(io::os_path(dir.file("abc/sub/../..")), abc));
 	TEST_EXPECT(!io::path_within(io::os_path(dir.root()), abc));
+	// Relative to the working folder: "." itself (a project opened as "."), a name not made yet at its top (the
+	// path a placement joins: ".", no folder, the name) and under it; its parent never.
+	std::error_code ec;
+	const fs::path was = fs::current_path(ec);
+	fs::current_path(abc, ec);
+	TEST_EXPECT(!ec);
+	const fs::path here(".");
+	const bool top = io::path_within(here / fs::path() / "not_made_yet.png", here);
+	const bool under = io::path_within(here / "sub" / "not_made_yet.png", here);
+	const bool parent = io::path_within(here / ".." / "not_made_yet.png", here);
+	fs::current_path(was, ec);
+	TEST_EXPECT(top && under && !parent);
 	return 0;
 }
 

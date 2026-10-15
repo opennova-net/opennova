@@ -186,6 +186,18 @@ std::uint32_t parse_move_bits(std::string_view raw) noexcept {
 	return parse_flag_table(raw, kMoveEntries);
 }
 
+bool is_move_flag_name(std::string_view token) noexcept {
+	for (const auto &entry : kMoveEntries)
+		if (strutil::iequals(token, entry.first)) return true;
+	return false;
+}
+
+bool is_particle_flag_name(std::string_view token) noexcept {
+	for (const auto &entry : kParticleFlagEntries)
+		if (strutil::iequals(token, entry.first)) return true;
+	return false;
+}
+
 std::string format_move_bits(std::uint32_t bits) {
 	return format_flag_table(bits, kMoveEntries);
 }

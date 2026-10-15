@@ -100,6 +100,13 @@ struct WaveConversion {
 };
 bool convert_wave(const std::vector<uint8_t> &source, const WaveConversion &conversion, std::vector<uint8_t> &out,
                   std::string &error);
+// A wave's samples as interleaved 16-bit stereo, left then right, at `rate` samples a second (what a music bank's
+// stream is made from, formats/sbf: byte-paired stereo at 22050 a second): one channel taken as both sides, two
+// kept, each resampled as convert_wave resamples (linear) where its rate is another, each sample times `gain`
+// clamped to full scale; `format` (when given) the format it came in. False, with `error`, for a source that does
+// not read, holds no sample, or has more than two channels.
+bool wave_stereo_pcm16(const std::vector<uint8_t> &source, uint32_t rate, float gain, std::vector<int16_t> &out,
+                       std::string &error, WaveFormat *format = nullptr);
 // The loudest sample of the one channel a conversion of `source` makes (its mix or the one taken, its frames
 // from start to end, before its gain and its rate), 0..1 of full scale: what a normalise divides by. -1 for a
 // source that does not read or a trim that keeps no frame.
