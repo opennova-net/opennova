@@ -643,6 +643,11 @@ secrets_sync() {
       --value "file://$value_file" --overwrite >/dev/null \
       || { rm -f "$value_file"; die "writing $SSM_PREFIX/secret/$RT_NAME failed"; }
     rm -f "$value_file"
+    # The deployment's tag, as on everything the stack makes (put-parameter
+    # takes no tags with --overwrite).
+    aws ssm add-tags-to-resource --resource-type Parameter --resource-id "$SSM_PREFIX/secret/$RT_NAME" \
+      --tags "Key=opennova:deployment,Value=$(hosted_deployment_tag)" >/dev/null \
+      || die "tagging $SSM_PREFIX/secret/$RT_NAME failed"
     synced+=("$RT_NAME")
     log "  $RT_NAME"
   done < "$tpl"

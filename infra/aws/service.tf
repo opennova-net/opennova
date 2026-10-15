@@ -165,6 +165,15 @@ data "aws_eip" "service" {
   }
 }
 
+# The adopted address carries the deployment's tag like everything the stack
+# makes (the provider's default tags reach only resources Terraform manages).
+resource "aws_ec2_tag" "service_eip" {
+  count       = local.adopt_eip ? 1 : 0
+  resource_id = data.aws_eip.service[0].id
+  key         = "opennova:deployment"
+  value       = local.hosted_deployment
+}
+
 # Another deployment gets one of its own. Prod never makes one: its address is
 # the one retail clients use, so a prod plan that names none stops here rather
 # than give prod a new address (and re-point the association at it).
@@ -248,8 +257,10 @@ resource "aws_instance" "service" {
     encrypted             = true
     delete_on_termination = true
 
+    # A root volume takes no provider default tags: the deployment's, spelled out.
     tags = merge(var.tags, {
-      Name = "${local.name}-service"
+      Name                  = "${local.name}-service"
+      "opennova:deployment" = local.hosted_deployment
     })
   }
 
