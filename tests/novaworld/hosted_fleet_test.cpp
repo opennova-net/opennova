@@ -4,7 +4,8 @@
 // hand-stepped clock: the desired state each machine's sync gets (the files
 // until the agent has reported a container, nothing for another machine, a
 // stopping server's container that never started left unstarted, the drain
-// flag, a running container answered for without files by a supervisor that
+// flag, also while a draining machine is lost, a running container answered
+// for without files by a supervisor that
 // started since), and the machines' lifecycle: a boot that never reports, or
 // whose cloud machine vanishes first (failed, a failed launch, its server placed
 // again with no restart counted), a lost machine terminated once its
@@ -190,6 +191,27 @@ int test_lost_reports_again() {
 	return 0;
 }
 
+// A draining machine lost and back: its agent is told to drain all along (the
+// sync that finds it still lost included), and it drains again.
+int test_lost_while_draining() {
+	Rig rig("fleet_lost_draining");
+	const int64_t id = rig.request("lost_draining_owner");
+	TEST_EXPECT(!rig.to_running(id, 3251).empty());
+	const int64_t machine = rig.machine_of(id);
+	TEST_EXPECT(hosted::transition_machine(*rig.pool.acquire(), machine, FleetMachineState::Ready,
+			FleetMachineState::Draining, "drained by an admin"));
+	rig.silence(machine);
+	rig.step();
+	TEST_EXPECT(rig.machine(machine)->state == FleetMachineState::Lost);
+	rig.muted.erase(machine);
+	rig.sync_all(); // still lost when it syncs
+	TEST_EXPECT(rig.agents.at(machine).last.drain);
+	rig.step();
+	TEST_EXPECT(rig.machine(machine)->state == FleetMachineState::Draining);
+	TEST_EXPECT(rig.agents.at(machine).last.drain);
+	return 0;
+}
+
 // A shared machine with no server on it ends idle_ms after its last server
 // left; one with a server stays.
 int test_idle_scale_in() {
@@ -252,6 +274,30 @@ int test_drain_one_at_a_time() {
 	const auto drained = rig.machine(old_machine);
 	TEST_EXPECT(drained->state == FleetMachineState::Ended && drained->end_reason == "drained by an admin; drained");
 	TEST_EXPECT(rig.server(a)->restarts == 0 && rig.server(b)->restarts == 0);
+	return 0;
+}
+
+// A machine drained while it boots, its agent never heard from, is never taken
+// for lost: its server moves off (no restart counted) and it ends drained.
+int test_drain_while_booting() {
+	Rig rig("fleet_drain_booting");
+	const int64_t id = rig.request("drain_booting_owner");
+	rig.tick(); // -> provisioning
+	rig.tick(); // the launch, the placement
+	const int64_t machine = rig.machine_of(id);
+	TEST_EXPECT(machine > 0 && rig.machine(machine)->state == FleetMachineState::Booting);
+	rig.muted.insert(machine);
+	auto db = rig.pool.acquire();
+	TEST_EXPECT(hosted::transition_machine(
+			*db, machine, FleetMachineState::Booting, FleetMachineState::Draining, "drained by an admin"));
+	for (int i = 0; i < 6; ++i) {
+		rig.advance(1000);
+		rig.step();
+		TEST_EXPECT(rig.machine(machine)->state != FleetMachineState::Lost);
+	}
+	const auto drained = rig.machine(machine);
+	TEST_EXPECT(drained->state == FleetMachineState::Ended && drained->end_reason == "drained by an admin; drained");
+	TEST_EXPECT(rig.machine_of(id) != machine && rig.machine_of(id) != 0 && rig.server(id)->restarts == 0);
 	return 0;
 }
 
@@ -397,8 +443,10 @@ int main(int argc, char **argv) {
 		{ "boot_timeout", test_boot_timeout },
 		{ "lost_terminated", test_lost_terminated },
 		{ "lost_reports_again", test_lost_reports_again },
+		{ "lost_while_draining", test_lost_while_draining },
 		{ "idle_scale_in", test_idle_scale_in },
 		{ "drain_one_at_a_time", test_drain_one_at_a_time },
+		{ "drain_while_booting", test_drain_while_booting },
 		{ "roll", test_roll },
 		{ "admin_end", test_admin_end },
 		{ "reconcile_machines", test_reconcile_machines },

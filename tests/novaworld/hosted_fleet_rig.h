@@ -256,10 +256,10 @@ struct Rig {
 		const auto s = server(id);
 		return s && s->machine_ref ? *s->machine_ref : 0;
 	}
-	// The server's container's name (the row's machine_id).
+	// The server's container's name (the row's container).
 	std::string container(int64_t id) {
 		const auto s = server(id);
-		return s ? s->machine_id : std::string();
+		return s ? s->container : std::string();
 	}
 	// The agent of the machine the server is on.
 	FakeAgent *agent_of(int64_t id) {

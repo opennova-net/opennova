@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <exception>
 #include <iterator>
+#include <optional>
 #include <set>
 #include <utility>
 #include <vector>
@@ -122,9 +123,9 @@ const FleetMachineRow *Supervisor::machine_of(const Fleet &fleet, const HostedSe
 }
 
 const SlotReport *Supervisor::report_of(const Fleet &fleet, const HostedServer &s) const {
-	if (!s.machine_ref || s.machine_id.empty()) return nullptr;
+	if (!s.machine_ref || s.container.empty()) return nullptr;
 	const auto it = fleet.reports.find(std::make_pair(*s.machine_ref, s.slot));
-	if (it == fleet.reports.end() || it->second.container != s.machine_id) return nullptr;
+	if (it == fleet.reports.end() || it->second.container != s.container) return nullptr;
 	return &it->second;
 }
 
@@ -999,6 +1000,15 @@ void Supervisor::step_machines(db::Database &db, uint64_t now_ms) {
 				}
 				break;
 			case FleetMachineState::Draining:
+				// One drained while it booted, its agent never heard from (so never
+				// lost): its servers move off as any, and the boot timeout still
+				// ends it.
+				if (m.last_report_at.empty() && now_ms - mrt.since_ms >= driver_.boot_timeout_ms()) {
+					launch_failed(m.kind, now_ms);
+					end_machine(db, m, FleetMachineState::Failed,
+							"its machine did not boot in " + seconds_text(driver_.boot_timeout_ms()), now_ms);
+					break;
+				}
 				drain_step(db, m, on, mrt, now_ms);
 				break;
 			case FleetMachineState::Ending:
@@ -1029,6 +1039,12 @@ void Supervisor::step_machines(db::Database &db, uint64_t now_ms) {
 	for (auto it = machine_runtimes_.begin(); it != machine_runtimes_.end();) {
 		it = seen.count(it->first) == 0 ? machine_runtimes_.erase(it) : std::next(it);
 	}
+	// The lost machines that were draining, for sync()'s drain flag.
+	std::lock_guard<std::mutex> lock(starts_mu_);
+	lost_draining_.clear();
+	for (const auto &[id, mrt] : machine_runtimes_) {
+		if (mrt.state == FleetMachineState::Lost && mrt.was_draining) lost_draining_.insert(id);
+	}
 }
 
 // --- the desired state ---------------------------------------------------------------
@@ -1036,33 +1052,46 @@ void Supervisor::step_machines(db::Database &db, uint64_t now_ms) {
 FleetDecision Supervisor::sync(db::Database &db, const FleetMachineRow &machine,
 		const std::vector<ContainerReport> &reported) {
 	FleetDecision decision;
-	decision.drain = machine.state == FleetMachineState::Draining;
 	std::set<std::string> names;
 	for (const ContainerReport &c : reported) names.insert(c.name);
 	const std::vector<SlotHolder> holders = slot_holders(db, machine.id);
-	std::lock_guard<std::mutex> lock(starts_mu_);
-	for (const SlotHolder &h : holders) {
-		if (h.state != State::Booting && h.state != State::Listing && h.state != State::Running &&
-				h.state != State::Stopping)
-			continue;
-		const std::string name = hosted_container_name(h.server_id, h.generation);
-		const bool seen = names.count(name) != 0;
-		auto it = starts_.find(h.server_id);
-		if (it != starts_.end() && it->second.container.name == name && it->second.machine_id == machine.id) {
-			Start &start = it->second;
-			if (seen) {
-				// Reported once: its files are the agent's now, and no longer kept here.
-				start.acknowledged = true;
-				start.container.files.reset();
+	// What the starts in memory answer, in the holders' order; the containers no
+	// start answers for are read from their rows after, with no database work
+	// under starts_mu_ (the pass takes it too).
+	std::vector<std::optional<DesiredContainer>> wanted(holders.size());
+	std::vector<size_t> unread;
+	{
+		std::lock_guard<std::mutex> lock(starts_mu_);
+		// A lost machine that was draining drains again once it is back.
+		decision.drain = machine.state == FleetMachineState::Draining ||
+				(machine.state == FleetMachineState::Lost && lost_draining_.count(machine.id) != 0);
+		for (size_t i = 0; i < holders.size(); ++i) {
+			const SlotHolder &h = holders[i];
+			if (h.state != State::Booting && h.state != State::Listing && h.state != State::Running &&
+					h.state != State::Stopping)
+				continue;
+			const std::string name = hosted_container_name(h.server_id, h.generation);
+			const bool seen = names.count(name) != 0;
+			auto it = starts_.find(h.server_id);
+			if (it != starts_.end() && it->second.container.name == name && it->second.machine_id == machine.id) {
+				Start &start = it->second;
+				if (seen) {
+					// Reported once: its files are the agent's now, and no longer kept here.
+					start.acknowledged = true;
+					start.container.files.reset();
+				}
+				// A stopping server's container that never started stays unstarted.
+				if (h.state == State::Stopping && !start.acknowledged) continue;
+				wanted[i] = start.container;
+				continue;
 			}
-			// A stopping server's container that never started stays unstarted.
-			if (h.state == State::Stopping && !start.acknowledged) continue;
-			decision.desired.push_back(start.container);
-			continue;
+			// No start in memory (the service started since): only a container its
+			// agent reports is still wanted, without files.
+			if (seen) unread.push_back(i);
 		}
-		// No start in memory (the service started since): only a container its
-		// agent reports is still wanted, without files.
-		if (!seen) continue;
+	}
+	for (const size_t i : unread) {
+		const SlotHolder &h = holders[i];
 		const auto server = find_server(db, h.server_id);
 		const DataSet *data_set = server ? find_data_set(config_.data_sets, server->settings.game) : nullptr;
 		if (!server || !data_set) continue;
@@ -1070,7 +1099,7 @@ FleetDecision Supervisor::sync(db::Database &db, const FleetMachineRow &machine,
 		start.machine_id = machine.id;
 		start.acknowledged = true;
 		DesiredContainer &c = start.container;
-		c.name = name;
+		c.name = hosted_container_name(h.server_id, h.generation);
 		c.slot = h.slot;
 		c.image = server->serve_image.empty() ? config_.serve_image : server->serve_image;
 		c.uid = slot_uid(h.slot);
@@ -1079,8 +1108,19 @@ FleetDecision Supervisor::sync(db::Database &db, const FleetMachineRow &machine,
 		c.cpus = config_.slot_cpus;
 		c.memory_mb = config_.slot_memory_mb;
 		c.pids = config_.slot_pids;
-		decision.desired.push_back(c);
-		starts_[h.server_id] = std::move(start);
+		std::lock_guard<std::mutex> lock(starts_mu_);
+		auto it = starts_.find(h.server_id);
+		if (it == starts_.end()) {
+			it = starts_.emplace(h.server_id, std::move(start)).first;
+		} else if (it->second.container.name != c.name || it->second.machine_id != machine.id) {
+			// The pass started the server again meanwhile: the old container is no
+			// longer wanted, and the next sync answers for the new one.
+			continue;
+		}
+		wanted[i] = it->second.container;
+	}
+	for (std::optional<DesiredContainer> &w : wanted) {
+		if (w) decision.desired.push_back(std::move(*w));
 	}
 	return decision;
 }

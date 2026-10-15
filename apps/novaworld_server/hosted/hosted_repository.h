@@ -43,6 +43,9 @@ std::optional<State> state_from_name(std::string_view name);
 // machine, and counts against the cap and against its owner's hosting
 // entitlement (a stopping one included, until it has stopped).
 bool is_live(State state);
+// is_live as SQL on hosted_servers' state, for every query of the table
+// (here and fleet_repository.h's).
+inline constexpr const char *kLiveServerSql = "state NOT IN ('stopped', 'failed')";
 
 // A hosted server's row. It carries no admin credential: that is AdminLogin's,
 // read by admin_login_of alone, so nothing that serializes a HostedServer can
@@ -58,7 +61,7 @@ struct HostedServer {
 	// link's target); empty until a start renders them, and cleared when it
 	// leaves its slot.
 	std::string provider;
-	std::string machine_id;
+	std::string container;
 	std::string machine_address;
 	int admin_port = 0;
 	int restarts = 0;
@@ -188,7 +191,7 @@ bool reset_restarts(db::Database &db, int64_t id);
 // The fields a start writes beside the state.
 void set_service_account(db::Database &db, int64_t id, std::optional<int64_t> user_id);
 void set_machine(db::Database &db, int64_t id, const std::string &provider,
-		const std::string &machine_id, const std::string &address);
+		const std::string &container, const std::string &address);
 void set_serve_image(db::Database &db, int64_t id, const std::string &image);
 void set_admin_login(db::Database &db, int64_t id, int admin_port, const std::string &user,
 		const std::string &password);

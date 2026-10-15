@@ -22,9 +22,7 @@ constexpr const char *kMachineColumns =
 		"COALESCE(reserved_for, 0), last_report_at, launched_at, ready_at, ended_at, end_reason";
 constexpr size_t kMachineColumnCount = 19;
 
-// The SQL test for a live hosted server (hosted_repository.cpp's).
-constexpr const char *kLiveServerSql = "state NOT IN ('stopped', 'failed')";
-// The SQL test for a live machine.
+// The SQL test for a live machine (a live hosted server's is hosted_repository.h's).
 constexpr const char *kLiveMachineSql = "state NOT IN ('ended', 'failed')";
 
 bool is_alnum_text(std::string_view text, size_t size) {
@@ -223,9 +221,11 @@ std::vector<FleetMachineRow> list_machines(db::Database &db, size_t ended_limit)
 }
 
 std::vector<FleetMachineRow> list_silent_machines(db::Database &db, int64_t seconds) {
+	// A machine whose agent never reported (one drained while it booted) has
+	// fallen silent from nothing: the boot timeout is its.
 	return query_machines(db,
-			"WHERE state IN ('ready', 'draining') AND (last_report_at IS NULL OR "
-			"last_report_at < now() - make_interval(secs => $1)) ORDER BY id;",
+			"WHERE state IN ('ready', 'draining') AND last_report_at IS NOT NULL AND "
+			"last_report_at < now() - make_interval(secs => $1) ORDER BY id;",
 			{ BindValue(static_cast<double>(seconds)) });
 }
 
@@ -540,17 +540,6 @@ bool release_slot(db::Database &db, int64_t server_id) {
 			"updated_at = now() WHERE id = $1 AND machine_ref IS NOT NULL;",
 			{ BindValue(server_id) });
 	return db.changes() > 0;
-}
-
-std::optional<int64_t> next_generation(db::Database &db, int64_t server_id) {
-	const auto rows = db.query(std::string("UPDATE hosted_servers SET generation = generation + 1, "
-										   "updated_at = now() WHERE id = $1 AND machine_ref IS "
-										   "NOT NULL AND ") +
-					kLiveServerSql + " RETURNING generation;",
-			{ BindValue(server_id) });
-	if (rows.empty())
-		return std::nullopt;
-	return rows.front().as_int(0);
 }
 
 } // namespace opennova::novaworld_server::hosted

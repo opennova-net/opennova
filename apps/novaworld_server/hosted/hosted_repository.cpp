@@ -18,9 +18,6 @@ constexpr std::array<const char *, 8> kStateNames = {
 	"requested", "provisioning", "booting", "listing", "running", "stopping", "stopped", "failed",
 };
 
-// The SQL test for a live row.
-constexpr const char *kLiveSql = "state NOT IN ('stopped', 'failed')";
-
 constexpr const char *kServerColumns =
 		"id, owner_user_id, service_user_id, state, game_name, max_players, game_password, "
 		"time_limit, kill_limit, max_score, respawn, start_delay, team_ff, expansion, missions, "
@@ -52,7 +49,7 @@ HostedServer row_to_server(const db::Row &r) {
 	st.expansion = r.as_text(13).value_or("");
 	st.missions = split_missions(r.as_text(14).value_or(""));
 	s.provider = r.as_text(15).value_or("");
-	s.machine_id = r.as_text(16).value_or("");
+	s.container = r.as_text(16).value_or("");
 	s.machine_address = r.as_text(17).value_or("");
 	s.admin_port = static_cast<int>(r.as_int(18).value_or(0));
 	s.restarts = static_cast<int>(r.as_int(19).value_or(0));
@@ -199,14 +196,14 @@ std::optional<HostedServer> owned_server(db::Database &db, int64_t id, int64_t o
 }
 
 std::vector<HostedServer> live_servers_of(db::Database &db, int64_t owner_user_id) {
-	return query_servers(db, std::string("WHERE owner_user_id = $1 AND ") + kLiveSql + " ORDER BY id;",
+	return query_servers(db, std::string("WHERE owner_user_id = $1 AND ") + kLiveServerSql + " ORDER BY id;",
 			{ BindValue(owner_user_id) });
 }
 
 std::vector<HostedServer> list_servers_of(db::Database &db, int64_t owner_user_id, size_t ended_limit) {
 	std::vector<HostedServer> out = live_servers_of(db, owner_user_id);
 	for (HostedServer &s : query_servers(db,
-				 std::string("WHERE owner_user_id = $1 AND NOT (") + kLiveSql + ") ORDER BY id DESC LIMIT $2;",
+				 std::string("WHERE owner_user_id = $1 AND NOT (") + kLiveServerSql + ") ORDER BY id DESC LIMIT $2;",
 				 { BindValue(owner_user_id), BindValue(static_cast<int64_t>(ended_limit)) }))
 		out.push_back(std::move(s));
 	return out;
@@ -214,38 +211,38 @@ std::vector<HostedServer> list_servers_of(db::Database &db, int64_t owner_user_i
 
 int count_live_of(db::Database &db, int64_t owner_user_id) {
 	return count_of(db.query(
-			std::string("SELECT COUNT(*) FROM hosted_servers WHERE owner_user_id = $1 AND ") + kLiveSql + ";",
+			std::string("SELECT COUNT(*) FROM hosted_servers WHERE owner_user_id = $1 AND ") + kLiveServerSql + ";",
 			{ BindValue(owner_user_id) }));
 }
 
 int count_own_live_of(db::Database &db, int64_t owner_user_id) {
 	return count_of(db.query(std::string("SELECT COUNT(*) FROM hosted_servers WHERE owner_user_id = $1 "
 										 "AND own_machine AND ") +
-					kLiveSql + ";",
+					kLiveServerSql + ";",
 			{ BindValue(owner_user_id) }));
 }
 
 std::vector<HostedServer> list_live(db::Database &db) {
-	return query_servers(db, std::string("WHERE ") + kLiveSql + " ORDER BY id;", {});
+	return query_servers(db, std::string("WHERE ") + kLiveServerSql + " ORDER BY id;", {});
 }
 
 std::vector<HostedServer> list_servers(db::Database &db, size_t limit) {
-	return query_servers(db, std::string("ORDER BY (") + kLiveSql + ") DESC, id DESC LIMIT $1;",
+	return query_servers(db, std::string("ORDER BY (") + kLiveServerSql + ") DESC, id DESC LIMIT $1;",
 			{ BindValue(static_cast<int64_t>(limit)) });
 }
 
 std::vector<HostedServer> list_fleet_servers(
 		db::Database &db, std::optional<int64_t> owner_user_id, ServerFilter filter, size_t limit) {
 	std::string where = owner_user_id ? "WHERE owner_user_id = $2" : "WHERE TRUE";
-	if (filter == ServerFilter::Live) where += std::string(" AND ") + kLiveSql;
-	if (filter == ServerFilter::Ended) where += std::string(" AND NOT (") + kLiveSql + ")";
+	if (filter == ServerFilter::Live) where += std::string(" AND ") + kLiveServerSql;
+	if (filter == ServerFilter::Ended) where += std::string(" AND NOT (") + kLiveServerSql + ")";
 	std::vector<BindValue> binds = { BindValue(static_cast<int64_t>(limit)) };
 	if (owner_user_id) binds.push_back(BindValue(*owner_user_id));
-	return query_servers(db, where + " ORDER BY (" + kLiveSql + ") DESC, id DESC LIMIT $1;", binds);
+	return query_servers(db, where + " ORDER BY (" + kLiveServerSql + ") DESC, id DESC LIMIT $1;", binds);
 }
 
 int count_live(db::Database &db) {
-	const auto rows = db.query(std::string("SELECT COUNT(*) FROM hosted_servers WHERE ") + kLiveSql + ";");
+	const auto rows = db.query(std::string("SELECT COUNT(*) FROM hosted_servers WHERE ") + kLiveServerSql + ";");
 	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
 }
 
@@ -326,7 +323,7 @@ bool request_stop(db::Database &db, int64_t id, const std::string &detail) {
 size_t request_stop_all(db::Database &db, const std::string &detail) {
 	size_t stopped = 0;
 	db::Transaction tx(db);
-	for (const auto &r : db.query(std::string("SELECT id, state FROM hosted_servers WHERE ") + kLiveSql +
+	for (const auto &r : db.query(std::string("SELECT id, state FROM hosted_servers WHERE ") + kLiveServerSql +
 					 " AND state <> 'stopping';")) {
 		const int64_t id = r.as_int(0).value_or(0);
 		const std::string from = r.as_text(1).value_or("");
@@ -348,10 +345,10 @@ void set_service_account(db::Database &db, int64_t id, std::optional<int64_t> us
 }
 
 void set_machine(db::Database &db, int64_t id, const std::string &provider,
-		const std::string &machine_id, const std::string &address) {
+		const std::string &container, const std::string &address) {
 	db.exec("UPDATE hosted_servers SET provider = $1, machine_id = $2, machine_address = $3, "
 			"updated_at = now() WHERE id = $4;",
-			{ BindValue(provider), BindValue(machine_id), BindValue(address), BindValue(id) });
+			{ BindValue(provider), BindValue(container), BindValue(address), BindValue(id) });
 }
 
 void set_serve_image(db::Database &db, int64_t id, const std::string &image) {
@@ -427,7 +424,7 @@ std::vector<int64_t> listing_accounts_of(db::Database &db, int64_t user_id) {
 	std::vector<int64_t> out{ user_id };
 	for (const auto &r : db.query(std::string("SELECT service_user_id FROM hosted_servers "
 											  "WHERE owner_user_id = $1 AND service_user_id IS NOT NULL AND ") +
-						 kLiveSql + " ORDER BY id;",
+						 kLiveServerSql + " ORDER BY id;",
 				 { BindValue(user_id) })) {
 		if (const auto account = r.as_int(0)) out.push_back(*account);
 	}

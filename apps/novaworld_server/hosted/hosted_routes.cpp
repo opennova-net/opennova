@@ -197,7 +197,7 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 		put_owner(e, db, s.owner_user_id);
 		put_account(e, "service_account", db, s.service_user_id);
 		e["provider"] = s.provider;
-		e["machine_id"] = s.machine_id;
+		e["container"] = s.container;
 		e["machine_address"] = s.machine_address;
 		e["admin_port"] = s.admin_port;
 		if (s.machine_ref)

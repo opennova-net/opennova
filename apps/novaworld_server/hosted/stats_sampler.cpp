@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <iterator>
+#include <optional>
 #include <set>
 #include <vector>
 
@@ -58,32 +59,37 @@ bool StatsSampler::sample(db::Database &db, int64_t now, const LinkLookup &links
 				sample.link_up = link->up;
 			}
 		}
+		// What the next sample counts from moves only once this one is stored (a
+		// sample that failed is counted by the next one instead).
+		std::optional<std::string> mission_mark;
 		if (sample.scene == "game" && !sample.mission.empty()) {
 			const auto last = last_mission_.find(s.id);
 			sample.mission_started = last == last_mission_.end() || last->second != sample.mission;
-			last_mission_[s.id] = sample.mission;
+			mission_mark = sample.mission;
 		}
 
 		// Its container's CPU, memory and its slot's egress, as the agent last
 		// reported them (only its own container's).
+		std::optional<EgressMark> egress_mark;
 		const auto report = slot_report_of(db, s.id);
-		if (report && s.machine_ref && report->container == s.machine_id) {
+		if (report && s.machine_ref && report->container == s.container) {
 			sample.cpu_percent = std::clamp(report->cpu_percent / slot_cpus_, 0.0, 100.0);
 			sample.memory_bytes = static_cast<int64_t>(report->memory_bytes);
-			EgressMark &mark = egress_[s.id];
-			if (mark.machine_id == *s.machine_ref && mark.slot == s.slot) {
+			const auto known = egress_.find(s.id);
+			if (known != egress_.end() && known->second.machine_id == *s.machine_ref &&
+					known->second.slot == s.slot) {
 				// A count below the last one is a counter that started over.
-				const uint64_t delta = report->egress_bytes >= mark.cumulative ? report->egress_bytes - mark.cumulative
-																				: report->egress_bytes;
+				const uint64_t last = known->second.cumulative;
+				const uint64_t delta = report->egress_bytes >= last ? report->egress_bytes - last : report->egress_bytes;
 				sample.egress_bytes = static_cast<int64_t>(delta);
 			}
-			mark.machine_id = *s.machine_ref;
-			mark.slot = s.slot;
-			mark.cumulative = report->egress_bytes;
+			egress_mark = EgressMark{ *s.machine_ref, s.slot, report->egress_bytes };
 		}
 
 		insert_sample(db, sample);
 		if (sample.egress_bytes > 0 && s.machine_ref) add_machine_egress(db, *s.machine_ref, minute, sample.egress_bytes);
+		if (egress_mark) egress_[s.id] = *egress_mark;
+		if (mission_mark) last_mission_[s.id] = *mission_mark;
 		rollup_hour(db, s.id, minute, static_cast<int64_t>(names.size()));
 	}
 

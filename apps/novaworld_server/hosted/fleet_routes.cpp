@@ -103,7 +103,7 @@ void FleetRoutes::register_routes(WebApp &app) {
 // no server), `state` live, ended or all (the default); each as GET
 // /api/me/servers' plus `owner` ({id, username, tier: its granting support
 // tier or null} or null), `service_account` ({id, username} or null),
-// `provider`, `machine_id` (its container), `machine_address`, `admin_port`,
+// `provider`, `container` (its container's name), `machine_address`, `admin_port`,
 // `machine_ref` and `slot` (null with none; an ended server's where it last
 // ran), `game_port` (null before its first placement), `generation`,
 // `serve_image` and `players` (its listing's, null when not listed)). 400

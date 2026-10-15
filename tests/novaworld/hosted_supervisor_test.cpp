@@ -635,7 +635,7 @@ int test_lifecycle_and_stop() {
 	auto row = rig.server(id);
 	TEST_EXPECT(row->state == State::Booting && row->machine_ref == launched.id && row->slot == 0);
 	TEST_EXPECT(row->game_port == 32768 && row->generation == 1 && row->serve_image == kServeImage);
-	TEST_EXPECT(row->provider == "fake" && row->machine_id == "srv-" + std::to_string(id) + "-g1");
+	TEST_EXPECT(row->provider == "fake" && row->container == "srv-" + std::to_string(id) + "-g1");
 	TEST_EXPECT(row->machine_address == "10.0.1.1");
 	const auto login = hosted::admin_login_of(*rig.pool.acquire(), id);
 	TEST_EXPECT(login && login->user == "svc" && login->port == 32800 && row->admin_port == login->port);
@@ -703,7 +703,7 @@ int test_lifecycle_and_stop() {
 	rig.step();
 	row = rig.server(id);
 	TEST_EXPECT(row->state == State::Stopped && !row->ended_at.empty());
-	TEST_EXPECT(row->machine_id.empty() && !row->service_user_id.has_value());
+	TEST_EXPECT(row->container.empty() && !row->service_user_id.has_value());
 	// The row keeps where it last ran; its container is no longer wanted.
 	TEST_EXPECT(row->machine_ref == launched.id && row->slot == 0);
 	TEST_EXPECT(agent->containers.empty() && agent->last.desired.empty());
@@ -835,7 +835,7 @@ int test_stop_paths() {
 	rig.tick(); // the placement loses to the stop
 	rig.fake.on_slot_plan = nullptr;
 	auto row = rig.server(racing);
-	TEST_EXPECT(row->state == State::Stopping && !row->machine_ref && row->machine_id.empty());
+	TEST_EXPECT(row->state == State::Stopping && !row->machine_ref && row->container.empty());
 	rig.sync_all();
 	for (const auto &entry : rig.agents) TEST_EXPECT(entry.second.last.desired.empty());
 	rig.tick();
@@ -876,7 +876,7 @@ int test_exits_and_crash_restarts() {
 	rig.sync_all();
 	rig.tick();
 	auto row = rig.server(id);
-	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 1 && row->machine_id.empty() &&
+	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 1 && row->container.empty() &&
 			!row->machine_ref);
 	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), id), "exited with code 3; restart 1 of 2"));
 	hostdb::remove_host_by_rid(*rig.pool.acquire(), 7002); // its NWU session timed out
@@ -886,7 +886,7 @@ int test_exits_and_crash_restarts() {
 	rig.step();
 	row = rig.server(id);
 	TEST_EXPECT(row->state == State::Booting && row->machine_ref == machine && row->generation == 2);
-	const std::string c2 = row->machine_id;
+	const std::string c2 = row->container;
 	TEST_EXPECT(c2 == "srv-" + std::to_string(id) + "-g2" && row->service_user_id == service);
 	TEST_EXPECT(rig.fake.launches == 1); // the same machine, no new one
 	const std::string second_password = credential(file_of(rig, id, "credentials.txt"), "NOVAWORLD_PASS");
@@ -1473,7 +1473,7 @@ int test_reconciliation() {
 
 	TEST_EXPECT(rig.state(kept) == State::Running && rig.machine_of(kept) == kept_machine);
 	auto row = rig.server(lost);
-	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 0 && row->machine_id.empty() && !row->machine_ref);
+	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 0 && row->container.empty() && !row->machine_ref);
 	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), lost), "its machine is gone; placed again (no restart counted)"));
 	TEST_EXPECT(rig.state(stopping) == State::Stopped);
 	// The resumed server's container is answered for without files.

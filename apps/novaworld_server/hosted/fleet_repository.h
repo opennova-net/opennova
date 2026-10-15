@@ -115,7 +115,8 @@ std::vector<FleetMachineRow> list_live_machines(db::Database &db);
 // admin's fleet view).
 std::vector<FleetMachineRow> list_machines(db::Database &db, size_t ended_limit);
 // The ready and draining machines whose agent last reported more than
-// `seconds` ago: the ones the supervisor marks lost.
+// `seconds` ago: the ones the supervisor marks lost (one whose agent never
+// reported, drained while it booted, is not among them).
 std::vector<FleetMachineRow> list_silent_machines(db::Database &db, int64_t seconds);
 // Whether machine `id`'s agent reported within the last `seconds` (a lost
 // machine's agent reporting again).
@@ -218,9 +219,5 @@ std::optional<int64_t> assign_slot(
 // The server's slot let go (a restart elsewhere); its generation stays. False
 // when it held none.
 bool release_slot(db::Database &db, int64_t server_id);
-// A restart on the slot it holds: live server `server_id`'s generation moves
-// on (+1, a new container name) and is returned; nullopt when it is not live
-// or holds no slot.
-std::optional<int64_t> next_generation(db::Database &db, int64_t server_id);
 
 } // namespace opennova::novaworld_server::hosted

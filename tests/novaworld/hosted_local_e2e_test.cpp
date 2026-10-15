@@ -195,7 +195,7 @@ std::vector<std::string> command_of(hosted::LocalMachineDriver &driver, Service 
 	const auto view = driver.view(machine->cloud_id);
 	if (!view) return {};
 	for (const auto &c : view->containers) {
-		if (c.name == row->machine_id) return c.argv;
+		if (c.name == row->container) return c.argv;
 	}
 	return {};
 }
@@ -203,12 +203,12 @@ std::vector<std::string> command_of(hosted::LocalMachineDriver &driver, Service 
 // The server's container log and its events, for a failure's diagnosis.
 void dump(Service &service, const fs::path &work, int64_t id) {
 	const auto row = server_row(service, id);
-	if (row && row->machine_ref && !row->machine_id.empty()) {
+	if (row && row->machine_ref && !row->container.empty()) {
 		std::string log;
 		std::string error;
-		const fs::path path = work / ("machine-" + std::to_string(*row->machine_ref)) / (row->machine_id + ".log");
+		const fs::path path = work / ("machine-" + std::to_string(*row->machine_ref)) / (row->container + ".log");
 		if (opennova::io::read_file_text(path.u8string(), log, error))
-			std::fprintf(stderr, "---- %s (last 4000 bytes)\n%s\n----\n", row->machine_id.c_str(),
+			std::fprintf(stderr, "---- %s (last 4000 bytes)\n%s\n----\n", row->container.c_str(),
 					log.substr(log.size() > 4000 ? log.size() - 4000 : 0).c_str());
 	}
 	for (const auto &e : hosted::list_events(*service.pool.acquire(), id, 50))
@@ -511,7 +511,7 @@ int main(int argc, char **argv) {
 			link.reset();
 
 			// The first server's stop; the second runs on.
-			const std::string container = jo->machine_id;
+			const std::string container = jo->container;
 			reply = send(service, "POST", "/api/me/servers/" + std::to_string(id) + "/stop", as_owner(session, true));
 			json = crow::json::load(body_text(reply));
 			const std::string stop_state = text_at(json, { "server", "state" });

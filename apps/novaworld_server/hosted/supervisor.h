@@ -118,8 +118,10 @@
 // once its agent has reported it), each with the files rendered at its start
 // until the agent has reported it once; the service keeps those files in
 // memory alone, so a server whose start the service's restart cut short is
-// rendered again (a new generation, new credentials). sync runs on the
-// internal listener's handler threads; it locks what it shares with the pass.
+// rendered again (a new generation, new credentials); drain is set while the
+// machine drains, or is lost after draining. sync runs on the internal
+// listener's handler threads; it locks what it shares with the pass, and reads
+// the database outside that lock.
 //
 // The admin link (admin_link.h): with set_admin_links, every pass ends by
 // syncing the links with the servers in running, at their machine's private
@@ -383,9 +385,12 @@ private:
 	std::map<MachineKind, uint64_t> launch_not_before_ms_;
 
 	// The starts sync() answers from, by server id (the pass writes, the
-	// internal listener's threads read).
+	// internal listener's threads read), and the lost machines that were
+	// draining (each pass's), whose agents are told to drain. No database work
+	// is done under starts_mu_.
 	std::mutex starts_mu_;
 	std::map<int64_t, Start> starts_;
+	std::set<int64_t> lost_draining_;
 
 	std::thread thread_;
 	std::mutex mu_;

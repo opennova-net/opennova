@@ -467,9 +467,14 @@ int test_silent_machines() {
 			{ BindValue(quiet.id) });
 	auto silent = hosted::list_silent_machines(db, 60);
 	TEST_EXPECT(silent.size() == 1 && silent[0].id == quiet.id);
-	// A booting machine is the boot timeout's, never silent.
-	(void)booting;
+	// A booting machine is the boot timeout's, never silent; and so is one drained
+	// while it booted, its agent never heard from.
 	TEST_EXPECT(hosted::list_silent_machines(db, 120).empty());
+	TEST_EXPECT(hosted::transition_machine(
+			db, booting.id, FleetMachineState::Booting, FleetMachineState::Draining, "roll"));
+	TEST_EXPECT(hosted::list_silent_machines(db, 120).empty());
+	silent = hosted::list_silent_machines(db, 60);
+	TEST_EXPECT(silent.size() == 1 && silent[0].id == quiet.id);
 	TEST_EXPECT(hosted::transition_machine(
 			db, quiet.id, FleetMachineState::Ready, FleetMachineState::Lost, "silent"));
 	TEST_EXPECT(hosted::list_silent_machines(db, 60).empty());
@@ -517,10 +522,6 @@ int test_slots() {
 	TEST_EXPECT(holders[0].server_id == a && holders[0].slot == 0 && holders[0].game_port == 32768);
 	TEST_EXPECT(holders[1].server_id == c && holders[1].slot == 1 && holders[1].generation == 1);
 	TEST_EXPECT(holders[2].server_id == b && holders[2].state == hosted::State::Booting);
-	// A restart on its slot: a new generation, the slot kept.
-	TEST_EXPECT(hosted::next_generation(db, c) == std::optional<int64_t>(2));
-	TEST_EXPECT(hosted::slot_holders(db, shared.id)[1].generation == 2);
-	TEST_EXPECT(!hosted::next_generation(db, server_row(db)));
 	// What the agent reported of a server's slot.
 	TEST_EXPECT(hosted::record_sync(db, shared.id, "v1",
 			{ report("srv-" + std::to_string(a) + "-g1", 0, hosted::ContainerState::Running,
@@ -561,8 +562,8 @@ int test_slots() {
 	// Let go (a restart elsewhere): the generation stays and moves on at the next slot.
 	TEST_EXPECT(hosted::release_slot(db, c));
 	TEST_EXPECT(!hosted::release_slot(db, c));
-	// (1 at its first slot, 2 at its restart there, 3 now.)
-	TEST_EXPECT(hosted::assign_slot(db, c, own.id, 0, 32768) == std::optional<int64_t>(3));
+	// (1 at its first slot, 2 now.)
+	TEST_EXPECT(hosted::assign_slot(db, c, own.id, 0, 32768) == std::optional<int64_t>(2));
 	// A machine that no longer takes servers takes no slot.
 	TEST_EXPECT(hosted::release_slot(db, b));
 	TEST_EXPECT(hosted::transition_machine(
