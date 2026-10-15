@@ -98,29 +98,13 @@ data "aws_ebs_snapshot" "hosted" {
   snapshot_ids = [each.value]
 }
 
-# The subnet the machines launch into (the service's own): its range is the
-# one the service's bootstrap route answers (ONNET_HOSTED_BOOTSTRAP_CIDRS).
-data "aws_subnet" "hosted" {
-  count = local.hosted_enabled ? 1 : 0
-  id    = local.target_subnet
-}
-
-# A machine needs a public address of its own (players join it there, and it
-# lists through the service's public one): the subnet must hand one out.
-check "hosted_subnet_assigns_public_ips" {
-  assert {
-    condition     = !local.hosted_enabled || one(data.aws_subnet.hosted[*].map_public_ip_on_launch) == true
-    error_message = "Hosted game servers launch into the service's subnet, which must auto-assign public IPv4 addresses (map_public_ip_on_launch); the auto-created subnet does."
-  }
-}
-
 # ---- network ----------------------------------------------------------------
 
 resource "aws_security_group" "hosted" {
   count       = local.hosted_enabled ? 1 : 0
   name        = "${local.name}-hosted-sg"
   description = "OpenNova hosted game server machines: the game port to players, remote admin to the NovaWorld service alone"
-  vpc_id      = local.target_vpc_id
+  vpc_id      = aws_vpc.main.id
 
   tags = merge(var.tags, {
     Name = "${local.name}-hosted"
@@ -386,7 +370,7 @@ data "aws_iam_policy_document" "hosted_service" {
     resources = concat(
       [
         "${local.hosted_arn_prefix}:${local.hosted_account}:network-interface/*",
-        "${local.hosted_arn_prefix}:${local.hosted_account}:subnet/${local.target_subnet}",
+        "${local.hosted_arn_prefix}:${local.hosted_account}:subnet/${aws_subnet.public["a"].id}",
         "${local.hosted_arn_prefix}:${local.hosted_account}:security-group/${aws_security_group.hosted[0].id}",
       ],
       [for t in aws_launch_template.hosted : "${local.hosted_arn_prefix}:${local.hosted_account}:launch-template/${t.id}"],

@@ -27,33 +27,21 @@ variable "allowed_cidrs" {
   default     = ["0.0.0.0/0"]
 }
 
-variable "vpc_id" {
-  description = "Optional VPC ID; leave blank to use an auto-created VPC"
-  type        = string
-  default     = ""
-
-  validation {
-    condition     = (var.vpc_id == "" && var.subnet_id == "") || (var.vpc_id != "" && var.subnet_id != "")
-    error_message = "Provide both vpc_id and subnet_id together, or leave both empty to let Terraform create networking."
-  }
-}
-
-variable "subnet_id" {
-  description = "Optional subnet ID; leave blank to use the auto-created subnet"
-  type        = string
-  default     = ""
-}
-
-variable "auto_vpc_cidr" {
-  description = "CIDR block for the auto-created VPC when none is provided"
+variable "vpc_cidr" {
+  description = "The VPC's range (network.tf carves the public and private subnets from it). Prod's VPC was made with the default."
   type        = string
   default     = "10.44.0.0/16"
 }
 
-variable "auto_subnet_cidr" {
-  description = "CIDR block for the auto-created public subnet"
-  type        = string
-  default     = "10.44.0.0/24"
+variable "azs" {
+  description = "The two availability zones, [a, b]: public and private subnet a in the first, b in the second. Empty (the default): the region's first two. Pin them in the deployment's var-file once the stack exists, so a change in the region's list never moves a subnet (a moved subnet is a new one)."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = length(var.azs) == 0 || length(var.azs) == 2
+    error_message = "azs takes exactly two zones, or none."
+  }
 }
 
 variable "instance_name" {

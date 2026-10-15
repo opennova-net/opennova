@@ -16,16 +16,13 @@
 
 mock_provider "aws" {
   mock_data "aws_availability_zones" {
-    defaults = { names = ["us-east-1a"] }
+    defaults = { names = ["us-east-1a", "us-east-1b", "us-east-1c"] }
   }
   mock_data "aws_ami" {
     defaults = { id = "ami-0123456789abcdef0", root_device_name = "/dev/sda1" }
   }
   mock_data "aws_ebs_snapshot" {
     defaults = { volume_size = 2 }
-  }
-  mock_data "aws_subnet" {
-    defaults = { cidr_block = "10.44.0.0/24", map_public_ip_on_launch = true }
   }
   mock_data "aws_caller_identity" {
     defaults = { account_id = "123456789012" }
@@ -50,10 +47,6 @@ mock_provider "aws" {
   mock_resource "aws_launch_template" {
     defaults = { arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0123456789abcdef0", id = "lt-0123456789abcdef0" }
   }
-}
-
-mock_provider "aws" {
-  alias = "us_east_1"
 }
 
 mock_provider "cloudflare" {}
@@ -95,8 +88,6 @@ run "hosting_on" {
       jop_2_consumer = "snap-0123456789abcdef0"
       dfx2_consumer  = "snap-0fedcba9876543210"
     }
-    vpc_id    = "vpc-0123456789abcdef0"
-    subnet_id = "subnet-0123456789abcdef0"
   }
 
   override_data {
@@ -156,8 +147,6 @@ run "hosted_policy" {
       jop_2_consumer = "snap-0123456789abcdef0"
       dfx2_consumer  = "snap-0fedcba9876543210"
     }
-    vpc_id    = "vpc-0123456789abcdef0"
-    subnet_id = "subnet-0123456789abcdef0"
   }
 
   # The DFX2 template is a launch template of its own, and its snapshot the
@@ -250,8 +239,6 @@ run "new_canonical_image" {
     hosted_data_snapshots = {
       jop_2_consumer = "snap-0123456789abcdef0"
     }
-    vpc_id    = "vpc-0123456789abcdef0"
-    subnet_id = "subnet-0123456789abcdef0"
   }
   override_data {
     target = data.aws_ami.hosted[0]
@@ -275,8 +262,6 @@ run "burstable_refused" {
       jop_2_consumer = "snap-0123456789abcdef0"
     }
     hosted_instance_type = "t3.medium"
-    vpc_id               = "vpc-0123456789abcdef0"
-    subnet_id            = "subnet-0123456789abcdef0"
   }
 
   expect_failures = [var.hosted_instance_type]
@@ -291,8 +276,6 @@ run "unknown_data_set_refused" {
     hosted_data_snapshots = {
       jop_2_consumr = "snap-0123456789abcdef0"
     }
-    vpc_id    = "vpc-0123456789abcdef0"
-    subnet_id = "subnet-0123456789abcdef0"
   }
 
   expect_failures = [var.hosted_data_snapshots]
@@ -305,8 +288,6 @@ run "no_snapshot_id_refused" {
     hosted_data_snapshots = {
       dfx2_consumer = "vol-0123456789abcdef0"
     }
-    vpc_id    = "vpc-0123456789abcdef0"
-    subnet_id = "subnet-0123456789abcdef0"
   }
 
   expect_failures = [var.hosted_data_snapshots]

@@ -23,6 +23,26 @@ output "backup_bucket_name" {
   description = "S3 bucket used for automated database backups"
 }
 
+output "deployment" {
+  value       = local.deployment
+  description = "The deployment this state is (the workspace: default is prod)"
+}
+
+output "vpc_id" {
+  value       = aws_vpc.main.id
+  description = "The VPC"
+}
+
+output "public_subnet_ids" {
+  value       = { for k, s in aws_subnet.public : k => s.id }
+  description = "The public subnets, a and b"
+}
+
+output "private_subnet_ids" {
+  value       = { for k, s in aws_subnet.private : k => s.id }
+  description = "The private subnets, a and b (the database's)"
+}
+
 output "region" {
   value       = var.region
   description = "The region everything here lives in (the hosted servers' ONNET_HOSTED_EC2_REGION)"
@@ -44,12 +64,12 @@ output "hosted_launch_templates" {
 }
 
 output "hosted_subnet_id" {
-  value       = local.hosted_enabled ? local.target_subnet : null
+  value       = local.hosted_enabled ? aws_subnet.public["a"].id : null
   description = "The subnet hosted machines launch into (ONNET_HOSTED_EC2_SUBNET); null while hosting is off"
 }
 
 output "hosted_subnet_cidr" {
-  value       = one(data.aws_subnet.hosted[*].cidr_block)
+  value       = local.hosted_enabled ? aws_subnet.public["a"].cidr_block : null
   description = "That subnet's range, the only peers the bootstrap route answers (ONNET_HOSTED_BOOTSTRAP_CIDRS); null while hosting is off"
 }
 
