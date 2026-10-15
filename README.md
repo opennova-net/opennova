@@ -105,11 +105,6 @@ selects the game (default `jo`); `/exp <name>` selects an expansion. A
 usage and exits with code 2; an invalid or unmountable directory exits with
 code 1.
 
-The game also builds for the browser: single player only, on Godot's
-Compatibility (WebGL2) renderer. Its PLAY RETAIL reads the install you pick
-inside the browser tab; no retail file is uploaded. `deploy/game/Dockerfile`
-builds and serves the site; see [DEPLOY.md](DEPLOY.md).
-
 ## Downloads
 
 CI and tagged releases publish `opennova-game-windows-v<version>.zip`. It

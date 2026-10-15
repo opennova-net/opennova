@@ -148,10 +148,10 @@ run "own_address" {
   }
   assert {
     condition = (
-      cloudflare_record.web_root[0].name == "staging" && cloudflare_record.game[0].name == "game-staging" &&
+      cloudflare_record.web_root[0].name == "staging" &&
       length(cloudflare_record.web_www) == 0 && cloudflare_record.web_root[0].content == "3.3.3.3"
     )
-    error_message = "staging's records (staging, game-staging; no www) point at its own address"
+    error_message = "staging's record (staging; no www) points at its own address"
   }
   assert {
     condition     = aws_instance.service.tags["opennova:service"] == "staging" && aws_instance.service.tags["Name"] == "opennova-server-staging"

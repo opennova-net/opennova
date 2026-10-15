@@ -3,8 +3,8 @@
 # ---------------------------------------------------------------------------
 #
 # One EC2 instance runs the NovaWorld stack with docker compose: the server
-# (gate UDP 7597, NovaWorld UDP 64206, HTTP 8080; host networking), the
-# portal's nginx and the web build (a bridge network, `edge`). It keeps no
+# (gate UDP 7597, NovaWorld UDP 64206, HTTP 8080; host networking) and the
+# portal's nginx (a bridge network, `edge`). It keeps no
 # state: secrets and settings live in SSM Parameter Store (service_ssm.tf),
 # releases in the operations bucket, logs in CloudWatch. So it is disposable:
 # `./deploy/run.sh infra apply --allow-destroy -replace=aws_instance.service`
