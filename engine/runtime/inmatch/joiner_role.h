@@ -290,6 +290,8 @@ private:
 	FrameSignals run_client_net_frame();
 	void wire_frame_providers();
 	void apply_weather_sample();
+	// The replica-world mirror and the authoritative appliers, through
+	// refresh_wire_collision_proxies (joiner_role_replica_world.cpp).
 	void materialize_replica_world();
 	void spawn_and_arm_local_player();
 	// The S2C 0x0F landing on L: the authoritative pose (+ look yaw, the
