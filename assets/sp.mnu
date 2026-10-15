@@ -1,0 +1,185 @@
+<SCREEN>
+  <NAME>SINGLE_PLAYER</NAME>
+  <MUSICVAR>11</MUSICVAR>
+  <WINDOW type="window" name="MAIN">
+    <POSITION>
+      <LEFT>0</LEFT>
+      <TOP>0</TOP>
+      <RIGHT>800</RIGHT>
+      <BOTTOM>600</BOTTOM>
+    </POSITION>
+    <APPEARANCE type="IMAGE" state="DEFAULT">%DEF_IMAGE_DEFAULT_BG%</APPEARANCE>
+    <TEXT_RSRC>menutxt.bin</TEXT_RSRC>
+    <CURSOR>
+      <FILE>newarow1.tga</FILE>
+    </CURSOR>
+    <FONT>
+      <NAME>%DEF_FONTNAME%</NAME>
+      <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+      <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+      <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+      <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+    </FONT>
+    <WINDOW type="static" name="TITLE">
+      <POSITION>
+        <LEFT>40</LEFT>
+        <TOP>16</TOP>
+        <RIGHT>600</RIGHT>
+        <BOTTOM>72</BOTTOM>
+      </POSITION>
+      <APPEARANCE state="DEFAULT"></APPEARANCE>
+      <FONT>
+        <NAME>%IMPACT_FONTNAME%</NAME>
+        <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+      </FONT>
+      <STRING justify="LEFT" vjustify="CENTER">SINGLE PLAYER</STRING>
+    </WINDOW>
+    <WINDOW type="window" name="MISSION_PANEL">
+      <POSITION>
+        <LEFT>30</LEFT>
+        <TOP>90</TOP>
+        <RIGHT>770</RIGHT>
+        <BOTTOM>530</BOTTOM>
+      </POSITION>
+      <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+      <WINDOW type="static" name="CA_LABEL">
+        <POSITION>
+          <LEFT>20</LEFT>
+          <TOP>12</TOP>
+          <RIGHT>300</RIGHT>
+          <BOTTOM>36</BOTTOM>
+        </POSITION>
+        <APPEARANCE state="DEFAULT"></APPEARANCE>
+        <STRING justify="LEFT" vjustify="CENTER">MISSIONS</STRING>
+      </WINDOW>
+      <WINDOW type="list" name="IA_LIST">
+        <POSITION>
+          <LEFT>20</LEFT>
+          <TOP>40</TOP>
+          <RIGHT>300</RIGHT>
+          <BOTTOM>424</BOTTOM>
+        </POSITION>
+        <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+        <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+        <ITEMS justify="LEFT" vjustify="CENTER">
+          <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+        </ITEMS>
+        <MIN_ITEM_HEIGHT>26</MIN_ITEM_HEIGHT>
+        <SCROLLBAR>
+          <POSITION>
+            <LEFT>264</LEFT>
+            <TOP>0</TOP>
+            <RIGHT>280</RIGHT>
+            <BOTTOM>384</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <SHUTTLE type="COLOR" state="DEFAULT">%TRIM_COLOR%</SHUTTLE>
+          <SHUTTLE type="COLOR" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</SHUTTLE>
+          <SHUTTLE type="COLOR" state="SELECTED">%DEF_TEXT_SELECTED_FG%</SHUTTLE>
+          <SCROLLUP type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</SCROLLUP>
+          <SCROLLUP type="COLOR" state="MOUSEOVER">%TRIM_COLOR%</SCROLLUP>
+          <SCROLLDOWN type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</SCROLLDOWN>
+          <SCROLLDOWN type="COLOR" state="MOUSEOVER">%TRIM_COLOR%</SCROLLDOWN>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+        </SCROLLBAR>
+      </WINDOW>
+      <WINDOW type="static" name="BRIEFING_LABEL">
+        <POSITION>
+          <LEFT>320</LEFT>
+          <TOP>12</TOP>
+          <RIGHT>700</RIGHT>
+          <BOTTOM>36</BOTTOM>
+        </POSITION>
+        <APPEARANCE state="DEFAULT"></APPEARANCE>
+        <STRING justify="LEFT" vjustify="CENTER">BRIEFING</STRING>
+      </WINDOW>
+      <WINDOW type="multiline_edit" name="BRIEFING" READONLY>
+        <POSITION>
+          <LEFT>320</LEFT>
+          <TOP>40</TOP>
+          <RIGHT>720</RIGHT>
+          <BOTTOM>424</BOTTOM>
+        </POSITION>
+        <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+        <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+        <STRING justify="LEFT" vjustify="TOP" edge="8"></STRING>
+        <SCROLLBAR>
+          <POSITION>
+            <LEFT>384</LEFT>
+            <TOP>0</TOP>
+            <RIGHT>400</RIGHT>
+            <BOTTOM>384</BOTTOM>
+          </POSITION>
+          <APPEARANCE type="COLOR" state="DEFAULT">%COLOR_BLACK%</APPEARANCE>
+          <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+          <SHUTTLE type="COLOR" state="DEFAULT">%TRIM_COLOR%</SHUTTLE>
+          <SHUTTLE type="COLOR" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</SHUTTLE>
+          <SHUTTLE type="COLOR" state="SELECTED">%DEF_TEXT_SELECTED_FG%</SHUTTLE>
+          <SCROLLUP type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</SCROLLUP>
+          <SCROLLUP type="COLOR" state="MOUSEOVER">%TRIM_COLOR%</SCROLLUP>
+          <SCROLLDOWN type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</SCROLLDOWN>
+          <SCROLLDOWN type="COLOR" state="MOUSEOVER">%TRIM_COLOR%</SCROLLDOWN>
+          <SOUND state="SELECTED" trigger="CLICK_VALUE">menu.lwf</SOUND>
+        </SCROLLBAR>
+      </WINDOW>
+    </WINDOW>
+    <WINDOW type="button" name="BACK">
+      <HOTKEY VIRTUAL>VK_ESCAPE</HOTKEY>
+      <ACTION type="POP_SCREEN"></ACTION>
+      <POSITION>
+        <LEFT>30</LEFT>
+        <TOP>548</TOP>
+        <RIGHT>220</RIGHT>
+        <BOTTOM>582</BOTTOM>
+      </POSITION>
+      <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+      <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+      <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+      <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+      <FONT>
+        <NAME>%DEF_FONTNAME_LG%</NAME>
+        <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+        <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+        <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+        <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+      </FONT>
+      <STRING justify="CENTER" vjustify="CENTER">BACK</STRING>
+      <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+      <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+    </WINDOW>
+    <WINDOW type="button" name="ACCEPT">
+      <HOTKEY VIRTUAL>VK_RETURN</HOTKEY>
+      <POSITION>
+        <LEFT>580</LEFT>
+        <TOP>548</TOP>
+        <RIGHT>770</RIGHT>
+        <BOTTOM>582</BOTTOM>
+      </POSITION>
+      <APPEARANCE type="COLOR" state="DEFAULT">%SEMIOPAQUE_BLACK%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="DEFAULT">%TRIM_COLOR%</APPEARANCE>
+      <APPEARANCE type="COLOR" state="MOUSEOVER">%SEMIOPAQUE_BLACK%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="MOUSEOVER">%DEF_TEXT_MOUSEOVER_FG%</APPEARANCE>
+      <APPEARANCE type="COLOR" state="SELECTED">%ITEM_SELECTED_BG%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="SELECTED">%DEF_TEXT_SELECTED_FG%</APPEARANCE>
+      <APPEARANCE type="COLOR" state="DISABLED">%SEMIOPAQUE_BLACK%</APPEARANCE>
+      <APPEARANCE type="OUTLINE" state="DISABLED">%TRIM_COLOR%</APPEARANCE>
+      <FONT>
+        <NAME>%DEF_FONTNAME_LG%</NAME>
+        <DEFAULT_FG>%DEF_TEXT_FG%</DEFAULT_FG>
+        <MOUSEOVER_FG>%DEF_TEXT_MOUSEOVER_FG%</MOUSEOVER_FG>
+        <SELECTED_FG>%DEF_TEXT_SELECTED_FG%</SELECTED_FG>
+        <DISABLED_FG>%DEF_TEXT_DISABLED_FG%</DISABLED_FG>
+      </FONT>
+      <STRING justify="CENTER" vjustify="CENTER">START MISSION</STRING>
+      <SOUND state="MOUSEIN" trigger="MOUSE_OVER">menu.lwf</SOUND>
+      <SOUND state="SELECTED" trigger="CLICK_SELECT">menu.lwf</SOUND>
+    </WINDOW>
+  </WINDOW>
+</SCREEN>

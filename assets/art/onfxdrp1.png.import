@@ -1,0 +1,13 @@
+{
+  "importer": "image",
+  "options": {
+    "format": "tga",
+    "size": "16x16"
+  },
+  "outputs": [
+    "onfxdrp1.tga"
+  ],
+  "schema_version": 1,
+  "source_hash": "76578a47a756458e",
+  "version": 3
+}

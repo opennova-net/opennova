@@ -1,0 +1,13 @@
+{
+  "importer": "image",
+  "options": {
+    "format": "tga",
+    "size": "32x32"
+  },
+  "outputs": [
+    "onpcs_01.tga"
+  ],
+  "schema_version": 1,
+  "source_hash": "c628daa0c89ff030",
+  "version": 3
+}

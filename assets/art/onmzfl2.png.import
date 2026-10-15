@@ -1,0 +1,13 @@
+{
+  "importer": "image",
+  "options": {
+    "format": "tga",
+    "size": "64x64"
+  },
+  "outputs": [
+    "onmzfl2.tga"
+  ],
+  "schema_version": 1,
+  "source_hash": "e2d701b2515c50e1",
+  "version": 3
+}

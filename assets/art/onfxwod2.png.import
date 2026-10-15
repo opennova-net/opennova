@@ -1,0 +1,13 @@
+{
+  "importer": "image",
+  "options": {
+    "format": "tga",
+    "size": "32x32"
+  },
+  "outputs": [
+    "onfxwod2.tga"
+  ],
+  "schema_version": 1,
+  "source_hash": "f94ed757138795fc",
+  "version": 3
+}

@@ -1,0 +1,13 @@
+{
+  "importer": "image",
+  "options": {
+    "format": "pcx",
+    "palette": "median_cut"
+  },
+  "outputs": [
+    "loading.pcx"
+  ],
+  "schema_version": 1,
+  "source_hash": "f4552eb76b8fc304",
+  "version": 3
+}

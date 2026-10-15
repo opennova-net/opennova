@@ -1,0 +1,17 @@
+// onjo1_m1.wac
+// Indigo Storm: the base game's Indigo Shore at night in a storm. The rain at full and a quarter of the
+// overcast's colours from the start, written as the original's rainy missions write theirs (TKP_C2A,
+// ASB_G11A): the first execution, at the start, sets both targets and the start's weather settle brings
+// them in before play. Then the storm's lightning, which the script asks for itself: the script runs once
+// a second, and each second a far strike comes one time in 25 and a near one, its thunder close by, one
+// time in 70.
+if never() then
+	rain(100,1)
+	overcast(25,1)
+endif
+if random(25) then
+	farflash()
+endif
+if random(70) then
+	flash()
+endif

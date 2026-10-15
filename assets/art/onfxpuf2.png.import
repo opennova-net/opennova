@@ -1,0 +1,13 @@
+{
+  "importer": "image",
+  "options": {
+    "format": "tga",
+    "size": "64x64"
+  },
+  "outputs": [
+    "onfxpuf2.tga"
+  ],
+  "schema_version": 1,
+  "source_hash": "9269edbba341b408",
+  "version": 3
+}

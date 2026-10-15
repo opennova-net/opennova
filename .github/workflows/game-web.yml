@@ -42,12 +42,12 @@ jobs:
           submodules: recursive
           lfs: false
 
-      # The site ships assets/ except the unreferenced art
+      # The site ships assets/ except the unreferenced art and the music banks
       # scripts/package_godot_web.sh excludes (keep the two lists in step).
       - name: Pull the shipped assets/ from LFS
         run: |
           git lfs install --local
-          git lfs pull --include="assets/**" --exclude="assets/on_ar15*,assets/on_arms*"
+          git lfs pull --include="assets/**" --exclude="assets/on_ar15*,assets/on_arms*,assets/*.sbf"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
