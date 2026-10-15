@@ -9,6 +9,9 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
 - `bin/on-deploy`: the orchestrator (`./deploy/run.sh help` prints its commands):
   - `secrets init|check|sync [--prune]`: the vault's generated secrets and Stripe
     placeholders, the checks (Stripe's forms and modes among them), the copy to SSM;
+  - `stripe check|setup [--mode test|live]`: the support tiers' Stripe objects (products
+    and monthly prices, the Customer Portal configuration, the webhook endpoint) read, or
+    made where missing, their ids and the webhook's signing secret into the vault item;
   - `infra plan|apply|destroy|state-rm|import|output|list`: Terraform in the
     deployment's workspace, its state a 1Password document; `apply` applies the plan it
     saved, refuses one that destroys or replaces an Elastic IP or its association, the

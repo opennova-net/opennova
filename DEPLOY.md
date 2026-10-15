@@ -97,10 +97,11 @@ It prints item and field names, never a value:
 Fill the `REPLACE_ME` fields in the 1Password app (that keeps the keys out of shell
 history): `alerts/email` is where every alarm, budget and cost anomaly writes;
 `email/forward_to` is the mailbox `support@<domain>` forwards to ("Email", section 3);
-the Stripe items are filled from the Stripe dashboard ("Monthly support tiers
-(Stripe)", below). Optional fields the toolbox picks up when present: `app-prod/bootstrap_admin`
-(section 3) and `app-prod/edge_auth_secret_previous` (a rotation). Item `hosted` holds the
-hosted servers' data snapshots (section 6). There is no SSH item any more.
+in each Stripe item you fill `secret_key` (the Stripe dashboard) and `./deploy/run.sh
+stripe setup` the rest ("Monthly support tiers (Stripe)", below). Optional fields the
+toolbox picks up when present: `app-prod/bootstrap_admin` (section 3) and
+`app-prod/edge_auth_secret_previous` (a rotation). Item `hosted` holds the hosted
+servers' data snapshots (section 6). There is no SSH item any more.
 
 The `op://` references the toolbox reads are listed in `deploy/env/terraform.env.tpl`
 (Terraform's), `deploy/env/aws.env.tpl` (the toolbox's own AWS calls) and
@@ -605,45 +606,85 @@ deploy with `--no-hosting`, delete the `hosted` vault item, `infra apply`.
 ## Monthly support tiers (Stripe)
 
 Billing runs on Stripe Checkout and the Customer Portal: the server makes the sessions
-and redirects to Stripe, so no card data and no publishable key touch our pages. Set
-Stripe up in test mode first (staging, `stripe-test`), then in live mode (prod,
-`stripe-live`).
+and redirects to Stripe, so no card data and no publishable key touch our pages. Test
+mode serves staging (`stripe-test`), live mode prod (`stripe-live`).
+
+**What exists.** Both modes are set up (made 2026-10-15, by what `stripe setup` below
+now does): the products and their monthly USD prices, found by lookup key
+(`opennova_tier1_monthly` $5, `opennova_tier2_monthly` $10, `opennova_tier3_monthly`
+$15: 1, 2 and 3 hosted servers; `opennova_own_machine_monthly` $45, the add-on that puts
+one of the account's servers on a machine of its own, about what a `c7a.medium` costs),
+their ids in the item's `price_tier1`..`price_tier3` and `price_own_machine` fields; the
+Customer Portal configuration tagged `opennova=support_tiers`; and the webhook endpoints,
+live `https://opennova.net/api/billing/webhook` and test
+`https://staging.opennova.net/api/billing/webhook`, each on the API version the server
+pins (`2025-03-31.basil`) with the 11 events it handles (`checkout.session.completed`,
+`.expired`; `customer.subscription.created`, `.updated`, `.deleted`, `.paused`,
+`.resumed`; `invoice.paid`, `.payment_failed`, `.payment_action_required`;
+`customer.deleted`), its signing secret in the item's `webhook_secret`.
+
+**The toolbox.** The one field you fill is the item's `secret_key` (Developers, API
+keys); the rest is the toolbox's:
+
+```bash
+./deploy/run.sh stripe check --mode test       # read alone: the item and its objects
+./deploy/run.sh stripe setup --mode test       # make what is missing (idempotent)
+./deploy/run.sh stripe check --mode live
+```
+
+`--mode` defaults to the deployment's (prod live, the others test); test mode names
+staging's site, live mode prod's. `stripe setup` makes what the mode lacks and leaves
+the rest: a product and a monthly price per lookup key (`--tier1`, `--tier2`, `--tier3`,
+`--own-machine` take other amounts in US dollars: an amount that differs from the current
+price makes a new price, which takes the lookup key and goes first in the field, the old
+one kept after it, since the first is sold and the rest still grant); the price ids
+into the item; the portal configuration (customers switch among the three tier products,
+an upgrade prorating at once and a downgrade waiting for the period's end, cancel at the
+period's end, and update the card, the email and the address and see invoices; the
+privacy and terms links are `https://<domain>/privacy` and `/terms`, the return link
+`https://<web host>/me/support`), brought to those settings when it exists; and the
+webhook endpoint on `https://<web host>/api/billing/webhook`, whose missing events it
+adds, a new one's signing secret going into `webhook_secret` (an endpoint's API version
+never changes: for another, delete the endpoint in Stripe and run setup again).
+`stripe check` reads the same and fails on what keeps billing from working: the key's
+form and mode, the webhook secret's form, each price (active, monthly, of the item's
+mode, the lookup key's), the portal configuration, the endpoint (enabled, its API
+version, its events). Neither prints a key or a signing secret: the key reaches curl
+through a config file in the tmpfs, the values reach the vault through a template file.
+
+The key `setup` uses needs write on Products, Prices, Customer portal and Webhook
+Endpoints; the server's key (the same field) needs Customers, Checkout Sessions, Customer
+portal and Subscriptions write, Prices and Products read. A restricted key
+(`rk_test_...`, `rk_live_...`) with both sets serves both; Stripe's 403 names a missing
+permission.
+
+**The portal and the default configuration.** The server opens portal sessions without
+naming a configuration, so a customer gets the account's default one (Settings, Billing,
+Customer portal). `stripe setup` and `stripe check` say whether the tagged configuration
+is the default; while it is not, set the default to the same features in the dashboard,
+or have the server name the tagged one.
+
+**Dashboard only** (no API makes these):
 
 1. **Activate the account** (live mode needs the site's legal pages live: terms,
    privacy, refunds). Statement descriptor: `OPENNOVA`.
-2. **Products and prices** (Products, Add product), each a recurring monthly USD price:
-   "OpenNova support Tier 1" $5, "Tier 2" $10, "Tier 3" $15 (1, 2 and 3 hosted servers),
-   and "Own machine" (the add-on: one of the account's servers on a machine of its own;
-   about $45 covers a `c7a.medium`). The prices' ids (`price_...`) go in the item's
-   `price_tier1`..`price_tier3` and `price_own_machine` fields. To change a price, make a
-   new one and put it first in the field (`price_new,price_old`): the first is sold, the
-   rest still grant.
-3. **Customer Portal** (Settings, Billing, Customer portal): customers update the payment
-   method, see invoices, cancel at the end of the period, and switch among the three tier
-   products (upgrades prorate at once, downgrades at the period's end); quantity changes
-   on for the own-machine product only.
-4. **The webhook** (Developers, Webhooks, Add endpoint): `https://<domain>/api/billing/webhook`
-   (staging: `https://staging.<domain>/...`), on the API version the server pins, with the
-   events `checkout.session.completed`, `checkout.session.expired`,
-   `customer.subscription.created`, `.updated`, `.deleted`, `.paused`, `.resumed`,
-   `invoice.paid`, `invoice.payment_failed`, `invoice.payment_action_required`,
-   `customer.deleted`. Its signing secret (`whsec_...`) is the item's `webhook_secret`.
-5. **A restricted key** (Developers, API keys, Create restricted key), the item's
-   `secret_key` (`rk_test_...`, `rk_live_...`): Customers, Checkout Sessions, Customer
-   portal and Subscriptions write; Prices and Products read.
-6. **Retries** (Settings, Billing, Subscriptions and emails): Smart Retries, and when all
-   retries fail, cancel the subscription. A past-due account keeps its servers running
-   but starts no new one; they stop when Stripe cancels. Turn on the receipt and
-   failed-payment emails.
-7. **Tax** is optional: Stripe Tax with `ONNET_BILLING_AUTOMATIC_TAX=1`. EU VAT applies
+2. **Public details** (Settings, Public details): the business name, the
+   support email `support@opennova.net` (section 3, "Email") and the website
+   `https://opennova.net`.
+3. **Revenue recovery** (Billing, Revenue recovery): retries (Smart Retries), then cancel
+   the subscription when all retries fail. A past-due account keeps its servers running
+   but starts no new one; they stop when Stripe cancels. Its customer emails: receipts
+   for successful payments, and the failed-payment emails.
+4. **Tax** is optional: Stripe Tax with `ONNET_BILLING_AUTOMATIC_TAX=1`. EU VAT applies
    from the first EU sale; check with an accountant.
-8. `./deploy/run.sh secrets check` (the item reads `OK`), `secrets sync`, `app converge`.
-   The server logs billing on; with an incomplete set it logs "billing off".
-9. **Check delivery**: the endpoint's "Send test webhook" must answer 2xx. A challenge
-   page means Cloudflare stopped it: the webhook's custom rule skips the WAF's rules
-   (`infra/aws/edge.tf`), but Bot Fight Mode cannot be skipped by a rule, so keep it off
-   (Security, Bots). On a plan without some skippable phase or product the apply names it:
-   drop it from `cloudflare_webhook_skip_phases` / `_products` in the var-file.
+
+Then `./deploy/run.sh secrets check` (the item reads `OK`), `secrets sync`, `app
+converge`: the server logs billing on; with an incomplete set it logs "billing off".
+**Check delivery**: the endpoint's "Send test webhook" must answer 2xx. A challenge page
+means Cloudflare stopped it: the webhook's custom rule skips the WAF's rules
+(`infra/aws/edge.tf`), but Bot Fight Mode cannot be skipped by a rule, so keep it off
+(section 1). On a plan without some skippable phase or product the apply names it: drop
+it from `cloudflare_webhook_skip_phases` / `_products` in the var-file.
 
 ## Operating
 
