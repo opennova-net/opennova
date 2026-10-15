@@ -314,7 +314,8 @@ private:
 // ----------------------------------------------------------------------------
 // Applies the *.sql files in `migrations_dir`, in lexicographic order, that
 // `_schema_migrations` has not recorded, each in its own transaction with its
-// row (file name and SHA-256), and holds kMigrationLock for the whole run, so
+// row (file name and SHA-256) and with no statement timeout (a file runs as
+// long as it takes), and holds kMigrationLock for the whole run, so
 // two processes booting on one database apply each file once. A recorded file
 // whose SHA-256 no longer matches the file fails the run: migrations are
 // append-only, a fix is a new file. A missing directory applies nothing.

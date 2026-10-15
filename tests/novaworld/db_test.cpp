@@ -544,6 +544,24 @@ int test_migrations() {
 		}
 		TEST_EXPECT(refused);
 	}
+	write_file(migrations / "0002_expansions.sql",
+			"CREATE TABLE expansions (slug text PRIMARY KEY, name text);"
+			"INSERT INTO expansions VALUES ('jox01', 'Joint Operations');");
+	// A file runs past the connection's statement timeout (an index built over
+	// a large table); the connection keeps its timeout after the run.
+	write_file(migrations / "0004_slow.sql",
+			"SELECT pg_sleep(0.6); CREATE TABLE slow (id bigint);");
+	{
+		auto options = scratch.options();
+		options.statement_timeout_ms = 200;
+		Database db(options);
+		TEST_EXPECT(sqlstate_of([&] { db.exec("SELECT pg_sleep(0.6);"); }) == "57014");
+		const auto r = run_migrations(db, migrations);
+		TEST_EXPECT(r.applied == std::vector<std::string>{ "0004_slow.sql" });
+		TEST_EXPECT(r.skipped.size() == 3);
+		TEST_EXPECT(db.query("SELECT to_regclass('slow') IS NULL;")[0].as_int(0) == 0);
+		TEST_EXPECT(db.query("SHOW statement_timeout;")[0].as_text(0) == "200ms");
+	}
 	// A missing directory applies nothing.
 	{
 		Database db = scratch.open();

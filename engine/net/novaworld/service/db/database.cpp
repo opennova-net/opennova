@@ -702,6 +702,10 @@ MigrationResult run_migrations(Database &db, const std::filesystem::path &migrat
 		}
 		db.begin();
 		try {
+			// A file runs as long as it takes (an index built over a table, a
+			// table rewritten): the connection's statement timeout is for the
+			// service's own statements, and this transaction alone sets it aside.
+			db.exec("SET LOCAL statement_timeout = 0;");
 			db.exec_script(sql);
 			db.exec("INSERT INTO _schema_migrations (filename, sha256) VALUES ($1, $2);",
 					{ BindValue{ filename }, BindValue{ hash } });
