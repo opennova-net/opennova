@@ -163,17 +163,17 @@ set_tests_properties(hosted_admin_link PROPERTIES RUN_SERIAL TRUE TIMEOUT 300)
 # throw, and every CLI failure, timeout and malformed reply; the bootstrap tokens
 # (hosted/bootstrap.h: issue, bind, one redeem from the bound address, the lapse, the CIDR
 # reads) and the bundle's JSON; the machine script's render; and the real
-# ProcessCommandRunner against the test binary itself (`--child <mode>`). Crow-free: compiles
-# the hosted sources it needs directly, so it runs on every build.
+# ProcessCommandRunner (apps/common/command_runner.h) against the test binary itself
+# (`--child <mode>`). Crow-free: compiles the hosted sources it needs directly, so it runs on
+# every build.
 add_executable(hosted_ec2_provider_test
     novaworld/hosted_ec2_provider_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/bootstrap.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/command_runner.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/ec2_provider.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/data_sets.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/owner_file.cpp)
-target_link_libraries(hosted_ec2_provider_test PRIVATE opennova_net Threads::Threads)
+target_link_libraries(hosted_ec2_provider_test PRIVATE opennova_app_common Threads::Threads)
 if(WIN32)
     target_link_libraries(hosted_ec2_provider_test PRIVATE advapi32)
 endif()

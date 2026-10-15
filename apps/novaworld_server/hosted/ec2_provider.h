@@ -121,7 +121,7 @@ public:
 	using Clock = std::function<uint64_t()>;
 
 	// `runner` and `bootstrap` must outlive the provider.
-	Ec2Provider(Ec2Config config, CommandRunner &runner, BootstrapStore &bootstrap, Clock now_ms = {});
+	Ec2Provider(Ec2Config config, proc::CommandRunner &runner, BootstrapStore &bootstrap, Clock now_ms = {});
 
 	// "" when `config` can run, else why not (a boot warning; hosting off).
 	static std::string check_config(const Ec2Config &config);
@@ -158,7 +158,7 @@ private:
 	void note_describe_failure(uint64_t now_ms, const std::string &error);
 
 	Ec2Config config_;
-	CommandRunner &runner_;
+	proc::CommandRunner &runner_;
 	BootstrapStore &bootstrap_;
 	Clock now_;
 	std::mutex mu_;
@@ -175,6 +175,6 @@ private:
 
 // Why the CLI call `what` failed, for the log: its outcome and the start of
 // its standard error.
-std::string aws_failure(const char *what, const CommandResult &result);
+std::string aws_failure(const char *what, const proc::CommandResult &result);
 
 } // namespace opennova::novaworld_server::hosted

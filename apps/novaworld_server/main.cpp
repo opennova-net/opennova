@@ -11,8 +11,8 @@
 #include "server_config.h"
 #ifdef OPENNOVA_HTTP_ENABLED
 #include "auth.h"
+#include "command_runner.h"
 #include "hosted/bootstrap.h"
-#include "hosted/command_runner.h"
 #include "hosted/ec2_provider.h"
 #include "hosted/hosted_settings.h"
 #include "hosted/local_process_provider.h"
@@ -129,7 +129,7 @@ namespace hosted_ns = opennova::novaworld_server::hosted;
 struct HostedMachines {
 	// The data sets the provider offers (hosted/data_sets.h); the supervisor's.
 	std::vector<hosted_ns::DataSet> data_sets;
-	std::unique_ptr<hosted_ns::CommandRunner> runner;
+	std::unique_ptr<opennova::proc::CommandRunner> runner;
 	std::unique_ptr<hosted_ns::BootstrapStore> bootstrap;
 	std::vector<hosted_ns::Ipv4Cidr> bootstrap_cidrs;
 	hosted_ns::Ec2Provider *ec2 = nullptr; // the provider, when it is the ec2 one
@@ -205,8 +205,8 @@ void make_ec2_machines(const opennova::novaworld_server::ServerConfig &config,
 		off("is not configured: " + why);
 		return;
 	}
-	m.runner = std::make_unique<hosted_ns::ProcessCommandRunner>(
-			hosted_ns::ProcessCommandRunner::service_environment(), ec2.scratch_dir);
+	m.runner = std::make_unique<opennova::proc::ProcessCommandRunner>(
+			opennova::proc::ProcessCommandRunner::service_environment(), ec2.scratch_dir);
 	m.bootstrap = std::make_unique<hosted_ns::BootstrapStore>();
 	m.bootstrap_cidrs = std::move(cidrs);
 	m.scratch_dir = scratch;

@@ -1,18 +1,22 @@
 #pragma once
 
-// How the cloud provider (ec2_provider.h) runs a command: the AWS CLI v2, from
-// an argv array with no shell between (nothing in an argument is ever
-// interpreted), bounded by a timeout, its standard output (the reply's JSON)
-// kept apart from its standard error (the CLI's diagnostics). The seam the
-// provider's tests replace with a stub that checks each argv and answers it
-// (tests/novaworld/hosted_ec2_provider_test.cpp). Platform plumbing, not a port.
+// How an app runs a command-line tool and reads its answer: from an argv array
+// with no shell between (nothing in an argument is ever interpreted), bounded
+// by a timeout, its standard output (the reply) kept apart from its standard
+// error (the tool's diagnostics). The NovaWorld service's cloud provider runs
+// the AWS CLI v2 through it (apps/novaworld_server/hosted/ec2_provider.h), and
+// opennova-hostd the docker and iptables CLIs (apps/hostd). The seam their
+// tests replace with a stub that checks each argv and answers it
+// (tests/novaworld/hosted_ec2_provider_test.cpp, tests/hostd). In base/proc's
+// namespace, as apps/common's sockets are in net's: the app layer's runner over
+// base/proc/child_process.h. Platform plumbing, not a port.
 
 #include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
 
-namespace opennova::novaworld_server::hosted {
+namespace opennova::proc {
 
 struct CommandResult {
 	enum class Outcome {
@@ -40,8 +44,8 @@ public:
 // The real runner: base/proc/child_process.h, its standard output and error
 // each in a file of its own under `scratch_dir` (owner-only), read back and
 // deleted once it ends. The child's environment is `environment` alone (the
-// NAME=value entries the service hands it: the AWS CLI's own variables, never
-// the service's secrets). Each stream keeps at most kMaxOutputBytes.
+// NAME=value entries its app hands it, never the app's secrets). Each stream
+// keeps at most kMaxOutputBytes.
 class ProcessCommandRunner : public CommandRunner {
 public:
 	static constexpr size_t kMaxOutputBytes = 16u << 20;
@@ -49,9 +53,10 @@ public:
 	ProcessCommandRunner(std::vector<std::string> environment, std::string scratch_dir);
 	CommandResult run(const std::vector<std::string> &argv, int timeout_ms) override;
 
-	// The variables a run keeps from the service's environment (a name ending
-	// in '*' is a prefix): the system's own and the AWS CLI's (AWS_*, its
-	// region and retry settings; its credentials come from the instance role).
+	// The variables the NovaWorld service's AWS CLI runs keep from its
+	// environment (a name ending in '*' is a prefix): the system's own and the
+	// AWS CLI's (AWS_*, its region and retry settings; its credentials come
+	// from the instance role).
 	static const std::vector<std::string> kEnvironment;
 	// kEnvironment's entries of this process's environment, with the CLI's
 	// standard retry mode (AWS_RETRY_MODE=standard, AWS_MAX_ATTEMPTS=4) unless
@@ -63,4 +68,4 @@ private:
 	std::string scratch_dir_;
 };
 
-} // namespace opennova::novaworld_server::hosted
+} // namespace opennova::proc

@@ -22,13 +22,12 @@ if(BUILD_NOVAWORLD_HTTP)
         web_access.cpp
         web_session.cpp
         # Hosted servers (ADR 0053, proposed): the supervisor, its rows and
-        # renders, the local and the EC2 MachineProviders (the AWS CLI runner,
-        # the cloud machines' bootstrap tokens and route), the admin link and
-        # its console routes.
+        # renders, the local and the EC2 MachineProviders (the cloud machines'
+        # bootstrap tokens and route; the AWS CLI runs through apps/common's
+        # command runner), the admin link and its console routes.
         hosted/admin_link.cpp
         hosted/bootstrap.cpp
         hosted/bootstrap_route.cpp
-        hosted/command_runner.cpp
         hosted/console_commands.cpp
         hosted/console_routes.cpp
         hosted/data_sets.cpp

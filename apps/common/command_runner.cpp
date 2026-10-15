@@ -1,7 +1,6 @@
 #include "command_runner.h"
 
-#include "hosted_settings.h"
-
+#include <base/os_random/os_random.h>
 #include <base/proc/child_process.h>
 
 #include <algorithm>
@@ -10,7 +9,7 @@
 #include <system_error>
 #include <utility>
 
-namespace opennova::novaworld_server::hosted {
+namespace opennova::proc {
 
 namespace fs = std::filesystem;
 
@@ -30,6 +29,19 @@ std::string read_capped(const fs::path &path, size_t cap) {
 	return out;
 }
 
+// 16 hex digits from the OS CSPRNG: a run's file names.
+std::string random_stem() {
+	static constexpr char kDigits[] = "0123456789abcdef";
+	uint8_t bytes[8];
+	os_random_bytes(bytes, sizeof(bytes));
+	std::string out;
+	for (const uint8_t b : bytes) {
+		out.push_back(kDigits[b >> 4]);
+		out.push_back(kDigits[b & 0xFu]);
+	}
+	return out;
+}
+
 } // namespace
 
 const std::vector<std::string> ProcessCommandRunner::kEnvironment = {
@@ -41,7 +53,7 @@ const std::vector<std::string> ProcessCommandRunner::kEnvironment = {
 };
 
 std::vector<std::string> ProcessCommandRunner::service_environment() {
-	std::vector<std::string> env = proc::filter_environment(kEnvironment);
+	std::vector<std::string> env = filter_environment(kEnvironment);
 	for (const char *fallback : { "AWS_RETRY_MODE=standard", "AWS_MAX_ATTEMPTS=4" }) {
 		const std::string name = std::string(fallback).substr(0, std::string(fallback).find('=') + 1);
 		bool named = false;
@@ -58,10 +70,10 @@ CommandResult ProcessCommandRunner::run(const std::vector<std::string> &argv, in
 	CommandResult result;
 	// A pair of files of this run's own: a random name in the owner-only
 	// scratch directory, so two runs never share one.
-	const std::string stem = "cmd-" + random_secret(16);
+	const std::string stem = "cmd-" + random_stem();
 	const fs::path out_path = fs::u8path(scratch_dir_) / (stem + ".out");
 	const fs::path err_path = fs::u8path(scratch_dir_) / (stem + ".err");
-	proc::SpawnOptions options;
+	SpawnOptions options;
 	options.argv = argv;
 	options.output_path = out_path.u8string();
 	options.error_path = err_path.u8string();
@@ -69,7 +81,7 @@ CommandResult ProcessCommandRunner::run(const std::vector<std::string> &argv, in
 	// The run is waited for here, so the starting thread outlives it.
 	options.end_with_parent = true;
 
-	proc::ChildProcess child;
+	ChildProcess child;
 	if (!child.spawn(options, result.error)) {
 		result.outcome = CommandResult::Outcome::NotStarted;
 	} else if (const auto code = child.wait(timeout_ms)) {
@@ -88,4 +100,4 @@ CommandResult ProcessCommandRunner::run(const std::vector<std::string> &argv, in
 	return result;
 }
 
-} // namespace opennova::novaworld_server::hosted
+} // namespace opennova::proc

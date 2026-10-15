@@ -8,7 +8,7 @@
 // child-process seam of the engine's embedders: the NovaWorld service's
 // hosted-server supervisor runs opennova-serve through it
 // (apps/novaworld_server/hosted/local_process_provider.h) and its cloud provider
-// the AWS CLI (hosted/command_runner.h), and a front end that
+// the AWS CLI (apps/common/command_runner.h), and a front end that
 // starts the game (the editor's Play) holds the game through it. Platform
 // plumbing, not a port: CreateProcessW on Windows, fork and execv elsewhere. It
 // is not in the web build: a browser starts no process.
@@ -57,7 +57,7 @@ struct SpawnOptions {
 	// The file the child's standard error is appended to instead (created when
 	// missing; owner-only on POSIX), so a program whose output is data keeps it
 	// apart from its diagnostics (the hosted servers' AWS CLI runs,
-	// apps/novaworld_server/hosted/command_runner.h); empty sends it where the
+	// apps/common/command_runner.h); empty sends it where the
 	// output goes.
 	std::string error_path;
 	// The child's whole environment, NAME=value entries (filter_environment

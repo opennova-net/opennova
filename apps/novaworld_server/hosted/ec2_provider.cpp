@@ -103,12 +103,12 @@ bool is_live_state(const std::string &state) {
 
 } // namespace
 
-std::string aws_failure(const char *what, const CommandResult &result) {
+std::string aws_failure(const char *what, const proc::CommandResult &result) {
 	std::string out = std::string("aws ec2 ") + what;
 	switch (result.outcome) {
-		case CommandResult::Outcome::NotStarted: return out + " did not start: " + loggable(result.error, 200);
-		case CommandResult::Outcome::TimedOut: return out + " timed out";
-		case CommandResult::Outcome::Exited: break;
+		case proc::CommandResult::Outcome::NotStarted: return out + " did not start: " + loggable(result.error, 200);
+		case proc::CommandResult::Outcome::TimedOut: return out + " timed out";
+		case proc::CommandResult::Outcome::Exited: break;
 	}
 	out += " exited with code " + std::to_string(result.exit_code);
 	const std::string err(strutil::trim_view(result.err));
@@ -116,7 +116,7 @@ std::string aws_failure(const char *what, const CommandResult &result) {
 	return out;
 }
 
-Ec2Provider::Ec2Provider(Ec2Config config, CommandRunner &runner, BootstrapStore &bootstrap, Clock now_ms) :
+Ec2Provider::Ec2Provider(Ec2Config config, proc::CommandRunner &runner, BootstrapStore &bootstrap, Clock now_ms) :
 		config_(std::move(config)), runner_(runner), bootstrap_(bootstrap),
 		now_(now_ms ? std::move(now_ms) : Clock(steady_now_ms)) {}
 
@@ -228,7 +228,7 @@ std::optional<std::string> Ec2Provider::launch(const LaunchSpec &spec, std::stri
 			json_tag(kTagServerId, server) + "," + json_tag("Name", config_.deployment + "-hosted-" + server);
 	const std::string tag_specifications = "[{\"ResourceType\":\"instance\",\"Tags\":[" + tags +
 			"]},{\"ResourceType\":\"volume\",\"Tags\":[" + tags + "]}]";
-	const CommandResult result = runner_.run(
+	const proc::CommandResult result = runner_.run(
 			command("run-instances",
 					{ "--launch-template",
 							"{\"LaunchTemplateId\":" + json_text(data_set->launch_template) +
@@ -266,7 +266,7 @@ std::optional<std::string> Ec2Provider::launch(const LaunchSpec &spec, std::stri
 		// A machine nothing may bootstrap: ended now rather than left to boot.
 		bootstrap_.revoke(token);
 		error = "run-instances answered machine " + id + " with no private address";
-		const CommandResult ended =
+		const proc::CommandResult ended =
 				runner_.run(command("terminate-instances", { "--instance-ids", id }), config_.command_timeout_ms);
 		if (ended.ok())
 			terminated_ms_[id] = now_();
@@ -288,7 +288,7 @@ std::optional<std::string> Ec2Provider::launch(const LaunchSpec &spec, std::stri
 }
 
 bool Ec2Provider::refresh(uint64_t now_ms, std::string &error) {
-	const CommandResult result = runner_.run(
+	const proc::CommandResult result = runner_.run(
 			command("describe-instances",
 					{ "--filters",
 							"[{\"Name\":\"tag:" + std::string(kTagHosted) + "\",\"Values\":[\"1\"]},{\"Name\":\"tag:" +
@@ -412,9 +412,9 @@ void Ec2Provider::terminate(const std::string &machine_id) {
 		std::printf("[hosted] ec2: machine %s is no EC2 machine; nothing to end\n", loggable(machine_id).c_str());
 		return;
 	}
-	const CommandResult result =
+	const proc::CommandResult result =
 			runner_.run(command("terminate-instances", { "--instance-ids", machine_id }), config_.command_timeout_ms);
-	const bool unknown = result.outcome == CommandResult::Outcome::Exited &&
+	const bool unknown = result.outcome == proc::CommandResult::Outcome::Exited &&
 			result.err.find("InvalidInstanceID.NotFound") != std::string::npos;
 	if (!result.ok() && !unknown) {
 		// It may run on: the supervisor's sweep finds it untracked and ends it.

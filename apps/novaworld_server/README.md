@@ -533,7 +533,7 @@ server runs one data set its owner picks. Everything here is service policy.
   role, IMDSv2 required, `InstanceInitiatedShutdownBehavior=terminate`).
   A machine is terminated at its server's end, never stopped, so every launch has a new
   public address. The provider runs the AWS CLI v2 (installed in the image, pinned and
-  checksummed) through a `CommandRunner` (`hosted/command_runner.*`: an argv array, no
+  checksummed) through a `CommandRunner` (`apps/common/command_runner.*`: an argv array, no
   shell, a 90 s timeout, the CLI's output and diagnostics apart, an environment of the
   system's and the `AWS_*` variables alone), its credentials the service instance's role.
   - `launch` is `run-instances`: the data set's launch template at its default version, the subnet, one

@@ -10,8 +10,8 @@
 // real ProcessCommandRunner against this binary itself (`--child <mode>`). Crow-free:
 // compiles the hosted sources it needs directly, so it runs on every build.
 
+#include "command_runner.h"
 #include "hosted/bootstrap.h"
-#include "hosted/command_runner.h"
 #include "hosted/ec2_provider.h"
 #include "hosted/hosted_settings.h"
 #include "hosted/owner_file.h"
@@ -46,7 +46,7 @@
 
 namespace fs = std::filesystem;
 namespace hosted = opennova::novaworld_server::hosted;
-using hosted::CommandResult;
+using opennova::proc::CommandResult;
 using hosted::MachineState;
 
 namespace {
@@ -76,7 +76,7 @@ struct Call {
 	std::string user_data_path; // its path
 };
 
-class StubRunner : public hosted::CommandRunner {
+class StubRunner : public opennova::proc::CommandRunner {
 public:
 	CommandResult run(const std::vector<std::string> &argv, int timeout_ms) override {
 		Call call;
@@ -895,7 +895,7 @@ int test_process_runner(const std::string &scratch) {
 	const fs::path dir = fs::u8path(scratch) / "runner";
 	std::string error;
 	TEST_EXPECT(hosted::make_owner_directory(dir, error));
-	hosted::ProcessCommandRunner runner(opennova::proc::current_environment(), dir.u8string());
+	opennova::proc::ProcessCommandRunner runner(opennova::proc::current_environment(), dir.u8string());
 
 	CommandResult r = runner.run({ g_self, "--child", "streams" }, 20000);
 	TEST_EXPECT(r.ok() && r.outcome == CommandResult::Outcome::Exited);
@@ -920,7 +920,7 @@ int test_process_runner(const std::string &scratch) {
 	// and the standard retry mode unless the service names one.
 	set_env("AWS_OPENNOVA_TEST_VAR", "kept");
 	set_env("ONNET_OPENNOVA_TEST_SECRET", "hunter2");
-	std::vector<std::string> env = hosted::ProcessCommandRunner::service_environment();
+	std::vector<std::string> env = opennova::proc::ProcessCommandRunner::service_environment();
 	const auto has = [&env](const std::string &entry) {
 		for (const std::string &e : env)
 			if (e == entry) return true;
@@ -935,7 +935,7 @@ int test_process_runner(const std::string &scratch) {
 	TEST_EXPECT(!names("ONNET_OPENNOVA_TEST_SECRET="));
 	TEST_EXPECT(names("AWS_RETRY_MODE=") && names("AWS_MAX_ATTEMPTS="));
 	set_env("AWS_RETRY_MODE", "adaptive");
-	env = hosted::ProcessCommandRunner::service_environment();
+	env = opennova::proc::ProcessCommandRunner::service_environment();
 	TEST_EXPECT(has("AWS_RETRY_MODE=adaptive") && !has("AWS_RETRY_MODE=standard"));
 	return 0;
 }
