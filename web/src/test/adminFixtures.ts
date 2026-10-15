@@ -41,9 +41,12 @@ export function userDetail(id: number, overrides: Partial<UserDetail> = {}): Use
   };
 }
 
+// A fleet_machines row (its id the row's, as the routes answer it) and the
+// cloud machine it stands for.
 export function machine(id: string, overrides: Partial<FleetMachine> = {}): FleetMachine {
   return {
     id,
+    cloud_id: `i-0abc00000000000${id}`,
     kind: 'shared',
     state: 'ready',
     instance_type: 't3a.large',
@@ -59,7 +62,7 @@ export function fleetServer(id: number, overrides: Partial<FleetServer> & Partia
   return {
     ...hostedServer(id, overrides),
     owner: { id: 100 + id, username: `owner${id}`, tier: 2 },
-    machine_ref: 'i-0abc',
+    machine_ref: '3',
     slot: 3,
     game_port: 32771,
     players: 5,
@@ -73,7 +76,7 @@ export function fleetResponse(overrides: Partial<FleetResponse> = {}): FleetResp
     enabled: true,
     cap: 24,
     live: servers.filter((s) => s.live).length,
-    machines: [machine('i-0abc'), machine('i-0own', { kind: 'own', slots: 1, slots_used: 1, instance_type: 'c7a.medium' })],
+    machines: [machine('3'), machine('4', { kind: 'own', slots: 1, slots_used: 1, instance_type: 'c7a.medium' })],
     servers,
     ...overrides,
   };

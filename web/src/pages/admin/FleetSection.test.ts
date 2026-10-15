@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import FleetSection from './FleetSection.vue';
 import { fetchHostedFleet, machineAction, rollFleet, stopAllFleetServers, stopFleetServer } from '../../api/admin';
-import { fleetResponse, fleetServer } from '../../test/adminFixtures';
+import { fleetResponse, fleetServer, machine as fleetMachine } from '../../test/adminFixtures';
 import { testRouter } from '../../test/router';
 
 vi.mock('../../api/admin', () => ({
@@ -46,6 +46,9 @@ describe('FleetSection', () => {
     const page = await mountSection();
     const rows = page.findAll('tr.fleet-machine-row');
     expect(rows).toHaveLength(2);
+    // The machine by its row, the cloud's id beneath.
+    expect(rows[0].get('th').text()).toContain('3');
+    expect(rows[0].get('th').text()).toContain('i-0abc000000000003');
     expect(rows[0].text()).toContain('Shared machine');
     expect(rows[0].text()).toContain('Ready');
     expect(rows[0].text()).toContain('2 of 12');
@@ -86,10 +89,10 @@ describe('FleetSection', () => {
     await row.findAll('button').find((b) => b.text().startsWith('Drain'))!.trigger('click');
     await flushPromises();
     // The servers move now, one at a time, each down while it moves.
-    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('Drain machine i-0abc?'));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('Drain machine 3?'));
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('one at a time; each server is down while it moves'));
-    expect(machine).toHaveBeenCalledWith('i-0abc', 'drain');
-    expect(page.get('[role="status"]').text()).toBe('Machine i-0abc is draining.');
+    expect(machine).toHaveBeenCalledWith('3', 'drain');
+    expect(page.get('[role="status"]').text()).toBe('Machine 3 is draining.');
 
     confirm.mockReturnValueOnce(false);
     await row.findAll('button').find((b) => b.text().startsWith('End'))!.trigger('click');
@@ -99,6 +102,21 @@ describe('FleetSection', () => {
     await page.findAll('button').find((b) => b.text() === 'Roll the fleet…')!.trigger('click');
     await flushPromises();
     expect(roll).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers no end for a machine that has ended or failed', async () => {
+    fleet.mockResolvedValue({
+      ok: true,
+      value: fleetResponse({
+        machines: [fleetMachine('5', { state: 'failed', slots_used: 0 }), fleetMachine('6', { state: 'ended', slots_used: 0 }), fleetMachine('7', { state: 'lost' })],
+      }),
+    });
+    const page = await mountSection();
+    const rows = page.findAll('tr.fleet-machine-row');
+    expect(rows).toHaveLength(3);
+    expect(rows[0].findAll('button')).toHaveLength(0);
+    expect(rows[1].findAll('button')).toHaveLength(0);
+    expect(rows[2].findAll('button').map((b) => b.text())).toEqual(['End machine 7']);
   });
 
   it('stops a server, and stops all behind the typed phrase', async () => {

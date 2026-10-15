@@ -231,6 +231,7 @@ function pickMachine(value: unknown): FleetMachine | null {
   if (typeof v.state !== 'string' || !isCount(v.slots) || !isCount(v.slots_used)) return null;
   return {
     id: String(v.id),
+    cloud_id: typeof v.cloud_id === 'string' ? v.cloud_id : '',
     kind: v.kind,
     state: v.state,
     instance_type: typeof v.instance_type === 'string' ? v.instance_type : '',
@@ -335,10 +336,15 @@ export function stopAllFleetServers(): Promise<AdminResult<number>> {
 }
 
 // POST /api/admin/fleet/machines/<id>/drain or /end: a machine takes no new
-// server (drain: its servers move to another machine at their next start),
-// or ends now (its servers stop). Any 2xx is taken.
-export function machineAction(id: string, action: 'drain' | 'end'): Promise<AdminResult<void>> {
-  return adminPost(`/fleet/machines/${encodeURIComponent(id)}/${action}`);
+// server and its servers move to other machines (drain: one at a time, then it
+// ends; end: all at once, now), no restart counted. Any 2xx is taken; a
+// machine that has ended already answers 409 not_live, told as a machine's.
+export async function machineAction(id: string, action: 'drain' | 'end'): Promise<AdminResult<void>> {
+  const result = await adminPost(`/fleet/machines/${encodeURIComponent(id)}/${action}`);
+  if (!result.ok && result.error.code === 'not_live') {
+    return { ok: false, error: { ...result.error, message: 'That machine has already ended. Refresh the list.' } };
+  }
+  return result;
 }
 
 // POST /api/admin/fleet/roll: every shared machine drains and its servers move

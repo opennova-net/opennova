@@ -65,7 +65,10 @@
               <td colspan="8" class="px-4 py-6 text-center text-ink-muted">No machine is running.</td>
             </tr>
             <tr v-for="m in fleet?.machines ?? []" :key="m.id" class="fleet-machine-row align-top hover:bg-hover">
-              <th scope="row" class="whitespace-nowrap px-4 py-3 text-left font-mono text-xs font-normal">{{ m.id }}</th>
+              <th scope="row" class="whitespace-nowrap px-4 py-3 text-left font-mono text-xs font-normal">
+                {{ m.id }}
+                <span v-if="m.cloud_id" class="block text-ink-muted">{{ m.cloud_id }}</span>
+              </th>
               <td class="whitespace-nowrap px-4 py-3">{{ machineKindLabel(m.kind) }}</td>
               <td class="whitespace-nowrap px-4 py-3" :class="m.state === 'failed' || m.state === 'lost' ? 'text-danger' : m.state === 'ready' ? 'text-online' : 'text-warn'">
                 {{ machineStateLabel(m.state) }}
@@ -85,7 +88,7 @@
                   Drain<span class="sr-only"> machine {{ m.id }}</span>
                 </button>
                 <button
-                  v-if="m.state !== 'ended' && m.state !== 'ending'"
+                  v-if="m.state !== 'ended' && m.state !== 'ending' && m.state !== 'failed'"
                   type="button"
                   :disabled="busy"
                   class="text-danger/80 hover:text-danger disabled:opacity-40"
@@ -258,8 +261,9 @@
 
 <script setup lang="ts">
 // /admin/fleet: the fleet (GET /api/admin/hosted?owner=&state=): its machines
-// (kind, state, instance type, servers on it of its slots, address, data
-// sent this month) with drain and end (POST /api/admin/fleet/machines/<id>/...)
+// (its row and cloud id, kind, state, instance type, servers on it of its
+// slots, address, data sent this month) with drain and end while it lives
+// (POST /api/admin/fleet/machines/<id>/...)
 // and the roll (POST /api/admin/fleet/roll); its servers (owner and tier,
 // state, players, machine and slot), each to its own page
 // (/admin/fleet/<id>), with a stop; and the kill switch (POST
@@ -389,7 +393,7 @@ async function onMachine(m: FleetMachine, action: 'drain' | 'end') {
   const prompt =
     action === 'drain'
       ? `Drain machine ${m.id}? It takes no new server, and its ${servers} server${servers === 1 ? '' : 's'} move to other machines one at a time; each server is down while it moves.`
-      : `End machine ${m.id} now? ${servers === 0 ? 'No server runs on it.' : `Its ${servers} server${servers === 1 ? '' : 's'} stop, and their matches end for everyone on them.`}`;
+      : `End machine ${m.id} now? ${servers === 0 ? 'No server runs on it.' : `Its ${servers} server${servers === 1 ? '' : 's'} move to other machines at once, and their matches end for everyone on them.`}`;
   if (!window.confirm(prompt)) return;
   busy.value = true;
   const result = await machineAction(m.id, action);

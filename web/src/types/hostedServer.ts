@@ -197,7 +197,10 @@ export type MachineState = 'launching' | 'booting' | 'ready' | 'draining' | 'end
 
 // A machine of the fleet (GET /api/admin/hosted's `machines`).
 export interface FleetMachine {
+  // The service's fleet_machines row (what machine_ref and the routes name).
   id: string;
+  // The cloud's handle of it (an EC2 instance id); '' before its launch answered.
+  cloud_id: string;
   kind: MachineKind;
   state: MachineState | (string & {});
   // The EC2 instance type ('t3a.large'), or the local driver's name.
