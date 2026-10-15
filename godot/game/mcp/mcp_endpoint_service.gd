@@ -5,7 +5,7 @@ extends Node
 ## (McpLogHub.instance while it lives), the Streamable-HTTP McpServer with its
 ## per-call tool context and log sink, the listen, and the stop when the node
 ## leaves the tree. The base of the game's endpoint (GameMcpService,
-## `opennova-game`) and the editor's (on the editor trunk, PR #665): a
+## `opennova-game`) and the editor's (EditorMcpService): a
 ## subclass opens the endpoint under its own names, adds its own children and
 ## registers its tools, then starts it.
 

@@ -8,6 +8,7 @@
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/os_random/os_random.h>
+#include <base/vfs/vfs.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/expansion_name.h>
 #include <editor/project/project_files.h>
@@ -178,8 +179,34 @@ bool save_project_document(const std::string &project_file, const ProjectDocumen
 	return true;
 }
 
+bool project_overlaps_install(const std::string &root, const std::string &install, Diagnostic &error) {
+	if (root.empty()) return false;
+	const auto overlaps = [&error](const std::string &where) {
+		fail(error, CoreFinding::ProjectInInstall,
+		     where + ". A project there would rewrite the game's own files, since the editor writes every file of its "
+		             "project: make the project in a folder of its own and import from the install.");
+		return true;
+	};
+	// The folder and each one above it, links resolved: the one that holds the game's boot archives is
+	// an install, or a game exported from one.
+	std::error_code ec;
+	fs::path at = fs::absolute(path_of(root), ec);
+	if (!ec) at = fs::weakly_canonical(at, ec);
+	if (ec) at = path_of(root).lexically_normal();
+	for (fs::path folder = at; !folder.empty(); folder = folder.parent_path()) {
+		if (vfs_has_boot_archive(utf8_of(folder)))
+			return overlaps(folder == at ? utf8_of(at) + " is a game install (it holds the game's archives)"
+			                             : utf8_of(at) + " is inside the game install " + utf8_of(folder));
+		if (folder == folder.parent_path()) break;
+	}
+	if (!install.empty() && io::path_within(path_of(install), at))
+		return overlaps(utf8_of(at) + " holds the game install " + install);
+	return false;
+}
+
 bool can_create_project(const std::string &root, const std::string &target_game, Diagnostic &error,
                         const ProjectExpansion &expansion) {
+	if (project_overlaps_install(root, std::string(), error)) return false;
 	const std::string code = strutil::to_lower(target_game);
 	if (gameprofile::gameprofile_by_code(code.c_str()) == nullptr)
 		return fail(error, CoreFinding::ProjectTargetGameUnknown, "Unknown target game \"" + target_game + "\".");
@@ -210,6 +237,7 @@ bool create_project(const std::string &root, const std::string &title, const std
 }
 
 bool open_project(const std::string &root, ProjectDocument &out, Diagnostic &error) {
+	if (project_overlaps_install(root, std::string(), error)) return false;
 	return load_project_document(ProjectPaths::for_root(root).project_file, out, error);
 }
 
