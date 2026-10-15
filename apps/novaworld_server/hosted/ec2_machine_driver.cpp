@@ -1,9 +1,9 @@
 #include "ec2_machine_driver.h"
 
 #include "agent_protocol.h"
-#include "bootstrap.h"
 #include "hosted_settings.h"
 #include "loggable.h"
+#include "net_cidr.h"
 #include "owner_file.h"
 
 #include <base/io/json.h>

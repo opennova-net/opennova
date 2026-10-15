@@ -130,7 +130,7 @@ CurlStripeApi::CurlStripeApi(proc::CommandRunner &runner, Config config) :
 		runner_(runner), config_(std::move(config)) {}
 
 std::string CurlStripeApi::check_config(const Config &config) {
-	// A POSIX root or a drive letter (as Ec2Provider reads ONNET_HOSTED_AWS_CLI).
+	// An absolute path: a POSIX root or a drive letter.
 	const std::string &curl = config.curl;
 	if (curl.empty() || !(curl[0] == '/' || (curl.size() > 2 && curl[1] == ':')))
 		return "the curl path '" + loggable(curl, 200) + "' is not absolute";

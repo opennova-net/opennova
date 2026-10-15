@@ -96,28 +96,34 @@ target_include_directories(web_session_test PRIVATE
 target_compile_definitions(web_session_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(web_session COMMAND web_session_test)
 
-# The hosted servers' supervisor (apps/novaworld_server/hosted):
-# the settings and their renders, the service accounts, the start request's
-# checks, the whole lifecycle on a FakeProvider and a hand-stepped clock (the
-# stops, the crash restarts and their limit, the timeouts, the health checks,
-# the owners' changes, the reconciliation, the admin links following the running
-# servers), and LocalProcessProvider against the test binary itself as its
-# opennova-serve. Compiles the server's auth.cpp, web_session.cpp and the hosted
-# sources directly, as web_session_test does, so it runs on every build, not
-# only under BUILD_NOVAWORLD_HTTP.
-add_executable(hosted_supervisor_test
-    novaworld/hosted_supervisor_test.cpp
+# The hosted servers' supervisor (apps/novaworld_server/hosted): the settings and
+# their renders, the data sets, the service accounts, the start request's checks (the
+# fleet's room among them), and each server's lifecycle on the fleet over a FakeDriver
+# (novaworld/hosted_fake_driver.h) whose machines' agents the test plays through the
+# supervisor's sync, on a hand-stepped clock: placement onto one shared machine for two
+# servers, a launch and the wait for it, the own machine, the stops, the crash restarts
+# and their limit, the timeouts, the health checks, the owners' changes and limits, a lost
+# machine placing its servers again with no restart counted, the reconciliation and the
+# admin links following the running servers. Compiles the server's auth.cpp,
+# web_session.cpp and the hosted sources directly, as web_session_test does, so it runs on
+# every build, not only under BUILD_NOVAWORLD_HTTP.
+set(OPENNOVA_HOSTED_SUPERVISOR_SOURCES
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/auth.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/web_session.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/billing_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/entitlement.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/admin_link.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/agent_protocol.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/data_sets.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/fleet_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/local_process_provider.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/owner_file.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/placement.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/supervisor.cpp)
+add_executable(hosted_supervisor_test
+    novaworld/hosted_supervisor_test.cpp
+    ${OPENNOVA_HOSTED_SUPERVISOR_SOURCES})
 target_link_libraries(hosted_supervisor_test
     PRIVATE opennova_novaworld_service opennova_bcrypt opennova_app_common Threads::Threads)
 if(WIN32)
@@ -127,9 +133,31 @@ target_include_directories(hosted_supervisor_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 target_compile_definitions(hosted_supervisor_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-opennova_add_pg_test(hosted_supervisor
-    COMMAND hosted_supervisor_test $<TARGET_FILE:hosted_supervisor_test>)
+opennova_add_pg_test(hosted_supervisor COMMAND hosted_supervisor_test)
 set_tests_properties(hosted_supervisor PROPERTIES TIMEOUT 300)
+
+# The fleet's side of the supervisor (apps/novaworld_server/hosted/supervisor.h) over the
+# same FakeDriver: the desired state each machine's sync gets (the files until the agent
+# reported a container, the stopping ones, a container rebuilt after a service restart),
+# and the machines' lifecycle (a boot that never reports, lost then gone or terminated, an
+# agent reporting again, a shared machine idle past its time, an own machine ending with
+# its server, a drain moving servers one at a time, a roll, an admin's end, the
+# reconciliation of the driver's machines with the rows). Same sources as
+# hosted_supervisor_test.
+add_executable(hosted_fleet_test
+    novaworld/hosted_fleet_test.cpp
+    ${OPENNOVA_HOSTED_SUPERVISOR_SOURCES})
+target_link_libraries(hosted_fleet_test
+    PRIVATE opennova_novaworld_service opennova_bcrypt opennova_app_common Threads::Threads)
+if(WIN32)
+    target_link_libraries(hosted_fleet_test PRIVATE advapi32)
+endif()
+target_include_directories(hosted_fleet_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+target_compile_definitions(hosted_fleet_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+opennova_add_pg_test(hosted_fleet COMMAND hosted_fleet_test)
+set_tests_properties(hosted_fleet PROPERTIES TIMEOUT 300)
 
 # The service's admin link (apps/novaworld_server/hosted/admin_link.h) against a real
 # opennova-serve child on the LAN network type with its remote-admin port open, over a
@@ -145,9 +173,12 @@ add_executable(hosted_admin_link_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/billing_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/entitlement.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/admin_link.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/agent_protocol.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/fleet_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/data_sets.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp)
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/placement.cpp)
 target_link_libraries(hosted_admin_link_test
     PRIVATE opennova_novaworld_service opennova_app_common Threads::Threads)
 target_include_directories(hosted_admin_link_test PRIVATE
@@ -158,36 +189,34 @@ add_dependencies(hosted_admin_link_test opennova_serve)
 opennova_add_pg_test(hosted_admin_link COMMAND hosted_admin_link_test $<TARGET_FILE:opennova_serve>)
 set_tests_properties(hosted_admin_link PROPERTIES RUN_SERIAL TRUE TIMEOUT 300)
 
-# The cloud MachineProvider (apps/novaworld_server/hosted/ec2_provider.h) on a stub
-# CommandRunner that checks every AWS CLI argv and answers it: the launch's run-instances
-# (the launch template, the subnet, the tags, the client token, the user-data file with the
-# bootstrap URL and token filled in, deleted after), describe's state mapping from one
-# cached describe-instances (the bundle fetch gating Running, the launch grace, the cache's
-# lifetime, a failure reading Pending), terminate's idempotence, list_tagged's scope and its
-# throw, and every CLI failure, timeout and malformed reply; the bootstrap tokens
-# (hosted/bootstrap.h: issue, bind, one redeem from the bound address, the lapse, the CIDR
-# reads) and the bundle's JSON; the machine script's render; and the real
-# ProcessCommandRunner (apps/common/command_runner.h) against the test binary itself
-# (`--child <mode>`). Crow-free: compiles the hosted sources it needs directly, so it runs on
-# every build.
-add_executable(hosted_ec2_provider_test
-    novaworld/hosted_ec2_provider_test.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/bootstrap.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/ec2_provider.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/data_sets.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp
+# The real ProcessCommandRunner (apps/common/command_runner.h) against the test binary
+# itself (`--child <mode>`): both streams captured apart, the exit code, the timeout, a
+# program that does not start, nothing left in the scratch directory, and the AWS CLI's
+# environment (the AWS and system variables, never the service's own). Database-free.
+add_executable(command_runner_test
+    novaworld/command_runner_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/owner_file.cpp)
-target_link_libraries(hosted_ec2_provider_test PRIVATE opennova_app_common Threads::Threads)
+target_link_libraries(command_runner_test PRIVATE opennova_app_common Threads::Threads)
 if(WIN32)
-    target_link_libraries(hosted_ec2_provider_test PRIVATE advapi32)
+    target_link_libraries(command_runner_test PRIVATE advapi32)
 endif()
-target_include_directories(hosted_ec2_provider_test PRIVATE
+target_include_directories(command_runner_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
-target_compile_definitions(hosted_ec2_provider_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-add_test(NAME hosted_ec2_provider
-    COMMAND hosted_ec2_provider_test $<TARGET_FILE:hosted_ec2_provider_test>)
-set_tests_properties(hosted_ec2_provider PROPERTIES TIMEOUT 120)
+add_test(NAME command_runner COMMAND command_runner_test $<TARGET_FILE:command_runner_test>)
+set_tests_properties(command_runner PROPERTIES TIMEOUT 120)
+
+# The fleet's IPv4 networks (apps/novaworld_server/hosted/net_cidr.h): the dotted quads and
+# CIDRs read strictly, the peers admitted (IPv4-mapped IPv6 included), the private ranges
+# the agent routes' networks must lie in, and the refusal log's throttle. Pure functions.
+add_executable(hosted_net_cidr_test
+    novaworld/hosted_net_cidr_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/net_cidr.cpp)
+target_compile_features(hosted_net_cidr_test PRIVATE cxx_std_17)
+target_include_directories(hosted_net_cidr_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+add_test(NAME hosted_net_cidr COMMAND hosted_net_cidr_test)
 
 # The console's curated commands (apps/novaworld_server/hosted/console_commands.h, service
 # policy): the owners' list and the admins' one wider read, every line composed from checked
@@ -461,12 +490,15 @@ if(BUILD_NOVAWORLD_HTTP)
     opennova_add_pg_test(nw_owner_admin_e2e COMMAND nw_owner_admin_e2e_test)
     set_tests_properties(nw_owner_admin_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
 
-    # A hosted server end to end (apps/novaworld_server/hosted): an in-process service with
-    # hosted servers on (the same nw_service_harness.h) and its
-    # supervisor running a real opennova-serve child through LocalProcessProvider over a
-    # synthetic loose game directory: started from POST /api/me/server/start, listed as its
-    # service account and shown as the owner's, renamed by the owner's SetServerName (game.cfg
-    # saved), and stopped from POST /api/me/server/stop. ctest passes the opennova-serve binary.
+    # Two hosted servers end to end on one machine's slots (apps/novaworld_server/hosted): an
+    # in-process service with hosted servers on (the same nw_service_harness.h), its
+    # supervisor over the local machine driver, whose stand-in machine plays opennova-hostd
+    # over the agent protocol against the internal listener on loopback and runs real
+    # opennova-serve children over synthetic loose game directories: started from POST
+    # /api/me/servers, both placed on one shared machine (slots 0 and 1, each listed at its
+    # slot's game port), listed as their service accounts and shown as the owners', renamed by
+    # the owner's SetServerName (game.cfg saved in the slot), and stopped from POST
+    # /api/me/servers/<id>/stop. ctest passes the opennova-serve binary.
     add_executable(hosted_local_e2e_test novaworld/hosted_local_e2e_test.cpp)
     target_link_libraries(hosted_local_e2e_test PRIVATE
         opennova_novaworld_server_core opennova_novaworld_service)
@@ -627,12 +659,12 @@ opennova_add_pg_test(hosted_fleet_repository COMMAND hosted_fleet_repository_tes
 add_executable(hosted_ec2_machine_driver_test
     novaworld/hosted_ec2_machine_driver_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/agent_protocol.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/bootstrap.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/data_sets.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/ec2_machine_driver.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/fleet_config.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/local_machine_driver.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/net_cidr.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/owner_file.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/placement.cpp)
 target_link_libraries(hosted_ec2_machine_driver_test PRIVATE opennova_app_common Threads::Threads)

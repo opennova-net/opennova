@@ -229,6 +229,19 @@ std::vector<FleetMachineRow> list_silent_machines(db::Database &db, int64_t seco
 			{ BindValue(static_cast<double>(seconds)) });
 }
 
+bool machine_reported_within(db::Database &db, int64_t id, int64_t seconds) {
+	return !db.query("SELECT 1 FROM fleet_machines WHERE id = $1 AND last_report_at IS NOT NULL AND "
+					 "last_report_at >= now() - make_interval(secs => $2);",
+						 { BindValue(id), BindValue(static_cast<double>(seconds)) })
+					.empty();
+}
+
+int count_machines(db::Database &db, FleetMachineState state) {
+	const auto rows = db.query("SELECT COUNT(*) FROM fleet_machines WHERE state = $1;",
+			{ BindValue(std::string(fleet_machine_state_text(state))) });
+	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
+}
+
 // --- the agent's credentials ---
 
 std::optional<FleetMachineRow> redeem_bootstrap_token(db::Database &db, int64_t id,
@@ -444,6 +457,29 @@ std::vector<FleetMachine> placement_machines(db::Database &db) {
 			out[it->second].used_slots.push_back(static_cast<int>(r.as_int(1).value_or(0)));
 	}
 	return out;
+}
+
+std::vector<PlacementRequest> waiting_servers(db::Database &db) {
+	std::vector<PlacementRequest> out;
+	for (const db::Row &r : db.query(std::string("SELECT id, own_machine FROM hosted_servers WHERE "
+												 "machine_ref IS NULL AND ") +
+					 kLiveServerSql + " AND state <> 'stopping' ORDER BY id;")) {
+		PlacementRequest request;
+		request.server_id = r.as_int(0).value_or(0);
+		request.own_machine = r.as_int(1).value_or(0) != 0;
+		out.push_back(request);
+	}
+	return out;
+}
+
+bool fleet_has_room(db::Database &db, const PlacementPolicy &policy, bool own_machine) {
+	db::ReadSnapshot snapshot(db);
+	std::vector<FleetMachine> machines = placement_machines(db);
+	const std::vector<PlacementRequest> waiting = waiting_servers(db);
+	PlacementRequest request;
+	request.server_id = -1; // no row's (the start not yet written), no machine reserved for it
+	request.own_machine = own_machine;
+	return place_after(request, waiting, std::move(machines), policy).outcome != Placement::Outcome::Full;
 }
 
 std::optional<int64_t> assign_slot(

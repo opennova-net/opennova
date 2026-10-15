@@ -2,6 +2,7 @@
 
 #include "auth.h"
 #include "billing/entitlement.h"
+#include "fleet_repository.h"
 #include "http_json.h"
 #include "loggable.h"
 #include "server_config.h"
@@ -176,16 +177,17 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 	return e;
 }
 
-void HostedRoutes::configure(const ServerConfig &config) {
+void HostedRoutes::configure(const ServerConfig &config, const PlacementPolicy &fleet) {
 	provider_ = config.hosted_provider.empty() ? std::string("none") : config.hosted_provider;
-	// main() has warned of texts that do not read (and runs no provider then).
+	// main() has warned of texts that do not read (and runs no driver then).
 	std::vector<DataSetConfig> configs;
 	std::string error;
 	data_sets_.clear();
-	if (parse_data_set_configs(config.hosted_data_sets, config.hosted_ec2_launch_templates, configs, error))
+	if (parse_data_set_configs(config.hosted_data_sets, configs, error))
 		data_sets_ = offered_data_sets(provider_, configs);
 	enabled_ = provider_ != "none" && !data_sets_.empty();
 	cap_ = config.hosted_cap;
+	fleet_ = fleet;
 	std::string games;
 	for (const DataSet &d : data_sets_) games += (games.empty() ? "" : ", ") + d.game;
 	std::printf("[http] hosted servers: %s (provider %s, cap %d, data sets %s)\n", enabled_ ? "on" : "off",
@@ -212,8 +214,10 @@ void HostedRoutes::register_routes(WebApp &app) {
 }
 
 // GET /api/me/servers — the logged-in account's hosted servers: {"enabled" (this
-// service runs hosted servers), "full" (every place under ONNET_HOSTED_CAP is
-// taken: a start now would be refused at_capacity), "entitlement" (its hosting
+// service runs hosted servers), "full" (a start now would be refused
+// at_capacity: every place under ONNET_HOSTED_CAP is taken, or the fleet has no
+// place for a shared server and none for one on an own machine the account
+// still has free), "entitlement" (its hosting
 // entitlement, billing/entitlement.h: {max_servers, used (its live servers, a
 // stopping one included), own_machines, own_used (those of them on own
 // machines), can_start, source ("none", "tier" or "comp")}), "data_sets" (the
@@ -237,13 +241,19 @@ crow::response HostedRoutes::me_servers(const crow::request &req) {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
 		out["enabled"] = enabled_;
-		out["full"] = enabled_ && count_live(*db_conn) >= cap_;
 		const billing::Entitlement entitlement = billing::entitlement_of(*db_conn, owner, billing::unix_now());
+		const int own_used = count_own_live_of(*db_conn, owner);
+		bool full = enabled_ && count_live(*db_conn) >= cap_;
+		if (enabled_ && !full) {
+			full = !fleet_has_room(*db_conn, fleet_, false) &&
+					(own_used >= entitlement.own_machines || !fleet_has_room(*db_conn, fleet_, true));
+		}
+		out["full"] = full;
 		crow::json::wvalue granted;
 		granted["max_servers"] = entitlement.max_servers;
 		granted["used"] = count_live_of(*db_conn, owner);
 		granted["own_machines"] = entitlement.own_machines;
-		granted["own_used"] = count_own_live_of(*db_conn, owner);
+		granted["own_used"] = own_used;
 		granted["can_start"] = entitlement.can_start;
 		granted["source"] = entitlement.source;
 		out["entitlement"] = std::move(granted);
@@ -317,8 +327,10 @@ crow::response HostedRoutes::me_server(const crow::request &req, uint64_t id) {
 // its support tier's payment is past due, 409 server_limit with "max_servers"
 // and "used" when every server it may run is live (a stopping one counts), 409
 // no_own_machine when each own machine it pays for already runs one, 409
-// at_capacity when ONNET_HOSTED_CAP servers are live; 202 {"server"} (state
-// requested) once written. The supervisor takes it from there.
+// at_capacity when ONNET_HOSTED_CAP servers are live or the fleet has no place
+// for it (the supervisor's planner over the machines and the servers waiting
+// before it: every slot taken and the fleet at its maximum machines); 202
+// {"server"} (state requested) once written. The supervisor takes it from there.
 crow::response HostedRoutes::me_start(const crow::request &req) {
 	auto access = access_.require_user(req);
 	if (access.refusal) return std::move(*access.refusal);
@@ -364,7 +376,7 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	try {
 		auto db_conn = pool_.acquire();
 		const RequestResult result = request_server(
-				*db_conn, user.id, settings, data_sets_, cap_, billing::unix_now(), own_machine);
+				*db_conn, user.id, settings, data_sets_, cap_, billing::unix_now(), own_machine, &fleet_);
 		switch (result.outcome) {
 			case RequestOutcome::Created:
 				log_owner(user, "start",

@@ -177,4 +177,30 @@ Placement place_server(const PlacementRequest &request, const std::vector<FleetM
 	return launch_or_full(machines, MachineKind::Shared, policy.max_shared);
 }
 
+Placement place_after(const PlacementRequest &request, const std::vector<PlacementRequest> &waiting,
+		std::vector<FleetMachine> machines, const PlacementPolicy &policy) {
+	// The machines the simulation launches take ids no row has.
+	int64_t next_id = -1;
+	for (const PlacementRequest &other : waiting) {
+		if (other.server_id == request.server_id)
+			continue;
+		const Placement p = place_server(other, machines, policy);
+		if (p.outcome == Placement::Outcome::Placed) {
+			for (FleetMachine &machine : machines)
+				if (machine.id == p.machine_id)
+					machine.used_slots.push_back(p.slot);
+		} else if (p.outcome == Placement::Outcome::Launch) {
+			FleetMachine launched;
+			launched.id = next_id--;
+			launched.kind = p.launch_kind;
+			launched.state = FleetMachineState::Launching;
+			launched.slots = p.launch_kind == MachineKind::Own ? 1 : policy.shared_slots;
+			launched.reserved_for = p.launch_kind == MachineKind::Own ? other.server_id : 0;
+			launched.used_slots.push_back(0);
+			machines.push_back(std::move(launched));
+		}
+	}
+	return place_server(request, machines, policy);
+}
+
 } // namespace opennova::novaworld_server::hosted

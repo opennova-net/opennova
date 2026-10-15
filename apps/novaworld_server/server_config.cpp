@@ -111,15 +111,6 @@ ServerConfig ServerConfig::from_env() {
 	if (auto v = getenv_safe("ONNET_HOSTED_SERVE_BIN")) c.hosted_serve_bin = v;
 	if (auto v = getenv_safe("ONNET_HOSTED_WORK_DIR")) c.hosted_work_dir = v;
 	if (auto v = getenv_safe("ONNET_HOSTED_DATA_SETS")) c.hosted_data_sets = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_EC2_LAUNCH_TEMPLATES")) c.hosted_ec2_launch_templates = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_EC2_REGION")) c.hosted_ec2_region = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_EC2_SUBNET")) c.hosted_ec2_subnet = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_DEPLOYMENT")) c.hosted_deployment = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_SERVE_IMAGE")) c.hosted_serve_image = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_SERVICE_ADDRESS")) c.hosted_service_address = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_BOOTSTRAP_CIDRS")) c.hosted_bootstrap_cidrs = split_list(v);
-	if (auto v = getenv_safe("ONNET_HOSTED_AWS_CLI")) c.hosted_aws_cli = v;
-	if (auto v = getenv_safe("ONNET_HOSTED_MACHINE_SCRIPT")) c.hosted_machine_script = v;
 
 	return c;
 }

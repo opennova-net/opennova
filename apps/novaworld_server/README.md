@@ -101,7 +101,7 @@ Service policy (`health.*`), what the container runtime and the uptime checks re
   `nw_sessions` counts the NovaWorld UDP sessions, `listed_hosts` the listed servers,
   `hosted_live` the live hosted servers; `hosted_failed` and `launch_failures` count the
   hosted servers that ended failed and the launches that failed since the last line;
-  `machines_lost` is 0 until the fleet reports machines; `billing_sync_age_s` is the age
+  `machines_lost` counts the fleet's machines lost now (their agents silent); `billing_sync_age_s` is the age
   in seconds of the oldest webhook event the billing worker has not synced (0 with none,
   -1 with billing off) and `webhook_rejects` the webhook deliveries refused since the
   last line.
@@ -378,9 +378,10 @@ statements to a listed server" above).
 ## Hosted servers
 
 An account with a hosting entitlement can have the service run as many `opennova-serve`
-servers for it as the entitlement allows, each on a machine, until it stops them (ADR
-0053, proposed; `hosted/`; the `hosted_servers` and `hosted_server_events` tables). Each
-server runs one data set its owner picks. Everything here is service policy.
+servers for it as the entitlement allows, each in a slot of one of the fleet's machines
+(a shared machine, or an own machine of its own), until it stops them (ADR 0053,
+proposed; `hosted/`; the `hosted_servers`, `hosted_server_events` and `fleet_machines`
+tables). Each server runs one data set its owner picks. Everything here is service policy.
 
 - **The hosting entitlement** (`billing/entitlement.*`): how many hosted servers an account
   may have live, the larger of its support tier's servers (a monthly Stripe subscription:
@@ -406,28 +407,58 @@ server runs one data set its owner picks. Everything here is service policy.
   Each has its own host-screen limits (Joint Operations': 2..64 players, a time limit of
   1..300, kill and score limits of 1..500, respawn and delay of 0..300; Delta Force Xtreme
   2's the same but 2..100 players, its host screen's cap; OpenNova's Joint Operations').
-  A deployment offers the ones its provider has the
-  data of (`ONNET_HOSTED_DATA_SETS`, `ONNET_HOSTED_EC2_LAUNCH_TEMPLATES`, below); with
-  none, hosting is off. A start names one (`hosted_servers.game`, the games slug), and
-  a server whose data set is no
-  longer offered fails at its next launch (no restart mends that).
+  A deployment offers the ones its machine driver has the data of
+  (`ONNET_HOSTED_DATA_SETS`, below: the local driver's with a `resource_dir`, the ec2
+  driver's every one it names, since each cloud machine mounts them all); with none,
+  hosting is off. A start names one (`hosted_servers.game`, the games slug), and a server
+  whose data set is no longer offered fails at its next placement (no restart mends that).
 
+- **The fleet** (`hosted/placement.*`, `hosted/fleet_repository.*`,
+  `backend/migrations/0003_fleet.sql`). Hosted servers run on **machines**: a **shared
+  machine** packs up to `ONNET_FLEET_SHARED_SLOTS` (12) servers of any account, an **own
+  machine** runs exactly one, the own-machine add-on's, launched for it and ended when it
+  stops. A **slot** is one server's position on a machine (`hosted/slots.h`): slot k is
+  the game's UDP port 32768 + k (open to everyone), the remote admin's TCP port 32800 + k
+  (open to the service alone), the container's user 10001 + k and the working directory
+  `/srv/slots/slot-k`; an own machine has slot 0 alone. `fleet_machines` holds one row per
+  machine (its driver, its kind, its state, its cloud id, its type, its slots, its private
+  and public addresses, the serve image it was launched with, the server an own machine
+  is reserved for, when its agent last reported, why it ended), each move a
+  compare-and-set: `launching` → `booting` (the cloud runs it) → `ready` (its agent
+  reports) → `draining` → `ending` → `ended`, or `failed`, and `lost` once its agent has
+  been silent 60 s. The live servers' slots are `hosted_servers.machine_ref`, `slot`,
+  `game_port` and `generation` (its starts; its container is `srv-<id>-g<generation>`),
+  two live servers never holding one slot (a unique index), and an ended server's row
+  keeping where it last ran.
+- **Placement** (`hosted/placement.h`, pure functions): a shared server goes to the
+  fullest shared machine that takes servers (launching, booting or ready; never one
+  draining, ending or gone) with a free slot, its lowest free slot, so machines fill one
+  at a time and an emptied one can end; with none, a shared machine is launched while
+  the fleet has fewer than `ONNET_FLEET_MAX_SHARED` (2) taking servers, and at that
+  maximum the server waits in `provisioning` for a slot to free. A server on the add-on
+  goes to the machine reserved for it, else to a new own machine (at most
+  `ONNET_FLEET_MAX_OWN`, 2). A launched machine takes the server whose placement launched
+  it at once, as it boots. The start request runs the same planner: placed after every
+  live server still waiting for a slot (`fleet_has_room`), a start the fleet could not
+  place is `at_capacity`.
 - **The rows.** `hosted_servers` holds one row per start: its owner, its service account,
   its state, its data set (`game`), the owner's settings (range-checked columns, never a
-  file), the machine
-  (`provider`, `machine_id`, `machine_address`), the remote-admin login rendered for the
-  service, the restarts used and why it failed. `hosted_server_events` keeps every
-  transition with what caused it. An owner has as many live servers (any state but
-  `stopped` and `failed`; a stopping one counts until it has stopped) as its hosting
-  entitlement allows, as many of those on own machines as its add-on pays for, and at
-  most `ONNET_HOSTED_CAP` servers are live at once; a request checks the entitlement
-  (some servers, none past due), the account's live servers against it, its own-machine
-  servers against the add-on and the cap in the transaction that writes it
+  file), its place in the fleet (above), its container's name and the machine's private
+  address (`provider`, `machine_id`, `machine_address`), the serve image its start pinned
+  (`serve_image`: a deploy's new image reaches a server at its next start), the
+  remote-admin login rendered for the service, the restarts used and why it failed.
+  `hosted_server_events` keeps every transition with what caused it. An owner has as many
+  live servers (any state but `stopped` and `failed`; a stopping one counts until it has
+  stopped) as its hosting entitlement allows, as many of those on own machines as its
+  add-on pays for, and at most `ONNET_HOSTED_CAP` servers are live at once (a backstop
+  beside the fleet's room); a request checks the entitlement (some servers, none past
+  due), the account's live servers against it, its own-machine servers against the
+  add-on, the cap and the fleet's room in the transaction that writes it
   (`hosted::request_server`), which holds the writer lock, so no two starts both pass a
-  count. When a server is about to start (`provisioning`, before its credentials are
+  count. When a server is about to be placed (`provisioning`, before its credentials are
   minted) its place is read again: its owner's live servers that are not stopping keep
-  their places oldest first, and one past the entitlement is stopped instead
-  (`its owner's support tier allows N hosted servers`).
+  their places oldest first, and one past the entitlement is stopped instead (`its
+  owner's support tier allows N hosted servers`).
 - **The owners' limits.** Every supervisor pass opens by stopping what an owner's hosting
   entitlement no longer covers (`Supervisor::enforce_limits`; an account deleted or not
   active is the stop's own case, below): its newest live servers past the entitlement's
@@ -444,63 +475,111 @@ server runs one data set its owner picks. Everything here is service policy.
   (`limits_hold`, `limits_hold_reason`). Cleared while its cause stands, the next pass
   holds again.
 - **The supervisor** (`hosted/supervisor.*`) is a thread of its own, started once the gate
-  has its port; each pass (every second) leases a pooled connection and walks every live
-  row: `requested` → `provisioning` (the service account, a new admin password, the
-  provider's plan, the files rendered, the machine launched) → `booting` (until the
-  machine runs `opennova-serve`) → `listing` (until a listed RID holds one of the
-  service account's HostKeys) → `running` → `stopping` → `stopped`, or `failed`. Every
-  move past a request or a stop is the supervisor's, a compare-and-set on the row's
-  state, so a stop that lands while a pass launches wins and the machine is ended on the
-  next pass.
+  has its port and the internal listener serves; each pass (every second) leases a
+  pooled connection, steps every live machine (below), then walks every live server:
+  `requested` → `provisioning` (placed; on its slot the service account gets a new
+  password, a new admin password is minted, and the files are rendered for the slot's
+  ports) → `booting` (its container wanted on its slot until its machine's agent reports
+  it running) → `listing` (until a listed RID holds one of the service account's
+  HostKeys) → `running` → `stopping` → `stopped`, or `failed`. Every move past a request
+  or a stop is the supervisor's, a compare-and-set on the row's state, so a stop that
+  lands while a pass places a server wins (it lets the slot go).
 - **A stop** is the supervisor's own act: the row goes to `stopping` (asked by the owner
   or an admin, or by the supervisor when the owner's account is deleted or no longer
   active, read every pass and again right before a start mints credentials, or for the
-  owners' limits above), the supervisor pushes `ServerStopHosting` to the listing (the sysop punt's
-  MsgCode 7, scoped to the service account), and ends the machine itself once the
-  listing has left the browser, or 60 s after the push. `opennova-serve` exiting while
-  the row is `stopping`, whatever its code, finishes the stop and is never restarted.
-  A stop is never read from an exit code: `opennova-serve` exits 0 for its rotation's
-  end or the admin's `GOTO MENUSTATE`, 3 when the service ends its hosting and 1 for a
-  SIGTERM while it waits to be listed.
-- **A crash** is any exit while the server should run (any code), its machine gone, a
-  launch that fails, a machine not running `opennova-serve` within 5 min, or no listing
-  within 3 min (the `ec2` provider's machines: 10 min and 5 min, for EC2's boot, the
-  docker install and the image pull). The machine is ended and the row goes back to `provisioning`, 15 s
-  later, while it has restarts left: 3 of them, and an hour of continuous `running`
-  resets the count (so an always-on server that crashes now and then over weeks is never
-  failed for it); then `failed`. The launch's own error text
-  (a path, a system error) goes to the server log; the event the owner reads says "the
-  launch failed".
+  owners' limits above), the supervisor pushes `ServerStopHosting` to the listing (the
+  sysop punt's MsgCode 7, scoped to the service account), and stops wanting the
+  container once the listing has left the browser, or 60 s after the push (its agent then
+  stops it: `opennova-serve` deregisters on SIGTERM). Its container exiting while the row
+  is `stopping`, whatever its code, finishes the stop and is never restarted. A stop is
+  never read from an exit code: `opennova-serve` exits 0 for its rotation's end or the
+  admin's `GOTO MENUSTATE`, 3 when the service ends its hosting and 1 for a SIGTERM while
+  it waits to be listed.
+- **A crash** is what the server itself causes: its container exiting while the server
+  should run (any code), the kernel ending it out of memory, a start that failed (docker's
+  125), its container not running within 5 min of its machine's ready, no listing within
+  3 min (on the ec2 driver: 10 min, for an image pull, and 5 min), a machine launched for
+  it that the cloud refused, and a machine it was placed on that never booted. The
+  server lets its slot go and goes back to `provisioning`, 15 s later, while it has
+  restarts left: 3 of them, and an hour of continuous `running` resets the count (so an
+  always-on server that crashes now and then over weeks is never failed for it); then
+  `failed`. Its next start is a new generation: a new container name with new
+  credentials, on whichever slot placement picks. The driver's own error text goes to the
+  server log; the event the owner reads says what happened (`the launch of its machine
+  failed`). **What the fleet causes is no crash**: its machine lost, gone, ended by an
+  admin or drained (an admin's drain, a fleet roll, an agent on another protocol) moves
+  the server off at once, placed again with no restart counted (`its machine is gone;
+  placed again (no restart counted)`).
+- **The machines' lifecycle.** A booting machine whose agent never reports within the
+  driver's boot timeout (15 min on EC2, 1 min locally) is terminated and failed. A ready
+  (or draining) machine whose agent has been silent 60 s is `lost`: the driver is asked;
+  gone, it ends now; still running, it is terminated 3 min later, and an agent that
+  reports again first makes it ready (or draining) again. While its machine is lost a
+  running server's health checks wait. A shared machine with no server on it ends after
+  `ONNET_FLEET_IDLE_MINUTES` (30); an own machine ends once its server has ended. A
+  draining machine moves its servers off one at a time, the next once the last moved one
+  runs again elsewhere (or ended), and ends once it holds none; nothing new lands on it,
+  and it counts toward neither maximum, so a roll launches the machines it moves servers
+  to. A machine row moved to `ending` (an admin's end) is terminated at the next pass. A
+  launch the cloud refuses fails the row and holds every launch of that kind for 60 s.
+- **The desired state** (`hosted/fleet_desired_state.h`, the supervisor's answer to each
+  agent's sync): the containers of the live servers placed on the machine that are
+  booting, listing, running or stopping (a stopping one only once its agent has reported
+  it, so a server stopped before its start never starts), each with its slot, its user,
+  its pinned image, its data set, `opennova-serve`'s arguments, the slots' limits
+  (`ONNET_FLEET_SLOT_CPUS`, `ONNET_FLEET_SLOT_MEMORY_MB`, 128 processes) and its working
+  directory's files until the agent has reported it once. The files are kept in the
+  service's memory alone and dropped once reported: a server whose start the service's
+  restart cut short (booting, never reported) is placed again with new credentials, and a
+  running server's container is answered for without files. The agent routes force each
+  container's user to its slot's and send `drain` while the machine's row is draining.
+- **The agents and the internal listener** (`hosted/agent_route.*`,
+  `hosted/internal_listener.*`, `hosted/agent_protocol.*`; `apps/hostd/README.md`). Each
+  machine runs `opennova-hostd`, the machine agent: its user-data carries a one-time
+  bootstrap token (kept by the service as its SHA-256 alone, 30 minutes' life), which it
+  redeems at `POST /hosted/machines/<id>/bootstrap` for its long-lived secret (stored
+  hashed), the serve image, its slots and the data sets' mount paths; then every 5 s (1 s
+  with work) it posts `POST /hosted/machines/<id>/sync` with every container's state, CPU,
+  memory and its slot's egress, and runs what the reply wants. Both routes are on the
+  **internal listener**, a second HTTP server bound to `ONNET_INTERNAL_HTTP_BIND` (the
+  service's private address, `10.44.0.10:8070`, which the machines' security group alone
+  reaches; `127.0.0.1:8070` by default), never on the public port: they answer only a TCP
+  peer inside `ONNET_HOSTED_BOOTSTRAP_CIDRS` (and loopback on a loopback bind), and only
+  from the machine's own recorded private address. Every refusal is one bare 404; a
+  refusal inside the networks is logged without the token or the secret at most once per
+  peer per minute, and Crow's per-request lines for these paths are left out of the log.
+  The service starts it before the supervisor and stops it after the supervisor's thread.
 - **The admin link** (`hosted/admin_link.*`; ADR 0053 d5). A running server opens
-  retail's remote admin on its `game.cfg`'s `remote_admin_port`, its `admin.cfg` granting
-  the user `svc` (a 31-character random password, new at every start, rights `7F`) to the
-  service's address alone (`ip_restrict`; on a cloud machine its security group too). The
-  service is that console's only client: owners never get the port or the login, and
-  reach the console only through the site's routes. The supervisor keeps one
-  `AdminLink` per server in `running` (every pass syncs them: a link comes up once the
-  server runs, is replaced when a restart rendered a new login, and goes down as the
-  server leaves `running`, at `stopping` or a crash). Each link is a thread of its own
-  (at most `ONNET_HOSTED_CAP` of them; the apps' sockets are blocking with timeouts, and a
-  thread per link keeps one dead machine from holding up another server's commands) that
-  keeps one logged-in session open, speaking the protocol as `RAT.exe` does through the
-  engine's client codec (`engine/net/admin/admin_protocol.h`): the challenge, the login
-  encrypted under it, one command packet at a time. The server marks no reply's end, so
-  each command's replies are read by the dispatcher's per-verb count
-  (`admin_reply_plan`, witnessed in `docs/net/novaworld-net-re.md` §6.9): an exact count
-  for most verbs, the first reply deciding for `PLAYER BAN <#>` (a second after `OK -
-  Banned Player`) and `GOTO MENUSTATE`, and a 200 ms quiet gap only where the line
-  cannot tell (`PLAYER BAN ALL`, a `PLAYER` sub-verb the server does not know). Bytes
-  between commands are read off first (to the console only after a recorded command), and
-  the idle socket is looked at every 250 ms, so a server that went away is noticed and its
-  connection reset at once. The link polls `GET GAMESTATE` every 15 s, reconnects with a
-  backoff (1 s doubling to 4 s: a link lives only while its server runs, and the health
-  check counts it), runs the queued commands (16 at most; a caller waits its own budget,
-  and a command still queued when it gives up is dropped; `QUIT` is refused, the link's
-  own), and ends with `QUIT` on a logged-in session (a reset otherwise). The password is a
-  log secret for the link's lifetime (`add_log_secret`, masked by `main()`'s log sink too)
-  and never reaches a log line, a console line or a reply.
+  retail's remote admin on its `game.cfg`'s `remote_admin_port`, its slot's admin port,
+  its `admin.cfg` granting the user `svc` (a 31-character random password, new at every
+  start, rights `7F`) to the service's address alone (`ip_restrict`; on a cloud machine
+  its security group too). The service is that console's only client: owners never get
+  the port or the login, and reach the console only through the site's routes. The
+  supervisor keeps one `AdminLink` per server in `running`, at its machine's private
+  address (every pass syncs them: a link comes up once the server runs, is replaced when
+  a restart rendered a new login, and goes down as the server leaves `running`, at
+  `stopping` or a crash). Each link is a thread of its own (at most `ONNET_HOSTED_CAP` of
+  them; the apps' sockets are blocking with timeouts, and a thread per link keeps one
+  dead machine from holding up another server's commands) that keeps one logged-in
+  session open, speaking the protocol as `RAT.exe` does through the engine's client codec
+  (`engine/net/admin/admin_protocol.h`): the challenge, the login encrypted under it, one
+  command packet at a time. The server marks no reply's end, so each command's replies
+  are read by the dispatcher's per-verb count (`admin_reply_plan`, witnessed in
+  `docs/net/novaworld-net-re.md` §6.9): an exact count for most verbs, the first reply
+  deciding for `PLAYER BAN <#>` (a second after `OK - Banned Player`) and `GOTO
+  MENUSTATE`, and a 200 ms quiet gap only where the line cannot tell (`PLAYER BAN ALL`, a
+  `PLAYER` sub-verb the server does not know). Bytes between commands are read off first
+  (to the console only after a recorded command), and the idle socket is looked at every
+  250 ms, so a server that went away is noticed and its connection reset at once. The
+  link polls `GET GAMESTATE` every 15 s, reconnects with a backoff (1 s doubling to 4 s:
+  a link lives only while its server runs, and the health check counts it), runs the
+  queued commands (16 at most; a caller waits its own budget, and a command still queued
+  when it gives up is dropped; `QUIT` is refused, the link's own), and ends with `QUIT`
+  on a logged-in session (a reset otherwise). The password is a log secret for the
+  link's lifetime (`add_log_secret`, masked by `main()`'s log sink too) and never reaches
+  a log line, a console line or a reply.
 - **The admin listener on a machine.** The apps' TCP listeners set `SO_REUSEADDR` on POSIX
-  (`apps/common/net_sockets.cpp`), so an `opennova-serve` restarted on its fixed admin port
+  (`apps/common/net_sockets.cpp`), so an `opennova-serve` restarted on a slot's admin port
   listens at once rather than after the closed session's TIME_WAIT. A listen that still
   fails leaves the server running without its console, as retail ignores its listen's
   result (`opennova-serve` keeps that); the supervisor's health check, which counts the
@@ -511,17 +590,19 @@ server runs one data set its owner picks. Everything here is service policy.
   link's own status lines (the session up, lost or refused, closed, and the server's scene
   when it changes), in UTF-8 with UTC times. The reads the site polls (the player list,
   the rotation, the chat window) are not recorded.
-- **Health.** While `running`, every pass checks the process and every 20 s the
-  listing and the admin link (its session up: its last status poll or command answered);
-  three failed checks in a row end the machine and fail the server. Always
-  on: nothing reaps an idle server or ends one for its age.
-- **Reconciliation** at the supervisor's start: a machine the provider runs that no live
-  row names is ended; a live row whose machine runs resumes where it was (a running one
-  gets the listing timeout for its lister to re-host before the health checks count,
-  since the boot cleared the previous run's listings); a live row whose machine is gone
-  is launched again without counting a restart (a `stopping` one is stopped). Every 5
-  min a sweep ends the machines no live row names again (a launch whose row write
-  failed).
+- **Health.** While `running`, every pass reads its agent's report and every 20 s checks
+  the listing and the admin link (its session up: its last status poll or command
+  answered); three failed checks in a row fail the server. Always on: nothing reaps an
+  idle server or ends one for its age.
+- **Reconciliation** at the supervisor's start: a machine row still `launching` (the
+  service went mid-launch) fails; every cloud machine the driver lists (`list_tagged`)
+  that no live row names is terminated; a live row whose cloud machine is gone ends, its
+  servers placed again with no restart counted (a `stopping` one is stopped); a server
+  whose files went with the service (`booting`, its container never reported) is placed
+  again; the rest resume where they were (a running one gets the listing timeout for its
+  lister to re-host before the health checks count, since the boot cleared the previous
+  run's listings), their containers answered for without files. A driver that cannot
+  list ends nothing. Every 5 min the sweep half runs again.
 - **Service accounts.** Each hosted server lists itself with an account of its own,
   `srv-<id>` (`players.kind = 'service'`), minted at its first start with a 32-character
   password from the OS CSPRNG (bcrypt, as every account), whose password is set again at
@@ -547,157 +628,94 @@ server runs one data set its owner picks. Everything here is service policy.
   goes out, since the supervisor would read the server's exit as a crash and restart it.
   Any other listing, an ended hosted server's lingering one included, takes the plain
   push.
+- **Several servers on one address.** A stock retail client lists and joins every slot of
+  a machine: NovaWorld lists a server at the source address and port of its datagrams
+  (`engine/net/novaworld/service/lobby_session.cpp`), `/NWJoin.dll` hands a joiner that
+  `host:port`, and the lobby keys its sessions by address and port. Each slot's `game.cfg`
+  pins `mpnovaworldportmin` = `max` to the slot's game port, and the containers run on
+  the machine's own network (`--network host`: a bridge's NAT would rewrite the port).
 - **The working directory** is rendered from scratch at every start
   (`hosted/hosted_settings.*`), in retail's formats: the host file (`server.host`:
   `GameName`, `MaxPlayers`, `MPHostGamePassword`, `Time_Limit`, `KillLimit`, `MaxScore`,
   `Respawn`, `Delay`, `TeamFF`, `Replay 1` so the rotation never ends the session, and
   one `Mission` line per map, the owner's first map last since the last line is the
   starting map; cp1252, CR LF), `game.cfg` (the defaults through the format's own writer,
-  the NovaWorld network type, `mpnovaworldportmin` = `max` = the provider's port and
-  `remote_admin_port`), `admin.cfg` (user `svc`, a 31-character random password, rights
-  `7F`, `ip_restrict` the service's address as the machine sees it) and the
-  `--credentials` file (`NOVAWORLD_USER` / `NOVAWORLD_PASS`). All but `game.cfg` are
-  secret (the host file carries the game password): written owner-only and never logged.
-  The admin login lives in the row's own columns, read by `hosted::admin_login_of` alone:
-  `HostedServer` has no field for it, so no reply can carry it. `opennova-serve` runs with `/HOST server.host
-  --credentials credentials.txt --master-host <host> --master-gate-port <port> /game
-  <title>` (the data set's) and `/exp jox01` for Escalation. The settings' rules: a game
-  the deployment offers, a name of 1..31 cp1252 bytes with no control character or double
-  quote, a password of up to 16 printable ASCII characters with no space or quote, the
-  whole numbers within the data set's limits, an expansion the data set allows, and 1..32
-  `.bms` names of letters, digits, `_` and `-`.
-- **Providers** (`hosted/machine_provider.h`): the supervisor hands a provider a
-  provider-neutral `LaunchSpec` (the data set, the files and the arguments), which the
-  provider resolves to its own data for that data set, and asks it to launch,
-  describe, terminate and list its tagged machines. `ONNET_HOSTED_PROVIDER=local`
-  (`hosted/local_process_provider.*`) runs each server as a child process of the service
-  on its own machine, for development and the tests: under
-  `ONNET_HOSTED_WORK_DIR/server-<id>` (deleted and written again at every start, `0700`
-  with its secret files `0600` on POSIX, a DACL granting the service's account alone on
-  Windows), `opennova-serve` (`ONNET_HOSTED_SERVE_BIN`) with `--resource-dir` the data
-  set's `resource_dir` (and `--loose-root` with its `loose_root`; `ONNET_HOSTED_DATA_SETS`),
-  started from an argv array with no shell (`engine/base/proc/child_process.h`), its output in
-  `console.log` there, listing on this service over loopback with free loopback ports.
-  Its environment is an allowlist (`PATH`, `HOME`, `LANG`, `LC_*`, `TZ`, `TMPDIR`; on
-  Windows `PATH`, `SystemRoot`, `SystemDrive`, `windir`, `TEMP`, `TMP`), so none of the
-  service's own variables (`ADMIN_API_TOKEN`, `DATABASE_URL`, `DATABASE_PASSWORD`, every
-  `ONNET_*`) reaches
-  it. Its secret files are deleted once the process has ended (`console.log` stays);
-  what `opennova-serve` writes there itself (`admin_log.txt` with the admin password,
-  as retail's, and `game.cfg` with the game password) is covered only by the directory.
-  The children are started from the provider's own spawner thread, so on Linux their
-  parent-death signal follows the provider, not the supervisor's thread. They end with
-  the service (a kill-on-close job on Windows, the parent-death signal on Linux) and at
-  its orderly shutdown, where the provider asks each to stop (SIGTERM, on which
-  `opennova-serve` deregisters) before it kills it, so the next boot launches them
-  again.
-- **The cloud provider** (`ONNET_HOSTED_PROVIDER=ec2`, `hosted/ec2_provider.*`) runs
-  each server on an EC2 machine of its own, launched from its data set's launch template
-  (`ONNET_HOSTED_EC2_LAUNCH_TEMPLATES`; `infra/aws`, DEPLOY.md "Hosted game servers": one
-  per data set, each a stock Ubuntu 24.04 image, the machine type, that data set's
-  private encrypted snapshot as a second volume, the game security group, the machine
-  role, IMDSv2 required, `InstanceInitiatedShutdownBehavior=terminate`).
-  A machine is terminated at its server's end, never stopped, so every launch has a new
-  public address. The provider runs the AWS CLI v2 (installed in the image, pinned and
-  checksummed) through a `CommandRunner` (`apps/common/command_runner.*`: an argv array, no
-  shell, a 90 s timeout, the CLI's output and diagnostics apart, an environment of the
-  system's and the `AWS_*` variables alone), its credentials the service instance's role.
-  - `launch` is `run-instances`: the data set's launch template at its default version, the subnet, one
-    machine, the tags `opennova:hosted=1`, `opennova:deployment=<ONNET_HOSTED_DEPLOYMENT>`,
-    `opennova:server-id=<id>` and `Name` on the machine and its volumes, a client token
-    (it makes the CLI's own retries of that one call launch once; a later launch for the
-    same server is a new call with a new token, and the sweep ends a machine no row
-    holds), and the user-data: the machine script (`hosted/machine/user_data.sh`) with two values
-    filled in, the bootstrap URL on the service's PRIVATE address and a one-time token.
-    No file and no credential travels in the user-data.
-  - `describe` reads one `describe-instances` of this deployment's tagged machines at most
-    every 10 s: `pending` is booting, `running` is running once the machine has fetched
-    its bundle (booting before, so the listing's 3 min start as the server is about to
-    run), and `shutting-down`, `terminated`, `stopping` and `stopped` are gone. A machine
-    the listing lacks is gone, but booting for 3 min after this service launched it (EC2
-    lists a new machine late). A describe that fails reads booting, never gone: the
-    supervisor's clocks still run, but no AWS blip is a crash. After a failure the CLI
-    runs again only 10 s later, so an API outage costs a supervisor pass one CLI run,
-    not one per server. The address is the
-    machine's PRIVATE IPv4, where the admin link connects.
-  - `terminate` is `terminate-instances`; a machine EC2 no longer knows is no error.
-    `list_tagged` filters on `opennova:hosted=1` AND this deployment's tag, so one stack
-    never ends another's machines, and throws when the listing fails, so the supervisor
-    ends nothing on a reply it could not read. Every CLI failure, timeout and malformed
-    reply is logged and handled; the instance role's policy lets the service end only
-    machines carrying both tags. A machine's token goes when it is ended, even when the
-    terminate call fails.
-  - The plan: the game port 32768 (`mpnovaworldportmin` = `max`; the game security group
-    opens it, UDP, to everyone), the admin port 32800 (TCP, open to the service's
-    security group alone) and the service's private address in `admin.cfg`'s
-    `ip_restrict`. Owners never reach the admin port.
-  - The servers list through `ONNET_PUBLIC_HOST` (`--master-host`), the service's public
-    address, so the listing records each machine's own public address.
-- **The bootstrap** (`hosted/bootstrap.*`, `hosted/bootstrap_route.*`). A launch mints
-  a 48-character token (the OS CSPRNG), kept only as its SHA-256, bound to the server and,
-  once `run-instances` answers, to the machine and its private address. At its first boot
-  the machine posts it to `POST /hosted/bootstrap/<server id>` (`Authorization: Bearer`)
-  and gets its bundle once: `{"server_id", "image", "args", "files": [{"name", "secret",
-  "content_base64"}]}`, the working directory's files (the secret ones among them),
-  `opennova-serve`'s arguments and the serve image (`ONNET_HOSTED_SERVE_IMAGE`). The token
-  is spent at that fetch, lapses 15 minutes after it was issued, and lives in memory, so a
-  service restart forgets it (a machine still booting then powers off, which the
-  supervisor restarts). The route is on this port (8080) but outside `/api/`, so the
-  portal's nginx, which forwards `/api/` alone, and Cloudflare in front of it never reach
-  it; it answers only a TCP peer inside `ONNET_HOSTED_BOOTSTRAP_CIDRS` (the VPC subnet),
-  read from the socket and never from a proxy header, and only the bound address may
-  redeem a token. Every refusal is the same 404 (`Cache-Control: no-store`), logged
-  without the token (once per peer per minute) for a peer inside the range and not at
-  all for any other; the reply is never logged. The ranges must lie inside the private
-  networks (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16), and the boot logs them. The machine writes the secret files owner-only (`0600`, the serve
-  image's user) and the token reaches no command line there.
-- **The machine side** (`hosted/machine/user_data.sh`, cloud-init at the first boot, as
-  root): serve's two ports reserved out of Linux's ephemeral range
-  (`net.ipv4.ip_local_reserved_ports`, so no socket of the image pull's holds one at
-  serve's bind), docker installed (and held, so no unattended upgrade restarts it under
-  the server), the data volume (label `opennova-data`: the data set's snapshot, which holds
-  at least `resource.pff`, `localres.pff` and `language.pff`) mounted read-only at `/opt/game`, the
-  bundle fetched, `/srv/serve` written (`0700`, owned by UID 10001), the image pulled, and
-  `opennova-serve.service` started: the serve image as UID 10001 with `--network host`,
-  no capability and no way to gain one (`--cap-drop ALL`, `no-new-privileges`; it binds
-  only ports above 1024), the data read-only, the working directory, the bundle's
-  arguments, its output in the journal. The host network shares the machine's instance
-  metadata service, so before the server starts (the unit's `ExecStartPre`, again at any
-  start) an `iptables` rule, and its `ip6tables` twin for `fd00:ec2::254` where the
-  kernel has IPv6, refuses UID 10001 any packet to `169.254.169.254`: the
-  internet-facing server never reads the machine role's credentials. The script checks
-  the refusal before the first start (curl's exit 7, not a timeout). Docker runs with no
-  user-namespace remapping (the script checks), so the container's UID is the host's and
-  the owner match holds; the process can never change it.
-  Whatever ends `opennova-serve` (0, 3, any other code, a signal) powers the machine off
-  (`SuccessAction` and `FailureAction`), and the shutdown behaviour terminates it; a
-  bootstrap step that fails does the same. Nothing on the machine restarts the server:
-  the supervisor is the one place crash restarts are made and counted (3, forgiven after
-  an hour of running, each on a new machine with new credentials), and it tells its own
-  stop from a crash by its row, never by the exit code, so the two never double-count.
-  The machine's end, with the exit, reaches its serial console (`aws ec2
-  get-console-output`). Break-glass is SSM Session Manager (the machine role); no machine
-  has an SSH key.
+  the NovaWorld network type, `mpnovaworldportmin` = `max` = the slot's game port and
+  `remote_admin_port` the slot's admin port), `admin.cfg` (user `svc`, a 31-character
+  random password, rights `7F`, `ip_restrict` the service's address as the machine sees
+  it) and the `--credentials` file (`NOVAWORLD_USER` / `NOVAWORLD_PASS`). All but
+  `game.cfg` are secret (the host file carries the game password): sent to the agent
+  only until it has reported the container, written owner-only and never logged. The
+  admin login lives in the row's own columns, read by `hosted::admin_login_of` alone:
+  `HostedServer` has no field for it, so no reply can carry it. `opennova-serve` runs with
+  `/HOST server.host --credentials credentials.txt --master-host <host>
+  --master-gate-port <port> /game <title>` (the data set's) and `/exp jox01` for
+  Escalation. The settings' rules: a game the deployment offers, a name of 1..31 cp1252
+  bytes with no control character or double quote, a password of up to 16 printable
+  ASCII characters with no space or quote, the whole numbers within the data set's
+  limits, an expansion the data set allows, and 1..32 `.bms` names of letters, digits,
+  `_` and `-`.
+- **Machine drivers** (`hosted/machine_driver.h`): the supervisor's one seam to the
+  cloud. A driver launches the machine a row stands for (the row's id and its one-time
+  token, nothing else), describes it, terminates it, lists the machines it runs for this
+  deployment and plans a slot's ports. `ONNET_HOSTED_PROVIDER=local`
+  (`hosted/local_machine_driver.*`, for development and the tests) runs each machine as
+  a stand-in on this one: a thread that plays `opennova-hostd` over the real protocol
+  against the internal listener on loopback and runs each container as an
+  `opennova-serve` child (`ONNET_HOSTED_SERVE_BIN`, `--resource-dir` the data set's
+  `resource_dir`, `--loose-root` with its `loose_root`) in
+  `ONNET_HOSTED_WORK_DIR/machine-<id>/slot-<k>` (written from scratch with the reply's
+  files, each owner-only), its output in `machine-<id>/<container>.log`, its ports free
+  ones probed on loopback, its environment an allowlist (`PATH`, `HOME`, `LANG`,
+  `LC_*`, `TZ`, `TMPDIR`; on Windows `PATH`, `SystemRoot`, `SystemDrive`, `windir`,
+  `TEMP`, `TMP`), so none of the service's own variables reaches it. Its machines end
+  with the service (they keep no state; the next boot's reconciliation places their
+  servers again). `ONNET_HOSTED_PROVIDER=ec2` (`hosted/ec2_machine_driver.*`) launches EC2
+  machines from the launch template of their kind (`ONNET_HOSTED_EC2_LAUNCH_TEMPLATES`,
+  `{"shared": "lt-...", "own": "lt-..."}`; `infra/aws`: a stock Ubuntu image, the
+  kind's type, every data set's private encrypted snapshot as a volume of its own, the
+  machines' security group, their instance profile, IMDSv2 required), tagged
+  `opennova:hosted`, `opennova:deployment`, `opennova:machine-kind`,
+  `opennova:machine-id` and `Name`, with the machine script
+  (`hosted/machine/machine_user_data.sh`, shipped in the image) as user-data: it mounts
+  every data set read-only at `/opt/game/<slug>` by its volume's ext4 label (`od-jop2`,
+  `od-dfx2`, `od-opennova0`), reserves the slots' ports out of the ephemeral range,
+  fences the slots' users off the instance metadata and the service's internal port,
+  and installs `opennova-hostd`, copied out of the serve image. The driver runs the AWS
+  CLI v2 (installed in the image, pinned and checksummed) through a `CommandRunner`
+  (`apps/common/command_runner.*`: an argv array, no shell, a 90 s timeout, an
+  environment of the system's and the `AWS_*` variables alone), its credentials the
+  service instance's role; it describes from one cached `describe-instances` every 10 s
+  (a failure reads unknown: nothing is decided on it), and a machine is terminated at
+  its end, never stopped. The servers list through `ONNET_PUBLIC_HOST`
+  (`--master-host`), so the listing records each machine's own public address.
 
 | Setting | Default | Meaning |
 | --- | --- | --- |
-| `ONNET_HOSTED_PROVIDER` | `none` | `local` runs hosted servers as child processes, `ec2` on EC2 machines (above); `none` runs none. Any other value, data sets that do not read or none the provider has the data of, `local` without `ONNET_HOSTED_SERVE_BIN`, or `ec2` missing or mistyping one of its settings below (or with a loopback `ONNET_PUBLIC_HOST`) is `none` with a boot warning naming why. |
-| `ONNET_HOSTED_CAP` | 5 | The most hosted servers live at once, across every account. |
-| `ONNET_HOSTED_SERVE_BIN` | none | The local provider's `opennova-serve` binary. |
-| `ONNET_HOSTED_WORK_DIR` | `backend/data/hosted` | The root of the local provider's working directories. |
-| `ONNET_HOSTED_DATA_SETS` | none | A JSON object keyed by data set (`jop_2_consumer`, `dfx2_consumer`, `opennova_0_consumer`), each member of an entry optional: `missions`, a list of `.bms` names, the rotation a start on it takes when its request names none (the first the starting map) and the missions the site's rotation picker offers (with none, a start must name its missions); for `local`, `resource_dir`, the game folder its servers serve (their `--resource-dir`; never licensed data in a repository: an install, or a synthetic loose directory), which is what makes `local` offer the data set, and `loose_root`, `true` to add `--loose-root` (a folder with no game archives, mounted as loose files). For example `{"jop_2_consumer":{"resource_dir":"C:/Games/Joint Operations Combined Arms","missions":["ASH_G11A.bms"]}}`. Any other key or member is a boot warning, and hosting is off. |
+| `ONNET_HOSTED_PROVIDER` | `none` | The machine driver: `local` (stand-in machines on this one, above), `ec2` (EC2 machines); `none` runs no hosted server. Any other value, fleet settings or data sets that do not read, none the driver has the data of, `local` without `ONNET_HOSTED_SERVE_BIN`, or `ec2` missing or mistyping one of its settings (or with a loopback `ONNET_PUBLIC_HOST`) is `none` with a boot warning naming why. |
+| `ONNET_HOSTED_CAP` | 24 | The most hosted servers live at once, across every account: a backstop beside the fleet's own room. |
+| `ONNET_HOSTED_SERVE_BIN` | none | The local driver's `opennova-serve` binary. |
+| `ONNET_HOSTED_WORK_DIR` | `backend/data/hosted` | The root of the local driver's machines' slot directories. |
+| `ONNET_HOSTED_DATA_SETS` | none | A JSON object keyed by data set (`jop_2_consumer`, `dfx2_consumer`, `opennova_0_consumer`), each member of an entry optional: `missions`, a list of `.bms` names, the rotation a start on it takes when its request names none (the first the starting map) and the missions the site's rotation picker offers (with none, a start must name its missions); for `local`, `resource_dir`, the game folder its servers serve (their `--resource-dir`; never licensed data in a repository: an install, or a synthetic loose directory), which is what makes `local` offer the data set, and `loose_root`, `true` to add `--loose-root` (a folder with no game archives, mounted as loose files). The `ec2` driver offers every data set named (each cloud machine mounts them all). For example `{"jop_2_consumer":{"resource_dir":"C:/Games/Joint Operations Combined Arms","missions":["ASH_G11A.bms"]}}`. Any other key or member is a boot warning, and hosting is off. |
+| `ONNET_INTERNAL_HTTP_BIND` | `127.0.0.1:8070` | The internal listener, `<IPv4>:<port>`: the service's private address in a deployment (`10.44.0.10:8070`); a private or loopback address, never a public or wildcard one. The ec2 machines' agents call it, and its address is what their `admin.cfg` admits. |
+| `ONNET_HOSTED_BOOTSTRAP_CIDRS` | none | Comma-separated private IPv4 CIDRs, the networks the agent routes answer (the machines' subnet); each inside 10.0.0.0/8, 172.16.0.0/12 or 192.168.0.0/16. On a loopback bind, 127.0.0.0/8 is admitted besides. |
+| `ONNET_FLEET_SHARED_SLOTS` | 12 | A new shared machine's slots (1..32). |
+| `ONNET_FLEET_MAX_SHARED` | 2 | The most shared machines taking servers at once. |
+| `ONNET_FLEET_MAX_OWN` | 2 | The most own machines taking servers at once. |
+| `ONNET_FLEET_IDLE_MINUTES` | 30 | How long a shared machine with no server lives on before it ends. |
+| `ONNET_FLEET_SLOT_MEMORY_MB` | 512 | Each container's memory (no swap). |
+| `ONNET_FLEET_SLOT_CPUS` | 1 | Each container's CPUs (a decimal). |
+| `ONNET_HOSTED_SERVE_IMAGE` | none | The serve image every start pins and the machines pull (`ghcr.io/<owner>/opennova-serve@sha256:...`, pinned at deploy); required for `ec2` (the local driver only names it). |
+| `ONNET_HOSTED_HOSTD_IMAGE` | the serve image | `ec2`: the image `opennova-hostd` is copied out of (pinned at deploy). |
+| `ONNET_HOSTED_EC2_LAUNCH_TEMPLATES` | none | `ec2`: the launch templates by machine kind, `{"shared": "lt-...", "own": "lt-..."}` (each `lt-<id>` at its default version, or `lt-<id>:<version>`). |
 | `ONNET_HOSTED_EC2_REGION` | none | `ec2`: the region every AWS CLI call names. |
-| `ONNET_HOSTED_EC2_LAUNCH_TEMPLATES` | none | `ec2`: a JSON object, data set to the launch template (`lt-...`) its machines launch from (its default version), the one whose data volume holds that data set; a data set it names is offered. `app deploy` sets it from the Terraform output `hosted_launch_templates`. |
 | `ONNET_HOSTED_EC2_SUBNET` | none | `ec2`: the subnet (`subnet-...`) a machine launches into; it must give its machines a public IPv4. |
 | `ONNET_HOSTED_DEPLOYMENT` | none | `ec2`: the `opennova:deployment` tag every machine carries and every describe, list and terminate is scoped to, so two stacks in one account never touch each other's machines (letters, digits, `.`, `_`, `-`). |
-| `ONNET_HOSTED_SERVE_IMAGE` | none | `ec2`: the serve image the machines run, pinned at deploy (`ghcr.io/<owner>/opennova-serve@sha256:...`). |
-| `ONNET_HOSTED_SERVICE_ADDRESS` | none | `ec2`: this service's PRIVATE IPv4, where the machines fetch their bundle and the address their `admin.cfg` admits. |
-| `ONNET_HOSTED_BOOTSTRAP_CIDRS` | none | `ec2`: comma-separated IPv4 CIDRs, the private networks the bootstrap route answers (the machines' subnet). Each must lie inside 10.0.0.0/8, 172.16.0.0/12 or 192.168.0.0/16; the boot logs the ranges it admits. |
 | `ONNET_HOSTED_AWS_CLI` | `/usr/local/bin/aws` | `ec2`: the AWS CLI v2, an absolute path (run as given, no `PATH` search). |
-| `ONNET_HOSTED_MACHINE_SCRIPT` | `/app/hosted/machine_user_data.sh` (where the image ships it) | `ec2`: the machine script, the user-data template (`hosted/machine/user_data.sh`); a run outside the image names it. |
+| `ONNET_HOSTED_MACHINE_SCRIPT` | `/app/hosted/machine_user_data.sh` (where the image ships it) | `ec2`: the machine script, the user-data template (`hosted/machine/machine_user_data.sh`); a run outside the image names it. |
 
-The deploy toolbox's `app deploy` sets every `ec2` setting from the Terraform outputs
-(DEPLOY.md, "Hosted game servers"); nobody copies an id by hand.
+The deploy toolbox sets every `ec2` setting from the Terraform outputs (DEPLOY.md,
+"Hosted game servers"); nobody copies an id by hand.
 
 The routes (`hosted/hosted_routes.*`, and the comp grant with the admin user routes), behind
 `ONNET_API_PROXY_ONLY` like every `/api` route. Every refusal is an error code with the
@@ -705,9 +723,9 @@ service's own message, never database text.
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/me/servers` | a website session | `{"enabled", "full", "entitlement", "data_sets", "servers"}`: `enabled` is a provider with at least one data set; `full` that `ONNET_HOSTED_CAP` servers are live (a start now is `at_capacity`); `entitlement` the account's hosting entitlement (`max_servers`, `used`: its live servers, a stopping one included, `own_machines`, `own_used`: those of them on own machines, `can_start`, `source`: `none`, `tier` or `comp`); `data_sets` the ones it offers, in order (empty when hosting is off), each `game`, `display_name`, `expansions` (`code` and `name`, the base game's `""` first), `default_missions` (its `missions`: the rotation a start on it takes when it names none and the missions the site's rotation picker offers) and `limits` (`max_players`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, each `min` and `max`); `servers` its live servers by id, oldest first, then its newest 10 ended ones, newest first, each `id`, `state`, `live`, `own_machine`, `settings` (`game`, `game_name`, `max_players`, `game_password`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, `team_ff`, `expansion`, `missions`), `game_display_name` and `expansion_display_name` (the catalog's names, so an ended server's read the same once its data set is gone), `restarts`, `failure_reason`, `created_at`, `updated_at`, `running_at`, `ended_at` (UTC, null until set) and `listing` (`rid`, `server_name`, `mission_name`, `players`, `max_players`, `host_ip`, `host_port` while listed, else null); `Cache-Control: no-store` |
+| `GET /api/me/servers` | a website session | `{"enabled", "full", "entitlement", "data_sets", "servers"}`: `enabled` is a machine driver with at least one data set; `full` that a start now would be `at_capacity` (`ONNET_HOSTED_CAP` servers live, or the fleet with no place for a shared server and none for one on an own machine the account still has free); `entitlement` the account's hosting entitlement (`max_servers`, `used`: its live servers, a stopping one included, `own_machines`, `own_used`: those of them on own machines, `can_start`, `source`: `none`, `tier` or `comp`); `data_sets` the ones it offers, in order (empty when hosting is off), each `game`, `display_name`, `expansions` (`code` and `name`, the base game's `""` first), `default_missions` (its `missions`: the rotation a start on it takes when it names none and the missions the site's rotation picker offers) and `limits` (`max_players`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, each `min` and `max`); `servers` its live servers by id, oldest first, then its newest 10 ended ones, newest first, each `id`, `state`, `live`, `own_machine`, `settings` (`game`, `game_name`, `max_players`, `game_password`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, `team_ff`, `expansion`, `missions`), `game_display_name` and `expansion_display_name` (the catalog's names, so an ended server's read the same once its data set is gone), `restarts`, `failure_reason`, `created_at`, `updated_at`, `running_at`, `ended_at` (UTC, null until set) and `listing` (`rid`, `server_name`, `mission_name`, `players`, `max_players`, `host_ip`, `host_port` while listed, else null); `Cache-Control: no-store` |
 | `GET /api/me/servers/<id>` | a website session | `{"server"}`, one of the account's servers in any state, as the list's plus `events` (the newest 50 transitions, oldest first: `from`, `to`, `detail`, `at`); 404 `not_found` for an id that is not the account's (another account's server is a 404, never a 403); `Cache-Control: no-store` |
-| `POST /api/me/servers` | a website session, the CSRF header | the settings as JSON (`game_name` required; `game` defaults to the first offered data set and `missions` to that data set's; every other field to its default) and `own_machine` (`true` to run it on an own machine; default `false`, a shared one). 503 `hosting_disabled` with no provider; 429 past the account's bucket (6, then one every 20 s, shared with the stop); 400 `invalid_json`, `invalid_field`, or `invalid_settings` with the `field` and why; 403 `not_entitled` with no hosting entitlement (or an account not active), 403 `payment_past_due` while a granting subscription's payment is past due; 409 `server_limit` with `max_servers` and `used` beside the code when every server the account may run is live, 409 `no_own_machine` when each own machine it pays for already runs one, 409 `at_capacity`; 202 `{"server"}`, `requested` |
+| `POST /api/me/servers` | a website session, the CSRF header | the settings as JSON (`game_name` required; `game` defaults to the first offered data set and `missions` to that data set's; every other field to its default) and `own_machine` (`true` to run it on an own machine; default `false`, a shared one). 503 `hosting_disabled` with no machine driver; 429 past the account's bucket (6, then one every 20 s, shared with the stop); 400 `invalid_json`, `invalid_field`, or `invalid_settings` with the `field` and why; 403 `not_entitled` with no hosting entitlement (or an account not active), 403 `payment_past_due` while a granting subscription's payment is past due; 409 `server_limit` with `max_servers` and `used` beside the code when every server the account may run is live, 409 `no_own_machine` when each own machine it pays for already runs one, 409 `at_capacity` (`ONNET_HOSTED_CAP` servers live, or the fleet's planner finds it no place: every slot taken, the servers already waiting counted, and the fleet at its maximum machines); 202 `{"server"}`, `requested` |
 | `POST /api/me/servers/<id>/stop` | a website session, the CSRF header | 429 past the bucket; 404 `not_found` for an id that is not the account's; 409 `not_live` once it has ended; 202 `{"server"}`, `stopping` (also when it already was), or `stopped` when the supervisor finished it in between |
 | `PUT /api/admin/users/<id>/comp-servers` | admin | `{"comp_servers": 0..16}`, the admin's grant; 200 `{"user"}` (which carries `comp_servers` and `max_servers`, the entitlement); 400 `invalid_json`, `invalid_field` (no whole number in 0..16) or `missing_field`; 404 for an unknown id or a service account. An entitlement down to no server stops the account's hosted server, as a ban does |
 | `GET /api/admin/hosted` | admin | the fleet: `{"enabled", "provider", "cap", "live", "servers"}`, the newest 100, live first, each as above plus `owner` and `service_account` (`{id, username}` or null), `provider`, `machine_id`, `machine_address` and `admin_port`. Never the admin password |
@@ -1017,7 +1035,11 @@ locally, the dev compose stack's `postgres` service or `scripts/dev_postgres.sh 
   its SHA-256, then the seeds (`SEED_DIR`), all under a second advisory lock, so two
   servers booting at once apply each file once. Migrations are append-only: a recorded
   file whose SHA-256 has changed stops the boot, so a fix is a new file
-  ([`backend/README.md`](../../backend/README.md)).
+  ([`backend/README.md`](../../backend/README.md)). Until the cutover nothing has applied
+  the program's new migrations in prod, so they may still be edited in place; a
+  development database that applied an older text is recreated
+  (`scripts/dev_postgres.sh reset`; on a deployment `deploy/bin/on-deploy db reset-db`,
+  which takes a `pg_dump` first and refuses while any support tier subscription grants).
 
 ## Website sessions and roles
 
@@ -1249,23 +1271,39 @@ account's push is a 404, and the owner's stop ends the listing. The hosted serve
 `hosted_supervisor`
 ([`tests/novaworld/hosted_supervisor_test.cpp`](../../tests/novaworld/hosted_supervisor_test.cpp),
 every build; it compiles `auth`, `web_session` and `hosted/` straight in) drives the
-settings' rules and renders, the service accounts, the request's checks and every
-transition on a fake provider and a hand-stepped clock (the stops, any exit while
-stopping, the crash restarts, their limit and the restart window, the timeouts, the
-health checks, the owners' changes including a withdrawn comp grant and a canceled support tier, the owners' limits (a tier lowered, past due, the add-on cut) and their mass-stop hold, the reconciliation (a
-`provisioning` row whose machine is gone among it) and the periodic sweep, the console
-ring's cap, and the admin links following the running servers), then
-`LocalProcessProvider` against the test binary itself as its
-server (the files, the environment allowlist against a planted secret, the secrets
-deleted at terminate, and its children outliving the supervisor's thread to get an
-orderly stop); `child_process`
+settings' rules and renders, the data sets, the service accounts, the request's checks
+(the fleet's room among them) and every server transition over a fake machine driver
+whose machines' agents the test plays through the supervisor's sync
+([`tests/novaworld/hosted_fake_driver.h`](../../tests/novaworld/hosted_fake_driver.h),
+[`hosted_fleet_rig.h`](../../tests/novaworld/hosted_fleet_rig.h)) on a hand-stepped clock:
+two servers on one shared machine's slots, the own machine, the stops, any exit while
+stopping, the crash restarts (an exit, the OOM kill, a failed start, a refused launch),
+their limit and the restart window, the timeouts, the health checks, a lost machine
+placing its server again with no restart counted, the owners' changes including a
+withdrawn comp grant and a canceled support tier, the owners' limits (a tier lowered, past
+due, the add-on cut) and their mass-stop hold, the reconciliation, the console ring's cap,
+and the admin links following the running servers; `hosted_fleet`
+([`tests/novaworld/hosted_fleet_test.cpp`](../../tests/novaworld/hosted_fleet_test.cpp),
+every build) the fleet's side over the same fake: the desired state each sync gets (the
+files until reported, a stopping server's unstarted container, the drain flag, a
+container answered for without files after a restart), a boot that never reports, a lost
+machine terminated or ready again, an idle shared machine ending, a drain moving its
+servers one at a time, an admin's end, the reconciliation of the cloud's machines with
+the rows and the periodic sweep; `hosted_placement` the planner (and the request's
+`place_after`); `hosted_fleet_repository` the fleet's rows; `hosted_agent_route` the agent
+routes on the internal listener and the local driver end to end; `hosted_ec2_machine_driver`
+the EC2 driver on a stub `CommandRunner`; `command_runner`
+([`tests/novaworld/command_runner_test.cpp`](../../tests/novaworld/command_runner_test.cpp))
+the real `ProcessCommandRunner` against itself; `hosted_net_cidr` the networks the agent
+routes answer and the refusal log's throttle; `child_process`
 ([`tests/proc/child_process_test.cpp`](../../tests/proc/child_process_test.cpp),
 every build) the child-process seam against itself; the route harness's
 `hosted_server_routes` and `hosted_listing_owner` cases the routes' refusals, the comp grant,
 the starts up to the entitlement (`server_limit` past it, a stopping server counting), the
 own-machine add-on, another account's id answering 404, the list's order, the cap and the
-stops, and the owner rule against a hand-driven host listing as a service account,
-and its `hosted_console_routes` case the console routes over a real admin link to a
+stops, and the owner rule against a hand-driven host listing as a service account, its
+`no_agent_routes_on_public_listener` case that the public port answers none of the agent
+routes, and its `hosted_console_routes` case the console routes over a real admin link to a
 scripted remote-admin server on loopback (the session, CSRF and owner refusals, every
 command and its reply, the arguments refused before a byte is sent, the rotation's
 checks (a full rotation, between matches), the admission (one request in flight per account, one rotation edit per server), hostile replies kept valid JSON, the write bucket, the console ring, the admin's routes, the refusals before
@@ -1273,24 +1311,15 @@ running, with no link and while stopping, and no line off the curated list reach
 server); `hosted_console_commands`
 ([`tests/novaworld/hosted_console_commands_test.cpp`](../../tests/novaworld/hosted_console_commands_test.cpp),
 every build) the curated list itself, its compositions and its reply mapping;
-`hosted_ec2_provider`
-([`tests/novaworld/hosted_ec2_provider_test.cpp`](../../tests/novaworld/hosted_ec2_provider_test.cpp),
-every build) the ec2 provider on a stub `CommandRunner` that checks every AWS CLI argv
-and answers it (the launch's exact `run-instances` and its user-data file, describe's state
-mapping from one cached listing, the bundle fetch gating `running`, the launch grace,
-terminate's idempotence, `list_tagged`'s scope and its throw, and every CLI failure,
-timeout and malformed reply), the bootstrap tokens and CIDRs, the bundle's JSON, the
-shipped machine script's render, and the real `ProcessCommandRunner` against itself; the
-route harness's `hosted_bootstrap_route` case the route over the wire (the one fetch, the
-refusals, a peer outside the networks whatever `X-Real-IP` says, nothing under `/api/`);
 and `hosted_local_e2e`
 ([`tests/novaworld/hosted_local_e2e_test.cpp`](../../tests/novaworld/hosted_local_e2e_test.cpp),
-`BUILD_NOVAWORLD_HTTP` only) a real `opennova-serve` child run by the supervisor through
-`LocalProcessProvider` over a synthetic loose game directory: started from the site,
-listed as its service account and shown as the owner's, renamed by the owner's
-`SetServerName` (its `game.cfg` saved), administered over the supervisor's admin link
-(`PLAYER LIST`, a recorded `CHAT SEND` in the console ring, no password in a log or console
-line), and stopped from the site, the link going down with it. `hosted_admin_link`
+`BUILD_NOVAWORLD_HTTP` only) two real `opennova-serve` children on one local machine's
+slots, the machine's stand-in agent bootstrapping and syncing against the internal
+listener: started from the site, each listed as its service account at its slot's game
+port and shown as its owner's, the first renamed by the owner's `SetServerName` (its
+`game.cfg` saved in its slot), administered over the supervisor's admin link (`PLAYER
+LIST`, a recorded `CHAT SEND` in the console ring, no password in a log or console line),
+and both stopped from the site, the link going down with the first. `hosted_admin_link`
 ([`tests/novaworld/hosted_admin_link_test.cpp`](../../tests/novaworld/hosted_admin_link_test.cpp),
 every build) runs the admin link against a real `opennova-serve` child on the LAN network
 type with the hosted renders' `admin.cfg`: the login, `PLAYER LIST`, `CHAT SEND` read back

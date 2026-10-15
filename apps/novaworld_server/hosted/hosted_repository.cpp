@@ -1,6 +1,7 @@
 #include "hosted_repository.h"
 
 #include "billing/entitlement.h"
+#include "fleet_repository.h"
 
 #include <net/novaworld/host_repository.h>
 
@@ -24,7 +25,8 @@ constexpr const char *kServerColumns =
 		"id, owner_user_id, service_user_id, state, game_name, max_players, game_password, "
 		"time_limit, kill_limit, max_score, respawn, start_delay, team_ff, expansion, missions, "
 		"provider, machine_id, machine_address, admin_port, restarts, "
-		"failure_reason, created_at, updated_at, running_at, ended_at, game, own_machine";
+		"failure_reason, created_at, updated_at, running_at, ended_at, game, own_machine, "
+		"machine_ref, slot, game_port, generation, serve_image";
 
 BindValue optional_id(std::optional<int64_t> id) {
 	if (!id) return BindValue(std::monostate{});
@@ -61,6 +63,11 @@ HostedServer row_to_server(const db::Row &r) {
 	s.ended_at = r.as_text(24).value_or("");
 	st.game = r.as_text(25).value_or("");
 	s.own_machine = r.as_int(26).value_or(0) != 0;
+	s.machine_ref = r.as_int(27);
+	s.slot = static_cast<int>(r.as_int(28).value_or(-1));
+	s.game_port = static_cast<int>(r.as_int(29).value_or(0));
+	s.generation = r.as_int(30).value_or(0);
+	s.serve_image = r.as_text(31).value_or("");
 	return s;
 }
 
@@ -100,7 +107,7 @@ std::optional<State> state_from_name(std::string_view name) {
 bool is_live(State state) { return state != State::Stopped && state != State::Failed; }
 
 RequestResult request_server(db::Database &db, int64_t owner_user_id, const HostedSettings &settings,
-		const std::vector<DataSet> &offered, int cap, int64_t now, bool own_machine) {
+		const std::vector<DataSet> &offered, int cap, int64_t now, bool own_machine, const PlacementPolicy *fleet) {
 	RequestResult out;
 	if (check_settings(settings, offered)) {
 		out.outcome = RequestOutcome::InvalidSettings;
@@ -138,7 +145,7 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id, const Host
 		out.outcome = RequestOutcome::NoOwnMachine;
 		return out;
 	}
-	if (count_live(db) >= cap) {
+	if (count_live(db) >= cap || (fleet && !fleet_has_room(db, *fleet, own_machine))) {
 		out.outcome = RequestOutcome::AtCapacity;
 		return out;
 	}
@@ -335,6 +342,11 @@ void set_machine(db::Database &db, int64_t id, const std::string &provider,
 	db.exec("UPDATE hosted_servers SET provider = $1, machine_id = $2, machine_address = $3, "
 			"updated_at = now() WHERE id = $4;",
 			{ BindValue(provider), BindValue(machine_id), BindValue(address), BindValue(id) });
+}
+
+void set_serve_image(db::Database &db, int64_t id, const std::string &image) {
+	db.exec("UPDATE hosted_servers SET serve_image = $1, updated_at = now() WHERE id = $2;",
+			{ BindValue(image), BindValue(id) });
 }
 
 void set_admin_login(db::Database &db, int64_t id, int admin_port, const std::string &user,

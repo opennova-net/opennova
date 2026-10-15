@@ -4,7 +4,7 @@
 #
 # The runtime image needs only the server binary, libpq and its data dirs
 # (migrations, seed, retail templates/static), and for the hosted servers' ec2
-# provider the AWS CLI v2 and the machine script. It keeps no state: the
+# machine driver the AWS CLI v2 and the machine script. It keeps no state: the
 # database is PostgreSQL (DATABASE_URL, a libpq URI, and DATABASE_PASSWORD
 # beside it; apps/novaworld_server/README.md). Against RDS the URI carries
 # sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem, the RDS CA bundle
@@ -33,8 +33,8 @@ RUN cmake -S . -B build -G Ninja \
     && cmake --build build --target opennova_novaworld_server
 
 # ---- AWS CLI stage ---------------------------------------------------------
-# The hosted servers' ec2 provider (hosted/ec2_provider.h) runs the AWS CLI v2,
-# its credentials the service instance's role (IMDSv2). A pinned release,
+# The hosted servers' ec2 machine driver (hosted/ec2_machine_driver.h) runs the
+# AWS CLI v2, its credentials the service instance's role (IMDSv2). A pinned release,
 # checked against its SHA-256 before it is unpacked. The sum was taken from the
 # release AWS signed: its .sig verifies against the AWS CLI Team key in the
 # CLI's install guide (fingerprint FB5D B77F D5C1 18B8 0511 ADA8 A631 0ACC 4672
@@ -54,7 +54,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && /tmp/aws/install --install-dir /usr/local/aws-cli --bin-dir /usr/local/bin \
     && /usr/local/bin/aws --version
 
-# The provider calls ec2 alone (sts for a credentials check by hand): the help
+# The driver calls ec2 alone (sts for a credentials check by hand): the help
 # examples, the completer and its index, and every other service's model go
 # (about 160 MB of the CLI's 270). The models' root files (endpoints.json,
 # partitions.json) stay. Then the check: both services' commands still build,
@@ -109,9 +109,10 @@ COPY --from=build /src/backend/migrations /app/backend/migrations
 COPY --from=build /src/backend/seed /app/backend/seed
 COPY --from=build /src/apps/novaworld_server/templates /app/templates
 COPY --from=build /src/apps/novaworld_server/static /app/static
-# The ec2 provider's machine script (the cloud machines' user-data template)
-# and the AWS CLI it runs, at the absolute path it runs it by.
-COPY --from=build /src/apps/novaworld_server/hosted/machine/user_data.sh /app/hosted/machine_user_data.sh
+# The ec2 machine driver's machine script (the cloud machines' user-data
+# template, which installs opennova-hostd) and the AWS CLI it runs, at the
+# absolute path it runs it by.
+COPY --from=build /src/apps/novaworld_server/hosted/machine/machine_user_data.sh /app/hosted/machine_user_data.sh
 COPY --from=awscli /usr/local/aws-cli /usr/local/aws-cli
 RUN ln -s /usr/local/aws-cli/v2/current/bin/aws /usr/local/bin/aws && aws --version
 COPY --from=rdsca /tmp/rds-global-bundle.pem /app/rds-global-bundle.pem

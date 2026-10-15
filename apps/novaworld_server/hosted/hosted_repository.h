@@ -1,14 +1,17 @@
 #pragma once
 
-// The hosted servers' rows (hosted_servers, hosted_server_events; migrations
-// 0011 and 0014, the server's data set): the requests the site makes, the state each server is in, every
-// transition with what caused it, and which listing is a hosted server's. The
-// supervisor (supervisor.h) and the routes share it; every write that spans
-// statements is one db::Transaction, and a transition is a compare-and-set on
-// the state, so the supervisor and a route that both move a server never both
-// win. Crow-free. Each function throws db::Error on a database failure.
+// The hosted servers' rows (hosted_servers, hosted_server_events; the
+// baseline, and 0003_fleet.sql's place in the fleet): the requests the site
+// makes, the state each server is in, every transition with what caused it,
+// and which listing is a hosted server's. The supervisor (supervisor.h) and the
+// routes share it; every write that spans statements is one db::Transaction,
+// and a transition is a compare-and-set on the state, so the supervisor and a
+// route that both move a server never both win. The slot a server holds is
+// fleet_repository.h's (assign_slot, release_slot). Crow-free. Each function
+// throws db::Error on a database failure.
 
 #include "hosted_settings.h"
+#include "placement.h"
 
 #include <net/novaworld/db/database.h>
 
@@ -26,11 +29,11 @@ namespace opennova::novaworld_server::hosted {
 // request takes any live state to stopping.
 enum class State : uint8_t {
 	Requested,    // the owner asked; the supervisor has not picked it up
-	Provisioning, // the service account and the files are made, the machine launched
-	Booting,      // the machine is starting opennova-serve
+	Provisioning, // placed on a slot of a machine (or waiting for one), its files rendered
+	Booting,      // its container is wanted on its slot; the machine's agent starts it
 	Listing,      // opennova-serve runs; its listing has not appeared yet
 	Running,      // listed on NovaWorld by its service account
-	Stopping,     // a stop was asked for; the machine is being ended
+	Stopping,     // a stop was asked for; its container is being stopped
 	Stopped,      // ended by a stop (or a clean exit)
 	Failed,       // ended by a fault (failure_reason)
 };
@@ -50,6 +53,10 @@ struct HostedServer {
 	std::optional<int64_t> service_user_id;
 	State state = State::Requested;
 	HostedSettings settings;
+	// The machine driver that ran its last start, its container's name
+	// (srv-<id>-g<generation>) and the machine's private address (the admin
+	// link's target); empty until a start renders them, and cleared when it
+	// leaves its slot.
 	std::string provider;
 	std::string machine_id;
 	std::string machine_address;
@@ -58,6 +65,15 @@ struct HostedServer {
 	std::string failure_reason;
 	// It runs on a machine of its own (the own-machine add-on), not a shared one.
 	bool own_machine = false;
+	// Its place in the fleet (0003_fleet.sql): the fleet_machines row and the
+	// slot it holds while live (an ended row keeps where it last ran), the game
+	// port its files were rendered with, how many starts it has had (its
+	// container's generation) and the serve image its start pinned.
+	std::optional<int64_t> machine_ref;
+	int slot = -1;
+	int game_port = 0;
+	int64_t generation = 0;
+	std::string serve_image;
 	// UTC 'YYYY-MM-DD HH:MM:SS'; running_at / ended_at empty until set.
 	std::string created_at;
 	std::string updated_at;
@@ -92,7 +108,7 @@ enum class RequestOutcome : uint8_t {
 	PastDue,      // its support tier's payment is past due: its servers run on, none starts
 	AtLimit,      // `used` of its `max_servers` are live already
 	NoOwnMachine, // an own machine was asked for, and each the add-on pays for runs one
-	AtCapacity,   // `cap` servers are live
+	AtCapacity,   // `cap` servers are live, or the fleet has no place for it (fleet_has_room)
 };
 struct RequestResult {
 	RequestOutcome outcome = RequestOutcome::Created;
@@ -109,9 +125,12 @@ struct RequestResult {
 // seconds; billing/entitlement.h): some servers, none past due, fewer of its
 // servers live than it grants (a stopping one counts), and with `own_machine`
 // fewer of them on own machines than the add-on pays for; then the global cap,
-// and the row written (state requested, its event beside it).
+// and with `fleet` the fleet's room under that placement policy (the
+// supervisor's planner, fleet_repository.h fleet_has_room); and the row
+// written (state requested, its event beside it).
 RequestResult request_server(db::Database &db, int64_t owner_user_id, const HostedSettings &settings,
-		const std::vector<DataSet> &offered, int cap, int64_t now, bool own_machine = false);
+		const std::vector<DataSet> &offered, int cap, int64_t now, bool own_machine = false,
+		const PlacementPolicy *fleet = nullptr);
 
 std::optional<HostedServer> find_server(db::Database &db, int64_t id);
 // Server `id` when `owner_user_id` owns it, in any state; nullopt for no such
@@ -164,6 +183,7 @@ bool reset_restarts(db::Database &db, int64_t id);
 void set_service_account(db::Database &db, int64_t id, std::optional<int64_t> user_id);
 void set_machine(db::Database &db, int64_t id, const std::string &provider,
 		const std::string &machine_id, const std::string &address);
+void set_serve_image(db::Database &db, int64_t id, const std::string &image);
 void set_admin_login(db::Database &db, int64_t id, int admin_port, const std::string &user,
 		const std::string &password);
 

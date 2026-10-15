@@ -17,10 +17,12 @@
 #include "billing/billing_repository.h"
 #include "billing/stripe_api.h"
 #include "command_runner.h"
-#include "hosted/bootstrap.h"
-#include "hosted/ec2_provider.h"
+#include "hosted/ec2_machine_driver.h"
+#include "hosted/fleet_config.h"
+#include "hosted/fleet_repository.h"
 #include "hosted/hosted_settings.h"
-#include "hosted/local_process_provider.h"
+#include "hosted/internal_listener.h"
+#include "hosted/local_machine_driver.h"
 #include "hosted/owner_file.h"
 #include "hosted/supervisor.h"
 #include "http_listener.h"
@@ -126,29 +128,34 @@ void apply_seed(opennova::db::Database &db,
 // brings in `hosted` itself).
 namespace hosted_ns = opennova::novaworld_server::hosted;
 
-// The hosted servers' machines: the MachineProvider ONNET_HOSTED_PROVIDER names
-// and, for "ec2", what it stands on (the AWS CLI runner, the bootstrap tokens
-// the HTTP listener redeems and the networks its route answers). main()
-// declares it before the HTTP listener, so the store outlives the route; the
-// provider alone is reset at the shutdown.
-struct HostedMachines {
-	// The data sets the provider offers (hosted/data_sets.h); the supervisor's.
+// The hosted servers' fleet: the MachineDriver ONNET_HOSTED_PROVIDER names, the
+// fleet's settings (hosted/fleet_config.h) and, for "ec2", what the driver
+// stands on (the AWS CLI runner and its owner-only scratch directory). main()
+// declares it before the HTTP listener and the internal listener; the driver
+// alone is reset at the shutdown.
+struct HostedFleet {
+	// The data sets the driver offers (hosted/data_sets.h); the supervisor's.
 	std::vector<hosted_ns::DataSet> data_sets;
+	hosted_ns::FleetConfig fleet;
 	std::unique_ptr<opennova::proc::CommandRunner> runner;
-	std::unique_ptr<hosted_ns::BootstrapStore> bootstrap;
-	std::vector<hosted_ns::Ipv4Cidr> bootstrap_cidrs;
-	hosted_ns::Ec2Provider *ec2 = nullptr; // the provider, when it is the ec2 one
-	std::filesystem::path scratch_dir;     // the ec2 provider's, removed at the shutdown
-	std::unique_ptr<hosted_ns::MachineProvider> provider;
+	std::filesystem::path scratch_dir; // the ec2 driver's, removed at the shutdown
+	hosted_ns::LocalMachineDriver *local = nullptr; // the driver, when it is the local one
+	std::unique_ptr<hosted_ns::MachineDriver> driver;
 };
 
-// The ec2 provider over `data_sets`, or nothing with a boot warning naming what
-// it lacks.
-void make_ec2_machines(const opennova::novaworld_server::ServerConfig &config,
-                       std::vector<hosted_ns::DataSet> data_sets, HostedMachines &m) {
+// The slugs of `data_sets`, in their order.
+std::vector<std::string> data_set_slugs(const std::vector<hosted_ns::DataSet> &data_sets) {
+	std::vector<std::string> out;
+	for (const hosted_ns::DataSet &d : data_sets) out.push_back(d.game);
+	return out;
+}
+
+// The ec2 driver over `f.data_sets` and `f.fleet`, or nothing with a boot
+// warning naming what it lacks.
+void make_ec2_driver(const opennova::novaworld_server::ServerConfig &config, HostedFleet &f) {
 	using opennova::novaworld_server::loggable;
 	const auto off = [](const std::string &why) {
-		std::fprintf(stderr, "[boot] WARN hosted servers: the ec2 provider %s; hosting off\n", why.c_str());
+		std::fprintf(stderr, "[boot] WARN hosted servers: the ec2 driver %s; hosting off\n", why.c_str());
 	};
 	// The servers list through the service's public address, so the listing
 	// records each machine's own public address (ADR 0053).
@@ -156,128 +163,94 @@ void make_ec2_machines(const opennova::novaworld_server::ServerConfig &config,
 		off("needs ONNET_PUBLIC_HOST, the public address its servers list on");
 		return;
 	}
-	std::vector<hosted_ns::Ipv4Cidr> cidrs;
-	for (const std::string &text : config.hosted_bootstrap_cidrs) {
-		const auto cidr = hosted_ns::parse_ipv4_cidr(text);
-		if (!cidr) {
-			off("finds ONNET_HOSTED_BOOTSTRAP_CIDRS entry '" + loggable(text) + "' no IPv4 CIDR");
-			return;
-		}
-		// The route hands out the servers' secrets: it never answers a peer
-		// outside the private networks (and no prefix shorter than /8).
-		if (!hosted_ns::ipv4_cidr_private(*cidr)) {
-			off("finds ONNET_HOSTED_BOOTSTRAP_CIDRS entry '" + loggable(text) +
-			    "' outside the private networks (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16)");
-			return;
-		}
-		cidrs.push_back(*cidr);
-	}
-	if (cidrs.empty()) {
-		off("needs ONNET_HOSTED_BOOTSTRAP_CIDRS, the private networks its machines fetch from");
+	hosted_ns::Ec2MachineConfig &ec2 = f.fleet.ec2;
+	ec2.data_sets = data_set_slugs(f.data_sets);
+	std::string error;
+	if (!hosted_ns::load_machine_script(f.fleet.machine_script_path, ec2.machine_script, error)) {
+		off(loggable(error, 300) + " (ONNET_HOSTED_MACHINE_SCRIPT)");
 		return;
-	}
-	hosted_ns::Ec2Config ec2;
-	{
-		std::ifstream in(config.hosted_machine_script, std::ios::binary);
-		std::ostringstream text;
-		if (in) text << in.rdbuf();
-		if (!in) {
-			off("cannot read its machine script '" + loggable(config.hosted_machine_script) +
-			    "' (ONNET_HOSTED_MACHINE_SCRIPT)");
-			return;
-		}
-		ec2.machine_script = text.str();
 	}
 	std::error_code ec;
 	const std::filesystem::path temp = std::filesystem::temp_directory_path(ec);
-	std::string error;
 	const std::filesystem::path scratch = temp / ("opennova-hosted-" + hosted_ns::random_secret(12));
 	if (ec || !hosted_ns::make_owner_directory(scratch, error)) {
 		off("cannot make its scratch directory" + (error.empty() ? std::string() : ": " + error));
 		return;
 	}
-	ec2.aws_cli = config.hosted_aws_cli;
-	ec2.region = config.hosted_ec2_region;
-	ec2.data_sets = data_sets;
-	ec2.subnet = config.hosted_ec2_subnet;
-	ec2.deployment = config.hosted_deployment;
-	ec2.serve_image = config.hosted_serve_image;
-	ec2.service_address = config.hosted_service_address;
-	ec2.bootstrap_port = config.http_port;
 	ec2.scratch_dir = scratch.u8string();
-	const std::string why = hosted_ns::Ec2Provider::check_config(ec2);
-	if (!why.empty()) {
+	if (const std::string why = hosted_ns::Ec2MachineDriver::check_config(ec2); !why.empty()) {
+		std::filesystem::remove_all(scratch, ec);
 		off("is not configured: " + why);
 		return;
 	}
-	m.runner = std::make_unique<opennova::proc::ProcessCommandRunner>(
+	f.runner = std::make_unique<opennova::proc::ProcessCommandRunner>(
 			opennova::proc::ProcessCommandRunner::service_environment(), ec2.scratch_dir);
-	m.bootstrap = std::make_unique<hosted_ns::BootstrapStore>();
-	m.bootstrap_cidrs = std::move(cidrs);
-	m.scratch_dir = scratch;
-	std::string admitted;
-	for (const hosted_ns::Ipv4Cidr &cidr : m.bootstrap_cidrs)
-		admitted += (admitted.empty() ? "" : ", ") + hosted_ns::ipv4_cidr_text(cidr);
-	std::printf("[boot] hosted servers: ec2 in %s, subnet %s, deployment %s, image %s\n",
-	            ec2.region.c_str(), ec2.subnet.c_str(), ec2.deployment.c_str(),
-	            loggable(ec2.serve_image, 255).c_str());
-	for (const hosted_ns::DataSet &d : ec2.data_sets)
-		std::printf("[boot] hosted servers: data set %s from launch template %s\n", d.game.c_str(),
-		            loggable(d.launch_template).c_str());
-	std::printf("[boot] hosted servers: the bootstrap route answers %s alone\n", admitted.c_str());
-	auto provider = std::make_unique<hosted_ns::Ec2Provider>(std::move(ec2), *m.runner, *m.bootstrap);
-	m.ec2 = provider.get();
-	m.provider = std::move(provider);
-	m.data_sets = std::move(data_sets);
+	f.scratch_dir = scratch;
+	std::printf("[boot] hosted servers: ec2 in %s, subnet %s, deployment %s, shared machines from %s, own from %s\n",
+	            ec2.region.c_str(), ec2.subnet.c_str(), ec2.deployment.c_str(), ec2.shared_template.c_str(),
+	            ec2.own_template.c_str());
+	std::printf("[boot] hosted servers: serve image %s, hostd image %s\n", loggable(ec2.serve_image, 255).c_str(),
+	            loggable(ec2.hostd_image.empty() ? ec2.serve_image : ec2.hostd_image, 255).c_str());
+	f.driver = std::make_unique<hosted_ns::Ec2MachineDriver>(ec2, *f.runner);
 }
 
-// The hosted servers' machines ONNET_HOSTED_PROVIDER names, over the data sets
-// it offers; no provider when hosting is off ("none", an unknown name, data
-// sets that did not read or none the provider has the data of, or a provider
-// missing what it needs; each but "none" logged as a warning).
-HostedMachines make_hosted_machines(const opennova::novaworld_server::ServerConfig &config) {
+// The hosted servers' fleet ONNET_HOSTED_PROVIDER names, over the data sets
+// its driver offers; no driver when hosting is off ("none", an unknown name,
+// fleet settings or data sets that did not read, none the driver has the data
+// of, or a driver missing what it needs; each but "none" logged as a warning).
+HostedFleet make_hosted_fleet(const opennova::novaworld_server::ServerConfig &config) {
 	using opennova::novaworld_server::loggable;
-	HostedMachines m;
-	if (config.hosted_provider == "none") return m;
+	HostedFleet f;
+	if (config.hosted_provider == "none") return f;
 	if (config.hosted_provider != "local" && config.hosted_provider != "ec2") {
 		std::fprintf(stderr, "[boot] WARN hosted servers: unknown ONNET_HOSTED_PROVIDER '%s'; hosting off\n",
 		             loggable(config.hosted_provider).c_str());
-		return m;
+		return f;
+	}
+	std::vector<std::string> errors;
+	f.fleet = hosted_ns::fleet_config_from_env(errors);
+	if (!errors.empty()) {
+		for (const std::string &e : errors)
+			std::fprintf(stderr, "[boot] WARN hosted servers: %s\n", loggable(e, 300).c_str());
+		std::fprintf(stderr, "[boot] WARN hosted servers: the fleet's settings do not read; hosting off\n");
+		return f;
 	}
 	std::vector<hosted_ns::DataSetConfig> configs;
 	std::string error;
-	if (!hosted_ns::parse_data_set_configs(config.hosted_data_sets, config.hosted_ec2_launch_templates, configs,
-	                                       error)) {
+	if (!hosted_ns::parse_data_set_configs(config.hosted_data_sets, configs, error)) {
 		std::fprintf(stderr, "[boot] WARN hosted servers: %s; hosting off\n", loggable(error, 300).c_str());
-		return m;
+		return f;
 	}
-	std::vector<hosted_ns::DataSet> data_sets = hosted_ns::offered_data_sets(config.hosted_provider, configs);
-	if (data_sets.empty()) {
-		std::fprintf(stderr, "[boot] WARN hosted servers: the %s provider has no data set (%s); hosting off\n",
+	f.data_sets = hosted_ns::offered_data_sets(config.hosted_provider, configs);
+	if (f.data_sets.empty()) {
+		std::fprintf(stderr, "[boot] WARN hosted servers: the %s driver has no data set (ONNET_HOSTED_DATA_SETS %s); "
+		                     "hosting off\n",
 		             config.hosted_provider.c_str(),
-		             config.hosted_provider == "ec2" ? "ONNET_HOSTED_EC2_LAUNCH_TEMPLATES names none"
-		                                             : "ONNET_HOSTED_DATA_SETS gives none a resource_dir");
-		return m;
+		             config.hosted_provider == "ec2" ? "names none" : "gives none a resource_dir");
+		return f;
 	}
 	if (config.hosted_provider == "ec2") {
-		make_ec2_machines(config, std::move(data_sets), m);
-		return m;
+		make_ec2_driver(config, f);
+		return f;
 	}
 	if (config.hosted_serve_bin.empty()) {
-		std::fprintf(stderr, "[boot] WARN hosted servers: the local provider needs "
+		std::fprintf(stderr, "[boot] WARN hosted servers: the local driver needs "
 		                     "ONNET_HOSTED_SERVE_BIN; hosting off\n");
-		return m;
+		return f;
 	}
-	for (const hosted_ns::DataSet &d : data_sets)
+	for (const hosted_ns::DataSet &d : f.data_sets)
 		std::printf("[boot] hosted servers: data set %s from %s%s\n", d.game.c_str(),
 		            loggable(d.resource_dir, 260).c_str(), d.loose_root ? " (loose)" : "");
-	hosted_ns::LocalProcessConfig local;
+	hosted_ns::LocalMachineConfig local;
 	local.serve_binary = config.hosted_serve_bin;
-	local.data_sets = data_sets;
+	local.data_sets = f.data_sets;
 	local.work_dir = config.hosted_work_dir;
-	m.provider = std::make_unique<hosted_ns::LocalProcessProvider>(std::move(local));
-	m.data_sets = std::move(data_sets);
-	return m;
+	auto driver = std::make_unique<hosted_ns::LocalMachineDriver>(std::move(local));
+	f.local = driver.get();
+	f.driver = std::move(driver);
+	// The local driver's containers run its own binary; the rows name an image all the same.
+	if (f.fleet.ec2.serve_image.empty()) f.fleet.ec2.serve_image = "opennova-serve:local";
+	return f;
 }
 
 namespace billing_ns = opennova::novaworld_server::billing;
@@ -522,22 +495,25 @@ int main() {
 	// declared before the HTTP listener and outlives it.
 	Watchdog watchdog;
 #ifdef OPENNOVA_HTTP_ENABLED
-	// The hosted servers' provider, decided before the routes start (they answer
-	// that hosting is off without one); its supervisor starts once the gate has
-	// its port. Declared before the supervisor, which uses it, and before the
-	// HTTP listener, whose bootstrap route redeems the ec2 provider's tokens.
-	HostedMachines hosted_machines = make_hosted_machines(config);
-	std::unique_ptr<hosted::MachineProvider> &hosted_provider = hosted_machines.provider;
+	// The hosted servers' machine driver, decided before the routes start (they
+	// answer that hosting is off without one); its supervisor starts once the
+	// gate has its port. Declared before the supervisor and the internal
+	// listener, which use it.
+	HostedFleet hosted_fleet = make_hosted_fleet(config);
+	std::unique_ptr<hosted::MachineDriver> &hosted_driver = hosted_fleet.driver;
 	// The admin links to the running hosted servers (hosted/admin_link.h): the
 	// supervisor keeps them in step with its rows; declared before the HTTP
 	// listener, whose routes run commands on them, so they outlive it.
 	std::unique_ptr<hosted::AdminLinks> admin_links;
-	if (hosted_provider) admin_links = std::make_unique<hosted::AdminLinks>(db_pool.get());
+	if (hosted_driver) admin_links = std::make_unique<hosted::AdminLinks>(db_pool.get());
 	// The hosted servers' limits hold (hosted/limits_hold.h): the supervisor
 	// sets it, the admin's billing reconcile clears it; it outlives both.
 	hosted::LimitsHold limits_hold;
+	// The supervisor, then the internal listener whose agent routes ask it
+	// what each machine runs (declared after it, so destroyed first).
 	std::unique_ptr<hosted::Supervisor> supervisor;
-	listening.hosted_provider = hosted_provider ? hosted_provider->name() : "none";
+	std::unique_ptr<hosted::InternalListener> internal_listener;
+	listening.hosted_provider = hosted_driver ? hosted_driver->name() : "none";
 	// Billing (the monthly support tiers; billing/): on only when its settings
 	// are complete. Declared before the HTTP listener, whose routes use it; its
 	// sync worker starts once the listeners serve.
@@ -552,18 +528,15 @@ int main() {
 	// NW UDP listener, which outlives this one (stopped after it below).
 	http.set_nw_udp_listener(&nwudp);
 	// The console routes run their commands on the admin links (declared above,
-	// so they outlive the listener); none without a provider.
+	// so they outlive the listener); none without a driver.
 	http.set_admin_links(admin_links.get());
-	// The cloud machines' bootstrap route (hosted/bootstrap_route.h), with the
-	// ec2 provider alone.
-	if (hosted_machines.bootstrap)
-		http.set_hosted_bootstrap(hosted_machines.bootstrap.get(), hosted_machines.bootstrap_cidrs);
+	// A start's at_capacity and the list's `full` ask the fleet's planner.
+	http.set_fleet_placement(hosted_fleet.fleet.placement);
 	if (!http.start(listening)) {
 		std::fprintf(stderr, "[boot] FATAL: HTTP listener start failed\n");
 		return 1;
 	}
 	listening.http_port = http.bound_port();
-	if (hosted_machines.ec2) hosted_machines.ec2->set_bootstrap_port(http.bound_port());
 #endif
 	if (!nwudp.start(listening)) {
 		std::fprintf(stderr, "[boot] FATAL: NW UDP listener start failed\n");
@@ -583,22 +556,29 @@ int main() {
 	}
 
 #ifdef OPENNOVA_HTTP_ENABLED
-	if (hosted_provider) {
+	if (hosted_driver) {
+		const hosted::FleetConfig &fleet = hosted_fleet.fleet;
 		hosted::SupervisorConfig hosted_config;
 		hosted_config.cap = config.hosted_cap;
-		// The local provider's servers run on this machine, so they reach the
-		// gate on loopback; a cloud machine lists through the service's public
+		// The local driver's servers run on this machine, so they reach the gate
+		// on loopback; a cloud machine lists through the service's public
 		// address, so the listing records the machine's own public one.
-		hosted_config.master_host = hosted_machines.ec2 ? config.public_host : "127.0.0.1";
+		hosted_config.master_host = hosted_fleet.local ? "127.0.0.1" : config.public_host;
 		hosted_config.master_gate_port = gate.bound_port();
-		hosted_config.data_sets = hosted_machines.data_sets;
-		// A cloud machine boots (EC2, cloud-init, docker, the fetch) and pulls
-		// its image before it lists: the ec2 provider's own clocks.
-		if (hosted_machines.ec2) {
-			hosted_config.boot_timeout_ms = hosted::Ec2Provider::kBootTimeoutMs;
-			hosted_config.listing_timeout_ms = hosted::Ec2Provider::kListingTimeoutMs;
+		hosted_config.data_sets = hosted_fleet.data_sets;
+		hosted_config.placement = fleet.placement;
+		hosted_config.idle_ms = static_cast<uint64_t>(fleet.idle_minutes) * 60 * 1000;
+		hosted_config.slot_cpus = fleet.slot_cpus;
+		hosted_config.slot_memory_mb = fleet.slot_memory_mb;
+		hosted_config.slot_pids = fleet.slot_pids;
+		hosted_config.serve_image = fleet.ec2.serve_image;
+		// A cloud container may pull its image before it starts, and lists over
+		// the internet: longer clocks than a local one's.
+		if (!hosted_fleet.local) {
+			hosted_config.boot_timeout_ms = 10 * 60 * 1000;
+			hosted_config.listing_timeout_ms = 5 * 60 * 1000;
 		}
-		supervisor = std::make_unique<hosted::Supervisor>(*db_pool, *hosted_provider, hosted_config);
+		supervisor = std::make_unique<hosted::Supervisor>(*db_pool, *hosted_driver, hosted_config);
 		// A stop's ServerStopHosting, scoped to the service account that holds
 		// the listing (the sysop punt's code, as the admin stop route's).
 		supervisor->set_stop_listing([&nwudp](uint32_t rid, int64_t account) {
@@ -607,6 +587,20 @@ int main() {
 		});
 		supervisor->set_admin_links(admin_links.get());
 		supervisor->set_limits_hold(&limits_hold);
+		// The machine agents' routes, on the internal listener before the
+		// supervisor's first pass launches a machine whose agent calls them.
+		internal_listener = std::make_unique<hosted::InternalListener>(
+				*db_pool, *supervisor, hosted::agent_route_config(fleet, data_set_slugs(hosted_fleet.data_sets)));
+		if (!internal_listener->start(fleet.internal_address, fleet.internal_port)) {
+			std::fprintf(stderr, "[boot] FATAL: the internal listener could not bind %s:%u (ONNET_INTERNAL_HTTP_BIND)\n",
+			             fleet.internal_address.c_str(), static_cast<unsigned>(fleet.internal_port));
+			gate.stop();
+			http.stop();
+			nwudp.stop();
+			return 1;
+		}
+		if (hosted_fleet.local)
+			hosted_fleet.local->set_service_url("http://127.0.0.1:" + std::to_string(internal_listener->bound_port()));
 		supervisor->start();
 	}
 	// The billing worker: its first pass reconciles with Stripe and checks the prices.
@@ -665,6 +659,7 @@ int main() {
 #ifdef OPENNOVA_HTTP_ENABLED
 				beat.hosted_live = hosted::count_live(dbh);
 				beat.hosted_failed = hosted::count_failed_since(dbh, window_s);
+				beat.machines_lost = hosted::count_machines(dbh, hosted::FleetMachineState::Lost);
 				if (billing_stack.billing)
 					beat.billing_sync_age_s = billing_stack.billing->sync().sync_age_s(dbh, billing::unix_now());
 #endif
@@ -746,25 +741,28 @@ int main() {
 	// destroyed in reverse declaration order, so main_lease and then the pool
 	// (declared first) go last, closing every connection.
 #ifdef OPENNOVA_HTTP_ENABLED
-	// The supervisor's thread first, then the provider, which ends the local
-	// provider's servers while the listeners still serve their deregistration.
-	// Their rows keep their states: the next boot's reconciliation launches them
-	// again.
+	// The supervisor's thread first (no pass runs from here on), then the admin
+	// links while their servers still run (each logged-in session ends with
+	// QUIT), then the driver, which ends the local driver's stand-in machines
+	// and their servers while the listeners still serve their deregistration;
+	// the cloud machines and their containers run on, and the next boot's
+	// reconciliation resumes them. The internal listener next (its agent routes
+	// ask the supervisor, still alive), then the supervisor itself. The rows
+	// keep their states.
 	if (supervisor) {
 		std::printf("[shutdown] stopping the hosted servers' supervisor\n");
-		supervisor.reset();
+		supervisor->stop();
 	}
-	// The admin links next, while their servers still run: each logged-in
-	// session ends with QUIT. The ec2 provider's machines run on (the next
-	// boot's reconciliation resumes them); its bootstrap store outlives the
-	// HTTP listener below.
 	if (admin_links) admin_links->stop_all();
-	hosted_provider.reset();
-	// The ec2 provider's scratch directory (the CLI's output and user-data
+	hosted_driver.reset();
+	if (internal_listener) internal_listener->stop();
+	internal_listener.reset();
+	supervisor.reset();
+	// The ec2 driver's scratch directory (the CLI's output and user-data
 	// files, each deleted after its call) goes with it.
-	if (!hosted_machines.scratch_dir.empty()) {
+	if (!hosted_fleet.scratch_dir.empty()) {
 		std::error_code scratch_ec;
-		std::filesystem::remove_all(hosted_machines.scratch_dir, scratch_ec);
+		std::filesystem::remove_all(hosted_fleet.scratch_dir, scratch_ec);
 	}
 #endif
 #ifdef OPENNOVA_HTTP_ENABLED

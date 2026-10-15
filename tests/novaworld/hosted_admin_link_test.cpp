@@ -162,7 +162,7 @@ int main(int argc, char **argv) {
 		settings.missions = { "servetst.bms" };
 		const uint16_t admin_port = serve_test::free_tcp_port();
 		expect(admin_port != 0, "a free admin port");
-		hosted::MachinePlan plan;
+		hosted::SlotPlan plan;
 		plan.admin_port = admin_port;
 		plan.admin_allowed_ip = "127.0.0.1";
 		opennova::gamecfg::GameCfg cfg = opennova::gamecfg::defaults();

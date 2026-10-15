@@ -38,8 +38,8 @@
 // The service's private address is ONNET_INTERNAL_HTTP_BIND's (infra.env's
 // ONNET_HOSTED_SERVICE_ADDRESS names the same one). Service policy, not a port.
 
-#include "bootstrap.h"
 #include "ec2_machine_driver.h"
+#include "net_cidr.h"
 #include "placement.h"
 
 #include <cstdint>

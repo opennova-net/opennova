@@ -108,9 +108,18 @@ int first_free_slot(const FleetMachine &machine);
 int free_slot_count(const FleetMachine &machine);
 
 // Where `request` goes on `machines` (every machine of the fleet, any state)
-// under `policy`. A start request that would get Full is the fleet's
-// at_capacity.
+// under `policy`.
 Placement place_server(const PlacementRequest &request, const std::vector<FleetMachine> &machines,
 		const PlacementPolicy &policy);
+
+// Where `request` would go once every server in `waiting` (the live servers
+// holding no slot yet, in the order the supervisor places them: by id) took
+// its place first: each one placed in turn on `machines`, a Placed one holding
+// its slot, a Launch one adding the machine it would launch (launching, an own
+// one reserved for it, a shared one of policy.shared_slots slots), a Full one
+// waiting with no place. A start request whose answer is Full is the fleet's
+// at_capacity: the supervisor would leave it waiting.
+Placement place_after(const PlacementRequest &request, const std::vector<PlacementRequest> &waiting,
+		std::vector<FleetMachine> machines, const PlacementPolicy &policy);
 
 } // namespace opennova::novaworld_server::hosted

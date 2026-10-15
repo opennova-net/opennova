@@ -25,12 +25,6 @@ uint64_t steady_now_ms() {
 
 std::string seconds_text(uint64_t ms) { return std::to_string(ms / 1000) + " s"; }
 
-// An exited machine's code as the events read it: unsigned, so a Windows code
-// such as 0xC0000005 reads as it is; "unknown" when the provider has none.
-std::string exit_code_text(const MachineStatus &status) {
-	return status.exit_code ? std::to_string(*status.exit_code) : std::string("unknown");
-}
-
 // "1 hosted server", "3 hosted servers".
 std::string servers_text(int n) { return std::to_string(n) + " hosted server" + (n == 1 ? "" : "s"); }
 
@@ -40,10 +34,23 @@ std::string limit_detail(const billing::Entitlement &e) {
 			servers_text(e.max_servers);
 }
 
+// "machine 3, slot 1": where a server runs, as its events say it.
+std::string place_text(int64_t machine_id, int slot) {
+	return "machine " + std::to_string(machine_id) + ", slot " + std::to_string(slot);
+}
+
+// Every state a live machine can leave for its end.
+const std::vector<FleetMachineState> &live_machine_states() {
+	static const std::vector<FleetMachineState> states = { FleetMachineState::Launching,
+		FleetMachineState::Booting, FleetMachineState::Ready, FleetMachineState::Draining,
+		FleetMachineState::Ending, FleetMachineState::Lost };
+	return states;
+}
+
 } // namespace
 
-Supervisor::Supervisor(db::ConnectionPool &pool, MachineProvider &provider, SupervisorConfig config) :
-		pool_(pool), provider_(provider), config_(std::move(config)) {}
+Supervisor::Supervisor(db::ConnectionPool &pool, MachineDriver &driver, SupervisorConfig config) :
+		pool_(pool), driver_(driver), config_(std::move(config)) {}
 
 Supervisor::~Supervisor() { stop(); }
 
@@ -51,9 +58,11 @@ void Supervisor::start() {
 	if (running_.exchange(true)) return;
 	std::string games;
 	for (const DataSet &d : config_.data_sets) games += (games.empty() ? "" : ", ") + d.game;
-	std::printf("[hosted] supervisor: provider %s, cap %d, data sets %s, servers list on %s:%u\n",
-			provider_.name(), config_.cap, games.empty() ? "(none)" : games.c_str(), config_.master_host.c_str(),
-			static_cast<unsigned>(config_.master_gate_port));
+	std::printf("[hosted] supervisor: machines %s (shared machines of %d slots, at most %d shared and %d own), "
+				"cap %d, data sets %s, servers list on %s:%u\n",
+			driver_.name(), config_.placement.shared_slots, config_.placement.max_shared,
+			config_.placement.max_own, config_.cap, games.empty() ? "(none)" : games.c_str(),
+			config_.master_host.c_str(), static_cast<unsigned>(config_.master_gate_port));
 	try {
 		reconcile(steady_now_ms());
 	} catch (const std::exception &e) {
@@ -91,94 +100,148 @@ void Supervisor::run() {
 	}
 }
 
-std::set<std::string> Supervisor::end_untracked(const std::vector<HostedServer> &live, const char *when) {
-	std::map<int64_t, const HostedServer *> by_id;
-	for (const HostedServer &s : live) by_id[s.id] = &s;
-	std::set<std::string> running;
-	for (const TaggedMachine &m : provider_.list_tagged()) {
-		const auto it = by_id.find(m.server_id);
-		if (it == by_id.end() || it->second->machine_id != m.machine_id) {
-			std::printf("[hosted] %s: machine %s (server %lld) is no live server's; ending it\n", when,
-					loggable(m.machine_id).c_str(), static_cast<long long>(m.server_id));
-			provider_.terminate(m.machine_id);
+// --- the view of the fleet ------------------------------------------------------
+
+Supervisor::Fleet Supervisor::read_fleet(db::Database &db) {
+	Fleet fleet;
+	for (FleetMachineRow &m : list_live_machines(db)) {
+		for (SlotReport &r : slot_reports(db, m.id)) {
+			const int slot = r.slot;
+			fleet.reports.emplace(std::make_pair(m.id, slot), std::move(r));
+		}
+		const int64_t id = m.id;
+		fleet.machines.emplace(id, std::move(m));
+	}
+	return fleet;
+}
+
+const FleetMachineRow *Supervisor::machine_of(const Fleet &fleet, const HostedServer &s) const {
+	if (!s.machine_ref) return nullptr;
+	const auto it = fleet.machines.find(*s.machine_ref);
+	return it == fleet.machines.end() ? nullptr : &it->second;
+}
+
+const SlotReport *Supervisor::report_of(const Fleet &fleet, const HostedServer &s) const {
+	if (!s.machine_ref || s.machine_id.empty()) return nullptr;
+	const auto it = fleet.reports.find(std::make_pair(*s.machine_ref, s.slot));
+	if (it == fleet.reports.end() || it->second.container != s.machine_id) return nullptr;
+	return &it->second;
+}
+
+void Supervisor::forget_start(int64_t server_id) {
+	std::lock_guard<std::mutex> lock(starts_mu_);
+	starts_.erase(server_id);
+}
+
+// --- the boot and the passes ----------------------------------------------------------
+
+void Supervisor::sweep(db::Database &db, uint64_t now_ms, const char *when) {
+	std::set<std::string> listed;
+	for (const TaggedCloudMachine &t : driver_.list_tagged()) {
+		const auto row = t.machine_id > 0 ? find_machine(db, t.machine_id) : std::nullopt;
+		if (!row || !machine_is_live(row->state) || row->provider != driver_.name() ||
+				row->cloud_id != t.cloud_id) {
+			std::printf("[fleet] %s: machine %s (row %lld) is no live machine's; ending it\n", when,
+					loggable(t.cloud_id).c_str(), static_cast<long long>(t.machine_id));
+			driver_.terminate(t.cloud_id);
 			continue;
 		}
-		running.insert(m.machine_id);
+		listed.insert(t.cloud_id);
 	}
-	return running;
+	for (const FleetMachineRow &m : list_live_machines(db)) {
+		if (m.state == FleetMachineState::Launching || m.cloud_id.empty() || listed.count(m.cloud_id) != 0)
+			continue;
+		// Not listed: the driver's own describe decides (a cloud machine launched
+		// a moment ago may not be listed yet).
+		if (driver_.describe(m.cloud_id).state == CloudState::Gone)
+			end_machine(db, m, FleetMachineState::Ended, "its machine is gone", false, now_ms);
+	}
 }
 
 void Supervisor::reconcile(uint64_t now_ms) {
 	auto lease = pool_.acquire();
 	db::Database &db = *lease;
-	const std::vector<HostedServer> live = list_live(db);
-	std::set<std::string> running;
-	bool listed = true;
+	// A launch the service's end cut short: its cloud machine, if any, is no
+	// live row's now, and the sweep below ends it.
+	for (const FleetMachineRow &m : list_live_machines(db)) {
+		if (m.state == FleetMachineState::Launching &&
+				transition_machine(db, m.id, FleetMachineState::Launching, FleetMachineState::Failed,
+						"the service restarted during its launch"))
+			std::printf("[fleet] reconcile: machine %lld failed: the service restarted during its launch\n",
+					static_cast<long long>(m.id));
+	}
 	try {
-		running = end_untracked(live, "reconcile");
+		sweep(db, now_ms, "reconcile");
 	} catch (const std::exception &e) {
-		// The provider could not list its machines (a cloud listing that
-		// failed): nothing is ended or launched again on that, and every live
-		// row's machine resumes as if it ran, until the passes' describes tell.
-		std::fprintf(stderr, "[hosted] WARN reconcile: %s; every live server resumes, nothing is ended\n",
-				e.what());
-		listed = false;
+		// The driver could not list its machines (a cloud listing that failed):
+		// nothing is terminated or ended on that, and every live row resumes.
+		std::fprintf(stderr, "[fleet] WARN reconcile: %s; every machine resumes, nothing is ended\n", e.what());
 	}
 	last_orphan_sweep_ms_ = now_ms;
 
-	for (const HostedServer &s : live) {
-		if (s.machine_id.empty()) continue; // requested, or provisioning before a launch
+	const Fleet fleet = read_fleet(db);
+	for (const HostedServer &s : list_live(db)) {
 		Runtime &rt = runtimes_[s.id];
 		rt = Runtime{};
 		rt.state = s.state;
 		rt.since_ms = now_ms;
 		rt.last_check_ms = now_ms;
-		if (!listed || running.count(s.machine_id) != 0) {
-			// Its lister re-hosts over the NWU reconnect; the health checks wait for it.
-			rt.grace_until_ms = now_ms + config_.listing_timeout_ms;
-			std::printf("[hosted] reconcile: server %lld resumes %s on machine %s\n",
-					static_cast<long long>(s.id), state_name(s.state), loggable(s.machine_id).c_str());
-			continue;
-		}
-		if (s.state == State::Stopping) {
-			finish(db, s, State::Stopped, "its machine was gone at the service's start");
+		if (!s.machine_ref) continue; // requested, or waiting for its place
+		const FleetMachineRow *m = machine_of(fleet, s);
+		if (!m) {
+			// A service restart is no crash: placed again, no restart counted.
+			replace(db, s, now_ms, "its machine was gone at the service's start");
 			continue;
 		}
 		if (s.state == State::Provisioning) {
-			// Launched just before the service went: launched again, the same
-			// state, no event.
-			set_machine(db, s.id, s.provider, "", "");
+			// Placed just before the service went, its files never rendered: the
+			// next pass places it again.
+			release_slot(db, s.id);
 			continue;
 		}
-		// A service restart is no crash: launched again, no restart counted.
-		move(db, s, rt, now_ms, State::Provisioning, "its machine was gone at the service's start",
-				TransitionOptions{ false, true });
+		if (s.state == State::Booting && !report_of(fleet, s)) {
+			// Its files went with the service before its agent took them.
+			replace(db, s, now_ms, "its start was cut short by the service's restart");
+			continue;
+		}
+		// Its lister re-hosts over the NWU reconnect; the health checks wait for it.
+		rt.grace_until_ms = now_ms + config_.listing_timeout_ms;
+		std::printf("[hosted] reconcile: server %lld resumes %s on %s\n", static_cast<long long>(s.id),
+				state_name(s.state), place_text(*s.machine_ref, s.slot).c_str());
 	}
 }
 
 void Supervisor::tick(uint64_t now_ms) {
 	auto lease = pool_.acquire();
 	db::Database &db = *lease;
-	std::vector<HostedServer> live = list_live(db);
 	// The servers this pass stopped for their owners' limits: stepped from the
 	// next pass on, as stopping (their rows here hold the state before it).
 	std::set<int64_t> limited;
 	try {
-		limited = enforce_limits(db, live);
+		limited = enforce_limits(db, list_live(db));
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[hosted] WARN the owners' limits: %s\n", e.what());
 	}
 	if (now_ms - last_orphan_sweep_ms_ >= config_.orphan_sweep_interval_ms) {
-		// A machine no live row names (a launch whose row write failed, a row
-		// ended while its machine lived on) is ended between the boots too.
+		// A cloud machine no live row names (a launch whose row write failed, a
+		// row ended while its machine lived on) is ended between the boots too.
 		last_orphan_sweep_ms_ = now_ms;
 		try {
-			end_untracked(live, "sweep");
+			sweep(db, now_ms, "sweep");
 		} catch (const std::exception &e) {
 			// No listing, nothing ended; the pass goes on, and the next sweep tries again.
-			std::fprintf(stderr, "[hosted] WARN sweep: %s; nothing is ended\n", e.what());
+			std::fprintf(stderr, "[fleet] WARN sweep: %s; nothing is ended\n", e.what());
 		}
 	}
+	try {
+		step_machines(db, now_ms);
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[fleet] WARN the machines: %s\n", e.what());
+	}
+
+	// The servers, as the machines' moves left them.
+	const std::vector<HostedServer> live = list_live(db);
+	const Fleet fleet = read_fleet(db);
 	std::set<int64_t> seen;
 	for (const HostedServer &s : live) {
 		seen.insert(s.id);
@@ -193,7 +256,7 @@ void Supervisor::tick(uint64_t now_ms) {
 			rt.last_check_ms = now_ms;
 		}
 		try {
-			step(db, s, rt, now_ms);
+			step(db, fleet, s, rt, now_ms);
 		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[hosted] WARN server %lld: %s\n", static_cast<long long>(s.id), e.what());
 		}
@@ -227,6 +290,8 @@ void Supervisor::sync_admin_links(db::Database &db) {
 	}
 	admin_links_->sync(wanted);
 }
+
+// --- the owners --------------------------------------------------------------------
 
 bool Supervisor::owner_active(db::Database &db, const HostedServer &s, std::string &why) {
 	if (!s.owner_user_id) {
@@ -316,7 +381,9 @@ void Supervisor::clear_limits_hold() {
 	if (hold_->clear()) std::printf("[hosted] the owners' limits hold cleared\n");
 }
 
-void Supervisor::step(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
+// --- the servers -------------------------------------------------------------------
+
+void Supervisor::step(db::Database &db, const Fleet &fleet, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
 	if (s.state != State::Stopping) {
 		std::string why;
 		if (!owner_active(db, s, why)) {
@@ -330,10 +397,10 @@ void Supervisor::step(db::Database &db, const HostedServer &s, Runtime &rt, uint
 	switch (s.state) {
 		case State::Requested: on_requested(db, s, rt, now_ms); break;
 		case State::Provisioning: on_provisioning(db, s, rt, now_ms); break;
-		case State::Booting: on_booting(db, s, rt, now_ms); break;
-		case State::Listing: on_listing(db, s, rt, now_ms); break;
-		case State::Running: on_running(db, s, rt, now_ms); break;
-		case State::Stopping: on_stopping(db, s, rt, now_ms); break;
+		case State::Booting: on_booting(db, fleet, s, rt, now_ms); break;
+		case State::Listing: on_listing(db, fleet, s, rt, now_ms); break;
+		case State::Running: on_running(db, fleet, s, rt, now_ms); break;
+		case State::Stopping: on_stopping(db, fleet, s, rt, now_ms); break;
 		case State::Stopped:
 		case State::Failed: break;
 	}
@@ -352,15 +419,15 @@ bool Supervisor::move(db::Database &db, const HostedServer &s, Runtime &rt, uint
 }
 
 void Supervisor::on_requested(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
-	// step() checked the owner (active, entitled) in this pass.
+	// step() checked the owner (active) in this pass.
 	move(db, s, rt, now_ms, State::Provisioning, "picked up");
 }
 
 void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
-	if (!s.machine_id.empty()) {
-		// Launched by an earlier pass whose move to booting lost to nothing (a
-		// database failure between the two writes): carry on with that machine.
-		move(db, s, rt, now_ms, State::Booting, "machine " + loggable(s.machine_id) + " launched");
+	if (s.machine_ref) {
+		// Placed by an earlier pass whose start never rendered (the service went
+		// in between): the slot goes, and the next pass places it again.
+		release_slot(db, s.id);
 		return;
 	}
 	if (now_ms < rt.not_before_ms) return; // a restart's backoff
@@ -398,25 +465,115 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 
 	// Its data set, which the deployment may have stopped offering since the
 	// request (no restart mends that).
-	const DataSet *data_set = find_data_set(config_.data_sets, s.settings.game);
-	if (!data_set) {
+	if (!find_data_set(config_.data_sets, s.settings.game)) {
 		finish(db, s, State::Failed, "its game (" + loggable(s.settings.game, 64) + ") is no longer hosted here");
 		return;
 	}
+	place(db, s, rt, now_ms);
+}
 
+void Supervisor::place(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
+	PlacementRequest request;
+	request.server_id = s.id;
+	request.own_machine = s.own_machine;
+	Placement p = place_server(request, placement_machines(db), config_.placement);
+	if (p.outcome == Placement::Outcome::Launch) {
+		// The machine launched for it takes it first: placed again at once, it
+		// lands there (a launching machine takes servers).
+		if (!launch_machine(db, s, p.launch_kind, rt, now_ms)) return;
+		p = place_server(request, placement_machines(db), config_.placement);
+	}
+	switch (p.outcome) {
+		case Placement::Outcome::Full:
+			if (!rt.waiting_logged) {
+				std::printf("[hosted] server %lld waits for a slot: the fleet's %s machines are full\n",
+						static_cast<long long>(s.id), s.own_machine ? "own" : "shared");
+				rt.waiting_logged = true;
+			}
+			return;
+		case Placement::Outcome::Launch:
+			return; // the launch's backoff, or a launch the next pass sees
+		case Placement::Outcome::Placed:
+			break;
+	}
+	const auto machine = find_machine(db, p.machine_id);
+	// A machine the cloud has not answered for yet (no address its agent comes
+	// from, none its admin link reaches): the next pass.
+	if (!machine || machine->private_address.empty()) return;
+	const SlotPlan plan = driver_.slot_plan(machine->cloud_id, p.slot);
+	if (!assign_slot(db, s.id, machine->id, p.slot, plan.game_port)) return; // raced: the next pass
+	const auto placed = find_server(db, s.id);
+	if (!placed || !placed->machine_ref || placed->state != State::Provisioning) {
+		// A stop landed meanwhile: it holds no slot it never ran on.
+		release_slot(db, s.id);
+		return;
+	}
+	start_on_slot(db, *placed, *machine, plan, rt, now_ms);
+}
+
+bool Supervisor::launch_machine(db::Database &db, const HostedServer &s, MachineKind kind, Runtime &rt,
+		uint64_t now_ms) {
+	const auto backoff = launch_not_before_ms_.find(kind);
+	if (backoff != launch_not_before_ms_.end() && now_ms < backoff->second) return false; // a refused launch's backoff
+	NewMachine wanted;
+	wanted.provider = driver_.name();
+	wanted.kind = kind;
+	wanted.slots = kind == MachineKind::Own ? 1 : config_.placement.shared_slots;
+	wanted.serve_image = config_.serve_image;
+	wanted.reserved_for = kind == MachineKind::Own ? s.id : 0;
+	const CreatedMachine created = create_machine(db, wanted);
+	MachineLaunch launch;
+	launch.machine_id = created.id;
+	launch.kind = kind;
+	launch.slots = wanted.slots;
+	launch.bootstrap_token = created.bootstrap_token;
+	std::string error;
+	const std::optional<LaunchedMachine> launched = driver_.launch(launch, error);
+	if (!launched) {
+		// The driver's own text (a CLI's error) goes to the log alone; the
+		// server's event, which the owner reads, says what happened.
+		std::fprintf(stderr, "[fleet] machine %lld (%s, for server %lld): the launch failed: %s\n",
+				static_cast<long long>(created.id), machine_kind_text(kind), static_cast<long long>(s.id),
+				error.c_str());
+		transition_machine(db, created.id, FleetMachineState::Launching, FleetMachineState::Failed, "the launch failed");
+		launch_failures_.fetch_add(1, std::memory_order_relaxed);
+		launch_not_before_ms_[kind] = now_ms + config_.launch_backoff_ms;
+		attempt_failed(db, s, rt, now_ms, "the launch of its machine failed");
+		return false;
+	}
+	if (!mark_launched(db, created.id, *launched)) {
+		// The row left launching meanwhile (an admin ended it): no row runs it.
+		driver_.terminate(launched->cloud_id);
+		return false;
+	}
+	MachineRuntime &mrt = machine_runtimes_[created.id];
+	mrt = MachineRuntime{};
+	mrt.state = FleetMachineState::Booting;
+	mrt.since_ms = now_ms;
+	std::printf("[fleet] machine %lld (%s, %d slot%s) launched as %s for server %lld\n",
+			static_cast<long long>(created.id), machine_kind_text(kind), wanted.slots, wanted.slots == 1 ? "" : "s",
+			loggable(launched->cloud_id).c_str(), static_cast<long long>(s.id));
+	rt.waiting_logged = true;
+	return true;
+}
+
+void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const FleetMachineRow &machine,
+		const SlotPlan &plan, Runtime &rt, uint64_t now_ms) {
+	const DataSet *data_set = find_data_set(config_.data_sets, s.settings.game);
+	if (!data_set) return; // checked in this pass; the next one fails it
 	// The service account, with a new password at every start.
 	const std::string username = service_username(s.id);
 	const std::string nw_password = random_secret(kServicePasswordChars);
 	const MutationResult account = upsert_service_account(db, username, nw_password);
 	if (!account.ok) {
+		release_slot(db, s.id);
 		if (account.error_code == "db_error") return; // logged by auth; the next pass tries again
 		finish(db, s, State::Failed, "its service account could not be made (" + account.error_code + ")");
 		return;
 	}
 	set_service_account(db, s.id, account.id);
 
-	// The plan, a new admin login and the files.
-	const MachinePlan plan = provider_.plan(s.id);
+	// A new admin login and the files, for the slot's ports.
 	const std::string admin_password = random_secret(kAdminPasswordChars);
 	set_admin_login(db, s.id, plan.admin_port, kAdminUser, admin_password);
 	RenderInputs inputs;
@@ -429,75 +586,90 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 	inputs.master_gate_port = config_.master_gate_port;
 	const LaunchSpec spec = render_launch(s.settings, *data_set, inputs);
 
-	std::string error;
-	const std::optional<std::string> machine = provider_.launch(spec, error);
-	if (!machine) {
-		// The provider's own text (a path, a system error) goes to the log alone;
-		// the event, which the owner reads, says what happened.
-		std::fprintf(stderr, "[hosted] server %lld: the launch failed: %s\n", static_cast<long long>(s.id),
-				error.c_str());
-		launch_failures_.fetch_add(1, std::memory_order_relaxed);
-		attempt_failed(db, s, rt, now_ms, "the launch failed");
-		return;
+	Start start;
+	start.machine_id = machine.id;
+	DesiredContainer &c = start.container;
+	c.name = hosted_container_name(s.id, s.generation);
+	c.slot = s.slot;
+	c.image = config_.serve_image;
+	c.uid = slot_uid(s.slot);
+	c.data_set = spec.data_set;
+	c.args = spec.serve_args;
+	std::map<std::string, std::string> files;
+	for (const LaunchFile &f : spec.files) files[f.name] = f.content;
+	c.files = std::move(files);
+	c.cpus = config_.slot_cpus;
+	c.memory_mb = config_.slot_memory_mb;
+	c.pids = config_.slot_pids;
+	set_serve_image(db, s.id, c.image);
+	const std::string container = c.name;
+	{
+		// Before the move: a sync that sees the server booting finds its files.
+		std::lock_guard<std::mutex> lock(starts_mu_);
+		starts_[s.id] = std::move(start);
 	}
-	const MachineStatus status = provider_.describe(*machine);
-	set_machine(db, s.id, provider_.name(), *machine, status.address);
-	if (!move(db, s, rt, now_ms, State::Booting, "machine " + loggable(*machine) + " launched")) {
-		// A stop landed meanwhile: the next pass ends the machine set above.
-		std::printf("[hosted] server %lld: launched machine %s while it left provisioning\n",
-				static_cast<long long>(s.id), loggable(*machine).c_str());
+	set_machine(db, s.id, driver_.name(), container, machine.private_address);
+	if (!move(db, s, rt, now_ms, State::Booting, "placed on " + place_text(machine.id, s.slot))) {
+		// A stop landed meanwhile: its container never reported, so the stop ends
+		// at the next pass with nothing to stop.
+		std::printf("[hosted] server %lld: placed on %s while it left provisioning\n", static_cast<long long>(s.id),
+				place_text(machine.id, s.slot).c_str());
 	}
 }
 
-void Supervisor::on_machine_down(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms,
-		const MachineStatus &status) {
+void Supervisor::on_exit(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms,
+		const SlotReport &report) {
 	// Whatever the code: a stop is the supervisor's own act (the row in
 	// stopping), never read from an exit. opennova-serve exits 0 for its
 	// rotation's end or the admin's GOTO MENUSTATE, 3 when the service ends its
 	// hosting and 1 for a SIGTERM while it waits to be listed
 	// (apps/serve/README.md "Exit codes"), and none of those is the owner's stop.
-	attempt_failed(db, s, rt, now_ms,
-			status.state == MachineState::Exited
-					? "opennova-serve exited with code " + exit_code_text(status)
-					: std::string("its machine is gone"));
+	std::string reason;
+	if (report.oom)
+		reason = "opennova-serve ran out of memory";
+	else if (report.exit_code == 125 && !report.started_at)
+		reason = "its container did not start";
+	else
+		reason = "opennova-serve exited with code " +
+				(report.exit_code ? std::to_string(*report.exit_code) : std::string("unknown"));
+	attempt_failed(db, s, rt, now_ms, reason);
 }
 
-MachineStatus Supervisor::describe(db::Database &db, const HostedServer &s) {
-	MachineStatus status = provider_.describe(s.machine_id);
-	// A machine may have no address yet right after its launch (a cloud machine
-	// is given one as it boots): the first describe that names one writes it, so
-	// the admin link and the views have it from then on.
-	if (s.machine_address.empty() && !status.address.empty() && status.state != MachineState::Gone) {
-		set_machine(db, s.id, s.provider, s.machine_id, status.address);
-		std::printf("[hosted] server %lld: machine %s at %s\n", static_cast<long long>(s.id),
-				loggable(s.machine_id).c_str(), loggable(status.address).c_str());
+void Supervisor::on_booting(db::Database &db, const Fleet &fleet, const HostedServer &s, Runtime &rt,
+		uint64_t now_ms) {
+	const FleetMachineRow *machine = machine_of(fleet, s);
+	if (!machine) {
+		replace(db, s, now_ms, "its machine is gone");
+		return;
 	}
-	return status;
-}
-
-void Supervisor::on_booting(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
-	const MachineStatus status = describe(db, s);
-	switch (status.state) {
-		case MachineState::Running:
+	if (machine->state != FleetMachineState::Ready) {
+		// Its machine boots (or is lost, or drains): the container's clock waits.
+		rt.since_ms = now_ms;
+		return;
+	}
+	if (const SlotReport *report = report_of(fleet, s)) {
+		if (report->state == ContainerState::Running) {
 			move(db, s, rt, now_ms, State::Listing, "opennova-serve runs");
 			return;
-		case MachineState::Pending:
-			if (now_ms - rt.since_ms >= config_.boot_timeout_ms) {
-				attempt_failed(db, s, rt, now_ms,
-						"its machine did not start in " + seconds_text(config_.boot_timeout_ms));
-			}
+		}
+		if (report->state == ContainerState::Exited) {
+			on_exit(db, s, rt, now_ms, *report);
 			return;
-		case MachineState::Exited:
-		case MachineState::Gone:
-			on_machine_down(db, s, rt, now_ms, status);
-			return;
+		}
 	}
+	if (now_ms - rt.since_ms >= config_.boot_timeout_ms)
+		attempt_failed(db, s, rt, now_ms, "its container did not start in " + seconds_text(config_.boot_timeout_ms));
 }
 
-void Supervisor::on_listing(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
-	const MachineStatus status = describe(db, s);
-	if (status.state == MachineState::Exited || status.state == MachineState::Gone) {
-		on_machine_down(db, s, rt, now_ms, status);
+void Supervisor::on_listing(db::Database &db, const Fleet &fleet, const HostedServer &s, Runtime &rt,
+		uint64_t now_ms) {
+	if (!machine_of(fleet, s)) {
+		replace(db, s, now_ms, "its machine is gone");
+		return;
+	}
+	const SlotReport *report = report_of(fleet, s);
+	if (report && report->state == ContainerState::Exited) {
+		on_exit(db, s, rt, now_ms, *report);
 		return;
 	}
 	const auto rid = s.service_user_id ? listing_rid_of(db, *s.service_user_id) : std::nullopt;
@@ -510,10 +682,16 @@ void Supervisor::on_listing(db::Database &db, const HostedServer &s, Runtime &rt
 	}
 }
 
-void Supervisor::on_running(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
-	const MachineStatus status = describe(db, s);
-	if (status.state == MachineState::Exited || status.state == MachineState::Gone) {
-		on_machine_down(db, s, rt, now_ms, status);
+void Supervisor::on_running(db::Database &db, const Fleet &fleet, const HostedServer &s, Runtime &rt,
+		uint64_t now_ms) {
+	const FleetMachineRow *machine = machine_of(fleet, s);
+	if (!machine) {
+		replace(db, s, now_ms, "its machine is gone");
+		return;
+	}
+	const SlotReport *report = report_of(fleet, s);
+	if (report && report->state == ContainerState::Exited) {
+		on_exit(db, s, rt, now_ms, *report);
 		return;
 	}
 	// The restart window: restart_reset_ms of running in one go and the
@@ -523,6 +701,9 @@ void Supervisor::on_running(db::Database &db, const HostedServer &s, Runtime &rt
 		std::printf("[hosted] server %lld: ran %s, its %d restart(s) forgiven\n", static_cast<long long>(s.id),
 				seconds_text(config_.restart_reset_ms).c_str(), s.restarts);
 	}
+	// While its machine is lost the checks wait: the machine's end, not a missed
+	// listing, decides then.
+	if (machine->state == FleetMachineState::Lost) return;
 	if (now_ms < rt.grace_until_ms || now_ms - rt.last_check_ms < config_.health_interval_ms) return;
 	rt.last_check_ms = now_ms;
 	// Healthy: listed, and (with admin links) its admin link's session answering
@@ -543,23 +724,33 @@ void Supervisor::on_running(db::Database &db, const HostedServer &s, Runtime &rt
 	}
 }
 
-void Supervisor::on_stopping(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
-	if (s.machine_id.empty()) {
-		finish(db, s, State::Stopped, "stopped before its machine ran");
+void Supervisor::on_stopping(db::Database &db, const Fleet &fleet, const HostedServer &s, Runtime &rt,
+		uint64_t now_ms) {
+	bool acknowledged = false;
+	{
+		std::lock_guard<std::mutex> lock(starts_mu_);
+		const auto it = starts_.find(s.id);
+		acknowledged = it != starts_.end() && it->second.acknowledged;
+	}
+	const SlotReport *report = report_of(fleet, s);
+	if (!s.machine_ref || (!acknowledged && !report)) {
+		finish(db, s, State::Stopped, "stopped before it ran");
 		return;
 	}
-	const MachineStatus status = provider_.describe(s.machine_id);
-	if (status.state == MachineState::Exited || status.state == MachineState::Gone) {
+	if (!machine_of(fleet, s)) {
+		finish(db, s, State::Stopped, "its machine is gone");
+		return;
+	}
+	if (report && report->state == ContainerState::Exited) {
 		finish(db, s, State::Stopped,
-				status.state == MachineState::Exited
-						? "opennova-serve exited (code " + exit_code_text(status) + ")"
-						: std::string("its machine is gone"));
+				"opennova-serve exited (code " +
+						(report->exit_code ? std::to_string(*report->exit_code) : std::string("unknown")) + ")");
 		return;
 	}
 	const auto rid = s.service_user_id ? listing_rid_of(db, *s.service_user_id) : std::nullopt;
 	if (!rt.stop_pushed) {
 		// The service's word first: a stock host leaves NovaWorld on it, and
-		// opennova-serve ends its session; the machine goes once the listing has.
+		// opennova-serve ends its session; the container goes once the listing has.
 		rt.stop_pushed = true;
 		rt.stop_pushed_ms = now_ms;
 		if (rid && stop_listing_) {
@@ -579,7 +770,8 @@ void Supervisor::on_stopping(db::Database &db, const HostedServer &s, Runtime &r
 
 void Supervisor::attempt_failed(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms,
 		const std::string &reason) {
-	if (!s.machine_id.empty()) provider_.terminate(s.machine_id);
+	forget_start(s.id);
+	if (s.machine_ref) release_slot(db, s.id);
 	if (s.restarts >= config_.restart_limit) {
 		finish(db, s, State::Failed,
 				reason + "; no restart left (" + std::to_string(config_.restart_limit) + " used)");
@@ -587,14 +779,46 @@ void Supervisor::attempt_failed(db::Database &db, const HostedServer &s, Runtime
 	}
 	const std::string detail = reason + "; restart " + std::to_string(s.restarts + 1) + " of " +
 			std::to_string(config_.restart_limit);
+	if (s.state == State::Provisioning) {
+		// Not placed yet (its machine's launch failed): the restart is counted on
+		// the row it stays in.
+		if (transition(db, s.id, State::Provisioning, State::Provisioning, detail, TransitionOptions{ true, true })) {
+			std::printf("[hosted] server %lld: provisioning (%s)\n", static_cast<long long>(s.id), detail.c_str());
+			rt.not_before_ms = now_ms + config_.restart_backoff_ms;
+		}
+		return;
+	}
 	if (move(db, s, rt, now_ms, State::Provisioning, detail, TransitionOptions{ true, true }))
 		rt.not_before_ms = now_ms + config_.restart_backoff_ms;
 }
 
+void Supervisor::replace(db::Database &db, const HostedServer &s, uint64_t now_ms, const std::string &reason) {
+	forget_start(s.id);
+	if (s.machine_ref) release_slot(db, s.id);
+	switch (s.state) {
+		case State::Stopping:
+			finish(db, s, State::Stopped, reason);
+			return;
+		case State::Requested:
+		case State::Provisioning:
+		case State::Stopped:
+		case State::Failed:
+			return;
+		case State::Booting:
+		case State::Listing:
+		case State::Running:
+			move(db, s, runtimes_[s.id], now_ms, State::Provisioning, reason + "; placed again (no restart counted)",
+					TransitionOptions{ false, true });
+			return;
+	}
+}
+
 void Supervisor::finish(db::Database &db, const HostedServer &s, State to, const std::string &detail) {
-	if (!s.machine_id.empty()) provider_.terminate(s.machine_id);
+	forget_start(s.id);
 	// The end and the service account's delete commit together: no ended row
-	// keeps an account, so nothing still resolves its listing to the owner.
+	// keeps an account, so nothing still resolves its listing to the owner. The
+	// row keeps the machine and slot it last held (no longer wanted there: its
+	// agent stops the container).
 	TransitionOptions options;
 	options.clear_machine = true;
 	options.end_service_account = true;
@@ -603,6 +827,213 @@ void Supervisor::finish(db::Database &db, const HostedServer &s, State to, const
 	// may still hold it).
 	std::printf("[hosted] server %lld: %s -> %s (%s)\n", static_cast<long long>(s.id), state_name(s.state),
 			state_name(to), detail.c_str());
+}
+
+// --- the machines -------------------------------------------------------------------
+
+void Supervisor::end_machine(db::Database &db, const FleetMachineRow &m, FleetMachineState to,
+		const std::string &reason, bool counted, uint64_t now_ms) {
+	if (!m.cloud_id.empty()) driver_.terminate(m.cloud_id);
+	if (!transition_machine(db, m.id, live_machine_states(), to, reason)) return;
+	std::printf("[fleet] machine %lld: %s -> %s (%s)\n", static_cast<long long>(m.id),
+			fleet_machine_state_text(m.state), fleet_machine_state_text(to), reason.c_str());
+	machine_runtimes_.erase(m.id);
+	for (const HostedServer &s : list_live(db)) {
+		if (s.machine_ref != m.id) continue;
+		if (counted && s.state != State::Stopping)
+			attempt_failed(db, s, runtimes_[s.id], now_ms, reason);
+		else
+			replace(db, s, now_ms, reason);
+	}
+}
+
+void Supervisor::drain_step(db::Database &db, const FleetMachineRow &m, const std::vector<HostedServer> &holders,
+		MachineRuntime &mrt, uint64_t now_ms) {
+	if (holders.empty()) {
+		end_machine(db, m, FleetMachineState::Ended, m.end_reason.empty() ? "drained" : m.end_reason + "; drained",
+				false, now_ms);
+		return;
+	}
+	// One at a time: the server moved last runs again elsewhere (or ended)
+	// before the next one moves.
+	if (mrt.moving != 0) {
+		const auto moved = find_server(db, mrt.moving);
+		if (moved && is_live(moved->state) && moved->state != State::Running && moved->state != State::Stopping)
+			return;
+		mrt.moving = 0;
+	}
+	for (const HostedServer &s : holders) {
+		if (s.state == State::Stopping) continue; // its stop ends it here
+		std::printf("[fleet] machine %lld drains: server %lld moves off it\n", static_cast<long long>(m.id),
+				static_cast<long long>(s.id));
+		replace(db, s, now_ms, "its machine drains");
+		mrt.moving = s.id;
+		return;
+	}
+}
+
+void Supervisor::step_machines(db::Database &db, uint64_t now_ms) {
+	// A machine whose agent fell silent: lost.
+	for (const FleetMachineRow &m : list_silent_machines(db, config_.machine_silence_s)) {
+		const std::string why = "its agent has not reported for " + std::to_string(config_.machine_silence_s) + " s";
+		if (!transition_machine(db, m.id, { FleetMachineState::Ready, FleetMachineState::Draining },
+					FleetMachineState::Lost, why))
+			continue;
+		std::fprintf(stderr, "[fleet] WARN machine %lld: %s -> lost (%s)\n", static_cast<long long>(m.id),
+				fleet_machine_state_text(m.state), why.c_str());
+		MachineRuntime &mrt = machine_runtimes_[m.id];
+		mrt = MachineRuntime{};
+		mrt.state = FleetMachineState::Lost;
+		mrt.since_ms = now_ms;
+		mrt.was_draining = m.state == FleetMachineState::Draining;
+	}
+
+	std::map<int64_t, std::vector<HostedServer>> holders;
+	std::set<int64_t> live_ids;
+	for (HostedServer &s : list_live(db)) {
+		live_ids.insert(s.id);
+		if (s.machine_ref) holders[*s.machine_ref].push_back(std::move(s));
+	}
+	std::set<int64_t> seen;
+	for (const FleetMachineRow &m : list_live_machines(db)) {
+		seen.insert(m.id);
+		MachineRuntime &mrt = machine_runtimes_[m.id];
+		if (mrt.since_ms == 0 || mrt.state != m.state) {
+			const bool was_draining = mrt.was_draining;
+			mrt = MachineRuntime{};
+			mrt.state = m.state;
+			mrt.since_ms = now_ms;
+			mrt.was_draining = was_draining && m.state == FleetMachineState::Lost;
+		}
+		const std::vector<HostedServer> &on = holders[m.id];
+		switch (m.state) {
+			case FleetMachineState::Launching:
+				// Only inside a pass's own launch; one left over is a launch that
+				// never finished.
+				if (now_ms - mrt.since_ms >= driver_.boot_timeout_ms())
+					end_machine(db, m, FleetMachineState::Failed, "its launch never finished", true, now_ms);
+				break;
+			case FleetMachineState::Booting: {
+				const CloudMachine cloud = driver_.describe(m.cloud_id);
+				if (cloud.state == CloudState::Gone) {
+					end_machine(db, m, FleetMachineState::Failed, "its machine is gone before it booted", true, now_ms);
+					break;
+				}
+				if (!cloud.private_address.empty() || !cloud.public_address.empty())
+					set_machine_addresses(db, m.id, cloud.private_address,
+							cloud.public_address.empty() ? m.public_address : cloud.public_address);
+				if (now_ms - mrt.since_ms >= driver_.boot_timeout_ms())
+					end_machine(db, m, FleetMachineState::Failed,
+							"its machine did not boot in " + seconds_text(driver_.boot_timeout_ms()), true, now_ms);
+				break;
+			}
+			case FleetMachineState::Ready:
+				if (m.public_address.empty()) {
+					const CloudMachine cloud = driver_.describe(m.cloud_id);
+					if (!cloud.public_address.empty())
+						set_machine_addresses(db, m.id, cloud.private_address, cloud.public_address);
+				}
+				if (m.kind == MachineKind::Own) {
+					// Launched for one server: it ends with that server.
+					if (m.reserved_for == 0 || live_ids.count(m.reserved_for) == 0)
+						end_machine(db, m, FleetMachineState::Ended, "its server ended", false, now_ms);
+					break;
+				}
+				if (!on.empty()) {
+					mrt.idle_since_ms = 0;
+				} else if (mrt.idle_since_ms == 0) {
+					mrt.idle_since_ms = now_ms;
+				} else if (now_ms - mrt.idle_since_ms >= config_.idle_ms) {
+					end_machine(db, m, FleetMachineState::Ended,
+							"no server on it for " + std::to_string(config_.idle_ms / 60000) + " min", false, now_ms);
+				}
+				break;
+			case FleetMachineState::Draining:
+				drain_step(db, m, on, mrt, now_ms);
+				break;
+			case FleetMachineState::Ending:
+				end_machine(db, m, FleetMachineState::Ended, m.end_reason.empty() ? "ended" : m.end_reason, false,
+						now_ms);
+				break;
+			case FleetMachineState::Lost: {
+				if (machine_reported_within(db, m.id, config_.machine_silence_s)) {
+					const FleetMachineState back =
+							mrt.was_draining ? FleetMachineState::Draining : FleetMachineState::Ready;
+					if (transition_machine(db, m.id, FleetMachineState::Lost, back, "its agent reports again"))
+						std::printf("[fleet] machine %lld: lost -> %s (its agent reports again)\n",
+								static_cast<long long>(m.id), fleet_machine_state_text(back));
+					break;
+				}
+				const CloudMachine cloud = driver_.describe(m.cloud_id);
+				if (cloud.state == CloudState::Gone)
+					end_machine(db, m, FleetMachineState::Ended, "its machine is gone", false, now_ms);
+				else if (cloud.state != CloudState::Unknown && now_ms - mrt.since_ms >= config_.lost_end_ms)
+					end_machine(db, m, FleetMachineState::Ended,
+							"its agent was silent for " + seconds_text(config_.lost_end_ms) + " more", false, now_ms);
+				break;
+			}
+			case FleetMachineState::Ended:
+			case FleetMachineState::Failed:
+				break;
+		}
+	}
+	for (auto it = machine_runtimes_.begin(); it != machine_runtimes_.end();) {
+		it = seen.count(it->first) == 0 ? machine_runtimes_.erase(it) : std::next(it);
+	}
+}
+
+// --- the desired state ---------------------------------------------------------------
+
+FleetDecision Supervisor::sync(db::Database &db, const FleetMachineRow &machine,
+		const std::vector<ContainerReport> &reported) {
+	FleetDecision decision;
+	decision.drain = machine.state == FleetMachineState::Draining;
+	std::set<std::string> names;
+	for (const ContainerReport &c : reported) names.insert(c.name);
+	const std::vector<SlotHolder> holders = slot_holders(db, machine.id);
+	std::lock_guard<std::mutex> lock(starts_mu_);
+	for (const SlotHolder &h : holders) {
+		if (h.state != State::Booting && h.state != State::Listing && h.state != State::Running &&
+				h.state != State::Stopping)
+			continue;
+		const std::string name = hosted_container_name(h.server_id, h.generation);
+		const bool seen = names.count(name) != 0;
+		auto it = starts_.find(h.server_id);
+		if (it != starts_.end() && it->second.container.name == name && it->second.machine_id == machine.id) {
+			Start &start = it->second;
+			if (seen) {
+				// Reported once: its files are the agent's now, and no longer kept here.
+				start.acknowledged = true;
+				start.container.files.reset();
+			}
+			// A stopping server's container that never started stays unstarted.
+			if (h.state == State::Stopping && !start.acknowledged) continue;
+			decision.desired.push_back(start.container);
+			continue;
+		}
+		// No start in memory (the service started since): only a container its
+		// agent reports is still wanted, without files.
+		if (!seen) continue;
+		const auto server = find_server(db, h.server_id);
+		const DataSet *data_set = server ? find_data_set(config_.data_sets, server->settings.game) : nullptr;
+		if (!server || !data_set) continue;
+		Start start;
+		start.machine_id = machine.id;
+		start.acknowledged = true;
+		DesiredContainer &c = start.container;
+		c.name = name;
+		c.slot = h.slot;
+		c.image = server->serve_image.empty() ? config_.serve_image : server->serve_image;
+		c.uid = slot_uid(h.slot);
+		c.data_set = data_set->game;
+		c.args = render_serve_args(server->settings, *data_set, config_.master_host, config_.master_gate_port);
+		c.cpus = config_.slot_cpus;
+		c.memory_mb = config_.slot_memory_mb;
+		c.pids = config_.slot_pids;
+		decision.desired.push_back(c);
+		starts_[h.server_id] = std::move(start);
+	}
+	return decision;
 }
 
 } // namespace opennova::novaworld_server::hosted

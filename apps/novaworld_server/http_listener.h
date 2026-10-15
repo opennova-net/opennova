@@ -1,7 +1,7 @@
 #pragma once
 
 #include "auth.h"
-#include "hosted/bootstrap.h"
+#include "hosted/placement.h"
 
 #include <net/novacrypto/epask.h>
 
@@ -38,8 +38,8 @@ namespace catalog { struct GameRow; }
 
 // Crow-backed HTTP listener. start() registers six route families, each in
 // its own registrar (bodies in http_listener.cpp, the listed servers' in
-// host_routes.cpp), and, with the ec2 provider, the cloud machines' bootstrap
-// route (hosted/bootstrap_route.h, outside /api/):
+// host_routes.cpp). The machine agents' routes are never here: they are the
+// internal listener's alone (hosted/internal_listener.h).
 //   admin REST API      — /api/admin/* + dev host inject, for the Bearer
 //                         ADMIN_API_TOKEN or an admin-role website session
 //   public JSON API     — /api/* for the web portal, with the website's
@@ -106,14 +106,10 @@ public:
 	// it must outlive the HTTP listener. Null: none.
 	void set_limits_hold(hosted::LimitsHold *hold) { limits_hold_ = hold; }
 
-	// The cloud machines' bootstrap route (hosted/bootstrap_route.h, POST
-	// /hosted/bootstrap/<id>): registered only with a store, answering only TCP
-	// peers inside `admitted`. Set before start(); the store must outlive the
-	// HTTP listener.
-	void set_hosted_bootstrap(hosted::BootstrapStore *store, std::vector<hosted::Ipv4Cidr> admitted) {
-		bootstrap_store_ = store;
-		bootstrap_admitted_ = std::move(admitted);
-	}
+	// The fleet's placement policy (hosted/fleet_config.h) the hosted routes ask
+	// the supervisor's planner with: a start's at_capacity, the list's `full`.
+	// Set before start(); unset, placement.h's defaults.
+	void set_fleet_placement(const hosted::PlacementPolicy &policy) { fleet_placement_ = policy; }
 
 	HttpListener(const HttpListener &) = delete;
 	HttpListener &operator=(const HttpListener &) = delete;
@@ -232,10 +228,8 @@ private:
 	billing::Billing *billing_ = nullptr;
 	// The hosted servers' limits hold (set_limits_hold); null: none.
 	hosted::LimitsHold *limits_hold_ = nullptr;
-	// The bootstrap route's tokens and networks (set_hosted_bootstrap); null:
-	// no route.
-	hosted::BootstrapStore *bootstrap_store_ = nullptr;
-	std::vector<hosted::Ipv4Cidr> bootstrap_admitted_;
+	// The hosted routes' placement policy (set_fleet_placement).
+	hosted::PlacementPolicy fleet_placement_;
 	// config.public_host, set in start() before Crow runs (host_url() /
 	// gsb_url()).
 	std::string public_host_;

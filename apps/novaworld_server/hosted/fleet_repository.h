@@ -117,6 +117,11 @@ std::vector<FleetMachineRow> list_machines(db::Database &db, size_t ended_limit)
 // The ready and draining machines whose agent last reported more than
 // `seconds` ago: the ones the supervisor marks lost.
 std::vector<FleetMachineRow> list_silent_machines(db::Database &db, int64_t seconds);
+// Whether machine `id`'s agent reported within the last `seconds` (a lost
+// machine's agent reporting again).
+bool machine_reported_within(db::Database &db, int64_t id, int64_t seconds);
+// How many machines are in `state` (the heartbeat's machines_lost).
+int count_machines(db::Database &db, FleetMachineState state);
 
 // --- the agent's credentials ---
 
@@ -180,6 +185,15 @@ std::vector<SlotHolder> slot_holders(db::Database &db, int64_t machine_id);
 // Every live machine as placement reads it (placement.h): its row and the
 // slots its live servers hold, from one snapshot.
 std::vector<FleetMachine> placement_machines(db::Database &db);
+// The live servers that hold no slot (requested, or provisioning before their
+// placement), by id: the ones placement serves first.
+std::vector<PlacementRequest> waiting_servers(db::Database &db);
+// Whether the fleet has a place for a new server (on an own machine with
+// `own_machine`) under `policy`: place_after over placement_machines and
+// waiting_servers is anything but Full. The start request's at_capacity and GET
+// /api/me/servers' `full` read it; inside a Transaction it reads that
+// transaction's view.
+bool fleet_has_room(db::Database &db, const PlacementPolicy &policy, bool own_machine);
 // Live server `server_id`, holding no slot, takes slot `slot` of machine
 // `machine_id` (one taking servers, the slot one of its own) at `game_port`:
 // its generation moves on (+1) and is returned. nullopt (nothing written) when

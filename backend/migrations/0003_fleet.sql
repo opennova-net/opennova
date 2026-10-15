@@ -69,12 +69,15 @@ CREATE UNIQUE INDEX idx_fleet_machines_cloud_id ON fleet_machines(provider, clou
 -- where it last ran. generation counts the server's starts: its container is
 -- srv-<id>-g<generation> (hosted/agent_protocol.h), a new name at every start.
 -- machine_id holds that container's name and machine_address the machine's
--- private address, where the service's admin link connects.
+-- private address, where the service's admin link connects. serve_image is
+-- the opennova-serve image the server's container runs, pinned at each start
+-- (a deploy's new image reaches a server at its next start, never mid-run).
 ALTER TABLE hosted_servers
     ADD COLUMN machine_ref bigint REFERENCES fleet_machines(id) ON DELETE SET NULL,
     ADD COLUMN slot        bigint CHECK (slot IS NULL OR (slot >= 0 AND slot < 32)),
     ADD COLUMN game_port   bigint NOT NULL DEFAULT 0 CHECK (game_port BETWEEN 0 AND 65535),
-    ADD COLUMN generation  bigint NOT NULL DEFAULT 0;
+    ADD COLUMN generation  bigint NOT NULL DEFAULT 0,
+    ADD COLUMN serve_image text NOT NULL DEFAULT '';
 CREATE UNIQUE INDEX idx_hosted_servers_live_slot ON hosted_servers(machine_ref, slot)
     WHERE machine_ref IS NOT NULL AND state NOT IN ('stopped', 'failed');
 CREATE INDEX idx_hosted_servers_machine_ref ON hosted_servers(machine_ref);

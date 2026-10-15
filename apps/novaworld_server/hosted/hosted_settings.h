@@ -11,7 +11,7 @@
 // their terminators, docs/mnu/menu-re.md "Host dialog rules").
 
 #include "data_sets.h"
-#include "machine_provider.h"
+#include "machine_driver.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -86,10 +86,33 @@ inline constexpr size_t kAdminPasswordChars = 31;
 // The service account's NovaWorld password.
 inline constexpr size_t kServicePasswordChars = 32;
 
+// One file of the server's working directory: a bare name and its bytes.
+// `secret` marks one holding a credential (owner-only on the machine, never
+// logged).
+struct LaunchFile {
+	std::string name;
+	std::string content;
+	bool secret = false;
+};
+
+// Everything a slot needs to run hosted server `server_id`, rendered from
+// scratch at every start: the data set it mounts (data_sets.h, by its game),
+// the working directory's files and opennova-serve's arguments, relative to
+// that directory. The supervisor hands it to the machine's agent as the
+// container's files and arguments (agent_protocol.h DesiredContainer); the
+// machine resolves the data set to its own data (a cloud machine's
+// /opt/game/<data set>, the local driver's --resource-dir and --loose-root).
+struct LaunchSpec {
+	int64_t server_id = 0;
+	std::string data_set;
+	std::vector<LaunchFile> files;
+	std::vector<std::string> serve_args;
+};
+
 // What a start renders, beside the settings.
 struct RenderInputs {
 	int64_t server_id = 0;
-	MachinePlan plan;
+	SlotPlan plan; // the slot's ports and the address admin.cfg admits
 	std::string service_username; // NOVAWORLD_USER
 	std::string service_password; // NOVAWORLD_PASS
 	std::string admin_password;   // admin.cfg's kAdminUser
@@ -103,20 +126,26 @@ struct RenderInputs {
 // map, the first map's line last (the last line is the starting map).
 std::string render_host_file(const HostedSettings &settings, int64_t server_id);
 // game.cfg: the defaults (Config_SetDefaults), on the NovaWorld network type,
-// the NovaWorld port range pinned to `plan.nw_port`, and the remote admin on
+// the NovaWorld port range pinned to `plan.game_port` (the slot's: NovaWorld
+// lists a server at its datagrams' source port, so a stock client joins each
+// slot of a machine on its own port), and the remote admin on
 // `plan.admin_port`; written by the format's own writer.
-std::string render_game_cfg(const MachinePlan &plan);
+std::string render_game_cfg(const SlotPlan &plan);
 // admin.cfg: kAdminUser with `admin_password` and kAdminRights, and one
 // ip_restrict line admitting `plan.admin_allowed_ip`.
-std::string render_admin_cfg(const MachinePlan &plan, const std::string &admin_password);
+std::string render_admin_cfg(const SlotPlan &plan, const std::string &admin_password);
 // The --credentials file: NOVAWORLD_USER and NOVAWORLD_PASS.
 std::string render_credentials(const std::string &username, const std::string &password);
 
-// The whole start of a server on `data_set` (its settings' game): the four
-// files (every one but game.cfg secret: the host file carries the game
-// password), the data set the machine mounts, and opennova-serve's arguments
-// (/HOST, --credentials, --master-host, --master-gate-port, /game with the data
-// set's title, and /exp for an expansion).
+// opennova-serve's arguments for a server on `data_set` (its settings' game):
+// /HOST, --credentials, --master-host, --master-gate-port, /game with the data
+// set's title, and /exp for an expansion. They name the working directory's
+// files and carry no secret.
+std::vector<std::string> render_serve_args(const HostedSettings &settings, const DataSet &data_set,
+		const std::string &master_host, uint16_t master_gate_port);
+// The whole start of a server on `data_set`: the four files (every one but
+// game.cfg secret: the host file carries the game password), the data set the
+// machine mounts, and render_serve_args.
 LaunchSpec render_launch(const HostedSettings &settings, const DataSet &data_set, const RenderInputs &inputs);
 
 // `length` letters and digits from the OS CSPRNG.

@@ -137,7 +137,7 @@ std::string check_billing_config(const BillingConfig &config) {
 	if (std::string why = take("STRIPE_PRICE_OWN_MACHINE", config.own_machine_prices); !why.empty()) return why;
 
 	if (std::string why = site_url_refusal(config.site_url, config.live()); !why.empty()) return why;
-	// A POSIX root or a drive letter (as Ec2Provider reads ONNET_HOSTED_AWS_CLI).
+	// An absolute path: a POSIX root or a drive letter.
 	const std::string &curl = config.curl_path;
 	if (curl.empty() || !(curl[0] == '/' || (curl.size() > 2 && curl[1] == ':')))
 		return "ONNET_STRIPE_CURL '" + loggable(curl, 120) + "' is not an absolute path";

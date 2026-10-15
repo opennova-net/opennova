@@ -58,11 +58,13 @@ public:
 	HostedRoutes(const HostedRoutes &) = delete;
 	HostedRoutes &operator=(const HostedRoutes &) = delete;
 
-	// Takes ONNET_HOSTED_PROVIDER, ONNET_HOSTED_CAP and the data sets the
-	// provider offers (data_sets.h: a start's game, and its rotation when the
-	// request names none) from the config; hosting is on with a provider and
-	// at least one offered data set. Before register_routes().
-	void configure(const ServerConfig &config);
+	// Takes ONNET_HOSTED_PROVIDER (the machine driver), ONNET_HOSTED_CAP and the
+	// data sets the driver offers (data_sets.h: a start's game, and its rotation
+	// when the request names none) from the config, and the fleet's placement
+	// policy (fleet_config.h: the start's at_capacity and the list's `full` ask
+	// the supervisor's planner); hosting is on with a driver and at least one
+	// offered data set. Before register_routes().
+	void configure(const ServerConfig &config, const PlacementPolicy &fleet);
 	void register_routes(WebApp &app);
 
 private:
@@ -78,7 +80,8 @@ private:
 	db::ConnectionPool &pool_;
 	bool enabled_ = false;
 	std::string provider_ = "none";
-	int cap_ = 5;
+	int cap_ = 24;
+	PlacementPolicy fleet_;
 	std::vector<DataSet> data_sets_;
 	RateLimiter start_stop_per_user_{ kStartStopPerUser };
 };

@@ -27,7 +27,7 @@
 // most once per peer per minute (LogThrottle). The replies carry
 // Cache-Control: no-store and are never logged. Service policy, not a port.
 
-#include "bootstrap.h"
+#include "net_cidr.h"
 #include "fleet_config.h"
 #include "fleet_desired_state.h"
 

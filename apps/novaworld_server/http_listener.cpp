@@ -7,9 +7,9 @@
 #include "cd_key_routes.h"
 #include "health.h"
 #include "host_routes.h"
-#include "hosted/bootstrap_route.h"
 #include "hosted/console_routes.h"
 #include "hosted/hosted_routes.h"
+#include "hosted/net_cidr.h"
 #include "http_cookies.h"
 #include "nw_udp_listener.h"
 #include "server_config.h"
@@ -365,7 +365,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	register_admin_api_routes(public_host);
 	register_public_api_routes();
 	impl_->hosts.register_routes(impl_->app, nw_udp_);
-	impl_->hosted_servers.configure(config);
+	impl_->hosted_servers.configure(config, fleet_placement_);
 	impl_->hosted_servers.register_routes(impl_->app);
 	impl_->console.set_handler_threads(handler_threads());
 	impl_->console.register_routes(impl_->app, admin_links_);
@@ -374,8 +374,6 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->billing.set_billing(billing_);
 	impl_->billing.set_limits_hold(limits_hold_);
 	impl_->billing.register_routes(impl_->app);
-	if (bootstrap_store_ != nullptr)
-		hosted::register_bootstrap_route(impl_->app, *bootstrap_store_, bootstrap_admitted_);
 	register_legacy_login_routes(templates_dir);
 	register_legacy_host_join_routes(templates_dir);
 	// The catch-all /<path> wildcard must register last: Crow rejects a
