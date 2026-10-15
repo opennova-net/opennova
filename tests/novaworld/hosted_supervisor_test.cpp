@@ -588,7 +588,7 @@ int test_service_accounts() {
 	TEST_EXPECT(nws::bootstrap_admin(db, "srv-7").outcome == nws::BootstrapAdminResult::Outcome::NoSuchAccount);
 	// A session row planted by hand resolves to nothing.
 	db.exec("INSERT INTO web_sessions (token_hash, user_id, expires_at) "
-			"VALUES (?, ?, datetime('now', '+1 day'));",
+			"VALUES ($1, $2, datetime('now', '+1 day'));",
 			{ BindValue(nws::web_session_token_hash(std::string(64, 'b'))), BindValue(made.id) });
 	TEST_EXPECT(!nws::resolve_web_session(db, std::string(64, 'b')));
 
@@ -619,7 +619,7 @@ int test_service_accounts() {
 	TEST_EXPECT(!nws::authenticate_user(db, "srv-7", "first-password"));
 	TEST_EXPECT(nws::authenticate_user(db, "srv-7", "second-password"));
 	TEST_EXPECT(nws::get_user_by_id(db, made.id)->credentials_gen == account->credentials_gen + 1);
-	TEST_EXPECT(db.query("SELECT 1 FROM host_keys WHERE user_id = ?;", { BindValue(made.id) }).empty());
+	TEST_EXPECT(db.query("SELECT 1 FROM host_keys WHERE user_id = $1;", { BindValue(made.id) }).empty());
 
 	// A player holding the name (a database written by hand) keeps it.
 	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
@@ -669,7 +669,7 @@ int test_requests() {
 	try {
 		db.exec("INSERT INTO hosted_servers (owner_user_id, game_name, max_players, time_limit, "
 				"kill_limit, max_score, respawn, start_delay, missions) "
-				"VALUES (?, 'x', 8, 1, 1, 1, 0, 0, 'm.bms');",
+				"VALUES ($1, 'x', 8, 1, 1, 1, 0, 0, 'm.bms');",
 				{ BindValue(a) });
 	} catch (const opennova::db::SqliteError &) {
 		refused = true;

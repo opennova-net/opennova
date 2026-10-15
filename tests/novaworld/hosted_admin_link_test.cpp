@@ -189,10 +189,13 @@ int main(int argc, char **argv) {
 		{
 			auto db = pool.acquire();
 			opennova::db::run_migrations(*db, fs::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations");
-			db->exec("INSERT INTO hosted_servers (state, game_name, max_players, time_limit, kill_limit, "
-					 "max_score, respawn, start_delay, missions) "
-					 "VALUES ('running', 'Admin Link Test', 8, 30, 50, 5, 5, 0, 'servetst.bms');");
-			server_id = db->last_insert_rowid();
+			server_id = db->query("INSERT INTO hosted_servers (state, game_name, max_players, time_limit, "
+								  "kill_limit, max_score, respawn, start_delay, missions) "
+								  "VALUES ('running', 'Admin Link Test', 8, 30, 50, 5, 5, 0, 'servetst.bms') "
+								  "RETURNING id;")
+								.front()
+								.as_int(0)
+								.value();
 		}
 
 		LogTap tap;

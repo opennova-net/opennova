@@ -537,7 +537,7 @@ int64_t admin_count(Harness &h) {
 // An integer the session row of `token` answers `select` with (-1: no row).
 int64_t session_scalar(Harness &h, const std::string &token, const std::string &select) {
 	const auto rows = h.pool.acquire()->query(
-			"SELECT " + select + " FROM web_sessions WHERE token_hash = ?;",
+			"SELECT " + select + " FROM web_sessions WHERE token_hash = $1;",
 			{opennova::db::BindValue(nws::web_session_token_hash(token))});
 	return rows.empty() ? -1 : rows.front().as_int(0).value_or(-1);
 }
@@ -564,7 +564,7 @@ int test_login_sets_session_cookie(Harness &h) {
 	TEST_EXPECT(cookies[0] == std::string(nws::kWebSessionCookie) + "=" + token + kCookieTail);
 
 	const auto rows = h.pool.acquire()->query(
-			"SELECT token_hash, ip FROM web_sessions WHERE user_id = ?;",
+			"SELECT token_hash, ip FROM web_sessions WHERE user_id = $1;",
 			{opennova::db::BindValue(id)});
 	TEST_EXPECT(rows.size() == 1);
 	TEST_EXPECT(rows[0].as_text(0).value() == opennova::io::sha256_hex(opennova::io::sha256(token)));
@@ -693,7 +693,7 @@ int test_login_refuses_inactive_accounts(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 401);
 	TEST_EXPECT(body_text(reply) == "{\"error\":\"invalid_credentials\"}");
 	TEST_EXPECT(h.pool.acquire()->query(
-			"SELECT 1 FROM web_sessions WHERE user_id IN (?, ?);",
+			"SELECT 1 FROM web_sessions WHERE user_id IN ($1, $2);",
 			{opennova::db::BindValue(banned), opennova::db::BindValue(disabled)}).empty());
 
 	const std::string token = login_token(h, "10.3.0.2", "web_later", "pw-later");
@@ -745,7 +745,7 @@ int test_me_requires_live_session(Harness &h) {
 
 	h.pool.acquire()->exec(
 			"UPDATE web_sessions SET expires_at = datetime('now', '-1 seconds') "
-			"WHERE token_hash = ?;",
+			"WHERE token_hash = $1;",
 			{opennova::db::BindValue(nws::web_session_token_hash(token))});
 	reply = h.send("GET", "/api/me", {with_session(token)});
 	TEST_EXPECT(reply.transport_ok && reply.code == 401);
@@ -765,7 +765,7 @@ int test_session_slides(Harness &h) {
 	auto age = [&h, &token](const char *last_seen) {
 		h.pool.acquire()->exec(
 				std::string("UPDATE web_sessions SET last_seen_at = datetime('now', '") + last_seen +
-						"'), expires_at = datetime('now', '+1 days') WHERE token_hash = ?;",
+						"'), expires_at = datetime('now', '+1 days') WHERE token_hash = $1;",
 				{opennova::db::BindValue(nws::web_session_token_hash(token))});
 	};
 
@@ -1541,7 +1541,7 @@ HostFetch fetch_nwhost(Harness &h, const std::string &cookies) {
 
 // The account host_keys records for `key` (by its hash), nullopt when none.
 std::optional<int64_t> key_owner(Harness &h, const std::string &key) {
-	const auto rows = h.pool.acquire()->query("SELECT user_id FROM host_keys WHERE key_hash = ?;",
+	const auto rows = h.pool.acquire()->query("SELECT user_id FROM host_keys WHERE key_hash = $1;",
 	                                          {opennova::db::BindValue(opennova::hostdb::host_key_hash(key))});
 	if (rows.empty()) return std::nullopt;
 	return rows.front().as_int(0);
@@ -1575,7 +1575,7 @@ int test_nwhost_records_owner(Harness &h) {
 	TEST_EXPECT(opennova::hostdb::is_host_key(owned.key));
 	TEST_EXPECT(key_owner(h, owned.key) == id);
 	TEST_EXPECT(h.pool.acquire()
-	                    ->query("SELECT 1 FROM host_keys WHERE key_hash = ?;",
+	                    ->query("SELECT 1 FROM host_keys WHERE key_hash = $1;",
 	                            {opennova::db::BindValue(owned.key)})
 	                    .empty());
 	const auto pinned = fetch_nwhost(h, "PERSISTENTEXPRESSLOGINDATA=pin-host-owner");
@@ -2340,7 +2340,7 @@ int test_dfx2_activation(Harness &h) {
 	};
 	const auto live_wire_key = [&h](int64_t user) {
 		const auto rows = h.pool.acquire()->query("SELECT wire_key, created_by FROM cd_keys WHERE "
-												  "user_id = ? AND revoked_at IS NULL;",
+												  "user_id = $1 AND revoked_at IS NULL;",
 				{ opennova::db::BindValue(user) });
 		return rows.size() == 1
 				? rows[0].as_text(0).value_or("") + "|" + rows[0].as_text(1).value_or("")
@@ -2380,7 +2380,7 @@ int test_dfx2_activation(Harness &h) {
 	TEST_EXPECT(h.pool.acquire()
 						->query("SELECT COUNT(*) FROM cd_key_activations a JOIN cd_keys k ON k.id "
 								"= a.key_id "
-								"WHERE k.user_id = ?;",
+								"WHERE k.user_id = $1;",
 								{ opennova::db::BindValue(player) })
 						.front()
 						.as_int(0)
@@ -2412,7 +2412,7 @@ int test_dfx2_activation(Harness &h) {
 			h.send("POST",
 					 "/api/admin/cd-keys/" +
 							 std::to_string(h.pool.acquire()
-											 ->query("SELECT id FROM cd_keys WHERE user_id = ?;",
+											 ->query("SELECT id FROM cd_keys WHERE user_id = $1;",
 													 { opennova::db::BindValue(player) })
 											 .front()
 											 .as_int(0)
@@ -2924,13 +2924,13 @@ int test_owner_host_push(Harness &h) {
 
 	// The route reads the live claim, not the row: a row that names Alice with no key of hers
 	// claimed for it is a 404 at the route.
-	h.pool.acquire()->exec("UPDATE active_hosts SET host_user_id = ? WHERE rid = ?;",
+	h.pool.acquire()->exec("UPDATE active_hosts SET host_user_id = $1 WHERE rid = $2;",
 	                       {BindValue(alice), BindValue(static_cast<int64_t>(anon->rid))});
 	TEST_EXPECT(!opennova::hostdb::listing_owned_by(*h.pool.acquire(), anon->rid, alice));
 	reply = command(alice_s, anon_rid, rename);
 	TEST_EXPECT(reply.transport_ok && reply.code == 404);
 	TEST_EXPECT(body_text(reply) == body_text(free_command));
-	h.pool.acquire()->exec("UPDATE active_hosts SET host_user_id = NULL WHERE rid = ?;",
+	h.pool.acquire()->exec("UPDATE active_hosts SET host_user_id = NULL WHERE rid = $1;",
 	                       {BindValue(static_cast<int64_t>(anon->rid))});
 	// The push-time check: a key of Alice's claimed for the anonymous host's RID passes the
 	// route's look-up, but that connection never presented it (its lobby names no owner), so the
@@ -2948,7 +2948,7 @@ int test_owner_host_push(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 404);
 	TEST_EXPECT(body_text(reply) == body_text(free_command));
 	TEST_EXPECT(theirs.wait_notice(Notice::Kind::Command, 500) == nullptr);
-	h.pool.acquire()->exec("DELETE FROM host_keys WHERE key_hash = ?;",
+	h.pool.acquire()->exec("DELETE FROM host_keys WHERE key_hash = $1;",
 	                       {BindValue(opennova::hostdb::host_key_hash(stray))});
 
 	// The bucket, per account: Dave's runs dry (the stop draws on it too); Alice's is her own.
@@ -3505,7 +3505,7 @@ int test_header_values_cannot_split(Harness &h) {
 	// A stored nwhandle, and expansion bits an admin set: the retail login's
 	// relay and completion. /api/register refuses the handle itself.
 	auto set_handle = [&h](const std::string &username, const std::string &handle) {
-		h.pool.acquire()->exec("UPDATE players SET nwhandle = ? WHERE username = ?;",
+		h.pool.acquire()->exec("UPDATE players SET nwhandle = $1 WHERE username = $2;",
 				{ opennova::db::BindValue(handle), opennova::db::BindValue(username) });
 	};
 	reply = h.send("POST", "/api/register", { kJson, kCsrf, from_ip("10.41.0.1") },
@@ -3669,7 +3669,7 @@ int test_reset_during_login(Harness &h) {
 	};
 	auto rows = [&h, id](const std::string &table) {
 		return h.pool.acquire()
-				->query("SELECT COUNT(*) FROM " + table + " WHERE user_id = ?;",
+				->query("SELECT COUNT(*) FROM " + table + " WHERE user_id = $1;",
 						{ opennova::db::BindValue(id) })
 				.front()
 				.as_int(0)
@@ -3736,13 +3736,13 @@ net::HttpReply join(Harness &h, const std::vector<std::string> &cookies) {
 // no row). Each join from the harness replaces the one row its address keeps.
 int64_t joined_user(Harness &h) {
 	const auto rows =
-			h.pool.acquire()->query("SELECT user_id FROM host_players WHERE host_rid = ?;",
+			h.pool.acquire()->query("SELECT user_id FROM host_players WHERE host_rid = $1;",
 					{ opennova::db::BindValue(static_cast<int64_t>(kJoinRid)) });
 	return rows.empty() ? -1 : rows.front().as_int(0).value_or(0);
 }
 
 void forget_joins(Harness &h) {
-	h.pool.acquire()->exec("DELETE FROM host_players WHERE host_rid = ?;",
+	h.pool.acquire()->exec("DELETE FROM host_players WHERE host_rid = $1;",
 			{ opennova::db::BindValue(static_cast<int64_t>(kJoinRid)) });
 }
 
@@ -3857,7 +3857,7 @@ int test_join_identity(Harness &h) {
 			{ std::pair<const char *, const char *>{
 					  "banned", "This NovaWorld account has been banned. NWEC11" },
 					{ "disabled", "This NovaWorld account is restricted. NWEC12" } }) {
-		h.pool.acquire()->exec("UPDATE players SET account_status = ? WHERE id = ?;",
+		h.pool.acquire()->exec("UPDATE players SET account_status = $1 WHERE id = $2;",
 				{ opennova::db::BindValue(std::string(status)), opennova::db::BindValue(other) });
 		forget_joins(h);
 		reply = join(h, { other_tag });
@@ -3869,7 +3869,7 @@ int test_join_identity(Harness &h) {
 		TEST_EXPECT(joined_user(h) == -1);
 		TEST_EXPECT(account_page_anonymous(h, { "Cookie: " + other_tag }));
 	}
-	h.pool.acquire()->exec("UPDATE players SET account_status = 'active' WHERE id = ?;",
+	h.pool.acquire()->exec("UPDATE players SET account_status = 'active' WHERE id = $1;",
 			{ opennova::db::BindValue(other) });
 	forget_joins(h);
 	TEST_EXPECT(identified(join(h, { other_tag })));
@@ -4055,12 +4055,12 @@ int test_login_row_kept_alive(Harness &h) {
 	auto age = [&h, id](const char *ago) {
 		h.pool.acquire()->exec(
 				std::string("UPDATE active_user_sessions SET last_seen_at = datetime('now', '") +
-						ago + "') WHERE user_id = ?;",
+						ago + "') WHERE user_id = $1;",
 				{ opennova::db::BindValue(id) });
 	};
 	auto fresh_row = [&h, id] {
 		return !h.pool.acquire()
-						->query("SELECT 1 FROM active_user_sessions WHERE user_id = ? "
+						->query("SELECT 1 FROM active_user_sessions WHERE user_id = $1 "
 								"AND last_seen_at >= datetime('now', '-5 seconds');",
 								{ opennova::db::BindValue(id) })
 						.empty();
@@ -4357,7 +4357,7 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "at_capacity");
 
 	// The fleet view: admin only; it names the owner and never the admin password.
-	h.pool.acquire()->exec("UPDATE hosted_servers SET admin_password = 'planted-admin-secret' WHERE id = ?;",
+	h.pool.acquire()->exec("UPDATE hosted_servers SET admin_password = 'planted-admin-secret' WHERE id = $1;",
 			{ opennova::db::BindValue(ana_server) });
 	TEST_EXPECT(h.send("GET", "/api/admin/hosted").code == 401);
 	TEST_EXPECT(h.send("GET", "/api/admin/hosted", { with_session(ana_s) }).code == 403);
@@ -4986,7 +4986,7 @@ int test_hosted_console_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_not_running");
 	{
 		auto db = h.pool.acquire();
-		db->exec("UPDATE hosted_servers SET state = 'running', machine_address = '127.0.0.1' WHERE id = ?;",
+		db->exec("UPDATE hosted_servers SET state = 'running', machine_address = '127.0.0.1' WHERE id = $1;",
 				{ opennova::db::BindValue(id) });
 		hosted::set_admin_login(*db, id, fake.port(), "svc", password);
 	}

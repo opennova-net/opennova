@@ -35,11 +35,12 @@ constexpr const char *kMachineA = "ABCDEFGHIJKLMNOPQRSTUVW";
 constexpr const char *kMachineB = "TTTTTTTTTTTTTTTTTTTTTTT";
 
 int64_t add_player(Database &db, const std::string &name, const char *kind = "player") {
-	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle, kind) VALUES (?, "
-			"'x', ?, '1', ?, ?);",
-			{ BindValue(name), BindValue("pc-" + name), BindValue(name),
-					BindValue(std::string(kind)) });
-	return db.last_insert_rowid();
+	return db.query("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle, kind) "
+					"VALUES ($1, 'x', $2, '1', $1, $3) RETURNING id;",
+					{ BindValue(name), BindValue("pc-" + name), BindValue(std::string(kind)) })
+			.front()
+			.as_int(0)
+			.value();
 }
 
 bool is_upper_hex(char c) {
@@ -208,7 +209,7 @@ int activations(Database &db) {
 	TEST_EXPECT(activates(result.nwact, kMachineA, fresh[0].wire_key) && result.nwact != nwact_a);
 
 	// A deleted account takes its keys and their activations.
-	db.exec("DELETE FROM players WHERE id = ?;", { BindValue(first) });
+	db.exec("DELETE FROM players WHERE id = $1;", { BindValue(first) });
 	TEST_EXPECT(!cdkeys::find_key(db, key_id) && !cdkeys::find_key(db, fresh[0].id));
 	TEST_EXPECT(cdkeys::activations_of_key(db, key_id).empty());
 	return 0;

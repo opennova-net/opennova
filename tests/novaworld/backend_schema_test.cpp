@@ -571,10 +571,10 @@ int test_host_keys_and_account_deletes() {
 	run_migrations(db, source_dir / "backend" / "migrations");
 	auto add_player = [&db](const std::string &name) {
 		db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
-		        "VALUES (?, 'x', ?, '1', ?);",
+		        "VALUES ($1, 'x', $2, '1', $3);",
 		        {opennova::db::BindValue(name), opennova::db::BindValue("pc-" + name),
 		         opennova::db::BindValue(name)});
-		return db.query("SELECT id FROM players WHERE username = ?;", {opennova::db::BindValue(name)})
+		return db.query("SELECT id FROM players WHERE username = $1;", {opennova::db::BindValue(name)})
 		        .front()
 		        .as_int(0)
 		        .value();
@@ -584,17 +584,17 @@ int test_host_keys_and_account_deletes() {
 	const int64_t first = add_player("first");
 	const int64_t newest = add_player("newest");
 	TEST_EXPECT(newest > first);
-	db.exec("DELETE FROM players WHERE id = ?;", {opennova::db::BindValue(newest)});
+	db.exec("DELETE FROM players WHERE id = $1;", {opennova::db::BindValue(newest)});
 	TEST_EXPECT(add_player("newcomer") > newest);
 
 	for (const char *index : {"idx_host_keys_user_id", "idx_host_keys_last_used_at"}) {
 		TEST_EXPECT(db.query("SELECT 1 FROM sqlite_master WHERE type = 'index' "
-		                     "AND tbl_name = 'host_keys' AND name = ?;",
+		                     "AND tbl_name = 'host_keys' AND name = $1;",
 		                     {opennova::db::BindValue(std::string(index))})
 		                    .size() == 1);
 	}
 	const int64_t host = add_player("host");
-	db.exec("INSERT INTO host_keys (key_hash, user_id) VALUES ('h1', ?);",
+	db.exec("INSERT INTO host_keys (key_hash, user_id) VALUES ('h1', $1);",
 	        {opennova::db::BindValue(host)});
 	auto fresh = db.query("SELECT created_at IS NOT NULL, last_used_at IS NOT NULL, claimed_rid "
 	                      "FROM host_keys WHERE key_hash = 'h1';");
@@ -604,7 +604,7 @@ int test_host_keys_and_account_deletes() {
 	// The hash is the key: a second row under it is refused.
 	bool caught = false;
 	try {
-		db.exec("INSERT INTO host_keys (key_hash, user_id) VALUES ('h1', ?);",
+		db.exec("INSERT INTO host_keys (key_hash, user_id) VALUES ('h1', $1);",
 		        {opennova::db::BindValue(first)});
 	} catch (const opennova::db::SqliteError &) {
 		caught = true;
@@ -622,12 +622,12 @@ int test_host_keys_and_account_deletes() {
 	// The host's listed server, with the first account in its player list.
 	db.exec("INSERT INTO active_hosts (rid, gsid, game, app_id, server_name, host_ip, host_port, "
 	        "host_user_id, peer_ip, peer_port) VALUES (7, 'G7', 'jop_2_consumer', '1234', 'Owned', "
-	        "'10.0.0.7', 32768, ?, '10.0.0.7', 32768);",
+	        "'10.0.0.7', 32768, $1, '10.0.0.7', 32768);",
 	        {opennova::db::BindValue(host)});
 	db.exec("INSERT INTO host_players (host_rid, user_id, nwhandle, peer_ip, peer_port) "
-	        "VALUES (7, ?, 'first', '10.0.0.8', 0);",
+	        "VALUES (7, $1, 'first', '10.0.0.8', 0);",
 	        {opennova::db::BindValue(first)});
-	db.exec("DELETE FROM players WHERE id IN (?, ?);",
+	db.exec("DELETE FROM players WHERE id IN ($1, $2);",
 	        {opennova::db::BindValue(host), opennova::db::BindValue(first)});
 	const auto listed = db.query("SELECT server_name, host_user_id FROM active_hosts WHERE rid = 7;");
 	TEST_EXPECT(listed.size() == 1 && listed[0].as_text(0).value() == "Owned");
@@ -656,26 +656,28 @@ bool refused(Database &db, const std::string &sql) {
 // activations. `prefix` keeps the rows of one call apart from another's.
 int expect_cd_key_rules(Database &db, const std::string &prefix) {
 	using opennova::db::BindValue;
-	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) VALUES (?, 'x', ?, "
-			"'1', ?);",
+	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) VALUES ($1, 'x', $2, "
+			"'1', $3);",
 			{ BindValue(prefix + "owner"), BindValue(prefix + "pc"), BindValue(prefix + "owner") });
 	const int64_t owner =
-			db.query("SELECT id FROM players WHERE username = ?;", { BindValue(prefix + "owner") })
+			db.query("SELECT id FROM players WHERE username = $1;", { BindValue(prefix + "owner") })
 					.front()
 					.as_int(0)
 					.value();
 	const auto add_key = [&](const std::string &serial, std::optional<int64_t> user, bool revoked) {
-		db.exec("INSERT INTO cd_keys (title, serial, wire_key, user_id, created_by, revoked_at) "
-				"VALUES ('dfx2', ?, ?, ?, 'token', ?);",
-				{ BindValue(prefix + serial), BindValue(prefix + serial + "-WIRE"),
-						user ? BindValue(*user) : BindValue(std::monostate{}),
-						revoked ? BindValue(std::string("2026-10-14 00:00:00"))
-								: BindValue(std::monostate{}) });
-		return db.last_insert_rowid();
+		return db.query("INSERT INTO cd_keys (title, serial, wire_key, user_id, created_by, revoked_at) "
+						"VALUES ('dfx2', $1, $2, $3, 'token', $4) RETURNING id;",
+						{ BindValue(prefix + serial), BindValue(prefix + serial + "-WIRE"),
+								user ? BindValue(*user) : BindValue(std::monostate{}),
+								revoked ? BindValue(std::string("2026-10-14 00:00:00"))
+										: BindValue(std::monostate{}) })
+				.front()
+				.as_int(0)
+				.value();
 	};
 	const int64_t live = add_key("LIVE", owner, false);
 	const auto fresh = db.query(
-			"SELECT created_at IS NOT NULL, assigned_at, revoked_at FROM cd_keys WHERE id = ?;",
+			"SELECT created_at IS NOT NULL, assigned_at, revoked_at FROM cd_keys WHERE id = $1;",
 			{ BindValue(live) });
 	TEST_EXPECT(fresh.size() == 1 && fresh[0].as_int(0).value() == 1);
 	TEST_EXPECT(fresh[0].is_null(1) && fresh[0].is_null(2));
@@ -701,14 +703,14 @@ int expect_cd_key_rules(Database &db, const std::string &prefix) {
 					prefix + "', 'GHOST-WIRE-" + prefix + "', 999999, 'token');"));
 	// Another title's live key is the account's own business.
 	db.exec("INSERT INTO cd_keys (title, serial, wire_key, user_id, created_by) VALUES ('other', "
-			"?, ?, ?, 'token');",
+			"$1, $2, $3, 'token');",
 			{ BindValue(prefix + "OTHER"), BindValue(prefix + "OTHER-WIRE"), BindValue(owner) });
 
-	db.exec("INSERT INTO cd_key_activations (key_id, nwpssk, nwact) VALUES (?, "
+	db.exec("INSERT INTO cd_key_activations (key_id, nwpssk, nwact) VALUES ($1, "
 			"'ABCDEFGHIJKLMNOPQRSTUVW', 'X');",
 			{ BindValue(live) });
 	const auto activation =
-			db.query("SELECT created_at IS NOT NULL FROM cd_key_activations WHERE key_id = ?;",
+			db.query("SELECT created_at IS NOT NULL FROM cd_key_activations WHERE key_id = $1;",
 					{ BindValue(live) });
 	TEST_EXPECT(activation.size() == 1 && activation[0].as_int(0).value() == 1);
 	TEST_EXPECT(refused(db,
@@ -717,27 +719,27 @@ int expect_cd_key_rules(Database &db, const std::string &prefix) {
 	TEST_EXPECT(refused(db,
 			"INSERT INTO cd_key_activations (key_id, nwpssk, nwact) VALUES "
 			"(999999, 'ABCDEFGHIJKLMNOPQRSTUVW', 'Y');"));
-	db.exec("INSERT INTO cd_key_activations (key_id, nwpssk, nwact) VALUES (?, "
+	db.exec("INSERT INTO cd_key_activations (key_id, nwpssk, nwact) VALUES ($1, "
 			"'TTTTTTTTTTTTTTTTTTTTTTT', 'Z');",
 			{ BindValue(live) });
 
 	// A deleted key takes its activations; a deleted account its keys.
 	const int64_t free_key =
-			db.query("SELECT id FROM cd_keys WHERE serial = ?;", { BindValue(prefix + "FREE") })
+			db.query("SELECT id FROM cd_keys WHERE serial = $1;", { BindValue(prefix + "FREE") })
 					.front()
 					.as_int(0)
 					.value();
-	db.exec("INSERT INTO cd_key_activations (key_id, nwpssk, nwact) VALUES (?, "
+	db.exec("INSERT INTO cd_key_activations (key_id, nwpssk, nwact) VALUES ($1, "
 			"'ABCDEFGHIJKLMNOPQRSTUVW', 'F');",
 			{ BindValue(free_key) });
-	db.exec("DELETE FROM cd_keys WHERE id = ?;", { BindValue(free_key) });
+	db.exec("DELETE FROM cd_keys WHERE id = $1;", { BindValue(free_key) });
 	TEST_EXPECT(
-			db.query("SELECT 1 FROM cd_key_activations WHERE key_id = ?;", { BindValue(free_key) })
+			db.query("SELECT 1 FROM cd_key_activations WHERE key_id = $1;", { BindValue(free_key) })
 					.empty());
-	db.exec("DELETE FROM players WHERE id = ?;", { BindValue(owner) });
-	TEST_EXPECT(db.query("SELECT 1 FROM cd_keys WHERE serial LIKE ? || '%';", { BindValue(prefix) })
+	db.exec("DELETE FROM players WHERE id = $1;", { BindValue(owner) });
+	TEST_EXPECT(db.query("SELECT 1 FROM cd_keys WHERE serial LIKE $1 || '%';", { BindValue(prefix) })
 					.empty());
-	TEST_EXPECT(db.query("SELECT 1 FROM cd_key_activations WHERE key_id = ?;", { BindValue(live) })
+	TEST_EXPECT(db.query("SELECT 1 FROM cd_key_activations WHERE key_id = $1;", { BindValue(live) })
 					.empty());
 	return 0;
 }
@@ -750,7 +752,7 @@ int test_cd_keys_fresh() {
 	for (const char *index :
 			{ "idx_cd_keys_title", "idx_cd_keys_user", "idx_cd_keys_live_per_account" }) {
 		TEST_EXPECT(db.query("SELECT 1 FROM sqlite_master WHERE type = 'index' AND tbl_name = "
-							 "'cd_keys' AND name = ?;",
+							 "'cd_keys' AND name = $1;",
 							  { opennova::db::BindValue(std::string(index)) })
 							.size() == 1);
 	}

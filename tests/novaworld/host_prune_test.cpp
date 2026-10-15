@@ -19,8 +19,8 @@ void insert_host(opennova::db::Database &db, uint32_t rid,
 	db.exec(
 		"INSERT INTO active_hosts (rid, gsid, game, app_id, server_name, "
 		" host_ip, host_port, peer_ip, peer_port, updated_at) "
-		"VALUES (?, ?, 'jop_2_consumer', '10000', 'srv', '10.0.0.1', 64206, "
-		" '10.0.0.1', 64206, datetime('now', ?));",
+		"VALUES ($1, $2, 'jop_2_consumer', '10000', 'srv', '10.0.0.1', 64206, "
+		" '10.0.0.1', 64206, datetime('now', $3));",
 		{opennova::db::BindValue(static_cast<int64_t>(rid)),
 		 opennova::db::BindValue(std::string("GSID-") + std::to_string(rid)),
 		 opennova::db::BindValue(age_modifier)});

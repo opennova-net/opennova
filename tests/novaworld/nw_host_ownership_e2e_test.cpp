@@ -441,7 +441,7 @@ void strict_flow(Service &strict) {
 
 	// The account's keys revoked (an admin password reset deletes them): the
 	// next re-host's key names nobody, and the request is refused.
-	strict.pool.acquire()->exec("DELETE FROM host_keys WHERE user_id = ?;",
+	strict.pool.acquire()->exec("DELETE FROM host_keys WHERE user_id = $1;",
 	                            {opennova::db::BindValue(strict.owner_id)});
 	rehost = host.reconnect([&] { return !strict.row("Strict Owned"); });
 	expect(rehost == ClientSession::HostState::Failed, "strict revoked: the re-host is refused");

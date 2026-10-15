@@ -45,9 +45,9 @@ void write_file(const std::filesystem::path &p, std::string_view body) {
 int test_open_and_basic_exec() {
 	Database db(":memory:");
 	db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT NOT NULL);");
-	db.exec("INSERT INTO t (id, name) VALUES (?, ?);",
+	db.exec("INSERT INTO t (id, name) VALUES ($1, $2);",
 	        {BindValue{int64_t{1}}, BindValue{std::string("alpha")}});
-	db.exec("INSERT INTO t (id, name) VALUES (?, ?);",
+	db.exec("INSERT INTO t (id, name) VALUES ($1, $2);",
 	        {BindValue{int64_t{2}}, BindValue{std::string("bravo")}});
 
 	auto rows = db.query("SELECT id, name FROM t ORDER BY id;");
@@ -58,6 +58,11 @@ int test_open_and_basic_exec() {
 	TEST_EXPECT(rows[1].as_text(1).value() == "bravo");
 	TEST_EXPECT(rows[0].columns[0] == "id");
 	TEST_EXPECT(rows[0].columns[1] == "name");
+
+	// A numbered parameter may appear more than once; one bind fills each.
+	rows = db.query("SELECT name FROM t WHERE id = $1 OR id = $1 + $2 ORDER BY id;",
+			{ BindValue{ int64_t{ 1 } }, BindValue{ int64_t{ 1 } } });
+	TEST_EXPECT(rows.size() == 2);
 	return 0;
 }
 
@@ -65,7 +70,7 @@ int test_null_and_blob() {
 	Database db(":memory:");
 	db.exec("CREATE TABLE t (k INTEGER PRIMARY KEY, blob BLOB);");
 	db.exec("INSERT INTO t (k, blob) VALUES (1, NULL);");
-	db.exec("INSERT INTO t (k, blob) VALUES (?, ?);",
+	db.exec("INSERT INTO t (k, blob) VALUES ($1, $2);",
 	        {BindValue{int64_t{2}}, BindValue{std::vector<uint8_t>{0x01, 0x02, 0xff}}});
 
 	auto rows = db.query("SELECT blob FROM t ORDER BY k;");
@@ -155,15 +160,13 @@ int test_transaction_guard() {
 
 int test_shared_memory_uri_spans_connections() {
 	// The shared-cache URI is one in-memory database for every connection
-	// that names it, and each connection's last insert stays its own.
+	// that names it, and each insert returns its own row's id.
 	const char *uri = "file:db_sqlite_shared?mode=memory&cache=shared";
 	Database a(uri);
 	Database b(uri);
 	a.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, name TEXT);");
-	a.exec("INSERT INTO t (name) VALUES ('alpha');");
-	b.exec("INSERT INTO t (name) VALUES ('bravo');");
-	TEST_EXPECT(a.last_insert_rowid() == 1);
-	TEST_EXPECT(b.last_insert_rowid() == 2);
+	TEST_EXPECT(a.query("INSERT INTO t (name) VALUES ('alpha') RETURNING id;")[0].as_int(0) == 1);
+	TEST_EXPECT(b.query("INSERT INTO t (name) VALUES ('bravo') RETURNING id;")[0].as_int(0) == 2);
 	TEST_EXPECT(count_rows(a) == 2);
 
 	// Plain ":memory:" is private to its connection.
@@ -339,18 +342,23 @@ int test_error_codes() {
 		TEST_EXPECT(caught);
 	}
 
-	// A bind past the statement's parameters fails before any step, and the
-	// statement is finalized on the way out (the connection goes on working).
+	// A bind past the statement's parameters, or a parameter no bind fills,
+	// fails before any step, and the statement is finalized on the way out
+	// (the connection goes on working).
 	{
 		Database db(":memory:");
-		bool caught = false;
-		try {
-			db.exec("SELECT ?;", { BindValue{ int64_t{ 1 } }, BindValue{ int64_t{ 2 } } });
-		} catch (const SqliteError &e) {
-			caught = true;
-			TEST_EXPECT(e.code() == kSqliteRange);
-		}
-		TEST_EXPECT(caught);
+		auto range = [&db](const char *sql, std::vector<BindValue> binds) {
+			try {
+				db.exec(sql, binds);
+			} catch (const SqliteError &e) {
+				return e.code() == kSqliteRange;
+			}
+			return false;
+		};
+		TEST_EXPECT(range("SELECT $1;", { BindValue{ int64_t{ 1 } }, BindValue{ int64_t{ 2 } } }));
+		TEST_EXPECT(range("SELECT $1, $2;", { BindValue{ int64_t{ 1 } } }));
+		TEST_EXPECT(range("SELECT $2;", { BindValue{ int64_t{ 1 } }, BindValue{ int64_t{ 2 } } }));
+		TEST_EXPECT(range("SELECT ?;", { BindValue{ int64_t{ 1 } } }));
 		TEST_EXPECT(db.query("SELECT 1;").size() == 1);
 	}
 

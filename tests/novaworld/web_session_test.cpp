@@ -63,7 +63,7 @@ int64_t scalar(Database &db, const std::string &sql, const std::string &hash) {
 }
 
 bool session_exists(Database &db, const std::string &token) {
-	return scalar(db, "SELECT COUNT(*) FROM web_sessions WHERE token_hash = ?;",
+	return scalar(db, "SELECT COUNT(*) FROM web_sessions WHERE token_hash = $1;",
 	              nws::web_session_token_hash(token)) == 1;
 }
 
@@ -97,14 +97,14 @@ int test_create_keeps_only_the_hash(Database &db, int64_t alice) {
 	TEST_EXPECT(hash != token);
 	const auto rows = db.query(
 		"SELECT user_id, ip, user_agent, expires_at > datetime('now', '+29 days') "
-		"FROM web_sessions WHERE token_hash = ?;",
+		"FROM web_sessions WHERE token_hash = $1;",
 		{BindValue(hash)});
 	TEST_EXPECT(rows.size() == 1);
 	TEST_EXPECT(rows[0].as_int(0).value() == alice);
 	TEST_EXPECT(rows[0].as_text(1).value() == "198.51.100.7");
 	TEST_EXPECT(rows[0].as_text(2).value() == "agent/1");
 	TEST_EXPECT(rows[0].as_int(3).value() == 1);
-	TEST_EXPECT(db.query("SELECT 1 FROM web_sessions WHERE token_hash = ?;",
+	TEST_EXPECT(db.query("SELECT 1 FROM web_sessions WHERE token_hash = $1;",
 	                     {BindValue(token)}).empty());
 	return 0;
 }
@@ -120,7 +120,7 @@ int test_sessions_per_account_capped(Database &db, int64_t) {
 	for (size_t i = 0; i < nws::kWebSessionsPerUser + 2; ++i) {
 		tokens.push_back(mint(db, many));
 	}
-	const auto count = db.query("SELECT COUNT(*) FROM web_sessions WHERE user_id = ?;",
+	const auto count = db.query("SELECT COUNT(*) FROM web_sessions WHERE user_id = $1;",
 	                            {BindValue(many)});
 	TEST_EXPECT(count[0].as_int(0).value() == static_cast<int64_t>(nws::kWebSessionsPerUser));
 	TEST_EXPECT(!session_exists(db, tokens[0]));
@@ -148,7 +148,7 @@ int test_resolve_and_refusals(Database &db, int64_t alice) {
 	TEST_EXPECT(!nws::resolve_web_session(db, std::string(64, '0')).has_value());
 
 	db.exec("UPDATE web_sessions SET expires_at = datetime('now', '-1 seconds') "
-	        "WHERE token_hash = ?;",
+	        "WHERE token_hash = $1;",
 	        {BindValue(nws::web_session_token_hash(token))});
 	TEST_EXPECT(!nws::resolve_web_session(db, token).has_value());
 	return 0;
@@ -160,22 +160,22 @@ int test_sliding_expiry(Database &db, int64_t alice) {
 	const std::string token = mint(db, alice);
 	const std::string hash = nws::web_session_token_hash(token);
 	db.exec("UPDATE web_sessions SET last_seen_at = datetime('now', '-120 seconds'), "
-	        "expires_at = datetime('now', '+1 days') WHERE token_hash = ?;",
+	        "expires_at = datetime('now', '+1 days') WHERE token_hash = $1;",
 	        {BindValue(hash)});
 	auto found = nws::resolve_web_session(db, token);
 	TEST_EXPECT(found && found->slid);
 	TEST_EXPECT(scalar(db, "SELECT expires_at > datetime('now', '+29 days') FROM web_sessions "
-	                       "WHERE token_hash = ?;", hash) == 1);
+	                       "WHERE token_hash = $1;", hash) == 1);
 	TEST_EXPECT(scalar(db, "SELECT last_seen_at >= datetime('now', '-5 seconds') FROM web_sessions "
-	                       "WHERE token_hash = ?;", hash) == 1);
+	                       "WHERE token_hash = $1;", hash) == 1);
 
 	db.exec("UPDATE web_sessions SET last_seen_at = datetime('now', '-10 seconds'), "
-	        "expires_at = datetime('now', '+1 days') WHERE token_hash = ?;",
+	        "expires_at = datetime('now', '+1 days') WHERE token_hash = $1;",
 	        {BindValue(hash)});
 	found = nws::resolve_web_session(db, token);
 	TEST_EXPECT(found && !found->slid);
 	TEST_EXPECT(scalar(db, "SELECT expires_at < datetime('now', '+2 days') FROM web_sessions "
-	                       "WHERE token_hash = ?;", hash) == 1);
+	                       "WHERE token_hash = $1;", hash) == 1);
 	return 0;
 }
 
@@ -192,7 +192,7 @@ int test_delete_and_prune(Database &db, int64_t alice) {
 
 	const std::string stale = mint(db, alice);
 	db.exec("UPDATE web_sessions SET expires_at = datetime('now', '-1 seconds') "
-	        "WHERE token_hash = ?;",
+	        "WHERE token_hash = $1;",
 	        {BindValue(nws::web_session_token_hash(stale))});
 	TEST_EXPECT(nws::prune_expired_web_sessions(db) >= 1);
 	TEST_EXPECT(!session_exists(db, stale));
@@ -297,7 +297,7 @@ int test_update_revokes_sessions(Database &db, int64_t) {
 	// without the word.
 	bool caught = false;
 	try {
-		db.exec("UPDATE players SET account_status = '' WHERE id = ?;", { BindValue(bob) });
+		db.exec("UPDATE players SET account_status = '' WHERE id = $1;", { BindValue(bob) });
 	} catch (const opennova::db::SqliteError &) {
 		caught = true;
 	}
@@ -374,7 +374,7 @@ int test_login_addresses(Database &db, int64_t) {
 	TEST_EXPECT(!nws::is_known_login_address(db, "fay", "198.51.100.2"));
 	TEST_EXPECT(!nws::is_known_login_address(db, "alice", "198.51.100.1"));
 	auto count = [&db, fay] {
-		return db.query("SELECT COUNT(*) FROM login_addresses WHERE user_id = ?;", {BindValue(fay)})
+		return db.query("SELECT COUNT(*) FROM login_addresses WHERE user_id = $1;", {BindValue(fay)})
 				.front()
 				.as_int(0)
 				.value_or(-1);
@@ -383,7 +383,7 @@ int test_login_addresses(Database &db, int64_t) {
 
 	// 30 days unused: no longer known, and pruned.
 	db.exec("UPDATE login_addresses SET last_success_at = datetime('now', '-31 days') "
-	        "WHERE user_id = ?;",
+	        "WHERE user_id = $1;",
 	        {BindValue(fay)});
 	TEST_EXPECT(!nws::is_known_login_address(db, "fay", "198.51.100.1"));
 	TEST_EXPECT(nws::prune_login_addresses(db) >= 1);
@@ -428,7 +428,7 @@ int test_login_addresses(Database &db, int64_t) {
 
 	remember(db, fay, "198.51.100.4");
 	TEST_EXPECT(nws::delete_user(db, fay).ok);
-	TEST_EXPECT(db.query("SELECT 1 FROM login_addresses WHERE user_id = ?;", {BindValue(fay)}).empty());
+	TEST_EXPECT(db.query("SELECT 1 FROM login_addresses WHERE user_id = $1;", {BindValue(fay)}).empty());
 	return 0;
 }
 
@@ -466,7 +466,7 @@ int test_reset_during_login(Database &db, int64_t) {
 	TEST_EXPECT(generation(db, gil) == 1);
 	TEST_EXPECT(!nws::create_web_session(db, gil, stale->credentials_gen, "", "").has_value());
 	TEST_EXPECT(
-			db.query("SELECT 1 FROM web_sessions WHERE user_id = ?;", { BindValue(gil) }).empty());
+			db.query("SELECT 1 FROM web_sessions WHERE user_id = $1;", { BindValue(gil) }).empty());
 	TEST_EXPECT(!register_row(gil, stale->credentials_gen, "tag-gil-stale"));
 	TEST_EXPECT(!nws::get_user_by_login_session_tag(db, "tag-gil-stale").has_value());
 	TEST_EXPECT(!nws::record_login_address(db, gil, stale->credentials_gen, "198.51.100.9"));
@@ -501,7 +501,7 @@ int test_inactive_and_deleted_accounts(Database &db, int64_t) {
 	const int64_t dan = make_player(db, "dan", "0000da01");
 	TEST_EXPECT(dan > 0);
 	const std::string token = mint(db, dan);
-	db.exec("UPDATE players SET account_status = 'disabled' WHERE id = ?;", {BindValue(dan)});
+	db.exec("UPDATE players SET account_status = 'disabled' WHERE id = $1;", {BindValue(dan)});
 	TEST_EXPECT(!nws::resolve_web_session(db, token).has_value());
 	TEST_EXPECT(!session_exists(db, token));
 
@@ -549,7 +549,7 @@ int test_listing_owner_revoked_and_deleted(Database &db, int64_t) {
 	nws::UpdateUserParams reset;
 	reset.password_plaintext = "pw-erin-2";
 	TEST_EXPECT(nws::update_user(db, erin, reset).ok);
-	TEST_EXPECT(db.query("SELECT 1 FROM host_keys WHERE user_id = ?;", {BindValue(erin)}).empty());
+	TEST_EXPECT(db.query("SELECT 1 FROM host_keys WHERE user_id = $1;", {BindValue(erin)}).empty());
 	TEST_EXPECT(owner_of(reset_row.rid) == erin); // until the listing's next refresh
 	hostdb::update_host(db, reset_row);           // the lobby still holds erin
 	TEST_EXPECT(owner_of(reset_row.rid) == std::nullopt);
@@ -652,7 +652,7 @@ int test_slide_race() {
 		TEST_EXPECT(id > 0);
 		token = mint(*conn, id);
 		conn->exec("UPDATE web_sessions SET last_seen_at = datetime('now', '-120 seconds'), "
-		           "expires_at = datetime('now', '+1 days') WHERE token_hash = ?;",
+		           "expires_at = datetime('now', '+1 days') WHERE token_hash = $1;",
 		           {BindValue(nws::web_session_token_hash(token))});
 	}
 	constexpr int kRacers = 8;

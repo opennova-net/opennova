@@ -139,7 +139,7 @@ struct Service {
 	// The key's host_keys row: {user_id, claimed_rid}; nullopt when none.
 	std::optional<std::pair<int64_t, std::optional<int64_t>>> key_row(const std::string &key) {
 		const auto rows = pool.acquire()->query(
-				"SELECT user_id, claimed_rid FROM host_keys WHERE key_hash = ?;",
+				"SELECT user_id, claimed_rid FROM host_keys WHERE key_hash = $1;",
 				{ opennova::db::BindValue(opennova::hostdb::host_key_hash(key)) });
 		if (rows.empty())
 			return std::nullopt;

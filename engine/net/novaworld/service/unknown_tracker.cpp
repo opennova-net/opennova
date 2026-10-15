@@ -67,7 +67,7 @@ void UnknownTracker::flush(db::Database &db) {
 	static constexpr char kUpsert[] =
 		"INSERT INTO unknown_messages "
 		"  (channel, signature, count, first_seen_ms, last_seen_ms, sample, sample_meta) "
-		"VALUES (?, ?, ?, ?, ?, ?, ?) "
+		"VALUES ($1, $2, $3, $4, $5, $6, $7) "
 		"ON CONFLICT(channel, signature) DO UPDATE SET "
 		"  count = excluded.count, "
 		"  last_seen_ms = excluded.last_seen_ms;";

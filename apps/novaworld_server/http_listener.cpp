@@ -1448,7 +1448,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			// account whenever a prior session ended without a clean logout
 			// (client crash / GOODBYE-less exit): the orphaned row blocked every
 			// retry until the 2h TTL sweep. register_active_user_session() below
-			// is INSERT OR REPLACE on the user_id PK, so the stale row is simply
+			// is an upsert on the user_id PK, so the stale row is simply
 			// overwritten by this fresh login.
 		}
 		// The login's session row and its pin are written only while the account

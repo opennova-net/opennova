@@ -13,7 +13,7 @@
 --
 -- PCIDs are the 8-hex-char Player Connection IDs that retail uses to
 -- disambiguate accounts; nwhandle is the in-game display name.
-INSERT OR IGNORE INTO players (username, password_hash, pcid, nwh, nwhandle)
+INSERT INTO players (username, password_hash, pcid, nwh, nwhandle)
 VALUES
     ('test',
      '$2b$10$biA28xC5Ka.QKKUOKWJGSuCFOfX8D51XkHIZUurZzstBCNQRfXCMS',
@@ -29,10 +29,11 @@ VALUES
      '00000005', '1', 'TestPlayer2'),
     ('test3',
      '$2b$10$biA28xC5Ka.QKKUOKWJGSuCFOfX8D51XkHIZUurZzstBCNQRfXCMS',
-     '00000006', '1', 'TestPlayer3');
+     '00000006', '1', 'TestPlayer3')
+ON CONFLICT DO NOTHING;
 
--- Repair existing development DBs too. Earlier seed versions used
--- INSERT OR IGNORE only, so a stale row (for example foo with an empty
+-- Repair existing development DBs too. Earlier seed versions only inserted
+-- (skipping a row already there), so a stale row (for example foo with an empty
 -- nwhandle) would survive every server boot and yield blank in-game names.
 UPDATE players SET
     password_hash = '$2b$10$biA28xC5Ka.QKKUOKWJGSuCFOfX8D51XkHIZUurZzstBCNQRfXCMS',
@@ -74,11 +75,12 @@ UPDATE players SET
     account_status = 'active'
 WHERE username = 'test3';
 
-INSERT OR IGNORE INTO player_game_access (user_id, game_slug, status, exp_bits)
+INSERT INTO player_game_access (user_id, game_slug, status, exp_bits)
 SELECT p.id, g.slug, 'active', g.exp_bits
 FROM players p
 JOIN games g ON g.slug = 'jop_2_consumer'
-WHERE p.username IN ('test', 'foo', 'test1', 'test2', 'test3');
+WHERE p.username IN ('test', 'foo', 'test1', 'test2', 'test3')
+ON CONFLICT DO NOTHING;
 
 UPDATE player_game_access
 SET status = 'active',

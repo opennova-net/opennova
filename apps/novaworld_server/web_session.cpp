@@ -44,8 +44,8 @@ std::optional<std::string> create_web_session(db::Database &db, int64_t user_id,
 	// server's service account gets none (players.kind, migration 0011).
 	db.exec("INSERT INTO web_sessions "
 			"(token_hash, user_id, created_at, expires_at, last_seen_at, ip, user_agent) "
-			"SELECT ?, id, datetime('now'), datetime('now', ?), datetime('now'), ?, ? "
-			"FROM players WHERE id = ? AND credentials_gen = ? AND account_status = 'active' "
+			"SELECT $1, id, datetime('now'), datetime('now', $2), datetime('now'), $3, $4 "
+			"FROM players WHERE id = $5 AND credentials_gen = $6 AND account_status = 'active' "
 			"AND kind = 'player';",
 			{ db::BindValue(web_session_token_hash(token)),
 					db::BindValue(seconds_modifier(kWebSessionLifetimeSeconds)), db::BindValue(ip),
@@ -56,11 +56,10 @@ std::optional<std::string> create_web_session(db::Database &db, int64_t user_id,
 	// The account's newest kWebSessionsPerUser stay; the oldest beyond them go.
 	// rowid orders sessions minted within one second.
 	db.exec(
-		"DELETE FROM web_sessions WHERE user_id = ? AND rowid NOT IN ("
-		"SELECT rowid FROM web_sessions WHERE user_id = ? "
-		"ORDER BY created_at DESC, rowid DESC LIMIT ?);",
-		{db::BindValue(user_id), db::BindValue(user_id),
-		 db::BindValue(static_cast<int64_t>(kWebSessionsPerUser))});
+		"DELETE FROM web_sessions WHERE user_id = $1 AND rowid NOT IN ("
+		"SELECT rowid FROM web_sessions WHERE user_id = $1 "
+		"ORDER BY created_at DESC, rowid DESC LIMIT $2);",
+		{db::BindValue(user_id), db::BindValue(static_cast<int64_t>(kWebSessionsPerUser))});
 	tx.commit();
 	return token;
 }
@@ -70,9 +69,9 @@ std::optional<WebSessionLookup> resolve_web_session(db::Database &db, std::strin
 	const std::string hash = web_session_token_hash(token);
 	const auto rows = db.query(
 		"SELECT p.id, p.username, p.role, p.account_status, "
-		"       s.last_seen_at <= datetime('now', ?), p.kind "
+		"       s.last_seen_at <= datetime('now', $1), p.kind "
 		"FROM web_sessions s JOIN players p ON p.id = s.user_id "
-		"WHERE s.token_hash = ? AND s.expires_at > datetime('now') LIMIT 1;",
+		"WHERE s.token_hash = $2 AND s.expires_at > datetime('now') LIMIT 1;",
 		{db::BindValue(seconds_modifier(-kWebSessionTouchSeconds)), db::BindValue(hash)});
 	if (rows.empty()) return std::nullopt;
 	const auto &row = rows.front();
@@ -82,7 +81,7 @@ std::optional<WebSessionLookup> resolve_web_session(db::Database &db, std::strin
 	// service account, which never gets one (create_web_session).
 	const std::string status = row.as_text(3).value_or("");
 	if (status != "active" || row.as_text(5).value_or("") != "player") {
-		db.exec("DELETE FROM web_sessions WHERE token_hash = ?;", {db::BindValue(hash)});
+		db.exec("DELETE FROM web_sessions WHERE token_hash = $1;", {db::BindValue(hash)});
 		return std::nullopt;
 	}
 	WebSessionLookup out;
@@ -94,8 +93,8 @@ std::optional<WebSessionLookup> resolve_web_session(db::Database &db, std::strin
 		// one stale session only one slides it.
 		db.exec(
 			"UPDATE web_sessions SET last_seen_at = datetime('now'), "
-			"expires_at = datetime('now', ?) "
-			"WHERE token_hash = ? AND last_seen_at <= datetime('now', ?);",
+			"expires_at = datetime('now', $1) "
+			"WHERE token_hash = $2 AND last_seen_at <= datetime('now', $3);",
 			{db::BindValue(seconds_modifier(kWebSessionLifetimeSeconds)), db::BindValue(hash),
 			 db::BindValue(seconds_modifier(-kWebSessionTouchSeconds))});
 		out.slid = db.changes() > 0;
@@ -105,7 +104,7 @@ std::optional<WebSessionLookup> resolve_web_session(db::Database &db, std::strin
 
 void delete_web_session(db::Database &db, std::string_view token) {
 	if (!is_web_session_token(token)) return;
-	db.exec("DELETE FROM web_sessions WHERE token_hash = ?;",
+	db.exec("DELETE FROM web_sessions WHERE token_hash = $1;",
 	        {db::BindValue(web_session_token_hash(token))});
 }
 

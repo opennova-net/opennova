@@ -66,9 +66,9 @@ std::string key_of(char letter) { return std::string(hostdb::kHostKeyChars, lett
 
 int64_t make_player(Database &db, const std::string &name) {
 	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
-	        "VALUES (?, 'x', ?, '1', ?);",
+	        "VALUES ($1, 'x', $2, '1', $3);",
 	        {BindValue(name), BindValue("pc-" + name), BindValue(name)});
-	return db.query("SELECT id FROM players WHERE username = ?;", {BindValue(name)})
+	return db.query("SELECT id FROM players WHERE username = $1;", {BindValue(name)})
 	        .front()
 	        .as_int(0)
 	        .value();
@@ -87,19 +87,19 @@ void list_rid(Database &db, uint32_t rid) {
 }
 
 void age_key(Database &db, const std::string &key, const char *modifier) {
-	db.exec("UPDATE host_keys SET last_used_at = datetime('now', ?) WHERE key_hash = ?;",
+	db.exec("UPDATE host_keys SET last_used_at = datetime('now', $1) WHERE key_hash = $2;",
 	        {BindValue(std::string(modifier)), BindValue(hostdb::host_key_hash(key))});
 }
 
 std::optional<int64_t> claimed_rid(Database &db, const std::string &key) {
-	const auto rows = db.query("SELECT claimed_rid FROM host_keys WHERE key_hash = ?;",
+	const auto rows = db.query("SELECT claimed_rid FROM host_keys WHERE key_hash = $1;",
 	                           {BindValue(hostdb::host_key_hash(key))});
 	if (rows.empty()) return std::nullopt;
 	return rows.front().as_int(0);
 }
 
 bool key_stored(Database &db, const std::string &key) {
-	return !db.query("SELECT 1 FROM host_keys WHERE key_hash = ?;",
+	return !db.query("SELECT 1 FROM host_keys WHERE key_hash = $1;",
 	                 {BindValue(hostdb::host_key_hash(key))})
 	                .empty();
 }
@@ -250,7 +250,7 @@ int test_record() {
 	TEST_EXPECT(rows[0].as_int(1).value() == alice);
 	TEST_EXPECT(!rows[0].as_int(2).has_value());
 	// The key itself is stored nowhere.
-	TEST_EXPECT(db.query("SELECT 1 FROM host_keys WHERE key_hash = ?;", {BindValue(key_of('A'))})
+	TEST_EXPECT(db.query("SELECT 1 FROM host_keys WHERE key_hash = $1;", {BindValue(key_of('A'))})
 	                    .empty());
 
 	TEST_EXPECT(!hostdb::record_host_key(db, "HK-NOT-A-KEY", alice, 0));
@@ -261,18 +261,18 @@ int test_record() {
 	// account: a login whose generation a reset has since moved records
 	// nothing (the race between /NWHost.dll's lookup and this insert), and
 	// neither does a banned account; nor does an account that is gone.
-	db.exec("UPDATE players SET credentials_gen = credentials_gen + 1 WHERE id = ?;",
+	db.exec("UPDATE players SET credentials_gen = credentials_gen + 1 WHERE id = $1;",
 			{ BindValue(alice) });
 	TEST_EXPECT(!hostdb::record_host_key(db, key_of('O'), alice, 0));
 	TEST_EXPECT(!key_stored(db, key_of('O')));
 	TEST_EXPECT(hostdb::record_host_key(db, key_of('O'), alice, 1));
 	TEST_EXPECT(key_stored(db, key_of('O')));
-	db.exec("DELETE FROM host_keys WHERE key_hash = ?;",
+	db.exec("DELETE FROM host_keys WHERE key_hash = $1;",
 			{ BindValue(hostdb::host_key_hash(key_of('O'))) });
-	db.exec("UPDATE players SET credentials_gen = 0, account_status = 'banned' WHERE id = ?;",
+	db.exec("UPDATE players SET credentials_gen = 0, account_status = 'banned' WHERE id = $1;",
 			{ BindValue(alice) });
 	TEST_EXPECT(!hostdb::record_host_key(db, key_of('O'), alice, 0));
-	db.exec("UPDATE players SET account_status = 'active' WHERE id = ?;", { BindValue(alice) });
+	db.exec("UPDATE players SET account_status = 'active' WHERE id = $1;", { BindValue(alice) });
 	TEST_EXPECT(!hostdb::record_host_key(db, key_of('O'), 9999, 0));
 	TEST_EXPECT(db.query("SELECT COUNT(*) FROM host_keys;").front().as_int(0).value() == 1);
 
@@ -334,9 +334,9 @@ int test_claim() {
 	hostdb::clear_all(db);
 
 	// A banned account's key claims nothing; lifted, it does again.
-	db.exec("UPDATE players SET account_status = 'banned' WHERE id = ?;", {BindValue(alice)});
+	db.exec("UPDATE players SET account_status = 'banned' WHERE id = $1;", {BindValue(alice)});
 	TEST_EXPECT(!hostdb::claim_host_key(db, key_of('A'), 0x0A000004u));
-	db.exec("UPDATE players SET account_status = 'active' WHERE id = ?;", {BindValue(alice)});
+	db.exec("UPDATE players SET account_status = 'active' WHERE id = $1;", {BindValue(alice)});
 	TEST_EXPECT(hostdb::claim_host_key(db, key_of('A'), 0x0A000004u) == alice);
 
 	// Idle past kHostKeyIdleSeconds: nothing, even before the sweep deletes it.
@@ -346,13 +346,13 @@ int test_claim() {
 	hostdb::record_host_key(db, key_of('C'), alice, 0);
 	age_key(db, key_of('C'), "-86000 seconds");
 	TEST_EXPECT(hostdb::claim_host_key(db, key_of('C'), 0x0A000005u) == alice);
-	TEST_EXPECT(!db.query("SELECT 1 FROM host_keys WHERE key_hash = ? "
+	TEST_EXPECT(!db.query("SELECT 1 FROM host_keys WHERE key_hash = $1 "
 	                      "AND last_used_at > datetime('now', '-60 seconds');",
 	                      {BindValue(hostdb::host_key_hash(key_of('C')))})
 	                     .empty());
 
 	// A deleted account takes its keys.
-	db.exec("DELETE FROM players WHERE id = ?;", {BindValue(alice)});
+	db.exec("DELETE FROM players WHERE id = $1;", {BindValue(alice)});
 	TEST_EXPECT(db.query("SELECT 1 FROM host_keys;").empty());
 	return 0;
 }
@@ -375,7 +375,7 @@ int test_listing_owned_by() {
 	hostdb::remove_host_by_rid(db, kRid);
 	db.exec("UPDATE host_keys SET claimed_rid = NULL;");
 	list_rid(db, kRid);
-	db.exec("UPDATE active_hosts SET host_user_id = ? WHERE rid = ?;",
+	db.exec("UPDATE active_hosts SET host_user_id = $1 WHERE rid = $2;",
 	        {BindValue(alice), BindValue(static_cast<int64_t>(kRid))});
 	TEST_EXPECT(!hostdb::listing_owned_by(db, kRid, alice));
 
@@ -388,7 +388,7 @@ int test_listing_owned_by() {
 
 	// The keys revoked (an admin reset deletes them): not hers at once, though
 	// the row still names her until its next write.
-	db.exec("DELETE FROM host_keys WHERE user_id = ?;", {BindValue(alice)});
+	db.exec("DELETE FROM host_keys WHERE user_id = $1;", {BindValue(alice)});
 	TEST_EXPECT(row_owner(db, kRid) == alice);
 	TEST_EXPECT(!hostdb::listing_owned_by(db, kRid, alice));
 
@@ -502,7 +502,7 @@ int test_lobby_links() {
 
 	// The owner deleted while listed (the row's owner is set NULL with it): the
 	// connection's next update writes no owner rather than tripping the key.
-	db.exec("DELETE FROM players WHERE id = ?;", {BindValue(alice)});
+	db.exec("DELETE FROM players WHERE id = $1;", {BindValue(alice)});
 	TEST_EXPECT(!row_owner(db, rid).has_value());
 	sess.dispatch(host_update("After Delete"), parked, "10.0.0.7", 40000);
 	const auto after = hostdb::find_host_by_rid(db, rid);
@@ -531,7 +531,7 @@ int test_owner_needs_live_claim() {
 	TEST_EXPECT(answered_hosting(sess.dispatch(fresh_request("Revoked"), revoked, "10.0.0.7", 40000)));
 	sess.dispatch(key_update(key_of('A')), revoked, "10.0.0.7", 40000);
 	TEST_EXPECT(row_owner(db, revoked.rid) == alice);
-	db.exec("DELETE FROM host_keys WHERE key_hash = ?;", {BindValue(hostdb::host_key_hash(key_of('A')))});
+	db.exec("DELETE FROM host_keys WHERE key_hash = $1;", {BindValue(hostdb::host_key_hash(key_of('A')))});
 	sess.dispatch(host_update("Revoked Renamed"), revoked, "10.0.0.7", 40000);
 	TEST_EXPECT(revoked.host_user_id == alice); // the lobby's memory; the row is what is read
 	TEST_EXPECT(!row_owner(db, revoked.rid).has_value());
@@ -542,7 +542,7 @@ int test_owner_needs_live_claim() {
 	TEST_EXPECT(row_owner(db, owned.rid) == alice);
 
 	// The owner deleted, and a newcomer registered: never with the deleted id.
-	db.exec("DELETE FROM players WHERE id = ?;", {BindValue(alice)});
+	db.exec("DELETE FROM players WHERE id = $1;", {BindValue(alice)});
 	TEST_EXPECT(!row_owner(db, owned.rid).has_value());
 	const int64_t newcomer = make_player(db, "newcomer");
 	TEST_EXPECT(newcomer > alice);
@@ -655,7 +655,7 @@ int test_require_host_key() {
 
 	// The key revoked (a password reset deletes the account's keys); the same
 	// connection's re-request is refused and the row leaves the browser.
-	db.exec("DELETE FROM host_keys WHERE user_id = ?;", {BindValue(alice)});
+	db.exec("DELETE FROM host_keys WHERE user_id = $1;", {BindValue(alice)});
 	r = sess.dispatch(host_request("Owned", key_of('A'), "1"), a, "10.0.0.7", 40000);
 	TEST_EXPECT(refused_unknown_key(r));
 	TEST_EXPECT(!a.hosting && hostdb::list_hosts(db).empty());

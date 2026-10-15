@@ -84,7 +84,16 @@ Statement prepare(sqlite3 *handle, std::string_view sql, int &rc) {
 	return Statement(stmt);
 }
 
-void bind_at(sqlite3_stmt *stmt, int i, const BindValue &v) {
+// Bind `v` to the statement's parameter `$<n>` (1-based), the placeholder the
+// SQL spells: the server dialect's numbered parameters, which sqlite takes as
+// named ones. A `$n` the statement does not name fails SQLITE_RANGE, as a bind
+// past a statement's parameters does.
+void bind_at(sqlite3_stmt *stmt, int n, const BindValue &v) {
+	const std::string name = "$" + std::to_string(n);
+	const int i = sqlite3_bind_parameter_index(stmt, name.c_str());
+	if (i == 0) {
+		throw SqliteError(SQLITE_RANGE, "bind parameter " + name + ": the statement names no " + name);
+	}
 	int rc = SQLITE_OK;
 	std::visit([&](auto &&val) {
 		using T = std::decay_t<decltype(val)>;
@@ -102,6 +111,20 @@ void bind_at(sqlite3_stmt *stmt, int i, const BindValue &v) {
 	}, v);
 	if (rc != SQLITE_OK) {
 		throw_sqlite(sqlite3_db_handle(stmt), rc, "bind parameter");
+	}
+}
+
+// Every bind, `binds[k]` to `$<k+1>`. The statement names exactly those
+// parameters: one it names that no bind fills fails SQLITE_RANGE too, rather
+// than reading NULL.
+void bind_all(sqlite3_stmt *stmt, const std::vector<BindValue> &binds) {
+	for (std::size_t i = 0; i < binds.size(); ++i) {
+		bind_at(stmt, static_cast<int>(i + 1), binds[i]);
+	}
+	const int named = sqlite3_bind_parameter_count(stmt);
+	if (static_cast<std::size_t>(named) != binds.size()) {
+		throw SqliteError(SQLITE_RANGE, "the statement names " + std::to_string(named) +
+				" parameters, " + std::to_string(binds.size()) + " bound");
 	}
 }
 
@@ -222,9 +245,7 @@ void Database::exec(std::string_view sql, const std::vector<BindValue> &binds) {
 		throw sqlite_error(
 				handle_, rc, std::string("prepare: ") + std::string(sql), prepare_started);
 	}
-	for (std::size_t i = 0; i < binds.size(); ++i) {
-		bind_at(stmt.get(), static_cast<int>(i + 1), binds[i]);
-	}
+	bind_all(stmt.get(), binds);
 	const Clock::time_point step_started = Clock::now();
 	rc = sqlite3_step(stmt.get());
 	if (rc != SQLITE_DONE && rc != SQLITE_ROW) {
@@ -252,9 +273,7 @@ std::vector<Row> Database::query(std::string_view sql, const std::vector<BindVal
 		throw sqlite_error(
 				handle_, rc, std::string("prepare: ") + std::string(sql), prepare_started);
 	}
-	for (std::size_t i = 0; i < binds.size(); ++i) {
-		bind_at(stmt.get(), static_cast<int>(i + 1), binds[i]);
-	}
+	bind_all(stmt.get(), binds);
 
 	const int ncol = sqlite3_column_count(stmt.get());
 	std::vector<std::string> columns;
@@ -280,10 +299,6 @@ std::vector<Row> Database::query(std::string_view sql, const std::vector<BindVal
 		throw sqlite_error(handle_, rc, std::string("query: ") + std::string(sql), step_started);
 	}
 	return out;
-}
-
-int64_t Database::last_insert_rowid() const {
-	return sqlite3_last_insert_rowid(handle_);
 }
 
 int Database::changes() const {
@@ -499,7 +514,7 @@ MigrationResult run_migrations(Database &db, const std::filesystem::path &migrat
 		const std::string filename = path.filename().string();
 
 		auto rows = db.query(
-			"SELECT 1 FROM _schema_migrations WHERE filename = ?;",
+			"SELECT 1 FROM _schema_migrations WHERE filename = $1;",
 			{BindValue{filename}}
 		);
 		if (!rows.empty()) {
@@ -512,7 +527,7 @@ MigrationResult run_migrations(Database &db, const std::filesystem::path &migrat
 		try {
 			db.exec_script(sql);
 			db.exec(
-				"INSERT INTO _schema_migrations (filename) VALUES (?);",
+				"INSERT INTO _schema_migrations (filename) VALUES ($1);",
 				{BindValue{filename}}
 			);
 			db.commit();

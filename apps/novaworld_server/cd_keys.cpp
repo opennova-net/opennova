@@ -77,17 +77,18 @@ int64_t insert_key(db::Database &db, std::string_view title, std::optional<int64
 	for (int draw = 0; draw < kSerialDraws; ++draw) {
 		const std::string serial = make_serial(title);
 		const std::string wire_key = cdkey::make_wire_key(serial);
-		if (!db.query("SELECT 1 FROM cd_keys WHERE serial = ? OR wire_key = ?;",
+		if (!db.query("SELECT 1 FROM cd_keys WHERE serial = $1 OR wire_key = $2;",
 					   { BindValue(serial), BindValue(wire_key) })
 						.empty())
 			continue;
-		db.exec("INSERT INTO cd_keys (title, serial, wire_key, user_id, created_by, assigned_at) "
-				"VALUES (?, ?, ?, ?, ?, CASE WHEN ? IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END);",
+		const auto inserted = db.query(
+				"INSERT INTO cd_keys (title, serial, wire_key, user_id, created_by, assigned_at) "
+				"VALUES ($1, $2, $3, $4, $5, CASE WHEN $4 IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END) "
+				"RETURNING id;",
 				{ BindValue(std::string(title)), BindValue(serial), BindValue(wire_key),
 						user_id ? BindValue(*user_id) : BindValue(std::monostate{}),
-						BindValue(created_by),
-						user_id ? BindValue(*user_id) : BindValue(std::monostate{}) });
-		return db.last_insert_rowid();
+						BindValue(created_by) });
+		return inserted.front().as_int(0).value_or(0);
 	}
 	throw db::SqliteError(
 			0, "cd_keys: no unused serial after " + std::to_string(kSerialDraws) + " draws");
@@ -98,7 +99,7 @@ int64_t insert_key(db::Database &db, std::string_view title, std::optional<int64
 ActivateResult record_activation(db::Database &db, const CdKey &key, const std::string &nwpssk) {
 	ActivateResult out;
 	const auto stored =
-			db.query("SELECT nwact FROM cd_key_activations WHERE key_id = ? AND nwpssk = ?;",
+			db.query("SELECT nwact FROM cd_key_activations WHERE key_id = $1 AND nwpssk = $2;",
 					{ BindValue(key.id), BindValue(nwpssk) });
 	if (!stored.empty()) {
 		out.outcome = ActivateOutcome::Reactivated;
@@ -106,7 +107,7 @@ ActivateResult record_activation(db::Database &db, const CdKey &key, const std::
 	} else {
 		out.outcome = ActivateOutcome::Activated;
 		out.nwact = cdkey::make_activation(key.wire_key, nwpssk);
-		db.exec("INSERT INTO cd_key_activations (key_id, nwpssk, nwact) VALUES (?, ?, ?);",
+		db.exec("INSERT INTO cd_key_activations (key_id, nwpssk, nwact) VALUES ($1, $2, $3);",
 				{ BindValue(key.id), BindValue(nwpssk), BindValue(out.nwact) });
 	}
 	out.key = find_key(db, key.id);
@@ -159,8 +160,10 @@ std::vector<CdKey> generate_keys(
 std::vector<CdKey> list_keys(db::Database &db, const KeyFilter &filter, int64_t *total) {
 	std::string where = "WHERE 1 = 1";
 	std::vector<BindValue> binds;
+	// The next bind's placeholder, $<n>.
+	const auto next = [&binds] { return "$" + std::to_string(binds.size() + 1); };
 	if (!filter.title.empty()) {
-		where += " AND k.title = ?";
+		where += " AND k.title = " + next();
 		binds.emplace_back(filter.title);
 	}
 	if (filter.state == "unassigned")
@@ -170,11 +173,10 @@ std::vector<CdKey> list_keys(db::Database &db, const KeyFilter &filter, int64_t 
 	else if (filter.state == "revoked")
 		where += " AND k.revoked_at IS NOT NULL";
 	if (!filter.search.empty()) {
-		where += " AND (instr(lower(k.serial), lower(?)) > 0 OR instr(lower(k.wire_key), lower(?)) "
-				 "> 0 "
-				 "OR instr(lower(COALESCE(p.username, '')), lower(?)) > 0)";
-		for (int i = 0; i < 3; ++i)
-			binds.emplace_back(filter.search);
+		const std::string search = next();
+		where += " AND (instr(lower(k.serial), lower(" + search + ")) > 0 OR instr(lower(k.wire_key), lower(" +
+				 search + ")) > 0 OR instr(lower(COALESCE(p.username, '')), lower(" + search + ")) > 0)";
+		binds.emplace_back(filter.search);
 	}
 	if (total != nullptr) {
 		const auto counted =
@@ -183,20 +185,22 @@ std::vector<CdKey> list_keys(db::Database &db, const KeyFilter &filter, int64_t 
 						binds);
 		*total = counted.empty() ? 0 : counted.front().as_int(0).value_or(0);
 	}
+	const std::string limit = next();
 	binds.emplace_back(static_cast<int64_t>(filter.limit));
+	const std::string offset = next();
 	binds.emplace_back(static_cast<int64_t>(filter.offset));
-	return query_keys(db, where + " ORDER BY k.id DESC LIMIT ? OFFSET ?;", binds);
+	return query_keys(db, where + " ORDER BY k.id DESC LIMIT " + limit + " OFFSET " + offset + ";", binds);
 }
 
 std::optional<CdKey> find_key(db::Database &db, int64_t id) {
-	auto keys = query_keys(db, "WHERE k.id = ?;", { BindValue(id) });
+	auto keys = query_keys(db, "WHERE k.id = $1;", { BindValue(id) });
 	if (keys.empty())
 		return std::nullopt;
 	return std::move(keys.front());
 }
 
 std::vector<CdKey> keys_of_account(db::Database &db, int64_t user_id) {
-	return query_keys(db, "WHERE k.user_id = ? ORDER BY k.id DESC;", { BindValue(user_id) });
+	return query_keys(db, "WHERE k.user_id = $1 ORDER BY k.id DESC;", { BindValue(user_id) });
 }
 
 AssignOutcome assign_key(db::Database &db, int64_t key_id, int64_t user_id) {
@@ -208,15 +212,15 @@ AssignOutcome assign_key(db::Database &db, int64_t key_id, int64_t user_id) {
 		return AssignOutcome::Revoked;
 	if (key->account)
 		return AssignOutcome::AlreadyAssigned;
-	if (db.query("SELECT 1 FROM players WHERE id = ? AND kind = 'player';", { BindValue(user_id) })
+	if (db.query("SELECT 1 FROM players WHERE id = $1 AND kind = 'player';", { BindValue(user_id) })
 					.empty())
 		return AssignOutcome::NoSuchAccount;
-	if (!db.query("SELECT 1 FROM cd_keys WHERE user_id = ? AND title = ? AND revoked_at IS NULL;",
+	if (!db.query("SELECT 1 FROM cd_keys WHERE user_id = $1 AND title = $2 AND revoked_at IS NULL;",
 				   { BindValue(user_id), BindValue(key->title) })
 					.empty())
 		return AssignOutcome::AccountHasKey;
-	db.exec("UPDATE cd_keys SET user_id = ?, assigned_at = CURRENT_TIMESTAMP "
-			"WHERE id = ? AND user_id IS NULL AND revoked_at IS NULL;",
+	db.exec("UPDATE cd_keys SET user_id = $1, assigned_at = CURRENT_TIMESTAMP "
+			"WHERE id = $2 AND user_id IS NULL AND revoked_at IS NULL;",
 			{ BindValue(user_id), BindValue(key_id) });
 	tx.commit();
 	return AssignOutcome::Assigned;
@@ -229,7 +233,7 @@ RevokeOutcome revoke_key(db::Database &db, int64_t key_id) {
 		return RevokeOutcome::NoSuchKey;
 	if (key->revoked())
 		return RevokeOutcome::AlreadyRevoked;
-	db.exec("UPDATE cd_keys SET revoked_at = CURRENT_TIMESTAMP WHERE id = ? AND revoked_at IS "
+	db.exec("UPDATE cd_keys SET revoked_at = CURRENT_TIMESTAMP WHERE id = $1 AND revoked_at IS "
 			"NULL;",
 			{ BindValue(key_id) });
 	tx.commit();
@@ -237,11 +241,11 @@ RevokeOutcome revoke_key(db::Database &db, int64_t key_id) {
 }
 
 std::vector<Activation> activations_of_key(db::Database &db, int64_t key_id) {
-	return query_activations(db, "WHERE a.key_id = ? ORDER BY a.id;", { BindValue(key_id) });
+	return query_activations(db, "WHERE a.key_id = $1 ORDER BY a.id;", { BindValue(key_id) });
 }
 
 std::vector<Activation> activations_of_account(db::Database &db, int64_t user_id) {
-	return query_activations(db, "WHERE k.user_id = ? ORDER BY a.id DESC;", { BindValue(user_id) });
+	return query_activations(db, "WHERE k.user_id = $1 ORDER BY a.id DESC;", { BindValue(user_id) });
 }
 
 ActivateResult activate_key(db::Database &db, int64_t key_id, const std::string &nwpssk) {
@@ -278,7 +282,7 @@ ActivateResult activate_account(db::Database &db, int64_t user_id, std::string_v
 		return out;
 	}
 	db::Transaction tx(db);
-	const auto keys = query_keys(db, "WHERE k.user_id = ? AND k.title = ? ORDER BY k.id DESC;",
+	const auto keys = query_keys(db, "WHERE k.user_id = $1 AND k.title = $2 ORDER BY k.id DESC;",
 			{ BindValue(user_id), BindValue(std::string(title)) });
 	for (const CdKey &key : keys) {
 		if (key.revoked())

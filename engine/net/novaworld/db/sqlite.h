@@ -64,12 +64,15 @@ struct Row {
 	bool is_null(std::size_t i) const;
 };
 
-// Bound parameter for exec/query. Use std::monostate to bind NULL.
+// Bound parameter for exec/query: binds[k] fills the statement's `$<k+1>`
+// (numbered, as the server dialect spells them; one may appear several times),
+// and the statement names exactly binds.size() of them. Use std::monostate to
+// bind NULL.
 using BindValue = std::variant<std::monostate, int64_t, double, std::string, std::vector<uint8_t>>;
 
 // RAII handle to a sqlite3* connection. NOT thread-safe: one thread uses a
 // Database at a time. sqlite (THREADSAFE=1, serialized) keeps a shared handle
-// from crashing, but last_insert_rowid(), changes(), the error text a
+// from crashing, but changes(), the error text a
 // SqliteError carries and any open transaction all belong to the connection,
 // so two threads on one handle read each other's results and commit or roll
 // back each other's writes. A multi-threaded process gives every thread its
@@ -113,9 +116,6 @@ public:
 	// streaming large result sets.
 	std::vector<Row> query(std::string_view sql);
 	std::vector<Row> query(std::string_view sql, const std::vector<BindValue> &binds);
-
-	// Last INSERT row id (sqlite3_last_insert_rowid).
-	int64_t last_insert_rowid() const;
 
 	// rows changed by the last DML (sqlite3_changes).
 	int changes() const;
