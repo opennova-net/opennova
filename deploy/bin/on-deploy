@@ -1436,14 +1436,15 @@ release_manifest() {
 }
 
 # Parse the bundle's compose files the way the host will (with stand-in
-# secrets), so a broken file fails here, before anything changes.
+# secrets and origin certificate: the host reads both from SSM), so a broken
+# file fails here, before anything changes.
 bundle_check() {
   local dir="$1" fake names line
   fake="$dir/../check.env"
   {
     for line in "${!INFRA[@]}"; do printf "%s='%s'\n" "$line" "${INFRA[$line]}"; done
     names="$(sed -n 's/^\([A-Z][A-Z0-9_]*\)=op:.*/\1/p' "$RUNTIME_TPL")"
-    for line in $names; do printf "%s='stand-in'\n" "$line"; done
+    for line in $names ORIGIN_TLS_CERT ORIGIN_TLS_KEY; do printf "%s='stand-in'\n" "$line"; done
   } > "$fake"
   docker compose --project-name opennova --project-directory "$dir/compose" \
     -f "$dir/compose/docker-compose.yml" -f "$dir/compose/docker-compose.prod.yml" \
