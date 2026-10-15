@@ -64,6 +64,7 @@ endif()
 add_subdirectory(apps/common)
 add_subdirectory(apps/3di)
 add_subdirectory(apps/extract)
+add_subdirectory(apps/hostd)  # Linux only
 add_subdirectory(apps/lan_probe)
 if(OPENNOVA_NOVAWORLD_SERVICE)
     add_subdirectory(apps/novaworld_server)

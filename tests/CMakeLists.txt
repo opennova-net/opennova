@@ -4719,6 +4719,25 @@ target_link_libraries(hud_capture_labels_test PRIVATE opennova_runtime)
 target_compile_features(hud_capture_labels_test PRIVATE cxx_std_17)
 add_test(NAME hud_capture_labels COMMAND hud_capture_labels_test)
 
+# opennova-hostd, the machine agent (apps/hostd; Linux only, as the app). The runtime
+# test drives its platform legs on a stub command runner that checks every argv: the
+# docker runtime's exact `docker run` and its listings, docker's texts read, the per-slot
+# iptables egress counters, the command line. The agent test drives the bootstrap and the
+# sync passes against an in-process fake of the service's routes and a fake container
+# runtime on a hand-stepped clock, with the planner and the slots' directories. Neither
+# runs docker or iptables.
+if(TARGET opennova_hostd_core)
+    add_executable(opennova_hostd_runtime_test hostd/opennova_hostd_runtime_test.cpp)
+    target_link_libraries(opennova_hostd_runtime_test PRIVATE opennova_hostd_core)
+    target_include_directories(opennova_hostd_runtime_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME opennova_hostd_runtime COMMAND opennova_hostd_runtime_test)
+
+    add_executable(opennova_hostd_agent_test hostd/opennova_hostd_agent_test.cpp)
+    target_link_libraries(opennova_hostd_agent_test PRIVATE opennova_hostd_core)
+    target_include_directories(opennova_hostd_agent_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME opennova_hostd_agent COMMAND opennova_hostd_agent_test)
+endif()
+
 # The NovaWorld service's tests (opennova_novaworld_service, apps/novaworld_server and
 # opennova-serve against the service's listeners), only when the service builds
 # (OPENNOVA_NOVAWORLD_SERVICE).

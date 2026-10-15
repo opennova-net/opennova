@@ -6,7 +6,8 @@ name: Net stack (Linux)
 # HTTP layer ON plus the
 # net-scoped ctests, on the deploy target's OS and flag set, and a Linux
 # compile of the mission-kernel embedders (extract, wire, opennova-serve) with
-# the kernel's ungated ctests. ci.yml's test-linux job builds the same tree (same
+# the kernel's ungated ctests, and of the machine agent (opennova-hostd, Linux
+# only, shipped in the serve image) with its ctests. ci.yml's test-linux job builds the same tree (same
 # directory, same flags, so the two share the linux-root compiler cache) and
 # runs the whole core suite over it on every push and PR. The service's
 # database tests make a database per case on the PostgreSQL service container
@@ -88,7 +89,7 @@ jobs:
             opennova_novaworld_server_signal_shutdown_test \
             nw_codec_identity_test nw_self_capture_test \
             unknown_tracker_test nwmsg_replay_test nwmsg_codec_parity_test \
-            opennova_extract opennova_wire opennova_serve \
+            opennova_extract opennova_wire opennova_serve opennova_hostd opennova_hostd_runtime_test opennova_hostd_agent_test \
             opennova_serve_test opennova_serve_game_cfg_test opennova_serve_novaworld_test serve_registration_parity_test nwu_demux_test opennova_serve_lister_options_test npruntime_host_file_test \
             opennova_serve_server_command_push_test nw_server_command_push_e2e_test \
             npruntime_host_config_test opennova_serve_status_console_test opennova_serve_admin_test \
@@ -99,7 +100,7 @@ jobs:
       - name: Run net ctests + the kernel smoke
         run: |
           ctest --test-dir build --output-on-failure --parallel "$(nproc)" -R \
-            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gate_listener|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db|db_concurrency|web_session|rate_limiter|child_process|hosted_supervisor|hosted_admin_link|hosted_console_commands|hosted_ec2_provider|hosted_agent_protocol|hosted_placement|admin_protocol|billing_stripe|session_hello_roundtrip|lobby_session|backend_schema|opennova_novaworld_server_http_routes|host_key|nw_host_ownership_e2e|nw_owner_admin_e2e|hosted_local_e2e|opennova_novaworld_server_signal_shutdown|nw_codec_identity|nw_self_capture|unknown_tracker|nwmsg_replay|nwmsg_codec_parity|mission_kernel|mission_kernel_lifecycle|host_role|inspect|terrain_field_store|opennova_serve_lan_join|opennova_serve_game_cfg|opennova_serve_novaworld|opennova_serve_server_command_push|nw_server_command_push_e2e|serve_registration_parity|nwu_demux|opennova_serve_lister_options|npruntime_host_file|npruntime_host_config|opennova_serve_status_console|opennova_serve_admin|npruntime_server_log_recorder|npruntime_punt_log|sha256|os_random|nwu_lobby_draws)$"
+            "^(url_cipher|crc32|nwu|pubcrypto|epask|envelope|tlv|session|registration_url|gate_response|gate_probe|lobby_update|gate_server_loopback|gate_listener|gsb_roundtrip|protocol_message|connection_registry|connection_manager|db|db_concurrency|web_session|rate_limiter|child_process|hosted_supervisor|hosted_admin_link|hosted_console_commands|hosted_ec2_provider|hosted_agent_protocol|hosted_placement|admin_protocol|billing_stripe|session_hello_roundtrip|lobby_session|backend_schema|opennova_novaworld_server_http_routes|host_key|nw_host_ownership_e2e|nw_owner_admin_e2e|hosted_local_e2e|opennova_novaworld_server_signal_shutdown|nw_codec_identity|nw_self_capture|unknown_tracker|nwmsg_replay|nwmsg_codec_parity|mission_kernel|mission_kernel_lifecycle|host_role|inspect|terrain_field_store|opennova_serve_lan_join|opennova_serve_game_cfg|opennova_serve_novaworld|opennova_serve_server_command_push|nw_server_command_push_e2e|serve_registration_parity|nwu_demux|opennova_serve_lister_options|npruntime_host_file|npruntime_host_config|opennova_serve_status_console|opennova_serve_admin|npruntime_server_log_recorder|npruntime_punt_log|sha256|os_random|nwu_lobby_draws|opennova_hostd_runtime|opennova_hostd_agent)$"
 
       - name: sccache stats
         if: always()

@@ -13,6 +13,12 @@
 #     -v <game folder>:/opt/game:ro -v <state dir>:/srv/serve \
 #     ghcr.io/<owner>/opennova-serve /HOST /srv/serve/server.host [serve args]
 # apps/serve/README.md ("Container image") has the contract.
+#
+# Beside the server it carries opennova-hostd (apps/hostd), the machine agent,
+# at /usr/local/bin/opennova-hostd. That one never runs in a container: a
+# machine copies it out of the image it pulled at its bootstrap and runs it as
+# root under systemd, so each machine's agent is the build of the serve image
+# it was launched with (apps/hostd/README.md).
 
 # ---- build stage ----------------------------------------------------------
 FROM ubuntu:24.04 AS build
@@ -24,13 +30,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /src
 COPY . .
 
-# Configure the whole tree (cheap) but compile only the server target and its
-# lib deps: the engine groups and apps/common, with no HTTP layer and no Godot.
-# The configure is .github/workflows/net-linux.yml's, which builds and tests
-# opennova_serve on Linux, minus its NovaWorld service flags (serve never
-# links the service).
+# The build opennova-hostd reports to the service (serve-image.yml passes the
+# commit).
+ARG OPENNOVA_VERSION=dev
+
+# Configure the whole tree (cheap) but compile only the server and the agent
+# targets and their lib deps: the engine groups and apps/common, with no HTTP
+# layer and no Godot. The configure is .github/workflows/net-linux.yml's, which
+# builds and tests both on Linux, minus its NovaWorld service flags (neither links
+# the service; the agent compiles the service's agent protocol itself).
 RUN cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    && cmake --build build --target opennova_serve
+        "-DOPENNOVA_HOSTD_VERSION=${OPENNOVA_VERSION}" \
+    && cmake --build build --target opennova_serve opennova_hostd
 
 # ---- runtime stage --------------------------------------------------------
 # Same distro/glibc as the build stage so the binary's GLIBC/GLIBCXX
@@ -50,6 +61,8 @@ RUN groupadd --system --gid 10001 serve \
     && chown serve:serve /srv/serve
 
 COPY --from=build /src/build/apps/serve/opennova-serve /usr/local/bin/opennova-serve
+# The machine agent, for the machine to copy out (never run here).
+COPY --from=build /src/build/apps/hostd/opennova-hostd /usr/local/bin/opennova-hostd
 
 USER 10001:10001
 WORKDIR /srv/serve
