@@ -1,9 +1,10 @@
 name: Infra
 
 # The offline checks of the deploy stack (DEPLOY.md): the Terraform under
-# infra/ (formatted, valid, and infra/aws/tests' mock-provider runs, which plan
-# against mocks with no credentials, so nothing reaches AWS or Cloudflare) at
-# the pinned Terraform the toolbox runs, and shellcheck on the deploy toolbox,
+# infra/ (formatted, valid, and infra/aws/tests' and infra/github/tests'
+# mock-provider runs, which plan against mocks with no credentials, so nothing
+# reaches AWS, Cloudflare or GitHub) at the pinned Terraform the toolbox runs,
+# and shellcheck on the deploy toolbox,
 # the service instance's first-boot and converge scripts, the portal's entrypoint
 # and the hosted machines' script. The Terraform reads deploy/host/ (the
 # service instance's scripts), so the repo root is mounted. Path-filtered: it runs
@@ -54,6 +55,12 @@ jobs:
       # in the selected one: tests/staging's runs, apart, as staging.
       - name: terraform test (staging workspace)
         run: docker run --rm --network none -e TF_WORKSPACE=staging -v "$PWD:/w" -w /w/infra/aws "$TERRAFORM_IMAGE" test -test-directory=tests/staging
+      # The organization's CI runners (infra/github), against a mock provider.
+      - name: terraform init, validate and test (infra/github)
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w/infra/github "$TERRAFORM_IMAGE" init -backend=false -input=false
+          docker run --rm -v "$PWD:/w" -w /w/infra/github "$TERRAFORM_IMAGE" validate
+          docker run --rm --network none -v "$PWD:/w" -w /w/infra/github "$TERRAFORM_IMAGE" test
 
   shellcheck:
     runs-on: ubuntu-latest

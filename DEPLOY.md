@@ -688,6 +688,59 @@ means Cloudflare stopped it: the webhook's custom rule skips the WAF's rules
 (section 1). On a plan without some skippable phase or product the apply names it: drop
 it from `cloudflare_webhook_skip_phases` / `_products` in the var-file.
 
+## GitHub
+
+The GitHub organization `opennova-net` is managed by `infra/github`, all of it: the
+organization's settings, members and Actions permissions, the CI runners and their runner
+group, every repository (settings, topics, default branch, vulnerability alerts),
+`opennova`'s `master` protection and its Actions secrets. A change made in GitHub's
+settings is drift: the next `github plan` shows it, and `github apply` puts it back. Make
+the change in `infra/github` instead. The repositories are never destroyed by Terraform
+(`prevent_destroy`; one dropped from the map on purpose is archived, not deleted).
+
+CI's build and test legs run on two larger GitHub-hosted runners: `windows-16core` and
+`ubuntu-16core` (16 cores, 64 GB). They run the images of `windows-latest` and
+`ubuntu-latest`, so they share compiler caches with the jobs that stay on those. They sit
+in the runner group `opennova-ci`, which only `opennova` may use; it allows public
+repositories, which GitHub's default group does not. `.github/workflows/ci.yml` names them
+in `runs-on`. A pull request from a fork runs on the standard runners, so only the
+organization's own branches spend minutes. Larger runners are billed per minute even for a
+public repository, and `maximum_runners` (10 Windows, 5 Linux) caps how many machines run
+at once.
+
+The stack is the organization's, not a deployment's: it has no workspaces, the toolbox
+runs it without `--deployment`, and its state is the vault document `tfstate-github-org`
+(`tfstate-github` was the retired expansion stack's; leave it alone). What stays out of
+this public repository comes from the vault:
+
+- **`github-terraform`**, fields:
+  - `token`: a fine-grained personal access token, resource owner **opennova-net**, with
+    organization permissions **Administration**, **Members** and **Self-hosted runners**
+    (each Read and write) and, on **All repositories**, **Administration** and **Secrets**
+    (Read and write).
+  - `billing_email`: the organization's billing email.
+  - `members`: the members and their roles as JSON, `{"login": "admin", "other": "member"}`.
+    Every member keeps the membership private. A login left out is removed from the
+    organization at the next apply, and a new one is invited.
+- **`reference-assets`**, field `token`: the value of the `REFERENCE_ASSETS_TOKEN` secret,
+  which the retail legs use to mount the two private reference repositories
+  (`docs/asset-gated-tests.md`). A fine-grained token, resource owner **opennova-net**,
+  access to only `opennova-reference-assets` and `opennova-reference-retail-packed`,
+  **Contents: Read-only**. When it expires, put the new token in the item and `github
+  apply`: Terraform keeps the value in its state and overwrites a secret set by hand.
+
+An org admin makes the tokens, or approves them if the organization reviews fine-grained
+tokens. Then:
+
+```bash
+./deploy/run.sh github plan
+./deploy/run.sh github apply            # shows the plan, then asks
+./deploy/run.sh github output           # the runners' names
+```
+
+`infra/github/imports.tf` adopted what existed before the stack. A new repository, member
+or secret is a change to the stack: add it, plan, apply. A new image replaces a runner.
+
 ## Operating
 
 - **Logs.** `./deploy/run.sh app logs [novaworld|web|game|backup] [--follow] [--since 2h]`
