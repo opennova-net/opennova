@@ -37,7 +37,7 @@
 
     <div v-else-if="loadError" class="space-y-3 rounded-panel border border-border bg-panel p-6">
       <p class="text-sm text-danger">{{ loadError }}</p>
-      <button type="button" :class="secondaryButton" @click="load">Try again</button>
+      <button type="button" :class="secondaryButton" @click="retry">Try again</button>
     </div>
 
     <p v-else-if="!tiers?.enabled || !billing?.enabled" class="rounded-panel border border-border bg-panel p-6 text-sm text-ink-muted">
@@ -194,7 +194,11 @@
 // the service to read Stripe now (POST /api/me/billing/sync), then reads the
 // account every 2 s backing off to 5 s for a minute until the payment is
 // confirmed, then every 30 s with a note that it went through, and drops the
-// query once confirmed; ?checkout=cancel says no payment was taken.
+// query once confirmed. A sync that finds no billing account (or support
+// tiers closed) drops the query with nothing claimed, and a page whose read
+// failed holds the confirmation back until "Try again". ?checkout=cancel says
+// no payment was taken. With billing off the page says support tiers are not
+// open.
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import TierPicker from '../../components/TierPicker.vue';
@@ -293,21 +297,41 @@ function fail(error: BillingError) {
   alertText.value = error.message;
 }
 
-async function load() {
+// Reads the tiers and the account: 'ok' with both in, 'closed' when support
+// tiers are not open (billing off: the page says so, no error), 'failed'
+// otherwise.
+async function load(): Promise<'ok' | 'closed' | 'failed'> {
   loading.value = true;
   loadError.value = '';
   const [t, b] = await Promise.all([fetchTiers(), fetchMyBilling()]);
   loading.value = false;
   if (!b.ok && b.error.code === 'unauthorized') {
     await onSessionEnded();
-    return;
+    return 'failed';
   }
-  if (!t.ok || !b.ok) {
-    loadError.value = (!t.ok ? t.error : (b as { ok: false; error: BillingError }).error).message;
-    return;
+  if (!t.ok) {
+    loadError.value = t.error.message;
+    return 'failed';
+  }
+  if (!b.ok && b.error.code === 'billing_disabled') {
+    tiers.value = t.value;
+    billing.value = null;
+    return 'closed';
+  }
+  if (!b.ok) {
+    loadError.value = b.error.message;
+    return 'failed';
   }
   tiers.value = t.value;
   billing.value = b.value;
+  return 'ok';
+}
+
+// "Try again": the read, then a checkout's confirmation the failed read held back.
+async function retry() {
+  const outcome = await load();
+  if (outcome === 'ok' && route.query.checkout === 'success' && confirm.value === 'idle') void confirmCheckout();
+  else if (outcome === 'closed') void dropQuery();
 }
 
 // Leaves for Stripe, or says the address looked wrong.
@@ -405,8 +429,19 @@ function scheduleConfirm() {
       await onSessionEnded();
       return;
     }
+    if (!result.ok && result.error.code === 'billing_disabled') {
+      nothingToConfirm();
+      return;
+    }
     scheduleConfirm();
   }, delay);
+}
+
+// The return names no payment this account could have made (it has no
+// billing account, or support tiers closed): nothing is awaited or claimed.
+function nothingToConfirm() {
+  confirm.value = 'idle';
+  void dropQuery();
 }
 
 async function confirmCheckout() {
@@ -421,14 +456,21 @@ async function confirmCheckout() {
     await onSessionEnded();
     return;
   }
+  if (!result.ok && (result.error.code === 'no_billing_account' || result.error.code === 'billing_disabled')) {
+    nothingToConfirm();
+    return;
+  }
   scheduleConfirm();
 }
 
 onMounted(async () => {
   const outcome = route.query.checkout;
-  await load();
+  const loaded = await load();
   if (outcome === 'success') {
-    void confirmCheckout();
+    // A read that failed leaves the query for "Try again"; with tiers closed
+    // there is nothing to confirm.
+    if (loaded === 'ok') void confirmCheckout();
+    else if (loaded === 'closed') void dropQuery();
   } else if (outcome === 'cancel') {
     notice.value = 'No payment was taken.';
     void dropQuery();

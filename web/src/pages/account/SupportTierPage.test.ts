@@ -191,4 +191,48 @@ describe('SupportTierPage', () => {
     expect(mine.mock.calls.length).toBe(pending + 1);
     expect(router.currentRoute.value.query.checkout).toBe('success');
   });
+
+  it('claims no payment when the sync finds no billing account', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    sync.mockResolvedValue({
+      ok: false,
+      error: { code: 'no_billing_account', status: 404, message: 'You have no billing account yet.' },
+    });
+    await mountAt('/me/support?checkout=success&session_id=cs_test_1');
+    await flushPromises();
+    expect(router.currentRoute.value.fullPath).toBe('/me/support');
+    await vi.advanceTimersByTimeAsync(120_000);
+    await flushPromises();
+    expect(statusText()).not.toContain('Your payment went through');
+    expect(statusText()).not.toContain('Confirming');
+    expect(mine).toHaveBeenCalledTimes(1); // the page's load alone
+  });
+
+  it('holds the confirmation back while the page could not read the account', async () => {
+    mine.mockResolvedValueOnce({ ok: false, error: { code: 'network', status: null, message: 'Could not reach the server.' } });
+    const page = await mountAt('/me/support?checkout=success&session_id=cs_test_1');
+    expect(sync).not.toHaveBeenCalled();
+    expect(page.text()).toContain('Could not reach the server.');
+    expect(router.currentRoute.value.query.checkout).toBe('success');
+    // Read again: the confirmation starts.
+    sync.mockResolvedValue({ ok: true, value: subscribed(2) });
+    await page.findAll('button').find((b) => b.text() === 'Try again')!.trigger('click');
+    await flushPromises();
+    expect(sync).toHaveBeenCalledTimes(1);
+    expect(statusText()).toContain('Your support tier is active.');
+  });
+
+  it('says support tiers are not open with billing off', async () => {
+    tiers.mockResolvedValue({ ok: true, value: tiersResponse({ enabled: false }) });
+    mine.mockResolvedValue({
+      ok: false,
+      error: { code: 'billing_disabled', status: 503, message: 'Support tiers are not open on NovaWorld yet.' },
+    });
+    const page = await mountAt('/me/support?checkout=success&session_id=cs_test_1');
+    expect(page.text()).toContain('Support tiers are not open on NovaWorld yet.');
+    expect(page.findAll('button').some((b) => b.text() === 'Try again')).toBe(false);
+    expect(page.find('[role="alert"]').text()).toBe('');
+    expect(sync).not.toHaveBeenCalled();
+    expect(router.currentRoute.value.fullPath).toBe('/me/support');
+  });
 });
