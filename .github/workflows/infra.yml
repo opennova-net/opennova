@@ -58,4 +58,5 @@ jobs:
             deploy/run.sh \
             deploy/bin/on-deploy \
             infra/aws/user_data.sh.tmpl \
-            apps/novaworld_server/hosted/machine/user_data.sh
+            apps/novaworld_server/hosted/machine/user_data.sh \
+            apps/novaworld_server/hosted/machine/machine_user_data.sh

@@ -596,3 +596,34 @@ target_include_directories(hosted_fleet_repository_test PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 target_compile_definitions(hosted_fleet_repository_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(hosted_fleet_repository COMMAND hosted_fleet_repository_test)
+
+# The fleet's machine drivers and settings: the EC2 driver (apps/novaworld_server/hosted/
+# ec2_machine_driver.h) on a stub CommandRunner that checks every AWS CLI argv and answers it
+# (each kind's launch template, the tags, the client token, the user-data file with the
+# machine's values filled in and deleted after, describe's states from one cached listing, a
+# failure reading Unknown and its back-off, terminate's idempotence, list_tagged's scope and its
+# throw, the slots' ports), its config checks and the data sets' volume labels; the shipped
+# machine script (hosted/machine/machine_user_data.sh) and its render; the settings
+# (hosted/fleet_config.h); and the local driver's machines without a service. Crow-free and
+# database-free: compiles the hosted sources it needs directly.
+add_executable(hosted_ec2_machine_driver_test
+    novaworld/hosted_ec2_machine_driver_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/agent_protocol.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/bootstrap.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/data_sets.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/ec2_machine_driver.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/fleet_config.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/local_machine_driver.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/owner_file.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/placement.cpp)
+target_link_libraries(hosted_ec2_machine_driver_test PRIVATE opennova_app_common Threads::Threads)
+if(WIN32)
+    target_link_libraries(hosted_ec2_machine_driver_test PRIVATE advapi32)
+endif()
+target_include_directories(hosted_ec2_machine_driver_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+target_compile_definitions(hosted_ec2_machine_driver_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+add_test(NAME hosted_ec2_machine_driver COMMAND hosted_ec2_machine_driver_test)
+set_tests_properties(hosted_ec2_machine_driver PROPERTIES TIMEOUT 120)
