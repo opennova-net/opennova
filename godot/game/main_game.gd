@@ -34,6 +34,14 @@ const DEV_TOOLS_KEY := KEY_INSERT
 # with the retail-configurable binding rows (huddetail's default; hudcolor's is
 # Ctrl+F6, D-CTRL-4).
 const PICK_KEY := KEY_F6
+# `-- --boot-smoke` (the package boot smoke, scripts/package_godot_windows.ps1):
+# once the bundled menu is up and its music plays, quit through request_quit(),
+# the window close's path, after BOOT_SMOKE_FRAMES frames. A forced quit
+# (`--quit-after`) with the menu music streaming crashes in Godot's shutdown
+# (audio/mus-sbf-re.md, "Godot playback shutdown"), so the smoke exits as a
+# player does instead, and exercises the music drain.
+const BOOT_SMOKE_FLAG := "--boot-smoke"
+const BOOT_SMOKE_FRAMES := 120
 # ARMORY = the WEAPON screen over LIVE play: the world keeps ticking (the witnessed
 # armory runs with no world-stop leg — and under the listen-server model a pausing
 # host would freeze every peer), only the mouse is released and player input idles.
@@ -754,7 +762,17 @@ func _enter_bundled_menu() -> bool:
 				+ "or the OpenNova Editor's Export)") % BootRootMount.bundled_project_dir())
 	# The boot marker the CLI startup contract test and the package smoke read (--verbose).
 	print_verbose("OpenNova: bundled menu up from %s (%s)" % [root.get_root_dir(), "build" if built else "loose"])
+	if OS.get_cmdline_user_args().has(BOOT_SMOKE_FLAG):
+		_quit_boot_smoke()
 	return true
+
+
+# The package boot smoke's exit (BOOT_SMOKE_FLAG): the menu runs its frames, its
+# music among them, then the runtime quits as a window close does.
+func _quit_boot_smoke() -> void:
+	for _frame in BOOT_SMOKE_FRAMES:
+		await get_tree().process_frame
+	request_quit()
 
 
 ## PLAY RETAIL: the saved retail install when it still mounts, else the picker.
