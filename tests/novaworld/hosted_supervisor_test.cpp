@@ -1378,7 +1378,7 @@ int test_hold_releases() {
 	rig.make_supervisor();
 	hosted::LimitsHold hold;
 	rig.sup->set_limits_hold(&hold);
-	auto db = rig.pool.acquire();
+	Database *db = &rig.db;
 	const auto lapse = [&](const std::vector<int64_t> &ids, int comp) {
 		bool ok = true;
 		for (const int64_t id : ids) ok = nws::set_comp_servers(*db, *rig.server(id)->owner_user_id, comp).ok && ok;
