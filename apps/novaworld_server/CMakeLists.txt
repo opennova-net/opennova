@@ -37,6 +37,7 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/hosted_settings.cpp
         hosted/local_process_provider.cpp
         hosted/owner_file.cpp
+        hosted/placement.cpp
         hosted/supervisor.cpp
         # Billing (monthly support tiers over Stripe Checkout and the Customer
         # Portal): the settings, the curl transport (hosted/command_runner.h,

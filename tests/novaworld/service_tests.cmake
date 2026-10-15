@@ -497,3 +497,17 @@ target_link_libraries(opennova_serve_lister_e2e_test PRIVATE opennova_serve_core
 target_include_directories(opennova_serve_lister_e2e_test PRIVATE ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 add_test(NAME opennova_serve_lister_e2e COMMAND opennova_serve_lister_e2e_test)
 set_tests_properties(opennova_serve_lister_e2e PROPERTIES RUN_SERIAL TRUE)
+
+# Where a hosted server runs (apps/novaworld_server/hosted/placement.h) and what a slot
+# of a machine is (hosted/slots.h): best fit on the fullest shared machine that takes
+# servers, the ties, the launches below the fleet's maximums and the waits at them, the
+# own-machine add-on's machine, the states that count, the columns' words. Pure
+# functions: compiles the source directly, so it runs on every build.
+add_executable(hosted_placement_test
+    novaworld/hosted_placement_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/placement.cpp)
+target_compile_features(hosted_placement_test PRIVATE cxx_std_17)
+target_include_directories(hosted_placement_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+add_test(NAME hosted_placement COMMAND hosted_placement_test)
