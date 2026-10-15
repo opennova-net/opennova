@@ -21,10 +21,10 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# The build legs (test-core, test-retail, test-linux, both gdext builds, the
-# Godot package) run on the organization's 16-core runners, windows-16core and
-# ubuntu-16core (infra/github; DEPLOY.md, "CI runners"): the compiles and the
-# ctests are CPU-bound and scale with the cores. They run windows-latest's and
+# The build and test legs (test-core, test-retail, test-linux, both gdext
+# builds, the Windows Godot tests, the Godot package) run on the organization's
+# 16-core runners, windows-16core and ubuntu-16core (infra/github; DEPLOY.md,
+# "CI runners"): the compiles and the tests are CPU-bound. They run windows-latest's and
 # ubuntu-latest's images, so their compiler caches serve the jobs left on the
 # standard runners. A pull request from a fork runs everything on the standard
 # runners, so only the organization's own branches spend the larger runners'
@@ -829,7 +829,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest]
-    runs-on: ${{ matrix.os }}
+    # The check's name is the matrix value's; the machine is the 16-core runner
+    # (a fork's pull request: the standard one the matrix names).
+    runs-on: ${{ github.event.pull_request.head.repo.fork && matrix.os || 'windows-16core' }}
     needs: [changes, build-gdextension-windows]
     # Runs (its steps gated on `code`) when the extension build was skipped
     # for a docs-only PR, so the required check still reports; skipped, as
@@ -1163,7 +1165,9 @@ jobs:
       fail-fast: false
       matrix:
         os: [windows-latest]
-    runs-on: ${{ matrix.os }}
+    # The check's name is the matrix value's; the machine is the 16-core runner
+    # (a fork's pull request: the standard one the matrix names).
+    runs-on: ${{ github.event.pull_request.head.repo.fork && matrix.os || 'windows-16core' }}
     needs: [build-gdextension-windows, retail-availability]
     env:
       GODOT_VERSION: 4.6.1-stable

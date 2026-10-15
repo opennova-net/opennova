@@ -34,9 +34,9 @@ variable "linux_image_id" {
 }
 
 # The scale-up caps, which also cap the spend: a pull request's run takes up
-# to 4 Windows machines at once (the two core shards, the retail leg, the
-# gdext build) and a master push 5 (the gdext build's release leg); jobs past
-# the cap queue.
+# to 6 Windows machines at once (the two core shards and the retail leg while
+# the Godot tests and the package follow the gdext build) and a master push 7
+# (the gdext build's release leg); jobs past the cap queue.
 variable "windows_maximum_runners" {
   description = "How many Windows machines may run at once."
   type        = number
