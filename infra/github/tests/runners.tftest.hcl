@@ -11,6 +11,48 @@ mock_provider "github" {
   }
 }
 
+# imports.tf adopts these, and a mock provider cannot import: each is stood in
+# for at plan instead.
+override_resource {
+  target          = github_organization_settings.org
+  override_during = plan
+}
+override_resource {
+  target          = github_membership.member
+  override_during = plan
+}
+override_resource {
+  target          = github_actions_organization_permissions.org
+  override_during = plan
+}
+override_resource {
+  target          = github_actions_organization_workflow_permissions.org
+  override_during = plan
+}
+override_resource {
+  target          = github_repository.repo
+  override_during = plan
+  values          = { node_id = "R_mock" }
+}
+override_resource {
+  target          = github_branch_default.repo
+  override_during = plan
+}
+override_resource {
+  target          = github_repository_vulnerability_alerts.repo
+  override_during = plan
+}
+override_resource {
+  target          = github_branch_protection.opennova_master
+  override_during = plan
+}
+
+variables {
+  billing_email          = "billing@example.com"
+  members                = { mock-admin = "admin", mock-member = "member" }
+  reference_assets_token = "github_pat_mock"
+}
+
 run "runners" {
   command = plan
 

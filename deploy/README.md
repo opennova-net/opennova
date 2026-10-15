@@ -17,9 +17,10 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
     saved, refuses one that destroys or replaces an Elastic IP or its association, the
     service instance or its interface, the database or a bucket unless
     `--allow-destroy`, and on prod asks for `yes` (or `--yes`) first;
-  - `github plan|apply|import|output|list`: the organization's CI runners
-    (`infra/github`; DEPLOY.md, "CI runners"), one stack with no deployments, its state
-    the vault document `tfstate-github`; `apply` asks for `yes` (or `--yes`) first;
+  - `github plan|apply|import|output|list`: the GitHub organization (`infra/github`;
+    DEPLOY.md, "GitHub"): its settings, members, CI runners, repositories, branch
+    protection and Actions secrets, one stack with no deployments, its state the vault
+    document `tfstate-github-org`; `apply` asks for `yes` (or `--yes`) first;
   - `app deploy|releases|rollback|converge|status|restart|down|logs|shell`: releases
     (bundles in S3, the images pinned by digest) converged on the host through SSM,
     CloudWatch logs, a Session Manager shell;

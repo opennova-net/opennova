@@ -10,6 +10,27 @@ variable "repository" {
   default     = "opennova"
 }
 
+variable "billing_email" {
+  description = "The organization's billing email (org.tf): a vault input (the vault item github-terraform, field billing_email), kept out of this public repository."
+  type        = string
+}
+
+variable "members" {
+  description = "The organization's members, login => role (member or admin; org.tf): a vault input (the vault item github-terraform, field members, as JSON), since every member keeps the membership private and this repository is public."
+  type        = map(string)
+
+  validation {
+    condition     = alltrue([for role in values(var.members) : contains(["member", "admin"], role)])
+    error_message = "A member's role is member or admin."
+  }
+}
+
+variable "reference_assets_token" {
+  description = "The REFERENCE_ASSETS_TOKEN secret's value (secrets.tf): a fine-grained token with Contents: Read-only on opennova-reference-assets and opennova-reference-retail-packed. The toolbox reads it from the vault item reference-assets (deploy/env/github.env.tpl)."
+  type        = string
+  sensitive   = true
+}
+
 variable "size" {
   description = "Both runners' machine size (GET /orgs/{org}/actions/hosted-runners/machine-sizes). It can change in place."
   type        = string

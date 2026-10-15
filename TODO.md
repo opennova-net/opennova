@@ -14,8 +14,7 @@ health. Divergences from the original engine belong in
       and delete marker); `./deploy/run.sh infra plan` then `apply` (it destroys the bucket
       set, CloudFront, the ACM cert and its validation record, the `downloads` CNAME, the
       `nw` record and `launcher_ci`, and turns the account-wide S3 public access block on);
-      delete the `LAUNCHER_AWS_*` secrets and the `DOWNLOADS_BUCKET` variable on this repo and the five
-      Actions secrets on revx02/onjo01/ondx01 (the repos stay); then drop the
+      delete the five Actions secrets on revx02/onjo01/ondx01 (the repos stay); then drop the
       `us_east_1` provider alias in `infra/aws/main.tf`.
 
 ## Project health follow-ups
