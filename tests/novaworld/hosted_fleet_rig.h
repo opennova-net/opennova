@@ -182,10 +182,13 @@ inline std::string credential(const std::string &text, const std::string &key) {
 }
 
 // One supervisor over a fresh database and a FakeDriver, its clock in hand.
+// The supervisor leases its pool; the test and these helpers use `db`, a
+// connection of their own, so no thread ever holds two of the pool's leases.
 struct Rig {
 	test_temp::TempDir temp;
 	test_db::TestDatabase scratch;
 	ConnectionPool pool;
+	Database db;
 	FakeDriver fake;
 	hosted::SupervisorConfig config;
 	std::unique_ptr<hosted::Supervisor> sup;
@@ -196,7 +199,7 @@ struct Rig {
 	uint64_t now = 1000;
 	int64_t wall = kWall; // the entitlements' clock, Unix seconds
 
-	explicit Rig(const char *name) : temp(name), pool(scratch.options()) {
+	explicit Rig(const char *name) : temp(name), pool(scratch.options()), db(scratch.open()) {
 		config.cap = 3;
 		config.master_host = "203.0.113.5";
 		config.master_gate_port = 7597;
@@ -229,15 +232,14 @@ struct Rig {
 	void advance(uint64_t ms) { now += ms; }
 	// Every live machine's agent syncs once (a muted one's does not).
 	void sync_all() {
-		auto db = pool.acquire();
-		for (const hosted::FleetMachineRow &m : hosted::list_live_machines(*db)) {
+		for (const hosted::FleetMachineRow &m : hosted::list_live_machines(db)) {
 			if (muted.count(m.id) != 0 || m.state == hosted::FleetMachineState::Launching) continue;
 			auto it = agents.find(m.id);
 			if (it == agents.end()) {
 				it = agents.emplace(m.id, FakeAgent(m.id)).first;
 				it->second.start_running = start_running;
 			}
-			it->second.sync(*db, *sup);
+			it->second.sync(db, *sup);
 		}
 	}
 	// A second of the service: a pass, then the agents' syncs.
@@ -245,12 +247,12 @@ struct Rig {
 		tick();
 		sync_all();
 	}
-	std::optional<hosted::HostedServer> server(int64_t id) { return hosted::find_server(*pool.acquire(), id); }
+	std::optional<hosted::HostedServer> server(int64_t id) { return hosted::find_server(db, id); }
 	State state(int64_t id) {
 		const auto s = server(id);
 		return s ? s->state : State::Failed;
 	}
-	std::optional<hosted::FleetMachineRow> machine(int64_t id) { return hosted::find_machine(*pool.acquire(), id); }
+	std::optional<hosted::FleetMachineRow> machine(int64_t id) { return hosted::find_machine(db, id); }
 	// The machine row the server holds a slot on (0: none).
 	int64_t machine_of(int64_t id) {
 		const auto s = server(id);
@@ -273,13 +275,13 @@ struct Rig {
 	}
 	// The request of a new owner an admin granted one server.
 	int64_t request(const std::string &owner, hosted::HostedSettings settings = valid_settings()) {
-		const int64_t user = make_player(*pool.acquire(), owner, 1);
+		const int64_t user = make_player(db, owner, 1);
 		return user == 0 ? 0 : request_as(user, settings);
 	}
 	// `user`'s request.
 	int64_t request_as(int64_t user, hosted::HostedSettings settings = valid_settings(), bool own_machine = false) {
 		const auto r = hosted::request_server(
-				*pool.acquire(), user, settings, config.data_sets, config.cap, wall, own_machine, &config.placement);
+				db, user, settings, config.data_sets, config.cap, wall, own_machine, &config.placement);
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	}
 	// Steps until the server is in `want`, `passes` at most; whether it got there.
@@ -291,7 +293,7 @@ struct Rig {
 	std::string to_running(int64_t id, uint32_t rid) {
 		if (!walk(id, State::Listing)) return {};
 		const auto s = server(id);
-		if (!s || !s->service_user_id || !list_as(*pool.acquire(), *s->service_user_id, rid)) return {};
+		if (!s || !s->service_user_id || !list_as(db, *s->service_user_id, rid)) return {};
 		step(); // -> running
 		return state(id) == State::Running ? container(id) : std::string();
 	}
@@ -305,7 +307,7 @@ struct Rig {
 	// The machine's agent's last report a few minutes old, and silent from now.
 	void silence(int64_t machine_id) {
 		muted.insert(machine_id);
-		pool.acquire()->exec("UPDATE fleet_machines SET last_report_at = now() - interval '5 minutes' WHERE id = $1;",
+		db.exec("UPDATE fleet_machines SET last_report_at = now() - interval '5 minutes' WHERE id = $1;",
 				{ BindValue(machine_id) });
 	}
 };

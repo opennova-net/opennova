@@ -51,7 +51,7 @@ int test_desired_state() {
 
 	// Another machine's sync names none of this machine's containers (an own one,
 	// so placement never picks it).
-	auto db = rig.pool.acquire();
+	Database *db = &rig.db;
 	const auto other = hosted::create_machine(*db, { "fake", hosted::MachineKind::Own, 1, kServeImage, 0 });
 	hosted::LaunchedMachine launched;
 	launched.cloud_id = "fake-other";
@@ -116,7 +116,7 @@ int test_boot_timeout() {
 	TEST_EXPECT(rig.fake.was_terminated(failed->cloud_id));
 	auto row = rig.server(id);
 	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 0 && !row->machine_ref);
-	TEST_EXPECT(has_event(*rig.pool.acquire(), id, "did not boot in 30 s; placed again (no restart counted)"));
+	TEST_EXPECT(has_event(rig.db, id, "did not boot in 30 s; placed again (no restart counted)"));
 	TEST_EXPECT(rig.sup->launch_failures() == 1);
 	// The launch backoff holds the next machine of its kind.
 	rig.step();
@@ -152,7 +152,7 @@ int test_lost_terminated() {
 	rig.step();
 	TEST_EXPECT(rig.machine(machine)->state == FleetMachineState::Lost);
 	TEST_EXPECT(contains(rig.machine(machine)->end_reason, "has not reported for 60 s"));
-	TEST_EXPECT(hosted::count_machines(*rig.pool.acquire(), FleetMachineState::Lost) == 1);
+	TEST_EXPECT(hosted::count_machines(rig.db, FleetMachineState::Lost) == 1);
 	rig.advance(rig.config.lost_end_ms - 1);
 	rig.step();
 	TEST_EXPECT(rig.machine(machine)->state == FleetMachineState::Lost && !rig.fake.was_terminated(cloud));
@@ -162,8 +162,8 @@ int test_lost_terminated() {
 	TEST_EXPECT(rig.machine(machine)->state == FleetMachineState::Ended && rig.fake.was_terminated(cloud));
 	auto row = rig.server(id);
 	TEST_EXPECT(row->restarts == 0 && row->machine_ref != machine);
-	TEST_EXPECT(has_event(*rig.pool.acquire(), id, "silent for 180 s more; placed again (no restart counted)"));
-	TEST_EXPECT(hosted::count_machines(*rig.pool.acquire(), FleetMachineState::Lost) == 0);
+	TEST_EXPECT(has_event(rig.db, id, "silent for 180 s more; placed again (no restart counted)"));
+	TEST_EXPECT(hosted::count_machines(rig.db, FleetMachineState::Lost) == 0);
 	return 0;
 }
 
@@ -198,7 +198,7 @@ int test_lost_while_draining() {
 	const int64_t id = rig.request("lost_draining_owner");
 	TEST_EXPECT(!rig.to_running(id, 3251).empty());
 	const int64_t machine = rig.machine_of(id);
-	TEST_EXPECT(hosted::transition_machine(*rig.pool.acquire(), machine, FleetMachineState::Ready,
+	TEST_EXPECT(hosted::transition_machine(rig.db, machine, FleetMachineState::Ready,
 			FleetMachineState::Draining, "drained by an admin"));
 	rig.silence(machine);
 	rig.step();
@@ -223,8 +223,8 @@ int test_idle_scale_in() {
 	rig.advance(rig.config.idle_ms);
 	rig.step();
 	TEST_EXPECT(rig.machine(machine)->state == FleetMachineState::Ready); // it holds a server
-	TEST_EXPECT(hosted::request_stop(*rig.pool.acquire(), id, "stopped by its owner"));
-	hostdb::remove_host_by_rid(*rig.pool.acquire(), 3301);
+	TEST_EXPECT(hosted::request_stop(rig.db, id, "stopped by its owner"));
+	hostdb::remove_host_by_rid(rig.db, 3301);
 	rig.step();
 	rig.step();
 	TEST_EXPECT(rig.state(id) == State::Stopped);
@@ -250,7 +250,7 @@ int test_drain_one_at_a_time() {
 	TEST_EXPECT(!rig.to_running(a, 3401).empty() && !rig.to_running(b, 3402).empty());
 	const int64_t old_machine = rig.machine_of(a);
 	TEST_EXPECT(rig.machine_of(b) == old_machine);
-	auto db = rig.pool.acquire();
+	Database *db = &rig.db;
 	TEST_EXPECT(hosted::transition_machine(*db, old_machine, FleetMachineState::Ready, FleetMachineState::Draining,
 			"drained by an admin"));
 	rig.step();
@@ -287,7 +287,7 @@ int test_drain_while_booting() {
 	const int64_t machine = rig.machine_of(id);
 	TEST_EXPECT(machine > 0 && rig.machine(machine)->state == FleetMachineState::Booting);
 	rig.muted.insert(machine);
-	auto db = rig.pool.acquire();
+	Database *db = &rig.db;
 	TEST_EXPECT(hosted::transition_machine(
 			*db, machine, FleetMachineState::Booting, FleetMachineState::Draining, "drained by an admin"));
 	for (int i = 0; i < 6; ++i) {
@@ -315,7 +315,7 @@ int test_roll() {
 	const int64_t old_a = rig.machine_of(a);
 	const int64_t old_b = rig.machine_of(b);
 	TEST_EXPECT(old_a != old_b && rig.fake.launches == 2);
-	auto db = rig.pool.acquire();
+	Database *db = &rig.db;
 	TEST_EXPECT(hosted::drain_machines(*db, "rolled by an admin") == (std::vector<int64_t>{ old_a, old_b }));
 	TEST_EXPECT(hosted::drain_machines(*db, "rolled by an admin").empty());
 	rig.step();
@@ -342,14 +342,14 @@ int test_admin_end() {
 	TEST_EXPECT(!rig.to_running(id, 3501).empty());
 	const int64_t machine = rig.machine_of(id);
 	const std::string cloud = rig.machine(machine)->cloud_id;
-	TEST_EXPECT(hosted::transition_machine(*rig.pool.acquire(), machine,
+	TEST_EXPECT(hosted::transition_machine(rig.db, machine,
 			{ FleetMachineState::Ready, FleetMachineState::Draining }, FleetMachineState::Ending, "ended by an admin"));
 	rig.step();
 	const auto ended = rig.machine(machine);
 	TEST_EXPECT(ended->state == FleetMachineState::Ended && ended->end_reason == "ended by an admin");
 	TEST_EXPECT(rig.fake.was_terminated(cloud));
 	TEST_EXPECT(rig.server(id)->restarts == 0 && rig.machine_of(id) != machine);
-	TEST_EXPECT(has_event(*rig.pool.acquire(), id, "ended by an admin; placed again (no restart counted)"));
+	TEST_EXPECT(has_event(rig.db, id, "ended by an admin; placed again (no restart counted)"));
 	return 0;
 }
 
@@ -372,7 +372,7 @@ int test_reconcile_machines() {
 	rig.step(); // placed; its machine's agent then muted before it took the files
 	const int64_t cut_machine = rig.machine_of(cut);
 	TEST_EXPECT(cut_machine > 0 && rig.state(cut) == State::Booting);
-	auto db = rig.pool.acquire();
+	Database *db = &rig.db;
 	// Its agent never took the files: undo what its sync did.
 	rig.agents.at(cut_machine).containers.clear();
 	db->exec("DELETE FROM fleet_slot_reports WHERE machine_id = $1;", { BindValue(cut_machine) });

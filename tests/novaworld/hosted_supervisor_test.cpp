@@ -450,8 +450,7 @@ int test_service_accounts() {
 
 int test_requests() {
 	Rig rig("hosted_requests");
-	auto lease = rig.pool.acquire();
-	Database &db = *lease;
+	Database &db = rig.db;
 	const auto settings = valid_settings();
 	const std::vector<hosted::DataSet> &offered = hosted::known_data_sets();
 	const auto request = [&](int64_t user, const hosted::HostedSettings &with,
@@ -573,7 +572,7 @@ int test_fleet_room() {
 	rig.config.placement.max_shared = 1;
 	rig.config.placement.max_own = 1;
 	rig.make_supervisor();
-	auto db = rig.pool.acquire();
+	Database *db = &rig.db;
 	const hosted::PlacementPolicy &fleet = rig.config.placement;
 	TEST_EXPECT(hosted::fleet_has_room(*db, fleet, false) && hosted::fleet_has_room(*db, fleet, true));
 	// A comp grant of ten servers (the fleet, not the entitlement, is the limit
@@ -624,7 +623,7 @@ int test_lifecycle_and_stop() {
 	// at once (it waits for the machine's boot in booting).
 	rig.tick();
 	TEST_EXPECT(rig.fake.launches == 1);
-	auto machines = hosted::list_live_machines(*rig.pool.acquire());
+	auto machines = hosted::list_live_machines(rig.db);
 	TEST_EXPECT(machines.size() == 1);
 	const hosted::FleetMachineRow launched = machines.front();
 	TEST_EXPECT(launched.kind == hosted::MachineKind::Shared && launched.slots == 4 &&
@@ -637,7 +636,7 @@ int test_lifecycle_and_stop() {
 	TEST_EXPECT(row->game_port == 32768 && row->generation == 1 && row->serve_image == kServeImage);
 	TEST_EXPECT(row->provider == "fake" && row->container == "srv-" + std::to_string(id) + "-g1");
 	TEST_EXPECT(row->machine_address == "10.0.1.1");
-	const auto login = hosted::admin_login_of(*rig.pool.acquire(), id);
+	const auto login = hosted::admin_login_of(rig.db, id);
 	TEST_EXPECT(login && login->user == "svc" && login->port == 32800 && row->admin_port == login->port);
 	TEST_EXPECT(login->password.size() == hosted::kAdminPasswordChars);
 	TEST_EXPECT(row->service_user_id.has_value());
@@ -656,7 +655,7 @@ int test_lifecycle_and_stop() {
 		"--master-host", "203.0.113.5", "--master-gate-port", "7597", "/game", "jo", "/exp", "jox01" };
 	TEST_EXPECT(c->desired.args == args);
 	{
-		auto db = rig.pool.acquire();
+		Database *db = &rig.db;
 		const auto account = nws::get_user_by_id(*db, service);
 		TEST_EXPECT(account && account->kind == "service" && account->username == "srv-" + std::to_string(id));
 		// The credentials the container got log the account in.
@@ -682,24 +681,24 @@ int test_lifecycle_and_stop() {
 	TEST_EXPECT(rig.state(id) == State::Listing);
 	rig.step(); // no listing yet
 	TEST_EXPECT(rig.state(id) == State::Listing);
-	TEST_EXPECT(list_as(*rig.pool.acquire(), service, 5001));
+	TEST_EXPECT(list_as(rig.db, service, 5001));
 	rig.step();
 	row = rig.server(id);
 	TEST_EXPECT(row->state == State::Running && !row->running_at.empty());
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), id), "RID 5001"));
+	TEST_EXPECT(contains(last_detail(rig.db, id), "RID 5001"));
 	rig.advance(rig.config.health_interval_ms);
 	rig.step(); // a health check that finds the listing
 	TEST_EXPECT(rig.state(id) == State::Running);
 
 	// The owner's stop: the push to the listing, then the end once it has left.
-	TEST_EXPECT(hosted::request_stop(*rig.pool.acquire(), id, "stopped by its owner"));
+	TEST_EXPECT(hosted::request_stop(rig.db, id, "stopped by its owner"));
 	rig.step();
 	TEST_EXPECT(rig.state(id) == State::Stopping);
 	TEST_EXPECT(rig.pushes.size() == 1 && rig.pushes[0].first == 5001 && rig.pushes[0].second == service);
 	rig.step();
 	TEST_EXPECT(rig.state(id) == State::Stopping && rig.pushes.size() == 1);
 	TEST_EXPECT(rig.running_container(id) != nullptr); // still wanted while it deregisters
-	hostdb::remove_host_by_rid(*rig.pool.acquire(), 5001);
+	hostdb::remove_host_by_rid(rig.db, 5001);
 	rig.step();
 	row = rig.server(id);
 	TEST_EXPECT(row->state == State::Stopped && !row->ended_at.empty());
@@ -707,8 +706,8 @@ int test_lifecycle_and_stop() {
 	// The row keeps where it last ran; its container is no longer wanted.
 	TEST_EXPECT(row->machine_ref == launched.id && row->slot == 0);
 	TEST_EXPECT(agent->containers.empty() && agent->last.desired.empty());
-	TEST_EXPECT(!nws::get_user_by_id(*rig.pool.acquire(), service));
-	TEST_EXPECT(transitions(*rig.pool.acquire(), id) ==
+	TEST_EXPECT(!nws::get_user_by_id(rig.db, service));
+	TEST_EXPECT(transitions(rig.db, id) ==
 			(std::vector<std::string>{ ">requested", "requested>provisioning", "provisioning>booting",
 					"booting>listing", "listing>running", "running>stopping", "stopping>stopped" }));
 	rig.step(); // nothing live: nothing happens, and the machine stays (idle) for now
@@ -732,13 +731,13 @@ int test_two_servers_one_machine() {
 	TEST_EXPECT(ra->machine_ref == rb->machine_ref && ra->slot == 0 && rb->slot == 1);
 	TEST_EXPECT(ra->game_port == 32768 && rb->game_port == 32769);
 	TEST_EXPECT(ra->machine_address == rb->machine_address);
-	TEST_EXPECT(hosted::admin_login_of(*rig.pool.acquire(), a)->port == 32800 &&
-			hosted::admin_login_of(*rig.pool.acquire(), b)->port == 32801);
+	TEST_EXPECT(hosted::admin_login_of(rig.db, a)->port == 32800 &&
+			hosted::admin_login_of(rig.db, b)->port == 32801);
 	FakeAgent *agent = rig.agent_of(a);
 	TEST_EXPECT(agent && agent->containers.size() == 2);
 	const auto *cb = rig.running_container(b);
 	TEST_EXPECT(cb && cb->desired.uid == 10002 && cb->desired.slot == 1);
-	const auto holders = hosted::slot_holders(*rig.pool.acquire(), *ra->machine_ref);
+	const auto holders = hosted::slot_holders(rig.db, *ra->machine_ref);
 	TEST_EXPECT(holders.size() == 2 && holders[0].server_id == a && holders[1].server_id == b);
 	return 0;
 }
@@ -749,7 +748,7 @@ int test_two_servers_one_machine() {
 // ends when its server stops.
 int test_own_machine() {
 	Rig rig("hosted_own");
-	auto db = rig.pool.acquire();
+	Database *db = &rig.db;
 	const int64_t owner = make_player(*db, "own_owner", 0);
 	subscribe(*db, owner, 2, "active", "sub_own");
 	subscribe_machines(*db, owner, 1, "sub_own_machine");
@@ -783,17 +782,17 @@ int test_stop_paths() {
 	Rig rig("hosted_stops");
 	// A stop before any slot: stopped with no launch.
 	const int64_t early = rig.request("stop_early");
-	TEST_EXPECT(hosted::request_stop(*rig.pool.acquire(), early, "stopped by its owner"));
+	TEST_EXPECT(hosted::request_stop(rig.db, early, "stopped by its owner"));
 	rig.tick();
 	TEST_EXPECT(rig.state(early) == State::Stopped && rig.fake.launches == 0);
-	TEST_EXPECT(transitions(*rig.pool.acquire(), early) ==
+	TEST_EXPECT(transitions(rig.db, early) ==
 			(std::vector<std::string>{ ">requested", "requested>stopping", "stopping>stopped" }));
 
 	// Still listed 60 s after the push: its container is let go anyway.
 	const int64_t stuck = rig.request("stop_stuck");
 	const std::string container = rig.to_running(stuck, 6001);
 	TEST_EXPECT(!container.empty());
-	TEST_EXPECT(hosted::request_stop(*rig.pool.acquire(), stuck, "stopped by an admin"));
+	TEST_EXPECT(hosted::request_stop(rig.db, stuck, "stopped by an admin"));
 	rig.step();
 	TEST_EXPECT(rig.pushes.size() == 1);
 	rig.advance(rig.config.stop_timeout_ms - 1);
@@ -802,16 +801,16 @@ int test_stop_paths() {
 	rig.advance(1);
 	rig.step();
 	TEST_EXPECT(rig.state(stuck) == State::Stopped);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), stuck), "after the stop"));
+	TEST_EXPECT(contains(last_detail(rig.db, stuck), "after the stop"));
 	TEST_EXPECT(rig.agents.begin()->second.find(container) == nullptr);
-	hostdb::remove_host_by_rid(*rig.pool.acquire(), 6001);
+	hostdb::remove_host_by_rid(rig.db, 6001);
 
 	// The process exits on its own during the stop, with the code a
 	// ServerStopHosting push ends opennova-serve with (3): the stop's end, never a
 	// restart.
 	const int64_t quick = rig.request("stop_quick");
 	const std::string c2 = rig.to_running(quick, 6002);
-	TEST_EXPECT(hosted::request_stop(*rig.pool.acquire(), quick, "stopped by its owner"));
+	TEST_EXPECT(hosted::request_stop(rig.db, quick, "stopped by its owner"));
 	rig.step();
 	const int launches_before = rig.fake.launches;
 	rig.agent_of(quick)->exit_with(c2, 3);
@@ -819,18 +818,18 @@ int test_stop_paths() {
 	rig.tick();
 	TEST_EXPECT(rig.state(quick) == State::Stopped);
 	TEST_EXPECT(rig.server(quick)->restarts == 0);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), quick), "code 3"));
+	TEST_EXPECT(contains(last_detail(rig.db, quick), "code 3"));
 	rig.advance(rig.config.restart_backoff_ms);
 	rig.step();
 	TEST_EXPECT(rig.state(quick) == State::Stopped && rig.fake.launches == launches_before);
-	hostdb::remove_host_by_rid(*rig.pool.acquire(), 6002);
+	hostdb::remove_host_by_rid(rig.db, 6002);
 
 	// A stop that lands while a pass places the server: it lets the slot go, its
 	// container never starts, and the stop ends with nothing to stop.
 	const int64_t racing = rig.request("stop_racing");
 	rig.tick(); // -> provisioning
 	rig.fake.on_slot_plan = [&rig, racing] {
-		hosted::request_stop(*rig.pool.acquire(), racing, "stopped mid-placement");
+		hosted::request_stop(rig.db, racing, "stopped mid-placement");
 	};
 	rig.tick(); // the placement loses to the stop
 	rig.fake.on_slot_plan = nullptr;
@@ -840,7 +839,7 @@ int test_stop_paths() {
 	for (const auto &entry : rig.agents) TEST_EXPECT(entry.second.last.desired.empty());
 	rig.tick();
 	TEST_EXPECT(rig.state(racing) == State::Stopped);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), racing), "stopped before it ran"));
+	TEST_EXPECT(contains(last_detail(rig.db, racing), "stopped before it ran"));
 	return 0;
 }
 
@@ -857,9 +856,9 @@ int test_exits_and_crash_restarts() {
 	rig.tick();
 	auto zero_row = rig.server(zero);
 	TEST_EXPECT(zero_row->state == State::Provisioning && zero_row->restarts == 1 && !zero_row->machine_ref);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), zero), "exited with code 0; restart 1 of 2"));
-	hostdb::remove_host_by_rid(*rig.pool.acquire(), 7001);
-	TEST_EXPECT(hosted::request_stop(*rig.pool.acquire(), zero, "stopped by its owner"));
+	TEST_EXPECT(contains(last_detail(rig.db, zero), "exited with code 0; restart 1 of 2"));
+	hostdb::remove_host_by_rid(rig.db, 7001);
+	TEST_EXPECT(hosted::request_stop(rig.db, zero, "stopped by its owner"));
 	rig.tick(); // no container to stop
 	TEST_EXPECT(rig.state(zero) == State::Stopped);
 
@@ -870,7 +869,7 @@ int test_exits_and_crash_restarts() {
 	TEST_EXPECT(!c1.empty());
 	const int64_t service = *rig.server(id)->service_user_id;
 	const std::string first_password = credential(file_of(rig, id, "credentials.txt"), "NOVAWORLD_PASS");
-	const std::string first_admin = hosted::admin_login_of(*rig.pool.acquire(), id)->password;
+	const std::string first_admin = hosted::admin_login_of(rig.db, id)->password;
 	const int64_t machine = rig.machine_of(id);
 	rig.agent_of(id)->exit_with(c1, 3);
 	rig.sync_all();
@@ -878,8 +877,8 @@ int test_exits_and_crash_restarts() {
 	auto row = rig.server(id);
 	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 1 && row->container.empty() &&
 			!row->machine_ref);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), id), "exited with code 3; restart 1 of 2"));
-	hostdb::remove_host_by_rid(*rig.pool.acquire(), 7002); // its NWU session timed out
+	TEST_EXPECT(contains(last_detail(rig.db, id), "exited with code 3; restart 1 of 2"));
+	hostdb::remove_host_by_rid(rig.db, 7002); // its NWU session timed out
 	rig.step(); // the backoff holds the placement; the exited container is let go
 	TEST_EXPECT(rig.state(id) == State::Provisioning && rig.agents.at(machine).containers.empty());
 	rig.advance(rig.config.restart_backoff_ms);
@@ -891,9 +890,9 @@ int test_exits_and_crash_restarts() {
 	TEST_EXPECT(rig.fake.launches == 1); // the same machine, no new one
 	const std::string second_password = credential(file_of(rig, id, "credentials.txt"), "NOVAWORLD_PASS");
 	TEST_EXPECT(!second_password.empty() && second_password != first_password);
-	TEST_EXPECT(hosted::admin_login_of(*rig.pool.acquire(), id)->password != first_admin);
+	TEST_EXPECT(hosted::admin_login_of(rig.db, id)->password != first_admin);
 	{
-		auto db = rig.pool.acquire();
+		Database *db = &rig.db;
 		const std::string name = "srv-" + std::to_string(id);
 		TEST_EXPECT(!nws::authenticate_user(*db, name, first_password));
 		TEST_EXPECT(nws::authenticate_user(*db, name, second_password));
@@ -905,7 +904,7 @@ int test_exits_and_crash_restarts() {
 	rig.tick();
 	row = rig.server(id);
 	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 2);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), id), "ran out of memory; restart 2 of 2"));
+	TEST_EXPECT(contains(last_detail(rig.db, id), "ran out of memory; restart 2 of 2"));
 	// A start that fails (docker's 125): the limit is used up, it fails.
 	rig.advance(rig.config.restart_backoff_ms);
 	rig.step(); // placed, booting, its container started
@@ -918,7 +917,7 @@ int test_exits_and_crash_restarts() {
 	TEST_EXPECT(row->state == State::Failed && row->restarts == 2);
 	TEST_EXPECT(contains(row->failure_reason, "its container did not start") &&
 			contains(row->failure_reason, "no restart left"));
-	TEST_EXPECT(!row->service_user_id && !nws::get_user_by_id(*rig.pool.acquire(), service));
+	TEST_EXPECT(!row->service_user_id && !nws::get_user_by_id(rig.db, service));
 	rig.sync_all();
 	TEST_EXPECT(rig.agents.at(machine).containers.empty());
 	return 0;
@@ -939,11 +938,11 @@ int test_launch_failure() {
 	auto row = rig.server(id);
 	TEST_EXPECT(rig.fake.launches == 1);
 	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 0 && !row->machine_ref);
-	const std::string detail = last_detail(*rig.pool.acquire(), id);
+	const std::string detail = last_detail(rig.db, id);
 	TEST_EXPECT(contains(detail, "the launch of its machine failed; it waits for the next (no restart counted)") &&
 			!contains(detail, "fake"));
 	TEST_EXPECT(rig.sup->launch_failures() == 1);
-	const auto machines = hosted::list_machines(*rig.pool.acquire(), 10);
+	const auto machines = hosted::list_machines(rig.db, 10);
 	TEST_EXPECT(machines.size() == 1 && machines[0].state == hosted::FleetMachineState::Failed &&
 			machines[0].end_reason == "the launch failed");
 	// Within the launch backoff (5 s) nothing launches.
@@ -959,7 +958,7 @@ int test_launch_failure() {
 	row = rig.server(id);
 	TEST_EXPECT(rig.fake.launches == 4 && rig.sup->launch_failures() == 4);
 	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 0);
-	TEST_EXPECT(transitions(*rig.pool.acquire(), id) ==
+	TEST_EXPECT(transitions(rig.db, id) ==
 			(std::vector<std::string>{ ">requested", "requested>provisioning", "provisioning>provisioning" }));
 	rig.advance(rig.config.launch_backoff_ms);
 	rig.tick();
@@ -998,7 +997,7 @@ int test_restart_window() {
 	crash(container);
 	auto row = rig.server(id);
 	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 1);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), id), "restart 1 of 2"));
+	TEST_EXPECT(contains(last_detail(rig.db, id), "restart 1 of 2"));
 	// Within the window the limit holds.
 	container = rig.back_to_running(id, 7110);
 	TEST_EXPECT(!container.empty());
@@ -1028,8 +1027,8 @@ int test_timeouts_and_health() {
 	rig.advance(1);
 	rig.step();
 	TEST_EXPECT(rig.state(slow) == State::Provisioning);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), slow), "its container did not start in 10 s"));
-	TEST_EXPECT(hosted::request_stop(*rig.pool.acquire(), slow, "done"));
+	TEST_EXPECT(contains(last_detail(rig.db, slow), "its container did not start in 10 s"));
+	TEST_EXPECT(hosted::request_stop(rig.db, slow, "done"));
 	rig.step();
 	rig.start_running = true;
 	for (auto &entry : rig.agents) entry.second.start_running = true;
@@ -1040,8 +1039,8 @@ int test_timeouts_and_health() {
 	rig.advance(rig.config.listing_timeout_ms);
 	rig.step();
 	TEST_EXPECT(rig.state(quiet) == State::Provisioning);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), quiet), "no listing in 20 s"));
-	TEST_EXPECT(hosted::request_stop(*rig.pool.acquire(), quiet, "done"));
+	TEST_EXPECT(contains(last_detail(rig.db, quiet), "no listing in 20 s"));
+	TEST_EXPECT(hosted::request_stop(rig.db, quiet, "done"));
 	rig.step();
 
 	// Listed, then gone from the browser: three missed checks in a row fail it,
@@ -1049,7 +1048,7 @@ int test_timeouts_and_health() {
 	const int64_t id = rig.request("health_lost");
 	const std::string container = rig.to_running(id, 8001);
 	TEST_EXPECT(!container.empty());
-	hostdb::remove_host_by_rid(*rig.pool.acquire(), 8001);
+	hostdb::remove_host_by_rid(rig.db, 8001);
 	rig.step(); // before the interval: no check
 	for (int miss = 1; miss <= 2; ++miss) {
 		rig.advance(rig.config.health_interval_ms);
@@ -1058,7 +1057,7 @@ int test_timeouts_and_health() {
 	}
 	// Back in the browser (its key still claimed for the RID): the count starts over.
 	{
-		auto db = rig.pool.acquire();
+		Database *db = &rig.db;
 		hostdb::HostRow row;
 		row.rid = 8001;
 		row.gsid = "GSID-8001";
@@ -1071,7 +1070,7 @@ int test_timeouts_and_health() {
 	}
 	rig.advance(rig.config.health_interval_ms);
 	rig.step();
-	hostdb::remove_host_by_rid(*rig.pool.acquire(), 8001);
+	hostdb::remove_host_by_rid(rig.db, 8001);
 	for (int miss = 1; miss <= 2; ++miss) {
 		rig.advance(rig.config.health_interval_ms);
 		rig.step();
@@ -1100,7 +1099,7 @@ int test_machine_lost_replaces() {
 	rig.step();
 	TEST_EXPECT(rig.machine(machine)->state == hosted::FleetMachineState::Lost);
 	// While lost, the health checks wait (its listing gone too).
-	hostdb::remove_host_by_rid(*rig.pool.acquire(), 8101);
+	hostdb::remove_host_by_rid(rig.db, 8101);
 	for (int i = 0; i < 4; ++i) {
 		rig.advance(rig.config.health_interval_ms);
 		rig.step();
@@ -1112,7 +1111,7 @@ int test_machine_lost_replaces() {
 	TEST_EXPECT(rig.machine(machine)->state == hosted::FleetMachineState::Ended);
 	auto row = rig.server(id);
 	TEST_EXPECT(row->restarts == 0 && row->machine_ref != machine);
-	TEST_EXPECT(has_event(*rig.pool.acquire(), id, "its machine is gone; placed again (no restart counted)"));
+	TEST_EXPECT(has_event(rig.db, id, "its machine is gone; placed again (no restart counted)"));
 	TEST_EXPECT(!rig.to_running(id, 8102).empty());
 	row = rig.server(id);
 	TEST_EXPECT(row->restarts == 0 && row->machine_ref != machine && rig.fake.launches == 2);
@@ -1144,7 +1143,7 @@ int test_listing_waits_while_lost() {
 	rig.advance(1000);
 	rig.step();
 	TEST_EXPECT(rig.state(id) == State::Provisioning && rig.server(id)->restarts == 1);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), id), "no listing in 20 s"));
+	TEST_EXPECT(contains(last_detail(rig.db, id), "no listing in 20 s"));
 	return 0;
 }
 
@@ -1155,53 +1154,53 @@ int test_owner_changes() {
 	const std::string c1 = rig.to_running(banned, 9001);
 	TEST_EXPECT(!c1.empty());
 	{
-		auto db = rig.pool.acquire();
+		Database *db = &rig.db;
 		nws::UpdateUserParams ban;
 		ban.account_status = "banned";
 		TEST_EXPECT(nws::update_user(*db, *rig.server(banned)->owner_user_id, ban).ok);
 	}
 	rig.step();
 	TEST_EXPECT(rig.state(banned) == State::Stopping);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), banned), "owner's account is banned"));
+	TEST_EXPECT(contains(last_detail(rig.db, banned), "owner's account is banned"));
 
 	// A deleted owner's server is stopped (the row keeps no owner).
 	const int64_t deleted = rig.request("owner_deleted");
 	const std::string c2 = rig.to_running(deleted, 9002);
 	TEST_EXPECT(!c2.empty());
 	const int64_t owner = *rig.server(deleted)->owner_user_id;
-	TEST_EXPECT(nws::delete_user(*rig.pool.acquire(), owner).ok);
+	TEST_EXPECT(nws::delete_user(rig.db, owner).ok);
 	TEST_EXPECT(!rig.server(deleted)->owner_user_id);
 	rig.step();
 	TEST_EXPECT(rig.state(deleted) == State::Stopping);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), deleted), "owner's account was deleted"));
+	TEST_EXPECT(contains(last_detail(rig.db, deleted), "owner's account was deleted"));
 
 	// The hosting entitlement is the brake: the comp grant withdrawn (0), the
 	// server stops, as for a ban. Before the pickup nothing is placed.
 	const int64_t withdrawn = rig.request("owner_withdrawn");
-	TEST_EXPECT(nws::set_comp_servers(*rig.pool.acquire(), *rig.server(withdrawn)->owner_user_id, 0).ok);
+	TEST_EXPECT(nws::set_comp_servers(rig.db, *rig.server(withdrawn)->owner_user_id, 0).ok);
 	rig.step();
-	TEST_EXPECT(stopped_with(*rig.pool.acquire(), withdrawn, "hosting entitlement allows 0 hosted servers"));
+	TEST_EXPECT(stopped_with(rig.db, withdrawn, "hosting entitlement allows 0 hosted servers"));
 	rig.step();
 	TEST_EXPECT(rig.state(withdrawn) == State::Stopped && !rig.server(withdrawn)->machine_ref);
 
 	// While it runs, on a support tier Stripe cancels; past due, before that, it
 	// keeps running.
-	const int64_t subscriber = make_player(*rig.pool.acquire(), "owner_subscriber", 0);
-	subscribe(*rig.pool.acquire(), subscriber, 1, "active", "sub_owner");
-	for (const uint32_t rid : { 9001u, 9002u }) hostdb::remove_host_by_rid(*rig.pool.acquire(), rid);
+	const int64_t subscriber = make_player(rig.db, "owner_subscriber", 0);
+	subscribe(rig.db, subscriber, 1, "active", "sub_owner");
+	for (const uint32_t rid : { 9001u, 9002u }) hostdb::remove_host_by_rid(rig.db, rid);
 	rig.step(); // the banned and deleted owners' stops end (their listings gone)
 	TEST_EXPECT(rig.state(banned) == State::Stopped && rig.state(deleted) == State::Stopped);
 	const int64_t revoked = rig.request_as(subscriber);
 	const std::string c3 = rig.to_running(revoked, 9003);
 	TEST_EXPECT(!c3.empty());
-	subscribe(*rig.pool.acquire(), subscriber, 1, "past_due", "sub_owner");
+	subscribe(rig.db, subscriber, 1, "past_due", "sub_owner");
 	rig.step();
 	TEST_EXPECT(rig.state(revoked) == State::Running);
-	subscribe(*rig.pool.acquire(), subscriber, 1, "canceled", "sub_owner");
+	subscribe(rig.db, subscriber, 1, "canceled", "sub_owner");
 	rig.step();
 	TEST_EXPECT(rig.state(revoked) == State::Stopping);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), revoked), "hosting entitlement allows 0 hosted servers"));
-	hostdb::remove_host_by_rid(*rig.pool.acquire(), 9003);
+	TEST_EXPECT(contains(last_detail(rig.db, revoked), "hosting entitlement allows 0 hosted servers"));
+	hostdb::remove_host_by_rid(rig.db, 9003);
 	rig.step(); // the push (nothing is listed)
 	rig.step(); // no listing left: the stop finishes
 	TEST_EXPECT(rig.state(revoked) == State::Stopped);
@@ -1215,14 +1214,14 @@ int test_owner_changes() {
 	rig.tick();
 	TEST_EXPECT(rig.state(crashed) == State::Provisioning);
 	const int64_t service = *rig.server(crashed)->service_user_id;
-	const int64_t generation = nws::get_user_by_id(*rig.pool.acquire(), service)->credentials_gen;
-	TEST_EXPECT(nws::set_comp_servers(*rig.pool.acquire(), *rig.server(crashed)->owner_user_id, 0).ok);
+	const int64_t generation = nws::get_user_by_id(rig.db, service)->credentials_gen;
+	TEST_EXPECT(nws::set_comp_servers(rig.db, *rig.server(crashed)->owner_user_id, 0).ok);
 	rig.advance(rig.config.restart_backoff_ms);
 	rig.step();
-	TEST_EXPECT(stopped_with(*rig.pool.acquire(), crashed, "hosting entitlement allows 0 hosted servers") &&
+	TEST_EXPECT(stopped_with(rig.db, crashed, "hosting entitlement allows 0 hosted servers") &&
 			!rig.server(crashed)->machine_ref);
 	// No new credentials: the account is untouched, or gone with the stop's end.
-	const auto account = nws::get_user_by_id(*rig.pool.acquire(), service);
+	const auto account = nws::get_user_by_id(rig.db, service);
 	TEST_EXPECT(!account || account->credentials_gen == generation);
 	rig.step();
 	TEST_EXPECT(rig.state(crashed) == State::Stopped);
@@ -1235,16 +1234,16 @@ int test_owner_changes() {
 // grant in id order) stops before any slot.
 int test_limit_at_provisioning() {
 	Rig rig("hosted_limit_provisioning");
-	const int64_t owner = make_player(*rig.pool.acquire(), "limit_owner", 2);
+	const int64_t owner = make_player(rig.db, "limit_owner", 2);
 	TEST_EXPECT(owner > 0);
 	const int64_t older = rig.request_as(owner);
 	const int64_t newer = rig.request_as(owner);
 	TEST_EXPECT(older > 0 && newer > older);
 	rig.tick(); // both -> provisioning
 	TEST_EXPECT(rig.state(older) == State::Provisioning && rig.state(newer) == State::Provisioning);
-	TEST_EXPECT(nws::set_comp_servers(*rig.pool.acquire(), owner, 1).ok);
+	TEST_EXPECT(nws::set_comp_servers(rig.db, owner, 1).ok);
 	rig.tick();
-	TEST_EXPECT(stopped_with(*rig.pool.acquire(), newer, "hosting entitlement allows 1 hosted server"));
+	TEST_EXPECT(stopped_with(rig.db, newer, "hosting entitlement allows 1 hosted server"));
 	TEST_EXPECT(rig.fake.launches == 1); // the older one's machine
 	TEST_EXPECT(rig.walk(older, State::Listing));
 	TEST_EXPECT(rig.state(newer) == State::Stopped && !rig.server(newer)->machine_ref);
@@ -1260,7 +1259,7 @@ int test_owner_limits() {
 	Rig rig("hosted_limits");
 	rig.config.cap = 20;
 	rig.make_supervisor();
-	auto db = rig.pool.acquire();
+	Database *db = &rig.db;
 	// Tier 3: three servers.
 	const int64_t ana = make_player(*db, "lim_ana", 0);
 	subscribe(*db, ana, 3, "active", "sub_lim_ana");
@@ -1331,7 +1330,7 @@ int test_mass_stop_hold() {
 	Rig rig("hosted_hold");
 	hosted::LimitsHold hold;
 	rig.sup->set_limits_hold(&hold);
-	auto db = rig.pool.acquire();
+	Database *db = &rig.db;
 	const int64_t a = rig.request("hold_a");
 	const int64_t b = rig.request("hold_b");
 	const int64_t c = rig.request("hold_c");
@@ -1459,12 +1458,12 @@ int test_reconciliation() {
 	TEST_EXPECT(!rig.to_running(lost, 9102).empty());
 	const int64_t stopping = rig.request("rec_stopping");
 	TEST_EXPECT(!rig.to_running(stopping, 9103).empty());
-	TEST_EXPECT(hosted::request_stop(*rig.pool.acquire(), stopping, "stopped by its owner"));
+	TEST_EXPECT(hosted::request_stop(rig.db, stopping, "stopped by its owner"));
 	const std::string kept_container = rig.container(kept);
 	const int64_t kept_machine = rig.machine_of(kept);
 	// The service goes down: its previous run's listings are gone (main()
 	// clears active_hosts at boot), two machines vanished.
-	for (const uint32_t rid : { 9101u, 9102u, 9103u }) hostdb::remove_host_by_rid(*rig.pool.acquire(), rid);
+	for (const uint32_t rid : { 9101u, 9102u, 9103u }) hostdb::remove_host_by_rid(rig.db, rid);
 	rig.fake.vanish(rig.machine(rig.machine_of(lost))->cloud_id);
 	rig.fake.vanish(rig.machine(rig.machine_of(stopping))->cloud_id);
 	rig.make_supervisor();
@@ -1474,7 +1473,7 @@ int test_reconciliation() {
 	TEST_EXPECT(rig.state(kept) == State::Running && rig.machine_of(kept) == kept_machine);
 	auto row = rig.server(lost);
 	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 0 && row->container.empty() && !row->machine_ref);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), lost), "its machine is gone; placed again (no restart counted)"));
+	TEST_EXPECT(contains(last_detail(rig.db, lost), "its machine is gone; placed again (no restart counted)"));
 	TEST_EXPECT(rig.state(stopping) == State::Stopped);
 	// The resumed server's container is answered for without files.
 	rig.sync_all();
@@ -1486,7 +1485,7 @@ int test_reconciliation() {
 	rig.step();
 	TEST_EXPECT(rig.fake.launches == 4);
 	TEST_EXPECT(rig.walk(lost, State::Booting));
-	TEST_EXPECT(hosted::request_stop(*rig.pool.acquire(), lost, "done"));
+	TEST_EXPECT(hosted::request_stop(rig.db, lost, "done"));
 
 	// The resumed server's checks wait out its grace, unlisted and uncounted,
 	// and its listing comes back within it.
@@ -1495,7 +1494,7 @@ int test_reconciliation() {
 		rig.step();
 	}
 	TEST_EXPECT(rig.state(kept) == State::Running);
-	TEST_EXPECT(list_as(*rig.pool.acquire(), *rig.server(kept)->service_user_id, 9104));
+	TEST_EXPECT(list_as(rig.db, *rig.server(kept)->service_user_id, 9104));
 	rig.advance(rig.config.listing_timeout_ms);
 	rig.step();
 	TEST_EXPECT(rig.state(kept) == State::Running);
@@ -1518,7 +1517,7 @@ int test_console_ring() {
 		l.at = "2026-10-12 10:00:00";
 		return l;
 	};
-	auto db = rig.pool.acquire();
+	Database *db = &rig.db;
 	hosted::append_console(*db, b, { line("b0") }, 5);
 	for (int i = 0; i < 4; ++i) hosted::append_console(*db, a, { line("a" + std::to_string(i)) }, 5);
 	hosted::append_console(*db, a, { line("a4"), line("a5"), line("a6") }, 5);
@@ -1564,11 +1563,11 @@ int test_admin_links_follow_running() {
 	TEST_EXPECT(id != 0);
 	TEST_EXPECT(rig.walk(id, State::Listing));
 	TEST_EXPECT(links.find(id) == nullptr);
-	TEST_EXPECT(list_as(*rig.pool.acquire(), *rig.server(id)->service_user_id, 9201));
+	TEST_EXPECT(list_as(rig.db, *rig.server(id)->service_user_id, 9201));
 	rig.step(); // -> running
 	TEST_EXPECT(rig.state(id) == State::Running);
 	const auto link = links.find(id);
-	const auto login = hosted::admin_login_of(*rig.pool.acquire(), id);
+	const auto login = hosted::admin_login_of(rig.db, id);
 	TEST_EXPECT(link != nullptr && login.has_value());
 	if (link && login) {
 		TEST_EXPECT(link->target().host == "10.0.1.1");
@@ -1589,7 +1588,7 @@ int test_admin_links_follow_running() {
 	if (relinked && link) TEST_EXPECT(relinked->target().password != link->target().password);
 
 	// The stop: no link from stopping on.
-	TEST_EXPECT(hosted::request_stop(*rig.pool.acquire(), id, "stopped by its owner"));
+	TEST_EXPECT(hosted::request_stop(rig.db, id, "stopped by its owner"));
 	rig.step();
 	TEST_EXPECT(rig.state(id) == State::Stopping && links.find(id) == nullptr);
 
