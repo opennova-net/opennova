@@ -109,6 +109,8 @@ add_executable(hosted_supervisor_test
     novaworld/hosted_supervisor_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/auth.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/web_session.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/billing_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/entitlement.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/admin_link.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/data_sets.cpp
@@ -140,6 +142,8 @@ set_tests_properties(hosted_supervisor PROPERTIES TIMEOUT 300)
 # its restart.
 add_executable(hosted_admin_link_test
     novaworld/hosted_admin_link_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/billing_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/entitlement.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/admin_link.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/data_sets.cpp
@@ -223,6 +227,24 @@ target_include_directories(billing_stripe_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 add_test(NAME billing_stripe COMMAND billing_stripe_test)
+
+# The hosting entitlement (apps/novaworld_server/billing/entitlement.h) and the billing
+# tables under it (billing_repository.h): which subscription statuses grant, the period's
+# 48 h net, comp grants against tiers, the own-machine add-on counting only beside a tier,
+# past_due keeping servers but starting none, an inactive or service account getting
+# nothing; and the tables' rows (the instance id minted once, the customers, the
+# subscriptions' status_since, the events' dedupe, pending order, cutoff and prune) on a
+# migrated database. Crow-free: compiles the billing sources directly.
+add_executable(billing_entitlement_test
+    novaworld/billing_entitlement_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/billing_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/entitlement.cpp)
+target_link_libraries(billing_entitlement_test PRIVATE opennova_novaworld_service)
+target_include_directories(billing_entitlement_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+target_compile_definitions(billing_entitlement_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+opennova_add_pg_test(billing_entitlement COMMAND billing_entitlement_test)
 
 # The credential routes' brake: token buckets on a hand-stepped clock and the
 # trusted-proxy client address. The server's rate_limiter.cpp compiled in

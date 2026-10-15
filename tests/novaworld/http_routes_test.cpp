@@ -25,6 +25,7 @@
 #include <net/title/title_identity.h>
 #include <base/gameprofile/gameprofile.h>
 #include "auth.h"
+#include "billing/entitlement.h"
 #include "health.h"
 #include "hosted/admin_link.h"
 #include "hosted/console_commands.h"
@@ -4231,7 +4232,7 @@ void end_stopping_servers(Harness &h) {
 // Joint Operations' with the default rotation "default.bms" and Delta Force
 // Xtreme 2's with its own, and no supervisor, so rows stay where the routes
 // put them): the session and CSRF refusals, the data sets the owner's view
-// lists, the approval (PUT /api/admin/users/<id>/can-host, admin only), the
+// lists, the comp grant (PUT /api/admin/users/<id>/comp-servers, admin only), the
 // settings' refusals (the game among them), the start (on the first data set
 // when it names none, and on Delta Force Xtreme 2's with its rotation), one
 // live server per account, the default rotation, the cap, the owner's stop,
@@ -4251,7 +4252,7 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(!ana_s.empty() && !ben_s.empty() && !cy_s.empty() && !dee_s.empty());
 	// The start / stop bucket (HostedRoutes::kStartStopPerUser) is 6 per account,
 	// then one every 20 s, and a request refused before it (logged out, no CSRF
-	// header) draws nothing. Ana draws exactly six below (not approved, the
+	// header) draws nothing. Ana draws exactly six below (not entitled, the
 	// start, already_live, three stops), Dee five (the refused settings), Ben and
 	// Cy one or two: add a draw to one of them and it must move to a new account.
 
@@ -4270,7 +4271,7 @@ int test_hosted_server_routes(Harness &h) {
 	};
 	auto approve = [&h](int64_t id, const std::string &body, std::vector<std::string> headers) {
 		headers.push_back(kJson);
-		return h.send("PUT", "/api/admin/users/" + std::to_string(id) + "/can-host", headers, body);
+		return h.send("PUT", "/api/admin/users/" + std::to_string(id) + "/comp-servers", headers, body);
 	};
 	const std::string settings =
 			"{\"game_name\":\"Ana's Server\",\"max_players\":16,\"missions\":[\"first.bms\",\"second.bms\"]}";
@@ -4284,10 +4285,12 @@ int test_hosted_server_routes(Harness &h) {
 	reply = stop(ana_s, /*csrf=*/false);
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
 
-	// Not approved yet.
+	// No hosting entitlement yet.
 	reply = me(ana_s);
 	auto json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && !json["can_host"].b());
+	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b());
+	TEST_EXPECT(json["entitlement"]["max_servers"].i() == 0 && !json["entitlement"]["can_start"].b() &&
+			str(json["entitlement"]["source"]) == "none");
 	TEST_EXPECT(json["server"].t() == crow::json::type::Null);
 	// The data sets the provider offers, in the service's order (Joint
 	// Operations first; OpenNova's has no folder here, so it is not offered):
@@ -4313,25 +4316,32 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(!json.has("default_missions"));
 	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
 	reply = start(ana_s, settings);
-	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_approved");
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_entitled");
 
-	// The approval: admin only (the token, or an admin session with the CSRF header).
-	TEST_EXPECT(approve(ana, "{\"can_host\":true}", {}).code == 401);
-	TEST_EXPECT(approve(ana, "{\"can_host\":true}", { with_session(ana_s), kCsrf }).code == 403);
+	// The comp grant: admin only (the token, or an admin session with the CSRF
+	// header), a whole number 0..16.
+	TEST_EXPECT(approve(ana, "{\"comp_servers\":1}", {}).code == 401);
+	TEST_EXPECT(approve(ana, "{\"comp_servers\":1}", { with_session(ana_s), kCsrf }).code == 403);
 	reply = approve(ana, "{}", { kBearer });
 	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "missing_field");
-	reply = approve(ana, "{\"can_host\":1}", { kBearer });
-	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
-	TEST_EXPECT(approve(999999, "{\"can_host\":true}", { kBearer }).code == 404);
-	reply = approve(ana, "{\"can_host\":true}", { kBearer });
+	for (const char *bad : { "{\"comp_servers\":true}", "{\"comp_servers\":1.5}", "{\"comp_servers\":17}",
+				 "{\"comp_servers\":-1}", "{\"comp_servers\":\"2\"}" }) {
+		reply = approve(ana, bad, { kBearer });
+		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+	}
+	TEST_EXPECT(approve(999999, "{\"comp_servers\":1}", { kBearer }).code == 404);
+	reply = approve(ana, "{\"comp_servers\":1}", { kBearer });
 	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 200 && json && json["user"]["can_host"].b());
-	for (const int64_t id : { ben, cy }) TEST_EXPECT(approve(id, "{\"can_host\":true}", { kBearer }).code == 200);
+	TEST_EXPECT(reply.code == 200 && json && json["user"]["comp_servers"].i() == 1 &&
+			json["user"]["max_servers"].i() == 1);
+	for (const int64_t id : { ben, cy }) TEST_EXPECT(approve(id, "{\"comp_servers\":1}", { kBearer }).code == 200);
 	reply = me(ana_s);
-	TEST_EXPECT(crow::json::load(body_text(reply))["can_host"].b());
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json["entitlement"]["max_servers"].i() == 1 && json["entitlement"]["can_start"].b() &&
+			str(json["entitlement"]["source"]) == "comp");
 
 	// Settings the backend refuses (hosted_supervisor has every rule): a field and why,
-	// a mistyped field, no JSON. Checked before the approval, so dee needs none.
+	// a mistyped field, no JSON. Checked before the entitlement, so dee needs none.
 	struct Refused {
 		const char *body;
 		const char *error;
@@ -4509,7 +4519,7 @@ int test_hosted_server_routes(Harness &h) {
 // it (a key /NWHost.dll recorded for that account, presented by a hand-driven
 // host), and its owner's GET /api/me/hosts carries it with its hosted server,
 // the owner's ServerCommand reaches it while another account's is a 404, and
-// the admin view names the owner. An admin withdraws the owner's approval
+// the admin view names the owner. An admin withdraws the owner's comp grant
 // through the route and one supervisor pass (a fake provider) moves the server
 // to stopping; a stopping server takes no command (409 server_stopping), and
 // the owner's and the admin's stop on the listing are the hosted server's stop
@@ -4524,7 +4534,7 @@ int test_hosted_listing_owner(Harness &h) {
 	using Notice = PushHost::Notice;
 	const int64_t owner = make_account(h, "listing_owner", "pw-listing-owner");
 	TEST_EXPECT(owner > 0 && make_account(h, "listing_other", "pw-listing-other") > 0);
-	TEST_EXPECT(nws::set_can_host(*h.pool.acquire(), owner, true).ok);
+	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), owner, 1).ok);
 	const std::string owner_s = login_token(h, "10.52.0.1", "listing_owner", "pw-listing-owner");
 	const std::string other_s = login_token(h, "10.52.0.2", "listing_other", "pw-listing-other");
 	TEST_EXPECT(!owner_s.empty() && !other_s.empty());
@@ -4534,7 +4544,8 @@ int test_hosted_listing_owner(Harness &h) {
 	settings.game = hosted::kDataSetJointOperations;
 	settings.game_name = "Hosted Owner Test";
 	settings.missions = { "a.bms" };
-	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, hosted::known_data_sets(), 10);
+	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, hosted::known_data_sets(), 10,
+			opennova::novaworld_server::billing::unix_now());
 	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
 	const int64_t server_id = request.id;
 	const std::string service_name = nws::service_username(server_id);
@@ -4596,11 +4607,11 @@ int test_hosted_listing_owner(Harness &h) {
 	}
 	TEST_EXPECT(seen);
 
-	// An admin withdraws the owner's approval (the route), and the supervisor's
+	// An admin withdraws the owner's comp grant (the route), and the supervisor's
 	// next pass (here one hand-driven pass over a fake provider) stops the server.
-	reply = h.send("PUT", "/api/admin/users/" + std::to_string(owner) + "/can-host", { kBearer, kJson },
-			"{\"can_host\":false}");
-	TEST_EXPECT(reply.code == 200 && !crow::json::load(body_text(reply))["user"]["can_host"].b());
+	reply = h.send("PUT", "/api/admin/users/" + std::to_string(owner) + "/comp-servers", { kBearer, kJson },
+			"{\"comp_servers\":0}");
+	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["user"]["max_servers"].i() == 0);
 	{
 		hosted_test::FakeProvider fake;
 		hosted::Supervisor supervisor(h.pool, fake, hosted::SupervisorConfig{});
@@ -4612,7 +4623,7 @@ int test_hosted_listing_owner(Harness &h) {
 	TEST_EXPECT(json && str(json["server"]["state"]) == "stopping");
 	const auto &events = json["server"]["events"];
 	TEST_EXPECT(events.size() >= 2 &&
-			str(events[events.size() - 1]["detail"]).find("approval to host was withdrawn") != std::string::npos);
+			str(events[events.size() - 1]["detail"]).find("no hosting entitlement left") != std::string::npos);
 
 	// A stopping server takes no more commands; the stops on its listing are the
 	// hosted server's: no ServerStopHosting goes out (the supervisor's to send).
@@ -4641,7 +4652,7 @@ int test_hosted_listing_owner(Harness &h) {
 	reply = h.send("GET", "/api/admin/users", { kBearer });
 	TEST_EXPECT(reply.code == 200 && body_text(reply).find(service_name) == std::string::npos);
 	const std::string service_path = "/api/admin/users/" + std::to_string(service.id);
-	TEST_EXPECT(h.send("PUT", service_path + "/can-host", { kBearer, kJson }, "{\"can_host\":true}").code == 404);
+	TEST_EXPECT(h.send("PUT", service_path + "/comp-servers", { kBearer, kJson }, "{\"comp_servers\":1}").code == 404);
 	TEST_EXPECT(h.send("PUT", service_path, { kBearer, kJson }, "{\"nwhandle\":\"Taken\"}").code == 404);
 	TEST_EXPECT(h.send("DELETE", service_path, { kBearer }).code == 404);
 	reply = h.send("POST", "/api/register", { kJson, kCsrf, from_ip("10.52.0.11") },
@@ -5006,7 +5017,7 @@ int test_hosted_console_routes(Harness &h) {
 	const int64_t owner = make_account(h, "console_owner", "pw-console-owner");
 	const int64_t admin = make_account(h, "console_admin", "pw-console-admin");
 	TEST_EXPECT(owner > 0 && admin > 0 && make_account(h, "console_other", "pw-console-other") > 0);
-	TEST_EXPECT(nws::set_can_host(*h.pool.acquire(), owner, true).ok);
+	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), owner, 1).ok);
 	TEST_EXPECT(set_role(h, admin, "admin"));
 	const std::string owner_s = login_token(h, "10.53.0.1", "console_owner", "pw-console-owner");
 	const std::string other_s = login_token(h, "10.53.0.2", "console_other", "pw-console-other");
@@ -5034,7 +5045,8 @@ int test_hosted_console_routes(Harness &h) {
 	settings.game = hosted::kDataSetJointOperations;
 	settings.game_name = "Console Test";
 	settings.missions = { "alpha.bms" };
-	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, hosted::known_data_sets(), 10);
+	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, hosted::known_data_sets(), 10,
+			opennova::novaworld_server::billing::unix_now());
 	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
 	const int64_t id = request.id;
 	const std::string base = "/api/admin/hosted/" + std::to_string(id);

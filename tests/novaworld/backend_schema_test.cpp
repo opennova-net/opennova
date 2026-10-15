@@ -82,11 +82,12 @@ int test_migrations_create_expected_tables() {
 
 	// Expected tables from the backend migration set.
 	const std::vector<std::string> expected = {
-		"active_hosts", "active_user_sessions", "cd_key_activations", "cd_keys",
+		"active_hosts", "active_user_sessions", "billing_customers", "billing_events",
+		"billing_subscriptions", "cd_key_activations", "cd_keys",
 		"games", "host_keys", "host_players", "host_roster", "hosted_server_console", "hosted_server_events",
 		"hosted_servers", "login_addresses",
 		"player_game_access",
-		"players", "server_status", "unknown_messages", "web_sessions"
+		"players", "server_status", "service_meta", "unknown_messages", "web_sessions"
 	};
 	TEST_EXPECT(rows.size() == expected.size());
 	for (size_t i = 0; i < expected.size(); ++i) {
@@ -104,9 +105,13 @@ int test_migrations_create_expected_tables() {
 						.empty());
 	const auto flags = db.query("SELECT table_name || '.' || column_name FROM information_schema.columns "
 								"WHERE table_schema = 'public' AND data_type = 'boolean' ORDER BY 1;");
-	TEST_EXPECT(flags.size() == 3 && flags[0].as_text(0) == "hosted_servers.team_ff" &&
-			flags[1].as_text(0) == "players.can_host" &&
-			flags[2].as_text(0) == "server_status.maintenance_enabled");
+	const std::vector<std::string> expected_flags = {
+		"billing_customers.livemode", "billing_events.livemode", "billing_subscriptions.cancel_at_period_end",
+		"billing_subscriptions.livemode", "hosted_servers.team_ff", "server_status.maintenance_enabled",
+	};
+	TEST_EXPECT(flags.size() == expected_flags.size());
+	for (size_t i = 0; i < flags.size() && i < expected_flags.size(); ++i)
+		TEST_EXPECT(flags[i].as_text(0) == expected_flags[i]);
 	TEST_EXPECT(db.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'unknown_messages' "
 						 "AND column_name = 'sample' AND data_type = 'bytea';")
 						.size() == 1);
@@ -655,6 +660,57 @@ int test_hosted_server_game() {
 	return 0;
 }
 
+// The billing tables (0002_billing.sql) and the comp grant beside them: the
+// grant's range, a subscription's item and tier rules, the indexes, an account's
+// delete taking its customer row and leaving its subscriptions with no account,
+// one customer row per account and per Stripe customer.
+int test_billing_tables() {
+	TestDatabase scratch;
+	Database db = scratch.open();
+	TEST_EXPECT(has_column(db, "players", "comp_servers") && !has_column(db, "players", "can_host"));
+	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
+	        "VALUES ('bill', 'x', '0b110001', '1', 'Bill'), ('bob', 'x', '0b110002', '1', 'Bob');");
+	TEST_EXPECT(db.query("SELECT comp_servers FROM players WHERE username = 'bill';").front().as_int(0) == 0);
+	db.exec("UPDATE players SET comp_servers = 16 WHERE username = 'bill';");
+	TEST_EXPECT(refused(db, "UPDATE players SET comp_servers = 17 WHERE username = 'bill';"));
+	TEST_EXPECT(refused(db, "UPDATE players SET comp_servers = -1 WHERE username = 'bill';"));
+	for (const char *index : { "idx_billing_subscriptions_user", "idx_billing_subscriptions_customer" })
+		TEST_EXPECT(has_index(db, "billing_subscriptions", index));
+	TEST_EXPECT(has_index(db, "billing_events", "idx_billing_events_pending"));
+
+	db.exec("INSERT INTO billing_customers (user_id, stripe_customer_id, livemode) "
+	        "SELECT id, 'cus_bill', false FROM players WHERE username = 'bill';");
+	TEST_EXPECT(refused(db, "INSERT INTO billing_customers (user_id, stripe_customer_id, livemode) "
+	                        "SELECT id, 'cus_bill', false FROM players WHERE username = 'bob';"));
+	TEST_EXPECT(refused(db, "INSERT INTO billing_customers (user_id, stripe_customer_id, livemode) "
+	                        "SELECT id, 'cus_two', false FROM players WHERE username = 'bill';"));
+	db.exec("INSERT INTO billing_subscriptions (stripe_subscription_id, stripe_customer_id, user_id, livemode, "
+	        "status, item, price_id, tier) SELECT 'sub_bill', 'cus_bill', id, false, 'active', 'tier', 'price_1', 1 "
+	        "FROM players WHERE username = 'bill';");
+	const char *bad_rows[] = {
+		"INSERT INTO billing_subscriptions (stripe_subscription_id, stripe_customer_id, livemode, status, item, "
+		"price_id) VALUES ('sub_x', 'cus_x', false, 'active', 'plan', 'price_x');",
+		"INSERT INTO billing_subscriptions (stripe_subscription_id, stripe_customer_id, livemode, status, item, "
+		"price_id, tier) VALUES ('sub_y', 'cus_y', false, 'active', 'tier', 'price_y', 4);",
+	};
+	for (const char *sql : bad_rows) TEST_EXPECT(refused(db, sql));
+	const auto row = db.query("SELECT quantity, cancel_at_period_end, current_period_end IS NULL, "
+	                          "status_since IS NOT NULL FROM billing_subscriptions WHERE stripe_subscription_id = 'sub_bill';");
+	TEST_EXPECT(row.size() == 1 && row[0].as_int(0) == 1 && row[0].as_int(1) == 0 && row[0].as_int(2) == 1 &&
+			row[0].as_int(3) == 1);
+	db.exec("INSERT INTO billing_events (event_id, type, livemode) VALUES ('evt_1', 'invoice.paid', false);");
+	TEST_EXPECT(refused(db, "INSERT INTO billing_events (event_id, type, livemode) VALUES ('evt_1', 'x', false);"));
+	TEST_EXPECT(db.query("SELECT customer_id, outcome, processed_at IS NULL FROM billing_events;").front().as_int(2) == 1);
+	db.exec("DELETE FROM players WHERE username = 'bill';");
+	TEST_EXPECT(db.query("SELECT 1 FROM billing_customers;").empty());
+	TEST_EXPECT(db.query("SELECT user_id FROM billing_subscriptions WHERE stripe_subscription_id = 'sub_bill';")
+						.front()
+						.is_null(0));
+	db.exec("INSERT INTO service_meta (key, value) VALUES ('instance_id', 'abc');");
+	TEST_EXPECT(refused(db, "INSERT INTO service_meta (key, value) VALUES ('instance_id', 'def');"));
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -671,9 +727,10 @@ int main(int argc, char **argv) {
 	if (test_hosted_server_game() != 0) return 1;
 	if (test_cd_keys_fresh() != 0)
 		return 1;
+	if (test_billing_tables() != 0) return 1;
 	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs, "
 				"web sessions + roles, games titles, host keys, credentials generation, hosted "
 				"server games, "
-				"cd keys)\n");
+				"cd keys, billing)\n");
 	return 0;
 }

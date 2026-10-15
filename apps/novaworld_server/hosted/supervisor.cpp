@@ -223,9 +223,9 @@ bool Supervisor::owner_active(db::Database &db, const HostedServer &s, std::stri
 		why = "its owner's account is " + loggable(owner->account_status, 32);
 		return false;
 	}
-	// The approval is the brake (ADR 0053 d6): withdrawn, the server stops.
-	if (!owner->can_host) {
-		why = "its owner's approval to host was withdrawn";
+	// The entitlement is the brake (ADR 0053 d6): none left, the server stops.
+	if (billing::entitlement_of(db, *s.owner_user_id, config_.wall_clock_s()).max_servers == 0) {
+		why = "its owner has no hosting entitlement left";
 		return false;
 	}
 	return true;
@@ -267,7 +267,7 @@ bool Supervisor::move(db::Database &db, const HostedServer &s, Runtime &rt, uint
 }
 
 void Supervisor::on_requested(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
-	// step() checked the owner (active, approved) in this pass.
+	// step() checked the owner (active, entitled) in this pass.
 	move(db, s, rt, now_ms, State::Provisioning, "picked up");
 }
 
@@ -281,7 +281,7 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 	if (now_ms < rt.not_before_ms) return; // a restart's backoff
 
 	// The owner read again right before credentials are minted (a crash
-	// restart's backoff gives an admin time to withdraw the approval).
+	// restart's backoff gives an admin time to withdraw a grant).
 	std::string why;
 	if (!owner_active(db, s, why)) {
 		if (request_stop(db, s.id, why)) {

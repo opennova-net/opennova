@@ -85,7 +85,8 @@ enum class RequestOutcome : uint8_t {
 	Created,
 	InvalidSettings, // check_settings refused them (the routes check first)
 	NoSuchUser,  // no player account by that id
-	NotApproved, // the account is not approved (can_host) or not active
+	NotEntitled, // the account is not active, or its hosting entitlement is 0 servers
+	PastDue,     // its support tier's payment is past due: its servers run on, none starts
 	AlreadyLive, // the account has a live server (`id` names it)
 	AtCapacity,  // `cap` servers are live
 };
@@ -96,10 +97,12 @@ struct RequestResult {
 
 // A start the owner asks for: the settings checked again against the offered
 // data sets (check_settings, as the routes do first), then in one transaction
-// the account's approval, its one live server and the global cap, and the row
-// written (state requested, its event beside it).
+// the account (a player's, active), its hosting entitlement at `now` (Unix
+// seconds; billing/entitlement.h: servers granted, and none past due), its one
+// live server and the global cap, and the row written (state requested, its
+// event beside it).
 RequestResult request_server(db::Database &db, int64_t owner_user_id,
-		const HostedSettings &settings, const std::vector<DataSet> &offered, int cap);
+		const HostedSettings &settings, const std::vector<DataSet> &offered, int cap, int64_t now);
 
 std::optional<HostedServer> find_server(db::Database &db, int64_t id);
 // The owner's live server, else the newest of its ended ones.

@@ -20,7 +20,12 @@ Contents:
 
 `0001_baseline.sql` is the schema the SQLite-era migrations 0001..0015 had
 built, squashed into one file in PostgreSQL's dialect: `bigint` integers,
-identity ids, `timestamptz` times, `boolean` flags and `bytea` samples.
+identity ids, `timestamptz` times, `boolean` flags and `bytea` samples (with
+the hosted servers' comp grant, `players.comp_servers`, in place of the old
+approval flag). `0002_billing.sql` adds the billing tables: the service's
+instance id, the support tiers' Stripe customers, subscriptions and webhook
+events, the cache of Stripe the hosting entitlement reads
+(apps/novaworld_server/README.md "Hosted servers").
 
 ## Migrations are append-only
 
@@ -28,7 +33,10 @@ A migration that a database has applied never changes: the server refuses to
 boot when a recorded file's SHA-256 no longer matches the file on disk. A new
 table, a new column or a fix to an existing one is a new file with the next
 number. (The disposable-database practice of the SQLite era, an edited
-migration plus a reset, ended with the move to PostgreSQL.)
+migration plus a reset, ended with the move to PostgreSQL; the one exception is
+the change that brought PostgreSQL in, whose files no deployment had applied
+before its cutover, so a database made from an earlier revision of it is
+recreated: `scripts/dev_postgres.sh reset`.)
 
 ## The database the server needs
 

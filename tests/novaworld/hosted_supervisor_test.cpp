@@ -7,15 +7,17 @@
 // rendered from them (read back by the formats' own readers; /game per data
 // set), the service accounts (minted, refused by the website, hidden,
 // reserved, their password set again at every start, deleted at the end), the
-// start request's checks (approval, one live server per account, the global
-// cap), every transition of the lifecycle with its event, the stop (the push,
+// start request's checks (the hosting entitlement: a comp grant or a support
+// tier, none past due; one live server per account, the global cap), every
+// transition of the lifecycle with its event, the stop (the push,
 // the listing's end, the 60 s timeout, any exit while stopping, a stop before
 // any machine, a stop landing mid-launch, the kill switch), the crash restart
 // and its limit (any exit while the server should run, code 0 and the
 // ServerStopHosting push's 3 included: a stop is never read from an exit code),
 // the restart window (an hour of running forgives the crashes before it), the
 // boot and listing timeouts, the health checks, an owner's account banned or
-// deleted or its approval withdrawn (also during a crash restart's backoff),
+// deleted, its comp grant withdrawn or its support tier canceled (also during a
+// crash restart's backoff),
 // the reconciliation at the service's start (a provisioning row whose machine
 // is gone among it) and the periodic orphan sweep, and the admin links kept in
 // step with the running servers.
@@ -31,6 +33,7 @@
 // runs on every build.
 
 #include "auth.h"
+#include "billing/billing_repository.h"
 #include "hosted/admin_link.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/hosted_settings.h"
@@ -89,6 +92,10 @@ namespace {
 
 std::string g_self;
 
+// The wall clock the entitlements are read at (a subscription's period end is a
+// date): the rigs' starting point.
+constexpr int64_t kWall = 1760000000;
+
 // --- fixtures -----------------------------------------------------------------
 
 hosted::HostedSettings valid_settings() {
@@ -101,8 +108,8 @@ hosted::HostedSettings valid_settings() {
 
 int g_pcid = 0;
 
-// A player, approved to host when `can_host`.
-int64_t make_player(Database &db, const std::string &name, bool can_host) {
+// A player with an admin's grant of `comp_servers` hosted servers.
+int64_t make_player(Database &db, const std::string &name, int comp_servers) {
 	nws::CreateUserParams p;
 	p.username = name;
 	p.password = "pw-" + name;
@@ -116,8 +123,24 @@ int64_t make_player(Database &db, const std::string &name, bool can_host) {
 		std::fprintf(stderr, "  create_user %s: %s\n", name.c_str(), created.error_code.c_str());
 		return 0;
 	}
-	if (can_host && !nws::set_can_host(db, created.id, true).ok) return 0;
+	if (comp_servers > 0 && !nws::set_comp_servers(db, created.id, comp_servers).ok) return 0;
 	return created.id;
+}
+
+// A support tier subscription of `user`'s in the billing cache, as the sync
+// worker writes it: `tier` (1..3), `status`, its period ending a month on.
+void subscribe(Database &db, int64_t user, int tier, const std::string &status, const std::string &id) {
+	namespace billing = opennova::novaworld_server::billing;
+	billing::SubscriptionRow row;
+	row.stripe_subscription_id = id;
+	row.stripe_customer_id = "cus_" + id;
+	row.user_id = user;
+	row.status = status;
+	row.item = billing::ItemKind::Tier;
+	row.price_id = "price_tier" + std::to_string(tier);
+	row.tier = tier;
+	row.current_period_end = kWall + 30 * 24 * 60 * 60;
+	billing::upsert_subscription(db, row);
 }
 
 // A 48-letter A..P HostKey, distinct per `n`.
@@ -182,6 +205,7 @@ struct Rig {
 	std::unique_ptr<hosted::Supervisor> sup;
 	std::vector<std::pair<uint32_t, int64_t>> pushes;
 	uint64_t now = 1000;
+	int64_t wall = kWall; // the entitlements' clock, Unix seconds
 
 	explicit Rig(const char *name) : temp(name), pool(scratch.options()) {
 		config.cap = 3;
@@ -195,6 +219,7 @@ struct Rig {
 		config.restart_backoff_ms = 3000;
 		config.stop_timeout_ms = 60000;
 		config.data_sets = hosted::known_data_sets();
+		config.wall_clock_s = [this] { return wall; };
 		make_supervisor();
 	}
 	void make_supervisor() {
@@ -211,12 +236,14 @@ struct Rig {
 		const auto s = server(id);
 		return s ? s->state : State::Failed;
 	}
-	// An approved owner's request.
+	// The request of a new owner an admin granted one server.
 	int64_t request(const std::string &owner, hosted::HostedSettings settings = valid_settings()) {
-		auto db = pool.acquire();
-		const int64_t user = make_player(*db, owner, true);
-		if (user == 0) return 0;
-		const auto r = hosted::request_server(*db, user, settings, config.data_sets, config.cap);
+		const int64_t user = make_player(*pool.acquire(), owner, 1);
+		return user == 0 ? 0 : request_as(user, settings);
+	}
+	// `user`'s request.
+	int64_t request_as(int64_t user, hosted::HostedSettings settings = valid_settings()) {
+		const auto r = hosted::request_server(*pool.acquire(), user, settings, config.data_sets, config.cap, wall);
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	}
 	// A request walked to running, listed under `rid`: its machine's id.
@@ -564,14 +591,14 @@ int test_service_accounts() {
 	ConnectionPool pool(scratch.options());
 	auto lease = pool.acquire();
 	Database &db = *lease;
-	const int64_t player = make_player(db, "acct_player", false);
+	const int64_t player = make_player(db, "acct_player", 0);
 	TEST_EXPECT(player > 0);
 
 	const auto made = nws::upsert_service_account(db, "srv-7", "first-password");
 	TEST_EXPECT(made.ok && made.id > 0);
 	auto account = nws::get_user_by_id(db, made.id);
 	TEST_EXPECT(account && account->kind == "service" && account->nwhandle == "srv-7");
-	TEST_EXPECT(!account->can_host && account->role == "player");
+	TEST_EXPECT(account->comp_servers == 0 && account->role == "player");
 	TEST_EXPECT(nws::get_user_by_id(db, player)->kind == "player");
 	const auto authed = nws::authenticate_user(db, "srv-7", "first-password");
 	TEST_EXPECT(authed && authed->kind == "service");
@@ -583,7 +610,7 @@ int test_service_accounts() {
 	rename.nwhandle = "Renamed";
 	TEST_EXPECT(nws::update_user(db, made.id, rename).error_code == "not_found");
 	TEST_EXPECT(nws::delete_user(db, made.id).error_code == "not_found");
-	TEST_EXPECT(nws::set_can_host(db, made.id, true).error_code == "not_found");
+	TEST_EXPECT(nws::set_comp_servers(db, made.id, 1).error_code == "not_found");
 	TEST_EXPECT(nws::bootstrap_admin(db, "srv-7").outcome == nws::BootstrapAdminResult::Outcome::NoSuchAccount);
 	// A session row planted by hand resolves to nothing.
 	db.exec("INSERT INTO web_sessions (token_hash, user_id, expires_at) "
@@ -629,7 +656,12 @@ int test_service_accounts() {
 	TEST_EXPECT(nws::delete_service_account(db, player).error_code == "not_found");
 	TEST_EXPECT(nws::delete_service_account(db, made.id).ok);
 	TEST_EXPECT(!nws::get_user_by_id(db, made.id));
-	TEST_EXPECT(nws::set_can_host(db, player, true).ok && nws::get_user_by_id(db, player)->can_host);
+	// The comp grant: 0..16.
+	TEST_EXPECT(nws::set_comp_servers(db, player, 2).ok && nws::get_user_by_id(db, player)->comp_servers == 2);
+	TEST_EXPECT(nws::set_comp_servers(db, player, 17).error_code == "invalid_field");
+	TEST_EXPECT(nws::set_comp_servers(db, player, -1).error_code == "invalid_field");
+	TEST_EXPECT(nws::set_comp_servers(db, 999999, 1).error_code == "not_found");
+	TEST_EXPECT(nws::get_user_by_id(db, player)->comp_servers == 2);
 	return 0;
 }
 
@@ -641,27 +673,39 @@ int test_requests() {
 	Database &db = *lease;
 	const auto settings = valid_settings();
 	const std::vector<hosted::DataSet> &offered = hosted::known_data_sets();
-	const int64_t unapproved = make_player(db, "req_unapproved", false);
-	TEST_EXPECT(hosted::request_server(db, unapproved, settings, offered, 3).outcome ==
-			hosted::RequestOutcome::NotApproved);
-	TEST_EXPECT(hosted::request_server(db, 999999, settings, offered, 3).outcome == hosted::RequestOutcome::NoSuchUser);
+	const auto request = [&](int64_t user, const hosted::HostedSettings &with,
+								 const std::vector<hosted::DataSet> &sets, int cap) {
+		return hosted::request_server(db, user, with, sets, cap, kWall);
+	};
+	const int64_t unentitled = make_player(db, "req_unentitled", 0);
+	TEST_EXPECT(request(unentitled, settings, offered, 3).outcome == hosted::RequestOutcome::NotEntitled);
+	TEST_EXPECT(request(999999, settings, offered, 3).outcome == hosted::RequestOutcome::NoSuchUser);
 	const auto service = nws::upsert_service_account(db, "srv-500", "pw");
-	TEST_EXPECT(hosted::request_server(db, service.id, settings, offered, 3).outcome ==
-			hosted::RequestOutcome::NoSuchUser);
-	const int64_t banned = make_player(db, "req_banned", true);
+	TEST_EXPECT(request(service.id, settings, offered, 3).outcome == hosted::RequestOutcome::NoSuchUser);
+	const int64_t banned = make_player(db, "req_banned", 1);
 	nws::UpdateUserParams ban;
 	ban.account_status = "banned";
 	TEST_EXPECT(nws::update_user(db, banned, ban).ok);
-	TEST_EXPECT(hosted::request_server(db, banned, settings, offered, 3).outcome == hosted::RequestOutcome::NotApproved);
+	TEST_EXPECT(request(banned, settings, offered, 3).outcome == hosted::RequestOutcome::NotEntitled);
+	// A support tier entitles; past due it starts nothing, canceled it entitles nothing.
+	const int64_t subscriber = make_player(db, "req_subscriber", 0);
+	subscribe(db, subscriber, 1, "past_due", "sub_req");
+	TEST_EXPECT(request(subscriber, settings, offered, 3).outcome == hosted::RequestOutcome::PastDue);
+	subscribe(db, subscriber, 1, "canceled", "sub_req");
+	TEST_EXPECT(request(subscriber, settings, offered, 3).outcome == hosted::RequestOutcome::NotEntitled);
+	// Its period ran out (and the 48 h net with it): nothing either.
+	subscribe(db, subscriber, 1, "active", "sub_req");
+	TEST_EXPECT(hosted::request_server(db, subscriber, settings, offered, 3, kWall + 33 * 24 * 60 * 60).outcome ==
+			hosted::RequestOutcome::NotEntitled);
 
 	// One live server per account.
-	const int64_t a = make_player(db, "req_a", true);
+	const int64_t a = make_player(db, "req_a", 1);
 	hosted::HostedSettings unchecked = settings;
 	unchecked.missions.clear();
-	TEST_EXPECT(hosted::request_server(db, a, unchecked, offered, 3).outcome == hosted::RequestOutcome::InvalidSettings);
-	const auto first = hosted::request_server(db, a, settings, offered, 3);
+	TEST_EXPECT(request(a, unchecked, offered, 3).outcome == hosted::RequestOutcome::InvalidSettings);
+	const auto first = request(a, settings, offered, 3);
 	TEST_EXPECT(first.outcome == hosted::RequestOutcome::Created && first.id > 0);
-	const auto second = hosted::request_server(db, a, settings, offered, 3);
+	const auto second = request(a, settings, offered, 3);
 	TEST_EXPECT(second.outcome == hosted::RequestOutcome::AlreadyLive && second.id == first.id);
 	// The index holds it too, whatever writes the row.
 	bool refused = false;
@@ -683,23 +727,23 @@ int test_requests() {
 	hosted::HostedSettings dfx2 = settings;
 	dfx2.game = hosted::kDataSetDeltaForceXtreme2;
 	const std::vector<hosted::DataSet> jo_only = { offered[0] };
-	const int64_t e = make_player(db, "req_e", true);
-	TEST_EXPECT(hosted::request_server(db, e, dfx2, jo_only, 3).outcome == hosted::RequestOutcome::InvalidSettings);
+	const int64_t e = make_player(db, "req_e", 1);
+	TEST_EXPECT(request(e, dfx2, jo_only, 3).outcome == hosted::RequestOutcome::InvalidSettings);
 	TEST_EXPECT(!hosted::latest_server_of(db, e));
 
 	// The cap counts every live server.
-	const int64_t b = make_player(db, "req_b", true);
-	const int64_t c = make_player(db, "req_c", true);
-	const int64_t d = make_player(db, "req_d", true);
-	TEST_EXPECT(hosted::request_server(db, b, settings, offered, 3).outcome == hosted::RequestOutcome::Created);
-	const auto third = hosted::request_server(db, c, settings, offered, 3);
+	const int64_t b = make_player(db, "req_b", 1);
+	const int64_t c = make_player(db, "req_c", 1);
+	const int64_t d = make_player(db, "req_d", 1);
+	TEST_EXPECT(request(b, settings, offered, 3).outcome == hosted::RequestOutcome::Created);
+	const auto third = request(c, settings, offered, 3);
 	TEST_EXPECT(third.outcome == hosted::RequestOutcome::Created);
 	TEST_EXPECT(hosted::count_live(db) == 3);
-	TEST_EXPECT(hosted::request_server(db, d, settings, offered, 3).outcome == hosted::RequestOutcome::AtCapacity);
+	TEST_EXPECT(request(d, settings, offered, 3).outcome == hosted::RequestOutcome::AtCapacity);
 	// An ended server frees its place, and its owner may start again.
 	TEST_EXPECT(hosted::transition(db, third.id, State::Requested, State::Failed, "test"));
-	TEST_EXPECT(hosted::request_server(db, d, settings, offered, 3).outcome == hosted::RequestOutcome::Created);
-	TEST_EXPECT(hosted::request_server(db, c, settings, offered, 4).outcome == hosted::RequestOutcome::Created);
+	TEST_EXPECT(request(d, settings, offered, 3).outcome == hosted::RequestOutcome::Created);
+	TEST_EXPECT(request(c, settings, offered, 4).outcome == hosted::RequestOutcome::Created);
 	TEST_EXPECT(hosted::latest_server_of(db, c)->state == State::Requested);
 	TEST_EXPECT(hosted::list_servers(db, 10).size() == 5);
 
@@ -1106,24 +1150,30 @@ int test_owner_changes() {
 	TEST_EXPECT(rig.state(deleted) == State::Stopping);
 	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), deleted), "owner's account was deleted"));
 
-	// The approval (can_host) is the brake: withdrawn, the server stops, as for a
-	// ban. Before the pickup nothing launches.
+	// The hosting entitlement is the brake: the comp grant withdrawn (0), the
+	// server stops, as for a ban. Before the pickup nothing launches.
 	const int64_t withdrawn = rig.request("owner_withdrawn");
-	TEST_EXPECT(nws::set_can_host(*rig.pool.acquire(), *rig.server(withdrawn)->owner_user_id, false).ok);
+	TEST_EXPECT(nws::set_comp_servers(*rig.pool.acquire(), *rig.server(withdrawn)->owner_user_id, 0).ok);
 	rig.tick();
 	TEST_EXPECT(rig.state(withdrawn) == State::Stopping);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), withdrawn), "approval to host was withdrawn"));
+	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), withdrawn), "no hosting entitlement left"));
 	rig.tick();
 	TEST_EXPECT(rig.state(withdrawn) == State::Stopped && rig.fake.launches == 2);
 
-	// While it runs.
-	const int64_t revoked = rig.request("owner_revoked");
+	// While it runs, on a support tier Stripe cancels; past due, before that, it
+	// keeps running.
+	const int64_t subscriber = make_player(*rig.pool.acquire(), "owner_subscriber", 0);
+	subscribe(*rig.pool.acquire(), subscriber, 1, "active", "sub_owner");
+	const int64_t revoked = rig.request_as(subscriber);
 	const std::string m3 = rig.to_running(revoked, 9003);
 	TEST_EXPECT(!m3.empty());
-	TEST_EXPECT(nws::set_can_host(*rig.pool.acquire(), *rig.server(revoked)->owner_user_id, false).ok);
+	subscribe(*rig.pool.acquire(), subscriber, 1, "past_due", "sub_owner");
+	rig.tick();
+	TEST_EXPECT(rig.state(revoked) == State::Running);
+	subscribe(*rig.pool.acquire(), subscriber, 1, "canceled", "sub_owner");
 	rig.tick();
 	TEST_EXPECT(rig.state(revoked) == State::Stopping);
-	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), revoked), "approval to host was withdrawn"));
+	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), revoked), "no hosting entitlement left"));
 
 	// The three stopping servers still count against the rig's cap (3): their
 	// listings end (as the stop's push takes them down), the stops finish, and
@@ -1143,7 +1193,7 @@ int test_owner_changes() {
 	const int launches = rig.fake.launches;
 	const int64_t service = *rig.server(crashed)->service_user_id;
 	const int64_t generation = nws::get_user_by_id(*rig.pool.acquire(), service)->credentials_gen;
-	TEST_EXPECT(nws::set_can_host(*rig.pool.acquire(), *rig.server(crashed)->owner_user_id, false).ok);
+	TEST_EXPECT(nws::set_comp_servers(*rig.pool.acquire(), *rig.server(crashed)->owner_user_id, 0).ok);
 	rig.advance(rig.config.restart_backoff_ms);
 	rig.tick();
 	TEST_EXPECT(rig.state(crashed) == State::Stopping && rig.fake.launches == launches);
@@ -1605,10 +1655,10 @@ int test_children_outlive_the_supervisor_thread() {
 	test_temp::TempDir temp("hosted_thread");
 	test_db::TestDatabase scratch;
 	ConnectionPool pool(scratch.options());
-	const int64_t owner = make_player(*pool.acquire(), "thread_owner", true);
+	const int64_t owner = make_player(*pool.acquire(), "thread_owner", 1);
 	TEST_EXPECT(owner > 0);
 	const auto request =
-			hosted::request_server(*pool.acquire(), owner, valid_settings(), hosted::known_data_sets(), 5);
+			hosted::request_server(*pool.acquire(), owner, valid_settings(), hosted::known_data_sets(), 5, kWall);
 	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
 	const fs::path data = temp.path / "data";
 	fs::create_directories(data);

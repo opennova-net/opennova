@@ -1,6 +1,7 @@
 #include "http_listener.h"
 
 #include "auth.h"
+#include "billing/entitlement.h"
 #include "catalog_repository.h"
 #include "cd_key_routes.h"
 #include "health.h"
@@ -270,9 +271,10 @@ const char *connection_state_name(ConnectionState s) {
 	return "unknown";
 }
 
-// Serialize a user row to JSON (no password_hash). Shared by the
-// public /api/register response and the admin user CRUD routes.
-crow::json::wvalue user_to_json(const UserRecord &u) {
+// Serialize a user row to JSON (no password_hash), with its admin comp grant
+// and its hosting entitlement's server count (billing/entitlement.h, read now).
+// Shared by the public /api/register response and the admin user CRUD routes.
+crow::json::wvalue user_to_json(db::Database &db, const UserRecord &u) {
 	crow::json::wvalue e;
 	e["id"]       = u.id;
 	e["username"] = u.username;
@@ -281,7 +283,8 @@ crow::json::wvalue user_to_json(const UserRecord &u) {
 	e["nwhandle"] = u.nwhandle;
 	e["account_status"] = u.account_status;
 	e["role"]     = u.role;
-	e["can_host"] = u.can_host;
+	e["comp_servers"] = u.comp_servers;
+	e["max_servers"] = billing::entitlement_of(db, u.id, billing::unix_now()).max_servers;
 	return e;
 }
 
@@ -666,7 +669,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		if (caller.refusal) return std::move(*caller.refusal);
 		auto db_conn = db_pool_.acquire();
 		std::vector<crow::json::wvalue> arr;
-		for (const auto &u : list_users(*db_conn)) arr.push_back(user_to_json(u));
+		for (const auto &u : list_users(*db_conn)) arr.push_back(user_to_json(*db_conn, u));
 		crow::json::wvalue out;
 		out["users"] = std::move(arr);
 		crow::response res(200);
@@ -703,7 +706,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 			return res;
 		}
 		auto created = get_user_by_id(*db_conn, result.id);
-		out["user"] = created ? user_to_json(*created) : crow::json::wvalue{};
+		out["user"] = created ? user_to_json(*db_conn, *created) : crow::json::wvalue{};
 		crow::response res(201);
 		res.body = out.dump();
 		res.set_header("Content-Type", "application/json");
@@ -765,37 +768,41 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 			return res;
 		}
 		auto updated = get_user_by_id(*db_conn, id);
-		out["user"] = updated ? user_to_json(*updated) : crow::json::wvalue{};
+		out["user"] = updated ? user_to_json(*db_conn, *updated) : crow::json::wvalue{};
 		crow::response res(200);
 		res.body = out.dump();
 		res.set_header("Content-Type", "application/json");
 		return res;
 	});
 
-	// PUT /api/admin/users/<id>/can-host — {"can_host": true|false}: the account's
-	// approval for a hosted server (players.can_host), answered
-	// with the account. 400 invalid_json / invalid_field / missing_field, 404 for
-	// an unknown id and for a hosted server's service account. Withdrawing it
-	// stops the account's hosted server, as a ban does (the supervisor's next
-	// pass; hosted/supervisor.h).
-	CROW_ROUTE(app, "/api/admin/users/<int>/can-host").methods("PUT"_method)(
+	// PUT /api/admin/users/<id>/comp-servers — {"comp_servers": 0..16}: an
+	// admin's grant of hosted servers to the account (players.comp_servers; its
+	// hosting entitlement is the larger of the grant and its support tier's
+	// servers), answered with the account. 400 invalid_json, invalid_field (no
+	// whole number, or outside 0..16) or missing_field, 404 for an unknown id and
+	// for a hosted server's service account. Lowering the entitlement below what
+	// the account runs stops servers (the supervisor's next pass;
+	// hosted/supervisor.h).
+	CROW_ROUTE(app, "/api/admin/users/<int>/comp-servers").methods("PUT"_method)(
 	    [this](const crow::request &req, int64_t id) {
 		auto caller = impl_->access.require_admin(req);
 		if (caller.refusal) return std::move(*caller.refusal);
 		auto body = JsonBody::parse(req.body);
 		if (!body) return json_error(400, "invalid_json");
-		const auto can_host = body->flag("can_host");
+		const auto comp_servers = body->integer("comp_servers");
 		if (body->wrong_type()) return json_error(400, "invalid_field");
-		if (!can_host) return json_error(400, "missing_field", "can_host (true or false) is required");
+		if (!comp_servers) return json_error(400, "missing_field", "comp_servers (0 to 16) is required");
+		if (*comp_servers < 0 || *comp_servers > billing::kMaxCompServers)
+			return json_error(400, "invalid_field", "comp_servers must be a whole number from 0 to 16");
 		auto db_conn = db_pool_.acquire();
-		const auto result = set_can_host(*db_conn, id, *can_host);
+		const auto result = set_comp_servers(*db_conn, id, static_cast<int>(*comp_servers));
 		if (!result.ok) {
 			return json_error(result.error_code == "not_found" ? 404 : 500,
 			                  result.error_code.c_str(), result.error_message);
 		}
 		const auto updated = get_user_by_id(*db_conn, id);
 		crow::json::wvalue out;
-		out["user"] = updated ? user_to_json(*updated) : crow::json::wvalue{};
+		out["user"] = updated ? user_to_json(*db_conn, *updated) : crow::json::wvalue{};
 		return json_reply(200, out);
 	});
 
@@ -972,7 +979,7 @@ void HttpListener::register_public_api_routes() {
 			return res;
 		}
 		auto created = get_user_by_id(*db_conn, result.id);
-		out["user"] = created ? user_to_json(*created) : crow::json::wvalue{};
+		out["user"] = created ? user_to_json(*db_conn, *created) : crow::json::wvalue{};
 		std::printf("[http] /api/register -> created user '%s' (id=%lld)\n",
 		            loggable(username).c_str(), static_cast<long long>(result.id));
 		crow::response res(201);

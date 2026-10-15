@@ -377,10 +377,22 @@ statements to a listed server" above).
 
 ## Hosted servers
 
-An account an admin approved (`players.can_host`) can have the service run one
-`opennova-serve` for it, on a machine of its own, until it stops it (ADR 0053, proposed;
-`hosted/`; the `hosted_servers` and `hosted_server_events` tables). Each
-server runs one data set its owner picks. Everything here is service policy.
+An account with a hosting entitlement can have the service run one `opennova-serve` for
+it, on a machine of its own, until it stops it (ADR 0053, proposed; `hosted/`; the
+`hosted_servers` and `hosted_server_events` tables). Each server runs one data set its
+owner picks. Everything here is service policy.
+
+- **The hosting entitlement** (`billing/entitlement.*`): how many hosted servers an account
+  may have live, the larger of its support tier's servers (a monthly Stripe subscription:
+  tier 1, 2 or 3 grants 1, 2 or 3 servers; `billing/tiers.h`) and an admin's comp grant
+  (`players.comp_servers`, 0..16, `PUT /api/admin/users/<id>/comp-servers`). Only an active
+  player's account has one. It is read from the billing tables (`backend/migrations/
+  0002_billing.sql`, the cache of Stripe the billing worker keeps), whether or not billing
+  is configured, so a deploy that breaks billing never stops a payer's servers. A
+  subscription grants while Stripe calls it `active`, `trialing` or `past_due`, and only
+  until 48 h past its period's end (a sync that stopped for good fails closed); `past_due`
+  (Stripe still retries the card) keeps the account's servers running but starts no new
+  one. Every other status grants nothing.
 
 - **Data sets** (`hosted/data_sets.*`). A data set is a game folder a machine mounts, the
   title `opennova-serve` speaks over it (`/game <code>`, a `gameprofile` row) and the
@@ -404,8 +416,9 @@ server runs one data set its owner picks. Everything here is service policy.
   service, the restarts used and why it failed. `hosted_server_events` keeps every
   transition with what caused it. An owner has at most one live server (any state but
   `stopped` and `failed`, a partial unique index), and at most `ONNET_HOSTED_CAP` servers
-  are live at once; a request checks the account's approval, its live server and the
-  cap in the transaction that writes it (`hosted::request_server`).
+  are live at once; a request checks the account's hosting entitlement (none past due),
+  its live server and the cap in the transaction that writes it
+  (`hosted::request_server`).
 - **The supervisor** (`hosted/supervisor.*`) is a thread of its own, started once the gate
   has its port; each pass (every second) leases a pooled connection and walks every live
   row: `requested` → `provisioning` (the service account, a new admin password, the
@@ -417,8 +430,9 @@ server runs one data set its owner picks. Everything here is service policy.
   next pass.
 - **A stop** is the supervisor's own act: the row goes to `stopping` (asked by the owner
   or an admin, or by the supervisor when the owner's account is deleted or no longer
-  active or its approval, `can_host`, is withdrawn: the brake, read every pass and again
-  right before a start mints credentials), the supervisor pushes `ServerStopHosting` to the listing (the sysop punt's
+  active or its hosting entitlement is down to no server, a comp grant withdrawn or a
+  support tier canceled or unpaid: the brake, read every pass and again right before a
+  start mints credentials), the supervisor pushes `ServerStopHosting` to the listing (the sysop punt's
   MsgCode 7, scoped to the service account), and ends the machine itself once the
   listing has left the browser, or 60 s after the push. `opennova-serve` exiting while
   the row is `stopping`, whatever its code, finishes the stop and is never restarted.
@@ -662,16 +676,16 @@ server runs one data set its owner picks. Everything here is service policy.
 The deploy toolbox's `app deploy` sets every `ec2` setting from the Terraform outputs
 (DEPLOY.md, "Hosted game servers"); nobody copies an id by hand.
 
-The routes (`hosted/hosted_routes.*`, and the approval with the admin user routes), behind
+The routes (`hosted/hosted_routes.*`, and the comp grant with the admin user routes), behind
 `ONNET_API_PROXY_ONLY` like every `/api` route. Every refusal is an error code with the
 service's own message, never database text.
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/me/server` | a website session | `{"enabled", "can_host", "data_sets", "server"}`: `enabled` is a provider with at least one data set; `data_sets` the ones it offers, in order (empty when hosting is off), each `game`, `display_name`, `expansions` (`code` and `name`, the base game's `""` first), `default_missions` (its `missions`: the rotation a start on it takes when it names none and the missions the site's rotation picker offers) and `limits` (`max_players`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, each `min` and `max`); `server` is the account's live server, else its newest ended one, else null: `id`, `state`, `live`, `settings` (`game`, `game_name`, `max_players`, `game_password`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, `team_ff`, `expansion`, `missions`), `game_display_name` and `expansion_display_name` (the catalog's names, so an ended server's read the same once its data set is gone), `restarts`, `failure_reason`, `created_at`, `updated_at`, `running_at`, `ended_at` (UTC, null until set), `listing` (`rid`, `server_name`, `mission_name`, `players`, `max_players`, `host_ip`, `host_port` while listed, else null) and `events` (the newest 50 transitions, oldest first: `from`, `to`, `detail`, `at`); `Cache-Control: no-store` |
-| `POST /api/me/server/start` | a website session, the CSRF header | the settings as JSON (`game_name` required; `game` defaults to the first offered data set and `missions` to that data set's; every other field to its default). 503 `hosting_disabled` with no provider; 429 past the account's bucket (6, then one every 20 s, shared with the stop); 400 `invalid_json`, `invalid_field`, or `invalid_settings` with the `field` and why; 403 `not_approved` without `can_host`; 409 `already_live` (with `server_id`) or `at_capacity`; 202 `{"server"}`, `requested` |
+| `GET /api/me/server` | a website session | `{"enabled", "entitlement", "data_sets", "server"}`: `enabled` is a provider with at least one data set; `entitlement` the account's hosting entitlement (`max_servers`, `can_start`, `source`: `none`, `tier` or `comp`); `data_sets` the ones it offers, in order (empty when hosting is off), each `game`, `display_name`, `expansions` (`code` and `name`, the base game's `""` first), `default_missions` (its `missions`: the rotation a start on it takes when it names none and the missions the site's rotation picker offers) and `limits` (`max_players`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, each `min` and `max`); `server` is the account's live server, else its newest ended one, else null: `id`, `state`, `live`, `settings` (`game`, `game_name`, `max_players`, `game_password`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, `team_ff`, `expansion`, `missions`), `game_display_name` and `expansion_display_name` (the catalog's names, so an ended server's read the same once its data set is gone), `restarts`, `failure_reason`, `created_at`, `updated_at`, `running_at`, `ended_at` (UTC, null until set), `listing` (`rid`, `server_name`, `mission_name`, `players`, `max_players`, `host_ip`, `host_port` while listed, else null) and `events` (the newest 50 transitions, oldest first: `from`, `to`, `detail`, `at`); `Cache-Control: no-store` |
+| `POST /api/me/server/start` | a website session, the CSRF header | the settings as JSON (`game_name` required; `game` defaults to the first offered data set and `missions` to that data set's; every other field to its default). 503 `hosting_disabled` with no provider; 429 past the account's bucket (6, then one every 20 s, shared with the stop); 400 `invalid_json`, `invalid_field`, or `invalid_settings` with the `field` and why; 403 `not_entitled` with no hosting entitlement (or an account not active), 403 `payment_past_due` while the support tier's payment is past due; 409 `already_live` (with `server_id`) or `at_capacity`; 202 `{"server"}`, `requested` |
 | `POST /api/me/server/stop` | a website session, the CSRF header | 404 `no_live_server`; 202 `{"server"}`, `stopping` (also when it already was), or `stopped` when the supervisor finished it in between |
-| `PUT /api/admin/users/<id>/can-host` | admin | `{"can_host": true\|false}`; 200 `{"user"}` (which carries `can_host`); 400 `invalid_json`, `invalid_field` (not a boolean) or `missing_field`; 404 for an unknown id or a service account. Withdrawing it stops the account's hosted server, as a ban does |
+| `PUT /api/admin/users/<id>/comp-servers` | admin | `{"comp_servers": 0..16}`, the admin's grant; 200 `{"user"}` (which carries `comp_servers` and `max_servers`, the entitlement); 400 `invalid_json`, `invalid_field` (no whole number in 0..16) or `missing_field`; 404 for an unknown id or a service account. An entitlement down to no server stops the account's hosted server, as a ban does |
 | `GET /api/admin/hosted` | admin | the fleet: `{"enabled", "provider", "cap", "live", "servers"}`, the newest 100, live first, each as above plus `owner` and `service_account` (`{id, username}` or null), `provider`, `machine_id`, `machine_address` and `admin_port`. Never the admin password |
 | `POST /api/admin/hosted/<id>/stop` | admin | 404 `not_found`, 409 `not_live`, else 202 `{"server"}` |
 | `POST /api/admin/hosted/stop-all` | admin | the kill switch: every live server to `stopping`; 200 `{"stopping": <how many>}` |
@@ -1121,7 +1135,7 @@ every build; it compiles `auth`, `web_session` and `hosted/` straight in) drives
 settings' rules and renders, the service accounts, the request's checks and every
 transition on a fake provider and a hand-stepped clock (the stops, any exit while
 stopping, the crash restarts, their limit and the restart window, the timeouts, the
-health checks, the owners' changes including a withdrawn approval, the reconciliation (a
+health checks, the owners' changes including a withdrawn comp grant and a canceled support tier, the reconciliation (a
 `provisioning` row whose machine is gone among it) and the periodic sweep, the console
 ring's cap, and the admin links following the running servers), then
 `LocalProcessProvider` against the test binary itself as its
@@ -1130,7 +1144,7 @@ deleted at terminate, and its children outliving the supervisor's thread to get 
 orderly stop); `child_process`
 ([`tests/proc/child_process_test.cpp`](../../tests/proc/child_process_test.cpp),
 every build) the child-process seam against itself; the route harness's
-`hosted_server_routes` and `hosted_listing_owner` cases the routes' refusals, approval,
+`hosted_server_routes` and `hosted_listing_owner` cases the routes' refusals, the comp grant,
 cap and stops and the owner rule against a hand-driven host listing as a service account,
 and its `hosted_console_routes` case the console routes over a real admin link to a
 scripted remote-admin server on loopback (the session, CSRF and owner refusals, every

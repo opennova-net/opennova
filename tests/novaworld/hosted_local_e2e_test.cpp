@@ -5,7 +5,7 @@
 // tests make them), one per data set: Joint Operations' and Delta Force Xtreme
 // 2's. Built only with BUILD_NOVAWORLD_HTTP.
 //
-//   * the owner, approved (players.can_host), starts a Joint Operations server
+//   * the owner, granted a server (players.comp_servers), starts a Joint Operations server
 //     with POST /api/me/server/start, which runs over that data set's folder
 //     with /game jo;
 //   * the supervisor mints its service account srv-<id>, renders its working
@@ -250,7 +250,7 @@ int main(int argc, char **argv) {
 					config.hosted_data_sets = data_sets_json;
 				});
 		expect(up, "the service starts");
-		expect(nws::set_can_host(*service.pool.acquire(), service.owner_id, true).ok, "the owner is approved");
+		expect(nws::set_comp_servers(*service.pool.acquire(), service.owner_id, 1).ok, "the owner is granted a server");
 
 		hosted::LocalProcessConfig local;
 		local.serve_binary = serve_binary;
@@ -468,8 +468,8 @@ int main(int argc, char **argv) {
 			p.nwhandle = "Owner2Handle";
 			const auto created = nws::create_user(*service.pool.acquire(), p);
 			second_owner = created.ok ? created.id : 0;
-			expect(second_owner > 0 && nws::set_can_host(*service.pool.acquire(), second_owner, true).ok,
-					"a second owner is approved");
+			expect(second_owner > 0 && nws::set_comp_servers(*service.pool.acquire(), second_owner, 1).ok,
+					"a second owner is granted a server");
 		}
 		const std::string second = second_owner > 0 ? site_login(service, "owner2", "pw-owner2") : std::string();
 		expect(!up || !second.empty(), "the second owner logs in to the site");

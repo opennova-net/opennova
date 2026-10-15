@@ -28,7 +28,9 @@
 -- statement that makes the change: every login's grants (a website session,
 -- the retail login's active_user_sessions row, a known login address) are
 -- written only while the account still has the generation its password check
--- read. can_host is an admin's approval for a hosted server.
+-- read. comp_servers is an admin's grant of hosted servers (0 to 16): the
+-- account's hosting entitlement is the larger of it and its support tier's
+-- servers (0002_billing.sql; apps/novaworld_server/billing/entitlement.h).
 CREATE TABLE players (
     id              bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     username        text NOT NULL UNIQUE,
@@ -42,7 +44,7 @@ CREATE TABLE players (
     role            text NOT NULL DEFAULT 'player' CHECK (role IN ('player', 'admin')),
     credentials_gen bigint NOT NULL DEFAULT 0,
     kind            text NOT NULL DEFAULT 'player' CHECK (kind IN ('player', 'service')),
-    can_host        boolean NOT NULL DEFAULT false
+    comp_servers    bigint NOT NULL DEFAULT 0 CHECK (comp_servers BETWEEN 0 AND 16)
 );
 CREATE INDEX idx_players_nwhandle ON players(nwhandle);
 

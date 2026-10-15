@@ -5,7 +5,7 @@
 // on a MachineProvider, logging every transition in hosted_server_events.
 //
 //   requested     the owner asked (POST /api/me/server/start): the account's
-//                 approval, its one live server and the cap were checked then
+//                 entitlement, its one live server and the cap were checked then
 //   provisioning  the service account srv-<id> with a new random password
 //                 (minted at the first start, its password set again at every
 //                 one), a new admin password, the provider's plan, the files
@@ -21,9 +21,10 @@
 //                 process; health_misses failed checks in a row end the
 //                 machine and fail the server
 //   stopping      asked for by the owner, an admin or the supervisor itself (an
-//                 owner's account deleted or no longer active, or its approval,
-//                 players.can_host, withdrawn; read every pass and again right
-//                 before a start mints credentials): the
+//                 owner's account deleted or no longer active, or its hosting
+//                 entitlement down to no server, billing/entitlement.h: a
+//                 comp grant withdrawn, a support tier canceled; read every
+//                 pass and again right before a start mints credentials): the
 //                 ServerStopHosting push to the listing, then the machine ended
 //                 by the supervisor once the listing has left the browser, or
 //                 stop_timeout_ms after the push; opennova-serve exiting in this
@@ -66,6 +67,7 @@
 // ended on the next pass. Each pass leases its own pooled connection.
 
 #include "admin_link.h"
+#include "billing/entitlement.h"
 #include "data_sets.h"
 #include "hosted_repository.h"
 #include "machine_provider.h"
@@ -111,6 +113,9 @@ struct SupervisorConfig {
 	uint64_t restart_backoff_ms = 15 * 1000;
 	uint64_t stop_timeout_ms = 60 * 1000;
 	uint64_t orphan_sweep_interval_ms = 5 * 60 * 1000;
+	// The wall clock, Unix seconds, the owners' hosting entitlements are read
+	// at (a subscription's period end is a date); the tests step it by hand.
+	std::function<int64_t()> wall_clock_s = billing::unix_now;
 };
 
 class Supervisor {
@@ -191,7 +196,7 @@ private:
 	bool move(db::Database &db, const HostedServer &server, Runtime &rt, uint64_t now_ms, State to,
 			const std::string &detail, TransitionOptions options = {});
 	// Whether the owner may keep the server: its account exists, is active and
-	// is approved to host (players.can_host).
+	// has a hosting entitlement of at least one server.
 	bool owner_active(db::Database &db, const HostedServer &server, std::string &why);
 	// Ends every machine the provider runs that no live row in `live` names
 	// (`when` labels the log line); the ids of the ones it keeps.

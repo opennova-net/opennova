@@ -7,8 +7,9 @@
 // POST /api/admin/hosted/<id>/stop (require_admin). They write requests and
 // stops only (hosted_repository.h); the supervisor does the rest. Every reply
 // is an error code with our own message, never database text. Behind
-// ONNET_API_PROXY_ONLY like every /api route. The account's approval toggle,
-// PUT /api/admin/users/<id>/can-host, sits with the admin user routes
+// ONNET_API_PROXY_ONLY like every /api route. A start needs the account's
+// hosting entitlement (billing/entitlement.h); an admin's comp grant, PUT
+// /api/admin/users/<id>/comp-servers, sits with the admin user routes
 // (http_listener.cpp). The HttpListener owns one HostedRoutes beside its
 // HostRoutes.
 

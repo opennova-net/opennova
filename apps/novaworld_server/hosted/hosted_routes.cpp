@@ -1,6 +1,7 @@
 #include "hosted_routes.h"
 
 #include "auth.h"
+#include "billing/entitlement.h"
 #include "http_json.h"
 #include "loggable.h"
 #include "server_config.h"
@@ -202,7 +203,8 @@ void HostedRoutes::register_routes(WebApp &app) {
 }
 
 // GET /api/me/server — the logged-in account's hosted server: {"enabled" (this
-// service runs hosted servers), "can_host" (an admin approved the account),
+// service runs hosted servers), "entitlement" (its hosting entitlement:
+// {max_servers, can_start, source}, billing/entitlement.h),
 // "data_sets" (the games a start may name, in the site's order: {game,
 // display_name, expansions [{code, name}], default_missions (the rotation a
 // start on it takes when it names none, and the missions the site's rotation
@@ -223,8 +225,13 @@ crow::response HostedRoutes::me_server(const crow::request &req) {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
 		out["enabled"] = enabled_;
-		const auto user = get_user_by_id(*db_conn, access.user->id);
-		out["can_host"] = user && user->can_host;
+		const billing::Entitlement entitlement =
+				billing::entitlement_of(*db_conn, access.user->id, billing::unix_now());
+		crow::json::wvalue granted;
+		granted["max_servers"] = entitlement.max_servers;
+		granted["can_start"] = entitlement.can_start;
+		granted["source"] = entitlement.source;
+		out["entitlement"] = std::move(granted);
 		std::vector<crow::json::wvalue> sets;
 		if (enabled_) {
 			for (const DataSet &d : data_sets_) sets.push_back(data_set_json(d));
@@ -265,10 +272,11 @@ crow::response HostedRoutes::me_server(const crow::request &req) {
 // header), 503 hosting_disabled when this service runs none, one token from the
 // account's kStartStopPerUser bucket (429), 400 invalid_json / invalid_field (a
 // mistyped field), 400 invalid_settings with the refused "field" and why
-// (hosted_settings.h check_settings), then the request: 403 not_approved without
-// the account's approval (players.can_host) or an active status, 409
-// already_live with its "server_id" when it has a live server, 409 at_capacity
-// when ONNET_HOSTED_CAP servers are live; 202 {"server"} (state requested) once
+// (hosted_settings.h check_settings), then the request: 403 not_entitled for
+// an account not active or with no hosting entitlement, 403 payment_past_due
+// while its support tier's payment is past due, 409 already_live with its
+// "server_id" when it has a live server, 409 at_capacity when
+// ONNET_HOSTED_CAP servers are live; 202 {"server"} (state requested) once
 // written. The supervisor takes it from there.
 crow::response HostedRoutes::me_start(const crow::request &req) {
 	auto access = access_.require_user(req);
@@ -313,7 +321,8 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	}
 	try {
 		auto db_conn = pool_.acquire();
-		const RequestResult result = request_server(*db_conn, user.id, settings, data_sets_, cap_);
+		const RequestResult result =
+				request_server(*db_conn, user.id, settings, data_sets_, cap_, billing::unix_now());
 		switch (result.outcome) {
 			case RequestOutcome::Created:
 				log_owner(user, "start", "server " + std::to_string(result.id) + " requested");
@@ -326,10 +335,13 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 				log_owner(user, "start", "internal_error");
 				return json_error(500, "internal_error");
 			case RequestOutcome::NoSuchUser:
-			case RequestOutcome::NotApproved:
-				log_owner(user, "start", "not_approved");
-				return json_error(403, "not_approved",
-						"an admin has not approved this account for a hosted server");
+			case RequestOutcome::NotEntitled:
+				log_owner(user, "start", "not_entitled");
+				return json_error(403, "not_entitled", "hosting a server needs a support tier");
+			case RequestOutcome::PastDue:
+				log_owner(user, "start", "payment_past_due");
+				return json_error(403, "payment_past_due",
+						"the support tier's payment is past due: running servers keep running, none starts");
 			case RequestOutcome::AlreadyLive: {
 				log_owner(user, "start", "already_live");
 				crow::json::wvalue out;

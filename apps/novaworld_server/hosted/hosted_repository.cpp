@@ -1,5 +1,7 @@
 #include "hosted_repository.h"
 
+#include "billing/entitlement.h"
+
 #include <net/novaworld/host_repository.h>
 
 #include <array>
@@ -93,22 +95,32 @@ std::optional<State> state_from_name(std::string_view name) {
 bool is_live(State state) { return state != State::Stopped && state != State::Failed; }
 
 RequestResult request_server(db::Database &db, int64_t owner_user_id,
-		const HostedSettings &settings, const std::vector<DataSet> &offered, int cap) {
+		const HostedSettings &settings, const std::vector<DataSet> &offered, int cap, int64_t now) {
 	RequestResult out;
 	if (check_settings(settings, offered)) {
 		out.outcome = RequestOutcome::InvalidSettings;
 		return out;
 	}
 	db::Transaction tx(db);
-	const auto user = db.query("SELECT can_host, account_status FROM players "
-							   "WHERE id = $1 AND kind = 'player';",
+	const auto user = db.query("SELECT account_status FROM players WHERE id = $1 AND kind = 'player';",
 			{ BindValue(owner_user_id) });
 	if (user.empty()) {
 		out.outcome = RequestOutcome::NoSuchUser;
 		return out;
 	}
-	if (user.front().as_int(0).value_or(0) == 0 || user.front().as_text(1).value_or("") != "active") {
-		out.outcome = RequestOutcome::NotApproved;
+	if (user.front().as_text(0).value_or("") != "active") {
+		out.outcome = RequestOutcome::NotEntitled;
+		return out;
+	}
+	// The entitlement read in the transaction, which holds the writer lock: no
+	// other start lands between its count and this row.
+	const billing::Entitlement entitlement = billing::entitlement_of(db, owner_user_id, now);
+	if (entitlement.max_servers == 0) {
+		out.outcome = RequestOutcome::NotEntitled;
+		return out;
+	}
+	if (!entitlement.can_start) {
+		out.outcome = RequestOutcome::PastDue;
 		return out;
 	}
 	const auto live = db.query(std::string("SELECT id FROM hosted_servers WHERE owner_user_id = $1 AND ") +
