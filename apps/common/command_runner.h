@@ -3,11 +3,13 @@
 // How an app runs a command-line tool and reads its answer: from an argv array
 // with no shell between (nothing in an argument is ever interpreted), bounded
 // by a timeout, its standard output (the reply) kept apart from its standard
-// error (the tool's diagnostics). The NovaWorld service's cloud provider runs
-// the AWS CLI v2 through it (apps/novaworld_server/hosted/ec2_provider.h), and
+// error (the tool's diagnostics). The NovaWorld service's EC2 machine driver runs
+// the AWS CLI v2 through it (apps/novaworld_server/hosted/ec2_machine_driver.h),
+// its billing curl (apps/novaworld_server/billing/stripe_api.h), and
 // opennova-hostd the docker and iptables CLIs (apps/hostd). The seam their
 // tests replace with a stub that checks each argv and answers it
-// (tests/novaworld/hosted_ec2_provider_test.cpp, tests/hostd). In base/proc's
+// (tests/novaworld/hosted_ec2_machine_driver_test.cpp, billing_stripe_test.cpp,
+// tests/hostd; the runner itself: command_runner_test.cpp). In base/proc's
 // namespace, as apps/common's sockets are in net's: the app layer's runner over
 // base/proc/child_process.h. Platform plumbing, not a port.
 

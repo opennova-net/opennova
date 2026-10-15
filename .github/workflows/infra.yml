@@ -63,5 +63,4 @@ jobs:
             deploy/host/converge.sh \
             deploy/host/service-user-data.sh \
             web/docker-entrypoint.sh \
-            apps/novaworld_server/hosted/machine/user_data.sh \
             apps/novaworld_server/hosted/machine/machine_user_data.sh
