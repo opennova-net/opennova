@@ -43,7 +43,7 @@ func run(ctx: ProbeContext) -> ProbeVerdict:
 	var weapon := String(ctx.args.get("weapon", ""))
 	var animtrace := bool(ctx.args.get("animtrace", false))
 	ctx.defer_restore(func() -> void:
-		for key in [KEY_W, KEY_SHIFT, KEY_R]:
+		for key in [KEY_W, ProbeInput.use_item_key(), KEY_R]:
 			ProbeInput.hold(key, false)
 		ProbeInput.mouse_btn(MOUSE_BUTTON_LEFT, false)
 		ProbeInput.mouse_btn(MOUSE_BUTTON_RIGHT, false))
@@ -147,15 +147,16 @@ func _verdict(summary: String) -> ProbeVerdict:
 	return ProbeVerdict.passed(summary, data)
 
 
-## The armory over live play + the Shift ACCEPT accelerator. True when
+## The armory over live play + the Use Item ACCEPT accelerator. True when
 ## `rig_weapon` was applied through the armory (false -> the caller falls
 ## back to the direct apply, still demoing the same ACCEPT plumbing).
 func _armory_sequence(rig_weapon: String) -> bool:
-	ProbeInput.hold(KEY_SHIFT, true)
+	var use_key := ProbeInput.use_item_key()
+	ProbeInput.hold(use_key, true)
 	await _ctx.wait_frames(4)
 	var armory := _ctx.armory_presenter()
 	if armory == null or not armory.is_open():
-		ProbeInput.hold(KEY_SHIFT, false)
+		ProbeInput.hold(use_key, false)
 		_ctx.log("armory did not open here (out of zone); direct apply later")
 		return false
 	await _ctx.wait_frames(20)
@@ -178,14 +179,14 @@ func _armory_sequence(rig_weapon: String) -> bool:
 
 	# The ACCEPT hotkey: the opener is still HELD from the open; release once
 	# to arm [orig: @0x4de2d0], press again to ACCEPT [orig: @0x5674a8].
-	ProbeInput.hold(KEY_SHIFT, false)
+	ProbeInput.hold(use_key, false)
 	await _ctx.wait_frames(5)
-	ProbeInput.hold(KEY_SHIFT, true)
+	ProbeInput.hold(use_key, true)
 	await _ctx.wait_frames(3)
-	ProbeInput.hold(KEY_SHIFT, false)
+	ProbeInput.hold(use_key, false)
 	await _ctx.wait_frames(60)
 	var still_open := is_instance_valid(armory) and armory.is_open()
-	_ctx.log("Shift ACCEPT accelerator: armory open=%s" % str(still_open))
+	_ctx.log("Use Item ACCEPT accelerator: armory open=%s" % str(still_open))
 	return row >= 0 and not still_open
 
 

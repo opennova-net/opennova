@@ -20,12 +20,15 @@ extends Node
 const MENU_FILE := "weapon.mnu"
 const MENU_SCREEN := "WEAPON"
 
-# The ACCEPT hotkey: the WEAPON screen's on-show registers the USE-ITEM binding
-# row's runtime keys (retail default: the Shifts — the same row 177 the shells'
-# open key mirrors) as ACCEPT accelerators on the ACCEPT control
-# [orig: UI_InitTeamClassSelection @0x567370 finds control "ACCEPT" (@0x7C7650)
-#  and adds word_81A468/g_UseItemBindingKey1 @0x5674a8/@0x5674c0].
-const ACCEPT_HOTKEY := KEY_SHIFT
+# The ACCEPT hotkeys: the WEAPON screen's on-show registers the USE-ITEM binding
+# row's two runtime keys (retail default: the Shifts — the same row 177 the
+# shells' open key reads, so a rebound Use Item opens AND accepts) as ACCEPT
+# accelerators on the ACCEPT control, and the open debounce clears on either
+# key's release [orig: UI_InitTeamClassSelection @0x567370 finds control "ACCEPT"
+# (@0x7C7650) and adds g_UseItemBindingKey0/g_UseItemBindingKey1
+# @0x5674a8/@0x5674c0; Input_HandleMenuKeyRelease @0x4de2d0 tests the same two].
+static func is_accept_hotkey(keycode: Key) -> bool:
+	return ControlsBindings.model().godot_keys_for_token("useitem").has(int(keycode))
 
 signal opened
 signal closed
@@ -228,7 +231,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if not is_open():
 		return
 	var key := event as InputEventKey
-	if key == null or key.keycode != ACCEPT_HOTKEY or key.echo:
+	if key == null or key.echo or not is_accept_hotkey(key.keycode):
 		return
 	if _armory.accept_hotkey_edge(key.pressed):
 		get_viewport().set_input_as_handled()

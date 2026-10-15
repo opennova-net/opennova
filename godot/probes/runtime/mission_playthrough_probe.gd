@@ -284,7 +284,7 @@ func _gate_4_board() -> String:
 	else:
 		for attempt in 3:
 			await _face(_truck_position())
-			await _tap(KEY_SHIFT)
+			await _tap(ProbeInput.use_item_key())
 			var seated := await _wait_until(_mounted_on_truck, 4000, "mounted")
 			if seated:
 				break
@@ -363,7 +363,7 @@ func _gate_6_arrival_dismount() -> String:
 	if _mode == "observe":
 		_ctx.log("gate 6: dismount at the range")
 	elif _mounted_on_truck():
-		await _tap(KEY_SHIFT)
+		await _tap(ProbeInput.use_item_key())
 	var down := await _wait_until(func() -> bool: return not _mounted_on_truck(),
 			OBSERVE_GATE_TIMEOUT_MS if _mode == "observe" else 5000, "dismounted")
 	# The camera returns to the body over a few frames; let it settle before
@@ -396,7 +396,7 @@ func _gate_7_armory() -> String:
 		await _capture("gate7_no_zone")
 		return _gate_done(7, "armory", false, "the player never stood in an armory zone", started)
 	if _mode != "observe":
-		await _tap(KEY_SHIFT)
+		await _tap(ProbeInput.use_item_key())
 	var opened := await _wait_until(func() -> bool:
 		var g := _ctx.game()
 		return g != null and g.shell_state_name() == "armory",

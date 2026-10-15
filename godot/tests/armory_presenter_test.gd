@@ -50,6 +50,7 @@ func before_each() -> void:
 
 func after_each() -> void:
 	Strings.clear()
+	ControlsBindings.model().restore_defaults()
 
 
 func after_all() -> void:
@@ -100,6 +101,58 @@ func _loadout_names(sim: Simulation) -> Array[String]:
 	for value in sim.get_local_player_loadout():
 		names.append((value as WeaponKitEntry).name)
 	return names
+
+
+func _key_edge(keycode: Key, pressed: bool) -> void:
+	var event := InputEventKey.new()
+	event.keycode = keycode
+	event.physical_keycode = keycode
+	event.pressed = pressed
+	Input.parse_input_event(event)
+	await get_tree().process_frame
+
+
+# The WEAPON screen's ACCEPT accelerators are the live Use Item row's keys (the
+# row whose key opened the screen), not a fixed Shift: a rebound Use Item
+# accepts with its new key, and Shift neither arms nor accepts any more
+# [orig: UI_InitTeamClassSelection @0x567370 adds g_UseItemBindingKey0 /
+#  g_UseItemBindingKey1 @0x5674a8/@0x5674c0; Input_HandleMenuKeyRelease
+#  @0x4de2d0 clears the open debounce on the same two keys].
+func test_accept_hotkey_follows_the_use_item_binding() -> void:
+	var model := ControlsBindings.model()
+	var use_item := -1
+	var rows: Array = model.get_rows(ControlsModel.DEVICE_KEYBOARD)
+	for i in rows.size():
+		if (rows[i] as PackedStringArray)[1] == "UseItem":
+			use_item = model.action_index_for_row(i)
+	assert_gte(use_item, 0, "the Use Item row is visible")
+	if use_item < 0:
+		return
+	assert_true(ArmoryPresenter.is_accept_hotkey(KEY_SHIFT), "the stock row is Shift")
+	model.clear_binding(use_item, ControlsModel.DEVICE_KEYBOARD)
+	assert_true(model.assign_godot_key(use_item, KEY_E), "Use Item takes E")
+	assert_true(ArmoryPresenter.is_accept_hotkey(KEY_E), "the rebound key accelerates ACCEPT")
+	assert_false(ArmoryPresenter.is_accept_hotkey(KEY_SHIFT), "Shift left the row")
+
+	var world := _make_world(_real_sim(2), _make_weapons())
+	var overlay := Control.new()
+	add_child_autofree(overlay)
+	overlay.size = Vector2(800, 600)
+	var presenter := ArmoryPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, null, overlay)
+	assert_true(presenter.open(), "the staged player opens the armory")
+
+	await _key_edge(KEY_SHIFT, false)
+	await _key_edge(KEY_SHIFT, true)
+	await _key_edge(KEY_SHIFT, false)
+	assert_true(presenter.is_open(), "Shift is no accelerator once Use Item moved")
+	await _key_edge(KEY_E, true)
+	assert_true(presenter.is_open(), "the opener's press is debounced until its release")
+	await _key_edge(KEY_E, false)
+	await _key_edge(KEY_E, true)
+	assert_false(presenter.is_open(), "the rebound Use Item key ACCEPTs")
+	await _key_edge(KEY_E, false)
 
 
 func test_out_of_zone_try_open_is_the_silent_gate() -> void:
