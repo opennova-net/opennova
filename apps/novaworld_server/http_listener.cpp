@@ -3,6 +3,7 @@
 #include "auth.h"
 #include "catalog_repository.h"
 #include "cd_key_routes.h"
+#include "health.h"
 #include "host_routes.h"
 #include "hosted/bootstrap_route.h"
 #include "hosted/console_routes.h"
@@ -1092,6 +1093,18 @@ void HttpListener::register_public_api_routes() {
 		crow::json::wvalue out;
 		out["status"] = "ok";
 		return out;
+	});
+
+	// The container runtime's and the uptime checks' probe (health.h): outside
+	// /api, so ONNET_API_PROXY_ONLY never refuses it. "ok", or 503 "stalled"
+	// while the stall watchdog finds a loop stuck; never a detail.
+	CROW_ROUTE(app, "/healthz")([this]() {
+		const bool healthy = watchdog_ == nullptr || watchdog_->healthy();
+		crow::response res(healthy ? 200 : 503);
+		res.body = healthy ? "ok" : "stalled";
+		res.set_header("Content-Type", "text/plain");
+		res.set_header("Cache-Control", "no-store");
+		return res;
 	});
 
 	// The OpenNova Switcher's (switcher/) one question: the address to point

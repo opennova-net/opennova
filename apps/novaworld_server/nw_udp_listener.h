@@ -156,6 +156,11 @@ public:
 	// configured value is zero.
 	uint16_t bound_port() const { return bound_port_; }
 
+	// The receive loop's turns so far (one per receive, which waits at most a
+	// pump period): the stall watchdog's progress counter (health.h).
+	// Thread-safe.
+	uint64_t loop_turns() const { return loop_turns_.load(std::memory_order_relaxed); }
+
 	// Snapshot of every connection that has issued a ClientHostRequest
 	// (and therefore appears in the lobby browser). Thread-safe.
 	struct HostedSnapshot {
@@ -245,6 +250,7 @@ private:
 	std::thread worker_;
 	std::atomic<bool> running_{false};
 	std::atomic<bool> stop_requested_{false};
+	std::atomic<uint64_t> loop_turns_{0};
 	uint16_t bound_port_ = 0;
 	// public_host:http_port, the NovaworldWebDomainNameAndPortNumber CU value
 	// (no scheme — the client adds "http://"), with the HTTP port the config

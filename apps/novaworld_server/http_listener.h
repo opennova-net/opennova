@@ -31,6 +31,7 @@ namespace opennova::novaworld_server {
 struct ServerConfig;
 class SessionStore;
 class NwUdpListener;
+class Watchdog;
 namespace hosted { class AdminLinks; }
 namespace catalog { struct GameRow; }
 
@@ -41,7 +42,8 @@ namespace catalog { struct GameRow; }
 //   admin REST API      — /api/admin/* + dev host inject, for the Bearer
 //                         ADMIN_API_TOKEN or an admin-role website session
 //   public JSON API     — /api/* for the web portal, with the website's
-//                         login / logout / me session routes
+//                         login / logout / me session routes, and the
+//                         health probe GET /healthz (outside /api)
 //   listed servers      — HostRoutes: GET /api/admin/hosts and GET
 //                         /api/me/hosts, and the ServerCommand /
 //                         ServerStopHosting pushes for an admin
@@ -83,6 +85,11 @@ public:
 	// (hosted/console_routes.h). Set before start(); they must outlive the HTTP
 	// listener. Null answers every console command 503.
 	void set_admin_links(hosted::AdminLinks *links) { admin_links_ = links; }
+
+	// The stall watchdog GET /healthz answers from (health.h). Set before
+	// start(); it must outlive the HTTP listener. Null: /healthz answers "ok"
+	// whenever Crow serves it.
+	void set_watchdog(const Watchdog *watchdog) { watchdog_ = watchdog; }
 
 	// The cloud machines' bootstrap route (hosted/bootstrap_route.h, POST
 	// /hosted/bootstrap/<id>): registered only with a store, answering only TCP
@@ -204,6 +211,8 @@ private:
 	// The console routes' admin links (set_admin_links); null in tests that do
 	// not wire them.
 	hosted::AdminLinks *admin_links_ = nullptr;
+	// GET /healthz's watchdog (set_watchdog); null: always "ok".
+	const Watchdog *watchdog_ = nullptr;
 	// The bootstrap route's tokens and networks (set_hosted_bootstrap); null:
 	// no route.
 	hosted::BootstrapStore *bootstrap_store_ = nullptr;

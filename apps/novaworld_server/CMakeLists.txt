@@ -5,6 +5,8 @@ set(NOVAWORLD_SERVER_CORE_SOURCES
     server_config.cpp
     catalog_repository.cpp
     gate_listener.cpp
+    # The stall watchdog and the heartbeat line (GET /healthz reads the first).
+    health.cpp
     nw_udp_listener.cpp
 )
 

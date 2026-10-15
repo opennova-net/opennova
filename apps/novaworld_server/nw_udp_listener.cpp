@@ -634,6 +634,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 	uint8_t rx[4096];
 	bool receive_batch_active = false;
 	while (!stop_requested_.load()) {
+		loop_turns_.fetch_add(1, std::memory_order_relaxed);
 		if (!receive_batch_active) {
 			const auto now = PumpClock::now();
 			if (now >= next_pump) {

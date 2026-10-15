@@ -130,8 +130,19 @@ ENV ONNET_GATE_UDP_PORT=7597 \
 
 EXPOSE 7597/udp 64206/udp 8080/tcp
 
+# The server runs as UID 10002, an account of its own with no home and no
+# shell: it keeps no state in the image (the database is PostgreSQL), writes
+# only its temporary files (/tmp, a tmpfs in the compose files) and binds only
+# ports above 1024. The number is fixed so a host's firewall rules can name it.
+RUN useradd --uid 10002 --user-group --no-create-home --home-dir /nonexistent \
+        --shell /usr/sbin/nologin novaworld
+USER 10002
+
+# GET /healthz: "ok", or 503 once the stall watchdog finds a loop stuck (the
+# process then exits 70 and the runtime starts it again). Outside /api, so
+# ONNET_API_PROXY_ONLY never refuses it.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:8080/api/health || exit 1
+    CMD curl -fsS http://127.0.0.1:8080/healthz || exit 1
 
 # Run it under an init as PID 1 (the compose files' `init: true`, or `docker
 # run --init`): a second SIGTERM ends a stuck shutdown only when the server is

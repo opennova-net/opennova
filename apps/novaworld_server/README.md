@@ -79,6 +79,35 @@ session handshake, the browser/host/play container services, and the legacy
   listener clears Crow's own signal set (`signal_clear()`), which would otherwise
   take both signals and stop only Crow.
 
+## Health: the watchdog, `/healthz` and the heartbeat
+
+Service policy (`health.*`), what the container runtime and the uptime checks read:
+
+- **The stall watchdog.** The gate's receive loop and the NW UDP listener's (each wakes
+  at least every 250 ms with nothing to read) and the hosted servers' supervisor (a pass
+  every second, a turn per server it steps) count their turns, and the main thread's
+  tick samples the counters. A loop whose count has not moved for 30 s is stalled: the
+  server logs `[watchdog] FATAL the <loop> made no progress for 30 s; exiting 70` and
+  exits 70 at once (nothing in the process can unstick a thread; an orderly shutdown
+  could hang on it), and the runtime starts it again (`restart: unless-stopped`).
+- **`GET /healthz`** answers `ok`, or `503 stalled` while a watched loop has stood still
+  for 30 s or the main thread's last sample is that old, with no other detail
+  (`Cache-Control: no-store`). It sits outside `/api`, so `ONNET_API_PROXY_ONLY` never
+  refuses it, and the image's `HEALTHCHECK` and the uptime checks use it.
+  `GET /api/health` stays, a static `{"status":"ok"}` behind the proxy rule.
+- **The heartbeat**, one line on stdout every 60 s, for the log pipeline's metric
+  filters:
+  `{"heartbeat":{"nw_sessions":N,"listed_hosts":N,"hosted_live":N,"hosted_failed":N,"machines_lost":N,"launch_failures":N,"billing_sync_age_s":N,"webhook_rejects":N}}`.
+  `nw_sessions` counts the NovaWorld UDP sessions, `listed_hosts` the listed servers,
+  `hosted_live` the live hosted servers; `hosted_failed` and `launch_failures` count the
+  hosted servers that ended failed and the launches that failed since the last line;
+  `machines_lost` is 0 until the fleet reports machines; `billing_sync_age_s` is the age
+  in seconds of the oldest webhook event the billing worker has not synced (0 with none,
+  -1 with billing off) and `webhook_rejects` the webhook deliveries refused since the
+  last line.
+- **The image runs as UID 10002** (`novaworld`, no home, no shell): the server keeps no
+  state in its container and writes only temporary files under `/tmp`.
+
 ## Lobbies: one per title
 
 Each `games` row is a lobby ([`catalog_repository.h`](catalog_repository.h)). The rows

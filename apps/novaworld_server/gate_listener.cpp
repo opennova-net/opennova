@@ -215,6 +215,7 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
                             std::optional<db::ConnectionPool::Lease> db_conn) {
 	uint8_t rx[65535];
 	while (!stop_requested_.load()) {
+		loop_turns_.fetch_add(1, std::memory_order_relaxed);
 		opennova::net::Endpoint from{};
 		const int n = opennova::net::udp_recv_from(socket.get(), rx, sizeof(rx),
 		                                           from, /*timeout_ms=*/250);

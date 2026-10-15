@@ -6,6 +6,7 @@
 // This is our NovaWorld server, not an emulator (CONTEXT.md "NovaWorld").
 
 #include "gate_listener.h"
+#include "health.h"
 #include "loggable.h"
 #include "nw_udp_listener.h"
 #include "server_config.h"
@@ -450,6 +451,10 @@ int main() {
 	// advertised byte stays the configured port's; and the gate, the client's
 	// first contact, answers only once what it names serves.
 	ServerConfig listening = config;
+	// The stall watchdog (health.h): main()'s loop samples the receive loops'
+	// (and the supervisor's) turn counters; GET /healthz reads it, so it is
+	// declared before the HTTP listener and outlives it.
+	Watchdog watchdog;
 #ifdef OPENNOVA_HTTP_ENABLED
 	// The hosted servers' provider, decided before the routes start (they answer
 	// that hosting is off without one); its supervisor starts once the gate has
@@ -467,6 +472,7 @@ int main() {
 	SessionStore sessions;
 	HttpListener http(manager, *db_pool, sessions);
 	http.set_unknown_tracker(&unknown_tracker);
+	http.set_watchdog(&watchdog);
 	// The admin host routes push ServerCommand / ServerStopHosting through the
 	// NW UDP listener, which outlives this one (stopped after it below).
 	http.set_nw_udp_listener(&nwudp);
@@ -529,19 +535,69 @@ int main() {
 	}
 #endif
 
+	// The loops the watchdog watches, each from here on.
+	watchdog.watch("gate receive loop", [&gate] { return gate.loop_turns(); });
+	watchdog.watch("NovaWorld UDP receive loop", [&nwudp] { return nwudp.loop_turns(); });
+#ifdef OPENNOVA_HTTP_ENABLED
+	if (supervisor) {
+		hosted::Supervisor *watched = supervisor.get();
+		watchdog.watch("hosted servers' supervisor", [watched] { return watched->pass_turns(); });
+	}
+#endif
+
 	install_signal_handlers();
 	std::printf("[boot] ready. Ctrl+C to stop.\n");
 
 	// --- Main loop: tick the connection manager ---------------------------
 	uint64_t last_host_sweep_ms = 0;
+	uint64_t last_heartbeat_ms = Watchdog::steady_now_ms();
+#ifdef OPENNOVA_HTTP_ENABLED
+	uint64_t launch_failures_reported = 0;
+#endif
 	while (!g_shutdown.load()) {
 		std::this_thread::sleep_for(
 			std::chrono::milliseconds(config.tick_interval_ms));
 		using namespace std::chrono;
 		const auto now = static_cast<uint64_t>(
 			duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
+		// A loop stuck past the stall time ends the process (exit 70), and the
+		// container runtime starts it again: nothing here can unstick a thread.
+		if (const std::string stalled = watchdog.check(); !stalled.empty()) {
+			std::fprintf(stderr, "[watchdog] FATAL the %s made no progress for %llu s; exiting %d\n",
+			             stalled.c_str(), static_cast<unsigned long long>(watchdog.stall_ms() / 1000),
+			             Watchdog::kStallExitCode);
+			std::fflush(nullptr);
+			std::_Exit(Watchdog::kStallExitCode);
+		}
 		if (auto dropped = manager.tick(now); dropped > 0) {
 			std::printf("[tick] expired %zu connection(s)\n", dropped);
+		}
+		// The heartbeat line (health.h), every kHeartbeatMs: the counts now, and
+		// what happened since the last line.
+		if (now - last_heartbeat_ms >= kHeartbeatMs) {
+#ifdef OPENNOVA_HTTP_ENABLED
+			const auto window_s = static_cast<int64_t>((now - last_heartbeat_ms + 999) / 1000);
+#endif
+			last_heartbeat_ms = now;
+			Heartbeat beat;
+			beat.nw_sessions = static_cast<int64_t>(manager.registry().size());
+			try {
+				beat.listed_hosts = hostdb::aggregate(dbh).lobbies;
+#ifdef OPENNOVA_HTTP_ENABLED
+				beat.hosted_live = hosted::count_live(dbh);
+				beat.hosted_failed = hosted::count_failed_since(dbh, window_s);
+#endif
+			} catch (const db::Error &e) {
+				std::fprintf(stderr, "[heartbeat] WARN counts: %s\n", e.what());
+			}
+#ifdef OPENNOVA_HTTP_ENABLED
+			if (supervisor) {
+				const uint64_t failures = supervisor->launch_failures();
+				beat.launch_failures = static_cast<int64_t>(failures - launch_failures_reported);
+				launch_failures_reported = failures;
+			}
+#endif
+			std::printf("%s\n", heartbeat_line(beat).c_str());
 		}
 		// Flush any unknown-message sightings the listener threads recorded
 		// since the last tick into unknown_messages (deduped upsert).

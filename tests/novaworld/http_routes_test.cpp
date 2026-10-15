@@ -25,6 +25,7 @@
 #include <net/title/title_identity.h>
 #include <base/gameprofile/gameprofile.h>
 #include "auth.h"
+#include "health.h"
 #include "hosted/admin_link.h"
 #include "hosted/console_commands.h"
 #include "hosted/hosted_repository.h"
@@ -95,6 +96,10 @@ using opennova::db::ConnectionPool;
 
 namespace {
 
+// The harness watchdog's hand-stepped clock and its watched loop's counter.
+std::atomic<uint64_t> g_watch_clock_ms{ 0 };
+std::atomic<uint64_t> g_watch_turns{ 0 };
+
 constexpr const char *kAdminToken = "harness-admin-token";
 // The one page in the templates root: the menu URLs the listener fills in.
 constexpr const char *kUrlsTemplate = "urls.htm";
@@ -129,6 +134,9 @@ struct Harness {
 	// harness's own address) and the third's (it admits 10.0.0.0/8 alone).
 	opennova::novaworld_server::hosted::BootstrapStore *bootstrap = nullptr;
 	opennova::novaworld_server::hosted::BootstrapStore *fresh_bootstrap = nullptr;
+	// The first listener's stall watchdog (GET /healthz): its clock and its one
+	// watched loop's counter are the test's (g_watch_clock_ms, g_watch_turns).
+	nws::Watchdog *watchdog = nullptr;
 
 	// Every connect, send and recv waits at most `timeout_ms`.
 	net::HttpReply send(const char *method, const std::string &path,
@@ -4154,6 +4162,57 @@ int test_db_failure_reply_carries_code_alone(Harness &h) {
 	return 0;
 }
 
+// GET /healthz (health.h): outside /api, so a listener whose /api/ refuses the
+// harness (a proxy it is not) still answers it; "ok" while the stall watchdog
+// finds its loops moving and main()'s checks coming, 503 "stalled" (no detail)
+// once its watched loop has not moved for the stall time, or no check came for
+// that long, and "ok" again as soon as the loop moves. A listener with no
+// watchdog answers "ok".
+int test_healthz(Harness &h) {
+	const auto expect_reply = [&h](int code, const char *body) {
+		const net::HttpReply reply = h.send("GET", "/healthz");
+		if (reply.code != code || body_text(reply) != body)
+			std::fprintf(stderr, "  /healthz: %s, want %d %s\n", describe(reply).c_str(), code, body);
+		return reply.code == code && body_text(reply) == body &&
+				header_value(reply, "Cache-Control") == "no-store";
+	};
+	const uint64_t stall = nws::Watchdog::kStallMs;
+	TEST_EXPECT(h.watchdog->check().empty());
+	TEST_EXPECT(expect_reply(200, "ok"));
+	auto reply = h.send_to(h.fresh_port, "GET", "/healthz");
+	TEST_EXPECT(reply.code == 200 && body_text(reply) == "ok");
+	TEST_EXPECT(h.send_to(h.fresh_port, "GET", "/api/health").code == 403);
+	reply = h.send_to(h.secure_port, "GET", "/healthz");
+	TEST_EXPECT(reply.code == 200 && body_text(reply) == "ok");
+
+	// The loop stands still: healthy until the stall time, then stalled, by name.
+	g_watch_clock_ms += stall - 1;
+	TEST_EXPECT(h.watchdog->check().empty());
+	TEST_EXPECT(expect_reply(200, "ok"));
+	g_watch_clock_ms += 1;
+	TEST_EXPECT(h.watchdog->check() == "harness loop");
+	TEST_EXPECT(expect_reply(503, "stalled"));
+	// It moves: healthy at once, before main()'s next check.
+	++g_watch_turns;
+	TEST_EXPECT(expect_reply(200, "ok"));
+	TEST_EXPECT(h.watchdog->check().empty());
+	// main()'s own loop stands still: no check for the stall time is stalled too,
+	// whatever the loops do.
+	g_watch_clock_ms += stall;
+	++g_watch_turns;
+	TEST_EXPECT(expect_reply(503, "stalled"));
+	TEST_EXPECT(h.watchdog->check().empty());
+	TEST_EXPECT(expect_reply(200, "ok"));
+	// The heartbeat line's shape.
+	nws::Heartbeat beat;
+	beat.nw_sessions = 3;
+	beat.hosted_failed = 1;
+	TEST_EXPECT(nws::heartbeat_line(beat) ==
+			"{\"heartbeat\":{\"nw_sessions\":3,\"listed_hosts\":0,\"hosted_live\":0,\"hosted_failed\":1,"
+			"\"machines_lost\":0,\"launch_failures\":0,\"billing_sync_age_s\":-1,\"webhook_rejects\":0}}");
+	return 0;
+}
+
 // ---- hosted servers ----------------------------------------------------------
 
 std::string error_of_reply(const net::HttpReply &reply) {
@@ -5348,6 +5407,7 @@ int run(Harness &h) {
 		{ "dfx2_activation", test_dfx2_activation },
 		{ "unknown_path_404", test_unknown_path_404 },
 		{ "server_info", test_server_info },
+		{ "healthz", test_healthz },
 		{ "admin_host_push", test_admin_host_push },
 		{ "owner_host_push", test_owner_host_push },
 		{ "hosted_server_routes", test_hosted_server_routes },
@@ -5459,9 +5519,15 @@ int main(int argc, char **argv) {
 		// listener answers the harness's own address, the third only 10.0.0.0/8.
 		opennova::novaworld_server::hosted::BootstrapStore bootstrap;
 		opennova::novaworld_server::hosted::BootstrapStore fresh_bootstrap;
+		// GET /healthz's watchdog on a hand-stepped clock, watching one loop whose
+		// counter the healthz case moves; declared before the listener so it
+		// outlives it.
+		nws::Watchdog watchdog(nws::Watchdog::kStallMs, [] { return g_watch_clock_ms.load(); });
+		watchdog.watch("harness loop", [] { return g_watch_turns.load(); });
 		nws::HttpListener http(manager, pool, sessions);
 		http.set_nw_udp_listener(&nw_udp);
 		http.set_admin_links(&links);
+		http.set_watchdog(&watchdog);
 		http.set_hosted_bootstrap(&bootstrap,
 				{ *opennova::novaworld_server::hosted::parse_ipv4_cidr("127.0.0.0/8") });
 		TEST_EXPECT(http.start(config));
@@ -5529,6 +5595,7 @@ int main(int argc, char **argv) {
 		harness.links = &links;
 		harness.bootstrap = &bootstrap;
 		harness.fresh_bootstrap = &fresh_bootstrap;
+		harness.watchdog = &watchdog;
 		rc = run(harness);
 		// Join the Crow threads before the pool and the TempDir go, then the
 		// NW UDP listener the push routes held.

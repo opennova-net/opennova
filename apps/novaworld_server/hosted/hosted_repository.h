@@ -108,6 +108,9 @@ std::vector<HostedServer> list_live(db::Database &db);
 // The newest `limit` servers, live ones first (the admin's fleet view).
 std::vector<HostedServer> list_servers(db::Database &db, size_t limit);
 int count_live(db::Database &db);
+// The servers that ended failed in the last `seconds` (the heartbeat's
+// hosted_failed).
+int count_failed_since(db::Database &db, int64_t seconds);
 // The newest `limit` transitions of a server, oldest first.
 std::vector<HostedEvent> list_events(db::Database &db, int64_t id, size_t limit);
 

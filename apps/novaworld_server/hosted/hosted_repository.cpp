@@ -186,6 +186,13 @@ int count_live(db::Database &db) {
 	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
 }
 
+int count_failed_since(db::Database &db, int64_t seconds) {
+	const auto rows = db.query("SELECT COUNT(*) FROM hosted_servers WHERE state = 'failed' "
+							   "AND ended_at > now() - make_interval(secs => $1);",
+			{ BindValue(seconds) });
+	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
+}
+
 std::vector<HostedEvent> list_events(db::Database &db, int64_t id, size_t limit) {
 	std::vector<HostedEvent> out;
 	const auto rows = db.query("SELECT id, from_state, to_state, detail, at FROM ("

@@ -146,6 +146,13 @@ public:
 
 	const SupervisorConfig &config() const { return config_; }
 
+	// The passes' progress (one per server stepped and one per pass): the stall
+	// watchdog's counter (health.h). Thread-safe.
+	uint64_t pass_turns() const { return pass_turns_.load(std::memory_order_relaxed); }
+	// The launches that failed so far (the heartbeat's launch_failures counts
+	// those since its last line). Thread-safe.
+	uint64_t launch_failures() const { return launch_failures_.load(std::memory_order_relaxed); }
+
 private:
 	// What a pass remembers of a live server between passes (the database holds
 	// the rest): since when it has been in its state, the health misses, and the
@@ -210,6 +217,8 @@ private:
 	std::condition_variable cv_;
 	bool stop_requested_ = false;
 	std::atomic<bool> running_{ false };
+	std::atomic<uint64_t> pass_turns_{ 0 };
+	std::atomic<uint64_t> launch_failures_{ 0 };
 };
 
 } // namespace opennova::novaworld_server::hosted

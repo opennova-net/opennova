@@ -74,6 +74,10 @@ public:
 	// The games catalogue start() loaded (the lobbies the gate answers for).
 	const catalog::GameCatalog &games() const { return games_; }
 
+	// The receive loop's turns so far (one per datagram or 250 ms wait): the
+	// stall watchdog's progress counter (health.h). Thread-safe.
+	uint64_t loop_turns() const { return loop_turns_.load(std::memory_order_relaxed); }
+
 private:
 	void run_loop(opennova::net::ScopedSocket socket,
 	              std::optional<db::ConnectionPool::Lease> db_conn);
@@ -81,6 +85,7 @@ private:
 	std::thread worker_;
 	std::atomic<bool> running_{false};
 	std::atomic<bool> stop_requested_{false};
+	std::atomic<uint64_t> loop_turns_{0};
 	uint16_t bound_port_ = 0;
 	std::string public_host_;
 	// The siblings' ports UDPNOVAWORLD and STARTUPURL advertise, as the config

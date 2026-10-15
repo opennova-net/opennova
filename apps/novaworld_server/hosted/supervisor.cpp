@@ -178,6 +178,7 @@ void Supervisor::tick(uint64_t now_ms) {
 		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[hosted] WARN server %lld: %s\n", static_cast<long long>(s.id), e.what());
 		}
+		pass_turns_.fetch_add(1, std::memory_order_relaxed);
 	}
 	for (auto it = runtimes_.begin(); it != runtimes_.end();) {
 		it = seen.count(it->first) == 0 ? runtimes_.erase(it) : std::next(it);
@@ -189,6 +190,7 @@ void Supervisor::tick(uint64_t now_ms) {
 			std::fprintf(stderr, "[hosted] WARN admin links: %s\n", e.what());
 		}
 	}
+	pass_turns_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void Supervisor::sync_admin_links(db::Database &db) {
@@ -329,6 +331,7 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 		// the event, which the owner reads, says what happened.
 		std::fprintf(stderr, "[hosted] server %lld: the launch failed: %s\n", static_cast<long long>(s.id),
 				error.c_str());
+		launch_failures_.fetch_add(1, std::memory_order_relaxed);
 		attempt_failed(db, s, rt, now_ms, "the launch failed");
 		return;
 	}
