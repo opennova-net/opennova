@@ -129,10 +129,18 @@ bool load_project_document(const std::string &project_file, ProjectDocument &out
 bool save_project_document(const std::string &project_file, const ProjectDocument &doc,
                            Diagnostic &error);
 
+// Whether a project at `root` would overlap a game install, said in `error` (project.in_install):
+// `root` holds the game's boot archives (vfs_has_boot_archive: an install, or a game exported from
+// one), sits inside a folder that does, or holds `install` (the install the project is made on or
+// opens with; "" for none). The editor writes every file of its project, so a project there would
+// rewrite the game's own files in the writers' canonical form. can_create_project and open_project
+// ask it with no install; the session asks again with the one it knows.
+bool project_overlaps_install(const std::string &root, const std::string &install, Diagnostic &error);
+
 // Whether a project could be made at `root` for `target_game` (a gameprofile code) as `expansion`
 // (the expansion's rule, check_project_expansion: what an install has is the caller's to weigh,
-// expansion_install_findings): the directory must not already hold a project file. Nothing is
-// written; create_project asks the same first.
+// expansion_install_findings): the directory must not already hold a project file nor overlap a
+// game install (project_overlaps_install). Nothing is written; create_project asks the same first.
 bool can_create_project(const std::string &root, const std::string &target_game, Diagnostic &error,
                         const ProjectExpansion &expansion = ProjectExpansion());
 
@@ -143,7 +151,8 @@ bool create_project(const std::string &root, const std::string &title, const std
                     ProjectDocument &out, Diagnostic &error,
                     const ProjectExpansion &expansion = ProjectExpansion());
 
-// The project rooted at `root` (its project file must exist).
+// The project rooted at `root` (its project file must exist, and the folder overlap no game
+// install: project_overlaps_install).
 bool open_project(const std::string &root, ProjectDocument &out, Diagnostic &error);
 
 } // namespace opennova::editor

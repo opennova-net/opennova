@@ -339,6 +339,9 @@ bool SessionCore::new_project(const std::string &dir, const std::string &title, 
 		if (!mission.empty())
 			return refused(make_finding(CoreFinding::ProjectFieldInvalid, DiagnosticSeverity::Error, mission));
 	}
+	// Nor around the install it is made on: its files would read as the project's (can_create_project
+	// has refused one in an install already).
+	if (project_overlaps_install(dir, install_root, error)) return refused(error);
 	if (!close_project()) return false;
 	if (!create_project(dir, title, target_game, doc, error, expansion)) return refused(error);
 	note("Created " + doc.title + ".");
@@ -386,7 +389,7 @@ bool SessionCore::open_project(const std::string &dir, bool import_pass, const s
 	view_.project.refused.clear();
 	ProjectDocument doc;
 	Diagnostic error;
-	if (!::opennova::editor::open_project(dir, doc, error)) {
+	const auto refuse_open = [&](const Diagnostic &why) {
 		// Taken off the recent projects, and said so where the welcome page shows why.
 		const bool listed = std::find(view_.project.recent_projects.begin(), view_.project.recent_projects.end(), dir) !=
 		                    view_.project.recent_projects.end();
@@ -394,11 +397,11 @@ bool SessionCore::open_project(const std::string &dir, bool import_pass, const s
 			preferences_.forget_recent_project(dir);
 			save_preferences();
 		}
-		refuse_project(error, listed ? "The project could not be opened, and it is off the recent projects now"
-		                             : "The project could not be opened");
+		refuse_project(why, listed ? "The project could not be opened, and it is off the recent projects now"
+		                           : "The project could not be opened");
 		return false;
-	}
-	if (!close_project()) return false;
+	};
+	if (!::opennova::editor::open_project(dir, doc, error)) return refuse_open(error);
 	const ProjectPaths paths = ProjectPaths::for_root(dir);
 	// The install whose names the Open lists: the run's own (game_install, for this session alone),
 	// else the project's (its local.json, read here and written nowhere), else the one last chosen
@@ -411,6 +414,10 @@ bool SessionCore::open_project(const std::string &dir, bool import_pass, const s
 	const std::string seed = game_install.empty() ? preferences_.values().game_install : std::string();
 	if (!game_install.empty()) local.game_install = absolute_install_path(game_install);
 	else if (local.game_install.empty()) local.game_install = absolute_install_path(seed);
+	// A project around that install would take the game's own files for its own (open_project has
+	// refused one in an install already).
+	if (project_overlaps_install(dir, local.game_install, error)) return refuse_open(error);
+	if (!close_project()) return false;
 	const std::string title = doc.title;
 	const uint64_t id = start_operation(
 			std::make_unique<OpenOperation>(paths, std::move(local), std::move(doc), import_pass, seed, game_install));

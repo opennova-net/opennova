@@ -42,6 +42,22 @@ bool kept_finding(const io::JsonValue &item, Diagnostic &out) {
 	return false;
 }
 
+// Every output an import made is named by a plain file name, so the output folder holds it. A
+// name a source supplies (an .o3a's clip or animation map) could otherwise climb out of the
+// folder, and nothing is written when one does.
+bool outputs_named_plainly(const ImportProduct &product, const std::string &source, std::vector<Diagnostic> &out) {
+	bool plain = true;
+	for (const ImportOutput &output : product.outputs) {
+		FileNameProblem problem = FileNameProblem::None;
+		std::string why;
+		if (check_file_name(output.name, AssetKind::Unknown, problem, why)) continue;
+		out.push_back(make_finding(CoreFinding::ImportWrite, DiagnosticSeverity::Error,
+		                           source + " makes an output its import cannot write: " + why, source));
+		plain = false;
+	}
+	return plain;
+}
+
 } // namespace
 
 ImportPass::ImportPass(const ProjectPaths &paths, const ProjectDocument &project, bool force, std::string only,
@@ -407,7 +423,7 @@ void ImportPass::take_source(const fs::path &path, const std::string &relative, 
 			if (d.asset.empty() || d.asset == filename) d.asset = source.source;
 			result_.diagnostics.push_back(d);
 		}
-		if (!ok) {
+		if (!ok || !outputs_named_plainly(product, source.source, result_.diagnostics)) {
 			source.ok = false;
 		} else {
 			const fs::path out_dir = root_ / path_of(source.output_dir);

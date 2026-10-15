@@ -282,6 +282,15 @@ bool run_duo(ImportContext &context, ImportProduct &out) {
 	return true;
 }
 
+// A `.nam` names its one output by its text, as an .o3a names its clips and its animation map.
+bool run_named(ImportContext &context, ImportProduct &out) {
+	ImportOutput output;
+	output.name = std::string(context.source().begin(), context.source().end());
+	output.bytes = {'x'};
+	out.outputs.push_back(std::move(output));
+	return true;
+}
+
 const std::vector<Importer> &duo_table() {
 	static const std::vector<Importer> table = [] {
 		Importer duo;
@@ -289,12 +298,69 @@ const std::vector<Importer> &duo_table() {
 		duo.version = 1;
 		duo.extensions = {".duo"};
 		duo.run = run_duo;
-		return std::vector<Importer>{duo};
+		Importer named;
+		named.id = "named";
+		named.version = 1;
+		named.extensions = {".nam"};
+		named.run = run_named;
+		return std::vector<Importer>{duo, named};
 	}();
 	return table;
 }
 
 } // namespace
+
+// An import's outputs stay in its output folder. A record whose outputs name a folder, `..` or a path
+// outside the project (a hand edit, a shared project) keeps only its plain names, so Refresh neither
+// deletes nor lists the file such an entry names. An import whose output name its source supplies
+// (`../x`, a path) writes nothing and says so (import.write).
+static int test_import_outputs_stay_in_folder() {
+	test_temp::TempDir dir("opennova_editor_import_outputs_folder");
+	const std::string root = dir.file("project");
+	ProjectDocument doc;
+	Diagnostic error;
+	TEST_EXPECT(create_project(root, "Outputs", "jo", doc, error));
+	const ProjectPaths paths = ProjectPaths::for_root(root);
+	const std::string victim = dir.file("victim.txt");
+	TEST_EXPECT(test_io::write_text(victim, "keep"));
+	const std::string victim_path = fs::absolute(fs::path(victim)).generic_string();
+	TEST_EXPECT(test_io::write_text(root + "/art/pair.duo", "left.txt\n") && test_io::write_text(root + "/art/left.txt", "L"));
+	ImportSidecar record;
+	record.importer = "duo";
+	record.version = 1;
+	record.outputs = {victim_path, "../../../../victim.txt", "sub/pair.txt", "..", "pair.txt"};
+	TEST_EXPECT(save_import_sidecar(root + "/art/pair.duo.import", record, error));
+	ImportSidecar read;
+	TEST_EXPECT(load_import_sidecar(root + "/art/pair.duo.import", read, error) &&
+	            read.outputs == std::vector<std::string>{"pair.txt"});
+	const auto pass = [&]() {
+		ImportPass walk(paths, doc, false, std::string(), duo_table());
+		while (!walk.step(kWholeWalkStep)) {
+		}
+		return walk.take();
+	};
+	ImportRunResult run = pass();
+	TEST_EXPECT(run.reimported == 1 && run.sources.size() == 1 && run.sources[0].ok &&
+	            run.sources[0].outputs.size() == 1);
+	TEST_EXPECT(test_io::read_file_text(victim) == "keep");
+
+	TEST_EXPECT(fs::remove(root + "/art/pair.duo") && fs::remove(root + "/art/pair.duo.import"));
+	const std::string escape = dir.file("escape.txt");
+	for (const std::string &name : {std::string("../../../../escape.txt"), fs::absolute(fs::path(escape)).generic_string(),
+	                                 std::string("sub/escape.txt")}) {
+		TEST_EXPECT(test_io::write_text(root + "/art/evil.nam", name));
+		ImportSidecar named;
+		named.importer = "named";
+		named.version = 1;
+		TEST_EXPECT(save_import_sidecar(root + "/art/evil.nam.import", named, error));
+		run = pass();
+		TEST_EXPECT(run.reimported == 0 && run.sources.size() == 1 && !run.sources[0].ok);
+		TEST_EXPECT(editor_test::count_code(run.diagnostics, "import.write") == 1);
+		TEST_EXPECT(!fs::exists(escape) && !fs::exists(root + "/.opennova/escape.txt"));
+		TEST_EXPECT(load_import_sidecar(root + "/art/evil.nam.import", named, error) && named.outputs.empty());
+	}
+	return 0;
+}
 
 // S13 A8: one import of many inputs (ImportContext). A source and the files its importer reads
 // through its context are recorded, the files' paths in its import record (`inputs`, each from its
@@ -1072,6 +1138,7 @@ int main(int argc, char **argv) {
 	int failures = 0;
 	failures += test_import_pass();
 	failures += test_import_inputs();
+	failures += test_import_outputs_stay_in_folder();
 	failures += test_image_tga_output();
 	failures += test_renamed_import_outputs();
 	failures += test_deep_root_import();

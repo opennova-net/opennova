@@ -16,7 +16,7 @@ namespace godot {
 // each level's meshes, skinned for `bone_count` bones of a rig where `skinned`, as the scene asks them of
 // the data: decoded here, so the scene's loads hit the data's caches. A device that builds a large model
 // over several frames steps it before it hands the data to an ObjectModel (the editor's model and
-// definition previews, on the editor trunk, PR #665).
+// definition previews).
 class ObjectDataBuild {
 public:
 	ObjectDataBuild(Ref<ObjectData> data, bool skinned, int bone_count);

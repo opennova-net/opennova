@@ -55,6 +55,37 @@ static int test_create_then_open() {
 	return 0;
 }
 
+// A project folder overlapping a game install is refused, made or opened (project.in_install): the
+// install itself (a folder holding one of the boot archives, its name in any case), a folder inside
+// it, and a folder holding the install the project is made on or opens with. Nothing is written for a
+// refused one. A folder beside the install makes a project like any other.
+static int test_install_overlap() {
+	test_temp::TempDir dir("opennova_editor_project_install_overlap");
+	const std::string install = dir.file("Joint Operations");
+	TEST_EXPECT(test_io::write_text(install + "/Resource.PFF", "archive"));
+	ProjectDocument doc;
+	Diagnostic error;
+	TEST_EXPECT(!create_project(install, "In", "jo", doc, error) && error.code() == "project.in_install");
+	TEST_EXPECT(!fs::exists(ProjectPaths::for_root(install).project_file) &&
+	            !fs::exists(ProjectPaths::for_root(install).cache_dir));
+	TEST_EXPECT(!can_create_project(install + "/Mods/Mine", "jo", error) && error.code() == "project.in_install");
+	TEST_EXPECT(!create_project(install + "/Mods/Mine", "Inside", "jo", doc, error) &&
+	            error.code() == "project.in_install" && !fs::exists(install + "/Mods"));
+
+	const std::string beside = dir.file("Mine");
+	TEST_EXPECT(create_project(beside, "Mine", "jo", doc, error) && open_project(beside, doc, error));
+	TEST_EXPECT(!project_overlaps_install(beside, install, error));
+	TEST_EXPECT(project_overlaps_install(dir.root(), install, error) && error.code() == "project.in_install");
+	TEST_EXPECT(project_overlaps_install(install, std::string(), error) && error.code() == "project.in_install");
+
+	// A project file put in the install by hand (or by an editor before the guard) does not open.
+	std::error_code ec;
+	fs::copy_file(fs::path(ProjectPaths::for_root(beside).project_file), fs::path(ProjectPaths::for_root(install).project_file), ec);
+	TEST_EXPECT(!ec);
+	TEST_EXPECT(!open_project(install, doc, error) && error.code() == "project.in_install");
+	return 0;
+}
+
 static int test_on_disk_form_is_deterministic() {
 	ProjectDocument doc;
 	doc.project_id = "00000000-0000-4000-8000-000000000000";
@@ -311,6 +342,7 @@ static int test_local_play_settings() {
 int main() {
 	int failures = 0;
 	failures += test_create_then_open();
+	failures += test_install_overlap();
 	failures += test_on_disk_form_is_deterministic();
 	failures += test_refusals();
 	failures += test_expansion_object();

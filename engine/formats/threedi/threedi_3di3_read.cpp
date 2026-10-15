@@ -206,6 +206,26 @@ static const ThreediChunk *find_child(const ThreediChunk *parent, const char id[
     return NULL;
 }
 
+// A counted chunk: a header (count and record size first) and then `count` records of
+// `record_size` bytes, filling the rest exactly, or at least, with `padded`. Each parser checks
+// its chunk against this before reading a record, because a count or record size that
+// disagrees with the chunk's length would read past the chunk. (Asserts used to check this, and
+// release builds compile them out.) The division keeps a huge count from wrapping on ILP32.
+static int counted_chunk_fits(const ThreediChunk *chunk, size_t header, uint32_t count, uint32_t record_size, int padded)
+{
+    if (chunk->data_len < header) {
+        return 0;
+    }
+    const size_t body = chunk->data_len - header;
+    if (record_size == 0) {
+        return count == 0 && (padded || body == 0);
+    }
+    if (body / record_size < count) {
+        return 0;
+    }
+    return padded || (body % record_size == 0 && body / record_size == count);
+}
+
 static int parse_rmdl_chunk(const ThreediChunk *chunk, char out_model_type[5], int32_t *out_render_obj_count, int32_t *out_lod_threshold)
 {
     if (!chunk || chunk->data_len < 12) {
@@ -223,14 +243,13 @@ static int parse_vert_chunk(const ThreediChunk *chunk, ThreediVertexBuffer *out)
     if (!chunk || !out) {
         return -1;
     }
-    assert(chunk->data_len >= 12);
+    if (chunk->data_len < 12) {
+        return -1;
+    }
 
     uint32_t count = read_u32_le(chunk->data);
     uint32_t stride = read_u32_le(chunk->data + 4);
     uint32_t flags = read_u32_le(chunk->data + 8);
-
-    size_t expected_size = 12u + (size_t)count * (size_t)stride;
-    assert(chunk->data_len == expected_size);
 
     int has_tangents = (flags & THREEDI_VERTEX_FLAG_TANGENTS) != 0;
     int is_skinned = (flags & THREEDI_VERTEX_FLAG_SKINNED) != 0;
@@ -241,7 +260,7 @@ static int parse_vert_chunk(const ThreediChunk *chunk, ThreediVertexBuffer *out)
     if (has_tangents) {
         expected_stride += 24; // tangent + bitangent
     }
-    if (stride != expected_stride) {
+    if (stride != expected_stride || !counted_chunk_fits(chunk, 12, count, stride, 0)) {
         return -1;
     }
 
@@ -302,12 +321,14 @@ static int parse_indx_chunk(const ThreediChunk *chunk, ThreediIndexBuffer *out)
     if (!chunk || !out) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(record_size == 2);
-    size_t expected = 8u + (size_t)count * 2u;
-    assert(chunk->data_len == expected);
+    if (record_size != 2 || !counted_chunk_fits(chunk, 8, count, record_size, 0)) {
+        return -1;
+    }
     uint16_t *indices = (uint16_t *)calloc(count, sizeof(uint16_t));
     if (!indices && count > 0) {
         return -1;
@@ -326,12 +347,14 @@ static int parse_strp_chunk(const ThreediChunk *chunk, ThreediTriangleStrip **ou
     if (!chunk || !out_strips || !out_count) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(record_size == 48 || record_size == 68);
-    size_t expected = 8u + (size_t)count * (size_t)record_size;
-    assert(chunk->data_len == expected);
+    if ((record_size != 48 && record_size != 68) || !counted_chunk_fits(chunk, 8, count, record_size, 0)) {
+        return -1;
+    }
     ThreediTriangleStrip *strips = (ThreediTriangleStrip *)calloc(count, sizeof(ThreediTriangleStrip));
     if (!strips && count > 0) {
         return -1;
@@ -376,12 +399,14 @@ static int parse_robj_chunk(const ThreediChunk *chunk, ThreediRenderObject **out
     if (!chunk || !out_objs || !out_count) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(record_size == 52);
-    size_t expected = 8u + (size_t)count * 52u;
-    assert(chunk->data_len == expected);
+    if (record_size != 52 || !counted_chunk_fits(chunk, 8, count, record_size, 0)) {
+        return -1;
+    }
     ThreediRenderObject *objs = (ThreediRenderObject *)calloc(count, sizeof(ThreediRenderObject));
     if (!objs && count > 0) {
         return -1;
@@ -486,7 +511,9 @@ static int parse_cmdl(const ThreediChunk *chunk, ThreediCollisionModelData *out)
     if (!chunk || !out) {
         return -1;
     }
-    assert(chunk->data_len == 64);
+    if (chunk->data_len != 64) {
+        return -1;
+    }
     // bbox {minX, minY, minZ, maxX, maxY, maxZ}, radii, 7 counts.
     for (int i = 0; i < 6; ++i) {
         out->bbox_fp16[i] = read_s32_le(chunk->data + i * 4);
@@ -511,13 +538,12 @@ static int parse_bpln(const ThreediChunk *chunk, ThreediBoundingPlane **out_plan
     if (!chunk || !out_planes || !out_count) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(record_size == 12);
-    size_t expected = 8u + (size_t)count * (size_t)record_size;
-    assert(chunk->data_len == expected);
-    if (chunk->data_len != expected) {
+    if (record_size != 12 || !counted_chunk_fits(chunk, 8, count, record_size, 0)) {
         return -1;
     }
     ThreediBoundingPlane *planes = (ThreediBoundingPlane *)calloc(count, sizeof(ThreediBoundingPlane));
@@ -542,13 +568,12 @@ static int parse_bvol(const ThreediChunk *chunk, ThreediBoundingVolume **out_vol
     if (!chunk || !out_vols || !out_count) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(record_size == 36);
-    size_t expected = 8u + (size_t)count * (size_t)record_size;
-    assert(chunk->data_len == expected);
-    if (chunk->data_len != expected) {
+    if (record_size != 36 || !counted_chunk_fits(chunk, 8, count, record_size, 0)) {
         return -1;
     }
     ThreediBoundingVolume *vols = (ThreediBoundingVolume *)calloc(count, sizeof(ThreediBoundingVolume));
@@ -577,13 +602,13 @@ static int parse_cvrt(const ThreediChunk *chunk, ThreediCollisionVertex **out_ve
     if (!chunk || !out_vertices || !out_count) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(count == 0 || record_size == 8);  // record_size can be 0 when count is 0
-    size_t expected = 8u + (size_t)count * (size_t)record_size;
-    // Don't assert on data_len - some files have padding; runtime check below handles mismatch
-    if (chunk->data_len < expected) {
+    // record_size can be 0 when count is 0, and some files pad the chunk past its records.
+    if ((count != 0 && record_size != 8) || !counted_chunk_fits(chunk, 8, count, record_size, 1)) {
         return -1;
     }
     ThreediCollisionVertex *verts = (ThreediCollisionVertex *)calloc(count, sizeof(ThreediCollisionVertex));
@@ -612,13 +637,13 @@ static int parse_cnrm(const ThreediChunk *chunk, ThreediCollisionNormal **out_no
     if (!chunk || !out_normals || !out_count) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(count == 0 || record_size == 8);  // record_size can be 0 when count is 0
-    size_t expected = 8u + (size_t)count * (size_t)record_size;
-    // Don't assert on data_len - some files have padding; runtime check below handles mismatch
-    if (chunk->data_len < expected) {
+    // record_size can be 0 when count is 0, and some files pad the chunk past its records.
+    if ((count != 0 && record_size != 8) || !counted_chunk_fits(chunk, 8, count, record_size, 1)) {
         return -1;
     }
     ThreediCollisionNormal *normals = (ThreediCollisionNormal *)calloc(count, sizeof(ThreediCollisionNormal));
@@ -646,13 +671,12 @@ static int parse_cfac(const ThreediChunk *chunk, ThreediCollisionFace **out_face
     if (!chunk || !out_faces || !out_count) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(record_size == 44);
-    size_t expected = 8u + (size_t)count * 44u;
-    assert(chunk->data_len == expected);
-    if (chunk->data_len != expected) {
+    if (record_size != 44 || !counted_chunk_fits(chunk, 8, count, record_size, 0)) {
         return -1;
     }
     ThreediCollisionFace *faces = (ThreediCollisionFace *)calloc(count, sizeof(ThreediCollisionFace));
@@ -688,13 +712,12 @@ static int parse_cobj(const ThreediChunk *chunk, ThreediCollisionObject **out_ob
     if (!chunk || !out_objs || !out_count) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(record_size == 88);
-    size_t expected = 8u + (size_t)count * 88u;
-    assert(chunk->data_len == expected);
-    if (chunk->data_len != expected) {
+    if (record_size != 88 || !counted_chunk_fits(chunk, 8, count, record_size, 0)) {
         return -1;
     }
     ThreediCollisionObject *objs = (ThreediCollisionObject *)calloc(count, sizeof(ThreediCollisionObject));
@@ -739,13 +762,12 @@ static int parse_cxlt(const ThreediChunk *chunk, ThreediCollisionTranslation **o
     if (!chunk || !out_trans || !out_count) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(record_size == 12);
-    size_t expected = 8u + (size_t)count * 12u;
-    assert(chunk->data_len == expected);
-    if (chunk->data_len != expected) {
+    if (record_size != 12 || !counted_chunk_fits(chunk, 8, count, record_size, 0)) {
         return -1;
     }
     ThreediCollisionTranslation *trans = (ThreediCollisionTranslation *)calloc(count, sizeof(ThreediCollisionTranslation));
@@ -788,7 +810,9 @@ static int parse_material(const uint8_t *base, uint32_t record_size, ThreediMate
 
     assert(cursor + 4 <= record_size);
     uint32_t tex_count = read_u32_le(base + cursor);
-    assert(tex_count <= 24);
+    if (tex_count > 24) {
+        return -1; // texture_count indexes textures[24]
+    }
     out->texture_count = tex_count;
     cursor += 4;
 
@@ -918,12 +942,14 @@ static int parse_mtrl(const ThreediChunk *chunk, ThreediMaterial **out_mats, uin
     if (!chunk || !out_mats || !out_count || !out_record_size) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(record_size == 584);
-    size_t expected = 8u + (size_t)count * (size_t)record_size;
-    assert(chunk->data_len == expected);
+    if (record_size != 584 || !counted_chunk_fits(chunk, 8, count, record_size, 0)) {
+        return -1;
+    }
     ThreediMaterial *mats = (ThreediMaterial *)calloc(count, sizeof(ThreediMaterial));
     if (!mats && count > 0) {
         return -1;
@@ -946,12 +972,14 @@ static int parse_lght(const ThreediChunk *chunk, ThreediLight **out_lights, size
     if (!chunk || !out_lights || !out_count) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(record_size == 116);
-    size_t expected = 8u + (size_t)count * 116u;
-    assert(chunk->data_len == expected);
+    if (record_size != 116 || !counted_chunk_fits(chunk, 8, count, record_size, 0)) {
+        return -1;
+    }
     ThreediLight *lights = (ThreediLight *)calloc(count, sizeof(ThreediLight));
     if (!lights && count > 0) {
         return -1;
@@ -998,12 +1026,14 @@ static int parse_usrp(const ThreediChunk *chunk, ThreediUserPoint **out_points, 
     if (!chunk || !out_points || !out_count) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(record_size == 48);
-    size_t expected = 8u + (size_t)count * 48u;
-    assert(chunk->data_len == expected);
+    if (record_size != 48 || !counted_chunk_fits(chunk, 8, count, record_size, 0)) {
+        return -1;
+    }
     ThreediUserPoint *pts = (ThreediUserPoint *)calloc(count, sizeof(ThreediUserPoint));
     if (!pts && count > 0) {
         return -1;
@@ -1031,13 +1061,12 @@ static int parse_ovrt(const ThreediChunk *chunk, ThreediOcclusionVertex **out_ve
     if (!chunk || !out_vertices || !out_count || !out_record_size) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(record_size == 12);
-    size_t expected = 8u + (size_t)count * (size_t)record_size;
-    assert(chunk->data_len == expected);
-    if (chunk->data_len != expected) {
+    if (record_size != 12 || !counted_chunk_fits(chunk, 8, count, record_size, 0)) {
         return -1;
     }
     ThreediOcclusionVertex *verts = (ThreediOcclusionVertex *)calloc(count, sizeof(ThreediOcclusionVertex));
@@ -1072,11 +1101,12 @@ static int parse_panm(const ThreediChunk *chunk, ThreediPartAnimation **out_anim
     if (!chunk || !out_anims || !out_count || !out_record_size) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    size_t expected = 8u + (size_t)count * (size_t)record_size;
-    if (chunk->data_len != expected || record_size != 68u) {
+    if (record_size != 68u || !counted_chunk_fits(chunk, 8, count, record_size, 0)) {
         return -1;
     }
     ThreediPartAnimation *anims = (ThreediPartAnimation *)calloc(count, sizeof(ThreediPartAnimation));
@@ -1112,13 +1142,12 @@ static int parse_ofac(const ThreediChunk *chunk, ThreediOcclusionFace **out_face
     if (!chunk || !out_faces || !out_count || !out_record_size) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(record_size == 12);
-    size_t expected = 8u + (size_t)count * (size_t)record_size;
-    assert(chunk->data_len == expected);
-    if (chunk->data_len != expected) {
+    if (record_size != 12 || !counted_chunk_fits(chunk, 8, count, record_size, 0)) {
         return -1;
     }
     ThreediOcclusionFace *faces = (ThreediOcclusionFace *)calloc(count, sizeof(ThreediOcclusionFace));
@@ -1142,13 +1171,12 @@ static int parse_oobj(const ThreediChunk *chunk, ThreediOcclusionObject **out_ob
     if (!chunk || !out_objs || !out_count || !out_record_size) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(record_size == 36);
-    size_t expected = 8u + (size_t)count * (size_t)record_size;
-    assert(chunk->data_len == expected);
-    if (chunk->data_len != expected) {
+    if (record_size != 36 || !counted_chunk_fits(chunk, 8, count, record_size, 0)) {
         return -1;
     }
     ThreediOcclusionObject *objs = (ThreediOcclusionObject *)calloc(count, sizeof(ThreediOcclusionObject));
@@ -1181,13 +1209,12 @@ static int parse_opln_typed(const ThreediChunk *chunk, ThreediOcclusionPlane **o
     if (!chunk || !out_planes || !out_count || !out_record_size) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(record_size == 16);
-    size_t expected = 8u + (size_t)count * (size_t)record_size;
-    assert(chunk->data_len == expected);
-    if (chunk->data_len != expected) {
+    if (record_size != 16 || !counted_chunk_fits(chunk, 8, count, record_size, 0)) {
         return -1;
     }
     ThreediOcclusionPlane *planes = (ThreediOcclusionPlane *)calloc(count, sizeof(ThreediOcclusionPlane));
@@ -1211,13 +1238,12 @@ static int parse_ctrl(const ThreediChunk *chunk, ThreediCtrl *out_ctrl)
     if (!chunk || !out_ctrl) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data + 0);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(record_size == 24);
-    size_t expected = 8u + (size_t)count * (size_t)record_size;
-    assert(chunk->data_len == expected);
-    if (chunk->data_len != expected) {
+    if (record_size != 24 || !counted_chunk_fits(chunk, 8, count, record_size, 0)) {
         return -1;
     }
     ThreediControlRegister *regs = NULL;
@@ -1243,13 +1269,12 @@ static int parse_mtrx(const ThreediChunk *chunk, ThreediMatrixTable *out)
     if (!chunk || !out) {
         return -1;
     }
-    assert(chunk->data_len >= 8);
+    if (chunk->data_len < 8) {
+        return -1;
+    }
     uint32_t count = read_u32_le(chunk->data);
     uint32_t record_size = read_u32_le(chunk->data + 4);
-    assert(record_size == 64);
-    size_t expected = 8u + (size_t)count * (size_t)record_size;
-    assert(chunk->data_len == expected);
-    if (chunk->data_len != expected) {
+    if (record_size != 64 || !counted_chunk_fits(chunk, 8, count, record_size, 0)) {
         return -1;
     }
     ThreediMatrix4x4 *mats = NULL;

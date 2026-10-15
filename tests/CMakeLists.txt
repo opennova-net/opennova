@@ -298,6 +298,11 @@ target_link_libraries(threedi_collision_3di_test PRIVATE opennova_formats)
 target_include_directories(threedi_collision_3di_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_collision_3di COMMAND threedi_collision_3di_test)
 
+# A chunk whose count, record size or length disagree is refused, never read past.
+add_executable(threedi_malformed_chunk_test threedi/malformed_chunk_test.cpp)
+target_link_libraries(threedi_malformed_chunk_test PRIVATE opennova_formats)
+add_test(NAME threedi_malformed_chunk COMMAND threedi_malformed_chunk_test)
+
 # A collision volume's planes -> its convex solid (threedi_volume_solid.h), on synthetic planes.
 add_executable(threedi_volume_solid_test threedi/volume_solid_test.cpp)
 target_link_libraries(threedi_volume_solid_test PRIVATE opennova_formats)
