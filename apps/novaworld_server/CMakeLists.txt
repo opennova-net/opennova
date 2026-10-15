@@ -44,11 +44,13 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/supervisor.cpp
         # Billing (monthly support tiers over Stripe Checkout and the Customer
         # Portal): the settings, the billing tables and the hosting entitlement
-        # read from them, the curl transport (hosted/command_runner.h, its
-        # config file owner-only through hosted/owner_file.cpp), the typed
-        # client and the webhook signature.
+        # read from them, the sync worker keeping them in step with Stripe,
+        # the curl transport (hosted/command_runner.h, its config file
+        # owner-only through hosted/owner_file.cpp), the typed client and the
+        # webhook signature.
         billing/billing_config.cpp
         billing/billing_repository.cpp
+        billing/billing_sync.cpp
         billing/entitlement.cpp
         billing/stripe_api.cpp
         billing/stripe_client.cpp

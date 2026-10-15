@@ -236,17 +236,18 @@ int64_t oldest_pending_age_s(db::Database &db) {
 }
 
 size_t mark_processed(db::Database &db, const std::string &customer_id, const std::string &outcome,
-		std::optional<int64_t> received_by) {
+		const std::optional<std::string> &received_by) {
 	db.exec("UPDATE billing_events SET processed_at = now(), outcome = $1 "
 			"WHERE customer_id = $2 AND processed_at IS NULL "
-			"AND ($3::float8 IS NULL OR received_at <= to_timestamp($3::float8));",
-			{ BindValue(outcome), BindValue(customer_id), optional_int(received_by) });
+			"AND ($3::text IS NULL OR received_at <= $3::timestamptz);",
+			{ BindValue(outcome), BindValue(customer_id),
+					received_by ? BindValue(*received_by) : BindValue(std::monostate{}) });
 	return static_cast<size_t>(db.changes());
 }
 
-int64_t database_now(db::Database &db) {
-	const auto rows = db.query("SELECT floor(extract(epoch FROM clock_timestamp()))::bigint;");
-	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
+std::string database_clock(db::Database &db) {
+	const auto rows = db.query("SELECT clock_timestamp()::text;");
+	return rows.empty() ? std::string() : rows.front().as_text(0).value_or("");
 }
 
 size_t prune_events(db::Database &db, int days) {

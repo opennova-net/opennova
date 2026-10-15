@@ -295,7 +295,9 @@ int test_tables() {
 	TEST_EXPECT(billing::pending_event_count(db) == 3);
 	TEST_EXPECT(billing::oldest_pending_age_s(db) >= 599);
 	// A cutoff before evt_3 marks evt_1 alone.
-	const int64_t cutoff = billing::database_now(db) - 60;
+	const std::string cutoff =
+			db.query("SELECT (clock_timestamp() - interval '60 seconds')::text;").front().as_text(0).value_or("");
+	TEST_EXPECT(!billing::database_clock(db).empty());
 	TEST_EXPECT(billing::mark_processed(db, "cus_b", "synced", cutoff) == 1);
 	TEST_EXPECT(billing::pending_customers(db, 10) == (std::vector<std::string>{ "cus_a", "cus_b" }));
 	TEST_EXPECT(billing::mark_processed(db, "cus_b", "synced") == 1);

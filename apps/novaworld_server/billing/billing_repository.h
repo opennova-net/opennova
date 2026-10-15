@@ -103,13 +103,13 @@ std::vector<std::string> pending_customers(db::Database &db, size_t limit);
 size_t pending_event_count(db::Database &db);
 int64_t oldest_pending_age_s(db::Database &db);
 // Every unprocessed event of the customer marked processed with `outcome`
-// (with `received_by`, Unix seconds, only those received by then: a sync
-// marks the events it started after, so one delivered while it read Stripe
-// waits for the next); how many.
+// (with `received_by`, a database_clock() reading, only those received by
+// then: a sync marks the events it started after, so one delivered while it
+// read Stripe waits for the next); how many.
 size_t mark_processed(db::Database &db, const std::string &customer_id, const std::string &outcome,
-		std::optional<int64_t> received_by = std::nullopt);
-// The database's clock, Unix seconds (rounded down).
-int64_t database_now(db::Database &db);
+		const std::optional<std::string> &received_by = std::nullopt);
+// The database's clock now, as its exact timestamptz text (for mark_processed).
+std::string database_clock(db::Database &db);
 // Processed events older than `days` deleted; how many.
 size_t prune_events(db::Database &db, int days = 30);
 

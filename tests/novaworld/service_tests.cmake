@@ -246,6 +246,32 @@ target_include_directories(billing_entitlement_test PRIVATE
 target_compile_definitions(billing_entitlement_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(billing_entitlement COMMAND billing_entitlement_test)
 
+# The billing worker (apps/novaworld_server/billing/billing_sync.h) against the in-memory
+# Stripe (novaworld/billing_fake_stripe.h) on a migrated database, its passes on a stepped
+# clock: a webhook event's customer synced into the entitlement, a redelivery recorded
+# once, another instance's customer ignored and listed as an orphan, the tables wiped and
+# rebuilt by a reconcile, the backoff of a customer Stripe could not be asked about, a
+# deleted customer, a row Stripe no longer knows, duplicates, and the price check.
+# Crow-free: compiles the billing sources directly.
+add_executable(billing_sync_test
+    novaworld/billing_sync_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/billing_config.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/billing_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/billing_sync.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/entitlement.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/stripe_api.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/stripe_client.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/owner_file.cpp)
+target_link_libraries(billing_sync_test PRIVATE opennova_novaworld_service opennova_app_common Threads::Threads)
+if(WIN32)
+    target_link_libraries(billing_sync_test PRIVATE advapi32)
+endif()
+target_include_directories(billing_sync_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+target_compile_definitions(billing_sync_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+opennova_add_pg_test(billing_sync COMMAND billing_sync_test)
+
 # The credential routes' brake: token buckets on a hand-stepped clock and the
 # trusted-proxy client address. The server's rate_limiter.cpp compiled in
 # directly, so it runs on every build.
