@@ -5,7 +5,7 @@
 
 #include <string>
 #include <string_view>
-
+#include <vector>
 
 namespace opennova::pff {
 
@@ -204,6 +204,29 @@ int pff_write_archive_streamed(const char *path, PffFormat format,
    PFF_WRITE_OK or a PFF_WRITE_ERR_* code (PFF_WRITE_ERR_IO for an index past the entries). */
 int pff_rewrite_with_entry(const PffArchive *source, uint32_t index, const uint8_t *data, uint32_t size,
                            const char *path);
+
+/* One entry an update writes into an archive: stored plain (flags 0) under `name`, stamped with
+   `timestamp` (the command row's time, which UPDATE.EXE's precheck compares within 2 s) and, in
+   the checksum word (+32), io::novalogic_file_crc of its bytes: the CRC the patch-era pack.exe
+   stamps and the precheck compares with the row's crc (JO:CA's one patched entry carries it; the
+   2005 build's entries the plain CRC-32/BZIP2; docs/update/updater-re.md §7, §10, ADR 0061 d8).
+   [orig: Cupdate2Dlg_PrecheckCommands @ 0x407820 (UPDATE.EXE)] */
+struct PffEditEntry {
+	std::string name;
+	std::vector<uint8_t> data;
+	uint32_t timestamp = 0;
+};
+
+/* The archive at `path` with `adds` written in (an entry whose normalized name matches is
+   replaced) and `removes` taken out (a name the archive lacks is nothing to do), as pack.exe's
+   `/FORCE` add and `-name` remove leave it (D-UPD-1: in process, never a child pack.exe). Every
+   other entry keeps its stored bytes, flags, time and checksum. An archive that does not exist is
+   created (PFF3, ADR 0008). Nothing is written when no entry would change (an add identical to the
+   entry it replaces, a remove of a missing name), and `*rewritten` says whether it was. The new
+   archive is written beside `path` ("<path>.new") and then put in its place. Returns PFF_WRITE_OK
+   or a PFF_WRITE_ERR_* code. */
+int pff_apply_edits(const char *path, const std::vector<PffEditEntry> &adds,
+		const std::vector<std::string> &removes, bool *rewritten);
 
 /* Optional progress callback for the streaming writer: invoked once per entry as payloads are
    written, with `done` running 1..n and `total` == n (fires for zero-size entries too, so `done`

@@ -196,6 +196,16 @@ add_library(opennova_formats STATIC
     # trn — terrain config
     ${CMAKE_CURRENT_SOURCE_DIR}/trn/trn_io.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/trn/trn_source_issue.cpp # the lines the readers read otherwise than TrnConfig holds
+    # update — NovaLogic's updater (UPDATE.EXE): the wizard, the command file, SERVER.LST, the 1ZLN
+    # compressed file, the 1SFS single-file update, the updater's INI dialect and checksums
+    # (docs/update/updater-re.md, ADR 0061)
+    ${CMAKE_CURRENT_SOURCE_DIR}/update/command_file.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/update/nlz.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/update/server_list.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/update/sfs.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/update/update_crc.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/update/update_ini.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/update/update_wizard.cpp
     # wac — the WAC scripting language's command table (names + param types),
     # bytecode encoding and compiled Program model. The single-pass compiler
     # (binds names/vars against the live world) and the VM are engine/runtime/wac.
@@ -214,9 +224,9 @@ target_include_directories(opennova_formats
 
 target_link_libraries(opennova_formats PUBLIC opennova_io opennova_crt)
 # The BFC1 decoder inflates through miniz (the PNG reader and writer, formats/png,
-# are the other consumers); the vendored leaf stays private
-# to this group (a STATIC library's PRIVATE deps still ride every downstream
-# link line, so nothing else needs to name it).
+# and the updater's 1ZLN files, formats/update, are the other consumers); the
+# vendored leaf stays private to this group (a STATIC library's PRIVATE deps
+# still ride every downstream link line, so nothing else needs to name it).
 target_link_libraries(opennova_formats PRIVATE opennova_miniz)
 
 # The TrnGen bake (cpt/trngen) makes a quadtree level's nodes on std::threads, as many

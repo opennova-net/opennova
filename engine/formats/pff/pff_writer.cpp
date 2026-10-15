@@ -17,10 +17,17 @@
 #include <formats/pff/pff.h>
 #include <formats/pff/pff_stream_writer.h>
 
+#include <base/io/crc32_mpeg2.h>
+#include <base/io/file_io.h>
+#include <base/io/os_path.h>
+
 #include <stdint.h>
 #include <string.h>
 
+#include <algorithm>
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace opennova::pff {
@@ -82,7 +89,153 @@ int read_rewrite_entry(void *ctx, uint32_t index, uint8_t *out, uint32_t size) {
 	return pff_extract_raw(rewrite.source, &rewrite.source->entries[index], out, size);
 }
 
+/* pff_apply_edits' payloads: a retained entry's stored bytes from the open source, an add's from
+   the caller. origin[i] >= 0 is a source index, < 0 the add -(origin[i] + 1). */
+struct EditPayloads {
+	const PffArchive *source;
+	const std::vector<PffEditEntry> *adds;
+	std::vector<int64_t> origin;
+};
+
+int read_edit_entry(void *ctx, uint32_t index, uint8_t *out, uint32_t size) {
+	const EditPayloads &edit = *static_cast<const EditPayloads *>(ctx);
+	const int64_t origin = edit.origin[index];
+	if (origin >= 0)
+		return pff_extract_raw(edit.source, &edit.source->entries[origin], out, size);
+	const PffEditEntry &add = (*edit.adds)[size_t(-origin - 1)];
+	if (size != add.data.size())
+		return 1;
+	if (size)
+		memcpy(out, add.data.data(), size);
+	return 0;
+}
+
+/* True when the source entry already holds what `add` would write: plain, the same time, the same
+   checksum, the same bytes. */
+bool entry_holds(const PffArchive *source, const PffEntry &entry, const PffEditEntry &add,
+		uint32_t checksum) {
+	if (entry.flags != 0 || entry.size != add.data.size() || entry.timestamp != add.timestamp ||
+			entry.checksum != checksum)
+		return false;
+	std::vector<uint8_t> stored(entry.size ? entry.size : 1);
+	if (pff_extract_raw(source, &entry, stored.data(), entry.size) != 0)
+		return false;
+	return entry.size == 0 || memcmp(stored.data(), add.data.data(), entry.size) == 0;
+}
+
 } // namespace
+
+int pff_apply_edits(const char *path, const std::vector<PffEditEntry> &adds,
+		const std::vector<std::string> &removes, bool *rewritten) {
+	if (rewritten)
+		*rewritten = false;
+	if (path == NULL)
+		return PFF_WRITE_ERR_IO;
+	PffArchive source{};
+	bool have_source = false;
+	std::error_code ec;
+	if (std::filesystem::exists(io::os_path(path), ec)) {
+		if (pff_open(&source, path) != 0)
+			return PFF_WRITE_ERR_IO;
+		have_source = true;
+	}
+	/* pack.exe's remove jobs run before its add jobs [orig: Pack_Tick @ 0x402a70 (UPDATE.EXE): the
+	   remove queue first], so an add of a removed name puts it back; of two adds of one name the
+	   last stands. */
+	std::vector<std::string> removed;
+	for (const std::string &name : removes)
+		removed.push_back(normalized_logical_name(name));
+	std::vector<std::string> add_key(adds.size());
+	for (size_t i = 0; i < adds.size(); ++i)
+		add_key[i] = normalized_logical_name(adds[i].name);
+	auto last_add = [&](const std::string &key) -> int64_t {
+		for (size_t i = adds.size(); i-- > 0;)
+			if (add_key[i] == key)
+				return int64_t(i);
+		return -1;
+	};
+	bool changed = false;
+	EditPayloads payloads{ have_source ? &source : NULL, &adds, {} };
+	std::vector<PffWriteStreamEntry> entries;
+	std::vector<std::string> names;
+	const uint32_t count = have_source ? source.entry_count : 0;
+	names.reserve(count + adds.size());
+	for (uint32_t i = 0; i < count; ++i) {
+		const PffEntry &entry = source.entries[i];
+		const std::string stored = pff_entry_stored_name(entry);
+		const std::string key = normalized_logical_name(stored);
+		const int64_t add = last_add(key);
+		const bool is_removed = std::find(removed.begin(), removed.end(), key) != removed.end();
+		if (add >= 0) {
+			const PffEditEntry &edit = adds[size_t(add)];
+			const uint32_t checksum = io::novalogic_file_crc(edit.data.data(), edit.data.size());
+			if (is_removed || !entry_holds(&source, entry, edit, checksum))
+				changed = true;
+			continue; /* written with the adds below */
+		}
+		if (is_removed) {
+			changed = true;
+			continue;
+		}
+		names.push_back(stored);
+		PffWriteStreamEntry out{};
+		out.size = entry.size;
+		out.flags = entry.flags;
+		out.timestamp = entry.timestamp;
+		out.checksum = entry.checksum;
+		entries.push_back(out);
+		payloads.origin.push_back(int64_t(i));
+	}
+	for (size_t i = 0; i < adds.size(); ++i) {
+		if (last_add(add_key[i]) != int64_t(i))
+			continue;
+		bool existed = false;
+		for (uint32_t e = 0; e < count && !existed; ++e)
+			existed =
+					normalized_logical_name(pff_entry_stored_name(source.entries[e])) == add_key[i];
+		if (!existed)
+			changed = true;
+		if (adds[i].data.size() > UINT32_MAX) {
+			if (have_source)
+				pff_close(&source);
+			return PFF_WRITE_ERR_TOO_LARGE;
+		}
+		names.push_back(adds[i].name);
+		PffWriteStreamEntry out{};
+		out.size = uint32_t(adds[i].data.size());
+		out.flags = 0;
+		out.timestamp = adds[i].timestamp;
+		out.checksum = io::novalogic_file_crc(adds[i].data.data(), adds[i].data.size());
+		entries.push_back(out);
+		payloads.origin.push_back(-int64_t(i) - 1);
+	}
+	if (!changed) {
+		if (have_source)
+			pff_close(&source);
+		return PFF_WRITE_OK;
+	}
+	for (size_t i = 0; i < entries.size(); ++i)
+		entries[i].name = names[i].c_str();
+	const PffFormat format =
+			have_source ? pff_format_for_magic(source.header.magic) : PFF_FORMAT_PFF3;
+	const std::string staged = std::string(path) + ".new";
+	const int rc = pff_write_archive_streamed(staged.c_str(), format, entries.data(),
+			uint32_t(entries.size()), read_edit_entry, &payloads);
+	if (have_source)
+		pff_close(&source);
+	if (rc != PFF_WRITE_OK) {
+		std::filesystem::remove(io::os_path(staged), ec);
+		return rc;
+	}
+	std::string error;
+	if (!io::replace_file(staged, path, error)) {
+		std::filesystem::remove(io::os_path(staged), ec);
+		return PFF_WRITE_ERR_IO;
+	}
+	if (rewritten)
+		*rewritten = true;
+	return PFF_WRITE_OK;
+}
 
 uint32_t pff_magic_for_format(PffFormat format)
 {
