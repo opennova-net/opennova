@@ -20,17 +20,24 @@
 // The driver runs the AWS CLI v2 through a CommandRunner (an argv array, no
 // shell, a timeout), its credentials the service instance's role. Every call
 // names the region, asks for JSON and turns off the pager; every failure is
-// logged and handled here, never thrown, but by list_tagged.
+// logged and handled here, never thrown, but by list_tagged. No lock is held
+// across a CLI call: the driver's state is read and written around it.
 //
 //   launch      run-instances: the kind's launch template (its default
 //               version, or the one the variable pins), the subnet, one
 //               machine, the tags opennova:hosted=1, opennova:deployment,
 //               opennova:machine-kind, opennova:machine-id and Name on the
 //               machine and its volumes (fleet.tf's service policy admits
-//               these keys alone), a client token, and the user-data from an
-//               owner-only file deleted once the call returns. A reply naming no machine fails
-//               the launch; one naming a machine with no private address ends
-//               it at once (its agent could never be admitted).
+//               these keys alone), the row's own client token
+//               (opennova-<deployment>-m<machine id>), and the user-data from
+//               an owner-only file deleted once the call returns. A call cut
+//               short (launch_timeout_ms, or the CLI's exit 255: the network)
+//               is made again, the same, up to launch_attempts: EC2 answers a
+//               client token it has seen with the machine it launched for it,
+//               so a slow answer never leaves a second machine running. A
+//               reply naming no machine fails the launch; one naming a
+//               machine with no private address ends it at once (its agent
+//               could never be admitted).
 //   describe    from ONE describe-instances of every machine this deployment
 //               tagged, read at most every describe_ttl_ms: pending ->
 //               Pending; running -> Running; shutting-down, terminated,
@@ -38,8 +45,12 @@
 //               but Pending within launch_grace_ms of this driver's launch. A
 //               describe that fails reads Unknown (with the addresses last
 //               read) and runs the CLI again only describe_ttl_ms later.
-//   terminate   terminate-instances; a machine EC2 no longer knows is no
-//               error, and an id that is no EC2 id is skipped.
+//   terminate   describe-instances of that machine on both tags first: one
+//               that does not carry opennova:hosted=1 and this deployment's
+//               opennova:deployment is never ended (a row's cloud id could name
+//               any machine of the account), nor is one whose tags did not
+//               read; then terminate-instances. A machine EC2 no longer knows
+//               is no error, and an id that is no EC2 id is skipped.
 //   list_tagged a fresh describe-instances on both tags; pending, running,
 //               stopping and stopped machines. Throws std::runtime_error when
 //               the listing fails.
@@ -89,6 +100,11 @@ struct Ec2MachineConfig {
 	uint64_t describe_ttl_ms = 10 * 1000;
 	uint64_t launch_grace_ms = 3 * 60 * 1000;
 	int command_timeout_ms = 90 * 1000;
+	// A run-instances call, and how many make a launch (the class comment):
+	// together under the supervisor's stall watchdog (health.h, 30 s), whose
+	// pass the launch holds up.
+	int launch_timeout_ms = 12 * 1000;
+	int launch_attempts = 2;
 };
 
 // The values one machine's user-data carries.
@@ -124,6 +140,8 @@ public:
 	static constexpr const char *kLegacyVolumeLabel = "opennova-data";
 	// EC2's raw user-data cap.
 	static constexpr size_t kMaxUserDataBytes = 16 * 1024;
+	// ONNET_HOSTED_DEPLOYMENT's longest: its client tokens then fit EC2's 64.
+	static constexpr size_t kMaxDeploymentBytes = 32;
 	// An ext4 label holds at most 16 bytes.
 	static constexpr size_t kMaxVolumeLabelBytes = 16;
 	// From the launch to the agent's first report: EC2's pending, cloud-init,
@@ -160,6 +178,9 @@ public:
 	// Why the CLI call `what` failed, for the log: its outcome and the start of
 	// its standard error.
 	static std::string cli_failure(const char *what, const proc::CommandResult &result);
+	// A launch's client token: "opennova-<deployment>-m<machine id>", the same
+	// for every call of the row's launch.
+	static std::string client_token(const std::string &deployment, int64_t machine_id);
 
 private:
 	struct Instance {
@@ -173,13 +194,27 @@ private:
 	// options every call takes.
 	std::vector<std::string> command(
 			const std::string &operation, std::vector<std::string> params) const;
-	// The tagged machines, read into instances_; false with `error`.
-	bool refresh(uint64_t now_ms, std::string &error);
+	// describe-instances' --filters on both tags (this deployment's).
+	std::string tag_filters() const;
+	// A describe-instances reply's machines that carry both tags, by id; false
+	// with `error` when it does not read.
+	bool parse_listing(const std::string &out, std::map<std::string, Instance> &listed,
+			std::string &error) const;
+	// Every tagged machine (the CLI call; no lock held); false with `error`.
+	bool read_listing(std::map<std::string, Instance> &listed, std::string &error);
+	// A listing read at `now_ms` made the driver's view (under mu_).
+	void take_listing(std::map<std::string, Instance> listed, uint64_t now_ms);
 	void note_describe_failure(uint64_t now_ms, const std::string &error);
+	// terminate-instances on `cloud_id`, unchecked (terminate checks the tags
+	// first; a launch's own machine carries them); false with `why`.
+	bool terminate_now(const std::string &cloud_id, std::string &why);
+	// The machine ended (or gone already, as `how` says): Gone from now on.
+	void forget(const std::string &cloud_id, const char *how);
 
-	Ec2MachineConfig config_;
+	const Ec2MachineConfig config_; // never changes, so read without the lock
 	proc::CommandRunner &runner_;
 	Clock now_;
+	// Guards what follows, never held across a CLI call.
 	std::mutex mu_;
 	std::map<std::string, Instance> instances_;
 	bool have_listing_ = false;

@@ -2,10 +2,12 @@
 // and settings. The EC2 driver (hosted/ec2_machine_driver.h) on a stub
 // CommandRunner that records every AWS CLI argv and answers it from a script:
 // the launch's run-instances (the exact argv, each kind's launch template and
-// a pinned version, the tags, the client token, the user-data file with the
-// machine's values filled in, deleted after), describe's state mapping from
+// a pinned version, the tags, the row's own client token, the user-data file
+// with the machine's values filled in, deleted after; a call cut short made
+// again the same), describe's state mapping from
 // one cached describe-instances (the launch grace, the cache's lifetime, a
-// failure reading Unknown and its back-off), terminate's idempotence,
+// failure reading Unknown and its back-off), terminate's tag check (a machine
+// without both of this deployment's tags never ended) and its idempotence,
 // list_tagged's scope and its throw, the slots' ports, and every CLI failure,
 // timeout and malformed reply; its config checks and the data sets' volume
 // labels. The shipped machine script (hosted/machine/machine_user_data.sh):
@@ -160,6 +162,13 @@ const std::vector<std::string> &describe_argv() {
 
 std::vector<std::string> terminate_argv(const std::string &id) {
 	return with_globals({ kAws, "ec2", "terminate-instances", "--instance-ids", id });
+}
+
+// The check before a terminate: that one machine, on both tags.
+std::vector<std::string> describe_one_argv(const std::string &id) {
+	return with_globals({ kAws, "ec2", "describe-instances", "--instance-ids", id, "--filters",
+			"[{\"Name\":\"tag:opennova:hosted\",\"Values\":[\"1\"]},"
+			"{\"Name\":\"tag:opennova:deployment\",\"Values\":[\"opennova-server\"]}]" });
 }
 
 std::string instance_json(const std::string &id, const std::string &state,
@@ -340,6 +349,12 @@ int test_config_checks(const std::string &scratch) {
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.subnet = "sg-0123456789abcdef0"; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.deployment = ""; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.deployment = "prod,dev"; }));
+	// The longest deployment still makes a client token EC2 takes (64 at most).
+	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.deployment = std::string(33, 'd'); }));
+	TEST_EXPECT(!refused([](hosted::Ec2MachineConfig &c) { c.deployment = std::string(32, 'd'); }));
+	TEST_EXPECT(
+			hosted::Ec2MachineDriver::client_token(std::string(32, 'd'), INT64_MAX).size() <= 64);
+	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.launch_attempts = 0; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.shared_template = ""; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.shared_template = "my-template"; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.own_template = "lt-XYZ"; }));
@@ -554,15 +569,16 @@ int test_launch(const std::string &scratch) {
 		"{\"LaunchTemplateId\":\"lt-0123456789abcdef0\",\"Version\":\"$Default\"}", "--subnet-id",
 		kSubnet, "--count", "1", "--client-token" };
 	TEST_EXPECT(std::vector<std::string>(argv.begin(), argv.begin() + 10) == head);
-	TEST_EXPECT(argv[10].rfind("opennova-", 0) == 0 && argv[10].size() == 41 &&
-			is_alnum_text(argv[10].substr(9)));
+	// The row's own client token: the same for every call of its launch.
+	TEST_EXPECT(argv[10] == "opennova-opennova-server-m12");
 	TEST_EXPECT(argv[11] == "--tag-specifications");
 	TEST_EXPECT(argv[12] ==
 			"[{\"ResourceType\":\"instance\",\"Tags\":[" + tags +
 					"]},{\"ResourceType\":\"volume\",\"Tags\":[" + tags + "]}]");
 	TEST_EXPECT(argv[13] == "--user-data" && argv[14].rfind("file://", 0) == 0);
 	TEST_EXPECT(std::vector<std::string>(argv.begin() + 15, argv.end()) == globals());
-	TEST_EXPECT(call.timeout_ms == 90 * 1000);
+	// Short enough that a launch's calls stay under the supervisor's stall watchdog.
+	TEST_EXPECT(call.timeout_ms == 12 * 1000);
 	// The user-data: the machine script with this machine's values, and the file gone after.
 	TEST_EXPECT(assigned(call.user_data, "MACHINE_ID") == "12");
 	TEST_EXPECT(assigned(call.user_data, "MACHINE_TOKEN") == launch.bootstrap_token);
@@ -585,6 +601,26 @@ int test_launch(const std::string &scratch) {
 	const hosted::CloudMachine status = rig.driver.describe(kMachineA);
 	TEST_EXPECT(status.state == CloudState::Pending && status.private_address == "10.44.0.21");
 	TEST_EXPECT(rig.runner.calls.size() == 2 && rig.runner.calls[1].argv == describe_argv());
+	return 0;
+}
+
+// A run-instances the timeout cut short (its machine launched meanwhile) is made
+// again with the same client token and user-data, and EC2's answer to it, the
+// machine of the first call, is the launch's: one machine, never two.
+int test_launch_retried(const std::string &scratch) {
+	Rig rig(scratch);
+	rig.runner.replies.push_back(timed_out());
+	rig.runner.replies.push_back(answered(run_instances_reply(kMachineA, "10.44.0.21")));
+	std::string error;
+	const hosted::MachineLaunch launch = launch_of(31);
+	const auto machine = rig.driver.launch(launch, error);
+	TEST_EXPECT(machine && machine->cloud_id == kMachineA);
+	TEST_EXPECT(rig.runner.calls.size() == 2);
+	TEST_EXPECT(rig.runner.calls[0].argv == rig.runner.calls[1].argv);
+	TEST_EXPECT(rig.runner.calls[1].argv[10] == "opennova-opennova-server-m31");
+	TEST_EXPECT(rig.runner.calls[0].user_data == rig.runner.calls[1].user_data &&
+			assigned(rig.runner.calls[1].user_data, "MACHINE_TOKEN") == launch.bootstrap_token);
+	TEST_EXPECT(!fs::exists(fs::u8path(rig.runner.calls[1].user_data_path)));
 	return 0;
 }
 
@@ -642,8 +678,18 @@ int test_launch_failures(const std::string &scratch) {
 									 "\nAn error occurred (UnauthorizedOperation) when calling the "
 									 "RunInstances operation: You are not authorized.\n"),
 			"exited with code 254: An error occurred (UnauthorizedOperation)"));
+	// EC2's own refusal (254) is final: one call. A call cut short is made again.
+	TEST_EXPECT(rig.runner.calls.size() == 1);
+	rig.runner.replies.push_back(timed_out());
 	TEST_EXPECT(launch_fails(timed_out(), "timed out"));
+	TEST_EXPECT(
+			rig.runner.calls.size() == 3 && rig.runner.calls[1].argv == rig.runner.calls[2].argv);
+	rig.runner.replies.push_back(failed(255, "Could not connect to the endpoint URL"));
+	TEST_EXPECT(launch_fails(
+			failed(255, "Could not connect to the endpoint URL"), "exited with code 255"));
+	TEST_EXPECT(rig.runner.calls.size() == 5);
 	TEST_EXPECT(launch_fails(not_started(), "did not start"));
+	TEST_EXPECT(rig.runner.calls.size() == 6);
 	TEST_EXPECT(launch_fails(answered("not json"), "answered no machine id"));
 	TEST_EXPECT(launch_fails(answered("{}"), "answered no machine id"));
 	TEST_EXPECT(launch_fails(answered("{\"Instances\":[]}"), "answered no machine id"));
@@ -750,23 +796,64 @@ int test_describe_failures(const std::string &scratch) {
 int test_terminate(const std::string &scratch) {
 	Rig rig(scratch);
 	TEST_EXPECT(!rig.launch(7, kMachineA, "10.44.0.21").empty());
+	// The machine's tags checked first (that machine, on both tags), then the end.
+	rig.runner.replies.push_back(
+			answered(listing({ instance_json(kMachineA, "running", "10.44.0.21", "7") })));
 	rig.runner.replies.push_back(answered("{\"TerminatingInstances\":[]}"));
-	rig.driver.terminate(kMachineA);
-	TEST_EXPECT(rig.runner.calls.back().argv == terminate_argv(kMachineA));
 	size_t calls = rig.runner.calls.size();
+	rig.driver.terminate(kMachineA);
+	TEST_EXPECT(rig.runner.calls.size() == calls + 2);
+	TEST_EXPECT(rig.runner.calls[calls].argv == describe_one_argv(kMachineA));
+	TEST_EXPECT(rig.runner.calls.back().argv == terminate_argv(kMachineA));
+	calls = rig.runner.calls.size();
 	TEST_EXPECT(rig.driver.describe(kMachineA).state == CloudState::Gone);
 	rig.now += kTtl;
 	TEST_EXPECT(rig.driver.describe(kMachineA).state == CloudState::Gone);
 	TEST_EXPECT(rig.runner.calls.size() == calls);
-	// A machine EC2 no longer knows: no error, and Gone.
+	// A machine EC2 no longer knows, at the check or at the end: no error, and Gone.
+	rig.runner.replies.push_back(failed(254,
+			"An error occurred (InvalidInstanceID.NotFound) when calling "
+			"the DescribeInstances operation"));
+	rig.driver.terminate(kMachineB);
+	TEST_EXPECT(rig.runner.calls.size() == calls + 1);
+	rig.runner.replies.push_back(answered(
+			listing({ instance_json("i-0ddddddddddddddd4", "running", "10.44.0.24", "10") })));
 	rig.runner.replies.push_back(failed(254,
 			"An error occurred (InvalidInstanceID.NotFound) when calling "
 			"the TerminateInstances operation"));
-	rig.driver.terminate(kMachineB);
+	rig.driver.terminate("i-0ddddddddddddddd4");
 	calls = rig.runner.calls.size();
 	TEST_EXPECT(rig.driver.describe(kMachineB).state == CloudState::Gone &&
+			rig.driver.describe("i-0ddddddddddddddd4").state == CloudState::Gone &&
 			rig.runner.calls.size() == calls);
+	// One terminated already: nothing to end.
+	rig.runner.replies.push_back(
+			answered(listing({ instance_json("i-0eeeeeeeeeeeeeee5", "terminated", "", "11") })));
+	rig.driver.terminate("i-0eeeeeeeeeeeeeee5");
+	TEST_EXPECT(rig.runner.calls.size() == calls + 1);
+	// One without both of this deployment's tags (another deployment's, or none):
+	// never ended, whatever the row says.
+	for (const std::string &foreign :
+			{ listing({}), listing({ instance_json("i-0fffffffffffffff6", "running", "10.44.0.26",
+									  "12", "", "opennova-dev") }),
+					listing({ instance_json("i-0fffffffffffffff6", "running", "10.44.0.26", "12",
+							"", kDeployment, false) }) }) {
+		rig.runner.replies.push_back(answered(foreign));
+		calls = rig.runner.calls.size();
+		rig.driver.terminate("i-0fffffffffffffff6");
+		TEST_EXPECT(rig.runner.calls.size() == calls + 1 &&
+				rig.runner.calls.back().argv == describe_one_argv("i-0fffffffffffffff6"));
+	}
+	// A check that does not answer: not ended either (the sweep tries again).
+	for (CommandResult reply : { failed(255, "throttled"), timed_out(), answered("not json") }) {
+		rig.runner.replies.push_back(std::move(reply));
+		calls = rig.runner.calls.size();
+		rig.driver.terminate("i-0fffffffffffffff6");
+		TEST_EXPECT(rig.runner.calls.size() == calls + 1);
+	}
 	// A refusal leaves the machine as EC2 says it is (the sweep tries again).
+	rig.runner.replies.push_back(answered(
+			listing({ instance_json("i-0ccccccccccccccc3", "running", "10.44.0.23", "9") })));
 	rig.runner.replies.push_back(failed(254, "An error occurred (UnauthorizedOperation)"));
 	rig.driver.terminate("i-0ccccccccccccccc3");
 	rig.now += kTtl;
@@ -784,6 +871,8 @@ int test_terminate(const std::string &scratch) {
 int test_list_tagged(const std::string &scratch) {
 	Rig rig(scratch);
 	TEST_EXPECT(!rig.launch(7, kMachineA, "10.44.0.21").empty());
+	rig.runner.replies.push_back(answered(
+			listing({ instance_json("i-0aaaaaaaaaaaaaa07", "running", "10.44.0.27", "13") })));
 	rig.runner.replies.push_back(answered("{}"));
 	rig.driver.terminate("i-0aaaaaaaaaaaaaa07");
 	const std::string all = listing({
@@ -1014,6 +1103,7 @@ int main() {
 		{ "machine_script", test_machine_script },
 		{ "slot_plan", test_slot_plan },
 		{ "launch", test_launch },
+		{ "launch_retried", test_launch_retried },
 		{ "launch_per_kind", test_launch_per_kind },
 		{ "launch_failures", test_launch_failures },
 		{ "describe", test_describe },

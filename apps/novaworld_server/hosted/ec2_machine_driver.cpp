@@ -191,8 +191,13 @@ std::string Ec2MachineDriver::check_config(const Ec2MachineConfig &c) {
 		return "ONNET_HOSTED_EC2_REGION is no region name";
 	if (!is_aws_id(c.subnet, "subnet-"))
 		return "ONNET_HOSTED_EC2_SUBNET is no subnet id";
-	if (c.deployment.empty() || c.deployment.size() > 64 || !all_of(c.deployment, is_name_char))
-		return "ONNET_HOSTED_DEPLOYMENT is not 1..64 letters, digits, '.', '_' and '-'";
+	// At most kMaxDeploymentBytes, so every launch's client token fits EC2's 64.
+	if (c.deployment.empty() || c.deployment.size() > kMaxDeploymentBytes ||
+			!all_of(c.deployment, is_name_char))
+		return "ONNET_HOSTED_DEPLOYMENT is not 1.." + std::to_string(kMaxDeploymentBytes) +
+				" letters, digits, '.', '_' and '-'";
+	if (c.launch_attempts < 1 || c.launch_timeout_ms <= 0)
+		return "no launch attempt";
 	std::string id;
 	std::string version;
 	if (!split_template(c.shared_template, id, version))
@@ -273,14 +278,67 @@ SlotPlan Ec2MachineDriver::slot_plan(const std::string &, int slot) {
 	SlotPlan plan;
 	plan.game_port = slot_game_port(slot);
 	plan.admin_port = slot_admin_port(slot);
-	std::lock_guard<std::mutex> lock(mu_);
 	plan.admin_allowed_ip = config_.service_address;
 	return plan;
 }
 
+std::string Ec2MachineDriver::client_token(const std::string &deployment, int64_t machine_id) {
+	return "opennova-" + deployment + "-m" + std::to_string(machine_id);
+}
+
+std::string Ec2MachineDriver::tag_filters() const {
+	return "[{\"Name\":\"tag:" + std::string(kTagHosted) +
+			"\",\"Values\":[\"1\"]},{\"Name\":\"tag:" + kTagDeployment + "\",\"Values\":[" +
+			json_text(config_.deployment) + "]}]";
+}
+
+bool Ec2MachineDriver::parse_listing(const std::string &out,
+		std::map<std::string, Instance> &listed, std::string &error) const {
+	io::JsonValue reply;
+	std::string parse_error;
+	if (!io::json_parse(out, reply, parse_error)) {
+		error = "describe-instances answered no JSON (" + loggable(parse_error, 120) + ")";
+		return false;
+	}
+	const io::JsonValue *reservations = member(reply, "Reservations", io::JsonValue::Type::Array);
+	if (reservations == nullptr) {
+		error = "describe-instances answered no Reservations list";
+		return false;
+	}
+	for (const io::JsonValue &reservation : reservations->array) {
+		const io::JsonValue *list = reservation.is_object()
+				? member(reservation, "Instances", io::JsonValue::Type::Array)
+				: nullptr;
+		if (list == nullptr)
+			continue;
+		for (const io::JsonValue &instance : list->array) {
+			if (!instance.is_object())
+				continue;
+			const std::string id = text_member(instance, "InstanceId");
+			// The filter's own scope again: a machine without both tags is not
+			// this deployment's.
+			if (!is_instance_id(id) || tag_value(instance, kTagHosted) != "1" ||
+					tag_value(instance, kTagDeployment) != config_.deployment)
+				continue;
+			Instance seen;
+			seen.state = state_name_of(instance);
+			seen.private_address = text_member(instance, "PrivateIpAddress");
+			seen.public_address = text_member(instance, "PublicIpAddress");
+			if (!seen.private_address.empty() && !parse_ipv4(seen.private_address))
+				seen.private_address.clear();
+			if (!seen.public_address.empty() && !parse_ipv4(seen.public_address))
+				seen.public_address.clear();
+			seen.machine_id = machine_id_of(tag_value(instance, kTagMachineId));
+			listed[id] = std::move(seen);
+		}
+	}
+	return true;
+}
+
 std::optional<LaunchedMachine> Ec2MachineDriver::launch(
 		const MachineLaunch &launch, std::string &error) {
-	std::lock_guard<std::mutex> lock(mu_);
+	// config_ never changes: everything up to the bookkeeping runs unlocked, the
+	// CLI call above all.
 	if (launch.machine_id <= 0) {
 		error = "no machine id";
 		return std::nullopt;
@@ -325,16 +383,28 @@ std::optional<LaunchedMachine> Ec2MachineDriver::launch(
 					config_.deployment + "-" + machine_kind_text(launch.kind) + "-" + machine);
 	const std::string tag_specifications = "[{\"ResourceType\":\"instance\",\"Tags\":[" + tags +
 			"]},{\"ResourceType\":\"volume\",\"Tags\":[" + tags + "]}]";
-	const proc::CommandResult result =
-			runner_.run(command("run-instances",
-								{ "--launch-template",
-										"{\"LaunchTemplateId\":" + json_text(template_id) +
-												",\"Version\":" + json_text(template_version) + "}",
-										"--subnet-id", config_.subnet, "--count", "1",
-										"--client-token", "opennova-" + random_secret(32),
-										"--tag-specifications", tag_specifications, "--user-data",
-										"file://" + user_data_path.u8string() }),
-					config_.command_timeout_ms);
+	const std::vector<std::string> argv = command("run-instances",
+			{ "--launch-template",
+					"{\"LaunchTemplateId\":" + json_text(template_id) +
+							",\"Version\":" + json_text(template_version) + "}",
+					"--subnet-id", config_.subnet, "--count", "1", "--client-token",
+					client_token(config_.deployment, launch.machine_id), "--tag-specifications",
+					tag_specifications, "--user-data", "file://" + user_data_path.u8string() });
+	// The client token is the row's own, so a call the timeout or the network cut
+	// short (its machine may run) is made again, the same, and EC2 answers it
+	// with the machine it launched then, never a second one.
+	proc::CommandResult result;
+	for (int attempt = 1; attempt <= config_.launch_attempts; ++attempt) {
+		result = runner_.run(argv, config_.launch_timeout_ms);
+		const bool cut_short = result.outcome == proc::CommandResult::Outcome::TimedOut ||
+				(result.outcome == proc::CommandResult::Outcome::Exited && result.exit_code == 255);
+		if (result.ok() || !cut_short || attempt == config_.launch_attempts)
+			break;
+		std::fprintf(stderr,
+				"[fleet] WARN ec2: machine %lld: %s; asking again with the same client token\n",
+				static_cast<long long>(launch.machine_id),
+				cli_failure("run-instances", result).c_str());
+	}
 	std::error_code ec;
 	fs::remove(user_data_path, ec);
 	if (!result.ok()) {
@@ -365,20 +435,16 @@ std::optional<LaunchedMachine> Ec2MachineDriver::launch(
 	out.instance_type = text_member(*instance, "InstanceType");
 	out.template_version = template_id + ":" + template_version;
 	if (!parse_ipv4(out.private_address)) {
-		// A machine whose agent nothing would admit: ended now rather than left to boot.
+		// A machine whose agent nothing would admit: ended now rather than left to
+		// boot (this very launch tagged it).
 		error = "run-instances answered machine " + out.cloud_id + " with no private address";
-		const proc::CommandResult ended =
-				runner_.run(command("terminate-instances", { "--instance-ids", out.cloud_id }),
-						config_.command_timeout_ms);
-		if (ended.ok())
-			terminated_ms_[out.cloud_id] = now_();
-		else
-			error += "; ending it failed too (" + cli_failure("terminate-instances", ended) + ")";
+		std::string why;
+		if (!terminate_now(out.cloud_id, why))
+			error += "; ending it failed too (" + why + ")";
 		return std::nullopt;
 	}
 	if (!out.public_address.empty() && !parse_ipv4(out.public_address))
 		out.public_address.clear();
-	const uint64_t now = now_();
 	Instance seen;
 	seen.state = state_name_of(*instance);
 	if (seen.state.empty())
@@ -386,65 +452,29 @@ std::optional<LaunchedMachine> Ec2MachineDriver::launch(
 	seen.private_address = out.private_address;
 	seen.public_address = out.public_address;
 	seen.machine_id = launch.machine_id;
-	instances_[out.cloud_id] = seen;
-	launched_ms_[out.cloud_id] = now;
+	{
+		std::lock_guard<std::mutex> lock(mu_);
+		instances_[out.cloud_id] = seen;
+		launched_ms_[out.cloud_id] = now_();
+	}
 	std::printf("[fleet] ec2: machine %lld (%s) launched as %s at %s\n",
 			static_cast<long long>(launch.machine_id), machine_kind_text(launch.kind),
 			out.cloud_id.c_str(), out.private_address.c_str());
 	return out;
 }
 
-bool Ec2MachineDriver::refresh(uint64_t now_ms, std::string &error) {
-	const proc::CommandResult result = runner_.run(
-			command("describe-instances",
-					{ "--filters",
-							"[{\"Name\":\"tag:" + std::string(kTagHosted) +
-									"\",\"Values\":[\"1\"]},{\"Name\":\"tag:" + kTagDeployment +
-									"\",\"Values\":[" + json_text(config_.deployment) + "]}]" }),
-			config_.command_timeout_ms);
+bool Ec2MachineDriver::read_listing(std::map<std::string, Instance> &listed, std::string &error) {
+	const proc::CommandResult result =
+			runner_.run(command("describe-instances", { "--filters", tag_filters() }),
+					config_.command_timeout_ms);
 	if (!result.ok()) {
 		error = cli_failure("describe-instances", result);
 		return false;
 	}
-	io::JsonValue reply;
-	std::string parse_error;
-	if (!io::json_parse(result.out, reply, parse_error)) {
-		error = "describe-instances answered no JSON (" + loggable(parse_error, 120) + ")";
-		return false;
-	}
-	const io::JsonValue *reservations = member(reply, "Reservations", io::JsonValue::Type::Array);
-	if (reservations == nullptr) {
-		error = "describe-instances answered no Reservations list";
-		return false;
-	}
-	std::map<std::string, Instance> listed;
-	for (const io::JsonValue &reservation : reservations->array) {
-		const io::JsonValue *list = reservation.is_object()
-				? member(reservation, "Instances", io::JsonValue::Type::Array)
-				: nullptr;
-		if (list == nullptr)
-			continue;
-		for (const io::JsonValue &instance : list->array) {
-			if (!instance.is_object())
-				continue;
-			const std::string id = text_member(instance, "InstanceId");
-			// The filter's own scope again: a machine without both tags is not
-			// this deployment's.
-			if (!is_instance_id(id) || tag_value(instance, kTagHosted) != "1" ||
-					tag_value(instance, kTagDeployment) != config_.deployment)
-				continue;
-			Instance seen;
-			seen.state = state_name_of(instance);
-			seen.private_address = text_member(instance, "PrivateIpAddress");
-			seen.public_address = text_member(instance, "PublicIpAddress");
-			if (!seen.private_address.empty() && !parse_ipv4(seen.private_address))
-				seen.private_address.clear();
-			if (!seen.public_address.empty() && !parse_ipv4(seen.public_address))
-				seen.public_address.clear();
-			seen.machine_id = machine_id_of(tag_value(instance, kTagMachineId));
-			listed[id] = std::move(seen);
-		}
-	}
+	return parse_listing(result.out, listed, error);
+}
+
+void Ec2MachineDriver::take_listing(std::map<std::string, Instance> listed, uint64_t now_ms) {
 	// A machine this driver launched a moment ago that EC2 does not list yet
 	// keeps what its launch read.
 	for (const auto &[id, when] : launched_ms_) {
@@ -465,7 +495,6 @@ bool Ec2MachineDriver::refresh(uint64_t now_ms, std::string &error) {
 		describe_failing_ = false;
 		std::printf("[fleet] ec2: describe-instances answers again\n");
 	}
-	return true;
 }
 
 void Ec2MachineDriver::note_describe_failure(uint64_t now_ms, const std::string &error) {
@@ -480,21 +509,34 @@ void Ec2MachineDriver::note_describe_failure(uint64_t now_ms, const std::string 
 }
 
 CloudMachine Ec2MachineDriver::describe(const std::string &cloud_id) {
-	std::lock_guard<std::mutex> lock(mu_);
 	CloudMachine status;
-	if (terminated_ms_.count(cloud_id) != 0 || !is_instance_id(cloud_id))
+	if (!is_instance_id(cloud_id))
 		return status; // Gone
 	const uint64_t now = now_();
-	bool fresh = have_listing_ && now - listed_ms_ < config_.describe_ttl_ms;
-	// A describe-instances that failed is tried again describe_ttl_ms later,
-	// not at every describe: while the EC2 API is down, a pass's describes would
-	// otherwise each wait out a CLI run.
-	const bool backing_off =
-			describe_failing_ && now - describe_failed_ms_ < config_.describe_ttl_ms;
-	if (!fresh && !backing_off) {
-		std::string error;
-		fresh = refresh(now, error);
-		if (!fresh)
+	bool fresh = false;
+	bool read_now = false;
+	{
+		std::lock_guard<std::mutex> lock(mu_);
+		if (terminated_ms_.count(cloud_id) != 0)
+			return status; // Gone
+		fresh = have_listing_ && now - listed_ms_ < config_.describe_ttl_ms;
+		// A describe-instances that failed is tried again describe_ttl_ms later,
+		// not at every describe: while the EC2 API is down, a pass's describes
+		// would otherwise each wait out a CLI run.
+		const bool backing_off =
+				describe_failing_ && now - describe_failed_ms_ < config_.describe_ttl_ms;
+		read_now = !fresh && !backing_off;
+	}
+	std::map<std::string, Instance> listed;
+	std::string error;
+	// The CLI call outside the lock.
+	const bool read = read_now && read_listing(listed, error);
+	std::lock_guard<std::mutex> lock(mu_);
+	if (read_now) {
+		fresh = read;
+		if (read)
+			take_listing(std::move(listed), now);
+		else
 			note_describe_failure(now, error);
 	}
 	const auto it = instances_.find(cloud_id);
@@ -527,41 +569,98 @@ CloudMachine Ec2MachineDriver::describe(const std::string &cloud_id) {
 	return status;
 }
 
+namespace {
+
+// EC2's answer for an instance id it does not know (any longer).
+bool says_not_found(const proc::CommandResult &result) {
+	return result.outcome == proc::CommandResult::Outcome::Exited &&
+			result.err.find("InvalidInstanceID.NotFound") != std::string::npos;
+}
+
+} // namespace
+
+void Ec2MachineDriver::forget(const std::string &cloud_id, const char *how) {
+	{
+		std::lock_guard<std::mutex> lock(mu_);
+		terminated_ms_[cloud_id] = now_();
+		launched_ms_.erase(cloud_id);
+		const auto it = instances_.find(cloud_id);
+		if (it != instances_.end())
+			it->second.state = "shutting-down";
+	}
+	std::printf("[fleet] ec2: machine %s %s\n", cloud_id.c_str(), how);
+}
+
+bool Ec2MachineDriver::terminate_now(const std::string &cloud_id, std::string &why) {
+	const proc::CommandResult result =
+			runner_.run(command("terminate-instances", { "--instance-ids", cloud_id }),
+					config_.command_timeout_ms);
+	const bool unknown = says_not_found(result);
+	if (!result.ok() && !unknown) {
+		why = cli_failure("terminate-instances", result);
+		return false;
+	}
+	forget(cloud_id, unknown ? "was gone already" : "terminated");
+	return true;
+}
+
 void Ec2MachineDriver::terminate(const std::string &cloud_id) {
-	std::lock_guard<std::mutex> lock(mu_);
 	if (!is_instance_id(cloud_id)) {
 		std::printf("[fleet] ec2: machine %s is no EC2 machine; nothing to end\n",
 				loggable(cloud_id).c_str());
 		return;
 	}
-	const proc::CommandResult result =
-			runner_.run(command("terminate-instances", { "--instance-ids", cloud_id }),
-					config_.command_timeout_ms);
-	const bool unknown = result.outcome == proc::CommandResult::Outcome::Exited &&
-			result.err.find("InvalidInstanceID.NotFound") != std::string::npos;
-	if (!result.ok() && !unknown) {
-		// It may run on: the supervisor's sweep finds it and ends it again.
-		std::fprintf(stderr, "[fleet] WARN ec2: ending machine %s failed: %s\n", cloud_id.c_str(),
-				cli_failure("terminate-instances", result).c_str());
+	// A row's cloud id could name any machine of the account: only one that
+	// carries both of this deployment's tags is ended. Whatever stops the check
+	// leaves the machine as it is (the supervisor's sweep tries again).
+	const std::vector<std::string> check = command(
+			"describe-instances", { "--instance-ids", cloud_id, "--filters", tag_filters() });
+	const proc::CommandResult checked = runner_.run(check, config_.command_timeout_ms);
+	if (says_not_found(checked)) {
+		forget(cloud_id, "was gone already");
 		return;
 	}
-	terminated_ms_[cloud_id] = now_();
-	launched_ms_.erase(cloud_id);
-	const auto it = instances_.find(cloud_id);
-	if (it != instances_.end())
-		it->second.state = "shutting-down";
-	std::printf("[fleet] ec2: machine %s %s\n", cloud_id.c_str(),
-			unknown ? "was gone already" : "terminated");
+	std::map<std::string, Instance> listed;
+	std::string why;
+	if (!checked.ok())
+		why = cli_failure("describe-instances", checked);
+	if (!checked.ok() || !parse_listing(checked.out, listed, why)) {
+		std::fprintf(stderr,
+				"[fleet] WARN ec2: machine %s was not ended: its tags did not read (%s)\n",
+				cloud_id.c_str(), why.c_str());
+		return;
+	}
+	const auto it = listed.find(cloud_id);
+	if (it == listed.end()) {
+		std::fprintf(stderr,
+				"[fleet] WARN ec2: machine %s carries no %s=1 and %s=%s: no machine of this "
+				"deployment's, it is not ended\n",
+				cloud_id.c_str(), kTagHosted, kTagDeployment, config_.deployment.c_str());
+		return;
+	}
+	if (it->second.state == "terminated") {
+		forget(cloud_id, "was gone already");
+		return;
+	}
+	if (!terminate_now(cloud_id, why)) {
+		// It may run on: the supervisor's sweep finds it and ends it again.
+		std::fprintf(stderr, "[fleet] WARN ec2: ending machine %s failed: %s\n", cloud_id.c_str(),
+				why.c_str());
+	}
 }
 
 std::vector<TaggedCloudMachine> Ec2MachineDriver::list_tagged() {
-	std::lock_guard<std::mutex> lock(mu_);
 	const uint64_t now = now_();
+	std::map<std::string, Instance> listed;
 	std::string error;
-	if (!refresh(now, error)) {
+	// The CLI call outside the lock.
+	const bool read = read_listing(listed, error);
+	std::lock_guard<std::mutex> lock(mu_);
+	if (!read) {
 		note_describe_failure(now, error);
 		throw std::runtime_error("ec2: the machines could not be listed: " + error);
 	}
+	take_listing(std::move(listed), now);
 	std::vector<TaggedCloudMachine> out;
 	for (const auto &[id, instance] : instances_)
 		if (is_listed_state(instance.state) && terminated_ms_.count(id) == 0)
