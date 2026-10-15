@@ -10,6 +10,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/text_types.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/document.h>
 #include <editor/model/source_state.h>
 #include <editor/model/text_document.h>

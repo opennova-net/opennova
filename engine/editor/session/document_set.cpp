@@ -33,6 +33,7 @@
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/native_text_sites.h>
 #include <editor/graph/rename_transaction.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
 #include <editor/model/text_document.h>

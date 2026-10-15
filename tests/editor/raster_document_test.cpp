@@ -6,6 +6,7 @@
 // payload putting back what it wrote; a cancelled gesture dropped; a snapshot read-only and apart; a save
 // written and checked against; a file no codec reads refused; and a type of it counted as raster content.
 #include <editor/documents/document_types.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/finding_code_row.h>
 #include <editor/model/raster_document.h>
 #include <editor/model/text_document.h>

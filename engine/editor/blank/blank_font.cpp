@@ -1,5 +1,6 @@
 #include "blank_makers.h"
 
+#include <editor/model/core_finding.h>
 #include <formats/fnt/fnt.h>
 #include <formats/fnt/fnt_stroke_font.h>
 

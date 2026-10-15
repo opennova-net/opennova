@@ -17,6 +17,7 @@
 #include <editor/documents/mission_variable_names.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/documents/texture_roles.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/staged_rows.h>
 #include <editor/project/project_files.h>

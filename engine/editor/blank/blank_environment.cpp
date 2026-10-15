@@ -2,6 +2,7 @@
 
 #include <sstream>
 
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <formats/env/env.h>
 

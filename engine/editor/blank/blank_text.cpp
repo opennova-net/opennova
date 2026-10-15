@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <sstream>
 
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <formats/avatars/avatars.h>
 #include <formats/def/def_hudfx.h>

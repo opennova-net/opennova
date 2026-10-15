@@ -5,6 +5,7 @@
 #include <optional>
 #include <vector>
 
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <editor/session/build_operation.h>
 #include <editor/session/disk_watch.h>

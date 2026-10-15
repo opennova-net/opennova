@@ -6,6 +6,7 @@
 #include <editor/documents/config_overrun.h>
 #include <editor/documents/document_types.h>
 #include <editor/documents/line_ends.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 

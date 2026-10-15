@@ -13,8 +13,8 @@
 #include <utility>
 #include <vector>
 
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
-#include <editor/model/finding_code_row.h>
 #include <editor/model/raster_document.h>
 
 namespace editor_test {

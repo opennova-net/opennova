@@ -10,6 +10,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kind.h>
 #include <editor/blank/blank_factory.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/field_text.h>
 #include <editor/model/finding_code_row.h>
 #include <editor/project/project_files.h>

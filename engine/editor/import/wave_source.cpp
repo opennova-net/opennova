@@ -2,6 +2,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 
 namespace opennova::editor {

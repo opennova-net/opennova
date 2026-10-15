@@ -5,6 +5,7 @@
 #include <editor/documents/catalog_validation.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/documents/texture_roles.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <formats/grm/grm.h>

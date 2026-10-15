@@ -22,6 +22,7 @@
 #include <editor/graph/graph_names.h>
 #include <editor/import/converter.h>
 #include <editor/import/importer.h>
+#include <editor/model/core_finding.h>
 #include <runtime/assets/mission_fixed_files.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>

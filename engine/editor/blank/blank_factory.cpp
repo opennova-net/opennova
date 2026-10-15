@@ -6,6 +6,7 @@
 #include "blank_makers.h"
 
 #include <editor/assets/asset_kinds.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <formats/configfile/config_file.h>
 #include <runtime/mission/mission_sidecars.h>

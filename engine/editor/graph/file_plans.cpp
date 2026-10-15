@@ -14,7 +14,7 @@
 #include <editor/import/import_run.h>
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
-#include <editor/model/finding_code_row.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 
 namespace opennova::editor {

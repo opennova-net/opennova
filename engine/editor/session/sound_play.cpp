@@ -10,11 +10,11 @@
 #include <editor/documents/mission_document.h>
 #include <editor/documents/sound_bank_document.h>
 #include <editor/documents/music_bank_document.h>
+#include <editor/model/core_finding.h>
 #include <editor/preview/dialog_preview.h>
 #include <editor/assets/project_asset_source.h>
 #include <runtime/mission/mission_sidecars.h>
 #include <editor/documents/sound_profile_document.h>
-#include <editor/model/finding_code_row.h>
 #include <editor/preview/model_viewport.h>
 #include <editor/preview/viewports.h>
 #include <editor/project/project_document.h>

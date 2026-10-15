@@ -16,6 +16,7 @@ class AssetGraph;
 class ValidationCache;
 struct AssetEntry;
 struct ValidationInput;
+enum class CoreFinding;
 
 // The texture use check (ADR 0046 S18; the texture kind's row of graph/use_checks): what each texture
 // reference's role asks of the file its loader opens, read from that file's header (texture_header,

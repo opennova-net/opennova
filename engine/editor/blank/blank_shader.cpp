@@ -51,6 +51,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/documents/text_types.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <formats/scr/scr.h>
 #include <runtime/renderer/shader_effect_info.h>

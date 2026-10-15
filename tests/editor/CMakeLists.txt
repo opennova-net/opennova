@@ -5,6 +5,17 @@
 get_filename_component(OPENNOVA_TESTS_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}" DIRECTORY)
 get_filename_component(OPENNOVA_TESTS_BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}" DIRECTORY)
 
+# The editor's test sources compile unoptimized in Release: each spent 30-60 s in MSVC's optimizer (in
+# clang the same TU takes 27 s at -O2 and 10 s at -O0), while what they test, the engine libraries, keeps
+# its optimization. The flags are this directory's own variable, so only the targets made here take them
+# (editor_ui_test's tests/editor_ui sources among them); NDEBUG stays.
+if(MSVC)
+    string(REPLACE "/O2" "/Od" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
+    string(REPLACE "/Ob2" "/Ob0" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
+else()
+    string(REGEX REPLACE "-O[23]" "-O0" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
+endif()
+
 # opennova_add_editor_executable(<target> SOURCES <files...> LIBS <libs...>): an editor test's
 # executable, linked PRIVATE against LIBS, tests/ its include root, built into build/tests.
 function(opennova_add_editor_executable target)

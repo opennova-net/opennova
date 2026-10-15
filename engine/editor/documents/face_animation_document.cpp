@@ -14,6 +14,7 @@
 #include <editor/documents/source_issue_findings.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/reference_kinds.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/record_shift.h>
 #include <editor/model/staged_rows.h>
 #include <runtime/world/facial_animation.h>

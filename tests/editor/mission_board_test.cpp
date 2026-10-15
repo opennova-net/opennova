@@ -117,7 +117,8 @@ int test_cards() {
 	                 "Its wait of 600 steps is past 512, where the game's countdown wraps: it acts about 1.0 s after its triggers hold."));
 	TEST_EXPECT(noted.words.delay.find("after about 1.0 s") == 0);
 	const BoardCard &empty = board.cards[2];
-	TEST_EXPECT(note_of(empty, kBoardNoActions) && note_of(empty, kBoardRightAway) && empty.notes[0].code == kBoardRightAway);
+	TEST_EXPECT(note_of(empty, kBoardNoActions) && note_of(empty, kBoardRightAway) &&
+	            std::string(empty.notes[0].code) == kBoardRightAway);
 	TEST_EXPECT(same(note_of(empty, kBoardRightAway)->words, "It has no trigger: it fires right away, as the mission runs."));
 	TEST_EXPECT(same(note_of(empty, kBoardNoActions)->words,
 	                 "It has no action, and nothing reads that it fired: no trigger names it, no waypoint marker advances on it, "

@@ -44,6 +44,7 @@
 #include <editor/import/import_run.h>
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
+#include <editor/model/core_finding.h>
 #include <editor/preview/menu_render_check.h>
 #include <editor/project/local_settings.h>
 #include <editor/project/project_document.h>

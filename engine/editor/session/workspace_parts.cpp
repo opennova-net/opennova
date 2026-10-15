@@ -20,8 +20,8 @@
 #include <editor/documents/mission_table.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/import/import_plan.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/document.h>
-#include <editor/model/finding_code_row.h>
 #include <editor/preview/viewport_kinds.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>

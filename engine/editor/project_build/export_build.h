@@ -12,6 +12,8 @@
 
 namespace opennova::editor {
 
+enum class CoreFinding;
+
 // What ships (ADR 0046 S16): Export copies the last good build, which the build's gate let through,
 // into a folder of its own, the project's export folder (project.opennova's `export.output`, or the
 // one the request names), as a player puts it in place: a standalone game's archives and loose

@@ -16,6 +16,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kind.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
 #include <editor/project/project_document.h>

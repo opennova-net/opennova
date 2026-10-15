@@ -10,6 +10,7 @@
 
 #include <base/io/fixed.h>
 #include <editor/assets/asset_kinds.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/staged_rows.h>
 #include <formats/til/til_io.h>
 

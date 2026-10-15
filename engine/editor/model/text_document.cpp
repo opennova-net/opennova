@@ -4,6 +4,7 @@
 #include <utility>
 
 #include <base/io/strutil.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/source_state.h>
 

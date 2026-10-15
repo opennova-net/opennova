@@ -3,6 +3,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_type_registry.h>
 #include <editor/graph/reference_kinds.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/requirements/requirement_words.h>
 #include <editor/project/expansion_files.h>

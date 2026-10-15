@@ -17,6 +17,7 @@
 #include <editor/graph/display_names.h>
 #include <editor/graph/graph_layer.h>
 #include <editor/graph/graph_names.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/expansion_files.h>
 #include <editor/project/project_files.h>

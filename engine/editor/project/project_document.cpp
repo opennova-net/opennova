@@ -9,6 +9,7 @@
 #include <base/io/strutil.h>
 #include <base/os_random/os_random.h>
 #include <base/vfs/vfs.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/expansion_name.h>
 #include <editor/project/project_files.h>

@@ -10,6 +10,7 @@
 #include <editor/documents/animation_slots.h>
 #include <editor/documents/source_issue_findings.h>
 #include <editor/graph/reference_kinds.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/id_list.h>
 #include <editor/project/project_files.h>
 #include <runtime/anim/adm_clip_index.h>

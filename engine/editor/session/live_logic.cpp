@@ -10,6 +10,7 @@
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_table.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/document_base.h>
 #include <editor/project/project_files.h>
 #include <editor/run/run_directory.h>

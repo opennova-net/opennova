@@ -5,6 +5,7 @@
 
 #include <cstring>
 
+#include <editor/model/core_finding.h>
 #include <formats/dbf/dbf.h>
 #include <formats/lwf/lwf.h>
 #include <formats/lwf/wav_pcm.h>

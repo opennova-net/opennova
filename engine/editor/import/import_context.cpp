@@ -8,6 +8,7 @@
 #include <base/io/file_time.h>
 #include <base/io/hash.h>
 #include <base/io/strutil.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 
 namespace fs = std::filesystem;

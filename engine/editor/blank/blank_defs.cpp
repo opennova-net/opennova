@@ -1,6 +1,7 @@
 #include "blank_makers.h"
 #include <base/io/fixed.h>
 #include <base/io/strutil.h>
+#include <editor/model/core_finding.h>
 #include <formats/def/def_write.h>
 #include <runtime/audio/sound_profile.h>
 #include <cstring>

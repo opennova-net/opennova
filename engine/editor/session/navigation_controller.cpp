@@ -5,8 +5,8 @@
 
 #include <editor/assets/asset_kinds.h>
 #include <editor/graph/display_names.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/document.h>
-#include <editor/model/finding_code_row.h>
 #include <editor/model/text_document.h>
 #include <editor/preview/viewport_kinds.h>
 #include <editor/project/project_files.h>

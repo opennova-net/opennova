@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/document_base.h>
 #include <editor/model/edit.h>

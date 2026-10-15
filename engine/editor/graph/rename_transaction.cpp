@@ -25,6 +25,7 @@
 #include <editor/import/import_run.h>
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>

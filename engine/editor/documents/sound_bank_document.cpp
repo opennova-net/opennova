@@ -15,6 +15,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/source_issue_findings.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <runtime/audio/sound_selector.h>
 

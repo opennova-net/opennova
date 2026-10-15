@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <base/vfs/vfs.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/archive_routing.h>
 #include <formats/mission/bms.h>

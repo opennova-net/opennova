@@ -21,6 +21,7 @@ std::string folder_words(const std::string &folder);
 class SessionCore;
 struct ProjectPaths;
 struct SessionView;
+enum class CoreFinding;
 
 // Who names what a delete takes from the project (DeletePlan::named): each use the card's Named by lists
 // (DI-05's file_users) from a file the delete leaves, and each import that reads one from its place; its count,

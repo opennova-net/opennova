@@ -7,6 +7,7 @@
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
 #include <editor/graph/reference_kinds.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
 #include <editor/project/expansion_files.h>

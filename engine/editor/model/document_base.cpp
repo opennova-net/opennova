@@ -4,6 +4,7 @@
 #include <base/io/hash.h>
 #include <base/vfs/vfs_decode.h>
 #include <editor/assets/asset_kinds.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 
 #include <atomic>

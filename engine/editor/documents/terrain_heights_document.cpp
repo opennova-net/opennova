@@ -6,6 +6,7 @@
 #include <utility>
 
 #include <base/io/strutil.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <formats/cpt/cpt_io.h>
 #include <formats/cpt/trngen/heightmap_depth.h>

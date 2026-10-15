@@ -2,6 +2,7 @@
 
 #include <utility>
 
+#include <editor/model/core_finding.h>
 #include <editor/session/session_core.h>
 
 namespace opennova::editor {
