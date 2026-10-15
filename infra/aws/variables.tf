@@ -371,3 +371,30 @@ variable "cost_anomaly_threshold_usd" {
   type        = number
   default     = 20
 }
+
+# ---------------------------------------------------------------------------
+# The optional GitHub Actions deploy (ci.tf)
+# ---------------------------------------------------------------------------
+
+variable "github_deploy" {
+  description = "Whether prod makes GitHub's OIDC provider and the role .github/workflows/deploy.yml assumes (DEPLOY.md, section 4). Off by default: deploys run from the toolbox."
+  type        = bool
+  default     = false
+}
+
+variable "github_repository" {
+  description = "The repository (owner/name) whose deploy workflow may assume the role."
+  type        = string
+  default     = "opennova-net/opennova-godot"
+
+  validation {
+    condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repository))
+    error_message = "github_repository takes owner/name."
+  }
+}
+
+variable "github_environment" {
+  description = "The repository environment whose jobs alone may assume the role: its required reviewers are the deploy's approval gate."
+  type        = string
+  default     = "production"
+}

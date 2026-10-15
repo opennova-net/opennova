@@ -1,0 +1,98 @@
+name: Deploy
+
+# An approval-gated deploy of the NovaWorld stack to prod (DEPLOY.md, section
+# 4, "The deploy workflow"): the toolbox's own `app deploy`, run here from a
+# short-lived AWS role instead of the vault. Manual runs alone. The job runs in
+# the repository's `production` environment, whose required reviewers approve
+# each run before it starts, and the role (infra/aws/ci.tf, var.github_deploy)
+# trusts that environment's jobs alone. It pins the images by digest, uploads
+# the release bundle built from the commit this run checks out, points prod's
+# release at it and converges the service host through SSM; an image given no
+# tag keeps the current release's. The repository variables AWS_DEPLOY_ROLE_ARN
+# (the infra output github_deploy_role_arn) and AWS_REGION name the role.
+# Rolling back is the toolbox's `app rollback` (or a run here with the old
+# release's tags).
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Server and web image tag (sha-abc1234); empty keeps the current release's"
+        required: false
+        default: ""
+      server_tag:
+        description: "Server image tag alone (overrides tag)"
+        required: false
+        default: ""
+      web_tag:
+        description: "Web image tag alone (overrides tag)"
+        required: false
+        default: ""
+      game_tag:
+        description: "Web build image tag; empty keeps the current release's"
+        required: false
+        default: ""
+      serve_tag:
+        description: "Serve image tag (the hosted servers); empty keeps the current release's"
+        required: false
+        default: ""
+      hostd_tag:
+        description: "hostd image tag (the machines' agent); empty keeps the current release's"
+        required: false
+        default: ""
+      no_hosting:
+        description: "Deploy with hosted game servers off"
+        type: boolean
+        required: false
+        default: false
+
+# One deploy at a time; a queued one waits, never cancels the running one.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: opennova-deploy-${{ github.run_id }}
+
+      # The inputs reach the script through the environment alone, never
+      # through the script's text.
+      - name: app deploy
+        env:
+          OPENNOVA_ROOT: ${{ github.workspace }}
+          OPENNOVA_SECRETS_DIR: ${{ runner.temp }}/opennova
+          GHCR_OWNER: ${{ github.repository_owner }}
+          IN_TAG: ${{ inputs.tag }}
+          IN_SERVER_TAG: ${{ inputs.server_tag }}
+          IN_WEB_TAG: ${{ inputs.web_tag }}
+          IN_GAME_TAG: ${{ inputs.game_tag }}
+          IN_SERVE_TAG: ${{ inputs.serve_tag }}
+          IN_HOSTD_TAG: ${{ inputs.hostd_tag }}
+          IN_NO_HOSTING: ${{ inputs.no_hosting }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "$IN_TAG" ]; then args+=(--tag "$IN_TAG"); fi
+          if [ -n "$IN_SERVER_TAG" ]; then args+=(--server-tag "$IN_SERVER_TAG"); fi
+          if [ -n "$IN_WEB_TAG" ]; then args+=(--web-tag "$IN_WEB_TAG"); fi
+          if [ -n "$IN_GAME_TAG" ]; then args+=(--game-tag "$IN_GAME_TAG"); fi
+          if [ -n "$IN_SERVE_TAG" ]; then args+=(--serve-tag "$IN_SERVE_TAG"); fi
+          if [ -n "$IN_HOSTD_TAG" ]; then args+=(--hostd-tag "$IN_HOSTD_TAG"); fi
+          if [ "$IN_NO_HOSTING" = true ]; then args+=(--no-hosting); fi
+          deploy/bin/on-deploy --deployment prod app deploy ${args[@]+"${args[@]}"}

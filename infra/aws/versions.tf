@@ -13,6 +13,7 @@
 #   ops_bucket.tf  the operations bucket (backups) and the account's S3 block
 #   fleet.tf       the hosted game servers' machines: shared and own launch templates
 #   observability.tf  logs, metrics, alarms, budgets
+#   ci.tf          the optional GitHub Actions deploy role (OIDC)
 #   outputs.tf     what the deploy toolbox and operators read
 #   moved.tf       address moves from the single-file layout
 #

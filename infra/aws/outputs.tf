@@ -132,3 +132,8 @@ output "health_check_id" {
   value       = aws_route53_health_check.service.id
   description = "The Route 53 health check on http://<Elastic IP>:8080/healthz"
 }
+
+output "github_deploy_role_arn" {
+  value       = one(aws_iam_role.github_deploy[*].arn)
+  description = "The role the deploy workflow assumes (the repository variable AWS_DEPLOY_ROLE_ARN); null unless github_deploy"
+}
