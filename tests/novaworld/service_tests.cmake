@@ -511,3 +511,18 @@ target_include_directories(hosted_placement_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 add_test(NAME hosted_placement COMMAND hosted_placement_test)
+
+# The machine agent's protocol (apps/novaworld_server/hosted/agent_protocol.h), the one
+# the service and opennova-hostd both build: every message's round trip through its
+# encoder and strict decoder, the wire's member names, the protocol check, every field's
+# shape and range, the routes' paths. Pure functions: compiles the source directly, so it
+# runs on every build.
+add_executable(hosted_agent_protocol_test
+    novaworld/hosted_agent_protocol_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/agent_protocol.cpp)
+target_link_libraries(hosted_agent_protocol_test PRIVATE opennova_io)
+target_compile_features(hosted_agent_protocol_test PRIVATE cxx_std_17)
+target_include_directories(hosted_agent_protocol_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+add_test(NAME hosted_agent_protocol COMMAND hosted_agent_protocol_test)

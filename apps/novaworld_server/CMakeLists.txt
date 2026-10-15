@@ -26,6 +26,7 @@ if(BUILD_NOVAWORLD_HTTP)
         # bootstrap tokens and route; the AWS CLI runs through apps/common's
         # command runner), the admin link and its console routes.
         hosted/admin_link.cpp
+        hosted/agent_protocol.cpp
         hosted/bootstrap.cpp
         hosted/bootstrap_route.cpp
         hosted/console_commands.cpp
