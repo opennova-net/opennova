@@ -398,8 +398,10 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   subscription grants while Stripe calls it `active`, `trialing` or `past_due`, and only
   until 48 h past its period's end (a sync that stopped for good fails closed); `past_due`
   (Stripe still retries the card) keeps the account's servers running but starts no new
-  one. Every other status grants nothing. The own-machine add-on (a subscription of its
-  own, its quantity the machines it pays for) lets that many of the account's servers run
+  one. Every other status grants nothing. The own-machine add-on (each own machine a
+  subscription of its own, quantity 1, bought through Checkout and canceled in the
+  Portal; the granting ones' quantities summed are the machines it pays for) lets that
+  many of the account's servers run
   on a machine of their own (`hosted_servers.own_machine`), and counts only while a tier
   also grants (a comp grant buys no machine).
 
@@ -842,9 +844,10 @@ their sender; the reads are not.
 
 A support tier is a monthly Stripe subscription that supports the project and sets the
 account's hosting entitlement ("Hosted servers" above): tier 1, 2 or 3 lets it run 1, 2 or
-3 hosted servers (`billing/tiers.h`), and the own-machine add-on, a subscription of its
-own whose quantity is the machines it pays for, moves that many of them onto machines of
-their own while a tier also grants. The service makes Stripe Checkout and Customer Portal
+3 hosted servers (`billing/tiers.h`), and the own-machine add-on, one subscription of
+quantity 1 per own machine (bought through Checkout, canceled in the Portal, which
+changes no quantity), moves that many of them onto machines of their own while a tier
+also grants. The service makes Stripe Checkout and Customer Portal
 sessions and hands the browser their URL; no publishable key and no Stripe.js reach the
 site. Everything here is service policy (`billing/`).
 

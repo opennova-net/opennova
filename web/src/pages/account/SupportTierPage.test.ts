@@ -121,6 +121,7 @@ describe('SupportTierPage', () => {
     const page = await mountAt('/me/support');
     const section = page.get('#support-own-machine').element.closest('section')!;
     expect(section.textContent).toContain('You have 1 own machine (active).');
+    expect(page.get('#support-own-machine-hint').text()).toContain('cancel one in the billing portal');
     const add = page.findAll('button').find((b) => b.text() === 'Add another own machine');
     expect(add).toBeDefined();
     await add!.trigger('click');
@@ -153,7 +154,7 @@ describe('SupportTierPage', () => {
     const page = await mountAt('/me/support');
     expect(page.findAll('button').some((b) => b.text().includes('own machine'))).toBe(false);
     expect(page.get('#support-own-machine-hint').text()).toContain('an own machine for every server your tier covers');
-    expect(page.findAll('button').some((b) => b.text() === 'Change how many, or cancel')).toBe(true);
+    expect(page.findAll('button').some((b) => b.text() === 'Cancel one')).toBe(true);
   });
 
   it('warns while a payment is past due', async () => {

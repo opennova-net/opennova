@@ -150,7 +150,7 @@
         </div>
         <p class="text-sm text-ink-muted">
           Runs one of your tier's servers alone on a machine of its own instead of a shared one. It adds no servers:
-          each own machine holds one of the servers your tier covers.
+          each own machine holds one of the servers your tier covers, and each is a monthly subscription of its own.
         </p>
         <p v-if="billing.own_machine_subscription" class="text-sm text-ink">
           You have {{ ownMachines }} own machine{{ ownMachines === 1 ? '' : 's' }}
@@ -172,9 +172,10 @@
             type="button"
             :disabled="busy || !billing.can_manage"
             :class="secondaryButton"
+            aria-describedby="support-own-machine-hint"
             @click="portal"
           >
-            Change how many, or cancel
+            Cancel one
           </button>
         </div>
         <p id="support-own-machine-hint" class="text-xs text-ink-muted">{{ ownMachineHint }}</p>
@@ -273,9 +274,12 @@ const ownMachineAtLimit = computed(
 const ownMachineHint = computed(() => {
   if (!billing.value?.subscription?.entitled) return 'Needs a support tier first.';
   if (ownMachineAtLimit.value) {
-    return 'You have an own machine for every server your tier covers. A higher tier makes room for more.';
+    return 'You have an own machine for every server your tier covers. A higher tier makes room for more; cancel one in the billing portal.';
   }
-  return 'Each own machine holds one of your servers; you can have one for each server your tier covers.';
+  if (billing.value.own_machine_subscription) {
+    return 'Add another here, up to one for each server your tier covers; cancel one in the billing portal.';
+  }
+  return 'You can have one for each server your tier covers, and cancel any in the billing portal.';
 });
 
 // The status line: the confirmation's progress, or the last thing done.

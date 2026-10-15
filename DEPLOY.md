@@ -639,8 +639,10 @@ the rest: a product and a monthly price per lookup key (`--tier1`, `--tier2`, `-
 price makes a new price, which takes the lookup key and goes first in the field, the old
 one kept after it, since the first is sold and the rest still grant); the price ids
 into the item; the portal configuration (customers switch among the three tier products,
-an upgrade prorating at once and a downgrade waiting for the period's end, cancel at the
-period's end, and update the card, the email and the address and see invoices; the
+an upgrade prorating at once and a downgrade waiting for the period's end, quantity
+changes off; cancel any subscription at the period's end, a tier or one own machine,
+since each own machine is a subscription of its own (quantity 1) bought through
+Checkout; and update the card, the email and the address and see invoices; the
 privacy and terms links are `https://<domain>/privacy` and `/terms`, the return link
 `https://<web host>/me/support`), brought to those settings when it exists; and the
 webhook endpoint on `https://<web host>/api/billing/webhook`, whose missing events it
