@@ -3,6 +3,7 @@
 #include "billing/billing_repository.h"
 #include "billing/billing_routes.h"
 #include "billing/entitlement.h"
+#include "billing/tiers.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/hosted_routes.h"
 #include "http_json.h"
@@ -18,8 +19,9 @@ namespace opennova::novaworld_server {
 namespace {
 
 // The entitlement a users list row and a user page carry: {max_servers,
-// source, tier (null for none)}, and on the user page its comp grant, own
-// machines and whether a server may start.
+// source, tier (null for none)}, and on the user page its comp grant, the
+// servers its tier alone grants (tier_servers, 0 for none), its own machines
+// and whether a server may start.
 crow::json::wvalue entitlement_json(const billing::Entitlement &e, bool full) {
 	crow::json::wvalue out;
 	out["max_servers"] = e.max_servers;
@@ -30,6 +32,7 @@ crow::json::wvalue entitlement_json(const billing::Entitlement &e, bool full) {
 		out["tier"] = nullptr;
 	if (full) {
 		out["comp_servers"] = e.comp_servers;
+		out["tier_servers"] = billing::kTierServers[e.tier];
 		out["own_machines"] = e.own_machines;
 		out["can_start"] = e.can_start;
 	}
@@ -141,7 +144,8 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	});
 
 	// GET /api/admin/users/<id> — one player: {"user", "entitlement"
-	// ({max_servers, source, tier, comp_servers, own_machines, can_start}),
+	// ({max_servers, source, tier, comp_servers, tier_servers, own_machines,
+	// can_start}),
 	// "servers" (its hosted servers: the live ones by id, then its newest 10
 	// ended), "billing" ({livemode, stripe_customer_id (null for none),
 	// subscriptions: [{stripe_subscription_id, item, tier, quantity, status,

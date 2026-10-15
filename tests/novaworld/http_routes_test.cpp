@@ -6402,7 +6402,8 @@ int test_admin_user_detail(Harness &h) {
 	TEST_EXPECT(body_text(reply).find("password_hash") == std::string::npos);
 	const auto &e = json["entitlement"];
 	TEST_EXPECT(e["max_servers"].i() == 1 && str(e["source"]) == "tier" && e["tier"].i() == 1 &&
-			e["comp_servers"].i() == 0 && e["own_machines"].i() == 0 && e["can_start"].b());
+			e["comp_servers"].i() == 0 && e["tier_servers"].i() == 1 && e["own_machines"].i() == 0 &&
+			e["can_start"].b());
 	TEST_EXPECT(json["servers"].t() == crow::json::type::List && json["servers"].size() == 0);
 	const auto customer = billing::customer_of(*h.pool.acquire(), ana->id);
 	TEST_EXPECT(customer && !json["billing"]["livemode"].b() &&
@@ -6426,7 +6427,7 @@ int test_admin_user_detail(Harness &h) {
 	TEST_EXPECT(bea && nws::set_comp_servers(*h.pool.acquire(), bea->id, 3).ok);
 	json = crow::json::load(body_text(h.send("GET", "/api/admin/users/" + std::to_string(bea->id), { kBearer })));
 	TEST_EXPECT(json && json["entitlement"]["max_servers"].i() == 3 && str(json["entitlement"]["source"]) == "comp" &&
-			json["entitlement"]["tier"].t() == crow::json::type::Null &&
+			json["entitlement"]["tier"].t() == crow::json::type::Null && json["entitlement"]["tier_servers"].i() == 0 &&
 			json["billing"]["stripe_customer_id"].t() == crow::json::type::Null &&
 			json["billing"]["subscriptions"].size() == 0);
 

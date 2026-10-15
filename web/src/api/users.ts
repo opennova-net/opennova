@@ -99,6 +99,7 @@ function pickDetail(data: unknown): UserDetail | null {
     entitlement: {
       ...pickEntitlement(e, user),
       comp_servers: Number.isInteger(e.comp_servers) ? (e.comp_servers as number) : user.comp_servers,
+      tier_servers: count(e.tier_servers),
       own_machines: count(e.own_machines),
       can_start: e.can_start === true,
     },

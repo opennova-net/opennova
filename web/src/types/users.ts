@@ -42,6 +42,9 @@ export interface UserListEntry extends User {
 // The account's hosting entitlement in full, on its admin page.
 export interface UserEntitlement extends UserEntitlementSummary {
   comp_servers: number;
+  // The servers its support tier alone grants (0 with none): the entitlement
+  // is the larger of this and comp_servers.
+  tier_servers: number;
   own_machines: number;
   can_start: boolean;
 }

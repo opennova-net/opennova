@@ -420,12 +420,15 @@ async function saveComp() {
   if (!detail.value || busy.value || compProblem.value) return;
   const n = Number(comp.value);
   const u = detail.value.user;
-  const tierServers = detail.value.entitlement.source === 'tier' ? detail.value.entitlement.max_servers : 0;
-  const after = Math.max(n, tierServers);
-  const over = liveCount.value - after;
+  // The entitlement after the change is the larger of the grant and the tier's
+  // servers, whichever gives it now; the limit counts the live servers not
+  // already stopping.
+  const after = Math.max(n, detail.value.entitlement.tier_servers);
+  const kept = detail.value.servers.filter((s) => s.live && s.state !== 'stopping').length;
+  const over = kept - after;
   if (over > 0) {
     const what = over === 1 ? 'its newest server' : `its ${over} newest servers`;
-    if (!window.confirm(`Lower ${u.username}'s grant to ${n}? They run ${liveCount.value} servers live, so the service stops ${what}: their matches end for everyone on them.`)) {
+    if (!window.confirm(`Lower ${u.username}'s grant to ${n}? They run ${kept} servers live, so the service stops ${what}: their matches end for everyone on them.`)) {
       return;
     }
   }

@@ -924,8 +924,9 @@ compose stack takes the test-mode set from the vault through
 the account still grants: Stripe would bill an account that is gone, so it is canceled
 first. `GET /api/admin/users` carries each account's `entitlement` (`max_servers`,
 `source`, `tier`), `live_servers` and `subscription_status`; `GET /api/admin/users/<id>`
-the account (`{"user", "entitlement"` in full, `"servers"`, `"billing": {livemode,
-stripe_customer_id, subscriptions}}`), 404 for no such player.
+the account (`{"user", "entitlement"` in full, with `comp_servers`, `tier_servers` (the
+servers its tier alone grants), `own_machines` and `can_start`, `"servers"`, `"billing":
+{livemode, stripe_customer_id, subscriptions}}`), 404 for no such player.
 
 ## CD keys (DFX2 activation)
 

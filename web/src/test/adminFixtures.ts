@@ -34,7 +34,7 @@ export function userEntry(id: number, overrides: Partial<UserListEntry> = {}): U
 export function userDetail(id: number, overrides: Partial<UserDetail> = {}): UserDetail {
   return {
     user: user(id, { max_servers: 2 }),
-    entitlement: { max_servers: 2, source: 'tier', tier: 2, comp_servers: 0, own_machines: 0, can_start: true },
+    entitlement: { max_servers: 2, source: 'tier', tier: 2, comp_servers: 0, tier_servers: 2, own_machines: 0, can_start: true },
     servers: [],
     billing: { livemode: false, stripe_customer_id: 'cus_test_1', subscriptions: [] },
     ...overrides,

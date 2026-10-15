@@ -104,7 +104,7 @@ describe('UserDetailSection', () => {
       ok: true,
       value: userDetail(7, {
         user: user(7, { comp_servers: 3, max_servers: 3 }),
-        entitlement: { max_servers: 3, source: 'comp', tier: null, comp_servers: 3, own_machines: 0, can_start: true },
+        entitlement: { max_servers: 3, source: 'comp', tier: null, comp_servers: 3, tier_servers: 0, own_machines: 0, can_start: true },
         servers: [hostedServer(31), hostedServer(32), hostedServer(33)],
       }),
     });
@@ -114,6 +114,26 @@ describe('UserDetailSection', () => {
     await wrapper.get('#user-comp-servers').element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('stops its 2 newest servers'));
+    expect(comp).not.toHaveBeenCalled();
+  });
+
+  it("counts the tier's servers under a comp grant, and no stopping server", async () => {
+    // Tier 1 (one server) under a grant of 3: cut to 0, the tier's one stays,
+    // and of three live servers one is stopping already.
+    detail.mockResolvedValue({
+      ok: true,
+      value: userDetail(7, {
+        user: user(7, { comp_servers: 3, max_servers: 3 }),
+        entitlement: { max_servers: 3, source: 'comp', tier: 1, comp_servers: 3, tier_servers: 1, own_machines: 0, can_start: true },
+        servers: [hostedServer(31), hostedServer(32), hostedServer(33, { state: 'stopping' })],
+      }),
+    });
+    const { wrapper } = await mountSection();
+    confirm.mockReturnValueOnce(false);
+    await wrapper.get('#user-comp-servers').setValue(0);
+    await wrapper.get('#user-comp-servers').element.closest('form')!.dispatchEvent(new Event('submit'));
+    await flushPromises();
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('They run 2 servers live, so the service stops its newest server'));
     expect(comp).not.toHaveBeenCalled();
   });
 
