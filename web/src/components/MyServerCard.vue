@@ -12,7 +12,7 @@
         <p class="mt-1 text-sm text-ink-muted">
           <span class="text-ink">{{ server.mission_name || 'No mission yet' }}</span>
           <span v-if="server.game_type"> · {{ server.game_type }}</span>
-          · {{ server.players }}/{{ server.max_players }} players
+          · {{ server.players }} of {{ server.max_players }} players
           · <span class="font-mono text-xs">{{ server.host_ip }}:{{ server.host_port }}</span>
         </p>
         <p v-if="server.msg" class="mt-1 text-sm text-ink-muted">
@@ -21,9 +21,9 @@
       </div>
       <dl class="grid shrink-0 grid-cols-[auto_auto] gap-x-3 text-xs text-ink-muted sm:text-right">
         <dt>Listed</dt>
-        <dd><time :datetime="isoOf(server.created_at)" :title="localOf(server.created_at)">{{ ago(server.created_at) }}</time></dd>
+        <dd><RelativeTime :value="server.created_at" :now="now" /></dd>
         <dt>Updated</dt>
-        <dd><time :datetime="isoOf(server.updated_at)" :title="localOf(server.updated_at)">{{ ago(server.updated_at) }}</time></dd>
+        <dd><RelativeTime :value="server.updated_at" :now="now" /></dd>
       </dl>
     </header>
 
@@ -274,7 +274,7 @@ import { computed, nextTick, ref } from 'vue';
 import { sendServerCommand, stopHosting, type HostError } from '../api/myServers';
 import type { MyServer, OwnerVerb, RosterSlot, ServerCommandBody } from '../types/myServers';
 import { cp1252Length, cp1252Problem } from '../utils/cp1252';
-import { ago as agoAt, isoOf, localOf } from '../utils/utcTime';
+import RelativeTime from './RelativeTime.vue';
 
 const props = defineProps<{
   server: MyServer;
@@ -352,10 +352,6 @@ function serverLabel(): string {
 function teamLabel(team: string): string {
   if (!team) return 'None';
   return TEAM_NAMES[team] ?? team;
-}
-
-function ago(utc: string): string {
-  return agoAt(utc, props.now);
 }
 
 function fail(form: string, error: HostError) {

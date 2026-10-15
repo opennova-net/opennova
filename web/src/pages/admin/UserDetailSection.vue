@@ -1,0 +1,463 @@
+<template>
+  <div class="space-y-10">
+    <RouterLink to="/admin/users" class="text-sm text-accent hover:text-ink-bright">Users</RouterLink>
+
+    <div role="status" class="sr-only">{{ message }}</div>
+    <div role="alert" class="sr-only">{{ error }}</div>
+    <div v-if="message" aria-hidden="true" class="rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online">{{ message }}</div>
+    <div v-if="error" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">{{ error }}</div>
+
+    <div v-if="detail === null && loading" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
+      Loading the account…
+    </div>
+    <div v-else-if="detail === null" class="space-y-3 rounded-panel border border-border bg-panel p-6">
+      <h1 class="text-xl font-semibold text-ink">The account could not be loaded</h1>
+      <button type="button" :class="secondaryButton" @click="load">Try again</button>
+    </div>
+
+    <template v-else>
+      <header class="space-y-2">
+        <h1 class="break-words text-3xl font-semibold text-ink">{{ detail.user.username }}</h1>
+        <p class="flex flex-wrap items-center gap-2 text-sm text-ink-muted">
+          <span>Account {{ detail.user.id }}</span>
+          <span :class="detail.user.role === 'admin' ? `${badge} bg-accent/15 text-accent` : `${badge} bg-hover text-ink-muted`">
+            {{ detail.user.role === 'admin' ? 'Admin' : 'Player' }}
+          </span>
+          <span :class="isActiveAccount(detail.user.account_status) ? 'text-ink' : 'text-warn'">
+            {{ accountStatusLabel(detail.user.account_status) }}
+          </span>
+          <span v-if="isSelf" class="text-xs">(you)</span>
+        </p>
+      </header>
+
+      <!-- Profile, and its edit. -->
+      <section class="space-y-4" aria-labelledby="user-profile">
+        <h2 id="user-profile" class="text-xl font-semibold text-ink">Profile</h2>
+        <form class="grid gap-4 rounded-panel border border-border bg-panel p-4 sm:grid-cols-2 sm:p-6" @submit.prevent="saveProfile">
+          <label class="space-y-1">
+            <span :class="labelClass">Username</span>
+            <input v-model="edit.username" required autocomplete="off" :class="inputClass" />
+          </label>
+          <label class="space-y-1">
+            <span :class="labelClass">NovaWorld handle</span>
+            <input v-model="edit.nwhandle" required autocomplete="off" aria-describedby="user-handle-hint" :class="inputClass" />
+            <span id="user-handle-hint" class="block text-xs text-ink-muted">The player's name in the game.</span>
+          </label>
+          <label class="space-y-1">
+            <span :class="labelClass">PCID</span>
+            <input v-model="edit.pcid" autocomplete="off" aria-describedby="user-pcid-hint" :class="[inputClass, 'font-mono']" />
+            <span id="user-pcid-hint" class="block text-xs text-ink-muted">The player's NovaWorld id, 8 hexadecimal digits.</span>
+          </label>
+          <label class="space-y-1">
+            <span :class="labelClass">NWH value</span>
+            <input v-model="edit.nwh" autocomplete="off" aria-describedby="user-nwh-hint" :class="[inputClass, 'font-mono']" />
+            <span id="user-nwh-hint" class="block text-xs text-ink-muted">A field retail clients carry with the handle; usually 1.</span>
+          </label>
+          <label class="space-y-1 sm:col-span-2">
+            <span :class="labelClass">New password</span>
+            <input
+              v-model="edit.password"
+              type="password"
+              autocomplete="new-password"
+              aria-describedby="user-password-hint"
+              :class="inputClass"
+            />
+            <span id="user-password-hint" class="block text-xs text-ink-muted">Leave it empty to keep the password.</span>
+          </label>
+          <div class="flex justify-end sm:col-span-2">
+            <button type="submit" :disabled="busy" :class="primaryButton">Save profile</button>
+          </div>
+        </form>
+      </section>
+
+      <!-- Role. -->
+      <section class="space-y-3" aria-labelledby="user-role">
+        <h2 id="user-role" class="text-xl font-semibold text-ink">Role</h2>
+        <p class="text-sm text-ink-muted">
+          {{ detail.user.role === 'admin' ? 'An admin manages every account and the service.' : 'A player has no admin pages.' }}
+        </p>
+        <button type="button" :disabled="busy" :class="secondaryButton" @click="changeRole(detail.user.role === 'admin' ? 'player' : 'admin')">
+          {{ detail.user.role === 'admin' ? 'Make player' : 'Make admin' }}
+        </button>
+      </section>
+
+      <!-- Hosting entitlement, with the comp grant. -->
+      <section class="space-y-4" aria-labelledby="user-hosting">
+        <h2 id="user-hosting" class="text-xl font-semibold text-ink">Hosting entitlement</h2>
+        <dl class="grid gap-x-6 gap-y-2 rounded-panel border border-border bg-panel p-4 text-sm sm:grid-cols-[auto_1fr]">
+          <dt class="text-ink-muted">May run at once</dt>
+          <dd class="text-ink">{{ detail.entitlement.max_servers }} hosted server{{ detail.entitlement.max_servers === 1 ? '' : 's' }}</dd>
+          <dt class="text-ink-muted">From</dt>
+          <dd class="text-ink">{{ entitlementLabel(detail.entitlement) }}</dd>
+          <dt class="text-ink-muted">Live now</dt>
+          <dd class="text-ink">{{ liveCount }}</dd>
+          <dt class="text-ink-muted">Own machines</dt>
+          <dd class="text-ink">{{ detail.entitlement.own_machines }}</dd>
+          <dt class="text-ink-muted">New servers</dt>
+          <dd :class="detail.entitlement.can_start ? 'text-ink' : 'text-warn'">
+            {{ detail.entitlement.can_start ? 'May start' : 'Cannot start (no entitlement, or a payment past due)' }}
+          </dd>
+        </dl>
+        <form class="space-y-2" @submit.prevent="saveComp">
+          <label for="user-comp-servers" :class="labelClass">Admin grant (comp servers)</label>
+          <div class="flex flex-wrap items-center gap-2">
+            <input
+              id="user-comp-servers"
+              v-model.number="comp"
+              type="number"
+              min="0"
+              :max="COMP_SERVERS_MAX"
+              step="1"
+              inputmode="numeric"
+              aria-describedby="user-comp-hint"
+              :aria-invalid="compProblem ? 'true' : undefined"
+              :class="numberClass"
+            />
+            <button type="submit" :disabled="busy || compProblem !== '' || comp === detail.user.comp_servers" :class="primaryButton">
+              Save grant
+            </button>
+          </div>
+          <p id="user-comp-hint" class="text-xs" :class="compProblem ? 'text-danger' : 'text-ink-muted'">
+            {{
+              compProblem ||
+              `0 to ${COMP_SERVERS_MAX} hosted servers, free of charge. The account may run the larger of this and its support tier's servers; lowering it below what it runs stops its newest servers first.`
+            }}
+          </p>
+        </form>
+      </section>
+
+      <!-- Hosted servers. -->
+      <section class="space-y-3" aria-labelledby="user-servers">
+        <h2 id="user-servers" class="text-xl font-semibold text-ink">Hosted servers</h2>
+        <p v-if="detail.servers.length === 0" class="text-sm text-ink-muted">None yet.</p>
+        <ul v-else class="divide-y divide-border rounded-panel border border-border bg-panel">
+          <li v-for="s in detail.servers" :key="s.id" class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
+            <RouterLink :to="`/admin/fleet/${s.id}`" class="font-medium text-accent hover:text-ink-bright">
+              {{ s.settings.game_name || 'Unnamed server' }}
+            </RouterLink>
+            <span class="flex items-center gap-2 text-ink-muted">
+              <span :class="stateBadgeClass(s.state)">{{ stateLabel(s.state) }}</span>
+              <span v-if="s.own_machine" class="text-xs">Own machine</span>
+              <RelativeTime v-if="s.ended_at" :value="s.ended_at" :now="now" />
+            </span>
+          </li>
+        </ul>
+      </section>
+
+      <!-- Billing ids. -->
+      <section class="space-y-3" aria-labelledby="user-billing">
+        <h2 id="user-billing" class="text-xl font-semibold text-ink">Billing</h2>
+        <p v-if="!detail.billing.stripe_customer_id" class="text-sm text-ink-muted">No Stripe customer: this account has never checked out.</p>
+        <template v-else>
+          <p class="text-sm text-ink">
+            Stripe customer
+            <a
+              :href="stripeDashboardUrl('customers', detail.billing.stripe_customer_id, detail.billing.livemode)"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="font-mono text-accent hover:text-ink-bright"
+            >{{ detail.billing.stripe_customer_id }}</a>
+            <span class="text-ink-muted"> ({{ detail.billing.livemode ? 'live' : 'test' }} mode)</span>
+          </p>
+          <div v-if="detail.billing.subscriptions.length" class="relative overflow-x-auto rounded-panel border border-border bg-panel">
+            <table class="min-w-full divide-y divide-border text-sm">
+              <caption class="sr-only">Subscriptions</caption>
+              <thead>
+                <tr class="bg-raised text-left text-xs font-semibold uppercase tracking-wider text-ink-muted">
+                  <th scope="col" class="px-4 py-2">Subscription</th>
+                  <th scope="col" class="px-4 py-2">For</th>
+                  <th scope="col" class="px-4 py-2">Status</th>
+                  <th scope="col" class="px-4 py-2">Period ends</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-border text-ink">
+                <tr v-for="sub in detail.billing.subscriptions" :key="sub.stripe_subscription_id">
+                  <td class="px-4 py-2">
+                    <a
+                      :href="stripeDashboardUrl('subscriptions', sub.stripe_subscription_id, detail.billing.livemode)"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="break-all font-mono text-xs text-accent hover:text-ink-bright"
+                    >{{ sub.stripe_subscription_id }}</a>
+                  </td>
+                  <td class="whitespace-nowrap px-4 py-2">
+                    {{ sub.item === 'own_machine' ? `Own machines: ${sub.quantity}` : `Tier ${sub.tier ?? '?'}` }}
+                  </td>
+                  <td class="whitespace-nowrap px-4 py-2">
+                    {{ subscriptionStatusLabel(sub.status) }}<template v-if="sub.cancel_at_period_end">, ends at the period's end</template>
+                  </td>
+                  <td class="whitespace-nowrap px-4 py-2"><RelativeTime :value="sub.current_period_end" :now="now" /></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+      </section>
+
+      <!-- CD keys. -->
+      <section class="space-y-3" aria-labelledby="user-cd-keys">
+        <h2 id="user-cd-keys" class="text-xl font-semibold text-ink">CD keys</h2>
+        <p v-if="keys === null" class="text-sm text-ink-muted">{{ keysError || 'Loading the keys…' }}</p>
+        <p v-else-if="keys.keys.length === 0" class="text-sm text-ink-muted">No key on this account.</p>
+        <ul v-else class="divide-y divide-border rounded-panel border border-border bg-panel">
+          <li v-for="k in keys.keys" :key="k.id" class="flex flex-wrap items-center justify-between gap-2 px-4 py-2 text-sm">
+            <span class="font-mono text-ink">{{ k.serial }}</span>
+            <span class="text-ink-muted">
+              {{ k.state.charAt(0).toUpperCase() + k.state.slice(1) }}, {{ k.activations }} machine{{ k.activations === 1 ? '' : 's' }} activated
+            </span>
+          </li>
+        </ul>
+        <RouterLink to="/admin/cd-keys" class="inline-block text-sm text-accent hover:text-ink-bright">Manage keys on the CD keys page</RouterLink>
+      </section>
+
+      <!-- Delete. -->
+      <section class="space-y-3 rounded-panel border border-danger/40 p-4" aria-labelledby="user-delete">
+        <h2 id="user-delete" class="text-lg font-semibold text-danger">Delete the account</h2>
+        <p class="text-sm text-ink-muted">
+          The account goes for good. One whose support tier still grants hosting cannot be deleted until the tier
+          ends.
+        </p>
+        <button type="button" :disabled="busy" class="rounded-control border border-danger px-4 py-2 text-sm font-medium text-danger transition hover:bg-danger/10 disabled:opacity-40" @click="remove">
+          Delete {{ detail.user.username }}…
+        </button>
+      </section>
+    </template>
+  </div>
+</template>
+
+<script setup lang="ts">
+// /admin/users/<id>: one account (GET /api/admin/users/<id>): its profile and
+// edit (PUT /api/admin/users/<id>), its role (a demotion of the last admin
+// who can log in says how one comes back), its hosting entitlement with the
+// admin's comp grant (PUT .../comp-servers, 0 to 16), its hosted servers
+// (each to its fleet page), its Stripe ids (to Stripe's dashboard, in the
+// key's mode), its CD keys (GET .../cd-keys) and its deletion (409
+// active_subscription while a tier grants).
+import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { RouterLink, useRoute, useRouter } from 'vue-router';
+import RelativeTime from '../../components/RelativeTime.vue';
+import { hasAdminToken } from '../../api/authToken';
+import { stripeDashboardUrl } from '../../api/adminBilling';
+import { fetchAccountCdKeys } from '../../api/cdKeys';
+import { deleteUser, fetchUser, listUsers, setCompServers, updateUser } from '../../api/users';
+import { useSession } from '../../composables/useSession';
+import type { CdKeyAccountResponse } from '../../types/cdKeys';
+import { COMP_SERVERS_MAX, type Role, type User, type UserDetail, type UserListEntry } from '../../types/users';
+import { accountStatusLabel, entitlementLabel, isActiveAccount } from '../../utils/adminView';
+import { subscriptionStatusLabel } from '../../utils/billingView';
+import { stateBadgeClass, stateLabel } from '../../utils/hostedState';
+
+const badge = 'inline-flex rounded-control px-2 py-0.5 text-xs font-semibold';
+const labelClass = 'block text-xs font-medium uppercase tracking-wider text-ink-muted';
+const fieldClass =
+  'rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none aria-[invalid=true]:border-danger';
+const inputClass = `w-full ${fieldClass}`;
+const numberClass = `w-24 ${fieldClass}`;
+const primaryButton =
+  'rounded-control bg-accent px-4 py-2 text-sm font-medium text-on-accent transition hover:bg-accent/90 disabled:cursor-not-allowed disabled:opacity-50';
+const secondaryButton =
+  'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
+
+const route = useRoute();
+const router = useRouter();
+const { user: sessionUser, refresh: refreshSession } = useSession();
+
+const detail = ref<UserDetail | null>(null);
+const keys = ref<CdKeyAccountResponse | null>(null);
+const keysError = ref('');
+const loading = ref(false);
+const busy = ref(false);
+const message = ref('');
+const error = ref('');
+const now = ref(Date.now());
+const comp = ref<number | string>(0);
+const edit = reactive({ username: '', nwhandle: '', pcid: '', nwh: '', password: '' });
+
+const id = computed(() => Number(route.params.id));
+const isSelf = computed(() => sessionUser.value?.id === detail.value?.user.id);
+const liveCount = computed(() => detail.value?.servers.filter((s) => s.live).length ?? 0);
+
+const compProblem = computed(() => {
+  const n = typeof comp.value === 'number' ? comp.value : Number(String(comp.value).trim());
+  if (String(comp.value).trim() === '' || !Number.isInteger(n) || n < 0 || n > COMP_SERVERS_MAX) {
+    return `Enter a whole number from 0 to ${COMP_SERVERS_MAX}.`;
+  }
+  return '';
+});
+
+function flash(text: string) {
+  message.value = text;
+  error.value = '';
+}
+
+function fail(text: string) {
+  error.value = text;
+  message.value = '';
+}
+
+// The profile form and the grant follow the account as read.
+function adopt(user: User) {
+  if (!detail.value) return;
+  detail.value = { ...detail.value, user };
+  Object.assign(edit, { username: user.username, nwhandle: user.nwhandle, pcid: user.pcid, nwh: user.nwh, password: '' });
+  comp.value = user.comp_servers;
+}
+
+async function load() {
+  loading.value = true;
+  const result = await fetchUser(id.value);
+  loading.value = false;
+  now.value = Date.now();
+  if (!result.ok) {
+    fail(result.error.code === 'not_found' ? 'No account has this id.' : result.error.message);
+    return;
+  }
+  detail.value = result.value;
+  adopt(result.value.user);
+  const k = await fetchAccountCdKeys(id.value);
+  if (k.ok) keys.value = k.value;
+  else keysError.value = k.error.message;
+}
+
+async function saveProfile() {
+  if (!detail.value || busy.value) return;
+  busy.value = true;
+  const payload: Record<string, string> = {
+    username: edit.username.trim(),
+    nwhandle: edit.nwhandle.trim(),
+    pcid: edit.pcid.trim(),
+    nwh: edit.nwh.trim(),
+  };
+  if (edit.password) payload.password = edit.password;
+  const result = await updateUser(detail.value.user.id, payload);
+  busy.value = false;
+  if (!result.ok) {
+    fail(result.error.message);
+    return;
+  }
+  adopt(result.value);
+  flash('Profile saved.');
+}
+
+// What the admin confirms before a role change, judged on `list`, the
+// accounts as the server has them now. Demoting one's own account says the
+// session loses these pages at once (unless a valid admin token is also
+// held). Demoting the last admin who can log in says how one comes back:
+// ONNET_BOOTSTRAP_ADMIN promotes only while no account holds the admin role,
+// so a banned or restricted admin left behind blocks it and only the token
+// remains.
+function roleChangePrompt(u: User, role: Role, list: UserListEntry[]): string {
+  if (role === 'admin') return `Make ${u.username} an admin? An admin can manage every account and the service.`;
+  const lines: string[] = [];
+  if (sessionUser.value?.id === u.id) {
+    lines.push(`You are about to remove your own admin role (${u.username}).`);
+    lines.push(
+      hasAdminToken.value
+        ? 'Your session loses admin access at once; these pages stay open only if the stored admin token is valid.'
+        : 'Your session loses admin access at once, and these pages close.',
+    );
+  } else {
+    lines.push(`Make ${u.username} a player? Their session loses admin access at once.`);
+  }
+  const otherAdmins = list.filter((x) => x.role === 'admin' && x.id !== u.id);
+  const inactive = otherAdmins.filter((x) => !isActiveAccount(x.account_status));
+  if (otherAdmins.length === inactive.length) {
+    if (inactive.length === 0) {
+      lines.push(
+        'No other account is an admin. Only the ADMIN_API_TOKEN, or ONNET_BOOTSTRAP_ADMIN at the next server start, can make one again.',
+      );
+    } else {
+      const names = inactive.map((x) => `${x.username} (${accountStatusLabel(x.account_status).toLowerCase()})`).join(', ');
+      lines.push(
+        `No other admin can log in: ${names} ${inactive.length === 1 ? 'holds' : 'hold'} the admin role but ${inactive.length === 1 ? 'is' : 'are'} not active. ` +
+          'While any account holds the role, ONNET_BOOTSTRAP_ADMIN does nothing, so only the ADMIN_API_TOKEN can make a working admin again.',
+      );
+    }
+  }
+  return lines.join('\n\n');
+}
+
+async function changeRole(role: Role) {
+  if (!detail.value || busy.value) return;
+  busy.value = true;
+  try {
+    const list = await listUsers();
+    if (!list.ok) {
+      fail(list.error.message);
+      return;
+    }
+    const current = list.value.find((x) => x.id === detail.value!.user.id);
+    if (!current) {
+      fail('This account no longer exists.');
+      return;
+    }
+    if (current.role === role) {
+      flash(`${current.username} is already ${role === 'admin' ? 'an admin' : 'a player'}.`);
+      return;
+    }
+    if (!window.confirm(roleChangePrompt(current, role, list.value))) return;
+    const self = sessionUser.value?.id === current.id;
+    const result = await updateUser(current.id, { role });
+    if (!result.ok) {
+      fail(result.error.message);
+      return;
+    }
+    adopt(result.value);
+    flash(`${result.value.username} is now ${result.value.role === 'admin' ? 'an admin' : 'a player'}.`);
+    if (self) {
+      // The gate follows the session's role: without the token, a demoted
+      // admin's pages close here; with one, the next read finds out whether
+      // it is valid.
+      await refreshSession();
+      if (hasAdminToken.value) await load();
+    }
+  } finally {
+    busy.value = false;
+  }
+}
+
+async function saveComp() {
+  if (!detail.value || busy.value || compProblem.value) return;
+  const n = Number(comp.value);
+  const u = detail.value.user;
+  const tierServers = detail.value.entitlement.source === 'tier' ? detail.value.entitlement.max_servers : 0;
+  const after = Math.max(n, tierServers);
+  const over = liveCount.value - after;
+  if (over > 0) {
+    const what = over === 1 ? 'its newest server' : `its ${over} newest servers`;
+    if (!window.confirm(`Lower ${u.username}'s grant to ${n}? They run ${liveCount.value} servers live, so the service stops ${what}: their matches end for everyone on them.`)) {
+      return;
+    }
+  }
+  busy.value = true;
+  const result = await setCompServers(u.id, n);
+  busy.value = false;
+  if (!result.ok) {
+    fail(result.error.message);
+    return;
+  }
+  flash(n === 0 ? `${u.username} has no admin grant now.` : `${u.username} may now run ${n} hosted server${n === 1 ? '' : 's'} free of charge.`);
+  await load();
+}
+
+async function remove() {
+  if (!detail.value || busy.value) return;
+  const u = detail.value.user;
+  if (!window.confirm(`Delete ${u.username}? This cannot be undone.`)) return;
+  busy.value = true;
+  const result = await deleteUser(u.id);
+  busy.value = false;
+  if (!result.ok) {
+    fail(result.error.message);
+    return;
+  }
+  await router.push({ path: '/admin/users' });
+}
+
+// Another account's page in the same component (a route left for another
+// page has no id: nothing to read).
+watch(id, (next) => {
+  if (Number.isInteger(next) && next > 0) void load();
+});
+onMounted(load);
+</script>

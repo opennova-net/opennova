@@ -14,11 +14,15 @@ import ServerOverviewTab from '../pages/servers/ServerOverviewTab.vue';
 import ServerConsoleTab from '../pages/servers/ServerConsoleTab.vue';
 import ServerStatsTab from '../pages/servers/ServerStatsTab.vue';
 import ServerSettingsTab from '../pages/servers/ServerSettingsTab.vue';
+import ServerMachineTab from '../pages/servers/ServerMachineTab.vue';
 import AdminLayout from '../pages/admin/AdminLayout.vue';
+import OverviewSection from '../pages/admin/OverviewSection.vue';
 import UsersSection from '../pages/admin/UsersSection.vue';
+import UserDetailSection from '../pages/admin/UserDetailSection.vue';
+import FleetSection from '../pages/admin/FleetSection.vue';
+import BillingSection from '../pages/admin/BillingSection.vue';
 import ServerStatusSection from '../pages/admin/ServerStatusSection.vue';
 import ConnectionsSection from '../pages/admin/ConnectionsSection.vue';
-import HostedSection from '../pages/admin/HostedSection.vue';
 import CdKeysSection from '../pages/admin/CdKeysSection.vue';
 import { requireUser } from './guards';
 
@@ -65,12 +69,32 @@ const router = createRouter({
       path: '/admin',
       component: AdminLayout,
       children: [
-        { path: '', redirect: '/admin/users' },
+        { path: '', redirect: '/admin/overview' },
+        { path: 'overview', component: OverviewSection },
         { path: 'users', component: UsersSection },
-        { path: 'server', component: ServerStatusSection },
-        { path: 'connections', component: ConnectionsSection },
-        { path: 'hosted', component: HostedSection },
+        { path: 'users/:id(\\d+)', component: UserDetailSection },
+        { path: 'fleet', component: FleetSection },
+        {
+          path: 'fleet/:id(\\d+)',
+          component: ServerDetailLayout,
+          props: { scope: 'admin' },
+          children: [
+            { path: '', component: ServerOverviewTab },
+            { path: 'stats', component: ServerStatsTab },
+            { path: 'console', component: ServerConsoleTab },
+            { path: 'game-settings', component: ServerSettingsTab },
+            { path: 'machine', component: ServerMachineTab },
+          ],
+        },
+        { path: 'billing', component: BillingSection },
+        { path: 'service', component: ServerStatusSection },
+        { path: 'sessions', component: ConnectionsSection },
         { path: 'cd-keys', component: CdKeysSection },
+        // The sections' names before the admin pages were rebuilt: old links
+        // land on their new pages.
+        { path: 'hosted', redirect: '/admin/fleet' },
+        { path: 'server', redirect: '/admin/service' },
+        { path: 'connections', redirect: '/admin/sessions' },
       ],
     },
   ],

@@ -21,8 +21,14 @@
 
     <template v-else>
       <header class="space-y-3">
-        <p v-if="scope === 'admin'" class="text-xs uppercase tracking-[0.3em] text-ink-muted">
-          Hosted server {{ server.id }}<template v-if="ownerName">, owned by {{ ownerName }}</template>
+        <p v-if="scope === 'admin'" class="text-sm text-ink-muted">
+          Hosted server {{ server.id }},
+          <template v-if="owner">
+            owned by
+            <RouterLink :to="`/admin/users/${owner.id}`" class="text-accent hover:text-ink-bright">{{ owner.username }}</RouterLink>
+            ({{ owner.tier ? `Tier ${owner.tier}` : 'no tier' }})
+          </template>
+          <template v-else>whose owner was deleted</template>
         </p>
         <h1
           :id="`hosted-server-${server.id}-heading`"
@@ -114,14 +120,25 @@ const id = computed(() => Number(route.params.id));
 const base = computed(() => (props.scope === 'admin' ? `/admin/fleet/${id.value}` : `/me/servers/${id.value}`));
 const backPath = computed(() => (props.scope === 'admin' ? '/admin/fleet' : '/me/servers'));
 const backLabel = computed(() => (props.scope === 'admin' ? 'Fleet' : 'All servers'));
-const ownerName = computed(() => (server.value as FleetServer | null)?.owner?.username ?? '');
+const owner = computed(() => (server.value as FleetServer | null)?.owner ?? null);
 
-const tabs = computed<Tab[]>(() => [
-  { path: base.value, label: 'Overview' },
-  { path: `${base.value}/stats`, label: 'Stats' },
-  { path: `${base.value}/console`, label: 'Console' },
-  { path: `${base.value}/settings`, label: 'Settings' },
-]);
+// The owner's tabs; the admin's name the settings tab for the game's (beside
+// the machine's) and add the Machine tab.
+const tabs = computed<Tab[]>(() => {
+  const common = [
+    { path: base.value, label: 'Overview' },
+    { path: `${base.value}/stats`, label: 'Stats' },
+    { path: `${base.value}/console`, label: 'Console' },
+  ];
+  if (props.scope === 'admin') {
+    return [
+      ...common,
+      { path: `${base.value}/game-settings`, label: 'Game settings' },
+      { path: `${base.value}/machine`, label: 'Machine' },
+    ];
+  }
+  return [...common, { path: `${base.value}/settings`, label: 'Settings' }];
+});
 
 function isActive(tab: Tab): boolean {
   return route.path.replace(/\/$/, '') === tab.path;

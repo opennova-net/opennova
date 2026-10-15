@@ -85,3 +85,66 @@ export interface MyBilling {
   // A checkout may start (billing on, the account active, no live tier).
   can_subscribe: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// The admin's view (GET /api/admin/billing, and a user's admin page).
+
+// What a subscription is for.
+export type SubscriptionItem = 'tier' | 'own_machine';
+
+// One subscription as NovaWorld last read it from Stripe.
+export interface AdminSubscription {
+  stripe_subscription_id: string;
+  item: SubscriptionItem;
+  // The tier, for a tier subscription; null for the add-on.
+  tier: TierNumber | null;
+  quantity: number;
+  status: SubscriptionStatus;
+  entitled: boolean;
+  current_period_end: string;
+  cancel_at_period_end: boolean;
+}
+
+// A subscription in the billing overview, with whose it is.
+export interface BillingSubscriptionRow extends AdminSubscription {
+  user_id: number;
+  username: string;
+  stripe_customer_id: string;
+}
+
+// A Stripe subscription no account here owns (another deployment's, or one
+// whose customer lost its link): an admin relinks it.
+export interface BillingOrphan {
+  stripe_customer_id: string;
+  stripe_subscription_id: string;
+  // The username Stripe's metadata names, '' when none.
+  username_hint: string;
+  status: SubscriptionStatus;
+}
+
+// One webhook event Stripe sent.
+export interface BillingEvent {
+  event_id: string;
+  type: string;
+  received_at: string;
+  // What the service made of it: 'processed', 'ignored', 'failed: ...'.
+  outcome: string;
+}
+
+// GET /api/admin/billing.
+export interface AdminBillingResponse {
+  enabled: boolean;
+  // The Stripe key's mode.
+  mode: 'test' | 'live';
+  // Every configured price is active, monthly and in the key's mode.
+  prices_ok: boolean;
+  last_reconcile_at: string | null;
+  last_reconcile_error: string | null;
+  // Customers marked for a sync not done yet.
+  pending_events: number;
+  subscriptions: BillingSubscriptionRow[];
+  // Accounts with more than one live tier subscription.
+  duplicates: number[];
+  orphans: BillingOrphan[];
+  recent_events: BillingEvent[];
+}

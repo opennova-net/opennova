@@ -262,7 +262,7 @@
         @scroll="logSticky.onScroll"
       >
         <li v-for="line in log" :key="line.id" class="flex gap-2">
-          <time class="shrink-0 text-ink-muted" :datetime="isoOf(line.at)" :title="localOf(line.at)">{{ clockOf(line.at) }}</time>
+          <time class="shrink-0 text-ink-muted" :datetime="isoTime(line.at)" :title="formatUtc(line.at)">{{ clockOf(line.at) }}</time>
           <span v-if="line.kind === 'command'" class="min-w-0 break-words text-accent">
             &gt; {{ line.text }}<span v-if="line.actor" class="text-ink-muted"> ({{ line.actor }})</span>
           </span>
@@ -296,7 +296,7 @@ import { useHostedConsole, type ConsoleNotice } from '../composables/useHostedCo
 import type { ConsolePlayer, PlayerAction, RotationEntry, RotationEntryAction } from '../types/hostedServer';
 import { cp1252Length, cp1252Problem } from '../utils/cp1252';
 import { MISSIONS_MAX, isMissionName } from '../utils/hostedSettings';
-import { isoOf, localOf } from '../utils/utcTime';
+import { formatUtc, isoTime, timeMs } from '../utils/format';
 
 const props = withDefaults(
   defineProps<{
@@ -430,7 +430,7 @@ function noticeClass(notice: ConsoleNotice): string {
 
 // "14:03:27", the visitor's own clock.
 function clockOf(utc: string): string {
-  const t = Date.parse(isoOf(utc));
+  const t = timeMs(utc);
   return Number.isNaN(t) ? utc : new Date(t).toLocaleTimeString();
 }
 

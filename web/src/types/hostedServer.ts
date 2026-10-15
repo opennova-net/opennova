@@ -179,39 +179,69 @@ export interface HostedServerReply {
   server: HostedServer;
 }
 
-// An account named in the fleet view.
-export interface AccountRef {
+// The owner named in the fleet view, with their support tier (null for
+// none: a comp grant, or no entitlement left).
+export interface FleetOwner {
   id: number;
   username: string;
+  tier: 1 | 2 | 3 | null;
+}
+
+// A machine's kind: a shared machine packs several servers, an own machine
+// runs exactly one (the own-machine add-on).
+export type MachineKind = 'shared' | 'own';
+
+// launching -> booting -> ready -> draining -> ending -> ended | failed; lost
+// when its reports stop.
+export type MachineState = 'launching' | 'booting' | 'ready' | 'draining' | 'ending' | 'ended' | 'failed' | 'lost';
+
+// A machine of the fleet (GET /api/admin/hosted's `machines`).
+export interface FleetMachine {
+  id: string;
+  kind: MachineKind;
+  state: MachineState | (string & {});
+  // The EC2 instance type ('t3a.large'), or the local driver's name.
+  instance_type: string;
+  // Its server positions, and how many hold a live server.
+  slots: number;
+  slots_used: number;
+  public_address: string;
+  // Bytes sent to players this calendar month, all its servers together.
+  egress_bytes_month: number;
 }
 
 // A hosted server in the admin's fleet view: the owner's view plus who owns
-// it, its service account (srv-<id>) and its machine. Never its admin
-// password.
+// it and where it runs. Never its admin password.
 export interface FleetServer extends HostedServer {
-  owner: AccountRef | null;
-  service_account: AccountRef | null;
-  provider: string;
-  machine_id: string;
-  machine_address: string;
-  admin_port: number;
+  owner: FleetOwner | null;
+  // The machine it is placed on (its id), its slot there and its game port;
+  // null before placement.
+  machine_ref: string | null;
+  slot: number | null;
+  game_port: number | null;
+  // Players on it now, as its listing says; null while not listed.
+  players: number | null;
+  // GET /api/admin/hosted/<id> only: its machine.
+  machine?: FleetMachine | null;
 }
 
 // GET /api/admin/hosted.
 export interface FleetResponse {
   enabled: boolean;
-  provider: string;
   // ONNET_HOSTED_CAP: the most servers live at once.
   cap: number;
   // How many are live now.
   live: number;
-  // The newest 100, live ones first.
+  machines: FleetMachine[];
+  // The filter's servers, live ones first.
   servers: FleetServer[];
 }
 
-// POST /api/admin/hosted/<id>/stop.
-export interface FleetServerReply {
-  server: FleetServer | null;
+// GET /api/admin/hosted's filter.
+export interface FleetQuery {
+  // An owner's username.
+  owner?: string;
+  state?: 'live' | 'ended' | 'all';
 }
 
 // POST /api/admin/hosted/stop-all.

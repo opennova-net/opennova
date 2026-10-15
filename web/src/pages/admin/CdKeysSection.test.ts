@@ -182,7 +182,7 @@ describe('CdKeysSection', () => {
   });
 
   it("looks an account up by name and shows its keys and machines", async () => {
-    users.mockResolvedValue([{ id: 7, username: 'Pilot' } as never]);
+    users.mockResolvedValue({ ok: true, value: [{ id: 7, username: 'Pilot' } as never] });
     account.mockResolvedValue({
       ok: true,
       value: {
@@ -201,7 +201,7 @@ describe('CdKeysSection', () => {
     expect(panel.text()).toContain(ASSIGNED.serial);
     expect(panel.text()).toContain('No machine is activated on this account.');
 
-    users.mockResolvedValue([]);
+    users.mockResolvedValue({ ok: true, value: [] });
     await wrapper.get('#cd-account-name').setValue('ghost');
     await wrapper.get('#cd-account-name').element.closest('form')!.dispatchEvent(new Event('submit'));
     await flushPromises();
