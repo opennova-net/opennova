@@ -75,7 +75,7 @@ export function pickSubscription(value: unknown): AdminSubscription | null {
     stripe_subscription_id: v.stripe_subscription_id,
     item: v.item === 'own_machine' ? 'own_machine' : 'tier',
     tier: tierOf(v.tier),
-    quantity: count(v.quantity) || 1,
+    quantity: count(v.quantity),
     status: str(v.status),
     entitled: v.entitled === true,
     current_period_end: str(v.current_period_end),

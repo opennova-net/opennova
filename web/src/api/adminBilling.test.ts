@@ -31,6 +31,24 @@ describe('parseAdminBilling', () => {
     });
   });
 
+  it("keeps a subscription's quantity as Stripe has it, 0 included", () => {
+    const row = (quantity: number) => ({
+      stripe_subscription_id: 'sub_1',
+      item: 'own_machine',
+      tier: null,
+      quantity,
+      status: 'active',
+      entitled: true,
+      current_period_end: '2026-11-14T12:00:00Z',
+      cancel_at_period_end: false,
+      user_id: 4,
+      username: 'player4',
+      stripe_customer_id: 'cus_4',
+    });
+    const parsed = parseAdminBilling({ enabled: true, subscriptions: [row(0), row(3)], orphans: [], recent_events: [] });
+    expect(parsed?.subscriptions.map((s) => s.quantity)).toEqual([0, 3]);
+  });
+
   it('reads billing off: the hold alone, the rest empty', () => {
     const parsed = parseAdminBilling({
       enabled: false,
