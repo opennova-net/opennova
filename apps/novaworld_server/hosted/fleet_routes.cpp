@@ -1,9 +1,11 @@
 #include "fleet_routes.h"
 
 #include "auth.h"
+#include "billing/entitlement.h"
 #include "hosted_repository.h"
 #include "hosted_routes.h"
 #include "http_json.h"
+#include "stats_repository.h"
 
 #include <climits>
 #include <cstdio>
@@ -69,8 +71,8 @@ crow::json::wvalue machine_json(db::Database &db, const FleetMachineRow &m) {
 	text_or_null(out, "ready_at", m.ready_at);
 	text_or_null(out, "ended_at", m.ended_at);
 	text_or_null(out, "end_reason", m.end_reason);
-	// Counted from the stats' samples (the per-server stats, not yet sampled).
-	out["egress_bytes_month"] = 0;
+	// Its slots' egress this calendar month, as the stats' samples counted it.
+	out["egress_bytes_month"] = machine_egress_month(db, m.id, billing::unix_now());
 	return out;
 }
 

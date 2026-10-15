@@ -50,7 +50,7 @@ const std::vector<FleetMachineState> &live_machine_states() {
 } // namespace
 
 Supervisor::Supervisor(db::ConnectionPool &pool, MachineDriver &driver, SupervisorConfig config) :
-		pool_(pool), driver_(driver), config_(std::move(config)) {}
+		pool_(pool), driver_(driver), config_(std::move(config)), sampler_(config_.slot_cpus) {}
 
 Supervisor::~Supervisor() { stop(); }
 
@@ -271,6 +271,16 @@ void Supervisor::tick(uint64_t now_ms) {
 		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[hosted] WARN admin links: %s\n", e.what());
 		}
+	}
+	try {
+		sampler_.sample(db, config_.wall_clock_s(), [this](int64_t id) -> std::optional<StatsSampler::LinkView> {
+			const auto link = admin_links_ != nullptr ? admin_links_->find(id) : nullptr;
+			if (!link) return std::nullopt;
+			const AdminLinkStatus status = link->status();
+			return StatsSampler::LinkView{ status.game_state, status.state == AdminLinkState::Up };
+		});
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[hosted] WARN the stats' sample: %s\n", e.what());
 	}
 	pass_turns_.fetch_add(1, std::memory_order_relaxed);
 }

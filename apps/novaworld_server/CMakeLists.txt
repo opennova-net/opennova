@@ -26,7 +26,8 @@ if(BUILD_NOVAWORLD_HTTP)
         web_access.cpp
         web_session.cpp
         # Hosted servers (ADR 0053, proposed): the supervisor, its rows and
-        # renders, the admin link and its console routes; the fleet (its rows,
+        # renders, the admin link and its console routes, the per-server stats
+        # (samples, hourly rollups, their routes); the fleet (its rows,
         # placement on the machines' slots, the local and the EC2 machine
         # drivers, the AWS CLI through apps/common's command runner, the
         # machine agents' routes on the internal listener, its settings).
@@ -48,6 +49,9 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/net_cidr.cpp
         hosted/owner_file.cpp
         hosted/placement.cpp
+        hosted/stats_repository.cpp
+        hosted/stats_routes.cpp
+        hosted/stats_sampler.cpp
         hosted/supervisor.cpp
         # Billing (monthly support tiers over Stripe Checkout and the Customer
         # Portal): the settings, the billing tables and the hosting entitlement

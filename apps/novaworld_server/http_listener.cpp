@@ -11,6 +11,7 @@
 #include "hosted/fleet_routes.h"
 #include "hosted/hosted_routes.h"
 #include "hosted/net_cidr.h"
+#include "hosted/stats_routes.h"
 #include "http_cookies.h"
 #include "nw_udp_listener.h"
 #include "server_config.h"
@@ -281,6 +282,7 @@ struct HttpListener::Impl {
 			hosts(access, pool),
 			hosted_servers(access, pool),
 			fleet(access, pool),
+			stats(access, pool),
 			console(access, pool),
 			cd_keys(access, pool),
 			users(access, pool),
@@ -305,6 +307,8 @@ struct HttpListener::Impl {
 	hosted::HostedRoutes hosted_servers;
 	// The admin's fleet view and the machines' routes (hosted/fleet_routes.h).
 	hosted::FleetRoutes fleet;
+	// The hosted servers' stats (hosted/stats_routes.h).
+	hosted::StatsRoutes stats;
 	// Their console routes over the admin links (hosted/console_routes.h).
 	hosted::ConsoleRoutes console;
 	// The CD keys' admin routes and the retail login's DFX2 activation (cd_key_routes.h).
@@ -374,6 +378,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->fleet.configure(impl_->hosted_servers.enabled(), impl_->hosted_servers.provider(),
 			impl_->hosted_servers.cap());
 	impl_->fleet.register_routes(impl_->app);
+	impl_->stats.register_routes(impl_->app, admin_links_);
 	impl_->console.set_handler_threads(handler_threads());
 	impl_->console.register_routes(impl_->app, admin_links_);
 	impl_->cd_keys.configure(config);

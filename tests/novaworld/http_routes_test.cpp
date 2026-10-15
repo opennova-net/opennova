@@ -35,6 +35,7 @@
 #include "hosted/console_commands.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/limits_hold.h"
+#include "hosted/stats_repository.h"
 #include "hosted/supervisor.h"
 #include "hosted_fake_driver.h"
 #include "http_cookies.h"
@@ -73,6 +74,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <chrono>
 #include <cstdint>
@@ -86,6 +88,7 @@
 #include <set>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -5273,6 +5276,174 @@ int test_admin_fleet_routes(Harness &h) {
 	return 0;
 }
 
+// The stats routes (hosted/stats_routes.h) over samples written by hand at this
+// minute (no sampler runs here): the owner's one server (every key of the
+// reply, the live view with its listing's players and its newest sample's CPU,
+// the summary, a point a minute for 1h with ISO timestamps), another account's
+// server a 404, the account's servers together and the fleet's (no live view,
+// no server_id), the admin's routes (a player's session refused), the ranges
+// (24h by default, 400 for another), no-store; and /api/me/servers/stats and
+// /api/admin/hosted/stats never read as a server id.
+int test_hosted_stats_routes(Harness &h) {
+	namespace hosted = opennova::novaworld_server::hosted;
+	namespace billing = opennova::novaworld_server::billing;
+	const int64_t owner = make_account(h, "stats_owner", "pw-stats-owner");
+	const int64_t other = make_account(h, "stats_other", "pw-stats-other");
+	TEST_EXPECT(owner > 0 && other > 0);
+	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), owner, 2).ok && nws::set_comp_servers(*h.pool.acquire(), other, 1).ok);
+	const std::string owner_s = login_token(h, "10.54.0.1", "stats_owner", "pw-stats-owner");
+	const std::string other_s = login_token(h, "10.54.0.2", "stats_other", "pw-stats-other");
+	TEST_EXPECT(!owner_s.empty() && !other_s.empty());
+	auto db = h.pool.acquire();
+	hosted::HostedSettings settings;
+	settings.game = hosted::kDataSetJointOperations;
+	settings.game_name = "Stats Routes";
+	settings.missions = { "a.bms" };
+	const auto start = [&](int64_t who) {
+		const auto r = hosted::request_server(*db, who, settings, hosted::known_data_sets(), 50, billing::unix_now());
+		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
+	};
+	const int64_t running = start(owner);
+	const int64_t ended = start(owner);
+	const int64_t others = start(other);
+	TEST_EXPECT(running > 0 && ended > 0 && others > 0);
+	for (const auto &[from, to] : { std::pair<hosted::State, hosted::State>{ hosted::State::Requested, hosted::State::Provisioning },
+				 { hosted::State::Provisioning, hosted::State::Booting }, { hosted::State::Booting, hosted::State::Listing },
+				 { hosted::State::Listing, hosted::State::Running } })
+		TEST_EXPECT(hosted::transition(*db, running, from, to, "by the test"));
+	TEST_EXPECT(hosted::transition(*db, ended, hosted::State::Requested, hosted::State::Stopped, "by the test"));
+	// Its listing: 4 players, a mission, the round's clock (TimeLeft, whole minutes).
+	const auto service = nws::upsert_service_account(*db, nws::service_username(running), "pw-stats-service");
+	TEST_EXPECT(service.ok);
+	hosted::set_service_account(*db, running, service.id);
+	const std::string key = "LLLLKKKKJJJJIIIIHHHHGGGGFFFFEEEEDDDDCCCCBBBBAAAA";
+	TEST_EXPECT(record_key_for(h, key, service.id));
+	const uint32_t rid = 0x05A75u;
+	{
+		opennova::hostdb::HostRow row;
+		row.rid = rid;
+		row.gsid = "GSID-stats";
+		row.game = "jop_2_consumer";
+		row.server_name = "Stats Routes";
+		row.mission_name = "Cliff Hanger";
+		row.game_type = "DM";
+		row.time_left = "12";
+		row.host_ip = row.peer_ip = "198.51.100.9";
+		row.host_port = row.peer_port = 32768;
+		row.player_count = 4;
+		row.max_players = 32;
+		row.host_user_id = opennova::hostdb::claim_host_key(*db, key, rid);
+		opennova::hostdb::upsert_host(*db, row);
+	}
+	// The minutes: the running server's last two, the ended one's earlier, the
+	// other account's, on an empty slate (an earlier case's hand-driven
+	// supervisor pass sampled the servers live then).
+	db->exec("DELETE FROM hosted_server_samples;");
+	db->exec("DELETE FROM hosted_server_hourly;");
+	const int64_t now = billing::unix_now();
+	const int64_t minute = now - now % 60;
+	// (The unique players written once per server, so an hour's edge between the
+	// two minutes counts them once either way.)
+	const auto put = [&](int64_t id, int64_t at, int64_t players, int64_t egress, int64_t unique) {
+		hosted::ServerSample s;
+		s.server_id = id;
+		s.at = at;
+		s.state = "running";
+		s.players = players;
+		s.max_players = 32;
+		s.cpu_percent = 30.0;
+		s.memory_bytes = 64 << 20;
+		s.egress_bytes = egress;
+		hosted::insert_sample(*db, s);
+		hosted::rollup_hour(*db, id, at, unique);
+	};
+	put(running, minute, 4, 1000, 2);
+	put(running, minute - 60, 4, 1000, 0);
+	put(ended, minute - 120, 1, 10, 1);
+	put(others, minute, 9, 5, 1);
+	const auto stats = [&h](const std::string &path, const std::vector<std::string> &headers) {
+		const auto reply = h.send("GET", path, headers);
+		return std::make_pair(reply, crow::json::load(body_text(reply)));
+	};
+	const std::string one = "/api/me/servers/" + std::to_string(running) + "/stats";
+
+	TEST_EXPECT(h.send("GET", one + "?range=1h").code == 401);
+	auto [reply, json] = stats(one + "?range=1h", { with_session(owner_s) });
+	if (reply.code != 200) std::fprintf(stderr, "  %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 200 && json && header_value(reply, "Cache-Control") == "no-store");
+	TEST_EXPECT(json["server_id"].i() == running && str(json["range"]) == "1h");
+	const auto &live = json["live"];
+	TEST_EXPECT(str(live["state"]) == "running" && live["uptime_seconds"].t() == crow::json::type::Number);
+	TEST_EXPECT(live["players"].i() == 4 && live["max_players"].i() == 32 && str(live["mission"]) == "Cliff Hanger");
+	TEST_EXPECT(str(live["game_type"]) == "DM" && live["time_left"].i() == 12 * 60);
+	TEST_EXPECT(live["scene"].t() == crow::json::type::Null && live["link_state"].t() == crow::json::type::Null);
+	TEST_EXPECT(std::fabs(live["cpu_percent"].d() - 30.0) < 1e-9 && live["memory_bytes"].i() == (64 << 20));
+	const auto &summary = json["summary"];
+	TEST_EXPECT(summary["live_seconds"].i() == 120 && summary["running_seconds"].i() == 120);
+	TEST_EXPECT(std::fabs(summary["availability"].d() - 1.0) < 1e-9 && summary["restarts"].i() == 0);
+	TEST_EXPECT(summary["peak_players"].i() == 4 && std::fabs(summary["avg_players"].d() - 4.0) < 1e-9);
+	TEST_EXPECT(std::fabs(summary["player_hours"].d() - 8.0 / 60) < 1e-9 && summary["unique_players"].i() == 2);
+	// The month's egress: both minutes', unless a month began between them.
+	TEST_EXPECT(summary["missions"].i() == 0 && summary["egress_bytes"].i() == 2000 &&
+			summary["egress_bytes_month"].i() >= 1000 && summary["egress_bytes_month"].i() <= 2000);
+	TEST_EXPECT(summary["approximate"].size() == 2 && str(summary["approximate"][0]) == "unique_players" &&
+			str(summary["approximate"][1]) == "missions");
+	const auto &series = json["series"];
+	TEST_EXPECT(series["step_seconds"].i() == 60 && series["points"].size() == 60);
+	if (series["points"].size() == 60) {
+		const auto &last = series["points"][59];
+		TEST_EXPECT(str(last["t"]) == hosted::iso_utc(minute) && str(last["t"]).size() == 20 && str(last["t"]).back() == 'Z');
+		TEST_EXPECT(std::fabs(last["players"].d() - 4.0) < 1e-9 && last["running"].b() && last["egress_bytes"].i() == 1000);
+		TEST_EXPECT(last["max_players"].i() == 32 && std::fabs(last["cpu_percent"].d() - 30.0) < 1e-9);
+		const auto &empty = series["points"][0];
+		TEST_EXPECT(empty["players"].t() == crow::json::type::Null && !empty["running"].b() &&
+				empty["egress_bytes"].t() == crow::json::type::Null && empty["cpu_percent"].t() == crow::json::type::Null);
+	}
+	// 24h by default; another range refused.
+	std::tie(reply, json) = stats(one, { with_session(owner_s) });
+	TEST_EXPECT(reply.code == 200 && str(json["range"]) == "24h" && json["series"]["step_seconds"].i() == 300 &&
+			json["series"]["points"].size() == 288);
+	std::tie(reply, json) = stats(one + "?range=2h", { with_session(owner_s) });
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+	// Another account's server is no server of the caller's; an ended one has no live view.
+	std::tie(reply, json) = stats(one, { with_session(other_s) });
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+	std::tie(reply, json) = stats("/api/me/servers/" + std::to_string(ended) + "/stats?range=1h", { with_session(owner_s) });
+	TEST_EXPECT(reply.code == 200 && json["live"].t() == crow::json::type::Null && json["summary"]["live_seconds"].i() == 60);
+
+	// The account's servers together, and the 7d range from the rollups.
+	std::tie(reply, json) = stats("/api/me/servers/stats?range=1h", { with_session(owner_s) });
+	TEST_EXPECT(reply.code == 200 && json && !json.has("server_id") && json["live"].t() == crow::json::type::Null);
+	TEST_EXPECT(json["summary"]["live_seconds"].i() == 180 && json["summary"]["peak_players"].i() == 4 &&
+			json["summary"]["egress_bytes"].i() == 2010);
+	std::tie(reply, json) = stats("/api/me/servers/stats?range=7d", { with_session(owner_s) });
+	TEST_EXPECT(reply.code == 200 && json["series"]["step_seconds"].i() == 3600 && json["series"]["points"].size() == 168);
+	// Totals over the rollups: the hours' peaks added up, approximately.
+	TEST_EXPECT(json["summary"]["egress_bytes"].i() == 2010 && json["summary"]["approximate"].size() == 4);
+	TEST_EXPECT(h.send("GET", "/api/me/servers/stats").code == 401);
+
+	// The admin's: one server and the fleet (a player's session refused).
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted/stats", { with_session(owner_s) }).code == 403);
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted/" + std::to_string(running) + "/stats", { with_session(owner_s) }).code == 403);
+	std::tie(reply, json) = stats("/api/admin/hosted/stats?range=1h", { kBearer });
+	TEST_EXPECT(reply.code == 200 && json && !json.has("server_id") && json["live"].t() == crow::json::type::Null);
+	TEST_EXPECT(json["summary"]["live_seconds"].i() == 240 && json["summary"]["peak_players"].i() == 13);
+	std::tie(reply, json) = stats("/api/admin/hosted/stats?range=30d", { kBearer });
+	TEST_EXPECT(reply.code == 200 && json["series"]["points"].size() == 180 && json["summary"]["approximate"].size() == 4);
+	std::tie(reply, json) = stats("/api/admin/hosted/" + std::to_string(others) + "/stats?range=1h", { kBearer });
+	TEST_EXPECT(reply.code == 200 && json["server_id"].i() == others && json["summary"]["peak_players"].i() == 9);
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted/999999/stats", { kBearer }).code == 404);
+	// The fleet view still answers at /api/admin/hosted/<id>.
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted/" + std::to_string(running), { kBearer }).code == 200);
+
+	// Leave no live server for the cases after.
+	opennova::hostdb::remove_host_by_rid(*db, rid);
+	for (const int64_t id : { running, others }) hosted::request_stop(*db, id, "by the test");
+	end_stopping_servers(h);
+	TEST_EXPECT(nws::delete_service_account(*db, service.id).ok);
+	return 0;
+}
+
 // The console routes (hosted/console_routes.h) over a real admin link
 // (hosted/admin_link.h) to a scripted remote-admin server on loopback
 // (FakeAdminConsole), the hosted row put in running by hand (no supervisor):
@@ -6184,6 +6355,7 @@ int run(Harness &h) {
 		{ "hosted_listing_owner", test_hosted_listing_owner },
 		{ "hosted_console_routes", test_hosted_console_routes },
 		{ "admin_fleet_routes", test_admin_fleet_routes },
+		{ "hosted_stats_routes", test_hosted_stats_routes },
 		{ "no_agent_routes_on_public_listener", test_no_agent_routes_on_public_listener },
 		{ "billing_routes", test_billing_routes },
 		{ "billing_webhook", test_billing_webhook },

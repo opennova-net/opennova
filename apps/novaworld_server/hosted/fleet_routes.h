@@ -28,7 +28,7 @@ namespace opennova::novaworld_server::hosted {
 // A fleet machine as JSON for the admin: its id, driver, kind, state, cloud id,
 // type, slots and the slots its live servers hold, addresses, agent, template,
 // serve image, the server an own machine is reserved for, its times and why it
-// ended, and its egress this calendar month.
+// ended, and its slots' egress this calendar month (UTC; stats_repository.h).
 crow::json::wvalue machine_json(db::Database &db, const FleetMachineRow &machine);
 
 class FleetRoutes {

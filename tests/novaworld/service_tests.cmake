@@ -120,6 +120,8 @@ set(OPENNOVA_HOSTED_SUPERVISOR_SOURCES
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/hosted_settings.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/owner_file.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/placement.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/stats_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/stats_sampler.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/supervisor.cpp)
 add_executable(hosted_supervisor_test
     novaworld/hosted_supervisor_test.cpp
@@ -158,6 +160,29 @@ target_include_directories(hosted_fleet_test PRIVATE
 target_compile_definitions(hosted_fleet_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(hosted_fleet COMMAND hosted_fleet_test)
 set_tests_properties(hosted_fleet PROPERTIES TIMEOUT 300)
+
+# The hosted servers' stats (apps/novaworld_server/hosted/stats_sampler.h,
+# stats_repository.h; migration 0004_server_stats.sql) on a migrated database and a
+# hand-stepped wall clock: one sample a minute of each live server (its listing's players
+# and mission, its link's scene, its agent's CPU, memory and egress: the counter's
+# differences, a restart of it counted from 0), the unique players counted and never
+# stored, the missions, the hourly rollups, the machines' monthly egress, the prune, and the
+# routes' reads over each range (the summary, the series' buckets, one server, an account's
+# servers, the fleet). Same sources as hosted_supervisor_test.
+add_executable(hosted_stats_test
+    novaworld/hosted_stats_test.cpp
+    ${OPENNOVA_HOSTED_SUPERVISOR_SOURCES})
+target_link_libraries(hosted_stats_test
+    PRIVATE opennova_novaworld_service opennova_bcrypt opennova_app_common Threads::Threads)
+if(WIN32)
+    target_link_libraries(hosted_stats_test PRIVATE advapi32)
+endif()
+target_include_directories(hosted_stats_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
+target_compile_definitions(hosted_stats_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+opennova_add_pg_test(hosted_stats COMMAND hosted_stats_test)
+set_tests_properties(hosted_stats PROPERTIES TIMEOUT 300)
 
 # The service's admin link (apps/novaworld_server/hosted/admin_link.h) against a real
 # opennova-serve child on the LAN network type with its remote-admin port open, over a

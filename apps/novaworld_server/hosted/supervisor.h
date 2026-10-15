@@ -116,6 +116,10 @@
 // syncing the links with the servers in running, at their machine's private
 // address and their slot's admin port.
 //
+// The stats (stats_sampler.h): the first pass of each minute of the wall clock
+// (wall_clock_s) samples every live server, its link's scene among the rest,
+// and rolls its hour up.
+//
 // The routes only write requests, stops and machine moves (hosted_repository.h,
 // fleet_repository.h); every transition past them is the supervisor's, a
 // compare-and-set on the row, so a stop that lands while a pass places a server
@@ -130,6 +134,7 @@
 #include "limits_hold.h"
 #include "machine_driver.h"
 #include "placement.h"
+#include "stats_sampler.h"
 
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/gate_probe.h>
@@ -353,6 +358,7 @@ private:
 	db::ConnectionPool &pool_;
 	MachineDriver &driver_;
 	const SupervisorConfig config_;
+	StatsSampler sampler_;
 	StopListing stop_listing_;
 	AdminLinks *admin_links_ = nullptr;
 	std::map<int64_t, Runtime> runtimes_;

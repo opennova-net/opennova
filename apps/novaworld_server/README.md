@@ -549,6 +549,23 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   refusal inside the networks is logged without the token or the secret at most once per
   peer per minute, and Crow's per-request lines for these paths are left out of the log.
   The service starts it before the supervisor and stops it after the supervisor's thread.
+- **Stats** (`hosted/stats_sampler.*`, `hosted/stats_repository.*`,
+  `backend/migrations/0004_server_stats.sql`). The first supervisor pass of each minute
+  (on its wall clock) samples every live server into `hosted_server_samples`: its state,
+  its listing's players, slots and mission, its admin link's scene and whether the link
+  is up, its container's CPU (a share of the slot's CPUs, 0..100) and memory as its
+  machine's agent last reported them, and the bytes its slot sent that minute (the
+  difference of the agent's per-slot counter, which counts since the machine booted; a
+  count below the last one is a counter that started over, counted from 0; a server's
+  first sample on a slot counts none). Each sample rewrites its server's hour in
+  `hosted_server_hourly` (live and running minutes, player-minutes, peak players and
+  slots, unique players, missions, bytes, mean CPU) and adds the bytes to its machine's
+  month in `fleet_machine_egress`. Counts alone: unique players are counted from the
+  listing's roster names held in memory for the hour, never stored (a service restart
+  loses that hour's names), and a mission is counted when a game-scene sample sees one
+  other than the last such sample's; both are approximations, and the replies say so.
+  Samples are kept 48 hours, hours 90 days; the routes read the samples for 1h and 24h
+  and the hours for 7d and 30d.
 - **The admin link** (`hosted/admin_link.*`; ADR 0053 d5). A running server opens
   retail's remote admin on its `game.cfg`'s `remote_admin_port`, its slot's admin port,
   its `admin.cfg` granting the user `svc` (a 31-character random password, new at every
@@ -728,12 +745,16 @@ service's own message, never database text.
 | `GET /api/me/servers/<id>` | a website session | `{"server"}`, one of the account's servers in any state, as the list's plus `events` (the newest 50 transitions, oldest first: `from`, `to`, `detail`, `at`); 404 `not_found` for an id that is not the account's (another account's server is a 404, never a 403); `Cache-Control: no-store` |
 | `POST /api/me/servers` | a website session, the CSRF header | the settings as JSON (`game_name` required; `game` defaults to the first offered data set and `missions` to that data set's; every other field to its default) and `own_machine` (`true` to run it on an own machine; default `false`, a shared one). 503 `hosting_disabled` with no machine driver; 429 past the account's bucket (6, then one every 20 s, shared with the stop); 400 `invalid_json`, `invalid_field`, or `invalid_settings` with the `field` and why; 403 `not_entitled` with no hosting entitlement (or an account not active), 403 `payment_past_due` while a granting subscription's payment is past due; 409 `server_limit` with `max_servers` and `used` beside the code when every server the account may run is live, 409 `no_own_machine` when each own machine it pays for already runs one, 409 `at_capacity` (`ONNET_HOSTED_CAP` servers live, or the fleet's planner finds it no place: every slot taken, the servers already waiting counted, and the fleet at its maximum machines); 202 `{"server"}`, `requested` |
 | `POST /api/me/servers/<id>/stop` | a website session, the CSRF header | 429 past the bucket; 404 `not_found` for an id that is not the account's; 409 `not_live` once it has ended; 202 `{"server"}`, `stopping` (also when it already was), or `stopped` when the supervisor finished it in between |
+| `GET /api/me/servers/<id>/stats` | a website session | one of the account's servers' stats, in any state: `?range=1h` (a point a minute), `24h` (the default; five minutes), `7d` (an hour) or `30d` (four hours), another 400 `invalid_field`; 404 `not_found` for an id that is not the account's; 429 past the caller's read bucket (60, then two a second). `{"server_id", "range", "live", "summary", "series"}`: `live` the server now, null once it has ended (`state`, `uptime_seconds` while running, else null, `players`, `max_players`, `mission`, `game_type` and `time_left` in seconds from its listing, `scene` (`game`, `menus`, `unknown`) and `link_state` from its admin link, `cpu_percent` and `memory_bytes` from its newest sample; each null where nothing is known); `summary` over the range (`live_seconds`, `running_seconds`, `availability` (running over live, 0..1, null with none), `restarts` (crash restarts), `peak_players`, `avg_players` (players at a time while it ran, null with none), `player_hours`, `unique_players`, `missions`, `egress_bytes`, `egress_bytes_month` (this calendar month, UTC, whatever the range) and `approximate`, the names of the fields counted approximately); `series` (`step_seconds`, and `points`, one per step oldest first: `t` (the step's start, ISO 8601 UTC), `players`, `max_players`, `running`, `cpu_percent`, `egress_bytes`, null where no sample fell); `Cache-Control: no-store` |
+| `GET /api/me/servers/stats` | a website session | the account's servers together, as above with no `server_id` and `live` null: the summary's times added up, its peak the most players at once across them, each point's players and bytes added up and `running` true while any ran |
 | `PUT /api/admin/users/<id>/comp-servers` | admin | `{"comp_servers": 0..16}`, the admin's grant; 200 `{"user"}` (which carries `comp_servers` and `max_servers`, the entitlement); 400 `invalid_json`, `invalid_field` (no whole number in 0..16) or `missing_field`; 404 for an unknown id or a service account. An entitlement down to no server stops the account's hosted server, as a ban does |
-| `GET /api/admin/hosted` | admin | the fleet: `{"enabled", "provider", "cap", "live", "machines", "servers"}`. `machines`: the live machines by id, then the newest 10 ended or failed, each `id`, `provider`, `kind` (`shared` or `own`), `state` (`launching`, `booting`, `ready`, `draining`, `ending`, `ended`, `failed`, `lost`), `cloud_id`, `instance_type`, `slots`, `slots_used` (the live servers on it), `private_address`, `public_address`, `bootstrapped`, `agent_version`, `template_version`, `serve_image`, `reserved_for` (an own machine's server, else null), `last_report_at`, `launched_at`, `ready_at`, `ended_at`, `end_reason` and `egress_bytes_month` (0 until the per-server stats count the egress). `servers`: the newest 100 the query takes, live first (`?owner=<username>`: that account's alone, none for an unknown name; `?state=live`, `ended` or `all`, the default; another state 400 `invalid_field`), each as `GET /api/me/servers`' plus `owner` (`{id, username, tier}`, `tier` its granting support tier or null; null once the account is gone), `service_account` (`{id, username}` or null), `provider`, `machine_id` (its container), `machine_address`, `admin_port`, `machine_ref` and `slot` (null with none; an ended server's where it last ran), `game_port` (null before a placement), `generation`, `serve_image` and `players` (its listing's, null when not listed). Never the admin password or an agent's credential; `Cache-Control: no-store` |
+| `GET /api/admin/hosted` | admin | the fleet: `{"enabled", "provider", "cap", "live", "machines", "servers"}`. `machines`: the live machines by id, then the newest 10 ended or failed, each `id`, `provider`, `kind` (`shared` or `own`), `state` (`launching`, `booting`, `ready`, `draining`, `ending`, `ended`, `failed`, `lost`), `cloud_id`, `instance_type`, `slots`, `slots_used` (the live servers on it), `private_address`, `public_address`, `bootstrapped`, `agent_version`, `template_version`, `serve_image`, `reserved_for` (an own machine's server, else null), `last_report_at`, `launched_at`, `ready_at`, `ended_at`, `end_reason` and `egress_bytes_month` (its slots' egress this calendar month, UTC, as the stats count it). `servers`: the newest 100 the query takes, live first (`?owner=<username>`: that account's alone, none for an unknown name; `?state=live`, `ended` or `all`, the default; another state 400 `invalid_field`), each as `GET /api/me/servers`' plus `owner` (`{id, username, tier}`, `tier` its granting support tier or null; null once the account is gone), `service_account` (`{id, username}` or null), `provider`, `machine_id` (its container), `machine_address`, `admin_port`, `machine_ref` and `slot` (null with none; an ended server's where it last ran), `game_port` (null before a placement), `generation`, `serve_image` and `players` (its listing's, null when not listed). Never the admin password or an agent's credential; `Cache-Control: no-store` |
 | `GET /api/admin/hosted/<id>` | admin | `{"server", "machine"}`: one server in any state as the fleet view's plus `events` (the newest 50 transitions, oldest first), and the machine it is on or last ran on (as above, or null); 404 `not_found`; `Cache-Control: no-store` |
 | `POST /api/admin/fleet/machines/<id>/drain` | admin | the machine takes no new server and the supervisor moves its servers off it one at a time (no restart counted), then ends it; 202 `{"machine"}` (one draining already included); 404 `not_found`; 409 `not_live` once it is ending or ended |
 | `POST /api/admin/fleet/machines/<id>/end` | admin | the machine to `ending`: the next pass terminates it and places its servers again (no restart counted); its agent is refused from then on; 202 `{"machine"}` (one ending already included); 404 `not_found`; 409 `not_live` once it has ended |
 | `POST /api/admin/fleet/roll` | admin | a fleet roll: every machine that takes servers (launching, booting, ready) drains, its servers moving to machines launched for them, so a new serve image or launch template reaches the fleet; 202 `{"draining": <how many>, "machines": [<their ids>]}` |
+| `GET /api/admin/hosted/<id>/stats` | admin | any server's stats, as the owner's; 404 `not_found` |
+| `GET /api/admin/hosted/stats` | admin | the fleet's: every server together, as the account's |
 | `POST /api/admin/hosted/<id>/stop` | admin | 404 `not_found`, 409 `not_live`, else 202 `{"server"}` |
 | `POST /api/admin/hosted/stop-all` | admin | the kill switch: every live server to `stopping`; 200 `{"stopping": <how many>}` |
 
@@ -1294,7 +1315,12 @@ files until reported, a stopping server's unstarted container, the drain flag, a
 container answered for without files after a restart), a boot that never reports, a lost
 machine terminated or ready again, an idle shared machine ending, a drain moving its
 servers one at a time, an admin's end, the reconciliation of the cloud's machines with
-the rows and the periodic sweep; `hosted_placement` the planner (and the request's
+the rows and the periodic sweep; `hosted_stats`
+([`tests/novaworld/hosted_stats_test.cpp`](../../tests/novaworld/hosted_stats_test.cpp))
+the sampler on a hand-stepped wall clock (the counter's differences and its restart, the
+CPU's share, the unique players never stored, the missions, the rollup, the machines'
+month, the prune) and the reads over each range for one server, an account and the
+fleet; `hosted_placement` the planner (and the request's
 `place_after`); `hosted_fleet_repository` the fleet's rows; `hosted_agent_route` the agent
 routes on the internal listener and the local driver end to end; `hosted_ec2_machine_driver`
 the EC2 driver on a stub `CommandRunner`; `command_runner`
@@ -1310,6 +1336,8 @@ stops, and the owner rule against a hand-driven host listing as a service accoun
 `admin_fleet_routes` case the fleet view over fleet rows made by hand (the machines, the
 servers' owners with their tiers, slots, ports and players, the `owner` and `state`
 filters), one server with its machine, and the drain, end and roll moves, its
+`hosted_stats_routes` case the four stats routes over hand-written samples (every key of
+the reply, the ranges, another account's 404, the totals, the admin's), its
 `no_agent_routes_on_public_listener` case that the public port answers none of the agent
 routes, and its `hosted_console_routes` case the console routes over a real admin link to a
 scripted remote-admin server on loopback (the session, CSRF and owner refusals, every
