@@ -1,6 +1,7 @@
 """Regression tests for suite isolation and missing-coverage detection."""
 import importlib.util
 import json
+import re
 from pathlib import Path
 import tempfile
 import unittest
@@ -162,6 +163,24 @@ class SuiteChecks(unittest.TestCase):
             self.assertEqual(command.call_args.args[0][-2:], ["-LE", "^retail$"])
             suites.ctest_inventory(self.root, "retail")
             self.assertEqual(command.call_args.args[0][-2:], ["-L", "^retail$"])
+            suites.ctest_inventory(self.root, "core", "editor")
+            self.assertEqual(command.call_args.args[0][-4:], suites.SHARDS["editor"])
+
+    def test_core_shards_partition_the_core_suite(self):
+        def selects(args, labels):
+            # ctest: -L keeps a test with a label matching, -LE drops one.
+            picked = True
+            for flag, pattern in zip(args[::2], args[1::2]):
+                hit = any(re.search(pattern, label) for label in labels)
+                picked = picked and (hit if flag == "-L" else not hit)
+            return picked
+
+        core = suites.ctest_selection("core")
+        for labels in ([], ["editor"], ["retail"], ["editor", "retail"], ["retail", "editor"], ["other"]):
+            shards = [name for name in suites.SHARDS if selects(suites.ctest_selection("core", name), labels)]
+            self.assertEqual(len(shards), 1 if selects(core, labels) else 0, labels)
+        with self.assertRaises(ValueError):
+            suites.ctest_selection("retail", "editor")
 
     def test_migration_cannot_lose_an_original_method(self):
         self.write("scripts/ci/retail_migration.json", json.dumps([{

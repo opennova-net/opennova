@@ -78,36 +78,18 @@ jobs:
           python -m pip install --quiet clang-format==21.1.6 ruff==0.16.9 gdtoolkit==4.5.0
           python scripts/lint/format_lint.py --github
 
-  # The C++ engine + ctest suites on Windows: the core suite (test-core) and
-  # the retail suite (test-retail) on two runners at once, each its own build
-  # from the same compiler cache, and `test` reporting both under the required
-  # check's name. One runner ran them back to back (~28 min: ~7 build, ~12
-  # core, ~7 retail); in parallel the core leg alone sets the pace.
-  #
-  # Built with Ninja + sccache (.github/actions/compiler-cache): the Visual
-  # Studio generator ignores CMAKE_*_COMPILER_LAUNCHER. scripts/build.sh lets
-  # CMake read CMAKE_GENERATOR and the launcher variables from the environment
-  # on a fresh configure, and Release carries no PDB flags, so every object is
-  # cacheable as-is. Linked by lld-link (CMAKE_LINKER_TYPE LLD; the runner
-  # image has LLVM on PATH): the ~930 executables are mostly tests over the
-  # same static libraries, and link.exe spent ~3 min of every build on them
-  # after the last cache hit. Only the link step changes, so the cache's
-  # objects serve either linker.
-  test-core:
+  # The repository gates on Windows, off the build legs' critical path: the
+  # maturity lints and the switcher's xunit suite, reported through `test`.
+  gates:
     runs-on: windows-latest
     needs: [changes]
-    permissions:
-      contents: read
-      actions: write   # the compiler cache's branch save replaces its older entries
     env:
-      CMAKE_GENERATOR: Ninja
-      CMAKE_CXX_COMPILER_LAUNCHER: sccache
-      CMAKE_C_COMPILER_LAUNCHER: sccache
       CODE: ${{ needs.changes.outputs.code }}
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: false   # scoped below: the tests read fixtures/ only
+          lfs: false   # scoped below: fixture_lint reads fixtures/ only
+          # godot_cpp_profile.py reads third_party/godot-cpp's extension_api.json.
           submodules: recursive
           # Full history so the diff-scoped maturity lint can resolve
           # origin/master...HEAD on PR builds (it self-skips without a base).
@@ -130,8 +112,8 @@ jobs:
       # (magic numbers stay advisory). The divergence-ledger scoreboard check
       # lives with the ledger in the private docs repo (tools/ledger_check.py).
       # The link-graph check (LIBS-1, ADR 0020) has no configured build tree
-      # at this point in the job, so it walks the CMake files transitively;
-      # local runs against build/ use `cmake --graphviz` ground truth.
+      # in this job, so it walks the CMake files transitively; local runs
+      # against build/ use `cmake --graphviz` ground truth.
       - name: Maturity gates (STD-1, enforced)
         shell: bash
         run: |
@@ -184,6 +166,62 @@ jobs:
         shell: bash
         run: dotnet test switcher/OpenNovaSwitcher.sln -c Release --nologo
 
+  # The C++ engine + ctest suites on Windows: the core suite (test-core, two
+  # shards) and the retail suite (test-retail), three runners at once, each its
+  # own build from the same compiler cache, and `test` reporting them under the
+  # required check's name. One runner ran them back to back (~28 min: ~7
+  # build, ~12 core, ~7 retail) before the editor's rows joined core.
+  #
+  # The core suite is split by the `editor` ctest label (scripts/ci/
+  # test_suites.py SHARDS): `editor` runs tests/editor's rows, `rest` the
+  # others, and each attests its own selection (inventory == report). The two
+  # selections partition core by construction. Each shard builds the full
+  # tree, so both compile the same objects and either may save the cache; the
+  # editor shard does.
+  #
+  # Built with Ninja + sccache (.github/actions/compiler-cache): the Visual
+  # Studio generator ignores CMAKE_*_COMPILER_LAUNCHER. scripts/build.sh lets
+  # CMake read CMAKE_GENERATOR and the launcher variables from the environment
+  # on a fresh configure, and Release carries no PDB flags, so every object is
+  # cacheable as-is. Linked by lld-link (CMAKE_LINKER_TYPE LLD; the runner
+  # image has LLVM on PATH): the ~930 executables are mostly tests over the
+  # same static libraries, and link.exe spent ~3 min of every build on them
+  # after the last cache hit. Only the link step changes, so the cache's
+  # objects serve either linker.
+  test-core:
+    runs-on: windows-latest
+    needs: [changes]
+    permissions:
+      contents: read
+      actions: write   # the compiler cache's branch save replaces its older entries
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [editor, rest]
+    env:
+      CMAKE_GENERATOR: Ninja
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+      CODE: ${{ needs.changes.outputs.code }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.CODE == 'true'
+        with:
+          lfs: false   # scoped below: the tests read fixtures/ only
+          submodules: recursive
+
+      - name: Pull Git LFS assets (fixtures/ only)
+        if: env.CODE == 'true'
+        shell: bash
+        run: |
+          git lfs install --local
+          git lfs pull --include="fixtures/**"
+
+      - uses: actions/setup-python@v5
+        if: env.CODE == 'true'
+        with:
+          python-version: '3.11'
+
       # cl/link on PATH for the Ninja generator (the VS generator found them by
       # itself; vcvars prepends the VC bin dir, and CMake's Ninja compiler search
       # takes the first compiler in PATH order); sccache in front of cl for the
@@ -222,27 +260,27 @@ jobs:
         run: sccache --show-stats
 
       # The build is up to date, so the second call goes straight to the tests.
-      - name: Test (core)
+      - name: Test (core, ${{ matrix.shard }})
         if: env.CODE == 'true'
         shell: bash
-        run: scripts/build.sh --no-godot --suite core
+        run: scripts/build.sh --no-godot --suite core --shard ${{ matrix.shard }}
 
       # build/.ninja_log carries each compile's and link's time.
       - name: Upload native core test reports
         if: always() && env.CODE == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: native-core-reports
+          name: native-core-reports-${{ matrix.shard }}
           if-no-files-found: warn
           include-hidden-files: true
           path: |
             build/Testing/
             build/.ninja_log
 
-      # The one Windows leg that saves the win-root flavour: test-retail builds
-      # the same objects and only reads it.
+      # The one Windows leg that saves the win-root flavour: the rest shard and
+      # test-retail build the same objects and only read it.
       - name: Save the compiler cache
-        if: env.CODE == 'true'
+        if: env.CODE == 'true' && matrix.shard == 'editor'
         uses: ./.github/actions/compiler-cache
         with:
           flavour: win-root
@@ -320,29 +358,35 @@ jobs:
           path: build/Testing/
 
   # The required check "test (windows-latest)" (branch protection names it):
-  # green when the core leg passed and the retail leg passed, or was skipped
-  # because there was nothing for it to run (a docs-only change, or a fork PR
-  # without the reference data). It runs when a leg fails too, so a failure
-  # reports red, never skipped.
+  # green when the gates passed, both core shards passed (a matrix job's
+  # result is success only when every leg is), and the retail leg passed, or
+  # was skipped because there was nothing for it to run (a docs-only change, or
+  # a fork PR without the reference data). It runs when a leg fails too, so a
+  # failure reports red, never skipped.
   test:
     name: test (windows-latest)
     if: ${{ !cancelled() }}
-    needs: [changes, retail-availability, test-core, test-retail]
+    needs: [changes, retail-availability, gates, test-core, test-retail]
     runs-on: ubuntu-latest
     steps:
-      - name: Both Windows legs
+      - name: The Windows legs
         shell: bash
         env:
           CHANGES: ${{ needs.changes.result }}
           AVAILABILITY: ${{ needs.retail-availability.result }}
+          GATES: ${{ needs.gates.result }}
           CORE: ${{ needs.test-core.result }}
           RETAIL: ${{ needs.test-retail.result }}
           CODE: ${{ needs.changes.outputs.code }}
           AVAILABLE: ${{ needs.retail-availability.outputs.available }}
         run: |
-          echo "test-core: ${CORE}; test-retail: ${RETAIL}"
+          echo "gates: ${GATES}; test-core: ${CORE}; test-retail: ${RETAIL}"
           if [[ "$CHANGES" != success || "$AVAILABILITY" != success ]]; then
             echo "::error::a gate job did not pass (changes: ${CHANGES}, retail-availability: ${AVAILABILITY})"
+            exit 1
+          fi
+          if [[ "$GATES" != success ]]; then
+            echo "::error::gates: ${GATES}"
             exit 1
           fi
           if [[ "$CORE" != success ]]; then
