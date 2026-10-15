@@ -599,6 +599,8 @@ add_test(NAME hosted_agent_protocol COMMAND hosted_agent_protocol_test)
 # directly, so it runs on every service build.
 add_executable(hosted_fleet_repository_test
     novaworld/hosted_fleet_repository_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/billing_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_server/billing/entitlement.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/agent_protocol.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/data_sets.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/hosted/fleet_repository.cpp
