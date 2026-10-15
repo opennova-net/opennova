@@ -882,3 +882,10 @@ opennova_add_editor_test(mission_map_terrain_view)
 
 # A mission entity's Height lock (S25): the field, the .mis companion's height_lock, the DI-28 words.
 opennova_add_editor_test(mission_height_lock)
+
+# Every row above, retail twins included, carries the `editor` label: CI's core leg runs as two
+# shards, `editor` (these rows) and `rest` (the core rows without it), each on its own runner
+# (scripts/ci/test_suites.py SHARDS). APPEND keeps a twin's `retail` label, so the suites are as
+# before. Keep this at the end of the file so it sees every row.
+get_property(opennova_editor_rows DIRECTORY PROPERTY TESTS)
+set_property(TEST ${opennova_editor_rows} APPEND PROPERTY LABELS editor)
