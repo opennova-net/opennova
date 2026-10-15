@@ -461,13 +461,15 @@ ensure_item() {
     added+=("$label")
   done
   generated=""
+  # stdin from /dev/null: op takes a piped stdin (a run with no terminal) for a
+  # second template and refuses the call.
   if [ "${#added[@]}" -eq 0 ]; then
     log "  $title: has ${kept[*]}"
   elif [ "$creating" -eq 1 ]; then
-    op item create --vault "$VAULT" --template "$json" >/dev/null || die "creating vault item '$title' failed"
+    op item create --vault "$VAULT" --template "$json" </dev/null >/dev/null || die "creating vault item '$title' failed"
     log "  $title: created with ${added[*]}"
   else
-    op item edit "$title" --vault "$VAULT" --template "$json" >/dev/null || die "adding ${added[*]} to vault item '$title' failed"
+    op item edit "$title" --vault "$VAULT" --template "$json" </dev/null >/dev/null || die "adding ${added[*]} to vault item '$title' failed"
     log "  $title: added ${added[*]}${kept[*]:+ (kept ${kept[*]})}"
   fi
   rm -f "$json" "$new"
@@ -833,7 +835,7 @@ vault_set_fields() {
       || die "preparing vault item '$title' failed"
     mv -f "$new" "$json"
   done
-  op item edit "$title" --vault "$VAULT" --template "$json" >/dev/null \
+  op item edit "$title" --vault "$VAULT" --template "$json" </dev/null >/dev/null \
     || { rm -f "$json"; die "writing ${labels[*]} to vault item '$title' failed"; }
   rm -f "$json"
 }
@@ -1434,14 +1436,15 @@ release_manifest() {
 }
 
 # Parse the bundle's compose files the way the host will (with stand-in
-# secrets), so a broken file fails here, before anything changes.
+# secrets and origin certificate: the host reads both from SSM), so a broken
+# file fails here, before anything changes.
 bundle_check() {
   local dir="$1" fake names line
   fake="$dir/../check.env"
   {
     for line in "${!INFRA[@]}"; do printf "%s='%s'\n" "$line" "${INFRA[$line]}"; done
     names="$(sed -n 's/^\([A-Z][A-Z0-9_]*\)=op:.*/\1/p' "$RUNTIME_TPL")"
-    for line in $names; do printf "%s='stand-in'\n" "$line"; done
+    for line in $names ORIGIN_TLS_CERT ORIGIN_TLS_KEY; do printf "%s='stand-in'\n" "$line"; done
   } > "$fake"
   docker compose --project-name opennova --project-directory "$dir/compose" \
     -f "$dir/compose/docker-compose.yml" -f "$dir/compose/docker-compose.prod.yml" \
