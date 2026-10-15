@@ -380,6 +380,16 @@ std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 	return row;
 }
 
+std::optional<FleetMachineRow> record_unlisted_sync(
+		db::Database &db, int64_t id, const std::string &agent_version) {
+	db.exec("UPDATE fleet_machines SET last_report_at = now(), agent_version = $2 "
+			"WHERE id = $1 AND state IN ('booting', 'ready', 'draining', 'lost');",
+			{ BindValue(id), BindValue(agent_version) });
+	if (db.changes() == 0)
+		return std::nullopt;
+	return find_machine(db, id);
+}
+
 namespace {
 
 std::vector<SlotReport> query_slot_reports(

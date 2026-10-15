@@ -168,6 +168,12 @@ struct SlotReport {
 // ready, draining, lost).
 std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 		const std::string &agent_version, const std::vector<ContainerReport> &containers);
+// A sync whose agent could not list its containers (agent_protocol.h
+// listing_failed): last_report_at and agent_version alone, so the machine is
+// heard from while its slot rows stand and a booting one stays booting. The
+// row after, or nullopt as record_sync's.
+std::optional<FleetMachineRow> record_unlisted_sync(
+		db::Database &db, int64_t id, const std::string &agent_version);
 // The machine's slot rows, by slot.
 std::vector<SlotReport> slot_reports(db::Database &db, int64_t machine_id);
 // The slot row of the slot server `server_id` holds, when its machine's agent

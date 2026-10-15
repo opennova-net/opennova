@@ -94,7 +94,7 @@ one to remove):
 ```
 POST /hosted/machines/<id>/sync           Authorization: Bearer <agent secret>
 {"protocol": 1, "agent_version", "containers": [{"name", "slot", "state", "exit_code",
-  "oom", "started_at", "cpu_percent", "memory_bytes", "egress_bytes"}]}
+  "oom", "started_at", "cpu_percent", "memory_bytes", "egress_bytes"}], ["listing_failed": true]}
 -> 200 {"protocol": 1, "drain", "desired": [{"name", "slot", "image", "uid", "data_set",
   "args", "files", "env", "cpus", "memory_mb", "pids"}]}
 ```
@@ -142,8 +142,10 @@ and the stats before a sync share 15 s, and the reply's acts 10 s; a stop, remov
 the act's time does not reach waits for the next pass, which comes at the busy cadence.
 
 A sync that fails changes nothing on the machine: the service down or refusing, a reply
-that does not read or speaks another protocol, or docker not answering the listing (then
-nothing is reported either). The containers keep running as they are and the agent keeps
+that does not read or speaks another protocol. Docker not answering the listing is no
+silence: the pass still syncs, with `"listing_failed": true` and no container, so the
+service keeps the slots' last reports and does not take the machine for lost, and the agent
+acts on nothing of the reply. The containers keep running as they are and the agent keeps
 trying, logging each warning when it changes and every 5 minutes while it lasts.
 
 ## The containers

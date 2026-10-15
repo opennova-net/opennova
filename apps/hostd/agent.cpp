@@ -340,8 +340,17 @@ int Agent::step() {
 	std::vector<ContainerInfo> observed;
 	std::string error;
 	if (!runtime_.list(observed, call_ms(deadline), error)) {
-		// Nothing is reported or done blind: the service reads the silence.
+		// Nothing is done blind, but the service still hears from the agent (the
+		// machine is not lost for a docker that does not answer): a sync that says
+		// so, its answer not acted on.
 		warn("runtime", "the containers cannot be listed: " + error);
+		hosted::SyncRequest unlisted;
+		unlisted.agent_version = config_.agent_version;
+		unlisted.listing_failed = true;
+		const net::HttpReply reply = link_.post(hosted::machine_sync_path(config_.machine_id),
+				machine_.agent_secret, hosted::encode_sync_request(unlisted));
+		if (!reply.transport_ok || reply.code != 200)
+			warn("sync", "the sync failed: " + http_failure(reply));
 		last_sync_ok_ = false;
 		return hosted::kSyncIntervalMs;
 	}

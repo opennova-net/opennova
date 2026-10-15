@@ -1,7 +1,8 @@
 // The machine agent's protocol (apps/novaworld_server/hosted/agent_protocol.h), the
 // one opennova-hostd and the NovaWorld service both build: each message's round trip
 // through its encoder and its strict decoder (the bootstrap's hello and reply, the
-// sync's report and reply, the files' bytes in base64, cp1252 and NUL included), the
+// sync's report, a listing that failed among them, and its reply, the files' bytes in
+// base64, cp1252 and NUL included), the
 // exact member names on the wire, the protocol check every decoder makes first
 // (protocol_of reads it alone), every field's shape (names, images, data sets, mount
 // paths, file names, environment names and values, the uid its slot's, the limits'
@@ -295,6 +296,27 @@ int test_sync_request() {
 	request.containers.push_back(sample_report(0, ContainerState::Running));
 	TEST_EXPECT(!hosted::decode_sync_request(hosted::encode_sync_request(request), back, error));
 	TEST_EXPECT(!hosted::decode_sync_request(without_member(one, "agent_version"), back, error));
+
+	// A listing that failed: the member only then, true, and no container with it.
+	TEST_EXPECT(one.find("listing_failed") == std::string::npos);
+	TEST_EXPECT(hosted::decode_sync_request(one, back, error) && !back.listing_failed);
+	hosted::SyncRequest unlisted;
+	unlisted.agent_version = "0123abcd";
+	unlisted.listing_failed = true;
+	const std::string failed = hosted::encode_sync_request(unlisted);
+	TEST_EXPECT(failed.find("\"listing_failed\": true") != std::string::npos);
+	TEST_EXPECT(hosted::decode_sync_request(failed, back, error) && back.listing_failed &&
+			back.containers.empty() && back.agent_version == "0123abcd");
+	unlisted.containers = { sample_report(0, ContainerState::Running) };
+	TEST_EXPECT(!hosted::decode_sync_request(hosted::encode_sync_request(unlisted), back, error) &&
+			error.find("listing that failed") != std::string::npos);
+	const auto with_flag = [&one](const std::string &value) {
+		std::string json = one;
+		json.insert(json.rfind('}'), ", \"listing_failed\": " + value);
+		return json;
+	};
+	TEST_EXPECT(!hosted::decode_sync_request(with_flag("false"), back, error));
+	TEST_EXPECT(!hosted::decode_sync_request(with_flag("1"), back, error));
 	return 0;
 }
 

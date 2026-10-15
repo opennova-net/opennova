@@ -31,7 +31,8 @@
 //    "containers": [{"name", "slot", "state": "starting" | "running" | "exited",
 //                    "exit_code": <int> | null, "oom": <bool>,
 //                    "started_at": <Unix seconds> | null, "cpu_percent": <number>,
-//                    "memory_bytes": <int>, "egress_bytes": <int>}]}
+//                    "memory_bytes": <int>, "egress_bytes": <int>}],
+//    ["listing_failed": true]}
 //   -> 200 {"protocol": 1, "drain": <bool>,
 //           "desired": [{"name", "slot", "image", "uid", "data_set", "args": [...],
 //                        "files": {"<name>": "<base64>"}, "env": {"<NAME>": "<value>"},
@@ -53,6 +54,12 @@
 // keeps none whose start failed past the report. The agent stops a container
 // only when a reply leaves it out; a sync that fails changes nothing on the
 // machine. `drain` says the service is moving the machine's servers off it.
+//
+// An agent that cannot list its containers (docker not answering) still
+// syncs, with `listing_failed` (present only then) and no container: the
+// service hears from the agent (the machine is not lost), keeps the slots' last
+// reports, moves no booting machine to ready, and the agent acts on no reply
+// until it lists again.
 //
 // Every refusal of either route is a bare 404. A message whose `protocol` is
 // not kAgentProtocol is not read further (protocol_of): the service drains a
@@ -156,6 +163,9 @@ struct SyncRequest {
 	int protocol = kAgentProtocol;
 	std::string agent_version;
 	std::vector<ContainerReport> containers;
+	// The agent could not list its containers: `containers` is empty and says
+	// nothing of the machine.
+	bool listing_failed = false;
 };
 
 struct DesiredContainer {

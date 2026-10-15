@@ -16,7 +16,9 @@
 // the files of a container this report names left out, each container's uid
 // its slot's, one whose slot is past the machine's dropped, and drain set
 // whenever the machine's row is draining. A sync in another protocol version
-// is not read: its machine is drained.
+// is not read: its machine is drained. A sync whose agent could not list its
+// containers (listing_failed) records that the agent was heard from alone
+// (record_unlisted_sync), logged at most once per peer per minute.
 //
 // Who is answered. A request is read only from a TCP peer (the socket's own
 // address, never a header) that is a private or loopback address inside the

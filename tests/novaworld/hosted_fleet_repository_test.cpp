@@ -396,6 +396,14 @@ int test_record_sync() {
 	TEST_EXPECT(slots[0].exit_code == int64_t{ 137 } && !slots[0].started_at &&
 			slots[0].egress_bytes == 2500);
 	TEST_EXPECT(slots[1].slot == 1 && slots[1].container == "srv-9-g2");
+	// A sync whose listing failed: heard from (its version), the slots' rows as they were.
+	db.exec("UPDATE fleet_machines SET last_report_at = now() - interval '5 minutes' "
+			"WHERE id = $1;",
+			{ BindValue(m.id) });
+	row = hosted::record_unlisted_sync(db, m.id, "v2.1");
+	TEST_EXPECT(row && row->state == FleetMachineState::Ready && row->agent_version == "v2.1");
+	TEST_EXPECT(hosted::machine_reported_within(db, m.id, 60));
+	TEST_EXPECT(hosted::slot_reports(db, m.id).size() == 2);
 	// An empty report empties them.
 	TEST_EXPECT(hosted::record_sync(db, m.id, "v2", {}));
 	TEST_EXPECT(hosted::slot_reports(db, m.id).empty());
@@ -410,7 +418,13 @@ int test_record_sync() {
 	TEST_EXPECT(hosted::transition_machine(
 			db, m.id, FleetMachineState::Lost, FleetMachineState::Ending, ""));
 	TEST_EXPECT(!hosted::record_sync(db, m.id, "v3", {}));
+	TEST_EXPECT(!hosted::record_unlisted_sync(db, m.id, "v3"));
 	TEST_EXPECT(hosted::slot_reports(db, m.id).size() == 1);
+	// A booting machine heard from with a listing that failed stays booting.
+	const hosted::CreatedMachine booting =
+			booting_machine(db, MachineKind::Shared, 4, "i-0ddddddddddddddd4", "10.44.1.24");
+	row = hosted::record_unlisted_sync(db, booting.id, "v1");
+	TEST_EXPECT(row && row->state == FleetMachineState::Booting && row->ready_at.empty());
 	// The rows go with their machine.
 	db.exec("DELETE FROM fleet_machines WHERE id = $1;", { BindValue(m.id) });
 	TEST_EXPECT(hosted::slot_reports(db, m.id).empty());

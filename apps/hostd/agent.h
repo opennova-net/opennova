@@ -10,7 +10,8 @@
 // reply asks (reconcile.h): starts the containers the machine lacks, stops and
 // removes the ones the reply leaves out. A sync that fails (the service down,
 // a refusal, a reply that does not read, another protocol) changes nothing:
-// the containers keep running as they are, and the agent keeps reporting. The
+// the containers keep running as they are, and the agent keeps reporting; a
+// pass that cannot list its containers syncs to say so and does nothing. The
 // agent never starts a container on its own, nor restarts one that exited:
 // the service decides, and counts. The secret and the token reach no log line;
 // the files a container gets are written for its slot's user alone. Service
@@ -116,7 +117,8 @@ public:
 	// otherwise, kBootstrapRetryMs before the bootstrap).
 	int step();
 
-	// Whether the last pass's sync was answered and read.
+	// Whether the last pass listed its containers and its sync was answered and
+	// read.
 	bool last_sync_ok() const { return last_sync_ok_; }
 	// Whether the service drains this machine, as its last reply said.
 	bool draining() const { return draining_; }

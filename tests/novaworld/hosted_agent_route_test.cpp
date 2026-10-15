@@ -6,7 +6,8 @@
 // hello that does not read, a machine not yet launched or reached from another
 // address, a reply that would not read: each the one bare 404, the token left
 // unspent), the sync (the agent's secret, the report stored and the machine
-// ready, the desired containers from a fake FleetDesiredState with the files
+// ready, a listing that failed heard from with nothing stored, the desired
+// containers from a fake FleetDesiredState with the files
 // of a reported container left out, each uid its slot's, a slot past the
 // machine's dropped, drain while draining, another protocol draining the
 // machine, a desired state that throws or does not read), every other path and
@@ -356,6 +357,18 @@ int test_sync() {
 	TEST_EXPECT(rig.fake.calls == 0);
 	TEST_EXPECT(hosted::find_machine(rig.db, m.id)->state == FleetMachineState::Booting);
 
+	// An agent whose listing failed: heard from, nothing of its slots stored, and a
+	// booting machine still booting.
+	hosted::SyncRequest unlisted;
+	unlisted.agent_version = "test-agent 2";
+	unlisted.listing_failed = true;
+	const std::string unlisted_body = hosted::encode_sync_request(unlisted);
+	TEST_EXPECT(rig.post(path, secret, unlisted_body).code == 200);
+	auto heard = hosted::find_machine(rig.db, m.id);
+	TEST_EXPECT(heard->state == FleetMachineState::Booting && !heard->last_report_at.empty() &&
+			heard->agent_version == "test-agent 2");
+	TEST_EXPECT(hosted::slot_reports(rig.db, m.id).empty() && rig.fake.calls == 1);
+
 	const Reply r = rig.post(path, secret, sync_body({ running("srv-7-g1", 0) }));
 	TEST_EXPECT(r.code == 200 && r.header("Cache-Control: no-store"));
 	hosted::SyncReply reply;
@@ -376,8 +389,12 @@ int test_sync() {
 	const auto slots = hosted::slot_reports(rig.db, m.id);
 	TEST_EXPECT(
 			slots.size() == 1 && slots[0].container == "srv-7-g1" && slots[0].egress_bytes == 4096);
-	TEST_EXPECT(rig.fake.calls == 1 && rig.fake.last_machine.state == FleetMachineState::Ready);
+	TEST_EXPECT(rig.fake.calls == 2 && rig.fake.last_machine.state == FleetMachineState::Ready);
 	TEST_EXPECT(rig.fake.reported().size() == 1 && rig.fake.reported()[0].name == "srv-7-g1");
+	// A listing that fails now leaves the slots' reports as they were.
+	TEST_EXPECT(rig.post(path, secret, unlisted_body).code == 200);
+	TEST_EXPECT(hosted::slot_reports(rig.db, m.id).size() == 1 &&
+			hosted::find_machine(rig.db, m.id)->state == FleetMachineState::Ready);
 
 	// A draining machine is told so.
 	TEST_EXPECT(hosted::transition_machine(

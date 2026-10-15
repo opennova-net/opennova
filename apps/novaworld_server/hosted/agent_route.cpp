@@ -183,9 +183,16 @@ crow::response AgentRoutes::sync(const crow::request &req, uint64_t raw_id) {
 		std::string error;
 		if (!decode_sync_request(req.body, request, error))
 			return refuse(peer, "sync", id, "a report that does not read: " + error);
-		const auto after = record_sync(db, id, request.agent_version, request.containers);
+		// A listing that failed: the agent is heard from, the slots' reports stand,
+		// and the answer is one the agent acts on nothing of.
+		const auto after = request.listing_failed
+				? record_unlisted_sync(db, id, request.agent_version)
+				: record_sync(db, id, request.agent_version, request.containers);
 		if (!after)
 			return refuse(peer, "sync", id, "a machine that no longer syncs");
+		if (request.listing_failed && throttle_->admit(peer))
+			std::fprintf(stderr, "[fleet] WARN machine %lld: its agent cannot list its containers\n",
+					static_cast<long long>(id));
 		if (machine->state == FleetMachineState::Booting &&
 				after->state == FleetMachineState::Ready)
 			std::printf("[fleet] machine %lld is ready (agent %s)\n", static_cast<long long>(id),

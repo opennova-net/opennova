@@ -517,6 +517,10 @@ std::string encode_sync_request(const SyncRequest &request) {
 		containers.push(std::move(entry));
 	}
 	v.set("containers", std::move(containers));
+	// Present only when it is so, so an agent that lists its containers sends
+	// what a service of before the member reads.
+	if (request.listing_failed)
+		v.set("listing_failed", JsonValue::make_bool(true));
 	return io::json_write(v);
 }
 
@@ -524,13 +528,22 @@ bool decode_sync_request(std::string_view json, SyncRequest &out, std::string &e
 	JsonValue v;
 	if (!parse_object(json, v, error) || !read_protocol(v, out.protocol, error))
 		return false;
-	if (!io::json_members_known(v, { "protocol", "agent_version", "containers" }, "sync", error))
+	if (!io::json_members_known(
+				v, { "protocol", "agent_version", "containers", "listing_failed" }, "sync", error))
 		return false;
 	if (!read_agent_version(v, out.agent_version, error))
 		return false;
+	out.listing_failed = false;
+	if (const JsonValue *failed = v.get("listing_failed")) {
+		if (!failed->is_bool() || !failed->boolean)
+			return fail(error, "listing_failed is no true");
+		out.listing_failed = true;
+	}
 	const JsonValue *containers = v.get("containers");
 	if (!containers || !containers->is_array() || containers->array.size() > kMaxReportedContainers)
 		return fail(error, "containers is no list of containers");
+	if (out.listing_failed && !containers->array.empty())
+		return fail(error, "a listing that failed reports containers");
 	out.containers.clear();
 	std::set<std::string> names;
 	for (const JsonValue &entry : containers->array) {

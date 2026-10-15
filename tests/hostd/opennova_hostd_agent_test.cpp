@@ -877,16 +877,20 @@ int test_sync_failures() {
 	rig.service.raw_reply = "{\"protocol\": 1, \"desired\": [{\"name\": \"x\"}], \"drain\": false}";
 	rig.step();
 	TEST_EXPECT(rig.runtime.calls.size() == calls && rig.runtime.containers.size() == 2);
-	// The runtime unlistable: nothing is reported or done.
+	// The runtime unlistable: a sync that says so, nothing reported or done, and the
+	// reply (here one that wants nothing) not acted on.
 	rig.service.raw_reply.clear();
 	rig.runtime.list_fails = true;
 	const int syncs = rig.service.syncs;
-	TEST_EXPECT(rig.step() == hosted::kSyncIntervalMs && rig.service.syncs == syncs &&
+	TEST_EXPECT(rig.step() == hosted::kSyncIntervalMs && rig.service.syncs == syncs + 1 &&
 			!rig.agent->last_sync_ok());
+	TEST_EXPECT(rig.service.last.listing_failed && rig.service.last.containers.empty());
+	TEST_EXPECT(rig.runtime.calls.size() == calls && rig.runtime.containers.size() == 2);
 	rig.runtime.list_fails = false;
 	// The service back, draining and wanting nothing: now they stop.
 	rig.service.drain = true;
 	rig.step();
+	TEST_EXPECT(!rig.service.last.listing_failed && rig.service.last.containers.size() == 2);
 	TEST_EXPECT(rig.agent->last_sync_ok() && rig.agent->draining());
 	TEST_EXPECT(rig.runtime.count("stop srv-1-g1") == 1 && rig.runtime.count("stop srv-2-g1") == 1);
 	rig.service.drain = false;
