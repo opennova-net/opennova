@@ -67,12 +67,14 @@ struct WeaponTimingRequest {
 };
 
 // The keys one ACTION block sets: ANIM (empty = leave it as it is, the
-// recoil nobody authored), DELAYSTART and DELAYEND.
+// recoil nobody authored), DELAYSTART and DELAYEND, and FUNCTION where the
+// timing needs another handler than the suffix's own (empty = leave it).
 struct WeaponTimingRow {
 	int action = 0;
 	std::string anim;
 	int32_t delaystart = 0;
 	int32_t delayend = 0;
+	std::string function;
 };
 
 // One FSM observation: `scenario` is the action the measured run requested
@@ -122,7 +124,7 @@ std::string weapon_edits_text(const WeaponTimingPlan &plan);
 // One entry of an edits file: the keys to set and nothing else.
 struct WeaponEditKey {
 	int action = 0;
-	std::string key;   // anim, delaystart or delayend
+	std::string key;   // anim, delaystart, delayend or function
 	std::string value; // as the def will hold it
 };
 
