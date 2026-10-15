@@ -50,6 +50,10 @@ jobs:
         run: docker run --rm -v "$PWD:/w" -w /w/infra/aws "$TERRAFORM_IMAGE" validate
       - name: terraform test (mock providers, offline)
         run: docker run --rm --network none -v "$PWD:/w" -w /w/infra/aws "$TERRAFORM_IMAGE" test
+      # A deployment besides prod is its own workspace, and terraform test runs
+      # in the selected one: tests/staging's runs, apart, as staging.
+      - name: terraform test (staging workspace)
+        run: docker run --rm --network none -e TF_WORKSPACE=staging -v "$PWD:/w" -w /w/infra/aws "$TERRAFORM_IMAGE" test -test-directory=tests/staging
 
   shellcheck:
     runs-on: ubuntu-latest

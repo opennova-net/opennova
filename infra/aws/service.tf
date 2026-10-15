@@ -7,19 +7,23 @@
 # portal's nginx and the web build (a bridge network, `edge`). It keeps no
 # state: secrets and settings live in SSM Parameter Store (service_ssm.tf),
 # releases in the operations bucket, logs in CloudWatch. So it is disposable:
-# `./deploy/run.sh infra apply -replace=aws_instance.service` makes a new one,
-# which converges itself to the current release at its first boot
-# (deploy/host/service-user-data.sh, deploy/host/converge.sh). What outlives
-# an instance:
+# `./deploy/run.sh infra apply --allow-destroy -replace=aws_instance.service`
+# makes a new one, which converges itself to the current release at its first
+# boot (deploy/host/service-user-data.sh, deploy/host/converge.sh). What
+# outlives an instance:
 #   - its network interface (aws_network_interface.service), which holds the
-#     host's fixed private address (10.44.0.10 by default): the address the
+#     instance's fixed private address (10.44.0.10 by default): the address the
 #     game machines reach the service's internal listener at;
 #   - the Elastic IP, associated with that interface. Retail clients find the
 #     service by it (gs.novaworld.net, the Switcher's hosts block), so prod
 #     adopts its existing address by allocation id
 #     (var.service_eip_allocation_id): Terraform only reads it, so no plan can
-#     release it. A deployment with no allocation id (staging) gets an address
-#     of its own, managed here.
+#     release it. Prod never makes an address, and another deployment never
+#     adopts one: each gets an address of its own, managed here. A plan that
+#     breaks either rule stops at its precondition.
+# The toolbox's `infra apply` also refuses a plan that destroys or replaces
+# the instance, its interface, the address or its association unless
+# --allow-destroy (deploy/bin/on-deploy, PRECIOUS_TYPES).
 # No SSH: no key pair, no port 22. The shell is SSM Session Manager (`app
 # shell`), deploys are SSM Run Command (`app deploy`).
 
@@ -145,13 +149,25 @@ resource "aws_network_interface" "service" {
   })
 }
 
-# Prod's Elastic IP, adopted: read by its allocation id, never managed.
+# Prod's Elastic IP, adopted: read by its allocation id, never managed. Prod
+# alone adopts one: another deployment naming an allocation id (a stray
+# *.auto.tfvars or TF_VAR_ holding prod's, say) would move that address onto
+# its own interface, so its plan stops here, before the address is read.
 data "aws_eip" "service" {
   count = local.adopt_eip ? 1 : 0
   id    = var.service_eip_allocation_id
+
+  lifecycle {
+    precondition {
+      condition     = local.manage_shared
+      error_message = "deployment ${local.deployment} names an Elastic IP to adopt (service_eip_allocation_id = ${var.service_eip_allocation_id}): prod alone adopts one, and this plan would move that address onto ${local.deployment}'s interface. Leave service_eip_allocation_id unset off prod (infra/aws/${local.deployment}.tfvars, TF_VAR_service_eip_allocation_id); ${local.deployment} gets an address of its own."
+    }
+  }
 }
 
-# A deployment that adopts none gets one of its own.
+# Another deployment gets one of its own. Prod never makes one: its address is
+# the one retail clients use, so a prod plan that names none stops here rather
+# than give prod a new address (and re-point the association at it).
 resource "aws_eip" "service" {
   count  = local.adopt_eip ? 0 : 1
   domain = "vpc"
@@ -159,25 +175,24 @@ resource "aws_eip" "service" {
   tags = merge(var.tags, {
     Name = "${local.name}-eip"
   })
+
+  lifecycle {
+    precondition {
+      condition     = !local.manage_shared
+      error_message = "prod names no Elastic IP to adopt: set service_eip_allocation_id in infra/aws/prod.tfvars to the allocation id of the address retail clients use (./deploy/run.sh aws ec2 describe-addresses). Prod never makes an address of its own; a brand-new prod stack allocates one first (./deploy/run.sh aws ec2 allocate-address --domain vpc) and adopts it (DEPLOY.md, \"The var-file\")."
+    }
+  }
 }
 
 # Associated with the interface, not the instance, so a new instance takes the
 # address with the interface. allow_reassociation moves it from wherever it is
-# now (the single-host stack's instance, at the cutover).
+# now (the single-host stack's instance, at the cutover); the preconditions
+# above keep it to the deployment's own address.
 resource "aws_eip_association" "service" {
   allocation_id        = local.service_eip_allocation_id
   network_interface_id = aws_network_interface.service.id
   private_ip_address   = local.service_private_ip
   allow_reassociation  = true
-}
-
-# Prod's address is the one retail clients use: a plan that would give prod a
-# new one says so (and `infra apply` in the toolbox refuses to destroy one).
-check "prod_adopts_its_elastic_ip" {
-  assert {
-    condition     = !local.manage_shared || local.adopt_eip
-    error_message = "prod gets a NEW Elastic IP: set service_eip_allocation_id in infra/aws/prod.tfvars to the allocation id of the address retail clients use (DEPLOY.md, \"Moving from the single-host stack\"); a brand-new stack ignores this."
-  }
 }
 
 # ---- the instance ---------------------------------------------------------------
@@ -203,7 +218,13 @@ resource "aws_instance" "service" {
   iam_instance_profile = aws_iam_instance_profile.service.name
 
   user_data = local.service_user_data
-  # A changed first-boot script is a new host: the plan shows the replacement.
+  # A changed first-boot script or converge unit (a comment in either
+  # included) is a new instance: the plan shows the replacement, and the
+  # toolbox's `infra apply` refuses it without --allow-destroy (aws_instance is
+  # one of its precious types; prod also asks for --yes), so it is taken on
+  # purpose, at a quiet time. Never false: an in-place user-data change stops
+  # and starts the instance, an outage no gate sees, and changes nothing on it
+  # (cloud-init runs the script at the first boot alone).
   user_data_replace_on_change = true
 
   network_interface {
@@ -243,8 +264,9 @@ resource "aws_instance" "service" {
 
   # The AMI only seeds a new instance: data.aws_ami.ubuntu is most_recent, so
   # without this every plan after Canonical publishes an image would replace
-  # the host. An OS upgrade is a deliberate replace (-replace=aws_instance.service;
-  # a changed var.ami_id waits for one too).
+  # the instance. An OS upgrade is a deliberate replace (infra apply
+  # --allow-destroy -replace=aws_instance.service; a changed var.ami_id waits
+  # for one too).
   lifecycle {
     ignore_changes = [ami]
   }

@@ -4,13 +4,14 @@
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> init -backend=false
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> test
 # Prod adopts its Elastic IP by allocation id (no managed address, the
-# association on the host's network interface at its fixed private address); a
-# deployment with no allocation id gets a managed one. No SSH: no rule on port
-# 22, the web port from Cloudflare's ranges alone, the retail ports from
-# everywhere. The instance requires IMDSv2 with a hop limit of 1; its role reads
-# its own deployment's parameters alone. infra.env carries the public address;
-# the release parameter starts at none; the converge document holds
-# deploy/host/converge.sh.
+# association on the instance's network interface at its fixed private
+# address), and a prod plan naming none stops at the address's precondition:
+# prod never makes one (tests/staging: another deployment gets a managed
+# address and never adopts one). No SSH: no rule on port 22, the web port from
+# Cloudflare's ranges alone, the retail ports from everywhere. The instance
+# requires IMDSv2 with a hop limit of 1; its role reads its own deployment's
+# parameters alone. infra.env carries the public address; the release
+# parameter starts at none; the converge document holds deploy/host/converge.sh.
 
 mock_provider "aws" {
   override_during = plan
@@ -220,8 +221,9 @@ run "adopted_eip" {
   }
 }
 
-# Prod without an allocation id gets a new address: the plan says so (the check
-# below), and the toolbox's apply refuses to destroy the old one.
+# Prod without an allocation id would get a new address (and the association
+# re-pointed at it): the plan stops at the managed address's precondition
+# instead. Prod never makes one.
 run "managed_eip" {
   command = plan
 
@@ -229,16 +231,7 @@ run "managed_eip" {
     service_eip_allocation_id = ""
   }
 
-  expect_failures = [check.prod_adopts_its_elastic_ip]
-
-  assert {
-    condition     = length(aws_eip.service) == 1 && aws_eip_association.service.allocation_id == "eipalloc-0fedcba9876543210"
-    error_message = "a deployment that adopts none gets a managed address, associated the same way"
-  }
-  assert {
-    condition     = output.public_ip == "3.3.3.3" && strcontains(aws_ssm_parameter.infra_env.value, "ONNET_PUBLIC_HOST='3.3.3.3'\n")
-    error_message = "the managed address is the public one"
-  }
+  expect_failures = [aws_eip.service]
 }
 
 run "no_cloudflare" {

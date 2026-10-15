@@ -155,8 +155,11 @@ take prod's Elastic IP), so the toolbox refuses to run while one exists.
 
 For prod set `service_eip_allocation_id` to the allocation id of the Elastic IP retail
 clients use (`./deploy/run.sh aws ec2 describe-addresses`). Terraform reads that address
-and associates it, and never manages it: no plan can release it. A deployment without
-one (staging) gets a managed address of its own; a prod plan without one warns. Pin
+and associates it, and never manages it: no plan can release it. Prod never makes an
+address of its own, so a prod plan without the allocation id stops at a precondition (a
+brand-new prod stack allocates one first, `./deploy/run.sh aws ec2 allocate-address
+--domain vpc`, and adopts it). Another deployment (staging) gets a managed address of
+its own and never adopts one: its plan stops too when an allocation id reaches it. Pin
 `azs` once the stack exists so a change in the region's list never moves a subnet.
 
 ### Plan and apply
