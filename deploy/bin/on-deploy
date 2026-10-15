@@ -461,13 +461,15 @@ ensure_item() {
     added+=("$label")
   done
   generated=""
+  # stdin from /dev/null: op takes a piped stdin (a run with no terminal) for a
+  # second template and refuses the call.
   if [ "${#added[@]}" -eq 0 ]; then
     log "  $title: has ${kept[*]}"
   elif [ "$creating" -eq 1 ]; then
-    op item create --vault "$VAULT" --template "$json" >/dev/null || die "creating vault item '$title' failed"
+    op item create --vault "$VAULT" --template "$json" </dev/null >/dev/null || die "creating vault item '$title' failed"
     log "  $title: created with ${added[*]}"
   else
-    op item edit "$title" --vault "$VAULT" --template "$json" >/dev/null || die "adding ${added[*]} to vault item '$title' failed"
+    op item edit "$title" --vault "$VAULT" --template "$json" </dev/null >/dev/null || die "adding ${added[*]} to vault item '$title' failed"
     log "  $title: added ${added[*]}${kept[*]:+ (kept ${kept[*]})}"
   fi
   rm -f "$json" "$new"
@@ -833,7 +835,7 @@ vault_set_fields() {
       || die "preparing vault item '$title' failed"
     mv -f "$new" "$json"
   done
-  op item edit "$title" --vault "$VAULT" --template "$json" >/dev/null \
+  op item edit "$title" --vault "$VAULT" --template "$json" </dev/null >/dev/null \
     || { rm -f "$json"; die "writing ${labels[*]} to vault item '$title' failed"; }
   rm -f "$json"
 }
