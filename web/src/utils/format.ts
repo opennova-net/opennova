@@ -71,6 +71,22 @@ export function formatDate(value: string | number): string {
   return new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' });
 }
 
+// "$5", "$12.50", "€45": an amount in the currency's smallest unit (cents),
+// whole amounts without decimals.
+export function formatMoney(minor: number, currency: string): string {
+  const code = currency.toUpperCase();
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: code,
+      minimumFractionDigits: minor % 100 === 0 ? 0 : 2,
+      maximumFractionDigits: 2,
+    }).format(minor / 100);
+  } catch {
+    return `${(minor / 100).toFixed(2)} ${code}`;
+  }
+}
+
 // The ISO instant, for a <time datetime>; '' when unreadable.
 export function isoTime(value: string | number): string {
   const t = timeMs(value);

@@ -68,7 +68,19 @@
           />
         </div>
         <div class="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-          <p v-if="blockText" class="text-sm" :class="block === 'past_due' ? 'text-warn' : 'text-ink-muted'">{{ blockText }}</p>
+          <p v-if="blockText" class="text-sm" :class="block === 'past_due' ? 'text-warn' : 'text-ink-muted'">
+            {{ blockText }}
+            <RouterLink v-if="block === 'past_due'" to="/me/support" class="text-accent hover:text-ink-bright">
+              Update your payment method
+            </RouterLink>
+            <RouterLink
+              v-else-if="block === 'limit' && data.entitlement.source !== 'comp'"
+              to="/me/support"
+              class="text-accent hover:text-ink-bright"
+            >
+              See the support tiers
+            </RouterLink>
+          </p>
           <p v-else class="text-sm text-ink-muted">Hosted servers are experimental (pre-1.0).</p>
           <RouterLink
             v-if="block === null"
@@ -210,8 +222,11 @@ const blockText = computed(() => {
       return "Your support tier's last payment did not go through. Your servers keep running while Stripe retries the card; new servers can't start.";
     case 'limit': {
       const stopping = live.value.some((s) => s.state === 'stopping');
-      const all = `All ${e?.max_servers === 1 ? 'the one server' : `${e?.max_servers} servers`} you may run are live.`;
-      return stopping ? `${all} ${STOPPING_STILL_COUNTS}` : `${all} Stop one to start another.`;
+      const all =
+        e?.max_servers === 1 ? 'The one server you may run is live.' : `All ${e?.max_servers} servers you may run are live.`;
+      return stopping
+        ? `${all} ${STOPPING_STILL_COUNTS}`
+        : `${all} Stop one to start another${e?.source === 'comp' ? '.' : ', or move to a bigger support tier.'}`;
     }
     case 'full':
       return 'Every hosted server place on NovaWorld is taken right now. Try again later.';

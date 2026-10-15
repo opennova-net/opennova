@@ -23,10 +23,12 @@
     <p
       v-if="alertText"
       :id="`${baseId}-alert`"
-      aria-hidden="true"
       class="rounded-panel border border-danger/40 bg-danger/10 p-3 text-sm text-danger"
     >
-      {{ alertText }}
+      <span aria-hidden="true">{{ alertText }}</span>
+      <RouterLink v-if="alertLinksToTiers" to="/me/support" class="ml-1 text-accent hover:text-ink-bright">
+        See your support tier
+      </RouterLink>
     </p>
 
     <!-- The data set: the game the server runs, and the lobby it lists in. -->
@@ -255,7 +257,8 @@
 // backend's text.
 import { computed, nextTick, reactive, ref, watch } from 'vue';
 import MissionRotationPicker from './MissionRotationPicker.vue';
-import { startHostedServer, type HostedError } from '../api/hostedServer';
+import { RouterLink } from 'vue-router';
+import { linksToSupportTier, startHostedServer, type HostedError } from '../api/hostedServer';
 import type {
   HostedDataSet,
   HostedExpansionOption,
@@ -386,6 +389,8 @@ const busy = ref(false);
 // The game password is masked (it may come from the last server) until shown.
 const showPassword = ref(false);
 const alertText = ref('');
+// The refusal shown is one a support tier answers: the alert links to it.
+const alertLinksToTiers = ref(false);
 // The form's own check, once a start was tried (then again on every change).
 const checked = ref<SettingsErrors>({});
 const attempted = ref(false);
@@ -447,6 +452,7 @@ async function submit() {
   serverRefusal.value = null;
   const result = checkSettings(form, props.dataSets);
   checked.value = result.errors;
+  alertLinksToTiers.value = false;
   if (!result.settings) {
     const count = Object.keys(result.errors).length;
     alertText.value = `Check the ${count === 1 ? 'setting' : `${count} settings`} marked below.`;
@@ -463,6 +469,7 @@ async function submit() {
   }
   const error = reply.error;
   alertText.value = error.message;
+  alertLinksToTiers.value = linksToSupportTier(error.code);
   if (error.code === 'invalid_settings' && error.field) {
     const rule = fieldRule(error.field, dataSet.value);
     const refused: SettingsErrors = {};

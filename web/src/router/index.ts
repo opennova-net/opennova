@@ -7,6 +7,8 @@ import AccountLayout from '../pages/account/AccountLayout.vue';
 import ServersPage from '../pages/account/ServersPage.vue';
 import NewServerPage from '../pages/account/NewServerPage.vue';
 import AccountPage from '../pages/account/AccountPage.vue';
+import SupportTierPage from '../pages/account/SupportTierPage.vue';
+import SupportPage from '../pages/SupportPage.vue';
 import ServerDetailLayout from '../pages/servers/ServerDetailLayout.vue';
 import ServerOverviewTab from '../pages/servers/ServerOverviewTab.vue';
 import ServerConsoleTab from '../pages/servers/ServerConsoleTab.vue';
@@ -28,6 +30,7 @@ const router = createRouter({
     { path: '/login', component: LoginPage },
     { path: '/register', component: RegisterPage },
     { path: '/lobby', component: LobbyPage },
+    { path: '/support', component: SupportPage },
     // The account area.
     {
       path: '/me',
@@ -47,6 +50,9 @@ const router = createRouter({
             { path: 'settings', component: ServerSettingsTab },
           ],
         },
+        // Stripe's Checkout and billing portal return here
+        // (?checkout=success&session_id=..., ?checkout=cancel).
+        { path: 'support', component: SupportTierPage },
         { path: 'account', component: AccountPage },
         // The hosted server's page before an account could have several:
         // old links land on the list.

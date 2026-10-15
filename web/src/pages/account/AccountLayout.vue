@@ -43,6 +43,7 @@ interface AccountSection {
 
 const sections: AccountSection[] = [
   { to: '/me/servers', label: 'Servers' },
+  { to: '/me/support', label: 'Support tier' },
   { to: '/me/account', label: 'Account' },
 ];
 

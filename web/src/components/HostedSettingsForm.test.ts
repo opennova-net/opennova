@@ -5,7 +5,10 @@ import { startHostedServer } from '../api/hostedServer';
 import { DFX2, JO, hostedServer, settings } from '../test/hostedFixtures';
 import type { HostedDataSet, HostedSettings } from '../types/hostedServer';
 
-vi.mock('../api/hostedServer', () => ({ startHostedServer: vi.fn() }));
+vi.mock('../api/hostedServer', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/hostedServer')>()),
+  startHostedServer: vi.fn(),
+}));
 const start = vi.mocked(startHostedServer);
 
 function mountForm(

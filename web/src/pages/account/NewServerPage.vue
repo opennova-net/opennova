@@ -7,9 +7,12 @@
       </h1>
     </header>
 
-    <p role="alert" class="sr-only">{{ notice }}</p>
-    <p v-if="notice" aria-hidden="true" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
-      {{ notice }}
+    <p role="alert" class="sr-only">{{ notice?.message }}</p>
+    <p v-if="notice" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
+      <span aria-hidden="true">{{ notice.message }}</span>
+      <RouterLink v-if="linksToSupportTier(notice.code)" to="/me/support" class="ml-1 text-accent hover:text-ink-bright">
+        See your support tier
+      </RouterLink>
     </p>
 
     <div v-if="data === null && !loadError" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">
@@ -30,7 +33,16 @@
     <section v-else-if="block !== null" class="space-y-3 rounded-panel border border-border bg-panel p-6" aria-labelledby="new-server-blocked">
       <h2 id="new-server-blocked" class="text-lg font-semibold text-ink">No new server can start right now</h2>
       <p class="text-sm text-ink-muted">{{ blockText }}</p>
-      <RouterLink to="/me/servers" class="inline-block text-sm text-accent hover:text-ink-bright">Back to your servers</RouterLink>
+      <p class="flex flex-wrap gap-4 text-sm">
+        <RouterLink
+          v-if="block === 'locked' || block === 'past_due' || (block === 'limit' && data.entitlement.source !== 'comp')"
+          to="/me/support"
+          class="text-accent hover:text-ink-bright"
+        >
+          {{ block === 'past_due' ? 'Update your payment method' : 'See the support tiers' }}
+        </RouterLink>
+        <RouterLink to="/me/servers" class="text-accent hover:text-ink-bright">Back to your servers</RouterLink>
+      </p>
     </section>
 
     <template v-else>
@@ -60,7 +72,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import HostedSettingsForm from '../../components/HostedSettingsForm.vue';
-import { fetchMyServer, fetchMyServers, type HostedError } from '../../api/hostedServer';
+import { fetchMyServer, fetchMyServers, linksToSupportTier, type HostedError } from '../../api/hostedServer';
 import { useSession } from '../../composables/useSession';
 import type { HostedServer, HostedServersResponse } from '../../types/hostedServer';
 import { ownMachinesFree, startBlock } from '../../utils/myServersView';
@@ -73,7 +85,8 @@ const data = ref<HostedServersResponse | null>(null);
 const from = ref<HostedServer | null>(null);
 const fromGone = ref(false);
 const loadError = ref('');
-const notice = ref('');
+// The refusal that took the form away, kept above what replaced it.
+const notice = ref<HostedError | null>(null);
 
 const block = computed(() => (data.value ? startBlock(data.value) : null));
 
@@ -154,7 +167,7 @@ function onRefused(error: HostedError) {
     error.code === 'hosting_disabled' ||
     error.code === 'at_capacity'
   ) {
-    notice.value = error.message;
+    notice.value = error;
     void load();
   }
 }
