@@ -1,6 +1,7 @@
 #include <runtime/devtools/environment_window.h>
 
 #include <runtime/devtools/debug_control_ids.h>
+#include <runtime/devtools/ui_kit.h>
 #include <runtime/world/weather_state.h>
 
 #include <imgui.h>
@@ -306,9 +307,7 @@ void EnvironmentWindow::draw_controls() {
 	};
 	ImGui::SetNextItemWidth(w);
 	ImGui::SliderInt("##precip", &rain_pct_edit_, 0, 100, "precip %d%%");
-	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Rain and Snow write the one precipitation channel; the button picks the kind.");
-	}
+	ui_kit::tooltip("Rain and Snow write the one precipitation channel; the button picks the kind.");
 	ImGui::SameLine();
 	if (ImGui::Button("Rain")) enqueue_request({control_id::kEnvironmentRain, two(rain_pct_edit_, seconds_edit_)});
 	ImGui::SameLine();
@@ -345,7 +344,7 @@ void EnvironmentWindow::draw_controls() {
 	ImGui::InputInt("##wind", &wind_edit_);
 	ImGui::SameLine();
 	if (ImGui::Button("Wind")) enqueue_request({control_id::kEnvironmentWindScale, one(wind_edit_)});
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("wind(value): 256 is the retail default.");
+	ui_kit::tooltip("wind(value): 256 is the retail default.");
 	ImGui::SameLine();
 	ImGui::SetNextItemWidth(w);
 	ImGui::SliderInt("##windpct", &wind_pct_edit_, 0, 100, "%d%%");
@@ -356,12 +355,10 @@ void EnvironmentWindow::draw_controls() {
 	ImGui::SliderInt("##minute", &minute_edit_, 0, 1439, "%d min");
 	ImGui::SameLine();
 	if (ImGui::Button("Time of day")) enqueue_request({control_id::kEnvironmentTimeOfDayMinutes, one(minute_edit_)});
-	if (ImGui::IsItemHovered()) ImGui::SetTooltip("tod(minute): the WAC command's clock math.");
+	ui_kit::tooltip("tod(minute): the WAC command's clock math.");
 	ImGui::SameLine();
 	if (ImGui::Button("Scrub")) request_clock_scrub(minute_edit_);
-	if (ImGui::IsItemHovered()) {
-		ImGui::SetTooltip("Set the mission clock to exactly this minute and resync the colors.");
-	}
+	ui_kit::tooltip("Set the mission clock to exactly this minute and resync the colors.");
 
 	ImGui::SetNextItemWidth(w);
 	ImGui::InputInt("##quake", &quake_seconds_edit_);
@@ -393,7 +390,7 @@ void EnvironmentWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	(void)pass;
 	(void)frame_index;
 	if (!snapshot_.valid) {
-		ImGui::TextUnformatted("No environment pushed (load a mission).");
+		ui_kit::empty_state("No environment pushed (load a mission).");
 		return;
 	}
 	ImGui::Text("Script & Env Values | logic tick %llu (%.2f s readings)",

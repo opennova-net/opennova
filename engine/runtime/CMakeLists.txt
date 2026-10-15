@@ -527,6 +527,7 @@ target_compile_features(opennova_runtime PUBLIC cxx_std_17)
 
 # Dear ImGui (ADR 0039) links PRIVATE so no ImGui header reaches a consumer: the
 # shell hands the context over as plain pointers (devtools/imgui_abi.h). The
+# pass, the tool kit its windows draw with (devtools/ui_kit) and the
 # game's dev-tool windows compile only when the including root leaves
 # OPENNOVA_DEVTOOLS on (every build but the release GDExtension flavour); the
 # define is PUBLIC so the shell gates its DevTools node on it.
@@ -534,9 +535,11 @@ if(OPENNOVA_DEVTOOLS)
     target_link_libraries(opennova_runtime PRIVATE opennova_imgui)
     target_sources(opennova_runtime PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/imgui_pass.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/ui_kit.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_dev_tools.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/game_window.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/control_board.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/devtools/capture_table.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/overlay_canvas.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/entity_overlay.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/devtools/ai_overlay.cpp

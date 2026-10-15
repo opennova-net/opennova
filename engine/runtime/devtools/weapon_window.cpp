@@ -1,14 +1,17 @@
 #include <runtime/devtools/weapon_window.h>
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
+#include <runtime/devtools/ui_kit.h>
 #include <runtime/world/weapon_fsm.h>
 
 #include <imgui.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <string>
 
 namespace opennova::devtools {
 namespace {
@@ -30,12 +33,16 @@ constexpr float kMaxZoom = 60.0f;
 constexpr float kTraceChannelHeight = 20.0f;
 constexpr int kTraceChannels = 5;
 
-const char *const kActionNames[wa::kCount] = {
-		"IDLE", "EMPTYIDLE", "FIRE", "RECOIL", "RELOAD", "EMPTY",
-		"SWITCHTO", "SWITCHFROM", "SWITCHRANK", "SCOPEUP", "SCOPEDOWN", "OVERHEATED"};
-
+// An action's name as the window shows it: the FSM's own suffix, upper-cased.
 const char *action_name(int id) {
-	return (id >= 0 && id < wa::kCount) ? kActionNames[id] : "?";
+	static const std::array<std::string, wa::kCount> kNames = [] {
+		std::array<std::string, wa::kCount> names;
+		for (int i = 0; i < wa::kCount; ++i) {
+			names[static_cast<size_t>(i)] = strutil::to_upper(world::kWeaponActionSuffixes[i]);
+		}
+		return names;
+	}();
+	return (id >= 0 && id < wa::kCount) ? kNames[static_cast<size_t>(id)].c_str() : "?";
 }
 
 const char *phase_name(uint8_t phase) {
@@ -66,18 +73,10 @@ double tick_of(float x0, float ppt, double origin, float x) {
 	return origin + static_cast<double>(x - x0) / static_cast<double>(ppt);
 }
 
-// The disabled-button contract: an empty `block` enables the button, a
-// non-empty one disables it AND becomes the tooltip explaining why.
-bool action_button(const char *label, const char *block) {
-	const bool blocked = block != nullptr && block[0] != '\0';
-	ImGui::BeginDisabled(blocked);
-	const bool pressed = ImGui::Button(label);
-	ImGui::EndDisabled();
-	if (blocked && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled |
-										ImGuiHoveredFlags_ForTooltip)) {
-		ImGui::SetTooltip("%s", block);
-	}
-	return pressed;
+// A trigger on the transport row: enabled while the FSM's refusal `block` is
+// empty, its tooltip `does` then, else the refusal itself.
+bool trigger_tool(ui_kit::WrapRow &row, const char *label, const std::string &block, const char *does) {
+	return ui_kit::tool(row, label, block.empty(), block.empty() ? std::string(does) : block);
 }
 
 // The coarsest label step that still leaves at least ~72 px between labels.
@@ -222,7 +221,7 @@ void WeaponWindow::format_rows() {
 	for (int id = 0; id < wa::kCount; ++id) {
 		const WeaponActionRow &row = definition_.actions[id];
 		RowText &text = texts_[static_cast<size_t>(id)];
-		text.label = kActionNames[id];
+		text.label = action_name(id);
 		if (!definition_.valid) {
 			text.timing.clear();
 			continue;
@@ -579,7 +578,7 @@ void WeaponWindow::draw_dope_sheet(float height) {
 			ImGui::SetTooltip("%s%s\nDELAYSTART %d  (%.0f ms)\nDELAYEND   %d  (%.0f ms)\n"
 							  "clip %s%d ticks\n\ndrag the divider or the right edge to retime\n"
 							  "double-click to frame",
-					kActionNames[id], row.authored ? "" : "  (not authored)", row.delay_start,
+					action_name(id), row.authored ? "" : "  (not authored)", row.delay_start,
 					row.delay_start * kMsPerTick, row.delay_end, row.delay_end * kMsPerTick,
 					row.clip_ticks > 0 ? "" : "unresolved, ", row.clip_ticks);
 		}
@@ -630,7 +629,7 @@ void WeaponWindow::draw_dope_sheet(float height) {
 					if (next_end != row.delay_end) request_delay_edit(id, DelayLeg::End, next_end);
 				}
 				ImGui::SetTooltip("%s  %s\nDELAYSTART %d  (%.0f ms)\nDELAYEND   %d  (%.0f ms)",
-						kActionNames[id], handle == 1 ? "delaystart" : "delayend", next_start,
+						action_name(id), handle == 1 ? "delaystart" : "delayend", next_start,
 						next_start * kMsPerTick, next_end, next_end * kMsPerTick);
 			}
 			if (ImGui::IsItemDeactivated() && drag_action_ == id && drag_handle_ == handle) {
@@ -949,11 +948,9 @@ void WeaponWindow::draw_header() {
 		// No magazine to track: the def authored no clipsize, so the FSM runs
 		// its infinite-ammo legs and a reload can never be requested.
 		ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.4f, 1.0f), "| no clipsize");
-		if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) {
-			ImGui::SetTooltip("The weapon.def entry authors no `clipsize`, so the FSM tracks no\n"
-							  "magazine and the reload gate refuses. (The parser key is\n"
-							  "`clipsize`; a `clip` line is not one and is not a recognized property.)");
-		}
+		ui_kit::tooltip("The weapon.def entry authors no `clipsize`, so the FSM tracks no magazine and the "
+						"reload gate refuses. (The parser key is `clipsize`; a `clip` line is not one and "
+						"is not a recognized property.)");
 	} else {
 		ImGui::Text("| clip %d/%d  reserve %d", live_.clip, definition_.clip_capacity, live_.reserve);
 	}
@@ -973,70 +970,62 @@ void WeaponWindow::draw_header() {
 }
 
 void WeaponWindow::draw_transport() {
-	const char *fire_block = live_.fire_block.c_str();
-	const bool fire_ok = live_.fire_block.empty();
-	if (action_button("Fire", fire_block)) queue_trigger(WeaponRequest::Trigger::Fire);
-	ImGui::SameLine();
+	const std::string &fire_block = live_.fire_block;
+	const bool fire_ok = fire_block.empty();
+	ui_kit::WrapRow row;
+	if (trigger_tool(row, "Fire", fire_block, "Pull the trigger once, as a click does.")) {
+		queue_trigger(WeaponRequest::Trigger::Fire);
+	}
 	bool held = live_.fire_held;
+	row.next(ui_kit::checkbox_width("Hold"));
 	ImGui::BeginDisabled(!fire_ok);
 	if (ImGui::Checkbox("Hold", &held)) queue_fire_held(held);
 	ImGui::EndDisabled();
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip | ImGuiHoveredFlags_AllowWhenDisabled)) {
-		if (fire_ok) {
-			ImGui::SetTooltip("Hold the trigger: on an auto weapon the recoil window's deferred\n"
-							  "re-queue sustains the volley, exactly as a held mouse button does.\n"
-							  "Released when the window hides.");
-		} else {
-			ImGui::SetTooltip("%s", fire_block);
-		}
-	}
-	ImGui::SameLine();
+	ui_kit::tooltip(fire_ok ? std::string("Hold the trigger: on an auto weapon the recoil window's deferred "
+										  "re-queue sustains the volley, exactly as a held mouse button "
+										  "does. Released when the window hides.")
+							: fire_block);
 	// Strict preview: the buttons carry the FSM's own refusal rather than
 	// faking ammo to keep themselves enabled.
-	if (action_button("Reload", fire_ok ? live_.reload_block.c_str() : fire_block)) {
+	if (trigger_tool(row, "Reload", fire_ok ? live_.reload_block : fire_block,
+				"Reload, as the reload key does.")) {
 		queue_trigger(WeaponRequest::Trigger::Reload);
 	}
-	ImGui::SameLine();
-	if (action_button("Scope toggle", fire_ok ? live_.scope_block.c_str() : fire_block)) {
+	if (trigger_tool(row, "Scope toggle", fire_ok ? live_.scope_block : fire_block,
+				"Raise or lower the sight, as the scope key does.")) {
 		queue_trigger(WeaponRequest::Trigger::ScopeToggle);
 	}
-	ImGui::SameLine();
-	if (action_button("Next weapon", fire_block)) queue_trigger(WeaponRequest::Trigger::NextWeapon);
-	ImGui::SameLine();
-	if (action_button("Prev weapon", fire_block)) queue_trigger(WeaponRequest::Trigger::PrevWeapon);
+	if (trigger_tool(row, "Next weapon", fire_block, "Switch to the next weapon of the kit.")) {
+		queue_trigger(WeaponRequest::Trigger::NextWeapon);
+	}
+	if (trigger_tool(row, "Prev weapon", fire_block, "Switch to the previous weapon of the kit.")) {
+		queue_trigger(WeaponRequest::Trigger::PrevWeapon);
+	}
 
-	ImGui::SameLine();
+	row.next(ui_kit::text_width("|"));
 	ImGui::TextDisabled("|");
-	ImGui::SameLine();
 	bool recording = recording_;
-	if (ImGui::Checkbox("REC", &recording)) {
+	if (ui_kit::check(row, "REC", &recording,
+				"Record the FSM at every 62.5 Hz pump tick. Stays on while the window is hidden, so you "
+				"can close F3, shoot, and reopen to read the burst.")) {
 		rec_touched_ = true;
 		set_recording(recording);
 	}
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) {
-		ImGui::SetTooltip("Record the FSM at every 62.5 Hz pump tick. Stays on while the window\n"
-						  "is hidden, so you can close F3, shoot, and reopen to read the burst.");
-	}
-	ImGui::SameLine();
-	ImGui::Checkbox("Follow", &trace_follow_);
-	ImGui::SameLine();
-	if (ImGui::Button("Fit")) {
+	ui_kit::check(row, "Follow", &trace_follow_, "The trace pane rides the newest tick (a pan stops it).");
+	if (ui_kit::tool(row, "Fit", true, "View All on both panes (Home over a pane fits just that one).")) {
 		fit_pending_ = true;
 		fit_trace_pending_ = !trace_.empty();
 	}
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) {
-		ImGui::SetTooltip("View All on both panes (Home over a pane fits just that one)");
-	}
-	ImGui::SameLine();
-	if (ImGui::Button("Clear trace")) {
+	if (ui_kit::tool(row, "Clear trace", true, "Drop the recorded trace.")) {
 		trace_.clear();
 		measure_valid_ = false;
 		WeaponRequest request;
 		request.kind = WeaponRequest::Kind::ClearTrace;
 		enqueue_request(request);
 	}
-	ImGui::SameLine();
-	if (ImGui::Button("Copy ACTION blocks")) {
+	if (ui_kit::tool(row, "Copy ACTION blocks", true,
+				"Edits never reach disk. This copies the current ACTION blocks in weapon.def shape so "
+				"the numbers can be carried out by hand.")) {
 		// Edits are live-only and never reach disk; this is only so the current
 		// numbers can be carried out of the window without retyping them.
 		std::string out;
@@ -1072,12 +1061,8 @@ void WeaponWindow::draw_transport() {
 		}
 		ImGui::SetClipboardText(out.c_str());
 	}
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) {
-		ImGui::SetTooltip("Edits never reach disk. This copies the current ACTION blocks in\n"
-						  "weapon.def shape so the numbers can be carried out by hand.");
-	}
-	ImGui::TextDisabled("wheel: zoom   middle/right drag: pan   Home: fit   double-click a track: frame it"
-						"   drag the trace ruler: measure");
+	ui_kit::note("wheel: zoom   middle/right drag: pan   Home: fit   double-click a track: frame it"
+				 "   drag the trace ruler: measure");
 }
 
 void WeaponWindow::draw_properties() {
@@ -1095,7 +1080,7 @@ void WeaponWindow::draw_properties() {
 	}
 
 	ImGui::Separator();
-	ImGui::Text("%s", kActionNames[id]);
+	ImGui::Text("%s", action_name(id));
 	ImGui::SameLine();
 	if (row.authored) {
 		ImGui::TextDisabled("authored as \"%s\"", row.authored_name.c_str());
@@ -1186,19 +1171,17 @@ void WeaponWindow::draw_properties() {
 			row.particle_userpoint, nullptr, "");
 
 	ImGui::TextDisabled("FUNCTION %s", row.function.empty() ? "-" : row.function.c_str());
-	if (ImGui::IsItemHovered(ImGuiHoveredFlags_ForTooltip)) {
+	ui_kit::tooltip_lazy([&] {
 		// The pump runs the handler the row names, or the suffix's own when it
 		// names none the registry knows (weapon_fsm.cpp run_handler).
 		const int8_t named = opennova::world::weapon_handler_named(row.function.c_str());
 		const int8_t bound = named == opennova::world::weapon_handler::kPlaceholder
 				? opennova::world::weapon_action_default_handler(id)
 				: named;
-		ImGui::SetTooltip(
-				"Read-only: this slot runs %s, the handler its FUNCTION names\n"
-				"(the suffix's own when it names none the registry knows).\n"
-				"Rebinding it is a def edit, not a live one.",
-				opennova::world::kWeaponHandlerNames[bound]);
-	}
+		return std::string("Read-only: this slot runs ") + opennova::world::kWeaponHandlerNames[bound] +
+				", the handler its FUNCTION names (the suffix's own when it names none the registry "
+				"knows). Rebinding it is a def edit, not a live one.";
+	});
 	if (row.clip_ticks > 0) {
 		ImGui::SameLine();
 		ImGui::TextDisabled("| clip %d ticks (%.0f ms)", row.clip_ticks,
@@ -1213,7 +1196,7 @@ void WeaponWindow::draw(ImGuiPass &pass, uint64_t frame_index) {
 	(void)pass;
 	(void)frame_index;
 	if (!definition_.valid) {
-		ImGui::TextUnformatted("No weapon installed. Load a mission and spawn.");
+		ui_kit::empty_state("No weapon installed. Load a mission and spawn.");
 		return;
 	}
 	draw_header();

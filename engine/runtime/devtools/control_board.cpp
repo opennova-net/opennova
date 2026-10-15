@@ -1,4 +1,5 @@
 #include <runtime/devtools/control_board.h>
+#include <runtime/devtools/ui_kit.h>
 
 #include <imgui.h>
 #include <imgui_internal.h>
@@ -54,7 +55,7 @@ double number_of(const ControlArg &value) {
 }
 
 void row_tooltip(const ControlSpec &spec, const ControlState *state) {
-	if (!ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled | ImGuiHoveredFlags_ForTooltip)) {
+	if (!ui_kit::tooltip_hovered()) {
 		return;
 	}
 	const bool refused = state == nullptr || !state->writable;
