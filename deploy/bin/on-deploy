@@ -49,8 +49,8 @@
 #                                 rereads its secrets and settings: after
 #                                 secrets sync or infra apply)
 #   app status                   the host's containers
-#   app restart [SERVICE]         restart a service (all without one)
-#   app down                      stop and remove the containers
+#   app restart [SERVICE] [--yes] restart a service (all without one)
+#   app down [--yes]              stop and remove the containers
 #   app logs [SERVICE] [--follow] [--since 1h]
 #                                 the containers' logs (CloudWatch)
 #   app shell                     a root shell on the host (Session Manager)
@@ -72,8 +72,8 @@
 #   fleet status                  the deployment's game machines (EC2) and the
 #                                 service's view of them (its admin API)
 #   fleet drain MACHINE           start no server there; move its servers off
-#   fleet end MACHINE             end a machine (its servers move first)
-#   fleet roll                    drain every machine onto new ones (a new
+#   fleet end MACHINE [--yes]     end a machine (its servers move first)
+#   fleet roll [--yes]            drain every machine onto new ones (a new
 #                                 image, a new hostd), one at a time
 #   hosted data-snapshot --data-set SLUG
 #                                 one data set of the hosted servers' game data,
@@ -85,6 +85,10 @@
 #   state push|pull [--force]     the deployment's terraform state <-> its
 #                                 1Password document; refuses to drop a change
 #                                 (or a state of another lineage) unless --force
+#
+# On prod (the default deployment), infra apply, app restart, app down, fleet
+# end and fleet roll ask first: they go ahead once you type yes, or with --yes;
+# with no terminal to ask on and no --yes they refuse.
 #
 # OP_VAULT (default OpenNova-Deploy) names the vault; GHCR_OWNER the images'
 # owner (default: the vault's ghcr/owner, else opennova-net).
@@ -776,6 +780,17 @@ confirm_prod() {
   [ "$answer" = yes ] || die "prod: not confirmed; nothing was changed"
 }
 
+# A command's arguments with --yes taken out: OPT_YES (1 when it was given)
+# and OPT_REST (the others, in order).
+take_yes() {
+  local a
+  OPT_YES=0
+  OPT_REST=()
+  for a in "$@"; do
+    if [ "$a" = --yes ]; then OPT_YES=1; else OPT_REST+=("$a"); fi
+  done
+}
+
 # The types whose destruction (or replacement) loses what no apply makes again,
 # or takes the service down: the Elastic IP retail clients use and its
 # association, the service instance and the network interface that holds its
@@ -1138,10 +1153,16 @@ cmd_app() {
         'cat /opt/opennova/converged 2>/dev/null | sed "s/^/release: /" || true' \
         "opennova-compose ps --format 'table {{.Service}}\t{{.Status}}\t{{.Image}}'")" ;;
     restart)
+      take_yes "$@"
       local svc=""
-      [ $# -eq 0 ] || svc="$(service_name "$1")"
+      [ "${#OPT_REST[@]}" -le 1 ] || die "app restart takes one SERVICE, or none for every service"
+      [ "${#OPT_REST[@]}" -eq 0 ] || svc="$(service_name "${OPT_REST[0]}")" || exit 1
+      confirm_prod "restart ${svc:-every service}" "$OPT_YES"
       ssm_run 300 "$(host_script "opennova-compose restart $svc" "opennova-compose ps")" ;;
     down)
+      take_yes "$@"
+      [ "${#OPT_REST[@]}" -eq 0 ] || die "unknown: app down ${OPT_REST[0]} (try: --yes)"
+      confirm_prod "stop and remove every container (the site and the game service stay down until app converge)" "$OPT_YES"
       ssm_run 300 "$(host_script "opennova-compose down")" ;;
     logs)  app_logs "$@" ;;
     shell)
@@ -1634,10 +1655,16 @@ cmd_fleet() {
   case "$action" in
     status) fleet_status "$@" ;;
     drain|end)
-      [ $# -eq 1 ] || die "fleet $action needs one MACHINE (fleet status lists them)"
-      ssm_run 120 "$(host_script "opennova-admin-api POST $FLEET_API/machines/$(machine_id "$1")/$action")" ;;
+      take_yes "$@"
+      [ "${#OPT_REST[@]}" -eq 1 ] || die "fleet $action needs one MACHINE (fleet status lists them)"
+      local machine
+      machine="$(machine_id "${OPT_REST[0]}")" || exit 1
+      [ "$action" = drain ] || confirm_prod "end machine $machine (its servers move off first)" "$OPT_YES"
+      ssm_run 120 "$(host_script "opennova-admin-api POST $FLEET_API/machines/$machine/$action")" ;;
     roll)
-      [ $# -eq 0 ] || die "unknown: fleet roll $1"
+      take_yes "$@"
+      [ "${#OPT_REST[@]}" -eq 0 ] || die "unknown: fleet roll ${OPT_REST[0]} (try: --yes)"
+      confirm_prod "roll every machine onto new ones (their servers move, one machine at a time)" "$OPT_YES"
       ssm_run 120 "$(host_script "opennova-admin-api POST $FLEET_API/roll")" ;;
     *) die "unknown: fleet $action (try: status|drain|end|roll)" ;;
   esac

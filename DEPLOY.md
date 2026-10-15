@@ -341,7 +341,10 @@ seconds.
 ./deploy/run.sh app shell                      # a root shell on the host (Session Manager)
 ```
 
-`--no-hosting` deploys with hosted game servers off (the kill switch, section 6). The
+On prod, `app restart` and `app down` ask first: they go ahead once you type `yes`, or
+with `--yes`, and a run with no terminal refuses without it (as `infra apply`, `fleet
+end` and `fleet roll` do). `--no-hosting` deploys with hosted game servers off (the kill
+switch, section 6). The
 release bundles never expire, so any release can be rolled back to; a rollback of the
 server across a migration is the database's business (section 5).
 
@@ -513,9 +516,10 @@ label, by which the machine mounts it.
 ./deploy/run.sh fleet roll                     # move every server to new machines
 ```
 
-They call the service's admin API on the host over SSM, from the loopback, with the
-admin token. `fleet roll` after a new machine image or a new hostd: servers move without
-counting restarts.
+They call the service's admin API on the service instance over SSM, from the loopback,
+with the admin token. `fleet roll` after a new machine image or a new hostd: servers move
+without counting restarts. On prod `fleet end` and `fleet roll` ask first (`--yes`
+answers for you).
 
 ### The smoke test
 
