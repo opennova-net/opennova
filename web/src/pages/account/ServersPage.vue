@@ -106,6 +106,18 @@
         />
       </section>
 
+      <!-- The account's servers together. -->
+      <StatsDashboard
+        v-if="data.servers.length > 0"
+        base-id="servers-stats"
+        heading="Your servers together"
+        description="Every hosted server of yours, sampled once a minute while live."
+        variant="aggregate"
+        :follow="live.length > 0"
+        :load="fetchAccountStats"
+        @session-ended="onSessionEnded"
+      />
+
       <section v-if="ended.length > 0" class="space-y-4" aria-labelledby="servers-ended-heading">
         <h2 id="servers-ended-heading" class="text-xl font-semibold text-ink">Recently ended</h2>
         <HostedServerCard
@@ -148,7 +160,8 @@
 // its hosting allowance (the AllowanceMeter, "2 of 3 servers used") with the
 // start (to /me/servers/new) while it has room, the support tier callout
 // while it has none, and its hosted servers (HostedServerCard, each linking
-// to its own page); from GET /api/me/hosts the games it hosts itself
+// to its own page) and their stats together (StatsDashboard, GET
+// /api/me/servers/stats); from GET /api/me/hosts the games it hosts itself
 // (MyServerCard; a hosted server's own listing shows on its card instead,
 // utils/myServersView.ts).
 //
@@ -164,7 +177,9 @@ import HostedServerCard from '../../components/HostedServerCard.vue';
 import HostingLockedCallout from '../../components/HostingLockedCallout.vue';
 import MyServerCard from '../../components/MyServerCard.vue';
 import RelativeTime from '../../components/RelativeTime.vue';
+import StatsDashboard from '../../components/StatsDashboard.vue';
 import { STOPPING_STILL_COUNTS, fetchMyServers } from '../../api/hostedServer';
+import { fetchAccountStats } from '../../api/hostedStats';
 import { listMyServers } from '../../api/myServers';
 import { hostedCadence, usePolling } from '../../composables/usePolling';
 import { useSession } from '../../composables/useSession';

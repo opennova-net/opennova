@@ -87,6 +87,37 @@ export function formatMoney(minor: number, currency: string): string {
   }
 }
 
+// "512 B", "1.2 MB", "15 GB": a byte count in decimal units, one decimal
+// under ten.
+export function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return 'unknown';
+  const units = ['B', 'kB', 'MB', 'GB', 'TB', 'PB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1000 && unit < units.length - 1) {
+    value /= 1000;
+    unit++;
+  }
+  if (unit === 0) return `${Math.round(value)} B`;
+  const shown = value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
+  return `${shown} ${units[unit]}`;
+}
+
+// "1,284", "12.9K", "4.2M": a count, compact from ten thousand up.
+export function formatCount(n: number): string {
+  if (!Number.isFinite(n)) return 'unknown';
+  if (Math.abs(n) < 10_000) return Math.round(n).toLocaleString('en-US');
+  return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(n);
+}
+
+// "99.2%": a fraction (0 to 1) as a percentage, one decimal under 100.
+export function formatFraction(fraction: number): string {
+  if (!Number.isFinite(fraction)) return 'unknown';
+  const percent = fraction * 100;
+  if (percent >= 100) return '100%';
+  return `${Math.floor(percent * 10) / 10}%`;
+}
+
 // The ISO instant, for a <time datetime>; '' when unreadable.
 export function isoTime(value: string | number): string {
   const t = timeMs(value);

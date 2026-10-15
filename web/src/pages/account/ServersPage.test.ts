@@ -12,6 +12,9 @@ vi.mock('../../api/hostedServer', async (importOriginal) => ({
   fetchMyServers: vi.fn(),
 }));
 vi.mock('../../api/myServers', () => ({ listMyServers: vi.fn(), sendServerCommand: vi.fn(), stopHosting: vi.fn() }));
+vi.mock('../../api/hostedStats', () => ({
+  fetchAccountStats: vi.fn(() => Promise.resolve({ ok: false, error: { code: 'network', status: null, message: 'offline' } })),
+}));
 
 const servers = vi.mocked(fetchMyServers);
 const hosts = vi.mocked(listMyServers);

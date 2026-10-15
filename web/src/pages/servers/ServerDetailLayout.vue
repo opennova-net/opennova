@@ -75,7 +75,8 @@
 // One hosted server's own page, the owner's (/me/servers/<id>, scope owner:
 // GET /api/me/servers/<id>) and the admin's (scope admin: GET
 // /api/admin/hosted/<id>): its name and state over tabs, each a child route
-// handed the server (Overview, Console, Settings, and the admin's extra ones).
+// handed the server (Overview, Stats, Console, Settings, and the admin's
+// extra ones).
 // The page polls the server on the hosted cadence (usePolling) and provides
 // the console queue its Console tab's calls go through.
 import { computed, ref, watch } from 'vue';
@@ -117,6 +118,7 @@ const ownerName = computed(() => (server.value as FleetServer | null)?.owner?.us
 
 const tabs = computed<Tab[]>(() => [
   { path: base.value, label: 'Overview' },
+  { path: `${base.value}/stats`, label: 'Stats' },
   { path: `${base.value}/console`, label: 'Console' },
   { path: `${base.value}/settings`, label: 'Settings' },
 ]);

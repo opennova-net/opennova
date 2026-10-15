@@ -12,6 +12,7 @@ import SupportPage from '../pages/SupportPage.vue';
 import ServerDetailLayout from '../pages/servers/ServerDetailLayout.vue';
 import ServerOverviewTab from '../pages/servers/ServerOverviewTab.vue';
 import ServerConsoleTab from '../pages/servers/ServerConsoleTab.vue';
+import ServerStatsTab from '../pages/servers/ServerStatsTab.vue';
 import ServerSettingsTab from '../pages/servers/ServerSettingsTab.vue';
 import AdminLayout from '../pages/admin/AdminLayout.vue';
 import UsersSection from '../pages/admin/UsersSection.vue';
@@ -46,6 +47,7 @@ const router = createRouter({
           props: { scope: 'owner' },
           children: [
             { path: '', component: ServerOverviewTab },
+            { path: 'stats', component: ServerStatsTab },
             { path: 'console', component: ServerConsoleTab },
             { path: 'settings', component: ServerSettingsTab },
           ],
