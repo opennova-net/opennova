@@ -44,6 +44,7 @@ class TerrainSculpt;
 class UnsavedGuard;
 class TextureUseIndex;
 class Viewports;
+enum class CoreFinding;
 
 // How long a gesture of the wire's stays open with no sample (S13 V7): a client that began a drag
 // and went away ends it, its Problems' validation no longer waiting on it.

@@ -9,6 +9,7 @@
 #include <editor/documents/model_labels.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/reference_kinds.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <formats/threedi/threedi_build.h>
 #include <formats/threedi_gp/threedi_gp.h>

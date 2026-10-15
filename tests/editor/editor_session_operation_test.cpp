@@ -15,6 +15,7 @@
 
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/reference_queries.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <editor/session/editor_preferences.h>

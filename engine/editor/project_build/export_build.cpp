@@ -8,6 +8,7 @@
 #include <base/io/file_time.h>
 #include <base/io/json.h>
 #include <base/io/os_path.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_run.h>
 

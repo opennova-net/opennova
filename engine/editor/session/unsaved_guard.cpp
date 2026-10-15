@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <utility>
 
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
 #include <editor/project/local_settings.h>

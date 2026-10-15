@@ -5,6 +5,7 @@
 #include <base/io/strutil.h>
 #include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/expansion_files.h>
 #include <runtime/mission/mission_catalog.h>
 #include <runtime/mission/mission_sidecars.h>

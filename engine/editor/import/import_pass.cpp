@@ -11,6 +11,7 @@
 #include <editor/assets/project_scan.h>
 #include <editor/import/import_context.h>
 #include <editor/import/importer.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 

@@ -2,6 +2,7 @@
 
 
 #include <base/io/strutil.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>

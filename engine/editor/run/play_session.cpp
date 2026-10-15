@@ -1,5 +1,7 @@
 #include <editor/run/play_session.h>
 
+#include <editor/model/core_finding.h>
+
 namespace opennova::editor {
 
 bool PlaySession::start(const LaunchPlan &plan, Diagnostic &error) {

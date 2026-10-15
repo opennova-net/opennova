@@ -11,6 +11,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/config_overrun.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/staged_rows.h>
 #include <editor/project/project_files.h>
 #include <formats/configfile/config_file.h>

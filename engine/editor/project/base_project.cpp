@@ -4,6 +4,7 @@
 
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 
 namespace fs = std::filesystem;

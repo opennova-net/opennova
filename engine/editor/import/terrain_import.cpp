@@ -12,6 +12,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/import/texture_import.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <formats/cpt/cpt.h>
 #include <formats/cpt/cpt_io.h>

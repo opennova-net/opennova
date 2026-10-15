@@ -8,7 +8,6 @@
 
 #include <editor/assets/asset_import.h>
 #include <editor/import/texture_source.h>
-#include <editor/model/finding_code_row.h>
 #include <editor/session/editor_request.h>
 #include <editor/session/session_operation.h>
 
@@ -20,6 +19,7 @@ class SessionCore;
 struct ImportPlan;
 struct ProjectPaths;
 struct SessionView;
+enum class CoreFinding;
 
 // Imports in the project session (ADR 0046 S8, S11g, S13 A2): the import dialog's preview (the
 // files to choose from, the files chosen, the plan of importing them with the files they need,

@@ -23,6 +23,7 @@ class MissionItemCache;
 class SessionCore;
 struct ProjectPaths;
 struct SessionView;
+enum class CoreFinding;
 
 // The project session's open documents (ADR 0046 S13 A2): which are open and which is active, the
 // selection each keeps while another is active, the ones whose file changed outside the editor

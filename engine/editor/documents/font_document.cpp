@@ -11,6 +11,7 @@
 #include <base/io/cp1252.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/staged_rows.h>
 #include <runtime/hud/game_font.h>
 

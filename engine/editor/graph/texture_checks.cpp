@@ -21,6 +21,7 @@
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/texture_uses.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <formats/particle/particle.h>
 #include <formats/til/til.h>

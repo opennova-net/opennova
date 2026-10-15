@@ -8,6 +8,7 @@
 
 #include <base/io/strutil.h>
 #include <editor/import/texture_import.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <formats/fnt/fnt_sheet.h>
 

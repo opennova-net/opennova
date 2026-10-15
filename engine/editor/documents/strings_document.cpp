@@ -4,6 +4,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/id_list.h>
 #include <editor/project/project_files.h>
 #include <runtime/hud/game_text_lookup.h>

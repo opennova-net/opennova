@@ -12,7 +12,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/graph_edge.h>
 #include <editor/graph/texture_uses.h>
-#include <editor/model/finding_code_row.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <editor/session/document_set.h>
 #include <editor/session/request_factories.h>

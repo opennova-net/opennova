@@ -5,6 +5,7 @@
 #include <string>
 #include <utility>
 
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/session/import_controller.h>
 #include <editor/session/session_core.h>

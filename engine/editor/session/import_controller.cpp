@@ -22,6 +22,7 @@
 #include <editor/import/sidecar.h>
 #include <editor/import/terrain_import.h>
 #include <editor/import/texture_source.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
 #include <editor/preview/texture_thumbnails.h>

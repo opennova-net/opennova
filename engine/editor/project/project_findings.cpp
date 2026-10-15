@@ -7,6 +7,7 @@
 #include <editor/assets/asset_kind.h>
 #include <editor/documents/project_checks.h>
 #include <editor/graph/project_validation.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <editor/project_build/build_plan.h>

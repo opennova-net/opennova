@@ -3,6 +3,7 @@
 #include <utility>
 
 #include <base/resource_index/resource_kind.h>
+#include <editor/model/core_finding.h>
 #include <formats/dds/dds.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/pcx/pcx_quantize.h>

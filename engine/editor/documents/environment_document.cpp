@@ -20,6 +20,7 @@
 #include <editor/documents/source_issue_findings.h>
 #include <editor/documents/terrain_document.h>
 #include <editor/documents/texture_roles.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/staged_rows.h>
 #include <formats/env/env_source_issue.h>
 #include <formats/trn/trn_io.h>

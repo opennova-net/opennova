@@ -22,6 +22,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/graph/reference_kinds.h>
 #include <editor/graph/rename_transaction.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/edit.h>
 #include <editor/model/field_text.h>
 #include <editor/project/base_project.h>

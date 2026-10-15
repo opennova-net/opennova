@@ -29,6 +29,7 @@
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/project_validation.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/document.h>
 #include <editor/preview/menu_render_check.h>
 #include <editor/preview/mission_ground_check.h>

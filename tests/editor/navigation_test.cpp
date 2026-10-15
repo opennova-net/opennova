@@ -21,6 +21,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/documents/document_types.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/document.h>
 #include <editor/model/text_document.h>
 #include <editor/project/project_files.h>

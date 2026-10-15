@@ -4,7 +4,7 @@
 #include <cstring>
 #include <utility>
 
-#include <editor/model/finding_code_row.h>
+#include <editor/model/core_finding.h>
 #include <formats/png/png_decode.h>
 #include <formats/png/png_encode.h>
 

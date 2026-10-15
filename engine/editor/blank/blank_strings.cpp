@@ -2,6 +2,7 @@
 
 #include <base/io/strutil.h>
 #include <base/vfs/vfs.h>
+#include <editor/model/core_finding.h>
 #include <formats/rtxt/rtxt.h>
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/mission/mission_catalog.h>

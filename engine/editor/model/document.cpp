@@ -11,6 +11,7 @@
 #include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/graph/reference_kinds.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/staged_rows.h>
 
 namespace opennova::editor {

@@ -4,6 +4,7 @@
 
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/text_types.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/text_document.h>
 #include <editor/project/project_files.h>
 #include <formats/configfile/config_file.h>

@@ -4,7 +4,6 @@
 #include <vector>
 
 #include <editor/model/diagnostic.h>
-#include <editor/model/finding_code_row.h>
 #include <editor/project/play_mode.h>
 #include <editor/project/project_document.h>
 
@@ -13,6 +12,8 @@ struct JsonValue;
 } // namespace opennova::io
 
 namespace opennova::editor {
+
+enum class CoreFinding;
 
 // Machine-local, never-committed settings of one project (ADR 0046 d6):
 // `.opennova/local.json`. Paths here are absolute on this machine; nothing the build

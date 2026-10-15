@@ -12,6 +12,7 @@
 #include <editor/documents/texture_load_rules.h>
 #include <editor/documents/texture_roles.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <formats/grm/grm.h>
 #include <formats/mission/mission_params.h>

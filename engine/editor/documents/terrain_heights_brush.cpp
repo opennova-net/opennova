@@ -6,8 +6,8 @@
 #include <memory>
 #include <utility>
 
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
-#include <editor/model/finding_code_row.h>
 
 namespace opennova::editor {
 

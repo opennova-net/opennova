@@ -22,6 +22,7 @@
 #include <base/vfs/vfs.h>
 #include <editor/assets/asset_import.h>
 #include <editor/assets/asset_registry.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <formats/filelog/file_access_log.h>
 #include <formats/pff/pff.h>

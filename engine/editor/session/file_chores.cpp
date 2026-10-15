@@ -11,6 +11,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/file_plans.h>
 #include <editor/graph/rename_transaction.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>
 #include <editor/session/document_set.h>

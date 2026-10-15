@@ -6,6 +6,7 @@
 #include <base/vfs/vfs_decode.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/source_issue_findings.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/staged_rows.h>
 #include <editor/project/project_files.h>
 #include <formats/mnu/mnu_schema.h>

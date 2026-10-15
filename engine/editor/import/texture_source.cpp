@@ -11,6 +11,7 @@
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
 #include <editor/import/texture_import.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_document.h>
 #include <editor/project/project_files.h>
 #include <formats/pff/pff.h>

@@ -15,6 +15,7 @@
 #include <editor/import/importer.h>
 #include <editor/import/sidecar.h>
 #include <editor/import/terrain_import.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <runtime/renderer/material_texture.h>

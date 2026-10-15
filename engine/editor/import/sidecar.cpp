@@ -5,6 +5,7 @@
 
 #include <base/io/hash.h>
 #include <base/io/json.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 

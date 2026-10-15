@@ -7,6 +7,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/project_layout.h>
 #include <editor/blank/blank_factory.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 

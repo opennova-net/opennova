@@ -6,6 +6,7 @@
 
 #include <algorithm>
 
+#include <editor/model/core_finding.h>
 #include <editor/model/document_base.h>
 #include <editor/project/project_files.h>
 #include <editor/session/problems_service.h>

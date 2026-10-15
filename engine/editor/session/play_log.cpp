@@ -13,6 +13,7 @@
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/graph_edge.h>
 #include <editor/graph/reference_kinds.h>
+#include <editor/model/core_finding.h>
 #include <editor/project/project_files.h>
 #include <editor/requirements/requirement_words.h>
 #include <editor/session/view/session_view.h>

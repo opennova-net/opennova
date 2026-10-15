@@ -17,6 +17,7 @@
 #include <editor/documents/model_document.h>
 #include <editor/documents/strings_document.h>
 #include <editor/graph/reference_kinds.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/preview/menu_render_check.h>
 #include <editor/project_build/build_plan.h>

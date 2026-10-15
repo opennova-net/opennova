@@ -10,6 +10,7 @@
 #include <base/io/hash.h>
 #include <editor/assets/project_layout.h>
 #include <editor/graph/asset_graph.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/model/field_text.h>
 #include <editor/project/project_files.h>

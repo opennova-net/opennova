@@ -2,6 +2,8 @@
 
 #include <iterator>
 
+#include <editor/model/core_finding.h>
+
 namespace opennova::editor {
 
 namespace {

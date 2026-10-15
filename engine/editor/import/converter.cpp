@@ -3,6 +3,7 @@
 #include <sstream>
 
 #include <base/io/strutil.h>
+#include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
 #include <formats/bad/bad_build.h>
