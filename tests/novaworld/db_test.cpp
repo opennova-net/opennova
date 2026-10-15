@@ -327,12 +327,13 @@ int test_connection_pool() {
 		b->exec("INSERT INTO t VALUES (8);");
 
 		// Both are out: a third holder waits until one comes back.
+		// The waiter's lease is the one that came back, not a third connection.
 		std::atomic<bool> got{ false };
+		std::atomic<bool> reused{ false };
 		std::thread waiter([&] {
 			auto c = pool.acquire();
+			reused = c.get() == first || c.get() == second;
 			got = true;
-			TEST_EXPECT(c.get() == first || c.get() == second);
-			return 0;
 		});
 		std::this_thread::sleep_for(std::chrono::milliseconds(300));
 		TEST_EXPECT(!got.load());
@@ -341,6 +342,7 @@ int test_connection_pool() {
 		}
 		waiter.join();
 		TEST_EXPECT(got.load());
+		TEST_EXPECT(reused.load());
 	}
 	{
 		// Released connections are reused, not reopened, and none comes back
