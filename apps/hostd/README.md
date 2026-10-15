@@ -127,9 +127,19 @@ egress, posts the report and acts on the reply (`reconcile.h`, a pure function):
 - A start that fails (the image did not pull, a mount is missing) is reported `exited`
   with docker's exit code (125), its leftovers and files removed, and never retried.
 
-A start whose image the machine lacks pulls it first, holding the pass up for the pull
-(at most 5 minutes). The machine's bootstrap pulls the serve image it copies the agent out
-of, so only a server pinned to a newer image than its machine's pays that.
+A start never pulls (`docker run --pull never`). A desired container whose image the
+machine lacks (`docker image inspect`) waits for a `docker pull` the agent runs in the
+background, one per image however many containers want it: it is reported `starting` on its
+slot meanwhile (so the service stops sending its files, which the agent keeps), and starts
+at the first pass after the pull. A pull that fails, or still runs 4 minutes after it began
+(it is then ended), is that start's failure: `exited` 125. The machine's bootstrap pulls the
+serve image it copies the agent out of, so only a server pinned to a newer image than its
+machine's waits for one.
+
+No pass holds the agent up for long, since the service ends a machine whose agent is silent
+for a minute and more (`hosted/supervisor.h`): every docker call is cut at 20 s, the listing
+and the stats before a sync share 15 s, and the reply's acts 10 s; a stop, removal or start
+the act's time does not reach waits for the next pass, which comes at the busy cadence.
 
 A sync that fails changes nothing on the machine: the service down or refusing, a reply
 that does not read or speaks another protocol, or docker not answering the listing (then
@@ -139,7 +149,7 @@ trying, logging each warning when it changes and every 5 minutes while it lasts.
 ## The containers
 
 ```
-docker run -d --name <name> --label opennova.hostd=1 --label opennova.slot=<k>
+docker run --pull never -d --name <name> --label opennova.hostd=1 --label opennova.slot=<k>
   --network host --user <uid>:<uid> --cap-drop ALL --security-opt no-new-privileges
   --read-only --tmpfs /tmp --cpus <cpus> --memory <mb>m --memory-swap <mb>m
   --pids-limit <pids> --stop-timeout 60 --log-driver journald --log-opt tag=<name>
@@ -187,12 +197,14 @@ The ctests (`tests/hostd`, Linux only; neither runs docker nor iptables):
 
 - `opennova_hostd_runtime` drives the docker runtime, the egress counters and the command
   line on a stub command runner that checks every argv: the exact `docker run`, the
-  listings and their partial answers, docker's texts read, the chain's rules put in place
-  only where missing and the counts summed.
+  listings and their partial answers, each call's timeout, the image check, docker's texts
+  read, the chain's rules put in place only where missing and the counts summed; the
+  background pull runs stand-in programs for the CLI.
 - `opennova_hostd_agent` drives the bootstrap and the sync passes against an in-process fake
   of the service's routes and a fake container runtime on a hand-stepped clock: the saved
   bootstrap, starts and their files, stops, kills, removals, the slot handover, failed
-  starts, refusals, every failing sync, and a log that never holds the secret, the token
-  or a file's bytes.
+  starts, the background pulls (done, failed, past their bound), the pass's time shares,
+  refusals, every failing sync, and a log that never holds the secret, the token or a
+  file's bytes.
 
 The protocol itself is `hosted_agent_protocol` (`tests/novaworld`).

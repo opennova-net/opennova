@@ -3,8 +3,14 @@
 #include <base/io/json.h>
 #include <base/io/strutil.h>
 
+#include <algorithm>
+#include <cctype>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
 #include <utility>
 
 namespace opennova::hostd {
@@ -12,6 +18,17 @@ namespace opennova::hostd {
 namespace {
 
 using io::JsonValue;
+namespace fs = std::filesystem;
+
+// The first line of a CLI's standard error, at most 200 bytes.
+std::string first_line(const std::string &text) {
+	std::string err = strutil::trim(text);
+	if (const size_t eol = err.find('\n'); eol != std::string::npos)
+		err.resize(eol);
+	if (err.size() > 200)
+		err.resize(200);
+	return err;
+}
 
 // "docker <what> exited 1: <the start of its standard error>", for the log.
 std::string failure(const char *what, const proc::CommandResult &result) {
@@ -25,14 +42,25 @@ std::string failure(const char *what, const proc::CommandResult &result) {
 			break;
 	}
 	out += " exited " + std::to_string(result.exit_code);
-	std::string err = strutil::trim(result.err);
-	if (const size_t eol = err.find('\n'); eol != std::string::npos)
-		err.resize(eol);
-	if (err.size() > 200)
-		err.resize(200);
+	const std::string err = first_line(result.err);
 	if (!err.empty())
 		out += ": " + err;
 	return out;
+}
+
+uint64_t steady_now_ms() {
+	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+			std::chrono::steady_clock::now().time_since_epoch())
+					.count());
+}
+
+// docker's word for an image it does not hold ("Error: No such image: x",
+// "Error response from daemon: No such image: x"), in any case.
+bool says_no_such_image(const std::string &err) {
+	std::string lower = err;
+	std::transform(lower.begin(), lower.end(), lower.begin(),
+			[](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+	return lower.find("no such image") != std::string::npos;
 }
 
 std::vector<std::string> lines_of(std::string_view text) {
@@ -80,14 +108,28 @@ std::optional<unsigned> digits(std::string_view text, size_t at, size_t count) {
 
 } // namespace
 
-DockerRuntime::DockerRuntime(proc::CommandRunner &runner, std::string docker) :
-		runner_(runner), docker_(std::move(docker)) {}
+DockerRuntime::DockerRuntime(proc::CommandRunner &runner, std::string docker,
+		std::vector<std::string> environment, std::string scratch_dir) :
+		runner_(runner),
+		docker_(std::move(docker)),
+		environment_(std::move(environment)),
+		scratch_dir_(std::move(scratch_dir)) {}
 
-bool DockerRuntime::list(std::vector<ContainerInfo> &out, std::string &error) {
+DockerRuntime::~DockerRuntime() {
+	for (auto &pull : pulls_) {
+		pull.second.child.kill();
+		pull.second.child.wait(5000);
+		take_error(pull.second.error_path);
+	}
+}
+
+bool DockerRuntime::list(std::vector<ContainerInfo> &out, int timeout_ms, std::string &error) {
+	// The two calls share the one timeout.
+	const uint64_t started = steady_now_ms();
 	const proc::CommandResult ps = runner_.run(
 			{ docker_, "ps", "-a", "--no-trunc", "--filter",
 					std::string("label=") + kManagedLabel + "=1", "--format", "{{.Names}}" },
-			kCommandTimeoutMs);
+			timeout_ms);
 	if (!ps.ok()) {
 		error = failure("ps", ps);
 		return false;
@@ -96,9 +138,14 @@ bool DockerRuntime::list(std::vector<ContainerInfo> &out, std::string &error) {
 	out.clear();
 	if (names.empty())
 		return true;
+	const uint64_t spent = steady_now_ms() - started;
+	if (spent >= static_cast<uint64_t>(timeout_ms)) {
+		error = "docker ps took the listing's whole time";
+		return false;
+	}
 	std::vector<std::string> argv = { docker_, "inspect", "--type", "container" };
 	argv.insert(argv.end(), names.begin(), names.end());
-	const proc::CommandResult inspect = runner_.run(argv, kCommandTimeoutMs);
+	const proc::CommandResult inspect = runner_.run(argv, timeout_ms - static_cast<int>(spent));
 	// A container removed between the two calls fails the inspect (exit 1) and
 	// leaves the others' entries; anything else unread is an error.
 	std::string why;
@@ -110,14 +157,14 @@ bool DockerRuntime::list(std::vector<ContainerInfo> &out, std::string &error) {
 }
 
 bool DockerRuntime::stats(const std::vector<std::string> &names,
-		std::map<std::string, ContainerStats> &out, std::string &error) {
+		std::map<std::string, ContainerStats> &out, int timeout_ms, std::string &error) {
 	out.clear();
 	if (names.empty())
 		return true;
 	std::vector<std::string> argv = { docker_, "stats", "--no-stream", "--no-trunc", "--format",
 		"{{json .}}" };
 	argv.insert(argv.end(), names.begin(), names.end());
-	const proc::CommandResult result = runner_.run(argv, kCommandTimeoutMs);
+	const proc::CommandResult result = runner_.run(argv, timeout_ms);
 	if (result.outcome != proc::CommandResult::Outcome::Exited) {
 		error = failure("stats", result);
 		return false;
@@ -131,11 +178,96 @@ bool DockerRuntime::stats(const std::vector<std::string> &names,
 	return true;
 }
 
+bool DockerRuntime::has_image(
+		const std::string &image, bool &present, int timeout_ms, std::string &error) {
+	const proc::CommandResult result = runner_.run(
+			{ docker_, "image", "inspect", "--format", "{{.Id}}", image }, timeout_ms);
+	if (result.ok()) {
+		present = true;
+		return true;
+	}
+	if (result.outcome == proc::CommandResult::Outcome::Exited && result.exit_code == 1 &&
+			says_no_such_image(result.err)) {
+		present = false;
+		return true;
+	}
+	error = failure("image inspect", result);
+	return false;
+}
+
+bool DockerRuntime::start_pull(const std::string &image, std::string &error) {
+	if (pulls_.count(image))
+		return true;
+	Pull pull;
+	pull.error_path =
+			(fs::u8path(scratch_dir_) / ("pull-" + std::to_string(++pulls_started_) + ".err"))
+					.u8string();
+	std::error_code ec;
+	fs::remove(fs::u8path(pull.error_path), ec);
+	proc::SpawnOptions options;
+	options.argv = { docker_, "pull", "-q", image };
+	options.error_path = pull.error_path;
+	options.environment = environment_;
+	// The agent's one thread starts it, and lives as long as it should.
+	options.end_with_parent = true;
+	std::string why;
+	if (!pull.child.spawn(options, why)) {
+		error = "docker pull did not start: " + why;
+		take_error(pull.error_path);
+		return false;
+	}
+	pulls_.emplace(image, std::move(pull));
+	return true;
+}
+
+PullState DockerRuntime::poll_pull(const std::string &image, std::string &error) {
+	const auto it = pulls_.find(image);
+	if (it == pulls_.end()) {
+		error = "no pull of it is under way";
+		return PullState::Failed;
+	}
+	const std::optional<uint32_t> code = it->second.child.poll();
+	if (!code)
+		return PullState::Running;
+	const std::string err = take_error(it->second.error_path);
+	pulls_.erase(it);
+	if (*code == 0)
+		return PullState::Done;
+	error = "docker pull exited " + std::to_string(*code) + (err.empty() ? "" : ": " + err);
+	return PullState::Failed;
+}
+
+void DockerRuntime::cancel_pull(const std::string &image) {
+	const auto it = pulls_.find(image);
+	if (it == pulls_.end())
+		return;
+	it->second.child.kill();
+	it->second.child.wait(5000);
+	take_error(it->second.error_path);
+	pulls_.erase(it);
+}
+
+std::string DockerRuntime::take_error(const std::string &path) {
+	if (path.empty())
+		return {};
+	const fs::path file = fs::u8path(path);
+	std::string text;
+	{
+		std::ifstream in(file, std::ios::binary);
+		std::ostringstream read;
+		read << in.rdbuf();
+		text = read.str();
+	}
+	std::error_code ec;
+	fs::remove(file, ec);
+	return first_line(text);
+}
+
 std::vector<std::string> DockerRuntime::run_argv(const ContainerSpec &spec) const {
 	const std::string user = std::to_string(spec.uid) + ":" + std::to_string(spec.uid);
 	const std::string memory = std::to_string(spec.memory_mb) + "m";
-	std::vector<std::string> argv = { docker_, "run", "-d", "--name", spec.name, "--label",
-		std::string(kManagedLabel) + "=1", "--label",
+	std::vector<std::string> argv = { docker_, "run", "--pull", "never", "-d", "--name", spec.name,
+		"--label", std::string(kManagedLabel) + "=1", "--label",
 		std::string(kSlotLabel) + "=" + std::to_string(spec.slot), "--network", "host", "--user",
 		user, "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only", "--tmpfs",
 		"/tmp", "--cpus", format_cpus(spec.cpus), "--memory", memory, "--memory-swap", memory,
@@ -153,8 +285,9 @@ std::vector<std::string> DockerRuntime::run_argv(const ContainerSpec &spec) cons
 	return argv;
 }
 
-bool DockerRuntime::run(const ContainerSpec &spec, int &exit_code, std::string &error) {
-	const proc::CommandResult result = runner_.run(run_argv(spec), kRunTimeoutMs);
+bool DockerRuntime::run(
+		const ContainerSpec &spec, int timeout_ms, int &exit_code, std::string &error) {
+	const proc::CommandResult result = runner_.run(run_argv(spec), timeout_ms);
 	if (result.ok())
 		return true;
 	// docker run's own codes: 125 the daemon refused, 126 and 127 the entry
@@ -166,24 +299,25 @@ bool DockerRuntime::run(const ContainerSpec &spec, int &exit_code, std::string &
 	return false;
 }
 
-bool DockerRuntime::simple(const char *what, std::vector<std::string> argv, std::string &error) {
-	const proc::CommandResult result = runner_.run(argv, kCommandTimeoutMs);
+bool DockerRuntime::simple(
+		const char *what, std::vector<std::string> argv, int timeout_ms, std::string &error) {
+	const proc::CommandResult result = runner_.run(argv, timeout_ms);
 	if (result.ok())
 		return true;
 	error = failure(what, result);
 	return false;
 }
 
-bool DockerRuntime::stop(const std::string &name, std::string &error) {
-	return simple("kill", { docker_, "kill", "--signal", "SIGTERM", name }, error);
+bool DockerRuntime::stop(const std::string &name, int timeout_ms, std::string &error) {
+	return simple("kill", { docker_, "kill", "--signal", "SIGTERM", name }, timeout_ms, error);
 }
 
-bool DockerRuntime::kill(const std::string &name, std::string &error) {
-	return simple("kill", { docker_, "kill", "--signal", "SIGKILL", name }, error);
+bool DockerRuntime::kill(const std::string &name, int timeout_ms, std::string &error) {
+	return simple("kill", { docker_, "kill", "--signal", "SIGKILL", name }, timeout_ms, error);
 }
 
-bool DockerRuntime::remove(const std::string &name, std::string &error) {
-	return simple("rm", { docker_, "rm", name }, error);
+bool DockerRuntime::remove(const std::string &name, int timeout_ms, std::string &error) {
+	return simple("rm", { docker_, "rm", name }, timeout_ms, error);
 }
 
 bool parse_docker_inspect(

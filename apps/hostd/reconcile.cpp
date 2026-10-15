@@ -51,9 +51,16 @@ Plan plan_sync(const PlanInput &in) {
 			continue;
 		}
 		// It starts now, or waits (busy) while its slot is still another
-		// container's or this pass has started its share.
+		// container's, its image is pulling or this pass has started its share.
 		plan.busy = true;
-		if (held_slots.count(d.slot) || plan.start.size() >= in.max_starts)
+		if (held_slots.count(d.slot))
+			continue;
+		if (in.pulling && in.pulling->count(d.image)) {
+			held_slots.insert(d.slot);
+			plan.wait_for_image.push_back(i);
+			continue;
+		}
+		if (plan.start.size() >= in.max_starts)
 			continue;
 		held_slots.insert(d.slot);
 		plan.start.push_back(i);

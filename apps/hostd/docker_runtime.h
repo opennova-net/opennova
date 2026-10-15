@@ -6,8 +6,8 @@
 // agent lists only its own (a restarted agent finds them again; nothing else on
 // the machine is ever stopped or removed). A start is:
 //
-//   docker run -d --name <name> --label opennova.hostd=1 --label opennova.slot=<k>
-//     --network host --user <uid>:<uid> --cap-drop ALL
+//   docker run --pull never -d --name <name> --label opennova.hostd=1
+//     --label opennova.slot=<k> --network host --user <uid>:<uid> --cap-drop ALL
 //     --security-opt no-new-privileges --read-only --tmpfs /tmp --cpus <cpus>
 //     --memory <mb>m --memory-swap <mb>m --pids-limit <pids> --stop-timeout 60
 //     --log-driver journald --log-opt tag=<name>
@@ -19,14 +19,21 @@
 // datagrams; a bridge's NAT would rewrite the port), the slot's user with no
 // capability and no way to gain one, a read-only root, swap no larger than the
 // memory, a pids cap, the game data read-only and the slot's directory its only
-// writable place but /tmp. A stop is SIGTERM (docker kill --signal SIGTERM:
-// opennova-serve deregisters, and the agent waits for it without blocking), a
-// kill SIGKILL. Stats come from `docker stats --no-stream`, the state from
-// `docker inspect`. Platform plumbing, not a port.
+// writable place but /tmp. A start never pulls (--pull never): an image the
+// machine lacks is pulled first, in the background, by `docker pull -q
+// <image>` (a child of its own, its standard error kept in a scratch file for
+// the failure's text), while the agent's passes go on; `docker image inspect`
+// tells whether the machine holds one. A stop is SIGTERM (docker kill --signal
+// SIGTERM: opennova-serve deregisters, and the agent waits for it without
+// blocking), a kill SIGKILL. Stats come from `docker stats --no-stream`, the
+// state from `docker inspect`. Each call waits at most the timeout it is
+// given. Platform plumbing, not a port.
 
 #include "container_runtime.h"
 
 #include "command_runner.h"
+
+#include <base/proc/child_process.h>
 
 #include <cstdint>
 #include <map>
@@ -41,31 +48,51 @@ class DockerRuntime : public ContainerRuntime {
 public:
 	static constexpr const char *kManagedLabel = "opennova.hostd";
 	static constexpr const char *kSlotLabel = "opennova.slot";
-	static constexpr int kCommandTimeoutMs = 30 * 1000;
-	// A start may pull its image first.
-	static constexpr int kRunTimeoutMs = 5 * 60 * 1000;
 	// docker's own wait between SIGTERM and SIGKILL when the machine shuts down.
 	static constexpr int kStopTimeoutSeconds = 60;
 
-	// `docker`: the CLI's absolute path. `runner` must outlive this.
-	DockerRuntime(proc::CommandRunner &runner, std::string docker);
+	// `docker`: the CLI's absolute path. `runner` must outlive this. A pull
+	// runs with `environment` (NAME=value entries) alone, its standard error
+	// in a file under `scratch_dir` (owner-only).
+	DockerRuntime(proc::CommandRunner &runner, std::string docker,
+			std::vector<std::string> environment, std::string scratch_dir);
+	// Ends the pulls still under way.
+	~DockerRuntime() override;
 
-	bool list(std::vector<ContainerInfo> &out, std::string &error) override;
+	bool list(std::vector<ContainerInfo> &out, int timeout_ms, std::string &error) override;
 	bool stats(const std::vector<std::string> &names, std::map<std::string, ContainerStats> &out,
+			int timeout_ms, std::string &error) override;
+	bool has_image(
+			const std::string &image, bool &present, int timeout_ms, std::string &error) override;
+	bool start_pull(const std::string &image, std::string &error) override;
+	PullState poll_pull(const std::string &image, std::string &error) override;
+	void cancel_pull(const std::string &image) override;
+	bool run(const ContainerSpec &spec, int timeout_ms, int &exit_code,
 			std::string &error) override;
-	bool run(const ContainerSpec &spec, int &exit_code, std::string &error) override;
-	bool stop(const std::string &name, std::string &error) override;
-	bool kill(const std::string &name, std::string &error) override;
-	bool remove(const std::string &name, std::string &error) override;
+	bool stop(const std::string &name, int timeout_ms, std::string &error) override;
+	bool kill(const std::string &name, int timeout_ms, std::string &error) override;
+	bool remove(const std::string &name, int timeout_ms, std::string &error) override;
 
 	// The argv run() runs for `spec`.
 	std::vector<std::string> run_argv(const ContainerSpec &spec) const;
 
 private:
-	bool simple(const char *what, std::vector<std::string> argv, std::string &error);
+	struct Pull {
+		proc::ChildProcess child;
+		std::string error_path;
+	};
+
+	bool simple(
+			const char *what, std::vector<std::string> argv, int timeout_ms, std::string &error);
+	// The pull's error file's first line, and the file gone.
+	static std::string take_error(const std::string &path);
 
 	proc::CommandRunner &runner_;
 	std::string docker_;
+	std::vector<std::string> environment_;
+	std::string scratch_dir_;
+	std::map<std::string, Pull> pulls_; // by image
+	uint64_t pulls_started_ = 0; // names the pulls' error files
 };
 
 // `docker inspect`'s JSON array as the agent's containers: the name without its

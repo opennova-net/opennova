@@ -15,6 +15,15 @@
 // the service decides, and counts. The secret and the token reach no log line;
 // the files a container gets are written for its slot's user alone. Service
 // policy, not a port.
+//
+// No pass waits long: the service ends a machine whose agent stays silent
+// (supervisor.h machine_silence_s, 60 s), so each docker call is cut at
+// kDockerCallMs, the listing and the stats before a sync share kReportBudgetMs
+// and the reply's acts kActBudgetMs (what the act's time does not reach waits
+// for the next pass), and an image the machine lacks is pulled in the
+// background: the container waits, reported starting, its files kept here,
+// and starts at the first pass after the pull; a pull that fails, or still
+// runs kPullTimeoutMs on, is the start's failure (exited 125).
 
 #include "container_runtime.h"
 #include "egress_counters.h"
@@ -78,6 +87,14 @@ public:
 	static constexpr uint64_t kEgressEnsureMs = 60 * 1000;
 	// A warning that repeats unchanged is logged again only this much later.
 	static constexpr uint64_t kRepeatLogMs = 5 * 60 * 1000;
+	// The most one docker call may take, and the shares of a pass (the class
+	// comment); a call is not made with less than kMinCallMs left.
+	static constexpr uint64_t kDockerCallMs = 20 * 1000;
+	static constexpr uint64_t kReportBudgetMs = 15 * 1000;
+	static constexpr uint64_t kActBudgetMs = 10 * 1000;
+	static constexpr uint64_t kMinCallMs = 1000;
+	// A pull still running this long after it began is ended, a failure.
+	static constexpr uint64_t kPullTimeoutMs = 4 * 60 * 1000;
 
 	// `link`, `runtime` and `slots` must outlive the agent. `make_egress`
 	// builds the egress counters for the machine's slots once it is
@@ -113,12 +130,26 @@ private:
 	bool load_saved();
 	bool save(std::string &error) const;
 	void bootstrapped_now();
-	void refresh_stats(const std::vector<ContainerInfo> &observed, uint64_t now);
-	void refresh_egress(uint64_t now);
+	// What one docker call may take before `deadline` (the agent's clock): at
+	// most kDockerCallMs, 0 with less than kMinCallMs left.
+	int call_ms(uint64_t deadline) const;
+	void refresh_stats(const std::vector<ContainerInfo> &observed, uint64_t now, uint64_t deadline);
+	void refresh_egress(uint64_t now, uint64_t deadline);
+	// The pulls under way: a finished one's image held, a failed or overdue
+	// one's waiting containers failed.
+	void poll_pulls(uint64_t now);
 	hosted::SyncRequest report(const std::vector<ContainerInfo> &observed) const;
 	void act(
 			const hosted::SyncReply &reply, const std::vector<ContainerInfo> &observed, int &delay);
-	void start(const hosted::DesiredContainer &desired);
+	// Starts `desired` (its image pulled first when the machine lacks it);
+	// false when `deadline` left no time for it (the next pass tries).
+	bool start(const hosted::DesiredContainer &desired, uint64_t deadline);
+	// `desired` waits for its image's pull, its files kept here.
+	void wait_for_image(const hosted::DesiredContainer &desired);
+	// The start failed: reported exited `exit_code`, never made again, and
+	// what the runtime made of it removed, its slot's files too.
+	void start_failed(const hosted::DesiredContainer &desired, int exit_code,
+			const std::string &why, uint64_t deadline);
 	// A warning under `key`, logged when it changes or kRepeatLogMs after it was.
 	void warn(const std::string &key, const std::string &text);
 	// `key`'s warning is over: `text` is logged once when there was one.
@@ -143,6 +174,11 @@ private:
 	bool stats_read_ = false;
 	std::map<std::string, uint64_t> stop_requested_; // by name: when its SIGTERM went
 	std::map<std::string, FailedStart> failed_starts_; // by name
+	std::map<std::string, uint64_t> pulls_; // image -> when its pull began
+	std::set<std::string> images_; // the images the machine holds, as checked
+	// By name: the desired containers whose image pulls, as the reply that
+	// started them gave them (their files with them).
+	std::map<std::string, hosted::DesiredContainer> waiting_;
 	std::set<std::string> refused_logged_; // the desired names whose refusal was logged
 	std::map<std::string, std::pair<std::string, uint64_t>> warnings_; // key -> text, when
 	bool last_sync_ok_ = false;

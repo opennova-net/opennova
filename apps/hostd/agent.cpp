@@ -7,6 +7,7 @@
 #include <base/io/log.h>
 #include <base/io/strutil.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstdio>
@@ -216,8 +217,20 @@ void Agent::bootstrapped_now() {
 	egress_attempted_ = false;
 }
 
-void Agent::refresh_stats(const std::vector<ContainerInfo> &observed, uint64_t now) {
+int Agent::call_ms(uint64_t deadline) const {
+	const uint64_t now = now_();
+	if (now >= deadline || deadline - now < kMinCallMs)
+		return 0;
+	return static_cast<int>(std::min<uint64_t>(deadline - now, kDockerCallMs));
+}
+
+void Agent::refresh_stats(
+		const std::vector<ContainerInfo> &observed, uint64_t now, uint64_t deadline) {
 	if (stats_read_ && now - stats_at_ < kStatsIntervalMs)
+		return;
+	// No time left in the pass: the last read stands, and the next pass reads.
+	const int ms = call_ms(deadline);
+	if (ms == 0)
 		return;
 	std::vector<std::string> running;
 	for (const ContainerInfo &c : observed)
@@ -227,7 +240,7 @@ void Agent::refresh_stats(const std::vector<ContainerInfo> &observed, uint64_t n
 	std::string error;
 	stats_read_ = true;
 	stats_at_ = now;
-	if (!runtime_.stats(running, read, error)) {
+	if (!runtime_.stats(running, read, ms, error)) {
 		warn("stats", "the containers' stats do not read: " + error);
 		return;
 	}
@@ -235,8 +248,8 @@ void Agent::refresh_stats(const std::vector<ContainerInfo> &observed, uint64_t n
 	stats_ = std::move(read);
 }
 
-void Agent::refresh_egress(uint64_t now) {
-	if (!egress_)
+void Agent::refresh_egress(uint64_t now, uint64_t deadline) {
+	if (!egress_ || call_ms(deadline) == 0)
 		return;
 	std::string error;
 	std::map<int, uint64_t> read;
@@ -292,6 +305,17 @@ hosted::SyncRequest Agent::report(const std::vector<ContainerInfo> &observed) co
 		reported.insert(c.name);
 		request.containers.push_back(std::move(r));
 	}
+	// A container waiting for its image's pull: starting, on its slot.
+	for (const auto &waiting : waiting_) {
+		if (!reported.insert(waiting.first).second)
+			continue;
+		hosted::ContainerReport r;
+		r.name = waiting.first;
+		r.slot = waiting.second.slot;
+		r.state = hosted::ContainerState::Starting;
+		r.egress_bytes = egress_of(waiting.second.slot);
+		request.containers.push_back(std::move(r));
+	}
 	for (const auto &failed : failed_starts_) {
 		if (reported.count(failed.first))
 			continue;
@@ -310,17 +334,20 @@ int Agent::step() {
 	if (!bootstrapped_ && !bootstrap())
 		return kBootstrapRetryMs;
 	const uint64_t now = now_();
+	poll_pulls(now);
+	// The listing and the stats share the report's time.
+	const uint64_t deadline = now + kReportBudgetMs;
 	std::vector<ContainerInfo> observed;
 	std::string error;
-	if (!runtime_.list(observed, error)) {
+	if (!runtime_.list(observed, call_ms(deadline), error)) {
 		// Nothing is reported or done blind: the service reads the silence.
 		warn("runtime", "the containers cannot be listed: " + error);
 		last_sync_ok_ = false;
 		return hosted::kSyncIntervalMs;
 	}
 	recovered("runtime", "the containers list again");
-	refresh_stats(observed, now);
-	refresh_egress(now);
+	refresh_stats(observed, now, deadline);
+	refresh_egress(now, deadline);
 
 	const net::HttpReply reply = link_.post(hosted::machine_sync_path(config_.machine_id),
 			machine_.agent_secret, hosted::encode_sync_request(report(observed)));
@@ -351,37 +378,99 @@ int Agent::step() {
 	return delay;
 }
 
+void Agent::poll_pulls(uint64_t now) {
+	for (auto it = pulls_.begin(); it != pulls_.end();) {
+		const std::string image = it->first;
+		std::string error;
+		PullState state = runtime_.poll_pull(image, error);
+		if (state == PullState::Running) {
+			if (now - it->second < kPullTimeoutMs) {
+				++it;
+				continue;
+			}
+			runtime_.cancel_pull(image);
+			state = PullState::Failed;
+			error = "it did not finish in " + std::to_string(kPullTimeoutMs / 1000) + " s";
+		}
+		it = pulls_.erase(it);
+		if (state == PullState::Done) {
+			io::logf(LogLevel::kInfo, "pulled %s", image.c_str());
+			images_.insert(image);
+			continue;
+		}
+		io::logf(LogLevel::kError, "%s did not pull: %s", image.c_str(), error.c_str());
+		// Its containers never ran: reported exited 125, as any start that failed.
+		for (auto w = waiting_.begin(); w != waiting_.end();) {
+			if (w->second.image != image) {
+				++w;
+				continue;
+			}
+			io::logf(LogLevel::kError, "%s did not start on slot %d: its image did not pull",
+					w->first.c_str(), w->second.slot);
+			failed_starts_[w->first] = { w->second.slot, 125 };
+			w = waiting_.erase(w);
+		}
+	}
+}
+
 void Agent::act(
 		const hosted::SyncReply &reply, const std::vector<ContainerInfo> &observed, int &delay) {
+	const uint64_t deadline = now_() + kActBudgetMs;
+	// The reply's containers; one waiting for its image takes the files the
+	// reply that started it carried (the later ones leave them out).
+	std::vector<hosted::DesiredContainer> desired = reply.desired;
+	for (hosted::DesiredContainer &d : desired) {
+		const auto waiting = waiting_.find(d.name);
+		if (waiting != waiting_.end() && !d.files)
+			d.files = waiting->second.files;
+	}
 	std::set<std::string> failed;
 	for (const auto &f : failed_starts_)
 		failed.insert(f.first);
+	std::set<std::string> pulling;
+	for (const auto &p : pulls_)
+		pulling.insert(p.first);
 	PlanInput in;
-	in.desired = &reply.desired;
+	in.desired = &desired;
 	in.observed = &observed;
 	in.stop_requested_ms = &stop_requested_;
 	in.failed_starts = &failed;
+	in.pulling = &pulling;
 	in.machine_slots = machine_.slots;
 	in.data_sets = &machine_.data_sets;
 	in.now_ms = now_();
 	const Plan plan = plan_sync(in);
 
+	// Each call in the act's time; what it does not reach waits for the next pass.
+	bool deferred = false;
+	const auto time_for = [&](int &ms) {
+		ms = deferred ? 0 : call_ms(deadline);
+		deferred = ms == 0;
+		return !deferred;
+	};
 	std::string error;
+	int ms = 0;
 	for (const std::string &name : plan.kill) {
+		if (!time_for(ms))
+			break;
 		io::logf(LogLevel::kWarn, "%s did not stop within %llu s: killing it", name.c_str(),
 				static_cast<unsigned long long>(kStopTimeoutMs / 1000));
-		if (!runtime_.kill(name, error))
+		if (!runtime_.kill(name, ms, error))
 			io::logf(LogLevel::kError, "%s", error.c_str());
 	}
 	for (const std::string &name : plan.stop) {
+		if (!time_for(ms))
+			break;
 		io::logf(LogLevel::kInfo, "stopping %s", name.c_str());
-		if (runtime_.stop(name, error))
+		if (runtime_.stop(name, ms, error))
 			stop_requested_[name] = in.now_ms;
 		else
 			io::logf(LogLevel::kError, "%s", error.c_str());
 	}
 	for (const ContainerInfo &c : plan.remove) {
-		if (!runtime_.remove(c.name, error)) {
+		if (!time_for(ms))
+			break;
+		if (!runtime_.remove(c.name, ms, error)) {
 			io::logf(LogLevel::kError, "%s", error.c_str());
 			continue;
 		}
@@ -391,13 +480,19 @@ void Agent::act(
 			io::logf(LogLevel::kError, "%s", error.c_str());
 	}
 	for (const auto &refused : plan.refused) {
-		const std::string &name = reply.desired[refused.first].name;
+		const std::string &name = desired[refused.first].name;
 		if (refused_logged_.insert(name).second)
 			io::logf(LogLevel::kWarn, "%s cannot start here: %s", name.c_str(),
 					refused.second.c_str());
 	}
-	for (const size_t index : plan.start)
-		start(reply.desired[index]);
+	for (const size_t index : plan.wait_for_image)
+		wait_for_image(desired[index]);
+	for (const size_t index : plan.start) {
+		if (deferred || !start(desired[index], deadline)) {
+			deferred = true;
+			break;
+		}
+	}
 
 	// Forget what the reply no longer names, and the stops of containers gone.
 	std::set<std::string> desired_names;
@@ -408,16 +503,71 @@ void Agent::act(
 		observed_names.insert(c.name);
 	for (auto it = failed_starts_.begin(); it != failed_starts_.end();)
 		it = desired_names.count(it->first) ? std::next(it) : failed_starts_.erase(it);
+	for (auto it = waiting_.begin(); it != waiting_.end();)
+		it = desired_names.count(it->first) ? std::next(it) : waiting_.erase(it);
 	for (auto it = refused_logged_.begin(); it != refused_logged_.end();)
 		it = desired_names.count(*it) ? std::next(it) : refused_logged_.erase(it);
 	for (auto it = stop_requested_.begin(); it != stop_requested_.end();)
 		it = observed_names.count(it->first) ? std::next(it) : stop_requested_.erase(it);
-	if (plan.busy)
+	if (plan.busy || deferred)
 		delay = hosted::kBusySyncIntervalMs;
 }
 
-void Agent::start(const hosted::DesiredContainer &desired) {
+void Agent::wait_for_image(const hosted::DesiredContainer &desired) {
+	if (waiting_.emplace(desired.name, desired).second)
+		io::logf(LogLevel::kInfo, "%s waits for its image %s to pull", desired.name.c_str(),
+				desired.image.c_str());
+}
+
+void Agent::start_failed(const hosted::DesiredContainer &desired, int exit_code,
+		const std::string &why, uint64_t deadline) {
+	io::logf(LogLevel::kError, "%s did not start on slot %d: %s", desired.name.c_str(),
+			desired.slot, why.c_str());
+	failed_starts_[desired.name] = { desired.slot, exit_code };
+	waiting_.erase(desired.name);
+	std::string ignored;
+	// A container the runtime made but could not start goes, and its files:
+	// given 5 s past the act's time too, since one left behind would be
+	// reported as starting.
+	runtime_.remove(desired.name, std::max(call_ms(deadline), 5 * 1000), ignored);
+	slots_.wipe(desired.slot, ignored);
+}
+
+bool Agent::start(const hosted::DesiredContainer &desired, uint64_t deadline) {
 	std::string error;
+	// Its image first: one the machine lacks is pulled in the background, and
+	// the container waits for it.
+	if (pulls_.count(desired.image)) {
+		wait_for_image(desired);
+		return true;
+	}
+	if (!images_.count(desired.image)) {
+		const int ms = call_ms(deadline);
+		if (ms == 0)
+			return false;
+		bool present = false;
+		if (!runtime_.has_image(desired.image, present, ms, error)) {
+			// Asked again at the next pass.
+			warn("image",
+					"whether the machine holds " + desired.image + " cannot be told: " + error);
+			return true;
+		}
+		recovered("image", "the machine's images read again");
+		if (!present) {
+			if (!runtime_.start_pull(desired.image, error)) {
+				start_failed(desired, 125, error, deadline);
+				return true;
+			}
+			io::logf(LogLevel::kInfo, "pulling %s", desired.image.c_str());
+			pulls_[desired.image] = now_();
+			wait_for_image(desired);
+			return true;
+		}
+		images_.insert(desired.image);
+	}
+	const int ms = call_ms(deadline);
+	if (ms == 0)
+		return false;
 	ContainerSpec spec;
 	spec.name = desired.name;
 	spec.slot = desired.slot;
@@ -431,13 +581,8 @@ void Agent::start(const hosted::DesiredContainer &desired) {
 	spec.pids = desired.pids;
 
 	const auto fail = [&](int exit_code, const std::string &why) {
-		io::logf(LogLevel::kError, "%s did not start on slot %d: %s", desired.name.c_str(),
-				desired.slot, why.c_str());
-		failed_starts_[desired.name] = { desired.slot, exit_code };
-		std::string ignored;
-		// A container the runtime made but could not start goes, and its files.
-		runtime_.remove(desired.name, ignored);
-		slots_.wipe(desired.slot, ignored);
+		start_failed(desired, exit_code, why, deadline);
+		return true;
 	};
 	if (!slots_.prepare(desired.slot, desired.uid, *desired.files, error))
 		return fail(125, error);
@@ -450,13 +595,18 @@ void Agent::start(const hosted::DesiredContainer &desired) {
 			return fail(125, error);
 	}
 	int exit_code = 125;
-	const bool ran = runtime_.run(spec, exit_code, error);
+	const bool ran = runtime_.run(spec, ms, exit_code, error);
 	if (!spec.env_file.empty())
 		::unlink(spec.env_file.c_str());
-	if (!ran)
+	if (!ran) {
+		// Asked again before the next start: the image may have gone since.
+		images_.erase(desired.image);
 		return fail(exit_code, error);
+	}
+	waiting_.erase(desired.name);
 	io::logf(LogLevel::kInfo, "started %s on slot %d (%s)", desired.name.c_str(), desired.slot,
 			desired.data_set.c_str());
+	return true;
 }
 
 } // namespace opennova::hostd

@@ -1,7 +1,8 @@
 // opennova-hostd's platform legs on a stub command runner that checks every argv and
 // answers it: the docker runtime (apps/hostd/docker_runtime.h: the exact `docker run`
 // of a slot's container, the ps-then-inspect listing and its partial answers, the stats,
-// the stop, kill and removal, every failure's exit code), docker's own texts read
+// the stop, kill and removal, every failure's exit code, each call's timeout, the image
+// check and the background pull, run here by stand-in programs), docker's own texts read
 // (inspect's states, exit codes, OOM flags, labels and times; stats' CPU and memory
 // sizes), the per-slot egress counters (apps/hostd/egress_counters.h: the chain, its
 // jump and the slots' rules put in place only where missing, the listings of iptables
@@ -12,14 +13,21 @@
 #include "egress_counters.h"
 #include "hostd_options.h"
 
+#include "common/temp_dir.h"
 #include "common/test_expect.h"
 
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <deque>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <string>
+#include <thread>
 #include <vector>
+
+#include <sys/stat.h>
 
 namespace hostd = opennova::hostd;
 namespace hosted = opennova::novaworld_server::hosted;
@@ -94,10 +102,12 @@ std::string labels(int slot) {
 
 int test_run_argv() {
 	StubRunner runner;
-	hostd::DockerRuntime docker(runner, kDocker);
+	hostd::DockerRuntime docker(runner, kDocker, {}, "/tmp");
 	hostd::ContainerSpec spec = sample_spec();
-	const std::vector<std::string> expected = { kDocker, "run", "-d", "--name", "srv-41-g2",
-		"--label", "opennova.hostd=1", "--label", "opennova.slot=3", "--network", "host", "--user",
+	// Never a pull inside the start: the agent pulls first, in the background.
+	const std::vector<std::string> expected = { kDocker, "run", "--pull", "never", "-d", "--name",
+		"srv-41-g2", "--label", "opennova.hostd=1", "--label", "opennova.slot=3", "--network",
+		"host", "--user",
 		"10004:10004", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only",
 		"--tmpfs", "/tmp", "--cpus", "1", "--memory", "512m", "--memory-swap", "512m",
 		"--pids-limit", "128", "--stop-timeout", "60", "--log-driver", "journald", "--log-opt",
@@ -110,7 +120,7 @@ int test_run_argv() {
 	spec.env_file = "/var/lib/opennova-hostd/scratch/env-srv-41-g2";
 	spec.cpus = 0.5;
 	const std::vector<std::string> argv = docker.run_argv(spec);
-	TEST_EXPECT(argv[21] == "0.5");
+	TEST_EXPECT(argv[23] == "0.5");
 	size_t image_at = 0;
 	for (size_t i = 0; i < argv.size(); ++i)
 		if (argv[i] == kImage)
@@ -120,57 +130,131 @@ int test_run_argv() {
 	int code = 0;
 	std::string error;
 	runner.answer(0, "0123abcd\n");
-	TEST_EXPECT(docker.run(sample_spec(), code, error));
-	TEST_EXPECT(runner.timeouts.back() == hostd::DockerRuntime::kRunTimeoutMs);
-	runner.answer(125, "", "docker: Error response from daemon: pull access denied\nmore\n");
-	TEST_EXPECT(!docker.run(sample_spec(), code, error) && code == 125);
+	TEST_EXPECT(docker.run(sample_spec(), 7000, code, error));
+	TEST_EXPECT(runner.timeouts.back() == 7000);
+	runner.answer(125, "", "docker: Error response from daemon: No such image: x\nmore\n");
+	TEST_EXPECT(!docker.run(sample_spec(), 7000, code, error) && code == 125);
 	TEST_EXPECT(error ==
-			"docker run exited 125: docker: Error response from daemon: pull access denied");
+			"docker run exited 125: docker: Error response from daemon: No such image: x");
 	runner.answer(127, "", "exec: not found");
-	TEST_EXPECT(!docker.run(sample_spec(), code, error) && code == 127);
+	TEST_EXPECT(!docker.run(sample_spec(), 7000, code, error) && code == 127);
 	proc::CommandResult timed_out;
 	timed_out.outcome = proc::CommandResult::Outcome::TimedOut;
 	runner.replies.push_back(timed_out);
-	TEST_EXPECT(!docker.run(sample_spec(), code, error) && code == 125 &&
+	TEST_EXPECT(!docker.run(sample_spec(), 7000, code, error) && code == 125 &&
 			error == "docker run timed out");
 	proc::CommandResult not_started;
 	not_started.error = "no such file";
 	runner.replies.push_back(not_started);
-	TEST_EXPECT(!docker.run(sample_spec(), code, error) && code == 125);
+	TEST_EXPECT(!docker.run(sample_spec(), 7000, code, error) && code == 125);
 	return 0;
 }
 
 int test_stop_kill_remove() {
 	StubRunner runner;
-	hostd::DockerRuntime docker(runner, kDocker);
+	hostd::DockerRuntime docker(runner, kDocker, {}, "/tmp");
 	std::string error;
 	runner.answer(0, "srv-1-g1\n");
 	runner.answer(0, "srv-1-g1\n");
 	runner.answer(0, "srv-1-g1\n");
-	TEST_EXPECT(docker.stop("srv-1-g1", error) && docker.kill("srv-1-g1", error) &&
-			docker.remove("srv-1-g1", error));
+	TEST_EXPECT(docker.stop("srv-1-g1", 3000, error) && docker.kill("srv-1-g1", 4000, error) &&
+			docker.remove("srv-1-g1", 5000, error));
 	TEST_EXPECT(runner.calls[0] ==
 			(std::vector<std::string>{ kDocker, "kill", "--signal", "SIGTERM", "srv-1-g1" }));
 	TEST_EXPECT(runner.calls[1] ==
 			(std::vector<std::string>{ kDocker, "kill", "--signal", "SIGKILL", "srv-1-g1" }));
 	// Never `rm -f`: a removal never ends a running container.
 	TEST_EXPECT(runner.calls[2] == (std::vector<std::string>{ kDocker, "rm", "srv-1-g1" }));
+	TEST_EXPECT((runner.timeouts == std::vector<int>{ 3000, 4000, 5000 }));
 	runner.answer(1, "", "Error response from daemon: cannot remove a running container\n");
-	TEST_EXPECT(!docker.remove("srv-1-g1", error) && error.find("docker rm exited 1") == 0);
+	TEST_EXPECT(!docker.remove("srv-1-g1", 5000, error) && error.find("docker rm exited 1") == 0);
+	return 0;
+}
+
+// Whether the machine holds an image (docker image inspect: present, absent by
+// docker's "No such image", or an error), and a pull in the background: a child
+// of its own (here programs that stand in for the CLI), polled until it ends, its
+// standard error's first line the failure's text, ended on the caller's word.
+int test_images_and_pulls() {
+	StubRunner runner;
+	hostd::DockerRuntime docker(runner, kDocker, {}, "/tmp");
+	bool present = false;
+	std::string error;
+	runner.answer(0, "sha256:0123\n");
+	TEST_EXPECT(docker.has_image(kImage, present, 6000, error) && present);
+	TEST_EXPECT(runner.calls[0] ==
+			(std::vector<std::string>{
+					kDocker, "image", "inspect", "--format", "{{.Id}}", kImage }));
+	TEST_EXPECT(runner.timeouts[0] == 6000);
+	runner.answer(1, "[]", "Error response from daemon: No such image: " + kImage + "\n");
+	TEST_EXPECT(docker.has_image(kImage, present, 6000, error) && !present);
+	runner.answer(1, "", "Cannot connect to the Docker daemon");
+	TEST_EXPECT(!docker.has_image(kImage, present, 6000, error) &&
+			error.find("Cannot connect") != std::string::npos);
+
+	test_temp::TempDir temp("hostd_runtime_pulls");
+	const auto poll_until_done = [](hostd::DockerRuntime &d, std::string &why) {
+		for (int i = 0; i < 500; ++i) {
+			const hostd::PullState state = d.poll_pull(kImage, why);
+			if (state != hostd::PullState::Running)
+				return state;
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		}
+		return hostd::PullState::Running;
+	};
+	// A pull that succeeds, one already under way being no second one.
+	hostd::DockerRuntime pulls_ok(runner, "/bin/true", {}, temp.root());
+	TEST_EXPECT(pulls_ok.start_pull(kImage, error) && pulls_ok.start_pull(kImage, error));
+	TEST_EXPECT(poll_until_done(pulls_ok, error) == hostd::PullState::Done);
+	// Ended, it is forgotten.
+	TEST_EXPECT(pulls_ok.poll_pull(kImage, error) == hostd::PullState::Failed);
+	// One that fails, with its standard error's first line.
+	const std::string failing = temp.file("failing-docker");
+	{
+		std::ofstream script(failing);
+		script << "#!/bin/sh\necho \"Error response from daemon: manifest unknown\" >&2\n"
+				  "echo more >&2\nexit 1\n";
+	}
+	::chmod(failing.c_str(), 0755);
+	hostd::DockerRuntime pulls_fail(runner, failing, {}, temp.root());
+	TEST_EXPECT(pulls_fail.start_pull(kImage, error));
+	TEST_EXPECT(poll_until_done(pulls_fail, error) == hostd::PullState::Failed);
+	TEST_EXPECT(error == "docker pull exited 1: Error response from daemon: manifest unknown");
+	// One that runs on until it is ended.
+	const std::string slow = temp.file("slow-docker");
+	{
+		std::ofstream script(slow);
+		script << "#!/bin/sh\nexec sleep 30\n";
+	}
+	::chmod(slow.c_str(), 0755);
+	hostd::DockerRuntime pulls_slow(runner, slow, {}, temp.root());
+	TEST_EXPECT(pulls_slow.start_pull(kImage, error));
+	TEST_EXPECT(pulls_slow.poll_pull(kImage, error) == hostd::PullState::Running);
+	pulls_slow.cancel_pull(kImage);
+	TEST_EXPECT(pulls_slow.poll_pull(kImage, error) == hostd::PullState::Failed);
+	// One whose CLI is not there does not start.
+	hostd::DockerRuntime no_cli(runner, temp.file("no-such-docker"), {}, temp.root());
+	TEST_EXPECT(!no_cli.start_pull(kImage, error) && error.find("docker pull did not start") == 0);
+	// No error file stays behind.
+	size_t left = 0;
+	for (const auto &entry : std::filesystem::directory_iterator(temp.root()))
+		left += entry.path().filename().string().rfind("pull-", 0) == 0;
+	TEST_EXPECT(left == 0);
 	return 0;
 }
 
 int test_list() {
 	StubRunner runner;
-	hostd::DockerRuntime docker(runner, kDocker);
+	hostd::DockerRuntime docker(runner, kDocker, {}, "/tmp");
 	std::vector<hostd::ContainerInfo> out;
 	std::string error;
 	// No container: no inspect.
 	runner.answer(0, "\n");
-	TEST_EXPECT(docker.list(out, error) && out.empty() && runner.calls.size() == 1);
+	TEST_EXPECT(docker.list(out, 8000, error) && out.empty() && runner.calls.size() == 1);
 	TEST_EXPECT(runner.calls[0] ==
 			(std::vector<std::string>{ kDocker, "ps", "-a", "--no-trunc", "--filter",
 					"label=opennova.hostd=1", "--format", "{{.Names}}" }));
+	TEST_EXPECT(runner.timeouts[0] == 8000);
 
 	const std::string a = inspect_entry(
 			"srv-1-g1", "running", 0, false, "2026-10-14T12:34:56.123456789Z", labels(0));
@@ -179,7 +263,7 @@ int test_list() {
 	runner.calls.clear();
 	runner.answer(0, "srv-1-g1\nsrv-2-g4\n");
 	runner.answer(0, "[" + a + "," + b + "]");
-	TEST_EXPECT(docker.list(out, error) && out.size() == 2);
+	TEST_EXPECT(docker.list(out, 8000, error) && out.size() == 2);
 	TEST_EXPECT(runner.calls[1] ==
 			(std::vector<std::string>{
 					kDocker, "inspect", "--type", "container", "srv-1-g1", "srv-2-g4" }));
@@ -192,16 +276,17 @@ int test_list() {
 	// One removed between the two calls: inspect exits 1 and answers the rest.
 	runner.answer(0, "srv-1-g1\nsrv-9-g1\n");
 	runner.answer(1, "[" + a + "]", "Error: No such container: srv-9-g1");
-	TEST_EXPECT(docker.list(out, error) && out.size() == 1 && out[0].name == "srv-1-g1");
+	TEST_EXPECT(docker.list(out, 8000, error) && out.size() == 1 && out[0].name == "srv-1-g1");
 	// A listing that fails or does not read is an error: the agent acts on nothing.
 	runner.answer(1, "", "Cannot connect to the Docker daemon");
-	TEST_EXPECT(!docker.list(out, error) && error.find("Cannot connect") != std::string::npos);
+	TEST_EXPECT(
+			!docker.list(out, 8000, error) && error.find("Cannot connect") != std::string::npos);
 	runner.answer(0, "srv-1-g1\n");
 	runner.answer(1, "", "permission denied");
-	TEST_EXPECT(!docker.list(out, error));
+	TEST_EXPECT(!docker.list(out, 8000, error));
 	runner.answer(0, "srv-1-g1\n");
 	runner.answer(0, "not json");
-	TEST_EXPECT(!docker.list(out, error));
+	TEST_EXPECT(!docker.list(out, 8000, error));
 	return 0;
 }
 
@@ -278,17 +363,17 @@ int test_times_and_sizes() {
 			stats["srv-3-g1"].memory_bytes == 1073741824u);
 
 	StubRunner runner;
-	hostd::DockerRuntime docker(runner, kDocker);
+	hostd::DockerRuntime docker(runner, kDocker, {}, "/tmp");
 	std::string error;
-	TEST_EXPECT(docker.stats({}, stats, error) && stats.empty() && runner.calls.empty());
+	TEST_EXPECT(docker.stats({}, stats, 8000, error) && stats.empty() && runner.calls.empty());
 	runner.answer(
 			0, "{\"CPUPerc\":\"1.00%\",\"MemUsage\":\"1MiB / 512MiB\",\"Name\":\"srv-1-g1\"}\n");
-	TEST_EXPECT(docker.stats({ "srv-1-g1" }, stats, error) && stats.size() == 1);
+	TEST_EXPECT(docker.stats({ "srv-1-g1" }, stats, 8000, error) && stats.size() == 1);
 	TEST_EXPECT(runner.calls[0] ==
 			(std::vector<std::string>{ kDocker, "stats", "--no-stream", "--no-trunc", "--format",
 					"{{json .}}", "srv-1-g1" }));
 	runner.answer(1, "", "Error: No such container: srv-1-g1");
-	TEST_EXPECT(!docker.stats({ "srv-1-g1" }, stats, error));
+	TEST_EXPECT(!docker.stats({ "srv-1-g1" }, stats, 8000, error));
 	return 0;
 }
 
@@ -463,6 +548,7 @@ int main() {
 	const Case cases[] = {
 		{ "run_argv", test_run_argv },
 		{ "stop_kill_remove", test_stop_kill_remove },
+		{ "images_and_pulls", test_images_and_pulls },
 		{ "list", test_list },
 		{ "parse_inspect", test_parse_inspect },
 		{ "times_and_sizes", test_times_and_sizes },

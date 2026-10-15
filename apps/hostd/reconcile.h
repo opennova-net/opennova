@@ -15,6 +15,8 @@
 //     or files), at most `max_starts` a pass, and only with its files (sent
 //     until the agent first reports it), its data set mounted here and its slot
 //     on this machine; a container whose start failed is not started again;
+//   - one whose image the machine is pulling waits for the pull instead,
+//     holding its slot, and is not counted among the pass's starts;
 //   - the pass is busy (the next sync comes sooner) while any of this waits.
 
 #include "container_runtime.h"
@@ -39,6 +41,8 @@ struct PlanInput {
 	const std::map<std::string, uint64_t> *stop_requested_ms = nullptr;
 	// The containers whose start failed (reported exited, never started again).
 	const std::set<std::string> *failed_starts = nullptr;
+	// The images the machine is pulling now (null: none).
+	const std::set<std::string> *pulling = nullptr;
 	int machine_slots = 0;
 	const std::map<std::string, std::string> *data_sets = nullptr; // data set -> mount path
 	uint64_t now_ms = 0;
@@ -50,6 +54,7 @@ struct Plan {
 	std::vector<std::string> kill; // still running past kStopTimeoutMs
 	std::vector<ContainerInfo> remove; // not running and not desired; its slot's directory goes too
 	std::vector<size_t> start; // indexes into the desired list
+	std::vector<size_t> wait_for_image; // the same: they start once their image pulled
 	// Desired containers that cannot start here, with why (the agent logs each once).
 	std::vector<std::pair<size_t, std::string>> refused;
 	bool busy = false;

@@ -40,12 +40,14 @@
 // `egress_bytes` is the container's slot's, every byte its user sent since the
 // machine booted (the agent's per-UID counters), so the service takes the
 // difference itself; a count below the last one is a counter that started over
-// (its rule put back), counted from 0. `exit_code` is the container's own once it exited, or the
-// docker CLI's (125) when its start failed; such a container is reported as
-// exited until the service drops it. `files` carries the slot's working
-// directory (the bytes in standard base64: the host file is cp1252) and is
-// sent until the agent has reported the container once, in any state; the
-// agent writes them before it starts the container and never needs them again.
+// (its rule put back), counted from 0. `exit_code` is the container's own once
+// it exited, or the docker CLI's (125) when its start failed (its image did not
+// pull among the causes); such a container is reported as exited until the
+// service drops it. One waiting for its image's pull is reported starting.
+// `files` carries the slot's working directory (the bytes in standard base64:
+// the host file is cp1252) and is sent until the agent has reported the
+// container once, in any state; the agent keeps them until it starts the
+// container, writes them before, and never needs them again.
 // A desired container the agent does not report is not on the machine: the
 // agent cannot start one whose files were left out (a lost agent state), and
 // keeps none whose start failed past the report. The agent stops a container

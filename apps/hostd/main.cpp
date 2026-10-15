@@ -110,10 +110,10 @@ int main(int argc, char **argv) {
 	}
 
 	// The CLIs get the system's variables alone.
-	proc::ProcessCommandRunner runner(proc::filter_environment({ "PATH", "HOME", "LANG", "LC_*",
-											  "TZ", "TMPDIR", "DOCKER_*" }),
-			scratch);
-	DockerRuntime docker(runner, options.docker);
+	const std::vector<std::string> environment = proc::filter_environment(
+			{ "PATH", "HOME", "LANG", "LC_*", "TZ", "TMPDIR", "DOCKER_*" });
+	proc::ProcessCommandRunner runner(environment, scratch);
+	DockerRuntime docker(runner, options.docker, environment, scratch);
 	std::vector<std::string> tools;
 	if (options.iptables != "none")
 		tools.push_back(options.iptables);

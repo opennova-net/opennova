@@ -7,7 +7,9 @@
 // alone; the ones left out stopped, killed past the stop timeout, removed and their
 // directories wiped; a slot's next container started only once its previous one is
 // gone), a start that fails (reported exited 125, never retried, forgotten once dropped),
-// the refusals (no files, a data set or slot the machine lacks), the busy cadence, the
+// an image pulled in the background while its containers wait (reported starting, their
+// files kept; a pull that fails or overruns its bound failing them), the pass's time
+// shares, the refusals (no files, a data set or slot the machine lacks), the busy cadence, the
 // drain flag, and every way a sync can fail (the service down, a refusal, a reply that
 // does not read or speaks another protocol, the runtime unlistable), none of which stops
 // or removes anything. The planner (apps/hostd/reconcile.h) and the slots' directories
@@ -193,7 +195,7 @@ struct Started {
 class FakeRuntime : public hostd::ContainerRuntime {
 public:
 	std::map<std::string, hostd::ContainerInfo> containers;
-	std::vector<std::string> calls; // "run <name>", "stop <name>", ...
+	std::vector<std::string> calls; // "run <name>", "stop <name>", "pull <image>", ...
 	std::vector<Started> started;
 	std::map<std::string, int> run_fails; // name -> the CLI's exit code
 	std::map<std::string, hostd::ContainerStats> stat_values;
@@ -201,8 +203,24 @@ public:
 	bool exit_on_stop = false; // SIGTERM ends a container at once
 	bool leave_created = false; // a failed run leaves a created container behind
 	int64_t now_s = 1791981296;
+	// The images the machine holds, the pulls under way (each one's state as
+	// the next poll reads it), the image checks made.
+	std::set<std::string> images = { kImage };
+	std::map<std::string, hostd::PullState> pulls;
+	bool pull_refused = false; // start_pull fails
+	std::vector<std::string> image_checks;
+	// Every call's timeout, and what each call costs on the agent's clock.
+	std::vector<int> timeouts;
+	uint64_t *clock_ms = nullptr;
+	uint64_t call_cost_ms = 0;
 
-	bool list(std::vector<hostd::ContainerInfo> &out, std::string &error) override {
+	void took(int timeout_ms) {
+		timeouts.push_back(timeout_ms);
+		if (clock_ms)
+			*clock_ms += call_cost_ms;
+	}
+	bool list(std::vector<hostd::ContainerInfo> &out, int timeout_ms, std::string &error) override {
+		took(timeout_ms);
 		if (list_fails) {
 			error = "Cannot connect to the Docker daemon";
 			return false;
@@ -213,14 +231,52 @@ public:
 		return true;
 	}
 	bool stats(const std::vector<std::string> &names,
-			std::map<std::string, hostd::ContainerStats> &out, std::string &) override {
+			std::map<std::string, hostd::ContainerStats> &out, int timeout_ms,
+			std::string &) override {
+		took(timeout_ms);
 		out.clear();
 		for (const std::string &name : names)
 			if (stat_values.count(name))
 				out[name] = stat_values[name];
 		return true;
 	}
-	bool run(const hostd::ContainerSpec &spec, int &exit_code, std::string &error) override {
+	bool has_image(
+			const std::string &image, bool &present, int timeout_ms, std::string &) override {
+		took(timeout_ms);
+		image_checks.push_back(image);
+		present = images.count(image) != 0;
+		return true;
+	}
+	bool start_pull(const std::string &image, std::string &error) override {
+		calls.push_back("pull " + image);
+		if (pull_refused) {
+			error = "docker pull did not start: no such file";
+			return false;
+		}
+		pulls.emplace(image, hostd::PullState::Running);
+		return true;
+	}
+	hostd::PullState poll_pull(const std::string &image, std::string &error) override {
+		const auto it = pulls.find(image);
+		if (it == pulls.end())
+			return hostd::PullState::Failed;
+		const hostd::PullState state = it->second;
+		if (state == hostd::PullState::Running)
+			return state;
+		pulls.erase(it);
+		if (state == hostd::PullState::Done)
+			images.insert(image);
+		else
+			error = "docker pull exited 1: manifest unknown";
+		return state;
+	}
+	void cancel_pull(const std::string &image) override {
+		calls.push_back("cancel " + image);
+		pulls.erase(image);
+	}
+	bool run(const hostd::ContainerSpec &spec, int timeout_ms, int &exit_code,
+			std::string &error) override {
+		took(timeout_ms);
 		calls.push_back("run " + spec.name);
 		Started s;
 		s.spec = spec;
@@ -249,18 +305,21 @@ public:
 		containers[spec.name] = c;
 		return true;
 	}
-	bool stop(const std::string &name, std::string &) override {
+	bool stop(const std::string &name, int timeout_ms, std::string &) override {
+		took(timeout_ms);
 		calls.push_back("stop " + name);
 		if (exit_on_stop)
 			end(name, 0);
 		return true;
 	}
-	bool kill(const std::string &name, std::string &) override {
+	bool kill(const std::string &name, int timeout_ms, std::string &) override {
+		took(timeout_ms);
 		calls.push_back("kill " + name);
 		end(name, 137);
 		return true;
 	}
-	bool remove(const std::string &name, std::string &error) override {
+	bool remove(const std::string &name, int timeout_ms, std::string &error) override {
+		took(timeout_ms);
 		calls.push_back("remove " + name);
 		const auto it = containers.find(name);
 		if (it == containers.end()) {
@@ -339,6 +398,7 @@ struct Rig {
 		slots = std::make_unique<hostd::SlotFiles>(slots_root, false);
 		std::string error;
 		slots->ensure_root(error);
+		runtime.clock_ms = &clock_ms;
 		make_agent();
 	}
 
@@ -443,6 +503,20 @@ int test_plan() {
 	in.max_starts = 3;
 	plan = hostd::plan_sync(in);
 	TEST_EXPECT(plan.start.size() == 3 && plan.busy);
+
+	// One whose image is pulling waits for it, holding its slot and no start of
+	// the pass's share; a free slot's next container still starts.
+	std::set<std::string> pulling = { "ghcr.io/opennova-net/opennova-serve@sha256:44556677" };
+	in.pulling = &pulling;
+	in.max_starts = 2;
+	want[0].image = want[1].image = *pulling.begin();
+	plan = hostd::plan_sync(in);
+	TEST_EXPECT((plan.wait_for_image == std::vector<size_t>{ 0, 1 }));
+	TEST_EXPECT((plan.start == std::vector<size_t>{ 2, 3 }) && plan.busy);
+	want[2].slot = 0; // the slot a waiting container holds
+	plan = hostd::plan_sync(in);
+	TEST_EXPECT((plan.wait_for_image == std::vector<size_t>{ 0, 1 }));
+	TEST_EXPECT((plan.start == std::vector<size_t>{ 3 }));
 	return 0;
 }
 
@@ -665,6 +739,100 @@ int test_failed_start() {
 	return 0;
 }
 
+// An image the machine lacks is pulled in the background: the container waits,
+// reported starting, while the passes go on at the busy cadence; once the pull is
+// done it starts with the files its first reply carried (the later ones leave
+// them out). Two containers of one image share its pull. A pull that fails, or
+// runs past its bound, is the start's failure (exited 125, never retried); a
+// pull that did not even start fails the start at once.
+int test_pull() {
+	const std::string newer = "ghcr.io/opennova-net/opennova-serve@sha256:44556677";
+	Rig rig("hostd_agent_pull");
+	rig.service.desired = { desired(1, 1, 0), desired(2, 1, 1) };
+	for (hosted::DesiredContainer &d : rig.service.desired)
+		d.image = newer;
+	TEST_EXPECT(rig.step() == hosted::kBusySyncIntervalMs);
+	TEST_EXPECT(rig.runtime.count("pull " + newer) == 1 && rig.runtime.count("run srv-1-g1") == 0);
+	TEST_EXPECT(rig.runtime.image_checks == std::vector<std::string>{ newer });
+	// Reported starting on their slots; the service stops sending the files.
+	TEST_EXPECT(rig.step() == hosted::kBusySyncIntervalMs);
+	const hosted::ContainerReport *a = rig.service.reported("srv-1-g1");
+	const hosted::ContainerReport *b = rig.service.reported("srv-2-g1");
+	TEST_EXPECT(a && b && a->state == ContainerState::Starting && a->slot == 0 && b->slot == 1);
+	TEST_EXPECT(!a->exit_code && !a->started_at);
+	rig.clock_ms += 60 * 1000;
+	rig.step();
+	TEST_EXPECT(rig.runtime.count("pull " + newer) == 1 && rig.runtime.started.empty());
+	// Pulled: both start, with their files.
+	rig.runtime.pulls[newer] = hostd::PullState::Done;
+	rig.clock_ms += 1000;
+	rig.step();
+	TEST_EXPECT(rig.runtime.started.size() == 2 && rig.runtime.started[0].spec.image == newer);
+	TEST_EXPECT(rig.runtime.started[0].files.at("credentials.txt") == kCredentials);
+	TEST_EXPECT(rig.runtime.image_checks.size() == 1);
+	rig.step();
+	TEST_EXPECT(rig.service.reported("srv-1-g1")->state == ContainerState::Running);
+	TEST_EXPECT(rig.step() == hosted::kSyncIntervalMs);
+
+	// A pull that fails: exited 125, never started; the next generation pulls again.
+	const std::string broken = "ghcr.io/opennova-net/opennova-serve@sha256:deadbeef";
+	rig.service.desired = { desired(3, 1, 2) };
+	rig.service.desired[0].image = broken;
+	rig.step();
+	rig.runtime.pulls[broken] = hostd::PullState::Failed;
+	rig.step();
+	rig.step();
+	const hosted::ContainerReport *c = rig.service.reported("srv-3-g1");
+	TEST_EXPECT(c && c->state == ContainerState::Exited && c->exit_code == 125 && c->slot == 2);
+	TEST_EXPECT(rig.runtime.count("run srv-3-g1") == 0 && rig.runtime.count("pull " + broken) == 1);
+	rig.service.desired = { desired(3, 2, 2) };
+	rig.service.desired[0].image = broken;
+	rig.step();
+	TEST_EXPECT(rig.runtime.count("pull " + broken) == 2);
+	// Still running at its bound: ended, a failure.
+	rig.clock_ms += hostd::Agent::kPullTimeoutMs;
+	rig.step();
+	rig.step();
+	TEST_EXPECT(rig.runtime.count("cancel " + broken) == 1);
+	const hosted::ContainerReport *d = rig.service.reported("srv-3-g2");
+	TEST_EXPECT(d && d->state == ContainerState::Exited && d->exit_code == 125);
+	TEST_EXPECT(rig.runtime.count("run srv-3-g2") == 0);
+
+	// A pull that does not start fails the start at once.
+	rig.runtime.pull_refused = true;
+	rig.service.desired = { desired(4, 1, 3) };
+	rig.service.desired[0].image = "ghcr.io/opennova-net/opennova-serve@sha256:0badf00d";
+	rig.step();
+	rig.step();
+	const hosted::ContainerReport *e = rig.service.reported("srv-4-g1");
+	TEST_EXPECT(e && e->state == ContainerState::Exited && e->exit_code == 125);
+	TEST_EXPECT(rig.service.bad_reports == 0);
+	return 0;
+}
+
+// No pass waits long: every docker call is cut at kDockerCallMs, the listing
+// gets the report's time, and the acts stop once the act's time is spent (each
+// call here costs 6 s of the agent's clock): what they did not reach is done at
+// the next pass, which comes at the busy cadence.
+int test_pass_budget() {
+	Rig rig("hostd_agent_budget");
+	rig.runtime.call_cost_ms = 6000;
+	rig.service.desired = { desired(1, 1, 0), desired(2, 1, 1), desired(3, 1, 2) };
+	TEST_EXPECT(rig.step() == hosted::kBusySyncIntervalMs);
+	// The listing gets the report's 15 s and the stats what is left of them; the act's
+	// 10 s hold the image check and one start (its run given the 4 s left), not a second.
+	TEST_EXPECT((rig.runtime.timeouts == std::vector<int>{ 15000, 9000, 10000, 4000 }));
+	TEST_EXPECT(rig.runtime.count("run srv-1-g1") == 1 && rig.runtime.count("run srv-2-g1") == 0);
+	// The next pass starts the other two.
+	TEST_EXPECT(rig.step() == hosted::kBusySyncIntervalMs);
+	TEST_EXPECT(rig.runtime.count("run srv-1-g1") == 1 && rig.runtime.count("run srv-2-g1") == 1 &&
+			rig.runtime.count("run srv-3-g1") == 1);
+	for (const int t : rig.runtime.timeouts)
+		TEST_EXPECT(t >= static_cast<int>(hostd::Agent::kMinCallMs) &&
+				t <= static_cast<int>(hostd::Agent::kReportBudgetMs));
+	return 0;
+}
+
 int test_refusals() {
 	Rig rig("hostd_agent_refusals");
 	rig.step();
@@ -753,6 +921,8 @@ int main() {
 		{ "sync", test_sync },
 		{ "slot_handover", test_slot_handover },
 		{ "failed_start", test_failed_start },
+		{ "pull", test_pull },
+		{ "pass_budget", test_pass_budget },
 		{ "refusals", test_refusals },
 		{ "sync_failures", test_sync_failures },
 		{ "log_hygiene", test_log_hygiene },
