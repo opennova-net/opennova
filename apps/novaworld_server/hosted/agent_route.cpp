@@ -123,7 +123,7 @@ crow::response AgentRoutes::bootstrap(const crow::request &req, uint64_t raw_id)
 		reply.serve_image = machine->serve_image;
 		reply.slots = machine->slots;
 		reply.data_sets = config_.data_sets;
-		// The reply must read before the token is spent on it.
+		// The reply must read before its secret is stored.
 		const std::string body = encode_machine_bootstrap(reply);
 		MachineBootstrap check;
 		if (!decode_machine_bootstrap(body, check, error)) {

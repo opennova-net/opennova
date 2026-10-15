@@ -84,9 +84,13 @@ POST /hosted/machines/<id>/bootstrap      Authorization: Bearer <one-time token>
 ```
 
 The reply is saved owner-only at `<state-dir>/machine-<id>.json` and the token file deleted,
-so a restarted agent never needs the token again. Without a saved reply and a token, or
-with a token the service refuses (spent, lapsed, unknown), the agent waits and tries again
-every 10 s; the service sees a machine that never reports and ends it.
+so a restarted agent never needs the token again. The service spends the token at the
+agent's first sync, not at the redeem: a redeem whose reply was lost (or did not read) is
+made again, and the fresh secret it gets replaces the first. Without a saved reply and a
+token, or with the service out of reach, the agent tries again every 10 s; a token the
+service refuses (spent, lapsed, unknown, a machine no longer booting) is logged and tried
+again twice as late each time, up to 5 minutes. The service sees a machine that never
+reports and ends it.
 
 **Sync**, every 5 s, every 1 s while the agent has work (a container to start, one stopping,
 one to remove):

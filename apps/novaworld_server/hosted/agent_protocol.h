@@ -9,7 +9,8 @@
 //
 // The machine's bootstrap. The machine's user-data carries a one-time token
 // the service minted for that machine (the service keeps its SHA-256). The
-// agent redeems it once:
+// agent redeems it; the token is spent at the agent's first sync, so a redeem
+// whose reply was lost is made again (a fresh secret replacing the last):
 //
 //   POST /hosted/machines/<id>/bootstrap      Authorization: Bearer <token>
 //   {"protocol": 1, "agent_version": "<the agent's build>"}

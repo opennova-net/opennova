@@ -5,8 +5,9 @@
 // until the agent has reported a container, nothing for another machine, a
 // stopping server's container that never started left unstarted, the drain
 // flag, a running container answered for without files by a supervisor that
-// started since), and the machines' lifecycle: a boot that never reports
-// (failed, its server's restart counted), a lost machine terminated once its
+// started since), and the machines' lifecycle: a boot that never reports, or
+// whose cloud machine vanishes first (failed, a failed launch, its server placed
+// again with no restart counted), a lost machine terminated once its
 // agent stays silent, an agent that reports again, a shared machine idle past
 // its time, a drain moving its servers one at a time with no restart counted, a
 // fleet roll draining every machine that takes servers,
@@ -91,7 +92,10 @@ int test_desired_state() {
 }
 
 // A machine whose agent never reports: failed at the driver's boot timeout and
-// terminated; its server's start counts as an attempt and goes to a new machine.
+// terminated, a failed launch (the heartbeat counts it, and its kind waits out
+// the launch backoff); its server, the machine's cause, is placed again with no
+// restart counted, on a new machine. One whose cloud machine vanishes before it
+// booted is the same.
 int test_boot_timeout() {
 	Rig rig("fleet_boot_timeout");
 	rig.fake.boot_timeout = 30000;
@@ -110,10 +114,28 @@ int test_boot_timeout() {
 	TEST_EXPECT(failed->state == FleetMachineState::Failed && contains(failed->end_reason, "did not boot in 30 s"));
 	TEST_EXPECT(rig.fake.was_terminated(failed->cloud_id));
 	auto row = rig.server(id);
-	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 1 && !row->machine_ref);
-	rig.advance(rig.config.restart_backoff_ms);
+	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 0 && !row->machine_ref);
+	TEST_EXPECT(has_event(*rig.pool.acquire(), id, "did not boot in 30 s; placed again (no restart counted)"));
+	TEST_EXPECT(rig.sup->launch_failures() == 1);
+	// The launch backoff holds the next machine of its kind.
+	rig.step();
+	TEST_EXPECT(rig.fake.launches == 1 && rig.state(id) == State::Provisioning);
+	rig.advance(rig.config.launch_backoff_ms);
+	rig.tick(); // the pass alone: its agent has not reported yet
+	TEST_EXPECT(rig.fake.launches == 2 && rig.state(id) == State::Booting);
+	const int64_t second = rig.machine_of(id);
+	TEST_EXPECT(second != machine);
+	// That one's cloud machine vanishes before its agent reports.
+	rig.muted.insert(second);
+	rig.fake.vanish(rig.machine(second)->cloud_id);
+	rig.step();
+	TEST_EXPECT(rig.machine(second)->state == FleetMachineState::Failed &&
+			rig.machine(second)->end_reason == "its machine is gone before it booted");
+	TEST_EXPECT(rig.server(id)->restarts == 0 && rig.sup->launch_failures() == 2);
+	rig.advance(rig.config.launch_backoff_ms);
 	TEST_EXPECT(rig.walk(id, State::Listing));
-	TEST_EXPECT(rig.machine_of(id) != machine && rig.fake.launches == 2);
+	TEST_EXPECT(rig.machine_of(id) != machine && rig.machine_of(id) != second && rig.fake.launches == 3);
+	TEST_EXPECT(rig.server(id)->restarts == 0);
 	return 0;
 }
 

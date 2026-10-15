@@ -104,7 +104,8 @@ Service policy (`health.*`), what the container runtime and the uptime checks re
   `{"heartbeat":{"nw_sessions":N,"listed_hosts":N,"hosted_live":N,"hosted_failed":N,"machines_lost":N,"launch_failures":N,"billing_sync_age_s":N,"webhook_rejects":N,"limits_held":N}}`.
   `nw_sessions` counts the NovaWorld UDP sessions, `listed_hosts` the listed servers,
   `hosted_live` the live hosted servers; `hosted_failed` and `launch_failures` count the
-  hosted servers that ended failed and the launches that failed since the last line;
+  hosted servers that ended failed and the launches that failed (refused, or a machine
+  that never booted) since the last line;
   `machines_lost` counts the fleet's machines lost now (their agents silent); `billing_sync_age_s` is the age
   in seconds of the oldest webhook event the billing worker has not synced (0 with none,
   -1 with billing off), `webhook_rejects` the webhook deliveries refused since the
@@ -512,19 +513,22 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   it waits to be listed.
 - **A crash** is what the server itself causes: its container exiting while the server
   should run (any code), the kernel ending it out of memory, a start that failed (docker's
-  125), its container not running within 5 min of its machine's ready, no listing within
-  3 min (on the ec2 driver: 10 min, for an image pull, and 5 min), a machine launched for
-  it that the cloud refused, and a machine it was placed on that never booted. The
+  125, an image that did not pull among them), its container not running within 5 min of
+  its machine's ready, no listing within 3 min (on the ec2 driver: 10 min, for an image
+  pull, and 5 min; the clock waits while its machine is lost). The
   server lets its slot go and goes back to `provisioning`, 15 s later, while it has
   restarts left: 3 of them, and an hour of continuous `running` resets the count (so an
   always-on server that crashes now and then over weeks is never failed for it); then
   `failed`. Its next start is a new generation: a new container name with new
-  credentials, on whichever slot placement picks. The driver's own error text goes to the
-  server log; the event the owner reads says what happened (`the launch of its machine
-  failed`). **What the fleet causes is no crash**: its machine lost, gone, ended by an
-  admin or drained (an admin's drain, a fleet roll, an agent on another protocol) moves
-  the server off at once, placed again with no restart counted (`its machine is gone;
-  placed again (no restart counted)`).
+  credentials, on whichever slot placement picks. **What the machine causes is no
+  crash** and costs no restart. A machine launched for it that the cloud refused: the
+  server waits for the next launch (the driver's own error text goes to the server log;
+  the event the owner reads says `the launch of its machine failed`). A machine it was
+  placed on that never booted, or its machine lost, gone, ended by an admin or drained
+  (an admin's drain, a fleet roll, an agent on another protocol): the server moves off at
+  once, placed again (`its machine is gone; placed again (no restart counted)`). The brake
+  on a fleet that cannot launch is the launch backoff below and the heartbeat's
+  `launch_failures`, not the servers' restarts.
 - **The machines' lifecycle.** A booting machine whose agent never reports within the
   driver's boot timeout (15 min on EC2, 1 min locally) is terminated and failed. A ready
   (or draining) machine whose agent has been silent 60 s is `lost`: the driver is asked;
@@ -536,7 +540,8 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   runs again elsewhere (or ended), and ends once it holds none; nothing new lands on it,
   and it counts toward neither maximum, so a roll launches the machines it moves servers
   to. A machine row moved to `ending` (an admin's end) is terminated at the next pass. A
-  launch the cloud refuses fails the row and holds every launch of that kind for 60 s.
+  launch the cloud refuses, or a machine that never booted, fails the row, counts toward
+  the heartbeat's `launch_failures` and holds every launch of that kind for 60 s.
 - **The desired state** (`hosted/fleet_desired_state.h`, the supervisor's answer to each
   agent's sync): the containers of the live servers placed on the machine that are
   booting, listing, running or stopping (a stopping one only once its agent has reported
@@ -551,9 +556,11 @@ tables). Each server runs one data set its owner picks. Everything here is servi
 - **The agents and the internal listener** (`hosted/agent_route.*`,
   `hosted/internal_listener.*`, `hosted/agent_protocol.*`; `apps/hostd/README.md`). Each
   machine runs `opennova-hostd`, the machine agent: its user-data carries a one-time
-  bootstrap token (kept by the service as its SHA-256 alone, 30 minutes' life), which it
-  redeems at `POST /hosted/machines/<id>/bootstrap` for its long-lived secret (stored
-  hashed), the serve image, its slots and the data sets' mount paths; then every 5 s (1 s
+  bootstrap token (kept by the service as its SHA-256 alone, 30 minutes' life, spent at
+  the agent's first sync, so a redeem whose reply was lost is made again for a fresh
+  secret), which it redeems at `POST /hosted/machines/<id>/bootstrap` for its long-lived
+  secret (stored hashed), the serve image, its slots and the data sets' mount paths; then
+  every 5 s (1 s
   with work) it posts `POST /hosted/machines/<id>/sync` with every container's state, CPU,
   memory and its slot's egress, and runs what the reply wants. Both routes are on the
   **internal listener**, a second HTTP server bound to `ONNET_INTERNAL_HTTP_BIND` (the

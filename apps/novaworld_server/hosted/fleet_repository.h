@@ -131,10 +131,13 @@ int count_machines(db::Database &db, FleetMachineState state);
 
 // The machine's bootstrap (POST /hosted/machines/<id>/bootstrap): when
 // `token` is machine `id`'s live one (its digest compared in constant time)
-// and the machine is booting, the token is spent and `secret_digest` (the new
-// agent secret's agent_secret_digest) stored with `agent_version`, in one
-// transaction, and the row returned. nullopt otherwise, with `why` for the log
-// (never the token).
+// and the machine is booting, `secret_digest` (the new agent secret's
+// agent_secret_digest) is stored with `agent_version`, replacing any earlier
+// redeem's, in one transaction, and the row returned. The token is spent by
+// the agent's first sync (record_sync, record_unlisted_sync), not here, so an
+// agent whose reply was lost redeems it again for a fresh secret (the route
+// answers the machine's own private address alone). nullopt otherwise, with
+// `why` for the log (never the token).
 std::optional<FleetMachineRow> redeem_bootstrap_token(db::Database &db, int64_t id,
 		std::string_view token, const std::string &secret_digest, const std::string &agent_version,
 		std::string &why);
@@ -160,8 +163,9 @@ struct SlotReport {
 	std::string reported_at; // UTC 'YYYY-MM-DD HH:MM:SS'
 };
 
-// One sync's report, in one transaction: last_report_at and agent_version, a
-// booting machine ready (its agent reports), and the machine's slot rows
+// One sync's report, in one transaction: last_report_at and agent_version, the
+// bootstrap token spent, a booting machine ready (its agent reports), and the
+// machine's slot rows
 // replaced by `containers` (one per slot: the running one where a slot holds
 // several, else the last; a slot past the machine's is dropped). The row
 // after, or nullopt when the machine is no longer one that syncs (booting,
@@ -169,9 +173,9 @@ struct SlotReport {
 std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 		const std::string &agent_version, const std::vector<ContainerReport> &containers);
 // A sync whose agent could not list its containers (agent_protocol.h
-// listing_failed): last_report_at and agent_version alone, so the machine is
-// heard from while its slot rows stand and a booting one stays booting. The
-// row after, or nullopt as record_sync's.
+// listing_failed): last_report_at and agent_version, the bootstrap token
+// spent, so the machine is heard from while its slot rows stand and a booting
+// one stays booting. The row after, or nullopt as record_sync's.
 std::optional<FleetMachineRow> record_unlisted_sync(
 		db::Database &db, int64_t id, const std::string &agent_version);
 // The machine's slot rows, by slot.

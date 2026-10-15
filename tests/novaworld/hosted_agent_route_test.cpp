@@ -1,7 +1,8 @@
 // The machine agents' routes (apps/novaworld_server/hosted/agent_route.h) on the
 // internal listener (hosted/internal_listener.h) on a loopback port over a
 // migrated database, driven with apps/common's http_exchange: the bootstrap (the
-// one-time token redeemed once for a secret kept as its digest, the reply's
+// one-time token redeemed for a secret kept as its digest, again for a fresh one
+// until the first sync spends it, the reply's
 // image, slots and data sets, no-store; a wrong, missing or spent token, a
 // hello that does not read, a machine not yet launched or reached from another
 // address, a reply that would not read: each the one bare 404, the token left
@@ -298,14 +299,27 @@ int test_bootstrap() {
 			got.data_sets.at("jop_2_consumer") == "/opt/game/jop_2_consumer");
 	auto row = hosted::find_machine(rig.db, m.id);
 	TEST_EXPECT(row && row->bootstrapped && row->agent_version == "test-agent 1");
+	const auto holds_secret = [&rig, &m](const std::string &secret) {
+		return rig.db
+					   .query("SELECT 1 FROM fleet_machines WHERE id = $1 AND agent_secret_hash = $2;",
+							   { BindValue(m.id), BindValue(hosted::agent_secret_digest(secret)) })
+					   .size() == 1;
+	};
+	TEST_EXPECT(holds_secret(got.agent_secret));
+	// Until the agent's first sync the token stays: a lost reply's retry redeems it
+	// again, for a fresh secret in place of the first.
+	TEST_EXPECT(token_hash(rig.db, m.id) == hosted::agent_secret_digest(m.bootstrap_token));
+	const Reply again = rig.post(path, m.bootstrap_token, hello());
+	hosted::MachineBootstrap second;
+	TEST_EXPECT(again.code == 200 && hosted::decode_machine_bootstrap(again.body, second, error));
+	TEST_EXPECT(second.agent_secret != got.agent_secret && holds_secret(second.agent_secret));
+	const std::string sync_path = hosted::machine_sync_path(m.id);
+	TEST_EXPECT(bare_404(rig.post(sync_path, got.agent_secret, sync_body({}))));
+	TEST_EXPECT(rig.post(sync_path, second.agent_secret, sync_body({})).code == 200);
+	// Spent by that sync: a redeem now is refused.
 	TEST_EXPECT(token_hash(rig.db, m.id).empty());
-	TEST_EXPECT(
-			rig.db.query("SELECT 1 FROM fleet_machines WHERE id = $1 AND agent_secret_hash = $2;",
-						  { BindValue(m.id),
-								  BindValue(hosted::agent_secret_digest(got.agent_secret)) })
-					.size() == 1);
-	// Spent: a second redeem (a lost reply's retry) is refused.
 	TEST_EXPECT(bare_404(rig.post(path, m.bootstrap_token, hello())));
+	TEST_EXPECT(holds_secret(second.agent_secret));
 
 	// A machine the cloud has not answered for, or one reached from another address.
 	const hosted::CreatedMachine launching = machine_row(rig.db, "");

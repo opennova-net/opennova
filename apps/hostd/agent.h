@@ -83,6 +83,9 @@ public:
 	using EgressFactory = std::function<std::unique_ptr<EgressSource>(int slots)>;
 
 	static constexpr int kBootstrapRetryMs = 10 * 1000;
+	// A bootstrap the service refuses is tried again twice as late each time,
+	// up to this.
+	static constexpr int kBootstrapBackoffMaxMs = 5 * 60 * 1000;
 	static constexpr uint64_t kStatsIntervalMs = 5 * 1000;
 	// How often a counter that does not read is put in place again, at most.
 	static constexpr uint64_t kEgressEnsureMs = 60 * 1000;
@@ -105,7 +108,8 @@ public:
 	~Agent();
 
 	// The saved bootstrap, or the token redeemed now and saved. False while
-	// neither worked (the caller tries again kBootstrapRetryMs later).
+	// neither worked: the caller tries again kBootstrapRetryMs later, or, after
+	// refusals in a row, twice as late each time up to kBootstrapBackoffMaxMs.
 	bool bootstrap();
 	bool bootstrapped() const { return bootstrapped_; }
 	const hosted::MachineBootstrap &machine() const { return machine_; }
@@ -165,6 +169,8 @@ private:
 	Clock now_;
 
 	bool bootstrapped_ = false;
+	int bootstrap_retry_ms_ = kBootstrapRetryMs; // the wait before the next try
+	bool bootstrap_refused_ = false; // the last try was refused (the backoff grows)
 	hosted::MachineBootstrap machine_;
 	std::unique_ptr<EgressSource> egress_;
 	bool egress_ready_ = false; // put in place once

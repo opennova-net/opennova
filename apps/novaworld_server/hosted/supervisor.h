@@ -67,17 +67,22 @@
 // run, its container exiting with ANY code (0 for its rotation's end or the
 // admin's GOTO MENUSTATE, 3 when the service ends its hosting, 1 for a SIGTERM
 // while it waits to be listed), the kernel ending it out of memory, a start
-// that fails (docker's 125), its container or its listing not coming in time,
-// a machine launched for it that the cloud refused, and a machine it was placed
-// on that never booted. A crash lets go of the slot and goes back to
+// that fails (docker's 125, an image that did not pull among them), its
+// container or its listing not coming in time (the listing's clock waits while
+// its machine is lost). A crash lets go of the slot and goes back to
 // provisioning after restart_backoff_ms while the server has restarts left:
 // restart_limit of them (3), and an hour (restart_reset_ms) of continuous
-// running resets the count. What the fleet causes is no crash and costs none:
-// its machine lost, ended by an admin, gone, or drained (an admin's drain, a
-// fleet roll, an agent on another protocol). The server lets go of its slot and
-// is placed again at once. A stopped or failed server's service account is
-// deleted with the transition that ends it. Always on: nothing reaps an idle
-// server, and nothing ends one for its age.
+// running resets the count. What the machine causes is no crash and costs
+// none: a machine launched for it that the cloud refused, one it was placed on
+// that never booted (gone, or past the driver's boot timeout), its machine
+// lost, gone, ended by an admin, or drained (an admin's drain, a fleet roll, an
+// agent on another protocol). The server lets go of its slot and is placed
+// again at once, or, its machine's launch refused, waits for the next one;
+// the brake on a fleet that cannot launch is the per-kind launch backoff and
+// the heartbeat's launch_failures (refused launches and machines that never
+// booted alike), not the servers' restarts. A stopped or failed server's
+// service account is deleted with the transition that ends it. Always on:
+// nothing reaps an idle server, and nothing ends one for its age.
 //
 // The machines (fleet_repository.h, each move a compare-and-set):
 //
@@ -86,7 +91,7 @@
 //                          launch of that kind for launch_backoff_ms
 //   booting -> ready       its agent's first sync (the agent routes); one that
 //                          never reports in the driver's boot_timeout_ms is
-//                          terminated and failed
+//                          terminated and failed, a failed launch as above
 //   ready -> lost          its agent silent for machine_silence_s (60): the
 //                          cloud is asked; gone, it ends now, running, it is
 //                          terminated lost_end_ms (3 min) on, and an agent that
@@ -244,8 +249,8 @@ public:
 	// The passes' progress (one per server stepped and one per pass): the stall
 	// watchdog's counter (health.h). Thread-safe.
 	uint64_t pass_turns() const { return pass_turns_.load(std::memory_order_relaxed); }
-	// The machine launches that failed so far (the heartbeat's launch_failures
-	// counts those since its last line). Thread-safe.
+	// The machine launches that failed so far, refused or never booted (the
+	// heartbeat's launch_failures counts those since its last line). Thread-safe.
 	uint64_t launch_failures() const { return launch_failures_.load(std::memory_order_relaxed); }
 
 	// The owners' limits' hold (the class comment, limits_hold.h): set before
@@ -270,6 +275,7 @@ private:
 		bool stop_pushed = false;
 		uint64_t stop_pushed_ms = 0;
 		bool waiting_logged = false;  // "waits for a slot", once
+		bool launch_failure_noted = false; // its machine's failed launch, in its events once
 	};
 	// What a pass remembers of a live machine: since when it has been in its
 	// state, since when it has held no server, the server its drain moved last,
@@ -312,7 +318,8 @@ private:
 	// for it, if need be), or a wait.
 	void place(db::Database &db, const HostedServer &server, Runtime &rt, uint64_t now_ms);
 	// A machine of `kind` launched for `server` (an own one reserved for it);
-	// false when none was (the launch backoff, a refused launch).
+	// false when none was (the launch backoff, a refused launch: the server
+	// waits, no restart counted).
 	bool launch_machine(db::Database &db, const HostedServer &server, MachineKind kind, Runtime &rt,
 			uint64_t now_ms);
 	// The start on the slot `server` (read after assign_slot) holds on
@@ -326,7 +333,7 @@ private:
 	// server has some left (after the backoff), else failed.
 	void attempt_failed(db::Database &db, const HostedServer &server, Runtime &rt, uint64_t now_ms,
 			const std::string &reason);
-	// The fleet's cause: its slot let go and placed again at once, no restart
+	// The machine's cause: its slot let go and placed again at once, no restart
 	// counted (a stopping server's stop ends instead).
 	void replace(db::Database &db, const HostedServer &server, uint64_t now_ms, const std::string &reason);
 	// The end: the row stopped or failed with its service account deleted, in
@@ -350,11 +357,15 @@ private:
 	void step_machines(db::Database &db, uint64_t now_ms);
 	void drain_step(db::Database &db, const FleetMachineRow &machine,
 			const std::vector<HostedServer> &holders, MachineRuntime &mrt, uint64_t now_ms);
+	// A launch of `kind` failed (the cloud refused it, or its machine never
+	// booted): counted for the heartbeat's launch_failures, and no launch of
+	// that kind for launch_backoff_ms.
+	void launch_failed(MachineKind kind, uint64_t now_ms);
 	// The machine terminated and its row moved to `to` (ended or failed) with
-	// `reason`; each server on it crashed (`counted`, the server's cause) or
-	// placed again.
+	// `reason`; each server on it placed again, no restart counted (the
+	// machine's cause, whatever it was).
 	void end_machine(db::Database &db, const FleetMachineRow &machine, FleetMachineState to,
-			const std::string &reason, bool counted, uint64_t now_ms);
+			const std::string &reason, uint64_t now_ms);
 	// The driver's machines against the rows (`when` labels the log lines):
 	// terminates each cloud machine no live row names, and ends each live row
 	// whose cloud machine is gone. Throws what list_tagged throws.

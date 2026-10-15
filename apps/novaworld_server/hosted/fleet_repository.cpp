@@ -290,8 +290,9 @@ std::optional<FleetMachineRow> redeem_bootstrap_token(db::Database &db, int64_t 
 		why = "a machine that is " + state + ", not booting";
 		return std::nullopt;
 	}
-	db.exec("UPDATE fleet_machines SET bootstrap_token_hash = '', bootstrap_expires_at = NULL, "
-			"agent_secret_hash = $2, agent_version = $3 "
+	// The token stays until the agent's first sync spends it, so an agent
+	// whose reply was lost redeems again: the new secret replaces the last.
+	db.exec("UPDATE fleet_machines SET agent_secret_hash = $2, agent_version = $3 "
 			"WHERE id = $1 AND bootstrap_token_hash = $4 AND state = 'booting';",
 			{ BindValue(id), BindValue(secret_digest), BindValue(agent_version),
 					BindValue(stored) });
@@ -344,8 +345,10 @@ std::optional<FleetMachineRow> authenticate_agent(
 std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 		const std::string &agent_version, const std::vector<ContainerReport> &containers) {
 	db::Transaction tx(db);
+	// The agent's first sync spends the bootstrap token (redeem_bootstrap_token).
 	const auto updated = db.query(
 			"UPDATE fleet_machines SET last_report_at = now(), agent_version = $2, "
+			"bootstrap_token_hash = '', bootstrap_expires_at = NULL, "
 			"ready_at = CASE WHEN state = 'booting' THEN now() ELSE ready_at END, "
 			"end_reason = CASE WHEN state = 'booting' THEN '' ELSE end_reason END, "
 			"state = CASE WHEN state = 'booting' THEN 'ready' ELSE state END "
@@ -382,7 +385,8 @@ std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 
 std::optional<FleetMachineRow> record_unlisted_sync(
 		db::Database &db, int64_t id, const std::string &agent_version) {
-	db.exec("UPDATE fleet_machines SET last_report_at = now(), agent_version = $2 "
+	db.exec("UPDATE fleet_machines SET last_report_at = now(), agent_version = $2, "
+			"bootstrap_token_hash = '', bootstrap_expires_at = NULL "
 			"WHERE id = $1 AND state IN ('booting', 'ready', 'draining', 'lost');",
 			{ BindValue(id), BindValue(agent_version) });
 	if (db.changes() == 0)

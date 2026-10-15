@@ -101,13 +101,16 @@ hosted::DesiredContainer desired(int64_t server, int64_t generation, int slot) {
 	return d;
 }
 
-// The service's two routes, in process: the token redeemed once, the secret checked,
-// each report decoded, the files sent until a container was reported once.
+// The service's two routes, in process: the token redeemed until the first sync spends
+// it, the secret checked, each report decoded, the files sent until a container was
+// reported once.
 struct FakeService {
 	hosted::MachineBootstrap machine;
 	std::vector<hosted::DesiredContainer> desired;
 	std::set<std::string> reported_once;
 	bool token_spent = false;
+	int redeems = 0;
+	bool lose_bootstrap_reply = false; // the next redeem is made, its reply lost
 	bool drain = false;
 	bool down = false;
 	int refuse = 0; // a sync's status instead of 200
@@ -134,11 +137,16 @@ struct FakeService {
 			std::string error;
 			if (bearer != kToken || token_spent || !hosted::decode_agent_hello(body, hello, error))
 				return answer(404, "");
-			token_spent = true;
+			++redeems;
+			if (lose_bootstrap_reply) {
+				lose_bootstrap_reply = false;
+				return unreachable();
+			}
 			return answer(200, hosted::encode_machine_bootstrap(machine));
 		}
 		if (path != hosted::machine_sync_path(kMachine) || bearer != kSecret)
 			return answer(404, "");
+		token_spent = true;
 		std::string error;
 		if (!hosted::decode_sync_request(body, last, error)) {
 			std::fprintf(stderr, "a report did not decode: %s\n", error.c_str());
@@ -572,8 +580,14 @@ int test_bootstrap() {
 	rig.service.down = true;
 	TEST_EXPECT(rig.step() == hostd::Agent::kBootstrapRetryMs && fs::exists(rig.token_file));
 	rig.service.down = false;
+	// The redeem made, its reply lost: the next try redeems the token again (the
+	// service spends it at the first sync).
+	rig.service.lose_bootstrap_reply = true;
+	TEST_EXPECT(rig.step() == hostd::Agent::kBootstrapRetryMs && !rig.agent->bootstrapped());
+	TEST_EXPECT(rig.service.redeems == 1 && fs::exists(rig.token_file));
 	rig.step();
-	TEST_EXPECT(rig.agent->bootstrapped() && rig.service.token_spent && rig.service.syncs == 1);
+	TEST_EXPECT(rig.agent->bootstrapped() && rig.service.redeems == 2);
+	TEST_EXPECT(rig.service.token_spent && rig.service.syncs == 1);
 	TEST_EXPECT(rig.service.bodies[0].find("\"agent_version\": \"test-1\"") != std::string::npos);
 	TEST_EXPECT(rig.agent->machine().slots == 4 && rig.agent->machine().agent_secret == kSecret);
 	// Saved owner-only; the spent token gone.
@@ -590,11 +604,20 @@ int test_bootstrap() {
 	rig.step();
 	TEST_EXPECT(rig.service.syncs == 2 && rig.agent->last_sync_ok());
 
-	// A token the service refuses (spent): no bootstrap, the file left as it was.
+	// A token the service refuses (spent): no bootstrap, the file left as it was, and
+	// each try twice as late as the one before, up to five minutes.
 	Rig spent("hostd_agent_spent");
 	spent.service.token_spent = true;
 	TEST_EXPECT(!spent.agent->bootstrap() && fs::exists(spent.token_file) &&
 			!fs::exists(spent.agent->saved_path()));
+	std::vector<int> waits;
+	for (int i = 0; i < 7; ++i)
+		waits.push_back(spent.step());
+	TEST_EXPECT((waits == std::vector<int>{ 20000, 40000, 80000, 160000, 300000, 300000, 300000 }));
+	TEST_EXPECT(g_log.find("the bootstrap was refused") != std::string::npos);
+	// Once the service answers otherwise, the pace is the usual one again.
+	spent.service.down = true;
+	TEST_EXPECT(spent.step() == hostd::Agent::kBootstrapRetryMs);
 	return 0;
 }
 

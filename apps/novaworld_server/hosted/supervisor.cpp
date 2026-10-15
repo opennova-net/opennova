@@ -154,7 +154,7 @@ void Supervisor::sweep(db::Database &db, uint64_t now_ms, const char *when) {
 		// Not listed: the driver's own describe decides (a cloud machine launched
 		// a moment ago may not be listed yet).
 		if (driver_.describe(m.cloud_id).state == CloudState::Gone)
-			end_machine(db, m, FleetMachineState::Ended, "its machine is gone", false, now_ms);
+			end_machine(db, m, FleetMachineState::Ended, "its machine is gone", now_ms);
 	}
 }
 
@@ -572,9 +572,16 @@ bool Supervisor::launch_machine(db::Database &db, const HostedServer &s, Machine
 				static_cast<long long>(created.id), machine_kind_text(kind), static_cast<long long>(s.id),
 				error.c_str());
 		transition_machine(db, created.id, FleetMachineState::Launching, FleetMachineState::Failed, "the launch failed");
-		launch_failures_.fetch_add(1, std::memory_order_relaxed);
-		launch_not_before_ms_[kind] = now_ms + config_.launch_backoff_ms;
-		attempt_failed(db, s, rt, now_ms, "the launch of its machine failed");
+		launch_failed(kind, now_ms);
+		// The fleet's cause, not the server's: no restart counted. It waits for
+		// the next launch the backoff lets through, its event saying so once.
+		if (!rt.launch_failure_noted &&
+				transition(db, s.id, State::Provisioning, State::Provisioning,
+						"the launch of its machine failed; it waits for the next (no restart counted)")) {
+			std::printf("[hosted] server %lld: the launch of its machine failed; it waits for the next\n",
+					static_cast<long long>(s.id));
+		}
+		rt.launch_failure_noted = true;
 		return false;
 	}
 	if (!mark_launched(db, created.id, *launched)) {
@@ -699,7 +706,8 @@ void Supervisor::on_booting(db::Database &db, const Fleet &fleet, const HostedSe
 
 void Supervisor::on_listing(db::Database &db, const Fleet &fleet, const HostedServer &s, Runtime &rt,
 		uint64_t now_ms) {
-	if (!machine_of(fleet, s)) {
+	const FleetMachineRow *machine = machine_of(fleet, s);
+	if (!machine) {
 		replace(db, s, now_ms, "its machine is gone");
 		return;
 	}
@@ -711,6 +719,12 @@ void Supervisor::on_listing(db::Database &db, const Fleet &fleet, const HostedSe
 	const auto rid = s.service_user_id ? listing_rid_of(db, *s.service_user_id) : std::nullopt;
 	if (rid) {
 		move(db, s, rt, now_ms, State::Running, "listed as RID " + std::to_string(*rid));
+		return;
+	}
+	// While its machine is lost the listing's clock waits: the machine's end,
+	// not a missed listing, decides then (as for a running server's checks).
+	if (machine->state == FleetMachineState::Lost) {
+		rt.since_ms = now_ms;
 		return;
 	}
 	if (now_ms - rt.since_ms >= config_.listing_timeout_ms) {
@@ -815,15 +829,6 @@ void Supervisor::attempt_failed(db::Database &db, const HostedServer &s, Runtime
 	}
 	const std::string detail = reason + "; restart " + std::to_string(s.restarts + 1) + " of " +
 			std::to_string(config_.restart_limit);
-	if (s.state == State::Provisioning) {
-		// Not placed yet (its machine's launch failed): the restart is counted on
-		// the row it stays in.
-		if (transition(db, s.id, State::Provisioning, State::Provisioning, detail, TransitionOptions{ true, true })) {
-			std::printf("[hosted] server %lld: provisioning (%s)\n", static_cast<long long>(s.id), detail.c_str());
-			rt.not_before_ms = now_ms + config_.restart_backoff_ms;
-		}
-		return;
-	}
 	if (move(db, s, rt, now_ms, State::Provisioning, detail, TransitionOptions{ true, true }))
 		rt.not_before_ms = now_ms + config_.restart_backoff_ms;
 }
@@ -867,19 +872,22 @@ void Supervisor::finish(db::Database &db, const HostedServer &s, State to, const
 
 // --- the machines -------------------------------------------------------------------
 
+void Supervisor::launch_failed(MachineKind kind, uint64_t now_ms) {
+	launch_failures_.fetch_add(1, std::memory_order_relaxed);
+	launch_not_before_ms_[kind] = now_ms + config_.launch_backoff_ms;
+}
+
 void Supervisor::end_machine(db::Database &db, const FleetMachineRow &m, FleetMachineState to,
-		const std::string &reason, bool counted, uint64_t now_ms) {
+		const std::string &reason, uint64_t now_ms) {
 	if (!m.cloud_id.empty()) driver_.terminate(m.cloud_id);
 	if (!transition_machine(db, m.id, live_machine_states(), to, reason)) return;
 	std::printf("[fleet] machine %lld: %s -> %s (%s)\n", static_cast<long long>(m.id),
 			fleet_machine_state_text(m.state), fleet_machine_state_text(to), reason.c_str());
 	machine_runtimes_.erase(m.id);
+	// Whatever ended it, the machine's cause, never its servers': each placed
+	// again with no restart counted (a stopping one's stop ends).
 	for (const HostedServer &s : list_live(db)) {
-		if (s.machine_ref != m.id) continue;
-		if (counted && s.state != State::Stopping)
-			attempt_failed(db, s, runtimes_[s.id], now_ms, reason);
-		else
-			replace(db, s, now_ms, reason);
+		if (s.machine_ref == m.id) replace(db, s, now_ms, reason);
 	}
 }
 
@@ -887,7 +895,7 @@ void Supervisor::drain_step(db::Database &db, const FleetMachineRow &m, const st
 		MachineRuntime &mrt, uint64_t now_ms) {
 	if (holders.empty()) {
 		end_machine(db, m, FleetMachineState::Ended, m.end_reason.empty() ? "drained" : m.end_reason + "; drained",
-				false, now_ms);
+				now_ms);
 		return;
 	}
 	// One at a time: the server moved last runs again elsewhere (or ended)
@@ -945,22 +953,28 @@ void Supervisor::step_machines(db::Database &db, uint64_t now_ms) {
 		switch (m.state) {
 			case FleetMachineState::Launching:
 				// Only inside a pass's own launch; one left over is a launch that
-				// never finished.
-				if (now_ms - mrt.since_ms >= driver_.boot_timeout_ms())
-					end_machine(db, m, FleetMachineState::Failed, "its launch never finished", true, now_ms);
+				// never finished. A machine that never booted is a launch that
+				// failed (the backoff, the heartbeat's count), never its servers'.
+				if (now_ms - mrt.since_ms >= driver_.boot_timeout_ms()) {
+					launch_failed(m.kind, now_ms);
+					end_machine(db, m, FleetMachineState::Failed, "its launch never finished", now_ms);
+				}
 				break;
 			case FleetMachineState::Booting: {
 				const CloudMachine cloud = driver_.describe(m.cloud_id);
 				if (cloud.state == CloudState::Gone) {
-					end_machine(db, m, FleetMachineState::Failed, "its machine is gone before it booted", true, now_ms);
+					launch_failed(m.kind, now_ms);
+					end_machine(db, m, FleetMachineState::Failed, "its machine is gone before it booted", now_ms);
 					break;
 				}
 				if (!cloud.private_address.empty() || !cloud.public_address.empty())
 					set_machine_addresses(db, m.id, cloud.private_address,
 							cloud.public_address.empty() ? m.public_address : cloud.public_address);
-				if (now_ms - mrt.since_ms >= driver_.boot_timeout_ms())
+				if (now_ms - mrt.since_ms >= driver_.boot_timeout_ms()) {
+					launch_failed(m.kind, now_ms);
 					end_machine(db, m, FleetMachineState::Failed,
-							"its machine did not boot in " + seconds_text(driver_.boot_timeout_ms()), true, now_ms);
+							"its machine did not boot in " + seconds_text(driver_.boot_timeout_ms()), now_ms);
+				}
 				break;
 			}
 			case FleetMachineState::Ready:
@@ -972,7 +986,7 @@ void Supervisor::step_machines(db::Database &db, uint64_t now_ms) {
 				if (m.kind == MachineKind::Own) {
 					// Launched for one server: it ends with that server.
 					if (m.reserved_for == 0 || live_ids.count(m.reserved_for) == 0)
-						end_machine(db, m, FleetMachineState::Ended, "its server ended", false, now_ms);
+						end_machine(db, m, FleetMachineState::Ended, "its server ended", now_ms);
 					break;
 				}
 				if (!on.empty()) {
@@ -981,15 +995,14 @@ void Supervisor::step_machines(db::Database &db, uint64_t now_ms) {
 					mrt.idle_since_ms = now_ms;
 				} else if (now_ms - mrt.idle_since_ms >= config_.idle_ms) {
 					end_machine(db, m, FleetMachineState::Ended,
-							"no server on it for " + std::to_string(config_.idle_ms / 60000) + " min", false, now_ms);
+							"no server on it for " + std::to_string(config_.idle_ms / 60000) + " min", now_ms);
 				}
 				break;
 			case FleetMachineState::Draining:
 				drain_step(db, m, on, mrt, now_ms);
 				break;
 			case FleetMachineState::Ending:
-				end_machine(db, m, FleetMachineState::Ended, m.end_reason.empty() ? "ended" : m.end_reason, false,
-						now_ms);
+				end_machine(db, m, FleetMachineState::Ended, m.end_reason.empty() ? "ended" : m.end_reason, now_ms);
 				break;
 			case FleetMachineState::Lost: {
 				if (machine_reported_within(db, m.id, config_.machine_silence_s)) {
@@ -1002,10 +1015,10 @@ void Supervisor::step_machines(db::Database &db, uint64_t now_ms) {
 				}
 				const CloudMachine cloud = driver_.describe(m.cloud_id);
 				if (cloud.state == CloudState::Gone)
-					end_machine(db, m, FleetMachineState::Ended, "its machine is gone", false, now_ms);
+					end_machine(db, m, FleetMachineState::Ended, "its machine is gone", now_ms);
 				else if (cloud.state != CloudState::Unknown && now_ms - mrt.since_ms >= config_.lost_end_ms)
 					end_machine(db, m, FleetMachineState::Ended,
-							"its agent was silent for " + seconds_text(config_.lost_end_ms) + " more", false, now_ms);
+							"its agent was silent for " + seconds_text(config_.lost_end_ms) + " more", now_ms);
 				break;
 			}
 			case FleetMachineState::Ended:

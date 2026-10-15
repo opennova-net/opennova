@@ -3,11 +3,13 @@
 // database: a machine's row and its one-time token (only its SHA-256 stored),
 // the launch's answer, every lifecycle move as a compare-and-set (ready_at,
 // the end's time and reason, the credentials spent at the end), the
-// bootstrap's redeem (the right token once, a wrong, spent or lapsed one, a
-// machine not booting), the agent's secret (its digest alone stored, a wrong
-// or ended one refused), a sync's report (a booting machine ready, the slots'
-// rows replaced, one per slot, the running one first, a slot past the
-// machine's dropped), the silent machines, the addresses a describe writes,
+// bootstrap's redeem (the right token, again for a fresh secret until the first
+// sync spends it, a wrong, spent or lapsed one, a machine not booting), the
+// agent's secret (its digest alone stored, a wrong or ended one refused), a
+// sync's report (a booting machine ready, the slots' rows replaced, one per
+// slot, the running one first, a slot past the machine's dropped; a listing
+// that failed storing nothing of them), the silent machines, the addresses a
+// describe writes,
 // and the slots: assigned with the generation moving on, never twice to two
 // live servers (the index holds it whatever writes the row), let go, and read
 // back for placement.
@@ -300,10 +302,28 @@ int test_redeem() {
 	TEST_EXPECT(redeemed && redeemed->id == m.id && redeemed->bootstrapped);
 	TEST_EXPECT(redeemed->agent_version == "v1.2" && redeemed->state == FleetMachineState::Booting);
 	TEST_EXPECT(column_of(db, m.id, "agent_secret_hash") == digest);
+	// Not spent yet: an agent whose reply was lost redeems it again, and the fresh
+	// secret replaces the first.
+	TEST_EXPECT(column_of(db, m.id, "bootstrap_token_hash") ==
+			hosted::agent_secret_digest(m.bootstrap_token));
+	const std::string again = hosted::agent_secret_digest(secret + "-again");
+	TEST_EXPECT(hosted::redeem_bootstrap_token(db, m.id, m.bootstrap_token, again, "v1.3", why));
+	TEST_EXPECT(column_of(db, m.id, "agent_secret_hash") == again);
+	// The agent's first sync spends it: once synced, never again.
+	TEST_EXPECT(hosted::record_sync(db, m.id, "v1.3", {}));
 	TEST_EXPECT(column_of(db, m.id, "bootstrap_token_hash").empty());
-	// Spent: once only.
 	TEST_EXPECT(!hosted::redeem_bootstrap_token(db, m.id, m.bootstrap_token, digest, "v1", why));
 	TEST_EXPECT(why.find("spent") != std::string::npos);
+	TEST_EXPECT(column_of(db, m.id, "agent_secret_hash") == again);
+	// A sync whose listing failed spends it too.
+	const hosted::CreatedMachine unlisted =
+			booting_machine(db, MachineKind::Shared, 4, "i-0ddddddddddddddd4", "10.44.1.24");
+	TEST_EXPECT(hosted::redeem_bootstrap_token(db, unlisted.id, unlisted.bootstrap_token, digest,
+			"v1", why));
+	TEST_EXPECT(hosted::record_unlisted_sync(db, unlisted.id, "v1"));
+	TEST_EXPECT(column_of(db, unlisted.id, "bootstrap_token_hash").empty());
+	TEST_EXPECT(!hosted::redeem_bootstrap_token(db, unlisted.id, unlisted.bootstrap_token, digest,
+			"v1", why));
 
 	// A lapsed token.
 	const hosted::CreatedMachine late =

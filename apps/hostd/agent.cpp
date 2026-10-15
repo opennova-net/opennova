@@ -180,23 +180,41 @@ bool Agent::bootstrap() {
 	hello.agent_version = config_.agent_version;
 	const net::HttpReply reply = link_.post(hosted::machine_bootstrap_path(config_.machine_id),
 			token, hosted::encode_agent_hello(hello));
-	if (!reply.transport_ok || reply.code != 200) {
+	if (!reply.transport_ok) {
+		// The service out of reach: tried again at the usual pace.
+		bootstrap_retry_ms_ = kBootstrapRetryMs;
+		bootstrap_refused_ = false;
+		warn("bootstrap", "the bootstrap failed: " + http_failure(reply));
+		return false;
+	}
+	if (reply.code != 200) {
+		// A refusal (a token spent, lapsed or unknown, a machine no longer
+		// booting): tried again later each time, up to kBootstrapBackoffMaxMs.
+		if (bootstrap_refused_)
+			bootstrap_retry_ms_ = std::min(bootstrap_retry_ms_ * 2, kBootstrapBackoffMaxMs);
+		bootstrap_refused_ = true;
 		warn("bootstrap",
-				"the bootstrap failed: " + http_failure(reply) +
-						(reply.transport_ok ? " (a token spent, lapsed or unknown)" : ""));
+				"the bootstrap was refused: " + http_failure(reply) +
+						" (a token spent, lapsed or unknown); trying again in " +
+						std::to_string(bootstrap_retry_ms_ / 1000) + " s");
 		return false;
 	}
 	std::string error;
 	hosted::MachineBootstrap got;
 	if (!hosted::decode_machine_bootstrap(
 				std::string(reply.body.begin(), reply.body.end()), got, error)) {
+		// The service keeps the token until the first sync: the next try
+		// redeems it again.
+		bootstrap_retry_ms_ = kBootstrapRetryMs;
+		bootstrap_refused_ = false;
 		warn("bootstrap", "the bootstrap's reply does not read (" + error + ")");
 		return false;
 	}
 	machine_ = std::move(got);
-	// Spent now: the saved reply stands in for it from here on. A save that
-	// fails leaves the agent running on what it holds; its next restart cannot
-	// bootstrap again, which the service sees as a lost machine.
+	// The saved reply stands in for the token from here on (the first sync
+	// spends it). A save that fails leaves the agent running on what it holds;
+	// its next restart cannot bootstrap again, which the service sees as a
+	// lost machine.
 	if (!save(error))
 		io::logf(LogLevel::kError, "the bootstrap could not be saved: %s", error.c_str());
 	if (::unlink(config_.token_file.c_str()) != 0 && errno != ENOENT)
@@ -332,7 +350,7 @@ hosted::SyncRequest Agent::report(const std::vector<ContainerInfo> &observed) co
 
 int Agent::step() {
 	if (!bootstrapped_ && !bootstrap())
-		return kBootstrapRetryMs;
+		return static_cast<int>(bootstrap_retry_ms_);
 	const uint64_t now = now_();
 	poll_pulls(now);
 	// The listing and the stats share the report's time.

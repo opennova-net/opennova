@@ -13,10 +13,11 @@
 // two servers on one machine's slots, an own machine of its own), the stop (the
 // push, the listing's end, the 60 s timeout, any exit while stopping, a stop
 // before any slot, a stop landing mid-placement, the kill switch), the crash
-// restart and its limit (any exit, the OOM kill, a start that failed, a launch
-// the cloud refused; a stop is never read from an exit code), the restart
-// window, the boot and listing timeouts, the health checks, a lost machine
-// placing its server again with no restart counted, an owner's account banned
+// restart and its limit (any exit, the OOM kill, a start that failed; a stop is
+// never read from an exit code), a launch the cloud refused costing the server
+// no restart, the restart window, the boot and listing timeouts, the health
+// checks, a lost machine placing its server again with no restart counted (and
+// holding its listing's clock), an owner's account banned
 // or deleted, its comp grant withdrawn or its support tier canceled (also
 // during a crash restart's backoff), the owners' limits and their hold, the
 // reconciliation at the service's start, and the admin links kept in step with
@@ -923,10 +924,11 @@ int test_exits_and_crash_restarts() {
 	return 0;
 }
 
-// A machine launch the cloud refuses counts as the server's attempt; the
-// driver's own text goes to the log, not to the event the owner reads; the
-// machine's row fails; and no launch of that kind follows within the launch
-// backoff, after which the server is placed on the next one.
+// A machine launch the cloud refuses is the machine's cause, never the server's:
+// no restart counted, however many fail. The driver's own text goes to the log,
+// not to the event the owner reads (written once per wait); the machine's row
+// fails, the heartbeat counts it, and no launch of that kind follows within the
+// launch backoff, after which the server is placed on the next one.
 int test_launch_failure() {
 	Rig rig("hosted_launch_failure");
 	const int64_t id = rig.request("launch_refused");
@@ -936,21 +938,33 @@ int test_launch_failure() {
 	rig.tick();
 	auto row = rig.server(id);
 	TEST_EXPECT(rig.fake.launches == 1);
-	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 1 && !row->machine_ref);
+	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 0 && !row->machine_ref);
 	const std::string detail = last_detail(*rig.pool.acquire(), id);
-	TEST_EXPECT(contains(detail, "the launch of its machine failed; restart 1 of 2") && !contains(detail, "fake"));
+	TEST_EXPECT(contains(detail, "the launch of its machine failed; it waits for the next (no restart counted)") &&
+			!contains(detail, "fake"));
 	TEST_EXPECT(rig.sup->launch_failures() == 1);
 	const auto machines = hosted::list_machines(*rig.pool.acquire(), 10);
 	TEST_EXPECT(machines.size() == 1 && machines[0].state == hosted::FleetMachineState::Failed &&
 			machines[0].end_reason == "the launch failed");
-	// Its restart's backoff (3 s) lapses inside the launch backoff (5 s).
-	rig.advance(rig.config.restart_backoff_ms);
+	// Within the launch backoff (5 s) nothing launches.
+	rig.advance(rig.config.launch_backoff_ms - 1);
 	rig.tick();
 	TEST_EXPECT(rig.fake.launches == 1 && rig.state(id) == State::Provisioning);
+	// Refused again, and again: still no restart, the event once.
+	for (int i = 0; i < 3; ++i) {
+		rig.advance(rig.config.launch_backoff_ms);
+		rig.fake.fail_next_launch = true;
+		rig.tick();
+	}
+	row = rig.server(id);
+	TEST_EXPECT(rig.fake.launches == 4 && rig.sup->launch_failures() == 4);
+	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 0);
+	TEST_EXPECT(transitions(*rig.pool.acquire(), id) ==
+			(std::vector<std::string>{ ">requested", "requested>provisioning", "provisioning>provisioning" }));
 	rig.advance(rig.config.launch_backoff_ms);
 	rig.tick();
-	TEST_EXPECT(rig.fake.launches == 2 && rig.state(id) == State::Booting);
-	TEST_EXPECT(rig.walk(id, State::Listing) && rig.server(id)->restarts == 1);
+	TEST_EXPECT(rig.fake.launches == 5 && rig.state(id) == State::Booting);
+	TEST_EXPECT(rig.walk(id, State::Listing) && rig.server(id)->restarts == 0);
 	return 0;
 }
 
@@ -1102,6 +1116,35 @@ int test_machine_lost_replaces() {
 	TEST_EXPECT(!rig.to_running(id, 8102).empty());
 	row = rig.server(id);
 	TEST_EXPECT(row->restarts == 0 && row->machine_ref != machine && rig.fake.launches == 2);
+	return 0;
+}
+
+// A server waiting for its listing whose machine goes lost: the listing's clock
+// waits while the machine is lost (its end, not a missed listing, decides), and
+// counts again from the machine's return.
+int test_listing_waits_while_lost() {
+	Rig rig("hosted_listing_lost");
+	const int64_t id = rig.request("listing_lost_owner");
+	TEST_EXPECT(rig.walk(id, State::Listing));
+	const int64_t machine = rig.machine_of(id);
+	rig.silence(machine);
+	rig.step();
+	TEST_EXPECT(rig.machine(machine)->state == hosted::FleetMachineState::Lost);
+	rig.advance(rig.config.listing_timeout_ms * 2);
+	rig.step();
+	TEST_EXPECT(rig.state(id) == State::Listing && rig.server(id)->restarts == 0);
+	// Its agent reports again: the clock starts over.
+	rig.muted.erase(machine);
+	rig.step();
+	rig.step();
+	TEST_EXPECT(rig.machine(machine)->state == hosted::FleetMachineState::Ready);
+	rig.advance(rig.config.listing_timeout_ms - 1000);
+	rig.step();
+	TEST_EXPECT(rig.state(id) == State::Listing);
+	rig.advance(1000);
+	rig.step();
+	TEST_EXPECT(rig.state(id) == State::Provisioning && rig.server(id)->restarts == 1);
+	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), id), "no listing in 20 s"));
 	return 0;
 }
 
@@ -1594,6 +1637,7 @@ int main(int argc, char **argv) {
 		{ "restart_window", test_restart_window },
 		{ "timeouts_and_health", test_timeouts_and_health },
 		{ "machine_lost_replaces", test_machine_lost_replaces },
+		{ "listing_waits_while_lost", test_listing_waits_while_lost },
 		{ "owner_changes", test_owner_changes },
 		{ "limit_at_provisioning", test_limit_at_provisioning },
 		{ "owner_limits", test_owner_limits },
