@@ -216,8 +216,9 @@ import type { BillingItem, MyBilling, TierNumber, TiersResponse } from '../../ty
 import {
   checkoutConfirmed,
   hasLiveTier,
-  recallCheckoutItem,
-  rememberCheckoutItem,
+  recallCheckout,
+  rememberCheckout,
+  type PendingCheckout,
   subscriptionStatusLabel,
 } from '../../utils/billingView';
 import { formatDate, formatMoney, formatUtc, isoTime } from '../../utils/format';
@@ -376,7 +377,7 @@ async function checkout(item: BillingItem) {
     }
     return;
   }
-  rememberCheckoutItem(item);
+  rememberCheckout(item, billing.value?.own_machines ?? 0);
   go(result.value);
 }
 
@@ -391,7 +392,7 @@ function onChoose(tier: TierNumber) {
 let confirmTimer: ReturnType<typeof setTimeout> | undefined;
 let confirmStarted = 0;
 let confirmDelay = CONFIRM_FIRST_MS;
-let confirmItem: BillingItem = 'tier1';
+let pending: PendingCheckout = { item: 'tier1', ownMachinesBefore: 0 };
 let unmounted = false;
 
 async function dropQuery() {
@@ -400,10 +401,10 @@ async function dropQuery() {
 
 function confirmed(value: MyBilling): boolean {
   billing.value = value;
-  if (!checkoutConfirmed(value, confirmItem)) return false;
+  if (!checkoutConfirmed(value, pending)) return false;
   confirm.value = 'done';
   notice.value =
-    confirmItem === 'own_machine'
+    pending.item === 'own_machine'
       ? 'Your own machine is active. Start a server on it from your Servers page.'
       : 'Your support tier is active. Thank you for supporting OpenNova.';
   void dropQuery();
@@ -445,7 +446,7 @@ function nothingToConfirm() {
 }
 
 async function confirmCheckout() {
-  confirmItem = recallCheckoutItem();
+  pending = recallCheckout();
   confirm.value = 'confirming';
   confirmStarted = Date.now();
   confirmDelay = CONFIRM_FIRST_MS;

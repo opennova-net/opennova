@@ -126,6 +126,26 @@ describe('SupportTierPage', () => {
     await add!.trigger('click');
     await flushPromises();
     expect(checkout).toHaveBeenCalledWith('own_machine');
+    // The count it had goes along, for the return to wait for one more.
+    expect(JSON.parse(window.sessionStorage.getItem('opennova_checkout')!)).toEqual({
+      item: 'own_machine',
+      own_machines_before: 1,
+    });
+  });
+
+  it('confirms another own machine only once the account has one more', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    window.sessionStorage.setItem('opennova_checkout', JSON.stringify({ item: 'own_machine', own_machines_before: 1 }));
+    const before = subscribed(3, { own_machines: 1, own_machine_subscription: ownMachine });
+    mine.mockResolvedValueOnce({ ok: true, value: before }); // the page's load
+    sync.mockResolvedValue({ ok: true, value: before }); // its first machine: not yet
+    mine.mockResolvedValue({ ok: true, value: subscribed(3, { own_machines: 2, own_machine_subscription: ownMachine }) });
+    await mountAt('/me/support?checkout=success&session_id=cs_test_1');
+    expect(statusText()).toBe('Confirming your payment with Stripe…');
+    await vi.advanceTimersByTimeAsync(2_000);
+    await flushPromises();
+    expect(statusText()).toContain('Your own machine is active.');
+    expect(router.currentRoute.value.fullPath).toBe('/me/support');
   });
 
   it('hides the add-on once every server has an own machine', async () => {
