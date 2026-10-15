@@ -59,6 +59,16 @@ public:
 	void restamp(const FileSource &files) {
 		for (FileStamp &file : files_) file.stamp = files.stamp(file.name);
 	}
+	// The file `name` (read before, in any case) holds `stamp` now: a move its reader followed in place (an
+	// editor's device patching what it made, ADR 0046 S25). False where it was not read.
+	bool restamp(const std::string &name, uint64_t stamp) {
+		for (FileStamp &file : files_)
+			if (strutil::iequals(file.name, name)) {
+				file.stamp = stamp;
+				return true;
+			}
+		return false;
+	}
 	const std::vector<FileStamp> &files() const { return files_; }
 	bool empty() const { return files_.empty(); }
 	void clear() { files_.clear(); }
@@ -84,6 +94,8 @@ public:
 		return stamp;
 	}
 	const FileStamps &stamps() const { return stamps_; }
+	// A file read holds `stamp` now (FileStamps::restamp): what was made from it followed the move in place.
+	bool restamp(const std::string &name, uint64_t stamp) { return stamps_.restamp(name, stamp); }
 
 private:
 	std::shared_ptr<const FileSource> files_;

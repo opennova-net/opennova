@@ -565,8 +565,8 @@ reads an existing weapon definition or imported timing.
    until Blender closes, never in the scene, and says when the timing has
    changed since.
 6. **Export Animations** writes `<table>_weapon_edits.txt` beside the table:
-   per entry only the keys to set (ANIM, DELAYSTART, DELAYEND, POS, TPOS),
-   never FUNCTION, sounds, effects or flags. A table without a fire row still
+   per entry only the keys to set (ANIM, DELAYSTART, DELAYEND, POS, TPOS,
+   and FUNCTION for a draw timed by its clip), never sounds, effects or flags. A table without a fire row still
    writes its clips, and no edits. **Merge into weapon.def** sets those keys
    in a copy of a `weapon.def` you pick (`opennova-3di weapon merge`), written
    beside it as `<name>_merged.def` unless you name another file; every other
@@ -577,10 +577,15 @@ reads an existing weapon definition or imported timing.
 | --- | --- |
 | `ON:Shot` | Fire: the shot pose; none means the first frame. Fire's recovery is each entry's target rate, so fire takes no Ready. |
 | `ON:Eject` | Recoil: the casing and refire decision; none means the first frame. |
-| `ON:Active End` | Reload, empty, fire mode, aim in and aim out: the end of the action's active phase; none means Ready, else the clip's end. |
+| `ON:Active End` | Reload, empty, fire mode, aim in and aim out, and a draw timed by its clip: the end of the action's active phase; none means Ready, else the clip's end. |
 | `ON:Ready` | The end of the recovery after that boundary, and an idle's window before the game plays it again; none means the clip's end. |
 
-Draw and holster take no marker: the game paces them on its switch timer.
+The holster takes no marker: the game paces it on its switch timer, about half
+a second, which swaps the next weapon in. A draw without markers is paced the
+same way. A draw with markers is timed by its clip: its row names the idle
+handler (`FUNCTION wpn_std_idle`), which runs on DELAYSTART and then goes to
+idle, where the draw's own handler ignores its delays (REVX02's AT4 draws the
+same way through `wpn_std_reload`, which also refills the magazine).
 Every clip on one action's row must time alike, in seconds: the game plays a
 ring's clips in turn, so any of them may be the one playing. A Ready marker
 may lie past the clip's last frame to hold a recovery; the other markers name

@@ -27,6 +27,20 @@ What is here:
   selection and labels, the AI's labels / routes / targets / rings, rays,
   contacts, hit meshes).
 
+## The tool kit
+
+`ui_kit.h` (`devtools::ui_kit`, ImGui-free) is the one set of pieces the
+windows on the pass draw with: `WrapRow` (a row that wraps whole controls) with
+the measures it takes, `tool` (a button whose tooltip says what it does, or
+while it cannot act, why not; a disabled one never acts), `check`,
+`row_tools` (a list's Add / Duplicate / Remove / Up / Down), `path_field`,
+`filter_box` (with its clear button and Ctrl+F), `Held` / `HeldText` (a
+control over a value its owner holds), `fit` / `fit_middle` / `clipped_text`
+(text cut to its cell), `tooltip` (every window's hover text, a disabled
+item's too), `empty_state` and `note`. A window never hand-rolls a disabled
+button's reason (`BeginDisabled` + `IsItemHovered` + `SetTooltip`): `tool` or
+`tooltip` carries it.
+
 ## The control board
 
 `control_board.h` is the read side of the debug-control table: the embedder
@@ -76,7 +90,8 @@ window's own widgets queuing a `ControlRequest`.
    `owns_frame()` only for a window that issues its own `ImGui::Begin/End`, and
    `preferred_size()` for a surface the cascade default is too small for (a
    timeline) — it applies `ImGuiCond_FirstUseEver`, so the user's own sizing and
-   ImGui's ini always win afterwards.
+   ImGui's ini always win afterwards. Draw its toolbars, filters, tooltips and
+   empty states with the tool kit (`ui_kit.h`).
 2. Register it in `GameDevTools::GameDevTools()` (`pass_.register_window(std::make_unique<MyWindow>())`);
    it appears in the "Windows" menu under its `menu_group()`. Keep `open`
    false unless the window is the default surface. A window that reads

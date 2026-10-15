@@ -45,6 +45,9 @@ constexpr uint32_t kMagic = 0x4C574631;  // 'LWF1'
 constexpr uint32_t kPitchUnityQ16 = 0x10000u;
 // The authoring tools' stock set-level pitch base (~unity; see above).
 constexpr uint32_t kAuthoredSetPitchBase = 0xFFFFu;
+// And their stock member pitch, the same ~unity word: every shipped set's and most shipped members' (JO:CA
+// game.lwf 1206 of its 1768 members, gamelocl.lwf 3629 of 3692, menu.lwf 55 of 56; the rest retuned).
+constexpr uint32_t kAuthoredMemberPitch = 0xFFFFu;
 
 inline double pitch_from_q16(uint32_t q16) {
   return static_cast<double>(q16) / static_cast<double>(kPitchUnityQ16);
