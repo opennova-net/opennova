@@ -35,7 +35,7 @@ opennova-hostd --service http://<service private address>:<port> --machine <id> 
 | `--service` | required | The service's internal listener (`ONNET_INTERNAL_HTTP_BIND`), `http://` only. |
 | `--machine` | required | This machine's id, the service's `fleet_machines` row. |
 | `--token-file` | `/etc/opennova/hostd.token` | The one-time bootstrap token the machine's user-data wrote (0600). Deleted once redeemed. |
-| `--state-dir` | `/var/lib/opennova-hostd` | The saved bootstrap (`machine-<id>.json`, 0600) and `scratch/` (the CLIs' output files, a start's environment file). Made 0700. |
+| `--state-dir` | `/var/lib/opennova-hostd` | The saved bootstrap (`machine-<id>.json`, 0600) and `scratch/` (the CLIs' output files, a pull's error file, a start's environment file). Made 0700. |
 | `--slots-root` | `/srv/slots` | The slots' working directories. Made 0755 when missing. |
 | `--docker` | `/usr/bin/docker` | The docker CLI, run as given (no `PATH` search). |
 | `--iptables` | `/usr/sbin/iptables` | The egress counters' iptables, or `none` to count nothing. |
@@ -47,7 +47,8 @@ opennova-hostd --service http://<service private address>:<port> --machine <id> 
 The agent reads no environment variable. The CLIs it runs get the system's variables alone
 (`PATH`, `HOME`, `LANG`, `LC_*`, `TZ`, `TMPDIR`, `DOCKER_*`).
 
-A unit the machine's user-data can install:
+The unit the machine's user-data installs (`hosted/machine/machine_user_data.sh`; its
+`ExecStartPre` puts the slots' users' fences back in place at every start of the agent):
 
 ```
 [Unit]
@@ -57,7 +58,8 @@ After=docker.service network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/local/sbin/opennova-hostd --service http://10.44.0.10:8070 --machine 12
+ExecStartPre=/usr/local/sbin/opennova-machine-fence
+ExecStart=/usr/local/bin/opennova-hostd --service http://10.44.0.10:8070 --machine 12
 Restart=always
 RestartSec=5
 
@@ -157,7 +159,8 @@ trying, logging each warning when it changes and every 5 minutes while it lasts.
 ```
 docker run --pull never -d --name <name> --label opennova.hostd=1 --label opennova.slot=<k>
   --network host --user <uid>:<uid> --cap-drop ALL --security-opt no-new-privileges
-  --read-only --tmpfs /tmp --cpus <cpus> --memory <mb>m --memory-swap <mb>m
+  --read-only --tmpfs /tmp:size=64m,nosuid,nodev,noexec --cpus <cpus> --memory <mb>m
+  --memory-swap <mb>m
   --pids-limit <pids> --stop-timeout 60 --log-driver journald --log-opt tag=<name>
   --mount type=bind,source=<data set's mount path>,target=/opt/game,readonly
   --mount type=bind,source=/srv/slots/slot-<k>,target=/srv/serve
@@ -171,13 +174,18 @@ agent's label are ever listed, stopped or removed. Their output is in the journa
 
 ## Egress
 
-A chain of its own, `OPENNOVA-EGRESS`, that `OUTPUT` jumps to first, holds one rule per slot
-(`-m owner --uid-owner <10001 + k> -j RETURN`), so each packet a slot's user sends is
-counted once and then meets the rest of `OUTPUT` (the metadata fence among it). The agent
-puts the chain, the jump and each rule in place only where missing (checked with `-C`), so
-the counters survive its restarts and count since the machine booted; it reads them with
-`-L -n -v -x` every pass and puts them back (counting from 0) when a rule went missing.
-Every call waits up to 5 s for the xtables lock docker also takes.
+A chain of its own, `OPENNOVA-EGRESS`, that `OUTPUT` jumps to first, opens with one rule per
+private destination (`-d <range> -j RETURN`: 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16,
+169.254.0.0/16 and 127.0.0.0/8; for IPv6 fc00::/7, fe80::/10 and ::1), then holds one rule
+per slot (`-m owner --uid-owner <10001 + k> -j RETURN`), so each packet a slot's user sends
+to the internet is counted once and then meets the rest of `OUTPUT` (the metadata fence
+among it). What goes to the metadata service, the service's internal port or its admin
+links, and so all the fences refuse, is never counted. The agent puts the chain, the jump
+and each rule in place only where missing (checked with `-C`; a private destination's
+inserted at the chain's head), so the counters survive its restarts and count since the
+machine booted; it reads them with `-L -n -v -x` every pass and puts them back (counting
+from 0) when a rule went missing. Every call waits up to 5 s for the xtables lock docker
+also takes.
 
 ## What the machine provides
 

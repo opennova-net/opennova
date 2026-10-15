@@ -114,11 +114,11 @@ int main(int argc, char **argv) {
 			{ "PATH", "HOME", "LANG", "LC_*", "TZ", "TMPDIR", "DOCKER_*" });
 	proc::ProcessCommandRunner runner(environment, scratch);
 	DockerRuntime docker(runner, options.docker, environment, scratch);
-	std::vector<std::string> tools;
+	std::vector<EgressTool> tools;
 	if (options.iptables != "none")
-		tools.push_back(options.iptables);
+		tools.push_back({ options.iptables, false });
 	if (options.ip6tables != "none" && ::access("/proc/net/if_inet6", F_OK) == 0)
-		tools.push_back(options.ip6tables);
+		tools.push_back({ options.ip6tables, true });
 	Agent::EgressFactory egress;
 	if (!tools.empty())
 		egress = [&runner, tools](int slot_count) {

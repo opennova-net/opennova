@@ -8,7 +8,8 @@
 //
 //   docker run --pull never -d --name <name> --label opennova.hostd=1
 //     --label opennova.slot=<k> --network host --user <uid>:<uid> --cap-drop ALL
-//     --security-opt no-new-privileges --read-only --tmpfs /tmp --cpus <cpus>
+//     --security-opt no-new-privileges --read-only
+//     --tmpfs /tmp:size=64m,nosuid,nodev,noexec --cpus <cpus>
 //     --memory <mb>m --memory-swap <mb>m --pids-limit <pids> --stop-timeout 60
 //     --log-driver journald --log-opt tag=<name>
 //     --mount type=bind,source=<data set's mount path>,target=/opt/game,readonly
@@ -19,7 +20,7 @@
 // datagrams; a bridge's NAT would rewrite the port), the slot's user with no
 // capability and no way to gain one, a read-only root, swap no larger than the
 // memory, a pids cap, the game data read-only and the slot's directory its only
-// writable place but /tmp. A start never pulls (--pull never): an image the
+// writable place but a bounded /tmp. A start never pulls (--pull never): an image the
 // machine lacks is pulled first, in the background, by `docker pull -q
 // <image>` (a child of its own, its standard error kept in a scratch file for
 // the failure's text), while the agent's passes go on; `docker image inspect`
@@ -50,6 +51,10 @@ public:
 	static constexpr const char *kSlotLabel = "opennova.slot";
 	// docker's own wait between SIGTERM and SIGKILL when the machine shuts down.
 	static constexpr int kStopTimeoutSeconds = 60;
+	// The container's /tmp: bounded (its pages count toward the container's
+	// memory, but a full one fails the writes, not the slot), and nothing on it
+	// runs, owns a device or gains an id.
+	static constexpr const char *kTmpfsOptions = "size=64m,nosuid,nodev,noexec";
 
 	// `docker`: the CLI's absolute path. `runner` must outlive this. A pull
 	// runs with `environment` (NAME=value entries) alone, its standard error

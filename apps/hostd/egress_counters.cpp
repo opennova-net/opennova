@@ -4,6 +4,7 @@
 
 #include <base/io/strutil.h>
 
+#include <iterator>
 #include <utility>
 
 namespace opennova::hostd {
@@ -32,13 +33,23 @@ std::vector<std::string> words_of(std::string_view line) {
 } // namespace
 
 EgressCounters::EgressCounters(
-		proc::CommandRunner &runner, std::vector<std::string> tools, int slots) :
+		proc::CommandRunner &runner, std::vector<EgressTool> tools, int slots) :
 		runner_(runner), tools_(std::move(tools)), slots_(slots) {}
 
 std::vector<std::string> EgressCounters::rule_argv(
 		const std::string &tool, const char *op, int slot) const {
 	return { tool, "-w", kLockWaitSeconds, op, kChain, "-m", "owner", "--uid-owner",
 		std::to_string(hosted::slot_uid(slot)), "-j", "RETURN" };
+}
+
+std::vector<std::string> EgressCounters::private_argv(
+		const std::string &tool, const char *op, const char *destination) const {
+	std::vector<std::string> argv = { tool, "-w", kLockWaitSeconds, op, kChain };
+	if (std::string(op) == "-I")
+		argv.push_back("1");
+	for (const char *word : { "-d", destination, "-j", "RETURN" })
+		argv.push_back(word);
+	return argv;
 }
 
 // Runs `argv`. With `refused`, exit 1 (the chain or rule a check asked about is
@@ -72,7 +83,8 @@ bool EgressCounters::call(std::vector<std::string> argv, std::string &error, boo
 }
 
 bool EgressCounters::ensure(std::string &error) {
-	for (const std::string &tool : tools_) {
+	for (const EgressTool &each : tools_) {
+		const std::string &tool = each.path;
 		bool missing = false;
 		if (!call({ tool, "-w", kLockWaitSeconds, "-L", kChain, "-n" }, error, &missing))
 			return false;
@@ -83,6 +95,18 @@ bool EgressCounters::ensure(std::string &error) {
 		if (missing &&
 				!call({ tool, "-w", kLockWaitSeconds, "-I", "OUTPUT", "1", "-j", kChain }, error))
 			return false;
+		// The private destinations first, ahead of every slot's rule.
+		std::vector<const char *> destinations;
+		if (each.ipv6)
+			destinations.assign(std::begin(kPrivateIpv6), std::end(kPrivateIpv6));
+		else
+			destinations.assign(std::begin(kPrivateIpv4), std::end(kPrivateIpv4));
+		for (const char *destination : destinations) {
+			if (!call(private_argv(tool, "-C", destination), error, &missing))
+				return false;
+			if (missing && !call(private_argv(tool, "-I", destination), error))
+				return false;
+		}
 		for (int slot = 0; slot < slots_; ++slot) {
 			if (!call(rule_argv(tool, "-C", slot), error, &missing))
 				return false;
@@ -96,7 +120,8 @@ bool EgressCounters::ensure(std::string &error) {
 bool EgressCounters::read(std::map<int, uint64_t> &out, std::string &error) {
 	out.clear();
 	bool whole = true;
-	for (const std::string &tool : tools_) {
+	for (const EgressTool &each : tools_) {
+		const std::string &tool = each.path;
 		const proc::CommandResult result =
 				runner_.run({ tool, "-w", kLockWaitSeconds, "-L", kChain, "-n", "-v", "-x" },
 						kCommandTimeoutMs);

@@ -109,7 +109,8 @@ int test_run_argv() {
 		"srv-41-g2", "--label", "opennova.hostd=1", "--label", "opennova.slot=3", "--network",
 		"host", "--user",
 		"10004:10004", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only",
-		"--tmpfs", "/tmp", "--cpus", "1", "--memory", "512m", "--memory-swap", "512m",
+		"--tmpfs", "/tmp:size=64m,nosuid,nodev,noexec", "--cpus", "1", "--memory", "512m",
+		"--memory-swap", "512m",
 		"--pids-limit", "128", "--stop-timeout", "60", "--log-driver", "journald", "--log-opt",
 		"tag=srv-41-g2", "--mount",
 		"type=bind,source=/opt/game/jop_2_consumer,target=/opt/game,readonly", "--mount",
@@ -382,6 +383,9 @@ const char *kNftListing =
 		"Chain OPENNOVA-EGRESS (1 references)\n"
 		"    pkts      bytes target     prot opt in     out     source               destination   "
 		"      \n"
+		// A private destination's rule: no slot's count.
+		"      40     9000 RETURN     0    --  *      *       0.0.0.0/0            10.0.0.0/8      "
+		"     \n"
 		"     120    45678 RETURN     0    --  *      *       0.0.0.0/0            0.0.0.0/0       "
 		"     owner UID match 10001\n"
 		"       0        0 RETURN     0    --  *      *       0.0.0.0/0            0.0.0.0/0       "
@@ -416,22 +420,24 @@ int test_chain_parse() {
 
 int test_egress() {
 	StubRunner runner;
-	hostd::EgressCounters counters(runner, { "/usr/sbin/iptables", "/usr/sbin/ip6tables" }, 3);
+	hostd::EgressCounters counters(
+			runner, { { "/usr/sbin/iptables", false }, { "/usr/sbin/ip6tables", true } }, 3);
 	std::string error;
-	// Nothing in place yet: the chain made, OUTPUT's jump inserted first, each slot's
-	// rule appended, each only after its check came back "not there" (exit 1).
-	for (int tool = 0; tool < 2; ++tool) {
+	// Nothing in place yet: the chain made, OUTPUT's jump inserted first, each private
+	// destination's rule inserted at the chain's head, each slot's rule appended, each
+	// only after its check came back "not there" (exit 1).
+	for (const size_t privates : { size_t{ 5 }, size_t{ 3 } }) {
 		runner.answer(1, "", "No chain/target/match by that name.");
 		runner.answer(0);
 		runner.answer(1, "", "Bad rule");
 		runner.answer(0);
-		for (int slot = 0; slot < 3; ++slot) {
+		for (size_t i = 0; i < privates + 3; ++i) {
 			runner.answer(1, "", "Bad rule");
 			runner.answer(0);
 		}
 	}
 	TEST_EXPECT(counters.ensure(error));
-	TEST_EXPECT(runner.calls.size() == 20);
+	TEST_EXPECT(runner.calls.size() == 36);
 	using V = std::vector<std::string>;
 	TEST_EXPECT(runner.calls[0] ==
 			(V{ "/usr/sbin/iptables", "-w", "5", "-L", "OPENNOVA-EGRESS", "-n" }));
@@ -440,19 +446,31 @@ int test_egress() {
 			(V{ "/usr/sbin/iptables", "-w", "5", "-C", "OUTPUT", "-j", "OPENNOVA-EGRESS" }));
 	TEST_EXPECT(runner.calls[3] ==
 			(V{ "/usr/sbin/iptables", "-w", "5", "-I", "OUTPUT", "1", "-j", "OPENNOVA-EGRESS" }));
+	// The private destinations (the metadata service, the internal port, the admin
+	// links, loopback) return uncounted, ahead of any slot's rule.
 	TEST_EXPECT(runner.calls[4] ==
+			(V{ "/usr/sbin/iptables", "-w", "5", "-C", "OPENNOVA-EGRESS", "-d", "10.0.0.0/8", "-j",
+					"RETURN" }));
+	TEST_EXPECT(runner.calls[5] ==
+			(V{ "/usr/sbin/iptables", "-w", "5", "-I", "OPENNOVA-EGRESS", "1", "-d", "10.0.0.0/8",
+					"-j", "RETURN" }));
+	TEST_EXPECT(runner.calls[10][6] == "169.254.0.0/16" && runner.calls[12][6] == "127.0.0.0/8");
+	TEST_EXPECT(runner.calls[14] ==
 			(V{ "/usr/sbin/iptables", "-w", "5", "-C", "OPENNOVA-EGRESS", "-m", "owner",
 					"--uid-owner", "10001", "-j", "RETURN" }));
-	TEST_EXPECT(runner.calls[5] ==
+	TEST_EXPECT(runner.calls[15] ==
 			(V{ "/usr/sbin/iptables", "-w", "5", "-A", "OPENNOVA-EGRESS", "-m", "owner",
 					"--uid-owner", "10001", "-j", "RETURN" }));
-	TEST_EXPECT(runner.calls[9][8] == "10003" && runner.calls[10][0] == "/usr/sbin/ip6tables");
+	TEST_EXPECT(runner.calls[19][8] == "10003" && runner.calls[20][0] == "/usr/sbin/ip6tables");
+	// IPv6's own: unique-local (Nitro's metadata address), link-local, loopback.
+	TEST_EXPECT(runner.calls[24][5] == "-d" && runner.calls[24][6] == "fc00::/7");
+	TEST_EXPECT(runner.calls[27][7] == "fe80::/10" && runner.calls[29][7] == "::1/128");
 
 	// All in place: checks alone, nothing added (the counters keep counting).
 	runner.calls.clear();
-	for (int i = 0; i < 10; ++i)
+	for (int i = 0; i < 18; ++i)
 		runner.answer(0);
-	TEST_EXPECT(counters.ensure(error) && runner.calls.size() == 10);
+	TEST_EXPECT(counters.ensure(error) && runner.calls.size() == 18);
 	for (const auto &call : runner.calls)
 		TEST_EXPECT(call[3] == "-L" || call[3] == "-C");
 
