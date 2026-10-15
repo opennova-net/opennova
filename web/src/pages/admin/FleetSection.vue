@@ -388,7 +388,7 @@ async function onMachine(m: FleetMachine, action: 'drain' | 'end') {
   const servers = m.slots_used;
   const prompt =
     action === 'drain'
-      ? `Drain machine ${m.id}? It takes no new server; its ${servers} server${servers === 1 ? '' : 's'} move to another machine at their next start.`
+      ? `Drain machine ${m.id}? It takes no new server, and its ${servers} server${servers === 1 ? '' : 's'} move to other machines one at a time; each server is down while it moves.`
       : `End machine ${m.id} now? ${servers === 0 ? 'No server runs on it.' : `Its ${servers} server${servers === 1 ? '' : 's'} stop, and their matches end for everyone on them.`}`;
   if (!window.confirm(prompt)) return;
   busy.value = true;

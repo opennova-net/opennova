@@ -85,7 +85,9 @@ describe('FleetSection', () => {
     const row = page.findAll('tr.fleet-machine-row')[0];
     await row.findAll('button').find((b) => b.text().startsWith('Drain'))!.trigger('click');
     await flushPromises();
+    // The servers move now, one at a time, each down while it moves.
     expect(confirm).toHaveBeenCalledWith(expect.stringContaining('Drain machine i-0abc?'));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('one at a time; each server is down while it moves'));
     expect(machine).toHaveBeenCalledWith('i-0abc', 'drain');
     expect(page.get('[role="status"]').text()).toBe('Machine i-0abc is draining.');
 
