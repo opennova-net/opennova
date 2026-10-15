@@ -1,6 +1,6 @@
 #pragma once
-// A headless Dear ImGui frame for the ImGui ctests (the dev tools' windows, and the
-// editor's on the editor trunk, PR #665): the null example's setup (a display size
+// A headless Dear ImGui frame for the ImGui ctests (the dev tools' windows and the
+// editor's): the null example's setup (a display size
 // and a built font atlas, no platform or renderer backend), and the allocator hooks
 // a pass's attach_imgui hand-off takes. It lives here because ImGui headers stay
 // under engine/runtime/devtools/ and tests/devtools/ (ADR 0042 d6).

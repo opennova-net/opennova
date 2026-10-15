@@ -1,11 +1,10 @@
 name: CI
 
 on:
-  # Master and the editor trunk: their pushes are the runs that save the
-  # compiler caches (.github/actions/compiler-cache lists the same two), which
-  # the pull requests into each branch then read.
+  # Master: its pushes are the runs that save the compiler caches
+  # (.github/actions/compiler-cache), which the pull requests then read.
   push:
-    branches: [master, editor/s1-project-core]
+    branches: [master]
   # Every pull request, whatever its base: a PR stacked on another PR's
   # branch gets the same checks as one targeting master.
   pull_request:
@@ -17,14 +16,9 @@ permissions:
 # On a PR, github.head_ref is the source branch, so a new push cancels the older
 # run (and prevents two runs racing to post the build-links comment). On push to
 # master, head_ref is empty and we fall back to the unique run_id, so master runs
-# are never cancelled. The trunk's pushes and manual runs queue in one group of
-# their own, never cancelled once started: the merge train lands PRs faster than
-# a run takes, so the trunk runs one at a time, each newer push replaces the
-# one still waiting, and every run starts from the compiler cache the last one
-# saved. (The ref, not the bare branch name, keeps that group apart from the
-# trunk's own PR into master, whose head_ref is the bare name.)
+# are never cancelled.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.head_ref || (github.ref == 'refs/heads/editor/s1-project-core' && github.ref) || github.run_id }}
+  group: ci-${{ github.workflow }}-${{ github.head_ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

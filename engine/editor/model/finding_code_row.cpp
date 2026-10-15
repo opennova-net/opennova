@@ -304,6 +304,9 @@ constexpr FindingCodeEntry<CoreFinding> kEntries[] = {
 	{ C::ProjectFieldInvalid, code("project.field.invalid", G::Project) },
 	{ C::ProjectFileMissing, code("project.file.missing", G::Project) },
 	{ C::ProjectFileUnreadable, code("project.file.unreadable", G::Project) },
+	// A project folder that is a game install, sits in one or holds the one it is made on
+	// (project/project_document.h, project_overlaps_install): refused where a project is made or opened.
+	{ C::ProjectInInstall, code("project.in_install", G::Project) },
 	{ C::ProjectInstallInvalid, code("project.install.invalid", G::Project) },
 	{ C::ProjectJson, code("project.json", G::Project) },
 	{ C::ProjectMissionFeatureOff, code("project.mission.feature_off", G::Project) },

@@ -66,9 +66,18 @@ bool load_import_sidecar(const std::string &path, ImportSidecar &out, Diagnostic
 	if (const io::JsonValue *inputs = json.get("inputs"); inputs && inputs->is_array())
 		for (const io::JsonValue &item : inputs->array)
 			sidecar.inputs.push_back(item.is_string() ? item.string : std::string());
+	// The pass removes, lists and builds an output by this name under the source's output folder,
+	// so only a plain file name is kept. A record naming a folder, `..` or a path outside the project
+	// (a hand edit, a shared project) would otherwise have Refresh delete or pack that file. The
+	// imports this pass writes name their outputs plainly, so a dropped entry was never one of
+	// them.
 	if (const io::JsonValue *outputs = json.get("outputs"); outputs && outputs->is_array())
-		for (const io::JsonValue &output : outputs->array)
-			if (output.is_string()) sidecar.outputs.push_back(output.string);
+		for (const io::JsonValue &output : outputs->array) {
+			FileNameProblem problem = FileNameProblem::None;
+			std::string why;
+			if (output.is_string() && check_file_name(output.string, AssetKind::Unknown, problem, why))
+				sidecar.outputs.push_back(output.string);
+		}
 	if (sidecar.importer.empty()) {
 		error = make_finding(CoreFinding::ImportSidecar, DiagnosticSeverity::Error, "The import record names no importer.", path);
 		return false;
