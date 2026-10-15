@@ -172,9 +172,10 @@ resource "aws_vpc_security_group_ingress_rule" "service_from_machines" {
 # ---- the machine role ---------------------------------------------------------
 
 resource "aws_iam_role" "machine" {
-  count              = local.hosted_enabled ? 1 : 0
-  name               = "${local.name}-machine"
-  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
+  count                = local.hosted_enabled ? 1 : 0
+  name                 = "${local.name}-machine"
+  assume_role_policy   = data.aws_iam_policy_document.ec2_assume_role.json
+  permissions_boundary = local.role_boundary_arn
 
   tags = merge(var.tags, {
     Name = "${local.name}-machine"

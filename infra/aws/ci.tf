@@ -57,6 +57,7 @@ resource "aws_iam_role" "github_deploy" {
   description          = "The approval-gated GitHub Actions deploy of the ${local.deployment} NovaWorld stack (.github/workflows/deploy.yml)"
   assume_role_policy   = data.aws_iam_policy_document.github_deploy_trust[0].json
   max_session_duration = 3600
+  permissions_boundary = local.role_boundary_arn
 
   tags = var.tags
 }

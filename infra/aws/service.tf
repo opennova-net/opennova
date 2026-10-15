@@ -68,7 +68,11 @@ data "aws_partition" "current" {}
 
 locals {
   account_id = data.aws_caller_identity.current.account_id
-  partition  = data.aws_partition.current.partition
+  # Every role the stack makes carries this boundary (infra/aws/iam/opennova-role-boundary.json,
+  # made by an admin, outside Terraform): the deploy user may create and change opennova-* roles
+  # only under it, so no role it writes can hold more than OpenNova's own resources.
+  role_boundary_arn = "arn:${data.aws_partition.current.partition}:iam::${data.aws_caller_identity.current.account_id}:policy/opennova-role-boundary"
+  partition         = data.aws_partition.current.partition
 
   # The host's fixed private address in public subnet a.
   service_private_ip = cidrhost(local.public_subnets.a.cidr, var.service_private_ip_host)
@@ -301,8 +305,9 @@ data "aws_iam_policy_document" "ec2_assume_role" {
 }
 
 resource "aws_iam_role" "service" {
-  name               = "${local.name}-service"
-  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
+  name                 = "${local.name}-service"
+  assume_role_policy   = data.aws_iam_policy_document.ec2_assume_role.json
+  permissions_boundary = local.role_boundary_arn
 
   tags = merge(var.tags, {
     Name = "${local.name}-service"
