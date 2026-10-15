@@ -3,9 +3,6 @@
 // The updater's checksums, as UPDATE.EXE 2.1.4.2 computes and compares them
 // (docs/update/updater-re.md §10). Both are CRC-32 over polynomial 0x04C11DB7, MSB first, initial
 // 0xFFFFFFFF; they differ in the final complement and in one retail defect.
-//
-// STAGED, NOT WIRED: consumed by opennova-project update build (ADR 0061 phase 2) and apps/update
-// (phase 3); until those land only tests/update include it.
 
 #include <cstddef>
 #include <cstdint>

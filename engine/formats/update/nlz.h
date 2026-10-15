@@ -2,9 +2,6 @@
 
 // 1ZLN, the updater's compressed file: a 16-byte header and a zlib stream.
 // docs/update/updater-re.md §9. [orig: Nlz_DecompressFile @ 0x401000 (UPDATE.EXE)]
-//
-// STAGED, NOT WIRED: consumed by apps/update (the client, ADR 0061 phase 3) and opennova-project
-// update build (phase 2); until those land only tests/update include it.
 
 #include <cstddef>
 #include <cstdint>

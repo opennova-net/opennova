@@ -15,7 +15,7 @@ build="$root/build/apps-package"
 
 # The apps/ directory of each shipped executable. An app in apps/<dir> builds
 # target opennova_<dir> as opennova-<dir, kebab-cased> (DEVELOPING.md).
-apps=(3di extract lan_probe parity serve wire)
+apps=(3di extract lan_probe parity serve update_tool wire)
 
 # The static MSVC runtime keeps the zip free of a VC++ runtime install, and a
 # separate build tree keeps it apart from development builds. No app links the
@@ -77,6 +77,13 @@ opennova-serve.exe
     range and plays the host file's map rotation. It keeps game.cfg in
     the folder it runs from; a nonzero remote_admin_port there opens
     retail's remote-admin console (users in admin.cfg, beside it).
+
+opennova-update-tool.exe
+    Builds a packed update (.sfs) from a product's baseline install and
+    the install to update it to, inspects one, and serves packed updates
+    over NovaLogic's updater protocol, so a stock UPDATE.EXE (or OpenNova's)
+    updates from it: "opennova-update-tool build --from <baseline> --to
+    <new> --out update.sfs --base JOPTR.CMD [--expansion jox01=JOEPTR.CMD]".
 
 opennova-wire.exe
     Decodes NovaWorld in-game traffic from a .pcap/.pcapng capture, a .sph

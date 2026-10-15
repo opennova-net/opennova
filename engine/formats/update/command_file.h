@@ -4,10 +4,6 @@
 // docs/update/updater-re.md §6.
 // [orig: Cupdate2Dlg_ReadCommandFile @ 0x4076e0 (UPDATE.EXE); CmdFile_ReadCommandRow @ 0x404f60
 //  (UPDATE.EXE)]
-//
-// STAGED, NOT WIRED: consumed by apps/update (the client, ADR 0061 phase 3) and
-// apps/novaworld_server/update (the service, phases 2 and 4); until those land only tests/update
-// include it.
 
 #include <cstddef>
 #include <cstdint>

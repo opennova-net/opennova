@@ -410,6 +410,24 @@ int tcp_recv_nonblocking(Socket &s, uint8_t *buf, size_t cap) {
 #endif
 }
 
+int tcp_send_nonblocking(Socket &s, const uint8_t *data, size_t len) {
+#if defined(MSG_NOSIGNAL)
+	constexpr int kFlags = MSG_NOSIGNAL; // a reset peer must not raise SIGPIPE
+#else
+	constexpr int kFlags = 0;
+#endif
+	const int n = ::send(native_socket(s.fd), reinterpret_cast<const char *>(data),
+			static_cast<int>(len > 0x7FFFFFFF ? 0x7FFFFFFF : len), kFlags);
+	if (n >= 0) {
+		return n;
+	}
+#if defined(_WIN32)
+	return ::WSAGetLastError() == WSAEWOULDBLOCK ? TCP_SEND_WOULD_BLOCK : -1;
+#else
+	return (errno == EWOULDBLOCK || errno == EAGAIN) ? TCP_SEND_WOULD_BLOCK : -1;
+#endif
+}
+
 void shutdown_socket(const Socket &s) {
 	if (!s.is_valid()) {
 		return;
