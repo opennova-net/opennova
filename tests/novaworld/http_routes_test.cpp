@@ -6171,6 +6171,27 @@ int test_billing_checkout_guard(Harness &h) {
 	TEST_EXPECT(gil_customer && gil_customer->stripe_customer_id != "cus_livemodegil" && !gil_customer->livemode &&
 			!gil_customer->open_checkout_session.empty());
 	TEST_EXPECT(!billing::customer_by_id(*h.pool.acquire(), "cus_livemodegil"));
+
+	// Two checkouts of one account at once (two tabs): while the first is
+	// inside Stripe the second answers 409 checkout_in_progress; once it is
+	// done, the next one runs.
+	const int64_t hal = make_account(h, "chk_hal", "pw-chk-hal");
+	const std::string hal_s = login_token(h, "10.62.0.4", "chk_hal", "pw-chk-hal");
+	TEST_EXPECT(hal > 0 && !hal_s.empty());
+	h.stripe->close_gate();
+	net::HttpReply first;
+	std::thread tab([&] {
+		first = h.send("POST", "/api/billing/checkout", { kJson, kCsrf, with_session(hal_s) },
+				"{\"item\":\"tier1\"}", 15000);
+	});
+	const bool inside = h.stripe->wait_at_gate(1, std::chrono::seconds(10));
+	net::HttpReply second;
+	if (inside) second = checkout(hal_s, "tier2");
+	h.stripe->open_gate();
+	tab.join();
+	TEST_EXPECT(inside && second.code == 409 && error_of_reply(second) == "checkout_in_progress");
+	TEST_EXPECT(first.code == 200);
+	TEST_EXPECT(checkout(hal_s, "tier1").code == 200);
 	return 0;
 }
 

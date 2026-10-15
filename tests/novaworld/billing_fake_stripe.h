@@ -4,7 +4,8 @@
 // API version's JSON shapes (basil: current_period_end on each subscription item). It
 // records every request, replays a POST's reply for a repeated idempotency key, honours
 // list pagination (newest first, limit, starting_after, has_more), and answers the next
-// calls with queued failures (fail_next). The test drives what Stripe would do on its own
+// calls with queued failures (fail_next), and holds every call at a gate while a test keeps
+// it closed (close_gate, wait_at_gate, open_gate). The test drives what Stripe would do on its own
 // side: complete_checkout (the customer paid), the maps themselves (a status change, a
 // renewal), delete_customer. Header-only; thread-safe through `mu` (the sync worker calls
 // from its own thread: a test that edits the maps while one runs holds `mu`).
@@ -16,6 +17,9 @@
 #include <base/io/json.h>
 
 #include <algorithm>
+#include <chrono>
+#include <condition_variable>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -161,6 +165,25 @@ public:
 		}
 	}
 
+	// A gate every call waits at while it is closed (counted as it arrives): a
+	// test holds a route inside its Stripe call, then opens it.
+	void close_gate() {
+		std::lock_guard<std::mutex> lock(gate_mu_);
+		gate_closed_ = true;
+	}
+	void open_gate() {
+		{
+			std::lock_guard<std::mutex> lock(gate_mu_);
+			gate_closed_ = false;
+		}
+		gate_cv_.notify_all();
+	}
+	// Whether `n` calls wait at the closed gate within `timeout`.
+	bool wait_at_gate(size_t n, std::chrono::milliseconds timeout) {
+		std::unique_lock<std::mutex> lock(gate_mu_);
+		return gate_cv_.wait_for(lock, timeout, [&] { return gate_waiting_ >= n; });
+	}
+
 	// The requests made so far of `method` whose path is `path`.
 	size_t count(billing::StripeRequest::Method method, const std::string &path) {
 		std::lock_guard<std::mutex> lock(mu);
@@ -170,6 +193,15 @@ public:
 	}
 
 	billing::StripeReply call(const billing::StripeRequest &request) override {
+		{
+			std::unique_lock<std::mutex> gate(gate_mu_);
+			if (gate_closed_) {
+				++gate_waiting_;
+				gate_cv_.notify_all();
+				gate_cv_.wait(gate, [this] { return !gate_closed_; });
+				--gate_waiting_;
+			}
+		}
 		std::lock_guard<std::mutex> lock(mu);
 		requests.push_back(request);
 		if (!failures_.empty()) {
@@ -565,6 +597,10 @@ private:
 	}
 
 	uint64_t seq_ = 0;
+	std::mutex gate_mu_;
+	std::condition_variable gate_cv_;
+	bool gate_closed_ = false;
+	size_t gate_waiting_ = 0;
 	std::deque<billing::StripeReply> failures_;
 	std::map<std::string, std::pair<std::string, billing::StripeReply>> replayed_;
 };

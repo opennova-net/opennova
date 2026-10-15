@@ -317,8 +317,9 @@ std::optional<crow::response> BillingRoutes::settle_previous_session(const WebSe
 // to. In order: require_user (401, 403 without the CSRF header), 503
 // billing_disabled, the account's kCheckoutPerUser bucket (429), 400
 // invalid_json / invalid_item, 503 billing_misconfigured while the prices do
-// not check out, 403 not_eligible for an account that is not an active
-// player's or (the add-on) has no tier granting, 409 already_subscribed when a
+// not check out, 409 checkout_in_progress while another checkout of the
+// account is running (one at a time), 403 not_eligible for an account that is
+// not an active player's or (the add-on) has no tier granting, 409 already_subscribed when a
 // tier grants already (the portal changes it), 409 own_machine_limit for the
 // add-on when the account has an own machine for every server it may run
 // (each add-on checkout sells one; several are fine below that), 502
@@ -351,6 +352,22 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 	if (!billing_->sync().status().prices_ok)
 		return json_error(503, "billing_misconfigured", "the support tiers' prices are being checked; try again later");
 	const std::string price = *item > 0 ? tier_price_for_sale(config, *item) : own_machine_price_for_sale(config);
+	// The account's one checkout at a time, released however this one ends.
+	{
+		std::lock_guard<std::mutex> lock(checkouts_mu_);
+		if (!checkouts_running_.insert(user.id).second) {
+			log_account(user, "checkout", "checkout_in_progress");
+			return json_error(409, "checkout_in_progress", "a checkout of this account is already starting");
+		}
+	}
+	struct Running {
+		BillingRoutes &routes;
+		int64_t user_id;
+		~Running() {
+			std::lock_guard<std::mutex> lock(routes.checkouts_mu_);
+			routes.checkouts_running_.erase(user_id);
+		}
+	} running{ *this, user.id };
 	std::optional<CustomerRow> customer;
 	try {
 		auto db_conn = pool_.acquire();

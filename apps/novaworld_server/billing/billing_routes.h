@@ -31,7 +31,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <optional>
+#include <set>
 #include <string>
 
 namespace opennova::novaworld_server::billing {
@@ -99,6 +101,11 @@ private:
 	hosted::LimitsHold *limits_hold_ = nullptr;
 	RateLimiter checkout_per_user_{ kCheckoutPerUser };
 	RateLimiter sync_per_user_{ kSyncPerUser };
+	// The accounts whose checkout is running now: a second one at once (two
+	// tabs) answers 409 checkout_in_progress, so two sessions never race past
+	// the previous session's settling.
+	std::mutex checkouts_mu_;
+	std::set<int64_t> checkouts_running_;
 };
 
 } // namespace opennova::novaworld_server::billing
