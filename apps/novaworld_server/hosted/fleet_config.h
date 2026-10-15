@@ -35,8 +35,8 @@
 // ONNET_HOSTED_SERVE_IMAGE, ONNET_HOSTED_AWS_CLI and ONNET_HOSTED_MACHINE_SCRIPT
 // (the path of machine/machine_user_data.sh). The ec2 driver's settings are
 // read as they are; Ec2MachineDriver::check_config decides whether they run.
-// The service's private address is ONNET_INTERNAL_HTTP_BIND's (infra.env's
-// ONNET_HOSTED_SERVICE_ADDRESS names the same one). Service policy, not a port.
+// The service's private address is ONNET_INTERNAL_HTTP_BIND's. Service policy, not a
+// port.
 
 #include "ec2_machine_driver.h"
 #include "net_cidr.h"

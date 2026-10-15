@@ -273,9 +273,10 @@ run "hosting_on" {
       strcontains(aws_ssm_parameter.infra_env.value, "ONNET_HOSTED_EC2_SUBNET='subnet-0public0a'\n") &&
       strcontains(aws_ssm_parameter.infra_env.value, "ONNET_HOSTED_BOOTSTRAP_CIDRS='10.44.0.0/24'\n") &&
       strcontains(aws_ssm_parameter.infra_env.value, "ONNET_HOSTED_DEPLOYMENT='opennova-server'\n") &&
-      strcontains(aws_ssm_parameter.infra_env.value, "ONNET_HOSTED_SERVICE_ADDRESS='10.44.0.10'\n")
+      strcontains(aws_ssm_parameter.infra_env.value, "ONNET_HOSTED_DATA_SETS='{\"dfx2_consumer\":{\"missions\":[]},\"jop_2_consumer\":{\"missions\":[]}}'\n") &&
+      !strcontains(aws_ssm_parameter.infra_env.value, "ONNET_HOSTED_SERVICE_ADDRESS")
     )
-    error_message = "infra.env hands the service the provider, the templates by kind, the subnet, the deployment tag and its own address"
+    error_message = "infra.env hands the service the provider, the templates by kind, the subnet, the deployment tag and the data sets the machines mount"
   }
   assert {
     condition     = output.fleet_launch_templates == { shared = "lt-0shared", own = "lt-0own" } && output.hosted_deployment == "opennova-server"

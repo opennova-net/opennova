@@ -258,6 +258,21 @@ variable "hosted_data_snapshots" {
   }
 }
 
+variable "hosted_data_set_missions" {
+  description = "Each data set's default map rotation for a new hosted server (ONNET_HOSTED_DATA_SETS in infra.env): .bms file names by data set slug. A data set left out starts with an empty rotation the owner fills in."
+  type        = map(list(string))
+  default     = {}
+
+  validation {
+    condition     = alltrue([for slug in keys(var.hosted_data_set_missions) : contains(keys(var.hosted_data_snapshots), slug)])
+    error_message = "hosted_data_set_missions names a data set hosted_data_snapshots does not."
+  }
+  validation {
+    condition     = alltrue(flatten([for m in values(var.hosted_data_set_missions) : [for f in m : can(regex("^[A-Za-z0-9_-]+\\.bms$", f))]]))
+    error_message = "every hosted_data_set_missions entry must be a .bms file name of letters, digits, _ and -."
+  }
+}
+
 variable "shared_instance_type" {
   description = "The shared machines' type: up to shared_slots servers each. A burstable type runs with unlimited CPU credits (the launch template sets them). x86_64 only (the serve image's), and no t2."
   type        = string

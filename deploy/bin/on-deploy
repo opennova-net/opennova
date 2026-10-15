@@ -1546,6 +1546,8 @@ hosted_deployment_tag() {
 # proxy the server trusts, ONNET_TRUSTED_PROXIES) with the admin token
 # (opennova-admin-api, written by converge).
 FLEET_API=/api/admin/fleet
+# Its view of the machines and of the servers in their slots.
+FLEET_VIEW_API=/api/admin/hosted
 
 # A machine's id as the service names it (its row) or EC2 does (i-...),
 # checked before it goes into a host script.
@@ -1568,8 +1570,8 @@ fleet_status() {
     --filters "Name=tag:opennova:hosted,Values=1" "Name=tag:opennova:deployment,Values=$tag" \
     --query 'Reservations[].Instances[].{machine:InstanceId,kind:Tags[?Key==`opennova:machine-kind`]|[0].Value,id:Tags[?Key==`opennova:machine-id`]|[0].Value,state:State.Name,type:InstanceType,public:PublicIpAddress,launched:LaunchTime}' \
     --output table
-  log "the service's fleet ($FLEET_API):"
-  ssm_run 120 "$(host_script "opennova-admin-api GET $FLEET_API")" \
+  log "the service's fleet ($FLEET_VIEW_API):"
+  ssm_run 120 "$(host_script "opennova-admin-api GET $FLEET_VIEW_API")" \
     || err "the service did not answer (app status, app logs novaworld)"
 }
 

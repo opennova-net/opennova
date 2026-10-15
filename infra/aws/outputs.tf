@@ -20,7 +20,7 @@ output "service_eip_allocation_id" {
 
 output "service_private_ip" {
   value       = local.service_private_ip
-  description = "The service host's fixed private address (its network interface's): where hosted machines reach the service, and the address their admin.cfg admits (ONNET_HOSTED_SERVICE_ADDRESS)"
+  description = "The service host's fixed private address (its network interface's): where hosted machines reach the service (ONNET_INTERNAL_HTTP_BIND) and the address their admin.cfg admits"
 }
 
 output "web_domain" {

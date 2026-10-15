@@ -481,7 +481,10 @@ label, by which the machine mounts it.
 4. **Plan, then apply.** The plan adds the two launch templates
    (`aws_launch_template.fleet["shared"]`, `["own"]`), the machines' security group and its
    rules, the machine role and the service role's fleet policy, and changes infra.env
-   (the service's `ONNET_HOSTED_*` settings).
+   (the service's `ONNET_HOSTED_*` settings, among them `ONNET_HOSTED_DATA_SETS`: the data
+   sets the machines mount, which are the ones the site offers). A data set's default map
+   rotation for new servers is `hosted_data_set_missions` in the deployment's tfvars
+   (`{ jop_2_consumer = ["m01.bms", ...] }`); without one, an owner picks the missions.
 
 5. **Deploy**, so the service reads them and pins the serve and hostd images:
    `./deploy/run.sh app deploy --serve-tag sha-<serve> --hostd-tag sha-<serve>`. The

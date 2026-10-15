@@ -492,8 +492,13 @@ locals {
     ONNET_HOSTED_EC2_LAUNCH_TEMPLATES = jsonencode({ for kind, t in aws_launch_template.fleet : kind => t.id })
     ONNET_HOSTED_EC2_SUBNET           = aws_subnet.public["a"].id
     ONNET_HOSTED_DEPLOYMENT           = local.hosted_deployment
-    ONNET_HOSTED_SERVICE_ADDRESS      = local.service_private_ip
     ONNET_HOSTED_BOOTSTRAP_CIDRS      = aws_subnet.public["a"].cidr_block
+    # The data sets the service offers are exactly the ones every machine mounts
+    # (a volume each, in sorted order), each with its default rotation.
+    ONNET_HOSTED_DATA_SETS = jsonencode({
+      for slug in sort(keys(var.hosted_data_snapshots)) :
+      slug => { missions = lookup(var.hosted_data_set_missions, slug, []) }
+    })
     } : {
     ONNET_HOSTED_PROVIDER = "none"
   })
