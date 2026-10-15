@@ -295,7 +295,10 @@ function Invoke-GodotAppBoot {
         # Headless uses Godot's Dummy renderer, so a render loop cannot validate
         # GPU work here. Disable it to keep --quit-after from racing render-server
         # teardown while this smoke still loads the product scene, scripts,
-        # shaders, and GDExtension.
+        # shaders, and GDExtension. Every leg ends itself (a usage error, the
+        # editor's smoke, the runtime's --boot-smoke quit), so --quit-after is
+        # only the guard against a hang: a forced quit with the menu music
+        # streaming crashes in Godot's shutdown (main_game.gd BOOT_SMOKE_FLAG).
         # The game keeps its saves in its working directory, as retail does
         # (player.sav and weapon.sav, written at the first menu start;
         # LaunchFlags.working_dir). Godot's export templates move the process to
@@ -309,7 +312,7 @@ function Invoke-GodotAppBoot {
         # staged layout is what boots.
         $proc = Start-Process `
             -FilePath $ExePath `
-            -ArgumentList "--headless --disable-render-loop --disable-crash-handler --quit-after 120 --verbose -- --working-dir `"$bootProfile`" $UserArgs" `
+            -ArgumentList "--headless --disable-render-loop --disable-crash-handler --quit-after 1200 --verbose -- --working-dir `"$bootProfile`" $UserArgs" `
             -WorkingDirectory $bootProfile `
             -WindowStyle Hidden `
             -Wait `
@@ -347,9 +350,10 @@ function Test-GodotAppBoot {
     param([string]$ExePath)
 
     Write-Host "=== Boot smoke: opennova-runtime ==="
-    # No arguments: the bundled game's menu (ADR 0048), from the base game's
-    # build in assets/ (its archives mounted, not a loose folder).
-    $bundled = Invoke-GodotAppBoot -ExePath $ExePath -UserArgs "" -ExpectedExit 0
+    # No --resource-dir: the bundled game's menu (ADR 0048), from the base
+    # game's build in assets/ (its archives mounted, not a loose folder), left
+    # through the player's quit once its frames and music have run.
+    $bundled = Invoke-GodotAppBoot -ExePath $ExePath -UserArgs "--boot-smoke" -ExpectedExit 0
     if ($bundled -match "bundled assets not found|no menu found in resource dir") {
         Write-Host $bundled.TrimEnd()
         throw "Boot smoke did not reach the bundled game's menu"
