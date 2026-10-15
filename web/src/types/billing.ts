@@ -77,6 +77,8 @@ export interface MyBilling {
   own_machines: number;
   // How many of its hosted servers are live now.
   used: number;
+  // How many of those are stopping: a lower tier stops among the rest.
+  stopping: number;
   can_start: boolean;
   subscription: TierSubscription | null;
   own_machine_subscription: OwnMachineSubscription | null;

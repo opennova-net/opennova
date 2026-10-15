@@ -121,7 +121,7 @@
           :currency="tiers.currency"
           :mode="liveTier ? 'manage' : 'subscribe'"
           :current-tier="billing.subscription?.tier ?? null"
-          :used="billing.used"
+          :used="billing.used - billing.stopping"
           :busy="busy || waiting"
           :disabled="liveTier ? !billing.can_manage : !billing.can_subscribe"
           base-id="support"

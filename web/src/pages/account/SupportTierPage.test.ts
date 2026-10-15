@@ -84,6 +84,13 @@ describe('SupportTierPage', () => {
     expect(navigate).toHaveBeenCalledWith(PORTAL_URL);
   });
 
+  it('counts no stopping server in what a move down would stop', async () => {
+    // Two live on Tier 2, one of them stopping already: Tier 1 keeps the other.
+    mine.mockResolvedValue({ ok: true, value: subscribed(2, { used: 2, stopping: 1 }) });
+    const page = await mountAt('/me/support');
+    expect(page.get('#support-tier-1').text()).not.toContain('will be stopped');
+  });
+
   it('opens the portal when the checkout finds a tier already live', async () => {
     checkout.mockResolvedValue({
       ok: false,

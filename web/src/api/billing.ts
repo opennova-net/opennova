@@ -207,8 +207,9 @@ function parseOwnMachineSubscription(value: unknown): OwnMachineSubscription | n
 export function parseMyBilling(value: unknown): MyBilling | null {
   const v = value as Record<string, unknown> | null;
   if (typeof v !== 'object' || v === null) return null;
-  const { enabled, max_servers: max, comp_servers: comp, own_machines: own, used } = v;
+  const { enabled, max_servers: max, comp_servers: comp, own_machines: own, used, stopping } = v;
   if (typeof enabled !== 'boolean' || !isCount(max) || !isCount(comp) || !isCount(own) || !isCount(used)) return null;
+  if (!isCount(stopping)) return null;
   if (typeof v.can_start !== 'boolean' || typeof v.can_manage !== 'boolean' || typeof v.can_subscribe !== 'boolean') {
     return null;
   }
@@ -221,6 +222,7 @@ export function parseMyBilling(value: unknown): MyBilling | null {
     comp_servers: comp,
     own_machines: own,
     used,
+    stopping,
     can_start: v.can_start,
     subscription,
     own_machine_subscription: ownMachine,

@@ -7,6 +7,7 @@
 #include "stripe_signature.h"
 #include "tiers.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <ctime>
 #include <optional>
@@ -178,7 +179,8 @@ crow::response BillingRoutes::tiers() {
 }
 
 // The account's billing: {"enabled", "max_servers", "comp_servers",
-// "own_machines", "used" (its live hosted servers), "can_start", "subscription"
+// "own_machines", "used" (its live hosted servers), "stopping" (how many of
+// those are stopping: the owners' limits count the rest), "can_start", "subscription"
 // (its support tier: {tier, status, entitled, current_period_end (ISO UTC),
 // cancel_at_period_end}, or null), "own_machine_subscription" ({quantity,
 // status, current_period_end, cancel_at_period_end}, or null), "can_manage" (it
@@ -196,7 +198,10 @@ crow::response BillingRoutes::me_billing_reply(db::Database &db, int64_t user_id
 	out["max_servers"] = e.max_servers;
 	out["comp_servers"] = e.comp_servers;
 	out["own_machines"] = e.own_machines;
-	out["used"] = hosted::count_live_of(db, user_id);
+	const std::vector<hosted::HostedServer> live = hosted::live_servers_of(db, user_id);
+	out["used"] = static_cast<int64_t>(live.size());
+	out["stopping"] = static_cast<int64_t>(std::count_if(live.begin(), live.end(),
+			[](const hosted::HostedServer &s) { return s.state == hosted::State::Stopping; }));
 	out["can_start"] = e.can_start;
 	if (const SubscriptionRow *tier = shown(rows, ItemKind::Tier, now)) {
 		crow::json::wvalue s;

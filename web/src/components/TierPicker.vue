@@ -31,7 +31,8 @@ const props = withDefaults(
     mode: 'subscribe' | 'manage';
     // The account's tier, in manage mode.
     currentTier?: TierNumber | null;
-    // How many of the account's hosted servers are live.
+    // How many of the account's live hosted servers are not already
+    // stopping: the ones a lower tier's limit counts (newest stop first).
     used?: number;
     busy?: boolean;
     disabled?: boolean;

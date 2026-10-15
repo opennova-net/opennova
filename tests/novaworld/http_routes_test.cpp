@@ -5938,7 +5938,8 @@ int test_billing_routes(Harness &h) {
 	reply = me(ana_s);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && json["max_servers"].i() == 0 &&
-			json["comp_servers"].i() == 0 && json["own_machines"].i() == 0 && json["used"].i() == 0);
+			json["comp_servers"].i() == 0 && json["own_machines"].i() == 0 && json["used"].i() == 0 &&
+			json["stopping"].i() == 0);
 	TEST_EXPECT(!json["can_start"].b() && !json["can_manage"].b() && json["can_subscribe"].b());
 	TEST_EXPECT(json["subscription"].t() == crow::json::type::Null &&
 			json["own_machine_subscription"].t() == crow::json::type::Null);
