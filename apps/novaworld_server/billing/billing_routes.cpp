@@ -322,8 +322,10 @@ std::optional<crow::response> BillingRoutes::settle_previous_session(const WebSe
 // customer synced from Stripe now and the rules judged again, so a payment the
 // webhook has not brought yet is never sold twice. Its Stripe customer is made
 // at its first checkout (the idempotency key opennova-<instance>-customer-<id>,
-// so a retry answers the same one). The session asks for the terms of
-// service, lives kCheckoutLifeS from just before it is made, returns to
+// so a retry answers the same one), and made again in place of a row of the
+// other Stripe mode (the key changed modes), which no call of this key could
+// use. The session asks for the terms of service, lives kCheckoutLifeS from
+// just before it is made, returns to
 // /me/support?checkout=success&session_id=... or ?checkout=cancel, and stamps
 // the instance and the account on the session and on the subscription it makes.
 crow::response BillingRoutes::checkout(const crow::request &req) {
@@ -353,8 +355,13 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 		std::fprintf(stderr, "[http] POST /api/billing/checkout failed: %s\n", e.what());
 		return json_error(500, "db_error");
 	}
-	// Stripe, outside any transaction.
+	// Stripe, outside any transaction. A customer row of the other mode (the key
+	// changed modes) names no customer this key can use: one is made in its place.
 	StripeClient &client = billing_->client();
+	const std::optional<std::string> other_mode =
+			customer && customer->livemode != config.live() ? std::optional<std::string>(customer->stripe_customer_id)
+															: std::nullopt;
+	if (other_mode) customer.reset();
 	if (customer && !customer->open_checkout_session.empty()) {
 		if (auto refusal = settle_previous_session(user, *customer, *item)) return std::move(*refusal);
 	}
@@ -367,13 +374,20 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 		}
 		try {
 			auto db_conn = pool_.acquire();
-			insert_customer(*db_conn, user.id, made.value->id, made.value->livemode);
+			{
+				db::Transaction tx(*db_conn);
+				if (other_mode) delete_customer(*db_conn, *other_mode);
+				insert_customer(*db_conn, user.id, made.value->id, made.value->livemode);
+				tx.commit();
+			}
 			customer = customer_of(*db_conn, user.id);
 		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[http] POST /api/billing/checkout failed: %s\n", e.what());
 			return json_error(500, "db_error");
 		}
 		if (!customer) return json_error(500, "db_error");
+		if (other_mode)
+			log_account(user, "checkout", "a customer of the key's mode made in place of " + loggable(*other_mode));
 	}
 	CheckoutCreate create;
 	create.customer = customer->stripe_customer_id;

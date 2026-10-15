@@ -6157,6 +6157,19 @@ int test_billing_checkout_guard(Harness &h) {
 	billing::set_open_checkout_session(*h.pool.acquire(), fay, "cs_test_gone");
 	reply = checkout(fay_s, "own_machine");
 	TEST_EXPECT(reply.code == 200 && open_session(fay) != "cs_test_gone");
+
+	// A customer row of the other mode (the key went from live to test): no
+	// customer this key can use; a new one replaces it, and the checkout goes on.
+	const int64_t gil = make_account(h, "chk_gil", "pw-chk-gil");
+	const std::string gil_s = login_token(h, "10.62.0.3", "chk_gil", "pw-chk-gil");
+	TEST_EXPECT(gil > 0 && !gil_s.empty());
+	TEST_EXPECT(billing::insert_customer(*h.pool.acquire(), gil, "cus_livemodegil", /*livemode=*/true));
+	reply = checkout(gil_s, "tier1");
+	TEST_EXPECT(reply.code == 200);
+	const auto gil_customer = billing::customer_of(*h.pool.acquire(), gil);
+	TEST_EXPECT(gil_customer && gil_customer->stripe_customer_id != "cus_livemodegil" && !gil_customer->livemode &&
+			!gil_customer->open_checkout_session.empty());
+	TEST_EXPECT(!billing::customer_by_id(*h.pool.acquire(), "cus_livemodegil"));
 	return 0;
 }
 
