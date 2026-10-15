@@ -1,6 +1,6 @@
 #pragma once
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 
 #include <cstdint>
 #include <string>
@@ -10,14 +10,14 @@
 
 namespace opennova::novaworld_server {
 
-// The games catalogue: one `games` row per lobby (migration 0013, the rows the
+// The games catalogue: one `games` row per lobby (the rows the
 // seed writes). A client's gate tag selects its row, and the row decides the
 // LobbyName and the start page the gate answers, the .gsb list its browser
 // fetches, the per-game values the NW*.dll pages fill in, and the game its
 // listings land under (active_hosts.game holds the listing's LobbyName).
 //
 // The gate and HTTP listeners each load a GameCatalog once, in start(), so the
-// gate's receive thread answers a probe without touching SQLite; a change to
+// gate's receive thread answers a probe without touching the database; a change to
 // the table takes a restart. /api/lobbies and /api/games read the table live.
 // Handlers never write SQL for it directly: this is the one place to look.
 namespace catalog {
@@ -60,7 +60,7 @@ struct GameRow {
 	std::string page(std::string_view suffix) const { return page_prefix() + std::string(suffix); }
 };
 
-// Every games row, in slug order. Throws db::SqliteError.
+// Every games row, in slug order. Throws db::Error.
 std::vector<GameRow> list_games(opennova::db::Database &db);
 
 // A gate tag with no row of its own that answers as another tag's game: the
@@ -93,7 +93,7 @@ public:
 	GameCatalog() = default;
 	explicit GameCatalog(std::vector<GameRow> rows) : rows_(std::move(rows)) {}
 
-	// The table as it stands. Throws db::SqliteError.
+	// The table as it stands. Throws db::Error.
 	static GameCatalog load(opennova::db::Database &db) { return GameCatalog(list_games(db)); }
 
 	const std::vector<GameRow> &games() const { return rows_; }

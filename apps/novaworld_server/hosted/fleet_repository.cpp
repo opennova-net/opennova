@@ -1,0 +1,545 @@
+#include "fleet_repository.h"
+
+#include "hosted_settings.h"
+
+#include <base/io/sha256.h>
+
+#include <algorithm>
+#include <limits>
+#include <map>
+#include <utility>
+#include <variant>
+
+namespace opennova::novaworld_server::hosted {
+
+namespace {
+
+using db::BindValue;
+
+constexpr const char *kMachineColumns =
+		"id, provider, kind, state, cloud_id, instance_type, slots, private_address, "
+		"public_address, agent_secret_hash <> '', agent_version, template_version, serve_image, "
+		"COALESCE(reserved_for, 0), last_report_at, launched_at, ready_at, ended_at, end_reason";
+constexpr size_t kMachineColumnCount = 19;
+
+// The SQL test for a live machine (a live hosted server's is hosted_repository.h's).
+constexpr const char *kLiveMachineSql = "state NOT IN ('ended', 'failed')";
+
+bool is_alnum_text(std::string_view text, size_t size) {
+	if (text.size() != size)
+		return false;
+	for (const char c : text) {
+		const bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+		if (!ok)
+			return false;
+	}
+	return true;
+}
+
+BindValue count_value(uint64_t count) {
+	constexpr uint64_t kMax = static_cast<uint64_t>(std::numeric_limits<int64_t>::max());
+	return BindValue(static_cast<int64_t>(std::min(count, kMax)));
+}
+
+BindValue optional_int(const std::optional<int64_t> &value) {
+	return value ? BindValue(*value) : BindValue(std::monostate{});
+}
+
+double as_double(const db::Row &row, size_t i) {
+	if (i >= row.values.size())
+		return 0.0;
+	if (const auto *d = std::get_if<double>(&row.values[i]))
+		return *d;
+	if (const auto *n = std::get_if<int64_t>(&row.values[i]))
+		return static_cast<double>(*n);
+	return 0.0;
+}
+
+uint64_t as_count(const db::Row &row, size_t i) {
+	const int64_t value = row.as_int(i).value_or(0);
+	return value > 0 ? static_cast<uint64_t>(value) : 0;
+}
+
+FleetMachineRow row_to_machine(const db::Row &r) {
+	FleetMachineRow m;
+	m.id = r.as_int(0).value_or(0);
+	m.provider = r.as_text(1).value_or("");
+	m.kind = parse_machine_kind(r.as_text(2).value_or("")).value_or(MachineKind::Shared);
+	m.state = parse_fleet_machine_state(r.as_text(3).value_or(""))
+					  .value_or(FleetMachineState::Failed);
+	m.cloud_id = r.as_text(4).value_or("");
+	m.instance_type = r.as_text(5).value_or("");
+	m.slots = static_cast<int>(r.as_int(6).value_or(0));
+	m.private_address = r.as_text(7).value_or("");
+	m.public_address = r.as_text(8).value_or("");
+	m.bootstrapped = r.as_int(9).value_or(0) != 0;
+	m.agent_version = r.as_text(10).value_or("");
+	m.template_version = r.as_text(11).value_or("");
+	m.serve_image = r.as_text(12).value_or("");
+	m.reserved_for = r.as_int(13).value_or(0);
+	m.last_report_at = r.as_text(14).value_or("");
+	m.launched_at = r.as_text(15).value_or("");
+	m.ready_at = r.as_text(16).value_or("");
+	m.ended_at = r.as_text(17).value_or("");
+	m.end_reason = r.as_text(18).value_or("");
+	return m;
+}
+
+std::vector<FleetMachineRow> query_machines(
+		db::Database &db, const std::string &tail, const std::vector<BindValue> &binds) {
+	std::vector<FleetMachineRow> out;
+	for (const db::Row &r : db.query(
+				 std::string("SELECT ") + kMachineColumns + " FROM fleet_machines " + tail, binds))
+		out.push_back(row_to_machine(r));
+	return out;
+}
+
+// "'a', 'b'": the states' words, for an IN list (fixed words, never input).
+std::string state_list(const std::vector<FleetMachineState> &states) {
+	std::string out;
+	for (const FleetMachineState state : states) {
+		if (!out.empty())
+			out += ", ";
+		out += "'";
+		out += fleet_machine_state_text(state);
+		out += "'";
+	}
+	return out;
+}
+
+} // namespace
+
+bool machine_is_live(FleetMachineState state) {
+	return state != FleetMachineState::Ended && state != FleetMachineState::Failed;
+}
+
+// --- the machines ---
+
+CreatedMachine create_machine(
+		db::Database &db, const NewMachine &machine, int64_t token_lifetime_s) {
+	CreatedMachine out;
+	out.bootstrap_token = random_secret(kMachineTokenChars);
+	const auto rows = db.query(
+			"INSERT INTO fleet_machines (provider, kind, slots, serve_image, reserved_for, "
+			"bootstrap_token_hash, bootstrap_expires_at) "
+			"VALUES ($1, $2, $3, $4, $5, $6, now() + make_interval(secs => $7)) RETURNING id;",
+			{ BindValue(machine.provider), BindValue(std::string(machine_kind_text(machine.kind))),
+					BindValue(static_cast<int64_t>(machine.slots)), BindValue(machine.serve_image),
+					machine.reserved_for > 0 ? BindValue(machine.reserved_for)
+											 : BindValue(std::monostate{}),
+					BindValue(agent_secret_digest(out.bootstrap_token)),
+					BindValue(static_cast<double>(token_lifetime_s)) });
+	out.id = rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
+	return out;
+}
+
+bool mark_launched(db::Database &db, int64_t id, const LaunchedMachine &launched) {
+	db.exec("UPDATE fleet_machines SET state = 'booting', cloud_id = $2, private_address = $3, "
+			"public_address = $4, instance_type = $5, template_version = $6 "
+			"WHERE id = $1 AND state = 'launching';",
+			{ BindValue(id), BindValue(launched.cloud_id), BindValue(launched.private_address),
+					BindValue(launched.public_address), BindValue(launched.instance_type),
+					BindValue(launched.template_version) });
+	return db.changes() > 0;
+}
+
+bool set_machine_addresses(db::Database &db, int64_t id, const std::string &private_address,
+		const std::string &public_address) {
+	db.exec(std::string("UPDATE fleet_machines SET "
+						"private_address = CASE WHEN private_address = '' THEN $2 "
+						"ELSE private_address END, "
+						"public_address = $3 "
+						"WHERE id = $1 AND ") +
+					kLiveMachineSql +
+					" AND ((private_address = '' AND $2 <> '') OR public_address <> $3);",
+			{ BindValue(id), BindValue(private_address), BindValue(public_address) });
+	return db.changes() > 0;
+}
+
+bool transition_machine(db::Database &db, int64_t id, const std::vector<FleetMachineState> &from,
+		FleetMachineState to, const std::string &reason) {
+	if (from.empty())
+		return false;
+	const std::string target = fleet_machine_state_text(to);
+	const bool ready = to == FleetMachineState::Ready;
+	const bool gone = to == FleetMachineState::Ended || to == FleetMachineState::Failed;
+	const bool spends = gone || to == FleetMachineState::Ending;
+	const bool takes_reason =
+			!ready && to != FleetMachineState::Booting && to != FleetMachineState::Launching;
+	std::string sql = "UPDATE fleet_machines SET state = $2";
+	if (ready)
+		sql += ", ready_at = COALESCE(ready_at, now()), end_reason = ''";
+	if (gone)
+		sql += ", ended_at = now()";
+	if (takes_reason)
+		sql += ", end_reason = CASE WHEN $3::text <> '' THEN $3::text ELSE end_reason END";
+	if (spends)
+		sql += ", bootstrap_token_hash = '', bootstrap_expires_at = NULL, agent_secret_hash = ''";
+	sql += " WHERE id = $1 AND state IN (" + state_list(from) + ")";
+	std::vector<BindValue> binds = { BindValue(id), BindValue(target) };
+	if (takes_reason)
+		binds.push_back(BindValue(reason));
+	db.exec(sql + ";", binds);
+	return db.changes() > 0;
+}
+
+bool transition_machine(db::Database &db, int64_t id, FleetMachineState from, FleetMachineState to,
+		const std::string &reason) {
+	return transition_machine(db, id, std::vector<FleetMachineState>{ from }, to, reason);
+}
+
+std::optional<FleetMachineRow> find_machine(db::Database &db, int64_t id) {
+	auto rows = query_machines(db, "WHERE id = $1;", { BindValue(id) });
+	if (rows.empty())
+		return std::nullopt;
+	return std::move(rows.front());
+}
+
+std::optional<FleetMachineRow> find_machine_by_cloud_id(
+		db::Database &db, const std::string &provider, const std::string &cloud_id) {
+	if (cloud_id.empty())
+		return std::nullopt;
+	auto rows = query_machines(db, "WHERE provider = $1 AND cloud_id = $2;",
+			{ BindValue(provider), BindValue(cloud_id) });
+	if (rows.empty())
+		return std::nullopt;
+	return std::move(rows.front());
+}
+
+std::vector<FleetMachineRow> list_live_machines(db::Database &db) {
+	return query_machines(db, std::string("WHERE ") + kLiveMachineSql + " ORDER BY id;", {});
+}
+
+std::vector<FleetMachineRow> list_machines(db::Database &db, size_t ended_limit) {
+	db::ReadSnapshot snapshot(db);
+	std::vector<FleetMachineRow> out = list_live_machines(db);
+	const auto ended =
+			query_machines(db, "WHERE state IN ('ended', 'failed') ORDER BY id DESC LIMIT $1;",
+					{ BindValue(static_cast<int64_t>(ended_limit)) });
+	out.insert(out.end(), ended.begin(), ended.end());
+	return out;
+}
+
+std::vector<FleetMachineRow> list_silent_machines(db::Database &db, int64_t seconds) {
+	// A machine whose agent never reported (one drained while it booted) has
+	// fallen silent from nothing: the boot timeout is its.
+	return query_machines(db,
+			"WHERE state IN ('ready', 'draining') AND last_report_at IS NOT NULL AND "
+			"last_report_at < now() - make_interval(secs => $1) ORDER BY id;",
+			{ BindValue(static_cast<double>(seconds)) });
+}
+
+bool machine_reported_within(db::Database &db, int64_t id, int64_t seconds) {
+	return !db.query("SELECT 1 FROM fleet_machines WHERE id = $1 AND last_report_at IS NOT NULL AND "
+					 "last_report_at >= now() - make_interval(secs => $2);",
+						 { BindValue(id), BindValue(static_cast<double>(seconds)) })
+					.empty();
+}
+
+std::vector<int64_t> drain_machines(db::Database &db, const std::string &reason) {
+	std::vector<int64_t> out;
+	for (const db::Row &r : db.query("UPDATE fleet_machines SET state = 'draining', end_reason = $1 "
+									 "WHERE state IN ('launching', 'booting', 'ready') RETURNING id;",
+				 { BindValue(reason) }))
+		out.push_back(r.as_int(0).value_or(0));
+	std::sort(out.begin(), out.end());
+	return out;
+}
+
+int count_machines(db::Database &db, FleetMachineState state) {
+	const auto rows = db.query("SELECT COUNT(*) FROM fleet_machines WHERE state = $1;",
+			{ BindValue(std::string(fleet_machine_state_text(state))) });
+	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
+}
+
+// --- the agent's credentials ---
+
+std::optional<FleetMachineRow> redeem_bootstrap_token(db::Database &db, int64_t id,
+		std::string_view token, const std::string &secret_digest, const std::string &agent_version,
+		std::string &why) {
+	if (!is_alnum_text(token, kMachineTokenChars)) {
+		why = "no token, or not one this service mints";
+		return std::nullopt;
+	}
+	db::Transaction tx(db);
+	const auto rows =
+			db.query("SELECT bootstrap_token_hash, state, "
+					 "(bootstrap_expires_at IS NOT NULL AND bootstrap_expires_at > now()) "
+					 "FROM fleet_machines WHERE id = $1;",
+					{ BindValue(id) });
+	if (rows.empty()) {
+		why = "no such machine";
+		return std::nullopt;
+	}
+	const std::string stored = rows.front().as_text(0).value_or("");
+	const std::string state = rows.front().as_text(1).value_or("");
+	const bool live = rows.front().as_int(2).value_or(0) != 0;
+	if (stored.empty()) {
+		why = "a machine whose token is spent";
+		return std::nullopt;
+	}
+	if (!io::constant_time_equal(agent_secret_digest(token), stored)) {
+		why = "a token that is not the machine's";
+		return std::nullopt;
+	}
+	if (!live) {
+		why = "a lapsed token";
+		return std::nullopt;
+	}
+	if (state != fleet_machine_state_text(FleetMachineState::Booting)) {
+		why = "a machine that is " + state + ", not booting";
+		return std::nullopt;
+	}
+	// The token stays until the agent's first sync spends it, so an agent
+	// whose reply was lost redeems again: the new secret replaces the last.
+	db.exec("UPDATE fleet_machines SET agent_secret_hash = $2, agent_version = $3 "
+			"WHERE id = $1 AND bootstrap_token_hash = $4 AND state = 'booting';",
+			{ BindValue(id), BindValue(secret_digest), BindValue(agent_version),
+					BindValue(stored) });
+	if (db.changes() == 0) {
+		why = "a token spent at the same time";
+		return std::nullopt;
+	}
+	auto row = find_machine(db, id);
+	tx.commit();
+	return row;
+}
+
+std::optional<FleetMachineRow> authenticate_agent(
+		db::Database &db, int64_t id, std::string_view secret, std::string &why) {
+	if (!is_alnum_text(secret, kAgentSecretChars)) {
+		why = "no secret, or not one this service mints";
+		return std::nullopt;
+	}
+	const auto rows = db.query(std::string("SELECT ") + kMachineColumns +
+					", agent_secret_hash FROM fleet_machines WHERE id = $1;",
+			{ BindValue(id) });
+	if (rows.empty()) {
+		why = "no such machine";
+		return std::nullopt;
+	}
+	const std::string stored = rows.front().as_text(kMachineColumnCount).value_or("");
+	if (stored.empty()) {
+		why = "a machine with no agent secret";
+		return std::nullopt;
+	}
+	if (!io::constant_time_equal(agent_secret_digest(secret), stored)) {
+		why = "a secret that is not the machine's agent's";
+		return std::nullopt;
+	}
+	FleetMachineRow machine = row_to_machine(rows.front());
+	switch (machine.state) {
+		case FleetMachineState::Booting:
+		case FleetMachineState::Ready:
+		case FleetMachineState::Draining:
+		case FleetMachineState::Lost:
+			return machine;
+		default:
+			why = std::string("a machine that is ") + fleet_machine_state_text(machine.state);
+			return std::nullopt;
+	}
+}
+
+// --- the agent's reports ---
+
+std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
+		const std::string &agent_version, const std::vector<ContainerReport> &containers) {
+	db::Transaction tx(db);
+	// The agent's first sync spends the bootstrap token (redeem_bootstrap_token).
+	const auto updated = db.query(
+			"UPDATE fleet_machines SET last_report_at = now(), agent_version = $2, "
+			"bootstrap_token_hash = '', bootstrap_expires_at = NULL, "
+			"ready_at = CASE WHEN state = 'booting' THEN now() ELSE ready_at END, "
+			"end_reason = CASE WHEN state = 'booting' THEN '' ELSE end_reason END, "
+			"state = CASE WHEN state = 'booting' THEN 'ready' ELSE state END "
+			"WHERE id = $1 AND state IN ('booting', 'ready', 'draining', 'lost') RETURNING slots;",
+			{ BindValue(id), BindValue(agent_version) });
+	if (updated.empty())
+		return std::nullopt;
+	const int slots = static_cast<int>(updated.front().as_int(0).value_or(0));
+	// One report per slot: a running container wins its slot, else the last.
+	std::map<int, const ContainerReport *> by_slot;
+	for (const ContainerReport &c : containers) {
+		if (c.slot < 0 || c.slot >= slots)
+			continue;
+		const ContainerReport *&held = by_slot[c.slot];
+		if (held == nullptr || held->state != ContainerState::Running ||
+				c.state == ContainerState::Running)
+			held = &c;
+	}
+	db.exec("DELETE FROM fleet_slot_reports WHERE machine_id = $1;", { BindValue(id) });
+	for (const auto &[slot, c] : by_slot) {
+		db.exec("INSERT INTO fleet_slot_reports (machine_id, slot, container, state, exit_code, "
+				"oom, started_at, cpu_percent, memory_bytes, egress_bytes) "
+				"VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7::double precision), $8, $9, $10);",
+				{ BindValue(id), BindValue(static_cast<int64_t>(slot)), BindValue(c->name),
+						BindValue(std::string(container_state_text(c->state))),
+						optional_int(c->exit_code), BindValue(db::Bool{ c->oom }),
+						optional_int(c->started_at), BindValue(c->cpu_percent),
+						count_value(c->memory_bytes), count_value(c->egress_bytes) });
+	}
+	auto row = find_machine(db, id);
+	tx.commit();
+	return row;
+}
+
+std::optional<FleetMachineRow> record_unlisted_sync(
+		db::Database &db, int64_t id, const std::string &agent_version) {
+	db.exec("UPDATE fleet_machines SET last_report_at = now(), agent_version = $2, "
+			"bootstrap_token_hash = '', bootstrap_expires_at = NULL "
+			"WHERE id = $1 AND state IN ('booting', 'ready', 'draining', 'lost');",
+			{ BindValue(id), BindValue(agent_version) });
+	if (db.changes() == 0)
+		return std::nullopt;
+	return find_machine(db, id);
+}
+
+namespace {
+
+std::vector<SlotReport> query_slot_reports(
+		db::Database &db, const std::string &tail, const std::vector<BindValue> &binds) {
+	std::vector<SlotReport> out;
+	for (const db::Row &r :
+			db.query("SELECT r.slot, r.container, r.state, r.exit_code, r.oom, "
+					 "CAST(extract(epoch FROM r.started_at) AS bigint), r.cpu_percent, "
+					 "r.memory_bytes, r.egress_bytes, r.reported_at FROM fleet_slot_reports r " +
+							tail,
+					binds)) {
+		SlotReport s;
+		s.slot = static_cast<int>(r.as_int(0).value_or(0));
+		s.container = r.as_text(1).value_or("");
+		s.state = parse_container_state(r.as_text(2).value_or("")).value_or(ContainerState::Exited);
+		s.exit_code = r.as_int(3);
+		s.oom = r.as_int(4).value_or(0) != 0;
+		s.started_at = r.as_int(5);
+		s.cpu_percent = as_double(r, 6);
+		s.memory_bytes = as_count(r, 7);
+		s.egress_bytes = as_count(r, 8);
+		s.reported_at = r.as_text(9).value_or("");
+		out.push_back(std::move(s));
+	}
+	return out;
+}
+
+} // namespace
+
+std::vector<SlotReport> slot_reports(db::Database &db, int64_t machine_id) {
+	return query_slot_reports(
+			db, "WHERE r.machine_id = $1 ORDER BY r.slot;", { BindValue(machine_id) });
+}
+
+std::optional<SlotReport> slot_report_of(db::Database &db, int64_t server_id) {
+	auto rows = query_slot_reports(db,
+			"JOIN hosted_servers s ON s.machine_ref = r.machine_id AND s.slot = r.slot "
+			"WHERE s.id = $1;",
+			{ BindValue(server_id) });
+	if (rows.empty())
+		return std::nullopt;
+	return std::move(rows.front());
+}
+
+// --- the slots ---
+
+std::vector<SlotHolder> slot_holders(db::Database &db, int64_t machine_id) {
+	std::vector<SlotHolder> out;
+	for (const db::Row &r : db.query(std::string("SELECT id, slot, game_port, generation, state "
+												 "FROM hosted_servers WHERE machine_ref = $1 AND "
+												 "slot IS NOT NULL AND ") +
+						 kLiveServerSql + " ORDER BY slot;",
+				 { BindValue(machine_id) })) {
+		SlotHolder h;
+		h.server_id = r.as_int(0).value_or(0);
+		h.slot = static_cast<int>(r.as_int(1).value_or(0));
+		h.game_port = static_cast<int>(r.as_int(2).value_or(0));
+		h.generation = r.as_int(3).value_or(0);
+		h.state = state_from_name(r.as_text(4).value_or("")).value_or(State::Failed);
+		out.push_back(h);
+	}
+	return out;
+}
+
+std::vector<FleetMachine> placement_machines(db::Database &db) {
+	db::ReadSnapshot snapshot(db);
+	std::vector<FleetMachine> out;
+	std::map<int64_t, size_t> index;
+	for (const FleetMachineRow &row : list_live_machines(db)) {
+		FleetMachine m;
+		m.id = row.id;
+		m.kind = row.kind;
+		m.state = row.state;
+		m.slots = row.slots;
+		m.reserved_for = row.reserved_for;
+		index[m.id] = out.size();
+		out.push_back(std::move(m));
+	}
+	for (const db::Row &r : db.query(std::string("SELECT machine_ref, slot FROM hosted_servers "
+												 "WHERE machine_ref IS NOT NULL AND slot IS NOT "
+												 "NULL AND ") +
+				 kLiveServerSql + " ORDER BY machine_ref, slot;")) {
+		const auto it = index.find(r.as_int(0).value_or(0));
+		if (it != index.end())
+			out[it->second].used_slots.push_back(static_cast<int>(r.as_int(1).value_or(0)));
+	}
+	return out;
+}
+
+std::vector<PlacementRequest> waiting_servers(db::Database &db) {
+	std::vector<PlacementRequest> out;
+	for (const db::Row &r : db.query(std::string("SELECT id, own_machine FROM hosted_servers WHERE "
+												 "machine_ref IS NULL AND ") +
+					 kLiveServerSql + " AND state <> 'stopping' ORDER BY id;")) {
+		PlacementRequest request;
+		request.server_id = r.as_int(0).value_or(0);
+		request.own_machine = r.as_int(1).value_or(0) != 0;
+		out.push_back(request);
+	}
+	return out;
+}
+
+bool fleet_has_room(db::Database &db, const PlacementPolicy &policy, bool own_machine) {
+	db::ReadSnapshot snapshot(db);
+	std::vector<FleetMachine> machines = placement_machines(db);
+	const std::vector<PlacementRequest> waiting = waiting_servers(db);
+	PlacementRequest request;
+	request.server_id = -1; // no row's (the start not yet written), no machine reserved for it
+	request.own_machine = own_machine;
+	return place_after(request, waiting, std::move(machines), policy).outcome != Placement::Outcome::Full;
+}
+
+std::optional<int64_t> assign_slot(
+		db::Database &db, int64_t server_id, int64_t machine_id, int slot, int game_port) {
+	if (!slot_valid(slot) || game_port < 0 || game_port > 65535)
+		return std::nullopt;
+	try {
+		// Its own transaction (a savepoint inside the caller's), so a slot another
+		// server holds undoes this write alone.
+		db::Transaction tx(db);
+		const auto rows = db.query(std::string("UPDATE hosted_servers SET machine_ref = $2, "
+											   "slot = $3, game_port = $4, generation = "
+											   "generation + 1, updated_at = now() "
+											   "WHERE id = $1 AND machine_ref IS NULL AND ") +
+						kLiveServerSql +
+						" AND EXISTS (SELECT 1 FROM fleet_machines WHERE id = $2 AND $3 < slots "
+						"AND state IN ('launching', 'booting', 'ready')) RETURNING generation;",
+				{ BindValue(server_id), BindValue(machine_id),
+						BindValue(static_cast<int64_t>(slot)),
+						BindValue(static_cast<int64_t>(game_port)) });
+		if (rows.empty())
+			return std::nullopt;
+		tx.commit();
+		return rows.front().as_int(0);
+	} catch (const db::Error &e) {
+		if (e.unique_violation())
+			return std::nullopt;
+		throw;
+	}
+}
+
+bool release_slot(db::Database &db, int64_t server_id) {
+	db.exec("UPDATE hosted_servers SET machine_ref = NULL, slot = NULL, game_port = 0, "
+			"updated_at = now() WHERE id = $1 AND machine_ref IS NOT NULL;",
+			{ BindValue(server_id) });
+	return db.changes() > 0;
+}
+
+} // namespace opennova::novaworld_server::hosted

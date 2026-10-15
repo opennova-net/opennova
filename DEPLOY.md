@@ -1,31 +1,48 @@
 # Deploying your own OpenNova NovaWorld instance
 
-This repository deploys a complete NovaWorld stack (the gate, the NovaWorld
-server, the legacy HTTP services, and the web portal) to your own cloud. Anyone
-can stand up their own instance with the same commands the project maintainers
-use. The original games reach your server through a hosts-file line that points
-`gs.novaworld.net` at it (see DEVELOPING.md, "Test with retail Joint Operations").
+This repository deploys a complete NovaWorld stack to AWS, behind Cloudflare: the gate,
+the NovaWorld server, the legacy HTTP services, the web portal, the browser build of the
+game, a PostgreSQL database, and the fleet of machines the hosted game servers run on.
+Anyone can stand up their own instance with the commands the project maintainers use.
+The original games reach your server through a hosts-file line that points
+`gs.novaworld.net` at its Elastic IP (the OpenNova Switcher writes it; DEVELOPING.md,
+"Test with retail Joint Operations").
+
+The stack in one paragraph: one disposable EC2 host (`c7i.large`) runs the service in
+docker compose and keeps no state of its own. Its database is RDS PostgreSQL 17 in
+private subnets; its secrets live in SSM Parameter Store, copied from a 1Password vault;
+its releases are bundles in an S3 bucket; its logs go to CloudWatch. Deploys and every
+command on the host go through SSM (Run Command, Session Manager): no SSH anywhere. The
+retail ports (gate UDP 7597, NovaWorld UDP 64206, HTTP 8080) stay open on one Elastic IP
+that no Terraform plan can release; the website reaches the host through Cloudflare alone,
+over TLS Cloudflare verifies. Hosted game servers run on machines the service launches
+itself: shared machines holding up to 12 servers, and own machines (a paid add-on)
+holding one.
 
 ## What you need
 
-- **Docker** on the machine you deploy from. That is the only dependency. The
-  deploy toolbox (1Password CLI, terraform, the docker client) runs in a
-  container; the target host runs only docker.
-- **A 1Password account** (any paid plan has service accounts) with a vault for
-  this deployment.
-- **An AWS account** and **a Cloudflare-managed domain** (optional but
-  recommended for TLS).
+- **Docker** on the machine you deploy from. That is the only dependency: the deploy
+  toolbox (1Password CLI, Terraform, the AWS CLI, the docker client) runs in a container.
+- **A 1Password account** (any paid plan has service accounts) with a vault for this
+  deployment.
+- **An AWS account.**
+- **A Cloudflare-managed domain.** The website is served through Cloudflare's proxy only:
+  the origin admits Cloudflare's address ranges alone and presents a Cloudflare Origin CA
+  certificate.
+- **A Stripe account** for the monthly support tiers (the paid hosting). Without one the
+  stack runs with billing off: nobody can subscribe, and only an admin's comp grant lets
+  an account host servers.
 
 No secret is ever committed to the repository or written to your disk outside a
 container's in-memory tmpfs, except what the Terraform state holds (the edge
-authentication secret, once that is on; section 3). The only secret you handle
-directly is a 1Password service-account token.
+authentication secret and the origin certificate's key; section 3). The only secret you
+handle directly is a 1Password service-account token.
 
 ## 1. Create the vault
 
-Create a vault named `OpenNova-Deploy` (the service account comes in step 2; it
-needs read + write access, the write for the terraform-state documents). Then
-create these items (paste-ready):
+Create a vault named `OpenNova-Deploy`; the service account comes in step 2 (it needs read
+and write access: the write for the generated secrets and the Terraform state
+documents). Create the items you supply yourself:
 
 ```bash
 op vault create OpenNova-Deploy
@@ -38,258 +55,364 @@ op item create --vault OpenNova-Deploy --title cloudflare --category 'API Creden
 
 op item create --vault OpenNova-Deploy --title ghcr --category 'Secure Note' \
   owner=your-github-owner
-
-op item create --vault OpenNova-Deploy --title app-prod --category 'Server' \
-  admin_api_token="$(openssl rand -hex 24)" \
-  admin_basic_auth_user=admin \
-  admin_basic_auth_password="$(openssl rand -hex 16)"
-
-# 1Password-generated SSH key the EC2 instance trusts.
-op item create --vault OpenNova-Deploy --title ssh --category 'SSH Key'
 ```
 
-The `op://` reference paths the toolbox reads are listed in
-`deploy/env/terraform.env.tpl` and `deploy/env/app.prod.env.tpl`.
+The Cloudflare token (`cloudflare/api_token`: My Profile, API Tokens, Create Token,
+Custom token) needs exactly these, the zone ones for the one zone and the account one
+for its account:
+
+| Scope | Permission | What needs it (`infra/aws/edge.tf`, `email.tf`) |
+|---|---|---|
+| Zone | DNS / Edit | the site's records |
+| Zone | Zone Settings / Edit | SSL/TLS "Full (strict)", Always Use HTTPS, the minimum TLS version; turning Email Routing on |
+| Zone | SSL and Certificates / Edit | the origin certificate (Origin CA) |
+| Zone | Zone WAF / Edit | the Stripe webhook's skip rule (custom rules) |
+| Zone | Transform Rules / Edit | edge authentication's header |
+| Zone | Email Routing Rules / Edit | `support@<domain>`'s rules |
+| Account | Email Routing Addresses / Edit | the email destination |
+| Zone (optional) | Bot Management / Read | reading Bot Fight Mode's state through the API (below) |
+
+**Bot Fight Mode must be off.** The zone is on the Free plan, whose Bot Fight Mode no
+WAF rule can skip (the webhook's skip rule covers the managed rules, rate limiting and
+the legacy products, not it): with it on, Cloudflare may challenge Stripe's webhook
+POSTs, and a challenged webhook never arrives. In the dashboard, Security, Bots: the
+"Bot Fight Mode" toggle is off. With the optional permission, `GET
+https://api.cloudflare.com/client/v4/zones/<zone id>/bot_management` answers
+`"fight_mode": false`. The end-to-end check is Stripe's "Send test webhook" answering
+2xx ("Monthly support tiers (Stripe)").
+
+Everything else is made by the toolbox once the token works (step 2):
+`./deploy/run.sh secrets init` adds whatever is missing and never overwrites a field.
+It prints item and field names, never a value:
+
+| Item | Fields | What `secrets init` puts there |
+|---|---|---|
+| `app-prod` (`app-<deployment>` for another deployment) | `admin_api_token`, `admin_basic_auth_user`, `admin_basic_auth_password`, `database_password` | random values (`admin` for the user) |
+| `app-prod` | `edge_auth_secret` (the zone's one secret, for every deployment) | 64 random hex digits |
+| `rds` (`rds-<deployment>`) | `master_password` | random |
+| `stripe-test`, `stripe-live` | `secret_key`, `webhook_secret`, `price_tier1`, `price_tier2`, `price_tier3`, `price_own_machine` | `REPLACE_ME` |
+| `alerts` | `email` | `REPLACE_ME` |
+| `email` | `forward_to` | `REPLACE_ME` |
+
+Fill the `REPLACE_ME` fields in the 1Password app (that keeps the keys out of shell
+history): `alerts/email` is where every alarm, budget and cost anomaly writes;
+`email/forward_to` is the mailbox `support@<domain>` forwards to ("Email", section 3);
+in each Stripe item you fill `secret_key` (the Stripe dashboard) and `./deploy/run.sh
+stripe setup` the rest ("Monthly support tiers (Stripe)", below). Optional fields the
+toolbox picks up when present: `app-prod/bootstrap_admin` (section 3) and
+`app-prod/edge_auth_secret_previous` (a rotation). Item `hosted` holds the hosted
+servers' data snapshots (section 6). There is no SSH item any more.
+
+The `op://` references the toolbox reads are listed in `deploy/env/terraform.env.tpl`
+(Terraform's), `deploy/env/aws.env.tpl` (the toolbox's own AWS calls) and
+`deploy/env/runtime.env.tpl` (the service's runtime secrets).
 
 ## 2. Mint the service-account token
 
-The toolbox authenticates with a single 1Password **service account** — no
-interactive login on the deploy host. Create one scoped to this vault with
-**read + write** items (`write_items` is required so terraform state can be
-stored as vault documents — for service accounts it covers creating items and
-documents; there is no separate `create_items` permission):
+The toolbox authenticates with a single 1Password **service account**, with no
+interactive login. Create one scoped to this vault with **read + write** items
+(`write_items` covers creating items and documents):
 
 ```bash
 # signed in to your own 1Password account as an owner/admin:
 op service-account create opennova-deploy \
   --vault 'OpenNova-Deploy:read_items,write_items' --expires-in 90d
-# prints the ops_... token ONCE — store it somewhere safe (e.g. a personal 1P item).
+# prints the ops_... token ONCE: store it somewhere safe (e.g. a personal 1P item).
 ```
 
-Web alternative: **Developer → Service Accounts → Create**, grant the
-`OpenNova-Deploy` vault Read/Write, and copy the `ops_...` token. (Service
-accounts need a paid 1Password plan with the feature enabled.)
-
-Point the toolbox at the token and verify:
+Web alternative: **Developer, Service Accounts, Create**, grant the `OpenNova-Deploy` vault
+Read/Write, and copy the `ops_...` token. Then:
 
 ```bash
 export OP_SERVICE_ACCOUNT_TOKEN=ops_...        # the only secret you handle
-./deploy/run.sh secrets check                  # dry-runs every op:// reference
+./deploy/run.sh secrets init                   # the generated secrets and the placeholders
+./deploy/run.sh secrets check                  # every reference, the Stripe items
 ```
 
-`secrets check` resolves every reference without printing a value. Fix any miss
-before continuing.
+`secrets check` resolves every reference without printing a value, and reports each
+Stripe item as `OK (test mode, 3 tiers + own machine)`, `placeholders: <fields> (billing
+off)`, `absent (billing off)` or `FAILED: <field> (malformed)` / `(a test key in a live
+item)`; a failed one makes it exit non-zero. The forms it checks: `secret_key`
+`sk_<mode>_...` or `rk_<mode>_...` (the item's mode: `test` for `stripe-test`, `live` for
+`stripe-live`), `webhook_secret` `whsec_...`, each price `price_...` (a comma list: the
+first is sold, the rest are grandfathered). It also says whether `alerts/email` and
+`email/forward_to` are still placeholders (an absent `email` item fails: every
+Terraform run reads it, so run `secrets init` once after an upgrade).
+
+`./deploy/run.sh` (or `.\deploy\run.ps1`) rebuilds the toolbox image when
+`deploy/Dockerfile` changed and runs it with the repository mounted. The toolbox is a
+Debian image with pinned, checksummed releases of every tool.
 
 ## 3. Stand up the infrastructure
 
-First create the non-secret terraform var-file (gitignored). The toolbox injects
-secrets from the vault as `TF_VAR_*`, but the non-secret knobs (bucket names,
-instance size, region, the proxied toggle) come from this file:
+### Deployments
+
+A deployment is one complete stack: `prod` (the default) or another such as `staging`.
+Every command takes `--deployment NAME` (or `OPENNOVA_DEPLOYMENT=NAME`), which picks:
+
+| | prod | another (staging) |
+|---|---|---|
+| Terraform workspace | `default` | `staging` |
+| state document (vault) | `tfstate` | `tfstate-staging` |
+| var-file | `infra/aws/prod.tfvars` | `infra/aws/staging.tfvars` |
+| SSM parameters | `/opennova/prod/...` | `/opennova/staging/...` |
+| vault items | `app-prod`, `rds`, `stripe-live` | `app-staging`, `rds-staging`, `stripe-test` |
+| site | `example.com`, `www`, `game.example.com` | `staging.example.com`, `game-staging.example.com` |
+| Elastic IP | adopted (below) | its own |
+
+The account-wide pieces belong to prod: the S3 account public access block, the
+operations bucket (every deployment's releases and dumps), the Cloudflare zone's
+settings and rulesets, the budgets, the cost anomaly monitor, the deploy workflow's
+role. Run prod first.
+
+### The var-file
+
+The non-secret knobs live in `infra/aws/<deployment>.tfvars`:
 
 ```bash
-cp infra/aws/terraform.tfvars.example infra/aws/terraform.tfvars
-# edit backup_bucket_name etc. for your deployment
+cp infra/aws/deployment.tfvars.example infra/aws/prod.tfvars
 ```
 
-Then plan and apply:
+It holds no secret, so committing it keeps every operator on the same knobs. Never name
+it `terraform.tfvars` or `*.auto.tfvars` (or their `.json` forms): Terraform loads those
+into every workspace (staging would take prod's Elastic IP), so the toolbox refuses to
+run while one exists in `infra/aws/`.
+
+For prod set `service_eip_allocation_id` to the allocation id of the Elastic IP retail
+clients use (`./deploy/run.sh aws ec2 describe-addresses`). Terraform reads that address
+and associates it, and never manages it: no plan can release it. Prod never makes an
+address of its own, so a prod plan without the allocation id stops at a precondition (a
+brand-new prod stack allocates one first, `./deploy/run.sh aws ec2 allocate-address
+--domain vpc`, and adopts it). Another deployment (staging) gets a managed address of
+its own and never adopts one: its plan stops too when an allocation id reaches it. Pin
+`azs` once the stack exists so a change in the region's list never moves a subnet.
+
+### Plan and apply
 
 ```bash
 ./deploy/run.sh infra plan                     # review the plan
-./deploy/run.sh infra apply                    # VPC, EC2, EIP, DNS, S3, CDN
+./deploy/run.sh infra apply                    # plans again, applies exactly that plan
 ```
 
-Terraform state is stored as a 1Password document (`tfstate`), pulled before and
-pushed after each run, so any operator with vault access can deploy. `infra apply` and
-`infra destroy` push whatever state Terraform leaves, a failed run's too (it can have
-changed resources and written a newer serial), then exit with Terraform's code; a failed
-run is named before that push, so a push that is then refused is not read as success.
+`infra apply` saves its plan to a file and applies that file, never a plan made again.
+It refuses a plan that destroys or replaces what no apply makes again or what the
+service runs on: an Elastic IP or its association, the service instance or its network
+interface, the database, a bucket. Read the plan, then `infra apply --allow-destroy` if
+that is meant. A plan that would make prod a new Elastic IP is refused whatever the
+flags. On prod it then prints what the plan does (`N to create, N to update, N to
+replace...`) and applies the saved plan only once you type `yes`; `--yes` answers for
+you, and a run with no terminal (a script) refuses without it. The database also carries
+`prevent_destroy` and deletion protection. Further arguments pass through (`infra apply
+--allow-destroy -replace=aws_instance.service`). Other `infra` commands:
+`state-rm ADDRESS` (forget a resource, keep its object), `import ADDRESS ID`, `output`,
+`list`, and `destroy` (refused for prod).
 
-Every pull or push that goes through records, beside the state, the vault document this
-checkout is now in step with: `infra/aws/terraform.tfstate.vault-sha256` (gitignored),
-the base. Both directions read the vault's copy first and compare the local state and
-the vault's with that base, so two checkouts that started from the same vault state are
-told apart however their serials ran. The states are compared, not the bytes: keys
-sorted and `terraform_version` left out, since Terraform stamps that at every write.
-Two copies that hold the same state are left alone. Otherwise, without `--force`:
+What it makes: the VPC (`10.44.0.0/16`: public subnets a/b for the service and the
+machines, private a/b with no route out for the database), the service instance with its
+fixed network interface (`10.44.0.10`) and the adopted Elastic IP, its security group
+(the retail ports to everyone, 443 to Cloudflare's ranges alone, the internal port to
+the machines alone, no 22, no 80), the database, the SSM parameters and converge
+document, the operations bucket, the logs, metrics and alarms, the budgets, the
+Cloudflare records, the origin certificate, the zone's TLS setting, edge authentication
+and the webhook rule, the zone's Email Routing (with a destination), and (with data
+snapshots) the fleet's launch templates. A new database takes 10 to 15 minutes.
 
-- **Both changed since the base:** pull and push both refuse. The two diverged (say two
-  operators applied from the same state, or your apply failed part-way while someone
-  else pushed), and either direction would drop the other's work. Merge them by hand
-  (`terraform state rm`/`import` in this checkout until it holds both, then `state push
-  --force`), or keep one side whole with `state push --force` or `state pull --force`.
+The state is a 1Password document per deployment, pulled before and pushed after each
+run, so any operator with vault access can run the stack. `infra apply`, `state-rm` and
+`import` push whatever state Terraform leaves, a failed run's too, then exit with
+Terraform's code. Every pull or push records, beside the state, the vault document this
+checkout is in step with (`<state file>.vault-sha256`, gitignored), and both directions
+compare three ways, so diverged states are refused rather than overwritten:
+
+- **Both changed since the last sync:** pull and push both refuse. Merge by hand
+  (`terraform state rm`/`import` until this checkout holds both, then `state push --force`),
+  or keep one side whole with `state push --force` or `state pull --force`.
 - **Only the local state changed** (an apply whose push never ran): a pull refuses;
   `./deploy/run.sh state push` it.
-- **Only the vault's changed** (another operator's push): a push refuses; `state pull`
-  it, then run again.
-- **No base recorded** (a checkout from before the base existed): the serials decide. A
-  pull refuses a local serial at or above the vault's, a push a vault serial at or above
-  the local one, and both say they cannot tell whose changed.
-- **Different lineages** (Terraform's id for one state, kept through every serial):
-  both refuse; they are different states, not versions of one.
+- **Only the vault's changed** (another operator's push): a push refuses; `state pull`.
+- **No record of the last sync:** the serials decide, and both say they cannot tell.
+- **Different lineages:** both refuse; they are different states.
 
-The vault's document is found by its title in the vault's item listing. Only a vault
-with no `tfstate` document reads as a first run (a pull) or as one to create (a push).
-A listing that fails or comes back empty, or any other vault failure, stops the command,
-so nothing runs on a state of unknown age and no push makes a second document.
+The state holds the edge authentication secret and the origin certificate's private key
+in plain text: treat the state documents as secrets, and delete the local state files
+after a run on a machine others can read. The database's master password never enters
+the state (Terraform 1.11 write-only arguments): it reaches RDS at creation, and again
+only when `db_master_password_version` in the var-file is bumped.
 
-Review the plan: after the first apply, pin `ami_id` in `infra/aws/terraform.tfvars` so AMI
-drift never replaces your instance and releases the EIP.
-
-Set `ONNET_PUBLIC_HOST` in `deploy/env/app.prod.env` to the EIP that
-`infra apply` reports (`terraform output public_ip`).
-
-The same file sets the website login's `ONNET_COOKIE_SECURE=1`,
-`ONNET_TRUSTED_PROXIES=127.0.0.1` and `ONNET_API_PROXY_ONLY=1`
-(apps/novaworld_server/README.md). The Secure session cookie needs the site served
-over https only: keep the web records proxied (`cloudflare_web_proxied`, the default)
-and turn on Cloudflare's "Always Use HTTPS", or a visitor on plain http cannot stay
-logged in.
-
-The server's own HTTP port (8080) is open to the internet: a stock client fetches the
-`NW*.dll` pages and the `.gsb` server lists from it directly, through no proxy. Its
-`/api/` is the website's, though, and `ONNET_API_PROXY_ONLY=1` answers it only to the
-portal's nginx, which reaches the server from `127.0.0.1` (host networking, with
-`host.docker.internal` mapped to the loopback in `docker-compose.prod.yml`): any other
-peer gets 403, so the website's API is reached only through nginx and the checks it
-applies. Check after a deploy: `curl -i http://<EIP>:8080/api/health` answers 403, and
-`curl -i http://<EIP>:8080/jop_2.gsb` still answers 200.
-
-Behind the proxied records every request reaches nginx from a Cloudflare edge, so the
-portal's nginx takes the visitor's address from `CF-Connecting-IP`, for a peer in
-Cloudflare's published ranges only (`web/cloudflare-realip.conf`); the server's website
-login and registration rate limits key on that address. Refresh the ranges before a
-web-image release with `sh web/cloudflare-realip.sh` (it rewrites the file from
-https://www.cloudflare.com/ips-v4 and /ips-v6, refusing any entry that is not a CIDR;
-review and commit the diff). Cloudflare announces range changes ahead of time.
-
-A Cloudflare peer does not make that header true: a Worker on anyone's zone can fetch
-this origin (its IP is public) from a real Cloudflare edge with any `CF-Connecting-IP`
-it likes, and so brake a chosen address on the website's login. The server keeps those
-addresses' buckets apart from the retail login's (which keys on its own TCP peer), so a
-forged address never brakes a game login; edge authentication, below, closes the
-website side.
-
-### Edge authentication (prepared, off)
-
-With it on, a Cloudflare Transform Rule on our zone stamps a secret header,
-`X-OpenNova-Edge`, on every request for the web hostnames, and the portal's nginx
-forwards `/api/` only for requests carrying it (403 otherwise, and the header is not
-forwarded to the server), so the requests nginx passes on came through our own zone,
-where Cloudflare sets `CF-Connecting-IP` itself. It guards nginx only; the server's own
-port refuses `/api/` to anyone but nginx through `ONNET_API_PROXY_ONLY`, above. It stays
-off while `EDGE_AUTH_SECRET` is unset (web/docker-entrypoint.sh, `infra/aws`
-`cloudflare_ruleset.edge_auth`). Terraform creates the rule only while the web records
-are proxied (`cloudflare_web_proxied`), and its plan warns about a secret without them:
-unproxied records reach the origin through no Transform Rule, so with
-`EDGE_AUTH_SECRET` set nginx would refuse every `/api/` request. Keep the web records
-proxied while it is on. To turn it on:
-
-1. Add an `edge_auth_secret` field to the `app-prod` vault item: lowercase hex, at
-   least 32 characters (`openssl rand -hex 32` gives 64). The entrypoint and Terraform
-   accept letters and digits, but nginx compares the header without regard to case,
-   so mixed case adds no strength.
-2. Give the Cloudflare API token in the `cloudflare` item the extra permission
-   Zone / Transform Rules / Edit.
-3. Add `TF_VAR_edge_auth_secret=op://OpenNova-Deploy/app-prod/edge_auth_secret` to
-   `deploy/env/terraform.env.tpl` and run `./deploy/run.sh infra plan`, then
-   `infra apply`: it creates the late-transform ruleset. A zone holds one entrypoint
-   ruleset per phase, so if the zone has one already, import it first; Terraform is
-   then authoritative over all of its rules, and the apply replaces whatever rules it
-   held with this one (copy any you need into `infra/aws/main.tf` before applying).
-   The dashboard alternative: Rules, Transform Rules, Modify Request Header, "Set
-   static" `X-OpenNova-Edge` to the secret for the root and `www` hostnames.
-4. Add `EDGE_AUTH_SECRET=op://OpenNova-Deploy/app-prod/edge_auth_secret` to
-   `deploy/env/app.prod.env.tpl` and deploy (`./deploy/run.sh app deploy`). The web
-   container logs `edge authentication: ON`.
-5. Check: `curl -i https://<domain>/api/health` answers 200, the same request
-   straight to the origin's nginx (`curl -i -H 'Host: <domain>' http://<EIP>/api/health`)
-   answers 403, and so does the server's own port (`curl -i http://<EIP>:8080/api/health`).
-
-Order matters: apply the rule (step 3) before deploying the secret (step 4), or the
-site's API answers 403 in between.
-
-The secret lands in the Terraform state in plain text (`sensitive` only keeps it out of
-plan output): in the vault's `tfstate` document, and in `infra/aws/terraform.tfstate`,
-which every `infra` run pulls into the working copy the toolbox mounts and leaves there
-(gitignored, but on your disk). Treat the `tfstate` document as a secret, and delete the
-local file after a run on any machine others can read.
-
-**Rotating.** nginx accepts a second value, `EDGE_AUTH_SECRET_PREVIOUS`, beside the
-current one while a rotation runs, so the rule can move without a window of 403s:
-
-1. In one sitting, with no other app deploy or `infra` run in between (from the vault
-   edit until this deploy, the vault names a secret nothing accepts yet, so any of
-   them would answer the site's API with 403): in the `app-prod` vault item, copy the
-   current `edge_auth_secret` into a new field `edge_auth_secret_previous` and set
-   `edge_auth_secret` to the new secret (`openssl rand -hex 32`); add
-   `EDGE_AUTH_SECRET_PREVIOUS=op://OpenNova-Deploy/app-prod/edge_auth_secret_previous`
-   to `deploy/env/app.prod.env.tpl`; and deploy the app. nginx now accepts both (the
-   web container logs that the previous secret is accepted too); the rule still
-   stamps the old one.
-2. `./deploy/run.sh infra apply`: the rule stamps the new secret.
-3. Remove the `EDGE_AUTH_SECRET_PREVIOUS` line (and the vault field) and deploy the app
-   again: only the new secret passes. Run the turn-on checks (step 5 above).
-
-The previous secret takes the same rule as the current one (the container stops on a
-malformed one, one set without `EDGE_AUTH_SECRET`, or one equal to it).
-
-**Turning it off.** Unset the environment first, then remove the rule, or the site's
-API answers 403 in between: remove the `EDGE_AUTH_SECRET` (and any
-`EDGE_AUTH_SECRET_PREVIOUS`) line from `deploy/env/app.prod.env.tpl` and deploy the app
-(the web container logs `edge authentication: OFF`), then remove the
-`TF_VAR_edge_auth_secret` line from `deploy/env/terraform.env.tpl` and run
-`infra apply`, which deletes the ruleset.
-
-To make the first site admin, register the account, then add a `bootstrap_admin` field
-holding its username to the `app-prod` vault item and the line
-`ONNET_BOOTSTRAP_ADMIN=op://OpenNova-Deploy/app-prod/bootstrap_admin` to
-`deploy/env/app.prod.env.tpl`, and deploy. Never put the name in the committed
-`app.prod.env`: a name in a public file is one anybody can register first. The server
-promotes the account only while no account is an admin and logs what it did; remove
-both lines after that deploy (the server warns at every boot while the setting is
-present).
-
-## 4. Publish and deploy the images
-
-The server and web images publish to GHCR from CI
-(`.github/workflows/novaworld-images.yml`). Make those packages public once so
-the target can pull them without credentials. Then:
+### Secrets to the host
 
 ```bash
-./deploy/run.sh app deploy                     # pull GHCR images + compose up
-./deploy/run.sh app status                     # ps on the remote host
-./deploy/run.sh app logs novaworld             # tail the server
+./deploy/run.sh secrets sync                   # vault -> SSM SecureStrings
 ```
 
-`app deploy` resolves the target IP from terraform output, reads the SSH key
-from the vault into a tmpfs, and drives the remote docker engine over
-`DOCKER_HOST=ssh://`. The host never needs anything but docker and sshd.
+`secrets sync` reads each reference in `deploy/env/runtime.env.tpl` from the vault and
+writes it to `/opennova/<deployment>/secret/<NAME>`, each value going vault, tmpfs file,
+`put-parameter --value file://...`: never an argument, never printed. The Stripe fields
+are synced together, and only while the deployment's Stripe item (`stripe-live` for
+prod, `stripe-test` otherwise) is complete and well formed; with placeholders billing
+stays off and none of them is synced. Fields marked optional (`bootstrap_admin`,
+`edge_auth_secret_previous`) are synced while they exist; `secrets sync --prune` deletes
+from SSM what the vault no longer names. The host reads them at its next converge
+(`app converge`, or the next `app deploy`), into a memory-only env file.
 
-Another image, `ghcr.io/<owner>/opennova-serve`, publishes from its own workflow
-(`.github/workflows/serve-image.yml`, `apps/serve/Dockerfile`): the headless game server
-the hosted game servers run (ADR 0053), with no retail byte in it
-(`apps/serve/README.md`, "Container image"). The target never pulls it: each hosted
-server's machine does, at the digest `app deploy` pins (`--serve-tag`, section 6), and
-`--tag` does not move it. Make the `opennova-serve` package public once, like the server
-and web images.
+### The database
+
+After the first apply, make the service's role and its database:
+
+```bash
+./deploy/run.sh db bootstrap
+```
+
+It runs on the host (SSM), in a one-off `postgres:17-alpine` container on the host's
+network, as the RDS master user: it creates the role `novaworld` with the
+`DATABASE_PASSWORD` secret as its password (so `secrets sync` first), and the database
+`novaworld` owned by it, `TEMPLATE template0 ENCODING 'SQL_ASCII' LC_COLLATE 'C'
+LC_CTYPE 'C'` (the only kind the server accepts: retail hosts send cp1252 bytes, which it
+stores byte for byte). It is idempotent: run again, it only sets the role's password
+again (how a changed `database_password` takes effect). The master password reaches the
+host as a short-lived SecureString the command deletes when it ends. TLS is required
+(`rds.force_ssl`), and every client verifies the server (`sslmode=verify-full` against
+the pinned RDS CA bundle).
+
+### Cloudflare: TLS to the origin
+
+The records are proxied; Cloudflare connects to the origin's nginx on 443 and verifies
+its certificate, a Cloudflare Origin CA certificate (ECDSA, the domain and its
+first-level names, 15 years) that Terraform makes and hands the host through SSM
+(`/opennova/<deployment>/tls/*`); the web container's entrypoint writes it to a tmpfs.
+The zone is set to SSL/TLS "Full (strict)" with "Always Use HTTPS". Apply the zone
+setting together with an app deploy whose nginx serves 443: in between, the site answers
+52x. There is no port 80 on the origin. The retail HTTP port (8080) has nothing to do
+with this: stock clients speak plain HTTP to it, and `ONNET_API_PROXY_ONLY=1` refuses its
+`/api/` to anyone but the portal's nginx.
+
+Behind the proxied records every request reaches nginx from a Cloudflare edge, so nginx
+takes the visitor's address from `CF-Connecting-IP`, for Cloudflare's published ranges
+only (`web/cloudflare-realip.conf`; refresh it before a web-image release with `sh
+web/cloudflare-realip.sh`, review and commit the diff). The security group takes the
+same ranges live from Cloudflare at each plan.
+
+### Edge authentication
+
+A Cloudflare Worker on anyone's zone can fetch an origin from a real Cloudflare edge with
+any `CF-Connecting-IP` it likes. Edge authentication closes that: a Transform Rule on our
+zone stamps `X-OpenNova-Edge: <secret>` on every request for the web hostnames (every
+deployment's: `edge_other_deployments`), and nginx forwards `/api/` only for requests
+carrying it. It is on: `secrets init` makes `app-prod/edge_auth_secret`, Terraform makes
+the rule, and the prod overlay requires `EDGE_AUTH_SECRET`, so a web container without it
+never starts. A zone holds one entrypoint ruleset per phase: import an existing
+late-transform ruleset before the first apply, and Terraform then owns all its rules.
+
+**Rotating.** nginx accepts a second value, `EDGE_AUTH_SECRET_PREVIOUS`, during a
+rotation, so the rule moves without a window of 403s:
+
+1. In one sitting: in `app-prod`, copy `edge_auth_secret` into a new field
+   `edge_auth_secret_previous` and set `edge_auth_secret` to a new value (`openssl rand
+   -hex 32`); `secrets sync`; `app converge` (for each deployment). nginx accepts both.
+2. `./deploy/run.sh infra apply`: the rule stamps the new secret.
+3. Delete the `edge_auth_secret_previous` field, `secrets sync --prune`, `app converge`.
+
+### Email (support@<domain>)
+
+Mail to `support@<domain>` (and to each local part in `email_routes`, default
+`["support"]`) reaches one mailbox of yours through Cloudflare Email Routing
+(`infra/aws/email.tf`, prod's alone: it is the zone's):
+
+1. In the vault, item `email`, set `forward_to` to the destination address (`secrets
+   init` makes the field as `REPLACE_ME`; `REPLACE_ME` or empty keeps email routing off).
+   Not an address at the domain itself, which would loop.
+2. `./deploy/run.sh infra apply`: it turns Email Routing on for the zone (Cloudflare adds
+   and locks its MX and SPF records; a zone holding MX records of another mail service
+   must drop them first), adds the destination address to the zone's account, and makes
+   one rule per local part.
+3. Cloudflare emails the destination a verification link: click it. Nothing is forwarded
+   until then (Email, Email Routing, Destination addresses in the dashboard shows it
+   pending).
+
+It is receive-only: replies leave from the destination mailbox, under its own address.
+Sending as `support@<domain>` needs an outbound mail provider (an SMTP relay with the
+domain's SPF and DKIM), which this stack does not set up. Every address no rule names is
+refused (the zone's catch-all stays off). The token's email permissions are in section 1.
+
+### The first site admin
+
+Register the account on the site, then add a `bootstrap_admin` field holding its
+username to the deployment's app item, `secrets sync` and `app converge`. The server
+promotes the account only while no account is an admin and logs what it did. Then
+delete the field, `secrets sync --prune` and `app converge` (the server warns at every
+boot while the setting is present). Never put the name in a committed file: a name in a
+public file is one anybody can register first.
+
+## 4. Deploy
+
+The images publish to GHCR from CI: `novaworld-server` and `novaworld-web`
+(`.github/workflows/novaworld-images.yml`), `opennova-game` (the web build,
+`game-web.yml`), `opennova-serve` (the hosted servers, `serve-image.yml`; it also carries
+hostd, the machines' agent). Make each package public once: the host and the machines
+pull anonymously.
+
+```bash
+./deploy/run.sh app deploy --tag sha-abc1234 --serve-tag sha-def5678
+```
+
+`app deploy`:
+
+1. resolves each image to its digest now: `--tag` sets the server and web images
+   (`--server-tag` and `--web-tag` set one alone), `--game-tag`, `--serve-tag` and
+   `--hostd-tag` the others. An image given no tag keeps the current release's digest,
+   so a web-only release (`--web-tag`) never restarts the NovaWorld server and its lobby
+   sessions; the first release takes `latest` for any tag not given;
+2. builds a release bundle: the compose files, the committed `deploy/env/app.prod.env`,
+   `release.env` (the digests), the backup sidecar's build context, and a manifest (the
+   checkout's revision, the images, the previous release); it parses the compose files
+   first, so a broken one fails before anything changes;
+3. uploads it to `s3://<ops bucket>/releases/<deployment>/<id>.tar.gz`, points
+   `/opennova/<deployment>/release` at it, and sends the converge document to the host;
+4. prints the converge's output: the images it pulled, the containers it recreated (only
+   those whose image or settings changed), the server's `[boot] migrations:` line, and
+   the containers' state. It waits for the server to answer `/healthz`.
+
+The host runs the same converge at every boot, so a new host serves the current release
+with no step of yours. Downtime per server change is the server's restart, a few
+seconds.
+
+```bash
+./deploy/run.sh app releases                   # the newest 20, the current one starred
+./deploy/run.sh app rollback                   # converge the previous release
+./deploy/run.sh app rollback --to <id>         # or a named one
+./deploy/run.sh app converge                   # the current release again (new secrets)
+./deploy/run.sh app status                     # the containers (over SSM)
+./deploy/run.sh app restart novaworld          # one service (all without a name)
+./deploy/run.sh app logs novaworld --follow    # CloudWatch, one stream per service
+./deploy/run.sh app shell                      # a root shell on the host (Session Manager)
+```
+
+On prod, `app restart` and `app down` ask first: they go ahead once you type `yes`, or
+with `--yes`, and a run with no terminal refuses without it (as `infra apply`, `fleet
+end` and `fleet roll` do). `--no-hosting` deploys with hosted game servers off (the kill
+switch, section 6). The
+release bundles never expire, so any release can be rolled back to; a rollback of the
+server across a migration is the database's business (section 5).
+
+### The deploy workflow (optional)
+
+`.github/workflows/deploy.yml` runs the same `app deploy` from GitHub Actions, approval
+gated, with no vault: set `github_deploy = true` in `prod.tfvars` and `infra apply`
+(GitHub's OIDC provider and a role trusting only this repository's `production`
+environment); in the repository settings make the `production` environment with
+required reviewers, and the variables `AWS_DEPLOY_ROLE_ARN` (the infra output
+`github_deploy_role_arn`) and `AWS_REGION`. Run it from the Actions tab with the tags; it
+deploys prod from the commit it runs on. The role may read the deployment's settings,
+upload its release bundles, point its release and send the converge document to its
+service instance, and nothing else.
 
 ### The web build (game.<domain>)
 
-The browser build of the game (ADR 0049) is a fourth image,
-`ghcr.io/<owner>/opennova-game`, published by `.github/workflows/game-web.yml`
-(manual runs only while the web build is paused) from `deploy/game/Dockerfile`: the wasm GDExtension, the Godot Web export and an
-nginx on `:8090` that sends the COOP/COEP headers the threaded build needs. The
-portal's nginx routes `game.<domain>` to it, `infra apply` creates the proxied
-`game` record, and the security group keeps `:8090` private. Make the
-`opennova-game` package public once, like the server and web images.
-
-It publishes on its own path filter, so `--tag` does not move it:
-
-```bash
-./deploy/run.sh app deploy --game-tag sha-abc1234   # pin the game image; default latest
-```
-
-To run it locally, from the repo root with the submodules checked out:
+The browser build of the game (ADR 0049), `ghcr.io/<owner>/opennova-game`, is an nginx on
+`:8090` serving the Godot Web export with the COOP/COEP headers the threaded build needs.
+The portal's nginx routes `game.<domain>` (staging: `game-staging.<domain>`) to it on the
+host's `edge` network. To run it locally, from the repo root with the submodules checked
+out:
 
 ```bash
 docker build -f deploy/game/Dockerfile -t opennova-game .
@@ -298,353 +421,421 @@ docker run --rm -p 8090:8090 opennova-game          # http://localhost:8090
 
 ## 5. Backups
 
+Two independent layers:
+
+- **RDS point-in-time recovery**, 14 days, kept even past a deletion of the instance
+  (and a final snapshot at one). `./deploy/run.sh db snapshot` takes a manual snapshot
+  now (before risky work); RDS restores a point in time or a snapshot into a new
+  instance (the RDS console, or `aws rds restore-db-instance-to-point-in-time`), which you
+  then adopt by pointing the stack at it.
+- **pg_dump**, the backup sidecar (`deploy/backup`): a custom-format dump to S3 nightly
+  at 03:00 UTC, kept 90 days, independent of the instance. It runs on the host's network
+  with the server's `DATABASE_URL` and `DATABASE_PASSWORD`; the dumps go under
+  `novaworld/` (prod) or `novaworld-<deployment>/` in the operations bucket.
+
 ```bash
-./deploy/run.sh backup now                     # sqlite .backup -> S3
-./deploy/run.sh backup list
+./deploy/run.sh backup now                     # a dump now
+./deploy/run.sh backup list                    # the dumps
+./deploy/run.sh backup restore novaworld/novaworld-<ts>.dump --yes-overwrite-database
 ```
 
-A backup sidecar also runs nightly (see `deploy/backup/`).
+`backup restore` stops the server, dumps the database as it stands (a
+`novaworld-pre-restore-<ts>` copy), restores the dump in one transaction (`pg_restore
+--clean --if-exists --single-transaction`), and starts the server, whose boot applies any
+migration the dump predates. A server older than the dump refuses an edited or unknown
+migration rather than run on it.
+
+**The restore drill**, once a quarter: restore the newest prod dump into staging
+(`--deployment staging backup restore novaworld/novaworld-<ts>.dump` after copying the
+object to `novaworld-staging/`), sign in on the staging site and check an account and a
+CD key.
+
+### Resetting the service database
+
+Once billing is live the database is durable: migrations are append-only, and `db
+reset-db` refuses while any subscription that grants hosting (active, trialing, past_due)
+is recorded:
+
+```bash
+./deploy/run.sh db reset-db --yes-drop-database
+```
+
+It dumps the database first (`--no-backup` skips it), stops the server, drops the
+database and makes it again (the same `CREATE DATABASE` as `db bootstrap`), and starts
+the server, whose first boot applies every migration; it prints the `[boot] migrations:`
+line. `--orphan-subscriptions` resets anyway: those customers keep paying with no
+account linked here, so cancel them in Stripe first. Everything goes with the reset:
+accounts, sessions, host keys, CD keys, DFX2 activations, billing links; make the first
+site admin again (section 3).
 
 ## 6. Hosted game servers
 
-An account an admin approved (`can_host` in the admin users page) can start one
-headless server from the site's My servers page (ADR 0053), picking its game: a data
-set. A data set is a game folder the server mounts, named by the games slug of the
-lobby it lists in: `jop_2_consumer` (Joint Operations), `dfx2_consumer` (Delta Force
-Xtreme 2) and `opennova_0_consumer` (OpenNova's own data). The server is always the
-public `opennova-serve` image, started with `/game <title>` so it speaks that game's
-identity and lists in that game's lobby; the site offers only the data sets this
-deployment has a snapshot for. The service launches one EC2 machine per server
-(`infra/aws/hosted.tf`, `c7a.medium` by default), running `opennova-serve` over the
-data set's game data, a private encrypted EBS snapshot made once per data set from your
-licensed install and mounted read-only at `/opt/game`. The server lists
-itself on this NovaWorld through the service's public address, its owner administers it
-from the site (the service is the only client of its admin port, 32800, open to the
-service's security group alone; owners never get RAT access), and its stop terminates
-the machine. Machines are terminated, never stopped, so every start has a new public
-address. No machine has an SSH key; break-glass is SSM Session Manager.
+An account with a hosting entitlement (a monthly support tier, or an admin's comp grant
+of `comp_servers`) starts servers from the site's My servers page, picking a data set:
+the game folder the server mounts, named by the games slug of the lobby it lists in
+(`jop_2_consumer`, `dfx2_consumer`, `opennova_0_consumer`). The server is always the
+public `opennova-serve` image, started with `/game <title>`.
 
-How the service launches, watches and ends the machines, the bootstrap route and the
-machine script are in `apps/novaworld_server/README.md`, "Hosted servers".
+The service places each server on a machine it launches itself (its EC2 machine driver,
+with the host's role):
 
-Hosting stays off until a data set's snapshot exists: with no `hosted` item in the vault,
-`infra apply` creates nothing for it and changes nothing but its outputs, and `app
-deploy` runs the service with `ONNET_HOSTED_PROVIDER=none`. `app deploy` reads the
-infra's `hosted_enabled` output (it pulls the state first), so after this lands run
-`./deploy/run.sh infra apply` once before the next deploy: with hosting off it only adds
-the outputs. A state without them stops the deploy rather than guess hosting off;
-`--no-hosting` deploys without reading them.
+- **shared machines**, `t3a.large` with unlimited CPU credits, holding up to 12 servers
+  (`shared_slots`) of any accounts, packed best-fit; an idle one ends after 30 minutes
+  (`fleet_idle_minutes`);
+- **own machines**, `c7a.medium`, exactly one server: the own-machine add-on.
+
+Slot k of a machine is game UDP `32768+k` (to players) and admin TCP `32800+k` (to the
+service instance alone); hostd, the agent on each machine, runs one container per slot
+and reports to the service's internal listener (`10.44.0.10:8070`, admitted from the
+machines alone). Every machine mounts every data set, read-only. Machines are terminated,
+never stopped. No machine has an SSH key or database credentials; break-glass is Session
+Manager. At most 2 shared and 2 own machines run at once (`fleet_max_shared`,
+`fleet_max_own`); `ONNET_HOSTED_CAP` (default 24) caps the servers.
 
 ### The game data
 
-Each data set's snapshot holds the files `opennova-serve` reads from its install, and
+Each data set's snapshot holds the files `opennova-serve` reads from an install, and
 nothing else:
 
 | File | Data sets | Why |
 |---|---|---|
-| `resource.pff`, `localres.pff`, `language.pff` | every one (required) | the retail boot table it mounts (`engine/base/vfs/vfs.h`) |
-| `expansion/jox01/jox01.pff`, `expansion/jox01/jox01L.pff` | `jop_2_consumer` (required) | Escalation, for a server started with it (`/exp jox01`) |
-| `expansion/jox01/version.txt` | `jop_2_consumer` (required) | the expansion checksum the session advertises to joiners |
-| `score.ini` (when present) | `jop_2_consumer`, `dfx2_consumer` | the scoring table a server reads loose from the install |
-| `_NSTMOUT.TXT` (when present) | `jop_2_consumer`, `dfx2_consumer` | the session timeout override, read when it is there |
+| `resource.pff`, `localres.pff`, `language.pff` | every one (required) | the retail boot table it mounts |
+| `expansion/jox01/jox01.pff`, `expansion/jox01/jox01L.pff` | `jop_2_consumer` (required) | Escalation (`/exp jox01`) |
+| `expansion/jox01/version.txt` | `jop_2_consumer` (required) | the expansion checksum joiners compare |
+| `score.ini`, `_NSTMOUT.TXT` (when present) | `jop_2_consumer`, `dfx2_consumer` | the scoring table; the session timeout override |
 
-A Joint Operations Combined Arms install is the `jop_2_consumer` folder, a Delta Force
-Xtreme 2 install the `dfx2_consumer` one (its `med.pff` is the mission editor's and stays
-home), and OpenNova's own data the `opennova_0_consumer` one. The movies, the music, the
-executables and the player's files stay home. A JO:CA install gives about 1 GB, a 2 GiB
-volume. Every snapshot's file system is labelled `opennova-data`, whatever its data set:
-the machine mounts that label read-only at `/opt/game`. The snapshots are encrypted with
-the account's default EBS key (`aws/ebs`) and private to the account; they never go in
-git or an image, and players never reach them (the machines mount them read-only and run
-nothing but the server).
-
-Each data set's host-screen limits (max players, time limit, kill limit, max score,
-respawn, pre-round delay) are the service's own table, the title's host screen's:
-Delta Force Xtreme 2 takes up to 100 players where Joint Operations takes 64, and
-OpenNova's data takes Joint Operations' limits.
+The snapshots are encrypted with the account's default EBS key (`aws/ebs`), private to
+the account, and never go in git or an image. Each file system carries its data set's
+label, by which the machine mounts it.
 
 ### Turning it on
 
-1. **Make each data set's snapshot, once.** For every data set you want to offer, mount
-   its game folder into the toolbox and run `hosted data-snapshot --data-set <slug>`.
-   From PowerShell, for Joint Operations:
+1. **Make each data set's snapshot, once.** Mount its game folder into the toolbox:
 
-   ```powershell
-   $env:OP_SERVICE_ACCOUNT_TOKEN = "ops_..."
-   docker compose -f deploy\docker-compose.deploy.yml run --rm -T `
-     -v "D:/SteamLibrary/steamapps/common/Joint Operations Combined Arms:/hosted-data:ro" `
-     deploy hosted data-snapshot --data-set jop_2_consumer
+   ```bash
+   HOSTED_DATA_DIR="D:/SteamLibrary/steamapps/common/Joint Operations Combined Arms" \
+     ./deploy/run.sh hosted data-snapshot --data-set jop_2_consumer
    ```
 
-   or `$env:HOSTED_DATA_DIR = "<folder>"; .\deploy\run.ps1 hosted data-snapshot --data-set
-   jop_2_consumer`, or from Git Bash `HOSTED_DATA_DIR="D:/SteamLibrary/steamapps/common/Joint
-   Operations Combined Arms" ./deploy/run.sh hosted data-snapshot --data-set
-   jop_2_consumer`. Then the same with your Delta Force Xtreme 2 folder and `--data-set
-   dfx2_consumer`, and so on: one folder, one snapshot, per data set.
-
-   The toolbox takes the data set's files above from the folder (the one place it reads
-   them) and streams them into a helper image it builds on your docker
-   (`deploy/hosted-data`), which makes an ext4 file system of them labelled
-   `opennova-data` and writes it straight into a new snapshot through the EBS direct
-   APIs: no EC2 machine, no S3 bucket, no SSH. The snapshot is tagged
-   `opennova:data-set=<slug>`. It is the only AWS resource the helper makes, and it
-   deletes it if anything fails; the copy of the files lives only in the helper's
-   container, which goes when it ends. It prints the snapshot id (`snap-...`). The
-   vault's AWS credentials need
+   (PowerShell: `$env:HOSTED_DATA_DIR = "<folder>"; .\deploy\run.ps1 hosted data-snapshot
+   --data-set jop_2_consumer`.) It streams the files into a helper image
+   (`deploy/hosted-data`) that writes an ext4 image straight into a new snapshot through
+   the EBS direct APIs, and prints its id. The vault's AWS credentials need
    `ebs:StartSnapshot`, `ebs:PutSnapshotBlock`, `ebs:CompleteSnapshot`,
-   `ec2:DescribeSnapshots` and `ec2:DeleteSnapshot`, and `kms:DescribeKey`, with which
-   the helper confirms the snapshot's key is the AWS-managed `aws/ebs` (without it, it
-   warns). It refuses any other key, because the service's launch policy grants no KMS
-   action: an account whose default EBS key is customer-managed resets it first
-   (`aws ec2 reset-ebs-default-kms-key-id`). The `aws/ebs` key's own policy admits the
-   account's principals through EBS, so an admin deploy user needs nothing more. A
-   deploy user restricted by an SCP or a key policy without that statement would also
-   need `kms:GenerateDataKeyWithoutPlaintext`, `kms:Decrypt` and `kms:CreateGrant` on
-   the key, as AWS's EBS direct APIs guide lists. This is untested here.
+   `ec2:DescribeSnapshots`, `ec2:DeleteSnapshot` and `kms:DescribeKey`.
 
-2. **Record them in the vault.** Create an item `hosted` in the deploy vault with one
-   field per data set, `data_snapshot_id_<slug>`, holding its snapshot's id (say
-   `data_snapshot_id_jop_2_consumer` and `data_snapshot_id_dfx2_consumer`). Every `infra`
-   run reads the item once and passes the fields as `TF_VAR_hosted_data_snapshots`, a
-   map by data set; with no item titled `hosted` in the vault's listing hosting is off,
-   and any other failure (the listing, reading the item, a field naming no data set, a
-   value that is no snapshot id, or an item with no such field at all) stops the run, so
-   a vault error never plans hosting away. The plan reads each snapshot (its size
-   becomes that data set's data volume), so a mistyped or deleted id fails at `infra
-   plan`. `./deploy/run.sh secrets check` checks the item the same way.
+2. **Record them in the vault.** Item `hosted`, one field per data set,
+   `data_snapshot_id_<slug>`. With no `hosted` item hosting is off; a broken item stops
+   every `infra` run rather than plan hosting away.
 
-3. **Check the vCPU quota.** The machines and the server instance share the account's
-   On-Demand Standard instances quota: 5 `c7a.medium` (1 vCPU each) beside the
-   `c7i.large` server (2) is 7 vCPUs, and a new account's quota can be lower.
+3. **Check the vCPU quota.** The service instance and the machines share the account's
+   On-Demand Standard instances quota (L-1216C47A): the host's `c7i.large` 2, each
+   `t3a.large` 2, each `c7a.medium` 1. The defaults need 8 (2 + 2 x 2 + 2 x 1); a staging
+   stack doubles it. Request 32 in the Service Quotas console to leave room for a roll:
 
    ```bash
    ./deploy/run.sh aws service-quotas get-service-quota --service-code ec2 --quota-code L-1216C47A
    ```
 
-   `Quota.Value` must be at least 2 + `ONNET_HOSTED_CAP` (7 at the default cap);
-   request more in the Service Quotas console if it is not. A launch past it fails with
-   `VcpuLimitExceeded`, which the server's timeline shows as a failed launch.
+4. **Plan, then apply.** The plan adds the two launch templates
+   (`aws_launch_template.fleet["shared"]`, `["own"]`), the machines' security group and its
+   rules, the machine role and the service role's fleet policy, and changes infra.env
+   (the service's `ONNET_HOSTED_*` settings, among them `ONNET_HOSTED_DATA_SETS`: the data
+   sets the machines mount, which are the ones the site offers). A data set's default map
+   rotation for new servers is `hosted_data_set_missions` in the deployment's tfvars
+   (`{ jop_2_consumer = ["m01.bms", ...] }`); without one, an owner picks the missions.
 
-   While you are in the console, an [AWS Budgets](https://console.aws.amazon.com/billing/home#/budgets)
-   cost alarm (say at the monthly figure under "Cost" below) is the AWS-side backstop
-   to the service's own cap.
+5. **Deploy**, so the service reads them and pins the serve and hostd images:
+   `./deploy/run.sh app deploy --serve-tag sha-<serve> --hostd-tag sha-<serve>`. The
+   server logs `[boot] hosted servers: ec2 ...`.
 
-4. **Plan, then apply.**
+6. **Subscribe, or grant.** An account hosts once it subscribes to a support tier, or an
+   admin gives it a comp grant (`comp_servers`, the admin user page). Run the smoke test
+   below.
 
-   ```bash
-   ./deploy/run.sh infra plan
-   ```
+### Fleet commands
 
-   The plan must create the hosted resources alone: one launch template per data set
-   (`aws_launch_template.hosted["<slug>"]`, each carrying its data set's snapshot),
-   `aws_security_group.hosted` and its three rules, `aws_iam_role.hosted_machine` with
-   its Session Manager policy (`aws_iam_role_policy.hosted_machine_ssm`) and instance
-   profile, and `aws_iam_policy.hosted_service` with its attachment to the existing
-   service role; update `aws_security_group.server` in
-   place (one ingress rule: the machines' bootstrap fetch on 8080, from their security
-   group); and add outputs. It must not touch `aws_instance.server` (it holds the
-   database). Then `./deploy/run.sh infra apply`.
+```bash
+./deploy/run.sh fleet status                   # EC2's view, then the service's
+./deploy/run.sh fleet drain <machine>          # no new server there; its servers move
+./deploy/run.sh fleet end <machine>            # end it (its servers move first)
+./deploy/run.sh fleet roll                     # move every server to new machines
+```
 
-5. **Deploy the app.**
-
-   ```bash
-   ./deploy/run.sh app deploy --tag sha-<server> --serve-tag sha-<serve>
-   ```
-
-   With the infra's `hosted_enabled` output true, `app deploy` gives the server
-   `ONNET_HOSTED_PROVIDER=ec2` and every setting the provider needs from the Terraform
-   outputs: the region, each data set's launch template
-   (`ONNET_HOSTED_EC2_LAUNCH_TEMPLATES`, a JSON object by data set: the data sets the
-   site offers), the subnet and its range (the only peers
-   the bootstrap route answers), the deployment tag, the server instance's private
-   address, and the serve image pinned to the digest `--serve-tag` names at that moment
-   (default `latest`; pick a tag from the "Serve image" workflow). The digest lookup and
-   every machine's pull are anonymous, so the `opennova-serve` GHCR package must be
-   public and stay public: a private package fails the deploy here, and a package made
-   private later fails every launch at its pull. The server logs
-   `[boot] hosted servers: ec2 in <region>, ...` and the ranges its bootstrap route
-   answers; a setting it lacks turns hosting off with a boot warning naming it. `app
-   reset-db` sets the same.
-
-   Optional, in `deploy/env/app.prod.env`: `ONNET_HOSTED_CAP` (the most servers at once,
-   default 5) and `ONNET_HOSTED_DATA_SETS`, a JSON object by data set on one line whose
-   `missions` is that data set's default rotation (the rotation a start of it takes when
-   it names none, and the maps the site's picker offers for it):
-
-   ```bash
-   ONNET_HOSTED_DATA_SETS='{"jop_2_consumer":{"missions":["a.bms","b.bms"]},"dfx2_consumer":{"missions":["c.bms"]}}'
-   ```
-
-   A data set with no entry there is still offered (its launch template is what offers
-   it); a start of it must then name its own missions.
-
-6. **Approve the first account** (the admin users page, `can_host`) and run the smoke
-   test below.
-
-### Moving a deployment from one snapshot to data sets
-
-A deployment set up before data sets has one snapshot, labelled `opennova-jo`, in the
-vault field `data_snapshot_id`. The machine script now mounts the label `opennova-data`
-at `/opt/game`, so that snapshot no longer boots a machine, and `infra` refuses the old
-field by name. Once, in this order:
-
-1. Stop every hosted server (the admin fleet view's **stop all**) and wait until
-   `./deploy/run.sh hosted status` lists nothing.
-2. Make the Joint Operations snapshot again:
-   `HOSTED_DATA_DIR="<your JO:CA folder>" ./deploy/run.sh hosted data-snapshot --data-set jop_2_consumer`
-   (and one per further data set you want to offer).
-3. In the vault item `hosted`, delete the field `data_snapshot_id` and add
-   `data_snapshot_id_jop_2_consumer` with the new id (and `data_snapshot_id_<slug>` for
-   each further data set).
-4. `./deploy/run.sh infra plan`, then `infra apply`. The old template moves to
-   `aws_launch_template.hosted["jop_2_consumer"]` and is replaced once, since its name
-   now carries its data set; running machines keep theirs, and the next `app deploy`
-   hands the service the new id. Each further data set adds a template of its own.
-5. `./deploy/run.sh app deploy --tag sha-<server> --serve-tag sha-<serve>`: the service
-   takes `ONNET_HOSTED_EC2_LAUNCH_TEMPLATES`. Move a rotation you set in
-   `ONNET_HOSTED_MISSIONS` (gone) to `ONNET_HOSTED_DATA_SETS` in `deploy/env/app.prod.env`.
-6. Delete the old snapshot: `./deploy/run.sh aws ec2 delete-snapshot --snapshot-id <old id>`.
+They call the service's admin API on the service instance over SSM, from the loopback,
+with the admin token. `fleet roll` after a new machine image or a new hostd: servers move
+without counting restarts. On prod `fleet end` and `fleet roll` ask first (`--yes`
+answers for you).
 
 ### The smoke test
 
-1. Start a server from My servers, picking one of the offered games. Its timeline runs
-   `requested`, `provisioning`, `booting` (the machine boots, installs docker, mounts
-   the data and fetches its bundle: a few minutes), `listing`, then `running`.
-   `./deploy/run.sh hosted status` lists the machine. Note how long `booting` and
-   `listing` took (the timeline's times): the service gives a machine 10 minutes to
-   boot and 5 to list (`Ec2Provider::kBootTimeoutMs`, `kListingTimeoutMs`), and real
-   times near either want those raised.
-2. The server shows in its game's lobby in the OpenNova and the retail server
-   browsers, at the machine's public address. A retail client of that game and an
-   OpenNova client both join. Run `/PROFILE` to check the tick holds on the machine
-   type. With several data sets, start one of each (from two approved accounts: one
-   live server per account) and check each lists in its own game's lobby alone.
-3. The site's console works: the player list, chat, a map change.
-4. A crash: open a shell on the machine (`aws ssm start-session --target <machine>`,
-   which needs the Session Manager plugin where you run it) and
-   `sudo docker kill opennova-serve`. The machine powers off and terminates, and the
-   server's timeline shows the crash and a restart on a new machine (restart 1 of 3).
-5. Restart the service (`./deploy/run.sh app restart novaworld`): the running server
-   resumes on its machine and lists again.
-6. Stop it from My servers: the machine terminates (`hosted status` shows it
-   `shutting-down`, then nothing).
-7. The bootstrap route answers no one outside the VPC:
-   `curl -i -X POST http://<EIP>:8080/hosted/bootstrap/1` answers 404.
-8. The server cannot read the machine role: on the machine (SSM),
-   `sudo setpriv --reuid=10001 --regid=10001 --clear-groups curl -sS -m 3 http://169.254.169.254/`
-   fails to connect (the machine script checks the same before the server starts, and
-   ends the machine when it does not hold).
-
-### Cost
-
-One always-on `c7a.medium` is about $0.05 an hour, about $37 a month, plus its public
-IPv4 address (about $3.60 a month) and its volumes (a 10 GiB root and the 2 GiB data
-volume, about $1 a month). Each data set's snapshot costs a few cents a month. Egress can add as much
-again as the compute: a full 64-player server sends about 1.8 GB an hour. At the cap of 5
-always-on servers, budget about $200 a month and more under load. `ONNET_HOSTED_CAP`
-lowers the cap.
+1. Start a server from My servers. Its timeline runs requested, provisioning (a machine
+   launching: a few minutes the first time), booting, listing, running.
+2. It lists in its game's lobby in the OpenNova and the retail server browsers, at the
+   machine's address and its slot's port; a retail client and an OpenNova client both
+   join. A second account's server lands on the next slot of the same shared machine and
+   is joinable too.
+3. The site's console works (players, chat, a map change), and the server's stats move.
+4. `app restart novaworld`: the running servers keep running and list again.
+5. Stop one: its slot frees; with the machine empty, it ends after the idle time.
+6. The kill switch (below) stops them all.
 
 ### The kill switch
 
-The admin fleet view's **stop all** (`POST /api/admin/hosted/stop-all`) moves every live
-server to `stopping`, and the service terminates each machine. Then, to keep hosting off
-across deploys, deploy with `./deploy/run.sh app deploy --no-hosting ...`.
-
-If the service is down, end the machines by hand:
-`./deploy/run.sh hosted status` lists them, and
-`./deploy/run.sh aws ec2 terminate-instances --instance-ids <machine> ...` ends them. A
-machine the service finds with no live server is ended at its next boot or sweep anyway.
-
-To turn hosting off for good: stop all, wait until `hosted status` lists nothing, deploy
-with `--no-hosting`, delete the `hosted` vault item, then `infra apply` (it removes the
-hosted resources; later deploys find hosting off on their own). The snapshots stay until
-you delete them (`./deploy/run.sh aws ec2 delete-snapshot --snapshot-id <id>`). To stop
-offering one data set alone, delete its `data_snapshot_id_<slug>` field (the item keeps
-the others), `infra apply` (its template goes), then `app deploy`; stop its live
-servers first, since the service can no longer launch them.
+The admin fleet view's **stop all** stops every live server and the service ends the
+machines. To keep hosting off across deploys, deploy with `app deploy --no-hosting`. If
+the service is down, `fleet status` lists the machines and `./deploy/run.sh aws ec2
+terminate-instances --instance-ids <machine> ...` ends them; the service ends any machine
+it finds without a server at its next pass anyway. To turn hosting off for good: stop all,
+deploy with `--no-hosting`, delete the `hosted` vault item, `infra apply`.
 
 ### Operating notes
 
-- **A new machine image.** Each launch template keeps the Ubuntu image it was made with
-  (it ignores later image changes, as the server instance does). To move new machines to
-  Canonical's newest, replace each data set's template:
-  `./deploy/run.sh infra apply -replace='aws_launch_template.hosted["jop_2_consumer"]'`
-  (one `-replace` per data set), then `app deploy` (the templates' ids change). Running
-  machines keep theirs.
-- **New data.** Run `hosted data-snapshot --data-set <slug>` again, put the new id in
-  that data set's vault field, `infra apply` (its template moves to it), and delete the
-  old snapshot. New machines of that data set take it.
-- **A new data set.** Make its snapshot, add its `data_snapshot_id_<slug>` field, `infra
-  apply` (a template of its own), `app deploy`: the site offers it from then on.
-- **A machine's logs.** `aws ec2 get-console-output --instance-id <machine> --latest`
-  (through `./deploy/run.sh aws`) shows the bootstrap's steps and the server's end, also
-  after the machine is gone, but only while EC2 still lists the terminated machine
-  (about an hour): read a crash's console soon. On a live machine, over SSM,
-  `journalctl -u opennova-serve` and `/var/log/cloud-init-output.log`.
-- **A refused call.** The service logs each AWS CLI failure with its message (`app logs
-  novaworld`, lines `[hosted] ...`); the timeline the owner sees says only "the launch
-  failed". For an `UnauthorizedOperation`,
-  `./deploy/run.sh aws sts decode-authorization-message --encoded-message <message>`
-  names the statement or condition that refused it.
-- **The machine side never restarts the server.** The unit has `Restart=no`, and
-  `SuccessAction`/`FailureAction=poweroff`: whatever ends `opennova-serve` (any exit
-  code, a signal) ends the machine, and the machine gives the code no meaning. The
-  service alone makes and counts every crash restart (3, forgiven after an hour of
-  running), each on a new machine with new credentials.
-- **The machine role.** It holds the five actions Session Manager needs and nothing
-  else, and the server (UID 10001, on the machine's own network) is fenced off the
-  instance metadata service by an `iptables` rule, so it never holds even those.
-- **The offline infra check.** `infra/aws/tests/hosted.tftest.hcl` plans and applies the
-  hosted resources against mock providers (no credentials, nothing reaches AWS); the
-  file says how to run it, and the "Infra" workflow runs it, with `terraform fmt` and
-  `validate` and shellcheck on the toolbox and the machine script, on every change
-  under `infra/` or `deploy/`.
+- **A new machine image.** The launch templates keep the image they were made with:
+  `./deploy/run.sh infra apply -replace='aws_launch_template.fleet["shared"]'
+  -replace='aws_launch_template.fleet["own"]'`, then `fleet roll`.
+- **New data, or a new data set.** Make its snapshot, set its vault field, `infra apply`
+  (the templates mount it), `fleet roll`, then delete the old snapshot.
+- **A machine's logs.** CloudWatch `/opennova/<deployment>/machines`, and the serial
+  console (`aws ec2 get-console-output --instance-id <machine> --latest`) while EC2 still
+  lists it.
+- **A refused AWS call.** The service logs each failure (`app logs novaworld`); for an
+  `UnauthorizedOperation`, `./deploy/run.sh aws sts decode-authorization-message
+  --encoded-message <message>` names the condition that refused it.
 
-## Resetting the service database
+## Monthly support tiers (Stripe)
 
-The service's SQLite database is disposable. A schema fix edits a migration in
-`backend/migrations` in place, and the server records the migrations it applied by
-file name only, so an edited file never runs again on an existing database. A deploy
-whose PR notes say "the service DB must be reset" (an edited migration) therefore
-starts from an empty database:
+Billing runs on Stripe Checkout and the Customer Portal: the server makes the sessions
+and redirects to Stripe, so no card data and no publishable key touch our pages. Test
+mode serves staging (`stripe-test`), live mode prod (`stripe-live`).
+
+**What exists.** Both modes are set up (made 2026-10-15, by what `stripe setup` below
+now does): the products and their monthly USD prices, found by lookup key
+(`opennova_tier1_monthly` $5, `opennova_tier2_monthly` $10, `opennova_tier3_monthly`
+$15: 1, 2 and 3 hosted servers; `opennova_own_machine_monthly` $45, the add-on that puts
+one of the account's servers on a machine of its own, about what a `c7a.medium` costs),
+their ids in the item's `price_tier1`..`price_tier3` and `price_own_machine` fields; the
+Customer Portal configuration tagged `opennova=support_tiers`; and the webhook endpoints,
+live `https://opennova.net/api/billing/webhook` and test
+`https://staging.opennova.net/api/billing/webhook`, each on the API version the server
+pins (`2025-03-31.basil`) with the 11 events it handles (`checkout.session.completed`,
+`.expired`; `customer.subscription.created`, `.updated`, `.deleted`, `.paused`,
+`.resumed`; `invoice.paid`, `.payment_failed`, `.payment_action_required`;
+`customer.deleted`), its signing secret in the item's `webhook_secret`.
+
+**The toolbox.** The one field you fill is the item's `secret_key` (Developers, API
+keys); the rest is the toolbox's:
 
 ```bash
-./deploy/run.sh app reset-db --yes-drop-database --tag sha-abc1234
+./deploy/run.sh stripe check --mode test       # read alone: the item and its objects
+./deploy/run.sh stripe setup --mode test       # make what is missing (idempotent)
+./deploy/run.sh stripe check --mode live
 ```
 
-Without `--yes-drop-database` it prints what it would do and refuses. With it:
+`--mode` defaults to the deployment's (prod live, the others test); test mode names
+staging's site, live mode prod's. `stripe setup` makes what the mode lacks and leaves
+the rest: a product and a monthly price per lookup key (`--tier1`, `--tier2`, `--tier3`,
+`--own-machine` take other amounts in US dollars: an amount that differs from the current
+price makes a new price, which takes the lookup key and goes first in the field, the old
+one kept after it, since the first is sold and the rest still grant); the price ids
+into the item; the portal configuration (customers switch among the three tier products,
+an upgrade prorating at once and a downgrade waiting for the period's end, quantity
+changes off; cancel any subscription at the period's end, a tier or one own machine,
+since each own machine is a subscription of its own (quantity 1) bought through
+Checkout; and update the card, the email and the address and see invoices; the
+privacy and terms links are `https://<domain>/privacy` and `/terms`, the return link
+`https://<web host>/me/support`), brought to those settings when it exists; and the
+webhook endpoint on `https://<web host>/api/billing/webhook`, whose missing events it
+adds, a new one's signing secret going into `webhook_secret` (an endpoint's API version
+never changes: for another, delete the endpoint in Stripe and run setup again).
+`stripe check` reads the same and fails on what keeps billing from working: the key's
+form and mode, the webhook secret's form, each price (active, monthly, of the item's
+mode, the lookup key's), the portal configuration, the endpoint (enabled, its API
+version, its events). Neither prints a key or a signing secret: the key reaches curl
+through a config file in the tmpfs, the values reach the vault through a template file.
 
-1. It pulls the images for `--tag` (and `--game-tag`, default `latest`, as in
-   `app deploy`), so a mistyped tag fails before anything changes.
-2. It stops `novaworld` and the backup sidecar. The portal stays up; its API fails
-   until step 5.
-3. It takes a final backup to S3, as `backup now`. If that fails it starts both
-   services again and stops, having deleted nothing. `--no-backup` skips this step.
-4. It deletes `novaworld.db` and its `-wal`, `-shm` and `-journal` files from the
-   `nw_data` volume, through a one-off backup-sidecar container on that volume.
-5. It deploys into a fresh `novaworld` container, then prints the server's
-   `[boot] migrations:` line, which on the empty database reads `N applied, 0 skipped`;
-   any other line, or none within a minute, makes it exit non-zero.
+The key `setup` uses needs write on Products, Prices, Customer portal and Webhook
+Endpoints; the server's key (the same field) needs Customers, Checkout Sessions, Customer
+portal and Subscriptions write, Prices and Products read. A restricted key
+(`rk_test_...`, `rk_live_...`) with both sets serves both; Stripe's 403 names a missing
+permission.
 
-It deploys the tag itself rather than leaving the server stopped: the first server to
-boot on the empty database applies and records every migration, so that boot must be
-the image carrying the edit. An `app restart` or a deploy of an older tag in between
-writes the old schema under the same file names, and nothing reports it. If step 5
-fails, rerun `app deploy` with the same tag.
+**The portal and the default configuration.** The server opens portal sessions without
+naming a configuration, so a customer gets the account's default one (Settings, Billing,
+Customer portal). `stripe setup` and `stripe check` say whether the tagged configuration
+is the default; while it is not, set the default to the same features in the dashboard,
+or have the server name the tagged one.
 
-The final backup is on by default because the nightly one can be a day old; skip it
-only when the database is known to be worthless or the backup path is what is broken.
-Everything the database holds goes with the reset (accounts, website sessions, host
-keys); the boot's seed puts back only the game rows. With no accounts left there is
-no site admin either: make the first one again as section 3 describes
-(`ONNET_BOOTSTRAP_ADMIN`). If that setting is still in the vault-injected secrets when
-you reset, remove it first: on the empty database its username is free, and whoever
-registers it first is made admin at the next boot. Register the account yourself, then
-set it and deploy once.
+**Dashboard only** (no API makes these):
 
-The backups from before the reset stay in S3 (the bucket expires objects after 90
-days). Each one records every migration it ran, so undoing the reset takes both steps:
-restore a pre-reset backup (`deploy/backup/README.md`) AND deploy the server tag that
-ran before the reset, which the plan prints as `novaworld now:`. A newer server on a
-restored backup skips every migration and runs on the old schema, and nothing reports
-it.
+1. **Activate the account** (live mode needs the site's legal pages live: terms,
+   privacy, refunds). Statement descriptor: `OPENNOVA`.
+2. **Public details** (Settings, Public details): the business name, the
+   support email `support@opennova.net` (section 3, "Email") and the website
+   `https://opennova.net`.
+3. **Revenue recovery** (Billing, Revenue recovery): retries (Smart Retries), then cancel
+   the subscription when all retries fail. A past-due account keeps its servers running
+   but starts no new one; they stop when Stripe cancels. Its customer emails: receipts
+   for successful payments, and the failed-payment emails.
+4. **Tax** is optional: Stripe Tax with `ONNET_BILLING_AUTOMATIC_TAX=1`. EU VAT applies
+   from the first EU sale; check with an accountant.
+
+Then `./deploy/run.sh secrets check` (the item reads `OK`), `secrets sync`, `app
+converge`: the server logs billing on; with an incomplete set it logs "billing off".
+**Check delivery**: the endpoint's "Send test webhook" must answer 2xx. A challenge page
+means Cloudflare stopped it: the webhook's custom rule skips the WAF's rules
+(`infra/aws/edge.tf`), but Bot Fight Mode cannot be skipped by a rule, so keep it off
+(section 1). On a plan without some skippable phase or product the apply names it: drop
+it from `cloudflare_webhook_skip_phases` / `_products` in the var-file.
+
+## Operating
+
+- **Logs.** `./deploy/run.sh app logs [novaworld|web|game|backup] [--follow] [--since 2h]`
+  reads CloudWatch (`/opennova/<deployment>/service`, 30 days). On the host, `docker logs`
+  works as well (`app shell`).
+- **Alarms** go to the SNS topic `opennova-server-alerts` (`<name>-alerts`), which emails
+  `alerts/email` (confirm the subscription from the first email AWS sends): the server's
+  heartbeat missing for 5 minutes, more than 3 boots in 15 minutes, a failed hosted
+  server, a lost machine, 3 failed launches in 15 minutes, a billing sync older than an
+  hour, 5 refused webhooks in 15 minutes, the entitlement stops held for 5 minutes
+  (`limits_held`: the supervisor's mass-stop guard keeps over-entitled servers running
+  until billing is trusted again; the admin billing view says why), the service
+  instance's status checks (a failed system check recovers the instance, a failed
+  instance check reboots it), its CPU over 80% for 15 minutes, the database's CPU
+  credits and free storage, and the Route 53 health check on `http://<Elastic
+  IP>:8080/healthz`. The heartbeat is the server's JSON line every 60 s; its fields are
+  metrics in `OpenNova/<deployment>`.
+- **Budgets** (prod's, counting every OpenNova deployment): the month's cost
+  (`budget_monthly_usd`) and the EC2 data transfer out (`budget_egress_gb`): an email at
+  80% and at a 100% forecast; Cost Anomaly Detection emails daily anomalies over
+  `cost_anomaly_threshold_usd`. The hosted servers' egress is metered and shown, never
+  capped. The account may hold other projects, so both budgets count only what carries
+  the `opennova:deployment` tag (every resource the stack makes, and the machines the
+  service launches). Cost Explorer sees a tag once it is an active cost allocation tag:
+  a day after the first apply, activate it once (until then the budgets read zero):
+
+  ```bash
+  ./deploy/run.sh aws ce update-cost-allocation-tags-status \
+    --cost-allocation-tags-status TagKey=opennova:deployment,Status=Active
+  ```
+- **A shell.** `./deploy/run.sh app shell` (Session Manager; the toolbox carries the
+  plugin). `./deploy/run.sh db psql` opens psql as the service's role there; `db psql -c
+  'SELECT ...'` runs one statement.
+- **Replacing the service instance.** It keeps no state: `./deploy/run.sh infra apply
+  --allow-destroy -replace=aws_instance.service` makes a new one, which takes the network
+  interface and the Elastic IP and converges to the current release at its first boot
+  (5 minutes or so; the service is down meanwhile, the hosted servers keep running on
+  their machines and list again). An OS upgrade is the same replace (the instance
+  ignores newer images otherwise). A changed first-boot script
+  (`deploy/host/service-user-data.sh`) or converge unit (`opennova-converge.service`),
+  a comment included, is the instance's user data, so it shows in the plan as a
+  replacement, and `infra apply` refuses that plan until you take the replacement on
+  purpose, at a quiet time, with `--allow-destroy`.
+- **Changing a secret.** Edit the vault, `secrets sync`, `app converge`. A new
+  `database_password` takes `db bootstrap` (it sets the role's password) between the sync
+  and the converge.
+
+### Cost
+
+About $90 a month for the service tier before the machines:
+
+| | a month |
+|---|---|
+| the service instance, `c7i.large` on demand | $65 |
+| its Elastic IP and 30 GiB root volume | $6 |
+| the database, `db.t4g.micro`, 20 GiB gp3, backups | $14 |
+| CloudWatch logs, metrics, alarms; the health check | $4 |
+| S3 (releases, dumps), SSM | under $1 |
+
+The machines: a full shared machine (`t3a.large`, its address and volumes, about $60) is
+about $5 a server at 12 servers, before egress; an own machine (`c7a.medium`) about $43.
+Egress is about $0.09 a GB, and a full 64-player server sends about 1.8 GB an hour, so
+egress can cost more than the machine: the egress budget is the alarm. The first shared
+machine runs at a loss until it fills.
+
+## Moving from the single-host stack
+
+Once, to move a deployment made before this layout (one `c7i.large` driven over SSH,
+SQLite on its disk, the Elastic IP `aws_eip.server[0]`) onto it. The database starts
+empty: announce the reset (accounts, CD keys and DFX2 activations go; a client holding an
+old CDKIID re-mints). Rehearse it on a staging deployment first (with Stripe test mode).
+
+**Before the window**
+
+1. From the old checkout, take a last SQLite backup (`./deploy/run.sh backup now`).
+2. On the new checkout: `secrets init`; fill `stripe-test` (and `stripe-live` when ready)
+   and `alerts/email`; `secrets check`.
+3. `mv infra/aws/terraform.tfvars infra/aws/prod.tfvars`, and set in it: the Elastic IP's
+   allocation id (`./deploy/run.sh aws ec2 describe-addresses --public-ips <EIP> --query
+   'Addresses[0].AllocationId'`) as `service_eip_allocation_id`; `azs`, the old subnet's
+   zone first (`./deploy/run.sh aws ec2 describe-subnets --filters
+   Name=cidr-block,Values=10.44.0.0/24`); and, should the old instance hold the private
+   address `10.44.0.10`, another `service_private_ip_host`. Drop the keys the new
+   variables no longer have (`ssh_allowed_cidr`, `allocate_eip`, `backup_bucket_name`:
+   its value is `ops_bucket_name` now).
+4. Request the vCPU quota (section 6) and make the data snapshots again if hosting is on
+   (every machine mounts every data set by its label).
+
+**The window**
+
+1. Maintenance on (the admin "NovaWorld service" page), and **stop all** hosted servers;
+   wait until `./deploy/run.sh aws ec2 describe-instances --filters
+   Name=tag:opennova:hosted,Values=1 Name=instance-state-name,Values=running` lists none.
+2. An image of the old host, for a rollback: `./deploy/run.sh aws ec2 create-image
+   --instance-id <old> --name opennova-server-pre-cutover --no-reboot`; wait until it is
+   `available`.
+3. If `./deploy/run.sh infra list` names a resource of the retired `us_east_1` provider
+   (the old downloads certificate), `infra state-rm` it and delete the certificate by hand
+   (ACM, us-east-1).
+4. `./deploy/run.sh infra state-rm 'aws_eip.server[0]'` (the configuration's `removed`
+   block forgets it as well), then check it still exists:
+   `./deploy/run.sh aws ec2 describe-addresses --allocation-ids <id>`.
+5. `./deploy/run.sh infra plan`, and read it: the network resources move (no subnet,
+   VPC or route table is destroyed); the old instance, its security group, key pair and
+   backup role go; the service instance, its interface, the database and the rest are
+   added; the Elastic IP is not destroyed (an `aws_eip_association` takes it); the DNS
+   records' content is unchanged. Then `infra apply --allow-destroy` (the old instance
+   is an instance it destroys: check that the list it prints before asking names nothing
+   else, then type `yes`; the database takes 10 to 15 minutes; the old instance goes,
+   and the address moves to the new interface).
+6. `secrets sync`, then `db bootstrap`.
+7. `./deploy/run.sh app deploy --tag sha-<server> --game-tag sha-<game> --serve-tag
+   sha-<serve> --hostd-tag sha-<serve>`: the server's first boot applies every migration
+   to the empty database.
+8. Make the first site admin (section 3), then turn maintenance off.
+
+**Rollback** (until the new stack is accepted): launch the image into public subnet a
+(`./deploy/run.sh aws ec2 run-instances --image-id <the image> --instance-type c7i.large
+--subnet-id <public a> --security-group-ids <a group admitting the old ports, 80
+included> --key-name <a key pair, if you need the old toolbox's SSH>`), move the address
+to it (`aws ec2 associate-address --allocation-id <id> --instance-id <it>
+--allow-reassociation`), and set the zone's SSL/TLS mode back to "Flexible" (the old
+nginx serves :80). The old SQLite database is on the image. The Elastic IP is never
+released either way; moving it back to the new service instance is `infra apply
+--allow-destroy` (it replaces the association).
+
+### Smoke tests
+
+- **A. Edge and ports.** `curl -I https://<domain>/` answers 200; `curl -m 5
+  http://<EIP>/` times out (no port 80); `curl -i http://<EIP>:8080/api/health` answers
+  403 (`proxy_required`); `curl -i http://<EIP>:8080/jop_2.gsb` answers 200; `curl -i
+  http://<EIP>:8080/healthz` answers 200 `ok`; `curl -m 5 http://<EIP>:8070/` times out
+  (the internal port); `curl https://<domain>/api/server-info` names the Elastic IP.
+- **B. Operations.** `app status` shows every service healthy; `app logs` shows a stream
+  per service; the `Heartbeat` metric has points; the SNS email subscription is
+  confirmed; the Route 53 health check is green.
+- **C. Accounts.** Register, log in, log out; the admin pages open.
+- **D. Billing.** Stripe's "Send test webhook" answers 2xx; subscribe to Tier 1 ($5, test
+  card in test mode) or give a comp grant; the account's entitlement shows it.
+- **E. Retail.** A stock JO client signs in through the gate and lists the lobby.
+- **F. A shared machine.** Start a server: a shared machine launches, the server lands on
+  slot k and is joinable by a retail and an OpenNova client.
+- **G. A second account** starts one: it lands on slot k+1 of the same machine.
+- **H. A service restart** (`app restart novaworld`) keeps the hosted servers running and
+  re-lists them; measure the gap.
+- **I. Stop** a server: its slot frees; stop the last: the machine ends after the idle
+  time.
+- **J. Stop all** (the kill switch) stops everything and the machines end.
+- **K. Alarms.** On staging: `app shell`, then `docker kill -s STOP <the novaworld
+  container>`: the heartbeat alarm emails within 5 minutes, the health check goes red;
+  `docker kill -s CONT` clears both.

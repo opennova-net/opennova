@@ -131,10 +131,11 @@ The add-on currently supports Windows x64.
 The native apps ship together in `opennova-apps-windows.zip` (on a PR's build
 comment) and `opennova-apps-windows-v<version>.zip` (on tagged releases): the
 `opennova-3di`, `opennova-extract`, `opennova-lan-probe`, `opennova-parity` and
-`opennova-wire` command-line tools, the headless game server
+`opennova-wire` command-line tools and the headless game server
 (`opennova-serve`, with a sample host file; it plays a map rotation and takes retail's
-remote admin) and the NovaWorld server (`opennova-novaworld-server`), for Windows x64. Its `README.txt`
-describes each one.
+remote admin), for Windows x64. Its `README.txt` describes each one. The NovaWorld
+server runs on Linux only; to host one on Windows, run the container stack in
+[deploy/](deploy/README.md) under Docker Desktop.
 
 The OpenNova Switcher ships as `opennova-switcher-windows.zip` (on a PR's build
 comment) and `opennova-switcher-windows-v<version>.zip` (on tagged releases):

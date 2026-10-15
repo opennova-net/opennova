@@ -1,6 +1,6 @@
 // Pins base/io/sha256.h: the FIPS 180-4 / NIST vectors one-shot and streamed in odd-sized
 // chunks, the padding boundaries around the 56-byte length slot, the reset finish() leaves,
-// and the lower-case hex spelling.
+// the lower-case hex spelling, HMAC-SHA256 against RFC 4231, and constant_time_equal.
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -110,8 +110,58 @@ static int test_hex_spelling() {
 	return 0;
 }
 
+static std::string repeat(char c, size_t n) { return std::string(n, c); }
+
+// RFC 4231 section 4: cases 1-4, 6 and 7 (case 5 truncates the output to 128 bits). Case 6 and 7
+// carry a 131-byte key, the hash-the-key-first path.
+static int test_hmac_rfc4231() {
+	const std::string key1 = repeat('\x0b', 20);
+	TEST_EXPECT(sha256_hex(hmac_sha256(key1, "Hi There")) ==
+	            "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7");
+	TEST_EXPECT(sha256_hex(hmac_sha256("Jefe", "what do ya want for nothing?")) ==
+	            "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
+	TEST_EXPECT(sha256_hex(hmac_sha256(repeat('\xaa', 20), repeat('\xdd', 50))) ==
+	            "773ea91e36800e46854db8ebd09181a72959098b3ef8c122d9635514ced565fe");
+	std::string key4;
+	for (int i = 1; i <= 25; ++i) key4.push_back(char(i));
+	TEST_EXPECT(sha256_hex(hmac_sha256(key4, repeat('\xcd', 50))) ==
+	            "82558a389a443c0ea4cc819899f2083a85f0faa3e578f8077a2e3ff46729665b");
+	const std::string key131 = repeat('\xaa', 131);
+	TEST_EXPECT(sha256_hex(hmac_sha256(key131, "Test Using Larger Than Block-Size Key - Hash Key First")) ==
+	            "60e431591ee0b67f0d8a26aacbf5b77f8e0bc6213728c5140546040f0ee37f54");
+	TEST_EXPECT(sha256_hex(hmac_sha256(key131,
+	                                   "This is a test using a larger than block-size key and a larger "
+	                                   "than block-size data. The key needs to be hashed before being "
+	                                   "used by the HMAC algorithm.")) ==
+	            "9b09ffa71b942fcb27635fbcd5b0e944bfdc63644f0713938a7f51535c3a35e2");
+	return 0;
+}
+
+// A 64-byte key is used as is (no hash, no pad); 65 bytes is hashed, so the two differ even
+// though the 65-byte key starts with the 64-byte one.
+static int test_hmac_block_size_key() {
+	const std::string key64 = repeat('k', 64);
+	const std::string key65 = repeat('k', 65);
+	TEST_EXPECT(hmac_sha256(key64, "m") != hmac_sha256(key65, "m"));
+	TEST_EXPECT(hmac_sha256("", "m") == hmac_sha256(std::string(1, '\0'), "m"));
+	return 0;
+}
+
+static int test_constant_time_equal() {
+	TEST_EXPECT(constant_time_equal("", ""));
+	TEST_EXPECT(constant_time_equal("abc", "abc"));
+	TEST_EXPECT(!constant_time_equal("abc", "abd"));
+	TEST_EXPECT(!constant_time_equal("abc", "ab"));
+	TEST_EXPECT(!constant_time_equal("", "a"));
+	TEST_EXPECT(!constant_time_equal(std::string("a\0b", 3), std::string("a\0c", 3)));
+	return 0;
+}
+
 int main() {
 	int failures = 0;
+	failures += test_hmac_rfc4231();
+	failures += test_hmac_block_size_key();
+	failures += test_constant_time_equal();
 	failures += test_nist_empty();
 	failures += test_nist_abc();
 	failures += test_nist_two_block_448_bits();

@@ -15,7 +15,7 @@ ARG GODOT_VERSION=4.6.1-stable
 
 # --- the web side module ------------------------------------------------------
 # Must be the Emscripten that built Godot 4.6's web templates
-# (scripts/build_godot_web.sh checks). The image's CMake predates the sqlite
+# (scripts/build_godot_web.sh checks). The image's CMake predates the rgbcx
 # fetch's options.
 FROM emscripten/emsdk:${EMSCRIPTEN_VERSION} AS wasm
 RUN pip install --no-cache-dir "cmake>=3.28,<4" ninja

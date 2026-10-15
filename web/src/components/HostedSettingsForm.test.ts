@@ -2,14 +2,21 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import HostedSettingsForm from './HostedSettingsForm.vue';
 import { startHostedServer } from '../api/hostedServer';
-import { DFX2, JO, settings } from '../test/hostedFixtures';
+import { DFX2, JO, hostedServer, settings } from '../test/hostedFixtures';
 import type { HostedDataSet, HostedSettings } from '../types/hostedServer';
 
-vi.mock('../api/hostedServer', () => ({ startHostedServer: vi.fn() }));
+vi.mock('../api/hostedServer', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api/hostedServer')>()),
+  startHostedServer: vi.fn(),
+}));
 const start = vi.mocked(startHostedServer);
 
-function mountForm(dataSets: HostedDataSet[] = [JO, DFX2], previous: HostedSettings | null = null) {
-  return mount(HostedSettingsForm, { props: { previous, dataSets } });
+function mountForm(
+  dataSets: HostedDataSet[] = [JO, DFX2],
+  previous: HostedSettings | null = null,
+  extra: { baseId?: string; ownMachinesFree?: number } = {},
+) {
+  return mount(HostedSettingsForm, { props: { previous, dataSets, ...extra } });
 }
 
 function radios(wrapper: VueWrapper, name: string) {
@@ -65,8 +72,8 @@ describe('HostedSettingsForm', () => {
     expect(start).not.toHaveBeenCalled();
     expect(wrapper.get('#hosted-settings-max_players-error').text()).toBe('Enter a whole number from 2 to 50.');
 
-    // In range, the start sends the game with the rest.
-    start.mockResolvedValue({ ok: true, value: null });
+    // In range, the start sends the game with the rest, on a shared machine.
+    start.mockResolvedValue({ ok: true, value: hostedServer(9, { state: 'requested' }) });
     await wrapper.get('#hosted-settings-max_players').setValue(24);
     await wrapper.get('form').trigger('submit');
     await flushPromises();
@@ -78,7 +85,24 @@ describe('HostedSettingsForm', () => {
       expansion: '',
       missions: ['dfx_one.bms'],
     });
-    expect(wrapper.emitted('started')).toHaveLength(1);
+    expect(start.mock.calls[0][1]).toBe(false);
+    expect(wrapper.emitted('started')?.[0]).toEqual([hostedServer(9, { state: 'requested' })]);
+  });
+
+  it('takes its ids from baseId, and offers an own machine only while one is free', async () => {
+    const shared = mountForm([JO], null, { baseId: 'new-server' });
+    expect(shared.find('#new-server-game_name').exists()).toBe(true);
+    expect(shared.find('#hosted-settings-game_name').exists()).toBe(false);
+    expect(shared.find('#new-server-own_machine').exists()).toBe(false);
+
+    start.mockResolvedValue({ ok: true, value: hostedServer(4, { state: 'requested', own_machine: true }) });
+    const own = mountForm([JO], null, { baseId: 'new-server', ownMachinesFree: 1 });
+    expect(own.get('#new-server-own_machine-hint').text()).toContain('One of your own machines is free.');
+    await own.get('#new-server-game_name').setValue('Night Ops 2');
+    await own.get('#new-server-own_machine').setValue(true);
+    await own.get('form').trigger('submit');
+    await flushPromises();
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({ game_name: 'Night Ops 2' }), true);
   });
 
   it("marks the game picker when the backend refuses the game", async () => {

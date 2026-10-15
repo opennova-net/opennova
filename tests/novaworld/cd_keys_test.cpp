@@ -1,5 +1,5 @@
-// The service's CD keys below the HTTP layer (apps/novaworld_server/cd_keys.h,
-// migration 0015), over a migrated in-memory database: the serial format, the
+// The service's CD keys below the HTTP layer (apps/novaworld_server/cd_keys.h),
+// over a migrated database: the serial format, the
 // keys an admin generates, lists, assigns and revokes, and the activations, an
 // account's (the retail login's: under its live key, the first key minted when
 // minting is on, none once its keys are revoked) and a key's (an admin's manual
@@ -10,8 +10,9 @@
 #include "cd_keys.h"
 
 #include <net/novacrypto/cdkey.h>
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 
+#include "common/test_database.h"
 #include "common/test_expect.h"
 
 #include <cstdint>
@@ -35,11 +36,12 @@ constexpr const char *kMachineA = "ABCDEFGHIJKLMNOPQRSTUVW";
 constexpr const char *kMachineB = "TTTTTTTTTTTTTTTTTTTTTTT";
 
 int64_t add_player(Database &db, const std::string &name, const char *kind = "player") {
-	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle, kind) VALUES (?, "
-			"'x', ?, '1', ?, ?);",
-			{ BindValue(name), BindValue("pc-" + name), BindValue(name),
-					BindValue(std::string(kind)) });
-	return db.last_insert_rowid();
+	return db.query("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle, kind) "
+					"VALUES ($1, 'x', $2, '1', $1, $3) RETURNING id;",
+					{ BindValue(name), BindValue("pc-" + name), BindValue(std::string(kind)) })
+			.front()
+			.as_int(0)
+			.value();
 }
 
 bool is_upper_hex(char c) {
@@ -208,7 +210,7 @@ int activations(Database &db) {
 	TEST_EXPECT(activates(result.nwact, kMachineA, fresh[0].wire_key) && result.nwact != nwact_a);
 
 	// A deleted account takes its keys and their activations.
-	db.exec("DELETE FROM players WHERE id = ?;", { BindValue(first) });
+	db.exec("DELETE FROM players WHERE id = $1;", { BindValue(first) });
 	TEST_EXPECT(!cdkeys::find_key(db, key_id) && !cdkeys::find_key(db, fresh[0].id));
 	TEST_EXPECT(cdkeys::activations_of_key(db, key_id).empty());
 	return 0;
@@ -216,10 +218,10 @@ int activations(Database &db) {
 
 } // namespace
 
-int main() {
-	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
-	Database db(":memory:");
-	opennova::db::run_migrations(db, source_dir / "backend" / "migrations");
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
+	test_db::TestDatabase scratch;
+	Database db = scratch.open();
 	int rc = 0;
 	rc |= serial_format();
 	rc |= needs_activation();

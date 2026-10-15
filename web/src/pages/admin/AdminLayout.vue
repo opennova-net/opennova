@@ -1,7 +1,7 @@
 <template>
   <AdminGate>
-    <div class="mx-auto max-w-6xl px-6 py-10">
-      <div class="mb-8 flex items-center justify-between">
+    <div class="mx-auto max-w-6xl px-4 py-10 sm:px-6">
+      <div class="mb-8 flex items-center justify-between gap-4">
         <div class="flex items-center gap-2 text-xs uppercase tracking-[0.3em] text-ink-muted">
           <span>Admin</span>
         </div>
@@ -19,25 +19,26 @@
       </div>
 
       <div class="flex flex-col gap-8 md:flex-row">
-        <aside class="shrink-0 md:w-56">
-          <nav class="flex gap-1 overflow-x-auto rounded-panel border border-border bg-panel p-2 md:flex-col md:overflow-visible">
-            <RouterLink
-              v-for="item in sections"
-              :key="item.to"
-              :to="item.to"
-              class="whitespace-nowrap rounded-control px-3 py-2 text-sm font-medium transition"
-              :class="isActive(item)
-                ? 'bg-raised text-accent'
-                : 'text-ink-muted hover:bg-hover hover:text-ink'"
-            >
-              {{ item.label }}
-            </RouterLink>
-          </nav>
-        </aside>
+        <nav aria-label="Admin" class="shrink-0 md:w-56">
+          <ul class="flex gap-1 overflow-x-auto rounded-panel border border-border bg-panel p-2 md:flex-col md:overflow-visible">
+            <li v-for="item in sections" :key="item.to">
+              <RouterLink
+                :to="item.to"
+                class="block whitespace-nowrap rounded-control px-3 py-2 text-sm font-medium transition"
+                :class="isActive(item)
+                  ? 'bg-raised text-accent'
+                  : 'text-ink-muted hover:bg-hover hover:text-ink'"
+                :aria-current="isActive(item) ? 'page' : undefined"
+              >
+                {{ item.label }}
+              </RouterLink>
+            </li>
+          </ul>
+        </nav>
 
-        <main class="min-w-0 flex-1">
+        <div class="min-w-0 flex-1">
           <RouterView />
-        </main>
+        </div>
       </div>
     </div>
   </AdminGate>
@@ -55,22 +56,25 @@ interface AdminSection {
   label: string;
 }
 
-// /admin is a pure redirect to /admin/users, so the route path is always one
-// of the `to` values below.
+// /admin is a pure redirect to /admin/overview, so the route path is always
+// one of the `to` values below or a page under one (a user's, a fleet
+// server's).
 const sections: AdminSection[] = [
+  { to: '/admin/overview', label: 'Overview' },
   { to: '/admin/users', label: 'Users' },
-  { to: '/admin/server', label: 'Server Status' },
-  { to: '/admin/connections', label: 'Connections' },
-  { to: '/admin/hosted', label: 'Hosted servers' },
+  { to: '/admin/fleet', label: 'Fleet' },
+  { to: '/admin/billing', label: 'Billing' },
+  { to: '/admin/service', label: 'NovaWorld service' },
+  { to: '/admin/sessions', label: 'NovaWorld sessions' },
   { to: '/admin/cd-keys', label: 'CD keys' },
 ];
 
 const route = useRoute();
 
-// Explicit active check — RouterLink's default active class would light up the
-// first item on every child path since '/admin' is a prefix of them all.
+// An explicit active check: RouterLink's default active class would light up
+// every item whose path is a prefix of the route's.
 function isActive(item: AdminSection): boolean {
-  return route.path === item.to;
+  return route.path === item.to || route.path.startsWith(`${item.to}/`);
 }
 
 const { user, isAdmin, signOut: endSession } = useSession();

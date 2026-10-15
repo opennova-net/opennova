@@ -42,11 +42,16 @@ export interface HostedSettings {
   missions: string[];
 }
 
-// POST /api/me/server/start's body: every field but game_name may be left out
-// (the backend's default): game defaults to the first data set the service
-// offers, and missions to that data set's rotation (its "missions" in
+// The settings in POST /api/me/servers's body: every field but game_name may
+// be left out (the backend's default): game defaults to the first data set the
+// service offers, and missions to that data set's rotation (its "missions" in
 // ONNET_HOSTED_DATA_SETS).
 export type StartSettings = Pick<HostedSettings, 'game_name'> & Partial<Omit<HostedSettings, 'game_name'>>;
+
+// POST /api/me/servers's body: the settings, and whether the server runs on
+// one of the account's own machines (the own-machine add-on) rather than a
+// shared one.
+export type StartRequest = StartSettings & { own_machine?: boolean };
 
 // The whole-number settings, each with its range per data set.
 export type HostedIntField = 'max_players' | 'time_limit' | 'kill_limit' | 'max_score' | 'respawn' | 'start_delay';
@@ -109,6 +114,8 @@ export interface HostedServer {
   state: HostedState;
   // Any state but stopped and failed.
   live: boolean;
+  // It runs on a machine of its own (the own-machine add-on), not a shared one.
+  own_machine: boolean;
   settings: HostedSettings;
   // The names the service gives the server's game and expansion ("Joint
   // Operations", "Escalation (jox01)" or "Joint Operations (base game)").
@@ -123,63 +130,121 @@ export interface HostedServer {
   running_at: string | null;
   ended_at: string | null;
   listing: HostedListing | null;
-  // The newest 50 transitions, oldest first: GET /api/me/server only (the
-  // start and stop replies leave them out).
+  // The newest 50 transitions, oldest first: GET /api/me/servers/<id> only
+  // (the list, the start and the stop replies leave them out).
   events?: HostedEvent[];
 }
 
-// GET /api/me/server.
-export interface MyHostedServerResponse {
-  // The service runs hosted servers (ONNET_HOSTED_PROVIDER is not none, and
-  // it offers at least one data set).
+// Where an account's hosting entitlement comes from: nothing, its support
+// tier, or an admin's comp grant.
+export type EntitlementSource = 'none' | 'tier' | 'comp';
+
+// The account's hosting entitlement, as GET /api/me/servers counts it.
+export interface HostingEntitlement {
+  // How many hosted servers the account may have live at once; 0 locks
+  // hosting.
+  max_servers: number;
+  // How many it has live now, stopping ones included (a stopping server holds
+  // its place until it has stopped).
+  used: number;
+  // The own-machine add-ons it holds, and how many of its live servers run on
+  // one.
+  own_machines: number;
+  own_used: number;
+  // Whether a new server may start: false while the support tier's payment is
+  // past due (the live ones keep running).
+  can_start: boolean;
+  source: EntitlementSource;
+}
+
+// GET /api/me/servers.
+export interface HostedServersResponse {
+  // The service runs hosted servers (it has a fleet and offers at least one
+  // data set).
   enabled: boolean;
-  // An admin approved this account for a hosted server.
-  can_host: boolean;
+  // Every hosted server place on the service is taken: a start now would be
+  // refused (at_capacity).
+  full: boolean;
+  entitlement: HostingEntitlement;
   // The data sets a start may pick, in the service's order (the first is a
   // start's default); only the ones this deployment configured.
   data_sets: HostedDataSet[];
-  // The account's live server, else its newest ended one, else null.
-  server: HostedServer | null;
+  // The live servers by id, oldest first, then the newest 10 ended ones,
+  // newest first; without their events.
+  servers: HostedServer[];
 }
 
-// The start and stop replies.
+// GET /api/me/servers/<id>, and the start and stop replies.
 export interface HostedServerReply {
-  server: HostedServer | null;
+  server: HostedServer;
 }
 
-// An account named in the fleet view.
-export interface AccountRef {
+// The owner named in the fleet view, with their support tier (null for
+// none: a comp grant, or no entitlement left).
+export interface FleetOwner {
   id: number;
   username: string;
+  tier: 1 | 2 | 3 | null;
+}
+
+// A machine's kind: a shared machine packs several servers, an own machine
+// runs exactly one (the own-machine add-on).
+export type MachineKind = 'shared' | 'own';
+
+// launching -> booting -> ready -> draining -> ending -> ended | failed; lost
+// when its reports stop.
+export type MachineState = 'launching' | 'booting' | 'ready' | 'draining' | 'ending' | 'ended' | 'failed' | 'lost';
+
+// A machine of the fleet (GET /api/admin/hosted's `machines`).
+export interface FleetMachine {
+  // The service's fleet_machines row (what machine_ref and the routes name).
+  id: string;
+  // The cloud's handle of it (an EC2 instance id); '' before its launch answered.
+  cloud_id: string;
+  kind: MachineKind;
+  state: MachineState | (string & {});
+  // The EC2 instance type ('t3a.large'), or the local driver's name.
+  instance_type: string;
+  // Its server positions, and how many hold a live server.
+  slots: number;
+  slots_used: number;
+  public_address: string;
+  // Bytes sent to players this calendar month, all its servers together.
+  egress_bytes_month: number;
 }
 
 // A hosted server in the admin's fleet view: the owner's view plus who owns
-// it, its service account (srv-<id>) and its machine. Never its admin
-// password.
+// it and where it runs. Never its admin password.
 export interface FleetServer extends HostedServer {
-  owner: AccountRef | null;
-  service_account: AccountRef | null;
-  provider: string;
-  machine_id: string;
-  machine_address: string;
-  admin_port: number;
+  owner: FleetOwner | null;
+  // The machine it is placed on (its id), its slot there and its game port;
+  // null before placement.
+  machine_ref: string | null;
+  slot: number | null;
+  game_port: number | null;
+  // Players on it now, as its listing says; null while not listed.
+  players: number | null;
+  // GET /api/admin/hosted/<id> only: its machine.
+  machine?: FleetMachine | null;
 }
 
 // GET /api/admin/hosted.
 export interface FleetResponse {
   enabled: boolean;
-  provider: string;
   // ONNET_HOSTED_CAP: the most servers live at once.
   cap: number;
   // How many are live now.
   live: number;
-  // The newest 100, live ones first.
+  machines: FleetMachine[];
+  // The filter's servers, live ones first.
   servers: FleetServer[];
 }
 
-// POST /api/admin/hosted/<id>/stop.
-export interface FleetServerReply {
-  server: FleetServer | null;
+// GET /api/admin/hosted's filter.
+export interface FleetQuery {
+  // An owner's username.
+  owner?: string;
+  state?: 'live' | 'ended' | 'all';
 }
 
 // POST /api/admin/hosted/stop-all.
@@ -190,7 +255,7 @@ export interface StopAllReply {
 
 // The console routes (apps/novaworld_server/hosted/console_routes.cpp, README
 // "Hosted servers", the console routes' table): the owner's on
-// /api/me/server/..., the admin's on /api/admin/hosted/<id>/....
+// /api/me/servers/<id>/..., the admin's on /api/admin/hosted/<id>/....
 
 // One PLAYER LIST row (the server's own slot-0 row left out). `team` and
 // `class` are the numbers the server prints.
@@ -253,7 +318,7 @@ export interface ConsoleLine {
   at: string;
 }
 
-// GET .../console.
+// GET .../console (readable on an ended server too).
 export interface ConsoleLog {
   server_id: number;
   // Null while the server has no link (not running).

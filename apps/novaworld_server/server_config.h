@@ -34,8 +34,17 @@ struct ServerConfig {
 	// for the static SPA.
 	uint16_t http_port = 8080;
 
-	// SQLite path. Created on first boot if missing.
-	std::filesystem::path database_path = "backend/data/state.db";
+	// The PostgreSQL database (db/database.h): DATABASE_URL, a libpq
+	// connection URI (not secret; the boot line prints it, a password in it
+	// masked), and DATABASE_PASSWORD, the role's password, kept apart from it
+	// (secret: registered as a log secret at boot). The default URL is
+	// scripts/dev_postgres.sh's local server. DATABASE_POOL_MAX caps the
+	// connections the service opens (db::ConnectionPool): the gate's, the NW
+	// UDP listener's and main's for their lifetime, and one per HTTP request,
+	// supervisor pass or admin-link call while it runs.
+	std::string database_url = "postgresql://novaworld@127.0.0.1:5432/novaworld";
+	std::string database_password;
+	size_t database_pool_max = 16;
 
 	// Migrations + seed dirs. Read at startup.
 	std::filesystem::path migrations_dir = "backend/migrations";
@@ -164,55 +173,33 @@ struct ServerConfig {
 	uint16_t    client_reflect_gate_port = 0;       // ONNET_CLIENT_REFLECT_GATE_PORT
 	uint16_t    client_reflect_novaworld_port = 0;  // ONNET_CLIENT_REFLECT_NOVAWORLD_PORT
 
-	// Hosted servers (apps/novaworld_server/hosted, ADR 0053 proposed): where the
-	// supervisor runs them. "none" (the default) runs none and the start route
-	// answers that hosting is off; "local" runs each as an opennova-serve child
-	// process on this machine (LocalProcessProvider), for development and the
-	// tests; "ec2" runs each on an EC2 machine of its own (Ec2Provider, the
-	// settings below). ONNET_HOSTED_PROVIDER; any other value is "none", with a
-	// warning, as is a provider no data set is configured for.
+	// Hosted servers (apps/novaworld_server/hosted, ADR 0053 proposed): the
+	// machine driver the supervisor runs their machines on. "none" (the
+	// default) runs none and the start route answers that hosting is off;
+	// "local" runs each machine as a stand-in on this one whose containers are
+	// opennova-serve child processes (LocalMachineDriver), for development and
+	// the tests; "ec2" launches EC2 machines from the shared and own launch
+	// templates (Ec2MachineDriver). ONNET_HOSTED_PROVIDER; any other value is
+	// "none", with a warning, as is a driver no data set is configured for.
+	// The fleet's own settings (the internal listener, the machines' knobs, the
+	// EC2 values, the serve and hostd images) are hosted/fleet_config.h's.
 	std::string hosted_provider = "none";
 	// ONNET_HOSTED_CAP: the most hosted servers live at once, across every
-	// account (each account has one at most).
-	int hosted_cap = 5;
-	// The local provider's opennova-serve binary (ONNET_HOSTED_SERVE_BIN,
-	// required for "local") and the root of the servers' working directories
+	// account, a backstop beside the fleet's own room.
+	int hosted_cap = 24;
+	// The local driver's opennova-serve binary (ONNET_HOSTED_SERVE_BIN,
+	// required for "local") and the root of its machines' slot directories
 	// (ONNET_HOSTED_WORK_DIR).
 	std::string hosted_serve_bin;
 	std::string hosted_work_dir = "backend/data/hosted";
-	// The data sets (hosted/data_sets.h, which reads these texts):
+	// The data sets (hosted/data_sets.h, which reads the text):
 	// ONNET_HOSTED_DATA_SETS, a JSON object keyed by data set (its default
-	// rotation, "missions", the first the starting map; the local provider's
-	// game folder, "resource_dir", and "loose_root" for one with no archives),
-	// and ONNET_HOSTED_EC2_LAUNCH_TEMPLATES, a JSON object, data set -> its
-	// launch template. The provider offers the ones it has the data of; none
-	// offered, or texts that do not read, is hosting off.
+	// rotation, "missions", the first the starting map; the local driver's
+	// game folder, "resource_dir", and "loose_root" for one with no archives).
+	// The driver offers the ones it has the data of (every one named, for the
+	// ec2 driver: each cloud machine mounts them all); none offered, or a text
+	// that does not read, is hosting off.
 	std::string hosted_data_sets;
-	std::string hosted_ec2_launch_templates;
-
-	// The ec2 provider's (hosted/ec2_provider.h), each set by the deploy
-	// toolbox's `app deploy` from the Terraform outputs (DEPLOY.md, "Hosted game
-	// servers"); every one is required for "ec2". The region
-	// (ONNET_HOSTED_EC2_REGION) and the subnet (ONNET_HOSTED_EC2_SUBNET) a
-	// machine launches in (its launch template is its data set's, above); the
-	// deployment tag every call is scoped to
-	// (ONNET_HOSTED_DEPLOYMENT); the serve image, pinned
-	// (ONNET_HOSTED_SERVE_IMAGE); this service's PRIVATE address
-	// (ONNET_HOSTED_SERVICE_ADDRESS: where the machines fetch their bootstrap
-	// bundle and the address their admin.cfg admits); the private networks the
-	// bootstrap route answers (ONNET_HOSTED_BOOTSTRAP_CIDRS, comma-separated
-	// IPv4 CIDRs: the VPC's subnet); the AWS CLI (ONNET_HOSTED_AWS_CLI, an
-	// absolute path); and the machine script (ONNET_HOSTED_MACHINE_SCRIPT, the
-	// user-data template, hosted/machine/user_data.sh, which the server image
-	// ships at the default path; a run outside the image names its own).
-	std::string hosted_ec2_region;
-	std::string hosted_ec2_subnet;
-	std::string hosted_deployment;
-	std::string hosted_serve_image;
-	std::string hosted_service_address;
-	std::vector<std::string> hosted_bootstrap_cidrs;
-	std::string hosted_aws_cli = "/usr/local/bin/aws";
-	std::string hosted_machine_script = "/app/hosted/machine_user_data.sh";
 
 	// Build a config by reading env vars, falling back to the defaults
 	// above for anything not set.

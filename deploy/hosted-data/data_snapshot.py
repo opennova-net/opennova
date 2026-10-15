@@ -10,13 +10,14 @@ files opennova-serve reads into this program's standard input. It
   1. extracts them into a staging directory (regular files and directories alone);
   2. checks the set against the data set's required files (every one: the three base
      archives; Joint Operations: Escalation's pair and its version.txt besides);
-  3. builds an ext4 file system image labelled opennova-data holding them (no journal:
-     every machine mounts it read-only, at /opt/game), checked with e2fsck;
+  3. builds an ext4 file system image labelled for its data set (volume_label: od-jop2
+     for jop_2_consumer) holding them (no journal: every machine mounts it read-only, at
+     /opt/game/<data set>), checked with e2fsck;
   4. writes the image's non-zero blocks straight into a new snapshot through the EBS
      direct APIs (StartSnapshot, PutSnapshotBlock, CompleteSnapshot), encrypted with
      the account's default EBS key, tagged opennova:hosted-data=1, the deployment and
      opennova:data-set=<slug>.
-     That key must be the AWS-managed aws/ebs one, which infra/aws/hosted.tf's launch
+     That key must be the AWS-managed aws/ebs one, which infra/aws/fleet.tf's launch
      policy relies on (it grants no KMS action): another is refused before a block is
      written, and a key it cannot read (no kms:DescribeKey) is a warning;
   5. waits until EC2 reports the snapshot completed, and prints its id on standard
@@ -46,9 +47,29 @@ import uuid
 import boto3
 from botocore.config import Config
 
-# The machine script mounts the volume by this label (apps/novaworld_server/hosted/
-# machine/user_data.sh), whatever the data set.
-LABEL = "opennova-data"
+# ext4 holds a label of at most 16 bytes.
+MAX_LABEL_BYTES = 16
+
+
+def volume_label(data_set: str) -> str:
+    """The label a data set's file system carries, by which every fleet machine mounts it.
+
+    "od-" and the slug without its "_consumer" suffix and its underscores (jop_2_consumer:
+    od-jop2), the service's Ec2MachineDriver::volume_label
+    (apps/novaworld_server/hosted/ec2_machine_driver.h, which machine/machine_user_data.sh
+    mounts by, and by nothing else): change both or neither.
+    """
+    suffix = "_consumer"
+    slug = data_set
+    if len(slug) > len(suffix) and slug.endswith(suffix):
+        slug = slug[: -len(suffix)]
+    label = "od-" + slug.replace("_", "")
+    allowed = set("abcdefghijklmnopqrstuvwxyz0123456789-")
+    if len(label) <= 3 or len(label) > MAX_LABEL_BYTES or not set(label) <= allowed:
+        raise SystemExit(f"data set {data_set} has no volume label")
+    return label
+
+
 # The retail boot table every data set's opennova-serve mounts.
 BOOT_ARCHIVES = ["resource.pff", "localres.pff", "language.pff"]
 # What opennova-serve mounts, per data set: the boot table, and for Joint Operations
@@ -109,13 +130,13 @@ def check(data_set: str, files: list[tuple[str, int]]) -> None:
         raise SystemExit("empty archives: " + ", ".join(empty))
 
 
-def build_image(stage: str, image: str, data_bytes: int) -> int:
-    """An ext4 image of `stage` at `image`; its size in GiB."""
+def build_image(stage: str, image: str, data_bytes: int, label: str) -> int:
+    """An ext4 image of `stage` at `image`, labelled `label`; its size in GiB."""
     size_gib = max(1, -(-(data_bytes + data_bytes // 10 + (128 << 20)) // GIB))
     with open(image, "wb") as f:
         f.truncate(size_gib * GIB)
     subprocess.run(
-        ["mkfs.ext4", "-q", "-F", "-L", LABEL, "-O", "^has_journal", "-m", "0",
+        ["mkfs.ext4", "-q", "-F", "-L", label, "-O", "^has_journal", "-m", "0",
          "-E", "root_owner=0:0", "-d", stage, image],
         check=True)
     subprocess.run(["e2fsck", "-fn", image], check=True, stdout=sys.stderr)
@@ -159,7 +180,7 @@ def upload(ebs, image: str, snapshot_id: str, block_size: int) -> int:
 def check_key(kms, key_arn: str | None) -> None:
     """Refuses a snapshot encrypted with any key but the AWS-managed aws/ebs one.
 
-    hosted.tf's service policy grants no KMS action: a launch from a snapshot under
+    fleet.tf's service policy grants no KMS action: a launch from a snapshot under
     a customer-managed key would fail. Reading the aws/ebs key needs kms:DescribeKey;
     without it the check is a warning, not a refusal.
     """
@@ -206,8 +227,9 @@ def main() -> int:
             log(f"  {name}  {size:,} bytes")
         log(f"{args.data_set}: {len(files)} files, {data_bytes:,} bytes")
         image = os.path.join(work, "data.ext4")
-        size_gib = build_image(stage, image, data_bytes)
-        log(f"ext4 image labelled {LABEL}, {size_gib} GiB")
+        label = volume_label(args.data_set)
+        size_gib = build_image(stage, image, data_bytes, label)
+        log(f"ext4 image labelled {label}, {size_gib} GiB")
 
         snapshot_id = None
         completed = False

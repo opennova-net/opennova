@@ -14,6 +14,10 @@ COPY cloudflare-realip.conf /etc/nginx/cloudflare-realip.conf
 COPY edge-auth.conf /etc/nginx/edge-auth.conf
 COPY docker-entrypoint.sh /docker-entrypoint.sh
 COPY --from=build /app/dist /usr/share/nginx/html
-EXPOSE 80
+# Where nginx listens: docker-entrypoint.sh writes it at every start (443 with
+# the origin certificate, 80 without); this default lets `nginx -t` read the
+# image's configuration as it stands.
+RUN printf 'listen 80;\n' > /etc/nginx/listen.conf
+EXPOSE 80 443
 ENTRYPOINT ["/bin/sh", "/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]

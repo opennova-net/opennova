@@ -104,7 +104,7 @@ std::string creator_of(const RouteAccess &caller) {
 	return caller.user ? "admin " + caller.user->username : std::string("token");
 }
 
-crow::response db_failure(const char *route, const db::SqliteError &e) {
+crow::response db_failure(const char *route, const db::Error &e) {
 	std::fprintf(stderr, "[http] %s failed: %s\n", route, e.what());
 	return json_error(500, "db_error");
 }
@@ -188,7 +188,7 @@ crow::response CdKeyRoutes::list(const crow::request &req) {
 		int64_t total = 0;
 		out["keys"] = keys_json(cdkeys::list_keys(*db_conn, filter, &total));
 		out["total"] = total;
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		return db_failure("GET /api/admin/cd-keys", e);
 	}
 	out["limit"] = filter.limit;
@@ -228,7 +228,7 @@ crow::response CdKeyRoutes::generate(const crow::request &req) {
 		crow::json::wvalue out;
 		out["keys"] = keys_json(keys);
 		return json_reply(201, out);
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		return db_failure("POST /api/admin/cd-keys", e);
 	}
 }
@@ -275,7 +275,7 @@ crow::response CdKeyRoutes::assign(const crow::request &req, uint64_t id) {
 		crow::json::wvalue out;
 		out["key"] = key_json(*cdkeys::find_key(*db_conn, id_of(id)));
 		return json_reply(200, out);
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		return db_failure("POST /api/admin/cd-keys/<id>/assign", e);
 	}
 }
@@ -300,7 +300,7 @@ crow::response CdKeyRoutes::revoke(const crow::request &req, uint64_t id) {
 		crow::json::wvalue out;
 		out["key"] = key_json(*cdkeys::find_key(*db_conn, id_of(id)));
 		return json_reply(200, out);
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		return db_failure("POST /api/admin/cd-keys/<id>/revoke", e);
 	}
 }
@@ -320,7 +320,7 @@ crow::response CdKeyRoutes::key_activations(const crow::request &req, uint64_t i
 			return no_such_key();
 		out["key"] = key_json(*key);
 		out["activations"] = activations_json(cdkeys::activations_of_key(*db_conn, key->id));
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		return db_failure("GET /api/admin/cd-keys/<id>/activations", e);
 	}
 	crow::response res = json_reply(200, out);
@@ -365,7 +365,7 @@ crow::response CdKeyRoutes::activate(const crow::request &req, uint64_t id) {
 		out["reactivated"] = again;
 		out["key"] = result.key ? key_json(*result.key) : crow::json::wvalue{};
 		return json_reply(again ? 200 : 201, out);
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		return db_failure("POST /api/admin/cd-keys/<id>/activations", e);
 	}
 }
@@ -388,7 +388,7 @@ crow::response CdKeyRoutes::account(const crow::request &req, int64_t user_id) {
 		out["account"]["username"] = user->username;
 		out["keys"] = keys_json(cdkeys::keys_of_account(*db_conn, user->id));
 		out["activations"] = activations_json(cdkeys::activations_of_account(*db_conn, user->id));
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		return db_failure("GET /api/admin/users/<id>/cd-keys", e);
 	}
 	crow::response res = json_reply(200, out);
@@ -408,7 +408,7 @@ std::string CdKeyRoutes::login_activation(int64_t user_id, const catalog::GameRo
 	try {
 		result = cdkeys::activate_account(
 				*pool_.acquire(), user_id, game.title, cookie("NWPSSK"), auto_mint_);
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[cdkey] activation of user %lld failed: %s\n",
 				static_cast<long long>(user_id), e.what());
 		return {};

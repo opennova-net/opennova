@@ -151,19 +151,19 @@ std::string render_host_file(const HostedSettings &s, int64_t server_id) {
 	return out;
 }
 
-std::string render_game_cfg(const MachinePlan &plan) {
+std::string render_game_cfg(const SlotPlan &plan) {
 	gamecfg::GameCfg cfg = gamecfg::defaults();
 	cfg.networkconnecttype = 1; // the NovaWorld screen's network type: list on the gate
 	cfg.mp_novaworld_host_lan_only = 0;
-	cfg.mp_novaworld_port_min = plan.nw_port;
-	cfg.mp_novaworld_port_max = plan.nw_port;
+	cfg.mp_novaworld_port_min = plan.game_port;
+	cfg.mp_novaworld_port_max = plan.game_port;
 	cfg.mp_novaworld_port_delta = 1;
 	cfg.mp_novaworld_port_random = 0;
 	cfg.remote_admin_port = plan.admin_port;
 	return gamecfg::write(cfg, {});
 }
 
-std::string render_admin_cfg(const MachinePlan &plan, const std::string &admin_password) {
+std::string render_admin_cfg(const SlotPlan &plan, const std::string &admin_password) {
 	char rights[16];
 	std::snprintf(rights, sizeof(rights), "%X", static_cast<unsigned>(kAdminRights));
 	std::string out = "// The NovaWorld service's admin link; rendered at every start.\r\n";
@@ -185,14 +185,20 @@ LaunchSpec render_launch(const HostedSettings &settings, const DataSet &data_set
 	spec.files.push_back({ kAdminCfgFileName, render_admin_cfg(in.plan, in.admin_password), true });
 	spec.files.push_back({ kCredentialsFileName,
 			render_credentials(in.service_username, in.service_password), true });
-	spec.serve_args = { "/HOST", kHostFileName, "--credentials", kCredentialsFileName,
-		"--master-host", in.master_host, "--master-gate-port",
-		std::to_string(in.master_gate_port), "/game", data_set.title };
-	if (!settings.expansion.empty()) {
-		spec.serve_args.push_back("/exp");
-		spec.serve_args.push_back(settings.expansion);
-	}
+	spec.serve_args = render_serve_args(settings, data_set, in.master_host, in.master_gate_port);
 	return spec;
+}
+
+std::vector<std::string> render_serve_args(const HostedSettings &settings, const DataSet &data_set,
+		const std::string &master_host, uint16_t master_gate_port) {
+	std::vector<std::string> args = { "/HOST", kHostFileName, "--credentials", kCredentialsFileName,
+		"--master-host", master_host, "--master-gate-port", std::to_string(master_gate_port), "/game",
+		data_set.title };
+	if (!settings.expansion.empty()) {
+		args.push_back("/exp");
+		args.push_back(settings.expansion);
+	}
+	return args;
 }
 
 std::string random_secret(size_t length) {

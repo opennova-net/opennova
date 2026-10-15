@@ -4,23 +4,17 @@
       <div>
         <h1 class="text-3xl font-semibold text-ink">Users</h1>
         <p class="text-sm text-ink-muted">
-          Create, edit, and remove player accounts, choose who is an admin, and approve who may have a hosted
-          server.
+          Player accounts with their support tier and hosted servers. Open one to edit it, change its role, grant
+          it hosted servers or delete it.
         </p>
       </div>
-      <button
-        type="button"
-        class="rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40"
-        :disabled="loading"
-        @click="refresh"
-      >
-        Refresh
+      <button type="button" :class="secondaryButton" :disabled="loading" @click="refresh">
+        {{ loading ? 'Refreshing…' : 'Refresh' }}
       </button>
     </header>
 
     <!-- Live regions, always in the page so a screen reader hears what lands in
-         them (a role change's result, any action's failure); the boxes below
-         are their visible copies. -->
+         them; the boxes below are their visible copies. -->
     <div role="status" class="sr-only">{{ message }}</div>
     <div role="alert" class="sr-only">{{ error }}</div>
     <div v-if="message" aria-hidden="true" class="rounded-panel border border-online/40 bg-online/10 p-4 text-sm text-online">
@@ -30,121 +24,100 @@
       {{ error }}
     </div>
 
-    <section class="space-y-4">
-      <h2 class="text-xl font-semibold text-ink">Existing users</h2>
-      <div class="overflow-x-auto rounded-panel border border-border bg-panel">
+    <section class="space-y-4" aria-labelledby="users-heading">
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <h2 id="users-heading" class="text-xl font-semibold text-ink">Accounts</h2>
+        <label class="space-y-1">
+          <span class="block text-xs font-medium text-ink-muted">Find by username</span>
+          <input
+            id="users-filter"
+            v-model="filter"
+            type="search"
+            autocomplete="off"
+            class="w-full rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none sm:w-64"
+          />
+        </label>
+      </div>
+      <!-- relative: the rows' sr-only spans are absolutely positioned, and without a
+           positioned ancestor they escape this scroller and widen the page on a phone. -->
+      <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
         <table class="min-w-full divide-y divide-border">
+          <caption class="sr-only">Player accounts</caption>
           <thead>
             <tr class="bg-raised text-left text-xs font-semibold uppercase tracking-wider text-ink-muted">
-              <th class="px-4 py-3">ID</th>
-              <th class="px-4 py-3">Username</th>
-              <th class="px-4 py-3">Role</th>
-              <th class="px-4 py-3">Hosting</th>
-              <th class="px-4 py-3">PCID</th>
-              <th class="px-4 py-3">NW Handle</th>
-              <th class="px-4 py-3">NWH</th>
-              <th class="px-4 py-3 text-right">Actions</th>
+              <th scope="col" class="px-4 py-3">Account</th>
+              <th scope="col" class="px-4 py-3">Role</th>
+              <th scope="col" class="px-4 py-3">Support tier</th>
+              <th scope="col" class="px-4 py-3">Subscription</th>
+              <th scope="col" class="px-4 py-3">Hosted servers</th>
+              <th scope="col" class="px-4 py-3">Status</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-border text-sm text-ink">
-            <tr v-if="loading">
-              <td colspan="8" class="px-4 py-6 text-center text-ink-muted">Loading…</td>
+            <tr v-if="users === null">
+              <td colspan="6" class="px-4 py-6 text-center text-ink-muted">{{ loading ? 'Loading…' : 'Not loaded.' }}</td>
             </tr>
-            <tr v-else-if="users.length === 0">
-              <td colspan="8" class="px-4 py-6 text-center text-ink-muted">No users yet.</td>
+            <tr v-else-if="shown.length === 0">
+              <td colspan="6" class="px-4 py-6 text-center text-ink-muted">
+                {{ users.length === 0 ? 'No accounts yet.' : 'No account matches.' }}
+              </td>
             </tr>
-            <tr v-for="u in users" :key="u.id" class="hover:bg-hover align-top">
-              <td class="px-4 py-3 font-mono text-xs">{{ u.id }}</td>
-              <template v-if="editing[u.id]">
-                <td class="px-4 py-3"><input v-model="edits[u.id].username" class="w-full rounded-control border border-border bg-surface px-2 py-1 text-xs text-ink"/></td>
-                <td class="px-4 py-3">
-                  <span :class="roleBadgeClass(u.role)">{{ u.role }}</span>
-                </td>
-                <td class="px-4 py-3">
-                  <span :class="hostBadgeClass(u.can_host)">{{ u.can_host ? 'approved' : 'no' }}</span>
-                </td>
-                <td class="px-4 py-3"><input v-model="edits[u.id].pcid"    class="w-full rounded-control border border-border bg-surface px-2 py-1 font-mono text-xs text-ink"/></td>
-                <td class="px-4 py-3"><input v-model="edits[u.id].nwhandle" class="w-full rounded-control border border-border bg-surface px-2 py-1 text-xs text-ink"/></td>
-                <td class="px-4 py-3"><input v-model="edits[u.id].nwh"      class="w-16 rounded-control border border-border bg-surface px-2 py-1 text-xs text-ink"/></td>
-                <td class="px-4 py-3 text-right space-x-2 whitespace-nowrap">
-                  <input
-                    v-model="edits[u.id].password"
-                    type="password"
-                    placeholder="(new password)"
-                    class="rounded-control border border-border bg-surface px-2 py-1 text-xs text-ink w-32"
-                  />
-                  <button class="text-online/80 hover:text-online" @click="save(u.id)">Save</button>
-                  <button class="text-ink-muted hover:text-ink" @click="cancelEdit(u.id)">Cancel</button>
-                </td>
-              </template>
-              <template v-else>
-                <td class="px-4 py-3">
-                  {{ u.username }}
-                  <span v-if="isSelf(u)" class="ml-1 text-xs text-ink-muted">(you)</span>
-                </td>
-                <td class="px-4 py-3 whitespace-nowrap">
-                  <span :class="roleBadgeClass(u.role)">{{ u.role }}</span>
-                  <button
-                    type="button"
-                    class="ml-3 text-xs text-accent/80 hover:text-accent disabled:opacity-40"
-                    :disabled="roleBusy[u.id]"
-                    @click="changeRole(u, u.role === 'admin' ? 'player' : 'admin')"
-                  >
-                    {{ u.role === 'admin' ? 'Make player' : 'Make admin' }}<span class="sr-only">, {{ u.username }}</span>
-                  </button>
-                </td>
-                <td class="px-4 py-3 whitespace-nowrap">
-                  <span :class="hostBadgeClass(u.can_host)">{{ u.can_host ? 'approved' : 'no' }}</span>
-                  <button
-                    type="button"
-                    class="ml-3 text-xs disabled:opacity-40"
-                    :class="u.can_host ? 'text-danger/80 hover:text-danger' : 'text-accent/80 hover:text-accent'"
-                    :disabled="hostBusy[u.id]"
-                    @click="changeCanHost(u, !u.can_host)"
-                  >
-                    {{ u.can_host ? 'Withdraw' : 'Approve' }}<span class="sr-only"> hosting, {{ u.username }}</span>
-                  </button>
-                </td>
-                <td class="px-4 py-3 font-mono text-xs">{{ u.pcid }}</td>
-                <td class="px-4 py-3">{{ u.nwhandle }}</td>
-                <td class="px-4 py-3 font-mono text-xs">{{ u.nwh }}</td>
-                <td class="px-4 py-3 text-right space-x-3 whitespace-nowrap">
-                  <button class="text-ink hover:text-ink-bright"   @click="startEdit(u)">Edit</button>
-                  <button class="text-danger/80 hover:text-danger" @click="remove(u.id)">Delete</button>
-                </td>
-              </template>
+            <tr v-for="u in shown" :key="u.id" class="user-row hover:bg-hover">
+              <th scope="row" class="px-4 py-3 text-left font-medium">
+                <RouterLink :to="`/admin/users/${u.id}`" class="text-accent hover:text-ink-bright">{{ u.username }}</RouterLink>
+                <span v-if="isSelf(u)" class="ml-1 text-xs font-normal text-ink-muted">(you)</span>
+                <span class="block text-xs font-normal text-ink-muted">Account {{ u.id }}</span>
+              </th>
+              <td class="px-4 py-3"><span :class="roleBadgeClass(u.role)">{{ u.role === 'admin' ? 'Admin' : 'Player' }}</span></td>
+              <td class="whitespace-nowrap px-4 py-3">
+                <span :class="tierBadgeClass(u)">{{ tierLabel(u) }}</span>
+              </td>
+              <td class="whitespace-nowrap px-4 py-3">
+                <span :class="u.subscription_status === 'past_due' ? 'text-warn' : 'text-ink'">
+                  {{ u.subscription_status ? subscriptionStatusLabel(u.subscription_status) : 'None' }}
+                </span>
+              </td>
+              <td class="whitespace-nowrap px-4 py-3">
+                <span :class="u.live_servers > u.entitlement.max_servers ? 'text-danger' : ''">
+                  {{ u.live_servers }} live of {{ u.entitlement.max_servers }}
+                </span>
+              </td>
+              <td class="whitespace-nowrap px-4 py-3">
+                <span :class="(u.account_status || 'active') === 'active' ? 'text-ink' : 'text-warn'">
+                  {{ accountStatusLabel(u.account_status) }}
+                </span>
+              </td>
             </tr>
           </tbody>
         </table>
       </div>
     </section>
 
-    <section class="space-y-4">
-      <h2 class="text-xl font-semibold text-ink">Create new user</h2>
-      <form
-        class="grid gap-4 rounded-panel border border-border bg-panel p-6 sm:grid-cols-2"
-        @submit.prevent="createUser"
-      >
+    <section class="space-y-4" aria-labelledby="users-create">
+      <h2 id="users-create" class="text-xl font-semibold text-ink">Create an account</h2>
+      <form class="grid gap-4 rounded-panel border border-border bg-panel p-6 sm:grid-cols-2" @submit.prevent="createUser">
         <label class="space-y-1">
-          <span class="text-xs font-medium uppercase tracking-wider text-ink-muted">Username</span>
-          <input v-model="newUser.username" required class="w-full rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink"/>
+          <span :class="labelClass">Username</span>
+          <input v-model="newUser.username" required autocomplete="off" :class="inputClass" />
         </label>
         <label class="space-y-1">
-          <span class="text-xs font-medium uppercase tracking-wider text-ink-muted">Password</span>
-          <input v-model="newUser.password" type="password" required class="w-full rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink"/>
+          <span :class="labelClass">Password</span>
+          <input v-model="newUser.password" type="password" required autocomplete="new-password" :class="inputClass" />
         </label>
         <label class="space-y-1">
-          <span class="text-xs font-medium uppercase tracking-wider text-ink-muted">PCID (8 hex)</span>
-          <input v-model="newUser.pcid" placeholder="auto-generate if blank" class="w-full rounded-control border border-border bg-surface px-3 py-2 font-mono text-sm text-ink"/>
+          <span :class="labelClass">PCID</span>
+          <input v-model="newUser.pcid" autocomplete="off" aria-describedby="users-create-pcid-hint" :class="[inputClass, 'font-mono']" />
+          <span id="users-create-pcid-hint" class="block text-xs text-ink-muted">
+            The player's NovaWorld id, 8 hexadecimal digits. Leave it empty and one is made up.
+          </span>
         </label>
         <label class="space-y-1">
-          <span class="text-xs font-medium uppercase tracking-wider text-ink-muted">NW Handle</span>
-          <input v-model="newUser.nwhandle" required class="w-full rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink"/>
+          <span :class="labelClass">NovaWorld handle</span>
+          <input v-model="newUser.nwhandle" required autocomplete="off" aria-describedby="users-create-handle-hint" :class="inputClass" />
+          <span id="users-create-handle-hint" class="block text-xs text-ink-muted">The player's name in the game.</span>
         </label>
-        <div class="sm:col-span-2 flex justify-end">
-          <button type="submit" class="rounded-control bg-accent px-4 py-2 text-sm font-medium text-on-accent hover:bg-accent/90">
-            Create user
-          </button>
+        <div class="flex justify-end sm:col-span-2">
+          <button type="submit" :disabled="creating" :class="primaryButton">{{ creating ? 'Creating…' : 'Create account' }}</button>
         </div>
       </form>
     </section>
@@ -152,285 +125,117 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
-import {
-  createUserAdmin,
-  deleteUser,
-  listUsers,
-  registerUser,
-  setCanHost,
-  updateUser,
-} from '../../api/users';
-import { fetchHostedFleet } from '../../api/admin';
-import { hasAdminToken } from '../../api/authToken';
-import { stateLabel } from '../../utils/hostedState';
+// /admin/users: every player account (GET /api/admin/users) with its role,
+// support tier, subscription status and hosted servers live against its
+// entitlement; each opens its own page (/admin/users/<id>, UserDetailSection)
+// for the edits. And the admin's account creation (POST /api/admin/users, or
+// the public registration when no PCID is given, which makes one up).
+import { computed, onMounted, reactive, ref } from 'vue';
+import { RouterLink } from 'vue-router';
+import { createUserAdmin, listUsers, registerUser } from '../../api/users';
 import { useSession } from '../../composables/useSession';
-import type { Role, User } from '../../types/users';
+import type { Role, UserListEntry } from '../../types/users';
+import { accountStatusLabel, entitlementLabel } from '../../utils/adminView';
+import { subscriptionStatusLabel } from '../../utils/billingView';
 
-const users = ref<User[]>([]);
+const labelClass = 'block text-xs font-medium uppercase tracking-wider text-ink-muted';
+const inputClass =
+  'w-full rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none';
+const primaryButton =
+  'rounded-control bg-accent px-4 py-2 text-sm font-medium text-on-accent transition hover:bg-accent/90 disabled:opacity-50';
+const secondaryButton =
+  'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
+
+const { user: sessionUser } = useSession();
+
+const users = ref<UserListEntry[] | null>(null);
 const loading = ref(false);
-const message = ref<string | null>(null);
-const error = ref<string | null>(null);
+const creating = ref(false);
+const message = ref('');
+const error = ref('');
+const filter = ref('');
 
-const { user: sessionUser, refresh: refreshSession } = useSession();
-const roleBusy = reactive<Record<number, boolean>>({});
+const newUser = reactive({ username: '', password: '', pcid: '', nwhandle: '' });
 
-function roleBadgeClass(role: Role): string {
-  const base = 'rounded-control px-2 py-0.5 text-xs font-semibold uppercase tracking-wider';
-  return role === 'admin' ? `${base} bg-accent/15 text-accent` : `${base} bg-hover text-ink-muted`;
-}
+const shown = computed(() => {
+  const all = users.value ?? [];
+  const q = filter.value.trim().toLowerCase();
+  return q ? all.filter((u) => u.username.toLowerCase().includes(q)) : all;
+});
 
-function isSelf(u: User): boolean {
+function isSelf(u: UserListEntry): boolean {
   return sessionUser.value?.id === u.id;
 }
 
-const hostBusy = reactive<Record<number, boolean>>({});
+const badge = 'inline-flex rounded-control px-2 py-0.5 text-xs font-semibold';
 
-function hostBadgeClass(canHost: boolean): string {
-  const base = 'rounded-control px-2 py-0.5 text-xs font-semibold uppercase tracking-wider';
-  return canHost ? `${base} bg-online/15 text-online` : `${base} bg-hover text-ink-muted`;
+function roleBadgeClass(role: Role): string {
+  return role === 'admin' ? `${badge} bg-accent/15 text-accent` : `${badge} bg-hover text-ink-muted`;
 }
 
-// What the admin confirms before withdrawing an approval: the service stops
-// the account's live hosted server (the supervisor's brake, as for a ban),
-// named when the fleet view shows one.
-async function withdrawPrompt(u: User): Promise<string> {
-  const lines = [`Withdraw ${u.username}'s approval to host?`];
-  const fleet = await fetchHostedFleet();
-  const live = fleet.ok ? fleet.value.servers.find((s) => s.live && s.owner?.id === u.id) : undefined;
-  if (live) {
-    const players = live.listing ? `, ${live.listing.players} player(s) on it` : '';
-    lines.push(
-      `Their hosted server "${live.settings.game_name}" is ${stateLabel(live.state).toLowerCase()}${players}. ` +
-        'The service stops it at once: its match ends for everyone and its machine shuts down.',
-    );
-  } else if (fleet.ok) {
-    lines.push('They have no hosted server live now, and cannot start one after this.');
-  } else {
-    lines.push(
-      'If they have a hosted server running, the service stops it at once: its match ends for everyone and its machine shuts down.',
-    );
-  }
-  return lines.join('\n\n');
+function tierLabel(u: UserListEntry): string {
+  return entitlementLabel(u.entitlement);
 }
 
-// PUT /api/admin/users/<id>/can-host. Approving takes effect at once;
-// withdrawing is confirmed first, since it stops the account's server.
-async function changeCanHost(u: User, canHost: boolean) {
-  if (hostBusy[u.id]) return;
-  hostBusy[u.id] = true;
-  try {
-    if (!canHost && !confirm(await withdrawPrompt(u))) return;
-    const result = await setCanHost(u.id, canHost);
-    if (!result.ok) {
-      // The mapped message, never the server's own text.
-      flashError(new Error(result.error.message));
-      if (result.error.code === 'not_found') await refresh();
-      return;
-    }
-    const updated = result.value;
-    users.value = users.value.map((x) => (x.id === updated.id ? updated : x));
-    flashMessage(
-      updated.can_host
-        ? `${updated.username} may now start a hosted server.`
-        : `${updated.username} may no longer host; any hosted server of theirs is being stopped.`,
-    );
-  } finally {
-    hostBusy[u.id] = false;
-  }
+function tierBadgeClass(u: UserListEntry): string {
+  if (u.entitlement.source === 'tier') return `${badge} bg-accent/15 text-accent`;
+  if (u.entitlement.source === 'comp') return `${badge} bg-online/15 text-online`;
+  return `${badge} bg-hover text-ink-muted`;
 }
 
-const editing = reactive<Record<number, boolean>>({});
-const edits   = reactive<Record<number, {
-  username: string;
-  pcid: string;
-  nwhandle: string;
-  nwh: string;
-  password: string;
-}>>({});
-
-const newUser = reactive({
-  username: '',
-  password: '',
-  pcid: '',
-  nwhandle: '',
-});
-
-function flashError(e: unknown) {
-  const detail = (e as { response?: { data?: { error?: string; message?: string } } })
-    ?.response?.data;
-  error.value = detail?.message || detail?.error || (e as Error).message || 'Unknown error';
-  message.value = null;
-  setTimeout(() => { error.value = null; }, 6000);
+function flashMessage(text: string) {
+  message.value = text;
+  error.value = '';
 }
 
-function flashMessage(m: string) {
-  message.value = m;
-  error.value = null;
-  setTimeout(() => { message.value = null; }, 4000);
+function flashError(text: string) {
+  error.value = text;
+  message.value = '';
 }
 
 async function refresh() {
   loading.value = true;
-  try {
-    users.value = await listUsers();
-  } catch (e) {
-    flashError(e);
-  } finally {
-    loading.value = false;
+  const result = await listUsers();
+  loading.value = false;
+  if (!result.ok) {
+    flashError(result.error.message);
+    return;
   }
-}
-
-function startEdit(u: User) {
-  editing[u.id] = true;
-  edits[u.id] = {
-    username: u.username,
-    pcid:     u.pcid,
-    nwhandle: u.nwhandle,
-    nwh:      u.nwh,
-    password: '',
-  };
-}
-function cancelEdit(id: number) {
-  editing[id] = false;
-  delete edits[id];
-}
-async function save(id: number) {
-  const e = edits[id];
-  try {
-    const payload: Record<string, string> = {
-      username: e.username,
-      pcid:     e.pcid,
-      nwhandle: e.nwhandle,
-      nwh:      e.nwh,
-    };
-    if (e.password) payload.password = e.password;
-    await updateUser(id, payload);
-    flashMessage('User updated.');
-    cancelEdit(id);
-    await refresh();
-  } catch (err) {
-    flashError(err);
-  }
-}
-
-async function remove(id: number) {
-  if (!confirm(`Delete user ${id}?`)) return;
-  try {
-    await deleteUser(id);
-    flashMessage('User deleted.');
-    await refresh();
-  } catch (e) {
-    flashError(e);
-  }
-}
-
-// An account that can log in: `active`, or a status stored empty (which the
-// server reads as active).
-function isActiveAccount(u: User): boolean {
-  return (u.account_status || 'active') === 'active';
-}
-
-// What the admin confirms before a role change, judged on `list`, the users
-// as the server has them now. Demoting one's own account says that the
-// session loses these pages at once (unless a valid admin token is also
-// held). Demoting the last admin who can log in says how one comes back:
-// ONNET_BOOTSTRAP_ADMIN promotes only while NO account holds the admin role
-// (bootstrap_admin in apps/novaworld_server/auth.cpp), so a banned or
-// restricted admin left behind blocks it and only the token remains.
-function roleChangePrompt(u: User, role: Role, list: User[]): string {
-  if (role === 'admin') {
-    return `Make ${u.username} an admin? An admin can manage every account and the server.`;
-  }
-  const lines: string[] = [];
-  if (isSelf(u)) {
-    lines.push(`You are about to remove your own admin role (${u.username}).`);
-    lines.push(
-      hasAdminToken.value
-        ? 'Your session loses admin access at once; these pages stay open only if the stored admin token is valid.'
-        : 'Your session loses admin access at once, and these pages close.',
-    );
-  } else {
-    lines.push(`Make ${u.username} a player? Their session loses admin access at once.`);
-  }
-  const otherAdmins = list.filter((x) => x.role === 'admin' && x.id !== u.id);
-  const inactiveAdmins = otherAdmins.filter((x) => !isActiveAccount(x));
-  if (otherAdmins.length === inactiveAdmins.length) {
-    if (inactiveAdmins.length === 0) {
-      lines.push(
-        'No other account is an admin. Only the ADMIN_API_TOKEN, or ONNET_BOOTSTRAP_ADMIN at the next server start, can make one again.',
-      );
-    } else {
-      const names = inactiveAdmins.map((x) => `${x.username} (${x.account_status})`).join(', ');
-      lines.push(
-        `No other admin can log in: ${names} ${inactiveAdmins.length === 1 ? 'holds' : 'hold'} the admin role but ${inactiveAdmins.length === 1 ? 'is' : 'are'} not active. ` +
-          'While any account holds the role, ONNET_BOOTSTRAP_ADMIN does nothing, so only the ADMIN_API_TOKEN can make a working admin again.',
-      );
-    }
-  }
-  return lines.join('\n\n');
-}
-
-// PUT /api/admin/users/<id> {role}, after the admin confirms. The list is
-// read again first, so the confirm judges the server's current admins, not
-// the ones this page loaded.
-async function changeRole(u: User, role: Role) {
-  if (roleBusy[u.id]) return;
-  roleBusy[u.id] = true;
-  try {
-    const list = await listUsers();
-    users.value = list;
-    const current = list.find((x) => x.id === u.id);
-    if (!current) {
-      flashError(new Error(`${u.username} no longer exists.`));
-      return;
-    }
-    if (current.role === role) {
-      flashMessage(`${current.username} is already ${role === 'admin' ? 'an admin' : 'a player'}.`);
-      return;
-    }
-    if (!confirm(roleChangePrompt(current, role, list))) return;
-    const self = isSelf(current);
-    const updated = await updateUser(current.id, { role });
-    users.value = users.value.map((x) => (x.id === updated.id ? updated : x));
-    flashMessage(`${updated.username} is now ${updated.role === 'admin' ? 'an admin' : 'a player'}.`);
-    if (self) {
-      // The gate follows the session's role: without the token, a demoted
-      // admin's pages close here. With a token stored, the list is asked for
-      // again at once, so a token the admin session was covering for is
-      // refused now (and dropped) rather than on some later request.
-      await refreshSession();
-      if (hasAdminToken.value) await refresh();
-    }
-  } catch (e) {
-    flashError(e);
-  } finally {
-    roleBusy[u.id] = false;
-  }
+  users.value = result.value;
 }
 
 async function createUser() {
+  if (creating.value) return;
+  creating.value = true;
+  const name = newUser.username.trim();
   try {
     if (newUser.pcid.trim() === '') {
-      // No PCID supplied → public registration endpoint auto-generates one.
-      await registerUser({
-        username: newUser.username,
-        password: newUser.password,
-        nwhandle: newUser.nwhandle,
-      });
+      // No PCID: the public registration makes one up.
+      await registerUser({ username: name, password: newUser.password, nwhandle: newUser.nwhandle.trim() });
     } else {
-      await createUserAdmin({
-        username: newUser.username,
+      const result = await createUserAdmin({
+        username: name,
         password: newUser.password,
-        pcid:     newUser.pcid,
-        nwhandle: newUser.nwhandle,
+        pcid: newUser.pcid.trim(),
+        nwhandle: newUser.nwhandle.trim(),
       });
+      if (!result.ok) {
+        flashError(result.error.message);
+        return;
+      }
     }
-    flashMessage(`Created '${newUser.username}'.`);
+    flashMessage(`Created ${name}.`);
     Object.assign(newUser, { username: '', password: '', pcid: '', nwhandle: '' });
     await refresh();
   } catch (e) {
-    flashError(e);
+    const code = (e as { response?: { data?: { error?: unknown } } })?.response?.data?.error;
+    flashError(
+      code === 'username_exists'
+        ? 'Another account already has that username.'
+        : 'The account could not be created. Check the fields and try again.',
+    );
+  } finally {
+    creating.value = false;
   }
 }
 

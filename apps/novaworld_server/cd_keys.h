@@ -1,6 +1,6 @@
 #pragma once
 
-// CD keys (migration 0015): the keys the service issues for a title whose
+// CD keys: the keys the service issues for a title whose
 // client activates against NovaWorld, the accounts they are on, and the
 // machines each one activated. Only Delta Force Xtreme 2 activates: its boot
 // and its menus gate on a registry CDKIID that NovaLogic's NovaWorld handed out
@@ -26,9 +26,9 @@
 // is one row per machine: the NWACT is cdkey::make_activation(wire key,
 // NWPSSK), the same every time that machine asks. A revoked key activates no
 // machine, and an account whose keys were all revoked gets no new one on its
-// own. Crow-free; each function throws db::SqliteError on a database failure.
+// own. Crow-free; each function throws db::Error on a database failure.
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 
 #include <cstddef>
 #include <cstdint>

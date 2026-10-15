@@ -53,8 +53,7 @@ jobs:
         run: scripts/package_apps.sh dist/opennova-apps-windows.zip
 
       # Every exe runs without an installed VC++ runtime and reaches its usage
-      # exit; the server boots from the unpacked folder on the shipped
-      # migrations and seed.
+      # exit.
       - name: Smoke-test the packaged apps
         shell: pwsh
         run: |
@@ -70,8 +69,7 @@ jobs:
             @{ Exe = "opennova-serve.exe"; Arguments = @("--help"); Code = 0 },
             @{ Exe = "opennova-wire.exe"; Arguments = @(); Code = 1 }
           )
-          $server = "opennova-novaworld-server.exe"
-          $expected = @($clis.Exe + $server | Sort-Object)
+          $expected = @($clis.Exe | Sort-Object)
           $shipped = @(Get-ChildItem -LiteralPath $unpacked -Filter *.exe | ForEach-Object Name | Sort-Object)
           if (Compare-Object $shipped $expected) {
             throw "Packaged exes ($($shipped -join ', ')) differ from the smoke list ($($expected -join ', '))"
@@ -90,30 +88,6 @@ jobs:
               throw "$($cli.Exe) exited $LASTEXITCODE, expected its usage exit $($cli.Code)"
             }
           }
-          $log = Join-Path $unpacked "novaworld.log"
-          $process = Start-Process -FilePath (Join-Path $unpacked $server) -WorkingDirectory $unpacked `
-            -RedirectStandardOutput $log -RedirectStandardError "$log.err" -NoNewWindow -PassThru
-          # The server's threads write the log concurrently, so a read while it runs can hold a
-          # region not yet written (NUL bytes) inside an earlier line: wait for the ready line,
-          # stop the server, then read the log whole with the NULs dropped.
-          $read = { ((Get-Content -Raw -LiteralPath $log -ErrorAction SilentlyContinue) -as [string]) -replace "`0", "" }
-          try {
-            $deadline = (Get-Date).AddSeconds(30)
-            do {
-              Start-Sleep -Milliseconds 250
-              $output = & $read
-            } until ($output -match '\[boot\] ready' -or $process.HasExited -or (Get-Date) -gt $deadline)
-          } finally {
-            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
-            $process.WaitForExit()
-          }
-          $output = & $read
-          Write-Host $output
-          Get-Content -Raw -LiteralPath "$log.err" -ErrorAction SilentlyContinue | Write-Host
-          if ($output -notmatch '\[boot\] migrations: [1-9]\d* applied') {
-            throw "Packaged NovaWorld server applied no migrations"
-          }
-          if ($output -notmatch '\[boot\] ready') { throw "Packaged NovaWorld server did not boot" }
           # The last CLI's usage exit would otherwise become the step's exit code.
           exit 0
 

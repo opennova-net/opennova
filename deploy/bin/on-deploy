@@ -1,67 +1,190 @@
 #!/usr/bin/env bash
-# OpenNova NovaWorld deploy orchestrator. Runs inside the deploy toolbox
-# container (deploy/Dockerfile). The operator supplies only
-# OP_SERVICE_ACCOUNT_TOKEN; every other secret is read from the 1Password
-# vault at run time and rendered to a tmpfs (/run/secrets) that never
-# touches disk.
+# OpenNova NovaWorld deploy orchestrator (DEPLOY.md). Runs inside the deploy
+# toolbox container (deploy/Dockerfile), or on a CI runner holding AWS
+# credentials of its own (.github/workflows/deploy.yml). The operator supplies
+# only OP_SERVICE_ACCOUNT_TOKEN; every other secret is read from the 1Password
+# vault at run time into a tmpfs (/run/secrets) that never touches disk. The
+# service instance is never reached over SSH: deploys and commands go through SSM.
 #
-# Subcommands:
-#   secrets check                 dry-run every op:// reference
-#   infra plan|apply|destroy      terraform (AWS + Cloudflare); plan and apply pass
-#                                 further terraform args on (-replace=ADDRESS)
+# Usage: on-deploy [--deployment NAME] <command> [args...]
+#   --deployment NAME   prod (the default, or OPENNOVA_DEPLOYMENT) or another
+#                       deployment such as staging: its Terraform workspace
+#                       (prod: default), its state document (tfstate,
+#                       tfstate-NAME), its var-file (infra/aws/NAME.tfvars),
+#                       its SSM parameters (/opennova/NAME/...) and its vault
+#                       items (app-prod or app-NAME; stripe-live for prod,
+#                       stripe-test otherwise)
+#
+# Commands:
+#   secrets init                  add what the vault lacks: the deployment's
+#                                 generated secrets and the placeholders (Stripe,
+#                                 alerts/email, email/forward_to; never
+#                                 overwrites; prints no value)
+#   secrets check                 resolve every reference; check the Stripe items,
+#                                 the alert address and the email destination
+#   secrets sync [--prune]        copy the deployment's runtime secrets to SSM
+#                                 (/opennova/NAME/secret/*); --prune deletes the
+#                                 ones the vault no longer names
+#   stripe check [--mode test|live]
+#                                 the mode's vault item (stripe-test or
+#                                 stripe-live; the deployment's by default) and
+#                                 its Stripe objects, read alone: the key's form
+#                                 and mode, the webhook secret's form, each price
+#                                 (active, monthly, the lookup key's), the
+#                                 Customer Portal configuration, the webhook
+#                                 endpoint (its URL, API version and events)
+#   stripe setup [--mode test|live] [--tier1 USD] [--tier2 USD] [--tier3 USD]
+#                [--own-machine USD]
+#                                 make what the mode lacks, idempotently: the
+#                                 products and monthly prices (5, 10, 15 and 45
+#                                 USD by default; a flag's other amount makes a
+#                                 new price, the old one kept as grandfathered),
+#                                 their ids in the vault item, the Customer
+#                                 Portal configuration, the webhook endpoint
+#                                 (a new one's signing secret into the vault).
+#                                 Test mode is staging's site, live mode prod's
+#   infra plan [args...]          terraform plan in the deployment's workspace
+#   infra apply [--allow-destroy] [--yes] [args...]
+#                                 plan to a file, then apply that plan; refuses a
+#                                 plan that destroys or replaces the service
+#                                 instance, its network interface, an Elastic IP
+#                                 or its association, a database or a bucket
+#                                 unless --allow-destroy, and any plan that
+#                                 makes prod an Elastic IP; on prod it applies
+#                                 the saved plan only after --yes or a typed yes
+#   infra destroy                 (not prod) destroy the deployment's stack
+#   infra state-rm ADDRESS...     forget resources (their objects stay)
+#   infra import ADDRESS ID       adopt an existing object
 #   infra output|list [args...]   terraform output / state list
-#   aws <args...>                 run the AWS CLI with vault credentials
-#   app deploy [--tag SHA] [--game-tag SHA] [--serve-tag TAG] [--no-hosting]
-#                                 pull the Terraform state, then GHCR images +
-#                                 compose up on the target;
-#                                 with hosted game servers set up (infra output
-#                                 hosted_enabled), the service gets every
-#                                 ONNET_HOSTED_* ec2 setting from the Terraform
-#                                 outputs (each data set's launch template among
-#                                 them) and the serve image pinned to the digest
-#                                 --serve-tag (default latest) names now;
-#                                 --no-hosting deploys with hosting off
-#   app status|logs [svc]|restart|down
-#   app sql <statement>           run SQL against the live sqlite DB
-#   app reset-db --yes-drop-database --tag SHA [--game-tag SHA] [--serve-tag TAG]
-#                [--no-hosting] [--no-backup]
-#                                 delete the sqlite DB, then deploy SHA onto an
-#                                 empty one (a deploy with an edited migration;
-#                                 DEPLOY.md "Resetting the service database").
-#                                 Takes a final backup first unless --no-backup;
-#                                 earlier backups stay in S3
-#   backup now|list               trigger / list the sqlite backups
-#   state push|pull [--force]     terraform state <-> 1Password document; each
-#                                 checks both sides against the checkout's
-#                                 record of its last sync and refuses to drop
-#                                 a change (or a state of another lineage)
-#                                 unless --force
-#   hosted status [--deployment NAME]
-#                                 this deployment's hosted game server machines
-#   hosted data-snapshot --data-set SLUG [--deployment NAME]
+#   aws <args...>                 the AWS CLI with the vault's credentials
+#   app deploy [--tag T] [--server-tag T] [--web-tag T] [--game-tag T]
+#              [--serve-tag T] [--hostd-tag T] [--no-hosting]
+#                                 pin the images by digest (--tag sets server and
+#                                 web; an image given no tag keeps the current
+#                                 release's), upload the release bundle, make it
+#                                 the deployment's release and converge the host
+#   app releases                  the deployment's releases, newest last
+#   app rollback [--to ID]        converge the previous (or the named) release
+#   app converge                  converge the current release again (the host
+#                                 rereads its secrets and settings: after
+#                                 secrets sync or infra apply)
+#   app status                   the host's containers
+#   app restart [SERVICE] [--yes] restart a service (all without one)
+#   app down [--yes]              stop and remove the containers
+#   app logs [SERVICE] [--follow] [--since 1h]
+#                                 the containers' logs (CloudWatch)
+#   app shell                     a root shell on the host (Session Manager)
+#   db bootstrap                  make the service's role and its database
+#                                 (SQL_ASCII, C collation) with the master user,
+#                                 or set the role's password again; idempotent
+#   db psql [-c SQL | -f FILE]    psql as the service's role (interactive without
+#                                 SQL, over Session Manager)
+#   db reset-db --yes-drop-database [--orphan-subscriptions] [--no-backup]
+#                                 dump, then drop and recreate the database and
+#                                 start the server on it (its migrations run);
+#                                 refuses while a subscription grants hosting
+#   db snapshot                   an RDS snapshot of the database, now
+#   backup now|list               dump the database to S3 (novaworld/ for prod,
+#                                 novaworld-NAME/ otherwise) / list the dumps
+#   backup restore KEY --yes-overwrite-database
+#                                 restore a dump over the database (the server
+#                                 is stopped meanwhile)
+#   fleet status                  the deployment's game machines (EC2) and the
+#                                 service's view of them (its admin API)
+#   fleet drain MACHINE           start no server there; move its servers off
+#   fleet end MACHINE [--yes]     end a machine (its servers move first)
+#   fleet roll [--yes]            drain every machine onto new ones (a new
+#                                 image, a new hostd), one at a time
+#   hosted data-snapshot --data-set SLUG
 #                                 one data set of the hosted servers' game data,
 #                                 once: its game folder mounted at /hosted-data
 #                                 (HOSTED_DATA_DIR=<folder> ./deploy/run.sh ...)
 #                                 into a new private encrypted EBS snapshot;
 #                                 prints its id. SLUG: jop_2_consumer,
-#                                 dfx2_consumer or opennova_0_consumer (DEPLOY.md,
-#                                 "Hosted game servers")
+#                                 dfx2_consumer or opennova_0_consumer
+#   state push|pull [--force]     the deployment's terraform state <-> its
+#                                 1Password document; refuses to drop a change
+#                                 (or a state of another lineage) unless --force
 #
-# OP_VAULT (default OpenNova-Deploy) names the vault.
+# On prod (the default deployment), infra apply, app restart, app down, fleet
+# end and fleet roll ask first: they go ahead once you type yes, or with --yes;
+# with no terminal to ask on and no --yes they refuse.
+#
+# OP_VAULT (default OpenNova-Deploy) names the vault; GHCR_OWNER the images'
+# owner (default: the vault's ghcr/owner, else opennova-net).
 set -euo pipefail
 
+ROOT="${OPENNOVA_ROOT:-/workspace}"
 VAULT="${OP_VAULT:-OpenNova-Deploy}"
-SECRETS_DIR="/run/secrets"
-TF_DIR="/workspace/infra/aws"
-COMPOSE_DIR="/workspace/deploy/compose"
-TF_ENV_TPL="/workspace/deploy/env/terraform.env.tpl"
-APP_ENV_TPL="/workspace/deploy/env/app.prod.env.tpl"
+SECRETS_DIR="${OPENNOVA_SECRETS_DIR:-/run/secrets}"
+TF_DIR="$ROOT/infra/aws"
+ENV_DIR="$ROOT/deploy/env"
+COMPOSE_DIR="$ROOT/deploy/compose"
+TF_ENV_TPL="$ENV_DIR/terraform.env.tpl"
+AWS_ENV_TPL="$ENV_DIR/aws.env.tpl"
+RUNTIME_TPL="$ENV_DIR/runtime.env.tpl"
 
 # Progress/diagnostics go to STDERR so stdout stays clean for captured output
 # (e.g. `infra output -raw`, `aws ...` in command substitutions).
 log()  { printf '\033[1;36m[deploy]\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31m[deploy:error]\033[0m %s\n' "$*" >&2; }
 die()  { err "$*"; exit 1; }
+
+# Whatever a command leaves in the tmpfs goes when it ends, and so does the
+# master password a db command lent the host (db_master_param_put).
+DB_MASTER_PARAM=""
+cleanup() {
+  rm -f "$SECRETS_DIR"/item.*.json "$SECRETS_DIR"/value.* "$SECRETS_DIR"/*.rendered \
+    "$SECRETS_DIR"/tfplan "$SECRETS_DIR"/aws.env 2>/dev/null || true
+  if [ -n "$DB_MASTER_PARAM" ]; then
+    aws ssm delete-parameter --name "$DB_MASTER_PARAM" >/dev/null 2>&1 \
+      || err "deleting $DB_MASTER_PARAM failed: delete it by hand (aws ssm delete-parameter --name $DB_MASTER_PARAM)"
+  fi
+}
+trap cleanup EXIT
+
+# ---------------------------------------------------------------------------
+# The deployment
+# ---------------------------------------------------------------------------
+
+# Everything a deployment's name decides.
+set_deployment() {
+  DEP="$1"
+  [[ "$DEP" =~ ^[a-z][a-z0-9-]{0,19}$ ]] \
+    || die "--deployment '$DEP': lowercase letters, digits and '-', up to 20 (prod, staging)"
+  [ "$DEP" != default ] || die "the deployment of the workspace 'default' is prod: --deployment prod"
+  SSM_PREFIX="/opennova/$DEP"
+  TFVARS="$TF_DIR/$DEP.tfvars"
+  if [ "$DEP" = prod ]; then
+    TF_WORKSPACE_NAME=default
+    STATE_DOC=tfstate
+    STATEFILE="$TF_DIR/terraform.tfstate"
+    APP_ITEM=app-prod
+    STRIPE_ITEM=stripe-live
+    STRIPE_MODE=live
+    RDS_ITEM=rds
+    DEP_FLAG=""
+  else
+    TF_WORKSPACE_NAME="$DEP"
+    STATE_DOC="tfstate-$DEP"
+    STATEFILE="$TF_DIR/terraform.tfstate.d/$DEP/terraform.tfstate"
+    APP_ITEM="app-$DEP"
+    STRIPE_ITEM=stripe-test
+    STRIPE_MODE="test"
+    RDS_ITEM="rds-$DEP"
+    DEP_FLAG=" --deployment $DEP"
+  fi
+}
+
+# A deploy/env template with the toolbox's placeholders filled in, in the tmpfs.
+render_tpl() {
+  local out
+  out="$SECRETS_DIR/$(basename "$1").rendered"
+  sed -e "s|@VAULT@|$VAULT|g" -e "s|@APP_ITEM@|$APP_ITEM|g" \
+      -e "s|@STRIPE_ITEM@|$STRIPE_ITEM|g" -e "s|@RDS_ITEM@|$RDS_ITEM|g" "$1" > "$out"
+  chmod 600 "$out"
+  printf '%s' "$out"
+}
 
 require_op() {
   [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || die "OP_SERVICE_ACCOUNT_TOKEN is not set"
@@ -88,77 +211,936 @@ vault_has_item() {
   esac
 }
 
-# Render an op:// template to a tmpfs file (0600). Echoes the path.
-inject() {
-  local tpl="$1" out="$2"
-  op inject -i "$tpl" -o "$out" -f >/dev/null
+# An item's JSON (its fields' values among it) into the tmpfs; echoes the path.
+item_json() {
+  local out="$SECRETS_DIR/item.$1.json"
+  op item get "$1" --vault "$VAULT" --format json > "$out" \
+    || die "reading vault item '$1' failed (run again once the vault answers)"
   chmod 600 "$out"
   printf '%s' "$out"
 }
 
-# Read the SSH private key from the vault to a tmpfs file; echo the path.
-ssh_key_file() {
-  local key="$SECRETS_DIR/ssh_key"
-  op read "op://$VAULT/ssh/private key?ssh-format=openssh" > "$key"
-  chmod 600 "$key"
-  printf '%s' "$key"
-}
-
-# Resolve the target host IP: explicit override, else terraform output.
-target_ip() {
-  if [ -n "${TARGET_HOST:-}" ]; then
-    printf '%s' "$TARGET_HOST"
-    return
-  fi
-  terraform -chdir="$TF_DIR" output -raw public_ip 2>/dev/null \
-    || die "no public_ip output; run 'infra apply' first or set TARGET_HOST"
-}
-
-tf_init() {
-  terraform -chdir="$TF_DIR" init -input=false >/dev/null
+# Whether the item JSON at $1 has a field labelled $2.
+json_has_field() {
+  jq -e --arg l "$2" 'any(.fields[]?; .label == $l)' "$1" >/dev/null
 }
 
 # ---------------------------------------------------------------------------
-cmd_secrets() {
+# AWS
+# ---------------------------------------------------------------------------
+
+AWS_READY=0
+
+# The AWS credentials for the toolbox's own calls: a CI runner's own (the deploy
+# workflow's OIDC role) when no vault token is given, else the vault's, resolved
+# once into this process's environment.
+aws_auth() {
+  [ "$AWS_READY" -eq 0 ] || return 0
+  if [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] \
+     && [ -n "${AWS_ACCESS_KEY_ID:-}${AWS_WEB_IDENTITY_TOKEN_FILE:-}${AWS_PROFILE:-}" ]; then
+    AWS_READY=1
+    return 0
+  fi
   require_op
-  case "${1:-check}" in
-    check)
-      log "checking vault '$VAULT' references (dry run)…"
-      local rc=0
-      if op inject -f -i "$TF_ENV_TPL" -o /dev/null >/dev/null; then
-        log "  terraform.env.tpl    OK"
-      else
-        err "  terraform.env.tpl    FAILED"; rc=1
-      fi
-      if op inject -f -i "$APP_ENV_TPL" -o /dev/null >/dev/null; then
-        log "  app.prod.env.tpl     OK"
-      else
-        err "  app.prod.env.tpl     FAILED"; rc=1
-      fi
-      if op read "op://$VAULT/ssh/private key?ssh-format=openssh" >/dev/null; then
-        log "  ssh private key      OK"
-      else
-        err "  ssh private key      FAILED"; rc=1
-      fi
-      # Optional: hosted game servers are off without it (DEPLOY.md, "Hosted game servers").
-      local snapshots
-      if ! vault_has_item hosted; then
-        log "  hosted data snapshots absent (hosted game servers off)"
-      elif snapshots="$(hosted_snapshot_map)"; then
-        log "  hosted data snapshots OK ($(jq -r 'keys | join(", ")' <<<"$snapshots"))"
-      else
-        err "  hosted data snapshots FAILED"; rc=1
-      fi
-      [ "$rc" -eq 0 ] || die "one or more references did not resolve — create the missing vault items (DEPLOY.md §1)"
-      log "all references resolved."
-      ;;
-    *) die "unknown: secrets $1 (try: check)" ;;
+  local tpl out="$SECRETS_DIR/aws.env" line key
+  tpl="$(render_tpl "$AWS_ENV_TPL")"
+  op inject -f -i "$tpl" -o "$out" >/dev/null || die "resolving deploy/env/aws.env.tpl failed (secrets check)"
+  chmod 600 "$out"
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue ;; esac
+    key="${line%%=*}"
+    [[ "$key" =~ ^AWS_[A-Z_]+$ ]] || continue
+    export "$key=${line#*=}"
+  done < "$out"
+  rm -f "$out" "$tpl"
+  AWS_READY=1
+}
+
+cmd_aws() {
+  aws_auth
+  aws "$@"
+}
+
+# The deployment's infra.env (SSM, written by Terraform), read once.
+declare -A INFRA=()
+infra_env_load() {
+  [ "${#INFRA[@]}" -eq 0 ] || return 0
+  aws_auth
+  local text line re="^([A-Z][A-Z0-9_]*)='([^']*)'\$"
+  text="$(aws ssm get-parameter --name "$SSM_PREFIX/infra.env" --query Parameter.Value --output text 2>/dev/null)" \
+    || die "cannot read $SSM_PREFIX/infra.env: run ./deploy/run.sh$DEP_FLAG infra apply first"
+  while IFS= read -r line; do
+    [[ "$line" =~ $re ]] || continue
+    INFRA["${BASH_REMATCH[1]}"]="${BASH_REMATCH[2]}"
+  done <<<"$text"
+  [ "${#INFRA[@]}" -gt 0 ] || die "$SSM_PREFIX/infra.env holds nothing (infra apply)"
+}
+
+infra_get() {
+  local v="${INFRA[$1]:-}"
+  [ -n "$v" ] || die "$SSM_PREFIX/infra.env names no $1 (run infra apply)"
+  printf '%s' "$v"
+}
+
+# The service instance: the running EC2 instance tagged opennova:service=<deployment>.
+SERVICE_INSTANCE=""
+service_instance() {
+  if [ -z "$SERVICE_INSTANCE" ]; then
+    aws_auth
+    local ids
+    ids="$(aws ec2 describe-instances \
+      --filters "Name=tag:opennova:service,Values=$DEP" "Name=instance-state-name,Values=running" \
+      --query 'Reservations[].Instances[].InstanceId' --output text)" \
+      || die "listing the $DEP service instance failed"
+    read -r -a found <<<"$ids"
+    case "${#found[@]}" in
+      1) SERVICE_INSTANCE="${found[0]}" ;;
+      0) die "no running instance is tagged opennova:service=$DEP (infra apply makes it)" ;;
+      *) die "several running instances are tagged opennova:service=$DEP: ${found[*]}" ;;
+    esac
+  fi
+  printf '%s' "$SERVICE_INSTANCE"
+}
+
+# Wait for SSM command $1 on instance $2 (up to $3 s past its own timeout),
+# print its output, succeed only when it did.
+ssm_wait() {
+  local cid="$1" iid="$2" limit="$3" waited=0 out="" status="" stderr
+  while :; do
+    sleep 3
+    waited=$((waited + 3))
+    if out="$(aws ssm get-command-invocation --command-id "$cid" --instance-id "$iid" --output json 2>/dev/null)"; then
+      status="$(jq -r '.Status' <<<"$out")"
+      case "$status" in
+        Pending|InProgress|Delayed) ;;
+        *) break ;;
+      esac
+    fi
+    if [ "$waited" -ge "$limit" ]; then
+      err "no result after ${waited}s: aws ssm get-command-invocation --command-id $cid --instance-id $iid"
+      return 1
+    fi
+  done
+  jq -r '.StandardOutputContent // ""' <<<"$out"
+  stderr="$(jq -r '.StandardErrorContent // ""' <<<"$out")"
+  [ -z "$stderr" ] || printf '%s\n' "$stderr" >&2
+  if [ "$status" != Success ]; then
+    err "the command ended $status (exit $(jq -r '.ResponseCode' <<<"$out"))"
+    return 1
+  fi
+}
+
+# Run the bash script $2 as root on the service instance (AWS-RunShellScript),
+# allowing it $1 seconds.
+ssm_run() {
+  local timeout="$1" script="$2" iid params cid
+  aws_auth
+  iid="$(service_instance)"
+  params="$(mktemp)"
+  jq -n --arg s "$script" --arg t "$timeout" '{commands: [$s], executionTimeout: [$t]}' > "$params"
+  cid="$(aws ssm send-command --instance-ids "$iid" --document-name AWS-RunShellScript \
+          --parameters "file://$params" --comment "opennova $DEP" \
+          --query Command.CommandId --output text)" \
+    || { rm -f "$params"; die "sending the command to $iid failed"; }
+  rm -f "$params"
+  ssm_wait "$cid" "$iid" $((timeout + 120))
+}
+
+# Converge the host to the deployment's release (the converge document).
+ssm_converge() {
+  local iid doc cid
+  infra_env_load
+  iid="$(service_instance)"
+  doc="$(infra_get OPENNOVA_CONVERGE_DOCUMENT)"
+  cid="$(aws ssm send-command --instance-ids "$iid" --document-name "$doc" \
+          --comment "opennova $DEP converge" --query Command.CommandId --output text)" \
+    || die "sending $doc to $iid failed"
+  log "converging $iid ($doc, command $cid)…"
+  ssm_wait "$cid" "$iid" 1500
+}
+
+# A script for ssm_run that refuses to start before the host's first converge.
+host_script() {
+  printf '#!/bin/bash\nset -euo pipefail\nexport PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root\n'
+  printf 'command -v opennova-compose >/dev/null || { echo "the host has converged no release yet (app deploy)" >&2; exit 1; }\n'
+  printf '%s\n' "$@"
+}
+
+# ---------------------------------------------------------------------------
+# secrets
+# ---------------------------------------------------------------------------
+
+STRIPE_FIELDS=(secret_key webhook_secret price_tier1 price_tier2 price_tier3 price_own_machine)
+
+# Whether a Stripe item's field value has its form ($3: the item's mode).
+stripe_field_ok() {
+  local field="$1" value="$2" mode="$3"
+  case "$field" in
+    secret_key)     [[ "$value" =~ ^(sk|rk)_${mode}_[A-Za-z0-9]{10,}$ ]] ;;
+    webhook_secret) [[ "$value" =~ ^whsec_[A-Za-z0-9+/=]{16,}$ ]] ;;
+    price_*)        [[ "$value" =~ ^price_[A-Za-z0-9]{8,}(,price_[A-Za-z0-9]{8,})*$ ]] ;;
+    *) return 1 ;;
   esac
 }
 
+# A Stripe item's state, without printing a value: STRIPE_STATE ok,
+# placeholders, absent or failed, and STRIPE_DETAIL saying which fields.
+stripe_check_item() {
+  local item="$1" mode="$2" json field value
+  local placeholders=() failed=()
+  STRIPE_STATE="" STRIPE_DETAIL=""
+  if ! vault_has_item "$item"; then
+    STRIPE_STATE=absent
+    STRIPE_DETAIL="absent (billing off)"
+    return 0
+  fi
+  json="$(item_json "$item")"
+  for field in "${STRIPE_FIELDS[@]}"; do
+    if ! json_has_field "$json" "$field"; then
+      placeholders+=("$field")
+      continue
+    fi
+    value="$(jq -r --arg l "$field" '[.fields[]? | select(.label == $l) | (.value // "")][0]' "$json")"
+    if [ -z "$value" ] || [ "$value" = REPLACE_ME ]; then
+      placeholders+=("$field")
+    elif ! stripe_field_ok "$field" "$value" "$mode"; then
+      if [ "$field" = secret_key ] && [[ "$value" =~ ^(sk|rk)_(test|live)_ ]]; then
+        failed+=("secret_key (a ${BASH_REMATCH[2]} key in a $mode item)")
+      else
+        failed+=("$field (malformed)")
+      fi
+    fi
+  done
+  value=""
+  rm -f "$json"
+  if [ "${#failed[@]}" -gt 0 ]; then
+    STRIPE_STATE=failed
+    STRIPE_DETAIL="FAILED: $(IFS=,; printf '%s' "${failed[*]}" | sed 's/,/, /g')"
+  elif [ "${#placeholders[@]}" -gt 0 ]; then
+    STRIPE_STATE=placeholders
+    STRIPE_DETAIL="placeholders: $(IFS=,; printf '%s' "${placeholders[*]}" | sed 's/,/, /g') (billing off)"
+  else
+    STRIPE_STATE=ok
+    STRIPE_DETAIL="OK ($mode mode, 3 tiers + own machine)"
+  fi
+}
+
+# Add the fields item $1 lacks (category $2 when it is new), each spec
+# label:kind:arg:type: kind `gen` makes `openssl rand -hex <arg>`, `value`
+# writes <arg>; type CONCEALED or STRING. Never overwrites a field; prints no
+# value (the values reach op through a template file in the tmpfs, never an
+# argument).
+ensure_item() {
+  local title="$1" category="$2" json new spec label kind arg type creating=0 generated
+  shift 2
+  local added=() kept=()
+  json="$SECRETS_DIR/item.ensure.json"
+  new="$SECRETS_DIR/item.ensure-new.json"
+  if vault_has_item "$title"; then
+    op item get "$title" --vault "$VAULT" --format json > "$json" \
+      || die "reading vault item '$title' failed"
+  else
+    creating=1
+    jq -n --arg t "$title" --arg c "$category" '{title: $t, category: $c, fields: []}' > "$json"
+  fi
+  chmod 600 "$json"
+  for spec in "$@"; do
+    IFS=: read -r label kind arg type <<<"$spec"
+    if json_has_field "$json" "$label"; then
+      kept+=("$label")
+      continue
+    fi
+    case "$kind" in
+      gen)   generated="$(openssl rand -hex "$arg")" ;;
+      value) generated="$arg" ;;
+      *) die "ensure_item: unknown kind $kind" ;;
+    esac
+    OPENNOVA_FIELD_VALUE="$generated" jq --arg l "$label" --arg t "$type" \
+      '.fields += [{label: $l, type: $t, value: env.OPENNOVA_FIELD_VALUE}]' "$json" > "$new"
+    mv -f "$new" "$json"
+    added+=("$label")
+  done
+  generated=""
+  if [ "${#added[@]}" -eq 0 ]; then
+    log "  $title: has ${kept[*]}"
+  elif [ "$creating" -eq 1 ]; then
+    op item create --vault "$VAULT" --template "$json" >/dev/null || die "creating vault item '$title' failed"
+    log "  $title: created with ${added[*]}"
+  else
+    op item edit "$title" --vault "$VAULT" --template "$json" >/dev/null || die "adding ${added[*]} to vault item '$title' failed"
+    log "  $title: added ${added[*]}${kept[*]:+ (kept ${kept[*]})}"
+  fi
+  rm -f "$json" "$new"
+}
+
+stripe_placeholder_specs() {
+  printf '%s\n' secret_key:value:REPLACE_ME:CONCEALED webhook_secret:value:REPLACE_ME:CONCEALED \
+    price_tier1:value:REPLACE_ME:STRING price_tier2:value:REPLACE_ME:STRING \
+    price_tier3:value:REPLACE_ME:STRING price_own_machine:value:REPLACE_ME:STRING
+}
+
+secrets_init() {
+  require_op
+  log "vault '$VAULT', deployment $DEP: adding what is missing (no value is printed or overwritten)…"
+  # The edge secret is the zone's (one Transform Rule for every deployment's
+  # web hostname): app-prod holds it for all.
+  local app_specs=(admin_api_token:gen:24:CONCEALED admin_basic_auth_user:value:admin:STRING
+                   admin_basic_auth_password:gen:16:CONCEALED database_password:gen:24:CONCEALED)
+  if [ "$APP_ITEM" = app-prod ]; then
+    app_specs+=(edge_auth_secret:gen:32:CONCEALED)
+    ensure_item app-prod SERVER "${app_specs[@]}"
+  else
+    ensure_item "$APP_ITEM" SERVER "${app_specs[@]}"
+    ensure_item app-prod SERVER edge_auth_secret:gen:32:CONCEALED
+  fi
+  ensure_item "$RDS_ITEM" SECURE_NOTE \
+    master_password:gen:24:CONCEALED
+  ensure_item alerts SECURE_NOTE \
+    email:value:REPLACE_ME:STRING
+  # Where support@<domain> forwards (infra/aws/email.tf); REPLACE_ME keeps
+  # email routing off.
+  ensure_item email SECURE_NOTE \
+    forward_to:value:REPLACE_ME:STRING
+  local specs=()
+  mapfile -t specs < <(stripe_placeholder_specs)
+  ensure_item stripe-test API_CREDENTIAL "${specs[@]}"
+  ensure_item stripe-live API_CREDENTIAL "${specs[@]}"
+  log "done. In the 1Password app fill alerts/email, email/forward_to and each Stripe item's secret_key;"
+  log "./deploy/run.sh stripe setup --mode test|live fills the rest of the Stripe fields (DEPLOY.md,"
+  log "\"Monthly support tiers (Stripe)\"). Then ./deploy/run.sh$DEP_FLAG secrets check and secrets sync."
+}
+
+# A runtime.env.tpl line: NAME=op://... [# optional|# billing]. Sets RT_NAME,
+# RT_REF, RT_FLAG; fails on a line that is none (comments, blanks).
+RT_RE='^([A-Z][A-Z0-9_]*)=(op://[^[:space:]#]+)[[:space:]]*(#[[:space:]]*(optional|billing))?[[:space:]]*$'
+parse_runtime_line() {
+  [[ "$1" =~ $RT_RE ]] || return 1
+  RT_NAME="${BASH_REMATCH[1]}"
+  RT_REF="${BASH_REMATCH[2]}"
+  RT_FLAG="${BASH_REMATCH[4]}"
+}
+
+# Whether reference op://vault/item/field names a field the item has.
+ref_field_exists() {
+  local path="${1#op://}" item field json rc=0
+  item="$(cut -d/ -f2 <<<"$path")"
+  field="$(cut -d/ -f3 <<<"$path")"
+  vault_has_item "$item" || return 1
+  json="$(item_json "$item")"
+  json_has_field "$json" "$field" || rc=1
+  rm -f "$json"
+  return "$rc"
+}
+
+secrets_check() {
+  require_op
+  log "checking vault '$VAULT' for deployment $DEP (no value is printed)…"
+  local rc=0 tpl line
+  for tpl in "$TF_ENV_TPL" "$AWS_ENV_TPL"; do
+    if op inject -f -i "$(render_tpl "$tpl")" -o /dev/null >/dev/null; then
+      log "  $(basename "$tpl")    OK"
+    else
+      err "  $(basename "$tpl")    FAILED"; rc=1
+    fi
+  done
+  # The runtime secrets: each required reference must resolve.
+  tpl="$(render_tpl "$RUNTIME_TPL")"
+  while IFS= read -r line || [ -n "$line" ]; do
+    parse_runtime_line "$line" || continue
+    case "$RT_FLAG" in
+      billing) continue ;;
+      optional)
+        if ref_field_exists "$RT_REF"; then log "  $RT_NAME    OK (optional)"; else log "  $RT_NAME    absent (optional)"; fi
+        continue ;;
+    esac
+    if op read --no-newline "$RT_REF" >/dev/null 2>&1; then
+      log "  $RT_NAME    OK"
+    else
+      err "  $RT_NAME    FAILED ($RT_REF)"; rc=1
+    fi
+  done < "$tpl"
+  # The Stripe items: test mode's and live mode's.
+  local item mode
+  for item in stripe-test stripe-live; do
+    mode="test"
+    [ "$item" != stripe-live ] || mode="live"
+    stripe_check_item "$item" "$mode"
+    if [ "$STRIPE_STATE" = failed ]; then
+      err "  $item    $STRIPE_DETAIL"; rc=1
+    else
+      log "  $item    $STRIPE_DETAIL"
+    fi
+  done
+  log "  (deployment $DEP syncs $STRIPE_ITEM)"
+  # Where the alarms and budgets write: a placeholder sends nothing.
+  local email
+  if email="$(op read --no-newline "op://$VAULT/alerts/email" 2>/dev/null)" && [[ "$email" == *@*.* ]]; then
+    log "  alerts/email    OK"
+  else
+    log "  alerts/email    placeholder or absent: the alarms, budgets and cost anomalies email nobody"
+  fi
+  # Where the domain's email routes forward (prod's zone, infra/aws/email.tf).
+  # terraform.env.tpl names the field, so an absent item fails its line above.
+  if ! vault_has_item email; then
+    err "  email/forward_to    absent: every infra run needs it (secrets init makes it, REPLACE_ME: email routing off)"; rc=1
+  elif email="$(op read --no-newline "op://$VAULT/email/forward_to" 2>/dev/null)" && [[ "$email" == *@*.* ]]; then
+    log "  email/forward_to    OK: support@<domain> forwards there (once Cloudflare's verification link is clicked)"
+  else
+    log "  email/forward_to    placeholder: email routing off (support@<domain> receives nothing)"
+  fi
+  email=""
+  # Optional: hosted game servers are off without it (DEPLOY.md, "Hosted game servers").
+  local snapshots
+  if ! vault_has_item hosted; then
+    log "  hosted data snapshots absent (hosted game servers off)"
+  elif snapshots="$(hosted_snapshot_map)"; then
+    log "  hosted data snapshots OK ($(jq -r 'keys | join(", ")' <<<"$snapshots"))"
+  else
+    err "  hosted data snapshots FAILED"; rc=1
+  fi
+  [ "$rc" -eq 0 ] || die "one or more checks failed: create or fix the vault items (DEPLOY.md, section 1; secrets init adds the generated ones)"
+  log "all references resolved."
+}
+
+# Copy the deployment's runtime secrets (runtime.env.tpl) from the vault to
+# SSM SecureStrings, /opennova/<deployment>/secret/<NAME>. Each value goes
+# vault -> a 0600 file in the tmpfs -> `put-parameter --value file://...`:
+# never an argument, never printed.
+secrets_sync() {
+  local prune=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --prune) prune=1; shift ;;
+      *) die "unknown: secrets sync $1 (try: --prune)" ;;
+    esac
+  done
+  require_op
+  aws_auth
+  local billing=0
+  stripe_check_item "$STRIPE_ITEM" "$STRIPE_MODE"
+  case "$STRIPE_STATE" in
+    ok) billing=1; log "billing: $STRIPE_ITEM $STRIPE_DETAIL" ;;
+    failed) die "$STRIPE_ITEM: $STRIPE_DETAIL. Fix it (secrets check), or delete the item to sync with billing off" ;;
+    *) log "billing: off ($STRIPE_ITEM $STRIPE_DETAIL); its parameters are not synced" ;;
+  esac
+  log "syncing vault '$VAULT' -> $SSM_PREFIX/secret/ (deployment $DEP)…"
+  local tpl line value_file="$SECRETS_DIR/value.sync" synced=()
+  tpl="$(render_tpl "$RUNTIME_TPL")"
+  while IFS= read -r line || [ -n "$line" ]; do
+    parse_runtime_line "$line" || continue
+    if [ "$RT_FLAG" = billing ] && [ "$billing" -eq 0 ]; then continue; fi
+    if [ "$RT_FLAG" = optional ] && ! ref_field_exists "$RT_REF"; then continue; fi
+    op read --no-newline "$RT_REF" > "$value_file" 2>/dev/null \
+      || { rm -f "$value_file"; die "reading $RT_NAME ($RT_REF) failed; nothing more was synced"; }
+    chmod 600 "$value_file"
+    if [ ! -s "$value_file" ]; then rm -f "$value_file"; die "$RT_NAME ($RT_REF) is empty"; fi
+    # The host writes NAME='value' lines (deploy/host/converge.sh).
+    if grep -q "'" "$value_file" || [ "$(wc -l < "$value_file")" -ne 0 ]; then
+      rm -f "$value_file"
+      die "$RT_NAME's value holds a single quote or a newline, which the host's env file cannot carry"
+    fi
+    aws ssm put-parameter --name "$SSM_PREFIX/secret/$RT_NAME" --type SecureString --tier Standard \
+      --value "file://$value_file" --overwrite >/dev/null \
+      || { rm -f "$value_file"; die "writing $SSM_PREFIX/secret/$RT_NAME failed"; }
+    rm -f "$value_file"
+    synced+=("$RT_NAME")
+    log "  $RT_NAME"
+  done < "$tpl"
+  # What SSM holds that the vault no longer names.
+  local names name stale=()
+  names="$(aws ssm get-parameters-by-path --path "$SSM_PREFIX/secret/" --recursive \
+             --query 'Parameters[].Name' --output text)" || die "listing $SSM_PREFIX/secret/ failed"
+  for name in $names; do
+    name="${name##*/}"
+    [[ " ${synced[*]} " == *" $name "* ]] || stale+=("$name")
+  done
+  for name in ${stale[@]+"${stale[@]}"}; do
+    if [ "$prune" -eq 1 ]; then
+      aws ssm delete-parameter --name "$SSM_PREFIX/secret/$name" >/dev/null \
+        || die "deleting $SSM_PREFIX/secret/$name failed"
+      log "  $name deleted (the vault no longer names it)"
+    else
+      log "  $name kept, though the vault no longer names it (secrets sync --prune deletes it)"
+    fi
+  done
+  log "synced ${#synced[@]} secrets. The host reads them at its next converge: ./deploy/run.sh$DEP_FLAG app converge (or the next app deploy)."
+}
+
+cmd_secrets() {
+  local action="${1:-check}"
+  shift || true
+  case "$action" in
+    init)  secrets_init "$@" ;;
+    check) secrets_check "$@" ;;
+    sync)  secrets_sync "$@" ;;
+    *) die "unknown: secrets $action (try: init|check|sync)" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# stripe: the support tiers' objects in one Stripe mode (DEPLOY.md, "Monthly
+# support tiers (Stripe)")
+# ---------------------------------------------------------------------------
+#
+# The vault item stripe-<mode>'s secret_key reaches curl through a config file
+# in the tmpfs (-K), never an argument; nothing prints a key or a signing
+# secret, and the fields go back to the vault through a template file, as
+# ensure_item writes them. Price ids, product ids and URLs are no secrets.
+
+STRIPE_API=https://api.stripe.com
+# The API version the server pins (apps/novaworld_server/billing): the webhook
+# endpoint's events arrive in its shape.
+STRIPE_API_VERSION=2025-03-31.basil
+# The events the server's webhook handles.
+STRIPE_EVENTS=(checkout.session.completed checkout.session.expired
+  customer.subscription.created customer.subscription.updated customer.subscription.deleted
+  customer.subscription.paused customer.subscription.resumed
+  invoice.paid invoice.payment_failed invoice.payment_action_required customer.deleted)
+# The catalog, one monthly USD price per entry: vault field|lookup key|product
+# name|product description|metadata opennova_item|default amount (cents).
+STRIPE_CATALOG=(
+  "price_tier1|opennova_tier1_monthly|OpenNova support tier 1|Monthly support for OpenNova: 1 hosted game server|tier1|500"
+  "price_tier2|opennova_tier2_monthly|OpenNova support tier 2|Monthly support for OpenNova: 2 hosted game servers|tier2|1000"
+  "price_tier3|opennova_tier3_monthly|OpenNova support tier 3|Monthly support for OpenNova: 3 hosted game servers|tier3|1500"
+  "price_own_machine|opennova_own_machine_monthly|OpenNova own machine|A machine of its own for one of your hosted servers, monthly add-on|own_machine|4500"
+)
+# The Customer Portal configuration this toolbox owns carries this metadata.
+STRIPE_PORTAL_TAG=support_tiers
+
+STRIPE_CFG=""
+STRIPE_REPLY=""
+STRIPE_HTTP=""
+STRIPE_DOMAIN=""
+STRIPE_WEB_HOST=""
+
+# The mode's key from the vault into curl's config file; checks its form and
+# mode first (a test key in stripe-live is refused), and finds the domain.
+stripe_auth() {
+  local mode="$1" key=""
+  require_op
+  vault_has_item "$STRIPE_ITEM" || die "vault item '$STRIPE_ITEM' is absent: ./deploy/run.sh secrets init makes it"
+  key="$(op read --no-newline "op://$VAULT/$STRIPE_ITEM/secret_key" 2>/dev/null)" \
+    || die "reading $STRIPE_ITEM/secret_key failed"
+  if [ -z "$key" ] || [ "$key" = REPLACE_ME ]; then
+    die "$STRIPE_ITEM/secret_key is a placeholder: put the $mode mode key there (Stripe, Developers, API keys)"
+  fi
+  if ! stripe_field_ok secret_key "$key" "$mode"; then
+    if [[ "$key" =~ ^(sk|rk)_(test|live)_ ]]; then
+      die "$STRIPE_ITEM/secret_key is a ${BASH_REMATCH[2]} mode key; $STRIPE_ITEM takes a $mode mode one"
+    fi
+    die "$STRIPE_ITEM/secret_key is malformed (sk_${mode}_... or rk_${mode}_...)"
+  fi
+  STRIPE_CFG="$SECRETS_DIR/value.stripe.curl"
+  STRIPE_REPLY="$SECRETS_DIR/value.stripe-reply"
+  (umask 077 && printf 'header = "Authorization: Bearer %s"\nheader = "Stripe-Version: %s"\n' \
+    "$key" "$STRIPE_API_VERSION" > "$STRIPE_CFG")
+  key=""
+  STRIPE_DOMAIN="$(op read --no-newline "op://$VAULT/cloudflare/domain" 2>/dev/null)" \
+    || die "reading cloudflare/domain failed (the site's domain: the webhook's and the portal's URLs)"
+  [[ "$STRIPE_DOMAIN" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]] \
+    || die "cloudflare/domain '$STRIPE_DOMAIN' is no domain name"
+  # The deployment's site, as infra/aws/locals.tf names it.
+  if [ "$DEP" = prod ]; then STRIPE_WEB_HOST="$STRIPE_DOMAIN"; else STRIPE_WEB_HOST="$DEP.$STRIPE_DOMAIN"; fi
+}
+
+# One Stripe API call: METHOD PATH, then curl's data arguments (GET: query
+# parameters). The reply lands in STRIPE_REPLY (the tmpfs; a webhook's reply
+# holds its signing secret), its status in STRIPE_HTTP. Only no answer at all
+# stops the command; the caller reads the status.
+stripe_call() {
+  local method="$1" path="$2"
+  shift 2
+  local args=(-sS --max-time 30 -K "$STRIPE_CFG" -o "$STRIPE_REPLY" -w '%{http_code}')
+  if [ "$method" = GET ]; then args+=(-G); else args+=(-X "$method"); fi
+  STRIPE_HTTP="$(umask 077 && curl "${args[@]}" "$@" "$STRIPE_API$path")" \
+    || die "Stripe did not answer $method $path"
+}
+
+# Stripe's error, from the last reply: its type, code and message.
+stripe_error() {
+  jq -r '[.error.type, .error.code, .error.param, .error.message] | map(select(. != null)) | join(" ")' \
+    "$STRIPE_REPLY" 2>/dev/null | cut -c1-300
+}
+
+# The last call answered 200, or the command stops with Stripe's error ($1:
+# what it was).
+stripe_ok() {
+  [ "$STRIPE_HTTP" = 200 ] || die "$1: Stripe answered $STRIPE_HTTP: $(stripe_error)"
+}
+
+# A dollar amount ($2, from flag $1: 5 or 5.00) in cents.
+usd_cents() {
+  [[ "$2" =~ ^([0-9]{1,5})(\.([0-9]{2}))?$ ]] || die "$1 takes US dollars (5, or 5.00), not '$2'"
+  local cents=$((10#${BASH_REMATCH[1]} * 100 + 10#${BASH_REMATCH[3]:-0}))
+  [ "$cents" -gt 0 ] || die "$1 must be more than 0"
+  printf '%s' "$cents"
+}
+
+# The portal's settings, as curl data arguments, for the tier products $@
+# (product:price each): switching among them prorates, a downgrade waits for
+# the period's end, a cancel ends the subscription at the period's end; the
+# card, the invoices, the email and the address are the customer's to see and
+# change.
+stripe_portal_args() {
+  local i=0 pair
+  printf '%s\n' \
+    "business_profile[headline]=OpenNova monthly support tiers" \
+    "business_profile[privacy_policy_url]=https://$STRIPE_DOMAIN/privacy" \
+    "business_profile[terms_of_service_url]=https://$STRIPE_DOMAIN/terms" \
+    "default_return_url=https://$STRIPE_WEB_HOST/me/support" \
+    "features[customer_update][enabled]=true" \
+    "features[customer_update][allowed_updates][]=email" \
+    "features[customer_update][allowed_updates][]=address" \
+    "features[invoice_history][enabled]=true" \
+    "features[payment_method_update][enabled]=true" \
+    "features[subscription_cancel][enabled]=true" \
+    "features[subscription_cancel][mode]=at_period_end" \
+    "features[subscription_cancel][proration_behavior]=none" \
+    "features[subscription_update][enabled]=true" \
+    "features[subscription_update][default_allowed_updates][]=price" \
+    "features[subscription_update][proration_behavior]=create_prorations" \
+    "features[subscription_update][schedule_at_period_end][conditions][0][type]=decreasing_item_amount" \
+    "metadata[opennova]=$STRIPE_PORTAL_TAG"
+  for pair in "$@"; do
+    printf '%s\n' "features[subscription_update][products][$i][product]=${pair%%:*}" \
+      "features[subscription_update][products][$i][prices][]=${pair#*:}"
+    i=$((i + 1))
+  done
+}
+
+# Set fields of vault item $1 (which exists): each further argument
+# label:TYPE, its value in VAULT_VALUES[label]. A field there is overwritten,
+# a missing one added; the values reach op through a template in the tmpfs,
+# never an argument, and are never printed.
+declare -A VAULT_VALUES=()
+vault_set_fields() {
+  local title="$1" json="$SECRETS_DIR/item.set.json" new="$SECRETS_DIR/item.set-new.json" spec label type labels=()
+  shift
+  (umask 077 && op item get "$title" --vault "$VAULT" --format json > "$json") \
+    || die "reading vault item '$title' failed"
+  for spec in "$@"; do
+    label="${spec%%:*}" type="${spec#*:}"
+    labels+=("$label")
+    (umask 077 && OPENNOVA_FIELD_VALUE="${VAULT_VALUES[$label]}" jq --arg l "$label" --arg t "$type" \
+      'if any(.fields[]?; .label == $l)
+       then .fields |= map(if .label == $l then .value = env.OPENNOVA_FIELD_VALUE else . end)
+       else .fields += [{label: $l, type: $t, value: env.OPENNOVA_FIELD_VALUE}] end' "$json" > "$new") \
+      || die "preparing vault item '$title' failed"
+    mv -f "$new" "$json"
+  done
+  op item edit "$title" --vault "$VAULT" --template "$json" >/dev/null \
+    || { rm -f "$json"; die "writing ${labels[*]} to vault item '$title' failed"; }
+  rm -f "$json"
+}
+
+# A vault field's value (the item JSON at $1, label $2), empty when it has none.
+json_field() {
+  jq -r --arg l "$2" '[.fields[]? | select(.label == $l) | (.value // "")][0] // ""' "$1"
+}
+
+# stripe setup: make what the mode lacks, idempotently. Products and monthly
+# prices by lookup key (an existing active one is kept; an amount given by a
+# flag that differs makes a new price, which takes the lookup key and goes
+# first in the vault field, the old one kept after it so its subscribers
+# still grant); the price ids into the vault item; the Customer Portal
+# configuration tagged opennova=support_tiers (made, or brought to these
+# settings); the webhook endpoint on https://<web host>/api/billing/webhook
+# (made, its events brought up to date; a new one's signing secret goes into
+# the vault's webhook_secret).
+stripe_setup() {
+  local mode="$1"
+  shift
+  declare -A amounts=() explicit=()
+  local entry field lookup name desc meta cents
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --tier1|--tier2|--tier3|--own-machine)
+        [ $# -ge 2 ] || die "$1 needs an amount in US dollars"
+        case "$1" in
+          --tier1) field=price_tier1 ;; --tier2) field=price_tier2 ;;
+          --tier3) field=price_tier3 ;; --own-machine) field=price_own_machine ;;
+        esac
+        amounts[$field]="$(usd_cents "$1" "$2")" || exit 1
+        explicit[$field]=1
+        shift 2 ;;
+      *) die "unknown: stripe setup $1 (try: --mode test|live, --tier1 USD, --tier2 USD, --tier3 USD, --own-machine USD)" ;;
+    esac
+  done
+  stripe_auth "$mode"
+  local livemode=false
+  [ "$mode" != live ] || livemode=true
+  log "stripe setup: $mode mode ($STRIPE_ITEM), the site https://$STRIPE_WEB_HOST"
+
+  # --- the products and their monthly prices
+  local vault_json current price_id product_id have want old tier_pairs=() wrote=()
+  vault_json="$(item_json "$STRIPE_ITEM")"
+  stripe_call GET /v1/products --data-urlencode "active=true" --data-urlencode "limit=100"
+  stripe_ok "listing the products"
+  local products="$SECRETS_DIR/value.stripe-products.json"
+  cp "$STRIPE_REPLY" "$products"
+  for entry in "${STRIPE_CATALOG[@]}"; do
+    IFS='|' read -r field lookup name desc meta cents <<<"$entry"
+    [ -z "${amounts[$field]:-}" ] || cents="${amounts[$field]}"
+    stripe_call GET /v1/prices --data-urlencode "lookup_keys[]=$lookup" --data-urlencode "active=true"
+    stripe_ok "finding the price $lookup"
+    price_id="$(jq -r '.data[0].id // empty' "$STRIPE_REPLY")"
+    product_id="$(jq -r '.data[0].product // empty' "$STRIPE_REPLY")"
+    have="$(jq -r '.data[0].unit_amount // empty' "$STRIPE_REPLY")"
+    if [ -n "$price_id" ] && { [ "$have" = "$cents" ] || [ -z "${explicit[$field]:-}" ]; }; then
+      if [ "$have" = "$cents" ]; then
+        log "  $field: $price_id ($lookup, $have usd cents a month)"
+      else
+        log "  $field: $price_id ($lookup) is $have usd cents a month, not the default $cents: kept (an amount given by its flag makes a new price)"
+      fi
+    else
+      if [ -z "$product_id" ]; then
+        product_id="$(jq -r --arg m "$meta" '[.data[]? | select((.metadata.opennova_item // "") == $m) | .id][0] // empty' "$products")"
+      fi
+      if [ -z "$product_id" ]; then
+        stripe_call POST /v1/products --data-urlencode "name=$name" --data-urlencode "description=$desc" \
+          --data-urlencode "metadata[opennova_item]=$meta" --data-urlencode "statement_descriptor=OPENNOVA"
+        stripe_ok "making the product '$name'"
+        product_id="$(jq -r '.id' "$STRIPE_REPLY")"
+        log "  $field: made the product $product_id ($name)"
+      fi
+      stripe_call POST /v1/prices --data-urlencode "product=$product_id" --data-urlencode "currency=usd" \
+        --data-urlencode "unit_amount=$cents" --data-urlencode "recurring[interval]=month" \
+        --data-urlencode "lookup_key=$lookup" --data-urlencode "transfer_lookup_key=true" \
+        --data-urlencode "metadata[opennova_item]=$meta"
+      stripe_ok "making the price $lookup"
+      [ "$(jq -r '.livemode' "$STRIPE_REPLY")" = "$livemode" ] \
+        || die "the price $lookup came back in the other mode: the key is not a $mode mode key"
+      old="$price_id"
+      price_id="$(jq -r '.id' "$STRIPE_REPLY")"
+      log "  $field: made $price_id ($lookup, $cents usd cents a month)${old:+, after $old (kept in the field: its subscribers still grant)}"
+    fi
+    # The field: this price first, then the prices it held before
+    # (grandfathered: their subscribers still grant).
+    current="$(json_field "$vault_json" "$field")"
+    want="$( { printf '%s\n' "$price_id"; tr ',' '\n' <<<"$current"; } \
+      | awk '/^price_[A-Za-z0-9]+$/ && !seen[$0]++' | paste -sd, -)"
+    if [ "$want" != "$current" ]; then
+      VAULT_VALUES[$field]="$want"
+      wrote+=("$field:STRING")
+    fi
+    [ "$field" = price_own_machine ] || tier_pairs+=("$product_id:$price_id")
+  done
+  rm -f "$vault_json" "$products"
+  if [ "${#wrote[@]}" -gt 0 ]; then
+    vault_set_fields "$STRIPE_ITEM" "${wrote[@]}"
+    log "  vault $STRIPE_ITEM: wrote ${wrote[*]%%:*}"
+  else
+    log "  vault $STRIPE_ITEM: the price fields already name these"
+  fi
+
+  # --- the Customer Portal configuration
+  local portal_args=() portal_id
+  mapfile -t portal_args < <(stripe_portal_args "${tier_pairs[@]}")
+  local data_args=()
+  for entry in "${portal_args[@]}"; do data_args+=(--data-urlencode "$entry"); done
+  stripe_call GET /v1/billing_portal/configurations --data-urlencode "active=true" --data-urlencode "limit=100"
+  stripe_ok "listing the Customer Portal configurations"
+  portal_id="$(jq -r --arg t "$STRIPE_PORTAL_TAG" '[.data[]? | select((.metadata.opennova // "") == $t) | .id][0] // empty' "$STRIPE_REPLY")"
+  if [ -n "$portal_id" ]; then
+    stripe_call POST "/v1/billing_portal/configurations/$portal_id" "${data_args[@]}"
+    stripe_ok "updating the Customer Portal configuration $portal_id"
+    log "  portal: $portal_id brought to these settings (default: $(jq -r '.is_default' "$STRIPE_REPLY"))"
+  else
+    stripe_call POST /v1/billing_portal/configurations "${data_args[@]}"
+    stripe_ok "making the Customer Portal configuration"
+    portal_id="$(jq -r '.id' "$STRIPE_REPLY")"
+    log "  portal: made $portal_id (default: $(jq -r '.is_default' "$STRIPE_REPLY"))"
+  fi
+  [ "$(jq -r '.is_default' "$STRIPE_REPLY")" = true ] \
+    || log "  portal: WARNING: $portal_id is not the account's default configuration, and the server's portal sessions name none, so they get the default's settings (DEPLOY.md, \"Monthly support tiers (Stripe)\")"
+
+  # --- the webhook endpoint
+  local url="https://$STRIPE_WEB_HOST/api/billing/webhook" endpoint version missing secret ev event_args=()
+  for ev in "${STRIPE_EVENTS[@]}"; do event_args+=(--data-urlencode "enabled_events[]=$ev"); done
+  stripe_call GET /v1/webhook_endpoints --data-urlencode "limit=100"
+  stripe_ok "listing the webhook endpoints"
+  endpoint="$(jq -c --arg u "$url" '[.data[]? | select(.url == $u)][0] // empty' "$STRIPE_REPLY")"
+  if [ -n "$endpoint" ]; then
+    version="$(jq -r '.api_version // ""' <<<"$endpoint")"
+    missing="$(jq -r --args '[$ARGS.positional[] as $e | select(.enabled_events | index($e) | not) | $e] | join(" ")' \
+      "${STRIPE_EVENTS[@]}" <<<"$endpoint")"
+    log "  webhook: $(jq -r '.id' <<<"$endpoint") on $url ($(jq -r '.status' <<<"$endpoint"), API $version)"
+    if [ -n "$missing" ]; then
+      stripe_call POST "/v1/webhook_endpoints/$(jq -r '.id' <<<"$endpoint")" "${event_args[@]}"
+      stripe_ok "updating the webhook endpoint's events"
+      log "  webhook: its events now include $missing"
+    fi
+    [ "$version" = "$STRIPE_API_VERSION" ] \
+      || err "  webhook: its API version is $version, not $STRIPE_API_VERSION, and an endpoint's version never changes: delete it in Stripe (Developers, Webhooks), then stripe setup again (which writes the new signing secret)"
+    log "  webhook: its signing secret is not readable again; the vault's webhook_secret is left as it is"
+  else
+    stripe_call POST /v1/webhook_endpoints --data-urlencode "url=$url" \
+      --data-urlencode "api_version=$STRIPE_API_VERSION" \
+      --data-urlencode "description=NovaWorld service: monthly support tiers (apps/novaworld_server/billing)" \
+      "${event_args[@]}"
+    stripe_ok "making the webhook endpoint"
+    secret="$(jq -r '.secret // ""' "$STRIPE_REPLY")"
+    log "  webhook: made $(jq -r '.id' "$STRIPE_REPLY") on $url ($(jq -r '.enabled_events | length' "$STRIPE_REPLY") events, API $(jq -r '.api_version' "$STRIPE_REPLY"))"
+    rm -f "$STRIPE_REPLY"
+    stripe_field_ok webhook_secret "$secret" "$mode" || { secret=""; die "the new endpoint's reply holds no signing secret: delete the endpoint in Stripe and run stripe setup again"; }
+    VAULT_VALUES[webhook_secret]="$secret"
+    secret=""
+    vault_set_fields "$STRIPE_ITEM" webhook_secret:CONCEALED
+    VAULT_VALUES[webhook_secret]=""
+    log "  vault $STRIPE_ITEM: wrote webhook_secret"
+  fi
+  log "done. Next: ./deploy/run.sh$DEP_FLAG stripe check --mode $mode, then secrets sync and app converge;"
+  log "then Stripe's \"Send test webhook\" on the endpoint must answer 2xx."
+}
+
+# stripe check: the mode's vault item and its objects in Stripe, read alone
+# (GET), nothing printed that is a secret. Fails (exit 1) on what keeps billing
+# from working.
+stripe_check() {
+  local mode="$1"
+  shift
+  [ $# -eq 0 ] || die "unknown: stripe check $1 (try: --mode test|live)"
+  stripe_auth "$mode"
+  local livemode=false rc=0 vault_json value entry field lookup name desc meta cents id first bad problems=()
+  [ "$mode" != live ] || livemode=true
+  log "stripe check: $mode mode ($STRIPE_ITEM), the site https://$STRIPE_WEB_HOST (no value is printed)"
+  log "  secret_key    OK ($mode mode form)"
+  vault_json="$(item_json "$STRIPE_ITEM")"
+  value="$(json_field "$vault_json" webhook_secret)"
+  if [ -z "$value" ] || [ "$value" = REPLACE_ME ]; then
+    err "  webhook_secret    FAILED: a placeholder (stripe setup writes it when it makes the endpoint)"; rc=1
+  elif stripe_field_ok webhook_secret "$value" "$mode"; then
+    log "  webhook_secret    OK (whsec_ form)"
+  else
+    err "  webhook_secret    FAILED: malformed (whsec_...)"; rc=1
+  fi
+  value=""
+
+  # The prices: the field's first is sold (active, monthly, this mode, the
+  # lookup key's); the rest still grant (they must exist).
+  for entry in "${STRIPE_CATALOG[@]}"; do
+    IFS='|' read -r field lookup name desc meta cents <<<"$entry"
+    value="$(json_field "$vault_json" "$field")"
+    if [ -z "$value" ] || [ "$value" = REPLACE_ME ]; then
+      err "  $field    FAILED: a placeholder (stripe setup writes it)"; rc=1; continue
+    fi
+    if ! stripe_field_ok "$field" "$value" "$mode"; then
+      err "  $field    FAILED: malformed (price_... or a comma list of them)"; rc=1; continue
+    fi
+    first="${value%%,*}"
+    problems=()
+    while IFS= read -r id; do
+      stripe_call GET "/v1/prices/$id"
+      if [ "$STRIPE_HTTP" != 200 ]; then
+        problems+=("$id: Stripe answered $STRIPE_HTTP ($(stripe_error))")
+        continue
+      fi
+      [ "$id" = "$first" ] || continue
+      bad="$(jq -r --argjson live "$livemode" '
+        [ (if .active then empty else "inactive" end),
+          (if .type == "recurring" and (.recurring.interval // "") == "month" and (.recurring.interval_count // 1) == 1 then empty else "not monthly" end),
+          (if .livemode == $live then empty else "of the other mode" end) ] | join(", ")' "$STRIPE_REPLY")"
+      [ -z "$bad" ] || problems+=("$id: $bad")
+      cents="$(jq -r '.unit_amount' "$STRIPE_REPLY")"
+    done < <(tr ',' '\n' <<<"$value")
+    if [ "${#problems[@]}" -gt 0 ]; then
+      err "  $field    FAILED: $(printf '%s; ' "${problems[@]}" | sed 's/; $//')"; rc=1; continue
+    fi
+    stripe_call GET /v1/prices --data-urlencode "lookup_keys[]=$lookup" --data-urlencode "active=true"
+    id="$(jq -r '.data[0].id // empty' "$STRIPE_REPLY" 2>/dev/null)"
+    if [ "$id" != "$first" ]; then
+      err "  $field    FAILED: sells $first, but the lookup key $lookup names ${id:-no active price} (stripe setup)"; rc=1; continue
+    fi
+    log "  $field    OK ($first, $cents usd cents a month$( [ "$value" = "$first" ] || printf ', and %s grandfathered' "${value#*,}"))"
+  done
+  rm -f "$vault_json"
+
+  # The Customer Portal configuration.
+  stripe_call GET /v1/billing_portal/configurations --data-urlencode "active=true" --data-urlencode "limit=100"
+  if [ "$STRIPE_HTTP" != 200 ]; then
+    err "  portal    FAILED: Stripe answered $STRIPE_HTTP ($(stripe_error))"; rc=1
+  else
+    id="$(jq -r --arg t "$STRIPE_PORTAL_TAG" '[.data[]? | select((.metadata.opennova // "") == $t) | .id][0] // empty' "$STRIPE_REPLY")"
+    if [ -z "$id" ]; then
+      err "  portal    FAILED: no active configuration tagged opennova=$STRIPE_PORTAL_TAG (stripe setup)"; rc=1
+    elif [ "$(jq -r --arg i "$id" '.data[] | select(.id == $i) | .is_default' "$STRIPE_REPLY")" = true ]; then
+      log "  portal    OK ($id, the default)"
+    else
+      log "  portal    OK ($id); WARNING: not the default, and the server's portal sessions name no configuration, so they get the default's settings ($(jq -r '[.data[] | select(.is_default) | .id][0] // "none"' "$STRIPE_REPLY"))"
+    fi
+  fi
+
+  # The webhook endpoint.
+  local url="https://$STRIPE_WEB_HOST/api/billing/webhook" endpoint missing
+  stripe_call GET /v1/webhook_endpoints --data-urlencode "limit=100"
+  if [ "$STRIPE_HTTP" != 200 ]; then
+    err "  webhook    FAILED: Stripe answered $STRIPE_HTTP ($(stripe_error))"; rc=1
+  else
+    endpoint="$(jq -c --arg u "$url" '[.data[]? | select(.url == $u)][0] // empty' "$STRIPE_REPLY")"
+    if [ -z "$endpoint" ]; then
+      err "  webhook    FAILED: no endpoint on $url (stripe setup)"; rc=1
+    else
+      missing="$(jq -r --args '[$ARGS.positional[] as $e | select(.enabled_events | index($e) | not) | $e] | join(" ")' \
+        "${STRIPE_EVENTS[@]}" <<<"$endpoint")"
+      problems=()
+      [ "$(jq -r '.status' <<<"$endpoint")" = enabled ] || problems+=("disabled")
+      [ "$(jq -r '.api_version // ""' <<<"$endpoint")" = "$STRIPE_API_VERSION" ] \
+        || problems+=("API $(jq -r '.api_version // "none"' <<<"$endpoint"), not $STRIPE_API_VERSION")
+      [ -z "$missing" ] || problems+=("lacks $missing")
+      if [ "${#problems[@]}" -gt 0 ]; then
+        err "  webhook    FAILED: $(jq -r '.id' <<<"$endpoint") on $url: $(printf '%s; ' "${problems[@]}" | sed 's/; $//')"; rc=1
+      else
+        log "  webhook    OK ($(jq -r '.id' <<<"$endpoint") on $url, API $STRIPE_API_VERSION, ${#STRIPE_EVENTS[@]} events)"
+      fi
+    fi
+  fi
+  [ "$rc" -eq 0 ] || die "stripe check: one or more checks failed (stripe setup makes what is missing)"
+  log "stripe check: all OK. Stripe's \"Send test webhook\" on the endpoint must answer 2xx."
+}
+
+cmd_stripe() {
+  local action="${1:-}" mode="" rest=()
+  shift || true
+  case "$action" in
+    check|setup) ;;
+    *) die "unknown: stripe $action (try: check|setup --mode test|live)" ;;
+  esac
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --mode) [ $# -ge 2 ] || die "--mode needs test or live"; mode="$2"; shift 2 ;;
+      --mode=*) mode="${1#*=}"; shift ;;
+      *) rest+=("$1"); shift ;;
+    esac
+  done
+  [ -n "$mode" ] || mode="$STRIPE_MODE"
+  case "$mode" in
+    test|live) ;;
+    *) die "--mode takes test or live, not '$mode'" ;;
+  esac
+  # The mode's item serves a deployment (stripe-live prod, stripe-test the
+  # others), whose site the webhook and the portal name: test mode on prod
+  # means staging's.
+  if [ "$mode" != "$STRIPE_MODE" ]; then
+    if [ "$mode" = test ]; then
+      set_deployment staging
+      log "test mode: the staging deployment's site (--deployment NAME names another)"
+    else
+      die "live mode (stripe-live) is prod's: drop --deployment"
+    fi
+  fi
+  case "$action" in
+    check) stripe_check "$mode" ${rest[@]+"${rest[@]}"} ;;
+    setup) stripe_setup "$mode" ${rest[@]+"${rest[@]}"} ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# infra
+# ---------------------------------------------------------------------------
+
 # The data sets hosted game servers run: each the games slug of the lobby its
 # servers list in (apps/novaworld_server/hosted, the service's data-set
-# catalog), one snapshot and one launch template each (infra/aws/hosted.tf).
+# catalog), one snapshot each (infra/aws/fleet.tf).
 HOSTED_DATA_SETS=(jop_2_consumer dfx2_consumer opennova_0_consumer)
 
 # Whether $1 is one of HOSTED_DATA_SETS.
@@ -201,11 +1183,11 @@ hosted_snapshot_map() {
   printf '%s' "$map"
 }
 
-# The hosted game servers' data snapshots (infra/aws/hosted.tf), from the
+# The hosted game servers' data snapshots (infra/aws/fleet.tf), from the
 # vault: item `hosted`, one field data_snapshot_id_<slug> per data set, as
 # TF_VAR_hosted_data_snapshots (a JSON object, which Terraform reads as the
 # map). No item titled `hosted` in the vault's listing means hosting is off (the
-# map stays empty, and hosted.tf makes nothing). Any other failure (the listing,
+# map stays empty, and fleet.tf makes nothing). Any other failure (the listing,
 # or reading an item that is there) stops the run, so a vault hiccup never
 # plans the hosting resources away.
 hosted_snapshot_var() {
@@ -221,14 +1203,48 @@ hosted_snapshot_var() {
   log "hosted game servers: data sets $(jq -r 'to_entries | map("\(.key) (\(.value))") | join(", ")' <<<"$map") (vault item 'hosted')"
 }
 
-# After `terraform apply|destroy` exited $2: push the state it left (a failed
-# run with no local state has none to push), then exit with terraform's code.
-# A failed run is named before its push, so a push that is then refused (or
-# succeeds) never reads as the run's success.
+tf() { terraform -chdir="$TF_DIR" "$@"; }
+
+# init, and the deployment's workspace. The var-files Terraform loads on its
+# own (terraform.tfvars[.json], *.auto.tfvars[.json]) are refused: Terraform
+# would load them into every workspace, so one holding prod's Elastic IP would
+# hand it to staging. A deployment's knobs live in infra/aws/<deployment>.tfvars,
+# which the toolbox passes to that deployment's runs alone.
+TF_VAR_ARGS=()
+tf_init() {
+  local f stray=()
+  for f in "$TF_DIR"/terraform.tfvars "$TF_DIR"/terraform.tfvars.json "$TF_DIR"/*.auto.tfvars*; do
+    [ ! -e "$f" ] || stray+=("infra/aws/${f##*/}")
+  done
+  [ "${#stray[@]}" -eq 0 ] \
+    || die "${stray[*]}: Terraform loads such a file into EVERY workspace (staging would take prod's settings, its Elastic IP among them). Move its settings into infra/aws/<deployment>.tfvars (prod.tfvars for prod; DEPLOY.md, section 3)"
+  tf init -input=false >/dev/null
+  tf workspace select -or-create "$TF_WORKSPACE_NAME" >/dev/null
+  if [ -f "$TFVARS" ]; then
+    TF_VAR_ARGS=(-var-file="$TFVARS")
+    log "deployment $DEP: workspace $TF_WORKSPACE_NAME, var-file infra/aws/$DEP.tfvars"
+  else
+    TF_VAR_ARGS=()
+    log "deployment $DEP: workspace $TF_WORKSPACE_NAME, no infra/aws/$DEP.tfvars (the variables' defaults; deployment.tfvars.example)"
+  fi
+}
+
+# terraform with the vault's credentials and TF_VAR_* secrets in its
+# environment alone.
+tf_op() {
+  local env_file
+  env_file="$(render_tpl "$TF_ENV_TPL")"
+  op run --env-file="$env_file" -- terraform -chdir="$TF_DIR" "$@"
+}
+
+# After a terraform run that changes state exited $2: push the state it left (a
+# failed run with no local state has none to push), then exit with terraform's
+# code. A failed run is named before its push, so a push that is then refused
+# (or succeeds) never reads as the run's success.
 tf_push_after() {
   local action="$1" rc="$2"
   if [ "$rc" -ne 0 ]; then
-    if [ ! -f "$TF_DIR/terraform.tfstate" ]; then
+    if [ ! -f "$STATEFILE" ]; then
       err "terraform $action exited $rc; it left no state to push"
       exit "$rc"
     fi
@@ -238,373 +1254,674 @@ tf_push_after() {
   [ "$rc" -eq 0 ] || exit "$rc"
 }
 
+# A change to prod goes ahead only on purpose: with --yes ($2 = 1), or once the
+# operator types yes at the prompt. With no terminal to ask on and no --yes it
+# refuses. Another deployment goes ahead unasked.
+stdin_is_terminal() { [ -t 0 ]; }
+confirm_prod() {
+  local what="$1" yes="$2" answer=""
+  [ "$DEP" = prod ] || return 0
+  if [ "$yes" -eq 1 ]; then
+    log "prod: $what (--yes)"
+    return 0
+  fi
+  stdin_is_terminal || die "prod: refusing to $what without --yes (no terminal to ask on); nothing was changed"
+  printf '\033[1;33m[deploy]\033[0m prod: %s? Type yes to go on: ' "$what" >&2
+  IFS= read -r answer || answer=""
+  [ "$answer" = yes ] || die "prod: not confirmed; nothing was changed"
+}
+
+# A command's arguments with --yes taken out: OPT_YES (1 when it was given)
+# and OPT_REST (the others, in order).
+take_yes() {
+  local a
+  OPT_YES=0
+  OPT_REST=()
+  for a in "$@"; do
+    if [ "$a" = --yes ]; then OPT_YES=1; else OPT_REST+=("$a"); fi
+  done
+}
+
+# The types whose destruction (or replacement) loses what no apply makes again,
+# or takes the service down: the Elastic IP retail clients use and its
+# association, the service instance and the network interface that holds its
+# fixed private address, the database, the operations bucket.
+PRECIOUS_TYPES='["aws_eip","aws_eip_association","aws_network_interface","aws_instance","aws_db_instance","aws_s3_bucket"]'
+
+# infra apply: plan to a file, and refuse a plan that destroys (or replaces) a
+# precious resource unless --allow-destroy, and any plan that makes prod an
+# Elastic IP (prod adopts the address retail clients use; service.tf's
+# preconditions stop such a plan first). On prod, show what the plan does and
+# apply that saved plan only after --yes or a typed yes; elsewhere apply it.
+# The plan applied is the one shown, never a new one.
+infra_apply() {
+  local allow_destroy=0 yes=0 args=() plan="$SECRETS_DIR/tfplan" plan_json doomed made summary rc=0 a
+  for a in "$@"; do
+    case "$a" in
+      --allow-destroy) allow_destroy=1 ;;
+      --yes) yes=1 ;;
+      *) args+=("$a") ;;
+    esac
+  done
+  tf_op plan -input=false -out="$plan" "${TF_VAR_ARGS[@]}" ${args[@]+"${args[@]}"} \
+    || die "the plan failed; nothing was applied"
+  # Held in memory: the plan's JSON carries the stack's sensitive values.
+  plan_json="$(tf show -json "$plan")" || { rm -f "$plan"; die "reading the plan failed; nothing was applied"; }
+  doomed="$(jq -r --argjson types "$PRECIOUS_TYPES" \
+    '[.resource_changes[]? | select((.change.actions | index("delete")) and (.type as $t | $types | index($t))) | .address] | join(" ")' <<<"$plan_json")" \
+    || { rm -f "$plan"; die "reading the plan failed; nothing was applied"; }
+  made="$(jq -r '[.resource_changes[]? | select(.type == "aws_eip" and (.change.actions | index("create"))) | .address] | join(" ")' <<<"$plan_json")" \
+    || { rm -f "$plan"; die "reading the plan failed; nothing was applied"; }
+  summary="$(jq -r '[.resource_changes[]? | .change.actions
+      | if index("delete") and index("create") then "replace"
+        elif . == ["create"] then "create" elif . == ["update"] then "update"
+        elif . == ["delete"] then "destroy" elif . == ["forget"] then "forget" else empty end]
+    | group_by(.) | map("\(length) to \(.[0])") | join(", ")' <<<"$plan_json")" \
+    || { rm -f "$plan"; die "reading the plan failed; nothing was applied"; }
+  plan_json=""
+  if [ "$DEP" = prod ] && [ -n "$made" ]; then
+    rm -f "$plan"
+    die "the plan makes prod a new Elastic IP ($made). Refusing whatever the flags: prod adopts the address retail clients use (service_eip_allocation_id in infra/aws/prod.tfvars; DEPLOY.md, \"The var-file\")"
+  fi
+  if [ -n "$doomed" ] && [ "$allow_destroy" -eq 0 ]; then
+    rm -f "$plan"
+    die "the plan destroys or replaces $doomed. Refusing: check the plan above, then infra apply --allow-destroy if that is meant"
+  fi
+  log "the plan: ${summary:-no resource changes}${doomed:+; it destroys or replaces $doomed (--allow-destroy)}"
+  # A refusal exits; the EXIT trap removes the saved plan.
+  [ -z "$summary" ] || confirm_prod "apply this saved plan as it stands (nothing is planned again)" "$yes"
+  tf_op apply -input=false "$plan" || rc=$?
+  rm -f "$plan"
+  tf_push_after apply "$rc"
+}
+
 cmd_infra() {
+  local action="${1:-plan}" rc=0
+  shift || true
+  case "$action" in
+    plan|apply|destroy|state-rm|import|output|list) ;;
+    *) die "unknown: infra $action (try: plan|apply|destroy|state-rm|import|output|list)" ;;
+  esac
   require_op
   cmd_state pull
   tf_init
-  local action="${1:-plan}"
   case "$action" in
-    plan|apply|destroy) hosted_snapshot_var ;;
+    plan)
+      hosted_snapshot_var
+      tf_op plan -input=false "${TF_VAR_ARGS[@]}" "$@" ;;
+    apply)
+      hosted_snapshot_var
+      infra_apply "$@" ;;
+    destroy)
+      [ "$DEP" != prod ] || die "infra destroy refuses prod"
+      hosted_snapshot_var
+      tf_op destroy -input=false -auto-approve "${TF_VAR_ARGS[@]}" "$@" || rc=$?
+      tf_push_after destroy "$rc" ;;
+    state-rm)
+      [ $# -ge 1 ] || die "infra state-rm needs an ADDRESS"
+      tf state rm "$@" || rc=$?
+      tf_push_after state-rm "$rc" ;;
+    import)
+      [ $# -eq 2 ] || die "infra import needs ADDRESS ID"
+      hosted_snapshot_var
+      tf_op import -input=false "${TF_VAR_ARGS[@]}" "$1" "$2" || rc=$?
+      tf_push_after import "$rc" ;;
+    output) tf output "$@" ;;
+    list)   tf state list "$@" ;;
   esac
-  log "terraform $action…"
-  # op run injects AWS + Cloudflare + ssh pubkey as env for the terraform run.
-  # plan and apply pass any further arguments on (say a -replace=ADDRESS).
-  # apply and destroy push whatever state terraform leaves, a failed run's too
-  # (it can have changed resources and written a newer serial), then exit with
-  # terraform's code.
-  shift || true
-  local rc=0
-  case "$action" in
-    plan)    op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" plan -input=false "$@" ;;
-    apply)   op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" apply -input=false -auto-approve "$@" || rc=$?
-             tf_push_after "$action" "$rc" ;;
-    destroy) op run --env-file="$TF_ENV_TPL" -- terraform -chdir="$TF_DIR" destroy -input=false -auto-approve || rc=$?
-             tf_push_after "$action" "$rc" ;;
-    output)  terraform -chdir="$TF_DIR" output "$@" ;;
-    list)    terraform -chdir="$TF_DIR" state list "$@" ;;
-    *) die "unknown: infra $action (try: plan|apply|destroy|output|list)" ;;
-  esac
 }
 
-# Run the AWS CLI with credentials injected from the vault, so the operator
-# never configures AWS locally. The CLI can't run natively on this Alpine
-# image (musl vs python-aws-cli), so we shell out to the official glibc
-# `amazon/aws-cli` image via the mounted Docker socket. `op run` resolves the
-# AWS_* refs in terraform.env.tpl into the env, and `docker run -e` forwards
-# them (by name) into the aws container, whose entrypoint is `aws`.
-#   ./deploy/run.sh aws ec2 describe-instances ...
-AWS_CLI_IMAGE="${AWS_CLI_IMAGE:-amazon/aws-cli:latest}"
-cmd_aws() {
-  require_op
-  op run --env-file="$TF_ENV_TPL" -- \
-    docker run --rm -i \
-      -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY \
-      -e AWS_REGION -e AWS_DEFAULT_REGION \
-      "$AWS_CLI_IMAGE" "$@"
-}
+# ---------------------------------------------------------------------------
+# app: releases
+# ---------------------------------------------------------------------------
 
-# Build the compose invocation for the remote host (DOCKER_HOST=ssh://).
-remote_compose() {
-  local ip key app_env
-  ip="$(target_ip)"
-  key="$(ssh_key_file)"
-  app_env="$(inject "$APP_ENV_TPL" "$SECRETS_DIR/app.prod.env")"
-  export DOCKER_HOST="ssh://ubuntu@${ip}"
-  # docker's ssh:// transport invokes `ssh` WITHOUT -i (there is no DOCKER_SSH_OPTS
-  # variable), so it must find the vault key via ~/.ssh/config. Point the host's
-  # IdentityFile at the tmpfs key; IdentitiesOnly avoids agent/default-key probing.
-  mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
-  cat > "$HOME/.ssh/config" <<SSHCFG
-Host ${ip}
-  HostName ${ip}
-  User ubuntu
-  IdentityFile ${key}
-  IdentitiesOnly yes
-  StrictHostKeyChecking accept-new
-SSHCFG
-  chmod 600 "$HOME/.ssh/config"
-  # The prod overlay's backup sidecar interpolates ${BACKUP_BUCKET} (required),
-  # and every compose invocation parses it — so resolve it for ALL app actions
-  # (deploy/status/logs/...), not just `backup`. From the AWS tf output; the
-  # state file is on the mounted disk from `infra apply`.
-  BACKUP_BUCKET="$(terraform -chdir="$TF_DIR" output -raw backup_bucket_name 2>/dev/null || true)"
-  export BACKUP_BUCKET
-  # The prod overlay requires SERVER_IMAGE/WEB_IMAGE/GAME_IMAGE to interpolate for EVERY
-  # compose action (status/logs/down parse them too), but only `deploy` sets
-  # them from --tag. Default the rest so those actions work; `ps`/`logs` match
-  # by service name, not image, so the tag is immaterial there. `:-` keeps the
-  # explicit values `deploy` already exported.
-  local owner; owner="$(op read "op://$VAULT/ghcr/owner" 2>/dev/null || echo opennova-net)"
-  export SERVER_IMAGE="${SERVER_IMAGE:-ghcr.io/${owner}/novaworld-server:latest}"
-  export WEB_IMAGE="${WEB_IMAGE:-ghcr.io/${owner}/novaworld-web:latest}"
-  export GAME_IMAGE="${GAME_IMAGE:-ghcr.io/${owner}/opennova-game:latest}"
-  # compose files + env, evaluated against the remote engine.
-  COMPOSE_ARGS=(-f "$COMPOSE_DIR/docker-compose.yml"
-                -f "$COMPOSE_DIR/docker-compose.prod.yml"
-                --env-file "$COMPOSE_DIR/../env/app.prod.env"
-                --env-file "$app_env")
-}
+# hostd's image repository (under ghcr.io/<owner>/): the serve image carries
+# hostd unless the fleet publishes an image of its own.
+HOSTD_REPO="${OPENNOVA_HOSTD_REPO:-opennova-serve}"
 
-# The one compose invocation every app/backup action runs: COMPOSE_ARGS (set
-# by remote_compose) against whatever engine DOCKER_HOST names.
-app_compose() {
-  docker compose "${COMPOSE_ARGS[@]}" "$@"
-}
-
-# The deployed images. --tag moves the server + portal pair; the game image
-# (the web build, ADR 0049) publishes on its own path filter, so it has its
-# own tag.
-app_images() {
-  local tag="$1" game_tag="$2" owner
-  owner="$(op read "op://$VAULT/ghcr/owner" 2>/dev/null || echo opennova-net)"
-  export SERVER_IMAGE="ghcr.io/${owner}/novaworld-server:${tag}"
-  export WEB_IMAGE="ghcr.io/${owner}/novaworld-web:${tag}"
-  export GAME_IMAGE="ghcr.io/${owner}/opennova-game:${game_tag}"
-}
-
-# The hosted game servers' settings for the service (apps/novaworld_server/
-# README.md, "Hosted servers"), from the Terraform outputs, so nobody copies an
-# id by hand: while hosted_data_snapshots names a data set (output
-# hosted_enabled), ONNET_HOSTED_PROVIDER=ec2 and every ec2 setting (each data
-# set's launch template as ONNET_HOSTED_EC2_LAUNCH_TEMPLATES, a JSON object by
-# data set: the data sets the service offers), and the serve image pinned to
-# the digest `serve_tag` names right now; with an explicit false, or with
-# --no-hosting (`hosting` 0), ONNET_HOSTED_PROVIDER=none. A state with no
-# hosted_enabled output at all (one the infra was not applied to since hosted.tf
-# came) is no answer: the deploy stops, never reading it as off. The caller has
-# pulled the state. Exported for compose's interpolation (docker-compose.yml
-# passes them to the server); the shell's values win over the env files'.
-hosted_app_env() {
-  local serve_tag="$1" hosting="$2" enabled templates owner ref digest
-  if [ "$hosting" -eq 0 ]; then
-    export ONNET_HOSTED_PROVIDER=none
-    log "hosted game servers: off (--no-hosting)"
+ghcr_owner() {
+  if [ -n "${GHCR_OWNER:-}" ]; then
+    printf '%s' "$GHCR_OWNER"
     return
   fi
-  enabled="$(terraform -chdir="$TF_DIR" output -raw hosted_enabled 2>/dev/null)" \
-    || die "no 'hosted_enabled' infra output: run 'infra apply' first (with hosting off it only adds outputs), or deploy with --no-hosting"
-  case "$enabled" in
-    true) ;;
-    false)
-      export ONNET_HOSTED_PROVIDER=none
-      log "hosted game servers: off (no data snapshot in the infra; DEPLOY.md, \"Hosted game servers\")"
-      return ;;
-    *) die "the 'hosted_enabled' infra output reads '$enabled', neither true nor false" ;;
-  esac
-  tf_output() {
-    terraform -chdir="$TF_DIR" output -raw "$1" 2>/dev/null \
-      || die "no '$1' output; run 'infra apply' (hosted_data_snapshots is set, its resources are not)"
-  }
-  ONNET_HOSTED_EC2_REGION="$(tf_output region)"
-  # Each data set's launch template, by its games slug: a non-empty object of
-  # lt- ids (a state from before data sets has no such output).
-  templates="$(terraform -chdir="$TF_DIR" output -json hosted_launch_templates 2>/dev/null)" \
-    || die "no 'hosted_launch_templates' output; run 'infra apply' (hosted_data_snapshots is set, its resources are not)"
-  ONNET_HOSTED_EC2_LAUNCH_TEMPLATES="$(jq -ce 'select(type == "object" and length > 0 and all(.[]; type == "string" and startswith("lt-")))' <<<"$templates")" \
-    || die "the 'hosted_launch_templates' infra output reads '$templates', no launch template per data set; run 'infra apply' (with the vault item 'hosted' naming each data set's snapshot), or deploy with --no-hosting"
-  ONNET_HOSTED_EC2_SUBNET="$(tf_output hosted_subnet_id)"
-  ONNET_HOSTED_DEPLOYMENT="$(tf_output hosted_deployment)"
-  ONNET_HOSTED_SERVICE_ADDRESS="$(tf_output service_private_ip)"
-  ONNET_HOSTED_BOOTSTRAP_CIDRS="$(tf_output hosted_subnet_cidr)"
-  owner="$(op read "op://$VAULT/ghcr/owner" 2>/dev/null || echo opennova-net)"
-  ref="ghcr.io/${owner}/opennova-serve:${serve_tag}"
+  if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] && op read --no-newline "op://$VAULT/ghcr/owner" 2>/dev/null; then
+    return
+  fi
+  printf 'opennova-net'
+}
+
+# ghcr.io/<owner>/<repo>:<tag> as ghcr.io/<owner>/<repo>@sha256:..., read
+# anonymously from the registry (the packages are public).
+image_digest() {
+  local ref="$1" digest
   digest="$(docker buildx imagetools inspect "$ref" --format '{{json .Manifest}}' 2>/dev/null | jq -r '.digest // empty')"
   case "$digest" in
-    sha256:*) ;;
-    *) die "cannot resolve $ref to a digest (is the opennova-serve package public, and the tag published?)" ;;
+    sha256:*) printf '%s@%s' "${ref%:*}" "$digest" ;;
+    *) return 1 ;;
   esac
-  ONNET_HOSTED_SERVE_IMAGE="ghcr.io/${owner}/opennova-serve@${digest}"
-  export ONNET_HOSTED_PROVIDER=ec2 ONNET_HOSTED_EC2_REGION ONNET_HOSTED_EC2_LAUNCH_TEMPLATES \
-    ONNET_HOSTED_EC2_SUBNET ONNET_HOSTED_DEPLOYMENT ONNET_HOSTED_SERVICE_ADDRESS \
-    ONNET_HOSTED_BOOTSTRAP_CIDRS ONNET_HOSTED_SERVE_IMAGE
-  log "hosted game servers: ec2 in $ONNET_HOSTED_EC2_REGION, data sets and launch templates:"
-  log "  $(jq -r 'to_entries | map("\(.key) \(.value)") | join(", ")' <<<"$ONNET_HOSTED_EC2_LAUNCH_TEMPLATES"),"
-  log "  subnet $ONNET_HOSTED_EC2_SUBNET ($ONNET_HOSTED_BOOTSTRAP_CIDRS), deployment $ONNET_HOSTED_DEPLOYMENT,"
-  log "  service $ONNET_HOSTED_SERVICE_ADDRESS, image $ref = $ONNET_HOSTED_SERVE_IMAGE"
 }
 
-check_target() {
-  ssh -i "$(ssh_key_file)" -o StrictHostKeyChecking=accept-new \
-    "ubuntu@$(target_ip)" "docker --version" >/dev/null \
-    || die "cannot reach docker on the target over SSH"
-}
-
-# Pull only the published images; the backup sidecar has no registry image
-# (it's built from deploy/backup/), so a blanket `pull` fails on it.
-app_pull() {
-  app_compose pull novaworld web game
-}
-
-# `up --build` pulls server/web/game (pull_policy: always) and builds the backup
-# sidecar on the remote in one shot. It also starts any stopped service.
-app_up() {
-  app_compose up -d --remove-orphans --build
-}
-
-# The novaworld image the target holds now (running or stopped), with the tag its
-# build revision publishes under: what undoing a reset deploys again.
-running_server() {
-  local cid image rev
-  if ! cid="$(app_compose ps --all -q novaworld 2>/dev/null)"; then
-    printf 'unknown (compose ps failed)'; return
+# The image a release takes for $1 (repo $2): tag $3 resolved now, else the
+# current release's ($4, its manifest), else `latest` resolved now.
+pick_image() {
+  local key="$1" repo="$2" tag="$3" manifest="$4" owner="$5" kept ref
+  if [ -z "$tag" ]; then
+    kept="$(jq -r --arg k "$key" '.images[$k] // empty' <<<"$manifest")"
+    if [ -n "$kept" ]; then
+      printf '%s' "$kept"
+      return
+    fi
+    tag=latest
   fi
-  cid="${cid%%$'\n'*}"
-  [ -n "$cid" ] || { printf 'none'; return; }
-  image="$(docker inspect -f '{{.Config.Image}}' "$cid" 2>/dev/null || true)"
-  rev="$(docker inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$cid" 2>/dev/null || true)"
-  printf '%s' "${image:-unknown}"
-  if [ -n "$rev" ]; then printf ', revision %s (--tag sha-%s)' "$rev" "${rev:0:7}"; fi
+  ref="ghcr.io/$owner/$repo:$tag"
+  image_digest "$ref" || { err "cannot resolve $ref to a digest (is the package public, and the tag published?)"; return 1; }
 }
 
-# app reset-db: delete the service's SQLite database and deploy onto an empty
-# one. The database is disposable: a schema fix edits a migration in place,
-# and the server records applied migrations by file name only
-# (_schema_migrations, engine/net/novaworld/db/sqlite.h), so an edited file
-# never runs again on an existing database. Such a deploy starts from nothing.
-#
-# It takes --tag and deploys itself rather than leaving the server stopped:
-# the first server to boot on the empty database applies and records every
-# migration, so that boot must be the image carrying the edit. Any other (an
-# `app restart` of the old container, a deploy of an older tag) writes the old
-# schema under the same file names and the reset is spent with no error.
-# Deploying in the same command also pulls the new images before anything is
-# stopped, so a mistyped tag fails while the database is still there.
-#
-# The final backup is on by default: the nightly snapshot can be a day old, and
-# the reset cannot be undone without one. --no-backup is for a database known
-# to be worthless or a backup path that is itself broken.
-app_reset_db() {
-  local tag="" game_tag="latest" serve_tag="latest" hosting=1 confirmed=0 backup=1
+release_current() {
+  aws ssm get-parameter --name "$SSM_PREFIX/release" --query Parameter.Value --output text 2>/dev/null \
+    || die "cannot read $SSM_PREFIX/release: run ./deploy/run.sh$DEP_FLAG infra apply first"
+}
+
+release_manifest() {
+  local bucket="$1" id="$2"
+  aws s3 cp "s3://$bucket/releases/$DEP/$id.json" - 2>/dev/null \
+    || die "cannot read release $id's manifest (s3://$bucket/releases/$DEP/$id.json)"
+}
+
+# Parse the bundle's compose files the way the host will (with stand-in
+# secrets), so a broken file fails here, before anything changes.
+bundle_check() {
+  local dir="$1" fake names line
+  fake="$dir/../check.env"
+  {
+    for line in "${!INFRA[@]}"; do printf "%s='%s'\n" "$line" "${INFRA[$line]}"; done
+    names="$(sed -n 's/^\([A-Z][A-Z0-9_]*\)=op:.*/\1/p' "$RUNTIME_TPL")"
+    for line in $names; do printf "%s='stand-in'\n" "$line"; done
+  } > "$fake"
+  docker compose --project-name opennova --project-directory "$dir/compose" \
+    -f "$dir/compose/docker-compose.yml" -f "$dir/compose/docker-compose.prod.yml" \
+    --env-file "$dir/env/app.prod.env" --env-file "$fake" --env-file "$dir/env/release.env" \
+    config --quiet \
+    || die "the release's compose files do not parse; nothing was uploaded"
+  rm -f "$fake"
+}
+
+app_deploy() {
+  local tag="" server_tag="" web_tag="" game_tag="" serve_tag="" hostd_tag="" hosting=1
   while [ $# -gt 0 ]; do
     case "$1" in
-      --yes-drop-database) confirmed=1; shift ;;
-      --tag)      [ $# -ge 2 ] || die "--tag needs a value"; tag="$2"; shift 2 ;;
-      --game-tag) [ $# -ge 2 ] || die "--game-tag needs a value"; game_tag="$2"; shift 2 ;;
-      --serve-tag) [ $# -ge 2 ] || die "--serve-tag needs a value"; serve_tag="$2"; shift 2 ;;
+      --tag|--server-tag|--web-tag|--game-tag|--serve-tag|--hostd-tag)
+        if [ $# -lt 2 ] || [ -z "$2" ]; then die "$1 needs a value"; fi
+        case "$1" in
+          --tag) tag="$2" ;;
+          --server-tag) server_tag="$2" ;;
+          --web-tag) web_tag="$2" ;;
+          --game-tag) game_tag="$2" ;;
+          --serve-tag) serve_tag="$2" ;;
+          --hostd-tag) hostd_tag="$2" ;;
+        esac
+        shift 2 ;;
       --no-hosting) hosting=0; shift ;;
-      --no-backup) backup=0; shift ;;
-      *) die "unknown: app reset-db $1 (try: --yes-drop-database --tag SHA [--game-tag SHA] [--serve-tag TAG] [--no-hosting] [--no-backup])" ;;
+      *) die "unknown: app deploy $1 (try: --tag T, --server-tag T, --web-tag T, --game-tag T, --serve-tag T, --hostd-tag T, --no-hosting)" ;;
     esac
   done
-  [ -n "$tag" ] || die "app reset-db needs --tag SHA: the server image carrying the edited migration, deployed onto the empty database"
+  [ -n "$server_tag" ] || server_tag="$tag"
+  [ -n "$web_tag" ] || web_tag="$tag"
 
-  # The target and the hosted settings come from the Terraform state.
-  cmd_state pull
-  app_images "$tag" "$game_tag"
-  remote_compose
-  # The deploy below recreates the server: with the same hosted settings as
-  # `app deploy`. (A reset drops every hosted server's row: stop them all from
-  # the admin fleet view first, or the next boot's reconciliation ends their
-  # machines, which no row names.)
-  hosted_app_env "$serve_tag" "$hosting"
-  # Read-only lookups for the plan. A compose file that does not parse leaves
-  # them blank here, and the pull below fails with compose's own error.
-  local project volume running
-  project="$(app_compose config 2>/dev/null | sed -n 's/^name: //p' | head -n 1 || true)"
-  volume="${project:+${project}_}nw_data"
-  running="$(running_server)"
+  aws_auth
+  infra_env_load
+  local bucket current manifest="{}" owner
+  bucket="$(infra_get OPENNOVA_OPS_BUCKET)"
+  current="$(release_current)"
+  [ "$current" = none ] || manifest="$(release_manifest "$bucket" "$current")"
+  owner="$(ghcr_owner)"
 
-  log "app reset-db on $(target_ip) will:"
-  log "  1. pull $SERVER_IMAGE + $WEB_IMAGE + $GAME_IMAGE (a bad tag stops here, before anything changes)"
-  log "  2. stop novaworld and the backup sidecar (web and game stay up; the site's API is down until step 5)"
-  if [ "$backup" -eq 1 ]; then
-    log "  3. take a final backup to s3://${BACKUP_BUCKET:-<backup bucket>}/ (as 'backup now'); if it fails, start both again and stop here"
-  else
-    log "  3. take NO final backup (--no-backup)"
-  fi
-  log "  4. delete novaworld.db and its -wal, -shm and -journal files from the volume $volume"
-  log "  5. deploy into a fresh novaworld container (compose up): its first boot applies every migration to the empty database"
-  log "novaworld now: $running"
-  log "Earlier backups stay in S3 (90-day lifecycle). Each records every migration it ran, so undoing"
-  log "the reset takes both: restore one AND deploy the server tag above (a newer server on it skips"
-  log "every migration and runs the old schema without a word)."
-  [ "$confirmed" -eq 1 ] || die "refusing to drop the database without --yes-drop-database"
-
-  check_target
-  log "pulling the images…"
-  app_pull || die "the pull failed; nothing was stopped or deleted"
-  log "stopping novaworld + backup…"
-  app_compose stop novaworld backup \
-    || die "stopping novaworld + backup failed; nothing was deleted (app status shows what runs)"
-  if [ "$backup" -eq 1 ]; then
-    log "taking the final backup…"
-    if ! app_compose run --rm --no-deps backup /backup/backup.sh; then
-      app_compose start novaworld backup || true
-      die "the final backup failed; nothing was deleted and novaworld + backup were started again (fix the backup, or pass --no-backup)"
+  log "deployment $DEP, current release: $current"
+  local server web game serve hostd hosted_provider
+  server="$(pick_image server novaworld-server "$server_tag" "$manifest" "$owner")" || die "nothing was changed"
+  web="$(pick_image web novaworld-web "$web_tag" "$manifest" "$owner")" || die "nothing was changed"
+  game="$(pick_image game opennova-game "$game_tag" "$manifest" "$owner")" || die "nothing was changed"
+  hosted_provider="${INFRA[ONNET_HOSTED_PROVIDER]:-none}"
+  if ! serve="$(pick_image serve opennova-serve "$serve_tag" "$manifest" "$owner")"; then
+    if [ "$hosted_provider" != none ] && [ "$hosting" -eq 1 ]; then
+      die "the hosted servers need the serve image; nothing was changed (or deploy with --no-hosting)"
     fi
+    serve=""
   fi
-  log "deleting the database files…"
-  # One-off container of the backup sidecar: it mounts the same nw_data volume
-  # as the server, and DATABASE_PATH names the same file.
-  # shellcheck disable=SC2016  # expanded by the container's sh, not here
-  app_compose run --rm --no-deps backup sh -c '
-    set -eu
-    db="$DATABASE_PATH"
-    rm -f "$db" "$db-wal" "$db-shm" "$db-journal"
-    for f in "$db" "$db-wal" "$db-shm" "$db-journal"; do
-      if [ -e "$f" ]; then echo "still present: $f" >&2; exit 1; fi
-    done
-    echo "[reset-db] deleted $db (+ -wal, -shm, -journal); $(dirname "$db") now holds:"
-    ls -la "$(dirname "$db")"' \
-    || die "deleting the database files failed; novaworld + backup are stopped and nothing was deployed (rerun reset-db)"
+  # hostd, the machines' agent, ships in its own image (HOSTD_REPO; the serve
+  # image's repository unless the fleet publishes one of its own), pinned apart
+  # from the serve image so either can move alone.
+  if ! hostd="$(pick_image hostd "$HOSTD_REPO" "$hostd_tag" "$manifest" "$owner")"; then
+    if [ "$hosted_provider" != none ] && [ "$hosting" -eq 1 ]; then
+      die "the machines need hostd's image; nothing was changed (or deploy with --no-hosting)"
+    fi
+    hostd=""
+  fi
+  log "  server $server"
+  log "  web    $web"
+  log "  game   $game"
+  log "  serve  ${serve:-none}"
+  log "  hostd  ${hostd:-none}"
+  if [ "$hosting" -eq 0 ]; then
+    log "  hosted game servers: off (--no-hosting)"
+  else
+    log "  hosted game servers: $hosted_provider (infra.env)"
+  fi
 
-  # Only the new image may boot first on the empty database (see above). The
-  # stopped server container goes too, so the deploy creates a fresh one whose
-  # log holds nothing but its boots on the empty database.
-  local redeploy="app deploy --tag $tag --game-tag $game_tag (not app restart)"
-  app_compose rm -f novaworld \
-    || die "removing the stopped novaworld container failed; the database is deleted and nothing was deployed; run: $redeploy"
-  log "deploying onto the empty database…"
-  app_up || die "the deploy onto the empty database failed; rerun: $redeploy"
-  # The first boot logs its migration count; on an empty database every file
-  # applies and none is skipped. "0 applied, 0 skipped" means the server found
-  # no migrations at all (run_migrations on a missing MIGRATIONS_DIR).
-  local line="" _
-  for _ in $(seq 1 30); do
-    line="$(app_compose logs --no-log-prefix novaworld 2>/dev/null \
-              | grep -m 1 '\[boot\] migrations:' || true)"
-    [ -n "$line" ] && break
-    sleep 2
+  local rev dirty=false id work
+  rev="$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+  if [ -n "$(git -C "$ROOT" status --porcelain -- deploy/compose deploy/env deploy/backup 2>/dev/null)" ]; then
+    dirty=true
+    log "  (the checkout's deploy/compose, deploy/env or deploy/backup has uncommitted changes; the bundle carries them)"
+  fi
+  id="$(date -u +%Y%m%dT%H%M%SZ)-${rev:0:7}"
+  work="$(mktemp -d)"
+  mkdir -p "$work/bundle/compose" "$work/bundle/env"
+  cp "$COMPOSE_DIR/docker-compose.yml" "$COMPOSE_DIR/docker-compose.prod.yml" "$work/bundle/compose/"
+  cp "$ENV_DIR/app.prod.env" "$work/bundle/env/"
+  if [ -d "$ROOT/deploy/backup" ]; then cp -R "$ROOT/deploy/backup" "$work/bundle/backup"; fi
+  {
+    printf "OPENNOVA_RELEASE='%s'\n" "$id"
+    printf "SERVER_IMAGE='%s'\n" "$server"
+    printf "WEB_IMAGE='%s'\n" "$web"
+    printf "GAME_IMAGE='%s'\n" "$game"
+    printf "ONNET_HOSTED_SERVE_IMAGE='%s'\n" "$serve"
+    printf "ONNET_HOSTED_HOSTD_IMAGE='%s'\n" "$hostd"
+    if [ "$hosting" -eq 0 ]; then printf "ONNET_HOSTED_PROVIDER='none'\n"; fi
+  } > "$work/bundle/env/release.env"
+  jq -n --arg id "$id" --arg dep "$DEP" --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+        --arg rev "$rev" --argjson dirty "$dirty" --arg previous "$current" \
+        --arg server "$server" --arg web "$web" --arg game "$game" --arg serve "$serve" --arg hostd "$hostd" \
+        --argjson hosting "$([ "$hosting" -eq 1 ] && echo true || echo false)" \
+    '{id: $id, deployment: $dep, created: $created, revision: $rev, dirty: $dirty,
+      previous: (if $previous == "none" then null else $previous end),
+      images: ({server: $server, web: $web, game: $game}
+               + (if $serve == "" then {} else {serve: $serve} end)
+               + (if $hostd == "" then {} else {hostd: $hostd} end)),
+      hosting: $hosting}' > "$work/bundle/manifest.json"
+  bundle_check "$work/bundle"
+  tar -C "$work/bundle" --owner=0 --group=0 --numeric-owner -czf "$work/$id.tar.gz" .
+
+  log "uploading release $id…"
+  aws s3 cp "$work/$id.tar.gz" "s3://$bucket/releases/$DEP/$id.tar.gz" --only-show-errors \
+    || die "uploading the bundle failed; nothing was changed"
+  aws s3 cp "$work/bundle/manifest.json" "s3://$bucket/releases/$DEP/$id.json" --only-show-errors \
+    --content-type application/json \
+    || die "uploading the manifest failed; nothing was changed"
+  rm -rf "$work"
+  aws ssm put-parameter --name "$SSM_PREFIX/release" --type String --value "$id" --overwrite >/dev/null \
+    || die "pointing $SSM_PREFIX/release at $id failed; nothing was changed"
+  log "release $id is the deployment's release (was $current)"
+  if ! ssm_converge; then
+    die "the host did not converge to $id. It may run a mix of $id and $current: ./deploy/run.sh$DEP_FLAG app rollback converges $current"
+  fi
+  log "deploy complete: $id"
+}
+
+app_releases() {
+  aws_auth
+  infra_env_load
+  local bucket current keys key id m
+  bucket="$(infra_get OPENNOVA_OPS_BUCKET)"
+  current="$(release_current)"
+  keys="$(aws s3api list-objects-v2 --bucket "$bucket" --prefix "releases/$DEP/" \
+            --query 'Contents[].Key' --output text 2>/dev/null)" || die "listing s3://$bucket/releases/$DEP/ failed"
+  tr '\t' '\n' <<<"$keys" | grep '\.json$' | sort | tail -n 20 | while read -r key; do
+    id="$(basename "$key" .json)"
+    m="$(aws s3 cp "s3://$bucket/$key" - 2>/dev/null || echo '{}')"
+    printf '%s %s  %s  rev %s%s\n' "$([ "$id" = "$current" ] && echo '*' || echo ' ')" "$id" \
+      "$(jq -r '.created // "?"' <<<"$m")" "$(jq -r '.revision // "?"' <<<"$m")" \
+      "$(jq -r 'if .dirty then " (dirty)" else "" end' <<<"$m")"
+    jq -r '.images // {} | to_entries[] | "      \(.key) \(.value | sub("^ghcr.io/"; ""))"' <<<"$m"
   done
-  case "$line" in
-    *": "[1-9]*" applied, 0 skipped"*) log "novaworld: $line" ;;
-    "") die "novaworld logged no '[boot] migrations:' line in 60 s; check: app logs novaworld" ;;
-    *) die "novaworld: $line (expected at least one applied and 0 skipped on an empty database; check: app logs novaworld)" ;;
-  esac
-  log "reset-db complete."
+  log "current: $current (* above); the newest 20 shown"
+}
+
+app_rollback() {
+  local to=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --to) [ $# -ge 2 ] || die "--to needs a release id"; to="$2"; shift 2 ;;
+      *) die "unknown: app rollback $1 (try: --to ID)" ;;
+    esac
+  done
+  aws_auth
+  infra_env_load
+  local bucket current
+  bucket="$(infra_get OPENNOVA_OPS_BUCKET)"
+  current="$(release_current)"
+  if [ -z "$to" ]; then
+    [ "$current" != none ] || die "the deployment has no release to roll back from"
+    to="$(release_manifest "$bucket" "$current" | jq -r '.previous // empty')"
+    [ -n "$to" ] || die "release $current names no previous release: app rollback --to ID (app releases lists them)"
+  fi
+  [[ "$to" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$ ]] || die "'$to' is no release id"
+  aws s3api head-object --bucket "$bucket" --key "releases/$DEP/$to.tar.gz" >/dev/null 2>&1 \
+    || die "release $to has no bundle (s3://$bucket/releases/$DEP/$to.tar.gz): app releases lists them"
+  aws ssm put-parameter --name "$SSM_PREFIX/release" --type String --value "$to" --overwrite >/dev/null \
+    || die "pointing $SSM_PREFIX/release at $to failed"
+  log "release $to is the deployment's release again (was $current)"
+  ssm_converge || die "the host did not converge to $to"
+  log "rollback complete: $to"
+}
+
+app_logs() {
+  local svc="" since=1h follow=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --follow|-f) follow=(--follow); shift ;;
+      --since) [ $# -ge 2 ] || die "--since needs a value (10m, 2h, 1d)"; since="$2"; shift 2 ;;
+      -*) die "unknown: app logs $1 (try: [SERVICE] [--follow] [--since 1h])" ;;
+      *) svc="$1"; shift ;;
+    esac
+  done
+  aws_auth
+  infra_env_load
+  local group streams=()
+  group="$(infra_get OPENNOVA_LOG_GROUP)"
+  [ -z "$svc" ] || streams=(--log-stream-names "$svc")
+  aws logs tail "$group" ${streams[@]+"${streams[@]}"} --since "$since" --format short ${follow[@]+"${follow[@]}"}
+}
+
+# A compose service's name, checked before it goes into a host script.
+service_name() {
+  [[ "$1" =~ ^[a-z][a-z0-9_-]{0,30}$ ]] || die "'$1' is no service name (novaworld, web, game, backup)"
+  printf '%s' "$1"
 }
 
 cmd_app() {
-  require_op
-  local action="${1:-status}"; shift || true
+  local action="${1:-status}"
+  shift || true
   case "$action" in
-    deploy)
-      local tag="latest" game_tag="latest" serve_tag="latest" hosting=1
-      while [ $# -gt 0 ]; do
-        case "$1" in
-          --tag) tag="$2"; shift 2 ;;
-          --game-tag) game_tag="$2"; shift 2 ;;
-          --serve-tag) [ $# -ge 2 ] || die "--serve-tag needs a value"; serve_tag="$2"; shift 2 ;;
-          --no-hosting) hosting=0; shift ;;
-          *) die "unknown: app deploy $1 (try: --tag SHA, --game-tag SHA, --serve-tag TAG, --no-hosting)" ;;
-        esac
-      done
-      # The target and the hosted settings come from the Terraform state.
-      cmd_state pull
-      app_images "$tag" "$game_tag"
-      remote_compose
-      hosted_app_env "$serve_tag" "$hosting"
-      log "deploying $SERVER_IMAGE + $WEB_IMAGE + $GAME_IMAGE to $(target_ip)…"
-      check_target
-      app_pull
-      app_up
-      log "deploy complete."
-      ;;
-    status)  remote_compose; app_compose ps ;;
-    logs)    remote_compose; app_compose logs --tail=200 "${1:-}" ;;
-    restart) remote_compose; app_compose restart "${1:-}" ;;
-    down)    remote_compose; app_compose down ;;
-    # Run SQL against the live SQLite DB via the backup sidecar (it has sqlite3
-    # and the nw_data volume rw). E.g. one-off admin cleanup.
-    sql)     remote_compose; app_compose exec -T backup \
-               sqlite3 /data/novaworld.db "$*" ;;
-    reset-db) app_reset_db "$@" ;;
-    *) die "unknown: app $action (try: deploy|status|logs|restart|down|sql|reset-db)" ;;
+    deploy)   app_deploy "$@" ;;
+    releases) app_releases "$@" ;;
+    rollback) app_rollback "$@" ;;
+    converge)
+      [ $# -eq 0 ] || die "unknown: app converge $1"
+      ssm_converge || die "the host did not converge" ;;
+    status)
+      ssm_run 120 "$(host_script \
+        'cat /opt/opennova/converged 2>/dev/null | sed "s/^/release: /" || true' \
+        "opennova-compose ps --format 'table {{.Service}}\t{{.Status}}\t{{.Image}}'")" ;;
+    restart)
+      take_yes "$@"
+      local svc=""
+      [ "${#OPT_REST[@]}" -le 1 ] || die "app restart takes one SERVICE, or none for every service"
+      [ "${#OPT_REST[@]}" -eq 0 ] || svc="$(service_name "${OPT_REST[0]}")" || exit 1
+      confirm_prod "restart ${svc:-every service}" "$OPT_YES"
+      ssm_run 300 "$(host_script "opennova-compose restart $svc" "opennova-compose ps")" ;;
+    down)
+      take_yes "$@"
+      [ "${#OPT_REST[@]}" -eq 0 ] || die "unknown: app down ${OPT_REST[0]} (try: --yes)"
+      confirm_prod "stop and remove every container (the site and the game service stay down until app converge)" "$OPT_YES"
+      ssm_run 300 "$(host_script "opennova-compose down")" ;;
+    logs)  app_logs "$@" ;;
+    shell)
+      aws_auth
+      aws ssm start-session --target "$(service_instance)" ;;
+    *) die "unknown: app $action (try: deploy|releases|rollback|converge|status|restart|down|logs|shell)" ;;
   esac
 }
 
-cmd_backup() {
+# ---------------------------------------------------------------------------
+# db (PostgreSQL 17 on RDS, infra/aws/database.tf) and backup
+# ---------------------------------------------------------------------------
+
+# The master password, lent to the host for one command: a SecureString,
+# /opennova/<deployment>/bootstrap/db-master-password, which the host reads
+# once and cleanup deletes when the command ends. Vault -> tmpfs file ->
+# put-parameter file://: never an argument, never printed.
+db_master_param_put() {
   require_op
-  # The backup S3 bucket comes from terraform output.
-  BACKUP_BUCKET="$(terraform -chdir="$TF_DIR" output -raw backup_bucket_name 2>/dev/null || true)"
-  [ -n "$BACKUP_BUCKET" ] || die "no backup_bucket_name output; run 'infra apply' first"
-  export BACKUP_BUCKET
-  case "${1:-now}" in
-    now)  remote_compose; app_compose run --rm backup /backup/backup.sh ;;
-    list) remote_compose; app_compose run --rm backup /backup/list.sh ;;
-    *) die "unknown: backup $1 (try: now|list)" ;;
+  local f="$SECRETS_DIR/value.master"
+  op read --no-newline "op://$VAULT/$RDS_ITEM/master_password" > "$f" 2>/dev/null \
+    || { rm -f "$f"; die "reading op://$VAULT/$RDS_ITEM/master_password failed (secrets init makes it)"; }
+  chmod 600 "$f"
+  DB_MASTER_PARAM="$SSM_PREFIX/bootstrap/db-master-password"
+  aws ssm put-parameter --name "$DB_MASTER_PARAM" --type SecureString --tier Standard \
+    --value "file://$f" --overwrite >/dev/null \
+    || { rm -f "$f"; DB_MASTER_PARAM=""; die "writing $SSM_PREFIX/bootstrap/db-master-password failed"; }
+  rm -f "$f"
+}
+
+# The database's names from infra.env, checked before they go into a script.
+db_names() {
+  infra_env_load
+  DB_HOST="$(infra_get OPENNOVA_DB_HOST)"
+  DB_PORT="$(infra_get OPENNOVA_DB_PORT)"
+  DB_NAME="$(infra_get OPENNOVA_DB_NAME)"
+  DB_USER="$(infra_get OPENNOVA_DB_USER)"
+  DB_MASTER="$(infra_get OPENNOVA_DB_MASTER_USER)"
+  [[ "$DB_HOST" =~ ^[a-z0-9.-]+$ ]] || die "infra.env's OPENNOVA_DB_HOST '$DB_HOST' is no hostname"
+  [[ "$DB_PORT" =~ ^[0-9]+$ ]] || die "infra.env's OPENNOVA_DB_PORT '$DB_PORT' is no port"
+  local n
+  for n in "$DB_NAME" "$DB_USER" "$DB_MASTER"; do
+    [[ "$n" =~ ^[a-z_][a-z0-9_]{0,62}$ ]] || die "infra.env names the database identifier '$n', which is no plain name"
+  done
+}
+
+# The SQL that makes the service's role and its database, or sets the role's
+# password again: idempotent. The database is SQL_ASCII with C collation, the
+# only one the server accepts (retail hosts send cp1252 bytes, which it stores
+# byte for byte; its boot refuses any other). The password comes from the
+# container's environment (\getenv), never from the script's text.
+db_bootstrap_sql() {
+  cat <<SQL
+\\getenv app_password NOVAWORLD_PASSWORD
+SELECT format('CREATE ROLE %I LOGIN PASSWORD %L', '$DB_USER', :'app_password')
+  WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$DB_USER') \\gexec
+SELECT format('ALTER ROLE %I WITH LOGIN PASSWORD %L', '$DB_USER', :'app_password') \\gexec
+GRANT $DB_USER TO CURRENT_USER;
+SELECT format('CREATE DATABASE %I OWNER %I TEMPLATE template0 ENCODING %L LC_COLLATE %L LC_CTYPE %L',
+              '$DB_NAME', '$DB_USER', 'SQL_ASCII', 'C', 'C')
+  WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '$DB_NAME') \\gexec
+REVOKE ALL ON DATABASE $DB_NAME FROM PUBLIC;
+GRANT CONNECT, TEMPORARY ON DATABASE $DB_NAME TO $DB_USER;
+\\pset footer off
+SELECT datname AS database, pg_get_userbyid(datdba) AS owner, pg_encoding_to_char(encoding) AS encoding,
+       datcollate AS lc_collate, datctype AS lc_ctype
+  FROM pg_database WHERE datname = '$DB_NAME';
+SQL
+}
+
+# A host script fragment: run the SQL on stdin's heredoc as the master user,
+# in a one-off postgres:17 container on the host's network, the passwords in a
+# 0600 env file in /run (the master's from the lent parameter, the service
+# role's from its secret).
+# shellcheck disable=SC2016  # the host's shell expands these
+db_master_psql_fragment() {
+  local sql="$1"
+  cat <<'HEAD'
+set -a
+. /etc/opennova/host.env
+set +a
+umask 077
+# A new host's first boot may still be installing docker.
+if command -v cloud-init >/dev/null 2>&1; then timeout 1200 cloud-init status --wait >/dev/null 2>&1 || true; fi
+command -v docker >/dev/null 2>&1 || { echo "docker is not installed: the host's first boot failed" >&2; exit 1; }
+ca=/etc/opennova/rds-global-bundle.pem
+[ -s "$ca" ] || { echo "the host has no RDS CA bundle ($ca): app deploy (converge) fetches it" >&2; exit 1; }
+install -d -m 0700 /run/opennova
+env_file="$(mktemp /run/opennova/db-admin.XXXXXX)"
+trap 'rm -f "$env_file"' EXIT
+master_password="$(aws ssm get-parameter --name "$OPENNOVA_SSM_PREFIX/bootstrap/db-master-password" \
+  --with-decryption --query Parameter.Value --output text)"
+app_password="$(aws ssm get-parameter --name "$OPENNOVA_SSM_PREFIX/secret/DATABASE_PASSWORD" \
+  --with-decryption --query Parameter.Value --output text)" \
+  || { echo "no $OPENNOVA_SSM_PREFIX/secret/DATABASE_PASSWORD: run ./deploy/run.sh secrets sync first" >&2; exit 1; }
+printf 'PGPASSWORD=%s\nNOVAWORLD_PASSWORD=%s\n' "$master_password" "$app_password" > "$env_file"
+unset master_password app_password
+HEAD
+  printf 'docker run --rm -i --network host --env-file "$env_file" -v "$ca:/ca.pem:ro" postgres:17-alpine \\\n'
+  printf '  psql "host=%s port=%s dbname=postgres user=%s sslmode=verify-full sslrootcert=/ca.pem" -X -q -v ON_ERROR_STOP=1 <<'"'"'SQL'"'"'\n' \
+    "$DB_HOST" "$DB_PORT" "$DB_MASTER"
+  printf '%s\nSQL\nrm -f "$env_file"\n' "$sql"
+}
+
+db_bootstrap() {
+  [ $# -eq 0 ] || die "unknown: db bootstrap $1"
+  aws_auth
+  db_names
+  log "db bootstrap: role $DB_USER and database $DB_NAME on $DB_HOST (as $DB_MASTER)…"
+  db_master_param_put
+  ssm_run 600 "$(printf '#!/bin/bash\nset -euo pipefail\nexport PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root\n'; \
+    db_master_psql_fragment "$(db_bootstrap_sql)")" \
+    || die "db bootstrap failed (secrets sync first: the role's password is the DATABASE_PASSWORD secret)"
+  log "db bootstrap complete. Deploy (or restart novaworld) to connect with it."
+}
+
+db_psql() {
+  aws_auth
+  if [ $# -eq 0 ]; then
+    log "psql as the service's role on the $DEP host (Session Manager; \\q ends it)…"
+    aws ssm start-session --target "$(service_instance)" --document-name AWS-StartInteractiveCommand \
+      --parameters '{"command":["sudo /usr/local/sbin/opennova-psql"]}'
+    return
+  fi
+  local sql=""
+  case "$1" in
+    -c) [ $# -eq 2 ] || die "db psql -c needs one SQL argument"; sql="$2" ;;
+    -f) [ $# -eq 2 ] || die "db psql -f needs one FILE"; [ -f "$2" ] || die "no file $2"; sql="$(cat "$2")" ;;
+    *) die "unknown: db psql $1 (try: [-c SQL | -f FILE])" ;;
+  esac
+  local b64
+  b64="$(printf '%s\n' "$sql" | base64 -w0)"
+  ssm_run 300 "$(host_script "printf '%s' '$b64' | base64 -d | opennova-psql -X -v ON_ERROR_STOP=1 -f -")"
+}
+
+# The count of subscriptions that grant hosting (active, trialing, past_due),
+# 0 while the billing table does not exist.
+DB_GUARD_SQL="SELECT to_regclass('public.billing_subscriptions') IS NOT NULL AS has_billing \\gset
+\\if :has_billing
+SELECT 'granting=' || count(*) FROM billing_subscriptions WHERE status IN ('active', 'trialing', 'past_due');
+\\else
+SELECT 'granting=0';
+\\endif"
+
+db_reset() {
+  local confirmed=0 orphan=0 backup=1
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --yes-drop-database) confirmed=1; shift ;;
+      --orphan-subscriptions) orphan=1; shift ;;
+      --no-backup) backup=0; shift ;;
+      *) die "unknown: db reset-db $1 (try: --yes-drop-database [--orphan-subscriptions] [--no-backup])" ;;
+    esac
+  done
+  aws_auth
+  db_names
+  log "checking for subscriptions that grant hosting…"
+  local out granting b64
+  b64="$(printf '%s\n' "$DB_GUARD_SQL" | base64 -w0)"
+  out="$(ssm_run 300 "$(host_script "printf '%s' '$b64' | base64 -d | opennova-psql -X -q -At -v ON_ERROR_STOP=1 -f -")")" \
+    || die "the check failed; nothing was changed (a database never bootstrapped wants db bootstrap, not a reset)"
+  granting="$(sed -n 's/^granting=\([0-9][0-9]*\)$/\1/p' <<<"$out" | tail -n 1)"
+  [ -n "$granting" ] || die "the check printed no count; nothing was changed"
+  if [ "$granting" -gt 0 ] && [ "$orphan" -eq 0 ]; then
+    die "$granting subscription(s) (active, trialing or past_due) grant hosting: once billing is live the database is durable. Refusing. (--orphan-subscriptions resets anyway: their customers keep paying with no account linked here, so cancel them in Stripe first)"
+  fi
+  log "db reset-db on $DEP will:"
+  if [ "$backup" -eq 1 ]; then
+    log "  1. dump the database to S3 (as backup now); a failed dump stops here, nothing changed"
+  else
+    log "  1. take NO dump (--no-backup)"
+  fi
+  log "  2. stop novaworld (the site's API and the game service are down until step 4)"
+  log "  3. drop the database $DB_NAME (WITH FORCE) and make it again, empty (SQL_ASCII, C collation, owned by $DB_USER)"
+  log "  4. start novaworld: its first boot applies every migration"
+  log "  ($granting subscription(s) grant hosting now)"
+  [ "$confirmed" -eq 1 ] || die "refusing to drop the database without --yes-drop-database"
+  db_master_param_put
+  local reset_sql script
+  reset_sql="DROP DATABASE IF EXISTS $DB_NAME WITH (FORCE);
+$(db_bootstrap_sql)"
+  # shellcheck disable=SC2016  # the host's shell expands these
+  script="$(host_script \
+    "$([ "$backup" -eq 1 ] && printf 'echo "[reset-db] dumping the database"\nopennova-compose run --rm --no-deps backup /backup/backup.sh')" \
+    'echo "[reset-db] stopping novaworld"' \
+    'opennova-compose stop novaworld' \
+    "trap 'echo \"[reset-db] failed; starting novaworld again\" >&2; opennova-compose start novaworld || true' ERR" \
+    "$(db_master_psql_fragment "$reset_sql")" \
+    'trap - ERR' \
+    'echo "[reset-db] starting novaworld on the empty database"' \
+    'opennova-compose up -d --wait --wait-timeout 300 novaworld' \
+    'docker logs "$(opennova-compose ps -q novaworld | head -n 1)" 2>&1 | grep "\[boot\] migrations:" | tail -n 1')"
+  ssm_run 1800 "$script" || die "db reset-db failed; its output above says where (app status, app logs novaworld)"
+  log "reset-db complete. Every account is gone: make the first site admin again (DEPLOY.md, ONNET_BOOTSTRAP_ADMIN)."
+}
+
+db_snapshot() {
+  [ $# -eq 0 ] || die "unknown: db snapshot $1"
+  aws_auth
+  infra_env_load
+  local id snap
+  id="$(infra_get OPENNOVA_DB_IDENTIFIER)"
+  snap="$id-manual-$(date -u +%Y%m%d-%H%M%S)"
+  aws rds create-db-snapshot --db-instance-identifier "$id" --db-snapshot-identifier "$snap" \
+    --query 'DBSnapshot.[DBSnapshotIdentifier,Status]' --output text \
+    || die "the snapshot was not started"
+  log "snapshot $snap started (minutes): ./deploy/run.sh$DEP_FLAG aws rds wait db-snapshot-available --db-snapshot-identifier $snap"
+}
+
+cmd_db() {
+  local action="${1:-}"
+  shift || true
+  case "$action" in
+    bootstrap) db_bootstrap "$@" ;;
+    psql)      db_psql "$@" ;;
+    reset-db)  db_reset "$@" ;;
+    snapshot)  db_snapshot "$@" ;;
+    *) die "unknown: db $action (try: bootstrap|psql|reset-db|snapshot)" ;;
   esac
 }
+
+backup_restore() {
+  local key="" confirmed=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --yes-overwrite-database) confirmed=1; shift ;;
+      -*) die "unknown: backup restore $1 (try: KEY --yes-overwrite-database)" ;;
+      *) [ -z "$key" ] || die "backup restore takes one KEY"; key="$1"; shift ;;
+    esac
+  done
+  [ -n "$key" ] || die "backup restore needs the dump's KEY (backup list)"
+  if ! [[ "$key" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] || [[ "$key" == *..* ]]; then die "'$key' is no key"; fi
+  aws_auth
+  infra_env_load
+  log "backup restore on $DEP: stop novaworld, restore s3://$(infra_get BACKUP_BUCKET)/$key over the database, start novaworld"
+  [ "$confirmed" -eq 1 ] || die "refusing to overwrite the database without --yes-overwrite-database"
+  # shellcheck disable=SC2016  # the host's shell expands these
+  ssm_run 1800 "$(host_script \
+    'echo "[restore] stopping novaworld"' \
+    'opennova-compose stop novaworld' \
+    "trap 'echo \"[restore] failed; starting novaworld again\" >&2; opennova-compose start novaworld || true' ERR" \
+    "opennova-compose run --rm --no-deps backup /backup/restore.sh '$key'" \
+    'trap - ERR' \
+    'echo "[restore] starting novaworld"' \
+    'opennova-compose up -d --wait --wait-timeout 300 novaworld' \
+    'docker logs "$(opennova-compose ps -q novaworld | head -n 1)" 2>&1 | grep "\[boot\] migrations:" | tail -n 1')" \
+    || die "the restore failed; its output above says where"
+  log "restore complete: $key"
+}
+
+cmd_backup() {
+  local action="${1:-}"
+  shift || true
+  case "$action" in
+    now)
+      ssm_run 1800 "$(host_script 'opennova-compose run --rm --no-deps backup /backup/backup.sh')" ;;
+    list)
+      aws_auth
+      infra_env_load
+      aws s3 ls "s3://$(infra_get BACKUP_BUCKET)/$(infra_get BACKUP_PREFIX)/" --recursive --human-readable ;;
+    restore) backup_restore "$@" ;;
+    *) die "unknown: backup $action (try: now|list|restore)" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# state
+# ---------------------------------------------------------------------------
 
 # A state file's serial (terraform bumps it at every change); 0 when the file
 # has none or is no state at all.
@@ -649,13 +1966,13 @@ state_base() {
 
 cmd_state() {
   require_op
-  # Optional args let other stacks reuse this:
+  # The deployment's state: its vault document (tfstate, tfstate-<deployment>)
+  # and its workspace's state file. Optional args let other stacks reuse this:
   #   state <pull|push> [--force] [doc] [tfdir]
-  # Defaults target the AWS stack (tfstate / infra/aws).
   #
   # Every pull or push that goes through records, beside the state, the digest
   # (state_digest) of the vault document this checkout is now in step with:
-  # terraform.tfstate.vault-sha256, the base. Both directions fetch the vault's
+  # <state file>.vault-sha256, the base. Both directions fetch the vault's
   # document to the tmpfs and compare three ways, so two checkouts that started
   # from one vault state are told apart however their serials ran. Without
   # --force:
@@ -677,9 +1994,9 @@ cmd_state() {
   local action="${1:-pull}" force=0
   shift || true
   if [ "${1:-}" = "--force" ]; then force=1; shift; fi
-  local doc="${1:-tfstate}"
-  local tfdir="${2:-$TF_DIR}"
-  local statefile="$tfdir/terraform.tfstate"
+  local doc="${1:-$STATE_DOC}"
+  local statefile="$STATEFILE"
+  [ -z "${2:-}" ] || statefile="$2/terraform.tfstate"
   local basefile="$statefile.vault-sha256"
   local fetched="$SECRETS_DIR/state-vault.tfstate"
   local base="" local_digest remote_digest local_changed=0 remote_changed=0
@@ -776,32 +2093,72 @@ cmd_state() {
 HOSTED_DATA_MOUNT=/hosted-data
 HOSTED_DATA_IMAGE=opennova-hosted-data:local
 
-# The deployment tag the hosted machines carry: --deployment, else the infra's
-# output, else the stack's default name (instance_name's default).
-hosted_deployment() {
-  local given="$1" out
-  if [ -n "$given" ]; then printf '%s' "$given"; return; fi
-  out="$(terraform -chdir="$TF_DIR" output -raw hosted_deployment 2>/dev/null || true)"
-  printf '%s' "${out:-opennova-server}"
+# The opennova:deployment tag the deployment's hosted machines carry: infra.env's,
+# else the stack's resource name (instance_name, with the deployment appended
+# off prod).
+hosted_deployment_tag() {
+  local tag
+  tag="${INFRA[ONNET_HOSTED_DEPLOYMENT]:-}"
+  if [ -z "$tag" ]; then
+    tag=opennova-server
+    [ "$DEP" = prod ] || tag="opennova-server-$DEP"
+  fi
+  printf '%s' "$tag"
 }
 
-# hosted status: every machine this deployment tagged (the service's own
-# listing's scope), with its server, state and addresses.
-hosted_status() {
-  local given="" dep
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --deployment) [ $# -ge 2 ] || die "--deployment needs a value"; given="$2"; shift 2 ;;
-      *) die "unknown: hosted status $1 (try: --deployment NAME)" ;;
-    esac
-  done
-  dep="$(hosted_deployment "$given")"
-  log "hosted machines tagged opennova:deployment=$dep:"
+# The service's admin API for its fleet (apps/novaworld_server: the admin fleet
+# routes). The toolbox calls it on the host, over SSM, from the loopback (a
+# proxy the server trusts, ONNET_TRUSTED_PROXIES) with the admin token
+# (opennova-admin-api, written by converge).
+FLEET_API=/api/admin/fleet
+# Its view of the machines and of the servers in their slots.
+FLEET_VIEW_API=/api/admin/hosted
+
+# A machine's id as the service names it (its row) or EC2 does (i-...),
+# checked before it goes into a host script.
+machine_id() {
+  [[ "$1" =~ ^[A-Za-z0-9_-]{1,64}$ ]] || die "'$1' is no machine id (fleet status lists them)"
+  printf '%s' "$1"
+}
+
+# fleet status: every machine this deployment tagged (the EC2 view, which
+# answers while the service is down), then the service's own view.
+fleet_status() {
+  [ $# -eq 0 ] || die "unknown: fleet status $1 (the deployment is --deployment's)"
+  aws_auth
+  infra_env_load
+  local tag
+  tag="$(hosted_deployment_tag)"
+  log "machines tagged opennova:deployment=$tag (EC2):"
   # shellcheck disable=SC2016  # a JMESPath literal, not a shell expansion
-  cmd_aws ec2 describe-instances \
-    --filters "Name=tag:opennova:hosted,Values=1" "Name=tag:opennova:deployment,Values=$dep" \
-    --query 'Reservations[].Instances[].{machine:InstanceId,server:Tags[?Key==`opennova:server-id`]|[0].Value,state:State.Name,type:InstanceType,private:PrivateIpAddress,public:PublicIpAddress,launched:LaunchTime}' \
+  aws ec2 describe-instances \
+    --filters "Name=tag:opennova:hosted,Values=1" "Name=tag:opennova:deployment,Values=$tag" \
+    --query 'Reservations[].Instances[].{machine:InstanceId,kind:Tags[?Key==`opennova:machine-kind`]|[0].Value,id:Tags[?Key==`opennova:machine-id`]|[0].Value,state:State.Name,type:InstanceType,public:PublicIpAddress,launched:LaunchTime}' \
     --output table
+  log "the service's fleet ($FLEET_VIEW_API):"
+  ssm_run 120 "$(host_script "opennova-admin-api GET $FLEET_VIEW_API")" \
+    || err "the service did not answer (app status, app logs novaworld)"
+}
+
+cmd_fleet() {
+  local action="${1:-status}"
+  shift || true
+  case "$action" in
+    status) fleet_status "$@" ;;
+    drain|end)
+      take_yes "$@"
+      [ "${#OPT_REST[@]}" -eq 1 ] || die "fleet $action needs one MACHINE (fleet status lists them)"
+      local machine
+      machine="$(machine_id "${OPT_REST[0]}")" || exit 1
+      [ "$action" = drain ] || confirm_prod "end machine $machine (its servers move off first)" "$OPT_YES"
+      ssm_run 120 "$(host_script "opennova-admin-api POST $FLEET_API/machines/$machine/$action")" ;;
+    roll)
+      take_yes "$@"
+      [ "${#OPT_REST[@]}" -eq 0 ] || die "unknown: fleet roll ${OPT_REST[0]} (try: --yes)"
+      confirm_prod "roll every machine onto new ones (their servers move, one machine at a time)" "$OPT_YES"
+      ssm_run 120 "$(host_script "opennova-admin-api POST $FLEET_API/roll")" ;;
+    *) die "unknown: fleet $action (try: status|drain|end|roll)" ;;
+  esac
 }
 
 # hosted data-snapshot --data-set SLUG: one data set of the hosted servers'
@@ -817,19 +2174,16 @@ hosted_status() {
 #                        present;
 #   opennova_0_consumer  OpenNova's own data: the three base archives.
 # They stream as a tar into the helper image (deploy/hosted-data), built on this
-# docker, which makes an ext4 image of them labelled opennova-data (every data
-# set's label: the machine mounts it at /opt/game) and writes it into a new
-# snapshot through the EBS direct APIs: no machine, no bucket, no SSH. The
-# snapshot is the only AWS resource it makes, and it deletes it on any failure;
-# the image and the staging copy live in the helper's container alone (--rm).
-# Prints the snapshot id.
+# docker, which makes an ext4 image of them and writes it into a new snapshot
+# through the EBS direct APIs: no machine, no bucket, no SSH. The snapshot is the
+# only AWS resource it makes, and it deletes it on any failure; the image and the
+# staging copy live in the helper's container alone (--rm). Prints the snapshot id.
 hosted_data_snapshot() {
-  local given="" data_set="" what dep dir="$HOSTED_DATA_MOUNT" rel found
+  local data_set="" what dir="$HOSTED_DATA_MOUNT" rel found tag
   while [ $# -gt 0 ]; do
     case "$1" in
       --data-set) [ $# -ge 2 ] || die "--data-set needs a value"; data_set="$2"; shift 2 ;;
-      --deployment) [ $# -ge 2 ] || die "--deployment needs a value"; given="$2"; shift 2 ;;
-      *) die "unknown: hosted data-snapshot $1 (try: --data-set SLUG [--deployment NAME])" ;;
+      *) die "unknown: hosted data-snapshot $1 (try: --data-set SLUG)" ;;
     esac
   done
   [ -n "$data_set" ] \
@@ -862,21 +2216,20 @@ hosted_data_snapshot() {
     found="$(cd "$dir" && find . -maxdepth 1 -type f -iname "$rel" | head -n 1)"
     [ -z "$found" ] || files+=("${found#./}")
   done
-  dep="$(hosted_deployment "$given")"
+  require_op
+  tag="$(hosted_deployment_tag)"
   log "the $data_set data snapshot takes, from $dir:"
   for rel in "${files[@]}"; do log "  $rel"; done
   log "building the helper image (deploy/hosted-data)…"
-  docker build -q -t "$HOSTED_DATA_IMAGE" /workspace/deploy/hosted-data >/dev/null \
+  docker build -q -t "$HOSTED_DATA_IMAGE" "$ROOT/deploy/hosted-data" >/dev/null \
     || die "the helper image did not build"
-  log "making the snapshot (tagged opennova:deployment=$dep, opennova:data-set=$data_set); a GiB takes a few minutes…"
+  log "making the snapshot (tagged opennova:deployment=$tag, opennova:data-set=$data_set); a GiB takes a few minutes…"
   # The vault's AWS credentials and region alone, for the helper, in the tmpfs.
-  local all_env="$SECRETS_DIR/terraform.env" aws_env="$SECRETS_DIR/hosted-aws.env" snapshot rc=0
-  inject "$TF_ENV_TPL" "$all_env" >/dev/null
-  grep -E '^AWS_(ACCESS_KEY_ID|SECRET_ACCESS_KEY|REGION|DEFAULT_REGION)=' "$all_env" > "$aws_env" || true
+  local aws_env="$SECRETS_DIR/aws.env" snapshot rc=0
+  op inject -f -i "$(render_tpl "$AWS_ENV_TPL")" -o "$aws_env" >/dev/null || die "resolving deploy/env/aws.env.tpl failed"
   chmod 600 "$aws_env"
-  rm -f "$all_env"
   snapshot="$( (cd "$dir" && tar -cf - "${files[@]}") \
-    | docker run --rm -i --env-file "$aws_env" "$HOSTED_DATA_IMAGE" --data-set "$data_set" --deployment "$dep")" || rc=$?
+    | docker run --rm -i --env-file "$aws_env" "$HOSTED_DATA_IMAGE" --data-set "$data_set" --deployment "$tag")" || rc=$?
   rm -f "$aws_env"
   [ "$rc" -eq 0 ] \
     || die "the snapshot was not made (the helper deletes one it started; check: ./deploy/run.sh aws ec2 describe-snapshots --owner-ids self --filters Name=tag:opennova:hosted-data,Values=1)"
@@ -889,20 +2242,21 @@ hosted_data_snapshot() {
   log "  1. in vault '$VAULT', item 'hosted', the field data_snapshot_id_$data_set = $snapshot"
   log "     (one field per data set; delete the snapshot it replaces once the infra no longer names it)"
   log "  2. ./deploy/run.sh infra plan, then infra apply"
-  log "  3. ./deploy/run.sh app deploy --tag <server tag> --serve-tag <serve tag>"
+  log "  3. ./deploy/run.sh app deploy --serve-tag <serve tag>"
   printf '%s\n' "$snapshot"
 }
 
 cmd_hosted() {
-  require_op
-  local action="${1:-status}"
+  local action="${1:-}"
   shift || true
   case "$action" in
-    status)        hosted_status "$@" ;;
     data-snapshot) hosted_data_snapshot "$@" ;;
-    *) die "unknown: hosted $action (try: status|data-snapshot)" ;;
+    status) die "hosted status is fleet status now" ;;
+    *) die "unknown: hosted $action (try: data-snapshot; the machines are fleet status)" ;;
   esac
 }
+
+# ---------------------------------------------------------------------------
 
 # The header comment above `set -euo pipefail` is the help text.
 usage() {
@@ -910,14 +2264,28 @@ usage() {
 }
 
 main() {
-  local group="${1:-help}"; shift || true
+  local dep="${OPENNOVA_DEPLOYMENT:-prod}"
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --deployment) [ $# -ge 2 ] || die "--deployment needs a name"; dep="$2"; shift 2 ;;
+      --deployment=*) dep="${1#*=}"; shift ;;
+      *) break ;;
+    esac
+  done
+  set_deployment "$dep"
+  mkdir -p "$SECRETS_DIR"
+  local group="${1:-help}"
+  shift || true
   case "$group" in
     secrets) cmd_secrets "$@" ;;
+    stripe)  cmd_stripe "$@" ;;
     infra)   cmd_infra "$@" ;;
     aws)     cmd_aws "$@" ;;
     app)     cmd_app "$@" ;;
+    db)      cmd_db "$@" ;;
     backup)  cmd_backup "$@" ;;
     state)   cmd_state "$@" ;;
+    fleet)   cmd_fleet "$@" ;;
     hosted)  cmd_hosted "$@" ;;
     help|-h|--help) usage ;;
     *) err "unknown command: $group"; usage; exit 1 ;;
@@ -925,8 +2293,7 @@ main() {
 }
 
 # Run when executed. Sourced, it only defines the functions, so a local check
-# can drive one (say app_reset_db) against a local engine with the vault,
-# terraform and SSH steps stubbed.
+# can drive one against stubs (op, aws, terraform, docker).
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   main "$@"
 fi

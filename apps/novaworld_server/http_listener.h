@@ -1,7 +1,7 @@
 #pragma once
 
 #include "auth.h"
-#include "hosted/bootstrap.h"
+#include "hosted/placement.h"
 
 #include <net/novacrypto/epask.h>
 
@@ -31,22 +31,28 @@ namespace opennova::novaworld_server {
 struct ServerConfig;
 class SessionStore;
 class NwUdpListener;
-namespace hosted { class AdminLinks; }
+class Watchdog;
+namespace hosted { class AdminLinks; class LimitsHold; }
+namespace billing { class Billing; }
 namespace catalog { struct GameRow; }
 
 // Crow-backed HTTP listener. start() registers six route families, each in
 // its own registrar (bodies in http_listener.cpp, the listed servers' in
-// host_routes.cpp), and, with the ec2 provider, the cloud machines' bootstrap
-// route (hosted/bootstrap_route.h, outside /api/):
+// host_routes.cpp). The machine agents' routes are never here: they are the
+// internal listener's alone (hosted/internal_listener.h).
 //   admin REST API      — /api/admin/* + dev host inject, for the Bearer
 //                         ADMIN_API_TOKEN or an admin-role website session
 //   public JSON API     — /api/* for the web portal, with the website's
-//                         login / logout / me session routes
+//                         login / logout / me session routes, and the
+//                         health probe GET /healthz (outside /api)
 //   listed servers      — HostRoutes: GET /api/admin/hosts and GET
 //                         /api/me/hosts, and the ServerCommand /
 //                         ServerStopHosting pushes for an admin
 //                         (/api/admin/hosts/<rid>/...) and for the
 //                         server's owner (/api/me/hosts/<rid>/...)
+//   support tiers       — BillingRoutes (billing/billing_routes.h): the tiers,
+//                         the account's billing, checkout and portal, the
+//                         Stripe webhook and the admin's billing view
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
@@ -84,14 +90,26 @@ public:
 	// listener. Null answers every console command 503.
 	void set_admin_links(hosted::AdminLinks *links) { admin_links_ = links; }
 
-	// The cloud machines' bootstrap route (hosted/bootstrap_route.h, POST
-	// /hosted/bootstrap/<id>): registered only with a store, answering only TCP
-	// peers inside `admitted`. Set before start(); the store must outlive the
-	// HTTP listener.
-	void set_hosted_bootstrap(hosted::BootstrapStore *store, std::vector<hosted::Ipv4Cidr> admitted) {
-		bootstrap_store_ = store;
-		bootstrap_admitted_ = std::move(admitted);
-	}
+	// The stall watchdog GET /healthz answers from (health.h). Set before
+	// start(); it must outlive the HTTP listener. Null: /healthz answers "ok"
+	// whenever Crow serves it.
+	void set_watchdog(const Watchdog *watchdog) { watchdog_ = watchdog; }
+
+	// Billing (billing/billing.h), which the billing routes run on
+	// (billing/billing_routes.h). Set before start(); it must outlive the HTTP
+	// listener. Null: billing is off, and those routes answer billing_disabled
+	// (GET /api/billing/tiers answers {"enabled": false}).
+	void set_billing(billing::Billing *billing) { billing_ = billing; }
+
+	// The hosted servers' limits hold (hosted/limits_hold.h), which the admin's
+	// billing reconcile clears and its billing view shows. Set before start();
+	// it must outlive the HTTP listener. Null: none.
+	void set_limits_hold(hosted::LimitsHold *hold) { limits_hold_ = hold; }
+
+	// The fleet's placement policy (hosted/fleet_config.h) the hosted routes ask
+	// the supervisor's planner with: a start's at_capacity, the list's `full`.
+	// Set before start(); unset, placement.h's defaults.
+	void set_fleet_placement(const hosted::PlacementPolicy &policy) { fleet_placement_ = policy; }
 
 	HttpListener(const HttpListener &) = delete;
 	HttpListener &operator=(const HttpListener &) = delete;
@@ -109,9 +127,9 @@ public:
 	// kMinHandlerThreads. Handlers can wait without working (a hosted server's
 	// console request waits on its admin link for up to 3 s), so a two-core
 	// machine still runs eight; the console admits at most two fewer
-	// waiting requests (hosted/console_routes.h). The SQLite pool grows to the
-	// peak of concurrent leases, one per handler thread at most, which this
-	// bounds.
+	// waiting requests (hosted/console_routes.h). Each holds at most one of
+	// the database pool's connections at a time (DATABASE_POOL_MAX of them);
+	// a handler finding every one leased waits for the next one back.
 	static constexpr unsigned kMinHandlerThreads = 8;
 	static unsigned handler_threads() {
 		return (std::max)(std::thread::hardware_concurrency(), kMinHandlerThreads);
@@ -185,7 +203,7 @@ private:
 	// account's status is the caller's to
 	// check. The NWHANDLE cookie never counts: the service sets it in the clear
 	// to the account's handle, so any client can send any account's (and a key
-	// minted on it would list a server as anyone's). Throws db::SqliteError.
+	// minted on it would list a server as anyone's). Throws db::Error.
 	std::optional<UserRecord> retail_login_user(
 			const std::map<std::string, std::string> &cookies, db::Database &db, const char *&how);
 	// Per-server-process EPASK params advertised via the EPASK cookie at
@@ -204,10 +222,14 @@ private:
 	// The console routes' admin links (set_admin_links); null in tests that do
 	// not wire them.
 	hosted::AdminLinks *admin_links_ = nullptr;
-	// The bootstrap route's tokens and networks (set_hosted_bootstrap); null:
-	// no route.
-	hosted::BootstrapStore *bootstrap_store_ = nullptr;
-	std::vector<hosted::Ipv4Cidr> bootstrap_admitted_;
+	// GET /healthz's watchdog (set_watchdog); null: always "ok".
+	const Watchdog *watchdog_ = nullptr;
+	// The billing routes' billing (set_billing); null: billing off.
+	billing::Billing *billing_ = nullptr;
+	// The hosted servers' limits hold (set_limits_hold); null: none.
+	hosted::LimitsHold *limits_hold_ = nullptr;
+	// The hosted routes' placement policy (set_fleet_placement).
+	hosted::PlacementPolicy fleet_placement_;
 	// config.public_host, set in start() before Crow runs (host_url() /
 	// gsb_url()).
 	std::string public_host_;

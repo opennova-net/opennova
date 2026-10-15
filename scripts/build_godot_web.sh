@@ -7,7 +7,7 @@
 # must come from the Emscripten that built those templates: 4.0.20 for Godot
 # 4.6 (godotengine/build-containers, branch 4.6, Dockerfile.web). The script
 # refuses any other emcc. Without that emcc on PATH, run it in the pinned image
-# (whose CMake 3.22 predates the sqlite fetch's 3.24 options, hence the pip):
+# (whose CMake 3.22 predates the rgbcx fetch's 3.24 options, hence the pip):
 #
 #   docker run --rm -v "$PWD:/src" -w /src emscripten/emsdk:4.0.20 bash -c \
 #       "pip install -q 'cmake>=3.28,<4' ninja && scripts/build_godot_web.sh [--release]"

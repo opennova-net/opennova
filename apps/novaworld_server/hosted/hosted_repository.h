@@ -1,16 +1,19 @@
 #pragma once
 
-// The hosted servers' rows (hosted_servers, hosted_server_events; migrations
-// 0011 and 0014, the server's data set): the requests the site makes, the state each server is in, every
-// transition with what caused it, and which listing is a hosted server's. The
-// supervisor (supervisor.h) and the routes share it; every write that spans
-// statements is one db::Transaction, and a transition is a compare-and-set on
-// the state, so the supervisor and a route that both move a server never both
-// win. Crow-free. Each function throws db::SqliteError on a database failure.
+// The hosted servers' rows (hosted_servers, hosted_server_events; the
+// baseline, and 0003_fleet.sql's place in the fleet): the requests the site
+// makes, the state each server is in, every transition with what caused it,
+// and which listing is a hosted server's. The supervisor (supervisor.h) and the
+// routes share it; every write that spans statements is one db::Transaction,
+// and a transition is a compare-and-set on the state, so the supervisor and a
+// route that both move a server never both win. The slot a server holds is
+// fleet_repository.h's (assign_slot, release_slot). Crow-free. Each function
+// throws db::Error on a database failure.
 
 #include "hosted_settings.h"
+#include "placement.h"
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -26,19 +29,23 @@ namespace opennova::novaworld_server::hosted {
 // request takes any live state to stopping.
 enum class State : uint8_t {
 	Requested,    // the owner asked; the supervisor has not picked it up
-	Provisioning, // the service account and the files are made, the machine launched
-	Booting,      // the machine is starting opennova-serve
+	Provisioning, // placed on a slot of a machine (or waiting for one), its files rendered
+	Booting,      // its container is wanted on its slot; the machine's agent starts it
 	Listing,      // opennova-serve runs; its listing has not appeared yet
 	Running,      // listed on NovaWorld by its service account
-	Stopping,     // a stop was asked for; the machine is being ended
+	Stopping,     // a stop was asked for; its container is being stopped
 	Stopped,      // ended by a stop (or a clean exit)
 	Failed,       // ended by a fault (failure_reason)
 };
 const char *state_name(State state);
 std::optional<State> state_from_name(std::string_view name);
 // Any state but Stopped and Failed: the server holds (or is about to hold) a
-// machine, counts against the cap and is its owner's one live server.
+// machine, and counts against the cap and against its owner's hosting
+// entitlement (a stopping one included, until it has stopped).
 bool is_live(State state);
+// is_live as SQL on hosted_servers' state, for every query of the table
+// (here and fleet_repository.h's).
+inline constexpr const char *kLiveServerSql = "state NOT IN ('stopped', 'failed')";
 
 // A hosted server's row. It carries no admin credential: that is AdminLogin's,
 // read by admin_login_of alone, so nothing that serializes a HostedServer can
@@ -49,12 +56,27 @@ struct HostedServer {
 	std::optional<int64_t> service_user_id;
 	State state = State::Requested;
 	HostedSettings settings;
+	// The machine driver that ran its last start, its container's name
+	// (srv-<id>-g<generation>) and the machine's private address (the admin
+	// link's target); empty until a start renders them, and cleared when it
+	// leaves its slot.
 	std::string provider;
-	std::string machine_id;
+	std::string container;
 	std::string machine_address;
 	int admin_port = 0;
 	int restarts = 0;
 	std::string failure_reason;
+	// It runs on a machine of its own (the own-machine add-on), not a shared one.
+	bool own_machine = false;
+	// Its place in the fleet (0003_fleet.sql): the fleet_machines row and the
+	// slot it holds while live (an ended row keeps where it last ran), the game
+	// port its files were rendered with, how many starts it has had (its
+	// container's generation) and the serve image its start pinned.
+	std::optional<int64_t> machine_ref;
+	int slot = -1;
+	int game_port = 0;
+	int64_t generation = 0;
+	std::string serve_image;
 	// UTC 'YYYY-MM-DD HH:MM:SS'; running_at / ended_at empty until set.
 	std::string created_at;
 	std::string updated_at;
@@ -84,30 +106,61 @@ std::optional<AdminLogin> admin_login_of(db::Database &db, int64_t id);
 enum class RequestOutcome : uint8_t {
 	Created,
 	InvalidSettings, // check_settings refused them (the routes check first)
-	NoSuchUser,  // no player account by that id
-	NotApproved, // the account is not approved (can_host) or not active
-	AlreadyLive, // the account has a live server (`id` names it)
-	AtCapacity,  // `cap` servers are live
+	NoSuchUser,   // no player account by that id
+	NotEntitled,  // the account is not active, or its hosting entitlement is 0 servers
+	PastDue,      // its support tier's payment is past due: its servers run on, none starts
+	AtLimit,      // `used` of its `max_servers` are live already
+	NoOwnMachine, // an own machine was asked for, and each the add-on pays for runs one
+	AtCapacity,   // `cap` servers are live, or the fleet has no place for it (fleet_has_room)
 };
 struct RequestResult {
 	RequestOutcome outcome = RequestOutcome::Created;
 	int64_t id = 0;
+	// AtLimit: the entitlement's servers, and how many of the account's are live.
+	int max_servers = 0;
+	int used = 0;
 };
 
 // A start the owner asks for: the settings checked again against the offered
 // data sets (check_settings, as the routes do first), then in one transaction
-// the account's approval, its one live server and the global cap, and the row
+// (which holds the writer lock, so no other start lands between a count and the
+// row) the account (a player's, active), its hosting entitlement at `now` (Unix
+// seconds; billing/entitlement.h): some servers, none past due, fewer of its
+// servers live than it grants (a stopping one counts), and with `own_machine`
+// fewer of them on own machines than the add-on pays for; then the global cap,
+// and with `fleet` the fleet's room under that placement policy (the
+// supervisor's planner, fleet_repository.h fleet_has_room); and the row
 // written (state requested, its event beside it).
-RequestResult request_server(db::Database &db, int64_t owner_user_id,
-		const HostedSettings &settings, const std::vector<DataSet> &offered, int cap);
+RequestResult request_server(db::Database &db, int64_t owner_user_id, const HostedSettings &settings,
+		const std::vector<DataSet> &offered, int cap, int64_t now, bool own_machine = false,
+		const PlacementPolicy *fleet = nullptr);
 
 std::optional<HostedServer> find_server(db::Database &db, int64_t id);
-// The owner's live server, else the newest of its ended ones.
-std::optional<HostedServer> latest_server_of(db::Database &db, int64_t owner_user_id);
+// Server `id` when `owner_user_id` owns it, in any state; nullopt for no such
+// server and for another account's (the owner's routes answer both 404).
+std::optional<HostedServer> owned_server(db::Database &db, int64_t id, int64_t owner_user_id);
+// The owner's live servers by id, oldest first.
+std::vector<HostedServer> live_servers_of(db::Database &db, int64_t owner_user_id);
+// The owner's live servers by id, oldest first, then its newest
+// `ended_limit` ended ones, newest first.
+std::vector<HostedServer> list_servers_of(db::Database &db, int64_t owner_user_id, size_t ended_limit = 10);
+// How many of the owner's servers are live, and how many of those run on own
+// machines (a stopping one counts in both).
+int count_live_of(db::Database &db, int64_t owner_user_id);
+int count_own_live_of(db::Database &db, int64_t owner_user_id);
 std::vector<HostedServer> list_live(db::Database &db);
 // The newest `limit` servers, live ones first (the admin's fleet view).
 std::vector<HostedServer> list_servers(db::Database &db, size_t limit);
+// Which servers the admin's fleet view lists.
+enum class ServerFilter : uint8_t { Live, Ended, All };
+// The newest `limit` servers `filter` takes, live ones first, of `owner_user_id`
+// alone when it is set.
+std::vector<HostedServer> list_fleet_servers(
+		db::Database &db, std::optional<int64_t> owner_user_id, ServerFilter filter, size_t limit);
 int count_live(db::Database &db);
+// The servers that ended failed in the last `seconds` (the heartbeat's
+// hosted_failed).
+int count_failed_since(db::Database &db, int64_t seconds);
 // The newest `limit` transitions of a server, oldest first.
 std::vector<HostedEvent> list_events(db::Database &db, int64_t id, size_t limit);
 
@@ -138,11 +191,12 @@ bool reset_restarts(db::Database &db, int64_t id);
 // The fields a start writes beside the state.
 void set_service_account(db::Database &db, int64_t id, std::optional<int64_t> user_id);
 void set_machine(db::Database &db, int64_t id, const std::string &provider,
-		const std::string &machine_id, const std::string &address);
+		const std::string &container, const std::string &address);
+void set_serve_image(db::Database &db, int64_t id, const std::string &image);
 void set_admin_login(db::Database &db, int64_t id, int admin_port, const std::string &user,
 		const std::string &password);
 
-// --- The remote-admin console (hosted_server_console, migration 0012) ---
+// --- The remote-admin console (hosted_server_console) ---
 //
 // One line of a hosted server's console: a command the service's admin link
 // (admin_link.h) sent on the server's retail remote-admin port, a reply packet

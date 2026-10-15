@@ -1,29 +1,28 @@
 // prune_stale_hosts backstop: rows whose updated_at is older than the
 // window are removed; fresh rows survive; host_players cascade away.
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/host_repository.h>
 
 #include <cstdio>
 #include <string>
 
+#include "common/test_database.h"
 #include "common/test_expect.h"
 
 namespace {
 
-void insert_host(opennova::db::Database &db, uint32_t rid,
-                 const std::string &age_modifier) {
-	// Directly insert with a controlled updated_at so we don't depend on
-	// wall-clock sleeps. age_modifier is a sqlite datetime() modifier,
-	// e.g. "-10 minutes" or "-5 seconds".
+void insert_host(opennova::db::Database &db, uint32_t rid, int64_t age_seconds) {
+	// Directly insert with a controlled updated_at, `age_seconds` ago, so we
+	// don't depend on wall-clock sleeps.
 	db.exec(
 		"INSERT INTO active_hosts (rid, gsid, game, app_id, server_name, "
 		" host_ip, host_port, peer_ip, peer_port, updated_at) "
-		"VALUES (?, ?, 'jop_2_consumer', '10000', 'srv', '10.0.0.1', 64206, "
-		" '10.0.0.1', 64206, datetime('now', ?));",
+		"VALUES ($1, $2, 'jop_2_consumer', '10000', 'srv', '10.0.0.1', 64206, "
+		" '10.0.0.1', 64206, now() - make_interval(secs => $3));",
 		{opennova::db::BindValue(static_cast<int64_t>(rid)),
 		 opennova::db::BindValue(std::string("GSID-") + std::to_string(rid)),
-		 opennova::db::BindValue(age_modifier)});
+		 opennova::db::BindValue(age_seconds)});
 }
 
 int64_t host_count(opennova::db::Database &db) {
@@ -33,15 +32,16 @@ int64_t host_count(opennova::db::Database &db) {
 
 } // namespace
 
-int main() {
-	opennova::db::Database db(":memory:");
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
 	// The real migrations, so the schema (FKs, indexes, cascade) matches
 	// production exactly.
-	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
+	test_db::TestDatabase scratch;
+	opennova::db::Database db = scratch.open();
 
-	insert_host(db, 1, "-10 minutes"); // stale
-	insert_host(db, 2, "-2 seconds");  // fresh
-	insert_host(db, 3, "-30 minutes"); // stale
+	insert_host(db, 1, 10 * 60); // stale
+	insert_host(db, 2, 2);       // fresh
+	insert_host(db, 3, 30 * 60); // stale
 	TEST_EXPECT(host_count(db) == 3);
 
 	// Window of 5 minutes (300 s): the two stale rows go, the fresh stays.

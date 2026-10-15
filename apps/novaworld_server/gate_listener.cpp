@@ -6,7 +6,7 @@
 #include <net_sockets.h>
 #include <net/napi/envelope.h>
 #include <net/novacrypto/nwu.h>
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/gate_metrics.h>
 #include <net/novaworld/host_repository.h>
@@ -16,6 +16,7 @@
 #include <chrono>
 #include <cstdio>
 #include <exception>
+#include <future>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -164,18 +165,33 @@ bool GateListener::start(const ServerConfig &config) {
 	glsvss_agrms_   = config.glsvss_agrms;
 
 	// The receive thread's own connection (Database is single-threaded),
-	// leased here so a database that cannot be opened stops the boot. The
-	// games catalogue is read on it once, before the thread exists.
-	std::optional<db::ConnectionPool::Lease> db_conn;
-	if (db_pool_) {
-		try {
-			db_conn.emplace(db_pool_->acquire());
-			games_ = catalog::GameCatalog::load(**db_conn);
-		} catch (const db::SqliteError &e) {
-			std::fprintf(stderr, "[gate] db open failed: %s\n", e.what());
-			return false;
+	// leased by the thread itself (a lease stays on the thread that acquired
+	// it), which reads the games catalogue on it once before it serves.
+	// start() waits for both, so a database that cannot be opened stops the
+	// boot.
+	stop_requested_.store(false);
+	std::promise<bool> leased;
+	std::future<bool> lease_taken = leased.get_future();
+	worker_ = std::thread([this, socket = std::move(socket), leased = std::move(leased)]() mutable {
+		std::optional<db::ConnectionPool::Lease> db_conn;
+		if (db_pool_) {
+			try {
+				db_conn.emplace(db_pool_->acquire());
+				games_ = catalog::GameCatalog::load(**db_conn);
+			} catch (const db::Error &e) {
+				std::fprintf(stderr, "[gate] db open failed: %s\n", e.what());
+				leased.set_value(false);
+				return;
+			}
 		}
+		leased.set_value(true);
+		run_loop(std::move(socket), std::move(db_conn));
+	});
+	if (!lease_taken.get()) {
+		worker_.join();
+		return false;
 	}
+	running_.store(true);
 	if (games_.empty()) {
 		std::fprintf(stderr, "[gate] WARN no games rows: every probe goes unanswered\n");
 	}
@@ -192,12 +208,6 @@ bool GateListener::start(const ServerConfig &config) {
 		}
 	}
 
-	stop_requested_.store(false);
-	running_.store(true);
-	worker_ = std::thread([this, socket = std::move(socket),
-	                       db_conn = std::move(db_conn)]() mutable {
-		run_loop(std::move(socket), std::move(db_conn));
-	});
 	std::printf("[gate] listening on UDP :%u (also the POSTIPPORT status sink)\n",
 	            static_cast<unsigned>(bound_port_));
 	return true;
@@ -215,6 +225,7 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
                             std::optional<db::ConnectionPool::Lease> db_conn) {
 	uint8_t rx[65535];
 	while (!stop_requested_.load()) {
+		loop_turns_.fetch_add(1, std::memory_order_relaxed);
 		opennova::net::Endpoint from{};
 		const int n = opennova::net::udp_recv_from(socket.get(), rx, sizeof(rx),
 		                                           from, /*timeout_ms=*/250);

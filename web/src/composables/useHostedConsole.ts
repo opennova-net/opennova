@@ -10,7 +10,9 @@
 // every third, the mission catalog until it is read once. A read still waiting
 // from the last tick is not asked again. A command takes the queue's next turn,
 // ahead of the waiting reads, and the panels it changed are read again after
-// it. When the console goes, its waiting reads leave the queue.
+// it. When the console goes, its waiting reads leave the queue. A server that
+// is not running gets the log alone (logOnly), read once when it has ended
+// (follow false).
 
 import { onMounted, onUnmounted, ref, shallowRef } from 'vue';
 import {
@@ -80,13 +82,19 @@ export interface HostedConsoleOptions {
   onGone: () => void;
   // The credentials were refused.
   onUnauthorized: () => void;
+  // Read the console log alone (a server that is not running: no command
+  // reaches it, but its log reads, an ended server's too).
+  logOnly?: boolean;
+  // Keep reading on the tick (the default); false reads once (an ended
+  // server's log no longer changes).
+  follow?: boolean;
 }
 
 type ReadKey = 'players' | 'rotation' | 'missions' | 'chat' | 'log';
 
-// The console's scope in the page's queue: one per server on the admin's page.
+// The console's scope in the page's queue: one per server.
 function scopeOf(target: ConsoleTarget): string {
-  return target.kind === 'admin' ? `admin:${target.id}` : 'owner';
+  return `${target.kind}:${target.id}`;
 }
 
 export function useHostedConsole(target: ConsoleTarget, queue: ConsoleQueue, options: HostedConsoleOptions) {
@@ -266,6 +274,10 @@ export function useHostedConsole(target: ConsoleTarget, queue: ConsoleQueue, opt
 
   function onTick() {
     if (stopped || queue.pollsPaused || Date.now() < holdUntil) return;
+    if (options.logOnly) {
+      void readLog();
+      return;
+    }
     void readPlayers();
     void readChat();
     void readLog();
@@ -400,6 +412,7 @@ export function useHostedConsole(target: ConsoleTarget, queue: ConsoleQueue, opt
 
   onMounted(() => {
     onTick();
+    if (options.follow === false) return;
     timer = setInterval(onTick, CONSOLE_TICK_MS);
     document.addEventListener('visibilitychange', onVisibility);
   });

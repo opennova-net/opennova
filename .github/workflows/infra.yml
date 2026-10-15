@@ -2,11 +2,12 @@ name: Infra
 
 # The offline checks of the deploy stack (DEPLOY.md): the Terraform under
 # infra/ (formatted, valid, and infra/aws/tests' mock-provider runs, which plan
-# and apply against mocks with no credentials, so nothing reaches AWS or
-# Cloudflare) at the pinned Terraform the toolbox runs, and shellcheck on the
-# deploy toolbox, the server instance's user-data template and the hosted
-# machines' script. Path-filtered: it runs when
-# one of those changes.
+# against mocks with no credentials, so nothing reaches AWS or Cloudflare) at
+# the pinned Terraform the toolbox runs, and shellcheck on the deploy toolbox,
+# the service instance's first-boot and converge scripts, the portal's entrypoint
+# and the hosted machines' script. The Terraform reads deploy/host/ (the
+# service instance's scripts), so the repo root is mounted. Path-filtered: it runs
+# when one of those changes.
 
 on:
   push:
@@ -15,12 +16,14 @@ on:
       - 'infra/**'
       - 'deploy/**'
       - 'apps/novaworld_server/hosted/machine/**'
+      - 'web/docker-entrypoint.sh'
       - '.github/workflows/infra.yml'
   pull_request:
     paths:
       - 'infra/**'
       - 'deploy/**'
       - 'apps/novaworld_server/hosted/machine/**'
+      - 'web/docker-entrypoint.sh'
       - '.github/workflows/infra.yml'
   workflow_dispatch:
 
@@ -35,18 +38,22 @@ jobs:
   terraform:
     runs-on: ubuntu-latest
     env:
-      # The toolbox's Terraform (deploy/Dockerfile) and the tests' header.
-      TERRAFORM_IMAGE: hashicorp/terraform:1.9.5
+      # The toolbox's Terraform (deploy/Dockerfile TERRAFORM_VERSION).
+      TERRAFORM_IMAGE: hashicorp/terraform:1.11.4
     steps:
       - uses: actions/checkout@v4
       - name: terraform fmt
-        run: docker run --rm -v "$PWD/infra:/tf" -w /tf "$TERRAFORM_IMAGE" fmt -check -recursive -diff
+        run: docker run --rm -v "$PWD:/w" -w /w/infra "$TERRAFORM_IMAGE" fmt -check -recursive -diff
       - name: terraform init (no backend)
-        run: docker run --rm -v "$PWD/infra/aws:/tf" -w /tf "$TERRAFORM_IMAGE" init -backend=false -input=false
+        run: docker run --rm -v "$PWD:/w" -w /w/infra/aws "$TERRAFORM_IMAGE" init -backend=false -input=false
       - name: terraform validate
-        run: docker run --rm -v "$PWD/infra/aws:/tf" -w /tf "$TERRAFORM_IMAGE" validate
+        run: docker run --rm -v "$PWD:/w" -w /w/infra/aws "$TERRAFORM_IMAGE" validate
       - name: terraform test (mock providers, offline)
-        run: docker run --rm --network none -v "$PWD/infra/aws:/tf" -w /tf "$TERRAFORM_IMAGE" test
+        run: docker run --rm --network none -v "$PWD:/w" -w /w/infra/aws "$TERRAFORM_IMAGE" test
+      # A deployment besides prod is its own workspace, and terraform test runs
+      # in the selected one: tests/staging's runs, apart, as staging.
+      - name: terraform test (staging workspace)
+        run: docker run --rm --network none -e TF_WORKSPACE=staging -v "$PWD:/w" -w /w/infra/aws "$TERRAFORM_IMAGE" test -test-directory=tests/staging
 
   shellcheck:
     runs-on: ubuntu-latest
@@ -57,5 +64,7 @@ jobs:
           docker run --rm -v "$PWD:/mnt:ro" -w /mnt koalaman/shellcheck:v0.10.0 \
             deploy/run.sh \
             deploy/bin/on-deploy \
-            infra/aws/user_data.sh.tmpl \
-            apps/novaworld_server/hosted/machine/user_data.sh
+            deploy/host/converge.sh \
+            deploy/host/service-user-data.sh \
+            web/docker-entrypoint.sh \
+            apps/novaworld_server/hosted/machine/machine_user_data.sh
