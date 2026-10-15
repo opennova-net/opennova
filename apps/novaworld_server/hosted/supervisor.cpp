@@ -30,6 +30,15 @@ std::string exit_code_text(const MachineStatus &status) {
 	return status.exit_code ? std::to_string(*status.exit_code) : std::string("unknown");
 }
 
+// "1 hosted server", "3 hosted servers".
+std::string servers_text(int n) { return std::to_string(n) + " hosted server" + (n == 1 ? "" : "s"); }
+
+// Why a server past its owner's entitlement stops: the event its owner reads.
+std::string limit_detail(const billing::Entitlement &e) {
+	return std::string(e.source == "tier" ? "its owner's support tier allows " : "its owner's hosting entitlement allows ") +
+			servers_text(e.max_servers);
+}
+
 } // namespace
 
 Supervisor::Supervisor(db::ConnectionPool &pool, MachineProvider &provider, SupervisorConfig config) :
@@ -287,6 +296,25 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 		if (request_stop(db, s.id, why)) {
 			std::printf("[hosted] server %lld: provisioning -> stopping (%s)\n", static_cast<long long>(s.id),
 					why.c_str());
+		}
+		return;
+	}
+	// Its place under the owner's entitlement, read again (a tier lowered, a
+	// grant cut since the request): the owner's live servers not stopping keep
+	// their places oldest first, and one past the entitlement's servers is
+	// stopped rather than started.
+	const billing::Entitlement entitlement =
+			billing::entitlement_of(db, *s.owner_user_id, config_.wall_clock_s());
+	int rank = 0;
+	for (const HostedServer &other : live_servers_of(db, *s.owner_user_id)) {
+		if (other.id == s.id) break;
+		if (other.state != State::Stopping) ++rank;
+	}
+	if (rank >= entitlement.max_servers) {
+		const std::string limit = limit_detail(entitlement);
+		if (request_stop(db, s.id, limit)) {
+			std::printf("[hosted] server %lld: provisioning -> stopping (%s)\n", static_cast<long long>(s.id),
+					limit.c_str());
 		}
 		return;
 	}

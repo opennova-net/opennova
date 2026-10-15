@@ -188,14 +188,19 @@ bool ConsoleRoutes::log_limit(const std::string &account) {
 	return true;
 }
 
-ConsoleRoutes::Caller ConsoleRoutes::owner_caller(const WebSessionUser &user, bool write, bool rotation_edit) {
+ConsoleRoutes::Caller ConsoleRoutes::owner_caller(const WebSessionUser &user, uint64_t id, bool write,
+		bool rotation_edit) {
 	Caller c;
 	c.actor = "owner";
 	c.who = "owner '" + loggable(user.username) + "' (id=" + std::to_string(user.id) + ")";
 	try {
-		const auto server = latest_server_of(*pool_.acquire(), user.id);
-		if (!server || !is_live(server->state)) {
-			c.refusal = json_error(404, "no_live_server", "this account runs no hosted server");
+		const auto server = owned_server(*pool_.acquire(), server_id_of(id), user.id);
+		if (!server) {
+			c.refusal = json_error(404, "not_found", "this account has no hosted server with this id");
+			return c;
+		}
+		if (!is_live(server->state)) {
+			c.refusal = json_error(409, "not_live", "this hosted server has ended");
 			return c;
 		}
 		c.server_id = server->id;
@@ -557,120 +562,137 @@ crow::response ConsoleRoutes::console(const Caller &c, const crow::request &req)
 
 void ConsoleRoutes::register_owner(WebApp &app) {
 	using Work = crow::response (ConsoleRoutes::*)(const Caller &);
-	// A route with no argument: require_user, then the owner's server and a token.
-	const auto simple = [this](const crow::request &req, bool write, Work work) -> crow::response {
+	// A route with no argument but the server: require_user, then the owner's
+	// server and a token.
+	const auto simple = [this](const crow::request &req, uint64_t id, bool write, Work work) -> crow::response {
 		auto access = access_.require_user(req);
 		if (access.refusal) return std::move(*access.refusal);
-		Caller c = owner_caller(*access.user, write, false);
+		Caller c = owner_caller(*access.user, id, write, false);
 		if (c.refusal) return std::move(*c.refusal);
 		return (this->*work)(c);
 	};
-	CROW_ROUTE(app, "/api/me/server/players")
-			.methods("GET"_method)([simple](const crow::request &req) { return simple(req, false, &ConsoleRoutes::players); });
-	CROW_ROUTE(app, "/api/me/server/missions")
-			.methods("GET"_method)([simple](const crow::request &req) { return simple(req, false, &ConsoleRoutes::missions); });
-	CROW_ROUTE(app, "/api/me/server/rotation")
-			.methods("GET"_method)([simple](const crow::request &req) { return simple(req, false, &ConsoleRoutes::rotation); });
-	CROW_ROUTE(app, "/api/me/server/rotation/cycle")
-			.methods("POST"_method)([simple](const crow::request &req) { return simple(req, true, &ConsoleRoutes::rotation_cycle); });
-	CROW_ROUTE(app, "/api/me/server/chat")
-			.methods("GET"_method)([simple](const crow::request &req) { return simple(req, false, &ConsoleRoutes::chat); });
+	CROW_ROUTE(app, "/api/me/servers/<uint>/players").methods("GET"_method)([simple](const crow::request &req, uint64_t id) {
+		return simple(req, id, false, &ConsoleRoutes::players);
+	});
+	CROW_ROUTE(app, "/api/me/servers/<uint>/missions").methods("GET"_method)([simple](const crow::request &req, uint64_t id) {
+		return simple(req, id, false, &ConsoleRoutes::missions);
+	});
+	CROW_ROUTE(app, "/api/me/servers/<uint>/rotation").methods("GET"_method)([simple](const crow::request &req, uint64_t id) {
+		return simple(req, id, false, &ConsoleRoutes::rotation);
+	});
+	CROW_ROUTE(app, "/api/me/servers/<uint>/rotation/cycle")
+			.methods("POST"_method)([simple](const crow::request &req, uint64_t id) {
+				return simple(req, id, true, &ConsoleRoutes::rotation_cycle);
+			});
+	CROW_ROUTE(app, "/api/me/servers/<uint>/chat").methods("GET"_method)([simple](const crow::request &req, uint64_t id) {
+		return simple(req, id, false, &ConsoleRoutes::chat);
+	});
 
-	// POST /api/me/server/players/<slot>/punt, /ban, /swap, /kill.
-	const auto player = [this](const crow::request &req, uint64_t slot, ConsoleVerb verb) -> crow::response {
+	// POST /api/me/servers/<id>/players/<slot>/punt, /ban, /swap, /kill.
+	const auto player = [this](const crow::request &req, uint64_t id, uint64_t slot, ConsoleVerb verb) -> crow::response {
 		auto access = access_.require_user(req);
 		if (access.refusal) return std::move(*access.refusal);
 		ConsoleRefusal why;
 		const auto command = console_player_command(verb, slot, why);
 		if (!command) return refused(why);
-		Caller c = owner_caller(*access.user, true, false);
+		Caller c = owner_caller(*access.user, id, true, false);
 		if (c.refusal) return std::move(*c.refusal);
 		return player_action(c, *command, slot);
 	};
-	CROW_ROUTE(app, "/api/me/server/players/<uint>/punt").methods("POST"_method)([player](const crow::request &req, uint64_t slot) {
-		return player(req, slot, ConsoleVerb::PlayerPunt);
-	});
-	CROW_ROUTE(app, "/api/me/server/players/<uint>/ban").methods("POST"_method)([player](const crow::request &req, uint64_t slot) {
-		return player(req, slot, ConsoleVerb::PlayerBan);
-	});
-	CROW_ROUTE(app, "/api/me/server/players/<uint>/swap").methods("POST"_method)([player](const crow::request &req, uint64_t slot) {
-		return player(req, slot, ConsoleVerb::PlayerSwapTeam);
-	});
-	CROW_ROUTE(app, "/api/me/server/players/<uint>/kill").methods("POST"_method)([player](const crow::request &req, uint64_t slot) {
-		return player(req, slot, ConsoleVerb::PlayerKill);
-	});
+	CROW_ROUTE(app, "/api/me/servers/<uint>/players/<uint>/punt")
+			.methods("POST"_method)([player](const crow::request &req, uint64_t id, uint64_t slot) {
+				return player(req, id, slot, ConsoleVerb::PlayerPunt);
+			});
+	CROW_ROUTE(app, "/api/me/servers/<uint>/players/<uint>/ban")
+			.methods("POST"_method)([player](const crow::request &req, uint64_t id, uint64_t slot) {
+				return player(req, id, slot, ConsoleVerb::PlayerBan);
+			});
+	CROW_ROUTE(app, "/api/me/servers/<uint>/players/<uint>/swap")
+			.methods("POST"_method)([player](const crow::request &req, uint64_t id, uint64_t slot) {
+				return player(req, id, slot, ConsoleVerb::PlayerSwapTeam);
+			});
+	CROW_ROUTE(app, "/api/me/servers/<uint>/players/<uint>/kill")
+			.methods("POST"_method)([player](const crow::request &req, uint64_t id, uint64_t slot) {
+				return player(req, id, slot, ConsoleVerb::PlayerKill);
+			});
 
-	// POST /api/me/server/rotation/<index>/remove and /next.
-	const auto entry = [this](const crow::request &req, uint64_t index, ConsoleVerb verb) -> crow::response {
+	// POST /api/me/servers/<id>/rotation/<index>/remove and /next.
+	const auto entry = [this](const crow::request &req, uint64_t id, uint64_t index, ConsoleVerb verb) -> crow::response {
 		auto access = access_.require_user(req);
 		if (access.refusal) return std::move(*access.refusal);
 		ConsoleRefusal why;
 		const auto command = console_rotation_command(verb, index, why);
 		if (!command) return refused(why);
-		Caller c = owner_caller(*access.user, true, true);
+		Caller c = owner_caller(*access.user, id, true, true);
 		if (c.refusal) return std::move(*c.refusal);
 		return rotation_entry(c, *command, index);
 	};
-	CROW_ROUTE(app, "/api/me/server/rotation/<uint>/remove").methods("POST"_method)([entry](const crow::request &req, uint64_t index) {
-		return entry(req, index, ConsoleVerb::MissionRemove);
-	});
-	CROW_ROUTE(app, "/api/me/server/rotation/<uint>/next").methods("POST"_method)([entry](const crow::request &req, uint64_t index) {
-		return entry(req, index, ConsoleVerb::MissionSetNext);
-	});
+	CROW_ROUTE(app, "/api/me/servers/<uint>/rotation/<uint>/remove")
+			.methods("POST"_method)([entry](const crow::request &req, uint64_t id, uint64_t index) {
+				return entry(req, id, index, ConsoleVerb::MissionRemove);
+			});
+	CROW_ROUTE(app, "/api/me/servers/<uint>/rotation/<uint>/next")
+			.methods("POST"_method)([entry](const crow::request &req, uint64_t id, uint64_t index) {
+				return entry(req, id, index, ConsoleVerb::MissionSetNext);
+			});
 
-	// POST /api/me/server/rotation — {"mission": "<file>.bms", "swap_sides": false}.
-	CROW_ROUTE(app, "/api/me/server/rotation").methods("POST"_method)([this](const crow::request &req) -> crow::response {
-		auto access = access_.require_user(req);
-		if (access.refusal) return std::move(*access.refusal);
-		auto body = JsonBody::parse(req.body);
-		if (!body) return json_error(400, "invalid_json");
-		const auto mission = body->text("mission");
-		const bool swap_sides = body->flag("swap_sides").value_or(false);
-		if (body->wrong_type()) return json_error(400, "invalid_field");
-		if (!mission) return json_error(400, "missing_field", "\"mission\" (a .bms file name) is required");
-		ConsoleRefusal why;
-		const auto command = console_mission_add(*mission, swap_sides, why);
-		if (!command) return refused(why);
-		Caller c = owner_caller(*access.user, true, true);
-		if (c.refusal) return std::move(*c.refusal);
-		return rotation_add(c, *command, *mission);
-	});
+	// POST /api/me/servers/<id>/rotation — {"mission": "<file>.bms", "swap_sides": false}.
+	CROW_ROUTE(app, "/api/me/servers/<uint>/rotation")
+			.methods("POST"_method)([this](const crow::request &req, uint64_t id) -> crow::response {
+				auto access = access_.require_user(req);
+				if (access.refusal) return std::move(*access.refusal);
+				auto body = JsonBody::parse(req.body);
+				if (!body) return json_error(400, "invalid_json");
+				const auto mission = body->text("mission");
+				const bool swap_sides = body->flag("swap_sides").value_or(false);
+				if (body->wrong_type()) return json_error(400, "invalid_field");
+				if (!mission) return json_error(400, "missing_field", "\"mission\" (a .bms file name) is required");
+				ConsoleRefusal why;
+				const auto command = console_mission_add(*mission, swap_sides, why);
+				if (!command) return refused(why);
+				Caller c = owner_caller(*access.user, id, true, true);
+				if (c.refusal) return std::move(*c.refusal);
+				return rotation_add(c, *command, *mission);
+			});
 
-	// POST /api/me/server/chat — {"text": "..."}.
-	CROW_ROUTE(app, "/api/me/server/chat").methods("POST"_method)([this](const crow::request &req) -> crow::response {
-		auto access = access_.require_user(req);
-		if (access.refusal) return std::move(*access.refusal);
-		auto body = JsonBody::parse(req.body);
-		if (!body) return json_error(400, "invalid_json");
-		const auto text = body->text("text");
-		if (body->wrong_type()) return json_error(400, "invalid_field");
-		if (!text) return json_error(400, "missing_field", "\"text\" is required");
-		ConsoleRefusal why;
-		const auto command = console_chat_send(*text, why);
-		if (!command) return refused(why);
-		Caller c = owner_caller(*access.user, true, false);
-		if (c.refusal) return std::move(*c.refusal);
-		return chat_send(c, *command);
-	});
+	// POST /api/me/servers/<id>/chat — {"text": "..."}.
+	CROW_ROUTE(app, "/api/me/servers/<uint>/chat")
+			.methods("POST"_method)([this](const crow::request &req, uint64_t id) -> crow::response {
+				auto access = access_.require_user(req);
+				if (access.refusal) return std::move(*access.refusal);
+				auto body = JsonBody::parse(req.body);
+				if (!body) return json_error(400, "invalid_json");
+				const auto text = body->text("text");
+				if (body->wrong_type()) return json_error(400, "invalid_field");
+				if (!text) return json_error(400, "missing_field", "\"text\" is required");
+				ConsoleRefusal why;
+				const auto command = console_chat_send(*text, why);
+				if (!command) return refused(why);
+				Caller c = owner_caller(*access.user, id, true, false);
+				if (c.refusal) return std::move(*c.refusal);
+				return chat_send(c, *command);
+			});
 
-	// GET /api/me/server/console — the account's newest server's console, in any
-	// state (a stopped or failed one's last lines included).
-	CROW_ROUTE(app, "/api/me/server/console").methods("GET"_method)([this](const crow::request &req) -> crow::response {
-		auto access = access_.require_user(req);
-		if (access.refusal) return std::move(*access.refusal);
-		Caller c;
-		try {
-			const auto server = latest_server_of(*pool_.acquire(), access.user->id);
-			if (!server) return json_error(404, "no_server", "this account has no hosted server");
-			c.server_id = server->id;
-		} catch (const db::Error &e) {
-			std::fprintf(stderr, "[http] hosted console lookup failed: %s\n", e.what());
-			return json_error(500, "db_error");
-		}
-		if (const int64_t wait = owner_reads_.take("console|" + std::to_string(access.user->id), RateLimiter::Clock::now()))
-			return too_many_requests(wait);
-		return console(c, req);
-	});
+	// GET /api/me/servers/<id>/console — one of the account's servers' console,
+	// in any state (a stopped or failed one's last lines included).
+	CROW_ROUTE(app, "/api/me/servers/<uint>/console")
+			.methods("GET"_method)([this](const crow::request &req, uint64_t id) -> crow::response {
+				auto access = access_.require_user(req);
+				if (access.refusal) return std::move(*access.refusal);
+				Caller c;
+				try {
+					const auto server = owned_server(*pool_.acquire(), server_id_of(id), access.user->id);
+					if (!server) return json_error(404, "not_found", "this account has no hosted server with this id");
+					c.server_id = server->id;
+				} catch (const db::Error &e) {
+					std::fprintf(stderr, "[http] hosted console lookup failed: %s\n", e.what());
+					return json_error(500, "db_error");
+				}
+				if (const int64_t wait = owner_reads_.take("console|" + std::to_string(access.user->id),
+							RateLimiter::Clock::now()))
+					return too_many_requests(wait);
+				return console(c, req);
+			});
 }
 
 void ConsoleRoutes::register_admin(WebApp &app) {

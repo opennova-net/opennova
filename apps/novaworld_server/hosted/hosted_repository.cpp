@@ -24,7 +24,7 @@ constexpr const char *kServerColumns =
 		"id, owner_user_id, service_user_id, state, game_name, max_players, game_password, "
 		"time_limit, kill_limit, max_score, respawn, start_delay, team_ff, expansion, missions, "
 		"provider, machine_id, machine_address, admin_port, restarts, "
-		"failure_reason, created_at, updated_at, running_at, ended_at, game";
+		"failure_reason, created_at, updated_at, running_at, ended_at, game, own_machine";
 
 BindValue optional_id(std::optional<int64_t> id) {
 	if (!id) return BindValue(std::monostate{});
@@ -60,7 +60,12 @@ HostedServer row_to_server(const db::Row &r) {
 	s.running_at = r.as_text(23).value_or("");
 	s.ended_at = r.as_text(24).value_or("");
 	st.game = r.as_text(25).value_or("");
+	s.own_machine = r.as_int(26).value_or(0) != 0;
 	return s;
+}
+
+int count_of(const std::vector<db::Row> &rows) {
+	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
 }
 
 std::vector<HostedServer> query_servers(
@@ -94,8 +99,8 @@ std::optional<State> state_from_name(std::string_view name) {
 
 bool is_live(State state) { return state != State::Stopped && state != State::Failed; }
 
-RequestResult request_server(db::Database &db, int64_t owner_user_id,
-		const HostedSettings &settings, const std::vector<DataSet> &offered, int cap, int64_t now) {
+RequestResult request_server(db::Database &db, int64_t owner_user_id, const HostedSettings &settings,
+		const std::vector<DataSet> &offered, int cap, int64_t now, bool own_machine) {
 	RequestResult out;
 	if (check_settings(settings, offered)) {
 		out.outcome = RequestOutcome::InvalidSettings;
@@ -123,12 +128,14 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id,
 		out.outcome = RequestOutcome::PastDue;
 		return out;
 	}
-	const auto live = db.query(std::string("SELECT id FROM hosted_servers WHERE owner_user_id = $1 AND ") +
-					kLiveSql + " LIMIT 1;",
-			{ BindValue(owner_user_id) });
-	if (!live.empty()) {
-		out.outcome = RequestOutcome::AlreadyLive;
-		out.id = live.front().as_int(0).value_or(0);
+	out.max_servers = entitlement.max_servers;
+	out.used = count_live_of(db, owner_user_id);
+	if (out.used >= entitlement.max_servers) {
+		out.outcome = RequestOutcome::AtLimit;
+		return out;
+	}
+	if (own_machine && count_own_live_of(db, owner_user_id) >= entitlement.own_machines) {
+		out.outcome = RequestOutcome::NoOwnMachine;
 		return out;
 	}
 	if (count_live(db) >= cap) {
@@ -138,8 +145,8 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id,
 	const auto inserted = db.query(
 			"INSERT INTO hosted_servers (owner_user_id, state, game, game_name, max_players, "
 			"game_password, time_limit, kill_limit, max_score, respawn, start_delay, team_ff, "
-			"expansion, missions) "
-			"VALUES ($1, 'requested', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) "
+			"expansion, missions, own_machine) "
+			"VALUES ($1, 'requested', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) "
 			"RETURNING id;",
 			{ BindValue(owner_user_id), BindValue(settings.game), BindValue(settings.game_name),
 					BindValue(static_cast<int64_t>(settings.max_players)),
@@ -150,7 +157,8 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id,
 					BindValue(static_cast<int64_t>(settings.respawn)),
 					BindValue(static_cast<int64_t>(settings.start_delay)),
 					BindValue(db::Bool{ settings.team_ff }),
-					BindValue(settings.expansion), BindValue(join_missions(settings.missions)) });
+					BindValue(settings.expansion), BindValue(join_missions(settings.missions)),
+					BindValue(db::Bool{ own_machine }) });
 	out.id = inserted.front().as_int(0).value_or(0);
 	insert_event(db, out.id, "", state_name(State::Requested), "requested by its owner");
 	tx.commit();
@@ -176,12 +184,38 @@ std::optional<HostedServer> find_server(db::Database &db, int64_t id) {
 	return std::move(rows.front());
 }
 
-std::optional<HostedServer> latest_server_of(db::Database &db, int64_t owner_user_id) {
-	auto rows = query_servers(db,
-			std::string("WHERE owner_user_id = $1 ORDER BY (") + kLiveSql + ") DESC, id DESC LIMIT 1;",
-			{ BindValue(owner_user_id) });
+std::optional<HostedServer> owned_server(db::Database &db, int64_t id, int64_t owner_user_id) {
+	auto rows = query_servers(db, "WHERE id = $1 AND owner_user_id = $2 LIMIT 1;",
+			{ BindValue(id), BindValue(owner_user_id) });
 	if (rows.empty()) return std::nullopt;
 	return std::move(rows.front());
+}
+
+std::vector<HostedServer> live_servers_of(db::Database &db, int64_t owner_user_id) {
+	return query_servers(db, std::string("WHERE owner_user_id = $1 AND ") + kLiveSql + " ORDER BY id;",
+			{ BindValue(owner_user_id) });
+}
+
+std::vector<HostedServer> list_servers_of(db::Database &db, int64_t owner_user_id, size_t ended_limit) {
+	std::vector<HostedServer> out = live_servers_of(db, owner_user_id);
+	for (HostedServer &s : query_servers(db,
+				 std::string("WHERE owner_user_id = $1 AND NOT (") + kLiveSql + ") ORDER BY id DESC LIMIT $2;",
+				 { BindValue(owner_user_id), BindValue(static_cast<int64_t>(ended_limit)) }))
+		out.push_back(std::move(s));
+	return out;
+}
+
+int count_live_of(db::Database &db, int64_t owner_user_id) {
+	return count_of(db.query(
+			std::string("SELECT COUNT(*) FROM hosted_servers WHERE owner_user_id = $1 AND ") + kLiveSql + ";",
+			{ BindValue(owner_user_id) }));
+}
+
+int count_own_live_of(db::Database &db, int64_t owner_user_id) {
+	return count_of(db.query(std::string("SELECT COUNT(*) FROM hosted_servers WHERE owner_user_id = $1 "
+										 "AND own_machine AND ") +
+					kLiveSql + ";",
+			{ BindValue(owner_user_id) }));
 }
 
 std::vector<HostedServer> list_live(db::Database &db) {

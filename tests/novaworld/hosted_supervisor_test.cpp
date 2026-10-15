@@ -698,7 +698,7 @@ int test_requests() {
 	TEST_EXPECT(hosted::request_server(db, subscriber, settings, offered, 3, kWall + 33 * 24 * 60 * 60).outcome ==
 			hosted::RequestOutcome::NotEntitled);
 
-	// One live server per account.
+	// As many live servers as the entitlement grants, a stopping one counted.
 	const int64_t a = make_player(db, "req_a", 1);
 	hosted::HostedSettings unchecked = settings;
 	unchecked.missions.clear();
@@ -706,19 +706,9 @@ int test_requests() {
 	const auto first = request(a, settings, offered, 3);
 	TEST_EXPECT(first.outcome == hosted::RequestOutcome::Created && first.id > 0);
 	const auto second = request(a, settings, offered, 3);
-	TEST_EXPECT(second.outcome == hosted::RequestOutcome::AlreadyLive && second.id == first.id);
-	// The index holds it too, whatever writes the row.
-	bool refused = false;
-	try {
-		db.exec("INSERT INTO hosted_servers (owner_user_id, game_name, max_players, time_limit, "
-				"kill_limit, max_score, respawn, start_delay, missions) "
-				"VALUES ($1, 'x', 8, 1, 1, 1, 0, 0, 'm.bms');",
-				{ BindValue(a) });
-	} catch (const opennova::db::Error &) {
-		refused = true;
-	}
-	TEST_EXPECT(refused);
+	TEST_EXPECT(second.outcome == hosted::RequestOutcome::AtLimit && second.max_servers == 1 && second.used == 1);
 	TEST_EXPECT(transitions(db, first.id) == std::vector<std::string>{ ">requested" });
+	TEST_EXPECT(hosted::count_live_of(db, a) == 1 && hosted::count_own_live_of(db, a) == 0);
 	const auto row = hosted::find_server(db, first.id);
 	TEST_EXPECT(row && row->state == State::Requested && row->owner_user_id == a);
 	TEST_EXPECT(row->settings.missions == settings.missions && row->settings.game_name == settings.game_name);
@@ -729,7 +719,7 @@ int test_requests() {
 	const std::vector<hosted::DataSet> jo_only = { offered[0] };
 	const int64_t e = make_player(db, "req_e", 1);
 	TEST_EXPECT(request(e, dfx2, jo_only, 3).outcome == hosted::RequestOutcome::InvalidSettings);
-	TEST_EXPECT(!hosted::latest_server_of(db, e));
+	TEST_EXPECT(hosted::list_servers_of(db, e).empty());
 
 	// The cap counts every live server.
 	const int64_t b = make_player(db, "req_b", 1);
@@ -744,8 +734,54 @@ int test_requests() {
 	TEST_EXPECT(hosted::transition(db, third.id, State::Requested, State::Failed, "test"));
 	TEST_EXPECT(request(d, settings, offered, 3).outcome == hosted::RequestOutcome::Created);
 	TEST_EXPECT(request(c, settings, offered, 4).outcome == hosted::RequestOutcome::Created);
-	TEST_EXPECT(hosted::latest_server_of(db, c)->state == State::Requested);
+	const auto of_c = hosted::list_servers_of(db, c);
+	TEST_EXPECT(of_c.size() == 2 && of_c[0].state == State::Requested && of_c[1].id == third.id);
 	TEST_EXPECT(hosted::list_servers(db, 10).size() == 5);
+	// An owner's server by id, and another's not.
+	TEST_EXPECT(hosted::owned_server(db, first.id, a) && !hosted::owned_server(db, first.id, c));
+
+	// A grant of two: two live, the third at the limit; the own-machine add-on
+	// counted apart, a tier needed for it (a comp grant buys no machine).
+	const int64_t g = make_player(db, "req_g", 2);
+	const int big_cap = 100;
+	TEST_EXPECT(request(g, settings, offered, big_cap).outcome == hosted::RequestOutcome::Created);
+	TEST_EXPECT(hosted::request_server(db, g, settings, offered, big_cap, kWall, /*own_machine=*/true).outcome ==
+			hosted::RequestOutcome::NoOwnMachine);
+	TEST_EXPECT(request(g, settings, offered, big_cap).outcome == hosted::RequestOutcome::Created);
+	const auto at_limit = request(g, settings, offered, big_cap);
+	TEST_EXPECT(at_limit.outcome == hosted::RequestOutcome::AtLimit && at_limit.max_servers == 2 &&
+			at_limit.used == 2);
+	// A stopping server still counts.
+	const auto g_live = hosted::live_servers_of(db, g);
+	TEST_EXPECT(g_live.size() == 2 && g_live[0].id < g_live[1].id);
+	TEST_EXPECT(hosted::request_stop(db, g_live[0].id, "test"));
+	TEST_EXPECT(request(g, settings, offered, big_cap).outcome == hosted::RequestOutcome::AtLimit);
+	// A tier with one own machine: one server on it, the second refused.
+	const int64_t m = make_player(db, "req_m", 0);
+	subscribe(db, m, 2, "active", "sub_req_m");
+	{
+		namespace billing = opennova::novaworld_server::billing;
+		billing::SubscriptionRow machine;
+		machine.stripe_subscription_id = "sub_req_m_machine";
+		machine.stripe_customer_id = "cus_sub_req_m";
+		machine.user_id = m;
+		machine.status = "active";
+		machine.item = billing::ItemKind::OwnMachine;
+		machine.price_id = "price_own";
+		machine.current_period_end = kWall + 30 * 24 * 60 * 60;
+		billing::upsert_subscription(db, machine);
+	}
+	const auto own = hosted::request_server(db, m, settings, offered, big_cap, kWall, true);
+	TEST_EXPECT(own.outcome == hosted::RequestOutcome::Created && hosted::find_server(db, own.id)->own_machine);
+	TEST_EXPECT(hosted::request_server(db, m, settings, offered, big_cap, kWall, true).outcome ==
+			hosted::RequestOutcome::NoOwnMachine);
+	TEST_EXPECT(request(m, settings, offered, big_cap).outcome == hosted::RequestOutcome::Created);
+	TEST_EXPECT(hosted::count_live_of(db, m) == 2 && hosted::count_own_live_of(db, m) == 1);
+	for (const int64_t owner : { g, m }) {
+		for (const auto &s : hosted::live_servers_of(db, owner)) hosted::request_stop(db, s.id, "test");
+		db.exec("UPDATE hosted_servers SET state = 'stopped' WHERE owner_user_id = $1 AND state = 'stopping';",
+				{ BindValue(owner) });
+	}
 
 	// The kill switch asks every live server's stop, once.
 	TEST_EXPECT(hosted::request_stop_all(db, "kill switch") == 4);
@@ -1200,6 +1236,29 @@ int test_owner_changes() {
 	TEST_EXPECT(nws::get_user_by_id(*rig.pool.acquire(), service)->credentials_gen == generation);
 	rig.tick();
 	TEST_EXPECT(rig.state(crashed) == State::Stopped);
+	return 0;
+}
+
+// A server past its owner's entitlement when it is about to start is stopped
+// rather than started: a grant of two, two requests picked up, the grant cut to
+// one before the launches; the older launches, the newer (past the grant in id
+// order) stops before any machine.
+int test_limit_at_provisioning() {
+	Rig rig("hosted_limit_provisioning");
+	const int64_t owner = make_player(*rig.pool.acquire(), "limit_owner", 2);
+	TEST_EXPECT(owner > 0);
+	const int64_t older = rig.request_as(owner);
+	const int64_t newer = rig.request_as(owner);
+	TEST_EXPECT(older > 0 && newer > older);
+	rig.tick(); // both -> provisioning
+	TEST_EXPECT(rig.state(older) == State::Provisioning && rig.state(newer) == State::Provisioning);
+	TEST_EXPECT(nws::set_comp_servers(*rig.pool.acquire(), owner, 1).ok);
+	rig.tick();
+	TEST_EXPECT(rig.state(older) == State::Booting && rig.state(newer) == State::Stopping);
+	TEST_EXPECT(contains(last_detail(*rig.pool.acquire(), newer), "hosting entitlement allows 1 hosted server"));
+	TEST_EXPECT(rig.fake.launches == 1);
+	rig.tick();
+	TEST_EXPECT(rig.state(newer) == State::Stopped && rig.state(older) == State::Booting);
 	return 0;
 }
 
@@ -1727,6 +1786,7 @@ int main(int argc, char **argv) {
 		{ "restart_window", test_restart_window },
 		{ "timeouts_and_health", test_timeouts_and_health },
 		{ "owner_changes", test_owner_changes },
+		{ "limit_at_provisioning", test_limit_at_provisioning },
 		{ "reconciliation", test_reconciliation },
 		{ "reconcile_provisioning_gone", test_reconcile_provisioning_gone },
 		{ "unlisted_provider", test_unlisted_provider },

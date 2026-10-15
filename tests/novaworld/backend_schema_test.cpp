@@ -107,7 +107,8 @@ int test_migrations_create_expected_tables() {
 								"WHERE table_schema = 'public' AND data_type = 'boolean' ORDER BY 1;");
 	const std::vector<std::string> expected_flags = {
 		"billing_customers.livemode", "billing_events.livemode", "billing_subscriptions.cancel_at_period_end",
-		"billing_subscriptions.livemode", "hosted_servers.team_ff", "server_status.maintenance_enabled",
+		"billing_subscriptions.livemode", "hosted_servers.own_machine", "hosted_servers.team_ff",
+		"server_status.maintenance_enabled",
 	};
 	TEST_EXPECT(flags.size() == expected_flags.size());
 	for (size_t i = 0; i < flags.size() && i < expected_flags.size(); ++i)
@@ -634,7 +635,9 @@ int test_cd_keys_fresh() {
 }
 
 // A hosted server's game: a row that names none lists under Joint Operations'
-// lobby, one that names its own keeps it, and the column takes no NULL.
+// lobby, one that names its own keeps it, and the column takes no NULL; a row
+// is on a shared machine unless it says otherwise, and an owner may have
+// several live (its hosting entitlement, not the schema, bounds them).
 int test_hosted_server_game() {
 	TestDatabase scratch;
 	Database db = scratch.open();
@@ -643,9 +646,9 @@ int test_hosted_server_game() {
 	db.exec("INSERT INTO hosted_servers (owner_user_id, state, game_name, max_players, time_limit, kill_limit, "
 	        "max_score, respawn, start_delay, missions) "
 	        "SELECT id, 'stopped', 'Default', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players WHERE username = 'host_game';");
-	const auto rows = db.query("SELECT game, team_ff FROM hosted_servers WHERE game_name = 'Default';");
+	const auto rows = db.query("SELECT game, team_ff, own_machine FROM hosted_servers WHERE game_name = 'Default';");
 	TEST_EXPECT(rows.size() == 1 && rows[0].as_text(0).value() == "jop_2_consumer");
-	TEST_EXPECT(rows[0].as_int(1) == 0);
+	TEST_EXPECT(rows[0].as_int(1) == 0 && rows[0].as_int(2) == 0);
 	db.exec("INSERT INTO hosted_servers (owner_user_id, state, game, game_name, max_players, time_limit, "
 	        "kill_limit, max_score, respawn, start_delay, missions) "
 	        "SELECT id, 'stopped', 'dfx2_consumer', 'Own', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players "
@@ -653,10 +656,10 @@ int test_hosted_server_game() {
 	const auto own = db.query("SELECT game FROM hosted_servers WHERE game_name = 'Own';");
 	TEST_EXPECT(own.size() == 1 && own[0].as_text(0).value() == "dfx2_consumer");
 	TEST_EXPECT(refused(db, "UPDATE hosted_servers SET game = NULL WHERE game_name = 'Own';"));
-	// One live server per owner (idx_hosted_servers_one_live): a second live
-	// one is refused, any number of ended ones are not.
 	db.exec("UPDATE hosted_servers SET state = 'running' WHERE game_name = 'Own';");
-	TEST_EXPECT(refused(db, "UPDATE hosted_servers SET state = 'running' WHERE game_name = 'Default';"));
+	db.exec("UPDATE hosted_servers SET state = 'running', own_machine = true WHERE game_name = 'Default';");
+	TEST_EXPECT(db.query("SELECT 1 FROM hosted_servers WHERE state = 'running';").size() == 2);
+	TEST_EXPECT(!has_index(db, "hosted_servers", "idx_hosted_servers_one_live"));
 	return 0;
 }
 

@@ -121,14 +121,20 @@ void put_account(crow::json::wvalue &out, const char *key, db::Database &db, std
 	out[key] = std::move(account);
 }
 
-// A hosted server for its owner (GET /api/me/server, the start and stop
-// replies) or, with `admin`, for the fleet view: its owner, its service account
-// and its machine besides. Never its admin password.
+// A path's server id; 0 (no server's) past int64.
+int64_t server_id_of(uint64_t id) {
+	return id <= static_cast<uint64_t>(INT64_MAX) ? static_cast<int64_t>(id) : 0;
+}
+
+// A hosted server for its owner (GET /api/me/servers and /api/me/servers/<id>,
+// the start and stop replies) or, with `admin`, for the fleet view: its owner,
+// its service account and its machine besides. Never its admin password.
 crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool admin) {
 	crow::json::wvalue e;
 	e["id"] = s.id;
 	e["state"] = state_name(s.state);
 	e["live"] = is_live(s.state);
+	e["own_machine"] = s.own_machine;
 	e["settings"] = settings_json(s.settings);
 	// The names the site shows for its game and expansion: the catalog's, so an
 	// ended server's read the same once its data set is no longer offered.
@@ -187,11 +193,14 @@ void HostedRoutes::configure(const ServerConfig &config) {
 }
 
 void HostedRoutes::register_routes(WebApp &app) {
-	CROW_ROUTE(app, "/api/me/server")([this](const crow::request &req) { return me_server(req); });
-	CROW_ROUTE(app, "/api/me/server/start")
+	CROW_ROUTE(app, "/api/me/servers")
+			.methods("GET"_method)([this](const crow::request &req) { return me_servers(req); });
+	CROW_ROUTE(app, "/api/me/servers")
 			.methods("POST"_method)([this](const crow::request &req) { return me_start(req); });
-	CROW_ROUTE(app, "/api/me/server/stop")
-			.methods("POST"_method)([this](const crow::request &req) { return me_stop(req); });
+	CROW_ROUTE(app, "/api/me/servers/<uint>")
+			.methods("GET"_method)([this](const crow::request &req, uint64_t id) { return me_server(req, id); });
+	CROW_ROUTE(app, "/api/me/servers/<uint>/stop")
+			.methods("POST"_method)([this](const crow::request &req, uint64_t id) { return me_stop(req, id); });
 	CROW_ROUTE(app, "/api/admin/hosted")
 			.methods("GET"_method)([this](const crow::request &req) { return admin_fleet(req); });
 	CROW_ROUTE(app, "/api/admin/hosted/stop-all")
@@ -202,33 +211,39 @@ void HostedRoutes::register_routes(WebApp &app) {
 			});
 }
 
-// GET /api/me/server — the logged-in account's hosted server: {"enabled" (this
-// service runs hosted servers), "entitlement" (its hosting entitlement:
-// {max_servers, can_start, source}, billing/entitlement.h),
-// "data_sets" (the games a start may name, in the site's order: {game,
-// display_name, expansions [{code, name}], default_missions (the rotation a
-// start on it takes when it names none, and the missions the site's rotation
-// picker offers), limits {max_players, time_limit, kill_limit, max_score,
-// respawn, start_delay: {min, max}}}), "server"}, the server its live one,
-// else its newest ended one, else null: {id, state, live, settings,
-// game_display_name, expansion_display_name, restarts, failure_reason,
-// created_at, updated_at, running_at, ended_at (UTC, null until set), listing
-// ({rid, server_name, mission_name, players, max_players, host_ip, host_port}
-// while listed, else null) and events, its newest kEventsShown transitions
-// oldest first ({from, to, detail, at}; the request's own has from "")}. 401
-// with no live session.
-crow::response HostedRoutes::me_server(const crow::request &req) {
+// GET /api/me/servers — the logged-in account's hosted servers: {"enabled" (this
+// service runs hosted servers), "full" (every place under ONNET_HOSTED_CAP is
+// taken: a start now would be refused at_capacity), "entitlement" (its hosting
+// entitlement, billing/entitlement.h: {max_servers, used (its live servers, a
+// stopping one included), own_machines, own_used (those of them on own
+// machines), can_start, source ("none", "tier" or "comp")}), "data_sets" (the
+// games a start may name, in the site's order: {game, display_name, expansions
+// [{code, name}], default_missions (the rotation a start on it takes when it
+// names none, and the missions the site's rotation picker offers), limits
+// {max_players, time_limit, kill_limit, max_score, respawn, start_delay: {min,
+// max}}}), "servers"}: its live servers by id, oldest first, then its newest
+// kEndedShown ended ones, newest first, each {id, state, live, own_machine,
+// settings, game_display_name, expansion_display_name, restarts,
+// failure_reason, created_at, updated_at, running_at, ended_at (UTC, null until
+// set), listing ({rid, server_name, mission_name, players, max_players,
+// host_ip, host_port} while listed, else null)}, without its events. 401 with no
+// live session.
+crow::response HostedRoutes::me_servers(const crow::request &req) {
 	auto access = access_.require_user(req);
 	if (access.refusal) return std::move(*access.refusal);
+	const int64_t owner = access.user->id;
 	crow::json::wvalue out;
 	try {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
 		out["enabled"] = enabled_;
-		const billing::Entitlement entitlement =
-				billing::entitlement_of(*db_conn, access.user->id, billing::unix_now());
+		out["full"] = enabled_ && count_live(*db_conn) >= cap_;
+		const billing::Entitlement entitlement = billing::entitlement_of(*db_conn, owner, billing::unix_now());
 		crow::json::wvalue granted;
 		granted["max_servers"] = entitlement.max_servers;
+		granted["used"] = count_live_of(*db_conn, owner);
+		granted["own_machines"] = entitlement.own_machines;
+		granted["own_used"] = count_own_live_of(*db_conn, owner);
 		granted["can_start"] = entitlement.can_start;
 		granted["source"] = entitlement.source;
 		out["entitlement"] = std::move(granted);
@@ -237,24 +252,12 @@ crow::response HostedRoutes::me_server(const crow::request &req) {
 			for (const DataSet &d : data_sets_) sets.push_back(data_set_json(d));
 		}
 		out["data_sets"] = std::move(sets);
-		if (const auto server = latest_server_of(*db_conn, access.user->id)) {
-			crow::json::wvalue e = server_json(*db_conn, *server, false);
-			std::vector<crow::json::wvalue> events;
-			for (const HostedEvent &ev : list_events(*db_conn, server->id, kEventsShown)) {
-				crow::json::wvalue j;
-				j["from"] = ev.from_state;
-				j["to"] = ev.to_state;
-				j["detail"] = ev.detail;
-				j["at"] = ev.at;
-				events.push_back(std::move(j));
-			}
-			e["events"] = std::move(events);
-			out["server"] = std::move(e);
-		} else {
-			out["server"] = nullptr;
-		}
+		std::vector<crow::json::wvalue> servers;
+		for (const HostedServer &s : list_servers_of(*db_conn, owner, kEndedShown))
+			servers.push_back(server_json(*db_conn, s, false));
+		out["servers"] = std::move(servers);
 	} catch (const db::Error &e) {
-		std::fprintf(stderr, "[http] GET /api/me/server failed: %s\n", e.what());
+		std::fprintf(stderr, "[http] GET /api/me/servers failed: %s\n", e.what());
 		return json_error(500, "db_error");
 	}
 	crow::response res = json_reply(200, out);
@@ -262,22 +265,60 @@ crow::response HostedRoutes::me_server(const crow::request &req) {
 	return res;
 }
 
-// POST /api/me/server/start — the account's hosted server, started with the
+// GET /api/me/servers/<id> — one of the account's servers, in any state:
+// {"server"}, as the list's with "events", its newest kEventsShown transitions
+// oldest first ({from, to, detail, at}; the request's own has from ""). 404
+// not_found for an id that is not the account's (another account's included).
+crow::response HostedRoutes::me_server(const crow::request &req, uint64_t id) {
+	auto access = access_.require_user(req);
+	if (access.refusal) return std::move(*access.refusal);
+	crow::json::wvalue out;
+	try {
+		auto db_conn = pool_.acquire();
+		db::ReadSnapshot snapshot(*db_conn);
+		const auto server = owned_server(*db_conn, server_id_of(id), access.user->id);
+		if (!server) return json_error(404, "not_found", "this account has no hosted server with this id");
+		crow::json::wvalue e = server_json(*db_conn, *server, false);
+		std::vector<crow::json::wvalue> events;
+		for (const HostedEvent &ev : list_events(*db_conn, server->id, kEventsShown)) {
+			crow::json::wvalue j;
+			j["from"] = ev.from_state;
+			j["to"] = ev.to_state;
+			j["detail"] = ev.detail;
+			j["at"] = ev.at;
+			events.push_back(std::move(j));
+		}
+		e["events"] = std::move(events);
+		out["server"] = std::move(e);
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[http] GET /api/me/servers/%llu failed: %s\n", static_cast<unsigned long long>(id),
+				e.what());
+		return json_error(500, "db_error");
+	}
+	crow::response res = json_reply(200, out);
+	res.set_header("Cache-Control", "no-store");
+	return res;
+}
+
+// POST /api/me/servers — a new hosted server of the account's, started with the
 // body's settings: {"game" (an offered data set; absent: the first),
 // "game_name" (required), "max_players", "game_password", "time_limit",
 // "kill_limit", "max_score", "respawn", "start_delay" (integers), "team_ff"
 // (true/false), "expansion" ("" or one of the game's), "missions" (a list of
 // .bms names, the first the starting map; absent: the game's default
-// rotation)}, each absent one its default. In order: require_user (401, 403 without the CSRF
-// header), 503 hosting_disabled when this service runs none, one token from the
+// rotation), "own_machine" (true: on one of the machines the account's
+// own-machine add-on pays for; absent: false, a shared machine)}, each absent
+// one its default. In order: require_user (401, 403 without the CSRF header),
+// 503 hosting_disabled when this service runs none, one token from the
 // account's kStartStopPerUser bucket (429), 400 invalid_json / invalid_field (a
 // mistyped field), 400 invalid_settings with the refused "field" and why
-// (hosted_settings.h check_settings), then the request: 403 not_entitled for
-// an account not active or with no hosting entitlement, 403 payment_past_due
-// while its support tier's payment is past due, 409 already_live with its
-// "server_id" when it has a live server, 409 at_capacity when
-// ONNET_HOSTED_CAP servers are live; 202 {"server"} (state requested) once
-// written. The supervisor takes it from there.
+// (hosted_settings.h check_settings), then the request: 403 not_entitled for an
+// account not active or with no hosting entitlement, 403 payment_past_due while
+// its support tier's payment is past due, 409 server_limit with "max_servers"
+// and "used" when every server it may run is live (a stopping one counts), 409
+// no_own_machine when each own machine it pays for already runs one, 409
+// at_capacity when ONNET_HOSTED_CAP servers are live; 202 {"server"} (state
+// requested) once written. The supervisor takes it from there.
 crow::response HostedRoutes::me_start(const crow::request &req) {
 	auto access = access_.require_user(req);
 	if (access.refusal) return std::move(*access.refusal);
@@ -310,6 +351,7 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	number("start_delay", settings.start_delay);
 	if (auto v = body->flag("team_ff")) settings.team_ff = *v;
 	if (auto v = body->text_list("missions")) settings.missions = *v;
+	const bool own_machine = body->flag("own_machine").value_or(false);
 	if (body->wrong_type()) return json_error(400, "invalid_field");
 	if (const auto refused = check_settings(settings, data_sets_)) {
 		crow::json::wvalue out;
@@ -321,11 +363,12 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	}
 	try {
 		auto db_conn = pool_.acquire();
-		const RequestResult result =
-				request_server(*db_conn, user.id, settings, data_sets_, cap_, billing::unix_now());
+		const RequestResult result = request_server(
+				*db_conn, user.id, settings, data_sets_, cap_, billing::unix_now(), own_machine);
 		switch (result.outcome) {
 			case RequestOutcome::Created:
-				log_owner(user, "start", "server " + std::to_string(result.id) + " requested");
+				log_owner(user, "start",
+						"server " + std::to_string(result.id) + " requested" + (own_machine ? " (own machine)" : ""));
 				return server_reply(202, *db_conn, result.id, false);
 			case RequestOutcome::InvalidSettings:
 				// check_settings passed above, and request_server runs the same
@@ -342,29 +385,36 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 				log_owner(user, "start", "payment_past_due");
 				return json_error(403, "payment_past_due",
 						"the support tier's payment is past due: running servers keep running, none starts");
-			case RequestOutcome::AlreadyLive: {
-				log_owner(user, "start", "already_live");
+			case RequestOutcome::AtLimit: {
+				log_owner(user, "start", "server_limit (" + std::to_string(result.used) + " of " +
+								std::to_string(result.max_servers) + ")");
 				crow::json::wvalue out;
-				out["error"] = "already_live";
-				out["message"] = "this account's hosted server is running; stop it first";
-				out["server_id"] = result.id;
+				out["error"] = "server_limit";
+				out["message"] = "every hosted server this account may run is live; stop one first";
+				out["max_servers"] = result.max_servers;
+				out["used"] = result.used;
 				return json_reply(409, out);
 			}
+			case RequestOutcome::NoOwnMachine:
+				log_owner(user, "start", "no_own_machine");
+				return json_error(409, "no_own_machine", "each own machine this account pays for runs a server");
 			case RequestOutcome::AtCapacity:
 				log_owner(user, "start", "at_capacity");
 				return json_error(409, "at_capacity", "every hosted server place is taken; try again later");
 		}
 	} catch (const db::Error &e) {
-		std::fprintf(stderr, "[http] POST /api/me/server/start failed: %s\n", e.what());
+		std::fprintf(stderr, "[http] POST /api/me/servers failed: %s\n", e.what());
 	}
 	return json_error(500, "db_error");
 }
 
-// POST /api/me/server/stop — the account's live hosted server goes to stopping
-// (the supervisor then asks it to stop and ends its machine). require_user
-// (401, 403 without the CSRF header), the start's bucket (429), 404
-// no_live_server, else 202 {"server"} (a server already stopping included).
-crow::response HostedRoutes::me_stop(const crow::request &req) {
+// POST /api/me/servers/<id>/stop — one of the account's live servers goes to
+// stopping (the supervisor then asks it to stop and ends its machine).
+// require_user (401, 403 without the CSRF header), the start's bucket (429),
+// 404 not_found for an id that is not the account's, 409 not_live for one that
+// has ended, else 202 {"server"} (a server already stopping included, and one
+// the supervisor finished in between, stopped).
+crow::response HostedRoutes::me_stop(const crow::request &req, uint64_t id) {
 	auto access = access_.require_user(req);
 	if (access.refusal) return std::move(*access.refusal);
 	const WebSessionUser &user = *access.user;
@@ -375,23 +425,28 @@ crow::response HostedRoutes::me_stop(const crow::request &req) {
 	}
 	try {
 		auto db_conn = pool_.acquire();
-		const auto server = latest_server_of(*db_conn, user.id);
-		if (!server || !is_live(server->state)) {
-			log_owner(user, "stop", "no_live_server");
-			return json_error(404, "no_live_server", "this account runs no hosted server");
+		const auto server = owned_server(*db_conn, server_id_of(id), user.id);
+		if (!server) {
+			log_owner(user, "stop", "not_found");
+			return json_error(404, "not_found", "this account has no hosted server with this id");
+		}
+		if (!is_live(server->state)) {
+			log_owner(user, "stop", "server " + std::to_string(server->id) + " not_live");
+			return json_error(409, "not_live", "this hosted server has ended");
 		}
 		const bool asked = request_stop(*db_conn, server->id, "stopped by its owner");
 		log_owner(user, "stop", "server " + std::to_string(server->id) + (asked ? " stopping" : " already stopping"));
 		return server_reply(202, *db_conn, server->id, false);
 	} catch (const db::Error &e) {
-		std::fprintf(stderr, "[http] POST /api/me/server/stop failed: %s\n", e.what());
+		std::fprintf(stderr, "[http] POST /api/me/servers/%llu/stop failed: %s\n",
+				static_cast<unsigned long long>(id), e.what());
 		return json_error(500, "db_error");
 	}
 }
 
 // GET /api/admin/hosted — the fleet: {"enabled", "provider", "cap", "live" (how
 // many are live), "servers"}, the newest kFleetShown, live ones first, each as
-// GET /api/me/server's plus "owner" and "service_account" ({id, username} or
+// GET /api/me/servers' plus "owner" and "service_account" ({id, username} or
 // null), "provider", "machine_id", "machine_address" and "admin_port".
 crow::response HostedRoutes::admin_fleet(const crow::request &req) {
 	auto caller = access_.require_admin(req);
@@ -440,7 +495,7 @@ crow::response HostedRoutes::admin_stop(const crow::request &req, uint64_t id) {
 	if (caller.refusal) return std::move(*caller.refusal);
 	try {
 		auto db_conn = pool_.acquire();
-		const int64_t server_id = id <= static_cast<uint64_t>(INT64_MAX) ? static_cast<int64_t>(id) : 0;
+		const int64_t server_id = server_id_of(id);
 		const auto server = find_server(*db_conn, server_id);
 		if (!server) return json_error(404, "not_found", "no hosted server has this id");
 		if (!is_live(server->state)) return json_error(409, "not_live", "this hosted server has ended");

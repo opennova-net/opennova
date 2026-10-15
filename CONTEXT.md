@@ -471,13 +471,31 @@ its reader; `opennova-serve` reads it (`engine/runtime/inmatch/host_file.h`).
 _Avoid_: server config, server.cfg, dedicated.cfg
 
 **Hosted server**:
-An `opennova-serve` that an approved account starts from the NovaWorld site (ADR 0053):
-one per account, each on a **machine** of its own, running the published
-`opennova-serve` image over the **data set** its owner picks. It lists on our NovaWorld under a
-service account of its own, and its owner administers it from the site, through the
-service only. It stays up until its owner stops it.
+An `opennova-serve` that an account starts from the NovaWorld site (ADR 0053): as many
+live at once as the account's **hosting entitlement** allows, each on a **machine**,
+running the published `opennova-serve` image over the **data set** its owner picks. It
+lists on our NovaWorld under a service account of its own, and its owner administers it
+from the site, by its id, through the service only. It stays up until its owner stops it
+(or the entitlement no longer covers it).
 _Avoid_ (for this product only; the words keep their meanings elsewhere): hosted host,
 game host, instance, dedicated server
+
+**Support tier**:
+The monthly Stripe subscription that supports the project and sets an account's
+**hosting entitlement**: tier 1, 2 or 3, one, two or three **hosted servers**
+(`apps/novaworld_server/billing/`). Its prices come from the service's configuration,
+never from code. The own-machine add-on is a subscription of its own beside it.
+_Avoid_: plan, package, premium, donation, membership
+
+**Hosting entitlement**:
+How many **hosted servers** an account may have live at once: the larger of its
+**support tier**'s servers and an admin's comp grant (`players.comp_servers`, 0..16),
+plus how many of them may run on an own machine (the add-on's quantity, while a tier
+grants). Only an active player's account has one; a support tier whose payment is past
+due keeps the servers but starts no new one. Read from the service's cache of Stripe,
+whether or not billing is configured (`billing/entitlement.h`).
+_Avoid_: quota, allowance (in code; the site's meter may say "N of M servers used"), approval
+(the retired admin flag)
 
 **Machine**:
 The virtual machine a **hosted server** runs on, one per server (an EC2 instance,

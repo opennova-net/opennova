@@ -6,7 +6,7 @@
 // 2's. Built only with BUILD_NOVAWORLD_HTTP.
 //
 //   * the owner, granted a server (players.comp_servers), starts a Joint Operations server
-//     with POST /api/me/server/start, which runs over that data set's folder
+//     with POST /api/me/servers, which runs over that data set's folder
 //     with /game jo;
 //   * the supervisor mints its service account srv-<id>, renders its working
 //     directory and launches opennova-serve there, which logs in as that
@@ -20,7 +20,7 @@
 //     the server's remote-admin port with the rendered svc login, runs PLAYER
 //     LIST and a recorded CHAT SEND, and the console ring holds
 //     the session's line, the command and its reply, never the password;
-//   * POST /api/me/server/stop: the supervisor pushes ServerStopHosting, the
+//   * POST /api/me/servers/<id>/stop: the supervisor pushes ServerStopHosting, the
 //     listing leaves the browser, the process is gone, the row is stopped and
 //     the service account deleted; the admin link went down at stopping (QUIT,
 //     the console's closing line);
@@ -290,13 +290,13 @@ int main(int argc, char **argv) {
 		// The start.
 		int64_t id = 0;
 		if (!session.empty()) {
-			const auto reply = send(service, "POST", "/api/me/server/start", as_owner(session, true),
+			const auto reply = send(service, "POST", "/api/me/servers", as_owner(session, true),
 					"{\"game\":\"jop_2_consumer\",\"game_name\":\"Hosted E2E\",\"max_players\":8,"
 					"\"missions\":[\"servetst.bms\"]}");
 			const auto json = crow::json::load(body_text(reply));
 			if (reply.code != 202) std::fprintf(stderr, "  start: %d %s\n", reply.code, body_text(reply).c_str());
 			const auto started = reply.code == 202 ? integer_at(json, { "server", "id" }) : std::nullopt;
-			expect(reply.transport_ok && started.has_value(), "POST /api/me/server/start is accepted");
+			expect(reply.transport_ok && started.has_value(), "POST /api/me/servers is accepted");
 			id = started.value_or(0);
 		}
 
@@ -330,11 +330,11 @@ int main(int argc, char **argv) {
 					"opennova-serve runs over Joint Operations' folder with /game jo");
 
 			// The owner's view: the listing, as its hosted server's.
-			auto reply = send(service, "GET", "/api/me/server", as_owner(session, false));
+			auto reply = send(service, "GET", "/api/me/servers/" + std::to_string(id), as_owner(session, false));
 			auto json = crow::json::load(body_text(reply));
 			const auto listed_rid = integer_at(json, { "server", "listing", "rid" });
-			if (!listed_rid) std::fprintf(stderr, "  /api/me/server: %s\n", body_text(reply).c_str());
-			expect(listed_rid.has_value(), "GET /api/me/server names the listing");
+			if (!listed_rid) std::fprintf(stderr, "  /api/me/servers/<id>: %s\n", body_text(reply).c_str());
+			expect(listed_rid.has_value(), "GET /api/me/servers/<id> names the listing");
 			const uint32_t rid = static_cast<uint32_t>(listed_rid.value_or(0));
 			reply = send(service, "GET", "/api/me/hosts", as_owner(session, false));
 			json = crow::json::load(body_text(reply));
@@ -404,12 +404,12 @@ int main(int argc, char **argv) {
 			link.reset();
 
 			// The stop.
-			reply = send(service, "POST", "/api/me/server/stop", as_owner(session, true));
+			reply = send(service, "POST", "/api/me/servers/" + std::to_string(id) + "/stop", as_owner(session, true));
 			json = crow::json::load(body_text(reply));
 			const std::string stop_state = text_at(json, { "server", "state" });
 			if (reply.code != 202) std::fprintf(stderr, "  stop: %d %s\n", reply.code, body_text(reply).c_str());
 			expect(reply.code == 202 && (stop_state == "stopping" || stop_state == "stopped"),
-					"POST /api/me/server/stop is accepted");
+					"POST /api/me/servers/<id>/stop is accepted");
 			const bool stopped = wait_for([&] {
 				const auto r = server_row(service, id);
 				return r && !hosted::is_live(r->state);
@@ -475,12 +475,12 @@ int main(int argc, char **argv) {
 		expect(!up || !second.empty(), "the second owner logs in to the site");
 		int64_t dfx2_id = 0;
 		if (!second.empty()) {
-			const auto reply = send(service, "POST", "/api/me/server/start", as_owner(second, true),
+			const auto reply = send(service, "POST", "/api/me/servers", as_owner(second, true),
 					"{\"game\":\"dfx2_consumer\",\"game_name\":\"Hosted E2E DFX2\",\"max_players\":8}");
 			if (reply.code != 202) std::fprintf(stderr, "  dfx2 start: %d %s\n", reply.code, body_text(reply).c_str());
 			dfx2_id = reply.code == 202 ? integer_at(crow::json::load(body_text(reply)), { "server", "id" }).value_or(0)
 										: 0;
-			expect(dfx2_id != 0, "POST /api/me/server/start is accepted for Delta Force Xtreme 2");
+			expect(dfx2_id != 0, "POST /api/me/servers is accepted for Delta Force Xtreme 2");
 		}
 		if (dfx2_id != 0) {
 			const bool dfx2_running = wait_for([&] {
@@ -498,13 +498,13 @@ int main(int argc, char **argv) {
 				expect(has_pair(command, "--resource-dir", fs::absolute(dfx2_data).u8string()) &&
 								has_pair(command, "/game", "dfx2"),
 						"opennova-serve runs over Delta Force Xtreme 2's folder with /game dfx2");
-				const auto reply = send(service, "GET", "/api/me/server", as_owner(second, false));
+				const auto reply = send(service, "GET", "/api/me/servers/" + std::to_string(dfx2_id), as_owner(second, false));
 				const auto json = crow::json::load(body_text(reply));
 				expect(text_at(json, { "server", "settings", "game" }) == "dfx2_consumer" &&
 								text_at(json, { "server", "game_display_name" }) == "Delta Force Xtreme 2",
-						"GET /api/me/server names the game");
+						"GET /api/me/servers/<id> names the game");
 			}
-			const auto reply = send(service, "POST", "/api/me/server/stop", as_owner(second, true));
+			const auto reply = send(service, "POST", "/api/me/servers/" + std::to_string(dfx2_id) + "/stop", as_owner(second, true));
 			expect(reply.code == 202, "the second owner's stop is accepted");
 			const bool stopped = wait_for([&] {
 				const auto r = server_row(service, dfx2_id);

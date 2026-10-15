@@ -279,9 +279,11 @@ CREATE INDEX idx_host_keys_claimed_rid ON host_keys(claimed_rid);
 -- are columns the backend range-checked (hosted_settings.h); the supervisor
 -- renders the server's files from them and never takes a file from the owner.
 -- game is the slug of the games row the server lists under (its data set,
--- hosted/data_sets.h). An owner has at most one live server (any state but
--- stopped and failed), held by idx_hosted_servers_one_live; the global cap
--- (ONNET_HOSTED_CAP) is counted in the transaction that inserts a request.
+-- hosted/data_sets.h). An owner has as many live servers (any state but
+-- stopped and failed) as its hosting entitlement allows, and own_machine marks
+-- one that runs on a machine of its own (the own-machine add-on); those counts
+-- and the global cap (ONNET_HOSTED_CAP) are taken in the transaction that
+-- inserts a request (hosted::request_server), which holds the writer lock.
 -- admin_user / admin_password are the remote-admin login the rendered
 -- admin.cfg grants the service alone (a new one at every start). machine_id
 -- is the MachineProvider's handle for the machine (provider names which one).
@@ -319,10 +321,9 @@ CREATE TABLE hosted_servers (
     updated_at      timestamptz NOT NULL DEFAULT now(),
     running_at      timestamptz,
     ended_at        timestamptz,
-    game            text NOT NULL DEFAULT 'jop_2_consumer'
+    game            text NOT NULL DEFAULT 'jop_2_consumer',
+    own_machine     boolean NOT NULL DEFAULT false
 );
-CREATE UNIQUE INDEX idx_hosted_servers_one_live ON hosted_servers(owner_user_id)
-    WHERE state NOT IN ('stopped', 'failed');
 CREATE INDEX idx_hosted_servers_owner ON hosted_servers(owner_user_id);
 CREATE INDEX idx_hosted_servers_state ON hosted_servers(state);
 CREATE INDEX idx_hosted_servers_service_user ON hosted_servers(service_user_id);

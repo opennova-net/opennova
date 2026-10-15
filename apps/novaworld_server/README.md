@@ -377,10 +377,10 @@ statements to a listed server" above).
 
 ## Hosted servers
 
-An account with a hosting entitlement can have the service run one `opennova-serve` for
-it, on a machine of its own, until it stops it (ADR 0053, proposed; `hosted/`; the
-`hosted_servers` and `hosted_server_events` tables). Each server runs one data set its
-owner picks. Everything here is service policy.
+An account with a hosting entitlement can have the service run as many `opennova-serve`
+servers for it as the entitlement allows, each on a machine, until it stops them (ADR
+0053, proposed; `hosted/`; the `hosted_servers` and `hosted_server_events` tables). Each
+server runs one data set its owner picks. Everything here is service policy.
 
 - **The hosting entitlement** (`billing/entitlement.*`): how many hosted servers an account
   may have live, the larger of its support tier's servers (a monthly Stripe subscription:
@@ -392,7 +392,10 @@ owner picks. Everything here is service policy.
   subscription grants while Stripe calls it `active`, `trialing` or `past_due`, and only
   until 48 h past its period's end (a sync that stopped for good fails closed); `past_due`
   (Stripe still retries the card) keeps the account's servers running but starts no new
-  one. Every other status grants nothing.
+  one. Every other status grants nothing. The own-machine add-on (a subscription of its
+  own, its quantity the machines it pays for) lets that many of the account's servers run
+  on a machine of their own (`hosted_servers.own_machine`), and counts only while a tier
+  also grants (a comp grant buys no machine).
 
 - **Data sets** (`hosted/data_sets.*`). A data set is a game folder a machine mounts, the
   title `opennova-serve` speaks over it (`/game <code>`, a `gameprofile` row) and the
@@ -414,11 +417,17 @@ owner picks. Everything here is service policy.
   file), the machine
   (`provider`, `machine_id`, `machine_address`), the remote-admin login rendered for the
   service, the restarts used and why it failed. `hosted_server_events` keeps every
-  transition with what caused it. An owner has at most one live server (any state but
-  `stopped` and `failed`, a partial unique index), and at most `ONNET_HOSTED_CAP` servers
-  are live at once; a request checks the account's hosting entitlement (none past due),
-  its live server and the cap in the transaction that writes it
-  (`hosted::request_server`).
+  transition with what caused it. An owner has as many live servers (any state but
+  `stopped` and `failed`; a stopping one counts until it has stopped) as its hosting
+  entitlement allows, as many of those on own machines as its add-on pays for, and at
+  most `ONNET_HOSTED_CAP` servers are live at once; a request checks the entitlement
+  (some servers, none past due), the account's live servers against it, its own-machine
+  servers against the add-on and the cap in the transaction that writes it
+  (`hosted::request_server`), which holds the writer lock, so no two starts both pass a
+  count. When a server is about to start (`provisioning`, before its credentials are
+  minted) its place is read again: its owner's live servers that are not stopping keep
+  their places oldest first, and one past the entitlement is stopped instead
+  (`its owner's support tier allows N hosted servers`).
 - **The supervisor** (`hosted/supervisor.*`) is a thread of its own, started once the gate
   has its port; each pass (every second) leases a pooled connection and walks every live
   row: `requested` → `provisioning` (the service account, a new admin password, the
@@ -682,21 +691,21 @@ service's own message, never database text.
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/me/server` | a website session | `{"enabled", "entitlement", "data_sets", "server"}`: `enabled` is a provider with at least one data set; `entitlement` the account's hosting entitlement (`max_servers`, `can_start`, `source`: `none`, `tier` or `comp`); `data_sets` the ones it offers, in order (empty when hosting is off), each `game`, `display_name`, `expansions` (`code` and `name`, the base game's `""` first), `default_missions` (its `missions`: the rotation a start on it takes when it names none and the missions the site's rotation picker offers) and `limits` (`max_players`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, each `min` and `max`); `server` is the account's live server, else its newest ended one, else null: `id`, `state`, `live`, `settings` (`game`, `game_name`, `max_players`, `game_password`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, `team_ff`, `expansion`, `missions`), `game_display_name` and `expansion_display_name` (the catalog's names, so an ended server's read the same once its data set is gone), `restarts`, `failure_reason`, `created_at`, `updated_at`, `running_at`, `ended_at` (UTC, null until set), `listing` (`rid`, `server_name`, `mission_name`, `players`, `max_players`, `host_ip`, `host_port` while listed, else null) and `events` (the newest 50 transitions, oldest first: `from`, `to`, `detail`, `at`); `Cache-Control: no-store` |
-| `POST /api/me/server/start` | a website session, the CSRF header | the settings as JSON (`game_name` required; `game` defaults to the first offered data set and `missions` to that data set's; every other field to its default). 503 `hosting_disabled` with no provider; 429 past the account's bucket (6, then one every 20 s, shared with the stop); 400 `invalid_json`, `invalid_field`, or `invalid_settings` with the `field` and why; 403 `not_entitled` with no hosting entitlement (or an account not active), 403 `payment_past_due` while the support tier's payment is past due; 409 `already_live` (with `server_id`) or `at_capacity`; 202 `{"server"}`, `requested` |
-| `POST /api/me/server/stop` | a website session, the CSRF header | 404 `no_live_server`; 202 `{"server"}`, `stopping` (also when it already was), or `stopped` when the supervisor finished it in between |
+| `GET /api/me/servers` | a website session | `{"enabled", "full", "entitlement", "data_sets", "servers"}`: `enabled` is a provider with at least one data set; `full` that `ONNET_HOSTED_CAP` servers are live (a start now is `at_capacity`); `entitlement` the account's hosting entitlement (`max_servers`, `used`: its live servers, a stopping one included, `own_machines`, `own_used`: those of them on own machines, `can_start`, `source`: `none`, `tier` or `comp`); `data_sets` the ones it offers, in order (empty when hosting is off), each `game`, `display_name`, `expansions` (`code` and `name`, the base game's `""` first), `default_missions` (its `missions`: the rotation a start on it takes when it names none and the missions the site's rotation picker offers) and `limits` (`max_players`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, each `min` and `max`); `servers` its live servers by id, oldest first, then its newest 10 ended ones, newest first, each `id`, `state`, `live`, `own_machine`, `settings` (`game`, `game_name`, `max_players`, `game_password`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, `team_ff`, `expansion`, `missions`), `game_display_name` and `expansion_display_name` (the catalog's names, so an ended server's read the same once its data set is gone), `restarts`, `failure_reason`, `created_at`, `updated_at`, `running_at`, `ended_at` (UTC, null until set) and `listing` (`rid`, `server_name`, `mission_name`, `players`, `max_players`, `host_ip`, `host_port` while listed, else null); `Cache-Control: no-store` |
+| `GET /api/me/servers/<id>` | a website session | `{"server"}`, one of the account's servers in any state, as the list's plus `events` (the newest 50 transitions, oldest first: `from`, `to`, `detail`, `at`); 404 `not_found` for an id that is not the account's (another account's server is a 404, never a 403); `Cache-Control: no-store` |
+| `POST /api/me/servers` | a website session, the CSRF header | the settings as JSON (`game_name` required; `game` defaults to the first offered data set and `missions` to that data set's; every other field to its default) and `own_machine` (`true` to run it on an own machine; default `false`, a shared one). 503 `hosting_disabled` with no provider; 429 past the account's bucket (6, then one every 20 s, shared with the stop); 400 `invalid_json`, `invalid_field`, or `invalid_settings` with the `field` and why; 403 `not_entitled` with no hosting entitlement (or an account not active), 403 `payment_past_due` while a granting subscription's payment is past due; 409 `server_limit` with `max_servers` and `used` beside the code when every server the account may run is live, 409 `no_own_machine` when each own machine it pays for already runs one, 409 `at_capacity`; 202 `{"server"}`, `requested` |
+| `POST /api/me/servers/<id>/stop` | a website session, the CSRF header | 429 past the bucket; 404 `not_found` for an id that is not the account's; 409 `not_live` once it has ended; 202 `{"server"}`, `stopping` (also when it already was), or `stopped` when the supervisor finished it in between |
 | `PUT /api/admin/users/<id>/comp-servers` | admin | `{"comp_servers": 0..16}`, the admin's grant; 200 `{"user"}` (which carries `comp_servers` and `max_servers`, the entitlement); 400 `invalid_json`, `invalid_field` (no whole number in 0..16) or `missing_field`; 404 for an unknown id or a service account. An entitlement down to no server stops the account's hosted server, as a ban does |
 | `GET /api/admin/hosted` | admin | the fleet: `{"enabled", "provider", "cap", "live", "servers"}`, the newest 100, live first, each as above plus `owner` and `service_account` (`{id, username}` or null), `provider`, `machine_id`, `machine_address` and `admin_port`. Never the admin password |
 | `POST /api/admin/hosted/<id>/stop` | admin | 404 `not_found`, 409 `not_live`, else 202 `{"server"}` |
 | `POST /api/admin/hosted/stop-all` | admin | the kill switch: every live server to `stopping`; 200 `{"stopping": <how many>}` |
 
 **The console routes** (`hosted/console_routes.*`) run the curated commands on a hosted
-server's admin link. The owner's act on the caller's own live server, which its session
-resolves (no route names a server, so no owner reaches another's); the admin's take the
-id. In order: the session (401; 403 without the CSRF header on a `POST`, an admin
+server's admin link. The owner's act on one of the caller's own servers by its id
+(`/api/me/servers/<id>/...`; another account's id answers as no server's does); the
+admin's take any server's id. In order: the session (401; 403 without the CSRF header on a `POST`, an admin
 session's too) or the admin check; the arguments (400, before anything is read or sent);
-the server (the owner's: 404 `no_live_server`; the admin's: 404 `not_found`, 409
-`not_live`), running (409 `server_stopping` while it stops, 409 `server_not_running` before
+the server (404 `not_found`, 409 `not_live`), running (409 `server_stopping` while it stops, 409 `server_not_running` before
 it runs) with its link up (503 `admin_unavailable`); the admission (below: 429
 `console_busy`, 503 `console_full`, 409 `rotation_busy`, each with `Retry-After`); for an
 owner, a token from the account's read bucket (30, then two a second) or, for a command
@@ -726,23 +735,23 @@ pages, the `.gsb` feeds and the logins:
   `rotation_busy`, and two removes can never both pass the last-map check.
 
 `GET .../console` reads the database alone and is not admitted. The site serializes its
-console calls per page: the My servers page and the admin's hosted page each send every
+console calls per page: a server's console page, the owner's and the admin's, sends every
 admitted call (their polls and their commands; the console log's read is not admitted, so
 it runs beside them) through one queue (`web/src/utils/consoleQueue.ts`), a command ahead
 of the waiting polls, so a page never meets its own `console_busy`.
 
 | Route (owner; the admin's: `/api/admin/hosted/<id>/...`) | Command | Replies |
 | --- | --- | --- |
-| `GET /api/me/server/players` | `PLAYER LIST` | `{"server_id", "players"}`: `slot`, `name`, `team`, `class`, `kills`, `deaths`, `ping` (the server's own slot-0 row left out); 409 `not_in_game`; any other `ERROR` reply 502 `admin_error` |
-| `POST /api/me/server/players/<slot>/punt`, `/ban`, `/swap`, `/kill` | `PLAYER PUNT` / `BAN` / `SWAPTEAM` / `KILL <slot>` | `{"server_id", "slot", "result"}` (`punted`, `banned` with `listed`: the PCID listed, a NovaWorld host's, `swapped`, `killed`); 400 `invalid_slot` (1..255), 404 `player_not_found`, 409 `no_pcid` or `not_connected` (a ban) |
-| `GET /api/me/server/missions` | `MISSION AVAILABLE` | `{"server_id", "missions"}`: `index`, `file`, `title` |
-| `GET /api/me/server/rotation` | `MISSION LIST` (and `GET GAMESTATE` when it lists none) | `{"server_id", "rotation"}`: `index`, `file`, `swap_sides`, `flipped`, `one_shot`, `current`, `next`; 409 `not_in_game` between matches (retail lists nothing there) |
-| `POST /api/me/server/rotation` | `MISSION LIST` (and `GET GAMESTATE` when it lists none), then `MISSION ADD <file> <0\|1>` | body `{"mission": "<file>.bms", "swap_sides": false}`, appended; `{"result": "added"}`; 400 `invalid_mission`, `missing_field`, `invalid_field`; 404 `mission_not_found`; 409 `rotation_full` (32 maps, the start settings' cap: policy, not a server limit), `not_in_game` (retail answers an add OK between matches and appends nothing) |
-| `POST /api/me/server/rotation/<index>/remove`, `/next` | `MISSION LIST` (and `GET GAMESTATE` when it lists none), then `MISSION REMOVE` / `SETNEXT <index>` | `{"result": "removed"}` / `"next_set"`; 400 `invalid_index` (0..31); 404 `no_such_entry` (the server answers OK for any index, so the rotation is read first); 409 `last_mission` (the last map stays: an empty rotation ends the session at the round's end), `not_in_game` |
-| `POST /api/me/server/rotation/cycle` | `MISSION CYCLE` | `{"result": "cycling"}`: the round ends now and the next map loads; 409 `not_in_game` |
-| `GET /api/me/server/chat` | `CHAT GET` | `{"server_id", "lines"}`, the server's chat window oldest first |
-| `POST /api/me/server/chat` | `CHAT SEND <text>` | body `{"text"}`: cp1252 text, no control character, not blank, at most 59 characters (all a server chat line keeps); `{"result": "sent"}` (a repeat within about 20 s is dropped by the server's flood control, and the server answers OK all the same); 400 `invalid_text` |
-| `GET /api/me/server/console` | none | the console ring of the account's newest server (any state): `{"server_id", "link", "lines"}`, `link` its link's `state`, `game_state`, `last_poll_at`, `up_since` and `error` (null with none), `lines` the newest `limit` (200; at most 500) with an id past `after` (0), oldest first: `id`, `kind`, `actor`, `text`, `at`; 404 `no_server` |
+| `GET /api/me/servers/<id>/players` | `PLAYER LIST` | `{"server_id", "players"}`: `slot`, `name`, `team`, `class`, `kills`, `deaths`, `ping` (the server's own slot-0 row left out); 409 `not_in_game`; any other `ERROR` reply 502 `admin_error` |
+| `POST /api/me/servers/<id>/players/<slot>/punt`, `/ban`, `/swap`, `/kill` | `PLAYER PUNT` / `BAN` / `SWAPTEAM` / `KILL <slot>` | `{"server_id", "slot", "result"}` (`punted`, `banned` with `listed`: the PCID listed, a NovaWorld host's, `swapped`, `killed`); 400 `invalid_slot` (1..255), 404 `player_not_found`, 409 `no_pcid` or `not_connected` (a ban) |
+| `GET /api/me/servers/<id>/missions` | `MISSION AVAILABLE` | `{"server_id", "missions"}`: `index`, `file`, `title` |
+| `GET /api/me/servers/<id>/rotation` | `MISSION LIST` (and `GET GAMESTATE` when it lists none) | `{"server_id", "rotation"}`: `index`, `file`, `swap_sides`, `flipped`, `one_shot`, `current`, `next`; 409 `not_in_game` between matches (retail lists nothing there) |
+| `POST /api/me/servers/<id>/rotation` | `MISSION LIST` (and `GET GAMESTATE` when it lists none), then `MISSION ADD <file> <0\|1>` | body `{"mission": "<file>.bms", "swap_sides": false}`, appended; `{"result": "added"}`; 400 `invalid_mission`, `missing_field`, `invalid_field`; 404 `mission_not_found`; 409 `rotation_full` (32 maps, the start settings' cap: policy, not a server limit), `not_in_game` (retail answers an add OK between matches and appends nothing) |
+| `POST /api/me/servers/<id>/rotation/<index>/remove`, `/next` | `MISSION LIST` (and `GET GAMESTATE` when it lists none), then `MISSION REMOVE` / `SETNEXT <index>` | `{"result": "removed"}` / `"next_set"`; 400 `invalid_index` (0..31); 404 `no_such_entry` (the server answers OK for any index, so the rotation is read first); 409 `last_mission` (the last map stays: an empty rotation ends the session at the round's end), `not_in_game` |
+| `POST /api/me/servers/<id>/rotation/cycle` | `MISSION CYCLE` | `{"result": "cycling"}`: the round ends now and the next map loads; 409 `not_in_game` |
+| `GET /api/me/servers/<id>/chat` | `CHAT GET` | `{"server_id", "lines"}`, the server's chat window oldest first |
+| `POST /api/me/servers/<id>/chat` | `CHAT SEND <text>` | body `{"text"}`: cp1252 text, no control character, not blank, at most 59 characters (all a server chat line keeps); `{"result": "sent"}` (a repeat within about 20 s is dropped by the server's flood control, and the server answers OK all the same); 400 `invalid_text` |
+| `GET /api/me/servers/<id>/console` | none | the server's console ring, in any state (an ended server's last lines included): `{"server_id", "link", "lines"}`, `link` its link's `state`, `game_state`, `last_poll_at`, `up_since` and `error` (null with none), `lines` the newest `limit` (200; at most 500) with an id past `after` (0), oldest first: `id`, `kind`, `actor`, `text`, `at`; 404 `not_found` |
 | `GET /api/admin/hosted/<id>/settings` (admin only) | `GET GAMESETTINGS` | `{"server_id", "settings"}`: `key`, `value`, in the server's order (the game and side passwords among them) |
 
 **The console's commands are a curated list (policy, ADR 0053 d9;
@@ -1145,7 +1154,9 @@ orderly stop); `child_process`
 ([`tests/proc/child_process_test.cpp`](../../tests/proc/child_process_test.cpp),
 every build) the child-process seam against itself; the route harness's
 `hosted_server_routes` and `hosted_listing_owner` cases the routes' refusals, the comp grant,
-cap and stops and the owner rule against a hand-driven host listing as a service account,
+the starts up to the entitlement (`server_limit` past it, a stopping server counting), the
+own-machine add-on, another account's id answering 404, the list's order, the cap and the
+stops, and the owner rule against a hand-driven host listing as a service account,
 and its `hosted_console_routes` case the console routes over a real admin link to a
 scripted remote-admin server on loopback (the session, CSRF and owner refusals, every
 command and its reply, the arguments refused before a byte is sent, the rotation's

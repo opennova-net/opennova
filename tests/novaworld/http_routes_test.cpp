@@ -25,6 +25,7 @@
 #include <net/title/title_identity.h>
 #include <base/gameprofile/gameprofile.h>
 #include "auth.h"
+#include "billing/billing_repository.h"
 #include "billing/entitlement.h"
 #include "health.h"
 #include "hosted/admin_link.h"
@@ -4228,70 +4229,90 @@ void end_stopping_servers(Harness &h) {
 }
 
 // The hosted servers' routes (hosted/hosted_routes.h; the harness listener runs
-// them with ONNET_HOSTED_PROVIDER set, a cap of 2 and two offered data sets,
+// them with ONNET_HOSTED_PROVIDER set, a cap of 4 and two offered data sets,
 // Joint Operations' with the default rotation "default.bms" and Delta Force
 // Xtreme 2's with its own, and no supervisor, so rows stay where the routes
 // put them): the session and CSRF refusals, the data sets the owner's view
-// lists, the comp grant (PUT /api/admin/users/<id>/comp-servers, admin only), the
-// settings' refusals (the game among them), the start (on the first data set
-// when it names none, and on Delta Force Xtreme 2's with its rotation), one
-// live server per account, the default rotation, the cap, the owner's stop,
-// the fleet view and the admin's stops (admin only, never the admin
-// password), and a listener with hosting off.
+// lists, the comp grant (PUT /api/admin/users/<id>/comp-servers, admin only),
+// the settings' refusals (the game among them), the starts (on the first data
+// set when it names none, and on Delta Force Xtreme 2's with its rotation) up
+// to the account's hosting entitlement (server_limit with its counts past it,
+// a stopping server counting), the cap and `full`, another account's id
+// answering 404, the owner's stop by id (409 not_live once ended), the
+// own-machine add-on (no_own_machine without one), the list's order (the live
+// servers, then the newest 10 ended), the fleet view and the admin's stops
+// (admin only, never the admin password), and a listener with hosting off.
 int test_hosted_server_routes(Harness &h) {
 	namespace hosted = opennova::novaworld_server::hosted;
-	const int64_t ana = make_account(h, "hosted_ana", "pw-hosted-ana");
-	const int64_t ben = make_account(h, "hosted_ben", "pw-hosted-ben");
-	const int64_t cy = make_account(h, "hosted_cy", "pw-hosted-cy");
-	const int64_t dee = make_account(h, "hosted_dee", "pw-hosted-dee");
-	TEST_EXPECT(ana > 0 && ben > 0 && cy > 0 && dee > 0);
-	const std::string ana_s = login_token(h, "10.51.0.1", "hosted_ana", "pw-hosted-ana");
-	const std::string ben_s = login_token(h, "10.51.0.2", "hosted_ben", "pw-hosted-ben");
-	const std::string cy_s = login_token(h, "10.51.0.3", "hosted_cy", "pw-hosted-cy");
-	const std::string dee_s = login_token(h, "10.51.0.4", "hosted_dee", "pw-hosted-dee");
-	TEST_EXPECT(!ana_s.empty() && !ben_s.empty() && !cy_s.empty() && !dee_s.empty());
+	namespace billing = opennova::novaworld_server::billing;
+	struct Owner {
+		int64_t id = 0;
+		std::string session;
+	};
+	const auto owner = [&h](const char *name, const char *ip) {
+		Owner o;
+		o.id = make_account(h, name, std::string("pw-") + name);
+		o.session = login_token(h, ip, name, std::string("pw-") + name);
+		return o;
+	};
+	const Owner ana = owner("hosted_ana", "10.51.0.1");
+	const Owner ben = owner("hosted_ben", "10.51.0.2");
+	const Owner cy = owner("hosted_cy", "10.51.0.3");
+	const Owner dee = owner("hosted_dee", "10.51.0.4");
+	const Owner eve = owner("hosted_eve", "10.51.0.5");
+	const Owner fay = owner("hosted_fay", "10.51.0.6");
+	const Owner gus = owner("hosted_gus", "10.51.0.7");
+	for (const Owner *o : { &ana, &ben, &cy, &dee, &eve, &fay, &gus }) TEST_EXPECT(o->id > 0 && !o->session.empty());
 	// The start / stop bucket (HostedRoutes::kStartStopPerUser) is 6 per account,
 	// then one every 20 s, and a request refused before it (logged out, no CSRF
-	// header) draws nothing. Ana draws exactly six below (not entitled, the
-	// start, already_live, three stops), Dee five (the refused settings), Ben and
-	// Cy one or two: add a draw to one of them and it must move to a new account.
+	// header) draws nothing. Ana draws exactly six below (three starts, three
+	// stops), Dee six (the refused settings, then not_entitled), the others fewer:
+	// add a draw to one of them and it must move to a new account.
 
-	auto start = [&h](const std::string &session, const std::string &body, bool csrf = true) {
-		std::vector<std::string> headers = { kJson, with_session(session) };
+	auto start = [&h](const Owner &o, const std::string &body, bool csrf = true) {
+		std::vector<std::string> headers = { kJson, with_session(o.session) };
 		if (csrf) headers.push_back(kCsrf);
-		return h.send("POST", "/api/me/server/start", headers, body);
+		return h.send("POST", "/api/me/servers", headers, body);
 	};
-	auto stop = [&h](const std::string &session, bool csrf = true) {
-		std::vector<std::string> headers = { with_session(session) };
+	auto stop = [&h](const Owner &o, int64_t id, bool csrf = true) {
+		std::vector<std::string> headers = { with_session(o.session) };
 		if (csrf) headers.push_back(kCsrf);
-		return h.send("POST", "/api/me/server/stop", headers);
+		return h.send("POST", "/api/me/servers/" + std::to_string(id) + "/stop", headers);
 	};
-	auto me = [&h](const std::string &session) {
-		return h.send("GET", "/api/me/server", { with_session(session) });
+	auto list = [&h](const Owner &o) { return h.send("GET", "/api/me/servers", { with_session(o.session) }); };
+	auto one = [&h](const Owner &o, int64_t id) {
+		return h.send("GET", "/api/me/servers/" + std::to_string(id), { with_session(o.session) });
 	};
-	auto approve = [&h](int64_t id, const std::string &body, std::vector<std::string> headers) {
+	auto grant = [&h](int64_t id, const std::string &body, std::vector<std::string> headers) {
 		headers.push_back(kJson);
 		return h.send("PUT", "/api/admin/users/" + std::to_string(id) + "/comp-servers", headers, body);
+	};
+	const auto entitlement_is = [](const crow::json::rvalue &json, int64_t max, int64_t used, int64_t own,
+										int64_t own_used, bool can_start, const char *source) {
+		if (!json || !json.has("entitlement")) return false;
+		const auto &e = json["entitlement"];
+		return e["max_servers"].i() == max && e["used"].i() == used && e["own_machines"].i() == own &&
+				e["own_used"].i() == own_used && e["can_start"].b() == can_start && str(e["source"]) == source;
 	};
 	const std::string settings =
 			"{\"game_name\":\"Ana's Server\",\"max_players\":16,\"missions\":[\"first.bms\",\"second.bms\"]}";
 
 	// Logged out: 401; no CSRF header on a state change: 403, before any bucket.
-	TEST_EXPECT(h.send("GET", "/api/me/server").code == 401);
-	TEST_EXPECT(h.send("POST", "/api/me/server/start", { kJson, kCsrf }, settings).code == 401);
-	TEST_EXPECT(h.send("POST", "/api/me/server/stop", { kCsrf }).code == 401);
-	auto reply = start(ana_s, settings, /*csrf=*/false);
+	TEST_EXPECT(h.send("GET", "/api/me/servers").code == 401);
+	TEST_EXPECT(h.send("GET", "/api/me/servers/1").code == 401);
+	TEST_EXPECT(h.send("POST", "/api/me/servers", { kJson, kCsrf }, settings).code == 401);
+	TEST_EXPECT(h.send("POST", "/api/me/servers/1/stop", { kCsrf }).code == 401);
+	auto reply = start(ana, settings, /*csrf=*/false);
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
-	reply = stop(ana_s, /*csrf=*/false);
+	reply = stop(ana, 1, /*csrf=*/false);
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
 
-	// No hosting entitlement yet.
-	reply = me(ana_s);
+	// No hosting entitlement yet, no server.
+	reply = list(ana);
 	auto json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b());
-	TEST_EXPECT(json["entitlement"]["max_servers"].i() == 0 && !json["entitlement"]["can_start"].b() &&
-			str(json["entitlement"]["source"]) == "none");
-	TEST_EXPECT(json["server"].t() == crow::json::type::Null);
+	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && !json["full"].b());
+	TEST_EXPECT(entitlement_is(json, 0, 0, 0, 0, false, "none"));
+	TEST_EXPECT(json["servers"].t() == crow::json::type::List && json["servers"].size() == 0);
 	// The data sets the provider offers, in the service's order (Joint
 	// Operations first; OpenNova's has no folder here, so it is not offered):
 	// each one's game, name, expansions, rotation (the missions the site's
@@ -4315,30 +4336,6 @@ int test_hosted_server_routes(Harness &h) {
 	}
 	TEST_EXPECT(!json.has("default_missions"));
 	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
-	reply = start(ana_s, settings);
-	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_entitled");
-
-	// The comp grant: admin only (the token, or an admin session with the CSRF
-	// header), a whole number 0..16.
-	TEST_EXPECT(approve(ana, "{\"comp_servers\":1}", {}).code == 401);
-	TEST_EXPECT(approve(ana, "{\"comp_servers\":1}", { with_session(ana_s), kCsrf }).code == 403);
-	reply = approve(ana, "{}", { kBearer });
-	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "missing_field");
-	for (const char *bad : { "{\"comp_servers\":true}", "{\"comp_servers\":1.5}", "{\"comp_servers\":17}",
-				 "{\"comp_servers\":-1}", "{\"comp_servers\":\"2\"}" }) {
-		reply = approve(ana, bad, { kBearer });
-		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
-	}
-	TEST_EXPECT(approve(999999, "{\"comp_servers\":1}", { kBearer }).code == 404);
-	reply = approve(ana, "{\"comp_servers\":1}", { kBearer });
-	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 200 && json && json["user"]["comp_servers"].i() == 1 &&
-			json["user"]["max_servers"].i() == 1);
-	for (const int64_t id : { ben, cy }) TEST_EXPECT(approve(id, "{\"comp_servers\":1}", { kBearer }).code == 200);
-	reply = me(ana_s);
-	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(json["entitlement"]["max_servers"].i() == 1 && json["entitlement"]["can_start"].b() &&
-			str(json["entitlement"]["source"]) == "comp");
 
 	// Settings the backend refuses (hosted_supervisor has every rule): a field and why,
 	// a mistyped field, no JSON. Checked before the entitlement, so dee needs none.
@@ -4356,18 +4353,18 @@ int test_hosted_server_routes(Harness &h) {
 		{ "not json", "invalid_json", "" },
 	};
 	for (const Refused &r : refused) {
-		reply = start(dee_s, r.body);
+		reply = start(dee, r.body);
 		json = crow::json::load(body_text(reply));
 		if (reply.code != 400 || error_of_reply(reply) != r.error)
 			std::fprintf(stderr, "  %s -> %s\n", r.body, describe(reply).c_str());
 		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == r.error);
 		if (*r.field) TEST_EXPECT(json && str(json["field"]) == r.field && json.has("message"));
 	}
+	// A valid start with no entitlement.
+	reply = start(dee, settings);
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_entitled");
 	// The game: one the service offers (OpenNova's is known, but not offered
-	// here), whose expansions the expansion names. A bucket of its own (Eve's).
-	const int64_t eve = make_account(h, "hosted_eve", "pw-hosted-eve");
-	const std::string eve_s = login_token(h, "10.51.0.5", "hosted_eve", "pw-hosted-eve");
-	TEST_EXPECT(eve > 0 && !eve_s.empty());
+	// here), whose expansions the expansion names; own_machine a flag.
 	const Refused game_refused[] = {
 		{ "{\"game\":\"jop_3_consumer\",\"game_name\":\"x\",\"missions\":[\"a.bms\"]}", "invalid_settings", "game" },
 		{ "{\"game\":\"opennova_0_consumer\",\"game_name\":\"x\",\"missions\":[\"a.bms\"]}", "invalid_settings",
@@ -4375,9 +4372,10 @@ int test_hosted_server_routes(Harness &h) {
 		{ "{\"game\":\"dfx2_consumer\",\"game_name\":\"x\",\"expansion\":\"jox01\"}", "invalid_settings",
 				"expansion" },
 		{ "{\"game\":7,\"game_name\":\"x\"}", "invalid_field", "" },
+		{ "{\"game_name\":\"x\",\"own_machine\":1}", "invalid_field", "" },
 	};
 	for (const Refused &r : game_refused) {
-		reply = start(eve_s, r.body);
+		reply = start(eve, r.body);
 		json = crow::json::load(body_text(reply));
 		if (reply.code != 400 || error_of_reply(reply) != r.error)
 			std::fprintf(stderr, "  %s -> %s\n", r.body, describe(reply).c_str());
@@ -4385,13 +4383,33 @@ int test_hosted_server_routes(Harness &h) {
 		if (*r.field) TEST_EXPECT(json && str(json["field"]) == r.field && json.has("message"));
 	}
 
-	// The start: 202 with the server, requested, and its first event.
-	reply = start(ana_s, settings);
+	// The comp grant: admin only (the token, or an admin session with the CSRF
+	// header), a whole number 0..16.
+	TEST_EXPECT(grant(ana.id, "{\"comp_servers\":1}", {}).code == 401);
+	TEST_EXPECT(grant(ana.id, "{\"comp_servers\":1}", { with_session(ana.session), kCsrf }).code == 403);
+	reply = grant(ana.id, "{}", { kBearer });
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "missing_field");
+	for (const char *bad : { "{\"comp_servers\":true}", "{\"comp_servers\":1.5}", "{\"comp_servers\":17}",
+				 "{\"comp_servers\":-1}", "{\"comp_servers\":\"2\"}" }) {
+		reply = grant(ana.id, bad, { kBearer });
+		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+	}
+	TEST_EXPECT(grant(999999, "{\"comp_servers\":1}", { kBearer }).code == 404);
+	reply = grant(ana.id, "{\"comp_servers\":2}", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["user"]["comp_servers"].i() == 2 &&
+			json["user"]["max_servers"].i() == 2);
+	for (const Owner *o : { &ben, &cy, &fay, &gus })
+		TEST_EXPECT(grant(o->id, "{\"comp_servers\":1}", { kBearer }).code == 200);
+	TEST_EXPECT(entitlement_is(crow::json::load(body_text(list(ana))), 2, 0, 0, 0, true, "comp"));
+
+	// Two starts: 202 with each server, requested, on a shared machine.
+	reply = start(ana, settings);
 	json = crow::json::load(body_text(reply));
 	if (reply.code != 202) std::fprintf(stderr, "  start: %s\n", describe(reply).c_str());
 	TEST_EXPECT(reply.code == 202 && json && str(json["server"]["state"]) == "requested");
-	const int64_t ana_server = json["server"]["id"].i();
-	TEST_EXPECT(json["server"]["live"].b());
+	const int64_t ana_first = json["server"]["id"].i();
+	TEST_EXPECT(json["server"]["live"].b() && !json["server"]["own_machine"].b());
 	TEST_EXPECT(str(json["server"]["settings"]["game_name"]) == "Ana's Server");
 	// No game named: the first the service offers, with its names.
 	TEST_EXPECT(str(json["server"]["settings"]["game"]) == "jop_2_consumer");
@@ -4401,116 +4419,204 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(json["server"]["settings"]["missions"].size() == 2);
 	TEST_EXPECT(str(json["server"]["settings"]["missions"][0]) == "first.bms");
 	TEST_EXPECT(json["server"]["listing"].t() == crow::json::type::Null);
-	reply = me(ana_s);
+	reply = one(ana, ana_first);
 	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(json && json["server"]["id"].i() == ana_server);
+	TEST_EXPECT(reply.code == 200 && json && json["server"]["id"].i() == ana_first);
 	TEST_EXPECT(json["server"]["events"].size() == 1);
 	TEST_EXPECT(str(json["server"]["events"][0]["from"]).empty() &&
 			str(json["server"]["events"][0]["to"]) == "requested");
-
-	// One live server per account.
-	reply = start(ana_s, settings);
-	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "already_live");
-	TEST_EXPECT(json["server_id"].i() == ana_server);
-	// The default rotation when none is named, then the cap (2).
-	reply = start(ben_s, "{\"game_name\":\"Ben's\"}");
+	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
+	// The second takes the default rotation when it names none.
+	reply = start(ana, "{\"game_name\":\"Ana's Second\"}");
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 202 && json["server"]["settings"]["missions"].size() == 1);
 	TEST_EXPECT(str(json["server"]["settings"]["missions"][0]) == "default.bms");
-	const int64_t ben_server = json["server"]["id"].i();
-	reply = start(cy_s, "{\"game_name\":\"Cy's\"}");
-	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "at_capacity");
-
-	// The fleet view: admin only; it names the owner and never the admin password.
-	h.pool.acquire()->exec("UPDATE hosted_servers SET admin_password = 'planted-admin-secret' WHERE id = $1;",
-			{ opennova::db::BindValue(ana_server) });
-	TEST_EXPECT(h.send("GET", "/api/admin/hosted").code == 401);
-	TEST_EXPECT(h.send("GET", "/api/admin/hosted", { with_session(ana_s) }).code == 403);
-	reply = h.send("GET", "/api/admin/hosted", { kBearer });
+	const int64_t ana_second = json["server"]["id"].i();
+	// The third: every server the grant allows is live.
+	reply = start(ana, settings);
 	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 200 && json && json["cap"].i() == 2 && json["live"].i() == 2);
-	TEST_EXPECT(json["enabled"].b() && str(json["provider"]) == "local");
-	TEST_EXPECT(body_text(reply).find("planted-admin-secret") == std::string::npos);
-	bool seen = false;
-	for (const auto &s : json["servers"]) {
-		if (s["id"].i() != ana_server) continue;
-		seen = true;
-		TEST_EXPECT(s["owner"]["id"].i() == ana && str(s["owner"]["username"]) == "hosted_ana");
-		TEST_EXPECT(s["service_account"].t() == crow::json::type::Null);
-		TEST_EXPECT(str(s["state"]) == "requested");
-		TEST_EXPECT(str(s["settings"]["game"]) == "jop_2_consumer" &&
-				str(s["game_display_name"]) == "Joint Operations");
-	}
-	TEST_EXPECT(seen);
-	TEST_EXPECT(body_text(me(ana_s)).find("planted-admin-secret") == std::string::npos);
-
-	// The owner's stop: stopping, again stopping, then (the row ended) nothing to stop.
-	reply = stop(ana_s);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_limit");
+	TEST_EXPECT(json && json["max_servers"].i() == 2 && json["used"].i() == 2 && json.has("message"));
+	reply = list(ana);
 	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 202 && str(json["server"]["state"]) == "stopping");
-	reply = stop(ana_s);
-	TEST_EXPECT(reply.code == 202 && str(crow::json::load(body_text(reply))["server"]["state"]) == "stopping");
-	TEST_EXPECT(opennova::novaworld_server::hosted::transition(*h.pool.acquire(), ana_server,
-			hosted::State::Stopping, hosted::State::Stopped, "ended by the test"));
-	reply = stop(ana_s);
-	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_live_server");
-	json = crow::json::load(body_text(me(ana_s)));
-	TEST_EXPECT(str(json["server"]["state"]) == "stopped" && !json["server"]["live"].b());
-	TEST_EXPECT(json["server"]["events"].size() == 3);
-	TEST_EXPECT(json["server"]["ended_at"].t() == crow::json::type::String);
-	// Its place is free again: Cy takes it with a Delta Force Xtreme 2 server,
-	// which takes that game's default rotation.
-	reply = start(cy_s, "{\"game\":\"dfx2_consumer\",\"game_name\":\"Cy's\"}");
+	TEST_EXPECT(entitlement_is(json, 2, 2, 0, 0, true, "comp") && json["servers"].size() == 2);
+	TEST_EXPECT(json["servers"][0]["id"].i() == ana_first && json["servers"][1]["id"].i() == ana_second);
+	TEST_EXPECT(!json["servers"][0].has("events"));
+
+	// The cap (4): two more fill it, and the next start finds it full.
+	reply = start(ben, "{\"game_name\":\"Ben's\"}");
+	TEST_EXPECT(reply.code == 202);
+	const int64_t ben_server = crow::json::load(body_text(reply))["server"]["id"].i();
+	reply = start(cy, "{\"game\":\"dfx2_consumer\",\"game_name\":\"Cy's\"}");
 	json = crow::json::load(body_text(reply));
 	if (reply.code != 202) std::fprintf(stderr, "  dfx2 start: %s\n", describe(reply).c_str());
+	// Delta Force Xtreme 2's server takes that game's default rotation.
 	TEST_EXPECT(reply.code == 202 && str(json["server"]["settings"]["game"]) == "dfx2_consumer");
 	TEST_EXPECT(str(json["server"]["game_display_name"]) == "Delta Force Xtreme 2");
 	TEST_EXPECT(json["server"]["settings"]["missions"].size() == 2 &&
 			str(json["server"]["settings"]["missions"][0]) == "dfx2_a.bms");
 	const int64_t cy_server = json["server"]["id"].i();
+	TEST_EXPECT(crow::json::load(body_text(list(ana)))["full"].b());
+	reply = start(fay, "{\"game_name\":\"Fay's\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "at_capacity");
+
+	// Another account's server, by id: 404, as no server's is.
+	for (const int64_t id : { ana_first, int64_t{ 999999 } }) {
+		reply = one(ben, id);
+		TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+	}
+	reply = stop(ben, ana_first);
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), ana_first)->state == hosted::State::Requested);
+
+	// A stopping server still counts: Ben's stop, then his start is server_limit.
+	reply = stop(ben, ben_server);
+	TEST_EXPECT(reply.code == 202 && str(crow::json::load(body_text(reply))["server"]["state"]) == "stopping");
+	reply = start(ben, "{\"game_name\":\"Ben's again\"}");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_limit" && json["used"].i() == 1 &&
+			json["max_servers"].i() == 1);
+
+	// The fleet view: admin only; it names the owner and never the admin password.
+	h.pool.acquire()->exec("UPDATE hosted_servers SET admin_password = 'planted-admin-secret' WHERE id = $1;",
+			{ opennova::db::BindValue(ana_first) });
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted").code == 401);
+	TEST_EXPECT(h.send("GET", "/api/admin/hosted", { with_session(ana.session) }).code == 403);
+	reply = h.send("GET", "/api/admin/hosted", { kBearer });
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["cap"].i() == 4 && json["live"].i() == 4);
+	TEST_EXPECT(json["enabled"].b() && str(json["provider"]) == "local");
+	TEST_EXPECT(body_text(reply).find("planted-admin-secret") == std::string::npos);
+	bool seen = false;
+	for (const auto &s : json["servers"]) {
+		if (s["id"].i() != ana_first) continue;
+		seen = true;
+		TEST_EXPECT(s["owner"]["id"].i() == ana.id && str(s["owner"]["username"]) == "hosted_ana");
+		TEST_EXPECT(s["service_account"].t() == crow::json::type::Null);
+		TEST_EXPECT(str(s["state"]) == "requested" && !s["own_machine"].b());
+	}
+	TEST_EXPECT(seen);
+	TEST_EXPECT(body_text(list(ana)).find("planted-admin-secret") == std::string::npos);
+	TEST_EXPECT(body_text(one(ana, ana_first)).find("planted-admin-secret") == std::string::npos);
+
+	// The owner's stop by id: stopping, again stopping, then (the row ended) 409
+	// not_live; the list shows the live one first, then the ended one.
+	reply = stop(ana, ana_first);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 202 && str(json["server"]["state"]) == "stopping");
+	reply = stop(ana, ana_first);
+	TEST_EXPECT(reply.code == 202 && str(crow::json::load(body_text(reply))["server"]["state"]) == "stopping");
+	TEST_EXPECT(hosted::transition(*h.pool.acquire(), ana_first, hosted::State::Stopping, hosted::State::Stopped,
+			"ended by the test"));
+	reply = stop(ana, ana_first);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
+	json = crow::json::load(body_text(one(ana, ana_first)));
+	TEST_EXPECT(str(json["server"]["state"]) == "stopped" && !json["server"]["live"].b());
+	TEST_EXPECT(json["server"]["events"].size() == 3);
+	TEST_EXPECT(json["server"]["ended_at"].t() == crow::json::type::String);
+	json = crow::json::load(body_text(list(ana)));
+	TEST_EXPECT(json["servers"].size() == 2 && json["servers"][0]["id"].i() == ana_second &&
+			json["servers"][1]["id"].i() == ana_first && entitlement_is(json, 2, 1, 0, 0, true, "comp"));
+	end_stopping_servers(h); // Ben's
+
+	// The own-machine add-on: none without it (a comp grant buys no machine),
+	// then a tier with one machine paid for, and the start on it.
+	reply = start(fay, "{\"game_name\":\"Fay's own\",\"own_machine\":true}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "no_own_machine");
 	{
-		const auto cy_row = hosted::find_server(*h.pool.acquire(), cy_server);
-		TEST_EXPECT(cy_row && cy_row->settings.game == "dfx2_consumer");
+		auto db = h.pool.acquire();
+		const int64_t period_end = billing::unix_now() + 30 * 24 * 60 * 60;
+		billing::SubscriptionRow tier;
+		tier.stripe_subscription_id = "sub_routes_fay_tier";
+		tier.stripe_customer_id = "cus_routes_fay";
+		tier.user_id = fay.id;
+		tier.status = "active";
+		tier.item = billing::ItemKind::Tier;
+		tier.price_id = "price_routes_tier1";
+		tier.tier = 1;
+		tier.current_period_end = period_end;
+		billing::upsert_subscription(*db, tier);
+		billing::SubscriptionRow machine = tier;
+		machine.stripe_subscription_id = "sub_routes_fay_machine";
+		machine.item = billing::ItemKind::OwnMachine;
+		machine.price_id = "price_routes_own";
+		machine.tier = 0;
+		billing::upsert_subscription(*db, machine);
+	}
+	TEST_EXPECT(entitlement_is(crow::json::load(body_text(list(fay))), 1, 0, 1, 0, true, "tier"));
+	reply = start(fay, "{\"game_name\":\"Fay's own\",\"own_machine\":true}");
+	json = crow::json::load(body_text(reply));
+	if (reply.code != 202) std::fprintf(stderr, "  own-machine start: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 202 && json["server"]["own_machine"].b());
+	const int64_t fay_server = json["server"]["id"].i();
+	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), fay_server)->own_machine);
+	TEST_EXPECT(entitlement_is(crow::json::load(body_text(list(fay))), 1, 1, 1, 1, true, "tier"));
+
+	// The list's ended servers: the newest 10, after the live ones.
+	{
+		auto db = h.pool.acquire();
+		for (int i = 0; i < 12; ++i) {
+			db->exec("INSERT INTO hosted_servers (owner_user_id, state, game_name, max_players, time_limit, "
+					 "kill_limit, max_score, respawn, start_delay, missions, ended_at) "
+					 "VALUES ($1, 'stopped', $2, 8, 30, 50, 5, 5, 0, 'a.bms', now());",
+					{ opennova::db::BindValue(gus.id), opennova::db::BindValue("Gus ended " + std::to_string(i)) });
+		}
+		db->exec("INSERT INTO hosted_servers (owner_user_id, state, game_name, max_players, time_limit, "
+				 "kill_limit, max_score, respawn, start_delay, missions) "
+				 "VALUES ($1, 'running', 'Gus live', 8, 30, 50, 5, 5, 0, 'a.bms');",
+				{ opennova::db::BindValue(gus.id) });
+	}
+	json = crow::json::load(body_text(list(gus)));
+	TEST_EXPECT(json && json["servers"].size() == 11);
+	if (json && json["servers"].size() == 11) {
+		TEST_EXPECT(str(json["servers"][0]["settings"]["game_name"]) == "Gus live" && json["servers"][0]["live"].b());
+		for (size_t i = 1; i < 11; ++i) {
+			TEST_EXPECT(str(json["servers"][i]["settings"]["game_name"]) == "Gus ended " + std::to_string(12 - i));
+			TEST_EXPECT(!json["servers"][i]["live"].b());
+		}
 	}
 
 	// The admin's stops: one server (404 for none, 409 for an ended one), and the kill switch.
 	auto admin_stop = [&h](const std::string &id, std::vector<std::string> headers) {
 		return h.send("POST", "/api/admin/hosted/" + id + "/stop", headers);
 	};
-	TEST_EXPECT(admin_stop(std::to_string(cy_server), { with_session(cy_s), kCsrf }).code == 403);
+	TEST_EXPECT(admin_stop(std::to_string(cy_server), { with_session(cy.session), kCsrf }).code == 403);
 	TEST_EXPECT(admin_stop("999999", { kBearer }).code == 404);
-	reply = admin_stop(std::to_string(ana_server), { kBearer });
+	reply = admin_stop(std::to_string(ana_first), { kBearer });
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
 	reply = admin_stop(std::to_string(cy_server), { kBearer });
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 202 && str(json["server"]["state"]) == "stopping");
 	TEST_EXPECT(str(json["server"]["owner"]["username"]) == "hosted_cy");
-	TEST_EXPECT(h.send("POST", "/api/admin/hosted/stop-all", { with_session(ben_s), kCsrf }).code == 403);
+	TEST_EXPECT(h.send("POST", "/api/admin/hosted/stop-all", { with_session(ben.session), kCsrf }).code == 403);
 	reply = h.send("POST", "/api/admin/hosted/stop-all", { kBearer });
-	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["stopping"].i() == 1);
+	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["stopping"].i() == 3);
 	reply = h.send("POST", "/api/admin/hosted/stop-all", { kBearer });
 	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["stopping"].i() == 0);
-	const auto ben_row = hosted::find_server(*h.pool.acquire(), ben_server);
-	TEST_EXPECT(ben_row && ben_row->state == hosted::State::Stopping);
+	const auto second_row = hosted::find_server(*h.pool.acquire(), ana_second);
+	TEST_EXPECT(second_row && second_row->state == hosted::State::Stopping);
 	end_stopping_servers(h);
+	{
+		auto db = h.pool.acquire();
+		db->exec("DELETE FROM billing_subscriptions WHERE stripe_subscription_id LIKE 'sub_routes_fay_%';");
+	}
 
 	// Hosting off (the Secure listener runs with ONNET_HOSTED_PROVIDER none): 503.
 	std::string token;
 	{
 		auto conn = h.pool.acquire();
-		const auto user = nws::get_user_by_id(*conn, dee);
-		const auto minted = nws::create_web_session(*conn, dee, user->credentials_gen, "127.0.0.1", "harness");
+		const auto user = nws::get_user_by_id(*conn, dee.id);
+		const auto minted = nws::create_web_session(*conn, dee.id, user->credentials_gen, "127.0.0.1", "harness");
 		TEST_EXPECT(minted.has_value());
 		token = *minted;
 	}
-	reply = h.send_to(h.secure_port, "POST", "/api/me/server/start",
+	reply = h.send_to(h.secure_port, "POST", "/api/me/servers",
 			{ kJson, kCsrf, with_cookie(nws::kWebSessionHostCookie, token) }, "{\"game_name\":\"x\"}");
 	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "hosting_disabled");
-	reply = h.send_to(h.secure_port, "GET", "/api/me/server",
-			{ with_cookie(nws::kWebSessionHostCookie, token) });
+	reply = h.send_to(h.secure_port, "GET", "/api/me/servers", { with_cookie(nws::kWebSessionHostCookie, token) });
 	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 200 && json && !json["enabled"].b() && json["data_sets"].size() == 0);
+	TEST_EXPECT(reply.code == 200 && json && !json["enabled"].b() && !json["full"].b() &&
+			json["data_sets"].size() == 0);
 	return 0;
 }
 
@@ -4575,7 +4681,7 @@ int test_hosted_listing_owner(Harness &h) {
 	TEST_EXPECT(json["hosts"][0]["hosted_server_id"].i() == server_id);
 	reply = h.send("GET", "/api/me/hosts", { with_session(other_s) });
 	TEST_EXPECT(crow::json::load(body_text(reply))["hosts"].size() == 0);
-	reply = h.send("GET", "/api/me/server", { with_session(owner_s) });
+	reply = h.send("GET", "/api/me/servers/" + std::to_string(server_id), { with_session(owner_s) });
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(json && json["server"]["listing"]["rid"].i() == static_cast<int64_t>(rid));
 
@@ -4619,7 +4725,7 @@ int test_hosted_listing_owner(Harness &h) {
 		TEST_EXPECT(fake.launches == 0);
 	}
 	TEST_EXPECT(hosted::find_server(*h.pool.acquire(), server_id)->state == hosted::State::Stopping);
-	json = crow::json::load(body_text(h.send("GET", "/api/me/server", { with_session(owner_s) })));
+	json = crow::json::load(body_text(h.send("GET", "/api/me/servers/" + std::to_string(server_id), { with_session(owner_s) })));
 	TEST_EXPECT(json && str(json["server"]["state"]) == "stopping");
 	const auto &events = json["server"]["events"];
 	TEST_EXPECT(events.size() >= 2 &&
@@ -5038,9 +5144,9 @@ int test_hosted_console_routes(Harness &h) {
 		return json && json.has("result") ? str(json["result"]) : std::string("<none>");
 	};
 
-	// No server yet; then one, not running yet; then running with no link.
-	auto reply = get("/api/me/server/players", as_owner);
-	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_live_server");
+	// No such server; then one, not running yet; then running with no link.
+	auto reply = get("/api/me/servers/999999/players", as_owner);
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
 	hosted::HostedSettings settings;
 	settings.game = hosted::kDataSetJointOperations;
 	settings.game_name = "Console Test";
@@ -5050,7 +5156,9 @@ int test_hosted_console_routes(Harness &h) {
 	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
 	const int64_t id = request.id;
 	const std::string base = "/api/admin/hosted/" + std::to_string(id);
-	reply = get("/api/me/server/players", as_owner);
+	// The owner's routes name the server by its id.
+	const std::string me = "/api/me/servers/" + std::to_string(id);
+	reply = get(me + "/players", as_owner);
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_not_running");
 	{
 		auto db = h.pool.acquire();
@@ -5058,7 +5166,7 @@ int test_hosted_console_routes(Harness &h) {
 				{ opennova::db::BindValue(id) });
 		hosted::set_admin_login(*db, id, fake.port(), "svc", password);
 	}
-	reply = get("/api/me/server/players", as_owner);
+	reply = get(me + "/players", as_owner);
 	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "admin_unavailable");
 	hosted::AdminLinkTarget target;
 	target.host = "127.0.0.1";
@@ -5073,23 +5181,25 @@ int test_hosted_console_routes(Harness &h) {
 
 	// Logged out: 401; a POST without the CSRF header: 403, an admin session's too, before
 	// anything is read; the proxy-only listener answers no one but its proxy.
-	TEST_EXPECT(get("/api/me/server/players", {}).code == 401);
-	TEST_EXPECT(post("/api/me/server/players/1/punt", {}).code == 401);
-	reply = post("/api/me/server/players/1/punt", { with_session(owner_s) });
+	TEST_EXPECT(get(me + "/players", {}).code == 401);
+	TEST_EXPECT(post(me + "/players/1/punt", {}).code == 401);
+	reply = post(me + "/players/1/punt", { with_session(owner_s) });
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
 	reply = post(base + "/players/1/punt", { with_session(admin_s) });
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
-	reply = h.send_to(h.fresh_port, "GET", "/api/me/server/players", as_owner);
+	reply = h.send_to(h.fresh_port, "GET", me + "/players", as_owner);
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "proxy_required");
-	reply = h.send_to(h.fresh_port, "POST", "/api/me/server/chat", { with_session(owner_s), kCsrf, kJson },
+	reply = h.send_to(h.fresh_port, "POST", me + "/chat", { with_session(owner_s), kCsrf, kJson },
 			"{\"text\":\"hi\"}");
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "proxy_required");
-	// Another account reaches no server: the owner's routes name none, its session resolves it.
-	reply = get("/api/me/server/players", { with_session(other_s) });
-	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_live_server");
-	reply = post("/api/me/server/players/1/punt", { with_session(other_s), kCsrf });
-	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_live_server");
-	TEST_EXPECT(get("/api/me/server/console", { with_session(other_s) }).code == 404);
+	// Another account reaches no server of the owner's: its id answers not_found,
+	// as no server's does (never a 403 that would tell it exists).
+	reply = get(me + "/players", { with_session(other_s) });
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+	reply = post(me + "/players/1/punt", { with_session(other_s), kCsrf });
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+	reply = get(me + "/console", { with_session(other_s) });
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
 	// Nor do the owners reach the admin's routes.
 	TEST_EXPECT(get(base + "/players", { with_session(other_s) }).code == 403);
 	TEST_EXPECT(get(base + "/players", { with_session(owner_s) }).code == 403);
@@ -5097,7 +5207,7 @@ int test_hosted_console_routes(Harness &h) {
 	TEST_EXPECT(post(base + "/players/1/punt", { with_session(owner_s), kCsrf }).code == 403);
 
 	// The reads.
-	reply = get("/api/me/server/players", as_owner);
+	reply = get(me + "/players", as_owner);
 	auto json = crow::json::load(body_text(reply));
 	if (reply.code != 200) std::fprintf(stderr, "  players: %s\n", describe(reply).c_str());
 	TEST_EXPECT(reply.code == 200 && json && json["players"].size() == 2);
@@ -5105,30 +5215,30 @@ int test_hosted_console_routes(Harness &h) {
 	TEST_EXPECT(str(json["players"][0]["name"]) == "Ann" && json["players"][0]["team"].i() == 1);
 	TEST_EXPECT(json["players"][0]["kills"].i() == 5 && json["players"][1]["ping"].i() == 55);
 	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
-	reply = get("/api/me/server/missions", as_owner);
+	reply = get(me + "/missions", as_owner);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["missions"].size() == 2);
 	TEST_EXPECT(str(json["missions"][1]["file"]) == "BRAVO.BMS" && str(json["missions"][1]["title"]) == "Bravo Ridge");
-	reply = get("/api/me/server/rotation", as_owner);
+	reply = get(me + "/rotation", as_owner);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["rotation"].size() == 1 && json["rotation"][0]["current"].b());
 
 	// Hostile replies: names holding a control byte and a cp1252 letter, lines that are
 	// no row; the JSON stays valid and the parsers keep what parses.
 	fake.set_hostile(true);
-	reply = get("/api/me/server/players", as_owner);
+	reply = get(me + "/players", as_owner);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["players"].size() == 2);
 	TEST_EXPECT(json && str(json["players"][0]["name"]) == "Ev\x01l" && str(json["players"][1]["name"]) == "Caf\xC3\xA9");
-	reply = get("/api/me/server/rotation", as_owner);
+	reply = get(me + "/rotation", as_owner);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["rotation"].size() == 1 &&
 			str(json["rotation"][0]["file"]) == "ALPHA.BMS");
-	reply = get("/api/me/server/missions", as_owner);
+	reply = get(me + "/missions", as_owner);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["missions"].size() == 1 && json["missions"][0]["index"].i() == 7 &&
 			str(json["missions"][0]["title"]) == "Odd (title)");
-	reply = get("/api/me/server/chat", as_owner);
+	reply = get(me + "/chat", as_owner);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["lines"].size() == 2 && str(json["lines"][0]) == "\x01" "ctl" &&
 			str(json["lines"][1]) == "\xC3\xA9t\xC3\xA9");
@@ -5137,66 +5247,66 @@ int test_hosted_console_routes(Harness &h) {
 	// Arguments outside their rules: refused before anything is sent or any token drawn.
 	const size_t lines_before = fake.lines().size();
 	struct Refused {
-		const char *path;
+		std::string path;
 		const char *body;
 		const char *error; // "" for any 400
 	};
 	const std::string long_mission = "{\"mission\":\"" + std::string(33, 'm') + ".bms\"}";
 	const std::string long_text = "{\"text\":\"" + std::string(60, 'x') + "\"}";
 	const Refused refusals[] = {
-		{ "/api/me/server/players/0/punt", "{}", "invalid_slot" },
-		{ "/api/me/server/players/256/ban", "{}", "invalid_slot" },
-		{ "/api/me/server/rotation/32/remove", "{}", "invalid_index" },
-		{ "/api/me/server/rotation/256/next", "{}", "invalid_index" },
-		{ "/api/me/server/rotation", "{\"mission\":\"../x.bms\"}", "invalid_mission" },
-		{ "/api/me/server/rotation", "{\"mission\":\"a.bms 1 0 ONESHOT\"}", "invalid_mission" },
-		{ "/api/me/server/rotation", "{\"mission\":\".bms\"}", "invalid_mission" },
-		{ "/api/me/server/rotation", long_mission.c_str(), "invalid_mission" },
-		{ "/api/me/server/rotation", "{\"mission\":\"a\\u0000.bms\"}", "" },
-		{ "/api/me/server/rotation", "{\"mission\":\"a\\u0085.bms\"}", "invalid_mission" },
-		{ "/api/me/server/rotation", "{\"mission\":\"a\\t.bms\"}", "invalid_mission" },
-		{ "/api/me/server/rotation", "{\"mission\":\"a\\u007f.bms\"}", "invalid_mission" },
-		{ "/api/me/server/rotation", "{}", "missing_field" },
-		{ "/api/me/server/rotation", "{\"mission\":1}", "invalid_field" },
-		{ "/api/me/server/rotation", "{\"mission\":\"a.bms\",\"swap_sides\":1}", "invalid_field" },
-		{ "/api/me/server/chat", "{\"text\":\"two\\nlines\"}", "invalid_text" },
-		{ "/api/me/server/chat", "{\"text\":\"a\\u0000b\"}", "" },
-		{ "/api/me/server/chat", "{\"text\":\"a\\u0085b\"}", "invalid_text" },
-		{ "/api/me/server/chat", "{\"text\":\"a\\tb\"}", "invalid_text" },
-		{ "/api/me/server/chat", "{\"text\":\"a\\u007fb\"}", "invalid_text" },
-		{ "/api/me/server/chat", "{\"text\":\"\\ud83d\\ude00\"}", "invalid_text" },
-		{ "/api/me/server/chat", "{\"text\":\"   \"}", "invalid_text" },
-		{ "/api/me/server/chat", long_text.c_str(), "invalid_text" },
-		{ "/api/me/server/chat", "{}", "missing_field" },
-		{ "/api/me/server/chat", "not json", "invalid_json" },
+		{ me + "/players/0/punt", "{}", "invalid_slot" },
+		{ me + "/players/256/ban", "{}", "invalid_slot" },
+		{ me + "/rotation/32/remove", "{}", "invalid_index" },
+		{ me + "/rotation/256/next", "{}", "invalid_index" },
+		{ me + "/rotation", "{\"mission\":\"../x.bms\"}", "invalid_mission" },
+		{ me + "/rotation", "{\"mission\":\"a.bms 1 0 ONESHOT\"}", "invalid_mission" },
+		{ me + "/rotation", "{\"mission\":\".bms\"}", "invalid_mission" },
+		{ me + "/rotation", long_mission.c_str(), "invalid_mission" },
+		{ me + "/rotation", "{\"mission\":\"a\\u0000.bms\"}", "" },
+		{ me + "/rotation", "{\"mission\":\"a\\u0085.bms\"}", "invalid_mission" },
+		{ me + "/rotation", "{\"mission\":\"a\\t.bms\"}", "invalid_mission" },
+		{ me + "/rotation", "{\"mission\":\"a\\u007f.bms\"}", "invalid_mission" },
+		{ me + "/rotation", "{}", "missing_field" },
+		{ me + "/rotation", "{\"mission\":1}", "invalid_field" },
+		{ me + "/rotation", "{\"mission\":\"a.bms\",\"swap_sides\":1}", "invalid_field" },
+		{ me + "/chat", "{\"text\":\"two\\nlines\"}", "invalid_text" },
+		{ me + "/chat", "{\"text\":\"a\\u0000b\"}", "" },
+		{ me + "/chat", "{\"text\":\"a\\u0085b\"}", "invalid_text" },
+		{ me + "/chat", "{\"text\":\"a\\tb\"}", "invalid_text" },
+		{ me + "/chat", "{\"text\":\"a\\u007fb\"}", "invalid_text" },
+		{ me + "/chat", "{\"text\":\"\\ud83d\\ude00\"}", "invalid_text" },
+		{ me + "/chat", "{\"text\":\"   \"}", "invalid_text" },
+		{ me + "/chat", long_text.c_str(), "invalid_text" },
+		{ me + "/chat", "{}", "missing_field" },
+		{ me + "/chat", "not json", "invalid_json" },
 	};
 	for (const Refused &r : refusals) {
 		reply = post(r.path, as_owner_post, r.body);
 		const bool ok = reply.code == 400 && (*r.error == '\0' || error_of_reply(reply) == r.error);
-		if (!ok) std::fprintf(stderr, "  %s %s -> %s\n", r.path, r.body, describe(reply).c_str());
+		if (!ok) std::fprintf(stderr, "  %s %s -> %s\n", r.path.c_str(), r.body, describe(reply).c_str());
 		TEST_EXPECT(ok);
 	}
 	TEST_EXPECT(fake.lines().size() == lines_before);
 
 	// The writes, eight of them: the owner's bucket.
-	reply = post("/api/me/server/players/1/punt", as_owner_post);
+	reply = post(me + "/players/1/punt", as_owner_post);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && str(json["result"]) == "punted" && json["slot"].i() == 1);
-	reply = post("/api/me/server/players/9/kill", as_owner_post);
+	reply = post(me + "/players/9/kill", as_owner_post);
 	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "player_not_found");
-	reply = post("/api/me/server/players/1/ban", as_owner_post);
+	reply = post(me + "/players/1/ban", as_owner_post);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && str(json["result"]) == "banned" && json["listed"].b());
-	reply = post("/api/me/server/players/2/ban", as_owner_post);
+	reply = post(me + "/players/2/ban", as_owner_post);
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "no_pcid");
 	TEST_EXPECT(body_text(reply).find("Bob") == std::string::npos);
-	reply = post("/api/me/server/players/2/swap", as_owner_post);
+	reply = post(me + "/players/2/swap", as_owner_post);
 	TEST_EXPECT(reply.code == 200 && result_of(reply) == "swapped");
-	reply = post("/api/me/server/chat", as_owner_post, "{\"text\":\"hello from the site\"}");
+	reply = post(me + "/chat", as_owner_post, "{\"text\":\"hello from the site\"}");
 	TEST_EXPECT(reply.code == 200 && result_of(reply) == "sent");
-	reply = post("/api/me/server/rotation", as_owner_post, "{\"mission\":\"bravo.bms\",\"swap_sides\":true}");
+	reply = post(me + "/rotation", as_owner_post, "{\"mission\":\"bravo.bms\",\"swap_sides\":true}");
 	TEST_EXPECT(reply.code == 200 && result_of(reply) == "added");
-	reply = post("/api/me/server/rotation", as_owner_post, "{\"mission\":\"nope.bms\"}");
+	reply = post(me + "/rotation", as_owner_post, "{\"mission\":\"nope.bms\"}");
 	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "mission_not_found");
 	// The exact lines the server received for them.
 	TEST_EXPECT(in_order(fake.lines(), { "PLAYER PUNT 1", "PLAYER KILL 9", "PLAYER BAN 1", "PLAYER BAN 2",
@@ -5205,12 +5315,12 @@ int test_hosted_console_routes(Harness &h) {
 	// The bucket runs dry (one token every 2 s after eight).
 	bool limited = false;
 	for (int i = 0; i < 12 && !limited; ++i) {
-		reply = post("/api/me/server/rotation/cycle", as_owner_post);
+		reply = post(me + "/rotation/cycle", as_owner_post);
 		limited = reply.code == 429;
 	}
 	TEST_EXPECT(limited && error_of_reply(reply) == "rate_limited" && has_header(reply, "Retry-After"));
 	// The chat window has the line (a read: another bucket).
-	reply = get("/api/me/server/chat", as_owner);
+	reply = get(me + "/chat", as_owner);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["lines"].size() == 1 &&
 			str(json["lines"][0]).find("hello from the site") != std::string::npos);
@@ -5285,10 +5395,10 @@ int test_hosted_console_routes(Harness &h) {
 	fake.delay("PLAYER LIST", 800);
 	net::HttpReply slow;
 	const size_t sent_before = fake.lines().size();
-	std::thread first([&] { slow = get("/api/me/server/players", as_owner); });
+	std::thread first([&] { slow = get(me + "/players", as_owner); });
 	const bool in_flight = wait_until([&] { return sent_since(sent_before, "PLAYER LIST"); }, 3000);
 	const auto busy_started = std::chrono::steady_clock::now();
-	const net::HttpReply second = get("/api/me/server/missions", as_owner);
+	const net::HttpReply second = get(me + "/missions", as_owner);
 	const auto busy_took = std::chrono::steady_clock::now() - busy_started;
 	first.join();
 	TEST_EXPECT(in_flight && slow.code == 200);
@@ -5300,14 +5410,14 @@ int test_hosted_console_routes(Harness &h) {
 	const size_t edit_before = fake.lines().size();
 	std::thread editing([&] { edit = post(base + "/rotation/0/remove", { kBearer }); });
 	const bool editing_now = wait_until([&] { return sent_since(edit_before, "MISSION LIST"); }, 3000);
-	const net::HttpReply racing = post("/api/me/server/rotation/1/remove", as_owner_post);
+	const net::HttpReply racing = post(me + "/rotation/1/remove", as_owner_post);
 	editing.join();
 	fake.delay("", 0);
 	TEST_EXPECT(editing_now && racing.code == 409 && error_of_reply(racing) == "rotation_busy");
 	TEST_EXPECT(edit.code == 200 && fake.rotation().size() == 1);
 
 	// The console: the writes recorded with their sender, the reads not, no password.
-	reply = get("/api/me/server/console", as_owner);
+	reply = get(me + "/console", as_owner);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && str(json["link"]["state"]) == "up");
 	bool owner_punt = false;
@@ -5334,7 +5444,7 @@ int test_hosted_console_routes(Harness &h) {
 	TEST_EXPECT(owner_punt && punt_reply && admin_kill && !read_recorded);
 	TEST_EXPECT(body_text(reply).find(password) == std::string::npos);
 	// Past the last id: nothing but a status line the link's poll may have added since.
-	reply = get("/api/me/server/console?after=" + std::to_string(last_id), as_owner);
+	reply = get(me + "/console?after=" + std::to_string(last_id), as_owner);
 	json = crow::json::load(body_text(reply));
 	bool past_last = reply.code == 200 && json;
 	if (past_last) {
@@ -5344,11 +5454,11 @@ int test_hosted_console_routes(Harness &h) {
 	TEST_EXPECT(past_last);
 	// limit=0 reads one line; limit=9999 every line from the oldest (fewer than 200 here, so
 	// the default read's too); after=abc is no after.
-	reply = get("/api/me/server/console?limit=0", as_owner);
+	reply = get(me + "/console?limit=0", as_owner);
 	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["lines"].size() == 1);
 	TEST_EXPECT(total > 0 && total < 200); // ConsoleRoutes::kConsoleLinesShown
 	for (const char *query : { "?limit=9999", "?after=abc" }) {
-		reply = get(std::string("/api/me/server/console") + query, as_owner);
+		reply = get((me + "/console") + query, as_owner);
 		json = crow::json::load(body_text(reply));
 		TEST_EXPECT(reply.code == 200 && json && json["lines"].size() >= total &&
 				json["lines"][0]["id"].i() == first_id);
@@ -5364,11 +5474,11 @@ int test_hosted_console_routes(Harness &h) {
 
 	// Stopping: refused before the link, the console still read.
 	TEST_EXPECT(hosted::request_stop(*h.pool.acquire(), id, "stopped by the test"));
-	reply = get("/api/me/server/players", as_owner);
+	reply = get(me + "/players", as_owner);
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_stopping");
 	reply = post(base + "/players/1/punt", { kBearer });
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "server_stopping");
-	TEST_EXPECT(get("/api/me/server/console", as_owner).code == 200);
+	TEST_EXPECT(get(me + "/console", as_owner).code == 200);
 
 	// The end: the link down, the row ended.
 	h.links->sync({});
@@ -5376,8 +5486,10 @@ int test_hosted_console_routes(Harness &h) {
 			"ended by the test"));
 	reply = get(base + "/players", { kBearer });
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
-	reply = get("/api/me/server/players", as_owner);
-	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_live_server");
+	reply = get(me + "/players", as_owner);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
+	// Its console log still reads.
+	TEST_EXPECT(get(me + "/console", as_owner).code == 200);
 	TEST_EXPECT(set_role(h, admin, "player")); // the cases after count no admin of this one's
 	fake.stop();
 	return 0;
@@ -5499,12 +5611,12 @@ int main(int argc, char **argv) {
 		config.trusted_proxies = {"127.0.0.1"};
 		config.api_proxy_only = true;
 		// The hosted servers' routes run (no supervisor: rows stay where the routes
-		// put them), with a cap of 2 and two data sets, each with a default
+		// put them), with a cap of 4 and two data sets, each with a default
 		// rotation: Joint Operations and Delta Force Xtreme 2 (the local
 		// provider's folders, never read here). OpenNova's names no folder, so
 		// the local provider does not offer it.
 		config.hosted_provider = "local";
-		config.hosted_cap = 2;
+		config.hosted_cap = 4;
 		config.hosted_data_sets =
 				"{\"dfx2_consumer\":{\"missions\":[\"dfx2_a.bms\",\"dfx2_b.bms\"],\"resource_dir\":\"unused-dfx2\"},"
 				"\"jop_2_consumer\":{\"missions\":[\"default.bms\"],\"resource_dir\":\"unused-jo\"},"

@@ -1,8 +1,11 @@
 #pragma once
 
 // The hosted servers' /api routes (ADR 0053, proposed; README "Hosted servers"):
-// the owner's GET /api/me/server, POST /api/me/server/start and /stop
-// (require_user, the CSRF header on the two POSTs), and the admin's fleet view
+// the owner's, by server id (an account runs as many as its hosting
+// entitlement allows): GET /api/me/servers, GET /api/me/servers/<id>, POST
+// /api/me/servers (a start) and POST /api/me/servers/<id>/stop (require_user,
+// the CSRF header on the two POSTs; another account's id is 404, never 403),
+// and the admin's fleet view
 // GET /api/admin/hosted, its kill switch POST /api/admin/hosted/stop-all and
 // POST /api/admin/hosted/<id>/stop (require_admin). They write requests and
 // stops only (hosted_repository.h); the supervisor does the rest. Every reply
@@ -37,8 +40,11 @@ public:
 	// Each owner start or stop, per account: 6 at once, then one every 20 s
 	// (service policy: a start costs a machine).
 	static constexpr RateLimiter::Params kStartStopPerUser{ 6, 1.0 / 20, 10000 };
-	// The transitions GET /api/me/server shows, and the servers the fleet view lists.
+	// The transitions GET /api/me/servers/<id> shows, the ended servers GET
+	// /api/me/servers lists after the live ones, and the servers the fleet view
+	// lists.
 	static constexpr size_t kEventsShown = 50;
+	static constexpr size_t kEndedShown = 10;
 	static constexpr size_t kFleetShown = 100;
 
 	HostedRoutes(WebAccess &access, db::ConnectionPool &pool) : access_(access), pool_(pool) {}
@@ -54,9 +60,10 @@ public:
 	void register_routes(WebApp &app);
 
 private:
-	crow::response me_server(const crow::request &req);
+	crow::response me_servers(const crow::request &req);
+	crow::response me_server(const crow::request &req, uint64_t id);
 	crow::response me_start(const crow::request &req);
-	crow::response me_stop(const crow::request &req);
+	crow::response me_stop(const crow::request &req, uint64_t id);
 	crow::response admin_fleet(const crow::request &req);
 	crow::response admin_stop_all(const crow::request &req);
 	crow::response admin_stop(const crow::request &req, uint64_t id);

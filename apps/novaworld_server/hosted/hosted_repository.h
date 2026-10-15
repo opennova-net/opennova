@@ -37,7 +37,8 @@ enum class State : uint8_t {
 const char *state_name(State state);
 std::optional<State> state_from_name(std::string_view name);
 // Any state but Stopped and Failed: the server holds (or is about to hold) a
-// machine, counts against the cap and is its owner's one live server.
+// machine, and counts against the cap and against its owner's hosting
+// entitlement (a stopping one included, until it has stopped).
 bool is_live(State state);
 
 // A hosted server's row. It carries no admin credential: that is AdminLogin's,
@@ -55,6 +56,8 @@ struct HostedServer {
 	int admin_port = 0;
 	int restarts = 0;
 	std::string failure_reason;
+	// It runs on a machine of its own (the own-machine add-on), not a shared one.
+	bool own_machine = false;
 	// UTC 'YYYY-MM-DD HH:MM:SS'; running_at / ended_at empty until set.
 	std::string created_at;
 	std::string updated_at;
@@ -84,29 +87,45 @@ std::optional<AdminLogin> admin_login_of(db::Database &db, int64_t id);
 enum class RequestOutcome : uint8_t {
 	Created,
 	InvalidSettings, // check_settings refused them (the routes check first)
-	NoSuchUser,  // no player account by that id
-	NotEntitled, // the account is not active, or its hosting entitlement is 0 servers
-	PastDue,     // its support tier's payment is past due: its servers run on, none starts
-	AlreadyLive, // the account has a live server (`id` names it)
-	AtCapacity,  // `cap` servers are live
+	NoSuchUser,   // no player account by that id
+	NotEntitled,  // the account is not active, or its hosting entitlement is 0 servers
+	PastDue,      // its support tier's payment is past due: its servers run on, none starts
+	AtLimit,      // `used` of its `max_servers` are live already
+	NoOwnMachine, // an own machine was asked for, and each the add-on pays for runs one
+	AtCapacity,   // `cap` servers are live
 };
 struct RequestResult {
 	RequestOutcome outcome = RequestOutcome::Created;
 	int64_t id = 0;
+	// AtLimit: the entitlement's servers, and how many of the account's are live.
+	int max_servers = 0;
+	int used = 0;
 };
 
 // A start the owner asks for: the settings checked again against the offered
 // data sets (check_settings, as the routes do first), then in one transaction
-// the account (a player's, active), its hosting entitlement at `now` (Unix
-// seconds; billing/entitlement.h: servers granted, and none past due), its one
-// live server and the global cap, and the row written (state requested, its
-// event beside it).
-RequestResult request_server(db::Database &db, int64_t owner_user_id,
-		const HostedSettings &settings, const std::vector<DataSet> &offered, int cap, int64_t now);
+// (which holds the writer lock, so no other start lands between a count and the
+// row) the account (a player's, active), its hosting entitlement at `now` (Unix
+// seconds; billing/entitlement.h): some servers, none past due, fewer of its
+// servers live than it grants (a stopping one counts), and with `own_machine`
+// fewer of them on own machines than the add-on pays for; then the global cap,
+// and the row written (state requested, its event beside it).
+RequestResult request_server(db::Database &db, int64_t owner_user_id, const HostedSettings &settings,
+		const std::vector<DataSet> &offered, int cap, int64_t now, bool own_machine = false);
 
 std::optional<HostedServer> find_server(db::Database &db, int64_t id);
-// The owner's live server, else the newest of its ended ones.
-std::optional<HostedServer> latest_server_of(db::Database &db, int64_t owner_user_id);
+// Server `id` when `owner_user_id` owns it, in any state; nullopt for no such
+// server and for another account's (the owner's routes answer both 404).
+std::optional<HostedServer> owned_server(db::Database &db, int64_t id, int64_t owner_user_id);
+// The owner's live servers by id, oldest first.
+std::vector<HostedServer> live_servers_of(db::Database &db, int64_t owner_user_id);
+// The owner's live servers by id, oldest first, then its newest
+// `ended_limit` ended ones, newest first.
+std::vector<HostedServer> list_servers_of(db::Database &db, int64_t owner_user_id, size_t ended_limit = 10);
+// How many of the owner's servers are live, and how many of those run on own
+// machines (a stopping one counts in both).
+int count_live_of(db::Database &db, int64_t owner_user_id);
+int count_own_live_of(db::Database &db, int64_t owner_user_id);
 std::vector<HostedServer> list_live(db::Database &db);
 // The newest `limit` servers, live ones first (the admin's fleet view).
 std::vector<HostedServer> list_servers(db::Database &db, size_t limit);

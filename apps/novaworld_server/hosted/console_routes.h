@@ -3,19 +3,19 @@
 // The hosted servers' console routes (ADR 0053 d5, proposed; README "Hosted
 // servers"): the site's players, rotation, chat and console pages run the
 // curated commands (console_commands.h) on the server's admin link
-// (admin_link.h). The owner's routes act on the caller's own live server
-// (resolved by its session, never named in the path): GET
-// /api/me/server/players, POST .../players/<slot>/punt, /ban, /swap and /kill,
-// GET .../missions, GET and POST .../rotation (the entries; one appended), POST
-// .../rotation/<index>/remove and /next, POST .../rotation/cycle, GET and POST
-// .../chat, and GET .../console. The admin's are the same under
-// /api/admin/hosted/<id>/..., plus GET .../settings. Every reply is JSON; a
-// refusal is an error code with our own message, never the server's text.
+// (admin_link.h). The owner's routes act on one of the caller's own servers by
+// its id: GET /api/me/servers/<id>/players, POST .../players/<slot>/punt, /ban,
+// /swap and /kill, GET .../missions, GET and POST .../rotation (the entries; one
+// appended), POST .../rotation/<index>/remove and /next, POST
+// .../rotation/cycle, GET and POST .../chat, and GET .../console. The admin's
+// are the same under /api/admin/hosted/<id>/..., plus GET .../settings. Every
+// reply is JSON; a refusal is an error code with our own message, never the
+// server's text.
 //
 // In order: require_user (401 with no live session, 403 without the CSRF
 // header on a POST) or require_admin; the arguments (400, before anything is
-// read); the server: the owner's live one (404 no_live_server) or the id (404
-// not_found, 409 not_live), running (409 server_stopping while it stops, 409
+// read); the server: the id (404 not_found, also for another account's server
+// on an owner's route, 409 not_live), running (409 server_stopping while it stops, 409
 // server_not_running before it runs), its link up (503 admin_unavailable); the
 // admission (below: 429 console_busy, 503 console_full, 409 rotation_busy);
 // for an owner, one token from the account's read or write bucket (429
@@ -107,9 +107,10 @@ private:
 		std::string bucket_key;
 		mutable bool refunded = false;
 	};
-	// The owner's live running server, admitted, a token drawn from its write
-	// bucket (a command that changes the server) or its read bucket.
-	Caller owner_caller(const WebSessionUser &user, bool write, bool rotation_edit);
+	// The owner's server `id`, live and running, admitted, a token drawn from
+	// the account's write bucket (a command that changes the server) or its read
+	// bucket.
+	Caller owner_caller(const WebSessionUser &user, uint64_t id, bool write, bool rotation_edit);
 	// Server `id`, live and running, admitted.
 	Caller admin_caller(const RouteAccess &access, uint64_t id, bool rotation_edit);
 	// The server's state and link, for `c.server_id`; the refusal when it is not

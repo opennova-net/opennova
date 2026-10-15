@@ -4,12 +4,15 @@
 // NovaWorld service that walks every live hosted server through its lifecycle
 // on a MachineProvider, logging every transition in hosted_server_events.
 //
-//   requested     the owner asked (POST /api/me/server/start): the account's
-//                 entitlement, its one live server and the cap were checked then
+//   requested     the owner asked (POST /api/me/servers): the account's hosting
+//                 entitlement (its live servers under it) and the cap were
+//                 checked then
 //   provisioning  the service account srv-<id> with a new random password
 //                 (minted at the first start, its password set again at every
 //                 one), a new admin password, the provider's plan, the files
-//                 rendered from scratch (hosted_settings.h) and the machine
+//                 rendered from scratch (hosted_settings.h; a server past its
+//                 owner's entitlement, counted in id order among the owner's
+//                 live servers not stopping, is stopped instead) and the machine
 //                 launched on the server's data set (data_sets.h; one this
 //                 service no longer offers fails the server, which no restart
 //                 mends)
