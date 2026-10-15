@@ -53,8 +53,9 @@ public:
 	static constexpr RateLimiter::Params kSyncPerUser{ 3, 1.0 / 10, 10000 };
 	// The largest webhook body read (413 past it).
 	static constexpr size_t kWebhookMaxBytes = 1u << 20;
-	// A checkout session's life (Stripe's minimum is 30 minutes).
-	static constexpr int64_t kCheckoutLifeS = 30 * 60;
+	// A checkout session's life: an hour, well past Stripe's minimum of 30
+	// minutes from its creation (Stripe refuses one under that).
+	static constexpr int64_t kCheckoutLifeS = 60 * 60;
 	// The webhook events GET /api/admin/billing lists, newest first.
 	static constexpr size_t kEventsShown = 50;
 

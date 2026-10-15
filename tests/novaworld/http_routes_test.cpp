@@ -5987,7 +5987,7 @@ int test_billing_routes(Harness &h) {
 		TEST_EXPECT(session.client_reference_id == std::to_string(ana));
 		TEST_EXPECT(session.subscription_metadata.at(billing::kMetaInstance) == h.billing->instance_id());
 		const int64_t life = session.expires_at - billing::unix_now();
-		TEST_EXPECT(life > 1700 && life <= 1800);
+		TEST_EXPECT(life > 3500 && life <= 3600);
 		bool terms = false;
 		for (const auto &[k, v] : session.params) terms = terms || (k == "consent_collection[terms_of_service]" && v == "required");
 		TEST_EXPECT(terms);

@@ -327,9 +327,11 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 	create.cancel_url = config.site_url + "/me/support?checkout=cancel";
 	create.metadata = { { kMetaInstance, billing_->instance_id() }, { kMetaUserId, std::to_string(user.id) },
 		{ kMetaUsername, user.username } };
-	create.expires_at = now + kCheckoutLifeS;
 	create.automatic_tax = config.automatic_tax;
 	create.require_tos_consent = true;
+	// Stripe counts the life from the session's creation and refuses one under
+	// 30 minutes: the clock read last, after every slow call above.
+	create.expires_at = unix_now() + kCheckoutLifeS;
 	const auto session = client.create_checkout_session(create);
 	if (!session.ok() || session.value->url.empty()) {
 		log_account(user, "checkout",
