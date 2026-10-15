@@ -212,8 +212,6 @@ String PlayerProfiles::weapon_sav_relpath(const String &p_expansion) {
 }
 
 String PlayerProfiles::account_name() {
-	// The web platform has no account to ask.
-	if (OS::get_singleton()->has_feature("web")) return String();
 	const String windows = OS::get_singleton()->get_environment("USERNAME");
 	return windows.is_empty() ? OS::get_singleton()->get_environment("USER") : windows;
 }

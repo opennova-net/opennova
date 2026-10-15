@@ -33,14 +33,11 @@ target_include_directories(opennova_base
 )
 
 # proc — child processes from an argv array, no shell (the hosted-server
-# supervisor's opennova-serve, a front end's game). Not in the web build: a
-# browser starts no process. Its POSIX side blocks signals around the fork
-# with pthread_sigmask.
-if(NOT EMSCRIPTEN)
-    target_sources(opennova_base PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/proc/child_process.cpp)
-    find_package(Threads REQUIRED)
-    target_link_libraries(opennova_base PRIVATE Threads::Threads)
-endif()
+# supervisor's opennova-serve, a front end's game). Its POSIX side blocks
+# signals around the fork with pthread_sigmask.
+target_sources(opennova_base PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/proc/child_process.cpp)
+find_package(Threads REQUIRED)
+target_link_libraries(opennova_base PRIVATE Threads::Threads)
 
 target_link_libraries(opennova_base PUBLIC opennova_io opennova_formats)
 if(WIN32)
