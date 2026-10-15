@@ -158,6 +158,20 @@ describe('BillingSection', () => {
     expect(wrapper.get('section.limits-hold').text()).toContain('Apply the stops');
   });
 
+  it('names a sold price missing from the configuration, and why the hold waits', async () => {
+    billing.mockResolvedValue({ ok: true, value: adminBilling({ ...held, unknown_prices: ['price_old_tier2'] }) });
+    const wrapper = await mountSection();
+    const missing = wrapper.get('section.unknown-prices');
+    expect(missing.text()).toContain('A sold price is missing from the configuration');
+    expect(missing.text()).toContain('price_old_tier2');
+    expect(wrapper.get('section.limits-hold').text()).toContain('no read from Stripe releases it until that price is listed');
+  });
+
+  it('shows no missing-price note when every price is configured', async () => {
+    const wrapper = await mountSection();
+    expect(wrapper.find('section.unknown-prices').exists()).toBe(false);
+  });
+
   it('shows the limits hold with billing off too', async () => {
     billing.mockResolvedValue({ ok: true, value: adminBilling({ ...held, enabled: false }) });
     const wrapper = await mountSection();

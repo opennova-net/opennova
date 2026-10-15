@@ -157,6 +157,10 @@ export interface AdminBillingResponse {
   subscriptions: BillingSubscriptionRow[];
   // Accounts with more than one live tier subscription.
   duplicates: number[];
+  // Prices our subscriptions sell that no STRIPE_PRICE_* setting names (a
+  // sold price missing from the configuration): their subscribers get no
+  // hosting, and no read from Stripe releases the limits hold meanwhile.
+  unknown_prices: string[];
   orphans: BillingOrphan[];
   recent_events: BillingEvent[];
 }

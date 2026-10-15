@@ -31,11 +31,15 @@
       </p>
       <p v-if="billing.limits_hold_reason" class="font-mono text-xs text-ink-muted">{{ billing.limits_hold_reason }}</p>
       <p class="text-sm text-ink-muted">
-        <template v-if="billing.enabled">
+        <template v-if="!billing.enabled">Billing is off, so no read from Stripe can release it.</template>
+        <template v-else-if="billing.unknown_prices.length">
+          A sold price is missing from the configuration (below), so no read from Stripe releases it until that price
+          is listed.
+        </template>
+        <template v-else>
           It releases by itself after the next full read from Stripe (Reconcile now starts one): if the same owners are
           still past their limits then, their servers stop.
         </template>
-        <template v-else>Billing is off, so no read from Stripe can release it.</template>
       </p>
       <div v-if="!confirmingStops" class="flex flex-wrap items-center gap-3">
         <button type="button" :disabled="busy" :class="dangerButton" @click="confirmingStops = true">Apply the stops</button>
@@ -49,6 +53,20 @@
           <button type="button" :disabled="busy" :class="secondaryButton" @click="confirmingStops = false">Keep the hold</button>
         </div>
       </div>
+    </section>
+
+    <!-- Prices our subscriptions sell that the configuration does not name. -->
+    <section
+      v-if="billing?.unknown_prices.length"
+      class="unknown-prices space-y-2 rounded-panel border border-warn/40 bg-warn/10 p-4 sm:p-6"
+      aria-labelledby="billing-unknown-prices"
+    >
+      <h2 id="billing-unknown-prices" class="text-lg font-semibold text-warn">A sold price is missing from the configuration</h2>
+      <p class="text-sm text-ink">
+        Subscriptions sell <span class="font-mono">{{ billing.unknown_prices.join(', ') }}</span>, which no
+        STRIPE_PRICE setting names: their subscribers get no hosting for them. Add each price to the list of the tier
+        or the own machine it sells (after the one sold now, if it is an older one).
+      </p>
     </section>
 
     <div v-if="billing === null && loading" class="animate-pulse rounded-panel border border-border bg-panel p-8 text-center text-ink-muted">

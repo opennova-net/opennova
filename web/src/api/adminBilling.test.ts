@@ -19,6 +19,7 @@ describe('parseAdminBilling', () => {
       limits_hold_reason: 'a pass would stop 4 server(s) of 3 of 5 owners',
       limits_hold_owners: 3,
       limits_hold_servers: 4,
+      unknown_prices: ['price_old_tier2', 7],
       subscriptions: [],
       orphans: [],
       recent_events: [],
@@ -28,6 +29,7 @@ describe('parseAdminBilling', () => {
       limits_hold_reason: 'a pass would stop 4 server(s) of 3 of 5 owners',
       limits_hold_owners: 3,
       limits_hold_servers: 4,
+      unknown_prices: ['price_old_tier2'],
     });
   });
 

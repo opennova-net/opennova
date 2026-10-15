@@ -62,6 +62,9 @@ export function parseAdminBilling(data: unknown): AdminBillingResponse | null {
     pending_events: Number.isInteger(v.pending_events) ? (v.pending_events as number) : 0,
     subscriptions,
     duplicates: Array.isArray(v.duplicates) ? v.duplicates.filter((d): d is number => typeof d === 'number') : [],
+    unknown_prices: Array.isArray(v.unknown_prices)
+      ? v.unknown_prices.filter((p): p is string => typeof p === 'string')
+      : [],
     orphans,
     recent_events: events,
   };

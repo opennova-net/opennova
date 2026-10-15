@@ -117,6 +117,7 @@ export function adminBilling(overrides: Partial<AdminBillingResponse> = {}): Adm
       subscriptionRow(4, { item: 'own_machine', tier: null, quantity: 2, stripe_subscription_id: 'sub_4_own' }),
     ],
     duplicates: [],
+    unknown_prices: [],
     orphans: [],
     recent_events: [{ event_id: 'evt_1', type: 'invoice.paid', received_at: '2026-10-14T12:00:00Z', outcome: 'processed' }],
     ...overrides,
