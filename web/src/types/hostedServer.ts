@@ -42,11 +42,16 @@ export interface HostedSettings {
   missions: string[];
 }
 
-// POST /api/me/server/start's body: every field but game_name may be left out
-// (the backend's default): game defaults to the first data set the service
-// offers, and missions to that data set's rotation (its "missions" in
+// The settings in POST /api/me/servers's body: every field but game_name may
+// be left out (the backend's default): game defaults to the first data set the
+// service offers, and missions to that data set's rotation (its "missions" in
 // ONNET_HOSTED_DATA_SETS).
 export type StartSettings = Pick<HostedSettings, 'game_name'> & Partial<Omit<HostedSettings, 'game_name'>>;
+
+// POST /api/me/servers's body: the settings, and whether the server runs on
+// one of the account's own machines (the own-machine add-on) rather than a
+// shared one.
+export type StartRequest = StartSettings & { own_machine?: boolean };
 
 // The whole-number settings, each with its range per data set.
 export type HostedIntField = 'max_players' | 'time_limit' | 'kill_limit' | 'max_score' | 'respawn' | 'start_delay';
@@ -109,6 +114,8 @@ export interface HostedServer {
   state: HostedState;
   // Any state but stopped and failed.
   live: boolean;
+  // It runs on a machine of its own (the own-machine add-on), not a shared one.
+  own_machine: boolean;
   settings: HostedSettings;
   // The names the service gives the server's game and expansion ("Joint
   // Operations", "Escalation (jox01)" or "Joint Operations (base game)").
@@ -123,28 +130,53 @@ export interface HostedServer {
   running_at: string | null;
   ended_at: string | null;
   listing: HostedListing | null;
-  // The newest 50 transitions, oldest first: GET /api/me/server only (the
-  // start and stop replies leave them out).
+  // The newest 50 transitions, oldest first: GET /api/me/servers/<id> only
+  // (the list, the start and the stop replies leave them out).
   events?: HostedEvent[];
 }
 
-// GET /api/me/server.
-export interface MyHostedServerResponse {
-  // The service runs hosted servers (ONNET_HOSTED_PROVIDER is not none, and
-  // it offers at least one data set).
+// Where an account's hosting entitlement comes from: nothing, its support
+// tier, or an admin's comp grant.
+export type EntitlementSource = 'none' | 'tier' | 'comp';
+
+// The account's hosting entitlement, as GET /api/me/servers counts it.
+export interface HostingEntitlement {
+  // How many hosted servers the account may have live at once; 0 locks
+  // hosting.
+  max_servers: number;
+  // How many it has live now, stopping ones included (a stopping server holds
+  // its place until it has stopped).
+  used: number;
+  // The own-machine add-ons it holds, and how many of its live servers run on
+  // one.
+  own_machines: number;
+  own_used: number;
+  // Whether a new server may start: false while the support tier's payment is
+  // past due (the live ones keep running).
+  can_start: boolean;
+  source: EntitlementSource;
+}
+
+// GET /api/me/servers.
+export interface HostedServersResponse {
+  // The service runs hosted servers (it has a fleet and offers at least one
+  // data set).
   enabled: boolean;
-  // An admin approved this account for a hosted server.
-  can_host: boolean;
+  // Every hosted server place on the service is taken: a start now would be
+  // refused (at_capacity).
+  full: boolean;
+  entitlement: HostingEntitlement;
   // The data sets a start may pick, in the service's order (the first is a
   // start's default); only the ones this deployment configured.
   data_sets: HostedDataSet[];
-  // The account's live server, else its newest ended one, else null.
-  server: HostedServer | null;
+  // The live servers by id, oldest first, then the newest 10 ended ones,
+  // newest first; without their events.
+  servers: HostedServer[];
 }
 
-// The start and stop replies.
+// GET /api/me/servers/<id>, and the start and stop replies.
 export interface HostedServerReply {
-  server: HostedServer | null;
+  server: HostedServer;
 }
 
 // An account named in the fleet view.
@@ -190,7 +222,7 @@ export interface StopAllReply {
 
 // The console routes (apps/novaworld_server/hosted/console_routes.cpp, README
 // "Hosted servers", the console routes' table): the owner's on
-// /api/me/server/..., the admin's on /api/admin/hosted/<id>/....
+// /api/me/servers/<id>/..., the admin's on /api/admin/hosted/<id>/....
 
 // One PLAYER LIST row (the server's own slot-0 row left out). `team` and
 // `class` are the numbers the server prints.
@@ -253,7 +285,7 @@ export interface ConsoleLine {
   at: string;
 }
 
-// GET .../console.
+// GET .../console (readable on an ended server too).
 export interface ConsoleLog {
   server_id: number;
   // Null while the server has no link (not running).

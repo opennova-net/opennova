@@ -265,11 +265,11 @@
 
 <script setup lang="ts">
 // One of the account's listed servers with the owner's pushes to it
-// (api/myServers.ts), on the My servers page. `embedded` puts it inside the
-// hosted server's section (HostedServerStatus) for that server's own listing,
-// with only what its console lacks: the name, the message, the mission's end
-// and the weather and time. Its header, chat, players and stop are then the
-// section's own.
+// (api/myServers.ts), on the account's Servers page. `embedded` puts it on a
+// hosted server's own page (its Overview tab) for that server's listing, with
+// only what its console lacks: the name, the message, the mission's end and
+// the weather and time. Its header, chat, players and stop are then the
+// page's own.
 import { computed, nextTick, ref } from 'vue';
 import { sendServerCommand, stopHosting, type HostError } from '../api/myServers';
 import type { MyServer, OwnerVerb, RosterSlot, ServerCommandBody } from '../types/myServers';

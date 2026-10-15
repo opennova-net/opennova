@@ -7,12 +7,12 @@
   >
     <div class="space-y-2">
       <h2 :id="`${baseId}-heading`" class="text-2xl font-semibold text-ink">
-        {{ retry ? 'Start your server again' : 'Start your hosted server' }}
+        {{ retry ? 'Start your server again' : 'Start a hosted server' }}
       </h2>
       <p class="text-sm text-ink-muted">
         {{
           retry
-            ? 'Your last server failed. Check its settings and try again.'
+            ? 'That server failed. Check its settings and try again.'
             : 'Pick your settings and start. Your server stays in the server browser until you stop it.'
         }}
       </p>
@@ -208,6 +208,26 @@
       :disabled="busy"
     />
 
+    <!-- The own-machine add-on: shown while one of the account's own machines
+         is free. -->
+    <div v-if="ownMachinesFree > 0" class="min-w-0 space-y-1">
+      <label class="flex items-center gap-3 text-sm text-ink">
+        <input
+          :id="`${baseId}-own_machine`"
+          v-model="ownMachine"
+          type="checkbox"
+          :disabled="busy"
+          :aria-describedby="`${baseId}-own_machine-hint`"
+          class="h-4 w-4 rounded border-border bg-surface text-accent focus:ring-accent"
+        />
+        Own machine
+      </label>
+      <p :id="`${baseId}-own_machine-hint`" class="text-xs text-ink-muted">
+        Run this server alone on one of your own machines instead of a shared one.
+        {{ ownMachinesFree === 1 ? 'One of your own machines is free.' : `${ownMachinesFree} of your own machines are free.` }}
+      </p>
+    </div>
+
     <div class="flex flex-col gap-3 border-t border-border pt-6 sm:flex-row sm:items-center sm:justify-between">
       <p class="text-xs text-ink-muted">Hosted servers are experimental (pre-1.0).</p>
       <button
@@ -222,10 +242,11 @@
 </template>
 
 <script setup lang="ts">
-// The hosted server's settings and its start (POST /api/me/server/start):
-// the My servers page's one start control, offered only while the account
-// has no live server (the service allows one: 409 already_live). After a
-// failed server it is the owner's try again, with that server's settings.
+// A hosted server's settings and its start (POST /api/me/servers), on the
+// account's start page (pages/account/NewServerPage.vue), offered only while
+// its entitlement has room. Started from an ended server, it begins with that
+// server's settings (after a failed one, the owner's try again). The
+// own-machine checkbox shows while one of the account's own machines is free.
 // The game (a data set the service offers) comes first and drives the rest:
 // the expansions it offers, the whole-number ranges and the rotation's
 // missions. Every field is checked against the backend's rule
@@ -259,24 +280,33 @@ import {
   type SettingsField,
 } from '../utils/hostedSettings';
 
-const props = defineProps<{
-  // The account's last server's settings, to start it again; null for none.
-  previous: HostedSettings | null;
-  // The games the service offers (GET /api/me/server data_sets), in its order.
-  dataSets: HostedDataSet[];
-  // The last server failed: the start is another try at it.
-  retry?: boolean;
-}>();
+const props = withDefaults(
+  defineProps<{
+    // An ended server's settings, to start it again; null for none.
+    previous: HostedSettings | null;
+    // The games the service offers (GET /api/me/servers data_sets), in its order.
+    dataSets: HostedDataSet[];
+    // The server started from failed: the start is another try at it.
+    retry?: boolean;
+    // The base of every id in the form.
+    baseId?: string;
+    // How many of the account's own machines are free; the own-machine
+    // checkbox shows while any is.
+    ownMachinesFree?: number;
+  }>(),
+  { retry: false, baseId: 'hosted-settings', ownMachinesFree: 0 },
+);
 
 const emit = defineEmits<{
   // The service took the request (202); the server is `requested`.
-  (e: 'started', server: HostedServer | null): void;
+  (e: 'started', server: HostedServer): void;
   // A refusal the page acts on besides showing it here (a session that ended,
-  // a server already live, the approval or hosting gone).
+  // the entitlement or hosting gone).
   (e: 'refused', error: HostedError): void;
 }>();
 
-const baseId = 'hosted-settings';
+// Run on one of the account's own machines.
+const ownMachine = ref(false);
 const labelClass = 'block text-xs font-medium uppercase tracking-wider text-ink-muted';
 const inputBase =
   'rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none disabled:opacity-60 aria-[invalid=true]:border-danger';
@@ -388,7 +418,7 @@ watch(refusedValue, (now, before) => {
 });
 
 function fieldId(field: SettingsField): string {
-  return `${baseId}-${field}`;
+  return `${props.baseId}-${field}`;
 }
 function hintId(field: SettingsField): string {
   return `${fieldId(field)}-hint`;
@@ -425,7 +455,7 @@ async function submit() {
   }
   alertText.value = '';
   busy.value = true;
-  const reply = await startHostedServer(result.settings);
+  const reply = await startHostedServer(result.settings, props.ownMachinesFree > 0 && ownMachine.value);
   busy.value = false;
   if (reply.ok) {
     emit('started', reply.value);

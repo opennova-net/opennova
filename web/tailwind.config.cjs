@@ -20,7 +20,13 @@ module.exports = {
         accent: 'rgb(var(--accent) / <alpha-value>)',
         danger: 'rgb(var(--danger) / <alpha-value>)',
         warn: 'rgb(var(--warn) / <alpha-value>)',
-        online: 'rgb(var(--online) / <alpha-value>)'
+        online: 'rgb(var(--online) / <alpha-value>)',
+        chart: {
+          series: 'rgb(var(--chart-series) / <alpha-value>)',
+          context: 'rgb(var(--chart-context) / <alpha-value>)',
+          grid: 'rgb(var(--chart-grid) / <alpha-value>)',
+          axis: 'rgb(var(--chart-axis) / <alpha-value>)'
+        }
       },
       borderColor: {
         // Bare `border` (no explicit color) uses the standard 1px border color.

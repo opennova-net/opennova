@@ -3,7 +3,14 @@ import LandingPage from '../pages/LandingPage.vue';
 import LoginPage from '../pages/LoginPage.vue';
 import RegisterPage from '../pages/RegisterPage.vue';
 import LobbyPage from '../pages/LobbyPage.vue';
-import MyServersPage from '../pages/MyServersPage.vue';
+import AccountLayout from '../pages/account/AccountLayout.vue';
+import ServersPage from '../pages/account/ServersPage.vue';
+import NewServerPage from '../pages/account/NewServerPage.vue';
+import AccountPage from '../pages/account/AccountPage.vue';
+import ServerDetailLayout from '../pages/servers/ServerDetailLayout.vue';
+import ServerOverviewTab from '../pages/servers/ServerOverviewTab.vue';
+import ServerConsoleTab from '../pages/servers/ServerConsoleTab.vue';
+import ServerSettingsTab from '../pages/servers/ServerSettingsTab.vue';
 import AdminLayout from '../pages/admin/AdminLayout.vue';
 import UsersSection from '../pages/admin/UsersSection.vue';
 import ServerStatusSection from '../pages/admin/ServerStatusSection.vue';
@@ -21,9 +28,31 @@ const router = createRouter({
     { path: '/login', component: LoginPage },
     { path: '/register', component: RegisterPage },
     { path: '/lobby', component: LobbyPage },
-    { path: '/me/servers', component: MyServersPage, meta: { requiresUser: true } },
-    // The hosted server's page before it joined My servers: old links land there.
-    { path: '/me/server', redirect: '/me/servers' },
+    // The account area.
+    {
+      path: '/me',
+      component: AccountLayout,
+      meta: { requiresUser: true },
+      children: [
+        { path: '', redirect: '/me/servers' },
+        { path: 'servers', component: ServersPage },
+        { path: 'servers/new', component: NewServerPage },
+        {
+          path: 'servers/:id(\\d+)',
+          component: ServerDetailLayout,
+          props: { scope: 'owner' },
+          children: [
+            { path: '', component: ServerOverviewTab },
+            { path: 'console', component: ServerConsoleTab },
+            { path: 'settings', component: ServerSettingsTab },
+          ],
+        },
+        { path: 'account', component: AccountPage },
+        // The hosted server's page before an account could have several:
+        // old links land on the list.
+        { path: 'server', redirect: '/me/servers' },
+      ],
+    },
     {
       path: '/admin',
       component: AdminLayout,
@@ -33,13 +62,17 @@ const router = createRouter({
         { path: 'server', component: ServerStatusSection },
         { path: 'connections', component: ConnectionsSection },
         { path: 'hosted', component: HostedSection },
-        { path: 'cd-keys', component: CdKeysSection }
-      ]
-    }
+        { path: 'cd-keys', component: CdKeysSection },
+      ],
+    },
   ],
-  scrollBehavior() {
+  // A server page's tab change keeps the scroll (the header and the tabs stay
+  // put); any other navigation starts at the top.
+  scrollBehavior(to, from) {
+    const onServerPage = to.matched.some((record) => record.components?.default === ServerDetailLayout);
+    if (onServerPage && to.params.id === from.params.id) return false;
     return { top: 0 };
-  }
+  },
 });
 
 router.beforeEach(requireUser);

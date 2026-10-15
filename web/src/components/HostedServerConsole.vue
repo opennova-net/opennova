@@ -2,11 +2,11 @@
   <section class="space-y-6" :aria-labelledby="ids.heading" data-seam="hosted-console">
     <div class="flex flex-col gap-2 sm:flex-row sm:items-baseline sm:justify-between">
       <component :is="headingTag" :id="ids.heading" class="text-lg font-semibold text-ink">Server console</component>
-      <p class="text-xs text-ink-muted">
+      <p v-if="!logOnly" class="text-xs text-ink-muted">
         Console link:
         <span :class="linkClass">{{ linkLabel }}</span>
         <template v-if="link?.state === 'up' && link.game_state">
-          · {{ link.game_state === 'Game' ? 'in a match' : link.game_state === 'Menus' ? 'between matches' : 'scene unknown' }}
+          ({{ link.game_state === 'Game' ? 'in a match' : link.game_state === 'Menus' ? 'between matches' : 'scene unknown' }})
         </template>
       </p>
     </div>
@@ -21,6 +21,7 @@
       The console's last refresh did not get through: {{ trouble }} It keeps trying.
     </p>
 
+    <template v-if="!logOnly">
     <!-- PLAYER LIST, with punt / ban / swap / kill for the owner. -->
     <section class="space-y-3" :aria-labelledby="ids.players">
       <div class="flex flex-wrap items-baseline justify-between gap-2">
@@ -241,6 +242,7 @@
         </p>
       </form>
     </section>
+    </template>
 
     <!-- The console ring: the commands sent (with their sender), the replies and
          the link's own lines. -->
@@ -277,10 +279,12 @@
 // its chat and its console log, read through the service's console routes
 // (api/hostedServer.ts) by useHostedConsole, every call the service admits in
 // the page's one console queue (useConsoleQueue: the service runs one console
-// request per account at once). The owner's view (HostedServerStatus, on /me/servers) has
-// every command the owner's routes offer: kick, ban, swap and kill a player,
-// add, remove and play-next a map, cycle, and chat. The admin's view
-// (HostedSection, on /admin/hosted) reads the same panels and cycles.
+// request per account at once). The owner's view (the server page's Console
+// tab, /me/servers/<id>/console) has every command the owner's routes offer:
+// kick, ban, swap and kill a player, add, remove and play-next a map, cycle,
+// and chat. The admin's view reads the same panels and cycles. A server that
+// is not running shows its console log alone (`logOnly`), read once when it
+// has ended (`follow` false). Every id carries the target's kind and id.
 import { computed, nextTick, ref, watch, type Ref } from 'vue';
 import {
   CHAT_TEXT_MAX,
@@ -303,8 +307,12 @@ const props = withDefaults(
     serverName: string;
     // The heading level the console sits under (its panels take the next).
     headingLevel?: 2 | 3 | 4;
+    // The console log alone (the server is not running).
+    logOnly?: boolean;
+    // Keep reading (the default); false reads once (an ended server).
+    follow?: boolean;
   }>(),
-  { headingLevel: 3 },
+  { headingLevel: 3, logOnly: false, follow: true },
 );
 
 const emit = defineEmits<{
@@ -319,7 +327,7 @@ const headingTag = computed(() => `h${props.headingLevel}`);
 const subheadingTag = computed(() => `h${props.headingLevel + 1}`);
 
 const ids = computed(() => {
-  const base = props.target.kind === 'admin' ? `hosted-console-${props.target.id}` : 'hosted-console-own';
+  const base = `hosted-console-${props.target.kind}-${props.target.id}`;
   return {
     heading: `${base}-heading`,
     players: `${base}-players`,
@@ -370,9 +378,11 @@ const {
   cycle,
   sendChat,
 } = useHostedConsole(props.target, useConsoleQueue(), {
-  missions: props.mode === 'owner',
+  missions: props.mode === 'owner' && !props.logOnly,
   onGone: () => emit('gone'),
   onUnauthorized: () => emit('unauthorized'),
+  logOnly: props.logOnly,
+  follow: props.follow,
 });
 
 const controlsOff = computed(() => acting.value || ended.value !== '');

@@ -4,6 +4,7 @@
 
 import { isAxiosError } from 'axios';
 import { adminClient } from './client';
+import { isHostedServer } from './hostedServer';
 import type { ConnectionsResponse, ServerStatus } from '../types/admin';
 import type { FleetResponse, FleetServer, FleetServerReply, StopAllReply } from '../types/hostedServer';
 
@@ -159,6 +160,18 @@ export async function fetchHostedFleet(signal?: AbortSignal): Promise<AdminResul
     const res = await adminClient.get<unknown>('/hosted', { signal });
     if (!isFleetResponse(res.data)) return malformedAdminReply(res.status);
     return { ok: true, value: res.data };
+  } catch (err) {
+    return { ok: false, error: describeAdminError(err) };
+  }
+}
+
+// GET /api/admin/hosted/<id>: one hosted server, with its events.
+export async function fetchFleetServer(id: number, signal?: AbortSignal): Promise<AdminResult<FleetServer>> {
+  try {
+    const res = await adminClient.get<unknown>(`/hosted/${id}`, { signal });
+    const server = (res.data as { server?: unknown } | null)?.server;
+    if (!isHostedServer(server)) return malformedAdminReply(res.status);
+    return { ok: true, value: server as FleetServer };
   } catch (err) {
     return { ok: false, error: describeAdminError(err) };
   }

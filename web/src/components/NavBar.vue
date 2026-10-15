@@ -13,14 +13,14 @@
 
       <nav class="hidden items-center gap-6 text-sm uppercase tracking-wider text-ink lg:flex">
         <RouterLink class="hover:text-ink-bright transition" to="/lobby">Lobbies</RouterLink>
-        <RouterLink class="hover:text-ink-bright transition" to="/admin">Admin</RouterLink>
+        <RouterLink v-if="isAdmin" class="hover:text-ink-bright transition" to="/admin">Admin</RouterLink>
         <template v-if="ready">
           <template v-if="user">
             <RouterLink class="hover:text-ink-bright transition" to="/me/servers">My servers</RouterLink>
-            <span class="text-ink-muted">
-              <span class="sr-only">Logged in as </span>
+            <RouterLink class="text-ink-muted transition hover:text-ink-bright" to="/me/account">
+              <span class="sr-only">Your account: logged in as </span>
               <span class="normal-case tracking-normal font-medium text-ink">{{ user.username }}</span>
-            </span>
+            </RouterLink>
             <button
               type="button"
               class="rounded-control border border-border-strong px-4 py-1 uppercase tracking-wider text-ink transition hover:border-accent disabled:opacity-50"
@@ -91,14 +91,14 @@
       >
         <div class="flex flex-col gap-2 text-sm uppercase tracking-[0.2em] text-ink">
           <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" to="/lobby" @click="closeMenu">Lobbies</RouterLink>
-          <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" to="/admin" @click="closeMenu">Admin</RouterLink>
+          <RouterLink v-if="isAdmin" class="rounded-control px-3 py-2 hover:bg-hover" to="/admin" @click="closeMenu">Admin</RouterLink>
           <template v-if="ready">
             <template v-if="user">
               <RouterLink class="rounded-control px-3 py-2 hover:bg-hover" to="/me/servers" @click="closeMenu">My servers</RouterLink>
-              <p class="px-3 py-2 text-ink-muted">
-                Logged in as
+              <RouterLink class="rounded-control px-3 py-2 text-ink-muted hover:bg-hover" to="/me/account" @click="closeMenu">
+                Account:
                 <span class="normal-case tracking-normal font-medium text-ink">{{ user.username }}</span>
-              </p>
+              </RouterLink>
               <button
                 type="button"
                 class="rounded-control border border-border-strong px-4 py-2 text-center uppercase tracking-[0.2em] text-ink transition hover:border-accent disabled:opacity-50"
@@ -147,7 +147,7 @@ watch(
   }
 );
 
-const { user, ready, signOut } = useSession();
+const { user, ready, isAdmin, signOut } = useSession();
 const signingOut = ref(false);
 
 // The login link brings the visitor back to the page they were on.
