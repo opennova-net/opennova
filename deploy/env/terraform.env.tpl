@@ -15,3 +15,6 @@ TF_VAR_cloudflare_domain=op://@VAULT@/cloudflare/domain
 TF_VAR_db_master_password=op://@VAULT@/@RDS_ITEM@/master_password
 TF_VAR_alert_email=op://@VAULT@/alerts/email
 TF_VAR_edge_auth_secret=op://@VAULT@/app-prod/edge_auth_secret
+# Where Cloudflare Email Routing forwards support@<domain> (infra/aws/email.tf):
+# `secrets init` makes it REPLACE_ME, which keeps email routing off.
+TF_VAR_email_forward_to=op://@VAULT@/email/forward_to

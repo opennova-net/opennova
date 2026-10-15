@@ -164,6 +164,28 @@ variable "cloudflare_web_proxied" {
   default     = true
 }
 
+variable "email_forward_to" {
+  description = "The mailbox Cloudflare Email Routing forwards the domain's addresses to (email.tf): support@<domain> and every email_routes local part. From the vault (TF_VAR_email_forward_to: item email, field forward_to); empty or REPLACE_ME turns email routing off. Cloudflare emails it a verification link once; nothing is forwarded before it is clicked."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = contains(["", "REPLACE_ME"], var.email_forward_to) || can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.email_forward_to))
+    error_message = "email_forward_to must be an email address, or empty or REPLACE_ME (email routing off)."
+  }
+}
+
+variable "email_routes" {
+  description = "The domain's local parts that forward to email_forward_to (prod's zone; email.tf): [\"support\"] makes support@<domain>. Lowercase; every other address is refused."
+  type        = list(string)
+  default     = ["support"]
+
+  validation {
+    condition     = alltrue([for l in var.email_routes : can(regex("^[a-z0-9]([a-z0-9._+-]{0,62}[a-z0-9])?$", l))])
+    error_message = "email_routes takes lowercase local parts (letters, digits, '.', '_', '+' and '-', not at either end), at most 64 each."
+  }
+}
+
 variable "ops_bucket_name" {
   description = "The operations bucket: every deployment's releases (releases/<deployment>/) and database dumps (novaworld/ for prod, novaworld-<deployment>/ otherwise). Prod (the default workspace) owns it; another deployment names the same bucket."
   type        = string

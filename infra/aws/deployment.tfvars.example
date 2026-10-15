@@ -44,6 +44,10 @@ instance_type = "c7i.large"
 # proxied toggle lives here.
 cloudflare_web_proxied = true
 
+# Email Routing (email.tf, prod's): the local parts that forward to the vault's
+# email/forward_to (support@<domain> by default).
+# email_routes = ["support"]
+
 # The fleet (fleet.tf; DEPLOY.md "Hosted game servers"). The data snapshots
 # (hosted_data_snapshots, one per data set) come from the vault (item `hosted`,
 # fields data_snapshot_id_<slug>), not this file: hosting is off without one.

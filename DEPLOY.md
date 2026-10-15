@@ -59,7 +59,8 @@ op item create --vault OpenNova-Deploy --title ghcr --category 'Secure Note' \
 
 The Cloudflare token needs, on the zone: DNS / Edit, Zone Settings / Edit, SSL and
 Certificates / Edit (the origin certificate), Transform Rules / Edit (edge
-authentication) and Zone WAF / Edit (the webhook rule).
+authentication), Zone WAF / Edit (the webhook rule) and Email Routing Rules / Edit; on
+the account: Email Routing Addresses / Edit (the email destination).
 
 Everything else is made by the toolbox once the token works (step 2):
 `./deploy/run.sh secrets init` adds whatever is missing and never overwrites a field.
@@ -72,11 +73,13 @@ It prints item and field names, never a value:
 | `rds` (`rds-<deployment>`) | `master_password` | random |
 | `stripe-test`, `stripe-live` | `secret_key`, `webhook_secret`, `price_tier1`, `price_tier2`, `price_tier3`, `price_own_machine` | `REPLACE_ME` |
 | `alerts` | `email` | `REPLACE_ME` |
+| `email` | `forward_to` | `REPLACE_ME` |
 
 Fill the `REPLACE_ME` fields in the 1Password app (that keeps the keys out of shell
-history): `alerts/email` is where every alarm, budget and cost anomaly writes; the
-Stripe items are filled from the Stripe dashboard ("Monthly support tiers (Stripe)",
-below). Optional fields the toolbox picks up when present: `app-prod/bootstrap_admin`
+history): `alerts/email` is where every alarm, budget and cost anomaly writes;
+`email/forward_to` is the mailbox `support@<domain>` forwards to ("Email", section 3);
+the Stripe items are filled from the Stripe dashboard ("Monthly support tiers
+(Stripe)", below). Optional fields the toolbox picks up when present: `app-prod/bootstrap_admin`
 (section 3) and `app-prod/edge_auth_secret_previous` (a rotation). Item `hosted` holds the
 hosted servers' data snapshots (section 6). There is no SSH item any more.
 
@@ -112,8 +115,9 @@ off)`, `absent (billing off)` or `FAILED: <field> (malformed)` / `(a test key in
 item)`; a failed one makes it exit non-zero. The forms it checks: `secret_key`
 `sk_<mode>_...` or `rk_<mode>_...` (the item's mode: `test` for `stripe-test`, `live` for
 `stripe-live`), `webhook_secret` `whsec_...`, each price `price_...` (a comma list: the
-first is sold, the rest are grandfathered). It also says whether `alerts/email` is still a
-placeholder.
+first is sold, the rest are grandfathered). It also says whether `alerts/email` and
+`email/forward_to` are still placeholders (an absent `email` item fails: every
+Terraform run reads it, so run `secrets init` once after an upgrade).
 
 `./deploy/run.sh` (or `.\deploy\run.ps1`) rebuilds the toolbox image when
 `deploy/Dockerfile` changed and runs it with the repository mounted. The toolbox is a
@@ -190,8 +194,8 @@ fixed network interface (`10.44.0.10`) and the adopted Elastic IP, its security 
 the machines alone, no 22, no 80), the database, the SSM parameters and converge
 document, the operations bucket, the logs, metrics and alarms, the budgets, the
 Cloudflare records, the origin certificate, the zone's TLS setting, edge authentication
-and the webhook rule, and (with data snapshots) the fleet's launch templates. A new
-database takes 10 to 15 minutes.
+and the webhook rule, the zone's Email Routing (with a destination), and (with data
+snapshots) the fleet's launch templates. A new database takes 10 to 15 minutes.
 
 The state is a 1Password document per deployment, pulled before and pushed after each
 run, so any operator with vault access can run the stack. `infra apply`, `state-rm` and
@@ -287,6 +291,28 @@ rotation, so the rule moves without a window of 403s:
    -hex 32`); `secrets sync`; `app converge` (for each deployment). nginx accepts both.
 2. `./deploy/run.sh infra apply`: the rule stamps the new secret.
 3. Delete the `edge_auth_secret_previous` field, `secrets sync --prune`, `app converge`.
+
+### Email (support@<domain>)
+
+Mail to `support@<domain>` (and to each local part in `email_routes`, default
+`["support"]`) reaches one mailbox of yours through Cloudflare Email Routing
+(`infra/aws/email.tf`, prod's alone: it is the zone's):
+
+1. In the vault, item `email`, set `forward_to` to the destination address (`secrets
+   init` makes the field as `REPLACE_ME`; `REPLACE_ME` or empty keeps email routing off).
+   Not an address at the domain itself, which would loop.
+2. `./deploy/run.sh infra apply`: it turns Email Routing on for the zone (Cloudflare adds
+   and locks its MX and SPF records; a zone holding MX records of another mail service
+   must drop them first), adds the destination address to the zone's account, and makes
+   one rule per local part.
+3. Cloudflare emails the destination a verification link: click it. Nothing is forwarded
+   until then (Email, Email Routing, Destination addresses in the dashboard shows it
+   pending).
+
+It is receive-only: replies leave from the destination mailbox, under its own address.
+Sending as `support@<domain>` needs an outbound mail provider (an SMTP relay with the
+domain's SPF and DKIM), which this stack does not set up. Every address no rule names is
+refused (the zone's catch-all stays off). The token's email permissions are in section 1.
 
 ### The first site admin
 

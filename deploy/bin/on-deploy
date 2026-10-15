@@ -17,9 +17,11 @@
 #
 # Commands:
 #   secrets init                  add what the vault lacks: the deployment's
-#                                 generated secrets and the Stripe placeholders
-#                                 (never overwrites; prints no value)
-#   secrets check                 resolve every reference; check the Stripe items
+#                                 generated secrets and the placeholders (Stripe,
+#                                 alerts/email, email/forward_to; never
+#                                 overwrites; prints no value)
+#   secrets check                 resolve every reference; check the Stripe items,
+#                                 the alert address and the email destination
 #   secrets sync [--prune]        copy the deployment's runtime secrets to SSM
 #                                 (/opennova/NAME/secret/*); --prune deletes the
 #                                 ones the vault no longer names
@@ -477,6 +479,10 @@ secrets_init() {
     master_password:gen:24:CONCEALED
   ensure_item alerts SECURE_NOTE \
     email:value:REPLACE_ME:STRING
+  # Where support@<domain> forwards (infra/aws/email.tf); REPLACE_ME keeps
+  # email routing off.
+  ensure_item email SECURE_NOTE \
+    forward_to:value:REPLACE_ME:STRING
   local specs=()
   mapfile -t specs < <(stripe_placeholder_specs)
   ensure_item stripe-test API_CREDENTIAL "${specs[@]}"
@@ -553,6 +559,15 @@ secrets_check() {
     log "  alerts/email    OK"
   else
     log "  alerts/email    placeholder or absent: the alarms, budgets and cost anomalies email nobody"
+  fi
+  # Where the domain's email routes forward (prod's zone, infra/aws/email.tf).
+  # terraform.env.tpl names the field, so an absent item fails its line above.
+  if ! vault_has_item email; then
+    err "  email/forward_to    absent: every infra run needs it (secrets init makes it, REPLACE_ME: email routing off)"; rc=1
+  elif email="$(op read --no-newline "op://$VAULT/email/forward_to" 2>/dev/null)" && [[ "$email" == *@*.* ]]; then
+    log "  email/forward_to    OK: support@<domain> forwards there (once Cloudflare's verification link is clicked)"
+  else
+    log "  email/forward_to    placeholder: email routing off (support@<domain> receives nothing)"
   fi
   email=""
   # Optional: hosted game servers are off without it (DEPLOY.md, "Hosted game servers").
