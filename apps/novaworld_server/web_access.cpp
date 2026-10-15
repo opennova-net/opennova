@@ -3,6 +3,8 @@
 #include "http_cookies.h"
 #include "server_config.h"
 
+#include <base/io/sha256.h>
+
 #include <algorithm>
 #include <cstdio>
 #include <utility>
@@ -135,13 +137,7 @@ bool WebAccess::bearer_authorized(const crow::request &req) const {
 	if (admin_token_.empty()) return false;
 	const std::string auth = req.get_header_value("Authorization");
 	if (auth.rfind("Bearer ", 0) != 0) return false;
-	const std::string presented = auth.substr(7);
-	if (presented.size() != admin_token_.size()) return false;
-	unsigned diff = 0;
-	for (size_t i = 0; i < presented.size(); ++i) {
-		diff |= static_cast<unsigned>(presented[i]) ^ static_cast<unsigned>(admin_token_[i]);
-	}
-	return diff == 0;
+	return io::constant_time_equal(std::string_view(auth).substr(7), admin_token_);
 }
 
 RouteAccess WebAccess::require_user(const crow::request &req) {

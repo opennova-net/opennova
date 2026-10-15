@@ -1,7 +1,8 @@
 // SHA-256 (FIPS 180-4), header-only: the digest a stored secret is compared through (the
 // NovaWorld website's session tokens are kept only as their SHA-256), and the content digest
 // the retail-pinned tests compare listings and payloads by. A streaming `Sha256`
-// (update/finish), the one-shot `sha256`, and `sha256_hex`, the 64 lower-case hex digits.
+// (update/finish), the one-shot `sha256`, `sha256_hex` (the 64 lower-case hex digits),
+// `hmac_sha256` (a webhook payload's signature) and `constant_time_equal` (comparing secrets).
 //
 // Not a port: nothing here is witnessed engine behaviour.
 #pragma once
@@ -174,5 +175,40 @@ inline std::string sha256_hex(const Sha256Digest &digest) {
 }
 
 inline std::string sha256_hex(const void *data, size_t size) { return sha256_hex(sha256(data, size)); }
+
+// HMAC-SHA256 (RFC 2104 over FIPS 180-4; RFC 4231 test vectors): the signature a webhook sender
+// such as Stripe stamps on a payload with a shared secret. A key longer than the 64-byte block is
+// hashed first; a shorter one is zero-padded.
+inline Sha256Digest hmac_sha256(std::string_view key, std::string_view message) noexcept {
+	uint8_t block[64] = {};
+	if (key.size() > sizeof(block)) {
+		const Sha256Digest hashed = sha256(key);
+		std::memcpy(block, hashed.data(), hashed.size());
+	} else if (!key.empty()) {
+		std::memcpy(block, key.data(), key.size());
+	}
+	uint8_t pad[64];
+	Sha256 inner;
+	for (size_t i = 0; i < sizeof(pad); ++i) pad[i] = uint8_t(block[i] ^ 0x36u);
+	inner.update(pad, sizeof(pad));
+	inner.update(message);
+	const Sha256Digest inner_digest = inner.finish();
+	Sha256 outer;
+	for (size_t i = 0; i < sizeof(pad); ++i) pad[i] = uint8_t(block[i] ^ 0x5cu);
+	outer.update(pad, sizeof(pad));
+	outer.update(inner_digest.data(), inner_digest.size());
+	return outer.finish();
+}
+
+// Compares two secrets (a presented token, a hex signature) in time that depends only on their
+// lengths, never on where they first differ. Unequal lengths are unequal at once: the length of a
+// token or a signature is not the secret.
+inline bool constant_time_equal(std::string_view a, std::string_view b) noexcept {
+	if (a.size() != b.size()) return false;
+	unsigned diff = 0;
+	for (size_t i = 0; i < a.size(); ++i)
+		diff |= static_cast<unsigned>(static_cast<uint8_t>(a[i]) ^ static_cast<uint8_t>(b[i]));
+	return diff == 0;
+}
 
 } // namespace opennova::io
