@@ -92,6 +92,7 @@ describe('the routes', () => {
   it('maps the refusals to messages, never the server text', async () => {
     const cases: [number, string, string][] = [
       [409, 'already_subscribed', 'You already have a support tier'],
+      [409, 'own_machine_limit', 'an own machine for every server'],
       [503, 'billing_disabled', 'not open on NovaWorld yet'],
       [503, 'billing_misconfigured', 'no payment was taken'],
       [502, 'stripe_unavailable', 'Stripe did not answer'],

@@ -37,6 +37,7 @@ export type BillingErrorCode =
   | 'invalid_item'
   | 'not_eligible'
   | 'already_subscribed'
+  | 'own_machine_limit'
   | 'no_billing_account'
   | 'stripe_unavailable'
   | 'db_error'
@@ -65,6 +66,7 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<BillingErrorCode>([
   'invalid_item',
   'not_eligible',
   'already_subscribed',
+  'own_machine_limit',
   'no_billing_account',
   'stripe_unavailable',
   'db_error',
@@ -93,6 +95,8 @@ function messageFor(code: BillingErrorCode, retryAfterSeconds?: number): string 
       return 'Your account cannot buy that right now: an own machine needs a support tier first, and an account that is not active cannot subscribe.';
     case 'already_subscribed':
       return 'You already have a support tier. Change it in the billing portal.';
+    case 'own_machine_limit':
+      return 'You already have an own machine for every server your support tier covers. A higher tier makes room for more.';
     case 'no_billing_account':
       return 'You have no billing account yet: subscribe to a support tier first.';
     case 'stripe_unavailable':
@@ -262,7 +266,9 @@ export function syncMyBilling(): Promise<BillingResult<MyBilling>> {
 }
 
 // POST /api/billing/checkout: a Stripe Checkout session for `item`; its URL.
-// 409 already_subscribed while a tier is live (change it in the portal).
+// 409 already_subscribed while a tier is live (change it in the portal), 409
+// own_machine_limit for the add-on once every server the account may run has
+// an own machine.
 export function startCheckout(item: BillingItem): Promise<BillingResult<string>> {
   return call(() => apiClient.post<unknown>('/billing/checkout', { item }), pickUrl);
 }

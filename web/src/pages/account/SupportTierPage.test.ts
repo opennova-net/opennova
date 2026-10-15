@@ -47,6 +47,7 @@ function statusText(): string {
 describe('SupportTierPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.sessionStorage.clear(); // the checkout item a test's checkout remembered
     tiers.mockResolvedValue({ ok: true, value: tiersResponse() });
     mine.mockResolvedValue({ ok: true, value: myBilling() });
   });
@@ -103,6 +104,29 @@ describe('SupportTierPage', () => {
     await page.get('#support-tier-1 button').trigger('click');
     await flushPromises();
     expect(page.get('[role="alert"]').text()).toContain('looked wrong');
+  });
+
+  const ownMachine = { quantity: 1, status: 'active', current_period_end: '2026-11-14T12:00:00Z', cancel_at_period_end: false };
+
+  it('offers another own machine below the limit', async () => {
+    mine.mockResolvedValue({ ok: true, value: subscribed(3, { own_machines: 1, own_machine_subscription: ownMachine }) });
+    checkout.mockResolvedValue({ ok: true, value: CHECKOUT_URL });
+    const page = await mountAt('/me/support');
+    const section = page.get('#support-own-machine').element.closest('section')!;
+    expect(section.textContent).toContain('You have 1 own machine (active).');
+    const add = page.findAll('button').find((b) => b.text() === 'Add another own machine');
+    expect(add).toBeDefined();
+    await add!.trigger('click');
+    await flushPromises();
+    expect(checkout).toHaveBeenCalledWith('own_machine');
+  });
+
+  it('hides the add-on once every server has an own machine', async () => {
+    mine.mockResolvedValue({ ok: true, value: subscribed(1, { own_machines: 1, own_machine_subscription: ownMachine }) });
+    const page = await mountAt('/me/support');
+    expect(page.findAll('button').some((b) => b.text().includes('own machine'))).toBe(false);
+    expect(page.get('#support-own-machine-hint').text()).toContain('an own machine for every server your tier covers');
+    expect(page.findAll('button').some((b) => b.text() === 'Change how many, or cancel')).toBe(true);
   });
 
   it('warns while a payment is past due', async () => {

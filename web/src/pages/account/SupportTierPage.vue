@@ -152,29 +152,32 @@
           Runs one of your tier's servers alone on a machine of its own instead of a shared one. It adds no servers:
           each own machine holds one of the servers your tier covers.
         </p>
-        <template v-if="billing.own_machine_subscription">
-          <p class="text-sm text-ink">
-            You have {{ billing.own_machine_subscription.quantity }} own machine{{ billing.own_machine_subscription.quantity === 1 ? '' : 's' }}
-            ({{ subscriptionStatusLabel(billing.own_machine_subscription.status).toLowerCase() }}).
-          </p>
-          <button type="button" :disabled="busy || !billing.can_manage" :class="secondaryButton" @click="portal">
-            Change how many, or cancel
-          </button>
-        </template>
-        <template v-else>
+        <p v-if="billing.own_machine_subscription" class="text-sm text-ink">
+          You have {{ ownMachines }} own machine{{ ownMachines === 1 ? '' : 's' }}
+          ({{ subscriptionStatusLabel(billing.own_machine_subscription.status).toLowerCase() }}).
+        </p>
+        <div class="flex flex-wrap gap-2">
           <button
+            v-if="!ownMachineAtLimit"
             type="button"
-            :disabled="busy || !billing.subscription?.entitled || tiers.own_machine.amount === null"
-            :class="primaryButton"
+            :disabled="busy || waiting || !billing.subscription?.entitled || tiers.own_machine.amount === null"
+            :class="billing.own_machine_subscription ? secondaryButton : primaryButton"
             aria-describedby="support-own-machine-hint"
             @click="checkout('own_machine')"
           >
-            Add an own machine
+            {{ billing.own_machine_subscription ? 'Add another own machine' : 'Add an own machine' }}
           </button>
-          <p id="support-own-machine-hint" class="text-xs text-ink-muted">
-            {{ billing.subscription?.entitled ? 'You can change how many in the billing portal later.' : 'Needs a support tier first.' }}
-          </p>
-        </template>
+          <button
+            v-if="billing.own_machine_subscription"
+            type="button"
+            :disabled="busy || !billing.can_manage"
+            :class="secondaryButton"
+            @click="portal"
+          >
+            Change how many, or cancel
+          </button>
+        </div>
+        <p id="support-own-machine-hint" class="text-xs text-ink-muted">{{ ownMachineHint }}</p>
       </section>
     </template>
   </div>
@@ -250,6 +253,25 @@ const liveTier = computed(() => hasLiveTier(billing.value));
 // A checkout came back and its confirmation is awaited: no second one starts.
 const waiting = computed(() => confirm.value === 'confirming' || confirm.value === 'pending');
 const currentOffer = computed(() => tiers.value?.tiers.find((t) => t.tier === billing.value?.subscription?.tier));
+// The own machines the account has: what its add-ons grant while its tier
+// does, else the shown add-on's own count.
+const ownMachines = computed(() => {
+  const b = billing.value;
+  if (!b) return 0;
+  return b.own_machines > 0 ? b.own_machines : (b.own_machine_subscription?.quantity ?? 0);
+});
+// An own machine for every server the account may run: another buys nothing
+// (the service refuses it, own_machine_limit).
+const ownMachineAtLimit = computed(
+  () => !!billing.value?.subscription?.entitled && billing.value.own_machines >= billing.value.max_servers,
+);
+const ownMachineHint = computed(() => {
+  if (!billing.value?.subscription?.entitled) return 'Needs a support tier first.';
+  if (ownMachineAtLimit.value) {
+    return 'You have an own machine for every server your tier covers. A higher tier makes room for more.';
+  }
+  return 'Each own machine holds one of your servers; you can have one for each server your tier covers.';
+});
 
 // The status line: the confirmation's progress, or the last thing done.
 const statusText = computed(() => {
@@ -323,6 +345,11 @@ async function checkout(item: BillingItem) {
       return;
     }
     fail(result.error);
+    // An own machine Stripe sold meanwhile (another tab): the page catches up.
+    if (result.error.code === 'own_machine_limit') {
+      const fresh = await fetchMyBilling();
+      if (fresh.ok) billing.value = fresh.value;
+    }
     return;
   }
   rememberCheckoutItem(item);
