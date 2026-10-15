@@ -917,7 +917,8 @@ int test_admin_routes_by_credential(Harness &h) {
 }
 
 // Every /api/admin/* route, the ServerCommand / ServerStopHosting pushes
-// included: no credential is 401, a player's session 403 (the CSRF header
+// included, and the admin-only GET /api/hosts and /api/unknowns: no
+// credential is 401, a player's session 403 (the CSRF header
 // sent, so the role is what refuses), and an admin's session without the CSRF
 // header 403 on a state change and 200 on a read. Nothing a refused request
 // names is touched (the user and host routes name no account or RID).
@@ -936,6 +937,8 @@ int test_admin_routes_table(Harness &h) {
 		{"POST", "/api/admin/hosts", "{\"rid\":4242}"},
 		{"GET", "/api/admin/hosts", ""},
 		{"GET", "/api/admin/connections", ""},
+		{"GET", "/api/hosts", ""},
+		{"GET", "/api/unknowns", ""},
 		{"GET", "/api/admin/users", ""},
 		{"POST", "/api/admin/users", "{\"username\":\"never\",\"password\":\"p\",\"pcid\":\"0badbad0\","
 		                             "\"nwhandle\":\"never\"}"},
@@ -1445,7 +1448,7 @@ int test_concurrent_requests(Harness &h) {
 	for (int r = 0; r < 3; ++r) {
 		readers.emplace_back([&h, &writing, &host_reads, &fail] {
 			while (writing.load()) {
-				const auto hosts = h.send("GET", "/api/hosts", {}, {}, kConcurrentTimeoutMs);
+				const auto hosts = h.send("GET", "/api/hosts", {kBearer}, {}, kConcurrentTimeoutMs);
 				const auto json = crow::json::load(body_text(hosts));
 				if (!hosts.transport_ok || hosts.code != 200 || !json) {
 					fail("/api/hosts: " + describe(hosts));
@@ -1644,7 +1647,7 @@ int test_nwhost_records_owner(Harness &h) {
 // GET /api/me/hosts lists the logged-in account's listed servers, and no
 // other's; with no live session it is 401. GET /api/admin/hosts lists every
 // listed server with its owner (null for an anonymous one), for an admin. The
-// public /api/lobbies and /api/hosts name no owner.
+// public /api/lobbies names no owner.
 int test_listed_server_owners(Harness &h) {
 	const int64_t me = make_account(h, "hosts_me", "pw-hosts-me");
 	const int64_t other = make_account(h, "hosts_other", "pw-hosts-other");
@@ -1735,9 +1738,9 @@ int test_listed_server_owners(Harness &h) {
 	}
 	TEST_EXPECT(seen == 3);
 
-	// The public lists name no owner.
-	for (const char *path : {"/api/lobbies", "/api/hosts"}) {
-		reply = h.send("GET", path);
+	// The public list names no owner.
+	{
+		reply = h.send("GET", "/api/lobbies");
 		TEST_EXPECT(reply.transport_ok && reply.code == 200);
 		const std::string text = body_text(reply);
 		TEST_EXPECT(text.find("Mine") != std::string::npos);
@@ -1754,6 +1757,81 @@ int test_listed_server_owners(Harness &h) {
 	TEST_EXPECT(orphan && !orphan->host_user_id);
 
 	for (const Listed &l : listed) opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), l.rid);
+	return 0;
+}
+
+// GET /api/hosts names each joiner /NWJoin.dll recorded (its handle, account id
+// and address) and GET /api/unknowns each sample's sender, so both are admin
+// routes: 401 with the Bearer challenge and no credential, 403 for a player's
+// session, 200 for the admin, whose /api/hosts carries the joiner. The public
+// /api/lobbies lists the host and names no joiner.
+int test_joiner_routes_admin_only(Harness &h) {
+	const int64_t joiner = make_account(h, "joiner_seen", "pw-joiner-seen");
+	TEST_EXPECT(joiner > 0);
+	const std::string player = login_token(h, "10.24.0.1", "joiner_seen", "pw-joiner-seen");
+	TEST_EXPECT(!player.empty());
+
+	constexpr uint32_t kRid = 2101;
+	const std::string joiner_ip = "198.51.100.77";
+	{
+		auto conn = h.pool.acquire();
+		opennova::hostdb::HostRow row;
+		row.rid = kRid;
+		row.gsid = "GSID-2101";
+		row.game = "jop_2_consumer";
+		row.server_name = "Joined Host";
+		row.host_ip = "10.0.0.11";
+		row.host_port = 32768;
+		row.player_count = 1;
+		row.max_players = 16;
+		row.peer_ip = "10.0.0.11";
+		opennova::hostdb::upsert_host(*conn, row);
+		// The joiner as /NWJoin.dll records one.
+		opennova::hostdb::PlayerRow p;
+		p.host_rid = kRid;
+		p.user_id = joiner;
+		p.nwhandle = "joiner_seen";
+		p.peer_ip = joiner_ip;
+		p.peer_port = 4242;
+		opennova::hostdb::add_player(*conn, p);
+	}
+
+	for (const char *path : {"/api/hosts", "/api/unknowns"}) {
+		auto reply = h.send("GET", path);
+		TEST_EXPECT(reply.transport_ok && reply.code == 401);
+		TEST_EXPECT(has_header(reply, "WWW-Authenticate"));
+		TEST_EXPECT(body_text(reply).find(joiner_ip) == std::string::npos);
+		reply = h.send("GET", path, {with_session(player)});
+		TEST_EXPECT(reply.transport_ok && reply.code == 403);
+		TEST_EXPECT(body_text(reply).find(joiner_ip) == std::string::npos);
+		reply = h.send("GET", path, {kBearer});
+		TEST_EXPECT(reply.transport_ok && reply.code == 200);
+		TEST_EXPECT(header_value(reply, "Content-Type") == "application/json");
+	}
+
+	const auto json = crow::json::load(body_text(h.send("GET", "/api/hosts", {kBearer})));
+	TEST_EXPECT(json);
+	bool seen = false;
+	for (const auto &e : json["hosts"]) {
+		if (e["rid"].i() != kRid) continue;
+		seen = true;
+		TEST_EXPECT(e["player_list"].size() == 1);
+		const auto &p = e["player_list"][0];
+		TEST_EXPECT(str(p["nwhandle"]) == "joiner_seen");
+		TEST_EXPECT(p["user_id"].i() == joiner);
+		TEST_EXPECT(str(p["peer_ip"]) == joiner_ip);
+	}
+	TEST_EXPECT(seen);
+
+	const auto lobbies = h.send("GET", "/api/lobbies");
+	TEST_EXPECT(lobbies.transport_ok && lobbies.code == 200);
+	const std::string text = body_text(lobbies);
+	TEST_EXPECT(text.find("Joined Host") != std::string::npos);
+	TEST_EXPECT(text.find(joiner_ip) == std::string::npos);
+	TEST_EXPECT(text.find("joiner_seen") == std::string::npos);
+	TEST_EXPECT(text.find("user_id") == std::string::npos);
+
+	opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), kRid);
 	return 0;
 }
 
@@ -3068,7 +3146,7 @@ int test_host_text_utf8(Harness &h) {
 	TEST_EXPECT(wait_until([&] { return row_named(h, cp1252_name).has_value(); }));
 
 	for (const char *path : {"/api/lobbies", "/api/hosts"}) {
-		const auto reply = h.send("GET", path);
+		const auto reply = h.send("GET", path, {kBearer});
 		TEST_EXPECT(reply.transport_ok && reply.code == 200);
 		const std::string text = body_text(reply);
 		if (!opennova::is_valid_utf8(text)) std::fprintf(stderr, "  %s is not UTF-8\n", path);
@@ -3082,7 +3160,7 @@ int test_host_text_utf8(Harness &h) {
 	}
 	TEST_EXPECT(in_lobbies);
 	bool in_hosts = false;
-	const auto hosts = crow::json::load(body_text(h.send("GET", "/api/hosts")));
+	const auto hosts = crow::json::load(body_text(h.send("GET", "/api/hosts", {kBearer})));
 	TEST_EXPECT(hosts);
 	for (const auto &e : hosts["hosts"]) in_hosts = in_hosts || str(e["server_name"]) == utf8_name;
 	TEST_EXPECT(in_hosts);
@@ -6533,6 +6611,7 @@ int run(Harness &h) {
 		{ "nwhost_first_call_mints_hostkey", test_nwhost_first_call_mints_hostkey },
 		{ "nwhost_records_owner", test_nwhost_records_owner },
 		{ "listed_server_owners", test_listed_server_owners },
+		{ "joiner_routes_admin_only", test_joiner_routes_admin_only },
 		{ "menu_urls_name_bound_port", test_menu_urls_name_bound_port },
 		{ "lobby_per_title", test_lobby_per_title },
 		{ "dfx2_client_path", test_dfx2_client_path },
