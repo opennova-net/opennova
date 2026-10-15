@@ -286,7 +286,7 @@ locals {
 # hosted machines' EC2 calls need), read its converge document, run SSM's agent
 # (Run Command and Session Manager; not the managed AmazonSSMManagedInstanceCore,
 # which reads every parameter in the account), read its deployment's releases,
-# write its deployment's backups, and ship its containers' logs. hosted.tf adds
+# write its deployment's backups, and ship its containers' logs. fleet.tf adds
 # the game machines' launch and end.
 data "aws_iam_policy_document" "service" {
   statement {

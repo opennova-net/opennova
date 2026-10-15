@@ -17,7 +17,7 @@ files opennova-serve reads into this program's standard input. It
      direct APIs (StartSnapshot, PutSnapshotBlock, CompleteSnapshot), encrypted with
      the account's default EBS key, tagged opennova:hosted-data=1, the deployment and
      opennova:data-set=<slug>.
-     That key must be the AWS-managed aws/ebs one, which infra/aws/hosted.tf's launch
+     That key must be the AWS-managed aws/ebs one, which infra/aws/fleet.tf's launch
      policy relies on (it grants no KMS action): another is refused before a block is
      written, and a key it cannot read (no kms:DescribeKey) is a warning;
   5. waits until EC2 reports the snapshot completed, and prints its id on standard
@@ -181,7 +181,7 @@ def upload(ebs, image: str, snapshot_id: str, block_size: int) -> int:
 def check_key(kms, key_arn: str | None) -> None:
     """Refuses a snapshot encrypted with any key but the AWS-managed aws/ebs one.
 
-    hosted.tf's service policy grants no KMS action: a launch from a snapshot under
+    fleet.tf's service policy grants no KMS action: a launch from a snapshot under
     a customer-managed key would fail. Reading the aws/ebs key needs kms:DescribeKey;
     without it the check is a warning, not a refusal.
     """

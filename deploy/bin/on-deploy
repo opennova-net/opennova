@@ -641,7 +641,7 @@ cmd_secrets() {
 
 # The data sets hosted game servers run: each the games slug of the lobby its
 # servers list in (apps/novaworld_server/hosted, the service's data-set
-# catalog), one snapshot each (infra/aws/hosted.tf).
+# catalog), one snapshot each (infra/aws/fleet.tf).
 HOSTED_DATA_SETS=(jop_2_consumer dfx2_consumer opennova_0_consumer)
 
 # Whether $1 is one of HOSTED_DATA_SETS.
@@ -684,11 +684,11 @@ hosted_snapshot_map() {
   printf '%s' "$map"
 }
 
-# The hosted game servers' data snapshots (infra/aws/hosted.tf), from the
+# The hosted game servers' data snapshots (infra/aws/fleet.tf), from the
 # vault: item `hosted`, one field data_snapshot_id_<slug> per data set, as
 # TF_VAR_hosted_data_snapshots (a JSON object, which Terraform reads as the
 # map). No item titled `hosted` in the vault's listing means hosting is off (the
-# map stays empty, and hosted.tf makes nothing). Any other failure (the listing,
+# map stays empty, and fleet.tf makes nothing). Any other failure (the listing,
 # or reading an item that is there) stops the run, so a vault hiccup never
 # plans the hosting resources away.
 hosted_snapshot_var() {
