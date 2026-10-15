@@ -17,7 +17,7 @@ export type StatsErrorCode =
   | 'unauthorized'
   | 'forbidden'
   | 'not_found'
-  | 'invalid_range'
+  | 'invalid_field'
   | 'rate_limited'
   | 'db_error'
   | 'network'
@@ -36,7 +36,7 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<StatsErrorCode>([
   'unauthorized',
   'forbidden',
   'not_found',
-  'invalid_range',
+  'invalid_field',
   'rate_limited',
   'db_error',
 ]);
@@ -51,7 +51,7 @@ function messageFor(code: StatsErrorCode, retryAfterSeconds?: number): string {
       return 'This account is not an admin.';
     case 'not_found':
       return 'That hosted server no longer exists.';
-    case 'invalid_range':
+    case 'invalid_field':
       return 'The server could not read the request. Reload the page and try again.';
     case 'rate_limited':
       return retryAfterSeconds !== undefined
