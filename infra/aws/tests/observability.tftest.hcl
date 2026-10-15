@@ -214,6 +214,12 @@ run "observability" {
     error_message = "prod makes the monthly cost budget and the EC2 egress budget, each emailing at 80% spent and a 100% forecast"
   }
   assert {
+    condition = alltrue([for b in [aws_budgets_budget.monthly_cost[0], aws_budgets_budget.egress[0]] :
+      length([for f in b.cost_filter : f if f.name == "TagKeyValue" && contains(f.values, "user:opennova:deployment$opennova-server") && contains(f.values, "user:opennova:deployment$opennova-server-staging")]) == 1
+    ])
+    error_message = "both budgets count only OpenNova's deployments (their tag), prod's and staging's, in an account other projects share"
+  }
+  assert {
     condition     = length(aws_ce_anomaly_monitor.services) == 1 && length(aws_ce_anomaly_subscription.email) == 1
     error_message = "prod makes the cost anomaly monitor and its email"
   }

@@ -600,10 +600,19 @@ Stripe up in test mode first (staging, `stripe-test`), then in live mode (prod,
   80% for 15 minutes, the database's CPU credits and free storage, and the Route 53
   health check on `http://<Elastic IP>:8080/healthz`. The heartbeat is the server's JSON
   line every 60 s; its fields are metrics in `OpenNova/<deployment>`.
-- **Budgets** (prod's, account-wide): the month's cost (`budget_monthly_usd`) and the
-  EC2 data transfer out (`budget_egress_gb`): an email at 80% and at a 100% forecast; Cost
-  Anomaly Detection emails daily anomalies over `cost_anomaly_threshold_usd`. The hosted
-  servers' egress is metered and shown, never capped.
+- **Budgets** (prod's, counting every OpenNova deployment): the month's cost
+  (`budget_monthly_usd`) and the EC2 data transfer out (`budget_egress_gb`): an email at
+  80% and at a 100% forecast; Cost Anomaly Detection emails daily anomalies over
+  `cost_anomaly_threshold_usd`. The hosted servers' egress is metered and shown, never
+  capped. The account may hold other projects, so both budgets count only what carries
+  the `opennova:deployment` tag (every resource the stack makes, and the machines the
+  service launches). Cost Explorer sees a tag once it is an active cost allocation tag:
+  a day after the first apply, activate it once (until then the budgets read zero):
+
+  ```bash
+  ./deploy/run.sh aws ce update-cost-allocation-tags-status \
+    --cost-allocation-tags-status TagKey=opennova:deployment,Status=Active
+  ```
 - **A shell.** `./deploy/run.sh app shell` (Session Manager; the toolbox carries the
   plugin). `./deploy/run.sh db psql` opens psql as the service's role there; `db psql -c
   'SELECT ...'` runs one statement.

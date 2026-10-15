@@ -310,7 +310,19 @@ resource "aws_cloudwatch_metric_alarm" "healthz" {
   tags = var.tags
 }
 
-# ---- budgets (account-wide: prod's) ---------------------------------------------------
+# ---- budgets (prod's, counting every OpenNova deployment) ------------------------------
+
+# The account may hold other projects, so the budgets count only what carries an
+# OpenNova deployment's tag (versions.tf's default tag, and the machines' launch
+# tag): prod's and every deployment edge_other_deployments names. Cost
+# Explorer sees the tag once it is an active cost allocation tag (DEPLOY.md,
+# "Budgets"); until then these budgets read zero.
+locals {
+  budget_tag_filter = [
+    for d in concat([local.hosted_deployment], [for o in var.edge_other_deployments : "${var.instance_name}-${o}"]) :
+    format("user:opennova:deployment$%s", d)
+  ]
+}
 
 resource "aws_budgets_budget" "monthly_cost" {
   count        = local.manage_shared ? 1 : 0
@@ -319,6 +331,11 @@ resource "aws_budgets_budget" "monthly_cost" {
   limit_amount = tostring(var.budget_monthly_usd)
   limit_unit   = "USD"
   time_unit    = "MONTHLY"
+
+  cost_filter {
+    name   = "TagKeyValue"
+    values = local.budget_tag_filter
+  }
 
   dynamic "notification" {
     for_each = local.alert_email != "" ? { ACTUAL = 80, FORECASTED = 100 } : {}
@@ -344,6 +361,11 @@ resource "aws_budgets_budget" "egress" {
   cost_filter {
     name   = "UsageTypeGroup"
     values = ["EC2: Data Transfer - Internet (Out)"]
+  }
+
+  cost_filter {
+    name   = "TagKeyValue"
+    values = local.budget_tag_filter
   }
 
   dynamic "notification" {

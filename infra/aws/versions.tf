@@ -47,6 +47,17 @@ terraform {
 
 provider "aws" {
   region = var.region
+
+  # Every resource this stack makes carries the deployment's tag, the one the
+  # service puts on the machines it launches (fleet.tf, hosted_deployment), so
+  # the budgets (observability.tf) can count OpenNova's costs alone in an
+  # account other projects share. A cost allocation tag once activated
+  # (DEPLOY.md, "Budgets").
+  default_tags {
+    tags = {
+      "opennova:deployment" = local.hosted_deployment
+    }
+  }
 }
 
 provider "cloudflare" {
