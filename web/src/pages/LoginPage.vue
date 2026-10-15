@@ -1,5 +1,5 @@
 <template>
-  <section class="px-6 pt-24 pb-16">
+  <section class="px-4 py-10 sm:px-6 sm:py-14">
     <div class="mx-auto max-w-md rounded-panel border border-border bg-panel p-8">
       <h1 class="text-3xl font-semibold text-ink">Log in</h1>
 

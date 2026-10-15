@@ -1,5 +1,5 @@
 <template>
-  <section class="px-4 pt-24 pb-16 sm:px-6">
+  <section class="px-4 py-10 sm:px-6 sm:py-14">
     <div class="mx-auto max-w-5xl space-y-10">
       <header class="space-y-4">
         <p class="text-sm uppercase tracking-[0.3em] text-accent">NovaWorld</p>

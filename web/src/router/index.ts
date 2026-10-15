@@ -9,6 +9,7 @@ import NewServerPage from '../pages/account/NewServerPage.vue';
 import AccountPage from '../pages/account/AccountPage.vue';
 import SupportTierPage from '../pages/account/SupportTierPage.vue';
 import SupportPage from '../pages/SupportPage.vue';
+import NotFoundPage from '../pages/NotFoundPage.vue';
 import TermsPage from '../pages/legal/TermsPage.vue';
 import PrivacyPage from '../pages/legal/PrivacyPage.vue';
 import RefundsPage from '../pages/legal/RefundsPage.vue';
@@ -103,6 +104,8 @@ const router = createRouter({
         { path: 'connections', redirect: '/admin/sessions' },
       ],
     },
+    // Anything else.
+    { path: '/:rest(.*)*', component: NotFoundPage },
   ],
   // A server page's tab change keeps the scroll (the header and the tabs stay
   // put); any other navigation starts at the top.

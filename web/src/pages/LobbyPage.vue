@@ -1,13 +1,14 @@
 <template>
-  <section class="px-6 pt-24 pb-16">
+  <section class="px-4 py-10 sm:px-6 sm:py-14">
     <div class="mx-auto max-w-6xl">
       <header class="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <p class="text-sm uppercase tracking-[0.3em] text-accent">Game Browser</p>
-          <h1 class="text-3xl font-semibold text-ink">Lobbies</h1>
+          <p class="eyebrow">NovaWorld</p>
+          <h1 class="mt-2 text-3xl font-semibold text-ink-bright">Lobbies</h1>
+          <p class="mt-2 text-sm text-ink-muted">Games hosted on NovaWorld right now. Join them from the game's own server browser.</p>
         </div>
         <button
-          class="rounded-control border border-border px-5 py-2 text-sm text-ink hover:border-accent"
+          class="btn-secondary"
           @click="refresh"
           :disabled="state.loading"
         >
@@ -30,19 +31,22 @@
              bare game headers over empty grids. -->
         <div v-if="totalHosts === 0" class="rounded-panel border border-border bg-panel p-10 text-center">
           <p class="text-lg font-semibold text-ink">No games are being hosted right now</p>
-          <p class="mt-2 text-sm text-ink-muted">Be the first: host a game and it will show up here.</p>
+          <p class="mt-2 text-sm text-ink-muted">
+            Be the first: host one from the game, or run your own server with a
+            <RouterLink to="/support" class="link">support tier</RouterLink>.
+          </p>
         </div>
 
         <template v-else>
           <div v-for="group in state.games" :key="group.slug" class="space-y-4">
             <div class="flex items-center justify-between">
               <h2 class="text-2xl font-semibold text-ink">{{ group.displayName }}</h2>
-              <span class="text-sm text-ink-muted">{{ group.hosts.length }} active host(s)</span>
+              <span class="text-sm text-ink-muted">{{ group.hosts.length }} {{ group.hosts.length === 1 ? 'server' : 'servers' }}</span>
             </div>
             <div v-if="group.hosts.length > 0" class="grid gap-4 md:grid-cols-2">
               <LobbyCard v-for="host in group.hosts" :key="host.id" :host="host" />
             </div>
-            <p v-else class="text-sm text-ink-muted">No active hosts.</p>
+            <p v-else class="text-sm text-ink-muted">No servers right now.</p>
           </div>
         </template>
       </div>
@@ -52,6 +56,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive } from 'vue';
+import { RouterLink } from 'vue-router';
 import LobbyCard from '../components/LobbyCard.vue';
 import { fetchLobbies } from '../api/lobbies';
 import type { LobbyGroup } from '../types/lobby';

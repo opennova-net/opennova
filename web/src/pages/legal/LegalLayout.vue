@@ -1,5 +1,5 @@
 <template>
-  <article class="px-4 pt-24 pb-16 sm:px-6" :aria-labelledby="`${id}-title`">
+  <article class="px-4 py-10 sm:px-6 sm:py-14" :aria-labelledby="`${id}-title`">
     <div class="mx-auto max-w-3xl space-y-8">
       <header class="space-y-3">
         <p class="text-sm uppercase tracking-[0.3em] text-accent">NovaWorld</p>

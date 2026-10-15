@@ -83,3 +83,6 @@ expansions/**/*.md text eol=lf
 # Markdown.
 art/** filter=lfs diff=lfs merge=lfs -text -eol
 art/**/*.md text eol=lf filter= diff= merge=
+
+# The site's screenshots and video are plain blobs, stored byte-for-byte.
+web/public/media/** -text -eol
