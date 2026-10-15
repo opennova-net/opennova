@@ -57,10 +57,29 @@ op item create --vault OpenNova-Deploy --title ghcr --category 'Secure Note' \
   owner=your-github-owner
 ```
 
-The Cloudflare token needs, on the zone: DNS / Edit, Zone Settings / Edit, SSL and
-Certificates / Edit (the origin certificate), Transform Rules / Edit (edge
-authentication), Zone WAF / Edit (the webhook rule) and Email Routing Rules / Edit; on
-the account: Email Routing Addresses / Edit (the email destination).
+The Cloudflare token (`cloudflare/api_token`: My Profile, API Tokens, Create Token,
+Custom token) needs exactly these, the zone ones for the one zone and the account one
+for its account:
+
+| Scope | Permission | What needs it (`infra/aws/edge.tf`, `email.tf`) |
+|---|---|---|
+| Zone | DNS / Edit | the site's records |
+| Zone | Zone Settings / Edit | SSL/TLS "Full (strict)", Always Use HTTPS, the minimum TLS version; turning Email Routing on |
+| Zone | SSL and Certificates / Edit | the origin certificate (Origin CA) |
+| Zone | Zone WAF / Edit | the Stripe webhook's skip rule (custom rules) |
+| Zone | Transform Rules / Edit | edge authentication's header |
+| Zone | Email Routing Rules / Edit | `support@<domain>`'s rules |
+| Account | Email Routing Addresses / Edit | the email destination |
+| Zone (optional) | Bot Management / Read | reading Bot Fight Mode's state through the API (below) |
+
+**Bot Fight Mode must be off.** The zone is on the Free plan, whose Bot Fight Mode no
+WAF rule can skip (the webhook's skip rule covers the managed rules, rate limiting and
+the legacy products, not it): with it on, Cloudflare may challenge Stripe's webhook
+POSTs, and a challenged webhook never arrives. In the dashboard, Security, Bots: the
+"Bot Fight Mode" toggle is off. With the optional permission, `GET
+https://api.cloudflare.com/client/v4/zones/<zone id>/bot_management` answers
+`"fight_mode": false`. The end-to-end check is Stripe's "Send test webhook" answering
+2xx ("Monthly support tiers (Stripe)").
 
 Everything else is made by the toolbox once the token works (step 2):
 `./deploy/run.sh secrets init` adds whatever is missing and never overwrites a field.

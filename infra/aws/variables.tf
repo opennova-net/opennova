@@ -110,7 +110,7 @@ variable "tags" {
 
 # Cloudflare DNS configuration
 variable "cloudflare_api_token" {
-  description = "Cloudflare API token with DNS edit permissions (sourced from the vault as TF_VAR_cloudflare_api_token)"
+  description = "Cloudflare API token, with the permissions DEPLOY.md lists (section 1: DNS, zone settings, Origin CA, WAF, Transform Rules, Email Routing). From the vault as TF_VAR_cloudflare_api_token (item cloudflare, field api_token)."
   type        = string
   default     = ""
   sensitive   = true
