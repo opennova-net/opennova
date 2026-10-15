@@ -100,7 +100,9 @@ struct Ec2MachineConfig {
 	std::string scratch_dir; // owner-only: the user-data files the CLI reads
 	uint64_t describe_ttl_ms = 10 * 1000;
 	uint64_t launch_grace_ms = 3 * 60 * 1000;
-	int command_timeout_ms = 90 * 1000;
+	// describe-instances and terminate-instances run inside the supervisor's pass
+	// too, so each stays under its stall watchdog (health.h, 30 s).
+	int command_timeout_ms = 20 * 1000;
 	// A run-instances call, and how many make a launch (the class comment):
 	// together under the supervisor's stall watchdog (health.h, 30 s), whose
 	// pass the launch holds up.

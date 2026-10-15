@@ -722,7 +722,7 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   fences the slots' users off the instance metadata and the service's internal port,
   and installs `opennova-hostd`, copied out of the serve image. The driver runs the AWS
   CLI v2 (installed in the image, pinned and checksummed) through a `CommandRunner`
-  (`apps/common/command_runner.*`: an argv array, no shell, a 90 s timeout, an
+  (`apps/common/command_runner.*`: an argv array, no shell, a 20 s timeout (under the stall watchdog), an
   environment of the system's and the `AWS_*` variables alone), its credentials the
   service instance's role; it describes from one cached `describe-instances` every 10 s
   (a failure reads unknown: nothing is decided on it), and a machine is terminated at
