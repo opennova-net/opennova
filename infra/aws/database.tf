@@ -52,9 +52,12 @@ resource "aws_db_parameter_group" "main" {
   family      = "postgres17"
   description = "OpenNova NovaWorld database: TLS required, slow statements logged"
 
+  # RDS records it as pending-reboot; left at Terraform's default (immediate),
+  # every plan would update it again.
   parameter {
-    name  = "rds.force_ssl"
-    value = "1"
+    name         = "rds.force_ssl"
+    value        = "1"
+    apply_method = "pending-reboot"
   }
 
   # Statements slower than a second reach the instance's postgresql log.
