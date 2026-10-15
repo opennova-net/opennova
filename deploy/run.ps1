@@ -1,9 +1,12 @@
-# Thin wrapper (PowerShell): build (if needed) and run the deploy toolbox
-# container, forwarding all arguments to the on-deploy entrypoint.
+# Thin wrapper (PowerShell): build (if its Dockerfile changed) and run the
+# deploy toolbox container, forwarding all arguments to the on-deploy entrypoint.
 #
 #   $env:OP_SERVICE_ACCOUNT_TOKEN = "ops_..."
 #   .\deploy\run.ps1 secrets check
 #   .\deploy\run.ps1 infra apply
+#   .\deploy\run.ps1 --deployment staging app deploy --tag sha-abc1234
+#
+# $env:OPENNOVA_DEPLOYMENT (default prod) names the deployment as --deployment does.
 #
 # $env:HOSTED_DATA_DIR mounts that folder read-only at /hosted-data, where
 # `hosted data-snapshot --data-set <slug>` reads that data set's game files, one
@@ -18,4 +21,5 @@ $mount = @()
 if ($env:HOSTED_DATA_DIR) {
     $mount = @("--volume=$($env:HOSTED_DATA_DIR):/hosted-data:ro")
 }
-docker compose -f "$here\docker-compose.deploy.yml" run --rm @mount deploy @args
+# --build: a changed deploy/Dockerfile rebuilds the image (cached otherwise).
+docker compose -f "$here\docker-compose.deploy.yml" run --rm --build @mount deploy @args

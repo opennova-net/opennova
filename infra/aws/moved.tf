@@ -2,6 +2,21 @@
 # bring-your-own VPC). Each keeps its object: the plan shows them as moved, never
 # as a destroy and a create.
 
+# The single-host stack's Elastic IP (aws_eip.server[0], prod's 54.162.79.147):
+# retail clients reach the service by it, so it must outlive the stack that
+# made it. Terraform forgets it here without releasing it; prod's
+# service_eip_allocation_id then adopts it by allocation id (service.tf), and
+# no later plan can release it. (`infra state-rm 'aws_eip.server[0]'` before the
+# cutover's apply does the same by hand; DEPLOY.md, "Moving from the
+# single-host stack".)
+removed {
+  from = aws_eip.server
+
+  lifecycle {
+    destroy = false
+  }
+}
+
 # The network: the auto-created VPC and its one subnet are now the VPC and its
 # public subnet a.
 moved {

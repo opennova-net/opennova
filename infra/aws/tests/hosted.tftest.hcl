@@ -1,9 +1,10 @@
 # The hosted game servers' resources (hosted.tf), planned against mock
 # providers: offline, no credentials, nothing reaches AWS or Cloudflare.
-#   docker run --rm -v "$PWD/infra/aws:/tf" -w /tf hashicorp/terraform:1.9.5 init -backend=false
-#   docker run --rm -v "$PWD/infra/aws:/tf" -w /tf hashicorp/terraform:1.9.5 test
-# Hosting off (no snapshot) plans nothing of it and leaves the server's security
-# group its six rules; hosting on with two data sets plans a launch template for
+# From the repo root (the configuration reads deploy/host/ beside infra/):
+#   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> init -backend=false
+#   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> test
+# Hosting off (no snapshot) plans nothing of it and admits no machine to the
+# service; hosting on with two data sets plans a launch template for
 # each (terminate on shutdown, IMDSv2, the encrypted data volume from that data
 # set's own snapshot, its size the snapshot's), the game and admin ports, the
 # service role's policy and the outputs app deploy reads (the templates by data
@@ -44,6 +45,12 @@ mock_provider "aws" {
   mock_resource "aws_iam_role" {
     defaults = { arn = "arn:aws:iam::123456789012:role/mock" }
   }
+  mock_resource "aws_cloudwatch_log_group" {
+    defaults = { arn = "arn:aws:logs:us-east-1:123456789012:log-group:/opennova/prod/service" }
+  }
+  mock_resource "aws_ssm_document" {
+    defaults = { arn = "arn:aws:ssm:us-east-1:123456789012:document/opennova-server-converge" }
+  }
   mock_resource "aws_launch_template" {
     defaults = { arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0123456789abcdef0", id = "lt-0123456789abcdef0" }
   }
@@ -51,8 +58,9 @@ mock_provider "aws" {
 
 mock_provider "cloudflare" {}
 
+# Prod adopts its Elastic IP (service.tf).
 variables {
-  ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAItest test"
+  service_eip_allocation_id = "eipalloc-0123456789abcdef0"
 }
 
 run "hosting_off" {
@@ -71,8 +79,12 @@ run "hosting_off" {
     error_message = "hosting off must create no rule"
   }
   assert {
-    condition     = length(aws_security_group.server.ingress) == 6
-    error_message = "hosting off must leave the server SG's six rules"
+    condition     = length(aws_vpc_security_group_ingress_rule.service_from_machines) == 0
+    error_message = "hosting off must admit no machine to the service"
+  }
+  assert {
+    condition     = strcontains(aws_ssm_parameter.infra_env.value, "ONNET_HOSTED_PROVIDER='none'")
+    error_message = "hosting off: infra.env turns the provider off"
   }
   assert {
     condition     = output.hosted_enabled == false && length(output.hosted_launch_templates) == 0 && output.hosted_subnet_cidr == null
@@ -136,6 +148,10 @@ run "hosting_on" {
   assert {
     condition     = length(aws_iam_role_policy_attachment.hosted_service) == 1 && length(aws_security_group.hosted) == 1
     error_message = "one security group, and the service role takes the hosted policy"
+  }
+  assert {
+    condition     = length(aws_vpc_security_group_ingress_rule.service_from_machines) == 1 && aws_vpc_security_group_ingress_rule.service_from_machines[0].from_port == 8080
+    error_message = "the service admits the machines' bootstrap fetch"
   }
 }
 
@@ -214,6 +230,10 @@ run "hosted_policy" {
   assert {
     condition     = output.hosted_launch_templates == { jop_2_consumer = "lt-0123456789abcdef0", dfx2_consumer = "lt-0fedcba9876543210" }
     error_message = "the templates output maps each data set to its template"
+  }
+  assert {
+    condition     = strcontains(aws_ssm_parameter.infra_env.value, "ONNET_HOSTED_PROVIDER='ec2'") && strcontains(aws_ssm_parameter.infra_env.value, "ONNET_HOSTED_EC2_LAUNCH_TEMPLATES='{\"dfx2_consumer\":\"lt-0fedcba9876543210\",\"jop_2_consumer\":\"lt-0123456789abcdef0\"}'")
+    error_message = "infra.env hands the service the provider and each data set's template"
   }
   assert {
     condition     = length(aws_iam_role_policy.hosted_machine_ssm) == 1

@@ -5,24 +5,18 @@ variable "region" {
 }
 
 variable "instance_type" {
-  description = "EC2 instance type"
+  description = "The service host's instance type: the NovaWorld server, the portal's nginx and the web build in docker compose. Never a burstable type (the server's loops run all the time)."
   type        = string
   default     = "c7i.large"
-}
 
-variable "ssh_public_key" {
-  description = "SSH public key material for the EC2 key pair (sourced from the 1Password vault; see DEPLOY.md). OpenSSH single-line format."
-  type        = string
-}
-
-variable "ssh_allowed_cidr" {
-  description = "CIDR allowed to SSH to the host"
-  type        = string
-  default     = "0.0.0.0/0"
+  validation {
+    condition     = !can(regex("^t[0-9]", var.instance_type))
+    error_message = "instance_type must not be a burstable t-family type."
+  }
 }
 
 variable "allowed_cidrs" {
-  description = "CIDRs allowed to reach game services"
+  description = "CIDRs allowed to reach the retail ports (the gate, NovaWorld UDP, the HTTP routes) and the game machines' slots"
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
@@ -45,7 +39,7 @@ variable "azs" {
 }
 
 variable "instance_name" {
-  description = "Base name tag for resources."
+  description = "Base name of the resources. Prod's (the default workspace's) resources carry it as it is, another deployment's with its name appended."
   type        = string
   default     = "opennova-server"
 }
@@ -68,28 +62,44 @@ variable "game_http_port" {
   default     = 8080
 }
 
-variable "web_http_port" {
-  description = "HTTP port for the user-facing web frontend"
-  type        = number
-  default     = 80
-}
-
-variable "web_https_port" {
-  description = "HTTPS port for the user-facing web frontend"
-  type        = number
-  default     = 443
-}
-
 variable "ami_id" {
-  description = "Override AMI ID. Leave blank to auto-discover Ubuntu 24.04. Pin this after the first prod apply so AMI drift never forces instance replacement."
+  description = "Override the service host's image (an Ubuntu 24.04 x86_64 AMI). Empty: Canonical's newest when the host is made; a later image waits for a deliberate -replace=aws_instance.service."
   type        = string
   default     = ""
 }
 
-variable "allocate_eip" {
-  description = "Whether to allocate and associate an Elastic IP."
-  type        = bool
-  default     = true
+variable "service_eip_allocation_id" {
+  description = "The Elastic IP the service host takes, by allocation id (eipalloc-...): prod adopts the address retail clients already use, which Terraform then reads and never manages, so no plan can release it. Empty: the deployment gets an address of its own, managed here (staging)."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.service_eip_allocation_id == "" || can(regex("^eipalloc-[0-9a-f]{8,17}$", var.service_eip_allocation_id))
+    error_message = "service_eip_allocation_id must be empty or an allocation id (eipalloc-...)."
+  }
+}
+
+variable "service_private_ip_host" {
+  description = "The service host's fixed private address, as a host number in public subnet a (10 gives 10.44.0.10). Its network interface keeps it across instances; the game machines reach the service's internal listener there."
+  type        = number
+  default     = 10
+
+  validation {
+    condition     = var.service_private_ip_host >= 4 && var.service_private_ip_host <= 250
+    error_message = "service_private_ip_host must be 4..250 (AWS reserves the first four addresses of a subnet and the last)."
+  }
+}
+
+variable "service_root_volume_gb" {
+  description = "The service host's root volume (the OS, docker, the images of a few releases), in GiB."
+  type        = number
+  default     = 30
+}
+
+variable "log_retention_days" {
+  description = "How long CloudWatch keeps the service's and the machines' logs, in days."
+  type        = number
+  default     = 30
 }
 
 variable "tags" {
@@ -113,7 +123,7 @@ variable "cloudflare_zone_id" {
 }
 
 variable "cloudflare_domain" {
-  description = "Domain name (e.g. 'example.com'). Creates the @ and www records."
+  description = "Domain name (e.g. 'example.com'). Prod makes the @, www and game records; another deployment <deployment> and game-<deployment>."
   type        = string
   default     = ""
 }
@@ -131,13 +141,13 @@ variable "edge_auth_secret" {
 }
 
 variable "cloudflare_web_proxied" {
-  description = "Whether the web records (@ / www) are proxied through Cloudflare. Proxied gives the site Cloudflare TLS."
+  description = "Whether the web records are proxied through Cloudflare. Proxied gives the site Cloudflare TLS; the portal's port admits Cloudflare's ranges alone, so unproxied records reach nothing."
   type        = bool
   default     = true
 }
 
-variable "backup_bucket_name" {
-  description = "S3 bucket for automated database backups."
+variable "ops_bucket_name" {
+  description = "The operations bucket: every deployment's releases (releases/<deployment>/) and database backups (backups/<deployment>/). Prod (the default workspace) owns it; another deployment names the same bucket."
   type        = string
   default     = "opennova-backups"
 }

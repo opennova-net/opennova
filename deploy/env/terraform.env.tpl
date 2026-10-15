@@ -1,11 +1,12 @@
-# 1Password-referenced terraform credentials. `op inject`/`op run` resolves
-# these 1Password references against the vault at deploy time; the resolved
-# values never touch disk outside the tmpfs. Edit the vault, not this file.
-AWS_ACCESS_KEY_ID=op://OpenNova-Deploy/aws/access_key_id
-AWS_SECRET_ACCESS_KEY=op://OpenNova-Deploy/aws/secret_access_key
-AWS_REGION=op://OpenNova-Deploy/aws/region
-AWS_DEFAULT_REGION=op://OpenNova-Deploy/aws/region
-TF_VAR_cloudflare_api_token=op://OpenNova-Deploy/cloudflare/api_token
-TF_VAR_cloudflare_zone_id=op://OpenNova-Deploy/cloudflare/zone_id
-TF_VAR_cloudflare_domain=op://OpenNova-Deploy/cloudflare/domain
-TF_VAR_ssh_public_key=op://OpenNova-Deploy/ssh/public key
+# 1Password references for a Terraform run: the AWS and Cloudflare credentials
+# and the TF_VAR_* secrets. `op run` resolves them against the vault at deploy
+# time; the values reach terraform's environment alone, never the disk outside
+# the toolbox's tmpfs. Edit the vault, not this file. The toolbox fills in
+# @VAULT@ (OP_VAULT, default OpenNova-Deploy).
+AWS_ACCESS_KEY_ID=op://@VAULT@/aws/access_key_id
+AWS_SECRET_ACCESS_KEY=op://@VAULT@/aws/secret_access_key
+AWS_REGION=op://@VAULT@/aws/region
+AWS_DEFAULT_REGION=op://@VAULT@/aws/region
+TF_VAR_cloudflare_api_token=op://@VAULT@/cloudflare/api_token
+TF_VAR_cloudflare_zone_id=op://@VAULT@/cloudflare/zone_id
+TF_VAR_cloudflare_domain=op://@VAULT@/cloudflare/domain

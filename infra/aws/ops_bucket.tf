@@ -1,7 +1,11 @@
 # ---------------------------------------------------------------------------
-# The operations bucket (backups) and the account's S3 public access block,
-# both account-wide: prod (the default workspace) owns them, another deployment
-# uses them by name.
+# The operations bucket and the account's S3 public access block, both
+# account-wide: prod (the default workspace) owns them, another deployment
+# uses them by name. The bucket holds, per deployment, the release bundles
+# (releases/<deployment>/<id>.tar.gz and its manifest <id>.json, which `app
+# deploy` uploads and the host's converge downloads) and the database dumps
+# (backups/<deployment>/, the backup sidecar's). Its name is the one the
+# single-host stack's backups bucket had.
 # ---------------------------------------------------------------------------
 
 # The account-wide S3 public access block: every bucket here is private.
@@ -16,11 +20,11 @@ resource "aws_s3_account_public_access_block" "this" {
 
 resource "aws_s3_bucket" "ops" {
   count         = local.manage_shared ? 1 : 0
-  bucket        = var.backup_bucket_name
+  bucket        = var.ops_bucket_name
   force_destroy = false
 
   tags = merge(var.tags, {
-    Name = "${local.name}-db-backups"
+    Name = "${local.name}-ops"
   })
 }
 
@@ -48,14 +52,52 @@ resource "aws_s3_bucket_lifecycle_configuration" "ops" {
   count  = local.manage_shared ? 1 : 0
   bucket = aws_s3_bucket.ops[0].id
 
+  # The database dumps (the backup sidecar, backups/<deployment>/): 90 days.
   rule {
     id     = "expire-old-backups"
     status = "Enabled"
 
-    filter {} # whole bucket
+    filter {
+      prefix = "backups/"
+    }
 
     expiration {
       days = 90
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
+
+  # The single-host stack's SQLite backups (novaworld/), which nothing writes
+  # any more: they go at the end of their 90 days.
+  rule {
+    id     = "expire-sqlite-backups"
+    status = "Enabled"
+
+    filter {
+      prefix = "novaworld/"
+    }
+
+    expiration {
+      days = 90
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
+    }
+  }
+
+  # The release bundles (releases/<deployment>/, a few KiB each) never expire:
+  # a new host converges to the current one however old it is, and `app
+  # rollback --to` reaches any.
+  rule {
+    id     = "release-old-versions"
+    status = "Enabled"
+
+    filter {
+      prefix = "releases/"
     }
 
     noncurrent_version_expiration {

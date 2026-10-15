@@ -23,7 +23,7 @@
 #   - the machine role: the five actions SSM Session Manager needs for
 #     break-glass, nothing else (no machine has an SSH key);
 #   - the service role's policy (the one instance profile the service instance
-#     carries, aws_iam_role.backup): launch only from these templates, only the
+#     carries, aws_iam_role.service): launch only from these templates, only the
 #     templates' machine type with IMDSv2 required, gp3 volumes of at most
 #     hosted_max_volume_gb and the templates' own images, with this deployment's
 #     tags; tag only at launch, end only machines carrying both tags, describe,
@@ -48,14 +48,6 @@ locals {
   # The largest volume a launch may make: the root volume, and the largest data
   # volume (each snapshot's size, 2 GiB for a JO:CA install).
   hosted_max_volume_gb = max(16, var.hosted_root_volume_gb, [for s in data.aws_ebs_snapshot.hosted : s.volume_size]...)
-}
-
-data "aws_caller_identity" "hosted" {
-  count = local.hosted_enabled ? 1 : 0
-}
-
-data "aws_partition" "hosted" {
-  count = local.hosted_enabled ? 1 : 0
 }
 
 # The machines' image: Canonical's newest Ubuntu 24.04 when the launch template
@@ -111,8 +103,8 @@ resource "aws_security_group" "hosted" {
   })
 }
 
-# Rules as resources of their own (aws_security_group.server admits this group
-# inline, so an inline rule here referring back would make a cycle).
+# Rules as resources of their own (the service's group admits this group and
+# this group the service's, so inline rules would make a cycle).
 resource "aws_vpc_security_group_ingress_rule" "hosted_game" {
   for_each = local.hosted_enabled ? toset(var.allowed_cidrs) : toset([])
 
@@ -132,11 +124,25 @@ resource "aws_vpc_security_group_ingress_rule" "hosted_admin" {
   ip_protocol                  = "tcp"
   from_port                    = local.hosted_admin_port
   to_port                      = local.hosted_admin_port
-  referenced_security_group_id = aws_security_group.server.id
+  referenced_security_group_id = aws_security_group.service.id
 }
 
 # Out: the image pull (ghcr.io), Ubuntu's mirrors, the bootstrap fetch, and
 # NovaWorld at the service's public address.
+# The service admits the machines on its HTTP port: their bootstrap fetch,
+# over the private network (the service answers only their subnet there,
+# ONNET_HOSTED_BOOTSTRAP_CIDRS).
+resource "aws_vpc_security_group_ingress_rule" "service_from_machines" {
+  count = local.hosted_enabled ? 1 : 0
+
+  security_group_id            = aws_security_group.service.id
+  description                  = "Hosted machines' bootstrap fetch (private)"
+  ip_protocol                  = "tcp"
+  from_port                    = var.game_http_port
+  to_port                      = var.game_http_port
+  referenced_security_group_id = aws_security_group.hosted[0].id
+}
+
 resource "aws_vpc_security_group_egress_rule" "hosted_all" {
   count = local.hosted_enabled ? 1 : 0
 
@@ -151,7 +157,7 @@ resource "aws_vpc_security_group_egress_rule" "hosted_all" {
 resource "aws_iam_role" "hosted_machine" {
   count              = local.hosted_enabled ? 1 : 0
   name               = "${local.name}-hosted-machine-role"
-  assume_role_policy = data.aws_iam_policy_document.backup_assume_role.json
+  assume_role_policy = data.aws_iam_policy_document.ec2_assume_role.json
 
   tags = merge(var.tags, {
     Name = "${local.name}-hosted-machine-role"
@@ -267,8 +273,8 @@ resource "aws_launch_template" "hosted" {
 # ---- what the service may do ----------------------------------------------------
 
 locals {
-  hosted_arn_prefix = local.hosted_enabled ? "arn:${data.aws_partition.hosted[0].partition}:ec2:${var.region}" : ""
-  hosted_account    = local.hosted_enabled ? data.aws_caller_identity.hosted[0].account_id : ""
+  hosted_arn_prefix = "arn:${local.partition}:ec2:${var.region}"
+  hosted_account    = local.account_id
 }
 
 data "aws_iam_policy_document" "hosted_service" {
@@ -444,11 +450,26 @@ resource "aws_iam_policy" "hosted_service" {
   policy      = data.aws_iam_policy_document.hosted_service[0].json
 }
 
-# The service instance carries one instance profile (aws_iam_instance_profile.
-# backup): its role takes this policy beside the backups'. An in-place change,
-# never a new instance.
+# The service host's role (service.tf) takes this policy beside its own.
 resource "aws_iam_role_policy_attachment" "hosted_service" {
   count      = local.hosted_enabled ? 1 : 0
-  role       = aws_iam_role.backup.name
+  role       = aws_iam_role.service.name
   policy_arn = aws_iam_policy.hosted_service[0].arn
+}
+
+# What the service needs to launch and reach the machines, in its infra.env
+# (service_ssm.tf): with hosting off, the provider `none` alone. The serve image
+# is the release's (`app deploy --serve-tag`, pinned by digest).
+locals {
+  hosted_env = local.hosted_enabled ? {
+    ONNET_HOSTED_PROVIDER             = "ec2"
+    ONNET_HOSTED_EC2_REGION           = var.region
+    ONNET_HOSTED_EC2_LAUNCH_TEMPLATES = jsonencode({ for slug, t in aws_launch_template.hosted : slug => t.id })
+    ONNET_HOSTED_EC2_SUBNET           = aws_subnet.public["a"].id
+    ONNET_HOSTED_DEPLOYMENT           = local.hosted_deployment
+    ONNET_HOSTED_SERVICE_ADDRESS      = local.service_private_ip
+    ONNET_HOSTED_BOOTSTRAP_CIDRS      = aws_subnet.public["a"].cidr_block
+    } : {
+    ONNET_HOSTED_PROVIDER = "none"
+  }
 }

@@ -21,8 +21,9 @@ mock_provider "aws" {
 
 mock_provider "cloudflare" {}
 
+# Prod adopts its Elastic IP (service.tf).
 variables {
-  ssh_public_key = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAItest test"
+  service_eip_allocation_id = "eipalloc-0123456789abcdef0"
 }
 
 run "subnets" {

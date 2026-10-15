@@ -2,12 +2,14 @@
 # Cloudflare: the site's DNS records and edge authentication
 # ---------------------------------------------------------------------------
 
-# Web root (example.com / www). Proxied by default so the site gets Cloudflare TLS.
+# The site's records, all at the service host's Elastic IP: prod's @, www and
+# game; another deployment's <deployment> and game-<deployment> (locals.tf).
+# Proxied by default so the site gets Cloudflare TLS.
 resource "cloudflare_record" "web_root" {
   count   = local.dns_enabled ? 1 : 0
   zone_id = var.cloudflare_zone_id
-  name    = "@"
-  content = local.public_ip
+  name    = local.manage_shared ? "@" : local.deployment
+  content = local.service_public_ip
   type    = "A"
   ttl     = var.cloudflare_web_proxied ? 1 : 300
   proxied = var.cloudflare_web_proxied
@@ -16,10 +18,10 @@ resource "cloudflare_record" "web_root" {
 }
 
 resource "cloudflare_record" "web_www" {
-  count   = local.dns_enabled ? 1 : 0
+  count   = local.dns_enabled && local.manage_shared ? 1 : 0
   zone_id = var.cloudflare_zone_id
   name    = "www"
-  content = local.public_ip
+  content = local.service_public_ip
   type    = "A"
   ttl     = var.cloudflare_web_proxied ? 1 : 300
   proxied = var.cloudflare_web_proxied
@@ -32,8 +34,8 @@ resource "cloudflare_record" "web_www" {
 resource "cloudflare_record" "game" {
   count   = local.dns_enabled ? 1 : 0
   zone_id = var.cloudflare_zone_id
-  name    = "game"
-  content = local.public_ip
+  name    = local.manage_shared ? "game" : "game-${local.deployment}"
+  content = local.service_public_ip
   type    = "A"
   ttl     = var.cloudflare_web_proxied ? 1 : 300
   proxied = var.cloudflare_web_proxied

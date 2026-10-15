@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
-# Thin wrapper: build (if needed) and run the deploy toolbox container,
-# forwarding all arguments to the on-deploy entrypoint.
+# Thin wrapper: build (if its Dockerfile changed) and run the deploy toolbox
+# container, forwarding all arguments to the on-deploy entrypoint.
 #
 #   export OP_SERVICE_ACCOUNT_TOKEN=ops_...
 #   ./deploy/run.sh secrets check
 #   ./deploy/run.sh infra plan
-#   ./deploy/run.sh infra apply
+#   ./deploy/run.sh --deployment staging app deploy --tag sha-abc1234
+#
+# OPENNOVA_DEPLOYMENT (default prod) names the deployment as --deployment does.
 #
 # HOSTED_DATA_DIR=<folder> mounts that folder read-only at /hosted-data, where
 # `hosted data-snapshot --data-set <slug>` reads that data set's game files, one
@@ -21,7 +23,8 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # When stdout is captured (e.g. `gh secret set -b "$(./run.sh infra output -raw …)"`),
 # disable the container's pseudo-TTY so the value isn't mangled with CR/ANSI bytes
 # that break downstream consumers (a stray CR in an AWS key crashes SigV4 signing).
-# Keep the TTY for interactive terminals so progress/colors still render.
+# Keep the TTY for interactive terminals so progress/colors still render (and
+# `app shell` and `db psql` get one).
 tty_flag=""
 [ -t 1 ] || tty_flag="-T"
 
@@ -37,4 +40,5 @@ if [ -n "${HOSTED_DATA_DIR:-}" ]; then
   export MSYS2_ARG_CONV_EXCL="--volume="
 fi
 
-exec docker compose -f "$here/docker-compose.deploy.yml" run --rm $tty_flag ${mount[@]+"${mount[@]}"} deploy "$@"
+# --build: a changed deploy/Dockerfile rebuilds the image (cached otherwise).
+exec docker compose -f "$here/docker-compose.deploy.yml" run --rm --build $tty_flag ${mount[@]+"${mount[@]}"} deploy "$@"
