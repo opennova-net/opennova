@@ -184,12 +184,13 @@ locals {
   # The first boot's script (deploy/host/service-user-data.sh) with this
   # deployment's values in its @...@ placeholders, and the converge unit it
   # installs.
-  service_user_data = replace(replace(replace(replace(replace(
+  service_user_data = replace(replace(replace(replace(replace(replace(
     file("${path.module}/../../deploy/host/service-user-data.sh"),
     "@OPENNOVA_DEPLOYMENT@", local.deployment),
     "@AWS_REGION@", var.region),
     "@OPENNOVA_SSM_PREFIX@", local.ssm_prefix),
     "@OPENNOVA_CONVERGE_DOCUMENT@", aws_ssm_document.converge.name),
+    "@OPENNOVA_INTERNAL_PORT@", tostring(var.internal_http_port)),
     "@OPENNOVA_CONVERGE_UNIT@", trimspace(file("${path.module}/../../deploy/host/opennova-converge.service")),
   )
 }
@@ -368,15 +369,4 @@ resource "aws_iam_role_policy" "service" {
 resource "aws_iam_instance_profile" "service" {
   name = "${local.name}-service"
   role = aws_iam_role.service.name
-}
-
-# ---- logs ---------------------------------------------------------------------
-
-# The containers' logs (docker's awslogs driver, one stream per service:
-# deploy/compose/docker-compose.prod.yml). `./deploy/run.sh app logs` reads it.
-resource "aws_cloudwatch_log_group" "service" {
-  name              = "/opennova/${local.deployment}/service"
-  retention_in_days = var.log_retention_days
-
-  tags = var.tags
 }

@@ -10,7 +10,8 @@
 #   database.tf    PostgreSQL 17 on RDS
 #   edge.tf        Cloudflare: DNS records, edge authentication
 #   ops_bucket.tf  the operations bucket (backups) and the account's S3 block
-#   hosted.tf      the hosted game servers' machines (ADR 0053)
+#   fleet.tf       the hosted game servers' machines: shared and own launch templates
+#   observability.tf  logs, metrics, alarms, budgets
 #   outputs.tf     what the deploy toolbox and operators read
 #   moved.tf       address moves from the single-file layout
 #

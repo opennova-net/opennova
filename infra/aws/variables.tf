@@ -222,11 +222,11 @@ variable "db_backup_retention_days" {
 }
 
 # ---------------------------------------------------------------------------
-# Hosted game servers (hosted.tf; DEPLOY.md "Hosted game servers")
+# The fleet: hosted game servers' machines (fleet.tf; DEPLOY.md "Hosted game servers")
 # ---------------------------------------------------------------------------
 
 variable "hosted_data_snapshots" {
-  description = "The data sets hosted game servers run, each the games slug of the lobby it lists in (jop_2_consumer, dfx2_consumer, opennova_0_consumer) to the private, encrypted EBS snapshot holding its game data, which its machines mount read-only (made once per data set by `./deploy/run.sh hosted data-snapshot --data-set <slug>`). One launch template per entry. Empty (the default) leaves hosting off: hosted.tf creates nothing and changes nothing. The toolbox reads it from the vault (item `hosted`, one field `data_snapshot_id_<slug>` per data set) as TF_VAR_hosted_data_snapshots."
+  description = "The data sets hosted game servers run, each the games slug of the lobby it lists in (jop_2_consumer, dfx2_consumer, opennova_0_consumer) to the private, encrypted EBS snapshot holding its game data, which every machine mounts read-only, a volume per data set (made once per data set by `./deploy/run.sh hosted data-snapshot --data-set <slug>`). Empty (the default) leaves hosting off: fleet.tf creates nothing. The toolbox reads it from the vault (item `hosted`, one field `data_snapshot_id_<slug>` per data set) as TF_VAR_hosted_data_snapshots."
   type        = map(string)
   default     = {}
 
@@ -240,27 +240,73 @@ variable "hosted_data_snapshots" {
   }
 }
 
-variable "hosted_instance_type" {
-  description = "The hosted game server machines' type: one machine per server. Never a burstable type (t2/t3/t4g...), whose spent CPU credits would starve the 62.5 Hz tick."
+variable "shared_instance_type" {
+  description = "The shared machines' type: up to shared_slots servers each. A burstable type runs with unlimited CPU credits (the launch template sets them). x86_64 only (the serve image's), and no t2."
+  type        = string
+  default     = "t3a.large"
+
+  validation {
+    condition     = !can(regex("^t2\\.", var.shared_instance_type)) && !can(regex("^[a-z]+[0-9]+[a-z]*g[a-z]*\\.", var.shared_instance_type))
+    error_message = "shared_instance_type must be an x86_64 type (no Graviton family such as t4g or c7g) and not t2 (the launch template's unlimited credits are for t3/t3a)."
+  }
+}
+
+variable "own_instance_type" {
+  description = "The own machines' type: exactly one server each (the paid own-machine add-on). The same rules as shared_instance_type."
   type        = string
   default     = "c7a.medium"
 
   validation {
-    condition     = !can(regex("^t[0-9]", var.hosted_instance_type))
-    error_message = "hosted_instance_type must not be a burstable t-family type."
+    condition     = !can(regex("^t2\\.", var.own_instance_type)) && !can(regex("^[a-z]+[0-9]+[a-z]*g[a-z]*\\.", var.own_instance_type))
+    error_message = "own_instance_type must be an x86_64 type (no Graviton family such as t4g or c7g) and not t2."
   }
 }
 
+variable "shared_slots" {
+  description = "K: the servers a shared machine holds (slot k: game UDP 32768+k, admin TCP 32800+k). The service reads it (ONNET_FLEET_SHARED_SLOTS); set it from measuring a full machine."
+  type        = number
+  default     = 12
+
+  validation {
+    condition     = var.shared_slots >= 1 && var.shared_slots <= 32 && floor(var.shared_slots) == var.shared_slots
+    error_message = "shared_slots must be 1..32 (the game ports 32768.. must stay below the admin ports 32800..)."
+  }
+}
+
+variable "fleet_max_shared" {
+  description = "The most shared machines the service runs at once (ONNET_FLEET_MAX_SHARED). With fleet_max_own, it sets the vCPU quota the account needs (DEPLOY.md)."
+  type        = number
+  default     = 2
+}
+
+variable "fleet_max_own" {
+  description = "The most own machines the service runs at once (ONNET_FLEET_MAX_OWN)."
+  type        = number
+  default     = 2
+}
+
+variable "fleet_idle_minutes" {
+  description = "How long a shared machine with no server runs before the service ends it (ONNET_FLEET_IDLE_MINUTES)."
+  type        = number
+  default     = 30
+}
+
 variable "hosted_ami_id" {
-  description = "Override the hosted machines' image (an Ubuntu 24.04 x86_64 AMI). Empty: Canonical's newest when a launch template is made; later images wait for `terraform apply -replace='aws_launch_template.hosted[\"<data set>\"]'`, one per data set."
+  description = "Override the machines' image (an Ubuntu 24.04 x86_64 AMI). Empty: Canonical's newest when a launch template is made; later images wait for a -replace of each template (aws_launch_template.fleet[\"shared\"], [\"own\"])."
   type        = string
   default     = ""
 }
 
-variable "hosted_root_volume_gb" {
-  description = "The hosted machines' root volume (the OS, docker, the serve image and the server's working directory), in GiB."
+variable "machine_root_volume_gb" {
+  description = "The machines' root volume (the OS, docker, the serve image and the slots' working directories), in GiB."
   type        = number
-  default     = 10
+  default     = 16
+}
+
+variable "internal_http_port" {
+  description = "The service's internal listener's port, on its fixed private address (ONNET_INTERNAL_HTTP_BIND): the machines' hostd bootstrap and sync, admitted from the machines' security group alone."
+  type        = number
+  default     = 8070
 }
 
 variable "hosted_deployment" {
@@ -272,4 +318,38 @@ variable "hosted_deployment" {
     condition     = can(regex("^[A-Za-z0-9._-]{0,64}$", var.hosted_deployment))
     error_message = "hosted_deployment takes up to 64 letters, digits, '.', '_' and '-'."
   }
+}
+
+# ---------------------------------------------------------------------------
+# Observability and budgets (observability.tf)
+# ---------------------------------------------------------------------------
+
+variable "alert_email" {
+  description = "Where the alarms, the budgets and cost anomalies write (an SNS email subscription to confirm once). From the vault (TF_VAR_alert_email: item alerts, field email); empty or REPLACE_ME sends nothing."
+  type        = string
+  default     = ""
+}
+
+variable "budget_monthly_usd" {
+  description = "The account's monthly cost budget, in USD: an email at 80% spent and at a 100% forecast."
+  type        = number
+  default     = 250
+}
+
+variable "budget_egress_gb" {
+  description = "The account's monthly EC2 data-transfer-out budget, in GB (the hosted servers' egress is metered, not capped): an email at 80% used and at a 100% forecast."
+  type        = number
+  default     = 1500
+}
+
+variable "cost_anomaly_monitor" {
+  description = "Whether prod makes the account's Cost Anomaly Detection monitor (by AWS service). An account holds one such monitor: false if it has one already (or import it)."
+  type        = bool
+  default     = true
+}
+
+variable "cost_anomaly_threshold_usd" {
+  description = "A cost anomaly's total impact, in USD, from which it is emailed (daily)."
+  type        = number
+  default     = 20
 }

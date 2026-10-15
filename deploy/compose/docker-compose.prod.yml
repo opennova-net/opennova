@@ -50,10 +50,29 @@ services:
     # (verify-full against the image's pinned RDS CA bundle), its password from
     # the vault. Required here, so a host missing either never starts a server
     # that cannot reach its data.
+    #
+    # The fleet (infra/aws/fleet.tf): the internal listener on the host's fixed
+    # private address (the machines' hostd), the fleet's knobs and the EC2
+    # settings (infra.env), the serve and hostd images (release.env, pinned by
+    # digest). Named here whether or not the base file names them too.
     environment:
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL (infra.env; infra apply)}
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:?set DATABASE_PASSWORD (secret.env; secrets sync)}
       DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-16}
+      ONNET_INTERNAL_HTTP_BIND: ${ONNET_INTERNAL_HTTP_BIND:-}
+      ONNET_FLEET_SHARED_SLOTS: ${ONNET_FLEET_SHARED_SLOTS:-}
+      ONNET_FLEET_MAX_SHARED: ${ONNET_FLEET_MAX_SHARED:-}
+      ONNET_FLEET_MAX_OWN: ${ONNET_FLEET_MAX_OWN:-}
+      ONNET_FLEET_IDLE_MINUTES: ${ONNET_FLEET_IDLE_MINUTES:-}
+      ONNET_HOSTED_HOSTD_IMAGE: ${ONNET_HOSTED_HOSTD_IMAGE:-}
+      ONNET_HOSTED_SERVE_IMAGE: ${ONNET_HOSTED_SERVE_IMAGE:-}
+      ONNET_HOSTED_PROVIDER: ${ONNET_HOSTED_PROVIDER:-none}
+      ONNET_HOSTED_EC2_REGION: ${ONNET_HOSTED_EC2_REGION:-}
+      ONNET_HOSTED_EC2_LAUNCH_TEMPLATES: ${ONNET_HOSTED_EC2_LAUNCH_TEMPLATES:-}
+      ONNET_HOSTED_EC2_SUBNET: ${ONNET_HOSTED_EC2_SUBNET:-}
+      ONNET_HOSTED_DEPLOYMENT: ${ONNET_HOSTED_DEPLOYMENT:-}
+      ONNET_HOSTED_SERVICE_ADDRESS: ${ONNET_HOSTED_SERVICE_ADDRESS:-}
+      ONNET_HOSTED_BOOTSTRAP_CIDRS: ${ONNET_HOSTED_BOOTSTRAP_CIDRS:-}
     logging:
       driver: awslogs
       options:

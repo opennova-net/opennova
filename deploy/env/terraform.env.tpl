@@ -13,3 +13,4 @@ TF_VAR_cloudflare_api_token=op://@VAULT@/cloudflare/api_token
 TF_VAR_cloudflare_zone_id=op://@VAULT@/cloudflare/zone_id
 TF_VAR_cloudflare_domain=op://@VAULT@/cloudflare/domain
 TF_VAR_db_master_password=op://@VAULT@/@RDS_ITEM@/master_password
+TF_VAR_alert_email=op://@VAULT@/alerts/email

@@ -44,11 +44,23 @@ instance_type = "c7i.large"
 # proxied toggle lives here.
 cloudflare_web_proxied = true
 
-# Hosted game servers (hosted.tf; DEPLOY.md "Hosted game servers"). The data
-# snapshots (hosted_data_snapshots, one per data set) come from the vault (item
-# `hosted`, fields data_snapshot_id_<slug>), not this file: hosting is off
-# without one.
-# hosted_instance_type  = "c7a.medium"  # never a burstable t-family type
-# hosted_root_volume_gb = 10
-# hosted_ami_id         = ""            # empty: Canonical's newest Ubuntu 24.04
-# hosted_deployment     = ""            # empty: the stack's resource name
+# The fleet (fleet.tf; DEPLOY.md "Hosted game servers"). The data snapshots
+# (hosted_data_snapshots, one per data set) come from the vault (item `hosted`,
+# fields data_snapshot_id_<slug>), not this file: hosting is off without one.
+# shared_instance_type   = "t3a.large"   # unlimited CPU credits; x86_64, no t2
+# own_instance_type      = "c7a.medium"
+# shared_slots           = 12            # K servers per shared machine (1..32)
+# fleet_max_shared       = 2
+# fleet_max_own          = 2
+# fleet_idle_minutes     = 30
+# machine_root_volume_gb = 16
+# hosted_ami_id          = ""            # empty: Canonical's newest Ubuntu 24.04
+# hosted_deployment      = ""            # empty: the stack's resource name
+
+# Alarms and budgets (observability.tf). The alert address comes from the vault
+# (item alerts, field email).
+# budget_monthly_usd         = 250
+# budget_egress_gb           = 1500
+# cost_anomaly_monitor       = true      # false if the account has one already
+# cost_anomaly_threshold_usd = 20
+# log_retention_days         = 30

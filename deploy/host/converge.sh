@@ -21,7 +21,7 @@
 #      the backup sidecar's build context; /opt/opennova/current points at it;
 #   3. makes sure of the RDS CA bundle the host's database tools verify
 #      against (pinned, as the images pin it), and installs the helpers the toolbox's other commands run here
-#      over SSM (opennova-compose, opennova-psql) and itself
+#      over SSM (opennova-compose, opennova-psql, opennova-admin-api) and itself
 #      (/usr/local/sbin/opennova-converge);
 #   4. pulls the release's images, then `docker compose up -d`: compose
 #      recreates only the containers whose image or settings changed (a
@@ -215,6 +215,34 @@ if [ -t 0 ] && [ -t 1 ]; then tty=(-t); fi
 exec docker run --rm -i "${tty[@]}" --network host -e PGPASSWORD \
   -v /etc/opennova/rds-global-bundle.pem:/app/rds-global-bundle.pem:ro \
   postgres:17-alpine psql "$url" "$@"
+HELPER
+
+install_helper opennova-admin-api <<'HELPER'
+#!/bin/bash
+# opennova-admin-api METHOD PATH [JSON]: the NovaWorld service's admin API from
+# the host's loopback (a proxy it trusts, ONNET_TRUSTED_PROXIES), with the admin
+# token from secret.env in a header file, never an argument (written by
+# opennova-converge; the toolbox's `fleet` commands run it). Prints the reply
+# and its status; fails on a status of 400 or more.
+set -euo pipefail
+method="${1:?usage: opennova-admin-api METHOD PATH [JSON]}"
+path="${2:?usage: opennova-admin-api METHOD PATH [JSON]}"
+body="${3:-}"
+[[ "$method" =~ ^(GET|POST|PUT|DELETE)$ ]] || { echo "opennova-admin-api: no method $method" >&2; exit 2; }
+[[ "$path" =~ ^/api/admin/[A-Za-z0-9/_.?=\&-]*$ ]] || { echo "opennova-admin-api: no admin path $path" >&2; exit 2; }
+token="$(sed -n "s/^ADMIN_API_TOKEN='\\(.*\\)'\$/\\1/p" /run/opennova/secret.env | tail -n 1)"
+[ -n "$token" ] || { echo "opennova-admin-api: secret.env holds no ADMIN_API_TOKEN (secrets sync, then converge)" >&2; exit 1; }
+umask 077
+auth="$(mktemp /run/opennova/admin-auth.XXXXXX)"
+trap 'rm -f "$auth"' EXIT
+printf 'Authorization: Bearer %s\n' "$token" > "$auth"
+unset token
+args=(-sS --max-time 30 -X "$method" -H "@$auth" -H 'Accept: application/json' -w '\nHTTP %{http_code}\n')
+if [ -n "$body" ]; then args+=(-H 'Content-Type: application/json' --data-binary "$body"); fi
+out="$(curl "${args[@]}" "http://127.0.0.1:8080$path")"
+printf '%s\n' "$out"
+code="$(printf '%s\n' "$out" | tail -n 1 | sed -n 's/^HTTP \([0-9]*\)$/\1/p')"
+[ -n "$code" ] && [ "$code" -lt 400 ]
 HELPER
 
 # --- 4. pull and start ----------------------------------------------------------------

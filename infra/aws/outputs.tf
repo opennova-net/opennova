@@ -88,27 +88,47 @@ output "hosted_enabled" {
   description = "Whether hosted game servers are set up (hosted_data_snapshots names a data set): infra.env then turns ONNET_HOSTED_PROVIDER=ec2 on"
 }
 
-output "hosted_launch_templates" {
-  value       = { for slug, template in aws_launch_template.hosted : slug => template.id }
-  description = "The hosted machines' launch templates, one per data set, by the data set's games slug (ONNET_HOSTED_EC2_LAUNCH_TEMPLATES in infra.env); empty while hosting is off"
+output "fleet_launch_templates" {
+  value       = { for kind, template in aws_launch_template.fleet : kind => template.id }
+  description = "The machines' launch templates by kind, shared and own (ONNET_HOSTED_EC2_LAUNCH_TEMPLATES in infra.env); empty while hosting is off"
 }
 
 output "hosted_subnet_id" {
   value       = local.hosted_enabled ? aws_subnet.public["a"].id : null
-  description = "The subnet hosted machines launch into (ONNET_HOSTED_EC2_SUBNET); null while hosting is off"
+  description = "The subnet machines launch into (ONNET_HOSTED_EC2_SUBNET); null while hosting is off"
 }
 
 output "hosted_subnet_cidr" {
   value       = local.hosted_enabled ? aws_subnet.public["a"].cidr_block : null
-  description = "That subnet's range, the only peers the bootstrap route answers (ONNET_HOSTED_BOOTSTRAP_CIDRS); null while hosting is off"
+  description = "That subnet's range, the only peers the internal listener's machine routes answer (ONNET_HOSTED_BOOTSTRAP_CIDRS); null while hosting is off"
 }
 
-output "hosted_security_group_id" {
-  value       = one(aws_security_group.hosted[*].id)
-  description = "The hosted machines' security group; null while hosting is off"
+output "machines_security_group_id" {
+  value       = one(aws_security_group.machines[*].id)
+  description = "The machines' security group; null while hosting is off"
 }
 
 output "hosted_deployment" {
   value       = local.hosted_enabled ? local.hosted_deployment : null
-  description = "The opennova:deployment tag of this stack's hosted machines (ONNET_HOSTED_DEPLOYMENT); null while hosting is off"
+  description = "The opennova:deployment tag of this stack's machines (ONNET_HOSTED_DEPLOYMENT); null while hosting is off"
+}
+
+output "internal_http_bind" {
+  value       = "${local.service_private_ip}:${var.internal_http_port}"
+  description = "The service's internal listener (ONNET_INTERNAL_HTTP_BIND), admitted from the machines alone"
+}
+
+output "machines_log_group" {
+  value       = aws_cloudwatch_log_group.machines.name
+  description = "The machines' logs"
+}
+
+output "alerts_topic_arn" {
+  value       = aws_sns_topic.alerts.arn
+  description = "The SNS topic every alarm notifies (its email subscription is confirmed once from the email AWS sends)"
+}
+
+output "health_check_id" {
+  value       = aws_route53_health_check.service.id
+  description = "The Route 53 health check on http://<Elastic IP>:8080/healthz"
 }

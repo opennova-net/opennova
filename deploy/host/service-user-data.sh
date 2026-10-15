@@ -11,7 +11,8 @@
 #      only root (the SSM agent, dockerd's awslogs driver, converge) and the
 #      NovaWorld server's UID reach it; a container on a bridge network
 #      (the portal's nginx, the web build) reaches it neither through the host
-#      (hop limit 1) nor through docker's forwarding (DOCKER-USER);
+#      (hop limit 1) nor through docker's forwarding (DOCKER-USER), nor the
+#      service's internal listener;
 #   3. writes /etc/opennova/host.env (the deployment, its region, its SSM
 #      parameters and converge document);
 #   4. installs opennova-converge.service and starts it: it fetches the converge
@@ -30,6 +31,11 @@ readonly DEPLOYMENT='@OPENNOVA_DEPLOYMENT@'
 readonly REGION='@AWS_REGION@'
 readonly SSM_PREFIX='@OPENNOVA_SSM_PREFIX@'
 readonly CONVERGE_DOCUMENT='@OPENNOVA_CONVERGE_DOCUMENT@'
+# The service's internal listener (ONNET_INTERNAL_HTTP_BIND: the machines'
+# hostd), which no container on the `edge` bridge (deploy/compose/
+# docker-compose.prod.yml) may reach either.
+readonly INTERNAL_PORT='@OPENNOVA_INTERNAL_PORT@'
+readonly EDGE_SUBNET=172.30.0.0/24
 
 # The NovaWorld server's UID (its image's USER): the one non-root user the
 # metadata fence admits.
@@ -111,6 +117,11 @@ if iptables -n -L DOCKER-USER >/dev/null 2>&1; then
   forward_rule=(DOCKER-USER -d 169.254.169.254 -j REJECT)
   iptables -C "\${forward_rule[@]}" 2>/dev/null || iptables -I "\${forward_rule[@]}"
 fi
+# The internal listener answers the machines (their security group) alone; a
+# container on the edge bridge reaches the host's addresses without passing
+# one, so it is refused here.
+internal_rule=(INPUT -s $EDGE_SUBNET -p tcp --dport $INTERNAL_PORT -j REJECT)
+iptables -C "\${internal_rule[@]}" 2>/dev/null || iptables -I "\${internal_rule[@]}"
 FENCE
 chmod 0755 /usr/local/sbin/opennova-fence
 

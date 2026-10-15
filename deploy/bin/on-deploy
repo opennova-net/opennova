@@ -34,7 +34,7 @@
 #   infra output|list [args...]   terraform output / state list
 #   aws <args...>                 the AWS CLI with the vault's credentials
 #   app deploy [--tag T] [--server-tag T] [--web-tag T] [--game-tag T]
-#              [--serve-tag T] [--no-hosting]
+#              [--serve-tag T] [--hostd-tag T] [--no-hosting]
 #                                 pin the images by digest (--tag sets server and
 #                                 web; an image given no tag keeps the current
 #                                 release's), upload the release bundle, make it
@@ -65,7 +65,12 @@
 #   backup restore KEY --yes-overwrite-database
 #                                 restore a dump over the database (the server
 #                                 is stopped meanwhile)
-#   hosted status                this deployment's hosted game server machines
+#   fleet status                  the deployment's game machines (EC2) and the
+#                                 service's view of them (its admin API)
+#   fleet drain MACHINE           start no server there; move its servers off
+#   fleet end MACHINE             end a machine (its servers move first)
+#   fleet roll                    drain every machine onto new ones (a new
+#                                 image, a new hostd), one at a time
 #   hosted data-snapshot --data-set SLUG
 #                                 one data set of the hosted servers' game data,
 #                                 once: its game folder mounted at /hosted-data
@@ -456,6 +461,8 @@ secrets_init() {
     database_password:gen:24:CONCEALED
   ensure_item "$RDS_ITEM" SECURE_NOTE \
     master_password:gen:24:CONCEALED
+  ensure_item alerts SECURE_NOTE \
+    email:value:REPLACE_ME:STRING
   local specs=()
   mapfile -t specs < <(stripe_placeholder_specs)
   ensure_item stripe-test API_CREDENTIAL "${specs[@]}"
@@ -526,6 +533,14 @@ secrets_check() {
     fi
   done
   log "  (deployment $DEP syncs $STRIPE_ITEM)"
+  # Where the alarms and budgets write: a placeholder sends nothing.
+  local email
+  if email="$(op read --no-newline "op://$VAULT/alerts/email" 2>/dev/null)" && [[ "$email" == *@*.* ]]; then
+    log "  alerts/email    OK"
+  else
+    log "  alerts/email    placeholder or absent: the alarms, budgets and cost anomalies email nobody"
+  fi
+  email=""
   # Optional: hosted game servers are off without it (DEPLOY.md, "Hosted game servers").
   local snapshots
   if ! vault_has_item hosted; then
@@ -795,6 +810,10 @@ cmd_infra() {
 # app: releases
 # ---------------------------------------------------------------------------
 
+# hostd's image repository (under ghcr.io/<owner>/): the serve image carries
+# hostd unless the fleet publishes an image of its own.
+HOSTD_REPO="${OPENNOVA_HOSTD_REPO:-opennova-serve}"
+
 ghcr_owner() {
   if [ -n "${GHCR_OWNER:-}" ]; then
     printf '%s' "$GHCR_OWNER"
@@ -863,10 +882,10 @@ bundle_check() {
 }
 
 app_deploy() {
-  local tag="" server_tag="" web_tag="" game_tag="" serve_tag="" hosting=1
+  local tag="" server_tag="" web_tag="" game_tag="" serve_tag="" hostd_tag="" hosting=1
   while [ $# -gt 0 ]; do
     case "$1" in
-      --tag|--server-tag|--web-tag|--game-tag|--serve-tag)
+      --tag|--server-tag|--web-tag|--game-tag|--serve-tag|--hostd-tag)
         if [ $# -lt 2 ] || [ -z "$2" ]; then die "$1 needs a value"; fi
         case "$1" in
           --tag) tag="$2" ;;
@@ -874,10 +893,11 @@ app_deploy() {
           --web-tag) web_tag="$2" ;;
           --game-tag) game_tag="$2" ;;
           --serve-tag) serve_tag="$2" ;;
+          --hostd-tag) hostd_tag="$2" ;;
         esac
         shift 2 ;;
       --no-hosting) hosting=0; shift ;;
-      *) die "unknown: app deploy $1 (try: --tag T, --server-tag T, --web-tag T, --game-tag T, --serve-tag T, --no-hosting)" ;;
+      *) die "unknown: app deploy $1 (try: --tag T, --server-tag T, --web-tag T, --game-tag T, --serve-tag T, --hostd-tag T, --no-hosting)" ;;
     esac
   done
   [ -n "$server_tag" ] || server_tag="$tag"
@@ -892,7 +912,7 @@ app_deploy() {
   owner="$(ghcr_owner)"
 
   log "deployment $DEP, current release: $current"
-  local server web game serve hosted_provider
+  local server web game serve hostd hosted_provider
   server="$(pick_image server novaworld-server "$server_tag" "$manifest" "$owner")" || die "nothing was changed"
   web="$(pick_image web novaworld-web "$web_tag" "$manifest" "$owner")" || die "nothing was changed"
   game="$(pick_image game opennova-game "$game_tag" "$manifest" "$owner")" || die "nothing was changed"
@@ -903,10 +923,20 @@ app_deploy() {
     fi
     serve=""
   fi
+  # hostd, the machines' agent, ships in its own image (HOSTD_REPO; the serve
+  # image's repository unless the fleet publishes one of its own), pinned apart
+  # from the serve image so either can move alone.
+  if ! hostd="$(pick_image hostd "$HOSTD_REPO" "$hostd_tag" "$manifest" "$owner")"; then
+    if [ "$hosted_provider" != none ] && [ "$hosting" -eq 1 ]; then
+      die "the machines need hostd's image; nothing was changed (or deploy with --no-hosting)"
+    fi
+    hostd=""
+  fi
   log "  server $server"
   log "  web    $web"
   log "  game   $game"
   log "  serve  ${serve:-none}"
+  log "  hostd  ${hostd:-none}"
   if [ "$hosting" -eq 0 ]; then
     log "  hosted game servers: off (--no-hosting)"
   else
@@ -931,15 +961,18 @@ app_deploy() {
     printf "WEB_IMAGE='%s'\n" "$web"
     printf "GAME_IMAGE='%s'\n" "$game"
     printf "ONNET_HOSTED_SERVE_IMAGE='%s'\n" "$serve"
+    printf "ONNET_HOSTED_HOSTD_IMAGE='%s'\n" "$hostd"
     if [ "$hosting" -eq 0 ]; then printf "ONNET_HOSTED_PROVIDER='none'\n"; fi
   } > "$work/bundle/env/release.env"
   jq -n --arg id "$id" --arg dep "$DEP" --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --arg rev "$rev" --argjson dirty "$dirty" --arg previous "$current" \
-        --arg server "$server" --arg web "$web" --arg game "$game" --arg serve "$serve" \
+        --arg server "$server" --arg web "$web" --arg game "$game" --arg serve "$serve" --arg hostd "$hostd" \
         --argjson hosting "$([ "$hosting" -eq 1 ] && echo true || echo false)" \
     '{id: $id, deployment: $dep, created: $created, revision: $rev, dirty: $dirty,
       previous: (if $previous == "none" then null else $previous end),
-      images: ({server: $server, web: $web, game: $game} + (if $serve == "" then {} else {serve: $serve} end)),
+      images: ({server: $server, web: $web, game: $game}
+               + (if $serve == "" then {} else {serve: $serve} end)
+               + (if $hostd == "" then {} else {hostd: $hostd} end)),
       hosting: $hosting}' > "$work/bundle/manifest.json"
   bundle_check "$work/bundle"
   tar -C "$work/bundle" --owner=0 --group=0 --numeric-owner -czf "$work/$id.tar.gz" .
@@ -1502,20 +1535,51 @@ hosted_deployment_tag() {
   printf '%s' "$tag"
 }
 
-# hosted status: every machine this deployment tagged (the service's own
-# listing's scope), with its server, state and addresses.
-hosted_status() {
-  [ $# -eq 0 ] || die "unknown: hosted status $1 (the deployment is --deployment's)"
+# The service's admin API for its fleet (apps/novaworld_server: the admin fleet
+# routes). The toolbox calls it on the host, over SSM, from the loopback (a
+# proxy the server trusts, ONNET_TRUSTED_PROXIES) with the admin token
+# (opennova-admin-api, written by converge).
+FLEET_API=/api/admin/fleet
+
+# A machine's id as the service names it (its row) or EC2 does (i-...),
+# checked before it goes into a host script.
+machine_id() {
+  [[ "$1" =~ ^[A-Za-z0-9_-]{1,64}$ ]] || die "'$1' is no machine id (fleet status lists them)"
+  printf '%s' "$1"
+}
+
+# fleet status: every machine this deployment tagged (the EC2 view, which
+# answers while the service is down), then the service's own view.
+fleet_status() {
+  [ $# -eq 0 ] || die "unknown: fleet status $1 (the deployment is --deployment's)"
   aws_auth
   infra_env_load
   local tag
   tag="$(hosted_deployment_tag)"
-  log "hosted machines tagged opennova:deployment=$tag:"
+  log "machines tagged opennova:deployment=$tag (EC2):"
   # shellcheck disable=SC2016  # a JMESPath literal, not a shell expansion
   aws ec2 describe-instances \
     --filters "Name=tag:opennova:hosted,Values=1" "Name=tag:opennova:deployment,Values=$tag" \
-    --query 'Reservations[].Instances[].{machine:InstanceId,server:Tags[?Key==`opennova:server-id`]|[0].Value,state:State.Name,type:InstanceType,private:PrivateIpAddress,public:PublicIpAddress,launched:LaunchTime}' \
+    --query 'Reservations[].Instances[].{machine:InstanceId,kind:Tags[?Key==`opennova:machine-kind`]|[0].Value,id:Tags[?Key==`opennova:machine-id`]|[0].Value,state:State.Name,type:InstanceType,public:PublicIpAddress,launched:LaunchTime}' \
     --output table
+  log "the service's fleet ($FLEET_API):"
+  ssm_run 120 "$(host_script "opennova-admin-api GET $FLEET_API")" \
+    || err "the service did not answer (app status, app logs novaworld)"
+}
+
+cmd_fleet() {
+  local action="${1:-status}"
+  shift || true
+  case "$action" in
+    status) fleet_status "$@" ;;
+    drain|end)
+      [ $# -eq 1 ] || die "fleet $action needs one MACHINE (fleet status lists them)"
+      ssm_run 120 "$(host_script "opennova-admin-api POST $FLEET_API/machines/$(machine_id "$1")/$action")" ;;
+    roll)
+      [ $# -eq 0 ] || die "unknown: fleet roll $1"
+      ssm_run 120 "$(host_script "opennova-admin-api POST $FLEET_API/roll")" ;;
+    *) die "unknown: fleet $action (try: status|drain|end|roll)" ;;
+  esac
 }
 
 # hosted data-snapshot --data-set SLUG: one data set of the hosted servers'
@@ -1604,12 +1668,12 @@ hosted_data_snapshot() {
 }
 
 cmd_hosted() {
-  local action="${1:-status}"
+  local action="${1:-}"
   shift || true
   case "$action" in
-    status)        hosted_status "$@" ;;
     data-snapshot) hosted_data_snapshot "$@" ;;
-    *) die "unknown: hosted $action (try: status|data-snapshot)" ;;
+    status) die "hosted status is fleet status now" ;;
+    *) die "unknown: hosted $action (try: data-snapshot; the machines are fleet status)" ;;
   esac
 }
 
@@ -1641,6 +1705,7 @@ main() {
     db)      cmd_db "$@" ;;
     backup)  cmd_backup "$@" ;;
     state)   cmd_state "$@" ;;
+    fleet)   cmd_fleet "$@" ;;
     hosted)  cmd_hosted "$@" ;;
     help|-h|--help) usage ;;
     *) err "unknown command: $group"; usage; exit 1 ;;
