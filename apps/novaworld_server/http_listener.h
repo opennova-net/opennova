@@ -33,6 +33,7 @@ class SessionStore;
 class NwUdpListener;
 class Watchdog;
 namespace hosted { class AdminLinks; }
+namespace billing { class Billing; }
 namespace catalog { struct GameRow; }
 
 // Crow-backed HTTP listener. start() registers six route families, each in
@@ -49,6 +50,9 @@ namespace catalog { struct GameRow; }
 //                         ServerStopHosting pushes for an admin
 //                         (/api/admin/hosts/<rid>/...) and for the
 //                         server's owner (/api/me/hosts/<rid>/...)
+//   support tiers       — BillingRoutes (billing/billing_routes.h): the tiers,
+//                         the account's billing, checkout and portal, the
+//                         Stripe webhook and the admin's billing view
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
@@ -90,6 +94,12 @@ public:
 	// start(); it must outlive the HTTP listener. Null: /healthz answers "ok"
 	// whenever Crow serves it.
 	void set_watchdog(const Watchdog *watchdog) { watchdog_ = watchdog; }
+
+	// Billing (billing/billing.h), which the billing routes run on
+	// (billing/billing_routes.h). Set before start(); it must outlive the HTTP
+	// listener. Null: billing is off, and those routes answer billing_disabled
+	// (GET /api/billing/tiers answers {"enabled": false}).
+	void set_billing(billing::Billing *billing) { billing_ = billing; }
 
 	// The cloud machines' bootstrap route (hosted/bootstrap_route.h, POST
 	// /hosted/bootstrap/<id>): registered only with a store, answering only TCP
@@ -213,6 +223,8 @@ private:
 	hosted::AdminLinks *admin_links_ = nullptr;
 	// GET /healthz's watchdog (set_watchdog); null: always "ok".
 	const Watchdog *watchdog_ = nullptr;
+	// The billing routes' billing (set_billing); null: billing off.
+	billing::Billing *billing_ = nullptr;
 	// The bootstrap route's tokens and networks (set_hosted_bootstrap); null:
 	// no route.
 	hosted::BootstrapStore *bootstrap_store_ = nullptr;

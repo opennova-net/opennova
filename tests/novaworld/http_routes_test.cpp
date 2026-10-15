@@ -25,8 +25,11 @@
 #include <net/title/title_identity.h>
 #include <base/gameprofile/gameprofile.h>
 #include "auth.h"
+#include "billing/billing.h"
 #include "billing/billing_repository.h"
+#include "billing/billing_routes.h"
 #include "billing/entitlement.h"
+#include "novaworld/billing_fake_stripe.h"
 #include "health.h"
 #include "hosted/admin_link.h"
 #include "hosted/console_commands.h"
@@ -139,6 +142,10 @@ struct Harness {
 	// The first listener's stall watchdog (GET /healthz): its clock and its one
 	// watched loop's counter are the test's (g_watch_clock_ms, g_watch_turns).
 	nws::Watchdog *watchdog = nullptr;
+	// The first listener's billing over an in-memory Stripe (the Secure
+	// listener runs with none: billing off).
+	billing_fake::FakeStripeApi *stripe = nullptr;
+	nws::billing::Billing *billing = nullptr;
 
 	// Every connect, send and recv waits at most `timeout_ms`.
 	net::HttpReply send(const char *method, const std::string &path,
@@ -937,6 +944,9 @@ int test_admin_routes_table(Harness &h) {
 		{"POST", "/api/admin/cd-keys/999999/assign", "{\"username\":\"web_table_player\"}"},
 		{"POST", "/api/admin/cd-keys/999999/revoke", ""},
 		{"POST", "/api/admin/cd-keys/999999/activations", "{\"nwpssk\":\"ABCDEFGHIJKLMNOPQRSTUVW\"}"},
+		{"GET", "/api/admin/billing", ""},
+		{"POST", "/api/admin/billing/reconcile", ""},
+		{"POST", "/api/admin/billing/link", "{\"user_id\":1,\"stripe_customer_id\":\"cus_never\"}"},
 	};
 	const auto users_before = nws::list_users(*h.pool.acquire()).size();
 	const auto status_before = nws::get_server_status(*h.pool.acquire());
@@ -5495,6 +5505,466 @@ int test_hosted_console_routes(Harness &h) {
 	return 0;
 }
 
+// ---- support tiers (billing) --------------------------------------------------
+
+// The harness's billing (billing/billing.h) runs over the in-memory Stripe
+// (novaworld/billing_fake_stripe.h) with the settings below, its worker driven
+// by hand (billing_pass); the Secure listener runs with none (billing off).
+constexpr const char *kWebhookSecret = "whsec_harnesswebhooksecret";
+constexpr const char *kSiteUrl = "https://site.example";
+
+billing_fake::FakeStripeApi::Price harness_price(const char *id, int64_t amount) {
+	billing_fake::FakeStripeApi::Price p;
+	p.id = id;
+	p.unit_amount = amount;
+	return p;
+}
+
+void billing_pass(Harness &h) { h.billing->sync().pass(nws::billing::unix_now()); }
+
+// A Stripe-Signature header for `body` at `t` under `secret`, as Stripe signs:
+// the hex HMAC-SHA256 of "<t>.<body>".
+std::string stripe_signature(const std::string &body, int64_t t, const std::string &secret = kWebhookSecret) {
+	const std::string signed_text = std::to_string(t) + "." + body;
+	return "Stripe-Signature: t=" + std::to_string(t) +
+			",v1=" + opennova::io::sha256_hex(opennova::io::hmac_sha256(secret, signed_text));
+}
+
+std::string event_body(const std::string &id, const std::string &customer, bool livemode = false) {
+	return "{\"id\":\"" + id + "\",\"object\":\"event\",\"type\":\"customer.subscription.updated\",\"livemode\":" +
+			(livemode ? "true" : "false") + ",\"created\":" + std::to_string(nws::billing::unix_now()) +
+			",\"data\":{\"object\":{\"id\":\"sub_x\",\"object\":\"subscription\",\"customer\":\"" + customer + "\"}}}";
+}
+
+// The tiers (public), the account's billing, checkout and the portal: the
+// session and CSRF refusals, the item's rules (an own machine needs a tier, a
+// tier while one grants is already_subscribed), the Checkout session's settings
+// (the customer made once with its idempotency key and the account's metadata,
+// the previous open session expired, the return URLs, the terms, the life), the
+// sync after a checkout, the portal, the buckets, prices that do not check out
+// (503 billing_misconfigured), Stripe unreachable (502), and billing off.
+int test_billing_routes(Harness &h) {
+	namespace billing = opennova::novaworld_server::billing;
+	using billing::StripeRequest;
+	const int64_t ana = make_account(h, "bill_ana", "pw-bill-ana");
+	const int64_t bea = make_account(h, "bill_bea", "pw-bill-bea");
+	const int64_t cy = make_account(h, "bill_cy", "pw-bill-cy");
+	TEST_EXPECT(ana > 0 && bea > 0 && cy > 0);
+	const std::string ana_s = login_token(h, "10.61.0.1", "bill_ana", "pw-bill-ana");
+	const std::string bea_s = login_token(h, "10.61.0.2", "bill_bea", "pw-bill-bea");
+	const std::string cy_s = login_token(h, "10.61.0.3", "bill_cy", "pw-bill-cy");
+	TEST_EXPECT(!ana_s.empty() && !bea_s.empty() && !cy_s.empty());
+	auto post = [&h](const std::string &path, const std::string &session, const std::string &body = {},
+						 bool csrf = true) {
+		std::vector<std::string> headers = { kJson, with_session(session) };
+		if (csrf) headers.push_back(kCsrf);
+		return h.send("POST", path, headers, body);
+	};
+	auto me = [&h](const std::string &session) { return h.send("GET", "/api/me/billing", { with_session(session) }); };
+
+	// The tiers: public, with Stripe's amounts once the prices check out.
+	auto reply = h.send("GET", "/api/billing/tiers");
+	auto json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && str(json["currency"]) == "usd");
+	TEST_EXPECT(json["tiers"].size() == 3);
+	if (json && json["tiers"].size() == 3) {
+		for (int i = 0; i < 3; ++i) {
+			TEST_EXPECT(json["tiers"][i]["tier"].i() == i + 1 && json["tiers"][i]["max_servers"].i() == i + 1);
+			TEST_EXPECT(json["tiers"][i]["amount"].i() == 500 * (i + 1) && str(json["tiers"][i]["interval"]) == "month");
+		}
+	}
+	TEST_EXPECT(json["own_machine"]["amount"].i() == 4500 && str(json["own_machine"]["interval"]) == "month");
+	// Billing off: the tiers with no amount, no add-on; the rest 503.
+	reply = h.send_to(h.secure_port, "GET", "/api/billing/tiers");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && !json["enabled"].b() && json["tiers"].size() == 3 &&
+			json["tiers"][0]["amount"].t() == crow::json::type::Null &&
+			json["own_machine"].t() == crow::json::type::Null);
+
+	// The account's billing: a session; nothing yet.
+	TEST_EXPECT(h.send("GET", "/api/me/billing").code == 401);
+	reply = me(ana_s);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && json["max_servers"].i() == 0 &&
+			json["comp_servers"].i() == 0 && json["own_machines"].i() == 0 && json["used"].i() == 0);
+	TEST_EXPECT(!json["can_start"].b() && !json["can_manage"].b() && json["can_subscribe"].b());
+	TEST_EXPECT(json["subscription"].t() == crow::json::type::Null &&
+			json["own_machine_subscription"].t() == crow::json::type::Null);
+	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
+
+	// Checkout's refusals: logged out, no CSRF header, the body (Bea's bucket).
+	TEST_EXPECT(h.send("POST", "/api/billing/checkout", { kJson, kCsrf }, "{\"item\":\"tier1\"}").code == 401);
+	reply = post("/api/billing/checkout", ana_s, "{\"item\":\"tier1\"}", /*csrf=*/false);
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
+	reply = post("/api/billing/checkout", bea_s, "not json");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_json");
+	for (const char *bad : { "{}", "{\"item\":\"tier4\"}", "{\"item\":2}", "{\"item\":\"premium\"}" }) {
+		reply = post("/api/billing/checkout", bea_s, bad);
+		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_item");
+	}
+	TEST_EXPECT(h.stripe->count(StripeRequest::Method::Post, "/v1/customers") == 0);
+
+	// Ana's checkouts (her bucket: 6). The add-on first needs a tier.
+	reply = post("/api/billing/checkout", ana_s, "{\"item\":\"own_machine\"}");
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_eligible");
+	reply = post("/api/billing/checkout", ana_s, "{\"item\":\"tier1\"}");
+	json = crow::json::load(body_text(reply));
+	if (reply.code != 200) std::fprintf(stderr, "  checkout: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 200 && json && str(json["url"]).rfind("https://checkout.stripe.com/", 0) == 0);
+	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
+	const auto customer = billing::customer_of(*h.pool.acquire(), ana);
+	TEST_EXPECT(customer && !customer->open_checkout_session.empty());
+	const std::string first_session = customer ? customer->open_checkout_session : std::string();
+	{
+		std::lock_guard<std::mutex> lock(h.stripe->mu);
+		const auto &made = h.stripe->customers[customer->stripe_customer_id];
+		TEST_EXPECT(made.metadata.at(billing::kMetaInstance) == h.billing->instance_id() &&
+				made.metadata.at(billing::kMetaUserId) == std::to_string(ana) &&
+				made.metadata.at(billing::kMetaUsername) == "bill_ana");
+		bool keyed = false;
+		for (const StripeRequest &r : h.stripe->requests) {
+			if (r.method == StripeRequest::Method::Post && r.path == "/v1/customers")
+				keyed = r.idempotency_key == "opennova-" + h.billing->instance_id() + "-customer-" + std::to_string(ana);
+		}
+		TEST_EXPECT(keyed);
+		const auto &session = h.stripe->checkout_sessions[first_session];
+		TEST_EXPECT(session.customer == customer->stripe_customer_id && session.price_id == "price_htier1");
+		TEST_EXPECT(session.success_url ==
+				std::string(kSiteUrl) + "/me/support?checkout=success&session_id={CHECKOUT_SESSION_ID}");
+		TEST_EXPECT(session.cancel_url == std::string(kSiteUrl) + "/me/support?checkout=cancel");
+		TEST_EXPECT(session.client_reference_id == std::to_string(ana));
+		TEST_EXPECT(session.subscription_metadata.at(billing::kMetaInstance) == h.billing->instance_id());
+		const int64_t life = session.expires_at - billing::unix_now();
+		TEST_EXPECT(life > 1700 && life <= 1800);
+		bool terms = false;
+		for (const auto &[k, v] : session.params) terms = terms || (k == "consent_collection[terms_of_service]" && v == "required");
+		TEST_EXPECT(terms);
+	}
+	// Again: the same customer, the previous session expired.
+	reply = post("/api/billing/checkout", ana_s, "{\"item\":\"tier1\"}");
+	TEST_EXPECT(reply.code == 200);
+	const std::string second_session = billing::customer_of(*h.pool.acquire(), ana)->open_checkout_session;
+	TEST_EXPECT(second_session != first_session);
+	TEST_EXPECT(h.stripe->count(StripeRequest::Method::Post, "/v1/customers") == 1);
+	{
+		std::lock_guard<std::mutex> lock(h.stripe->mu);
+		TEST_EXPECT(h.stripe->checkout_sessions[first_session].status == "expired");
+	}
+
+	// She pays (Stripe makes the subscription); the success page's sync shows it.
+	TEST_EXPECT(!h.stripe->complete_checkout(second_session).empty());
+	reply = post("/api/me/billing/sync", ana_s);
+	json = crow::json::load(body_text(reply));
+	if (reply.code != 200) std::fprintf(stderr, "  sync: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 200 && json && json["max_servers"].i() == 1 && json["can_start"].b());
+	TEST_EXPECT(json["subscription"]["tier"].i() == 1 && str(json["subscription"]["status"]) == "active" &&
+			json["subscription"]["entitled"].b() && !json["subscription"]["cancel_at_period_end"].b());
+	const std::string period_end = str(json["subscription"]["current_period_end"]);
+	TEST_EXPECT(period_end.size() == 20 && period_end[10] == 'T' && period_end.back() == 'Z');
+	TEST_EXPECT(json["can_manage"].b() && !json["can_subscribe"].b());
+	// A tier while one grants: the portal changes it. The add-on now may start.
+	reply = post("/api/billing/checkout", ana_s, "{\"item\":\"tier2\"}");
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "already_subscribed");
+	reply = post("/api/billing/checkout", ana_s, "{\"item\":\"own_machine\"}");
+	TEST_EXPECT(reply.code == 200);
+	// The portal, returning to the support page.
+	reply = post("/api/billing/portal", ana_s);
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && str(json["url"]).rfind("https://billing.stripe.com/", 0) == 0);
+	{
+		std::lock_guard<std::mutex> lock(h.stripe->mu);
+		TEST_EXPECT(!h.stripe->portal_sessions.empty() &&
+				h.stripe->portal_sessions.back().return_url == std::string(kSiteUrl) + "/me/support");
+	}
+	reply = post("/api/billing/portal", bea_s);
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_billing_account");
+	reply = post("/api/me/billing/sync", bea_s);
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "no_billing_account");
+	// The sync bucket: 3 at once (Ana spent one).
+	TEST_EXPECT(post("/api/me/billing/sync", ana_s).code == 200);
+	TEST_EXPECT(post("/api/me/billing/sync", ana_s).code == 200);
+	reply = post("/api/me/billing/sync", ana_s);
+	TEST_EXPECT(reply.code == 429 && has_header(reply, "Retry-After"));
+	// Ana's checkout bucket is spent too (six draws).
+	TEST_EXPECT(post("/api/billing/checkout", ana_s, "{\"item\":\"tier1\"}").code == 429);
+
+	// Prices that do not check out: checkout pauses (Cy's bucket).
+	{
+		std::lock_guard<std::mutex> lock(h.stripe->mu);
+		h.stripe->prices["price_htier2"].interval = "year";
+	}
+	TEST_EXPECT(h.billing->sync().validate_prices() && !h.billing->sync().status().prices_ok);
+	reply = post("/api/billing/checkout", cy_s, "{\"item\":\"tier2\"}");
+	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "billing_misconfigured");
+	TEST_EXPECT(!crow::json::load(body_text(h.send("GET", "/api/billing/tiers")))["enabled"].b());
+	TEST_EXPECT(!crow::json::load(body_text(me(cy_s)))["can_subscribe"].b());
+	{
+		std::lock_guard<std::mutex> lock(h.stripe->mu);
+		h.stripe->prices["price_htier2"].interval = "month";
+	}
+	TEST_EXPECT(h.billing->sync().validate_prices() && h.billing->sync().status().prices_ok);
+	// Stripe unreachable: 502, nothing kept.
+	h.stripe->fail_next(billing::StripeReply::Outcome::Unreachable);
+	reply = post("/api/billing/checkout", cy_s, "{\"item\":\"tier2\"}");
+	TEST_EXPECT(reply.code == 502 && error_of_reply(reply) == "stripe_unavailable");
+	TEST_EXPECT(!billing::customer_of(*h.pool.acquire(), cy));
+
+	// Billing off (the Secure listener): every account route 503 billing_disabled.
+	std::string token;
+	{
+		auto conn = h.pool.acquire();
+		const auto user = nws::get_user_by_id(*conn, cy);
+		const auto minted = nws::create_web_session(*conn, cy, user->credentials_gen, "127.0.0.1", "harness");
+		TEST_EXPECT(minted.has_value());
+		token = *minted;
+	}
+	const std::string cookie = with_cookie(nws::kWebSessionHostCookie, token);
+	reply = h.send_to(h.secure_port, "GET", "/api/me/billing", { cookie });
+	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "billing_disabled");
+	for (const char *path : { "/api/billing/checkout", "/api/billing/portal", "/api/me/billing/sync" }) {
+		reply = h.send_to(h.secure_port, "POST", path, { kJson, kCsrf, cookie }, "{\"item\":\"tier1\"}");
+		TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "billing_disabled");
+	}
+	return 0;
+}
+
+// POST /api/billing/webhook: no session and no CSRF header, the signature its
+// credential. Missing, wrong, stale and several-v1 signatures; a body past
+// 1 MiB (413); a signed body that is no event (400 invalid_json); an event of the
+// other mode dropped (200); an event recorded once however often delivered,
+// its customer synced by the worker's next pass into the account's billing;
+// the refusals counted for the heartbeat; billing off (503).
+int test_billing_webhook(Harness &h) {
+	namespace billing = opennova::novaworld_server::billing;
+	const int64_t dee = make_account(h, "bill_dee", "pw-bill-dee");
+	const std::string dee_s = login_token(h, "10.62.0.1", "bill_dee", "pw-bill-dee");
+	TEST_EXPECT(dee > 0 && !dee_s.empty());
+	// Dee's customer and her tier 3, as a checkout left them, not synced yet.
+	const std::string cus = h.stripe->add_customer({ { billing::kMetaInstance, h.billing->instance_id() },
+			{ billing::kMetaUserId, std::to_string(dee) }, { billing::kMetaUsername, "bill_dee" } });
+	TEST_EXPECT(billing::insert_customer(*h.pool.acquire(), dee, cus, false));
+	h.stripe->add_subscription(cus, "price_htier3", 1, "active", billing::unix_now() + 30 * 86400);
+	TEST_EXPECT(crow::json::load(body_text(h.send("GET", "/api/me/billing", { with_session(dee_s) })))["max_servers"]
+						.i() == 0);
+
+	auto deliver = [&h](const std::string &body, const std::vector<std::string> &extra) {
+		std::vector<std::string> headers = { kJson };
+		headers.insert(headers.end(), extra.begin(), extra.end());
+		return h.send("POST", "/api/billing/webhook", headers, body);
+	};
+	const uint64_t rejects_before = h.billing->webhook_rejects();
+	const int64_t now = billing::unix_now();
+	const std::string body = event_body("evt_harness_1", cus);
+	auto reply = deliver(body, {});
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "bad_signature");
+	reply = deliver(body, { stripe_signature(body, now, "whsec_notthesecret") });
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "bad_signature");
+	reply = deliver(body, { stripe_signature(body, now - 400) });
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "bad_signature");
+	reply = deliver(body, { "Stripe-Signature: t=" + std::to_string(now) + ",v1=nothex" });
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "bad_signature");
+	const std::string not_event = "{\"id\":\"evt_x\"}";
+	reply = deliver(not_event, { stripe_signature(not_event, now) });
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_json");
+	TEST_EXPECT(h.billing->webhook_rejects() == rejects_before + 5);
+	const std::string huge(billing::BillingRoutes::kWebhookMaxBytes + 1, 'x');
+	reply = deliver(huge, { stripe_signature(huge, now) });
+	TEST_EXPECT(reply.code == 413);
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM billing_events WHERE event_id = 'evt_harness_1';").empty());
+
+	// Signed: received, recorded once however often it comes, with no session and no CSRF header.
+	for (int i = 0; i < 2; ++i) {
+		reply = deliver(body, { stripe_signature(body, now) });
+		TEST_EXPECT(reply.code == 200 && body_text(reply) == "{\"received\":true}");
+	}
+	// Several v1 signatures (a secret's roll): any one matching passes.
+	const std::string second = event_body("evt_harness_2", cus);
+	const std::string both = stripe_signature(second, now) + ",v1=" + std::string(64, '0');
+	TEST_EXPECT(deliver(second, { both }).code == 200);
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM billing_events WHERE customer_id = $1;",
+					{ opennova::db::BindValue(cus) }).size() == 2);
+	// An event of the other mode: answered, dropped.
+	const std::string live = event_body("evt_harness_live", cus, /*livemode=*/true);
+	TEST_EXPECT(deliver(live, { stripe_signature(live, now) }).code == 200);
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM billing_events WHERE event_id = 'evt_harness_live';").empty());
+
+	// The worker's next pass reads Dee's customer back: her tier 3.
+	billing_pass(h);
+	auto json = crow::json::load(body_text(h.send("GET", "/api/me/billing", { with_session(dee_s) })));
+	TEST_EXPECT(json && json["max_servers"].i() == 3 && json["subscription"]["tier"].i() == 3);
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM billing_events WHERE customer_id = $1 AND outcome = 'synced';",
+					{ opennova::db::BindValue(cus) }).size() == 2);
+
+	// Billing off: 503.
+	reply = h.send_to(h.secure_port, "POST", "/api/billing/webhook", { kJson, stripe_signature(body, now) }, body);
+	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "billing_disabled");
+	return 0;
+}
+
+// The admin's billing view, its reconcile and relink: admin only; the mode,
+// the price check, the last reconcile, the pending count, the subscriptions
+// with their accounts, the webhook log, the orphans a reconcile found (another
+// instance's subscription) and their relink to an account (its metadata
+// stamped, the account's entitlement from it), and the account delete refused
+// while a subscription grants.
+int test_billing_admin(Harness &h) {
+	namespace billing = opennova::novaworld_server::billing;
+	const int64_t eli = make_account(h, "bill_eli", "pw-bill-eli");
+	const std::string eli_s = login_token(h, "10.63.0.1", "bill_eli", "pw-bill-eli");
+	TEST_EXPECT(eli > 0 && !eli_s.empty());
+	TEST_EXPECT(h.send("GET", "/api/admin/billing").code == 401);
+	TEST_EXPECT(h.send("GET", "/api/admin/billing", { with_session(eli_s) }).code == 403);
+	TEST_EXPECT(h.send("POST", "/api/admin/billing/reconcile", { with_session(eli_s), kCsrf }).code == 403);
+
+	// Another instance's customer with a granting tier: an orphan once reconciled.
+	const std::string foreign = h.stripe->add_customer({ { billing::kMetaInstance, "another-instance" },
+			{ billing::kMetaUserId, "424242" }, { billing::kMetaUsername, "bill_eli" } });
+	const std::string orphan_sub =
+			h.stripe->add_subscription(foreign, "price_htier2", 1, "active", billing::unix_now() + 30 * 86400);
+	auto reply = h.send("POST", "/api/admin/billing/reconcile", { kBearer });
+	TEST_EXPECT(reply.code == 202 && str(crow::json::load(body_text(reply))["reconcile"]) == "requested");
+	billing_pass(h);
+	reply = h.send("GET", "/api/admin/billing", { kBearer });
+	auto json = crow::json::load(body_text(reply));
+	if (reply.code != 200) std::fprintf(stderr, "  admin billing: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && str(json["mode"]) == "test" &&
+			json["prices_ok"].b());
+	TEST_EXPECT(json["prices_error"].t() == crow::json::type::Null &&
+			json["last_reconcile_error"].t() == crow::json::type::Null);
+	TEST_EXPECT(str(json["last_reconcile_at"]).size() == 20 && json["pending_events"].i() == 0);
+	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
+	bool ana_row = false;
+	for (const auto &row : json["subscriptions"]) {
+		if (str(row["username"]) != "bill_ana" || str(row["item"]) != "tier") continue;
+		ana_row = row["tier"].i() == 1 && row["entitled"].b() && str(row["status"]) == "active" &&
+				str(row["stripe_customer_id"]).rfind("cus_", 0) == 0 && row["user_id"].t() == crow::json::type::Number &&
+				str(row["current_period_end"]).size() == 20;
+	}
+	TEST_EXPECT(ana_row);
+	bool logged = false;
+	for (const auto &e : json["recent_events"]) {
+		logged = logged || (str(e["event_id"]) == "evt_harness_1" && str(e["outcome"]) == "synced" &&
+								   str(e["received_at"]).size() == 20);
+	}
+	TEST_EXPECT(logged);
+	bool listed = false;
+	for (const auto &o : json["orphans"]) {
+		listed = listed || (str(o["stripe_subscription_id"]) == orphan_sub && str(o["stripe_customer_id"]) == foreign &&
+								   str(o["username_hint"]) == "bill_eli" && str(o["status"]) == "active");
+	}
+	TEST_EXPECT(listed);
+	TEST_EXPECT(json["duplicates"].t() == crow::json::type::List && json["duplicates"].size() == 0);
+
+	// The relink: its checks, then the orphan made Eli's.
+	auto link = [&h](const std::string &body) {
+		return h.send("POST", "/api/admin/billing/link", { kBearer, kJson }, body);
+	};
+	TEST_EXPECT(link("{}").code == 400 && error_of_reply(link("{}")) == "missing_field");
+	reply = link("{\"user_id\":\"1\",\"stripe_customer_id\":\"cus_x\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+	reply = link("{\"user_id\":1,\"stripe_customer_id\":\"sub_x\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+	reply = link("{\"user_id\":999999,\"stripe_customer_id\":\"" + foreign + "\"}");
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+	reply = link("{\"user_id\":" + std::to_string(eli) + ",\"stripe_customer_id\":\"cus_nosuch\"}");
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+	reply = link("{\"user_id\":" + std::to_string(eli) + ",\"stripe_customer_id\":\"" + foreign + "\"}");
+	json = crow::json::load(body_text(reply));
+	if (reply.code != 200) std::fprintf(stderr, "  link: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 200 && json && str(json["outcome"]) == "synced" && json["user_id"].i() == eli);
+	{
+		std::lock_guard<std::mutex> lock(h.stripe->mu);
+		const auto &meta = h.stripe->customers[foreign].metadata;
+		TEST_EXPECT(meta.at(billing::kMetaInstance) == h.billing->instance_id() &&
+				meta.at(billing::kMetaUserId) == std::to_string(eli));
+	}
+	json = crow::json::load(body_text(h.send("GET", "/api/me/billing", { with_session(eli_s) })));
+	TEST_EXPECT(json && json["max_servers"].i() == 2 && json["subscription"]["tier"].i() == 2);
+
+	// The account delete waits for the subscription's end.
+	reply = h.send("DELETE", "/api/admin/users/" + std::to_string(eli), { kBearer });
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "active_subscription");
+	TEST_EXPECT(nws::get_user_by_id(*h.pool.acquire(), eli).has_value());
+	{
+		std::lock_guard<std::mutex> lock(h.stripe->mu);
+		h.stripe->subscriptions[orphan_sub].status = "canceled";
+	}
+	TEST_EXPECT(h.billing->sync().sync_customer(*h.pool.acquire(), foreign, billing::unix_now()) ==
+			billing::SyncOutcome::Synced);
+	TEST_EXPECT(h.send("DELETE", "/api/admin/users/" + std::to_string(eli), { kBearer }).code == 204);
+	// Billing off: 503.
+	TEST_EXPECT(h.send_to(h.secure_port, "GET", "/api/admin/billing", { kBearer }).code == 503);
+	return 0;
+}
+
+// GET /api/admin/users/<id> and the users list's entitlement: admin only; the
+// profile, the entitlement in full, the servers and the billing ids (the
+// customer and each subscription); 404 for no such player and for a hosted
+// server's service account.
+int test_admin_user_detail(Harness &h) {
+	namespace billing = opennova::novaworld_server::billing;
+	const auto ana = nws::get_user_by_username(*h.pool.acquire(), "bill_ana");
+	TEST_EXPECT(ana.has_value());
+	const std::string path = "/api/admin/users/" + std::to_string(ana->id);
+	TEST_EXPECT(h.send("GET", path).code == 401);
+	const std::string ana_s = login_token(h, "10.64.0.1", "bill_ana", "pw-bill-ana");
+	TEST_EXPECT(h.send("GET", path, { with_session(ana_s) }).code == 403);
+	auto reply = h.send("GET", path, { kBearer });
+	auto json = crow::json::load(body_text(reply));
+	if (reply.code != 200) std::fprintf(stderr, "  user detail: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 200 && json && str(json["user"]["username"]) == "bill_ana");
+	TEST_EXPECT(json["user"]["comp_servers"].i() == 0 && json["user"]["max_servers"].i() == 1);
+	TEST_EXPECT(body_text(reply).find("password_hash") == std::string::npos);
+	const auto &e = json["entitlement"];
+	TEST_EXPECT(e["max_servers"].i() == 1 && str(e["source"]) == "tier" && e["tier"].i() == 1 &&
+			e["comp_servers"].i() == 0 && e["own_machines"].i() == 0 && e["can_start"].b());
+	TEST_EXPECT(json["servers"].t() == crow::json::type::List && json["servers"].size() == 0);
+	const auto customer = billing::customer_of(*h.pool.acquire(), ana->id);
+	TEST_EXPECT(customer && !json["billing"]["livemode"].b() &&
+			str(json["billing"]["stripe_customer_id"]) == customer->stripe_customer_id);
+	TEST_EXPECT(json["billing"]["subscriptions"].size() >= 1);
+	bool tier = false;
+	for (const auto &s : json["billing"]["subscriptions"])
+		tier = tier || (str(s["item"]) == "tier" && s["tier"].i() == 1 && s["entitled"].b() &&
+							   s["quantity"].i() == 1 && str(s["stripe_subscription_id"]).rfind("sub_", 0) == 0);
+	TEST_EXPECT(tier);
+	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
+	// No such player, and a service account: 404.
+	TEST_EXPECT(h.send("GET", "/api/admin/users/999999", { kBearer }).code == 404);
+	const auto service = nws::upsert_service_account(*h.pool.acquire(), "srv-31337", "pw-detail-service");
+	TEST_EXPECT(service.ok);
+	reply = h.send("GET", "/api/admin/users/" + std::to_string(service.id), { kBearer });
+	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
+	TEST_EXPECT(nws::delete_service_account(*h.pool.acquire(), service.id).ok);
+	// A comped account with no billing: its ids null.
+	const auto bea = nws::get_user_by_username(*h.pool.acquire(), "bill_bea");
+	TEST_EXPECT(bea && nws::set_comp_servers(*h.pool.acquire(), bea->id, 3).ok);
+	json = crow::json::load(body_text(h.send("GET", "/api/admin/users/" + std::to_string(bea->id), { kBearer })));
+	TEST_EXPECT(json && json["entitlement"]["max_servers"].i() == 3 && str(json["entitlement"]["source"]) == "comp" &&
+			json["entitlement"]["tier"].t() == crow::json::type::Null &&
+			json["billing"]["stripe_customer_id"].t() == crow::json::type::Null &&
+			json["billing"]["subscriptions"].size() == 0);
+
+	// The list carries each one's entitlement, live servers and tier status.
+	json = crow::json::load(body_text(h.send("GET", "/api/admin/users", { kBearer })));
+	bool ana_seen = false;
+	bool bea_seen = false;
+	for (const auto &u : json["users"]) {
+		if (str(u["username"]) == "bill_ana") {
+			ana_seen = u["entitlement"]["max_servers"].i() == 1 && str(u["entitlement"]["source"]) == "tier" &&
+					u["entitlement"]["tier"].i() == 1 && u["live_servers"].i() == 0 &&
+					str(u["subscription_status"]) == "active" && u["max_servers"].i() == 1;
+		}
+		if (str(u["username"]) == "bill_bea") {
+			bea_seen = u["entitlement"]["max_servers"].i() == 3 && str(u["entitlement"]["source"]) == "comp" &&
+					u["subscription_status"].t() == crow::json::type::Null && u["comp_servers"].i() == 3;
+		}
+	}
+	TEST_EXPECT(ana_seen && bea_seen);
+	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), bea->id, 0).ok);
+	return 0;
+}
+
 int run(Harness &h) {
 	struct Case { const char *name; int (*fn)(Harness &); };
 	const Case cases[] = {
@@ -5538,6 +6008,10 @@ int run(Harness &h) {
 		{ "hosted_listing_owner", test_hosted_listing_owner },
 		{ "hosted_console_routes", test_hosted_console_routes },
 		{ "hosted_bootstrap_route", test_hosted_bootstrap_route },
+		{ "billing_routes", test_billing_routes },
+		{ "billing_webhook", test_billing_webhook },
+		{ "billing_admin", test_billing_admin },
+		{ "admin_user_detail", test_admin_user_detail },
 		{ "host_text_utf8", test_host_text_utf8 },
 		{ "name_and_value_rules", test_name_and_value_rules },
 		{ "template_names_refused", test_template_names_refused },
@@ -5648,10 +6122,31 @@ int main(int argc, char **argv) {
 		// outlives it.
 		nws::Watchdog watchdog(nws::Watchdog::kStallMs, [] { return g_watch_clock_ms.load(); });
 		watchdog.watch("harness loop", [] { return g_watch_turns.load(); });
+		// Billing over the in-memory Stripe, its worker's passes the cases' own (no
+		// thread): the first one here checks the prices and reconciles (nothing yet).
+		billing_fake::FakeStripeApi stripe;
+		stripe.now = nws::billing::unix_now(); // the periods Checkout starts are real ones
+		stripe.add_price(harness_price("price_htier1", 500));
+		stripe.add_price(harness_price("price_htier2", 1000));
+		stripe.add_price(harness_price("price_htier3", 1500));
+		stripe.add_price(harness_price("price_hown", 4500));
+		nws::billing::BillingConfig billing_config;
+		billing_config.secret_key = "sk_test_harnesskey";
+		billing_config.webhook_secret = kWebhookSecret;
+		billing_config.site_url = kSiteUrl;
+		billing_config.tier_prices[1] = { "price_htier1" };
+		billing_config.tier_prices[2] = { "price_htier2" };
+		billing_config.tier_prices[3] = { "price_htier3" };
+		billing_config.own_machine_prices = { "price_hown" };
+		TEST_EXPECT(nws::billing::check_billing_config(billing_config).empty());
+		nws::billing::Billing billing_service(billing_config, stripe, pool, nws::billing::instance_id(*pool.acquire()));
+		billing_service.sync().pass(nws::billing::unix_now());
+		TEST_EXPECT(billing_service.sync().status().prices_ok);
 		nws::HttpListener http(manager, pool, sessions);
 		http.set_nw_udp_listener(&nw_udp);
 		http.set_admin_links(&links);
 		http.set_watchdog(&watchdog);
+		http.set_billing(&billing_service);
 		http.set_hosted_bootstrap(&bootstrap,
 				{ *opennova::novaworld_server::hosted::parse_ipv4_cidr("127.0.0.0/8") });
 		TEST_EXPECT(http.start(config));
@@ -5720,6 +6215,8 @@ int main(int argc, char **argv) {
 		harness.bootstrap = &bootstrap;
 		harness.fresh_bootstrap = &fresh_bootstrap;
 		harness.watchdog = &watchdog;
+		harness.stripe = &stripe;
+		harness.billing = &billing_service;
 		rc = run(harness);
 		// Join the Crow threads before the pool and the TempDir go, then the
 		// NW UDP listener the push routes held.

@@ -12,6 +12,10 @@
 #include "server_config.h"
 #ifdef OPENNOVA_HTTP_ENABLED
 #include "auth.h"
+#include "billing/billing.h"
+#include "billing/billing_config.h"
+#include "billing/billing_repository.h"
+#include "billing/stripe_api.h"
 #include "command_runner.h"
 #include "hosted/bootstrap.h"
 #include "hosted/ec2_provider.h"
@@ -275,6 +279,68 @@ HostedMachines make_hosted_machines(const opennova::novaworld_server::ServerConf
 	m.data_sets = std::move(data_sets);
 	return m;
 }
+
+namespace billing_ns = opennova::novaworld_server::billing;
+
+// Billing (billing/billing.h) as main() runs it: the curl transport (its
+// runner and its owner-only scratch directory, removed at the shutdown) and the
+// billing over it. Declared before the HTTP listener, whose routes use it.
+struct BillingStack {
+	std::filesystem::path scratch_dir;
+	std::unique_ptr<opennova::proc::CommandRunner> runner;
+	std::unique_ptr<billing_ns::CurlStripeApi> api;
+	std::unique_ptr<billing_ns::Billing> billing;
+};
+
+// Billing over `config`, or none with a boot warning naming why: settings not
+// complete and well-formed (check_billing_config), no scratch directory, a
+// transport that would not run. Both secrets are log secrets either way.
+BillingStack make_billing(const billing_ns::BillingConfig &config, opennova::db::ConnectionPool &pool,
+                          opennova::db::Database &db) {
+	using opennova::novaworld_server::add_log_secret;
+	BillingStack s;
+	add_log_secret(config.secret_key);
+	add_log_secret(config.webhook_secret);
+	const auto off = [](const std::string &why) {
+		std::fprintf(stderr, "[boot] WARN billing: %s; billing off\n", why.c_str());
+	};
+	if (const std::string why = billing_ns::check_billing_config(config); !why.empty()) {
+		off(why);
+		return s;
+	}
+	std::error_code ec;
+	const std::filesystem::path temp = std::filesystem::temp_directory_path(ec);
+	std::string error;
+	const std::filesystem::path scratch = temp / ("opennova-billing-" + hosted_ns::random_secret(12));
+	if (ec || !hosted_ns::make_owner_directory(scratch, error)) {
+		off("no scratch directory for the Stripe calls" + (error.empty() ? std::string() : ": " + error));
+		return s;
+	}
+	billing_ns::CurlStripeApi::Config api;
+	api.curl = config.curl_path;
+	api.secret_key = config.secret_key;
+	api.scratch_dir = scratch.u8string();
+	if (const std::string why = billing_ns::CurlStripeApi::check_config(api); !why.empty()) {
+		std::filesystem::remove_all(scratch, ec);
+		off("the Stripe transport: " + why);
+		return s;
+	}
+	std::string instance;
+	try {
+		instance = billing_ns::instance_id(db);
+	} catch (const opennova::db::Error &e) {
+		std::filesystem::remove_all(scratch, ec);
+		off(std::string("no instance id: ") + e.what());
+		return s;
+	}
+	s.scratch_dir = scratch;
+	s.runner = std::make_unique<opennova::proc::ProcessCommandRunner>(billing_ns::curl_environment(), api.scratch_dir);
+	s.api = std::make_unique<billing_ns::CurlStripeApi>(*s.runner, std::move(api));
+	s.billing = std::make_unique<billing_ns::Billing>(config, *s.api, pool, instance);
+	std::printf("[boot] billing: on, %s mode, instance %s, checkout returns to %s%s\n", config.live() ? "live" : "test",
+	            instance.c_str(), config.site_url.c_str(), config.automatic_tax ? ", Stripe Tax on" : "");
+	return s;
+}
 #endif
 
 } // namespace
@@ -469,10 +535,15 @@ int main() {
 	if (hosted_provider) admin_links = std::make_unique<hosted::AdminLinks>(db_pool.get());
 	std::unique_ptr<hosted::Supervisor> supervisor;
 	listening.hosted_provider = hosted_provider ? hosted_provider->name() : "none";
+	// Billing (the monthly support tiers; billing/): on only when its settings
+	// are complete. Declared before the HTTP listener, whose routes use it; its
+	// sync worker starts once the listeners serve.
+	BillingStack billing_stack = make_billing(billing::billing_config_from_env(), *db_pool, dbh);
 	SessionStore sessions;
 	HttpListener http(manager, *db_pool, sessions);
 	http.set_unknown_tracker(&unknown_tracker);
 	http.set_watchdog(&watchdog);
+	http.set_billing(billing_stack.billing.get());
 	// The admin host routes push ServerCommand / ServerStopHosting through the
 	// NW UDP listener, which outlives this one (stopped after it below).
 	http.set_nw_udp_listener(&nwudp);
@@ -533,6 +604,8 @@ int main() {
 		supervisor->set_admin_links(admin_links.get());
 		supervisor->start();
 	}
+	// The billing worker: its first pass reconciles with Stripe and checks the prices.
+	if (billing_stack.billing) billing_stack.billing->sync().start();
 #endif
 
 	// The loops the watchdog watches, each from here on.
@@ -553,6 +626,7 @@ int main() {
 	uint64_t last_heartbeat_ms = Watchdog::steady_now_ms();
 #ifdef OPENNOVA_HTTP_ENABLED
 	uint64_t launch_failures_reported = 0;
+	uint64_t webhook_rejects_reported = 0;
 #endif
 	while (!g_shutdown.load()) {
 		std::this_thread::sleep_for(
@@ -586,6 +660,8 @@ int main() {
 #ifdef OPENNOVA_HTTP_ENABLED
 				beat.hosted_live = hosted::count_live(dbh);
 				beat.hosted_failed = hosted::count_failed_since(dbh, window_s);
+				if (billing_stack.billing)
+					beat.billing_sync_age_s = billing_stack.billing->sync().sync_age_s(dbh, billing::unix_now());
 #endif
 			} catch (const db::Error &e) {
 				std::fprintf(stderr, "[heartbeat] WARN counts: %s\n", e.what());
@@ -595,6 +671,11 @@ int main() {
 				const uint64_t failures = supervisor->launch_failures();
 				beat.launch_failures = static_cast<int64_t>(failures - launch_failures_reported);
 				launch_failures_reported = failures;
+			}
+			if (billing_stack.billing) {
+				const uint64_t rejects = billing_stack.billing->webhook_rejects();
+				beat.webhook_rejects = static_cast<int64_t>(rejects - webhook_rejects_reported);
+				webhook_rejects_reported = rejects;
 			}
 #endif
 			std::printf("%s\n", heartbeat_line(beat).c_str());
@@ -641,6 +722,15 @@ int main() {
 			} catch (const db::Error &e) {
 				std::fprintf(stderr, "[sweep] WARN web session / login address prune: %s\n", e.what());
 			}
+			// Webhook events synced more than 30 days ago (the cache keeps no
+			// history Stripe does not).
+			try {
+				if (const auto pruned = billing::prune_events(dbh); pruned > 0) {
+					std::printf("[sweep] pruned %zu old billing event(s)\n", pruned);
+				}
+			} catch (const db::Error &e) {
+				std::fprintf(stderr, "[sweep] WARN billing event prune: %s\n", e.what());
+			}
 #endif
 		}
 	}
@@ -672,9 +762,18 @@ int main() {
 		std::filesystem::remove_all(hosted_machines.scratch_dir, scratch_ec);
 	}
 #endif
+#ifdef OPENNOVA_HTTP_ENABLED
+	// The billing worker before the routes: a pass in flight ends its Stripe call.
+	if (billing_stack.billing) billing_stack.billing->sync().stop();
+#endif
 	std::printf("[shutdown] stopping listeners\n");
 #ifdef OPENNOVA_HTTP_ENABLED
 	http.stop();
+	// No request runs now: the Stripe calls' scratch directory goes.
+	if (!billing_stack.scratch_dir.empty()) {
+		std::error_code billing_ec;
+		std::filesystem::remove_all(billing_stack.scratch_dir, billing_ec);
+	}
 #endif
 	gate.stop();
 	nwudp.stop();

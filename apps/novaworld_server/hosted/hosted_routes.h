@@ -35,6 +35,12 @@ struct ServerConfig;
 
 namespace hosted {
 
+// A hosted server as JSON for its owner (GET /api/me/servers and
+// /api/me/servers/<id>, the start and stop replies, an admin's user page) or,
+// with `admin`, for the fleet view: its owner, its service account and its
+// machine besides. Never its admin password. Without its events.
+crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool admin);
+
 class HostedRoutes {
 public:
 	// Each owner start or stop, per account: 6 at once, then one every 20 s

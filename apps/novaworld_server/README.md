@@ -767,6 +767,97 @@ next-map cursor unset when the list grows) and no `ONESHOT`, and a `PLAYER ... A
 is not on the list. The commands that change the server are recorded in the console with
 their sender; the reads are not.
 
+## Billing (monthly support tiers)
+
+A support tier is a monthly Stripe subscription that supports the project and sets the
+account's hosting entitlement ("Hosted servers" above): tier 1, 2 or 3 lets it run 1, 2 or
+3 hosted servers (`billing/tiers.h`), and the own-machine add-on, a subscription of its
+own whose quantity is the machines it pays for, moves that many of them onto machines of
+their own while a tier also grants. The service makes Stripe Checkout and Customer Portal
+sessions and hands the browser their URL; no publishable key and no Stripe.js reach the
+site. Everything here is service policy (`billing/`).
+
+- **The transport** (`billing/stripe_api.*`): every call runs `curl -q --config <file>`
+  through the apps' command runner, the key, the headers and the form body in an
+  owner-only (`0600`) file of the call's own in the service's owner-only scratch
+  directory (`/tmp/opennova-billing-<random>`, removed at the shutdown), deleted when
+  curl ends, so no secret is on a command line or in the child's environment (`PATH`,
+  `LANG`, `LC_*`, `TZ` alone). Each request pins the API version
+  (`kStripeApiVersion`, basil), carries an idempotency key on a POST, and is tried once
+  more on no answer, a 429 or a 5xx. The key and the webhook secret are log secrets.
+- **The cache** (`billing/billing_repository.*`, `backend/migrations/0002_billing.sql`):
+  each account's Stripe customer (`billing_customers`), every subscription of it as
+  Stripe last answered (`billing_subscriptions`: its item, `tier`, `own_machine` or
+  `unknown` for a price no setting names, read from its price; its status and since when;
+  its period end and whether it cancels at it), the webhook events
+  (`billing_events`) and the database's instance id (`service_meta`, 32 hex digits from
+  the OS CSPRNG at the first boot). The entitlement reads only this cache, so it holds
+  whether or not billing is configured.
+- **The instance id** is stamped on every customer and subscription the service makes
+  (`opennova_instance`, with `opennova_user_id` and `opennova_username`), so a reset
+  database, or a developer's local one on a shared Stripe test account, never adopts a
+  subscription that is not its own: another instance's is an orphan the admin page lists
+  and an admin may relink.
+- **The webhook** (`POST /api/billing/webhook`, no session and no CSRF header; still
+  behind the site's proxy): a body past 1 MiB is 413; the `Stripe-Signature` header must
+  hold a `v1` HMAC-SHA256 of `<t>.<body>` under `STRIPE_WEBHOOK_SECRET` within 300 s of
+  the service's clock (any of several `v1`s, so a secret's roll needs no second setting),
+  else 400 `bad_signature` and one WARN line naming the check's class and the clock skew,
+  never the body or the header; a signed body that is no event is 400 `invalid_json`; an
+  event of the other mode is answered 200 and dropped. The event is recorded once (a
+  redelivery is a no-op) with the customer it names, the worker is woken, and the reply
+  is 200 `{"received": true}`. The payload is never trusted beyond its customer's id.
+- **The sync worker** (`billing/billing_sync.*`, a thread of its own): each customer with
+  an unrecorded event is read back from Stripe with all its subscriptions, then written in
+  one transaction (no Stripe call ever runs inside one), the longest-waiting first; a
+  customer Stripe could not be asked about waits 60 s, doubling to 15 min. A deleted
+  customer's subscriptions are canceled here and its row goes. A full reconcile runs at
+  the first pass, every `ONNET_BILLING_RECONCILE_MINUTES` and when an admin asks: every
+  subscription, a page of 100 at a time with its customer, written when it is this
+  instance's (a missing customer row made again from its metadata), listed as an orphan
+  when it grants and is another instance's or names no account here, and a granting row
+  Stripe no longer lists read alone and canceled when Stripe no longer knows it; accounts
+  with two granting tiers are listed as duplicates. The configured prices are checked
+  then (and at the first pass): each a monthly recurring price in the key's mode, the one
+  each list sells active and all sold in one currency; else checkout answers 503
+  `billing_misconfigured` until they are fixed.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `STRIPE_SECRET_KEY` | none | `sk_` or `rk_` (a restricted key is the recommended one), `test` or `live`: the mode everything else must match. |
+| `STRIPE_WEBHOOK_SECRET` | none | The webhook endpoint's signing secret, `whsec_...`. |
+| `STRIPE_PRICE_TIER1`..`3`, `STRIPE_PRICE_OWN_MACHINE` | none | Comma lists of `price_...` ids: the first one sold, the rest still recognized (grandfathered); each price in one list alone. The amounts are Stripe's, never the service's. |
+| `ONNET_SITE_URL` | none | The site's origin (no path): Checkout returns to `/me/support?checkout=success&session_id=...` or `?checkout=cancel` there, the portal to `/me/support`. `https://` with a live key. The dev compose stack sets `http://localhost:5173`. |
+| `ONNET_STRIPE_CURL` | `/usr/bin/curl` | The curl binary, an absolute path. |
+| `ONNET_BILLING_AUTOMATIC_TAX` | off | `1` turns Stripe Tax on in Checkout (it collects the customer's address). |
+| `ONNET_BILLING_RECONCILE_MINUTES` | 360 | The full reconcile's period, 5 to 10080. |
+
+Billing is on only when the whole set is complete and well-formed (`REPLACE_ME`, the
+vault's placeholder, counts as unset); otherwise the boot logs `[boot] WARN billing:
+<what is missing>; billing off`, the routes below answer 503 `billing_disabled` (the tiers
+answer `{"enabled": false}`), and the hosting entitlement still reads the cache. The dev
+compose stack takes the test-mode set from the vault through
+`deploy/env/billing.dev.env.tpl` (`op run --env-file=...`).
+
+| Route | Access | Replies |
+| --- | --- | --- |
+| `GET /api/billing/tiers` | public | `{"enabled", "currency", "tiers": [{tier, max_servers, amount, interval: "month"}], "own_machine": {amount, interval} \| null}`: `enabled` is billing on with its prices checked out; each `amount` the price sold now in the currency's smallest unit, null until read |
+| `GET /api/me/billing` | a website session | `{"enabled", "max_servers", "comp_servers", "own_machines", "used", "can_start", "subscription", "own_machine_subscription", "can_manage", "can_subscribe"}`: `subscription` the support tier shown (a granting one, the highest tier, else the newest still open): `{tier, status, entitled, current_period_end (ISO 8601 UTC), cancel_at_period_end}` or null; `own_machine_subscription` `{quantity, status, current_period_end, cancel_at_period_end}` or null; `can_manage` the account has a Stripe customer; `can_subscribe` the prices check out, the account is an active player's and no tier grants. `Cache-Control: no-store` |
+| `POST /api/billing/checkout` | a website session, the CSRF header | `{"item": "tier1" \| "tier2" \| "tier3" \| "own_machine"}`; 429 past the account's bucket (6, then one every 20 s, shared with the portal); 400 `invalid_json` or `invalid_item`; 503 `billing_misconfigured`; 403 `not_eligible` (an account not active, or the add-on with no tier granting); 409 `already_subscribed` while a tier grants (the portal changes it); 502 `stripe_unavailable`; 200 `{"url"}`. The account's previous open session is expired first; its customer is made at its first checkout (idempotency key `opennova-<instance>-customer-<id>`); the session asks for the terms of service, lives 30 min and stamps the instance and the account on the subscription it makes |
+| `POST /api/billing/portal` | a website session, the CSRF header | 429 (the checkout bucket); 404 `no_billing_account`; 502 `stripe_unavailable`; 200 `{"url"}` |
+| `POST /api/me/billing/sync` | a website session, the CSRF header | the account's customer read back from Stripe now (the success page's, before the webhook comes); 429 past its bucket (3, then one every 10 s); 404 `no_billing_account`; 502 `stripe_unavailable`; else as `GET /api/me/billing` |
+| `POST /api/billing/webhook` | Stripe's signature | above |
+| `GET /api/admin/billing` | admin | `{"enabled", "mode" ("test" \| "live"), "prices_ok", "prices_error", "last_reconcile_at" (ISO or null), "last_reconcile_error", "pending_events", "subscriptions" (each row with an account: `user_id`, `username`, `stripe_customer_id`, `stripe_subscription_id`, `item`, `tier`, `quantity`, `status`, `entitled`, `current_period_end`, `cancel_at_period_end`), "duplicates" (account ids), "orphans" (`stripe_customer_id`, `stripe_subscription_id`, `username_hint`, `status`), "recent_events" (the newest 50: `event_id`, `type`, `received_at`, `outcome`)}; `Cache-Control: no-store` |
+| `POST /api/admin/billing/reconcile` | admin | a full reconcile on the worker's next pass, at once: 202 `{"reconcile": "requested"}` |
+| `POST /api/admin/billing/link` | admin | `{"user_id", "stripe_customer_id"}`: the customer (an orphan's) made the account's, its metadata stamped with this instance and the account, then synced; 400 `invalid_json`, `missing_field`, `invalid_field`; 404 `not_found` (no such player, or a customer Stripe does not know); 502; 200 `{"user_id", "stripe_customer_id", "outcome"}` |
+
+`DELETE /api/admin/users/<id>` answers 409 `active_subscription` while a subscription of
+the account still grants: Stripe would bill an account that is gone, so it is canceled
+first. `GET /api/admin/users` carries each account's `entitlement` (`max_servers`,
+`source`, `tier`), `live_servers` and `subscription_status`; `GET /api/admin/users/<id>`
+the account (`{"user", "entitlement"` in full, `"servers"`, `"billing": {livemode,
+stripe_customer_id, subscriptions}}`), 404 for no such player.
+
 ## CD keys (DFX2 activation)
 
 Delta Force Xtreme 2 activates against NovaWorld; Joint Operations does not
@@ -860,6 +951,9 @@ for a docker bridge or NAT (leave unset in production): `ONNET_CLIENT_REFLECT_IP
 listed with no owner; "Listed servers and owners" above).
 `ONNET_CD_KEY_AUTO_MINT=0` stops minting a DFX2 account's first CD key at its first
 activation (default on; "CD keys (DFX2 activation)" above).
+Billing takes the `STRIPE_*` set and `ONNET_SITE_URL`, `ONNET_STRIPE_CURL`,
+`ONNET_BILLING_AUTOMATIC_TAX` and `ONNET_BILLING_RECONCILE_MINUTES` ("Billing (monthly
+support tiers)" above).
 Seeding: `SEED_DEV_USERS=1` applies the dev-only `0002_dev_users.sql` (the
 `test`/`foo` accounts) — leave unset in production. Build + run via Docker:
 [`Dockerfile`](Dockerfile) and the compose files under [`deploy/`](../../deploy/).
@@ -1191,3 +1285,17 @@ command in step), the status poll, the reconnect after the child is killed and s
 again on the same port, `QUIT` at the end, and the password in no log or console line;
 `admin_protocol` and `admin_server` pin the reply-count table itself, against the
 engine's own console.
+
+The support tiers: `billing_stripe` (every build) the transport, the typed client, the
+webhook signature and the settings; `billing_entitlement`
+([`tests/novaworld/billing_entitlement_test.cpp`](../../tests/novaworld/billing_entitlement_test.cpp))
+the entitlement's truth table (the statuses, the period's net, comp against tier, the
+add-on beside a tier, past due, an inactive or service account) and the billing tables;
+`billing_sync`
+([`tests/novaworld/billing_sync_test.cpp`](../../tests/novaworld/billing_sync_test.cpp))
+the worker over the in-memory Stripe (an event synced into the entitlement, a redelivery,
+another instance's customer and the orphans, a wiped cache rebuilt by a reconcile, the
+backoff, a deleted customer, the price check); and the route harness's `billing_routes`,
+`billing_webhook`, `billing_admin` and `admin_user_detail` cases the routes over the
+same fake, the webhook's signatures computed with `io::hmac_sha256`, and its `healthz`
+case the probe and the watchdog on a hand-stepped clock.

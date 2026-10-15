@@ -13,6 +13,8 @@ set(NOVAWORLD_SERVER_CORE_SOURCES
 if(BUILD_NOVAWORLD_HTTP)
     list(APPEND NOVAWORLD_SERVER_CORE_SOURCES
         http_listener.cpp
+        # The admin's user routes (moved out of http_listener.cpp whole).
+        admin_user_routes.cpp
         host_routes.cpp
         # CD keys (migration 0015): the keys, the DFX2 activations, their routes.
         cd_keys.cpp
@@ -50,6 +52,7 @@ if(BUILD_NOVAWORLD_HTTP)
         # webhook signature.
         billing/billing_config.cpp
         billing/billing_repository.cpp
+        billing/billing_routes.cpp
         billing/billing_sync.cpp
         billing/entitlement.cpp
         billing/stripe_api.cpp

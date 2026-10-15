@@ -70,6 +70,15 @@ services:
       #   novaworld session  = mpnovaworldport (32768) -> advertised to joiners
       ONNET_CLIENT_REFLECT_GATE_PORT: ${ONNET_CLIENT_REFLECT_GATE_PORT:-49152}
       ONNET_CLIENT_REFLECT_NOVAWORLD_PORT: ${ONNET_CLIENT_REFLECT_NOVAWORLD_PORT:-32768}
+      # Billing in Stripe's test mode: the base file passes the STRIPE_* set
+      # through from the shell, which deploy/env/billing.dev.env.tpl fills from
+      # the vault's stripe-test item, e.g.
+      #   op run --env-file=../env/billing.dev.env.tpl -- \
+      #     docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+      # and `stripe listen --forward-to localhost:8080/api/billing/webhook`
+      # delivers the webhooks (its whsec_ as STRIPE_WEBHOOK_SECRET). Unset,
+      # billing is off. Checkout and the portal return to the Vite site.
+      ONNET_SITE_URL: ${ONNET_SITE_URL:-http://localhost:5173}
     ports:
       - "7597:7597/udp"      # novaworld_gate
       - "64206:64206/udp"    # NovaWorld UDP

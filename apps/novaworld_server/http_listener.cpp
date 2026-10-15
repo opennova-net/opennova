@@ -1,7 +1,8 @@
 #include "http_listener.h"
 
+#include "admin_user_routes.h"
 #include "auth.h"
-#include "billing/entitlement.h"
+#include "billing/billing_routes.h"
 #include "catalog_repository.h"
 #include "cd_key_routes.h"
 #include "health.h"
@@ -271,23 +272,6 @@ const char *connection_state_name(ConnectionState s) {
 	return "unknown";
 }
 
-// Serialize a user row to JSON (no password_hash), with its admin comp grant
-// and its hosting entitlement's server count (billing/entitlement.h, read now).
-// Shared by the public /api/register response and the admin user CRUD routes.
-crow::json::wvalue user_to_json(db::Database &db, const UserRecord &u) {
-	crow::json::wvalue e;
-	e["id"]       = u.id;
-	e["username"] = u.username;
-	e["pcid"]     = u.pcid;
-	e["nwh"]      = u.nwh;
-	e["nwhandle"] = u.nwhandle;
-	e["account_status"] = u.account_status;
-	e["role"]     = u.role;
-	e["comp_servers"] = u.comp_servers;
-	e["max_servers"] = billing::entitlement_of(db, u.id, billing::unix_now()).max_servers;
-	return e;
-}
-
 } // namespace
 
 struct HttpListener::Impl {
@@ -296,7 +280,9 @@ struct HttpListener::Impl {
 			hosts(access, pool),
 			hosted_servers(access, pool),
 			console(access, pool),
-			cd_keys(access, pool) {}
+			cd_keys(access, pool),
+			users(access, pool),
+			billing(access, pool) {}
 
 	WebApp app;
 	// start()'s handshake with the Crow thread: Pending until Crow serves
@@ -319,6 +305,10 @@ struct HttpListener::Impl {
 	hosted::ConsoleRoutes console;
 	// The CD keys' admin routes and the retail login's DFX2 activation (cd_key_routes.h).
 	CdKeyRoutes cd_keys;
+	// The admin's user routes (admin_user_routes.h).
+	AdminUserRoutes users;
+	// The support tiers' routes (billing/billing_routes.h).
+	billing::BillingRoutes billing;
 	// The games catalogue, loaded once in start() before the routes register
 	// and never written after, so handlers read it without a lock.
 	catalog::GameCatalog games;
@@ -381,6 +371,8 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->console.register_routes(impl_->app, admin_links_);
 	impl_->cd_keys.configure(config);
 	impl_->cd_keys.register_routes(impl_->app);
+	impl_->billing.set_billing(billing_);
+	impl_->billing.register_routes(impl_->app);
 	if (bootstrap_store_ != nullptr)
 		hosted::register_bootstrap_route(impl_->app, *bootstrap_store_, bootstrap_admitted_);
 	register_legacy_login_routes(templates_dir);
@@ -512,8 +504,9 @@ std::string HttpListener::gsb_url(const catalog::GameRow &game) const {
 	return "http://" + public_host_ + ":" + std::to_string(impl_->app.port()) + game.gsb_route();
 }
 
-// Admin REST API: server status, dev host injection, connection dump, user
-// CRUD (the listed servers and their pushes are host_routes.h's). Every
+// Admin REST API: server status, dev host injection, connection dump, and the
+// user routes (admin_user_routes.h; the listed servers and their pushes are
+// host_routes.h's). Every
 // handler opens with WebAccess::require_admin: the Bearer
 // ADMIN_API_TOKEN, or an admin-role website session (with the CSRF header on a
 // state change).
@@ -661,187 +654,8 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		return res;
 	});
 
-	// ----- Phase J: admin user CRUD ------------------------------------
-	// GET /api/admin/users — list every player (no password_hash).
-	CROW_ROUTE(app, "/api/admin/users").methods("GET"_method)(
-	    [this](const crow::request &req) {
-		auto caller = impl_->access.require_admin(req);
-		if (caller.refusal) return std::move(*caller.refusal);
-		auto db_conn = db_pool_.acquire();
-		std::vector<crow::json::wvalue> arr;
-		for (const auto &u : list_users(*db_conn)) arr.push_back(user_to_json(*db_conn, u));
-		crow::json::wvalue out;
-		out["users"] = std::move(arr);
-		crow::response res(200);
-		res.body = out.dump();
-		res.set_header("Content-Type", "application/json");
-		return res;
-	});
-
-	// POST /api/admin/users — create. Body JSON:
-	//   {username, password, pcid, nwhandle, nwh? (default "1")}
-	CROW_ROUTE(app, "/api/admin/users").methods("POST"_method)(
-	    [this](const crow::request &req) {
-		auto caller = impl_->access.require_admin(req);
-		if (caller.refusal) return std::move(*caller.refusal);
-		auto body = JsonBody::parse(req.body);
-		if (!body) return json_error(400, "invalid_json");
-		CreateUserParams p;
-		p.username = body->text_or("username", "");
-		p.password = body->text_or("password", "");
-		p.pcid     = body->text_or("pcid",     "");
-		p.nwh      = body->text_or("nwh",      "1");
-		p.nwhandle = body->text_or("nwhandle", "");
-		if (body->wrong_type()) return json_error(400, "invalid_field");
-		auto db_conn = db_pool_.acquire();
-		auto result = create_user(*db_conn, p);
-		crow::json::wvalue out;
-		if (!result.ok) {
-			out["error"]   = result.error_code;
-			if (!result.error_message.empty())
-				out["message"] = result.error_message;
-			crow::response res(result.error_code == "db_error" ? 500 : 400);
-			res.body = out.dump();
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
-		auto created = get_user_by_id(*db_conn, result.id);
-		out["user"] = created ? user_to_json(*db_conn, *created) : crow::json::wvalue{};
-		crow::response res(201);
-		res.body = out.dump();
-		res.set_header("Content-Type", "application/json");
-		return res;
-	});
-
-	// DELETE /api/admin/users/<id>
-	CROW_ROUTE(app, "/api/admin/users/<int>").methods("DELETE"_method)(
-	    [this](const crow::request &req, int id) {
-		auto caller = impl_->access.require_admin(req);
-		if (caller.refusal) return std::move(*caller.refusal);
-		auto db_conn = db_pool_.acquire();
-		auto result = delete_user(*db_conn, id);
-		if (result.ok) forget_revoked_account(id);
-		crow::response res(result.ok ? 204 :
-		                   result.error_code == "not_found" ? 404 : 500);
-		if (!result.ok) {
-			crow::json::wvalue err;
-			err["error"]   = result.error_code;
-			if (!result.error_message.empty())
-				err["message"] = result.error_message;
-			res.body = err.dump();
-			res.set_header("Content-Type", "application/json");
-		}
-		return res;
-	});
-
-	// PUT /api/admin/users/<id> — partial update. Any field omitted is
-	// left untouched. password (plaintext) triggers a fresh bcrypt hash; role
-	// takes "player" or "admin" (anything else is a 400 invalid_field).
-	CROW_ROUTE(app, "/api/admin/users/<int>").methods("PUT"_method)(
-	    [this](const crow::request &req, int id) {
-		auto caller = impl_->access.require_admin(req);
-		if (caller.refusal) return std::move(*caller.refusal);
-		auto body = JsonBody::parse(req.body);
-		if (!body) return json_error(400, "invalid_json");
-		UpdateUserParams p;
-		p.username           = body->text("username");
-		p.password_plaintext = body->text("password");
-		p.pcid               = body->text("pcid");
-		p.nwh                = body->text("nwh");
-		p.nwhandle           = body->text("nwhandle");
-		p.account_status     = body->text("account_status");
-		p.role               = body->text("role");
-		if (body->wrong_type()) return json_error(400, "invalid_field");
-		auto db_conn = db_pool_.acquire();
-		auto result = update_user(*db_conn, id, p);
-		if (result.ok && update_revokes_sessions(p)) forget_revoked_account(id);
-		crow::json::wvalue out;
-		if (!result.ok) {
-			out["error"]   = result.error_code;
-			if (!result.error_message.empty())
-				out["message"] = result.error_message;
-			crow::response res(
-				result.error_code == "not_found" ? 404 :
-				result.error_code == "db_error"  ? 500 : 400);
-			res.body = out.dump();
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
-		auto updated = get_user_by_id(*db_conn, id);
-		out["user"] = updated ? user_to_json(*db_conn, *updated) : crow::json::wvalue{};
-		crow::response res(200);
-		res.body = out.dump();
-		res.set_header("Content-Type", "application/json");
-		return res;
-	});
-
-	// PUT /api/admin/users/<id>/comp-servers — {"comp_servers": 0..16}: an
-	// admin's grant of hosted servers to the account (players.comp_servers; its
-	// hosting entitlement is the larger of the grant and its support tier's
-	// servers), answered with the account. 400 invalid_json, invalid_field (no
-	// whole number, or outside 0..16) or missing_field, 404 for an unknown id and
-	// for a hosted server's service account. Lowering the entitlement below what
-	// the account runs stops servers (the supervisor's next pass;
-	// hosted/supervisor.h).
-	CROW_ROUTE(app, "/api/admin/users/<int>/comp-servers").methods("PUT"_method)(
-	    [this](const crow::request &req, int64_t id) {
-		auto caller = impl_->access.require_admin(req);
-		if (caller.refusal) return std::move(*caller.refusal);
-		auto body = JsonBody::parse(req.body);
-		if (!body) return json_error(400, "invalid_json");
-		const auto comp_servers = body->integer("comp_servers");
-		if (body->wrong_type()) return json_error(400, "invalid_field");
-		if (!comp_servers) return json_error(400, "missing_field", "comp_servers (0 to 16) is required");
-		if (*comp_servers < 0 || *comp_servers > billing::kMaxCompServers)
-			return json_error(400, "invalid_field", "comp_servers must be a whole number from 0 to 16");
-		auto db_conn = db_pool_.acquire();
-		const auto result = set_comp_servers(*db_conn, id, static_cast<int>(*comp_servers));
-		if (!result.ok) {
-			return json_error(result.error_code == "not_found" ? 404 : 500,
-			                  result.error_code.c_str(), result.error_message);
-		}
-		const auto updated = get_user_by_id(*db_conn, id);
-		crow::json::wvalue out;
-		out["user"] = updated ? user_to_json(*db_conn, *updated) : crow::json::wvalue{};
-		return json_reply(200, out);
-	});
-
-	// PUT /api/admin/users/<id>/game-access — per-game expansion/access gate.
-	CROW_ROUTE(app, "/api/admin/users/<int>/game-access").methods("PUT"_method)(
-	    [this](const crow::request &req, int id) {
-		auto caller = impl_->access.require_admin(req);
-		if (caller.refusal) return std::move(*caller.refusal);
-		auto body = JsonBody::parse(req.body);
-		if (!body) return json_error(400, "invalid_json");
-		UpdateGameAccessParams p;
-		p.game_slug = body->text_or("game_slug", "");
-		p.status    = body->text_or("status",    "active");
-		p.exp_bits  = body->text_or("exp_bits",  "");
-		if (body->wrong_type()) return json_error(400, "invalid_field");
-		auto db_conn = db_pool_.acquire();
-		auto result = update_game_access(*db_conn, id, p);
-		crow::json::wvalue out;
-		if (!result.ok) {
-			out["error"] = result.error_code;
-			if (!result.error_message.empty())
-				out["message"] = result.error_message;
-			crow::response res(result.error_code == "not_found" ? 404 :
-			                   result.error_code == "db_error"  ? 500 : 400);
-			res.body = out.dump();
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
-		auto access = get_game_access(*db_conn, id, p.game_slug);
-		if (access) {
-			out["game_slug"] = access->game_slug;
-			out["status"] = access->status;
-			out["exp_bits"] = access->exp_bits;
-		}
-		crow::response res(200);
-		res.body = out.dump();
-		res.set_header("Content-Type", "application/json");
-		return res;
-	});
+	// The admin user routes (admin_user_routes.h).
+	impl_->users.register_routes(app, [this](int64_t id) { forget_revoked_account(id); });
 }
 
 // Public JSON API consumed by the web portal: lobbies, stats, self-signup,

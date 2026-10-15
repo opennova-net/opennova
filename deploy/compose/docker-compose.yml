@@ -24,6 +24,10 @@ services:
     # (pid_namespaces(7)), so a second `docker kill -s TERM` could not end a
     # stuck shutdown. The overlays inherit it.
     init: true
+    # The server's only writes are temporary files (the Stripe calls' and the
+    # ec2 provider's owner-only scratch directories): memory, never the image.
+    tmpfs:
+      - /tmp
     environment:
       ONNET_PUBLIC_HOST: ${ONNET_PUBLIC_HOST:-127.0.0.1}
       # The database (apps/novaworld_server/README.md "Database"): the libpq
@@ -65,6 +69,23 @@ services:
       ONNET_HOSTED_SERVE_IMAGE: ${ONNET_HOSTED_SERVE_IMAGE:-}
       ONNET_HOSTED_SERVICE_ADDRESS: ${ONNET_HOSTED_SERVICE_ADDRESS:-}
       ONNET_HOSTED_BOOTSTRAP_CIDRS: ${ONNET_HOSTED_BOOTSTRAP_CIDRS:-}
+      # Billing, the monthly support tiers over Stripe (apps/novaworld_server/
+      # README.md "Billing (monthly support tiers)"): on only when the set is
+      # complete and well-formed, else a boot warning and billing off. The key
+      # and the webhook secret are secrets (the vault's stripe-test or
+      # stripe-live item); the price ids are comma lists (the first sold, the
+      # rest grandfathered); ONNET_SITE_URL is the site's origin, where Checkout
+      # and the portal return.
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_TIER1: ${STRIPE_PRICE_TIER1:-}
+      STRIPE_PRICE_TIER2: ${STRIPE_PRICE_TIER2:-}
+      STRIPE_PRICE_TIER3: ${STRIPE_PRICE_TIER3:-}
+      STRIPE_PRICE_OWN_MACHINE: ${STRIPE_PRICE_OWN_MACHINE:-}
+      ONNET_SITE_URL: ${ONNET_SITE_URL:-}
+      ONNET_STRIPE_CURL: ${ONNET_STRIPE_CURL:-}
+      ONNET_BILLING_AUTOMATIC_TAX: ${ONNET_BILLING_AUTOMATIC_TAX:-}
+      ONNET_BILLING_RECONCILE_MINUTES: ${ONNET_BILLING_RECONCILE_MINUTES:-}
 
   web:
     image: ${WEB_IMAGE:-opennova-web:local}

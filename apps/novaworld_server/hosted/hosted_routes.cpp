@@ -126,6 +126,22 @@ int64_t server_id_of(uint64_t id) {
 	return id <= static_cast<uint64_t>(INT64_MAX) ? static_cast<int64_t>(id) : 0;
 }
 
+crow::response server_reply(int code, db::Database &db, int64_t id, bool admin) {
+	crow::json::wvalue out;
+	if (const auto server = find_server(db, id))
+		out["server"] = server_json(db, *server, admin);
+	else
+		out["server"] = nullptr;
+	return json_reply(code, out);
+}
+
+void log_owner(const WebSessionUser &user, const char *what, const std::string &outcome) {
+	std::printf("[hosted] owner '%s' (id=%lld) %s -> %s\n", loggable(user.username).c_str(),
+			static_cast<long long>(user.id), what, outcome.c_str());
+}
+
+} // namespace
+
 // A hosted server for its owner (GET /api/me/servers and /api/me/servers/<id>,
 // the start and stop replies) or, with `admin`, for the fleet view: its owner,
 // its service account and its machine besides. Never its admin password.
@@ -159,22 +175,6 @@ crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool adm
 	}
 	return e;
 }
-
-crow::response server_reply(int code, db::Database &db, int64_t id, bool admin) {
-	crow::json::wvalue out;
-	if (const auto server = find_server(db, id))
-		out["server"] = server_json(db, *server, admin);
-	else
-		out["server"] = nullptr;
-	return json_reply(code, out);
-}
-
-void log_owner(const WebSessionUser &user, const char *what, const std::string &outcome) {
-	std::printf("[hosted] owner '%s' (id=%lld) %s -> %s\n", loggable(user.username).c_str(),
-			static_cast<long long>(user.id), what, outcome.c_str());
-}
-
-} // namespace
 
 void HostedRoutes::configure(const ServerConfig &config) {
 	provider_ = config.hosted_provider.empty() ? std::string("none") : config.hosted_provider;
