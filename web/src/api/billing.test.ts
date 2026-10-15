@@ -93,6 +93,7 @@ describe('the routes', () => {
     const cases: [number, string, string][] = [
       [409, 'already_subscribed', 'You already have a support tier'],
       [409, 'own_machine_limit', 'an own machine for every server'],
+      [409, 'checkout_in_progress', 'already starting'],
       [503, 'billing_disabled', 'not open on NovaWorld yet'],
       [503, 'billing_misconfigured', 'no payment was taken'],
       [502, 'stripe_unavailable', 'Stripe did not answer'],
