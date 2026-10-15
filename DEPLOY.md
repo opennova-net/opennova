@@ -609,11 +609,14 @@ Stripe up in test mode first (staging, `stripe-test`), then in live mode (prod,
   `alerts/email` (confirm the subscription from the first email AWS sends): the server's
   heartbeat missing for 5 minutes, more than 3 boots in 15 minutes, a failed hosted
   server, a lost machine, 3 failed launches in 15 minutes, a billing sync older than an
-  hour, 5 refused webhooks in 15 minutes, the host's status checks (a failed system
-  check recovers the instance, a failed instance check reboots it), the host's CPU over
-  80% for 15 minutes, the database's CPU credits and free storage, and the Route 53
-  health check on `http://<Elastic IP>:8080/healthz`. The heartbeat is the server's JSON
-  line every 60 s; its fields are metrics in `OpenNova/<deployment>`.
+  hour, 5 refused webhooks in 15 minutes, the entitlement stops held for 5 minutes
+  (`limits_held`: the supervisor's mass-stop guard keeps over-entitled servers running
+  until billing is trusted again; the admin billing view says why), the service
+  instance's status checks (a failed system check recovers the instance, a failed
+  instance check reboots it), its CPU over 80% for 15 minutes, the database's CPU
+  credits and free storage, and the Route 53 health check on `http://<Elastic
+  IP>:8080/healthz`. The heartbeat is the server's JSON line every 60 s; its fields are
+  metrics in `OpenNova/<deployment>`.
 - **Budgets** (prod's, counting every OpenNova deployment): the month's cost
   (`budget_monthly_usd`) and the EC2 data transfer out (`budget_egress_gb`): an email at
   80% and at a 100% forecast; Cost Anomaly Detection emails daily anomalies over

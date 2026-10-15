@@ -7,17 +7,19 @@
 # server's heartbeat, a JSON line it logs every 60 s,
 #   {"heartbeat":{"nw_sessions":N,"listed_hosts":N,"hosted_live":N,
 #     "hosted_failed":N,"machines_lost":N,"launch_failures":N,
-#     "billing_sync_age_s":N,"webhook_rejects":N}}
+#     "billing_sync_age_s":N,"webhook_rejects":N,"limits_held":0|1}}
 # (gauges, but launch_failures and webhook_rejects count the minute since the
-# last line; billing_sync_age_s is -1 with billing off), and from its boot line.
-# Alarms, to one SNS topic emailing var.alert_email:
+# last line; billing_sync_age_s is -1 with billing off; limits_held is 1 while
+# the supervisor holds back the entitlement stops, its mass-stop guard), and
+# from its boot line. Alarms, to one SNS topic emailing var.alert_email:
 #   heartbeat missing for 5 minutes (no data is an alarm: a dead server logs
 #   nothing), more than 3 boots in 15 minutes (a crash loop), a failed hosted
 #   server or a lost machine, 3 failed launches in 15 minutes, a billing sync
-#   older than an hour, 5 refused webhooks in 15 minutes, the host's status
-#   checks (system: recover the instance; instance: reboot it), its CPU over 80%
-#   for 15 minutes, the database's CPU credits and free storage, and (in
-#   us-east-1, where Route 53's metrics live) the /healthz health check.
+#   older than an hour, 5 refused webhooks in 15 minutes, the entitlement
+#   stops held for 5 minutes, the service instance's status checks (system:
+#   recover it; instance: reboot it), its CPU over 80% for 15 minutes, the
+#   database's CPU credits and free storage, and (in us-east-1, where Route
+#   53's metrics live) the /healthz health check.
 # Budgets (prod, account-wide): the month's cost and its EC2 data transfer out,
 # and Cost Anomaly Detection.
 
@@ -35,6 +37,7 @@ locals {
     LaunchFailures  = "launch_failures"
     BillingSyncAgeS = "billing_sync_age_s"
     WebhookRejects  = "webhook_rejects"
+    LimitsHeld      = "limits_held"
   }
 
   alarm_actions = [aws_sns_topic.alerts.arn]
@@ -157,6 +160,14 @@ locals {
       metric      = "WebhookRejects", statistic = "Sum", period = 900, periods = 1,
       comparison  = "GreaterThanOrEqualToThreshold", threshold = 5, missing = "notBreaching",
       description = "5 or more Stripe webhooks refused in 15 minutes (a rolled secret not synced, or forged requests)."
+    }
+    # Every heartbeat of 5 minutes said 1 (Minimum): a hold that lasts, not one
+    # pass's. A server without the field logs nothing for it: no data is no
+    # alarm (heartbeat-missing covers silence).
+    limits-held = {
+      metric      = "LimitsHeld", statistic = "Minimum", period = 300, periods = 1,
+      comparison  = "GreaterThanOrEqualToThreshold", threshold = 1, missing = "notBreaching",
+      description = "The entitlement stops have been held for 5 minutes (the supervisor's mass-stop guard): over-entitled servers keep running meanwhile (the admin billing view says why)."
     }
   }
 }

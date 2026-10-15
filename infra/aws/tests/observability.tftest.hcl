@@ -6,8 +6,8 @@
 # The service's and machines' log groups keep 30 days; the server's heartbeat
 # line becomes metrics; its silence for 5 minutes is an alarm (no data
 # breaches), as are a crash loop, failed servers, lost machines, failed
-# launches, a stale billing sync, refused webhooks, the host's status checks
-# (recover, reboot) and CPU, the database's credits and storage and the
+# launches, a stale billing sync, refused webhooks, entitlement stops held for
+# 5 minutes, the service instance's status checks (recover, reboot) and CPU, the database's credits and storage and the
 # /healthz health check; every alarm notifies the one topic, which emails the
 # alert address. Prod makes the cost and egress budgets and the anomaly
 # monitor; a placeholder address subscribes nothing.
@@ -144,7 +144,8 @@ run "observability" {
   }
   assert {
     condition = (
-      length(aws_cloudwatch_log_metric_filter.heartbeat_field) == 8 &&
+      length(aws_cloudwatch_log_metric_filter.heartbeat_field) == 9 &&
+      aws_cloudwatch_log_metric_filter.heartbeat_field["LimitsHeld"].metric_transformation[0].value == "$.heartbeat.limits_held" &&
       aws_cloudwatch_log_metric_filter.heartbeat_field["LaunchFailures"].metric_transformation[0].value == "$.heartbeat.launch_failures" &&
       aws_cloudwatch_log_metric_filter.heartbeat_field["BillingSyncAgeS"].pattern == "{ $.heartbeat.billing_sync_age_s >= 0 }"
     )
@@ -173,6 +174,17 @@ run "observability" {
       aws_cloudwatch_metric_alarm.server["hosted-failed"].threshold == 0 && aws_cloudwatch_metric_alarm.server["machines-lost"].threshold == 0
     )
     error_message = "the crash loop, launch failure, webhook, billing sync, failed server and lost machine alarms"
+  }
+  assert {
+    condition = (
+      aws_cloudwatch_metric_alarm.server["limits-held"].metric_name == "LimitsHeld" &&
+      aws_cloudwatch_metric_alarm.server["limits-held"].statistic == "Minimum" &&
+      aws_cloudwatch_metric_alarm.server["limits-held"].period == 300 && aws_cloudwatch_metric_alarm.server["limits-held"].evaluation_periods == 1 &&
+      aws_cloudwatch_metric_alarm.server["limits-held"].comparison_operator == "GreaterThanOrEqualToThreshold" &&
+      aws_cloudwatch_metric_alarm.server["limits-held"].threshold == 1 &&
+      aws_cloudwatch_metric_alarm.server["limits-held"].treat_missing_data == "notBreaching"
+    )
+    error_message = "limits_held at 1 in every heartbeat for 5 minutes is an alarm; no data is none"
   }
   assert {
     condition = (
@@ -237,7 +249,7 @@ run "placeholder_email" {
     error_message = "a placeholder address subscribes nothing"
   }
   assert {
-    condition     = length(aws_cloudwatch_metric_alarm.server) == 7 && length(aws_ce_anomaly_monitor.services) == 1
+    condition     = length(aws_cloudwatch_metric_alarm.server) == 8 && length(aws_ce_anomaly_monitor.services) == 1
     error_message = "the alarms and the monitor exist all the same"
   }
 }
