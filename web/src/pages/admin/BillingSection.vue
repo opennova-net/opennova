@@ -217,7 +217,10 @@
                 <td class="whitespace-nowrap px-4 py-2" :class="s.status === 'past_due' ? 'text-warn' : ''">
                   {{ subscriptionStatusLabel(s.status) }}<template v-if="s.cancel_at_period_end">, canceling</template>
                 </td>
-                <td class="whitespace-nowrap px-4 py-2"><RelativeTime :value="s.current_period_end" :now="now" /></td>
+                <td class="whitespace-nowrap px-4 py-2">
+                  <RelativeTime v-if="s.current_period_end" :value="s.current_period_end" :now="now" />
+                  <span v-else class="text-ink-muted">None</span>
+                </td>
                 <td class="px-4 py-2 text-xs">
                   <a :href="stripeDashboardUrl('customers', s.stripe_customer_id, live)" target="_blank" rel="noopener noreferrer" class="text-accent hover:text-ink-bright">Customer</a>,
                   <a :href="stripeDashboardUrl('subscriptions', s.stripe_subscription_id, live)" target="_blank" rel="noopener noreferrer" class="text-accent hover:text-ink-bright">subscription</a>

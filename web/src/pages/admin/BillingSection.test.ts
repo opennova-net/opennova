@@ -4,7 +4,7 @@ import BillingSection from './BillingSection.vue';
 import { applyLimitStops, fetchAdminBilling, linkBillingCustomer, reconcileBilling } from '../../api/adminBilling';
 import { fetchTiers } from '../../api/billing';
 import { listUsers } from '../../api/users';
-import { adminBilling, userEntry } from '../../test/adminFixtures';
+import { adminBilling, subscriptionRow, userEntry } from '../../test/adminFixtures';
 import { tiersResponse } from '../../test/billingFixtures';
 import { testRouter } from '../../test/router';
 
@@ -82,6 +82,16 @@ describe('BillingSection', () => {
     await flushPromises();
     expect(reconcile).toHaveBeenCalledTimes(1);
     expect(wrapper.get('[role="status"]').text()).toContain('Reconcile started');
+  });
+
+  it('says None for a subscription with no period end', async () => {
+    billing.mockResolvedValue({
+      ok: true,
+      value: adminBilling({ subscriptions: [subscriptionRow(9, { status: 'incomplete', entitled: false, current_period_end: '' })] }),
+    });
+    const wrapper = await mountSection();
+    const cells = wrapper.findAll('tbody tr').find((r) => r.text().includes('player9'));
+    expect(cells?.findAll('td')[2].text()).toBe('None');
   });
 
   it('relinks an orphan to the account named', async () => {

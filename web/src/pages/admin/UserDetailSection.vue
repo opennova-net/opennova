@@ -186,7 +186,10 @@
                   <td class="whitespace-nowrap px-4 py-2">
                     {{ subscriptionStatusLabel(sub.status) }}<template v-if="sub.cancel_at_period_end">, ends at the period's end</template>
                   </td>
-                  <td class="whitespace-nowrap px-4 py-2"><RelativeTime :value="sub.current_period_end" :now="now" /></td>
+                  <td class="whitespace-nowrap px-4 py-2">
+                    <RelativeTime v-if="sub.current_period_end" :value="sub.current_period_end" :now="now" />
+                    <span v-else class="text-ink-muted">None</span>
+                  </td>
                 </tr>
               </tbody>
             </table>
