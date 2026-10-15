@@ -23,9 +23,9 @@
         <h3 :id="`${baseId}-now`" class="text-sm font-semibold text-ink">Right now</h3>
         <dl class="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-[auto_1fr]">
           <dt class="text-ink-muted">State</dt>
-          <dd class="text-ink">{{ ownerStateLabel(stats.live.state) }}, up for {{ formatDuration(stats.live.uptime_seconds * 1000) }}</dd>
+          <dd class="text-ink">{{ ownerStateLabel(stats.live.state) }}<template v-if="stats.live.uptime_seconds !== null">, up for {{ formatDuration(stats.live.uptime_seconds * 1000) }}</template></dd>
           <dt class="text-ink-muted">Players</dt>
-          <dd class="text-ink">{{ stats.live.players }} of {{ stats.live.max_players }}</dd>
+          <dd class="text-ink">{{ stats.live.players === null ? 'Not listed' : `${stats.live.players} of ${stats.live.max_players ?? '?'}` }}</dd>
           <template v-if="stats.live.mission">
             <dt class="text-ink-muted">Mission</dt>
             <dd class="break-words text-ink">
@@ -170,9 +170,9 @@ const span = computed(() => (stats.value ? statsWindow(stats.value, now.value) :
 
 const sceneText = computed(() => {
   switch (stats.value?.live?.scene) {
-    case 'Game':
+    case 'game':
       return 'In a match';
-    case 'Menus':
+    case 'menus':
       return 'Between matches';
     default:
       return '';
@@ -218,7 +218,7 @@ const tiles = computed<Tile[]>(() => {
   out.push({
     label: 'Peak players',
     value: formatCount(sum.peak_players),
-    detail: `Average ${Math.round(sum.avg_players * 10) / 10} ${words}`,
+    detail: sum.avg_players === null ? `No players sampled ${words}` : `Average ${Math.round(sum.avg_players * 10) / 10} ${words}`,
     approximate: approx('peak_players'),
     trend: { values: playerValues(s), label: 'Players', format: formatCount },
   });

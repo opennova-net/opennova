@@ -31,7 +31,7 @@ export function serverStats(overrides: Partial<HostedStats> = {}): HostedStats {
       mission: 'jo_one.bms',
       game_type: 'TDM',
       time_left: 600,
-      scene: 'Game',
+      scene: 'game',
       link_state: 'up',
       cpu_percent: 21.4,
       memory_bytes: 180_000_000,

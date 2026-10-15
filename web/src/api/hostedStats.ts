@@ -100,15 +100,16 @@ function parseLive(value: unknown): LiveStats | null | undefined {
   if (value === null || value === undefined) return null;
   const v = value as Record<string, unknown>;
   if (typeof v !== 'object') return undefined;
-  if (typeof v.state !== 'string' || !isNumber(v.uptime_seconds) || !isCount(v.players) || !isCount(v.max_players)) {
+  const countOrNull = (x: unknown) => x === null || x === undefined || isCount(x);
+  if (typeof v.state !== 'string' || !isNumberOrNull(v.uptime_seconds ?? null) || !countOrNull(v.players) || !countOrNull(v.max_players)) {
     return undefined;
   }
   if (!isNumberOrNull(v.cpu_percent ?? null) || !isNumberOrNull(v.memory_bytes ?? null)) return undefined;
   return {
     state: v.state as HostedState,
-    uptime_seconds: v.uptime_seconds,
-    players: v.players,
-    max_players: v.max_players,
+    uptime_seconds: (v.uptime_seconds ?? null) as number | null,
+    players: (v.players ?? null) as number | null,
+    max_players: (v.max_players ?? null) as number | null,
     mission: typeof v.mission === 'string' ? v.mission : '',
     game_type: typeof v.game_type === 'string' ? v.game_type : '',
     time_left: isNumber(v.time_left) ? v.time_left : null,
@@ -127,14 +128,13 @@ function parseSummary(value: unknown): StatsSummary | null {
     'running_seconds',
     'restarts',
     'peak_players',
-    'avg_players',
     'player_hours',
     'unique_players',
     'missions',
     'egress_bytes',
   ] as const;
   if (!numbers.every((k) => isNumber(v[k]) && (v[k] as number) >= 0)) return null;
-  if (!isNumberOrNull(v.availability ?? null)) return null;
+  if (!isNumberOrNull(v.availability ?? null) || !isNumberOrNull(v.avg_players ?? null)) return null;
   const approximate = Array.isArray(v.approximate) ? v.approximate.filter((a): a is string => typeof a === 'string') : [];
   return {
     live_seconds: v.live_seconds as number,
@@ -142,7 +142,7 @@ function parseSummary(value: unknown): StatsSummary | null {
     availability: (v.availability ?? null) as number | null,
     restarts: v.restarts as number,
     peak_players: v.peak_players as number,
-    avg_players: v.avg_players as number,
+    avg_players: (v.avg_players ?? null) as number | null,
     player_hours: v.player_hours as number,
     unique_players: v.unique_players as number,
     missions: v.missions as number,

@@ -12,14 +12,16 @@ export type StatsRange = '1h' | '24h' | '7d' | '30d';
 // server that is not live.
 export interface LiveStats {
   state: HostedState;
-  uptime_seconds: number;
-  players: number;
-  max_players: number;
+  // Seconds since it last reached running; null while it is not running.
+  uptime_seconds: number | null;
+  // From its listing; null while it is not listed.
+  players: number | null;
+  max_players: number | null;
   mission: string;
   game_type: string;
   // Seconds left in the round, null when the server did not say.
   time_left: number | null;
-  // 'Game' (a match), 'Menus' (between matches), or '' before a poll.
+  // 'game' (a match), 'menus' (between matches), 'unknown', or '' before a poll.
   scene: string;
   // The service's console link: 'connecting', 'up', 'down' or 'stopped'.
   link_state: string;
@@ -37,7 +39,8 @@ export interface StatsSummary {
   availability: number | null;
   restarts: number;
   peak_players: number;
-  avg_players: number;
+  // null when the range has no sample of it.
+  avg_players: number | null;
   player_hours: number;
   unique_players: number;
   missions: number;
