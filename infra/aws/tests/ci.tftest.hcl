@@ -149,7 +149,7 @@ run "deploy_role" {
       for st in data.aws_iam_policy_document.github_deploy_trust[0].statement : st
       if contains(st.actions, "sts:AssumeRoleWithWebIdentity") && length([
         for c in st.condition : c
-        if(c.variable == "token.actions.githubusercontent.com:sub" && length(c.values) == 1 && contains(c.values, "repo:opennova-net/opennova-godot:environment:production")) ||
+        if(c.variable == "token.actions.githubusercontent.com:sub" && length(c.values) == 1 && contains(c.values, "repo:opennova-net/opennova:environment:production")) ||
         (c.variable == "token.actions.githubusercontent.com:aud" && contains(c.values, "sts.amazonaws.com"))
       ]) == 2
     ]) == 1

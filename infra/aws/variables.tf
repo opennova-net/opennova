@@ -400,7 +400,7 @@ variable "github_deploy" {
 variable "github_repository" {
   description = "The repository (owner/name) whose deploy workflow may assume the role."
   type        = string
-  default     = "opennova-net/opennova-godot"
+  default     = "opennova-net/opennova"
 
   validation {
     condition     = can(regex("^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$", var.github_repository))
