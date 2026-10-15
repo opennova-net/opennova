@@ -9,7 +9,8 @@ namespace opennova::io {
 // no input/output reflection, no final XOR. Check value for "123456789" is
 // 0x0376E6E7. Retail walks this one CRC in two places, each witnessed at its
 // own home: the NAPI envelope (net/novacrypto/crc32.h) and the expansion
-// version checksum (base/vfs vfs_version_crc).
+// version checksum (base/vfs vfs_version_crc); the updater a third
+// (formats/update) and its file CRC below.
 inline constexpr uint32_t kCrc32Mpeg2Init = 0xFFFFFFFFu;
 
 // The retail table, carried as literals. Do not regenerate; preserving the
@@ -65,6 +66,28 @@ inline uint32_t crc32_mpeg2_update(uint32_t crc, const uint8_t *data, size_t len
 // One-shot CRC of a buffer.
 inline uint32_t crc32_mpeg2(const uint8_t *data, size_t len) {
 	return crc32_mpeg2_update(kCrc32Mpeg2Init, data, len);
+}
+
+// The CRC NovaLogic's update tools compute over a file, defect and all: complemented, and its
+// 4x unrolled loop reads one byte, advances by one, then reads that same byte three more times,
+// so the first len/4 bytes each count four times and the next len%4 once; the rest never
+// counts. UPDATE.EXE checks a loose file and a PFF entry against a command row with it, and the
+// patch-era pack.exe stamps it on an entry it adds: JO:CA's one patched entry (main.mnu,
+// 2009-07-24, in localres.pff and jox01.pff) carries it, the 2005 build's entries the plain
+// complemented CRC (docs/update/updater-re.md §10). [orig: FileCrc_ComputeFile @ 0x404ac0
+// (UPDATE.EXE); FileCrc_Update @ 0x403e40 (UPDATE.EXE), the reads @0x403e65 / @0x403e81 /
+// @0x403e9b / @0x403eb5]
+inline uint32_t novalogic_file_crc(const uint8_t *data, size_t len) {
+	uint32_t crc = kCrc32Mpeg2Init;
+	size_t at = 0;
+	for (size_t quad = len >> 2; quad != 0; --quad) {
+		const uint8_t byte = data[at++];
+		for (int i = 0; i < 4; ++i)
+			crc = crc32_mpeg2_update(crc, byte);
+	}
+	for (size_t tail = len & 3u; tail != 0; --tail)
+		crc = crc32_mpeg2_update(crc, data[at++]);
+	return ~crc;
 }
 
 } // namespace opennova::io

@@ -143,6 +143,10 @@ const GameWorld::FrameLeg GameWorld::kFrameLegs[] = {
 	// publishes the frame's ambient scale, before the lit material draws
 	// consume the pushed globals).
 	{ "lights", FrameStats::WORLD_LIGHT, &GameWorld::leg_lights, kLegNone },
+	// The opt-in ragdoll corpses (ADR 0060): after the session walks dispatched
+	// this frame's body clips and the local view posed the avatar, before the
+	// materials leg writes the awake models' bones.
+	{ "ragdolls", FrameStats::WORLD_RAGDOLL, &GameWorld::leg_ragdolls, kLegNone },
 	// Per-model runtime advance (ex-self-clocked ObjectModel _process): after
 	// occlusion resolves visibility, before the particle composite over it.
 	{ "materials", FrameStats::WORLD_MATERIAL, &GameWorld::leg_materials, kLegNone },
@@ -446,6 +450,26 @@ GameWorld::LegResult GameWorld::leg_sun_veil(FrameContext &r_ctx) {
 GameWorld::LegResult GameWorld::leg_lights(FrameContext &r_ctx) {
 	render_light_frame();
 	return kLegRan;
+}
+
+GameWorld::LegResult GameWorld::leg_ragdolls(FrameContext &r_ctx) {
+	MissionRoot *runtime = get_runtime();
+	EntityPresenter *entities = runtime != nullptr ? runtime->get_entity_presenter() : nullptr;
+	const Ref<Simulation> sim = get_sim();
+	LocalPlayerPresenter *local = local_view_presenter();
+	const int ticks = r_ctx.outcome.is_valid() ? r_ctx.outcome->get_ticks_run() : 0;
+	ragdolls_.present(entities, sim.ptr(), local != nullptr ? local->avatar() : nullptr, ticks);
+	return ragdolls_.enabled() ? kLegRan : kLegSkipped;
+}
+
+PackedInt32Array GameWorld::get_ragdoll_counts() const {
+	const opennova::ragdoll::RagdollStats s = ragdolls_.stats();
+	PackedInt32Array out;
+	out.push_back(s.awake);
+	out.push_back(s.sleeping);
+	out.push_back(s.blending);
+	out.push_back(s.started);
+	return out;
 }
 
 GameWorld::LegResult GameWorld::leg_materials(FrameContext &r_ctx) {

@@ -79,6 +79,10 @@ Socket tcp_accept(Socket &listener, Endpoint &from);
 // One recv on a non-blocking socket: the byte count, 0 when the peer closed,
 // TCP_RECV_WOULD_BLOCK when nothing waits, -1 on an error (a reset).
 inline constexpr int TCP_RECV_WOULD_BLOCK = -2;
+// One send on a non-blocking socket: the bytes the kernel took (fewer than `len` when its buffer
+// filled), TCP_SEND_WOULD_BLOCK when it took none, -1 on an error.
+inline constexpr int TCP_SEND_WOULD_BLOCK = -2;
+int tcp_send_nonblocking(Socket &s, const uint8_t *data, size_t len);
 int tcp_recv_nonblocking(Socket &s, uint8_t *buf, size_t cap);
 // Shut both directions down, so a recv blocked on `s` in another thread returns; the socket
 // stays open for its owner to close.

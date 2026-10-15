@@ -316,6 +316,21 @@ public:
 	void sync_fixed_tick_effects();
 	Ref<FirePresentStats> get_fire_present_stats() const;
 	Ref<DestructionPresentStats> get_destruction_present_stats() const;
+	// The skeletal rows this frame's walks presented, drawn or not, as the
+	// ragdoll corpses read them (ADR 0060). The ragdoll leg takes them once a
+	// frame; a frame whose walks did not run hands over none.
+	struct RagdollRow {
+		ObjectModel *model = nullptr;
+		int32_t handle = -1;
+		int32_t life = 0;       // PF_RESPAWN_REVISION
+		int32_t anim_state = -1;
+		bool hidden = false;
+		bool severed = false;   // a dismemberment piece (its hips hidden)
+	};
+	std::vector<RagdollRow> take_ragdoll_rows();
+	// Off (the default) records nothing: only a session with ragdolls on
+	// collects the rows its leg takes.
+	void set_collect_ragdoll_rows(bool p_collect);
 	// Built per call (the live census).
 	Ref<ThrowablePresentStats> get_throwable_present_stats() const;
 	Ref<ScarPresentStats> get_scar_present_stats() const;
@@ -660,6 +675,9 @@ private:
 	uint64_t plan_model_lifetime_generation_ = 0;
 	bool plan_dirty_ = true;
 	std::vector<Row> rows_;
+	std::vector<RagdollRow> ragdoll_rows_;
+	bool collect_ragdoll_rows_ = false;
+	void note_ragdoll_row(ObjectModel *model, int32_t handle, const float *p, int base);
 	// infantry_anim_key(state) allocates its String per call natively; the
 	// state->key map is tiny and global-stable, so cache per presenter (both
 	// walks read it).

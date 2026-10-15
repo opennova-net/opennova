@@ -53,7 +53,7 @@
     X(WORLD_NETWORK_FRAME, "net-session edge observation/environment apply") \
     X(WORLD_SUN_VEIL, "celestial exposure feed") \
     X(WORLD_LIGHT, "point-light selection and terrain/shadow context") \
-    X(WORLD_MATERIAL, "awake ObjectModel runtime/material/animation advance") \
+    X(WORLD_RAGDOLL, "ragdoll corpses: observe, step, pose writes (ADR 0060)")     X(WORLD_MATERIAL, "awake ObjectModel runtime/material/animation advance") \
     X(MODEL_CLOCK_ANIMATION, "native model clocks + part/body animation") \
     X(MODEL_PANM, "native PANM transform evaluation/publication") \
     X(MODEL_MATERIAL, "native dynamic material generator/texture writes") \

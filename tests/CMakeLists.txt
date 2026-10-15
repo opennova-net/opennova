@@ -711,6 +711,43 @@ target_link_libraries(dbf_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(dbf_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 opennova_add_mixed_test(dbf_roundtrip COMMAND dbf_roundtrip_test)
 
+# The updater (docs/update/updater-re.md, ADR 0061): its formats (the checksums, the INI
+# dialect, the wizard, the command file, SERVER.LST, 1ZLN, 1SFS) over synthetic inputs and the
+# minted fixtures/update/synth_update.sfs; its wire, both directions; pff_apply_edits, the
+# archive edit in place of pack.exe, with the JO:CA archives' checksum convention as its
+# OPENNOVA_JO_DIR leg.
+add_executable(minimal_update_gen_test fixtures/minimal_update_gen.cpp)
+target_link_libraries(minimal_update_gen_test PRIVATE opennova_formats)
+target_include_directories(minimal_update_gen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME minimal_update_gen COMMAND minimal_update_gen_test)
+
+add_executable(update_formats_test update/update_formats_test.cpp)
+target_link_libraries(update_formats_test PRIVATE opennova_formats)
+target_include_directories(update_formats_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME update_formats COMMAND update_formats_test)
+
+add_executable(update_wire_test update/update_wire_test.cpp)
+target_link_libraries(update_wire_test PRIVATE opennova_net)
+target_include_directories(update_wire_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME update_wire COMMAND update_wire_test)
+
+add_executable(update_pff_test update/update_pff_test.cpp)
+target_link_libraries(update_pff_test PRIVATE opennova_formats)
+target_include_directories(update_pff_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_mixed_test(update_pff COMMAND update_pff_test)
+
+add_executable(update_server_test update/update_server_test.cpp)
+target_link_libraries(update_server_test PRIVATE opennova_net)
+target_include_directories(update_server_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME update_server COMMAND update_server_test)
+
+# opennova-update-tool's core: a packed update built from two synthetic trees and served on a
+# loopback port.
+add_executable(update_tool_test update/update_tool_test.cpp)
+target_link_libraries(update_tool_test PRIVATE opennova_update_tool_core)
+target_include_directories(update_tool_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME update_tool COMMAND update_tool_test)
+
 # Audio sound-set member selection state machine (FIRST/RANDOM/SEQUENTIAL/RANDOM_SEQ),
 # pushed down from sound_bank.gd into engine/runtime/audio.
 add_executable(sound_selector_test audio/sound_selector_test.cpp)
@@ -4760,3 +4797,16 @@ endif()
 # The OpenNova Editor's rows (ADR 0046): tests/editor/CMakeLists.txt, one opennova_add_editor_test per
 # executable; their executables and working directory stay this folder's.
 add_subdirectory(editor)
+
+# The opt-in ragdoll corpses (ADR 0060): the solver, the set and the death
+# clip reading on a synthetic person rig; ragdoll_us01 on retail's own rig.
+add_executable(ragdoll_test ragdoll/ragdoll_test.cpp)
+target_link_libraries(ragdoll_test PRIVATE opennova_runtime)
+target_include_directories(ragdoll_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ragdoll_test PRIVATE cxx_std_17)
+add_test(NAME ragdoll COMMAND ragdoll_test)
+add_executable(ragdoll_us01_test ragdoll/ragdoll_us01_test.cpp)
+target_link_libraries(ragdoll_us01_test PRIVATE opennova_runtime)
+target_include_directories(ragdoll_us01_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(ragdoll_us01_test PRIVATE cxx_std_17)
+opennova_add_gated_test(ragdoll_us01 COMMAND ragdoll_us01_test)

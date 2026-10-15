@@ -12,6 +12,7 @@
 
 #include <base/gameprofile/resource_missing.h>
 #include <formats/mission/bms_edit.h>
+#include <runtime/ragdoll/ragdoll_option.h>
 #include <runtime/environment/environment_state.h>
 #include <runtime/mission/mission_sidecars.h>
 
@@ -248,6 +249,11 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	session_texcompression_level_ = texcompression_level_;
 	session_particle_density_ = particle_density_;
 	publish_session_render_settings();
+	// The same copy of NoBlood's ragdoll bit: this mission's corpses ragdoll
+	// or keep their clips until the next mission start (engine:
+	// ragdoll/ragdoll_option.h).
+	ragdolls_.set_enabled(game_config_.is_valid() &&
+			opennova::ragdoll::ragdolls_enabled(game_config_->native().cfg().no_blood));
 	join_wire_assets_pending_ = wire_header_join;
 	join_wire_til_applied_ = false;
 	join_wire_assets_failed_ = false;
@@ -473,6 +479,7 @@ void GameWorld::place_mission_objects(const Ref<MissionData> &p_mission) {
 // load_*(). Safe to call when nothing is loaded.
 void GameWorld::unload() {
 	world_ready_ = false;
+	ragdolls_.clear();
 	scene_overlay_bodies_.clear();
 	minimap_water_mask_.unref();
 	emit_signal(kSignalMinimapWaterChanged, Variant());

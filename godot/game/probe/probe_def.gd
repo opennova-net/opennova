@@ -580,6 +580,29 @@ static func _build_definitions() -> Array[ProbeDef]:
 				+ "through the seam the window's checkbox and game_debug share; captures the "
 				+ "workspace.",
 				RUNTIME + "entity_pick_probe.gd", {}, [], true, true, 120_000),
+		ProbeDef.make("ragdoll_line",
+				"The opt-in ragdoll corpses (ADR 0060): the local player NoDie for the run, the "
+				+ "`count` live NPCs on foot nearest it shot in turn (with `line_up`, first pinned in a "
+				+ "row `standoff` m north, `spacing` m apart): the view set onto each body plus "
+				+ "`height` m, its health dropped to 1, `burst_frames` fired, `watch_frames` watched "
+				+ "with a capture every `capture_every` frames and the session's ragdoll counts "
+				+ "logged. Passes when every target died and each death started a ragdoll; ragdolls "
+				+ "off for the session (game.cfg NoBlood bit 1 clear) fail unless `force`. With "
+				+ "`observe` it shoots nothing and passes once `count` ragdolls have started on this "
+				+ "machine within `watch_frames` (a joiner while its host shoots).",
+				RUNTIME + "ragdoll_line_probe.gd", {
+					"count": { "type": "integer", "minimum": 1, "default": 6 },
+					"line_up": { "type": "boolean", "default": false },
+					"standoff": { "type": "number", "minimum": 2.0, "default": 8.0 },
+					"spacing": { "type": "number", "minimum": 0.5, "default": 2.5 },
+					"height": { "type": "number", "default": 0.4 },
+					"burst_frames": { "type": "integer", "minimum": 1, "default": 4 },
+					"watch_frames": { "type": "integer", "minimum": 0, "default": 150 },
+					"capture_every": { "type": "integer", "minimum": 1, "default": 30 },
+					"force": { "type": "boolean", "default": false },
+					"observe": { "type": "boolean", "default": false },
+					"output_dir": { "type": "string", "default": "" },
+				}, [], true, true, 240_000),
 		ProbeDef.make("terrain_ground",
 				"The ground the game reads at a mission point (x east, y north, metres) on the live "
 				+ "process: the engine's pick ray dropped straight down there meets the terrain (its "

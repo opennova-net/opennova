@@ -164,6 +164,11 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap_rings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_map_view.cpp       # the DEATH / CMAP windowed map views
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_minimap_radar.cpp # the spinmap's bit-10 legs
+    # ragdoll — the opt-in ragdoll corpses (ADR 0060): OpenNova's own
+    # presentation solver, never a port (citation allowlist)
+    ${CMAKE_CURRENT_SOURCE_DIR}/ragdoll/ragdoll_rig.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ragdoll/ragdoll_set.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/ragdoll/ragdoll_solver.cpp
     # renderer — fixed-function material/light/order math
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/authored_occluder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/light_runtime.cpp
@@ -278,6 +283,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_carrier.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_death.cpp         # the once-per-life death edge
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/corpse_ragdoll.cpp         # the ragdoll's death reading + collider (ADR 0060)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_slope.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/collision_force.cpp   # Entity_ApplyCollisionForce: burn state + the four force modes
     ${CMAKE_CURRENT_SOURCE_DIR}/world/infantry_attention.cpp

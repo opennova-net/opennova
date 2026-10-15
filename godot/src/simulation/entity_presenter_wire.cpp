@@ -815,6 +815,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 			"ctrl leg field table must match the row cache size");
 	const float *p = snap.ptr();
 	const int base = row.base;
+	note_ragdoll_row(model, row.handle, p, base);
 	// A row the occlusion frame's collector gate culled is not drawn: no
 	// presentation leg runs for it (the sector walk only visits collected
 	// entities; OcclusionWorld::sphere_render_visible carries the witness). Its body

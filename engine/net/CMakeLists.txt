@@ -59,6 +59,10 @@ add_library(opennova_net STATIC
     # title — each title's wire and NovaWorld identity (the in-match hello, the lobby
     # identity, the gate tag and gt.ssc) keyed by gameprofile's GameId
     ${CMAKE_CURRENT_SOURCE_DIR}/title/title_identity.cpp
+    # update — the updater's wire: UPDATE.EXE's requests to its gateway and update servers and
+    # their replies (docs/update/updater-re.md §4, ADR 0061)
+    ${CMAKE_CURRENT_SOURCE_DIR}/update/update_wire.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/update/update_server.cpp # the server side: one connection's requests answered
     # novaworld session leg — NWU session establishment above the npwire
     # framing: the client session state machine, the session-protocol
     # classifier, join identity, the lobby CU var-list codec
