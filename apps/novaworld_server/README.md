@@ -476,11 +476,14 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   servers) reads as the billing cache gone wrong, not as that many owners lapsing at
   once, so it stops none, logs `[hosted] ERROR the owners' limits held: ...` and holds
   (no limit stop, and no start refused for its place; the heartbeat's `limits_held` is 1).
-  It releases itself once a full billing reconcile has completed with the prices checking
-  out after it took its owners and a pass then finds the same owners (or some of them)
-  still past their entitlements: the cache is confirmed against Stripe, and their stops
-  apply. New owners past theirs meanwhile widen the hold, which then waits for the next
-  reconcile. An admin's override (`POST /api/admin/billing/reconcile` with
+  It releases itself once a full billing reconcile has completed after it took its
+  owners and a pass then finds the same owners (or some of them) still past their
+  entitlements: the cache is confirmed against Stripe, and their stops apply. Such a
+  reconcile has the prices checking out and every price our subscriptions sell
+  configured: a sold price missing from the `STRIPE_PRICE_*` lists grants its
+  subscribers nothing, the misconfiguration the hold is for, so while one is left
+  (`unknown_prices` in the admin view) no reconcile releases it. New owners past theirs
+  meanwhile widen the hold, which then waits for the next reconcile. An admin's override (`POST /api/admin/billing/reconcile` with
   `{"force_limits": true}`) makes the next pass apply the stops past the brake, once.
   `GET /api/admin/billing` shows it (`limits_hold`, `limits_hold_reason`,
   `limits_hold_owners`, `limits_hold_servers`), billing on or off.
@@ -916,7 +919,7 @@ compose stack takes the test-mode set from the vault through
 | `POST /api/billing/portal` | a website session, the CSRF header | 429 (the checkout bucket); 404 `no_billing_account`; 502 `stripe_unavailable`; 200 `{"url"}` |
 | `POST /api/me/billing/sync` | a website session, the CSRF header | the account's customer read back from Stripe now (the success page's, before the webhook comes); 429 past its bucket (3, then one every 10 s); 404 `no_billing_account`; 502 `stripe_unavailable`; else as `GET /api/me/billing` |
 | `POST /api/billing/webhook` | Stripe's signature | above |
-| `GET /api/admin/billing` | admin | `{"enabled", "mode" ("test" \| "live"), "prices_ok", "prices_error", "last_reconcile_at" (ISO or null), "last_reconcile_error", "pending_events", "subscriptions" (each row with an account: `user_id`, `username`, `stripe_customer_id`, `stripe_subscription_id`, `item`, `tier`, `quantity`, `status`, `entitled`, `current_period_end`, `cancel_at_period_end`), "duplicates" (account ids), "orphans" (`stripe_customer_id`, `stripe_subscription_id`, `username_hint`, `status`), "recent_events" (the newest 50: `event_id`, `type`, `received_at`, `outcome`), "limits_hold", "limits_hold_reason", "limits_hold_owners" and "limits_hold_servers" (the hosted servers' limits hold and the stops it keeps back, "Hosted servers" above)}; with billing off `{"enabled": false}` and the limits hold alone; `Cache-Control: no-store` |
+| `GET /api/admin/billing` | admin | `{"enabled", "mode" ("test" \| "live"), "prices_ok", "prices_error", "last_reconcile_at" (ISO or null), "last_reconcile_error", "pending_events", "subscriptions" (each row with an account: `user_id`, `username`, `stripe_customer_id`, `stripe_subscription_id`, `item`, `tier`, `quantity`, `status`, `entitled`, `current_period_end`, `cancel_at_period_end`), "duplicates" (account ids), "unknown_prices" (the prices of our subscriptions that would grant but that no `STRIPE_PRICE_*` list names, as the last reconcile found them), "orphans" (`stripe_customer_id`, `stripe_subscription_id`, `username_hint`, `status`), "recent_events" (the newest 50: `event_id`, `type`, `received_at`, `outcome`), "limits_hold", "limits_hold_reason", "limits_hold_owners" and "limits_hold_servers" (the hosted servers' limits hold and the stops it keeps back, "Hosted servers" above)}; with billing off `{"enabled": false}` and the limits hold alone; `Cache-Control: no-store` |
 | `POST /api/admin/billing/reconcile` | admin | no body or `{}`: a full reconcile on the worker's next pass, at once: 202 `{"reconcile": "requested", "force_limits": false}`; `{"force_limits": true}` also has the supervisor's next pass apply the stops the limits hold keeps back (`"force_limits": true`); 400 `invalid_json`, `invalid_field`; with billing off 503, but an override still applies (202 `{"reconcile": "off", "force_limits": true}`) |
 | `POST /api/admin/billing/link` | admin | `{"user_id", "stripe_customer_id"}`: the customer (an orphan's) made the account's, its metadata stamped with this instance and the account, then synced; 400 `invalid_json`, `missing_field`, `invalid_field`; 404 `not_found` (no such player, or a customer Stripe does not know); 502; 200 `{"user_id", "stripe_customer_id", "outcome"}` |
 

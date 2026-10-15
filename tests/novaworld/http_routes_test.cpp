@@ -6300,6 +6300,29 @@ int test_billing_admin(Harness &h) {
 	}
 	TEST_EXPECT(listed);
 	TEST_EXPECT(json["duplicates"].t() == crow::json::type::List && json["duplicates"].size() == 0);
+	TEST_EXPECT(json["unknown_prices"].t() == crow::json::type::List && json["unknown_prices"].size() == 0);
+
+	// A subscription of ours selling a price no list names: listed once a
+	// reconcile reads it, gone once it is canceled.
+	{
+		const auto ana = nws::get_user_by_username(*h.pool.acquire(), "bill_ana");
+		const auto ana_customer = ana ? billing::customer_of(*h.pool.acquire(), ana->id) : std::nullopt;
+		TEST_EXPECT(ana_customer.has_value());
+		const std::string unlisted = h.stripe->add_subscription(ana_customer->stripe_customer_id, "price_hunlisted", 1,
+				"active", billing::unix_now() + 30 * 86400);
+		TEST_EXPECT(h.send("POST", "/api/admin/billing/reconcile", { kBearer }).code == 202);
+		billing_pass(h);
+		json = crow::json::load(body_text(h.send("GET", "/api/admin/billing", { kBearer })));
+		TEST_EXPECT(json && json["unknown_prices"].size() == 1 && str(json["unknown_prices"][0]) == "price_hunlisted");
+		{
+			std::lock_guard<std::mutex> lock(h.stripe->mu);
+			h.stripe->subscriptions[unlisted].status = "canceled";
+		}
+		TEST_EXPECT(h.send("POST", "/api/admin/billing/reconcile", { kBearer }).code == 202);
+		billing_pass(h);
+		json = crow::json::load(body_text(h.send("GET", "/api/admin/billing", { kBearer })));
+		TEST_EXPECT(json && json["unknown_prices"].size() == 0);
+	}
 	TEST_EXPECT(!json["limits_hold"].b() && json["limits_hold_reason"].t() == crow::json::type::Null);
 	TEST_EXPECT(json["limits_hold_owners"].i() == 0 && json["limits_hold_servers"].i() == 0);
 

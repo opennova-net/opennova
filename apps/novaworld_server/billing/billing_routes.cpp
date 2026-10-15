@@ -555,6 +555,9 @@ void BillingRoutes::limits_hold_json(crow::json::wvalue &out) const {
 // completed), "pending_events" (events not synced yet), "subscriptions" (every
 // row with an account: admin_subscription_json plus user_id, username,
 // stripe_customer_id), "duplicates" (accounts with two granting tiers),
+// "unknown_prices" (the prices of our subscriptions that would grant but that
+// no STRIPE_PRICE_* list names, as the last reconcile found them: while any is
+// left no reconcile releases the limits hold),
 // "orphans" ({stripe_customer_id, stripe_subscription_id, username_hint,
 // status}), "recent_events" (the newest kEventsShown: event_id, type,
 // received_at (ISO), outcome)} with the limits hold (limits_hold_json). With
@@ -616,6 +619,13 @@ crow::response BillingRoutes::admin_billing(const crow::request &req) {
 		duplicates.push_back(std::move(d));
 	}
 	out["duplicates"] = std::move(duplicates);
+	std::vector<crow::json::wvalue> unknown_prices;
+	for (const std::string &price : status.unknown_prices) {
+		crow::json::wvalue p;
+		p = price;
+		unknown_prices.push_back(std::move(p));
+	}
+	out["unknown_prices"] = std::move(unknown_prices);
 	std::vector<crow::json::wvalue> orphans;
 	for (const Orphan &o : status.orphans) {
 		crow::json::wvalue e;

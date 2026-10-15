@@ -23,8 +23,12 @@
 //     prices are checked at every reconcile (and at the first pass): each one
 //     a recurring monthly price in the key's mode, the one each list sells
 //     active, the ones sold in one currency; else prices_ok is false and
-//     checkout refuses (503 billing_misconfigured). One that read every
-//     subscription with the prices checking out calls on_reconciled.
+//     checkout refuses (503 billing_misconfigured). A subscription of ours
+//     whose status would grant but whose price none of the lists names is
+//     listed (unknown_prices: a sold price missing from the configuration,
+//     which leaves its account with nothing). One that read every
+//     subscription with the prices checking out and no such price left calls
+//     on_reconciled.
 //   - then syncs the customers with an unprocessed event, the longest-waiting
 //     first (kPendingPerPass at most), one sync each: a customer Stripe could
 //     not be asked about waits kBackoffFirstS, doubling to kBackoffMaxS.
@@ -89,6 +93,10 @@ struct SyncStatus {
 	std::string last_reconcile_error;
 	std::vector<Orphan> orphans;
 	std::vector<int64_t> duplicates; // accounts with more than one granting tier subscription
+	// The prices of our subscriptions that would grant but sell no configured
+	// price (a sold price missing from STRIPE_PRICE_*): their accounts get
+	// nothing for them, and no reconcile confirms the cache while any is left.
+	std::vector<std::string> unknown_prices;
 	int64_t started_at = 0;          // the worker's start (or its construction)
 };
 
@@ -135,7 +143,8 @@ public:
 	BillingSync &operator=(const BillingSync &) = delete;
 
 	// Called on the worker's thread after each full reconcile that completed
-	// with the prices checking out (the hosted servers' limits hold,
+	// with the prices checking out and no subscription of ours selling a price
+	// the configuration does not name (the hosted servers' limits hold,
 	// hosted/limits_hold.h, trusts the cache after one). Set before start().
 	void set_on_reconciled(std::function<void()> on_reconciled) { on_reconciled_ = std::move(on_reconciled); }
 

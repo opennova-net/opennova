@@ -362,7 +362,8 @@ int test_price_validation() {
 // on_reconciled (the hosted servers' limits hold trusts the cache after it):
 // called after a reconcile that read every subscription with the prices
 // checking out, and after no other: not when Stripe could not be asked, not
-// when a price is wrong.
+// when a price is wrong, not while a subscription of ours sells a price the
+// configuration does not name (listed in unknown_prices).
 int test_on_reconciled() {
 	Rig rig;
 	int calls = 0;
@@ -383,6 +384,23 @@ int test_on_reconciled() {
 	rig.sync->request_reconcile();
 	rig.sync->pass(++rig.now);
 	TEST_EXPECT(rig.sync->status().prices_ok && calls == 2);
+	TEST_EXPECT(rig.sync->status().unknown_prices.empty());
+
+	// A subscription of ours selling a price no list names (one sold, then
+	// left out of the configuration): listed, and no confirmation while it
+	// would grant; canceled, the next reconcile confirms again.
+	const int64_t ana = rig.player("onr_ana");
+	const std::string cus = rig.customer(ana, "onr_ana");
+	const std::string sub = rig.fake.add_subscription(cus, "price_unlisted", 1, "active", rig.now + kMonth);
+	TEST_EXPECT(rig.sync->reconcile_all(++rig.now).completed && rig.sync->status().prices_ok);
+	TEST_EXPECT(rig.sync->status().unknown_prices == std::vector<std::string>{ "price_unlisted" } && calls == 2);
+	TEST_EXPECT(rig.entitlement(ana).max_servers == 0);
+	{
+		std::lock_guard<std::mutex> lock(rig.fake.mu);
+		rig.fake.subscriptions[sub].status = "canceled";
+	}
+	TEST_EXPECT(rig.sync->reconcile_all(++rig.now).completed);
+	TEST_EXPECT(rig.sync->status().unknown_prices.empty() && calls == 3);
 	return 0;
 }
 

@@ -434,9 +434,16 @@ ReconcileReport BillingSync::reconcile_all(int64_t now) {
 	// The accounts paying for two tiers at once (a second checkout raced the
 	// first, or a subscription made by hand).
 	std::map<int64_t, int> granting_tiers;
+	// Ours that would grant but sell a price no list names: a sold price
+	// missing from the configuration, which grants its account nothing.
+	std::set<std::string> unknown;
 	for (const SubscriptionRow &row : list_subscriptions(db)) {
 		if (row.user_id && row.item == ItemKind::Tier && subscription_grants(row, now)) ++granting_tiers[*row.user_id];
+		if (row.user_id && row.item == ItemKind::Unknown && status_grants(row.status) && row.current_period_end &&
+				now < *row.current_period_end + kPeriodNetSeconds)
+			unknown.insert(row.price_id);
 	}
+	const std::vector<std::string> unknown_prices(unknown.begin(), unknown.end());
 	std::vector<int64_t> duplicates;
 	for (const auto &[user, count] : granting_tiers) {
 		if (count > 1) duplicates.push_back(user);
@@ -448,6 +455,7 @@ ReconcileReport BillingSync::reconcile_all(int64_t now) {
 		std::lock_guard<std::mutex> lock(status_mu_);
 		status_.orphans = std::move(orphans);
 		status_.duplicates = duplicates;
+		status_.unknown_prices = unknown_prices;
 		prices_ok = status_.prices_ok;
 		if (whole) {
 			status_.last_reconcile_at = now;
@@ -462,8 +470,16 @@ ReconcileReport BillingSync::reconcile_all(int64_t now) {
 				"again, %zu canceled, %zu orphan(s), %zu account(s) with two tiers\n",
 			report.listed, report.written, report.customers_recreated, report.canceled, report.orphans,
 			duplicates.size());
-	// The cache now matches Stripe, read whole under prices that check out.
-	if (whole && prices_ok && on_reconciled_) on_reconciled_();
+	if (!unknown_prices.empty()) {
+		std::string list;
+		for (const std::string &p : unknown_prices) list += (list.empty() ? "" : ", ") + loggable(p, 80);
+		std::fprintf(stderr, "[billing] WARN reconcile: subscription(s) of ours sell a price no STRIPE_PRICE_* list "
+							 "names (%s): their accounts get nothing for them, and the cache is not confirmed\n",
+				list.c_str());
+	}
+	// The cache now matches Stripe, read whole under prices that check out and
+	// name every price ours sell.
+	if (whole && prices_ok && unknown_prices.empty() && on_reconciled_) on_reconciled_();
 	return report;
 }
 
