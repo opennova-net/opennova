@@ -1,5 +1,5 @@
-// The NovaWorld service's HTTP routes, driven in-process: a SQLite file in the
-// run's temp directory under backend/migrations (plus the games seed), the
+// The NovaWorld service's HTTP routes, driven in-process: a database of the
+// run's own (common/test_database.h: backend/migrations plus the games seed), the
 // Crow HttpListener from opennova_novaworld_server_core on port 0 (the OS
 // picks; the harness reads the port back from bound_port()), and requests sent
 // through apps/common's http_exchange to 127.0.0.1. Built only
@@ -19,10 +19,7 @@
 //
 // The listener and the test share one db::ConnectionPool, the way main() wires
 // the server: each Crow handler leases a connection for its request, and the
-// test thread leases its own for every direct read or write. A file rather
-// than a shared-cache in-memory URI: Crow runs handlers on several threads at
-// once, and shared cache's SQLITE_LOCKED skips the busy timeout a WAL file's
-// writers wait on.
+// test thread leases its own for every direct read or write.
 
 #include "admin_tcp_server.h"
 #include <net/title/title_identity.h>
@@ -54,7 +51,7 @@
 #include <net/napi/session.h>
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/connection/manager.h>
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/gsb.h>
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/http_login.h>
@@ -63,6 +60,7 @@
 
 #include "common/file_io.h"
 #include "common/temp_dir.h"
+#include "common/test_database.h"
 #include "common/test_expect.h"
 
 #include <algorithm>
@@ -744,7 +742,7 @@ int test_me_requires_live_session(Harness &h) {
 	TEST_EXPECT(header_values(reply, "Set-Cookie").empty()); // fresh: nothing to renew
 
 	h.pool.acquire()->exec(
-			"UPDATE web_sessions SET expires_at = datetime('now', '-1 seconds') "
+			"UPDATE web_sessions SET expires_at = (now() + interval '-1 seconds') "
 			"WHERE token_hash = $1;",
 			{opennova::db::BindValue(nws::web_session_token_hash(token))});
 	reply = h.send("GET", "/api/me", {with_session(token)});
@@ -764,8 +762,8 @@ int test_session_slides(Harness &h) {
 	TEST_EXPECT(!token.empty());
 	auto age = [&h, &token](const char *last_seen) {
 		h.pool.acquire()->exec(
-				std::string("UPDATE web_sessions SET last_seen_at = datetime('now', '") + last_seen +
-						"'), expires_at = datetime('now', '+1 days') WHERE token_hash = $1;",
+				std::string("UPDATE web_sessions SET last_seen_at = (now() + interval '") + last_seen +
+						"'), expires_at = (now() + interval '+1 days') WHERE token_hash = $1;",
 				{opennova::db::BindValue(nws::web_session_token_hash(token))});
 	};
 
@@ -774,14 +772,14 @@ int test_session_slides(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	TEST_EXPECT(header_value(reply, "Set-Cookie") ==
 	            std::string(nws::kWebSessionCookie) + "=" + token + kCookieTail);
-	TEST_EXPECT(session_scalar(h, token, "expires_at > datetime('now', '+29 days')") == 1);
-	TEST_EXPECT(session_scalar(h, token, "last_seen_at >= datetime('now', '-5 seconds')") == 1);
+	TEST_EXPECT(session_scalar(h, token, "expires_at > (now() + interval '+29 days')") == 1);
+	TEST_EXPECT(session_scalar(h, token, "last_seen_at >= (now() + interval '-5 seconds')") == 1);
 
 	age("-10 seconds");
 	reply = h.send("GET", "/api/me", {with_session(token)});
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	TEST_EXPECT(header_values(reply, "Set-Cookie").empty());
-	TEST_EXPECT(session_scalar(h, token, "expires_at < datetime('now', '+2 days')") == 1);
+	TEST_EXPECT(session_scalar(h, token, "expires_at < (now() + interval '+2 days')") == 1);
 
 	// A player's session refused by an admin route still slid.
 	age("-120 seconds");
@@ -789,7 +787,7 @@ int test_session_slides(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 403);
 	TEST_EXPECT(header_value(reply, "Set-Cookie") ==
 	            std::string(nws::kWebSessionCookie) + "=" + token + kCookieTail);
-	TEST_EXPECT(session_scalar(h, token, "expires_at > datetime('now', '+29 days')") == 1);
+	TEST_EXPECT(session_scalar(h, token, "expires_at > (now() + interval '+29 days')") == 1);
 	return 0;
 }
 
@@ -1308,13 +1306,9 @@ int test_untrusted_proxy_header_ignored(Harness &h) {
 // generation.
 constexpr uint32_t kConcurrentRid = 2000;
 constexpr int kConcurrentRegistrations = 16;
-// The host writes run back to back, each re-taking the write lock moments after
-// the last COMMIT, and SQLite's busy handler polls (1 ms sleeps growing to
-// 100 ms) rather than queueing, so a registration's BEGIN IMMEDIATE can starve
-// behind the whole run. The pool keeps the server's busy timeout, so that run
-// must fit inside it: at synchronous=FULL every commit fsynced the WAL, and on
-// a loaded disk (WSL2's, under a parallel build) the run once outlasted 5 s
-// and 13 of the 16 registrations failed "database is locked".
+// The host writes run back to back, each taking the writer lock moments after
+// the last COMMIT; a registration's Transaction queues on that lock between
+// them, within the server's own lock timeout, which the pool keeps.
 constexpr int kHostGenerations = 40;
 // The case checks that the replies are each request's own and consistent, not
 // how fast they come: the bcrypt registrations queue behind Crow's few workers
@@ -4054,14 +4048,14 @@ int test_login_row_kept_alive(Harness &h) {
 	const std::string tag = "LOGINSESSIONTAG=" + set_cookie_value(logged_in, "LOGINSESSIONTAG");
 	auto age = [&h, id](const char *ago) {
 		h.pool.acquire()->exec(
-				std::string("UPDATE active_user_sessions SET last_seen_at = datetime('now', '") +
+				std::string("UPDATE active_user_sessions SET last_seen_at = (now() + interval '") +
 						ago + "') WHERE user_id = $1;",
 				{ opennova::db::BindValue(id) });
 	};
 	auto fresh_row = [&h, id] {
 		return !h.pool.acquire()
 						->query("SELECT 1 FROM active_user_sessions WHERE user_id = $1 "
-								"AND last_seen_at >= datetime('now', '-5 seconds');",
+								"AND last_seen_at >= (now() + interval '-5 seconds');",
 								{ opennova::db::BindValue(id) })
 						.empty();
 	};
@@ -4115,9 +4109,9 @@ int test_host_tag_serves_once(Harness &h) {
 }
 
 // A database failure's reply is its error code and nothing else: the
-// SqliteError's text names the failing statement ("exec: INSERT INTO players
-// ..."), its extended code and its wait, and goes to the server log alone. A
-// trigger fails each route's write the way any SqliteError does: POST
+// db::Error's text names its SQLSTATE, the server's message and the failing
+// statement ("— INSERT INTO players ..."), and goes to the server log alone. A
+// trigger fails each route's write the way any db::Error does: POST
 // /api/register (the public route, create_user's db_error), PUT
 // /api/admin/server-status and POST /api/admin/hosts (its upsert_failed).
 // Nothing lands.
@@ -4127,9 +4121,11 @@ int test_db_failure_reply_carries_code_alone(Harness &h) {
 		{ "harness_fail_server_status", "server_status" },
 		{ "harness_fail_active_hosts", "active_hosts" },
 	};
+	h.pool.acquire()->exec("CREATE FUNCTION harness_fail() RETURNS trigger LANGUAGE plpgsql AS "
+						   "$$BEGIN RAISE EXCEPTION 'harness forced failure'; END$$;");
 	for (const auto &t : triggers) {
 		h.pool.acquire()->exec(std::string("CREATE TRIGGER ") + t[0] + " BEFORE INSERT ON " + t[1] +
-				" BEGIN SELECT RAISE(ABORT, 'harness forced failure'); END;");
+				" FOR EACH ROW EXECUTE FUNCTION harness_fail();");
 	}
 	auto refused = [](const net::HttpReply &reply, const char *want) {
 		if (reply.transport_ok && reply.code == 500 && body_text(reply) == want)
@@ -4150,7 +4146,8 @@ int test_db_failure_reply_carries_code_alone(Harness &h) {
 			"{\"error\":\"upsert_failed\"}"));
 
 	for (const auto &t : triggers)
-		h.pool.acquire()->exec(std::string("DROP TRIGGER ") + t[0] + ";");
+		h.pool.acquire()->exec(std::string("DROP TRIGGER ") + t[0] + " ON " + t[1] + ";");
+	h.pool.acquire()->exec("DROP FUNCTION harness_fail();");
 	TEST_EXPECT(nws::list_users(*h.pool.acquire()).size() == users_before);
 	TEST_EXPECT(nws::get_server_status(*h.pool.acquire()).message == status_before.message);
 	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM active_hosts WHERE rid = 4343;").empty());
@@ -5385,27 +5382,21 @@ int run(Harness &h) {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
 	TEST_EXPECT(net::startup() == 0);
 	int rc = 1;
 	{
 		const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
-		// Declared first, so it outlives the pool and the listener: the database
-		// file and its WAL siblings go only once every connection is closed.
+		// Declared first, so they outlive the pool and the listener.
 		test_temp::TempDir temp("http_routes");
-		// The server's own busy timeout (kDefaultBusyTimeoutMs), unlike
-		// db_concurrency_test's stress margin: a write that holds the lock past
+		// Migrated, then the games seed alone: no dev users, so the players
+		// table starts empty.
+		test_db::TestDatabase database({ /*migrate=*/true, /*seed_games=*/true });
+		// The server's own lock timeout (kDefaultLockTimeoutMs), unlike
+		// db_concurrency_test's stress margin: a write that waits on a lock past
 		// it fails here as it would in production.
-		ConnectionPool pool(temp.path / "novaworld.db");
-		{
-			auto boot = pool.acquire();
-			const auto migrated =
-					opennova::db::run_migrations(*boot, source_dir / "backend" / "migrations");
-			TEST_EXPECT(!migrated.applied.empty());
-			// The games seed alone: no dev users, so the players table starts empty.
-			boot->exec_script(test_io::read_file_text(
-					(source_dir / "backend" / "seed" / "0001_games.sql").string()));
-		}
+		ConnectionPool pool(database.options());
 
 		nws::ServerConfig config;
 		config.public_host = "127.0.0.1";

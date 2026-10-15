@@ -175,7 +175,7 @@ void Supervisor::tick(uint64_t now_ms) {
 		}
 		try {
 			step(db, s, rt, now_ms);
-		} catch (const db::SqliteError &e) {
+		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[hosted] WARN server %lld: %s\n", static_cast<long long>(s.id), e.what());
 		}
 	}
@@ -185,7 +185,7 @@ void Supervisor::tick(uint64_t now_ms) {
 	if (admin_links_ != nullptr) {
 		try {
 			sync_admin_links(db);
-		} catch (const db::SqliteError &e) {
+		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[hosted] WARN admin links: %s\n", e.what());
 		}
 	}

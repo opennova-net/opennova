@@ -4,7 +4,7 @@
 -- fetches and the game its listings land under. Applied at every boot after
 -- the migrations, so a row added here reaches every database. Idempotent via
 -- ON CONFLICT DO NOTHING on the UNIQUE slug and gate_tag: a row already present
--- is left as it is (migration 0013 brings the older rows' values up to these).
+-- is left as it is (a change to one is a migration's UPDATE).
 --
 -- `title` is the engine's game profile code the row's clients speak
 -- (engine/base/gameprofile). `startup_query` is the startupurl after

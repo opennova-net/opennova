@@ -16,7 +16,7 @@
 // machine at 127.0.0.1.
 //
 // Secrets. The child gets an environment of its own, kServeEnvironment's
-// variables alone, so none of the service's (ADMIN_API_TOKEN, DATABASE_PATH,
+// variables alone, so none of the service's (ADMIN_API_TOKEN, DATABASE_PASSWORD,
 // every ONNET_*) reaches it. The spec's secret files (the host file with its
 // game password, admin.cfg, the credentials) are written owner-only: mode
 // 0600 in a 0700 directory on POSIX; on Windows a protected DACL granting the

@@ -11,7 +11,7 @@ docs/dev-env-vars.md is the registry. After the 2026-08 cut the whole set is:
                           launch default;
                           scripts/ci/test_suites.py validates root availability
   GODOT_BIN               the scripts' Godot binary
-  the deployed service    ONNET_*, DATABASE_PATH, ADMIN_*, ... under
+  the deployed service    ONNET_*, DATABASE_URL, ADMIN_*, ... under
                           apps/novaworld_server, deploy, web, backend, infra
   OS variables            TEMP/TMP/APPDATA/HOME/... at their known sites
 

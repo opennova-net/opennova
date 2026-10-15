@@ -1,7 +1,7 @@
 # NovaWorld server
 
-The standalone NovaWorld server: one process, three listeners, one SQLite
-database. Implements the matchmaking/backend half of NovaWorld (the gate, the
+The standalone NovaWorld server: one process, three listeners, one PostgreSQL
+database ("Database" below). Linux only: it ships as its container image. Implements the matchmaking/backend half of NovaWorld (the gate, the
 session handshake, the browser/host/play container services, and the legacy
 `NW*.dll` HTTP flow). Protocol record: [`docs/net/novaworld-net-re.md`](../../docs/net/novaworld-net-re.md).
 
@@ -23,34 +23,24 @@ session handshake, the browser/host/play container services, and the legacy
   `NwUdpListener`'s `lobby_states_` map (guarded by `lobby_states_mu_`); the
   higher-level invariants (the per-peer session-state map, the unknown
   accumulator) carry their own mutexes.
-- **Every thread has its own SQLite connection.** A `db::Database` is used by one
-  thread at a time: its last insert id, its error text and any open transaction
+- **Every thread has its own database connection.** A `db::Database` is used by
+  one thread at a time: its row counts, its error text and any open transaction
   belong to the connection. `main()` owns one `db::ConnectionPool` on
-  `DATABASE_PATH`; the main thread and the gate and NW UDP receive threads each
-  hold a connection for their lifetime (the listeners lease theirs in `start()`,
-  so a database that cannot be opened stops the boot), each HTTP request leases
-  one for the handler, and `erase_lobby_state` (run from the NW UDP thread and
-  from the main thread's `on_lost`) leases one per call. The database is WAL, so
-  connections read while one writes, and the 5 s busy timeout makes a second
-  writer wait. Every connection runs `synchronous=NORMAL`: under WAL the WAL
-  syncs before each checkpoint, not at every commit, so most commits hold the
-  write lock across no fsync (the exception is the first commit after each WAL
-  restart, which syncs the new WAL header). Back-to-back writers no longer pay
-  a loaded disk's fsync each, which at `FULL` could add up past a waiting
-  writer's busy timeout (SQLite's busy handler polls rather than queues). The
-  file stays consistent; a power loss or OS crash can roll back the last
-  commits before it, which the disposable service database accepts. A
-  `db::SqliteError` carries sqlite's extended code and, for a busy or locked
-  statement, how long its failing prepare or step ran, so a busy timeout
-  that ran out (`[extended 5, after 5003 ms]`) reads apart from a lock sqlite
-  refused at once (`[extended 517, after 0 ms]`, `SQLITE_BUSY_SNAPSHOT`). Its
-  text also names the failing statement, so it goes to the server log alone:
-  a reply to a database failure carries only its error code (`db_error`). A
-  write that spans statements (`clear_all`, `replace_roster`,
+  `DATABASE_URL` (at most `DATABASE_POOL_MAX` connections); the main thread and
+  the gate and NW UDP receive threads each hold a connection for their lifetime
+  (the listeners lease theirs in `start()`, so a database that cannot be reached
+  stops the boot), each HTTP request leases one for the handler, and
+  `erase_lobby_state` (run from the NW UDP thread and from the main thread's
+  `on_lost`) leases one per call. A `db::Error` carries the server's SQLSTATE
+  (`unique_violation()`, `lock_timeout()`, `connection_lost()`) and its text
+  names the failing statement, never a bound value, so it goes to the server
+  log alone: a reply to a database failure carries only its error code
+  (`db_error`). A write that spans statements (`clear_all`, `replace_roster`,
   `apply_status_blob`, the lobby's host row with its roster, a registration's
-  checks and insert) is one `db::Transaction`, and a read that spans them
-  (`/api/hosts` and the `.gsb` feeds: the rows, then each roster) is one
-  `db::ReadSnapshot`, so a host never goes out beside another write's roster.
+  checks and insert) is one `db::Transaction`, which holds the writer lock
+  ("Database" below), and a read that spans them (`/api/hosts` and the `.gsb`
+  feeds: the rows, then each roster) is one `db::ReadSnapshot`, so a host never
+  goes out beside another write's roster.
 - **The hosted servers' supervisor runs on a thread of its own** (with
   `ONNET_HOSTED_PROVIDER` set; "Hosted servers" below), started once the gate has its
   port and stopped before the listeners, so the local provider's servers deregister
@@ -85,7 +75,7 @@ session handshake, the browser/host/play container services, and the legacy
   held-open request included), then the gate and NW UDP receive threads (each
   returns its lease), then the connections (`Shutdown`). As `main()` returns, its
   locals go in reverse declaration order, so the main lease and then the pool
-  (declared first) close last, and the last close checkpoints the WAL. The HTTP
+  (declared first) close last. The HTTP
   listener clears Crow's own signal set (`signal_clear()`), which would otherwise
   take both signals and stop only Crow.
 
@@ -93,8 +83,8 @@ session handshake, the browser/host/play container services, and the legacy
 
 Each `games` row is a lobby ([`catalog_repository.h`](catalog_repository.h)). The rows
 are `backend/seed/0001_games.sql`'s, which every boot applies after the migrations
-(`INSERT OR IGNORE`, so a row added there reaches every database at its next boot);
-migration 0013 adds `title`, the engine's game profile code the row's clients speak
+(`ON CONFLICT DO NOTHING`, so a row added there reaches every database at its next
+boot); `title` is the engine's game profile code the row's clients speak
 (`engine/base/gameprofile`), and the gate's per-row answer (`startup_query`,
 `glsvss_*`).
 
@@ -120,7 +110,7 @@ expansion.
   service's address in the `startupurl` where the live one has `[domainname]`; its
   `TimeOnGateServer`, a key no client reads, is not sent. A tag no row (nor the alias)
   answers to gets no reply, and the unknown tracker records it. The gate reads the table
-  once in `start()`, so its receive thread never touches SQLite for a probe; a change to
+  once in `start()`, so its receive thread never touches the database for a probe; a change to
   the table takes a restart.
 - **Listings** carry the LobbyName the gate gave their host (`active_hosts.game`), so a
   host lands in its own game: `/api/lobbies` groups the hosts by it (one group per row),
@@ -280,7 +270,7 @@ HostKey is unwitnessed.
 
 - **The key.** `/NWHost.dll`'s first call mints the 48-letter A..P key (24 OS CSPRNG
   bytes, a nibble each) and, when the request's own retail login names an account,
-  records the key for it in `host_keys` (migration `0009_host_keys.sql`), as its
+  records the key for it in `host_keys`, as its
   SHA-256 only, the way `web_sessions` keeps its tokens. The account is the one the
   request's `LOGINSESSIONTAG` cookie names while that retail login's
   `active_user_sessions` row lives (a stock client sends its whole cookie jar on every
@@ -360,7 +350,7 @@ statements to a listed server" above).
 
 An account an admin approved (`players.can_host`) can have the service run one
 `opennova-serve` for it, on a machine of its own, until it stops it (ADR 0053, proposed;
-`hosted/`, migrations `0011_hosted_servers.sql` and `0014_hosted_server_game.sql`). Each
+`hosted/`; the `hosted_servers` and `hosted_server_events` tables). Each
 server runs one data set its owner picks. Everything here is service policy.
 
 - **Data sets** (`hosted/data_sets.*`). A data set is a game folder a machine mounts, the
@@ -374,8 +364,8 @@ server runs one data set its owner picks. Everything here is service policy.
   2's the same but 2..100 players, its host screen's cap; OpenNova's Joint Operations').
   A deployment offers the ones its provider has the
   data of (`ONNET_HOSTED_DATA_SETS`, `ONNET_HOSTED_EC2_LAUNCH_TEMPLATES`, below); with
-  none, hosting is off. A start names one (`hosted_servers.game`, the games slug; the
-  rows from before 0014 ran Joint Operations' data), and a server whose data set is no
+  none, hosting is off. A start names one (`hosted_servers.game`, the games slug), and
+  a server whose data set is no
   longer offered fails at its next launch (no restart mends that).
 
 - **The rows.** `hosted_servers` holds one row per start: its owner, its service account,
@@ -449,7 +439,7 @@ server runs one data set its owner picks. Everything here is service policy.
   fails leaves the server running without its console, as retail ignores its listen's
   result (`opennova-serve` keeps that); the supervisor's health check, which counts the
   admin link, then restarts the server.
-- **The console** is `hosted_server_console` (migration `0012_hosted_server_console.sql`),
+- **The console** is the table `hosted_server_console`,
   a capped ring of each server's newest 500 lines: the commands the routes ask a link to
   record (with their sender, `owner`, `admin` or `service`), each reply packet, and the
   link's own status lines (the session up, lost or refused, closed, and the server's scene
@@ -524,7 +514,8 @@ server runs one data set its owner picks. Everything here is service policy.
   `console.log` there, listing on this service over loopback with free loopback ports.
   Its environment is an allowlist (`PATH`, `HOME`, `LANG`, `LC_*`, `TZ`, `TMPDIR`; on
   Windows `PATH`, `SystemRoot`, `SystemDrive`, `windir`, `TEMP`, `TMP`), so none of the
-  service's own variables (`ADMIN_API_TOKEN`, `DATABASE_PATH`, every `ONNET_*`) reaches
+  service's own variables (`ADMIN_API_TOKEN`, `DATABASE_URL`, `DATABASE_PASSWORD`, every
+  `ONNET_*`) reaches
   it. Its secret files are deleted once the process has ended (`console.log` stays);
   what `opennova-serve` writes there itself (`admin_log.txt` with the admin password,
   as retail's, and `game.cfg` with the game password) is covered only by the directory.
@@ -679,7 +670,9 @@ so a map load stalls it). So that the console never takes every thread from the 
 pages, the `.gsb` feeds and the logins:
 - the HTTP listener runs `max(hardware_concurrency(), 8)` handler threads
   (`HttpListener::handler_threads`; Crow v1.2.0 runs `concurrency - 1` of them beside its
-  acceptor). The SQLite pool grows to the peak of concurrent leases, which this bounds;
+  acceptor). Each holds a pooled connection for its request; the pool opens at most
+  `DATABASE_POOL_MAX` of them, and a lease past that waits (up to 30 s) for one to come
+  back;
 - each account (each admin session; the Bearer token as one) has at most one console
   request in flight: a second answers 429 `console_busy` at once, with no wait and no
   token drawn;
@@ -732,7 +725,8 @@ empty `NWCDKIID` / `NWCDKIIDEXP1`. DFX2's boot and STARTUP menu gate on a regist
 `CDKIID` that NovaLogic's (now dead, `NWNODB01`) service handed out as the `NWACT`
 browser variable, and its LAN host checks the wire `CDKIID` that value decodes to
 (DFX2-13, codes 10 to 13). The codec is `engine/net/novacrypto/cdkey.h`; the keys are
-`cd_keys.h` (migration 0015) and the routes `cd_key_routes.h`.
+`cd_keys.h` (the `cd_keys` and `cd_key_activations` tables) and the routes
+`cd_key_routes.h`.
 
 - **A key** is its serial, `DFX2-XXXX-XXXX-XXXX-XXXX` (64 bits from the OS CSPRNG, the
   service's own format: NovaLogic's issuer is unwitnessed), and its wire key, the serial
@@ -773,8 +767,8 @@ browser variable, and its LAN host checks the wire `CDKIID` that value decodes t
   is `/admin/cd-keys`.
 
 Tests: `cdkey` (the codec, the RE record's section 9.7 vectors, the LAN join codes),
-`cd_keys` (the keys and activations on a migrated in-memory database, every build),
-`backend_schema` (0015 on a fresh database and over one at 0014), and the route harness's
+`cd_keys` (the keys and activations on a migrated database of their own),
+`backend_schema` (the tables and their indexes as the baseline makes them), and the route harness's
 `cd_key_routes` and `dfx2_activation` cases (the admin routes, and a DFX2 client's whole
 activation through `NWStart.dll` and `NWLogin.dll`, its NWACT read back to the account's
 wire key).
@@ -796,7 +790,8 @@ answers.
 ## Configuration
 
 All via environment (`server_config.cpp`): `ONNET_PUBLIC_HOST`,
-`ONNET_{GATE_UDP,NW_UDP,HTTP}_PORT`, `DATABASE_PATH`, `MIGRATIONS_DIR`, `SEED_DIR`,
+`ONNET_{GATE_UDP,NW_UDP,HTTP}_PORT`, `DATABASE_URL`, `DATABASE_PASSWORD`,
+`DATABASE_POOL_MAX` ("Database" below), `MIGRATIONS_DIR`, `SEED_DIR`,
 `TEMPLATES_DIR`, `STATIC_DIR`, `WEB_DIST_DIR`,
 `TICK_INTERVAL_MS`, `HOST_SWEEP_INTERVAL_MS`, `HOST_STALE_WINDOW_MS`,
 `ADMIN_API_TOKEN`. Gate extras (all optional): the MET endpoint
@@ -826,18 +821,49 @@ The website's sessions (next section) take four more:
 | `ONNET_API_PROXY_ONLY` | off | `1` answers every `/api` request (`/api` and everything under it, a route or not) with 403 `{"error":"proxy_required"}` unless its TCP peer is one of `ONNET_TRUSTED_PROXIES`, so the website's API is reached only through the proxy that applies the edge checks, never straight on the HTTP port. The retail routes a stock client reaches on that port directly (the `NW*.dll` pages, the `.gsb` feeds, the templates and static files) stay open. Prod sets it (`deploy/env/app.prod.env`): its nginx reaches the server from `127.0.0.1`, the one trusted proxy. With it on and no trusted proxy, every `/api` request is refused (logged at boot). Leave it off for the dev site. |
 | `ONNET_BOOTSTRAP_ADMIN` | none | An existing account's username, given the `admin` role at boot while no account is an admin; with an admin present it does nothing (logged either way, a name no account has is a warning). How the first site admin is made; later ones through `PUT /api/admin/users/<id>` `{"role":"admin"}`. Pass it through the vault-injected secrets file, never a committed one, and remove it once it ran (DEPLOY.md). |
 
-Migrations: each boot applies the `backend/migrations` files (`MIGRATIONS_DIR`) that
-`_schema_migrations` does not name yet. It goes by file name only, so a migration
-edited in place never runs again on an existing database. The service database is
-disposable: a PR that edits one says "the service DB must be reset" in its notes, and
-its deploy is `./deploy/run.sh app reset-db` ([DEPLOY.md](../../DEPLOY.md),
-"Resetting the service database").
+## Database
+
+PostgreSQL 17, reached through libpq
+([`engine/net/novaworld/db/database.h`](../../engine/net/novaworld/db/database.h), the
+`opennova_pq` target the service alone links). In prod it is a managed instance (RDS);
+locally, the dev compose stack's `postgres` service or `scripts/dev_postgres.sh up`.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `DATABASE_URL` | `postgresql://novaworld@127.0.0.1:5432/novaworld` | A libpq connection URI: host, port, role, database and options. Against RDS it carries `sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem`, the CA bundle the image pins ([`Dockerfile`](Dockerfile)). Not a secret: the boot log prints it, a password in it masked. |
+| `DATABASE_PASSWORD` | none | The role's password, kept apart from the URI because it is a secret (the vault's). Unset, libpq's own sources apply (a password in the URI, `~/.pgpass`). |
+| `DATABASE_POOL_MAX` | `16` | The most connections the server opens. A thread that needs one past them waits up to 30 s for a lease to come back, then its request fails `db_error`. |
+
+- **The database itself** is made with the SQL_ASCII encoding and the C locale
+  (`CREATE DATABASE ... TEMPLATE template0 ENCODING 'SQL_ASCII' LC_COLLATE 'C'
+  LC_CTYPE 'C'`), and the server refuses to migrate any other: a retail client's text
+  (a server name, a roster, a player name) arrives in its code page and is stored and
+  handed back byte for byte, and text sorts byte by byte ([`backend/README.md`](../../backend/README.md)).
+- **Each connection** runs in UTC (a time reads `YYYY-MM-DD HH:MM:SS`, as the JSON
+  routes send it) with a 5 s lock timeout, a 15 s statement timeout and a 60 s limit on
+  sitting idle inside a transaction. A connection the network or the server dropped is
+  reopened before its next statement when it held no transaction; a failed statement is
+  never retried.
+- **One writer at a time.** A `db::Transaction` takes a database-wide advisory lock
+  (the writer lock) after its `BEGIN` and holds it to its end, so a check and the write
+  it decides (the hosted servers' cap, a registration's duplicate checks, the status
+  blob's read-modify-write, a CD key's assignment, the first admin) never interleave
+  with another transaction's, across processes too. Waiting for it past the lock
+  timeout fails the write. Nothing slow runs inside one (bcrypt, the AWS CLI): every
+  other writer would wait on it. A `db::ReadSnapshot` is `REPEATABLE READ, READ ONLY`:
+  its reads see one snapshot and take no lock.
+- **Migrations.** Each boot applies the `backend/migrations` files (`MIGRATIONS_DIR`)
+  that `_schema_migrations` does not name yet, each in its own transaction, recording
+  its SHA-256, then the seeds (`SEED_DIR`), all under a second advisory lock, so two
+  servers booting at once apply each file once. Migrations are append-only: a recorded
+  file whose SHA-256 has changed stops the boot, so a fix is a new file
+  ([`backend/README.md`](../../backend/README.md)).
 
 ## Website sessions and roles
 
 The NovaWorld site logs players in with their NovaWorld account (`web_access.*`,
-`web_session.*`, `rate_limiter.*`, `http_json.h`; migrations
-`0008_web_sessions_and_roles.sql` and `0010_credentials_generation.sql`). The retail
+`web_session.*`, `rate_limiter.*`, `http_json.h`; the tables `web_sessions` and
+`login_addresses`, and `players.role` and `players.credentials_gen`). The retail
 `NW*.dll` login keeps its own flow and shares only the login brake's per-username cap,
 the known addresses and the credentials generation below.
 
@@ -859,7 +885,7 @@ the known addresses and the credentials generation below.
 - **Revocation.** A deleted player takes its sessions and its known login addresses.
   An admin password reset or a status other than `active` (`PUT
   /api/admin/users/<id>`) moves the account's credentials generation
-  (`players.credentials_gen`, migration 0010) and deletes its website sessions, its
+  (`players.credentials_gen`) and deletes its website sessions, its
   retail login's `active_user_sessions` row and its hosting keys in the same
   transaction (a server it listed loses its owner at its next refresh; "Listed servers
   and owners"), and the HTTP layer drops the retail login's
@@ -870,7 +896,7 @@ the known addresses and the credentials generation below.
   per-(username, address) bucket still brakes a guesser at one of them. A session
   whose account went inactive any other way is refused and deleted when next used. An
   empty status is refused, by the update (400 `invalid_field`) and by the schema (a
-  `CHECK` in migration 0003), so `active` alone is active everywhere.
+  `CHECK` on `players.account_status`), so `active` alone is active everywhere.
 - **The credentials generation.** A login reads the account's generation with its
   password hash, before bcrypt runs, and everything it then grants is written only
   while the account is still at it, tested by the insert itself: the website session
@@ -987,13 +1013,26 @@ since the gate reads it too. The route harness, ctest
 drives the Crow listener in-process on port 0 (the port it reads back from
 `bound_port()`, and the port a rendered page's `HOST_URL` / `GSB_SERVER` carry)
 over a `db::ConnectionPool`
-on a SQLite file under `backend/migrations`, with `apps/common`'s `http_exchange`. It exists only
+on a database of its own under `backend/migrations`, with `apps/common`'s `http_exchange`. It exists only
 with `BUILD_NOVAWORLD_HTTP=ON` and runs in `net-linux.yml` and `ci.yml`'s
-test-linux. The ctest `opennova_novaworld_server_signal_shutdown`
+test-linux. Every test that opens a database (ctest label `pg`, registered through
+`opennova_add_pg_test` in
+[`tests/novaworld/service_tests.cmake`](../../tests/novaworld/service_tests.cmake))
+makes its databases on the PostgreSQL server `-DOPENNOVA_TEST_PG=<uri>` names, one per
+case (`nwt_<pid>_<n>`, made SQL_ASCII with the C locale and dropped after it;
+[`tests/common/test_database.h`](../../tests/common/test_database.h)); with none it prints
+`SKIP: needs a PostgreSQL server` and exits 77, which `--suite core` counts as a failure.
+`scripts/dev_postgres.sh up` prints the value for a local server, and the Linux CI jobs
+run one beside the build. The ctest `db`
+([`tests/novaworld/db_test.cpp`](../../tests/novaworld/db_test.cpp)) drives the wrapper
+itself: the binds and the types they read back as, errors and their SQLSTATE, savepoints,
+read snapshots, the pool's limit, the writer lock, the lock timeout, a reconnect, and the
+migration runner (its records, a failed file rolled back, a changed file refused). The
+ctest `opennova_novaworld_server_signal_shutdown`
 ([`tests/novaworld/server_signal_shutdown_test.cpp`](../../tests/novaworld/server_signal_shutdown_test.cpp),
 POSIX builds) runs the real binary on a temp database with every port 0, sends
-SIGINT and then SIGTERM to a fresh run, and expects exit 0, the shutdown legs
-logged in order and no WAL file left; with the HTTP layer it reads the HTTP port
+SIGINT and then SIGTERM to a fresh run, and expects exit 0 and the shutdown legs
+logged in order; with the HTTP layer it reads the HTTP port
 from the `[http] listening on :<port>` line and holds a half-sent request open
 across the signal. On Linux a third run checks that the first signal puts the
 default action back and the same signal again ends a shutdown still pending. A
@@ -1012,19 +1051,19 @@ DFX2 host's lists (`DFXCATEGORY1`, `PBServer` `0`); the route harness's
 `lobby_per_title` case drives
 `/api/games`, each row's `.gsb` route and the game a retail page's `GSB_SERVER` names
 (the gate tag, the `GT` cookie, the `NWPF` cookie, the page prefix), and
-`backend_schema` migration 0013 on a fresh database and over one at 0012. The website
+`backend_schema` the games columns as the baseline makes them. The website
 sessions' store and the rate
 limiter also have Crow-free ctests that compile those sources straight in and run on
 every build: `web_session`
 ([`tests/novaworld/web_session_test.cpp`](../../tests/novaworld/web_session_test.cpp),
-the store and the roles on a migrated in-memory database) and `rate_limiter`
+the store and the roles on a migrated database of their own) and `rate_limiter`
 ([`tests/novaworld/rate_limiter_test.cpp`](../../tests/novaworld/rate_limiter_test.cpp),
 the buckets on a hand-stepped clock and the trusted-proxy client address); the
 route harness drives the cookie, CSRF, rate-limit and admin-credential paths over
 the wire. The listing's owner: `host_key`
 ([`tests/novaworld/host_key_test.cpp`](../../tests/novaworld/host_key_test.cpp), every
 build) drives the key store and the lobby session's links and strict refusal on a
-migrated in-memory database; the route harness pins `/NWHost.dll`'s recording (and its
+migrated database of its own; the route harness pins `/NWHost.dll`'s recording (and its
 unchanged bytes), `GET /api/me/hosts` and `GET /api/admin/hosts`; and
 `nw_host_ownership_e2e`
 ([`tests/novaworld/nw_host_ownership_e2e_test.cpp`](../../tests/novaworld/nw_host_ownership_e2e_test.cpp),

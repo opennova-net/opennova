@@ -246,7 +246,7 @@ crow::response HostedRoutes::me_server(const crow::request &req) {
 		} else {
 			out["server"] = nullptr;
 		}
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] GET /api/me/server failed: %s\n", e.what());
 		return json_error(500, "db_error");
 	}
@@ -342,7 +342,7 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 				log_owner(user, "start", "at_capacity");
 				return json_error(409, "at_capacity", "every hosted server place is taken; try again later");
 		}
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/me/server/start failed: %s\n", e.what());
 	}
 	return json_error(500, "db_error");
@@ -371,7 +371,7 @@ crow::response HostedRoutes::me_stop(const crow::request &req) {
 		const bool asked = request_stop(*db_conn, server->id, "stopped by its owner");
 		log_owner(user, "stop", "server " + std::to_string(server->id) + (asked ? " stopping" : " already stopping"));
 		return server_reply(202, *db_conn, server->id, false);
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/me/server/stop failed: %s\n", e.what());
 		return json_error(500, "db_error");
 	}
@@ -395,7 +395,7 @@ crow::response HostedRoutes::admin_fleet(const crow::request &req) {
 		std::vector<crow::json::wvalue> servers;
 		for (const HostedServer &s : list_servers(*db_conn, kFleetShown)) servers.push_back(server_json(*db_conn, s, true));
 		out["servers"] = std::move(servers);
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] GET /api/admin/hosted failed: %s\n", e.what());
 		return json_error(500, "db_error");
 	}
@@ -415,7 +415,7 @@ crow::response HostedRoutes::admin_stop_all(const crow::request &req) {
 		crow::json::wvalue out;
 		out["stopping"] = stopping;
 		return json_reply(200, out);
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/admin/hosted/stop-all failed: %s\n", e.what());
 		return json_error(500, "db_error");
 	}
@@ -434,7 +434,7 @@ crow::response HostedRoutes::admin_stop(const crow::request &req, uint64_t id) {
 		if (!is_live(server->state)) return json_error(409, "not_live", "this hosted server has ended");
 		request_stop(*db_conn, server_id, "stopped by an admin");
 		return server_reply(202, *db_conn, server_id, true);
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/admin/hosted/%llu/stop failed: %s\n",
 				static_cast<unsigned long long>(id), e.what());
 		return json_error(500, "db_error");

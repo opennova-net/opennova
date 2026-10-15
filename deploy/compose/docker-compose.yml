@@ -1,7 +1,9 @@
 # Base compose for the OpenNova NovaWorld stack: the C++ server (gate UDP,
-# NW UDP, HTTP) plus the nginx web portal. SQLite lives in the nw_data
-# volume. Overlays add dev (published ports, dev env) or prod (host
-# networking, GHCR images, backup sidecar) on top of this file.
+# NW UDP, HTTP) plus the nginx web portal. The server keeps no state of its
+# own: its database is PostgreSQL, named by DATABASE_URL (a libpq URI) with
+# DATABASE_PASSWORD beside it. Overlays add dev (published ports, dev env, a
+# local postgres) or prod (host networking, GHCR images, the managed
+# database, backup sidecar) on top of this file.
 #
 # Run from this directory, e.g.:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
@@ -22,11 +24,15 @@ services:
     # (pid_namespaces(7)), so a second `docker kill -s TERM` could not end a
     # stuck shutdown. The overlays inherit it.
     init: true
-    volumes:
-      - nw_data:/data
     environment:
       ONNET_PUBLIC_HOST: ${ONNET_PUBLIC_HOST:-127.0.0.1}
-      DATABASE_PATH: /data/novaworld.db
+      # The database (apps/novaworld_server/README.md "Database"): the libpq
+      # URI, the role's password kept apart from it (a secret; the URI is
+      # not), and the most connections the server opens (unset: 16). Unset,
+      # the URI is the server's local default.
+      DATABASE_URL: ${DATABASE_URL:-}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-}
       ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-}
       # The website session (apps/novaworld_server/README.md): the cookie's
       # Secure flag for an https site, the proxy whose X-Real-IP names the
@@ -86,6 +92,3 @@ services:
       context: ../..
       dockerfile: deploy/game/Dockerfile
     restart: unless-stopped
-
-volumes:
-  nw_data:

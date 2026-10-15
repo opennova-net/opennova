@@ -1,6 +1,6 @@
 #pragma once
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -10,7 +10,7 @@
 
 namespace opennova::novaworld_server {
 
-// The NovaWorld site's login sessions (web_sessions, migration 0008), the
+// The NovaWorld site's login sessions (web_sessions), the
 // store behind POST /api/login, POST /api/logout and the session cookie the
 // /api routes authenticate a browser by. Crow-free, so a unit test drives it on
 // every build.
@@ -64,7 +64,7 @@ std::string web_session_token_hash(std::string_view token);
 // ban that committed while the password was being checked mints nothing.
 // `ip` and `user_agent` are recorded for the account's session list. The
 // account's sessions beyond the newest kWebSessionsPerUser are deleted in the
-// same transaction. Throws db::SqliteError when the insert fails.
+// same transaction. Throws db::Error when the insert fails.
 std::optional<std::string> create_web_session(db::Database &db, int64_t user_id,
 		int64_t credentials_gen, const std::string &ip, const std::string &user_agent);
 
@@ -72,7 +72,7 @@ std::optional<std::string> create_web_session(db::Database &db, int64_t user_id,
 // recorded use is older than kWebSessionTouchSeconds. nullopt for a malformed,
 // unknown or expired token, and for a session whose account is no longer
 // active (banned or restricted), which is deleted on the spot. Throws
-// db::SqliteError on a database failure.
+// db::Error on a database failure.
 std::optional<WebSessionLookup> resolve_web_session(db::Database &db, std::string_view token);
 
 // Deletes the token's session (logout); an unknown token is a no-op.

@@ -327,8 +327,8 @@ target_include_directories(${TARGET_NAME} PRIVATE
 
 # opennova_runtime carries the sim chain (runtime -> formats -> base -> io) the
 # bindings consume directly; opennova_net is the wire only and never links
-# runtime (ADR 0043 d4). The service target is deliberately absent (see the sqlite note
-# above); scripts/lint/link_graph_check.py enforces it.
+# runtime (ADR 0043 d4). The service target is deliberately absent (this root never
+# defines it, see the engine note above); scripts/lint/link_graph_check.py enforces it.
 target_link_libraries(${TARGET_NAME} PRIVATE
     godot-cpp
     opennova_runtime

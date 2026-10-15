@@ -6,7 +6,7 @@
 #include <net_sockets.h>
 #include <net/napi/envelope.h>
 #include <net/novacrypto/nwu.h>
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/gate_metrics.h>
 #include <net/novaworld/host_repository.h>
@@ -171,7 +171,7 @@ bool GateListener::start(const ServerConfig &config) {
 		try {
 			db_conn.emplace(db_pool_->acquire());
 			games_ = catalog::GameCatalog::load(**db_conn);
-		} catch (const db::SqliteError &e) {
+		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[gate] db open failed: %s\n", e.what());
 			return false;
 		}

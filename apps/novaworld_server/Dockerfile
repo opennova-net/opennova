@@ -2,16 +2,19 @@
 # HTTP via Crow). Build context is the repo root:
 #   docker build -f apps/novaworld_server/Dockerfile -t opennova-novaworld-server .
 #
-# The runtime image needs only the server binary plus its data dirs
+# The runtime image needs only the server binary, libpq and its data dirs
 # (migrations, seed, retail templates/static), and for the hosted servers' ec2
-# provider the AWS CLI v2 and the machine script. SQLite lives in a mounted
-# volume; the web portal is a separate nginx container.
+# provider the AWS CLI v2 and the machine script. It keeps no state: the
+# database is PostgreSQL (DATABASE_URL, a libpq URI, and DATABASE_PASSWORD
+# beside it; apps/novaworld_server/README.md). Against RDS the URI carries
+# sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem, the RDS CA bundle
+# this image pins. The web portal is a separate nginx container.
 
 # ---- build stage ----------------------------------------------------------
 FROM ubuntu:24.04 AS build
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        build-essential cmake ninja-build git ca-certificates \
+        build-essential cmake ninja-build git ca-certificates libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -73,6 +76,22 @@ RUN dist=/usr/local/aws-cli/v2/current/dist \
     && echo "$out" | grep -q 'Could not connect to the endpoint URL' \
     && du -sh /usr/local/aws-cli
 
+# ---- RDS CA bundle stage ---------------------------------------------------
+# The CA bundle that signs every RDS endpoint (all regions), for the service's
+# sslmode=verify-full connection. Pinned by its SHA-256 like the AWS CLI above:
+# AWS adds a CA to it before rotating an endpoint's certificate, so a bump
+# fetches the new bundle, checks it lists the old CAs and the new one, and
+# records the new sum.
+FROM ubuntu:24.04 AS rdsca
+
+ARG RDS_CA_BUNDLE_SHA256=90a6f1a7978a1b1b096dca6c57511ca48d3b8cf052f8e704baf358f34ea2f21b
+
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -fsSL https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem \
+        -o /tmp/rds-global-bundle.pem \
+    && echo "${RDS_CA_BUNDLE_SHA256}  /tmp/rds-global-bundle.pem" | sha256sum -c -
+
 # ---- runtime stage --------------------------------------------------------
 # Same distro/glibc as the build stage so the binary's GLIBC/GLIBCXX
 # requirements resolve (a debian:12 runtime is too old for ubuntu:24.04's
@@ -80,7 +99,7 @@ RUN dist=/usr/local/aws-cli/v2/current/dist \
 FROM ubuntu:24.04 AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl \
+        ca-certificates curl libpq5 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -95,12 +114,13 @@ COPY --from=build /src/apps/novaworld_server/static /app/static
 COPY --from=build /src/apps/novaworld_server/hosted/machine/user_data.sh /app/hosted/machine_user_data.sh
 COPY --from=awscli /usr/local/aws-cli /usr/local/aws-cli
 RUN ln -s /usr/local/aws-cli/v2/current/bin/aws /usr/local/bin/aws && aws --version
+COPY --from=rdsca /tmp/rds-global-bundle.pem /app/rds-global-bundle.pem
 
-# The server reads these paths from the environment (server_config.cpp).
+# The server reads these paths from the environment (server_config.cpp); the
+# database's DATABASE_URL and DATABASE_PASSWORD come from the deployment.
 ENV ONNET_GATE_UDP_PORT=7597 \
     ONNET_NW_UDP_PORT=64206 \
     ONNET_HTTP_PORT=8080 \
-    DATABASE_PATH=/data/novaworld.db \
     MIGRATIONS_DIR=/app/backend/migrations \
     SEED_DIR=/app/backend/seed \
     TEMPLATES_DIR=/app/templates \
@@ -108,7 +128,6 @@ ENV ONNET_GATE_UDP_PORT=7597 \
     ONNET_HOSTED_MACHINE_SCRIPT=/app/hosted/machine_user_data.sh \
     ONNET_HOSTED_AWS_CLI=/usr/local/bin/aws
 
-VOLUME ["/data"]
 EXPOSE 7597/udp 64206/udp 8080/tcp
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \

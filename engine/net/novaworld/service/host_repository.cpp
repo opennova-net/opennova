@@ -92,9 +92,6 @@ constexpr const char *HOST_COLUMNS =
 constexpr const char *HOST_OWNER_VALUE =
 	"(SELECT user_id FROM host_keys WHERE user_id=$34 AND claimed_rid=$35)";
 
-// The SQLite datetime() modifier `seconds` before now.
-std::string seconds_ago(int64_t seconds) { return "-" + std::to_string(seconds) + " seconds"; }
-
 // A host row's binds, $1..$37 in this order; the statements below name them
 // by number.
 std::vector<opennova::db::BindValue> host_binds(const HostRow &h) {
@@ -198,11 +195,9 @@ int prune_stale_hosts(opennova::db::Database &db, int64_t window_seconds) {
 	// missed (a DB write that landed while its in-memory lobby_state was
 	// already gone). `updated_at` is refreshed on every ClientHostUpdate
 	// heartbeat, so anything older than the window is a crash orphan.
-	// host_players / host_roster rows cascade-delete (ON DELETE CASCADE;
-	// sqlite is built with DEFAULT_FOREIGN_KEYS=1).
-	const std::string modifier = "-" + std::to_string(window_seconds) + " seconds";
-	db.exec("DELETE FROM active_hosts WHERE updated_at < datetime('now', $1);",
-	        {str(modifier)});
+	// host_players / host_roster rows cascade-delete (ON DELETE CASCADE).
+	db.exec("DELETE FROM active_hosts WHERE updated_at < now() - make_interval(secs => $1);",
+	        {i64(window_seconds)});
 	return db.changes();
 }
 
@@ -212,7 +207,7 @@ void add_player(opennova::db::Database &db, const PlayerRow &p) {
 		" host_rid, user_id, nwhandle, peer_ip, peer_port) "
 		"VALUES ($1,$2,$3,$4,$5) "
 		"ON CONFLICT (host_rid, peer_ip, peer_port) DO UPDATE SET"
-		" user_id=excluded.user_id, nwhandle=excluded.nwhandle, joined_at=CURRENT_TIMESTAMP;",
+		" user_id=excluded.user_id, nwhandle=excluded.nwhandle, joined_at=now();",
 		{i64(p.host_rid), opt_int(p.user_id), str(p.nwhandle),
 		 str(p.peer_ip), i64(p.peer_port)});
 }
@@ -361,7 +356,7 @@ LobbyAggregate aggregate(opennova::db::Database &db) {
 	}
 	{
 		auto rows = db.query(
-			"SELECT COUNT(*), COALESCE(SUM(player_count),0) FROM active_hosts;");
+			"SELECT COUNT(*), COALESCE(SUM(player_count), 0)::bigint FROM active_hosts;");
 		if (!rows.empty()) {
 			agg.lobbies = static_cast<int>(rows.front().as_int(0).value_or(0));
 			agg.players = static_cast<int>(rows.front().as_int(1).value_or(0));
@@ -480,17 +475,17 @@ bool record_host_key(opennova::db::Database &db, std::string_view key, int64_t u
 	// generation and deletes the account's keys in one transaction, before or
 	// after this one).
 	db.exec("INSERT INTO host_keys (key_hash, user_id) "
-			"SELECT $1, id FROM players "
+			"SELECT $1::text, id FROM players "
 			"WHERE id = $2 AND credentials_gen = $3 AND account_status = 'active';",
 			{ str(host_key_hash(key)), i64(user_id), i64(credentials_gen) });
 	if (db.changes() == 0)
 		return false;
 	// The account's newest kHostKeysPerUser stay, and so does any key a listed
-	// server holds; rowid orders keys minted within one second.
+	// server holds; id orders keys minted at one instant.
 	db.exec(
-		"DELETE FROM host_keys WHERE user_id = $1 AND rowid NOT IN ("
-		"SELECT rowid FROM host_keys WHERE user_id = $1 "
-		"ORDER BY created_at DESC, rowid DESC LIMIT $2) "
+		"DELETE FROM host_keys WHERE user_id = $1 AND id NOT IN ("
+		"SELECT id FROM host_keys WHERE user_id = $1 "
+		"ORDER BY created_at DESC, id DESC LIMIT $2) "
 		"AND (claimed_rid IS NULL OR claimed_rid NOT IN (SELECT rid FROM active_hosts));",
 		{i64(user_id), i64(static_cast<int64_t>(kHostKeysPerUser))});
 	tx.commit();
@@ -505,12 +500,12 @@ std::optional<int64_t> claim_host_key(opennova::db::Database &db, std::string_vi
 	// One statement decides the claim: the key is live, its account active,
 	// and no other listed RID holds it. (A password reset or a ban deletes the
 	// account's keys, and record_host_key writes none at a stale generation.)
-	db.exec("UPDATE host_keys SET claimed_rid = $1, last_used_at = CURRENT_TIMESTAMP "
-			"WHERE key_hash = $2 AND last_used_at > datetime('now', $3) "
+	db.exec("UPDATE host_keys SET claimed_rid = $1, last_used_at = now() "
+			"WHERE key_hash = $2 AND last_used_at > now() - make_interval(secs => $3) "
 			"AND (claimed_rid IS NULL OR claimed_rid = $1 "
 			"     OR claimed_rid NOT IN (SELECT rid FROM active_hosts)) "
 			"AND user_id IN (SELECT id FROM players WHERE account_status = 'active');",
-			{ i64(rid), str(hash), str(seconds_ago(kHostKeyIdleSeconds)) });
+			{ i64(rid), str(hash), i64(kHostKeyIdleSeconds) });
 	std::optional<int64_t> owner;
 	if (db.changes() > 0) {
 		const auto rows = db.query("SELECT user_id FROM host_keys WHERE key_hash = $1;", {str(hash)});
@@ -531,12 +526,12 @@ bool listing_owned_by(opennova::db::Database &db, uint32_t rid, int64_t user_id)
 std::size_t prune_host_keys(opennova::db::Database &db) {
 	opennova::db::Transaction tx(db);
 	db.exec(
-		"UPDATE host_keys SET last_used_at = CURRENT_TIMESTAMP "
+		"UPDATE host_keys SET last_used_at = now() "
 		"WHERE claimed_rid IN (SELECT rid FROM active_hosts) "
-		"AND last_used_at <= datetime('now', $1);",
-		{str(seconds_ago(kHostKeyTouchSeconds))});
-	db.exec("DELETE FROM host_keys WHERE last_used_at <= datetime('now', $1);",
-	        {str(seconds_ago(kHostKeyIdleSeconds))});
+		"AND last_used_at <= now() - make_interval(secs => $1);",
+		{i64(kHostKeyTouchSeconds)});
+	db.exec("DELETE FROM host_keys WHERE last_used_at <= now() - make_interval(secs => $1);",
+	        {i64(kHostKeyIdleSeconds)});
 	const auto pruned = static_cast<std::size_t>(db.changes());
 	tx.commit();
 	return pruned;

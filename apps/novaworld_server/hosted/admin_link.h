@@ -43,7 +43,7 @@
 // The console: every command a caller asks to record, its replies, and the
 // link's status lines (logged in, the session lost or refused, the server's
 // scene when it changes) go to an in-memory reply ring and from there to the
-// server's hosted_server_console ring (hosted_repository.h, migration 0012).
+// server's hosted_server_console ring (hosted_repository.h).
 // The admin password is a log secret (loggable.h's add_log_secret) for the
 // link's lifetime, and never reaches a log line, a console line or a reply.
 //
@@ -56,7 +56,7 @@
 
 #include "net_sockets.h"
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 
 #include <atomic>
 #include <chrono>

@@ -57,8 +57,8 @@ easier to relay than to rediscover.
   with `scripts/land_docs.sh` (Git, PRs, CI below).
 - `third_party/` — never edit a submodule in place (bump it upstream). Dear ImGui
   (`third_party/imgui/`) is pinned to the commit the imgui-godot addon bundles: bump it
-  and `scripts/bootstrap_imgui_godot.sh` together, never one alone; sqlite and rgbcx
-  bump their URL/commit and URL_HASH together.
+  and `scripts/bootstrap_imgui_godot.sh` together, never one alone; rgbcx bumps its
+  URL/commit and URL_HASH together.
 
 ## Build & test
 
@@ -84,6 +84,10 @@ python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (d
   `"$GODOT_BIN" --headless --path godot --import` once, or engine classes appear missing.
 - GUT specifics (how `GODOT_BIN` resolves, the flaky-full-run protocol) live in
   `godot/tests/CLAUDE.md` and the `gut` skill.
+- The NovaWorld service (Linux only) builds with `-DOPENNOVA_NOVAWORLD_SERVICE=ON
+  -DBUILD_NOVAWORLD_HTTP=ON`; its database tests need a PostgreSQL server,
+  `-DOPENNOVA_TEST_PG=<uri>` (`scripts/dev_postgres.sh up` runs one and prints it), or
+  they skip, which `--suite core` fails.
 - Full ctest is ~90 s. Scope during focused work:
   `ctest --test-dir build -C Release -R "<pattern>"` (e.g. `-R "mission|terrain"`).
 - For a stale Godot editor, rebuild via `scripts/build_godot.sh` and fully restart it.

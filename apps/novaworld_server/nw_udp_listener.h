@@ -11,7 +11,7 @@
 #include <unordered_set>
 #include <vector>
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/npwire/cs_config.h>
 #include <net_sockets.h>
 #include <net/novaworld/connection/registry.h>  // PeerAddr / PeerAddrHash

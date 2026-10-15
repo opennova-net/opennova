@@ -6,11 +6,11 @@
 // supervisor (supervisor.h) and the routes share it; every write that spans
 // statements is one db::Transaction, and a transition is a compare-and-set on
 // the state, so the supervisor and a route that both move a server never both
-// win. Crow-free. Each function throws db::SqliteError on a database failure.
+// win. Crow-free. Each function throws db::Error on a database failure.
 
 #include "hosted_settings.h"
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -142,7 +142,7 @@ void set_machine(db::Database &db, int64_t id, const std::string &provider,
 void set_admin_login(db::Database &db, int64_t id, int admin_port, const std::string &user,
 		const std::string &password);
 
-// --- The remote-admin console (hosted_server_console, migration 0012) ---
+// --- The remote-admin console (hosted_server_console) ---
 //
 // One line of a hosted server's console: a command the service's admin link
 // (admin_link.h) sent on the server's retail remote-admin port, a reply packet

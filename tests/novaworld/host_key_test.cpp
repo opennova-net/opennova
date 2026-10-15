@@ -1,6 +1,6 @@
-// The listing's owner, below the HTTP layer (host_keys, migration 0009): the
+// The listing's owner, below the HTTP layer (host_keys): the
 // hosting-key store in host_repository and the lobby session's use of it, on a
-// migrated in-memory database. Runs on every build (the HTTP layer's halves,
+// migrated database per case. Runs on every service build (the HTTP layer's halves,
 // /NWHost.dll recording the key and the owner routes, are the route harness's;
 // the whole flow over the wire is nw_host_ownership_e2e's).
 //
@@ -33,11 +33,12 @@
 
 #include <base/io/sha256.h>
 #include <net/napi/session.h>
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/lobby_session.h>
 
 #include "client_var_fixture.h"
+#include "common/test_database.h"
 #include "common/test_expect.h"
 
 #include <cstdint>
@@ -87,7 +88,7 @@ void list_rid(Database &db, uint32_t rid) {
 }
 
 void age_key(Database &db, const std::string &key, const char *modifier) {
-	db.exec("UPDATE host_keys SET last_used_at = datetime('now', $1) WHERE key_hash = $2;",
+	db.exec("UPDATE host_keys SET last_used_at = now() + $1::interval WHERE key_hash = $2;",
 	        {BindValue(std::string(modifier)), BindValue(hostdb::host_key_hash(key))});
 }
 
@@ -238,8 +239,8 @@ int test_key_form_and_hash() {
 // record_host_key keeps the hash alone, records no non-key, and trims the
 // account's keys to the newest kHostKeysPerUser, sparing a listed server's.
 int test_record() {
-	Database db(":memory:");
-	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
+	test_db::TestDatabase scratch;
+	opennova::db::Database db = scratch.open();
 	const int64_t alice = make_player(db, "alice");
 	const int64_t bob = make_player(db, "bob");
 
@@ -305,8 +306,8 @@ int test_record() {
 // claim_host_key: the account for a live key of an active account; one listed
 // RID at a time; idle, unknown and banned claim nothing; clear_all releases.
 int test_claim() {
-	Database db(":memory:");
-	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
+	test_db::TestDatabase scratch;
+	opennova::db::Database db = scratch.open();
 	const int64_t alice = make_player(db, "alice");
 	hostdb::record_host_key(db, key_of('A'), alice, 0);
 
@@ -347,7 +348,7 @@ int test_claim() {
 	age_key(db, key_of('C'), "-86000 seconds");
 	TEST_EXPECT(hostdb::claim_host_key(db, key_of('C'), 0x0A000005u) == alice);
 	TEST_EXPECT(!db.query("SELECT 1 FROM host_keys WHERE key_hash = $1 "
-	                      "AND last_used_at > datetime('now', '-60 seconds');",
+	                      "AND last_used_at > (now() + interval '-60 seconds');",
 	                      {BindValue(hostdb::host_key_hash(key_of('C')))})
 	                     .empty());
 
@@ -362,8 +363,8 @@ int test_claim() {
 // the account without a claim answers false, and so does a claim once its keys
 // are revoked, before the row's next write drops the owner.
 int test_listing_owned_by() {
-	Database db(":memory:");
-	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
+	test_db::TestDatabase scratch;
+	opennova::db::Database db = scratch.open();
 	const int64_t alice = make_player(db, "alice");
 	const int64_t bob = make_player(db, "bob");
 	constexpr uint32_t kRid = 0x0A000011u;
@@ -404,8 +405,8 @@ int test_listing_owned_by() {
 // The sweep keeps a listed server's key however long ago it was claimed, and
 // deletes every other key idle for a day.
 int test_prune() {
-	Database db(":memory:");
-	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
+	test_db::TestDatabase scratch;
+	opennova::db::Database db = scratch.open();
 	const int64_t alice = make_player(db, "alice");
 	for (char c : { 'A', 'B', 'C', 'D' })
 		hostdb::record_host_key(db, key_of(c), alice, 0);
@@ -430,8 +431,8 @@ int test_prune() {
 
 // The lobby session's links: request, update, roster statements, re-host.
 int test_lobby_links() {
-	Database db(":memory:");
-	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
+	test_db::TestDatabase scratch;
+	opennova::db::Database db = scratch.open();
 	const int64_t alice = make_player(db, "alice");
 	hostdb::record_host_key(db, key_of('A'), alice, 0);
 
@@ -519,8 +520,8 @@ int test_lobby_links() {
 // holding the old id) names no one; a row written with an owner but no claim
 // (the dev inject) names no one.
 int test_owner_needs_live_claim() {
-	Database db(":memory:");
-	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
+	test_db::TestDatabase scratch;
+	opennova::db::Database db = scratch.open();
 	const int64_t alice = make_player(db, "alice");
 	hostdb::record_host_key(db, key_of('A'), alice, 0);
 	hostdb::record_host_key(db, key_of('B'), alice, 0);
@@ -580,8 +581,8 @@ int test_require_host_key() {
 	TEST_EXPECT(opennova::novaworld_server_msg_code_key(opennova::SERVER_MSG_CODE_NEED_TO_LOGIN) ==
 	            "NWUSERVERMSGCODE_NEEDTOLOGIN");
 
-	Database db(":memory:");
-	opennova::db::run_migrations(db, OPENNOVA_SOURCE_DIR "/backend/migrations");
+	test_db::TestDatabase scratch;
+	opennova::db::Database db = scratch.open();
 	const int64_t alice = make_player(db, "alice");
 	hostdb::record_host_key(db, key_of('A'), alice, 0);
 	hostdb::record_host_key(db, key_of('B'), alice, 0);
@@ -671,7 +672,8 @@ int test_require_host_key() {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
 	if (test_key_form_and_hash() != 0) return 1;
 	if (test_record() != 0) return 1;
 	if (test_claim() != 0) return 1;

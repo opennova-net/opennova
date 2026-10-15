@@ -1,6 +1,6 @@
 #include <net/novaworld/unknown_tracker.h>
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 
 #include <algorithm>
 #include <utility>
@@ -45,7 +45,7 @@ void UnknownTracker::record(std::string channel, std::string signature,
 
 void UnknownTracker::flush(db::Database &db) {
 	// Copy the dirty rows out under the lock, then do DB I/O outside it so a
-	// slow sqlite write doesn't block the listener threads' record() calls.
+	// slow database write doesn't block the listener threads' record() calls.
 	std::vector<UnknownSighting> pending;
 	std::set<Key> flushed;
 	{

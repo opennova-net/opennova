@@ -1,12 +1,12 @@
-// Apply backend/migrations/* + backend/seed/* against a fresh in-process
-// SQLite DB and verify the schema + canonical seed data are intact. Catches
-// SQL syntax errors and seed regressions at CI time before the standalone
-// server boots them in production.
+// Apply backend/migrations/* + backend/seed/* to a fresh database of the
+// test's own (common/test_database.h, one per case) and verify the schema and
+// the canonical seed data are intact. Catches SQL errors and seed regressions
+// at CI time before the standalone server boots them in production.
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 
 #include "../common/file_io.h"
-#include "../common/temp_dir.h"
+#include "../common/test_database.h"
 #include "../common/test_expect.h"
 
 #include <algorithm>
@@ -21,33 +21,27 @@
 #error "OPENNOVA_SOURCE_DIR must be set by CMake"
 #endif
 
+using opennova::db::BindValue;
 using opennova::db::Database;
 using opennova::db::run_migrations;
+using test_db::TestDatabase;
 
 namespace {
 
-// The games rows as the seed wrote them before migration 0013 (no title, JO's
-// pfid NULL): what every deployment's database held then. A test that builds
-// an older schema writes these, since today's seed names columns it lacks.
-constexpr const char *kGamesSeedBefore0013 =
-		"INSERT OR IGNORE INTO games (slug, display_name, lobby_name, gate_tag, start_page, "
-		"host_page, gsb_path, join_lan_url, ver1, ver2, exp_bits, pfid) VALUES "
-		"('jop_2_consumer', 'Joint Operations', 'jop_2_consumer', 'jop:cus2', 'jop_2_start.htm', "
-		"'jop_2_host1.htm', 'jop_2.gsb?a=1', NULL, '3', '2345', '3', NULL), "
-		"('dfx2_consumer', 'Delta Force Xtreme 2', 'dfx2_consumer', 'dfx2:0:cus:buffy', "
-		"'dfx2_0_start.htm', 'dfx2_0_host1.htm', 'dfx2_0.gsb?a=1', 'NWJoin.dll?pfid=38', '1', "
-		"'9013', "
-		"'1', '38');";
+// Whether the public schema holds index `name` on `table`.
+bool has_index(Database &db, const char *table, const char *name) {
+	return db.query("SELECT 1 FROM pg_indexes WHERE schemaname = 'public' AND tablename = $1 "
+					"AND indexname = $2;",
+				   { BindValue(std::string(table)), BindValue(std::string(name)) })
+				   .size() == 1;
+}
 
-// The repo's migrations whose file names sort before `before` (e.g. "0008"),
-// copied into `dir`.
-void copy_migrations_before(const std::filesystem::path &migrations, const std::string &before,
-		const std::filesystem::path &dir) {
-	for (const auto &e : std::filesystem::directory_iterator(migrations)) {
-		if (e.path().extension() == ".sql" && e.path().filename().string() < before) {
-			std::filesystem::copy_file(e.path(), dir / e.path().filename());
-		}
-	}
+// Whether `table` has column `column`.
+bool has_column(Database &db, const char *table, const char *column) {
+	return db.query("SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' "
+					"AND table_name = $1 AND column_name = $2;",
+				   { BindValue(std::string(table)), BindValue(std::string(column)) })
+				   .size() == 1;
 }
 
 // Every seed file in file-name order, as the server's apply_seed() runs them.
@@ -66,15 +60,23 @@ int test_migrations_create_expected_tables() {
 	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
 	const auto migrations = source_dir / "backend" / "migrations";
 
-	Database db(":memory:");
+	TestDatabase scratch({ /*migrate=*/false });
+	Database db = scratch.open();
 	auto r = run_migrations(db, migrations);
-	TEST_EXPECT(!r.applied.empty());
+	// Every file in the directory applies, in name order, and is recorded.
+	std::vector<std::string> listing;
+	for (const auto &e : std::filesystem::directory_iterator(migrations)) {
+		if (e.path().extension() == ".sql") listing.push_back(e.path().filename().string());
+	}
+	std::sort(listing.begin(), listing.end());
+	TEST_EXPECT(!listing.empty() && r.applied == listing);
+	const auto recorded = db.query("SELECT filename FROM _schema_migrations ORDER BY filename;");
+	TEST_EXPECT(recorded.size() == listing.size());
+	for (size_t i = 0; i < listing.size(); ++i) TEST_EXPECT(recorded[i].as_text(0) == listing[i]);
 
 	auto rows = db.query(
-		"SELECT name FROM sqlite_master WHERE type='table' "
-		"  AND name NOT LIKE 'sqlite_%' AND name <> '_schema_migrations' "
-		"ORDER BY name;"
-	);
+		"SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' "
+		"AND table_type = 'BASE TABLE' AND table_name <> '_schema_migrations' ORDER BY table_name;");
 	std::printf("  applied %zu migration(s); created %zu table(s)\n",
 	            r.applied.size(), rows.size());
 
@@ -82,7 +84,7 @@ int test_migrations_create_expected_tables() {
 	const std::vector<std::string> expected = {
 		"active_hosts", "active_user_sessions", "cd_key_activations", "cd_keys",
 		"games", "host_keys", "host_players", "host_roster", "hosted_server_console", "hosted_server_events",
-		"hosted_servers", "hosts", "login_addresses",
+		"hosted_servers", "login_addresses",
 		"player_game_access",
 		"players", "server_status", "unknown_messages", "web_sessions"
 	};
@@ -90,10 +92,24 @@ int test_migrations_create_expected_tables() {
 	for (size_t i = 0; i < expected.size(); ++i) {
 		TEST_EXPECT(rows[i].as_text(0).value() == expected[i]);
 	}
-	// 0007 retired the launcher's executable_name column.
-	auto launcher_column = db.query(
-		"SELECT name FROM pragma_table_info('games') WHERE name = 'executable_name';");
-	TEST_EXPECT(launcher_column.empty());
+	// The dialect's rules: every integer is bigint (no integer or smallint
+	// column), every time a timestamptz, the flags booleans, the sample bytea.
+	TEST_EXPECT(db.query("SELECT table_name, column_name FROM information_schema.columns "
+						 "WHERE table_schema = 'public' AND data_type IN ('integer', 'smallint');")
+						.empty());
+	TEST_EXPECT(db.query("SELECT table_name, column_name FROM information_schema.columns "
+						 "WHERE table_schema = 'public' AND table_name <> '_schema_migrations' "
+						 "AND (column_name LIKE '%\\_at' OR column_name IN ('last_login', 'at')) "
+						 "AND data_type <> 'timestamp with time zone';")
+						.empty());
+	const auto flags = db.query("SELECT table_name || '.' || column_name FROM information_schema.columns "
+								"WHERE table_schema = 'public' AND data_type = 'boolean' ORDER BY 1;");
+	TEST_EXPECT(flags.size() == 3 && flags[0].as_text(0) == "hosted_servers.team_ff" &&
+			flags[1].as_text(0) == "players.can_host" &&
+			flags[2].as_text(0) == "server_status.maintenance_enabled");
+	TEST_EXPECT(db.query("SELECT 1 FROM information_schema.columns WHERE table_name = 'unknown_messages' "
+						 "AND column_name = 'sample' AND data_type = 'bytea';")
+						.size() == 1);
 	return 0;
 }
 
@@ -102,15 +118,14 @@ int test_seed_populates_games() {
 	const auto migrations = source_dir / "backend" / "migrations";
 	const auto seed_dir = source_dir / "backend" / "seed";
 
-	Database db(":memory:");
-	run_migrations(db, migrations);
+	TestDatabase scratch;
+	Database db = scratch.open();
 
 	// Apply seeds in filename order, matching the server's apply_seed()
 	// (main.cpp). directory_iterator yields entries in an unspecified order
 	// that differs across filesystems (sorted on NTFS, inode-order on ext4),
-	// and 0002_dev_users.sql seeds player_game_access whose rows FK-reference
-	// the games created by 0001_*; out of order, INSERT OR IGNORE silently
-	// drops them.
+	// and 0002_dev_users.sql seeds player_game_access whose rows join the games
+	// created by 0001_*; out of order, they would be missing.
 	std::vector<std::filesystem::path> seeds;
 	for (const auto &entry : std::filesystem::directory_iterator(seed_dir)) {
 		if (entry.path().extension() == ".sql") seeds.push_back(entry.path());
@@ -187,8 +202,8 @@ int test_seed_is_idempotent() {
 	const auto migrations = source_dir / "backend" / "migrations";
 	const auto seed_dir = source_dir / "backend" / "seed";
 
-	Database db(":memory:");
-	run_migrations(db, migrations);
+	TestDatabase scratch;
+	Database db = scratch.open();
 
 	std::vector<std::filesystem::path> seeds;
 	for (const auto &e : std::filesystem::directory_iterator(seed_dir)) {
@@ -196,7 +211,7 @@ int test_seed_is_idempotent() {
 	}
 	std::sort(seeds.begin(), seeds.end());  // deterministic, FK-safe order
 
-	// Run the seed twice; INSERT OR IGNORE should keep counts stable.
+	// Run the seed twice; ON CONFLICT DO NOTHING should keep counts stable.
 	for (int pass = 0; pass < 2; ++pass) {
 		for (const auto &p : seeds) {
 			db.exec_script(test_io::read_file_text(p.string()));
@@ -237,33 +252,29 @@ int test_seed_is_idempotent() {
 }
 
 int test_foreign_keys_enforced() {
-	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
-	const auto migrations = source_dir / "backend" / "migrations";
+	TestDatabase scratch;
+	Database db = scratch.open();
 
-	Database db(":memory:");
-	run_migrations(db, migrations);
-
-	// Inserting a host against a non-existent game_id should fail.
+	// A joiner of a host that is not listed is refused (23503).
 	bool caught = false;
 	try {
 		db.exec(
-			"INSERT INTO hosts (rid, gsid, game_id) "
-			"VALUES (1, 'orphan', 9999);"
+			"INSERT INTO host_players (host_rid, nwhandle, peer_ip, peer_port) "
+			"VALUES (9999, 'orphan', '10.0.0.1', 1);"
 		);
-	} catch (const opennova::db::SqliteError &) {
-		caught = true;
+	} catch (const opennova::db::Error &e) {
+		caught = e.sqlstate() == "23503";
 	}
 	TEST_EXPECT(caught);
 	return 0;
 }
 
-// 0008: every account starts as a 'player', the role takes only 'player' or
+// Every account starts as a 'player', the role takes only 'player' or
 // 'admin', web_sessions is keyed by the token hash with its user_id index, and
 // a deleted player takes its sessions.
 int test_web_sessions_and_roles() {
-	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
-	Database db(":memory:");
-	run_migrations(db, source_dir / "backend" / "migrations");
+	TestDatabase scratch;
+	Database db = scratch.open();
 
 	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
 	        "VALUES ('roleless', 'x', '0000aaaa', '1', 'Roleless');");
@@ -273,26 +284,23 @@ int test_web_sessions_and_roles() {
 	bool caught = false;
 	try {
 		db.exec("UPDATE players SET role = 'root' WHERE username = 'roleless';");
-	} catch (const opennova::db::SqliteError &) {
+	} catch (const opennova::db::Error &) {
 		caught = true;
 	}
 	TEST_EXPECT(caught);
 	role = db.query("SELECT role FROM players WHERE username = 'roleless';");
 	TEST_EXPECT(role[0].as_text(0).value() == "admin");
 
-	auto index = db.query(
-		"SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'web_sessions' "
-		"AND name = 'idx_web_sessions_user_id';");
-	TEST_EXPECT(index.size() == 1);
+	TEST_EXPECT(has_index(db, "web_sessions", "idx_web_sessions_user_id"));
 
 	db.exec("INSERT INTO web_sessions (token_hash, user_id, expires_at) "
-	        "SELECT 'h1', id, datetime('now', '+30 days') FROM players WHERE username = 'roleless';");
+	        "SELECT 'h1', id, (now() + interval '+30 days') FROM players WHERE username = 'roleless';");
 	// The token hash is the key: a second row under it is refused.
 	caught = false;
 	try {
 		db.exec("INSERT INTO web_sessions (token_hash, user_id, expires_at) "
-		        "SELECT 'h1', id, datetime('now') FROM players WHERE username = 'roleless';");
-	} catch (const opennova::db::SqliteError &) {
+		        "SELECT 'h1', id, now() FROM players WHERE username = 'roleless';");
+	} catch (const opennova::db::Error &) {
 		caught = true;
 	}
 	TEST_EXPECT(caught);
@@ -300,8 +308,8 @@ int test_web_sessions_and_roles() {
 	caught = false;
 	try {
 		db.exec("INSERT INTO web_sessions (token_hash, user_id, expires_at) "
-		        "VALUES ('h2', 9999, datetime('now'));");
-	} catch (const opennova::db::SqliteError &) {
+		        "VALUES ('h2', 9999, now());");
+	} catch (const opennova::db::Error &) {
 		caught = true;
 	}
 	TEST_EXPECT(caught);
@@ -313,89 +321,6 @@ int test_web_sessions_and_roles() {
 
 	db.exec("DELETE FROM players WHERE username = 'roleless';");
 	TEST_EXPECT(db.query("SELECT 1 FROM web_sessions;").empty());
-	return 0;
-}
-
-// 0008 over a database that already holds accounts (every deployment before
-// it): the migrations up to 0007 and the seed of the time (the games rows
-// before 0013, then the dev accounts), then the full set, which applies 0008
-// (and 0009 on after it) and gives every existing account the 'player' role,
-// and (0011) the 'player' kind with no hosting approval.
-int test_web_sessions_migration_over_existing_accounts() {
-	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
-	const auto migrations = source_dir / "backend" / "migrations";
-	const auto seed_dir = source_dir / "backend" / "seed";
-	test_temp::TempDir before_0008("backend_schema_pre0008");
-	copy_migrations_before(migrations, "0008", before_0008.path);
-
-	Database db(":memory:");
-	const auto first = run_migrations(db, before_0008.path);
-	TEST_EXPECT(first.applied.size() == 7);
-	db.exec_script(kGamesSeedBefore0013);
-	db.exec_script(test_io::read_file_text((seed_dir / "0002_dev_users.sql").string()));
-	TEST_EXPECT(db.query("SELECT name FROM pragma_table_info('players') WHERE name = 'role';").empty());
-
-	const auto second = run_migrations(db, migrations);
-	TEST_EXPECT(second.applied.size() == 8);
-	TEST_EXPECT(second.applied[0] == "0008_web_sessions_and_roles.sql");
-	TEST_EXPECT(second.applied[1] == "0009_host_keys.sql");
-	TEST_EXPECT(second.applied[2] == "0010_credentials_generation.sql");
-	TEST_EXPECT(second.applied[3] == "0011_hosted_servers.sql");
-	TEST_EXPECT(second.applied[4] == "0012_hosted_server_console.sql");
-	TEST_EXPECT(second.applied[5] == "0013_games_title.sql");
-	TEST_EXPECT(second.applied[6] == "0014_hosted_server_game.sql");
-	TEST_EXPECT(second.applied[7] == "0015_cd_keys.sql");
-	const auto roles = db.query("SELECT COUNT(*), SUM(role = 'player'), SUM(kind = 'player'), "
-	                            "SUM(can_host) FROM players;");
-	TEST_EXPECT(roles[0].as_int(0).value() == 5);
-	TEST_EXPECT(roles[0].as_int(1).value() == 5);
-	TEST_EXPECT(roles[0].as_int(2).value() == 5);
-	TEST_EXPECT(roles[0].as_int(3).value() == 0);
-	TEST_EXPECT(db.query("SELECT 1 FROM web_sessions;").empty());
-	return 0;
-}
-
-// 0014 over a database whose hosted servers ran before it (every one on Joint
-// Operations' data): the migrations up to 0012 with a hosted server written,
-// then the full set, which gives that row the game 'jop_2_consumer'; a new row
-// names its own.
-int test_hosted_server_game_migration() {
-	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
-	const auto migrations = source_dir / "backend" / "migrations";
-	test_temp::TempDir before_0013("backend_schema_pre0013");
-	for (const auto &e : std::filesystem::directory_iterator(migrations)) {
-		if (e.path().extension() == ".sql" && e.path().filename().string() < "0013") {
-			std::filesystem::copy_file(e.path(), before_0013.path / e.path().filename());
-		}
-	}
-	Database db(":memory:");
-	const auto first = run_migrations(db, before_0013.path);
-	TEST_EXPECT(first.applied.size() == 12);
-	TEST_EXPECT(db.query("SELECT name FROM pragma_table_info('hosted_servers') WHERE name = 'game';").empty());
-	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
-	        "VALUES ('host_before', 'x', '0e140001', '1', 'HostBefore');");
-	db.exec("INSERT INTO hosted_servers (owner_user_id, state, game_name, max_players, time_limit, kill_limit, "
-	        "max_score, respawn, start_delay, missions) "
-	        "SELECT id, 'stopped', 'Before', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players WHERE username = 'host_before';");
-
-	const auto second = run_migrations(db, migrations);
-	TEST_EXPECT(second.applied.size() >= 2 && second.applied[1] == "0014_hosted_server_game.sql");
-	const auto rows = db.query("SELECT game FROM hosted_servers WHERE game_name = 'Before';");
-	TEST_EXPECT(rows.size() == 1 && rows[0].as_text(0).value() == "jop_2_consumer");
-	db.exec("INSERT INTO hosted_servers (owner_user_id, state, game, game_name, max_players, time_limit, "
-	        "kill_limit, max_score, respawn, start_delay, missions) "
-	        "SELECT id, 'stopped', 'dfx2_consumer', 'After', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players "
-	        "WHERE username = 'host_before';");
-	const auto after = db.query("SELECT game FROM hosted_servers WHERE game_name = 'After';");
-	TEST_EXPECT(after.size() == 1 && after[0].as_text(0).value() == "dfx2_consumer");
-	// The column takes no NULL.
-	bool refused = false;
-	try {
-		db.exec("UPDATE hosted_servers SET game = NULL WHERE game_name = 'After';");
-	} catch (const opennova::db::SqliteError &) {
-		refused = true;
-	}
-	TEST_EXPECT(refused);
 	return 0;
 }
 
@@ -455,15 +380,14 @@ int expect_gate_rows(Database &db) {
 	return 0;
 }
 
-// 0013 on a fresh database: the column, and the seed after it (the boot's
+// The games' title column, and the seed after the migrations (the boot's
 // order) writes every row with its title, the OpenNova row among them.
 int test_games_title_fresh() {
 	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
-	Database db(":memory:");
-	run_migrations(db, source_dir / "backend" / "migrations");
-	TEST_EXPECT(
-			db.query("SELECT name FROM pragma_table_info('games') WHERE name = 'title';").size() ==
-			1);
+	TestDatabase scratch;
+	Database db = scratch.open();
+	TEST_EXPECT(has_column(db, "games", "title"));
+	TEST_EXPECT(!has_column(db, "games", "executable_name")); // the launcher's, retired
 	apply_seeds(db, source_dir / "backend" / "seed");
 	const auto titles = db.query("SELECT slug, title FROM games ORDER BY slug;");
 	TEST_EXPECT(titles.size() == 3);
@@ -475,58 +399,12 @@ int test_games_title_fresh() {
 	return expect_opennova_row(db);
 }
 
-// 0013 over a database at 0012 (every deployment before it): the migrations
-// up to 0012 and the seed of the time, then the boot's order, the full set
-// (0013 first among what it applies) and today's seed. The rows already there
-// keep their ids and take their titles (JO's its pfid 28) and their gate
-// answers (DFX2's LobbyName becomes dfx2_0_consumer), the accounts keep their
-// game access, and the seed adds the OpenNova row.
-int test_games_title_over_0012() {
-	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
-	const auto migrations = source_dir / "backend" / "migrations";
-	const auto seed_dir = source_dir / "backend" / "seed";
-	test_temp::TempDir before_0013("backend_schema_pre0013");
-	copy_migrations_before(migrations, "0013", before_0013.path);
-
-	Database db(":memory:");
-	TEST_EXPECT(run_migrations(db, before_0013.path).applied.size() == 12);
-	db.exec_script(kGamesSeedBefore0013);
-	db.exec_script(test_io::read_file_text((seed_dir / "0002_dev_users.sql").string()));
-	TEST_EXPECT(
-			db.query("SELECT name FROM pragma_table_info('games') WHERE name = 'title';").empty());
-	const auto ids = db.query("SELECT id FROM games ORDER BY slug;");
-	TEST_EXPECT(ids.size() == 2);
-
-	const auto second = run_migrations(db, migrations);
-	TEST_EXPECT(!second.applied.empty() && second.applied[0] == "0013_games_title.sql");
-	apply_seeds(db, seed_dir);
-
-	const auto games = db.query("SELECT slug, id, title, pfid FROM games ORDER BY slug;");
-	TEST_EXPECT(games.size() == 3);
-	TEST_EXPECT(games[0].as_text(0).value() == "dfx2_consumer");
-	TEST_EXPECT(games[0].as_int(1).value() == ids[0].as_int(0).value());
-	TEST_EXPECT(games[0].as_text(2).value() == "dfx2");
-	TEST_EXPECT(games[0].as_text(3).value() == "38");
-	TEST_EXPECT(games[1].as_text(0).value() == "jop_2_consumer");
-	TEST_EXPECT(games[1].as_int(1).value() == ids[1].as_int(0).value());
-	TEST_EXPECT(games[1].as_text(2).value() == "jo");
-	TEST_EXPECT(games[1].as_text(3).value() == "28");
-	TEST_EXPECT(games[2].as_text(0).value() == "opennova_0_consumer");
-	TEST_EXPECT(db.query("SELECT 1 FROM player_game_access WHERE game_slug = 'jop_2_consumer';")
-						.size() == 5);
-	// The older rows' gate answers (DFX2's LobbyName among them) are 0013's.
-	if (expect_gate_rows(db) != 0)
-		return 1;
-	return expect_opennova_row(db);
-}
-
-// 0010: a new account starts at credentials generation 0, a retail login's
-// session row carries one, and neither column takes NULL. And 0003's
-// account_status: 'active' by default, never empty (inserted or updated).
+// A new account starts at credentials generation 0, a retail login's session
+// row carries one, and neither column takes NULL. And account_status: 'active'
+// by default, never empty (inserted or updated).
 int test_credentials_generation() {
-	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
-	Database db(":memory:");
-	run_migrations(db, source_dir / "backend" / "migrations");
+	TestDatabase scratch;
+	Database db = scratch.open();
 
 	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
 			"VALUES ('gen', 'x', '0000bbbb', '1', 'Gen');");
@@ -550,7 +428,7 @@ int test_credentials_generation() {
 		bool caught = false;
 		try {
 			db.exec(sql);
-		} catch (const opennova::db::SqliteError &) {
+		} catch (const opennova::db::Error &) {
 			caught = true;
 		}
 		TEST_EXPECT(caught);
@@ -558,17 +436,15 @@ int test_credentials_generation() {
 	return 0;
 }
 
-// The fresh schema's account deletes and host_keys (0001, 0002, 0009, edited
-// in place: the service database is reset on deploy). players.id is
-// AUTOINCREMENT, so a deleted account's id is never handed out again; a
-// deleted account leaves its listed server listed and its player-list rows
-// in place with no account (ON DELETE SET NULL) and takes its hosting keys
-// (ON DELETE CASCADE). host_keys is keyed by the key hash, with its indexes; a
-// key needs a player, and a fresh key row carries both times and no claim.
+// The account deletes and host_keys. players.id is an identity, so a deleted
+// account's id is never handed out again; a deleted account leaves its listed
+// server listed and its player-list rows in place with no account (ON DELETE
+// SET NULL) and takes its hosting keys (ON DELETE CASCADE). host_keys is keyed
+// by the key hash, with its indexes; a key needs a player, and a fresh key row
+// carries both times and no claim.
 int test_host_keys_and_account_deletes() {
-	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
-	Database db(":memory:");
-	run_migrations(db, source_dir / "backend" / "migrations");
+	TestDatabase scratch;
+	Database db = scratch.open();
 	auto add_player = [&db](const std::string &name) {
 		db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
 		        "VALUES ($1, 'x', $2, '1', $3);",
@@ -588,10 +464,7 @@ int test_host_keys_and_account_deletes() {
 	TEST_EXPECT(add_player("newcomer") > newest);
 
 	for (const char *index : {"idx_host_keys_user_id", "idx_host_keys_last_used_at"}) {
-		TEST_EXPECT(db.query("SELECT 1 FROM sqlite_master WHERE type = 'index' "
-		                     "AND tbl_name = 'host_keys' AND name = $1;",
-		                     {opennova::db::BindValue(std::string(index))})
-		                    .size() == 1);
+		TEST_EXPECT(has_index(db, "host_keys", index));
 	}
 	const int64_t host = add_player("host");
 	db.exec("INSERT INTO host_keys (key_hash, user_id) VALUES ('h1', $1);",
@@ -606,7 +479,7 @@ int test_host_keys_and_account_deletes() {
 	try {
 		db.exec("INSERT INTO host_keys (key_hash, user_id) VALUES ('h1', $1);",
 		        {opennova::db::BindValue(first)});
-	} catch (const opennova::db::SqliteError &) {
+	} catch (const opennova::db::Error &) {
 		caught = true;
 	}
 	TEST_EXPECT(caught);
@@ -614,7 +487,7 @@ int test_host_keys_and_account_deletes() {
 	caught = false;
 	try {
 		db.exec("INSERT INTO host_keys (key_hash, user_id) VALUES ('h2', 9999);");
-	} catch (const opennova::db::SqliteError &) {
+	} catch (const opennova::db::Error &) {
 		caught = true;
 	}
 	TEST_EXPECT(caught);
@@ -643,13 +516,13 @@ int test_host_keys_and_account_deletes() {
 bool refused(Database &db, const std::string &sql) {
 	try {
 		db.exec(sql);
-	} catch (const opennova::db::SqliteError &) {
+	} catch (const opennova::db::Error &) {
 		return true;
 	}
 	return false;
 }
 
-// 0015's rules over `db` (migrated): a serial and a wire key are each unique,
+// The CD keys' rules over `db` (migrated): a serial and a wire key are each unique,
 // a key's account must exist, an account holds one live key per title (any
 // number of revoked ones), a machine is one activation per key, and a
 // deleted account takes its keys and their activations, a deleted key its
@@ -737,76 +610,66 @@ int expect_cd_key_rules(Database &db, const std::string &prefix) {
 			db.query("SELECT 1 FROM cd_key_activations WHERE key_id = $1;", { BindValue(free_key) })
 					.empty());
 	db.exec("DELETE FROM players WHERE id = $1;", { BindValue(owner) });
-	TEST_EXPECT(db.query("SELECT 1 FROM cd_keys WHERE serial LIKE $1 || '%';", { BindValue(prefix) })
+	TEST_EXPECT(db.query("SELECT 1 FROM cd_keys WHERE serial LIKE $1::text || '%';", { BindValue(prefix) })
 					.empty());
 	TEST_EXPECT(db.query("SELECT 1 FROM cd_key_activations WHERE key_id = $1;", { BindValue(live) })
 					.empty());
 	return 0;
 }
 
-// 0015 on a fresh database: the two tables, their indexes and their rules.
+// The CD keys' two tables, their indexes and their rules.
 int test_cd_keys_fresh() {
-	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
-	Database db(":memory:");
-	run_migrations(db, source_dir / "backend" / "migrations");
+	TestDatabase scratch;
+	Database db = scratch.open();
 	for (const char *index :
 			{ "idx_cd_keys_title", "idx_cd_keys_user", "idx_cd_keys_live_per_account" }) {
-		TEST_EXPECT(db.query("SELECT 1 FROM sqlite_master WHERE type = 'index' AND tbl_name = "
-							 "'cd_keys' AND name = $1;",
-							  { opennova::db::BindValue(std::string(index)) })
-							.size() == 1);
+		TEST_EXPECT(has_index(db, "cd_keys", index));
 	}
 	return expect_cd_key_rules(db, "fresh-");
 }
 
-// 0015 over a database at 0014 (every deployment before it), holding accounts:
-// the full set applies 0015 alone, the accounts stay as they were, and the new
-// tables start empty and take keys for those accounts.
-int test_cd_keys_over_0014() {
-	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
-	const auto migrations = source_dir / "backend" / "migrations";
-	const auto seed_dir = source_dir / "backend" / "seed";
-	test_temp::TempDir before_0015("backend_schema_pre0015");
-	copy_migrations_before(migrations, "0015", before_0015.path);
-
-	Database db(":memory:");
-	TEST_EXPECT(run_migrations(db, before_0015.path).applied.size() == 14);
-	apply_seeds(db, seed_dir);
-	TEST_EXPECT(db.query("SELECT name FROM sqlite_master WHERE name = 'cd_keys';").empty());
-	const auto accounts = db.query("SELECT COUNT(*) FROM players;").front().as_int(0).value();
-	TEST_EXPECT(accounts == 5);
-
-	const auto second = run_migrations(db, migrations);
-	TEST_EXPECT(second.applied.size() == 1 && second.applied[0] == "0015_cd_keys.sql");
-	TEST_EXPECT(db.query("SELECT COUNT(*) FROM players;").front().as_int(0).value() == accounts);
-	TEST_EXPECT(db.query("SELECT 1 FROM cd_keys;").empty());
-	TEST_EXPECT(db.query("SELECT 1 FROM cd_key_activations;").empty());
-	db.exec("INSERT INTO cd_keys (title, serial, wire_key, user_id, created_by) "
-			"SELECT 'dfx2', 'PRE0015-' || username, 'PRE0015-WIRE-' || username, id, 'token' FROM "
-			"players;");
-	TEST_EXPECT(db.query("SELECT COUNT(*) FROM cd_keys;").front().as_int(0).value() == accounts);
-	return expect_cd_key_rules(db, "over-");
+// A hosted server's game: a row that names none lists under Joint Operations'
+// lobby, one that names its own keeps it, and the column takes no NULL.
+int test_hosted_server_game() {
+	TestDatabase scratch;
+	Database db = scratch.open();
+	db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
+	        "VALUES ('host_game', 'x', '0e140001', '1', 'HostGame');");
+	db.exec("INSERT INTO hosted_servers (owner_user_id, state, game_name, max_players, time_limit, kill_limit, "
+	        "max_score, respawn, start_delay, missions) "
+	        "SELECT id, 'stopped', 'Default', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players WHERE username = 'host_game';");
+	const auto rows = db.query("SELECT game, team_ff FROM hosted_servers WHERE game_name = 'Default';");
+	TEST_EXPECT(rows.size() == 1 && rows[0].as_text(0).value() == "jop_2_consumer");
+	TEST_EXPECT(rows[0].as_int(1) == 0);
+	db.exec("INSERT INTO hosted_servers (owner_user_id, state, game, game_name, max_players, time_limit, "
+	        "kill_limit, max_score, respawn, start_delay, missions) "
+	        "SELECT id, 'stopped', 'dfx2_consumer', 'Own', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players "
+	        "WHERE username = 'host_game';");
+	const auto own = db.query("SELECT game FROM hosted_servers WHERE game_name = 'Own';");
+	TEST_EXPECT(own.size() == 1 && own[0].as_text(0).value() == "dfx2_consumer");
+	TEST_EXPECT(refused(db, "UPDATE hosted_servers SET game = NULL WHERE game_name = 'Own';"));
+	// One live server per owner (idx_hosted_servers_one_live): a second live
+	// one is refused, any number of ended ones are not.
+	db.exec("UPDATE hosted_servers SET state = 'running' WHERE game_name = 'Own';");
+	TEST_EXPECT(refused(db, "UPDATE hosted_servers SET state = 'running' WHERE game_name = 'Default';"));
+	return 0;
 }
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
 	if (test_migrations_create_expected_tables() != 0) return 1;
 	if (test_seed_populates_games() != 0) return 1;
 	if (test_seed_is_idempotent() != 0) return 1;
 	if (test_foreign_keys_enforced() != 0) return 1;
 	if (test_web_sessions_and_roles() != 0) return 1;
-	if (test_web_sessions_migration_over_existing_accounts() != 0) return 1;
 	if (test_games_title_fresh() != 0)
-		return 1;
-	if (test_games_title_over_0012() != 0)
 		return 1;
 	if (test_host_keys_and_account_deletes() != 0) return 1;
 	if (test_credentials_generation() != 0) return 1;
-	if (test_hosted_server_game_migration() != 0) return 1;
+	if (test_hosted_server_game() != 0) return 1;
 	if (test_cd_keys_fresh() != 0)
-		return 1;
-	if (test_cd_keys_over_0014() != 0)
 		return 1;
 	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs, "
 				"web sessions + roles, games titles, host keys, credentials generation, hosted "

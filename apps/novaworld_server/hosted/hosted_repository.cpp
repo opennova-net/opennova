@@ -137,7 +137,7 @@ RequestResult request_server(db::Database &db, int64_t owner_user_id,
 					BindValue(static_cast<int64_t>(settings.max_score)),
 					BindValue(static_cast<int64_t>(settings.respawn)),
 					BindValue(static_cast<int64_t>(settings.start_delay)),
-					BindValue(static_cast<int64_t>(settings.team_ff ? 1 : 0)),
+					BindValue(db::Bool{ settings.team_ff }),
 					BindValue(settings.expansion), BindValue(join_missions(settings.missions)) });
 	out.id = inserted.front().as_int(0).value_or(0);
 	insert_event(db, out.id, "", state_name(State::Requested), "requested by its owner");
@@ -209,16 +209,16 @@ bool transition(db::Database &db, int64_t id, State from, State to, const std::s
 		TransitionOptions options) {
 	const std::string to_name = state_name(to);
 	db::Transaction tx(db);
-	db.exec("UPDATE hosted_servers SET state = $1, updated_at = CURRENT_TIMESTAMP, "
+	db.exec("UPDATE hosted_servers SET state = $1, updated_at = now(), "
 			"restarts = restarts + $2, "
 			"machine_id = CASE WHEN $3 THEN '' ELSE machine_id END, "
 			"machine_address = CASE WHEN $3 THEN '' ELSE machine_address END, "
-			"running_at = CASE WHEN $1 = 'running' THEN CURRENT_TIMESTAMP ELSE running_at END, "
-			"ended_at = CASE WHEN $1 IN ('stopped', 'failed') THEN CURRENT_TIMESTAMP ELSE ended_at END, "
+			"running_at = CASE WHEN $1 = 'running' THEN now() ELSE running_at END, "
+			"ended_at = CASE WHEN $1 IN ('stopped', 'failed') THEN now() ELSE ended_at END, "
 			"failure_reason = CASE WHEN $1 = 'failed' THEN $4 ELSE failure_reason END "
 			"WHERE id = $5 AND state = $6;",
 			{ BindValue(to_name), BindValue(static_cast<int64_t>(options.count_restart ? 1 : 0)),
-					BindValue(static_cast<int64_t>(options.clear_machine ? 1 : 0)), BindValue(detail),
+					BindValue(db::Bool{ options.clear_machine }), BindValue(detail),
 					BindValue(id), BindValue(std::string(state_name(from))) });
 	if (db.changes() == 0) return false;
 	insert_event(db, id, state_name(from), to_name, detail);
@@ -232,7 +232,7 @@ bool transition(db::Database &db, int64_t id, State from, State to, const std::s
 }
 
 bool reset_restarts(db::Database &db, int64_t id) {
-	db.exec("UPDATE hosted_servers SET restarts = 0, updated_at = CURRENT_TIMESTAMP "
+	db.exec("UPDATE hosted_servers SET restarts = 0, updated_at = now() "
 			"WHERE id = $1 AND state = 'running' AND restarts > 0;",
 			{ BindValue(id) });
 	return db.changes() > 0;
@@ -244,7 +244,7 @@ bool request_stop(db::Database &db, int64_t id, const std::string &detail) {
 	if (rows.empty()) return false;
 	const auto state = state_from_name(rows.front().as_text(0).value_or(""));
 	if (!state || !is_live(*state) || *state == State::Stopping) return false;
-	db.exec("UPDATE hosted_servers SET state = 'stopping', updated_at = CURRENT_TIMESTAMP "
+	db.exec("UPDATE hosted_servers SET state = 'stopping', updated_at = now() "
 			"WHERE id = $1 AND state = $2;",
 			{ BindValue(id), BindValue(std::string(state_name(*state))) });
 	if (db.changes() == 0) return false;
@@ -260,7 +260,7 @@ size_t request_stop_all(db::Database &db, const std::string &detail) {
 					 " AND state <> 'stopping';")) {
 		const int64_t id = r.as_int(0).value_or(0);
 		const std::string from = r.as_text(1).value_or("");
-		db.exec("UPDATE hosted_servers SET state = 'stopping', updated_at = CURRENT_TIMESTAMP "
+		db.exec("UPDATE hosted_servers SET state = 'stopping', updated_at = now() "
 				"WHERE id = $1 AND state = $2;",
 				{ BindValue(id), BindValue(from) });
 		if (db.changes() == 0) continue;
@@ -272,7 +272,7 @@ size_t request_stop_all(db::Database &db, const std::string &detail) {
 }
 
 void set_service_account(db::Database &db, int64_t id, std::optional<int64_t> user_id) {
-	db.exec("UPDATE hosted_servers SET service_user_id = $1, updated_at = CURRENT_TIMESTAMP "
+	db.exec("UPDATE hosted_servers SET service_user_id = $1, updated_at = now() "
 			"WHERE id = $2;",
 			{ optional_id(user_id), BindValue(id) });
 }
@@ -280,14 +280,14 @@ void set_service_account(db::Database &db, int64_t id, std::optional<int64_t> us
 void set_machine(db::Database &db, int64_t id, const std::string &provider,
 		const std::string &machine_id, const std::string &address) {
 	db.exec("UPDATE hosted_servers SET provider = $1, machine_id = $2, machine_address = $3, "
-			"updated_at = CURRENT_TIMESTAMP WHERE id = $4;",
+			"updated_at = now() WHERE id = $4;",
 			{ BindValue(provider), BindValue(machine_id), BindValue(address), BindValue(id) });
 }
 
 void set_admin_login(db::Database &db, int64_t id, int admin_port, const std::string &user,
 		const std::string &password) {
 	db.exec("UPDATE hosted_servers SET admin_port = $1, admin_user = $2, admin_password = $3, "
-			"updated_at = CURRENT_TIMESTAMP WHERE id = $4;",
+			"updated_at = now() WHERE id = $4;",
 			{ BindValue(static_cast<int64_t>(admin_port)), BindValue(user), BindValue(password),
 					BindValue(id) });
 }

@@ -13,7 +13,7 @@
 #include "rate_limiter.h"
 #include "web_session.h"
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 
 #include <crow.h>
 

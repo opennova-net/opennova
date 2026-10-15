@@ -109,9 +109,9 @@ public:
 	// kMinHandlerThreads. Handlers can wait without working (a hosted server's
 	// console request waits on its admin link for up to 3 s), so a two-core
 	// machine still runs eight; the console admits at most two fewer
-	// waiting requests (hosted/console_routes.h). The SQLite pool grows to the
-	// peak of concurrent leases, one per handler thread at most, which this
-	// bounds.
+	// waiting requests (hosted/console_routes.h). Each holds at most one of
+	// the database pool's connections at a time (DATABASE_POOL_MAX of them);
+	// a handler finding every one leased waits for the next one back.
 	static constexpr unsigned kMinHandlerThreads = 8;
 	static unsigned handler_threads() {
 		return (std::max)(std::thread::hardware_concurrency(), kMinHandlerThreads);
@@ -185,7 +185,7 @@ private:
 	// account's status is the caller's to
 	// check. The NWHANDLE cookie never counts: the service sets it in the clear
 	// to the account's handle, so any client can send any account's (and a key
-	// minted on it would list a server as anyone's). Throws db::SqliteError.
+	// minted on it would list a server as anyone's). Throws db::Error.
 	std::optional<UserRecord> retail_login_user(
 			const std::map<std::string, std::string> &cookies, db::Database &db, const char *&how);
 	// Per-server-process EPASK params advertised via the EPASK cookie at

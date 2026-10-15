@@ -1,5 +1,5 @@
 // The hosted servers' supervisor and what it stands on (apps/novaworld_server/
-// hosted, migrations 0011 and 0014), on a migrated SQLite file with a
+// hosted), on a migrated database with a
 // FakeProvider (hosted_fake_provider.h) and a hand-stepped clock: the data sets
 // (the catalog, the two variables' reads, what each provider offers, a server
 // whose data set is no longer offered), the owner's settings and their checks
@@ -45,10 +45,11 @@
 #include <base/proc/child_process.h>
 #include <formats/admincfg/admin_cfg.h>
 #include <formats/gamecfg/game_cfg.h>
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/host_repository.h>
 
 #include "common/temp_dir.h"
+#include "common/test_database.h"
 #include "common/test_expect.h"
 
 #include <algorithm>
@@ -174,6 +175,7 @@ std::string credential(const std::string &text, const std::string &key) {
 // One supervisor over a fresh database and a FakeProvider, its clock in hand.
 struct Rig {
 	test_temp::TempDir temp;
+	test_db::TestDatabase scratch;
 	ConnectionPool pool;
 	FakeProvider fake;
 	hosted::SupervisorConfig config;
@@ -181,9 +183,7 @@ struct Rig {
 	std::vector<std::pair<uint32_t, int64_t>> pushes;
 	uint64_t now = 1000;
 
-	explicit Rig(const char *name) : temp(name), pool(temp.path / "hosted.db") {
-		auto boot = pool.acquire();
-		opennova::db::run_migrations(*boot, fs::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations");
+	explicit Rig(const char *name) : temp(name), pool(scratch.options()) {
 		config.cap = 3;
 		config.master_host = "127.0.0.1";
 		config.master_gate_port = 7597;
@@ -560,11 +560,10 @@ int test_data_sets() {
 // --- the service accounts -----------------------------------------------------
 
 int test_service_accounts() {
-	test_temp::TempDir temp("hosted_accounts");
-	ConnectionPool pool(temp.path / "accounts.db");
+	test_db::TestDatabase scratch;
+	ConnectionPool pool(scratch.options());
 	auto lease = pool.acquire();
 	Database &db = *lease;
-	opennova::db::run_migrations(db, fs::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations");
 	const int64_t player = make_player(db, "acct_player", false);
 	TEST_EXPECT(player > 0);
 
@@ -588,7 +587,7 @@ int test_service_accounts() {
 	TEST_EXPECT(nws::bootstrap_admin(db, "srv-7").outcome == nws::BootstrapAdminResult::Outcome::NoSuchAccount);
 	// A session row planted by hand resolves to nothing.
 	db.exec("INSERT INTO web_sessions (token_hash, user_id, expires_at) "
-			"VALUES ($1, $2, datetime('now', '+1 day'));",
+			"VALUES ($1, $2, (now() + interval '+1 day'));",
 			{ BindValue(nws::web_session_token_hash(std::string(64, 'b'))), BindValue(made.id) });
 	TEST_EXPECT(!nws::resolve_web_session(db, std::string(64, 'b')));
 
@@ -671,7 +670,7 @@ int test_requests() {
 				"kill_limit, max_score, respawn, start_delay, missions) "
 				"VALUES ($1, 'x', 8, 1, 1, 1, 0, 0, 'm.bms');",
 				{ BindValue(a) });
-	} catch (const opennova::db::SqliteError &) {
+	} catch (const opennova::db::Error &) {
 		refused = true;
 	}
 	TEST_EXPECT(refused);
@@ -1276,7 +1275,7 @@ int test_address_after_launch() {
 	return 0;
 }
 
-// The console ring (hosted_server_console, migration 0012): an append keeps a
+// The console ring (hosted_server_console): an append keeps a
 // server's newest `keep` lines and leaves another server's alone; the reads go
 // oldest first, past an id, the newest `limit`.
 int test_console_ring() {
@@ -1312,7 +1311,7 @@ int test_console_ring() {
 	bool refused = false;
 	try {
 		hosted::append_console(*db, a, { bad });
-	} catch (const opennova::db::SqliteError &) {
+	} catch (const opennova::db::Error &) {
 		refused = true;
 	}
 	TEST_EXPECT(refused && texts(a, 0, 100).size() == 5);
@@ -1604,8 +1603,8 @@ int test_local_provider() {
 // server answers by writing terminated.txt; TerminateProcess on Windows).
 int test_children_outlive_the_supervisor_thread() {
 	test_temp::TempDir temp("hosted_thread");
-	ConnectionPool pool(temp.path / "thread.db");
-	opennova::db::run_migrations(*pool.acquire(), fs::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations");
+	test_db::TestDatabase scratch;
+	ConnectionPool pool(scratch.options());
 	const int64_t owner = make_player(*pool.acquire(), "thread_owner", true);
 	TEST_EXPECT(owner > 0);
 	const auto request =
@@ -1654,6 +1653,7 @@ int test_children_outlive_the_supervisor_thread() {
 
 int main(int argc, char **argv) {
 	if (argc > 1 && std::strcmp(argv[1], "--resource-dir") == 0) return fake_serve_main(argc, argv);
+	test_db::init(argc, argv);
 	if (argc < 2) {
 		std::fprintf(stderr, "usage: hosted_supervisor_test <this binary's path>\n");
 		return 2;

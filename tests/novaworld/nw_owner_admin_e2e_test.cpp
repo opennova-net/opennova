@@ -1,7 +1,7 @@
 // The owner's pushes end to end: an in-process opennova-serve (serve::Server on a loose game
 // directory, the opennova_serve_server_command_push setup) hosting with an account (its
 // --credentials) on an in-process NovaWorld service (nw_service_harness.h: the HTTP, NW UDP and
-// gate listeners over one pooled SQLite file), administered by that account from the website's
+// gate listeners over one pooled database), administered by that account from the website's
 // own routes. Built only with BUILD_NOVAWORLD_HTTP.
 //
 //   * the server logs in, fetches its HOSTKEY from /NWHost.dll, hosts, and the update carrying
@@ -148,7 +148,8 @@ net::HttpReply owner_push(const Service &service, const std::string &session, ui
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
 	opennova::io::set_log_sink(&log_sink);
 	if (net::startup() != 0) {
 		std::fprintf(stderr, "FAIL: net::startup\n");
@@ -156,9 +157,8 @@ int main() {
 	}
 	const fs::path source_dir{ OPENNOVA_SOURCE_DIR };
 	{
-		// Declared first, so the database's files go only once every connection is closed.
 		test_temp::TempDir temp("nw_owner_admin");
-		Service service(temp.path / "owner_admin.db");
+		Service service;
 		const bool up = service.start(source_dir, temp.path, /*require_host_key=*/false);
 		expect(up, "the service starts");
 		{

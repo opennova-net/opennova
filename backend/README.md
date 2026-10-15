@@ -1,25 +1,54 @@
 # backend/
 
-Persistence layer for the standalone novaworld server.
+Persistence layer for the standalone novaworld server: its PostgreSQL 17
+schema and seed data.
 
 Contents:
-- `migrations/` — SQLite-flavored DDL applied idempotently on server boot via
-  `opennova::db::run_migrations` (engine/net/novaworld/db/sqlite.h). Order is
-  lexicographic: `0001_*.sql`, `0002_*.sql`, …
-- `seed/` — idempotent INSERT statements (`OR IGNORE`) so they can be re-run
-  safely. The standalone server applies these after migrations
-  during startup; the dev-only `0002_dev_users.sql` is skipped unless
-  `SEED_DEV_USERS` is set.
-- `data/` — runtime DB files (SQLite). Gitignored. The default location is
-  `backend/data/state.db`; override with the `DATABASE_PATH` env var.
+- `migrations/` — PostgreSQL DDL, applied on server boot by
+  `opennova::db::run_migrations` (engine/net/novaworld/db/database.h) in
+  lexicographic order: `0001_baseline.sql`, `0002_*.sql`, …. Each file runs in
+  its own transaction, and `_schema_migrations` records its name and SHA-256.
+  The run holds a database-wide advisory lock, so two servers booting on one
+  database apply each file once.
+- `seed/` — idempotent inserts (`ON CONFLICT DO NOTHING`), safe to re-run. The
+  server applies them after the migrations, under the same lock, at every
+  boot; the dev-only `0002_dev_users.sql` is skipped unless `SEED_DEV_USERS` is
+  set.
+- `data/` — gitignored scratch for a server run from the repo root: the local
+  hosted-server provider's working directories (`ONNET_HOSTED_WORK_DIR`'s
+  default). The database is not here: it is the PostgreSQL server's.
 
-Schema is derived from `onnet/alembic/versions/*` (PostgreSQL) collapsed to a
-single SQLite-flavored baseline. We don't need history compatibility with the
-Postgres deployment — this is a clean SQLite-backed start.
+`0001_baseline.sql` is the schema the SQLite-era migrations 0001..0015 had
+built, squashed into one file in PostgreSQL's dialect: `bigint` integers,
+identity ids, `timestamptz` times, `boolean` flags and `bytea` samples.
 
-The service database is disposable. A new table or feature goes in a new file; a fix
-to an existing table edits the migration that made it, in place. Migrations are
-tracked by file name only, so an edited file never runs again on an existing
-database: the PR says "the service DB must be reset" in its notes, and its deploy is
-`./deploy/run.sh app reset-db` ([DEPLOY.md](../DEPLOY.md), "Resetting the service
-database").
+## Migrations are append-only
+
+A migration that a database has applied never changes: the server refuses to
+boot when a recorded file's SHA-256 no longer matches the file on disk. A new
+table, a new column or a fix to an existing one is a new file with the next
+number. (The disposable-database practice of the SQLite era, an edited
+migration plus a reset, ended with the move to PostgreSQL.)
+
+## The database the server needs
+
+The server connects with `DATABASE_URL` (a libpq URI) and `DATABASE_PASSWORD`
+(apps/novaworld_server/README.md "Database"). Its database must be created
+with the SQL_ASCII encoding and the C locale; `run_migrations` refuses any
+other:
+
+```sql
+CREATE DATABASE novaworld TEMPLATE template0
+    ENCODING 'SQL_ASCII' LC_COLLATE 'C' LC_CTYPE 'C';
+```
+
+- **SQL_ASCII** stores text as the bytes it was sent. Retail clients send
+  their own code page's bytes (cp1252: server names, rosters, player names),
+  which the service keeps byte for byte and hands back to stock clients
+  unchanged; a UTF8 database would refuse them. The service converts that text
+  to UTF-8 itself where a UTF-8 consumer reads it (the JSON routes).
+- **C** orders text byte by byte and folds case for ASCII alone.
+
+`scripts/dev_postgres.sh up` runs a local server whose database is made this
+way, and the dev compose stack's `postgres` service is the same
+(`POSTGRES_INITDB_ARGS="--locale=C --encoding=SQL_ASCII"`).

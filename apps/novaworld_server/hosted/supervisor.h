@@ -70,7 +70,7 @@
 #include "hosted_repository.h"
 #include "machine_provider.h"
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/gate_probe.h>
 
 #include <atomic>

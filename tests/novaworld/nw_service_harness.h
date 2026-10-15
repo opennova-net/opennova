@@ -3,9 +3,10 @@
 // One NovaWorld service in-process for the end-to-end tests that need all of
 // it (nw_host_ownership_e2e, nw_owner_admin_e2e): the Crow HttpListener (the
 // retail NW*.dll pages from apps/novaworld_server/templates and the /api
-// routes), the NwUdpListener and the GateListener over one pooled SQLite file
-// under backend/migrations (plus the games seed) with one account, on
-// loopback ports the OS picks. Built only with BUILD_NOVAWORLD_HTTP.
+// routes), the NwUdpListener and the GateListener over one pooled database of
+// the service's own (common/test_database.h: backend/migrations plus the games
+// seed) with one account, on loopback ports the OS picks. Built only with
+// BUILD_NOVAWORLD_HTTP; main() calls test_db::init first.
 
 #include "auth.h"
 #include "gate_listener.h"
@@ -15,10 +16,10 @@
 #include "session_store.h"
 
 #include <net/novaworld/connection/manager.h>
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/host_repository.h>
 
-#include "common/file_io.h"
+#include "common/test_database.h"
 
 #include <chrono>
 #include <cstdint>
@@ -46,6 +47,7 @@ inline bool wait_for(const std::function<bool()> &done, int tries = 100) {
 // through the NW UDP listener), then the NW UDP listener naming its port as
 // the web domain, then the gate naming both.
 struct Service {
+	test_db::TestDatabase database{ test_db::Options{ /*migrate=*/true, /*seed_games=*/true } };
 	opennova::db::ConnectionPool pool;
 	opennova::ConnectionManager manager;
 	opennova::novaworld_server::SessionStore sessions;
@@ -54,8 +56,7 @@ struct Service {
 	opennova::novaworld_server::GateListener gate;
 	int64_t owner_id = 0;
 
-	explicit Service(const std::filesystem::path &db_path) :
-			pool(db_path), http(manager, pool, sessions), nwudp(manager) {}
+	Service() : pool(database.options()), http(manager, pool, sessions), nwudp(manager) {}
 
 	// `tweak`, when set, edits the config the listeners start with (the hosted
 	// servers' settings, say) after the harness has set its own.
@@ -64,9 +65,6 @@ struct Service {
 			const std::function<void(opennova::novaworld_server::ServerConfig &)> &tweak = {}) {
 		{
 			auto boot = pool.acquire();
-			opennova::db::run_migrations(*boot, source_dir / "backend" / "migrations");
-			boot->exec_script(test_io::read_file_text(
-					(source_dir / "backend" / "seed" / "0001_games.sql").string()));
 			opennova::novaworld_server::CreateUserParams p;
 			p.username = kOwner;
 			p.password = kOwnerPassword;

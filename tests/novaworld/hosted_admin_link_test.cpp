@@ -33,9 +33,10 @@
 
 #include <base/proc/child_process.h>
 #include <formats/gamecfg/game_cfg.h>
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 
 #include "common/temp_dir.h"
+#include "common/test_database.h"
 
 #include <chrono>
 #include <cstdint>
@@ -132,6 +133,7 @@ std::vector<std::string> replies_of(hosted::AdminLink &link, const std::string &
 } // namespace
 
 int main(int argc, char **argv) {
+	test_db::init(argc, argv);
 	if (argc < 2) {
 		std::fprintf(stderr, "usage: hosted_admin_link_test <opennova-serve binary>\n");
 		return 2;
@@ -184,11 +186,11 @@ int main(int argc, char **argv) {
 		if (!error.empty()) std::fprintf(stderr, "  spawn: %s\n", error.c_str());
 
 		// The console's database, with the server's row.
-		opennova::db::ConnectionPool pool(temp.path / "console.db");
+		test_db::TestDatabase scratch;
+		opennova::db::ConnectionPool pool(scratch.options());
 		int64_t server_id = 0;
 		{
 			auto db = pool.acquire();
-			opennova::db::run_migrations(*db, fs::path(OPENNOVA_SOURCE_DIR) / "backend" / "migrations");
 			server_id = db->query("INSERT INTO hosted_servers (state, game_name, max_players, time_limit, "
 								  "kill_limit, max_score, respawn, start_delay, missions) "
 								  "VALUES ('running', 'Admin Link Test', 8, 30, 50, 5, 5, 0, 'servetst.bms') "

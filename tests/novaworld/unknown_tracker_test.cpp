@@ -1,10 +1,11 @@
 // UnknownTracker unit tests: record/dedup semantics, sample cap, distinct
-// keys, DB flush + upsert against the real 0004 migration, and snapshot.
+// keys, DB flush + upsert against the migrated unknown_messages table, and
+// snapshot.
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/unknown_tracker.h>
 
-#include "../common/file_io.h"
+#include "../common/test_database.h"
 #include "../common/test_expect.h"
 
 #include <cstdio>
@@ -21,14 +22,6 @@ using opennova::UnknownTracker;
 using opennova::db::Database;
 
 namespace {
-
-// Apply the real 0004 migration onto a fresh in-memory DB so the test
-// exercises the same schema the server ships.
-void apply_unknown_messages_schema(Database &db) {
-	const std::filesystem::path source_dir{OPENNOVA_SOURCE_DIR};
-	const auto sql = source_dir / "backend" / "migrations" / "0004_unknown_messages.sql";
-	db.exec_script(test_io::read_file_text(sql.string()));
-}
 
 const UnknownSighting *find(const std::vector<UnknownSighting> &v,
                            const std::string &channel,
@@ -88,8 +81,9 @@ int test_distinct_keys() {
 }
 
 int test_flush_and_upsert() {
-	Database db(":memory:");
-	apply_unknown_messages_schema(db);
+	// The migrated schema, so the test exercises the table the server ships.
+	test_db::TestDatabase scratch;
+	Database db = scratch.open();
 
 	UnknownTracker t;
 	const std::vector<uint8_t> sample{0x10, 0x20, 0x30};
@@ -107,6 +101,7 @@ int test_flush_and_upsert() {
 	TEST_EXPECT(rows[0].as_int(2).value() == 2);
 	TEST_EXPECT(rows[0].as_int(3).value() == 500);
 	TEST_EXPECT(rows[0].as_int(4).value() == 900);
+	TEST_EXPECT(std::get<std::vector<uint8_t>>(rows[0].values[5]) == sample);
 	TEST_EXPECT(rows[0].as_text(6).value() == "1.2.3.4:64206");
 
 	// A second flush after more records upserts: count grows, first sample +
@@ -131,8 +126,8 @@ int test_flush_and_upsert() {
 }
 
 int test_flush_multiple_rows() {
-	Database db(":memory:");
-	apply_unknown_messages_schema(db);
+	test_db::TestDatabase scratch;
+	Database db = scratch.open();
 
 	UnknownTracker t;
 	t.record("nwu", "0x47", nullptr, 0, "a", 1);
@@ -167,7 +162,8 @@ int test_snapshot_returns_recorded() {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
 	if (test_record_and_dedup() != 0) return 1;
 	if (test_sample_cap() != 0) return 1;
 	if (test_distinct_keys() != 0) return 1;

@@ -30,8 +30,8 @@
 
 namespace opennova::novaworld_server::hosted {
 
-// The data sets' slugs: the games rows (backend/seed/0001_games.sql, and the
-// OpenNova row of migration 0013) whose lobbies they list in.
+// The data sets' slugs: the games rows (backend/seed/0001_games.sql) whose
+// lobbies they list in.
 inline constexpr const char *kDataSetJointOperations = "jop_2_consumer";
 inline constexpr const char *kDataSetDeltaForceXtreme2 = "dfx2_consumer";
 inline constexpr const char *kDataSetOpenNova = "opennova_0_consumer";

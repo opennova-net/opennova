@@ -49,7 +49,7 @@ target_include_directories(opennova_novaworld_server_core
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# The service target (the one sqlite consumer), the wire group (gate/session
+# The service target (the one libpq consumer), the wire group (gate/session
 # legs, npwire, napi, novacrypto — opennova_net), and the runtime group for
 # the in-match host session the JO listener hosts peers through
 # (runtime/inmatch, ADR 0043 d4).
@@ -82,8 +82,8 @@ endif()
 
 add_executable(opennova_novaworld_server main.cpp)
 
-# The service edge is direct as well: the sqlite-containment lint
-# (scripts/lint/link_graph_check.py) wants every target that reaches sqlite to
+# The service edge is direct as well: the libpq-containment lint
+# (scripts/lint/link_graph_check.py) wants every target that reaches libpq to
 # list opennova_novaworld_service itself.
 target_link_libraries(opennova_novaworld_server
     PRIVATE

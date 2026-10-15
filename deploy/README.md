@@ -11,7 +11,7 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
 - `compose/` — the runtime stack: base + dev + prod overlays.
 - `env/` — `*.tpl` carry `op://` references; `app.prod.env` carries the
   committed non-secret prod values.
-- `backup/` — the nightly sqlite backup sidecar.
+- `backup/` — the nightly `pg_dump` backup sidecar (the service database to S3).
 - `hosted-data/`: the helper image `hosted data-snapshot --data-set <slug>` builds on
   the operator's docker to write one data set of the hosted game servers' data, once,
   into a private encrypted EBS snapshot (one snapshot per data set).

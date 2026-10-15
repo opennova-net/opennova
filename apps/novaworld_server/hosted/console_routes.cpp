@@ -203,7 +203,7 @@ ConsoleRoutes::Caller ConsoleRoutes::owner_caller(const WebSessionUser &user, bo
 			c.refusal = std::move(refusal);
 			return c;
 		}
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] hosted console lookup failed: %s\n", e.what());
 		c.refusal = json_error(500, "db_error");
 		return c;
@@ -247,7 +247,7 @@ ConsoleRoutes::Caller ConsoleRoutes::admin_caller(const RouteAccess &access, uin
 			c.refusal = std::move(refusal);
 			return c;
 		}
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] hosted console lookup failed: %s\n", e.what());
 		c.refusal = json_error(500, "db_error");
 		return c;
@@ -540,7 +540,7 @@ crow::response ConsoleRoutes::console(const Caller &c, const crow::request &req)
 			e["at"] = line.at;
 			lines.push_back(std::move(e));
 		}
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] hosted console read failed: %s\n", e.what());
 		return json_error(500, "db_error");
 	}
@@ -663,7 +663,7 @@ void ConsoleRoutes::register_owner(WebApp &app) {
 			const auto server = latest_server_of(*pool_.acquire(), access.user->id);
 			if (!server) return json_error(404, "no_server", "this account has no hosted server");
 			c.server_id = server->id;
-		} catch (const db::SqliteError &e) {
+		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[http] hosted console lookup failed: %s\n", e.what());
 			return json_error(500, "db_error");
 		}
@@ -792,7 +792,7 @@ void ConsoleRoutes::register_admin(WebApp &app) {
 					const auto server = find_server(*pool_.acquire(), server_id_of(id));
 					if (!server) return json_error(404, "not_found", "no hosted server has this id");
 					c.server_id = server->id;
-				} catch (const db::SqliteError &e) {
+				} catch (const db::Error &e) {
 					std::fprintf(stderr, "[http] hosted console lookup failed: %s\n", e.what());
 					return json_error(500, "db_error");
 				}

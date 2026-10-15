@@ -34,8 +34,17 @@ struct ServerConfig {
 	// for the static SPA.
 	uint16_t http_port = 8080;
 
-	// SQLite path. Created on first boot if missing.
-	std::filesystem::path database_path = "backend/data/state.db";
+	// The PostgreSQL database (db/database.h): DATABASE_URL, a libpq
+	// connection URI (not secret; the boot line prints it, a password in it
+	// masked), and DATABASE_PASSWORD, the role's password, kept apart from it
+	// (secret: registered as a log secret at boot). The default URL is
+	// scripts/dev_postgres.sh's local server. DATABASE_POOL_MAX caps the
+	// connections the service opens (db::ConnectionPool): the gate's, the NW
+	// UDP listener's and main's for their lifetime, and one per HTTP request,
+	// supervisor pass or admin-link call while it runs.
+	std::string database_url = "postgresql://novaworld@127.0.0.1:5432/novaworld";
+	std::string database_password;
+	size_t database_pool_max = 16;
 
 	// Migrations + seed dirs. Read at startup.
 	std::filesystem::path migrations_dir = "backend/migrations";

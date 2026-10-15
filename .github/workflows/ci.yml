@@ -368,6 +368,9 @@ jobs:
   # sources join the server target and change no other object), so this job
   # also covers the net leg .github/workflows/net-linux.yml runs for the
   # NovaWorld images workflow. The two share the linux-root compiler cache.
+  # The service's database tests make a database per case on the PostgreSQL
+  # service container below (OPENNOVA_TEST_PG); without it they skip, which
+  # the core suite fails.
   test-linux:
     runs-on: ubuntu-latest
     needs: [changes]
@@ -379,12 +382,29 @@ jobs:
       CMAKE_GENERATOR: Ninja
       CMAKE_CXX_COMPILER_LAUNCHER: sccache
       CMAKE_C_COMPILER_LAUNCHER: sccache
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       # The root CMake project builds without godot-cpp or GUT, so the
       # submodules stay uninitialized.
       - uses: actions/checkout@v4
         with:
           lfs: false   # scoped below: the tests read fixtures/ only
+
+      # The service's client library (libpq; CMake's FindPostgreSQL).
+      - name: Install libpq
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpq-dev
 
       - name: Pull Git LFS assets (fixtures/ only)
         shell: bash
@@ -403,6 +423,7 @@ jobs:
         run: >-
           scripts/build.sh --no-godot --suite core
           --cmake-arg -DOPENNOVA_NOVAWORLD_SERVICE=ON --cmake-arg -DBUILD_NOVAWORLD_HTTP=ON
+          --cmake-arg -DOPENNOVA_TEST_PG=postgresql://postgres:postgres@127.0.0.1:5432/postgres
 
       - name: sccache stats
         if: always()

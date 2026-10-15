@@ -4,6 +4,25 @@
 # (OPENNOVA_NOVAWORLD_SERVICE, off by default; the Linux CI jobs and the server image turn
 # it on), so its paths are the including file's: ${CMAKE_CURRENT_SOURCE_DIR} is tests/.
 
+# The database tests run against a real PostgreSQL server: OPENNOVA_TEST_PG names
+# it (a libpq URI whose role may create and drop databases), and each test case
+# gets a database of its own there (tests/common/test_database.h). ctest hands
+# the URI to the test as `--pg <uri>`; with none set the test prints "SKIP: needs
+# a PostgreSQL server" and exits 77, which ctest reports Skipped and the core
+# suite fails (scripts/ci/test_suites.py). scripts/dev_postgres.sh runs a local
+# one and prints the value; CI runs postgres:17 as a job service.
+set(OPENNOVA_TEST_PG "" CACHE STRING
+    "PostgreSQL server URI the NovaWorld service's database tests create their databases on")
+function(opennova_add_pg_test name)
+    cmake_parse_arguments(TEST "" "" "COMMAND" ${ARGN})
+    if(OPENNOVA_TEST_PG)
+        add_test(NAME ${name} COMMAND ${TEST_COMMAND} --pg ${OPENNOVA_TEST_PG})
+    else()
+        add_test(NAME ${name} COMMAND ${TEST_COMMAND})
+    endif()
+    set_tests_properties(${name} PROPERTIES SKIP_RETURN_CODE 77 LABELS pg)
+endfunction()
+
 # The real GateListener on port 0 over loopback UDP: the port start() reports is
 # the one that answers a probe and the one the reply advertises as POSTIPPORT,
 # a second listener on that port fails start(), and each gate tag's reply
@@ -20,7 +39,7 @@ target_include_directories(gate_listener_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 target_compile_definitions(gate_listener_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-add_test(NAME gate_listener COMMAND gate_listener_test)
+opennova_add_pg_test(gate_listener COMMAND gate_listener_test)
 
 # Connection registry / manager tests
 add_executable(connection_registry_test novaworld/connection_registry_test.cpp)
@@ -33,17 +52,21 @@ target_link_libraries(connection_manager_test PRIVATE opennova_novaworld_service
 target_include_directories(connection_manager_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME connection_manager COMMAND connection_manager_test)
 
-# SQLite wrapper + migration runner tests
-add_executable(db_sqlite_test novaworld/db_sqlite_test.cpp)
-target_link_libraries(db_sqlite_test PRIVATE opennova_novaworld_service)
-target_include_directories(db_sqlite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME db_sqlite COMMAND db_sqlite_test)
+# The database wrapper (net/novaworld/db/database.h) and its migration runner:
+# binds and types, errors and SQLSTATEs, savepoints, read snapshots, the pool's
+# bound, the writer lock and its timeout, a reconnect, the migrations' records
+# and checksum refusal and the database contract.
+add_executable(db_test novaworld/db_test.cpp)
+target_link_libraries(db_test PRIVATE opennova_novaworld_service Threads::Threads)
+target_include_directories(db_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(db_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+opennova_add_pg_test(db COMMAND db_test)
 
 # One connection per thread under load (issue #981): registrations race host
-# writes and roster readers on one WAL file, each thread on its own pooled
+# writes and roster readers on one database, each thread on its own pooled
 # connection. Compiles the server's auth.cpp (create_user) directly: it joins
 # opennova_novaworld_server_core only under BUILD_NOVAWORLD_HTTP, and this test
-# runs on every build.
+# runs on every service build.
 add_executable(db_concurrency_test
     novaworld/db_concurrency_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/auth.cpp)
@@ -53,14 +76,14 @@ target_include_directories(db_concurrency_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 target_compile_definitions(db_concurrency_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-add_test(NAME db_concurrency COMMAND db_concurrency_test)
+opennova_add_pg_test(db_concurrency COMMAND db_concurrency_test)
 
 # The NovaWorld site's login sessions and roles (web_sessions, players.role):
 # the token kept as its SHA-256, the per-account cap, the sliding expiry and
-# its race (threads on a WAL file), the refusals, the revocations, the prune and
-# the one-shot bootstrap promotion, on a migrated in-memory database. Compiles the
-# server's web_session.cpp and auth.cpp directly, as db_concurrency_test does,
-# so it runs on every build, not only under BUILD_NOVAWORLD_HTTP.
+# its race (threads on pooled connections), the refusals, the revocations, the
+# prune and the one-shot bootstrap promotion, on a migrated database. Compiles
+# the server's web_session.cpp and auth.cpp directly, as db_concurrency_test
+# does, so it runs on every service build, not only under BUILD_NOVAWORLD_HTTP.
 add_executable(web_session_test
     novaworld/web_session_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server/auth.cpp
@@ -71,9 +94,9 @@ target_include_directories(web_session_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 target_compile_definitions(web_session_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-add_test(NAME web_session COMMAND web_session_test)
+opennova_add_pg_test(web_session COMMAND web_session_test)
 
-# The hosted servers' supervisor (apps/novaworld_server/hosted, migration 0011):
+# The hosted servers' supervisor (apps/novaworld_server/hosted):
 # the settings and their renders, the service accounts, the start request's
 # checks, the whole lifecycle on a FakeProvider and a hand-stepped clock (the
 # stops, the crash restarts and their limit, the timeouts, the health checks,
@@ -102,7 +125,7 @@ target_include_directories(hosted_supervisor_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 target_compile_definitions(hosted_supervisor_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-add_test(NAME hosted_supervisor
+opennova_add_pg_test(hosted_supervisor
     COMMAND hosted_supervisor_test $<TARGET_FILE:hosted_supervisor_test>)
 set_tests_properties(hosted_supervisor PROPERTIES TIMEOUT 300)
 
@@ -128,7 +151,7 @@ target_include_directories(hosted_admin_link_test PRIVATE
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 target_compile_definitions(hosted_admin_link_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_dependencies(hosted_admin_link_test opennova_serve)
-add_test(NAME hosted_admin_link COMMAND hosted_admin_link_test $<TARGET_FILE:opennova_serve>)
+opennova_add_pg_test(hosted_admin_link COMMAND hosted_admin_link_test $<TARGET_FILE:opennova_serve>)
 set_tests_properties(hosted_admin_link PROPERTIES RUN_SERIAL TRUE TIMEOUT 300)
 
 # The cloud MachineProvider (apps/novaworld_server/hosted/ec2_provider.h) on a stub
@@ -282,27 +305,27 @@ add_executable(host_prune_test novaworld/host_prune_test.cpp)
 target_link_libraries(host_prune_test PRIVATE opennova_novaworld_service)
 target_include_directories(host_prune_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(host_prune_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-add_test(NAME host_prune COMMAND host_prune_test)
+opennova_add_pg_test(host_prune COMMAND host_prune_test)
 
 # End-to-end host register -> read-back (the path /api/lobbies + /jop_2.gsb use).
 add_executable(host_register_list_test novaworld/host_register_list_test.cpp)
 target_link_libraries(host_register_list_test PRIVATE opennova_novaworld_service opennova_net)
 target_include_directories(host_register_list_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(host_register_list_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-add_test(NAME host_register_list COMMAND host_register_list_test)
+opennova_add_pg_test(host_register_list COMMAND host_register_list_test)
 
-# The listing's owner below the HTTP layer (host_keys, migration 0009): the hosting-key
-# store's hash, cap, claims and sweep, and the lobby session linking a listing to the account
-# its HostKey was minted for, through updates and a parked re-host, plus
-# ONNET_REQUIRE_HOST_KEY's refusal. A migrated in-memory database; runs on every build.
+# The listing's owner below the HTTP layer (host_keys): the hosting-key store's hash, cap,
+# claims and sweep, and the lobby session linking a listing to the account its HostKey was
+# minted for, through updates and a parked re-host, plus ONNET_REQUIRE_HOST_KEY's refusal. A
+# migrated database per case; runs on every service build.
 add_executable(host_key_test novaworld/host_key_test.cpp)
 target_link_libraries(host_key_test PRIVATE opennova_novaworld_service opennova_net)
 target_include_directories(host_key_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(host_key_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-add_test(NAME host_key COMMAND host_key_test)
+opennova_add_pg_test(host_key COMMAND host_key_test)
 
-# The service's CD keys below the HTTP layer (apps/novaworld_server/cd_keys.h, migration
-# 0015): the serial format, generate / list / assign / revoke, and the DFX2 activations
+# The service's CD keys below the HTTP layer (apps/novaworld_server/cd_keys.h): the
+# serial format, generate / list / assign / revoke, and the DFX2 activations
 # (the account's, minting its first key or not, and an admin's manual one), each NWACT
 # read back by the client's leg. Compiles the server's cd_keys.cpp directly, as
 # hosted_supervisor_test does, so it runs on every build.
@@ -314,33 +337,35 @@ target_include_directories(cd_keys_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_server)
 target_compile_definitions(cd_keys_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-add_test(NAME cd_keys COMMAND cd_keys_test)
+opennova_add_pg_test(cd_keys COMMAND cd_keys_test)
 
+# The schema backend/migrations builds and the seeds: tables, columns, keys, indexes and
+# the rules they hold, the applied list against the directory, the seeds' rows.
 add_executable(backend_schema_test novaworld/backend_schema_test.cpp)
 target_link_libraries(backend_schema_test PRIVATE opennova_novaworld_service)
 target_include_directories(backend_schema_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(backend_schema_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-add_test(NAME backend_schema COMMAND backend_schema_test)
+opennova_add_pg_test(backend_schema COMMAND backend_schema_test)
 
 # The service's HTTP route harness (hosted servers, PR A): the Crow listener from
-# opennova_novaworld_server_core on a loopback port over a pooled SQLite file under
-# the backend migrations, driven with apps/common's http_exchange. Only with the
-# HTTP layer (BUILD_NOVAWORLD_HTTP); the service edge is direct for the
-# sqlite-containment lint.
+# opennova_novaworld_server_core on a loopback port over a pooled, migrated database,
+# driven with apps/common's http_exchange. Only with the HTTP layer
+# (BUILD_NOVAWORLD_HTTP); the service edge is direct for the libpq-containment lint.
 if(BUILD_NOVAWORLD_HTTP)
     add_executable(opennova_novaworld_server_http_routes_test novaworld/http_routes_test.cpp)
     target_link_libraries(opennova_novaworld_server_http_routes_test PRIVATE
         opennova_novaworld_server_core opennova_novaworld_service)
     target_include_directories(opennova_novaworld_server_http_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(opennova_novaworld_server_http_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-    add_test(NAME opennova_novaworld_server_http_routes COMMAND opennova_novaworld_server_http_routes_test)
+    opennova_add_pg_test(opennova_novaworld_server_http_routes
+        COMMAND opennova_novaworld_server_http_routes_test)
     # The concurrent case gives each request up to 30 s; this bounds a hang
     # below ctest's 1500 s default.
     set_tests_properties(opennova_novaworld_server_http_routes PROPERTIES TIMEOUT 120)
 
-    # The listing's owner end to end (host_keys, migration 0009): two in-process
-    # services (the HTTP, NW UDP and gate listeners over one pooled SQLite file
-    # each, one with ONNET_REQUIRE_HOST_KEY) and opennova-serve's Lister with
+    # The listing's owner end to end (host_keys): two in-process services (the
+    # HTTP, NW UDP and gate listeners over one pooled database each, one with
+    # ONNET_REQUIRE_HOST_KEY) and opennova-serve's Lister with
     # and without an account, plus hand-driven host sessions for the NWU
     # reconnect and a second connection presenting a listed key. Its packet
     # windows are protocol assertions, so it runs serially.
@@ -349,7 +374,7 @@ if(BUILD_NOVAWORLD_HTTP)
         opennova_novaworld_server_core opennova_serve_core opennova_novaworld_service)
     target_include_directories(nw_host_ownership_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(nw_host_ownership_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-    add_test(NAME nw_host_ownership_e2e COMMAND nw_host_ownership_e2e_test)
+    opennova_add_pg_test(nw_host_ownership_e2e COMMAND nw_host_ownership_e2e_test)
     set_tests_properties(nw_host_ownership_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
 
     # The owner's pushes end to end: an in-process opennova-serve hosting with an account on an
@@ -362,7 +387,7 @@ if(BUILD_NOVAWORLD_HTTP)
         opennova_novaworld_server_core opennova_serve_core opennova_novaworld_service)
     target_include_directories(nw_owner_admin_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(nw_owner_admin_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-    add_test(NAME nw_owner_admin_e2e COMMAND nw_owner_admin_e2e_test)
+    opennova_add_pg_test(nw_owner_admin_e2e COMMAND nw_owner_admin_e2e_test)
     set_tests_properties(nw_owner_admin_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 120)
 
     # A hosted server end to end (apps/novaworld_server/hosted): an in-process service with
@@ -377,12 +402,12 @@ if(BUILD_NOVAWORLD_HTTP)
     target_include_directories(hosted_local_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(hosted_local_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     add_dependencies(hosted_local_e2e_test opennova_serve)
-    add_test(NAME hosted_local_e2e COMMAND hosted_local_e2e_test $<TARGET_FILE:opennova_serve>)
+    opennova_add_pg_test(hosted_local_e2e COMMAND hosted_local_e2e_test $<TARGET_FILE:opennova_serve>)
     set_tests_properties(hosted_local_e2e PROPERTIES RUN_SERIAL TRUE TIMEOUT 300)
 endif()
 
 # The server binary's signal shutdown: SIGINT and SIGTERM each run main()'s
-# orderly stop (exit 0, listeners in order, the WAL closed) with the HTTP layer
+# orderly stop (exit 0, listeners in order, the database closed) with the HTTP layer
 # on or off; with it on, past Crow and a held-open request. A last run checks
 # that on every port 0 the gate (and the NW UDP SessionInit) advertise the
 # ports the sibling listeners bound. POSIX only (fork, kill); TIMEOUT bounds it
@@ -390,24 +415,26 @@ endif()
 if(UNIX)
     add_executable(opennova_novaworld_server_signal_shutdown_test
         novaworld/server_signal_shutdown_test.cpp)
-    target_link_libraries(opennova_novaworld_server_signal_shutdown_test PRIVATE opennova_app_common)
+    # The service for the test's own database (common/test_database.h).
+    target_link_libraries(opennova_novaworld_server_signal_shutdown_test PRIVATE
+        opennova_app_common opennova_novaworld_service)
     target_include_directories(opennova_novaworld_server_signal_shutdown_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(opennova_novaworld_server_signal_shutdown_test PRIVATE
         OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
         $<$<BOOL:${BUILD_NOVAWORLD_HTTP}>:OPENNOVA_HTTP_ENABLED>)
     add_dependencies(opennova_novaworld_server_signal_shutdown_test opennova_novaworld_server)
-    add_test(NAME opennova_novaworld_server_signal_shutdown
+    opennova_add_pg_test(opennova_novaworld_server_signal_shutdown
         COMMAND opennova_novaworld_server_signal_shutdown_test $<TARGET_FILE:opennova_novaworld_server>)
     set_tests_properties(opennova_novaworld_server_signal_shutdown PROPERTIES TIMEOUT 120)
 endif()
 
 # Unknown-message tracker: record/dedup, sample cap, flush/upsert against the
-# real 0004 migration (OPENNOVA_SOURCE_DIR for the SQL on disk), snapshot.
+# migrated unknown_messages table (OPENNOVA_SOURCE_DIR for the SQL on disk), snapshot.
 add_executable(unknown_tracker_test novaworld/unknown_tracker_test.cpp)
 target_link_libraries(unknown_tracker_test PRIVATE opennova_novaworld_service)
 target_include_directories(unknown_tracker_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(unknown_tracker_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
-add_test(NAME unknown_tracker COMMAND unknown_tracker_test)
+opennova_add_pg_test(unknown_tracker COMMAND unknown_tracker_test)
 
 # opennova-serve listed on NovaWorld (ADR 0051 d6) against the real NwUdpListener and an in-test
 # gate over loopback: it hosts on the game socket before the boot, lists the Serve Only columns

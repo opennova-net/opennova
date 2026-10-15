@@ -10,7 +10,8 @@ endif()
 # The NovaWorld service (the server-side lobby and persistence leg: the
 # opennova_novaworld_service target, apps/novaworld_server and their tests)
 # builds only when asked. It runs on Linux (the server image, the Linux CI
-# jobs); the game, the tools and opennova-serve never need it.
+# jobs) over PostgreSQL through the system libpq (libpq-dev to build, libpq5
+# to run); the game, the tools and opennova-serve never need it.
 option(OPENNOVA_NOVAWORLD_SERVICE
     "Build the NovaWorld service (opennova_novaworld_service, apps/novaworld_server, their tests)" OFF)
 # Its HTTP layer: Crow and Asio, fetched at configure time.
@@ -21,9 +22,6 @@ if(BUILD_NOVAWORLD_HTTP AND NOT OPENNOVA_NOVAWORLD_SERVICE)
 endif()
 
 # Vendored dependencies used by the native network stack.
-if(OPENNOVA_NOVAWORLD_SERVICE)
-    add_subdirectory(third_party/sqlite)
-endif()
 add_subdirectory(third_party/bcrypt)
 # Vendored miniz: the BFC1 container decoder's inflate (engine/formats/bfc1).
 add_subdirectory(third_party/miniz)

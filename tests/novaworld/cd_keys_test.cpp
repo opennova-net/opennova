@@ -1,5 +1,5 @@
-// The service's CD keys below the HTTP layer (apps/novaworld_server/cd_keys.h,
-// migration 0015), over a migrated in-memory database: the serial format, the
+// The service's CD keys below the HTTP layer (apps/novaworld_server/cd_keys.h),
+// over a migrated database: the serial format, the
 // keys an admin generates, lists, assigns and revokes, and the activations, an
 // account's (the retail login's: under its live key, the first key minted when
 // minting is on, none once its keys are revoked) and a key's (an admin's manual
@@ -10,8 +10,9 @@
 #include "cd_keys.h"
 
 #include <net/novacrypto/cdkey.h>
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 
+#include "common/test_database.h"
 #include "common/test_expect.h"
 
 #include <cstdint>
@@ -217,10 +218,10 @@ int activations(Database &db) {
 
 } // namespace
 
-int main() {
-	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
-	Database db(":memory:");
-	opennova::db::run_migrations(db, source_dir / "backend" / "migrations");
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
+	test_db::TestDatabase scratch;
+	Database db = scratch.open();
 	int rc = 0;
 	rc |= serial_format();
 	rc |= needs_activation();

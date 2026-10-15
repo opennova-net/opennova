@@ -1,7 +1,8 @@
 // Standalone novaworld server entrypoint.
 //
-// Wires the gate UDP, NW UDP, HTTP listeners onto a single SQLite-backed
-// process. Architecture and design rationale: the README.md beside this file.
+// Wires the gate UDP, NW UDP, HTTP listeners into one process over the
+// service's PostgreSQL database. Architecture and design rationale: the
+// README.md beside this file.
 // This is our NovaWorld server, not an emulator (CONTEXT.md "NovaWorld").
 
 #include "gate_listener.h"
@@ -25,7 +26,7 @@
 #endif
 
 #include <net/novaworld/connection/manager.h>
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/unknown_tracker.h>
 
@@ -74,6 +75,9 @@ void install_signal_handlers() {
 	std::signal(SIGTERM, on_signal);
 }
 
+// Every seed file, each a script the server runs as one transaction. The
+// caller holds the migration lock, so two services booting on one database
+// seed it one after the other.
 void apply_seed(opennova::db::Database &db,
                 const std::filesystem::path &seed_dir,
                 bool include_dev_users) {
@@ -104,7 +108,7 @@ void apply_seed(opennova::db::Database &db,
 			db.exec_script(os.str());
 			std::printf("[boot] seed applied: %s\n",
 			            p.filename().string().c_str());
-		} catch (const opennova::db::SqliteError &e) {
+		} catch (const opennova::db::Error &e) {
 			std::fprintf(stderr,
 			             "[boot] seed FAILED: %s — %s\n",
 			             p.filename().string().c_str(), e.what());
@@ -310,39 +314,43 @@ int main() {
 	std::printf("  public_host=%s\n", config.public_host.c_str());
 	std::printf("  gate_udp=:%u  nw_udp=:%u  http=:%u\n",
 	            config.gate_udp_port, config.nw_udp_port, config.http_port);
-	std::printf("  database=%s\n", config.database_path.string().c_str());
+	std::printf("  database=%s (pool of %zu)\n", db::masked_url(config.database_url).c_str(),
+	            config.database_pool_max);
 
-	// --- DB: ensure dir exists, open, migrate, seed ----------------------
-	if (auto parent = config.database_path.parent_path(); !parent.empty()) {
-		std::filesystem::create_directories(parent);
-	}
+	// --- DB: connect, migrate, seed --------------------------------------
+	// The password never reaches a log line.
+	add_log_secret(config.database_password);
+	db::ConnectOptions db_options;
+	db_options.url = config.database_url;
+	db_options.password = config.database_password;
 	// Every thread that touches the database owns its connection (Database is
 	// single-threaded): this thread, the gate's and the NW UDP listener's
 	// receive threads each hold one for their lifetime (the listeners lease
-	// theirs in start(), which fails the boot when the open does); each HTTP
+	// theirs in start(), which fails the boot when the connect does); each HTTP
 	// request and each erase_lobby_state call leases one for the call. The pool
 	// outlives every listener (declared first, destroyed last).
 	std::unique_ptr<db::ConnectionPool> db_pool;
 	std::optional<db::ConnectionPool::Lease> main_lease;
 	try {
-		db_pool = std::make_unique<db::ConnectionPool>(config.database_path);
+		db_pool = std::make_unique<db::ConnectionPool>(db_options, config.database_pool_max);
 		main_lease.emplace(db_pool->acquire());
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[boot] FATAL: open db failed: %s\n", e.what());
 		return 1;
 	}
 	db::Database &dbh = **main_lease;
 
+	// The migrations and the seeds under one hold of the migration lock.
 	try {
+		const db::SessionLock migrating(dbh, db::kMigrationLock);
 		auto r = db::run_migrations(dbh, config.migrations_dir);
 		std::printf("[boot] migrations: %zu applied, %zu skipped\n",
 		            r.applied.size(), r.skipped.size());
-	} catch (const db::SqliteError &e) {
+		apply_seed(dbh, config.seed_dir, config.seed_dev_users);
+	} catch (const std::exception &e) {
 		std::fprintf(stderr, "[boot] FATAL: migrations failed: %s\n", e.what());
 		return 1;
 	}
-
-	apply_seed(dbh, config.seed_dir, config.seed_dev_users);
 
 #ifdef OPENNOVA_HTTP_ENABLED
 	// The first website admin: ONNET_BOOTSTRAP_ADMIN names an existing account,
@@ -369,7 +377,7 @@ int main() {
 				             name.c_str());
 				break;
 			}
-		} catch (const db::SqliteError &e) {
+		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[boot] WARN bootstrap admin: %s\n", e.what());
 		}
 	}
@@ -395,14 +403,14 @@ int main() {
 	try {
 		hostdb::clear_all(dbh);
 		std::printf("[boot] active_hosts + host_players + host key claims cleared (previous-run cleanup)\n");
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[boot] WARN active_hosts clear: %s\n", e.what());
 	}
 #ifdef OPENNOVA_HTTP_ENABLED
 	try {
 		clear_all_active_user_sessions(dbh);
 		std::printf("[boot] active_user_sessions cleared (previous-run cleanup)\n");
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[boot] WARN active_user_sessions clear: %s\n", e.what());
 	}
 #endif
@@ -539,7 +547,7 @@ int main() {
 		// since the last tick into unknown_messages (deduped upsert).
 		try {
 			unknown_tracker.flush(dbh);
-		} catch (const db::SqliteError &e) {
+		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[tick] WARN unknown_tracker flush: %s\n", e.what());
 		}
 
@@ -553,7 +561,7 @@ int main() {
 				if (pruned > 0) {
 					std::printf("[sweep] pruned %d stale host row(s)\n", pruned);
 				}
-			} catch (const db::SqliteError &e) {
+			} catch (const db::Error &e) {
 				std::fprintf(stderr, "[sweep] WARN prune_stale_hosts: %s\n", e.what());
 			}
 			// Hosting keys idle for a day; a listed server's key counts as used.
@@ -561,7 +569,7 @@ int main() {
 				if (const auto pruned = hostdb::prune_host_keys(dbh); pruned > 0) {
 					std::printf("[sweep] pruned %zu idle host key(s)\n", pruned);
 				}
-			} catch (const db::SqliteError &e) {
+			} catch (const db::Error &e) {
 				std::fprintf(stderr, "[sweep] WARN prune_host_keys: %s\n", e.what());
 			}
 #ifdef OPENNOVA_HTTP_ENABLED
@@ -574,7 +582,7 @@ int main() {
 				if (const auto pruned = prune_login_addresses(dbh); pruned > 0) {
 					std::printf("[sweep] pruned %zu stale login address(es)\n", pruned);
 				}
-			} catch (const db::SqliteError &e) {
+			} catch (const db::Error &e) {
 				std::fprintf(stderr, "[sweep] WARN web session / login address prune: %s\n", e.what());
 			}
 #endif
@@ -585,7 +593,7 @@ int main() {
 	// lease), then the gate and NW UDP receive threads (each returns its lease
 	// as it exits), then the connections. As main() returns, its locals are
 	// destroyed in reverse declaration order, so main_lease and then the pool
-	// (declared first) go last; the last close checkpoints the WAL.
+	// (declared first) go last, closing every connection.
 #ifdef OPENNOVA_HTTP_ENABLED
 	// The supervisor's thread first, then the provider, which ends the local
 	// provider's servers while the listeners still serve their deregistration.

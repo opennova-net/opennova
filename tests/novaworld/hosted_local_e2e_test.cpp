@@ -18,7 +18,7 @@
 //     server, which saves game.cfg in its working directory with the name;
 //   * the supervisor's admin link comes up once the server runs: it logs in on
 //     the server's remote-admin port with the rendered svc login, runs PLAYER
-//     LIST and a recorded CHAT SEND, and the console ring (migration 0012) holds
+//     LIST and a recorded CHAT SEND, and the console ring holds
 //     the session's line, the command and its reply, never the password;
 //   * POST /api/me/server/stop: the supervisor pushes ServerStopHosting, the
 //     listing leaves the browser, the process is gone, the row is stopped and
@@ -195,6 +195,7 @@ void log_sink(opennova::io::LogLevel level, const char *message) {
 } // namespace
 
 int main(int argc, char **argv) {
+	test_db::init(argc, argv);
 	if (argc < 2) {
 		std::fprintf(stderr, "usage: hosted_local_e2e_test <opennova-serve binary>\n");
 		return 2;
@@ -241,7 +242,7 @@ int main(int argc, char **argv) {
 		const std::vector<hosted::DataSet> data_sets = hosted::offered_data_sets("local", data_set_configs);
 		expect(data_sets.size() == 2, "the local provider offers both data sets");
 
-		Service service(temp.path / "hosted.db");
+		Service service;
 		const bool up = service.start(source_dir, temp.path, /*require_host_key=*/false,
 				[&data_sets_json](nws::ServerConfig &config) {
 					config.hosted_provider = "local";

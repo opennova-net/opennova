@@ -2,7 +2,7 @@
 
 #include "catalog_repository.h"
 
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net_sockets.h>
 
 #include <atomic>
@@ -32,7 +32,7 @@ struct ServerConfig;
 // (catalog::GameCatalog::by_gate_tag), which supplies the reply's LobbyName,
 // its startupurl's query and its GLSVSS leg (the configured one standing in
 // for a row with none); a tag no row (nor alias) answers to gets no reply. start() loads the catalog once from its leased connection,
-// so the receive thread answers a probe without touching SQLite.
+// so the receive thread answers a probe without touching the database.
 //
 // Runs on its own thread. start() returns immediately; the listener stays
 // up until stop() is called or the destructor runs. Designed to be cheap

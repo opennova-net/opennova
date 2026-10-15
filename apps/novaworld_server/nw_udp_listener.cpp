@@ -11,7 +11,7 @@
 #include <net/napi/tlv.h>
 #include <net/novacrypto/nwu.h>
 #include <net/novaworld/connection/manager.h>
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/lobby_session.h>
 #include <net/npwire/cs_config.h>
@@ -396,7 +396,7 @@ bool NwUdpListener::start(const ServerConfig &config) {
 	if (db_pool_) {
 		try {
 			db_conn.emplace(db_pool_->acquire());
-		} catch (const db::SqliteError &e) {
+		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[nwudp] db open failed: %s\n", e.what());
 			return false;
 		}

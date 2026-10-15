@@ -1,6 +1,6 @@
 // The NovaWorld site's login-session store (apps/novaworld_server/
 // web_session.*) and account roles (auth.*: bootstrap_admin, the role column,
-// update_user's session revocation) over a migrated in-memory database: the
+// update_user's session revocation) over a migrated database: the
 // token minted and kept only as its SHA-256, the per-account session cap, a
 // live session's user, the refusals (malformed, unknown, expired, an inactive
 // account), the once-a-minute sliding expiry and its race, logout, the prune,
@@ -18,10 +18,10 @@
 #include "web_session.h"
 
 #include <base/io/sha256.h>
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/host_repository.h>
 
-#include "common/temp_dir.h"
+#include "common/test_database.h"
 #include "common/test_expect.h"
 
 #include <atomic>
@@ -43,7 +43,6 @@ using opennova::db::Database;
 
 namespace {
 
-const std::filesystem::path kSourceDir{OPENNOVA_SOURCE_DIR};
 
 int64_t make_player(Database &db, const std::string &username, const std::string &pcid) {
 	nws::CreateUserParams p;
@@ -96,7 +95,7 @@ int test_create_keeps_only_the_hash(Database &db, int64_t alice) {
 	TEST_EXPECT(hash == opennova::io::sha256_hex(opennova::io::sha256(token)));
 	TEST_EXPECT(hash != token);
 	const auto rows = db.query(
-		"SELECT user_id, ip, user_agent, expires_at > datetime('now', '+29 days') "
+		"SELECT user_id, ip, user_agent, expires_at > (now() + interval '+29 days') "
 		"FROM web_sessions WHERE token_hash = $1;",
 		{BindValue(hash)});
 	TEST_EXPECT(rows.size() == 1);
@@ -147,7 +146,7 @@ int test_resolve_and_refusals(Database &db, int64_t alice) {
 	TEST_EXPECT(!nws::resolve_web_session(db, "not-a-token").has_value());
 	TEST_EXPECT(!nws::resolve_web_session(db, std::string(64, '0')).has_value());
 
-	db.exec("UPDATE web_sessions SET expires_at = datetime('now', '-1 seconds') "
+	db.exec("UPDATE web_sessions SET expires_at = (now() + interval '-1 seconds') "
 	        "WHERE token_hash = $1;",
 	        {BindValue(nws::web_session_token_hash(token))});
 	TEST_EXPECT(!nws::resolve_web_session(db, token).has_value());
@@ -159,22 +158,22 @@ int test_resolve_and_refusals(Database &db, int64_t alice) {
 int test_sliding_expiry(Database &db, int64_t alice) {
 	const std::string token = mint(db, alice);
 	const std::string hash = nws::web_session_token_hash(token);
-	db.exec("UPDATE web_sessions SET last_seen_at = datetime('now', '-120 seconds'), "
-	        "expires_at = datetime('now', '+1 days') WHERE token_hash = $1;",
+	db.exec("UPDATE web_sessions SET last_seen_at = (now() + interval '-120 seconds'), "
+	        "expires_at = (now() + interval '+1 days') WHERE token_hash = $1;",
 	        {BindValue(hash)});
 	auto found = nws::resolve_web_session(db, token);
 	TEST_EXPECT(found && found->slid);
-	TEST_EXPECT(scalar(db, "SELECT expires_at > datetime('now', '+29 days') FROM web_sessions "
+	TEST_EXPECT(scalar(db, "SELECT expires_at > (now() + interval '+29 days') FROM web_sessions "
 	                       "WHERE token_hash = $1;", hash) == 1);
-	TEST_EXPECT(scalar(db, "SELECT last_seen_at >= datetime('now', '-5 seconds') FROM web_sessions "
+	TEST_EXPECT(scalar(db, "SELECT last_seen_at >= (now() + interval '-5 seconds') FROM web_sessions "
 	                       "WHERE token_hash = $1;", hash) == 1);
 
-	db.exec("UPDATE web_sessions SET last_seen_at = datetime('now', '-10 seconds'), "
-	        "expires_at = datetime('now', '+1 days') WHERE token_hash = $1;",
+	db.exec("UPDATE web_sessions SET last_seen_at = (now() + interval '-10 seconds'), "
+	        "expires_at = (now() + interval '+1 days') WHERE token_hash = $1;",
 	        {BindValue(hash)});
 	found = nws::resolve_web_session(db, token);
 	TEST_EXPECT(found && !found->slid);
-	TEST_EXPECT(scalar(db, "SELECT expires_at < datetime('now', '+2 days') FROM web_sessions "
+	TEST_EXPECT(scalar(db, "SELECT expires_at < (now() + interval '+2 days') FROM web_sessions "
 	                       "WHERE token_hash = $1;", hash) == 1);
 	return 0;
 }
@@ -191,13 +190,13 @@ int test_delete_and_prune(Database &db, int64_t alice) {
 	nws::delete_web_session(db, "not-a-token"); // malformed: a no-op
 
 	const std::string stale = mint(db, alice);
-	db.exec("UPDATE web_sessions SET expires_at = datetime('now', '-1 seconds') "
+	db.exec("UPDATE web_sessions SET expires_at = (now() + interval '-1 seconds') "
 	        "WHERE token_hash = $1;",
 	        {BindValue(nws::web_session_token_hash(stale))});
 	TEST_EXPECT(nws::prune_expired_web_sessions(db) >= 1);
 	TEST_EXPECT(!session_exists(db, stale));
 	TEST_EXPECT(session_exists(db, kept));
-	TEST_EXPECT(db.query("SELECT 1 FROM web_sessions WHERE expires_at <= datetime('now');").empty());
+	TEST_EXPECT(db.query("SELECT 1 FROM web_sessions WHERE expires_at <= now();").empty());
 	return 0;
 }
 
@@ -298,7 +297,7 @@ int test_update_revokes_sessions(Database &db, int64_t) {
 	bool caught = false;
 	try {
 		db.exec("UPDATE players SET account_status = '' WHERE id = $1;", { BindValue(bob) });
-	} catch (const opennova::db::SqliteError &) {
+	} catch (const opennova::db::Error &) {
 		caught = true;
 	}
 	TEST_EXPECT(caught);
@@ -382,7 +381,7 @@ int test_login_addresses(Database &db, int64_t) {
 	TEST_EXPECT(count() == 1);
 
 	// 30 days unused: no longer known, and pruned.
-	db.exec("UPDATE login_addresses SET last_success_at = datetime('now', '-31 days') "
+	db.exec("UPDATE login_addresses SET last_success_at = (now() + interval '-31 days') "
 	        "WHERE user_id = $1;",
 	        {BindValue(fay)});
 	TEST_EXPECT(!nws::is_known_login_address(db, "fay", "198.51.100.1"));
@@ -637,22 +636,21 @@ int test_bootstrap_and_roles(Database &db, int64_t alice) {
 	return 0;
 }
 
-// Requests racing on one stale session, each on its own connection to a WAL
-// file: every one resolves the account, and exactly one slides the expiry
-// (the UPDATE repeats the staleness test, so the others write nothing).
+// Requests racing on one stale session, each on its own pooled connection:
+// every one resolves the account, and exactly one slides the expiry (the
+// UPDATE repeats the staleness test, so the others write nothing).
 int test_slide_race() {
-	test_temp::TempDir temp("web_session_race");
-	opennova::db::ConnectionPool pool(temp.path / "race.db");
+	test_db::TestDatabase scratch;
+	opennova::db::ConnectionPool pool(scratch.options());
 	int64_t id = 0;
 	std::string token;
 	{
 		auto conn = pool.acquire();
-		opennova::db::run_migrations(*conn, kSourceDir / "backend" / "migrations");
 		id = make_player(*conn, "racer", "0000ace0");
 		TEST_EXPECT(id > 0);
 		token = mint(*conn, id);
-		conn->exec("UPDATE web_sessions SET last_seen_at = datetime('now', '-120 seconds'), "
-		           "expires_at = datetime('now', '+1 days') WHERE token_hash = $1;",
+		conn->exec("UPDATE web_sessions SET last_seen_at = (now() + interval '-120 seconds'), "
+		           "expires_at = (now() + interval '+1 days') WHERE token_hash = $1;",
 		           {BindValue(nws::web_session_token_hash(token))});
 	}
 	constexpr int kRacers = 8;
@@ -678,9 +676,10 @@ int test_slide_race() {
 
 } // namespace
 
-int main() {
-	Database db(":memory:");
-	opennova::db::run_migrations(db, kSourceDir / "backend" / "migrations");
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
+	test_db::TestDatabase scratch;
+	opennova::db::Database db = scratch.open();
 	const int64_t alice = make_player(db, "alice", "0000a11c");
 	TEST_EXPECT(alice > 0);
 

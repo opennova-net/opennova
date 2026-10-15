@@ -8,7 +8,7 @@
 // listener asking for that same port fails start(), the boot-fatal path.
 //
 // One lobby per title: the listener reads the games table (the repo's
-// migrations and the games seed, on a shared in-memory database) at start(),
+// migrations and the games seed, on a database of the test's own) at start(),
 // and each probe's tag selects the row whose LobbyName, startupurl query and
 // GLSVSS leg the reply carries. JO's tag, and the JO demo's alias of it, get
 // the reply this gate always sent, byte for byte; DFX2's gets what NovaLogic's
@@ -25,11 +25,11 @@
 
 #include <net/napi/envelope.h>
 #include <net/novacrypto/nwu.h>
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/gate_response.h>
 
-#include "common/file_io.h"
+#include "common/test_database.h"
 #include "common/test_expect.h"
 
 #include <array>
@@ -162,19 +162,14 @@ int expect_lobby(uint16_t port, const std::string &tag, const Lobby &lobby) {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
 	TEST_EXPECT(net::startup() == 0);
 
 	// The service database as main() leaves it before the listeners start:
 	// migrated, then the games seed.
-	const std::filesystem::path source_dir{ OPENNOVA_SOURCE_DIR };
-	opennova::db::ConnectionPool pool("file:gate_listener_test?mode=memory&cache=shared");
-	{
-		auto boot = pool.acquire();
-		opennova::db::run_migrations(*boot, source_dir / "backend" / "migrations");
-		boot->exec_script(test_io::read_file_text(
-				(source_dir / "backend" / "seed" / "0001_games.sql").string()));
-	}
+	test_db::TestDatabase scratch({ /*migrate=*/true, /*seed_games=*/true });
+	opennova::db::ConnectionPool pool(scratch.options());
 
 	nws::ServerConfig config;
 	config.public_host = "127.0.0.1";

@@ -154,7 +154,7 @@ RouteAccess WebAccess::require_user(const crow::request &req) {
 	std::optional<WebSessionLookup> session;
 	try {
 		session = resolve_web_session(*pool_.acquire(), token);
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] WARN web session lookup failed: %s\n", e.what());
 		access.refusal = json_error(500, "db_error");
 		return access;
@@ -208,7 +208,7 @@ int64_t WebAccess::begin_password_check(LoginRoute route, const std::string &use
 	bool known = false;
 	try {
 		known = is_known_login_address(*pool_.acquire(), name, ticket.known_address);
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] WARN login address lookup failed: %s\n", e.what());
 	}
 	if (!known) {
@@ -228,7 +228,7 @@ void WebAccess::password_accepted(
 	if (!ticket.username_key.empty()) login_failures_per_user_.refund(ticket.username_key, now);
 	try {
 		record_login_address(*pool_.acquire(), user_id, credentials_gen, ticket.known_address);
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] WARN login address record failed: %s\n", e.what());
 	}
 }
@@ -317,7 +317,7 @@ crow::response WebAccess::login(const crow::request &req) {
 		res.add_header("Set-Cookie", session_cookie(*token, kWebSessionLifetimeSeconds));
 		res.set_header("Cache-Control", "no-store");
 		return res;
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] /api/login failed: %s\n", e.what());
 		return json_error(500, "db_error");
 	}
@@ -331,7 +331,7 @@ crow::response WebAccess::logout(const crow::request &req) {
 	if (!has_csrf_header(req)) return json_error(403, "csrf_header_required");
 	try {
 		delete_web_session(*pool_.acquire(), session_token(req));
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] /api/logout failed: %s\n", e.what());
 		return json_error(500, "db_error");
 	}

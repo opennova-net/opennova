@@ -70,7 +70,7 @@ int main() {
 	}
 
 	// Stand up the real listener (no DB: snapshot_hosted reads the in-memory
-	// lobby state, so host registration is observable without SQLite).
+	// lobby state, so host registration is observable without a database).
 	opennova::ConnectionManager manager;
 	opennova::novaworld_server::NwUdpListener listener(manager);
 	manager.on_lost([&listener](

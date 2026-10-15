@@ -17,7 +17,7 @@
 #include <net/napi/session.h>
 #include <net/novacrypto/pubcrypto.h>
 #include <net/novaworld/connection/manager.h>
-#include <net/novaworld/db/sqlite.h>
+#include <net/novaworld/db/database.h>
 #include <net/novaworld/gsb.h>
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/join_identity.h>
@@ -361,7 +361,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	// client's game's values.
 	try {
 		impl_->games = catalog::GameCatalog::load(*db_pool_.acquire());
-	} catch (const db::SqliteError &e) {
+	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] games catalogue read failed: %s\n", e.what());
 		return false;
 	}
@@ -772,7 +772,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 	});
 
 	// PUT /api/admin/users/<id>/can-host — {"can_host": true|false}: the account's
-	// approval for a hosted server (players.can_host, migration 0011), answered
+	// approval for a hosted server (players.can_host), answered
 	// with the account. 400 invalid_json / invalid_field / missing_field, 404 for
 	// an unknown id and for a hosted server's service account. Withdrawing it
 	// stops the account's hosted server, as a ban does (the supervisor's next
@@ -881,7 +881,7 @@ void HttpListener::register_public_api_routes() {
 				game["hosts"] = std::move(hosts);
 				games_json.push_back(std::move(game));
 			}
-		} catch (const db::SqliteError &e) {
+		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[http] /api/lobbies failed: %s\n", e.what());
 		}
 		crow::json::wvalue out;
@@ -904,7 +904,7 @@ void HttpListener::register_public_api_routes() {
 				system_clock::now().time_since_epoch()).count();
 			stats["updatedAtMs"] = static_cast<int64_t>(now_ms);
 			out["stats"] = std::move(stats);
-		} catch (const db::SqliteError &e) {
+		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[http] /api/stats failed: %s\n", e.what());
 			out["error"] = "db_error";
 		}
@@ -998,7 +998,7 @@ void HttpListener::register_public_api_routes() {
 				arr.push_back(std::move(e));
 			}
 			out["games"] = std::move(arr);
-		} catch (const db::SqliteError &e) {
+		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[http] /api/games failed: %s\n", e.what());
 			out["error"] = "db_error";
 		}
@@ -1055,7 +1055,7 @@ void HttpListener::register_public_api_routes() {
 						re["type"]        = text(s.type);
 						roster_entries.push_back(std::move(re));
 					}
-				} catch (const db::SqliteError &ex) {
+				} catch (const db::Error &ex) {
 					// The host goes out without its roster.
 					std::fprintf(stderr, "[http] /api/hosts roster failed: %s\n", ex.what());
 				}
@@ -1071,14 +1071,14 @@ void HttpListener::register_public_api_routes() {
 						pe["peer_ip"]  = text(p.peer_ip);
 						player_entries.push_back(std::move(pe));
 					}
-				} catch (const db::SqliteError &ex) {
+				} catch (const db::Error &ex) {
 					// The host goes out without its player list.
 					std::fprintf(stderr, "[http] /api/hosts player list failed: %s\n", ex.what());
 				}
 				e["player_list"] = std::move(player_entries);
 				entries.push_back(std::move(e));
 			}
-		} catch (const db::SqliteError &e) {
+		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[http] /api/hosts list failed: %s\n", e.what());
 		}
 		crow::json::wvalue out;
@@ -1261,7 +1261,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 					std::printf("[http] active-session TTL sweep dropped %zu stale entries\n",
 					            active_dropped);
 				}
-			} catch (const db::SqliteError &e) {
+			} catch (const db::Error &e) {
 				std::fprintf(stderr, "[http] active-session TTL sweep failed: %s\n", e.what());
 			}
 		}
@@ -1751,7 +1751,7 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 		try {
 			const char *how = "";
 			user = retail_login_user(cookies, *db_conn, how);
-		} catch (const db::SqliteError &e) {
+		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[http] WARN retail login lookup failed: %s\n", e.what());
 		}
 		if (user && user->account_status != "active")
@@ -1829,7 +1829,7 @@ void HttpListener::register_legacy_host_join_routes(
 				entries.push_back(hostdb::gsb_entry_from_host(
 						h, hostdb::list_roster(*db_conn, h.rid), {game.ver1, game.exp_bits}));
 			}
-		} catch (const db::SqliteError &e) {
+		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[http] GSB list failed: %s\n", e.what());
 		}
 		const auto blob = opennova::gsb_build_response(entries);
@@ -2053,7 +2053,7 @@ void HttpListener::register_legacy_host_join_routes(
 			const char *how = "";
 			try {
 				joiner = retail_login_user(cookies, *db_conn, how);
-			} catch (const db::SqliteError &e) {
+			} catch (const db::Error &e) {
 				std::fprintf(
 						stderr, "[http] /NWJoin.dll WARN joiner lookup failed: %s\n", e.what());
 			}

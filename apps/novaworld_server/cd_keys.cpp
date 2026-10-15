@@ -83,15 +83,14 @@ int64_t insert_key(db::Database &db, std::string_view title, std::optional<int64
 			continue;
 		const auto inserted = db.query(
 				"INSERT INTO cd_keys (title, serial, wire_key, user_id, created_by, assigned_at) "
-				"VALUES ($1, $2, $3, $4, $5, CASE WHEN $4 IS NULL THEN NULL ELSE CURRENT_TIMESTAMP END) "
+				"VALUES ($1, $2, $3, $4, $5, CASE WHEN $4::bigint IS NULL THEN NULL ELSE now() END) "
 				"RETURNING id;",
 				{ BindValue(std::string(title)), BindValue(serial), BindValue(wire_key),
 						user_id ? BindValue(*user_id) : BindValue(std::monostate{}),
 						BindValue(created_by) });
 		return inserted.front().as_int(0).value_or(0);
 	}
-	throw db::SqliteError(
-			0, "cd_keys: no unused serial after " + std::to_string(kSerialDraws) + " draws");
+	throw db::Error("cd_keys: no unused serial after " + std::to_string(kSerialDraws) + " draws");
 }
 
 // The machine `nwpssk` names activated under `key` (live), inside the caller's
@@ -173,9 +172,9 @@ std::vector<CdKey> list_keys(db::Database &db, const KeyFilter &filter, int64_t 
 	else if (filter.state == "revoked")
 		where += " AND k.revoked_at IS NOT NULL";
 	if (!filter.search.empty()) {
-		const std::string search = next();
-		where += " AND (instr(lower(k.serial), lower(" + search + ")) > 0 OR instr(lower(k.wire_key), lower(" +
-				 search + ")) > 0 OR instr(lower(COALESCE(p.username, '')), lower(" + search + ")) > 0)";
+		const std::string search = "lower(" + next() + "::text)";
+		where += " AND (strpos(lower(k.serial), " + search + ") > 0 OR strpos(lower(k.wire_key), " + search +
+				 ") > 0 OR strpos(lower(COALESCE(p.username, '')), " + search + ") > 0)";
 		binds.emplace_back(filter.search);
 	}
 	if (total != nullptr) {
@@ -219,7 +218,7 @@ AssignOutcome assign_key(db::Database &db, int64_t key_id, int64_t user_id) {
 				   { BindValue(user_id), BindValue(key->title) })
 					.empty())
 		return AssignOutcome::AccountHasKey;
-	db.exec("UPDATE cd_keys SET user_id = $1, assigned_at = CURRENT_TIMESTAMP "
+	db.exec("UPDATE cd_keys SET user_id = $1, assigned_at = now() "
 			"WHERE id = $2 AND user_id IS NULL AND revoked_at IS NULL;",
 			{ BindValue(user_id), BindValue(key_id) });
 	tx.commit();
@@ -233,8 +232,7 @@ RevokeOutcome revoke_key(db::Database &db, int64_t key_id) {
 		return RevokeOutcome::NoSuchKey;
 	if (key->revoked())
 		return RevokeOutcome::AlreadyRevoked;
-	db.exec("UPDATE cd_keys SET revoked_at = CURRENT_TIMESTAMP WHERE id = $1 AND revoked_at IS "
-			"NULL;",
+	db.exec("UPDATE cd_keys SET revoked_at = now() WHERE id = $1 AND revoked_at IS NULL;",
 			{ BindValue(key_id) });
 	tx.commit();
 	return RevokeOutcome::Revoked;
