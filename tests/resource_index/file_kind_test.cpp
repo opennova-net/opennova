@@ -41,7 +41,7 @@ bool typed_and_placed(FileKind kind) {
 }
 
 // The file names a manifest row stands for: its literal, or for a pattern each of its
-// alternatives ("*.npj/*.npz") by the file name after its folders, a placeholder or a wildcard
+// alternatives ("*.bms/*.npj/*.npz") by the file name after its folders, a placeholder or a wildcard
 // standing for a letter ("expansion\<n>\<n>.pff" is x.pff).
 std::vector<std::string> names_of(const gameprofile::RequiredResource &row) {
 	if (!(row.flags & gameprofile::RES_F_PATTERN)) return {row.name};

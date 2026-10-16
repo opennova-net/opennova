@@ -68,7 +68,7 @@ static int test_row_set_follows_the_manifest_and_features() {
 	TEST_EXPECT(static_cast<int>(menu_only.diagnostics.size()) == expected_rows);
 	TEST_EXPECT(unmet_required_roles(menu_only).size() == static_cast<size_t>(expected_required));
 	TEST_EXPECT(row_named(menu_only, "resource.pff") == nullptr);   // a build output
-	TEST_EXPECT(row_named(menu_only, "*.npj/*.npz") == nullptr);    // a pattern
+	TEST_EXPECT(row_named(menu_only, "*.bms/*.npj/*.npz") == nullptr);    // a pattern
 	TEST_EXPECT(row_named(menu_only, "failsafe.bad") == nullptr);   // mission phase, off
 	TEST_EXPECT(row_named(menu_only, "main.mnu") != nullptr);
 	TEST_EXPECT(row_named(menu_only, "main.mnu")->role == "main_menu");

@@ -128,7 +128,7 @@ static int test_known_row_lookups(void) {
     CHECK(failsafe != NULL && failsafe->phase == BOOT_PHASE_MISSION &&
               failsafe->severity == RES_OPTIONAL,
           "failsafe.bad is the mission-phase anim fallback, optional (retail JO ships none)");
-    const RequiredResource *scan = gameprofile_required_resource_find("*.npj/*.npz");
+    const RequiredResource *scan = gameprofile_required_resource_find("*.bms/*.npj/*.npz");
     CHECK(scan != NULL && (scan->flags & RES_F_PATTERN) != 0,
           "the mission-list wildcard scan is a pattern row");
     /* The player's and this machine's own files carry RES_F_PLAYER_FILE, and only they. */
