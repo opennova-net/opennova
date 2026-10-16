@@ -640,6 +640,24 @@ if(BUILD_NOVAWORLD_HTTP)
     opennova_add_pg_test(job_routes REDIS COMMAND job_routes_test)
     set_tests_properties(job_routes PROPERTIES TIMEOUT 120)
 
+    # The hosted data sets' admin routes (apps/novaworld_web/data_sets/, ADR 0064) on the
+    # in-process Crow listener over a migrated database, a Redis namespace and a local
+    # object store in a temp directory: every route refused without the admin, the list's
+    # shapes over the seeded rows, a base and an expansion created (every shape and database
+    # refusal), patched and deleted; a tree upload begun with the kind's files (a missing
+    # and an unexpected name refused), each part PUT through the route (the ETag back; one
+    # over the cap, out of range or of a name the kind lacks refused), each file completed
+    # (a wrong ETag refused), the tree finalized with its tree.finalize job, ready and
+    # current (its delete refused), an upload abandoned, a superseded tree pruned with a
+    # tree.prune job, a pinned one refused.
+    add_executable(data_set_routes_test novaworld/data_set_routes_test.cpp)
+    target_link_libraries(data_set_routes_test PRIVATE
+        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+    target_include_directories(data_set_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(data_set_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    opennova_add_pg_test(data_set_routes REDIS COMMAND data_set_routes_test)
+    set_tests_properties(data_set_routes PROPERTIES TIMEOUT 120)
+
     # The outbound mail (apps/novaworld_common/mailer.h) and the address rule
     # (auth.h normalize_email): the shapes taken and refused, SesMailer's settings,
     # argv and SendEmail request on a stub CommandRunner (the request file
@@ -1030,3 +1048,21 @@ target_include_directories(hosted_ec2_machine_driver_test PRIVATE
 target_compile_definitions(hosted_ec2_machine_driver_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME hosted_ec2_machine_driver COMMAND hosted_ec2_machine_driver_test)
 set_tests_properties(hosted_ec2_machine_driver PROPERTIES TIMEOUT 120)
+
+# The object store seam (apps/novaworld_common/object_store.h, ADR 0064): the URL forms, the
+# local store over a directory (its multipart uploads part by part), and the S3 store's argv
+# through a recording runner (a part's bytes handed to `upload-part` in a scratch file).
+# Crow-free and database-free.
+add_executable(object_store_test
+    novaworld/object_store_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/object_store.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/s3_object_store.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/local_object_store.cpp)
+target_link_libraries(object_store_test PRIVATE opennova_app_common Threads::Threads)
+if(WIN32)
+    target_link_libraries(object_store_test PRIVATE advapi32)
+endif()
+target_include_directories(object_store_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common)
+add_test(NAME object_store COMMAND object_store_test)

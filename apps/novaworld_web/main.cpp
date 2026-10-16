@@ -10,6 +10,7 @@
 #include "auth.h"
 #include "http_listener.h"
 #include "loggable.h"
+#include "object_store.h"
 #include "parts.h"
 #include "program.h"
 #include "redis_client.h"
@@ -61,7 +62,7 @@ void bootstrap_first_admin(const ServerConfig &config, db::Database &db) {
 std::string configure(ServerConfig &config) {
 	if (config.web_host.empty())
 		return "web needs ONNET_WEB_HOST, the web endpoint its pages name";
-	return {};
+	return std::string();
 }
 
 int run(const program::Boot &boot) {
@@ -124,7 +125,6 @@ int run(const program::Boot &boot) {
 	http.set_mail_enabled(mail.on);
 	http.set_watchdog(&watchdog);
 	http.set_billing(billing_stack->billing.get());
-	http.set_object_store(store.store.get(), dynamic_cast<LocalObjectStore *>(store.store.get()));
 	// A start's at_capacity and the list's `full` ask the fleet's planner.
 	http.set_fleet_placement(hosting.fleet.placement);
 	// The admin usage view's limits: each container's memory and CPUs.
@@ -132,6 +132,10 @@ int run(const program::Boot &boot) {
 	// The admin jobs page's schedules: the controller's, read from the same
 	// settings.
 	http.set_job_schedules(periodic_jobs(config, hosting));
+	// The game data routes (data_sets/) work on the deployment's object store
+	// (ONNET_OBJECT_STORE_URL, ADR 0064), built above: none without one, and those
+	// routes answer 503 store_unavailable.
+	http.set_object_store(store.store.get());
 	if (!http.start(config))
 		return program::fatal("HTTP listener start failed");
 

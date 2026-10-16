@@ -63,6 +63,9 @@ namespace catalog { struct GameRow; }
 //                         Stripe webhook and the admin's billing view
 //   background jobs     — JobRoutes (jobs/job_routes.h): the admin's view of
 //                         the job queue and its actions on it
+//   game data           — DataSetRoutes (data_sets/): the hosted data sets and
+//                         their tree uploads into the object store, each part
+//                         through this program (ADR 0064)
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
@@ -251,7 +254,7 @@ private:
 	bool redis_answers();
 	// The billing routes' billing (set_billing); null: billing off.
 	billing::Billing *billing_ = nullptr;
-	// The object store (set_object_store, set_local_object_store); null: none.
+	// The object store (set_object_store); null: none.
 	ObjectStore *object_store_ = nullptr;
 	// The slots' limits (set_fleet_slots).
 	int fleet_slot_memory_mb_ = 512;
