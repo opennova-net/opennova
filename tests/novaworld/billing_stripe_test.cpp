@@ -472,6 +472,21 @@ int test_curl_retries(const std::string &scratch) {
 	TEST_EXPECT(reply.status == 500);
 	TEST_EXPECT(runs_for(unkeyed, { CurlStub::exited(7, ""), CurlStub::answered("{}", 200) }, reply) == 1);
 	TEST_EXPECT(reply.outcome == StripeReply::Outcome::Unreachable);
+	// A DELETE (the billing end-to-end test's cleanup): its verb, no body and no key,
+	// and never sent again.
+	StripeRequest remove = get_request("/v1/customers/cus_1");
+	remove.method = StripeRequest::Method::Delete;
+	TEST_EXPECT(runs_for(remove, { CurlStub::answered("{}", 500), CurlStub::answered("{}", 200) },
+						reply) == 1);
+	TEST_EXPECT(runs_for(remove, { CurlStub::exited(7, ""), CurlStub::answered("{}", 200) },
+						reply) == 1);
+	TEST_EXPECT(runs_for(remove, { CurlStub::answered("{\"deleted\":true}", 200) }, reply) == 1 &&
+			reply.ok());
+	const std::string &config = stub.runs[0].config;
+	TEST_EXPECT(has_line(config, "url = \"https://api.stripe.com/v1/customers/cus_1\""));
+	TEST_EXPECT(has_line(config, "request = \"DELETE\""));
+	TEST_EXPECT(config.find("data-raw") == std::string::npos &&
+			config.find("Idempotency-Key") == std::string::npos);
 	TEST_EXPECT(fs::is_empty(fs::u8path(scratch)));
 	return 0;
 }

@@ -20,15 +20,17 @@
 //      tier's checkout refused (already_subscribed); the Customer Portal opens.
 //
 // Gated twice. ONNET_STRIPE_TEST_SECRET_KEY names a Stripe TEST-mode key (sk_test_ or
-// rk_test_; a live key fails the test, never runs it): with none the test prints why and
+// rk_test_; a live key fails the test, never runs it): with none (unset, empty, or the
+// vault's REPLACE_ME, which CI's secret holds until it is filled) the test prints why and
 // exits 77 (Skipped) on a line the core suite accepts, so the suite passes on a machine
 // without the key. The prices are the test account's found by the lookup keys `stripe
 // setup` gives them (DEPLOY.md, "Monthly support tiers (Stripe)"). The database is
 // OPENNOVA_TEST_PG's, as for every pg test. Locally, from the vault and never on disk:
 //   op run --env-file=deploy/env/billing.e2e.env.tpl -- \
 //     ctest --test-dir build -C Release -R '^billing_stripe_e2e$' --output-on-failure
-// What it leaves in the test account: one customer per run (its subscription cancels
-// itself; its last Checkout session is expired here).
+// It leaves nothing in the test account: its last Checkout session is expired and its
+// customer deleted at the end, which cancels the subscription (set to cancel itself
+// anyway, should the test die first).
 
 #include "auth.h"
 #include "billing/billing.h"
@@ -160,8 +162,13 @@ std::optional<JsonValue> stripe(billing::StripeApi &api, billing::StripeRequest:
 		request.idempotency_key = "opennova-e2e-" + random_hex(16);
 	const billing::StripeReply reply = api.call(request);
 	if (!reply.ok()) {
-		std::fprintf(stderr, "  Stripe %s %s: %s\n",
-				method == billing::StripeRequest::Method::Post ? "POST" : "GET", path.c_str(),
+		using Method = billing::StripeRequest::Method;
+		const char *verb = "GET";
+		if (method == Method::Post)
+			verb = "POST";
+		if (method == Method::Delete)
+			verb = "DELETE";
+		std::fprintf(stderr, "  Stripe %s %s: %s\n", verb, path.c_str(),
 				reply.outcome == billing::StripeReply::Outcome::Answered
 						? ("HTTP " + std::to_string(reply.status) + " " + reply.body.substr(0, 400))
 								  .c_str()
@@ -247,8 +254,10 @@ int run(const std::string &secret_key) {
 		site.session = *token;
 	}
 	int rc = 0;
-	// The open session the test leaves, expired at the end.
+	// What the test made in Stripe, undone at the end: the open session expired, the
+	// customer deleted.
 	std::string open_session;
+	std::string customer_id;
 	[&] {
 		// 1. The tiers, priced by Stripe.
 		auto reply = site.send("GET", "/api/billing/tiers");
@@ -275,6 +284,8 @@ int run(const std::string &secret_key) {
 			return;
 		}
 		auto customer = billing::customer_of(*service.pool.acquire(), user);
+		if (customer)
+			customer_id = customer->stripe_customer_id;
 		if (!customer || customer->livemode || customer->open_checkout_session.empty()) {
 			std::fprintf(stderr, "  checkout: no test-mode customer row with its open session\n");
 			rc = 1;
@@ -402,6 +413,15 @@ int run(const std::string &secret_key) {
 		std::fprintf(stderr,
 				"  the last Checkout session %s was not expired (it lapses in an hour)\n",
 				open_session.c_str());
+	if (!customer_id.empty()) {
+		const auto deleted =
+				stripe(api, billing::StripeRequest::Method::Delete, "/v1/customers/" + customer_id);
+		if (!deleted || !deleted->get_bool("deleted", false)) {
+			std::fprintf(
+					stderr, "  cleanup: the customer %s was not deleted\n", customer_id.c_str());
+			rc = 1;
+		}
+	}
 	service.stop();
 	return rc;
 }
@@ -410,7 +430,7 @@ int run(const std::string &secret_key) {
 
 int main(int argc, char **argv) {
 	const char *key = std::getenv("ONNET_STRIPE_TEST_SECRET_KEY");
-	if (key == nullptr || *key == '\0') {
+	if (key == nullptr || *key == '\0' || std::string(key) == billing::kPlaceholder) {
 		// Not the pg tests' "SKIP: needs" line, which fails the core suite: without the
 		// key this test has nothing to run against (deploy/env/billing.e2e.env.tpl).
 		std::printf(

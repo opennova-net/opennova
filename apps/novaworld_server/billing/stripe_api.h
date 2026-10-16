@@ -23,7 +23,8 @@
 // Idempotency-Key. A call that does not reach Stripe (curl's own failure, its
 // timeout), a 429 or a 5xx is tried once more about a second later, but only a
 // GET or a POST with an idempotency key, which Stripe answers once however often
-// it is sent. No error text ever holds the key. Thread-safe: a call keeps no
+// it is sent (a DELETE, which only the billing end-to-end test's cleanup sends,
+// is not). No error text ever holds the key. Thread-safe: a call keeps no
 // state but its own file. Platform plumbing, not a port.
 
 #include "command_runner.h"
@@ -39,13 +40,13 @@ namespace opennova::novaworld_server::billing {
 inline constexpr const char *kStripeApiVersion = "2025-03-31.basil";
 
 struct StripeRequest {
-	enum class Method { Get, Post };
+	enum class Method { Get, Post, Delete };
 	Method method = Method::Get;
 	// From the API's root: "/v1/customers", "/v1/subscriptions/sub_123". Letters,
 	// digits, '_', '-' and '/' alone (an id is checked before it is spelled in).
 	std::string path;
 	// The form fields, in order, unencoded: {"metadata[opennova_user_id]", "7"}.
-	// A GET sends them as the query string, a POST as its body.
+	// A GET or a DELETE sends them as the query string, a POST as its body.
 	std::vector<std::pair<std::string, std::string>> params;
 	// A POST's Idempotency-Key (ignored on a GET). Empty: none, and no retry.
 	std::string idempotency_key;
