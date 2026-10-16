@@ -695,9 +695,10 @@ target_include_directories(minimal_gamecfg_gen_test PRIVATE ${CMAKE_CURRENT_SOUR
 add_test(NAME minimal_gamecfg_gen COMMAND minimal_gamecfg_gen_test)
 
 add_executable(gamecfg_roundtrip_test gamecfg/gamecfg_roundtrip_test.cpp)
-target_link_libraries(gamecfg_roundtrip_test PRIVATE opennova_formats)
+# opennova_runtime for game_cfg_weapon_roster (the retail leg's roster from weapon.def).
+target_link_libraries(gamecfg_roundtrip_test PRIVATE opennova_formats opennova_runtime)
 target_include_directories(gamecfg_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-add_test(NAME gamecfg_roundtrip COMMAND gamecfg_roundtrip_test)
+opennova_add_mixed_test(gamecfg_roundtrip COMMAND gamecfg_roundtrip_test)
 
 add_executable(gamecfg_parse_test gamecfg/gamecfg_parse_test.cpp)
 target_link_libraries(gamecfg_parse_test PRIVATE opennova_formats)
