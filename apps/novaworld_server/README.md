@@ -186,6 +186,26 @@ it prunes `active_hosts` rows whose `updated_at` (refreshed by every
 This only catches rows the normal teardown somehow missed; `host_players` rows
 cascade. At boot the table is wiped entirely (previous-run cleanup).
 
+**The admin's view** (`connection_routes.*`, the site's admin page `/admin/sessions`):
+every session the registry holds, who it is and the server it lists, and an end. A
+session's account is the listing's owner while it hosts (the one rule `GET
+/api/admin/hosts` applies, `listing_owner`), else the account whose live retail login
+its latest `Cookie` list named: a stock client's verify, play, host and GLSVSS requests
+carry every name/value pair its pages hold, so after the web login they carry its
+`LOGINSESSIONTAG` (`LobbyState::login_session_tag`; an ended login names no one). The
+registry stamps the steady clock, which counts from the machine's boot, so the route
+sends each time as the wall time less its age.
+
+| Route | Access | Replies |
+| --- | --- | --- |
+| `GET /api/admin/connections` | admin | `{"count", "heartbeat_timeout_ms", "connections"}`, each `id` (the registry's), `state` (`handshaking`, `active`, `closing`), `pn`, `identity` (the ClientAuth `NA`, the game tag: `jop:cus2`), `addr`, `created_ms` and `last_seen_ms` (Unix epoch ms), `account` (`{id, username, via}`, `via` `host_key` or `login`; null while neither names one) and `host` (while it hosts: `rid`, `server_name`, `mission_name` (UTF-8), `players`, `max_players`, `listed` (false while it waits out of the browser for a HostKey naming an account) and `hosted_server_id` (null unless it is a live hosted server's listing); else null) |
+| `POST /api/admin/connections/<id>/end` | admin | `{"addr"}`, the address the list showed beside the id (a freed CI can name another session). 202 `{"status": "queued", "id", "addr"}`: the receive thread latches the pending-disconnect record `{1, 8, 0, 0, "", 0, "NP.C:PMP:PDESTME"}`, sends the client its `ServerGoodBye` burst (CS field 1 times, keyed by its CK; none to a session still signing in) and drops the connection (`Logout`), as the NAPI server role ends a connection it asked to disconnect (the service's end itself is service policy). 400 `invalid_json`, `invalid_field`, `missing_field`; 404 `not_found` for an id no connection holds; 409 `connection_changed` (the id names another address now), `hosting` (with its listing's `rid`: `POST /api/admin/hosts/<rid>/stop` ends it, as ending its session would only park the listing for the reconnect's re-host) or `not_lobby` (a game connection); 503 with no NW UDP listener. Logged as every admin state change is, with the actor and status, and with the session's id, address and game tag; no rate limit, as no admin write has one |
+
+The page lists them sortable by session, account, connection time (newest first) and
+last heard; it shows when each connected in UTC and for how long, links the account to
+its admin page and a hosted server to its fleet page, and ends a session (or, on a
+hosting one, stops its server) after a confirmation.
+
 ## Pushing statements to a listed server
 
 The service can send a hosting connection retail's two administrative statements over
