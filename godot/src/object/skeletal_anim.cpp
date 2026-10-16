@@ -21,7 +21,10 @@ using namespace godot;
 
 namespace {
 
-constexpr int kRightHandBoneIndex = 16;
+// The collapsed right-hand bone is the engine's (anim::kCollapsedRightHandBone,
+// skeletal_clips.h, the special row @0x4b1290 cited there); this file writes
+// the collapsed Transform3D.
+constexpr int kRightHandBoneIndex = opennova::anim::kCollapsedRightHandBone;
 
 // Entity_BuildBoneTransformMatrices applies the BN17 special row after every
 // ordinary channel/overlay branch, including the fallback taken when overlay
