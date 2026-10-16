@@ -9,6 +9,7 @@
 #include <base/resource_index/resource_index.h>
 #include <formats/def/def.h>
 #include <runtime/assets/asset_store.h>
+#include <runtime/inmatch/game_config.h>
 #include <runtime/mission/runtime_boot.h>
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/ammo_table_build.h>
@@ -299,6 +300,10 @@ void WeaponRange::reset_() {
 	if (!ready_ || !tables_) return;
 	world_ = std::make_unique<world::World>();
 	world::World &world = *world_;
+	// The range fires as the game's single player does, out of a session: its rules
+	// word, whose 0x4000 spreads a player's shot by the weapon's ERROR
+	// (world::weapon_spread_rule).
+	world.rules.mpattrib = inmatch::GameConfig::kSpRulesWord;
 	world.tables.weapons = tables_->weapons;
 	world.tables.ammo = tables_->ammo;
 	world.registry.configure_pool(0, kPoolCapacity);

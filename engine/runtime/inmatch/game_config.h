@@ -203,6 +203,11 @@ struct GameConfig {
 	// read by WeaponSlot_InitFromDef @0x53ef17) and never this word, so the
 	// bit is live only when a host cfg carries it in its mpattrib value.
 	static constexpr uint32_t kMpAttribAutoScopeZero = 0x10000;
+	// The rules word out of a session: TEAM_CHOOSE 0x4, NoFriendlyFire 0x200 and the
+	// out-of-session weapon spread 0x4000 [orig: CNapiGameSession_InitRandomSeedOrRequest
+	// `mov [esi+2Ch], 4204h` @0x51E957]. The host's single player stamps it, and so does a
+	// world that fires as the single player does (the editor's weapon range).
+	static constexpr uint32_t kSpRulesWord = 0x4204u;
 	// [orig game_settings +0xD0; the cfg default `mov g_mpattrib_flags,3A02h`
 	//  @0x54d406 in Config_SetDefaults = 14850. The SP launcher does NOT take
 	//  that default: SinglePlayer_StartMission stores the literal 14854 (0x3A06)
