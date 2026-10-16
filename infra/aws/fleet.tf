@@ -503,6 +503,16 @@ data "aws_iam_policy_document" "fleet_service" {
     }
   }
 
+  # The templates name their image by SSM parameter (resolve:ssm:), which
+  # RunInstances reads as its caller: without it every launch fails
+  # SsmAccessDenied.
+  statement {
+    sid       = "ResolveFleetImage"
+    effect    = "Allow"
+    actions   = ["ssm:GetParameters"]
+    resources = [aws_ssm_parameter.fleet_image[0].arn]
+  }
+
   # Describe calls take no resource scope.
   statement {
     sid       = "DescribeMachines"
