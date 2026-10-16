@@ -238,7 +238,7 @@ run "observability" {
   assert {
     condition = (
       aws_ce_anomaly_monitor.services[0].monitor_type == "CUSTOM" &&
-      jsondecode(aws_ce_anomaly_monitor.services[0].monitor_specification).Tags.Key == "opennova:deployment" &&
+      jsondecode(aws_ce_anomaly_monitor.services[0].monitor_specification).Tags.Key == "user:opennova:deployment" &&
       contains(jsondecode(aws_ce_anomaly_monitor.services[0].monitor_specification).Tags.Values, "opennova-server")
     )
     error_message = "the cost anomaly monitor watches OpenNova's deployments' tag alone"
