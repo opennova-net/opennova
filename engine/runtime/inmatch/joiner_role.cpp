@@ -122,12 +122,17 @@ void JoinerRole::send(const std::vector<uint8_t> &dg) {
 // retail's INADDR_NONE (0) and leaves the proxy disabled.
 // [orig: CNapiGameSession_InitTransportConnection @0x4ca051..0x4ca0c7]
 void JoinerRole::set_join_proxy(const JoinProxyOptions &options) {
-	proxy_ = ProxyRendezvousConfig{};
-	proxy_.node_addr = proxy_inet_addr(options.proxy_node_ip);
-	proxy_.node_port = options.proxy_node_port;
-	proxy_.cookie = options.proxy_cookie;
-	proxy_.relay_addr = proxy_inet_addr(options.proxy_relay_ip);
-	proxy_.relay_port = options.proxy_relay_port;
+	ProxyRendezvousConfig proxy;
+	proxy.node_addr = proxy_inet_addr(options.proxy_node_ip);
+	proxy.node_port = options.proxy_node_port;
+	proxy.cookie = options.proxy_cookie;
+	proxy.relay_addr = proxy_inet_addr(options.proxy_relay_ip);
+	proxy.relay_port = options.proxy_relay_port;
+	set_join_proxy(proxy);
+}
+
+void JoinerRole::set_join_proxy(const ProxyRendezvousConfig &proxy) {
+	proxy_ = proxy;
 	// PeerAddr packs octets exactly like the inet_addr dword (first octet in the
 	// low byte), so the node address is the same word.
 	proxy_node_addr_ = PeerAddr{};

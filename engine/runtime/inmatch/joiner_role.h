@@ -111,6 +111,9 @@ public:
 		uint32_t proxy_relay_port = 0; // the NK-decoded port
 	};
 	void set_join_proxy(const JoinProxyOptions &options);
+	// The same install from the engine's own build of the six fields
+	// (proxy_rendezvous_from_join over the resolved .joi, net/novaworld/http_flow.h).
+	void set_join_proxy(const ProxyRendezvousConfig &proxy);
 	// The pre-mission subset of the frame: the same socket and runtime advance
 	// the retail connect exchange, but no World exists yet to tick and the
 	// runtime's world-ready gate suppresses the load/spawn drive. The hello

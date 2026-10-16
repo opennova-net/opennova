@@ -19,7 +19,6 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
-#include <base/io/crt_ftol.h>
 #include <base/os_random/os_random.h>
 #include <net/napi/envelope.h>
 #include <net/napi/session.h>
@@ -1021,16 +1020,8 @@ void NovaWorldClient::start_playing(const opennova::JoinResult &resolved) {
 	pending_join_ = resolved;
 	// NI/NP/BK next to NK: the proxy-assisted join fields the in-match joiner
 	// installs on its NP connection (engine/net/novaworld/proxy_rendezvous.h).
-	join_proxy_ = opennova::ProxyRendezvousConfig{};
-	join_proxy_.node_addr = opennova::proxy_inet_addr(resolved.ni);
-	// atol(NP) and atol(BK), the CRT's (io::retail_atol; D-NET-384) [orig:
-	//  CNapiGameSession_InitTransportConnection @0x4c9e10 — _atol of BK @0x4ca05b, of NP
-	//  @0x4ca08a]. The relay port's atol (@0x4ca0b9) is the .joi's NK tail, read in
-	//  LobbyHttpFlow (http_flow.cpp).
-	join_proxy_.node_port = static_cast<uint32_t>(opennova::io::retail_atol(resolved.np.c_str()));
-	join_proxy_.cookie = static_cast<uint32_t>(opennova::io::retail_atol(resolved.bk.c_str()));
-	join_proxy_.relay_addr = opennova::proxy_inet_addr(resolved.host_ip);
-	join_proxy_.relay_port = resolved.host_port;
+	// The engine's install of the six fields (net/novaworld/http_flow.h).
+	join_proxy_ = opennova::proxy_rendezvous_from_join(resolved);
 	join_proxy_node_ip_ = resolved.ni;
 	join_proxy_relay_ip_ = resolved.host_ip;
 	opennova::ClientSession *session = lobby_.session();

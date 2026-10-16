@@ -186,6 +186,19 @@ JoinResult join_fail(std::string reason) {
 
 } // namespace
 
+ProxyRendezvousConfig proxy_rendezvous_from_join(const JoinResult &resolved) {
+	ProxyRendezvousConfig proxy;
+	// [orig: CNapiGameSession_InitTransportConnection @0x4c9e10 - inet_addr(NI) and
+	//  _atol of NP @0x4ca08a, _atol of BK @0x4ca05b; the relay is the NK endpoint, its
+	//  port's atol @0x4ca0b9 already taken by the .joi parse (http_login.cpp)]
+	proxy.node_addr = proxy_inet_addr(resolved.ni);
+	proxy.node_port = static_cast<uint32_t>(io::retail_atol(resolved.np.c_str()));
+	proxy.cookie = static_cast<uint32_t>(io::retail_atol(resolved.bk.c_str()));
+	proxy.relay_addr = proxy_inet_addr(resolved.host_ip);
+	proxy.relay_port = resolved.host_port;
+	return proxy;
+}
+
 HostKeyResult host_need(HttpRequestSpec req) {
 	HostKeyResult r;
 	r.kind = HostKeyResult::Kind::NeedRequest;
