@@ -43,6 +43,7 @@
 #include "http_listener.h"
 #include "mailer.h"
 #include "novaworld/fake_mailer.h"
+#include "password_reset.h"
 #include "net_http.h"
 #include "net_sockets.h"
 #include "nw_udp_listener.h"
@@ -4048,7 +4049,8 @@ int test_api_proxy_only(Harness &h) {
 			{ std::pair<const char *, const char *>{ "GET", "/api/health" }, { "GET", "/api" },
 					{ "GET", "/api/lobbies" }, { "GET", "/api/server-info" },
 					{ "GET", "/api/no-such-route" }, { "POST", "/api/login" },
-					{ "POST", "/api/register" }, { "GET", "/api/admin/users" },
+					{ "POST", "/api/register" }, { "POST", "/api/auth/forgot" },
+					{ "POST", "/api/auth/reset" }, { "GET", "/api/admin/users" },
 					{ "PUT", "/api/admin/server-status" }, { "GET", "/api/me/hosts" },
 					{ "POST", "/api/me/hosts/1/command" }, { "POST", "/api/me/hosts/1/stop" },
 					{ "GET", "/api/admin/hosts" }, { "POST", "/api/admin/hosts/1/command" },
@@ -6866,6 +6868,202 @@ int test_admin_user_detail(Harness &h) {
 	return 0;
 }
 
+// ---- password resets ----------------------------------------------------------
+
+// An account made straight in the database with an email address.
+int64_t make_account_with_email(Harness &h, const std::string &username, const std::string &password,
+		const std::string &email) {
+	static int next = 0;
+	char pcid[16];
+	std::snprintf(pcid, sizeof(pcid), "%08x", 0x6e550000u + static_cast<unsigned>(next++));
+	nws::CreateUserParams p;
+	p.username = username;
+	p.password = password;
+	p.pcid = pcid;
+	p.nwh = "1";
+	p.nwhandle = username;
+	p.email = email;
+	const auto result = nws::create_user(*h.pool.acquire(), p);
+	if (!result.ok) std::fprintf(stderr, "  create %s: %s\n", username.c_str(), result.error_code.c_str());
+	return result.ok ? result.id : 0;
+}
+
+net::HttpReply forgot(const Harness &h, const std::string &ip, const std::string &email) {
+	return h.send("POST", "/api/auth/forgot", { kJson, kCsrf, from_ip(ip) }, "{\"email\":\"" + email + "\"}");
+}
+
+net::HttpReply reset_password(const Harness &h, const std::string &ip, const std::string &token,
+		const std::string &password) {
+	return h.send("POST", "/api/auth/reset", { kJson, kCsrf, from_ip(ip) },
+			"{\"token\":\"" + token + "\",\"password\":\"" + password + "\"}");
+}
+
+// The token the newest reset mail to `to` links to ("" for none): the 64 hex
+// digits after the link's "/reset?token=".
+std::string reset_token_sent_to(Harness &h, const std::string &to) {
+	std::string token;
+	for (const auto &m : sent_mail(h)) {
+		if (m.kind != "password_reset" || m.to != to) continue;
+		const std::string marker = std::string(kMailSiteUrl) + "/reset?token=";
+		const auto at = m.text.find(marker);
+		if (at == std::string::npos) continue;
+		token = m.text.substr(at + marker.size(), 64);
+	}
+	return token;
+}
+
+// Whether a forgot reply is the one every address gets: 202, no body, not cached.
+bool forgot_answer(const net::HttpReply &reply) {
+	const bool ok = reply.transport_ok && reply.code == 202 && body_text(reply).empty() &&
+			header_value(reply, "Cache-Control") == "no-store";
+	if (!ok) std::fprintf(stderr, "  forgot answered %s\n", describe(reply).c_str());
+	return ok;
+}
+
+// POST /api/auth/forgot answers 202 with no body for every address, an
+// account's (in any case) or none, and mails a link only to an active
+// player's; POST /api/auth/reset spends the link's token once on the new
+// password, ending the account's website sessions and its old password; a
+// spent, wrong or malformed token is 400 invalid_token. The refusals before
+// any of it: the CSRF header, the body's shape, an address that is none.
+int test_password_reset(Harness &h) {
+	const int64_t id = make_account_with_email(h, "reset_me", "pw-old", "reset.me@example.com");
+	TEST_EXPECT(id > 0);
+	const std::string session = login_token(h, "10.60.0.1", "reset_me", "pw-old");
+	TEST_EXPECT(!session.empty());
+	h.mailer->clear();
+
+	// The refusals.
+	auto reply = h.send("POST", "/api/auth/forgot", { kJson, from_ip("10.60.0.2") },
+			"{\"email\":\"reset.me@example.com\"}");
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
+	reply = h.send("POST", "/api/auth/forgot", { kJson, kCsrf, from_ip("10.60.0.2") }, "not json");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_json");
+	reply = h.send("POST", "/api/auth/forgot", { kJson, kCsrf, from_ip("10.60.0.2") }, "{}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "missing_field");
+	reply = forgot(h, "10.60.0.2", "not-an-address");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+
+	// An address no account has and the account's own get the same answer;
+	// only the account's gets a mail.
+	const auto unknown = forgot(h, "10.60.0.3", "nobody@example.com");
+	const auto known = forgot(h, "10.60.0.4", "Reset.Me@Example.com");
+	TEST_EXPECT(forgot_answer(unknown) && forgot_answer(known));
+	TEST_EXPECT(header_values(unknown, "Set-Cookie").empty() && header_values(known, "Set-Cookie").empty());
+	auto mail = sent_mail(h);
+	TEST_EXPECT(mail.size() == 1 && mail[0].kind == "password_reset" && mail[0].to == "reset.me@example.com");
+	TEST_EXPECT(mail[0].text.find("reset_me") != std::string::npos);
+	const std::string token = reset_token_sent_to(h, "reset.me@example.com");
+	TEST_EXPECT(nws::is_web_session_token(token));
+	// The table keeps the token's hash alone, an hour out.
+	const auto row = h.pool.acquire()->query(
+			"SELECT token_hash, expires_at > now() + interval '59 minutes', "
+			"expires_at <= now() + interval '1 hour' FROM password_resets WHERE user_id = $1;",
+			{ opennova::db::BindValue(id) });
+	TEST_EXPECT(row.size() == 1 && row[0].as_text(0).value() == nws::web_session_token_hash(token));
+	TEST_EXPECT(row[0].as_int(1) == 1 && row[0].as_int(2) == 1);
+
+	// The reset's refusals: no CSRF header, missing fields, a wrong and a
+	// malformed token. None spends the real one.
+	reply = h.send("POST", "/api/auth/reset", { kJson, from_ip("10.60.0.5") },
+			"{\"token\":\"" + token + "\",\"password\":\"pw-new\"}");
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
+	reply = h.send("POST", "/api/auth/reset", { kJson, kCsrf, from_ip("10.60.0.5") }, "{\"token\":\"" + token + "\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "missing_field");
+	reply = reset_password(h, "10.60.0.5", std::string(64, 'b'), "pw-new");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_token");
+	reply = reset_password(h, "10.60.0.5", "short", "pw-new");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_token");
+	TEST_EXPECT(nws::authenticate_user(*h.pool.acquire(), "reset_me", "pw-old").has_value());
+
+	// The token sets the password: the old one and the old session end, the
+	// credentials generation moves.
+	const int64_t gen_before = nws::get_user_by_id(*h.pool.acquire(), id)->credentials_gen;
+	reply = reset_password(h, "10.60.0.5", token, "pw-new");
+	TEST_EXPECT(reply.transport_ok && reply.code == 204 && body_text(reply).empty());
+	TEST_EXPECT(nws::get_user_by_id(*h.pool.acquire(), id)->credentials_gen == gen_before + 1);
+	TEST_EXPECT(h.send("GET", "/api/me", { with_session(session) }).code == 401);
+	TEST_EXPECT(login(h, "10.60.0.1", "reset_me", "pw-old").code == 401);
+	TEST_EXPECT(login(h, "10.60.0.1", "reset_me", "pw-new").code == 200);
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM password_resets WHERE user_id = $1;",
+						{ opennova::db::BindValue(id) }).empty());
+
+	// Single use: the same link again is refused, and the password stays.
+	reply = reset_password(h, "10.60.0.5", token, "pw-again");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_token");
+	TEST_EXPECT(nws::authenticate_user(*h.pool.acquire(), "reset_me", "pw-new").has_value());
+	return 0;
+}
+
+// A newer link replaces the older one; a link past its hour is refused (and
+// gone); an account that is not active, and one with no email, get no mail.
+int test_password_reset_links(Harness &h) {
+	const int64_t id = make_account_with_email(h, "reset_twice", "pw-1", "twice@example.com");
+	TEST_EXPECT(id > 0);
+	h.mailer->clear();
+	TEST_EXPECT(forgot_answer(forgot(h, "10.61.0.1", "twice@example.com")));
+	const std::string first = reset_token_sent_to(h, "twice@example.com");
+	TEST_EXPECT(forgot_answer(forgot(h, "10.61.0.1", "twice@example.com")));
+	const std::string second = reset_token_sent_to(h, "twice@example.com");
+	TEST_EXPECT(!first.empty() && !second.empty() && first != second);
+	TEST_EXPECT(reset_password(h, "10.61.0.2", first, "pw-2").code == 400);
+	TEST_EXPECT(reset_password(h, "10.61.0.2", second, "pw-2").code == 204);
+	TEST_EXPECT(nws::authenticate_user(*h.pool.acquire(), "reset_twice", "pw-2").has_value());
+
+	// Past its hour.
+	TEST_EXPECT(make_account_with_email(h, "reset_late", "pw-1", "late@example.com") > 0);
+	TEST_EXPECT(forgot_answer(forgot(h, "10.61.0.3", "late@example.com")));
+	const std::string late = reset_token_sent_to(h, "late@example.com");
+	TEST_EXPECT(!late.empty());
+	h.pool.acquire()->exec("UPDATE password_resets SET expires_at = now() - interval '1 second' "
+						   "WHERE token_hash = $1;",
+			{ opennova::db::BindValue(nws::web_session_token_hash(late)) });
+	TEST_EXPECT(error_of_reply(reset_password(h, "10.61.0.4", late, "pw-2")) == "invalid_token");
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM password_resets WHERE token_hash = $1;",
+						{ opennova::db::BindValue(nws::web_session_token_hash(late)) }).empty());
+	TEST_EXPECT(nws::authenticate_user(*h.pool.acquire(), "reset_late", "pw-1").has_value());
+	// The sweep's prune takes what nobody spent once it is past its hour.
+	TEST_EXPECT(forgot_answer(forgot(h, "10.61.0.3", "late@example.com")));
+	h.pool.acquire()->exec("UPDATE password_resets SET expires_at = now() - interval '1 second';");
+	TEST_EXPECT(nws::prune_password_resets(*h.pool.acquire()) >= 1);
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM password_resets;").empty());
+
+	// A banned account: the same answer, no mail, no link.
+	const int64_t banned = make_account_with_email(h, "reset_banned", "pw-1", "banned@example.com");
+	TEST_EXPECT(banned > 0);
+	h.pool.acquire()->exec("UPDATE players SET account_status = 'banned' WHERE id = $1;",
+			{ opennova::db::BindValue(banned) });
+	h.mailer->clear();
+	TEST_EXPECT(forgot_answer(forgot(h, "10.61.0.5", "banned@example.com")));
+	TEST_EXPECT(sent_mail(h).empty());
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM password_resets WHERE user_id = $1;",
+						{ opennova::db::BindValue(banned) }).empty());
+	return 0;
+}
+
+// The brakes: POST /api/auth/forgot per email address (3, then 429 with
+// Retry-After, whether or not an account has the address, from any client
+// address) and both routes per client address (10, then 429).
+int test_password_reset_brakes(Harness &h) {
+	for (int i = 0; i < 3; ++i)
+		TEST_EXPECT(forgot_answer(forgot(h, "10.62.0." + std::to_string(i + 1), "brake@example.com")));
+	auto reply = forgot(h, "10.62.0.9", "Brake@Example.com");
+	TEST_EXPECT(reply.code == 429 && is_retry_after(reply));
+	// Another address from the same client is not braked by it.
+	TEST_EXPECT(forgot_answer(forgot(h, "10.62.0.9", "other.brake@example.com")));
+
+	net::HttpReply refusal;
+	const int accepted = accepted_before_429(
+			[&h](int i) { return forgot(h, "10.62.1.1", "ip" + std::to_string(i) + "@example.com"); }, 40, refusal);
+	TEST_EXPECT(accepted == 10);
+	TEST_EXPECT(is_retry_after(refusal));
+	const int resets = accepted_before_429(
+			[&h](int) { return reset_password(h, "10.62.2.1", std::string(64, 'c'), "pw"); }, 40, refusal);
+	TEST_EXPECT(resets == 10);
+	TEST_EXPECT(is_retry_after(refusal));
+	return 0;
+}
+
 int run(Harness &h) {
 	struct Case { const char *name; int (*fn)(Harness &); };
 	const Case cases[] = {
@@ -6888,6 +7086,9 @@ int run(Harness &h) {
 		{ "csrf_before_buckets", test_csrf_before_buckets },
 		{ "login_brake", test_login_brake },
 		{ "register_brake", test_register_brake },
+		{ "password_reset", test_password_reset },
+		{ "password_reset_links", test_password_reset_links },
+		{ "password_reset_brakes", test_password_reset_brakes },
 		{ "nwlogin_brake", test_nwlogin_brake },
 		{ "known_addresses", test_known_addresses },
 		{ "retail_pin_revocation", test_retail_pin_revocation },

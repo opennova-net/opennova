@@ -27,6 +27,7 @@
 #include "hosted/supervisor.h"
 #include "http_listener.h"
 #include "mailer.h"
+#include "password_reset.h"
 #include "session_store.h"
 #include "web_session.h"
 
@@ -813,8 +814,11 @@ int main() {
 				if (const auto pruned = prune_login_addresses(dbh); pruned > 0) {
 					std::printf("[sweep] pruned %zu stale login address(es)\n", pruned);
 				}
+				if (const auto pruned = prune_password_resets(dbh); pruned > 0) {
+					std::printf("[sweep] pruned %zu expired password reset link(s)\n", pruned);
+				}
 			} catch (const db::Error &e) {
-				std::fprintf(stderr, "[sweep] WARN web session / login address prune: %s\n", e.what());
+				std::fprintf(stderr, "[sweep] WARN web session / login address / reset link prune: %s\n", e.what());
 			}
 			// Webhook events synced more than 30 days ago (the cache keeps no
 			// history Stripe does not).

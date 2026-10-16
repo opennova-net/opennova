@@ -15,6 +15,7 @@
 #include "http_cookies.h"
 #include "mailer.h"
 #include "nw_udp_listener.h"
+#include "password_reset_routes.h"
 #include "server_config.h"
 #include "session_store.h"
 #include "template_engine.h"
@@ -287,7 +288,8 @@ struct HttpListener::Impl {
 			console(access, pool),
 			cd_keys(access, pool),
 			users(access, pool),
-			billing(access, pool) {}
+			billing(access, pool),
+			resets(access, pool) {}
 
 	WebApp app;
 	// start()'s handshake with the Crow thread: Pending until Crow serves
@@ -318,6 +320,8 @@ struct HttpListener::Impl {
 	AdminUserRoutes users;
 	// The support tiers' routes (billing/billing_routes.h).
 	billing::BillingRoutes billing;
+	// The password reset routes (password_reset_routes.h).
+	PasswordResetRoutes resets;
 	// The games catalogue, loaded once in start() before the routes register
 	// and never written after, so handlers read it without a lock.
 	catalog::GameCatalog games;
@@ -374,6 +378,8 @@ bool HttpListener::start(const ServerConfig &config) {
 
 	register_admin_api_routes(public_host);
 	register_public_api_routes();
+	impl_->resets.register_routes(impl_->app, mail_, config.site_url,
+			[this](int64_t id) { forget_revoked_account(id); });
 	impl_->hosts.register_routes(impl_->app, nw_udp_);
 	impl_->hosted_servers.configure(config, fleet_placement_);
 	impl_->hosted_servers.register_routes(impl_->app);

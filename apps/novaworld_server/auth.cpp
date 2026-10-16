@@ -221,6 +221,17 @@ std::optional<UserRecord> get_user_by_id(opennova::db::Database &db, int64_t id)
 	}
 }
 
+std::optional<UserRecord> get_user_by_email(opennova::db::Database &db, const std::string &email) {
+	if (email.empty())
+		return std::nullopt;
+	const auto rows = db.query(std::string("SELECT ") + kUserColumns +
+					" FROM players WHERE email = $1 AND kind = 'player' LIMIT 1;",
+			{ opennova::db::BindValue(email) });
+	if (rows.empty())
+		return std::nullopt;
+	return row_to_user(rows.front());
+}
+
 std::optional<std::string> normalize_email(std::string_view raw) {
 	if (raw.empty() || raw.size() > kEmailMaxBytes)
 		return std::nullopt;

@@ -44,7 +44,8 @@ namespace catalog { struct GameRow; }
 //   admin REST API      — /api/admin/* + dev host inject, for the Bearer
 //                         ADMIN_API_TOKEN or an admin-role website session
 //   public JSON API     — /api/* for the web portal, with the website's
-//                         login / logout / me session routes, and the
+//                         login / logout / me session routes, the password
+//                         reset routes (password_reset_routes.h), and the
 //                         health probe GET /healthz (outside /api)
 //   listed servers      — HostRoutes: GET /api/admin/hosts and GET
 //                         /api/me/hosts, and the ServerCommand /

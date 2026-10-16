@@ -118,6 +118,9 @@ std::optional<UserRecord> authenticate_user(opennova::db::Database &db,
 std::optional<UserRecord> get_user_by_username(opennova::db::Database &db,
                                                 const std::string &username);
 std::optional<UserRecord> get_user_by_id(opennova::db::Database &db, int64_t id);
+// The player account (kind 'player') whose players.email is `email`, an
+// address normalize_email gave; nullopt for none. Throws db::Error.
+std::optional<UserRecord> get_user_by_email(opennova::db::Database &db, const std::string &email);
 // The account whose live retail login set `session_tag` (the LOGINSESSIONTAG
 // POST /NWLogin.dll mints after a password check or a pin resume): its
 // active_user_sessions row, until a logout, the 2 h idle sweep, a boot, the
