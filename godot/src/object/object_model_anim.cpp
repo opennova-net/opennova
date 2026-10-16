@@ -92,7 +92,7 @@ void ObjectModel::play_body_clip(const String &p_key) {
 
 // play_body_clip selecting a same-key VARIANT (multi-clip .adm rows): the FSM
 // owner's ring serves the index and playback follows that latch until the next
-// play. [orig: AnimMap_PlayAnimBySlot @0x40bda0 latches the served ring entry]
+// play. (engine: runtime/world/player_weapon.h)
 void ObjectModel::play_body_clip_variant(const String &p_key, int p_variant) {
 	for (ObjectModel *linked : live_presentation_links()) {
 		linked->play_body_clip_variant(p_key, p_variant);

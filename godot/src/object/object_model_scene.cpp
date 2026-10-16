@@ -530,7 +530,7 @@ void ObjectModel::harvest_level_surfaces(Vector<HarvestedSurface> &r_rows) {
 
 // Build the Skeleton3D + rest-derived Skin from the loaded SkeletalAnim (the
 // clip's rig, or the bone table at rest).
-// [orig: BoneFile_Load @0x40fff0 builds the runtime skeleton.]
+// (engine: formats/bad/bad.cpp)
 void ObjectModel::build_skeleton(const Ref<SkeletalAnim> &p_rig) {
 	skeleton_ = memnew(Skeleton3D);
 	skeleton_->set_name("Skeleton3D");

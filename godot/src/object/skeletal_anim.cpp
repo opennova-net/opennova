@@ -11,7 +11,7 @@
 #include <godot_cpp/variant/quaternion.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
-#include <runtime/anim/aim_overlay.h> // the torso-bend overlay [orig: @0x4b1290]
+#include <runtime/anim/aim_overlay.h> // the torso-bend overlay (engine: runtime/anim/aim_overlay.h)
 #include <runtime/anim/skeletal_pose.h>
 
 #include <utility>

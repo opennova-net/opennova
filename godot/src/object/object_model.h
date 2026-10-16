@@ -67,8 +67,7 @@ class Camera3D;
 // same block as the opennova_light_block_* / opennova_fog_* global shader
 // parameters MissionEnvironment writes, and the typed record serves the
 // light director, the terrain light rows, and the diagnostics.
-// [orig: CTerrainRenderer_BuildLightingShaderConstants @ 0x5c8090 ->
-//  RenderBatchCtx_StoreLightingConstants @ 0x5d89e0]
+// (engine: runtime/renderer/light_runtime.h)
 class EnvLightValues : public RefCounted {
 	GDCLASS(EnvLightValues, RefCounted)
 
@@ -645,8 +644,7 @@ private:
 	int wpn_phase_ticks_ = 0;
 	// The secondary channel's outgoing clip + cross-fade weight (the sim's
 	// wpn_prev / wpn_prev_clip_phase / wpn_blend_weight). Empty prev key = the
-	// channel is not blending [orig: the AnimMap_UpdateEntity @0x40b5f0
-	// re-init, see docs/world/world-wac-ai-re.md §14.8.7].
+	// channel is not blending (engine: runtime/world/infantry.h).
 	String wpn_prev_key_;
 	int wpn_prev_phase_ticks_ = 0;
 	float wpn_blend_weight_ = 1.0f;
@@ -952,8 +950,7 @@ public:
 	};
 	// Visible rigid ROBJ draws and their exact world bounds. The EffectWorld
 	// device leg uses these only for a building's per-ROBJ owner-section scope
-	// [orig: Render_CollectRenderObjectsForBatch @0x5d8ff7, see
-	// docs/render/render-lighting-re.md].
+	// (engine: runtime/renderer/light_scene.h).
 	void collect_point_light_draw_parts(
 			std::vector<PointLightDrawPart> &r_parts) const;
 	// The per-ROBJ world bounds are rebuilt only when a part/robj transform,

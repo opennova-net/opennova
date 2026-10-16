@@ -35,7 +35,7 @@ class Skeleton3D;
 // and the original engine use -- so poses map directly to Godot Transform3Ds (no change of
 // basis). The mesh carries the (-x,y,z) handedness flip; the Skin's global-rest-inverse
 // bind keeps mesh and bones consistent. (Matches the proven oscarmike Godot port.)
-// [orig: AnimMap_PlayAnimBySlot @0x40bda0 selects a clip]; the .bad pose math
+// (engine: runtime/world/player_weapon.h); the .bad pose math
 // (frame-window walk, blend, bind rest) is anim/skeletal_pose.h's.
 class SkeletalAnim : public RefCounted {
 	GDCLASS(SkeletalAnim, RefCounted)
@@ -127,8 +127,7 @@ public:
 	bool has_clip(const String &p_key) const { return find_clip(p_key) != nullptr; }
 	// Variant surface: p_variant selects among same-key clips (0-based file order,
 	// wrapped). All getters/eval are non-consuming PEEKS — the consuming ring
-	// rotation (serve-then-advance on duration reads and play starts [orig:
-	// Anim_GetDurationTicks @ 0x53ee10 / AnimMap_PlayAnimBySlot @ 0x40bda0]) is
+	// rotation (serve-then-advance on duration reads and play starts (engine: runtime/anim/adm_ring_table.h)) is
 	// driven by the FSM owner, which passes the served index back in.
 	int get_clip_variant_count(const String &p_key) const;
 	// Every variant's length (seconds) in ring order — the FSM owner's ring data.
@@ -160,7 +159,7 @@ public:
 	// eval_pose_overlay. Accessory/unparsable bones map to the body class (the original's
 	// default case). BODY rigs only: first-person weapon rigs reuse BN## tags for a
 	// different 39-bone Pelvis/arms/fingers skeleton (ak47_RST.bad et al.) — never feed
-	// a viewmodel through the overlay path. [orig: switch @0x4b1f3a; world-wac-ai-re §14.2]
+	// a viewmodel through the overlay path. (engine: runtime/anim/aim_overlay.h)
 	PackedInt32Array get_overlay_classes() const;
 
 	// eval_pose plus the third-person aim overlay — the torso bend. p_deltas is one
@@ -174,7 +173,7 @@ public:
 	// collapse_right_hand emits a terminal zero-scale BN17 pose at its sampled
 	// local joint even when overlay inputs are unavailable and this falls back to
 	// the sampled pose. Collision adapts that verdict to its final-row convention.
-	// [orig: Entity_BuildBoneTransformMatrices @0x4b1290; world-wac-ai-re.md §14/§14.8.6]
+	// (engine: runtime/anim/skeletal_clips.h)
 	// p_variant / p_source_variant / p_target_variant: the primary channels'
 	// served ring entries.
 	Array eval_pose_overlay_deltas(const String &p_key, double p_playhead_seconds,
