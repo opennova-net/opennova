@@ -3,12 +3,14 @@
 // The admin's fleet routes (ADR 0053, proposed; README "Hosted servers"): the
 // fleet view (GET /api/admin/hosted: the machines and the servers on them,
 // filtered by owner and state), one server with its
-// machine (GET /api/admin/hosted/<id>), and the machines' moves an admin
-// makes: a drain, an end and a fleet roll (POST /api/admin/fleet/...). Every
-// one require_admin; they write rows only (fleet_repository.h), and the
-// supervisor's next pass does the rest (moves the servers off, terminates the
-// machine). The kill switch and one server's stop are hosted_routes.h's.
-// Every reply is an error
+// machine (GET /api/admin/hosted/<id>), the machines' moves an admin makes: a
+// drain, an end and a fleet roll (POST /api/admin/fleet/...), and the force of
+// every outdated server onto its data sets' current data (POST
+// /api/admin/hosted/update-all, ADR 0064). Every one require_admin; they write
+// rows only (fleet_repository.h, data_set_repository.h), and the supervisor's
+// next pass does the rest (moves the servers off, terminates the machine,
+// starts the updated servers again). The kill switch and one server's stop are
+// hosted_routes.h's. Every reply is an error
 // code with our own message, never database text, and carries no credential:
 // a machine row holds none (FleetMachineRow), a server's admin login is never
 // read here. The HttpListener owns one FleetRoutes beside its HostedRoutes.
@@ -56,6 +58,7 @@ private:
 	crow::response drain(const crow::request &req, uint64_t id);
 	crow::response end(const crow::request &req, uint64_t id);
 	crow::response roll(const crow::request &req);
+	crow::response update_all(const crow::request &req);
 
 	WebAccess &access_;
 	db::ConnectionPool &pool_;

@@ -82,6 +82,8 @@ void FleetRoutes::register_routes(WebApp &app) {
 			.methods("POST"_method)([this](const crow::request &req, uint64_t id) { return end(req, id); });
 	CROW_ROUTE(app, "/api/admin/fleet/roll")
 			.methods("POST"_method)([this](const crow::request &req) { return roll(req); });
+	CROW_ROUTE(app, "/api/admin/hosted/update-all")
+			.methods("POST"_method)([this](const crow::request &req) { return update_all(req); });
 }
 
 // GET /api/admin/hosted[?owner=<username>][&state=live|ended|all] — the fleet:
@@ -242,6 +244,34 @@ crow::response FleetRoutes::end(const crow::request &req, uint64_t id) {
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/admin/fleet/machines/%llu/end failed: %s\n",
 				static_cast<unsigned long long>(id), e.what());
+		return json_error(500, "db_error");
+	}
+}
+
+// POST /api/admin/hosted/update-all — the force of every live server whose
+// pins are behind its data sets' current trees onto them (data_set_repository.h
+// request_update_all): body {"data_set_id"} (optional: the servers of that data
+// set, as base or expansion, alone), each marked update_requested for the
+// supervisor's next pass (placed again on the current trees, no restart
+// counted). 400 invalid_json / invalid_field; 202 {"updating": how many}.
+crow::response FleetRoutes::update_all(const crow::request &req) {
+	auto caller = access_.require_admin(req);
+	if (caller.refusal) return std::move(*caller.refusal);
+	std::optional<int64_t> data_set_id;
+	if (!req.body.empty()) {
+		auto body = JsonBody::parse(req.body);
+		if (!body) return json_error(400, "invalid_json");
+		data_set_id = body->integer("data_set_id");
+		if (body->wrong_type()) return json_error(400, "invalid_field");
+	}
+	try {
+		const size_t updating = request_update_all(*pool_.acquire(), data_set_id);
+		std::printf("[hosted] update all: %zu server(s) to their data sets' current data\n", updating);
+		crow::json::wvalue out;
+		out["updating"] = updating;
+		return json_reply(202, out);
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[http] POST /api/admin/hosted/update-all failed: %s\n", e.what());
 		return json_error(500, "db_error");
 	}
 }

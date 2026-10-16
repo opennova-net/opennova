@@ -398,6 +398,104 @@ int test_data_sets() {
 	return 0;
 }
 
+// The trees a server is pinned to (ADR 0064): its first start takes its data
+// sets' current trees; a crash restart and a fleet-caused replace keep them
+// while newer data arrives (the owner's view says an update waits); the
+// owner's update places the server again on the current trees, a new
+// generation, no restart counted; the admin's update-all does the same for
+// every outdated server; a pinned tree pruned falls back to the current one.
+int test_pins_and_updates() {
+	Rig rig("hosted_pins");
+	Database &db = rig.db;
+	hosted::HostedSettings settings = rig.settings();
+	settings.expansion_id = rig.data.jox;
+	const int64_t id = rig.request("pins_owner", settings);
+	TEST_EXPECT(id > 0 && !rig.to_running(id, 9301).empty());
+	auto row = rig.server(id);
+	TEST_EXPECT(row->base_tree_id == rig.data.jo_tree && row->expansion_tree_id == rig.data.jox_tree &&
+			row->generation == 1 && !hosted::server_outdated(db, id));
+	TEST_EXPECT(hosted::request_update(db, id) == hosted::UpdateOutcome::UpToDate);
+
+	// Newer data for the base: the server is outdated, runs on, and a crash
+	// restart keeps its pins (its generation moves on, its restart counted).
+	const int64_t jo_tree2 = seed_tree(db, rig.data.jo, "JO V1.7.5.4", { "second.bms", "SERVETST.BMS" });
+	TEST_EXPECT(jo_tree2 != 0 && hosted::server_outdated(db, id));
+	rig.step();
+	TEST_EXPECT(rig.state(id) == State::Running && rig.server(id)->base_tree_id == rig.data.jo_tree);
+	rig.agent_of(id)->exit_with(rig.container(id), 1);
+	rig.sync_all();
+	rig.tick();
+	TEST_EXPECT(rig.state(id) == State::Provisioning && rig.server(id)->restarts == 1);
+	TEST_EXPECT(!rig.back_to_running(id, 9302).empty());
+	row = rig.server(id);
+	TEST_EXPECT(row->generation == 2 && row->base_tree_id == rig.data.jo_tree &&
+			row->expansion_tree_id == rig.data.jox_tree && hosted::server_outdated(db, id));
+	{
+		const FakeAgent::Container *c = rig.running_container(id);
+		TEST_EXPECT(c && c->desired.base_tree == rig.data.jo_tree);
+	}
+	// A fleet-caused replace (its machine drained) keeps them too.
+	const int64_t machine = rig.machine_of(id);
+	TEST_EXPECT(hosted::transition_machine(db, machine, hosted::FleetMachineState::Ready,
+			hosted::FleetMachineState::Draining, "test"));
+	rig.step();
+	TEST_EXPECT(rig.state(id) == State::Provisioning && rig.server(id)->restarts == 1);
+	TEST_EXPECT(!rig.to_running(id, 9303).empty());
+	row = rig.server(id);
+	TEST_EXPECT(row->generation == 3 && rig.machine_of(id) != machine && row->base_tree_id == rig.data.jo_tree &&
+			row->expansion_tree_id == rig.data.jox_tree);
+
+	// The owner's update: placed again at once, no restart counted, the next
+	// start on the current trees with a new generation; the flag cleared.
+	TEST_EXPECT(hosted::request_update(db, id) == hosted::UpdateOutcome::Requested);
+	TEST_EXPECT(rig.server(id)->update_requested);
+	rig.step();
+	row = rig.server(id);
+	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 1 &&
+			contains(last_detail(db, id), "updated to its data set's current data"));
+	TEST_EXPECT(!rig.to_running(id, 9304).empty());
+	row = rig.server(id);
+	TEST_EXPECT(row->generation == 4 && row->base_tree_id == jo_tree2 && row->expansion_tree_id == rig.data.jox_tree &&
+			!row->update_requested && !hosted::server_outdated(db, id) && row->restarts == 1);
+	{
+		const FakeAgent::Container *c = rig.running_container(id);
+		TEST_EXPECT(c && c->desired.base_tree == jo_tree2 && c->desired.expansion_tree == rig.data.jox_tree);
+		const FakeAgent *agent = rig.agent_of(id);
+		TEST_EXPECT(agent && agent->last.trees.count(jo_tree2) == 1 &&
+				agent->last.trees.at(jo_tree2).version == "JO V1.7.5.4");
+	}
+	TEST_EXPECT(has_event(db, id, "with tree " + std::to_string(jo_tree2)));
+
+	// The admin's update-all: every outdated server (a second one on Delta Force
+	// Xtreme 2, up to date, is left alone), each placed again.
+	hosted::HostedSettings dfx2 = valid_settings(rig.data.dfx2);
+	dfx2.missions = { "dfx2_a.bms" };
+	const int64_t other = rig.request("pins_other", dfx2);
+	TEST_EXPECT(other > 0 && !rig.to_running(other, 9305).empty());
+	const int64_t jox_tree2 = seed_tree(db, rig.data.jox, "JOX V1.1", { "escal.bms" }, { "jox01.pff", "jox01L.pff", "version.txt" });
+	TEST_EXPECT(jox_tree2 != 0 && hosted::server_outdated(db, id) && !hosted::server_outdated(db, other));
+	TEST_EXPECT(hosted::request_update_all(db, std::nullopt) == 1);
+	rig.step();
+	TEST_EXPECT(rig.state(id) == State::Provisioning && rig.state(other) == State::Running);
+	TEST_EXPECT(!rig.to_running(id, 9306).empty());
+	row = rig.server(id);
+	TEST_EXPECT(row->generation == 5 && row->base_tree_id == jo_tree2 && row->expansion_tree_id == jox_tree2 &&
+			row->restarts == 1);
+	TEST_EXPECT(rig.server(other)->generation == 1 && rig.server(other)->base_tree_id == rig.data.dfx2_tree);
+
+	// A pinned tree pruned: a crash restart falls back to the current tree.
+	const int64_t dfx2_tree2 = seed_tree(db, rig.data.dfx2, "DFX2 V1.1", { "dfx2_a.bms", "dfx2_b.bms" });
+	TEST_EXPECT(dfx2_tree2 != 0);
+	hosted::mark_tree_pruned(db, rig.data.dfx2_tree);
+	rig.agent_of(other)->exit_with(rig.container(other), 1);
+	rig.sync_all();
+	rig.tick();
+	TEST_EXPECT(rig.state(other) == State::Provisioning);
+	TEST_EXPECT(!rig.back_to_running(other, 9307).empty());
+	TEST_EXPECT(rig.server(other)->base_tree_id == dfx2_tree2 && rig.server(other)->restarts == 1);
+	return 0;
+}
+
 // --- the service accounts -----------------------------------------------------
 
 int test_service_accounts() {
@@ -915,6 +1013,21 @@ int test_exits_and_crash_restarts() {
 	TEST_EXPECT(hosted::request_stop(rig.db, zero, "stopped by its owner"));
 	rig.tick(); // no container to stop
 	TEST_EXPECT(rig.state(zero) == State::Stopped);
+
+	// A container that never started because its data could not be fetched: the
+	// agent's reason is the event's, in place of "its container did not start".
+	const int64_t unfetched = rig.request("fetch_fails");
+	TEST_EXPECT(rig.walk(unfetched, State::Booting));
+	rig.agent_of(unfetched)->fail_start(rig.container(unfetched),
+			"its data could not be fetched: aws s3 sync exited 1: NoSuchKey");
+	rig.sync_all();
+	rig.tick();
+	TEST_EXPECT(rig.state(unfetched) == State::Provisioning);
+	TEST_EXPECT(contains(last_detail(rig.db, unfetched),
+			"its data could not be fetched: aws s3 sync exited 1: NoSuchKey; restart 1 of 2"));
+	TEST_EXPECT(hosted::request_stop(rig.db, unfetched, "stopped by its owner"));
+	rig.tick();
+	TEST_EXPECT(rig.state(unfetched) == State::Stopped);
 
 	// A crash (here the ServerStopHosting exit, 3, while the server should run)
 	// restarts, a new generation with a new password, until the limit (2) is used up.
@@ -1950,6 +2063,7 @@ int main(int argc, char **argv) {
 		{ "renders", test_renders },
 		{ "data_sets", test_data_sets },
 		{ "no_data", test_no_data },
+		{ "pins_and_updates", test_pins_and_updates },
 		{ "service_accounts", test_service_accounts },
 		{ "requests", test_requests },
 		{ "fleet_room", test_fleet_room },

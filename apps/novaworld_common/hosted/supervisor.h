@@ -52,7 +52,12 @@
 //                 links) the server's admin link answering, every pass its
 //                 agent's report; health_misses checks in a row with no answer
 //                 on its admin link fail it, and its listing gone for
-//                 listing_lost_ms places it again (below)
+//                 listing_lost_ms places it again (below).
+//                 In booting, listing and running alike, the owner's update
+//                 (update_requested: POST /api/me/servers/<id>/update, or the
+//                 admin's update-all) lets go of the slot and places the server
+//                 again at once, no restart counted, and the next start pins it
+//                 to its data sets' current trees (a new generation)
 //   stopping      asked for by the owner, an admin or the supervisor itself (an
 //                 owner's account deleted or no longer active, read every pass
 //                 and again right before a start mints credentials, or a server

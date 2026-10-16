@@ -181,6 +181,8 @@ struct Harness {
 	int64_t dfx2_id = 0;
 	int64_t on_id = 0;
 	int64_t jo_tree = 0;
+	int64_t jox_tree = 0;
+	int64_t dfx2_tree = 0;
 
 	// Every connect, send and recv waits at most `timeout_ms`.
 	net::HttpReply send(const char *method, const std::string &path,
@@ -4945,8 +4947,9 @@ void end_stopping_servers(Harness &h) {
 // a stopping server counting), the cap and `full`, another account's id
 // answering 404, the owner's stop by id (409 not_live once ended), the
 // own-machine add-on (no_own_machine without one), the list's order (the live
-// servers, then the newest 10 ended), the fleet view and the admin's stops
-// (admin only, never the admin password), and a listener with hosting off.
+// servers, then the newest 10 ended), the owner's update and the admin's
+// update-all (ADR 0064), the fleet view and the admin's stops (admin only,
+// never the admin password), and a listener with hosting off.
 int test_hosted_server_routes(Harness &h) {
 	namespace hosted = opennova::novaworld_server::hosted;
 	namespace billing = opennova::novaworld_server::billing;
@@ -5261,6 +5264,41 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(json["servers"].size() == 2 && json["servers"][0]["id"].i() == ana_second &&
 			json["servers"][1]["id"].i() == ana_first && entitlement_is(json, 2, 1, 0, 0, true, "comp"));
 	end_stopping_servers(h); // Ben's
+
+	// The owner's update (ADR 0064): a live server not started yet holds no
+	// pins and is behind by the rule, so the update is asked (idempotent); an
+	// ended one is not_live, another account's 404; one pinned to the current
+	// trees is up_to_date. The admin's update-all marks every outdated live
+	// server, of one data set or all.
+	auto update = [&h](const Owner &o, int64_t id) {
+		return h.send("POST", "/api/me/servers/" + std::to_string(id) + "/update", { with_session(o.session), kCsrf });
+	};
+	TEST_EXPECT(update(ben, ana_second).code == 404);
+	reply = update(ana, ana_first);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
+	reply = update(ana, ana_second);
+	json = crow::json::load(body_text(reply));
+	if (reply.code != 202) std::fprintf(stderr, "  update: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.code == 202 && json["server"]["update_requested"].b() && json["server"]["update_available"].b());
+	TEST_EXPECT(update(ana, ana_second).code == 202);
+	hosted::set_tree_pins(*h.pool.acquire(), ana_second, h.jo_tree, h.jox_tree);
+	reply = update(ana, ana_second);
+	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "up_to_date");
+	json = crow::json::load(body_text(one(ana, ana_second)));
+	TEST_EXPECT(!json["server"]["update_requested"].b() && !json["server"]["update_available"].b());
+	TEST_EXPECT(json["server"]["data"]["base"]["tree_id"].i() == h.jo_tree &&
+			str(json["server"]["data"]["base"]["version"]) == "JO V1.7.5.3" &&
+			json["server"]["data"]["expansion"]["tree_id"].i() == h.jox_tree);
+	TEST_EXPECT(h.send("POST", "/api/admin/hosted/update-all", { with_session(ana.session), kCsrf }).code == 403);
+	reply = h.send("POST", "/api/admin/hosted/update-all", { kBearer, kJson }, "{\"data_set_id\":" + jo + "}");
+	TEST_EXPECT(reply.code == 202 && crow::json::load(body_text(reply))["updating"].i() == 0);
+	reply = h.send("POST", "/api/admin/hosted/update-all", { kBearer, kJson }, "{}");
+	TEST_EXPECT(reply.code == 202 && crow::json::load(body_text(reply))["updating"].i() == 1); // Cy's
+	json = crow::json::load(body_text(h.send("GET", "/api/admin/hosted/" + std::to_string(cy_server), { kBearer })));
+	TEST_EXPECT(json["server"]["update_requested"].b() && json["server"]["outdated"].b() &&
+			json["server"]["base_tree_id"].t() == crow::json::type::Null);
+	reply = h.send("POST", "/api/admin/hosted/update-all", { kBearer, kJson }, "{\"data_set_id\":\"x\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
 
 	// The own-machine add-on: none without it (a comp grant buys no machine),
 	// then a tier with one machine paid for, and the start on it.
@@ -7822,7 +7860,7 @@ int main(int argc, char **argv) {
 			std::filesystem::create_directories(temp.path / "store" / "trees");
 			config.object_store_url = "file://" + (store_dir.front() == '/' ? store_dir : "/" + store_dir);
 		}
-		int64_t jo_id = 0, jox_id = 0, dfx2_id = 0, on_id = 0, jo_tree = 0;
+		int64_t jo_id = 0, jox_id = 0, dfx2_id = 0, on_id = 0, jo_tree = 0, jox_tree = 0, dfx2_tree = 0;
 		{
 			auto db = pool.acquire();
 			jo_id = data_set_named(*db, "Joint Operations");
@@ -7830,9 +7868,10 @@ int main(int argc, char **argv) {
 			dfx2_id = data_set_named(*db, "Delta Force Xtreme 2");
 			on_id = data_set_named(*db, "OpenNova");
 			jo_tree = seed_tree(*db, jo_id, "JO V1.7.5.3", { "a.bms", "alpha.bms", "first.bms", "second.bms" });
-			TEST_EXPECT(jo_id > 0 && jox_id > 0 && dfx2_id > 0 && on_id > 0 && jo_tree > 0);
-			TEST_EXPECT(seed_tree(*db, jox_id, "JOX V1.0", { "escal.bms" }) > 0);
-			TEST_EXPECT(seed_tree(*db, dfx2_id, "DFX2 V1.0", { "dfx2_a.bms", "dfx2_b.bms" }) > 0);
+			jox_tree = seed_tree(*db, jox_id, "JOX V1.0", { "escal.bms" });
+			dfx2_tree = seed_tree(*db, dfx2_id, "DFX2 V1.0", { "dfx2_a.bms", "dfx2_b.bms" });
+			TEST_EXPECT(jo_id > 0 && jox_id > 0 && dfx2_id > 0 && on_id > 0 && jo_tree > 0 && jox_tree > 0 &&
+					dfx2_tree > 0);
 		}
 
 		opennova::ConnectionManager manager;
@@ -7985,6 +8024,8 @@ int main(int argc, char **argv) {
 		harness.dfx2_id = dfx2_id;
 		harness.on_id = on_id;
 		harness.jo_tree = jo_tree;
+		harness.jox_tree = jox_tree;
+		harness.dfx2_tree = dfx2_tree;
 		rc = run(harness);
 		// Join the Crow threads before the pool and the TempDir go, then the
 		// NW UDP listener.

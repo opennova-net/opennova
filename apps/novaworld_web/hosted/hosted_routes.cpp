@@ -213,7 +213,7 @@ crow::json::wvalue offered_data_set_json(const OfferedDataSet &d) {
 }
 
 // A hosted server for its owner (GET /api/me/servers and /api/me/servers/<id>,
-// the start and stop replies) or, with `admin`, for the fleet view:
+// the start, stop and update replies) or, with `admin`, for the fleet view:
 // its owner (with its tier), its service account, its place in the fleet, its
 // pins and its listed players besides. Never its admin password.
 crow::json::wvalue server_json(db::Database &db, const HostedServer &s, bool admin) {
@@ -308,6 +308,8 @@ void HostedRoutes::register_routes(WebApp &app) {
 			.methods("GET"_method)([this](const crow::request &req, uint64_t id) { return me_server(req, id); });
 	CROW_ROUTE(app, "/api/me/servers/<uint>/stop")
 			.methods("POST"_method)([this](const crow::request &req, uint64_t id) { return me_stop(req, id); });
+	CROW_ROUTE(app, "/api/me/servers/<uint>/update")
+			.methods("POST"_method)([this](const crow::request &req, uint64_t id) { return me_update(req, id); });
 	CROW_ROUTE(app, "/api/admin/hosted/stop-all")
 			.methods("POST"_method)([this](const crow::request &req) { return admin_stop_all(req); });
 	CROW_ROUTE(app, "/api/admin/hosted/<uint>/stop")
@@ -577,6 +579,47 @@ crow::response HostedRoutes::me_stop(const crow::request &req, uint64_t id) {
 		return server_reply(202, *db_conn, server->id, false);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/me/servers/%llu/stop failed: %s\n",
+				static_cast<unsigned long long>(id), e.what());
+		return json_error(500, "db_error");
+	}
+}
+
+// POST /api/me/servers/<id>/update — the owner's move of one of the account's
+// live servers to its data sets' current data (ADR 0064): the row's
+// update_requested, which the supervisor honours at its next pass (the server
+// placed again on the current trees, a new generation; players drop). Idempotent.
+// require_user (401, 403 without the CSRF header); 404 not_found for an id that
+// is not the account's; 409 not_live once it has ended, 409 up_to_date when
+// its pins are its data sets' current trees already; 202 {"server"} (one
+// already asked included).
+crow::response HostedRoutes::me_update(const crow::request &req, uint64_t id) {
+	auto access = access_.require_user(req);
+	if (access.refusal) return std::move(*access.refusal);
+	const WebSessionUser &user = *access.user;
+	try {
+		auto db_conn = pool_.acquire();
+		const auto server = owned_server(*db_conn, server_id_of(id), user.id);
+		if (!server) {
+			log_owner(user, "update", "not_found");
+			return json_error(404, "not_found", "this account has no hosted server with this id");
+		}
+		switch (request_update(*db_conn, server->id)) {
+			case UpdateOutcome::NotFound:
+				log_owner(user, "update", "not_found");
+				return json_error(404, "not_found", "this account has no hosted server with this id");
+			case UpdateOutcome::NotLive:
+				log_owner(user, "update", "server " + std::to_string(server->id) + " not_live");
+				return json_error(409, "not_live", "this hosted server has ended");
+			case UpdateOutcome::UpToDate:
+				log_owner(user, "update", "server " + std::to_string(server->id) + " up_to_date");
+				return json_error(409, "up_to_date", "this hosted server runs its data set's current data");
+			case UpdateOutcome::Requested:
+				break;
+		}
+		log_owner(user, "update", "server " + std::to_string(server->id) + " update requested");
+		return server_reply(202, *db_conn, server->id, false);
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[http] POST /api/me/servers/%llu/update failed: %s\n",
 				static_cast<unsigned long long>(id), e.what());
 		return json_error(500, "db_error");
 	}
