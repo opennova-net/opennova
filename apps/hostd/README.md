@@ -9,11 +9,13 @@ restarts and ends machines; the agent does what the last reply said and keeps do
 while the service cannot be reached.
 
 Linux only. Target `opennova_hostd`, binary `opennova-hostd`, built from `apps/hostd` with
-the service's half of the protocol (`apps/novaworld_server/hosted/agent_protocol.*`,
+the service's half of the protocol (`apps/novaworld_common/hosted/agent_protocol.*`,
 `slots.h`) compiled in. It ships inside the `opennova-serve` image at
-`/usr/local/bin/opennova-hostd` (`apps/serve/Dockerfile`) and never runs in a container: a
-machine copies it out of the image it pulled at its bootstrap, so each machine's agent is
-the build of the serve image it was launched with.
+`/usr/local/bin/opennova-hostd` (`apps/serve/Dockerfile`). On a cloud machine it never runs
+in a container: the machine copies it out of the image it pulled at its bootstrap, so each
+machine's agent is the build of the serve image it was launched with. The local stack's
+machines are themselves containers of that image, the agent their own process, with the
+process runtime (below).
 
 ## Vocabulary
 
@@ -27,17 +29,19 @@ slots; an own machine has slot 0 alone.
 ## Command line
 
 ```
-opennova-hostd --service http://<service private address>:<port> --machine <id> [options]
+opennova-hostd --service http://<host>:<port> --machine <id> [options]
 ```
 
 | Flag | Default | Meaning |
 | --- | --- | --- |
-| `--service` | required | The service's internal listener (`ONNET_INTERNAL_HTTP_BIND`), `http://` only. |
+| `--service` | required | The controller's internal listener as the machine reaches it (`ONNET_INTERNAL_URL`: the deployment's private name for the controller, resolved at each request, so the agent follows the controller to a new instance; each request tries every address the name lists until one takes the connection, since during a controller's replacement it lists the standby, which does not listen, beside the leader), `http://` only. |
 | `--machine` | required | This machine's id, the service's `fleet_machines` row. |
 | `--token-file` | `/etc/opennova/hostd.token` | The one-time bootstrap token the machine's user-data wrote (0600). Deleted once redeemed. |
 | `--state-dir` | `/var/lib/opennova-hostd` | The saved bootstrap (`machine-<id>.json`, 0600) and `scratch/` (the CLIs' output files, a pull's error file, a start's environment file). Made 0700. |
 | `--slots-root` | `/srv/slots` | The slots' working directories. Made 0755 when missing. |
+| `--runtime` | `docker` | How the servers run: `docker`, each a docker container (a cloud machine); `process`, each an `opennova-serve` child of the agent (a machine that is itself a container, the local stack's; "The process runtime" below). |
 | `--docker` | `/usr/bin/docker` | The docker CLI, run as given (no `PATH` search). |
+| `--serve` | `/usr/local/bin/opennova-serve` | The process runtime's `opennova-serve`. |
 | `--iptables` | `/usr/sbin/iptables` | The egress counters' iptables, or `none` to count nothing. |
 | `--ip6tables` | `/usr/sbin/ip6tables` | The same for IPv6, used only where the kernel has IPv6; `none` skips it. |
 | `--once` | | One pass, then exit: 0 when the sync was answered and read. |
@@ -59,7 +63,7 @@ Wants=network-online.target
 
 [Service]
 ExecStartPre=/usr/local/sbin/opennova-machine-fence
-ExecStart=/usr/local/bin/opennova-hostd --service http://10.44.0.10:8070 --machine 12
+ExecStart=/usr/local/bin/opennova-hostd --service http://controller.prod.opennova.internal:8070 --machine 12
 Restart=always
 RestartSec=5
 
@@ -74,7 +78,7 @@ agent's children.
 
 Both routes are on the service's internal listener and answer every refusal with a bare
 404. The message shapes, their checks and their caps are
-`apps/novaworld_server/hosted/agent_protocol.h`; the agent and the service build the same
+`apps/novaworld_common/hosted/agent_protocol.h`; the agent and the service build the same
 encoders and strict decoders.
 
 **Bootstrap**, once per machine:
@@ -172,6 +176,24 @@ port of its datagrams, and a bridge's NAT would rewrite the port. Only container
 agent's label are ever listed, stopped or removed. Their output is in the journal
 (`journalctl CONTAINER_NAME=<name>` or `-t <name>`).
 
+## The process runtime
+
+`--runtime process` (`process_runtime.h`) runs each server as a child process of the agent
+rather than a docker container: the runtime of a machine that is itself a container and runs
+no docker, the local stack's (`apps/novaworld_common/hosted/docker_machine_driver.h`, which
+starts the serve image with `--runtime process --iptables none --ip6tables none`). A start
+is `<--serve> --resource-dir <the data set's mount path> <opennova-serve's arguments>` in the
+slot's directory, its environment the system's variables (`PATH`, `HOME`, `LANG`, `LC_*`,
+`TZ`, `TMPDIR`) and the env file's, its output where the agent's own goes (the machine
+container's log). The rest of the agent is the same: the bootstrap, the syncs, the slots'
+directories, the starts, stops (SIGTERM), kills (SIGKILL) and removals the reply asks for,
+each server reported by name with its exit code (one a signal ended reads 128 plus the
+signal) until the reply drops it. What a container gave and a process does not: no slot user
+(the agent's own; the uid, CPUs, memory and pids cap are not applied), no egress counters,
+no CPU or memory figure (0), and every image is the machine's own (never pulled). The
+servers end with the agent (the parent-death signal), so a machine whose agent ended runs
+nothing, as its container ends with it.
+
 ## Egress
 
 A chain of its own, `OPENNOVA-EGRESS`, that `OUTPUT` jumps to first, opens with one rule per
@@ -189,7 +211,7 @@ also takes.
 
 ## What the machine provides
 
-The machine's user-data (`apps/novaworld_server/hosted/machine/`) is the agent's contract
+The machine's user-data (`apps/novaworld_common/hosted/machine/`) is the agent's contract
 with the machine: docker with no user-namespace remapping (the slot's UID in the container
 is the machine's, which the egress counters and the metadata fence match); every data set's
 volume mounted read-only at the path the bootstrap names; ports 32768-32831 reserved out of
@@ -213,7 +235,10 @@ The ctests (`tests/hostd`, Linux only; neither runs docker nor iptables):
   line on a stub command runner that checks every argv: the exact `docker run`, the
   listings and their partial answers, each call's timeout, the image check, docker's texts
   read, the chain's rules put in place only where missing and the counts summed; the
-  background pull runs stand-in programs for the CLI.
+  background pull runs stand-in programs for the CLI. And the process runtime over a
+  stand-in `opennova-serve` script: its argv, its working directory, the env file's
+  variables and none of the agent's own, running then exited with its code, SIGTERM and
+  SIGKILL, removal, and a start that cannot run (125).
 - `opennova_hostd_agent` drives the bootstrap and the sync passes against an in-process fake
   of the service's routes and a fake container runtime on a hand-stepped clock: the saved
   bootstrap, starts and their files, stops, kills, removals, the slot handover, failed
@@ -221,4 +246,8 @@ The ctests (`tests/hostd`, Linux only; neither runs docker nor iptables):
   refusals, every failing sync, and a log that never holds the secret, the token or a
   file's bytes.
 
-The protocol itself is `hosted_agent_protocol` (`tests/novaworld`).
+The protocol itself is `hosted_agent_protocol` (`tests/novaworld`). The real binary runs
+end to end, with the process runtime, in `hosted_agent_route` (against the service's agent
+routes, a stand-in `opennova-serve`) and `hosted_local_e2e` (under the service's supervisor,
+real servers), and in the local stack's smoke test (`scripts/dev_stack.sh smoke`), its
+machines containers of the serve image.

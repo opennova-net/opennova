@@ -41,7 +41,7 @@ namespace opennova {
 // (state -> -9) unless POSTIPADDRESS and POSTIPPORT are both present, OR
 // the junction/direct-connect bypass `dword_B5FD2C` is set from command
 // line flags. Our server therefore MUST emit both, which it does
-// (apps/novaworld_server/gate_listener.cpp). onnet's omission of them was
+// (apps/novaworld_gate/gate_listener.cpp). onnet's omission of them was
 // a bug; the reverted PR #37 stack adding them was the correct fix.
 //
 // CUS / PVT are NOT part of retail JO:CA's ProcessResponse key set (they

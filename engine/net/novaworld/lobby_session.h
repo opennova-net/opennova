@@ -98,6 +98,10 @@ struct LobbyState {
 	// that carries it, or with a re-host's kept Host list, which a parked
 	// connection sends under its kept RID. Unset: the listing is anonymous.
 	std::optional<int64_t> host_user_id;
+	// The connection's lobby_sessions row (lobbydb), which the NW UDP listener inserts and
+	// records here; 0 before it does. persist_host writes the row's listing columns in the
+	// listing's own transaction.
+	int64_t session_row_id = 0;
 	// The HostKey the owner was decided from; nullopt until the connection's
 	// request (or an update since) presented one.
 	std::optional<std::string> owner_key;
@@ -197,6 +201,10 @@ public:
 	// over the one its receive thread leases).
 	void set_database(opennova::db::Database *db) { db_ = db; }
 
+	// The lobby instance this lobby is (lobbydb::register_instance; 0: none),
+	// written on every listing it persists (active_hosts.lobby_id).
+	void set_lobby_id(int64_t lobby_id) { lobby_id_ = lobby_id; }
+
 	// Reflection override for the advertised game-host endpoint (dev/NAT). When
 	// set, ClientHostRequest / ClientHostUpdate force host_ip / host_port to
 	// these instead of trusting the observed UDP source (the docker gateway
@@ -242,16 +250,23 @@ public:
 	// CNapiGameSession_HandleServerMessage @0x4d1c50]. `reason` is the log tag.
 	void end_hosting(LobbyState &state, const char *reason);
 
+	// The connection's listing written again as it stands (its active_hosts row upserted with
+	// its roster, and its session row's listing columns), as its lobby registers again after its
+	// instance's row was reaped, which took the listing with it. One that does not host, or is
+	// held out of the browser for its HostKey, writes nothing, and so does a lobby with no
+	// database. `peer_ip` / `peer_port`: the connection's NovaWorld session address.
+	void relist(const LobbyState &state, const std::string &peer_ip, uint16_t peer_port);
+
 	// Allow tests to inject deterministic id generation.
 	using IdGenerator = std::function<std::string()>;
 	void set_sess_id_generator(IdGenerator g) { sess_id_gen_ = std::move(g); }
 	void set_gsid_generator(std::function<std::string(const std::string&)> g) {
 		gsid_gen_ = std::move(g);
 	}
-	// The host RID is minted by the service alone (see mint_rid); tests may
-	// pin it. The generator takes no input on purpose: nothing the host sends
-	// is a uniqueness source (its AppId is a per-session random in
-	// [1000, 9999] [orig: CNapiNetwork_RandomizeTimeout @0x4c4d80]).
+	// The host RID is minted by the service alone (see mint_rid: the
+	// database's sequence, shared by every lobby instance); tests may pin it. The generator takes
+	// no input on purpose: nothing the host sends is a uniqueness source (its AppId is a
+	// per-session random in [1000, 9999] [orig: CNapiNetwork_RandomizeTimeout @0x4c4d80]).
 	void set_rid_generator(std::function<uint32_t()> g) { rid_gen_ = std::move(g); }
 
 private:
@@ -263,6 +278,8 @@ private:
 	                                              const std::string &remote_ip);
 	LobbyDispatchResult handle_client_play_request(const NapiMessage &msg, LobbyState &state);
 	LobbyDispatchResult handle_client_glsvss_request(const NapiMessage &msg, LobbyState &state);
+	// The next RID: lobbydb::next_rid on the database (0, logged, when it
+	// fails), or with no database (the in-memory tests) a counter of its own.
 	uint32_t mint_rid();
 	// The account `host_key` claims for `rid` (hostdb::claim_host_key); nullopt
 	// with no database, or on a database failure (logged).
@@ -274,7 +291,8 @@ private:
 	IdGenerator sess_id_gen_;
 	std::function<std::string(const std::string&)> gsid_gen_;
 	std::function<uint32_t()> rid_gen_;     // null == mint_rid()
-	uint32_t next_rid_suffix_ = 1;          // policy: monotonic per process
+	uint32_t next_rid_suffix_ = 1; // the database-free tests' RIDs alone
+	int64_t lobby_id_ = 0; // set_lobby_id
 	std::string glsvss_results_;
 	bool require_host_key_ = false;         // ONNET_REQUIRE_HOST_KEY
 	opennova::db::Database *db_ = nullptr;  // optional, null in tests

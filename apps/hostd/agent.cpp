@@ -82,19 +82,32 @@ std::string http_failure(const net::HttpReply &reply) {
 
 // --- the link ------------------------------------------------------------------
 
-HttpServiceLink::HttpServiceLink(std::string base_url, int timeout_ms) :
-		base_url_(std::move(base_url)), timeout_ms_(timeout_ms) {
+HttpServiceLink::HttpServiceLink(std::string base_url, int timeout_ms, Resolver resolve) :
+		base_url_(std::move(base_url)), timeout_ms_(timeout_ms), resolve_(std::move(resolve)) {
 	while (!base_url_.empty() && base_url_.back() == '/')
 		base_url_.pop_back();
 }
 
 net::HttpReply HttpServiceLink::post(
 		const std::string &path, const std::string &bearer, const std::string &body) {
-	return net::http_exchange("POST", base_url_ + path,
-			{ "Authorization: Bearer " + bearer, "Content-Type: application/json" }, body,
-			timeout_ms_, [](const std::string &address, net::Endpoint &out) {
-				return net::resolve_ipv4(address, out);
-			});
+	// The host's addresses, read at the call's first try; each try the next.
+	std::vector<net::Endpoint> addresses;
+	size_t next = 0;
+	net::HttpReply reply;
+	do {
+		reply = net::http_exchange("POST", base_url_ + path,
+				{ "Authorization: Bearer " + bearer, "Content-Type: application/json" }, body,
+				timeout_ms_,
+				[this, &addresses, &next](const std::string &host, net::Endpoint &out) {
+					if (next == 0)
+						addresses = resolve_(host);
+					if (next >= addresses.size())
+						return false;
+					out.ip = addresses[next++].ip;
+					return true;
+				});
+	} while (!reply.connected && next > 0 && next < addresses.size());
+	return reply;
 }
 
 // --- the agent -----------------------------------------------------------------

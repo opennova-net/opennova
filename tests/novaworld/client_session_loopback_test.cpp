@@ -1,5 +1,5 @@
 // Phase 1 (ADR 0010) — drive the Godot-free ClientSession state machine
-// through the full session handshake against apps/novaworld_server's own
+// through the full session handshake against the lobby's (apps/novaworld_lobby) own
 // parsers/builders, in-process (no sockets — deterministic). Proves the two
 // Phase 1 fixes and the D-NET-21 timing closure end to end:
 //   1. ServerHello.hk is parsed and ECHOED in ClientAuth.hk (was hardcoded 0).
@@ -14,7 +14,7 @@
 // The "server" here is a minimal responder using the real library functions
 // (parse_client_hello/auth, build_server_hello/auth, LobbySession dispatch,
 // the protocol_message + envelope + NWU codecs) — the same calls
-// apps/novaworld_server/nw_udp_listener.cpp makes. If the client and server
+// apps/novaworld_lobby/nw_udp_listener.cpp makes. If the client and server
 // disagree on any layer (envelope, NWU, flat-TLV, scrk direction, the hk
 // echo, the 0x43/0x83 framing), this test fails.
 

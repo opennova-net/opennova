@@ -1,4 +1,4 @@
-// The hosted servers' fleet in the database (apps/novaworld_server/hosted/
+// The hosted servers' fleet in the database (apps/novaworld_common/hosted/
 // fleet_repository.h, backend/migrations/0003_fleet.sql) on a migrated
 // database: a machine's row and its one-time token (only its SHA-256 stored),
 // the launch's answer, every lifecycle move as a compare-and-set (ready_at,

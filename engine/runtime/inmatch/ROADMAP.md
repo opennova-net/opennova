@@ -426,7 +426,7 @@ to fold into `Server_SendInitialGameStateToPlayer`) stay part of that grill wave
 
 Migrations the deletion forced: `napi_np_protocol.cpp` (drop `ctx.game_runtime` + the mirror; reactive
 replies via `dispatch_session_replies`); the per-frame `0x0A` adapter (`build_tag_0a_world_reference`)
-lifted into `engine/runtime/replication/connection_fan.cpp` (`build_0a_frame`); `apps/novaworld_server`'s JO routing
+lifted into `engine/runtime/replication/connection_fan.cpp` (`build_0a_frame`); the lobby's (`apps/novaworld_lobby`) JO routing
 re-pointed off `HostSessionAccept` onto a World-less `inmatch::NapiNPServerCtx` session responder;
 `simulation` `host_session_config_` retyped `GameServerRuntimeConfig` → `inmatch::SessionReplyConfig`.
 Tests: the P2 `handshake_server_test` migrated to assert the reactive §5.1 replies (the World-driven

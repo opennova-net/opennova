@@ -62,6 +62,7 @@ HostRow row_to_host(const opennova::db::Row &r) {
 	h.peer_port    = static_cast<int>(r.as_int(36).value_or(0));
 	h.created_at   = r.as_text(37).value_or("");
 	h.updated_at   = r.as_text(38).value_or("");
+	h.lobby_id     = r.as_int(39).value_or(0);
 	return h;
 }
 
@@ -82,7 +83,7 @@ constexpr const char *HOST_COLUMNS =
 	"exp, exp_bits, ver1, joicon2, "
 	"time_left, time_of_day, msg, mod, age, pb_server, level_range, bb_mode, "
 	"skins, tracers, pix, "
-	"host_user_id, peer_ip, peer_port, created_at, updated_at";
+	"host_user_id, peer_ip, peer_port, created_at, updated_at, COALESCE(lobby_id, 0)";
 
 // The host_user_id column's expression over host_binds' owner ($34) and RID
 // ($35): the account only while one of its keys stands claimed for this RID,
@@ -98,7 +99,7 @@ constexpr const char *HOST_OWNER_VALUE =
 	"(SELECT user_id FROM host_keys WHERE user_id=$34 AND claimed_rid=$35 "
 	"ORDER BY last_used_at DESC, id DESC LIMIT 1)";
 
-// A host row's binds, $1..$37 in this order; the statements below name them
+// A host row's binds, $1..$38 in this order; the statements below name them
 // by number.
 std::vector<opennova::db::BindValue> host_binds(const HostRow &h) {
 	return {
@@ -113,6 +114,7 @@ std::vector<opennova::db::BindValue> host_binds(const HostRow &h) {
 		str(h.pb_server), str(h.level_range), str(h.bb_mode),
 		str(h.skins), str(h.tracers), str(h.pix),
 		opt_int(h.host_user_id), i64(h.rid), str(h.peer_ip), i64(h.peer_port),
+		h.lobby_id == 0 ? opennova::db::BindValue(std::monostate{}) : i64(h.lobby_id),
 	};
 }
 
@@ -129,13 +131,14 @@ std::vector<HostRow> query_hosts(opennova::db::Database &db, const std::string &
 
 } // namespace
 
-void clear_all(opennova::db::Database &db) {
+void clear_lobby(opennova::db::Database &db, int64_t lobby_id) {
 	opennova::db::Transaction tx(db);
-	db.exec("DELETE FROM host_roster;");
-	db.exec("DELETE FROM host_players;");
-	db.exec("DELETE FROM active_hosts;");
-	// The claims name the previous run's RIDs, which this run mints again.
-	db.exec("UPDATE host_keys SET claimed_rid = NULL WHERE claimed_rid IS NOT NULL;");
+	// The listings' players and rosters cascade with them.
+	db.exec("DELETE FROM active_hosts WHERE lobby_id = $1 OR lobby_id IS NULL;", {i64(lobby_id)});
+	// The lobby's sessions were the previous run's too, and the commands addressed to them
+	// (lobby_repository.h) with them.
+	db.exec("DELETE FROM lobby_commands WHERE lobby_id = $1 OR lobby_id IS NULL;", {i64(lobby_id)});
+	db.exec("DELETE FROM lobby_sessions WHERE lobby_id = $1 OR lobby_id IS NULL;", {i64(lobby_id)});
 	tx.commit();
 }
 
@@ -152,10 +155,10 @@ void upsert_host(opennova::db::Database &db, const HostRow &h) {
 		" exp, exp_bits, ver1, joicon2,"
 		" time_left, time_of_day, msg, mod, age, pb_server, level_range, bb_mode,"
 		" skins, tracers, pix,"
-		" host_user_id, peer_ip, peer_port, updated_at) "
+		" host_user_id, peer_ip, peer_port, lobby_id, updated_at) "
 		"VALUES ($35,$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,"
 		"$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,"
-		+ std::string(HOST_OWNER_VALUE) + ",$36,$37,CURRENT_TIMESTAMP) "
+		+ std::string(HOST_OWNER_VALUE) + ",$36,$37,$38::bigint,CURRENT_TIMESTAMP) "
 		"ON CONFLICT(rid) DO UPDATE SET"
 		" gsid=excluded.gsid, game=excluded.game, app_id=excluded.app_id,"
 		" server_name=excluded.server_name, host_ip=excluded.host_ip,"
@@ -172,7 +175,7 @@ void upsert_host(opennova::db::Database &db, const HostRow &h) {
 		" level_range=excluded.level_range, bb_mode=excluded.bb_mode,"
 		" skins=excluded.skins, tracers=excluded.tracers, pix=excluded.pix,"
 		" host_user_id=excluded.host_user_id, peer_ip=excluded.peer_ip,"
-		" peer_port=excluded.peer_port, updated_at=CURRENT_TIMESTAMP;",
+		" peer_port=excluded.peer_port, lobby_id=excluded.lobby_id, updated_at=CURRENT_TIMESTAMP;",
 		host_binds(h));
 }
 
@@ -186,7 +189,7 @@ void update_host(opennova::db::Database &db, const HostRow &h) {
 		" time_left=$23, time_of_day=$24, msg=$25, mod=$26, age=$27, pb_server=$28,"
 		" level_range=$29, bb_mode=$30, skins=$31, tracers=$32, pix=$33,"
 		" host_user_id=" + std::string(HOST_OWNER_VALUE) + ", peer_ip=$36, peer_port=$37,"
-		" updated_at=CURRENT_TIMESTAMP "
+		" lobby_id=$38::bigint, updated_at=CURRENT_TIMESTAMP "
 		"WHERE rid=$35;",
 		host_binds(h));
 }
@@ -244,6 +247,23 @@ void replace_roster(opennova::db::Database &db, uint32_t host_rid,
 	tx.commit();
 }
 
+namespace {
+
+// A host_roster row's slot from its columns at `first` on (slot, player_name,
+// ip_and_port, pcid, team, type).
+HostRosterSlot row_to_slot(const opennova::db::Row &r, std::size_t first) {
+	HostRosterSlot s;
+	s.slot = static_cast<int>(r.as_int(first).value_or(0));
+	s.player_name = r.as_text(first + 1).value_or("");
+	s.ip_and_port = r.as_text(first + 2).value_or("");
+	s.pcid = r.as_text(first + 3).value_or("");
+	s.team = r.as_text(first + 4).value_or("");
+	s.type = r.as_text(first + 5).value_or("");
+	return s;
+}
+
+} // namespace
+
 std::vector<HostRosterSlot> list_roster(opennova::db::Database &db, uint32_t host_rid) {
 	auto rows = db.query(
 		"SELECT slot, player_name, ip_and_port, pcid, team, type "
@@ -251,28 +271,48 @@ std::vector<HostRosterSlot> list_roster(opennova::db::Database &db, uint32_t hos
 		{i64(host_rid)});
 	std::vector<HostRosterSlot> out;
 	out.reserve(rows.size());
-	for (const auto &r : rows) {
-		HostRosterSlot s;
-		s.slot        = static_cast<int>(r.as_int(0).value_or(0));
-		s.player_name = r.as_text(1).value_or("");
-		s.ip_and_port = r.as_text(2).value_or("");
-		s.pcid        = r.as_text(3).value_or("");
-		s.team        = r.as_text(4).value_or("");
-		s.type        = r.as_text(5).value_or("");
-		out.push_back(std::move(s));
+	for (const auto &r : rows)
+		out.push_back(row_to_slot(r, 0));
+	return out;
+}
+
+std::map<uint32_t, std::vector<HostRosterSlot>> list_rosters(
+		opennova::db::Database &db, const std::vector<uint32_t> &host_rids) {
+	std::map<uint32_t, std::vector<HostRosterSlot>> out;
+	if (host_rids.empty())
+		return out;
+	// The RIDs as one bigint[] literal: {1,2,3}.
+	std::string rids = "{";
+	for (std::size_t i = 0; i < host_rids.size(); ++i) {
+		if (i != 0)
+			rids += ',';
+		rids += std::to_string(host_rids[i]);
 	}
+	rids += '}';
+	const auto rows =
+			db.query("SELECT host_rid, slot, player_name, ip_and_port, pcid, team, type "
+					 "FROM host_roster WHERE host_rid = ANY($1::bigint[]) ORDER BY host_rid, slot;",
+					{ str(rids) });
+	for (const auto &r : rows)
+		out[static_cast<uint32_t>(r.as_int(0).value_or(0))].push_back(row_to_slot(r, 1));
 	return out;
 }
 
 bool apply_status_blob(opennova::db::Database &db, const LobbyStatusBlob &blob) {
 	if (blob.host_key.empty()) return false;
 	// One transaction for the read-modify-write: the row and its roster change
-	// together, and no ClientHostUpdate can commit between this read and this
-	// write (and be overwritten with the columns the read saw).
+	// together, and the read locks the row to the commit (FOR NO KEY UPDATE), so
+	// no ClientHostUpdate commits between this read and this write (and is
+	// overwritten with the columns the read saw): one in flight is waited for,
+	// and the read then returns the row it wrote. The lobby's own write of the
+	// row (lobby_session.cpp persist_host) takes the row's lock first too, so
+	// the two never hold the row and its roster crosswise.
 	opennova::db::Transaction tx(db);
-	auto host = find_host_by_key(db, blob.host_key);
-	if (!host) return false;
-	HostRow h = *host;
+	const auto rows =
+			query_hosts(db, "WHERE host_key=$1 LIMIT 1 FOR NO KEY UPDATE;", { str(blob.host_key) });
+	if (rows.empty())
+		return false;
+	HostRow h = rows.front();
 	auto take = [&blob](std::string &dst, const char *key) {
 		if (auto v = lobby_status_value(blob, key); !v.empty()) dst = v;
 	};
@@ -480,12 +520,16 @@ bool record_host_key(opennova::db::Database &db, std::string_view key, int64_t u
 		return false;
 	opennova::db::Transaction tx(db);
 	// One statement: the account's status and generation it tests are the ones
-	// the key is written against (a password reset or a ban moves the
-	// generation and deletes the account's keys in one transaction, before or
-	// after this one).
+	// the key is written against. It locks the account's row to the commit (FOR
+	// NO KEY UPDATE), so a password reset or a ban, which moves the generation
+	// and deletes the account's keys in one transaction, runs wholly before this
+	// one (and this one, waiting on the row, then reads the moved generation and
+	// writes no key) or wholly after (and deletes this key). Two mints of one
+	// account take turns on the row too, so the cap below holds exactly.
 	db.exec("INSERT INTO host_keys (key_hash, user_id) "
 			"SELECT $1::text, id FROM players "
-			"WHERE id = $2 AND credentials_gen = $3 AND account_status = 'active';",
+			"WHERE id = $2 AND credentials_gen = $3 AND account_status = 'active' "
+			"FOR NO KEY UPDATE;",
 			{ str(host_key_hash(key)), i64(user_id), i64(credentials_gen) });
 	if (db.changes() == 0)
 		return false;

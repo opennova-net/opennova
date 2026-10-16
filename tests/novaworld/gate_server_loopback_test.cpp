@@ -36,7 +36,7 @@ bool serve_one_probe(opennova::net::Socket &server, const std::string &response_
 	if (n <= 0) return false;
 
 	// Strip the LSB-scatter CRC envelope the client wraps the probe in
-	// (matches apps/novaworld_server/gate_listener.cpp + retail).
+	// (matches apps/novaworld_gate/gate_listener.cpp + retail).
 	std::vector<uint8_t> plain(static_cast<size_t>(n));
 	size_t inner_len = 0;
 	if (opennova::napi_envelope_decode(rx, static_cast<size_t>(n),

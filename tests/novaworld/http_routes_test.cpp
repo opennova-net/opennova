@@ -1,6 +1,7 @@
 // The NovaWorld service's HTTP routes, driven in-process: a database of the
-// run's own (common/test_database.h: backend/migrations plus the games seed), the
-// Crow HttpListener from opennova_novaworld_server_core on port 0 (the OS
+// run's own (common/test_database.h: backend/migrations plus the games seed), a
+// Redis namespace of each listener's own (common/test_redis.h), the
+// Crow HttpListener from opennova_novaworld_web_core on port 0 (the OS
 // picks; the harness reads the port back from bound_port()), and requests sent
 // through apps/common's http_exchange to 127.0.0.1. Built only
 // with BUILD_NOVAWORLD_HTTP. The cases share one listener and run in order
@@ -15,8 +16,8 @@
 // same retail roots with ONNET_API_PROXY_ONLY and a proxy the harness is not,
 // so its /api/ refuses the harness while its retail routes answer. The retail
 // POST /NWLogin.dll cases post an EPASK-encrypted form the way a stock client
-// does. The first listener's mail goes to a FakeMailer through a real
-// MailOutbox (novaworld/fake_mailer.h); the other two run with mail off.
+// does. The first listener's mail goes to a FakeMailer through its mail.send
+// jobs (novaworld/fake_mailer.h); the other two run with mail off.
 //
 // The listener and the test share one db::ConnectionPool, the way main() wires
 // the server: each Crow handler leases a connection for its request, and the
@@ -27,6 +28,7 @@
 #include <base/gameprofile/gameprofile.h>
 #include "auth.h"
 #include "billing/billing.h"
+#include "billing/billing_jobs.h"
 #include "billing/billing_repository.h"
 #include "billing/billing_routes.h"
 #include "billing/entitlement.h"
@@ -35,6 +37,7 @@
 #include "health.h"
 #include "hosted/admin_link.h"
 #include "hosted/console_commands.h"
+#include "hosted/console_queue.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/limits_hold.h"
 #include "hosted/stats_repository.h"
@@ -42,6 +45,8 @@
 #include "hosted_fake_driver.h"
 #include "http_cookies.h"
 #include "http_listener.h"
+#include "jobs/account_jobs.h"
+#include "jobs/worker_pool.h"
 #include "mailer.h"
 #include "novaworld/fake_mailer.h"
 #include "password_reset.h"
@@ -75,6 +80,7 @@
 #include "common/temp_dir.h"
 #include "common/test_database.h"
 #include "common/test_expect.h"
+#include "common/test_redis.h"
 
 #include <algorithm>
 #include <atomic>
@@ -126,8 +132,11 @@ constexpr const char *kMailSiteUrl = "https://site.example";
 
 struct Harness {
 	ConnectionPool &pool;
-	nws::SessionStore &sessions; // the listener's, for what a reply only names by its tag
-	nws::NwUdpListener &nw_udp;  // the push routes' channel, a real listener on loopback
+	// The first listener's sessions (over its Redis namespace), for what a reply
+	// only names by its tag.
+	nws::SessionStore &sessions;
+	nws::NwUdpListener &nw_udp;  // the lobby the push routes and the sessions view reach (through
+	                             // its tables), a real listener on loopback
 	uint16_t port = 0;
 	// A second listener on the same database with the Secure session cookie
 	// (ONNET_COOKIE_SECURE) and no trusted proxy.
@@ -143,6 +152,8 @@ struct Harness {
 	// /api/ refuses every request here; its retail login brake starts unspent
 	// for the cases that log in through it.
 	uint16_t fresh_port = 0;
+	// The third listener's sessions (over its own Redis namespace).
+	nws::SessionStore *fresh_sessions = nullptr;
 	// The first listener's admin links (the console routes run their commands on
 	// them); the console case syncs them by hand.
 	opennova::novaworld_server::hosted::AdminLinks *links = nullptr;
@@ -153,12 +164,13 @@ struct Harness {
 	// listener runs with none: billing off).
 	billing_fake::FakeStripeApi *stripe = nullptr;
 	nws::billing::Billing *billing = nullptr;
-	// The first listener's hosted servers' limits hold (no supervisor sets it
-	// here: the billing admin case does by hand).
-	nws::hosted::LimitsHold *limits_hold = nullptr;
-	// The first listener's mail: its outbox, over a mailer that records.
+	// The first listener's mail, over a mailer that records, and the jobs the
+	// cases run by hand (the mail, the billing sync), as a worker would.
 	fake_mail::FakeMailer *mailer = nullptr;
-	nws::MailOutbox *outbox = nullptr;
+	nws::jobs::JobRegistry *jobs = nullptr;
+	// The first listener's Redis (its own namespace): what every web process
+	// sharing it would see.
+	nws::RedisPool *redis = nullptr;
 
 	// Every connect, send and recv waits at most `timeout_ms`.
 	net::HttpReply send(const char *method, const std::string &path,
@@ -318,11 +330,17 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 	return 0;
 }
 
-// Every message the first listener's outbox has sent so far, once it has
-// sent all it was handed.
+// Every message the first listener's mail has sent so far, once every job due
+// has run (its mail.send jobs among them).
 std::vector<nws::MailMessage> sent_mail(Harness &h) {
-	h.outbox->drain();
+	nws::jobs::run_due(h.pool, *h.jobs);
 	return h.mailer->messages();
+}
+
+// Every mail queued so far sent, then forgotten.
+void clear_mail(Harness &h) {
+	sent_mail(h);
+	h.mailer->clear();
 }
 
 // POST /api/register: 201 with the public record (a fresh 8-hex PCID, the
@@ -352,7 +370,20 @@ int test_register_ok(Harness &h) {
 	TEST_EXPECT(mail[0].kind == "welcome" && mail[0].to == "harness@example.com");
 	TEST_EXPECT(mail[0].text.find("harness") != std::string::npos);
 	TEST_EXPECT(mail[0].text.find(std::string(kMailSiteUrl) + "/") != std::string::npos);
-	h.mailer->clear();
+	{
+		// Its mail.send job: sent, its body (the job's secret) gone from the row
+		// (an empty text says it carried one), the payload naming the template and
+		// the address alone.
+		const auto job =
+				h.pool.acquire()->query("SELECT state, secret = '', payload::text FROM jobs "
+										"WHERE kind = 'mail.send' ORDER BY id DESC LIMIT 1;");
+		TEST_EXPECT(
+				job.size() == 1 && job.front().as_text(0) == "done" && job.front().as_int(1) == 1);
+		const std::string payload = job.front().as_text(2).value_or("");
+		TEST_EXPECT(payload.find("welcome") != std::string::npos &&
+				payload.find(kMailSiteUrl) == std::string::npos);
+	}
+	clear_mail(h);
 
 	auto conn = h.pool.acquire();
 	const auto stored = nws::get_user_by_username(*conn, "harness");
@@ -1000,7 +1031,9 @@ int test_admin_routes_table(Harness &h) {
 				"{\"game_slug\":\"jop_2_consumer\",\"status\":\"active\",\"exp_bits\":\"3\"}" },
 		{ "POST", "/api/admin/hosts/999999/command", "{\"verb\":\"Cycle\"}" },
 		{ "POST", "/api/admin/hosts/999999/stop", "" },
-		{ "POST", "/api/admin/connections/999999/end", "{\"addr\":\"127.0.0.1:1\"}" },
+		{ "POST", "/api/admin/connections/999999/end", "" },
+		{ "GET", "/api/admin/lobbies", "" },
+		{ "POST", "/api/admin/lobbies/999999/drain", "" },
 		{ "GET", "/api/admin/cd-keys", "" },
 		{ "POST", "/api/admin/cd-keys", "{\"title\":\"dfx2\",\"count\":1}" },
 		{ "POST", "/api/admin/cd-keys/999999/assign", "{\"username\":\"web_table_player\"}" },
@@ -1390,9 +1423,9 @@ int test_untrusted_proxy_header_ignored(Harness &h) {
 // generation.
 constexpr uint32_t kConcurrentRid = 2000;
 constexpr int kConcurrentRegistrations = 16;
-// The host writes run back to back, each taking the writer lock moments after
-// the last COMMIT; a registration's Transaction queues on that lock between
-// them, within the server's own lock timeout, which the pool keeps.
+// The host writes run back to back, each locking the host's row moments after
+// the last COMMIT; a registration's Transaction shares no lock with them and
+// runs beside them, under the server's own lock timeout, which the pool keeps.
 constexpr int kHostGenerations = 40;
 // The case checks that the replies are each request's own and consistent, not
 // how fast they come: the bcrypt registrations queue behind Crow's few workers
@@ -1670,9 +1703,8 @@ int test_nwhost_records_owner(Harness &h) {
 
 	// The same bytes whatever the login: the relay page whole, the HOSTKEY page
 	// as the template with the key, the same cookies in the same order.
-	const std::string host2 = test_io::read_file_text(
-			(std::filesystem::path(OPENNOVA_SOURCE_DIR) / "apps" / "novaworld_server" / "templates" /
-			 "jop_2_host2.htm")
+	const std::string host2 = test_io::read_file_text((std::filesystem::path(OPENNOVA_SOURCE_DIR) /
+			"apps" / "novaworld_web" / "templates" / "jop_2_host2.htm")
 					.string());
 	auto with_key = [&host2](const std::string &key) {
 		std::string page = host2;
@@ -2406,6 +2438,86 @@ int test_cd_key_routes(Harness &h) {
 	return 0;
 }
 
+// A .gsb feed reads every listed host's roster in one query (hostdb::list_rosters), and
+// its bytes are the ones a query per host builds (the rows, then list_roster for each):
+// each row's tail names its roster in slot order, whatever order the slots were written
+// in, an empty name left out; a host with no roster has an empty tail; another lobby's
+// host is not listed.
+int test_gsb_rosters(Harness &h) {
+	using opennova::HostRosterSlot;
+	namespace hostdb = opennova::hostdb;
+	struct Listed {
+		uint32_t rid;
+		const char *lobby;
+		std::vector<std::pair<int, const char *>> roster; // slot, name, in write order
+	};
+	const Listed listed[] = {
+		{ 3201, "jop_2_consumer", { { 2, "Charlie" }, { 0, "Alpha" }, { 1, "Bravo" } } },
+		{ 3202, "jop_2_consumer", {} },
+		{ 3203, "jop_2_consumer", { { 1, "" }, { 0, "Solo" } } },
+		{ 3204, "dfx2_0_consumer", { { 0, "Elsewhere" } } },
+	};
+	for (const Listed &l : listed) {
+		hostdb::HostRow row;
+		row.rid = l.rid;
+		row.gsid = "GSID-" + std::to_string(l.rid);
+		row.game = l.lobby;
+		row.server_name = "Roster " + std::to_string(l.rid);
+		row.host_ip = "10.0.32.1";
+		row.host_port = 32768;
+		row.player_count = static_cast<int>(l.roster.size());
+		row.max_players = 8;
+		std::vector<HostRosterSlot> roster;
+		for (const auto &[slot, name] : l.roster) {
+			HostRosterSlot s;
+			s.slot = slot;
+			s.player_name = name;
+			roster.push_back(s);
+		}
+		auto db = h.pool.acquire();
+		hostdb::upsert_host(*db, row);
+		if (!roster.empty())
+			hostdb::replace_roster(*db, l.rid, roster);
+	}
+
+	const auto reply = h.send("GET", "/jop_2.gsb");
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	std::vector<uint8_t> want;
+	{
+		auto db = h.pool.acquire();
+		std::vector<opennova::GsbServerEntry> entries;
+		for (const auto &row : hostdb::list_hosts_by_game(*db, "jop_2_consumer"))
+			entries.push_back(hostdb::gsb_entry_from_host(
+					row, hostdb::list_roster(*db, row.rid), { "3", "3" }));
+		want = opennova::gsb_build_response(entries);
+		// The one query's map: each listed RID's slots in slot order, none for 3202.
+		const auto rosters = hostdb::list_rosters(*db, { 3201, 3202, 3203 });
+		TEST_EXPECT(rosters.size() == 2 && rosters.count(3202) == 0);
+		TEST_EXPECT(rosters.at(3201).size() == 3 && rosters.at(3201)[0].player_name == "Alpha" &&
+				rosters.at(3201)[2].slot == 2);
+		TEST_EXPECT(hostdb::list_rosters(*db, {}).empty());
+	}
+	const std::vector<uint8_t> got(reply.body.begin(), reply.body.end());
+	if (got != want)
+		std::fprintf(stderr, "  /jop_2.gsb: %zu bytes, the per-host build %zu\n", got.size(),
+				want.size());
+	TEST_EXPECT(got == want);
+
+	opennova::GsbResponse parsed;
+	TEST_EXPECT(opennova::gsb_parse_response(got.data(), got.size(), parsed));
+	std::map<uint32_t, std::vector<std::string>> names;
+	for (const auto &s : parsed.servers)
+		names[s.rid] = s.player_names;
+	TEST_EXPECT(names.count(3204) == 0);
+	TEST_EXPECT((names[3201] == std::vector<std::string>{ "Alpha", "Bravo", "Charlie" }));
+	TEST_EXPECT(names.count(3202) == 1 && names[3202].empty());
+	TEST_EXPECT((names[3203] == std::vector<std::string>{ "Solo" }));
+
+	for (const Listed &l : listed)
+		hostdb::remove_host_by_rid(*h.pool.acquire(), l.rid);
+	return 0;
+}
+
 // A retail DFX2 client's activation through the login (cd_key_routes.h login_activation), on
 // listeners of its own (their own retail login brakes), one minting an account's first key and
 // one not (ONNET_CD_KEY_AUTO_MINT=0). An unactivated client (its NWCDKIID empty) gets the
@@ -2419,19 +2531,20 @@ int test_dfx2_activation(Harness &h) {
 	namespace cdkey = opennova::cdkey;
 	constexpr const char *kMachineA = "ABCDEFGHIJKLMNOPQRSTUVW";
 	constexpr const char *kMachineB = "TTTTTTTTTTTTTTTTTTTTTTT";
-	opennova::ConnectionManager manager;
-	nws::SessionStore sessions;
+	test_redis::TestRedis minting_redis;
+	test_redis::TestRedis assigned_only_redis;
 	nws::ServerConfig config;
 	config.public_host = "127.0.0.1";
+	config.web_host = "127.0.0.1";
 	config.http_port = 0;
 	config.admin_api_token = kAdminToken;
 	config.templates_dir = h.retail_root / "templates";
 	config.static_dir = h.retail_root / "static";
 	config.web_dist_dir = h.retail_root / "web";
-	nws::HttpListener minting(manager, h.pool, sessions);
+	nws::HttpListener minting(h.pool, minting_redis.pool());
 	TEST_EXPECT(minting.start(config));
 	config.cd_key_auto_mint = false;
-	nws::HttpListener assigned_only(manager, h.pool, sessions);
+	nws::HttpListener assigned_only(h.pool, assigned_only_redis.pool());
 	TEST_EXPECT(assigned_only.start(config));
 	const auto page = [&h](const char *name) {
 		return test_io::read_file_text((h.retail_root / "templates" / name).string());
@@ -2947,10 +3060,11 @@ std::optional<opennova::hostdb::HostRow> row_named(Harness &h, const std::string
 // player verbs target. Logged out is 401 and a missing CSRF header 403, before any bucket. Another
 // account's RID and a free one get the same 404 and push nothing; a body the composer refuses is a
 // 400 (read before the listing), SetMPReset a 403 even for the owner; the owner's pushes are 202
-// and reach the host's session, a "café" as the host's cp1252 (an emoji is a 400). The listener
-// re-checks the owner at push time: a claim of the caller's on a connection that does not name
-// the caller is a 404; and again at the drain: a push queued before a ban (which takes the
-// listing's in-memory owner) never goes out. Every push draws one token from the account's
+// and reach the host's session, a "café" as the host's cp1252 (an emoji is a 400). The queue
+// checks the owner against the session at push time: a claim of the caller's on a connection that
+// does not name the caller is a 404; and the lobby again as it sends: a push queued before a ban
+// (which takes the account's keys, and then the listing's owner in the lobby's memory) never goes
+// out. Every push draws one token from the account's
 // bucket (8 at once, 429 with Retry-After past them); the stop ends the listing, and a listed
 // row over a connection no longer hosting is the 409. Each account below keeps to its
 // bucket's eight (Alice waits for a ninth).
@@ -3186,10 +3300,11 @@ int test_owner_host_push(Harness &h) {
 	TEST_EXPECT(mine.wait_notice(Notice::Kind::Command, 300) == nullptr);
 	opennova::hostdb::remove_host_by_rid(*h.pool.acquire(), row->rid);
 
-	// The drain's owner re-check, and a revocation taking the in-memory owner with the keys: with
-	// the drain held, Erin's push is queued (202); an admin ban then takes her keys, her session
-	// and her listing's in-memory owner (NwUdpListener::forget_owner), so once the drain runs it
-	// drops the queued push and her server hears nothing.
+	// The drain's owner re-check, and a revocation taking the lobby's owner with the keys: with
+	// the drain held, Erin's push is queued (202); an admin ban then takes her keys and her
+	// session, and queues the lobby's forget_owner behind the push. Once the drain runs, the push
+	// goes first and is dropped all the same (her claim is gone), her server hears nothing, and
+	// the forget_owner takes her off the listing's owner, in the lobby's memory and its row.
 	const int64_t erin = make_account(h, "owner_erin", "pw-owner-erin");
 	TEST_EXPECT(erin > 0);
 	const std::string erin_s = login_token(h, "10.31.0.5", "owner_erin", "pw-owner-erin");
@@ -3208,21 +3323,31 @@ int test_owner_host_push(Harness &h) {
 	{
 		struct DrainHold {
 			nws::NwUdpListener &nw_udp;
-			~DrainHold() { nw_udp.pause_push_drain(false); }
+			~DrainHold() { nw_udp.pause_command_drain(false); }
 		} hold{h.nw_udp};
-		h.nw_udp.pause_push_drain(true);
+		h.nw_udp.pause_command_drain(true);
 		reply = command(erin_s, erin_rid, "{\"verb\":\"TextChatServer\",\"args\":[\"held back\"]}");
 		TEST_EXPECT(reply.transport_ok && reply.code == 202);
 		reply = h.send("PUT", "/api/admin/users/" + std::to_string(erin), {kJson, kBearer},
 		               "{\"account_status\":\"banned\"}");
 		TEST_EXPECT(reply.transport_ok && reply.code == 200);
+		const auto kinds = h.pool.acquire()->query("SELECT kind FROM lobby_commands ORDER BY id;");
+		TEST_EXPECT(kinds.size() == 2 && kinds[0].as_text(0) == "server_command" &&
+		            kinds[1].as_text(0) == "forget_owner");
+	}
+	TEST_EXPECT(erins.wait_notice(Notice::Kind::Command, 1000) == nullptr);
+	TEST_EXPECT(wait_until([&] {
 		bool erin_unowned = false;
 		for (const auto &entry : h.nw_udp.snapshot_hosted()) {
 			if (entry.lobby.rid == erin_row->rid) erin_unowned = !entry.lobby.host_user_id.has_value();
 		}
-		TEST_EXPECT(erin_unowned);
-	}
-	TEST_EXPECT(erins.wait_notice(Notice::Kind::Command, 1000) == nullptr);
+		return erin_unowned;
+	}));
+	TEST_EXPECT(h.pool.acquire()
+	                    ->query("SELECT 1 FROM lobby_sessions WHERE rid = $1 AND host_user_id IS NULL;",
+	                            {BindValue(static_cast<int64_t>(erin_row->rid))})
+	                    .size() == 1);
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM lobby_commands;").empty());
 	reply = command(erin_s, erin_rid, rename);
 	TEST_EXPECT(reply.transport_ok && reply.code == 401);
 
@@ -3237,11 +3362,13 @@ int test_owner_host_push(Harness &h) {
 
 // GET /api/admin/connections names each connection's times as Unix epoch ms. The registry stamps
 // the steady clock, which counts from the machine's boot: production's sessions read 27514593
-// (7 h 38 min of uptime) and the page showed them as 20,741 days old (January 1970). A stamp
-// converts to the wall time less its age, and a live session's read within a minute of now.
-// Each session names who it is: none until a Cookie list carries a live retail login, then that
-// login's account; a hosting session its listing (name, map, players, listed) and the owner its
-// HostKey names, whatever login it sent; a login that ended names no one.
+// (7 h 38 min of uptime) and the page showed them as 20,741 days old (January 1970). The lobby
+// converts a stamp to the wall time less its age as it writes its session row, and a live
+// session's read within a minute of now. Each session names who it is: none until a Cookie list
+// carries a live retail login, then that login's account; a hosting session its listing (name,
+// map, players, listed) and the owner its HostKey names, whatever login it sent; a login that
+// ended names no one. The route reads the lobby's rows, which the lobby writes as the session
+// changes, before it answers the statement that changed it.
 int test_admin_sessions(Harness &h) {
 	// The production shape: a session made 125 s before the read, on a machine up 7 h 40 min.
 	const int64_t unix_now = 1792120342793; // 2026-10-16 09:39 UTC
@@ -3280,6 +3407,8 @@ int test_admin_sessions(Harness &h) {
 	TEST_EXPECT(row != nullptr);
 	if (row != nullptr) {
 		TEST_EXPECT(str((*row)["state"]) == "active");
+		// The session's row and the lobby instance holding it (the harness's one lobby).
+		TEST_EXPECT((*row)["session_id"].i() > 0 && (*row)["lobby_id"].i() == h.nw_udp.lobby_id());
 		const int64_t created = (*row)["created_ms"].i();
 		const int64_t last_seen = (*row)["last_seen_ms"].i();
 		if (std::llabs(created - read_at) > 60000) {
@@ -3323,9 +3452,12 @@ int test_admin_sessions(Harness &h) {
 		const auto listed = row_named(h, "Sessions Host");
 		return listed && listed->host_user_id == owner;
 	}));
-	reply = connections();
-	json = crow::json::load(body_text(reply));
-	row = row_at(json, host.addr());
+	// The update's session row follows its active_hosts row on the receive thread.
+	TEST_EXPECT(wait_until([&] {
+		json = crow::json::load(body_text(connections()));
+		row = row_at(json, host.addr());
+		return row != nullptr && (*row)["account"].t() == crow::json::type::Object;
+	}));
 	TEST_EXPECT(row != nullptr && (*row)["host"].t() == crow::json::type::Object);
 	const auto &listing = (*row)["host"];
 	TEST_EXPECT(listing["rid"].i() == static_cast<int64_t>(row_named(h, "Sessions Host")->rid));
@@ -3349,22 +3481,22 @@ int test_admin_sessions(Harness &h) {
 	return 0;
 }
 
-// POST /api/admin/connections/<id>/end (admin-gated; the routes table pins the refusals): the body
-// names the session's address, 400 without it and 409 connection_changed for another, and an id
-// no connection holds is a 404. A signed-in session ends: its client reads the ServerGoodBye
-// keyed by its CK with the pending-disconnect record, and the session leaves the list (a second
-// end is a 404). A session still signing in leaves the list too. A hosting session is refused
-// with its listing's RID and stays listed.
+// POST /api/admin/connections/<session id>/end (admin-gated; the routes table pins the
+// refusals): the session the list names by its row's id (session_id, unique across the lobby
+// instances, where the registry's id and the address are one instance's alone), no body; an id no
+// session row has is a 404. A signed-in session ends: its client reads the ServerGoodBye keyed by
+// its CK with the pending-disconnect record, and the session leaves the list (a second end is a
+// 404). A session still signing in leaves the list too. A hosting session is refused with its
+// listing's RID and stays listed.
 int test_admin_end_session(Harness &h) {
-	const auto end = [&h](const std::string &id, const std::string &body) {
-		return h.send("POST", "/api/admin/connections/" + id + "/end", { kJson, kBearer }, body);
+	const auto end = [&h](const std::string &session_id) {
+		return h.send("POST", "/api/admin/connections/" + session_id + "/end", { kBearer });
 	};
 	const auto error_of = [](const net::HttpReply &reply) {
 		const auto json = crow::json::load(body_text(reply));
 		return json && json.has("error") ? str(json["error"]) : std::string("<none>");
 	};
-	const auto addr_body = [](const std::string &addr) { return "{\"addr\":\"" + addr + "\"}"; };
-	// The id the list shows beside `addr`, "" when none.
+	// The session id the list shows for `addr`, "" when none.
 	const auto id_at = [&h](const std::string &addr) {
 		const auto json =
 				crow::json::load(body_text(h.send("GET", "/api/admin/connections", { kBearer })));
@@ -3372,7 +3504,7 @@ int test_admin_end_session(Harness &h) {
 		if (json && json.has("connections")) {
 			for (const auto &c : json["connections"]) {
 				if (str(c["addr"]) == addr)
-					id = std::to_string(c["id"].i());
+					id = std::to_string(c["session_id"].i());
 			}
 		}
 		return id;
@@ -3382,31 +3514,23 @@ int test_admin_end_session(Harness &h) {
 	TEST_EXPECT(client.connect());
 	const std::string id = id_at(client.addr());
 	TEST_EXPECT(!id.empty());
-	auto reply = end(id, "nope");
-	TEST_EXPECT(reply.transport_ok && reply.code == 400 && error_of(reply) == "invalid_json");
-	reply = end(id, "{}");
-	TEST_EXPECT(reply.transport_ok && reply.code == 400 && error_of(reply) == "missing_field");
-	reply = end(id, "{\"addr\":3}");
-	TEST_EXPECT(reply.transport_ok && reply.code == 400 && error_of(reply) == "invalid_field");
-	for (const char *none : { "999999999", "99999999999" }) {
-		reply = end(none, addr_body(client.addr()));
+	for (const char *none : { "999999999", "18446744073709551615" }) {
+		auto reply = end(none);
 		TEST_EXPECT(reply.transport_ok && reply.code == 404 && error_of(reply) == "not_found");
 	}
-	reply = end(id, addr_body("127.0.0.1:1"));
-	TEST_EXPECT(reply.transport_ok && reply.code == 409 && error_of(reply) == "connection_changed");
 
-	reply = end(id, addr_body(client.addr()));
+	auto reply = end(id);
 	if (reply.code != 202)
 		std::fprintf(stderr, "  end: %s\n", describe(reply).c_str());
 	TEST_EXPECT(reply.transport_ok && reply.code == 202);
 	auto json = crow::json::load(body_text(reply));
-	TEST_EXPECT(json && str(json["status"]) == "queued" && std::to_string(json["id"].i()) == id &&
-			str(json["addr"]) == client.addr());
+	TEST_EXPECT(json && str(json["status"]) == "queued" &&
+			std::to_string(json["session_id"].i()) == id && str(json["addr"]) == client.addr());
 	TEST_EXPECT(client.wait_ended(3000));
 	TEST_EXPECT(client.disconnect_event().dc == 8 &&
 			client.disconnect_event().ddstr == "NP.C:PMP:PDESTME");
 	TEST_EXPECT(wait_until([&] { return id_at(client.addr()).empty(); }));
-	reply = end(id, addr_body(client.addr()));
+	reply = end(id);
 	TEST_EXPECT(reply.transport_ok && reply.code == 404);
 
 	// A session still signing in (its ClientHello alone).
@@ -3414,7 +3538,7 @@ int test_admin_end_session(Harness &h) {
 	signing_in.hello();
 	std::string hello_id;
 	TEST_EXPECT(wait_until([&] { return !(hello_id = id_at(signing_in.addr())).empty(); }));
-	reply = end(hello_id, addr_body(signing_in.addr()));
+	reply = end(hello_id);
 	TEST_EXPECT(reply.transport_ok && reply.code == 202);
 	TEST_EXPECT(wait_until([&] { return id_at(signing_in.addr()).empty(); }));
 
@@ -3423,7 +3547,7 @@ int test_admin_end_session(Harness &h) {
 	TEST_EXPECT(host.host("End Session Host"));
 	const auto listed = row_named(h, "End Session Host");
 	TEST_EXPECT(listed.has_value());
-	reply = end(id_at(host.addr()), addr_body(host.addr()));
+	reply = end(id_at(host.addr()));
 	TEST_EXPECT(reply.transport_ok && reply.code == 409 && error_of(reply) == "hosting");
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(json && json["rid"].i() == static_cast<int64_t>(listed->rid));
@@ -3431,6 +3555,38 @@ int test_admin_end_session(Harness &h) {
 	TEST_EXPECT(row_named(h, "End Session Host").has_value());
 	host.goodbye();
 	TEST_EXPECT(wait_until([&] { return !row_named(h, "End Session Host"); }));
+	return 0;
+}
+
+// GET /api/admin/lobbies lists the lobby instances (the harness's one lobby: its endpoint, active,
+// seen within the minute, its sessions), and POST /api/admin/lobbies/<id>/drain marks one
+// draining (no gate hands it a new client from its next read on); an id no instance has is a
+// 404. The instance is active again for the cases after.
+int test_admin_lobbies(Harness &h) {
+	const auto lobbies = [&h]() {
+		return crow::json::load(body_text(h.send("GET", "/api/admin/lobbies", { kBearer })));
+	};
+	const int64_t id = h.nw_udp.lobby_id();
+	TEST_EXPECT(id > 0);
+	auto json = lobbies();
+	TEST_EXPECT(json && json.has("lobbies") && json["lobbies"].size() == 1);
+	const auto &mine = json["lobbies"][0];
+	TEST_EXPECT(mine["id"].i() == id && str(mine["endpoint"]) == h.nw_udp.instance_endpoint() &&
+			str(mine["state"]) == "active" && mine["sessions"].i() >= 0);
+	const int64_t now_ms =
+			static_cast<int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+					std::chrono::system_clock::now().time_since_epoch())
+							.count());
+	TEST_EXPECT(std::llabs(mine["last_seen_ms"].i() - now_ms) <= 60000);
+
+	auto reply = h.send("POST", "/api/admin/lobbies/999999/drain", { kBearer });
+	TEST_EXPECT(reply.transport_ok && reply.code == 404);
+	reply = h.send("POST", "/api/admin/lobbies/" + std::to_string(id) + "/drain", { kBearer });
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	json = lobbies();
+	TEST_EXPECT(json && str(json["lobbies"][0]["state"]) == "draining");
+	TEST_EXPECT(opennova::lobbydb::active_endpoints(*h.pool.acquire()).empty());
+	TEST_EXPECT(opennova::lobbydb::set_instance_state(*h.pool.acquire(), id, "active"));
 	return 0;
 }
 
@@ -3504,14 +3660,14 @@ int test_server_info(Harness &h) {
 
 	for (const char *public_host : { "nw.example.test", "0.0.0.0", "0.1.2.3", "224.0.0.1",
 				 "240.0.0.1", "255.255.255.255" }) {
-		opennova::ConnectionManager manager;
 		nws::ServerConfig config;
 		config.public_host = public_host;
 		config.http_port = 0;
 		config.web_dist_dir = h.temp_root / "web_dist";
 		config.templates_dir = h.temp_root / "templates";
 		config.static_dir = h.temp_root / "static";
-		nws::HttpListener listener(manager, h.pool, h.sessions);
+		test_redis::TestRedis redis;
+		nws::HttpListener listener(h.pool, redis.pool());
 		TEST_EXPECT(listener.start(config));
 		const auto refused = h.send_to(listener.bound_port(), "GET", "/api/server-info");
 		listener.stop();
@@ -3619,7 +3775,7 @@ net::HttpReply retail_login(Harness &h, const std::string &name, const std::stri
 // client, and a handle with a space, goes out as it is.
 int test_name_and_value_rules(Harness &h) {
 	const std::filesystem::path source_templates =
-			std::filesystem::path(OPENNOVA_SOURCE_DIR) / "apps" / "novaworld_server" / "templates";
+			std::filesystem::path(OPENNOVA_SOURCE_DIR) / "apps" / "novaworld_web" / "templates";
 	int templates = 0;
 	for (const auto &entry : std::filesystem::directory_iterator(source_templates)) {
 		const std::string name = entry.path().filename().string();
@@ -4436,10 +4592,10 @@ int test_register_handle_rule(Harness &h) {
 
 // A retail login's session row stays alive while the login is used: each
 // request it names its account by (here /NWJoin.dll and /NWAccount.dll)
-// restarts the row's idle clock, so the main tick's 2 h sweep keeps a login
-// used 1 h 50 min after its GET /NWLogin.dll, and the join after it still
-// names the joiner. A row left idle past the 2 h is swept, and its tag then
-// names no one.
+// restarts the row's idle clock, so the 2 h prune (the active_user_sessions.prune
+// job) keeps a login used 1 h 50 min after its GET /NWLogin.dll, and the join
+// after it still names the joiner. A row left idle past the 2 h is pruned, and
+// its tag then names no one.
 int test_login_row_kept_alive(Harness &h) {
 	{
 		opennova::hostdb::HostRow row;
@@ -4471,8 +4627,22 @@ int test_login_row_kept_alive(Harness &h) {
 								{ opennova::db::BindValue(id) })
 						.empty();
 	};
-	auto sweep = [&h] {
-		return nws::evict_active_user_sessions_older_than(*h.pool.acquire(), 2 * 60 * 60);
+	// The prune is the periodic active_user_sessions.prune job's, run as a
+	// worker runs it: the account's rows it left, or -1 when no job ran.
+	auto sweep = [&h, id]() -> int64_t {
+		nws::jobs::JobRegistry prunes;
+		nws::jobs::register_account_jobs(prunes);
+		nws::jobs::NewJob prune;
+		prune.kind = nws::jobs::kJobActiveSessionsPrune;
+		prune.dedupe_key = prune.kind;
+		if (nws::jobs::enqueue(*h.pool.acquire(), prune) <= 0 ||
+				nws::jobs::run_due(h.pool, prunes) != 1)
+			return -1;
+		return static_cast<int64_t>(
+				h.pool.acquire()
+						->query("SELECT 1 FROM active_user_sessions WHERE user_id = $1;",
+								{ opennova::db::BindValue(id) })
+						.size());
 	};
 	auto joined_by_login = [&h, &tag] {
 		const auto reply = join(h, { tag });
@@ -4483,7 +4653,7 @@ int test_login_row_kept_alive(Harness &h) {
 	age("-110 minutes");
 	TEST_EXPECT(joined_by_login());
 	TEST_EXPECT(fresh_row());
-	sweep();
+	TEST_EXPECT(sweep() == 1);
 	TEST_EXPECT(joined_by_login());
 
 	age("-110 minutes");
@@ -4491,7 +4661,7 @@ int test_login_row_kept_alive(Harness &h) {
 	TEST_EXPECT(fresh_row());
 
 	age("-121 minutes");
-	TEST_EXPECT(sweep() >= 1);
+	TEST_EXPECT(sweep() == 0);
 	const auto reply = join(h, { tag });
 	TEST_EXPECT(
 			reply.transport_ok && reply.code == 200 && has_set_cookie(reply, "PUBPCID=; Path=/"));
@@ -4507,13 +4677,13 @@ int test_host_tag_serves_once(Harness &h) {
 			h.send_to(h.fresh_port, "GET", "/NWHost.dll?success=jop_2_host2.htm&pfid=28");
 	const std::string tag = join_tag(first);
 	TEST_EXPECT(!tag.empty());
-	const auto session = h.sessions.get_host(tag);
+	const auto session = h.fresh_sessions->get_host(tag);
 	TEST_EXPECT(session.has_value());
 	const std::vector<std::string> jar = { "Cookie: NWJOINSESSIONTAG=" + tag };
 	auto reply = h.send_to(h.fresh_port, "GET", "/NWHost.dll", jar);
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	TEST_EXPECT(body_text(reply).find("[HOSTKEY=" + session->host_key + "&]") != std::string::npos);
-	TEST_EXPECT(!h.sessions.get_host(tag).has_value());
+	TEST_EXPECT(!h.fresh_sessions->get_host(tag).has_value());
 	reply = h.send_to(h.fresh_port, "GET", "/NWHost.dll", jar);
 	TEST_EXPECT(reply.transport_ok && reply.code == 400);
 	TEST_EXPECT(body_text(reply).find(session->host_key) == std::string::npos);
@@ -4590,24 +4760,34 @@ int test_public_reads_fail_as_500(Harness &h) {
 	return 0;
 }
 
-// GET /healthz (health.h): outside /api, so a listener whose /api/ refuses the
-// harness (a proxy it is not) still answers it; "ok" while the stall watchdog
-// finds its loops moving and main()'s checks coming, 503 "stalled" (no detail)
-// once its watched loop has not moved for the stall time, or no check came for
-// that long, and "ok" again as soon as the loop moves. A listener with no
-// watchdog answers "ok".
+// GET /livez and GET /healthz (health.h): outside /api, so a listener whose
+// /api/ refuses the harness (a proxy it is not) still answers them; "ok" while
+// the stall watchdog finds its loops moving and main()'s checks coming and
+// Redis answers, 503 "stalled" (no detail) once its watched loop has not moved
+// for the stall time, or no check came for that long, and "ok" again as soon
+// as the loop moves. A listener with no watchdog answers "ok"; one whose Redis
+// does not answer, "ok" to /livez (the process lives: its compose healthcheck
+// and converge's wait pass) and 503 "redis unreachable" to /healthz (the load
+// balancer routes around it).
 int test_healthz(Harness &h) {
 	const auto expect_reply = [&h](int code, const char *body) {
-		const net::HttpReply reply = h.send("GET", "/healthz");
-		if (reply.code != code || body_text(reply) != body)
-			std::fprintf(stderr, "  /healthz: %s, want %d %s\n", describe(reply).c_str(), code, body);
-		return reply.code == code && body_text(reply) == body &&
-				header_value(reply, "Cache-Control") == "no-store";
+		bool ok = true;
+		for (const char *path : { "/livez", "/healthz" }) {
+			const net::HttpReply reply = h.send("GET", path);
+			if (reply.code != code || body_text(reply) != body)
+				std::fprintf(stderr, "  %s: %s, want %d %s\n", path, describe(reply).c_str(), code,
+						body);
+			ok = ok && reply.code == code && body_text(reply) == body &&
+					header_value(reply, "Cache-Control") == "no-store";
+		}
+		return ok;
 	};
 	const uint64_t stall = nws::Watchdog::kStallMs;
 	TEST_EXPECT(h.watchdog->check().empty());
 	TEST_EXPECT(expect_reply(200, "ok"));
 	auto reply = h.send_to(h.fresh_port, "GET", "/healthz");
+	TEST_EXPECT(reply.code == 200 && body_text(reply) == "ok");
+	reply = h.send_to(h.fresh_port, "GET", "/livez");
 	TEST_EXPECT(reply.code == 200 && body_text(reply) == "ok");
 	TEST_EXPECT(h.send_to(h.fresh_port, "GET", "/api/health").code == 403);
 	reply = h.send_to(h.secure_port, "GET", "/healthz");
@@ -4631,16 +4811,72 @@ int test_healthz(Harness &h) {
 	TEST_EXPECT(expect_reply(503, "stalled"));
 	TEST_EXPECT(h.watchdog->check().empty());
 	TEST_EXPECT(expect_reply(200, "ok"));
-	// The heartbeat line's shape.
+	// A web process that lost Redis (here a closed port) fails /healthz, so the
+	// load balancer sends its retail logins elsewhere (its PING's answer, then
+	// that answer reused), while /livez, its liveness, answers ok: a cache outage
+	// neither holds a new web instance's converge nor counts against it.
+	{
+		nws::ServerConfig config;
+		config.public_host = "127.0.0.1";
+		config.http_port = 0;
+		config.web_dist_dir = h.temp_root / "web_dist";
+		config.templates_dir = h.temp_root / "templates";
+		config.static_dir = h.temp_root / "static";
+		nws::RedisOptions closed;
+		closed.url = "redis://127.0.0.1:1";
+		closed.connect_timeout_ms = 500;
+		nws::RedisPool redis(closed);
+		nws::HttpListener listener(h.pool, redis);
+		TEST_EXPECT(listener.start(config));
+		for (int probe = 0; probe < 2; ++probe) {
+			reply = h.send_to(listener.bound_port(), "GET", "/healthz");
+			if (reply.code != 503 || body_text(reply) != "redis unreachable")
+				std::fprintf(stderr, "  /healthz, Redis gone: %s\n", describe(reply).c_str());
+			TEST_EXPECT(reply.code == 503 && body_text(reply) == "redis unreachable");
+			reply = h.send_to(listener.bound_port(), "GET", "/livez");
+			if (reply.code != 200 || body_text(reply) != "ok")
+				std::fprintf(stderr, "  /livez, Redis gone: %s\n", describe(reply).c_str());
+			TEST_EXPECT(reply.code == 200 && body_text(reply) == "ok");
+		}
+		listener.stop();
+	}
+	// The heartbeat line's shape: the program first, then the fields that program
+	// knows in their order (one it leaves unset is left out), then every program's
+	// lock failures.
 	nws::Heartbeat beat;
+	beat.program = "lobby";
 	beat.nw_sessions = 3;
-	beat.hosted_failed = 1;
+	beat.listed_hosts = 0;
 	TEST_EXPECT(nws::heartbeat_line(beat) ==
-			"{\"heartbeat\":{\"nw_sessions\":3,\"listed_hosts\":0,\"hosted_live\":0,\"hosted_failed\":1,"
-			"\"machines_lost\":0,\"launch_failures\":0,\"billing_sync_age_s\":-1,\"webhook_rejects\":0,"
-			"\"limits_held\":0}}");
-	beat.limits_held = 1;
-	TEST_EXPECT(nws::heartbeat_line(beat).find(",\"limits_held\":1}}") != std::string::npos);
+			"{\"heartbeat\":{\"program\":\"lobby\",\"nw_sessions\":3,\"listed_hosts\":0,"
+			"\"db_lock_timeouts\":0,\"db_deadlocks\":0}}");
+	nws::Heartbeat controller;
+	controller.program = "controller";
+	controller.hosted_live = 2;
+	controller.hosted_failed = 1;
+	controller.machines_lost = 0;
+	controller.launch_failures = 0;
+	controller.limits_held = 1;
+	controller.db_lock_timeouts = 2;
+	controller.db_deadlocks = 1;
+	TEST_EXPECT(nws::heartbeat_line(controller) ==
+			"{\"heartbeat\":{\"program\":\"controller\",\"hosted_live\":2,\"hosted_failed\":1,"
+			"\"machines_lost\":0,\"launch_failures\":0,\"limits_held\":1,\"db_lock_timeouts\":2,"
+			"\"db_deadlocks\":1}}");
+	nws::Heartbeat gate;
+	gate.program = "gate";
+	gate.probes_unanswered = 4;
+	gate.lobbies_live = 0;
+	TEST_EXPECT(nws::heartbeat_line(gate) ==
+			"{\"heartbeat\":{\"program\":\"gate\",\"probes_unanswered\":4,\"lobbies_live\":0,"
+			"\"db_lock_timeouts\":0,\"db_deadlocks\":0}}");
+	nws::Heartbeat worker;
+	worker.program = "worker";
+	worker.billing_sync_age_s = -1;
+	TEST_EXPECT(nws::heartbeat_line(worker) ==
+			"{\"heartbeat\":{\"program\":\"worker\",\"billing_sync_age_s\":-1,\"db_lock_timeouts\":"
+			"0,"
+			"\"db_deadlocks\":0}}");
 	return 0;
 }
 
@@ -4746,8 +4982,8 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && !json["full"].b());
 	TEST_EXPECT(entitlement_is(json, 0, 0, 0, 0, false, "none"));
 	TEST_EXPECT(json["servers"].t() == crow::json::type::List && json["servers"].size() == 0);
-	// The data sets the provider offers, in the service's order (Joint
-	// Operations first; OpenNova's has no folder here, so it is not offered):
+	// The data sets the deployment offers, in the service's order (Joint
+	// Operations first; OpenNova's is not named here, so it is not offered):
 	// each one's game, name, expansions, rotation (the missions the site's
 	// picker offers) and limits.
 	TEST_EXPECT(json.has("data_sets") && json["data_sets"].size() == 2);
@@ -4918,8 +5154,9 @@ int test_hosted_server_routes(Harness &h) {
 	reply = h.send("GET", "/api/admin/hosted", { kBearer });
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["cap"].i() == 4 && json["live"].i() == 4);
-	TEST_EXPECT(json["enabled"].b() && str(json["provider"]) == "local");
+	TEST_EXPECT(json["enabled"].b() && str(json["provider"]) == "docker");
 	TEST_EXPECT(body_text(reply).find("planted-admin-secret") == std::string::npos);
+	TEST_EXPECT(!json.has("jobs")); // the jobs routes' now (job_routes_test)
 	bool seen = false;
 	for (const auto &s : json["servers"]) {
 		if (s["id"].i() != ana_first) continue;
@@ -5153,7 +5390,7 @@ int test_hosted_listing_owner(Harness &h) {
 	TEST_EXPECT(reply.code == 200 && crow::json::load(body_text(reply))["user"]["max_servers"].i() == 0);
 	{
 		hosted_test::FakeDriver fake;
-		hosted::Supervisor supervisor(h.pool, fake, hosted::SupervisorConfig{});
+		hosted::Supervisor supervisor(h.pool, fake.profile(), hosted::SupervisorConfig{});
 		supervisor.tick(1000);
 		TEST_EXPECT(fake.launches == 0);
 	}
@@ -5509,7 +5746,8 @@ int test_admin_fleet_routes(Harness &h) {
 	// A ready shared machine (its agent reported once) and the servers: Ana's on
 	// its slot 0, running and listed with 5 players; Ana's second, waiting; Ben's
 	// ended, where it last ran on slot 1.
-	const auto machine = hosted::create_machine(*db, { "local", hosted::MachineKind::Shared, 4, "opennova-serve:local", 0 });
+	const auto machine = hosted::create_machine(
+			*db, { "docker", hosted::MachineKind::Shared, 4, "opennova-serve:local", 0 });
 	hosted::LaunchedMachine launched;
 	launched.cloud_id = "local-fleet-1";
 	launched.private_address = "10.0.1.7";
@@ -5669,10 +5907,12 @@ int test_admin_fleet_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "not_live");
 
 	// A roll drains every machine that takes servers, none other.
-	const auto booting = hosted::create_machine(*db, { "local", hosted::MachineKind::Shared, 4, "opennova-serve:local", 0 });
+	const auto booting = hosted::create_machine(
+			*db, { "docker", hosted::MachineKind::Shared, 4, "opennova-serve:local", 0 });
 	launched.cloud_id = "local-fleet-2";
 	TEST_EXPECT(hosted::mark_launched(*db, booting.id, launched));
-	const auto failed = hosted::create_machine(*db, { "local", hosted::MachineKind::Own, 1, "opennova-serve:local", 0 });
+	const auto failed = hosted::create_machine(
+			*db, { "docker", hosted::MachineKind::Own, 1, "opennova-serve:local", 0 });
 	TEST_EXPECT(hosted::transition_machine(*db, failed.id, hosted::FleetMachineState::Launching,
 			hosted::FleetMachineState::Failed, "by the test"));
 	reply = h.send("POST", "/api/admin/fleet/roll", { kBearer });
@@ -5891,7 +6131,7 @@ int test_hosted_usage_route(Harness &h) {
 	const auto ready_machine = [&](hosted::MachineKind kind, int slots,
 									   const char *cloud_id) -> int64_t {
 		const auto m =
-				hosted::create_machine(*db, { "local", kind, slots, "opennova-serve:local", 0 });
+				hosted::create_machine(*db, { "docker", kind, slots, "opennova-serve:local", 0 });
 		hosted::LaunchedMachine launched;
 		launched.cloud_id = cloud_id;
 		launched.private_address = "10.0.1.8";
@@ -6159,6 +6399,8 @@ int test_hosted_console_routes(Harness &h) {
 		const auto link = h.links->find(id);
 		return link && link->status().state == hosted::AdminLinkState::Up;
 	}, 10000));
+	// Its state where the routes read it (as the supervisor's pass publishes it).
+	h.links->publish(*h.pool.acquire());
 
 	// Logged out: 401; a POST without the CSRF header: 403, an admin session's too, before
 	// anything is read; the proxy-only listener answers no one but its proxy.
@@ -6391,11 +6633,22 @@ int test_hosted_console_routes(Harness &h) {
 	const size_t edit_before = fake.lines().size();
 	std::thread editing([&] { edit = post(base + "/rotation/0/remove", { kBearer }); });
 	const bool editing_now = wait_until([&] { return sent_since(edit_before, "MISSION LIST"); }, 3000);
+	// The edit is held in Redis, where every web process sharing it sees it, not in
+	// this listener's memory.
+	const nws::RedisReply held = h.redis->command(
+			{ "EXISTS", h.redis->key("rotation:" + std::to_string(id)) });
+	TEST_EXPECT(held.type == nws::RedisReply::Type::Integer && held.integer == 1);
 	const net::HttpReply racing = post(me + "/rotation/1/remove", as_owner_post);
 	editing.join();
 	fake.delay("", 0);
 	TEST_EXPECT(editing_now && racing.code == 409 && error_of_reply(racing) == "rotation_busy");
 	TEST_EXPECT(edit.code == 200 && fake.rotation().size() == 1);
+	// And let go once the edit answered.
+	TEST_EXPECT(wait_until([&] {
+		const nws::RedisReply gone = h.redis->command(
+				{ "EXISTS", h.redis->key("rotation:" + std::to_string(id)) });
+		return gone.type == nws::RedisReply::Type::Integer && gone.integer == 0;
+	}, 2000));
 
 	// The console: the writes recorded with their sender, the reads not, no password.
 	reply = get(me + "/console", as_owner);
@@ -6491,7 +6744,11 @@ billing_fake::FakeStripeApi::Price harness_price(const char *id, int64_t amount)
 	return p;
 }
 
-void billing_pass(Harness &h) { h.billing->sync().pass(nws::billing::unix_now()); }
+// The billing jobs a webhook or an admin enqueued (billing.sync,
+// billing.reconcile), run as a worker would.
+void billing_pass(Harness &h) {
+	nws::jobs::run_due(h.pool, *h.jobs);
+}
 
 // A Stripe-Signature header for `body` at `t` under `secret`, as Stripe signs:
 // the hex HMAC-SHA256 of "<t>.<body>".
@@ -6666,7 +6923,8 @@ int test_billing_routes(Harness &h) {
 		std::lock_guard<std::mutex> lock(h.stripe->mu);
 		h.stripe->prices["price_htier2"].interval = "year";
 	}
-	TEST_EXPECT(h.billing->sync().validate_prices() && !h.billing->sync().status().prices_ok);
+	TEST_EXPECT(h.billing->sync().validate_prices() &&
+			!h.billing->sync().status(*h.pool.acquire()).prices_ok);
 	reply = post("/api/billing/checkout", cy_s, "{\"item\":\"tier2\"}");
 	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "billing_misconfigured");
 	TEST_EXPECT(!crow::json::load(body_text(h.send("GET", "/api/billing/tiers")))["enabled"].b());
@@ -6675,7 +6933,8 @@ int test_billing_routes(Harness &h) {
 		std::lock_guard<std::mutex> lock(h.stripe->mu);
 		h.stripe->prices["price_htier2"].interval = "month";
 	}
-	TEST_EXPECT(h.billing->sync().validate_prices() && h.billing->sync().status().prices_ok);
+	TEST_EXPECT(h.billing->sync().validate_prices() &&
+			h.billing->sync().status(*h.pool.acquire()).prices_ok);
 	// Stripe unreachable: 503 (a 502 is Cloudflare's to replace), nothing kept.
 	h.stripe->fail_next(billing::StripeReply::Outcome::Unreachable);
 	reply = post("/api/billing/checkout", cy_s, "{\"item\":\"tier2\"}");
@@ -6986,8 +7245,9 @@ int test_billing_admin(Harness &h) {
 	// The hosted servers' limits hold: shown with the stops it keeps back. A
 	// reconcile alone leaves it to the supervisor (it releases after a clean
 	// one); the override arms the supervisor's next pass.
-	TEST_EXPECT(h.limits_hold->hold("a pass would stop 9 server(s) of 3 of 4 owners", { 11, 12, 13 }, 9, 0) ==
-			nws::hosted::LimitsHold::Held::Now);
+	TEST_EXPECT(nws::hosted::limits_hold::hold(*h.pool.acquire(),
+						"a pass would stop 9 server(s) of 3 of 4 owners", { 11, 12, 13 }, 9,
+						0) == nws::hosted::LimitsHeld::Now);
 	json = crow::json::load(body_text(h.send("GET", "/api/admin/billing", { kBearer })));
 	TEST_EXPECT(json && json["limits_hold"].b() &&
 			str(json["limits_hold_reason"]) == "a pass would stop 9 server(s) of 3 of 4 owners");
@@ -6998,17 +7258,19 @@ int test_billing_admin(Harness &h) {
 	reply = reconcile("");
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 202 && json && str(json["reconcile"]) == "requested" && !json["force_limits"].b());
-	TEST_EXPECT(h.limits_hold->held() && !h.limits_hold->take_force());
+	TEST_EXPECT(nws::hosted::limits_hold::held(*h.pool.acquire()));
+	TEST_EXPECT(!nws::hosted::limits_hold::take_force(*h.pool.acquire()));
 	reply = reconcile("{\"force_limits\":\"yes\"}");
 	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
 	reply = reconcile("not json");
 	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_json");
-	TEST_EXPECT(!h.limits_hold->take_force());
+	TEST_EXPECT(!nws::hosted::limits_hold::take_force(*h.pool.acquire()));
 	reply = reconcile("{\"force_limits\":true}");
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 202 && json && str(json["reconcile"]) == "requested" && json["force_limits"].b());
-	TEST_EXPECT(h.limits_hold->take_force() && h.limits_hold->held());
-	TEST_EXPECT(h.limits_hold->clear());
+	TEST_EXPECT(nws::hosted::limits_hold::take_force(*h.pool.acquire()));
+	TEST_EXPECT(nws::hosted::limits_hold::held(*h.pool.acquire()));
+	TEST_EXPECT(nws::hosted::limits_hold::clear(*h.pool.acquire()));
 	billing_pass(h);
 
 	// The relink: its checks, then the orphan made Eli's.
@@ -7203,7 +7465,7 @@ int test_password_reset(Harness &h) {
 	TEST_EXPECT(id > 0);
 	const std::string session = login_token(h, "10.60.0.1", "reset_me", "pw-old");
 	TEST_EXPECT(!session.empty());
-	h.mailer->clear();
+	clear_mail(h);
 
 	// The refusals.
 	auto reply = h.send("POST", "/api/auth/forgot", { kJson, from_ip("10.60.0.2") },
@@ -7272,7 +7534,7 @@ int test_password_reset(Harness &h) {
 int test_password_reset_links(Harness &h) {
 	const int64_t id = make_account_with_email(h, "reset_twice", "pw-1", "twice@example.com");
 	TEST_EXPECT(id > 0);
-	h.mailer->clear();
+	clear_mail(h);
 	TEST_EXPECT(forgot_answer(forgot(h, "10.61.0.1", "twice@example.com")));
 	const std::string first = reset_token_sent_to(h, "twice@example.com");
 	TEST_EXPECT(forgot_answer(forgot(h, "10.61.0.1", "twice@example.com")));
@@ -7305,7 +7567,7 @@ int test_password_reset_links(Harness &h) {
 	TEST_EXPECT(banned > 0);
 	h.pool.acquire()->exec("UPDATE players SET account_status = 'banned' WHERE id = $1;",
 			{ opennova::db::BindValue(banned) });
-	h.mailer->clear();
+	clear_mail(h);
 	TEST_EXPECT(forgot_answer(forgot(h, "10.61.0.5", "banned@example.com")));
 	TEST_EXPECT(sent_mail(h).empty());
 	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM password_resets WHERE user_id = $1;",
@@ -7371,6 +7633,7 @@ int run(Harness &h) {
 		{ "joiner_routes_admin_only", test_joiner_routes_admin_only },
 		{ "menu_urls_name_bound_port", test_menu_urls_name_bound_port },
 		{ "lobby_per_title", test_lobby_per_title },
+		{ "gsb_rosters", test_gsb_rosters },
 		{ "dfx2_client_path", test_dfx2_client_path },
 		{ "cd_key_routes", test_cd_key_routes },
 		{ "dfx2_activation", test_dfx2_activation },
@@ -7381,6 +7644,7 @@ int run(Harness &h) {
 		{ "owner_host_push", test_owner_host_push },
 		{ "admin_sessions", test_admin_sessions },
 		{ "admin_end_session", test_admin_end_session },
+		{ "admin_lobbies", test_admin_lobbies },
 		{ "hosted_server_routes", test_hosted_server_routes },
 		{ "hosted_listing_owner", test_hosted_listing_owner },
 		{ "hosted_console_routes", test_hosted_console_routes },
@@ -7424,6 +7688,7 @@ int run(Harness &h) {
 
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
+	test_redis::init(argc, argv);
 	TEST_EXPECT(net::startup() == 0);
 	int rc = 1;
 	{
@@ -7437,9 +7702,16 @@ int main(int argc, char **argv) {
 		// db_concurrency_test's stress margin: a write that waits on a lock past
 		// it fails here as it would in production.
 		ConnectionPool pool(database.options());
+		// Each listener's Redis namespace: three services' worth of sessions,
+		// pins and rate-limit buckets (each listener's brakes start unspent).
+		test_redis::TestRedis http_redis;
+		test_redis::TestRedis secure_redis;
+		test_redis::TestRedis fresh_redis;
 
 		nws::ServerConfig config;
 		config.public_host = "127.0.0.1";
+		// The one web endpoint the menus' HOST_URL and GSB_SERVER name (ONNET_WEB_HOST).
+		config.web_host = "127.0.0.1";
 		config.admin_api_token = kAdminToken;
 		// Port 0: Crow binds the port the OS picks, and start() returns once it
 		// serves there, with that port in bound_port().
@@ -7457,8 +7729,8 @@ int main(int argc, char **argv) {
 		// The retail message page POST /NWLogin.dll's failures render, and the
 		// relay and HOSTKEY pages /NWHost.dll renders.
 		for (const char *page : {"jop_2_msg.htm", "jop_2_relay.htm", "jop_2_host2.htm"}) {
-			std::filesystem::copy_file(source_dir / "apps" / "novaworld_server" / "templates" / page,
-			                           config.templates_dir / page);
+			std::filesystem::copy_file(source_dir / "apps" / "novaworld_web" / "templates" / page,
+					config.templates_dir / page);
 		}
 
 		// The harness talks to the listener from 127.0.0.1 and names each
@@ -7468,21 +7740,20 @@ int main(int argc, char **argv) {
 		config.api_proxy_only = true;
 		// The hosted servers' routes run (no supervisor: rows stay where the routes
 		// put them), with a cap of 4 and two data sets, each with a default
-		// rotation: Joint Operations and Delta Force Xtreme 2 (the local
-		// provider's folders, never read here). OpenNova's names no folder, so
-		// the local provider does not offer it.
-		config.hosted_provider = "local";
+		// rotation: Joint Operations and Delta Force Xtreme 2. OpenNova's is not
+		// named, so it is not offered.
+		config.hosted_provider = "docker";
 		config.hosted_cap = 4;
 		config.hosted_data_sets =
-				"{\"dfx2_consumer\":{\"missions\":[\"dfx2_a.bms\",\"dfx2_b.bms\"],\"resource_dir\":\"unused-dfx2\"},"
-				"\"jop_2_consumer\":{\"missions\":[\"default.bms\"],\"resource_dir\":\"unused-jo\"},"
-				"\"opennova_0_consumer\":{\"missions\":[\"on.bms\"]}}";
+				"{\"dfx2_consumer\":{\"missions\":[\"dfx2_a.bms\",\"dfx2_b.bms\"]},"
+				"\"jop_2_consumer\":{\"missions\":[\"default.bms\"]}}";
 
 		opennova::ConnectionManager manager;
-		// The push routes' channel, as main() wires it: a real NW UDP listener on a port the
-		// OS picks, over the same pool, so a hosting connection's row (and its owner, which an
-		// owner's push is checked against) lands in active_hosts. The host cases end their
-		// listings, so they leave active_hosts as the other cases expect it.
+		// The lobby, as main() wires it: a real NW UDP listener on a port the OS picks, over the
+		// same pool, so a hosting connection's row (and its owner, which an owner's push is
+		// checked against) lands in active_hosts, its session in lobby_sessions, and the push
+		// routes' commands reach it through lobby_commands. The host cases end their listings,
+		// so they leave active_hosts as the other cases expect it.
 		nws::NwUdpListener nw_udp(manager);
 		manager.on_lost([&nw_udp](const opennova::Connection &c, opennova::DropReason r) {
 			nw_udp.erase_lobby_state(c.addr, opennova::drop_reason_name(r));
@@ -7490,18 +7761,37 @@ int main(int argc, char **argv) {
 		nw_udp.set_db_pool(&pool);
 		nws::ServerConfig udp_config;
 		udp_config.nw_udp_port = 0;
+		// The endpoint its instance announces (no gate hands it out here: the
+		// cases reach the port it bound).
+		udp_config.lobby_endpoint = "198.51.100.7:64206";
 		TEST_EXPECT(nw_udp.start(udp_config));
-		nws::SessionStore sessions;
+		nws::SessionStore sessions(http_redis.pool());
 		// The console routes' admin links (the console case syncs them by hand),
-		// declared before the listener so they outlive it.
+		// declared before the listener so they outlive it, as the controller
+		// keeps them: their states published to their rows every 50 ms (the
+		// supervisor's pass does it each second) and the routes' commands
+		// drained from their table.
 		opennova::novaworld_server::hosted::AdminLinks links(&pool);
+		opennova::novaworld_server::hosted::ConsoleDrain console_drain(pool, links, 5);
+		console_drain.start();
+		std::atomic<bool> publishing{ true };
+		std::thread publisher([&links, &pool, &publishing] {
+			while (publishing.load()) {
+				try {
+					links.publish(*pool.acquire());
+				} catch (const std::exception &) {
+					// The next turn tries again.
+				}
+				std::this_thread::sleep_for(std::chrono::milliseconds(50));
+			}
+		});
 		// GET /healthz's watchdog on a hand-stepped clock, watching one loop whose
 		// counter the healthz case moves; declared before the listener so it
 		// outlives it.
 		nws::Watchdog watchdog(nws::Watchdog::kStallMs, [] { return g_watch_clock_ms.load(); });
 		watchdog.watch("harness loop", [] { return g_watch_turns.load(); });
-		// Billing over the in-memory Stripe, its worker's passes the cases' own (no
-		// thread): the first one here checks the prices and reconciles (nothing yet).
+		// Billing over the in-memory Stripe, its jobs the cases' own (no worker):
+		// the first reconcile here checks the prices (nothing to read yet).
 		billing_fake::FakeStripeApi stripe;
 		stripe.now = nws::billing::unix_now(); // the periods Checkout starts are real ones
 		stripe.add_price(harness_price("price_htier1", 500));
@@ -7518,22 +7808,20 @@ int main(int argc, char **argv) {
 		billing_config.own_machine_prices = { "price_hown" };
 		TEST_EXPECT(nws::billing::check_billing_config(billing_config).empty());
 		nws::billing::Billing billing_service(billing_config, stripe, pool, nws::billing::instance_id(*pool.acquire()));
-		billing_service.sync().pass(nws::billing::unix_now());
-		TEST_EXPECT(billing_service.sync().status().prices_ok);
-		nws::hosted::LimitsHold limits_hold;
-		// The first listener's mail: a real outbox over a mailer that records,
-		// declared before the listener so it outlives it, and the site URL its
-		// links name.
+		TEST_EXPECT(billing_service.sync().reconcile_all(nws::billing::unix_now()).completed);
+		TEST_EXPECT(billing_service.sync().status(*pool.acquire()).prices_ok);
+		// The first listener's mail: its mail.send jobs over a mailer that
+		// records, declared before the listener so they outlive it, and the site
+		// URL its links name; the billing jobs beside them.
 		fake_mail::FakeMailer mailer;
-		nws::MailOutbox outbox(mailer);
+		nws::jobs::JobRegistry job_registry;
+		nws::register_mail_jobs(job_registry, mailer);
+		nws::billing::register_billing_jobs(job_registry, billing_service.sync());
 		config.site_url = kMailSiteUrl;
-		nws::HttpListener http(manager, pool, sessions);
-		http.set_mail_outbox(&outbox);
-		http.set_nw_udp_listener(&nw_udp);
-		http.set_admin_links(&links);
+		nws::HttpListener http(pool, http_redis.pool());
+		http.set_mail_enabled(true);
 		http.set_watchdog(&watchdog);
 		http.set_billing(&billing_service);
-		http.set_limits_hold(&limits_hold);
 		// The usage view's slot limits: 256 MiB and 2 CPUs a container.
 		http.set_fleet_slots(256, 2.0);
 		TEST_EXPECT(http.start(config));
@@ -7546,7 +7834,7 @@ int main(int argc, char **argv) {
 		const std::string secret = kSecret;
 		const std::vector<uint8_t> secret_bytes(secret.begin(), secret.end());
 		const std::filesystem::path retail_root = temp.path / "retail";
-		const std::filesystem::path apps_dir = source_dir / "apps" / "novaworld_server";
+		const std::filesystem::path apps_dir = source_dir / "apps" / "novaworld_web";
 		std::filesystem::create_directories(retail_root / "web" / "assets");
 		std::filesystem::copy(apps_dir / "templates", retail_root / "templates",
 				std::filesystem::copy_options::recursive);
@@ -7579,7 +7867,7 @@ int main(int argc, char **argv) {
 		secure_config.templates_dir = retail_root / "templates";
 		secure_config.static_dir = retail_root / "static";
 		secure_config.web_dist_dir = retail_root / "web";
-		nws::HttpListener secure_http(manager, pool, sessions);
+		nws::HttpListener secure_http(pool, secure_redis.pool());
 		TEST_EXPECT(secure_http.start(secure_config));
 		TEST_EXPECT(secure_http.bound_port() != 0);
 
@@ -7588,7 +7876,7 @@ int main(int argc, char **argv) {
 		fresh_config.cookie_secure = false;
 		fresh_config.trusted_proxies = { "10.255.0.1" };
 		fresh_config.api_proxy_only = true;
-		nws::HttpListener fresh_http(manager, pool, sessions);
+		nws::HttpListener fresh_http(pool, fresh_redis.pool());
 		TEST_EXPECT(fresh_http.start(fresh_config));
 		TEST_EXPECT(fresh_http.bound_port() != 0);
 
@@ -7596,19 +7884,24 @@ int main(int argc, char **argv) {
 		harness.temp_root = temp.path;
 		harness.retail_root = retail_root;
 		harness.fresh_port = fresh_http.bound_port();
+		nws::SessionStore fresh_sessions(fresh_redis.pool());
+		harness.fresh_sessions = &fresh_sessions;
 		harness.links = &links;
 		harness.watchdog = &watchdog;
 		harness.stripe = &stripe;
 		harness.billing = &billing_service;
-		harness.limits_hold = &limits_hold;
 		harness.mailer = &mailer;
-		harness.outbox = &outbox;
+		harness.jobs = &job_registry;
+		harness.redis = &http_redis.pool();
 		rc = run(harness);
 		// Join the Crow threads before the pool and the TempDir go, then the
-		// NW UDP listener the push routes held.
+		// NW UDP listener.
 		fresh_http.stop();
 		secure_http.stop();
 		http.stop();
+		publishing.store(false);
+		publisher.join();
+		console_drain.stop();
 		links.stop_all();
 		nw_udp.stop();
 	}

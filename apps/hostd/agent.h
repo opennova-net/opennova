@@ -1,7 +1,7 @@
 #pragma once
 
 // opennova-hostd's agent: one machine's side of the agent protocol
-// (apps/novaworld_server/hosted/agent_protocol.h). It bootstraps once (the
+// (apps/novaworld_common/hosted/agent_protocol.h). It bootstraps once (the
 // one-time token from the machine's user-data redeemed for its long-lived
 // secret, the machine's slots and data sets, all saved owner-only so a restart
 // of the agent never needs the token again), then syncs: every pass it lists
@@ -52,18 +52,27 @@ public:
 };
 
 // The real link: one HTTP exchange per call (apps/common/net_http.h) to
-// `base_url`, "http://<address>:<port>" (the service's private address).
+// `base_url`, "http://<host>:<port>" (the controller's internal name, or a
+// private address). Each call tries every IPv4 address the host resolves to,
+// in turn, until one takes the connection: while the controller is replaced,
+// its name lists the standby beside the leader (Cloud Map, MULTIVALUE), and
+// the standby does not listen. Only a connection never made moves on to the
+// next address; a request that reached a server is never sent again.
 class HttpServiceLink : public ServiceLink {
 public:
 	static constexpr int kTimeoutMs = 10 * 1000;
+	// A host's addresses (net::resolve_ipv4_all; a test's own list).
+	using Resolver = std::function<std::vector<net::Endpoint>(const std::string &host)>;
 
-	explicit HttpServiceLink(std::string base_url, int timeout_ms = kTimeoutMs);
+	explicit HttpServiceLink(std::string base_url, int timeout_ms = kTimeoutMs,
+			Resolver resolve = net::resolve_ipv4_all);
 	net::HttpReply post(
 			const std::string &path, const std::string &bearer, const std::string &body) override;
 
 private:
 	std::string base_url_;
 	int timeout_ms_;
+	Resolver resolve_;
 };
 
 struct AgentConfig {

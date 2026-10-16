@@ -1,4 +1,4 @@
-// The fleet's IPv4 networks (apps/novaworld_server/hosted/net_cidr.h): dotted
+// The fleet's IPv4 networks (apps/novaworld_common/hosted/net_cidr.h): dotted
 // quads and CIDRs read strictly, the peers a list of networks admits (an
 // IPv4-mapped IPv6 peer among them, never an IPv6 one), the private ranges the
 // agent routes' networks (ONNET_HOSTED_BOOTSTRAP_CIDRS) must lie in, the log

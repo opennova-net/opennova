@@ -1,4 +1,4 @@
-// The machine agents' routes (apps/novaworld_server/hosted/agent_route.h) on the
+// The machine agents' routes (apps/novaworld_controller/hosted/agent_route.h) on the
 // internal listener (hosted/internal_listener.h) on a loopback port over a
 // migrated database, driven with apps/common's http_exchange: the bootstrap (the
 // one-time token redeemed for a secret kept as its digest, again for a fresh one
@@ -13,22 +13,24 @@
 // machine's dropped, drain while draining, another protocol draining the
 // machine, a desired state that throws or does not read), every other path and
 // method the same 404, and a listener whose networks leave loopback out. Then
-// the local machine driver (hosted/local_machine_driver.h) end to end against
-// the routes, this test binary as its opennova-serve: a machine bootstraps,
-// starts a container in its slot's directory with the files owner-only, the
-// argv per data set and an environment without the service's secret, reports
-// it running, stops it (SIGTERM) and removes it with its files when the
-// desired state drops it, reports one that exited with its code, and ends with
-// the driver's terminate.
+// the real agent end to end against the routes: opennova-hostd (ctest passes
+// it) with its process runtime, as the local stack's machine containers run it,
+// this test binary as its opennova-serve: it redeems its token file (deleted
+// then) and the machine is ready, starts a container in its slot's directory
+// with the files owner-only, over the bootstrap's data set folder and with an
+// environment without the agent's secret, reports it running, stops it
+// (SIGTERM) and removes it with its files when the desired state drops it,
+// reports one that exited with its code, never one whose files it lacks, and
+// its own end ends its servers.
 
 #include "hosted/agent_protocol.h"
 #include "hosted/fleet_desired_state.h"
 #include "hosted/fleet_repository.h"
 #include "hosted/internal_listener.h"
-#include "hosted/local_machine_driver.h"
 #include "net_http.h"
 #include "net_sockets.h"
 
+#include <base/proc/child_process.h>
 #include <net/novaworld/db/database.h>
 
 #include "common/temp_dir.h"
@@ -54,7 +56,9 @@
 #include <vector>
 
 #ifndef _WIN32
+#include <signal.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 namespace fs = std::filesystem;
@@ -69,6 +73,7 @@ using test_db::TestDatabase;
 namespace {
 
 std::string g_self;
+std::string g_hostd; // opennova-hostd
 constexpr const char *kImage = "opennova-serve:local";
 // What an unknown path gets (Crow's own status text, nothing of the routes'),
 // read by each rig as it starts.
@@ -208,22 +213,25 @@ std::string token_hash(Database &db, int64_t id) {
 			.value_or("");
 }
 
-hosted::AgentRouteConfig route_config(std::vector<hosted::Ipv4Cidr> admitted) {
+hosted::AgentRouteConfig route_config(
+		std::vector<hosted::Ipv4Cidr> admitted, const std::string &data_set_path) {
 	hosted::AgentRouteConfig c;
 	c.admitted = std::move(admitted);
-	c.data_sets = { { hosted::kDataSetJointOperations, "/opt/game/jop_2_consumer" } };
+	c.data_sets = { { hosted::kDataSetJointOperations, data_set_path } };
 	return c;
 }
 
 const hosted::Ipv4Cidr kLoopback = { 0x7F000000u, 0xFF000000u };
 
-// A listener on a loopback port over `scratch`'s database.
+// A listener on a loopback port over `scratch`'s database, its machines mounting
+// Joint Operations' data set at `data_set_path`.
 struct Rig {
-	explicit Rig(
-			const TestDatabase &scratch, std::vector<hosted::Ipv4Cidr> admitted = { kLoopback }) :
+	explicit Rig(const TestDatabase &scratch,
+			std::vector<hosted::Ipv4Cidr> admitted = { kLoopback },
+			const std::string &data_set_path = "/opt/game/jop_2_consumer") :
 			pool(scratch.options(), 4),
 			db(scratch.open()),
-			listener(pool, fake, route_config(std::move(admitted))) {
+			listener(pool, fake, route_config(std::move(admitted), data_set_path)) {
 		started = listener.start("127.0.0.1", 0);
 		g_unknown_path_body = exchange(listener.bound_port(), "GET", "/no/such/path", "", "").body;
 	}
@@ -465,7 +473,7 @@ int test_networks() {
 	return 0;
 }
 
-// --- the local machine driver end to end -----------------------------------------------------
+// --- the agent end to end ------------------------------------------------------------------------
 
 std::string read_file(const fs::path &path) {
 	std::ifstream in(path, std::ios::binary);
@@ -482,113 +490,133 @@ bool wait_for(const std::function<bool()> &done, int timeout_ms = 20000) {
 	return done();
 }
 
-std::optional<hosted::LocalMachineView::Container> container_of(
-		hosted::LocalMachineDriver &driver, const std::string &cloud_id, const std::string &name) {
-	const auto view = driver.view(cloud_id);
-	if (!view)
-		return std::nullopt;
-	for (const auto &c : view->containers)
-		if (c.name == name)
-			return c;
-	return std::nullopt;
+// The line `<key>=<value>` of a marker file, its value; "" when it has none.
+std::string marker_value(const std::string &text, const std::string &key) {
+	const std::string head = key + "=";
+	size_t at = text.rfind("\n" + head) != std::string::npos ? text.rfind("\n" + head) + 1
+			: text.rfind(head, 0) == 0						 ? 0
+															 : std::string::npos;
+	if (at == std::string::npos)
+		return {};
+	at += head.size();
+	return text.substr(at, text.find('\n', at) - at);
 }
 
-int test_local_machine_end_to_end(const std::string &scratch_dir) {
-	TestDatabase scratch;
-	Rig rig(scratch);
-	TEST_EXPECT(rig.started);
+#ifndef _WIN32
+// Whether process `pid` runs (a zombie, ended and not yet reaped, does not).
+bool alive(pid_t pid) {
+	if (::kill(pid, 0) != 0)
+		return false;
+	const std::string stat = read_file("/proc/" + std::to_string(pid) + "/stat");
+	const size_t paren = stat.rfind(')');
+	return paren == std::string::npos || paren + 2 >= stat.size() || stat[paren + 2] != 'Z';
+}
+#endif
+
+bool reported(FakeDesiredState &fake, const std::string &name, ContainerState state, int slot) {
+	for (const auto &r : fake.reported())
+		if (r.name == name && r.state == state && r.slot == slot)
+			return true;
+	return false;
+}
+
+// opennova-hostd, the real agent, as the local stack's machine containers run it
+// (--runtime process, hostd/process_runtime.h), against the routes: its servers
+// this test binary (the fake opennova-serve below), its data set's folder the
+// bootstrap's path, its environment this test's own (a secret planted in it).
+int test_agent_end_to_end(const std::string &scratch_dir) {
+#ifdef _WIN32
+	(void)scratch_dir;
+	return 0;
+#else
 	const fs::path root = fs::u8path(scratch_dir) / "e2e";
 	const fs::path game = root / "game";
 	const fs::path markers = root / "markers";
+	const fs::path slots = root / "slots";
 	fs::create_directories(game);
 	fs::create_directories(markers);
-
-	hosted::LocalMachineConfig config;
-	config.serve_binary = g_self;
-	hosted::DataSet jo = hosted::known_data_sets()[0];
-	jo.resource_dir = game.u8string();
-	jo.loose_root = true;
-	config.data_sets = { jo };
-	config.work_dir = (root / "work").u8string();
-	config.service_url = "http://127.0.0.1:" + std::to_string(rig.listener.bound_port());
-	config.agent_version = "local-test";
-	config.sync_interval_ms = 100;
-	config.busy_sync_interval_ms = 50;
-	config.bootstrap_retry_ms = 50;
-	config.stop_grace_ms = 3000;
-	hosted::LocalMachineDriver driver(config);
+	TestDatabase scratch;
+	Rig rig(scratch, { kLoopback }, game.u8string());
+	TEST_EXPECT(rig.started);
 
 	hosted::NewMachine spec;
-	spec.provider = driver.name();
+	spec.provider = "docker";
 	spec.slots = 2;
 	spec.serve_image = kImage;
 	const hosted::CreatedMachine m = hosted::create_machine(rig.db, spec);
-	hosted::MachineLaunch launch;
-	launch.machine_id = m.id;
-	launch.slots = 2;
-	launch.bootstrap_token = m.bootstrap_token;
+	hosted::LaunchedMachine launched;
+	launched.cloud_id = "dev-machine-" + std::to_string(m.id);
+	launched.private_address = "127.0.0.1";
+	TEST_EXPECT(hosted::mark_launched(rig.db, m.id, launched));
+	// The machine's user-data: its one-time token in a file of its own.
+	const fs::path token = root / "hostd.token";
+	{
+		std::ofstream out(token, std::ios::binary);
+		out << m.bootstrap_token;
+	}
+	fs::permissions(
+			token, fs::perms::owner_read | fs::perms::owner_write, fs::perm_options::replace);
+	opennova::proc::SpawnOptions options;
+	options.argv = { g_hostd, "--runtime", "process", "--serve", g_self, "--service",
+		"http://127.0.0.1:" + std::to_string(rig.listener.bound_port()), "--machine",
+		std::to_string(m.id), "--token-file", token.u8string(), "--state-dir",
+		(root / "state").u8string(), "--slots-root", slots.u8string(), "--iptables", "none",
+		"--ip6tables", "none", "--verbose" };
+	options.output_path = (root / "hostd.log").u8string();
+	opennova::proc::ChildProcess hostd;
 	std::string error;
-	const auto launched = driver.launch(launch, error);
-	TEST_EXPECT(launched);
-	TEST_EXPECT(hosted::mark_launched(rig.db, m.id, *launched));
-	const std::string cloud = launched->cloud_id;
+	TEST_EXPECT(hostd.spawn(options, error));
+	const auto fail = [&](const char *what) {
+		std::fprintf(stderr, "FAIL: %s\n---- hostd.log ----\n%s\n", what,
+				read_file(root / "hostd.log").c_str());
+		hostd.kill();
+		hostd.wait(5000);
+		return 1;
+	};
 
-	// The machine bootstraps and reports: ready, with nothing on it.
-	TEST_EXPECT(wait_for([&] {
-		const auto view = driver.view(cloud);
-		return view && view->bootstrapped && view->syncs >= 1;
-	}));
-	TEST_EXPECT(wait_for(
-			[&] { return hosted::find_machine(rig.db, m.id)->state == FleetMachineState::Ready; }));
-	TEST_EXPECT(driver.view(cloud)->slots == 2);
+	// It bootstraps (the token spent and its file gone) and reports: ready, nothing on it.
+	if (!wait_for([&] {
+			return hosted::find_machine(rig.db, m.id)->state == FleetMachineState::Ready;
+		}))
+		return fail("the agent bootstraps and its machine is ready");
+	if (fs::exists(token))
+		return fail("the token file is deleted once redeemed");
 
-	// A container: started in its slot's directory with its files.
+	// A container: started in its slot's directory with its files, over the data
+	// set's folder, with the reply's variable and none of the agent's own.
 	const fs::path started = markers / "srv-5-g1.started";
 	const fs::path stopped = markers / "srv-5-g1.stopped";
 	hosted::FleetDecision decision;
 	decision.desired = { desired(
 			"srv-5-g1", 1, { "--marker", (markers / "srv-5-g1").u8string(), "--run" }) };
 	rig.fake.set(m.id, decision);
-	TEST_EXPECT(wait_for([&] { return fs::exists(started); }));
-	const auto c = container_of(driver, cloud, "srv-5-g1");
-	TEST_EXPECT(c && c->slot == 1 && c->state == ContainerState::Running);
-	TEST_EXPECT(c->argv.size() >= 4 && c->argv[0] == g_self && c->argv[1] == "--resource-dir");
-	TEST_EXPECT(c->argv[2] == game.u8string() && c->argv[3] == "--loose-root");
-	const fs::path slot_dir =
-			fs::u8path(config.work_dir) / ("machine-" + std::to_string(m.id)) / "slot-1";
-	// What the fake server saw: its working directory, the slot's files, its environment.
+	if (!wait_for([&] { return fs::exists(started); }))
+		return fail("the agent starts the server");
+	const fs::path slot_dir = slots / "slot-1";
 	const std::string seen = read_file(started);
-	TEST_EXPECT(seen.find("cwd=" + fs::canonical(slot_dir).u8string() + "\n") != std::string::npos);
-	TEST_EXPECT(seen.find("note=slot-1\n") != std::string::npos);
+	TEST_EXPECT(marker_value(seen, "cwd") == fs::canonical(slot_dir).u8string());
+	TEST_EXPECT(marker_value(seen, "data") == game.u8string());
+	TEST_EXPECT(marker_value(seen, "note") == "slot-1");
 	TEST_EXPECT(seen.find("secret=\n") != std::string::npos);
 	TEST_EXPECT(
 			read_file(slot_dir / "credentials.txt").find("secretpassword") != std::string::npos);
-#ifndef _WIN32
 	struct stat st{};
 	TEST_EXPECT(::stat((slot_dir / "credentials.txt").c_str(), &st) == 0 &&
 			(st.st_mode & 0777) == 0600);
 	TEST_EXPECT(::stat(slot_dir.c_str(), &st) == 0 && (st.st_mode & 0777) == 0700);
-#endif
-	// Reported running, and from then on its files are left out of the replies.
+	// Reported running on its slot, and so on the machine's row.
+	TEST_EXPECT(
+			wait_for([&] { return reported(rig.fake, "srv-5-g1", ContainerState::Running, 1); }));
 	TEST_EXPECT(wait_for([&] {
-		for (const auto &r : rig.fake.reported())
-			if (r.name == "srv-5-g1" && r.state == ContainerState::Running && r.slot == 1)
-				return true;
-		return false;
-	}));
-	TEST_EXPECT(wait_for([&] {
-		const auto slots = hosted::slot_reports(rig.db, m.id);
-		return slots.size() == 1 && slots[0].container == "srv-5-g1" &&
-				slots[0].state == ContainerState::Running;
+		const auto rows = hosted::slot_reports(rig.db, m.id);
+		return rows.size() == 1 && rows[0].container == "srv-5-g1" &&
+				rows[0].state == ContainerState::Running;
 	}));
 
 	// Dropped: asked to stop (SIGTERM), removed with its slot's files.
 	rig.fake.set(m.id, hosted::FleetDecision{});
-	TEST_EXPECT(wait_for([&] { return !container_of(driver, cloud, "srv-5-g1"); }));
-#ifndef _WIN32
-	TEST_EXPECT(fs::exists(stopped));
-#endif
-	TEST_EXPECT(!fs::exists(slot_dir));
+	TEST_EXPECT(wait_for([&] { return fs::exists(stopped); }));
+	TEST_EXPECT(wait_for([&] { return !fs::exists(slot_dir); }));
 	TEST_EXPECT(wait_for([&] { return hosted::slot_reports(rig.db, m.id).empty(); }));
 
 	// One that exits on its own is reported exited with its code until dropped, never restarted.
@@ -597,38 +625,46 @@ int test_local_machine_end_to_end(const std::string &scratch_dir) {
 			"srv-5-g2", 0, { "--marker", (markers / "srv-5-g2").u8string(), "--exit", "3" }) };
 	rig.fake.set(m.id, exits);
 	TEST_EXPECT(wait_for([&] {
-		const auto slots = hosted::slot_reports(rig.db, m.id);
-		return slots.size() == 1 && slots[0].container == "srv-5-g2" &&
-				slots[0].state == ContainerState::Exited && slots[0].exit_code == int64_t{ 3 };
+		const auto rows = hosted::slot_reports(rig.db, m.id);
+		return rows.size() == 1 && rows[0].container == "srv-5-g2" &&
+				rows[0].state == ContainerState::Exited && rows[0].exit_code == int64_t{ 3 };
 	}));
-	const auto exited = container_of(driver, cloud, "srv-5-g2");
-	TEST_EXPECT(
-			exited && exited->state == ContainerState::Exited && exited->exit_code == int64_t{ 3 });
-	// A container whose files were never sent cannot start (a lost agent state): it is not
-	// reported.
+	TEST_EXPECT(read_file(markers / "srv-5-g2.started").find("cwd=") != std::string::npos);
+	// A container whose files were never sent cannot start (a lost agent state): it is
+	// never reported.
 	hosted::FleetDecision fileless;
 	fileless.desired = { exits.desired[0], desired("srv-6-g1", 1, {}, false) };
 	rig.fake.set(m.id, fileless);
-	const uint64_t syncs = driver.view(cloud)->syncs;
-	TEST_EXPECT(wait_for([&] { return driver.view(cloud)->syncs >= syncs + 3; }));
-	TEST_EXPECT(!container_of(driver, cloud, "srv-6-g1"));
+	int calls = 0;
+	{
+		std::lock_guard<std::mutex> lock(rig.fake.mu);
+		calls = rig.fake.calls;
+	}
+	TEST_EXPECT(wait_for([&] {
+		std::lock_guard<std::mutex> lock(rig.fake.mu);
+		return rig.fake.calls >= calls + 2;
+	}));
+	for (const auto &r : rig.fake.reported())
+		TEST_EXPECT(r.name != "srv-6-g1");
 	rig.fake.set(m.id, hosted::FleetDecision{});
-	TEST_EXPECT(wait_for([&] { return driver.view(cloud)->containers.empty(); }));
+	TEST_EXPECT(wait_for([&] { return hosted::slot_reports(rig.db, m.id).empty(); }));
 
-	// A running one at the machine's end is stopped with it.
+	// A running one ends with its machine: the agent's end ends its servers.
 	const fs::path last_started = markers / "srv-5-g3.started";
 	hosted::FleetDecision last;
 	last.desired = { desired(
 			"srv-5-g3", 0, { "--marker", (markers / "srv-5-g3").u8string(), "--run" }) };
 	rig.fake.set(m.id, last);
 	TEST_EXPECT(wait_for([&] { return fs::exists(last_started); }));
-	driver.terminate(cloud);
-	TEST_EXPECT(!driver.view(cloud) && driver.describe(cloud).state == hosted::CloudState::Gone);
-#ifndef _WIN32
-	TEST_EXPECT(fs::exists(markers / "srv-5-g3.stopped"));
-#endif
-	TEST_EXPECT(driver.list_tagged().empty());
+	const auto pid =
+			static_cast<pid_t>(std::atoll(marker_value(read_file(last_started), "pid").c_str()));
+	TEST_EXPECT(pid > 0 && alive(pid));
+	hostd.terminate();
+	TEST_EXPECT(hostd.wait(10000).has_value());
+	TEST_EXPECT(wait_for([&] { return !alive(pid); }));
+	TEST_EXPECT(read_file(root / "hostd.log").find(m.bootstrap_token) == std::string::npos);
 	return 0;
+#endif
 }
 
 // --- the fake opennova-serve ---------------------------------------------------------------
@@ -642,9 +678,9 @@ void on_term(int) {
 	g_stop = true;
 }
 
-// `<self> --resource-dir <dir> [--loose-root] [/HOST <file>] --marker <path> --run | --exit
-// <code>`: writes <path>.started (its working directory and environment), then runs until SIGTERM
-// (writing <path>.stopped) or exits with <code>.
+// `<self> --resource-dir <dir> [/HOST <file>] --marker <path> --run | --exit <code>`: writes
+// <path>.started (its working directory, its data folder, its environment and its pid), then
+// runs until SIGTERM (writing <path>.stopped) or exits with <code>.
 int fake_serve_main(int argc, char **argv) {
 	std::signal(SIGTERM, on_term);
 	std::string marker;
@@ -672,8 +708,13 @@ int fake_serve_main(int argc, char **argv) {
 				secret = entry.substr(entry.find('=') + 1);
 		}
 		out << "cwd=" << fs::current_path(ec).u8string() << "\n"
+			<< "data=" << (argc > 2 ? argv[2] : "") << "\n"
 			<< "note=" << note << "\n"
-			<< "secret=" << secret << "\n";
+			<< "secret=" << secret << "\n"
+#ifndef _WIN32
+			<< "pid=" << ::getpid() << "\n"
+#endif
+				;
 	}
 	if (exit_code >= 0)
 		return exit_code;
@@ -689,11 +730,14 @@ int main(int argc, char **argv) {
 	if (argc > 1 && std::strcmp(argv[1], "--resource-dir") == 0)
 		return fake_serve_main(argc, argv);
 	test_db::init(argc, argv);
-	if (argc < 2 || std::string(argv[1]) == "--pg") {
-		std::fprintf(stderr, "usage: hosted_agent_route_test <this binary's path> --pg <uri>\n");
+	if (argc < 3 || std::string(argv[1]) == "--pg" || std::string(argv[2]) == "--pg") {
+		std::fprintf(stderr,
+				"usage: hosted_agent_route_test <this binary's path> <opennova-hostd> --pg "
+				"<uri>\n");
 		return 2;
 	}
 	g_self = argv[1];
+	g_hostd = argv[2];
 #ifdef _WIN32
 	_putenv_s(kPlantedSecret, "hunter2");
 #else
@@ -709,7 +753,7 @@ int main(int argc, char **argv) {
 		{ "bootstrap", [](const std::string &) { return test_bootstrap(); } },
 		{ "sync", [](const std::string &) { return test_sync(); } },
 		{ "networks", [](const std::string &) { return test_networks(); } },
-		{ "local_machine_end_to_end", test_local_machine_end_to_end },
+		{ "agent_end_to_end", test_agent_end_to_end },
 	};
 	for (const Case &c : cases) {
 		std::printf("-- %s\n", c.name);

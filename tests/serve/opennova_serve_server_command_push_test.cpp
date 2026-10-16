@@ -1,9 +1,11 @@
 // The NovaWorld service pushes ServerCommand and ServerStopHosting to opennova-serve over the
-// server's own NovaWorld session: the real apps/novaworld_server NwUdpListener and an in-test
+// server's own NovaWorld session: the real apps/novaworld_lobby NwUdpListener and an in-test
 // gate, and an in-process serve::Server listed on them over loopback (the
 // opennova_serve_novaworld setup: a loose game directory, two deathmatch maps in rotation, no
-// retail data). The listener resolves the server's RID and queues each statement for its receive
-// thread, which frames it on the server's session as a reliable record; the server's lobby
+// retail data), over a database of the test's own. Each push is a command this thread inserts on
+// its own connection (lobby_repository.h) once the server's RID resolves to its hosting session;
+// the listener's receive thread takes it and frames it on the server's session as a reliable
+// record; the server's lobby
 // session reads it [orig: CNapiGameSession_DispatchServerStatement @0x4d18a0] and the match runs
 // it [orig: CNapiGameSession_HandleServerCommand @0x4d22f0]. A pushed SetServerName renames the
 // live match and saves game.cfg, a pushed Cycle ends the round and the map changes, the next map's
@@ -23,7 +25,11 @@
 #include <formats/gamecfg/game_cfg.h>
 #include <net/napi/session.h>
 #include <net/novaworld/connection/manager.h>
+#include <net/novaworld/db/database.h>
+#include <net/novaworld/lobby_repository.h>
 #include <net/novaworld/lobby_session.h>
+
+#include "common/test_database.h"
 
 #include <atomic>
 #include <chrono>
@@ -39,7 +45,7 @@
 using namespace opennova;
 namespace fs = std::filesystem;
 using namespace std::chrono_literals;
-using novaworld_server::HostPushResult;
+using lobbydb::PushResult;
 
 namespace {
 
@@ -54,16 +60,27 @@ int failures = 0;
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	test_db::init(argc, argv);
 	if (net::startup() != 0) return (std::printf("FAIL net::startup\n"), 1);
 
+	test_db::TestDatabase database;
+	db::ConnectionPool pool(database.options());
 	ConnectionManager manager;
 	novaworld_server::NwUdpListener listener(manager);
+	listener.set_db_pool(&pool);
+	// The pushes, as a route inserts them: on a connection of this thread's own.
+	auto push_command = [&pool](uint32_t rid, const std::string &cmd) {
+		return lobbydb::queue_server_command(*pool.acquire(), rid, cmd);
+	};
 	manager.on_lost([&listener](const Connection &connection, DropReason reason) {
 		listener.erase_lobby_state(connection.addr, drop_reason_name(reason));
 	});
 	novaworld_server::ServerConfig service;
 	service.nw_udp_port = 0;
+	// The endpoint its instance announces (the in-test gate hands out the port
+	// it bound instead).
+	service.lobby_endpoint = "198.51.100.7:64206";
 	if (!listener.start(service)) return (std::printf("FAIL listener.start\n"), 1);
 	uint16_t gate_port = 0;
 	net::ScopedSocket gate_server(net::udp_bind(0, &gate_port));
@@ -138,8 +155,8 @@ int main() {
 	CHECK(rid != 0);
 
 	// --- a RID no connection holds is refused, and nothing reaches the server.
-	CHECK(listener.push_server_command(rid + 1000, "Cycle") == HostPushResult::UnknownRid);
-	CHECK(listener.push_server_command(0, "Cycle") == HostPushResult::UnknownRid);
+	CHECK(push_command(rid + 1000, "Cycle") == PushResult::UnknownRid);
+	CHECK(push_command(0, "Cycle") == PushResult::UnknownRid);
 
 	// --- SetServerName: the live match takes the name and game.cfg is saved, as retail's
 	// handler does [orig: CNapiGameSession_HandleServerCommand — the block copy @0x4D2CFC,
@@ -147,7 +164,7 @@ int main() {
 	const inmatch::NapiNPServerCtx &ctx = server.role().state.host_owner.ctx;
 	const std::string rename =
 			server_command_text(ServerCommandVerb::SetServerName, ServerCommandTarget::None, {"Pushed Name"});
-	CHECK(listener.push_server_command(rid, rename) == HostPushResult::Queued);
+	CHECK(push_command(rid, rename) == PushResult::Queued);
 	CHECK(frame_until([&] { return ctx.config.server_name == "Pushed Name"; }, 10s));
 	CHECK(server.game_cfg().game_name == "Pushed Name");
 	const gamecfg::LoadResult renamed = gamecfg::load_file(gamecfg::kFileName, {});
@@ -159,7 +176,7 @@ int main() {
 	CHECK(server.missions_played() == 1);
 	const std::string cycle = server_command_text(ServerCommandVerb::Cycle, ServerCommandTarget::None, {});
 	CHECK(cycle == "Cycle");
-	CHECK(listener.push_server_command(rid, cycle) == HostPushResult::Queued);
+	CHECK(push_command(rid, cycle) == PushResult::Queued);
 	CHECK(frame_until([&] { return server.missions_played() >= 2; }, 30s));
 	CHECK(server.missions_played() == 2);
 	CHECK(server.role().state.host_owner.ctx.config.mission_name == "Serve Test Map Two");
@@ -176,7 +193,8 @@ int main() {
 
 	// --- ServerStopHosting: the server's session drops to verified and its lister stops on the
 	// service's word; the row leaves the browser as the statement goes out.
-	CHECK(listener.push_stop_hosting(rid, SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT) == HostPushResult::Queued);
+	CHECK(lobbydb::queue_stop_hosting(*pool.acquire(), rid, SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT) ==
+			PushResult::Queued);
 	int lister_exit = -1;
 	// The lister can finish in the very frame whose mission exit stops the server, which tears the
 	// lister down; the server keeps the code it finished with.
@@ -193,7 +211,7 @@ int main() {
 	bool still_listed = false;
 	for (const auto &h : listener.snapshot_hosted()) still_listed = still_listed || h.lobby.rid == rid;
 	CHECK(!still_listed);
-	CHECK(listener.push_server_command(rid, "Cycle") != HostPushResult::Queued);
+	CHECK(push_command(rid, "Cycle") != PushResult::Queued);
 	std::printf("opennova_serve_server_command_push: rid %u, renamed, cycled to '%s', stopped\n", rid,
 			cycled_to.c_str());
 

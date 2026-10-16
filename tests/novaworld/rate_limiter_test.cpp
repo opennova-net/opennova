@@ -1,18 +1,25 @@
-// The NovaWorld service's credential-route brake (apps/novaworld_server/
-// rate_limiter.*): token buckets on a hand-stepped clock (the burst, the
-// refill, the Retry-After, independent keys, the table bound and its
-// eviction, the take/refund pair the failure-only buckets use), the address
-// keys (IPv6 grouped to a prefix), and the client address a request is keyed by (resolve_client_ip:
-// a proxy header counts only from a trusted peer). Crow-free, so it runs on
-// every build; the HTTP route harness drives the same limits over the wire.
+// The NovaWorld service's credential-route brake (apps/novaworld_web/
+// rate_limiter.*): token buckets in Redis on a hand-stepped clock (the burst,
+// the refill, the Retry-After, independent keys and limiters, a bucket's key
+// expiring when it would be full again, the take/refund pair the failure-only
+// buckets use, and two replicas drawing on one bucket exactly), the address
+// keys (IPv6 grouped to a prefix), and the client address a request is keyed
+// by (resolve_client_ip: a proxy header counts only from a trusted peer).
+// Crow-free; the buckets on the Redis server -DOPENNOVA_TEST_REDIS names
+// (common/test_redis.h), each case in a namespace of its own. The HTTP route
+// harness drives the same limits over the wire.
 
 #include "rate_limiter.h"
+#include "redis_client.h"
 
 #include "common/test_expect.h"
+#include "common/test_redis.h"
 
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace nws = opennova::novaworld_server;
@@ -22,13 +29,21 @@ using std::chrono::seconds;
 
 namespace {
 
-// A clock origin well past the limiter's zero last-sweep time.
+// A hand-stepped clock's origin. The buckets' TTLs run on the Redis server's
+// own clock, so a case keeps each bucket's real time to full above the moments
+// it runs for.
 const RateLimiter::Clock::time_point kT0 = RateLimiter::Clock::time_point() + std::chrono::hours(1);
+
+// `key`'s bucket's remaining TTL in ms; -2 when it has no key.
+long long pttl(nws::RedisPool &redis, const RateLimiter &limiter, const std::string &key) {
+	return redis.command({ "PTTL", limiter.bucket_key(key) }).integer;
+}
 
 // A burst of `capacity` from a fresh key, then a refusal whose Retry-After is
 // the time one token takes; a token returns after that long, and only one.
 int test_burst_refill_retry_after() {
-	RateLimiter limiter({3, 0.5, 100}); // 3 at once, then one every 2 s
+	test_redis::TestRedis redis;
+	RateLimiter limiter(redis.pool(), { "t", 3, 0.5 }); // 3 at once, then one every 2 s
 	for (int i = 0; i < 3; ++i) TEST_EXPECT(limiter.take("a", kT0) == 0);
 	TEST_EXPECT(limiter.take("a", kT0) == 2);
 	// 1.5 s later: three quarters of a token, so still 1 s to go (rounded up).
@@ -39,52 +54,69 @@ int test_burst_refill_retry_after() {
 	const auto later = kT0 + seconds(600);
 	for (int i = 0; i < 3; ++i) TEST_EXPECT(limiter.take("a", later) == 0);
 	TEST_EXPECT(limiter.take("a", later) > 0);
+	// A clock behind the bucket's last update (another replica's, a little
+	// behind) refills nothing and never moves the bucket back.
+	TEST_EXPECT(limiter.take("a", later - seconds(30)) > 0);
+	TEST_EXPECT(limiter.take("a", later + seconds(2)) == 0);
 	return 0;
 }
 
-// Keys hold their own buckets: one key's exhaustion leaves another whole.
-int test_keys_are_independent() {
-	RateLimiter limiter({2, 0.25, 100}); // one every 4 s
+// Keys hold their own buckets: one key's exhaustion leaves another whole. And
+// limiters hold their own: two over the same key (the billing routes' two
+// per-account limiters key "billing|<id>" alike) never share a bucket.
+int test_keys_and_limiters_are_independent() {
+	test_redis::TestRedis redis;
+	RateLimiter limiter(redis.pool(), { "t", 2, 0.25 }); // one every 4 s
 	TEST_EXPECT(limiter.take("10.0.0.1", kT0) == 0);
 	TEST_EXPECT(limiter.take("10.0.0.1", kT0) == 0);
 	TEST_EXPECT(limiter.take("10.0.0.1", kT0) == 4);
 	TEST_EXPECT(limiter.take("10.0.0.2", kT0) == 0);
 	TEST_EXPECT(limiter.take("10.0.0.2", kT0) == 0);
-	TEST_EXPECT(limiter.size() == 2);
+	RateLimiter other(redis.pool(), { "u", 2, 0.25 });
+	TEST_EXPECT(other.take("10.0.0.1", kT0) == 0);
+	TEST_EXPECT(other.take("10.0.0.1", kT0) == 0);
+	TEST_EXPECT(other.take("10.0.0.1", kT0) == 4);
+	TEST_EXPECT(limiter.bucket_key("k") != other.bucket_key("k"));
+	TEST_EXPECT(limiter.bucket_key("k").rfind(redis.prefix(), 0) == 0);
 	return 0;
 }
 
-// The table never holds more than max_keys: a new key first drops the
-// buckets that refilled to capacity, then evicts the one touched longest ago.
-int test_table_is_bounded() {
-	RateLimiter limiter({2, 1.0, 3});
-	TEST_EXPECT(limiter.take("a", kT0) == 0);
-	TEST_EXPECT(limiter.take("b", kT0 + milliseconds(100)) == 0);
-	TEST_EXPECT(limiter.take("c", kT0 + milliseconds(200)) == 0);
-	TEST_EXPECT(limiter.size() == 3);
-	// All three are still short of capacity at +300 ms: "a", the oldest, goes.
-	TEST_EXPECT(limiter.take("d", kT0 + milliseconds(300)) == 0);
-	TEST_EXPECT(limiter.size() == 3);
-	// "a" comes back as a fresh bucket (the eviction forgot its draw).
-	TEST_EXPECT(limiter.take("a", kT0 + milliseconds(400)) == 0);
-	TEST_EXPECT(limiter.take("a", kT0 + milliseconds(400)) == 0);
-	TEST_EXPECT(limiter.size() == 3);
-	for (int i = 0; i < 1000; ++i) {
-		limiter.take("k" + std::to_string(i), kT0 + seconds(1) + milliseconds(i));
-	}
-	TEST_EXPECT(limiter.size() == 3);
-	return 0;
-}
+// The bound: a bucket that refilled to capacity says nothing a missing one
+// does not, so its key expires when it would be full again (its TTL the time to
+// full) and a refund that fills it deletes it; a key past its TTL is gone and
+// comes back a full bucket.
+int test_bucket_key_expires_when_full() {
+	test_redis::TestRedis redis;
+	RateLimiter limiter(redis.pool(), { "t", 5, 1.0 }); // 5, then one a second
+	TEST_EXPECT(limiter.take("k", kT0) == 0);
+	long long ttl = pttl(redis.pool(), limiter, "k");
+	TEST_EXPECT(ttl > 0 && ttl <= 1000);
+	for (int i = 0; i < 4; ++i)
+		TEST_EXPECT(limiter.take("k", kT0) == 0);
+	ttl = pttl(redis.pool(), limiter, "k");
+	TEST_EXPECT(ttl > 4000 && ttl <= 5000);
+	// A refused take leaves it as it was.
+	TEST_EXPECT(limiter.take("k", kT0) == 1);
+	ttl = pttl(redis.pool(), limiter, "k");
+	TEST_EXPECT(ttl > 4000 && ttl <= 5000);
+	limiter.refund("k", kT0);
+	ttl = pttl(redis.pool(), limiter, "k");
+	TEST_EXPECT(ttl > 3000 && ttl <= 4000);
+	for (int i = 0; i < 4; ++i)
+		limiter.refund("k", kT0);
+	TEST_EXPECT(pttl(redis.pool(), limiter, "k") == -2);
 
-// Buckets that refilled to capacity say nothing a missing one does not: the
-// periodic sweep drops them.
-int test_sweep_drops_full_buckets() {
-	RateLimiter limiter({5, 1.0, 100});
-	for (int i = 0; i < 10; ++i) TEST_EXPECT(limiter.take("ip" + std::to_string(i), kT0) == 0);
-	TEST_EXPECT(limiter.size() == 10);
-	// Past the sweep interval every bucket is full again; only the new key stays.
-	TEST_EXPECT(limiter.take("late", kT0 + RateLimiter::kSweepInterval + seconds(1)) == 0);
-	TEST_EXPECT(limiter.size() == 1);
+	// On the real clock: a fast bucket drained, then left past its time to full.
+	RateLimiter fast(redis.pool(), { "fast", 2, 20.0 }); // full again in 100 ms
+	const auto now = RateLimiter::Clock::now();
+	TEST_EXPECT(fast.take("f", now) == 0);
+	TEST_EXPECT(fast.take("f", now) == 0);
+	TEST_EXPECT(fast.take("f", now) == 1);
+	std::this_thread::sleep_for(milliseconds(250));
+	TEST_EXPECT(pttl(redis.pool(), fast, "f") == -2);
+	const auto after = RateLimiter::Clock::now();
+	TEST_EXPECT(fast.take("f", after) == 0);
+	TEST_EXPECT(fast.take("f", after) == 0);
 	return 0;
 }
 
@@ -93,7 +125,8 @@ int test_sweep_drops_full_buckets() {
 // exactly, however many run at once (each took its token first); a refund
 // never lifts the bucket past capacity.
 int test_take_and_refund() {
-	RateLimiter limiter({3, 0.5, 100}); // 3 failures, then one every 2 s
+	test_redis::TestRedis redis;
+	RateLimiter limiter(redis.pool(), { "t", 3, 0.5 }); // 3 failures, then one every 2 s
 	for (int i = 0; i < 10; ++i) {
 		TEST_EXPECT(limiter.take("user", kT0) == 0);
 		limiter.refund("user", kT0); // the password was right
@@ -112,6 +145,50 @@ int test_take_and_refund() {
 	for (int i = 0; i < 10; ++i) limiter.refund("other", kT0);
 	for (int i = 0; i < 3; ++i) TEST_EXPECT(limiter.take("other", kT0) == 0);
 	TEST_EXPECT(limiter.take("other", kT0) == 2);
+	return 0;
+}
+
+// Two web replicas (two pools over one service's namespace, each with its own
+// limiter, as two processes hold them), eight threads on each drawing on one
+// bucket at once: exactly `capacity` takes succeed between them, never one
+// more, and every refusal names a wait.
+int test_replicas_share_buckets_exactly() {
+	test_redis::TestRedis replica_a;
+	test_redis::TestRedis replica_b(replica_a.prefix(), /*owns=*/false);
+	const RateLimiter::Params params{ "login_ip", 50, 1.0 / 3600 };
+	RateLimiter limiter_a(replica_a.pool(), params);
+	RateLimiter limiter_b(replica_b.pool(), params);
+	std::atomic<int> granted{ 0 };
+	std::atomic<int> refused_without_wait{ 0 };
+	std::atomic<int> failed{ 0 };
+	std::vector<std::thread> threads;
+	for (int t = 0; t < 16; ++t) {
+		RateLimiter &limiter = t % 2 == 0 ? limiter_a : limiter_b;
+		threads.emplace_back([&limiter, &granted, &refused_without_wait, &failed] {
+			for (int i = 0; i < 20; ++i) {
+				try {
+					const int64_t wait = limiter.take("198.51.100.7", kT0);
+					if (wait == 0)
+						++granted;
+					else if (wait < 1)
+						++refused_without_wait;
+				} catch (const std::exception &e) {
+					std::fprintf(stderr, "  take: %s\n", e.what());
+					++failed;
+				}
+			}
+		});
+	}
+	for (std::thread &t : threads)
+		t.join();
+	if (granted != 50)
+		std::fprintf(stderr, "  %d granted of 320 against a burst of 50\n", granted.load());
+	TEST_EXPECT(failed == 0);
+	TEST_EXPECT(granted == 50);
+	TEST_EXPECT(refused_without_wait == 0);
+	// Either replica sees the bucket the other drew on.
+	TEST_EXPECT(limiter_a.take("198.51.100.7", kT0) > 0);
+	TEST_EXPECT(limiter_b.take("198.51.100.7", kT0) > 0);
 	return 0;
 }
 
@@ -172,16 +249,17 @@ int test_client_ip() {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+	test_redis::init(argc, argv);
 	struct Case { const char *name; int (*fn)(); };
 	const Case cases[] = {
-		{"burst_refill_retry_after", test_burst_refill_retry_after},
-		{"keys_are_independent", test_keys_are_independent},
-		{"table_is_bounded", test_table_is_bounded},
-		{"sweep_drops_full_buckets", test_sweep_drops_full_buckets},
-		{"take_and_refund", test_take_and_refund},
-		{"address_key", test_address_key},
-		{"client_ip", test_client_ip},
+		{ "burst_refill_retry_after", test_burst_refill_retry_after },
+		{ "keys_and_limiters_are_independent", test_keys_and_limiters_are_independent },
+		{ "bucket_key_expires_when_full", test_bucket_key_expires_when_full },
+		{ "take_and_refund", test_take_and_refund },
+		{ "replicas_share_buckets_exactly", test_replicas_share_buckets_exactly },
+		{ "address_key", test_address_key },
+		{ "client_ip", test_client_ip },
 	};
 	for (const Case &c : cases) {
 		std::printf("-- %s\n", c.name);

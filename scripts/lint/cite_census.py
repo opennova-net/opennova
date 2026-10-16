@@ -168,7 +168,7 @@ FROZEN_TOKENS = (
     "host_players",
 )
 FROZEN_PATHS = ("fixtures/", "backend/migrations/",
-                "apps/novaworld_server/templates/", "engine/net/napi/",
+                "apps/novaworld_web/templates/", "engine/net/napi/",
                 "third_party/")
 CITATION = re.compile(r"\[orig:[^\]]*\]")
 DIVERGENCE_ID = re.compile(r"\bD-[A-Z]+-\d+\b")

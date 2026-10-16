@@ -89,6 +89,7 @@ HttpReply http_exchange(const std::string &method, const std::string &url,
 		reply.error = "connect to " + endpoint_to_string(to) + " failed";
 		return reply;
 	}
+	reply.connected = true;
 	const bool has_body = method != "GET";
 	std::string request = method + " " + path + " HTTP/1.0\r\n";
 	request += "Host: " + authority + "\r\n";

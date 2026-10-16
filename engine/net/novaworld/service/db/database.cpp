@@ -7,6 +7,7 @@
 #include <libpq-fe.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -78,15 +79,25 @@ std::string describe(const std::string &sqlstate, const std::string &message, st
 	return os.str();
 }
 
+// lock_failures(): every statement_error whose SQLSTATE is a lock's.
+std::atomic<uint64_t> g_lock_timeouts{ 0 };
+std::atomic<uint64_t> g_deadlocks{ 0 };
+
 // The error a failed command left: the server's SQLSTATE and primary message
-// from its result, else the connection's message (a lost connection).
+// from its result, else the connection's message (a lost connection). Counted
+// in lock_failures() when it is a lock's.
 Error statement_error(PGconn *conn, const PGresult *result, std::string_view sql) {
 	const char *state = result ? PQresultErrorField(result, PG_DIAG_SQLSTATE) : nullptr;
 	const char *primary = result ? PQresultErrorField(result, PG_DIAG_MESSAGE_PRIMARY) : nullptr;
 	const std::string sqlstate = state ? state : "";
 	const std::string message = primary && *primary ? std::string(primary) : trimmed(PQerrorMessage(conn));
 	const bool lost = PQstatus(conn) == CONNECTION_BAD;
-	return Error(sqlstate, describe(sqlstate, message, sql), lost);
+	Error error(sqlstate, describe(sqlstate, message, sql), lost);
+	if (error.lock_timeout())
+		g_lock_timeouts.fetch_add(1, std::memory_order_relaxed);
+	if (error.deadlock())
+		g_deadlocks.fetch_add(1, std::memory_order_relaxed);
+	return error;
 }
 
 // The connection's server notices (a NOTICE, a WARNING) go to the log.
@@ -200,6 +211,13 @@ Value decode(const PGresult *result, int row, int column) {
 }
 
 } // namespace
+
+LockFailures lock_failures() {
+	LockFailures out;
+	out.lock_timeouts = g_lock_timeouts.load(std::memory_order_relaxed);
+	out.deadlocks = g_deadlocks.load(std::memory_order_relaxed);
+	return out;
+}
 
 std::string masked_url(std::string_view url) {
 	std::string out(url);
@@ -464,16 +482,6 @@ Transaction::Transaction(Database &db) : db_(db), nested_(db.in_transaction()) {
 		return;
 	}
 	db_.begin();
-	try {
-		db_.exec("SELECT pg_advisory_xact_lock($1);", { BindValue(kWriterLock) });
-	} catch (...) {
-		try {
-			db_.rollback();
-		} catch (const Error &) {
-			// Lost with the connection; nothing is left open.
-		}
-		throw;
-	}
 }
 
 Transaction::~Transaction() {

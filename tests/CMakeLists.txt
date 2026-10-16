@@ -4798,8 +4798,9 @@ add_test(NAME hud_capture_labels COMMAND hud_capture_labels_test)
 # docker runtime's exact `docker run` and its listings, docker's texts read, the per-slot
 # iptables egress counters, the command line. The agent test drives the bootstrap and the
 # sync passes against an in-process fake of the service's routes and a fake container
-# runtime on a hand-stepped clock, with the planner and the slots' directories. Neither
-# runs docker or iptables.
+# runtime on a hand-stepped clock, with the planner and the slots' directories, and the
+# real link's walk over the addresses a name lists (one that takes no connection passed
+# over) against an HTTP server on loopback. Neither runs docker or iptables.
 if(TARGET opennova_hostd_core)
     add_executable(opennova_hostd_runtime_test hostd/opennova_hostd_runtime_test.cpp)
     target_link_libraries(opennova_hostd_runtime_test PRIVATE opennova_hostd_core)
@@ -4812,8 +4813,9 @@ if(TARGET opennova_hostd_core)
     add_test(NAME opennova_hostd_agent COMMAND opennova_hostd_agent_test)
 endif()
 
-# The NovaWorld service's tests (opennova_novaworld_service, apps/novaworld_server and
-# opennova-serve against the service's listeners), only when the service builds
+# The NovaWorld service's tests (opennova_novaworld_service, its programs under
+# apps/novaworld_* and opennova-serve against the service's listeners), only when the
+# service builds
 # (OPENNOVA_NOVAWORLD_SERVICE).
 if(OPENNOVA_NOVAWORLD_SERVICE)
     include(novaworld/service_tests.cmake)

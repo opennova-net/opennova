@@ -12,6 +12,7 @@ namespace opennova::net {
 // One completed HTTP exchange, in the shape LobbyHttpFlow's on_*_response hooks take.
 struct HttpReply {
 	bool transport_ok = false;        // the exchange itself completed (a status line came back)
+	bool connected = false; // the connection was made (the request may have reached a server)
 	int code = 0;                     // the HTTP status
 	std::vector<std::string> headers; // raw "Name: value" lines
 	std::vector<uint8_t> body;

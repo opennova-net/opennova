@@ -1,20 +1,24 @@
 // Two hosted servers end to end on one machine's slots: an in-process NovaWorld
-// service (nw_service_harness.h, hosted servers on) with its supervisor over
-// the local machine driver (hosted/local_machine_driver.h), whose stand-in
-// machine plays opennova-hostd over the real agent protocol against the
-// service's internal listener (hosted/internal_listener.h, on loopback) and
-// runs each container as a real opennova-serve child (ctest passes the binary)
-// over synthetic loose game directories (serve_test_support.h's deathmatch map
-// and game text), one per data set: Joint Operations' and Delta Force Xtreme
-// 2's. Built only with BUILD_NOVAWORLD_HTTP.
+// service (nw_service_harness.h, hosted servers on) with its supervisor and its
+// job workers (the fleet's jobs, hosted/fleet_jobs.h) over a machine driver of
+// the test's whose machines are the real agent, opennova-hostd, each a process
+// on this system with its process runtime (as the local stack's machine
+// containers run it), launched with its token file and reaching the service's
+// internal listener (hosted/internal_listener.h) on loopback; its servers are
+// real opennova-serve children (ctest passes both binaries) over synthetic loose
+// game directories (serve_test_support.h's deathmatch map and game text), one
+// per data set: Joint Operations' and Delta Force Xtreme 2's, each the folder
+// the bootstrap names for it. Built only with BUILD_NOVAWORLD_HTTP; Linux (the
+// agent is).
 //
 //   * the owner, granted a server (players.comp_servers), starts a Joint
 //     Operations server with POST /api/me/servers; the supervisor launches a
 //     shared machine, whose agent bootstraps and syncs, places the server on
 //     its first slot, mints its service account srv-<id> and renders its
-//     files, which the machine writes to the slot's directory before it starts
-//     opennova-serve over that data set's folder with /game jo; it logs in as
-//     that account, hosts and lists; the server reaches running;
+//     files, which the agent writes to the slot's directory before it starts
+//     opennova-serve over that data set's folder with /game jo and
+//     --loose-root; it logs in as that account, hosts and lists; the server
+//     reaches running;
 //   * a second owner's Delta Force Xtreme 2 server, naming no missions, lands on
 //     the same machine's second slot (no second machine), on its own game port,
 //     with that data set's rotation and /game dfx2, and runs beside the first;
@@ -36,11 +40,13 @@
 
 #include "hosted/admin_link.h"
 #include "hosted/fleet_config.h"
+#include "hosted/fleet_jobs.h"
 #include "hosted/fleet_repository.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/internal_listener.h"
-#include "hosted/local_machine_driver.h"
+#include "hosted/machine_driver.h"
 #include "hosted/supervisor.h"
+#include "jobs/worker_pool.h"
 #include "serve/serve_test_support.h"
 #include "web_session.h"
 
@@ -49,27 +55,34 @@
 
 #include <base/io/file_io.h>
 #include <base/io/log.h>
+#include <base/proc/child_process.h>
 #include <formats/gamecfg/game_cfg.h>
 #include <net/napi/session.h>
 #include <net/novaworld/host_repository.h>
+#include <net/novaworld/lobby_repository.h>
 
 #include <crow/json.h>
 
 #include "common/temp_dir.h"
 
+#include <algorithm>
 #include <cctype>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <signal.h>
 
 #ifndef OPENNOVA_SOURCE_DIR
 #error "OPENNOVA_SOURCE_DIR must be set by CMake"
@@ -169,6 +182,177 @@ bool wait_for(Done done, int seconds) {
 	return done();
 }
 
+// --- the machines: opennova-hostd processes ------------------------------------------------
+
+std::string read_text(const fs::path &path) {
+	std::ifstream in(path, std::ios::binary);
+	return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+// The test's machine driver: each machine the real agent, opennova-hostd with its
+// process runtime, as a process of this system's (the local stack runs it as a
+// container of its own), its user-data a token file in the machine's directory,
+// <work>/machine-<id> (its state, its slots, its log). Its servers share this
+// system's network, so its profile's slot ports are free ones probed on loopback,
+// admitting loopback.
+class HostdMachines : public hosted::MachineDriver {
+public:
+	HostdMachines(std::string hostd, std::string serve, fs::path work) :
+			hostd_(std::move(hostd)), serve_(std::move(serve)), work_(std::move(work)) {}
+	~HostdMachines() override {
+		std::vector<std::string> ids;
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			for (const auto &entry : machines_)
+				ids.push_back(entry.first);
+		}
+		for (const std::string &id : ids)
+			terminate(id);
+	}
+
+	static hosted::MachineProfile profile() {
+		hosted::MachineProfile out;
+		out.provider = "hostd";
+		out.boot_timeout_ms = 60 * 1000;
+		out.slot_plan = [](int) {
+			hosted::SlotPlan plan;
+			{
+				net::ScopedSocket udp(net::udp_bind(0, &plan.game_port));
+			}
+			{
+				net::ScopedSocket tcp(
+						net::tcp_listen(0, 1, &plan.admin_port, /*loopback_only=*/true));
+			}
+			plan.admin_allowed_ip = "127.0.0.1";
+			return plan;
+		};
+		return out;
+	}
+
+	void set_service_url(const std::string &url) { service_url_ = url; }
+	fs::path dir(int64_t machine_id) const {
+		return work_ / ("machine-" + std::to_string(machine_id));
+	}
+	// The agent's process id; 0 for a machine not running.
+	int64_t pid(const std::string &cloud_id) {
+		std::lock_guard<std::mutex> lock(mu_);
+		const auto it = machines_.find(cloud_id);
+		return it == machines_.end() ? 0 : it->second->pid();
+	}
+
+	const char *name() const override { return "hostd"; }
+
+	std::optional<hosted::LaunchedMachine> launch(
+			const hosted::MachineLaunch &launch, std::string &error) override {
+		const fs::path machine = dir(launch.machine_id);
+		std::error_code ec;
+		fs::remove_all(machine, ec);
+		fs::create_directories(machine, ec);
+		const fs::path token = machine / "hostd.token";
+		{
+			std::ofstream out(token, std::ios::binary);
+			out << launch.bootstrap_token;
+		}
+		fs::permissions(token, fs::perms::owner_read | fs::perms::owner_write,
+				fs::perm_options::replace, ec);
+		opennova::proc::SpawnOptions options;
+		options.argv = { hostd_, "--runtime", "process", "--serve", serve_, "--service",
+			service_url_, "--machine", std::to_string(launch.machine_id), "--token-file",
+			token.u8string(), "--state-dir", (machine / "state").u8string(), "--slots-root",
+			(machine / "slots").u8string(), "--iptables", "none", "--ip6tables", "none" };
+		options.output_path = (machine / "hostd.log").u8string();
+		auto child = std::make_unique<opennova::proc::ChildProcess>();
+		if (!child->spawn(options, error))
+			return std::nullopt;
+		hosted::LaunchedMachine out;
+		out.cloud_id = "hostd-" + std::to_string(launch.machine_id);
+		out.private_address = "127.0.0.1";
+		out.public_address = "127.0.0.1";
+		out.instance_type = "process";
+		std::lock_guard<std::mutex> lock(mu_);
+		machines_[out.cloud_id] = std::move(child);
+		return out;
+	}
+
+	hosted::CloudMachine describe(const std::string &cloud_id, int64_t) override {
+		hosted::CloudMachine out;
+		std::lock_guard<std::mutex> lock(mu_);
+		const auto it = machines_.find(cloud_id);
+		if (it == machines_.end() || it->second->poll())
+			return out; // Gone
+		out.state = hosted::CloudState::Running;
+		out.private_address = "127.0.0.1";
+		out.public_address = "127.0.0.1";
+		return out;
+	}
+
+	void terminate(const std::string &cloud_id) override {
+		std::unique_ptr<opennova::proc::ChildProcess> child;
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			const auto it = machines_.find(cloud_id);
+			if (it == machines_.end())
+				return;
+			child = std::move(it->second);
+			machines_.erase(it);
+		}
+		child->terminate();
+		if (!child->wait(10000)) {
+			child->kill();
+			child->wait(5000);
+		}
+	}
+
+	std::vector<hosted::TaggedCloudMachine> list_tagged() override {
+		std::vector<hosted::TaggedCloudMachine> out;
+		std::lock_guard<std::mutex> lock(mu_);
+		for (const auto &entry : machines_)
+			out.push_back({ entry.first, std::stoll(entry.first.substr(6)) });
+		return out;
+	}
+
+private:
+	std::string hostd_;
+	std::string serve_;
+	fs::path work_;
+	std::string service_url_;
+	std::mutex mu_;
+	std::map<std::string, std::unique_ptr<opennova::proc::ChildProcess>> machines_;
+};
+
+// The command lines of process `parent`'s running children (the agent's servers).
+std::vector<std::vector<std::string>> children_argv(int64_t parent) {
+	std::vector<std::vector<std::string>> out;
+	std::error_code ec;
+	for (const auto &entry : fs::directory_iterator("/proc", ec)) {
+		const std::string name = entry.path().filename().string();
+		if (name.empty() || name.find_first_not_of("0123456789") != std::string::npos)
+			continue;
+		const std::string stat = read_text(entry.path() / "stat");
+		const size_t paren = stat.rfind(')');
+		if (paren == std::string::npos || paren + 4 >= stat.size())
+			continue;
+		// "<pid> (<comm>) <state> <ppid> ...": a zombie (Z) has ended.
+		if (stat[paren + 2] == 'Z')
+			continue;
+		if (std::atoll(stat.c_str() + paren + 4) != parent)
+			continue;
+		const std::string cmdline = read_text(entry.path() / "cmdline");
+		std::vector<std::string> argv;
+		size_t start = 0;
+		while (start < cmdline.size()) {
+			const size_t end = cmdline.find('\0', start);
+			argv.push_back(cmdline.substr(
+					start, end == std::string::npos ? std::string::npos : end - start));
+			if (end == std::string::npos)
+				break;
+			start = end + 1;
+		}
+		out.push_back(std::move(argv));
+	}
+	return out;
+}
+
 std::optional<hosted::HostedServer> server_row(Service &service, int64_t id) {
 	return hosted::find_server(*service.pool.acquire(), id);
 }
@@ -180,36 +364,40 @@ std::optional<hosted::FleetMachineRow> machine_of(Service &service, int64_t id) 
 	return hosted::find_machine(*service.pool.acquire(), *row->machine_ref);
 }
 
-// The server's slot directory on the local stand-in machine.
-fs::path slot_dir(const fs::path &work, Service &service, int64_t id) {
+// The server's slot directory on its machine.
+fs::path slot_dir(const HostdMachines &machines, Service &service, int64_t id) {
 	const auto row = server_row(service, id);
 	if (!row || !row->machine_ref || row->slot < 0) return {};
-	return work / ("machine-" + std::to_string(*row->machine_ref)) / hosted::slot_dir_name(row->slot);
+	return machines.dir(*row->machine_ref) / "slots" / hosted::slot_dir_name(row->slot);
 }
 
-// What the stand-in machine runs for the server (its argv), empty for none.
-std::vector<std::string> command_of(hosted::LocalMachineDriver &driver, Service &service, int64_t id) {
-	const auto row = server_row(service, id);
+// What the machine's agent runs over data set folder `data` (the server's argv), empty for none.
+std::vector<std::string> command_over(
+		HostdMachines &machines, Service &service, int64_t id, const fs::path &data) {
 	const auto machine = machine_of(service, id);
-	if (!row || !machine) return {};
-	const auto view = driver.view(machine->cloud_id);
-	if (!view) return {};
-	for (const auto &c : view->containers) {
-		if (c.name == row->container) return c.argv;
+	if (!machine)
+		return {};
+	for (auto &argv : children_argv(machines.pid(machine->cloud_id))) {
+		for (size_t i = 0; i + 1 < argv.size(); ++i) {
+			if (argv[i] == "--resource-dir" && argv[i + 1] == data.u8string())
+				return argv;
+		}
 	}
 	return {};
 }
 
-// The server's container log and its events, for a failure's diagnosis.
-void dump(Service &service, const fs::path &work, int64_t id) {
+// The machine's log (its agent's lines and its servers') and the server's events, for a
+// failure's diagnosis.
+void dump(Service &service, const HostdMachines &machines, int64_t id) {
 	const auto row = server_row(service, id);
-	if (row && row->machine_ref && !row->container.empty()) {
+	if (row && row->machine_ref) {
 		std::string log;
 		std::string error;
-		const fs::path path = work / ("machine-" + std::to_string(*row->machine_ref)) / (row->container + ".log");
+		const fs::path path = machines.dir(*row->machine_ref) / "hostd.log";
 		if (opennova::io::read_file_text(path.u8string(), log, error))
-			std::fprintf(stderr, "---- %s (last 4000 bytes)\n%s\n----\n", row->container.c_str(),
-					log.substr(log.size() > 4000 ? log.size() - 4000 : 0).c_str());
+			std::fprintf(stderr, "---- machine %lld (last 6000 bytes)\n%s\n----\n",
+					static_cast<long long>(*row->machine_ref),
+					log.substr(log.size() > 6000 ? log.size() - 6000 : 0).c_str());
 	}
 	for (const auto &e : hosted::list_events(*service.pool.acquire(), id, 50))
 		std::fprintf(stderr, "  event %s -> %s: %s\n", e.from_state.c_str(), e.to_state.c_str(), e.detail.c_str());
@@ -231,11 +419,14 @@ void log_sink(opennova::io::LogLevel level, const char *message) {
 
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
-	if (argc < 2) {
-		std::fprintf(stderr, "usage: hosted_local_e2e_test <opennova-serve binary>\n");
+	test_redis::init(argc, argv);
+	if (argc < 3) {
+		std::fprintf(stderr,
+				"usage: hosted_local_e2e_test <opennova-serve binary> <opennova-hostd binary>\n");
 		return 2;
 	}
-	const std::string serve_binary = argv[1];
+	const std::string serve_binary = fs::absolute(argv[1]).u8string();
+	const std::string hostd_binary = fs::absolute(argv[2]).u8string();
 	opennova::io::set_log_sink(&log_sink);
 	if (net::startup() != 0) {
 		std::fprintf(stderr, "FAIL: net::startup\n");
@@ -261,43 +452,36 @@ int main(int argc, char **argv) {
 						   })),
 					"the game text");
 		};
-		const fs::path data = temp.path / "jo data";
-		const fs::path dfx2_data = temp.path / "dfx2 data";
+		// (Their paths are mount paths: letters, digits and ./_- alone.)
+		const fs::path data = temp.path / "jo_data";
+		const fs::path dfx2_data = temp.path / "dfx2_data";
 		write_game(data, "SERVETST.BMS", "Serve Test Map");
 		write_game(dfx2_data, "DFXTEST.BMS", "DFX2 Test Map");
-		// ONNET_HOSTED_DATA_SETS as a deployment writes it (the paths with
-		// forward slashes, which JSON takes unescaped), read as main() reads it.
-		const std::string data_sets_json = "{\"jop_2_consumer\":{\"resource_dir\":\"" + data.generic_u8string() +
-				"\",\"loose_root\":true,\"missions\":[\"servetst.bms\"]},\"dfx2_consumer\":{\"resource_dir\":\"" +
-				dfx2_data.generic_u8string() + "\",\"loose_root\":true,\"missions\":[\"dfxtest.bms\"]}}";
+		// ONNET_HOSTED_DATA_SETS as a deployment writes it, read as main() reads it:
+		// both loose folders, each with its rotation.
+		const std::string data_sets_json =
+				"{\"jop_2_consumer\":{\"loose_root\":true,\"missions\":[\"servetst.bms\"]},"
+				"\"dfx2_consumer\":{\"loose_root\":true,\"missions\":[\"dfxtest.bms\"]}}";
 		std::vector<hosted::DataSetConfig> data_set_configs;
 		std::string config_error;
 		expect(hosted::parse_data_set_configs(data_sets_json, data_set_configs, config_error),
 				"ONNET_HOSTED_DATA_SETS reads");
-		const std::vector<hosted::DataSet> data_sets = hosted::offered_data_sets("local", data_set_configs);
-		expect(data_sets.size() == 2, "the local driver offers both data sets");
+		const std::vector<hosted::DataSet> data_sets = hosted::offered_data_sets(data_set_configs);
+		expect(data_sets.size() == 2, "both data sets are offered");
 
 		Service service;
 		const bool up = service.start(source_dir, temp.path, /*require_host_key=*/false,
 				[&data_sets_json](nws::ServerConfig &config) {
-					config.hosted_provider = "local";
+					config.hosted_provider = "docker";
 					config.hosted_cap = 5;
 					config.hosted_data_sets = data_sets_json;
 				});
 		expect(up, "the service starts");
 		expect(nws::set_comp_servers(*service.pool.acquire(), service.owner_id, 1).ok, "the owner is granted a server");
 
-		// The local machine driver, its stand-ins syncing often.
+		// The machines: opennova-hostd processes.
 		const fs::path work = temp.path / "work";
-		hosted::LocalMachineConfig local;
-		local.serve_binary = serve_binary;
-		local.data_sets = data_sets;
-		local.work_dir = work.u8string();
-		local.sync_interval_ms = 300;
-		local.busy_sync_interval_ms = 100;
-		local.bootstrap_retry_ms = 200;
-		local.stop_grace_ms = 5000;
-		hosted::LocalMachineDriver driver(local);
+		HostdMachines driver(hostd_binary, serve_binary, work);
 		hosted::SupervisorConfig config;
 		config.data_sets = data_sets;
 		config.cap = 5;
@@ -307,7 +491,15 @@ int main(int argc, char **argv) {
 		config.listing_timeout_ms = 60 * 1000;
 		config.restart_limit = 0; // a crash fails it at once, with its reason
 		config.serve_image = "opennova-serve:local";
-		hosted::Supervisor supervisor(service.pool, driver, config);
+		hosted::Supervisor supervisor(service.pool, HostdMachines::profile(), config);
+		// The job workers that run the driver's calls (the launch, the describes, the ends).
+		nws::jobs::JobRegistry job_registry;
+		hosted::register_fleet_jobs(job_registry, driver);
+		nws::jobs::WorkerPoolConfig worker_config;
+		worker_config.threads = 4;
+		worker_config.poll_ms = 50;
+		worker_config.idle_max_ms = 200;
+		nws::jobs::WorkerPool workers(service.pool, job_registry, worker_config);
 		// The admin links, their log lines kept for the secret check.
 		std::mutex link_log_mu;
 		std::vector<std::string> link_log;
@@ -320,17 +512,22 @@ int main(int argc, char **argv) {
 		};
 		hosted::AdminLinks links(&service.pool, link_config);
 		supervisor.set_admin_links(&links);
-		supervisor.set_stop_listing([&service](uint32_t rid, int64_t account) {
-			return service.nwudp.push_stop_hosting(rid, opennova::SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT, 0,
-						   0, account) == nws::HostPushResult::Queued;
+		supervisor.set_stop_listing([](opennova::db::Database &db, uint32_t rid, int64_t account) {
+			return opennova::lobbydb::queue_stop_hosting(db, rid, opennova::SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT, 0,
+						   0, account) == opennova::lobbydb::PushResult::Queued;
 		});
-		// The machine agents' routes on loopback, as main() wires them.
-		hosted::InternalListener internal(
-				service.pool, supervisor, hosted::agent_route_config(hosted::FleetConfig{}, { "jop_2_consumer", "dfx2_consumer" }));
+		// The machine agents' routes on loopback, as main() wires them, but each data set
+		// at its synthetic folder (a machine mounts it at /opt/game/<data set>).
+		hosted::AgentRouteConfig routes = hosted::agent_route_config(
+				hosted::FleetConfig{}, { "jop_2_consumer", "dfx2_consumer" });
+		routes.data_sets["jop_2_consumer"] = data.u8string();
+		routes.data_sets["dfx2_consumer"] = dfx2_data.u8string();
+		hosted::InternalListener internal(service.pool, supervisor, routes);
 		const bool internal_up = up && internal.start("127.0.0.1", 0);
 		expect(!up || internal_up, "the internal listener serves on loopback");
 		if (internal_up) {
 			driver.set_service_url("http://127.0.0.1:" + std::to_string(internal.bound_port()));
+			workers.start();
 			supervisor.start();
 		}
 
@@ -357,7 +554,8 @@ int main(int argc, char **argv) {
 			}, 90);
 			const auto row = server_row(service, id);
 			running = running && row && row->state == hosted::State::Running;
-			if (!running) dump(service, work, id);
+			if (!running)
+				dump(service, driver, id);
 			expect(running, "the hosted server is placed, started on its slot, lists with its service account and runs");
 		}
 
@@ -392,7 +590,8 @@ int main(int argc, char **argv) {
 				const auto row = server_row(service, dfx2_id);
 				return row && (row->state == hosted::State::Running || !hosted::is_live(row->state));
 			}, 90) && server_row(service, dfx2_id)->state == hosted::State::Running;
-			if (!dfx2_running) dump(service, work, dfx2_id);
+			if (!dfx2_running)
+				dump(service, driver, dfx2_id);
 			expect(dfx2_running, "the Delta Force Xtreme 2 server runs beside the first");
 		}
 
@@ -405,26 +604,30 @@ int main(int argc, char **argv) {
 			expect(jo->slot == 0 && dfx2->slot == 1 && jo->game_port != dfx2->game_port,
 					"each on its own slot and game port");
 			expect(machine && machine->kind == hosted::MachineKind::Shared &&
-							machine->state == hosted::FleetMachineState::Ready && machine->provider == "local",
-					"the machine is a ready shared local machine");
+							machine->state == hosted::FleetMachineState::Ready &&
+							machine->provider == "hostd",
+					"the machine is a ready shared machine");
 			expect(hosted::list_live_machines(*service.pool.acquire()).size() == 1, "no second machine");
 			const auto account = jo->service_user_id ? nws::get_user_by_id(*service.pool.acquire(), *jo->service_user_id)
 													 : std::nullopt;
 			expect(account && account->kind == "service" && account->username == nws::service_username(id),
 					"the server lists as its own service account");
-			const fs::path dir = slot_dir(work, service, id);
+			const fs::path dir = slot_dir(driver, service, id);
 			expect(fs::exists(dir / "server.host") && fs::exists(dir / "credentials.txt"),
 					"its slot's directory was written from its files");
 			expect(jo->settings.game == "jop_2_consumer" && dfx2->settings.game == "dfx2_consumer" &&
 							dfx2->settings.missions == std::vector<std::string>{ "dfxtest.bms" },
 					"the rows name their data sets (the second its data set's rotation)");
-			const std::vector<std::string> jo_command = command_of(driver, service, id);
-			const std::vector<std::string> dfx2_command = command_of(driver, service, dfx2_id);
-			expect(has_pair(jo_command, "--resource-dir", fs::absolute(data).u8string()) &&
-							has_pair(jo_command, "/game", "jo"),
-					"opennova-serve runs over Joint Operations' folder with /game jo");
-			expect(has_pair(dfx2_command, "--resource-dir", fs::absolute(dfx2_data).u8string()) &&
-							has_pair(dfx2_command, "/game", "dfx2"),
+			const std::vector<std::string> jo_command = command_over(driver, service, id, data);
+			const std::vector<std::string> dfx2_command =
+					command_over(driver, service, dfx2_id, dfx2_data);
+			const auto loose = [](const std::vector<std::string> &argv) {
+				return std::find(argv.begin(), argv.end(), "--loose-root") != argv.end();
+			};
+			expect(!jo_command.empty() && jo_command[0] == serve_binary &&
+							has_pair(jo_command, "/game", "jo") && loose(jo_command),
+					"opennova-serve runs over Joint Operations' folder with /game jo, loose");
+			expect(has_pair(dfx2_command, "/game", "dfx2") && loose(dfx2_command),
 					"opennova-serve runs over Delta Force Xtreme 2's folder with /game dfx2");
 
 			// Each listing at its slot's game port: one address, two servers.
@@ -465,7 +668,8 @@ int main(int argc, char **argv) {
 				const auto cfg = opennova::gamecfg::load_file(cfg_path, {});
 				return cfg.file_read && cfg.cfg.game_name == "Renamed Hosted";
 			}, 20);
-			if (!renamed) dump(service, work, id);
+			if (!renamed)
+				dump(service, driver, id);
 			expect(renamed, "the server takes the owner's name and saves game.cfg in its slot");
 
 			// The admin link: up from running, logged in with the rendered login.
@@ -477,7 +681,8 @@ int main(int argc, char **argv) {
 				link = links.find(id);
 				return link && link->status().state == hosted::AdminLinkState::Up;
 			}, 30);
-			if (!link_up) dump(service, work, id);
+			if (!link_up)
+				dump(service, driver, id);
 			expect(link_up, "the admin link logs in on the running server's slot");
 			if (link_up) {
 				hosted::AdminCommandOptions read;
@@ -523,18 +728,19 @@ int main(int argc, char **argv) {
 				return r && !hosted::is_live(r->state);
 			}, 60);
 			const auto ended = server_row(service, id);
-			if (!stopped || !ended || ended->state != hosted::State::Stopped) dump(service, work, id);
+			if (!stopped || !ended || ended->state != hosted::State::Stopped)
+				dump(service, driver, id);
 			expect(stopped && ended && ended->state == hosted::State::Stopped, "the server ends stopped");
 			expect(!opennova::hostdb::find_host_by_rid(*service.pool.acquire(), rid), "its listing has left the browser");
-			expect(wait_for([&] {
-				const auto view = machine ? driver.view(machine->cloud_id) : std::nullopt;
-				if (!view) return false;
-				for (const auto &c : view->containers) {
-					if (c.name == container) return false;
-				}
-				return true;
-			}, 30),
-					"its container is gone from the machine");
+			expect(wait_for(
+						   [&] {
+							   return !fs::exists(dir) &&
+									   command_over(driver, service, dfx2_id, dfx2_data).size() >
+									   0 &&
+									   command_over(driver, service, id, data).empty();
+						   },
+						   30),
+					"its server and its slot's directory are gone from the machine");
 			expect(account && wait_for([&] {
 				const auto r = server_row(service, id);
 				return r && !r->service_user_id && !nws::get_user_by_id(*service.pool.acquire(), account->id);
@@ -579,12 +785,14 @@ int main(int argc, char **argv) {
 				return r && !hosted::is_live(r->state);
 			}, 60);
 			const auto ended = server_row(service, dfx2_id);
-			if (!stopped || !ended || ended->state != hosted::State::Stopped) dump(service, work, dfx2_id);
+			if (!stopped || !ended || ended->state != hosted::State::Stopped)
+				dump(service, driver, dfx2_id);
 			expect(stopped && ended && ended->state == hosted::State::Stopped, "the Delta Force Xtreme 2 server stops");
 		}
 
 		supervisor.stop();
 		links.stop_all();
+		workers.stop();
 		internal.stop();
 		service.stop();
 	}

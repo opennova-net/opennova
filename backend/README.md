@@ -14,9 +14,8 @@ Contents:
   server applies them after the migrations, under the same lock, at every
   boot; the dev-only `0002_dev_users.sql` is skipped unless `SEED_DEV_USERS` is
   set.
-- `data/` — gitignored scratch for a server run from the repo root: the local
-  hosted-server provider's working directories (`ONNET_HOSTED_WORK_DIR`'s
-  default). The database is not here: it is the PostgreSQL server's.
+
+The database is not here: it is the PostgreSQL server's.
 
 `0001_baseline.sql` is the schema the SQLite-era migrations 0001..0015 had
 built, squashed into one file in PostgreSQL's dialect: `bigint` integers,
@@ -25,10 +24,14 @@ the hosted servers' comp grant, `players.comp_servers`, in place of the old
 approval flag). `0002_billing.sql` adds the billing tables: the service's
 instance id, the support tiers' Stripe customers, subscriptions and webhook
 events, the cache of Stripe the hosting entitlement reads
-(apps/novaworld_server/README.md "Hosted servers"). `0005_account_email.sql`
+(apps/novaworld_common/README.md "Hosted servers"). `0005_account_email.sql`
 adds the accounts' email addresses (`players.email`, lowercased, one account's)
-and the password reset links (apps/novaworld_server/README.md "Account email
-and password resets").
+and the password reset links (apps/novaworld_common/README.md "Account email
+and password resets"). `0006_lobby_commands.sql` adds the lobby's tables: the
+NovaWorld sessions the lobby holds (`lobby_sessions`) and the commands the
+routes and the hosted servers' supervisor address to it (`lobby_commands`),
+the only way in and out of the lobby's memory (apps/novaworld_common/README.md
+"Connection lifecycle").
 
 ## Migrations are append-only
 
@@ -44,7 +47,7 @@ recreated: `scripts/dev_postgres.sh reset`.)
 ## The database the server needs
 
 The server connects with `DATABASE_URL` (a libpq URI) and `DATABASE_PASSWORD`
-(apps/novaworld_server/README.md "Database"). Its database must be created
+(apps/novaworld_common/README.md "Database"). Its database must be created
 with the SQL_ASCII encoding and the C locale; `run_migrations` refuses any
 other:
 

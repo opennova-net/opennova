@@ -417,8 +417,9 @@ jobs:
   # also covers the net leg .github/workflows/net-linux.yml runs for the
   # NovaWorld images workflow. The two share the linux-root compiler cache.
   # The service's database tests make a database per case on the PostgreSQL
-  # service container below (OPENNOVA_TEST_PG); without it they skip, which
-  # the core suite fails.
+  # service container below (OPENNOVA_TEST_PG), and the HTTP layer's tests keep
+  # their keys on the Valkey one (OPENNOVA_TEST_REDIS); without them they skip,
+  # which the core suite fails.
   test-linux:
     runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || 'ubuntu-16core' }}
     needs: [changes]
@@ -442,6 +443,17 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
+      # The HTTP layer's shared web state (OPENNOVA_TEST_REDIS): each test keeps
+      # its keys under a prefix of its own.
+      redis:
+        image: valkey/valkey:8
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       # The root CMake project builds without godot-cpp or GUT, so the
       # submodules stay uninitialized.
@@ -449,10 +461,13 @@ jobs:
         with:
           lfs: false   # scoped below: the tests read fixtures/ only
 
-      # The service's client library (libpq; CMake's FindPostgreSQL).
-      - name: Install libpq
+      # The service's client libraries: libpq (CMake's FindPostgreSQL) and, for
+      # the server's HTTP layer, hiredis with hiredis_ssl and OpenSSL.
+      - name: Install libpq and hiredis
         shell: bash
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libpq-dev
+        run: >-
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          libpq-dev libhiredis-dev libssl-dev
 
       - name: Pull Git LFS assets (fixtures/ only)
         shell: bash
@@ -477,6 +492,7 @@ jobs:
           scripts/build.sh --no-godot --suite core
           --cmake-arg -DOPENNOVA_NOVAWORLD_SERVICE=ON --cmake-arg -DBUILD_NOVAWORLD_HTTP=ON
           --cmake-arg -DOPENNOVA_TEST_PG=postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          --cmake-arg -DOPENNOVA_TEST_REDIS=redis://127.0.0.1:6379
 
       - name: sccache stats
         if: always()

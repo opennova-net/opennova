@@ -12,7 +12,7 @@
 //
 // Self-contained: drives the Godot-free ClientSession against a minimal
 // ServerHello crafted from the real library codecs (the same calls
-// apps/novaworld_server makes). No sockets.
+// the lobby (apps/novaworld_lobby) makes). No sockets.
 
 #include <net/novaworld/client_session.h>
 #include <net/title/title_identity.h>
@@ -46,7 +46,7 @@ bool expect(bool cond, const char *msg) {
 }
 
 // Server-direction encode of an inbound datagram for the client (mirrors
-// apps/novaworld_server/nw_udp_listener.cpp + the loopback test): NWU-encrypt is
+// apps/novaworld_lobby/nw_udp_listener.cpp + the loopback test): NWU-encrypt is
 // the server's nwu_decrypt (names swapped vs onnet), opcode-prefix, CRC-envelope.
 std::vector<uint8_t> encode_inbound_for_client(uint8_t opcode, std::vector<uint8_t> body) {
 	if (!body.empty()) nwu_decrypt(body.data(), body.size(), SESSION_NWU_KEY);

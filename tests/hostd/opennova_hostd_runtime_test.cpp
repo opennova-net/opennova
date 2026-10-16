@@ -6,12 +6,17 @@
 // (inspect's states, exit codes, OOM flags, labels and times; stats' CPU and memory
 // sizes), the per-slot egress counters (apps/hostd/egress_counters.h: the chain, its
 // jump and the slots' rules put in place only where missing, the listings of iptables
-// and ip6tables summed, a missing rule read as a failure) and the command line
-// (apps/hostd/hostd_options.h). No docker and no iptables run.
+// and ip6tables summed, a missing rule read as a failure), the process runtime
+// (apps/hostd/process_runtime.h: a stand-in opennova-serve script started in its
+// slot's directory over its data set with its arguments and the env file's
+// variables alone, listed running then exited with its code, stopped by SIGTERM,
+// killed, removed once ended, a start that cannot run exit 125) and the command
+// line (apps/hostd/hostd_options.h). No docker and no iptables run.
 
 #include "docker_runtime.h"
 #include "egress_counters.h"
 #include "hostd_options.h"
+#include "process_runtime.h"
 
 #include "common/temp_dir.h"
 #include "common/test_expect.h"
@@ -26,6 +31,10 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <cstdlib>
+#include <iterator>
+#include <optional>
 
 #include <sys/stat.h>
 
@@ -508,6 +517,152 @@ int test_egress() {
 	return 0;
 }
 
+// The process runtime: each server a child process of the agent. A stand-in
+// opennova-serve (a shell script) writes what it was started with, then runs until
+// SIGTERM or exits with the code its arguments name.
+int test_process_runtime() {
+	test_temp::TempDir temp("hostd_process_runtime");
+	const std::string serve = temp.file("fake-serve");
+	{
+		std::ofstream script(serve);
+		script << "#!/bin/sh\n"
+				  "# --resource-dir <dir> <mode> [<code>]\n"
+				  "printf 'cwd=%s\\ndata=%s\\nnote=%s\\nplanted=%s\\n' \"$PWD\" \"$2\" "
+				  "\"$OPENNOVA_SLOT_NOTE\" \"$HOSTD_TEST_PLANTED\" > started\n"
+				  "case \"$3\" in exit) exit \"$4\";; esac\n"
+				  "trap 'echo stopped > stopped; exit 0' TERM\n"
+				  "while :; do sleep 0.05; done\n";
+	}
+	::chmod(serve.c_str(), 0755);
+	// A variable of the agent's own, which no server may see.
+	::setenv("HOSTD_TEST_PLANTED", "hunter2", 1);
+	const std::string log = temp.file("servers.log");
+	hostd::ProcessRuntime runtime(
+			serve, { "PATH=/usr/bin:/bin" }, log, [] { return int64_t{ 1760000000 }; });
+
+	const auto slot_dir = [&](int slot) {
+		const std::string dir = temp.file(("slot-" + std::to_string(slot)).c_str());
+		std::filesystem::create_directories(dir);
+		return dir;
+	};
+	const auto read = [](const std::string &path) {
+		std::ifstream in(path);
+		return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+	};
+	const auto wait_file = [](const std::string &path) {
+		for (int i = 0; i < 200 && !std::filesystem::exists(path); ++i)
+			std::this_thread::sleep_for(std::chrono::milliseconds(25));
+		return std::filesystem::exists(path);
+	};
+	const auto state_of = [&](const std::string &name) -> std::optional<hostd::ContainerInfo> {
+		std::vector<hostd::ContainerInfo> listed;
+		std::string why;
+		if (!runtime.list(listed, 1000, why))
+			return std::nullopt;
+		for (const auto &c : listed)
+			if (c.name == name)
+				return c;
+		return std::nullopt;
+	};
+	const auto exited_with = [&](const std::string &name, int64_t code) {
+		for (int i = 0; i < 200; ++i) {
+			const auto c = state_of(name);
+			if (c && c->state == hosted::ContainerState::Exited)
+				return c->exit_code == code;
+			std::this_thread::sleep_for(std::chrono::milliseconds(25));
+		}
+		return false;
+	};
+
+	// The argv: the binary, the data set's folder, then the server's arguments.
+	hostd::ContainerSpec spec;
+	spec.name = "srv-1-g1";
+	spec.slot = 1;
+	spec.data_dir = "/opt/game/jop_2_consumer";
+	spec.args = { "run", "/HOST", "server.host" };
+	TEST_EXPECT(runtime.run_argv(spec) ==
+			(std::vector<std::string>{ serve, "--resource-dir", "/opt/game/jop_2_consumer", "run",
+					"/HOST", "server.host" }));
+
+	// Started in its slot's directory with the env file's variables and the system's alone.
+	spec.work_dir = slot_dir(1);
+	spec.env_file = temp.file("env-srv-1-g1");
+	{
+		std::ofstream env(spec.env_file);
+		env << "OPENNOVA_SLOT_NOTE=slot one\n";
+	}
+	int exit_code = -1;
+	std::string error;
+	TEST_EXPECT(runtime.run(spec, 1000, exit_code, error) && exit_code == 0);
+	TEST_EXPECT(wait_file(spec.work_dir + "/started"));
+	const std::string seen = read(spec.work_dir + "/started");
+	TEST_EXPECT(seen.find("cwd=" + std::filesystem::canonical(spec.work_dir).string() + "\n") !=
+			std::string::npos);
+	TEST_EXPECT(seen.find("data=/opt/game/jop_2_consumer\n") != std::string::npos);
+	TEST_EXPECT(seen.find("note=slot one\n") != std::string::npos);
+	TEST_EXPECT(seen.find("planted=\n") != std::string::npos);
+	const auto c = state_of("srv-1-g1");
+	TEST_EXPECT(c && c->slot == 1 && c->state == hosted::ContainerState::Running && !c->exit_code &&
+			c->started_at == int64_t{ 1760000000 });
+	std::map<std::string, hostd::ContainerStats> stats;
+	TEST_EXPECT(runtime.stats({ "srv-1-g1", "srv-9-g9" }, stats, 1000, error) &&
+			stats.size() == 1 && stats.count("srv-1-g1") == 1);
+	// A second start of one name is refused; a running one is not removed.
+	TEST_EXPECT(!runtime.run(spec, 1000, exit_code, error) && exit_code == 125);
+	TEST_EXPECT(!runtime.remove("srv-1-g1", 1000, error));
+	// Every image is the machine's own: present, never pulled.
+	bool present = false;
+	TEST_EXPECT(runtime.has_image("anything:tag", present, 1000, error) && present);
+	TEST_EXPECT(runtime.start_pull("anything:tag", error) &&
+			runtime.poll_pull("anything:tag", error) == hostd::PullState::Done);
+
+	// A stop is SIGTERM: it ends on its own, exit 0, and is then removed.
+	TEST_EXPECT(runtime.stop("srv-1-g1", 1000, error));
+	TEST_EXPECT(wait_file(spec.work_dir + "/stopped"));
+	TEST_EXPECT(exited_with("srv-1-g1", 0));
+	TEST_EXPECT(runtime.remove("srv-1-g1", 1000, error) && !state_of("srv-1-g1"));
+
+	// One that exits on its own keeps its code until removed.
+	hostd::ContainerSpec exits = spec;
+	exits.name = "srv-2-g1";
+	exits.slot = 0;
+	exits.work_dir = slot_dir(0);
+	exits.env_file.clear();
+	exits.args = { "exit", "3" };
+	TEST_EXPECT(runtime.run(exits, 1000, exit_code, error));
+	TEST_EXPECT(exited_with("srv-2-g1", 3));
+	TEST_EXPECT(runtime.remove("srv-2-g1", 1000, error));
+
+	// A kill is SIGKILL (128 + 9).
+	hostd::ContainerSpec killed = exits;
+	killed.name = "srv-3-g1";
+	killed.args = { "run" };
+	std::filesystem::remove(killed.work_dir + "/started");
+	TEST_EXPECT(runtime.run(killed, 1000, exit_code, error));
+	TEST_EXPECT(wait_file(killed.work_dir + "/started"));
+	TEST_EXPECT(runtime.kill("srv-3-g1", 1000, error));
+	TEST_EXPECT(exited_with("srv-3-g1", 137));
+	TEST_EXPECT(runtime.remove("srv-3-g1", 1000, error));
+
+	// A start that cannot run (its slot's directory is missing) is docker's 125, nothing listed.
+	hostd::ContainerSpec broken = exits;
+	broken.name = "srv-4-g1";
+	broken.work_dir = temp.file("no-such-slot");
+	TEST_EXPECT(!runtime.run(broken, 1000, exit_code, error) && exit_code == 125 &&
+			!error.empty() && !state_of("srv-4-g1"));
+	// So is an env file that does not read.
+	broken.work_dir = exits.work_dir;
+	broken.env_file = temp.file("no-such-env");
+	TEST_EXPECT(!runtime.run(broken, 1000, exit_code, error) && exit_code == 125);
+	TEST_EXPECT(!runtime.stop("srv-4-g1", 1000, error) && !runtime.kill("srv-4-g1", 1000, error));
+
+	// The env file's lines: NAME=value each, CR LF read, a line with no name skipped.
+	TEST_EXPECT(hostd::read_env_file_lines("A=1\r\nB=two words\n=x\nnoequals\nC=\n") ==
+			(std::vector<std::string>{ "A=1", "B=two words", "C=" }));
+	::unsetenv("HOSTD_TEST_PLANTED");
+	return 0;
+}
+
 int test_options() {
 	using hostd::ParseOutcome;
 	hostd::HostdOptions o;
@@ -519,6 +674,8 @@ int test_options() {
 	TEST_EXPECT(o.token_file == "/etc/opennova/hostd.token" &&
 			o.state_dir == "/var/lib/opennova-hostd");
 	TEST_EXPECT(o.slots_root == "/srv/slots" && o.docker == "/usr/bin/docker" && !o.once);
+	TEST_EXPECT(
+			o.runtime == hostd::RuntimeKind::Docker && o.serve == "/usr/local/bin/opennova-serve");
 	o = {};
 	TEST_EXPECT(hostd::parse_hostd_options(
 						{ "--machine", "3", "--service", "http://127.0.0.1:8070", "--token-file",
@@ -530,6 +687,12 @@ int test_options() {
 			o.token_file == "/tmp/t" && o.state_dir == "/tmp/s" && o.slots_root == "/tmp/slots");
 	TEST_EXPECT(o.iptables == "none" && o.ip6tables == "none" && o.once && o.verbose &&
 			o.docker == "/opt/docker");
+	o = {};
+	TEST_EXPECT(
+			hostd::parse_hostd_options({ "--machine", "4", "--service", "http://controller:8070",
+											   "--runtime", "process", "--serve", "/opt/serve" },
+					o, error) == ParseOutcome::Run);
+	TEST_EXPECT(o.runtime == hostd::RuntimeKind::Process && o.serve == "/opt/serve");
 	TEST_EXPECT(hostd::parse_hostd_options({ "--help" }, o, error) == ParseOutcome::Help);
 	TEST_EXPECT(hostd::parse_hostd_options({ "--version" }, o, error) == ParseOutcome::Version);
 	const std::vector<std::vector<std::string>> bad = {
@@ -546,6 +709,8 @@ int test_options() {
 		{ "--service", "http://10.0.0.1", "--machine", "3", "--slots-root", "/srv/a,b" },
 		{ "--service", "http://10.0.0.1", "--machine", "3", "--slots-root", "/srv/../etc" },
 		{ "--service", "http://10.0.0.1", "--machine", "3", "--frobnicate" },
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--runtime", "podman" },
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--serve", "opennova-serve" },
 	};
 	for (const auto &args : bad) {
 		hostd::HostdOptions fresh;
@@ -572,6 +737,7 @@ int main() {
 		{ "times_and_sizes", test_times_and_sizes },
 		{ "chain_parse", test_chain_parse },
 		{ "egress", test_egress },
+		{ "process_runtime", test_process_runtime },
 		{ "options", test_options },
 	};
 	for (const Case &c : cases) {

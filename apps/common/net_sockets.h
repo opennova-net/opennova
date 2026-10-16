@@ -9,7 +9,7 @@
 
 namespace opennova::net {
 
-// Thin cross-platform socket layer for the apps/ binaries (novaworld_server,
+// Thin cross-platform socket layer for the apps/ binaries (the NovaWorld programs,
 // lan_probe, serve); engine/ carries no socket code of its own.
 // Winsock2 on Windows, POSIX BSD sockets elsewhere.
 
@@ -38,6 +38,11 @@ std::string endpoint_to_string(const Endpoint &ep);
 // Resolve a dotted quad, or (with `allow_names`) a host name, to its first IPv4 address; the port
 // is left alone. False when it does not resolve.
 bool resolve_ipv4(const std::string &host, Endpoint &out, bool allow_names = true);
+
+// Every IPv4 address a dotted quad or a host name resolves to, in the resolver's order, each
+// once (ports 0); none when it does not resolve. A name a service registry lists several
+// tasks under (a DNS answer of several A records) gives each.
+std::vector<Endpoint> resolve_ipv4_all(const std::string &host);
 
 // This machine's host name (gethostname); empty when it cannot be read.
 std::string local_host_name();

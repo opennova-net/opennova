@@ -14,7 +14,9 @@
 // does not read or speaks another protocol, the runtime unlistable), none of which stops
 // or removes anything. The planner (apps/hostd/reconcile.h) and the slots' directories
 // (apps/hostd/slot_files.h) are checked on their own first. Neither the secret nor a
-// file's bytes reach the log.
+// file's bytes reach the log. The real link (HttpServiceLink) tries each address the
+// service's name lists until one takes the connection (a controller's standby, listed beside
+// the leader while it is replaced, takes none), against a test server on loopback.
 
 #include "agent.h"
 #include "reconcile.h"
@@ -22,9 +24,11 @@
 
 #include <base/io/log.h>
 
+#include "common/http_reply_server.h"
 #include "common/temp_dir.h"
 #include "common/test_expect.h"
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -935,6 +939,50 @@ int test_log_hygiene() {
 
 } // namespace
 
+// The real link against the service on 127.0.0.1 alone, reached by a name whose addresses
+// the test lists: an address nothing listens on (127.0.0.2, as the controller's standby is
+// while it is replaced) is passed over for the next, which answers, and the request reaches
+// the service once; with no address taking the connection the call fails at the connect,
+// and with none at all it cannot reach the name.
+int test_link_addresses() {
+	test_http::ReplyServer service(200, "{}");
+	const auto listing = [](std::vector<std::string> quads) {
+		return [quads](const std::string &host) {
+			std::vector<net::Endpoint> out;
+			for (const std::string &quad : quads) {
+				net::Endpoint ep;
+				if (host == "controller.test" && net::resolve_ipv4(quad, ep, false))
+					out.push_back(ep);
+			}
+			return out;
+		};
+	};
+	const std::string url = "http://controller.test:" + std::to_string(service.port());
+	{
+		hostd::HttpServiceLink link(url, 2000, listing({ "127.0.0.2", "127.0.0.1" }));
+		const net::HttpReply reply = link.post("/internal/agent/sync", kToken, "{}");
+		TEST_EXPECT(reply.transport_ok && reply.connected && reply.code == 200);
+		TEST_EXPECT(service.requests() == 1);
+		TEST_EXPECT(service.last_line() == "POST /internal/agent/sync HTTP/1.0");
+	}
+	{
+		hostd::HttpServiceLink link(url, 2000, listing({ "127.0.0.2", "127.0.0.3" }));
+		const net::HttpReply reply = link.post("/internal/agent/sync", kToken, "{}");
+		TEST_EXPECT(!reply.transport_ok && !reply.connected);
+		TEST_EXPECT(reply.error.find("connect to 127.0.0.3:") == 0);
+		TEST_EXPECT(service.requests() == 1);
+	}
+	{
+		hostd::HttpServiceLink link(url, 2000, listing({}));
+		const net::HttpReply reply = link.post("/internal/agent/sync", kToken, "{}");
+		TEST_EXPECT(!reply.transport_ok && reply.error == "cannot reach controller.test");
+	}
+	// The real resolver: a dotted quad is its one address.
+	const std::vector<net::Endpoint> quad = net::resolve_ipv4_all("127.0.0.1");
+	TEST_EXPECT(quad.size() == 1 && quad[0].ip == (std::array<uint8_t, 4>{ 127, 0, 0, 1 }));
+	return 0;
+}
+
 int main() {
 	opennova::io::set_log_sink(capture_log);
 	struct Case {
@@ -953,6 +1001,7 @@ int main() {
 		{ "refusals", test_refusals },
 		{ "sync_failures", test_sync_failures },
 		{ "log_hygiene", test_log_hygiene },
+		{ "link_addresses", test_link_addresses },
 	};
 	for (const Case &c : cases) {
 		std::printf("-- %s\n", c.name);

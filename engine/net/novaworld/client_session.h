@@ -53,10 +53,10 @@ namespace opennova {
 // at once), then finish_receive_batch(), then pump(), then process_periodic_update(); set the
 // wall clock (set_clock_ms) first — the negotiated intervals and the receive-silence reap are
 // millisecond windows. Each leg is unit-testable via
-// in-process loopback against apps/novaworld_server's own parsers/builders —
+// in-process loopback against the lobby's (apps/novaworld_lobby) parsers/builders —
 // see docs/adr/0010-novaworld-client-completion.md.
 //
-// [mirror: apps/novaworld_server/nw_udp_listener.cpp — the server direction
+// [mirror: apps/novaworld_lobby/nw_udp_listener.cpp — the server direction
 //  of the same wire protocol; this class inverts request <-> response]
 class ClientSession {
 public:

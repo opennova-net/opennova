@@ -14,7 +14,7 @@
 #     option; godot/src never sets it). GUARDRAIL (non-negotiable): libpq
 #     containment is linker-enforced — this is the ONLY target in the tree
 #     that links opennova_pq (scripts/lint/link_graph_check.py pins it).
-#     Consumers: apps/novaworld_server and the service tests.
+#     Consumers: the service's programs (apps/novaworld_*) and its tests.
 #
 # Wire compatibility holds for every protocol lib exactly as before
 # (engine/CLAUDE.md; witness record docs/net/novaworld-net-re.md; ADRs
@@ -108,7 +108,7 @@ set_target_properties(opennova_net PROPERTIES
 )
 
 # service — the server-side lobby/persistence leg: lobby sessions and updates,
-# host repository, connection registry/manager, unknown tracker, the database
+# host repository, the lobby's session rows and commands (lobby_repository), connection registry/manager, unknown tracker, the database
 # (PostgreSQL through libpq, db/database.h). The ONLY target that links
 # opennova_pq (see the guardrail note at the top). Only when the service builds.
 if(OPENNOVA_NOVAWORLD_SERVICE)
@@ -121,6 +121,7 @@ if(OPENNOVA_NOVAWORLD_SERVICE)
     add_library(opennova_novaworld_service STATIC
         ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/lobby_session.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/host_repository.cpp
+        ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/lobby_repository.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/unknown_tracker.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/connection/registry.cpp
         ${CMAKE_CURRENT_SOURCE_DIR}/novaworld/service/connection/manager.cpp

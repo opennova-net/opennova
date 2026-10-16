@@ -55,7 +55,7 @@ struct Connection {
 	// LIFETIME (do not "dedupe" this against the lobby listener's copy):
 	// these keys are WIRE-level and are reset whenever a ClientHello
 	// re-inserts the address as Handshaking. The lobby listener keeps its own
-	// durable copy in LobbyConnState (apps/novaworld_server/nw_udp_listener.h)
+	// durable copy in LobbyConnState (apps/novaworld_lobby/nw_udp_listener.h)
 	// precisely so a repeated ClientAuth can replay the SAME cached ServerAuth
 	// after such a reset — it restores these fields via notify_active_addr.
 	// The two copies are a deliberate lifetime split, not duplication; merging

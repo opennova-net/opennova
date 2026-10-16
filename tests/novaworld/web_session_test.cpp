@@ -1,4 +1,4 @@
-// The NovaWorld site's login-session store (apps/novaworld_server/
+// The NovaWorld site's login-session store (apps/novaworld_common/
 // web_session.*) and account roles (auth.*: bootstrap_admin, the role column,
 // update_user's session revocation) over a migrated database: the
 // token minted and kept only as its SHA-256, the per-account session cap, a

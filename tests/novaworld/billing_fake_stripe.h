@@ -1,4 +1,4 @@
-// An in-memory Stripe behind the billing seam (apps/novaworld_server/billing/stripe_api.h)
+// An in-memory Stripe behind the billing seam (apps/novaworld_common/billing/stripe_api.h)
 // for the billing tests: customers, subscriptions, prices, Checkout and Customer Portal
 // sessions, answering the routes the typed client calls (stripe_client.h) with the pinned
 // API version's JSON shapes (basil: current_period_end on each subscription item). It

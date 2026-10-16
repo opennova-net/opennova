@@ -14,7 +14,7 @@ namespace opennova {
 // `remote_admin_port` (CAdminServer), as the retail admin client RAT.exe speaks it. The server
 // sends a challenge, the client answers with the encrypted login, then sends one NUL-terminated
 // command per packet and reads the text replies. Its one client is the NovaWorld service's admin
-// link to its hosted servers (apps/novaworld_server/hosted/admin_link.h), and the parsers below
+// link to its hosted servers (apps/novaworld_common/hosted/admin_link.h), and the parsers below
 // are what its console routes read. The witness record is docs/net/novaworld-net-re.md §6.9.
 // [orig: CAdminServer_ProcessFrame @0x406f50; CAdminServer_ProcessClientData @0x406ec0;
 //  CAdminServer_HandleLogin @0x405870; CAdminServer_DispatchCommand @0x406720]

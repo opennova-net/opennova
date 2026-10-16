@@ -231,7 +231,7 @@ TitleIdentity dfx2_row() {
 	// The live DFX2 gate's startupurl carries &pfid=38 (docs/titles/dfx2-vs-jo-re.md §6.5).
 	t.pfid = 38;
 	// The dfx2_0 pages the live gate's startupurl leads to (url=dfx2_0_start.htm, dfx2-vs-jo-re
-	// §6.5), as the service serves them (apps/novaworld_server/templates): the start page's NWStart
+	// §6.5), as the service serves them (apps/novaworld_web/templates): the start page's NWStart
 	// link with its ACT page (dfx2_0_start.htm), the login form's fields (dfx2_0_login.htm: its
 	// enterkey and its charglsvssrequest), the join link with its leading lan=0
 	// (dfx2_0_main.mnx) and the dfx2_0.gsb feed.

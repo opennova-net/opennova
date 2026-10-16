@@ -5,7 +5,7 @@
 // (docs/titles/dfx2-vs-jo-re.md section 9, DFX2-13).
 //
 //   serial    the issuer's plaintext (any bytes; NovaLogic's own format is
-//             unwitnessed, the service's is apps/novaworld_server/cd_keys.h's)
+//             unwitnessed, the service's is apps/novaworld_web/cd_keys.h's)
 //   wire key  the A-P CDKIID a client sends a LAN host and that host decodes:
 //             encode_key_chain(serial, kDfx2WireChain)
 //   NWACT     the registry CDKIID, bound to one machine: the wire key encoded

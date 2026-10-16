@@ -6,7 +6,7 @@ namespace OpenNova.Switcher.Services;
 
 /// <summary>
 /// The OpenNova NovaWorld service's <c>GET /api/server-info</c>: <c>{"novaworld_ip": "&lt;IPv4&gt;"}</c>,
-/// the public address its gate advertises (apps/novaworld_server/README.md). The site's
+/// the public address its gate advertises (apps/novaworld_common/README.md). The site's
 /// own domain sits behind a proxy, so its DNS answer is the proxy's, not the game
 /// server's; the route is how the switcher learns the address.
 /// </summary>

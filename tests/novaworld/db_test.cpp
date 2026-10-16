@@ -2,9 +2,11 @@
 // migration runner against a real PostgreSQL server (tests/common/
 // test_database.h): binds and the types they read back as, the errors and
 // their SQLSTATE, transactions and savepoints, read snapshots, the pool's
-// bound and its reuse, each thread's lease, the writer lock across connections
-// and its timeout, a connection the server ended, and the runner's records,
-// rollback, statement timeout, checksum refusal and database contract.
+// bound and its reuse, each thread's lease, Transactions on two connections
+// running side by side (no lock of their own), a row lock's wait and its
+// timeout, a deadlock, the lock failures counted, a connection the server
+// ended, and the runner's records, rollback, statement timeout, checksum
+// refusal and database contract.
 
 #include <net/novaworld/db/database.h>
 
@@ -64,6 +66,25 @@ template <typename Fn> std::string sqlstate_of(Fn fn) {
 		return e.sqlstate();
 	}
 	return "none";
+}
+
+// The connection's server process id.
+int64_t backend_pid(Database &db) {
+	return db.query("SELECT pg_backend_pid();")[0].as_int(0).value_or(0);
+}
+
+// Waits, up to `limit_ms`, until server process `pid` waits on a lock (a
+// pg_locks row of its not granted): whether it does.
+bool waits_on_lock(Database &observer, int64_t pid, int64_t limit_ms = 4000) {
+	const auto started = Clock::now();
+	while (elapsed_ms(started) < limit_ms) {
+		if (!observer.query("SELECT 1 FROM pg_locks WHERE pid = $1::integer AND NOT granted;",
+							 { BindValue{ pid } })
+						.empty())
+			return true;
+		std::this_thread::sleep_for(std::chrono::milliseconds(5));
+	}
+	return false;
 }
 
 int test_binds_and_types() {
@@ -445,60 +466,118 @@ int test_thread_leases() {
 	return 0;
 }
 
-int test_writer_lock() {
+int test_transaction_locks() {
 	TestDatabase scratch({ /*migrate=*/false });
 	Database a = scratch.open();
+	Database b = scratch.open();
+	Database observer = scratch.open();
 	a.exec("CREATE TABLE t (id bigint PRIMARY KEY);");
+	a.exec("INSERT INTO t VALUES (1);");
 
-	// A Transaction on one connection holds the writer lock: another
-	// connection's Transaction waits for its commit, then sees its write.
-	std::atomic<int64_t> waited_ms{ -1 };
-	std::atomic<int> seen{ -1 };
+	// A Transaction takes no lock of its own: two on two connections are open
+	// at once, each writing, and neither sees the other's write until it
+	// commits. No advisory lock is held.
+	{
+		Transaction ta(a);
+		Transaction tb(b);
+		a.exec("INSERT INTO t VALUES (2);");
+		b.exec("INSERT INTO t VALUES (3);");
+		TEST_EXPECT(count_rows(a) == 2 && count_rows(b) == 2);
+		TEST_EXPECT(a.query(kAdvisoryLocksHere)[0].as_int(0) == 0);
+		ta.commit();
+		TEST_EXPECT(count_rows(b) == 3);
+		tb.commit();
+	}
+	TEST_EXPECT(count_rows(a) == 3);
+
+	// A row lock is the transaction's: another connection's lock of the row
+	// waits for its commit, then reads the row as it committed it.
+	a.exec("CREATE TABLE u (id bigint PRIMARY KEY, v bigint NOT NULL);");
+	a.exec("INSERT INTO u VALUES (1, 0);");
+	std::atomic<int64_t> seen{ -1 };
 	{
 		Transaction holding(a);
-		a.exec("INSERT INTO t VALUES (1);");
+		a.exec("UPDATE u SET v = 7 WHERE id = 1;");
+		const int64_t b_pid = backend_pid(b);
 		std::thread other([&] {
-			Database b = scratch.open();
-			const auto started = Clock::now();
 			Transaction tx(b);
-			waited_ms = elapsed_ms(started);
-			seen = count_rows(b);
+			seen = b.query("SELECT v FROM u WHERE id = 1 FOR UPDATE;")[0].as_int(0).value_or(0);
 			tx.commit();
 		});
-		std::this_thread::sleep_for(std::chrono::milliseconds(400));
-		TEST_EXPECT(waited_ms.load() == -1);
+		const bool waited = waits_on_lock(observer, b_pid);
 		holding.commit();
 		other.join();
+		TEST_EXPECT(waited);
 	}
-	TEST_EXPECT(waited_ms.load() >= 300);
-	TEST_EXPECT(seen.load() == 1);
+	TEST_EXPECT(seen.load() == 7);
 
-	// Its wait ends at the lock timeout: 55P03.
+	// Its wait ends at the lock timeout: 55P03, counted in lock_failures().
 	{
 		auto options = scratch.options();
 		options.lock_timeout_ms = 200;
 		Database impatient(options);
 		Transaction holding(a);
+		a.exec("SELECT v FROM u WHERE id = 1 FOR UPDATE;");
+		const auto before = opennova::db::lock_failures();
 		const auto started = Clock::now();
 		bool timed_out = false;
-		try {
+		{
 			Transaction tx(impatient);
-		} catch (const Error &e) {
-			timed_out = e.lock_timeout();
+			try {
+				impatient.exec("SELECT v FROM u WHERE id = 1 FOR UPDATE;");
+			} catch (const Error &e) {
+				timed_out = e.lock_timeout();
+			}
 		}
 		TEST_EXPECT(timed_out);
 		TEST_EXPECT(elapsed_ms(started) >= 150);
 		TEST_EXPECT(!impatient.in_transaction());
+		TEST_EXPECT(opennova::db::lock_failures().lock_timeouts == before.lock_timeouts + 1);
+		TEST_EXPECT(opennova::db::lock_failures().deadlocks == before.deadlocks);
 	}
-	// The lock is the transaction's: ended, it is free.
+	return 0;
+}
+
+// Two transactions each waiting on a row the other holds: the server ends one
+// of the two statements (40P01, deadlock()) and the other goes on, and
+// lock_failures() counts the one.
+int test_deadlock() {
+	TestDatabase scratch({ /*migrate=*/false });
+	Database a = scratch.open();
+	Database b = scratch.open();
+	Database observer = scratch.open();
+	a.exec("CREATE TABLE t (id bigint PRIMARY KEY, v bigint NOT NULL);");
+	a.exec("INSERT INTO t VALUES (1, 0), (2, 0);");
+	const auto before = opennova::db::lock_failures();
+	std::atomic<int> deadlocks{ 0 };
+	std::atomic<int> other_errors{ 0 };
+	const auto note = [&](const Error &e) { ++(e.deadlock() ? deadlocks : other_errors); };
+	const int64_t a_pid = backend_pid(a);
 	{
-		Transaction tx(a);
-		const auto locks = a.query("SELECT COUNT(*) FROM pg_locks WHERE locktype = 'advisory' "
-								   "AND pid = pg_backend_pid();");
-		TEST_EXPECT(locks[0].as_int(0) == 1);
-		tx.commit();
+		Transaction ta(a);
+		Transaction tb(b);
+		a.exec("UPDATE t SET v = 1 WHERE id = 1;");
+		b.exec("UPDATE t SET v = 2 WHERE id = 2;");
+		std::thread first([&] {
+			try {
+				a.exec("UPDATE t SET v = 1 WHERE id = 2;");
+			} catch (const Error &e) {
+				note(e);
+			}
+		});
+		const bool waited = waits_on_lock(observer, a_pid);
+		try {
+			b.exec("UPDATE t SET v = 2 WHERE id = 1;");
+		} catch (const Error &e) {
+			note(e);
+		}
+		first.join();
+		TEST_EXPECT(waited);
 	}
-	TEST_EXPECT(a.query(kAdvisoryLocksHere)[0].as_int(0) == 0);
+	TEST_EXPECT(deadlocks.load() == 1);
+	TEST_EXPECT(other_errors.load() == 0);
+	TEST_EXPECT(opennova::db::lock_failures().deadlocks == before.deadlocks + 1);
+	TEST_EXPECT(opennova::db::lock_failures().lock_timeouts == before.lock_timeouts);
 	return 0;
 }
 
@@ -697,7 +776,8 @@ int main(int argc, char **argv) {
 		{ "read_snapshot", test_read_snapshot },
 		{ "connection_pool", test_connection_pool },
 		{ "thread_leases", test_thread_leases },
-		{ "writer_lock", test_writer_lock },
+		{ "transaction_locks", test_transaction_locks },
+		{ "deadlock", test_deadlock },
 		{ "reconnect", test_reconnect },
 		{ "migrations", test_migrations },
 	};
@@ -708,6 +788,7 @@ int main(int argc, char **argv) {
 			return 1;
 		}
 	}
-	std::printf("OK: database wrapper, transactions, read snapshots, pool, writer lock + migration runner\n");
+	std::printf(
+			"OK: database wrapper, transactions, read snapshots, pool, locks + migration runner\n");
 	return 0;
 }

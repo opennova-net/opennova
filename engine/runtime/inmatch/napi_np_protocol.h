@@ -30,7 +30,7 @@
 // are ported VERBATIM. Wire bytes stay byte-exact.
 //
 // [orig: NapiNPProtocol_HandleSessionPacket @0x626A00; CNapiNPConnection_ParseMessages @0x625BC0;
-//  accept loop apps/novaworld_server/nw_udp_listener.cpp run_loop]
+//  accept loop apps/novaworld_lobby/nw_udp_listener.cpp run_loop]
 namespace opennova::inmatch {
 
 // Joiner pose recovered when a peer reaches Spawned. Position is i32 16.16 world: the joiner's own

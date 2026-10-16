@@ -233,9 +233,9 @@ int run(const std::string &secret_key) {
 	nw_service_test::Service service;
 	billing::Billing billing_service(
 			config, api, service.pool, billing::instance_id(*service.pool.acquire()));
-	// The worker's first pass, by hand (no thread): the prices checked, a reconcile.
-	billing_service.sync().pass(billing::unix_now());
-	const billing::SyncStatus first = billing_service.sync().status();
+	// The controller's first reconcile, by hand (no worker): the prices checked.
+	billing_service.sync().reconcile_all(billing::unix_now());
+	const billing::SyncStatus first = billing_service.sync().status(*service.pool.acquire());
 	if (!first.prices_ok)
 		std::fprintf(stderr, "  the prices: %s\n", first.prices_error.c_str());
 	TEST_EXPECT(first.prices_ok);
@@ -370,7 +370,8 @@ int run(const std::string &secret_key) {
 			rc = 1;
 			return;
 		}
-		billing_service.sync().pass(billing::unix_now());
+		// The billing.sync job the webhook enqueued, as a worker runs it.
+		billing_service.sync().sync_pending(billing::unix_now());
 
 		// 6. The entitlement the service grants, as the support page reads it.
 		reply = site.send("GET", "/api/me/billing");
@@ -445,6 +446,7 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 	test_db::init(argc, argv);
+	test_redis::init(argc, argv);
 	TEST_EXPECT(net::startup() == 0);
 	const int rc = run(secret_key);
 	net::shutdown();

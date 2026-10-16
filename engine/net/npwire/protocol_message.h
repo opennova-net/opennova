@@ -215,7 +215,7 @@ struct ProtocolReassemblyState {
 	// The most bytes one reassembled payload may hold; 0 is no bound, retail's
 	// split buffer (reassemble_protocol_payload). A bound is service policy, not
 	// retail's: the NovaWorld service's lobby connections set one
-	// (apps/novaworld_server/nw_udp_listener.h), so a client cannot grow the
+	// (apps/novaworld_lobby/nw_udp_listener.h), so a client cannot grow the
 	// buffer without end. A stream that would pass it is dropped whole.
 	size_t max_bytes = 0;
 	// Set while the rest of a stream past max_bytes is being dropped: up to and

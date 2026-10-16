@@ -9,7 +9,7 @@
 namespace opennova {
 
 // NW-UDP session-channel outer framing + per-session key material, shared by
-// every host-side accept path (apps/novaworld_server's listener and the
+// every host-side accept path (apps/novaworld_lobby's listener and the
 // in-engine HostSessionAccept). Extracted verbatim from the original listener
 // so the two paths can never drift — there is exactly one decode_inbound /
 // encode_outbound in the tree, and the key material's two sources sit here: the

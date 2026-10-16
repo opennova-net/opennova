@@ -1,4 +1,4 @@
-// The hosted servers' stats (apps/novaworld_server/hosted/stats_sampler.h,
+// The hosted servers' stats (apps/novaworld_common/hosted/stats_sampler.h,
 // stats_repository.h; migration 0004_server_stats.sql) on a migrated database
 // and a hand-stepped wall clock: the sampler's one sample a minute of each live
 // server (its listing's players, slots and mission, its admin link's scene,
@@ -6,7 +6,8 @@
 // egress as the counter's differences, a first sample counting none and a
 // counter that started over counted from 0), the unique players counted from
 // the roster and never stored, the missions started in the game scene, the
-// hourly rollup, the machine's monthly egress and the prune; then the reads the
+// hourly rollup, the machine's monthly egress, and the prune (the stats.prune
+// job, the pass's sample never); then the reads the
 // stats routes answer from, over hand-written samples: the summary (live and
 // running time, availability, the peak and the average players, the
 // player-hours, the egress, the restarts, the month's egress) and the series'
@@ -16,8 +17,11 @@
 
 #include "hosted_fleet_rig.h"
 
+#include "hosted/stats_jobs.h"
 #include "hosted/stats_repository.h"
 #include "hosted/stats_sampler.h"
+#include "jobs/job_queue.h"
+#include "jobs/worker_pool.h"
 
 #include "common/test_expect.h"
 
@@ -200,8 +204,9 @@ int test_sampler() {
 	TEST_EXPECT(two_cpus.sample(db, t0 + 360, links));
 	TEST_EXPECT(near(sample_at(db, id, t0 + 360)->cpu_percent, 100.0));
 
-	// The prune, at the first sample of an hour: samples past 48 h and hours
-	// past 90 days go.
+	// The prune is the hourly stats.prune job's, never the pass's: the first
+	// sample of an hour prunes nothing; the job, at its clock's hour, takes the
+	// samples past 48 h and the hours past 90 days.
 	hosted::ServerSample old;
 	old.server_id = id;
 	old.at = t0 - 49 * 3600;
@@ -211,8 +216,17 @@ int test_sampler() {
 	const std::string old_hours = "SELECT COUNT(*) FROM hosted_server_hourly WHERE hour < to_timestamp(" +
 			std::to_string(t0 - 90 * 86400) + ");";
 	TEST_EXPECT(sample_at(db, id, old.at).has_value() && count_rows(db, old_hours) == 1);
-	// (t0 + 360 opened the hour 1760000400 and pruned then; the next hour prunes again.)
-	TEST_EXPECT(two_cpus.sample(db, t0 + 4000, links));
+	TEST_EXPECT(two_cpus.sample(db, t0 + 4000, links)); // a new hour's first sample
+	TEST_EXPECT(sample_at(db, id, old.at).has_value() && count_rows(db, old_hours) == 1);
+	jobs::JobRegistry registry;
+	hosted::register_stats_jobs(registry, [t0] { return t0 + 4000; });
+	const auto schedule = hosted::stats_schedule();
+	TEST_EXPECT(schedule.size() == 1 && schedule[0].kind == hosted::kJobStatsPrune &&
+			schedule[0].period_ms == 60 * 60 * 1000);
+	jobs::NewJob prune;
+	prune.kind = hosted::kJobStatsPrune;
+	TEST_EXPECT(jobs::enqueue(db, prune) > 0);
+	TEST_EXPECT(jobs::run_due(pool, registry) == 1);
 	TEST_EXPECT(!sample_at(db, id, old.at) && count_rows(db, old_hours) == 0);
 	TEST_EXPECT(sample_at(db, id, t0).has_value()); // within 48 h: kept
 	return 0;

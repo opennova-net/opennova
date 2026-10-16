@@ -7,12 +7,13 @@ docs/dev-env-vars.md is the registry. After the 2026-08 cut the whole set is:
                           by the three resolvers (tests/common/retail_paths.h,
                           godot/tests/support/retail_data.gd, scripts/net/lib.ps1),
                           the Blender tests' tests/blender/addon_harness.py
-                          (OPENNOVA_JO_ASSETS) and the scripts/mcp/game_mcp.py
-                          launch default;
+                          (OPENNOVA_JO_ASSETS), the scripts/mcp/game_mcp.py
+                          launch default and the scripts/dev_stack.sh hosted
+                          data set default (OPENNOVA_JO_DIR);
                           scripts/ci/test_suites.py validates root availability
   GODOT_BIN               the scripts' Godot binary
   the deployed service    ONNET_*, DATABASE_URL, ADMIN_*, ... under
-                          apps/novaworld_server, deploy, web, backend, infra
+                          apps/novaworld_*, deploy, web, backend, infra
   OS variables            TEMP/TMP/APPDATA/HOME/... at their known sites
 
 Everything else was a launch flag, an argv option, an MCP tool argument, or
