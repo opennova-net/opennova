@@ -52,6 +52,12 @@ services:
       # 0 stops minting a DFX2 account's first CD key at its first activation
       # (unset: on); apps/novaworld_server/README.md "CD keys (DFX2 activation)".
       ONNET_CD_KEY_AUTO_MINT: ${ONNET_CD_KEY_AUTO_MINT:-}
+      # Outbound mail (apps/novaworld_server/README.md "Account email and password
+      # resets"): the sender and SES's region, both from Terraform's infra.env
+      # (infra/aws/mail.tf); unset,
+      # mail is off (registration and resets still work, nothing is sent).
+      ONNET_MAIL_FROM: ${ONNET_MAIL_FROM:-}
+      ONNET_MAIL_REGION: ${ONNET_MAIL_REGION:-}
       # Hosted game servers (apps/novaworld_server/README.md "Hosted servers"):
       # a deployed host gets the provider and every ec2 setting from Terraform's
       # infra.env: the two launch templates by machine kind
