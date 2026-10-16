@@ -201,7 +201,7 @@ static int test_plan_and_frame() {
 	                                                         "4 blast", "31 fade"}));
 	if (plan.legs.size() == 7) {
 		TEST_EXPECT(plan.legs[0].words == "The husk swap: armory is drawn in the item's place from here on." &&
-		            plan.legs[0].cite == "[orig: sub_407020 @ 0x407020 -> Entity_UpdateDeathTransforms @ 0x494660]");
+		            plan.legs[0].cite == "[orig: GnrcClass_HandleEvent @ 0x407020 -> Entity_UpdateDeathTransforms @ 0x494660]");
 		TEST_EXPECT(plan.legs[2].words.find("1 WHEEL (a 50% chance: kept here), 2 CHUNK_M, 3 CHUNK_S") != std::string::npos);
 		TEST_EXPECT(plan.legs[3].name == "EXPLO_PUMP" && plan.legs[3].shown == "played");
 		TEST_EXPECT(plan.legs[4].name == "fx_pump_dead" && plan.legs[4].shown == "named" &&

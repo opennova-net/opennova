@@ -10,7 +10,7 @@
 
 namespace opennova::world {
 namespace {
-// The walker's ray [orig: Physics_RaycastIntContext @0x5385E0]: the segment, its length
+// The walker's ray [orig: Physics_InitRayContext @0x5385E0]: the segment, its length
 // truncated, the direction divided by that length; `distance` < 16 is a ray its callers take
 // as clear (the context returns 1 and builds nothing).
 CollisionRay int_context_ray(const FixedVec3 &start, const FixedVec3 &end, int32_t &distance) {

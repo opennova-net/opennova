@@ -264,7 +264,7 @@ struct VehicleCtrlRegisters {
 	int32_t speed = 0;
     // The part-animation words: the rotor angle accumulator's high word for
     // HELO_ROTOR and HELO_TAILROTOR, the wheel phase's for VEHICLE_WHEELS
-    // [orig: Entity_CacheVehicleHUDStats @0x4929B0 — +0x466 @0x492ACA..
+    // [orig: BoneCallback_cveh_PublishControls @0x4929B0 — +0x466 @0x492ACA..
     //  0x492ADE, +0x2BA @0x4929B4]. Same MOVZX idiom as `steering`.
     // HELO_TAILROTOR (ordinal 47) reads the SAME +0x464 accumulator as
     // HELO_ROTOR (46) [orig: the shared HIWORD(+0x464) store @0x492AD7].
@@ -273,7 +273,7 @@ struct VehicleCtrlRegisters {
     int32_t wheels = 0;
 	int32_t gear = 0;
 	// VEHICLE_TIRE00..05: front L/R, midpoint L/R, rear R/L.
-	// [orig: Entity_CacheVehicleHUDStats @0x4929F6..0x492AC5]
+	// [orig: BoneCallback_cveh_PublishControls @0x4929F6..0x492AC5]
 	std::array<int32_t, 14> tires{};
 };
 

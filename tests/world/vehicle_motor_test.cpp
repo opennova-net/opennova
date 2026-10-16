@@ -245,7 +245,7 @@ void test_def_decel_default() {
 // The cveh render callback publishes the high steer word and saturated wrapped
 // speed magnitude. Pin the word orientation and every signed boundary,
 // especially INT_MIN where std::abs(int32_t) would be undefined.
-// [orig: Entity_CacheVehicleHUDStats @0x4929B0;
+// [orig: BoneCallback_cveh_PublishControls @0x4929B0;
 //  steering @0x4929C0..0x4929D7; speed @0x4929DC..0x4929F1]
 void test_ctrl_register_projection() {
     Entity::VehicleMotorState state;

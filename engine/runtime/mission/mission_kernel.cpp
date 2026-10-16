@@ -994,7 +994,7 @@ bool precipitation_entity_hit(void *ctx, int32_t x, int32_t y, int32_t z_top,
 	MissionKernel *kernel = static_cast<PrecipitationFloorContext *>(ctx)->kernel;
 	if (kernel->world.collision == nullptr) return false;
 	// The ray from floor + 200 m down to the floor through the local player's
-	// candidate slice [orig: Physics_RaycastIntContext @ 0x5385e0 +
+	// candidate slice [orig: Physics_InitRayContext @ 0x5385e0 +
 	// Physics_RaycastProximityEntities @ 0x538350 — the end clips to the first hit].
 	const int32_t start[3] = {x, y, z_top};
 	int32_t end[3] = {x, y, z_bottom};

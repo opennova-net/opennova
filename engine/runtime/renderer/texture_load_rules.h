@@ -115,7 +115,7 @@ enum class TextureLoader : uint8_t {
 	// sub_58A430: a .TGA (or its .dds) height made a horizon volume or an occlusion map.
 	Producer,
 	// The NQ8B, HRZ8 and AOC8 chunk loaders (Texture_LoadNQ8BChunk @ 0x58F350,
-	// Texture_LoadHRZ8Chunk @ 0x58F470, Texture_LoadTGAAlphaOverlay @ 0x58F590): a chunk
+	// Texture_LoadHRZ8Chunk @ 0x58F470, Texture_LoadAOC8Chunk @ 0x58F590): a chunk
 	// container under any name.
 	Chunk,
 	// Texture_LoadPCXFromPFF8Bit: an 8-bit PCX's indices and palette (a terrain's foliage and

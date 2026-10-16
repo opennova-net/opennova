@@ -486,7 +486,7 @@ bool test_joiner_door_phases_reach_present_rows() {
 // The joiner projection publishes a replica vehicle's controls from its local
 // twin, whose client mover advances the same tracks, wheels and springs: the
 // tank render callback reads those live fields on every peer.
-// [orig: HUD_CacheEntityDebugStats @0x449C10, track words @0x449C3C..0x449C69;
+// [orig: BoneCallback_tank_PublishControls @0x449C10, track words @0x449C3C..0x449C69;
 //  the client mover's track phase Entity_UpdateTankVehiclePhysics @0x489F98 /
 //  @0x489FA0]
 bool test_joiner_vehicle_motion_controls_reach_present_rows() {
@@ -919,7 +919,7 @@ bool test_joiner_palm_source_and_local_fragment() {
 // seated gunner's occupant back-reference, a pool-0 handle. A child that is
 // no ewep class publishes nothing.
 // [orig: Entity_UpdateTransformAndTurret groundEntity @0x440CBF, GROUND
-//  @0x440F70..0x440F8A; HUD_CacheEntityDebugStats @0x449ECF..0x449EE2]
+//  @0x440F70..0x440F8A; BoneCallback_tank_PublishControls @0x449ECF..0x449EE2]
 bool test_joiner_hull_gun_words_follow_the_turret_child() {
 	opennova::mission::MissionKernel kernel;
 	kernel.world.registry.configure_pool(1, 4);

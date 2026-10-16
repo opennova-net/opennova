@@ -127,7 +127,7 @@ enum PresentField : int {
 	// Vehicle render controls projected from authoritative motor/brain state.
 	// CTRL_MASK selects the callback-owned groups. Joiner compacts lack the source fields, so those
 	// rows remain invalid rather than inferring motion from lossy transforms.
-	// [orig: Entity_CacheVehicleHUDStats @ 0x4929B0;
+	// [orig: BoneCallback_cveh_PublishControls @ 0x4929B0;
 	//  VEHICLE_STEERING @ 0x4929C0..0x4929D7;
 	//  VEHICLE_SPEED @ 0x4929DC..0x4929F1]
 	PF_VEHICLE_MOTION_VALID,
@@ -142,7 +142,7 @@ enum PresentField : int {
 	// The part-animation registers the same callback publishes: the rotor
 	// angle accumulator's high word (HELO_ROTOR / HELO_TAILROTOR) and the
 	// wheel phase's (VEHICLE_WHEELS). Valid with PF_VEHICLE_MOTION_VALID.
-	// [orig: Entity_CacheVehicleHUDStats @0x4929B0; the +0x466 read
+	// [orig: BoneCallback_cveh_PublishControls @0x4929B0; the +0x466 read
 	//  @0x492ACA..0x492ADE; the +0x2BA read @0x4929B4; the accumulators are
 	//  owned by Entity_UpdatePartSpinAccumulator @0x4928B0]
 	PF_VEHICLE_ROTOR,

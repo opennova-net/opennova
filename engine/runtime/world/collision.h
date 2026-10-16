@@ -1202,7 +1202,7 @@ public:
     // bound-sphere hit unless it is on the local player's team within 3 u of `start`, any other
     // row its TYPE-1 solid. True when nothing blocks; the terrain is the caller's.
     // [orig: Render_SkyboxSunGlow @0x5ace65..0x5acee8; Environment_UpdateSunGlare
-    //  @0x5ad282..0x5ad305 -> Physics_RaycastIntContext @0x5385E0 (radius 0),
+    //  @0x5ad282..0x5ad305 -> Physics_InitRayContext @0x5385E0 (radius 0),
     //  Physics_RaycastAgainstPoolByIndex @0x539530 (2, 1, 0; include 1), ctx[17] =
     //  g_LocalPlayerEntity @0x5acea7 / @0x5ad2c4]
     bool sun_ray_clear_of_entities(const World &world, const FixedVec3 &start,

@@ -3146,7 +3146,7 @@ int count_active_pieces(const World &w) {
 // Flags |= 6 at once, the death tick, the def death sound and ONE transient
 // particledeath effect. No section debris and no Entity_InitDeathSounds
 // bank/KZ chain — the kz_OrganicBlast an ammo crate used to detonate with came
-// from the tree body every item ran. [orig: sub_407F80 — the Flags&4 gate
+// from the tree body every item ran. [orig: GnrlClass_HandleEvent — the Flags&4 gate
 // @0x407f89, the alive re-arm @0x4080ba, the kill leg @0x4080bd..0x4080f4,
 // the tail @0x408044/@0x40806b]
 void test_gnrl_death_is_husk_sound_and_one_effect() {
@@ -3233,7 +3233,7 @@ void test_gnrl_client_kill_leg() {
 // four-tick think; the expiry runs Entity_UpdateDeathTransforms — the
 // unitType piece dispatch, the husk, Entity_InitDeathSounds' sound, banks
 // and kz blast — then the 0x26 resend and Flags |= 4.
-// [orig: sub_407020 — @0x4070b2..0x4070e2 (Flags |= 2, +0x2AC = 4), the
+// [orig: GnrcClass_HandleEvent — @0x4070b2..0x4070e2 (Flags |= 2, +0x2AC = 4), the
 //  Flags&2 leg @0x407072..0x4070a6; Entity_UpdatePool1Slot @0x4b8e1b gate]
 void test_gnrc_death_lands_husk_on_pool2_cohort() {
 	auto w_heap = std::make_unique<World>();
@@ -3322,7 +3322,7 @@ void test_gnrc_client_kill_runs_death_transforms_at_once() {
 // the gnrc client leg forwards it to Entity_UpdateDeathTransforms: the husk
 // and pieces land, but no death sound, effect bank or kz blast, and no piece
 // trail. A vehicle def (ItemDef+0x5C type 1) clears the bit and dies loud.
-// [orig: Entity_KillBySlotId @0x42BD5B..0x42BD6A; sub_407020 @0x40703f..
+// [orig: Entity_KillBySlotId @0x42BD5B..0x42BD6A; GnrcClass_HandleEvent @0x40703f..
 //  0x407045; Entity_InitDeathSounds @0x4939cd/@0x493a40;
 //  Entity_SpawnDeathPieces @0x493811]
 void test_gnrc_silent_kill_flags() {

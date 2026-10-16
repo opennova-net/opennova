@@ -233,7 +233,7 @@ inline void write_present_vehicle_motion_controls(float *record, const World &wo
 	// The part-animation words ride the same valid bit: the rotor angle
 	// accumulator's high word (HELO_ROTOR / HELO_TAILROTOR) and the wheel
 	// phase's (VEHICLE_WHEELS), published by the same cveh callback
-	// [orig: Entity_CacheVehicleHUDStats @0x4929B0 — the +0x466 read
+	// [orig: BoneCallback_cveh_PublishControls @0x4929B0 — the +0x466 read
 	// @0x492ACA..0x492ADE, the +0x2BA read @0x4929B4; the accumulators are
 	// world/vehicle_part_anim.h's].
 	record[PF_VEHICLE_ROTOR] = static_cast<float>(controls.rotor);
@@ -535,7 +535,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 					world::mount_collapses_right_hand_row(*ent) ? 1.0f : 0.0f;
 			// The cveh render callback publishes directly from the live entity
 			// motor fields; a joiner publishes its own twin's below.
-			// [orig: Entity_CacheVehicleHUDStats @ 0x4929B0;
+			// [orig: BoneCallback_cveh_PublishControls @ 0x4929B0;
 			//  stores @0x4929D7 / @0x4929F1]
 			write_present_vehicle_motion_controls(r, kernel.world, *ent);
 			// Only a carrier in the witnessed live UseGun attachment relation
@@ -739,8 +739,8 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				// advances the same tracks, wheel phase and springs), so a
 				// joiner publishes its local twin's controls exactly as the
 				// authority collector does.
-				// [orig: HUD_CacheEntityDebugStats @0x449C10 (tank track words
-				//  @0x449C3C..0x449C69); Entity_CacheVehicleHUDStats @0x4929B0;
+				// [orig: BoneCallback_tank_PublishControls @0x449C10 (tank track words
+				//  @0x449C3C..0x449C69); BoneCallback_cveh_PublishControls @0x4929B0;
 				//  the client mover's track phase Entity_UpdateTankVehiclePhysics
 				//  @0x489F98 / @0x489FA0]
 				write_present_vehicle_motion_controls(r, kernel.world, *owned);
@@ -748,7 +748,7 @@ void build_client_replica_present_rows(const PresentRowsContext &context,
 				// children published on its replica row stand for the brain
 				// words its tank/helo render callback reads.
 				// [orig: Entity_UpdateTransformAndTurret @0x440F70..0x441020;
-				//  HUD_CacheEntityDebugStats @0x449ECF..0x449EE2]
+				//  BoneCallback_tank_PublishControls @0x449ECF..0x449EE2]
 				write_present_replica_vehicle_gun(r, kernel.world, *owned, es);
 			}
 			const auto *item = owned ? kernel.world.tables.item_death_traits.get(owned->item_id) : nullptr;
@@ -927,7 +927,7 @@ static void write_world_present_row(const PresentRowsContext &context,
 	r[PF_RIGHT_HAND_COLLAPSED] =
 			world::mount_collapses_right_hand_row(e) ? 1.0f : 0.0f;
 	// The cveh render callback publishes directly from the live entity
-	// motor fields [orig: Entity_CacheVehicleHUDStats @0x4929B0, stores
+	// motor fields [orig: BoneCallback_cveh_PublishControls @0x4929B0, stores
 	// @0x4929D7 / @0x4929F1; see docs/world/vehicle-client-movers-re.md].
 	write_present_vehicle_motion_controls(r, w, e);
 	// Only a carrier in the witnessed live UseGun attachment relation

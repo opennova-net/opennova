@@ -121,7 +121,7 @@ constexpr FileKindFacts kRows[] = {
 	Kind(FileKind::Texture, ArchiveSlot::Resource).extensions(kTexture).row,
 	// No name gives it: a model's chunk row reads the file it names as a chunk container whatever
 	// the name [orig: Texture_LoadNQ8BChunk @ 0x58F350; Texture_LoadHRZ8Chunk @ 0x58F470;
-	// Texture_LoadTGAAlphaOverlay @ 0x58F590, the AOC8 chunk] (renderer::load_material_chunk),
+	// Texture_LoadAOC8Chunk @ 0x58F590, the AOC8 chunk] (renderer::load_material_chunk),
 	// so a file no rule types by its name is one when its bytes hold one (renderer::
 	// is_material_chunk_container, a peek at its chunk headers); it packs with the art.
 	Kind(FileKind::MaterialChunk, ArchiveSlot::Resource).row,

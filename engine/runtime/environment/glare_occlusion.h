@@ -28,7 +28,7 @@ inline constexpr float kGlareRayLength = 1024.0f;
 //   its jitter (glare_ray_jitter of jitter_index + 1, then + 2) to the one end
 //   in place, so the second sample's end carries both jitters
 //   [orig: Render_SkyboxSunGlow @ 0x5ace3d..0x5ace61], and is clear when no
-//   entity blocks it [orig: Physics_RaycastIntContext @ 0x5385e0 (the call
+//   entity blocks it [orig: Physics_InitRayContext @ 0x5385e0 (the call
 //   @ 0x5ace79); Physics_RaycastAgainstPoolByIndex @ 0x539530 (the calls
 //   @ 0x5aceae / @ 0x5acec6 / @ 0x5acede), pools 2, 1, 0]; the fine rays test
 //   no terrain;

@@ -375,7 +375,7 @@ AudioStreamPlayer *SoundBank::spawn_oneshot_2d(Node *p_parent, const String &p_n
 		// ROL3 draws; the per-layer member pick above still draws for random
 		// layers (docs/audio/lwf-dbf-sound-re.md, Dialog_LoadAudioClip). The voice
 		// plays at the play hook's word, 0x10000, as MissionAudio's dialog voice
-		// does [orig: sub_527560 @ 0x52757c, called through dword_A8A23C @ 0x44de50].
+		// does [orig: Dialog_ApplyDialogueVolumeAndPlayFactor @ 0x52757c, called through dword_A8A23C @ 0x44de50].
 		player->set_pitch_scale(WavLoader::pitch_scale_for(stream, 1.0));
 		player->set_volume_db(volume_db_from_255(static_cast<int>(member.volume)));
 		player->set_stream(stream);

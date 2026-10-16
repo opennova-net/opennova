@@ -1348,7 +1348,7 @@ struct Entity {
         // registers HELO_ROTOR/HELO_TAILROTOR/VEHICLE_WHEELS sample their
         // HIGH words [orig: Entity_UpdatePartSpinAccumulator @0x4928B0 owns
         //  +0x460 speed / +0x464 angle / +0x468 rate; the wheel phase is
-        //  +0x2B8; Entity_CacheVehicleHUDStats @0x4929B0 reads +0x466 /
+        //  +0x2B8; BoneCallback_cveh_PublishControls @0x4929B0 reads +0x466 /
         //  +0x2BA]. The crashed bike's chassis-orientation helper reuses
         //  +0x460 as its fall rate [orig: @0x468BFC/@0x468D67..0x468D7D].
         struct PartSpin {

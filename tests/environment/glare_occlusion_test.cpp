@@ -356,7 +356,7 @@ void test_the_entity_walk_skips_the_local_player_and_its_near_teammates() {
 	w.registry.get(enemy)->position.y = 30;
 	CHECK(collision.sun_ray_clear_of_entities(w, from, to));
 	// A segment under 16 raw is clear whatever stands on it [orig:
-	// Physics_RaycastIntContext @ 0x5385E0 returns 1].
+	// Physics_InitRayContext @ 0x5385E0 returns 1].
 	w.registry.get(enemy)->position = {0, 0, 5};
 	CHECK(collision.sun_ray_clear_of_entities(w, from, world::FixedVec3{8, 0, 5 * 65536}));
 }

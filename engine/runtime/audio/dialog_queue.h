@@ -56,7 +56,7 @@ const lwf::Single *find_dialog_wave(const lwf::File &sounds, const std::string &
 // The volume a line plays its wave at, from the wave's byte +33
 // (lwf::Single::volume): a byte of 0 plays at full volume [orig:
 // Dialog_LoadAudioClip @ 0x44dd15 -> sub_75BE10 @ 0x75be10; the play hook
-// sub_527560 @ 0x527583..0x5275a6 scales a nonzero byte by the voice option
+// Dialog_ApplyDialogueVolumeAndPlayFactor @ 0x527583..0x5275a6 scales a nonzero byte by the voice option
 // and takes 255 for 0]. 0..255.
 int dialog_wave_volume(const lwf::Single &wave);
 
@@ -109,7 +109,7 @@ std::string dialog_line_text(const rtxt::File *mission_text, const dbf::Line &li
 //  Dialog_LoadAudioClipLocalized @0x44DEF0 — the clip @0x44df2e..0x44df96, the
 //  missing-audio line @0x44dfd1..0x44dff8, the subtitle @0x44e054..0x44e0c2, the
 //  play @0x44e0d7..0x44e136, the chat @0x44e144..0x44e150; the hooks
-//  DialogSystem_Init installs @0x527665 (sub_527560, the master-volume gate) /
+//  DialogSystem_Init installs @0x527665 (Dialog_ApplyDialogueVolumeAndPlayFactor, the master-volume gate) /
 //  @0x52766F (Chat_AddSystemMessageIfValid)]
 struct DialogLinePlayback {
 	bool line_found = false;

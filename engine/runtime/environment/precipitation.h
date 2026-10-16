@@ -32,7 +32,7 @@ struct PrecipitationSlot {
 // terrain_height: the bilinear terrain height at (x, y)
 // [orig: Terrain_SampleHeightBilinear @ 0x6067b0]. entity_hit: the first
 // entity surface between z_top and z_bottom under (x, y); returns true and
-// the hit height [orig: Physics_RaycastIntContext @ 0x5385e0 +
+// the hit height [orig: Physics_InitRayContext @ 0x5385e0 +
 // Physics_RaycastProximityEntities @ 0x538350, the ray from floor + 200 m down to
 // the floor]. Null callbacks skip that query.
 struct PrecipitationFloorSampler {

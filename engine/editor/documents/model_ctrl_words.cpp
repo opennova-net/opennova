@@ -124,10 +124,10 @@ std::array<CtrlRegisterWords, THREEDI_CTRL_REGISTER_COUNT> make_table() {
 	none(THREEDI_CTRL_HELO_CPCANOPY, "helicopter", "Copilot canopy");
 	row(THREEDI_CTRL_HELO_ROTOR, "helicopter", "Main rotor", CtrlWriter::Ported,
 	    "The rotor's turn: the high word of the helicopter's rotor accumulator.",
-	    "[orig: Entity_CacheVehicleHUDStats @ 0x4929B0]", 0, 65535);
+	    "[orig: BoneCallback_cveh_PublishControls @ 0x4929B0]", 0, 65535);
 	row(THREEDI_CTRL_HELO_TAILROTOR, "helicopter", "Tail rotor", CtrlWriter::Ported,
 	    "The same rotor accumulator's high word as the main rotor's.",
-	    "[orig: Entity_CacheVehicleHUDStats @ 0x4929B0]", 0, 65535);
+	    "[orig: BoneCallback_cveh_PublishControls @ 0x4929B0]", 0, 65535);
 	none(THREEDI_CTRL_HELO_PILOTYAW, "helicopter", "Pilot yaw");
 	none(THREEDI_CTRL_HELO_PILOTPITCH, "helicopter", "Pilot pitch");
 	none(THREEDI_CTRL_HELO_CPILOTYAW, "helicopter", "Copilot yaw");
@@ -152,13 +152,13 @@ std::array<CtrlRegisterWords, THREEDI_CTRL_REGISTER_COUNT> make_table() {
 	// A vehicle.
 	row(THREEDI_CTRL_VEHICLE_WHEELS, "vehicle", "Wheels", CtrlWriter::Ported,
 	    "The wheels' turn: the high word of the vehicle's wheel phase.",
-	    "[orig: Entity_CacheVehicleHUDStats @ 0x4929B0]", 0, 65535);
+	    "[orig: BoneCallback_cveh_PublishControls @ 0x4929B0]", 0, 65535);
 	row(THREEDI_CTRL_VEHICLE_STEERING, "vehicle", "Steering", CtrlWriter::Ported,
-	    "The steering's high word, at most 0x10000.", "[orig: Entity_CacheVehicleHUDStats @ 0x4929B0]", 0,
+	    "The steering's high word, at most 0x10000.", "[orig: BoneCallback_cveh_PublishControls @ 0x4929B0]", 0,
 	    65536, true);
 	row(THREEDI_CTRL_VEHICLE_SPEED, "vehicle", "Speed", CtrlWriter::Ported,
 	    "The vehicle's speed, its absolute value capped at 0x10000.",
-	    "[orig: Entity_CacheVehicleHUDStats @ 0x4929B0]", 0, 65536, true);
+	    "[orig: BoneCallback_cveh_PublishControls @ 0x4929B0]", 0, 65536, true);
 	row(THREEDI_CTRL_VEHICLE_GUNYAW, "vehicle", "Turret yaw", CtrlWriter::Ported,
 	    "The turret's aim across, as the tank class publishes it.", "[orig: the tank CTRL publication @ 0x449C10]");
 	row(THREEDI_CTRL_VEHICLE_GUNPITCH, "vehicle", "Turret pitch", CtrlWriter::Ported,
@@ -177,7 +177,7 @@ std::array<CtrlRegisterWords, THREEDI_CTRL_REGISTER_COUNT> make_table() {
 		if (i < 6)
 			row(THREEDI_CTRL_VEHICLE_TIRE00 + i, "vehicle", kTires[i], CtrlWriter::Ported,
 			    "A wheel's compression, 0 to 1 (front left and right, middle, rear right and left).",
-			    "[orig: Entity_CacheVehicleHUDStats @ 0x4929B0]", 0, 65536, true);
+			    "[orig: BoneCallback_cveh_PublishControls @ 0x4929B0]", 0, 65536, true);
 		else
 			row(THREEDI_CTRL_VEHICLE_TIRE00 + i, "vehicle", kTires[i], CtrlWriter::Ported,
 			    "A road wheel's compression, as the tank class publishes it.",

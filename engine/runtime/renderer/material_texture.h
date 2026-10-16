@@ -66,7 +66,7 @@ std::string material_dds_sibling(std::string_view name);
 // - 16 to 18: the name as written, read as a chunk container whatever it is
 //   called. [orig: dispatch @ 0x5B17D4, @ 0x5B17DD, @ 0x5B17E6;
 //   Texture_LoadNQ8BChunk @ 0x58F350; Texture_LoadHRZ8Chunk @ 0x58F470;
-//   Texture_LoadTGAAlphaOverlay @ 0x58F590, the AOC8 chunk]
+//   Texture_LoadAOC8Chunk @ 0x58F590, the AOC8 chunk]
 // - any other type: none, the dispatcher's default (@ 0x5B17F4).
 MaterialTextureSource material_texture_source(std::string_view name, uint8_t type,
 		const MaterialTextureFileTest &exists, const MaterialTextureFileTest &loose_first = {});
@@ -126,7 +126,7 @@ struct MaterialTexturePixels {
 MaterialTexturePixels horizon_volume_from_height(const uint8_t *rgba, uint32_t width, uint32_t height);
 MaterialTexturePixels ambient_occlusion_from_height(const uint8_t *rgba, uint32_t width, uint32_t height);
 // [orig: Texture_LoadNQ8BChunk @ 0x58F350; Texture_LoadHRZ8Chunk @ 0x58F470;
-// Texture_LoadTGAAlphaOverlay @ 0x58F590, the AOC8 chunk]
+// Texture_LoadAOC8Chunk @ 0x58F590, the AOC8 chunk]
 MaterialTexturePixels load_material_chunk(const uint8_t *bytes, size_t size, uint8_t type);
 // The bytes of a chunk container at [position, position + size) into `out`; false past its end.
 using MaterialChunkReader = std::function<bool(uint64_t position, uint8_t *out, size_t size)>;
@@ -137,7 +137,7 @@ using MaterialChunkReader = std::function<bool(uint64_t position, uint8_t *out, 
 bool material_chunk_loads(uint64_t size, const MaterialChunkReader &read, uint8_t type);
 // Bytes a model's chunk row reads (runtime types 16 to 18): the runtime's own chunk
 // loader takes them as one of its three chunks [orig: Texture_LoadNQ8BChunk @ 0x58F350;
-// Texture_LoadHRZ8Chunk @ 0x58F470; Texture_LoadTGAAlphaOverlay @ 0x58F590, the AOC8 chunk]
+// Texture_LoadHRZ8Chunk @ 0x58F470; Texture_LoadAOC8Chunk @ 0x58F590, the AOC8 chunk]
 // (load_material_chunk), whatever the file is named.
 bool is_material_chunk_container(const std::vector<uint8_t> &bytes);
 // The same answer for the file at `path` (UTF-8), read by its chunk headers alone

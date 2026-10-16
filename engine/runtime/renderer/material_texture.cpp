@@ -91,7 +91,7 @@ MaterialTextureSource material_texture_source(std::string_view name, uint8_t typ
 		return {};
 	case 16: case 17: case 18:
 		// [orig: Texture_LoadNQ8BChunk @ 0x58F350; Texture_LoadHRZ8Chunk @ 0x58F470;
-		// Texture_LoadTGAAlphaOverlay @ 0x58F590, the AOC8 chunk]
+		// Texture_LoadAOC8Chunk @ 0x58F590, the AOC8 chunk]
 		return {std::string(name), MaterialTextureReader::Chunk};
 	default:
 		return {};

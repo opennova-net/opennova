@@ -141,7 +141,8 @@ int test_a_number_plays_its_dialog_s_waves() {
 	TEST_EXPECT(files(first) == expect_first);
 	TEST_EXPECT(first.size() == 3 && first[0].dialog_name == "dlg001" && first[0].line == 0 &&
 			first[1].line == 1 && first[2].line == 2 && first[1].wave == "MISSING");
-	// The wave's byte +33 is the line's volume, 0 playing at full [orig: sub_527560 @0x527598].
+	// The wave's byte +33 is the line's volume, 0 playing at full
+	// [orig: Dialog_ApplyDialogueVolumeAndPlayFactor @0x527598].
 	TEST_EXPECT(first.size() == 3 && first[0].volume == 210 && first[2].volume == 255);
 	// Each line carries its DELAY byte (dbf line +0x35) [orig: Dialog_UpdatePlayback @0x44e563].
 	TEST_EXPECT(first.size() == 3 && first[0].delay == 3 && first[1].delay == 0 && first[2].delay == 7);

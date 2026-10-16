@@ -496,7 +496,7 @@ struct ClientEntityState {
 	// +0x1DC pitch high words): a joiner runs no brains, so an ewep child's
 	// class update publishes its gun words here for the carrier's render
 	// callback. Not a wire field. [orig: Entity_UpdateTransformAndTurret
-	//  @0x440F70..0x441020; HUD_CacheEntityDebugStats @0x449ECF..0x449EE2]
+	//  @0x440F70..0x441020; BoneCallback_tank_PublishControls @0x449ECF..0x449EE2]
 	int16_t carried_gun_yaw_word = 0;
 	int16_t carried_gun_pitch_word = 0;
 	bool carried_gun_words_valid = false;

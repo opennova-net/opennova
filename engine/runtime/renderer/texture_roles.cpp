@@ -63,7 +63,7 @@ constexpr TextureRole kRoles[] = {
 	// [orig: sub_58A430 @ 0x58A430 from sub_58CE10 @ 0x58CE6A]
 	Role(R::ModelOcclusion, L::Producer, kTextureTga | kTextureDds).row,
 	// [orig: Texture_LoadNQ8BChunk @ 0x58F350; Texture_LoadHRZ8Chunk @ 0x58F470;
-	// Texture_LoadTGAAlphaOverlay @ 0x58F590, the AOC8 chunk]
+	// Texture_LoadAOC8Chunk @ 0x58F590, the AOC8 chunk]
 	Role(R::ModelChunk, L::Chunk, 0).size(S::Unknown).no_alpha().row,
 	// --- Terrain (.trn) -------------------------------------------------------------------------------
 	// [orig: PolyTrn_InitTextures @ 0x60B389, @ 0x60B3BE; Game_StartMission @ 0x525AD8]

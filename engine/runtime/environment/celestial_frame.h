@@ -63,7 +63,7 @@ namespace opennova::env {
 //   (the calls @ 0x5ad234 / @ 0x5ad24e)];
 // - then the point jittered +-2 in x and z [orig: Environment_UpdateSunGlare
 //   @ 0x5ad25e..0x5ad27e] and the ENTITY ray from the camera to it [orig:
-//   Physics_RaycastIntContext @ 0x5385e0 (the call @ 0x5ad296);
+//   Physics_InitRayContext @ 0x5385e0 (the call @ 0x5ad296);
 //   Physics_RaycastAgainstPoolByIndex @ 0x539530 (the calls @ 0x5ad2cb /
 //   @ 0x5ad2e3 / @ 0x5ad2fb), pools 2, 1, 0];
 // then the +-16 chase toward popcount * 64 and the mirrored glare submit at

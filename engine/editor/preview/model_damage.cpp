@@ -298,7 +298,7 @@ DamagePlan damage_plan(const DamageItem &item, const DamageModels &models) {
 	// once [orig: AI_TransitionToDeath_GroundVehicle @ 0x467B20; AI_TransitionToDestroyed_Vehicle @ 0x467DE0].
 	if (item.ai_class || item.death_class == ItemDeathClass::kGnrc) {
 		// gnrc: the first kill marks it dead and arms a four-tick think; its expiry runs the death transforms
-		// [orig: sub_407020 @ 0x4070B2..0x4070E2, the expiry @ 0x407072..0x4070A6].
+		// [orig: GnrcClass_HandleEvent @ 0x4070B2..0x4070E2, the expiry @ 0x407072..0x4070A6].
 		const bool gnrc = !item.ai_class;
 		plan.swaps = true;
 		plan.swap_tick = gnrc ? world::kGnrcDeathThinkTicks : 0;
@@ -308,7 +308,7 @@ DamagePlan damage_plan(const DamageItem &item, const DamageModels &models) {
 		                        : "A brain's item (attrib AIData, ai_function " + item.ai_function +
 		                                  "): its brain's death state lands the husk, its pieces and its death "
 		                                  "sounds at once.";
-		const char *cite = gnrc ? "[orig: sub_407020 @ 0x407020 -> Entity_UpdateDeathTransforms @ 0x494660]"
+		const char *cite = gnrc ? "[orig: GnrcClass_HandleEvent @ 0x407020 -> Entity_UpdateDeathTransforms @ 0x494660]"
 		                        : "[orig: AI_TransitionToDeath_GroundVehicle @ 0x467B20 -> Entity_UpdateDeathTransforms "
 		                          "@ 0x494660]";
 		// The unitType row's callback, then Flags |= 6 [orig: Entity_DispatchDeathCallback @ 0x493EF0].
@@ -329,7 +329,7 @@ DamagePlan damage_plan(const DamageItem &item, const DamageModels &models) {
 	           item.death_class == ItemDeathClass::kGnl2) {
 		// The class's own tail: the def's death sound and ONE particledeath effect at the item, not the banks.
 		const bool gnl2 = item.death_class == ItemDeathClass::kGnl2;
-		const char *cite = item.death_class == ItemDeathClass::kGnrl ? "[orig: sub_407F80 @ 0x4080BD..0x4080F4]"
+		const char *cite = item.death_class == ItemDeathClass::kGnrl ? "[orig: GnrlClass_HandleEvent @ 0x4080BD..0x4080F4]"
 		                   : item.death_class == ItemDeathClass::kEwep
 		                           ? "[orig: Entity_UpdateChildAttachment @ 0x440C23..0x440C87]"
 		                           : "[orig: Entity_HandleDeathEvent @ 0x407279..0x4072DD]";

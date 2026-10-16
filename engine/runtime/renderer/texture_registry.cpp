@@ -25,7 +25,7 @@ std::string folded_key(std::string_view name, const char *suffix, bool volume = 
 //  sub_58A580 (@ 0x5B17AD: "%s:HZ:%c" @ 0x58A5BA, the volume list), 7 through sub_58CE10
 //  (@ 0x5B17CA: "%s:AO:%c" @ 0x58CE4A), 16 through sub_58F350 ("%s:NML" @ 0x58F399), 17
 //  through sub_58F470 ("%s:HZ" @ 0x58F4B9, the volume list), 18 through
-//  Texture_LoadTGAAlphaOverlay ("%s:AO" @ 0x58F5D9); the default @ 0x5B17F4 loads nothing]
+//  Texture_LoadAOC8Chunk ("%s:AO" @ 0x58F5D9); the default @ 0x5B17F4 loads nothing]
 std::string texture_registry_key(std::string_view name, uint8_t runtime_type) {
 	if (name.empty()) return std::string();
 	switch (runtime_type) {

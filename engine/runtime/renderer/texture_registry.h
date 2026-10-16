@@ -38,7 +38,7 @@ namespace opennova::renderer {
 //  sub_58A580 @ 0x58A5BA ("%s:HZ:%c", looked up in the volume list GStaticVB_FindByName
 //  @ 0x686B60); sub_58CE10 @ 0x58CE4A ("%s:AO:%c");
 //  sub_58F350 @ 0x58F399 ("%s:NML"); sub_58F470 @ 0x58F4B9 ("%s:HZ", the volume list);
-//  Texture_LoadTGAAlphaOverlay @ 0x58F5D9 ("%s:AO");
+//  Texture_LoadAOC8Chunk @ 0x58F5D9 ("%s:AO");
 //  the row's name copied byte for byte, Material_ConvertDefinition @ 0x5B0410..0x5B041A;
 //  rows with an empty name skipped, Material_ResolveEffectSubobjectsAndShader @ 0x5B1890]
 std::string texture_registry_key(std::string_view name, uint8_t runtime_type);

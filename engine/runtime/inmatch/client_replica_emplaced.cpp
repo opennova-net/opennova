@@ -109,7 +109,7 @@ void publish_replica_gun_words(replication::ClientState &state,
 // The tank render callback publishes VEHICLE_GUNYAW/GUNPITCH, and a GROUND
 // brain (or the helicopter callback) the HELO pair, from the brain's active
 // words; on a joiner the replica row carries the words its children
-// published. [orig: HUD_CacheEntityDebugStats @0x449ECF..0x449EE2;
+// published. [orig: BoneCallback_tank_PublishControls @0x449ECF..0x449EE2;
 //  HUD_CacheEntityDisplayInfo @0x4A3D90]
 void write_present_replica_vehicle_gun(float *record, const world::World &world,
 		const world::Entity &twin, const replication::ClientEntityState &carrier) {

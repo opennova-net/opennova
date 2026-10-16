@@ -638,7 +638,7 @@ AudioStreamPlayer *MissionAudio::_spawn_dialog_voice(const Ref<AudioStreamWAV> &
 	}
 	voice->set_stream(p_stream);
 	// The line plays at the play factor 0x10000, centred: the dialog's play hook writes both into the
-	// line's record before the open [orig: sub_527560 @ 0x52757c, called through dword_A8A23C
+	// line's record before the open [orig: Dialog_ApplyDialogueVolumeAndPlayFactor @ 0x52757c, called through dword_A8A23C
 	// @ 0x44de50]. A decoded wave's player takes its scale through WavLoader::pitch_scale_for (the
 	// mixer's step of the wave, a boxed rate's too).
 	voice->set_pitch_scale(static_cast<float>(WavLoader::pitch_scale_for(p_stream, 1.0)));

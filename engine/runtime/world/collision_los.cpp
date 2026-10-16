@@ -420,7 +420,7 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
 
     // Sector leg [orig: Physics_RaycastAgainstEntityPool @ 0x538720, pool 2 then pool 1
     // @ 0x539a3a]. Degenerate segments (< 1 u) skip the walk entirely
-    // [orig: Physics_RaycastIntContext @ 0x5385e0 returns 1 -> clear on len < 16].
+    // [orig: Physics_InitRayContext @ 0x5385e0 returns 1 -> clear on len < 16].
     const int64_t sdx = static_cast<int64_t>(b[0]) - a[0];
     const int64_t sdy = static_cast<int64_t>(b[1]) - a[1];
     const int64_t sdz = static_cast<int64_t>(b[2]) - a[2];
