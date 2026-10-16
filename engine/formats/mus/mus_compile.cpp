@@ -64,6 +64,8 @@
 
 #include <formats/mus/mus.h>
 
+#include <base/io/le.h>
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1873,14 +1875,12 @@ static void buf_align16(uint8_t **buf, size_t *cap, size_t *used) {
     buf_append_zero(buf, cap, used, (16 - *used % 16) % 16);
 }
 
-static void put32(uint8_t *at, uint32_t v) { memcpy(at, &v, 4); }
-
 /* One 48-byte debug entry: a value at +0 (and +8), a 32-byte name at +0x10. */
 static void debug_entry(uint8_t **buf, size_t *cap, size_t *used, uint32_t first, uint32_t third, const char *name) {
     uint8_t entry[48];
     memset(entry, 0, sizeof(entry));
-    put32(entry + 0x00, first);
-    put32(entry + 0x08, third);
+    io::write_u32_le(entry + 0x00, first);
+    io::write_u32_le(entry + 0x08, third);
     const size_t nlen = strnlen(name, 31);
     memcpy(entry + 0x10, name, nlen);
     buf_append(buf, cap, used, entry, sizeof(entry));
@@ -1944,7 +1944,7 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
         const size_t bc_at = used;
         const uint32_t bc_rel = (uint32_t)(bc_at - chunk_hdr_at);
         if (s->code && s->code_size > 0) buf_append(&buf, &cap, &used, s->code, s->code_size);
-        for (uint32_t k = 0; k < s->section_count; ++k) put32(buf + sec_tab_at + 4 * k, bc_rel + s->sections[k].code_offset);
+        for (uint32_t k = 0; k < s->section_count; ++k) io::write_u32_le(buf + sec_tab_at + 4 * k, bc_rel + s->sections[k].code_offset);
         const size_t debug_info_at = used;
 
         /* The editor debug section. */
@@ -1971,22 +1971,22 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
         const size_t lines_at = used;
         for (uint32_t k = 0; k < s->line_count; ++k) {
             uint8_t pair[8];
-            put32(pair, s->lines[k].code_offset);
-            put32(pair + 4, s->lines[k].line);
+            io::write_u32_le(pair, s->lines[k].code_offset);
+            io::write_u32_le(pair + 4, s->lines[k].line);
             buf_append(&buf, &cap, &used, pair, sizeof(pair));
         }
         uint8_t *h = buf + hdr_at;
-        put32(h + 0x00, 48);
-        put32(h + 0x04, rel(sections_at));
-        put32(h + 0x08, s->section_count);
-        put32(h + 0x0C, rel(vars_at));
-        put32(h + 0x10, s->variable_count);
-        put32(h + 0x14, rel(locals_at));
-        put32(h + 0x18, s->local_count);
-        put32(h + 0x1C, rel(functions_at));
-        put32(h + 0x20, s->function_count);
-        put32(h + 0x24, rel(lines_at));
-        put32(h + 0x28, s->line_count);
+        io::write_u32_le(h + 0x00, 48);
+        io::write_u32_le(h + 0x04, rel(sections_at));
+        io::write_u32_le(h + 0x08, s->section_count);
+        io::write_u32_le(h + 0x0C, rel(vars_at));
+        io::write_u32_le(h + 0x10, s->variable_count);
+        io::write_u32_le(h + 0x14, rel(locals_at));
+        io::write_u32_le(h + 0x18, s->local_count);
+        io::write_u32_le(h + 0x1C, rel(functions_at));
+        io::write_u32_le(h + 0x20, s->function_count);
+        io::write_u32_le(h + 0x24, rel(lines_at));
+        io::write_u32_le(h + 0x28, s->line_count);
 
         MusChunkHeader ch;
         memset(&ch, 0, sizeof(ch));
