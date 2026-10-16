@@ -36,8 +36,10 @@ namespace opennova::world {
 namespace {
 
 constexpr double kPi = io::kPi;
-// BAM32 -> radians (full turn = 2^32) [orig: engine-wide BAM convention, angle.h].
-constexpr double kRadPerBam = io::kRadiansPerBam;
+// BAM32 -> radians: retail's x87 double, which every spawner's trig multiplies
+// by [orig: `fld dbl_7C3608` @0x4EC515 / @0x4EBA25 / @0x4EBCCD; the knife's
+// Math_BuildFixedPointMatrixFromEulerAngles @0x613F5D].
+constexpr double kRadPerBam = io::kRadiansPerBamX87;
 constexpr int32_t kProjectileGravityQ16 = 167;
 constexpr int32_t kDragTableSize = 1220;
 // The glass-section break sound: row 29 of the 84-row {char name[32]; int *handle}
@@ -580,6 +582,39 @@ Vec3 flight_direction(const Vec3 &vel) {
     return Vec3{vel.x / len, vel.y / len, vel.z / len};
 }
 
+// The Q22 product the spawners round each term through: the 64-bit `imul`,
+// then `shrd eax, edx, 16h` (the low dword of the product >> 22).
+int32_t mul22(int32_t a, int32_t b) {
+    return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);
+}
+
+// A round's launch speed in Q16 units per tick: the ammo velocity << 16 divided
+// by the 62-tick second as a signed integer (the magic-multiply divide).
+// [orig: RoundData_SpawnRound `shl ecx, 10h` @0x4EC595, `imul 84210843h`
+//  @0x4EC598..0x4EC5AB; Weapon_SpawnProjectileBurst @0x4EBAA3..0x4EBAB9;
+//  Weapon_SpawnProjectileBurstWithSpread @0x4EBD72..0x4EBD88]
+int32_t round_launch_speed_q16(int32_t velocity) {
+    return signed_from_u32(static_cast<uint32_t>(velocity) << 16) / io::kTicksPerSecondInt;
+}
+
+// A round's launch velocity (Q16 units per tick, mission axes): each angle
+// times retail's radians-per-BAM double into fsin / fcos, each scaled to Q22
+// and truncated by `_ftol2_sse`; the heading pair takes the pitch cosine, each
+// product >> 22, then every axis the speed's product >> 22.
+// [orig: RoundData_SpawnRound @0x4EC511..0x4EC58A, the velocity stores
+//  @0x4EC5DD..0x4EC60D; Weapon_SpawnProjectileBurst @0x4EBA21..0x4EBAF1;
+//  Weapon_SpawnProjectileBurstWithSpread @0x4EBCC9..0x4EBDAA]
+FixedVec3 round_launch_velocity_q16(int32_t yaw_bam, int32_t pitch_bam, int32_t speed_q16) {
+    const double pitch = static_cast<double>(pitch_bam) * kRadPerBam;
+    const int32_t sp = static_cast<int32_t>(std::sin(pitch) * io::kQ22One);
+    const int32_t cp = static_cast<int32_t>(std::cos(pitch) * io::kQ22One);
+    const double yaw = static_cast<double>(yaw_bam) * kRadPerBam;
+    const int32_t sy = static_cast<int32_t>(std::sin(yaw) * io::kQ22One);
+    const int32_t cy = static_cast<int32_t>(std::cos(yaw) * io::kQ22One);
+    return FixedVec3{mul22(mul22(cy, cp), speed_q16), mul22(mul22(sy, cp), speed_q16),
+                     mul22(sp, speed_q16)};
+}
+
 // The fire descriptor's engine-frame BAM pair projected into mission axes.
 // Knife consumes this before the ballistic spread/recoil branch, while an
 // ordinary round uses the same mapping after its final angle is selected.
@@ -1026,22 +1061,29 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         final_pitch = io::bam_add(final_pitch, offset.pitch_bam);
     }
 
-    // Wire fire direction -> mission-frame unit vector. The 0x06 yaw BAM IS the mission
+    // Wire fire direction -> mission-frame velocity. The 0x06 yaw BAM IS the mission
     // bearing directly — NOT the 0x0A euler_z heading frame (which is 90deg - mission
     // yaw): wire-validated on the v29 duel baselines (wire yaw -122.0/45.6 deg vs true
     // shooter->victim bearings -122.4/44.2 deg; the old 90-minus mapping missed by 26 deg
     // and only coincided on the 45-deg diagonal — the asymmetric-kill bug, D-NET-153).
-    // The original spawner builds X=sinYaw*cosPitch, Y=cosYaw*cosPitch, Z=sinPitch in
-    // engine axes [orig: RoundData_SpawnRound @0x4ec5e9 / Weapon_SpawnSingleProjectile
-    // @0x4ebf51]; in this mission frame that lands as (cos yaw, sin yaw, sin pitch).
-    const double bearing = double(final_yaw) * kRadPerBam;
-    const double pitch = double(final_pitch) * kRadPerBam;
-    const double cp = std::cos(pitch);
-    double speed_per_tick = double(ammo->velocity) / io::kTicksPerSecondInt; // [orig: speed/62 @0x4ec508]
+    // The spawner stores X = cosYaw*cosPitch, Y = sinYaw*cosPitch, Z = sinPitch
+    // (+0x98 / +0x9C / +0xA0) [orig: RoundData_SpawnRound @0x4ec5dd..0x4ec60d]. Its
+    // trig reads the final angles with their low words masked off, while the round
+    // keeps the unmasked words [orig: `and eax, 0FFFF0000h` @0x4EC508 (pitch) /
+    // `and ecx, 0FFFF0000h` @0x4EC542 (yaw); the round's angle copy
+    // @0x4EC61D..0x4EC626].
+    int32_t speed_q16 = round_launch_speed_q16(ammo->velocity);
     // The PowerThrow charge byte scales the launch speed for 1..254; 0 and 255
-    // mean full [orig: (charge - 1) <= 0xFD gate @ 0x4ec5bb, x charge/256].
+    // mean full: the speed times charge << 8, rounded, >> 16 [orig: (charge - 1)
+    // <= 0xFD gate @ 0x4ec5bb, `mov dh, al` @0x4EC5BF, the rounded shrd
+    // @0x4EC5C9..0x4EC5D5].
     if (static_cast<uint8_t>(params.charge - 1u) <= 0xFDu)
-        speed_per_tick = speed_per_tick * double(params.charge) / 256.0;
+        speed_q16 = static_cast<int32_t>(
+                (static_cast<int64_t>(speed_q16) * (static_cast<int32_t>(params.charge) << 8) +
+                 0x8000) >> 16);
+    const FixedVec3 launch_q16 = round_launch_velocity_q16(
+            static_cast<int32_t>(static_cast<uint32_t>(final_yaw) & 0xFFFF0000u),
+            static_cast<int32_t>(static_cast<uint32_t>(final_pitch) & 0xFFFF0000u), speed_q16);
 
     LiveRound &r = rounds[static_cast<size_t>(slot)];
     r = LiveRound{};
@@ -1057,9 +1099,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     r.presentation_generation = next_presentation_generation_++;
     r.pos = params.origin;
     r.prev_z_q16 = to_fixed(params.origin.z); // [orig: +0x80..+0x88 = Position @0x4ec643..0x4ec655]
-    r.vel.x = static_cast<float>(std::cos(bearing) * cp * speed_per_tick);
-    r.vel.y = static_cast<float>(std::sin(bearing) * cp * speed_per_tick);
-    r.vel.z = static_cast<float>(std::sin(pitch) * speed_per_tick);
+    r.vel = vec_from_fixed(launch_q16);
     r.age_ticks = 0;
     // noage rounds never expire on time [orig: flag 0x4000]; everything else uses the
     // ammo max_age (already in 62 Hz ticks).
@@ -1220,10 +1260,8 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
                     base_pitch + static_cast<uint32_t>(
                             (pieslice * r2 + 0x8000) >> 16));
         }
-        const double bearing = double(yaw) * kRadPerBam;
-        const double pitch_rad = double(pitch) * kRadPerBam;
-        const double cp = std::cos(pitch_rad);
-        const double speed = double(ammo.velocity) / io::kTicksPerSecondInt;
+        const FixedVec3 launch_q16 = round_launch_velocity_q16(
+                yaw, pitch, round_launch_speed_q16(ammo.velocity));
         LiveRound &r = rounds[static_cast<size_t>(slot)];
         r = LiveRound{};
         r.active = true;
@@ -1238,9 +1276,7 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         r.presentation_generation = next_presentation_generation_++;
         r.pos = params.origin;
         r.prev_z_q16 = to_fixed(params.origin.z); // [orig: the spawn's +0x80 copy @0x4ec655]
-        r.vel.x = static_cast<float>(std::cos(bearing) * cp * speed);
-        r.vel.y = static_cast<float>(std::sin(bearing) * cp * speed);
-        r.vel.z = static_cast<float>(std::sin(pitch_rad) * speed);
+        r.vel = vec_from_fixed(launch_q16);
         r.max_age_ticks = ammo.max_age_ticks;
         r.team = owner_ent != nullptr ? static_cast<uint8_t>(owner_ent->team)
                                       : params.shooter_team;

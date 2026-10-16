@@ -196,7 +196,8 @@ void entry_goal(AiEntity &e, World &world, Entity &self, const Entity &target, i
 			// is hidden by its hull. [orig: @0x4BB4A2..0x4BB591]
 			const int32_t yaw =
 					board_bearing_to(-static_cast<int32_t>(dx), -static_cast<int32_t>(dy));
-			const double angle = yaw / io::kBamPerRadian;
+			// [orig: `fmul dbl_7C3608` @0x4BB4FB]
+			const double angle = yaw * io::kRadiansPerBamX87;
 			const int64_t c = static_cast<int32_t>(std::cos(angle) * 4194304.0);
 			const int64_t sn = static_cast<int32_t>(std::sin(angle) * 4194304.0);
 			goal[0] = io::float_to_fp16_16(target.position.x) + int32_t((bound * c) >> 22) +

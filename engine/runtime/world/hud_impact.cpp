@@ -26,8 +26,8 @@ HudImpact predict_hud_impact(World &world, LocalPlayerWeapon &weapon, bool scope
 	const auto *slot = active_local_weapon_slot(world, weapon);
 	local_weapon_fire_pose(world, weapon, slot ? slot->clip : 0, scope_settled, pose);
 	const int32_t speed = int32_t(uint32_t(ammo->velocity) << 16) / 62;
-	const double pitch = double(int32_t(uint32_t(pose[4]) & 0xFFFF0000u)) * io::kRadiansPerBam;
-	const double yaw = double(int32_t(uint32_t(pose[3]) & 0xFFFF0000u)) * io::kRadiansPerBam;
+	const double pitch = double(int32_t(uint32_t(pose[4]) & 0xFFFF0000u)) * io::kRadiansPerBamX87;
+	const double yaw = double(int32_t(uint32_t(pose[3]) & 0xFFFF0000u)) * io::kRadiansPerBamX87;
 	const int32_t cp = int32_t(std::cos(pitch) * 4194304), sp = int32_t(std::sin(pitch) * 4194304);
 	const int32_t cy = int32_t(std::cos(yaw) * 4194304), sy = int32_t(std::sin(yaw) * 4194304);
 	// The round descriptor is a mission bearing: X=cos, Y=sin.
@@ -67,7 +67,7 @@ HudImpact predict_hud_impact(World &world, LocalPlayerWeapon &weapon, bool scope
 	// [orig: Player_UpdatePerFrame @0x4DE9F8..0x4DEAD2; map-slot +0x1C writes
 	//  @0x4DEBAA / @0x4DEBCC, designation radius @0x4DEC40 / @0x4DEC62]
 	const int32_t error_bam = int32_t((int64_t(spread_q16) * 0xB60B60 + 0x8000) >> 16);
-	const double spread_yaw = double(io::bam_add(pose[3], error_bam)) * io::kRadiansPerBam;
+	const double spread_yaw = double(io::bam_add(pose[3], error_bam)) * io::kRadiansPerBamX87;
 	const int32_t offset_x =
 			int32_t((int64_t(out.distance_q16) * int32_t(std::cos(spread_yaw) * 4194304)) >> 22);
 	const int32_t offset_y =

@@ -252,11 +252,14 @@ void test_motor_gradient_and_rotation() {
         CHECK(m.ai().inf.vel[2] == -900);
         CHECK(m.ai().inf.path_state == 1); // motor response also runs on clients
     }
+    // A quarter-turn heading: the player body (org2) reads the Q22 sine table,
+    // exact there; the NPC (org1) the trig of dbl_7C3608, whose cosine is
+    // -201 / 2^22 [orig: org2 @0x4B41E4..0x4B4255; org1 @0x4BF001..0x4BF02A].
     for (bool player : {false, true}) {
         Motor m(512, 768, player, 0x40000000);
         m.tick();
-        CHECK(m.ai().pos[0] == q16(100) - (player ? 3277 : 4915));
-        CHECK(m.ai().pos[1] == -q16(100) - (player ? -4915 : 3277));
+        CHECK(m.ai().pos[0] == q16(100) - (player ? 3277 : 4914));
+        CHECK(m.ai().pos[1] == -q16(100) - (player ? -4915 : 3278));
         CHECK(m.ai().inf.path_state == (player ? 0 : 1));
         CHECK(m.ai().inf.vel[2] == (player ? -375 : -167));
     }

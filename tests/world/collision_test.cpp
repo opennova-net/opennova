@@ -2414,9 +2414,10 @@ void test_ladder_from_above_entry_and_sin_lane() {
     // dbl_7C3608 leaves cos(−90°) = −201/2^22: the anchor sits 2 units off X.
     CHECK(yrig.cw.last_ladder_frame.anchor[0] == fx(10.0) + 2);
     CHECK(yrig.cw.last_ladder_frame.anchor[1] == fx(10.375));
-    // The press rides sin(−90°) = −1 on Y; cos ≈ 0 leaves X at the snap.
+    // The press rides sin(−90°) = −1 on Y; its cos of −201/2^22 takes X one
+    // unit back from the snap ((−201 << 12) >> 22 = −1) [orig: @0x4B340F..0x4B3495].
     CHECK(ypos[1] == fx(10.375) - 4096 + 64);
-    CHECK(ypos[0] == fx(10.0) + 2);
+    CHECK(ypos[0] == fx(10.0) + 1);
     CHECK(ypos[2] == 20480);
 }
 
@@ -6166,9 +6167,14 @@ void test_fixed_matrix_euler_witnessed_vector() {
 
 void test_fixed_matrix_euler_round_trip() {
 	// Compound yaw/pitch and obtuse rolls exercise all three sequential
-	// integer projections, including the inverted-hull quadrant. The retail
-	// radians multiplier is 30.5 ppm above the mathematical inverse; allow
-	// one BAM high-word of roll drift through these compound rotations.
+	// integer projections, including the inverted-hull quadrant. The builder
+	// scales by retail's dbl_7C3608, 30.5 ppm above the extractor's exact
+	// inverse (dbl_7C19D8), so the trip returns each angle that much larger,
+	// as retail's own pair does; allow one BAM high-word of roll drift
+	// through these compound rotations.
+	const auto scaled = [](int32_t bam) {
+		return int64_t(double(bam) * opennova::io::kRadiansPerBamX87 * opennova::io::kBamPerRadian);
+	};
 	for (double yaw : { -170.0, -35.0, 0.0, 61.0, 170.0 }) {
 		for (double pitch : { -61.0, 0.0, 38.0 }) {
 			for (double roll : { -130.0, -22.0, 0.0, 34.0, 135.0 }) {
@@ -6179,9 +6185,9 @@ void test_fixed_matrix_euler_round_trip() {
 				const CollisionMatrix matrix = collision_matrix_from_euler(y, p, r, origin);
 				int32_t got[3];
 				collision_matrix_to_euler(matrix, got);
-				CHECK(std::abs(int64_t(got[0]) - y) < 8192);
-				CHECK(std::abs(int64_t(got[1]) - p) < 8192);
-				CHECK(std::abs(int64_t(got[2]) - r) < 65536);
+				CHECK(std::abs(int64_t(got[0]) - scaled(y)) < 8192);
+				CHECK(std::abs(int64_t(got[1]) - scaled(p)) < 8192);
+				CHECK(std::abs(int64_t(got[2]) - scaled(r)) < 65536);
 			}
 		}
 	}

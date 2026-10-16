@@ -206,17 +206,19 @@ void AiSystem::seed_route_turn_budget(AiEntity &e) {
     e.brain.f[AiBrain::kAnimFlag] = route_turn_budget(e.brain, e.heading);
 }
 
-// Aircraft steering uses full-angle x87 FCOS, independently of the vehicle
-// footprint table below. [orig: Entity_UpdateAircraftPhysics @0x4917E6]
+// Aircraft steering uses full-angle x87 FCOS of the angle times retail's
+// radians-per-BAM double, independently of the vehicle footprint table below.
+// [orig: Entity_UpdateAircraftPhysics @0x4917E6; dbl_7C3608 @0x49164A]
 static int32_t flight_cos22(int32_t bam) {
-    const double a = static_cast<double>(bam) * io::kRadiansPerBam;
+    const double a = static_cast<double>(bam) * io::kRadiansPerBamX87;
     return static_cast<int32_t>(std::cos(a) * io::kQ22One);
 }
 
 // x87 sin at the same 2^22 scale — the cbot slip block multiplies fsin by the
-// 4194304.0 constant [orig: dbl_7C3600, consumed @0x48E43D].
+// 4194304.0 constant, the angle scaled by retail's radians-per-BAM double
+// [orig: dbl_7C3608 @0x48E435; dbl_7C3600, consumed @0x48E43D].
 static int32_t avoid_sin22(int32_t bam) {
-    const double a = static_cast<double>(bam) * io::kRadiansPerBam;
+    const double a = static_cast<double>(bam) * io::kRadiansPerBamX87;
     return static_cast<int32_t>(std::sin(a) * io::kQ22One);
 }
 

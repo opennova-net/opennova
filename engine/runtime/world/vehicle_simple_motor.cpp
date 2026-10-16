@@ -59,9 +59,8 @@ void ground_step(World &world, Entity &e, const VehicleTraits &t, int32_t &z) {
 		m.air_pitch_rate = io::bam_add(m.air_pitch_rate, (seed ^ 0x29690000) >> 15);
 	}
 	// The simple path samples the same 1024-entry cosine table as its input.
-	const uint32_t index = (uint32_t(m.air_pitch_bam) + 0x200000u) >> 22;
-	const int32_t cosine =
-			int32_t(std::cos(double(index) * io::kRadiansPerBam * 4194304.0) * io::kQ22One);
+	const int index = io::bam_table_index(uint32_t(m.air_pitch_bam) + 0x200000u);
+	const int32_t cosine = int32_t(io::bam_table_cos(index) * io::kQ22One);
 	const int32_t slope = int32_t((int64_t(cosine) * cosine) >> 22);
 	const int32_t target = int32_t((int64_t(slope) * m.cmd_speed) >> 22);
 	m.speed_accel = io::bam_sar(io::bam_add(io::bam_sub(target, m.speed), 16), 5);

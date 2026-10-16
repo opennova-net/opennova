@@ -27,7 +27,9 @@ void fill_hud_vehicle_sights(World &world, LocalPlayerWeapon &weapon, LocalPlaye
 											   : bam_from_degrees_wrapped(mount->roll);
 	if ((mount->item_attrib & kItemAttribEweap) && player->mount_type == SeatType::Controller &&
 			view.camera_mode == 0) {
-		const double angle = double(mount->veh.view_tilt_bam) * io::kRadiansPerBam;
+		// [orig: HUD_DrawWeaponSightCrosshair `fild [esi+45Ch]; fld dbl_7C3608`
+		//  @0x59ECFB..0x59ED01]
+		const double angle = double(mount->veh.view_tilt_bam) * io::kRadiansPerBamX87;
 		const int32_t local[] = { int32_t((65536000LL * int32_t(std::cos(angle) * 4194304)) >> 22),
 			0, int32_t((65536000LL * int32_t(std::sin(angle) * 4194304)) >> 22) };
 		collision_matrix_from_euler(yaw, pitch, roll, root)

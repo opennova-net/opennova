@@ -60,14 +60,16 @@ anim::Quat quat_axis_z(double angle) {
 // binding's bms_to_godot_basis (mission_object_placer): Ry(yaw) * Rz(pitch) * Rx(roll)
 // with the trailing +90° model-forward correction. The correction does NOT
 // cancel in the body-relative delta below — it conjugates the delta into the
-// node frame apply_aim_overlay expects.
+// node frame apply_aim_overlay expects. Each angle is scaled by retail's
+// radians-per-BAM double, as the bone rotations it stands for are [orig:
+// Bone_ApplyAxisRotations @0x4E3EB0, `fmul dbl_7C3608` @0x4E3ECA / @0x4E3F24].
 anim::Quat overlay_model_quat(const anim::AimOverlayAngles &angles) {
 	const anim::Quat yaw =
-			quat_axis_y(static_cast<double>(angles.yaw) * io::kRadiansPerBam);
+			quat_axis_y(static_cast<double>(angles.yaw) * io::kRadiansPerBamX87);
 	const anim::Quat pitch =
-			quat_axis_z(static_cast<double>(angles.pitch) * io::kRadiansPerBam);
+			quat_axis_z(static_cast<double>(angles.pitch) * io::kRadiansPerBamX87);
 	const anim::Quat roll =
-			quat_axis_x(static_cast<double>(angles.roll) * io::kRadiansPerBam);
+			quat_axis_x(static_cast<double>(angles.roll) * io::kRadiansPerBamX87);
 	const anim::Quat fwd = quat_axis_y(kHalfPi);
 	return anim::quat_mul(anim::quat_mul(anim::quat_mul(yaw, pitch), roll), fwd);
 }

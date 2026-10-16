@@ -242,6 +242,65 @@ FlightResult fly_one_tick(FixedVec3 velocity, uint32_t flags = 0,
     };
 }
 
+// The single-round spawn's launch velocity is RoundData_SpawnRound's integer
+// form: the final angles' low words masked off before the trig (the round keeps
+// them unmasked), each sine and cosine of the angle times retail's radians-per-BAM
+// double (dbl_7C3608) truncated to Q22, the heading pair scaled by the pitch
+// cosine with each product >> 22, and the speed the integer (velocity << 16) / 62,
+// a PowerThrow charge then scaling it by (charge << 8) rounded >> 16. The values
+// are that computation's, written out; the exact 2*pi / 2^32 scale, the double
+// trig and a float speed give (483853, 817767, 46575) for the first shot.
+// [orig: RoundData_SpawnRound @0x4EC508..0x4EC60D; the charge @0x4EC5AF..0x4EC5D9]
+void test_single_round_launch_velocity_is_retails() {
+    HeapWorldFixture fixture;
+    World &world = fixture.world;
+    AmmoTableEntry ammo;
+    ammo.name = "LAUNCH";
+    ammo.valid = true;
+    ammo.velocity = 900;
+    ammo.max_age_ticks = 100;
+    world.tables.ammo.entries.push_back(ammo);
+    RoundSpawnParams params;
+    params.origin = {0.0f, 0.0f, 10.0f};
+    params.ammo_index = 0;
+    params.dir_yaw_bam = 0x2A3B4C5D;
+    params.dir_pitch_bam = 0x01FEDCBA;
+    int slot = world.round_sim.spawn(world, params);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    const LiveRound &round = world.round_sim.rounds[static_cast<size_t>(slot)];
+    CHECK(to_fixed(round.vel.x) == 483852);
+    CHECK(to_fixed(round.vel.y) == 817771);
+    CHECK(to_fixed(round.vel.z) == 46498);
+    // The round keeps the unmasked angles [orig: @0x4EC61D..0x4EC626].
+    CHECK(round.yaw_bam == 0x2A3B4C5D && round.pitch_bam == 0x01FEDCBA);
+
+    world.round_sim.reset();
+    params.charge = 100;
+    slot = world.round_sim.spawn(world, params);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    const LiveRound &charged = world.round_sim.rounds[static_cast<size_t>(slot)];
+    CHECK(to_fixed(charged.vel.x) == 189004);
+    CHECK(to_fixed(charged.vel.y) == 319442);
+    CHECK(to_fixed(charged.vel.z) == 18163);
+
+    // A quarter turn back: dbl_7C3608's scale leaves cos at -201 / 2^22, so the
+    // round drifts 32 Q16 units off the axis where an exact scale gives 0.
+    world.round_sim.reset();
+    world.tables.ammo.entries[0].velocity = 620;
+    params.charge = 0;
+    params.dir_yaw_bam = static_cast<int32_t>(0xC0001234u);
+    params.dir_pitch_bam = static_cast<int32_t>(0xFEDC5433u);
+    slot = world.round_sim.spawn(world, params);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    const LiveRound &back = world.round_sim.rounds[static_cast<size_t>(slot)];
+    CHECK(to_fixed(back.vel.x) == -32);
+    CHECK(to_fixed(back.vel.y) == -655104);
+    CHECK(to_fixed(back.vel.z) == -18345);
+}
+
 void test_arming_dud_and_armed_damage() {
     Rig r;
     r.world.tables.ammo.entries[0].tracer_rate = 1;
@@ -3996,6 +4055,7 @@ void test_jox_tank_round_bullets_class_splashes() {
 
 struct NamedTest { const char *name; void (*fn)(); };
 static const NamedTest kTests[] = {
+    {"test_single_round_launch_velocity_is_retails", test_single_round_launch_velocity_is_retails},
     {"test_armed_expiry_detonates_only_a_kill_zone_class", test_armed_expiry_detonates_only_a_kill_zone_class},
     {"test_impact_producers_apply_their_own_gates", test_impact_producers_apply_their_own_gates},
     {"test_jox_tank_round_bullets_class_splashes", test_jox_tank_round_bullets_class_splashes},

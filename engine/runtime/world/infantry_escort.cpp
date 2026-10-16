@@ -26,8 +26,10 @@ void anchor_of(World &world, const Entity &entity, SkeletalAnchor anchor, int32_
         out[2] = static_cast<int32_t>(entity.position.z * 65536.0f);
     }
 }
+// [orig: the Q22 trig of retail's radians-per-BAM double, `fmul dbl_7C3608`
+//  @0x4BB674 / @0x4BBA1A / @0x4BBBD7 / @0x4BBC9D]
 void offset_goal(int32_t goal[3], int32_t heading, int32_t amount) {
-    const double radians = heading / io::kBamPerRadian;
+    const double radians = heading * io::kRadiansPerBamX87;
     const int32_t c = static_cast<int32_t>(std::cos(radians) * 4194304.0);
     const int32_t s = static_cast<int32_t>(std::sin(radians) * 4194304.0);
     goal[0] = io::bam_add(goal[0], static_cast<int32_t>((int64_t(c) * amount) >> 22));

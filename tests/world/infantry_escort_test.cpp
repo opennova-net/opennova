@@ -94,7 +94,9 @@ void test_escort_approach_boundaries() {
     const auto heli = f.person(11000, 0, 0, 5);
     f.order(medic, heli);
     CHECK(f.body(medic).inf.arrival_radius == 81920);
-    CHECK(std::abs(f.body(medic).inf.move_target[0]) <= 1);
+    // The offset rides retail's dbl_7C3608 trig: a quarter turn's cosine is
+    // -201 / 2^22, so 4 u along it lands 13 Q16 off the axis [orig: @0x4BB674].
+    CHECK(f.body(medic).inf.move_target[0] == -13);
     CHECK(std::abs(f.body(medic).inf.move_target[1] + fx(4)) <= 1);
     CHECK(f.body(medic).inf.move_target[2] == fx(2.5f));
     // Offset distance is NOT fed back into the far arrival test.

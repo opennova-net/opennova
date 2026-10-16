@@ -5522,10 +5522,11 @@ int main(int argc, char **argv) {
         CHECK(!w.script.relations.group_visited(4, 1, 1));
 
         // Sampling the previous clip on each selection tick changes the near-goal
-        // turn. Pin the resulting arrival and then its stationary one-shot hold.
+        // turn. Pin the resulting arrival and then its stationary one-shot hold
+        // (the root rotates by retail's dbl_7C3608 trig, @0x4BF001).
         run_ticks(ai, w, 320, 1200);
-        CHECK(e->pos[0] == 437272);
-        CHECK(e->pos[1] == -38987);
+        CHECK(e->pos[0] == 437271);
+        CHECK(e->pos[1] == -38978);
         CHECK(e->inf.anim_state == anim_state::kIdle);
         CHECK(e->inf.wait_cooldown == 13);
         CHECK(w.script.relations.group_visited(4, 1, 1));
@@ -5533,8 +5534,8 @@ int main(int argc, char **argv) {
         CHECK(std::hypot(double(e->pos[0] - fx(6)), double(e->pos[1])) < fx(1));
         const size_t marks = ai.relmat_calls.size();
         run_ticks(ai, w, 1200, 1400);
-        CHECK(e->pos[0] == 437272);
-        CHECK(e->pos[1] == -38987);
+        CHECK(e->pos[0] == 437271);
+        CHECK(e->pos[1] == -38978);
         CHECK(ai.relmat_calls.size() > marks); // re-arrivals keep marking the matrix
 
     }

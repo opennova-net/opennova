@@ -225,9 +225,12 @@ void initialize_organic_ai(World &world, Entity &entity) {
     }
     entity.position = {body->pos[0] / 65536.0f, body->pos[1] / 65536.0f,
                          body->pos[2] / 65536.0f};
-    // The source is savedLivePose, deliberately not the grounded position.
+    // The source is savedLivePose, deliberately not the grounded position; the
+    // offset is 3 u along the heading in the Q22 trig of retail's
+    // radians-per-BAM double. [orig: Entity_InitOrganicAI @0x4C01CD..0x4C022C,
+    //  `fmul dbl_7C3608` @0x4C01DC]
     std::copy_n(body->net_saved_live_pose, 3, inf.aim_point);
-    const double radians = double(body->heading) * io::kRadiansPerBam;
+    const double radians = double(body->heading) * io::kRadiansPerBamX87;
     inf.aim_point[0] = io::bam_add(inf.aim_point[0],
             int32_t((int64_t(196608) * int32_t(std::cos(radians) * io::kQ22One)) >> 22));
     inf.aim_point[1] = io::bam_add(inf.aim_point[1],

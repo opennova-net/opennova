@@ -65,7 +65,8 @@ bool throwable_surface_accepts_stick(const FixedVec3 &normal_q16) {
 void throwable_stick_pose(const int32_t normal_q16[3], int32_t yaw_bam,
                           int32_t pitch_bias_bam, int32_t roll_bias_bam,
                           int32_t &pitch_bam, int32_t &roll_bam) {
-    const double a = static_cast<double>(yaw_bam) / kBamPerRad;
+    // [orig: Math_BuildFixedPointRotationMatrixYXZ `fmul dbl_7C3608` @0x61541F]
+    const double a = static_cast<double>(yaw_bam) * io::kRadiansPerBamX87;
     const int32_t c = static_cast<int32_t>(std::cos(a) * io::kQ22One);
     const int32_t s = static_cast<int32_t>(std::sin(a) * io::kQ22One);
     const int64_t nx = normal_q16[0], ny = normal_q16[1];
