@@ -13,7 +13,7 @@
       <p class="flex flex-wrap items-center gap-2 text-sm text-ink-muted">
         <span :class="stateBadgeClass(server.state)">{{ ownerStateLabel(server.state) }}</span>
         <span>{{ gameLabel }}</span>
-        <span v-if="server.settings.expansion">{{ server.expansion_display_name || server.settings.expansion }}</span>
+        <span v-if="expansionLabel">{{ expansionLabel }}</span>
         <span v-if="server.own_machine" class="rounded-control bg-hover px-2 py-0.5 text-xs text-ink">Own machine</span>
       </p>
       <dl class="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
@@ -94,7 +94,8 @@ const secondaryButton =
 
 const base = computed(() => `hosted-server-${props.server.id}`);
 const detailPath = computed(() => `/me/servers/${props.server.id}`);
-const gameLabel = computed(() => props.server.game_display_name || props.server.settings.game);
+const gameLabel = computed(() => props.server.data_set?.display_name || props.server.game_display_name || 'Unknown game');
+const expansionLabel = computed(() => props.server.expansion?.display_name || props.server.expansion_display_name);
 
 const players = computed(() => {
   const row = props.listing;

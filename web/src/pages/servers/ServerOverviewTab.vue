@@ -52,6 +52,68 @@
       </dl>
     </section>
 
+    <!-- The data it runs on, and the update waiting when its data set has
+         newer data than the trees it was started on. -->
+    <section class="space-y-3" :aria-labelledby="ids.data">
+      <h2 :id="ids.data" tabindex="-1" class="text-lg font-semibold text-ink focus:outline-none">Game data</h2>
+      <dl class="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
+        <dt class="text-ink-muted">{{ gameName }}</dt>
+        <dd class="text-ink">{{ dataVersionText(server.data.base) }}</dd>
+        <template v-if="server.expansion || server.data.expansion">
+          <dt class="text-ink-muted">{{ expansionName }}</dt>
+          <dd class="text-ink">{{ dataVersionText(server.data.expansion) }}</dd>
+        </template>
+      </dl>
+      <p v-if="server.update_requested" class="rounded-panel border border-warn/40 bg-warn/10 p-3 text-sm text-warn">
+        Update requested. The server restarts on the current data shortly; its players drop while it does.
+      </p>
+      <div
+        v-else-if="server.update_available"
+        id="hosted-server-update"
+        class="space-y-3 rounded-panel border border-accent/40 bg-accent/10 p-3 text-sm text-ink"
+      >
+        <p>
+          {{ updateText }}
+          <template v-if="scope === 'owner'">Your server keeps the data it started on until you update it.</template>
+          <template v-else>It keeps the data it started on until its owner updates it, or an admin updates every outdated server.</template>
+        </p>
+        <template v-if="scope === 'owner' && server.live && server.state !== 'stopping'">
+          <button
+            v-if="!confirmingUpdate"
+            ref="updateButton"
+            type="button"
+            :disabled="busy"
+            class="rounded-control bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition hover:bg-accent/90 disabled:opacity-40"
+            @click="beginUpdate"
+          >
+            Update…
+          </button>
+          <form v-else class="space-y-3" @submit.prevent="confirmUpdate">
+            <p ref="updateWarning" tabindex="-1" class="text-sm font-semibold text-warn focus:outline-none">
+              Updating restarts the server and drops its players.
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <button
+                type="submit"
+                :disabled="busy"
+                class="rounded-control bg-accent px-4 py-2 text-sm font-semibold text-on-accent transition hover:bg-accent/90 disabled:opacity-40"
+              >
+                {{ busy ? 'Updating…' : 'Update now' }}
+              </button>
+              <button
+                type="button"
+                :disabled="busy"
+                class="rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:opacity-40"
+                @click="cancelUpdate"
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </template>
+      </div>
+    </section>
+
     <!-- The listing the server's NovaWorld account holds, with the owner's
          pushes to it that the console lacks, while it runs. -->
     <section v-if="server.live" class="space-y-3" :aria-labelledby="ids.listing">
@@ -152,18 +214,21 @@
 <script setup lang="ts">
 // A hosted server page's Overview tab: where the server is in its life
 // (requested -> starting -> running, then stopping -> stopped, or failed),
-// its listing (the owner's with the pushes its console lacks, MyServerCard
-// embedded, from GET /api/me/hosts), its timeline and, while it is live, its
-// stop (the owner's POST /api/me/servers/<id>/stop, the admin's POST
+// the game data it runs on with the owner's Update when its data set has
+// newer (POST /api/me/servers/<id>/update, which restarts it), its listing
+// (the owner's with the pushes its console lacks, MyServerCard embedded,
+// from GET /api/me/hosts), its timeline and, while it is live, its stop (the
+// owner's POST /api/me/servers/<id>/stop, the admin's POST
 // /api/admin/hosted/<id>/stop).
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import MyServerCard from '../../components/MyServerCard.vue';
 import RelativeTime from '../../components/RelativeTime.vue';
 import { stopFleetServer } from '../../api/admin';
-import { STOPPING_STILL_COUNTS, stopHostedServer } from '../../api/hostedServer';
+import { fetchDataSets } from '../../api/dataSets';
+import { fetchMyServers, STOPPING_STILL_COUNTS, stopHostedServer, updateHostedServer } from '../../api/hostedServer';
 import { listMyServers } from '../../api/myServers';
 import { usePolling } from '../../composables/usePolling';
-import type { HostedEvent, HostedServer } from '../../types/hostedServer';
+import type { HostedEvent, HostedServer, PinnedTree } from '../../types/hostedServer';
 import type { MyServer } from '../../types/myServers';
 import {
   OWNER_START_STEPS,
@@ -196,6 +261,7 @@ const ids = computed(() => {
   const base = `hosted-server-${props.server.id}`;
   return {
     progress: `${base}-progress`,
+    data: `${base}-data`,
     listing: `${base}-listing`,
     timeline: `${base}-timeline`,
     stop: `${base}-stop`,
@@ -204,12 +270,63 @@ const ids = computed(() => {
 
 const stopButton = ref<HTMLButtonElement | null>(null);
 const stopWarning = ref<HTMLElement | null>(null);
+const updateButton = ref<HTMLButtonElement | null>(null);
+const updateWarning = ref<HTMLElement | null>(null);
 const busy = ref(false);
 const status = ref('');
 const alertText = ref('');
 const confirmingStop = ref(false);
+const confirmingUpdate = ref(false);
 
 const events = computed<HostedEvent[]>(() => props.server.events ?? []);
+
+// The data the server runs on, and what its data set holds now.
+const gameName = computed(() => props.server.data_set?.display_name || props.server.game_display_name || 'Game');
+const expansionName = computed(() => props.server.expansion?.display_name || props.server.expansion_display_name || 'Expansion');
+
+function dataVersionText(tree: PinnedTree | null): string {
+  if (!tree) return 'Not placed on data yet';
+  return tree.version ? `version ${tree.version}` : `tree ${tree.tree_id}`;
+}
+
+// The data set's (and expansion's) current versions, read when an update
+// waits so the callout can name what is new: the owner's from GET
+// /api/me/servers, the admin's from GET /api/admin/data-sets.
+const current = ref<{ base: string; expansion: string } | null>(null);
+async function readCurrentVersions() {
+  current.value = null;
+  if (!props.server.update_available) return;
+  const dataSetId = props.server.data_set?.id;
+  const expansionId = props.server.expansion?.id;
+  if (props.scope === 'owner') {
+    const result = await fetchMyServers();
+    if (!result.ok) return;
+    const dataSet = result.value.data_sets.find((d) => d.id === dataSetId);
+    const expansion = dataSet?.expansions.find((e) => e.id === expansionId);
+    current.value = { base: dataSet?.version ?? '', expansion: expansion?.version ?? '' };
+    return;
+  }
+  const result = await fetchDataSets();
+  if (!result.ok) return;
+  const versionOf = (id: number | undefined) => result.value.data_sets.find((d) => d.id === id)?.current_tree?.version ?? '';
+  current.value = { base: versionOf(dataSetId), expansion: versionOf(expansionId) };
+}
+watch(() => props.server.update_available, readCurrentVersions, { immediate: true });
+
+// "Joint Operations 1.7.5.9 is available." (and the expansion's, when it is
+// the newer one); without the versions, that newer data is.
+const updateText = computed(() => {
+  const now = current.value;
+  const newer: string[] = [];
+  if (now) {
+    if (now.base && now.base !== (props.server.data.base?.version ?? '')) newer.push(`${gameName.value} ${now.base}`);
+    if (now.expansion && now.expansion !== (props.server.data.expansion?.version ?? '')) {
+      newer.push(`${expansionName.value} ${now.expansion}`);
+    }
+  }
+  if (newer.length === 0) return `Newer data for ${gameName.value} is available.`;
+  return `${newer.join(' and ')} ${newer.length === 1 ? 'is' : 'are'} available.`;
+});
 
 // The server's own row among the owner's listed servers.
 const listing = ref<MyServer | null>(null);
@@ -315,6 +432,45 @@ const stopConsequence = computed(() => {
     ? 'No one is playing on it right now.'
     : `The match ends at once for the ${players} player${players === 1 ? '' : 's'} on it.`;
 });
+
+async function beginUpdate() {
+  confirmingUpdate.value = true;
+  status.value = '';
+  alertText.value = '';
+  await nextTick();
+  updateWarning.value?.focus();
+}
+
+async function cancelUpdate() {
+  confirmingUpdate.value = false;
+  await nextTick();
+  updateButton.value?.focus();
+}
+
+// The owner's update: the service restarts the server on its data set's
+// current data (its players drop); the reply shows at once and the page
+// follows it from there.
+async function confirmUpdate() {
+  if (busy.value) return;
+  busy.value = true;
+  status.value = '';
+  alertText.value = '';
+  const result = await updateHostedServer(props.server.id);
+  busy.value = false;
+  confirmingUpdate.value = false;
+  if (!result.ok) {
+    alertText.value = result.error.message;
+    if (result.error.code === 'unauthorized') emit('session-ended');
+    else if (result.error.code === 'not_found' || result.error.code === 'not_live' || result.error.code === 'up_to_date') emit('gone');
+    await nextTick();
+    updateButton.value?.focus();
+    return;
+  }
+  status.value = `Update requested: ${props.server.settings.game_name || 'the server'} restarts on the current data shortly.`;
+  emit('changed', result.value);
+  await nextTick();
+  document.getElementById(ids.value.data)?.focus();
+}
 
 async function beginStop() {
   confirmingStop.value = true;

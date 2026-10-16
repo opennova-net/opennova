@@ -40,8 +40,8 @@
         </h1>
         <p class="flex flex-wrap items-center gap-2 text-sm text-ink-muted">
           <span :class="stateBadgeClass(server.state)">{{ ownerStateLabel(server.state) }}</span>
-          <span>{{ server.game_display_name || server.settings.game }}</span>
-          <span v-if="server.settings.expansion">{{ server.expansion_display_name || server.settings.expansion }}</span>
+          <span>{{ server.data_set?.display_name || server.game_display_name || 'Unknown game' }}</span>
+          <span v-if="server.expansion || server.expansion_display_name">{{ server.expansion?.display_name || server.expansion_display_name }}</span>
           <span v-if="server.own_machine" class="rounded-control bg-hover px-2 py-0.5 text-xs text-ink">Own machine</span>
         </p>
         <p v-if="pollTrouble" class="text-xs text-warn">The last refresh did not get through; this page keeps trying.</p>
