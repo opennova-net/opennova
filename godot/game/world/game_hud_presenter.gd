@@ -541,7 +541,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 		clip = HudPos.displayed_clip(wv.clip, weapon.clipsize) if weapon != null else wv.clip
 		# Capacity-1 weapons fold the chambered round into the displayed reserve
 		# (hud_math.folded_reserve carries the witness).
-		# [orig: HUD_BuildEntityInfo @0x4b85ef — hudInfo+52 += clip when def+88 == 1]
+		# (engine: runtime/hud/hud_math.cpp)
 		reserve = HudPos.folded_reserve(clip, wv.reserve,
 				weapon.clipsize if weapon != null else -1)
 	var probe_t0 := Time.get_ticks_usec() if stats_on else 0
@@ -834,7 +834,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 
 # The HUD's presentation clock driving the fade/message timers — the engine's
 # ms -> tick quantum count (world/tick_accumulator.h ticks_from_ms carries the
-# [orig: current_tick @0x24c1968] witness). Adopting the engine's exact 16 ms
+# (engine: runtime/world/world.cpp) witness). Adopting the engine's exact 16 ms
 # quantum corrects the old 0.062 ticks/ms approximation (62 Hz vs 62.5 Hz).
 func _hud_ticks() -> int:
 	return Simulation.ticks_from_ms(_world.frame_clock_ms)
@@ -863,7 +863,7 @@ func _build_waypoint_entry() -> WaypointHudEntry:
 	entry.mission_position = Vector2(pos.x, -pos.z)
 	entry.altitude_wu = pos.y
 	# Horizontal-only (mission X/Y deltas = the Godot ground plane), truncated
-	# to whole meters natively. [orig: @0x594836 sar 16]
+	# to whole meters natively. (engine: runtime/hud/hud_math.cpp)
 	entry.distance_m = HudPos.waypoint_distance_m(
 			Vector2(pos.x - player.x, pos.z - player.z))
 	return entry

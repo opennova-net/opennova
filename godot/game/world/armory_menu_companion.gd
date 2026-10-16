@@ -245,16 +245,14 @@ func _populate_classes() -> void:
 
 
 # The class the screen opens on — the engine's one impl (world/player_loadout
-# armory_resolve_selected_class [orig: Armory_ResolveSelectedClass @0x5642f0
-# against g_HostClassAllowMask]).
+# armory_resolve_selected_class (engine: runtime/world/player_loadout.cpp)).
 func _resolve_selected_class() -> int:
 	return WeaponDatabase.armory_resolve_selected_class(
 			_player_class, _class_allow_mask)
 
 
 # The class filter bit — the engine's one impl (world/player_loadout
-# armory_class_filter_mask [orig: Armory_ResolveSelectedClass @0x5642f0
-# switch default mask = -1 filters NOTHING]).
+# armory_class_filter_mask (engine: runtime/world/player_loadout.cpp)).
 func _class_mask() -> int:
 	return WeaponDatabase.armory_class_filter_mask(_selected_class_value)
 

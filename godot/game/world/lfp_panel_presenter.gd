@@ -6,8 +6,7 @@ extends RefCounted
 ## text. The panel is the AAS branch of its drawer; the conquest arm
 ## (g_GameType == 0x50010) is unmodelled and the overlay draws nothing under
 ## it, so this lane shows the panel for AAS sessions only.
-## [orig: HUD_DrawZoneStatusPanel @0x5a2480 -> HUD_DrawZoneMarker @0x5986f0;
-##  the game-type test @0x5a24a1]
+## (engine: runtime/hud/hud_lfp_panel.h)
 ##
 ## The zone rows never round-trip through script (the overlay pulls them
 ## natively through Simulation.fill_lfp_zones); the two status strings resolve

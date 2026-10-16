@@ -527,17 +527,14 @@ func _draw() -> void:
 
 
 # The blinking centered continue line + the cursor arrow
-# [orig: Game_ShowStartMissionSplash @ 0x520820].
+# (engine: runtime/hud/loading_screen.h).
 func _draw_splash_overlay() -> void:
 	if _splash_font != null and not _splash_text.is_empty():
 		# Centered at virtual (512, 730) of the 1024x768 overlay space in the
 		# large HUD label font at its width/800 slot scale, the colour pulsing
 		# on the 512 ms tick bit and halved by the centred drawer, then doubled
 		# by the font page's MODULATE2X: laid out and drawn by the engine's run
-		# through the shared glyph leg [orig: HUD_DrawTextAtVirtualPos(ctx, 512,
-		# 730, 0, text, g_HUDLabelFontLarge, color, mode=2 centered) @ 0x5209da;
-		# HUD_DrawTextCentered_HalfBright @ 0x580680 -> CGameFont_DrawText
-		# @ 0x6752c0] (hud/loading_screen.h splash_continue_run).
+		# through the shared glyph leg (engine: runtime/hud/loading_screen.h) (hud/loading_screen.h splash_continue_run).
 		HudPos.draw_splash_continue(self, _splash_font, _splash_pages, _splash_text,
 				Vector2i(roundi(size.x), roundi(size.y)), _splash_blink_on)
 	if _splash_arrow != null:
@@ -616,7 +613,7 @@ func _draw_wrapped(font: FontFile, text: String, x: int, y: int, width: int,
 # The progress bar, scaled from the HudPos.DESIGN_* virtual overlay space onto
 # the display; the 1px border/inset steps stay in real pixels (the rect/color
 # witnesses live at the engine home, hud/loading_screen.h)
-# [orig: LoadingScreen_UpdateAndPresent @ 0x586c78 + HUD_DrawProgressBar_0 @ 0x5d4c40].
+# (engine: runtime/hud/loading_screen.h).
 func _draw_progress_bar() -> void:
 	# The layered rects are the engine's (hud/loading_screen.h loading_bar_rects):
 	# black, gray, black track, then the fill child.
