@@ -13,8 +13,8 @@
     <AssemblyTitle>OpenNova Switcher</AssemblyTitle>
     <Company>OpenNova</Company>
     <Copyright>MIT License</Copyright>
-    <!-- A development build; a release stamps its tag over this (package-switcher-windows.yml). -->
-    <Version>0.0.0</Version>
+    <!-- What CI dev builds report; a release stamps its tag over this (package-switcher-windows.yml). -->
+    <Version>0.1.0</Version>
     <ApplicationIcon>Assets\onswitcher.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
