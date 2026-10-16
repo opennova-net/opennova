@@ -2380,6 +2380,47 @@ bool run_vehicle_drive_authority() {
 	return true;
 }
 
+// The tail's last i16 is the recipient's entity+0x120 word (Armor; ammo class 1's
+// carried pool, our Entity::mana), raw, alive or dead; a retail client stores it
+// as its own Armor every frame. It was a constant 0 (B-4).
+// [orig: NetPacket_WritePlayerState @0x4FFD77..0x4FFD8B;
+//  NapiNPClientMsg_0x00A @0x4305EB]
+bool run_0a_tail_carries_the_armor_word() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	const w::EntityHandle h =
+			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+	w::Entity *e = world.registry.get(h);
+	if (!expect(e != nullptr, "armor: player entity resolvable")) return false;
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, h, 0});
+	auto frame_armor = [&](int16_t &armor) {
+		ns::test::emit_all(world, conns);
+		ns::Datagram dg;
+		if (!ch.client_recv(dg)) return false;
+		nw::FrameUpdate fu;
+		if (!nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu) ||
+				!fu.local_tail_present)
+			return false;
+		armor = fu.armor;
+		return true;
+	};
+	int16_t armor = 0;
+	e->mana = 75;
+	if (!expect(frame_armor(armor) && armor == 75, "armor: the tail carries entity+0x120"))
+		return false;
+	// A negative word crosses raw (the signed i16 the client stores).
+	e->mana = -2;
+	if (!expect(frame_armor(armor) && armor == -2, "armor: a negative word crosses raw"))
+		return false;
+	// Dead: retail still writes the word.
+	e->health = 0;
+	e->flags |= 2u;
+	e->mana = 40;
+	return expect(frame_armor(armor) && armor == 40, "armor: a dead recipient's word still rides");
+}
+
 int main() {
 	const bool ok = run_fanout_and_per_connection_anchor() && run_joiner_uplink_snaps_peer() &&
 	                run_self_uplink_rejected() && run_cross_peer_uplink_rejected() &&
@@ -2392,7 +2433,8 @@ int main() {
 	                run_0a_player_record_field_sources() &&
 	                run_0a_anchor_is_the_recipient_eye() &&
 	                run_0a_round_score_and_los_read_the_body() &&
-	                run_0a_deploy_hold_and_tail_stance() && run_0x26_attach_mounted_echo() &&
+	                run_0a_deploy_hold_and_tail_stance() && run_0a_tail_carries_the_armor_word() &&
+	                run_0x26_attach_mounted_echo() &&
 	                run_mounted_g_slot_route_echo() &&
 	                run_vehicle_drive_authority() &&
 	                run_grounded_uplink_apply_and_echo() && run_pose_transform_roundtrip() &&

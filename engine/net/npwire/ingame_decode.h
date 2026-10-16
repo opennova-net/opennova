@@ -1037,7 +1037,11 @@ struct FrameUpdate {
 	//  @0x439DF0 / Entity_AttachCarriedObject @0x43C130]
 	uint16_t carried_handle = 0xFFFF;
 	int16_t  health = 0;            // local-player health
-	int16_t  state_word = 0;
+	// The recipient's entity+0x120 word, Armor (ammo class 1's carried pool
+	// shares it), which the client stores as its own every frame.
+	// [orig: NetPacket_WritePlayerState @0x4FFD77..0x4FFD8B; NapiNPClientMsg_0x00A
+	//  read @0x430442, store g_LocalPlayerEntity->Armor @0x4305EB]
+	int16_t  armor = 0;
 	bool     local_tail_present = false; // all seven recipient-local tail bytes decoded
 	FrameWeaponBlock    weapon;     // valid iff sub_block == 0
 	FrameTimerBlock     timer;      // valid iff sub_block == 1

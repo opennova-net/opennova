@@ -565,7 +565,7 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu,
 	w.u8(fu.state_flag_byte);
 	w.u16(fu.carried_handle);
 	w.u16(uint16_t(fu.health));
-	w.u16(uint16_t(fu.state_word));
+	w.u16(uint16_t(fu.armor));
 
 	// Conditional mounted-weapon ammo record.
 	if ((fu.flags2 & 0x0F) == 8) {

@@ -236,6 +236,11 @@ void JoinerRole::apply_authoritative_health() {
                 local->flags = (local->flags & ~world::kEntityFlagParachute) | chute;
                 local->engine_flags = (local->engine_flags & ~world::kEntityFlagParachute) | chute;
             }
+			// The tail's last word lands on L's +0x120 every frame that carries
+			// it, alive or dead: retail's store has no gate past the local
+			// entity's null test. [orig: NapiNPClientMsg_0x00A @0x430550 null
+			//  test, `g_LocalPlayerEntity->Armor = v109` @0x4305EB]
+			local->mana = rt.state().local_armor;
 
 			// ClientRuntime latches authoritative spawn closed on a decoded zero
 			// tail, even if a later packet in this recv pump carries stale positive

@@ -394,7 +394,7 @@ void ParityTraceBuilder::emit_message(const InGameMessage &message, uint64_t ts_
 	out.local_tail = frame.local_tail_present;
 	out.state_flag_byte = frame.state_flag_byte;
 	out.health = frame.health;
-	out.state_word = frame.state_word;
+	out.armor = frame.armor;
 	out.records = frame.records.size();
 	for (const FrameUpdateRecord &record : frame.records) {
 		switch (record.cls) {
@@ -559,7 +559,7 @@ void ParityTracePrinter::on_frame(const ParityFrameState &record) {
 			record.decoded ? 1u : 0u, record.length, unsigned(record.sub_block),
 			unsigned(record.flags1), unsigned(record.flags2), int(record.anchor_x),
 			int(record.anchor_y), int(record.anchor_z), record.local_tail ? 1u : 0u,
-			unsigned(record.state_flag_byte), int(record.health), int(record.state_word),
+			unsigned(record.state_flag_byte), int(record.health), int(record.armor),
 			record.records, unsigned(record.players), unsigned(record.vehicles),
 			unsigned(record.infantry), unsigned(record.none), record.rounds,
 			unsigned(record.carried), record.weapon_present ? 1u : 0u, unsigned(record.weapon[0]),

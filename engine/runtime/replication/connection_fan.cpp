@@ -68,6 +68,12 @@ struct FrameHeaderState {
 	// record byte13 dead bit). The pre-v34 hardcoded 150 meant a killed client never
 	// learned it died. A decrease also fires the brief damage flash [orig: @0x43059a].
 	int16_t tail_health = 150;
+	// Tail armor = the recipient's entity+0x120 word (Armor; ammo class 1's
+	// carried pool shares it, our Entity::mana), which the client stores as its
+	// own every frame [orig: NetPacket_WritePlayerState `movzx ecx, word ptr
+	// [ecx+120h]` @0x4FFD77, written @0x4FFD8B; NapiNPClientMsg_0x00A store
+	// @0x4305EB].
+	int16_t tail_armor = 0;
 	// Phase-2 global environment and phase-8 recipient mount-ammo state. These are
 	// derived once before budgeting so the conditional header width and bytes agree.
 	uint8_t preround_delay_seconds = 0;
@@ -201,7 +207,8 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	}
 
 	// 7-byte tail: the recipient's OWN stance echo (bits 0-1 = prone/crouch — the client
-	// re-latches from it every frame) + its own carrier handle. See FrameHeaderState.
+	// re-latches from it every frame), its carried object, its Health and its Armor word.
+	// See FrameHeaderState.
 	fu.state_flag_byte = hdr.tail_state_byte;
 	fu.carried_handle = hdr.tail_carried_handle;
 	// TAIL health (v121) -> g_LocalPlayerEntity->Health [orig: @0x4305df] — the recipient's
@@ -212,7 +219,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	// (NetPacket_SerializePlayerState skips that apply [orig: @0x4c11ac]); the tail is the
 	// one channel its own health rides.
 	fu.health = hdr.tail_health;
-	fu.state_word = 0;
+	fu.armor = hdr.tail_armor; // [orig: @0x4FFD77..0x4FFD8B]
 	fu.passenger = hdr.mount_ammo;
 
 	for (const GameEntitySnapshot &e : entities) {
@@ -1266,6 +1273,8 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 			}
 			hs.tail_health = static_cast<int16_t>(
 					own->health > 32767 ? 32767 : (own->health < 0 ? 0 : own->health));
+			// The +0x120 word, raw [orig: NetPacket_WritePlayerState @0x4FFD77].
+			hs.tail_armor = own->mana;
 		}
 	}
 

@@ -144,7 +144,7 @@ int check_S_0A_frame_update() {
 	w.zeros(6);                         // weapon: preround + slot-state bytes
 	w.u8(0xFF);                         // weapon reload_seconds (belt-fed special)
 	w.u32(0);                           // uniform_team_mask i32
-	w.u8(0); w.u16(0); w.u16(0); w.u16(0); // tail: state_flag, mount, health, state_word
+	w.u8(0); w.u16(0); w.u16(0); w.u16(0); // tail: state_flag, carried, health, armor
 	w.u8(0);                            // event-loop terminator (tag 0)
 	EXPECT(w.b.size() == 33);
 	std::function<EntityClass(uint16_t)> noclass;

@@ -59,7 +59,7 @@ inline opennova::FrameUpdate coop_objective_update() {
 	fu.state_flag_byte = 0;
 	fu.carried_handle = 0xFFFF;
 	fu.health = kHealth;
-	fu.state_word = 0;
+	fu.armor = 0;
 	opennova::FrameUpdateRecord rec;
 	rec.handle = kPlayerHandle;
 	rec.type_id = kPlayerTypeId;

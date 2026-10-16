@@ -128,7 +128,7 @@ struct ParityFrameState {
 	int32_t anchor_x = 0, anchor_y = 0, anchor_z = 0;
 	bool local_tail = false;
 	uint32_t state_flag_byte = 0;
-	int32_t health = 0, state_word = 0;
+	int32_t health = 0, armor = 0;
 	size_t records = 0;
 	uint32_t players = 0, vehicles = 0, infantry = 0, none = 0;
 	size_t rounds = 0;

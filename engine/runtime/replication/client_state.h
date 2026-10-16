@@ -1034,6 +1034,12 @@ struct ClientState {
 	int32_t anchor_y = 0;
 	int32_t anchor_z = 0;
 	int16_t local_health = 0;
+	// The 0x0A header tail's last word: the authority's copy of this client's
+	// own entity+0x120 (Armor; ammo class 1's carried pool shares it), stored
+	// onto the local player on every frame that carries the tail.
+	// [orig: NapiNPClientMsg_0x00A -- the read @0x430442, the store
+	//  g_LocalPlayerEntity->Armor @0x4305EB]
+	int16_t local_armor = 0;
 	// The 0x0A header tail's state byte: the authority's copy of this client's
 	// own stance, bit 0 prone and bit 1 crouch (MoveOrder bits 8/9 >> 8). The
 	// client re-latches its stance from it on every frame that carries the tail

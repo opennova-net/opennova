@@ -416,8 +416,8 @@ void compare_frames(const RunFacts &rr, const RunFacts &other, std::vector<Metri
 			[](const F &f) { return std::to_string(f.state_flag_byte); });
 	both("frame_health", "FRAME_HEADER_VALUES_MISMATCH",
 			[](const F &f) { return std::to_string(f.health); });
-	both("frame_state_word", "FRAME_HEADER_VALUES_MISMATCH",
-			[](const F &f) { return std::to_string(f.state_word); });
+	both("frame_armor", "FRAME_HEADER_VALUES_MISMATCH",
+			[](const F &f) { return std::to_string(f.armor); });
 	both("frame_carried", "FRAME_HEADER_VALUES_MISMATCH",
 			[](const F &f) { return std::string(f.carried == 0xFFFF ? "none" : "bound"); });
 	both("frame_weapon", "FRAME_WEAPON_PHASE_MISMATCH", [](const F &f) {
