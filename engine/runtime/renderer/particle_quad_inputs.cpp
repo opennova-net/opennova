@@ -122,7 +122,8 @@ ParticleQuadInputs particle_quad_inputs(const particle::Particle &particle,
 	// = 1/128) and @ 0x5e7183 (flt_7C3B94 = 0.5); RenderStaticBillboards
 	// @ 0x5f51a7..0x5f51e1; RenderTopAlignedBillboards @ 0x5f5b59..0x5f5b93].
 	// The blend weights the NEXT byte by (1 - frac) and the index byte by frac:
-	// `fld1; fsub` multiplied into the lut[i + 1] load, frac into lut[i]
+	// `fld1; fsub` multiplied into the lut[i + 1] load (@ 0x5e7100..0x5e7104),
+	// frac into lut[i] (@ 0x5e710a)
 	// [orig: CParticleEmitter_BuildBillboardQuads @ 0x5e7100..0x5e710a; the
 	// twins CParticleEmitter_RenderStaticBillboards @ 0x5f51c4..0x5f51db and
 	// CParticleEmitter_RenderTopAlignedBillboards @ 0x5f5b76..0x5f5b8d]
