@@ -147,11 +147,6 @@ std::string DockerMachineDriver::check_config(const DockerMachineConfig &c) {
 		return "ONNET_HOSTED_SERVE_IMAGE is no image reference";
 	if (!Ec2MachineDriver::parse_service_url(c.service_url, host, port))
 		return "ONNET_INTERNAL_URL is no http://<host>:<port> the machines can reach";
-	if (c.data_sets.empty())
-		return "no data set for the machines to mount";
-	for (const std::string &data_set : c.data_sets)
-		if (!is_data_set_name(data_set))
-			return "data set '" + loggable(data_set) + "' is no data set name";
 	if (c.call_timeout_ms <= 0)
 		return "no engine call time";
 	return {};

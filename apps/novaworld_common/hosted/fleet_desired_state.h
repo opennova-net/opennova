@@ -10,10 +10,13 @@
 // The answer, per desired container (agent_protocol.h DesiredContainer): its
 // name (hosted_container_name: srv-<server id>-g<generation>), its slot on
 // this machine (fleet_repository.h assign_slot), the serve image the server
-// is pinned to, its data set, opennova-serve's arguments, its environment, its
-// limits (fleet_config.h: the slot's CPUs and memory) and its working
-// directory's files (the host file, game.cfg, admin.cfg, the NovaWorld
-// credentials). The files go only until the machine has reported the
+// is pinned to, the trees it is pinned to (its base data set's and its
+// expansion's, data_set_repository.h, ADR 0064), opennova-serve's arguments,
+// its environment, its limits (fleet_config.h: the slot's CPUs and memory) and
+// its working directory's files (the host file, game.cfg, admin.cfg, the
+// NovaWorld credentials); and, beside the containers, every tree they use
+// (`trees`: where the agent fetches it from the object store and its
+// manifest, each file's name and size). The files go only until the machine has reported the
 // container once, in any state: `reported` is every container the agent runs,
 // so the implementation marks each desired container it names as acknowledged
 // and leaves its files out from then on (the route leaves out the files of any
@@ -29,12 +32,17 @@
 
 #include <net/novaworld/db/database.h>
 
+#include <cstdint>
+#include <map>
 #include <vector>
 
 namespace opennova::novaworld_server::hosted {
 
 struct FleetDecision {
 	std::vector<DesiredContainer> desired; // one per slot, one per name
+	// Every tree the desired containers name, and only those: the agent fetches
+	// what it lacks before a start and may drop what no reply names.
+	std::map<int64_t, TreeSpec> trees;
 	// Whether the service is moving the machine's servers off it. The route
 	// says so as well whenever the machine's row is draining.
 	bool drain = false;

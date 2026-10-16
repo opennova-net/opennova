@@ -9,16 +9,16 @@
 // The bootstrap redeems the machine's one-time token (fleet_repository.h
 // redeem_bootstrap_token) for a new agent secret, minted here, kept as its
 // SHA-256 alone, and handed over with the serve image the machine was
-// launched with, its slots and the data sets it mounts; until the agent's
-// first sync spends the token, a redeem again (a lost reply's retry) mints a
-// fresh secret in place of the last. The sync authenticates the agent's
-// secret (its digest compared in constant time), stores its report
-// (record_sync: the first one spends the token and makes a booting machine
-// ready), asks the
-// supervisor what the machine should run (FleetDesiredState) and answers it:
-// the files of a container this report names left out, each container's uid
-// its slot's, one whose slot is past the machine's dropped, and drain set
-// whenever the machine's row is draining. A sync in another protocol version
+// launched with and its slots; until the agent's first sync spends the token,
+// a redeem again (a lost reply's retry) mints a fresh secret in place of the
+// last. The sync authenticates the agent's secret (its digest compared in
+// constant time), stores its report (record_sync: the first one spends the
+// token and makes a booting machine ready), asks
+// the supervisor what the machine should run (FleetDesiredState) and answers
+// it: the containers with the trees they use, the files of a container this
+// report names left out, each container's uid its slot's, one whose slot is
+// past the machine's dropped, and drain set whenever the machine's row is
+// draining. A sync in another protocol version
 // is not read: its machine is drained. A sync whose agent could not list its
 // containers (listing_failed) records that the agent was heard from alone
 // (record_unlisted_sync), logged at most once per peer per minute.

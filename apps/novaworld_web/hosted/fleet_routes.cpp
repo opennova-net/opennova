@@ -2,6 +2,7 @@
 
 #include "auth.h"
 #include "billing/entitlement.h"
+#include "hosted/data_set_repository.h"
 #include "hosted/hosted_repository.h"
 #include "hosted_routes.h"
 #include "http_json.h"
@@ -64,8 +65,8 @@ crow::json::wvalue machine_json(db::Database &db, const FleetMachineRow &m) {
 	return out;
 }
 
-void FleetRoutes::configure(bool enabled, std::string provider, int cap) {
-	enabled_ = enabled;
+void FleetRoutes::configure(bool hosting_on, std::string provider, int cap) {
+	hosting_on_ = hosting_on;
 	provider_ = std::move(provider);
 	cap_ = cap;
 }
@@ -84,17 +85,20 @@ void FleetRoutes::register_routes(WebApp &app) {
 }
 
 // GET /api/admin/hosted[?owner=<username>][&state=live|ended|all] — the fleet:
-// {"enabled", "provider", "cap", "live" (how many servers are live), "machines"
-// (the live machines by id, then the newest kEndedMachinesShown ended or failed
-// ones, newest first; machine_json), "servers"} (the newest kServersShown the
-// filter takes, live first: `owner` an account's username (none by that name:
-// no server), `state` live, ended or all (the default); each as GET
-// /api/me/servers' plus `owner` ({id, username, tier: its granting support
-// tier or null} or null), `service_account` ({id, username} or null),
+// {"enabled" (a machine driver and at least one offered data set), "provider",
+// "cap", "live" (how many servers are live), "machines" (the live machines by
+// id, then the newest kEndedMachinesShown ended or failed ones, newest first;
+// machine_json, with the trees each holds), "servers"} (the newest
+// kServersShown the filter takes, live first: `owner` an account's username
+// (none by that name: no server), `state` live, ended or all (the default);
+// each as GET /api/me/servers' plus `owner` ({id, username, tier: its granting
+// support tier or null} or null), `service_account` ({id, username} or null),
 // `provider`, `container` (its container's name), `machine_address`, `admin_port`,
 // `machine_ref` and `slot` (null with none; an ended server's where it last
 // ran), `game_port` (null before its first placement), `generation`,
-// `serve_image` and `players` (its listing's, null when not listed)). 400
+// `serve_image`, `base_tree_id` and `expansion_tree_id` (its pins, null before
+// its first start), `outdated` (newer data than its pins, while live),
+// `update_requested` and `players` (its listing's, null when not listed)). 400
 // invalid_field for another state. Never the admin password; no-store. The
 // background jobs (the machines' launches and ends among them) are the jobs
 // routes' (jobs/job_routes.h).
@@ -115,7 +119,7 @@ crow::response FleetRoutes::fleet(const crow::request &req) {
 	try {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
-		out["enabled"] = enabled_;
+		out["enabled"] = hosting_on_ && !offered_data_sets(*db_conn).empty();
 		out["provider"] = provider_;
 		out["cap"] = cap_;
 		out["live"] = count_live(*db_conn);

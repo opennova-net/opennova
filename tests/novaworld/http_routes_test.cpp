@@ -38,6 +38,7 @@
 #include "hosted/admin_link.h"
 #include "hosted/console_commands.h"
 #include "hosted/console_queue.h"
+#include "hosted/data_set_repository.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/limits_hold.h"
 #include "hosted/stats_repository.h"
@@ -171,6 +172,15 @@ struct Harness {
 	// The first listener's Redis (its own namespace): what every web process
 	// sharing it would see.
 	nws::RedisPool *redis = nullptr;
+	// The seeded data sets (migration 0011) the harness gave ready trees: Joint
+	// Operations (missions a.bms, alpha.bms, first.bms, second.bms), Escalation
+	// under it (escal.bms) and Delta Force Xtreme 2 (dfx2_a.bms, dfx2_b.bms);
+	// OpenNova's has none, so it is not offered.
+	int64_t jo_id = 0;
+	int64_t jox_id = 0;
+	int64_t dfx2_id = 0;
+	int64_t on_id = 0;
+	int64_t jo_tree = 0;
 
 	// Every connect, send and recv waits at most `timeout_ms`.
 	net::HttpReply send(const char *method, const std::string &path,
@@ -192,6 +202,30 @@ struct Harness {
 
 std::string body_text(const net::HttpReply &reply) {
 	return std::string(reply.body.begin(), reply.body.end());
+}
+
+// The seeded data set named `display_name` (migration 0011's rows), 0 for none.
+int64_t data_set_named(opennova::db::Database &db, const char *display_name) {
+	const auto rows = db.query("SELECT id FROM data_sets WHERE display_name = $1;", { opennova::db::BindValue(display_name) });
+	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
+}
+
+// A ready tree of `data_set_id` with `version` and `missions` (each titled after itself); its id.
+int64_t seed_tree(opennova::db::Database &db, int64_t data_set_id, const std::string &version,
+		const std::vector<std::string> &missions) {
+	namespace hosted = opennova::novaworld_server::hosted;
+	const int64_t id = hosted::create_tree(db, data_set_id, hosted::TreeState::Finalizing, "harness");
+	hosted::TreeReady ready;
+	ready.files = { { "resource.pff", 1000 }, { "version.txt", 20 } };
+	for (const std::string &m : missions) ready.missions.push_back({ m, "Map " + m });
+	ready.version_text = version;
+	ready.bytes = 1020;
+	return hosted::finish_tree(db, id, hosted::TreeState::Finalizing, ready) ? id : 0;
+}
+
+// What a start may pick now (data_set_repository.h).
+std::vector<opennova::novaworld_server::hosted::OfferedDataSet> offered(Harness &h) {
+	return opennova::novaworld_server::hosted::offered_data_sets(*h.pool.acquire());
 }
 
 // A reply for a failure line: its status and body, or why no reply came.
@@ -4898,13 +4932,15 @@ void end_stopping_servers(Harness &h) {
 }
 
 // The hosted servers' routes (hosted/hosted_routes.h; the harness listener runs
-// them with ONNET_HOSTED_PROVIDER set, a cap of 4 and two offered data sets,
-// Joint Operations' with the default rotation "default.bms" and Delta Force
-// Xtreme 2's with its own, and no supervisor, so rows stay where the routes
-// put them): the session and CSRF refusals, the data sets the owner's view
-// lists, the comp grant (PUT /api/admin/users/<id>/comp-servers, admin only),
-// the settings' refusals (the game among them), the starts (on the first data
-// set when it names none, and on Delta Force Xtreme 2's with its rotation) up
+// them with ONNET_HOSTED_PROVIDER set, a cap of 4 and the seeded data sets with
+// ready trees, Joint Operations' (with Escalation) and Delta Force Xtreme 2's,
+// and no supervisor, so rows stay where the routes put them): the session and
+// CSRF refusals, the data sets the owner's view lists (each with its tree's
+// missions, limits and expansions), the comp grant (PUT
+// /api/admin/users/<id>/comp-servers, admin only), the settings' refusals (the
+// data set, the expansion and the rotation among them), the starts (on the
+// first data set with every mission of its tree when it names none, and on
+// Delta Force Xtreme 2's with its own) up
 // to the account's hosting entitlement (server_limit with its counts past it,
 // a stopping server counting), the cap and `full`, another account's id
 // answering 404, the owner's stop by id (409 not_live once ended), the
@@ -4935,8 +4971,9 @@ int test_hosted_server_routes(Harness &h) {
 	// The start / stop bucket (HostedRoutes::kStartStopPerUser) is 6 per account,
 	// then one every 20 s, and a request refused before it (logged out, no CSRF
 	// header) draws nothing. Ana draws exactly six below (three starts, three
-	// stops), Dee six (the refused settings, then not_entitled), the others fewer:
-	// add a draw to one of them and it must move to a new account.
+	// stops), Dee six (the refused settings, then not_entitled), Eve four and Gus
+	// four (the data set refusals, then an expansion start with no entitlement),
+	// the others fewer: add a draw to one of them and it must move to a new account.
 
 	auto start = [&h](const Owner &o, const std::string &body, bool csrf = true) {
 		std::vector<std::string> headers = { kJson, with_session(o.session) };
@@ -4982,24 +5019,29 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(reply.code == 200 && json && json["enabled"].b() && !json["full"].b());
 	TEST_EXPECT(entitlement_is(json, 0, 0, 0, 0, false, "none"));
 	TEST_EXPECT(json["servers"].t() == crow::json::type::List && json["servers"].size() == 0);
-	// The data sets the deployment offers, in the service's order (Joint
-	// Operations first; OpenNova's is not named here, so it is not offered):
-	// each one's game, name, expansions, rotation (the missions the site's
-	// picker offers) and limits.
+	// The data sets with data, bases by id (Joint Operations first; OpenNova's
+	// has no tree, so it is not offered): each one's id, name, title, version,
+	// its tree's missions (the site's picker and the default rotation), its
+	// title's limits and its expansions with data.
 	TEST_EXPECT(json.has("data_sets") && json["data_sets"].size() == 2);
 	if (json.has("data_sets") && json["data_sets"].size() == 2) {
 		const auto &jo = json["data_sets"][0];
 		const auto &dfx2 = json["data_sets"][1];
-		TEST_EXPECT(str(jo["game"]) == "jop_2_consumer" && str(jo["display_name"]) == "Joint Operations");
-		TEST_EXPECT(jo["expansions"].size() == 2 && str(jo["expansions"][0]["code"]).empty() &&
-				str(jo["expansions"][1]["code"]) == "jox01" &&
-				str(jo["expansions"][1]["name"]) == "Escalation (jox01)");
-		TEST_EXPECT(jo["default_missions"].size() == 1 && str(jo["default_missions"][0]) == "default.bms");
+		TEST_EXPECT(jo["id"].i() == h.jo_id && str(jo["display_name"]) == "Joint Operations" &&
+				str(jo["title"]) == "jo" && str(jo["version"]) == "JO V1.7.5.3");
+		TEST_EXPECT(jo["missions"].size() == 4 && str(jo["missions"][0]["file"]) == "a.bms" &&
+				str(jo["missions"][0]["title"]) == "Map a.bms" && str(jo["missions"][3]["file"]) == "second.bms");
+		TEST_EXPECT(jo["expansions"].size() == 1 && jo["expansions"][0]["id"].i() == h.jox_id &&
+				str(jo["expansions"][0]["code"]) == "jox01" &&
+				str(jo["expansions"][0]["display_name"]) == "Escalation" &&
+				str(jo["expansions"][0]["version"]) == "JOX V1.0" && jo["expansions"][0]["missions"].size() == 1 &&
+				str(jo["expansions"][0]["missions"][0]["file"]) == "escal.bms");
 		TEST_EXPECT(jo["limits"]["max_players"]["min"].i() == 2 && jo["limits"]["max_players"]["max"].i() == 64);
 		TEST_EXPECT(jo["limits"]["kill_limit"]["max"].i() == 500 && jo["limits"]["start_delay"]["min"].i() == 0);
-		TEST_EXPECT(str(dfx2["game"]) == "dfx2_consumer" && str(dfx2["display_name"]) == "Delta Force Xtreme 2");
-		TEST_EXPECT(dfx2["expansions"].size() == 1 && str(dfx2["expansions"][0]["code"]).empty());
-		TEST_EXPECT(dfx2["default_missions"].size() == 2 && str(dfx2["default_missions"][1]) == "dfx2_b.bms");
+		TEST_EXPECT(dfx2["id"].i() == h.dfx2_id && str(dfx2["display_name"]) == "Delta Force Xtreme 2" &&
+				str(dfx2["title"]) == "dfx2");
+		TEST_EXPECT(dfx2["expansions"].size() == 0);
+		TEST_EXPECT(dfx2["missions"].size() == 2 && str(dfx2["missions"][1]["file"]) == "dfx2_b.bms");
 		TEST_EXPECT(dfx2["limits"].has("respawn") && dfx2["limits"]["time_limit"]["max"].i() == 300);
 		TEST_EXPECT(dfx2["limits"]["max_players"]["max"].i() == 100);
 	}
@@ -5032,25 +5074,41 @@ int test_hosted_server_routes(Harness &h) {
 	// A valid start with no entitlement.
 	reply = start(dee, settings);
 	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_entitled");
-	// The game: one the service offers (OpenNova's is known, but not offered
-	// here), whose expansions the expansion names; own_machine a flag.
-	const Refused game_refused[] = {
-		{ "{\"game\":\"jop_3_consumer\",\"game_name\":\"x\",\"missions\":[\"a.bms\"]}", "invalid_settings", "game" },
-		{ "{\"game\":\"opennova_0_consumer\",\"game_name\":\"x\",\"missions\":[\"a.bms\"]}", "invalid_settings",
-				"game" },
-		{ "{\"game\":\"dfx2_consumer\",\"game_name\":\"x\",\"expansion\":\"jox01\"}", "invalid_settings",
-				"expansion" },
-		{ "{\"game\":7,\"game_name\":\"x\"}", "invalid_field", "" },
+	// The data set: one with data (OpenNova's row is there, with no tree), whose
+	// expansions the expansion is one of, and whose missions the rotation
+	// names; own_machine a flag.
+	const std::string jo = std::to_string(h.jo_id), dfx2 = std::to_string(h.dfx2_id);
+	const std::string jox = std::to_string(h.jox_id), on = std::to_string(h.on_id);
+	struct RefusedBody {
+		std::string body;
+		const char *error;
+		const char *field;
+	};
+	const RefusedBody data_set_refused[] = {
+		{ "{\"data_set_id\":999999,\"game_name\":\"x\",\"missions\":[\"a.bms\"]}", "invalid_settings", "data_set_id" },
+		{ "{\"data_set_id\":" + on + ",\"game_name\":\"x\",\"missions\":[\"a.bms\"]}", "invalid_settings", "data_set_id" },
+		{ "{\"data_set_id\":" + dfx2 + ",\"game_name\":\"x\",\"expansion_id\":" + jox + "}", "invalid_settings",
+				"expansion_id" },
+		{ "{\"data_set_id\":" + jo + ",\"game_name\":\"x\",\"missions\":[\"escal.bms\"]}", "invalid_settings", "missions" },
+		{ "{\"data_set_id\":" + jo + ",\"game_name\":\"x\",\"missions\":[\"dfx2_a.bms\"]}", "invalid_settings", "missions" },
+		{ "{\"data_set_id\":\"" + jo + "\",\"game_name\":\"x\"}", "invalid_field", "" },
 		{ "{\"game_name\":\"x\",\"own_machine\":1}", "invalid_field", "" },
 	};
-	for (const Refused &r : game_refused) {
-		reply = start(eve, r.body);
+	size_t refusals = 0;
+	for (const RefusedBody &r : data_set_refused) {
+		// Four draws from Eve's bucket, the rest from Gus's.
+		reply = start(refusals++ < 4 ? eve : gus, r.body);
 		json = crow::json::load(body_text(reply));
 		if (reply.code != 400 || error_of_reply(reply) != r.error)
-			std::fprintf(stderr, "  %s -> %s\n", r.body, describe(reply).c_str());
+			std::fprintf(stderr, "  %s -> %s\n", r.body.c_str(), describe(reply).c_str());
 		TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == r.error);
 		if (*r.field) TEST_EXPECT(json && str(json["field"]) == r.field && json.has("message"));
 	}
+	// Escalation's missions count with the expansion picked (the rotation then
+	// spans both), refused past the settings at the entitlement: gus has none yet.
+	reply = start(gus, "{\"data_set_id\":" + jo + ",\"expansion_id\":" + jox +
+							",\"game_name\":\"x\",\"missions\":[\"first.bms\",\"escal.bms\"]}");
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "not_entitled");
 
 	// The comp grant: admin only (the token, or an admin session with the CSRF
 	// header), a whole number 0..16.
@@ -5080,10 +5138,20 @@ int test_hosted_server_routes(Harness &h) {
 	const int64_t ana_first = json["server"]["id"].i();
 	TEST_EXPECT(json["server"]["live"].b() && !json["server"]["own_machine"].b());
 	TEST_EXPECT(str(json["server"]["settings"]["game_name"]) == "Ana's Server");
-	// No game named: the first the service offers, with its names.
-	TEST_EXPECT(str(json["server"]["settings"]["game"]) == "jop_2_consumer");
+	// No data set named: the first offered, with its names; no expansion; not
+	// started yet, so no data and nothing newer.
+	TEST_EXPECT(json["server"]["settings"]["data_set_id"].i() == h.jo_id &&
+			json["server"]["settings"]["expansion_id"].t() == crow::json::type::Null);
+	TEST_EXPECT(json["server"]["data_set"]["id"].i() == h.jo_id &&
+			str(json["server"]["data_set"]["display_name"]) == "Joint Operations");
+	TEST_EXPECT(json["server"]["expansion"].t() == crow::json::type::Null);
 	TEST_EXPECT(str(json["server"]["game_display_name"]) == "Joint Operations");
-	TEST_EXPECT(str(json["server"]["expansion_display_name"]) == "Joint Operations (base game)");
+	TEST_EXPECT(str(json["server"]["expansion_display_name"]).empty());
+	TEST_EXPECT(json["server"]["data"]["base"].t() == crow::json::type::Null &&
+			json["server"]["data"]["expansion"].t() == crow::json::type::Null);
+	// Not started, so no pins: behind by the rule (server_outdated) until its
+	// first start pins it; nothing asked.
+	TEST_EXPECT(json["server"]["update_available"].b() && !json["server"]["update_requested"].b());
 	TEST_EXPECT(json["server"]["settings"]["max_players"].i() == 16);
 	TEST_EXPECT(json["server"]["settings"]["missions"].size() == 2);
 	TEST_EXPECT(str(json["server"]["settings"]["missions"][0]) == "first.bms");
@@ -5095,11 +5163,16 @@ int test_hosted_server_routes(Harness &h) {
 	TEST_EXPECT(str(json["server"]["events"][0]["from"]).empty() &&
 			str(json["server"]["events"][0]["to"]) == "requested");
 	TEST_EXPECT(header_value(reply, "Cache-Control") == "no-store");
-	// The second takes the default rotation when it names none.
-	reply = start(ana, "{\"game_name\":\"Ana's Second\"}");
+	// The second takes every mission of its data set's tree when it names none
+	// (with Escalation, the expansion's after the base's).
+	reply = start(ana, "{\"game_name\":\"Ana's Second\",\"expansion_id\":" + jox + "}");
 	json = crow::json::load(body_text(reply));
-	TEST_EXPECT(reply.code == 202 && json["server"]["settings"]["missions"].size() == 1);
-	TEST_EXPECT(str(json["server"]["settings"]["missions"][0]) == "default.bms");
+	TEST_EXPECT(reply.code == 202 && json["server"]["settings"]["missions"].size() == 5);
+	TEST_EXPECT(str(json["server"]["settings"]["missions"][0]) == "a.bms" &&
+			str(json["server"]["settings"]["missions"][4]) == "escal.bms");
+	TEST_EXPECT(json["server"]["settings"]["expansion_id"].i() == h.jox_id &&
+			json["server"]["expansion"]["id"].i() == h.jox_id && str(json["server"]["expansion"]["code"]) == "jox01" &&
+			str(json["server"]["expansion_display_name"]) == "Escalation");
 	const int64_t ana_second = json["server"]["id"].i();
 	// The third: every server the grant allows is live.
 	reply = start(ana, settings);
@@ -5116,11 +5189,11 @@ int test_hosted_server_routes(Harness &h) {
 	reply = start(ben, "{\"game_name\":\"Ben's\"}");
 	TEST_EXPECT(reply.code == 202);
 	const int64_t ben_server = crow::json::load(body_text(reply))["server"]["id"].i();
-	reply = start(cy, "{\"game\":\"dfx2_consumer\",\"game_name\":\"Cy's\"}");
+	reply = start(cy, "{\"data_set_id\":" + dfx2 + ",\"game_name\":\"Cy's\"}");
 	json = crow::json::load(body_text(reply));
 	if (reply.code != 202) std::fprintf(stderr, "  dfx2 start: %s\n", describe(reply).c_str());
-	// Delta Force Xtreme 2's server takes that game's default rotation.
-	TEST_EXPECT(reply.code == 202 && str(json["server"]["settings"]["game"]) == "dfx2_consumer");
+	// Delta Force Xtreme 2's server takes its tree's missions.
+	TEST_EXPECT(reply.code == 202 && json["server"]["settings"]["data_set_id"].i() == h.dfx2_id);
 	TEST_EXPECT(str(json["server"]["game_display_name"]) == "Delta Force Xtreme 2");
 	TEST_EXPECT(json["server"]["settings"]["missions"].size() == 2 &&
 			str(json["server"]["settings"]["missions"][0]) == "dfx2_a.bms");
@@ -5317,10 +5390,10 @@ int test_hosted_listing_owner(Harness &h) {
 
 	// The hosted server and its service account, as the supervisor makes them.
 	hosted::HostedSettings settings;
-	settings.game = hosted::kDataSetJointOperations;
+	settings.data_set_id = h.jo_id;
 	settings.game_name = "Hosted Owner Test";
 	settings.missions = { "a.bms" };
-	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, hosted::known_data_sets(), 10,
+	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, offered(h), 10,
 			opennova::novaworld_server::billing::unix_now());
 	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
 	const int64_t server_id = request.id;
@@ -5757,11 +5830,11 @@ int test_admin_fleet_routes(Harness &h) {
 	TEST_EXPECT(hosted::mark_launched(*db, machine.id, launched));
 	TEST_EXPECT(hosted::record_sync(*db, machine.id, "test-agent", {}).has_value());
 	hosted::HostedSettings settings;
-	settings.game = hosted::kDataSetJointOperations;
+	settings.data_set_id = h.jo_id;
 	settings.game_name = "Fleet Routes";
 	settings.missions = { "a.bms" };
 	const auto start = [&](int64_t owner) {
-		const auto r = hosted::request_server(*db, owner, settings, hosted::known_data_sets(), 50, billing::unix_now());
+		const auto r = hosted::request_server(*db, owner, settings, hosted::offered_data_sets(*db), 50, billing::unix_now());
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	};
 	const int64_t running = start(ana);
@@ -5957,11 +6030,11 @@ int test_hosted_stats_routes(Harness &h) {
 	TEST_EXPECT(!owner_s.empty() && !other_s.empty());
 	auto db = h.pool.acquire();
 	hosted::HostedSettings settings;
-	settings.game = hosted::kDataSetJointOperations;
+	settings.data_set_id = h.jo_id;
 	settings.game_name = "Stats Routes";
 	settings.missions = { "a.bms" };
 	const auto start = [&](int64_t who) {
-		const auto r = hosted::request_server(*db, who, settings, hosted::known_data_sets(), 50, billing::unix_now());
+		const auto r = hosted::request_server(*db, who, settings, hosted::offered_data_sets(*db), 50, billing::unix_now());
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	};
 	const int64_t running = start(owner);
@@ -6148,13 +6221,13 @@ int test_hosted_usage_route(Harness &h) {
 	// on its slot 0, Ana's running on the own machine, Ana's waiting for a
 	// place, and Ben's ended.
 	hosted::HostedSettings settings;
-	settings.game = hosted::kDataSetJointOperations;
+	settings.data_set_id = h.jo_id;
 	settings.game_name = "Usage Routes";
 	settings.missions = { "a.bms" };
 	const auto start = [&](int64_t owner, const char *name) {
 		settings.game_name = name;
 		const auto r = hosted::request_server(
-				*db, owner, settings, hosted::known_data_sets(), 50, billing::unix_now());
+				*db, owner, settings, hosted::offered_data_sets(*db), 50, billing::unix_now());
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	};
 	const auto to_running = [&](int64_t id) {
@@ -6369,10 +6442,10 @@ int test_hosted_console_routes(Harness &h) {
 	auto reply = get("/api/me/servers/999999/players", as_owner);
 	TEST_EXPECT(reply.code == 404 && error_of_reply(reply) == "not_found");
 	hosted::HostedSettings settings;
-	settings.game = hosted::kDataSetJointOperations;
+	settings.data_set_id = h.jo_id;
 	settings.game_name = "Console Test";
 	settings.missions = { "alpha.bms" };
-	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, hosted::known_data_sets(), 10,
+	const auto request = hosted::request_server(*h.pool.acquire(), owner, settings, offered(h), 10,
 			opennova::novaworld_server::billing::unix_now());
 	TEST_EXPECT(request.outcome == hosted::RequestOutcome::Created);
 	const int64_t id = request.id;
@@ -6479,7 +6552,7 @@ int test_hosted_console_routes(Harness &h) {
 	const Refused refusals[] = {
 		{ me + "/players/0/punt", "{}", "invalid_slot" },
 		{ me + "/players/256/ban", "{}", "invalid_slot" },
-		{ me + "/rotation/32/remove", "{}", "invalid_index" },
+		{ me + "/rotation/128/remove", "{}", "invalid_index" },
 		{ me + "/rotation/256/next", "{}", "invalid_index" },
 		{ me + "/rotation", "{\"mission\":\"../x.bms\"}", "invalid_mission" },
 		{ me + "/rotation", "{\"mission\":\"a.bms 1 0 ONESHOT\"}", "invalid_mission" },
@@ -6588,7 +6661,7 @@ int test_hosted_console_routes(Harness &h) {
 
 	// A full rotation takes no more (kConsoleRotationMax, policy).
 	const std::vector<std::string> saved = fake.rotation();
-	fake.set_rotation(std::vector<std::string>(32, "ALPHA.BMS"));
+	fake.set_rotation(std::vector<std::string>(128, "ALPHA.BMS"));
 	reply = post(base + "/rotation", { kBearer }, "{\"mission\":\"BRAVO.BMS\"}");
 	TEST_EXPECT(reply.code == 409 && error_of_reply(reply) == "rotation_full");
 	fake.set_rotation(saved);
@@ -7739,14 +7812,28 @@ int main(int argc, char **argv) {
 		config.trusted_proxies = {"127.0.0.1"};
 		config.api_proxy_only = true;
 		// The hosted servers' routes run (no supervisor: rows stay where the routes
-		// put them), with a cap of 4 and two data sets, each with a default
-		// rotation: Joint Operations and Delta Force Xtreme 2. OpenNova's is not
-		// named, so it is not offered.
+		// put them), with a cap of 4, a local object store (never read here) and
+		// the seeded data sets given ready trees: Joint Operations with
+		// Escalation, and Delta Force Xtreme 2; OpenNova's has none.
 		config.hosted_provider = "docker";
 		config.hosted_cap = 4;
-		config.hosted_data_sets =
-				"{\"dfx2_consumer\":{\"missions\":[\"dfx2_a.bms\",\"dfx2_b.bms\"]},"
-				"\"jop_2_consumer\":{\"missions\":[\"default.bms\"]}}";
+		{
+			const std::string store_dir = (temp.path / "store").generic_u8string();
+			std::filesystem::create_directories(temp.path / "store" / "trees");
+			config.object_store_url = "file://" + (store_dir.front() == '/' ? store_dir : "/" + store_dir);
+		}
+		int64_t jo_id = 0, jox_id = 0, dfx2_id = 0, on_id = 0, jo_tree = 0;
+		{
+			auto db = pool.acquire();
+			jo_id = data_set_named(*db, "Joint Operations");
+			jox_id = data_set_named(*db, "Escalation");
+			dfx2_id = data_set_named(*db, "Delta Force Xtreme 2");
+			on_id = data_set_named(*db, "OpenNova");
+			jo_tree = seed_tree(*db, jo_id, "JO V1.7.5.3", { "a.bms", "alpha.bms", "first.bms", "second.bms" });
+			TEST_EXPECT(jo_id > 0 && jox_id > 0 && dfx2_id > 0 && on_id > 0 && jo_tree > 0);
+			TEST_EXPECT(seed_tree(*db, jox_id, "JOX V1.0", { "escal.bms" }) > 0);
+			TEST_EXPECT(seed_tree(*db, dfx2_id, "DFX2 V1.0", { "dfx2_a.bms", "dfx2_b.bms" }) > 0);
+		}
 
 		opennova::ConnectionManager manager;
 		// The lobby, as main() wires it: a real NW UDP listener on a port the OS picks, over the
@@ -7893,6 +7980,11 @@ int main(int argc, char **argv) {
 		harness.mailer = &mailer;
 		harness.jobs = &job_registry;
 		harness.redis = &http_redis.pool();
+		harness.jo_id = jo_id;
+		harness.jox_id = jox_id;
+		harness.dfx2_id = dfx2_id;
+		harness.on_id = on_id;
+		harness.jo_tree = jo_tree;
 		rc = run(harness);
 		// Join the Crow threads before the pool and the TempDir go, then the
 		// NW UDP listener.

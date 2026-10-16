@@ -398,7 +398,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->connections.register_routes(impl_->app, config.heartbeat_timeout_ms);
 	impl_->hosted_servers.configure(config, fleet_placement_);
 	impl_->hosted_servers.register_routes(impl_->app);
-	impl_->fleet.configure(impl_->hosted_servers.enabled(), impl_->hosted_servers.provider(),
+	impl_->fleet.configure(impl_->hosted_servers.hosting_on(), impl_->hosted_servers.provider(),
 			impl_->hosted_servers.cap());
 	impl_->fleet.register_routes(impl_->app);
 	impl_->stats.configure(fleet_slot_memory_mb_, fleet_slot_cpus_);
@@ -411,7 +411,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->billing.register_routes(impl_->app);
 	impl_->jobs.register_routes(impl_->app);
 	impl_->infra.configure(
-			infra_, impl_->hosted_servers.enabled(), impl_->hosted_servers.provider());
+			infra_, impl_->hosted_servers.hosting_on(), impl_->hosted_servers.provider());
 	impl_->infra.register_routes(impl_->app);
 	register_legacy_login_routes(templates_dir);
 	register_legacy_host_join_routes(templates_dir);

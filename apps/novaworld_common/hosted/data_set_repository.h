@@ -132,8 +132,19 @@ struct OfferedDataSet {
 	std::vector<OfferedExpansion> expansions;
 };
 std::vector<OfferedDataSet> offered_data_sets(db::Database &db);
-const OfferedDataSet *find_offered(const std::vector<OfferedDataSet> &offered, int64_t id);
-const OfferedExpansion *find_offered_expansion(const OfferedDataSet &data_set, int64_t id);
+// Pure lookups over the list (inline: check_settings runs them without the database).
+inline const OfferedDataSet *find_offered(const std::vector<OfferedDataSet> &offered, int64_t id) {
+	for (const OfferedDataSet &d : offered)
+		if (d.id == id)
+			return &d;
+	return nullptr;
+}
+inline const OfferedExpansion *find_offered_expansion(const OfferedDataSet &data_set, int64_t id) {
+	for (const OfferedExpansion &e : data_set.expansions)
+		if (e.id == id)
+			return &e;
+	return nullptr;
+}
 
 // --- trees ---
 

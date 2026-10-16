@@ -116,7 +116,8 @@ ServerConfig ServerConfig::from_env() {
 
 	if (auto v = getenv_safe("ONNET_HOSTED_PROVIDER")) c.hosted_provider = v;
 	c.hosted_cap = getenv_int("ONNET_HOSTED_CAP", c.hosted_cap);
-	if (auto v = getenv_safe("ONNET_HOSTED_DATA_SETS")) c.hosted_data_sets = v;
+	if (auto v = getenv_safe("ONNET_OBJECT_STORE_URL")) c.object_store_url = strutil::trim(v);
+	if (auto v = getenv_safe("ONNET_OBJECT_STORE_REGION")) c.object_store_region = strutil::trim(v);
 
 	return c;
 }

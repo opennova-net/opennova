@@ -1,5 +1,6 @@
 #include "object_store.h"
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
 namespace opennova::novaworld_server {
@@ -47,6 +48,15 @@ bool parse_object_store_url(std::string_view url, std::string_view region, Objec
 	}
 	out = std::move(config);
 	return true;
+}
+
+std::string object_store_url(const ObjectStoreConfig &config, std::string_view key) {
+	if (config.kind == ObjectStoreConfig::Kind::S3)
+		return "s3://" + config.bucket + "/" + config.root + "/" + std::string(key);
+	std::string path = io::utf8_join(config.root, key);
+	if (!path.empty() && path.front() != '/')
+		path = "/" + path; // file:///C:/dir on Windows
+	return "file://" + path;
 }
 
 bool is_store_key(std::string_view key) {

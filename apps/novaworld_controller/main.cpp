@@ -25,6 +25,7 @@
 #include "hosted/net_cidr.h"
 #include "hosted/supervisor.h"
 #include "jobs/scheduler.h"
+#include "object_store.h"
 
 #include <base/os_random/os_random.h>
 #include <net/napi/session.h>
@@ -98,19 +99,22 @@ int run(const program::Boot &boot) {
 		// gate sees it).
 		hosted_config.master_host = config.public_host;
 		hosted_config.master_gate_port = config.gate_udp_port;
-		hosted_config.data_sets = hosting.data_sets;
+		// Where the machines fetch each tree from: the store's URL of trees/<id>/,
+		// a pure function of the store's config (the controller holds no store).
+		hosted_config.tree_url = [store = hosting.store](int64_t tree_id) {
+			return object_store_url(store, "trees/" + std::to_string(tree_id) + "/");
+		};
 		hosted_config.placement = fleet.placement;
 		hosted_config.idle_ms = static_cast<uint64_t>(fleet.idle_minutes) * 60 * 1000;
 		hosted_config.slot_cpus = fleet.slot_cpus;
 		hosted_config.slot_memory_mb = fleet.slot_memory_mb;
 		hosted_config.slot_pids = fleet.slot_pids;
 		hosted_config.serve_image = fleet.ec2.serve_image;
-		// A cloud container may pull its image before it starts, and lists over
-		// the internet: longer clocks than a local stack's machine's.
-		if (hosting.provider == "ec2") {
-			hosted_config.boot_timeout_ms = 10 * 60 * 1000;
+		// A cloud container lists over the internet: a longer listing clock than
+		// a local stack's machine's (its boot clock, 15 min, covers a fresh
+		// machine's tree fetch and image pull on either driver).
+		if (hosting.provider == "ec2")
 			hosted_config.listing_timeout_ms = 5 * 60 * 1000;
-		}
 		supervisor =
 				std::make_unique<hosted::Supervisor>(boot.pool, hosting.profile, hosted_config);
 		// A stop's ServerStopHosting, scoped to the service account that holds
@@ -127,11 +131,8 @@ int run(const program::Boot &boot) {
 			}
 		});
 		supervisor->set_admin_links(admin_links.get());
-		std::vector<std::string> data_sets;
-		for (const hosted::DataSet &d : hosting.data_sets)
-			data_sets.push_back(d.game);
 		internal_listener = std::make_unique<hosted::InternalListener>(
-				boot.pool, *supervisor, hosted::agent_route_config(fleet, data_sets));
+				boot.pool, *supervisor, hosted::agent_route_config(fleet));
 	}
 
 	// The election (controller.h): while it leads, its parts run in order, each

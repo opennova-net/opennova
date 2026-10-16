@@ -38,10 +38,10 @@ std::string LocalObjectStore::path_of(std::string_view key) const {
 }
 
 std::string LocalObjectStore::url_of(std::string_view key) const {
-	std::string path = path_of(key);
-	if (!path.empty() && path.front() != '/')
-		path = "/" + path; // file:///C:/dir on Windows
-	return "file://" + path;
+	ObjectStoreConfig config;
+	config.kind = ObjectStoreConfig::Kind::Local;
+	config.root = root_;
+	return object_store_url(config, key);
 }
 
 bool LocalObjectStore::put_file(std::string_view key, const std::string &path, std::string &error) {

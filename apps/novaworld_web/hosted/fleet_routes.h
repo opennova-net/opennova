@@ -2,12 +2,13 @@
 
 // The admin's fleet routes (ADR 0053, proposed; README "Hosted servers"): the
 // fleet view (GET /api/admin/hosted: the machines and the servers on them,
-// filtered by owner and state), one server with its machine (GET
-// /api/admin/hosted/<id>), and the machines' moves an admin makes: a drain, an
-// end and a fleet roll (POST /api/admin/fleet/...). Every one require_admin;
-// they write rows only (fleet_repository.h), and the supervisor's next pass
-// does the rest (moves the servers off, terminates the machine). The kill
-// switch and one server's stop are hosted_routes.h's. Every reply is an error
+// filtered by owner and state), one server with its
+// machine (GET /api/admin/hosted/<id>), and the machines' moves an admin
+// makes: a drain, an end and a fleet roll (POST /api/admin/fleet/...). Every
+// one require_admin; they write rows only (fleet_repository.h), and the
+// supervisor's next pass does the rest (moves the servers off, terminates the
+// machine). The kill switch and one server's stop are hosted_routes.h's.
+// Every reply is an error
 // code with our own message, never database text, and carries no credential:
 // a machine row holds none (FleetMachineRow), a server's admin login is never
 // read here. The HttpListener owns one FleetRoutes beside its HostedRoutes.
@@ -43,10 +44,10 @@ public:
 	FleetRoutes(const FleetRoutes &) = delete;
 	FleetRoutes &operator=(const FleetRoutes &) = delete;
 
-	// Whether this service runs hosted servers, its machine driver's name and
-	// ONNET_HOSTED_CAP (HostedRoutes::configure decided them). Before
-	// register_routes().
-	void configure(bool enabled, std::string provider, int cap);
+	// Whether this service has a machine driver, its name and ONNET_HOSTED_CAP
+	// (HostedRoutes::configure decided them; the view's `enabled` adds at least
+	// one offered data set, read at each request). Before register_routes().
+	void configure(bool hosting_on, std::string provider, int cap);
 	void register_routes(WebApp &app);
 
 private:
@@ -58,7 +59,7 @@ private:
 
 	WebAccess &access_;
 	db::ConnectionPool &pool_;
-	bool enabled_ = false;
+	bool hosting_on_ = false;
 	std::string provider_ = "none";
 	int cap_ = 24;
 };

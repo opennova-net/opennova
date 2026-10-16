@@ -38,14 +38,6 @@
 
 namespace opennova::novaworld_server::hosted {
 
-// Where a cloud machine mounts each data set it holds, read-only:
-// /opt/game/<data set>, the bind source of that data set's containers (their
-// /opt/game). The bootstrap reply names these paths (agent_protocol.h).
-inline constexpr const char *kMachineGameRoot = "/opt/game";
-inline std::string machine_data_set_path(std::string_view data_set) {
-	return std::string(kMachineGameRoot) + "/" + std::string(data_set);
-}
-
 // What a launch asks for.
 struct MachineLaunch {
 	int64_t machine_id = 0; // the fleet_machines row (the agent's --machine)

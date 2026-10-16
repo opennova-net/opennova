@@ -46,9 +46,6 @@ bool is_lower_hex(char c) {
 bool is_name_char(char c) {
 	return is_alnum(c) || c == '.' || c == '_' || c == '-';
 }
-bool is_label_char(char c) {
-	return (c >= 'a' && c <= 'z') || is_digit(c) || c == '-';
-}
 
 // An id EC2 spells `<prefix>` and 8 to 17 lower-case hex digits.
 bool is_aws_id(std::string_view text, std::string_view prefix) {
@@ -173,20 +170,6 @@ Ec2MachineDriver::Ec2MachineDriver(
 		runner_(runner),
 		now_(now_ms ? std::move(now_ms) : Clock(steady_now_ms)) {}
 
-std::string Ec2MachineDriver::volume_label(std::string_view data_set) {
-	constexpr std::string_view kSuffix = "_consumer";
-	if (data_set.size() > kSuffix.size() &&
-			data_set.substr(data_set.size() - kSuffix.size()) == kSuffix)
-		data_set.remove_suffix(kSuffix.size());
-	std::string label = "od-";
-	for (const char c : data_set)
-		if (c != '_')
-			label.push_back(c);
-	if (label.size() == 3 || label.size() > kMaxVolumeLabelBytes || !all_of(label, is_label_char))
-		return {};
-	return label;
-}
-
 std::string Ec2MachineDriver::check_config(const Ec2MachineConfig &c) {
 	if (c.aws_cli.empty() || c.aws_cli[0] != '/')
 		return "ONNET_HOSTED_AWS_CLI is no absolute path";
@@ -225,15 +208,10 @@ std::string Ec2MachineDriver::check_config(const Ec2MachineConfig &c) {
 	uint16_t service_port = 0;
 	if (!parse_service_url(c.service_url, service_host, service_port))
 		return "ONNET_INTERNAL_URL is no http://<host>:<port> the machines can reach";
-	if (c.data_sets.empty())
-		return "no data set for the machines to mount";
-	for (const std::string &data_set : c.data_sets)
-		if (!is_data_set_name(data_set) || volume_label(data_set).empty())
-			return "data set '" + loggable(data_set) + "' has no volume label";
 	if (!is_log_group_name(c.log_group))
 		return "ONNET_HOSTED_EC2_LOG_GROUP is no log group name";
 	for (const char *blank : { kBlankServiceUrl, kBlankServicePort, kBlankMachineId,
-				 kBlankMachineToken, kBlankServeImage, kBlankHostdImage, kBlankDataSets,
+				 kBlankMachineToken, kBlankServeImage, kBlankHostdImage,
 				 kBlankLogGroup, kBlankRegion })
 		if (c.machine_script.find(blank) == std::string::npos)
 			return std::string(
@@ -277,25 +255,16 @@ std::optional<std::string> Ec2MachineDriver::render_user_data(
 			values.service_port != service_port || values.machine_id <= 0 ||
 			values.bootstrap_token.size() != kMachineTokenChars ||
 			!all_of(values.bootstrap_token, is_alnum) || !is_image_reference(values.serve_image) ||
-			!is_image_reference(values.hostd_image) || values.data_sets.empty() ||
+			!is_image_reference(values.hostd_image) ||
 			!is_log_group_name(values.log_group) || !is_aws_region(values.region))
 		return std::nullopt;
-	std::string data_sets;
-	for (const auto &[data_set, label] : values.data_sets) {
-		if (!is_data_set_name(data_set) || label.size() < 4 ||
-				label.size() > kMaxVolumeLabelBytes || !all_of(label, is_label_char))
-			return std::nullopt;
-		if (!data_sets.empty())
-			data_sets += ' ';
-		data_sets += data_set + "=" + label;
-	}
 	std::string out = script;
 	const bool filled = fill(out, kBlankServiceUrl, values.service_url) &
 			fill(out, kBlankServicePort, std::to_string(values.service_port)) &
 			fill(out, kBlankMachineId, std::to_string(values.machine_id)) &
 			fill(out, kBlankMachineToken, values.bootstrap_token) &
 			fill(out, kBlankServeImage, values.serve_image) &
-			fill(out, kBlankHostdImage, values.hostd_image) & fill(out, kBlankDataSets, data_sets) &
+			fill(out, kBlankHostdImage, values.hostd_image) &
 			fill(out, kBlankLogGroup, values.log_group) & fill(out, kBlankRegion, values.region);
 	if (!filled || out.size() > kMaxUserDataBytes)
 		return std::nullopt;
@@ -425,11 +394,6 @@ std::optional<LaunchedMachine> Ec2MachineDriver::launch(
 	values.bootstrap_token = launch.bootstrap_token;
 	values.serve_image = config_.serve_image;
 	values.hostd_image = config_.hostd_image.empty() ? config_.serve_image : config_.hostd_image;
-	// The order the launch template attaches the volumes in.
-	std::vector<std::string> data_sets = config_.data_sets;
-	std::sort(data_sets.begin(), data_sets.end());
-	for (const std::string &data_set : data_sets)
-		values.data_sets.emplace_back(data_set, volume_label(data_set));
 	values.log_group = config_.log_group;
 	values.region = config_.region;
 	const std::optional<std::string> user_data = render_user_data(config_.machine_script, values);

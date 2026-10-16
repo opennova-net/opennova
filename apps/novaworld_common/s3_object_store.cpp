@@ -53,7 +53,7 @@ std::string S3ObjectStore::s3_url(std::string_view key) const {
 }
 
 std::string S3ObjectStore::url_of(std::string_view key) const {
-	return s3_url(key);
+	return object_store_url(config_, key);
 }
 
 std::vector<std::string> S3ObjectStore::api(
