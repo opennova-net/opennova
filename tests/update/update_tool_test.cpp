@@ -152,6 +152,38 @@ int test_build(const test_temp::TempDir &dir, update::SfsPackage &package) {
 	TEST_EXPECT(write_text(dir.file("to") + "/add.def", "collides with the archive's"));
 	TEST_EXPECT(!update_tool::build_update_package(spec, refused, report, error));
 	TEST_EXPECT(error.find("two files") != std::string::npos);
+	std::error_code ec;
+	fs::remove(io::os_path(dir.file("to") + "/add.def"), ec);
+
+	// B-12: an empty loose file is refused (the stock precheck fetches an empty file on every
+	// pass, so the update would loop UPDATE -> REVUPDAT forever).
+	// [orig: Cupdate2Dlg_PrecheckCommands @ 0x407970..0x4079B9 (UPDATE.EXE)]
+	TEST_EXPECT(write_text(dir.file("to") + "/empty.txt", ""));
+	TEST_EXPECT(!update_tool::build_update_package(spec, refused, report, error));
+	TEST_EXPECT(error.find("empty") != std::string::npos);
+	fs::remove(io::os_path(dir.file("to") + "/empty.txt"), ec);
+
+	// B-25: an archive the baseline has and `to` lacks gets a REMOVE row at the root, ahead of
+	// every TARGET row.
+	TEST_EXPECT(make_archive(dir.file("from") + "/old.pff", { { "gone.def", bytes("x"), 1100000000 } }));
+	update::SfsPackage removed;
+	TEST_EXPECT(update_tool::build_update_package(spec, removed, report, error));
+	TEST_EXPECT(report[0].remove_rows == 3);
+	const update::SfsSection &removed_base = removed.sections[0];
+	const std::optional<update::CommandFile> removed_cmd = update::read_command_file(std::string(
+			removed_base.entries[0].data.begin(), removed_base.entries[0].data.end()));
+	TEST_EXPECT(removed_cmd.has_value());
+	if (!removed_cmd)
+		return 1;
+	bool before_target = true, archive_removed = false;
+	for (const update::CommandRow &r : removed_cmd->rows) {
+		if (r.type == update::CommandType::Target)
+			before_target = false;
+		if (r.name == "old.pff")
+			archive_removed = r.type == update::CommandType::Remove && before_target;
+	}
+	TEST_EXPECT(archive_removed);
+	fs::remove(io::os_path(dir.file("from") + "/old.pff"), ec);
 	return 0;
 }
 

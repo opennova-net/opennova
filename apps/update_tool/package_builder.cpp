@@ -211,6 +211,17 @@ bool build_product(const BuildSpec &spec, const ProductSpec &product, update::Sf
 				return false;
 			}
 		}
+		// The precheck fetches a loose row whenever the installed file is empty, so an empty
+		// file shipped as a row is fetched again on every pass and the client loops UPDATE ->
+		// REVUPDAT -> UPDATE without end: refused, like the change it cannot see.
+		// [orig: Cupdate2Dlg_PrecheckCommands @ 0x407820 (UPDATE.EXE), the loose case
+		//  @0x407970..0x4079B9 (UPDATE.EXE): missing or size 0 fetches]
+		if (content.empty()) {
+			error = io::utf8_path(path.filename()) +
+					" is empty: UPDATE.EXE fetches an empty loose file again on every pass, so "
+					"the update would never finish; give it content or leave it out";
+			return false;
+		}
 		const std::string name = io::utf8_path(path.filename());
 		if (!claim_name(names, name, error))
 			return false;
@@ -239,6 +250,17 @@ bool build_product(const BuildSpec &spec, const ProductSpec &product, update::Sf
 	if (spec.removes) {
 		for (const auto &[key, path] : from_files) {
 			if (to_files.count(key))
+				continue;
+			cmd.rows.push_back({ "REMOVE", CommandType::Remove, io::utf8_path(path.filename()), 0,
+					0, std::nullopt });
+			++report.remove_rows;
+		}
+		// An archive `to` lacks goes too: before any TARGET row the target is ".", where a
+		// REMOVE deletes the named file, the archive's file included.
+		// [orig: Cupdate2Dlg_PrecheckCommands @ 0x407820 (UPDATE.EXE), the REMOVE case
+		//  (docs/update/updater-re.md §7)]
+		for (const auto &[key, path] : from_archives) {
+			if (to_archives.count(key))
 				continue;
 			cmd.rows.push_back({ "REMOVE", CommandType::Remove, io::utf8_path(path.filename()), 0,
 					0, std::nullopt });
