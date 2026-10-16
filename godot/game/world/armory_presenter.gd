@@ -30,6 +30,14 @@ const MENU_SCREEN := "WEAPON"
 static func is_accept_hotkey(keycode: Key) -> bool:
 	return ControlsBindings.model().godot_keys_for_token("useitem").has(int(keycode))
 
+
+# The key a binding row matches an event by. The rows hold PHYSICAL codes (the
+# polled rows read Input.is_physical_key_pressed, ControlsModel::vk_down_), so an
+# event matches by its physical_keycode; a synthetic event that carries none
+# falls back to its keycode.
+static func bound_key_of(key: InputEventKey) -> Key:
+	return key.physical_keycode if key.physical_keycode != KEY_NONE else key.keycode
+
 signal opened
 signal closed
 
@@ -231,7 +239,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	if not is_open():
 		return
 	var key := event as InputEventKey
-	if key == null or key.echo or not is_accept_hotkey(key.keycode):
+	if key == null or key.echo or not is_accept_hotkey(bound_key_of(key)):
 		return
 	if _armory.accept_hotkey_edge(key.pressed):
 		get_viewport().set_input_as_handled()

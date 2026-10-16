@@ -103,9 +103,9 @@ func _loadout_names(sim: Simulation) -> Array[String]:
 	return names
 
 
-func _key_edge(keycode: Key, pressed: bool) -> void:
+func _key_edge(keycode: Key, pressed: bool, logical: Key = KEY_NONE) -> void:
 	var event := InputEventKey.new()
-	event.keycode = keycode
+	event.keycode = keycode if logical == KEY_NONE else logical
 	event.physical_keycode = keycode
 	event.pressed = pressed
 	Input.parse_input_event(event)
@@ -153,6 +153,47 @@ func test_accept_hotkey_follows_the_use_item_binding() -> void:
 	await _key_edge(KEY_E, true)
 	assert_false(presenter.is_open(), "the rebound Use Item key ACCEPTs")
 	await _key_edge(KEY_E, false)
+
+
+# The binding rows hold physical codes: on a layout whose logical key differs
+# (the physical E key typing another letter), the physical key ACCEPTs
+# and the logical code alone does not.
+func test_accept_hotkey_matches_the_physical_key() -> void:
+	var model := ControlsBindings.model()
+	var use_item := -1
+	var rows: Array = model.get_rows(ControlsModel.DEVICE_KEYBOARD)
+	for i in rows.size():
+		if (rows[i] as PackedStringArray)[1] == "UseItem":
+			use_item = model.action_index_for_row(i)
+	if use_item < 0:
+		fail_test("the Use Item row is visible")
+		return
+	model.clear_binding(use_item, ControlsModel.DEVICE_KEYBOARD)
+	assert_true(model.assign_godot_key(use_item, KEY_E), "Use Item takes E")
+	var event := InputEventKey.new()
+	event.physical_keycode = KEY_E
+	event.keycode = KEY_F
+	assert_eq(ArmoryPresenter.bound_key_of(event), KEY_E, "the physical code wins")
+	event.physical_keycode = KEY_NONE
+	assert_eq(ArmoryPresenter.bound_key_of(event), KEY_F, "a synthetic event falls back")
+
+	var world := _make_world(_real_sim(2), _make_weapons())
+	var overlay := Control.new()
+	add_child_autofree(overlay)
+	overlay.size = Vector2(800, 600)
+	var presenter := ArmoryPresenter.new()
+	add_child_autofree(presenter)
+	presenter.setup(world, null, overlay)
+	assert_true(presenter.open(), "the staged player opens the armory")
+	await _key_edge(KEY_F, true, KEY_E)
+	await _key_edge(KEY_F, false, KEY_E)
+	assert_true(presenter.is_open(), "the logical E on another physical key is no accelerator")
+	await _key_edge(KEY_E, true, KEY_F)
+	assert_true(presenter.is_open(), "the opener's press is debounced until its release")
+	await _key_edge(KEY_E, false, KEY_F)
+	await _key_edge(KEY_E, true, KEY_F)
+	assert_false(presenter.is_open(), "the physical E ACCEPTs whatever it types")
+	await _key_edge(KEY_E, false, KEY_F)
 
 
 func test_out_of_zone_try_open_is_the_silent_gate() -> void:

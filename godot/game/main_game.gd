@@ -490,7 +490,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 	# polled `useitem` row -- the hold latch, the USE+digit seat pick, the mount
 	# toggle on the release edge (PlayerInputRouter::sample_use_item); the screen
 	# this arm opens leaves gameplay input inactive, which resets that chain.
-	if is_gameplay_input_active() and _is_use_item_key(key.keycode):
+	if is_gameplay_input_active() and _is_use_item_key(ArmoryPresenter.bound_key_of(key)):
 		if _try_open_armory():
 			get_viewport().set_input_as_handled()
 			return
