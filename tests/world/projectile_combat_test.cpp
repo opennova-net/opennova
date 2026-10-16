@@ -1,5 +1,6 @@
 // Observable projectile consequence tests through RoundSim's public seam:
 // arming/dud substitution, NoDie, and geometric dead/indestructible blockers.
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -2606,6 +2607,51 @@ void test_terrain_impact_emits_permanent_scorch() {
 // section or target. [orig: Projectile_HandleTerrainImpact
 // Projectile_CopyEntityToHitRecord @0x4E9319..0x4E931F, +0x30 / +0x48 zeroed
 // @0x4E9326 / @0x4E932B]
+// A round into the water: its splash stands 0.375 u on along the round's normalized
+// tick-start ray on X and Y (each a round-half-up Q16 product), on the water plane.
+// [orig: Projectile_SpawnImpactEffect @0x4E9CA5..0x4E9CD8, the adds @0x4E9D13 /
+//  @0x4E9D29, Z = g_EnvWaterHeightFixed @0x4E9D24]
+void test_water_impact_splash_is_pushed_along_the_ray() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    AmmoTableEntry ammo;
+    ammo.name = "SPLASH";
+    ammo.valid = true;
+    ammo.velocity = 620;
+    ammo.max_age_ticks = 20;
+    world.tables.ammo.entries.push_back(ammo);
+    std::vector<uint16_t> heights(512u * 512u, 0);
+    std::vector<int> sectors(256u, 1);
+    opennova::terrain::TerrainHeightField flat;
+    flat.heightmap = heights.data();
+    flat.dim = 512;
+    flat.layout.sector_grid = sectors.data();
+    CollisionWorld collision;
+    collision.terrain = &flat;
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+    world.env.water_z = 1 << 16; // the plane at 1 u, above the terrain at 0
+    RoundSpawnParams params;
+    params.origin = {10.0f, -20.0f, 3.0f};
+    params.ammo_index = 0;
+    const int slot = world.round_sim.spawn(world, params);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    // 10 u a tick along (0.8, 0, -0.6): it crosses the plane a third of the way in,
+    // at x 12.667; the ray's Q16 X is 52424, its push 19659 (0.29997 u). The base point
+    // is the port's exact crossing; retail's backs off 0x800 along the ray first
+    // (@0x4EA603..0x4EA65C, 12.94164 here), D-ITEM-13(b)'s residual, which this pins.
+    world.round_sim.rounds[static_cast<size_t>(slot)].vel = Vec3{8.0f, 0.0f, -6.0f};
+    world.round_sim.tick(world, &flat, &collision);
+    const auto &impacts = world.round_sim.impacts;
+    CHECK(impacts.size() == 1);
+    if (impacts.size() != 1) return;
+    CHECK(impacts[0].effect_tag == kWaterImpactEffectTag);
+    CHECK(std::fabs(impacts[0].position.x - (12.6667f + 0.29997f)) < 0.01f);
+    CHECK(std::fabs(impacts[0].position.y + 20.0f) < 0.001f);
+    CHECK(impacts[0].position.z == 1.0f);
+}
+
 void test_terrain_stop_records_the_round() {
     World world;
     world.registry.configure_pool(0, 4);
@@ -4088,6 +4134,7 @@ static const NamedTest kTests[] = {
     {"test_terrain_impact_samples_charmap_surface", test_terrain_impact_samples_charmap_surface},
     {"test_terrain_impact_emits_permanent_scorch", test_terrain_impact_emits_permanent_scorch},
     {"test_terrain_stop_records_the_round", test_terrain_stop_records_the_round},
+    {"test_water_impact_splash_is_pushed_along_the_ray", test_water_impact_splash_is_pushed_along_the_ray},
     {"test_visual_dynamic_proxy_projects_decoded_pose_geometry", test_visual_dynamic_proxy_projects_decoded_pose_geometry},
     {"test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises", test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises},
     {"test_visual_dynamic_proxy_excludes_shooter_self_slot", test_visual_dynamic_proxy_excludes_shooter_self_slot},

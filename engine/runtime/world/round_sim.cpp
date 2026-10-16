@@ -2108,6 +2108,26 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             copy_round_to_hit_record(hit_record, r, velocity_q16);
         } else if (collision.hit_class == ProjectileHitClass::Water) {
             imp.effect_tag = kWaterImpactEffectTag;
+            // The splash stands 0.375 u on along the round's tick-start ray on X
+            // and Y, each a round-half-up Q16 product of the normalized ray, on
+            // the water plane; the Z product is computed and dropped.
+            // [orig: Projectile_SpawnImpactEffect — `mov eax, 6000h; imul;
+            //  add eax, 8000h; adc; shrd 10h` @0x4E9CA5..0x4E9CB6 (X) /
+            //  @0x4E9CC3..0x4E9CD4 (Y), the dropped Z @0x4E9CDA..0x4E9CF2, the
+            //  adds @0x4E9D13 / @0x4E9D29, Z = g_EnvWaterHeightFixed @0x4E9D24;
+            //  the ray the caller passes is the ray record's
+            //  @0x4EA241..0x4EA25F, Projectile_UpdatePhysics @0x4EA82F]
+            const int32_t magnitude = fixed_magnitude(incoming_velocity_q16);
+            const int32_t inverse =
+                    magnitude != 0 ? int32_t(0x100000000LL / magnitude) : 0;
+            const int32_t ray_x = retail_q16_mul_rhu(incoming_velocity_q16.x, inverse);
+            const int32_t ray_y = retail_q16_mul_rhu(incoming_velocity_q16.y, inverse);
+            imp.position = Vec3{
+                static_cast<float>(from_fixed(io::bam_add(
+                        impact_q16.x, retail_q16_mul_rhu(0x6000, ray_x)))),
+                static_cast<float>(from_fixed(io::bam_add(
+                        impact_q16.y, retail_q16_mul_rhu(0x6000, ray_y)))),
+                static_cast<float>(from_fixed(world.env.water_z))};
         } else if (person_collision) {
             // The person leg. Bullets reach a person ONLY through the bone-section
             // pass — Projectile_RaycastProximitySlots walks pool 2 (statics) for
