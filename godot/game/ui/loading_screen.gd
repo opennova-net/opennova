@@ -348,20 +348,14 @@ func _create_bar_fill() -> void:
 	_sync_bar_fill()
 
 
+# The fill's full rect at 100% (the engine's rects, hud/loading_screen.h
+# loading_bar_rects); _sync_bar_fill scales it to the checkpoint's width.
 func _layout_bar_fill() -> void:
 	if _bar_fill == null or _layout_base_size == Vector2.ZERO:
 		return
-	var surface_scale := _layout_base_size / Vector2(
-			HudPos.DESIGN_WIDTH, HudPos.DESIGN_HEIGHT)
-	var bar_pos := HudPos.loading_bar_pos()
-	var bar_size := HudPos.loading_bar_size()
-	var x := int(bar_pos.x * surface_scale.x)
-	var y := int(bar_pos.y * surface_scale.y)
-	var w := int(bar_size.x * surface_scale.x)
-	var h := int(bar_size.y * surface_scale.y)
-	var full_span := HudPos.loading_bar_fill_span(x, w, 100)
-	_bar_fill.position = Vector2(full_span.x, y + 3)
-	_bar_fill.size = Vector2(full_span.y - full_span.x, h)
+	var full: Rect2i = HudPos.loading_bar_rects(_layout_base_size, 100)[3]
+	_bar_fill.position = Vector2(full.position)
+	_bar_fill.size = Vector2(full.size)
 	_bar_fill.pivot_offset = Vector2.ZERO
 
 
@@ -371,9 +365,8 @@ func _sync_bar_fill() -> void:
 	var full_width := int(_bar_fill.size.x)
 	if full_width <= 0:
 		return
-	var x := int(_bar_fill.position.x) - 3
-	var span := HudPos.loading_bar_fill_span(x, full_width, _progress)
-	var fill_width := maxi(0, span.y - span.x)
+	var fill: Rect2i = HudPos.loading_bar_rects(_layout_base_size, _progress)[3]
+	var fill_width := maxi(0, fill.size.x)
 	var should_draw := _texture != null and _splash_state == SplashState.NONE \
 			and fill_width > 0
 	# The rectangle's full draw command is submitted during the two-frame
@@ -625,19 +618,12 @@ func _draw_wrapped(font: FontFile, text: String, x: int, y: int, width: int,
 # witnesses live at the engine home, hud/loading_screen.h)
 # [orig: LoadingScreen_UpdateAndPresent @ 0x586c78 + HUD_DrawProgressBar_0 @ 0x5d4c40].
 func _draw_progress_bar() -> void:
-	var s := size / Vector2(HudPos.DESIGN_WIDTH, HudPos.DESIGN_HEIGHT)
-	var bar_pos := HudPos.loading_bar_pos()
-	var bar_size := HudPos.loading_bar_size()
-	var x := int(bar_pos.x * s.x)
-	var y := int(bar_pos.y * s.y)
-	var w := int(bar_size.x * s.x)
-	var h := int(bar_size.y * s.y)
-	# Layered filled rects, each inset 1px: black, gray, black track, then the
-	# fill [orig: HUD_DrawProgressBar_0 — outer spans w+6/h+6, three inset border
-	# draws, fill right edge = pct*(inner width)/100 + left + 2, one last inset].
-	draw_rect(Rect2(x, y, w + 6, h + 6), Color.BLACK)
-	draw_rect(Rect2(x + 1, y + 1, w + 4, h + 4), HudPos.loading_bar_border_gray())
-	draw_rect(Rect2(x + 2, y + 2, w + 2, h + 2), Color.BLACK)
+	# The layered rects are the engine's (hud/loading_screen.h loading_bar_rects):
+	# black, gray, black track, then the fill child.
+	var rects: Array[Rect2i] = HudPos.loading_bar_rects(size, 0)
+	draw_rect(Rect2(rects[0]), Color.BLACK)
+	draw_rect(Rect2(rects[1]), HudPos.loading_bar_border_gray())
+	draw_rect(Rect2(rects[2]), Color.BLACK)
 	# The fill is the ProgressFill child. Its complete red rectangle is
 	# submitted before loading blocks, then scaled to the exact native span by
 	# _sync_bar_fill() at each real checkpoint.
