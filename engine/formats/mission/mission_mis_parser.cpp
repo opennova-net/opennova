@@ -735,7 +735,7 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 			entity.pitch = static_cast<int16_t>(v);
 			if (!token_i32(line, 3, v, error)) return false;
 			entity.roll = static_cast<int16_t>(v);
-		} else if (key == "team" || key == "alignment") { // one word to the original [orig: MIS_ParseToken @0x4523bb]
+		} else if (key == "team" || key == "alignment") { // one word to the original [orig: JOTACmed.exe MIS_ParseToken @0x4523bb]
 			if (!token_i32(line, 1, v, error)) return false;
 			entity.team = static_cast<uint8_t>(std::clamp<int32_t>(v, 0, 255));
 		} else if (key == "map_symbol") {
@@ -906,7 +906,7 @@ bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &r
 		} else if (section == "item") {
 			if (!parse_mis_item(lines, pos, resolve_item_type, out, error, issues)) return false;
 		} else if (section == "teleport_target" || section == "wind") {
-			// Sections the original editor writes and reads that the .bms has no room for [orig: MIS_ParseToken
+			// Sections the original editor writes and reads that the .bms has no room for [orig: JOTACmed.exe MIS_ParseToken
 			// @0x450e50, the sections @0x450faa, @0x451004, @0x451119; MIS_SaveDocument @0x454f28..0x455015].
 			note(issues, lines[pos].line_no, "the " + section + " section is the original editor's; not kept here");
 			if (!skip_mis_section(lines, pos, section, error)) return false;

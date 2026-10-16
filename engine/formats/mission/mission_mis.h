@@ -154,16 +154,16 @@ inline bool parse_mis_text(const std::string &text, const MisItemTypeResolver &r
 // The terrain the original editor measures an item's base height over: its save adds the terrain's height under a
 // height-locked item to the item's z and to its base (extra_bheight), its read takes it off again [orig: JOTACmed.exe
 // sub_44E640 @ 0x44e640, from MIS_SaveDocument @ 0x4546b5; sub_44E6A0 @ 0x44e6a0, from MIS_LoadDocument @
-// 0x45460e], and its .bms export adds it to every item's z [orig: sub_44E5A0 @ 0x44e5a0], so the .bms's z less the
+// 0x45460e], and its .bms export adds it to every item's z [orig: JOTACmed.exe sub_44E5A0 @ 0x44e5a0], so the .bms's z less the
 // terrain's height there is the item's z in the editor's frame (write_mis_text's `base_heights`,
 // mis_items_to_bms_frame's `terrain`). `heights`: the .cpt's height atlas, 1024 x 1024 depth words in the
 // file's order, the grid the game loads (CptFile::depth_buffer, the .cpt the .trn's polytrn_polydata names), which
 // the original editor holds as twice each word [orig: JOTACmed.exe sub_44C2B0 @ 0x44c2b0, its DPTH arm @ 0x44c64b
 // and CDEP arm @ 0x44c5e7]. The rest is the .trn's own (the original editor reads the .trn alone): `sectors` its
 // 16 x 16 sector grid, row by row, extended past the rows and the width read as trn_extend_sector_grid extends it
-// [orig: sub_464BD0 @ 0x464bd0]; `origin_x`/`origin_y` polytrn_origin; the wraps polytrn_wrapx and polytrn_wrapy;
+// [orig: JOTACmed.exe sub_464BD0 @ 0x464bd0]; `origin_x`/`origin_y` polytrn_origin; the wraps polytrn_wrapx and polytrn_wrapy;
 // `scale` polytrn_scale, the original editor's height factor (scale / 128, 128 where the .trn names none: no shipped
-// one does; the game reads the key for its file check alone) [orig: sub_463C90 @ 0x463c90, its polytrn_scale arm @
+// one does; the game reads the key for its file check alone) [orig: JOTACmed.exe sub_463C90 @ 0x463c90, its polytrn_scale arm @
 // 0x464a38; the default, sub_464B60 @ 0x464bb6].
 struct MisTerrain {
 	const uint16_t *heights = nullptr;
@@ -183,10 +183,10 @@ int32_t mis_terrain_height(const MisTerrain &terrain, int32_t x, int32_t y);
 // The original editor's two frames of an item's height (its z) and its base (extra_bheight). Its
 // document keeps both relative to the terrain under the item; its .mis save writes a height-locked
 // item's both absolute, the terrain's height added [orig: JOTACmed.exe sub_44E640 @ 0x44e640, from
-// MIS_SaveDocument @ 0x4546b5], and its read takes it off again [orig: sub_44E6A0 @ 0x44e6a0, from
-// MIS_LoadDocument @ 0x45460e]; its .bms export adds it to every item's z and base [orig:
+// MIS_SaveDocument @ 0x4546b5], and its read takes it off again [orig: JOTACmed.exe sub_44E6A0 @ 0x44e6a0, from
+// MIS_LoadDocument @ 0x45460e]; its .bms export adds it to every item's z and base [orig: JOTACmed.exe
 // sub_44E5A0 @ 0x44e5a0, from sub_44F920 @ 0x44fa4e]; and a change of the terrain takes a locked
-// item's both to absolute over the old terrain and back to relative over the new [orig: sub_402770
+// item's both to absolute over the old terrain and back to relative over the new [orig: JOTACmed.exe sub_402770
 // @ 0x402c9f..0x402ccd], so a locked item keeps its height and its base and an unlocked one follows
 // the ground. A bms::File's mis_frame names the frame its entities are in (bms::MisFrame): the
 // .bms's (a parsed .bms, a new file), each entity's z absolute (the game's), its mis_extra_bheight
@@ -208,7 +208,7 @@ void mis_items_to_bms_frame(bms::File &file, const MisTerrain &terrain);
 // 0x44d296, the range @ 0x44d2a9, the bounds
 // @ 0x44d2d8..0x44d444], the `areatrig` section of its id giving it its flags (`attrib`) and its
 // description; its .bms export writes the area where the item of the least x (the first of a tie)
-// holds an extra_valmode of 0 [orig: sub_44F920 @ 0x450a16..0x450ab3, the test @ 0x450a3a], in zone
+// holds an extra_valmode of 0 [orig: JOTACmed.exe sub_44F920 @ 0x450a16..0x450ab3, the test @ 0x450a3a], in zone
 // id order, and leaves the 6013 items out of the markers [orig: @ 0x450785]. rebuild_mis_areas
 // makes `file`'s areas so from its mis_area_markers, each area's flags those an area of its id held
 // before (an `areatrig` section's); an area of no marker goes. parse_mis_text reads a 6013 item so

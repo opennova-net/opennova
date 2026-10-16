@@ -231,7 +231,7 @@ int main() {
 		TEST_EXPECT(locked_text.find(at + std::to_string(z) + "\r\n") != std::string::npos);
 		TEST_EXPECT(locked_text.find("  extra_bheight " + std::to_string(27 * 65536) + "\r\n") != std::string::npos);
 		TEST_EXPECT(locked_text.find("  height_lock 1\r\n") != std::string::npos);
-		// A lock is written as it stands, as the original writes the int it read [orig: MIS_SaveDocument @ 0x45589a].
+		// A lock is written as it stands, as the original writes the int it read [orig: JOTACmed.exe MIS_SaveDocument @ 0x45589a].
 		locked.items[0].mis_height_lock = -1;
 		TEST_EXPECT(write_mis_text(locked, locked_text, error, &base_heights));
 		TEST_EXPECT(locked_text.find("  height_lock -1\r\n") != std::string::npos);
@@ -297,7 +297,7 @@ int main() {
 		for (size_t at = back.find("height_lock"); at != std::string::npos; at = back.find("height_lock", at + 1)) ++locks;
 		TEST_EXPECT(locks == 1);
 
-		// A lock is any nonzero value, read as the original reads it, an int tested nonzero [orig:
+		// A lock is any nonzero value, read as the original reads it, an int tested nonzero [orig: JOTACmed.exe
 		// MIS_ParseToken @ 0x4536c9; sub_44E640 @ 0x44e657]: -1 is a lock, its z and base kept
 		// absolute through the read and written back as -1; 300 likewise.
 		bms::File odd;
