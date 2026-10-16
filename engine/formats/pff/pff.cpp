@@ -35,8 +35,9 @@ static int pff_count_sane(uint32_t num_entries)
 }
 
 /* Normalize a PFF name into an uppercase, trailing-space-trimmed C string. Reads up to
-   raw_cap bytes or until a NUL; result is capped to out_sz - 1 chars. Matches the engine's
-   strupr + trailing-0x20 trim used for sort/lookup (PFF_SortEntries / PFF_FindEntry).
+   raw_cap bytes or until a NUL; result is capped to out_sz - 1 chars. The uppercase is the
+   engine's sort and lookup key (PFF_SortEntries strupr's each name); the trim is OpenNova's
+   own: PFF_FindEntry's trim loop starts on the NUL and never runs (D-VFS-7).
    Declared in pff.h: the writer's sort and normalized_logical_name share it. */
 void pff_norm_name(const char *raw, size_t raw_cap, char *out, size_t out_sz)
 {
