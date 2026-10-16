@@ -5,7 +5,7 @@
 #
 #   export OP_SERVICE_ACCOUNT_TOKEN=ops_...
 #   ./deploy/run.sh secrets check
-#   OPENNOVA_DEPLOYMENT=staging ./deploy/run.sh infra plan   # or --deployment staging
+#   ./deploy/run.sh --deployment staging infra plan   # the deployment: the flag alone
 
 services:
   deploy:
@@ -27,10 +27,5 @@ services:
     environment:
       OP_SERVICE_ACCOUNT_TOKEN: ${OP_SERVICE_ACCOUNT_TOKEN:?set OP_SERVICE_ACCOUNT_TOKEN to your 1Password service-account token}
       OP_VAULT: ${OP_VAULT:-OpenNova-Deploy}
-      # The deployment the commands act on (prod, staging); --deployment overrides it.
-      OPENNOVA_DEPLOYMENT: ${OPENNOVA_DEPLOYMENT:-prod}
-      # The GHCR owner of the published images (default: the vault's ghcr/owner,
-      # else opennova-net).
-      GHCR_OWNER: ${GHCR_OWNER:-}
     stdin_open: true
     tty: true

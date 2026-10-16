@@ -1,23 +1,26 @@
-# Backup sidecar
+# Backup task
 
 A nightly `pg_dump` of the NovaWorld service database to S3, plus on-demand
 backup / list / restore. The dumps are copies independent of the database
 instance: the managed database keeps its own snapshots and point-in-time
 recovery beside them, and a dump restores into a fresh instance as well.
 
-- Runs as a long-lived `backup` service in the prod compose (cron at 03:00 UTC).
+- Published as `<registry>/opennova-novaworld-backup` beside the programs' images, and run
+  as an ECS task (`infra/aws/backup.tf`): EventBridge Scheduler starts `/backup/backup.sh`
+  nightly at 03:00 UTC, and the deploy toolbox runs the same task definition for its
+  one-off work (`backup now|restore`, the `db` commands), a command each. A deploy pins the
+  image by digest like the programs'.
 - `postgres:17.11-alpine3.24`, pinned by digest (the Dockerfile says how to bump it): the
-  client tools match the server's major version, and every converge builds on the same
-  base.
-- AWS credentials come from the EC2 instance IAM role over IMDSv2; no keys in
-  the container.
+  client tools match the server's major version.
+- AWS credentials come from the task's role (`opennova-<deployment>-backup`: the deployment's
+  dumps alone, and the master password the `db` commands lend it); no keys in the
+  container.
 - The database comes from `DATABASE_URL` (a libpq URI) and `DATABASE_PASSWORD`,
   the server's own settings. The image carries the pinned RDS CA bundle at
   `/app/rds-global-bundle.pem`, where the server image has it, so a URI with
   `sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem` works in both.
-- `BACKUP_BUCKET` is the backups S3 bucket from `terraform output
-  backup_bucket_name`; the toolbox sets it automatically. `BACKUP_PREFIX`
-  (default `novaworld`) is the key prefix.
+- `BACKUP_BUCKET` is the operations bucket and `BACKUP_PREFIX` the deployment's prefix
+  (`novaworld`, `novaworld-<deployment>` off prod), both in the task definition.
 
 A dump is custom format (`pg_dump -Fc`: compressed; `pg_restore` reads it)
 with no owners or grants, so it restores under whichever role runs the
@@ -30,18 +33,14 @@ restore.
 ./deploy/run.sh backup list     # list dumps, newest last
 ```
 
-## Restore (server must be down)
+## Restore
 
 ```bash
-./deploy/run.sh app down
-# from the toolbox shell:
-docker compose -f deploy/compose/docker-compose.yml \
-               -f deploy/compose/docker-compose.prod.yml \
-  run --rm backup /backup/restore.sh novaworld/novaworld-<ts>.dump
-./deploy/run.sh app deploy
+./deploy/run.sh backup restore novaworld/novaworld-<ts>.dump --yes-overwrite-database
 ```
 
-`restore.sh` first dumps the database as it stands to
+It stops every program (`app down`), runs `restore.sh` in a one-off task and starts them
+again (`app up`). `restore.sh` first dumps the database as it stands to
 `novaworld/novaworld-pre-restore-<ts>.dump`, then restores in one transaction
 (`pg_restore --clean --if-exists --single-transaction`): every table in the
 dump is dropped and recreated, or nothing changes. The server's next boot

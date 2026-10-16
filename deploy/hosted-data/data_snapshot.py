@@ -56,7 +56,7 @@ def volume_label(data_set: str) -> str:
 
     "od-" and the slug without its "_consumer" suffix and its underscores (jop_2_consumer:
     od-jop2), the service's Ec2MachineDriver::volume_label
-    (apps/novaworld_server/hosted/ec2_machine_driver.h, which machine/machine_user_data.sh
+    (apps/novaworld_common/hosted/ec2_machine_driver.h, which machine/machine_user_data.sh
     mounts by, and by nothing else): change both or neither.
     """
     suffix = "_consumer"
