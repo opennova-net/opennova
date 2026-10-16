@@ -87,8 +87,7 @@ public:
 	// `anchors` (nullable) is the owner-anchor registry (GameWorld's
 	// ItemEffectDirector); `audio` (nullable) gates the sound leg, `fx`
 	// (nullable) the effect legs; `lights` (nullable) takes the death-flash
-	// light route (EffectLightDirector.on_death_light) [orig: the
-	// Entity_SpawnDeathPieces glow @ 0x49351a].
+	// light route (EffectLightDirector.on_death_light) (engine: runtime/renderer/light_scene.h).
 	void setup(EntityPresenter *p_owner, Simulation *p_sim, Node3D *p_container,
 			const Ref<EntityIndex> &p_index, const Ref<MissionObjectPlacer> &p_placer,
 			const Ref<ItemDatabase> &p_item_db, const Ref<ItemEffectDirector> &p_anchors,

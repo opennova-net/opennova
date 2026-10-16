@@ -379,7 +379,7 @@ uint8_t Simulation::sound_listener_view_flags() const {
 
 // The presenting shell's listener stamp — the camera position, once per frame
 // before the tick batch, feeding the sim's fire-sound distance gate
-// [orig: listener_pos @ 0x24D6630; world/fire_sound.h]. Never called on a
+// (engine: runtime/world/fire_sound.h). Never called on a
 // dedicated host, which is the witnessed peer gate.
 void Simulation::set_sound_listener(const Vector3 &p_listener_godot) {
 	if (!world_installed_) return;
@@ -391,8 +391,7 @@ void Simulation::set_sound_listener(const Vector3 &p_listener_godot) {
 // sets, and expired propagation-delayed slots, in play order on the logic
 // clock. The shell plays each row positionally; the set's max-range cull
 // stays at play time in the audio bank (D-AI-8).
-// [orig: Entity_PlaySound3D_FullVolume @ 0x528e20 / the pending drain
-//  Sound_TickPendingSlots @ 0x529310]
+// (engine: runtime/world/fire_sound.h)
 void Simulation::drain_fire_sounds(std::vector<opennova::world::ReadyFireSound> &r_sounds) {
 	r_sounds.clear();
 	if (!world_installed_) return;

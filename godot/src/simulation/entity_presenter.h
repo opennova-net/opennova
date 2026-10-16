@@ -302,7 +302,7 @@ public:
 	// same sample to the sim's fire-sound distance gate, world/fire_sound.h);
 	// fire's ribbon camera and scar's fog-box cull both read it. A host with
 	// no camera (a dedicated serve) never pushes, which is the witnessed peer
-	// gate [orig: @ 0x528e57]. Non-finite until the first push.
+	// gate (engine: runtime/world/fire_sound.cpp). Non-finite until the first push.
 	void set_listener_position(const Vector3 &p_position);
 	Vector3 listener_position() const { return listener_position_; }
 	// The four passes in drive order, once per ticked present frame.

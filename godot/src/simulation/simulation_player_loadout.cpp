@@ -480,7 +480,7 @@ TypedArray<WeaponKitEntry> Simulation::get_local_player_loadout() const {
 
 // weapon.def -> the sim world's armory table. Mirrors the retail load site (Game_StartMission
 // parses literally "weapon.def" through WeaponDefs_LoadFile right after AnimDef_InitAll wipes
-// the AdmDef table [orig: @0x5254b3/@0x5254bd]); build_weapon_table ports the witnessed
+// the AdmDef table (engine: runtime/inmatch/host_boot.cpp)); build_weapon_table ports the witnessed
 // allocation rule (null@0 + by-name-reuse-else-lowest-free = file order; §5.57, D-NET-141).
 Error Simulation::load_weapon_table(const Ref<ResourceRoot> &p_resource_root,
                                         const String &p_name) {
@@ -514,7 +514,7 @@ Error Simulation::load_weapon_table(const Ref<ResourceRoot> &p_resource_root,
 
 // ammo.def -> the sim world's ballistics table + the weapon round_type resolve. Mirrors the
 // retail load site (Game_StartMission parses literally "ammo.def" through AmmoDef_LoadAll
-// @0x40b0b0, the sibling of the weapon.def load [orig: @0x52548a]); the resolve binds each
+// @0x40b0b0, the sibling of the weapon.def load (engine: base/gameprofile/required_resources.cpp)); the resolve binds each
 // adm's fired round to its AmmoTable index (the original's adm+84 pair; §5.60). Call AFTER
 // load_weapon_table — an empty armory leaves every round_type unresolved and the fire
 // pipeline echoes without spawning sim rounds.

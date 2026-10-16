@@ -369,8 +369,7 @@ public:
 
 	// Seat-bone type codes, surfaced so GDScript reads ONE source — the values
 	// are pinned to engine/runtime/world's SeatType by static_assert in the .cpp.
-	// [orig: Entity_FindBestSeatSlot @0x4351f0 classifies "sitex"->1,
-	// "ctrlx"->2, "UseGun"->3, armory scan ->4 @0x436417, "drvrx"->5]
+	// (engine: runtime/world/entity.h)
 	enum SeatCode {
 		SEAT_NONE = 0,
 		SEAT_PASSENGER = 1,
@@ -1476,8 +1475,7 @@ public:
 	// g_PlayerStanceProneLatch, see docs/render/render-lighting-re.md].
 	Stance get_local_player_stance_latch() const { return static_cast<Stance>(kernel_->local.stance_latch()); }
 	// The HUD stance icon index (0 stand / 1 crouch / 2 prone) from the sim's
-	// authoritative stance state [orig: HUD_BuildEntityInfo @0x4b860c —
-	// entity+300 flags 0x200=crouch -> 1, 0x100=prone -> 2]. The witnessed
+	// authoritative stance state (engine: runtime/world/local_player_view.cpp). The witnessed
 	// source is the body state, never the anim clip name.
 	Stance get_local_player_stance() const;
 	int get_local_player_anim_phase_ticks() const;
@@ -1827,7 +1825,7 @@ public:
 	int64_t get_last_occlusion_probe_us() const {
 		return static_cast<int64_t>(present_.last_occlusion_probe_us);
 	}
-	// Script-disable gate [orig: dword_C6EB28].
+	// Script-disable gate (engine: runtime/wac/wac_system.h).
 	void set_wac_paused(bool p_paused);
 	bool is_wac_paused() const;
 
@@ -1961,7 +1959,7 @@ public:
 	// resolved graphics per type): the count the seat-install pins read.
 	int get_mounted_graphic_source_count() const;
 	// Whole-bank snapshots of the script variable stores (V0..V511 / G0..G255 /
-	// M0..M15 [orig: g_WacMissionVars / dword_C6BA40 / music bank]): ONE packed call
+	// M0..M15 (engine: runtime/world/var_store.h)): ONE packed call
 	// for a low-Hz overlay refresh instead of hundreds of boxed scalar reads.
 	// Always bank-sized; all zeros when no mission is loaded.
 	PackedInt32Array get_mission_variables_snapshot() const;
@@ -2099,8 +2097,7 @@ public:
 	// tier generates around: crouched or prone (MoveOrder stance bits 8-9) and
 	// standing on terrain, not on another entity. Retail tests every visible
 	// sector entity, but only infantry ever carry the stance bits.
-	// [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded
-	// (MoveOrder & 0x300), groundEntity gate @ 0x5c7dd5..0x5c7df7]
+	// (engine: runtime/inmatch/occlusion_collect.cpp)
 	PackedVector3Array get_foliage_mask_anchor_positions() const;
 	// PF_PHASE/PF_ACTIVE jointly encode one exact signed dword: PHASE carries
 	// low16 and ACTIVE carries high16+1 (zero means unpublished). This avoids
@@ -2469,8 +2466,7 @@ public:
 	// Parse weapon.def from the resource root and install the armory table on the sim world
 	// (world::World::weapons) — the server-side source for the 0x2F/0x5A loadout service, the
 	// extended-uplink equipped-weapon gate, and the player-spawn WPN_M4AUTO default
-	// (D-NET-141/143). [orig: Game_StartMission @0x5254bd -> WeaponDefs_LoadFile @0x5450A0,
-	// right after AnimDef_InitAll @0x5254b3]. Idempotent; call after load.
+	// (D-NET-141/143). (engine: runtime/inmatch/integrity_weapon_image.h). Idempotent; call after load.
 	Error load_weapon_table(const Ref<class ResourceRoot> &p_resource_root,
 	                        const String &p_name = "weapon.def");
 

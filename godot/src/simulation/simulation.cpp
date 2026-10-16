@@ -545,7 +545,7 @@ void Simulation::finish_kernel_boot() {
 
 // The kernel boot's bringup_net_session hook: the active role's own bring-up
 // (the listen host stands its inmatch session up between the world wiring
-// and the system registration [orig: SinglePlayer_StartMission @0x561af0];
+// and the system registration (engine: runtime/inmatch/host_role.cpp);
 // a joiner (re)builds its non-authority ClientRuntime at the same point; the
 // bare no-net world installs nothing), then the binding's tail: the live
 // runtime pointer, the retained join inputs on a fresh joiner runtime, the
@@ -1035,7 +1035,7 @@ Error Simulation::debug_set_entity_position(int p_index, const Vector3 &p_missio
 // outright so an unattended round can reach a scripted win condition that an
 // autofiring bot cannot reliably produce (00TRg's event 31 needs GroupDestroyed(16),
 // i.e. six specific AI dead). It drives the SAME EntityCommands::kill_group the BMS
-// KILL_GROUP action uses [orig: EventAction_Dispatch case 2 @0x4542e0]; it invents no
+// KILL_GROUP action uses (engine: formats/mission/bms.h); it invents no
 // state and fakes no event -- the win chain still has to evaluate on its own.
 // Sibling of debug_teleport_local_player, which exists for the same reason.
 int Simulation::debug_kill_group(int p_group) {

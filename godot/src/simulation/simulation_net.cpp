@@ -51,7 +51,7 @@ using namespace sim_internal;
 
 
 // The host's session record (the faithful §5.0 mode-3 in-process listen
-// server [orig: SinglePlayer_StartMission @0x561af0]): the UI host config for a
+// server (engine: runtime/inmatch/host_role.cpp)): the UI host config for a
 // LAN host, the SP listen server's own otherwise. The host's own player
 // AUTO-spawns through the real pipeline (Server_ProcessPendingPlayerSpawns ->
 // resolve_player_spawn_pose marker chain), and its own loopback client renders
@@ -838,9 +838,7 @@ Ref<JoinScreenStatus> Simulation::get_join_screen_status() const {
 // reap window. Either way the disconnect event maps a reason code onto g_MissionExitReason
 // — retail EXITS THE MISSION with a reason rather than raising an in-world dialog, so the
 // shell's analog is return-to-menu with the reason surfaced.
-// [orig: CNapiNetwork_Init @0x4ca4a0 (timeout stores @0x4caa81/@0x4cab54) and
-//  CNapiNPConnection_HandleDescriptionPacket @0x621ae0, both ->
-//  CNapiNetwork_OnDisconnectedFromServer @0x4c63d0]
+// (engine: runtime/inmatch/joiner_connection.h)
 String Simulation::get_session_loss_reason() const {
 	if (!is_joiner() || !runtime_) return String();
 	return opennova::to_gd(runtime_->session_loss_reason());

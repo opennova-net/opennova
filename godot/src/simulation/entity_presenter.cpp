@@ -609,13 +609,12 @@ namespace {
 // The held weapon placement — the calibration and the full derivation live at
 // pivot nudge in raw def units, X negated into the render frame — the values
 // engine world/entity_pose.h (the sim-side muzzle shares them)
-// [orig: flt_7C68E8 = 0.05 +X/-Y, flt_7C9BA8 = 0.051 +Z @ 0x4b2186].
+// (engine: runtime/world/entity_pose.h).
 constexpr int kHeldWeaponBoneIndex = opennova::world::kHeldWeaponBoneIndex;
 const Vector3 kHeldWeaponAttachNudge(opennova::world::kHeldWeaponAttachNudgeX,
 		opennova::world::kHeldWeaponAttachNudgeY,
 		opennova::world::kHeldWeaponAttachNudgeZ);
-// Hand-frame calibration [orig: Rz dbl_7C9BA0 / Ry dbl_7C9B98 via
-// Math_BuildRotationMatrix4x4_ByAxis @ 0x611db0].
+// Hand-frame calibration (engine: runtime/world/entity_pose.h).
 constexpr double kHandFrameZRad = opennova::world::kHeldWeaponHandFrameZRad;
 constexpr double kHandFrameYRad = opennova::world::kHeldWeaponHandFrameYRad;
 

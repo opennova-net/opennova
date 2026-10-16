@@ -719,7 +719,7 @@ void DestructionPresenter::unregister_effect_anchor(const Variant &p_key) {
 // crackle itself rolls in the SIM on the engine PRNG stream, per logic tick,
 // and arrives as an ordinary transient effect + distance-delay-gated sound
 // (S12b; world/destruction tick_item_death_motion
-// [orig: Entity_UpdateDeadWreckEffects @ 0x493140]).
+// (engine: runtime/world/death_effects.cpp)).
 void DestructionPresenter::tick_wreck_fires() {
 	if (burning_.is_empty()) {
 		return;
