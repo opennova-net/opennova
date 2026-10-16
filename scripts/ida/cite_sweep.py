@@ -15,9 +15,10 @@ For each marker the tool asks the IDB what lives at the address and classifies t
                 (the `Callee @0xCALLSITE` form)
   site-only     the marker names no symbol (`@0xADDR` alone, or a prose word before the @)
                 and the address is a defined location -- accepted
-  other-image   the marker carries another image's qualifier (dfx2med, JOTACmed, jomed, ModSuperOed,
-                misldr.dll, binkw32, jodemo, dfvas, TrnGen) -- skipped, this tool only knows the
-                Jointops.exe IDB
+  other-image   the marker names another image (scripts/lint/cite_images.py: every image
+                docs/engine-primer.md section 2 lists, by its file name or an established
+                short form such as `(dfbhd)`), or the record makes one its default
+                (DOC_DEFAULT_IMAGE) -- skipped, this tool only knows the Jointops.exe IDB
 
   name-mismatch        a real symbol name is cited, the IDB names that address differently
   name-elsewhere       the cited symbol exists in the IDB, but at another address, and the
@@ -29,6 +30,9 @@ For each marker the tool asks the IDB what lives at the address and classifies t
   undefined            the address is not code or data in the IDB
   malformed            the address is below the image (a dropped digit)
   unqualified-image    a DLL-range address (>= 0x10000000) with no image qualifier
+  image-spelling       the marker names a ratified image other than by its file name
+                       (`gobj` for `gobj.dll`, `JOTACmed` for `JOTACmed.exe`): one spelling
+                       per image (cite_images.RATIFIED)
   reimpl-stale         an IDB `reimpl:` entry comment names a repo path that no longer
                        exists (the reverse link half of the check)
   reimpl-moved         the named path exists but neither it nor its .h/.cpp sibling still
@@ -36,6 +40,12 @@ For each marker the tool asks the IDB what lives at the address and classifies t
                        kept the basename, or a push-down moved the port to its engine home)
   reimpl-orphan        the named path exists but no code file cites the function any more
                        (the port was deleted, or its marker dropped) -- adjudicate by hand
+
+Names compare in their MSVC-demangled and undecorated forms too: the statically linked D3DX
+`?LoadDDS@CImage@D3DXTex@@AAEJPBXK@Z` answers to `D3DXTex::CImage::LoadDDS`, the import
+`_D3DXCreateCubeTextureFromFileInMemory@16` to `D3DXCreateCubeTextureFromFileInMemory`. A
+CamelCase word with no underscore that the IDB does not know is a label or prose
+(`CenteredScaled @0x59d8fc`), read as a site cite.
 
 Exit status 1 when any of the defect classes is non-empty. Prints disagreements only;
 `--all` prints every accepted row too, `--tsv PATH` writes the full join.
@@ -68,6 +78,8 @@ import urllib.request
 from collections import Counter, defaultdict
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, os.path.join(REPO, "scripts", "lint"))
+import cite_images  # noqa: E402  the image table and rule, shared with cite_census.py
 DEFAULT_URL = "http://127.0.0.1:13337/mcp"
 URL = DEFAULT_URL  # the IDA MCP endpoint; --url overrides
 
@@ -84,13 +96,20 @@ COMMENT_LEAD = re.compile(r"^\s*(?://|##?|\*|--|;)+\s?")   # a wrapped marker's 
 MARKER_LINE = re.compile(r"\[orig:|\(retail:")
 PAIR = re.compile(r"(?<![\w.}])(?:([A-Za-z_][A-Za-z0-9_]*(?:::~?[A-Za-z_][A-Za-z0-9_]*)*)\s*)?@\s*(0x[0-9A-Fa-f]{4,8})\b")
 CAMEL = re.compile(r"^[A-Z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+$")
-QUALIFIER = re.compile(
-    r"dfx2med|JOTACmed|jomed|ModSuperOed|modsuperoed|misldr|binkw32|bink\.dll|jodemo|dfvas|Dflw|ParticleEdit|TrnGen|\(\s*demo\s*\)|\.dll\b",
-    re.I,
-)
-RETAIL_TAG = re.compile(r"^\s*\(\s*(?:retail|Jointops(?:\.exe)?)\s*\)")
-# a record that states another image in its preamble (docs/threedi/3di-gp-format-re.md: ModSuperOed / dfvas)
-DOC_IMAGE = re.compile(r"(ModSuperOed|Dflw|dfvas|dfx2med|JOTACmed|jodemo|ParticleEdit|TrnGen)[\s\S]{0,160}?(?:imagebase|IDB|\.i64|addresses)", re.I)
+# Records whose preamble makes another image the default for an unlabeled address
+# (docs/README.md: "Jointops.exe retail unless a doc says otherwise"); a marker that names
+# its image, `(retail)` included, still binds its own. Every other record is Jointops-default
+# and labels its other-image markers (correspondence.md, til-re.md, dfx2-vs-jo-re.md, ...).
+DOC_DEFAULT_IMAGE = {
+    "docs/threedi/3di-lw-format-re.md": "Dflw.exe",
+    # sectioned: section 1/3 ModSuperOed.exe, 2 dfvas.exe, 5 dfbhd.exe
+    "docs/threedi/3di-gp-format-re.md": "ModSuperOed.exe",
+    # misldr.dll (every 0x100xxxxx), dfx2med.exe and JOTACmed.exe, never mixed in one marker
+    "docs/mission/mis-format-re.md": "misldr.dll",
+}
+MAX_CONTINUATION = 6   # lines a wrapped marker may run onto before its `]`
+PRIMER_ROW = re.compile(r"^\|([^|\n]+)\|", re.M)               # a table row's first cell
+PRIMER_IMAGE = re.compile(r"`([^`]+\.(?:exe|dll))`", re.I)     # a binary named in it
 AUTO_PREFIXES = (
     "sub_", "loc_", "locret_", "dword_", "word_", "byte_", "unk_", "off_", "flt_",
     "dbl_", "stru_", "asc_", "nullsub_", "j_", "def_", "algn_", "qword_", "xmmword_",
@@ -98,8 +117,8 @@ AUTO_PREFIXES = (
 LABELISH = re.compile(r"^(?:LABEL_\d+|var_[0-9A-Fa-f]+|arg_[0-9A-Fa-f]+|v\d+|a\d+|kong)$")
 DEFECTS = (
     "name-mismatch", "name-elsewhere", "unknown-name", "code-autoname", "idb-autoname",
-    "undefined", "malformed", "unqualified-image", "reimpl-stale", "reimpl-moved",
-    "reimpl-orphan",
+    "undefined", "malformed", "unqualified-image", "image-spelling", "reimpl-stale",
+    "reimpl-moved", "reimpl-orphan",
 )
 TEST_ROOTS = ("godot/tests/", "tests/")
 
@@ -175,6 +194,36 @@ def tracked_files(roots, exts):
     return [p for p in out.split("\n") if p and p.endswith(exts)]
 
 
+# The spellings one IDB name answers to; run here and, prepended to IDB_CODE, inside IDA
+# (whose py_eval runs with separate globals and locals: the patterns ride as default
+# arguments and the function is published into globals for refs_symbol to call).
+NAME_FORMS_SRC = r'''
+import re as _re
+def name_forms(name, _ms=_re.compile(r"^\?(\?[01]|\?_7)?([A-Za-z_]\w*)@((?:[A-Za-z_]\w*@)*)@"),
+               _dec=_re.compile(r"^[_@]([A-Za-z_]\w*)@\d+$")):
+    """name, its MSVC-demangled scoped form (`?LoadDDS@CImage@D3DXTex@@AAEJPBXK@Z` ->
+    `D3DXTex::CImage::LoadDDS`; a ctor/dtor `Class::Class` / `Class::~Class`; a vftable
+    `??_7Class@@6B@` -> `Class`) and its undecorated stdcall form (`_Name@16` -> `Name`)."""
+    forms = {name} if name else set()
+    m = _ms.match(name or "")
+    if m:
+        special, leaf, scopes = m.group(1), m.group(2), [s for s in m.group(3).split("@") if s]
+        if special == "?_7":
+            forms.add("::".join(list(reversed(scopes)) + [leaf]))
+        elif special in ("?0", "?1"):
+            path = list(reversed(scopes)) + [leaf]
+            forms.add("::".join(path + [("~" if special == "?1" else "") + leaf]))
+        else:
+            forms.add("::".join(list(reversed(scopes)) + [leaf]))
+    m = _dec.match(name or "")
+    if m:
+        forms.add(m.group(1))
+    return forms
+globals()["name_forms"] = name_forms
+'''
+exec(NAME_FORMS_SRC)
+
+
 def symbol_like(tok):
     """A token that names a symbol, as opposed to a prose word before the `@` ("the gate
     @0x..."), a Hex-Rays local (`leanAngle`), a text-token key (`STRMISC_KILLEDBLUE`) or a
@@ -191,35 +240,56 @@ def symbol_like(tok):
     return "_" in tok or bool(CAMEL.match(tok))
 
 
+def marker_text(lines, i):
+    """Line i plus, when its last `[orig:` marker wraps, the continuation lines up to the one
+    that closes it (at most MAX_CONTINUATION), minus their comment lead-in (`Name @ //
+    0x4c8750` is one marker, not a dropped cite)."""
+    line = lines[i]
+    body = line.rfind("[orig:")
+    if "(retail:" in line or body < 0 or cite_images.marker_close(line, body + 6) >= 0:
+        return line
+    parts = [line]
+    for nxt in lines[i + 1:i + 1 + MAX_CONTINUATION]:
+        parts.append(COMMENT_LEAD.sub("", nxt))
+        joined = " ".join(parts)
+        # two lines at least (the sites a wrapped marker's prose names right after it),
+        # then on to the line whose bracket closes the marker
+        if len(parts) > 2 and cite_images.marker_close(joined, joined.rfind("[orig:") + 6) >= 0:
+            break
+    return " ".join(parts)
+
+
 def extract(paths):
-    """Yield (path, line_no, token, addr, bracket_text) per address in every marker.
-    bracket_text carries an image qualifier when the address itself is tagged (`@ 0x42ec20
-    (ParticleEdit_v1_1.exe)`), when the bracket names another image and the address is not
-    tagged `(retail)`, or when the record's preamble pins another image."""
+    """Yield (path, line_no, token, addr, ctx) per address in every marker. ctx is "" for a
+    Jointops address (the default), "(retail)" when the marker says so explicitly, else
+    "(other-image) <image>" or "(image-spelling) <image> <as spelled>"
+    (scripts/lint/cite_images.py binds the address to its image), or the record's
+    DOC_DEFAULT_IMAGE."""
     for path in paths:
         try:
             lines = open(os.path.join(REPO, path), encoding="utf-8", errors="replace").read().split("\n")
         except OSError:
             continue
-        doc_image = path.startswith("docs/") and DOC_IMAGE.search("\n".join(lines[:40]))
+        doc_image = DOC_DEFAULT_IMAGE.get(path)
         for i, line in enumerate(lines):
             if not MARKER_LINE.search(line):
                 continue
-            # a marker may wrap onto the next line(s); take up to 2 continuation lines, minus
-            # their comment lead-in (`Name @ // 0x4c8750` is one marker, not a dropped cite)
-            text = line
-            if "]" not in line.split("[orig:")[-1] and "(retail:" not in line:
-                text = " ".join([line] + [COMMENT_LEAD.sub("", l) for l in lines[i + 1:i + 3]])
+            text = marker_text(lines, i)
             for m in PAIR.finditer(text):
                 tok, addr = m.group(1), m.group(2).lower()
-                tail = text[m.end():m.end() + 40]
-                if RETAIL_TAG.match(tail):
-                    ctx = "(retail)"
-                elif QUALIFIER.match(tail.lstrip(" (")) or QUALIFIER.search(text) or doc_image:
-                    ctx = "(other-image)"
+                bound = cite_images.image_at(text, m.start(), m.end())
+                image, spelled = bound if bound else (doc_image or cite_images.DEFAULT_IMAGE, "")
+                if image == cite_images.DEFAULT_IMAGE:
+                    ctx = "(retail)" if bound else ""
+                elif cite_images.misspelled(image, spelled):
+                    ctx = "(image-spelling) %s %s" % (image, spelled)
                 else:
-                    ctx = ""
+                    ctx = "(other-image) " + image
                 yield path, i + 1, tok, addr, ctx
+
+
+def is_other_image(ctx):
+    return ctx.startswith(("(other-image)", "(image-spelling)"))
 
 
 # ---------------------------------------------------------------- IDB join
@@ -236,11 +306,14 @@ try:
 except Exception:
     pass  # IDA 9 dropped ida_struct; without the member table field cites fall to unknown-name
 def refs_symbol(ea, tea, tok, f):
-    """The nearest instruction in ea's function (or +-0x60) that calls/references the symbol
-    at tea, or -- when the symbol is a short form -- calls a function whose name ends in
-    `_tok`. Returns the site or None."""
-    lo = max(ea - 0x60, f.start_ea if f else ea - 0x60)
-    hi = min(ea + 0x60, f.end_ea if f else ea + 0x60)
+    """The nearest instruction in ea's function chunk (or +-0x60) that calls/references the
+    symbol at tea, or -- when the symbol is a short form or a demangled/undecorated name --
+    calls a function whose name ends in `_tok` or answers to tok. Returns the site or None.
+    The window is the CHUNK holding ea: a tail chunk below its function's entry would get
+    an empty window from the entry's bounds."""
+    ch = ida_funcs.get_fchunk(ea) if f else None
+    lo = max(ea - 0x60, ch.start_ea if ch else ea - 0x60)
+    hi = min(ea + 0x60, ch.end_ea if ch else ea + 0x60)
     size = max(idc.get_item_size(tea), 4) if tea != idc.BADADDR else 0
     best = None
     for x in range(lo, hi):
@@ -252,7 +325,7 @@ def refs_symbol(ea, tea, tok, f):
             hit = (tea != idc.BADADDR and tea <= v < tea + size)
             if not hit and tok and t in (idc.o_near, idc.o_far):
                 tn = idc.get_func_name(v) or idc.get_name(v) or ""
-                hit = tn.endswith("_" + tok)
+                hit = tn.endswith("_" + tok) or tok in name_forms(tn)
             if hit and (best is None or abs(x - ea) < abs(best - ea)):
                 best = x
     return ("0x%%x" %% best) if best is not None else None
@@ -267,7 +340,7 @@ for key in KEYS:
     fn = idc.get_func_name(ea) if f else ""
     in_data_seg = idc.get_segm_attr(ea, idc.SEGATTR_TYPE) == idc.SEG_DATA  # a table interior is a legitimate data cite
     defined = bool(f or idc.is_code(fl) or idc.is_data(fl) or nm or in_data_seg)
-    if (tok and nm == tok) or (not tok and defined):
+    if (tok and tok in name_forms(nm)) or (not tok and defined):
         continue  # trivially ok; omitted rows read as ok on the client side (keeps the reply small)
     tea = idc.get_name_ea_simple(tok) if tok else idc.BADADDR
     tea_s = ("0x%%x" %% tea) if tea != idc.BADADDR else None
@@ -278,24 +351,33 @@ result = json.dumps(out)
 OK_INFO = ["", None, "", True, None, None, False]  # an omitted key: the IDB name is the cited name
 
 
+def label_like(tok):
+    """A CamelCase word with no underscore (`CenteredScaled`, `BySide`, `PlayerList`): once
+    the IDB has no such name, it is a label or prose before the `@`, not a stale symbol."""
+    return "_" not in tok and "::" not in tok and bool(CAMEL.match(tok))
+
+
 def classify(tok, addr, ctx, info):
     a = int(addr, 16)
-    if ctx == "(other-image)":
+    if ctx.startswith("(image-spelling)"):
+        return "image-spelling"
+    if ctx.startswith("(other-image)"):
         return "other-image"
     if a < 0x401000:
         return "malformed"
     if a >= 0x10000000:
         return "unqualified-image"
     nm, fs, fn, defined, tea, ref, member = info
+    fn_forms = name_forms(fn)
     sym = symbol_like(tok)
     if not sym or member:
         # a prose word, a struct member, an unnamed site: only the address matters
-        if tok and tea and (tea == addr or ref or fn == tok):
+        if tok and tea and (tea == addr or ref or tok in fn_forms):
             return "ok" if tea == addr else "call-site"
         return "site-only" if defined else "undefined"
-    if nm == tok:
+    if tok in name_forms(nm):
         return "ok"
-    if fn and fs != addr and (fn == tok or tok in fn):
+    if fn and fs != addr and (tok in fn_forms or tok in fn):
         return "inner-site"   # `Func @0xSITE`, the short form `Method @0xSITE`, or an IDB `_0` twin
     if fs == addr and fn.endswith("_" + tok):
         return "short-form"   # `Method @0xFUNC` for `CClass_Method`: accepted, the full name is nicer
@@ -309,6 +391,8 @@ def classify(tok, addr, ctx, info):
         return "code-autoname"
     if tea and tea != addr:
         return "name-elsewhere"
+    if not tea and label_like(tok):
+        return "site-only" if defined else "undefined"
     if not defined and not fs:
         return "undefined"
     if nm.startswith(AUTO_PREFIXES):
@@ -377,7 +461,9 @@ def stem_siblings(path):
     return {base + e for e in (".h", ".hpp", ".cpp")} - {path}
 
 
-ORPHAN_OK = re.compile(r"unported|not ported|retired|deferr|no cite|no marker", re.I)   # a documented absence
+# a documented absence: an unported or retired leg, or a device-side leg the ratchets keep
+# unmarked (`godot/src/... (device leg)`)
+ORPHAN_OK = re.compile(r"unported|not ported|retired|deferr|no cite|no marker|device leg", re.I)
 
 
 def collapse_homes(homes):
@@ -394,26 +480,28 @@ def collapse_homes(homes):
     return out
 
 
-def renamed_twin(old_tok, by_base):
+def renamed_twin(old_tok, by_base, homes):
     """The file a retired path became when only its name changed: the `nova_` prefix
     dropped (ADR 0040) or the pre-engine `libs/<lib>/src/` layout -- a unique tracked file
-    with the surviving basename."""
+    with the surviving basename that still cites the function (it, or its .h/.cpp sibling,
+    is among the homes). A same-named file the port has since left is no twin."""
     base = os.path.basename(old_tok)
     for cand in (base[5:] if base.startswith("nova_") else base,):
         same = by_base.get(cand, [])
-        if len(same) == 1:
+        if len(same) == 1 and (same[0] in homes or stem_siblings(same[0]) & homes):
             return same[0]
     return None
 
 
 def pick_home(homes, old_tok, path_exists, by_base):
     """The unambiguous new home for a link. A retired path follows its rename when the twin
-    still exists, else the single citing file (siblings collapsed), else the single citing
-    engine/ or godot/src file. A path that still EXISTS but lost its cite is rewritten only
-    when exactly one file cites the function and it lives under engine/ (the push-down
-    direction); everything else is listed for a hand adjudication."""
+    still cites the function, else the single citing file (siblings collapsed), else the
+    single citing engine/ file, else (no engine/ file cites it) the single godot/src one.
+    A path that still EXISTS but lost its cite is rewritten only when exactly one file
+    cites the function and it lives under engine/ (the push-down direction); everything
+    else is listed for a hand adjudication."""
     if not path_exists:
-        twin = renamed_twin(old_tok, by_base)
+        twin = renamed_twin(old_tok, by_base, homes)
         if twin:
             return twin
     homes = collapse_homes(homes)
@@ -423,8 +511,10 @@ def pick_home(homes, old_tok, path_exists, by_base):
         return None
     for root in ("engine/", "godot/src/"):
         under = [h for h in homes if h.startswith(root)]
-        if len(under) == 1:
-            return under[0]
+        if under:
+            # several engine/ homes are ambiguous: a lone godot/src/ cite beside them is a
+            # pointer or a prose mention, never the port's new home
+            return under[0] if len(under) == 1 else None
     return None
 
 
@@ -438,7 +528,7 @@ def classify_reimpl(rows, pairs, all_tracked):
     for p in tracked:
         by_base[os.path.basename(p)].append(p)
     cites = sorted({(int(addr, 16), path) for path, _, _, addr, ctx in pairs
-                    if ctx != "(other-image)" and not path.startswith(DOC_ROOTS + TEST_ROOTS)})
+                    if not is_other_image(ctx) and not path.startswith(DOC_ROOTS + TEST_ROOTS)})
     addrs = [a for a, _ in cites]
     text_cache = {}
 
@@ -488,6 +578,28 @@ def apply_reimpl(edits, batch):
     return n
 
 
+def check_primer_images(pairs):
+    """cite_images.IMAGES mirrors docs/engine-primer.md section 2's binaries table: print
+    every image one lists and the other lacks, and every image a marker names that neither
+    lists (a new image owes the primer a row and cite_images.py an entry)."""
+    try:
+        primer = open(os.path.join(REPO, "docs", "engine-primer.md"), encoding="utf-8").read()
+    except OSError:
+        return
+    section = primer.split("## 2.", 1)[-1].split("\n## 3.", 1)[0]
+    listed = set()
+    for cell in PRIMER_ROW.findall(section):
+        listed.update(PRIMER_IMAGE.findall(cell))
+    known = set(cite_images.IMAGES)
+    named = Counter(ctx.split(" ")[1] for _, _, _, _, ctx in pairs if is_other_image(ctx))
+    for image in sorted(known - listed):
+        print("[cite-sweep][images] cite_images.IMAGES lists %s; engine-primer section 2 does not" % image)
+    for image in sorted(listed - known):
+        print("[cite-sweep][images] engine-primer section 2 lists %s; cite_images.IMAGES does not" % image)
+    for image in sorted(set(named) - known - listed):
+        print("[cite-sweep][images] %d marker address(es) name %s, which neither lists" % (named[image], image))
+
+
 # ---------------------------------------------------------------- main
 
 def main():
@@ -513,13 +625,15 @@ def main():
     doc_paths = [] if args.no_docs else tracked_files(DOC_ROOTS, DOC_EXT)
     pairs = list(extract(code_paths + doc_paths))
     keys = sorted({(addr, tok or "") for _, _, tok, addr, ctx in pairs
-                   if ctx != "(other-image)" and 0x401000 <= int(addr, 16) < 0x10000000})
+                   if not is_other_image(ctx) and 0x401000 <= int(addr, 16) < 0x10000000})
+    if not args.no_docs:
+        check_primer_images(pairs)
 
     connect()
     info = {}
     for i in range(0, len(keys), args.batch):
         chunk = keys[i:i + args.batch]
-        code = "KEYS = " + json.dumps(chunk) + "\n" + (IDB_CODE % (AUTO_PREFIXES,))
+        code = "KEYS = " + json.dumps(chunk) + "\n" + NAME_FORMS_SRC + (IDB_CODE % (AUTO_PREFIXES,))
         info.update(py_eval(code, rid=100 + i))
         sys.stderr.write("  idb join %d/%d\n" % (min(i + args.batch, len(keys)), len(keys)))
 
@@ -531,9 +645,10 @@ def main():
             cls = classify(tok, addr, ctx, info[key])
             nm, fs, fn = info[key][:3]
             hint = info[key][5] or ""
-        elif ctx == "(other-image)" or not (0x401000 <= int(addr, 16) < 0x10000000):
+        elif is_other_image(ctx) or not (0x401000 <= int(addr, 16) < 0x10000000):
             cls = classify(tok, addr, ctx, OK_INFO)
             nm, fs, fn = "", None, ""
+            hint = ctx.split(" ", 1)[1] if is_other_image(ctx) else ""   # the image (as spelled)
         else:
             cls, nm, fs, fn = ("ok" if tok else "site-only"), (tok or ""), None, ""
         rows.append((cls, addr, tok or "", nm, fs or "", fn, "%s:%d" % (path, ln), hint))

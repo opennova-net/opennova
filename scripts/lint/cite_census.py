@@ -8,8 +8,11 @@ structural translation of. A structural refactor moves that line — into a
 method, another translation unit, another directory — and MUST carry the cite
 with it; a slice that loses an address either deleted verified dead code or
 lost a witness. The census makes the difference visible: the baseline is the
-map `address -> occurrence count` over engine/, godot/, apps/ and tests/;
-a run compares the current map against it.
+map `witness -> occurrence count` over engine/, godot/, apps/ and tests/, a
+witness being an address in its image (`0x404ac0` is Jointops.exe's,
+`0x404ac0 (UPDATE.EXE)` another image's, by scripts/lint/cite_images.py's rule:
+the same number in two images is two witnesses); a run compares the current
+map against it.
 
   --enforce        exit 1 when a baselined address no longer occurs anywhere
                    (a LOST witness). A count that merely dropped is reported
@@ -42,6 +45,9 @@ import sys
 from collections import Counter
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import cite_images  # noqa: E402  the image rule, shared with scripts/ida/cite_sweep.py
+
 REPO = Path(__file__).resolve().parents[2]
 BASELINE_PATH = Path(__file__).resolve().parent / "cite_census_baseline.json"
 
@@ -71,6 +77,16 @@ def canonical(hex_digits: str) -> str:
     return f"0x{int(hex_digits, 16):x}"
 
 
+def witness(text: str, match: re.Match) -> str:
+    """The census key of one cited address: `0x404ac0` in Jointops.exe (the default image),
+    `0x404ac0 (UPDATE.EXE)` in another."""
+    addr = canonical(match.group(1))
+    bound = cite_images.image_at(text, match.start(), match.end())
+    if bound is None or bound[0] == cite_images.DEFAULT_IMAGE:
+        return addr
+    return f"{addr} ({bound[0]})"
+
+
 def census() -> Counter:
     counts: Counter = Counter()
     for scope in SCOPES:
@@ -88,9 +104,9 @@ def census() -> Counter:
             except OSError:
                 continue
             for match in ANCHOR.finditer(text):
-                counts[canonical(match.group(1))] += 1
+                counts[witness(text, match)] += 1
             for match in RANGE_END.finditer(text):
-                counts[canonical(match.group(1))] += 1
+                counts[witness(text, match)] += 1
     return counts
 
 
@@ -103,9 +119,10 @@ def load_baseline() -> dict[str, int]:
 
 def write_baseline(counts: Counter) -> None:
     payload = {
-        "_comment": "scripts/lint/cite_census.py --write-baseline: witness address -> "
-                    "occurrence count over engine/, godot/, apps/, tests/. A dropped "
-                    "address is named in the commit that drops it (ADR 0043).",
+        "_comment": "scripts/lint/cite_census.py --write-baseline: witness (an address, "
+                    "with its image when not Jointops.exe) -> occurrence count over "
+                    "engine/, godot/, apps/, tests/. A dropped witness is named in the "
+                    "commit that drops it (ADR 0043).",
         "addresses": dict(sorted(counts.items())),
     }
     BASELINE_PATH.write_text(json.dumps(payload, indent=1, sort_keys=False) + "\n",
