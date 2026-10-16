@@ -47,8 +47,8 @@ There are three places the service runs, and nothing of one reaches another by a
 **Separate, per deployment.** Everything AWS: each deployment is an account of its own
 (the Organization's management account holds no OpenNova resource), so its VPC, cluster,
 database, cache, buckets, SSM parameters, logs, alarms and their topic, budgets, SES
-identities and sandbox, Cloud Map namespace, hosted machines and data snapshots, and its
-Terraform state (a versioned, encrypted bucket in that account, locked by S3's own lock
+identities and sandbox, Cloud Map namespace, hosted machines and their game data (its
+bucket's `data/`), and its Terraform state (a versioned, encrypted bucket in that account, locked by S3's own lock
 file) are its own, and no IAM principal of one account can touch the other's. Each
 deployment's credentials: its deploy user (`opennova-deploy` in its account; its key in
 its own vault item) and its GitHub environment's OIDC role (which trusts that
@@ -57,8 +57,7 @@ exceptions, each one way and named by its flag: `backup import --from-deployment
 on staging reads prod's dump with prod's key, and `app deploy --promote staging` on prod
 reads staging's release with staging's key; each in a subshell of its own, the two keys
 never in one call. Its vault items
-(`aws-<deployment>`, `app-<deployment>`, `rds-<deployment>`, `hosted-<deployment>`), its
-Stripe mode, its site's hostname, its origin certificate (staging's names
+(`aws-<deployment>`, `app-<deployment>`, `rds-<deployment>`), its Stripe mode, its site's hostname, its origin certificate (staging's names
 `staging.<domain>` alone, so it can never serve prod's), its edge authentication secret
 and rule, its database's dumps (`backup restore` takes the deployment's own alone).
 
@@ -133,7 +132,6 @@ the manual steps below (each fills the vault field it names), then the applies
 | `cloudflare` | `api_token`, `zone_id`, `domain` | hand (section 1) |
 | `app-prod`, `app-staging` | `admin_api_token`, `admin_basic_auth_user`, `admin_basic_auth_password`, `database_password`, `redis_password`, `edge_auth_secret` | `secrets init` |
 | `rds-prod`, `rds-staging` | `master_password` | `secrets init` |
-| `hosted-prod`, `hosted-staging` | `data_snapshot_id_<slug>` | `hosted data-snapshot` prints each; hand |
 | `stripe-test`, `stripe-live` | `secret_key` (and `restricted_key` in `stripe-test`) | hand (Stripe's dashboard) |
 | `stripe-test`, `stripe-live` | `webhook_secret`, `price_*` | `stripe setup` |
 | `alerts`, `email` | `email`, `forward_to` | hand |
@@ -229,8 +227,9 @@ in each Stripe item you fill `secret_key` (the Stripe dashboard) and `./deploy/r
 --deployment <prod|staging> stripe setup` the rest ("Monthly support tiers (Stripe)",
 below). Optional fields the toolbox picks up when present:
 `app-<deployment>/bootstrap_admin` (section 4) and
-`app-<deployment>/edge_auth_secret_previous` (a rotation). Item `hosted-<deployment>` holds
-that deployment's hosted servers' data snapshots (section 7). There is no SSH item.
+`app-<deployment>/edge_auth_secret_previous` (a rotation). There is no SSH item, and nothing
+of the hosted servers' game data is in the vault (section 7: the site's Game data page holds
+it, in the deployment's operations bucket).
 
 The `op://` references the toolbox reads are listed in `deploy/env/`: `terraform.env.tpl`
 (a deployment stack's), `org.env.tpl`, `zone.env.tpl` and `github.env.tpl` (the shared
@@ -460,11 +459,13 @@ name; the public network load balancer with the gate's Elastic IP (adopted on pr
 zone a and one of its own in zone b, carrying the gate, the lobby and web, and its own
 security group; the database and the cache (Valkey, a primary and a replica); the backup task and its nightly schedule; the
 SSM parameters the toolbox reads; the operations bucket (`opennova-<deployment>-ops-<account
-id>`: the releases and the dumps); the logs, metrics and alarms; the account's budgets;
-the deployment's Cloudflare records (its site's, proxied), its origin certificate; its
-outbound mail's SES identities and records (with a sender); and (with data snapshots) the
-fleet's launch templates and image parameter. A new database takes 10 to 15 minutes, a new
-cache about as long. The services run no task until the deployment's first release: a
+id>`: the releases, the dumps and the game data's store, `data/`, with its lifecycle
+rules); the logs, metrics and alarms; the account's budgets; the deployment's
+Cloudflare records (its site's, proxied), its origin certificate; its outbound mail's SES
+identities and records (with a sender); and (with `hosted_enabled`) the fleet's launch
+templates and image parameter, the machine role and web's and the worker's store policies
+(section 7). A new
+database takes 10 to 15 minutes, a new cache about as long. The services run no task until the deployment's first release: a
 template's images are unpinned (`image_tag`, `latest`), so no task starts from one, and
 each count's floor is 0 until then; the first `app deploy` starts each program at its
 `desired` count and raises its floor to its `min`, which the next `infra apply` keeps
@@ -946,10 +947,11 @@ again (section 4). On prod it asks for `prod` besides `--yes-drop-database`.
 ## 7. Hosted game servers
 
 An account with a hosting entitlement (a monthly support tier, or an admin's comp grant
-of `comp_servers`) starts servers from the site's My servers page, picking a data set:
-the game folder the server mounts, named by the games slug of the lobby it lists in
-(`jop_2_consumer`, `dfx2_consumer`, `opennova_0_consumer`). The server is always the
-public `opennova-serve` image, started with `/game <title>`.
+of `comp_servers`) starts servers from the site's My servers page, picking a data set
+(JO, DFX2 or OpenNova: a product's game files, which admins upload on the site's Game
+data page, below) and, for JO, its Escalation expansion. The server is always the public
+`opennova-serve` image, started with `/game <title>` (and `/exp <code>`) over the data
+set's files, which its machine fetches from the store.
 
 The service places each server on a machine it launches itself (its EC2 machine driver,
 in the worker's jobs, with the worker's task role), in either public subnet:
@@ -962,47 +964,61 @@ in the worker's jobs, with the worker's task role), in either public subnet:
 Slot k of a machine is game UDP `32768+k` (to players) and admin TCP `32800+k` (to the
 controller alone); hostd, the agent on each machine, runs one container per slot and
 reports to the controller's internal listener (`controller.<deployment>.opennova.internal:8070`,
-its Cloud Map name, admitted from the machines alone). Every machine mounts every data set,
-read-only. Machines are terminated, never stopped. No machine has an SSH key or database credentials; break-glass is Session
-Manager. At most 2 shared and 2 own machines run at once (`fleet_max_shared`,
-`fleet_max_own`); `ONNET_HOSTED_CAP` (default 24) caps the servers.
+its Cloud Map name, admitted from the machines alone). A machine holds no volume of game
+data: its hostd fetches the trees its servers pin from the store (below), once each, onto
+its root volume (`machine_root_volume_gb`, 40 GiB), and keeps each while a server needs
+it. Machines are terminated, never stopped. No machine has an SSH key or database
+credentials; break-glass is Session Manager. At most 2 shared and 2 own machines run at
+once (`fleet_max_shared`, `fleet_max_own`); `ONNET_HOSTED_CAP` (default 24) caps the
+servers.
 
 ### The game data
 
-Each data set's snapshot holds the files `opennova-serve` reads from an install, and
-nothing else:
+Admins create and upload data sets on the admin page **Game data** (`/admin/data-sets`;
+ADR 0064). A data set is one product: of kind base (JO, DFX2, OpenNova: its title and the
+lobby it lists in) or expansion (Escalation, code `jox01`, under JO). Its data is a
+**tree**, one immutable version of its files: **Upload data** takes an install's folder
+from a folder picker, keeps only the files `opennova-serve` reads, sends them through the
+site in 32 MiB parts (each a request to web, which puts it in the bucket; the bucket needs
+no CORS rule), and **Finalize** has the worker check the names and sizes and list the
+missions, which are the data set's map rotation (there is no configured one):
 
-| File | Data sets | Why |
+| File | Kind | Why |
 |---|---|---|
-| `resource.pff`, `localres.pff`, `language.pff` | every one (required) | the retail boot table it mounts |
-| `expansion/jox01/jox01.pff`, `expansion/jox01/jox01L.pff` | `jop_2_consumer` (required) | Escalation (`/exp jox01`) |
-| `expansion/jox01/version.txt` | `jop_2_consumer` (required) | the expansion checksum joiners compare |
-| `score.ini`, `_NSTMOUT.TXT` (when present) | `jop_2_consumer`, `dfx2_consumer` | the scoring table; the session timeout override |
+| `resource.pff`, `localres.pff`, `language.pff` | base (required) | the retail boot table it mounts |
+| `version.txt`, `score.ini`, `_NSTMOUT.TXT`, `gt.ssc` | base (when present) | the version joiners compare; the scoring table; the session timeout override; the game types |
+| `<code>.pff`, `<code>L.pff`, `version.txt` | expansion (required) | the expansion's archives and the checksum joiners compare |
+| `gt.ssc` | expansion (when present) | its game types |
 
-Each deployment's account makes its own snapshots, encrypted with that account's default
-EBS key (`aws/ebs`), private to it (such a snapshot cannot be shared with another account;
-moving one across would mean re-encrypting it under a customer-managed key first), and they
-never go in git or an image. Each file system carries its data set's
-label, by which the machine mounts it.
+A data set's **current tree** is what new servers start on; a running server is pinned to
+the trees it started on until its owner presses **Update** on its page (the page says an
+update waits), or an admin's **Update servers** does it for every server of the data set,
+and a crash restart or a fleet roll keeps the pins.
+
+The store is the deployment's operations bucket under `data/` (one bucket per deployment,
+so the prefix carries no deployment): `trees/<tree id>/<file>` with its `manifest.json`
+(each file's name and size, the version line). `ONNET_OBJECT_STORE_URL`
+(`s3://opennova-<deployment>-ops-<account id>/data`) and `ONNET_OBJECT_STORE_REGION` name
+it to web, the controller and the worker. The machines' hostd fetches a tree with `aws s3
+sync` under the machine role, which reads `data/trees/` and nothing else of the bucket,
+and checks the names and sizes against the manifest; web's and the worker's task roles
+read, write and delete under `data/` alone. The bucket aborts an upload abandoned for 7
+days, and keeps a deleted tree's objects' old versions 7 days. Nothing of the game data
+goes in git, an image or the vault, and nothing of it crosses between the accounts: each
+deployment's admins upload it on its own site, into its own bucket.
 
 ### Turning it on
 
-1. **Make each data set's snapshot, once.** Mount its game folder into the toolbox:
+1. **The role boundary.** The task roles' store access needs `s3:DeleteObject` and
+   `s3:ListBucketMultipartUploads` in `infra/aws/iam/opennova-role-boundary.json`, which
+   the org stack applies in both accounts before the apply below (`./deploy/run.sh org
+   plan`, then `org apply`; `infra/aws/iam/README.md`, "Changing a policy"); applied
+   after, every store call of web and the worker is refused until it is. The deploy user's
+   policies gain nothing.
 
-   ```bash
-   HOSTED_DATA_DIR="D:/SteamLibrary/steamapps/common/Joint Operations Combined Arms" \
-     ./deploy/run.sh --deployment staging hosted data-snapshot --data-set jop_2_consumer
-   ```
-
-   (PowerShell: `$env:HOSTED_DATA_DIR = "<folder>"; .\deploy\run.ps1 --deployment staging
-   hosted data-snapshot --data-set jop_2_consumer`.) It streams the files into a helper
-   image (`deploy/hosted-data`) that writes an ext4 image straight into a new snapshot of
-   the deployment's account through the EBS direct APIs, with the deployment's deploy
-   user's credentials, and prints its id.
-
-2. **Record them in the vault.** The deployment's item, `hosted-<deployment>`, one field
-   per data set, `data_snapshot_id_<slug>`. With no such item the deployment's hosting is
-   off; a broken item stops every `infra` run rather than plan hosting away.
+2. **`hosted_enabled = true`** in the deployment's var-file (`infra/aws/<deployment>.tfvars`;
+   prod's and staging's say so). Off, fleet.tf creates nothing and the programs run with
+   hosting off.
 
 3. **Check the vCPU quota.** The machines alone use the account's On-Demand Standard
    instances quota (L-1216C47A; the programs run on Fargate, whose quota is its own):
@@ -1016,22 +1032,28 @@ label, by which the machine mounts it.
 
 4. **Plan, then apply.** The plan adds the two launch templates
    (`aws_launch_template.fleet["shared"]`, `["own"]`), the fleet's image parameter, the
-   machines' security group and its rules, the machine role and the worker's fleet
-   policy, and changes web's, the controller's and the worker's task definitions (the
-   `ONNET_HOSTED_*` settings, among them `ONNET_HOSTED_DATA_SETS`: the data sets the
-   machines mount, which are the ones the site offers; `app converge` takes them). A data set's default map
-   rotation for new servers is `hosted_data_set_missions` in the deployment's tfvars
-   (`{ jop_2_consumer = ["m01.bms", ...] }`); without one, an owner picks the missions.
+   machines' security group and its rules, the machine role (with its read of the trees)
+   and the worker's fleet policy, web's and the worker's store policies and the game data's
+   lifecycle rules; it changes web's, the controller's and the worker's task definitions
+   (the `ONNET_HOSTED_*` settings, the store's URL and region; `app converge` takes them).
 
 5. **Deploy**, so the programs read them and pin the serve and hostd images:
    `./deploy/run.sh --deployment staging app deploy --serve-tag sha-<serve> --hostd-tag sha-<serve>`
-   (on prod, the next `--promote staging`). The
-   controller and the worker log `[boot] hosted servers: ec2 ...`.
+   (on prod, the next `--promote staging`). The controller and the worker log
+   `[boot] hosted servers: ec2 ...`.
 
-6. **Bake the machines' image** (optional, recommended): `./deploy/run.sh --deployment
-   <deployment> fleet bake-image` (below), so a machine boots with docker and the images already there.
+6. **Upload the data.** On Game data, make the data sets (JO in `jop_2_consumer`,
+   Escalation `jox01` under it, DFX2, OpenNova); **Upload data** on each from its install's
+   folder, then **Finalize**. A data set is offered to owners once its current tree is
+   ready; until then a server of it fails with "its data set has no data" (not counted as
+   a crash). Each deployment's admins upload into that deployment alone: staging's data
+   never reaches prod's bucket, nor the other way.
 
-7. **Subscribe, or grant.** An account hosts once it subscribes to a support tier, or an
+7. **Bake the machines' image** (optional, recommended): `./deploy/run.sh --deployment
+   <deployment> fleet bake-image` (below), so a machine boots with docker and the images
+   already there.
+
+8. **Subscribe, or grant.** An account hosts once it subscribes to a support tier, or an
    admin gives it a comp grant (`comp_servers`, the admin user page). Run the smoke test
    below.
 
@@ -1056,7 +1078,8 @@ the other account's are out of its reach.
 ### The smoke test
 
 1. Start a server from My servers. Its timeline runs requested, provisioning (a machine
-   launching: a few minutes the first time), booting, listing, running.
+   launching and fetching the data set's trees: a few minutes the first time), booting,
+   listing, running.
 2. It lists in its game's lobby in the OpenNova and the retail server browsers, at the
    machine's address and its slot's port; a retail client and an OpenNova client both
    join. A second account's server lands on the next slot of the same shared machine and
@@ -1074,7 +1097,8 @@ machines. To keep hosting off across deploys, deploy with `app deploy --no-hosti
 the service is down, `fleet status` lists the machines and `./deploy/run.sh --deployment
 <deployment> aws ec2 terminate-instances --instance-ids <machine> ...` ends them; the service ends any machine
 it finds without a server at its next pass anyway. To turn hosting off for good: stop all,
-deploy with `--no-hosting`, delete the `hosted-<deployment>` vault item, `infra apply`.
+deploy with `--no-hosting`, `hosted_enabled = false` in the var-file, `infra apply` (the
+game data stays in the bucket).
 
 ### Operating notes
 
@@ -1092,9 +1116,19 @@ deploy with `--no-hosting`, delete the `hosted-<deployment>` vault item, `infra 
   boot from it, and `fleet roll` moves running servers onto new ones. Bake again after an
   `app deploy --serve-tag` (the pulled images go stale) and now and then for OS updates.
   A failed bake leaves the parameter alone and says how to read the builder's console.
-- **New data, or a new data set.** Make its snapshot, set its vault field
-  (`hosted-<deployment>`), `infra apply` (the templates mount it), `fleet roll`, then
-  delete the old snapshot; staging first, then prod's own.
+- **New data, or a new data set.** On Game data: a new data set is a row, new data a
+  tree uploaded on it, and new servers start on it at once; a
+  running server moves to it when its owner presses Update (or the admin's Update servers
+  does), which restarts it on the new tree. Nothing to apply, no roll: a fleet roll keeps
+  every server's pins, so a rolled server comes back on the data it ran on. Staging
+  first, then prod's own upload.
+- **A stuck upload.** The page holds an upload's parts until Finalize; a page closed
+  mid-way leaves the tree `uploading` with its parts in the bucket. Delete the tree on the
+  page (its uploads are aborted), or leave it: the bucket aborts them after 7 days. A tree
+  `failed` says why in its row; delete it and upload again.
+- **Pruning.** The worker's `tree.prune` (hourly, and after each finalize) removes a tree
+  that is not current and that no live server pins, an hour after it stopped being either;
+  a running server's data is never deleted under it.
 - **A machine's logs.** Every machine writes CloudWatch `/opennova/<deployment>/machines`
   (30 days), a stream per slot and one for its agent, named by the machine's id (the admin
   fleet view's "Machine N, slot k"): `<id>/slot-<k>` holds the output of each server that
@@ -1469,15 +1503,13 @@ COUNTS="SELECT (SELECT count(*) FROM players) AS players, (SELECT count(*) FROM 
    ./deploy/run.sh $D infra apply                 # the whole stack, every program at no task
    ./deploy/run.sh $D db bootstrap
    ./deploy/run.sh $D stripe check                # test mode, staging's site; stripe setup for what lacks
-   HOSTED_DATA_DIR="<the JO:CA folder>" ./deploy/run.sh $D hosted data-snapshot --data-set jop_2_consumer
-   HOSTED_DATA_DIR="<the DFX2 folder>" ./deploy/run.sh $D hosted data-snapshot --data-set dfx2_consumer
-   #   each id into hosted-staging/data_snapshot_id_<slug> (opennova_0_consumer the same way)
-   ./deploy/run.sh $D infra apply                 # the fleet's templates
+   #   staging.tfvars has hosted_enabled = true: the apply above made the fleet's templates
+   #   and the store; the game data is uploaded on staging's Game data page once its first
+   #   release runs (section 7)
    ```
 
-   An EBS snapshot under the account's AWS-managed key (`aws/ebs`) cannot be shared with
-   another account (moving it would mean re-encrypting it under a customer-managed key
-   first), so each account makes its own from the game folders.
+   The game data never crosses between the accounts: each deployment's admins upload it
+   on its own site, into its own bucket (section 7).
 3. **The database's move and the first release, rehearsed** in the window's order (its
    steps 9 to 11): prod's live dump restored into the empty database before any program
    has booted on it, then the first release, whose boot applies the migrations the dump
@@ -1516,8 +1548,6 @@ COUNTS="SELECT (SELECT count(*) FROM players) AS players, (SELECT count(*) FROM 
 ```bash
 P='--deployment prod'
 ./deploy/run.sh $P secrets sync
-HOSTED_DATA_DIR="<the JO:CA folder>" ./deploy/run.sh $P hosted data-snapshot --data-set jop_2_consumer
-#   ... each data set, each id into hosted-prod/data_snapshot_id_<slug>
 ./deploy/run.sh $P infra apply -target=aws_db_instance.main -target=aws_elasticache_replication_group.cache -target=aws_s3_bucket.ops
 ```
 
@@ -1776,8 +1806,9 @@ every command).
   gate's address, port 64206; `app logs lobby` names its session); its HTTP requests
   reach the gate's address on 8080. On staging, with two web tasks, repeat the login until its steps land
   on both (web's logs show it): it completes.
-- **F. A shared machine.** Start a server: a shared machine launches (from the baked
-  image, `fleet status`), its hostd reaches the controller by its Cloud Map name, the
+- **F. A shared machine.** With a data set uploaded on Game data, start a server: a
+  shared machine launches (from the baked image, `fleet status`), its hostd reaches the
+  controller by its Cloud Map name and fetches the server's trees from the store, the
   server lands on slot k and is joinable by a retail and an OpenNova client; `fleet logs
   <machine> <k>` shows the server's output and `fleet logs <machine> hostd` the agent's.
 - **G. A second account** starts one: it lands on slot k+1 of the same machine.

@@ -29,7 +29,7 @@ set +e
 trap 'rm -rf "$scratch"' EXIT
 
 # Every command group answers with the deployment it was handed.
-for group in secrets stripe infra org zone github aws app db backup fleet hosted; do
+for group in secrets stripe infra org zone github aws app db backup fleet; do
   eval "cmd_$group() { echo \"ran DEP=\${DEP:-none} DEFAULTED=\$DEP_DEFAULTED\"; }"
 done
 
@@ -68,7 +68,7 @@ for cmd in "app deploy --tag sha-abc1234" "app rollback" "app converge" "app res
            "app shell web" "infra plan" "infra apply" "infra destroy" "infra import a b" "infra state-rm a" \
            "secrets init" "secrets sync" "stripe setup" "db bootstrap" "db psql" "db reset-db --yes-drop-database" \
            "db snapshot" "backup now" "backup restore novaworld/x.dump --yes-overwrite-database" "backup import -" \
-           "fleet drain i-0" "fleet end i-0" "fleet roll" "fleet bake-image" "hosted data-snapshot --data-set jop_2_consumer" \
+           "fleet drain i-0" "fleet end i-0" "fleet roll" "fleet bake-image" \
            "aws s3 ls"; do
   # shellcheck disable=SC2086  # the words are the command's arguments
   expect_refused "'$cmd' without --deployment" "There is no default" $cmd

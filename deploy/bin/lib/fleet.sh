@@ -1,6 +1,6 @@
 # shellcheck shell=bash
-# on-deploy's hosted game servers: the machines (`fleet`) and the game data
-# snapshots (`hosted`).
+# on-deploy's hosted game servers: the machines (`fleet`). The game data is
+# the site's Game data page (ADR 0064), not the toolbox's.
 # deploy/bin/on-deploy sources this file before it runs a command: it defines
 # functions and their constants alone, and runs nothing itself. The helpers
 # every command shares (log, die, the deployment, the vault, AWS) are
@@ -9,11 +9,6 @@
 # ---------------------------------------------------------------------------
 # Hosted game servers (ADR 0053; DEPLOY.md "Hosted game servers")
 # ---------------------------------------------------------------------------
-
-# Where a data set's game folder is mounted into this container for
-# `hosted data-snapshot` (run.sh and run.ps1 mount HOSTED_DATA_DIR there).
-HOSTED_DATA_MOUNT=/hosted-data
-HOSTED_DATA_IMAGE=opennova-hosted-data:local
 
 # The opennova:deployment tag the deployment's hosted machines carry: infra.env's,
 # else the stack's resource name (opennova-<deployment>).
@@ -126,7 +121,7 @@ fleet_bake_image() {
   aws_auth
   infra_env_load
   [ "${INFRA[ONNET_HOSTED_PROVIDER]:-none}" = ec2 ] \
-    || die "hosting is off (no 'hosted' vault item, infra apply): there is no fleet to bake an image for"
+    || die "hosting is off (hosted_enabled in infra/aws/$DEP.tfvars, then infra apply): there is no fleet to bake an image for"
   local param sg subnet tag base current manifest pull user_data name tags iid ami state waited=0
   param="$(infra_get OPENNOVA_FLEET_IMAGE_PARAMETER)"
   sg="$(infra_get OPENNOVA_FLEET_SECURITY_GROUP)"
@@ -223,101 +218,5 @@ cmd_fleet() {
       aws_auth
       admin_api POST "$FLEET_API/roll" || die "the service refused or did not answer (app logs web)" ;;
     *) die "unknown: fleet $action (try: status|logs|drain|end|roll|bake-image)" ;;
-  esac
-}
-
-# hosted data-snapshot --data-set SLUG: one data set of the hosted servers'
-# game data, once, as a private encrypted EBS snapshot. The data set's game
-# folder is mounted here (HOSTED_DATA_MOUNT) read-only; only the files
-# opennova-serve reads are taken (apps/serve/README.md, "Container image"):
-#   jop_2_consumer       a Joint Operations Combined Arms install: the three
-#                        base archives, Escalation's archive pair and its
-#                        version.txt (required), score.ini and _NSTMOUT.TXT
-#                        when present;
-#   dfx2_consumer        a Delta Force Xtreme 2 install: the three base
-#                        archives (required), score.ini and _NSTMOUT.TXT when
-#                        present;
-#   opennova_0_consumer  OpenNova's own data: the three base archives.
-# They stream as a tar into the helper image (deploy/hosted-data), built on this
-# docker, which makes an ext4 image of them and writes it into a new snapshot
-# through the EBS direct APIs: no machine, no bucket, no SSH. The snapshot is the
-# only AWS resource it makes, and it deletes it on any failure; the image and the
-# staging copy live in the helper's container alone (--rm). Prints the snapshot id.
-hosted_data_snapshot() {
-  local data_set="" what dir="$HOSTED_DATA_MOUNT" rel found tag
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      --data-set) [ $# -ge 2 ] || die "--data-set needs a value"; data_set="$2"; shift 2 ;;
-      *) die "unknown: hosted data-snapshot $1 (try: --data-set SLUG)" ;;
-    esac
-  done
-  [ -n "$data_set" ] \
-    || die "hosted data-snapshot needs --data-set, one of: ${HOSTED_DATA_SETS[*]} (DEPLOY.md, \"Hosted game servers\")"
-  hosted_known_data_set "$data_set" \
-    || die "--data-set '$data_set' is no data set; one of: ${HOSTED_DATA_SETS[*]}"
-  # The data set's files: the required ones, then the ones taken when present.
-  local required=(resource.pff localres.pff language.pff) optional=()
-  case "$data_set" in
-    jop_2_consumer)
-      what="a Joint Operations Combined Arms install (with expansion/jox01)"
-      required+=(expansion/jox01/jox01.pff expansion/jox01/jox01L.pff expansion/jox01/version.txt)
-      optional=(score.ini _nstmout.txt) ;;
-    dfx2_consumer)
-      what="a Delta Force Xtreme 2 install"
-      optional=(score.ini _nstmout.txt) ;;
-    opennova_0_consumer)
-      what="OpenNova's data (its three base archives)" ;;
-  esac
-  if [ ! -d "$dir" ] || [ -z "$(ls -A "$dir" 2>/dev/null)" ]; then
-    die "no game folder at $dir: run HOSTED_DATA_DIR='<the folder: $what>' ./deploy/run.sh$DEP_FLAG hosted data-snapshot --data-set $data_set (DEPLOY.md, \"Hosted game servers\")"
-  fi
-  local files=()
-  for rel in "${required[@]}"; do
-    found="$(cd "$dir" && find . -type f -ipath "./$rel" | head -n 1)"
-    [ -n "$found" ] || die "$dir has no $rel: mount $what"
-    files+=("${found#./}")
-  done
-  for rel in ${optional[@]+"${optional[@]}"}; do
-    found="$(cd "$dir" && find . -maxdepth 1 -type f -iname "$rel" | head -n 1)"
-    [ -z "$found" ] || files+=("${found#./}")
-  done
-  aws_auth
-  tag="$(hosted_deployment_tag)"
-  log "the $data_set data snapshot (account $ACCOUNT_ID) takes, from $dir:"
-  for rel in "${files[@]}"; do log "  $rel"; done
-  log "building the helper image (deploy/hosted-data)…"
-  docker build -q -t "$HOSTED_DATA_IMAGE" "$ROOT/deploy/hosted-data" >/dev/null \
-    || die "the helper image did not build"
-  log "making the snapshot (tagged opennova:deployment=$tag, opennova:data-set=$data_set); a GiB takes a few minutes…"
-  # The deployment's role's short-lived credentials and its region alone, for
-  # the helper, in the tmpfs: the snapshot is made in the deployment's account.
-  local aws_env="$SECRETS_DIR/aws.env" snapshot rc=0
-  (umask 077 && printf 'AWS_ACCESS_KEY_ID=%s\nAWS_SECRET_ACCESS_KEY=%s\nAWS_SESSION_TOKEN=%s\nAWS_REGION=%s\nAWS_DEFAULT_REGION=%s\n' \
-    "${AWS_ACCESS_KEY_ID:-}" "${AWS_SECRET_ACCESS_KEY:-}" "${AWS_SESSION_TOKEN:-}" "$REGION" "$REGION" > "$aws_env")
-  snapshot="$( (cd "$dir" && tar -cf - "${files[@]}") \
-    | docker run --rm -i --env-file "$aws_env" "$HOSTED_DATA_IMAGE" --data-set "$data_set" --deployment "$tag")" || rc=$?
-  rm -f "$aws_env"
-  [ "$rc" -eq 0 ] \
-    || die "the snapshot was not made (the helper deletes one it started; check: ./deploy/run.sh$DEP_FLAG aws ec2 describe-snapshots --owner-ids self --filters Name=tag:opennova:hosted-data,Values=1)"
-  snapshot="$(printf '%s\n' "$snapshot" | tail -n 1)"
-  case "$snapshot" in
-    snap-*) ;;
-    *) die "the helper printed no snapshot id ('$snapshot')" ;;
-  esac
-  log "made $snapshot for $data_set. Next (DEPLOY.md, \"Hosted game servers\"):"
-  log "  1. in vault '$VAULT', item '$HOSTED_ITEM', the field data_snapshot_id_$data_set = $snapshot"
-  log "     (one field per data set; delete the snapshot it replaces once the infra no longer names it)"
-  log "  2. ./deploy/run.sh$DEP_FLAG infra plan, then infra apply"
-  log "  3. ./deploy/run.sh$DEP_FLAG app deploy --serve-tag <serve tag>"
-  printf '%s\n' "$snapshot"
-}
-
-cmd_hosted() {
-  local action="${1:-}"
-  shift || true
-  case "$action" in
-    data-snapshot) hosted_data_snapshot "$@" ;;
-    status) die "hosted status is fleet status now" ;;
-    *) die "unknown: hosted $action (try: data-snapshot; the machines are fleet status)" ;;
   esac
 }

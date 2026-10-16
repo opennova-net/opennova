@@ -19,8 +19,7 @@ services:
     working_dir: /workspace
     volumes:
       - ../:/workspace
-      # `app deploy` resolves image tags to digests and `hosted data-snapshot`
-      # builds its helper image, on the operator's docker.
+      # `app deploy` resolves image tags to digests on the operator's docker.
       - /var/run/docker.sock:/var/run/docker.sock
     tmpfs:
       - /run/secrets:mode=0700

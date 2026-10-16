@@ -12,16 +12,21 @@
 //          lobby (the engine's own probe and reply codecs), and a NovaWorld session
 //          verified on that lobby (the engine's ClientSession); the jobs admin API
 //          (GET /api/admin/jobs/overview, the admin token). With --hosting <data
-//          set>: the admin grants the account a server, the account starts one
-//          (POST /api/me/servers) on a machine the worker launches, which reaches
-//          running and is listed in the lobby (its listing's RID), takes console
-//          commands through the controller's admin link (PLAYER LIST, CHAT SEND),
-//          and stops.
+//          set id> (as GET /api/me/servers offers it, once its tree is ready): the
+//          admin grants the account a server, the account starts one on that data
+//          set (POST /api/me/servers, with --mission's rotation or the data's
+//          whole one) on a machine the worker launches, which reaches running and
+//          is listed in the lobby (its listing's RID), takes console commands
+//          through the controller's admin link (PLAYER LIST, CHAT SEND), and
+//          stops.
 //   data-set <dir>
 //          writes the synthetic Joint Operations data set the stack's machines can
-//          serve without licensed data (the serve tests' deathmatch map
-//          SERVETST.BMS and game text, a loose folder): what `dev_stack.sh up
-//          --synthetic-data` and CI host on.
+//          serve without licensed data: the serve tests' deathmatch map
+//          SERVETST.BMS and game text packed into the three base archives a
+//          data set's tree holds (resource.pff, localres.pff, language.pff:
+//          apps/novaworld_common/hosted/data_set_files.h), with a version.txt,
+//          as an install's root. What `dev_stack.sh up --synthetic-data` uploads
+//          and CI hosts on.
 //
 // Infrastructure only, POSIX only.
 
@@ -34,6 +39,7 @@
 
 #include <base/io/json.h>
 #include <base/os_random/os_random.h>
+#include <formats/pff/pff.h>
 
 #include <cctype>
 #include <chrono>
@@ -168,8 +174,8 @@ struct Options {
 	std::string gate = "novaworld-gate:7597";
 	std::vector<std::string> livez; // host:port of each other program's health listener
 	std::string admin_token;
-	std::string hosting; // a data set to host on, "" for none
-	std::string mission; // the start's rotation; "" for the data set's default
+	std::string hosting; // the id of a data set to host on, "" for none
+	std::string mission; // the start's rotation; "" for the data's whole one
 	int timeout_s = 300;
 };
 
@@ -232,13 +238,37 @@ void check_hosting(const Site &site, int64_t user_id, const Options &o) {
 	if (!check(reply.code == 200 && enabled && enabled->is_bool() && enabled->boolean,
 				"hosting is on (GET /api/me/servers: enabled)", status_text(reply)))
 		return;
+	// The data set --hosting names, among the ones the start may pick (a base
+	// with a ready tree): its id, and the missions its data holds.
+	const int64_t wanted = std::strtoll(o.hosting.c_str(), nullptr, 10);
+	const io::JsonValue *data_sets = at(*list, { "data_sets" });
+	const io::JsonValue *offered = nullptr;
+	std::string offered_text;
+	if (data_sets && data_sets->is_array()) {
+		for (const io::JsonValue &d : data_sets->array) {
+			const int64_t id = number_at(d, { "id" });
+			offered_text += (offered_text.empty() ? "" : ", ") + std::to_string(id) + " " +
+					text_at(d, { "display_name" });
+			if (id == wanted)
+				offered = &d;
+		}
+	}
+	if (!check(offered != nullptr, "data set " + o.hosting + " is offered (its tree is ready)",
+				"offered: " + (offered_text.empty() ? std::string("none") : offered_text)))
+		return;
+	const io::JsonValue *mission_list = at(*offered, { "missions" });
+	std::string mission_text;
+	if (mission_list && mission_list->is_array())
+		for (const io::JsonValue &m : mission_list->array)
+			mission_text += (mission_text.empty() ? "" : ", ") + text_at(m, { "file" });
+	note("its missions: " + (mission_text.empty() ? std::string("none") : mission_text));
 	std::string missions;
 	if (!o.mission.empty())
 		missions = ",\"missions\":[\"" + o.mission + "\"]";
 	const std::string name = "Smoke " + random_hex(3);
 	reply = site.user("POST", "/api/me/servers",
-			"{\"game\":\"" + o.hosting + "\",\"game_name\":\"" + name + "\",\"max_players\":8" +
-					missions + "}");
+			"{\"data_set_id\":" + std::to_string(wanted) + ",\"game_name\":\"" + name +
+					"\",\"max_players\":8" + missions + "}");
 	const auto started = json_of(reply);
 	const int64_t id = reply.code == 202 && started ? number_at(*started, { "server", "id" }) : 0;
 	if (!check(id > 0, "a hosted server starts (POST /api/me/servers: 202)", status_text(reply)))
@@ -369,27 +399,55 @@ int run(const Options &o) {
 	return g_failures;
 }
 
-// The synthetic data set: a loose Joint Operations folder of one deathmatch map
-// (servetst.bms) and the game text a server's listing reads.
+// One archive of the synthetic data set: `entries` packed under `path` by the
+// engine's own writer (new entries: no flags, the writer's fixed timestamp).
+bool write_archive(const fs::path &path,
+		const std::vector<std::pair<std::string, std::vector<uint8_t>>> &entries) {
+	std::vector<opennova::pff::PffWriteEntry> packed;
+	packed.reserve(entries.size());
+	for (const auto &e : entries)
+		packed.push_back({ e.first.c_str(), e.second.data(), static_cast<uint32_t>(e.second.size()),
+				0, opennova::pff::PFF_NEW_ENTRY_TIMESTAMP, 0 });
+	const int rc = opennova::pff::pff_write_archive(path.string().c_str(),
+			opennova::pff::PFF_FORMAT_PFF3, packed.data(), static_cast<uint32_t>(packed.size()));
+	if (rc != opennova::pff::PFF_WRITE_OK)
+		std::fprintf(stderr, "%s: %s\n", path.string().c_str(),
+				opennova::pff::pff_write_error_string(rc));
+	return rc == opennova::pff::PFF_WRITE_OK;
+}
+
+// The synthetic data set: an install's root of one deathmatch map (servetst.bms)
+// and the game text a server's listing reads, packed into the retail boot
+// table's three archives (the mission in localres.pff, the texts in
+// language.pff, as the mission catalog reads a base's pair; resource.pff a
+// placeholder, since the table mounts no install without it) with a
+// version.txt: the files a base data set's tree holds and nothing else.
 int write_data_set(const fs::path &dir) {
 	std::error_code ec;
 	fs::create_directories(dir, ec);
-	const bool written = serve_test::write_bytes(dir / "SERVETST.BMS",
-								 serve_test::deathmatch_mission("Serve Test Map")) &&
-			serve_test::write_bytes(dir / "gametext.bin",
-					serve_test::gametext({
-							{ "NovaWorld",
-									{ { "STRNOVA07", "Jungle" }, { "STRNOVA08", "Desert" },
-											{ "STRNOVA09", "Snow" }, { "STRNOVA10", "None" },
-											{ "STRNOVA11", "Yes" }, { "STRNOVA12", "No" } } },
-							{ "GateTypeAbbrev", { { "DM", "DM" } } },
-					}));
+	const std::string placeholder = "OpenNova's synthetic data set: one deathmatch map.\n";
+	const bool written =
+			write_archive(dir / "resource.pff",
+					{ { "readme.txt", std::vector<uint8_t>(placeholder.begin(), placeholder.end()) } }) &&
+			write_archive(dir / "localres.pff",
+					{ { "SERVETST.BMS", serve_test::deathmatch_mission("Serve Test Map") } }) &&
+			write_archive(dir / "language.pff",
+					{ { "gametext.bin",
+							serve_test::gametext({
+									{ "NovaWorld",
+											{ { "STRNOVA07", "Jungle" }, { "STRNOVA08", "Desert" },
+													{ "STRNOVA09", "Snow" }, { "STRNOVA10", "None" },
+													{ "STRNOVA11", "Yes" }, { "STRNOVA12", "No" } } },
+									{ "GateTypeAbbrev", { { "DM", "DM" } } },
+							}) } }) &&
+			serve_test::write_text(dir / "version.txt", "OpenNova Synthetic Data, V1.0.0.0; English\r\n");
 	if (!written) {
 		std::fprintf(stderr, "cannot write the data set to %s\n", dir.string().c_str());
 		return 1;
 	}
-	std::printf(
-			"the synthetic data set (SERVETST.BMS, gametext.bin) is in %s\n", dir.string().c_str());
+	std::printf("the synthetic data set (resource.pff, localres.pff with SERVETST.BMS, "
+				"language.pff with gametext.bin, version.txt) is in %s\n",
+			dir.string().c_str());
 	return 0;
 }
 
@@ -397,7 +455,7 @@ int usage() {
 	std::fprintf(stderr,
 			"usage: opennova-novaworld-stack-smoke run [--web <host:port>] [--site <host:port>]\n"
 			"           [--gate <host:port>] [--livez <host:port>]... --admin-token <token>\n"
-			"           [--hosting <data set> [--mission <name.bms>]] [--timeout <seconds>]\n"
+			"           [--hosting <data set id> [--mission <name.bms>]] [--timeout <seconds>]\n"
 			"       opennova-novaworld-stack-smoke data-set <dir>\n");
 	return 2;
 }
