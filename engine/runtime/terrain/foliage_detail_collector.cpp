@@ -1,5 +1,7 @@
 #include <runtime/terrain/foliage_detail_collector.h>
 
+#include <runtime/terrain_query/coords.h>
+
 #include <cmath>
 #include <cstddef>
 
@@ -16,28 +18,13 @@ constexpr int kLastMipLevel = 6;
 constexpr float kMaximumDistance = kFoliageDetailDistanceLimit;
 constexpr size_t kPatchCapacity = kFoliageDetailPatchCapacity;
 
+// The sector's quadrant by the one routing every lookup shares (coords.h, D-TERRAIN-21); a flat
+// sector (id 0) keeps quadrant 1's raw node heights, and an id past 4 has no patch here.
 bool sector_atlas_origin(int sector_id, int &atlas_x, int &atlas_z) {
-	switch (sector_id) {
-		case 0: // Flat sectors retain quadrant 1's raw node heights.
-		case 1:
-			atlas_x = 0;
-			atlas_z = 0;
-			return true;
-		case 3:
-			atlas_x = kSectorSize;
-			atlas_z = 0;
-			return true;
-		case 2:
-			atlas_x = 0;
-			atlas_z = kSectorSize;
-			return true;
-		case 4:
-			atlas_x = kSectorSize;
-			atlas_z = kSectorSize;
-			return true;
-		default:
-			return false;
-	}
+	if (sector_id < 0 || sector_id > 4) return false;
+	atlas_x = terrain::coords_quadrant_offset_x(sector_id);
+	atlas_z = terrain::coords_quadrant_offset_z(sector_id);
+	return true;
 }
 
 float clamped_axis_distance(float point, float minimum, float maximum) {

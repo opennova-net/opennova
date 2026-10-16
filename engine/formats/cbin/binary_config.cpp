@@ -3,6 +3,7 @@
 // the 20-byte header, the cipher loop @ 0x75e348], read here whatever the labels.
 #include <formats/cbin/binary_config.h>
 
+#include <base/io/bits.h>
 #include <base/io/le.h>
 #include <formats/cbin/cbin.h>
 #include <formats/configfile/config_file.h>
@@ -21,16 +22,11 @@ bool fail(std::string &error, const char *why) {
 	return false;
 }
 
-uint32_t rol32(uint32_t value, unsigned count) {
-	count &= 31;
-	return count ? (value << count) | (value >> (32 - count)) : value;
-}
-
 } // namespace
 
 void apply_cipher(uint8_t *data, size_t size, uint32_t key) {
 	for (size_t i = 0; i < size; ++i) {
-		key = rol32(key, 7);
+		key = io::rotl32(key, 7);
 		data[i] ^= static_cast<uint8_t>(key & 0xFF);
 	}
 }

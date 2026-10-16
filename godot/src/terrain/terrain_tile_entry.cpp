@@ -1,6 +1,5 @@
 #include "terrain/terrain_tile_entry.h"
 
-#include "terrain/terrain_clamp.h"
 
 #include <algorithm>
 
@@ -57,7 +56,7 @@ int TerrainTileEntry::get_tile_index() const {
 }
 
 void TerrainTileEntry::set_flags(int value) {
-	flags = clamp_int<int>(value, 0, 255);
+	flags = std::clamp(value, 0, 255);
 }
 
 int TerrainTileEntry::get_flags() const {
@@ -65,7 +64,7 @@ int TerrainTileEntry::get_flags() const {
 }
 
 void TerrainTileEntry::set_layer(int value) {
-	layer = clamp_int<int>(value, 0, 65535);
+	layer = std::clamp(value, 0, 65535);
 }
 
 int TerrainTileEntry::get_layer() const {
@@ -105,8 +104,8 @@ opennova::TilOverlayEntry TerrainTileEntry::to_native() const {
 	opennova::TilOverlayEntry entry;
 	entry.x_fixed = x_fixed;
 	entry.z_fixed = z_fixed;
-	entry.tile_index = clamp_int<uint8_t>(tile_index, 0, 255);
-	entry.flags = clamp_int<uint8_t>(flags, 0, 255);
-	entry.layer = clamp_int<uint16_t>(layer, 0, 65535);
+	entry.tile_index = static_cast<uint8_t>(std::clamp(tile_index, 0, 255));
+	entry.flags = static_cast<uint8_t>(std::clamp(flags, 0, 255));
+	entry.layer = static_cast<uint16_t>(std::clamp(layer, 0, 65535));
 	return entry;
 }

@@ -23,10 +23,6 @@ using io::read_u32_le;
 using io::write_u16_le;
 using io::write_u32_le;
 
-int32_t read_i32_le(const uint8_t *data) {
-	return static_cast<int32_t>(read_u32_le(data));
-}
-
 } // namespace
 
 bool load_til(const uint8_t *data, size_t size, TilFile &out, std::string &error, TilHeaderFacts *facts) {
@@ -65,8 +61,8 @@ bool load_til(const uint8_t *data, size_t size, TilFile &out, std::string &error
 	const uint8_t *cursor = data + TIL_HEADER_SIZE;
 	for (uint32_t i = 0; i < entry_count; ++i) {
 		TilOverlayEntry &entry = out.entries[static_cast<size_t>(i)];
-		entry.x_fixed = read_i32_le(cursor + 0);
-		entry.z_fixed = read_i32_le(cursor + 4);
+		entry.x_fixed = io::read_s32_le(cursor + 0);
+		entry.z_fixed = io::read_s32_le(cursor + 4);
 		entry.tile_index = cursor[8];
 		entry.flags = cursor[9];
 		entry.layer = read_u16_le(cursor + 10);

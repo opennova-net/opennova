@@ -1,16 +1,10 @@
 #include <runtime/audio/sound_selector.h>
 
+#include <base/io/bits.h>
+
 #include <formats/lwf/lwf.h>
 
 namespace opennova::audio {
-
-namespace {
-
-inline uint32_t rol32(uint32_t v, unsigned bits) {
-    return (v << bits) | (v >> (32u - bits));
-}
-
-} // namespace
 
 // Flag precedence per the witnessed play path [orig: SoundBank_PlayTriggerEntries
 // @ 0x75cd5c..0x75cdfc]: sequential (0x10) is tested first, then
@@ -30,7 +24,7 @@ SelectionMode selection_mode_for_flags(uint32_t playlist_flags) {
 // low byte. One stream for every layer, never reseeded.
 // [orig: PRNG_ScaledRandom @ 0x75be50; inline copies at 0x75cdfc / 0x75c025 / 0x75c220]
 uint32_t SoundSelector::scaled_random(uint32_t count) {
-    rng_ = rol32(rng_ + rol32(rng_, 11), 3);
+    rng_ = io::rotl32(rng_ + io::rotl32(rng_, 11), 3);
     return (count * (rng_ & 0xFFu)) >> 8;
 }
 

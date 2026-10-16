@@ -6,6 +6,7 @@
 
 #include <formats/pff/pff.h>
 
+#include <base/io/bits.h>
 #include <base/io/os_path.h>
 
 #include <ctype.h>
@@ -91,7 +92,7 @@ static void pff_xor_buffer(uint8_t *buf, size_t size, uint32_t key)
 {
     size_t i;
     for (i = 0; i < size; ++i) {
-        key = (key << 7) | (key >> (32 - 7)); /* rotl32(key, 7) */
+        key = opennova::io::rotl32(key, 7);
         buf[i] ^= (uint8_t)(key & 0xFFu);
     }
 }

@@ -1,5 +1,6 @@
 #include <formats/foliage/runtime.h>
 
+#include <base/io/bits.h>
 #include <base/io/fixed.h>
 
 #include <algorithm>
@@ -36,20 +37,14 @@ constexpr int32_t kQuadrantOffsetFixed = 0x80000;
 constexpr int32_t kTileSizeFixed = 0x100000;
 constexpr uint32_t kTileSnapMask = 0xFFF00000u;
 
-uint32_t rol32(uint32_t value, uint32_t amount) {
-	const uint32_t n = amount & 31u;
-	if (n == 0u) return value;
-	return (value << n) | (value >> (32u - n));
-}
-
 uint32_t seed_for_key(uint32_t key) {
 	// [orig: Foliage_GenerateInstances_0 @ 0x5ffdd0;
 	// Foliage_GenerateModelTileInstances @ 0x600980]
-	return (key & 0x01FF01FFu) + rol32(kSeedConstant, key & 31u);
+	return (key & 0x01FF01FFu) + io::rotl32(kSeedConstant, key & 31u);
 }
 
 uint16_t next_draw(uint32_t &state) {
-	state = rol32(state + rol32(state, 11u), 4u) ^ 1u;
+	state = io::rotl32(state + io::rotl32(state, 11u), 4u) ^ 1u;
 	return static_cast<uint16_t>(state);
 }
 
@@ -58,10 +53,6 @@ int32_t sign_extend_15(uint32_t value) {
 	return (low & 0x4000u) != 0u
 	         ? static_cast<int32_t>(low | 0xFFFF8000u)
 	         : static_cast<int32_t>(low);
-}
-
-int32_t to_fixed(float value) {
-	return static_cast<int32_t>(value * static_cast<float>(kFixedOne));
 }
 
 bool try_to_fixed(float value, int32_t &result) {
@@ -74,10 +65,6 @@ bool try_to_fixed(float value, int32_t &result) {
 	}
 	result = static_cast<int32_t>(scaled);
 	return true;
-}
-
-float from_fixed(int32_t value) {
-	return static_cast<float>(value) / static_cast<float>(kFixedOne);
 }
 
 int32_t midpoint_fixed(int32_t a, int32_t b) {
@@ -138,8 +125,8 @@ Candidate detail_candidate(uint32_t key, int index, uint32_t &state) {
 	Candidate candidate = next_candidate(index, state);
 	const int32_t base_x = sign_extend_15(key >> 16u);
 	const int32_t base_z = sign_extend_15(key);
-	candidate.x_fixed = to_fixed(static_cast<float>(base_x) + candidate.local_a);
-	candidate.z_fixed = to_fixed(static_cast<float>(base_z) + candidate.local_b);
+	candidate.x_fixed = io::float_to_fp16_16(static_cast<float>(base_x) + candidate.local_a);
+	candidate.z_fixed = io::float_to_fp16_16(static_cast<float>(base_z) + candidate.local_b);
 	return candidate;
 }
 
@@ -153,9 +140,9 @@ Candidate model_candidate(uint32_t key, int index, uint32_t &state,
 	Candidate candidate = next_candidate(index, state);
 	const int32_t base_x = sign_extend_15(key >> 16u);
 	const int32_t base_y = sign_extend_15(key);
-	candidate.x_fixed = to_fixed(static_cast<float>(base_x) + candidate.local_a);
+	candidate.x_fixed = io::float_to_fp16_16(static_cast<float>(base_x) + candidate.local_a);
 	r_mission_y_fixed =
-	    to_fixed(static_cast<float>(base_y) - candidate.local_b);
+	    io::float_to_fp16_16(static_cast<float>(base_y) - candidate.local_b);
 	candidate.z_fixed = negate_fixed(r_mission_y_fixed);
 	return candidate;
 }
@@ -203,7 +190,7 @@ std::array<SilhouetteCell, 4> silhouette_cells(int32_t anchor_x,
 }
 
 float sampled_height(const WorldSamplers &world, int32_t x, int32_t z) {
-	return world.height_at ? world.height_at(from_fixed(x), from_fixed(z)) : 0.0f;
+	return world.height_at ? world.height_at(io::fp16_16_to_float(x), io::fp16_16_to_float(z)) : 0.0f;
 }
 
 bool candidate_is_blocked(const RuntimeSlot &slot,
@@ -211,8 +198,8 @@ bool candidate_is_blocked(const RuntimeSlot &slot,
                           const Candidate &candidate) {
 	if (!placed_tiles_keep_off(slot.attrib_flags)) return false;
 	return world.path_blocked &&
-	       world.path_blocked(from_fixed(candidate.x_fixed),
-	                          from_fixed(candidate.z_fixed),
+	       world.path_blocked(io::fp16_16_to_float(candidate.x_fixed),
+	                          io::fp16_16_to_float(candidate.z_fixed),
 	                          kPlacedTileReach);
 }
 
@@ -256,8 +243,8 @@ std::vector<DetailInstance> generate_detail_cell(
 		const uint32_t mask =
 		    world.detail_foliage_mask_at
 		        ? world.detail_foliage_mask_at(
-		              to_fixed(static_cast<float>(cell.atlas_x) + candidate.local_a),
-		              to_fixed(static_cast<float>(cell.atlas_z) + candidate.local_b))
+		              io::float_to_fp16_16(static_cast<float>(cell.atlas_x) + candidate.local_a),
+		              io::float_to_fp16_16(static_cast<float>(cell.atlas_z) + candidate.local_b))
 		        : 0u;
 		if ((mask & (1u << slot_index)) == 0u) continue;
 
@@ -268,8 +255,8 @@ std::vector<DetailInstance> generate_detail_cell(
 		instance.atlas_x = cell.atlas_x;
 		instance.atlas_z = cell.atlas_z;
 		instance.center = {
-		    from_fixed(candidate.x_fixed),
-		    from_fixed(candidate.z_fixed),
+		    io::fp16_16_to_float(candidate.x_fixed),
+		    io::fp16_16_to_float(candidate.z_fixed),
 		};
 		instance.yaw_radians = candidate.yaw;
 		result.push_back(instance);
@@ -295,8 +282,8 @@ bool make_silhouette_instance(
 	instance.quadrant = quadrant;
 	instance.cell_key = cell_key;
 	instance.center = {
-	    from_fixed(candidate.x_fixed),
-	    from_fixed(candidate.z_fixed),
+	    io::fp16_16_to_float(candidate.x_fixed),
+	    io::fp16_16_to_float(candidate.z_fixed),
 	};
 	instance.yaw_radians = candidate.yaw;
 	instance.alpha_reference = alpha_reference;
@@ -331,8 +318,8 @@ bool make_silhouette_instance(
 		instance.corner_local_b[corner] = rotated_b;
 		const int32_t corner_z = negate_fixed(corner_y[corner]);
 		instance.corners[corner] = {
-		    from_fixed(corner_x[corner]),
-		    from_fixed(corner_z),
+		    io::fp16_16_to_float(corner_x[corner]),
+		    io::fp16_16_to_float(corner_z),
 		    sampled_height(world, corner_x[corner], corner_z),
 		};
 	}

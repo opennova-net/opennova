@@ -1,6 +1,5 @@
 #include "terrain/terrain_foliage_def.h"
 
-#include "terrain/terrain_clamp.h"
 #include "util/string_convert.h"
 
 #include <algorithm>
@@ -52,7 +51,7 @@ PackedInt32Array TerrainFoliageDef::get_match() const {
 }
 
 void TerrainFoliageDef::set_attrib_flags(int value) {
-	attrib_flags = clamp_int<int>(opennova::foliage_normalize_attrib_flags(static_cast<uint8_t>(std::clamp(value, 0, 255))), 0, 255);
+	attrib_flags = opennova::foliage_normalize_attrib_flags(static_cast<uint8_t>(std::clamp(value, 0, 255)));
 }
 
 int TerrainFoliageDef::get_attrib_flags() const {
@@ -65,7 +64,7 @@ void TerrainFoliageDef::set_shadow(bool enabled) {
 	} else {
 		attrib_flags &= ~ATTRIB_SHADOW;
 	}
-	attrib_flags = clamp_int<int>(opennova::foliage_normalize_attrib_flags(static_cast<uint8_t>(attrib_flags)), 0, 255);
+	attrib_flags = opennova::foliage_normalize_attrib_flags(static_cast<uint8_t>(attrib_flags));
 }
 
 bool TerrainFoliageDef::get_shadow() const {
@@ -78,7 +77,7 @@ void TerrainFoliageDef::copy_from_native(const opennova::FoliageDef &def) {
 	color_lower = normalized.color_lower;
 	color_upper = normalized.color_upper;
 	match = normalized.match;
-	attrib_flags = clamp_int<int>(normalized.attrib_flags, 0, 255);
+	attrib_flags = normalized.attrib_flags;
 }
 
 opennova::FoliageDef TerrainFoliageDef::to_native() const {
@@ -87,6 +86,6 @@ opennova::FoliageDef TerrainFoliageDef::to_native() const {
 	def.color_lower = color_lower;
 	def.color_upper = color_upper;
 	def.match = match;
-	def.attrib_flags = clamp_int<uint8_t>(attrib_flags, 0, 255);
+	def.attrib_flags = static_cast<uint8_t>(std::clamp(attrib_flags, 0, 255));
 	return opennova::foliage_normalize_def(def);
 }
