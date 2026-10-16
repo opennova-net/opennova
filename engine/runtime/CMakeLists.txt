@@ -203,6 +203,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/nvg_scope_lens.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/fp_viewmodel_spec.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_order.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_slot_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_slot_shadow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/scene_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/precipitation_frame.cpp

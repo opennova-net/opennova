@@ -750,18 +750,18 @@ void SlotShadow::advance_frame() {
 			}
 			CasterInfo info;
 			info.model = model;
-			info.capture_radius = record.capture_radius;
-			info.state.bound_radius = record.slot_radius;
+			info.caster.capture_radius = record.capture_radius;
+			info.caster.state.bound_radius = record.slot_radius;
 			if (record.radius_fallback) {
 				// Unstamped models (previews/tests) keep the live-bounds
 				// derivation the per-frame walk used.
 				const AABB bounds = model->get_world_bounds();
-				info.capture_radius =
+				info.caster.capture_radius =
 						MAX(0.5f, float(bounds.size.length()) * 0.5f);
-				info.state.bound_radius = info.capture_radius;
+				info.caster.state.bound_radius = info.caster.capture_radius;
 			}
-			info.state.is_person = record.is_person;
-			info.state.seat_parented = record.seat_parented_ancestor;
+			info.caster.state.is_person = record.is_person;
+			info.caster.state.seat_parented = record.seat_parented_ancestor;
 			casters.push_back(info);
 			caster_index[uint64_t(record.id)] = casters.size() - 1;
 		}
@@ -805,8 +805,6 @@ void SlotShadow::advance_frame() {
 	const Vector3 tuple = env->get_light_direction();
 	const std::array<float, 3> sun_dir = opennova::renderer::slot_projection_direction(
 			{float(tuple.x), float(tuple.y), float(tuple.z)});
-	const Vector3 default_dir =
-			Vector3(sun_dir[0], sun_dir[1], sun_dir[2]).normalized();
 	const Vector3 sun_rgb = env->get_sun_light();
 	const Vector3 sky_rgb = env->get_sky_ambient();
 	// The drape fogs with the device's primary fog config — the terrain's —
@@ -830,7 +828,11 @@ void SlotShadow::advance_frame() {
 		plan_.register_entity(id);
 		registered_ids_.insert(id);
 		const Vector3 pos = model->get_global_position();
-		opennova::renderer::SlotCandidateState &state = info.state;
+		info.caster.position = {float(pos.x), float(pos.y), float(pos.z)};
+		const Vector3 march_offset = model->get_slot_march_offset();
+		info.caster.march_offset = {float(march_offset.x), float(march_offset.y),
+				float(march_offset.z)};
+		opennova::renderer::SlotCandidateState &state = info.caster.state;
 		state.pos2d = {float(pos.x), float(pos.z)};
 		// Hidden = the sim's present intent (retail Flags & 1), never the
 		// render-occlusion claim: retail's slot pass reads no render gate, so
@@ -875,7 +877,7 @@ void SlotShadow::advance_frame() {
 			gone.hidden = true;
 			return gone;
 		}
-		return casters[*index].state;
+		return casters[*index].caster.state;
 	};
 	const std::vector<opennova::renderer::SlotAssignment> assignments =
 			plan_.assign(cam2d, view2d, state_for);
@@ -894,271 +896,133 @@ void SlotShadow::advance_frame() {
 	light_pos.resize(opennova::renderer::kSlotCaptureCount);
 	PackedVector4Array light_diffuse;
 	light_diffuse.resize(opennova::renderer::kSlotCaptureCount);
-	// The slot's lod x lod patch around the marched anchor
-	// (opennova::renderer::slot_patch_bounds; the march probes TerrainData when set).
-	// Planar mission north is Godot -z, so the patch's north range maps to
-	// z in [-max_north, -min_north].
-	const auto slot_patch = [&](const Vector3 &p_pos, const Vector3 &p_dir, int lod) {
-		std::array<float, 2> anchor = {float(p_pos.x), float(p_pos.z)};
-		// p_pos is the march start (renderer::slot_march_start_offset).
-		if (terrain_data_.is_valid()) {
-			const TerrainData *terrain = terrain_data_.ptr();
-			const auto height_at = [terrain](float x, float z) {
-				return terrain->get_height_world(Vector3(x, 0.0f, z));
-			};
-			// Retail marches from the live simulated entity. Static mission
-			// presentation has no vehicle-settle tick, so grounded vehicles can
-			// retain the authored handful of Q16 ticks above the raw16 terrain
-			// (03TR M939: 2.500107 over 2.5). Reconcile only that sub-quantum
-			// contact before the exact march; otherwise the tiny gap becomes a
-			// whole planar step and crosses the lod-20 four-unit patch snap.
-			const float start_y = opennova::renderer::slot_march_start_height(
-					float(p_pos.y), height_at(float(p_pos.x), float(p_pos.z)),
-					opennova::renderer::kSlotTerrainHeightQuantumUnits);
-			anchor = opennova::renderer::march_shadow_anchor(
-					{float(p_pos.x), start_y, float(p_pos.z)},
-					{float(p_dir.x), float(p_dir.y), float(p_dir.z)},
-					height_at);
-		}
-		return opennova::renderer::slot_patch_bounds(anchor[0], -anchor[1], lod);
-	};
-	// The orders whose drape patch draws this frame.
-	uint32_t drawn_patch_mask = 0;
-	report_bound_ = report_captures_ = 0;
 
-	// The retail child walk: models linked capture-with an admitted caster
-	// (held weapons, mounted children) render into the parent's slot
-	// [orig: RenderSlot_RenderEntityAndChildren @0x5d78ef..0x5d79d6]. The
-	// walk follows the entity hierarchy, not the slot table: a linked child
-	// the full table refused (no row of its own) still rides its parent.
-	const auto claimed_children = [&](uint64_t p_parent) {
-		std::vector<uint64_t> children;
-		for (const std::pair<uint64_t, uint64_t> &link : capture_links) {
-			if (link.second == p_parent) {
-				children.push_back(link.first);
-			}
-		}
-		return children;
+	// The per-slot frame (engine: runtime/renderer/render_slot_frame.h): each
+	// assigned slot's capture and drape terms from the casters, their
+	// capture-with links, the lights the pick weighs and the terrain the march
+	// probes. The device half below turns them into the RD capture requests,
+	// the patch meshes and the drape uniforms.
+	opennova::renderer::SlotFrameInput frame_input;
+	frame_input.sun_direction = sun_dir;
+	frame_input.sun_rgb = {float(sun_rgb.x), float(sun_rgb.y), float(sun_rgb.z)};
+	frame_input.sky_rgb = {float(sky_rgb.x), float(sky_rgb.y), float(sky_rgb.z)};
+	frame_input.camera_position = {float(cam_pos.x), float(cam_pos.y), float(cam_pos.z)};
+	frame_input.frame = frame_;
+	frame_input.shadow_detail = shadow_detail_;
+	frame_input.local_id = local_id;
+	frame_input.local_first_person = local_first_person_;
+	frame_input.local_prone = local_prone_;
+	// A closed terrain sector pass skips its drapes; the captures and the
+	// terms keep running (set_terrain_pass_drawn).
+	frame_input.terrain_pass_drawn = terrain_pass_drawn_;
+	const auto caster_for = [&](uint64_t p_id) -> const opennova::renderer::SlotFrameCaster * {
+		const size_t *index = caster_index.getptr(p_id);
+		return index != nullptr ? &casters[*index].caster : nullptr;
 	};
-
-	for (const opennova::renderer::SlotAssignment &assignment : assignments) {
-		const size_t *index = caster_index.getptr(assignment.id);
-		if (index == nullptr) {
-			continue;
-		}
-		CasterInfo &info = casters[*index];
-		ObjectModel *model = info.model;
-		const bool captures =
-				assignment.draws_silhouette && !assignment.excluded;
-		if (assignment.bound && !assignment.excluded) {
-			++report_bound_;
-		}
-		// Only a slot with a silhouette RT draws anything; the light pick,
-		// patch and depth clip below feed that drape alone.
-		if (!captures) {
-			continue;
-		}
-		// The dominant-light pick (the clamped sun by default; the strongest
-		// nearby point light overrides) (engine: runtime/renderer/render_slot_shadow.h). Every slot quantity keys on
-		// the entity origin (entity+4..+0xC) — the light query box, the pick
-		// distance, the capture's view origin, the drape projection — never on
-		// the render bounds, which move with part animation and RLOD switches
-		// (retail: the query box @0x5d6af1..0x5d6b39, the pick distance origin
-		// @0x5d6bbd..0x5d6bc9, the entity rendered at the view origin by
-		// Entity_RenderWithLODCallback @0x5d6fc4..0x5d6fd9).
-		const Vector3 center = model->get_global_position();
-		opennova::renderer::SlotLightPick pick;
-		pick.direction = {default_dir.x, default_dir.y, default_dir.z};
-		pick.attached_handle = 0;
-		opennova::renderer::SlotPointLight attached_light;
-		bool attached_found = false;
-		if (light_director_.is_valid()) {
-			Weather *weather = Object::cast_to<Weather>(
-					ObjectDB::get_instance(weather_id_));
+	opennova::renderer::SlotFrameLightQuery lights_for;
+	if (light_director_.is_valid()) {
+		Weather *weather = Object::cast_to<Weather>(ObjectDB::get_instance(weather_id_));
+		lights_for = [&, weather](uint64_t p_id)
+				-> const std::vector<opennova::renderer::SlotPointLight> & {
+			const CasterInfo &info = casters[*caster_index.getptr(p_id)];
 			// The entity's interior light group from its first blink hit
 			// (retail @0x5d6b40..0x5d6b77 -> Lighting_SetInteriorLightGroup).
-			ObjectModel *entity_model = model->get_entity_light_owner();
-			if (entity_model == nullptr) entity_model = model;
+			ObjectModel *entity_model = info.model->get_entity_light_owner();
+			if (entity_model == nullptr) entity_model = info.model;
 			const int interior_bms = entity_model->get_interior_light_group_bms();
 			const int64_t interior_owner = interior_bms != 0
 					? light_director_->interior_owner_for_bms(interior_bms) : 0;
-			light_director_->scene()->slot_shadow_lights(center, info.state.bound_radius,
-					interior_owner, entity_model->get_interior_light_group_section(),
-					light_gain_, light_time_ms_, weather, slot_lights_);
-			pick = opennova::renderer::pick_dominant_light(
-					{float(center.x), float(center.y), float(center.z)},
-					{default_dir.x, default_dir.y, default_dir.z},
-					slot_lights_.data(), slot_lights_.size(),
-					info.state.interior);
-			if (pick.attached_handle != 0) {
-				for (const opennova::renderer::SlotPointLight &point : slot_lights_) {
-					if (point.handle == pick.attached_handle) {
-						attached_light = point;
-						attached_found = true;
-						break;
-					}
-				}
-			}
-		}
-		const Vector3 dir = Vector3(pick.direction[0], pick.direction[1],
-				pick.direction[2])
-									.normalized();
-		// The slot direction as stored: the RAW clamped-negated sun, or the
-		// unit attached-light direction — what the grazing rescale's vertical
-		// and the depth clip read [orig: slot+0x68..0x70, RenderSlot_Update-
-		// EntityLight @0x5d6d5c; RenderSlot_DrawSilhouetteDrape @0x5d5d66].
-		const float dir_y_raw = pick.attached_handle != 0 ? dir.y : sun_dir[1];
-		const std::array<float, 3> stored_dir = pick.attached_handle != 0
-				? std::array<float, 3>{float(dir.x), float(dir.y), float(dir.z)}
-				: sun_dir;
+			light_director_->scene()->slot_shadow_lights(info.model->get_global_position(),
+					info.caster.state.bound_radius, interior_owner,
+					entity_model->get_interior_light_group_section(), light_gain_,
+					light_time_ms_, weather, slot_lights_);
+			return slot_lights_;
+		};
+	}
+	// The march probes TerrainData when set; without it the anchor stays under
+	// the march start.
+	std::function<float(float, float)> terrain_height;
+	if (terrain_data_.is_valid()) {
+		const TerrainData *terrain = terrain_data_.ptr();
+		terrain_height = [terrain](float p_x, float p_z) {
+			return terrain->get_height_world(Vector3(p_x, 0.0f, p_z));
+		};
+	}
+	opennova::renderer::slot_frame(frame_input, assignments, caster_for, capture_links,
+			lights_for, terrain_height, slot_frame_);
+	report_bound_ = slot_frame_.bound;
+	report_captures_ = slot_frame_.captures;
 
-		// The capture view along the slot direction, sized from the MODEL
-		// sphere [orig: RenderSlot_RenderEntityAndChildren @0x5d7835 —
-		// float24 = min(1.25 gpm[5], gpm[5] + 0.75)]: the witnessed
-		// rotation-only look-at mapped into presentation axes
-		// (renderer::slot_capture_view_axes: right-handed, so the back-face
-		// cull keeps the light-facing faces like retail's CULLMODE CCW).
-		const int order = assignment.capture_order;
-		const float radius = info.capture_radius;
-		const float half_extent = opennova::renderer::silhouette_half_extent(radius);
-		const opennova::renderer::SlotCaptureViewAxes axes =
-				opennova::renderer::slot_capture_view_axes(
-						{float(dir.x), float(dir.y), float(dir.z)});
-		const Vector3 forward(-axes.z[0], -axes.z[1], -axes.z[2]);
-		// The RenderingDevice depth band (the device fold D-RLIT-10 in
-		// docs/render/render-lighting-re.md): retail renders the entity at the
-		// origin of that rotation-only view under its 0.2..5000.2 band
-		// (renderer::kSilhouetteCaptureNear/Far), a band that as read starts
-		// in front of the entity's own origin; the RD ortho clips outside
-		// [near, far] the same way, so this eye backs off along -forward by
-		// two sphere diameters plus the retail near margin and the band
-		// spans the sphere. An orthographic silhouette is invariant under that
-		// translation, so the capture is the same image.
+	// The orders whose drape patch draws this frame.
+	uint32_t drawn_patch_mask = 0;
+	for (const opennova::renderer::SlotFrameSlot &slot : slot_frame_.slots) {
+		const opennova::renderer::SlotFrameCapture &capture = slot.capture;
+		const int order = capture.order;
+		for (const uint64_t id : capture.casters) {
+			capture_orders_[id] = order;
+		}
+		// The capture eye. The RenderingDevice depth band (the device fold
+		// D-RLIT-10 in docs/render/render-lighting-re.md): retail renders the
+		// entity at the origin of the rotation-only view under its
+		// 0.2..5000.2 band (renderer::kSilhouetteCaptureNear/Far), a band that
+		// as read starts in front of the entity's own origin; the RD ortho
+		// clips outside [near, far] the same way, so this eye backs off along
+		// -forward by two sphere diameters plus the retail near margin and the
+		// band spans the sphere. An orthographic silhouette is invariant under
+		// that translation, so the capture is the same image.
+		const float radius = casters[*caster_index.getptr(slot.id)].caster.capture_radius;
+		const float half_extent = capture.half_extent;
+		const Vector3 center(capture.center[0], capture.center[1], capture.center[2]);
+		const Vector3 forward(-capture.axes.z[0], -capture.axes.z[1], -capture.axes.z[2]);
 		const float eye_distance = radius * 2.0f + 2.0f;
 		const float eye_near = opennova::renderer::kSilhouetteCaptureNear * 0.25f;
 		const float eye_far = eye_distance * 2.0f + radius;
 		Transform3D pose;
-		pose.basis = Basis(Vector3(axes.x[0], axes.x[1], axes.x[2]),
-				Vector3(axes.y[0], axes.y[1], axes.y[2]),
-				Vector3(axes.z[0], axes.z[1], axes.z[2]));
+		pose.basis = Basis(Vector3(capture.axes.x[0], capture.axes.x[1], capture.axes.x[2]),
+				Vector3(capture.axes.y[0], capture.axes.y[1], capture.axes.y[2]),
+				Vector3(capture.axes.z[0], capture.axes.z[1], capture.axes.z[2]));
 		pose.origin = center - forward * eye_distance;
-
-		// The refresh cadence (opennova::renderer::slot_refresh_mask_for carries the
-		// local-player exception).
-		const uint32_t effective_mask = opennova::renderer::slot_refresh_mask_for(
-				shadow_detail_, info.state.is_local_player_or_parent);
-		const int want_size =
-				opennova::renderer::slot_texture_size(order, shadow_detail_);
-		const std::vector<uint64_t> children = claimed_children(assignment.id);
-		capture_orders_[assignment.id] = order;
-		for (const uint64_t child : children) {
-			capture_orders_[child] = order;
-		}
-		if (opennova::renderer::slot_refresh_due(assignment.record_index, frame_,
-					effective_mask, assignment.capture_dirty)) {
+		if (capture.armed) {
 			SlotCaptureRequest request;
 			request.order = order;
-			request.size = want_size;
+			request.size = capture.size;
 			request.view = pose;
 			request.projection = Projection::create_orthogonal(-half_extent,
 					half_extent, -half_extent, half_extent, eye_near, eye_far);
-			if (_ensure_capture_target(order, want_size)) {
+			if (_ensure_capture_target(order, capture.size)) {
 				request.target = capture_targets_[order];
 			}
-			request.casters.push_back(assignment.id);
-			for (const uint64_t child : children) {
-				request.casters.push_back(child);
-			}
+			request.casters = capture.casters;
 			requests_.push_back(std::move(request));
 			armed_capture_mask_ |= 1u << order;
 		}
 
-		// The local player's first-person drape gate
-		// (opennova::renderer::local_first_person_drape_skipped carries the law).
-		if (assignment.id == local_id &&
-				opennova::renderer::local_first_person_drape_skipped(local_first_person_,
-						local_prone_, shadow_detail_)) {
+		const opennova::renderer::SlotFrameDrape &terms = slot.drape;
+		if (!terms.drawn) {
 			silhouette_terms[order] = Vector4();
 			continue;
 		}
-
-		// The drape distance: the entity-to-camera 3D distance, taken once
-		// per slot. At >= 80 u retail skips the drape outright; inside it the
-		// one fade scales the whole patch's material ambient (retail:
-		// RenderSlot_DrawSilhouetteDrape @0x5d5cc4..0x5d5d59; renderer::
-		// drape_culled / drape_fade). The capture above is unaffected.
-		const Vector3 entity_pos = model->get_global_position();
-		const float camera_distance = float((entity_pos - cam_pos).length());
-		if (opennova::renderer::drape_culled(camera_distance)) {
-			silhouette_terms[order] = Vector4();
-			continue;
-		}
-		const float fade = opennova::renderer::drape_fade(camera_distance);
-
-		// The slot's fixed-function material ambient, per channel.
-		std::array<float, 3> ambient{};
-		light_pos[order] = Vector4();
-		light_diffuse[order] = Vector4();
-		if (pick.attached_handle != 0) {
-			// An attached light lights the patch with D3D light 4 over a
-			// white material under a white D3DRS_AMBIENT: the term is 1 plus
-			// the light's negative diffuse at each patch point, which the
-			// shader evaluates (renderer::drape_attached_light and
-			// drape_attached_light_color). A handle the fill cannot read
-			// leaves the white material alone.
-			ambient = {1.0f, 1.0f, 1.0f};
-			if (attached_found) {
-				const opennova::renderer::SlotDrapeLight light =
-						opennova::renderer::drape_attached_light(attached_light, fade);
-				light_pos[order] = Vector4(light.position[0], light.position[1],
-						light.position[2], light.range);
-				light_diffuse[order] = Vector4(light.diffuse[0], light.diffuse[1],
-						light.diffuse[2], light.quadratic);
-			}
-		} else {
-			// The sun leg reads the STORED slot vertical — the raw
-			// clamped-negated sun, not its normalized twin (retail: fabs of
-			// slot+0x6C @0x5d5f63).
-			ambient = opennova::renderer::drape_sun_ambient(
-					{float(sun_rgb.x), float(sun_rgb.y), float(sun_rgb.z)},
-					{float(sky_rgb.x), float(sky_rgb.y), float(sky_rgb.z)},
-					dir_y_raw, fade);
-		}
-		const Projection drape_mat =
-				_drape_projection(pose, half_extent, half_extent);
+		// The attached-light leg's light 4 (range 0 = the sun leg).
+		light_pos[order] = Vector4(terms.light.position[0], terms.light.position[1],
+				terms.light.position[2], terms.light.range);
+		light_diffuse[order] = Vector4(terms.light.diffuse[0], terms.light.diffuse[1],
+				terms.light.diffuse[2], terms.light.quadratic);
+		const Projection drape_mat = _drape_projection(pose, half_extent, half_extent);
 		SlotParamStamp &mat_stamp = drape_mat_stamps_[order];
 		if (!mat_stamp.valid || mat_stamp.mat != drape_mat) {
 			drape->set_shader_parameter(slot_uniforms().mat[order], drape_mat);
 			mat_stamp.valid = true;
 			mat_stamp.mat = drape_mat;
 		}
-		silhouette_terms[order] = Vector4(ambient[0], ambient[1], ambient[2], 1.0f);
-		// The patch around the marched anchor, from the stored direction, at
-		// the grazing-rescaled lod.
-		const int patch_lod = opennova::renderer::grazing_slot_lod(
-				opennova::renderer::slot_lod_for_radius(info.state.bound_radius),
-				dir_y_raw);
-		// The march starts at the rotated collision-bbox centre while the
-		// entity's Flags dword is zero, else at its position (retail:
-		// RenderSlot_UpdateEntityLight @0x5d6ce7..0x5d6d31); every role's
-		// present rows carry that offset (renderer::slot_march_start_offset).
-		const Vector3 march_start = entity_pos + model->get_slot_march_offset();
-		// A closed terrain sector pass skips its drapes; the capture above
-		// and the terms keep running (set_terrain_pass_drawn).
-		if (terrain_pass_drawn_) {
-			_draw_patch(order, slot_patch(march_start, dir, patch_lod), patch_lod);
+		silhouette_terms[order] = Vector4(terms.ambient[0], terms.ambient[1], terms.ambient[2], 1.0f);
+		if (terms.patch_drawn) {
+			_draw_patch(order, terms.patch, terms.lod);
 			drawn_patch_mask |= 1u << order;
 		}
-		// The depth-clip texgen from the stored direction, the capture half
-		// size and the person steepening (opennova::renderer::slot_depth_clip).
-		const opennova::renderer::SlotDepthClip clip = opennova::renderer::slot_depth_clip(
-				stored_dir, half_extent, info.state.is_person,
-				{float(entity_pos.x), float(entity_pos.y), float(entity_pos.z)});
-		clip_u[order] = Vector4(clip.u_axis[0], clip.u_axis[1], clip.u_axis[2],
-				clip.u_offset);
-		clip_v[order] = Vector4(clip.v_axis[0], clip.v_axis[1], clip.v_axis[2],
-				clip.v_offset);
-		++report_captures_;
+		clip_u[order] = Vector4(terms.clip.u_axis[0], terms.clip.u_axis[1], terms.clip.u_axis[2],
+				terms.clip.u_offset);
+		clip_v[order] = Vector4(terms.clip.v_axis[0], terms.clip.v_axis[1], terms.clip.v_axis[2],
+				terms.clip.v_offset);
 	}
 
 	// Identical-value pushes elided: the materials retain what was last set
