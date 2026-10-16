@@ -850,6 +850,9 @@ void test_reply_plan() {
 	                         "MISSION CLEAR"}) {
 		expect_plan(c, line);
 	}
+	// 0xA0 splits on both sides: the console reads `SET`, `Bogus`, `1` and draws the usage and
+	// the not-found error, and the plan counts the same two (D-NET-381).
+	expect_plan(c, "SET\xA0" "Bogus 1");
 	// A NovaWorld host's ban list: BAN draws two.
 	host.conn(0).account.pcid = "A-MM-WXXIB2";
 	host.ctx.bans.pcids = banlist::PcidBanList{};
