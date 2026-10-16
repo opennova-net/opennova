@@ -15,6 +15,7 @@
 #include <runtime/world/entity.h>      // EntityHandle (pinned below)
 #include <runtime/world/geom.h>        // to_fixed / from_fixed
 #include <runtime/world/player_spawn.h> // kPlayerInfantryTypeId (pinned below)
+#include <runtime/world/shell_sort_by_value.h> // CPairList_ShellSortByValue (the interest list)
 #include <runtime/world/infantry.h>    // kInfantryAirborneGap / remote body state
 #include <runtime/world/zone_chain.h>   // zone_chain_zone_info_byte — the 0x0D zone byte (§5.11)
 
@@ -1041,27 +1042,6 @@ struct InterestPair {
 	uint16_t handle = 0xFFFF;
 };
 
-// [orig: CPairList_ShellSortByValue @0x526CF0 -- the Knuth gap sequence and the
-//  signed `cmp; jge` that stops the insertion at an equal key, so the sort is
-//  descending and NOT stable]
-void retail_shell_sort_descending(std::vector<InterestPair> &rows) {
-	size_t gap = 1;
-	while (gap <= rows.size() / 9)
-		gap = 3 * gap + 1;
-	do {
-		for (size_t i = gap; i < rows.size(); ++i) {
-			const InterestPair insert = rows[i];
-			size_t j = i;
-			while (j >= gap && rows[j - gap].key < insert.key) {
-				rows[j] = rows[j - gap];
-				j -= gap;
-			}
-			rows[j] = insert;
-		}
-		gap /= 3;
-	} while (gap != 0);
-}
-
 // The client's own top-N interest list, scored against the uplinking player.
 // Pool 0 then pool 1, each in slot order, admitting a live entity with an
 // items.def network callback, Flags bit 0 clear, that is not the player.
@@ -1208,7 +1188,9 @@ void build_uplink_interest_pairs(world::World &world, const world::Entity &e,
 		if ((flags & 1u) != 0) key >>= 4;         // [orig: @0x50E208] (unreachable past the filter)
 		list.push_back({key, row->handle});
 	}
-	retail_shell_sort_descending(list);
+	// [orig: Server_BuildEntityPriorityListForPlayer's CPairList_ShellSortByValue call
+	//  @0x50E493]
+	world::shell_sort_by_value(list, [](const InterestPair &p) { return p.key; });
 	// The top entries: a key above 0xFFFF saturates. [orig: @0x50E4C0..0x50E53C]
 	const size_t count = std::min<size_t>(list.size(), 4);
 	for (size_t i = 0; i < count; ++i) {

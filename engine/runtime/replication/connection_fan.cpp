@@ -15,6 +15,7 @@
 #include <net/npwire/wire_handle.h>
 #include <net/title/title_identity.h>        // title_in_match (the 0x0A co-op checkpoint, DFX2-1)
 #include <runtime/world/geom.h>              // to_fixed
+#include <runtime/world/shell_sort_by_value.h> // CPairList_ShellSortByValue
 #include <runtime/world/vehicle_mount.h>
 
 #include <runtime/replication/entity_wire_bridge.h> // health_classification_byte (the field-17 pack)
@@ -580,7 +581,9 @@ std::size_t record_wire_size(const GameEntitySnapshot &e) {
 //  1. saturating-age every tracked entity byte [orig: paddusb sweep @0x50e60f];
 //  2. admit + score each replicable entity against the recipient anchor;
 //  3. sort descending by key [orig: CPairList_ShellSortByValue @0x526cf0 — a Knuth-gap
-//     shell sort; std::stable_sort is order-equivalent for our distinct keys];
+//     shell sort, not stable: the keys are small integers and tie routinely (for a dead or
+//     deploying recipient a saturated, unmoved far entity scores exactly 255), so the
+//     candidates enter in retail's order, pool 0 then pool 1, each by slot];
 //  4. take records until the byte budget (header included) is exhausted — the budget is
 //     a SOFT cap checked after each record [orig: @0x50f34b], so the record in flight
 //     completes; a selected entity's age resets to 0 [orig: @0x50f168].
@@ -826,9 +829,9 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 	}
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_SCORE);
 
-	// 3. Highest priority first [orig: descending shell sort @0x526cf0].
-	std::stable_sort(scored.begin(), scored.end(),
-	                 [](const Scored &a, const Scored &b) { return a.key > b.key; });
+	// 3. Highest priority first [orig: Server_BuildEntityPriorityList's
+	//  CPairList_ShellSortByValue call @0x50F057].
+	world::shell_sort_by_value(scored, [](const Scored &s) { return s.key; });
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_SORT);
 
 	// 4. Budget walk (soft cap, header included) + age reset and last-sent cache
@@ -951,9 +954,10 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 		scored.push_back({score, &ev});
 	}
 
-	// Closest-to-the-bullet-line first [orig: CPairList_ShellSortByValue @0x50016a].
-	std::stable_sort(scored.begin(), scored.end(),
-	                 [](const ScoredRound &a, const ScoredRound &b) { return a.score > b.score; });
+	// Closest-to-the-bullet-line first, the ring's records added in index order
+	// 0..count-1, as retail walks g_RoundRing [orig: Server_BuildRoundEventListForPlayer
+	//  @0x4FFF24..0x500157, its CPairList_ShellSortByValue call @0x50016a].
+	world::shell_sort_by_value(scored, [](const ScoredRound &s) { return s.score; });
 
 	// Convert to wire records — capped at 255 [orig: the g_RoundEventRefs array
 	// @0x500190] and by the remaining frame budget (soft cap, like the tag-1 walk

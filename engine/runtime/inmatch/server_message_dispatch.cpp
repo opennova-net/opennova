@@ -42,6 +42,7 @@
 #include <runtime/world/local_player.h>
 #include <runtime/world/entity_spawn.h>  // entity_reset_to_spawn_state — the deploy revive (§5.61)
 #include <runtime/world/spawn_select.h>  // deploy target validation + one spawn-pose resolver
+#include <runtime/world/shell_sort_by_value.h> // CPairList_ShellSortByValue (the 0x16 rows)
 #include <runtime/world/vehicle_attach.h> // entity_process_vehicle_attach / entity_detach_from_vehicle (0x26/0x27)
 #include <runtime/world/world.h>  // world::World::registry (the authoritative roster, §6.9)
 #include <runtime/audio/sound_profile.h> // compose_entity_sound_set — the 0x2E MEDIC_REQUEST composite
@@ -439,23 +440,7 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 	          [](const ScoredPlayerListEntry &a, const ScoredPlayerListEntry &b) {
 	              return a.row.slot < b.row.slot;
 	          });
-	{
-		const size_t count = rows.size();
-		size_t gap = 1;
-		while (gap <= count / 9)
-			gap = 3 * gap + 1;
-		for (; gap > 0; gap /= 3) {
-			for (size_t i = gap; i < count; ++i) {
-				ScoredPlayerListEntry insert = rows[i];
-				size_t j = i;
-				while (j >= gap && rows[j - gap].score < insert.score) {
-					rows[j] = rows[j - gap];
-					j -= gap;
-				}
-				rows[j] = insert;
-			}
-		}
-	}
+	world::shell_sort_by_value(rows, [](const ScoredPlayerListEntry &e) { return e.score; });
 	for (const ScoredPlayerListEntry &entry : rows)
 		frame.players.push_back(entry.row);
 	frame.teams.resize(size_t(frame.team_count) + 1);

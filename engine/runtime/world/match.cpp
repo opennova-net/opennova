@@ -14,6 +14,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/carrier_motion.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/shell_sort_by_value.h>
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
@@ -176,22 +177,9 @@ void sort_scoreboard_players(std::vector<MatchResultPlayer> &players, uint32_t g
               [](const MatchResultPlayer &a, const MatchResultPlayer &b) {
                   return a.identity.slot < b.identity.slot;
               });
-    const size_t count = players.size();
-    size_t gap = 1;
-    while (gap <= count / 9)
-        gap = 3 * gap + 1;
-    for (; gap > 0; gap /= 3) {
-        for (size_t i = gap; i < count; ++i) {
-            MatchResultPlayer insert = std::move(players[i]);
-            const int32_t key = scoreboard_sort_key(insert, game_type);
-            size_t j = i;
-            while (j >= gap && scoreboard_sort_key(players[j - gap], game_type) < key) {
-                players[j] = std::move(players[j - gap]);
-                j -= gap;
-            }
-            players[j] = std::move(insert);
-        }
-    }
+    shell_sort_by_value(players, [game_type](const MatchResultPlayer &row) {
+        return scoreboard_sort_key(row, game_type);
+    });
 }
 
 // ItemDef+0x5C == 3, the scorer's person test.
