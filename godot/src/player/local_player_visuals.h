@@ -130,8 +130,9 @@ public:
 	// WeaponDef_ParseProperty @0x54d730]; the file's gfx1a/gfx1b tokens are
 	// parsed-and-discarded by retail and never name the arms), the arms from
 	// the resolved character. Camera sway / fire-kick / ADS [orig:
-	// Player_UpdateFirstPersonCamera @0x4dd380] are follow-ups. Null when the
-	// placer or both models fail to resolve.
+	// Player_UpdateFirstPersonCamera @0x4dd380] ride the viewmodel rig
+	// (player_viewmodel_rig.cpp). Null when the placer or both models fail to
+	// resolve.
 	Node3D *build_local_player_viewmodel();
 	// The FP viewmodel's typed model parts (arms/gun), rebuilt with the
 	// container -- the rig consumes this instead of scanning children (the

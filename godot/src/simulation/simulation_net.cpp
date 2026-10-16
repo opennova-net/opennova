@@ -1043,14 +1043,6 @@ int Simulation::get_joiner_self_handle() const {
 			? static_cast<int>(joiner_role_->self_wire_handle()) : 0;
 }
 
-// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0 — the leave sends a burst of
-// 0x46 disconnect packets (SendDisconnectPacket @0x61f2a0) before the key material clears; the
-// host's non-timeout teardown fires only on that opcode (Nwu_HandleClientGoodbye @0x624250)]
-
-
-// (P7 A4: joiner_net_poll / joiner_net_flush deleted — the joiner now runs through the joiner role
-//  over an inmatch::ClientRuntime; the legacy JoinerSession path is retired here.)
-
 bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int p_team) {
 	opennova::inmatch::ListenHostState *host = host_state();
 	if (!is_host_listening() || host == nullptr) return false;
