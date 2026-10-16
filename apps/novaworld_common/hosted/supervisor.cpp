@@ -750,11 +750,13 @@ void Supervisor::on_exit(db::Database &db, const HostedServer &s, Runtime &rt, u
 	// rotation's end or the admin's GOTO MENUSTATE, 3 when the service ends its
 	// hosting and 1 for a SIGTERM while it waits to be listed
 	// (apps/serve/README.md "Exit codes"), and none of those is the owner's stop.
+	// A container that never started may say why (its data could not be
+	// fetched): the agent's reason rides its report.
 	std::string reason;
 	if (report.oom)
 		reason = "opennova-serve ran out of memory";
 	else if (report.exit_code == 125 && !report.started_at)
-		reason = "its container did not start";
+		reason = report.reason.empty() ? "its container did not start" : report.reason;
 	else
 		reason = "opennova-serve exited with code " +
 				(report.exit_code ? std::to_string(*report.exit_code) : std::string("unknown"));
@@ -766,6 +768,10 @@ void Supervisor::on_booting(db::Database &db, const Fleet &fleet, const HostedSe
 	const FleetMachineRow *machine = machine_of(fleet, s);
 	if (!machine) {
 		replace(db, s, now_ms, "its machine is gone");
+		return;
+	}
+	if (s.update_requested) {
+		replace(db, s, now_ms, "updated to its data set's current data");
 		return;
 	}
 	if (machine->state != FleetMachineState::Ready) {
@@ -794,6 +800,10 @@ void Supervisor::on_listing(db::Database &db, const Fleet &fleet, const HostedSe
 		replace(db, s, now_ms, "its machine is gone");
 		return;
 	}
+	if (s.update_requested) {
+		replace(db, s, now_ms, "updated to its data set's current data");
+		return;
+	}
 	const SlotReport *report = report_of(fleet, s);
 	if (report && report->state == ContainerState::Exited) {
 		on_exit(db, s, rt, now_ms, *report);
@@ -820,6 +830,12 @@ void Supervisor::on_running(db::Database &db, const Fleet &fleet, const HostedSe
 	const FleetMachineRow *machine = machine_of(fleet, s);
 	if (!machine) {
 		replace(db, s, now_ms, "its machine is gone");
+		return;
+	}
+	// The owner's update: its slot let go and placed again at once (the next
+	// start takes the current trees), the machine's kind of move, no restart.
+	if (s.update_requested) {
+		replace(db, s, now_ms, "updated to its data set's current data");
 		return;
 	}
 	const SlotReport *report = report_of(fleet, s);

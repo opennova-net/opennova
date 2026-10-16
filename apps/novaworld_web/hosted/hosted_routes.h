@@ -3,12 +3,14 @@
 // The hosted servers' /api routes (ADR 0053, proposed; README "Hosted servers"):
 // the owner's, by server id (an account runs as many as its hosting
 // entitlement allows): GET /api/me/servers, GET /api/me/servers/<id>, POST
-// /api/me/servers (a start) and POST /api/me/servers/<id>/stop (require_user,
-// the CSRF header on the two POSTs; another account's id is 404, never 403),
-// and the admin's kill switch POST /api/admin/hosted/stop-all and POST
-// /api/admin/hosted/<id>/stop (require_admin; the fleet view and the
-// machines' routes are fleet_routes.h's). They write requests and stops only
-// (hosted_repository.h); the supervisor does the rest.
+// /api/me/servers (a start), POST /api/me/servers/<id>/stop and POST
+// /api/me/servers/<id>/update (the owner's move to its data sets' current
+// data, ADR 0064; require_user, the CSRF header on the POSTs; another
+// account's id is 404, never 403), and the admin's kill switch POST
+// /api/admin/hosted/stop-all and POST /api/admin/hosted/<id>/stop
+// (require_admin; the fleet view, the machines' routes and update-all are
+// fleet_routes.h's). They write requests, stops and update requests only
+// (hosted_repository.h, data_set_repository.h); the supervisor does the rest.
 // Every reply is an error code with our own message, never database text.
 // Behind ONNET_API_PROXY_ONLY like every /api route. A start needs the
 // account's hosting entitlement (billing/entitlement.h); an admin's comp
@@ -36,7 +38,7 @@ struct ServerConfig;
 namespace hosted {
 
 // A hosted server as JSON for its owner (GET /api/me/servers and
-// /api/me/servers/<id>, the start and stop replies, an admin's user
+// /api/me/servers/<id>, the start, stop and update replies, an admin's user
 // page) or, with `admin`, for the fleet view (fleet_routes.h): its owner (with
 // its support tier), its service account, its container and machine address,
 // its place in the fleet (machine_ref, slot, game_port, generation,
@@ -86,6 +88,7 @@ private:
 	crow::response me_server(const crow::request &req, uint64_t id);
 	crow::response me_start(const crow::request &req);
 	crow::response me_stop(const crow::request &req, uint64_t id);
+	crow::response me_update(const crow::request &req, uint64_t id);
 	crow::response admin_stop_all(const crow::request &req);
 	crow::response admin_stop(const crow::request &req, uint64_t id);
 
