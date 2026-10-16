@@ -115,7 +115,10 @@ add_library(opennova_bindings OBJECT
     particle/effect_world.cpp
     particle/particle_compositor.cpp
     particle/particle_far_pass.cpp
+    particle/particle_first_person_batch.cpp
+    particle/particle_material_cache.cpp
     particle/particle_renderer.cpp
+    particle/particle_atlas_device.cpp
     particle/particle_atlas_page_upload.cpp
     render/d3d9_raster_device.cpp
     render/environment_cube_blit.cpp

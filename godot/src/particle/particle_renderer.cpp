@@ -12,27 +12,18 @@
 #include <map>
 #include <memory>
 #include <string>
-#include <unordered_map>
-#include <unordered_set>
 #include <utility>
 #include <vector>
 
-#include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/camera3d.hpp>
 #include <godot_cpp/classes/compositor.hpp>
 #include <godot_cpp/classes/compositor_effect.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
-#include <godot_cpp/classes/image.hpp>
-#include <godot_cpp/classes/image_texture.hpp>
-#include <godot_cpp/classes/mesh.hpp>
 #include <godot_cpp/classes/mesh_instance3d.hpp>
-#include <godot_cpp/classes/resource.hpp>
-#include <godot_cpp/classes/resource_loader.hpp>
 #include <godot_cpp/classes/rendering_server.hpp>
 #include <godot_cpp/classes/quad_mesh.hpp>
 #include <godot_cpp/classes/shader.hpp>
 #include <godot_cpp/classes/shader_material.hpp>
-#include <godot_cpp/classes/texture2d.hpp>
 #include <godot_cpp/classes/viewport.hpp>
 #include <godot_cpp/classes/world3d.hpp>
 #include <godot_cpp/classes/world_environment.hpp>
@@ -40,10 +31,6 @@
 #include <godot_cpp/core/object_id.hpp>
 #include <godot_cpp/variant/aabb.hpp>
 #include <godot_cpp/variant/packed_byte_array.hpp>
-#include <godot_cpp/variant/packed_color_array.hpp>
-#include <godot_cpp/variant/packed_int32_array.hpp>
-#include <godot_cpp/variant/packed_vector2_array.hpp>
-#include <godot_cpp/variant/packed_vector3_array.hpp>
 #include <godot_cpp/variant/projection.hpp>
 #include <godot_cpp/variant/rect2i.hpp>
 #include <godot_cpp/variant/transform3d.hpp>
@@ -52,7 +39,6 @@
 #include <godot_cpp/variant/vector3.hpp>
 
 #include <base/io/hash.h>
-#include <base/io/strutil.h>
 #include <runtime/particle/emitter.h>
 #include <runtime/renderer/particle_atlas.h>
 #include <runtime/renderer/particle_color.h>
@@ -60,31 +46,27 @@
 #include <runtime/renderer/particle_quad_inputs.h>
 #include <runtime/renderer/render_order.h>
 #include <runtime/renderer/particle_density.h>
-#include <runtime/renderer/texture_compression.h>
 
-#include "particle/particle_atlas_page_upload.h"
+#include "particle/particle_atlas_device.h"
 #include "particle/particle_compositor.h"
 #include "particle/effect_distortion_drawer.h"
 #include "particle/particle_convert.h"
 #include "particle/particle_far_pass.h"
+#include "particle/particle_first_person_batch.h"
+#include "particle/particle_material_cache.h"
 #include "render/frame_fx.h"
 #include "render/scene_overlay_compositor.h"
-#include "render/visual_layers.h"
 #include "render/world_environment_lookup.h"
-#include "util/texture_path_resolver.h"
 #include "util/string_convert.h"
 
 using namespace godot;
 
 namespace {
 
-constexpr int kGraphicLayerCount = 4;
-// The FirstPerson batch rides the viewmodel layer, so every view that masks the
-// viewmodel out (the water mirror, the second scene view) drops it as well.
-constexpr std::uint32_t kFirstPersonVisibilityMask = visual_layers::VIEWMODEL;
-static_assert((visual_layers::SECOND_SCENE_VIEW_EXCLUDED & kFirstPersonVisibilityMask) != 0,
-		"a second scene view must never draw the FirstPerson particle batch");
-constexpr std::size_t kMissingEntry = std::numeric_limits<std::size_t>::max();
+constexpr int kGraphicLayerCount = ParticleAtlasDevice::kGraphicLayerCount;
+constexpr std::size_t kMissingEntry = ParticleAtlasDevice::kMissingEntry;
+using DefinitionVisual = ParticleAtlasDevice::DefinitionVisual;
+using LayerVisual = ParticleAtlasDevice::LayerVisual;
 
 enum ParticleDrawSlot : std::size_t {
 	kWorldFarSide = 0,
@@ -104,157 +86,6 @@ using ParticleEffectPair = std::array<Ref<ParticleCompositorEffect>, 2>;
 using opennova::particle::GraphicLayer;
 using opennova::particle::Particle;
 
-Ref<Image> load_particle_image(const Callable &provider,
-		const String &texture_dir, const std::string &name) {
-	const String candidate = opennova::to_gd(name);
-	Ref<Texture2D> texture;
-	if (provider.is_valid())
-		texture = provider.call(candidate);
-	if (texture.is_null() && !texture_dir.is_empty())
-		texture = opennova::load_texture_from_dir(texture_dir, candidate,
-				opennova::renderer::TextureLoader::Particle);
-	if (texture.is_null())
-		return Ref<Image>();
-	Ref<Image> image = texture->get_image();
-	if (image.is_null())
-		return Ref<Image>();
-	if (image->get_format() != Image::FORMAT_RGBA8)
-		image->convert(Image::FORMAT_RGBA8);
-	return image;
-}
-
-Ref<Image> make_fallback_image() {
-	constexpr int side = 32;
-	Ref<Image> image = Image::create(side, side, false, Image::FORMAT_RGBA8);
-	if (image.is_null())
-		return image;
-	const float center = (static_cast<float>(side) - 1.0f) * 0.5f;
-	for (int y = 0; y < side; ++y) {
-		for (int x = 0; x < side; ++x) {
-			const float dx = (static_cast<float>(x) - center) / center;
-			const float dy = (static_cast<float>(y) - center) / center;
-			const float alpha = std::clamp(1.0f - std::sqrt(dx * dx + dy * dy),
-					0.0f, 1.0f);
-			image->set_pixel(x, y, Color(1.0f, 1.0f, 1.0f, alpha));
-		}
-	}
-	return image;
-}
-
-struct AtlasPage {
-	std::uint8_t type = 0;
-	int side = 0;
-	// The page's retail levels and the last of them, the stage's point-mip
-	// bound (renderer::particle_atlas_page_texture / _last_level).
-	int levels = 0;
-	float max_lod = 0.0f;
-	// The uploaded image carries a mip chain.
-	bool mipmapped = false;
-	// The device texture's level-0 side (the page's after its halvings) and
-	// whether it is DXT5 (D-RMAT-24).
-	int device_side = 0;
-	bool dxt5 = false;
-	Ref<ImageTexture> texture;
-};
-
-struct LayerVisual {
-	bool present = false;
-	std::uint8_t type = 0;
-	int flip_frames = 1;
-	std::vector<std::size_t> frame_entries;
-};
-
-struct DefinitionVisual {
-	std::array<LayerVisual, kGraphicLayerCount> layers;
-	// The ambient tint pick (engine: runtime/renderer/particle_quad_inputs.h).
-	bool ambient_lit = false;
-};
-
-opennova::renderer::ParticleRgbaImage particle_rgba_image(const Ref<Image> &image,
-		bool type_one_procedural_mask) {
-	opennova::renderer::ParticleRgbaImage result;
-	if (image.is_null() || image->get_width() <= 0 || image->get_height() <= 0)
-		return result;
-	result.width = image->get_width();
-	result.height = image->get_height();
-	const PackedByteArray pixels = image->get_data();
-	const std::size_t width = static_cast<std::size_t>(result.width);
-	const std::size_t height = static_cast<std::size_t>(result.height);
-	if (width > std::numeric_limits<std::size_t>::max() / height)
-		return opennova::renderer::ParticleRgbaImage{};
-	const std::size_t pixel_count = width * height;
-	if (pixel_count > std::numeric_limits<std::size_t>::max() / 4u)
-		return opennova::renderer::ParticleRgbaImage{};
-	const std::size_t mip0_bytes = pixel_count * 4u;
-	if (mip0_bytes > static_cast<std::size_t>(
-			std::numeric_limits<int64_t>::max()) ||
-			pixels.size() < static_cast<int64_t>(mip0_bytes))
-		return opennova::renderer::ParticleRgbaImage{};
-	// Image::get_data() appends lower mip levels after mip 0. The portable
-	// atlas accepts one flat RGBA frame, so copy only the base-level prefix.
-	result.rgba.resize(mip0_bytes);
-	if (!result.rgba.empty())
-		std::memcpy(result.rgba.data(), pixels.ptr(), result.rgba.size());
-	if (type_one_procedural_mask) {
-		for (std::size_t offset = 0; offset + 3 < result.rgba.size();
-				offset += 4) {
-			const std::uint8_t radial = result.rgba[offset + 3];
-			result.rgba[offset + 0] = radial;
-			result.rgba[offset + 1] = radial;
-			result.rgba[offset + 2] = radial;
-		}
-	}
-	return result;
-}
-
-String shader_path_for_pipeline(opennova::renderer::ParticlePipeline pipeline) {
-	switch (pipeline) {
-		case opennova::renderer::ParticlePipeline::Blend:
-			return "res://shaders/particle/particle_blend_blend.gdshader";
-		case opennova::renderer::ParticlePipeline::Additive:
-			return "res://shaders/particle/particle_blend_additive.gdshader";
-		case opennova::renderer::ParticlePipeline::Premult:
-			return "res://shaders/particle/particle_blend_premult.gdshader";
-		case opennova::renderer::ParticlePipeline::Bump:
-			return "res://shaders/particle/particle_blend_bump.gdshader";
-		case opennova::renderer::ParticlePipeline::Mod:
-			return "res://shaders/particle/particle_blend_mod.gdshader";
-		case opennova::renderer::ParticlePipeline::Mod2x:
-			return "res://shaders/particle/particle_blend_mod2x.gdshader";
-		case opennova::renderer::ParticlePipeline::Bumpadd:
-			return "res://shaders/particle/particle_blend_bumpadd.gdshader";
-		case opennova::renderer::ParticlePipeline::Distort:
-			return "res://shaders/particle/particle_blend_distort.gdshader";
-	}
-	return "res://shaders/particle/particle_blend_blend.gdshader";
-}
-
-// The thermal frame's secondary materials (renderer::particle_thermal_material)
-// sit after the eight PTL types in the shader cache.
-constexpr std::size_t kThermalInvertedBlendShader = 8;
-constexpr std::size_t kThermalDarkeningShader = 9;
-constexpr std::size_t kParticleShaderCount = 10;
-
-String shader_path_for_index(std::size_t index) {
-	if (index == kThermalInvertedBlendShader)
-		return "res://shaders/particle/particle_blend_blend_thermal.gdshader";
-	if (index == kThermalDarkeningShader)
-		return "res://shaders/particle/particle_blend_additive_thermal.gdshader";
-	return shader_path_for_pipeline(static_cast<opennova::renderer::ParticlePipeline>(index));
-}
-
-std::size_t shader_index_for(opennova::renderer::ParticlePipeline pipeline,
-		opennova::renderer::ParticleThermalMaterial thermal) {
-	switch (thermal) {
-		case opennova::renderer::ParticleThermalMaterial::InvertedBlend:
-			return kThermalInvertedBlendShader;
-		case opennova::renderer::ParticleThermalMaterial::DarkeningModulate:
-			return kThermalDarkeningShader;
-		default:
-			return static_cast<std::size_t>(pipeline);
-	}
-}
-
 // The view basis rows (world to view) as the engine's particle laws read them.
 std::array<float, 9> basis_rows(const Basis &basis) {
 	std::array<float, 9> rows;
@@ -262,15 +93,6 @@ std::array<float, 9> basis_rows(const Basis &basis) {
 		for (int col = 0; col < 3; ++col)
 			rows[row * 3 + col] = static_cast<float>(basis[row][col]);
 	return rows;
-}
-
-Color unpack_argb(std::uint32_t value) {
-	constexpr float inv = 1.0f / 255.0f;
-	return Color(
-			static_cast<float>((value >> 16) & 0xffu) * inv,
-			static_cast<float>((value >> 8) & 0xffu) * inv,
-			static_cast<float>(value & 0xffu) * inv,
-			static_cast<float>((value >> 24) & 0xffu) * inv);
 }
 
 opennova::renderer::ParticleVec3 particle_vec(const opennova::particle::Vec3 &value) {
@@ -598,51 +420,25 @@ struct LitQuadInput {
 	std::uint8_t alpha = 255;
 };
 
-// Retained FirstPerson upload scratch: one ArrayMesh whose surfaces are
-// rebuilt per frame, plus packed arrays whose storage survives across frames.
-struct FirstPersonUploadBuffers {
-	PackedVector3Array vertices;
-	PackedVector2Array uvs;
-	PackedColorArray colors;
-	PackedByteArray custom0;
-	PackedInt32Array indices;
-	Array arrays;
-};
-
 } // namespace
 
 class ParticleRenderer::Impl {
 public:
-	MeshInstance3D *first_person_instance = nullptr;
-	Ref<ArrayMesh> first_person_mesh;
-	FirstPersonUploadBuffers first_person_upload;
+	ParticleFirstPersonBatch first_person;
 	std::array<opennova::renderer::ParticleFrameCompiler, kParticleDrawSlotCount> compilers;
 	// A slot is present once it compiled for the current render and until
 	// clear_draws or a render without its camera retires it.
 	std::array<bool, kParticleDrawSlotCount> slot_present{};
 	opennova::renderer::ParticleFrameSnapshot render_snapshot;
 	std::vector<LitQuadInput> lit_quads;
-	std::shared_ptr<const std::vector<opennova::particle::ParticleDef>> catalog_definitions;
-	std::vector<DefinitionVisual> definition_visuals;
-	std::vector<opennova::renderer::ParticleAtlasEntry> entries;
-	std::vector<AtlasPage> pages;
-	std::shared_ptr<const ParticleAtlasSnapshot> atlas_snapshot;
-	std::uint64_t atlas_generation = 0;
-	std::array<Ref<Shader>, kParticleShaderCount> shader_cache;
-	std::map<std::uint64_t, Ref<ShaderMaterial>> materials;
+	ParticleAtlasDevice atlas;
+	ParticleMaterialCache materials;
 	// Pass A of the main view and of the second scene view as render-list
 	// runs at kRungParticleFarSide (ParticleFarPass), with their own
 	// shaders/materials; the compositor far effect keeps only distortion.
 	ParticleFarPass world_far_pass;
 	ParticleFarPass second_scene_far_pass;
-	std::array<Ref<Shader>, 8> far_shader_cache;
-	// The thermal secondary materials' pass-A shaders: Blend's inversion and
-	// Additive/Premult's darkening (renderer::particle_thermal_material).
-	std::array<Ref<Shader>, 2> far_thermal_shader_cache;
-	std::map<std::uint64_t, Ref<ShaderMaterial>> far_materials;
 	opennova::renderer::ParticleDrawList far_distortion_scratch;
-	std::vector<std::string> unresolved_names;
-	std::size_t rejected_atlas_entries = 0;
 	ParticleEffectPair world_effects;
 	ParticleEffectPair reflection_effects;
 	ParticleEffectPair second_scene_effects;
@@ -662,10 +458,6 @@ public:
 	bool inherited_world_compositor = false;
 	bool inherited_reflection_compositor = false;
 	bool inherited_second_scene_compositor = false;
-	bool catalog_dirty = true;
-	// The creation flags the current pages were built with
-	// (renderer::particle_atlas_page_creation_flags).
-	std::uint32_t catalog_page_flags = opennova::renderer::kParticlePageCreationFlags;
 	// The stride the frame's last scene pass left, which the next frame's
 	// water mirror draws in (renderer::particle_frame_strides); the effect
 	// world's scale starts at kParticleDensityScaleInitial.
@@ -751,7 +543,7 @@ public:
 	~Impl() = default;
 
 	void invalidate_catalog() {
-		catalog_dirty = true;
+		atlas.invalidate();
 	}
 
 	void invalidate_environment() {
@@ -934,21 +726,6 @@ public:
 			rebuild_camera_compositor(state, camera);
 	}
 
-	void ensure_visuals(ParticleRenderer *owner) {
-		if (first_person_instance != nullptr)
-			return;
-		first_person_instance = memnew(MeshInstance3D);
-		first_person_instance->set_name("ParticleFirstPersonBatch");
-		first_person_instance->set_cast_shadows_setting(
-				GeometryInstance3D::SHADOW_CASTING_SETTING_OFF);
-		first_person_instance->set_extra_cull_margin(200.0f);
-		first_person_instance->set_as_top_level(true);
-		first_person_instance->set_transform(Transform3D());
-		first_person_instance->set_layer_mask(kFirstPersonVisibilityMask);
-		owner->add_child(first_person_instance);
-		first_person_instance->set_owner(owner->get_owner());
-	}
-
 	void clear_draws() {
 		for_each_effect([](Ref<ParticleCompositorEffect> &effect) {
 			effect->clear_submission();
@@ -956,273 +733,18 @@ public:
 		world_far_pass.clear();
 		second_scene_far_pass.clear();
 		distortion_drawer->set_particles_present(false);
-		if (first_person_mesh.is_valid())
-			first_person_mesh->clear_surfaces();
+		first_person.clear();
 		slot_present.fill(false);
-		if (first_person_instance != nullptr)
-			first_person_instance->set_visible(false);
 	}
 
-	bool first_person_has_surfaces() const {
-		return first_person_mesh.is_valid() &&
-				first_person_mesh->get_surface_count() > 0;
-	}
-
+	// The catalog's atlas and pages, built again; the first-person materials
+	// bound the old pages.
 	void rebuild_catalog(
-			const std::shared_ptr<const std::vector<opennova::particle::ParticleDef>> &definitions,
+			const ParticleAtlasDevice::Definitions &definitions,
 			const Callable &provider, const String &texture_dir,
 			bool procedural_fallback, std::uint32_t page_flags) {
-		catalog_definitions = definitions;
-		catalog_page_flags = page_flags;
-		definition_visuals.clear();
-		entries.clear();
-		pages.clear();
-		materials.clear();
-		unresolved_names.clear();
-		rejected_atlas_entries = 0;
-		catalog_dirty = false;
-		opennova::renderer::ParticleAtlasBuilder builder;
-		if (definitions)
-			definition_visuals.resize(definitions->size());
-		std::unordered_map<std::string, std::size_t> entry_lookup;
-		std::unordered_set<std::string> unresolved_lookup;
-		std::unordered_map<int, std::size_t> fallback_entries;
-		Ref<Image> fallback_image;
-
-		auto mark_unresolved = [&](const std::string &name) {
-			if (name.empty())
-				return;
-			const std::string key = opennova::strutil::to_lower(name);
-			if (unresolved_lookup.insert(key).second)
-				unresolved_names.push_back(name);
-		};
-
-		auto register_frame = [&](const std::string &name,
-				std::uint8_t type) -> std::size_t {
-			const std::string key = std::to_string(static_cast<int>(type)) +
-					"|" + opennova::strutil::to_lower(name);
-			const auto found = entry_lookup.find(key);
-			if (found != entry_lookup.end())
-				return found->second;
-
-			Ref<Image> image;
-			bool used_fallback = false;
-			if (!name.empty())
-				image = load_particle_image(provider, texture_dir, name);
-			if (image.is_null()) {
-				mark_unresolved(name);
-				if (!procedural_fallback) {
-					entry_lookup.emplace(key, kMissingEntry);
-					return kMissingEntry;
-				}
-				const auto fallback = fallback_entries.find(static_cast<int>(type));
-				if (fallback != fallback_entries.end()) {
-					entry_lookup.emplace(key, fallback->second);
-					return fallback->second;
-				}
-				if (fallback_image.is_null())
-					fallback_image = make_fallback_image();
-				image = fallback_image;
-				used_fallback = true;
-			}
-			if (image.is_null() || image->get_width() <= 0 ||
-					image->get_height() <= 0) {
-				entry_lookup.emplace(key, kMissingEntry);
-				return kMissingEntry;
-			}
-
-			opennova::renderer::ParticleRgbaImage rgba = particle_rgba_image(image,
-					used_fallback && type == 1);
-			if (!rgba.valid()) {
-				entry_lookup.emplace(key, kMissingEntry);
-				return kMissingEntry;
-			}
-			const std::size_t index = builder.register_frame(name, type,
-					std::move(rgba));
-			entry_lookup.emplace(key, index);
-			if (name.empty() || used_fallback)
-				fallback_entries.emplace(static_cast<int>(type), index);
-			return index;
-		};
-
-		for (std::size_t definition_index = 0; definitions &&
-				definition_index < definitions->size(); ++definition_index) {
-			const opennova::particle::ParticleDef &definition =
-					(*definitions)[definition_index];
-			DefinitionVisual &visual = definition_visuals[definition_index];
-			visual.ambient_lit = opennova::renderer::particle_def_ambient_tinted(definition);
-			bool any_present = false;
-			for (int layer_index = 0; layer_index < kGraphicLayerCount;
-					++layer_index) {
-				const GraphicLayer &graphic =
-						definition.graphics[static_cast<std::size_t>(layer_index)];
-				if (!graphic.present)
-					continue;
-				any_present = true;
-				LayerVisual &layer = visual.layers[static_cast<std::size_t>(layer_index)];
-				layer.present = true;
-				layer.type = static_cast<std::uint8_t>(graphic.blend_mode);
-				layer.flip_frames = std::clamp(graphic.flip_frames, 1,
-						opennova::particle::kMaxParticleFlipFrames);
-				layer.frame_entries.reserve(static_cast<std::size_t>(layer.flip_frames));
-				for (int frame = 1; frame <= layer.flip_frames; ++frame) {
-					const std::string name = opennova::renderer::retail_particle_frame_name(
-							graphic.texture, layer.flip_frames, frame);
-					layer.frame_entries.push_back(register_frame(name, layer.type));
-				}
-			}
-			if (!any_present) {
-				LayerVisual &layer = visual.layers[0];
-				layer.present = true;
-				layer.frame_entries.push_back(register_frame(std::string(), 0));
-			}
-		}
-
-		opennova::renderer::ParticleAtlasBuild build = builder.build();
-		entries = std::move(build.entries);
-		rejected_atlas_entries = build.rejected_entries;
-		pages.reserve(build.pages.size());
-		auto snapshot = std::make_shared<ParticleAtlasSnapshot>();
-		snapshot->generation = ++atlas_generation;
-		snapshot->pages.reserve(build.pages.size());
-		for (opennova::renderer::ParticleAtlasPage &source : build.pages) {
-			AtlasPage page;
-			page.type = source.type;
-			page.side = source.image.width;
-			// The page's device texture under the session's two words: at most
-			// three levels sampled with point mips (D-RMAT-23), DXT5 and halved
-			// once on the low branches (D-RMAT-24).
-			const ParticleAtlasPageUpload device = particle_atlas_page_upload(
-					opennova::renderer::particle_atlas_page_texture(source.image, page_flags));
-			page.levels = static_cast<int>(device.level_count);
-			page.device_side = static_cast<int>(device.side);
-			page.dxt5 = device.dxt5;
-			page.max_lod = static_cast<float>(
-					opennova::renderer::particle_atlas_page_last_level(page.side, page_flags));
-			if (device.image.is_valid()) {
-				page.mipmapped = device.image->has_mipmaps();
-				page.texture = ImageTexture::create_from_image(device.image);
-			}
-			pages.push_back(page);
-
-			ParticleAtlasPageSnapshot upload;
-			upload.type = source.type;
-			upload.side = device.side;
-			upload.levels = device.level_count;
-			upload.dxt5 = device.dxt5;
-			upload.data = device.levels;
-			snapshot->pages.push_back(std::move(upload));
-		}
-		atlas_snapshot = std::shared_ptr<const ParticleAtlasSnapshot>(
-				std::move(snapshot));
-	}
-
-	Ref<Shader> shader_for_index(std::size_t index) {
-		if (index >= shader_cache.size())
-			return Ref<Shader>();
-		if (shader_cache[index].is_null()) {
-			ResourceLoader *loader = ResourceLoader::get_singleton();
-			if (loader != nullptr) {
-				Ref<Resource> resource = loader->load(shader_path_for_index(index));
-				shader_cache[index] = resource;
-			}
-		}
-		return shader_cache[index];
-	}
-
-	Ref<ShaderMaterial> material_for(const opennova::renderer::ParticleDrawCommand &command,
-			bool thermal) {
-		const std::size_t shader_index = shader_index_for(command.pipeline,
-				opennova::renderer::particle_thermal_material(command.pipeline, thermal));
-		const std::uint64_t key =
-				(static_cast<std::uint64_t>(command.atlas_page) << 24) |
-				(static_cast<std::uint64_t>(shader_index) << 16) |
-				static_cast<std::uint64_t>(command.variant);
-		const auto found = materials.find(key);
-		if (found != materials.end())
-			return found->second;
-		Ref<ShaderMaterial> material;
-		material.instantiate();
-		material->set_shader(shader_for_index(shader_index));
-		if (command.atlas_page < pages.size() &&
-				pages[command.atlas_page].texture.is_valid()) {
-			material->set_shader_parameter("albedo_tex",
-					pages[command.atlas_page].texture);
-			material->set_shader_parameter("albedo_max_lod",
-					pages[command.atlas_page].max_lod);
-			material->set_shader_parameter("has_texture", true);
-		} else {
-			material->set_shader_parameter("has_texture", false);
-		}
-		materials.emplace(key, material);
-		return material;
-	}
-
-	// The far-pass shader for a particle type
-	// (godot/shaders/particle/world_far; Distort has none: it stays on the
-	// distortion path).
-	Ref<Shader> far_shader_for(opennova::renderer::ParticlePipeline pipeline,
-			opennova::renderer::ParticleThermalMaterial thermal) {
-		if (thermal != opennova::renderer::ParticleThermalMaterial::Primary) {
-			const bool inverted =
-					thermal == opennova::renderer::ParticleThermalMaterial::InvertedBlend;
-			Ref<Shader> &cached = far_thermal_shader_cache[inverted ? 0 : 1];
-			if (cached.is_null()) {
-				if (ResourceLoader *loader = ResourceLoader::get_singleton()) {
-					cached = loader->load(inverted ?
-									"res://shaders/particle/world_far/particle_far_blend_thermal.gdshader" :
-									"res://shaders/particle/world_far/particle_far_additive_thermal.gdshader");
-				}
-			}
-			return cached;
-		}
-		static const char *const kFarShaderNames[8] = {"blend", "additive",
-				"premult", "bump", "mod", "mod2x", "bumpadd", nullptr};
-		const std::size_t index = static_cast<std::size_t>(pipeline);
-		if (index >= far_shader_cache.size() || kFarShaderNames[index] == nullptr)
-			return Ref<Shader>();
-		if (far_shader_cache[index].is_null()) {
-			ResourceLoader *loader = ResourceLoader::get_singleton();
-			if (loader != nullptr) {
-				Ref<Resource> resource = loader->load(
-						String("res://shaders/particle/world_far/particle_far_") +
-						kFarShaderNames[index] + ".gdshader");
-				far_shader_cache[index] = resource;
-			}
-		}
-		return far_shader_cache[index];
-	}
-
-	Ref<ShaderMaterial> far_material_for(
-			const opennova::renderer::ParticleDrawCommand &command,
-			opennova::renderer::ParticleThermalMaterial thermal) {
-		const std::uint64_t key =
-				(static_cast<std::uint64_t>(thermal) << 40) |
-				(static_cast<std::uint64_t>(command.atlas_page) << 24) |
-				(static_cast<std::uint64_t>(command.pipeline) << 16) |
-				static_cast<std::uint64_t>(command.variant);
-		const auto found = far_materials.find(key);
-		if (found != far_materials.end())
-			return found->second;
-		const Ref<Shader> shader = far_shader_for(command.pipeline, thermal);
-		if (shader.is_null())
-			return Ref<ShaderMaterial>();
-		Ref<ShaderMaterial> material;
-		material.instantiate();
-		material->set_shader(shader);
-		material->set_render_priority(opennova::renderer::kRungParticleFarSide);
-		if (command.atlas_page < pages.size() &&
-				pages[command.atlas_page].texture.is_valid()) {
-			material->set_shader_parameter("albedo_tex",
-					pages[command.atlas_page].texture);
-			material->set_shader_parameter("albedo_max_lod",
-					pages[command.atlas_page].max_lod);
-			material->set_shader_parameter("has_texture", true);
-		} else {
-			material->set_shader_parameter("has_texture", false);
-		}
-		far_materials.emplace(key, material);
-		return material;
+		materials.clear_scene_materials();
+		atlas.rebuild(definitions, provider, texture_dir, procedural_fallback, page_flags);
 	}
 
 	// The distortion commands of a far-side list, for the compositor far
@@ -1277,6 +799,8 @@ public:
 		render_snapshot.emitters.clear();
 		render_snapshot.particles.clear();
 		lit_quads.clear();
+		const std::vector<DefinitionVisual> &definition_visuals = atlas.definition_visuals();
+		const std::vector<opennova::renderer::ParticleAtlasEntry> &entries = atlas.entries();
 		if (!frame.definitions ||
 				definition_visuals.size() != frame.definitions->size())
 			return;
@@ -1413,7 +937,7 @@ public:
 		submission->thermal = thermal;
 		submission->time_ms = static_cast<uint32_t>(time_ms);
 		submission->commands = draw_list.commands;
-		submission->atlas = atlas_snapshot;
+		submission->atlas = atlas.snapshot();
 		for (std::size_t component = 0; component < 3; ++component) {
 			submission->camera_position[component] =
 					camera_position[static_cast<int>(component)];
@@ -1473,92 +997,10 @@ public:
 
 	void upload_first_person_draw_list(
 			const opennova::renderer::ParticleDrawList &draw_list, bool hidden, bool thermal) {
-		if (first_person_instance == nullptr)
-			return;
-		// One retained ArrayMesh: surfaces are rebuilt per frame while the mesh
-		// RID, the instance binding, and the packed scratch arrays survive.
-		if (first_person_mesh.is_null())
-			first_person_mesh.instantiate();
-		if (first_person_instance->get_mesh().ptr() != first_person_mesh.ptr())
-			first_person_instance->set_mesh(first_person_mesh);
-		first_person_mesh->clear_surfaces();
-		if (draw_list.commands.empty() || draw_list.vertices.empty()) {
-			first_person_instance->set_visible(false);
-			return;
-		}
-
-		FirstPersonUploadBuffers &upload = first_person_upload;
-		if (upload.arrays.size() != Mesh::ARRAY_MAX)
-			upload.arrays.resize(Mesh::ARRAY_MAX);
-		for (const opennova::renderer::ParticleDrawCommand &command : draw_list.commands) {
-			const std::size_t first_vertex =
-					static_cast<std::size_t>(command.first_quad) * 4u;
-			const std::size_t vertex_count =
-					static_cast<std::size_t>(command.quad_count) * 4u;
-			if (first_vertex > draw_list.vertices.size() ||
-					vertex_count > draw_list.vertices.size() - first_vertex)
-				continue;
-
-			upload.vertices.resize(static_cast<int64_t>(vertex_count));
-			upload.uvs.resize(static_cast<int64_t>(vertex_count));
-			upload.colors.resize(static_cast<int64_t>(vertex_count));
-			upload.custom0.resize(static_cast<int64_t>(vertex_count * 4u));
-			upload.indices.resize(static_cast<int64_t>(command.quad_count) * 6);
-			Vector3 *vertices = upload.vertices.ptrw();
-			Vector2 *uvs = upload.uvs.ptrw();
-			Color *colors = upload.colors.ptrw();
-			std::uint8_t *custom_bytes = upload.custom0.ptrw();
-			std::int32_t *indices = upload.indices.ptrw();
-
-			for (std::size_t vertex_index = 0; vertex_index < vertex_count;
-					++vertex_index) {
-				const opennova::renderer::ParticleVertex &source =
-						draw_list.vertices[first_vertex + vertex_index];
-				vertices[vertex_index] = Vector3(source.x, source.y, source.z);
-				uvs[vertex_index] = Vector2(source.u, source.v);
-				colors[vertex_index] = unpack_argb(source.primary_color);
-				const std::size_t byte_offset = vertex_index * 4u;
-				custom_bytes[byte_offset + 0] = static_cast<std::uint8_t>(
-						(source.secondary_color >> 16) & 0xffu);
-				custom_bytes[byte_offset + 1] = static_cast<std::uint8_t>(
-						(source.secondary_color >> 8) & 0xffu);
-				custom_bytes[byte_offset + 2] = static_cast<std::uint8_t>(
-						source.secondary_color & 0xffu);
-				custom_bytes[byte_offset + 3] = static_cast<std::uint8_t>(
-						(source.secondary_color >> 24) & 0xffu);
-			}
-
-			for (std::uint32_t quad = 0; quad < command.quad_count; ++quad) {
-				const std::int32_t vertex = static_cast<std::int32_t>(quad * 4u);
-				const std::size_t index = static_cast<std::size_t>(quad) * 6u;
-				indices[index + 0] = vertex + 0;
-				indices[index + 1] = vertex + 1;
-				indices[index + 2] = vertex + 2;
-				indices[index + 3] = vertex + 1;
-				indices[index + 4] = vertex + 3;
-				indices[index + 5] = vertex + 2;
-			}
-
-			upload.arrays[Mesh::ARRAY_VERTEX] = upload.vertices;
-			upload.arrays[Mesh::ARRAY_TEX_UV] = upload.uvs;
-			upload.arrays[Mesh::ARRAY_COLOR] = upload.colors;
-			upload.arrays[Mesh::ARRAY_CUSTOM0] = upload.custom0;
-			upload.arrays[Mesh::ARRAY_INDEX] = upload.indices;
-			const std::uint64_t flags =
-					static_cast<std::uint64_t>(Mesh::ARRAY_FORMAT_CUSTOM0);
-			first_person_mesh->add_surface_from_arrays(
-					Mesh::PRIMITIVE_TRIANGLES, upload.arrays,
-					TypedArray<Array>(), Dictionary(),
-					static_cast<Mesh::ArrayFormat>(flags));
-			// The surface owns a converted copy. Drop the Array's shares so the
-			// next frame's ptrw() writes in place instead of copying on write.
-			upload.arrays.fill(Variant());
-			const int surface = first_person_mesh->get_surface_count() - 1;
-			first_person_mesh->surface_set_material(surface, material_for(command, thermal));
-		}
-
-		first_person_instance->set_visible(
-				!hidden && first_person_mesh->get_surface_count() > 0);
+		first_person.upload(draw_list, hidden,
+				[this, thermal](const opennova::renderer::ParticleDrawCommand &command) {
+					return materials.material_for(command, thermal, atlas.pages());
+				});
 	}
 };
 
@@ -1634,7 +1076,7 @@ void ParticleRenderer::_notification(int p_what) {
 	if (p_what == NOTIFICATION_ENTER_TREE) {
 		_restore_device_state();
 	} else if (p_what == NOTIFICATION_READY) {
-		impl_->ensure_visuals(this);
+		impl_->first_person.ensure(this);
 		set_process(false);
 		render_now(GameWorld::current_frame_clock_ms());
 	} else if (p_what == NOTIFICATION_EXIT_TREE) {
@@ -1752,8 +1194,8 @@ void ParticleRenderer::warm_pipelines(const Vector3 &p_position) {
 	Ref<QuadMesh> quad;
 	quad.instantiate();
 	quad->set_size(Vector2(0.01f, 0.01f));
-	for (std::size_t i = 0; i < impl_->shader_cache.size(); ++i) {
-		Ref<Shader> shader = impl_->shader_for_index(i);
+	for (std::size_t i = 0; i < ParticleMaterialCache::kShaderCount; ++i) {
+		Ref<Shader> shader = impl_->materials.shader_for_index(i);
 		if (shader.is_null())
 			continue;
 		Ref<ShaderMaterial> material;
@@ -1848,10 +1290,7 @@ void ParticleRenderer::set_hidden(bool p_hidden) {
 		impl_->clear_draws();
 		return;
 	}
-	if (impl_->first_person_instance != nullptr) {
-		impl_->first_person_instance->set_visible(
-				!hidden_ && impl_->first_person_has_surfaces());
-	}
+	impl_->first_person.set_hidden(hidden_);
 }
 
 bool ParticleRenderer::get_hidden() const {
@@ -1872,7 +1311,7 @@ bool ParticleRenderer::get_procedural_fallback_enabled() const {
 void ParticleRenderer::render_now(int64_t p_time_ms) {
 	if (shutdown_ || !impl_)
 		return;
-	impl_->ensure_visuals(this);
+	impl_->first_person.ensure(this);
 	Viewport *viewport = get_viewport();
 	Camera3D *camera = viewport != nullptr ? viewport->get_camera_3d() : nullptr;
 	Camera3D *reflection_camera = reflection_camera_.is_valid() ?
@@ -1915,9 +1354,7 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 			scene_->native_frame_snapshot();
 	const std::uint32_t page_flags = opennova::renderer::particle_atlas_page_creation_flags(
 			session_texcompression_level_, session_particle_density_);
-	if (impl_->catalog_dirty ||
-			impl_->catalog_definitions.get() != frame.definitions.get() ||
-			impl_->catalog_page_flags != page_flags) {
+	if (impl_->atlas.needs_rebuild(frame.definitions, page_flags)) {
 		impl_->rebuild_catalog(frame.definitions, texture_provider_, texture_dir_,
 				procedural_fallback_enabled_, page_flags);
 	}
@@ -1969,9 +1406,10 @@ void ParticleRenderer::render_now(int64_t p_time_ms) {
 					[this, view_thermal](const opennova::renderer::ParticleDrawCommand &command) {
 						// Pass A binds the secondary materials too while the
 						// main scene's thermal byte is set.
-						return impl_->far_material_for(command,
+						return impl_->materials.far_material_for(command,
 								opennova::renderer::particle_thermal_material(
-										command.pipeline, view_thermal));
+										command.pipeline, view_thermal),
+								impl_->atlas.pages());
 					});
 			impl_->publish_world_draw_list(effect, impl_->far_distortion_only(draw_list),
 					view_camera.position, view_camera.forward, p_time_ms, view_thermal);
@@ -2160,40 +1598,42 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	environment_fog["end"] = impl_->fog_end;
 	environment_fog["type"] = impl_->fog_type;
 	result["environment_fog"] = environment_fog;
-	result["atlas_page_count"] = static_cast<int64_t>(impl_->pages.size());
-	result["atlas_entry_count"] = static_cast<int64_t>(impl_->entries.size());
+	const std::vector<ParticleAtlasDevice::Page> &pages = impl_->atlas.pages();
+	const std::vector<opennova::renderer::ParticleAtlasEntry> &entries = impl_->atlas.entries();
+	result["atlas_page_count"] = static_cast<int64_t>(pages.size());
+	result["atlas_entry_count"] = static_cast<int64_t>(entries.size());
 	std::size_t resolved_entries = 0;
-	for (const opennova::renderer::ParticleAtlasEntry &entry : impl_->entries) {
+	for (const opennova::renderer::ParticleAtlasEntry &entry : entries) {
 		if (entry.placement.valid)
 			++resolved_entries;
 	}
 	result["atlas_resolved_entry_count"] =
 			static_cast<int64_t>(resolved_entries);
 	result["atlas_rejected_entry_count"] =
-			static_cast<int64_t>(impl_->rejected_atlas_entries);
+			static_cast<int64_t>(impl_->atlas.rejected_entries());
 	Array atlas_pages;
-	atlas_pages.resize(static_cast<int64_t>(impl_->pages.size()));
-	for (std::size_t i = 0; i < impl_->pages.size(); ++i) {
+	atlas_pages.resize(static_cast<int64_t>(pages.size()));
+	for (std::size_t i = 0; i < pages.size(); ++i) {
 		Dictionary value;
 		value["page"] = static_cast<int64_t>(i);
-		value["type"] = static_cast<int>(impl_->pages[i].type);
-		value["side"] = impl_->pages[i].side;
-		value["levels"] = impl_->pages[i].levels;
-		value["max_lod"] = impl_->pages[i].max_lod;
-		value["texture_mipmaps"] = impl_->pages[i].mipmapped;
-		value["device_side"] = impl_->pages[i].device_side;
-		value["dxt5"] = impl_->pages[i].dxt5;
+		value["type"] = static_cast<int>(pages[i].type);
+		value["side"] = pages[i].side;
+		value["levels"] = pages[i].levels;
+		value["max_lod"] = pages[i].max_lod;
+		value["texture_mipmaps"] = pages[i].mipmapped;
+		value["device_side"] = pages[i].device_side;
+		value["dxt5"] = pages[i].dxt5;
 		atlas_pages[static_cast<int64_t>(i)] = value;
 	}
 	result["atlas_pages"] = atlas_pages;
-	result["atlas_page_flags"] = static_cast<int64_t>(impl_->catalog_page_flags);
+	result["atlas_page_flags"] = static_cast<int64_t>(impl_->atlas.page_flags());
 	result["session_texcompression_level"] = session_texcompression_level_;
 	result["session_particle_density"] = session_particle_density_;
 	result["main_view_nvg_scene"] = main_view_nvg_scene_;
 	Array atlas_entries;
-	atlas_entries.resize(static_cast<int64_t>(impl_->entries.size()));
-	for (std::size_t i = 0; i < impl_->entries.size(); ++i) {
-		const opennova::renderer::ParticleAtlasEntry &entry = impl_->entries[i];
+	atlas_entries.resize(static_cast<int64_t>(entries.size()));
+	for (std::size_t i = 0; i < entries.size(); ++i) {
+		const opennova::renderer::ParticleAtlasEntry &entry = entries[i];
 		Dictionary value;
 		value["name"] = opennova::to_gd(entry.name);
 		value["type"] = static_cast<int>(entry.type);
@@ -2214,7 +1654,7 @@ Dictionary ParticleRenderer::get_debug_draw_list_report() const {
 	}
 	result["atlas_entries"] = atlas_entries;
 	result["unresolved_texture_count"] =
-			static_cast<int64_t>(impl_->unresolved_names.size());
+			static_cast<int64_t>(impl_->atlas.unresolved_names().size());
 	result["hidden"] = hidden_;
 	result["procedural_fallback_enabled"] = procedural_fallback_enabled_;
 	return result;
@@ -2267,9 +1707,9 @@ PackedStringArray ParticleRenderer::get_unresolved_texture_names() const {
 	PackedStringArray result;
 	if (!impl_)
 		return result;
-	result.resize(static_cast<int64_t>(impl_->unresolved_names.size()));
-	for (std::size_t i = 0; i < impl_->unresolved_names.size(); ++i)
-		result[static_cast<int64_t>(i)] =
-				opennova::to_gd(impl_->unresolved_names[i]);
+	const std::vector<std::string> &names = impl_->atlas.unresolved_names();
+	result.resize(static_cast<int64_t>(names.size()));
+	for (std::size_t i = 0; i < names.size(); ++i)
+		result[static_cast<int64_t>(i)] = opennova::to_gd(names[i]);
 	return result;
 }
