@@ -153,9 +153,9 @@ int32_t piece_physics_ground_probe_q16(
     const int32_t query_x = io::bam_add(entity_x_q16, offset_x_q16);
     const int32_t query_y = io::bam_add(entity_y_q16, offset_y_q16);
     const int32_t terrain_z = to_fixed(
-            terrain::height_field_height_world_bilinear(
+            terrain::height_field_height_mission_bilinear(
                     *terrain, static_cast<float>(from_fixed(query_x)),
-                    static_cast<float>(-from_fixed(query_y))));
+                    static_cast<float>(from_fixed(query_y))));
     return terrain_z <= start_z && terrain_z >= end_z ? terrain_z : end_z;
 }
 
@@ -301,8 +301,8 @@ bool blast_los_clear(World &world, CollisionWorld *collision,
         // The same null-entity terrain leg when no collision device is bound.
         // [orig: Physics_CheckTerrainLineOfSight @ 0x53B080]
         const auto buried = [&](const int32_t p[3]) {
-            return to_fixed(terrain::height_field_height_world_bilinear(*terrain,
-                    p[0] * io::kInvFp16One, -p[1] * io::kInvFp16One)) > p[2];
+            return to_fixed(terrain::height_field_height_mission_bilinear(*terrain,
+                    p[0] * io::kInvFp16One, p[1] * io::kInvFp16One)) > p[2];
         };
         if (buried(a) || buried(b)) return true;
         const int32_t raised_a[3] = {a[0], a[1], a[2] + 0x4000};
@@ -1722,8 +1722,8 @@ void tick_item_death_motion(World &world, Entity &entity,
         // current ground before movement and clears the building bit.
         float ground = -1.0e9f;
         if (terrain != nullptr && terrain->valid())
-            ground = terrain::height_field_height_world_bilinear(
-                    *terrain, e->position.x, -e->position.y);
+            ground = terrain::height_field_height_mission_bilinear(
+                    *terrain, e->position.x, e->position.y);
         e->engine_flags &= ~kEntityFlagMatrixBuilt;
         const float static_water =
                 water_height <= -1.0e8f ? 0.0f : water_height;
@@ -1783,8 +1783,8 @@ void tick_item_death_motion(World &world, Entity &entity,
 				if (height != INT32_MIN)
 					ground = float(from_fixed(height));
 			} else if (terrain != nullptr && terrain->valid())
-				ground = terrain::height_field_height_world_bilinear(
-						*terrain, e->position.x, -e->position.y);
+				ground = terrain::height_field_height_mission_bilinear(
+						*terrain, e->position.x, e->position.y);
 			// The wreck rests with section 0's lowest extent on the ground
     // [orig: ground -= |sec0 z min| @ 0x461e23-0x461e4b; the inverted
     // += |z max| leg is unreachable here — sim wrecks stay upright].
@@ -1908,8 +1908,7 @@ void DeathPieceSim::tick(World &world, const terrain::TerrainHeightField *terrai
         p.pitch += p.spin_b;
         float ground = -1.0e9f;
         if (terrain != nullptr && terrain->valid())
-            ground = terrain::height_field_height_world_bilinear(*terrain, p.pos.x,
-                                                                 -p.pos.y);
+            ground = terrain::height_field_height_mission_bilinear(*terrain, p.pos.x, p.pos.y);
         ground += 1024.0f / 65536.0f; // [orig: the +1024 rest offset @ 0x492e0d]
         if (p.pos.z < water_height) {
             // Water: splash at the surface crossing, sink, free at ground

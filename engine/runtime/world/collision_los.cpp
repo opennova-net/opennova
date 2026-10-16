@@ -207,9 +207,8 @@ terrain::TerrainRaycastSample los_field_point_cb(void *vctx, int32_t x, int32_t 
 
 terrain::TerrainRaycastSample los_field_bilinear_sample(const terrain::TerrainHeightField &f,
                                                         int32_t x, int32_t y) {
-    const float wx = static_cast<float>(x) / 65536.0f;
-    const float wz = -static_cast<float>(y) / 65536.0f; // engine Y -> sampler z
-    const float h = terrain::height_field_height_world_bilinear(f, wx, wz);
+    const float h = terrain::height_field_height_mission_bilinear(f, static_cast<float>(x) / 65536.0f,
+                                                     static_cast<float>(y) / 65536.0f);
     terrain::TerrainRaycastSample s;
     s.kind = terrain::TerrainRaycastSample::kHeight;
     s.height_1616 = static_cast<int32_t>(h * 65536.0f);

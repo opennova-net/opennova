@@ -13,8 +13,8 @@ namespace {
 int32_t section_ground(const World &world, const Vec3 &position) {
     const auto *terrain = world.tables.terrain;
     return io::bam_add(terrain && terrain->valid() ? int32_t(
-            terrain::height_field_height_world_bilinear(*terrain,
-                position.x, -position.y) * 65536) : 0, 16384);
+            terrain::height_field_height_mission_bilinear(*terrain,
+                position.x, position.y) * 65536) : 0, 16384);
 }
 void section_effect(World &world, const std::string &name, const Vec3 &position) {
     if (!name.empty()) world.out.destruction.effects.push_back({name, position, {}});
@@ -474,8 +474,8 @@ bool tick_item_section_motion(World &world, Entity &entity) {
     entity.saved_live_valid = true;
     const auto *terrain = world.tables.terrain;
     const int32_t ground = io::bam_add(terrain && terrain->valid() ? int32_t(
-            terrain::height_field_height_world_bilinear(*terrain,
-                entity.position.x, -entity.position.y) * 65536) : 0, 16384);
+            terrain::height_field_height_mission_bilinear(*terrain,
+                entity.position.x, entity.position.y) * 65536) : 0, 16384);
     const int32_t z = io::bam_add(pos[2], entity.veh.slide_z);
     if (z <= ground) {
         entity.veh.vel_x >>= 2;

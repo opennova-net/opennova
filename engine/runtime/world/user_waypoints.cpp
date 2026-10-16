@@ -31,8 +31,8 @@ EntityHandle waypoint_create_for_player(World &world, int32_t x, int32_t y, cons
 	seed.position.x = static_cast<float>(x) / 65536.0f;
 	seed.position.y = static_cast<float>(y) / 65536.0f;
 	seed.position.z = world.tables.terrain != nullptr
-			? terrain::height_field_height_world_bilinear(*world.tables.terrain, seed.position.x,
-					  -seed.position.y)
+			? terrain::height_field_height_mission_bilinear(*world.tables.terrain, seed.position.x,
+					  seed.position.y)
 			: 0.0f;
 	seed.display_name = text.substr(0, kUserWaypointNameMax);
 	seed.primary_occupant = owner;

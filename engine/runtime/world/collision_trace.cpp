@@ -429,8 +429,8 @@ int32_t CollisionWorld::minefield_ground(const World &world, EntityHandle source
     const bool object_ground = hit.hit() && hit.distance_q16 < position.z;
     int32_t height = object_ground ? position.z - hit.distance_q16 : position.z;
     if (!indoors) {
-        const int32_t floor = terrain ? to_fixed(terrain::height_field_height_world_bilinear(
-                *terrain, position.x * io::kInvFp16One, -position.y * io::kInvFp16One)) : 0;
+        const int32_t floor = terrain ? to_fixed(terrain::height_field_height_mission_bilinear(
+                *terrain, position.x * io::kInvFp16One, position.y * io::kInvFp16One)) : 0;
         if (!object_ground || height < floor) height = floor;
     }
     // A client's pool-1 movers trace as wire proxies: the hit names the
@@ -526,10 +526,10 @@ ProjectileHit CollisionWorld::trace_projectile_impl(
             // metadata; the fixed refined hit point remains authoritative.
             const float wx = static_cast<float>(hit[0]) / io::kFp16One;
             const float wy = static_cast<float>(hit[1]) / io::kFp16One;
-            const float hx0 = terrain::height_field_height_world_bilinear(*terrain, wx - 1.0f, -wy);
-            const float hx1 = terrain::height_field_height_world_bilinear(*terrain, wx + 1.0f, -wy);
-            const float hy0 = terrain::height_field_height_world_bilinear(*terrain, wx, -(wy - 1.0f));
-            const float hy1 = terrain::height_field_height_world_bilinear(*terrain, wx, -(wy + 1.0f));
+            const float hx0 = terrain::height_field_height_mission_bilinear(*terrain, wx - 1.0f, wy);
+            const float hx1 = terrain::height_field_height_mission_bilinear(*terrain, wx + 1.0f, wy);
+            const float hy0 = terrain::height_field_height_mission_bilinear(*terrain, wx, wy - 1.0f);
+            const float hy1 = terrain::height_field_height_mission_bilinear(*terrain, wx, wy + 1.0f);
             double nx = -0.5 * static_cast<double>(hx1 - hx0);
             double ny = -0.5 * static_cast<double>(hy1 - hy0);
             double nz = 1.0;

@@ -98,8 +98,8 @@ bool RotorWashSystem::contains(const Zone &z, const int32_t p[3]) const {
 }
 int32_t RotorWashSystem::ground(int32_t x, int32_t y) const {
 	return world_.tables.terrain
-			? to_fixed(terrain::height_field_height_world_bilinear(
-					  *world_.tables.terrain, float(from_fixed(x)), -float(from_fixed(y))))
+			? to_fixed(terrain::height_field_height_mission_bilinear(
+					  *world_.tables.terrain, float(from_fixed(x)), float(from_fixed(y))))
 			: 0;
 }
 

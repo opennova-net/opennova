@@ -131,9 +131,9 @@ void MinefieldSystem::think(World &world, Entity &field) {
                 ground = world.collision->minefield_ground(world, vehicle.handle, probe, indoors);
             else if (!indoors)
                 ground = world.tables.terrain
-                        ? io::float_to_fp16_16(terrain::height_field_height_world_bilinear(
+                        ? io::float_to_fp16_16(terrain::height_field_height_mission_bilinear(
                                 *world.tables.terrain, probe.x * io::kInvFp16One,
-                                -probe.y * io::kInvFp16One))
+                                probe.y * io::kInvFp16One))
                         : 0;
             contact.z = add(ground, 0x8000);
             if (distance(contact, positions[i]) - vehicle_radius / 2 < 49152)

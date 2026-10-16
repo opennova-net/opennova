@@ -1008,17 +1008,15 @@ void AiSystem::on_load(World &) {
 // [orig: Entity_CalcAverageGroundHeight @0x457230] 5-tap weighted ground height (16.16 fixed).
 // The taps sample the bilinear terrain column at center + N/S/E/W at sample_radius; the original
 // per-tap sampler is the hi-res down-raycast @0x60e710 (its near-vertical result == this column
-// height — tracked deviation). Engine ground plane is (X,Y) = (pos[0],pos[1]); the renderer-loaded
-// atlas is sampled in Godot coords (x, -y), and the N/S/E/W taps are symmetric so the Y sign only
-// renames which tap is "north". Height comes back in world units; ground_16.16 = units * 65536.
+// height — tracked deviation). The taps sample the mission plane (X,Y) = (pos[0],pos[1]). Height
+// comes back in world units; ground_16.16 = units * 65536.
 int32_t calc_average_ground_height(const terrain::TerrainHeightField &field, const int32_t pos[3],
                                    int32_t sample_radius, const GroundClearance &clearance) {
     if (!field.valid()) return INT32_MIN; // [orig: terrain assumed present; null -> no ground]
 
     auto sample = [&](int32_t x16, int32_t y16) -> int32_t {
-        const float wx = static_cast<float>(x16) / 65536.0f;
-        const float wz = -static_cast<float>(y16) / 65536.0f; // engine Y -> Godot z
-        const float h = terrain::height_field_height_world_bilinear(field, wx, wz);
+        const float h = terrain::height_field_height_mission_bilinear(field, static_cast<float>(x16) / 65536.0f,
+                                                         static_cast<float>(y16) / 65536.0f);
         return static_cast<int32_t>(h * 65536.0f);
     };
 

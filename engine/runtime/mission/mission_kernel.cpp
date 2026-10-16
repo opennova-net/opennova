@@ -1164,9 +1164,7 @@ void MissionKernel::keep_weapon_action_edit(int action_id) {
 // --- terrain ----------------------------------------------------------------
 
 float MissionKernel::ground_height(float mission_x, float mission_y) const {
-	// The field's world frame is the renderer's: x, and z = -mission y.
-	return terrain::height_field_height_world_bilinear(terrain_store.height_field(),
-			mission_x, -mission_y);
+	return terrain::height_field_height_mission_bilinear(terrain_store.height_field(), mission_x, mission_y);
 }
 
 // --- observation ------------------------------------------------------------

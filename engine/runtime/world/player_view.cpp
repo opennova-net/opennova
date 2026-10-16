@@ -739,7 +739,7 @@ void view_axes_mission(double yaw_deg, double pitch_deg, float fwd[3],
 // the engine ground frame (x, y) -> the renderer atlas (x, -y) mapping the
 // head-bone floor uses.
 float terrain_height_at(const terrain::TerrainHeightField *terrain, float x, float y) {
-    return terrain::height_field_height_world_bilinear(*terrain, x, -y);
+    return terrain::height_field_height_mission_bilinear(*terrain, x, y);
 }
 
 // THE CHASE (mode 1). One path serves the on-foot orbit and the control-seat
@@ -902,9 +902,8 @@ void player_view_floor_eye_to_terrain(const terrain::TerrainHeightField *terrain
     //  skip @ 0x4b6c08/@ 0x4b6c16 (the heightmap has no interiors)]
     if (terrain == nullptr || !terrain->valid() || indoors) return;
     // Engine ground plane is (x, y); the renderer-loaded atlas samples in
-    // Godot coords (x, -y) — the calc_average_ground_height mapping.
     const auto sample = [&](float x, float y) {
-        return terrain::height_field_height_world_bilinear(*terrain, x, -y) +
+        return terrain::height_field_height_mission_bilinear(*terrain, x, y) +
                kEyeTerrainClearance; // [orig: each sample + 0x1000 @ 0x4b6c2d]
     };
     // The eye column, then ±0x4000 along each ground axis, max-folded
