@@ -12,6 +12,8 @@
 
 #include <base/io/os_path.h>
 
+#include "common/temp_dir.h"
+
 using namespace opennova::renderer;
 
 void expect(bool condition, const char *message) {
@@ -341,7 +343,8 @@ int main() {
     {
         // A large file of another kind: a megabyte of zeros reads as empty chunks, walked no further
         // than kChunkHeaderReads headers for each chunk type.
-        const std::filesystem::path file = std::filesystem::temp_directory_path() / "opennova_material_chunk_filler.bin";
+        test_temp::TempDir temp("opennova_material_chunk_filler");
+        const std::filesystem::path file = opennova::io::os_path(temp.file("filler.bin"));
         { std::ofstream out(file, std::ios::binary); const std::vector<char> zeros(1 << 20, 0); out.write(zeros.data(), std::streamsize(zeros.size())); }
         uint64_t read = 0;
         expect(!is_material_chunk_file(opennova::io::utf8_path(file), read) && read > 0 &&
