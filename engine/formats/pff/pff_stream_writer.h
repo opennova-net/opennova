@@ -47,6 +47,9 @@ public:
 	int write(uint64_t budget);
 	/* True once every payload is written: finish() may run. */
 	bool payloads_written() const { return is_open() && next_ == entries_.size(); }
+	/* The footer's second word (pff_footer_kept_word of the archive this one writes again); 0, a new
+	   archive's, unless set before finish(). */
+	void set_footer_kept(uint32_t word) { footer_kept_ = word; }
 	/* Writes the directory and the footer, patches the header's directory offset and replaces
 	   `path` with the temp file (an existing `path` kept aside as "<path>.bak" until the new one is in place).
 	   PFF_WRITE_OK, or PFF_WRITE_ERR_IO with `path` as it was. */
@@ -78,6 +81,7 @@ private:
 	PffFormat format_ = PFF_FORMAT_PFF3;
 	std::vector<Entry> entries_;
 	ReadChunkFn read_ = nullptr;
+	uint32_t footer_kept_ = 0;
 	void *ctx_ = nullptr;
 	FILE *file_ = nullptr;
 	size_t next_ = 0;         // the entry whose payload is being written

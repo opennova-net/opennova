@@ -162,8 +162,13 @@ int PffStreamWriter::finish() {
 		put_u32_le(record + 32, entry.checksum);
 		if (fwrite(record, 1, sizeof(record), file_) != sizeof(record)) return fail(PFF_WRITE_ERR_IO);
 	}
-	// The footer after the directory [orig: sub_4040E0 @ 0x4042B7..0x40432F (pack.exe)].
-	if (fwrite(PFF_RETAIL_FOOTER, 1, PFF_FOOTER_SIZE, file_) != size_t(PFF_FOOTER_SIZE))
+	// The footer after the directory, its second word the one kept from the archive's earlier
+	// footer [orig: sub_4040E0 @ 0x4042B7..0x40432F (pack.exe); the second word replaced only on a
+	// 65.211.238.x machine @ 0x4042DA..0x404318].
+	uint8_t footer[PFF_FOOTER_SIZE];
+	memcpy(footer, PFF_RETAIL_FOOTER, sizeof(footer));
+	put_u32_le(footer + 4, footer_kept_);
+	if (fwrite(footer, 1, sizeof(footer), file_) != sizeof(footer))
 		return fail(PFF_WRITE_ERR_IO);
 	uint8_t offset[4];
 	put_u32_le(offset, table_offset);

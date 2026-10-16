@@ -305,6 +305,23 @@ int pff_extract_raw(const PffArchive *archive, const PffEntry *entry,
     return 0;
 }
 
+uint32_t pff_footer_kept_word(const PffArchive *archive)
+{
+    FILE *f;
+    uint8_t footer[PFF_FOOTER_SIZE];
+
+    if (!archive) return 0;
+    f = (FILE *)archive->_file;
+    if (!f) return 0;
+    /* The last 12 bytes, kept only when they end in 'KING' [orig: sub_4030E0 @ 0x403133..0x40318A
+       (pack.exe): the seek to 12 before the end, the 12-byte read, the 'KING' test, else zeroed]. */
+    if (fseek(f, -(long)PFF_FOOTER_SIZE, SEEK_END) != 0) return 0;
+    if (fread(footer, 1, sizeof(footer), f) != sizeof(footer)) return 0;
+    if (memcmp(footer + 8, "KING", 4) != 0) return 0;
+    return (uint32_t)footer[4] | ((uint32_t)footer[5] << 8) | ((uint32_t)footer[6] << 16) |
+           ((uint32_t)footer[7] << 24);
+}
+
 int pff_extract(const PffArchive *archive, const PffEntry *entry,
                 uint8_t *out_buf, size_t buf_size)
 {

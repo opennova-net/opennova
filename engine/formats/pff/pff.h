@@ -128,12 +128,20 @@ inline constexpr uint32_t PFF_WRITER_VERSION = 2;
    machine; and 'KING' [orig: sub_4040E0 @ 0x4042B7..0x40432F (pack.exe)]
    [orig: sub_4030E0 @ 0x40312B..0x40318A (pack.exe)]. No reader reads it (PFF_Open @ 0x7682e0
    reads the header and the directory). Every JO:CA archive ends with c0a8a939 00000000 'KING'
-   (192.168.169.57, a private address, presumably the packing machine's); OpenNova writes those
-   bytes, never its own machine's address, so an archive is the same bytes on every machine and
-   a JO:CA archive written again is its own bytes (D-VFS-X1). */
+   (192.168.169.57, a private address, presumably the packing machine's); OpenNova writes that
+   first word, never its own machine's address, so an archive is the same bytes on every machine
+   and a JO:CA archive written again is its own bytes (D-VFS-X1). The second word is the packer's:
+   an archive written again or edited keeps its earlier footer's (pff_footer_kept_word), a new one
+   writes 0. */
 inline constexpr int PFF_FOOTER_SIZE = 12;
 inline constexpr uint8_t PFF_RETAIL_FOOTER[PFF_FOOTER_SIZE] = { 0xC0, 0xA8, 0xA9, 0x39, 0x00, 0x00,
                                                                  0x00, 0x00, 'K',  'I',  'N',  'G' };
+
+/* The footer's second word the packer keeps when it writes an archive again: the archive's last 12
+   bytes read whole, and kept when they end in 'KING', else all three words zero
+   [orig: sub_4030E0 @ 0x403133..0x40318A (pack.exe)]; its four bytes as a little-endian word. 0 for
+   an archive with no such footer (one OpenNova's first writer packed, or none at all). */
+uint32_t pff_footer_kept_word(const PffArchive *archive);
 
 /* Container format selector for a written archive (legacy is read-only; not authored here). */
 typedef enum PffFormat {
@@ -208,9 +216,12 @@ typedef struct PffWriteStreamEntry {
     uint32_t    checksum;
 } PffWriteStreamEntry;
 
+/* `footer_kept` is the footer's second word (pff_footer_kept_word of the archive this one writes
+   again; 0 for a new archive). */
 int pff_write_archive_streamed(const char *path, PffFormat format,
                                           const PffWriteStreamEntry *entries, uint32_t n,
-                                          PffReadEntryFn read_entry, void *ctx);
+                                          PffReadEntryFn read_entry, void *ctx,
+                                          uint32_t footer_kept = 0);
 
 /* The archive `source` written again to `path` with one entry's bytes replaced: every other entry's
    stored bytes as the source holds them (an encrypted one still encrypted, its flags, time and
@@ -280,7 +291,8 @@ typedef void (*PffWriteProgressFn)(void *ctx, uint32_t done, uint32_t total);
 int pff_write_archive_streamed_progress(const char *path, PffFormat format,
                                                    const PffWriteStreamEntry *entries, uint32_t n,
                                                    PffReadEntryFn read_entry, void *ctx,
-                                                   PffWriteProgressFn progress, void *progress_ctx);
+                                                   PffWriteProgressFn progress, void *progress_ctx,
+                                                   uint32_t footer_kept = 0);
 
 /* In-place symmetric container XOR (PFF_FLAG_ENCRYPTED keystream). XOR is its own inverse, so the
    same call encrypts (before storing a payload) and decrypts (after reading one). `container_key`

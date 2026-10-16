@@ -212,12 +212,12 @@ EditPlan plan_edits(const PffArchive *source, const std::vector<PffEditEntry> &a
 	return plan;
 }
 
-/* The plan written to `out_path` in `format`. */
-int write_plan(EditPlan &plan, PffFormat format, const char *out_path) {
+/* The plan written to `out_path` in `format`, the footer keeping `footer_kept`. */
+int write_plan(EditPlan &plan, PffFormat format, const char *out_path, uint32_t footer_kept) {
 	for (size_t i = 0; i < plan.entries.size(); ++i)
 		plan.entries[i].name = plan.names[i].c_str();
 	return pff_write_archive_streamed(out_path, format, plan.entries.data(),
-			uint32_t(plan.entries.size()), read_edit_entry, &plan.payloads);
+			uint32_t(plan.entries.size()), read_edit_entry, &plan.payloads, footer_kept);
 }
 
 } // namespace
@@ -264,7 +264,7 @@ int pff_apply_edits(const char *path, const std::vector<PffEditEntry> &adds,
 	const PffFormat format =
 			have_source ? pff_format_for_magic(source.header.magic) : PFF_FORMAT_PFF3;
 	const std::string staged = std::string(path) + ".new";
-	const int rc = write_plan(plan, format, staged.c_str());
+	const int rc = write_plan(plan, format, staged.c_str(), have_source ? pff_footer_kept_word(&source) : 0);
 	if (have_source)
 		pff_close(&source);
 	if (rc != PFF_WRITE_OK) {
@@ -291,7 +291,8 @@ int pff_write_archive_again(const char *path, const char *out_path) {
 	EditPlan plan = plan_edits(&source, no_adds, {});
 	const int rc = plan.error != PFF_WRITE_OK
 			? plan.error
-			: write_plan(plan, pff_format_for_magic(source.header.magic), out_path);
+			: write_plan(plan, pff_format_for_magic(source.header.magic), out_path,
+					pff_footer_kept_word(&source));
 	pff_close(&source);
 	return rc;
 }
@@ -329,7 +330,8 @@ const char *pff_write_error_string(int code)
 int pff_write_archive_streamed_progress(const char *path, PffFormat format,
                                         const PffWriteStreamEntry *entries, uint32_t n,
                                         PffReadEntryFn read_entry, void *ctx,
-                                        PffWriteProgressFn progress, void *progress_ctx)
+                                        PffWriteProgressFn progress, void *progress_ctx,
+                                        uint32_t footer_kept)
 {
 	if (n > 0 && read_entry == NULL)
 		return PFF_WRITE_ERR_IO;
@@ -338,6 +340,7 @@ int pff_write_archive_streamed_progress(const char *path, PffFormat format,
 	int rc = writer.open(path, format, entries, n, read_whole_entry_chunk, &reader);
 	if (rc != PFF_WRITE_OK)
 		return rc;
+	writer.set_footer_kept(footer_kept);
 	/* Tick once per entry as its payload is written (a zero-size one too), so `done` reaches `n`. */
 	uint32_t reported = 0;
 	while (!writer.payloads_written()) {
@@ -352,10 +355,10 @@ int pff_write_archive_streamed_progress(const char *path, PffFormat format,
 
 int pff_write_archive_streamed(const char *path, PffFormat format,
                                const PffWriteStreamEntry *entries, uint32_t n,
-                               PffReadEntryFn read_entry, void *ctx)
+                               PffReadEntryFn read_entry, void *ctx, uint32_t footer_kept)
 {
 	return pff_write_archive_streamed_progress(path, format, entries, n, read_entry, ctx,
-	                                           NULL, NULL);
+	                                           NULL, NULL, footer_kept);
 }
 
 int pff_rewrite_with_entry(const PffArchive *source, uint32_t index, const uint8_t *data, uint32_t size,
@@ -381,7 +384,8 @@ int pff_rewrite_with_entry(const PffArchive *source, uint32_t index, const uint8
 		entries[k].checksum = entry.checksum;
 	}
 	return pff_write_archive_streamed(path, pff_format_for_magic(source->header.magic), entries.data(),
-	                                  uint32_t(entries.size()), read_rewrite_entry, &rewrite);
+	                                  uint32_t(entries.size()), read_rewrite_entry, &rewrite,
+	                                  pff_footer_kept_word(source));
 }
 
 int pff_write_archive(const char *path, PffFormat format,

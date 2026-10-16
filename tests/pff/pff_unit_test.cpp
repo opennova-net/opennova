@@ -543,6 +543,65 @@ static int test_write_retail_layout(void) {
     return 1;
 }
 
+/* The footer's second word is the packer's to keep: an archive written again, edited or rewritten
+   with one entry keeps its earlier footer's, a new archive writes 0, and a file whose last bytes are
+   no 'KING' footer keeps nothing [orig: sub_4030E0 @ 0x403133..0x40318A (pack.exe), kept by
+   sub_4040E0 @ 0x4042B7..0x40432F]. */
+static int test_footer_keeps_second_word(void) {
+    const uint8_t a[] = {1, 2, 3};
+    const uint8_t b[] = {4, 5};
+    PffWriteEntry e[2] = {
+        { "one.txt", a, (uint32_t)sizeof(a), 0, 11, 21 },
+        { "two.txt", b, (uint32_t)sizeof(b), 0, 12, 22 },
+    };
+    const char *path = "pff_footer_kept.pff";
+    const char *again = "pff_footer_kept_again.pff";
+    const char *played = "pff_footer_kept_played.pff";
+    CHECK(pff_write_archive(path, PFF_FORMAT_PFF3, e, 2) == PFF_WRITE_OK, "write");
+    PffArchive ar;
+    CHECK(pff_open(&ar, path) == 0 && pff_footer_kept_word(&ar) == 0, "a new archive's second word is 0");
+    pff_close(&ar);
+    /* A footer whose second word an earlier packer left set. */
+    FILE *f = fopen(path, "r+b");
+    CHECK(f != NULL, "open for the patch");
+    const uint8_t word[4] = {0x41, 0xD3, 0xEE, 0x07};
+    fseek(f, -8, SEEK_END);
+    fwrite(word, 1, sizeof(word), f);
+    fclose(f);
+    CHECK(pff_open(&ar, path) == 0 && pff_footer_kept_word(&ar) == 0x07EED341u, "the kept word read back");
+    CHECK(pff_rewrite_with_entry(&ar, 0, b, sizeof(b), played) == PFF_WRITE_OK, "a rewrite with one entry");
+    pff_close(&ar);
+    CHECK(pff_write_archive_again(path, again) == PFF_WRITE_OK, "written again");
+    std::vector<PffEditEntry> adds(1);
+    adds[0].name = "three.txt";
+    adds[0].data = {7};
+    adds[0].timestamp = 1700000000u;
+    bool rewritten = false;
+    CHECK(pff_apply_edits(path, adds, {}, &rewritten) == PFF_WRITE_OK && rewritten, "an edit");
+    const char *outs[3] = { path, again, played };
+    for (int k = 0; k < 3; ++k) {
+        uint8_t *bytes = NULL;
+        long len = 0;
+        CHECK(read_whole_file(outs[k], &bytes, &len) && len >= 12, "read the result");
+        const uint8_t footer[12] = { 0xC0, 0xA8, 0xA9, 0x39, 0x41, 0xD3, 0xEE, 0x07, 'K', 'I', 'N', 'G' };
+        const int ok = memcmp(bytes + len - 12, footer, 12) == 0;
+        free(bytes);
+        CHECK(ok, "the earlier footer's second word kept");
+    }
+    /* No 'KING' at the end: nothing kept. */
+    f = fopen(again, "r+b");
+    CHECK(f != NULL, "open for the second patch");
+    fseek(f, -4, SEEK_END);
+    fwrite("QUIT", 1, 4, f);
+    fclose(f);
+    CHECK(pff_open(&ar, again) == 0 && pff_footer_kept_word(&ar) == 0, "no footer, no kept word");
+    pff_close(&ar);
+    remove(path);
+    remove(again);
+    remove(played);
+    return 1;
+}
+
 /* A stock-updated archive holds a `<DEAD SPACE>` record (flags 1) for every entry an edit
    removed or replaced [orig: sub_4040E0 @ 0x4041B0..0x4041C4 (pack.exe)], so several share the
    name; an edit, a rewrite and a Play rewrite leave them out (written compact, D-UPD-1) instead of
@@ -756,6 +815,7 @@ int main(void) {
     RUN_TEST(test_rewrite_with_entry);
     RUN_TEST(test_write_retail_layout);
     RUN_TEST(test_edits_drop_dead_space);
+    RUN_TEST(test_footer_keeps_second_word);
     RUN_TEST(test_write_zero_entries);
     RUN_TEST(test_write_rejects_overlong_name);
     RUN_TEST(test_write_rejects_duplicate_names);
