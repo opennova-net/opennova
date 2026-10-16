@@ -1181,8 +1181,8 @@ workflow"). What stays out of this public repository comes from the vault:
 - **`github-terraform`**, fields:
   - `token`: a fine-grained personal access token, resource owner **opennova-net**, with
     organization permissions **Administration**, **Members** and **Self-hosted runners**
-    (each Read and write) and, on **All repositories**, **Administration** and **Secrets**
-    (Read and write).
+    (each Read and write) and, on **All repositories**, **Administration**,
+    **Environments** (the deploy environments' variables) and **Secrets** (Read and write).
   - `billing_email`: the organization's billing email.
   - `members`: the members and their roles as JSON, `{"login": "admin", "other": "member"}`.
     Every member keeps the membership private. A login left out is removed from the
@@ -1339,17 +1339,22 @@ COUNTS="SELECT (SELECT count(*) FROM players) AS players, (SELECT count(*) FROM 
    - [old] `../opennova-old/deploy/run.sh infra state-rm 'cloudflare_zone_settings_override.zone[0]'
      'cloudflare_ruleset.edge_auth[0]' 'cloudflare_ruleset.webhook_skip[0]'
      'cloudflare_email_routing_settings.zone[0]' 'cloudflare_email_routing_address.forward_to[0]'
-     'cloudflare_email_routing_rule.route["support"]'` (the objects stay; the old stack
-     forgets them, and never plans them again).
-   - [new] each into the zone's stack (the zone's settings override is made anew: it
-     holds no object to adopt):
+     'cloudflare_email_routing_rule.route["support"]' 'cloudflare_email_routing_rule.route["aws-prod"]'
+     'cloudflare_email_routing_rule.route["aws-staging"]'` (every routing rule the old
+     state holds: the objects stay; the old stack forgets them, and never plans them
+     again).
+   - [new] each into the zone's stack. Two are made anew instead: the zone's settings
+     override holds no object to adopt, and the provider cannot import Email Routing's
+     settings (the apply turns on what is on already). Strip any carriage return from an
+     id read on Windows:
 
      ```bash
      ./deploy/run.sh zone import cloudflare_ruleset.edge_auth zone/<zone id>/<edge_auth id>
      ./deploy/run.sh zone import cloudflare_ruleset.webhook_skip zone/<zone id>/<webhook_skip id>
-     ./deploy/run.sh zone import 'cloudflare_email_routing_settings.zone[0]' <zone id>
      ./deploy/run.sh zone import 'cloudflare_email_routing_address.forward_to[0]' <account>/<forward_to id>
-     ./deploy/run.sh zone import 'cloudflare_email_routing_rule.route["support"]' <zone id>/<support rule id>
+     for r in support aws-prod aws-staging; do
+       ./deploy/run.sh zone import "cloudflare_email_routing_rule.route[\"$r\"]" <zone id>/<that rule's id>
+     done
      ./deploy/run.sh zone plan
      ./deploy/run.sh zone apply                  # type zone
      ```
@@ -1369,8 +1374,8 @@ COUNTS="SELECT (SELECT count(*) FROM players) AS players, (SELECT count(*) FROM 
    ./deploy/run.sh github apply                  # type github
    ```
 
-   Delete the old workflow's environment, `production`, in the repository's settings
-   (Environments).
+   If the old workflow's environment, `production`, exists, delete it in the repository's
+   settings (Environments).
 
 ### 2. Staging, in its account: the rehearsal
 
@@ -1386,6 +1391,10 @@ COUNTS="SELECT (SELECT count(*) FROM players) AS players, (SELECT count(*) FROM 
    ../opennova-old/deploy/run.sh --deployment staging infra state-rm aws_db_instance.main
    ../opennova-old/deploy/run.sh --deployment staging infra destroy
    ```
+
+   `onnet` may not detach the instance's network interface or disassociate its address
+   (the destroy stops on `UnauthorizedOperation`); the instance it terminated freed both, so
+   run the same `infra destroy` again for what is left.
 2. **[new] Staging, built:**
 
    ```bash
@@ -1459,8 +1468,26 @@ aws ec2 describe-addresses-attribute --allocation-ids <old allocation id> --attr
 aws ec2 reset-address-attribute --allocation-id <old allocation id> --attribute domain-name   # only if it names one
 ```
 
-A transfer offer (window step 5) lapses after 7 hours unaccepted: steps 5 and 6 run back
-to back, and a lapsed offer is made again with the same `enable-address-transfer`.
+A transfer offer (window step 5) lapses after 7 days unaccepted; steps 5 and 6 still run
+back to back, and a lapsed offer is made again with the same `enable-address-transfer`.
+
+[admin] **`onnet` may make the moves.** The calls marked [admin] that touch the address, and
+the old stack's destroys, run as `onnet` (the vault item `aws`) with one inline policy it
+lacks, granted once (it goes when `onnet` does, "Cleaning the management account"):
+
+```bash
+aws iam put-user-policy --user-name onnet --policy-name opennova-cutover --policy-document '{
+  "Version": "2012-10-17",
+  "Statement": [
+    {"Sid": "GateAddressTransfer", "Effect": "Allow", "Resource": "*",
+     "Action": ["ec2:EnableAddressTransfer", "ec2:DisableAddressTransfer", "ec2:DescribeAddressTransfers",
+                "ec2:DescribeAddressesAttribute", "ec2:ResetAddressAttribute"],
+     "Condition": {"StringEquals": {"aws:RequestedRegion": "us-east-1"}}},
+    {"Sid": "OldStackTeardown", "Effect": "Allow", "Resource": "*",
+     "Action": ["ec2:DetachNetworkInterface", "ec2:DisassociateAddress"],
+     "Condition": {"StringEquals": {"aws:RequestedRegion": "us-east-1"}}}
+  ]}'
+```
 
 ### 4. The window
 
@@ -1491,7 +1518,7 @@ The gate and the site are down from step 2 until step 10, about an hour.
    aws ec2 enable-address-transfer --allocation-id <old allocation id> --transfer-account-id <aws-prod/account_id>
    ```
 
-   The offer lapses after 7 hours: accept it now (step 6).
+   Accept it now (step 6); the offer would lapse after 7 days.
 6. [new] The prod account accepts it, and the vault records its allocation id there:
 
    ```bash
@@ -1596,7 +1623,9 @@ the maintainer's.
    ../opennova-old/deploy/run.sh infra apply -destroy --allow-destroy        # type yes
    ```
 
-   What a plan still cannot destroy goes by hand in the steps below.
+   If it stops on `UnauthorizedOperation` detaching the instance's network interface,
+   `onnet` lacks that call; the terminated instance frees the interface, so run the same
+   command again. What a plan still cannot destroy goes by hand in the steps below.
 4. **[admin] The old bucket**, `opennova-backups`: the S3 console's Empty (it removes every
    version), then Delete.
 5. **[admin] IAM.** The old deploy user `onnet`: each access key (`aws iam
