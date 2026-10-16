@@ -54,6 +54,12 @@ public:
 	// light_scene.h witness map; lights/light_spawn.h GlowSpawn). 0 for a
 	// null request.
 	int64_t spawn_glow(const Ref<GlowSpawn> &p_config);
+	// The transient spawners' engine records (engine/runtime/renderer/light_scene.h
+	// fire_muzzle_glow, impact_flash_spawn, death_flash_spawn) over Godot positions. C++ only.
+	int64_t fire_muzzle_glow(int64_t p_cached, const Vector3 &p_muzzle, int64_t p_shooter);
+	int64_t spawn_impact_flash(const Vector3 &p_impact, float p_radius, const Color &p_color,
+			int p_ticks);
+	int64_t spawn_death_flash(const Vector3 &p_position, float p_radius);
 	void despawn(int64_t p_handle);
 	void set_light_position(int64_t p_handle, const Vector3 &p_world);
 	// The witnessed instance re-arm setters (fade mode/duration, owner group,
@@ -265,18 +271,6 @@ public:
 	// Read-only diagnostics snapshot of the last uploaded RGBAF atlas. The
 	// returned Image owns copied bytes; tests/tools cannot mutate render state.
 	Ref<Image> get_static_light_rows_image() const;
-
-protected:
-public:
-	// The witnessed muzzle-glow / death-flash spawn constants, re-exported
-	// from opennova::renderer::LightScene for the presenting director.
-	static float muzzle_glow_radius();
-	static Color muzzle_glow_color();
-	static int muzzle_glow_fade_mode();
-	static int muzzle_glow_fade_ticks();
-	static Color death_flash_color();
-	static int death_flash_fade_mode();
-	static int death_flash_fade_ticks();
 
 protected:
 	static void _bind_methods();

@@ -236,6 +236,27 @@ int64_t LightScene::spawn_glow(const Ref<GlowSpawn> &p_config) {
 	return encode_handle(scene_.spawn(params));
 }
 
+int64_t LightScene::fire_muzzle_glow(int64_t p_cached, const Vector3 &p_muzzle, int64_t p_shooter) {
+	return encode_handle(scene_.fire_muzzle_glow(decode_handle(p_cached),
+			mission_fixed_from_godot(p_muzzle), static_cast<uint64_t>(p_shooter)));
+}
+
+int64_t LightScene::spawn_impact_flash(const Vector3 &p_impact, float p_radius, const Color &p_color,
+		int p_ticks) {
+	if (p_radius <= 0.0f) return 0;
+	return encode_handle(scene_.spawn(opennova::renderer::impact_flash_spawn(
+			mission_fixed_from_godot(p_impact),
+			static_cast<int32_t>(Math::round(p_radius * opennova::io::kFp16One)),
+			{ color_byte(p_color.r), color_byte(p_color.g), color_byte(p_color.b) }, p_ticks)));
+}
+
+int64_t LightScene::spawn_death_flash(const Vector3 &p_position, float p_radius) {
+	if (p_radius <= 0.0f) return 0;
+	return encode_handle(scene_.spawn(opennova::renderer::death_flash_spawn(
+			mission_fixed_from_godot(p_position),
+			static_cast<int32_t>(Math::round(p_radius * opennova::io::kFp16One)))));
+}
+
 void LightScene::despawn(int64_t p_handle) {
 	scene_.despawn(decode_handle(p_handle));
 }
@@ -1264,19 +1285,6 @@ namespace {
 
 } // namespace
 
-float LightScene::muzzle_glow_radius() {
-	return static_cast<float>(opennova::renderer::LightScene::kMuzzleGlowRadiusFixed) / opennova::io::kFp16One;
-}
-Color LightScene::muzzle_glow_color() {
-	return opennova::color_from_rgb24(opennova::renderer::LightScene::kMuzzleGlowColorRgb);
-}
-int LightScene::muzzle_glow_fade_mode() { return opennova::renderer::LightScene::kMuzzleGlowFadeMode; }
-int LightScene::muzzle_glow_fade_ticks() { return opennova::renderer::LightScene::kMuzzleGlowFadeTicks; }
-Color LightScene::death_flash_color() {
-	return opennova::color_from_rgb24(opennova::renderer::LightScene::kDeathFlashColorRgb);
-}
-int LightScene::death_flash_fade_mode() { return opennova::renderer::LightScene::kDeathFlashFadeMode; }
-int LightScene::death_flash_fade_ticks() { return opennova::renderer::LightScene::kDeathFlashFadeTicks; }
 
 void LightScene::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("spawn_model_light", "config"),

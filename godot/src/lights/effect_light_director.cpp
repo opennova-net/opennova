@@ -847,48 +847,22 @@ void EffectLightDirector::advance_fixed_tick() {
 }
 
 void EffectLightDirector::on_muzzle_fire(int64_t p_shooter_handle, const Vector3 &p_world_pos) {
+	// The shooter's handle word, the engine's re-arm rule (renderer::LightScene::fire_muzzle_glow).
 	const int64_t owner_id = LightScene::owner_id_for_wire(p_shooter_handle);
-	int64_t handle = 0;
-	if (const int64_t *cached = entity_effect_handles_.getptr(owner_id)) {
-		handle = *cached;
-	}
-	if (handle == 0) {
-		handle = scene()->spawn_glow(GlowSpawn::make(p_world_pos, LightScene::muzzle_glow_radius(),
-				LightScene::muzzle_glow_color())
-						->fading(3, -1)
-						->owned_by(owner_id, 0));
-		if (handle == 0) {
-			return;
-		}
+	const int64_t *cached = entity_effect_handles_.getptr(owner_id);
+	const int64_t handle = scene()->fire_muzzle_glow(cached ? *cached : 0, p_world_pos, owner_id);
+	if (handle != 0) {
 		entity_effect_handles_.insert(owner_id, handle);
 	}
-	scene()->set_light_fade(handle, LightScene::muzzle_glow_fade_mode(),
-			LightScene::muzzle_glow_fade_ticks());
-	scene()->set_light_owner(handle, owner_id, 0);
-	scene()->set_light_position(handle, p_world_pos);
-	scene()->set_light_blend(handle, 1.0f);
 }
 
 void EffectLightDirector::on_impact_light(const Vector3 &p_world_pos, float p_radius,
 		const Color &p_color, int p_duration_ticks) {
-	if (p_radius <= 0.0f) {
-		return;
-	}
-	Ref<GlowSpawn> spawn =
-			GlowSpawn::make(p_world_pos + Vector3(0.0f, p_radius * 0.5f, 0.0f), p_radius, p_color);
-	spawn->fading(2, p_duration_ticks);
-	spawn->set_corona_lower_half_radius(true);
-	scene()->spawn_glow(spawn);
+	scene()->spawn_impact_flash(p_world_pos, p_radius, p_color, p_duration_ticks);
 }
 
 void EffectLightDirector::on_death_light(const Vector3 &p_world_pos, float p_radius) {
-	if (p_radius <= 0.0f) {
-		return;
-	}
-	scene()->spawn_glow(GlowSpawn::make(p_world_pos, p_radius, LightScene::death_flash_color())
-								->fading(LightScene::death_flash_fade_mode(),
-										LightScene::death_flash_fade_ticks())
-								->masking(true, false, false));
+	scene()->spawn_death_flash(p_world_pos, p_radius);
 }
 
 void EffectLightDirector::sync_round_glow_records(const Array &p_rows) {

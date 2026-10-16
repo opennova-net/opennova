@@ -24,7 +24,7 @@ namespace godot {
 
 // A transient glow (muzzle / impact / death / round legs): radius in world
 // units; fade_mode / fade_duration as the retail instance words (mode 1 =
-// permanent, 2 = the impact countdown, 3 = the muzzle re-arm); owner_entity /
+// permanent, 2 = the impact countdown, 4 = the muzzle re-arm); owner_entity /
 // owner_section scope the light to its owner's draws; the disable_* flags
 // are the record render masks; corona_lower_half_radius is render flag
 // 0x100 (the impact flash's corona re-centre).

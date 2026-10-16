@@ -134,6 +134,61 @@ void LightScene::set_blend(LightHandle handle, float amount) {
 	slot->hidden = hidden;
 }
 
+LightHandle LightScene::fire_muzzle_glow(LightHandle cached,
+		const std::array<int32_t, 3> &muzzle_fixed, uint64_t shooter) {
+	// [orig: Entity_UpdateMuzzleGlowEffect @ 0x56c960 — a zero entity+0x1B4 word spawns, then the
+	// fade, owner, position and blend setters on the word]
+	LightHandle handle = cached;
+	if (handle.is_null()) {
+		handle = spawn(muzzle_glow_spawn(muzzle_fixed, shooter));
+		if (handle.is_null()) return handle;
+	}
+	set_fade(handle, kMuzzleGlowFadeMode, kMuzzleGlowFadeTicks);
+	set_owner(handle, shooter, 0);
+	set_position(handle, muzzle_fixed);
+	set_blend(handle, 1.0f);
+	return handle;
+}
+
+LightSpawnParams muzzle_glow_spawn(const std::array<int32_t, 3> &muzzle_fixed, uint64_t shooter) {
+	LightSpawnParams params;
+	params.position_fixed = muzzle_fixed;
+	params.radius_fixed = LightScene::kMuzzleGlowRadiusFixed;
+	params.rgb = {static_cast<uint8_t>(LightScene::kMuzzleGlowColorRgb >> 16),
+			static_cast<uint8_t>(LightScene::kMuzzleGlowColorRgb >> 8),
+			static_cast<uint8_t>(LightScene::kMuzzleGlowColorRgb)};
+	params.owner_entity = shooter;
+	params.owner_section = 0;
+	return params;
+}
+
+LightSpawnParams impact_flash_spawn(const std::array<int32_t, 3> &impact_fixed,
+		int32_t radius_fixed, const std::array<uint8_t, 3> &rgb, int32_t ticks) {
+	LightSpawnParams params;
+	params.position_fixed = impact_fixed;
+	params.position_fixed[2] = clamp_i32(static_cast<int64_t>(impact_fixed[2]) + (radius_fixed >> 1));
+	params.radius_fixed = radius_fixed;
+	params.rgb = rgb;
+	params.fade_mode = 2;
+	params.fade_duration = ticks;
+	params.corona_lower_half_radius = true;
+	return params;
+}
+
+LightSpawnParams death_flash_spawn(const std::array<int32_t, 3> &position_fixed,
+		int32_t radius_fixed) {
+	LightSpawnParams params;
+	params.position_fixed = position_fixed;
+	params.radius_fixed = radius_fixed;
+	params.rgb = {static_cast<uint8_t>(LightScene::kDeathFlashColorRgb >> 16),
+			static_cast<uint8_t>(LightScene::kDeathFlashColorRgb >> 8),
+			static_cast<uint8_t>(LightScene::kDeathFlashColorRgb)};
+	params.fade_mode = LightScene::kDeathFlashFadeMode;
+	params.fade_duration = LightScene::kDeathFlashFadeTicks;
+	params.disable_corona = true;
+	return params;
+}
+
 void LightScene::set_owner(LightHandle handle, uint64_t owner_entity,
 		int32_t owner_section) {
 	Slot *slot = slot_for(handle);
