@@ -9,6 +9,7 @@ import NewServerPage from '../pages/account/NewServerPage.vue';
 import AccountPage from '../pages/account/AccountPage.vue';
 import SupportTierPage from '../pages/account/SupportTierPage.vue';
 import SupportPage from '../pages/SupportPage.vue';
+import NotFoundPage from '../pages/NotFoundPage.vue';
 import TermsPage from '../pages/legal/TermsPage.vue';
 import PrivacyPage from '../pages/legal/PrivacyPage.vue';
 import RefundsPage from '../pages/legal/RefundsPage.vue';
@@ -35,13 +36,13 @@ const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: '/', component: LandingPage },
-    { path: '/login', component: LoginPage },
-    { path: '/register', component: RegisterPage },
-    { path: '/lobby', component: LobbyPage },
-    { path: '/support', component: SupportPage },
-    { path: '/terms', component: TermsPage },
-    { path: '/privacy', component: PrivacyPage },
-    { path: '/refunds', component: RefundsPage },
+    { path: '/login', component: LoginPage, meta: { title: 'Log in' } },
+    { path: '/register', component: RegisterPage, meta: { title: 'Register' } },
+    { path: '/lobby', component: LobbyPage, meta: { title: 'Lobbies' } },
+    { path: '/support', component: SupportPage, meta: { title: 'Support tiers' } },
+    { path: '/terms', component: TermsPage, meta: { title: 'Terms of service' } },
+    { path: '/privacy', component: PrivacyPage, meta: { title: 'Privacy notice' } },
+    { path: '/refunds', component: RefundsPage, meta: { title: 'Refund policy' } },
     // The account area.
     {
       path: '/me',
@@ -103,10 +104,15 @@ const router = createRouter({
         { path: 'connections', redirect: '/admin/sessions' },
       ],
     },
+    // Anything else.
+    { path: '/:rest(.*)*', component: NotFoundPage, meta: { title: 'Page not found' } },
   ],
-  // A server page's tab change keeps the scroll (the header and the tabs stay
-  // put); any other navigation starts at the top.
-  scrollBehavior(to, from) {
+  // Back and Forward return to where the page was; a #section link scrolls to
+  // it below the fixed header; a server page's tab change keeps the scroll (the
+  // header and the tabs stay put); any other navigation starts at the top.
+  scrollBehavior(to, from, savedPosition) {
+    if (savedPosition) return savedPosition;
+    if (to.hash) return { el: to.hash, top: 72 };
     const onServerPage = to.matched.some((record) => record.components?.default === ServerDetailLayout);
     if (onServerPage && to.params.id === from.params.id) return false;
     return { top: 0 };
@@ -114,5 +120,12 @@ const router = createRouter({
 });
 
 router.beforeEach(requireUser);
+
+// Each public page names itself in the tab; the rest keep the site's title.
+const SITE_TITLE = document.title;
+router.afterEach((to) => {
+  const title = to.meta.title as string | undefined;
+  document.title = title ? `${title} | OpenNova` : SITE_TITLE;
+});
 
 export default router;

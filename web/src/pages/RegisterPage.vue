@@ -1,5 +1,5 @@
 <template>
-  <section class="px-6 pt-24 pb-16">
+  <section class="px-4 py-10 sm:px-6 sm:py-14">
     <div class="mx-auto max-w-3xl rounded-panel border border-border bg-panel p-8">
       <h1 class="text-3xl font-semibold text-ink">Register</h1>
       <p class="mt-2 text-sm text-ink-muted">
@@ -9,18 +9,18 @@
         <label class="grid gap-2 text-sm text-ink">
           Game Handle
           <input v-model="form.username" type="text" required minlength="2" maxlength="30"
-                 class="rounded-control border border-border bg-surface px-4 py-3 focus:border-accent focus:outline-none" />
+                 class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none" />
         </label>
         <label class="grid gap-2 text-sm text-ink">
           Display Name (NW Handle)
           <input v-model="form.nwhandle" type="text" maxlength="30"
                  placeholder="defaults to handle"
-                 class="rounded-control border border-border bg-surface px-4 py-3 focus:border-accent focus:outline-none" />
+                 class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none" />
         </label>
         <label class="grid gap-2 text-sm text-ink">
           Password
           <input v-model="form.password" type="password" required minlength="3" maxlength="72"
-                 class="rounded-control border border-border bg-surface px-4 py-3 focus:border-accent focus:outline-none" />
+                 class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none" />
         </label>
         <button type="submit" :disabled="busy"
                 class="rounded-control bg-accent px-6 py-3 font-semibold text-on-accent hover:bg-accent/90 disabled:opacity-50">
@@ -50,7 +50,7 @@
       </form>
       <p class="mt-6 text-sm text-ink-muted">
         Already have an account?
-        <RouterLink :to="loginLink()" class="text-accent hover:text-ink-bright">Log in</RouterLink>
+        <RouterLink :to="loginLink()" class="link">Log in</RouterLink>
       </p>
     </div>
   </section>

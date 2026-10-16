@@ -16,9 +16,8 @@ locals {
 
   # The site's hostnames: prod the domain itself (and www), another deployment
   # a first-level name of its own (Cloudflare's universal certificate covers
-  # first-level names only): staging.<domain> and game-staging.<domain>.
-  web_host  = local.manage_shared ? var.cloudflare_domain : "${local.deployment}.${var.cloudflare_domain}"
-  game_host = local.manage_shared ? "game.${var.cloudflare_domain}" : "game-${local.deployment}.${var.cloudflare_domain}"
+  # first-level names only): staging.<domain>.
+  web_host = local.manage_shared ? var.cloudflare_domain : "${local.deployment}.${var.cloudflare_domain}"
 
   # The two availability zones: var.azs, or the region's first two. Public and
   # private subnet a share the first (the service instance and its database), b the

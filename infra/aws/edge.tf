@@ -16,8 +16,8 @@
 # the zone's, so prod (the default workspace) owns them, naming every
 # deployment's web hostname (var.edge_other_deployments).
 
-# The site's records, all at the service instance's Elastic IP: prod's @, www and
-# game; another deployment's <deployment> and game-<deployment> (locals.tf).
+# The site's records, all at the service instance's Elastic IP: prod's @ and www;
+# another deployment's <deployment> (locals.tf).
 # Proxied by default so the site gets Cloudflare TLS.
 resource "cloudflare_record" "web_root" {
   count   = local.dns_enabled ? 1 : 0
@@ -41,20 +41,6 @@ resource "cloudflare_record" "web_www" {
   proxied = var.cloudflare_web_proxied
 
   comment = "Managed by Terraform - OpenNova web (www)"
-}
-
-# The web build (ADR 0049): the portal's nginx routes game.<domain> to the game
-# container. Proxied like the root, so it gets the same Cloudflare TLS.
-resource "cloudflare_record" "game" {
-  count   = local.dns_enabled ? 1 : 0
-  zone_id = var.cloudflare_zone_id
-  name    = local.manage_shared ? "game" : "game-${local.deployment}"
-  content = local.service_public_ip
-  type    = "A"
-  ttl     = var.cloudflare_web_proxied ? 1 : 300
-  proxied = var.cloudflare_web_proxied
-
-  comment = "Managed by Terraform - OpenNova web build"
 }
 
 locals {

@@ -28,10 +28,6 @@ on:
         description: "Web image tag alone (overrides tag)"
         required: false
         default: ""
-      game_tag:
-        description: "Web build image tag; empty keeps the current release's"
-        required: false
-        default: ""
       serve_tag:
         description: "Serve image tag (the hosted servers); empty keeps the current release's"
         required: false
@@ -81,7 +77,6 @@ jobs:
           IN_TAG: ${{ inputs.tag }}
           IN_SERVER_TAG: ${{ inputs.server_tag }}
           IN_WEB_TAG: ${{ inputs.web_tag }}
-          IN_GAME_TAG: ${{ inputs.game_tag }}
           IN_SERVE_TAG: ${{ inputs.serve_tag }}
           IN_HOSTD_TAG: ${{ inputs.hostd_tag }}
           IN_NO_HOSTING: ${{ inputs.no_hosting }}
@@ -91,7 +86,6 @@ jobs:
           if [ -n "$IN_TAG" ]; then args+=(--tag "$IN_TAG"); fi
           if [ -n "$IN_SERVER_TAG" ]; then args+=(--server-tag "$IN_SERVER_TAG"); fi
           if [ -n "$IN_WEB_TAG" ]; then args+=(--web-tag "$IN_WEB_TAG"); fi
-          if [ -n "$IN_GAME_TAG" ]; then args+=(--game-tag "$IN_GAME_TAG"); fi
           if [ -n "$IN_SERVE_TAG" ]; then args+=(--serve-tag "$IN_SERVE_TAG"); fi
           if [ -n "$IN_HOSTD_TAG" ]; then args+=(--hostd-tag "$IN_HOSTD_TAG"); fi
           if [ "$IN_NO_HOSTING" = true ]; then args+=(--no-hosting); fi

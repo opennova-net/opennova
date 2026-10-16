@@ -1184,7 +1184,7 @@ the known addresses and the credentials generation below.
   `/api/register`. A cross-site form cannot set the header, and a cross-origin script
   that sets one needs a CORS preflight the server never grants (it sends no
   `Access-Control-*` header). `SameSite=Lax` already keeps the cookie off cross-site
-  POSTs; the header also covers same-site origins such as `game.<domain>` and the
+  POSTs; the header also covers same-site origins such as `staging.<domain>` and the
   routes no cookie authenticates: a forged login would sign the visitor into the
   forger's account, a forged logout sign them out, and a forged registration (a
   `text/plain` form can carry a JSON body) create accounts from visitors' addresses.

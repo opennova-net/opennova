@@ -17,7 +17,7 @@
     allowlist; the frame-stats board builds in every flavour; Dear ImGui, the pass
     and the tool kit both products' windows draw with (`devtools/ui_kit.h`) build with
     `OPENNOVA_IMGUI` (either product), the game's F3 windows only with
-    `OPENNOVA_DEVTOOLS` — off for the release GDExtension flavour and the web build;
+    `OPENNOVA_DEVTOOLS` — off for the release GDExtension flavour;
     ImGui headers stay in the group and `editor/ui`, the shell hands the context over
     as plain pointers via `devtools/imgui_abi.h`).
   - `net/` — the retail WIRE (ADRs 0009–0012, 0019; ADR 0043 d4: net means
@@ -185,13 +185,12 @@
   style is `.clang-format` at the repo root (tabs, 4-wide, 100 columns,
   `NamespaceIndentation: None`) — config only until the whitespace-only
   reformat commits land; never reformat a file as part of another change.
-- Web-portable (ADR 0049 d5): the web build links this code (every group but `editor/`,
-  which only the editor variant links) into a wasm32 side module whose templates
-  abort on any throw, so nothing uses exceptions as control flow
-  (`strutil::parse_int` / `parse_ulong` / `parse_float`, never `try { std::stoi }`);
-  thread counts are the embedder's (the terrain composer's `Threads` budget and the
-  TrnGen bake's `TerrainBakeInput::threads`, each `for_hardware()` being the desktop
-  sizing); layout guards hold on ILP32.
+- Portable (ADR 0049 d5, kept by ADR 0062, which deleted the web build): nothing uses
+  exceptions as control flow (`strutil::parse_int` / `parse_ulong` / `parse_float`, never
+  `try { std::stoi }`); thread counts are the embedder's (the terrain composer's `Threads`
+  budget and the TrnGen bake's `TerrainBakeInput::threads`, each `for_hardware()` being the
+  desktop sizing); layout guards hold on ILP32. No CI job builds an ILP32 or no-exceptions
+  target, so review keeps these.
 - Group targets (ADR 0029): FIVE STATIC targets, no per-lib ones (single ratified
   exception: the `opennova_crt` STATIC leaf under `base/crt` — the one mutable
   thread-local CRT rand stream; formats cannot link `opennova_base`, which sits
@@ -237,8 +236,7 @@
   its Windows call needs `<windows.h>`. A child process starts through `base/proc`
   (`proc::ChildProcess`: an argv array with no shell, the identity, `process_liveness`,
   release without a kill), the one process seam of the apps and the front ends; it is
-  platform plumbing (citation allowlist) and is left out of the web build. The one
-  `std::random_device` left in `engine/`
+  platform plumbing (citation allowlist). The one `std::random_device` left in `engine/`
   is the narrow exception: the CBIN writer's fresh XOR key (`formats/cbin`, a credits
   file with no preserved key) is written in the clear in the file's own header, so it
   only obfuscates and is neither a secret nor an id, and formats cannot link base. The

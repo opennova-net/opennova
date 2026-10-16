@@ -395,10 +395,19 @@ resource "aws_ce_anomaly_monitor" "services" {
   monitor_type = "CUSTOM"
   # OpenNova's deployments' tag alone: the account holds other projects, whose
   # anomalies are not OpenNova's to email (and an account-wide AWS-services
-  # monitor is one per account).
+  # monitor is one per account). Cost Explorer names a cost allocation tag with
+  # its "user:" prefix and stores the key that way whatever it is sent, so the key
+  # carries it here too (as the budgets' filter does). It also answers the
+  # expression's unused operands as nulls, so they are spelled out: any
+  # difference in this document replaces the monitor.
   monitor_specification = jsonencode({
+    And            = null
+    CostCategories = null
+    Dimensions     = null
+    Not            = null
+    Or             = null
     Tags = {
-      Key          = "opennova:deployment"
+      Key          = "user:opennova:deployment"
       Values       = local.opennova_deployment_tags
       MatchOptions = ["EQUALS"]
     }

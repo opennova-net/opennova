@@ -1,5 +1,5 @@
 <template>
-  <section class="px-6 pt-24 pb-16">
+  <section class="px-4 py-10 sm:px-6 sm:py-14">
     <div class="mx-auto max-w-md rounded-panel border border-border bg-panel p-8">
       <h1 class="text-3xl font-semibold text-ink">Log in</h1>
 
@@ -55,7 +55,7 @@
               maxlength="64"
               :aria-invalid="usernameInvalid ? 'true' : undefined"
               :aria-describedby="usernameInvalid ? 'login-error' : undefined"
-              class="rounded-control border border-border bg-surface px-4 py-3 focus:border-accent focus:outline-none"
+              class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none"
             />
           </label>
           <label class="grid gap-2 text-sm text-ink">
@@ -69,7 +69,7 @@
               required
               :aria-invalid="passwordInvalid ? 'true' : undefined"
               :aria-describedby="passwordInvalid ? 'login-error' : undefined"
-              class="rounded-control border border-border bg-surface px-4 py-3 focus:border-accent focus:outline-none"
+              class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none"
             />
           </label>
           <button
@@ -90,7 +90,7 @@
         </form>
         <p class="mt-6 text-sm text-ink-muted">
           No account yet?
-          <RouterLink :to="registerLink" class="text-accent hover:text-ink-bright">Register</RouterLink>
+          <RouterLink :to="registerLink" class="link">Register</RouterLink>
         </p>
       </template>
     </div>

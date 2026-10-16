@@ -82,14 +82,6 @@ Gotchas:
   pushes/manual runs, so a release-flavour breakage surfaces after merge — build via
   `scripts/package_godot_windows.ps1` when touching build glue here. The engine test job
   runs Ninja + sccache (the VS generator is local-only).
-- The web build (ADR 0049) compiles this tree as a wasm32 threads side module
-  (`scripts/build_godot_web.sh`, Emscripten 4.0.20 only) with `OPENNOVA_DEVTOOLS` off, as
-  in the release flavour, and `OPENNOVA_EDITOR` off: it is the runtime variant alone, with no Dear
-  ImGui and no `authoring/`. Its CI jobs (`build-gdextension-web` in `ci.yml`, and
-  `game-web.yml`'s push/PR triggers) are paused while the web build is on hold; ADR 0049
-  d5's rules (no exceptions as control flow, ILP32-safe layout guards) still apply, but no
-  CI checks them. A device that starts threads sizes them for the page's fixed pthread
-  pool under `OS::has_feature("web")` (`terrain/terrain_tile_cache_device.cpp`).
 - godot-cpp `Basis(axis, angle)` diverges from core Godot for negative-component axes.
   When porting GDScript Basis math to C++, add a parity test first.
 - `ResourceRoot::set_root_dir` clears the dir index and texture caches — a 94s -> 2s

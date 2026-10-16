@@ -228,8 +228,8 @@ run "adopted_eip" {
     error_message = "every statement but the SSM agent's is scoped to a resource"
   }
   assert {
-    condition     = cloudflare_record.web_root[0].name == "@" && cloudflare_record.web_www[0].name == "www" && cloudflare_record.game[0].name == "game" && cloudflare_record.web_root[0].content == "54.162.79.147"
-    error_message = "prod's records (@, www, game) point at the adopted address"
+    condition     = cloudflare_record.web_root[0].name == "@" && cloudflare_record.web_www[0].name == "www" && cloudflare_record.web_root[0].content == "54.162.79.147"
+    error_message = "prod's records (@, www) point at the adopted address"
   }
 }
 

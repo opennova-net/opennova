@@ -3,8 +3,8 @@
 // page off the installed snapshot; wait_idle() returns once every queued job
 // has completed; a completion a predicate rejects stays queued while an
 // allowed one behind it drains; an epoch bump drops everything queued; a
-// one-worker, no-lane-thread budget (the web build's shape) composes the same
-// bytes as the hardware sizing.
+// one-worker, no-lane-thread budget composes the same bytes as the hardware
+// sizing.
 #include <runtime/terrain/terrain_tile_composition_worker.h>
 
 #include <algorithm>

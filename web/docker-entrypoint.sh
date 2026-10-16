@@ -26,7 +26,7 @@ chown nginx:nginx "$HTPASSWD_FILE"
 
 # Origin TLS (DEPLOY.md): with ORIGIN_TLS_CERT and ORIGIN_TLS_KEY set (each a
 # PEM, base64 on one line, as the host's env file carries them: the Cloudflare
-# Origin CA certificate infra/aws/edge.tf makes), both servers listen on 443
+# Origin CA certificate infra/aws/edge.tf makes), the site listens on 443
 # with them, and Cloudflare verifies this origin ("Full (strict)"). The two are
 # written to ORIGIN_TLS_DIR (a tmpfs in the prod overlay), the key owner-only.
 # Neither set: plain 80, as a local run of the image wants. One alone stops

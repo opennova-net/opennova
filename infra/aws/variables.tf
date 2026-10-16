@@ -5,7 +5,7 @@ variable "region" {
 }
 
 variable "instance_type" {
-  description = "The service instance's type: the NovaWorld server, the portal's nginx and the web build in docker compose. Never a burstable type (the server's loops run all the time)."
+  description = "The service instance's type: the NovaWorld server and the portal's nginx in docker compose. Never a burstable type (the server's loops run all the time)."
   type        = string
   default     = "c7i.large"
 
@@ -123,7 +123,7 @@ variable "cloudflare_zone_id" {
 }
 
 variable "cloudflare_domain" {
-  description = "Domain name (e.g. 'example.com'). Prod makes the @, www and game records; another deployment <deployment> and game-<deployment>."
+  description = "Domain name (e.g. 'example.com'). Prod makes the @ and www records; another deployment <deployment>."
   type        = string
   default     = ""
 }

@@ -127,13 +127,6 @@ hot-reload reliably, and on Windows the running editor holds the DLL lock so the
 deferred. A stale DLL shows up as GDScript "class not found" errors for classes that
 `engine/` has since added.
 
-The web build (ADR 0049) compiles the same sources as a wasm32 threads side module:
-`scripts/build_godot_web.sh [--release]` refuses any Emscripten but 4.0.20 (its header
-shows the run inside the pinned `emscripten/emsdk` image), and
-`scripts/package_godot_web.sh` exports the `OpenNova Web` preset into `godot/exports/web`.
-`deploy/game/Dockerfile` runs both and serves the site on `:8090`; see
-[DEPLOY.md](DEPLOY.md) for building and running that image.
-
 ## Run the game
 
 ```bash
@@ -156,9 +149,7 @@ examples and exit codes.
 
 ## Run the NovaWorld servers locally
 
-The whole stack (gate + NovaWorld UDP + HTTP/API + web portal + the game's web build) via
-Docker. `--build` also builds the game image (the wasm and native GDExtensions plus a
-Godot export, so its first build is slow), which needs the submodules checked out:
+The whole stack (gate + NovaWorld UDP + HTTP/API + web portal) via Docker:
 
 ```bash
 cd deploy/compose
@@ -171,7 +162,6 @@ docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
 | NovaWorld UDP | `64206/udp` | NAPI session + in-match traffic (HELLO/JOIN/SESSION/GOODBYE) |
 | HTTP / API | `8080/tcp` | `/api/*`, the legacy `NW*.dll` routes |
 | web UI (Vite) | `http://localhost:5173` | the Vue site with **hot-reload**; Vite proxies `/api` to the server |
-| game (web build) | `http://localhost:8090` | the browser build of the game (`deploy/game/`, ADR 0049), single player only |
 
 The Docker dev override adds the server's database (a `postgres` service, its data in the
 `pg_data` volume) and sets the dev values: `ADMIN_API_TOKEN=dev-admin-token`, the seeded
@@ -195,8 +185,7 @@ Avoid rebuilding images to test changes:
 - **Server (C++):** the dockerized server is for "I just need the backend up." For active server work,
   run the local binary (below) and rebuild incrementally with `cmake --build build` (only the changed
   objects, seconds). To refresh just the server image in the stack: `docker compose ... up -d --build novaworld`.
-- **Ports at a glance:** `5173` = web UI (dev/HMR), `8080` = API/server, `8090` = the
-  game's web build. Hitting
+- **Ports at a glance:** `5173` = web UI (dev/HMR), `8080` = API/server. Hitting
   `http://localhost:8080/` shows an "API server" note, which is expected; the dev UI is at `:5173`.
 
 **Without Docker** (Linux), build and run the server binary directly. It reads its config

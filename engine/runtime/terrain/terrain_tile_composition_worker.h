@@ -51,8 +51,7 @@ public:
 	// page inside the frame that draws it), and each page's rows split over
 	// the shared lane pool (row_stripes.h; the bytes are the same for every
 	// count). for_hardware() is the desktop sizing; an embedder whose
-	// platform fixes its thread pool up front (the web build's pthread pool)
-	// passes a smaller budget.
+	// platform fixes its thread pool up front passes a smaller budget.
 	struct Threads {
 		std::size_t page_workers = 1;
 		std::size_t lane_threads = 0;
