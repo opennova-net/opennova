@@ -202,7 +202,13 @@ static void test_emplacement_attachments() {
     CHECK(crosshair_child->emplacement_pose_metadata_resolved);
     CHECK(crosshair_child->ground_target == parent_h);
     CHECK(crosshair_child->emplacement_attachment_flags == 1);
-    CHECK(plain_child->position.x == 12.f && plain_child->position.y == 20.f &&
+    // The carrier's mission yaw 0 is the quarter-turn heading 0x40000000, whose
+    // sine and cosine come through dbl_7C3608 (io::kRadiansPerBamX87): 4194303 and
+    // -201 over 2^22. The anchor (2, 0, 1) un-swizzles to (0, -2, 1) and leaves
+    // (-2 x 65536 x -201 + 0x200000) >> 22 = 6 (Q16) on world Y [orig:
+    // Math_BuildFixedPointMatrixFromEulerAngles `fld dbl_7C3608` @0x613F5D].
+    CHECK(plain_child->position.x == 12.f &&
+          plain_child->position.y == 20.f + 6.f / 65536.f &&
           plain_child->position.z == 4.f);
     CHECK(gun_child->position.x == 10.f && gun_child->position.y == 20.f &&
           gun_child->position.z == 3.f);
@@ -286,8 +292,10 @@ static void test_emplacement_attachments() {
           old_parent_spawn_id);
     cw->run_logic_tick();
     plain_child = cw->registry.get(plain_h);
+    // The replacement's yaw 0 is the same dbl_7C3608 quarter turn: 6 (Q16) on Y.
     CHECK(plain_child != nullptr && plain_child->position.x == 52.f &&
-          plain_child->position.y == 60.f && plain_child->position.z == 8.f);
+          plain_child->position.y == 60.f + 6.f / 65536.f &&
+          plain_child->position.z == 8.f);
     CHECK(cw->registry.get(replacement_h) != nullptr);
 }
 
@@ -1416,11 +1424,17 @@ int main() {
         CHECK(occ->mounted);
         CHECK(occ->mount_target == vh);
         CHECK(veh->seats[0].occupant == oh);
-        CHECK(occ->position.x == 11.f && occ->position.y == 2.f && occ->position.z == 3.f);
+        // The vehicle's yaw 0 is the quarter-turn heading 0x40000000, whose sine
+        // and cosine come through dbl_7C3608 (io::kRadiansPerBamX87): 4194303 and
+        // -201 over 2^22. The seat (1, 2, 3) un-swizzles to (2, -1, 3) and lands at
+        // (65530, 131075) Q16 off the hull, not (65536, 131072) [orig:
+        // Math_BuildFixedPointMatrixFromEulerAngles `fld dbl_7C3608` @0x613F5D].
+        CHECK(occ->position.x == 10.f + 65530.f / 65536.f &&
+              occ->position.y == 131075.f / 65536.f && occ->position.z == 3.f);
         CHECK(cai.at(0)->slot.f[37] == 125);
         CHECK(cai.at(0)->slot.f[38] == 11);
-        CHECK(cai.at(0)->pos[0] == to_fixed(11.0));
-        CHECK(cai.at(0)->pos[1] == to_fixed(2.0));
+        CHECK(cai.at(0)->pos[0] == to_fixed(10.0) + 65530);
+        CHECK(cai.at(0)->pos[1] == 131075);
         CHECK(cai.at(0)->pos[2] == to_fixed(3.0));
     }
 
