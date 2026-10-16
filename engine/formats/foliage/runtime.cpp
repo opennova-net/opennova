@@ -73,7 +73,7 @@ int32_t midpoint_fixed(int32_t a, int32_t b) {
 	return static_cast<int32_t>(-((-sum + 1) / 2));
 }
 
-// One candidate of the shared 6x6 stream. x_fixed/z_fixed are the Godot
+// One candidate of the shared 6x6 stream. x_fixed/z_fixed are the render
 // plane (z = -mission y); the MODEL tier additionally keeps its mission-y
 // value, the frame its key and corner arithmetic run in.
 struct Candidate {
@@ -85,7 +85,7 @@ struct Candidate {
 	int32_t z_fixed = 0;
 };
 
-// Negating a mission-y fixed value into the Godot plane; the one
+// Negating a mission-y fixed value into the render plane; the one
 // unrepresentable input (INT32_MIN) saturates instead of overflowing.
 int32_t negate_fixed(int32_t value) {
 	return value == std::numeric_limits<int32_t>::min()
@@ -116,7 +116,7 @@ Candidate next_candidate(int index, uint32_t &state) {
 
 Candidate detail_candidate(uint32_t key, int index, uint32_t &state) {
 	// The detail key's HIGH15 is the cell's X-min and LOW15 its Z-min on the
-	// Godot plane (the collector packs PolyTrn's -camera_y sector, FB20, into
+	// render plane (the collector packs PolyTrn's -camera_y sector, FB20, into
 	// the low half); local A and local B both ADD. Retail's blocker, map and
 	// height samples all take (keyHi + A, keyLo + B).
 	// [orig: Foliage_GenerateInstances_0 @ 0x5fff84..0x5fffa2 (placement),
@@ -134,7 +134,7 @@ Candidate model_candidate(uint32_t key, int index, uint32_t &state,
                           int32_t &r_mission_y_fixed) {
 	// The MODEL key's HIGH15 is the cell's X-min and LOW15 its MISSION-y top
 	// (y_snap + 16); the candidate is (keyHi + A, keyLo - B) in mission x/y,
-	// so on the Godot plane z = B - keyLo.
+	// so on the render plane z = B - keyLo.
 	// [orig: Foliage_GenerateModelTileInstances @ 0x600af5..0x600b0c;
 	// Foliage_UpdateModelTiles @ 0x601fd0..0x60205b (key)]
 	Candidate candidate = next_candidate(index, state);
@@ -292,7 +292,7 @@ bool make_silhouette_instance(
 	// (keyHi + A', keyLo - B') with (A', B') the rotated footprint offsets,
 	// the edge midpoints are the arithmetic-shift halves of those fixed
 	// coordinates, and every height sample takes mission (x, y), i.e. the
-	// Godot plane (x, -y). [orig: Foliage_GenerateModelTileInstances
+	// render plane (x, -y). [orig: Foliage_GenerateModelTileInstances
 	// @ 0x600bd0..0x600c6a (corners), 0x600c70..0x600d32 (midpoints)]
 	const float cosine = std::cos(candidate.yaw);
 	const float sine = std::sin(candidate.yaw);
@@ -483,13 +483,13 @@ void Runtime::reset() {
 size_t Runtime::invalidate_cells(int32_t x0, int32_t z0, int32_t x1, int32_t z1,
                                  const std::array<int32_t, FOLIAGE_MAX_DEFS> &detail_reach) {
 	if (x1 <= x0 || z1 <= z0) return 0;
-	// A cell's span on the Godot plane, widened by `reach` each way, against the rect (half-open both).
+	// A cell's span on the render plane, widened by `reach` each way, against the rect (half-open both).
 	const auto meets = [&](int64_t cx0, int64_t cz0, int64_t reach) {
 		return cx0 - reach < x1 && cx0 + 16 + reach > x0 && cz0 - reach < z1 && cz0 + 16 + reach > z0;
 	};
 	size_t dropped = 0;
 	for (int slot_index = 0; slot_index < FOLIAGE_MAX_DEFS; ++slot_index) {
-		// A detail cell keys its X-min and Godot-plane Z-min; its candidates sample the ground bilinearly (one
+		// A detail cell keys its X-min and render-plane Z-min; its candidates sample the ground bilinearly (one
 		// texel on), and the geometry expanded over them reaches the slot's detail reach past each.
 		const int64_t cell_reach = 1 + std::max<int64_t>(0, detail_reach[static_cast<size_t>(slot_index)]);
 		for (DetailCacheEntry &entry : detail_cache_[slot_index]) {
@@ -499,7 +499,7 @@ size_t Runtime::invalidate_cells(int32_t x0, int32_t z0, int32_t x1, int32_t z1,
 			entry = DetailCacheEntry{};
 			++dropped;
 		}
-		// A model tile keys its X-min and its mission-y top (the Godot plane's z from -top); its corners reach the
+		// A model tile keys its X-min and its mission-y top (the render plane's z from -top); its corners reach the
 		// rotated footprint past the tile.
 		const int64_t reach =
 		    static_cast<int64_t>(std::ceil(cached_slots_[slot_index].model_radius * 0.75f * 1.4143f)) + 1;
@@ -743,7 +743,7 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 		}
 		if (anchor.view_depth < kSilhouetteDepth) continue;
 		// The anchor enters the MODEL walk as its mission (x, y) position;
-		// the Godot plane's z is -y. [orig: Terrain_RenderSectorEntitiesBySide
+		// the render plane's z is -y. [orig: Terrain_RenderSectorEntitiesBySide
 		// @ 0x5c7e1e..0x5c7e24 (tile_coords = entity +4/+8)]
 		int32_t anchor_x = 0;
 		int32_t anchor_mission_y = 0;
