@@ -746,8 +746,8 @@ void wheeled_contact_solve(World &world, Entity &veh, const VehicleTraits &trait
 		int32_t unit[3];
 		q16_normalize(force, unit);
 		return io::bam_add(
-				io::bam_add(q16_mul_rhu(unit[0], direction[0]), q16_mul_rhu(unit[1], direction[1])),
-				q16_mul_rhu(unit[2], direction[2]));
+				io::bam_add(retail_q16_mul_rhu(unit[0], direction[0]), retail_q16_mul_rhu(unit[1], direction[1])),
+				retail_q16_mul_rhu(unit[2], direction[2]));
 	};
 	bool reverse_flag[13] = {};
     bool any_wall = false;
@@ -1100,8 +1100,8 @@ static void light_bounding_quad(const VehicleTraits &traits, const VehicleEulerB
     const int32_t height = io::bam_abs(io::bam_sub(traits.box_z_hi, traits.box_z_lo)) / 2;
     const int32_t pos[3] = {x, y, z};
     for (int k = 0; k < 3; ++k) {
-        const int32_t forward = q16_mul_rhu(half_length, basis.q22.m[4*k] >> 6);
-        const int32_t lift = q16_mul_rhu(height, basis.q22.m[4*k+2] >> 6);
+        const int32_t forward = retail_q16_mul_rhu(half_length, basis.q22.m[4*k] >> 6);
+        const int32_t lift = retail_q16_mul_rhu(height, basis.q22.m[4*k+2] >> 6);
         out[0][k] = io::bam_add(pos[k], forward);
         out[1][k] = io::bam_sub(pos[k], forward);
         out[2][k] = io::bam_add(out[1][k], lift);
@@ -1385,9 +1385,9 @@ void light_contact_solve(World &world, Entity &veh, const VehicleTraits &traits,
 		int32_t normal[3], direction[3];
 		q16_normalize(normal_sum, normal);
 		q16_normalize(velocity, direction);
-		const int32_t dot = io::bam_add(io::bam_add(q16_mul_rhu(normal[0], direction[0]),
-												q16_mul_rhu(normal[1], direction[1])),
-				q16_mul_rhu(normal[2], direction[2]));
+		const int32_t dot = io::bam_add(io::bam_add(retail_q16_mul_rhu(normal[0], direction[0]),
+												retail_q16_mul_rhu(normal[1], direction[1])),
+				retail_q16_mul_rhu(normal[2], direction[2]));
 		const int32_t speed = int32_t(std::min(2147418100.0,
 				std::sqrt(double(velocity[0]) * velocity[0] + double(velocity[1]) * velocity[1] +
 						double(velocity[2]) * velocity[2])));

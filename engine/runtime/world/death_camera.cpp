@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <base/io/fixed.h>
 #include <base/io/bam.h>
+#include <runtime/world/entity.h>
 
 namespace opennova::world {
 
@@ -23,10 +24,6 @@ inline int32_t cos_q22(uint32_t index) {
 }
 inline uint32_t table_index(uint32_t angle_bam) { return (angle_bam + 0x200000u) >> 22; }
 
-// (a * b + 0x8000) >> 16 in 64-bit, the original's rounded 16.16 multiply.
-inline int32_t mul_q16(int32_t a, int32_t b) {
-    return static_cast<int32_t>((static_cast<int64_t>(a) * b + 0x8000) >> 16);
-}
 inline int32_t mul_q22(int32_t a, int32_t b) {
     return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);
 }
@@ -71,9 +68,9 @@ int32_t death_camera_probe_terrain(const CameraTerrainSampler &terrain,
         do {
             if (hit) break;
             reached = accum_x >> 2; // 0.25 u steps
-            const int32_t px = mul_q16(reached, dir_q16[0]) + origin[0];
-            const int32_t py = mul_q16(reached, dir_q16[1]) + origin[1];
-            const int32_t pz = mul_q16(reached, dir_q16[2]) + origin[2];
+            const int32_t px = retail_q16_mul_rhu(reached, dir_q16[0]) + origin[0];
+            const int32_t py = retail_q16_mul_rhu(reached, dir_q16[1]) + origin[1];
+            const int32_t pz = retail_q16_mul_rhu(reached, dir_q16[2]) + origin[2];
             for (int bone = 0; bone < bone_count; ++bone) {
                 // The bone force leg (Entity_ComputeCollisionForceFromBones
                 // @0x4afff0) is the tracked residue; the terrain test that
@@ -90,8 +87,8 @@ int32_t death_camera_probe_terrain(const CameraTerrainSampler &terrain,
             ++sample;
         } while (sample < (max_dist >> 14));
     }
-    return reached + mul_q16(dir_q16[0], accum[0]) + mul_q16(dir_q16[1], accum[1]) +
-           mul_q16(dir_q16[2], accum[2]);
+    return reached + retail_q16_mul_rhu(dir_q16[0], accum[0]) + retail_q16_mul_rhu(dir_q16[1], accum[1]) +
+           retail_q16_mul_rhu(dir_q16[2], accum[2]);
 }
 
 void death_camera_compute(const int32_t player_pos[3],
@@ -126,8 +123,8 @@ void death_camera_compute(const int32_t player_pos[3],
             const int32_t s = sin_q22(index);
             const int32_t c = cos_q22(index);
             int32_t trial[3];
-            trial[0] = mul_q16(s, norm[1]) - mul_q16(c, norm[0]);
-            trial[1] = -(mul_q16(s, norm[0]) + mul_q16(c, norm[1]));
+            trial[0] = retail_q16_mul_rhu(s, norm[1]) - retail_q16_mul_rhu(c, norm[0]);
+            trial[1] = -(retail_q16_mul_rhu(s, norm[0]) + retail_q16_mul_rhu(c, norm[1]));
             trial[2] = neg_z;
             normalise_q16(trial, nullptr);
             const int32_t reach = probe ? probe(from, trial, kDeathCameraLiftQ16, kDeathCameraReachQ16)
@@ -144,9 +141,9 @@ void death_camera_compute(const int32_t player_pos[3],
     }
     // FROM: the player lifted 0.5 u, pushed out along the best direction by
     // its reach, looking back along -best [orig: @0x438ea0..0x438f5b].
-    from[0] += mul_q16(best_reach, best[0]);
-    from[1] += mul_q16(best_reach, best[1]);
-    from[2] += mul_q16(best_reach, best[2]);
+    from[0] += retail_q16_mul_rhu(best_reach, best[0]);
+    from[1] += retail_q16_mul_rhu(best_reach, best[1]);
+    from[2] += retail_q16_mul_rhu(best_reach, best[2]);
     out.from.pos[0] = from[0];
     out.from.pos[1] = from[1];
     out.from.pos[2] = from[2];
@@ -163,9 +160,9 @@ void death_camera_compute(const int32_t player_pos[3],
     const int32_t back[3] = {-norm[0], -norm[1], neg_z};
     const int32_t reach_back = probe ? probe(to, back, kDeathCameraLiftQ16, kDeathCameraReachQ16)
                                      : kDeathCameraReachQ16;
-    to[0] += mul_q16(reach_back, back[0]);
-    to[1] += mul_q16(reach_back, back[1]);
-    to[2] += mul_q16(reach_back, back[2]);
+    to[0] += retail_q16_mul_rhu(reach_back, back[0]);
+    to[1] += retail_q16_mul_rhu(reach_back, back[1]);
+    to[2] += retail_q16_mul_rhu(reach_back, back[2]);
     out.to.pos[0] = to[0];
     out.to.pos[1] = to[1];
     out.to.pos[2] = to[2];

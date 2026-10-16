@@ -582,8 +582,8 @@ void vehicle_boat_suspension_fit(World &world, Entity &e, const VehicleTraits &t
 		for (int i = 0; i < 4; ++i)
 			for (int k = 0; k < 3; ++k)
 				corners[i][k] = io::bam_add(position[k],
-						io::bam_add(q16_mul_rhu(xs[i], matrix.m[4 * k] >> 6),
-								q16_mul_rhu(ys[i], matrix.m[4 * k + 1] >> 6)));
+						io::bam_add(retail_q16_mul_rhu(xs[i], matrix.m[4 * k] >> 6),
+								retail_q16_mul_rhu(ys[i], matrix.m[4 * k + 1] >> 6)));
 		if (m.speed < 14080) {
 			if (!m.wreck_2fc) {
 				vehicle_clear_chassis(m);

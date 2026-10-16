@@ -10,7 +10,7 @@ using namespace detail;
 namespace {
 int32_t radial(const int32_t delta[3], bool rounded) {
 	const int32_t square =
-			io::bam_add(q16_mul_rhu(delta[0], delta[0]), q16_mul_rhu(delta[1], delta[1]));
+			io::bam_add(retail_q16_mul_rhu(delta[0], delta[0]), retail_q16_mul_rhu(delta[1], delta[1]));
 	if (square < 0)
 		return 0; // x87 indefinite cannot name an in-pool radius.
 	const double root = std::sqrt(double(square));
@@ -20,19 +20,19 @@ int32_t projection(const CollisionMatrix &frame, const int32_t p[3], int32_t del
 	int32_t axis[3], distance = 0;
 	for (int k = 0; k < 3; ++k) {
 		axis[k] = io::bam_sub(0, frame.m[8 + k]) >> 6;
-		distance = io::bam_add(distance, q16_mul_rhu(frame.m[4 * k + 3], axis[k]));
+		distance = io::bam_add(distance, retail_q16_mul_rhu(frame.m[4 * k + 3], axis[k]));
 	}
 	for (int k = 2; k >= 0; --k)
-		distance = io::bam_sub(distance, q16_mul_rhu(p[k], axis[k]));
+		distance = io::bam_sub(distance, retail_q16_mul_rhu(p[k], axis[k]));
 	for (int k = 0; k < 3; ++k)
 		delta[k] =
-				io::bam_sub(p[k], io::bam_sub(frame.m[4 * k + 3], q16_mul_rhu(distance, axis[k])));
+				io::bam_sub(p[k], io::bam_sub(frame.m[4 * k + 3], retail_q16_mul_rhu(distance, axis[k])));
 	return distance;
 }
 void radial_direction(const int32_t delta[3], int32_t radius, int32_t dir[3]) {
 	const int32_t inverse = radius > 256 ? int32_t(0x100000000LL / radius) : 0;
 	for (int k = 0; k < 3; ++k)
-		dir[k] = radius > 256 ? q16_mul_rhu(inverse, delta[k]) : bam_shl_wrap(delta[k], 4);
+		dir[k] = radius > 256 ? retail_q16_mul_rhu(inverse, delta[k]) : bam_shl_wrap(delta[k], 4);
 }
 } // namespace
 
@@ -117,7 +117,7 @@ uint16_t RotorWashSystem::nearby_zone(const int32_t p[3], int32_t radius) const 
 		const int32_t dy = absolute(io::bam_sub(zone.frame.m[7], p[1]));
 		if (dy > radius) continue;
 		const int32_t half_z = io::bam_sub(zone.frame.m[11], p[2]) >> 1;
-		if (half_z < 0 || half_z > q16_mul_rhu(radius, zone.intensity)) continue;
+		if (half_z < 0 || half_z > retail_q16_mul_rhu(radius, zone.intensity)) continue;
 		int32_t square = int32_t(int64_t(dx) * dx >> 22);
 		square = io::bam_add(square, int32_t(int64_t(dy) * dy >> 22));
 		square = io::bam_add(square, int32_t(int64_t(half_z) * half_z >> 22));
@@ -177,7 +177,7 @@ void RotorWashSystem::vortex(const Zone &z, int32_t p[3], int32_t v[3]) const {
 	} else {
 		if (axial < (z.extent >> 1)) {
 			const int32_t ratio = bam_shl_wrap(io::bam_abs(axial), 8) / z.extent;
-			const int32_t suction = ratio > 255 ? 0 : q16_mul_rhu(z.intensity, 8 * (256 - ratio));
+			const int32_t suction = ratio > 255 ? 0 : retail_q16_mul_rhu(z.intensity, 8 * (256 - ratio));
 			v[2] = io::bam_sub(v[2], suction);
 		}
 		if (v[2] > 0)
@@ -189,7 +189,7 @@ void RotorWashSystem::vortex(const Zone &z, int32_t p[3], int32_t v[3]) const {
 			v[2] = 0;
 		}
 		for (int k = 0; k < 2; ++k)
-			v[k] = io::bam_add(v[k], q16_mul_rhu(z.intensity, dir[k]) >> (above ? 8 : 6));
+			v[k] = io::bam_add(v[k], retail_q16_mul_rhu(z.intensity, dir[k]) >> (above ? 8 : 6));
 	}
 	if (p[2] <= floor) {
 		p[2] = floor;
@@ -214,7 +214,7 @@ void RotorWashSystem::repel(const Zone &z, int32_t p[3], int32_t v[3]) const {
 			radius = std::min(radius, z.radius);
 			const int32_t scaled = bam_shl_wrap(int32_t(int64_t(delta[2]) * 65536 / radius), 2);
 			horizontal = io::bam_sub(
-					horizontal, q16_mul_rhu(int32_t(int64_t(radius) * 65536 / z.radius), scaled));
+					horizontal, retail_q16_mul_rhu(int32_t(int64_t(radius) * 65536 / z.radius), scaled));
 		}
 	}
 	const int32_t floor = std::max(io::bam_add(ground(p[0], p[1]), 114688), world_.env.water_z);
@@ -230,7 +230,7 @@ void RotorWashSystem::repel(const Zone &z, int32_t p[3], int32_t v[3]) const {
 		q16_normalize(d, dir);
 	}
 	for (int k = 0; k < 2; ++k)
-		v[k] = q16_mul_rhu(horizontal, dir[k]) >> 4;
+		v[k] = retail_q16_mul_rhu(horizontal, dir[k]) >> 4;
 }
 
 // [orig: CParticleEmitter_UpdateAllParticles @0x5F3BE0]
@@ -291,7 +291,7 @@ FocalSwayPose RotorWashSystem::sway_pose(const Entity &e) const {
 			uint32_t(to_fixed(e.position.z) >> 14);
 	auto wave = [&](uint32_t rate, int32_t weight, int shift) {
 		const int32_t sine = sin22_of_bam_x87(int32_t(seed * rate));
-		return q16_mul_rhu(weight, sine >> shift);
+		return retail_q16_mul_rhu(weight, sine >> shift);
 	};
 	const int32_t a = wave(234881024u, std::min(magnitude, 49152), 11);
 	const int32_t b = wave(184549376u, std::clamp(magnitude - 12288, 0, 16384), 10);
@@ -366,7 +366,7 @@ void RotorWashSystem::tick() {
 		const int particles = (elapsed * (intensity + (world_.next_prng16_c() & 0x7fff))) >> 15;
 		int32_t angle = int32_t(((world_.logic_tick << 16) + world_.next_prng16_c()) << 12);
 		for (int n = 0; n < particles; ++n, angle = io::bam_add(angle, 1193046400)) {
-			const int32_t radius = q16_mul_rhu(z.inner - 393216, world_.next_prng16_c()) + 327680;
+			const int32_t radius = retail_q16_mul_rhu(z.inner - 393216, world_.next_prng16_c()) + 327680;
 			int32_t p[3] = { int32_t(int64_t(radius) * cos22_of_bam_x87(angle) >> 22),
 				int32_t(int64_t(radius) * sin22_of_bam_x87(angle) >> 22), 0 };
 			z.frame.transform_point(p, p);
@@ -374,7 +374,7 @@ void RotorWashSystem::tick() {
 			for (int k = 0; k < 3; ++k)
 				step[k] = io::bam_sub(0, z.frame.m[8 + k]) >> 6;
 			const int steps =
-					(q16_mul_rhu(z.extent >> 1, world_.next_prng16_c()) + (z.extent >> 1)) >> 16;
+					(retail_q16_mul_rhu(z.extent >> 1, world_.next_prng16_c()) + (z.extent >> 1)) >> 16;
 			for (int nstep = 0; nstep < steps; ++nstep) {
 				for (int k = 0; k < 3; ++k)
 					p[k] = io::bam_add(p[k], step[k]);
@@ -446,9 +446,9 @@ void RotorWashSystem::tick() {
 							float(1.0 - double(height) / z.extent), float(z.intensity) / 65536.0f));
 			if (opacity > 0) {
 				const int32_t x = io::bam_add(
-						z.frame.m[3], q16_mul_rhu(height, io::bam_sub(0, z.frame.m[8]) >> 6));
+						z.frame.m[3], retail_q16_mul_rhu(height, io::bam_sub(0, z.frame.m[8]) >> 6));
 				const int32_t y = io::bam_add(
-						z.frame.m[7], q16_mul_rhu(height, io::bam_sub(0, z.frame.m[9]) >> 6));
+						z.frame.m[7], retail_q16_mul_rhu(height, io::bam_sub(0, z.frame.m[9]) >> 6));
 				water_wakes_.add(x, y, opacity);
 			}
 		}

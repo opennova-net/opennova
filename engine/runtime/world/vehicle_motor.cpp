@@ -880,9 +880,9 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 			if (static_cast<int32_t>(std::min(length, detail::kFtolClamp)) > 0) {
 				const int32_t scale = static_cast<int32_t>(
 						double(m.chassis_impulse_amplitude) * double(28.16f)); // flt_7C6FA0
-				m.vel_x = io::bam_add(m.vel_x, q16_mul_rhu(dir[0], scale));
-				m.vel_y = io::bam_add(m.vel_y, q16_mul_rhu(dir[1], scale));
-				m.slide_z = io::bam_add(m.slide_z, q16_mul_rhu(dir[2], scale));
+				m.vel_x = io::bam_add(m.vel_x, retail_q16_mul_rhu(dir[0], scale));
+				m.vel_y = io::bam_add(m.vel_y, retail_q16_mul_rhu(dir[1], scale));
+				m.slide_z = io::bam_add(m.slide_z, retail_q16_mul_rhu(dir[2], scale));
 			}
 			if (!m.chassis_contact_active)
 				std::fill_n(m.chassis_impulse_direction, 3, 0);
@@ -1254,7 +1254,7 @@ int32_t plat_terrain_probe(const World &world, int32_t X, int32_t Y, int32_t Z, 
 
 } // namespace detail
 
-// q16_mul_rhu / q16_normalize / q16_cross moved to vehicle_motor_detail.h
+// q16_normalize / q16_cross moved to vehicle_motor_detail.h (the product is entity.h's retail_q16_mul_rhu)
 // (shared with the wheeled/light solves); the witness notes ride with them.
 
 namespace detail {

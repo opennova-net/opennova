@@ -7,8 +7,8 @@ namespace {
 
 int32_t dot16(const int32_t a[3], const int32_t b[3]) {
 	return io::bam_add(
-			io::bam_add(detail::q16_mul_rhu(a[0], b[0]), detail::q16_mul_rhu(a[1], b[1])),
-			detail::q16_mul_rhu(a[2], b[2]));
+			io::bam_add(retail_q16_mul_rhu(a[0], b[0]), retail_q16_mul_rhu(a[1], b[1])),
+			retail_q16_mul_rhu(a[2], b[2]));
 }
 void normalize16(const int32_t in[3], int32_t out[3]) {
 	const double length =
@@ -35,8 +35,8 @@ void impulse_quad(const Entity &e, const VehicleTraits &t, const CollisionMatrix
 	for (int i = 0; i < 4; ++i) {
 		int32_t delta[3];
 		for (int k = 0; k < 3; ++k) {
-			delta[k] = io::bam_add(detail::q16_mul_rhu(xs[i], frame.m[4 * k] >> 6),
-					detail::q16_mul_rhu(ys[i], frame.m[4 * k + 1] >> 6));
+			delta[k] = io::bam_add(retail_q16_mul_rhu(xs[i], frame.m[4 * k] >> 6),
+					retail_q16_mul_rhu(ys[i], frame.m[4 * k + 1] >> 6));
 			corners[i][k] = io::bam_add(position[k], delta[k]);
 		}
 		normalize16(delta, directions[i]);

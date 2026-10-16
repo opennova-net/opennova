@@ -10,6 +10,7 @@
 
 #include <runtime/renderer/object_lod.h>
 #include <runtime/world/angle.h>
+#include <runtime/world/collision_detail.h>
 #include <runtime/world/world.h>
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
@@ -28,13 +29,6 @@ inline double bam_angle_scale() {
 // _ftol2_sse truncates toward zero (C cast semantics).
 inline int32_t ftol(double v) { return static_cast<int32_t>(v); }
 
-inline int32_t abs32(int32_t v) { return v < 0 ? -v : v; }
-
-inline void entity_pos_fixed(const Entity &e, int32_t out[3]) {
-    out[0] = to_fixed(e.position.x);
-    out[1] = to_fixed(e.position.y);
-    out[2] = to_fixed(e.position.z);
-}
 
 // The collectors' fixed entity matrix: the full Euler pack at entity+4 (the
 // canonical heading plus the authored pitch/roll BAMs), which places the
@@ -164,7 +158,7 @@ RenderMatrix render_matrix_from_pose(const int32_t pos[3], int32_t yaw_bam, int3
 // [orig: Math_BuildFixedPointToFloatMatrix4x4(entity+4)]
 RenderMatrix render_matrix_from_entity_pose(const Entity &e) {
     int32_t pos[3];
-    entity_pos_fixed(e, pos);
+    detail::entity_pos_fixed(e, pos);
     const int32_t heading = bam_heading_from_mission_yaw_deg(static_cast<double>(e.yaw));
     const int32_t pitch = bam_from_degrees_wrapped(static_cast<double>(e.pitch));
     const int32_t roll = bam_from_degrees_wrapped(static_cast<double>(e.roll));
@@ -448,7 +442,7 @@ bool OcclusionWorld::sphere_in_view(const OcclusionFrameCamera &cam,
         (rx * cam.view_rows_q22[0][0] + ry * cam.view_rows_q22[0][1] +
          rz * cam.view_rows_q22[0][2] + 0x200000) >> 22);
     if (depth_out != nullptr) *depth_out = depth;
-    if (abs32(depth) >= radius_fixed + cam.fog_dist) return false;
+    if (io::bam_abs(depth) >= radius_fixed + cam.fog_dist) return false;
     // The projector's near leg: the depth past its near word must not fall
     // below -radius (the frustum's forward plane runs through the eye).
     // [orig: Viewport_TransformAndClipPoint @ 0x41161a..0x411636]
@@ -546,9 +540,9 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
         // Per-axis XY cull against the fog distance on the quantized prox
         // coords. [orig: @ 0x5c6bcb-0x5c6bff]
         const int32_t limit = (static_cast<int32_t>(slot.radius) << 16) + cam.fog_dist;
-        const int32_t dx = abs32(static_slot_coord_q16(slot.x) - cam.pos_fixed[0]);
+        const int32_t dx = io::bam_abs(static_slot_coord_q16(slot.x) - cam.pos_fixed[0]);
         if (dx > limit) continue;
-        const int32_t dy = abs32(static_slot_coord_q16(slot.y) - cam.pos_fixed[1]);
+        const int32_t dy = io::bam_abs(static_slot_coord_q16(slot.y) - cam.pos_fixed[1]);
         if (dy > limit) continue;
 
         Entity *e = world.registry.get(slot.h);
@@ -564,7 +558,7 @@ void OcclusionWorld::collect_buildings(World &world, CollisionWorld &collision,
         // model value keys; a guard miss (husk swap, a mover) recomputes the
         // identical way.
         int32_t epos[3];
-        entity_pos_fixed(*e, epos);
+        detail::entity_pos_fixed(*e, epos);
         if (static_pose_memo_.size() <= static_cast<size_t>(i)) {
             static_pose_memo_.resize(static_cast<size_t>(buildings));
         }
@@ -1175,7 +1169,7 @@ namespace {
 OcclusionWorld::TocCandidate toc_candidate(const Entity &e, const CollisionModel *cm) {
     OcclusionWorld::TocCandidate c;
     c.self = e.handle;
-    entity_pos_fixed(e, c.pos_fixed);
+    detail::entity_pos_fixed(e, c.pos_fixed);
     c.radius_q16 = to_fixed(e.bound_radius);
     c.model = cm;
     c.heading_bam = bam_heading_from_mission_yaw_deg(static_cast<double>(e.yaw));
@@ -1402,7 +1396,7 @@ void OcclusionWorld::build_section_masks(World &world, CollisionWorld &collision
         const CollisionModel *cm = collision.model_for(world, h);
         if (e == nullptr || cm == nullptr || !cm->valid()) return false;
         int32_t p[3];
-        entity_pos_fixed(*e, p);
+        detail::entity_pos_fixed(*e, p);
         return p[2] + cm->max[2] > cam.water_z && p[2] + cm->min[2] < cam.water_z;
     };
     auto link_water_straddle = [&](EntityHandle h) {
@@ -1561,7 +1555,7 @@ bool OcclusionWorld::entity_render_visible(World &world, CollisionWorld &collisi
     if (!blink_hits_render_active(ent.blink_hits)) return false;
 
     int32_t epos[3];
-    entity_pos_fixed(ent, epos);
+    detail::entity_pos_fixed(ent, epos);
     const CollisionModel *cm = collision.model_for(world, ent.handle);
     bool collected = false;
     if (ent.kind == EntityKind::Organic) {

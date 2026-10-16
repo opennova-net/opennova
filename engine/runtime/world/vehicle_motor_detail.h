@@ -15,6 +15,7 @@
 #include <cstdint>
 
 #include <runtime/world/collision.h>
+#include <runtime/world/entity.h> // retail_q16_mul_rhu, the round-half-up 16.16 product
 #include <runtime/world/vehicle_motor.h>
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
@@ -100,12 +101,6 @@ inline int32_t bam_of_atan2(double y, double x) {
     return static_cast<int32_t>(std::atan2(y, x) * 683565275.5764316);
 }
 
-// Round-half-up 16.16 product [orig: the `imul; add 0x8000; adc; shrd 16`
-// idiom every solver product uses].
-inline int32_t q16_mul_rhu(int32_t a, int32_t b) {
-    return static_cast<int32_t>((static_cast<int64_t>(a) * b + 0x8000) >> 16);
-}
-
 // The witnessed solver normalize: `v * 65536.0 / sqrt(dot)` in x87 double,
 // EACH COMPONENT ftol'd back to a 16.16 int; zero length -> (0,0,0)
 // [orig: 0x46C9BA..0x46CA14 pattern, repeated at every edge/normal site].
@@ -121,9 +116,9 @@ inline void q16_normalize(const int64_t v[3], int32_t out[3]) {
 
 // Cross of two quantized 16.16 vectors, each term a round-half-up product.
 inline void q16_cross(const int32_t a[3], const int32_t b[3], int64_t r[3]) {
-    r[0] = int64_t(q16_mul_rhu(a[1], b[2])) - q16_mul_rhu(a[2], b[1]);
-    r[1] = int64_t(q16_mul_rhu(a[2], b[0])) - q16_mul_rhu(a[0], b[2]);
-    r[2] = int64_t(q16_mul_rhu(a[0], b[1])) - q16_mul_rhu(a[1], b[0]);
+    r[0] = int64_t(retail_q16_mul_rhu(a[1], b[2])) - retail_q16_mul_rhu(a[2], b[1]);
+    r[1] = int64_t(retail_q16_mul_rhu(a[2], b[0])) - retail_q16_mul_rhu(a[0], b[2]);
+    r[2] = int64_t(retail_q16_mul_rhu(a[0], b[1])) - retail_q16_mul_rhu(a[1], b[0]);
 }
 
 // The retail Q22 Rz(yaw)*Ry(-pitch)*Rx(roll) builder shared with collision and
