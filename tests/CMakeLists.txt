@@ -698,7 +698,10 @@ add_executable(gamecfg_roundtrip_test gamecfg/gamecfg_roundtrip_test.cpp)
 # opennova_runtime for game_cfg_weapon_roster (the retail leg's roster from weapon.def).
 target_link_libraries(gamecfg_roundtrip_test PRIVATE opennova_formats opennova_runtime)
 target_include_directories(gamecfg_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-opennova_add_mixed_test(gamecfg_roundtrip COMMAND gamecfg_roundtrip_test)
+# The core row only. The install leg (--retail) reads the install's own game.cfg, a
+# player-machine file the reference data never carries (gamecfg/game-cfg-re.md), so a
+# retail row could never be exercised in CI: run `gamecfg_roundtrip_test --retail` by hand.
+add_test(NAME gamecfg_roundtrip COMMAND gamecfg_roundtrip_test)
 
 add_executable(gamecfg_parse_test gamecfg/gamecfg_parse_test.cpp)
 target_link_libraries(gamecfg_parse_test PRIVATE opennova_formats)

@@ -2,9 +2,10 @@
 // tests/fixtures/minimal_gamecfg_gen.cpp through gamecfg::write) loads through
 // Game_LoadConfig's port and writes back byte for byte, in memory and through
 // load_file / save_file; the defaults write as Game_SaveConfig writes a fresh
-// state; and the activesrvr.txt marker is the dead host path's one line. The _retail
-// entry adds the install's own retail-written game.cfg, read in place, which writes back
-// byte for byte over the install's base weapon.def roster.
+// state; and the activesrvr.txt marker is the dead host path's one line. With --retail
+// (by hand against an install: no CTest row, since the reference data carries no
+// game.cfg) the install's own retail-written game.cfg, read in place, writes back byte
+// for byte over the install's base weapon.def roster.
 #include "common/file_io.h"
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
