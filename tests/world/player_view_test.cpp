@@ -1339,7 +1339,7 @@ void test_tick_mounted_anchor_ease() {
 // call steps it a thirty-second per axis toward the carrier matrix x (6, 0,
 // 0) — a pitched hull's target climbs with it — so the per-quantum and the
 // per-frame composes both advance it, and a higher frame rate eases faster.
-// [orig: g_camera_lookahead @0x43885A..0x4388AF inside
+// [orig: g_CameraLookaheadX..Z @0x43885A..0x4388AF inside
 //  Camera_ComputeThirdPersonView @0x437D10, called per quantum @0x526781 and
 //  per rendered frame @0x5CA34D]
 void test_mounted_lookahead_eases_on_every_compose() {

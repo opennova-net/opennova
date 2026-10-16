@@ -488,7 +488,7 @@ struct PlayerViewState {
     // carrier's matrix x 6.0 by EVERY compose of the mounted chase — each
     // logic quantum's and each rendered frame's, so the ease runs faster at a
     // higher frame rate exactly as retail's does; the look-at point is the
-    // pivot plus this [orig: g_camera_lookahead += (target - lookahead + 16)
+    // pivot plus this [orig: g_CameraLookaheadX..Z += (target - lookahead + 16)
     // >> 5 per axis @0x43885A..0x4388AF, inside Camera_ComputeThirdPersonView
     // @0x437D10 (called @0x526781 and @0x5CA34D)].
     int32_t lookahead_q16[3] = {0, 0, 0};

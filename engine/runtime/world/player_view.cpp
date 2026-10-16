@@ -867,7 +867,7 @@ void compose_chase_camera(PlayerViewState &v, const float position[3],
 
         // The look-ahead eases a thirty-second per axis on EVERY compose —
         // the logic quantum's and the rendered frame's — and rides the target
-        // [orig: g_camera_lookahead += (target - lookahead + 16) >> 5
+        // [orig: g_CameraLookaheadX..Z += (target - lookahead + 16) >> 5
         //  @0x43885A..0x4388AF; added onto the look-at deltas @0x43887B /
         //  @0x43888F / @0x4388A0].
         for (int i = 0; i < 3; ++i) {

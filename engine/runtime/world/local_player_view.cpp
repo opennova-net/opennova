@@ -129,7 +129,7 @@ void local_player_view_reset(World *world, LocalPlayerWeapon &w, PlayerViewState
     v.binoculars_raised = false;
     t.binocular_yaw_offset_deg = 0.0f;
     t.binocular_pitch_offset_deg = 0.0f;
-    t.binocular_sway_latched = false; // [orig: dword_29D6BA8 @0x5ca4b0]
+    t.binocular_sway_latched = false; // [orig: g_BinocularSwayLatched @0x5ca4b0]
     v.nvg_gain = kNvgGainMin;
     v.nvg_active = world != nullptr &&
                    (world->tables.mission_attrib_flags &
@@ -567,7 +567,7 @@ bool local_player_binoculars_toggle(World &world, const LocalPlayerWeapon &w,
 }
 
 // The once-per-activation sway seed [orig: Render_ProcessMainSceneFrame
-// @0x5ca3d3..0x5ca3f8, the clear @0x5ca4b0]. The retail latch dword_29D6BA8
+// @0x5ca3d3..0x5ca3f8, the clear @0x5ca4b0]. The retail latch g_BinocularSwayLatched
 // gates one Binoculars_RandomizeSwayOffsets @ 0x4dd830 call per activation,
 // and is cleared on every frame
 // the optical view is down. The draw comes off the SAME PRNG_Next16 owner
@@ -576,11 +576,11 @@ bool local_player_binoculars_toggle(World &world, const LocalPlayerWeapon &w,
 void local_player_binocular_sway_latch(World &world, const PlayerViewState &v,
                                        LocalPlayerViewTracker &t) {
     if (!v.binoculars_view_active) {
-        t.binocular_sway_latched = false; // [orig: dword_29D6BA8 = 0 @0x5ca4b0]
+        t.binocular_sway_latched = false; // [orig: g_BinocularSwayLatched = 0 @0x5ca4b0]
         return;
     }
     if (t.binocular_sway_latched) return;
-    t.binocular_sway_latched = true; // [orig: dword_29D6BA8 = 1 @0x5ca3e9]
+    t.binocular_sway_latched = true; // [orig: g_BinocularSwayLatched = 1 @0x5ca3e9]
     // PRNG_Next16() << 16 read as a full-circle BAM32 fraction is our
     // `unit_random` in [0, 1); the fixed-radius circle is kBinocularAimOffsetDeg.
     // [orig: Binoculars_RandomizeSwayOffsets @ 0x4dd830]

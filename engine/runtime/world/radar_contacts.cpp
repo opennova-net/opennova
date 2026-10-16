@@ -216,7 +216,7 @@ void round_tracer_whiz(World &world, LiveRound &round, const AmmoTableEntry *amm
 	const uint32_t flags = ammo->flags | (round.whiz_latched ? 0x40000u : 0u);
 	if ((flags & 0x10040000u) != 0) return;
 	// The listener box: start or end within the whiz radius on X, then on Y
-	// [orig: @0x4ea99a..0x4ea9ea over g_SoundListenerPos @0x24D6630].
+	// [orig: @0x4ea99a..0x4ea9ea over g_SoundListenerPosX..Z @0x24D6630].
 	const Vec3 &listener = world.out.fire_sounds.listener();
 	const int32_t lx = to_fixed(listener.x);
 	const int32_t ly = to_fixed(listener.y);

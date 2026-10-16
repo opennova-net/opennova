@@ -18,7 +18,7 @@ namespace opennova::profile {
 // @0x551500, run by Game_StartMission @0x524662 at every mission start]. The
 // same copy writes the mouse look's gate dword_24D2074 = 1 whatever +1420
 // holds (@0x551601..0x551606, after the controls apply's copy of +1420 at
-// sub_563620 @0x563652), so the mouse is always on in a mission; the
+// Profile_ApplySessionControls @0x563652), so the mouse is always on in a mission; the
 // ENABLE_JOYSTICK word reaches the input layer through apply_controls; +1436
 // (dword_24D208C, the joystick's analog channel 1 negate,
 // Input_TryTriggerAxisBinding @0x497c0c) and +1432 && +1444 (dword_24D20AC,
@@ -31,7 +31,7 @@ struct SessionInput {
 	// g_MouseSensitivity <- +1424, copied unclamped; the look scales by it << 11
 	// [orig: @0x551618..0x55161e; @0x4996dd].
 	int32_t mouse_sensitivity = 128;
-	// g_autoReloadEnabled <- +1524, forced 0 under `/noreload`
+	// g_AutoReloadEnabled <- +1524, forced 0 under `/noreload`
 	// [orig: @0x551a24..0x551a48; the flag Game_ParseCommandLineAndInit
 	//  @0x4a76d7..0x4a76e9 -> dword_B4C4F4].
 	bool auto_reload = true;
@@ -46,13 +46,13 @@ SessionInput session_input(const playersav::ProfileRecord &record, bool no_reloa
 // auto-reload global stands until the next mission start's session copy, its
 // one writer [orig: UI_IngameOptionsDialogEventHandler @0x555252..0x55525e
 // (g_MouseSensitivity <- +1424), @0x555264..0x555271 (g_MouseInvertY <- +1428);
-// g_autoReloadEnabled written only @0x551a40/@0x551a48].
+// g_AutoReloadEnabled written only @0x551a40/@0x551a48].
 SessionInput ingame_accept_input(const playersav::ProfileRecord &record, const SessionInput &live);
 
 // The record's binding table onto the live records: each entry's eight
 // binding fields onto the record of the row whose action code the entry's
 // row word (+4) names; a row the table does not carry keeps what it held
-// [orig: KeyBinding_ApplyProfileBindings @0x562e60 -> sub_562DF0 @0x562df0 (row 54 * entry+4: the
+// [orig: KeyBinding_ApplyProfileBindings @0x562e60 -> KeyBinding_ApplyProfileEntry @0x562df0 (row 54 * entry+4: the
 //  flag word, +24/+26 the keys, +28/+30 their modifiers, +32 the mouse mask,
 //  +34 its modifier, +36 the joystick binding, +37 its modifier)]. The flag
 // word the original copies too is the catalog row's own on every entry the
@@ -63,7 +63,7 @@ void apply_bindings(const playersav::ProfileRecord &record, controls::BindingSet
 // The controls apply every session start runs before the mission loads, and
 // the in-game options Accept with it: the binding table onto the live records
 // and the ENABLE_JOYSTICK word into the joystick gate
-// [orig: sub_563620 @0x563620 — +1432 -> dword_24D2088 @0x563664, KeyBinding_ApplyProfileBindings
+// [orig: Profile_ApplySessionControls @0x563620 — +1432 -> dword_24D2088 @0x563664, KeyBinding_ApplyProfileBindings
 //  @0x5636bf; callers SinglePlayer_StartMission @0x561bc1,
 //  UI_HandleHostSessionStart @0x556e77, the join's pre-game step sub_5693E0
 //  @0x5693ef, the NovaWorld URL host @0x54f30a; the in-game Accept's

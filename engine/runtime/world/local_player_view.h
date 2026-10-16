@@ -45,7 +45,7 @@ struct LocalPlayerViewTracker {
     // view is up and cleared on every frame it is down, so a raise that stays
     // suppressed (moving, dead, round over, third person) never draws
     // [orig: Render_ProcessMainSceneFrame @0x5ca3d3..0x5ca3f8 — the
-    //  `if (!dword_29D6BA8) { dword_29D6BA8 = 1; Binoculars_RandomizeSwayOffsets(); }`
+    //  `if (!g_BinocularSwayLatched) { g_BinocularSwayLatched = 1; Binoculars_RandomizeSwayOffsets(); }`
     //  arm, the clear @0x5ca4b0; the seeded pair is added to the view angles
     //  @0x5ca3f8..0x5ca407. Binoculars_RandomizeSwayOffsets @ 0x4dd830 writes
     //  the BINOCULAR SWAY pair: eight times truncated Q22 sin(angle)
@@ -53,7 +53,7 @@ struct LocalPlayerViewTracker {
     //  The port stores mission-coordinate degree deltas (yaw sign reversed).]
     float binocular_yaw_offset_deg = 0.0f;
     float binocular_pitch_offset_deg = 0.0f;
-    bool binocular_sway_latched = false; // dword_29D6BA8
+    bool binocular_sway_latched = false; // g_BinocularSwayLatched
     // The binocular tip's edge detector: the raw toggle as the previous frame
     // left it, seeded once on the first frame [orig: dword_B79438, seeded
     // behind dword_B7943C bit 0 @0x4de3d0..0x4de3e3 — process statics, so a
@@ -308,7 +308,7 @@ bool local_player_binoculars_toggle(World &world, const LocalPlayerWeapon &w,
                                     PlayerViewState &v, LocalPlayerViewTracker &t);
 
 // The binocular sway's ONCE-PER-ACTIVATION seed and its clear (the tracker's
-// `binocular_sway_latched` is retail's dword_29D6BA8). Runs when the rendered
+// `binocular_sway_latched` is retail's g_BinocularSwayLatched). Runs when the rendered
 // view is assembled; draws one PRNG_Next16 word on the activating frame
 // only. [orig: Render_ProcessMainSceneFrame @0x5ca3d3..0x5ca3f8 / @0x5ca4b0 ->
 //  Binoculars_RandomizeSwayOffsets @ 0x4dd830]

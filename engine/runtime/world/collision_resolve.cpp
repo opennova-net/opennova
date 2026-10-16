@@ -508,7 +508,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                         }
                     }
                     // The CD callback is peer-local and runs even with zero force.
-                    // [orig: Entity_ProcessCollisionAndPlatformPhysics @0x4B3505]
+                    // [orig: Entity_MovementCollisionResolver @0x4B3505]
                     if ((res.flags & kTouchDoor) != 0)
                         if (Entity *door = world.registry.get(ch))
                             world.doors.command(world, *door, 6, res.door_sections);

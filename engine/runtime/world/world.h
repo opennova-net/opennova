@@ -630,7 +630,7 @@ struct SessionRules {
     // the remote players' an authority pumps alike — an empty magazine's IDLE
     // queues the reload only with it set, and the last round's RECOIL queues it
     // only with it set. Default on, a fresh record's +1524 = 1.
-    // [orig: g_autoReloadEnabled @0x24D2118 <- Game_ApplySessionSettingsToGlobals
+    // [orig: g_AutoReloadEnabled @0x24D2118 <- Game_ApplySessionSettingsToGlobals
     //  @0x551a40 (forced 0 by `/noreload` @0x551a48); readers WeaponAction_Idle
     //  @0x5429a6 (no owner test) and WeaponAction_Recoil @0x543013 (the local
     //  player's arm)]

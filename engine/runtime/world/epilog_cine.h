@@ -136,7 +136,7 @@ struct CineEvent {
 	// An EpilogCounter's count-up column: the count stepped toward
 	// points_target by points_rate (+0x440) and the frames until its next step
 	// (+0x444) [orig: CineEventEpilogCounter's start @0x573370 and step
-	// CineNode_CounterStep @0x573390].
+	// CineEventEpilogCounter_Step @0x573390].
 	int32_t points = 0;
 	int32_t points_cooldown = 0;
 
@@ -183,7 +183,7 @@ inline constexpr float kEpilogFadeStep = 0.01f;
 // every step re-arm a four-frame wait [orig: @0x57337a / @0x573416].
 inline constexpr int32_t kEpilogCounterStepWait = 4;
 // The interface set a count-up column plays on the step that reaches its
-// target [orig: CineNode_CounterStep @0x573408 — Sound_PlayInterfaceTriggerSet
+// target [orig: CineEventEpilogCounter_Step @0x573408 — Sound_PlayInterfaceTriggerSet
 // of g_SndTextEnd, the registry @0x82F590's TEXT_END row].
 inline constexpr const char *kEpilogCounterEndSoundset = "TEXT_END";
 

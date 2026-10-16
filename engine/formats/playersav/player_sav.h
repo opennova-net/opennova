@@ -88,7 +88,7 @@ inline constexpr size_t kBindingTokenBytes = kBindingBytes - kBindingTokenOffset
 // One key-binding entry: a catalog row's identity and its eight binding
 // fields [orig: KeyBinding_BuildFilteredTable @0x54c2b0 builds them;
 // sort_and_copy_weapon_loadout_to_session @0x559d50 writes the live ones back;
-// UI_BuildKeyBindingLoadoutTable @0x559e50 and sub_562DF0 @0x562df0 read them].
+// UI_BuildKeyBindingLoadoutTable @0x559e50 and KeyBinding_ApplyProfileEntry @0x562df0 read them].
 struct BindingEntry {
 	uint16_t id = 0;          // +0, the catalog row's action id
 	int32_t index = 0;        // +4, the row's place in the sorted catalog (its id)

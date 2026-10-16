@@ -113,7 +113,7 @@ inline float aircraft_eye_drop(float carrier_radius) {
 // THE LOOK-AHEAD. Mounted (parent && slot 2/5) the look-at target is the
 // carrier's chassis matrix times (6.0, 0, 0) — rotation only, so it follows
 // the carrier's pitch and roll — eased into the camera's look-ahead offset a
-// thirty-second per axis (`g_camera_lookahead += (target - lookahead + 16)
+// thirty-second per axis (`g_CameraLookaheadX..Z += (target - lookahead + 16)
 // >> 5`) and added onto the eye accumulators; the final yaw comes from the
 // look-at (fpatan) [orig: @0x438811..0x4388b5]. The tracked-entity (on-foot)
 // leg uses 6 units along the entity's own yaw floored at terrain + 1.0

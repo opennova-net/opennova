@@ -428,7 +428,7 @@ int test_controls_words() {
                         a->joy_button == b->joy_button && a->joy_mod == b->joy_mod);
         }
     }
-    // The table onto the live records [orig: KeyBinding_ApplyProfileBindings -> sub_562DF0]: a row
+    // The table onto the live records [orig: KeyBinding_ApplyProfileBindings -> KeyBinding_ApplyProfileEntry]: a row
     // the table names takes the entry's fields, the joystick gate the word.
     controls::BindingSet live;
     const int forward = live.index_of_token("move_forward");
