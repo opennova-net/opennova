@@ -694,9 +694,11 @@ void HudMinimapCompiler::compile(const HudMinimapInput &input,
 		layout.sector_rows = input.terrain.sector_rows;
 		for (int sz = sz0; sz <= sz1; ++sz) {
 			for (int sx = sx0; sx <= sx1; ++sx) {
+				// The cell by the terrain's wrap flags (HudMinimapTerrain::wrap_x).
 				const terrain::CoordsSectorResolve sector =
 						terrain::coords_resolve_sector(layout, sx, sz,
-								terrain::coords_runtime_options());
+								terrain::coords_runtime_options(input.terrain.wrap_x,
+										input.terrain.wrap_z));
 				// A missing sector (grid id <= 0) is NOT skipped: the tile still
 				// draws, every UV zero and the texture Colormap0
 				// (tile_offset_x = max(sector, 0)) — the colormap's corner

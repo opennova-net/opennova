@@ -1571,6 +1571,8 @@ void HudOverlay::set_minimap_terrain(const Ref<TerrainData> &p_terrain,
 	terrain.origin_y = p_terrain->get_origin_y();
 	terrain.sector_count = p_terrain->get_sector_count();
 	terrain.sector_rows = p_terrain->get_sector_rows();
+	terrain.wrap_x = p_terrain->get_trn().wrap_x != 0;
+	terrain.wrap_z = p_terrain->get_trn().wrap_y != 0;
 	terrain.present = copy_count == static_cast<int64_t>(terrain.sector_grid.size()) &&
 			terrain.sector_count > 0 && terrain.sector_rows > 0;
 	// Retail's base pass samples the 512x512 colormap quadrants directly, as
