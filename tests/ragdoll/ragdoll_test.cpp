@@ -8,6 +8,7 @@
 #include <runtime/ragdoll/ragdoll_solver.h>
 #include <runtime/world/corpse_ragdoll.h>
 #include <runtime/world/infantry.h>
+#include <runtime/world/world.h>
 
 #include <cmath>
 #include <cstdio>
@@ -534,6 +535,41 @@ void test_corpse_death() {
 			"a round travelling west at a north-facing victim: from the right");
 }
 
+// The rules every machine must agree on, the world's (ADR 0060 d2, d6, d7): the kick's
+// seed from the wire handle and the clip id alone; the water start gate; the local
+// avatar's life, one more at every dead -> alive edge of the local player.
+void test_corpse_rules() {
+	using namespace opennova::world;
+	const int shot = anim_state::kDeathBulletBase + 4;
+	// Two machines that saw different respawn counts seed the same corpse alike.
+	expect(corpse_death(shot, 0x1234).kick.seed == corpse_death(shot, 0x1234).kick.seed &&
+	               corpse_death(shot, 0x1234).kick.seed == corpse_kick_seed(0x1234, shot),
+			"the seed is the wire handle's and the clip's");
+	expect(corpse_kick_seed(0x1234, shot) != corpse_kick_seed(0x1234, shot + 1) &&
+	               corpse_kick_seed(0x1234, shot) != corpse_kick_seed(0x1235, shot),
+			"another clip or another corpse seeds otherwise");
+
+	auto world = std::make_unique<World>();
+	expect(corpse_ragdoll_may_start(*world, -1000.0f), "a world with no water starts anywhere");
+	world->env.water_z = 10 << 16;
+	expect(!corpse_ragdoll_may_start(*world, 10.0f) && !corpse_ragdoll_may_start(*world, 9.5f),
+			"hips at or below the water keep retail's float");
+	expect(corpse_ragdoll_may_start(*world, 10.5f), "hips above the water start a ragdoll");
+
+	world->registry.configure_pool(0, 4);
+	Entity seed;
+	seed.kind = EntityKind::Organic;
+	world->cached.local_player = world->registry.spawn(0, seed);
+	LocalAvatarLife life;
+	Entity &self = *world->registry.get(world->cached.local_player);
+	expect(life.observe(*world) == 0, "the first life is 0");
+	self.flags |= kEntityFlagDead;
+	expect(life.observe(*world) == 0, "a death keeps the life");
+	self.flags &= ~kEntityFlagDead;
+	expect(life.observe(*world) == 1, "a respawn is a new life");
+	expect(life.observe(*world) == 1, "...once");
+}
+
 } // namespace
 
 int main() {
@@ -548,6 +584,7 @@ int main() {
 	test_tether();
 	test_set();
 	test_corpse_death();
+	test_corpse_rules();
 	if (failures == 0)
 		std::printf("ragdoll: all passed\n");
 	return failures == 0 ? 0 : 1;

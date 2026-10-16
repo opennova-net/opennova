@@ -48,12 +48,16 @@ ragdoll::Vec3 presentation(const FixedVec3 &m) {
 
 } // namespace
 
-CorpseDeath corpse_death(int anim_state, uint32_t seed) {
+uint32_t corpse_kick_seed(uint32_t wire_key, int anim_state) {
+	return wire_key * 0x9E3779B1u ^ static_cast<uint32_t>(anim_state) * 0x85EBCA77u;
+}
+
+CorpseDeath corpse_death(int anim_state, uint32_t wire_key) {
 	CorpseDeath d;
 	if (anim_state < anim_state::kDeathFire || anim_state > kDeathLast)
 		return d;
 	d.dying = true;
-	d.kick.seed = seed;
+	d.kick.seed = corpse_kick_seed(wire_key, anim_state);
 	if (anim_state == anim_state::kDeathFire || anim_state == anim_state::kDeathDrown)
 		return d;
 	d.ragdolls = true;
@@ -69,6 +73,27 @@ CorpseDeath corpse_death(int anim_state, uint32_t seed) {
 		d.kick.bone = kGroupBone[off / 4];
 	}
 	return d;
+}
+
+bool corpse_ragdoll_may_start(const World &world, float hips_height) {
+	return world.env.water_z == 0 ||
+			hips_height > static_cast<float>(world.env.water_z) * io::kInvFp16One;
+}
+
+int32_t LocalAvatarLife::observe(const World &world) {
+	const Entity *self = world.registry.get(world.cached.local_player);
+	if (self == nullptr)
+		return life_;
+	if (self->registry_spawn_id != spawn_id_) {
+		spawn_id_ = self->registry_spawn_id;
+		dead_known_ = false;
+	}
+	const bool dead = (self->flags & kEntityFlagDead) != 0;
+	if (dead_known_ && dead_ && !dead)
+		++life_;
+	dead_known_ = true;
+	dead_ = dead;
+	return life_;
 }
 
 bool WorldRagdollCollider::ground(
