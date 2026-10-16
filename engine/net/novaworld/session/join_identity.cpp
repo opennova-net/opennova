@@ -1,6 +1,7 @@
 #include <net/novaworld/join_identity.h>
 
 #include <base/io/strutil.h>
+#include <net/napi/tlv.h> // napi_copy_string
 #include <net/novacrypto/ap_alphabet.h>
 #include <net/novacrypto/pubcrypto.h>
 
@@ -78,14 +79,6 @@ constexpr std::size_t kPcidFieldCapacity = 32;      // [orig: @0x4c2734]
 constexpr std::size_t kSquadNameChars = 64;          // [orig: i = 65 .. > 1 @0x512dca]
 constexpr std::size_t kSquadTagChars = 8;            // [orig: j = 9 .. > 1 @0x512e0b]
 
-// Napi_CopyString(dst, src, N): at most N-1 characters, stopping at a NUL.
-std::string copy_capped(std::string_view src, std::size_t capacity) {
-	const std::size_t nul = src.find('\0');
-	if (nul != std::string_view::npos) src = src.substr(0, nul);
-	const std::size_t cap = capacity > 0 ? capacity - 1 : 0;
-	return std::string(src.substr(0, std::min(src.size(), cap)));
-}
-
 // The bounded string copy of the SQUADINFO walk: up to `chars` bytes from
 // `pos`, stopping at a NUL or at `end`.
 std::string bounded_string(const std::vector<uint8_t> &buf, std::size_t pos, std::size_t end,
@@ -98,7 +91,7 @@ std::string bounded_string(const std::vector<uint8_t> &buf, std::size_t pos, std
 } // namespace
 
 void set_join_account_pcid(JoinAccount &account, std::string_view pcid) {
-	account.pcid = copy_capped(pcid, kPcidFieldCapacity);
+	account.pcid = napi_copy_string(pcid, kPcidFieldCapacity);
 }
 
 bool decrypt_join_cookie_field(const JoinCookiePairs &cookie, const std::string &field_name,
@@ -113,7 +106,7 @@ bool decrypt_join_cookie_field(const JoinCookiePairs &cookie, const std::string 
 	}
 	if (value == nullptr) return false;
 	std::vector<uint8_t> decoded;
-	if (!decode_ap(copy_capped(*value, kCookieValueCapacity), decoded) ||
+	if (!decode_ap(napi_copy_string(*value, kCookieValueCapacity), decoded) ||
 			decoded.size() > kCookieValueCapacity || decoded.size() <= 4)
 		return false;
 	std::vector<uint8_t> plaintext;

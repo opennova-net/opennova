@@ -4,6 +4,7 @@
 
 #include <base/io/le.h>
 #include <base/io/strutil.h>
+#include <net/napi/tlv.h> // napi_copy_string
 
 #include <cstring>
 
@@ -22,14 +23,6 @@ void append_kv(std::vector<uint8_t> &out, const char *name, const void *data, ui
 
 void append_string_kv(std::vector<uint8_t> &out, const char *name, const std::string &value) {
 	append_kv(out, name, value.c_str(), static_cast<uint32_t>(value.size() + 1));
-}
-
-// Napi_CopyString(dst, src, n): at most n - 1 characters, stopping at the
-// source NUL, always terminated -- bounded here by the stream's end.
-std::string copy_capped(const uint8_t *src, std::size_t available, std::size_t cap) {
-	std::size_t n = 0;
-	while (n + 1 < cap && n < available && src[n] != 0) ++n;
-	return std::string(reinterpret_cast<const char *>(src), n);
 }
 
 } // namespace
@@ -74,7 +67,7 @@ void decode_session_vars(const uint8_t *data, std::size_t size, SessionVars &var
 		while (pos + key_len < size && key[key_len] != 0) ++key_len;
 		if (pos + key_len >= size)
 			break;
-		const std::string name = copy_capped(key, key_len + 1, 512);
+		const std::string name = napi_copy_string(key, key_len + 1, 512);
 		pos += key_len + 1;
 		if (pos + 4 > size)
 			break;
@@ -83,16 +76,16 @@ void decode_session_vars(const uint8_t *data, std::size_t size, SessionVars &var
 		const uint8_t *value = data + pos;
 		const std::size_t available = size - pos;
 		if (strutil::iequals(name, "SERVERNAME"))
-			vars.server_name = copy_capped(value, available, 32);
+			vars.server_name = napi_copy_string(value, available, 32);
 		else if (strutil::iequals(name, "MISSIONNAME"))
-			vars.mission_name = copy_capped(value, available, 64);
+			vars.mission_name = napi_copy_string(value, available, 64);
 		else if (strutil::iequals(name, "GAMETYPE")) {
 			if (available >= 4)
 				vars.game_type = io::read_u32_le(value);
 		} else if (strutil::iequals(name, "CUSTOMTEXT"))
-			vars.custom_text = copy_capped(value, available, 512);
+			vars.custom_text = napi_copy_string(value, available, 512);
 		else if (strutil::iequals(name, "MISSIONFILENAME"))
-			vars.mission_file = copy_capped(value, available, 64);
+			vars.mission_file = napi_copy_string(value, available, 64);
 		else if (strutil::iequals(name, "EXP_FANFARE")) {
 			if (available >= 2)
 				vars.exp_fanfare = static_cast<uint16_t>(value[0] | (value[1] << 8));

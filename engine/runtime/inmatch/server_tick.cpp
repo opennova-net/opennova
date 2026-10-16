@@ -18,7 +18,7 @@
 #include <vector>
 
 #include <base/gameprofile/game_type.h>        // the CTF / FlagBall / Flag Me carry-limit modes
-#include <base/io/le.h>                        // append_u16_le / append_u32_le (put_u16le / put_u32le)
+#include <base/io/le.h>                        // append_u16_le / append_u32_le
 #include <base/io/strutil.h>                   // iequals (the JOINTICKET key lookup)
 #include <net/npwire/ingame_encode.h>
 #include <net/npwire/ingame_message_id.h>
@@ -166,14 +166,6 @@ PlayerDeathFeed classify_player_death(
 	out.victim = victim_index;
 	out.aux = world::pool0_index_byte(killer_entity->primary_occupant);
 	return out;
-}
-
-void put_u16le(std::vector<uint8_t> &v, uint16_t x) {
-	opennova::io::append_u16_le(v, x);
-}
-
-void put_u32le(std::vector<uint8_t> &v, uint32_t x) {
-	opennova::io::append_u32_le(v, x);
 }
 
 constexpr uint32_t kPuntCharattrSilence = 16;
@@ -368,9 +360,9 @@ void route_match_gameplay_events(NapiNPServerCtx &ctx, world::World &world) {
 			feed.push_back(feed_actor);
 			feed.push_back(0xFF);
 			feed.push_back(0xFF);
-			put_u16le(feed, static_cast<uint16_t>(
+			io::append_u16_le(feed, static_cast<uint16_t>(
 					static_cast<uint32_t>(world::to_fixed(feed_position.x)) >> 16));
-			put_u16le(feed, static_cast<uint16_t>(
+			io::append_u16_le(feed, static_cast<uint16_t>(
 					static_cast<uint32_t>(world::to_fixed(feed_position.y)) >> 16));
 		}
 
@@ -875,7 +867,7 @@ void emit_requester_score_refreshes(NapiNPServerCtx &ctx,
 		if (score == conn.reply.score_delta_sound_value) continue;
 		conn.reply.score_delta_sound_value = score;
 		std::vector<uint8_t> body;
-		put_u32le(body, static_cast<uint32_t>(score));
+		io::append_u32_le(body, static_cast<uint32_t>(score));
 		conn.link.transport->host_send(
 				s2c::SCORE_DELTA_SOUND, std::move(body),
 				/*reliable=*/true);
@@ -991,7 +983,7 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 
 	if (ctx.is_in_session && organic_victim) {
 		std::vector<uint8_t> body13;
-		put_u16le(body13, d.victim_handle);
+		io::append_u16_le(body13, d.victim_handle);
 		// word1 = the victim's entity+0x2C0 death-anim slot AS THE SENDER
 		// SEES IT — never the killer. Both infantry death edges consume the
 		// slot into the anim state and ZERO it before the authority-gated
@@ -1012,7 +1004,7 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 				(victim_entity->item_type == 3 ||
 				 (victim_entity->item_type == 0 &&
 				  victim_entity->kind == world::EntityKind::Organic));
-		put_u16le(body13, victim_entity != nullptr && !edge_consumes_slot
+		io::append_u16_le(body13, victim_entity != nullptr && !edge_consumes_slot
 				? static_cast<uint16_t>(victim_entity->death_anim_state)
 				: uint16_t{0});
 		std::vector<uint8_t> body1e;
@@ -1025,8 +1017,8 @@ void Server_ProcessPlayerDeath(NapiNPServerCtx &ctx, world::World &world,
 			// to other 0x1E producers, not this feed family.
 			// [orig: GameEvent_PlayerDeath @0x516DD0 (the GameEvent_BuildPayload
 			//  call @0x517362; 0x51737b is the payload-length store)]
-			put_u16le(body1e, 0);
-			put_u16le(body1e, 0);
+			io::append_u16_le(body1e, 0);
+			io::append_u16_le(body1e, 0);
 		}
 		// First broadcast the ordinary death record with mask 0x90
 		// (active players, not the listen host).
@@ -1252,7 +1244,7 @@ void emit_periodic_rtt(NapiNPServerCtx &ctx, const world::World &world) {
 				conn.s2c_send_holdoff_countdown != 0 || conn.reply.rtt_request_countdown != 0) continue;
 		conn.reply.rtt_request_countdown = 62;
 		std::vector<uint8_t> body;
-		put_u32le(body, io::host_milliseconds_for_logic_tick(world.logic_tick));
+		io::append_u32_le(body, io::host_milliseconds_for_logic_tick(world.logic_tick));
 		body.push_back(1);
 		conn.link.transport->host_send(s2c::RTT_ECHO, std::move(body), true, 0, false, 62);
 	}
@@ -1390,7 +1382,7 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 				if (reply.control_challenge_seed == 0)
 					reply.control_challenge_seed = next_maintenance_prng16(world);
 				std::vector<uint8_t> challenge;
-				put_u32le(challenge, reply.control_challenge_seed);
+				io::append_u32_le(challenge, reply.control_challenge_seed);
 				conn.link.transport->host_send(
 						s2c::CHARATTR_CRC_CHALLENGE, std::move(challenge));
 
@@ -1414,7 +1406,7 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 					reply.time_sync_round_host_ms = host_ms;
 				}
 				std::vector<uint8_t> time_sync;
-				put_u32le(time_sync, reply.time_sync_sequence);
+				io::append_u32_le(time_sync, reply.time_sync_sequence);
 				conn.link.transport->host_send(
 						s2c::TIME_SYNC_PING, std::move(time_sync));
 
@@ -1428,7 +1420,7 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 							ctx.loaded_model_viewport_height)
 						reply.loaded_model_page_cursor = 0;
 					std::vector<uint8_t> model_page;
-					put_u32le(model_page, reply.loaded_model_page_cursor);
+					io::append_u32_le(model_page, reply.loaded_model_page_cursor);
 					conn.link.transport->host_send(
 							s2c::LOADED_MODEL_PAGE_REQUEST, std::move(model_page),
 							/*reliable=*/false);
@@ -1549,7 +1541,7 @@ std::vector<uint8_t> Server_RerollPlayerTickSeed(
 	connection.fire_tick_mode = true;
 	std::vector<uint8_t> body;
 	body.reserve(4);
-	put_u32le(body, connection.tick_seed);
+	io::append_u32_le(body, connection.tick_seed);
 	return body;
 }
 
@@ -2061,7 +2053,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			if (const auto *control =
 						std::get_if<world::ZoneCaptureEvents::Control>(&event)) {
 				std::vector<uint8_t> body;
-				put_u16le(body, control->zone.packed);
+				io::append_u16_le(body, control->zone.packed);
 				body.push_back(control->team);
 				const uint32_t value = static_cast<uint32_t>(control->control);
 				body.push_back(static_cast<uint8_t>(value & 0xFF));
@@ -2072,7 +2064,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 				body.push_back(0x00);
 				body.push_back(0x01);
 				body.push_back(0x00);
-				put_u16le(body, static_cast<uint16_t>(control->delta));
+				io::append_u16_le(body, static_cast<uint16_t>(control->delta));
 				body.push_back(control->friendlies);
 				body.push_back(control->enemies);
 				auto cached = ctx.zone_6f_cache.find(control->zone.packed);
@@ -2120,11 +2112,11 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			if (const auto *window =
 						std::get_if<world::ZoneCaptureEvents::TimerWindow>(&event)) {
 				std::vector<uint8_t> body;
-				put_u16le(body, window->zone.packed);
+				io::append_u16_le(body, window->zone.packed);
 				body.push_back(window->current_team);
 				body.push_back(window->capturing_team);
-				put_u16le(body, window->progress);
-				put_u16le(body, window->limit);
+				io::append_u16_le(body, window->progress);
+				io::append_u16_le(body, window->limit);
 				body.push_back(window->rate);
 				send_all(s2c::ZONE_TIMER_WINDOW, body);
 				continue;
@@ -2132,7 +2124,7 @@ void Server_TickUpdate(NapiNPServerCtx &ctx) {
 			if (const auto *presence =
 						std::get_if<world::ZoneCaptureEvents::Presence>(&event)) {
 				std::vector<uint8_t> body;
-				put_u16le(body, presence->zone.packed);
+				io::append_u16_le(body, presence->zone.packed);
 				body.push_back(presence->count);
 				send_all(s2c::ZONE_PRESENCE_COUNT, body);
 				continue;

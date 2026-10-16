@@ -16,6 +16,7 @@
 // Header-only so every consumer (npwire, runtime/inmatch) shares one reader.
 
 #include <base/io/le.h>
+#include <net/napi/tlv.h> // napi_copy_string
 
 #include <cstddef>
 #include <cstdint>
@@ -114,10 +115,7 @@ inline uint32_t load_value_dword(const uint8_t *value, const uint8_t *end) {
 // [orig: Napi_CopyString @0x617E10 - the NUL test @0x617E32, the `buffer - 1`
 //  bound @0x617E41..0x617E44]
 inline std::string load_value_string(const uint8_t *value, const uint8_t *end, size_t buffer) {
-	std::string out;
-	for (const uint8_t *p = value; p < end && *p != 0 && out.size() + 1 < buffer; ++p)
-		out.push_back(static_cast<char>(*p));
-	return out;
+	return napi_copy_string(value, end > value ? static_cast<size_t>(end - value) : 0u, buffer);
 }
 
 // Append one field. `size` is the raw value length: a string value carries its

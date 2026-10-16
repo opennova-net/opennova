@@ -34,10 +34,6 @@ constexpr const char *kTableHeader = "NAME            \t #\tTEAM\tClass\tKills\t
 // SendFiltered(0x14, 1, 0x136). [orig: CAdminServer_HandleFunCommand, ARMAGEDDON]
 constexpr uint32_t kChatRetentionFlushes = 0x136;
 
-bool ieq(std::string_view a, std::string_view b) {
-	return strutil::iequals(a, b);
-}
-
 int32_t atol_of(const std::string &s) {
 	return io::retail_atol(s.c_str());
 }
@@ -226,7 +222,7 @@ void AdminConsole::handle_player(const Args &args, std::vector<std::string> &rep
 		return;
 	}
 	const std::string &sub = args[0];
-	if (ieq(sub, "LIST")) {
+	if (strutil::iequals(sub, "LIST")) {
 		replies.push_back(in_game() ? player_table() : std::string("ERROR - Not in Game State."));
 		return;
 	}
@@ -234,7 +230,7 @@ void AdminConsole::handle_player(const Args &args, std::vector<std::string> &rep
 		replies.emplace_back(kPlayerUsage);
 		return;
 	}
-	const bool all = ieq(args[1], "ALL");
+	const bool all = strutil::iequals(args[1], "ALL");
 	const uint8_t number = all ? 0 : static_cast<uint8_t>(atol_of(args[1]));
 	NapiNPConnection *target = nullptr;
 	// A Serve Only host's own slot 0 is found like any active slot; each verb acts on its
@@ -252,7 +248,7 @@ void AdminConsole::handle_player(const Args &args, std::vector<std::string> &rep
 			return;
 		}
 	}
-	if (ieq(sub, "PUNT")) {
+	if (strutil::iequals(sub, "PUNT")) {
 		// The number, not the matched slot, is what is tested and punted.
 		// [orig: @0x40409F..0x40414F]
 		if (all) {
@@ -266,7 +262,7 @@ void AdminConsole::handle_player(const Args &args, std::vector<std::string> &rep
 		}
 		return;
 	}
-	if (ieq(sub, "SWAPTEAM")) {
+	if (strutil::iequals(sub, "SWAPTEAM")) {
 		// ALL walks every active slot from slot 0, the host's own row first (swap_host_team);
 		// the row's body is D-NET-352's. [orig: @0x404197..0x4041D9, @0x4041ED..0x404202]
 		if (all) {
@@ -282,7 +278,7 @@ void AdminConsole::handle_player(const Args &args, std::vector<std::string> &rep
 		}
 		return;
 	}
-	if (ieq(sub, "KILL")) {
+	if (strutil::iequals(sub, "KILL")) {
 		// The single form tests for no entity in retail (D-NET-369); the walk skips one. The
 		// host's own row dies through its body (D-NET-352). [orig: @0x404253..0x40425E,
 		//  @0x404284..0x404291]
@@ -297,7 +293,7 @@ void AdminConsole::handle_player(const Args &args, std::vector<std::string> &rep
 		replies.emplace_back(all ? "OK - All Players Killed." : "OK - Player Killed.");
 		return;
 	}
-	if (ieq(sub, "ZEROSCORE")) {
+	if (strutil::iequals(sub, "ZEROSCORE")) {
 		// The slot's CPlayerStats freed and re-initialised. ALL takes every active slot with an
 		// entity, which retail's host slot has (its hidden body, D-NET-352), so its row is
 		// zeroed too. [orig: ALL @0x4042B7..0x4042FE (+4, the entity +0), one slot
@@ -317,7 +313,7 @@ void AdminConsole::handle_player(const Args &args, std::vector<std::string> &rep
 		}
 		return;
 	}
-	if (ieq(sub, "BAN")) {
+	if (strutil::iequals(sub, "BAN")) {
 		if (all) {
 			// Every active non-local slot with an entity: its lines, the punt and `OK - All
 			// Players Banned.` each, and no closing reply; the host's own slot is local.
@@ -341,7 +337,7 @@ void AdminConsole::handle_player(const Args &args, std::vector<std::string> &rep
 		if (ban_slot(ctx_, *target, replies)) replies.emplace_back("OK - Player Banned.");
 		return;
 	}
-	if (ieq(sub, "CEASEFIRE")) replies.emplace_back(all ? "OK - All Players Modified." : "OK - Player Modified.");
+	if (strutil::iequals(sub, "CEASEFIRE")) replies.emplace_back(all ? "OK - All Players Modified." : "OK - Player Modified.");
 }
 
 // [orig: CAdminServer_HandleFunCommand @0x404E30 (@0x404E3F..0x40517F) — no argument an empty
@@ -353,7 +349,7 @@ void AdminConsole::handle_fun(const Args &args, std::vector<std::string> &replie
 	}
 	const std::string &sub = args[0];
 	world::World *world = ctx_.world;
-	if (ieq(sub, "SEXCHANGE") && args.size() > 1) {
+	if (strutil::iequals(sub, "SEXCHANGE") && args.size() > 1) {
 		// Two combos from the avatar table: the first female head (the found combo's +280 sex)
 		// of an evil nationality and of a good one, walking nationality 0..31, division
 		// 0..15, the combos in table order; each matching slot (compared by its TEAM byte
@@ -365,7 +361,7 @@ void AdminConsole::handle_fun(const Args &args, std::vector<std::string> &replie
 		//  nationality's alignment)]
 		uint16_t evil_model = 0xFFFF;
 		uint16_t good_model = 0xFFFF;
-		const bool all = ieq(args[1], "ALL");
+		const bool all = strutil::iequals(args[1], "ALL");
 		const uint8_t target = all ? 0 : static_cast<uint8_t>(atol_of(args[1]));
 		const auto both = [&] { return evil_model != 0xFFFF && good_model != 0xFFFF; };
 		if (seams_.characters != nullptr) {
@@ -399,7 +395,7 @@ void AdminConsole::handle_fun(const Args &args, std::vector<std::string> &replie
 				Server_ChangeEntityTeam(ctx_, *world, slot->link.owned_entity, team);
 			}
 		}
-	} else if (ieq(sub, "ARMAGEDDON")) {
+	} else if (strutil::iequals(sub, "ARMAGEDDON")) {
 		// Every active slot's entity to the origin (+4 / +8 / +12), then S2C 0x14 [0][slot]
 		// ["ARMAGEDDON!!!"] to every in-match slot, the slot byte read one past the table's
 		// last slot in retail (D-NET-369: no sender, 0xFF, here).
@@ -416,11 +412,11 @@ void AdminConsole::handle_fun(const Args &args, std::vector<std::string> &replie
 			if (!active_player_recipient(conn)) continue;
 			conn.link.transport->host_send(s2c::CHAT_BROADCAST, body, true, 0, false, kChatRetentionFlushes);
 		}
-	} else if (ieq(sub, "FLING")) {
+	} else if (strutil::iequals(sub, "FLING")) {
 		// None, or ALL, means every active slot; else the slot whose number matches. Each one's
 		// vertical velocity (+160, the organic's InfantryState::vel[2]) becomes
 		// `(rand() + 0xFFFF) & 0x7FFFFFFF`; a slot with no entity is skipped (D-NET-369).
-		const bool all = args.size() == 1 || ieq(args[1], "ALL");
+		const bool all = args.size() == 1 || strutil::iequals(args[1], "ALL");
 		const uint8_t target = all ? 0 : static_cast<uint8_t>(atol_of(args[1]));
 		if (world != nullptr) {
 			for (NapiNPConnection *slot : active_slots(ctx_)) {

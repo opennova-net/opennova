@@ -192,10 +192,6 @@ std::vector<std::string_view> split_command(std::string_view line) {
 	return tokens;
 }
 
-bool ieq(std::string_view a, std::string_view b) {
-	return strutil::iequals(a, b);
-}
-
 // The keys SET writes; any other key with a value draws the usage and then
 // `ERROR - Setting Not Found.`. [orig: CAdminServer_HandleSetCommand @0x405A60 — the compares
 //  @0x405B93..0x406185, the not-found tail]
@@ -220,13 +216,13 @@ AdminReplyPlan admin_reply_plan(std::string_view command) {
 	if (t.empty()) return exact(1); // the usage
 	const std::string_view verb = t[0];
 	// QUIT returns 0 and the slot closes, with no reply. [orig: @0x406811]
-	if (ieq(verb, "QUIT")) return exact(0);
+	if (strutil::iequals(verb, "QUIT")) return exact(0);
 	// SET: no argument, or a key alone (a password cleared, else the usage): one; a key and a
 	// value: one, or the usage and `ERROR - Setting Not Found.` for a key it does not know.
-	if (ieq(verb, "SET")) {
+	if (strutil::iequals(verb, "SET")) {
 		if (t.size() < 3) return exact(1);
 		for (const char *key : kSetKeys) {
-			if (ieq(t[1], key)) return exact(1);
+			if (strutil::iequals(t[1], key)) return exact(1);
 		}
 		return exact(2);
 	}
@@ -236,14 +232,14 @@ AdminReplyPlan admin_reply_plan(std::string_view command) {
 	// more per qualifying slot, or none; any other sub-verb none for a found target.
 	// [orig: CAdminServer_HandlePlayer @0x403EF0 — LIST @0x403F7C, the target @0x40407E..0x404136,
 	//  BAN ALL @0x404298..0x40444B, BAN <#> @0x40445D..0x404539, CEASEFIRE @0x404543..0x404573]
-	if (ieq(verb, "PLAYER")) {
-		if (t.size() < 2 || ieq(t[1], "LIST") || t.size() < 3) return exact(1);
+	if (strutil::iequals(verb, "PLAYER")) {
+		if (t.size() < 2 || strutil::iequals(t[1], "LIST") || t.size() < 3) return exact(1);
 		const std::string_view sub = t[1];
-		if (ieq(sub, "PUNT") || ieq(sub, "SWAPTEAM") || ieq(sub, "KILL") || ieq(sub, "ZEROSCORE") ||
-				ieq(sub, "CEASEFIRE"))
+		if (strutil::iequals(sub, "PUNT") || strutil::iequals(sub, "SWAPTEAM") || strutil::iequals(sub, "KILL") || strutil::iequals(sub, "ZEROSCORE") ||
+				strutil::iequals(sub, "CEASEFIRE"))
 			return exact(1);
-		if (ieq(sub, "BAN")) {
-			if (ieq(t[2], "ALL")) return AdminReplyPlan{ AdminReplyFraming::QuietGap, 0 };
+		if (strutil::iequals(sub, "BAN")) {
+			if (strutil::iequals(t[2], "ALL")) return AdminReplyPlan{ AdminReplyFraming::QuietGap, 0 };
 			return AdminReplyPlan{ AdminReplyFraming::BanTarget, 0 };
 		}
 		return AdminReplyPlan{ AdminReplyFraming::QuietGap, 0 };
@@ -252,9 +248,9 @@ AdminReplyPlan admin_reply_plan(std::string_view command) {
 	// it); GAMESTATE and any other target a reply of their own and then the tail.
 	// [orig: CAdminServer_HandleGotoCommand @0x4049D0 — the usage @0x4049E4, the arms' reply
 	//  @0x404A6F, the tail @0x404A88 / @0x404AAF]
-	if (ieq(verb, "GOTO")) {
+	if (strutil::iequals(verb, "GOTO")) {
 		if (t.size() < 2) return exact(1);
-		if (ieq(t[1], "MENUSTATE")) return AdminReplyPlan{ AdminReplyFraming::MenuState, 0 };
+		if (strutil::iequals(t[1], "MENUSTATE")) return AdminReplyPlan{ AdminReplyFraming::MenuState, 0 };
 		return exact(2);
 	}
 	// GET, MISSION (every sub-verb, ADD's `OK - Entry Added` in any state, AVAILABLE's empty
