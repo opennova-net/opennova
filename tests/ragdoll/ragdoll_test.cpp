@@ -493,6 +493,18 @@ void test_set() {
 	std::printf("set after the drift: awake %d sleeping %d\n", drifted.awake, drifted.sleeping);
 	expect(drifted.awake <= RagdollSet::kMaxAwake, "a drifting sleeper wakes only into the budget");
 	expect(drifted.awake + drifted.sleeping == RagdollSet::kMaxAwake + 4, "...and every ragdoll is kept");
+	// Four of the awake corpses go (hidden): the four drifted sleepers, put down by the
+	// burst (the oldest, 100..103), wake into the freed budget on the next tick.
+	for (uint32_t k = 100; k < 100 + RagdollSet::kMaxAwake + 4; ++k) {
+		SubjectHead h = head_for(k, kShot);
+		h.hidden = k >= 104 && k < 108;
+		many.observe(h);
+		many.feed(k, Xform{}, lower);
+	}
+	many.step(1, ground);
+	expect(many.ragdoll(100) != nullptr && !many.ragdoll(100)->asleep(),
+			"a drifted sleeper wakes when the budget has room");
+	expect(many.stats().awake <= RagdollSet::kMaxAwake, "...still inside the budget");
 
 	set.set_enabled(false);
 	const RagdollStats off = set.stats();
@@ -568,6 +580,11 @@ void test_corpse_rules() {
 	self.flags &= ~kEntityFlagDead;
 	expect(life.observe(*world) == 1, "a respawn is a new life");
 	expect(life.observe(*world) == 1, "...once");
+	// A dead local player replaced by another, live entity: a new life, no edge seen.
+	self.flags |= kEntityFlagDead;
+	expect(life.observe(*world) == 1, "a death keeps the life");
+	world->cached.local_player = world->registry.spawn(0, seed);
+	expect(life.observe(*world) == 2, "another entity as the local player is a new life");
 }
 
 } // namespace

@@ -84,7 +84,11 @@ int32_t LocalAvatarLife::observe(const World &world) {
 	const Entity *self = world.registry.get(world.cached.local_player);
 	if (self == nullptr)
 		return life_;
+	// Another entity as the local player is a new life too, its old corpse ended
+	// at once rather than blended onto the new body.
 	if (self->registry_spawn_id != spawn_id_) {
+		if (dead_known_)
+			++life_;
 		spawn_id_ = self->registry_spawn_id;
 		dead_known_ = false;
 	}

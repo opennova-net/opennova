@@ -46,7 +46,8 @@ inline constexpr uint32_t kLocalAvatarRagdollKey = 0x80000000u;
 // The local avatar's life: one more at every dead -> alive edge of the local
 // player's Dead flag, counted as the pool rows count theirs (inmatch
 // present_rows' respawn revision), so its ragdoll ends at once on a respawn
-// (ADR 0060 d6). A new local player starts it over.
+// (ADR 0060 d6). Another entity taking the local player's place is a new life
+// as well.
 class LocalAvatarLife {
 public:
 	int32_t observe(const World &world);
