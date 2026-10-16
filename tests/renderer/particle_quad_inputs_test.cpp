@@ -122,6 +122,14 @@ void scale_lut_lerps_into_the_half_extent() {
 			r::particle_quad_inputs(particle, definition, graphic, false, {}, kIdentityView);
 	check(near(last.half_extent, 4.0f * 200.0f / 128.0f * 0.5f), "lut[255] clamps the i + 1 read");
 
+	// Off the midpoint the port keeps its own weights: lut[i] by 1 - frac
+	// gives 64 x 0.75 + 192 x 0.25 = 96 -> 1.5, where retail's lut[i+1] by
+	// 1 - frac gives 160 -> 2.5 (D-PTL-X1, OPEN: porting it updates this).
+	particle.curve_phase = 20.25f;
+	const r::ParticleQuadInputs quarter =
+			r::particle_quad_inputs(particle, definition, graphic, false, {}, kIdentityView);
+	check(near(quarter.half_extent, 1.5f), "the port's lerp weights at a quarter phase (D-PTL-X1)");
+
 	particle.flags = 0;
 	const r::ParticleQuadInputs unscaled =
 			r::particle_quad_inputs(particle, definition, graphic, false, {}, kIdentityView);
@@ -147,6 +155,21 @@ void the_tint_pick_and_its_saturation() {
 	const r::ParticleQuadInputs modulated =
 			r::particle_quad_inputs(particle, definition, graphic, false, tints, kIdentityView);
 	check(byte_at(modulated.primary_color, 16) == 63, "modulator red: (255 * 32) >> 7 = 63");
+
+	// A curved channel under a tint truncates once in the port: 1.0 x 0.5 x
+	// 1.5 = 0.75 -> 191, where retail truncates twice, ((128 x 255) >> 8) =
+	// 127, (127 x 192) >> 7 = 190 (D-PTL-X2, OPEN: porting it updates this).
+	p::Particle curved = white_particle();
+	curved.flags = p::particle_runtime_flag::RedCurve;
+	p::GraphicLayer red_curve;
+	red_curve.present = true;
+	bake(red_curve.red_func, 128);
+	r::ParticleQuadTints one_and_a_half;
+	one_and_a_half.modulator = {1.5f, 1.0f, 1.0f};
+	const r::ParticleQuadInputs tinted_curve = r::particle_quad_inputs(
+			curved, definition, red_curve, false, one_and_a_half, kIdentityView);
+	check(byte_at(tinted_curve.primary_color, 16) == 191,
+			"the port's one truncation under a 1.5 tint (D-PTL-X2)");
 
 	// Which definitions take the ambient tint (Initialize @ 0x5e6038..0x5e605e).
 	p::ParticleDef authored;

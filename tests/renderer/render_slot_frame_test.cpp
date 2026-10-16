@@ -244,6 +244,41 @@ int main() {
 				!same3(lit->drape.ambient, {1.0f, 1.0f, 1.0f}));
 	}
 
+	// --- a grazing sun the 0.25 clamp leaves non-unit: the sun leg's ambient,
+	// the lod and the depth clip read the RAW stored direction
+	// (-1, -0.25, -1), never its unit twin (y -0.174).
+	{
+		SlotFrameInput low = input;
+		low.sun_direction = slot_projection_direction({1.0f, 0.0f, 1.0f});
+		const std::array<float, 3> raw = low.sun_direction;
+		const float len = std::sqrt(raw[0] * raw[0] + raw[1] * raw[1] + raw[2] * raw[2]);
+		const float unit_y = raw[1] / len;
+		CHECK(near_f(raw[1], -0.25f) && !near_f(unit_y, raw[1], 0.05f));
+		std::map<uint64_t, SlotFrameCaster> one;
+		one[1] = caster_at(10.0f, 2.0f, 0.0f, 1.0f, 2.0f);
+		const SlotFrameCasterLookup only = [&](uint64_t id) -> const SlotFrameCaster * {
+			const auto found = one.find(id);
+			return found != one.end() ? &found->second : nullptr;
+		};
+		SlotFrame grazing;
+		slot_frame(low, {assignment(1, 0, 0)}, only, {}, nullptr, flat, grazing);
+		CHECK(grazing.slots.size() == 1);
+		if (grazing.slots.size() == 1) {
+			const SlotFrameDrape &drape = grazing.slots[0].drape;
+			CHECK(same3(drape.ambient, drape_sun_ambient(low.sun_rgb, low.sky_rgb, raw[1], 0.0f)));
+			CHECK(!same3(drape.ambient, drape_sun_ambient(low.sun_rgb, low.sky_rgb, unit_y, 0.0f)));
+			// (0.5 + 0.5 / 0.25) x 6 = 15; the unit vertical would give 20.
+			CHECK(drape.lod == 15);
+			const SlotDepthClip raw_clip = slot_depth_clip(raw, 2.5f, false, {10.0f, 2.0f, 0.0f});
+			const SlotDepthClip unit_clip = slot_depth_clip(
+					{raw[0] / len, raw[1] / len, raw[2] / len}, 2.5f, false, {10.0f, 2.0f, 0.0f});
+			CHECK(drape.clip.u_offset == raw_clip.u_offset &&
+					drape.clip.v_offset == raw_clip.v_offset);
+			CHECK(!near_f(drape.clip.v_offset, unit_clip.v_offset, 1.0e-7f) ||
+					!near_f(drape.clip.u_offset, unit_clip.u_offset, 1.0e-7f));
+		}
+	}
+
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

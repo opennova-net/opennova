@@ -1,11 +1,17 @@
 // The render-slot pass's per-slot frame: for every slot the plan assigned
 // (render_slot_shadow.h RenderSlotPlan::assign), what the frame captures and
-// what it drapes, composed from the planner's leaf laws in retail's order
-// [orig: Render_ShadowPass @ 0x5d7b70 — the light pick and march
-// (RenderSlot_UpdateEntityLight @ 0x5d6a30), the silhouette capture
-// (RenderSlot_RenderEntityAndChildren @ 0x5d7690) and the drape
-// (RenderSlot_DrawAllDrapes @ 0x5d6e20 -> RenderSlot_DrawSilhouetteDrape
-// @ 0x5d5ca0)]. The embedder marshals the casters, their capture-with links,
+// what it drapes, composed from the planner's leaf laws. Retail runs the
+// three stages at three sites: the light pick and march in the entity update
+// [orig: RenderSlot_UpdateEntityLight @ 0x5d6a30, called from
+// Entity_UpdateAllEntities @ 0x4c25fa], the silhouette capture in the shadow
+// pass [orig: RenderSlot_RenderEntityAndChildren @ 0x5d7690, called from
+// Render_ShadowPass @ 0x5d7c95] and the drapes in the terrain render
+// [orig: RenderSlot_DrawAllDrapes @ 0x5d6e20, called from
+// Terrain_RenderMainSectorPass @ 0x610c47 -> RenderSlot_DrawSilhouetteDrape
+// @ 0x5d5ca0]; this function composes each stage's per-slot outcome once per
+// display frame (the pick's cadence, render-lighting-re.md's accepted
+// divergence), each stage's own rules as retail orders them. The embedder
+// marshals the casters, their capture-with links,
 // the point lights a slot may pick and the terrain height, and keeps the
 // device half: the capture targets and their draws, the capture eye
 // (docs/render/render-lighting-re.md D-RLIT-10), the drape projection and
