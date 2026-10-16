@@ -6,6 +6,7 @@
 #include <base/io/crt_ftol.h>
 #include <base/io/file_io.h>
 #include <base/io/os_path.h>
+#include <base/io/strutil.h>
 
 #include <cstdio>
 #include <cstring>
@@ -14,15 +15,11 @@ namespace opennova::gamecfg {
 
 namespace {
 
-char ascii_lower(char c) {
-	return (c >= 'A' && c <= 'Z') ? static_cast<char>(c + ('a' - 'A')) : c;
-}
-
 // _stricmp == 0 and Napi_StrCaseEqual in the C locale: an ASCII case fold
 // [orig: _stricmp @0x76FDF6; Napi_StrCaseEqual @0x616E70].
 bool equal_nocase(const char *a, const char *b) {
 	for (;; ++a, ++b) {
-		if (ascii_lower(*a) != ascii_lower(*b)) return false;
+		if (strutil::ascii_tolower(*a) != strutil::ascii_tolower(*b)) return false;
 		if (*a == 0) return true;
 	}
 }
@@ -30,7 +27,7 @@ bool equal_nocase(const char *a, const char *b) {
 // _strnicmp(a, b, n) == 0 [orig: _strnicmp @0x7706B6].
 bool equal_nocase_n(const char *a, const char *b, size_t n) {
 	for (size_t i = 0; i < n; ++i) {
-		if (ascii_lower(a[i]) != ascii_lower(b[i])) return false;
+		if (strutil::ascii_tolower(a[i]) != strutil::ascii_tolower(b[i])) return false;
 		if (a[i] == 0) return true;
 	}
 	return true;
@@ -628,7 +625,7 @@ void apply_line(GameCfg &cfg, const io::ConfigTokens &line, const WeaponRoster &
 
 	// The switch on the lowercased first letter, 'a'..'x' [orig: @0x54F771..
 	// 0x54F78D, the jump table @0x551418; any other letter is the default].
-	const char arm = ascii_lower(key[0]);
+	const char arm = strutil::ascii_tolower(key[0]);
 	if (arm < 'a' || arm > 'x') return;
 	for (const SwitchKey &k : kSwitchKeys) {
 		if (k.arm != arm || !equal_nocase(key, k.name)) continue;
@@ -656,7 +653,7 @@ auto find_int_word(Cfg &cfg, const char *key) -> decltype(&(cfg.*kConfigVarRows[
 				row.type == ConfigVarType::Bool;
 		return int_row && row.int_field != nullptr ? &(cfg.*row.int_field) : nullptr;
 	}
-	const char arm = ascii_lower(key[0]);
+	const char arm = strutil::ascii_tolower(key[0]);
 	for (const SwitchKey &k : kSwitchKeys) {
 		if (k.arm != arm || !equal_nocase(key, k.name)) continue;
 		return k.int_field != nullptr ? &(cfg.*k.int_field) : nullptr;

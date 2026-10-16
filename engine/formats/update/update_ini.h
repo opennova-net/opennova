@@ -50,7 +50,4 @@ private:
 	std::vector<std::string> lines_;
 };
 
-// ASCII upper case, as the CRT's _strupr does it under the C locale.
-std::string ascii_upper(std::string_view text);
-
 } // namespace opennova::update
