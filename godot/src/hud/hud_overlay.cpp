@@ -22,6 +22,7 @@
 #include <formats/def/def.h> // DefVehicleHudBlock (the VEHICLE_HUD block the panel feed reads)
 #include <formats/def/def_hudpos_write.h> // hudpos_unauthored (the layout of a file with no key)
 #include <runtime/hud/feed_format.h> // kGameTextLineColor (the 0x32 join/leave lines)
+#include <runtime/hud/hud_lfp_panel.h> // lfp_under_attack_text / lfp_ready_text (D-25)
 #include <base/gameprofile/game_type.h> // the conquest arm of the zone panel
 
 #include <godot_cpp/classes/image.hpp>
