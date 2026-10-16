@@ -220,8 +220,7 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 	bank_->set_occlusion_override(occlusion_override_);
 	const String mission_base = p_mission_name.get_file().get_basename();
 	// The global slots in the engine's order -- expansion pair (when one is
-	// mounted) ahead of the statics [orig: slot table @ 0x82A5B0, walk
-	// @ 0x525443; expansion fill @ 0x4a4989 / @ 0x4a495e]. The witnessed table
+	// mounted) ahead of the statics (engine: base/gameprofile/required_resources.cpp). The witnessed table
 	// lives native (audio/bank_chain.h); missing files skip like retail's
 	// SoundBank_LoadIfExists (D-SND-2 closed). A set is searched for in these
 	// slots alone: the mission's own <mission>.lwf is its dialog bank's sounds,

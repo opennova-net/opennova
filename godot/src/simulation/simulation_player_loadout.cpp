@@ -199,10 +199,8 @@ void Simulation::respawn_local_player_loadout() {
 
 void Simulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
 	// The Player_InitPlayer weapon leg — world/player_loadout.h
-	// local_loadout_rebuild [orig: @ 0x4e15f0]. The 0x2F pair's SECOND submit
-	// carries the LIVE equipped slot, not the fixed 195 [orig:
-	// Game_StartMission @0x525c2e passes g_CurrentWeaponSlot — the value the
-	// spawn fill just settled], so the seam re-arms here AFTER the inventory
+	// local_loadout_rebuild (engine: runtime/inmatch/joiner_role.cpp). The 0x2F pair's SECOND submit
+	// carries the LIVE equipped slot, not the fixed 195 (engine: runtime/inmatch/loadout_submit.cpp), so the seam re-arms here AFTER the inventory
 	// settles. push_joiner_loadout_kit never rebuilds (it holds a one-way
 	// re-entry latch), so this cannot recurse.
 	if (!kernel_) return;
@@ -525,7 +523,7 @@ Error Simulation::load_ammo_table(const Ref<ResourceRoot> &p_resource_root,
 	const String file_name = p_name.get_file();
 	if (file_name.is_empty()) return ERR_INVALID_PARAMETER;
 	// The ballistics build + the weapon round_type resolve + the damage-class
-	// sync are the kernel's one body [orig: AmmoDef_LoadAll @0x40b0b0].
+	// sync are the kernel's one body (engine: formats/def/def_ammo.cpp).
 	const opennova::mission::BootFileSource files =
 			opennova::mission::boot_files_from_index(p_resource_root->native_index());
 	if (!kernel_->load_ammo_table(files, opennova::to_std(file_name)))

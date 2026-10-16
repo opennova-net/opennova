@@ -695,7 +695,7 @@ void GameWorld::_bind_methods() {
 	// during the pre-load wait: server/mission names + the exact wire-header
 	// world about to be constructed. The shell refreshes its loading screen
 	// from this -- retail's connect stream fills the same session vars before
-	// its header-backed load [orig: Client_ParseServerSessionVariables @ 0x5202f0].
+	// its header-backed load (engine: net/npwire/session_vars.h).
 	ADD_SIGNAL(MethodInfo(kSignalJoinSessionIdentified,
 			PropertyInfo(Variant::OBJECT, "info", PROPERTY_HINT_RESOURCE_TYPE, "LoadingScreenInfo")));
 	// A joiner crossed the authoritative admission edge. Wire-header world
@@ -716,8 +716,7 @@ void GameWorld::_bind_methods() {
 	// it EXITS THE MISSION with a reason. The shell's analog is return-to-menu
 	// with `reason` surfaced the same way a join failure is. Emitted at most
 	// ONCE per session.
-	// [orig: CNapiNetwork_Init @ 0x4ca4a0 (timeout stores @ 0x4caa81/@ 0x4cab54) ->
-	//  CNapiNetwork_OnDisconnectedFromServer @ 0x4c63d0]
+	// (engine: runtime/inmatch/joiner_connection.h)
 	ADD_SIGNAL(MethodInfo(kSignalSessionLost, PropertyInfo(Variant::STRING, "reason")));
 	// Mission-load progress, 0..100, emitted when each stage of the engine's
 	// mission load plan starts (MissionData.load_progress_percent -- the

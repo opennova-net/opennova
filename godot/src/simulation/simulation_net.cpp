@@ -958,7 +958,7 @@ bool Simulation::is_deploy_overlay_active() const {
 	// The deploy-map overlay (retail g_DeployScreenActive): armed by the S2C
 	// 0x0F game_flags bit0, then host-maintained per frame from the 0x0A flags1
 	// bit1, on the listen host's own loopback client too. A UI signal only —
-	// it never gates the spawn. [orig: the folds @0x42e2f8/@0x42ff82]
+	// it never gates the spawn. (engine: runtime/replication/client_state.h)
 	return runtime_ && runtime_->state().deploy_overlay_active;
 }
 

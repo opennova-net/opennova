@@ -1084,8 +1084,7 @@ void GameWorld::apply_occlusion_frame() {
 	// (retail collects visible entities per scene render, not per sim tick),
 	// and consumes the RENDER camera the local-view leg just placed
 	// (D-RORD-8).
-	// [orig: Terrain_CollectVisibleEntities @ 0x5c9160 from
-	// Terrain_RenderWorldScene @ 0x5c94f0]
+	// (engine: runtime/world/occlusion.cpp)
 	if (world_ready_ && !frame_skip_occlusion_) {
 		occlusion_->apply_frame(image_camera(), surface_width(), render_camera_xform(),
 				mission_forces_indoors(), object_detail_);

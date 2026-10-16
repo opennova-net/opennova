@@ -43,8 +43,7 @@ int Simulation::spawn_local_player_at_start() {
 	// bring-up via the SAME retail spawn-pose operation
 	// (Server_BuildPlayerInfoAndAdd), so when a player already exists this is
 	// a no-op success. The bare path runs the kernel's marker-select spawn
-	// [orig: Server_PositionPlayerForSpawn @0x50cf60 ->
-	// Entity_FindBestSpawnPoint @0x50ccc0; net-re §5.2c].
+	// (engine: runtime/world/spawn_select.h).
 	if (has_local_player()) return 1;
 	const int status = kernel_->spawn_local_player_at_start(mission_game_type());
 	reset_local_player_view_effects();

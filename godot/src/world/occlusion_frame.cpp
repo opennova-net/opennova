@@ -119,8 +119,7 @@ opennova::renderer::ScenePassGateEdges OcclusionFrame::apply_blink_gates(bool p_
 	// Letter bits only accumulate while inside a box, so the outdoors leg of
 	// retail's override is implicit; the remaining g_BlinkWaterVisible legs
 	// (a camera building straddling the water plane, the window latch) ride
-	// the section-mask slice [orig: Terrain_RenderWorldScene
-	// @ 0x5c93cb / @ 0x5c95d2-0x5c95ea].
+	// the section-mask slice (engine: runtime/renderer/scene_pass_gates.h).
 	const bool water_off =
 			!opennova::renderer::scene_water_visible(static_cast<uint32_t>(flags), false);
 	if (water_off != blink_water_suppressed_) {
@@ -184,7 +183,7 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 	// applied, so a steady frame walks nothing. Batch culls claim the
 	// occlusion-hidden bit; a batched static (no node) takes the verdict on
 	// its placer instance instead.
-	// [orig: Terrain_RenderSectorModels @ 0x5c5d30]
+	// (engine: runtime/mission/placement_traits.h)
 	const int64_t building_query_start = timing ? ticks_usec() : 0;
 	const PackedInt64Array changes = s->get_building_visibility_changes();
 	if (timing) {
@@ -212,7 +211,7 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 	}
 
 	// Entity render gates (the blink-hits gate + the outdoors three-ray latch),
-	// also applied as changes. [orig: the collector gates @ 0x5c7022-0x5c708a / §3.4]
+	// also applied as changes. (engine: runtime/world/occlusion.h)
 	const int64_t cull_query_start = timing ? ticks_usec() : 0;
 	const PackedInt32Array culled_changes = s->get_render_culled_changes();
 	if (timing) {

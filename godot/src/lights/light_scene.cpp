@@ -554,9 +554,7 @@ int LightScene::select_model_frame(const TypedArray<Node3D> &p_models,
 					// A building draw declares itself as interior section zero, then
 					// the model collector re-scopes the OWNER section per ROBJ. The
 					// group gate falls back from interior section zero to this value.
-					// [orig: Terrain_RenderSectorModels @0x5c5e07;
-					// Render_CollectRenderObjectsForBatch @0x5d8ff7, see
-					// docs/render/render-lighting-re.md]
+					// (engine: runtime/renderer/light_scene.cpp)
 					const opennova::renderer::SubmitOwnerGroup owner =
 							opennova::renderer::submit_owner_group(owner_entity, false, false,
 									part.robj_index);
@@ -1006,8 +1004,7 @@ void LightScene::build_corona_inputs(const Vector3 &p_camera_pos,
 	}
 	inputs.owner_masks = owner_masks.data();
 	inputs.owner_mask_count = owner_masks.size();
-	// The fog-to-black fold [orig: CD3DDevice_SetFogAndBlendMode(dev, 2)
-	// @0x5aafb6, see docs/render/render-lighting-re.md]: primary fog params,
+	// The fog-to-black fold (engine: runtime/renderer/light_scene.h): primary fog params,
 	// color forced black engine-side.
 	inputs.fog_enabled = p_fog.is_valid() && p_fog->fog_enabled;
 	inputs.fog_type = p_fog.is_valid() ? static_cast<int32_t>(p_fog->fog_type) : 0;

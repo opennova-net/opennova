@@ -512,7 +512,7 @@ float EnvFile::get_fog_end_distance(float p_overcast) const {
 float EnvFile::fog_end_above_water(float p_fog_distance, float p_overcast) {
 	// Static leg for callers holding a LIVE smoothed distance rather than this
 	// file's authored fog_level (the water pass) — same witnessed curve
-	// [orig: Environment_GetFogEndDistance @ 0x57e426, see docs/env/env-tod-re.md].
+	// (engine: formats/env/env_render.cpp).
 	return opennova::env::fog_end_above_water(p_fog_distance, p_overcast);
 }
 
@@ -549,7 +549,7 @@ Color EnvFile::horizon_blend_skyfog(const Color &p_fog, const Color &p_skyfog,
 }
 
 Color EnvFile::tile_overlay_tint_factor(const Color &p_terrain_tint) {
-	// [orig: PolyTrn_RenderTile @ 0x60df0d, see docs/env/env-tod-re.md] — DIFFUSE(HALF) x TEXTURE under
+	// (engine: formats/env/env_weather.h) — DIFFUSE(HALF) x TEXTURE under
 	// MODULATE2X, folded to one multiply for the shader.
 	const opennova::env::TerrainTint tint =
 			opennova::env::terrain_tint_from_rgb(opennova::env_rgb_from_color(p_terrain_tint));
@@ -557,7 +557,7 @@ Color EnvFile::tile_overlay_tint_factor(const Color &p_terrain_tint) {
 }
 
 Array EnvFile::build_sky_dome_arrays(float p_sky_height) {
-	// [orig: SkyDome_BuildMesh @ 0x578db0, see docs/env/env-tod-re.md] — engine/formats/env owns the math; this
+	// (engine: formats/env/env_celestial.h) — engine/formats/env owns the math; this
 	// repacks the plain vectors into Mesh.ARRAY_* surface arrays.
 	const opennova::env::SkyDomeMesh mesh = opennova::env::build_sky_dome_mesh(p_sky_height);
 	const int vertex_count = static_cast<int>(mesh.positions.size() / 3);

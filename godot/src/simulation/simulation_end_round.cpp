@@ -130,8 +130,7 @@ Ref<EndRoundStatistics> Simulation::get_end_round_statistics() const {
 	// engine feed (world/objectives_feed.h; hud/end_round_statistics.h
 	// documents the rows). Host-world data only: the panel's toggle is
 	// settable only outside a session, and a joiner has no tally world.
-	// [orig: HUD_DrawEndRoundStatistics @0x5b7600 reads the block; the toggle
-	// gate @0x49bd29 — see net-re §5.68]
+	// (engine: runtime/hud/end_round_statistics.h)
 	if (kernel_ == nullptr) return Ref<EndRoundStatistics>();
 	const opennova::hud::EndRoundStatisticsInput in =
 			opennova::world::end_round_statistics_input(kernel_->world);

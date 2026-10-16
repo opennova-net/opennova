@@ -136,8 +136,7 @@ void Simulation::run_occlusion_frame(const Transform3D &p_camera, double p_fov_y
 		present_.last_occlusion_build_us = occl_probe_start - occl_build_start;
 
 	// The entity collectors' render gates over the non-building entities the
-	// host draws. [orig: Terrain_CollectVisibleEntities_0 @ 0x5c6f20 /
-	// Terrain_CollectVisibleEntitiesForTerrain @ 0x5c8c60]
+	// host draws. (engine: runtime/world/occlusion.h)
 	// The death pieces ride the same collect, after the scar caches (retail
 	// DeathPiece_CollectVisible @ 0x57b560, called from
 	// Terrain_CollectVisibleEntities @ 0x5c91bc).
@@ -364,7 +363,7 @@ int64_t Simulation::sound_occlusion_distance_q16(const Vector3 &listener_pos,
                                                      const Vector3 &source_pos,
                                                      int64_t distance_q16,
                                                      int source_bms_id) {
-	// [orig: Sound_ApplyOcclusionDistance @ 0x529970] — the audio layer feeds
+	// (engine: runtime/audio/ambient_mixer.h) — the audio layer feeds
 	// the AUDIO listener (camera), emitter/one-shot position, and source
 	// identity when known. -1 denotes the local player, positive values are
 	// authored BMS ids, and zero keeps the no-entity path. Godot world

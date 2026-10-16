@@ -253,9 +253,7 @@ void SessionDrive::step_preload() {
 	// stalled or incompatible host would leave the player loaded but hidden
 	// forever. The policy reuses the retail ConnectOrHost window from
 	// world-ready and composes a stage-named failure -- the reachable analog of
-	// retail's post-load network-wait failure returns [orig:
-	// NapiClient_WaitForGameStart @ 0x42cc10 failure legs -> "Mission loading
-	// aborted"]. It covers only SERVER-owed transitions: at the player-paced
+	// retail's post-load network-wait failure returns (engine: runtime/inmatch/join_session_policy.h). It covers only SERVER-owed transitions: at the player-paced
 	// deployment pick the watchdog ends (retail's DEATH screen simply waits;
 	// net-re 5.61).
 	// A reload's admission tail has no window either (net-re §5.70.7).
@@ -340,8 +338,7 @@ String SessionDrive::switch_join_expansion(const Ref<ResourceRoot> &p_root,
 	}
 	// A runtime mount that cannot supply the host's expansion aborts the join.
 	// Retail's switch is a no-op when expansion\<name>\<name>.pff is missing
-	// and it connects on its own data set anyway [orig: Expansion_SwitchTo
-	// @ 0x5688c0, missing-.pff gate @ 0x568914] -- that is precisely the ADM
+	// and it connects on its own data set anyway (engine: runtime/inmatch/join_session_policy.h) -- that is precisely the ADM
 	// index-space corruption D-NET-178 records, so we refuse the join instead
 	// (tracked divergence).
 	if (action == NetSessionPolicy::ACTION_FAIL) {

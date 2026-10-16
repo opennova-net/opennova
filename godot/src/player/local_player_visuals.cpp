@@ -389,11 +389,10 @@ Node3D *LocalPlayerVisuals::build_local_player_viewmodel() {
 	// anim_wpn_idle = the FP holding pose; without it the arms sit in their
 	// bind/T-pose. The environment: the viewmodel lights/fogs with the live
 	// TOD like every entity (retail draws the FP model through the same
-	// lighting constants [orig: Player_RenderFirstPersonViewModel @ 0x4ded60
-	// -> the ctx block]).
+	// lighting constants (engine: runtime/renderer/fp_viewmodel_spec.h)).
 	// The submit spec (gun/arms/clip-adm + the emplaced arms omission)
 	// resolves natively (renderer::fp_viewmodel_spec): a def with no fpModel
-	// submits nothing. [orig: Player_RenderFirstPersonViewModel @0x4ded60; @0x4dedc7]
+	// submits nothing. (engine: runtime/renderer/fp_viewmodel_spec.h)
 	const Ref<PlayerVisualSpec> character_spec = local_player_visual_spec();
 	const Ref<FpViewmodelSpec> spec = Simulation::fp_viewmodel_spec(def.is_valid(),
 			def.is_valid() ? def->get_gfx1() : String(),

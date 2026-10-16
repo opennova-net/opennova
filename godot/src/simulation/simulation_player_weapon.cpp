@@ -132,7 +132,7 @@ Ref<PlayerAimOverlay> Simulation::get_local_player_aim_overlay() const {
 	opennova::anim::AimOverlayInputs in = aim_overlay_inputs_for(*p, *entity);
 	// The pitch-kick term carries the arms-dip feed (the +0x371 weapon-switch
 	// window drops it 0x2800000/tick; infantry_weapon_channel owns the decay)
-	// [orig: @ 0x4b5cab..0x4b5cd5]. The lean term is the sim's lean angle
+	// (engine: runtime/world/infantry_weapon_channel.cpp). The lean term is the sim's lean angle
 	// (entity+0xB0; ramp/decay in infantry_lean_tick); roll is the slope-conform
 	// visual roll (entity+0x18) and torso_roll its sixteenth-step chaser
 	// (entity+0x2DC, infantry_torso_roll_tick); body_pitch is the slope-conform

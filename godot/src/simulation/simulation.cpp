@@ -1147,7 +1147,7 @@ Ref<RoundOutcome> Simulation::get_round_outcome_debug() const {
 bool Simulation::has_event_fired(int index) const {
 	if (!kernel_ || index < 0) return false;
 	// The active latch + delay-elapsed window — the same read the original's Event
-	// trigger category makes [orig: EventTrigger_EvaluateCondition @0x453620 case 3].
+	// trigger category makes (engine: formats/mission/mission_params.h).
 	return kernel_->events.event_fired(static_cast<size_t>(index));
 }
 

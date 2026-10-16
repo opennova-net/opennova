@@ -454,8 +454,7 @@ int ItemEffectDirector::_attach_item_effect_to_node(ObjectModel *p_node, int p_k
 	const Ref<EntityRef> entity_ref = p_node->get_entity_ref();
 	const Transform3D node_transform = p_node->get_global_transform();
 	// The first-16 case-insensitive scan and the spawn_count==0 origin leg
-	// are the engine's attach plan [orig: ItemDef_GetBoneMaskByName
-	// @ 0x49ea40; duplicate names all set their bit].
+	// are the engine's attach plan (engine: formats/threedi/threedi_3di3.h).
 	const opennova::world::ItemEffectAttachPlan plan =
 			opennova::world::item_effect_attach_plan(data->native_model(), to_std(userpoint).c_str());
 	for (const int i : plan.user_points) {
@@ -544,8 +543,7 @@ int ItemEffectDirector::_attach_item_effect_to_static(const opennova::mission::S
 	}
 	const Transform3D entity_transform = from_static_source_transform(p_source.world_transform);
 	int attached = 0;
-	// The same engine attach plan as the animated leg [orig:
-	// ItemDef_GetBoneMaskByName @ 0x49ea40]; static sources compose the
+	// The same engine attach plan as the animated leg (engine: formats/threedi/threedi_3di3.h); static sources compose the
 	// EffectWorld.spawn_effect_attached local pose once with their placement
 	// transform, and the spawn_count==0 leg keeps the entity basis (an
 	// attached origin pose at the moment it becomes world-bound).

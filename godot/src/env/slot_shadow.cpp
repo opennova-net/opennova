@@ -959,8 +959,7 @@ void SlotShadow::advance_frame() {
 			continue;
 		}
 		// The dominant-light pick (the clamped sun by default; the strongest
-		// nearby point light overrides) [orig: RenderSlot_UpdateEntityLight
-		// @0x5d6a30 <- Entity_UpdateAllEntities]. Every slot quantity keys on
+		// nearby point light overrides) (engine: runtime/renderer/render_slot_shadow.h). Every slot quantity keys on
 		// the entity origin (entity+4..+0xC) — the light query box, the pick
 		// distance, the capture's view origin, the drape projection — never on
 		// the render bounds, which move with part animation and RLOD switches

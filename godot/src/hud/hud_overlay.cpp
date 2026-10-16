@@ -882,7 +882,7 @@ void HudOverlay::push_message(const String &p_text) {
 
 void HudOverlay::push_feed_line(const String &p_text, int64_t p_argb) {
 	// The SYSTEM feed sink (kills, joins, system lines) — the packed ARGB is
-	// stored raw and drawn as stored [orig: the stored-color read @0x59ae97].
+	// stored raw and drawn as stored (engine: runtime/hud/hud_frame.cpp).
 	compiler_.push_feed_line(opennova::to_std(p_text),
 			static_cast<uint32_t>(p_argb), state_.ticks);
 	queue_redraw();
@@ -1433,9 +1433,7 @@ void HudOverlay::apply_declutter_() {
 }
 
 void HudOverlay::set_hud_detail_level(int p_level) {
-	// The level write + visibility rebuild [orig: the hud_detail global
-	// @0x24D20BC -> CRenderState_SetLayerVisibility @0x59B0F0, see
-	// docs/interface/hud-re.md]. The presenter owns the persistence and the
+	// The level write + visibility rebuild (engine: runtime/hud/hud_declutter.h). The presenter owns the persistence and the
 	// cycle/death-force policy. The level is stored VERBATIM: retail clamps
 	// nowhere, and an out-of-range level hides every gated element until the
 	// huddetail cycle wraps it (the engine module carries the arithmetic).
