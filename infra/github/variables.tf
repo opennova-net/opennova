@@ -31,6 +31,12 @@ variable "reference_assets_token" {
   sensitive   = true
 }
 
+variable "stripe_test_secret_key" {
+  description = "The STRIPE_TEST_SECRET_KEY secret's value (secrets.tf): a Stripe test-mode key (rk_test_ restricted to Customers, Checkout Sessions, Subscriptions and Customer portal write and Prices and Products read; or sk_test_), or the vault's REPLACE_ME, with which the billing end-to-end test skips. The toolbox reads it from the vault item stripe-test, field ci_secret_key (deploy/env/github.env.tpl)."
+  type        = string
+  sensitive   = true
+}
+
 variable "size" {
   description = "Both runners' machine size (GET /orgs/{org}/actions/hosted-runners/machine-sizes). It can change in place."
   type        = string

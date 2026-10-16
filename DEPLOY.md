@@ -91,6 +91,7 @@ It prints item and field names, never a value:
 | `app-prod` | `edge_auth_secret` (the zone's one secret, for every deployment) | 64 random hex digits |
 | `rds` (`rds-<deployment>`) | `master_password` | random |
 | `stripe-test`, `stripe-live` | `secret_key`, `webhook_secret`, `price_tier1`, `price_tier2`, `price_tier3`, `price_own_machine` | `REPLACE_ME` |
+| `stripe-test` | `ci_secret_key` (CI's key for the billing end-to-end test, "GitHub" below) | `REPLACE_ME` |
 | `alerts` | `email` | `REPLACE_ME` |
 | `email` | `forward_to` | `REPLACE_ME` |
 
@@ -758,6 +759,16 @@ this public repository comes from the vault:
   access to only `opennova-reference-assets` and `opennova-reference-retail-packed`,
   **Contents: Read-only**. When it expires, put the new token in the item and `github
   apply`: Terraform keeps the value in its state and overwrites a secret set by hand.
+- **`stripe-test`**, field `ci_secret_key` (`secrets init` adds it as `REPLACE_ME`): the
+  value of the `STRIPE_TEST_SECRET_KEY` secret, which test-linux hands the billing
+  end-to-end test (`billing_stripe_e2e`) as `ONNET_STRIPE_TEST_SECRET_KEY`. The test makes
+  a customer, Checkout sessions and a subscription in Stripe's test mode and deletes the
+  customer at the end. Fill it with a restricted key of the test mode with the server
+  key's permissions (Developers, API keys, Create restricted key: **Customers**,
+  **Checkout Sessions**, **Subscriptions** and **Customer portal** Write, **Prices** and
+  **Products** Read; Stripe's 403 names one that is missing), or, until one exists, the
+  item's own `secret_key`; then `github apply`. A live key fails the test. While the field holds
+  `REPLACE_ME`, or for a fork's pull request (which gets no secret), the test skips.
 
 An org admin makes the tokens, or approves them if the organization reviews fine-grained
 tokens. Then:

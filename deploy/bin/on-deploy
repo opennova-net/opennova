@@ -64,7 +64,8 @@
 #                                 for the organization, so no --deployment; its
 #                                 state is the vault document tfstate-github-org,
 #                                 its token and inputs the vault items
-#                                 github-terraform and reference-assets. apply
+#                                 github-terraform, reference-assets and
+#                                 stripe-test (ci_secret_key). apply
 #                                 plans to a file and applies that plan after
 #                                 --yes or a typed yes
 #   aws <args...>                 the AWS CLI with the vault's credentials
@@ -519,7 +520,9 @@ secrets_init() {
     forward_to:value:REPLACE_ME:STRING
   local specs=()
   mapfile -t specs < <(stripe_placeholder_specs)
-  ensure_item stripe-test API_CREDENTIAL "${specs[@]}"
+  # stripe-test's ci_secret_key: CI's key for the billing end-to-end test, the
+  # Actions secret STRIPE_TEST_SECRET_KEY (infra/github; REPLACE_ME: it skips).
+  ensure_item stripe-test API_CREDENTIAL "${specs[@]}" ci_secret_key:value:REPLACE_ME:CONCEALED
   ensure_item stripe-live API_CREDENTIAL "${specs[@]}"
   log "done. In the 1Password app fill alerts/email, email/forward_to and each Stripe item's secret_key;"
   log "./deploy/run.sh stripe setup --mode test|live fills the rest of the Stripe fields (DEPLOY.md,"

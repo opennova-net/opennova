@@ -10,3 +10,4 @@ GITHUB_TOKEN=op://@VAULT@/github-terraform/token
 TF_VAR_billing_email=op://@VAULT@/github-terraform/billing_email
 TF_VAR_members=op://@VAULT@/github-terraform/members
 TF_VAR_reference_assets_token=op://@VAULT@/reference-assets/token
+TF_VAR_stripe_test_secret_key=op://@VAULT@/stripe-test/ci_secret_key
