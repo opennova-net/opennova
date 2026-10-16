@@ -73,15 +73,16 @@ describe('LandingPage', () => {
     expect(hrefs(wrapper)).toContain('/support');
   });
 
-  it('links to the support tiers page when tiers are off or did not load', async () => {
+  it('says when tiers are not open, and when the prices did not load', async () => {
     tiers.mockResolvedValueOnce({ ok: true, value: tiersResponse({ enabled: false }) });
     let wrapper = await mountPage();
     expect(wrapper.text()).not.toContain('$5');
-    expect(wrapper.text()).toContain('Prices and what each tier covers are on the support tiers page.');
+    expect(wrapper.text()).toContain('Support tiers are not open on NovaWorld yet.');
 
     tiers.mockResolvedValueOnce({ ok: false, error: { code: 'network', status: null, message: 'offline' } });
     wrapper = await mountPage();
-    expect(wrapper.text()).toContain('Prices and what each tier covers are on the support tiers page.');
+    expect(wrapper.text()).toContain('The prices did not load.');
+    expect(wrapper.text()).not.toContain('Own machine add-on');
   });
 
   it('offers every release download and the account and lobby steps', async () => {
@@ -100,5 +101,13 @@ describe('LandingPage', () => {
     expect(links).toContain('https://github.com/opennova-net/opennova/releases/latest');
     expect(links).toContain('/register');
     expect(links).toContain('/lobby');
+    expect(links).toContain('#downloads');
+  });
+
+  it('leaves the time-lapse to the visitor: controls, no autoplay', async () => {
+    const video = (await mountPage()).get('video');
+    expect(video.attributes()).toHaveProperty('controls');
+    expect(video.attributes()).not.toHaveProperty('autoplay');
+    expect(video.attributes('preload')).toBe('none');
   });
 });

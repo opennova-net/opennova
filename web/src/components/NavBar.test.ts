@@ -35,9 +35,9 @@ describe('NavBar', () => {
   it('shows the site links, Download, and Log in / Register to a visitor', async () => {
     const found = links(await mountAt('/'));
     expect(found['Lobbies']).toBe('/lobby');
-    expect(found['Server hosting']).toBe('/support');
+    expect(found['Support tiers']).toBe('/support');
     expect(found['GitHub']).toBe('https://github.com/opennova-net/opennova');
-    expect(found['Download']).toBe('https://github.com/opennova-net/opennova/releases/latest');
+    expect(found['Download']).toBe('/#downloads');
     expect(found['Log in']).toBe('/login');
     expect(found['Register']).toBe('/register');
     expect(found['My servers']).toBeUndefined();
@@ -57,5 +57,25 @@ describe('NavBar', () => {
     expect(found['Log in']).toBeUndefined();
     expect(wrapper.text()).toContain('ranger');
     expect(wrapper.findAll('button').some((b) => b.text() === 'Log out')).toBe(true);
+  });
+});
+
+describe('the phone menu', () => {
+  beforeEach(() => {
+    session.user = null;
+  });
+
+  it('opens from its toggle and closes on Escape', async () => {
+    const wrapper = await mountAt('/');
+    const toggle = wrapper.get('button[aria-controls="primary-navigation"]');
+    expect(wrapper.find('#primary-navigation').exists()).toBe(false);
+
+    await toggle.trigger('click');
+    expect(toggle.attributes('aria-expanded')).toBe('true');
+    expect(wrapper.find('#primary-navigation').exists()).toBe(true);
+
+    await wrapper.get('#primary-navigation a').trigger('keydown', { key: 'Escape' });
+    expect(toggle.attributes('aria-expanded')).toBe('false');
+    expect(wrapper.find('#primary-navigation').exists()).toBe(false);
   });
 });

@@ -1,5 +1,5 @@
 <template>
-  <header class="fixed inset-x-0 top-0 z-20 border-b border-border bg-surface/95 backdrop-blur">
+  <header @keydown.esc="closeMenuToToggle" class="fixed inset-x-0 top-0 z-20 border-b border-border bg-surface/95 backdrop-blur">
     <div class="page flex h-16 items-center justify-between gap-6">
       <RouterLink to="/" class="flex items-center gap-2 text-lg font-semibold tracking-wide text-ink" aria-label="OpenNova home">
         <img src="/favicon.svg" alt="" class="h-6 w-6" width="24" height="24" />
@@ -30,12 +30,12 @@
             <RouterLink to="/register" class="text-ink-muted transition hover:text-ink-bright">Register</RouterLink>
           </template>
         </template>
-        <a :href="RELEASES_URL" target="_blank" rel="noopener" class="btn-primary px-4 py-2">Download</a>
+        <RouterLink :to="downloadsLink" class="btn-primary px-4 py-2">Download</RouterLink>
       </div>
 
       <button
         ref="menuToggle"
-        class="inline-flex items-center justify-center rounded-control border border-border-strong p-2 text-ink transition hover:bg-hover lg:hidden"
+        class="inline-flex h-11 w-11 items-center justify-center rounded-control border border-border-strong text-ink transition hover:bg-hover lg:hidden"
         type="button"
         :aria-expanded="isMenuOpen"
         aria-controls="primary-navigation"
@@ -59,7 +59,7 @@
       leave-from-class="opacity-100 translate-y-0"
       leave-to-class="opacity-0 -translate-y-2"
     >
-      <nav v-if="isMenuOpen" id="primary-navigation" aria-label="Primary" class="border-t border-border bg-surface px-4 pb-4 pt-2 lg:hidden">
+      <nav v-if="isMenuOpen" id="primary-navigation" aria-label="Primary" class="max-h-[calc(100vh-4rem)] overflow-y-auto border-t border-border bg-surface px-4 pb-4 pt-2 lg:hidden">
         <div class="flex flex-col gap-1 text-base text-ink">
           <RouterLink v-for="link in siteLinks" :key="link.to" :to="link.to" class="rounded-control px-3 py-2.5 hover:bg-hover" @click="closeMenu">
             {{ link.label }}
@@ -81,7 +81,7 @@
               <RouterLink to="/register" class="rounded-control px-3 py-2.5 hover:bg-hover" @click="closeMenu">Register</RouterLink>
             </template>
           </template>
-          <a :href="RELEASES_URL" target="_blank" rel="noopener" class="btn-primary mt-2" @click="closeMenu">Download</a>
+          <RouterLink :to="downloadsLink" class="btn-primary mt-2" @click="closeMenu">Download</RouterLink>
         </div>
       </nav>
     </Transition>
@@ -92,12 +92,16 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import { useSession } from '../composables/useSession';
-import { GITHUB_URL, RELEASES_URL } from '../utils/links';
+import { GITHUB_URL } from '../utils/links';
 
 const siteLinks = [
   { to: '/lobby', label: 'Lobbies' },
-  { to: '/support', label: 'Server hosting' },
+  { to: '/support', label: 'Support tiers' },
 ];
+
+// Download goes to the home page's downloads section, which says what each
+// release file is.
+const downloadsLink = { path: '/', hash: '#downloads' };
 
 const isMenuOpen = ref(false);
 const toggleMenu = () => {
@@ -105,6 +109,12 @@ const toggleMenu = () => {
 };
 const closeMenu = () => {
   isMenuOpen.value = false;
+};
+// Escape closes the open menu and gives the keyboard back to its toggle.
+const closeMenuToToggle = () => {
+  if (!isMenuOpen.value) return;
+  closeMenu();
+  menuToggle.value?.focus();
 };
 
 const route = useRoute();

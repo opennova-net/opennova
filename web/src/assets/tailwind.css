@@ -61,7 +61,7 @@
     @apply btn border border-border-strong text-ink hover:border-accent hover:text-ink-bright;
   }
   .link {
-    @apply text-accent underline-offset-4 transition hover:text-ink-bright hover:underline;
+    @apply text-accent underline underline-offset-4 transition hover:text-ink-bright;
   }
 }
 

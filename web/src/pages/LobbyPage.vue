@@ -1,6 +1,6 @@
 <template>
-  <section class="px-4 py-10 sm:px-6 sm:py-14">
-    <div class="mx-auto max-w-6xl">
+  <section class="page py-10 sm:py-14">
+    <div>
       <header class="flex flex-wrap items-center justify-between gap-4">
         <div>
           <p class="eyebrow">NovaWorld</p>
@@ -32,8 +32,8 @@
         <div v-if="totalHosts === 0" class="rounded-panel border border-border bg-panel p-10 text-center">
           <p class="text-lg font-semibold text-ink">No games are being hosted right now</p>
           <p class="mt-2 text-sm text-ink-muted">
-            Be the first: host one from the game, or run your own server with a
-            <RouterLink to="/support" class="link">support tier</RouterLink>.
+            Host one from your game's own menu once it is <RouterLink :to="{ path: '/', hash: '#online' }" class="link">set up for online play</RouterLink>,
+            or run a managed server with a <RouterLink to="/support" class="link">support tier</RouterLink>.
           </p>
         </div>
 

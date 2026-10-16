@@ -1,9 +1,9 @@
 <template>
-  <section class="px-4 py-10 sm:px-6 sm:py-14">
-    <div class="mx-auto max-w-5xl space-y-10">
+  <section class="page py-10 sm:py-14">
+    <div class="space-y-10">
       <header class="space-y-4">
-        <p class="text-sm uppercase tracking-[0.3em] text-accent">NovaWorld</p>
-        <h1 class="text-4xl font-semibold text-ink">Support OpenNova</h1>
+        <p class="eyebrow">Server hosting</p>
+        <h1 class="text-4xl font-semibold text-ink-bright">Support tiers</h1>
         <p class="max-w-3xl text-base text-ink-muted">
           OpenNova is a free, open-source project. A monthly support tier funds it, and lets you run your own
           hosted servers on NovaWorld: we start them on our machines, list them in the game's server browser and
@@ -26,14 +26,14 @@
 
       <template v-else-if="tiers">
         <section class="space-y-4" aria-labelledby="public-support-tiers">
-          <h2 id="public-support-tiers" class="text-xl font-semibold text-ink">Support tiers</h2>
+          <h2 id="public-support-tiers" class="text-xl font-semibold text-ink">Choose a tier</h2>
           <TierPicker :tiers="tiers.tiers" :currency="tiers.currency" mode="subscribe" base-id="public-support" @choose="onChoose" />
           <p class="text-xs text-ink-muted">
             Prices are monthly in {{ tiers.currency.toUpperCase() }} and renew each month until you cancel, which you
             can do at any time in Stripe's billing portal.
             <template v-if="!user">Subscribing asks you to log in first.</template>
-            Read the <RouterLink to="/terms" class="text-accent hover:text-ink-bright">terms of service</RouterLink>
-            and the <RouterLink to="/refunds" class="text-accent hover:text-ink-bright">refund policy</RouterLink>
+            Read the <RouterLink to="/terms" class="link">terms of service</RouterLink>
+            and the <RouterLink to="/refunds" class="link">refund policy</RouterLink>
             before you subscribe.
           </p>
         </section>

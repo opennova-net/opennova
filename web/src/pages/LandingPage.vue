@@ -30,10 +30,11 @@
           </p>
 
           <div class="mt-8 flex flex-wrap items-center gap-3">
-            <a :href="RELEASES_URL" target="_blank" rel="noopener" class="btn-primary">Download OpenNova</a>
-            <RouterLink to="/lobby" class="btn-secondary">View lobbies</RouterLink>
+            <a href="#downloads" class="btn-primary">Download</a>
+            <a href="#online" class="btn-secondary">Play online</a>
             <RouterLink to="/support" class="btn-secondary">Host a server</RouterLink>
           </div>
+          <p class="mt-3 text-sm text-ink-muted">Windows x64. Pre-1.0 and experimental.</p>
 
           <p class="mt-8 inline-flex items-center gap-2 rounded-full border border-border-strong bg-surface/80 px-3 py-1.5 text-sm text-ink-muted" role="status">
             <span class="h-2 w-2 shrink-0 rounded-full" :class="statusDot" aria-hidden="true"></span>
@@ -63,13 +64,77 @@
         <p class="mt-3 max-w-2xl text-ink-muted">
           Every frame here is the original game's own data, loaded and drawn by OpenNova.
         </p>
-        <div class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <figure v-for="(shot, i) in gameShots" :key="shot.src" :class="i === 0 ? 'sm:col-span-2 lg:col-span-3' : ''">
+        <div class="mt-10 grid gap-4 sm:grid-cols-3">
+          <figure v-for="(shot, i) in gameShots" :key="shot.src" :class="i === 0 ? 'sm:col-span-3' : ''">
             <a :href="shot.src" target="_blank" rel="noopener" class="block overflow-hidden rounded-panel border border-border">
-              <img :src="shot.src" :alt="shot.alt" loading="lazy" decoding="async" width="1600" height="900" class="aspect-video w-full object-cover transition duration-300 hover:scale-[1.02]" />
+              <img :src="shot.thumb" :alt="shot.alt" loading="lazy" decoding="async" width="1600" height="900" class="aspect-video w-full object-cover" />
             </a>
             <figcaption class="mt-2 text-sm text-ink-muted">{{ shot.caption }}</figcaption>
           </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- Playing online with a retail game. -->
+    <section id="online" class="page scroll-mt-20 py-16 sm:py-20" aria-labelledby="online-title">
+      <p class="eyebrow">NovaWorld</p>
+      <h2 id="online-title" class="mt-3 text-3xl font-semibold text-ink-bright">Play online today</h2>
+      <p class="mt-3 max-w-2xl text-ink-muted">
+        Connect your own Joint Operations or Delta Force Xtreme 2 to our NovaWorld with the OpenNova Switcher. OpenNova
+        itself joins the same servers.
+      </p>
+      <ol class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <li v-for="(step, i) in steps" :key="step.title" class="card p-6">
+          <p class="text-sm font-semibold text-accent">Step {{ i + 1 }}</p>
+          <h3 class="mt-1 text-lg font-semibold text-ink-bright">{{ step.title }}</h3>
+          <p class="mt-2 text-sm text-ink-muted">{{ step.body }}</p>
+          <RouterLink v-if="step.to" :to="step.to" class="link mt-3 inline-block text-sm">{{ step.link }}</RouterLink>
+          <a v-else-if="step.href" :href="step.href" class="link mt-3 inline-block text-sm">{{ step.link }}</a>
+        </li>
+      </ol>
+    </section>
+
+    <!-- Managed server hosting through a support tier. -->
+    <section class="border-y border-border bg-panel/40 py-16 sm:py-20" aria-labelledby="hosting-title">
+      <div class="page grid gap-10 lg:grid-cols-2 lg:items-center">
+        <div>
+          <p class="eyebrow">Support tiers</p>
+          <h2 id="hosting-title" class="mt-3 text-3xl font-semibold text-ink-bright">Managed server hosting</h2>
+          <p class="mt-4 text-ink">
+            A monthly support tier funds OpenNova and runs your own servers on NovaWorld. We start them on our machines,
+            list them in the game's server browser and keep them running until you stop them. Retail and OpenNova
+            players both join.
+          </p>
+          <p class="mt-3 text-ink-muted">
+            Pick the map rotation and game settings, watch the stats and use the server console, all from this site.
+          </p>
+          <div class="mt-6">
+            <RouterLink to="/support" class="btn-primary">{{ tiersState === 'open' ? 'Choose a tier' : 'See support tiers' }}</RouterLink>
+          </div>
+          <p class="mt-4 text-xs text-ink-muted">
+            A tier is support for the project, not the sale of any game. Hosted servers are pre-1.0 and experimental.
+          </p>
+        </div>
+
+        <div>
+          <ul v-if="tiersState === 'open' || tiersState === 'loading'" class="grid grid-cols-3 gap-3" :aria-busy="tiersState === 'loading'">
+            <template v-if="tiersState === 'open'">
+              <li v-for="row in tierRows" :key="row.tier" class="card px-2 py-5 text-center">
+                <p class="text-sm text-ink-muted">Tier {{ row.tier }}</p>
+                <p class="mt-1 text-3xl font-semibold text-ink-bright">{{ row.price }}</p>
+                <p class="text-sm text-ink-muted">a month</p>
+                <p class="mt-3 text-sm text-ink">{{ row.servers }}</p>
+              </li>
+            </template>
+            <li v-for="n in loadingCards" v-else :key="n" class="card h-36 animate-pulse" aria-hidden="true"></li>
+          </ul>
+          <p v-if="ownMachine" class="mt-3 text-sm text-ink-muted">
+            Own machine add-on: {{ ownMachine }} a month for each, to run one of your servers on a machine of its own.
+          </p>
+          <p v-if="tiersState === 'closed'" class="card p-6 text-sm text-ink-muted">Support tiers are not open on NovaWorld yet.</p>
+          <p v-if="tiersState === 'failed'" class="card p-6 text-sm text-ink-muted">
+            The prices did not load. They are on the <RouterLink to="/support" class="link">support tiers</RouterLink> page.
+          </p>
         </div>
       </div>
     </section>
@@ -84,14 +149,15 @@
       <div class="mt-10 grid gap-8 lg:grid-cols-5">
         <figure class="lg:col-span-3">
           <video
-            ref="timelapseEl"
             class="aspect-video w-full rounded-panel border border-border bg-panel"
             :poster="timelapse.poster"
+            controls
             muted
             loop
             playsinline
             preload="none"
-            :controls="reducedMotion"
+            width="1280"
+            height="720"
             :aria-label="timelapse.alt"
           >
             <source v-for="source in timelapse.sources" :key="source.src" :src="source.src" :type="source.type" />
@@ -105,102 +171,32 @@
               <span>{{ feature }}</span>
             </li>
           </ul>
-          <p class="mt-6 text-sm text-ink-muted">Pre-1.0 and experimental, like everything here.</p>
         </div>
       </div>
-      <div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div class="mt-8 grid gap-4 sm:grid-cols-3">
         <figure v-for="shot in editorShots" :key="shot.src">
           <a :href="shot.src" target="_blank" rel="noopener" class="block overflow-hidden rounded-panel border border-border">
-            <img :src="shot.src" :alt="shot.alt" loading="lazy" decoding="async" width="1600" height="900" class="aspect-video w-full object-cover transition duration-300 hover:scale-[1.03]" />
+            <img :src="shot.thumb" :alt="shot.alt" loading="lazy" decoding="async" width="800" height="450" class="aspect-video w-full object-cover" />
           </a>
           <figcaption class="mt-2 text-sm text-ink-muted">{{ shot.caption }}</figcaption>
         </figure>
       </div>
     </section>
 
-    <!-- Playing online. -->
-    <section class="border-y border-border bg-panel/40 py-16 sm:py-20" aria-labelledby="online-title">
-      <div class="page">
-        <p class="eyebrow">NovaWorld</p>
-        <h2 id="online-title" class="mt-3 text-3xl font-semibold text-ink-bright">Play online today</h2>
-        <p class="mt-3 max-w-2xl text-ink-muted">
-          Retail Joint Operations and Delta Force Xtreme 2 connect to our NovaWorld as they are. OpenNova joins the same
-          servers.
-        </p>
-        <ol class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <li v-for="(step, i) in steps" :key="step.title" class="card p-6">
-            <p class="text-sm font-semibold text-accent">Step {{ i + 1 }}</p>
-            <h3 class="mt-1 text-lg font-semibold text-ink-bright">{{ step.title }}</h3>
-            <p class="mt-2 text-sm text-ink-muted">{{ step.body }}</p>
-            <component
-              :is="step.href ? 'a' : RouterLink"
-              v-if="step.link"
-              v-bind="step.href ? { href: step.href, target: '_blank', rel: 'noopener' } : { to: step.to }"
-              class="link mt-3 inline-block text-sm"
-            >
-              {{ step.link }}
-            </component>
-          </li>
-        </ol>
-      </div>
-    </section>
-
-    <!-- Managed server hosting through a support tier. -->
-    <section class="page py-16 sm:py-20" aria-labelledby="hosting-title">
-      <div class="grid gap-10 lg:grid-cols-2 lg:items-center">
-        <div>
-          <p class="eyebrow">Support tiers</p>
-          <h2 id="hosting-title" class="mt-3 text-3xl font-semibold text-ink-bright">Managed server hosting</h2>
-          <p class="mt-4 text-ink">
-            A monthly support tier funds OpenNova and runs your own servers on NovaWorld. We start them on our machines,
-            list them in the game's server browser and keep them running until you stop them. Retail and OpenNova
-            players both join.
-          </p>
-          <p class="mt-3 text-ink-muted">
-            Pick the map rotation and game settings, watch the stats and use the server console, all from this site.
-          </p>
-          <div class="mt-6 flex flex-wrap gap-3">
-            <RouterLink to="/support" class="btn-primary">Choose a tier</RouterLink>
-          </div>
-          <p class="mt-4 text-xs text-ink-muted">
-            A tier is support for the project, not the sale of any game. Hosted servers are pre-1.0 and experimental.
-          </p>
-        </div>
-
-        <div>
-          <ul v-if="tierRows.length" class="grid grid-cols-3 gap-3">
-            <li v-for="row in tierRows" :key="row.tier" class="card px-2 py-5 text-center">
-              <p class="text-sm text-ink-muted">Tier {{ row.tier }}</p>
-              <p class="mt-1 text-3xl font-semibold text-ink-bright">{{ row.price }}</p>
-              <p class="text-sm text-ink-muted">a month</p>
-              <p class="mt-3 text-sm text-ink">{{ row.servers }}</p>
-            </li>
-          </ul>
-          <p v-if="ownMachine" class="mt-3 text-sm text-ink-muted">
-            Own machine add-on: {{ ownMachine }} a month for each, to run one of your servers on a machine of its own.
-          </p>
-          <p v-if="!tierRows.length" class="card p-6 text-sm text-ink-muted">
-            Prices and what each tier covers are on the
-            <RouterLink to="/support" class="link">support tiers</RouterLink> page.
-          </p>
-        </div>
-      </div>
-    </section>
-
     <!-- Downloads. -->
-    <section class="border-t border-border bg-panel/40 py-16 sm:py-20" aria-labelledby="downloads-title">
+    <section id="downloads" class="scroll-mt-20 border-t border-border bg-panel/40 py-16 sm:py-20" aria-labelledby="downloads-title">
       <div class="page">
         <p class="eyebrow">Downloads</p>
         <h2 id="downloads-title" class="mt-3 text-3xl font-semibold text-ink-bright">Get OpenNova</h2>
         <p class="mt-3 max-w-2xl text-ink-muted">
           Windows x64. Pre-1.0 and experimental. No game data is included: playing a retail title needs your own
-          purchased copy.
+          purchased copy. Each release on GitHub carries these files:
         </p>
         <ul class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <li v-for="item in downloads" :key="item.file" class="card p-5">
             <p class="font-semibold text-ink-bright">{{ item.name }}</p>
             <p class="mt-1 text-sm text-ink-muted">{{ item.body }}</p>
-            <p class="mt-3 font-mono text-xs text-ink-muted">{{ item.file }}-v*.zip</p>
+            <p class="mt-3 font-mono text-xs text-ink-muted">{{ item.file }}</p>
           </li>
         </ul>
         <div class="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3">
@@ -209,13 +205,14 @@
             The source, the issues and every release are on
             <a :href="GITHUB_URL" target="_blank" rel="noopener" class="link">GitHub</a>.
           </p>
-        </div>      </div>
+        </div>
+      </div>
     </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { fetchStats } from '../api/stats';
 import { fetchTiers } from '../api/billing';
@@ -238,8 +235,8 @@ const pillars = [
     body: "NovaWorld is the online service these games log in to. We run our own, with accounts, lobbies and the in-game server browser, so Delta Force Xtreme 2 activates without NovaLogic's retired service.",
   },
   {
-    title: 'Wire-compatible',
-    body: 'OpenNova speaks the original network protocol. Retail players join OpenNova servers and OpenNova joins retail ones, on LAN and on NovaWorld.',
+    title: 'Plays with the originals',
+    body: 'OpenNova speaks the original network protocol: retail players join OpenNova servers and OpenNova joins theirs, on LAN and on NovaWorld.',
   },
 ];
 
@@ -251,27 +248,27 @@ const editorFeatures = [
   'Build packs the game archives; Play runs them in OpenNova or the original game',
 ];
 
-const steps = [
+const steps: { title: string; body: string; link?: string; to?: string; href?: string }[] = [
   {
-    title: 'Own the game',
-    body: 'Install Joint Operations or Delta Force Xtreme 2 from your own copy.',
+    title: 'Install your game',
+    body: 'Joint Operations or Delta Force Xtreme 2, from your own copy.',
   },
   {
     title: 'Make an account',
-    body: 'Register a NovaWorld account here. It is the handle and password you log in with in-game.',
+    body: 'Register a NovaWorld account here: the handle and password you log in with in-game.',
     link: 'Create an account',
     to: '/register',
   },
   {
     title: 'Run the Switcher',
-    body: 'The OpenNova Switcher points a stock install at our NovaWorld. No patched exe, no injected DLL.',
+    body: "Pick OpenNova's NovaWorld in the Switcher. Your game files stay as they are.",
     link: 'Get the Switcher',
-    href: RELEASES_URL,
+    href: '#downloads',
   },
   {
-    title: 'Pick a game',
-    body: "Join from the game's own server browser. The Lobbies page shows who is playing now.",
-    link: 'View lobbies',
+    title: 'Log in and play',
+    body: "Start the game, log in with your account and join from its server browser. Or host a game from it yourself.",
+    link: 'See who is playing',
     to: '/lobby',
   },
 ];
@@ -279,17 +276,17 @@ const steps = [
 const downloads = [
   {
     name: 'OpenNova',
-    body: 'The game. Plays retail Joint Operations from your install, and OpenNova\'s own base game.',
+    body: "The game. Plays retail Joint Operations from your install, and OpenNova's own base game.",
     file: 'opennova-game-windows',
   },
   {
     name: 'OpenNova Editor',
-    body: 'The editor, with its own runtime. No Godot install needed.',
+    body: 'The editor, ready to run on its own.',
     file: 'opennova-editor-windows',
   },
   {
     name: 'OpenNova Switcher',
-    body: "A tray app that points a stock Joint Operations or Delta Force Xtreme 2 install at our NovaWorld, NovaLogic's, or an address of your own.",
+    body: "A tray app that points your Joint Operations or Delta Force Xtreme 2 at our NovaWorld, NovaLogic's, or an address of your own.",
     file: 'opennova-switcher-windows',
   },
   {
@@ -299,12 +296,12 @@ const downloads = [
   },
   {
     name: 'Tools and dedicated server',
-    body: 'The command-line tools and opennova-serve, a headless server retail and OpenNova clients both join.',
+    body: 'The command-line tools and opennova-serve, a headless server retail and OpenNova players both join.',
     file: 'opennova-apps-windows',
   },
 ];
 
-// NovaWorld's live counts (GET /api/stats).
+// NovaWorld's live counts (GET /api/stats), as of the page's load.
 const stats = ref<{ players: number; lobbies: number } | null>(null);
 const statsFailed = ref(false);
 
@@ -324,9 +321,11 @@ const statusDot = computed(() => {
   return 'bg-online';
 });
 
-// The support tiers (GET /api/billing/tiers); the section links on when they
-// are off or did not load.
+// The support tiers (GET /api/billing/tiers): loading, open with prices,
+// closed (billing off), or failed to load.
 const tiers = ref<TiersResponse | null>(null);
+const tiersFailed = ref(false);
+const loadingCards = 3;
 
 const tierRows = computed(() => {
   const t = tiers.value;
@@ -340,39 +339,31 @@ const tierRows = computed(() => {
     }));
 });
 
+const tiersState = computed<'loading' | 'open' | 'closed' | 'failed'>(() => {
+  if (tiersFailed.value) return 'failed';
+  if (!tiers.value) return 'loading';
+  if (!tiers.value.enabled) return 'closed';
+  return tierRows.value.length ? 'open' : 'failed';
+});
+
 const ownMachine = computed(() => {
   const t = tiers.value;
-  if (!t || !t.enabled || !t.own_machine || t.own_machine.amount === null) return '';
+  if (tiersState.value !== 'open' || !t?.own_machine || t.own_machine.amount === null) return '';
   return formatMoney(t.own_machine.amount, t.currency);
 });
 
-// The time-lapse plays on its own, muted, unless the visitor asks for reduced
-// motion; then it waits with its controls.
-const timelapseEl = ref<HTMLVideoElement | null>(null);
-const reducedMotion = ref(false);
-let observer: IntersectionObserver | null = null;
-
-onMounted(async () => {
-  reducedMotion.value = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-  const video = timelapseEl.value;
-  if (video && !reducedMotion.value && 'IntersectionObserver' in window) {
-    observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.isIntersecting) void video.play().catch(() => undefined);
-        else video.pause();
-      }
+onMounted(() => {
+  fetchStats()
+    .then((value) => {
+      if (value) stats.value = { players: value.players, lobbies: value.lobbies };
+      else statsFailed.value = true;
+    })
+    .catch(() => {
+      statsFailed.value = true;
     });
-    observer.observe(video);
-  }
-
-  const [statsResult, tiersResult] = await Promise.allSettled([fetchStats(), fetchTiers()]);
-  if (statsResult.status === 'fulfilled' && statsResult.value) {
-    stats.value = { players: statsResult.value.players, lobbies: statsResult.value.lobbies };
-  } else {
-    statsFailed.value = true;
-  }
-  if (tiersResult.status === 'fulfilled' && tiersResult.value.ok) tiers.value = tiersResult.value.value;
+  fetchTiers().then((result) => {
+    if (result.ok) tiers.value = result.value;
+    else tiersFailed.value = true;
+  });
 });
-
-onBeforeUnmount(() => observer?.disconnect());
 </script>

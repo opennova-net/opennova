@@ -1,7 +1,7 @@
 <template>
   <footer class="border-t border-border bg-panel/40 py-10 text-sm">
-    <div class="page grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
-      <div class="space-y-2 sm:col-span-2 lg:col-span-1">
+    <div class="page grid grid-cols-3 gap-6 lg:grid-cols-4">
+      <div class="col-span-3 space-y-2 lg:col-span-1">
         <p class="font-semibold text-ink">Open<span class="text-accent">Nova</span></p>
         <p class="text-ink-muted">
           An open-source reimplementation of NovaLogic's engine for Joint Operations and newer. Pre-1.0 and experimental.
