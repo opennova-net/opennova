@@ -1,0 +1,113 @@
+# Hosted game servers in the local stack, over the dev overlay: the fleet's
+# machines are containers of the serve image (apps/serve/Dockerfile) that the
+# worker's docker machine driver launches on the stack's network
+# (apps/novaworld_common/hosted/docker_machine_driver.h), as a deployment's
+# worker launches EC2 machines. Each runs the image's own opennova-hostd with
+# its process runtime: it redeems the one-time token its launch handed it at
+# the controller's internal listener (bound at the controller's fixed address,
+# admitting the stack's subnet), syncs from the machine's address, and runs
+# each server the controller places on its slots as an opennova-serve child at
+# the slot's fixed ports; the controller's admin links reach those on the
+# machine's address; the servers list through the gate at ONNET_PUBLIC_HOST.
+#
+#   docker-api    the worker's Docker Engine API: a socket proxy that admits
+#                 the whole containers API, on every container of this
+#                 machine (no images, volumes, networks, exec start or swarm).
+#                 That is root on this machine (a container it creates can
+#                 mount anything or run privileged, and a container's /json
+#                 shows its environment, secrets included), so it sits on a
+#                 network of its own (docker-api, internal: no route out) that
+#                 the worker alone joins: no other program and no machine (a
+#                 game server's) reaches it. The local stack's alone, never a
+#                 deployment's.
+#   machine-data  the data set's folder (STACK_DATA_DIR: a licensed install
+#                 the developer names, or the synthetic one scripts/dev_stack.sh
+#                 writes) at /opt/game/<data set>, where a machine mounts each
+#                 data set; the machines take it from this container
+#                 (ONNET_HOSTED_DOCKER_DATA_FROM).
+#   machine-image the machines' image, the serve image, built and never run.
+#
+# scripts/dev_stack.sh up --data <dir> (or --synthetic-data) adds this file.
+# The machines are no compose service: `scripts/dev_stack.sh down` removes them
+# (label opennova.deployment=dev) before the stack.
+
+# The Docker API's network: the proxy and the worker alone, no route out.
+networks:
+  docker-api:
+    name: opennova-dev-docker-api
+    internal: true
+
+x-hosting-env: &hosting-env
+  ONNET_HOSTED_PROVIDER: docker
+  ONNET_HOSTED_DATA_SETS: ${STACK_DATA_SETS:?set STACK_DATA_SETS, ONNET_HOSTED_DATA_SETS for the data set (scripts/dev_stack.sh writes it)}
+  ONNET_HOSTED_DOCKER_URL: http://docker-api:2375
+  ONNET_HOSTED_DOCKER_NETWORK: opennova-dev
+  ONNET_HOSTED_DOCKER_DATA_FROM: opennova-dev-machine-data
+  ONNET_HOSTED_DEPLOYMENT: dev
+  ONNET_HOSTED_SERVE_IMAGE: ${SERVE_IMAGE:-opennova-serve:local}
+  # The controller's internal listener at its fixed address (the dev
+  # overlay's), admitting the agents from the stack's subnet; the machines'
+  # admin.cfg admits the controller's network.
+  ONNET_INTERNAL_HTTP_BIND: 172.30.77.10:8070
+  ONNET_HOSTED_BOOTSTRAP_CIDRS: 172.30.77.0/24
+  # A small fleet: one shared machine of 4 slots, one own machine.
+  ONNET_FLEET_SHARED_SLOTS: ${ONNET_FLEET_SHARED_SLOTS:-4}
+  ONNET_FLEET_MAX_SHARED: ${ONNET_FLEET_MAX_SHARED:-1}
+  ONNET_FLEET_MAX_OWN: ${ONNET_FLEET_MAX_OWN:-1}
+
+services:
+  novaworld-web:
+    environment:
+      <<: *hosting-env
+
+  novaworld-controller:
+    environment:
+      <<: *hosting-env
+
+  # On the stack's network and the Docker API's, which it alone joins.
+  novaworld-worker:
+    environment:
+      <<: *hosting-env
+    networks:
+      default: {}
+      docker-api: {}
+    depends_on:
+      docker-api:
+        condition: service_started
+      machine-data:
+        condition: service_started
+
+  docker-api:
+    image: tecnativa/docker-socket-proxy:0.3.0
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"
+      POST: "1"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker-api
+
+  # A container of no image of ours: the machines take every mount it has
+  # (VolumesFrom), so it holds the data set's alone.
+  machine-data:
+    image: alpine:3.20
+    container_name: opennova-dev-machine-data
+    restart: unless-stopped
+    init: true
+    command: ["sleep", "infinity"]
+    volumes:
+      - type: bind
+        source: ${STACK_DATA_DIR:?set STACK_DATA_DIR, the data set's folder (scripts/dev_stack.sh --data or --synthetic-data)}
+        target: /opt/game/${STACK_DATA_SET:-jop_2_consumer}
+        read_only: true
+
+  # The machines' image (apps/serve/Dockerfile: opennova-serve and
+  # opennova-hostd), which the worker's driver starts each machine from: built
+  # here, never started as a service (the `machines` profile).
+  machine-image:
+    profiles: ["machines"]
+    image: ${SERVE_IMAGE:-opennova-serve:local}
+    build:
+      context: ../..
+      dockerfile: apps/serve/Dockerfile

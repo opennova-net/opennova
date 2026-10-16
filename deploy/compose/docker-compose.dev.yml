@@ -1,28 +1,103 @@
-# Dev overlay: publish the game ports to the host, set the dev environment,
-# run a local PostgreSQL for the server (its data in the pg_data volume;
-# `down -v` wipes it), and serve the web UI via Vite with hot-reload (no
-# image rebuild on web changes). On a Windows + WSL2 docker host the
-# published ports reach the Windows host, so a retail JO process on the same
-# machine (with the hosts file pointing gs.novaworld.net at 127.0.0.1)
-# connects straight through.
+# The local stack: the base file's five programs and portal, each its own
+# container as a deployment runs each as its own ECS service, with a local
+# PostgreSQL (its data in the pg_data volume; `down -v` wipes it) and Valkey (no
+# persistence: it holds TTL'd state alone), the dev environment, and the
+# ports a retail client and a browser on this machine reach. The portal is
+# prod's nginx in web's network (as in web's ECS task), so the site's API is
+# reached through it alone (ONNET_API_PROXY_ONLY), as in a deployment. Hosted
+# game servers are the hosting overlay's (docker-compose.hosting.yml). The
+# smoke test (scripts/dev_stack.sh smoke) runs from the stack's network.
 #
-#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
-#   # then open the web UI at http://localhost:5173 (Vite, hot-reload)
+# scripts/dev_stack.sh runs it: it finds this machine's LAN address for
+# ONNET_PUBLIC_HOST, builds the images, and writes the values below to an env
+# file it passes with --env-file. By hand, from this directory:
+#   ONNET_PUBLIC_HOST=<this machine's LAN IPv4> \
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 #
-# NOTE on networking: we deliberately use the published-port BRIDGE network
-# here, NOT `network_mode: host`. Host mode was tried so the server could
-# observe the real client source IP for the host/join reflection flow, and it
-# did (the gate saw 127.0.0.1) — but on Docker Desktop + WSL2 it left the NW
-# UDP (:64206) handshake unreachable and bounced the engine. Instead the join
-# endpoint is made reachable via the reflection override (see the novaworld
-# `environment:` block below), which forces the advertised host endpoint to a
-# locally reachable address without depending on source observation.
+# ONNET_PUBLIC_HOST is the address everything announces: the gate's
+# POSTIPADDRESS, the lobby's endpoint, web's host. A retail client on this
+# machine (the Switcher's custom address, or a hosts line, naming it) and the
+# stack's own containers (the smoke test, the hosted servers' machines) all
+# reach the published ports there, so it is never loopback: a container's
+# 127.0.0.1 is its own.
+#
+# Networking: the published-port bridge network, not `network_mode: host`.
+# Host mode was tried so the server could observe the real client source IP
+# for the host/join reflection flow, but on Docker Desktop + WSL2 it left the
+# NW UDP (:64206) handshake unreachable and bounced the engine. Instead the
+# join endpoint is made reachable via the reflection override (below), which
+# forces the advertised host endpoint to a locally reachable address without
+# depending on source observation.
+
+name: opennova-dev
+
+# The stack's network, by a fixed name and subnet: the hosting overlay's
+# machines join it by name, and the controller's internal listener binds a
+# fixed address on it (the agents reach it there, its admin links come from
+# it). Docker hands out addresses from the upper half alone, so no container
+# (a machine the worker launches among them) ever takes the controller's.
+networks:
+  default:
+    name: opennova-dev
+    ipam:
+      config:
+        - subnet: 172.30.77.0/24
+          ip_range: 172.30.77.128/25
+
+# Every program's dev dependencies.
+x-dev-depends: &dev-depends
+  postgres:
+    condition: service_healthy
+  valkey:
+    condition: service_healthy
+
+x-dev-env: &dev-env
+  ONNET_PUBLIC_HOST: ${ONNET_PUBLIC_HOST:?set ONNET_PUBLIC_HOST to this machine's LAN IPv4 (scripts/dev_stack.sh finds it)}
+  # Web's address as the gate and the lobby announce it: its published 8080
+  # on the same address.
+  ONNET_WEB_HOST: ${ONNET_PUBLIC_HOST}
+  # The controller's internal listener, by its compose name.
+  ONNET_INTERNAL_URL: http://novaworld-controller:8070
+  # The postgres service below.
+  DATABASE_URL: postgresql://novaworld@postgres:5432/novaworld
+  DATABASE_PASSWORD: dev
+  # The dev admin token: without it the admin API stays CLOSED and the web
+  # /admin gate 401s. Override per shell via ADMIN_API_TOKEN=...
+  ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-dev-admin-token}
+  # Seed the local test accounts (test, foo, test1..3; backend/seed) for dev
+  # only, and make `test` (password test) the first site admin; a deployment
+  # leaves both unset. This is test DATA only: the login/auth logic is
+  # identical in dev and in a deployment.
+  SEED_DEV_USERS: "1"
+  ONNET_BOOTSTRAP_ADMIN: ${ONNET_BOOTSTRAP_ADMIN:-test}
+  # The site's API through the portal alone, as in web's ECS task: nginx in
+  # web's network forwards /api/ from 127.0.0.1.
+  ONNET_TRUSTED_PROXIES: 127.0.0.1
+  ONNET_API_PROXY_ONLY: "1"
+  # Local host/join (peer-to-peer): the retail client's advertised host
+  # endpoint, forced to this address (docker hides the real source). Two
+  # reflect ports, mirroring onnet's separate gate/nw_udp processes and JO
+  # game.cfg. Each is the retail client's LOCAL UDP port for that socket:
+  #   gate-server socket = mpgateserverlocalport (49152) -> ReflectedPortNumber
+  #   novaworld session  = mpnovaworldport (32768) -> advertised to joiners
+  ONNET_CLIENT_REFLECT_IP: ${ONNET_CLIENT_REFLECT_IP:-${ONNET_PUBLIC_HOST}}
+  ONNET_CLIENT_REFLECT_GATE_PORT: ${ONNET_CLIENT_REFLECT_GATE_PORT:-49152}
+  ONNET_CLIENT_REFLECT_NOVAWORLD_PORT: ${ONNET_CLIENT_REFLECT_NOVAWORLD_PORT:-32768}
+  # Billing in Stripe's test mode: the base file passes the STRIPE_* set
+  # through from the shell, which deploy/env/billing.dev.env.tpl fills from
+  # the vault's stripe-test item, e.g.
+  #   op run --env-file=../env/billing.dev.env.tpl -- scripts/dev_stack.sh up
+  # and `stripe listen --forward-to localhost:8000/api/billing/webhook`
+  # delivers the webhooks, its secret (`stripe listen --print-secret`) set by
+  # hand as STRIPE_WEBHOOK_SECRET. Unset, billing is off (the smoke test needs
+  # none of it). Checkout and the portal return to the site.
+  ONNET_SITE_URL: ${ONNET_SITE_URL:-http://localhost:${STACK_SITE_PORT:-8000}}
 
 services:
-  # The server's database: PostgreSQL 17, created SQL_ASCII with the C locale
-  # as the server requires (backend/README.md): bytes stored as sent, ordered
+  # The programs' database: PostgreSQL 17, created SQL_ASCII with the C locale
+  # as the programs require (backend/README.md): bytes stored as sent, ordered
   # byte by byte. Not published to the host; scripts/dev_postgres.sh runs one
-  # on 127.0.0.1 for a server built outside Docker.
+  # on 127.0.0.1 for a program built outside Docker.
   postgres:
     image: postgres:17
     restart: unless-stopped
@@ -33,65 +108,87 @@ services:
       POSTGRES_INITDB_ARGS: "--locale=C --encoding=SQL_ASCII"
     volumes:
       - pg_data:/var/lib/postgresql/data
+    # Over TCP: on a fresh volume the image's init runs a server on the unix
+    # socket alone, which a socket check would call ready, then restarts it,
+    # and a program connecting meanwhile is refused.
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "novaworld", "-d", "novaworld"]
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "novaworld", "-d", "novaworld"]
       interval: 2s
       timeout: 5s
       retries: 30
 
-  novaworld:
-    depends_on:
-      postgres:
-        condition: service_healthy
-    # Local host/join (peer-to-peer) config — MACHINE-SPECIFIC. Set these to your
-    # adapter's LAN IPv4 (ipconfig) and point the hosts line at the same IP, so
-    # retail binds its host game socket where the server advertises it; a
-    # loopback/LAN mismatch leaves joiners stuck on "Enumerating". Override per
-    # machine via shell env, e.g.:
-    #   ONNET_PUBLIC_HOST=192.168.1.50 ONNET_CLIENT_REFLECT_IP=192.168.1.50 \
-    #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-    environment:
-      ONNET_PUBLIC_HOST: ${ONNET_PUBLIC_HOST:-192.168.10.120}
-      # The postgres service above.
-      DATABASE_URL: postgresql://novaworld@postgres:5432/novaworld
-      DATABASE_PASSWORD: dev
-      # The dev admin token: without it the admin API stays CLOSED and the web
-      # /admin gate 401s. Override per shell via ADMIN_API_TOKEN=...
-      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-dev-admin-token}
-      # Seed the local test accounts (test/foo) for dev only; prod leaves this
-      # unset so 0002_dev_users.sql is skipped. This is test DATA only — the
-      # login/auth logic is identical in dev and prod.
-      SEED_DEV_USERS: "1"
-      ONNET_CLIENT_REFLECT_IP: ${ONNET_CLIENT_REFLECT_IP:-192.168.10.120}
-      # Two reflect ports, mirroring onnet's separate gate/nw_udp processes and
-      # JO game.cfg. Each is the retail client's LOCAL UDP port for that socket
-      # (docker hides the real source, so we set them):
-      #   gate-server socket = mpgateserverlocalport (49152) -> ReflectedPortNumber
-      #   novaworld session  = mpnovaworldport (32768) -> advertised to joiners
-      ONNET_CLIENT_REFLECT_GATE_PORT: ${ONNET_CLIENT_REFLECT_GATE_PORT:-49152}
-      ONNET_CLIENT_REFLECT_NOVAWORLD_PORT: ${ONNET_CLIENT_REFLECT_NOVAWORLD_PORT:-32768}
-      # Billing in Stripe's test mode: the base file passes the STRIPE_* set
-      # through from the shell, which deploy/env/billing.dev.env.tpl fills from
-      # the vault's stripe-test item, e.g.
-      #   op run --env-file=../env/billing.dev.env.tpl -- \
-      #     docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
-      # and `stripe listen --forward-to localhost:8080/api/billing/webhook`
-      # delivers the webhooks (its whsec_ as STRIPE_WEBHOOK_SECRET). Unset,
-      # billing is off. Checkout and the portal return to the Vite site.
-      ONNET_SITE_URL: ${ONNET_SITE_URL:-http://localhost:5173}
-    ports:
-      - "7597:7597/udp"      # novaworld_gate
-      - "64206:64206/udp"    # NovaWorld UDP
-      - "8080:8080/tcp"      # HTTP / API
+  # Web's state store: Valkey 8 with no password and no persistence, evicting
+  # as the deployed one does (volatile-lru: every key has a TTL;
+  # infra/aws/cache.tf). Not published to the host.
+  valkey:
+    image: valkey/valkey:8
+    restart: unless-stopped
+    command: ["valkey-server", "--save", "", "--appendonly", "no", "--maxmemory", "256mb", "--maxmemory-policy", "volatile-lru"]
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
 
-  # Web UI via the Vite dev server. Edits to web/ hot-reload live at
-  # http://localhost:5173 with no rebuild. Vite proxies /api to the novaworld
-  # server on the compose network (see web/vite.config.ts; its polling watch
-  # makes file changes reliable on WSL2). The nginx image (base web + the prod
-  # overlay) is the production path and is left untouched.
-  web:
+  # The gate, handing out the live lobby instance (no fallback, as deployed).
+  novaworld-gate:
+    depends_on: *dev-depends
+    environment:
+      <<: *dev-env
+    ports:
+      - "7597:7597/udp"      # the gate: the retail client's probe
+
+  # One lobby instance, announced on this machine's address.
+  novaworld-lobby:
+    depends_on: *dev-depends
+    environment:
+      <<: *dev-env
+      ONNET_LOBBY_ENDPOINT: ${ONNET_PUBLIC_HOST}:64206
+    ports:
+      - "64206:64206/udp"    # NovaWorld UDP, the lobby
+
+  # Web, and the portal in its network: its ports are published here.
+  novaworld-web:
+    depends_on: *dev-depends
+    environment:
+      <<: *dev-env
+      # The valkey service below (no password).
+      ONNET_REDIS_URL: redis://valkey:6379
+    ports:
+      - "8080:8080/tcp"                     # web: the retail NW*.dll and .gsb routes
+      - "${STACK_SITE_PORT:-8000}:80/tcp"   # the portal: the site and its /api
+
+  # At a fixed address on the stack's network, where its internal listener
+  # binds (the hosting overlay's ONNET_INTERNAL_HTTP_BIND).
+  novaworld-controller:
+    depends_on: *dev-depends
+    environment:
+      <<: *dev-env
+    networks:
+      default:
+        ipv4_address: 172.30.77.10
+
+  novaworld-worker:
+    depends_on: *dev-depends
+    environment:
+      <<: *dev-env
+
+  # The portal's /admin pages' basic auth (dev values; the site's own admin
+  # session is the `test` account above).
+  portal:
+    environment:
+      ADMIN_BASIC_AUTH_USER: ${ADMIN_BASIC_AUTH_USER:-admin}
+      ADMIN_BASIC_AUTH_PASSWORD: ${ADMIN_BASIC_AUTH_PASSWORD:-dev}
+
+  # The site via the Vite dev server, for web/ work: edits hot-reload at
+  # http://localhost:5173 with no image rebuild. Vite proxies /api to the
+  # portal (see web/vite.config.ts; its polling watch makes file changes
+  # reliable on WSL2). Off unless asked for: `scripts/dev_stack.sh up --vite`
+  # (the `vite` profile).
+  portal-vite:
+    profiles: ["vite"]
     image: node:21-alpine
-    build: !reset null
+    restart: unless-stopped
     working_dir: /app
     command: sh -c "npm install && npm run dev"
     volumes:
@@ -100,7 +197,19 @@ services:
     ports:
       - "5173:5173"
     environment:
-      VITE_API_TARGET: http://novaworld:8080
+      VITE_API_TARGET: http://novaworld-web:80
+    depends_on:
+      - portal
+
+  # The smoke test (tests/novaworld/stack_smoke.cpp), run on the stack's
+  # network by scripts/dev_stack.sh smoke (the `smoke` profile).
+  smoke:
+    profiles: ["smoke"]
+    image: ${SMOKE_IMAGE:-opennova-novaworld-smoke:local}
+    build:
+      context: ../..
+      dockerfile: apps/novaworld_common/Dockerfile
+      target: smoke
 
 volumes:
   pg_data:
