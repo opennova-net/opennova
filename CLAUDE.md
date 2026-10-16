@@ -17,6 +17,8 @@ easier to relay than to rediscover.
 - `godot/` — the Godot 4.6.1 project: `src/` (pure C++ GDExtension bindings —
   part of the core engine, ADR 0034 d6; see `godot/src/CLAUDE.md`),
   `game/` (the game shell plus its game-level GDScript runtime),
+  `editor/` (the OpenNova Editor's GDScript: its MCP service, catalog and tools,
+  ADR 0046; loaded by path, never in a game export),
   `probes/` (the registered `game_probe` runtime probes, source-only and
   excluded from every export preset, ADR 0041; see `docs/mcp.md`),
   `tests/` (GUT suite).

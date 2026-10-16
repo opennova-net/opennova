@@ -51,7 +51,7 @@ import cite_images  # noqa: E402  the image rule, shared with scripts/ida/cite_s
 REPO = Path(__file__).resolve().parents[2]
 BASELINE_PATH = Path(__file__).resolve().parent / "cite_census_baseline.json"
 
-SCOPES = ("engine", "godot/src", "godot/game", "godot/probes",
+SCOPES = ("engine", "godot/src", "godot/game", "godot/editor", "godot/probes",
           "apps", "tests")
 SUFFIXES = (".c", ".cc", ".cpp", ".h", ".hpp", ".gd")
 EXCLUDED_PARTS = ("third_party", "addons")
