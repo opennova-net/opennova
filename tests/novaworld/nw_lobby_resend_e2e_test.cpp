@@ -111,6 +111,9 @@ int main() {
 		std::fprintf(stderr, "FAIL: listener.start\n");
 		return 1;
 	}
+	// The in-match JO host is opt-in (ONNET_EMBEDDED_JO_HOST): a default
+	// listener runs none, so a full-JO-identity Hello stays on the lobby path.
+	expect(!listener.embedded_jo_host_running(), "a default listener runs no JO host");
 
 	opennova::ClientSession::Config cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 	cfg.client_index = 0x52455345u;

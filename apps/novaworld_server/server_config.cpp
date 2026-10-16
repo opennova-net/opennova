@@ -90,6 +90,7 @@ ServerConfig ServerConfig::from_env() {
 	if (auto v = getenv_safe("ONNET_BOOTSTRAP_ADMIN")) c.bootstrap_admin = v;
 	c.require_host_key = getenv_bool("ONNET_REQUIRE_HOST_KEY", c.require_host_key);
 	c.cd_key_auto_mint = getenv_bool("ONNET_CD_KEY_AUTO_MINT", c.cd_key_auto_mint);
+	c.embedded_jo_host = getenv_bool("ONNET_EMBEDDED_JO_HOST", c.embedded_jo_host);
 
 	if (auto v = getenv_safe("ONNET_MET_IP"))    c.met_ip = v;
 	c.met_port = getenv_u16("ONNET_MET_PORT", c.met_port);
