@@ -28,8 +28,13 @@ crow::response disabled() {
 	return json_error(503, "billing_disabled", "support tiers are not open on this NovaWorld service");
 }
 
+// Stripe did not answer, or refused what was asked (the reason is in the log
+// line the caller writes). 503, never 502: Cloudflare, in front of the site,
+// answers an origin's 502 (and 504) with a page of its own in place of this
+// body, so the site's page could not tell the visitor what happened.
 crow::response stripe_unavailable() {
-	return json_error(502, "stripe_unavailable", "Stripe did not answer; try again in a moment");
+	return json_error(
+			503, "stripe_unavailable", "Stripe could not take the request; try again in a moment");
 }
 
 void text_or_null(crow::json::wvalue &out, const char *key, const std::string &text) {
@@ -292,7 +297,7 @@ std::optional<crow::response> BillingRoutes::settle_previous_session(const WebSe
 		// Stripe knows no such session (in this mode): nothing was sold through it.
 		if (previous.error.kind == StripeError::Kind::Rejected && previous.error.status == 404) return std::nullopt;
 		log_account(user, "checkout",
-				std::string("the previous session unread: ") + stripe_error_kind_name(previous.error.kind));
+				"the previous session unread: " + stripe_error_text(previous.error));
 		return stripe_unavailable();
 	}
 	if (previous.value->status != "complete") return std::nullopt;
@@ -322,7 +327,7 @@ std::optional<crow::response> BillingRoutes::settle_previous_session(const WebSe
 // not an active player's or (the add-on) has no tier granting, 409 already_subscribed when a
 // tier grants already (the portal changes it), 409 own_machine_limit for the
 // add-on when the account has an own machine for every server it may run
-// (each add-on checkout sells one; several are fine below that), 502
+// (each add-on checkout sells one; several are fine below that), 503
 // stripe_unavailable. Then the account's previous session
 // (settle_previous_session): an open one is expired; a complete one has the
 // customer synced from Stripe now and the rules judged again, so a payment the
@@ -391,7 +396,7 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 		const auto made = client.create_customer(user.id, user.username, billing_->instance_id(),
 				"opennova-" + billing_->instance_id() + "-customer-" + std::to_string(user.id));
 		if (!made.ok()) {
-			log_account(user, "checkout", std::string("customer not made: ") + stripe_error_kind_name(made.error.kind));
+			log_account(user, "checkout", "customer not made: " + stripe_error_text(made.error));
 			return stripe_unavailable();
 		}
 		try {
@@ -421,14 +426,17 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 	create.metadata = { { kMetaInstance, billing_->instance_id() }, { kMetaUserId, std::to_string(user.id) },
 		{ kMetaUsername, user.username } };
 	create.automatic_tax = config.automatic_tax;
+	// Stripe refuses the session while the account's public details name no
+	// terms of service URL (Dashboard, Settings, Public details; DEPLOY.md).
 	create.require_tos_consent = true;
 	// Stripe counts the life from the session's creation and refuses one under
 	// 30 minutes: the clock read last, after every slow call above.
 	create.expires_at = unix_now() + kCheckoutLifeS;
 	const auto session = client.create_checkout_session(create);
 	if (!session.ok() || session.value->url.empty()) {
-		log_account(user, "checkout",
-				std::string("no session: ") + (session.ok() ? "no url" : stripe_error_kind_name(session.error.kind)));
+		const std::string why =
+				session.ok() ? std::string("no url") : stripe_error_text(session.error);
+		log_account(user, "checkout", "no session: " + why);
 		return stripe_unavailable();
 	}
 	try {
@@ -447,7 +455,7 @@ crow::response BillingRoutes::checkout(const crow::request &req) {
 // POST /api/billing/portal — a Customer Portal session for the account's Stripe
 // customer, {"url"}, returning to /me/support. require_user (401, 403 without
 // the CSRF header), 503 billing_disabled, the checkout bucket (429), 404
-// no_billing_account with no customer yet, 502 stripe_unavailable.
+// no_billing_account with no customer yet, 503 stripe_unavailable.
 crow::response BillingRoutes::portal(const crow::request &req) {
 	auto access = access_.require_user(req);
 	if (access.refusal) return std::move(*access.refusal);
@@ -468,7 +476,7 @@ crow::response BillingRoutes::portal(const crow::request &req) {
 	const auto url =
 			billing_->client().create_portal_session(customer->stripe_customer_id, billing_->config().site_url + "/me/support");
 	if (!url.ok()) {
-		log_account(user, "portal", std::string("no session: ") + stripe_error_kind_name(url.error.kind));
+		log_account(user, "portal", "no session: " + stripe_error_text(url.error));
 		return stripe_unavailable();
 	}
 	crow::json::wvalue out;
@@ -480,7 +488,7 @@ crow::response BillingRoutes::portal(const crow::request &req) {
 // (the checkout success page's: the webhook may not have come yet), then as GET
 // /api/me/billing. require_user (401, 403 without the CSRF header), 503
 // billing_disabled, the account's kSyncPerUser bucket (429), 404
-// no_billing_account with no customer yet, 502 stripe_unavailable.
+// no_billing_account with no customer yet, 503 stripe_unavailable.
 crow::response BillingRoutes::me_sync(const crow::request &req) {
 	auto access = access_.require_user(req);
 	if (access.refusal) return std::move(*access.refusal);
@@ -697,7 +705,7 @@ crow::response BillingRoutes::admin_reconcile(const crow::request &req) {
 // instance and the account, the account's customer row replaced, and the
 // customer synced. require_admin; 503 billing_disabled; 400 invalid_json,
 // missing_field, invalid_field (no cus_ id, no positive id); 404 not_found for
-// no such player or a customer Stripe does not know (or deleted); 502
+// no such player or a customer Stripe does not know (or deleted); 503
 // stripe_unavailable; 200 {"user_id", "stripe_customer_id", "outcome"}.
 crow::response BillingRoutes::admin_link(const crow::request &req) {
 	auto caller = access_.require_admin(req);

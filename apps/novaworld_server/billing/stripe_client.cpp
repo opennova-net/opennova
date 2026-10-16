@@ -224,6 +224,17 @@ const char *stripe_error_kind_name(StripeError::Kind kind) {
 	return "unknown";
 }
 
+std::string stripe_error_text(const StripeError &e) {
+	std::string out = stripe_error_kind_name(e.kind);
+	if (e.status != 0)
+		out += " " + std::to_string(e.status);
+	if (!e.stripe_code.empty())
+		out += " (" + e.stripe_code + ")";
+	if (!e.message.empty())
+		out += ": " + loggable(e.message, 200);
+	return out;
+}
+
 std::string Subscription::first_price_id() const { return items.empty() ? std::string() : items[0].price_id; }
 int64_t Subscription::first_period_end() const { return items.empty() ? 0 : items[0].current_period_end; }
 int64_t Subscription::first_quantity() const { return items.empty() ? 0 : items[0].quantity; }

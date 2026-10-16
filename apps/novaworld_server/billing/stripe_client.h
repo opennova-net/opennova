@@ -47,6 +47,9 @@ struct StripeError {
 };
 
 const char *stripe_error_kind_name(StripeError::Kind kind);
+// The error for a log line: its kind, Stripe's status and code, and its message
+// ("rejected 404 (resource_missing): No such customer: 'cus_1'"); never a key.
+std::string stripe_error_text(const StripeError &e);
 
 // A value, or (when `value` is empty) the error that kept it.
 template <typename T> struct StripeResult {

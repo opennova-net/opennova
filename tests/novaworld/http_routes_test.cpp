@@ -5972,7 +5972,8 @@ std::string event_body(const std::string &id, const std::string &customer, bool 
 // (the customer made once with its idempotency key and the account's metadata,
 // the previous open session expired, the return URLs, the terms, the life), the
 // sync after a checkout, the portal, the buckets, prices that do not check out
-// (503 billing_misconfigured), Stripe unreachable (502), and billing off.
+// (503 billing_misconfigured), Stripe unreachable or refusing the session (503
+// stripe_unavailable, never a 502 Cloudflare would replace), and billing off.
 int test_billing_routes(Harness &h) {
 	namespace billing = opennova::novaworld_server::billing;
 	using billing::StripeRequest;
@@ -6134,11 +6135,27 @@ int test_billing_routes(Harness &h) {
 		h.stripe->prices["price_htier2"].interval = "month";
 	}
 	TEST_EXPECT(h.billing->sync().validate_prices() && h.billing->sync().status().prices_ok);
-	// Stripe unreachable: 502, nothing kept.
+	// Stripe unreachable: 503 (a 502 is Cloudflare's to replace), nothing kept.
 	h.stripe->fail_next(billing::StripeReply::Outcome::Unreachable);
 	reply = post("/api/billing/checkout", cy_s, "{\"item\":\"tier2\"}");
-	TEST_EXPECT(reply.code == 502 && error_of_reply(reply) == "stripe_unavailable");
+	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "stripe_unavailable");
 	TEST_EXPECT(!billing::customer_of(*h.pool.acquire(), cy));
+	// Stripe refuses the session, as it did prod's first checkouts (2026-10-16,
+	// behind a 502 Cloudflare replaced): 503 stripe_unavailable; the customer
+	// made, no session kept. Once the refusal is gone, the next one goes.
+	h.stripe->refuse_next("/v1/checkout/sessions", 400, "parameter_invalid",
+			"fake: a terms of service URL must be set in the Dashboard");
+	const size_t sessions_before =
+			h.stripe->count(StripeRequest::Method::Post, "/v1/checkout/sessions");
+	reply = post("/api/billing/checkout", cy_s, "{\"item\":\"tier2\"}");
+	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "stripe_unavailable");
+	TEST_EXPECT(h.stripe->count(StripeRequest::Method::Post, "/v1/checkout/sessions") ==
+			sessions_before + 1);
+	const auto cy_customer = billing::customer_of(*h.pool.acquire(), cy);
+	TEST_EXPECT(cy_customer && cy_customer->open_checkout_session.empty());
+	reply = post("/api/billing/checkout", cy_s, "{\"item\":\"tier2\"}");
+	TEST_EXPECT(reply.code == 200 &&
+			!billing::customer_of(*h.pool.acquire(), cy)->open_checkout_session.empty());
 
 	// Billing off (the Secure listener): every account route 503 billing_disabled.
 	std::string token;
@@ -6165,7 +6182,7 @@ int test_billing_routes(Harness &h) {
 // already_subscribed; the add-on: own_machine_limit once the account has an own
 // machine for every server it may run, several fine below that). A previous
 // session Stripe no longer knows is no obstacle; one Stripe cannot be asked
-// about refuses (502) with nothing made.
+// about refuses (503) with nothing made.
 int test_billing_checkout_guard(Harness &h) {
 	namespace billing = opennova::novaworld_server::billing;
 	using billing::StripeRequest;
@@ -6230,7 +6247,7 @@ int test_billing_checkout_guard(Harness &h) {
 	const size_t sessions_before = h.stripe->count(StripeRequest::Method::Post, "/v1/checkout/sessions");
 	h.stripe->fail_next(billing::StripeReply::Outcome::Unreachable);
 	reply = checkout(fay_s, "own_machine");
-	TEST_EXPECT(reply.code == 502 && error_of_reply(reply) == "stripe_unavailable");
+	TEST_EXPECT(reply.code == 503 && error_of_reply(reply) == "stripe_unavailable");
 	TEST_EXPECT(open_session(fay) == pending &&
 			h.stripe->count(StripeRequest::Method::Post, "/v1/checkout/sessions") == sessions_before);
 	billing::set_open_checkout_session(*h.pool.acquire(), fay, "cs_test_gone");
