@@ -159,6 +159,11 @@ public:
 	// "mod_lists", "mod_descriptions"): MenuShell's defaults, one table the editor's Try mode
 	// reads too. Empty for another token.
 	static PackedStringArray command_names(const String &p_set);
+	// The command the game binds on the control `p_name` of the open document's
+	// screen `p_screen` (engine MenuCommands::wire / command_of over the runtime
+	// as it is now), as its token ("apply_loadout", "cancel_loadout", ...;
+	// menu_commands.h menu_command_token); "" for none.
+	String screen_command(const String &p_screen, const String &p_name, bool p_in_mission) const;
 	// The front-end OPTIONS screen, whose every show re-runs the options
 	// preparation (engine OptionsScreen::is_front_screen).
 	static bool is_front_options_screen(const String &p_screen);

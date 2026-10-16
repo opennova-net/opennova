@@ -168,8 +168,16 @@ func on_menu_built(driver: MenuDriver, file: String, screen: String, root: Resou
 	_ensure_weapons()
 	_populate_classes()
 	_populate_slots()
-	_activation_handlers["ACCEPT"] = _on_accept   # [orig: @0x5671f6 arg 0]
-	_activation_handlers["CANCEL"] = _on_cancel   # [orig: @0x567214 arg 1 skips the apply]
+	# The screen's ACCEPT / CANCEL do the commands the game binds on it (engine
+	# menu_commands.h: WEAPON ACCEPT -> apply_loadout, CANCEL -> cancel_loadout)
+	# [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0 -- ACCEPT's arg 0 @0x5671f6,
+	# CANCEL's arg 1 @0x567214 skips the apply].
+	for control in ["ACCEPT", "CANCEL"]:
+		match driver.screen_command(screen, control, true):
+			"apply_loadout":
+				_activation_handlers[control] = _on_accept
+			"cancel_loadout":
+				_activation_handlers[control] = _on_cancel
 	# The on-show re-registers the ACCEPT hotkeys and the open re-stamps the
 	# debounce [orig: the calls of CUIWidget_ResetScreenHotkeys @0x649ce0 and
 	# CUIWidget_AddScreenHotkey @0x649e20 @0x567483..0x5674c0;
