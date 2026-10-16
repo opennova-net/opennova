@@ -20,7 +20,7 @@ struct Trig {
 	int32_t c[3], s[3];
 	explicit Trig(const int32_t pose[6], bool inverse = false) {
 		for (int i = 0; i < 3; ++i) {
-			const double radians = double(pose[i + 3]) * 1.4629627251502471e-9;
+			const double radians = double(pose[i + 3]) * io::kRadiansPerBamX87;
 			c[i] = int32_t(std::cos(radians) * 4194304.0);
 			s[i] = int32_t(std::sin(radians) * (inverse ? -4194304.0 : 4194304.0));
 		}

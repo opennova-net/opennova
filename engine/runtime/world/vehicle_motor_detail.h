@@ -75,7 +75,7 @@ void vehicle_follow_carrier(World &world, Entity &vehicle);
 // the atan2 scale dbl_7C19D8 — port both constants verbatim)
 // [orig: fld dbl_7C3608 @0x48EB32/@0x4905BF/@0x492006; the ground family
 // keeps the 1024-entry table equivalents in vehicle_motor.cpp (D-INF-4)].
-constexpr double kBamToRadX87 = 1.4629627251502471e-9; // dbl_7C3608, exact bits
+constexpr double kBamToRadX87 = io::kRadiansPerBamX87; // dbl_7C3608, exact bits
 inline int32_t cos22_of_bam_x87(int32_t bam) {
     return static_cast<int32_t>(
             std::cos(static_cast<double>(bam) * kBamToRadX87) * io::kQ22One);

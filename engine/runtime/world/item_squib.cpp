@@ -31,7 +31,7 @@ FixedVec3 rotate(const CollisionMatrix &m, const FixedVec3 &v) {
 CollisionMatrix rotation(int32_t yaw, int32_t pitch) {
     // The original double is 30.5 ppm above the ideal radians/BAM constant.
     // [orig: Math_BuildFixedPointRotationMatrixYXZ @0x615400, dbl_7C3608]
-    constexpr double radians = 1.4629627251502471e-9;
+    constexpr double radians = io::kRadiansPerBamX87;
     const int32_t cy=int32_t(std::cos(yaw*radians)*4194304.0);
     const int32_t sy=int32_t(std::sin(yaw*radians)*4194304.0);
     const int32_t cp=int32_t(std::cos(pitch*radians)*4194304.0);

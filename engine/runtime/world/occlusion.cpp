@@ -7,28 +7,22 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstring>
 
 #include <runtime/renderer/object_lod.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/world.h>
+#include <base/io/bam.h>
 #include <base/io/fixed.h>
 
 namespace opennova::world {
 
 namespace {
 
-// The engine's angle scale — NOT exactly 2*pi/2^32: the retail double is
-// 0x3E19222D9890E4A8 (~30.5 ppm above), and the quantized trig below feeds off
-// it, so we carry the exact bits. [orig: dbl_7C3608]
+// The engine's angle scale — NOT exactly 2*pi/2^32: the retail double
+// io::kRadiansPerBamX87 (bits 0x3E19222D9890E4A8, ~30.5 ppm above), which the
+// quantized trig below feeds off. [orig: dbl_7C3608]
 inline double bam_angle_scale() {
-    static const double v = [] {
-        const uint64_t bits = 0x3E19222D9890E4A8ull;
-        double d;
-        std::memcpy(&d, &bits, sizeof(d));
-        return d;
-    }();
-    return v;
+    return io::kRadiansPerBamX87;
 }
 
 // _ftol2_sse truncates toward zero (C cast semantics).

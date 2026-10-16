@@ -7,13 +7,11 @@
 #include <cmath>
 #include <cstdint>
 
+#include <base/io/fixed.h>
+
 namespace opennova::world {
 
 namespace {
-
-int32_t to_q16(float units) {
-    return static_cast<int32_t>(std::lround(static_cast<double>(units) * 65536.0));
-}
 
 // sqrt(dx^2 + dy^2) in Q16, saturated like the retail float chain
 // [orig: @0x5987aa..0x5987cf — fild/fmul/fsqrt against flt_7C19E0 = 2147418112.0].
@@ -60,14 +58,14 @@ void build_lfp_zones(const World &world, const SpawnZoneRegistry &registry,
         // [orig: @0x59879f..0x598810 — Position.X/Y deltas, fsqrt, the
         //  +0x15E radius << 16, |dz| against its half].
         const int32_t d2 = dist2d_q16(local.position, zone->position);
-        const int32_t dz = to_q16(local.position.z - zone->position.z);
+        const int32_t dz = io::q16_from_float(local.position.z - zone->position.z);
         row.in_cylinder = hud::lfp_in_cylinder(d2, dz, zone->zone_radius);
         // The distance label subtracts the zone entity's own bound radius —
         // `*(*EntryById)`: entry[0] is the zone entity, +0 its bound radius
         // (the same field the camera's eye drop reads @0x43862f) — so the
         // label reads to the objective's EDGE, floored at zero, then >> 16
         // [orig: @0x5990ac..0x599108; the subtrahend load @0x5990f3].
-        int32_t edge = d2 - to_q16(zone->bound_radius);
+        int32_t edge = d2 - io::q16_from_float(zone->bound_radius);
         if (edge < 0) edge = 0;
         row.distance_m = edge >> 16;
         out.push_back(row);

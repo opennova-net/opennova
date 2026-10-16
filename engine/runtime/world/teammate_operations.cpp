@@ -30,7 +30,7 @@ int32_t heading(const World &world, const Entity &entity) {
 //  HeliLift_SpawnFlyover @0x4528d8 (fmul dbl_7C3608), dbl_7C3600 @0x451868/
 //  @0x451983/@0x451c6e/@0x4528f7]
 int32_t trig(int32_t angle, bool sine) {
-    const double rad = double(angle) * 1.4629627251502471e-09;
+    const double rad = double(angle) * io::kRadiansPerBamX87;
     return int32_t((sine ? std::sin(rad) : std::cos(rad)) * 4194304.0);
 }
 int32_t mul22(int32_t a, int32_t b) {

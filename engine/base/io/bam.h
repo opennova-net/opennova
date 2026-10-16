@@ -51,12 +51,21 @@ constexpr int32_t bam_abs(int32_t v)
     return v < 0 ? (int32_t)(0u - (uint32_t)v) : v;
 }
 
-// The BAM32 <-> radian scales, exact (a full turn is 2^32): the one spelling
-// every port aliases. A port that reproduces a retail double VERBATIM (the
-// x87 dbl_7C3608 = 1.4629627251502471e-9, 30.5 ppm off) keeps its own
-// constant and says so; everything else uses these.
+// The BAM32 <-> radian scales, exact (a full turn is 2^32). The retail image
+// holds no exact radians-per-BAM scale: a ported retail trig site multiplies
+// by kRadiansPerBamX87 below, as the original does, and kRadiansPerBam serves
+// only math with no retail counterpart (the editor, presentation-only
+// conversions). kBamPerRadian is retail's dbl_7C19D8 bit for bit, so every
+// atan2 port uses it.
 constexpr double kRadiansPerBam = 6.283185307179586 / 4294967296.0;
 constexpr double kBamPerRadian = 4294967296.0 / 6.283185307179586;
+
+// Retail's own radians-per-BAM32 double, the one the image's x87 trig
+// multiplies a BAM by (`fild angle; fmul dbl_7C3608`): 1.4629627251502471e-9,
+// bits 0x3E19222D9890E4A8, about 30.5 ppm above the exact 2*pi/2^32 (the image
+// holds no exact scale). Its inverse partner dbl_7C19D8 is bit-identical to
+// kBamPerRadian. [orig: dbl_7C3608 @0x7C3608]
+constexpr double kRadiansPerBamX87 = 1.4629627251502471e-9;
 
 // Radians to the nearest BAM32, wrapped to the signed 32-bit turn.
 inline int32_t bam_from_radians(double radians) {

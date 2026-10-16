@@ -67,6 +67,14 @@ inline int32_t float_to_fp16_16_round_sat(double units)
     return detail::saturate_fp16_16(std::round(units * 65536.0));
 }
 
+// Round-to-nearest (half away from zero), unsaturated: the float -> 16.16 the
+// presentation-frame feeds take (std::lround over the double product). Binding
+// policy, not witnessed arithmetic.
+inline int32_t q16_from_float(float units)
+{
+    return (int32_t)std::lround((double)units * 65536.0);
+}
+
 // Non-negative, truncating, unsaturated: the env fog-distance form.
 inline uint32_t float_to_fp16_16_nonneg(float units)
 {

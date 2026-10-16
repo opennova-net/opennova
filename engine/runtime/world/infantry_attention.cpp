@@ -91,7 +91,7 @@ void idle_facing(AiSystem &ai, AiEntity &e, World &world, const Entity &self) {
     // One probe: `range` out along `angle` (the Q22 trig of dbl_7C3608 /
     // dbl_7C3600), a quarter unit up, through the self entity LOS.
     const auto clear = [&](int32_t angle, int32_t range, int32_t height_offset) {
-        const double radians = static_cast<double>(angle) * 1.4629627251502471e-9;
+        const double radians = static_cast<double>(angle) * io::kRadiansPerBamX87;
         const int32_t s = static_cast<int32_t>(std::sin(radians) * 4194304.0);
         const int32_t c = static_cast<int32_t>(std::cos(radians) * 4194304.0);
         const int32_t end[3] = {

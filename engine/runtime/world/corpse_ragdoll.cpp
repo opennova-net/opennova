@@ -8,6 +8,8 @@
 
 #include <cmath>
 
+#include <base/io/fixed.h>
+
 namespace opennova::world {
 
 namespace {
@@ -34,13 +36,9 @@ constexpr int kGroupBone[15] = {
 
 constexpr int kDeathLast = anim_state::kDeathBulletBase + 4 * 15 - 1;
 
-int32_t to_q16(float v) {
-	return static_cast<int32_t>(std::lround(static_cast<double>(v) * 65536.0));
-}
-
 // presentation (x, y, z) -> mission 16.16 (x, -z, y), and back.
 FixedVec3 mission_q16(const ragdoll::Vec3 &p) {
-	return FixedVec3{ to_q16(p.x), to_q16(-p.z), to_q16(p.y) };
+	return FixedVec3{ io::q16_from_float(p.x), io::q16_from_float(-p.z), io::q16_from_float(p.y) };
 }
 ragdoll::Vec3 presentation(const FixedVec3 &m) {
 	constexpr float k = 1.0f / 65536.0f;

@@ -517,8 +517,8 @@ void player_view_binocular_sway_offset(float unit_random,
     // each truncated at Q22 BEFORE multiplication by eight.
     // [orig: Binoculars_RandomizeSwayOffsets @0x4dd830..0x4dd874]
     constexpr double q22 = 4194304.0;
-    // Retail's dbl_7C3608 is about 30.5 ppm above exact 2pi / 2^32.
-    constexpr double radians_per_bam = 1.4629627251502471e-9;
+    // Retail's dbl_7C3608 (io::kRadiansPerBamX87), not the exact 2pi / 2^32.
+    constexpr double radians_per_bam = io::kRadiansPerBamX87;
     const double signed_bam = (unit_random >= 0.5f ? unit_random - 1.0 : unit_random) * 4294967296.0;
     const double angle = signed_bam * radians_per_bam;
     const int32_t yaw_q22 = static_cast<int32_t>(std::sin(angle) * q22);
