@@ -161,12 +161,10 @@ void PlayerViewmodelRig::clear_viewmodel() {
 // The witnessed FP projection, fed to the object shaders as one global: the
 // gun draws INSIDE the beauty pass (retail's "viewmodel first" into the same
 // backbuffer) through the weapon renderfov -- a HORIZONTAL fov in degrees --
-// with the near plane swapped to 0.05 [orig: Render_SwapProjectionNearZ
-// @0x4dee29] and the depth range clamped to the nearest tenth [orig:
+// with the near plane swapped to 0.05 (engine: runtime/renderer/fp_viewmodel_spec.h) and the depth range clamped to the nearest tenth [orig:
 // Render_SetViewportDepth01 @0x58a7b0]. The renderfov and world frusta share
 // the frame's vertical scale (the FP pass pushes the world pass's scaleY
-// [orig: Render_SetViewAndProjectionMatrices @0x58d900, the FP call
-// @0x4dee7f]), so the shader needs only the focal ratio between them: the
+// (engine: runtime/world/player_view.cpp)), so the shader needs only the focal ratio between them: the
 // engine's world::viewmodel_focal_ratio, the ratio of the horizontal
 // half-tangents on both axes whatever the aspect mode or surface -- which is
 // why the feed reads no camera projection (while the presenter's stretched
@@ -400,8 +398,7 @@ void PlayerViewmodelRig::apply_viewmodel_control_registers(bool p_submit_viewmod
 // Pull the resolved weapon.def view record from the world; null when no
 // equipped weapon resolves in the mounted root -- nothing draws then, and the
 // placement values stay as they were. The def rows carry xyz raw
-// file units + yaw/pitch/roll degrees [orig: weapon.def 'pos'/'tpos' handlers
-// @0x54471f; 'renderfov' @0x54482a, default 80.0].
+// file units + yaw/pitch/roll degrees (engine: runtime/renderer/fp_viewmodel_spec.h).
 void PlayerViewmodelRig::apply_viewmodel_def() {
 	LocalPlayerPresenter *owner = presenter();
 	const Ref<LocalPlayerVisuals> visuals = owner != nullptr ? owner->visuals() : Ref<LocalPlayerVisuals>();

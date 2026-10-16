@@ -826,11 +826,9 @@ void LocalPlayerPresenter::feed_virtual_display(bool p_live) {
 
 // The ADS camera: the fov POLICY is sim state (80 base, 80/mag for sighted
 // defs, eased by the 15-tick interp, suppressed in third person --
-// engine/runtime/world player_view [orig: g_CameraFovTargetQ16 @0x26C6848;
-// Player_ToggleWeaponScope @0x4df401; @0x4df3fa]); the frame's projection over
+// engine/runtime/world player_view (engine: runtime/world/player_view.h)); the frame's projection over
 // the surface -- the mode-invariant horizontal fov, the vertical half-extent
-// of the SELECTED ratio -- is the engine's world::view_projection [orig:
-// @0x58d900]. The gameplay camera carries that frustum's CULLING SUPERSET: the
+// of the SELECTED ratio -- is the engine's world::view_projection (engine: runtime/world/player_view.cpp). The gameplay camera carries that frustum's CULLING SUPERSET: the
 // frustum itself when the selected ratio is the surface's, otherwise the
 // vertical fov under the surface's wider horizontal (a selected ratio taller
 // than the surface) or the horizontal fov under the surface's taller vertical

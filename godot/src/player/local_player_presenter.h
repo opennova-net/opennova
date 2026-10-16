@@ -55,19 +55,16 @@ class Simulation;
 // Position -- the eye follows the animation (stand/crouch/prone/jump all
 // move it) [orig: the local bone path @0x4b6bb3 stores head-Position into
 // CameraOffset(+0x6C); the on-foot person camera leg adds it @0x437f9c].
-// +1.0 is the witnessed NON-person fallback bump [orig: @0x437e8f], kept for
-// the no-skeleton case. F4 swaps to the mode-1 chase camera [orig:
-// ThirdPersonCamera_Update @0x437af0]. Mouse look is SIM-owned: raw pixel
+// +1.0 is the witnessed NON-person fallback bump (engine: runtime/world/player_view.cpp), kept for
+// the no-skeleton case. F4 swaps to the mode-1 chase camera (engine: runtime/world/player_view.cpp). Mouse look is SIM-owned: raw pixel
 // deltas feed Simulation.add_local_player_look (the witnessed integer
 // pipeline -- sensitivity<<11, scoped zoom reduction, +-80 deg pitch clamp
-// with the +40 deg up-limit while prone) [orig: Input_ProcessMouseAxisBindings
-// @0x499680]. Calibration values live at engine world/player_view.h
+// with the +40 deg up-limit while prone) (engine: runtime/world/local_player.cpp). Calibration values live at engine world/player_view.h
 // (Simulation re-exports).
 //
 // The head is bone INDEX 14 (.bad row "BN15 Head") -- the rig is index-driven
 // and the model bone order IS the BN order [world-wac-ai-re §14.2]; the
-// original reads the head row of its bone-matrix array, never a name [orig:
-// the local bone path @0x4b6bb3].
+// original reads the head row of its bone-matrix array, never a name (engine: runtime/world/infantry.cpp).
 //
 // The FP eye pull-back (-0x3000 along the view forward), the eye floor, and
 // the non-person bump compose in the SIM's camera pose now
@@ -124,8 +121,7 @@ public:
 	// world/player_view.h player_view_apply_view_action). The preference is
 	// effective only in a control seat: the sim's arbiter resolves the camera mode every tick from
 	// the preference and the seat, so on foot the preference changes nothing
-	// visible [orig: g_CameraThirdPersonSelected @0xA860DF; the arbiter
-	// Render_ProcessMainSceneFrame @0x5ca1d2]. GameHudPresenter polls the rows
+	// visible (engine: runtime/world/player_view.h). GameHudPresenter polls the rows
 	// (it owns the FP-gun bit two of them also write) and calls this.
 	void apply_view_action(int p_action);
 	// The debug menu's on-foot third person (the F3 Player page): stock JO
@@ -135,7 +131,7 @@ public:
 	void set_debug_third_person(bool p_enabled);
 	bool is_debug_third_person() const { return debug_third_person_; }
 	// The RESOLVED camera mode, mirrored from the sim's view snapshot every
-	// tick [orig: g_CameraMode @0xA890C8]. Nothing on the shell writes it
+	// tick (engine: runtime/world/local_player_view.cpp). Nothing on the shell writes it
 	// directly.
 	bool is_third_person() const { return third_person_; }
 	// The last presented snapshot: the frame the camera displays, composed
@@ -154,8 +150,7 @@ public:
 	bool is_debug_body_in_first_person() const { return debug_body_in_first_person_; }
 	// The showhud bit-0 FP-gun gate, forwarded to the rig's visibility
 	// decision. GameHudPresenter owns the showhud flag cycle and pushes the bit
-	// here. [orig: g_FpWeaponViewFlags bit 0 read by
-	// Player_RenderFirstPersonViewModel @0x4DEDEA]
+	// here. (engine: runtime/hud/hud_config_tokens.h)
 	void set_fp_gun_visible(bool p_visible);
 
 	// W4-2-style justified accessors: PlayerWeaponEffects resolves action
@@ -242,7 +237,7 @@ public:
 	// router's release edge then runs no mount toggle.
 	void consume_use_hold();
 	// Mouse-look rides the input router: raw pixel deltas into the SIM's
-	// witnessed integer pipeline [orig: Input_ProcessMouseAxisBindings @0x499680].
+	// witnessed integer pipeline (engine: runtime/world/local_player.cpp).
 	bool handle_input(const Ref<InputEvent> &p_event, bool p_active);
 
 	bool has_player() const;

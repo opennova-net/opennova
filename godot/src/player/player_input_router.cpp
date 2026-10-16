@@ -218,8 +218,7 @@ void PlayerInputRouter::consume_use_hold() {
 
 // Mouse-look: raw pixel deltas into the SIM's witnessed integer pipeline
 // (the sim owns sensitivity, the scoped zoom reduction, Y-invert, and the
-// pitch clamps). [orig: Input_ProcessMouseAxisBindings @0x499680 -> the axis
-// cases 166/164]
+// pitch clamps). (engine: runtime/world/local_player.cpp)
 bool PlayerInputRouter::handle_input(const Ref<InputEvent> &p_event, bool p_active) {
 	LocalPlayerPresenter *owner = presenter();
 	if (!p_active || owner == nullptr || !owner->has_player()) {
@@ -274,7 +273,7 @@ void PlayerInputRouter::release_mouse_capture() {
 // momentary (the motor jumps once when grounded). There is no run key:
 // running is the automatic forward-walk promotion in the sim's body
 // selection, suppressed while scoped.
-// [orig: Player_PackInputStateToEntity @0x4df450; promotion @0x4b729d]
+// (engine: runtime/world/player_input.h)
 void PlayerInputRouter::read_input_state(bool &r_forward, bool &r_back, bool &r_left, bool &r_right,
 		bool &r_lean_left, bool &r_lean_right, bool &r_jump) const {
 	if (input_override_.is_valid()) {
