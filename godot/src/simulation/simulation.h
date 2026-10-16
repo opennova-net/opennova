@@ -145,6 +145,7 @@ class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card
 
 #include <runtime/inmatch/host_boot.h>                // the one host boot, its two phases (ADR 0051 d4)
 #include <runtime/inmatch/host_role.h>                // HostRole: the listen/dedicated host's state + frame (ADR 0043 d3)
+#include <runtime/inmatch/server_info.h>              // HostPlayerListRow (the NovaWorld roster rows)
 #include <runtime/inmatch/joiner_role.h>              // JoinerRole: the joiner's runtime, bridge and frame
 #include <runtime/inmatch/local_role.h>               // LocalRole: the bare no-net tick
 #include <runtime/inmatch/loopback_channel.h>          // LoopbackChannel (the host role's own dcb-2 client)
@@ -1030,16 +1031,10 @@ public:
 	// The NovaWorld UDP session the shell keeps through the match (in use, flags, hosting/playing
 	// word, its own exit store): the N icon's inputs and the 62-frame NovaWorld exit's (D-NET-220).
 	void set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role, int32_t p_exit_reason);
-	// The added players as the NovaWorld host's PlayerList sees them (Server_PlayerAdd's five
-	// per-slot vars), keyed by roster slot; the host's own (`own`) takes the gate binding's identity.
-	struct HostPeerSlot {
-		int slot = 0;
-		uint32_t connection_id = 0; // the add's connection: a re-join is a new one
-		bool own = false;
-		String player_name, ip_and_port, pcid; // "a.b.c.d:port"; the decrypted PUBPCID or ""
-		String team, type; // the match's PlayerTeam / PlayerType ("%ld")
-	};
-	std::vector<HostPeerSlot> host_peer_slots() const;
+	// The added players as the NovaWorld host's PlayerList sees them (the engine's
+	// inmatch::host_player_list_rows over the host context; empty without one); the host's
+	// own (`own`) takes the gate binding's identity.
+	std::vector<opennova::inmatch::HostPlayerListRow> host_player_list_rows() const;
 	// The host role's server context (null without one): the NovaWorld listing's live columns.
 	opennova::inmatch::NapiNPServerCtx *host_ctx();
 	const opennova::inmatch::NapiNPServerCtx *host_ctx() const;

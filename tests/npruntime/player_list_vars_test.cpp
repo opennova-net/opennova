@@ -21,6 +21,7 @@
 #include <runtime/inmatch/host_role.h>
 #include <runtime/inmatch/map_change.h>
 #include <runtime/inmatch/server_initial_state.h>
+#include <runtime/inmatch/server_info.h> // host_player_list_rows (the PlayerList roster)
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_session.h>
 #include <runtime/inmatch/server_spawn.h>
@@ -270,12 +271,49 @@ void roster_sync() {
 	expect(same.removed.empty() && same.added.empty() && same.vars.empty(), "an unchanged roster is left alone");
 }
 
+// B-14: the one roster both embedders sync. Every connection past its player add, at its
+// slot, with the add's connection id, the NA bytes, "a.b.c.d:port", the PCID and the match's
+// PlayerTeam / PlayerType; the listen host's own client-side connection marked `own`; a
+// connection not yet added left out.
+// [orig: Server_PlayerAdd @0x51cbc0 - PlayerIpAndPort @0x51d3d1..0x51d3f2, the five vars
+//  @0x51d441..0x51d4aa]
+void host_player_list_rows() {
+	inmatch::NapiNPServerCtx ctx;
+	auto &list = ctx.np_protocol.connection_list;
+	list.resize(3);
+	list[0].type = inmatch::NapiNPConnection::kTypeClientSide;
+	list[0].phase = inmatch::ConnectionPhase::InMatch;
+	list[0].reply.player_slot = 0;
+	list[0].connection_id = 1;
+	list[1].type = inmatch::NapiNPConnection::kTypeServerSide;
+	list[1].phase = inmatch::ConnectionPhase::InMatch;
+	list[1].reply.player_slot = 3;
+	list[1].connection_id = 9;
+	list[1].player_name = "Caf\xE9";
+	list[1].peer = opennova::PeerAddr{0x0201A8C0u, 3001};
+	list[1].account.pcid = "0a1b2c3d";
+	list[1].player_list_team = 2;
+	list[1].player_list_type = 6;
+	list[2].type = inmatch::NapiNPConnection::kTypeServerSide;
+	list[2].phase = inmatch::ConnectionPhase::New;
+	const std::vector<inmatch::HostPlayerListRow> rows = inmatch::host_player_list_rows(ctx);
+	expect(rows.size() == 2, "rows: the two added connections, not the pending one");
+	if (rows.size() != 2) return;
+	expect(rows[0].own && rows[0].slot.slot == 0, "rows: the listen host's own is marked own");
+	const opennova::HostPlayerSlot &joiner = rows[1].slot;
+	expect(!rows[1].own && joiner.slot == 3 && joiner.connection_id == 9 &&
+	               joiner.player_name == "Caf\xE9" && joiner.ip_and_port == "192.168.1.2:3001" &&
+	               joiner.pcid == "0a1b2c3d" && joiner.team == "2" && joiner.type == "6",
+	       "rows: a joiner's five vars and identity, its name's bytes as sent");
+}
+
 } // namespace
 
 int main() {
 	in_match_writers();
 	remote_slot_class_at_round_init();
 	roster_sync();
+	host_player_list_rows();
 	if (failures != 0) {
 		std::printf("%d failure(s)\n", failures);
 		return 1;

@@ -672,21 +672,17 @@ void SessionDrive::sync_nwu_session(const Ref<Simulation> &p_sim) {
 void SessionDrive::sync_nw_host_roster(opennova::NwuHostRole &p_host, const Ref<Simulation> &p_sim) {
 	std::vector<opennova::HostPlayerSlot> wanted;
 	bool self_listed = false;
-	for (const Simulation::HostPeerSlot &slot : p_sim->host_peer_slots()) {
+	for (const opennova::inmatch::HostPlayerListRow &row : p_sim->host_player_list_rows()) {
 		opennova::HostPlayerSlot player;
-		if (slot.own) {
+		if (row.own) {
 			if (!nw_self_slot_set_) continue;
 			player = nw_self_slot_;
+			player.team = row.slot.team;
+			player.type = row.slot.type;
 			self_listed = true;
 		} else {
-			player.slot = slot.slot;
-			player.connection_id = slot.connection_id;
-			player.player_name = opennova::utf8_to_retail_text(opennova::to_std(slot.player_name));
-			player.ip_and_port = opennova::to_std(slot.ip_and_port);
-			player.pcid = opennova::to_std(slot.pcid);
+			player = row.slot;
 		}
-		player.team = opennova::to_std(slot.team);
-		player.type = opennova::to_std(slot.type);
 		wanted.push_back(std::move(player));
 	}
 	if (nw_self_slot_set_ && !self_listed) wanted.push_back(nw_self_slot_);
@@ -881,10 +877,10 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 		// Its PlayerTeam / PlayerType are the match's, as for any added player.
 		self.team = "0";
 		self.type = "0";
-		for (const Simulation::HostPeerSlot &slot : sim->host_peer_slots()) {
-			if (!slot.own) continue;
-			self.team = opennova::to_std(slot.team);
-			self.type = opennova::to_std(slot.type);
+		for (const opennova::inmatch::HostPlayerListRow &row : sim->host_player_list_rows()) {
+			if (!row.own) continue;
+			self.team = row.slot.team;
+			self.type = row.slot.type;
 		}
 		host.set_player_slot(self);
 		nw_self_slot_ = self;

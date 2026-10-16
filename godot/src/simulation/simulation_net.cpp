@@ -349,25 +349,10 @@ void Simulation::set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role
 	if (runtime_ != nullptr) runtime_->set_novaworld_link(facts);
 }
 
-std::vector<Simulation::HostPeerSlot> Simulation::host_peer_slots() const {
-	std::vector<HostPeerSlot> out;
+std::vector<opennova::inmatch::HostPlayerListRow> Simulation::host_player_list_rows() const {
 	const opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
-	if (ctx == nullptr) return out;
-	for (const opennova::inmatch::NapiNPConnection &c : ctx->np_protocol.connection_list) {
-		if (c.phase < opennova::inmatch::ConnectionPhase::PlayerAdded) continue;
-		HostPeerSlot s;
-		s.slot = c.reply.player_slot;
-		s.connection_id = c.connection_id;
-		s.own = c.type == opennova::inmatch::NapiNPConnection::kTypeClientSide;
-		// The roster's name is the joiner's NA bytes, the page's (D-NET-661).
-		s.player_name = opennova::cp1252_to_gd(c.player_name);
-		s.ip_and_port = opennova::to_gd(opennova::peer_addr_to_string(c.peer));
-		s.pcid = opennova::to_gd(c.account.pcid);
-		s.team = String::num_int64(c.player_list_team);
-		s.type = String::num_int64(c.player_list_type);
-		out.push_back(std::move(s));
-	}
-	return out;
+	if (ctx == nullptr) return {};
+	return opennova::inmatch::host_player_list_rows(*ctx);
 }
 
 Simulation::ServerCommandResult Simulation::execute_server_command(const String &p_verb,
