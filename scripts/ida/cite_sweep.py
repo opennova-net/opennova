@@ -652,9 +652,11 @@ def main():
         elif is_other_image(ctx) or not (0x401000 <= int(addr, 16) < 0x10000000):
             cls = classify(tok, addr, ctx, OK_INFO)
             nm, fs, fn = "", None, ""
-            hint = ctx.split(" ", 1)[1] if is_other_image(ctx) else ""   # the image (as spelled)
+            hint = ""
         else:
             cls, nm, fs, fn = ("ok" if tok else "site-only"), (tok or ""), None, ""
+        if is_other_image(ctx):
+            hint = ctx.split(" ", 1)[1]   # the image (as spelled), also where the key was joined for a twin
         rows.append((cls, addr, tok or "", nm, fs or "", fn, "%s:%d" % (path, ln), hint))
 
     n_reimpl, edits = 0, []
