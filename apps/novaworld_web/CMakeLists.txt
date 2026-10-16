@@ -33,6 +33,9 @@ add_library(opennova_novaworld_web_core STATIC
     hosted/fleet_routes.cpp
     hosted/hosted_routes.cpp
     hosted/stats_routes.cpp
+    # The hosted data sets' admin routes over the object store (ADR 0064), and the jobs
+    # they enqueue for the worker.
+    data_sets/data_set_routes.cpp
     # Billing's routes and the webhook's signature.
     billing/billing_routes.cpp
     billing/stripe_signature.cpp

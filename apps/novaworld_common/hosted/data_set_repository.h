@@ -110,6 +110,8 @@ std::vector<DataSetRow> list_data_sets(db::Database &db);
 std::vector<DataSetRow> list_expansions_of(db::Database &db, int64_t parent_id);
 // How many live servers run `id` as their data set or expansion.
 int count_live_servers_of(db::Database &db, int64_t id);
+// How many of them are behind its current tree (server_outdated's rule, over `id` alone).
+int count_outdated_servers_of(db::Database &db, int64_t id);
 
 // A data set a start may pick: a base with a ready current tree, each of its expansions
 // with one beside it. The start form's list and check_settings' `offered`.
@@ -175,9 +177,14 @@ bool finish_tree(db::Database &db, int64_t id, TreeState from, const TreeReady &
 std::vector<int64_t> prunable_trees(db::Database &db, int64_t min_age_s, int64_t abandoned_upload_s);
 // Marks `id` pruned: its state, and pruned_at now (its objects are gone).
 void mark_tree_pruned(db::Database &db, int64_t id);
+// Marks `id` pruned with its objects still there (pruned_at NULL): the admin's delete of a
+// ready or failed tree, whose objects the tree.prune job removes (prunable_trees lists it).
+void request_tree_prune(db::Database &db, int64_t id);
 // Why a ready tree cannot be deleted now: "current", "pinned" (with how many live servers),
 // or "" when it can.
 std::string tree_hold(db::Database &db, int64_t id, int &pinned_by);
+// How many live servers pin tree `id` (as base or expansion).
+int count_tree_pins(db::Database &db, int64_t id);
 
 // --- the hosted servers' pins ---
 

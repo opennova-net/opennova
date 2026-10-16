@@ -1332,6 +1332,38 @@ service's own message, never database text.
 | `POST /api/admin/hosted/<id>/stop` | admin | 404 `not_found`, 409 `not_live`, else 202 `{"server"}` |
 | `POST /api/admin/hosted/stop-all` | admin | the kill switch: every live server to `stopping`; 200 `{"stopping": <how many>}` |
 
+**Game data** (`apps/novaworld_web/data_sets/`, ADR 0064): the data sets as rows
+(`hosted/data_set_repository.h`, migration 0011), each one product (a base game or one
+expansion of a base), and the trees the admin page uploads into the deployment's object
+store (`object_store.h`: web begins each file's multipart upload, takes each part's PUT
+and hands it to the store, and completes the upload; the bytes pass through this program,
+32 MiB a part, inside Cloudflare's request limits). The jobs a route enqueues
+(`tree.finalize`, `tree.prune`; "Background jobs" above) commit in the transaction of the
+state move that causes them. Every route is the admin's (the Bearer token or an admin
+session); each state change is logged with its actor and status. Without an object store
+(hosting off) the store routes answer 503 `store_unavailable`; a store call that fails
+mid-way answers 502 `store_error` (the store's own text goes to the log alone). Timestamps
+are the database's UTC `YYYY-MM-DD HH:MM:SS`, `""` until set; ids are numbers; a body with
+nothing to say is `{}`. The admin's force-all update of the servers behind their data sets
+is `POST /api/admin/hosted/update-all` (the fleet routes). The shapes: `DataSet` = `{id,
+display_name, kind ("base" or "expansion"), parent_id, expansion_code, title, game,
+current_tree ({id, version, ready_at} or null), servers_live, servers_outdated, trees:
+[Tree]}` (its trees newest first, pruned ones left out); `Tree` = `{id, state (uploading,
+finalizing, ready, failed, pruned), version, bytes, files (how many), missions (how many),
+pinned_by (the live servers running on it), error, created_by, created_at, ready_at}`.
+
+| Route | Access | Replies |
+| --- | --- | --- |
+| `GET /api/admin/data-sets` | admin | `{"store" ({"kind": "s3" or "local"}; null with none), "titles" (what a base may speak: `jo`, `dfx2`), "games" (the lobbies, each `slug` and `display_name`), "data_sets"}` (bases first, each a `DataSet`); `Cache-Control: no-store` |
+| `POST /api/admin/data-sets` | admin | `{display_name, kind, parent_id?, expansion_code?, title?, game?}`: a base (a title among the titles, a `games` slug; no parent or code) or an expansion (a base `parent_id`, an `expansion_code` of 1 to 8 of `a-z0-9`; no title or lobby); `display_name` 1 to 64 characters without control characters. 201 `{"data_set"}`; 400 `invalid_json`, `missing_field`, `invalid_field` (each with the `field`); 409 `duplicate_expansion`, `no_such_parent` |
+| `PATCH /api/admin/data-sets/<id>` | admin | any of `display_name`, `game` (a base's), the shapes as the create's: 200 `{"data_set"}`; 400; 404 `not_found` |
+| `DELETE /api/admin/data-sets/<id>` | admin | the data set and its trees: each tree's objects go first, here and now (its uploads in flight aborted, its prefix removed, the row marked pruned as it goes), then the row; 204; 404 `not_found`; 409 `in_use` while a live server runs it or an expansion has it as parent; 503 `store_unavailable` (no store, or one that did not remove the trees: the data set stays) |
+| `POST /api/admin/data-sets/<id>/trees` | admin | `{"files": [{"name", "size"}]}`: a new uploading tree and one multipart upload per file, each name canonicalised to the kind's spelling (`hosted/data_set_files.h`): 201 `{"tree" (a Tree), "uploads": [{"name", "key" (`trees/<tree id>/<name>`), "upload_id", "part_size" (33554432: 32 MiB)}]}`; 400 `invalid_json`, `invalid_field`, `invalid_files` with `missing` (the required names not given) and `unexpected` (names the kind lacks); 404 `not_found`; 409 `upload_in_flight` (a tree of it is uploading or finalizing); 503 `store_unavailable` |
+| `PUT /api/admin/data-sets/<id>/trees/<t>/files/<name>/parts/<n>?upload_id=<u>` | admin | the body (`application/octet-stream`, at most 32 MiB) handed to the store as part `n` (1 to 10000) of the file's upload: 200 `{"etag"}` (what the completion reports for it); 400 `invalid_field` (`part_number`, `upload_id`); 404 `not_found` (the data set, the tree, a name the kind lacks); 409 `not_uploading`; 413 `too_large`; 502 `store_error` (an upload the store does not know among the causes); 503 `store_unavailable`; `Cache-Control: no-store` |
+| `POST /api/admin/data-sets/<id>/trees/<t>/files/<name>/complete` | admin | `{"upload_id", "parts": [{"part_number", "etag"}]}` (each part's ETag as its PUT answered): the file's upload completed in the store, 200 `{"completed": true}`; 400; 404; 409 `not_uploading`; 502 `store_error` (a part missing or an ETag that differs among them); 503 |
+| `POST /api/admin/data-sets/<id>/trees/<t>/finalize` | admin | the tree `finalizing` and its `tree.finalize` job (key `tree.finalize:<t>`), in one transaction: 202 `{"tree"}`; 404; 409 `not_uploading` |
+| `DELETE /api/admin/data-sets/<id>/trees/<t>` | admin | an uploading tree: its uploads aborted, its objects removed, the row pruned, 204; a ready or failed one: the row marked pruned (its objects kept for the job) and a `tree.prune` job in the same transaction, 202 `{"tree"}`; a pruned one 204; 404; 409 `current` (what new starts take), `pinned` with `servers` (how many live ones run on it), `in_progress` (the worker is finalizing it); 502; 503 |
+
 **The console routes** (`hosted/console_routes.*`) run the curated commands on a hosted
 server's admin link, which the controller holds: a route writes its command to
 `hosted_console_commands` with the deadline its budget allows and reads its row until it

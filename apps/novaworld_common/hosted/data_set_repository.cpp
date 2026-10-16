@@ -191,6 +191,14 @@ int count_live_servers_of(db::Database &db, int64_t id) {
 	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
 }
 
+int count_outdated_servers_of(db::Database &db, int64_t id) {
+	const auto rows = db.query(std::string("SELECT count(*) FROM hosted_servers s WHERE ") +
+					kLiveServerSql + " AND (s.data_set_id = $1 OR s.expansion_id = $1) AND (" +
+					kOutdatedSql + ");",
+			{ BindValue(id) });
+	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
+}
+
 std::vector<OfferedDataSet> offered_data_sets(db::Database &db) {
 	std::vector<OfferedDataSet> out;
 	const auto rows = db.query(
@@ -298,6 +306,18 @@ std::vector<int64_t> prunable_trees(db::Database &db, int64_t min_age_s, int64_t
 void mark_tree_pruned(db::Database &db, int64_t id) {
 	db.exec("UPDATE data_set_trees SET state = 'pruned', pruned_at = now() WHERE id = $1;",
 			{ BindValue(id) });
+}
+
+void request_tree_prune(db::Database &db, int64_t id) {
+	db.exec("UPDATE data_set_trees SET state = 'pruned', pruned_at = NULL WHERE id = $1;",
+			{ BindValue(id) });
+}
+
+int count_tree_pins(db::Database &db, int64_t id) {
+	const auto rows = db.query(std::string("SELECT count(*) FROM hosted_servers WHERE ") +
+					kLiveServerSql + " AND (base_tree_id = $1 OR expansion_tree_id = $1);",
+			{ BindValue(id) });
+	return rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
 }
 
 std::string tree_hold(db::Database &db, int64_t id, int &pinned_by) {

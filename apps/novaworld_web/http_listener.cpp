@@ -6,6 +6,7 @@
 #include "catalog_repository.h"
 #include "cd_key_routes.h"
 #include "connection_routes.h"
+#include "data_sets/data_set_routes.h"
 #include "health.h"
 #include "host_routes.h"
 #include "hosted/console_routes.h"
@@ -17,6 +18,7 @@
 #include "infra/infra_routes.h"
 #include "jobs/job_routes.h"
 #include "mailer.h"
+#include "object_store.h"
 #include "password_reset_routes.h"
 #include "redis_client.h"
 #include "server_config.h"
@@ -291,7 +293,8 @@ struct HttpListener::Impl {
 			billing(access, pool, redis),
 			resets(access, pool, redis),
 			jobs(access, pool),
-			infra(access, pool) {}
+			infra(access, pool),
+			data_sets(access, pool) {}
 
 	WebApp app;
 	// start()'s handshake with the Crow thread: Pending until Crow serves
@@ -330,6 +333,8 @@ struct HttpListener::Impl {
 	jobs::JobRoutes jobs;
 	// The admin's infrastructure view (infra/infra_routes.h).
 	infra::InfraRoutes infra;
+	// The hosted data sets' routes over the object store (data_sets/data_set_routes.h).
+	hosted::DataSetRoutes data_sets;
 	// The games catalogue, loaded once in start() before the routes register
 	// and never written after, so handlers read it without a lock.
 	catalog::GameCatalog games;
@@ -413,6 +418,13 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->infra.configure(
 			infra_, impl_->hosted_servers.hosting_on(), impl_->hosted_servers.provider());
 	impl_->infra.register_routes(impl_->app);
+	impl_->data_sets.set_store(object_store_);
+	impl_->data_sets.register_routes(impl_->app);
+	if (object_store_ != nullptr)
+		std::printf("[http] game data routes over the %s object store\n", object_store_->kind());
+	else
+		std::printf(
+				"[http] game data routes with no object store (hosting off): uploads refused\n");
 	register_legacy_login_routes(templates_dir);
 	register_legacy_host_join_routes(templates_dir);
 	// The catch-all /<path> wildcard must register last: Crow rejects a

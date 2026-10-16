@@ -69,6 +69,9 @@ namespace infra { class InfraStatus; }
 //                         programs' ECS services and tasks, the balancer, the
 //                         database, the cache, the lobbies, the controller,
 //                         the machines)
+//   game data           — DataSetRoutes (data_sets/): the hosted data sets and
+//                         their tree uploads into the object store, each part
+//                         through this program (ADR 0064)
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
@@ -263,7 +266,7 @@ private:
 	billing::Billing *billing_ = nullptr;
 	// The infrastructure view's cloud reader (set_infra); null: none.
 	infra::InfraStatus *infra_ = nullptr;
-	// The object store (set_object_store, set_local_object_store); null: none.
+	// The object store (set_object_store); null: none.
 	ObjectStore *object_store_ = nullptr;
 	// The slots' limits (set_fleet_slots).
 	int fleet_slot_memory_mb_ = 512;
