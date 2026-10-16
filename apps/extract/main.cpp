@@ -13,15 +13,18 @@
 // — and written to <out>/<basename>.
 // Exit 0 when every entry was written, 1 when any entry was missing, 2 on a usage,
 // mount or write error. Paths are UTF-8 (the exe's manifest opts into the UTF-8 code
-// page; the writes go through base/io/file_io.h).
-#include <base/io/file_io.h>
+// page; the writes open through base/io/os_path.h's fopen_utf8).
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <string>
+#include <system_error>
 #include <vector>
 
 namespace {
@@ -37,6 +40,20 @@ int usage(const char *why) {
 			"  --out <dir>    where each entry is written, as <out>/<basename>\n"
 			"  <name>...      the entries to extract (e.g. weapon.def M82_1st.adm joAmmoHit.ptl)\n");
 	return 2;
+}
+
+// `bytes` written to the UTF-8 `path` in place, whole: a short write or a failed close is an
+// error and the partial file is removed. No staging file beside it (an entry named like
+// another's staging name never clobbers it) and a read-only file stays as it is (the open fails).
+bool write_entry(const std::string &path, const std::vector<uint8_t> &bytes) {
+	std::FILE *f = opennova::io::fopen_utf8(path.c_str(), "wb");
+	if (f == nullptr) return false;
+	const bool written = bytes.empty() || std::fwrite(bytes.data(), 1, bytes.size(), f) == bytes.size();
+	const bool closed = std::fclose(f) == 0;
+	if (written && closed) return true;
+	std::error_code ignored;
+	std::filesystem::remove(opennova::io::os_path(path), ignored);
+	return false;
 }
 
 std::string basename_of(const std::string &name) {
@@ -115,9 +132,8 @@ int main(int argc, char **argv) {
 			continue;
 		}
 		const std::string path = opennova::boot_path_join(out_dir, basename_of(name));
-		std::string error;
-		if (!opennova::io::write_file_atomic(path, bytes.data(), bytes.size(), error)) {
-			std::fprintf(stderr, "opennova-extract: %s\n", error.c_str());
+		if (!write_entry(path, bytes)) {
+			std::fprintf(stderr, "opennova-extract: cannot write %s\n", path.c_str());
 			return 2;
 		}
 		std::printf("%s -> %s (%zu bytes)\n", name.c_str(), path.c_str(), bytes.size());

@@ -105,6 +105,9 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(run(cli + " --game " + quoted(unicode_install.u8string()) + " --out " +
 	                quoted(unicode_out.u8string()) + " note.txt > " + quoted(log.string())) == 0 &&
 	            text_of(unicode_out / "note.txt") == "packed");
+	// Each entry is written in place: a file beside it named like a staging file stays as it was.
+	std::ofstream((out / "note.txt.tmp").string(), std::ios::binary) << "keep";
+	TEST_EXPECT(extract(to_out) == 0 && text_of(out / "note.txt") == "packed" && text_of(out / "note.txt.tmp") == "keep");
 	// A write that fails is an error, not a success: the entry's name is a folder at the output.
 	const fs::path blocked = root / "blocked";
 	fs::create_directories(blocked / "note.txt", ec);
