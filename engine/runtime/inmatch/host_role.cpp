@@ -616,7 +616,7 @@ void HostRole::run_tick(const TickInput &input) {
 		// The own client's 0x0F / 0x50 track legs: the map POI list outside
 		// the waypoint gametypes (the route stays the promotion's).
 		apply_replica_track(kernel.world, state.client_runtime->state(),
-				state.client_runtime->view().game_type(), /*route_from_wire=*/false, track_seen_);
+				state.client_runtime->game_type(), /*route_from_wire=*/false, track_seen_);
 	}
 	ctx.net_quality_link_errors = 0;
 	last_net_us_ = static_cast<int64_t>(io::perf_now_us()) - net_start;

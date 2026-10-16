@@ -707,7 +707,7 @@ void JoinerRole::pump() {
 	const bool had_local = local_spawned_;
 	spawn_and_arm_local_player();
 	apply_world_state_load();
-	apply_replica_track(world, rt.state(), rt.view().game_type(), true, track_seen_);
+	apply_replica_track(world, rt.state(), rt.game_type(), true, track_seen_);
 	if (decoded.health) apply_authoritative_health();
 	// The S2C 0x3A revive tint. Retail arms the word inside the message handler;
 	// our replica state keeps the recipient's retained +0x1E0 "a medic is
