@@ -105,31 +105,6 @@
       }
     },
     {
-      "Sid": "DataSnapshotStart",
-      "Effect": "Allow",
-      "Action": "ebs:StartSnapshot",
-      "Resource": "arn:aws:ec2:${region}::snapshot/*",
-      "Condition": {
-        "StringLike": {
-          "aws:RequestTag/opennova:deployment": "opennova-*"
-        }
-      }
-    },
-    {
-      "Sid": "DataSnapshotWrite",
-      "Effect": "Allow",
-      "Action": [
-        "ebs:PutSnapshotBlock",
-        "ebs:CompleteSnapshot"
-      ],
-      "Resource": "arn:aws:ec2:${region}::snapshot/*",
-      "Condition": {
-        "StringLike": {
-          "aws:ResourceTag/opennova:deployment": "opennova-*"
-        }
-      }
-    },
-    {
       "Sid": "EbsKeyMetadata",
       "Effect": "Allow",
       "Action": "kms:DescribeKey",

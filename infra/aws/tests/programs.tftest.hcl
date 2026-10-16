@@ -6,7 +6,8 @@
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> init -backend=false
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> test
 # Five Fargate task definitions (x86_64, awsvpc), each its program's image,
-# small (0.25 vCPU and 0.5 GiB; web and the worker 0.5 and 1), health-checked
+# small (0.25 vCPU and 0.5 GiB; web and the worker 0.5 and 1; the worker's
+# task with 40 GiB of storage, the others Fargate's 20), health-checked
 # on /livez, an init as PID 1, its logs under its program's prefix, and the
 # environment and secrets its program reads and no other's (web's with the
 # portal's nginx beside it, which starts once the server answers); five
@@ -18,9 +19,10 @@
 # counts held between min and max, web and the worker on their CPU; every security group's ingress its
 # program's alone; each task role ECS Exec's channels and its program's own
 # permission alone (the lobby none of its own: it announces the balancer's
-# address, ONNET_LOBBY_ENDPOINT); the execution role the deployment's secrets
-# and its log group alone; the controller named in Cloud Map. A size Fargate does not
-# offer and counts out of order are refused.
+# address, ONNET_LOBBY_ENDPOINT; with hosting on, web's and the worker's the game
+# data's store, the deployment's bucket under data/); the execution role the
+# deployment's secrets and its log group alone; the controller named in Cloud Map.
+# A size Fargate does not offer and counts out of order are refused.
 
 mock_provider "aws" {
   override_during = plan
@@ -30,9 +32,6 @@ mock_provider "aws" {
   }
   mock_data "aws_ami" {
     defaults = { id = "ami-0123456789abcdef0", root_device_name = "/dev/sda1" }
-  }
-  mock_data "aws_ebs_snapshot" {
-    defaults = { volume_size = 2 }
   }
   mock_data "aws_caller_identity" {
     defaults = { account_id = "123456789012" }
@@ -352,6 +351,13 @@ run "task_definitions" {
   }
   assert {
     condition = (
+      length(aws_ecs_task_definition.program["worker"].ephemeral_storage) == 1 && aws_ecs_task_definition.program["worker"].ephemeral_storage[0].size_in_gib == 40 &&
+      alltrue([for p in ["gate", "lobby", "web", "controller"] : length(aws_ecs_task_definition.program[p].ephemeral_storage) == 0])
+    )
+    error_message = "the worker's task has 40 GiB of storage (a tree's files pass through it); the others keep Fargate's default"
+  }
+  assert {
+    condition = (
       alltrue([for p in ["gate", "lobby", "web", "controller", "worker"] : jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].stopTimeout == 30])
     )
     error_message = "every program's orderly shutdown gets 30 s (the lobby's drain among them: the balancer drained its task before the signal)"
@@ -606,9 +612,9 @@ run "task_roles" {
   }
   assert {
     condition = (
-      length(aws_iam_role_policy.fleet_service) == 0 && length(aws_iam_role_policy.mail) == 0
+      length(aws_iam_role_policy.fleet_service) == 0 && length(aws_iam_role_policy.mail) == 0 && length(aws_iam_role_policy.data_store) == 0
     )
-    error_message = "without hosting and mail, every task role holds ECS Exec alone but web's infrastructure reads (fleet.tf and mail.tf add the worker's)"
+    error_message = "without hosting and mail, every task role holds ECS Exec alone but web's infrastructure reads (fleet.tf and mail.tf add the worker's, hosting the store's)"
   }
   assert {
     condition = (
@@ -647,6 +653,73 @@ run "task_roles" {
       aws_iam_role_policy.execution.role == aws_iam_role.execution.id
     )
     error_message = "the execution role reads the deployment's secrets and origin certificate and ships the logs, nothing else (the images are public)"
+  }
+}
+
+# Hosting on: web and the worker get the game data's store, the deployment's
+# bucket under data/ alone; the controller and the others nothing of it.
+run "hosting_on" {
+  command = plan
+
+  override_resource {
+    target          = aws_security_group.machines[0]
+    override_during = plan
+    values          = { id = "sg-0machines" }
+  }
+  override_resource {
+    target          = aws_launch_template.fleet["shared"]
+    override_during = plan
+    values          = { id = "lt-0shared", arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0shared" }
+  }
+  override_resource {
+    target          = aws_launch_template.fleet["own"]
+    override_during = plan
+    values          = { id = "lt-0own", arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0own" }
+  }
+  override_resource {
+    target          = terraform_data.fleet_seed_image[0]
+    override_during = plan
+    values          = { output = "ami-0123456789abcdef0" }
+  }
+
+  variables {
+    hosted_enabled = true
+  }
+
+  assert {
+    condition = (
+      toset(keys(aws_iam_role_policy.data_store)) == toset(["web", "worker"]) &&
+      alltrue([for p, r in aws_iam_role_policy.data_store : r.role == aws_iam_role.program[p].id && r.name == "opennova-prod-${p}-data-store"])
+    )
+    error_message = "web's and the worker's task roles hold the store's policy, no other's"
+  }
+  assert {
+    condition = (
+      length([
+        for st in data.aws_iam_policy_document.data_store[0].statement : st
+        if st.sid == "ListDataStore" && toset(st.actions) == toset(["s3:ListBucket"]) && toset(st.resources) == toset(["arn:aws:s3:::opennova-prod-ops-123456789012"]) &&
+        length([for c in st.condition : c if c.test == "StringLike" && c.variable == "s3:prefix" && toset(c.values) == toset(["data/*"])]) == 1
+      ]) == 1 &&
+      length([
+        for st in data.aws_iam_policy_document.data_store[0].statement : st
+        if st.sid == "ListDataStoreUploads" && toset(st.actions) == toset(["s3:ListBucketMultipartUploads"]) && toset(st.resources) == toset(["arn:aws:s3:::opennova-prod-ops-123456789012"]) && length(st.condition) == 0
+      ]) == 1 &&
+      length([
+        for st in data.aws_iam_policy_document.data_store[0].statement : st
+        if st.sid == "DataStoreObjects" && toset(st.resources) == toset(["arn:aws:s3:::opennova-prod-ops-123456789012/data/*"]) &&
+        toset(st.actions) == toset(["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload"])
+      ]) == 1 &&
+      length(data.aws_iam_policy_document.data_store[0].statement) == 3
+    )
+    error_message = "the store's policy: list data/ and the uploads in flight; get, put, delete and abort under data/ alone"
+  }
+  assert {
+    condition = alltrue([
+      for p in ["web", "controller", "worker"] :
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_OBJECT_STORE_URL"] == "s3://opennova-prod-ops-123456789012/data" &&
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_OBJECT_STORE_REGION"] == "us-east-1"
+    ]) && alltrue([for p in ["gate", "lobby"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_OBJECT_STORE")])
+    error_message = "web, the controller and the worker name the store; the gate and the lobby know nothing of it"
   }
 }
 

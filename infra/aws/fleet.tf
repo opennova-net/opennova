@@ -13,8 +13,13 @@
 #   own     var.own_instance_type (c7a.medium), exactly one server, the paid
 #           own-machine add-on.
 # Slot k of a machine: game UDP 32768+k (to players), admin TCP 32800+k (to the
-# controller's security group alone). Every machine mounts every data set's
-# snapshot (var.hosted_data_snapshots) as a volume of its own, read-only.
+# controller's security group alone). A server's game data is a tree (one
+# version of a data set's files, ADR 0064) in the store: the deployment's
+# operations bucket, data/trees/<id>/, which admins fill from the site's Game
+# data page. A machine holds no volume of game data: its hostd fetches
+# the trees its servers pin on demand (`aws s3 sync`, under the machine role)
+# onto the root volume, /opt/game/<tree id>/, and keeps each while a server
+# needs it.
 #
 # Machines launch into both public subnets, so a zone's loss or its want of
 # capacity costs a launch its zone, not the fleet (ONNET_HOSTED_EC2_SUBNETS:
@@ -29,8 +34,8 @@
 #     points the parameter at it, so a new machine boots in less time and no
 #     plan changes (fleet roll moves running servers onto it);
 #   - a launch template per kind: the fleet's image, the kind's type
-#     (a burstable one with unlimited credits), an encrypted root volume, one
-#     encrypted volume per data set from its private snapshot, the machines'
+#     (a burstable one with unlimited credits), an encrypted root volume (the
+#     trees live there), the machines'
 #     security group, the machine role, IMDSv2 with a hop limit of 1, and
 #     InstanceInitiatedShutdownBehavior=terminate (a machine powering off is a
 #     machine ended). The service names the template by kind
@@ -40,29 +45,37 @@
 #     admin ports to the controller alone; and the controller admitting the
 #     machines on its internal port (var.internal_http_port, its second
 #     listener, on its task's private address: hostd's bootstrap and sync);
-#   - the machine role: the five actions Session Manager needs for break-glass
-#     and its logs (/opennova/<deployment>/machines, which docker's awslogs
+#   - the machine role: the five actions Session Manager needs for break-glass,
+#     its logs (/opennova/<deployment>/machines, which docker's awslogs
 #     driver writes: a stream per slot, <machine id>/slot-<k>, and the agent's,
 #     <machine id>/hostd; the service hands each machine the group,
-#     ONNET_HOSTED_EC2_LOG_GROUP), nothing else (no machine has an SSH key or
-#     database credentials);
+#     ONNET_HOSTED_EC2_LOG_GROUP), and a read of the trees in the store,
+#     nothing else (no machine has an SSH key or database credentials);
 #   - the worker's task role's policy: launch only from these templates, only their
-#     two types with IMDSv2 required, gp3 volumes no larger than the largest
-#     the templates make, the seed image or an image this account baked for
-#     this deployment, the templates' snapshots, the public subnets, this
-#     deployment's tags and no other tag; tag only at launch, end only
-#     machines carrying both of this deployment's tags, describe, and pass the
-#     machine role to EC2.
+#     two types with IMDSv2 required, gp3 volumes no larger than the root
+#     volume the templates make, the seed image or an image this account baked
+#     for this deployment, the public subnets, this deployment's tags and no
+#     other tag; tag only at launch, end only machines carrying both of this
+#     deployment's tags, describe, and pass the machine role to EC2.
 #
-# All of it exists only while var.hosted_data_snapshots names a snapshot; empty
-# (the default), hosting is off and the programs' environment says so.
+# All of it exists only while var.hosted_enabled is on; off (the default),
+# hosting is off and the programs' environment says so. Web's and the worker's
+# own store policies are programs.tf's.
 #
 # The ports are the service's and hostd's (apps/novaworld_common/hosted/slots.h):
 # change them in both places or in neither.
 
 locals {
-  hosted_enabled    = length(var.hosted_data_snapshots) > 0
+  hosted_enabled    = var.hosted_enabled
   hosted_deployment = local.name
+
+  # The game data's store: the deployment's operations bucket under data/
+  # (trees/<tree id>/<file>, apps/novaworld_common/object_store.h), as the
+  # programs name it
+  # (ONNET_OBJECT_STORE_URL) and the policies scope it. The bucket is the
+  # deployment's own (ops_bucket.tf), so the prefix carries no deployment.
+  data_prefix      = "data"
+  object_store_url = "s3://${local.ops_bucket_name}/${local.data_prefix}"
 
   slot_game_port  = 32768
   slot_admin_port = 32800
@@ -75,14 +88,9 @@ locals {
   # The only tags a launch may carry (the service's run-instances names these).
   fleet_tag_keys = ["opennova:hosted", "opennova:deployment", "opennova:machine-kind", "opennova:machine-id", "opennova:server-id", "Name"]
 
-  # Each data set's volume: a device of its own, in the data sets' sorted
-  # order (/dev/sdf, /dev/sdg, ...). The machine finds each by its file
-  # system's label, not by the device.
-  data_set_devices = { for i, slug in sort(keys(var.hosted_data_snapshots)) : slug => "/dev/sd${substr("fghijklm", i, 1)}" }
-
-  # The largest volume a launch may make: the root volume, and the largest data
-  # volume (each snapshot's size, 2 GiB for a JO:CA install).
-  fleet_max_volume_gb = max(16, var.machine_root_volume_gb, [for s in data.aws_ebs_snapshot.hosted : s.volume_size]...)
+  # The largest volume a launch may make: the root volume (the one volume the
+  # templates make).
+  fleet_max_volume_gb = max(16, var.machine_root_volume_gb)
 }
 
 # The fleet's seed image: Canonical's newest Ubuntu 24.04 when the image
@@ -111,14 +119,6 @@ data "aws_ami" "hosted" {
       values = filter.value
     }
   }
-}
-
-# Each data set's snapshot, read so its size is explicit in the templates (and
-# so a mistyped or deleted id fails at plan, not at a launch).
-data "aws_ebs_snapshot" "hosted" {
-  for_each     = var.hosted_data_snapshots
-  owners       = ["self"]
-  snapshot_ids = [each.value]
 }
 
 # ---- the fleet's image ------------------------------------------------------------
@@ -230,11 +230,11 @@ resource "aws_iam_role" "machine" {
 }
 
 # Session Manager for break-glass (aws ssm start-session): the agent's
-# registration and its session channels; and the machine's logs (the docker
-# daemon's awslogs driver makes each stream and writes it). Not the managed
-# AmazonSSMManagedInstanceCore, which also reads every SSM parameter in the
-# account. (The machine also fences the slots' UIDs off the metadata service,
-# so no server holds even these.)
+# registration and its session channels; the machine's logs (the docker
+# daemon's awslogs driver makes each stream and writes it); and the trees
+# hostd fetches. Not the managed AmazonSSMManagedInstanceCore, which also
+# reads every SSM parameter in the account. (The machine also fences the
+# slots' UIDs off the metadata service, so no server holds even these.)
 data "aws_iam_policy_document" "machine" {
   count = local.hosted_enabled ? 1 : 0
 
@@ -256,6 +256,29 @@ data "aws_iam_policy_document" "machine" {
     effect    = "Allow"
     actions   = ["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogStreams"]
     resources = [aws_cloudwatch_log_group.machines.arn, "${aws_cloudwatch_log_group.machines.arn}:*"]
+  }
+
+  # The trees (immutable, written by the worker): hostd's `aws s3 sync` lists
+  # a tree's prefix and reads its objects. The trees alone, read alone:
+  # nothing of the dumps, the releases or the uploads.
+  statement {
+    sid       = "ListDataTrees"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [local.ops_bucket_arn]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["${local.data_prefix}/trees/*"]
+    }
+  }
+
+  statement {
+    sid       = "ReadDataTrees"
+    effect    = "Allow"
+    actions   = ["s3:GetObject"]
+    resources = ["${local.ops_bucket_arn}/${local.data_prefix}/trees/*"]
   }
 }
 
@@ -306,8 +329,9 @@ resource "aws_launch_template" "fleet" {
     }
   }
 
-  # The root volume: the OS, docker, the serve image and the slots' working
-  # directories (their secret files among them).
+  # The root volume, the machine's one volume: the OS, docker, the serve
+  # image, the slots' working directories (their secret files among them) and
+  # the trees hostd fetches (/opt/game).
   block_device_mappings {
     device_name = data.aws_ami.hosted[0].root_device_name
 
@@ -316,23 +340,6 @@ resource "aws_launch_template" "fleet" {
       volume_type           = "gp3"
       encrypted             = true
       delete_on_termination = true
-    }
-  }
-
-  # Every data set: its private snapshot's volume, its size the snapshot's,
-  # mounted read-only by its file system's label.
-  dynamic "block_device_mappings" {
-    for_each = local.data_set_devices
-    content {
-      device_name = block_device_mappings.value
-
-      ebs {
-        snapshot_id           = var.hosted_data_snapshots[block_device_mappings.key]
-        volume_size           = data.aws_ebs_snapshot.hosted[block_device_mappings.key].volume_size
-        volume_type           = "gp3"
-        encrypted             = true
-        delete_on_termination = true
-      }
     }
   }
 
@@ -392,15 +399,14 @@ data "aws_iam_policy_document" "fleet_service" {
     }
   }
 
-  # What such a launch touches besides the machine: its volumes (gp3, no
-  # larger than the largest the templates make; IfExists, so a request whose
-  # context lacks a key is not refused for that, though the templates name both
-  # for every volume), its network interface, the public subnets, the machines'
-  # security group, the templates and the snapshots, and the templates' own
-  # images. RunInstances on these creates nothing without the machine statement
-  # above. The snapshots are encrypted with the AWS-managed aws/ebs key, whose
-  # key policy admits every principal of the account through EBS: no KMS grant
-  # here.
+  # What such a launch touches besides the machine: its root volume (gp3, no
+  # larger than the templates make; IfExists, so a request whose context
+  # lacks a key is not refused for that, though the templates name both), its
+  # network interface, the public subnets, the machines' security group, the
+  # templates, and the templates' own images. RunInstances on these creates
+  # nothing without the machine statement above. The volume is encrypted with
+  # the AWS-managed aws/ebs key, whose key policy admits every principal of
+  # the account through EBS: no KMS grant here.
   statement {
     sid       = "LaunchMachineVolumes"
     effect    = "Allow"
@@ -467,7 +473,6 @@ data "aws_iam_policy_document" "fleet_service" {
       ],
       [for k in sort(keys(aws_subnet.public)) : "${local.fleet_arn_prefix}:${local.account_id}:subnet/${aws_subnet.public[k].id}"],
       [for k in sort(keys(aws_launch_template.fleet)) : "${local.fleet_arn_prefix}:${local.account_id}:launch-template/${aws_launch_template.fleet[k].id}"],
-      [for id in values(var.hosted_data_snapshots) : "${local.fleet_arn_prefix}::snapshot/${id}"],
     )
   }
 
@@ -552,9 +557,9 @@ resource "aws_iam_role_policy" "fleet_service" {
 # machines, in their environment (programs.tf). The fleet's knobs are there
 # whether or not hosting is on (the controller's address is ONNET_INTERNAL_URL,
 # and its task binds its own private address); with it off, the provider is
-# `none`. The serve and hostd images are the release's (`app deploy
-# --serve-tag --hostd-tag`, pinned by digest). The toolbox's own (infra.env):
-# what `fleet bake-image` and the machines' tag need.
+# `none` and there is no store. The serve and hostd images are the release's
+# (`app deploy --serve-tag --hostd-tag`, pinned by digest). The toolbox's own
+# (infra.env): what `fleet bake-image` and the machines' tag need.
 locals {
   fleet_env = {
     ONNET_FLEET_SHARED_SLOTS = tostring(var.shared_slots)
@@ -572,12 +577,10 @@ locals {
     ONNET_HOSTED_EC2_SUBNETS     = join(",", [for k in sort(keys(aws_subnet.public)) : aws_subnet.public[k].id])
     ONNET_HOSTED_DEPLOYMENT      = local.hosted_deployment
     ONNET_HOSTED_BOOTSTRAP_CIDRS = join(",", [for k in sort(keys(aws_subnet.public)) : aws_subnet.public[k].cidr_block])
-    # The data sets the service offers are exactly the ones every machine mounts
-    # (a volume each, in sorted order), each with its default rotation.
-    ONNET_HOSTED_DATA_SETS = jsonencode({
-      for slug in sort(keys(var.hosted_data_snapshots)) :
-      slug => { missions = lookup(var.hosted_data_set_missions, slug, []) }
-    })
+    # The game data's store: the trees the machines fetch (the controller hands
+    # hostd each tree's URL under it), what web uploads and the worker builds.
+    ONNET_OBJECT_STORE_URL    = local.object_store_url
+    ONNET_OBJECT_STORE_REGION = var.region
     } : {
     ONNET_HOSTED_PROVIDER = "none"
   })

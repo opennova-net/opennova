@@ -289,6 +289,53 @@ resource "aws_iam_role_policy" "infra_read" {
   policy = data.aws_iam_policy_document.infra_read.json
 }
 
+# The game data's store (ADR 0064; fleet.tf names it: the deployment's
+# operations bucket under local.data_prefix, data/), with hosting on: web
+# starts the admin page's uploads (multipart; the browser sends each part
+# through the site and web puts it) and removes an abandoned tree's; the
+# worker finalizes a tree and prunes. Both read, write and delete under data/
+# alone, list it, and list the uploads in flight (that listing takes no prefix
+# condition; aborting one is scoped by its key). The machines read the trees
+# alone (fleet.tf); the controller needs no call (it builds URLs alone).
+data "aws_iam_policy_document" "data_store" {
+  count = local.hosted_enabled ? 1 : 0
+
+  statement {
+    sid       = "ListDataStore"
+    effect    = "Allow"
+    actions   = ["s3:ListBucket"]
+    resources = [local.ops_bucket_arn]
+
+    condition {
+      test     = "StringLike"
+      variable = "s3:prefix"
+      values   = ["${local.data_prefix}/*"]
+    }
+  }
+
+  statement {
+    sid       = "ListDataStoreUploads"
+    effect    = "Allow"
+    actions   = ["s3:ListBucketMultipartUploads"]
+    resources = [local.ops_bucket_arn]
+  }
+
+  statement {
+    sid       = "DataStoreObjects"
+    effect    = "Allow"
+    actions   = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject", "s3:AbortMultipartUpload"]
+    resources = ["${local.ops_bucket_arn}/${local.data_prefix}/*"]
+  }
+}
+
+resource "aws_iam_role_policy" "data_store" {
+  for_each = local.hosted_enabled ? toset(["web", "worker"]) : toset([])
+
+  name   = "${local.name}-${each.key}-data-store"
+  role   = aws_iam_role.program[each.key].id
+  policy = data.aws_iam_policy_document.data_store[0].json
+}
+
 # ---- what each program's container gets --------------------------------------------
 
 locals {
@@ -390,6 +437,11 @@ locals {
     worker     = [{ port = var.health_port, protocol = "tcp" }]
   }
 
+  # The worker's task storage, in GiB: a tree's files pass through its disk
+  # (the finalize job, a GiB or two at once; Fargate's default is 20). The
+  # others keep the default.
+  task_ephemeral_storage_gib = { worker = 40 }
+
   # The service's log group, a stream per container and task under the
   # program's prefix (<program>/<container>/<task id>; `app logs PROGRAM`).
   awslogs = {
@@ -480,6 +532,13 @@ resource "aws_ecs_task_definition" "program" {
   runtime_platform {
     operating_system_family = "LINUX"
     cpu_architecture        = "X86_64"
+  }
+
+  dynamic "ephemeral_storage" {
+    for_each = contains(keys(local.task_ephemeral_storage_gib), each.key) ? [local.task_ephemeral_storage_gib[each.key]] : []
+    content {
+      size_in_gib = ephemeral_storage.value
+    }
   }
 
   tags = merge(var.tags, {

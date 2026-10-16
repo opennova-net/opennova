@@ -27,3 +27,8 @@ db_multi_az       = true
 # mail and password reset links as support@<domain>, through prod's own
 # identity.
 mail_sender = "support"
+
+# Hosted game servers (fleet.tf; DEPLOY.md "Hosted game servers"): the
+# machines, the game data's store in the operations bucket. The fleet's sizes
+# keep their defaults.
+hosted_enabled = true

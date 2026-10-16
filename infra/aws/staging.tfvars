@@ -17,7 +17,9 @@ cloudflare_web_proxied = true
 db_instance_class = "db.t4g.small"
 db_multi_az       = true
 
-# One shared machine is enough to rehearse on.
+# Hosted game servers (fleet.tf; DEPLOY.md "Hosted game servers"), rehearsed
+# here first: one shared machine is enough.
+hosted_enabled   = true
 fleet_max_shared = 1
 fleet_max_own    = 1
 

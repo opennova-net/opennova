@@ -65,7 +65,7 @@ output "web_domain" {
 
 output "ops_bucket" {
   value       = local.ops_bucket_name
-  description = "The deployment's operations bucket: the release manifests (releases/) and the database dumps (novaworld/)"
+  description = "The deployment's operations bucket: the release manifests (releases/), the game data's store (data/: the data sets' trees) and the database dumps (novaworld/)"
 }
 
 output "ssm_prefix" {
@@ -124,8 +124,8 @@ output "region" {
 }
 
 output "hosted_enabled" {
-  value       = local.hosted_enabled
-  description = "Whether hosted game servers are set up (hosted_data_snapshots names a data set): the programs' environment then turns ONNET_HOSTED_PROVIDER=ec2 on"
+  value       = var.hosted_enabled
+  description = "Whether hosted game servers are set up (var.hosted_enabled): the programs' environment then turns ONNET_HOSTED_PROVIDER=ec2 on and names the game data's store"
 }
 
 output "fleet_launch_templates" {
