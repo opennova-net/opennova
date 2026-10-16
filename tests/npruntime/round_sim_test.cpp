@@ -1523,6 +1523,7 @@ int main() {
 	ctx.is_in_session = 1;
 	ctx.config.respawn_timeout = 5;
 	ctx.config.death_messages = 1;
+	ctx.config.max_players = 3; // the C2S 0x22 pull answers slots inside the table only
 	// This scenario is an MP session (three players over transports): stamp the
 	// world-side flag too, or the SP-only round-outcome legs (kill tallies + the
 	// death auto-lose in check_win_conditions) run and hold the respawn queue.

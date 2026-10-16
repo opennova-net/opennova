@@ -764,8 +764,9 @@ std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack) {
 	Writer w{out};
 	w.u8(slot);
 	// 0x8000 removal + optional 0x4000 ack (golden's 0xC000): the client clears the slot and, with the
-	// ack bit, requests the next one — so the walk terminates at max_players. [orig: NapiNPClientMsg_PlayerSync
-	// @0x431370 — a 0x8000 record reads NO entity slot / fields, just [u8 slot][u16 flags].]
+	// ack bit, requests the next one while the slot is below its max-player count (@0x43175a), which
+	// ends the walk. [orig: NapiNPClientMsg_PlayerSync @0x431370 — a 0x8000 record reads NO entity
+	// slot / fields, just [u8 slot][u16 flags].]
 	w.u16(static_cast<uint16_t>(kPlayerSyncRemoval | (with_ack ? kPlayerSyncAck : 0u)));
 	return out;
 }

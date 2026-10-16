@@ -1301,20 +1301,33 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				break;
 			case c2s::PLAYER_SYNC_REQUEST: { // player-sync request [u8 slot][u16 fieldFlags] -> S2C 0x46 player-sync.
 				// [orig: NapiNPServerMsg_0x022 @0x514C90; §5.33] The client requests a SPECIFIC slot
-				// (body byte 0) + a fieldFlags word (bytes 1-2); reply 0x46 for THAT slot so the joiner
-				// binds it. The ACK-WALK is CLIENT-driven: the server ECHOES bit 0x4000 from the request
-				// into the reply (NetPacket_SerializePlayerSync0x46 @0x505f05 `if (fieldFlags &
-				// 0x4000) adjusted |= 0x4000`), and the CLIENT, on seeing the echoed ack, re-requests
-				// slot+1 with fieldFlags 0x5CF7 until slot+1 >= its max-player count g_MaxPlayerSlots
-				// (NapiNPClientMsg_PlayerSync @0x431370 tail) — the server never terminates the walk.
-				// An inactive slot / NULL entity forces a 0x8000 removal reply (@0x505ecb..0x505ee0).
+				// (body byte 0) + a fieldFlags word (bytes 1-2); an added requester asking for an
+				// in-table slot gets the 0x46 for THAT slot, so the joiner binds it. The ACK-WALK is
+				// CLIENT-driven: the server ECHOES bit 0x4000 from the request into the reply
+				// (NetPacket_SerializePlayerSync0x46 @0x505f07 `adjusted |= 0x4000`), and the
+				// CLIENT, on seeing the echoed ack, re-requests slot+1 with fieldFlags 0x5CF7 while
+				// slot < its max-player count g_MaxPlayerSlots (NapiNPClientMsg_PlayerSync @0x43175a),
+				// so its final request is slot == the 0x04 capacity byte, which the capacity gate
+				// below leaves unanswered — the server never terminates the walk. An in-table
+				// inactive slot / NULL entity answers the 0x8000 removal record (@0x505ecb..0x505ee0).
 				// Without the walk the joiner only ever binds its OWN slot, leaving other players (the
 				// host's serve-and-play player) unbound (residual 0x0F flood grill 2026-07-01).
-				const uint8_t req_slot = msg.payload.empty() ? rep.player_slot : msg.payload[0];
+				// The requester must be an added player: retail reads the connection's session
+				// player (conn+0x160) and its server player slot (+0xC0) and sends nothing when
+				// either is null [orig: @0x514ca1..0x514cb8]; our analogue of the bound slot is the
+				// PlayerAdded phase (the 0x0F query's gate below).
+				if (conn.phase < ConnectionPhase::PlayerAdded) break;
+				// Lenient reads: a missing slot byte reads 0, and the flags word reads only when
+				// both of its bytes follow the slot byte, else 0 [orig: @0x514cca..0x514ce7].
+				const uint8_t req_slot = msg.payload.empty() ? 0 : msg.payload[0];
 				const uint16_t req_flags =
 						msg.payload.size() >= 3
 								? static_cast<uint16_t>(msg.payload[1] | (msg.payload[2] << 8))
 								: 0;
+				// A slot at or past the slot table sends nothing at all, removal record included
+				// [orig: `cmp eax, g_PlayerSlotCapacity` @0x514cf1, `jge` @0x514cf7]. The retail
+				// walk's inclusive final request (slot == the 0x04 capacity byte) lands here.
+				if (req_slot >= config.total_player_slot_capacity()) break;
 				bool slot_has_player = false;
 				for (const NapiNPConnection &c : roster) {
 					if (c.phase >= ConnectionPhase::PlayerAdded && c.link.owned_entity.valid() &&
@@ -1323,24 +1336,21 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						break;
 					}
 				}
-				// Answer EXACTLY the requested fieldFlags — ack bit included [orig:
-				// NetPacket_SerializePlayerSync0x46 @0x505E80 serializes the request mask
-				// verbatim; ack echo @0x505f05]. The retail client stops the walk itself at
-				// its max-player count g_MaxPlayerSlots (fed by our 0x04 slot-config byte 18), so
-				// no server-side cap. A zero/absent mask answers the 0x1CF7 field set.
+				// An active slot answers the request mask minus bit 0x8000, the ack bit riding
+				// along; there is no default field set, so a zero or ack-only mask answers the
+				// header and the pool index alone [orig: NetPacket_SerializePlayerSync0x46
+				// @0x505E80 - `fieldFlags & 0x7FFF` @0x505efb, the ack OR @0x505f07]. The retail
+				// client stops the walk itself at its max-player count g_MaxPlayerSlots (fed by
+				// our 0x04 slot-config byte 18).
 				const bool echo_ack = (req_flags & kPlayerSyncAck) != 0;
-				const uint16_t reply_flags =
-						(req_flags & static_cast<uint16_t>(~(kPlayerSyncAck | kPlayerSyncRemoval))) != 0
-								? static_cast<uint16_t>(req_flags & ~kPlayerSyncRemoval)
-								: static_cast<uint16_t>(kPlayerSyncJoinBroadcastFields |
-										(echo_ack ? kPlayerSyncAck : 0u));
+				const uint16_t reply_flags = static_cast<uint16_t>(req_flags & ~kPlayerSyncRemoval);
 				if (slot_has_player) {
 					const PlayerReplicationState prs = rep_for_slot(config, roster, req_slot, rep, world);
 					replies.push_back(
 							make_protocol_message(s2c::PLAYER_SYNC, encode_player_sync(prs, reply_flags)));
 				} else {
-					// Empty/disconnected slot: the 0x8000 removal record (|0x4000 when the
-					// request asked for the ack) — the walk terminator [orig: @0x505ecb..ee0].
+					// An in-table empty or disconnected slot: the 0x8000 removal record (|0x4000
+					// when the request asked for the ack) [orig: @0x505ecb..0x505ee0, @0x505f37].
 					replies.push_back(
 							make_protocol_message(s2c::PLAYER_SYNC, encode_player_sync_removal(req_slot, echo_ack)));
 				}

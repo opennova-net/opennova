@@ -364,6 +364,7 @@ bool check_scoreboard_row_team_is_the_slot_team() {
 bool check_player_sync_and_0x75_carry_the_slot_team() {
 	opennova::inmatch::GameConfig config;
 	config.game_type = opennova::game_type::kTeamDeathmatch;
+	config.max_players = 2; // the 0x22 pull answers slots inside the table only
 	opennova::world::World world;
 	world.registry.configure_pool(0, 4);
 	auto spawn_player = [&](uint8_t team) {
