@@ -13,31 +13,45 @@
 // whose reply was lost is made again (a fresh secret replacing the last):
 //
 //   POST /hosted/machines/<id>/bootstrap      Authorization: Bearer <token>
-//   {"protocol": 1, "agent_version": "<the agent's build>"}
-//   -> 200 {"protocol": 1, "agent_secret": "<kAgentSecretChars letters and digits>",
+//   {"protocol": 2, "agent_version": "<the agent's build>"}
+//   -> 200 {"protocol": 2, "agent_secret": "<kAgentSecretChars letters and digits>",
 //           "serve_image": "ghcr.io/<owner>/opennova-serve@sha256:<digest>",
-//           "slots": <the machine's slots, 1..kMaxSlots>,
-//           "data_sets": {"<data set>": "/opt/game/<data set>", ...}}
+//           "slots": <the machine's slots, 1..kMaxSlots>}
 //
 // The secret is the agent's long-lived credential (the service keeps only its
-// SHA-256, agent_secret_digest); the data sets map each data set the machine
-// mounts to its mount path, the bind source of that data set's containers.
+// SHA-256, agent_secret_digest).
 //
 // The sync. Every kSyncIntervalMs (kBusySyncIntervalMs while the agent has work:
-// a container to start, stop or remove) the agent reports every container it
-// runs and gets back the ones it should:
+// a container to start, stop or remove, a tree to fetch) the agent reports every
+// container it runs, and gets back the containers it should run and the trees
+// they need:
 //
 //   POST /hosted/machines/<id>/sync           Authorization: Bearer <agent secret>
-//   {"protocol": 1, "agent_version": "...",
+//   {"protocol": 2, "agent_version": "...",
 //    "containers": [{"name", "slot", "state": "starting" | "running" | "exited",
 //                    "exit_code": <int> | null, "oom": <bool>,
-//                    "started_at": <Unix seconds> | null, "cpu_percent": <number>,
-//                    "memory_bytes": <int>, "egress_bytes": <int>}],
+//                    "started_at": <Unix seconds> | null, ["reason": "<why>",]
+//                    "cpu_percent": <number>, "memory_bytes": <int>, "egress_bytes": <int>}],
 //    ["listing_failed": true]}
-//   -> 200 {"protocol": 1, "drain": <bool>,
-//           "desired": [{"name", "slot", "image", "uid", "data_set", "args": [...],
+//   -> 200 {"protocol": 2, "drain": <bool>,
+//           "desired": [{"name", "slot", "image", "uid",
+//                        "base_tree": <tree id>, "expansion_tree": <tree id> | null,
+//                        "expansion_code": "<code>" | "", "args": [...],
 //                        "files": {"<name>": "<base64>"}, "env": {"<NAME>": "<value>"},
-//                        "cpus": <number>, "memory_mb": <int>, "pids": <int>}]}
+//                        "cpus": <number>, "memory_mb": <int>, "pids": <int>}],
+//           "trees": {"<tree id>": {"url": "s3://<bucket>/<root>/trees/<id>/" | "file:///...",
+//                                   "version": "<its version.txt's line>",
+//                                   "files": [{"name", "size"}]}}}
+//
+// A tree (ADR 0064) is one immutable version of a data set's files in the
+// object store, which the agent fetches from its `url` into <trees root>/<id>
+// (its own `aws s3 sync`, or a directory copy for file://) and checks against
+// the manifest (`files`: every name with its size), then binds into a
+// container: the base tree at /opt/game, the expansion tree (when the container
+// has one) at /opt/game/expansion/<expansion_code>. The reply's `trees` map names
+// every tree its desired containers use (and only those), so the agent fetches
+// what it lacks before starting a container (reported `starting` meanwhile) and
+// may drop a tree no reply has named for a while.
 //
 // `egress_bytes` is the container's slot's, every byte its user sent since the
 // machine booted (the agent's per-UID counters), so the service takes the
@@ -45,16 +59,20 @@
 // (its rule put back), counted from 0. `exit_code` is the container's own once
 // it exited, or the docker CLI's (125) when its start failed (its image did not
 // pull among the causes); such a container is reported as exited until the
-// service drops it. One waiting for its image's pull is reported starting.
-// `files` carries the slot's working directory (the bytes in standard base64:
-// the host file is cp1252) and is sent until the agent has reported the
-// container once, in any state; the agent keeps them until it starts the
-// container, writes them before, and never needs them again.
-// A desired container the agent does not report is not on the machine: the
-// agent cannot start one whose files were left out (a lost agent state), and
-// keeps none whose start failed past the report. The agent stops a container
-// only when a reply leaves it out; a sync that fails changes nothing on the
-// machine. `drain` says the service is moving the machine's servers off it.
+// service drops it, and one that never started may carry `reason`, why (its
+// data could not be fetched: the owner reads it in the server's events), at
+// most kMaxContainerReasonBytes of printable ASCII, present only with an exit
+// code and no `started_at`. One waiting for its image's pull or its trees'
+// fetch is reported starting. `files` carries the slot's working directory
+// (the bytes in standard base64: the host file is cp1252) and is sent until
+// the agent has reported the container once, in any state; the agent keeps
+// them until it starts the container, writes them before, and never needs them
+// again. A desired container the agent does not report is not on the machine:
+// the agent cannot start one whose files were left out (a lost agent state),
+// and keeps none whose start failed past the report. The agent stops a
+// container only when a reply leaves it out; a sync that fails changes nothing
+// on the machine. `drain` says the service is moving the machine's servers off
+// it.
 //
 // An agent that cannot list its containers (docker not answering) still
 // syncs, with `listing_failed` (present only then) and no container: the
@@ -79,7 +97,7 @@
 
 namespace opennova::novaworld_server::hosted {
 
-inline constexpr int kAgentProtocol = 1;
+inline constexpr int kAgentProtocol = 2;
 inline constexpr int kSyncIntervalMs = 5000;
 inline constexpr int kBusySyncIntervalMs = 1000;
 // The bootstrap token and the agent's secret: letters and digits from the OS
@@ -87,11 +105,18 @@ inline constexpr int kBusySyncIntervalMs = 1000;
 inline constexpr size_t kMachineTokenChars = 48;
 inline constexpr size_t kAgentSecretChars = 48;
 // A desired container's caps: files, their bytes all told, arguments, the
-// environment.
+// environment; and the longest reason a report carries.
 inline constexpr size_t kMaxContainerFiles = 16;
 inline constexpr size_t kMaxContainerFileBytes = 1u << 20;
 inline constexpr size_t kMaxContainerArgs = 64;
 inline constexpr size_t kMaxContainerEnv = 32;
+inline constexpr size_t kMaxContainerReasonBytes = 200;
+// The trees: how many a reply may name, how many files one holds, the longest
+// fetch URL.
+inline constexpr size_t kMaxReplyTrees = 32;
+inline constexpr size_t kMaxTreeFiles = 64;
+inline constexpr size_t kMaxTreeUrlBytes = 512;
+inline constexpr size_t kMaxExpansionCodeChars = 8;
 
 // "/hosted/machines/<id>/bootstrap" and "/hosted/machines/<id>/sync".
 std::string machine_bootstrap_path(int64_t machine_id);
@@ -108,19 +133,21 @@ std::string agent_secret_digest(std::string_view secret);
 // The shapes every field is checked against, the agent's and the service's
 // alike: a container name (1..64 of letters, digits, '_', '.', '-', a letter
 // or digit first); an image reference (letters, digits and ./:@_-, at most 255,
-// a letter or digit first); a data set (1..64 of a-z, 0-9, '_'); a mount path
-// (absolute, at most 255 of letters, digits and ./_-, no "." or ".." part); a
-// working-directory file name (1..64 of letters, digits, '.', '_', '-', never
-// "." or ".."); an environment name (a letter or '_' first, then letters,
-// digits and '_', at most 128). And the machines' log group and its region,
-// which the user-data hands the agent's command line (not the protocol): a
-// CloudWatch log group (1..512 of letters, digits and ./_-) and an AWS region
-// (1..32 of a-z, 0-9 and '-', a letter first).
+// a letter or digit first); a working-directory file name and a tree's file
+// name (1..64 of letters, digits, '.', '_', '-', never "." or ".."); an
+// expansion code (1..kMaxExpansionCodeChars of a-z, 0-9); a tree's fetch URL
+// (s3://... or file:///..., printable ASCII, at most kMaxTreeUrlBytes); an
+// environment name (a letter or '_' first, then letters, digits and '_', at
+// most 128). And the machines' log group and its region, which the user-data
+// hands the agent's command line (not the protocol): a CloudWatch log group
+// (1..512 of letters, digits and ./_-) and an AWS region (1..32 of a-z, 0-9
+// and '-', a letter first).
 bool is_container_name(std::string_view name);
 bool is_image_reference(std::string_view image);
-bool is_data_set_name(std::string_view name);
-bool is_mount_path(std::string_view path);
 bool is_slot_file_name(std::string_view name);
+bool is_tree_file_name(std::string_view name);
+bool is_expansion_code(std::string_view code);
+bool is_tree_url(std::string_view url);
 bool is_env_name(std::string_view name);
 bool is_log_group_name(std::string_view name);
 bool is_aws_region(std::string_view region);
@@ -141,7 +168,6 @@ struct MachineBootstrap {
 	std::string agent_secret;
 	std::string serve_image;
 	int slots = 0;
-	std::map<std::string, std::string> data_sets; // data set -> mount path
 };
 
 enum class ContainerState : uint8_t {
@@ -159,6 +185,9 @@ struct ContainerReport {
 	std::optional<int64_t> exit_code; // set once it exited
 	bool oom = false; // the kernel's OOM killer ended it
 	std::optional<int64_t> started_at; // Unix seconds, once it started
+	// Why a container that never started did not ("" for none): sent only with
+	// an exit code and no started_at, 1..kMaxContainerReasonBytes printable.
+	std::string reason;
 	double cpu_percent = 0.0; // of one CPU (above 100 on more than one)
 	uint64_t memory_bytes = 0;
 	uint64_t egress_bytes = 0; // its slot's, since the machine booted
@@ -174,12 +203,27 @@ struct SyncRequest {
 	bool listing_failed = false;
 };
 
+// One file of a tree, as its manifest lists it.
+struct TreeFileSpec {
+	std::string name;
+	uint64_t size = 0;
+};
+
+// A tree a desired container uses: where to fetch it and what it holds.
+struct TreeSpec {
+	std::string url;
+	std::string version;
+	std::vector<TreeFileSpec> files;
+};
+
 struct DesiredContainer {
 	std::string name;
 	int slot = 0;
 	std::string image;
 	uint32_t uid = 0; // slot_uid(slot), always
-	std::string data_set;
+	int64_t base_tree = 0; // a key of the reply's trees
+	std::optional<int64_t> expansion_tree; // a key of the reply's trees, with the code
+	std::string expansion_code; // "" with no expansion tree
 	std::vector<std::string> args; // opennova-serve's arguments
 	// The working directory's files, name -> bytes; absent once the agent has
 	// reported the container.
@@ -194,6 +238,7 @@ struct DesiredContainer {
 struct SyncReply {
 	int protocol = kAgentProtocol;
 	std::vector<DesiredContainer> desired; // one per slot, one per name
+	std::map<int64_t, TreeSpec> trees; // every tree the desired containers use
 	bool drain = false;
 };
 

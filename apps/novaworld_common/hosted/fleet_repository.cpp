@@ -575,12 +575,13 @@ std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 	db.exec("DELETE FROM fleet_slot_reports WHERE machine_id = $1;", { BindValue(id) });
 	for (const auto &[slot, c] : by_slot) {
 		db.exec("INSERT INTO fleet_slot_reports (machine_id, slot, container, state, exit_code, "
-				"oom, started_at, cpu_percent, memory_bytes, egress_bytes) "
-				"VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7::double precision), $8, $9, $10);",
+				"oom, started_at, reason, cpu_percent, memory_bytes, egress_bytes) "
+				"VALUES ($1, $2, $3, $4, $5, $6, to_timestamp($7::double precision), $8, $9, $10, "
+				"$11);",
 				{ BindValue(id), BindValue(static_cast<int64_t>(slot)), BindValue(c->name),
 						BindValue(std::string(container_state_text(c->state))),
 						optional_int(c->exit_code), BindValue(db::Bool{ c->oom }),
-						optional_int(c->started_at), BindValue(c->cpu_percent),
+						optional_int(c->started_at), BindValue(c->reason), BindValue(c->cpu_percent),
 						count_value(c->memory_bytes), count_value(c->egress_bytes) });
 	}
 	auto row = find_machine(db, id);
@@ -606,7 +607,7 @@ std::vector<SlotReport> query_slot_reports(
 	std::vector<SlotReport> out;
 	for (const db::Row &r :
 			db.query("SELECT r.slot, r.container, r.state, r.exit_code, r.oom, "
-					 "CAST(extract(epoch FROM r.started_at) AS bigint), r.cpu_percent, "
+					 "CAST(extract(epoch FROM r.started_at) AS bigint), r.reason, r.cpu_percent, "
 					 "r.memory_bytes, r.egress_bytes, r.reported_at FROM fleet_slot_reports r " +
 							tail,
 					binds)) {
@@ -617,10 +618,11 @@ std::vector<SlotReport> query_slot_reports(
 		s.exit_code = r.as_int(3);
 		s.oom = r.as_int(4).value_or(0) != 0;
 		s.started_at = r.as_int(5);
-		s.cpu_percent = as_double(r, 6);
-		s.memory_bytes = as_count(r, 7);
-		s.egress_bytes = as_count(r, 8);
-		s.reported_at = r.as_text(9).value_or("");
+		s.reason = r.as_text(6).value_or("");
+		s.cpu_percent = as_double(r, 7);
+		s.memory_bytes = as_count(r, 8);
+		s.egress_bytes = as_count(r, 9);
+		s.reported_at = r.as_text(10).value_or("");
 		out.push_back(std::move(s));
 	}
 	return out;

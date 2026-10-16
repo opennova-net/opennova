@@ -408,6 +408,7 @@ int test_record_sync() {
 	oom.oom = true;
 	oom.exit_code = 137;
 	oom.started_at.reset();
+	oom.reason = "its data could not be fetched: aws s3 sync exited 1";
 	row = hosted::record_sync(db, m.id, "v2",
 			{ oom, report("srv-9-g2", 1, ContainerState::Running, 50),
 					report("srv-9-g1", 1, ContainerState::Exited),
@@ -418,7 +419,9 @@ int test_record_sync() {
 	TEST_EXPECT(slots[0].slot == 0 && slots[0].state == ContainerState::Exited && slots[0].oom);
 	TEST_EXPECT(slots[0].exit_code == int64_t{ 137 } && !slots[0].started_at &&
 			slots[0].egress_bytes == 2500);
-	TEST_EXPECT(slots[1].slot == 1 && slots[1].container == "srv-9-g2");
+	// The reason a container never started rides its row; a running one has none.
+	TEST_EXPECT(slots[0].reason == "its data could not be fetched: aws s3 sync exited 1");
+	TEST_EXPECT(slots[1].slot == 1 && slots[1].container == "srv-9-g2" && slots[1].reason.empty());
 	// A sync whose listing failed: heard from (its version), the slots' rows as they were.
 	db.exec("UPDATE fleet_machines SET last_report_at = now() - interval '5 minutes' "
 			"WHERE id = $1;",

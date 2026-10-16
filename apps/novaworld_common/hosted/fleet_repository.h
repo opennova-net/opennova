@@ -261,6 +261,7 @@ struct SlotReport {
 	std::optional<int64_t> exit_code;
 	bool oom = false;
 	std::optional<int64_t> started_at; // Unix seconds
+	std::string reason; // exited and never started: why (agent_protocol.h), else ""
 	double cpu_percent = 0.0;
 	uint64_t memory_bytes = 0;
 	uint64_t egress_bytes = 0; // the slot's, since the machine booted
