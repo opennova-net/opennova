@@ -17,6 +17,15 @@ const CurveRef &resolved_curve(const CurveRef &graphic_curve, const CurveRef &de
 	return graphic_curve.baked ? graphic_curve : definition_curve;
 }
 
+// The manager tint byte a ParticleQuadTints multiplier stands for (1.0 = 128),
+// rounded as the environment rounds its colour bytes; past 255 it is 255.
+std::uint32_t tint_byte(float multiplier) {
+	if (!(multiplier > 0.0f))
+		return 0;
+	const float scaled = multiplier * 128.0f + 0.5f;
+	return scaled >= 255.0f ? 255u : static_cast<std::uint32_t>(scaled);
+}
+
 // Godot's YXZ Euler basis R = Ry(yaw) * Rx(pitch) * Rz(0), evaluated in the
 // order and grouping its Basis::from_euler and operator* use, so the
 // world-oriented TOPALIGN frame lands on the same floats the presentation
@@ -77,33 +86,35 @@ ParticleQuadInputs particle_quad_inputs(const particle::Particle &particle,
 	const float lut_fraction = phase - std::floor(phase);
 
 	// The colour and alpha curves read the RAW byte at the index, no lerp,
-	// and scale their channel by byte / 256: retail's channel is the integer
-	// `(lut[i] * c) >> 8` on the particle's colour dword, one LUT per bit of
-	// the particle's curve flags (alpha +0x1E0, red +0x228, green +0x270, blue
-	// +0x2B8) [orig: CParticleEmitter_BuildBillboardQuads @ 0x5e7012..0x5e70d2;
-	// CParticleEmitter_RenderStaticBillboards @ 0x5f50e5..0x5f51a5;
-	// CParticleEmitter_RenderTopAlignedBillboards @ 0x5f5a97..0x5f5b57]. The
-	// port carries the channel in float to the one truncating pack below, so
-	// a curved channel under a non-neutral tint can land up to 2 below or
-	// above retail's two integer truncations (D-PTL-36).
-	auto channel_multiplier = [&](std::uint32_t flag, const CurveRef &graphic_curve,
-										const CurveRef &definition_curve) -> float {
+	// and scale the particle colour dword's channel byte in integer,
+	// `(lut[i] * c) >> 8`, one LUT per bit of the particle's curve flags: the
+	// alpha (+0x1E0, its product's high byte merged into the dword's top byte),
+	// red (+0x228), green (+0x270) and blue (+0x2B8) [orig:
+	// CParticleEmitter_BuildBillboardQuads @ 0x5e7012..0x5e7055 (alpha),
+	// @ 0x5e7057..0x5e7087 (red), @ 0x5e7089..0x5e70ae (green),
+	// @ 0x5e70b0..0x5e70d2 (blue); the twins
+	// CParticleEmitter_RenderStaticBillboards @ 0x5f50e5..0x5f51a5 and
+	// CParticleEmitter_RenderTopAlignedBillboards @ 0x5f5a97..0x5f5b57]
+	// (D-PTL-36).
+	auto curved = [&](std::uint32_t flag, const CurveRef &graphic_curve,
+						  const CurveRef &definition_curve, std::uint32_t channel) -> std::uint32_t {
 		if ((particle.flags & flag) == 0)
-			return 1.0f;
+			return channel;
 		const CurveRef &curve = resolved_curve(graphic_curve, definition_curve);
 		if (!curve.baked)
-			return 1.0f;
-		return static_cast<float>(curve.baked_lut[static_cast<std::size_t>(lut_index)]) /
-				256.0f;
+			return channel;
+		return (static_cast<std::uint32_t>(curve.baked_lut[static_cast<std::size_t>(lut_index)]) *
+					   channel) >>
+				8;
 	};
-	const float alpha_multiplier =
-			channel_multiplier(AlphaCurve, graphic.alpha_func, definition.alpha_func);
-	const float red_multiplier =
-			channel_multiplier(RedCurve, graphic.red_func, definition.red_func);
-	const float green_multiplier =
-			channel_multiplier(GreenCurve, graphic.green_func, definition.green_func);
-	const float blue_multiplier =
-			channel_multiplier(BlueCurve, graphic.blue_func, definition.blue_func);
+	const std::uint32_t alpha =
+			curved(AlphaCurve, graphic.alpha_func, definition.alpha_func, particle.alpha);
+	const std::uint32_t curved_red =
+			curved(RedCurve, graphic.red_func, definition.red_func, particle.color.r);
+	const std::uint32_t curved_green =
+			curved(GreenCurve, graphic.green_func, definition.green_func, particle.color.g);
+	const std::uint32_t curved_blue =
+			curved(BlueCurve, graphic.blue_func, definition.blue_func, particle.color.b);
 
 	// The scale curve blends two LUT bytes by the phase fraction and scales the
 	// base size by the result / 128, then by 0.5 into the half extent
@@ -132,23 +143,23 @@ ParticleQuadInputs particle_quad_inputs(const particle::Particle &particle,
 	const float size = particle.size * scale_multiplier;
 	out.half_extent = size * 0.5f;
 
-	// The manager tint `(c * tint) >> 7`, saturated at 255, on the three
-	// colour channels (alpha untinted) [orig: BuildBillboardQuads
-	// @ 0x5e7116..0x5e717e over the emitter's +0xC8..+0xCA bytes]: an
+	// The manager tint on the curved channels, `(c * tint) >> 7` saturated at
+	// 255 (red by +0xCA, green by +0xC9, blue by +0xC8; alpha untinted), and
+	// the four bytes packed back into the colour dword [orig:
+	// CParticleEmitter_BuildBillboardQuads @ 0x5e7116..0x5e717e (the tint),
+	// @ 0x5e7189..0x5e71a4 (the pack); the twins
+	// CParticleEmitter_RenderStaticBillboards @ 0x5f51e7..0x5f524f /
+	// @ 0x5f525a..0x5f5275 and CParticleEmitter_RenderTopAlignedBillboards
+	// @ 0x5f5b99..0x5f5c01 / @ 0x5f5c0c..0x5f5c25] (D-PTL-36). An
 	// ambient-tinted definition's emitter holds the terrain light, every other
 	// one the doubled modulator [orig: CParticleEmitter_AdvanceFrame
 	// @ 0x5e65f6..0x5e661c — the AMBIENTCOLOR test picks the manager's +0x3E8
 	// or +0x3F0 into emitter+0xC8].
 	const std::array<float, 3> &tint = ambient_tinted ? tints.ambient : tints.modulator;
-	constexpr float byte_to_unit = 1.0f / 255.0f;
-	float red = static_cast<float>(particle.color.r) * byte_to_unit;
-	float green = static_cast<float>(particle.color.g) * byte_to_unit;
-	float blue = static_cast<float>(particle.color.b) * byte_to_unit;
-	red = std::clamp(red * red_multiplier * tint[0], 0.0f, 1.0f);
-	green = std::clamp(green * green_multiplier * tint[1], 0.0f, 1.0f);
-	blue = std::clamp(blue * blue_multiplier * tint[2], 0.0f, 1.0f);
-	const float alpha = std::clamp(
-			static_cast<float>(particle.alpha) * byte_to_unit * alpha_multiplier, 0.0f, 1.0f);
+	const std::uint32_t red = std::min((curved_red * tint_byte(tint[0])) >> 7, 255u);
+	const std::uint32_t green = std::min((curved_green * tint_byte(tint[1])) >> 7, 255u);
+	const std::uint32_t blue = std::min((curved_blue * tint_byte(tint[2])) >> 7, 255u);
+	const std::uint32_t colour = (alpha << 24) | (red << 16) | (green << 8) | blue;
 
 	// The flipbook clock: frame = (start + trunc(4 * flip_rate * elapsed
 	// seconds)) mod frames, retail's `(start - ftol((256 / phase_rate) *
@@ -218,12 +229,12 @@ ParticleQuadInputs particle_quad_inputs(const particle::Particle &particle,
 	// carries the light).
 	if ((particle.flags & LitColor) != 0) {
 		out.lit = true;
-		out.lit_alpha = particle_unit_byte(alpha);
+		out.lit_alpha = static_cast<std::uint8_t>(alpha);
 		out.primary_color = particle_lit_primary_color(
 				definition.bump_scale, particle.rotation, out.lit_alpha, view_rows);
-		out.secondary_color = particle_pack_argb(red, green, blue, 1.0f);
+		out.secondary_color = colour | 0xff000000u;
 	} else {
-		out.primary_color = particle_pack_argb(red, green, blue, alpha);
+		out.primary_color = colour;
 		out.secondary_color = 0xffffffffu;
 	}
 	return out;

@@ -18,15 +18,6 @@ inline std::uint8_t particle_unit_byte(float value) noexcept {
 	return static_cast<std::uint8_t>(value * 255.0f);
 }
 
-// A D3DCOLOR (ARGB) word from four unit channels through particle_unit_byte.
-inline std::uint32_t particle_pack_argb(float red, float green, float blue,
-		float alpha) noexcept {
-	return (static_cast<std::uint32_t>(particle_unit_byte(alpha)) << 24) |
-			(static_cast<std::uint32_t>(particle_unit_byte(red)) << 16) |
-			(static_cast<std::uint32_t>(particle_unit_byte(green)) << 8) |
-			static_cast<std::uint32_t>(particle_unit_byte(blue));
-}
-
 // Retail's bump-color path truncates ((v+1)*0.5*255) to a signed dword and
 // packs its low byte without saturation. x86 invalid conversion produces
 // 0x80000000, whose low byte is zero; return the same deterministic byte for

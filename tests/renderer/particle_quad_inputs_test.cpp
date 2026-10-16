@@ -158,9 +158,10 @@ void the_tint_pick_and_its_saturation() {
 			r::particle_quad_inputs(particle, definition, graphic, false, tints, kIdentityView);
 	check(byte_at(modulated.primary_color, 16) == 63, "modulator red: (255 * 32) >> 7 = 63");
 
-	// A curved channel under a tint truncates once in the port: 1.0 x 0.5 x
-	// 1.5 = 0.75 -> 191, where retail truncates twice, ((128 x 255) >> 8) =
-	// 127, (127 x 192) >> 7 = 190 (D-PTL-X2, OPEN: porting it updates this).
+	// A curved channel under a tint truncates twice, as retail's integer form
+	// does: (128 x 255) >> 8 = 127, then (127 x 192) >> 7 = 190 (D-PTL-36; the
+	// one float truncation gave 0.75 x 255 -> 191). The curved alpha is the
+	// same product's high byte, untinted.
 	p::Particle curved = white_particle();
 	curved.flags = p::particle_runtime_flag::RedCurve;
 	p::GraphicLayer red_curve;
@@ -170,8 +171,17 @@ void the_tint_pick_and_its_saturation() {
 	one_and_a_half.modulator = {1.5f, 1.0f, 1.0f};
 	const r::ParticleQuadInputs tinted_curve = r::particle_quad_inputs(
 			curved, definition, red_curve, false, one_and_a_half, kIdentityView);
-	check(byte_at(tinted_curve.primary_color, 16) == 191,
-			"the port's one truncation under a 1.5 tint (D-PTL-X2)");
+	check(byte_at(tinted_curve.primary_color, 16) == 190,
+			"retail's two truncations under a 1.5 tint (D-PTL-36)");
+	check(byte_at(tinted_curve.primary_color, 8) == 255,
+			"an uncurved channel under a neutral tint keeps its byte");
+	curved.flags |= p::particle_runtime_flag::AlphaCurve;
+	bake(red_curve.alpha_func, 255);
+	curved.alpha = 200;
+	const r::ParticleQuadInputs curved_alpha = r::particle_quad_inputs(
+			curved, definition, red_curve, false, one_and_a_half, kIdentityView);
+	check(byte_at(curved_alpha.primary_color, 24) == 199,
+			"the alpha curve: (255 x 200) >> 8 = 199, untinted");
 
 	// Which definitions take the ambient tint (Initialize @ 0x5e6038..0x5e605e).
 	p::ParticleDef authored;
