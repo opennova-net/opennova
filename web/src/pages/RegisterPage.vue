@@ -5,7 +5,7 @@
       <p class="mt-2 text-sm text-ink-muted">
         Pick a handle and a password. That is what you log in with in-game.
       </p>
-      <form class="mt-8 grid gap-6" @submit.prevent="handleSubmit">
+      <form class="mt-8 grid gap-6" novalidate @submit.prevent="handleSubmit">
         <label class="grid gap-2 text-sm text-ink">
           Game Handle
           <input v-model="form.username" type="text" required minlength="2" maxlength="30"
@@ -16,6 +16,16 @@
           <input v-model="form.nwhandle" type="text" maxlength="30"
                  placeholder="defaults to handle"
                  class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none" />
+        </label>
+        <label class="grid gap-2 text-sm text-ink">
+          Email
+          <input ref="emailInput" v-model="form.email" name="email" type="email" required maxlength="254"
+                 autocomplete="email" autocapitalize="none" spellcheck="false"
+                 :aria-invalid="emailProblem ? 'true' : undefined" aria-describedby="register-email-hint"
+                 class="rounded-control border border-ink-muted/60 bg-surface px-4 py-3 focus:border-accent focus:outline-none" />
+          <span id="register-email-hint" class="text-xs" :class="emailProblem ? 'text-danger' : 'text-ink-muted'">
+            {{ emailProblem || 'We send a welcome mail here, and a password reset link when you ask for one.' }}
+          </span>
         </label>
         <label class="grid gap-2 text-sm text-ink">
           Password
@@ -35,6 +45,7 @@
             Account created! Username <code class="font-mono">{{ success.username }}</code>, PCID
             <code class="font-mono">{{ success.pcid }}</code>. You can now log in via Joint Operations,
             or log in to this site.
+            <template v-if="success.email">A welcome mail is on its way to {{ success.email }}.</template>
           </p>
           <RouterLink
             ref="loginOffer"
@@ -62,6 +73,7 @@ import { RouterLink, useRoute, type RouteLocationRaw } from 'vue-router';
 import { registerUser } from '../api/users';
 import { safeRedirect } from '../router/guards';
 import type { User } from '../types/users';
+import { EMAIL_HINT, isEmailAddress } from '../utils/email';
 
 const route = useRoute();
 
@@ -77,23 +89,52 @@ function loginLink(username?: string): RouteLocationRaw {
 
 const loginOffer = ref<{ $el: HTMLElement } | null>(null);
 
-const form = reactive({ username: '', nwhandle: '', password: '' });
+const form = reactive({ username: '', nwhandle: '', email: '', password: '' });
 const busy = ref(false);
 const success = ref<User | null>(null);
 const error = ref<string | null>(null);
+// What is wrong with the email field: the address rule, checked before the
+// request, or the server's refusal of it. Shown under the field.
+const emailProblem = ref<string | null>(null);
+const emailInput = ref<HTMLInputElement | null>(null);
+
+// The server's refusals in words; any other answer shows its own message.
+function refusalText(code: string | undefined, message: string | undefined): string | null {
+  switch (code) {
+    case 'username_exists':
+      return 'Another account already has that username.';
+    case 'email_exists':
+      return 'Another account already uses that email address.';
+    case 'missing_field':
+      return 'Fill in the username, the email and the password.';
+    case 'rate_limited':
+      return 'Too many registrations from your address. Try again in a few minutes.';
+    default:
+      return message || code || null;
+  }
+}
 
 async function handleSubmit() {
-  busy.value = true;
   error.value = null;
+  emailProblem.value = null;
   success.value = null;
+  const email = form.email.trim();
+  if (!isEmailAddress(email)) {
+    emailProblem.value = EMAIL_HINT;
+    emailInput.value?.focus();
+    return;
+  }
+  busy.value = true;
   try {
     success.value = await registerUser({
       username: form.username.trim(),
       password: form.password,
       nwhandle: form.nwhandle.trim() || undefined,
+      email,
     });
     form.username = '';
     form.nwhandle = '';
+    form.email = '';
     form.password = '';
     // The next step is the login: put the keyboard on it.
     await nextTick();
@@ -101,7 +142,15 @@ async function handleSubmit() {
   } catch (e) {
     const detail = (e as { response?: { data?: { error?: string; message?: string } } })
       ?.response?.data;
-    error.value = detail?.message || detail?.error || (e as Error).message || 'Registration failed.';
+    const text = refusalText(detail?.error, detail?.message);
+    const aboutEmail =
+      detail?.error === 'email_exists' || (detail?.error === 'invalid_field' && /email/i.test(detail?.message ?? ''));
+    if (aboutEmail) {
+      emailProblem.value = text;
+      emailInput.value?.focus();
+    } else {
+      error.value = text || (e as Error).message || 'Registration failed.';
+    }
   } finally {
     busy.value = false;
   }

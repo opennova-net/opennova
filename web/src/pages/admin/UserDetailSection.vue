@@ -20,6 +20,7 @@
         <h1 class="break-words text-3xl font-semibold text-ink">{{ detail.user.username }}</h1>
         <p class="flex flex-wrap items-center gap-2 text-sm text-ink-muted">
           <span>Account {{ detail.user.id }}</span>
+          <span v-if="detail.user.email" class="break-all">{{ detail.user.email }}</span>
           <span :class="detail.user.role === 'admin' ? `${badge} bg-accent/15 text-accent` : `${badge} bg-hover text-ink-muted`">
             {{ detail.user.role === 'admin' ? 'Admin' : 'Player' }}
           </span>

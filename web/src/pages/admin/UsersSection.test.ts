@@ -56,6 +56,7 @@ describe('UsersSection', () => {
     expect(rows[0].text()).toContain('Active');
     expect(rows[0].text()).toContain('1 live of 2');
     expect(rows[0].get('a').attributes('href')).toBe('/admin/users/1');
+    expect(rows[0].text()).toContain('player1@example.com');
     expect(rows[1].text()).toContain('Admin grant of 3');
     expect(rows[1].text()).toContain('None');
     expect(rows[2].text()).toContain('Payment past due');
@@ -83,13 +84,20 @@ describe('UsersSection', () => {
     await inputs[1].setValue('secret');
     await inputs[2].setValue('0000BEEF');
     await inputs[3].setValue('Delta');
+    await inputs[4].setValue('delta@example.com');
     create.mockResolvedValueOnce({
       ok: false,
       error: { code: 'pcid_exists', status: 400, message: 'Another account already has that PCID.' },
     });
     await form.trigger('submit');
     await flushPromises();
-    expect(create).toHaveBeenCalledWith({ username: 'delta', password: 'secret', pcid: '0000BEEF', nwhandle: 'Delta' });
+    expect(create).toHaveBeenCalledWith({
+      username: 'delta',
+      password: 'secret',
+      pcid: '0000BEEF',
+      nwhandle: 'Delta',
+      email: 'delta@example.com',
+    });
     expect(wrapper.get('[role="alert"]').text()).toBe('Another account already has that PCID.');
 
     // No PCID: the public registration makes one up.
@@ -97,7 +105,7 @@ describe('UsersSection', () => {
     register.mockResolvedValueOnce({ id: 9 } as never);
     await form.trigger('submit');
     await flushPromises();
-    expect(register).toHaveBeenCalledWith({ username: 'delta', password: 'secret', nwhandle: 'Delta' });
+    expect(register).toHaveBeenCalledWith({ username: 'delta', password: 'secret', nwhandle: 'Delta', email: 'delta@example.com' });
     expect(wrapper.get('[role="status"]').text()).toBe('Created delta.');
   });
 });
