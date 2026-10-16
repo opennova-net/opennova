@@ -1,4 +1,5 @@
 #include "agent_protocol.h"
+#include "text_util.h"
 
 #include <base/io/base64.h>
 #include <base/io/json.h>
@@ -25,10 +26,6 @@ constexpr int64_t kMinMemoryMb = 16;
 constexpr int64_t kMaxMemoryMb = 65536;
 constexpr int64_t kMinPids = 16;
 constexpr int64_t kMaxPids = 32768;
-
-bool is_alnum(char c) {
-	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
-}
 
 bool all_of(std::string_view text, bool (*ok)(char)) {
 	for (const char c : text)

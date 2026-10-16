@@ -18,13 +18,6 @@ namespace opennova::novaworld_server {
 
 namespace {
 
-void text_or_null(crow::json::wvalue &out, const char *key, const std::string &text) {
-	if (text.empty())
-		out[key] = nullptr;
-	else
-		out[key] = text;
-}
-
 crow::json::wvalue key_json(const cdkeys::CdKey &k) {
 	crow::json::wvalue out;
 	out["id"] = k.id;

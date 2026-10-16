@@ -1,4 +1,5 @@
 #include "server_config.h"
+#include "text_util.h"
 
 #include <base/io/strutil.h>
 
@@ -44,19 +45,6 @@ bool getenv_bool(const char *name, bool fallback) {
 }
 
 // A comma-separated list, each entry trimmed, empty entries dropped.
-std::vector<std::string> split_list(std::string_view list) {
-	std::vector<std::string> out;
-	size_t pos = 0;
-	while (pos <= list.size()) {
-		const auto comma = list.find(',', pos);
-		const auto end = comma == std::string_view::npos ? list.size() : comma;
-		const auto entry = strutil::trim_view(list.substr(pos, end - pos));
-		if (!entry.empty()) out.emplace_back(entry);
-		pos = end + 1;
-	}
-	return out;
-}
-
 } // namespace
 
 ServerConfig ServerConfig::from_env() {

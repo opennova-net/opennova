@@ -10,14 +10,6 @@ namespace {
 
 bool is_hex(char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'); }
 
-std::string lower(std::string_view text) {
-	std::string out(text);
-	for (char &c : out) {
-		if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-	}
-	return out;
-}
-
 // The string member `key` of `object`; "" when absent or not a string.
 std::string text_of(const io::JsonValue &object, const char *key) {
 	const io::JsonValue *v = object.get(key);
@@ -55,7 +47,7 @@ SignatureCheck verify_stripe_signature(std::string_view header, std::string_view
 			for (const char c : value) {
 				if (!is_hex(c)) return SignatureCheck::Malformed;
 			}
-			signatures.push_back(lower(value));
+			signatures.push_back(strutil::to_lower(value));
 		}
 		// v0 (Stripe's test-only scheme) and any other key: ignored.
 	}

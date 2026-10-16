@@ -23,6 +23,20 @@ inline crow::response json_reply(int code, const crow::json::wvalue &body) {
 	return res;
 }
 
+// A reply no cache may keep.
+inline crow::response no_store(crow::response res) {
+	res.set_header("Cache-Control", "no-store");
+	return res;
+}
+
+// `key` is `text`, or null when `text` is empty.
+inline void text_or_null(crow::json::wvalue &out, const char *key, const std::string &text) {
+	if (text.empty())
+		out[key] = nullptr;
+	else
+		out[key] = text;
+}
+
 // {"error": <code>}, with "message" beside it when one is given.
 inline crow::response json_error(int code, const char *error, const std::string &message = {}) {
 	crow::json::wvalue body;

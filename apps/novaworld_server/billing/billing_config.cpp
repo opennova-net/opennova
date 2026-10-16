@@ -1,6 +1,7 @@
 #include "billing_config.h"
 
 #include "loggable.h"
+#include "text_util.h"
 
 #include <base/io/strutil.h>
 
@@ -15,10 +16,6 @@ namespace {
 constexpr int kReconcileMin = 5;
 constexpr int kReconcileMax = 7 * 24 * 60;
 
-bool starts_with(std::string_view text, std::string_view head) { return text.substr(0, head.size()) == head; }
-
-bool is_alnum(char c) { return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'); }
-
 // `text` is `head` and then one or more letters and digits.
 bool is_token(std::string_view text, std::string_view head) {
 	if (!starts_with(text, head) || text.size() == head.size()) return false;
@@ -32,20 +29,6 @@ bool is_unset(const std::vector<std::string> &list) {
 }
 
 bool is_price(std::string_view text) { return is_token(text, "price_"); }
-
-// A comma-separated list, each entry trimmed, empty entries dropped.
-std::vector<std::string> split_list(std::string_view list) {
-	std::vector<std::string> out;
-	size_t pos = 0;
-	while (pos <= list.size()) {
-		const size_t comma = list.find(',', pos);
-		const size_t end = comma == std::string_view::npos ? list.size() : comma;
-		const std::string_view entry = strutil::trim_view(list.substr(pos, end - pos));
-		if (!entry.empty()) out.emplace_back(entry);
-		pos = end + 1;
-	}
-	return out;
-}
 
 std::string tier_variable(int tier) { return "STRIPE_PRICE_TIER" + std::to_string(tier); }
 

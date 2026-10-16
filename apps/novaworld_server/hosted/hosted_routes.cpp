@@ -21,13 +21,6 @@ namespace opennova::novaworld_server::hosted {
 
 namespace {
 
-void text_or_null(crow::json::wvalue &out, const char *key, const std::string &text) {
-	if (text.empty())
-		out[key] = nullptr;
-	else
-		out[key] = text;
-}
-
 // A JSON list of strings.
 std::vector<crow::json::wvalue> text_list(const std::vector<std::string> &texts) {
 	std::vector<crow::json::wvalue> out;
