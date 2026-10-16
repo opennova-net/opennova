@@ -83,9 +83,10 @@ MissionChoices param_choices(ParamKind kind);
 
 // A trigger's sub-types by its main type, and an action's by its type, by name: the values the
 // evaluator and the dispatcher have a case for [orig: the jump tables of
-// EventTrigger_EvaluateCondition @0x453620 and of Entity_ApplyCommand @0x43ab60; the names dfx2med's
-// Med_TriggerConditionName @0x446330 and Med_ActionSubTypeName @0x445ee0], none for a type whose
-// sub-type selects nothing (its sub-type is 0, "Null").
+// EventTrigger_EvaluateCondition @0x453620 and of Entity_ApplyCommand @0x43ab60], named as
+// dfx2med names them [orig: dfx2med.exe Med_TriggerConditionName @0x446330;
+// Med_ActionSubTypeName @0x445ee0], none for a type whose sub-type selects nothing (its sub-type
+// is 0, "Null").
 MissionChoices trigger_sub_types(int32_t main_type);
 MissionChoices action_sub_types(int32_t action_type);
 // Whether the evaluator reads a trigger's sub-type under its main type: every case but Event's, which
@@ -98,7 +99,7 @@ bool trigger_reads_sub_type(int32_t main_type);
 inline constexpr int32_t kFirstPathCommand = 123, kLastPathCommand = 127;
 // The commands whose rider names an entity by its SSN (the wp_number beside an entity's waypoint_id,
 // a Redirect action's third parameter): 123..125 [orig: Entity_UpdateInfantryAI @0x4ba9ad boards the
-// SSN; dfx2med section 8.2].
+// SSN]; dfx2med section 8.2.
 inline constexpr int32_t kLastEntityPathCommand = 125;
 constexpr bool path_command_names_entity(int64_t path) {
 	return path >= kFirstPathCommand && path <= kLastEntityPathCommand;

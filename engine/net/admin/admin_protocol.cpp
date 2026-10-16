@@ -91,7 +91,8 @@ CipherWords cipher_words(const uint8_t *key, size_t key_len) {
 
 // The challenge string keys the cipher; the server decrypts the whole payload with the inverse
 // (Crypto_DecryptBuffer @0x4375b0), so the zero byte after the fields is encrypted too.
-// [orig: Crypto_EncryptBuffer @0x437510; RAT.exe @0x4012d2..0x401361 (65 bytes, zero-filled)]
+// [orig: Crypto_EncryptBuffer @0x437510] [orig: RAT.exe @0x4012d2..0x401361 (65 bytes,
+// zero-filled)]
 std::array<uint8_t, ADMIN_LOGIN_BYTES> admin_encode_login(const std::vector<uint8_t> &challenge,
                                                           std::string_view user, std::string_view password) {
 	std::array<uint8_t, ADMIN_LOGIN_BYTES> buf{};
@@ -143,8 +144,9 @@ void admin_decrypt_buffer(uint8_t *buf, size_t size, const uint8_t *key, size_t 
 	for (size_t i = 0; i < size; ++i) buf[i] = static_cast<uint8_t>(buf[i] - key[i % key_len]);
 }
 
-// [orig: RAT.exe @0x401492..0x4014f3 (strlen + 1 bytes after the header);
-//  ProcessClientData @0x406f20..0x406f27 (an authenticated packet must end in its NUL)]
+// [orig: RAT.exe @0x401492..0x4014f3 (strlen + 1 bytes after the header)]
+// [orig: CAdminServer_ProcessClientData @0x406f20..0x406f27 (an authenticated packet must end
+//  in its NUL)]
 std::vector<uint8_t> admin_encode_command(std::string_view command) {
 	std::vector<uint8_t> out(command.begin(), command.end());
 	out.push_back(0);

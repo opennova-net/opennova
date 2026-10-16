@@ -64,8 +64,8 @@ bool is_fingerprint(std::string_view text);
 // and the character shifted DOWN within its class (a-z, A-Z, 0-9) by the step
 // modulo the class's size; any other byte is left alone and takes no step. It
 // stops at a NUL as the original's string walk does.
-// [orig: NapiNP_EncryptStringWithPRNG @ 0x618cc0, NapiNP_EncryptCharWithCipher @ 0x618690;
-//  the twins @0x700df0 and @0x7007c0 (dfx2.exe), the same code]
+// [orig: NapiNP_EncryptStringWithPRNG @ 0x618cc0, NapiNP_EncryptCharWithCipher @ 0x618690];
+// [orig: the twins @0x700df0 and @0x7007c0 (dfx2.exe), the same code]
 void mix_down(std::string &text, std::string_view fingerprint);
 // Its inverse, the issuer's direction: the same steps, each character shifted
 // UP. mix_down(mix_up(x)) == x for any x and fingerprint.

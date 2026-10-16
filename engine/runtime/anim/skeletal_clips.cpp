@@ -510,7 +510,7 @@ void SkeletalClips::eval_pose_blended(const std::string &p_source_key,
 	// that does not sample (the bind pose stands in) carries none. Both
 	// translated, retail weights channel B's term by a read past its three-float
 	// row (12 * channel A's bone count bytes on), stack bytes; the origin lerp
-	// above keeps the evident intent (D-ANIM-X2).
+	// above keeps the evident intent (D-ANIM-6).
 	// [orig: AnimChannel_BlendTwoChannels @0x410740 — the flag tests @0x4107A2..0x4107A8
 	//  (channel A) / @0x4107AE (channel B), the one-translated arms @0x41099B..0x4109E1 (channel A) and
 	//  @0x410B12..0x410B58 (channel B); both translated, the over-read `lea ecx,

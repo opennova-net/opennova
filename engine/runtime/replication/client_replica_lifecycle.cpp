@@ -229,7 +229,7 @@ void ClientReplicaPipeline::apply_team_assign(uint16_t handle, uint8_t team) {
 	// Not the 0xFFFF sentinel, and the pool nibble must address one of the five
 	// entity pools; the slot-capacity gate is the callers' (the 0x50 and 0x51
 	// folds), and so is the authority test (the 0x51 fold's; the 0x50 fold stores
-	// the Team on the host view too, a ledgered divergence).
+	// the Team on the host view too, D-NET-736).
 	const world::EntityHandle h{handle};
 	if (!h.valid() || h.pool() >= world::kEntityPoolCount) return;
 	ClientEntityState &entity = state_.upsert(handle);

@@ -261,9 +261,9 @@ constexpr FileKindFacts kRows[] = {
 	// HLSLEffect_InitAndLoadAll @ 0x5b0080, the slots 0..14 @ 0x5b0141, through
 	// HLSLEffect_LoadAllFromPFFArchive @ 0x5afed0], where it is given no override folder, which
 	// would be read alone [orig: @ 0x5b0112..0x5b0118]; both its callers give none [orig:
-	// Render_InitAllSubsystems @ 0x58642f; sub_586480 @ 0x5864a6]. So any slot serves one; retail
-	// packs its 44 in localres.pff (JO:CA, measured 2026-10-09: none in resource.pff, language.pff or
-	// jox01's), the slot that places them.
+	// Render_InitAllSubsystems @ 0x58642f; Render_ReloadEffectsForTexFilter @ 0x5864a6]. So any
+	// slot serves one; retail packs its 44 in localres.pff (JO:CA, measured 2026-10-09: none in
+	// resource.pff, language.pff or jox01's), the slot that places them.
 	Kind(FileKind::Shader, ArchiveSlot::Localres).extensions(kShader).row,
 	// Read from the install's folder before any archive mounts (game.cfg, assets.cd:
 	// docs/required-resources.md); gt.ssc, read loose first from the expansion's folder, is the

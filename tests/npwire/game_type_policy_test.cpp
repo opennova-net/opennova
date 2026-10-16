@@ -4,7 +4,7 @@
 // single-select. The values were previously pinned by a GUT test against
 // GDScript twins; the engine home is the truth now.
 // [orig: AI_GetTaskTypeFromFlags @ 0x40DAE0; EntitySlot_LookupAndPackEntry
-//  @ 0x57AD40; Config_SetDefaults; dfx2med sub_402770]
+//  @ 0x57AD40; Config_SetDefaults] [orig: dfx2med.exe sub_402770]
 
 #include <formats/mission/bms.h>
 #include <runtime/inmatch/game_config.h>

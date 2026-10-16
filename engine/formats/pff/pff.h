@@ -130,7 +130,7 @@ inline constexpr uint32_t PFF_WRITER_VERSION = 2;
    reads the header and the directory). Every JO:CA archive ends with c0a8a939 00000000 'KING'
    (192.168.169.57, a private address, presumably the packing machine's); OpenNova writes that
    first word, never its own machine's address, so an archive is the same bytes on every machine
-   and a JO:CA archive written again is its own bytes (D-VFS-X1). The second word is the packer's:
+   and a JO:CA archive written again is its own bytes (D-VFS-15). The second word is the packer's:
    an archive written again or edited keeps its earlier footer's (pff_footer_kept_word), a new one
    writes 0. */
 inline constexpr int PFF_FOOTER_SIZE = 12;

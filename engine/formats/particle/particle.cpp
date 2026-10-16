@@ -62,7 +62,8 @@ bool icontains(std::string_view haystack, std::string_view needle) noexcept {
 	return strutil::ifind(haystack, needle) != std::string_view::npos;
 }
 
-// [orig: g_ParticleFlagTable @ 0x5ba500 (ParticleEdit_v1_1.exe, cnt dword_5BC2E8=29); JO @ 0x846A18]
+// [orig: g_ParticleFlagTable @ 0x5ba500 (ParticleEdit_v1_1.exe, cnt dword_5BC2E8=29)]; JO's
+// [orig: @ 0x846A18]
 // 29 entries in engine table order (the write order). HAZE (idx 9), BELOWH20
 // (idx 27), ABOVEH20 (idx 28) added per the ParticleEdit cross-witness grill
 // (D5) — fixes the HAZE round-trip drop (fire.ptl) and the GLOBALWIND..
@@ -123,7 +124,8 @@ std::uint32_t parse_flag_table(std::string_view raw,
 template <std::size_t N>
 std::string format_flag_table(std::uint32_t bits,
 		const std::array<std::pair<const char *, std::uint32_t>, N> &entries) {
-	// [orig: FlagTable_BuildString @ 0x428fe0 (ParticleEdit_v1_1.exe); JO FlagTable_BuildString @ 0x5df9c0 (ex sub_5DF9C0)]
+	// [orig: FlagTable_BuildString @ 0x428fe0 (ParticleEdit_v1_1.exe)]; JO's
+	// [orig: FlagTable_BuildString @ 0x5df9c0 (ex sub_5DF9C0)]
 	// DIVERGENCE D1 (docs/particles/ptl-format-re.md §9): the engine seeds the
 	// buffer with a LEADING space (*(WORD*)buf = 0x20) before appending names, so
 	// the value is " NAME1 NAME2 " and a line reads "flags\t=  NAME1 NAME2 ;" (two
@@ -165,7 +167,8 @@ const char *blend_mode_name(BlendMode mode) noexcept {
 }
 
 BlendMode parse_blend_mode(std::string_view raw) noexcept {
-	// [orig: ParseBlendMode @ 0x42c080 (ParticleEdit_v1_1.exe); JO CParticleDefEntry_ParseBlendMode @ 0x5e29f0]
+	// [orig: ParseBlendMode @ 0x42c080 (ParticleEdit_v1_1.exe)]; JO's
+	// [orig: CParticleDefEntry_ParseBlendMode @ 0x5e29f0]
 	// ParticleEdit confirms the chained-strstr order exactly (no distort case;
 	// distort=7 is a Jointops-era addition). CParticleDefEntry_ParseBlendMode uses chained strstr — first
 	// match wins. Order matters because "bump" is a substring of "bumpadd";

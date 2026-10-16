@@ -46,8 +46,8 @@ inline constexpr HudFixedTexture kHudFixedTextures[] = {
 	{ kHudTexNetLinkIcon, "neticon1.tga" },
 	{ kHudTexNetIcon, "neticon2.tga" },
 	{ kHudTexNetNovaWorldIcon, "neticon3.tga" },
-	// The tip panel [orig: CTipSystem_Init @0x5b6970, border3 @0x5b698c, k_tip @0x5b69ae, g_tip
-	// @0x5b69b6].
+	// The tip panel [orig: CTipSystem_Init @0x5b6970, border3.tga @0x5b698c, k_tip.tga @0x5b69ae,
+	// g_tip.tga @0x5b69b6].
 	{ kHudTexTipBox, "border3.tga" },
 	{ kHudTexTipKeyboard, "k_tip.tga" },
 	{ kHudTexTipGameplay, "g_tip.tga" },

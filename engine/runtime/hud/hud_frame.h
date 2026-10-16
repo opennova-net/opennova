@@ -127,8 +127,8 @@ enum HudTexture : int32_t {
 	kHudTexSlotBarMoreAv,
 	// The tip panel ("MrClippy"): its box atlas border3.tga (no second stage)
 	// and the two icons, keyboard k_tip.tga and gameplay g_tip.tga
-	// [orig: CTipSystem_Init @0x5b6970 — the panel slot @0x5b6978, border3
-	//  @0x5b698c, k_tip @0x5b69ae, g_tip @0x5b69b6].
+	// [orig: CTipSystem_Init @0x5b6970 — the panel slot @0x5b6978, border3.tga
+	//  @0x5b698c, k_tip.tga @0x5b69ae, g_tip.tga @0x5b69b6].
 	kHudTexTipBox,
 	kHudTexTipKeyboard,
 	kHudTexTipGameplay,

@@ -11,12 +11,12 @@
 // samples the exact same implementation the renderer/editor do.
 //
 // [orig: jodemo.exe Terrain_SampleHeightBilinear @0x5C6770 +
-// Terrain_GetFoliageMapValue @0x5C65E0 world->source mapping (docs §5.2/§4.4.4).
-// Jointops entity grounding goes through Terrain_RaycastHeightmapHiRes_0 @0x60e710,
+// Terrain_GetFoliageMapValue @0x5C65E0 world->source mapping (docs §5.2/§4.4.4)].
+// Jointops entity grounding goes through [orig: Terrain_RaycastHeightmapHiRes_0 @0x60e710],
 // a hi-res lo-res-then-bisect DOWN-raycast that writes the ground height back into
 // the probe position's Z. Its near-vertical result equals this bilinear column
 // height; the sub-cell refinement along the ray is a tracked deviation, faithful
-// enough for terrain-following grounding.]
+// enough for terrain-following grounding.
 
 #include <cstdint>
 

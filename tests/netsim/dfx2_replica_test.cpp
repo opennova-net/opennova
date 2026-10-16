@@ -11,7 +11,8 @@
 //   DFX2-10  S2C 0x66: a DFX2 joiner keeps the 0 and 3 (armory-only) entries, JO's the 0 and 2.
 //
 // [orig: NetPacket_WritePlayerState @0x4ffc2d..0x4ffc99; NapiNPClientMsg_0x00A @0x430361;
-//  NapiNPClientMsg_HandleWeaponRestrictions @0x42d51c] [orig: NetPacket_WritePlayerState
+//  NapiNPClientMsg_HandleWeaponRestrictions @0x42d51c]
+// [orig: NetPacket_WritePlayerState
 //  @0x4fcd84..0x4fcd9b, NapiNPClientMsg_0x00A @0x431dee..0x431e62, NapiNPClientMsg_HandleWeaponRestrictions
 //  @0x42f2ac (dfx2.exe)]
 

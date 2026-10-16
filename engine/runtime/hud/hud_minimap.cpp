@@ -115,7 +115,7 @@ constexpr int kIconStripCells = 30;
 constexpr int kWpIndicatorCells = 4;
 // Every pointer drawer receives a 10-design-pixel span after Y-axis viewport
 // scaling [orig: renderFlags = 10 through Viewport_ScaleToVirtualCoords
-//  @0x5a60dd/@0x5a64c5; the span arg @0x5a64df/@0x5a7885].
+//  (HUD_DrawMapOverlay @0x5a60dd/@0x5a64c5); the span arg @0x5a64df/@0x5a7885].
 constexpr int kPointerSpanDesignPx = 10;
 
 // Base-26 grid column letters, A..Z then AA..ZZ, negatives folding back

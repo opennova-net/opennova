@@ -631,9 +631,10 @@ void ClientSession::on_server_goodbye(const std::vector<uint8_t> &body,
 // session's disconnect callback runs, and the reconnect schedule restarts (the tail acts on it
 // only while the hosting/playing word is set).
 // [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 — ++DCNT under conn_flag0
-//  @0x6253c9..0x6253dc; the state-5 burst @0x62549e..0x6254d3 then conn+0xC4 =
-//  CNapiGameSession_OnDisconnect @0x6254d5..0x6254e7; conn_flag1 and the client's
-//  gap/next restart @0x6254f7..0x625525; conn_flag0 cleared @0x625535]
+//  @0x6253c9..0x6253dc; the state-5 burst @0x62549e..0x6254d3 then the conn+0xC4
+//  callback (CNapiGameSession_OnDisconnect @0x4CFAA0) called @0x6254d5..0x6254e7;
+//  conn_flag1 and the client's gap/next restart @0x6254f7..0x625525; conn_flag0 cleared
+//  @0x625535]
 void ClientSession::teardown_connection(std::vector<std::vector<uint8_t>> &out) {
 	const bool connected = receive_clock_armed_;
 	if (connected) {

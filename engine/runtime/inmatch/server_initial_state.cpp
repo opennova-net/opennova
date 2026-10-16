@@ -270,7 +270,7 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 		io::append_u16_le(b, static_cast<uint16_t>(entry->node));
 		io::append_u16_le(b, static_cast<uint16_t>(entry->name_id));
 		// The marker's done byte: a DFX2 joiner stores it, JO's skips it.
-		// [orig: `mov al, [eax+218h]` @0x502f5f; @0x50008f (dfx2.exe)]
+		// [orig: `mov al, [eax+218h]` @0x502f5f] [orig: @0x50008f (dfx2.exe)]
 		b.push_back(entry->done ? 1u : 0u);
 	}
 	// LOCATION NAMES [orig: NetPacket_WriteWorldStateLoad0x0F @0x502D10 tail — u16 count +

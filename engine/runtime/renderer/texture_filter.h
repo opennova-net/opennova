@@ -74,8 +74,8 @@ struct StageSampler {
 // The texture creation flags the stage decode reads (GTexture +0x18).
 // [orig: CGfxShader_ApplyTextureStages @ 0x680856..0x680870 (bit 1 clear =
 //  LINEAR min/mag into g_GfxStageLinearMinMag, bit 3 into
-//  g_GfxStageDeviceFilter, bit 0 into g_GfxStageClamp); GTexture_BindToStage
-//  @ 0x6845A9..0x6845C8 the same]
+//  g_GfxStageDeviceFilter, bit 0 into g_GfxStageClamp); the stage bind
+//  sub_684540 @ 0x6845A9..0x6845C8 the same]
 inline constexpr uint32_t kTextureFlagClamp = 0x1;
 inline constexpr uint32_t kTextureFlagPointMinMag = 0x2;
 inline constexpr uint32_t kTextureFlagDeviceFilter = 0x8;

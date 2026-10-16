@@ -265,7 +265,7 @@ int main_impl() {
 						state.waypoints[0].slot_id == 0x000C &&
 						state.waypoints[0].name_id == 0 &&
 						// The marker's done byte (entity+536), which a DFX2
-						// joiner stores [orig: @0x502f5f; @0x50008f (dfx2.exe)].
+						// joiner stores [orig: @0x502f5f] [orig: @0x50008f (dfx2.exe)].
 						state.waypoints[0].done == 1,
 				"0x0F carries 00TRg's blue-route waypoint record")) {
 			return 1;

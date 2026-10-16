@@ -61,8 +61,8 @@ void race_anchor(const MapCompile &c, float cx, float cy, float dir_x,
 
 // ONE TSDicon cell centred on the tip, rotated along the bearing (cell 7's
 // chevron points up, so +90 degrees lays it along (C, S)); the viewport rect
-// crops it [orig: the quad @0x5994BD..0x599539 -> Render_DrawIconStripCell_Debug
-// @0x5994BF].
+// crops it [orig: HUD_DrawMapTargetPointer, the quad @0x5994BD..0x599539 and its
+// Render_DrawIconStripCell_Debug call @0x59953D].
 void emit_tip_cell(MapCompile &c, float x, float y, float half, float dir_x,
 		float dir_y, uint8_t cell, uint32_t argb) {
 	HudMapSprite tip;

@@ -489,9 +489,10 @@ ChatSink chat_channel_sink(int channel) {
 
 uint32_t chat_channel_color(int channel) {
 	// [orig: the per-case colour pushes — 1/4/5 g_HUDColors.palette[3]
-	//  @0x42ba5c; 9 dword_24C184C @0x42b9a5; 2 dword_24C183C @0x42b9c2;
-	//  11 dword_24C1860 @0x42ba26; 3 `color` @0x42ba43; 7 dword_24C1854
-	//  @0x42baa2; 12 dword_24C1850 @0x42baea; 0/6/10/13/14 and the default
+	//  @0x42ba5c; 9 g_HUDColors.palette[5] @0x42b9a5; 2 g_HUDColors.palette[1]
+	//  @0x42b9c2; 11 g_HUDColors.auxiliaryColors[4] @0x42ba26; 3 `color` @0x42ba43;
+	//  7 g_HUDColors.auxiliaryColors[1] @0x42baa2; 12 g_HUDColors.auxiliaryColors[0]
+	//  @0x42baea; 0/6/10/13/14 and the default
 	//  g_HUDColors[0] @0x42bb0c/@0x42ba86/@0x42b9de/@0x42bb01]
 	switch (channel) {
 		case 1: case 4: case 5:

@@ -50,7 +50,7 @@ inline constexpr size_t kFlatTlvEnd = static_cast<size_t>(-1);
 // - a value that runs past the end keeps its declared size and its value
 //   pointer (`present` counts its bytes inside the body), and the cursor stays
 //   at the value's start, so the next read takes a name from the value's bytes.
-// [orig: NapiNP_ReadTLV @0x61DBE0 - the tag defaulted to g_EmptyStr
+// [orig: NapiNP_ReadTLV @0x61DBE0 - the tag defaulted to g_EmptyStr (off_849F0C)
 //  @0x61DC1E..0x61DC24 and kept for an empty name @0x61DCB9..0x61DCBE, the name
 //  copy's end bound @0x61DC76..0x61DC79, the cursor past the name clamped to the
 //  end @0x61DCAA..0x61DCB6, the tag @0x61DCC4, the cut size reading 0

@@ -97,9 +97,10 @@ void append_rle_row(const uint8_t *row, int length, std::vector<uint8_t> &out) {
 }
 
 // JO's mission editor's row coder (PcxCoding::Med): the shipped coding but for the row's last run, which it
-// writes as a count pair whatever it holds [orig: JOTACmed sub_45E8A0 @ 0x45E8A0: a full run of 63 written
-// as 0xFF and the byte, the current byte opening the next run (@ 0x45E8EB..0x45E913); a run of one below
-// 0xC0 alone, any other a pair (@ 0x45E946..0x45E980); the tail pair @ 0x45E9BF..0x45E9E7].
+// writes as a count pair whatever it holds [orig: JOTACmed.exe sub_45E8A0 @ 0x45E8A0: a full run of
+// 63 written as 0xFF and the byte, the current byte opening the next run (@ 0x45E8EB..0x45E913); a
+// run of one below 0xC0 alone, any other a pair (@ 0x45E946..0x45E980); the tail pair
+// @ 0x45E9BF..0x45E9E7].
 void append_med_rle_row(const uint8_t *row, int length, std::vector<uint8_t> &out) {
 	if (length <= 0) return;
 	uint8_t value = row[0];
@@ -196,8 +197,9 @@ PcxEgaPalette pcx_ega_filled(uint8_t value) {
 }
 
 PcxIndexedForm pcx_med_form() {
-	// [orig: JOTACmed sub_45EB60 @ 0x45EBA0 (the 128 bytes zeroed), 0x45EBDA (0A 05), 0x45EBE4 (01 08),
-	//  0x45EBEE (one plane), 0x45EBF3 (palette info 1), 0x45EBFF (the bytes a line)]
+	// [orig: JOTACmed.exe sub_45EB60 @ 0x45EBA0 (the 128 bytes zeroed), 0x45EBDA (0A 05),
+	//  0x45EBE4 (01 08), 0x45EBEE (one plane), 0x45EBF3 (palette info 1), 0x45EBFF (the bytes a
+	//  line)]
 	PcxIndexedForm form;
 	form.hdpi = 0;
 	form.vdpi = 0;

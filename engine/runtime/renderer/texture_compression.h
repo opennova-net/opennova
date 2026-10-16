@@ -8,7 +8,8 @@
 // [orig: Config_ParseSettingsLine @ 0x551268 (game.cfg +0x13C, never clamped);
 //  apply_session_settings_to_globals @ 0x551565..0x551574 (the copy's +0x30,
 //  g_SessionTexCompressionLevel @ 0x24D2070); Options_HandleAcceptOrBack @ 0x55A957..0x55A972
-//  (the Accept writes g_CfgTexCompressionLevel @ 0x25507F4 only)]
+//  (the Accept writes g_GameConfigState.graphicsQuality_10C.textureCompressionLevel_30
+//  @ 0x25507F4 only)]
 //
 // A family's flag word is a texture creation word (renderer/texture_dxt.h
 // select_texture_dxt_format): 0x200 asks for DXT5, 0x100 for DXT1, and 0x400000

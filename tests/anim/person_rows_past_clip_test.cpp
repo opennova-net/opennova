@@ -13,7 +13,7 @@
      5. load_rest: the model table at rest with no clip, every row's deformation identity;
      6. the cross-fade's translation: one translated clip's rows go in whole, unweighted, from the fade's
         first tick [orig: AnimChannel_BlendTwoChannels @0x410740]; two translated clips' rows blend by the
-        weight (retail's B term is an over-read, D-ANIM-X2). */
+        weight (retail's B term is an over-read, D-ANIM-6). */
 
 #include <array>
 #include <cmath>
@@ -230,7 +230,7 @@ int main() {
 	// translated walk at +1.0 Y and an untranslated idle. Exactly one translated channel puts its
 	// rows in whole and unweighted [orig: AnimChannel_BlendTwoChannels @0x41099B..0x4109E1,
 	// @0x410B12..0x410B58]; both translated, the port's rows blend by the weight, where retail's
-	// channel-B term reads past its row (@0x410D28, D-ANIM-X2).
+	// channel-B term reads past its row (@0x410D28, D-ANIM-6).
 	{
 		MemoryClip bind(kClipBones), walk(kClipBones), walk2(kClipBones), still(kClipBones);
 		std::vector<std::array<float, 3>> zero_rows(3 * kClipBones, std::array<float, 3>{0.0f, 0.0f, 0.0f});
@@ -291,7 +291,7 @@ int main() {
 			fade.eval_pose_blended("anim_idle", 0.0, "anim_walk", 0.0, 0.0f, blended);
 			TEST_EXPECT(blended.size() == walking.size() &&
 			            std::fabs(blended[0].origin.y - walking[0].origin.y) < 1e-4f);
-			// Two translated walks blend their rows by the weight (the port's stand-in, D-ANIM-X2).
+			// Two translated walks blend their rows by the weight (the port's stand-in, D-ANIM-6).
 			fade.eval_pose_blended("anim_walk", 0.0, "anim_walk2", 0.0, 0.25f, blended);
 			TEST_EXPECT(blended.size() == walking.size() &&
 			            std::fabs(blended[0].origin.y -

@@ -41,7 +41,7 @@ constexpr uint64_t kClientHelloRetryMilliseconds = 1000;
 //  @0x62648a and the last send +0x5E4 = now - 2000 @0x626499; CNapiNPConnection_PumpStateMachine
 //  case 3: `now - start > +0x5B4` @0x62951c -> +0x5F0 = 2 @0x629525, state 4 @0x629564; else
 //  `now - last > +0x5B0` @0x629588 -> last = now @0x62958f, SendClientJoin @0x629595;
-//  {2, "NCC002"} in g_MPNetConnectCodes @0x82ba60, read by
+//  {2, "NCC002"} in g_MPNetConnectCodes @0x82ba58, its row @0x82ba60, read by
 //  CNapiNetwork_GetDisconnectReasonString @0x4c703d]
 constexpr uint64_t kClientJoinRetryMilliseconds = 2000;
 constexpr uint64_t kClientJoinTimeoutMilliseconds = 30000;

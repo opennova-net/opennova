@@ -208,7 +208,7 @@ bool TilDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shar
 		issues.push_back(std::move(issue));
 	} else {
 		// What a save writes as MED does and the game never places by [orig: JOTACmed.exe MapTileStore_Serialize @
-		// 0x433F44..0x433F50; Terrain_LoadTileInfoFile @ 0x60A7E6..0x60A7EF].
+		// 0x433F44..0x433F50] [orig: Terrain_LoadTileInfoFile @ 0x60A7E6..0x60A7EF].
 		const uint32_t meds = uint32_t(16 + 12 * read.entries.size());
 		if (facts.size_word != meds || facts.word12 != 0)
 			issues.push_back({false, 0, std::string(), std::string(),

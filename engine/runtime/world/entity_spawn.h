@@ -41,10 +41,10 @@ void initialize_organic_ai(World &world, Entity &e);
 
 // What the organic init reads to choose the body state a person starts in: its definition
 // callback, which both person classes run (the org0 and org1 rows of the event-callback table
-// name it as their second function) [orig: g_EntityClassEventCallbackTable @0x813018 / @0x813030
-// -> Entity_InitOrganicAI @0x4BFCC0]. The world fills it from the live entity; the editor's
-// mission view fills it from a placed record and its definition (docs/world/world-wac-ai-re.md
-// section 41).
+// name it as their second function) [orig: g_EntityClassEventCallbackTable @0x813000, its rows
+// @0x813018 / @0x813030 -> Entity_InitOrganicAI @0x4BFCC0]. The world fills it from the live
+// entity; the editor's mission view fills it from a placed record and its definition
+// (docs/world/world-wac-ai-re.md section 41).
 struct OrganicSpawnFacts {
     // The AI slot's has-route word (+0x8C) and its route channel (+0x94): set from the record's
     // waypoint_id when it is nonzero [orig: Entity_SpawnFromBMSRecord, slot+140/+148]. A body
@@ -64,8 +64,8 @@ struct OrganicSpawnFacts {
 
 // Whether an item's ai_function class runs that init: the event-callback table's org0 and org1
 // rows (found by the table walk's whole-tag stricmp) name Entity_InitOrganicAI as their second
-// function, and no other row does [orig: g_EntityClassEventCallbackTable @0x813018 / @0x813030;
-// the lookup Entity_LookupRenderCallbacks @0x407dc0, stricmp @0x407de2].
+// function, and no other row does [orig: g_EntityClassEventCallbackTable @0x813000, its rows
+// @0x813018 / @0x813030; the lookup Entity_LookupRenderCallbacks @0x407dc0, stricmp @0x407de2].
 bool organic_init_class(const char *ai_function);
 
 // The facts a placed record hands the init through its spawn, before any mount, parent or rotor's

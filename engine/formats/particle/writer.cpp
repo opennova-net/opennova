@@ -32,7 +32,8 @@ void write_vec3(std::ostream &out, const Vec3 &v) {
 	out << format_float(v.x) << ", " << format_float(v.y) << ", " << format_float(v.z);
 }
 
-// [orig: CurveRef_ModifierSuffix @ 0x42bf60 (ParticleEdit_v1_1.exe); JO suffix writer in CParticleDef_SaveToFile @ 0x5e4d70]
+// [orig: CurveRef_ModifierSuffix @ 0x42bf60 (ParticleEdit_v1_1.exe)]; JO's suffix writer in
+// [orig: CParticleDef_SaveToFile @ 0x5e4d70]
 // The engine writer maps modifier bit 0x01 -> " invert", bit 0x02 ->
 // " reverse", and both -> " invert reverse". Its parser spells the first token
 // "inverse" instead; our parser accepts both spellings so retail writer output
@@ -130,7 +131,8 @@ void write_graphic(std::ostream &out, const GraphicLayer &layer, int slot) {
 }
 
 void write_particle(std::ostream &out, const ParticleDef &p) {
-	// [orig: ParticleDef_Write @ 0x42ec20 (ParticleEdit_v1_1.exe); JO CParticleDef_SaveToFile @ 0x5e4d70]
+	// [orig: ParticleDef_Write @ 0x42ec20 (ParticleEdit_v1_1.exe)]; JO's
+	// [orig: CParticleDef_SaveToFile @ 0x5e4d70]
 	// Field order/whitespace/duplicate emit_dur/unconditional lod/BGR colors all
 	// byte-match ParticleEdit's fprintf format strings — exact field ordering and whitespace.
 	out << NL << "[particledef]" << NL << "{" << NL;

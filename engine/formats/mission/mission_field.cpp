@@ -701,8 +701,9 @@ using A = bms::AreaTrigger;
 
 // [orig: the bounds consumers Entity_IsTeamInTriggerBounds @0x43c75c, Entity_IsBmsRefInTriggerBounds
 // @0x43e53b, Entity_IsLocalPlayerOutOfBounds @0x439d40 read the bounds interleaved per axis and the @28
-// flags; dfx2med's AREA_TRIGGERS dialog Med_AreaTriggerDialogProc @0x40f400 the zone id 1..99 at @0 and
-// the MISSION_AREA (bit0) and constrain-Z (bit1) checkboxes.] The flags word keeps its other bits.
+// flags] [orig: dfx2med.exe Med_AreaTriggerDialogProc @0x40f400, the AREA_TRIGGERS dialog: the zone
+// id 1..99 at @0 and the MISSION_AREA (bit0) and constrain-Z (bit1) checkboxes.] The flags word keeps
+// its other bits.
 const MissionField kAreaFields[] = {
 	{MissionRecord::Area, "id", MissionFieldType::Integer, 0, kI32Min, kI32Max, nullptr, 0, false,
 	 get_number<A, int32_t, &A::id>, set_cast<A, int32_t, &A::id>},

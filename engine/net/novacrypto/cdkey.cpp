@@ -20,7 +20,7 @@ constexpr size_t kDecodeRoom = 0x800;
 
 // The PRNG the mix steps, {state, multiplier, counter}: the state seeded with
 // the fingerprint's key seed, the multiplier NWU's.
-// [orig: NapiPRNG_Init @ 0x62e430; @0x716560 (dfx2.exe)]
+// [orig: NapiPRNG_Init @ 0x62e430] [orig: @0x716560 (dfx2.exe)]
 struct Prng {
 	uint32_t state = 0;
 	uint32_t multiplier = 0;
@@ -70,7 +70,7 @@ CharClass class_of(char c) {
 // One character of the mix. Down is the original's: the position less the
 // step modulo the size, the size added back when that went below zero. Up
 // undoes it.
-// [orig: NapiNP_EncryptCharWithCipher @ 0x618690; @0x7007ff..0x700807 (dfx2.exe), the
+// [orig: NapiNP_EncryptCharWithCipher @ 0x618690] [orig: @0x7007ff..0x700807 (dfx2.exe), the
 //  `ch - first + size * (state / size) - state` form]
 void shift(char &c, Prng &prng, bool up) {
 	const CharClass cls = class_of(c);
@@ -87,7 +87,7 @@ void shift(char &c, Prng &prng, bool up) {
 
 // The string walk: one PRNG for the whole string, each character in turn up
 // to the first NUL.
-// [orig: NapiNP_EncryptStringWithPRNG @ 0x618cc0; @0x700e13..0x700e29 (dfx2.exe)]
+// [orig: NapiNP_EncryptStringWithPRNG @ 0x618cc0] [orig: @0x700e13..0x700e29 (dfx2.exe)]
 void mix(std::string &text, std::string_view fingerprint, bool up) {
 	Prng prng = prng_for(fingerprint);
 	for (char &c : text) {

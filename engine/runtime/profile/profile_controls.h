@@ -65,7 +65,7 @@ void apply_bindings(const playersav::ProfileRecord &record, controls::BindingSet
 // and the ENABLE_JOYSTICK word into the joystick gate
 // [orig: Profile_ApplySessionControls @0x563620 — +1432 -> dword_24D2088 @0x563664, KeyBinding_ApplyProfileBindings
 //  @0x5636bf; callers SinglePlayer_StartMission @0x561bc1,
-//  UI_HandleHostSessionStart @0x556e77, the join's pre-game step sub_5693E0
+//  UI_HandleHostSessionStart @0x556e77, the join's pre-game step PreMenu_Init
 //  @0x5693ef, the NovaWorld URL host @0x54f30a; the in-game Accept's
 //  KeyBinding_ApplyProfileBindings @0x554e79 and its +1432 -> dword_24D2088 @0x555158..0x55515e].
 void apply_controls(const playersav::ProfileRecord &record, controls::BindingSet &live);

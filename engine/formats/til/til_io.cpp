@@ -93,7 +93,8 @@ bool save_til(const TilFile &til, std::vector<uint8_t> &out, std::string &error)
 	}
 	const size_t total_size = TIL_HEADER_SIZE + count * TIL_ENTRY_SIZE;
 
-	// [orig: JOTACmed MapTileStore_Serialize @ 0x433F39..0x433F50: til0, the count, 12 * count + 16, 0]
+	// [orig: JOTACmed.exe MapTileStore_Serialize @ 0x433F39..0x433F50: til0, the count,
+	//  12 * count + 16, 0]
 	out.resize(total_size, 0);
 	write_u32_le(out.data() + 0, TIL_MAGIC);
 	write_u32_le(out.data() + 4, static_cast<uint32_t>(count));

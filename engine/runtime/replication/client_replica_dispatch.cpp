@@ -193,8 +193,8 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 			// Retail stores the entity's Team off the authority only [orig: `cmp
 			// g_NapiNPCtx.is_authority` @0x4319e1, the store @0x4319ee]; the listen
 			// host's view still takes it, because two host-view readers (the deploy
-			// zone teams, the effects' sound actor) read it there. A ledgered
-			// divergence: the host view's 0x50 Team store.
+			// zone teams, the effects' sound actor) read it there. D-NET-736:
+			// the host view's 0x50 Team store.
 			apply_team_assign(assign.entity_handle, assign.team);
 			// A player's team change asks for its 0x46 team field and a fresh
 			// 0x4C snapshot; the 0x22 slot byte is the handle's low byte (the

@@ -71,7 +71,8 @@ size_t skip_space(const std::string &text, size_t at, size_t to) {
 } // namespace
 
 ShaderEffectInfo read_shader_effect_info(const std::string &text) {
-	// The annotations the loader reads [orig: HLSLEffect_LoadFromFile @ 0x5AE899..0x5AE9BC; EffectAlt_UV @ 0x5AEA03].
+	// The annotations the loader reads [orig: HLSLEffect_LoadFromFile @ 0x5AE899..0x5AE9BC,
+	// the EffectAlt_UV test @ 0x5AEA03].
 	ShaderEffectInfo info;
 	const std::string code = without_comments(text);
 	const size_t name = find_word(code, "EffectInfo", 0, code.size());
