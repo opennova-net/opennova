@@ -367,8 +367,7 @@ int64_t EffectLightDirector::_spawn_light_at(const Ref<ModelLight> &p_info,
 // The blink-box owner at one world point: retail runs ONE query at the
 // spawning entity's position before walking its LGHT records, and slot 0's
 // hit names the containing building + section every unattached record binds
-// to [orig: Entity_SpawnGlowEffects @ 0x56c7fc -> Entity_QueryBlinkBoxesAtPoint
-// @ 0x4af350]. Owner 0 outdoors. Both individual ObjectModels and batched
+// to (engine: runtime/renderer/light_scene.h). Owner 0 outdoors. Both individual ObjectModels and batched
 // buildings resolve into the active-group domain their respective draw
 // contexts declare.
 EffectLightDirector::BlinkOwner EffectLightDirector::_blink_owner_at(const Vector3 &p_world_pos) {
@@ -785,9 +784,9 @@ EffectLightDirector::BlinkOwner EffectLightDirector::_local_player_interior_grou
 // walk for the post-particle overlay stage (append_overlay). The
 // models/owners arrays are the per-model pass's own walk — models with an
 // occlusion section-mask verdict gate their owned coronas on the
-// visible-section bit [orig: Terrain_IsBuildingSectionBitSet @ 0x5c6960];
+// visible-section bit (engine: runtime/renderer/light_scene.h);
 // the env fog rides in as the fog-to-black fold
-// [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6].
+// (engine: runtime/renderer/light_scene.h).
 void EffectLightDirector::_render_coronas(Camera3D *p_camera, const Vector3 &p_gain,
 		int p_time_ms, Weather *p_weather, const TypedArray<Node3D> &p_models, const PackedInt64Array &p_owners,
 		MissionEnvironment *p_env) {
