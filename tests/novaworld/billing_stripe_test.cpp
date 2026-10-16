@@ -816,6 +816,11 @@ int test_client_errors() {
 	auto r = client.get_customer("cus_x");
 	TEST_EXPECT(!r.ok() && r.error.kind == StripeError::Kind::Rejected && r.error.status == 404);
 	TEST_EXPECT(r.error.stripe_code == "resource_missing" && r.error.message == "No such customer: 'cus_x'");
+	// The log line's text names Stripe's status, code and message: the routes'
+	// failures (prod's first checkouts logged "rejected" alone, which said
+	// nothing of why).
+	TEST_EXPECT(billing::stripe_error_text(r.error) ==
+			"rejected 404 (resource_missing): No such customer: 'cus_x'");
 	// No code: the type stands in.
 	api.answer("{\"error\":{\"message\":\"Keys for idempotent requests can only be used with the same parameters\","
 			   "\"type\":\"idempotency_error\"}}",
@@ -837,6 +842,8 @@ int test_client_errors() {
 	r = client.get_customer("cus_x");
 	TEST_EXPECT(r.error.kind == StripeError::Kind::Unreachable && r.error.status == 0);
 	TEST_EXPECT(r.error.message == "curl exited with code 7: Failed to connect");
+	TEST_EXPECT(billing::stripe_error_text(r.error) ==
+			"unreachable: curl exited with code 7: Failed to connect");
 	// A 2xx that is not what was asked for.
 	api.answer("<html>");
 	r = client.get_customer("cus_x");

@@ -110,7 +110,7 @@ function adminMessageFor(code: AdminErrorCode): string {
     case 'billing_disabled':
       return 'Billing is off on this NovaWorld service.';
     case 'stripe_unavailable':
-      return 'Stripe did not answer. Try again in a moment.';
+      return 'Stripe could not take the request (the server log says why). Try again in a moment.';
     case 'rate_limited':
       return 'Too many requests. Try again in a little while.';
     case 'db_error':

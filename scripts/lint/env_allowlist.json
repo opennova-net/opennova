@@ -14,6 +14,7 @@
     "scripts/render/*.ps1": ["GODOT_BIN"],
     "scripts/*.ps1": ["APPDATA"],
     "tests/common/test_paths.h": ["TEMP", "TMP"],
+    "tests/novaworld/billing_stripe_e2e_test.cpp": ["ONNET_STRIPE_TEST_SECRET_KEY"],
     "apps/novaworld_server/*": ["*"],
     "deploy/*": ["*"],
     "web/src/*": ["*"],

@@ -656,9 +656,14 @@ or have the server name the tagged one.
 
 1. **Activate the account** (live mode needs the site's legal pages live: terms,
    privacy, refunds). Statement descriptor: `OPENNOVA`.
-2. **Public details** (Settings, Public details): the business name, the
-   support email `support@opennova.net` (section 3, "Email") and the website
-   `https://opennova.net`.
+2. **Public details** (Settings, Public details), in each mode: the business name, the
+   support email `support@opennova.net` (section 3, "Email"), the website
+   `https://opennova.net`, the terms of service URL `https://opennova.net/terms` and the
+   privacy policy URL `https://opennova.net/privacy`. Checkout asks every buyer to accept
+   the terms, and Stripe refuses every Checkout session while no terms URL is set: the
+   site answers 503 `stripe_unavailable` and the server logs Stripe's message
+   (`checkout -> no session: rejected 400 ...`). The portal configuration's own terms and
+   privacy links (`stripe setup`) do not set these.
 3. **Revenue recovery** (Billing, Revenue recovery): retries (Smart Retries), then cancel
    the subscription when all retries fail. A past-due account keeps its servers running
    but starts no new one; they stop when Stripe cancels. Its customer emails: receipts
