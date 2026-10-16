@@ -108,7 +108,7 @@
 // the driver) is terminated, a live row whose cloud machine is gone ends, a
 // server whose machine is gone (or whose files went with the service: booting
 // and never reported) is placed again, and the rest resume where they were (a
-// running one gets listing_timeout_ms for its lister to re-host before the
+// running one gets relist_grace_ms for its lister to re-host before the
 // health checks count). The sweep half runs again every
 // orphan_sweep_interval_ms. A driver that cannot list its machines (its
 // list_tagged throws) has nothing terminated or ended on that.
@@ -191,6 +191,14 @@ struct SupervisorConfig {
 	// included).
 	uint64_t boot_timeout_ms = 5 * 60 * 1000;
 	uint64_t listing_timeout_ms = 3 * 60 * 1000;
+	// A server running at the service's start: its health checks wait this
+	// long for it to list again, on either driver. The restart left its
+	// lister's NOVAWORLDUDP session dead, which opennova-serve drops only past
+	// the service template's 240 s of receive silence, retail's
+	// (novaworldudp_session_timeout_ms; [orig: CNapiGameSession_InitNPConnection
+	// @0x4d3e1f], the reap [orig: CNapiNPConnection_PumpStateMachine @0x6292e0]),
+	// before it reconnects and re-hosts: twice that 240 s.
+	uint64_t relist_grace_ms = 2 * 240 * 1000;
 	uint64_t health_interval_ms = 20 * 1000;
 	int health_misses = 3;
 	// At most restart_limit crash restarts within the restart window: a run of
