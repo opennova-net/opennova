@@ -3,7 +3,8 @@
 // neighbours as Nile reads them over its quadrant-major copy, red where not) [orig: gobj.dll sub_10010720,
 // sub_100307BA]; the original mission editor's flatness (0x404040 where a texel differs from its four wrapped
 // neighbours) [orig: JOTACmed.exe sub_44C2B0 @ 0x44c7e9..0x44c8ac] and its water overlay (the channels halved and 128
-// added to the low byte where the height byte is below the water's) [orig: sub_4222A0 @ 0x422508..0x422525]; and
+// added to the low byte where the height byte is below the water's) [orig: JOTACmed.exe sub_4222A0 @
+// 0x422508..0x422525]; and
 // the view made again only when what it reads moves, and patched where a stroke changed the atlas in place (the same
 // picture a whole make gives; whole where the heights' range moved).
 #include <cstdio>

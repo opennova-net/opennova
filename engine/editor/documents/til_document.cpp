@@ -131,7 +131,7 @@ constexpr FindingCodeEntry<TilFinding> kFindingEntries[] = {
 	{ TilFinding::InvalidInput, unwritable_code("til.invalid_input") },
 	{ TilFinding::IgnoredInput, listed_code("til.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput) },
 	// S25 B5: what JO's mission editor makes of the file, never the game's: its save groups the tiles by layer
-	// [orig: JOTACmed MapTileStore_Serialize @ 0x433EC0], and it holds 6144 tiles at most [orig: JOTACmed
+	// [orig: JOTACmed.exe MapTileStore_Serialize @ 0x433EC0], and it holds 6144 tiles at most [orig: JOTACmed.exe
 	// MapTileStore_Append @ 0x433B59; MapTileStore_RemoveAt @ 0x433BE0].
 	{ TilFinding::LayerOrder, listed_code("til.layer_order") },
 	{ TilFinding::MedCap, listed_code("til.med_cap") },
@@ -207,7 +207,7 @@ bool TilDocument::parse(const std::vector<uint8_t> &bytes, std::vector<std::shar
 		                          std::to_string(present) + " whole tiles, read only: fix the count outside the editor."};
 		issues.push_back(std::move(issue));
 	} else {
-		// What a save writes as MED does and the game never places by [orig: JOTACmed MapTileStore_Serialize @
+		// What a save writes as MED does and the game never places by [orig: JOTACmed.exe MapTileStore_Serialize @
 		// 0x433F44..0x433F50; Terrain_LoadTileInfoFile @ 0x60A7E6..0x60A7EF].
 		const uint32_t meds = uint32_t(16 + 12 * read.entries.size());
 		if (facts.size_word != meds || facts.word12 != 0)

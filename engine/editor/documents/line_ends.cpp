@@ -61,9 +61,9 @@ Reading read_lines(std::string_view text) {
 }
 
 // What the shared ASCII walk makes of that line: skipped where it has no word (a "//" or a ';' first
-// cuts it before any [orig: Terrain_TokenizeConfigLine @ 0x53CC16..0x53CC31]) or its first word starts
+// cuts it before any [orig: Config_TokenizeLine @ 0x53CC16..0x53CC31]) or its first word starts
 // with '/' [orig: File_ParseASCIIFile @ 0x53D915 / @ 0x53D91E]; only its first 1000 characters
-// tokenized [orig: Terrain_TokenizeConfigLine @ 0x53CBBB]. "" for a line it reads within that.
+// tokenized [orig: Config_TokenizeLine @ 0x53CBBB]. "" for a line it reads within that.
 std::string walk_words(const Reading &r) {
 	io::ConfigTokens tokens;
 	io::tokenize_config_line(r.line.c_str(), tokens);

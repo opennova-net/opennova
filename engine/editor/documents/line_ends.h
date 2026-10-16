@@ -15,7 +15,7 @@ namespace opennova::editor {
 // after it, up to the next CR LF, as one line [orig: File_ParseASCIIFile @ 0x53D8DE; ConfigFile_ParseText
 // @ 0x7608a0], and a file of LF line ends as one line, of which the ASCII walk reads a key and at most
 // 29 values from its first 1000 characters, or nothing where its first word starts with '/' (a def
-// that begins with a comment defines nothing) [orig: Terrain_TokenizeConfigLine @ 0x53CB60, the clamp
+// that begins with a comment defines nothing) [orig: Config_TokenizeLine @ 0x53CB60, the clamp
 // @ 0x53CBBB, the 30 cap @ 0x53CC8C; File_ParseASCIIFile @ 0x53D91E]. The editor reads the file the
 // same way (the def catalogs, the sound profiles, the animation maps and the environments through the
 // game's own walk), so such a file shows what the game reads: document.line_ends says so, a warning

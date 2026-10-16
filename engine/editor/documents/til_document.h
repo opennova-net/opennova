@@ -14,7 +14,7 @@ namespace opennova::editor {
 
 // A tile placement (`.til`, ADR 0046 S25; docs/tiles/til-re.md): the tiles of a terrain's tile set painted over
 // its surface, each a 12-byte record of the file read and written through formats/til (load_til, save_til: the
-// header MED's serializer writes, computed from the rows [orig: JOTACmed MapTileStore_Serialize @ 0x433EC0]).
+// header MED's serializer writes, computed from the rows [orig: JOTACmed.exe MapTileStore_Serialize @ 0x433EC0]).
 // One row per tile in the file's order, which is the game's draw order: the last tile drawn over the others
 // [orig: PolyTrn_RenderTile @ 0x60DDD4..0x60DF1B], the first holding the point deciding the surface under it
 // [orig: Terrain_GetSurfaceTypeAtPosition @ 0x6065CC..0x60660C]. A tile's fields are its cell of the tile set,

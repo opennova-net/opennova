@@ -85,8 +85,8 @@ private:
 	int high_ = 0;
 };
 
-// The parsers' reads of one statement [orig: sub_5DFFB0 @ 0x5DFFB0]: the next slot, a lone ';' ',' or '=' skipped,
-// the token stripped, the statement ended at a stripped ';'.
+// The parsers' reads of one statement [orig: CParticleDefEntry_NextToken @ 0x5DFFB0]: the next slot, a lone ';' ',' or
+// '=' skipped, the token stripped, the statement ended at a stripped ';'.
 class Reads {
 public:
 	enum class Got { Token, End, Null, Outside };

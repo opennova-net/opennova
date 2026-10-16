@@ -195,7 +195,8 @@ void check_sizes(R role, const std::string &file, const TextureHeader &header, c
 		// Sampled at (c & 1023) >> (10 - log2(width)) on both axes; past 1024 the shift is negative, which the
 		// processor takes modulo 32, so every sample reads the first texel (terrain::surface_sample_extent, its
 		// witnesses). Rows past the file's read the arena's memory past its block [orig: Foliage_LoadFoliageMapPCX
-		// @ 0x605B35; Foliage_SampleFoliageMapMask @ 0x60660D]: wrong foliage, no fault, listed (S26 A4).
+		// @ 0x605B35; Foliage_SampleFoliageMapMask @ 0x606620 (the read @ 0x6066C6)]: wrong foliage, no fault,
+		// listed (S26 A4).
 		const uint32_t side = uint32_t(terrain::surface_sample_extent(int32_t(std::min<uint32_t>(w, 0x7FFFFFFF))));
 		if (w <= 1024 && h < side)
 			add(F::TextureFoliageMapOverrun, DiagnosticSeverity::Error,

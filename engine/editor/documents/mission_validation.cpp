@@ -112,7 +112,7 @@ const size_t kMaxItems = world::retail_pool_capacity(1), kMaxBuildings = world::
              kMaxMarkers = world::retail_pool_capacity(3), kMaxOrganics = world::retail_pool_capacity(0);
 // The group tables hold 64 (bms::kGroupRecordCount) [orig: docs/mission/bms-event-runtime-re.md 7.2].
 constexpr int64_t kLastGroup = bms::kGroupRecordCount - 1;
-// The zone ids the original editor offers [orig editor: dfx2med Med_AreaTriggerDialogProc @0x40f400].
+// The zone ids the original editor offers [orig: dfx2med.exe Med_AreaTriggerDialogProc @0x40f400].
 constexpr int32_t kFirstZoneId = 1, kLastZoneId = 99;
 // A waypoint number from 1 to 122 names a path; 0 none, 123..127 a command (kFirstPathCommand on).
 constexpr int32_t kLastPathNumber = kFirstPathCommand - 1;

@@ -69,10 +69,10 @@ std::shared_ptr<const TextureImage> particle_page_texels(const std::shared_ptr<c
 	return out;
 }
 
-// The blend map's legend: each channel's mean weight and the splat detail the terrain names for it. The ps.1.4
-// splat weighs the detail of stage 1 by the map's red, stage 4's by its green and stage 5's by its blue [orig:
-// g_PolyTrnPS14Splat @ 0x7DEE18: mul r1, r1, r2.r; mad r1, r4, r2.g; mad r1, r5, r2.b], the three splat layers
-// in their order [orig: PolyTrn_BindStageTextures @ 0x604330]; the splat is taken only with _c1 named [orig:
+// The blend map's legend: each channel's mean weight and the splat detail the terrain names for it. The ps.1.4 splat
+// weighs the detail of stage 1 by the map's red, stage 4's by its green and stage 5's by its blue [orig: the ps.1.4
+// splat text @ 0x7DEE18 (g_PolyTrnPS14Splat's): mul r1, r1, r2.r; mad r1, r4, r2.g; mad r1, r5, r2.b], the three splat
+// layers in their order [orig: PolyTrn_BindStageTextures @ 0x604330]; the splat is taken only with _c1 named [orig:
 // PolyTrn_InitTextures @ 0x60ABDF].
 TextureRoleView blend_legend(const TextureImage &used, const TrnConfig *terrain) {
 	TextureRoleView out;

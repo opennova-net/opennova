@@ -49,8 +49,8 @@ bool form_fits(TerrainPlane plane, const RasterPlane &texels, int layer, bool so
 		}
 		// Three layers whatever the depth: the splat weighs the three detail textures by the map's red, green and blue,
 		// normalised over those three alone [orig: PolyTrn_InitTextures @ 0x60b216..0x60b24d (the normalisation,
-		// texture_preprocess normalize_detail_blend_map); g_PolyTrnPS14SplatNormalMap @ 0x7dece0 (c1 R + c2 G + c3 B)];
-		// a 32-bit map's alpha is read by nothing.
+		// texture_preprocess normalize_detail_blend_map); the normal-map splat text @ 0x7dece0
+		// (g_PolyTrnPS14SplatNormalMap's: c1 R + c2 G + c3 B)]; a 32-bit map's alpha is read by nothing.
 		if (layer < 0 || layer > 2) {
 			why = "the game blends three detail layers by the map's red, green and blue (layers 0 to 2)";
 			return false;

@@ -329,7 +329,7 @@ constexpr AppliesRow kApplies[] = {
 	{MissionRecord::Group, "flags", Applicability::Unverified},
 	{MissionRecord::Group, "value", Applicability::Unverified},
 	// Read and discarded [orig: Mission_LoadBMSFile @0x40fc05..0x40fc38]; the original editor's wav list's file
-	// names [orig editor: sub_44F920 @0x4509bc..0x450a14].
+	// names [orig: JOTACmed.exe sub_44F920 @0x4509bc..0x450a14].
 	{MissionRecord::WavList, "file_name", Applicability::Unverified},
 	{MissionRecord::Entity, "next_ssn", Applicability::Unverified},
 	// Read on a waypoint marker alone, a type-6005 or 6006 one: the spawn reads the record's +0x60 in

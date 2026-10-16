@@ -19,11 +19,11 @@ class FileSource;
 namespace opennova::editor {
 
 // The original editor's read of a terrain's .trn for its base heights: the .trn alone (its own parser over the file,
-// the game's later passes over overcast.def and the mission's .env never run [orig: JOTACmed.exe sub_464DE0 @
-// 0x464de0 -> sub_463C90 @ 0x463c90]) and its last polytrn_scale line by the CRT's atol (128 where it has none [orig:
-// the arm @ 0x464a38; the default, sub_464B60 @ 0x464bb6]). The .trn is read through the game's parser and admission
-// gate (load_mission_trn with no later texts): a terrain the game refuses (no polydata, a sector count or row count
-// that is no power of two) samples no height, where the original editor would; and a .trn naming a
+// the game's later passes over overcast.def and the mission's .env never run [orig: JOTACmed.exe sub_464DE0 @ 0x464de0
+// -> sub_463C90 @ 0x463c90]) and its last polytrn_scale line by the CRT's atol (128 where it has none [orig:
+// JOTACmed.exe, the arm @ 0x464a38; the default, sub_464B60 @ 0x464bb6]). The .trn is read through the game's parser
+// and admission gate (load_mission_trn with no later texts): a terrain the game refuses (no polydata, a sector count or
+// row count that is no power of two) samples no height, where the original editor would; and a .trn naming a
 // polytrn_sectorcount but no polytrn_sectors row, whose grid the original editor fills with the .trn's other words
 // (scale, wraps) and the game with no sector, samples none either. No shipped terrain is either. `trn_file`: the
 // .trn's name as `files` finds it. False where it does not read.

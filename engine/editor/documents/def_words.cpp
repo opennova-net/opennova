@@ -187,8 +187,8 @@ const DefWords kItemWords[] = {
 	{"door_type", "Door type", "Doors", "No door code reads it; its one reader takes the value as a squib's random spread (it shares sqb_error's storage).", "[orig: sub_448CE0 @ 0x448d2c]; itemdef-re.md, witnessed value tables"},
 	{"door_open_rate_q16", "Door swing time", "Doors", "Seconds a door section takes to swing fully open or fully closed.", "[orig: Entity_SpawnFromBMSRecord @ 0x40E9F0]; [orig: FadeEffect_UpdateAll @ 0x44E920]"},
 	{"door_max_angle_bam", "Door max angle", "Doors", "Copied to each door, but the swing ignores it; only a late-joining client uses it to set an already-open door's position.", "[orig: Entity_SpawnFromBMSRecord @ 0x40E9F0]; [orig: NapiNPClientMsg_0x010 @ 0x4336B5]"},
-	{"door_open_sound", "Door open sound", "Doors", "Played at a door section's pivot when it starts opening; also when a carried object such as a flag is dropped.", "[orig: Entity_ProcessSectionDamageTransition @ 0x43F370]; [orig: Entity_DropCarriedObject @ 0x439DF0]"},
-	{"door_close_sound", "Door close sound", "Doors", "Played at a door section's pivot when it starts closing.", "[orig: Entity_ProcessSectionDamageTransition @ 0x43F370]"},
+	{"door_open_sound", "Door open sound", "Doors", "Played at a door section's pivot when it starts opening; also when a carried object such as a flag is dropped.", "[orig: DoorClass_HandleEvent @ 0x43F370]; [orig: Entity_DropCarriedObject @ 0x439DF0]"},
+	{"door_close_sound", "Door close sound", "Doors", "Played at a door section's pivot when it starts closing.", "[orig: DoorClass_HandleEvent @ 0x43F370]"},
 	{"attrib_parent", "Parent", "Attributes", "Set by the Parent attribute: the vehicle carries items sharing its reference number on its agun points and kills them when it dies.", "[orig: Entity_SetupGunnerAttachments @ 0x468100]; [orig: AI_TransitionToDeath_GroundVehicle @ 0x467B90]"},
 	{"max_attack_dist", "Placed attack distance", "Behaviour", "The original mission editor's: a record placed of the item takes it as its attack distance (16 unless set). The game reads nothing of the key.", "[orig: JOTACmed.exe ItemsDef_ParseToken @ 0x431a58; MissionItem_InitFromDefinition @ 0x44dc46]; [orig: ItemDef_ParseProperty @ 0x4a1a7b]"},
 	{"max_engagement_dist", "Placed engagement distance (far)", "Behaviour", "The original mission editor's: a record placed of the item takes it as its far engagement distance (320 unless set). The game reads nothing of the key.", "[orig: JOTACmed.exe ItemsDef_ParseToken @ 0x431a89; MissionItem_InitFromDefinition @ 0x44dc6b]; [orig: ItemDef_ParseProperty @ 0x4a1a94]"},
@@ -382,7 +382,7 @@ const DefWords kSightWords[] = {
 };
 
 const DefWords kCarryWords[] = {
-	{"name", "Ammo class", "", "The ammo class this limit is for, as weapons name it on their ammoclass line; a later line for the class overwrites it.", "[orig: WeaponDefs_ParseLineCallback @ 0x5437FE; sub_540590 @ 0x540590]"},
+	{"name", "Ammo class", "", "The ammo class this limit is for, as weapons name it on their ammoclass line; a later line for the class overwrites it.", "[orig: WeaponDefs_ParseLineCallback @ 0x5437FE; AmmoClass_FindIdByName @ 0x540590]"},
 	{"max_carry", "Carry limit", "", "The most this ammo class's pool holds: setting or adding reserve clamps to it (the number's absolute value); a class with no line holds 0.", "[orig: WeaponSlot_SetAmmoCount @ 0x540B50; WeaponSlot_AddAmmo @ 0x540A20]"},
 };
 

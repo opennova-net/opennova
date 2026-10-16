@@ -7,7 +7,7 @@
 namespace opennova::editor {
 
 // What the map draws under its marks (the map's option `background`): the terrain's colour map as the game's
-// commander map draws it, the original tools' Height map and Delta map (Nile [orig: gobj sub_10010720]), the
+// commander map draws it, the original tools' Height map and Delta map (Nile [orig: gobj.dll sub_10010720]), the
 // original mission editor's flatness view, the surface classes the char map holds in its legend's colours, or
 // nothing; its option `water` lays that editor's water overlay over the heights' views.
 enum class MissionMapBackground : uint8_t { Colour, Height, Delta, Flatness, Surface, None, kCount };
@@ -24,16 +24,16 @@ bool mission_map_background_from_token(const std::string &token, MissionMapBackg
 // Nile's Height map [orig: gobj.dll sub_10010720 @ 0x10010720, the 2dHeightMap pass]: each texel's height less the
 // lowest, times 255 over the range (1 where the heights are flat), its green channel; the lowest seeded at 0x7FFF and
 // the highest at 0 as the original seeds them, so a terrain whose every height is past 0x7FFF reads from 0x7FFF.
-// The atlas copied into its four quadrants first, one after another [orig: sub_100307BA @ 0x100307ba].
+// The atlas copied into its four quadrants first, one after another [orig: gobj.dll sub_100307BA @ 0x100307ba].
 void nile_height_map(const uint16_t *atlas, int width, int height, std::vector<uint32_t> &out);
-// Nile's Delta map [orig: sub_10010720, the 2dDeltaMap pass]: the same brightness, green where the texel equals its
-// four neighbours, red where it does not; the neighbours as the original reads them, over its quadrant-major copy
-// with a 1024-word row (so a "row" of it is two rows of a quadrant, and its neighbours above and below two rows
-// away), wrapped.
+// Nile's Delta map [orig: gobj.dll sub_10010720, the 2dDeltaMap pass]: the same brightness, green where the texel
+// equals its four neighbours, red where it does not; the neighbours as the original reads them, over its
+// quadrant-major copy with a 1024-word row (so a "row" of it is two rows of a quadrant, and its neighbours above and
+// below two rows away), wrapped.
 void nile_delta_map(const uint16_t *atlas, int width, int height, std::vector<uint32_t> &out);
-// The original mission editor's flatness view (JOTACmed.exe [orig: sub_44C2B0 @ 0x44c7e9..0x44c8ac], drawn by
-// sub_4222A0 in its third mode): black where the texel equals its four neighbours, wrapped at the 1024 edges, else
-// 0x404040.
+// The original mission editor's flatness view ([orig: JOTACmed.exe sub_44C2B0 @ 0x44c7e9..0x44c8ac], drawn
+// by its sub_4222A0 in its third mode): black where the texel equals its four neighbours, wrapped at the 1024
+// edges, else 0x404040.
 void med_flatness_map(const uint16_t *atlas, std::vector<uint32_t> &out);
 // The char map's surface classes over the atlas (an editor view, no tool's: the 3D view's surfaces overlay's colours):
 // each atlas texel the class the game's char map sampler reads there, the atlas texel shifted down by the map's sample
@@ -41,9 +41,9 @@ void med_flatness_map(const uint16_t *atlas, std::vector<uint32_t> &out);
 // map (`classes` null), as the sampler reads one], in the legend's colour (formats/trn/charmap_legend.h; white past
 // it). The placed tiles' classes are not in it: the map draws the tiles over it (the 3D view's overlay reads them).
 void surface_class_map(const uint8_t *classes, int width, int height, std::vector<uint32_t> &out);
-// Its water overlay over any picture [orig: sub_4222A0 @ 0x422508..0x422525, toggled by its Water button @
-// 0x4434f3]: where the texel's height byte (bits 8..15 of twice its depth word, as the original holds it) is below
-// the water's (its 16.16 height >> 15), the pixel's channels halved and 128 added to its low byte.
+// Its water overlay over any picture [orig: JOTACmed.exe sub_4222A0 @ 0x422508..0x422525, toggled by its Water
+// button @ 0x4434f3]: where the texel's height byte (bits 8..15 of twice its depth word, as the original holds
+// it) is below the water's (its 16.16 height >> 15), the pixel's channels halved and 128 added to its low byte.
 void med_water_overlay(const uint16_t *atlas, int32_t water_1616, std::vector<uint32_t> &pixels);
 
 // A region of the atlas, its texels [x0, x1) x [y0, y1) in the atlas's own rows.

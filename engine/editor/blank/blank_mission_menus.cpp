@@ -140,8 +140,8 @@ bool make_blank_cmap_menu(const BlankRequest &request, std::vector<uint8_t> &out
 // The blank leaves out the shipped screen's OPTIONS (the whole options dialog) and RESTART. RESTART
 // queues the respawn action before the restart [orig: UI_IngameRestartCommand @ 0x555410, action 12
 // @ 0x555428], and the respawn resets the player through its body's animation slot, read unchecked
-// [orig: Server_ProcessClientRequestRespawn @ 0x519ce3 -> Server_ProcessPlayerDeath @ 0x517899 ->
-// Entity_ResetToSpawnState @ 0x4b9620, entity+0x188]: a project with no character yet plays the
+// [orig: Server_ProcessClientRequestRespawn @ 0x519ce3 -> Server_DeployPlayer @ 0x517740 (the call @ 0x517899)
+// -> Entity_ResetToSpawnState @ 0x4b9620, entity+0x188]: a project with no character yet plays the
 // first items.def row (D-NET-348), which has none, and the game faults there (witnessed in strict
 // retail 2026-10-05). A project whose player has a body adds it; the command stays bound by name.
 bool make_blank_game_menu(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
@@ -222,7 +222,7 @@ bool make_blank_mp_menu(const BlankRequest &request, std::vector<uint8_t> &out, 
 	return blank_menu_bytes(screen("NW_MULTI_PLAYER", back), request, out, error);
 }
 
-// pre.mnu: the join screen, PRE_GAME_MENU, which the PreMenu loads as a join starts [orig: sub_5693E0 @ 0x5693e0, the
+// pre.mnu: the join screen, PRE_GAME_MENU, which the PreMenu loads as a join starts [orig: PreMenu_Init @ 0x5693e0, the
 // load @ 0x56944a] and whose panels the panel machine shows and hides by name, every one hidden until it does [orig:
 // UI_ShowPreGameMenuByState @ 0x568d10; runtime/inmatch/pre_game_menu.h's windows]: ERROR_WRAPPER with MESSAGES, where
 // the join machine writes its status line and a failure's reason [orig: MultiPlayer_JoinSessionStateMachine @
