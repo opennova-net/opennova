@@ -18,10 +18,10 @@
 #include <unordered_map>
 
 #include <runtime/environment/celestial_frame.h>
+#include <runtime/environment/glare_occlusion.h>
 #include <runtime/renderer/q3_frame.h>
 
 #include "env/env_file.h"
-#include "env/glare_occlusion.h"
 #include "object/object_data.h"
 #include "resource_index/resource_root.h"
 #include "terrain/terrain_data.h"
@@ -33,8 +33,8 @@ class ObjectModel;
 
 // The celestial applier — the ADR 0033 device leg over the engine's
 // per-frame body selection (environment/celestial_frame.h) and the witnessed
-// fixed-point math already in engine/formats/env (env_celestial.h behind the
-// GlareOcclusion device helper). Renders the sun/moon/glare 3DI bodies named
+// fixed-point math already in engine/formats/env (env_celestial.h, the glare
+// occlusion state runtime/environment/glare_occlusion.h advances). Renders the sun/moon/glare 3DI bodies named
 // in the mission .env, attached to the sky at camera + direction * 64; retail
 // loads the star 3DI but never draws it (env_celestial.h carries the
 // witness). This node keeps only device work: the ObjectModel children with
@@ -243,7 +243,8 @@ private:
 		return !entities_clear_ || entities_clear_(p_from, p_to);
 	}
 	// One frame of the glare occlusion at this camera: the engine's ray
-	// sequence (GlareOcclusion::advance) over _segment_clear and _entities_clear.
+	// sequence (env::advance_glare_occlusion) over _segment_clear and
+	// _entities_clear.
 	void _advance_glare_occlusion(const opennova::env::EnvironmentState &p_state,
 			const Vector3 &p_cam_pos, const Vector3 &p_sun_dir);
 	// One frame of the water-glint leg (engine: formats/env/env_celestial.h):
@@ -263,7 +264,10 @@ private:
 	Ref<TerrainData> terrain_data_;
 	EntitiesClear entities_clear_;
 	Ref<ResourceRoot> resource_root_;
-	std::unique_ptr<GlareOcclusion> glare_occlusion_;
+	// The sun glare's occlusion window and hysteresis brightness, which the
+	// engine's ray sequence advances (engine: runtime/environment/
+	// glare_occlusion.h; env #14, docs/env/env-tod-re.md "Celestial bodies").
+	opennova::env::GlareOcclusionState glare_occlusion_{};
 	HashMap<String, Body> bodies_;
 	// name-signature change detection (undo/scrub safe rebuilds).
 	HashMap<String, String> loaded_names_;

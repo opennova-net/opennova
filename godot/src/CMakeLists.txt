@@ -101,7 +101,6 @@ add_library(opennova_bindings OBJECT
     env/weather.cpp
     env/precipitation.cpp
     env/water_core.cpp
-    env/glare_occlusion.cpp
     particle/particle_effect.cpp
     particle/particle_file.cpp
     lights/effect_light_director.cpp

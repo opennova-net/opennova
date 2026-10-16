@@ -167,9 +167,6 @@ Ref<EnvFile> Celestial::_env_data() {
 }
 
 void Celestial::_ready() {
-	if (!glare_occlusion_) {
-		glare_occlusion_ = std::make_unique<GlareOcclusion>();
-	}
 	_rebuild_if_needed();
 }
 
@@ -521,7 +518,7 @@ void Celestial::advance_frame(double p_delta) {
 		_advance_glare_occlusion(state, cam_pos, sun_dir);
 		const int view_dot_fixed = opennova::io::float_to_fp16_16(forward.dot(sun_dir));
 		const opennova::env::GlareFrame frame = opennova::env::build_glare_frame(
-				state, cam_rf, view_dot_fixed, glare_occlusion_->get_brightness());
+				state, cam_rf, view_dot_fixed, glare_occlusion_.brightness);
 		glare->model->set_global_position(render_float_to_godot(frame.position));
 		_set_body_parameter(*glare, "u_sky_anchor_camera", cam_pos);
 		_set_body_upl(*glare, frame.upl, frame.q3_upl);
@@ -551,10 +548,10 @@ void Celestial::advance_frame(double p_delta) {
 	// Weather.
 	sun_veil_glare_ = 0;
 	sun_veil_stopdown_ = 0;
-	if (glare_occlusion_ != nullptr && cam != nullptr) {
+	if (cam != nullptr) {
 		const opennova::env::SunVeil veil = opennova::env::sun_veil_frame(state,
 				bodies_.has("sun"), godot_to_mission(cam_pos), godot_to_mission(sun_dir),
-				godot_to_mission(forward), glare_occlusion_->get_brightness(),
+				godot_to_mission(forward), glare_occlusion_.brightness,
 				water_glint_.brightness);
 		sun_veil_glare_ = veil.glare;
 		sun_veil_stopdown_ = veil.stopdown;
@@ -736,12 +733,9 @@ Node3D *Celestial::get_overlay_body_node(const String &p_body) const {
 }
 
 int Celestial::settle_glare_occlusion(int p_max_frames) {
-	if (!glare_occlusion_) {
-		glare_occlusion_ = std::make_unique<GlareOcclusion>();
-	}
 	MissionEnvironment *env = _env_node();
 	if (env == nullptr || !env->is_loaded()) {
-		return glare_occlusion_->get_brightness();
+		return glare_occlusion_.brightness;
 	}
 	const opennova::env::EnvironmentState &state = env->state();
 	Camera3D *cam = _resolve_camera();
@@ -761,7 +755,7 @@ int Celestial::settle_glare_occlusion(int p_max_frames) {
 	// scene's, then the weapon Inset pass's while one is set (set_inset_view).
 	Body *glint_body = bodies_.getptr("glint");
 	int held = 0;
-	int last = glare_occlusion_->get_brightness();
+	int last = glare_occlusion_.brightness;
 	for (int frame = 0; frame < p_max_frames; ++frame) {
 		_advance_glare_occlusion(state, cam_pos, sun_dir);
 		if (glint_body != nullptr) {
@@ -769,7 +763,7 @@ int Celestial::settle_glare_occlusion(int p_max_frames) {
 					*glint_body);
 			_advance_inset_water_glint(state, cam_pos, sun_dir, *glint_body);
 		}
-		const int brightness = glare_occlusion_->get_brightness();
+		const int brightness = glare_occlusion_.brightness;
 		held = brightness == last ? held + 1 : 0;
 		last = brightness;
 		if (frame >= 3 && held >= 8) {
@@ -782,11 +776,9 @@ int Celestial::settle_glare_occlusion(int p_max_frames) {
 Dictionary Celestial::get_diagnostics() const {
 	Dictionary diag;
 	Dictionary glare;
-	if (glare_occlusion_ != nullptr) {
-		glare["brightness"] = glare_occlusion_->get_brightness();
-		glare["window"] = glare_occlusion_->get_window();
-		glare["ray_length"] = glare_occlusion_->get_ray_length();
-	}
+	glare["brightness"] = glare_occlusion_.brightness;
+	glare["window"] = static_cast<int>(glare_occlusion_.window);
+	glare["ray_length"] = opennova::env::kGlareRayLength;
 	diag["glare_occlusion"] = glare;
 	Dictionary glint;
 	glint["brightness"] = water_glint_.brightness;
@@ -853,8 +845,8 @@ bool Celestial::_segment_clear(const Vector3 &p_from, const Vector3 &p_to) {
 
 void Celestial::_advance_glare_occlusion(const opennova::env::EnvironmentState &p_state,
 		const Vector3 &p_cam_pos, const Vector3 &p_sun_dir) {
-	glare_occlusion_->advance(godot_to_mission(p_cam_pos), godot_to_mission(p_sun_dir),
-			p_state.fog_level(),
+	opennova::env::advance_glare_occlusion(glare_occlusion_, godot_to_mission(p_cam_pos),
+			godot_to_mission(p_sun_dir), p_state.fog_level(),
 			[this](const opennova::env::Vec3 &p_from, const opennova::env::Vec3 &p_to) {
 				return _segment_clear(mission_to_godot(p_from), mission_to_godot(p_to));
 			},
