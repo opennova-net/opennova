@@ -4,7 +4,7 @@
 // live server every minute and buckets the series by the range (1h raw, 24h
 // by 5 minutes, 7d hourly, 30d by 4 hours). Times are ISO 8601 UTC.
 
-import type { HostedState } from './hostedServer';
+import type { HostedState, MachineKind, MachineState } from './hostedServer';
 
 export type StatsRange = '1h' | '24h' | '7d' | '30d';
 
@@ -74,4 +74,93 @@ export interface HostedStats {
   live: LiveStats | null;
   summary: StatsSummary;
   series: StatsSeries;
+}
+
+// The admin's usage view (GET /api/admin/hosted/usage): what every live
+// hosted server uses of its slot, from the service's samples (one a minute)
+// of what each machine's agent reports: its container's memory and CPU, and
+// the bytes its slot sends to players. Nothing here is sampled anew.
+
+// What a set of servers uses: the fleet's, or the servers on one machine.
+export interface UsageTotals {
+  // The servers whose newest sample (at most 3 minutes old) carries their
+  // agent's CPU and memory; the memory and CPU figures cover these alone.
+  reporting: number;
+  players: number;
+  // Their memory, and their slots' limits added up.
+  memory_bytes: number;
+  memory_limit_bytes: number;
+  // Their CPU use and limits, in CPUs.
+  cpus_used: number;
+  cpus_limit: number;
+  // Bytes a second sent to players over each server's newest sampled minute,
+  // added up.
+  egress_bytes_per_second: number;
+  // Bytes sent to players in the window (the last hour).
+  egress_bytes_window: number;
+}
+
+export interface FleetUsageTotals extends UsageTotals {
+  servers_live: number;
+  machines_live: number;
+  // The live machines' slots, and how many hold a live server.
+  slots: number;
+  slots_used: number;
+}
+
+// A live machine and what the servers on it use.
+export interface MachineUsage extends UsageTotals {
+  id: string;
+  kind: MachineKind;
+  state: MachineState | (string & {});
+  instance_type: string;
+  slots: number;
+  slots_used: number;
+}
+
+// A server's samples in the window, summed up; the CPU and memory are null
+// when none of them carried the agent's numbers.
+export interface ServerUsageWindow {
+  minutes: number;
+  cpu_percent_mean: number | null;
+  cpu_percent_peak: number | null;
+  memory_bytes_peak: number | null;
+  egress_bytes: number;
+}
+
+// A live server: its newest sample's figures (each null without a sample in
+// the last 3 minutes, or when it did not carry them) and its window.
+export interface ServerUsage {
+  id: number;
+  name: string;
+  state: HostedState;
+  own_machine: boolean;
+  owner: { id: number; username: string } | null;
+  // The machine it is placed on and its slot there; null before placement.
+  machine_ref: string | null;
+  slot: number | null;
+  // Seconds since it last reached running; null while it is not running.
+  uptime_seconds: number | null;
+  sample_at: string | null;
+  players: number | null;
+  max_players: number | null;
+  // Of its slot's CPUs, 0 to 100.
+  cpu_percent: number | null;
+  memory_bytes: number | null;
+  egress_bytes_per_second: number | null;
+  window: ServerUsageWindow;
+}
+
+export interface FleetUsage {
+  // When the service answered (ISO 8601 UTC).
+  at: string;
+  window_seconds: number;
+  // Each container's limits.
+  slot_memory_bytes: number;
+  slot_cpus: number;
+  totals: FleetUsageTotals;
+  // The live machines by id.
+  machines: MachineUsage[];
+  // The live servers by machine, then slot; the ones placed nowhere last.
+  servers: ServerUsage[];
 }

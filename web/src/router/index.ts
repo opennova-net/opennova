@@ -24,6 +24,7 @@ import OverviewSection from '../pages/admin/OverviewSection.vue';
 import UsersSection from '../pages/admin/UsersSection.vue';
 import UserDetailSection from '../pages/admin/UserDetailSection.vue';
 import FleetSection from '../pages/admin/FleetSection.vue';
+import UsageSection from '../pages/admin/UsageSection.vue';
 import BillingSection from '../pages/admin/BillingSection.vue';
 import ServerStatusSection from '../pages/admin/ServerStatusSection.vue';
 import ConnectionsSection from '../pages/admin/ConnectionsSection.vue';
@@ -93,6 +94,7 @@ const router = createRouter({
             { path: 'machine', component: ServerMachineTab },
           ],
         },
+        { path: 'usage', component: UsageSection },
         { path: 'billing', component: BillingSection },
         { path: 'service', component: ServerStatusSection },
         { path: 'sessions', component: ConnectionsSection },
