@@ -208,7 +208,7 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_message_log_title", "title"),
 			&HudOverlay::set_message_log_title);
 	ClassDB::bind_method(D_METHOD("set_lfp_panel", "shown", "game_type", "local_team",
-			"frame_counter", "strings", "sim"), &HudOverlay::set_lfp_panel);
+			"frame_counter", "gametext", "sim"), &HudOverlay::set_lfp_panel);
 	ClassDB::bind_method(D_METHOD("set_waypoint", "name", "distance_m",
 			"mission_position", "altitude_wu"),
 			&HudOverlay::set_waypoint, DEFVAL(Vector2()), DEFVAL(0.0f));
@@ -1213,7 +1213,7 @@ void HudOverlay::set_message_log_title(const String &p_title) {
 }
 
 void HudOverlay::set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_team,
-		int p_frame_counter, const Dictionary &p_strings, const Ref<Simulation> &p_sim) {
+		int p_frame_counter, const Ref<RtxtStringFile> &p_gametext, const Ref<Simulation> &p_sim) {
 	opennova::hud::HudLfpPanelState &lp = state_.lfp_panel;
 	lp.local_team = p_local_team;
 	// The blink clock the marker masks (`& 0x18`). The shell feeds the 62 Hz
@@ -1224,9 +1224,9 @@ void HudOverlay::set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_te
 	lp.frame_counter = p_frame_counter;
 	// The compiler's element branches on it (the unmodelled conquest arm).
 	lp.game_type = static_cast<uint32_t>(p_game_type);
-	lp.under_attack_text =
-			opennova::to_std(String(p_strings.get("under_attack", "")));
-	lp.ready_text = opennova::to_std(String(p_strings.get("ready", "")));
+	const opennova::hud::GameTextLookup gametext = game_text_lookup(p_gametext);
+	lp.under_attack_text = opennova::hud::lfp_under_attack_text(gametext);
+	lp.ready_text = opennova::hud::lfp_ready_text(gametext);
 	if (p_shown && p_sim.is_valid()) {
 		lp.shown = p_sim->fill_lfp_zones(p_local_team, lp.zones);
 	} else {

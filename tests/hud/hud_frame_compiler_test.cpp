@@ -2969,6 +2969,17 @@ void test_attach_label_text_anchor_and_round_divisor() {
 	CHECK(opennova::hud::rounds_per_icon_from_layout(1) == 1, "divisor 1");
 	CHECK(opennova::hud::rounds_per_icon_from_layout(257) == 1, "the low byte only");
 	CHECK(opennova::hud::rounds_per_icon_from_layout(0x1FF) == 0xFF, "0x1FF -> 255");
+
+	// The LFP panel's status strings: the table's entries, else retail's literals.
+	CHECK(opennova::hud::lfp_under_attack_text(none) == "!Under\nAttack!!", "under-attack fallback");
+	CHECK(opennova::hud::lfp_ready_text(none) == "!Ready for\nTakeover!", "ready fallback");
+	const opennova::hud::GameTextLookup lfp = [](const char *section, const char *key,
+			const char *fallback) -> std::string {
+		if (std::strcmp(section, "Overlays") == 0 && std::strcmp(key, "STROVER_UNDERATTACK") == 0)
+			return "Contested";
+		return fallback;
+	};
+	CHECK(opennova::hud::lfp_under_attack_text(lfp) == "Contested", "the table's under-attack text");
 }
 
 int main() {

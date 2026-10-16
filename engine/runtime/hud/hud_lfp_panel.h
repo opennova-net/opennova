@@ -2,8 +2,24 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <string>
+
+#include <runtime/hud/game_text_lookup.h>
 
 namespace opennova::hud {
+
+// The panel's two status strings, the gametext Overlays entries with retail's
+// literal fallbacks [orig: HUD_DrawZoneStatusPanel --
+// GameText_GetStringWithFallback(Overlays, "STROVER_UNDERATTACK",
+// "!Under\nAttack!!") @0x5a263c, ("STROVER_READYFORTAKEOVER",
+// "!Ready for\nTakeover!") @0x5a261d].
+inline std::string lfp_under_attack_text(const GameTextLookup &gametext) {
+	return game_text(gametext, kGameTextOverlays, "STROVER_UNDERATTACK", "!Under\nAttack!!");
+}
+inline std::string lfp_ready_text(const GameTextLookup &gametext) {
+	return game_text(gametext, kGameTextOverlays, "STROVER_READYFORTAKEOVER",
+			"!Ready for\nTakeover!");
+}
 
 // THE AAS OBJECTIVE ("LFP") STATUS PANEL — retail's objective-status HUD
 // element. One marker per contestable objective: the team-coloured icon, the

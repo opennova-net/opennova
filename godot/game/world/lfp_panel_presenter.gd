@@ -10,11 +10,9 @@ extends RefCounted
 ##  the game-type test @0x5a24a1]
 ##
 ## The zone rows never round-trip through script (the overlay pulls them
-## natively through Simulation.fill_lfp_zones); the shell owns the two status
-## strings because it owns the string tables, with retail's literal fallbacks
-## [orig: GameText_GetStringWithFallback(Strings.SECTION_OVERLAYS, "STROVER_UNDERATTACK",
-##  "!Under\nAttack!!") @0x5a263c / ("STROVER_READYFORTAKEOVER",
-##  "!Ready for\nTakeover!") @0x5a261d].
+## natively through Simulation.fill_lfp_zones); the two status strings resolve
+## natively too, in the gametext table this lane hands over (engine
+## hud_lfp_panel.h, retail's literal fallbacks).
 
 var _pushed := false
 
@@ -33,18 +31,12 @@ func update(hud: HudOverlay, sim: Simulation, frame_counter: int) -> void:
 	if game_type != NetProtocol.GAME_TYPE_ADVANCE_AND_SECURE:
 		_hide(hud)
 		return
-	var strings := {
-		"under_attack": Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_OVERLAYS,
-				"STROVER_UNDERATTACK", "!Under\nAttack!!"),
-		"ready": Strings.lookup_or(Strings.TABLE_GAMETEXT, Strings.SECTION_OVERLAYS,
-				"STROVER_READYFORTAKEOVER", "!Ready for\nTakeover!"),
-	}
 	hud.set_lfp_panel(true, game_type, sim.get_local_player_team(), frame_counter,
-			strings, sim)
+			Strings.get_table(Strings.TABLE_GAMETEXT), sim)
 	_pushed = true
 
 
 func _hide(hud: HudOverlay) -> void:
 	if _pushed:
-		hud.set_lfp_panel(false, 0, 0, 0, {}, null)
+		hud.set_lfp_panel(false, 0, 0, 0, null, null)
 		_pushed = false

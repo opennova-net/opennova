@@ -241,11 +241,13 @@ public:
 	void set_message_log_title(const String &p_title);
 	// The AAS zone status panel: shown, the session game type (the conquest
 	// arm is unmodelled and draws nothing), the viewer's team, the HUD frame
-	// counter the blink masks, the two status strings the shell resolved
-	// ({under_attack, ready}), and the Simulation the zone rows are pulled
-	// from natively (Simulation::fill_lfp_zones). Pass null when hiding.
+	// counter the blink masks, the gametext table its two status strings
+	// resolve in (engine hud_lfp_panel.h, retail's fallbacks; null = the
+	// fallbacks), and the Simulation the zone rows are pulled from natively
+	// (Simulation::fill_lfp_zones). Pass null when hiding.
 	void set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_team,
-			int p_frame_counter, const Dictionary &p_strings, const Ref<Simulation> &p_sim);
+			int p_frame_counter, const Ref<RtxtStringFile> &p_gametext,
+			const Ref<Simulation> &p_sim);
 	void set_waypoint(const String &p_name, int p_distance_m,
 			const Vector2 &p_mission_position = Vector2(),
 			float p_altitude_wu = 0.0f);

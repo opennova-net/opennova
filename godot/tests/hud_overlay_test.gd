@@ -1117,13 +1117,12 @@ func test_lfp_panel_device_seam() -> void:
 	var hud := _make_overlay()
 	hud.configure(fixture.layout, root)
 	var before := hud.get_draw_list_stats()
-	hud.set_lfp_panel(true, NetProtocol.GAME_TYPE_ADVANCE_AND_SECURE, 1, 0,
-			{"under_attack": "!Under\nAttack!!", "ready": "!Ready for\nTakeover!"}, null)
+	hud.set_lfp_panel(true, NetProtocol.GAME_TYPE_ADVANCE_AND_SECURE, 1, 0, null, null)
 	var shown := hud.get_draw_list_stats()
 	assert_eq(shown.elements_drawn, before.elements_drawn,
 			"With no zone rows the panel draws nothing.")
 	await get_tree().process_frame
-	hud.set_lfp_panel(false, 0, 0, 0, {}, null)
+	hud.set_lfp_panel(false, 0, 0, 0, null, null)
 	assert_true(is_instance_valid(hud), "Hiding the zone panel is safe.")
 
 
