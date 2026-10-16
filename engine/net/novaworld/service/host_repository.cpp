@@ -3,6 +3,9 @@
 #include <base/io/sha256.h>
 #include <base/io/strutil.h>
 
+#include <algorithm>
+#include <cstddef>
+
 namespace opennova::hostdb {
 
 namespace {
@@ -299,10 +302,13 @@ bool apply_status_blob(opennova::db::Database &db, const LobbyStatusBlob &blob) 
 	take(h.exp,         "Exp");
 	update_host(db, h);
 	if (blob.send_player_names) {
+		// Inside the roster's bounds (lobby_session.h), as the lobby's own lists.
+		const std::size_t cap = roster_row_cap(h.max_players);
 		std::vector<HostRosterSlot> roster;
-		roster.reserve(blob.player_names.size());
+		roster.reserve(std::min(blob.player_names.size(), cap));
 		int slot = 0;
 		for (const auto &name : blob.player_names) {
+			if (roster.size() >= cap) break;
 			HostRosterSlot s;
 			s.slot = slot++;
 			s.player_name = name;

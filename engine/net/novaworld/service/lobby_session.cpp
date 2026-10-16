@@ -267,10 +267,17 @@ VarLists extract_var_lists(const NapiMessage &container) {
 
 // A PlayerList's vars onto `roster`, slot by VarFNum: a ClientHostUpdate's list
 // carries only the vars whose values changed (below), so a slot it leaves out
-// keeps its row; a slot leaves with ClientHostPlayerRemoved.
-void apply_player_list(std::vector<HostRosterSlot> &roster, const VarList &player_list) {
-	auto slot_for = [&roster](int fnum) -> HostRosterSlot & {
+// keeps its row; a slot leaves with ClientHostPlayerRemoved. A slot past the
+// roster's bounds for `max_players` (lobby_session.h) is not kept: its vars land
+// in a row that goes.
+void apply_player_list(std::vector<HostRosterSlot> &roster, const VarList &player_list,
+                       int max_players) {
+	const std::size_t cap = roster_row_cap(max_players);
+	HostRosterSlot refused;
+	auto slot_for = [&roster, &refused, cap](int fnum) -> HostRosterSlot & {
+		if (!roster_slot_in_range(fnum)) return refused;
 		for (auto &s : roster) if (s.slot == fnum) return s;
+		if (roster.size() >= cap) return refused;
 		roster.push_back({});
 		roster.back().slot = fnum;
 		return roster.back();
@@ -284,9 +291,10 @@ void apply_player_list(std::vector<HostRosterSlot> &roster, const VarList &playe
 	}
 }
 
-std::vector<HostRosterSlot> roster_from_player_list(const VarList &player_list) {
+std::vector<HostRosterSlot> roster_from_player_list(const VarList &player_list,
+                                                    int max_players) {
 	std::vector<HostRosterSlot> roster;
-	apply_player_list(roster, player_list);
+	apply_player_list(roster, player_list, max_players);
 	return roster;
 }
 
@@ -297,14 +305,15 @@ std::vector<HostRosterSlot> roster_from_player_list(const VarList &player_list) 
 // only on a changed value; NapiStatement_SerializeVarList @0x4d0660 writes
 // `includeAll || dirty`; CNapiGameSession_SendHostUpdate @0x4d3860;
 // Game_StartMission @0x5248e4..0x524903;
-// CNapiGameSession_HandleHostVerifyResponse @0x4d5c52..0x4d5c9e].
+// CNapiGameSession_HandleHostVerifyResponse @0x4d5c52..0x4d5c9e]. A var new
+// past kKeptVarsMax is not kept (lobby_session.h).
 void merge_var_list(VarList &kept, const VarList &update) {
 	for (const VarEntry &e : update) {
 		auto it = std::find_if(kept.begin(), kept.end(), [&e](const VarEntry &k) {
 			return k.fnum == e.fnum && strutil::iequals(k.name, e.name);
 		});
 		if (it != kept.end()) it->value = e.value;
-		else kept.push_back(e);
+		else if (kept.size() < kKeptVarsMax) kept.push_back(e);
 	}
 }
 
@@ -420,8 +429,19 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 		auto it = std::find_if(state.roster.begin(), state.roster.end(),
 				[&slot](const HostRosterSlot &s) { return s.slot == slot.slot; });
 		if (name == "ClientHostPlayerAdded") {
-			if (it != state.roster.end()) *it = slot;
-			else state.roster.push_back(slot);
+			if (it != state.roster.end()) {
+				*it = slot;
+			} else if (roster_slot_in_range(slot.slot) &&
+			           state.roster.size() < roster_row_cap(state.max_players)) {
+				state.roster.push_back(slot);
+			} else {
+				// Past the roster's bounds (lobby_session.h): not kept, nothing written.
+				opennova::io::logf(opennova::io::LogLevel::kWarn,
+					"[lobby] player_added rid=%u slot=%d past the roster's bounds (%zu rows, "
+					"MaxPlayers %d); not kept",
+					state.rid, slot.slot, state.roster.size(), state.max_players);
+				return {{}, "ClientHostPlayerAdded:past-roster-bounds"};
+			}
 		} else {
 			if (it != state.roster.end()) state.roster.erase(it);
 			// The slot's vars leave the kept PlayerList with it: the host's
@@ -566,7 +586,6 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 	state.app_id = app_id;
 	state.hosting = true;
 
-	state.roster = roster_from_player_list(var_lists["PlayerList"]);
 	// The kept lists the updates merge into (the Cookie, the login's, is not kept).
 	state.last_host_update.clear();
 	for (const char *list : {"Host", "HostSetup", "PlayerList"}) {
@@ -588,6 +607,8 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 	else if (state.region.empty())          state.region = "us";
 	refresh_host_keys(state, host_info);
 	refresh_gsb_fields(state, host_setup, host_info);
+	// The roster once MaxPlayers is read: it bounds the rows (lobby_session.h).
+	state.roster = roster_from_player_list(var_lists["PlayerList"], state.max_players);
 	if (state.player_count == 0 && !state.roster.empty()) {
 		state.player_count = static_cast<int>(state.roster.size());
 	}
@@ -684,7 +705,9 @@ LobbyDispatchResult LobbySession::handle_client_host_update(
 	if (var_has(host_vars, "Region"))          state.region       = var_value(host_vars, "Region");
 	else if (var_has(host_vars, "Country"))    state.region       = var_value(host_vars, "Country");
 	refresh_gsb_fields(state, host_setup, host_vars);
-	if (update.count("PlayerList")) apply_player_list(state.roster, update["PlayerList"]);
+	if (update.count("PlayerList")) {
+		apply_player_list(state.roster, update["PlayerList"], state.max_players);
+	}
 
 	refresh_host_endpoint(state, host_vars, remote_ip, /*remote_port=*/0);
 	// Reflection override (dev/NAT) — same as the host-request path.
