@@ -256,60 +256,20 @@ int64_t ObjectData::get_panm_evaluation_serial() const {
 }
 
 Array ObjectData::evaluate_lights(int64_t p_time_ms, const Dictionary &p_ctrl_values) const {
+	// The LGHT walk, the loader's phase fixup and the evaluation are the
+	// engine's (renderer/material_eval.h eval_model_lights); the binding
+	// marshals each light's record fields beside its colour.
 	Array out;
 	if (!source_model_ || native_model().light_count == 0) {
 		return out;
 	}
-	const GlobalCtrlValues ctrl_values =
-			global_control_values_from_dict(p_ctrl_values);
-	for (size_t i = 0; i < native_model().light_count; ++i) {
-		const ThreediLight &light = native_model().lights[i];
-		if ((light.flags & THREEDI_LIGHT_FLAG_DISABLE_OBJECTS) != 0) {
-			continue;
-		}
-		// The loader fixup below rewrites the phase byte, so evaluate a copy.
-		ThreediLight runtime_light = light;
-		if (threedi_generator_names_register(runtime_light.style)) {
-			const char *name = nullptr;
-			const size_t local_ordinal = runtime_light.phase;
-			if (native_model().ctrl.registers != nullptr &&
-					local_ordinal < native_model().ctrl.count) {
-				name = native_model().ctrl.registers[local_ordinal].name;
-			}
-			// The light loader applies the same local-name -> global-ordinal
-			// rewrite as PANM. Controlled styles read that bus slot; waveform
-			// styles retain the resolved ordinal as their phase byte.
-			// [orig: model light fixups @ 0x5B5F4F..0x5B5F62;
-			//  RgbGen_EvaluateColor @ 0x5B23D0]
-			runtime_light.phase =
-					threedi_ctrl_register_loader_ordinal(name);
-		}
-		const std::array<uint8_t, 4> color_start = {
-			runtime_light.color_start[0], runtime_light.color_start[1], runtime_light.color_start[2], runtime_light.color_start[3]
-		};
-		const std::array<uint8_t, 4> color_end = {
-			runtime_light.color_end[0], runtime_light.color_end[1], runtime_light.color_end[2], runtime_light.color_end[3]
-		};
-		int32_t ctrl_value = 0;
-		// Light RgbGen shares the material RGB evaluator: only 113/114 read
-		// the resolved global CTRL slot (threedi_generator_reads_register).
-		// [orig: Light_GetPointLightParams @ 0x5A9180;
-		//  RgbGen_EvaluateColor @ 0x5B23D0]
-		if (threedi_generator_reads_register(THREEDI_GENERATOR_CONSUMER_LIGHT, runtime_light.style)) {
-			ctrl_value = ctrl_values[runtime_light.phase];
-		}
-		const opennova::renderer::LightRuntime runtime = opennova::renderer::eval_light_runtime(
-				runtime_light.style,
-				runtime_light.phase,
-				runtime_light.rate,
-				color_start,
-				color_end,
-				threedi_panm_runtime_time_ms(p_time_ms),
-				ctrl_value);
+	for (const opennova::renderer::ModelLightEval &eval : opennova::renderer::eval_model_lights(
+				 native_model(), p_time_ms, global_control_values_from_dict(p_ctrl_values))) {
+		const ThreediLight &light = native_model().lights[eval.index];
 		Dictionary entry;
 		entry["position"] = godot_vec3(light.offset);
-		entry["color"] = Color(runtime.r, runtime.g, runtime.b, 1.0f);
-		entry["intensity"] = runtime.intensity;
+		entry["color"] = Color(eval.runtime.r, eval.runtime.g, eval.runtime.b, 1.0f);
+		entry["intensity"] = eval.runtime.intensity;
 		entry["atten_start"] = light.atten_start;
 		entry["atten_end"] = light.atten_end;
 		entry["subobject"] = static_cast<int>(light.subobj_index);

@@ -240,13 +240,6 @@ public:
 	static float glare_glow_alpha(float p_view_dot_sun, int p_brightness,
 			float p_overcast_blend, float p_sun_dim_pct);
 
-	// The steady-state layer-1 cloud UV drift per second for a parsed
-	// sky_speed (rate = sky_speed << 10 through 62 Hz x 2^-28) — the single
-	// home of the old "sky_speed * 1024 * 62 / 2^28" magic; owners with a live
-	// weather node read the RAMPING rate off it instead
-	// (engine: formats/env/env_render.cpp).
-	static float cloud_uv_rate_per_second(float p_sky_speed);
-
 	// Field name -> renderer-consumption status for editor badging:
 	// {"status": "honored"|"partial"|"unconsumed", "faithful": bool,
 	//  "anchor": String, "note": String}. Statuses mirror

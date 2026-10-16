@@ -55,7 +55,6 @@ void EnvFile::_bind_methods() {
 	ClassDB::bind_static_method("EnvFile", D_METHOD("lit_water_color", "water", "light"), &EnvFile::lit_water_color);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("compute_sun_glare", "view_dot_sun", "occlusion_brightness"), &EnvFile::compute_sun_glare);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("dome_reference_height"), &EnvFile::dome_reference_height);
-	ClassDB::bind_static_method("EnvFile", D_METHOD("cloud_uv_rate_per_second", "sky_speed"), &EnvFile::cloud_uv_rate_per_second);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_body_distance"), &EnvFile::celestial_body_distance);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_sun_alpha", "overcast_blend", "sun_dim_pct"), &EnvFile::celestial_sun_alpha);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_moon_alpha", "fog_distance", "overcast_blend"), &EnvFile::celestial_moon_alpha);
@@ -634,14 +633,6 @@ float EnvFile::glare_glow_alpha(float p_view_dot_sun, int p_brightness,
 			opennova::io::float_to_fp16_16(p_view_dot_sun), p_brightness,
 			opennova::io::float_to_fp16_16(p_overcast_blend), opennova::io::float_to_fp16_16(p_sun_dim_pct),
 			false)) / 65536.0f;
-}
-
-float EnvFile::cloud_uv_rate_per_second(float p_sky_speed) {
-	// Steady state: the ramp's target rate (sky_speed << 10) through the
-	// per-second layer-1 UV scale [orig: @ 0x57eecc; @ 0x57f1a5, see docs/env/env-tod-re.md].
-	opennova::env::CloudScrollState steady;
-	steady.rate = static_cast<int>(p_sky_speed) << 10;
-	return opennova::env::cloud_uv_rate_per_second(steady);
 }
 
 Ref<EnvSunGlare> EnvFile::compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness) {

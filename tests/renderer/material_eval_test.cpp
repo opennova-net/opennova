@@ -1,5 +1,6 @@
 #include <runtime/renderer/material_eval.h>
 #include <base/crt/crt_rng.h>
+#include <formats/threedi/threedi_panm_pose.h>
 #include <formats/threedi/threedi_panm_runtime.h>
 
 #include <cmath>
@@ -737,6 +738,34 @@ int main() {
         expect(opennova::renderer::compute_anim_frame(
                        material, 2, 250, {}, ctrl_bus({})) == 0,
                "The optional frame-table bound should cap timed animation too");
+    }
+
+    {
+        // The model LGHT walk: a DISABLE_OBJECTS record is skipped; the rest
+        // evaluate as eval_light_runtime does over their record bytes.
+        opennova::threedi::ThreediLight lights[2] = {};
+        lights[0].style = 0;
+        lights[0].color_start[0] = 10; lights[0].color_start[1] = 20; lights[0].color_start[2] = 30;
+        lights[1].flags = static_cast<uint8_t>(opennova::threedi::THREEDI_LIGHT_FLAG_DISABLE_OBJECTS);
+        opennova::threedi::Threedi3di3 model{};
+        model.lights = lights;
+        model.light_count = 2;
+        const opennova::renderer::ControlRegisterValues bus{};
+        const std::vector<opennova::renderer::ModelLightEval> evals =
+                opennova::renderer::eval_model_lights(model, 500, bus);
+        expect(evals.size() == 1 && evals[0].index == 0, "DISABLE_OBJECTS skips the record");
+        const opennova::renderer::LightRuntime direct = opennova::renderer::eval_light_runtime(
+                lights[0].style, lights[0].phase, lights[0].rate,
+                {lights[0].color_start[0], lights[0].color_start[1], lights[0].color_start[2],
+                 lights[0].color_start[3]},
+                {lights[0].color_end[0], lights[0].color_end[1], lights[0].color_end[2],
+                 lights[0].color_end[3]},
+                opennova::threedi::threedi_panm_runtime_time_ms(500), 0);
+        expect(evals.empty() || (nearly_equal(evals[0].runtime.r, direct.r) &&
+                                 nearly_equal(evals[0].runtime.g, direct.g) &&
+                                 nearly_equal(evals[0].runtime.b, direct.b) &&
+                                 nearly_equal(evals[0].runtime.intensity, direct.intensity)),
+               "an unregistered style evaluates its own record bytes");
     }
 
     return 0;
