@@ -75,8 +75,10 @@ bool encode_field(const NapiField &f, uint8_t *&cur, const uint8_t *end) {
 	return true;
 }
 
-bool encode_message(const NapiMessage &msg, uint8_t *&cur, const uint8_t *end) {
-	if (!name_in_bounds(msg.name)) {
+// `depth` is the container's own nesting depth, 1 for the outermost.
+bool encode_message(const NapiMessage &msg, uint8_t *&cur, const uint8_t *end,
+                    size_t depth) {
+	if (depth > NAPI_MAX_CONTAINER_DEPTH || !name_in_bounds(msg.name)) {
 		return false;
 	}
 	const size_t need = message_size_impl(msg);
@@ -93,7 +95,7 @@ bool encode_message(const NapiMessage &msg, uint8_t *&cur, const uint8_t *end) {
 		}
 	}
 	for (const auto &c : msg.children) {
-		if (!encode_message(c, cur, end)) {
+		if (!encode_message(c, cur, end, depth + 1)) {
 			return false;
 		}
 	}
@@ -151,8 +153,11 @@ bool decode_field(const uint8_t *&cur, const uint8_t *end, NapiField &out) {
 	return true;
 }
 
-bool decode_message(const uint8_t *&cur, const uint8_t *end, NapiMessage &out) {
-	if (cur >= end || *cur != TAG_CONTAINER_START) {
+// `depth` is the container's own nesting depth, 1 for the outermost; one past
+// NAPI_MAX_CONTAINER_DEPTH fails before it recurses again.
+bool decode_message(const uint8_t *&cur, const uint8_t *end, NapiMessage &out,
+                    size_t depth) {
+	if (depth > NAPI_MAX_CONTAINER_DEPTH || cur >= end || *cur != TAG_CONTAINER_START) {
 		return false;
 	}
 	++cur; // consume 0x02
@@ -167,7 +172,7 @@ bool decode_message(const uint8_t *&cur, const uint8_t *end, NapiMessage &out) {
 		}
 		if (marker == TAG_CONTAINER_START) {
 			NapiMessage child;
-			if (!decode_message(cur, end, child)) {
+			if (!decode_message(cur, end, child, depth + 1)) {
 				return false;
 			}
 			out.children.push_back(std::move(child));
@@ -197,7 +202,7 @@ int napi_message_encode(const NapiMessage &msg, uint8_t *out, size_t out_cap, si
 	}
 	uint8_t *cur = out;
 	const uint8_t *end = out + out_cap;
-	if (!encode_message(msg, cur, end)) {
+	if (!encode_message(msg, cur, end, 1)) {
 		return -1;
 	}
 	*out_size = static_cast<size_t>(cur - out);
@@ -211,7 +216,7 @@ int napi_message_decode(const uint8_t *data, size_t data_len, NapiMessage &out, 
 	out = NapiMessage{}; // reset
 	const uint8_t *cur = data;
 	const uint8_t *end = data + data_len;
-	if (!decode_message(cur, end, out)) {
+	if (!decode_message(cur, end, out, 1)) {
 		return -1;
 	}
 	*bytes_consumed = static_cast<size_t>(cur - data);
@@ -243,7 +248,7 @@ int napi_stream_encode(const std::vector<NapiMessage> &messages,
 	uint8_t *cur = out;
 	const uint8_t *end = out + out_cap;
 	for (const auto &m : messages) {
-		if (!encode_message(m, cur, end)) {
+		if (!encode_message(m, cur, end, 1)) {
 			return -1;
 		}
 	}
@@ -274,7 +279,7 @@ int napi_stream_decode(const uint8_t *data, size_t data_len,
 			return -1;
 		}
 		NapiMessage msg;
-		if (!decode_message(cur, end, msg)) {
+		if (!decode_message(cur, end, msg, 1)) {
 			return -1;
 		}
 		out.push_back(std::move(msg));

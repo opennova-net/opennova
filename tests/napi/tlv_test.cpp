@@ -1,5 +1,6 @@
 #include <net/napi/tlv.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <vector>
@@ -301,6 +302,88 @@ bool check_retail_bounds() {
 
 } // namespace
 
+// A chain of `depth` containers, each named "A" and holding the next, as bytes:
+// `02 41 00` `depth` times, then `03` as many, then the stream's 0x01.
+std::vector<uint8_t> nested_chain_bytes(size_t depth) {
+	std::vector<uint8_t> out;
+	out.reserve(depth * 4 + 1);
+	for (size_t i = 0; i < depth; ++i) {
+		out.push_back(0x02);
+		out.push_back('A');
+		out.push_back(0x00);
+	}
+	out.insert(out.end(), depth, 0x03);
+	out.push_back(0x01);
+	return out;
+}
+
+// The same chain as a tree.
+opennova::NapiMessage nested_chain(size_t depth) {
+	opennova::NapiMessage root;
+	root.name = "A";
+	opennova::NapiMessage *cur = &root;
+	for (size_t i = 1; i < depth; ++i) {
+		cur->children.emplace_back();
+		cur = &cur->children.back();
+		cur->name = "A";
+	}
+	return root;
+}
+
+// The nesting bound (NAPI_MAX_CONTAINER_DEPTH, ours: a stock statement nests 3 or 4
+// deep). A chain at the bound encodes to the hand-built bytes and decodes both ways;
+// one past it neither encodes nor decodes; and the hostile stream, ~1.3 MB nesting
+// 330,000 deep (the shape that recursed the decoder off its stack), fails cleanly.
+bool check_nesting_bound() {
+	using opennova::NAPI_MAX_CONTAINER_DEPTH;
+	{
+		const auto msg = nested_chain(NAPI_MAX_CONTAINER_DEPTH);
+		std::vector<uint8_t> buf(opennova::napi_message_size(msg));
+		size_t written = 0;
+		if (!expect(opennova::napi_message_encode(msg, buf.data(), buf.size(), &written) == 0 &&
+		            written == buf.size(), "a chain at the bound encodes")) return false;
+		const auto bytes = nested_chain_bytes(NAPI_MAX_CONTAINER_DEPTH);
+		if (!expect(std::vector<uint8_t>(bytes.begin(), bytes.end() - 1) == buf,
+		            "its bytes are the hand-built chain's")) return false;
+		opennova::NapiMessage back;
+		size_t consumed = 0;
+		if (!expect(opennova::napi_message_decode(buf.data(), buf.size(), back, &consumed) == 0 &&
+		            consumed == buf.size() && messages_equal(back, msg),
+		            "a chain at the bound decodes")) return false;
+		std::vector<opennova::NapiMessage> stream;
+		if (!expect(opennova::napi_stream_decode(bytes.data(), bytes.size(), stream, &consumed) == 0 &&
+		            stream.size() == 1 && consumed == bytes.size(),
+		            "a stream at the bound decodes")) return false;
+	}
+	{
+		const auto msg = nested_chain(NAPI_MAX_CONTAINER_DEPTH + 1);
+		std::vector<uint8_t> buf(opennova::napi_message_size(msg));
+		size_t written = 0;
+		if (!expect(opennova::napi_message_encode(msg, buf.data(), buf.size(), &written) != 0,
+		            "a chain past the bound does not encode")) return false;
+		const std::vector<opennova::NapiMessage> one{msg};
+		std::vector<uint8_t> stream_buf(opennova::napi_stream_size(one));
+		if (!expect(opennova::napi_stream_encode(one, stream_buf.data(), stream_buf.size(), &written) != 0,
+		            "a stream past the bound does not encode")) return false;
+		const auto bytes = nested_chain_bytes(NAPI_MAX_CONTAINER_DEPTH + 1);
+		opennova::NapiMessage back;
+		size_t consumed = 0;
+		if (!expect(opennova::napi_message_decode(bytes.data(), bytes.size() - 1, back, &consumed) != 0,
+		            "a chain past the bound does not decode")) return false;
+		std::vector<opennova::NapiMessage> stream;
+		if (!expect(opennova::napi_stream_decode(bytes.data(), bytes.size(), stream, &consumed) != 0,
+		            "a stream past the bound does not decode")) return false;
+	}
+	{
+		const auto bytes = nested_chain_bytes(330000);
+		std::vector<opennova::NapiMessage> stream;
+		size_t consumed = 0;
+		if (!expect(opennova::napi_stream_decode(bytes.data(), bytes.size(), stream, &consumed) != 0 &&
+		            stream.empty(), "a stream nesting 330,000 deep fails to decode")) return false;
+	}
+	return true;
+}
+
 int main() {
 	if (!check_size_math()) return 1;
 	if (!check_retail_bounds()) return 1;
@@ -313,6 +396,7 @@ int main() {
 	if (!check_stream_roundtrip_and_terminator()) return 1;
 	if (!check_empty_stream()) return 1;
 	if (!check_malformed_rejected()) return 1;
+	if (!check_nesting_bound()) return 1;
 	std::printf("OK: TLV container 0x02/0x03 + field 0x04/NUL/0x05 byte-exact\n");
 	return 0;
 }

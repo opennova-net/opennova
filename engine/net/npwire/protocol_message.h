@@ -212,6 +212,15 @@ struct ProtocolMessage {
 // first message without FRAG_CONT.
 struct ProtocolReassemblyState {
 	std::vector<uint8_t> buffer;
+	// The most bytes one reassembled payload may hold; 0 is no bound, retail's
+	// split buffer (reassemble_protocol_payload). A bound is service policy, not
+	// retail's: the NovaWorld service's lobby connections set one
+	// (apps/novaworld_server/nw_udp_listener.h), so a client cannot grow the
+	// buffer without end. A stream that would pass it is dropped whole.
+	size_t max_bytes = 0;
+	// Set while the rest of a stream past max_bytes is being dropped: up to and
+	// including its final fragment, or until a first fragment starts another.
+	bool discarding = false;
 };
 
 ProtocolMessage make_protocol_message(uint8_t tag, std::vector<uint8_t> payload,
@@ -464,12 +473,16 @@ bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
 // contains a complete payload ready for higher-level dispatch. An
 // unfragmented record (no 0x06 bits) dispatches on its own and leaves a
 // pending fragment stream untouched; `was_fragmented` reports false for it.
+// Under a `state.max_bytes` bound, a fragment that would carry the stream past
+// it drops the stream (its buffer freed), and so does every later fragment of
+// it; each returns false with `was_dropped` set, and nothing dispatches.
 // [orig: CNapiNPConnection_DispatchMessage @0x622570, split-buffer gate
 //  `(msg_type & 6) != 0` @0x6225b1]
 bool reassemble_protocol_payload(ProtocolReassemblyState &state,
                                  const ProtocolMessage &msg,
                                  std::vector<uint8_t> &payload_out,
-                                 bool *was_fragmented = nullptr);
+                                 bool *was_fragmented = nullptr,
+                                 bool *was_dropped = nullptr);
 
 
 } // namespace opennova

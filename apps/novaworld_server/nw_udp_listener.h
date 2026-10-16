@@ -30,6 +30,12 @@ class World;
 
 namespace opennova::novaworld_server {
 
+// The longest lobby statement a connection may reassemble (service policy, not
+// retail's): far past the longest a stock client or host sends (a cookie-heavy
+// ClientRequestVerifyResult, a few KB), so a client cannot grow the buffer
+// without end; a longer stream is dropped whole.
+inline constexpr size_t kLobbyStatementMaxBytes = 64 * 1024;
+
 // Per-connection state owned by NwUdpListener (in addition to the wire-level
 // info ConnectionRegistry tracks). Keyed by peer address.
 //
@@ -88,8 +94,9 @@ struct LobbyConnState {
 	// (e.g. ClientRequestVerifyResult ~3.4 KB per
 	// docs/net/novaworld-net-re.md) carry FRAG_CONT (0x04) on
 	// every chunk except the final. We accumulate into `reassembly`
-	// and only dispatch the assembled payload when FRAG_CONT clears.
-	ProtocolReassemblyState reassembly;
+	// and only dispatch the assembled payload when FRAG_CONT clears,
+	// up to kLobbyStatementMaxBytes.
+	ProtocolReassemblyState reassembly{/*buffer=*/{}, /*max_bytes=*/kLobbyStatementMaxBytes};
 };
 
 struct ServerConfig;
