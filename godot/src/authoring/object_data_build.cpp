@@ -1,4 +1,4 @@
-#include "object/object_data_build.h"
+#include "authoring/object_data_build.h"
 
 #include <godot_cpp/variant/packed_string_array.hpp>
 

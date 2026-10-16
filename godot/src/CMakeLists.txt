@@ -146,7 +146,6 @@ add_library(opennova_bindings OBJECT
     object/object_data_materials.cpp
     object/object_data_geometry.cpp
     object/object_data_runtime_eval.cpp
-    object/object_data_build.cpp
     object/object_shader_cache.cpp
     object/item_database.cpp
     object/model_light.cpp
@@ -391,6 +390,7 @@ if(OPENNOVA_EDITOR)
         authoring/mission_map_viewport_applier.cpp
         authoring/mission_viewport_applier.cpp
         authoring/model_viewport_applier.cpp
+        authoring/object_data_build.cpp
         authoring/play_logic_link.cpp
         authoring/preview_backdrop.cpp
         authoring/preview_scene_layers.cpp
