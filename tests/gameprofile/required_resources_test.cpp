@@ -9,6 +9,7 @@
 #include <runtime/audio/music_policy.h>
 
 #include <string>
+#include <vector>
 
 using namespace opennova::gameprofile;
 
@@ -318,6 +319,31 @@ static int test_boot_and_mission_report_lines(void) {
 
 /* Under /exp the game reads M<n>.* and G<n>.* in the place of the base music pairs, and nothing
  * else of the base game's. */
+/* The boot probe: the FATAL rows a mount is asked for by name, in manifest order; never the
+   archive-table trio (the mount's own gate) nor a pattern row. */
+static int test_missing_boot_resources(void) {
+    const std::vector<std::string> none_present =
+            gameprofile_missing_boot_resources([](const std::string &) { return false; });
+    int fatal_named = 0;
+    for (int i = 0; i < gameprofile_required_resource_count(); ++i) {
+        const RequiredResource *row = gameprofile_required_resource_at(i);
+        if (row->severity == RES_FATAL && (row->flags & (RES_F_PFF_TABLE_ANY | RES_F_PATTERN)) == 0)
+            CHECK(none_present.size() > static_cast<size_t>(fatal_named) &&
+                          none_present[static_cast<size_t>(fatal_named++)] == row->name,
+                  "every named FATAL row, in manifest order");
+    }
+    CHECK(none_present.size() == static_cast<size_t>(fatal_named), "no other row");
+    for (const std::string &name : none_present)
+        CHECK(name != "resource.pff" && name != "localres.pff" && name != "language.pff",
+              "the archive trio is the mount's own gate");
+    CHECK(gameprofile_missing_boot_resources([](const std::string &) { return true; }).empty(),
+          "a full mount lacks nothing");
+    const std::vector<std::string> one = gameprofile_missing_boot_resources(
+            [](const std::string &name) { return name != "gametext.bin"; });
+    CHECK(one.size() == 1 && one[0] == "gametext.bin", "exactly the missing one");
+    return 1;
+}
+
 static int test_replaced_under_expansion(void) {
     for (const char *name : {"MENUMUS.SBF", "menumus.bin", "GAMEMUS.SBF", "gamemus.BIN"})
         CHECK(gameprofile_replaced_under_expansion(name), "a base music pair");
@@ -348,6 +374,7 @@ int main(void) {
     RUN_TEST(test_resource_missing_lines);
     RUN_TEST(test_boot_and_mission_report_lines);
     RUN_TEST(test_replaced_under_expansion);
+    RUN_TEST(test_missing_boot_resources);
     printf("%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

@@ -67,6 +67,22 @@ int main() {
   if (!expect(file.get_in_section("hud", "BTN_OK") == "Main OK",
               "moved entry should resolve in its new section")) return 1;
 
+  // insert_entry: at the end of its section's run, a later section's entries after it.
+  {
+    File ins;
+    ins.sections.push_back({"a", 0});
+    ins.sections.push_back({"b", 0});
+    ins.entries.push_back(Entry{"A1", "a1", {}, 0});
+    ins.entries.push_back(Entry{"B1", "b1", {}, 1});
+    ins.normalize_grouping();
+    if (!expect(ins.insert_entry(Entry{"A2", "a2", {}, 0}) == 1, "a's run ends before b's")) return 1;
+    if (!expect(ins.insert_entry(Entry{"B2", "b2", {}, 1}) == 3, "b's run is the tail")) return 1;
+    ins.normalize_grouping();
+    if (!expect(ins.is_grouped() && ins.get_in_section("a", "A2") == "a2" &&
+                    ins.get_in_section("b", "B2") == "b2",
+                "inserted entries resolve in their sections")) return 1;
+  }
+
   std::printf("OK: section-scoped lookup matches engine semantics\n");
   return 0;
 }

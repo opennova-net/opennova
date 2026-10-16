@@ -168,21 +168,11 @@ PackedStringArray ResourceRoot::list_missing_boot_resources() const {
 	if (root_dir_.is_empty()) {
 		return missing;
 	}
-	for (int i = 0; i < gameprofile_required_resource_count(); ++i) {
-		const RequiredResource *row = gameprofile_required_resource_at(i);
-		if (row->severity != RES_FATAL) {
-			continue;
-		}
-		// The archive-table trio's all-missing gate belongs to mount_runtime
-		// itself [orig: fatal check @ 0x4a6f44, see docs/vfs/vfs-pff-mount-re.md]; pattern rows carry no
-		// probeable literal name.
-		if ((row->flags & (RES_F_PFF_TABLE_ANY | RES_F_PATTERN)) != 0) {
-			continue;
-		}
-		const String name = String::utf8(row->name);
-		if (!has_file(name)) {
-			missing.push_back(name);
-		}
+	// The rows asked and their order are the engine's
+	// (gameprofile_missing_boot_resources); the mount answers.
+	for (const std::string &name : gameprofile_missing_boot_resources(
+				 [this](const std::string &file) { return has_file(String::utf8(file.c_str())); })) {
+		missing.push_back(String::utf8(name.c_str()));
 	}
 	return missing;
 }

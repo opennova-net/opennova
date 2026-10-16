@@ -989,17 +989,11 @@ int Simulation::get_class_allow_mask() const {
 }
 
 const opennova::world::SpawnZoneRegistry &Simulation::deploy_zone_registry() {
-	// Built once per load; the zone set is authored (the world stream upserts state,
-	// not membership). The joiner role hook resets the flag. [orig: Entity_BuildSpawnZoneList
-	// @0x43EAE0 — rebuilt at mission start]
-	const uint64_t sync_serial = joiner_role_ != nullptr ? joiner_role_->world_sync_serial() : 0;
-	if (kernel_ && (!net_.deploy_zone_registry_built ||
-			net_.deploy_zone_registry_sync_serial != sync_serial)) {
-		net_.deploy_zone_registry = kernel_->world.zones.build_spawn_zone_list();
-		net_.deploy_zone_registry_built = true;
-		net_.deploy_zone_registry_sync_serial = sync_serial;
-	}
-	return net_.deploy_zone_registry;
+	// The cache's lifetime is the engine's (world::SpawnZoneRegistryCache); a
+	// fresh world invalidates it.
+	if (!kernel_) return net_.deploy_zone_registry.registry;
+	return net_.deploy_zone_registry.get(kernel_->world,
+			joiner_role_ != nullptr ? joiner_role_->world_sync_serial() : 0);
 }
 
 int Simulation::deploy_key_pick(int p_vk) {

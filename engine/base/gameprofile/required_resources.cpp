@@ -416,4 +416,16 @@ bool gameprofile_replaced_under_expansion(const std::string &name) {
     return false;
 }
 
+std::vector<std::string> gameprofile_missing_boot_resources(
+        const std::function<bool(const std::string &name)> &has_file) {
+    std::vector<std::string> missing;
+    for (int i = 0; i < gameprofile_required_resource_count(); ++i) {
+        const RequiredResource *row = gameprofile_required_resource_at(i);
+        if (row->severity != RES_FATAL) continue;
+        if ((row->flags & (RES_F_PFF_TABLE_ANY | RES_F_PATTERN)) != 0) continue;
+        if (!has_file(row->name)) missing.push_back(row->name);
+    }
+    return missing;
+}
+
 } // namespace opennova::gameprofile

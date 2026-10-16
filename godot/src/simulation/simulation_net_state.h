@@ -149,13 +149,9 @@ struct SimulationNetState {
 	// grant above rebuilt the slots; engine: world/weapon_inventory.h
 	// weapon_inventory_apply_authority_pools carries the witness).
 	uint64_t joiner_applied_ammo_pools_revision = 0;
-	// The deploy/spawn-zone registry (letters/pick-index space), built lazily
-	// per load (engine: runtime/hud/hud_lfp_panel.h), and the joiner role's
-	// world-sync serial it was last derived at (a streamed topology change
-	// moves it; the registry re-derives).
-	opennova::world::SpawnZoneRegistry deploy_zone_registry;
-	bool deploy_zone_registry_built = false;
-	uint64_t deploy_zone_registry_sync_serial = 0;
+	// The deploy/spawn-zone registry (letters/pick-index space) and its
+	// lifetime (engine world::SpawnZoneRegistryCache).
+	opennova::world::SpawnZoneRegistryCache deploy_zone_registry;
 };
 
 } // namespace godot

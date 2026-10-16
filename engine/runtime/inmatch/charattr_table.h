@@ -16,6 +16,10 @@
 #include <cstddef>
 #include <cstdint>
 
+namespace opennova::world {
+class World; // the class-key must match world.h
+}
+
 namespace opennova::inmatch {
 
 struct CharAttrTable {
@@ -98,5 +102,14 @@ uint32_t charattr_class_checksum(const CharAttrTable &state, uint8_t class_id, u
 // The sixteen per-class ATTRIBUTES words as charattr_class_has_attribute reads them (index = class - 1):
 // an active row's word while ATTRIBUTES is not disabled, else 0. World::class_attribute_flags takes them.
 std::array<uint32_t, charattr::kClassCount> charattr_class_attribute_rows(const CharAttrTable &state);
+
+// The world's per-class ATTRIBUTES words and disabled word from the table this
+// client holds: a joiner's live copy (every S2C 0x41 / 0x42 applied so far)
+// when `live` is set, else the boot copy (a host's, its restrictions applied);
+// a failed or missing charattr.def is the all-zero table, no class carrying an
+// attribute [orig: CharAttr_LoadFromDef @0x412140 memsets 0x7C0 bytes first;
+// CharAttr_ClassHasAttribute @0x4125e0].
+void install_class_attribute_flags(world::World &world, const CharAttrTable *live,
+		const CharAttrTable &boot);
 
 } // namespace opennova::inmatch

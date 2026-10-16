@@ -164,6 +164,21 @@ int main() {
             opennova::inmatch::CharAttrTable{});
     for (uint8_t c = 0; c < 32; ++c) CHECK(!w.tables.class_has_attribute(c, 0xFFFFFFFFu));
 
+    // The table a client installs from: its live copy when it has one, else the boot copy.
+    {
+        World iw;
+        opennova::inmatch::CharAttrTable boot{};
+        opennova::inmatch::CharAttrTable live{};
+        boot.table.rows[4].active = 1;
+        boot.table.rows[4].class_id = 5;
+        boot.table.rows[4].attributes = 0x8u;
+        opennova::inmatch::install_class_attribute_flags(iw, nullptr, boot);
+        CHECK(iw.tables.class_attribute_flags == opennova::inmatch::charattr_class_attribute_rows(boot));
+        CHECK(iw.tables.charattr_disabled_word == opennova::inmatch::charattr_pack_disabled(boot));
+        opennova::inmatch::install_class_attribute_flags(iw, &live, boot);
+        CHECK(iw.tables.class_attribute_flags == opennova::inmatch::charattr_class_attribute_rows(live));
+    }
+
     if (failures == 0) std::printf("charattr_flags_test: ok\n");
     return failures == 0 ? 0 : 1;
 }

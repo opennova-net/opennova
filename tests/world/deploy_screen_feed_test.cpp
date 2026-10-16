@@ -11,6 +11,7 @@
 
 #include <runtime/world/deploy_screen_feed.h>
 #include <runtime/world/spawn_select.h>
+#include <runtime/world/world.h>
 
 using namespace opennova::world;
 
@@ -380,6 +381,21 @@ int main() {
 	test_status_line();
 	test_statics();
 	test_statics_text();
+	// The registry cache: built once, kept while the world sync serial stands,
+	// rebuilt when it moves or when invalidated.
+	{
+		World w;
+		SpawnZoneRegistryCache cache;
+		CHECK(!cache.built);
+		cache.get(w, 0);
+		CHECK(cache.built);
+		cache.registry.min_x = 99; // a marker a rebuild clears
+		CHECK(cache.get(w, 0).min_x == 99);
+		CHECK(cache.get(w, 1).min_x != 99 && cache.sync_serial == 1);
+		cache.registry.min_x = 99;
+		cache.invalidate();
+		CHECK(cache.get(w, 1).min_x != 99);
+	}
 	// The rows' team tag [orig: @0x553adb..0x553af1].
 	CHECK(std::string(deploy_list_team_color_tag(2)) == "<cFF2020>");
 	CHECK(std::string(deploy_list_team_color_tag(1)) == "<c4040FF>");

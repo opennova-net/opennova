@@ -125,6 +125,18 @@ struct SpawnZoneRegistry {
     int32_t min_x = 0, min_y = 0, max_x = 0, max_y = 0;
     bool empty() const { return entries.empty(); }
 };
+// The deploy screen's registry, built once per mission and again whenever the
+// joiner's world sync serial moves (the zone set is authored: the world stream
+// upserts zone state, not membership) [orig: Entity_BuildSpawnZoneList
+// @0x43EAE0, rebuilt at mission start].
+struct SpawnZoneRegistryCache {
+    SpawnZoneRegistry registry;
+    bool built = false;
+    uint64_t sync_serial = 0;
+    const SpawnZoneRegistry &get(const World &world, uint64_t world_sync_serial);
+    void invalidate() { built = false; }
+};
+
 // Registry index of a zone entity, -1 when absent [orig: SpawnZoneList_IndexOf @0x43B990].
 int spawn_zone_index_of(const SpawnZoneRegistry &registry, EntityHandle handle);
 

@@ -679,4 +679,14 @@ uint16_t deploy_pick_wire_value(int param, const SpawnZoneRegistry &registry) {
     return kDeployPickNone;
 }
 
+const SpawnZoneRegistry &SpawnZoneRegistryCache::get(const World &world,
+                                                     uint64_t world_sync_serial) {
+    if (!built || sync_serial != world_sync_serial) {
+        registry = world.zones.build_spawn_zone_list();
+        built = true;
+        sync_serial = world_sync_serial;
+    }
+    return registry;
+}
+
 } // namespace opennova::world

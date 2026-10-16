@@ -567,7 +567,7 @@ std::function<void(bool)> Simulation::role_bringup_tail() {
 		}
 		if (is_joiner()) {
 			net_.joiner_applied_loadout_revision = 0;
-			net_.deploy_zone_registry_built = false; // fresh world -> fresh zone registry
+			net_.deploy_zone_registry.invalidate(); // fresh world -> fresh zone registry
 			// Re-arm the 0x2F submission seam from the carried sim state. The fresh
 			// kernel holds an EMPTY weapon catalog, so this is a deliberate no-op
 			// that leaves the capture-default fallback armed; the real arm happens
@@ -821,7 +821,7 @@ void Simulation::restore_world_baseline() {
 		// its registry carriers. Force one exact rematerialization fold; retain the
 		// already-built portal tables because their handles remain identical and
 		// the occlusion models' weld records are intentionally one-shot mutable.
-		net_.deploy_zone_registry_built = false;
+		net_.deploy_zone_registry.invalidate();
 	}
 	if (assets_.collision_item_db.is_valid())
 		resolve_collision_instances(assets_.collision_item_db);

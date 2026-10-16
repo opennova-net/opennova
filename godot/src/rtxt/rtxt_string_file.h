@@ -39,7 +39,6 @@ private:
 	opennova::rtxt::File file_;
 
 	void _refresh();  // rebuild lookup + recompute section counts
-	int _section_insert_index(uint32_t p_section_index) const;
 
 protected:
 	static void _bind_methods();

@@ -102,6 +102,14 @@ struct File {
   // recompute section string_counts. Rebuilds the lookup map if built.
   void normalize_grouping();
 
+  // Insert `entry` at the end of its section's run (one past the last entry of
+  // a section <= its section_index: the run's end in a grouped file, a sane
+  // append point in a not-yet-normalized one), keeping the grouping a lookup
+  // derives its ranges from [orig: TextResource_FindEntryBySectionAndKey
+  // @ 0x75D250, the ranges from accumulated string_counts]. Returns the index.
+  // The caller recomputes counts / lookup (normalize_grouping, build_lookup).
+  size_t insert_entry(Entry entry);
+
   // Get all entries in a section by index.
   std::vector<const Entry *> get_section_entries(uint32_t section_index) const;
 
