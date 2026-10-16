@@ -113,10 +113,25 @@ bool logical_name_fits_archive(std::string_view name);
 /* --- Write API --- */
 
 /* The writers' own version: bumped whenever pff_write_archive and PffStreamWriter would write other
-   bytes for the same entries (their order, the header, the directory), so a build that keys an
-   archive by its entries' content keys it by the writer too, and never takes an archive the older
-   writer packed for one this writer would pack (ADR 0046 S13 A8). */
-inline constexpr uint32_t PFF_WRITER_VERSION = 1;
+   bytes for the same entries (their order, the header, the directory, the footer), so a build that
+   keys an archive by its entries' content keys it by the writer too, and never takes an archive the
+   older writer packed for one this writer would pack (ADR 0046 S13 A8). 2: the directory in the
+   entries' own order and the retail footer (1: sorted by name, no footer). */
+inline constexpr uint32_t PFF_WRITER_VERSION = 2;
+
+/* The 12 bytes the retail packer ends an archive with, after the directory: the packing machine's
+   IPv4 address as gethostbyname(gethostname()) answers it, in network order
+   [orig: sub_403360 @ 0x403360 (pack.exe)]; a second word kept from the archive's earlier footer
+   (zero for a new archive), which the packer overwrites with the address only on a 65.211.238.x
+   machine; and 'KING' [orig: sub_4040E0 @ 0x4042B7..0x40432F (pack.exe)]
+   [orig: sub_4030E0 @ 0x40312B..0x40318A (pack.exe)]. No reader reads it (PFF_Open @ 0x7682e0
+   reads the header and the directory). Every JO:CA archive ends with c0a8a939 00000000 'KING'
+   (192.168.169.57, a private address, presumably the packing machine's); OpenNova writes those
+   bytes, never its own machine's address, so an archive is the same bytes on every machine and
+   a JO:CA archive written again is its own bytes (D-VFS-X1). */
+inline constexpr int PFF_FOOTER_SIZE = 12;
+inline constexpr uint8_t PFF_RETAIL_FOOTER[PFF_FOOTER_SIZE] = { 0xC0, 0xA8, 0xA9, 0x39, 0x00, 0x00,
+                                                                 0x00, 0x00, 'K',  'I',  'N',  'G' };
 
 /* Container format selector for a written archive (legacy is read-only; not authored here). */
 typedef enum PffFormat {
@@ -165,22 +180,22 @@ inline constexpr int PFF_WRITE_ERR_TOO_LARGE = -5;  /* total payload size overfl
    reads as PFF_WRITE_ERR_IO's. */
 const char *pff_write_error_string(int code);
 
-/* Write a modern archive: header(20) | payloads | directory(36 each). Entries are emitted sorted
-   by normalized name (uppercase + trailing-space trim), matching the engine's on-disk convention
-   so naive readers that bsearch without re-sorting still resolve; our pff_open and the retail
-   loader both re-sort on load regardless. The write goes to "<path>.tmp" then atomically renames
-   onto `path`, so a crash never leaves a half-written archive. Returns PFF_WRITE_OK on success or
-   one of the PFF_WRITE_ERR_* codes. Models the on-disk layout of PFF_Open @ 0x7682e0. */
+/* Write a modern archive in retail's layout: header(20) | payloads | directory(36 each) | the
+   footer (PFF_RETAIL_FOOTER), the payloads and the directory both in the entries' own order, as
+   every retail archive lists its entries in the order their payloads lie (our pff_open and the
+   retail loader sort the directory on load). The write goes to "<path>.tmp" then atomically
+   renames onto `path`, so a crash never leaves a half-written archive. Returns PFF_WRITE_OK on
+   success or one of the PFF_WRITE_ERR_* codes. Models the on-disk layout of PFF_Open @ 0x7682e0. */
 int pff_write_archive(const char *path, PffFormat format,
                                  const PffWriteEntry *entries, uint32_t n);
 
 /* Streaming variant. The writer pulls each entry's stored bytes via `read_entry` as it serializes,
    so only one payload is buffered at a time (the editor's Save-As streams retained payloads
    straight from the still-open source archive instead of materializing the whole archive in RAM).
-   read_entry must fill `out` with exactly `size` bytes for the entry at `index` (the ORIGINAL
-   array index, not the sorted write position) and return 0 on success, non-zero on failure. Same
-   header/payload/directory layout, name validation, sort, and atomic temp-rename as
-   pff_write_archive: both run PffStreamWriter (pff_stream_writer.h) to the end in one call. */
+   read_entry must fill `out` with exactly `size` bytes for the entry at `index` (its index in the
+   array, which is also its written place) and return 0 on success, non-zero on failure. Same
+   layout, name validation and atomic temp-rename as pff_write_archive: both run PffStreamWriter
+   (pff_stream_writer.h) to the end in one call. */
 typedef int (*PffReadEntryFn)(void *ctx, uint32_t index, uint8_t *out, uint32_t size);
 
 typedef struct PffWriteStreamEntry {
@@ -198,8 +213,8 @@ int pff_write_archive_streamed(const char *path, PffFormat format,
 /* The archive `source` written again to `path` with one entry's bytes replaced: every other entry's
    stored bytes as the source holds them (an encrypted one still encrypted, its flags, time and
    checksum kept, pff_extract_raw), the entry at `index` (into source->entries) `size` bytes of
-   `data`, stored plain (flags 0) under its own name, time and checksum; in the source's format
-   (pff_format_for_magic of its magic). The write is pff_write_archive_streamed's (temp file, then the
+   `data`, stored plain (flags 0) under its own name, time and checksum; every entry in the source's
+   payload order (pff_payload_order), in the source's format (pff_format_for_magic of its magic). The write is pff_write_archive_streamed's (temp file, then the
    rename onto `path`), so `path` is never the source's own file while it is open. Returns
    PFF_WRITE_OK or a PFF_WRITE_ERR_* code (PFF_WRITE_ERR_IO for an index past the entries). */
 int pff_rewrite_with_entry(const PffArchive *source, uint32_t index, const uint8_t *data, uint32_t size,
@@ -219,14 +234,29 @@ struct PffEditEntry {
 
 /* The archive at `path` with `adds` written in (an entry whose normalized name matches is
    replaced) and `removes` taken out (a name the archive lacks is nothing to do), as pack.exe's
-   `/FORCE` add and `-name` remove leave it (D-UPD-1: in process, never a child pack.exe). Every
-   other entry keeps its stored bytes, flags, time and checksum. An archive that does not exist is
-   created (PFF3, ADR 0008). Nothing is written when no entry would change (an add identical to the
+   `/FORCE` add and `-name` remove leave its live entries (D-UPD-1: in process, never a child
+   pack.exe; written compact, where pack.exe keeps a removed or replaced entry's bytes as a
+   `<DEAD SPACE>` record and refills such holes). Every other entry keeps its stored bytes,
+   flags, time and checksum and its place in the archive's payload order (pff_payload_order);
+   the adds follow them. An archive that does not exist is created (PFF3, ADR 0008). Nothing is written when no entry would change (an add identical to the
    entry it replaces, a remove of a missing name), and `*rewritten` says whether it was. The new
    archive is written beside `path` ("<path>.new") and then put in its place. Returns PFF_WRITE_OK
    or a PFF_WRITE_ERR_* code. */
 int pff_apply_edits(const char *path, const std::vector<PffEditEntry> &adds,
 		const std::vector<std::string> &removes, bool *rewritten);
+
+/* pff_apply_edits with nothing to apply, written whatever: the archive at `path` written to
+   `out_path` (never `path` itself) with every entry kept as an edit keeps it. A retail archive
+   written so is its own bytes (ctest pff_retail_rewrite, over JO:CA's five). Returns PFF_WRITE_OK
+   or a PFF_WRITE_ERR_* code (PFF_WRITE_ERR_IO for an archive that does not open). */
+int pff_write_archive_again(const char *path, const char *out_path);
+
+/* `archive`'s entries (indices into archive->entries, which pff_open sorts by name) in the order
+   their payloads lie in the file: by offset, an empty entry before the payload that starts where it
+   does. A retail archive's directory lists them so (the packer's list order), and the writers keep
+   it. Two empty entries at one offset come back in name order, which pff_open's sort leaves no
+   way to tell apart (no JO:CA archive holds an empty entry). */
+std::vector<uint32_t> pff_payload_order(const PffArchive &archive);
 
 /* Optional progress callback for the streaming writer: invoked once per entry as payloads are
    written, with `done` running 1..n and `total` == n (fires for zero-size entries too, so `done`

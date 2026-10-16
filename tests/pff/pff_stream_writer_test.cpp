@@ -1,8 +1,10 @@
-// Pins the resumable PFF writer (S13 A1, formats/pff/pff_stream_writer.h) against the archives the
-// writer made before it existed: each fixture set written a budget of 1 byte, 7 bytes and the
-// whole at a time, and through the single-call forms, is byte for byte the archive of the
-// pre-stream writer, whose size and 64-bit FNV-1a digest are recorded below (taken from that
-// writer's pff_write_archive over the same sets). Also: the payloads are asked for one entry at
+// Pins the resumable PFF writer (S13 A1, formats/pff/pff_stream_writer.h) against recorded archives:
+// each fixture set written a budget of 1 byte, 7 bytes and the whole at a time, and through the
+// single-call forms, is byte for byte the recorded archive, whose size and 64-bit FNV-1a digest
+// are below. The records are retail's layout (PFF_WRITER_VERSION 2, ADR 0008 as amended): the
+// payloads and the directory in the fixture's own order, then the 12-byte retail footer, computed
+// from that layout independently of the writer (the version-1 records, the directory sorted by
+// name and no footer, were 199 / 141284 / 20 bytes). Also: the payloads are asked for one entry at
 // a time at increasing offsets, a writer dropped before finish() leaves no file, and finish()
 // replaces an existing archive.
 #include <stdint.h>
@@ -52,7 +54,7 @@ struct Spec {
 	uint32_t checksum;
 };
 
-// A fixture set and what the pre-stream writer made of it.
+// A fixture set and the archive recorded for it.
 struct Fixture {
 	const char *label;
 	PffFormat format;
@@ -68,7 +70,7 @@ std::vector<Fixture> fixtures() {
 		  {"alpha.txt", 1, 5, 0, 0x11223344u, 0x55667788u},
 		  {"empty.bin", 0, 0, 0, 0, 0},
 		  {"Bravo.dat", 2, 3, 0, 0, 0}},
-		 199, 0x8345D1B73FB72573ull},
+		 211, 0x22E0490082682CE8ull},
 		{"sizes", PFF_FORMAT_PFF4,
 		 {{"zz_last.bin", 10, 0, 0, 0, 0},
 		  {"Mid.TGA", 11, 1, 0, 0, 0},
@@ -82,8 +84,8 @@ std::vector<Fixture> fixtures() {
 		  {"Big.tga", 19, 65537, 0, 0, 0},
 		  {"bigger.pcx", 20, 70000, PFF_FLAG_ENCRYPTED, 0, 0},
 		  {"e4.lwf", 21, 3, 0, 0, 0}},
-		 141284, 0xEF7CAEA65A64E8C3ull},
-		{"empty", PFF_FORMAT_BHD, {}, 20, 0x041C8451988F1062ull},
+		 141296, 0x85900724F4B4A545ull},
+		{"empty", PFF_FORMAT_BHD, {}, 32, 0xB414C50FC11658CFull},
 	};
 }
 

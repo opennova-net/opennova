@@ -1,10 +1,11 @@
-/* The PFF archive writer, a budget of payload bytes at a time. [orig: PFF_SortEntries @ 0x768280;
-   the layout is a from-scratch inverse of the retail loader, PFF_Open @ 0x7682e0,
-   docs/vfs/vfs-pff-mount-re.md, ADR 0008]
-   header(20) | payloads in the directory's order | directory(36 each), the directory sorted by
-   normalized name (uppercase, trailing spaces trimmed: the engine's own convention, which its
-   loader sorts by again). Payloads are never transformed: the bytes the caller supplies are the
-   stored bytes (container-XOR-encrypted iff flags & PFF_FLAG_ENCRYPTED). */
+/* The PFF archive writer, a budget of payload bytes at a time: a from-scratch inverse of the retail
+   loader [orig: PFF_Open @ 0x7682e0], in the retail packer's order and with its footer
+   [orig: sub_4040E0 @ 0x4041A3..0x40432F (pack.exe)] (docs/vfs/vfs-pff-mount-re.md, ADR 0008).
+   header(20) | payloads in the entries' order | directory(36 each) in that same order | footer(12).
+   Every JO:CA archive is laid out so: its directory lists the entries in the order their payloads
+   lie, and the loader sorts it itself [orig: PFF_SortEntries @ 0x768280]. Payloads are never
+   transformed: the bytes the caller supplies are the stored bytes (container-XOR-encrypted iff
+   flags & PFF_FLAG_ENCRYPTED). */
 
 #include <formats/pff/pff_stream_writer.h>
 
@@ -91,11 +92,8 @@ int PffStreamWriter::open(const char *path, PffFormat format, const PffWriteStre
 		checked[i].timestamp = entries[i].timestamp;
 		checked[i].checksum = entries[i].checksum;
 	}
-	std::vector<uint32_t> order(n);
-	for (uint32_t i = 0; i < n; ++i) order[i] = i;
-	std::sort(order.begin(), order.end(), [&norm](uint32_t a, uint32_t b) { return norm[a] < norm[b]; });
-	for (uint32_t k = 1; k < n; ++k)
-		if (norm[order[k]] == norm[order[k - 1]]) return PFF_WRITE_ERR_DUP_NAME;
+	std::sort(norm.begin(), norm.end());
+	if (std::adjacent_find(norm.begin(), norm.end()) != norm.end()) return PFF_WRITE_ERR_DUP_NAME;
 
 	path_ = path;
 	tmp_path_ = path_ + ".tmp";
@@ -103,7 +101,6 @@ int PffStreamWriter::open(const char *path, PffFormat format, const PffWriteStre
 	if (file_ == nullptr) return PFF_WRITE_ERR_IO;
 	format_ = format;
 	entries_ = std::move(checked);
-	order_ = std::move(order);
 	read_ = read;
 	ctx_ = ctx;
 	next_ = 0;
@@ -126,8 +123,8 @@ int PffStreamWriter::open(const char *path, PffFormat format, const PffWriteStre
 int PffStreamWriter::write(uint64_t budget) {
 	if (file_ == nullptr) return PFF_WRITE_ERR_IO;
 	uint64_t left = budget;
-	while (next_ < order_.size()) {
-		Entry &entry = entries_[order_[next_]];
+	while (next_ < entries_.size()) {
+		Entry &entry = entries_[next_];
 		if (entry_done_ == 0) entry.offset = position_;
 		const uint32_t remaining = entry.size - entry_done_;
 		if (remaining == 0) {
@@ -138,7 +135,7 @@ int PffStreamWriter::write(uint64_t budget) {
 		if (left == 0) break;
 		const uint32_t chunk = uint32_t(std::min<uint64_t>({remaining, left, kChunkBytes}));
 		if (chunk_.size() < chunk) chunk_.resize(chunk);
-		if (read_(ctx_, order_[next_], entry_done_, chunk_.data(), chunk) != 0) return fail(PFF_WRITE_ERR_IO);
+		if (read_(ctx_, uint32_t(next_), entry_done_, chunk_.data(), chunk) != 0) return fail(PFF_WRITE_ERR_IO);
 		if (fwrite(chunk_.data(), 1, chunk, file_) != chunk) return fail(PFF_WRITE_ERR_IO);
 		entry_done_ += chunk;
 		position_ += chunk;
@@ -150,11 +147,11 @@ int PffStreamWriter::write(uint64_t budget) {
 
 int PffStreamWriter::finish() {
 	if (!payloads_written()) return fail(PFF_WRITE_ERR_IO);
-	// The directory, in the written order: flags, offset, size, timestamp, the name in its
-	// own case zero-padded to 16 bytes, checksum.
+	// The directory, in the payloads' order: flags, offset, size, timestamp, the name in its
+	// own case zero-padded to 16 bytes, checksum [orig: sub_4040E0 @ 0x4041C7..0x404234
+	// (pack.exe): each record zeroed, then filled from the packer's list entry and written].
 	const uint32_t table_offset = position_;
-	for (const uint32_t index : order_) {
-		const Entry &entry = entries_[index];
+	for (const Entry &entry : entries_) {
 		uint8_t record[PFF_ENTRY_SIZE];
 		memset(record, 0, sizeof(record));
 		put_u32_le(record + 0, entry.flags);
@@ -165,6 +162,9 @@ int PffStreamWriter::finish() {
 		put_u32_le(record + 32, entry.checksum);
 		if (fwrite(record, 1, sizeof(record), file_) != sizeof(record)) return fail(PFF_WRITE_ERR_IO);
 	}
+	// The footer after the directory [orig: sub_4040E0 @ 0x4042B7..0x40432F (pack.exe)].
+	if (fwrite(PFF_RETAIL_FOOTER, 1, PFF_FOOTER_SIZE, file_) != size_t(PFF_FOOTER_SIZE))
+		return fail(PFF_WRITE_ERR_IO);
 	uint8_t offset[4];
 	put_u32_le(offset, table_offset);
 	if (fseek(file_, 16, SEEK_SET) != 0 || fwrite(offset, 1, sizeof(offset), file_) != sizeof(offset))

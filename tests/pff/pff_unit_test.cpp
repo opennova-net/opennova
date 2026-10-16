@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include <string>
+#include <vector>
 
 #include <formats/pff/pff.h>
 #include "pff/pff_test_writer.h"
@@ -466,6 +467,82 @@ static int test_rewrite_with_entry(void) {
     return 1;
 }
 
+static uint32_t le32_at(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+/* Retail's layout (C-400, ADR 0008 as amended): the payloads and the directory in the entries' own
+   order, never sorted, and the packer's 12-byte footer after the directory (every JO:CA archive:
+   c0a8a939 00000000 'KING') [orig: sub_4040E0 @ 0x4041A3..0x40432F (pack.exe)]. */
+static int test_write_retail_layout(void) {
+    const uint8_t b[] = {9, 8, 7, 6};
+    const uint8_t a[] = {1, 2, 3};
+    const uint8_t m[] = {5};
+    PffWriteEntry e[4] = {
+        { "bravo.dat", b,    (uint32_t)sizeof(b), 0, 11, 21 },   /* out of name order on purpose */
+        { "Alpha.txt", a,    (uint32_t)sizeof(a), 0, 12, 22 },
+        { "empty.bin", NULL, 0,                   0, 13, 23 },
+        { "Mid.bin",   m,    (uint32_t)sizeof(m), 0, 14, 24 },
+    };
+    const char *names[4] = { "bravo.dat", "Alpha.txt", "empty.bin", "Mid.bin" };
+    const uint32_t offsets[4] = { 20, 24, 27, 27 };
+    const char *path = "pff_layout.pff";
+    uint8_t *bytes = NULL;
+    long len = 0;
+    CHECK(pff_write_archive(path, PFF_FORMAT_PFF3, e, 4) == PFF_WRITE_OK, "write");
+    CHECK(read_whole_file(path, &bytes, &len), "read");
+    const uint32_t table = 20 + 4 + 3 + 0 + 1;
+    int ok = len == (long)(table + 4 * PFF_ENTRY_SIZE + PFF_FOOTER_SIZE) && le32_at(bytes + 16) == table &&
+             memcmp(bytes + 20, b, sizeof(b)) == 0 && memcmp(bytes + 24, a, sizeof(a)) == 0 &&
+             bytes[27] == m[0];
+    for (int i = 0; ok && i < 4; ++i) {
+        const uint8_t *rec = bytes + table + 36 * i;
+        char name[17] = {0};
+        memcpy(name, rec + 16, 16);
+        ok = strcmp(name, names[i]) == 0 && le32_at(rec + 4) == offsets[i] && le32_at(rec + 8) == e[i].size &&
+             le32_at(rec + 12) == e[i].timestamp && le32_at(rec + 32) == e[i].checksum;
+    }
+    const uint8_t footer[12] = { 0xC0, 0xA8, 0xA9, 0x39, 0, 0, 0, 0, 'K', 'I', 'N', 'G' };
+    ok = ok && memcmp(bytes + len - 12, footer, 12) == 0 && memcmp(PFF_RETAIL_FOOTER, footer, 12) == 0;
+    free(bytes);
+    CHECK(ok, "payloads and directory in the entries' order, then the retail footer");
+
+    /* The archive's payload order back from the name-sorted directory pff_open keeps (the empty
+       entry before the payload that starts where it does), and written again it is its bytes. */
+    PffArchive ar;
+    CHECK(pff_open(&ar, path) == 0, "open");
+    const std::vector<uint32_t> order = pff_payload_order(ar);
+    std::string walked;
+    for (const uint32_t i : order) walked += pff_entry_stored_name(ar.entries[i]) + ",";
+    pff_close(&ar);
+    CHECK(walked == "bravo.dat,Alpha.txt,empty.bin,Mid.bin,", "payload order");
+    const char *again = "pff_layout_again.pff";
+    CHECK(pff_write_archive_again(path, again) == PFF_WRITE_OK, "written again");
+    uint8_t *b1 = NULL, *b2 = NULL;
+    long l1 = 0, l2 = 0;
+    CHECK(read_whole_file(path, &b1, &l1) && read_whole_file(again, &b2, &l2), "read both");
+    ok = l1 == l2 && memcmp(b1, b2, (size_t)l1) == 0;
+    free(b1);
+    free(b2);
+    CHECK(ok, "an archive written again is its bytes");
+
+    /* An edit keeps the remaining entries in their payload order and adds after them. */
+    std::vector<PffEditEntry> adds(1);
+    adds[0].name = "Zed.new";
+    adds[0].data = {4, 2};
+    adds[0].timestamp = 1700000000u;
+    bool rewritten = false;
+    CHECK(pff_apply_edits(again, adds, {"alpha.txt"}, &rewritten) == PFF_WRITE_OK && rewritten, "edit");
+    CHECK(pff_open(&ar, again) == 0, "open edited");
+    walked.clear();
+    for (const uint32_t i : pff_payload_order(ar)) walked += pff_entry_stored_name(ar.entries[i]) + ",";
+    pff_close(&ar);
+    CHECK(walked == "bravo.dat,empty.bin,Mid.bin,Zed.new,", "kept in order, the add last");
+    remove(path);
+    remove(again);
+    return 1;
+}
+
 /* F6a: zero-entry archive is valid. */
 static int test_write_zero_entries(void) {
     const char *path = "pff_zero.pff";
@@ -618,6 +695,7 @@ int main(void) {
     RUN_TEST(test_entry_stored_name);
     RUN_TEST(test_write_error_string);
     RUN_TEST(test_rewrite_with_entry);
+    RUN_TEST(test_write_retail_layout);
     RUN_TEST(test_write_zero_entries);
     RUN_TEST(test_write_rejects_overlong_name);
     RUN_TEST(test_write_rejects_duplicate_names);

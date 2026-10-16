@@ -843,6 +843,13 @@ target_link_libraries(pff_stream_writer_test PRIVATE opennova_formats)
 target_include_directories(pff_stream_writer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pff_stream_writer COMMAND pff_stream_writer_test)
 
+# The writer against retail's own archives: every JO:CA .pff written again with nothing changed is
+# its bytes (the directory in payload order, the packer's footer; ADR 0008 as amended).
+add_executable(pff_retail_rewrite_test pff/pff_retail_rewrite_test.cpp)
+target_link_libraries(pff_retail_rewrite_test PRIVATE opennova_formats)
+target_include_directories(pff_retail_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(pff_retail_rewrite COMMAND pff_retail_rewrite_test)
+
 # Game profile table tests
 add_executable(gameprofile_test gameprofile/gameprofile_test.cpp)
 target_link_libraries(gameprofile_test PRIVATE opennova_base)

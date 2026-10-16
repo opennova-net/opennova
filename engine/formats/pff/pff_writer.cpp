@@ -1,18 +1,19 @@
-/* PFF archive writer (production). [orig: PFF_SortEntries @ 0x768280; the writer is a from-scratch
-   inverse of the retail loader, docs/vfs/vfs-pff-mount-re.md, ADR 0008]
-   Serializes an explicit, caller-provided set of stored entries
-   into a modern PFF3/PFF4/BHD archive: header(20) | payloads | directory(36 each). Payloads are
-   NEVER transformed — the supplied bytes are the exact stored bytes (container-XOR-encrypted iff
-   flags & PFF_FLAG_ENCRYPTED). The directory is emitted sorted by normalized name (matching the
-   engine's on-disk convention; PFF_SortEntries @ 0x768280 also re-sorts on load), and the write
-   goes to a temp file then atomically renames, so a crash never leaves a half-written archive.
+/* PFF archive writer (production): a from-scratch inverse of the retail loader
+   [orig: PFF_Open @ 0x7682e0] in the retail packer's layout
+   [orig: sub_4040E0 @ 0x4041A3..0x40432F (pack.exe)] (docs/vfs/vfs-pff-mount-re.md, ADR 0008).
+   Serializes an explicit, caller-provided set of stored entries into a modern PFF3/PFF4/BHD
+   archive: header(20) | payloads | directory(36 each) | footer(12), the payloads and the directory
+   in the entries' own order. Payloads are NEVER transformed: the supplied bytes are the exact
+   stored bytes (container-XOR-encrypted iff flags & PFF_FLAG_ENCRYPTED). The write goes to a temp
+   file then atomically renames, so a crash never leaves a half-written archive. An archive written
+   again (an edit, a rewrite) keeps its entries in the order their payloads lay
+   (pff_payload_order), so a retail archive written again with nothing changed is its own bytes.
 
    The core is PffStreamWriter (pff_stream_writer.h), which writes a budget of payload bytes at a
    time; these single-call forms run it to the end. The streaming form (pff_write_archive_streamed)
    pulls one payload at a time via a callback, so a multi-hundred-MB archive resaves with only the
    largest single entry buffered; the flat-array form (pff_write_archive) is a thin wrapper for
-   tests and the future dir packer. Mirrors the layout witnessed in docs/vfs/vfs-pff-mount-re.md
-   (PFF_Open @ 0x7682e0). */
+   tests and the future dir packer. */
 
 #include <formats/pff/pff.h>
 #include <formats/pff/pff_stream_writer.h>
@@ -71,22 +72,24 @@ int read_array_chunk(void *ctx, uint32_t index, uint32_t offset, uint8_t *out, u
 }
 
 /* pff_rewrite_with_entry's payloads: each entry's stored bytes from the open source, the replaced
-   entry's from the caller. */
+   entry's from the caller; `order` maps a written place to its source index. */
 struct Rewrite {
 	const PffArchive *source;
 	uint32_t replaced;
 	const uint8_t *data;
 	uint32_t size;
+	std::vector<uint32_t> order;
 };
 
 int read_rewrite_entry(void *ctx, uint32_t index, uint8_t *out, uint32_t size) {
 	const Rewrite &rewrite = *static_cast<const Rewrite *>(ctx);
-	if (index == rewrite.replaced) {
+	const uint32_t source_index = rewrite.order[index];
+	if (source_index == rewrite.replaced) {
 		if (size != rewrite.size) return 1;
 		if (size) memcpy(out, rewrite.data, size);
 		return 0;
 	}
-	return pff_extract_raw(rewrite.source, &rewrite.source->entries[index], out, size);
+	return pff_extract_raw(rewrite.source, &rewrite.source->entries[source_index], out, size);
 }
 
 /* pff_apply_edits' payloads: a retained entry's stored bytes from the open source, an add's from
@@ -123,22 +126,20 @@ bool entry_holds(const PffArchive *source, const PffEntry &entry, const PffEditE
 	return entry.size == 0 || memcmp(stored.data(), add.data.data(), entry.size) == 0;
 }
 
-} // namespace
+/* The entries an edit of `source` (NULL: no archive yet) writes: every entry it keeps, in its
+   payload order, then the adds; `changed` when any entry would differ from the source's. */
+struct EditPlan {
+	std::vector<PffWriteStreamEntry> entries;
+	std::vector<std::string> names;
+	EditPayloads payloads;
+	bool changed = false;
+	int error = PFF_WRITE_OK;
+};
 
-int pff_apply_edits(const char *path, const std::vector<PffEditEntry> &adds,
-		const std::vector<std::string> &removes, bool *rewritten) {
-	if (rewritten)
-		*rewritten = false;
-	if (path == NULL)
-		return PFF_WRITE_ERR_IO;
-	PffArchive source{};
-	bool have_source = false;
-	std::error_code ec;
-	if (std::filesystem::exists(io::os_path(path), ec)) {
-		if (pff_open(&source, path) != 0)
-			return PFF_WRITE_ERR_IO;
-		have_source = true;
-	}
+EditPlan plan_edits(const PffArchive *source, const std::vector<PffEditEntry> &adds,
+		const std::vector<std::string> &removes) {
+	EditPlan plan;
+	plan.payloads = EditPayloads{ source, &adds, {} };
 	/* pack.exe's remove jobs run before its add jobs [orig: Pack_Tick @ 0x402a70 (UPDATE.EXE): the
 	   remove queue first], so an add of a removed name puts it back; of two adds of one name the
 	   last stands. */
@@ -154,37 +155,35 @@ int pff_apply_edits(const char *path, const std::vector<PffEditEntry> &adds,
 				return int64_t(i);
 		return -1;
 	};
-	bool changed = false;
-	EditPayloads payloads{ have_source ? &source : NULL, &adds, {} };
-	std::vector<PffWriteStreamEntry> entries;
-	std::vector<std::string> names;
-	const uint32_t count = have_source ? source.entry_count : 0;
-	names.reserve(count + adds.size());
-	for (uint32_t i = 0; i < count; ++i) {
-		const PffEntry &entry = source.entries[i];
-		const std::string stored = pff_entry_stored_name(entry);
-		const std::string key = normalized_logical_name(stored);
-		const int64_t add = last_add(key);
-		const bool is_removed = std::find(removed.begin(), removed.end(), key) != removed.end();
-		if (add >= 0) {
-			const PffEditEntry &edit = adds[size_t(add)];
-			const uint32_t checksum = io::novalogic_file_crc(edit.data.data(), edit.data.size());
-			if (is_removed || !entry_holds(&source, entry, edit, checksum))
-				changed = true;
-			continue; /* written with the adds below */
+	const uint32_t count = source ? source->entry_count : 0;
+	plan.names.reserve(count + adds.size());
+	if (source != NULL) {
+		for (const uint32_t i : pff_payload_order(*source)) {
+			const PffEntry &entry = source->entries[i];
+			const std::string stored = pff_entry_stored_name(entry);
+			const std::string key = normalized_logical_name(stored);
+			const int64_t add = last_add(key);
+			const bool is_removed = std::find(removed.begin(), removed.end(), key) != removed.end();
+			if (add >= 0) {
+				const PffEditEntry &edit = adds[size_t(add)];
+				const uint32_t checksum = io::novalogic_file_crc(edit.data.data(), edit.data.size());
+				if (is_removed || !entry_holds(source, entry, edit, checksum))
+					plan.changed = true;
+				continue; /* written with the adds below */
+			}
+			if (is_removed) {
+				plan.changed = true;
+				continue;
+			}
+			plan.names.push_back(stored);
+			PffWriteStreamEntry out{};
+			out.size = entry.size;
+			out.flags = entry.flags;
+			out.timestamp = entry.timestamp;
+			out.checksum = entry.checksum;
+			plan.entries.push_back(out);
+			plan.payloads.origin.push_back(int64_t(i));
 		}
-		if (is_removed) {
-			changed = true;
-			continue;
-		}
-		names.push_back(stored);
-		PffWriteStreamEntry out{};
-		out.size = entry.size;
-		out.flags = entry.flags;
-		out.timestamp = entry.timestamp;
-		out.checksum = entry.checksum;
-		entries.push_back(out);
-		payloads.origin.push_back(int64_t(i));
 	}
 	for (size_t i = 0; i < adds.size(); ++i) {
 		if (last_add(add_key[i]) != int64_t(i))
@@ -192,35 +191,74 @@ int pff_apply_edits(const char *path, const std::vector<PffEditEntry> &adds,
 		bool existed = false;
 		for (uint32_t e = 0; e < count && !existed; ++e)
 			existed =
-					normalized_logical_name(pff_entry_stored_name(source.entries[e])) == add_key[i];
+					normalized_logical_name(pff_entry_stored_name(source->entries[e])) == add_key[i];
 		if (!existed)
-			changed = true;
+			plan.changed = true;
 		if (adds[i].data.size() > UINT32_MAX) {
-			if (have_source)
-				pff_close(&source);
-			return PFF_WRITE_ERR_TOO_LARGE;
+			plan.error = PFF_WRITE_ERR_TOO_LARGE;
+			return plan;
 		}
-		names.push_back(adds[i].name);
+		plan.names.push_back(adds[i].name);
 		PffWriteStreamEntry out{};
 		out.size = uint32_t(adds[i].data.size());
 		out.flags = 0;
 		out.timestamp = adds[i].timestamp;
 		out.checksum = io::novalogic_file_crc(adds[i].data.data(), adds[i].data.size());
-		entries.push_back(out);
-		payloads.origin.push_back(-int64_t(i) - 1);
+		plan.entries.push_back(out);
+		plan.payloads.origin.push_back(-int64_t(i) - 1);
 	}
-	if (!changed) {
+	return plan;
+}
+
+/* The plan written to `out_path` in `format`. */
+int write_plan(EditPlan &plan, PffFormat format, const char *out_path) {
+	for (size_t i = 0; i < plan.entries.size(); ++i)
+		plan.entries[i].name = plan.names[i].c_str();
+	return pff_write_archive_streamed(out_path, format, plan.entries.data(),
+			uint32_t(plan.entries.size()), read_edit_entry, &plan.payloads);
+}
+
+} // namespace
+
+std::vector<uint32_t> pff_payload_order(const PffArchive &archive) {
+	std::vector<uint32_t> order(archive.entry_count);
+	for (uint32_t i = 0; i < archive.entry_count; ++i)
+		order[i] = i;
+	/* An empty entry's offset is where the next payload starts, and it was written first. */
+	std::stable_sort(order.begin(), order.end(), [&archive](uint32_t a, uint32_t b) {
+		const PffEntry &ea = archive.entries[a];
+		const PffEntry &eb = archive.entries[b];
+		if (ea.offset != eb.offset)
+			return ea.offset < eb.offset;
+		return ea.size == 0 && eb.size != 0;
+	});
+	return order;
+}
+
+int pff_apply_edits(const char *path, const std::vector<PffEditEntry> &adds,
+		const std::vector<std::string> &removes, bool *rewritten) {
+	if (rewritten)
+		*rewritten = false;
+	if (path == NULL)
+		return PFF_WRITE_ERR_IO;
+	PffArchive source{};
+	bool have_source = false;
+	std::error_code ec;
+	if (std::filesystem::exists(io::os_path(path), ec)) {
+		if (pff_open(&source, path) != 0)
+			return PFF_WRITE_ERR_IO;
+		have_source = true;
+	}
+	EditPlan plan = plan_edits(have_source ? &source : NULL, adds, removes);
+	if (plan.error != PFF_WRITE_OK || !plan.changed) {
 		if (have_source)
 			pff_close(&source);
-		return PFF_WRITE_OK;
+		return plan.error;
 	}
-	for (size_t i = 0; i < entries.size(); ++i)
-		entries[i].name = names[i].c_str();
 	const PffFormat format =
 			have_source ? pff_format_for_magic(source.header.magic) : PFF_FORMAT_PFF3;
 	const std::string staged = std::string(path) + ".new";
-	const int rc = pff_write_archive_streamed(staged.c_str(), format, entries.data(),
-			uint32_t(entries.size()), read_edit_entry, &payloads);
+	const int rc = write_plan(plan, format, staged.c_str());
 	if (have_source)
 		pff_close(&source);
 	if (rc != PFF_WRITE_OK) {
@@ -235,6 +273,21 @@ int pff_apply_edits(const char *path, const std::vector<PffEditEntry> &adds,
 	if (rewritten)
 		*rewritten = true;
 	return PFF_WRITE_OK;
+}
+
+int pff_write_archive_again(const char *path, const char *out_path) {
+	if (path == NULL || out_path == NULL)
+		return PFF_WRITE_ERR_IO;
+	PffArchive source{};
+	if (pff_open(&source, path) != 0)
+		return PFF_WRITE_ERR_IO;
+	const std::vector<PffEditEntry> no_adds;
+	EditPlan plan = plan_edits(&source, no_adds, {});
+	const int rc = plan.error != PFF_WRITE_OK
+			? plan.error
+			: write_plan(plan, pff_format_for_magic(source.header.magic), out_path);
+	pff_close(&source);
+	return rc;
 }
 
 uint32_t pff_magic_for_format(PffFormat format)
@@ -304,18 +357,19 @@ int pff_rewrite_with_entry(const PffArchive *source, uint32_t index, const uint8
 {
 	if (source == NULL || path == NULL || index >= source->entry_count || (size != 0 && data == NULL))
 		return PFF_WRITE_ERR_IO;
+	Rewrite rewrite{source, index, data, size, pff_payload_order(*source)};
 	std::vector<PffWriteStreamEntry> entries(source->entry_count);
 	std::vector<std::string> names(source->entry_count);
-	for (uint32_t i = 0; i < source->entry_count; ++i) {
+	for (uint32_t k = 0; k < source->entry_count; ++k) {
+		const uint32_t i = rewrite.order[k];
 		const PffEntry &entry = source->entries[i];
-		names[i] = pff_entry_stored_name(entry);
-		entries[i].name = names[i].c_str();
-		entries[i].size = i == index ? size : entry.size;
-		entries[i].flags = i == index ? 0u : entry.flags;
-		entries[i].timestamp = entry.timestamp;
-		entries[i].checksum = entry.checksum;
+		names[k] = pff_entry_stored_name(entry);
+		entries[k].name = names[k].c_str();
+		entries[k].size = i == index ? size : entry.size;
+		entries[k].flags = i == index ? 0u : entry.flags;
+		entries[k].timestamp = entry.timestamp;
+		entries[k].checksum = entry.checksum;
 	}
-	Rewrite rewrite{source, index, data, size};
 	return pff_write_archive_streamed(path, pff_format_for_magic(source->header.magic), entries.data(),
 	                                  uint32_t(entries.size()), read_rewrite_entry, &rewrite);
 }
