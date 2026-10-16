@@ -61,6 +61,10 @@ struct UserRecord {
 	// records the generation its password check read and counts only while the
 	// account still has it.
 	int64_t credentials_gen = 0;
+	// players.email, normalized (normalize_email); empty for an account that
+	// has none (one an admin made without one, a service account, an account
+	// older than the column).
+	std::string email;
 };
 
 struct GameAccessRecord {
@@ -76,7 +80,7 @@ struct ServerStatusRecord {
 };
 
 // Result of a CRUD mutation. ok=true means success; on failure,
-// `error_code` is one of: "username_exists", "pcid_exists",
+// `error_code` is one of: "username_exists", "pcid_exists", "email_exists",
 // "missing_field", "invalid_field", "not_found", "db_error". Used as the body
 // foundation for /api/admin/users.* HTTP responses, so `error_message` is
 // client-facing: a "db_error" leaves it empty, its text going to the server
@@ -167,11 +171,17 @@ struct CreateUserParams {
 	std::string pcid;       // 8-hex-char
 	std::string nwh;        // typically "1"
 	std::string nwhandle;
+	// The account's email address: empty for none (an admin's create may
+	// leave it out; POST /api/register requires it). Stored normalized
+	// (normalize_email).
+	std::string email;
 };
 
 // A username of at most kUsernameMaxBytes bytes and a handle of at most
 // kHandleMaxBytes, neither holding a control byte nor starting with the service
-// accounts' prefix (is_service_username), else invalid_field.
+// accounts' prefix (is_service_username), else invalid_field; an email that
+// normalize_email refuses is invalid_field too, and one another account has is
+// email_exists.
 MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p);
 // Deletes the account with its sessions and hosting keys (ON DELETE CASCADE).
 // A server it has listed stays listed with no owner, and its rows in listed

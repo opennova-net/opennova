@@ -42,9 +42,9 @@ std::function<void(int64_t)> g_password_accepted_hook;
 
 // The columns row_to_user reads, in its order.
 constexpr const char *kUserColumns =
-		"id, username, pcid, nwh, nwhandle, account_status, role, credentials_gen, kind, comp_servers";
+		"id, username, pcid, nwh, nwhandle, account_status, role, credentials_gen, kind, comp_servers, email";
 // The column after them (authenticate_user's password_hash).
-constexpr std::size_t kUserColumnCount = 10;
+constexpr std::size_t kUserColumnCount = 11;
 
 // Verify a password against a bcrypt hash. The stored hash format is
 //     $2a$<cost>$<22-char-salt><31-char-hash>     (or $2b$ — same algo)
@@ -95,6 +95,7 @@ std::optional<UserRecord> row_to_user(const opennova::db::Row &row) {
 	u.credentials_gen = row.as_int(7).value_or(0);
 	u.kind     = row.as_text(8).value_or("player");
 	u.comp_servers = static_cast<int>(row.as_int(9).value_or(0));
+	u.email    = row.as_text(10).value_or("");
 	if (u.id == 0) return std::nullopt;
 	return u;
 }
@@ -245,7 +246,7 @@ std::optional<UserRecord> get_user_by_login_session_tag(
 		return std::nullopt;
 	auto rows = db.query(
 			"SELECT p.id, p.username, p.pcid, p.nwh, p.nwhandle, p.account_status, p.role, "
-			"       p.credentials_gen, p.kind, p.comp_servers "
+			"       p.credentials_gen, p.kind, p.comp_servers, p.email "
 			"FROM active_user_sessions s JOIN players p ON p.id = s.user_id "
 			"WHERE s.session_tag = $1 AND s.credentials_gen = p.credentials_gen LIMIT 1;",
 			{ opennova::db::BindValue(session_tag) });
@@ -474,10 +475,17 @@ MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p
 	if (auto refused = handle_refusal(p.nwhandle))
 		return *refused;
 	std::string nwh = p.nwh.empty() ? std::string("1") : p.nwh;
+	// The address in its stored form; none stays NULL.
+	std::optional<std::string> email;
+	if (!p.email.empty()) {
+		email = normalize_email(p.email);
+		if (!email) return err("invalid_field", "email is not an email address");
+	}
 
-	// Detect duplicate-by-username / duplicate-by-pcid so we can return a
-	// useful error code instead of the server's unique-violation text.
-	auto duplicate = [&db, &p]() -> std::optional<MutationResult> {
+	// Detect duplicate-by-username / duplicate-by-pcid / duplicate-by-email so
+	// we can return a useful error code instead of the server's
+	// unique-violation text.
+	auto duplicate = [&db, &p, &email]() -> std::optional<MutationResult> {
 		if (get_user_by_username(db, p.username)) {
 			return err("username_exists", "username already taken");
 		}
@@ -485,6 +493,10 @@ MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p
 			"SELECT id FROM players WHERE pcid = $1 LIMIT 1;",
 			{opennova::db::BindValue(p.pcid)});
 		if (!rows.empty()) return err("pcid_exists", "PCID already in use");
+		if (email && !db.query("SELECT 1 FROM players WHERE email = $1 LIMIT 1;",
+				{ opennova::db::BindValue(*email) }).empty()) {
+			return err("email_exists", "another account uses that email address");
+		}
 		return std::nullopt;
 	};
 
@@ -512,13 +524,14 @@ MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p
 		opennova::db::Transaction tx(db);
 		if (auto taken = duplicate()) return *taken;
 		const auto inserted = db.query(
-			"INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) "
-			"VALUES ($1, $2, $3, $4, $5) RETURNING id;",
+			"INSERT INTO players (username, password_hash, pcid, nwh, nwhandle, email) "
+			"VALUES ($1, $2, $3, $4, $5, $6) RETURNING id;",
 			{opennova::db::BindValue(p.username),
 			 opennova::db::BindValue(hashed),
 			 opennova::db::BindValue(p.pcid),
 			 opennova::db::BindValue(nwh),
-			 opennova::db::BindValue(p.nwhandle)});
+			 opennova::db::BindValue(p.nwhandle),
+			 email ? opennova::db::BindValue(*email) : opennova::db::BindValue(std::monostate{})});
 		MutationResult m;
 		m.ok = true;
 		m.id = inserted.front().as_int(0).value_or(0);

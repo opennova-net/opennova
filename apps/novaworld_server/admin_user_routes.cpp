@@ -51,6 +51,11 @@ crow::json::wvalue user_json(const UserRecord &u, int max_servers) {
 	e["role"]     = u.role;
 	e["comp_servers"] = u.comp_servers;
 	e["max_servers"] = max_servers;
+	// Read-only on every admin route: the account's own address, null for none.
+	if (u.email.empty())
+		e["email"] = nullptr;
+	else
+		e["email"] = u.email;
 	return e;
 }
 
@@ -109,7 +114,7 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 	});
 
 	// POST /api/admin/users — create. Body JSON:
-	//   {username, password, pcid, nwhandle, nwh? (default "1")}
+	//   {username, password, pcid, nwhandle, nwh? (default "1"), email? (none)}
 	CROW_ROUTE(app, "/api/admin/users").methods("POST"_method)(
 	    [this](const crow::request &req) {
 		auto caller = access_.require_admin(req);
@@ -122,6 +127,7 @@ void AdminUserRoutes::register_routes(WebApp &app, ForgetAccount forget) {
 		p.pcid     = body->text_or("pcid",     "");
 		p.nwh      = body->text_or("nwh",      "1");
 		p.nwhandle = body->text_or("nwhandle", "");
+		p.email    = body->text_or("email",    "");
 		if (body->wrong_type()) return json_error(400, "invalid_field");
 		auto db_conn = pool_.acquire();
 		auto result = create_user(*db_conn, p);

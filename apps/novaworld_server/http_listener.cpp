@@ -13,6 +13,7 @@
 #include "hosted/net_cidr.h"
 #include "hosted/stats_routes.h"
 #include "http_cookies.h"
+#include "mailer.h"
 #include "nw_udp_listener.h"
 #include "server_config.h"
 #include "session_store.h"
@@ -879,8 +880,12 @@ void HttpListener::register_public_api_routes() {
 	// Server auto-generates a unique 8-hex-char PCID. nwhandle defaults
 	// to username when omitted; either takes create_user's rules (a username
 	// of at most 64 bytes, a handle of at most 30, no control byte in either).
-	// Returns the new user's public record on success; 400 on conflict /
-	// missing or refused fields, 500 on DB error.
+	// The email is required: an address normalize_email takes (stored
+	// lowercased) that no other account has (400 email_exists). Returns the
+	// new user's public record on success; 400 on conflict / missing or refused
+	// fields, 500 on DB error. Once the account is made, its welcome mail is
+	// posted to the outbox: a mail that is not sent is logged, never the
+	// registration's failure.
 	// The X-OpenNova-Request header is required, checked first: a cross-site
 	// text/plain form can carry a JSON body (the parse ignores Content-Type),
 	// so without it any page could make its visitors create accounts and drain
@@ -899,14 +904,10 @@ void HttpListener::register_public_api_routes() {
 		const std::string username = body->text_or("username", "");
 		const std::string password = body->text_or("password", "");
 		const std::string nwhandle = body->text_or("nwhandle", username);
+		const std::string email = body->text_or("email", "");
 		if (body->wrong_type()) return json_error(400, "invalid_field");
-		if (username.empty() || password.empty()) {
-			crow::response res(400);
-			res.body = "{\"error\":\"missing_field\","
-			           "\"message\":\"username and password required\"}";
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
+		if (username.empty() || password.empty() || email.empty())
+			return json_error(400, "missing_field", "username, password and email required");
 		auto db_conn = db_pool_.acquire();
 		// Try up to 5 random PCIDs to avoid the rare collision.
 		MutationResult result;
@@ -918,6 +919,7 @@ void HttpListener::register_public_api_routes() {
 			p.pcid     = pcid;
 			p.nwh      = "1";
 			p.nwhandle = nwhandle;
+			p.email    = email;
 			result = create_user(*db_conn, p);
 			if (result.ok || result.error_code != "pcid_exists") break;
 		}
@@ -935,6 +937,7 @@ void HttpListener::register_public_api_routes() {
 		out["user"] = created ? user_to_json(*db_conn, *created) : crow::json::wvalue{};
 		std::printf("[http] /api/register -> created user '%s' (id=%lld)\n",
 		            loggable(username).c_str(), static_cast<long long>(result.id));
+		if (created) post_mail(mail_, welcome_mail(created->email, created->username, site_url_));
 		crow::response res(201);
 		res.body = out.dump();
 		res.set_header("Content-Type", "application/json");
