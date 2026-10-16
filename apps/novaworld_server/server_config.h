@@ -148,6 +148,18 @@ struct ServerConfig {
 	// (LobbySession::set_require_host_key).
 	bool require_host_key = false;
 
+	// The site's origin (ONNET_SITE_URL, its trailing '/' dropped): the links
+	// the welcome mail and the password reset mail carry (mailer.h). Billing
+	// reads the same variable for its return URLs (billing/billing_config.h).
+	std::string site_url;
+
+	// Outbound mail through Amazon SES (mailer.h, README "Account email and
+	// password resets"): ONNET_MAIL_FROM, the sender's address
+	// (support@<domain>), and ONNET_MAIL_REGION, SES's region. Mail is on only
+	// with both and ONNET_SITE_URL set; main() logs why it is off otherwise.
+	std::string mail_from;
+	std::string mail_region;
+
 	// ONNET_CD_KEY_AUTO_MINT (on unless set to 0): a DFX2 account that has never
 	// held a CD key gets one minted onto it at its first activation, so a player
 	// need not wait on an admin (cd_keys.h, cd_key_routes.h). Off, only a key an

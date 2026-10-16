@@ -29,6 +29,7 @@ namespace db { class ConnectionPool; class Database; }
 namespace opennova::novaworld_server {
 
 struct ServerConfig;
+class MailOutbox;
 class SessionStore;
 class NwUdpListener;
 class Watchdog;
@@ -117,6 +118,12 @@ public:
 	// the supervisor's planner with: a start's at_capacity, the list's `full`.
 	// Set before start(); unset, placement.h's defaults.
 	void set_fleet_placement(const hosted::PlacementPolicy &policy) { fleet_placement_ = policy; }
+
+	// The outbox the welcome mail (POST /api/register) and the password reset
+	// links (POST /api/auth/forgot) are posted to (mailer.h). Set before
+	// start(); it must outlive the HTTP listener. Null: mail is off, and each
+	// mail is logged as not sent.
+	void set_mail_outbox(MailOutbox *outbox) { mail_ = outbox; }
 
 	HttpListener(const HttpListener &) = delete;
 	HttpListener &operator=(const HttpListener &) = delete;
@@ -240,9 +247,13 @@ private:
 	double fleet_slot_cpus_ = 1.0;
 	// The hosted routes' placement policy (set_fleet_placement).
 	hosted::PlacementPolicy fleet_placement_;
+	// The outbound mail (set_mail_outbox); null: mail off.
+	MailOutbox *mail_ = nullptr;
 	// config.public_host, set in start() before Crow runs (host_url() /
 	// gsb_url()).
 	std::string public_host_;
+	// config.site_url, set in start() before Crow runs: the welcome mail's link.
+	std::string site_url_;
 };
 
 } // namespace opennova::novaworld_server

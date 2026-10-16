@@ -26,6 +26,18 @@ inline constexpr size_t kUsernameMaxBytes = 64;
 // @0x4c8238..0x4c8249, outputSize 0x1F; the copy, sub_64EA90 @0x64eb3e..0x64eb59].
 inline constexpr size_t kHandleMaxBytes = 30;
 
+// The longest email address an account may have (RFC 5321's path limit, less
+// its angle brackets).
+inline constexpr size_t kEmailMaxBytes = 254;
+
+// The address `raw` names, in the one form players.email stores and every
+// lookup compares: its ASCII letters lowercased. nullopt unless it is at most
+// kEmailMaxBytes bytes with exactly one '@', a local part, and a domain that
+// holds a '.' with a label on each side of every one; no space and no control
+// byte anywhere. Service policy, not a port: a check of the shape alone, the
+// mail sent to it being the proof.
+std::optional<std::string> normalize_email(std::string_view raw);
+
 // Resolved player record returned by authenticate_user / get_user_by_*.
 struct UserRecord {
 	int64_t     id = 0;

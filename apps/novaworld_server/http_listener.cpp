@@ -357,6 +357,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->access.configure(config);
 
 	public_host_ = public_host; // host_url() / gsb_url(), with the port Crow binds
+	site_url_ = config.site_url; // the welcome mail's link
 
 	// The games catalogue the retail routes answer from (one lobby per title):
 	// each row's .gsb route registers below, and each retail page fills in its

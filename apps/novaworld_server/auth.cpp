@@ -220,6 +220,25 @@ std::optional<UserRecord> get_user_by_id(opennova::db::Database &db, int64_t id)
 	}
 }
 
+std::optional<std::string> normalize_email(std::string_view raw) {
+	if (raw.empty() || raw.size() > kEmailMaxBytes)
+		return std::nullopt;
+	const size_t at = raw.find('@');
+	if (at == 0 || at == std::string_view::npos || raw.find('@', at + 1) != std::string_view::npos)
+		return std::nullopt;
+	for (const char c : raw) {
+		const auto u = static_cast<unsigned char>(c);
+		if (u <= 0x20 || u == 0x7f)
+			return std::nullopt;
+	}
+	// The domain: labels joined by single dots, at least two of them.
+	const std::string_view domain = raw.substr(at + 1);
+	if (domain.empty() || domain.front() == '.' || domain.back() == '.' ||
+			domain.find('.') == std::string_view::npos || domain.find("..") != std::string_view::npos)
+		return std::nullopt;
+	return strutil::to_lower(raw);
+}
+
 std::optional<UserRecord> get_user_by_login_session_tag(
 		opennova::db::Database &db, const std::string &session_tag) {
 	if (session_tag.empty())

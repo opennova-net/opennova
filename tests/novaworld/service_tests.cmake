@@ -488,6 +488,16 @@ if(BUILD_NOVAWORLD_HTTP)
     # below ctest's 1500 s default.
     set_tests_properties(opennova_novaworld_server_http_routes PROPERTIES TIMEOUT 120)
 
+    # The outbound mail (apps/novaworld_server/mailer.h) and the address rule
+    # (auth.h normalize_email): the shapes taken and refused, SesMailer's settings,
+    # argv and SendEmail request on a stub CommandRunner (the request file
+    # owner-only while the CLI runs and gone after, the CLI's failures), the
+    # outbox's order, bound and stop, and the templates. Database-free.
+    add_executable(mailer_test novaworld/mailer_test.cpp)
+    target_link_libraries(mailer_test PRIVATE opennova_novaworld_server_core opennova_novaworld_service)
+    target_include_directories(mailer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME mailer COMMAND mailer_test)
+
     # The listing's owner end to end (host_keys): two in-process services (the
     # HTTP, NW UDP and gate listeners over one pooled database each, one with
     # ONNET_REQUIRE_HOST_KEY) and opennova-serve's Lister with
