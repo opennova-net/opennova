@@ -237,6 +237,7 @@ int main() {
 		std::vector<std::array<float, 3>> walk_rows = zero_rows, walk2_rows = zero_rows;
 		for (size_t row = 0; row < 3; ++row) {
 			walk_rows[row * kClipBones][1] = 0.5f;
+			walk_rows[row * kClipBones + 1][0] = 0.25f; // the first child rides +0.25 X
 			walk2_rows[row * kClipBones][1] = 1.0f;
 		}
 		const auto translate = [](MemoryClip &clip, std::vector<std::array<float, 3>> &rows) {
@@ -246,6 +247,9 @@ int main() {
 		};
 		translate(bind, zero_rows);
 		translate(walk, walk_rows);
+		// The walk's root stands unturned where the others turn it +90 about Y, so the
+		// first child's parent turns between the clips.
+		walk.rotations[0] = {0.0f, 0.0f, 0.0f, 1.0f};
 		translate(walk2, walk2_rows);
 		MemoryFiles fade_files;
 		fade_files.bads["rest.bad"] = &bind.file;
@@ -269,6 +273,22 @@ int main() {
 			            std::fabs(blended[0].origin.y - walking[0].origin.y) < 1e-4f);
 			// Out of it: the same, the walk the one translated channel.
 			fade.eval_pose_blended("anim_walk", 0.0, "anim_idle", 0.0, 0.25f, blended);
+			TEST_EXPECT(blended.size() == walking.size() &&
+			            std::fabs(blended[0].origin.y - walking[0].origin.y) < 1e-4f);
+			// A child's translation is a model-space row: the blended pose carries the
+			// walk's model-space offset whole, under the blended root turn.
+			const auto model_offset = [](const std::vector<PoseBone> &pose, const std::vector<PoseBone> &base) {
+				return anim::quat_rotate(pose[0].rotation,
+						anim::Vec3{pose[1].origin.x - base[1].origin.x, pose[1].origin.y - base[1].origin.y,
+						           pose[1].origin.z - base[1].origin.z});
+			};
+			fade.eval_pose_blended("anim_idle", 0.0, "anim_walk", 0.0, 0.5f, blended);
+			const anim::Vec3 want = model_offset(walking, standing);
+			const anim::Vec3 got = model_offset(blended, standing);
+			TEST_EXPECT(std::fabs(want.x - got.x) < 1e-4f && std::fabs(want.y - got.y) < 1e-4f &&
+			            std::fabs(want.z - got.z) < 1e-4f);
+			// The fade's first tick (weight 0) already holds the walk's translation.
+			fade.eval_pose_blended("anim_idle", 0.0, "anim_walk", 0.0, 0.0f, blended);
 			TEST_EXPECT(blended.size() == walking.size() &&
 			            std::fabs(blended[0].origin.y - walking[0].origin.y) < 1e-4f);
 			// Two translated walks blend their rows by the weight (the port's stand-in, D-ANIM-X2).

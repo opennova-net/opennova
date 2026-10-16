@@ -489,10 +489,8 @@ void SkeletalClips::eval_pose_blended(const std::string &p_source_key,
 		return;
 	}
 	const float w = std::clamp(weight, 0.0f, 1.0f);
-	if (w <= 0.0f) {
-		eval_pose(source_key, source_seconds, source_variant, r_pose);
-		return;
-	}
+	// A zero weight still samples both clips: the translation rule below holds
+	// from the fade's first tick (blend_poses returns the source pose there).
 	if (w >= 1.0f) {
 		eval_pose(target_key, target_seconds, target_variant, r_pose);
 		return;
@@ -522,11 +520,35 @@ void SkeletalClips::eval_pose_blended(const std::string &p_source_key,
 		return lc != nullptr && lc->clip.frame_count != 0 && (lc->clip.flags & 0x02u) != 0;
 	};
 	const bool source_translated = translated(source_key, source_variant);
-	if (source_translated != translated(target_key, target_variant) &&
-			source.size() == target.size() && r_pose.size() == target.size()) {
-		const std::vector<anim::PoseBone> &whole = source_translated ? source : target;
-		for (size_t i = 0; i < r_pose.size(); ++i)
-			r_pose[i].origin = whole[i].origin;
+	const size_t n = r_pose.size();
+	if (source_translated != translated(target_key, target_variant) && source.size() == n &&
+			target.size() == n && parents_.size() == n) {
+		// The translation is a model-space row added after the bone's carried
+		// pivot (anim_sample: carried + translation)
+		// [orig: BoneAnim_BuildWorldMatrices @0x40C400 - the add @0x40C6E9..0x40C71D],
+		// so it is taken from the translated clip in model space and set back
+		// under the blended parent: the untranslated clip's origin is the rest
+		// pivot, and the translated one's carries R_parent^-1 * T in its own
+		// parent's frame.
+		const std::vector<anim::PoseBone> &moved = source_translated ? source : target;
+		const std::vector<anim::PoseBone> &rest = source_translated ? target : source;
+		std::vector<anim::Quat> moved_world(n), blended_world(n);
+		for (size_t i = 0; i < n; ++i) {
+			const int p = parents_[i];
+			const bool chained = p >= 0 && static_cast<size_t>(p) < i;
+			moved_world[i] = chained ? anim::quat_mul(moved_world[static_cast<size_t>(p)], moved[i].rotation)
+			                         : moved[i].rotation;
+			blended_world[i] = chained ? anim::quat_mul(blended_world[static_cast<size_t>(p)], r_pose[i].rotation)
+			                           : r_pose[i].rotation;
+			anim::Vec3 delta{moved[i].origin.x - rest[i].origin.x, moved[i].origin.y - rest[i].origin.y,
+					moved[i].origin.z - rest[i].origin.z};
+			if (chained) {
+				delta = anim::quat_rotate(anim::quat_inv(blended_world[static_cast<size_t>(p)]),
+						anim::quat_rotate(moved_world[static_cast<size_t>(p)], delta));
+			}
+			r_pose[i].origin = anim::Vec3{rest[i].origin.x + delta.x, rest[i].origin.y + delta.y,
+					rest[i].origin.z + delta.z};
+		}
 	}
 }
 
