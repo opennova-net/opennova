@@ -177,8 +177,10 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// None of them moves the camera by itself — the sim's arbiter resolves the
 	// mode from the preference and the seat (stock JO has no on-foot third
 	// person).
-	// The 412 cycle and the 405-410 orbit actions have no catalog row and are
-	// unreachable from a key. [orig: Input_HandleActionBinding cases 400
+	// The 412 cycle has no catalog row and is unreachable from a key; the
+	// 405-410 orbit actions have none either, but the death screen's chase
+	// sub-mode dispatches them (world player_view_chase_action, [orig:
+	// DeathScreen_FilterInputAction @0x52ad50]). [orig: Input_HandleActionBinding cases 400
 	// @0x49c073, 401 @0x49c0d9, 402 @0x49c0f6..0x49c107; the records @0x8186CC /
 	// @0x818738 / @0x8187A4 (keys F2/F3/F4) — their row flag gates (0x1 /
 	// 0x40 / 0x400 / 0x8000000) ride the unported binding layer, D-CTRL-3;

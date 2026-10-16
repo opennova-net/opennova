@@ -594,10 +594,14 @@ inline constexpr int kViewActionChase = 402;       // viewchase, F4
 // player triggers read (view1st -> PlayerFirstPerson 0x4000000, viewwithgun
 // -> PlayerCockpitView 0x10000000, viewchase -> PlayerThirdPerson
 // 0x8000000). Pass nullptr off the authority, which never evaluates the
-// .bms. Any other action changes nothing: the 412 cycle and the 405-410
-// orbit/zoom cases have no binding-table row, so no key reaches them.
+// .bms. Any other action changes nothing here: the 412 cycle has no
+// binding-table row, so no key reaches it; the 405-410 orbit/zoom cases have
+// none either, but the death screen's chase sub-mode dispatches them from the
+// movement keys (player_view_chase_action).
 // [orig: Input_HandleActionBinding case 400 @0x49c073 (the bit @0x49c07a),
-//  case 401 @0x49c0d9 (the bit @0x49c0e0), case 402 @0x49c0f6]
+//  case 401 @0x49c0d9 (the bit @0x49c0e0), case 402 @0x49c0f6;
+//  DeathScreen_FilterInputAction @0x52ad50, the chase sub-mode's
+//  Input_HandleActionBinding(405..410) calls @0x52adb6..0x52ae3d]
 void player_view_apply_view_action(PlayerViewState &v, uint32_t *input_action_bits,
                                    int action);
 
