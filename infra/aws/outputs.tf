@@ -1,26 +1,61 @@
 output "deployment" {
   value       = local.deployment
-  description = "The deployment this state is (the workspace: default is prod)"
+  description = "The deployment this state is (prod or staging)"
 }
 
-output "instance_id" {
-  value       = aws_instance.service.id
-  description = "The service instance's id (disposable: -replace=aws_instance.service makes a new one)"
+output "account_id" {
+  value       = local.account_id
+  description = "The AWS account the deployment lives in (var.aws_account_id, from the vault)"
+}
+
+output "cluster" {
+  value       = aws_ecs_cluster.main.name
+  description = "The ECS cluster the programs run in"
+}
+
+output "services" {
+  value       = { for p, s in aws_ecs_service.program : p => s.name }
+  description = "Each program's ECS service (app status, app restart PROGRAM)"
+}
+
+output "task_definitions" {
+  value       = merge({ for p, d in aws_ecs_task_definition.program : p => d.arn }, { backup = aws_ecs_task_definition.backup.arn })
+  description = "The task definitions Terraform made, each program's and the backup task's: the templates app deploy clones (infra.env names them too)"
 }
 
 output "public_ip" {
   value       = local.service_public_ip
-  description = "The service's public address (its Elastic IP): retail clients' gs.novaworld.net, the gate's announced address, the site's DNS records"
+  description = "The gate's public address, the load balancer's in zone a (its Elastic IP): retail clients' gs.novaworld.net, where host status blobs land, and the retail HTTP routes (ONNET_PUBLIC_HOST, ONNET_WEB_HOST)"
 }
 
 output "service_eip_allocation_id" {
   value       = local.service_eip_allocation_id
-  description = "The Elastic IP's allocation id: prod's var.service_eip_allocation_id (adopted, never managed), or the managed address of a deployment that adopts none"
+  description = "The gate's Elastic IP's allocation id: prod's var.service_eip_allocation_id (adopted, never managed), or staging's managed address"
 }
 
-output "service_private_ip" {
-  value       = local.service_private_ip
-  description = "The service instance's fixed private address (its network interface's): where hosted machines reach the service (ONNET_INTERNAL_HTTP_BIND) and the address their admin.cfg admits"
+output "lb_dns_name" {
+  value       = aws_lb.public.dns_name
+  description = "The public load balancer's DNS name (the site's records point at it)"
+}
+
+output "lb_arn" {
+  value       = aws_lb.public.arn
+  description = "The public load balancer (deletion protection on: DEPLOY.md's rollback from the cutover lifts it first)"
+}
+
+output "lb_addresses" {
+  value       = { a = local.service_public_ip, b = aws_eip.lb_b.public_ip }
+  description = "The public load balancer's static addresses, one per zone (zone a's is the gate's)"
+}
+
+output "controller_host" {
+  value       = local.controller_host
+  description = "The controller's private DNS name (Cloud Map)"
+}
+
+output "internal_url" {
+  value       = local.internal_url
+  description = "The controller's internal listener by its private name (ONNET_INTERNAL_URL): where the machines' hostd bootstrap and sync"
 }
 
 output "web_domain" {
@@ -28,29 +63,24 @@ output "web_domain" {
   description = "The site's hostname"
 }
 
-output "ops_bucket_name" {
-  value       = var.ops_bucket_name
-  description = "The operations bucket: releases/<deployment>/ and the database dumps (novaworld/, novaworld-<deployment>/)"
+output "ops_bucket" {
+  value       = local.ops_bucket_name
+  description = "The deployment's operations bucket: the release manifests (releases/) and the database dumps (novaworld/)"
 }
 
 output "ssm_prefix" {
   value       = local.ssm_prefix
-  description = "The deployment's SSM parameters: infra.env, release, secret/*"
-}
-
-output "converge_document" {
-  value       = aws_ssm_document.converge.name
-  description = "The SSM document that converges the host to its release (deploy/host/converge.sh)"
+  description = "The deployment's SSM parameters: infra.env, release, secret/*, tls/*"
 }
 
 output "log_group" {
   value       = aws_cloudwatch_log_group.service.name
-  description = "The containers' logs (app logs)"
+  description = "The tasks' logs, a stream per container and task under its program's prefix (app logs)"
 }
 
 output "db_endpoint" {
   value       = aws_db_instance.main.address
-  description = "The database's hostname (private: the service instance reaches it; DATABASE_URL in infra.env)"
+  description = "The database's hostname (private: the programs reach it; DATABASE_URL in their environment)"
 }
 
 output "db_port" {
@@ -63,6 +93,16 @@ output "db_identifier" {
   description = "The database instance (db snapshot; RDS point-in-time restores name it)"
 }
 
+output "cache_endpoint" {
+  value       = aws_elasticache_replication_group.cache.primary_endpoint_address
+  description = "The cache's primary endpoint (private, TLS: ONNET_REDIS_URL in web's environment)"
+}
+
+output "cache_port" {
+  value       = local.cache_port
+  description = "The cache's port"
+}
+
 output "vpc_id" {
   value       = aws_vpc.main.id
   description = "The VPC"
@@ -70,7 +110,7 @@ output "vpc_id" {
 
 output "public_subnet_ids" {
   value       = { for k, s in aws_subnet.public : k => s.id }
-  description = "The public subnets, a and b"
+  description = "The public subnets, a and b (the tasks', the load balancer's and the machines')"
 }
 
 output "private_subnet_ids" {
@@ -79,28 +119,33 @@ output "private_subnet_ids" {
 }
 
 output "region" {
-  value       = var.region
+  value       = local.region
   description = "The region everything here lives in (the hosted servers' ONNET_HOSTED_EC2_REGION)"
 }
 
 output "hosted_enabled" {
   value       = local.hosted_enabled
-  description = "Whether hosted game servers are set up (hosted_data_snapshots names a data set): infra.env then turns ONNET_HOSTED_PROVIDER=ec2 on"
+  description = "Whether hosted game servers are set up (hosted_data_snapshots names a data set): the programs' environment then turns ONNET_HOSTED_PROVIDER=ec2 on"
 }
 
 output "fleet_launch_templates" {
   value       = { for kind, template in aws_launch_template.fleet : kind => template.id }
-  description = "The machines' launch templates by kind, shared and own (ONNET_HOSTED_EC2_LAUNCH_TEMPLATES in infra.env); empty while hosting is off"
+  description = "The machines' launch templates by kind, shared and own (ONNET_HOSTED_EC2_LAUNCH_TEMPLATES); empty while hosting is off"
 }
 
-output "hosted_subnet_id" {
-  value       = local.hosted_enabled ? aws_subnet.public["a"].id : null
-  description = "The subnet machines launch into (ONNET_HOSTED_EC2_SUBNET); null while hosting is off"
+output "hosted_subnet_ids" {
+  value       = local.hosted_enabled ? [for k in sort(keys(aws_subnet.public)) : aws_subnet.public[k].id] : null
+  description = "The subnets machines launch into, both zones' (ONNET_HOSTED_EC2_SUBNETS); null while hosting is off"
 }
 
-output "hosted_subnet_cidr" {
-  value       = local.hosted_enabled ? aws_subnet.public["a"].cidr_block : null
-  description = "That subnet's range, the only peers the internal listener's machine routes answer (ONNET_HOSTED_BOOTSTRAP_CIDRS); null while hosting is off"
+output "hosted_subnet_cidrs" {
+  value       = local.hosted_enabled ? [for k in sort(keys(aws_subnet.public)) : aws_subnet.public[k].cidr_block] : null
+  description = "Their ranges, the only peers the internal listener's machine routes answer (ONNET_HOSTED_BOOTSTRAP_CIDRS); null while hosting is off"
+}
+
+output "fleet_image_parameter" {
+  value       = one(aws_ssm_parameter.fleet_image[*].name)
+  description = "The SSM parameter holding the image the machines launch from (fleet bake-image writes it); null while hosting is off"
 }
 
 output "machines_security_group_id" {
@@ -111,11 +156,6 @@ output "machines_security_group_id" {
 output "hosted_deployment" {
   value       = local.hosted_enabled ? local.hosted_deployment : null
   description = "The opennova:deployment tag of this stack's machines (ONNET_HOSTED_DEPLOYMENT); null while hosting is off"
-}
-
-output "internal_http_bind" {
-  value       = "${local.service_private_ip}:${var.internal_http_port}"
-  description = "The service's internal listener (ONNET_INTERNAL_HTTP_BIND), admitted from the machines alone"
 }
 
 output "machines_log_group" {
@@ -130,10 +170,5 @@ output "alerts_topic_arn" {
 
 output "health_check_id" {
   value       = aws_route53_health_check.service.id
-  description = "The Route 53 health check on http://<Elastic IP>:8080/healthz"
-}
-
-output "github_deploy_role_arn" {
-  value       = one(aws_iam_role.github_deploy[*].arn)
-  description = "The role the deploy workflow assumes (the repository variable AWS_DEPLOY_ROLE_ARN); null unless github_deploy"
+  description = "The Route 53 health check on http://<the gate's address>:8080/healthz"
 }

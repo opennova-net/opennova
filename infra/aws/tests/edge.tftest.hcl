@@ -3,12 +3,13 @@
 # Cloudflare. From the repo root:
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> init -backend=false
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> test
-# Proxied records: an Origin CA certificate (ECDSA) for the domain and its
-# first-level names, its certificate and key handed to the host through SSM
-# SecureStrings, the zone on Full (strict) with https forced, edge
-# authentication stamping every deployment's web hostname, and Stripe's
-# webhook (POST /api/billing/webhook alone) skipping the WAF. Unproxied or
-# without Cloudflare: none of it. Prod without an edge secret says so.
+# Proxied records: the deployment's own site records (prod's @ and www,
+# staging's `staging`) and an Origin CA certificate (ECDSA) for its web
+# hostnames alone (staging's names no prod hostname), its certificate and key
+# handed to the portal through SSM SecureStrings under the deployment's prefix.
+# Unproxied or without Cloudflare: no certificate. The zone's own settings and
+# rules (Full strict, edge authentication, the webhook's WAF skip) are
+# infra/zone's: none of them is made here.
 
 mock_provider "aws" {
   override_during = plan
@@ -34,6 +35,11 @@ mock_provider "aws" {
   mock_data "aws_eip" {
     defaults = { id = "eipalloc-0123456789abcdef0", public_ip = "54.162.79.147" }
   }
+  # The deployment's parameters as the toolbox left them: no release yet (a run
+  # naming one overrides data.aws_ssm_parameters_by_path.deployment).
+  mock_data "aws_ssm_parameters_by_path" {
+    defaults = { names = [], values = [] }
+  }
   mock_resource "aws_eip" {
     defaults = { allocation_id = "eipalloc-0fedcba9876543210", public_ip = "3.3.3.3" }
   }
@@ -42,29 +48,54 @@ mock_provider "aws" {
   mock_resource "aws_iam_instance_profile" {
     defaults = { arn = "arn:aws:iam::123456789012:instance-profile/mock" }
   }
-  mock_resource "aws_iam_policy" {
-    defaults = { arn = "arn:aws:iam::123456789012:policy/mock" }
-  }
   mock_resource "aws_iam_role" {
     defaults = { arn = "arn:aws:iam::123456789012:role/mock" }
   }
   mock_resource "aws_cloudwatch_log_group" {
     defaults = { arn = "arn:aws:logs:us-east-1:123456789012:log-group:/opennova/prod/mock" }
   }
-  mock_resource "aws_ssm_document" {
-    defaults = { arn = "arn:aws:ssm:us-east-1:123456789012:document/opennova-server-converge" }
-  }
   mock_resource "aws_sns_topic" {
-    defaults = { arn = "arn:aws:sns:us-east-1:123456789012:opennova-server-alerts" }
+    defaults = { arn = "arn:aws:sns:us-east-1:123456789012:opennova-prod-alerts" }
+  }
+  mock_resource "aws_ssm_parameter" {
+    defaults = { arn = "arn:aws:ssm:us-east-1:123456789012:parameter/opennova/prod/mock" }
   }
   mock_resource "aws_db_instance" {
-    defaults = { address = "opennova-server-db.abcdefghijkl.us-east-1.rds.amazonaws.com", port = 5432, id = "db-MOCK" }
+    defaults = { address = "opennova-prod-db.abcdefghijkl.us-east-1.rds.amazonaws.com", port = 5432, id = "db-MOCK" }
+  }
+  mock_resource "aws_elasticache_replication_group" {
+    defaults = { primary_endpoint_address = "master.opennova-prod-cache.abcdef.use1.cache.amazonaws.com" }
+  }
+  mock_resource "aws_lb" {
+    defaults = {
+      arn        = "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/net/opennova-prod/0123456789abcdef"
+      arn_suffix = "net/opennova-prod/0123456789abcdef"
+      dns_name   = "opennova-prod-0123456789abcdef.elb.us-east-1.amazonaws.com"
+    }
+  }
+  mock_resource "aws_lb_target_group" {
+    defaults = {
+      arn        = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-mock/0123456789abcdef"
+      arn_suffix = "targetgroup/opennova-prod-mock/0123456789abcdef"
+    }
   }
   mock_resource "aws_launch_template" {
     defaults = { arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0123456789abcdef0", id = "lt-0123456789abcdef0" }
   }
-  mock_resource "aws_instance" {
-    defaults = { id = "i-0123456789abcdef0" }
+  mock_resource "aws_ecs_cluster" {
+    defaults = { id = "arn:aws:ecs:us-east-1:123456789012:cluster/opennova-prod", arn = "arn:aws:ecs:us-east-1:123456789012:cluster/opennova-prod" }
+  }
+  mock_resource "aws_ecs_task_definition" {
+    defaults = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/mock:1" }
+  }
+  mock_resource "aws_ecs_service" {
+    defaults = { id = "arn:aws:ecs:us-east-1:123456789012:service/opennova-prod/mock" }
+  }
+  mock_resource "aws_service_discovery_private_dns_namespace" {
+    defaults = { id = "ns-0123456789abcdef", arn = "arn:aws:servicediscovery:us-east-1:123456789012:namespace/ns-0123456789abcdef" }
+  }
+  mock_resource "aws_service_discovery_service" {
+    defaults = { id = "srv-0123456789abcdef", arn = "arn:aws:servicediscovery:us-east-1:123456789012:service/srv-0123456789abcdef" }
   }
 }
 
@@ -77,12 +108,15 @@ mock_provider "cloudflare" {
       ipv6_cidr_blocks = ["2400:cb00::/32"]
     }
   }
+  mock_data "cloudflare_zone" {
+    defaults = { account_id = "fedcba9876543210fedcba9876543210", name = "example.com" }
+  }
   mock_resource "cloudflare_origin_ca_certificate" {
     defaults = { certificate = "-----BEGIN CERTIFICATE-----\nMOCK\n-----END CERTIFICATE-----\n" }
   }
 }
 
-# The ids the assertions compare, known at plan.
+# The ids and ARNs the assertions compare, known at plan.
 override_resource {
   target          = aws_subnet.public["a"]
   override_during = plan
@@ -104,9 +138,34 @@ override_resource {
   values          = { id = "subnet-0private0b" }
 }
 override_resource {
-  target          = aws_security_group.service
+  target          = aws_security_group.program["gate"]
   override_during = plan
-  values          = { id = "sg-0service" }
+  values          = { id = "sg-0gate" }
+}
+override_resource {
+  target          = aws_security_group.program["lobby"]
+  override_during = plan
+  values          = { id = "sg-0lobby" }
+}
+override_resource {
+  target          = aws_security_group.program["web"]
+  override_during = plan
+  values          = { id = "sg-0web" }
+}
+override_resource {
+  target          = aws_security_group.program["controller"]
+  override_during = plan
+  values          = { id = "sg-0controller" }
+}
+override_resource {
+  target          = aws_security_group.program["worker"]
+  override_during = plan
+  values          = { id = "sg-0worker" }
+}
+override_resource {
+  target          = aws_security_group.lb
+  override_during = plan
+  values          = { id = "sg-0lb" }
 }
 override_resource {
   target          = aws_security_group.db
@@ -114,36 +173,133 @@ override_resource {
   values          = { id = "sg-0db" }
 }
 override_resource {
-  target          = aws_network_interface.service
+  target          = aws_security_group.backup
   override_during = plan
-  values          = { id = "eni-0service" }
+  values          = { id = "sg-0backup" }
+}
+override_resource {
+  target          = aws_lb_target_group.public["gate"]
+  override_during = plan
+  values          = { arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-gate/0123456789abcdef", arn_suffix = "targetgroup/opennova-prod-gate/0123456789abcdef" }
+}
+override_resource {
+  target          = aws_lb_target_group.public["https"]
+  override_during = plan
+  values          = { arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-https/0123456789abcdef", arn_suffix = "targetgroup/opennova-prod-https/0123456789abcdef" }
+}
+override_resource {
+  target          = aws_lb_target_group.public["http"]
+  override_during = plan
+  values          = { arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-http/0123456789abcdef", arn_suffix = "targetgroup/opennova-prod-http/0123456789abcdef" }
+}
+override_resource {
+  target          = aws_eip.lb_b
+  override_during = plan
+  values          = { allocation_id = "eipalloc-0000000000000000b", public_ip = "5.5.5.5" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["gate"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-gate:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["lobby"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-lobby:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["web"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-web:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["controller"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-controller:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["worker"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-worker:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.backup
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-backup:1" }
+}
+override_resource {
+  target          = aws_iam_role.program["gate"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-gate" }
+}
+override_resource {
+  target          = aws_iam_role.program["lobby"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-lobby" }
+}
+override_resource {
+  target          = aws_iam_role.program["web"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-web" }
+}
+override_resource {
+  target          = aws_iam_role.program["controller"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-controller" }
+}
+override_resource {
+  target          = aws_iam_role.program["worker"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-worker" }
+}
+override_resource {
+  target          = aws_iam_role.execution
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-execution" }
+}
+override_resource {
+  target          = aws_iam_role.backup
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-backup" }
+}
+override_resource {
+  target          = aws_iam_role.backup_schedule
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-backup-schedule" }
 }
 
-# The tls provider is the real one: it works offline, and its key and request
-# stay unknown at plan (the Cloudflare provider parses a request it is given,
-# so a mock one would not do).
-
 variables {
+  deployment                = "prod"
+  aws_account_id            = "123456789012"
+  region                    = "us-east-1"
   service_eip_allocation_id = "eipalloc-0123456789abcdef0"
   db_master_password        = "0123456789abcdef0123456789abcdef"
+  cache_auth_token          = "fedcba9876543210fedcba9876543210"
   cloudflare_zone_id        = "0123456789abcdef0123456789abcdef"
   cloudflare_domain         = "example.com"
-  edge_auth_secret          = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 }
 
 run "edge" {
   command = plan
 
   assert {
+    condition = (
+      cloudflare_record.web_root[0].name == "@" && cloudflare_record.web_root[0].type == "CNAME" && cloudflare_record.web_root[0].proxied &&
+      length(cloudflare_record.web_www) == 1 && cloudflare_record.web_www[0].name == "www"
+    )
+    error_message = "prod's site records: the apex and www, proxied"
+  }
+  assert {
     condition     = tls_private_key.origin[0].algorithm == "ECDSA" && tls_private_key.origin[0].ecdsa_curve == "P256"
     error_message = "the origin's key: ECDSA P-256"
   }
   assert {
     condition = (
-      toset(cloudflare_origin_ca_certificate.origin[0].hostnames) == toset(["example.com", "*.example.com"]) &&
-      cloudflare_origin_ca_certificate.origin[0].request_type == "origin-ecc"
+      toset(cloudflare_origin_ca_certificate.origin[0].hostnames) == toset(["example.com", "www.example.com"]) &&
+      cloudflare_origin_ca_certificate.origin[0].request_type == "origin-ecc" &&
+      tls_cert_request.origin[0].subject[0].common_name == "example.com"
     )
-    error_message = "an Origin CA certificate for the domain and its first-level names"
+    error_message = "an Origin CA certificate for prod's web hostnames alone (no wildcard that would cover staging's)"
   }
   assert {
     condition = (
@@ -151,45 +307,33 @@ run "edge" {
       aws_ssm_parameter.origin_tls_key[0].name == "/opennova/prod/tls/ORIGIN_TLS_KEY" && aws_ssm_parameter.origin_tls_key[0].type == "SecureString" &&
       base64decode(aws_ssm_parameter.origin_tls_cert[0].value) == "-----BEGIN CERTIFICATE-----\nMOCK\n-----END CERTIFICATE-----\n"
     )
-    error_message = "the certificate and key reach the host as base64 SecureStrings under /opennova/<deployment>/tls/"
-  }
-  assert {
-    condition = (
-      cloudflare_zone_settings_override.zone[0].settings[0].ssl == "strict" &&
-      cloudflare_zone_settings_override.zone[0].settings[0].always_use_https == "on"
-    )
-    error_message = "the zone verifies the origin (Full strict) and forces https"
-  }
-  assert {
-    condition = (
-      cloudflare_ruleset.edge_auth[0].rules[0].expression == "(http.host in {\"example.com\" \"www.example.com\" \"staging.example.com\"})" &&
-      cloudflare_ruleset.edge_auth[0].rules[0].action_parameters[0].headers[0].name == "X-OpenNova-Edge"
-    )
-    error_message = "edge authentication stamps every deployment's web hostname"
-  }
-  assert {
-    condition = (
-      strcontains(cloudflare_ruleset.webhook_skip[0].rules[0].expression, "http.request.uri.path eq \"/api/billing/webhook\"") &&
-      strcontains(cloudflare_ruleset.webhook_skip[0].rules[0].expression, "http.request.method eq \"POST\"") &&
-      cloudflare_ruleset.webhook_skip[0].rules[0].action == "skip" &&
-      cloudflare_ruleset.webhook_skip[0].phase == "http_request_firewall_custom"
-    )
-    error_message = "Stripe's webhook, and it alone, skips the WAF"
+    error_message = "the certificate and key reach the portal as base64 SecureStrings under /opennova/<deployment>/tls/"
   }
 }
 
-run "no_secret_says_so" {
+# Staging's records and certificate: its own first-level name alone.
+run "staging_edge" {
   command = plan
 
   variables {
-    edge_auth_secret = ""
+    deployment                = "staging"
+    service_eip_allocation_id = ""
   }
 
-  expect_failures = [check.edge_auth_is_on]
-
   assert {
-    condition     = length(cloudflare_ruleset.edge_auth) == 0
-    error_message = "no secret, no rule"
+    condition     = cloudflare_record.web_root[0].name == "staging" && length(cloudflare_record.web_www) == 0
+    error_message = "staging's site record is staging.<domain> alone: no apex, no www"
+  }
+  assert {
+    condition = (
+      toset(cloudflare_origin_ca_certificate.origin[0].hostnames) == toset(["staging.example.com"]) &&
+      tls_cert_request.origin[0].subject[0].common_name == "staging.example.com"
+    )
+    error_message = "staging's origin certificate names staging.<domain> alone: its key is good for no prod hostname"
+  }
+  assert {
+    condition     = aws_ssm_parameter.origin_tls_key[0].name == "/opennova/staging/tls/ORIGIN_TLS_KEY"
+    error_message = "staging's certificate reaches staging's portal alone, under /opennova/staging/tls/"
   }
 }
 
@@ -203,10 +347,9 @@ run "unproxied" {
   assert {
     condition = (
       length(tls_private_key.origin) == 0 && length(cloudflare_origin_ca_certificate.origin) == 0 &&
-      length(cloudflare_zone_settings_override.zone) == 0 && length(cloudflare_ruleset.edge_auth) == 0 &&
-      length(cloudflare_ruleset.webhook_skip) == 0
+      !strcontains(aws_ecs_task_definition.program["web"].container_definitions, "ORIGIN_TLS_CERT")
     )
-    error_message = "unproxied records: no origin certificate and no zone rule"
+    error_message = "unproxied records: no origin certificate (the portal reads none)"
   }
 }
 
@@ -219,7 +362,7 @@ run "no_cloudflare" {
   }
 
   assert {
-    condition     = length(aws_ssm_parameter.origin_tls_cert) == 0 && length(cloudflare_ruleset.webhook_skip) == 0
+    condition     = length(aws_ssm_parameter.origin_tls_cert) == 0 && length(cloudflare_record.web_root) == 0
     error_message = "without Cloudflare: none of it"
   }
 }

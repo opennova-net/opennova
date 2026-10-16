@@ -1,27 +1,17 @@
 # ---------------------------------------------------------------------------
-# The operations bucket, account-wide: prod (the default workspace) owns it, another deployment
-# uses them by name. The bucket holds, per deployment, the release bundles
-# (releases/<deployment>/<id>.tar.gz and its manifest <id>.json, which `app
-# deploy` uploads and the host's converge downloads) and the database dumps
-# (the backup sidecar's: novaworld/ for prod, novaworld-<deployment>/
-# otherwise). Its name is the one the single-host stack's backups bucket had.
+# The deployment's operations bucket, in its own account: the release
+# manifests (releases/<id>.json, which `app deploy` and `app rollback` write
+# and read) and the database dumps (novaworld/, the backup task's). Named after
+# the deployment and its account (opennova-prod-ops-<account id>), so no other
+# deployment names it. The account's S3 public access block is infra/org's.
 # ---------------------------------------------------------------------------
 
-# The account-wide S3 public access block is not OpenNova's: the account holds
-# other projects, and an account-wide switch here would undo theirs. Forgotten,
-# never destroyed (the setting stays as it is); the ops bucket's own block keeps
-# it private.
-removed {
-  from = aws_s3_account_public_access_block.this
-
-  lifecycle {
-    destroy = false
-  }
+locals {
+  ops_bucket_name = "${local.name}-ops-${local.account_id}"
 }
 
 resource "aws_s3_bucket" "ops" {
-  count         = local.manage_shared ? 1 : 0
-  bucket        = var.ops_bucket_name
+  bucket        = local.ops_bucket_name
   force_destroy = false
 
   tags = merge(var.tags, {
@@ -30,8 +20,7 @@ resource "aws_s3_bucket" "ops" {
 }
 
 resource "aws_s3_bucket_versioning" "ops" {
-  count  = local.manage_shared ? 1 : 0
-  bucket = aws_s3_bucket.ops[0].id
+  bucket = aws_s3_bucket.ops.id
 
   versioning_configuration {
     status = "Enabled"
@@ -39,8 +28,7 @@ resource "aws_s3_bucket_versioning" "ops" {
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "ops" {
-  count  = local.manage_shared ? 1 : 0
-  bucket = aws_s3_bucket.ops[0].id
+  bucket = aws_s3_bucket.ops.id
 
   rule {
     apply_server_side_encryption_by_default {
@@ -50,17 +38,15 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "ops" {
 }
 
 resource "aws_s3_bucket_lifecycle_configuration" "ops" {
-  count  = local.manage_shared ? 1 : 0
-  bucket = aws_s3_bucket.ops[0].id
+  bucket = aws_s3_bucket.ops.id
 
-  # The database dumps, every deployment's (novaworld/, novaworld-<deployment>/;
-  # the single-host stack's SQLite backups under novaworld/ among them): 90 days.
+  # The database dumps (novaworld/): 90 days.
   rule {
     id     = "expire-old-backups"
     status = "Enabled"
 
     filter {
-      prefix = "novaworld"
+      prefix = "${local.backup_prefix}/"
     }
 
     expiration {
@@ -72,8 +58,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "ops" {
     }
   }
 
-  # The release bundles (releases/<deployment>/, a few KiB each) never expire:
-  # a new host converges to the current one however old it is, and `app
+  # The release manifests (releases/, a few KiB each) never expire: `app
   # rollback --to` reaches any.
   rule {
     id     = "release-old-versions"
@@ -90,8 +75,7 @@ resource "aws_s3_bucket_lifecycle_configuration" "ops" {
 }
 
 resource "aws_s3_bucket_public_access_block" "ops" {
-  count  = local.manage_shared ? 1 : 0
-  bucket = aws_s3_bucket.ops[0].id
+  bucket = aws_s3_bucket.ops.id
 
   block_public_acls       = true
   block_public_policy     = true

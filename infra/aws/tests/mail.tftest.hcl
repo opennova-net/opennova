@@ -1,13 +1,17 @@
 # Outbound mail through Amazon SES (mail.tf), planned against mock providers
 # whose values reach the plan: offline, no credentials, nothing reaches AWS or
-# Cloudflare (tests/email.tftest.hcl says how these run). With a sender, prod
-# makes the domain's SES identity with its custom MAIL FROM domain, the three
-# DKIM CNAMEs and the MAIL FROM's MX and SPF records in the zone (DNS only), an
-# identity for the forward_to address (the sandbox's recipient), the service
-# role's one permission (ses:SendEmail through those identities, from the sender
-# alone) and the sender and region in infra.env. With none (the default), or
-# without Cloudflare, none of it; a malformed sender is refused. (tests/staging:
-# off prod, the role's permission and infra.env alone.)
+# Cloudflare. From the repo root:
+#   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> init -backend=false
+#   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> test
+# With a sender, prod makes, in its own account, the domain's SES identity with
+# its custom MAIL FROM domain, the three DKIM CNAMEs and the MAIL FROM's MX and
+# SPF records in the zone (DNS only), an identity for the forward_to address
+# (the sandbox's recipient), the worker's one permission (ses:SendEmail through
+# those identities, from the sender alone; web queues the mail and sends none)
+# and the sender and region in web's and the worker's environment. With none
+# (the default), or without Cloudflare, none of it; a malformed sender is
+# refused. (staging_mail.tftest.hcl: staging's own identities, under
+# staging.<domain>.)
 
 mock_provider "aws" {
   override_during = plan
@@ -33,13 +37,18 @@ mock_provider "aws" {
   mock_data "aws_eip" {
     defaults = { id = "eipalloc-0123456789abcdef0", public_ip = "54.162.79.147" }
   }
+  # The deployment's parameters as the toolbox left them: no release yet (a run
+  # naming one overrides data.aws_ssm_parameters_by_path.deployment).
+  mock_data "aws_ssm_parameters_by_path" {
+    defaults = { names = [], values = [] }
+  }
+  mock_resource "aws_eip" {
+    defaults = { allocation_id = "eipalloc-0fedcba9876543210", public_ip = "3.3.3.3" }
+  }
   # Well-formed ARNs and ids for what the configuration hands to an ARN or id
   # argument (the provider's own validation reads them).
   mock_resource "aws_iam_instance_profile" {
     defaults = { arn = "arn:aws:iam::123456789012:instance-profile/mock" }
-  }
-  mock_resource "aws_iam_policy" {
-    defaults = { arn = "arn:aws:iam::123456789012:policy/mock" }
   }
   mock_resource "aws_iam_role" {
     defaults = { arn = "arn:aws:iam::123456789012:role/mock" }
@@ -47,20 +56,48 @@ mock_provider "aws" {
   mock_resource "aws_cloudwatch_log_group" {
     defaults = { arn = "arn:aws:logs:us-east-1:123456789012:log-group:/opennova/prod/mock" }
   }
-  mock_resource "aws_ssm_document" {
-    defaults = { arn = "arn:aws:ssm:us-east-1:123456789012:document/opennova-server-converge" }
-  }
   mock_resource "aws_sns_topic" {
-    defaults = { arn = "arn:aws:sns:us-east-1:123456789012:opennova-server-alerts" }
+    defaults = { arn = "arn:aws:sns:us-east-1:123456789012:opennova-prod-alerts" }
+  }
+  mock_resource "aws_ssm_parameter" {
+    defaults = { arn = "arn:aws:ssm:us-east-1:123456789012:parameter/opennova/prod/mock" }
   }
   mock_resource "aws_db_instance" {
-    defaults = { address = "opennova-server-db.abcdefghijkl.us-east-1.rds.amazonaws.com", port = 5432, id = "db-MOCK" }
+    defaults = { address = "opennova-prod-db.abcdefghijkl.us-east-1.rds.amazonaws.com", port = 5432, id = "db-MOCK" }
+  }
+  mock_resource "aws_elasticache_replication_group" {
+    defaults = { primary_endpoint_address = "master.opennova-prod-cache.abcdef.use1.cache.amazonaws.com" }
+  }
+  mock_resource "aws_lb" {
+    defaults = {
+      arn        = "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/net/opennova-prod/0123456789abcdef"
+      arn_suffix = "net/opennova-prod/0123456789abcdef"
+      dns_name   = "opennova-prod-0123456789abcdef.elb.us-east-1.amazonaws.com"
+    }
+  }
+  mock_resource "aws_lb_target_group" {
+    defaults = {
+      arn        = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-mock/0123456789abcdef"
+      arn_suffix = "targetgroup/opennova-prod-mock/0123456789abcdef"
+    }
   }
   mock_resource "aws_launch_template" {
     defaults = { arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0123456789abcdef0", id = "lt-0123456789abcdef0" }
   }
-  mock_resource "aws_instance" {
-    defaults = { id = "i-0123456789abcdef0" }
+  mock_resource "aws_ecs_cluster" {
+    defaults = { id = "arn:aws:ecs:us-east-1:123456789012:cluster/opennova-prod", arn = "arn:aws:ecs:us-east-1:123456789012:cluster/opennova-prod" }
+  }
+  mock_resource "aws_ecs_task_definition" {
+    defaults = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/mock:1" }
+  }
+  mock_resource "aws_ecs_service" {
+    defaults = { id = "arn:aws:ecs:us-east-1:123456789012:service/opennova-prod/mock" }
+  }
+  mock_resource "aws_service_discovery_private_dns_namespace" {
+    defaults = { id = "ns-0123456789abcdef", arn = "arn:aws:servicediscovery:us-east-1:123456789012:namespace/ns-0123456789abcdef" }
+  }
+  mock_resource "aws_service_discovery_service" {
+    defaults = { id = "srv-0123456789abcdef", arn = "arn:aws:servicediscovery:us-east-1:123456789012:service/srv-0123456789abcdef" }
   }
 }
 
@@ -81,7 +118,7 @@ mock_provider "cloudflare" {
   }
 }
 
-# The ids the configuration hands on, known at plan.
+# The ids and ARNs the assertions compare, known at plan.
 override_resource {
   target          = aws_subnet.public["a"]
   override_during = plan
@@ -103,9 +140,34 @@ override_resource {
   values          = { id = "subnet-0private0b" }
 }
 override_resource {
-  target          = aws_security_group.service
+  target          = aws_security_group.program["gate"]
   override_during = plan
-  values          = { id = "sg-0service" }
+  values          = { id = "sg-0gate" }
+}
+override_resource {
+  target          = aws_security_group.program["lobby"]
+  override_during = plan
+  values          = { id = "sg-0lobby" }
+}
+override_resource {
+  target          = aws_security_group.program["web"]
+  override_during = plan
+  values          = { id = "sg-0web" }
+}
+override_resource {
+  target          = aws_security_group.program["controller"]
+  override_during = plan
+  values          = { id = "sg-0controller" }
+}
+override_resource {
+  target          = aws_security_group.program["worker"]
+  override_during = plan
+  values          = { id = "sg-0worker" }
+}
+override_resource {
+  target          = aws_security_group.lb
+  override_during = plan
+  values          = { id = "sg-0lb" }
 }
 override_resource {
   target          = aws_security_group.db
@@ -113,12 +175,101 @@ override_resource {
   values          = { id = "sg-0db" }
 }
 override_resource {
-  target          = aws_network_interface.service
+  target          = aws_security_group.backup
   override_during = plan
-  values          = { id = "eni-0service" }
+  values          = { id = "sg-0backup" }
+}
+override_resource {
+  target          = aws_lb_target_group.public["gate"]
+  override_during = plan
+  values          = { arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-gate/0123456789abcdef", arn_suffix = "targetgroup/opennova-prod-gate/0123456789abcdef" }
+}
+override_resource {
+  target          = aws_lb_target_group.public["https"]
+  override_during = plan
+  values          = { arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-https/0123456789abcdef", arn_suffix = "targetgroup/opennova-prod-https/0123456789abcdef" }
+}
+override_resource {
+  target          = aws_lb_target_group.public["http"]
+  override_during = plan
+  values          = { arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-http/0123456789abcdef", arn_suffix = "targetgroup/opennova-prod-http/0123456789abcdef" }
+}
+override_resource {
+  target          = aws_eip.lb_b
+  override_during = plan
+  values          = { allocation_id = "eipalloc-0000000000000000b", public_ip = "5.5.5.5" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["gate"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-gate:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["lobby"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-lobby:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["web"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-web:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["controller"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-controller:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["worker"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-worker:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.backup
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-backup:1" }
+}
+override_resource {
+  target          = aws_iam_role.program["gate"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-gate" }
+}
+override_resource {
+  target          = aws_iam_role.program["lobby"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-lobby" }
+}
+override_resource {
+  target          = aws_iam_role.program["web"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-web" }
+}
+override_resource {
+  target          = aws_iam_role.program["controller"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-controller" }
+}
+override_resource {
+  target          = aws_iam_role.program["worker"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-worker" }
+}
+override_resource {
+  target          = aws_iam_role.execution
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-execution" }
+}
+override_resource {
+  target          = aws_iam_role.backup
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-backup" }
+}
+override_resource {
+  target          = aws_iam_role.backup_schedule
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-backup-schedule" }
 }
 
-# Easy DKIM's three tokens, which SES hands back when it makes the identity.
 override_resource {
   target          = aws_sesv2_email_identity.domain
   override_during = plan
@@ -128,11 +279,14 @@ override_resource {
 }
 
 variables {
+  deployment                = "prod"
+  aws_account_id            = "123456789012"
+  region                    = "us-east-1"
   service_eip_allocation_id = "eipalloc-0123456789abcdef0"
   db_master_password        = "0123456789abcdef0123456789abcdef"
+  cache_auth_token          = "fedcba9876543210fedcba9876543210"
   cloudflare_zone_id        = "0123456789abcdef0123456789abcdef"
   cloudflare_domain         = "example.com"
-  edge_auth_secret          = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   email_forward_to          = "maintainer@mail.example.org"
   mail_sender               = "support"
 }
@@ -183,16 +337,19 @@ run "mail" {
         ]) &&
         one([for c in st.condition : c.test == "StringEquals" && c.variable == "ses:FromAddress" && toset(c.values) == toset(["support@example.com"])])
       ]) &&
-      aws_iam_role_policy.mail[0].name == "opennova-server-mail"
+      toset(keys(aws_iam_role_policy.mail)) == toset(["worker"]) &&
+      aws_iam_role_policy.mail["worker"].name == "opennova-prod-worker-mail" &&
+      aws_iam_role_policy.mail["worker"].role == aws_iam_role.program["worker"].id
     )
-    error_message = "the service role sends through the two identities, from support@<domain> alone"
+    error_message = "the worker alone sends, through the two identities, from support@<domain> alone (web queues mail.send jobs)"
   }
   assert {
-    condition = (
-      strcontains(aws_ssm_parameter.infra_env.value, "ONNET_MAIL_FROM='support@example.com'\n") &&
-      strcontains(aws_ssm_parameter.infra_env.value, "ONNET_MAIL_REGION='us-east-1'\n")
-    )
-    error_message = "infra.env names the sender and SES's region"
+    condition = alltrue([
+      for p in ["web", "worker"] :
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_MAIL_FROM"] == "support@example.com" &&
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_MAIL_REGION"] == "us-east-1"
+    ]) && alltrue([for p in ["gate", "lobby", "controller"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_MAIL_")])
+    error_message = "web's and the worker's environment name the sender and SES's region, no other program's"
   }
 }
 
@@ -226,7 +383,7 @@ run "off" {
       length(aws_sesv2_email_identity.domain) == 0 && length(aws_sesv2_email_identity.forward_to) == 0 &&
       length(aws_sesv2_email_identity_mail_from_attributes.domain) == 0 && length(cloudflare_record.mail_dkim) == 0 &&
       length(cloudflare_record.mail_from_mx) == 0 && length(cloudflare_record.mail_from_spf) == 0 &&
-      length(aws_iam_role_policy.mail) == 0 && !strcontains(aws_ssm_parameter.infra_env.value, "ONNET_MAIL_")
+      length(aws_iam_role_policy.mail) == 0 && alltrue([for p, d in aws_ecs_task_definition.program : !strcontains(d.container_definitions, "ONNET_MAIL_")])
     )
     error_message = "no sender: no mail, nothing made"
   }
