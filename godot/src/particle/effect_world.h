@@ -162,7 +162,7 @@ public:
 	// first-draw pipeline compiles) are paid behind the loading screen
 	// instead of as a ~90 ms hitch on the player's first live shot. Retail
 	// pays this at load — CEffectSystem_Init loads every .ptl AND its
-	// textures up front [orig: @ 0x5f6070 <- Game_StartMission @ 0x524980];
+	// textures up front (engine: runtime/mission/mission_load_plan.h);
 	// the deferred-resolve shell path is what made first fire hitch. The
 	// caller renders a frame or two (advancing the fixed tick so fresh
 	// emitters actually emit and draw), then clears the warm spawns via

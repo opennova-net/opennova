@@ -18,7 +18,7 @@ namespace godot {
 //
 // Derivation: the original getters serve celestial tuples in the RENDER FLOAT
 // basis — mission fixed (x east, y north, z up) maps through
-// [orig: Math_FixedPointToFloat3_YNegated @ 0x611210, see docs/env/env-tod-re.md] as
+// (engine: runtime/world/occlusion.h) as
 // (x, y, z)_mission -> (-y, z, x)_render (render x = south, y = up,
 // z = east). OpenNova's Godot world was built from mission axes as
 // (x, y, z)_mission -> (x, z, -y)_godot (godot x = east, y = up, z = south).

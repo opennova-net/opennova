@@ -348,8 +348,7 @@ public:
 	// / HudDeclutter::apply_level). The timers count down on the ticks
 	// set_player_state carries.
 	void set_item_flash(int p_index, int p_value);
-	// The showhud 2-bit FP-view flags [orig: g_FpWeaponViewFlags cycle
-	// @0x4E0561]: bit 0 = the FP gun (consumed by the viewmodel rig, not
+	// The showhud 2-bit FP-view flags (engine: runtime/hud/hud_toggles.cpp): bit 0 = the FP gun (consumed by the viewmodel rig, not
 	// here), bit 1 = the corner spinmap block.
 	void set_showhud_flags(int p_flags);
 	// The per-player sight-scale index the SIGHTS card's `scale` rows draw

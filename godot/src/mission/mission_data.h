@@ -190,8 +190,7 @@ public:
 	bool set_header_flag(int bit, bool on);
 	bool set_header_float(const String &field, float value);
 	// Game mode is a single-select among the 11 ATTRIB_* mode bits (or none = Single Player). The
-	// engine stores it as exactly one bit of attrib_flags and selects by priority [orig: sub_402770
-	// decode @0x4050c7, encode @0x4031cd `and 0x7CFFFF`/`or <bit>`, dfx2med.exe]. get_game_mode returns
+	// engine stores it as exactly one bit of attrib_flags and selects by priority (engine: formats/mission/bms.h). get_game_mode returns
 	// the active mode bit (0 = Single Player); set_game_mode clears all 11 mode bits then sets `bit`
 	// (0 clears all). Returns int64 because ATTRIB_SEARCH_AND_DESTROY (0x80000000) overflows a signed int.
 	int64_t get_game_mode() const;

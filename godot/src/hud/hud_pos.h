@@ -59,7 +59,7 @@ public:
 	~HudPos();
 
 	// The virtual design space hudpos.def positions are authored in; the HUD
-	// scales these to the real surface. [orig: Viewport_ScaleToVirtualCoords @0x5d2b20, see docs/interface/hud-re.md]
+	// scales these to the real surface. (engine: runtime/hud/hud_math.h)
 	enum {
 		DESIGN_WIDTH = 1024,
 		DESIGN_HEIGHT = 768,

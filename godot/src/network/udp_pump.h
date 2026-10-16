@@ -31,7 +31,7 @@ class UdpDatagram;
 // poll() before its receive step and the sends after its emit, routing each datagram to the
 // right engine/runtime/replication UdpSessionTransport by source address (a later increment). This is a
 // RefCounted, not a Node — it never self-processes; its owner drives the cadence (the witnessed
-// poll-before-logic / send-after order, [orig: Game_ProcessMainFrame @0x5263f0, see docs/net/novaworld-net-re.md]).
+// poll-before-logic / send-after order, (engine: runtime/inmatch/joiner_role.cpp)).
 class UdpPump : public RefCounted {
 	GDCLASS(UdpPump, RefCounted)
 

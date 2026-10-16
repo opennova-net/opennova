@@ -78,8 +78,7 @@ bool MnsStyleSheet::has_variable(const String &p_name) const {
 }
 
 // A text-level %VAR% helper for tools and tests, not the runtime path: the original
-// expands %VAR% over the whole raw .mnu buffer before the XML parse [orig:
-// NapiXML_ExpandVariablesInText @ 0x63a000]; the menus resolve whole field values
+// expands %VAR% over the whole raw .mnu buffer before the XML parse (engine: runtime/menu/menu_frame.cpp); the menus resolve whole field values
 // through MenuFrameCompiler::resolve_var (D-MNU-1, ADR 0005; docs/mnu/menu-re.md).
 String MnsStyleSheet::substitute(const String &p_text) const {
 	return to_gd(sheet_.substitute(to_std(p_text)));
