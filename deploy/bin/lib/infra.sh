@@ -12,67 +12,9 @@
 # infra
 # ---------------------------------------------------------------------------
 
-# The data sets hosted game servers run: each the games slug of the lobby its
-# servers list in (apps/novaworld_common/hosted, the service's data-set
-# catalog), one snapshot each (infra/aws/fleet.tf).
-HOSTED_DATA_SETS=(jop_2_consumer dfx2_consumer opennova_0_consumer)
-
-# Whether $1 is one of HOSTED_DATA_SETS.
-hosted_known_data_set() {
-  local slug
-  for slug in "${HOSTED_DATA_SETS[@]}"; do
-    [ "$slug" = "$1" ] && return 0
-  done
-  return 1
-}
-
-# The deployment's data sets' snapshots in its vault item (hosted-<deployment>,
-# one field per data set, data_snapshot_id_<slug>: snapshots in the
-# deployment's own account), as a JSON object slug -> snapshot id on stdout.
-# The item is read once (the run's cache); a failed read, a field naming no
-# data set, a value that is no snapshot id, or an item naming no data set at
-# all fails (the reason on stderr), so nothing reads a broken item as hosting
-# off. Run it in a command substitution and check its status.
-hosted_snapshot_map() {
-  local fields label value slug map="{}"
-  vault_item_load "$HOSTED_ITEM" \
-    || die "reading vault item '$HOSTED_ITEM' failed (fix the vault access, or delete the item to turn $DEP's hosting off): $VAULT_ERR"
-  fields="$(jq -r '.fields[]? | select((.label // "") | startswith("data_snapshot_id")) | [.label, (.value // "")] | @tsv' "$(vault_item_file "$HOSTED_ITEM")")" \
-    || die "vault item '$HOSTED_ITEM' came back unreadable (no JSON with fields)"
-  while IFS=$'\t' read -r label value; do
-    [ -n "$label" ] || continue
-    slug="${label#data_snapshot_id_}"
-    hosted_known_data_set "$slug" \
-      || die "vault item '$HOSTED_ITEM' has the field $label, which names no data set (data_snapshot_id_<slug>, the slug one of: ${HOSTED_DATA_SETS[*]})"
-    case "$value" in
-      snap-*) ;;
-      *) die "vault item '$HOSTED_ITEM' field $label holds '$value', which is no snapshot id (snap-...)" ;;
-    esac
-    map="$(jq -c --arg k "$slug" --arg v "$value" '. + {($k): $v}' <<<"$map")"
-  done <<<"$fields"
-  [ "$map" != "{}" ] \
-    || die "vault item '$HOSTED_ITEM' names no data set: add a field data_snapshot_id_<slug> per data set (the slug one of: ${HOSTED_DATA_SETS[*]}), or delete the item to turn $DEP's hosting off"
-  printf '%s' "$map"
-}
-
-# The hosted game servers' data snapshots (infra/aws/fleet.tf), from the
-# deployment's vault item as TF_VAR_hosted_data_snapshots (a JSON object, which
-# Terraform reads as the map). No such item in the vault's listing means the
-# deployment's hosting is off (the map stays empty, and fleet.tf makes
-# nothing). Any other failure (the listing, or reading an item that is there)
-# stops the run, so a vault hiccup never plans the hosting resources away.
-hosted_snapshot_var() {
-  local map
-  if ! vault_has_item "$HOSTED_ITEM"; then
-    export TF_VAR_hosted_data_snapshots="{}"
-    log "hosted game servers: off (no '$HOSTED_ITEM' item in vault '$VAULT')"
-    return
-  fi
-  map="$(hosted_snapshot_map)" \
-    || die "Refusing to run terraform with hosting unknown (fix the vault item '$HOSTED_ITEM', or delete it to turn $DEP's hosting off)"
-  export TF_VAR_hosted_data_snapshots="$map"
-  log "hosted game servers: data sets $(jq -r 'to_entries | map("\(.key) (\(.value))") | join(", ")' <<<"$map") (vault item '$HOSTED_ITEM')"
-}
+# Hosting is the deployment's var-file's (hosted_enabled in
+# infra/aws/<deployment>.tfvars; DEPLOY.md "Hosted game servers"): nothing of
+# it comes from the vault, and the game data is the site's Game data page.
 
 # terraform in infra/aws, with the deployment's own data directory: each
 # deployment's backend (its account's state bucket) stays its own.
@@ -183,16 +125,13 @@ cmd_infra() {
   tf_init
   case "$action" in
     plan)
-      hosted_snapshot_var
       tf_op plan -input=false "${TF_VAR_ARGS[@]}" "$@" ;;
     apply)
-      hosted_snapshot_var
       infra_apply "$@" ;;
     destroy)
       [ "$DEP" != prod ] || die "infra destroy refuses prod"
       take_yes "$@"
       confirm_word "$DEP" "destroy $DEP's whole stack (account $ACCOUNT_ID; the database keeps its final snapshot)" "$OPT_YES"
-      hosted_snapshot_var
       tf_op destroy -input=false -auto-approve "${TF_VAR_ARGS[@]}" ${OPT_REST[@]+"${OPT_REST[@]}"} ;;
     state-rm)
       take_yes "$@"
@@ -203,7 +142,6 @@ cmd_infra() {
       take_yes "$@"
       [ "${#OPT_REST[@]}" -eq 2 ] || die "infra import needs ADDRESS ID"
       confirm_prod "adopt ${OPT_REST[1]} as ${OPT_REST[0]}" "$OPT_YES"
-      hosted_snapshot_var
       tf_op import -input=false "${TF_VAR_ARGS[@]}" "${OPT_REST[0]}" "${OPT_REST[1]}" ;;
     output) tf output "$@" ;;
     list)   tf state list "$@" ;;

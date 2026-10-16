@@ -16,11 +16,15 @@
 # that base: web hiredis (the one program that links it) and the retail pages
 # (templates, static); web, the controller and the
 # worker the machine script (every program that decides whether hosting is on
-# checks it; the worker renders it); the lobby (its own public address, from EC2)
-# and the worker (the fleet's machines, the outbound mail) the AWS CLI v2. No
-# image keeps state: the database is PostgreSQL (DATABASE_URL, DATABASE_PASSWORD),
-# web's state Redis (ONNET_REDIS_URL, ONNET_REDIS_PASSWORD). The web portal is a
-# separate nginx image (web/Dockerfile), a second container in web's task.
+# checks it; the worker renders it); the lobby (its own public address, from
+# EC2), web (the game data's store: the admin page's uploads) and the worker
+# (the fleet's machines, the store, the outbound mail) the AWS CLI v2. No
+# image keeps state: the database is
+# PostgreSQL (DATABASE_URL, DATABASE_PASSWORD), web's state Redis
+# (ONNET_REDIS_URL, ONNET_REDIS_PASSWORD), the game data the store (S3 on a
+# deployment; the compose stack's directory volume mounts under
+# /var/lib/opennova/store). The web portal is a separate nginx image
+# (web/Dockerfile), a second container in web's task.
 
 # ---- build stage ----------------------------------------------------------
 FROM ubuntu:24.04 AS build
@@ -47,14 +51,15 @@ RUN cmake -S . -B build -G Ninja \
         opennova_novaworld_web opennova_novaworld_controller opennova_novaworld_worker
 
 # ---- AWS CLI stage ---------------------------------------------------------
-# The hosted servers' ec2 machine driver (hosted/ec2_machine_driver.h) and
-# the outbound mail (mailer.h, sesv2 send-email) run the AWS CLI v2, their
-# credentials the ECS task role's. A pinned release, checked against its
-# SHA-256 before it is unpacked. The sum was taken from the release AWS
-# signed: its .sig verifies against the AWS CLI Team key in the CLI's install
-# guide (fingerprint FB5D B77F D5C1 18B8 0511 ADA8 A631 0ACC 4672 475C). A bump
-# moves both ARGs: fetch the new zip and its .sig, verify, and record the new
-# sum.
+# The hosted servers' ec2 machine driver (hosted/ec2_machine_driver.h), the
+# game data's S3 store (s3_object_store.h: s3 cp, sync and rm, s3api's objects
+# and multipart uploads) and the outbound mail (mailer.h, sesv2 send-email) run
+# the AWS CLI v2, their credentials the ECS task role's. A pinned release,
+# checked against its SHA-256 before it is unpacked. The sum was taken from the
+# release AWS signed: its .sig verifies against the AWS CLI Team key in the
+# CLI's install guide (fingerprint FB5D B77F D5C1 18B8 0511 ADA8 A631 0ACC 4672
+# 475C). A bump moves both ARGs: fetch the new zip and its .sig, verify, and
+# record the new sum.
 FROM ubuntu:24.04 AS awscli
 
 ARG AWSCLI_VERSION=2.36.50
@@ -69,26 +74,38 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && /tmp/aws/install --install-dir /usr/local/aws-cli --bin-dir /usr/local/bin \
     && /usr/local/bin/aws --version
 
-# The programs call ec2 and sesv2 alone (sts for a credentials check by hand):
-# the help examples, the completer and its index, and every other service's
-# model go (about 160 MB of the CLI's 270). The models' root files
-# (endpoints.json, partitions.json) stay. Then the check: the commands the
-# programs run still build, and a real describe-instances runs to its HTTP
-# request (fake keys, a closed local port, so it can reach nothing).
+# The programs call ec2, s3 (the s3 and s3api commands share its model) and
+# sesv2 alone (sts for a credentials check by hand): the help examples, the
+# completer and its index, and every other service's model go (about 160 MB
+# of the CLI's 270). The models' root files (endpoints.json, partitions.json)
+# stay. Then the check: the commands the programs run still build, and a real
+# describe-instances and a real s3 ls run to their HTTP request (fake keys, a
+# closed local port, so they can reach nothing).
 RUN dist=/usr/local/aws-cli/v2/current/dist \
     && data="$dist/awscli/botocore/data" \
-    && test -d "$data/ec2" && test -d "$data/sts" && test -d "$data/sesv2" && test -f "$data/endpoints.json" \
+    && test -d "$data/ec2" && test -d "$data/s3" && test -d "$data/sts" && test -d "$data/sesv2" && test -f "$data/endpoints.json" \
     && rm -rf "$dist/awscli/examples" "$dist/awscli/data/ac.index" "$dist/aws_completer" \
         /usr/local/aws-cli/v2/current/bin/aws_completer /usr/local/bin/aws_completer \
-    && find "$data" -mindepth 1 -maxdepth 1 -type d ! -name ec2 ! -name sts ! -name sesv2 -exec rm -rf {} + \
+    && find "$data" -mindepth 1 -maxdepth 1 -type d ! -name ec2 ! -name s3 ! -name sts ! -name sesv2 -exec rm -rf {} + \
     && aws ec2 describe-instances --generate-cli-skeleton >/dev/null \
     && aws ec2 run-instances --generate-cli-skeleton >/dev/null \
     && aws ec2 terminate-instances --generate-cli-skeleton >/dev/null \
+    && aws s3api list-objects-v2 --generate-cli-skeleton >/dev/null \
+    && aws s3api head-object --generate-cli-skeleton >/dev/null \
+    && aws s3api upload-part --generate-cli-skeleton >/dev/null \
+    && aws s3api create-multipart-upload --generate-cli-skeleton >/dev/null \
+    && aws s3api complete-multipart-upload --generate-cli-skeleton >/dev/null \
+    && aws s3api abort-multipart-upload --generate-cli-skeleton >/dev/null \
+    && aws s3api list-multipart-uploads --generate-cli-skeleton >/dev/null \
     && aws sts get-caller-identity --generate-cli-skeleton >/dev/null \
     && aws sesv2 send-email --generate-cli-skeleton >/dev/null \
     && out="$(AWS_ACCESS_KEY_ID=AKIAEXAMPLEEXAMPLE00 AWS_SECRET_ACCESS_KEY=example AWS_MAX_ATTEMPTS=1 \
         aws ec2 describe-instances --region us-east-1 --endpoint-url http://127.0.0.1:9 \
         --cli-connect-timeout 2 --output json --no-cli-pager 2>&1 || true)" \
+    && echo "$out" | grep -q 'Could not connect to the endpoint URL' \
+    && out="$(AWS_ACCESS_KEY_ID=AKIAEXAMPLEEXAMPLE00 AWS_SECRET_ACCESS_KEY=example AWS_MAX_ATTEMPTS=1 \
+        aws s3 ls s3://example-bucket/data/ --region us-east-1 --endpoint-url http://127.0.0.1:9 \
+        --cli-connect-timeout 2 --no-cli-pager 2>&1 || true)" \
     && echo "$out" | grep -q 'Could not connect to the endpoint URL' \
     && du -sh /usr/local/aws-cli
 
@@ -150,10 +167,15 @@ RUN useradd --uid 10002 --user-group --no-create-home --home-dir /nonexistent \
 # a second SIGTERM ends a stuck shutdown only when the program is not PID 1,
 # which the kernel shields from default-action signals (program.cpp).
 
-# The AWS CLI, at the absolute path the programs run it by: the worker's.
+# The AWS CLI, at the absolute path the programs run it by: web's and the
+# worker's. The local store's mount point beside it (the compose stack's volume:
+# a named volume takes the image directory's owner on its first mount, so the
+# program, UID 10002, can write it; a deployment's store is S3 and nothing
+# mounts it).
 FROM runtime AS runtime-aws
 COPY --from=awscli /usr/local/aws-cli /usr/local/aws-cli
-RUN ln -s /usr/local/aws-cli/v2/current/bin/aws /usr/local/bin/aws && aws --version
+RUN ln -s /usr/local/aws-cli/v2/current/bin/aws /usr/local/bin/aws && aws --version \
+    && install -d -o 10002 -g 10002 -m 0750 /var/lib/opennova/store
 
 # ---- gate ------------------------------------------------------------------
 FROM runtime AS gate
@@ -177,8 +199,10 @@ ENTRYPOINT ["/app/opennova-novaworld-lobby"]
 
 # ---- web -------------------------------------------------------------------
 # Web alone links hiredis (its Redis pool, the shared library's one hiredis
-# user: scripts/lint/link_graph_check.py), so its image alone carries it.
-FROM runtime AS web
+# user: scripts/lint/link_graph_check.py), so its image alone carries it. It
+# runs the AWS CLI for the game data's store (the admin page's uploads, which
+# it puts there part by part).
+FROM runtime-aws AS web
 RUN apt-get update && apt-get install -y --no-install-recommends libhiredis1.1.0 \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /src/build/apps/novaworld_web/opennova-novaworld-web /app/
@@ -188,7 +212,8 @@ COPY --from=build /src/apps/novaworld_common/hosted/machine/machine_user_data.sh
 RUN ! ldd /app/opennova-novaworld-web | grep -q 'not found'
 ENV TEMPLATES_DIR=/app/templates \
     STATIC_DIR=/app/static \
-    ONNET_HOSTED_MACHINE_SCRIPT=/app/hosted/machine_user_data.sh
+    ONNET_HOSTED_MACHINE_SCRIPT=/app/hosted/machine_user_data.sh \
+    ONNET_HOSTED_AWS_CLI=/usr/local/bin/aws
 USER 10002
 EXPOSE 8080/tcp
 # GET /livez on its own HTTP port: the process's liveness (GET /healthz, the

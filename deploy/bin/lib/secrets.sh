@@ -268,16 +268,6 @@ secrets_check() {
     log "  email/forward_to    placeholder: email routing off (support@<domain> receives nothing)"
   fi
   VAULT_VALUE=""
-  # Optional: the deployment's hosted game servers are off without it (DEPLOY.md,
-  # "Hosted game servers").
-  local snapshots
-  if ! vault_has_item "$HOSTED_ITEM"; then
-    log "  $HOSTED_ITEM absent (the $DEP hosted game servers off)"
-  elif snapshots="$(hosted_snapshot_map)"; then
-    log "  $HOSTED_ITEM OK ($(jq -r 'keys | join(", ")' <<<"$snapshots"))"
-  else
-    err "  $HOSTED_ITEM FAILED"; rc=1
-  fi
   [ "$rc" -eq 0 ] || die "one or more checks failed: create or fix the vault items (DEPLOY.md, section 1; secrets init adds the generated ones)"
   log "all references resolved."
 }

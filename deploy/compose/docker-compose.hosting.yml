@@ -20,11 +20,15 @@
 #                 the worker alone joins: no other program and no machine (a
 #                 game server's) reaches it. The local stack's alone, never a
 #                 deployment's.
-#   machine-data  the data set's folder (STACK_DATA_DIR: a licensed install
-#                 the developer names, or the synthetic one scripts/dev_stack.sh
-#                 writes) at /opt/game/<data set>, where a machine mounts each
-#                 data set; the machines take it from this container
-#                 (ONNET_HOSTED_DOCKER_DATA_FROM).
+#   machine-data  the local object store (the base file's `store` volume: the
+#                 data sets' trees the site's Game data page uploads, which
+#                 scripts/dev_stack.sh up --data or --synthetic-data seeds
+#                 through the admin API) at /var/lib/opennova/store, the path
+#                 the programs see it at, read-only; the machines take every
+#                 mount of this container (ONNET_HOSTED_DOCKER_DATA_FROM), so a
+#                 machine's hostd copies a tree from
+#                 file:///var/lib/opennova/store/trees/<id>/, the URL the
+#                 controller hands it, into its own /opt/game.
 #   machine-image the machines' image, the serve image, built and never run.
 #
 # scripts/dev_stack.sh up --data <dir> (or --synthetic-data) adds this file.
@@ -39,7 +43,6 @@ networks:
 
 x-hosting-env: &hosting-env
   ONNET_HOSTED_PROVIDER: docker
-  ONNET_HOSTED_DATA_SETS: ${STACK_DATA_SETS:?set STACK_DATA_SETS, ONNET_HOSTED_DATA_SETS for the data set (scripts/dev_stack.sh writes it)}
   ONNET_HOSTED_DOCKER_URL: http://docker-api:2375
   ONNET_HOSTED_DOCKER_NETWORK: opennova-dev
   ONNET_HOSTED_DOCKER_DATA_FROM: opennova-dev-machine-data
@@ -89,7 +92,8 @@ services:
       - docker-api
 
   # A container of no image of ours: the machines take every mount it has
-  # (VolumesFrom), so it holds the data set's alone.
+  # (VolumesFrom), so it holds the store alone, read-only, at the path web and
+  # the worker mount it at (ONNET_OBJECT_STORE_URL names it).
   machine-data:
     image: alpine:3.20
     container_name: opennova-dev-machine-data
@@ -97,10 +101,7 @@ services:
     init: true
     command: ["sleep", "infinity"]
     volumes:
-      - type: bind
-        source: ${STACK_DATA_DIR:?set STACK_DATA_DIR, the data set's folder (scripts/dev_stack.sh --data or --synthetic-data)}
-        target: /opt/game/${STACK_DATA_SET:-jop_2_consumer}
-        read_only: true
+      - store:/var/lib/opennova/store:ro
 
   # The machines' image (apps/serve/Dockerfile: opennova-serve and
   # opennova-hostd), which the worker's driver starts each machine from: built

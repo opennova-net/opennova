@@ -45,9 +45,8 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
     database and its pg_dump copies, through one-off tasks of the backup task definition
     (`backup import --from-deployment prod KEY` brings prod's dump into staging alone);
   - `fleet status|logs|drain|end|roll|bake-image`: the hosted game servers' machines
-    (`fleet logs MACHINE [SLOT|hostd]`: a machine's logs from CloudWatch);
-  - `hosted data-snapshot --data-set <slug>`: a data set's game data into a snapshot in
-    the deployment's account;
+    (`fleet logs MACHINE [SLOT|hostd]`: a machine's logs from CloudWatch; their game data
+    is the site's Game data page, DEPLOY.md "Hosted game servers", not the toolbox's);
   - `aws <args...>`: the AWS CLI in the deployment's account.
 
   Every Terraform state lives in an S3 bucket of a deployment's account, versioned and
@@ -57,7 +56,7 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
   the vault, AWS) and `main`; the commands live in the files it sources from `bin/lib/`,
   one per responsibility: `secrets.sh`, `stripe.sh`, `infra.sh` (`infra`, `org`, `zone`,
   `github`), `app.sh` (the releases on ECS, ECS Exec, the one-off tasks), `db.sh` (`db`,
-  `backup`) and `fleet.sh` (`fleet`, `hosted`). The toolbox runs it from the repo, mounted
+  `backup`) and `fleet.sh` (`fleet`). The toolbox runs it from the repo, mounted
   at `/workspace`, so the image copies none of it. `bin/tests/deployment_guard_test.sh`
   checks the deployment guard offline, `bin/tests/vault_requests_test.sh` the vault's
   requests (each command's counted) and the values the templates resolve to (CI's infra
@@ -89,8 +88,6 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
   costs).
 - `backup/`: the backup task's image (nightly dumps to the deployment's own bucket,
   `backup now|list|restore`).
-- `hosted-data/`: the helper image `hosted data-snapshot` builds on the operator's docker
-  to write one data set's game data into a private encrypted EBS snapshot.
 
 The only secret an operator handles is `OP_SERVICE_ACCOUNT_TOKEN`. Nothing is reached over
 SSH: the programs run on Fargate, a shell is ECS Exec.
