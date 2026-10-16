@@ -882,8 +882,14 @@ Ref<Resource> ResourceRoot::load_font(const String &name) const {
 			return font;
 		}
 	}
-	// A font a disk root holds under another case is found by walking its directory: a file source has none.
-	if (mount_kind_ == MountKind::Source) {
+	// A runtime mount answers what the game's font loads answer: the session-default read alone,
+	// archive-only without /d (loose and case-insensitive under it), a miss leaving the font out
+	// (docs/fonts/fnt-re.md "Font load path", docs/vfs/vfs-pff-mount-re.md: every font loader reads
+	// through File_LoadResource @ 0x75b540, HUD_LoadFontIntoSlot @ 0x580400 and the loading
+	// screen's Render_LoadingScreen @ 0x521d10 among them). Only a loose root, which the editor
+	// mounts, finds a font it holds under another case by walking its directory; a file source has
+	// none.
+	if (mount_kind_ != MountKind::Loose) {
 		return Ref<Resource>();
 	}
 	return find_font_by_name(file, root_dir_);

@@ -555,6 +555,30 @@ func after_each() -> void:
 	TestFs.remove_dir_recursive(OS.get_cache_dir().path_join("opennova_resource_root_contract"))
 
 
+# A runtime mount loads a font through the game's front door alone: archive-only
+# without /d, so a font only loose is not loaded, as HUD_LoadFontIntoSlot
+# @ 0x580400 and Render_LoadingScreen @ 0x521d10 (File_LoadResource @ 0x75b540)
+# leave it out on a miss (C-403); under /d the front door reads it loose, without
+# case. A loose root still finds one it holds under another case.
+func test_runtime_mount_loads_no_loose_only_font() -> void:
+	var root := _make_flat_root("runtime_font")
+	var fnt := FileAccess.get_file_as_bytes("res://../fixtures/fnt/synth_1page.fnt")
+	assert_gt(fnt.size(), 0, "the fnt fixture reads")
+	var file := FileAccess.open(root.path_join("LooseOnly.FNT"), FileAccess.WRITE)
+	file.store_buffer(fnt)
+	file.close()
+	WorldFixture.write_pff(self, root.path_join("resource.pff"), [
+		{"name": "Other.dat", "bytes": "archive"},
+	])
+	var resources := ResourceRoot.new()
+	assert_eq(resources.mount_runtime(root), OK)
+	assert_null(resources.load_font("LooseOnly"), "packed runtime: a loose-only font is not read")
+	assert_eq(resources.mount_runtime(root, "", true), OK)
+	assert_not_null(resources.load_font("looseonly"), "/d: the front door reads it loose, without case")
+	assert_eq(resources.set_root_dir(root), OK)
+	assert_not_null(resources.load_font("looseonly"), "a loose root finds it under another case")
+
+
 func _make_flat_root(name: String) -> String:
 	var root := OS.get_cache_dir().path_join("opennova_resource_root_contract").path_join("%s_%d" % [name, Time.get_ticks_usec()])
 	assert_eq(DirAccess.make_dir_recursive_absolute(root), OK)
