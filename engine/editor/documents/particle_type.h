@@ -16,15 +16,15 @@ namespace opennova::editor {
 class ProjectCheck;
 
 // The particle type (ADR 0046 DI-14): a .ptl (and the gore set's .ptu or .ptg), a text document of
-// the file as stored, which the game's effect system reads at a mission's start, every file of the
-// kind then the gore set, by name [orig: CEffectSystem_Init @ 0x5F6070 -> File_ParseASCIIFile with
-// CEffectWorld_ParseSectionCallback @ 0x5ECB40]; the port of that reader is formats/particle's
-// load_particles. Its findings are the reader's: where it stops reading the file, and an effect the
-// file defines twice. What it names (each effect's id, a symbol at its place; each graphic's texture)
-// the asset graph reads through the same reader (graph/extractors.cpp, extract_particles), so the
-// type names no references of its own and a rename rewrites its names as a native text's
-// (graph/native_text_sites.h). Its Document tab is the script device (S13 V10); the Preview window
-// plays the effect the text defines (preview/effect_viewport.h).
+// the file as stored, which the game's effect system reads at a mission's start, the .ptl and gore-set
+// files interleaved by the upper-cased name, as one archive's table walks them [orig: CEffectSystem_Init
+// @ 0x5F6070 -> File_ParseASCIIFile with CEffectWorld_ParseSectionCallback @ 0x5ECB40]; the port of
+// that reader is formats/particle's load_particles. Its findings are the reader's: where it stops
+// reading the file, and an effect the file defines twice. What it names (each effect's id, a symbol
+// at its place; each graphic's texture) the asset graph reads through the same reader
+// (graph/extractors.cpp, extract_particles), so the type names no references of its own and a rename
+// rewrites its names as a native text's (graph/native_text_sites.h). Its Document tab is the script
+// device (S13 V10); the Preview window plays the effect the text defines (preview/effect_viewport.h).
 std::unique_ptr<DocumentBase> make_particle_document();
 std::vector<Diagnostic> validate_particle_file(const DocumentBase &document);
 
@@ -60,9 +60,10 @@ bool define_particle_effect(const DocumentBase &document, const ReferenceSubject
 
 // The particle type's project check (DocumentType::project_check, documents/project_check.h): what the names inside
 // the particle files come to once the game has loaded them all. The effect system loads every particle file of the
-// catalog (every .ptl, then the gore set's .ptu, or .ptg where the files hold fgn2.bin: opennova::effect_file_order
-// [orig: CEffectSystem_Init @ 0x5F6070]) and only then resolves the names inside them, each among every file's,
-// without case. Problems rows after the build's gate (the game runs the mission either way), warnings at the name:
+// catalog (every .ptl and the gore set's .ptu, or .ptg where the files hold fgn2.bin, interleaved by the upper-cased
+// name as one archive's table walks them: opennova::effect_file_order [orig: CEffectSystem_Init @ 0x5F6070]) and
+// only then resolves the names inside them, each among every file's, without case. Problems rows after the build's
+// gate (the game runs the mission either way), warnings at the name:
 // - particle.effect_unresolved: an effect's pdefs member no file defines as a [particledef]. The game resolves an
 //   effect's particles all or none: the first it misses is logged (UNRESOLVED: EFFDEF <effect> missing PARDEF
 //   <particle>) and the effect keeps none of them, so it spawns nothing [orig: CEffectBank_ResolveAllEntries @

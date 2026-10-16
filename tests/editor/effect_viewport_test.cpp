@@ -298,7 +298,7 @@ int test_session() {
 	const EffectViewport *viewport = rig.viewport(rig.second);
 	editor_test::FakeDevice *device = rig.device(rig.second);
 	TEST_EXPECT(viewport && device && device->since(0) == std::vector<ViewportAction>{ViewportAction::Rebuild});
-	// The catalog in the effect system's order: the .ptl files by name, then the gore set the project picks.
+	// The catalog in the effect system's order: the .ptl files and the gore set the project picks, interleaved by name.
 	const std::vector<PreviewEffectCatalog::File> &files = viewport->catalog().files();
 	TEST_EXPECT(files.size() == 3 && files[0].path == rig.first && files[1].path == rig.second &&
 	            files[2].path == "particles/gore.ptu" && files[0].read && files[1].read);

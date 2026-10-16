@@ -65,9 +65,10 @@ const std::vector<ResourceKindRule> &resource_kind_rules() {
 	        // section callback and differing only in which one the runtime selects
 	        // [orig: CEffectSystem_Init @ 0x5f6070 matches an archive entry against ".ptl"
 	        // OR the selected extension @0x5f64f3 and parses both through
-	        // CEffectWorld_ParseSectionCallback @ 0x5ecb40; the loose `.ptu` leg's
+	        // CEffectWorld_ParseSectionCallback @ 0x5ecb40; the loose gore leg's
 	        // CEffectWorld_LoadDefinitionFile @ 0x5ecf70 is a thin wrapper on the same
-	        // File_ParseASCIIFile + callback]. The index carries all three so the browser
+	        // File_ParseASCIIFile + callback, though its search, `ptl\` + the extension with
+	        // no wildcard @ 0x5f6387, finds nothing]. The index carries all three so the browser
 	        // and the loader can both see them; particle_extension() owns the SELECTION.
 	        {"", ".ptl", "", "particle"},
 	        {"", ".ptu", "", "particle"},

@@ -103,13 +103,15 @@ public:
 	// [orig: Game_LoadConfig @ 0x5514e8..0x5514fa -> byte_24D4DF9, read by
 	// CEffectSystem_Init @ 0x5f608b..0x5f6095]. Empty mount answers the ".ptu" default.
 	std::string particle_extension() const;
-	// The effect catalog's files, the order the runtime parses them: every mounted `.ptl`,
-	// then every file of the gore set (particle_extension()), each list by name. A name the
-	// mounted archives carry only in entries stamped 0 is left out: retail's effect loader
-	// walks each archive's directory and skips an entry whose +12 word is 0, so such a file
-	// is never parsed [orig: CEffectSystem_Init @ 0x5f6070 — the slot walk @ 0x5f6485, the
-	// skip @ 0x5f64c0, the extension test @ 0x5f64cd..0x5f64f3] (D-VFS-13). A name no
-	// archive carries (a loose file) stays.
+	// The effect catalog's files, the order the runtime parses them (the first id registered
+	// wins, D-PTL-24): the loose files no archive carries in effect_file_order's order, then
+	// retail's archive walk, slot 0..5, each archive's directory in its table's order (by the
+	// upper-cased name), `.ptl` and gore-set (particle_extension()) entries interleaved, a name
+	// once. An entry stamped 0 is skipped, so a name the archives carry only in such entries is
+	// never parsed [orig: CEffectSystem_Init @ 0x5f6070 — the slot walk @ 0x5f6485, the entry
+	// walk @ 0x5f64c0..0x5f6560, the skip @ 0x5f64c0, the extension test @ 0x5f64cd..0x5f64f3]
+	// (D-VFS-13). A mount with no retail slots lists its archived names after the loose ones in
+	// effect_file_order's order.
 	std::vector<std::string> effect_files() const;
 	// The archive slots retail's walks visit (Vfs::archive_slot_entries / _has_file).
 	std::vector<VfsArchiveEntry> archive_slot_entries(int slot) const;
@@ -140,12 +142,14 @@ private:
 	std::unique_ptr<Impl> impl_;
 };
 
-// The effect catalog's files in the order the runtime parses them, of `names` (logical names):
-// every `.ptl`, then every file of the gore set (`gore_extension`, ResourceIndex::particle_extension),
-// each list by name without case; a name of neither is left out. ResourceIndex::effect_files' order,
-// for an embedder whose files no index lists (the OpenNova Editor's project, ADR 0046 DI-14)
-// [orig: CEffectSystem_Init @ 0x5f6070 — loose `ptl\*.ptl` @ 0x5f6228, then `ptl\*<ext>` @ 0x5f6356,
-// the archive walk's extension test @ 0x5f64cd..0x5f64f3].
+// The effect catalog's files in the order the runtime parses them, of `names` (logical names): every
+// `.ptl` and every file of the gore set (`gore_extension`, ResourceIndex::particle_extension), the two
+// interleaved, by the upper-cased name, as one archive's table walks them; a name of neither is left
+// out. The order of an embedder whose files no index lists (the OpenNova Editor's project, which its
+// build packs into one archive, ADR 0046 DI-14), and ResourceIndex::effect_files' for its loose files
+// [orig: CEffectSystem_Init @ 0x5f6070 — the archive walk @ 0x5f64c0..0x5f6560, its extension test
+// @ 0x5f64cd..0x5f64f3; retail's loose gore leg searches `ptl\` + the extension with no wildcard
+// (`ptl\` @ 0x5f6356, the extension @ 0x5f6387, FindFirstFileA @ 0x5f63a3), so it reads nothing].
 std::vector<std::string> effect_file_order(const std::vector<std::string> &names, const std::string &gore_extension);
 
 // The German content marker whose mere presence in the mount picks the gore set.

@@ -6,8 +6,9 @@
 // first-registration rule lets that copy win over US_BLOOD.PTU's working one
 // and the engine clears the effect whole (rendering it would be a divergence);
 // a mount whose first declaration resolves renders it.
-// [orig: CEffectSystem_Init @0x5f6070 scans `ptl\*.ptl` @0x5f6228 then
-//  `ptl\*<ext>` @0x5f6356]
+// [orig: CEffectSystem_Init @0x5f6070 scans `ptl\*.ptl` @0x5f6228, then walks
+//  the archives' `.ptl` and gore-set entries interleaved @0x5f64c0..0x5f6560;
+//  its loose gore leg (no wildcard @0x5f6387) reads nothing]
 // Gated on OPENNOVA_JO_DIR (a retail JO install).
 #include "common/retail_paths.h"
 

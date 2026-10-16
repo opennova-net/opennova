@@ -181,8 +181,8 @@ int EffectWorld::load_from_resource_root(const Ref<ResourceRoot> &p_root) {
 	// tga folder first, then the mounted name (renderer::TextureLoader::Particle).
 	texture_provider_ = Callable(p_root.ptr(), "load_texture").bind(ResourceRoot::TEXTURE_LOADER_PARTICLE);
 	_ensure_renderer()->set_texture_provider(texture_provider_);
-	// The `.ptl` set then the gore set, less what retail's archive walk skips
-	// (ResourceIndex::effect_files, D-VFS-13).
+	// The effect files in the archive walk's order, `.ptl` and the gore set
+	// interleaved, less what it skips (ResourceIndex::effect_files, D-VFS-13).
 	const PackedStringArray names = p_root->effect_files();
 	for (int64_t i = 0; i < names.size(); ++i) {
 		const String logical_name = names[i];

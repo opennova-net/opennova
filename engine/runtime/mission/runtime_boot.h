@@ -31,9 +31,10 @@ struct BootFileSource {
 	std::function<bool(const std::string &name)> has_file;
 	std::function<bool(const std::string &name, std::vector<uint8_t> &out)>
 			read_file;
-	// Optional mounted enumeration, in mount precedence order. Used by the
-	// particle catalog; ordinary in-memory BMS/AI boots need only the readers.
-	std::function<std::vector<std::string>(const std::string &extension)> list_files;
+	// Optional: the effect files in the order the effect system parses them
+	// (ResourceIndex::effect_files). Used by the particle catalog; ordinary
+	// in-memory BMS/AI boots need only the readers.
+	std::function<std::vector<std::string>()> effect_files;
 	// Optional loose-first reader: the game directory's own file ahead of the
 	// archives whatever the session's lookup policy, for the reads retail
 	// makes off the disk (score.ini, the mission .til). Unset (an in-memory

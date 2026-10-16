@@ -23,17 +23,9 @@ BootFileSource boot_files_from_index(const ResourceIndex &index) {
     files.read_loose_first = [&index](const std::string &name, std::vector<uint8_t> &out) {
         return index.read_file(name, out, VfsLookupPolicy::ForceLooseFirst);
     };
-    // The effect files, less the names retail's archive walk skips for a zero stamp
-    // (ResourceIndex::effect_files, D-VFS-13).
-    files.list_files = [&index](const std::string &extension) {
-        std::vector<std::string> result;
-        for (const std::string &name : index.effect_files()) {
-            const auto dot = name.find_last_of('.');
-            if (dot != std::string::npos && strutil::to_lower(name.substr(dot)) == extension)
-                result.push_back(name);
-        }
-        return result;
-    };
+    // The effect files in the walk's order, less the names retail's archive walk skips for a zero
+    // stamp (ResourceIndex::effect_files, D-VFS-13).
+    files.effect_files = [&index]() { return index.effect_files(); };
     return files;
 }
 
