@@ -125,8 +125,10 @@ control, Users read; nothing inherited) rather than relying on what it inherits.
 
 Changing the hosts file needs administrator rights, and that change is the switcher's
 whole job, so it asks for them when it starts (a UAC prompt) and never fails halfway
-through a switch. One switcher runs per computer: starting a second one, from any
-signed-in user, says the first is already running.
+through a switch. It will not run without them: a start that skipped the prompt (a
+compatibility setting, or UAC turned off for a standard account) says so and exits
+before it does anything else. One switcher runs per computer: starting a second one,
+from any signed-in user, says the first is already running.
 
 ## Windows Defender
 
