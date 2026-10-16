@@ -11,7 +11,9 @@
 // root (the precheck stats a loose row's bare name, never under a TARGET), names of at most 15
 // characters (a 1SFS entry's field) and unique across a product (every blob lands in one flat
 // update directory), PFF archives at the product's root, and a loose change the precheck can see:
-// a file of the same size whose defective file CRC is unchanged never installs.
+// a file of the same size whose defective file CRC is unchanged never installs, and an empty file
+// is fetched again on every pass, so neither is taken. An archive `to` lacks is a REMOVE row of
+// its own at the root.
 
 #include <formats/update/sfs.h>
 

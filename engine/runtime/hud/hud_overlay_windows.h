@@ -75,7 +75,7 @@ struct HudMapLegendState {
 	int frame_counter = 0;           // the pulses' clock [orig: g_HUDFrameCounter @0xA87064]
 };
 
-// The briefing panel's text [orig: sub_5BAD00 — the authority reads
+// The briefing panel's text [orig: HUD_DrawBriefingPanel @0x5bad00 — the authority reads
 // MissionText info/briefing2, falling back to info/briefing @0x5bad96..
 // 0x5badb9; a joiner draws the text its world state delivered
 // (byte_A86120)]. Out of a session only: in a session the same window flag

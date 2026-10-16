@@ -6,6 +6,8 @@
 // HudLfpZone per list entry.
 
 #include <runtime/hud/hud_frame.h>
+
+#include <base/gameprofile/game_type.h>
 #include <runtime/hud/hud_lfp_panel.h>
 
 #include <algorithm>
@@ -26,7 +28,7 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 	if (!lp.shown || !layout_.lfp_anchor_present) return;
 	// The conquest arm (one row per marker, text per marker) is unmodelled
 	// [orig: g_GameType == 0x50010 @0x5a24a1]; nothing draws under it here.
-	if (lp.conquest_mode) return;
+	if (lp.game_type == game_type::kConquerAndControl) return;
 	if (font_.font() == nullptr) return;
 
 	// Pass 1: zones per team [orig: @0x5a24c5..0x5a24ea — team byte & 0x1F,
@@ -61,8 +63,8 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 	const GameFont &bf = have_bold ? label_font_bold_ : font_;
 	const float bscale = have_bold ? label_scale_ : 1.0f;
 	// Every text here goes through a half-bright drawer, alpha forced opaque
-	// [orig: sub_580B40 @0x580b40 -> HUD_DrawTextLeft_HalfBright, sub_580BC0
-	//  @0x580bc0 -> HUD_DrawTextRightAligned_HalfBright, sub_580B80 @0x580b80 ->
+	// [orig: HUD_DrawTextLeftScaled @0x580b40 -> HUD_DrawTextLeft_HalfBright, HUD_DrawTextRightAlignedScaled
+	//  @0x580bc0 -> HUD_DrawTextRightAligned_HalfBright, HUD_DrawTextCenteredScaled @0x580b80 ->
 	//  HUD_DrawTextCentered_HalfBright].
 	const auto bold_text = [&](const char *t, float design_x, float design_y,
 			uint32_t argb, uint32_t flags) {
@@ -163,7 +165,7 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 		}
 		// 3. The letter, centred, in the point colour through the half-bright
 		//  drawer [orig: sprintf("%c", 'A' + idx) @0x5989fe;
-		//  HUD_DrawTextCenteredScaled (ex sub_580B80)(&dword_2723C74, x+32, y+44,
+		//  HUD_DrawTextCenteredScaled(&dword_2723C74, x+32, y+44,
 		//  text, point) @0x598a1b, the colour `push edi` @0x598a05 (edi the point
 		//  colour from @0x59890d)]. The font object at dword_2723C74 is the hudpos
 		//  HUD slot [orig: HUD_SelectHudposFont @0x591890], the HUD font here.

@@ -20,6 +20,7 @@
 #include <runtime/assets/asset_store.h>
 
 #include "common/file_io.h"
+#include "common/temp_dir.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
 
@@ -102,11 +103,10 @@ int main() {
 	TEST_EXPECT(index.revision() != mounted);
 
 	// A directory scanned over a source replaces it; a source mounted over a directory replaces that.
-	const fs::path dir = fs::temp_directory_path() / "opennova_resource_index_source_test";
-	fs::remove_all(dir);
-	fs::create_directories(dir);
+	test_temp::TempDir temp("opennova_resource_index_source_test");
+	const fs::path dir = temp.path;
 	std::ofstream(dir / "loose.trn", std::ios::binary) << "loose";
-	TEST_EXPECT(index.scan(dir.string(), std::string(), opennova::VfsMountMode::LooseOnly));
+	TEST_EXPECT(index.scan(temp.root(), std::string(), opennova::VfsMountMode::LooseOnly));
 	TEST_EXPECT(index.has_file("loose.trn") && !index.has_file("terrain.trn") &&
 			index.root_dir() != opennova::ResourceIndex::kSourceRootDir && index.resource_files("terrain").size() == 1);
 	TEST_EXPECT(index.mount_source(source));
@@ -119,7 +119,6 @@ int main() {
 			!index.read_file("terrain.trn", bytes));
 	source.reset();
 	TEST_EXPECT(held.expired());
-	fs::remove_all(dir);
 
 	// An AssetStore over a source index: a model the source holds parsed once and kept while the
 	// index's revision stands, parsed again after it moved; none while nothing is mounted.

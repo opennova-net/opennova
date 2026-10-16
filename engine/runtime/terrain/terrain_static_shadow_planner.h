@@ -22,6 +22,7 @@
 #include <runtime/terrain/terrain_static_shadow_raster.h>
 #include <runtime/terrain/terrain_tile_composition_cache.h>
 #include <runtime/terrain/terrain_tile_light_epoch.h>
+#include <runtime/terrain_query/height_field.h>
 
 #include <array>
 #include <cstdint>
@@ -59,6 +60,14 @@ struct TerrainStaticShadowPlannerCaster {
 	// instance id); participates in the candidate transform revision.
 	uint64_t caster_identity = 0;
 };
+
+// The ground a static caster stands on, the planner record's ground_y: the terrain's height at the
+// caster's origin, a point sample, not a bilinear one [orig: Terrain_CollectAndRenderTileModels
+// @ 0x60d8d3..0x60d8ee -> Terrain_GetHeightAtPosition @ 0x606720, subtracted from the entity's
+// height]. `world_transform` is the record's (rows-major, the origin at [9..11], the Godot plane's
+// x and z, so the mission point is (x, -z)). 0 over an invalid field.
+float static_shadow_caster_ground(const TerrainHeightField &field,
+		const std::array<float, 12> &world_transform);
 
 struct TerrainStaticShadowPagePlanResult {
 	bool valid = false;

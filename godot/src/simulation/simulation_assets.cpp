@@ -107,16 +107,10 @@ void Simulation::install_charattr_table() {
 
 void Simulation::sync_class_attribute_flags() {
 	if (!kernel_) return;
-	// The joiner's live copy carries every S2C 0x41 and 0x42 applied so far; a
-	// HostClient keeps the boot copy (its restrictions applied), and a
-	// failed/missing charattr.def leaves the all-zero table -- no class carries
-	// an attribute, retail's failed-load state [orig: CharAttr_LoadFromDef
-	// @0x412140 memsets 0x7C0 bytes first; CharAttr_ClassHasAttribute @0x4125e0;
-	// see docs/interface/hud-re.md].
-	const opennova::inmatch::CharAttrTable *live = runtime_ ? runtime_->charattr_table() : nullptr;
-	const opennova::inmatch::CharAttrTable &table = live != nullptr ? *live : net_.charattr_table;
-	kernel_->world.tables.class_attribute_flags = opennova::inmatch::charattr_class_attribute_rows(table);
-	kernel_->world.tables.charattr_disabled_word = opennova::inmatch::charattr_pack_disabled(table);
+	// Which table and its two words are the engine's
+	// (inmatch::install_class_attribute_flags).
+	opennova::inmatch::install_class_attribute_flags(kernel_->world,
+			runtime_ ? runtime_->charattr_table() : nullptr, net_.charattr_table);
 }
 
 void Simulation::install_character_join_vars() {

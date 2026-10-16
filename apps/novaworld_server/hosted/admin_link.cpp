@@ -276,7 +276,7 @@ bool AdminLink::read_packet(std::string &text, std::string &error) {
 // login encrypted under it. A refused login gets no reply: the server closes.
 // [orig: CAdminServer_AcceptConnection @0x405580 (an ip_restrict miss closes before the
 //  challenge); CAdminServer_HandleLogin @0x405870 (the failure returns 0, the slot closes;
-//  success replies @0x405A0C); RAT.exe @0x401323 (the challenge's byte 0)]
+//  success replies @0x405A0C)] [orig: RAT.exe @0x401323 (the challenge's byte 0)]
 bool AdminLink::log_in(std::string &error) {
 	net::Endpoint endpoint;
 	if (!net::resolve_ipv4(target_.host, endpoint, /*allow_names=*/false) || target_.port == 0) {
@@ -328,7 +328,7 @@ bool AdminLink::log_in(std::string &error) {
 // table once six are held, so a logged-in session ends with QUIT, the server closing first,
 // and anything else with a reset (which also spares the server's side a TIME_WAIT on its admin
 // port). [orig: CAdminServer_ProcessFrame @0x406FA3 (recv() == 0 is not a close);
-//  CAdminServer_DispatchCommand @0x406811 (QUIT returns 0); RAT.exe @0x401475..0x40148D]
+//  CAdminServer_DispatchCommand @0x406811 (QUIT returns 0)] [orig: RAT.exe @0x401475..0x40148D]
 void AdminLink::close_session(bool logged_in) {
 	if (!socket_.is_valid()) return;
 	if (logged_in && send_packet(socket_, admin_encode_command(ADMIN_COMMAND_QUIT))) {

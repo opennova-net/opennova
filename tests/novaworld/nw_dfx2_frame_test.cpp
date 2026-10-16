@@ -92,7 +92,7 @@ void coop_frame_reads_as_dfx2() {
 	expect(fu.objective.has_coop_checkpoint && fu.objective.coop_checkpoint == 0x0000FFFFu,
 	       "the fifth value is the co-op checkpoint, 0x0000FFFF");
 	expect(fu.local_tail_present && fu.state_flag_byte == 0 && fu.carried_handle == 0xFFFF &&
-	               fu.health == 100 && fu.state_word == 0,
+	               fu.health == 100 && fu.armor == 0,
 	       "the tail after the checkpoint reads the recipient's own state");
 	expect(fu.records.size() == 1 && fu.records[0].handle == dfx2_wire::kPlayerHandle &&
 	               fu.records[0].type_id == dfx2_wire::kPlayerTypeId &&

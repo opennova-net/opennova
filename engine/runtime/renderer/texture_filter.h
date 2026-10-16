@@ -74,8 +74,8 @@ struct StageSampler {
 // The texture creation flags the stage decode reads (GTexture +0x18).
 // [orig: CGfxShader_ApplyTextureStages @ 0x680856..0x680870 (bit 1 clear =
 //  LINEAR min/mag into g_GfxStageLinearMinMag, bit 3 into
-//  g_GfxStageDeviceFilter, bit 0 into g_GfxStageClamp); GTexture_BindToStage
-//  @ 0x6845A9..0x6845C8 the same]
+//  g_GfxStageDeviceFilter, bit 0 into g_GfxStageClamp); the stage bind
+//  GTexture_BindToStage @ 0x6845A9..0x6845C8 the same]
 inline constexpr uint32_t kTextureFlagClamp = 0x1;
 inline constexpr uint32_t kTextureFlagPointMinMag = 0x2;
 inline constexpr uint32_t kTextureFlagDeviceFilter = 0x8;
@@ -84,7 +84,7 @@ inline constexpr uint32_t kTextureFlagDeviceFilter = 0x8;
 // The switch leaves the mode alone for a word outside 0..3, which the load's
 // clamp never lets through; the mode before the first terrain frame is the
 // zero-initialised 0, which filters as mode 1.
-// [orig: Terrain_RenderSkyboxPass @ 0x610BE8..0x610C1D (g_SessionTexFilterLevel
+// [orig: Terrain_RenderMainSectorPass @ 0x610BE8..0x610C1D (g_SessionTexFilterLevel
 //  into g_GfxDeviceTexFilterMode, device +0x258); the session copy
 //  apply_session_settings_to_globals @ 0x551565..0x551574]
 inline constexpr int texfilter_device_mode(int session_level, int current_mode) {

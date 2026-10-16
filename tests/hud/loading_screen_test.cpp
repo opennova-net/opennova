@@ -2,6 +2,7 @@
 // loading_screen.h): the .bms -> .pcx sidecar name, the present-due rule and
 // the composited resource names.
 
+#include <runtime/hud/hud_math.h> // loading_bar_fill_span
 #include <runtime/hud/loading_screen.h>
 
 #include "common/test_font.h"
@@ -166,6 +167,39 @@ int main() {
 		const GameFontRun off = splash_continue_run(font, "GO", 1280, 720, false);
 		check(!off.quads.empty() && off.quads[0].color == 0xFF7F4040u, "the red phase halved");
 		check(splash_continue_run(font, "GO", 0, 720, true).quads.empty(), "no display, no line");
+	}
+
+	// The progress bar's rects: at the design size the placement is the
+	// virtual one; the three borders inset by one; the fill from x + 3 to the
+	// span's right edge, empty at 0 and stopping inside the track at 100.
+	{
+		const LoadingBarRects at0 = loading_bar_rects(1024.0f, 768.0f, 0);
+		check(at0.outer.x == kLoadingBarX && at0.outer.y == kLoadingBarY &&
+				      at0.outer.w == kLoadingBarW + 6 && at0.outer.h == kLoadingBarH + 6,
+		      "the outer rect at the design size");
+		check(at0.gray.x == kLoadingBarX + 1 && at0.gray.w == kLoadingBarW + 4 &&
+				      at0.track.y == kLoadingBarY + 2 && at0.track.h == kLoadingBarH + 2,
+		      "the gray and track insets");
+		check(at0.fill.x == kLoadingBarX + 3 && at0.fill.y == kLoadingBarY + 3 &&
+				      at0.fill.h == kLoadingBarH && at0.fill.w == 0,
+		      "the empty fill at 0");
+		const LoadingBarRects full = loading_bar_rects(1024.0f, 768.0f, 100);
+		check(full.fill.w == kLoadingBarW, "the full fill spans the bar's width");
+		const LoadingBarSpan span = loading_bar_fill_span(kLoadingBarX, kLoadingBarW, 37);
+		const LoadingBarRects part = loading_bar_rects(1024.0f, 768.0f, 37);
+		check(part.fill.x == span.left && part.fill.w == span.right - span.left,
+		      "the fill's edges are loading_bar_fill_span's");
+		// An 800 x 640 surface: the float ratio 640/768 is 0.83333331, whose
+		// exact product with y 732 is 609.99998, truncated to 609 (an all-double
+		// or all-float product would give 610); x 287.5 -> 287, w 223.44 -> 223,
+		// h 12.49 -> 12. The arithmetic is the shell's before the move.
+		const LoadingBarRects small = loading_bar_rects(800.0f, 640.0f, 100);
+		check(small.outer.x == 287 && small.outer.y == 609 && small.outer.w == 229 &&
+				      small.outer.h == 18,
+		      "the placement at 800 x 640 truncates the float ratio's exact product");
+		check(small.fill.x == 290 && small.fill.y == 612 && small.fill.w == 223 &&
+				      small.fill.h == 12,
+		      "the full fill at 800 x 640");
 	}
 
 	if (g_failures != 0) {

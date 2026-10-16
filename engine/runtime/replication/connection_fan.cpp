@@ -15,6 +15,7 @@
 #include <net/npwire/wire_handle.h>
 #include <net/title/title_identity.h>        // title_in_match (the 0x0A co-op checkpoint, DFX2-1)
 #include <runtime/world/geom.h>              // to_fixed
+#include <runtime/world/shell_sort_by_value.h> // CPairList_ShellSortByValue
 #include <runtime/world/vehicle_mount.h>
 
 #include <runtime/replication/entity_wire_bridge.h> // health_classification_byte (the field-17 pack)
@@ -68,9 +69,19 @@ struct FrameHeaderState {
 	// record byte13 dead bit). The pre-v34 hardcoded 150 meant a killed client never
 	// learned it died. A decrease also fires the brief damage flash [orig: @0x43059a].
 	int16_t tail_health = 150;
+	// Tail armor = the recipient's entity+0x120 word (Armor; ammo class 1's
+	// carried pool shares it, our Entity::mana), which the client stores as its
+	// own every frame [orig: NetPacket_WritePlayerState `movzx ecx, word ptr
+	// [ecx+120h]` @0x4FFD77, written @0x4FFD8B; NapiNPClientMsg_0x00A store
+	// @0x4305EB].
+	int16_t tail_armor = 0;
 	// Phase-2 global environment and phase-8 recipient mount-ammo state. These are
 	// derived once before budgeting so the conditional header width and bytes agree.
-	uint8_t preround_delay_seconds = 0;
+	// The whole g_PreRoundDelayTimer dword: phase 0 sends its low byte, phase 1's
+	// round-clock gate tests the full dword [orig: NetPacket_WritePlayerState -
+	// `mov cl, byte ptr g_PreRoundDelayTimer` @0x4FF82D, `cmp g_PreRoundDelayTimer, 0`
+	// @0x4FFA81].
+	uint32_t preround_delay_seconds = 0;
 	// The authority's round clock in 62 Hz ticks (-1 = untimed), for the
 	// phase-1 timer projection [orig: g_RoundTimeRemaining read @0x4ffa8d].
 	int32_t round_time_remaining_ticks = -1;
@@ -138,7 +149,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 		// The global whole-second countdown is truncated directly to the wire
 		// byte; values above 255 wrap rather than clamp.
 		// [orig: NetPacket_WritePlayerState @0x4FF82D..0x4FF837]
-		fu.weapon.preround_timer = hdr.preround_delay_seconds;
+		fu.weapon.preround_timer = static_cast<uint8_t>(hdr.preround_delay_seconds);
 		fu.weapon.slot_state360 = hdr.respawn_delay_seconds;
 		fu.weapon.slot_state368 = hdr.downed_revive_seconds;
 		fu.weapon.slot_state364 = hdr.spawn_target_hold_seconds;
@@ -201,7 +212,8 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	}
 
 	// 7-byte tail: the recipient's OWN stance echo (bits 0-1 = prone/crouch — the client
-	// re-latches from it every frame) + its own carrier handle. See FrameHeaderState.
+	// re-latches from it every frame), its carried object, its Health and its Armor word.
+	// See FrameHeaderState.
 	fu.state_flag_byte = hdr.tail_state_byte;
 	fu.carried_handle = hdr.tail_carried_handle;
 	// TAIL health (v121) -> g_LocalPlayerEntity->Health [orig: @0x4305df] — the recipient's
@@ -212,7 +224,7 @@ std::vector<uint8_t> build_0a_frame(const PlayerReplicationState &ctx,
 	// (NetPacket_SerializePlayerState skips that apply [orig: @0x4c11ac]); the tail is the
 	// one channel its own health rides.
 	fu.health = hdr.tail_health;
-	fu.state_word = 0;
+	fu.armor = hdr.tail_armor; // [orig: @0x4FFD77..0x4FFD8B]
 	fu.passenger = hdr.mount_ammo;
 
 	for (const GameEntitySnapshot &e : entities) {
@@ -536,10 +548,19 @@ int view_distance_units(const world::World &world) {
 
 namespace {
 
-// Age-array index for one entity: pool-0 ages [0..255], pool-1 [256..511], slot & 0xFF
-// [orig: idx = handle & 0xFFF, +256 if pool 1, @0x50f15c].
-inline std::size_t age_index(const GameEntitySnapshot &e) {
-	return (e.pool == 1 ? 256u : 0u) + (std::size_t(e.slot) & 0xFFu);
+// The priority caches' index for one entity: handle & 0xFFF, plus 256 for pool 1 only, with
+// no further mask, so pool 0's 256 slots take [0..255] and pool 1's 1200 take [256..1455] (the
+// three arrays are 0x5B0 bytes apart). Retail's list holds only pools 0 and 1; a pool-2/3 row
+// our snapshot admits indexes like pool 0, as before. False only for an index past the arrays
+// (a slot beyond retail's pool capacities), which reads as never sent and stamps nothing.
+// [orig: NetPacket_SerializeEntityStatesToPacket @0x50F070 - `and ebp, 0FFFh` @0x50F150,
+//  +0x100 for pool 1 @0x50F156..0x50F15E (the pool test's `jnz` @0x50F15C), the age reset
+//  @0x50F168, the heading @0x50F17C, the speed @0x50F241; Server_BuildEntityPriorityList
+//  @0x50E590 - the pool-0 reads
+//  @0x50E8DE..0x50E8F4, the pool-1 reads @0x50EDA5..0x50EDBB]
+inline bool priority_cache_index(const GameEntitySnapshot &e, std::size_t &index) {
+	index = (e.pool == 1 ? 256u : 0u) + (std::size_t(e.slot) & 0xFFFu);
+	return index < Connection::kPriorityCacheSlots;
 }
 
 // Encoded wire size of one tag-1 record: [u8 1][u16 handle][u16 type] + the class body.
@@ -560,7 +581,9 @@ std::size_t record_wire_size(const GameEntitySnapshot &e) {
 //  1. saturating-age every tracked entity byte [orig: paddusb sweep @0x50e60f];
 //  2. admit + score each replicable entity against the recipient anchor;
 //  3. sort descending by key [orig: CPairList_ShellSortByValue @0x526cf0 — a Knuth-gap
-//     shell sort; std::stable_sort is order-equivalent for our distinct keys];
+//     shell sort, not stable: the keys are small integers and tie routinely (for a dead or
+//     deploying recipient a saturated, unmoved far entity scores exactly 255), so the
+//     candidates enter in retail's order, pool 0 then pool 1, each by slot];
 //  4. take records until the byte budget (header included) is exhausted — the budget is
 //     a SOFT cap checked after each record [orig: @0x50f34b], so the record in flight
 //     completes; a selected entity's age resets to 0 [orig: @0x50f168].
@@ -575,8 +598,13 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
                                                       std::size_t hard_frame_limit,
                                                       std::size_t frame_budget) {
 	devtools::ProfileLap lap(w.profile);
-	// 1. Age sweep [orig: @0x50e60f, saturating +1 over both pools' age arrays].
-	for (uint8_t &a : conn.s2c_entity_age) {
+	// 1. Age sweep: a saturating +1 in 32-byte strides over the age block's 0x5B0 bytes
+	// rounded down to the stride, so 0x5A0: pool 1's last sixteen slots (1184..1199) never
+	// age. [orig: Server_BuildEntityPriorityList - `mov ecx, 5B0h` @0x50E601, `shr ecx, 5`
+	//  @0x50E60F, the paddusb passes @0x50E62B..0x50E634]
+	constexpr std::size_t kAgedSlots = (Connection::kPriorityCacheSlots >> 5) << 5;
+	for (std::size_t i = 0; i < kAgedSlots; ++i) {
+		uint8_t &a = conn.s2c_entity_age[i];
 		if (a != 0xFF) ++a;
 	}
 
@@ -639,7 +667,9 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 		// also despawns a tracked hidden row with a reliable 0x12; that sweep
 		// stays a D-NET-139 residual.
 		if (e.owner_hidden && e.wire_handle != conn.owned_entity.packed) continue;
-		const uint8_t age = conn.s2c_entity_age[age_index(e)];
+		std::size_t cache = 0;
+		const bool cached = priority_cache_index(e, cache);
+		const uint8_t age = cached ? conn.s2c_entity_age[cache] : uint8_t{0};
 
 		// distanceTiles = (sqrt(dx^2 + dy^2 + (dz/2)^2) - boundRadius) >> 16 against the
 		// recipient anchor [orig: @0x50e925; z half-weighted]. boundRadius (entity+0) is
@@ -772,16 +802,16 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 
 		// Motion-change boosts off the last-SENT caches [orig: reads @0x50e905/@0x50ea77;
 		// 3*speedDelta + 2*headingDelta @0x50eb80].
-		const std::size_t idx = age_index(e);
-		const int32_t cached_heading_bam =
-				static_cast<int32_t>(uint32_t(conn.s2c_entity_heading[idx]) << 24);
+		const int32_t cached_heading_bam = static_cast<int32_t>(
+				uint32_t(cached ? conn.s2c_entity_heading[cache] : uint8_t{0}) << 24);
 		// Unsigned difference: the cached byte reconstructs to exactly INT_MIN
 		// for heading 0x80, and euler_z spans the circle — signed sub is UB.
 		const int32_t heading_delta =
 				io::bam_abs(static_cast<int32_t>(
 						uint32_t(cached_heading_bam) - uint32_t(e.euler_z))) >> 24;
 		const int32_t speed_delta =
-				std::abs(int(conn.s2c_entity_speed[idx]) - int(e.tick_speed_q6));
+				std::abs(int(cached ? conn.s2c_entity_speed[cache] : uint8_t{0}) -
+						int(e.tick_speed_q6));
 		v += 3 * int64_t(speed_delta) + 2 * int64_t(heading_delta);
 
 		if ((e.state_flags & 0x01) != 0) v >>= 4; // [orig: @0x50eb83]
@@ -799,9 +829,9 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 	}
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_SCORE);
 
-	// 3. Highest priority first [orig: descending shell sort @0x526cf0].
-	std::stable_sort(scored.begin(), scored.end(),
-	                 [](const Scored &a, const Scored &b) { return a.key > b.key; });
+	// 3. Highest priority first [orig: Server_BuildEntityPriorityList's
+	//  CPairList_ShellSortByValue call @0x50F057].
+	world::shell_sort_by_value(scored, [](const Scored &s) { return s.key; });
 	lap.mark(devtools::Slot::SIM_REPLICATION_ENTITY_SORT);
 
 	// 4. Budget walk (soft cap, header included) + age reset and last-sent cache
@@ -816,11 +846,13 @@ std::vector<GameEntitySnapshot> select_frame_entities(const world::World &w,
 				 record_bytes > hard_frame_limit - written))
 			continue;
 		selected.push_back(*s.snap);
-		const std::size_t idx = age_index(*s.snap);
-		conn.s2c_entity_age[idx] = 0;
-		conn.s2c_entity_heading[idx] = static_cast<uint8_t>(
-				(static_cast<uint32_t>(s.snap->euler_z) + 0x800000u) >> 24);
-		conn.s2c_entity_speed[idx] = s.snap->tick_speed_q6;
+		std::size_t idx = 0;
+		if (priority_cache_index(*s.snap, idx)) {
+			conn.s2c_entity_age[idx] = 0;
+			conn.s2c_entity_heading[idx] = static_cast<uint8_t>(
+					(static_cast<uint32_t>(s.snap->euler_z) + 0x800000u) >> 24);
+			conn.s2c_entity_speed[idx] = s.snap->tick_speed_q6;
+		}
 		written += record_bytes;
 		if (written >= frame_budget) break; // [orig: @0x50f34b]
 	}
@@ -883,7 +915,7 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 		// >> 22 then >> 6 -> 16.16); component convention X=sinYaw*cosPitch,
 		// Y=cosYaw*cosPitch, Z=sinPitch per the round spawners
 		// [orig: Weapon_SpawnSingleProjectile @0x4ebf51 / RoundData_SpawnRound @0x4ec5e9].
-		constexpr double kBamToRad = 1.4629627251502471e-09; // [orig: dbl_7C3608, 30.5 ppm above 2pi/2^32]
+		constexpr double kBamToRad = io::kRadiansPerBamX87; // [orig: dbl_7C3608, 30.5 ppm above 2pi/2^32]
 		constexpr double kTrigScale = io::kQ22One;             // [orig: dbl_7C3600 = 2^22]
 		const double yaw = double(ev.dir_yaw) * kBamToRad;
 		const double pitch = double(ev.dir_pitch) * kBamToRad;
@@ -922,9 +954,10 @@ std::vector<RoundEventRecord> select_round_events(const world::World &w, Connect
 		scored.push_back({score, &ev});
 	}
 
-	// Closest-to-the-bullet-line first [orig: CPairList_ShellSortByValue @0x50016a].
-	std::stable_sort(scored.begin(), scored.end(),
-	                 [](const ScoredRound &a, const ScoredRound &b) { return a.score > b.score; });
+	// Closest-to-the-bullet-line first, the ring's records added in index order
+	// 0..count-1, as retail walks g_RoundRing [orig: Server_BuildRoundEventListForPlayer
+	//  @0x4FFF24..0x500157, its CPairList_ShellSortByValue call @0x50016a].
+	world::shell_sort_by_value(scored, [](const ScoredRound &s) { return s.score; });
 
 	// Convert to wire records — capped at 255 [orig: the g_RoundEventRefs array
 	// @0x500190] and by the remaining frame budget (soft cap, like the tag-1 walk
@@ -1178,8 +1211,7 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 					 owned->hud_hit_feedback_serial != conn.hud_hit_feedback_serial)
 							? 4u
 							: 0u));
-	hs.preround_delay_seconds =
-			static_cast<uint8_t>(w.preround_delay_seconds);
+	hs.preround_delay_seconds = w.preround_delay_seconds;
 	// The weapon block's owned-zone mask is the recipient slot's own team
 	// byte's (+416), not its body's (D-NET-674): the world side keeps it on
 	// the roster row (MatchPlayer::slot_team), which every player add writes.
@@ -1266,6 +1298,8 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 			}
 			hs.tail_health = static_cast<int16_t>(
 					own->health > 32767 ? 32767 : (own->health < 0 ? 0 : own->health));
+			// The +0x120 word, raw [orig: NetPacket_WritePlayerState @0x4FFD77].
+			hs.tail_armor = own->mana;
 		}
 	}
 

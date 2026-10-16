@@ -55,7 +55,6 @@ void EnvFile::_bind_methods() {
 	ClassDB::bind_static_method("EnvFile", D_METHOD("lit_water_color", "water", "light"), &EnvFile::lit_water_color);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("compute_sun_glare", "view_dot_sun", "occlusion_brightness"), &EnvFile::compute_sun_glare);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("dome_reference_height"), &EnvFile::dome_reference_height);
-	ClassDB::bind_static_method("EnvFile", D_METHOD("cloud_uv_rate_per_second", "sky_speed"), &EnvFile::cloud_uv_rate_per_second);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_body_distance"), &EnvFile::celestial_body_distance);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_sun_alpha", "overcast_blend", "sun_dim_pct"), &EnvFile::celestial_sun_alpha);
 	ClassDB::bind_static_method("EnvFile", D_METHOD("celestial_moon_alpha", "fog_distance", "overcast_blend"), &EnvFile::celestial_moon_alpha);
@@ -342,7 +341,7 @@ Error EnvFile::load() {
 	}
 
 	PackedByteArray bytes;
-	if (!read_nova_payload_file(source_path, bytes)) {
+	if (!read_payload_file(source_path, bytes)) {
 		UtilityFunctions::push_warning("[EnvFile] Cannot open: ", source_path);
 		return ERR_FILE_CANT_READ;
 	}
@@ -513,7 +512,7 @@ float EnvFile::get_fog_end_distance(float p_overcast) const {
 float EnvFile::fog_end_above_water(float p_fog_distance, float p_overcast) {
 	// Static leg for callers holding a LIVE smoothed distance rather than this
 	// file's authored fog_level (the water pass) — same witnessed curve
-	// [orig: Environment_GetFogEndDistance @ 0x57e426, see docs/env/env-tod-re.md].
+	// (engine: formats/env/env_render.cpp).
 	return opennova::env::fog_end_above_water(p_fog_distance, p_overcast);
 }
 
@@ -550,7 +549,7 @@ Color EnvFile::horizon_blend_skyfog(const Color &p_fog, const Color &p_skyfog,
 }
 
 Color EnvFile::tile_overlay_tint_factor(const Color &p_terrain_tint) {
-	// [orig: PolyTrn_RenderTile @ 0x60df0d, see docs/env/env-tod-re.md] — DIFFUSE(HALF) x TEXTURE under
+	// (engine: formats/env/env_weather.h) — DIFFUSE(HALF) x TEXTURE under
 	// MODULATE2X, folded to one multiply for the shader.
 	const opennova::env::TerrainTint tint =
 			opennova::env::terrain_tint_from_rgb(opennova::env_rgb_from_color(p_terrain_tint));
@@ -558,7 +557,7 @@ Color EnvFile::tile_overlay_tint_factor(const Color &p_terrain_tint) {
 }
 
 Array EnvFile::build_sky_dome_arrays(float p_sky_height) {
-	// [orig: SkyDome_BuildMesh @ 0x578db0, see docs/env/env-tod-re.md] — engine/formats/env owns the math; this
+	// (engine: formats/env/env_celestial.h) — engine/formats/env owns the math; this
 	// repacks the plain vectors into Mesh.ARRAY_* surface arrays.
 	const opennova::env::SkyDomeMesh mesh = opennova::env::build_sky_dome_mesh(p_sky_height);
 	const int vertex_count = static_cast<int>(mesh.positions.size() / 3);
@@ -634,14 +633,6 @@ float EnvFile::glare_glow_alpha(float p_view_dot_sun, int p_brightness,
 			opennova::io::float_to_fp16_16(p_view_dot_sun), p_brightness,
 			opennova::io::float_to_fp16_16(p_overcast_blend), opennova::io::float_to_fp16_16(p_sun_dim_pct),
 			false)) / 65536.0f;
-}
-
-float EnvFile::cloud_uv_rate_per_second(float p_sky_speed) {
-	// Steady state: the ramp's target rate (sky_speed << 10) through the
-	// per-second layer-1 UV scale [orig: @ 0x57eecc; @ 0x57f1a5, see docs/env/env-tod-re.md].
-	opennova::env::CloudScrollState steady;
-	steady.rate = static_cast<int>(p_sky_speed) << 10;
-	return opennova::env::cloud_uv_rate_per_second(steady);
 }
 
 Ref<EnvSunGlare> EnvFile::compute_sun_glare(float p_view_dot_sun, int p_occlusion_brightness) {

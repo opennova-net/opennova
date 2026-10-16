@@ -288,8 +288,7 @@ void PlayerWeaponEffects::fire_action_effects(const Ref<PlayerWeaponEvent> &p_ev
 // param7=0: no scope gate, name/user-point classification, or live-slot
 // handle. Each event is therefore an Always transient in its production
 // tick's render domain, pre-aged when multiple fixed ticks are presented
-// together. [orig: WeaponAction_Recoil @ 0x542dd0, spawn @ 0x542f64 with
-// param7=0]
+// together. (engine: runtime/world/weapon_fsm.h)
 void PlayerWeaponEffects::fire_direct_action_effect(const Ref<PlayerWeaponEvent> &p_event) {
 	const String particle = p_event->get_effect_particle();
 	if (world() == nullptr || particle.is_empty()) {
@@ -534,8 +533,7 @@ void PlayerWeaponEffects::play_switch_deny_sound() {
 // the sim's gated channel position -- a replay resets the position to 0
 // through the sim (fire/recoil re-triggers). `variant` is the sim ring's
 // latched serve for multi-clip .adm rows -- both parts follow the ONE latch,
-// so arms and gun never split variants [orig: AnimMap_PlayAnimBySlot
-// @0x40bda0 latches the served entry at animState+68]. The playhead is
+// so arms and gun never split variants (engine: runtime/world/player_weapon.h). The playhead is
 // PINNED (external phase): retail's channel moves only in the weapon pump's
 // gated tick shim, never per render frame [orig: AnimChannel_AdvancePlayback
 // @ 0x40b140 rate = one 62 Hz tick of clip time; the gate

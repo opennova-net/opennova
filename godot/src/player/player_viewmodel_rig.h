@@ -36,18 +36,15 @@ class Simulation;
 // First-person weapon viewmodel placement, witnessed from weapon.def `pos`
 // (hip) / `tpos` (ADS). The original adds the equipped weapon's view-bias
 // offset to the eye in view-local space, rotated by the view orientation,
-// then draws the gun (gfx1) + character arms at that view root [orig:
-// Player_UpdateFirstPersonCamera @0x4dd380 -> g_ViewEulerTranslationOut;
-// Player_RenderFirstPersonViewModel @0x4ded60]. The weapon.def parser stores
+// then draws the gun (gfx1) + character arms at that view root (engine: runtime/renderer/fp_viewmodel_spec.h). The weapon.def parser stores
 // the pos/tpos POSITION as `atof(str) * 256.0` (a 16.16 fixed-point world
 // coord; scale flt_7D1D70 @0x544770) and the ROTATION as degrees -> 32-bit
-// BAM (`* 0x0B60B60` = 2^32/360) [orig: weapon.def 'tpos' handler
-// @0x54471f]. The camera ftol's the stored float and adds it straight onto
+// BAM (`* 0x0B60B60` = 2^32/360) (engine: runtime/renderer/fp_viewmodel_spec.h). The camera ftol's the stored float and adds it straight onto
 // g_view_pos (16.16), so the net WORLD offset is simply `file_value / 256`
 // -- see place_viewmodel_at_camera for the axis map and derivation. The Sighted/ADS
 // path eases `pos` -> `tpos` (the scope interp runs from the hip copy at
 // WeaponDef+0x10C to the tpos at +0x124 and publishes the difference as the
-// view bias [orig: Player_StepFpViewBiasInterp @0x4ddf53..0x4ddfc3]),
+// view bias (engine: runtime/world/player_view.h)),
 // rotation carried by the sim's authored pose interpolator; position still
 // uses its scalar fraction (D-WPN-39). (The `Flags & 2` leg of the
 // camera is the DEAD/round-end camera, not ADS.) The view fields flow from
@@ -94,8 +91,7 @@ public:
 	// PLAYER_VIEWMODEL_ROT_BIAS_DEF: the witnessed per-weapon view-rotation
 	// bias: weapon.def `pos` rotation columns, DEGREES (yaw, pitch, roll)
 	// ADDED to the view angles -- the weapon cant. AK47AUTO = 5.0 / 3.75 /
-	// 353.0. [orig: Player_UpdateFirstPersonCamera @0x4dd444: rot = view_rot +
-	// Def.Bone.rot; parser stores degrees -> BAM @0x54471f.] Sign map to Godot
+	// 353.0. (engine: runtime/renderer/fp_viewmodel_spec.h) Sign map to Godot
 	// camera axes verified visually.
 	Vector3 get_player_viewmodel_rot_bias_def() const { return rot_bias_def_; }
 	void set_player_viewmodel_rot_bias_def(const Vector3 &p_value) { rot_bias_def_ = p_value; }
@@ -139,8 +135,7 @@ public:
 
 	// The showhud bit-0 FP-gun gate (GameHudPresenter cycles the flags and
 	// pushes the bit through LocalPlayerPresenter.set_fp_gun_visible). Default
-	// on = the boot flags value 3. [orig: g_FpWeaponViewFlags bit 0, tested by
-	// Player_RenderFirstPersonViewModel @0x4DEDEA before the FP submit]
+	// on = the boot flags value 3. (engine: runtime/hud/hud_config_tokens.h)
 	void set_fp_gun_visible(bool p_visible);
 
 	// The world serves the viewmodel builder + def; the presenter serves the
@@ -188,8 +183,7 @@ public:
 	// First-person weapon viewmodel: sit it in front of the eye, tracking the
 	// camera 1:1, shown in first person only (in 3P the body avatar shows
 	// instead). The original biases the CAMERA by the weapon's `pos`/`tpos`
-	// view offset and draws the model at the view root [orig:
-	// Player_UpdateFirstPersonCamera @0x4dd380]; placing it in camera space is
+	// view offset and draws the model at the view root (engine: runtime/world/local_player_view.cpp); placing it in camera space is
 	// the faithful structural equivalent (camera.global_transform == the engine
 	// view transform here). Per-frame state arrives as arguments from the
 	// presenter's camera pass: the sim view snapshot, this tick's weapon view,

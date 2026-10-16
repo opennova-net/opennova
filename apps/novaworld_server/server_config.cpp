@@ -1,4 +1,5 @@
 #include "server_config.h"
+#include "text_util.h"
 
 #include <base/io/strutil.h>
 
@@ -44,19 +45,6 @@ bool getenv_bool(const char *name, bool fallback) {
 }
 
 // A comma-separated list, each entry trimmed, empty entries dropped.
-std::vector<std::string> split_list(std::string_view list) {
-	std::vector<std::string> out;
-	size_t pos = 0;
-	while (pos <= list.size()) {
-		const auto comma = list.find(',', pos);
-		const auto end = comma == std::string_view::npos ? list.size() : comma;
-		const auto entry = strutil::trim_view(list.substr(pos, end - pos));
-		if (!entry.empty()) out.emplace_back(entry);
-		pos = end + 1;
-	}
-	return out;
-}
-
 } // namespace
 
 ServerConfig ServerConfig::from_env() {
@@ -90,6 +78,7 @@ ServerConfig ServerConfig::from_env() {
 	if (auto v = getenv_safe("ONNET_BOOTSTRAP_ADMIN")) c.bootstrap_admin = v;
 	c.require_host_key = getenv_bool("ONNET_REQUIRE_HOST_KEY", c.require_host_key);
 	c.cd_key_auto_mint = getenv_bool("ONNET_CD_KEY_AUTO_MINT", c.cd_key_auto_mint);
+	c.embedded_jo_host = getenv_bool("ONNET_EMBEDDED_JO_HOST", c.embedded_jo_host);
 	if (auto v = getenv_safe("ONNET_SITE_URL")) {
 		c.site_url = strutil::trim(v);
 		while (!c.site_url.empty() && c.site_url.back() == '/') c.site_url.pop_back();

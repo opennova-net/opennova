@@ -315,10 +315,6 @@ int GameWorld::load_mission_internal(const Ref<MissionData> &p_mission, const St
 	emit_signal(kSignalLoadProgress, MissionData::load_progress_percent(MissionData::LOAD_STAGE_OBJECTS));
 
 	loaded_mission_ = p_mission;
-	// The mission attribute that forces the indoors accum bit every frame.
-	// [orig: g_BmsAttribFlags & 0x10 @ 0x5ca1c8]
-	mission_forces_indoors_ =
-			(p_mission->get_info()->get_attrib_flags() & MissionData::ATTRIB_FORCE_INDOORS) != 0;
 	timeline->span("objects");
 	start_mission_root();
 	place_mission_objects(p_mission);
@@ -548,7 +544,6 @@ void GameWorld::unload() {
 	// release clears the occlusion-hidden bit, so every node lands on its own
 	// present intent — see OcclusionFrame.reset.
 	occlusion_->reset();
-	mission_forces_indoors_ = false;
 	player_visuals_->set_local_player_nvg_view(false, 0);
 	if (env_ != nullptr && env_->get_environment_data().is_valid()) {
 		env_->get_environment_data()->clear_mission_overrides();
@@ -604,8 +599,7 @@ void GameWorld::load_environment(const String &p_trn_path, const String &p_env_p
 }
 
 // Apply the mission's attrib-gated water/fog overrides onto the loaded env via
-// EnvFile's non-persistent override layer [orig: Game_LoadTerrainDuringConnect
-// @ 0x520710]. The base .env is never mutated.
+// EnvFile's non-persistent override layer (engine: formats/env/env.h). The base .env is never mutated.
 void GameWorld::apply_mission_environment_overrides(const Ref<MissionData> &p_mission) {
 	if (p_mission.is_null()) {
 		return;

@@ -41,7 +41,7 @@ PcxRowFit pcx_row_fit(const PcxHeader &header);
 //            coder and MED's (every row ends in a run, none in a lone byte), so the shipped tool's own tail
 //            rule is unwitnessed; a shipped map's header (72 dpi) reads it as this one.
 //   Med      the same, but each row's LAST run always a count pair, a single byte below 0xC0 included:
-//            JO's mission editor, which writes the char map it paints [orig: JOTACmed sub_45E8A0 @
+//            JO's mission editor, which writes the char map it paints [orig: JOTACmed.exe sub_45E8A0 @
 //            0x45E8A0, the tail @ 0x45E9BF..0x45E9E7; the rows a row at a time, sub_45EA00 @ 0x45EA2B].
 //   Other    rows neither coder writes as they are (another program's, a row padded past its width, a
 //            run across rows): read whole, written again in the shipped coding.
@@ -82,7 +82,7 @@ struct PcxIndexedForm {
 
 // The form JO's mission editor writes a char map in: the header zero but for 0A 05 01 08, the window, one
 // plane, the bytes a line and the palette info 1 (no resolution, no EGA palette), its rows MED-coded
-// [orig: JOTACmed sub_45EB60 @ 0x45EBA0..0x45EBFF].
+// [orig: JOTACmed.exe sub_45EB60 @ 0x45EBA0..0x45EBFF].
 PcxIndexedForm pcx_med_form();
 
 bool decode_pcx_rgb(const uint8_t *data, size_t size, RgbImage &out, std::string &error);

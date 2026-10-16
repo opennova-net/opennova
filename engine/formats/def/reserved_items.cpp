@@ -51,7 +51,7 @@ constexpr ReservedItem kRows[] = {
 	 "A mission's marker of this item aligns the commander map's grid."},
 	// A named sector: its Locations name at spawn, keyed on the record's type [orig:
 	// Entity_SpawnFromBMSRecord @ 0x40e9f0, @0x40F17C]; the sector names of chat and of sector actions
-	// [orig: NapiNPServer_HandleChatMessage @ 0x513760, @0x513979; NapiNPServerMsg_HandleSectorAction @
+	// [orig: NapiNPServer_HandleChatMessage @ 0x513760, @0x513979; NapiNPServerMsg_HandleRadioCall @
 	// 0x514330, @0x51443B]; the HUD map [orig: HUD_DrawMapOverlay @ 0x5a5f40, @0x5A7598].
 	{2044, kMarker, R::Refuse, "Map named location", "Map Named Location",
 	 "A mission's marker of this item names a map sector (its Locations string), which chat and the map show."},

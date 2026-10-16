@@ -117,7 +117,7 @@ static int test_name_rule() {
 	TEST_EXPECT(takes(twelve, ExpansionNameUse::BuildsOn) && takes(thirty_one, ExpansionNameUse::BuildsOn));
 	TEST_EXPECT(refuses(thirty_two, "holds an expansion's name in 31", ExpansionNameUse::BuildsOn));
 	TEST_EXPECT(refuses(thirty_two, "holds an expansion's name in 31"));
-	// One /exp token [orig: Terrain_TokenizeConfigLine @ 0x53cb60] for the project's own; an installed
+	// One /exp token [orig: Config_TokenizeLine @ 0x53cb60] for the project's own; an installed
 	// one the game mounts by its folder, a quoted name with a space among them, takes any.
 	for (const char *name : { "my mod", "my,mod", "my;mod", "trailing " })
 		TEST_EXPECT(refuses(name, "one word") && takes(name, ExpansionNameUse::BuildsOn));

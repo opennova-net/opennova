@@ -28,8 +28,8 @@ namespace opennova::editor {
 //   Dialog_UpdatePlayback @ 0x44e585, 62 * delay / 10 ticks].
 // The line's other words (its flags, its def id index, its param and reserved words) and the dialog's id
 // list are copied into the play's block and read by no hook [orig: Dialog_LoadAudioClip @ 0x44dd1d..0x44dd37;
-// the hooks sub_527560 @ 0x527560, Chat_AddSystemMessageIfValid]: kept as read, never shown. serialize()
-// writes the bank from scratch through the engine's writer (dbf::encode_dbf, ADR 0003).
+// the hooks Dialog_ApplyDialogueVolumeAndPlayFactor @ 0x527560, Chat_AddSystemMessageIfValid]: kept as
+// read, never shown. serialize() writes the bank from scratch through the engine's writer (dbf::encode_dbf, ADR 0003).
 
 enum class DialogBankKind : NodeKind { Dialog = 0, Line = 1 };
 constexpr NodeKind node_kind(DialogBankKind kind) { return static_cast<NodeKind>(kind); }

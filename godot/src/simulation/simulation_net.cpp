@@ -51,7 +51,7 @@ using namespace sim_internal;
 
 
 // The host's session record (the faithful §5.0 mode-3 in-process listen
-// server [orig: SinglePlayer_StartMission @0x561af0]): the UI host config for a
+// server (engine: runtime/inmatch/host_role.cpp)): the UI host config for a
 // LAN host, the SP listen server's own otherwise. The host's own player
 // AUTO-spawns through the real pipeline (Server_ProcessPendingPlayerSpawns ->
 // resolve_player_spawn_pose marker chain), and its own loopback client renders
@@ -80,45 +80,25 @@ const opennova::TitleIdentity *session_title(const opennova::TitleIdentity *name
 
 opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type) {
 	namespace inmatch = opennova::inmatch;
-	inmatch::HostConfig cfg;
-	cfg.title = session_title(net_.title);
+	// The record is the engine's (inmatch/host_config.h shell_host_config); the
+	// binding passes the session's values.
+	inmatch::ShellHostSource source;
 	if (is_host_listening()) {
-		cfg.config = net_.host_session_config; // mission/player/spawn + game_type/mp_attributes from the UI
-		if (cfg.config.server_name.empty()) cfg.config.server_name = "OpenNova LAN Host";
-		cfg.config.max_players = net_.host_max_players; // the UI cap as configure_host_session clamped it (session_player_cap)
-		cfg.config.dedicated_server = !net_.host_serve_and_play; // the slot limit's own slot
-	} else {
-		// The SP listen server's config (docs/net/novaworld-net-re.md §5.0), its
-		// session words the current player profile record's.
-		cfg.config = inmatch::singleplayer_game_config(p_game_type,
-				player_.profile_record_set ? &player_.profile_record : nullptr);
+		source.lan_config = &net_.host_session_config; // the host screen's (configure_host_session)
+		source.lan_max_players = net_.host_max_players;
+		source.lan_serve_and_play = net_.host_serve_and_play;
+		source.lan_network_type = net_.host_network_type;
 	}
-	// Every session create reads the process's cfg block words, single player's
-	// and a host's alike (engine: inmatch/game_config_block.h; the create's
-	// ProcessExit, inmatch/server_session.h): mpreset, and the lineup queue the
-	// 0x42 gate admits past the cap (GameConfig::join_capacity; the session
-	// create's copy, CNapiGameSession_BuildAndCreateSession @0x569626..0x569646).
-	if (net_.game_config.is_valid()) {
-		const opennova::gamecfg::GameCfg &block = net_.game_config->native().cfg();
-		cfg.config.multiplayer_reset = block.mp_reset;
-		cfg.config.use_lineup_queue = block.mp_use_lineup_queue;
-		cfg.config.lineup_queue_size = block.mp_lineup_queue_size;
-		// The join validator reads the block's duplicate-PCID word live
-		// (Server_ValidatePlayerJoinRequest @0x512771).
-		cfg.config.punt_duplicate_pcids = block.mp_host_punt_same_pcids;
-	}
-	cfg.socket_mode = is_host_listening() ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;
-	cfg.serve_and_play = is_host_listening() ? net_.host_serve_and_play : true;
-	cfg.network_type = is_host_listening() ? net_.host_network_type : inmatch::NetworkType::Lan;
+	source.sp_game_type = p_game_type;
+	source.profile = player_.profile_record_set ? &player_.profile_record : nullptr;
+	source.cfg_block = net_.game_config.is_valid() ? &net_.game_config->native().cfg() : nullptr;
+	inmatch::HostConfig cfg = inmatch::shell_host_config(source);
+	cfg.title = session_title(net_.title);
 	// The loose _NSTMOUT.TXT reap/pool override under the install root
 	// (engine session_timeout_config.h; the CNapiNetwork_Init read). Empty
 	// keeps the 120000 ms / 1200-record template.
 	cfg.game_root = host_game_root_;
 	if (net_.local_character_vars_set) cfg.local_character_vars = net_.local_character_vars;
-	// The host's own inverse OPTIONS_AUTOMEDIC word, its record's +1660 (engine
-	// HostConfig::local_auto_medic_disabled carries the witness).
-	if (player_.profile_record_set)
-		cfg.local_auto_medic_disabled = static_cast<uint32_t>(player_.profile_record.auto_medic_off);
 	return cfg;
 }
 
@@ -369,25 +349,10 @@ void Simulation::set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role
 	if (runtime_ != nullptr) runtime_->set_novaworld_link(facts);
 }
 
-std::vector<Simulation::HostPeerSlot> Simulation::host_peer_slots() const {
-	std::vector<HostPeerSlot> out;
+std::vector<opennova::inmatch::HostPlayerListRow> Simulation::host_player_list_rows() const {
 	const opennova::inmatch::NapiNPServerCtx *ctx = host_ctx();
-	if (ctx == nullptr) return out;
-	for (const opennova::inmatch::NapiNPConnection &c : ctx->np_protocol.connection_list) {
-		if (c.phase < opennova::inmatch::ConnectionPhase::PlayerAdded) continue;
-		HostPeerSlot s;
-		s.slot = c.reply.player_slot;
-		s.connection_id = c.connection_id;
-		s.own = c.type == opennova::inmatch::NapiNPConnection::kTypeClientSide;
-		// The roster's name is the joiner's NA bytes, the page's (D-NET-661).
-		s.player_name = opennova::cp1252_to_gd(c.player_name);
-		s.ip_and_port = opennova::to_gd(opennova::peer_addr_to_string(c.peer));
-		s.pcid = opennova::to_gd(c.account.pcid);
-		s.team = String::num_int64(c.player_list_team);
-		s.type = String::num_int64(c.player_list_type);
-		out.push_back(std::move(s));
-	}
-	return out;
+	if (ctx == nullptr) return {};
+	return opennova::inmatch::host_player_list_rows(*ctx);
 }
 
 Simulation::ServerCommandResult Simulation::execute_server_command(const String &p_verb,
@@ -858,9 +823,7 @@ Ref<JoinScreenStatus> Simulation::get_join_screen_status() const {
 // reap window. Either way the disconnect event maps a reason code onto g_MissionExitReason
 // — retail EXITS THE MISSION with a reason rather than raising an in-world dialog, so the
 // shell's analog is return-to-menu with the reason surfaced.
-// [orig: CNapiNetwork_Init @0x4ca4a0 (timeout stores @0x4caa81/@0x4cab54) and
-//  CNapiNPConnection_HandleDescriptionPacket @0x621ae0, both ->
-//  CNapiNetwork_OnDisconnectedFromServer @0x4c63d0]
+// (engine: runtime/inmatch/joiner_connection.h)
 String Simulation::get_session_loss_reason() const {
 	if (!is_joiner() || !runtime_) return String();
 	return opennova::to_gd(runtime_->session_loss_reason());
@@ -980,7 +943,7 @@ bool Simulation::is_deploy_overlay_active() const {
 	// The deploy-map overlay (retail g_DeployScreenActive): armed by the S2C
 	// 0x0F game_flags bit0, then host-maintained per frame from the 0x0A flags1
 	// bit1, on the listen host's own loopback client too. A UI signal only —
-	// it never gates the spawn. [orig: the folds @0x42e2f8/@0x42ff82]
+	// it never gates the spawn. (engine: runtime/replication/client_state.h)
 	return runtime_ && runtime_->state().deploy_overlay_active;
 }
 
@@ -1009,17 +972,11 @@ int Simulation::get_class_allow_mask() const {
 }
 
 const opennova::world::SpawnZoneRegistry &Simulation::deploy_zone_registry() {
-	// Built once per load; the zone set is authored (the world stream upserts state,
-	// not membership). The joiner role hook resets the flag. [orig: Entity_BuildSpawnZoneList
-	// @0x43EAE0 — rebuilt at mission start]
-	const uint64_t sync_serial = joiner_role_ != nullptr ? joiner_role_->world_sync_serial() : 0;
-	if (kernel_ && (!net_.deploy_zone_registry_built ||
-			net_.deploy_zone_registry_sync_serial != sync_serial)) {
-		net_.deploy_zone_registry = kernel_->world.zones.build_spawn_zone_list();
-		net_.deploy_zone_registry_built = true;
-		net_.deploy_zone_registry_sync_serial = sync_serial;
-	}
-	return net_.deploy_zone_registry;
+	// The cache's lifetime is the engine's (world::SpawnZoneRegistryCache); a
+	// fresh world invalidates it.
+	if (!kernel_) return net_.deploy_zone_registry.registry;
+	return net_.deploy_zone_registry.get(kernel_->world,
+			joiner_role_ != nullptr ? joiner_role_->world_sync_serial() : 0);
 }
 
 int Simulation::deploy_key_pick(int p_vk) {
@@ -1054,15 +1011,8 @@ bool Simulation::send_deployment_pick(int p_param) {
 	// role's case-12 gate turns a dead permanent-death press into the 0x51
 	// convert or nothing (Role::request_deployment_pick).
 	if (!runtime_ || !kernel_) return false;
-	uint16_t wire = opennova::world::kDeployPickNone;
-	if (p_param == 65534) {
-		wire = opennova::world::kDeployPickAutoTeam;
-	} else if (p_param > 0) {
-		const opennova::world::SpawnZoneRegistry &reg = deploy_zone_registry();
-		const size_t idx = static_cast<size_t>(p_param - 1);
-		if (idx < reg.entries.size()) wire = reg.entries[idx].packed;
-	}
-	return active_role().request_deployment_pick(wire);
+	return active_role().request_deployment_pick(
+			opennova::world::deploy_pick_wire_value(p_param, deploy_zone_registry()));
 }
 
 int Simulation::get_joiner_phase() const {
@@ -1075,14 +1025,6 @@ int Simulation::get_joiner_self_handle() const {
 	return joiner_role_ != nullptr && joiner_role_->has_self_wire_handle()
 			? static_cast<int>(joiner_role_->self_wire_handle()) : 0;
 }
-
-// [orig: CNapiNPConnection_TeardownActiveConnection @0x6253c0 — the leave sends a burst of
-// 0x46 disconnect packets (SendDisconnectPacket @0x61f2a0) before the key material clears; the
-// host's non-timeout teardown fires only on that opcode (Nwu_HandleClientGoodbye @0x624250)]
-
-
-// (P7 A4: joiner_net_poll / joiner_net_flush deleted — the joiner now runs through the joiner role
-//  over an inmatch::ClientRuntime; the legacy JoinerSession path is retired here.)
 
 bool Simulation::admit_test_remote_peer(Vector3 p_position, float p_yaw_deg, int p_team) {
 	opennova::inmatch::ListenHostState *host = host_state();
@@ -1172,10 +1114,9 @@ void Simulation::present_wire_body_sounds(int p_type_id, int p_character_id,
 	const int32_t capsule_bottom =
 			kernel_->root_motion.capsule_bottom_at(adm_id, p_anim_state, p_to_phase,
 					/*variant=*/0);
-	// Godot (x, y, z) -> mission (x, -z, y) 16.16, the drain's own convention.
-	const int32_t body[3] = { static_cast<int32_t>(p_pos.x * 65536.0f),
-		                      static_cast<int32_t>(-p_pos.z * 65536.0f),
-		                      static_cast<int32_t>(p_pos.y * 65536.0f) };
+	// Godot -> mission 16.16 (util/axes.h).
+	int32_t body[3];
+	fixed3_from_godot(p_pos, body);
 	opennova::world::wire_body_slot_sounds(kernel_->world, words, n, capsule_bottom,
 			p_type_id, static_cast<uint16_t>(p_character_id),
 			static_cast<uint16_t>(p_wire_handle), p_carrier_handle >= 0, body);

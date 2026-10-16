@@ -166,8 +166,16 @@ terrain::TerrainRaycastSample los_field_point_cb(void *vctx, int32_t x, int32_t 
     if (sx != ctx.cached_sx || sz != ctx.cached_sz) {
         ctx.cached_sx = sx;
         ctx.cached_sz = sz;
+        // An off-grid cell clamps to the grid's edge on an axis the .trn does not
+        // wrap: the OOB mask is zero on a wrapping axis, else any bit past the
+        // low nibble sets the cell to 0 or 15 by its sign.
+        // [orig: Terrain_RaycastHeightmapHiRes @0x60C760 — g_TerrainCellOOBMaskX /
+        //  g_TerrainCellOOBMaskY @0x60C95D / @0x60C96A at the start and
+        //  @0x60CA26 / @0x60CA35 at each sector change, `sar 1Fh; not` then
+        //  `and 0Fh` @0x60C962..0x60C977; Terrain_RaycastHeightmapLoRes @0x60CB80
+        //  the same @0x60CD3E / @0x60CE22]
         const terrain::CoordsSectorResolve sector = terrain::coords_resolve_sector(
-            f.layout, sx, sz, terrain::coords_runtime_options());
+            f.layout, sx, sz, terrain::coords_runtime_options(f.wrap_x, f.wrap_z));
         ctx.sector_valid = sector.valid && f.valid();
         ctx.base_x = sector.quadrant_x;
         ctx.base_z = sector.quadrant_z;
@@ -199,9 +207,8 @@ terrain::TerrainRaycastSample los_field_point_cb(void *vctx, int32_t x, int32_t 
 
 terrain::TerrainRaycastSample los_field_bilinear_sample(const terrain::TerrainHeightField &f,
                                                         int32_t x, int32_t y) {
-    const float wx = static_cast<float>(x) / 65536.0f;
-    const float wz = -static_cast<float>(y) / 65536.0f; // engine Y -> sampler z
-    const float h = terrain::height_field_height_world_bilinear(f, wx, wz);
+    const float h = terrain::height_field_height_mission_bilinear(f, static_cast<float>(x) / 65536.0f,
+                                                     static_cast<float>(y) / 65536.0f);
     terrain::TerrainRaycastSample s;
     s.kind = terrain::TerrainRaycastSample::kHeight;
     s.height_1616 = static_cast<int32_t>(h * 65536.0f);
@@ -413,7 +420,7 @@ bool CollisionWorld::raycast_clear_impl(World &world, const int32_t a[3],
 
     // Sector leg [orig: Physics_RaycastAgainstEntityPool @ 0x538720, pool 2 then pool 1
     // @ 0x539a3a]. Degenerate segments (< 1 u) skip the walk entirely
-    // [orig: Physics_RaycastIntContext @ 0x5385e0 returns 1 -> clear on len < 16].
+    // [orig: Physics_InitRayContext @ 0x5385e0 returns 1 -> clear on len < 16].
     const int64_t sdx = static_cast<int64_t>(b[0]) - a[0];
     const int64_t sdy = static_cast<int64_t>(b[1]) - a[1];
     const int64_t sdz = static_cast<int64_t>(b[2]) - a[2];

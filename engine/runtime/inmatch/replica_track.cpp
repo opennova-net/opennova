@@ -32,7 +32,8 @@ void rebuild_route(world::World &world, const replication::ClientState &state) {
 		entry.node = wp.slot_id;
 		entry.name_id = wp.name_id;
 		// A DFX2 joiner takes the marker's done byte; JO's keeps its own.
-		// [orig: `mov [esi+218h], bl` @0x42fff0 (dfx2.exe); JO's skip @0x42e497]
+		// [orig: `mov [esi+218h], bl` @0x42fff0 (dfx2.exe)]; JO's skip
+		// [orig: NapiNPClientMsg_0x00F @0x42e497]
 		if (state.world_state.waypoint_done_stored) entry.done = wp.done != 0;
 		// The marker's own position: the registry's pool-3 entity (a
 		// full-BMS joiner promoted it), else the decoded pool-3 row (a

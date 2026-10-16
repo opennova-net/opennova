@@ -1440,7 +1440,17 @@ bool check_dead_player_punt_uses_a_consecutive_state6_counter() {
 			"permanent-death mode suppresses t7 after the strict boundary"))
 		return false;
 
+	// A spectator is exempt at the punt, not at the counter [orig: the latch
+	// `cmp byte ptr [esi+188D7h], 0` @0x51E170].
 	ctx.config.permanent_death = false;
+	live.link.spectator = true;
+	tick_to_periodic_second();
+	(void)drain_outbound();
+	if (!expect(live.reply.dead_live_seconds == 362 && !live.host_disconnect_sent,
+			"a spectator's dead seconds count on without t7"))
+		return false;
+
+	live.link.spectator = false;
 	tick_to_periodic_second();
 	DisconnectEvent expected;
 	expected.ds = 1;

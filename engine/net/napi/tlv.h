@@ -1,8 +1,10 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace opennova {
@@ -56,6 +58,22 @@ inline std::string field_to_string(const uint8_t *data, size_t len) {
 inline std::string field_to_string(const NapiField &f) {
 	return f.data.empty() ? std::string()
 	                      : field_to_string(f.data.data(), f.data.size());
+}
+
+// Napi_CopyString(dst, src, capacity) into a fresh string: at most capacity - 1
+// bytes of `src`, stopping at its first NUL; a capacity under 1 copies nothing.
+// [orig: Napi_CopyString @0x617E10 - the capacity guard @0x617E1C..0x617E1F, the
+//  NUL test @0x617E32, the `capacity - 1` bound @0x617E41..0x617E44]
+inline std::string napi_copy_string(std::string_view src, size_t capacity) {
+	if (capacity < 1) return std::string();
+	const size_t nul = src.find('\0');
+	if (nul != std::string_view::npos) src = src.substr(0, nul);
+	return std::string(src.substr(0, std::min(src.size(), capacity - 1)));
+}
+
+// The same over the `available` bytes at `src` (a value up to its body's end).
+inline std::string napi_copy_string(const uint8_t *src, size_t available, size_t capacity) {
+	return napi_copy_string(std::string_view(reinterpret_cast<const char *>(src), available), capacity);
 }
 
 struct NapiMessage {

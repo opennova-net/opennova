@@ -36,12 +36,9 @@ std::vector<opennova::world::WeaponKitEntry> kit_rows_from(const TypedArray<Weap
 } // namespace
 
 bool Simulation::local_player_in_armory_zone() const {
-	if (!kernel_) return false;
-	const opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);
-	// The use-item armory leg rejects a seated player before consulting the type-6
-	// volume bit [orig: Input_HandleActionBinding_0 @0x4e0b3f, parentSlot == 0].
-	return e != nullptr && !e->mounted &&
-	       (e->flags & opennova::world::kEntityFlagArmoryZone) != 0;
+	// The useitem armory arm's gate (engine local_player_in_armory_zone:
+	// unmounted + the type-6 volume bit).
+	return kernel_ && opennova::world::local_player_in_armory_zone(kernel_->world);
 }
 
 bool Simulation::local_player_in_vehicle_loadout_zone() const {
@@ -61,30 +58,12 @@ bool Simulation::local_player_toggle_mount() {
 	// armory/vehicle-zone legs of the key don't apply. [orig: Input_ProcessFrame release
 	// edge @0x49d6dc -> Entity_ToggleVehicleMount @0x436950]
 	if (!kernel_) return false;
-	// The witnessed non-authority path queues C2S 0x26 (attach) /
-	// sends 0x27 (detach) and waits for the 0x0A stream to confirm [orig:
-	// Entity_RequestVehicleAttach @0x4364a0 / Entity_SendDetachPacket @0x435510].
-	// Joiners therefore choose a candidate locally and change L's relation only
-	// when the authoritative echo arrives; the attach request turns L to the
-	// seat before it queues the 0x26, as retail's does.
-	// A missing EquippedSlot passes the retail action gate; active_local_weapon_slot
-	// supplies the inert slot state used by the modeled gate below.
-	const opennova::world::Entity *toggle_player =
-			kernel_->world.registry.get(kernel_->world.cached.local_player);
-	if (toggle_player == nullptr || !toggle_player->alive ||
-			toggle_player->health <= 0)
-		return false;
-	sync_local_usegun_weapon_transition();
-	// The weapon-busy gate + candidate search live engine-side
-	// (world/vehicle_attach.h). A missing EquippedSlot passes the retail gate;
-	// active_local_weapon_slot supplies the inert slot state.
-	const opennova::world::WeaponSlotState *active_slot =
-			active_local_weapon_slot();
-	if (!opennova::world::weapon_state_allows_mount_toggle(
-				active_slot->current, active_slot->next))
-		return false;
+	// The gates are the kernel's (LocalPlayer::mount_toggle_allowed); a joiner
+	// then queues C2S 0x26 (attach) / 0x27 (detach) and waits for the 0x0A
+	// stream to confirm (JoinerRole::queue_mount_toggle).
 	if (is_joiner())
-		return joiner_role_ && joiner_role_->queue_mount_toggle();
+		return kernel_->local.mount_toggle_allowed() && joiner_role_ &&
+				joiner_role_->queue_mount_toggle();
 	// The authority's toggle is the kernel's one body (the out-of-session
 	// UseGun rejection, the seat transition, the view/weapon folds).
 	const bool changed = kernel_->local.toggle_mount();
@@ -153,20 +132,13 @@ int Simulation::get_weapon_availability(const String &p_weapon_name) const {
 }
 
 bool Simulation::set_local_player_class(int p_player_class) {
-	// Sim-side class only. The 0x2F WIRE class is NOT taken from here — retail reads it
-	// straight out of the assigned side's profile block, the same integer that picks the
-	// kit page [orig: Game_StartMission @0x5257a0], so push_joiner_loadout_kit sources
-	// both from player_.weapon_profile. The pushes below just keep the seam re-armed.
-	if (!kernel_ || p_player_class < 5 || p_player_class > 9) return false;
-	opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);
-	if (e == nullptr) {
-		// A joiner's shell applies the profile class before L has spawned
-		// (name-match). Latch it; the joiner spawn block stamps the entity.
-		kernel_->local.loadout.pending_player_class = p_player_class;
-		push_joiner_loadout_kit();
-		return true;
-	}
-	e->player_class = static_cast<uint8_t>(p_player_class);
+	// Sim-side class only (engine local_loadout_set_player_class). The 0x2F WIRE
+	// class is NOT taken from here: push_joiner_loadout_kit sources it from
+	// player_.weapon_profile (inmatch::build_joiner_loadout_kit). The push just
+	// keeps the seam re-armed.
+	if (!kernel_ || !opennova::world::local_loadout_set_player_class(
+				kernel_->world, kernel_->local.loadout, p_player_class))
+		return false;
 	push_joiner_loadout_kit();
 	return true;
 }
@@ -227,10 +199,8 @@ void Simulation::respawn_local_player_loadout() {
 
 void Simulation::rebuild_local_player_loadout(bool p_select_spawn_default) {
 	// The Player_InitPlayer weapon leg — world/player_loadout.h
-	// local_loadout_rebuild [orig: @ 0x4e15f0]. The 0x2F pair's SECOND submit
-	// carries the LIVE equipped slot, not the fixed 195 [orig:
-	// Game_StartMission @0x525c2e passes g_CurrentWeaponSlot — the value the
-	// spawn fill just settled], so the seam re-arms here AFTER the inventory
+	// local_loadout_rebuild (engine: runtime/inmatch/joiner_role.cpp). The 0x2F pair's SECOND submit
+	// carries the LIVE equipped slot, not the fixed 195 (engine: runtime/inmatch/loadout_submit.cpp), so the seam re-arms here AFTER the inventory
 	// settles. push_joiner_loadout_kit never rebuilds (it holds a one-way
 	// re-entry latch), so this cannot recurse.
 	if (!kernel_) return;
@@ -496,7 +466,7 @@ Ref<PlayerInventory> Simulation::get_local_player_inventory() const {
 TypedArray<WeaponKitEntry> Simulation::get_local_player_loadout() const {
 	TypedArray<WeaponKitEntry> out;
 	const std::vector<opennova::world::WeaponKitEntry> kit =
-			kernel_->local.loadout.spawn_kit_set ? kernel_->local.loadout.spawn_kit : opennova::world::weapon_kit_default(kernel_->world.rules.title);
+			opennova::world::local_loadout_kit(kernel_->world, kernel_->local.loadout);
 	for (const opennova::world::WeaponKitEntry &entry : kit) {
 		Ref<WeaponKitEntry> row;
 		row.instantiate();
@@ -508,7 +478,7 @@ TypedArray<WeaponKitEntry> Simulation::get_local_player_loadout() const {
 
 // weapon.def -> the sim world's armory table. Mirrors the retail load site (Game_StartMission
 // parses literally "weapon.def" through WeaponDefs_LoadFile right after AnimDef_InitAll wipes
-// the AdmDef table [orig: @0x5254b3/@0x5254bd]); build_weapon_table ports the witnessed
+// the AdmDef table (engine: runtime/inmatch/host_boot.cpp)); build_weapon_table ports the witnessed
 // allocation rule (null@0 + by-name-reuse-else-lowest-free = file order; §5.57, D-NET-141).
 Error Simulation::load_weapon_table(const Ref<ResourceRoot> &p_resource_root,
                                         const String &p_name) {
@@ -520,14 +490,8 @@ Error Simulation::load_weapon_table(const Ref<ResourceRoot> &p_resource_root,
 	// witnessed WPN_M4AUTO re-stamp (D-NET-143), the mission loadout-chunk
 	// promotion through the SP-vs-net gate and the spawn-kit rebuild are the
 	// kernel's ONE table-load body; this binding hands it the mounted source.
-	const opennova::ResourceIndex *index = &p_resource_root->native_index();
-	opennova::mission::BootFileSource files;
-	files.has_file = [index](const std::string &name) {
-		return index->has_file(name);
-	};
-	files.read_file = [index](const std::string &name, std::vector<uint8_t> &out) {
-		return index->read_file(name, out);
-	};
+	const opennova::mission::BootFileSource files =
+			opennova::mission::boot_files_from_index(p_resource_root->native_index());
 	if (!kernel_->load_weapon_table(files, &p_resource_root->native_assets(),
 				opennova::to_std(file_name)))
 		return ERR_FILE_NOT_FOUND;
@@ -548,7 +512,7 @@ Error Simulation::load_weapon_table(const Ref<ResourceRoot> &p_resource_root,
 
 // ammo.def -> the sim world's ballistics table + the weapon round_type resolve. Mirrors the
 // retail load site (Game_StartMission parses literally "ammo.def" through AmmoDef_LoadAll
-// @0x40b0b0, the sibling of the weapon.def load [orig: @0x52548a]); the resolve binds each
+// @0x40b0b0, the sibling of the weapon.def load (engine: base/gameprofile/required_resources.cpp)); the resolve binds each
 // adm's fired round to its AmmoTable index (the original's adm+84 pair; §5.60). Call AFTER
 // load_weapon_table — an empty armory leaves every round_type unresolved and the fire
 // pipeline echoes without spawning sim rounds.
@@ -559,15 +523,9 @@ Error Simulation::load_ammo_table(const Ref<ResourceRoot> &p_resource_root,
 	const String file_name = p_name.get_file();
 	if (file_name.is_empty()) return ERR_INVALID_PARAMETER;
 	// The ballistics build + the weapon round_type resolve + the damage-class
-	// sync are the kernel's one body [orig: AmmoDef_LoadAll @0x40b0b0].
-	const opennova::ResourceIndex *index = &p_resource_root->native_index();
-	opennova::mission::BootFileSource files;
-	files.has_file = [index](const std::string &name) {
-		return index->has_file(name);
-	};
-	files.read_file = [index](const std::string &name, std::vector<uint8_t> &out) {
-		return index->read_file(name, out);
-	};
+	// sync are the kernel's one body (engine: formats/def/def_ammo.cpp).
+	const opennova::mission::BootFileSource files =
+			opennova::mission::boot_files_from_index(p_resource_root->native_index());
 	if (!kernel_->load_ammo_table(files, opennova::to_std(file_name)))
 		return ERR_FILE_NOT_FOUND;
 	return OK;

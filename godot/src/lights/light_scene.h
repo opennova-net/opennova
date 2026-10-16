@@ -54,6 +54,12 @@ public:
 	// light_scene.h witness map; lights/light_spawn.h GlowSpawn). 0 for a
 	// null request.
 	int64_t spawn_glow(const Ref<GlowSpawn> &p_config);
+	// The transient spawners' engine records (engine/runtime/renderer/light_scene.h
+	// fire_muzzle_glow, impact_flash_spawn, death_flash_spawn) over Godot positions. C++ only.
+	int64_t fire_muzzle_glow(int64_t p_cached, const Vector3 &p_muzzle, int64_t p_shooter);
+	int64_t spawn_impact_flash(const Vector3 &p_impact, float p_radius, const Color &p_color,
+			int p_ticks);
+	int64_t spawn_death_flash(const Vector3 &p_position, float p_radius);
 	void despawn(int64_t p_handle);
 	void set_light_position(int64_t p_handle, const Vector3 &p_world);
 	// The witnessed instance re-arm setters (fade mode/duration, owner group,
@@ -178,25 +184,21 @@ public:
 
 	// The render-slot dominant-light query (SlotShadow's per-slot pick):
 	// entity-centered collect + group-gated params, no D3D-fill boost
-	// [orig: RenderSlot_UpdateEntityLight @0x5d6a30, see
-	// docs/render/render-lighting-re.md]. A C++ seam (not script-bound):
+	// (engine: runtime/renderer/render_slot_shadow.h). A C++ seam (not script-bound):
 	// fills r_out with the planner's typed inputs (positions in Godot world).
 	void slot_shadow_lights(const Vector3 &p_world_pos, float p_radius,
 			int64_t p_interior_owner, int p_interior_section,
 			const Vector3 &p_ambient_scale, int p_time_ms, Weather *p_weather,
 			std::vector<opennova::renderer::SlotPointLight> &r_out);
 
-	// The corona billboard walk for this frame [orig:
-	// EffectWorld_RenderLightCoronas @0x5aaf40 — witness comment on
-	// opennova::renderer::LightScene::collect_corona_quads]: the segment
+	// The corona billboard walk for this frame (engine: runtime/renderer/light_scene.h): the segment
 	// quads (centre, half size, the premultiplied additive colour including
 	// the segment fade and the fog-to-black fold) the post-particle overlay
 	// stage draws (renderer/scene_overlay.h). models/owner_entities are the
 	// SAME parallel arrays the per-model light pass walks — models carrying an
 	// occlusion section-mask verdict gate their owned coronas on the
 	// visible-section bit; fog is the environment's EnvLightValues (null = no
-	// fog; the primary device fog with the color forced black [orig:
-	// CD3DDevice_SetFogAndBlendMode(dev, 2) @0x5aafb6]). Returns the row count
+	// fog; the primary device fog with the color forced black (engine: runtime/renderer/light_scene.h)). Returns the row count
 	// (the walk's semantics are the renderer_light_scene ctest's).
 	int collect_corona_rows(const Vector3 &p_camera_pos,
 			const Vector3 &p_camera_forward, const Vector3 &p_ambient_scale,
@@ -269,18 +271,6 @@ public:
 	// Read-only diagnostics snapshot of the last uploaded RGBAF atlas. The
 	// returned Image owns copied bytes; tests/tools cannot mutate render state.
 	Ref<Image> get_static_light_rows_image() const;
-
-protected:
-public:
-	// The witnessed muzzle-glow / death-flash spawn constants, re-exported
-	// from opennova::renderer::LightScene for the presenting director.
-	static float muzzle_glow_radius();
-	static Color muzzle_glow_color();
-	static int muzzle_glow_fade_mode();
-	static int muzzle_glow_fade_ticks();
-	static Color death_flash_color();
-	static int death_flash_fade_mode();
-	static int death_flash_fade_ticks();
 
 protected:
 	static void _bind_methods();

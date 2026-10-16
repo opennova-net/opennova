@@ -47,17 +47,14 @@ class Weather;
 // per-frame select that feeds the technique shaders' global parameters. The
 // witness map lives on engine/runtime/renderer/light_scene.h — mission
 // start walks the placed pools spawning per-record instances
-// [orig: Game_StartMission @ 0x525d19 -> Game_SpawnAllEntityGlowEffects @0x5227b0 ->
-// Entity_SpawnGlowEffects @ 0x56c7c0], and each draw selects the nearest
-// group-passing three [orig: Light_SelectAndEnableForDraw @ 0x5ab9d0 ->
-// Light_CollectNearbyZonesByAABB @ 0x5aa250; the batch collectors' group gate
-// @ 0x5d91f8 / @ 0x5d96b8 and 3-cap @ 0x5d9229]. The object pass runs per
+// (engine: runtime/renderer/light_scene.h), and each draw selects the nearest
+// group-passing three (engine: runtime/renderer/light_scene.h). The object pass runs per
 // rendered model: one draw context per visible ObjectModel carrying BOTH
 // witnessed groups — the owner group its submit declares, and the building
 // it stands inside plus that blink volume's section as the interior group —
 // so owned lights (muzzle glow, subobject records, interior room lights)
 // light only what retail's collectors admit. Corona billboards draw per frame from
-// the portable corona walk [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40].
+// the portable corona walk (engine: runtime/renderer/light_scene.h).
 // The remaining D-RLIT-4 residual is foliage sampling. Authored LGHT
 // positions/lifetimes are spawn-fixed; powerup respawn is routed, and a
 // husk swap neither moves nor rescans lights (retail call graph cited
@@ -109,8 +106,7 @@ public:
 	// self-lights), an unattached record spawned INSIDE a blink box is owned
 	// by the containing building + that volume's section (interior room
 	// lights), and everything else — the fire barrels — spawns unowned and
-	// lights the world [orig: Entity_SpawnGlowEffects @ 0x56c89f /
-	// @ 0x56c8bd]. Every caller supplies an owner id — live nodes their wire
+	// lights the world (engine: runtime/renderer/light_scene.h). Every caller supplies an owner id — live nodes their wire
 	// handle/instance id, batched static sources a synthetic negative id —
 	// so an owned light passes the per-draw select only for the draws
 	// retail admits (per_model_light_isolation_test pins both directions).
@@ -157,11 +153,9 @@ public:
 	// (renderer/scene_overlay.h): the main walk's, and the Inset walk's in its
 	// own slot. Not bound to Godot.
 	void append_overlay(SceneOverlaySubmission &r_submission);
-	// The 62 Hz lifecycle decay [orig: EffectWorld_TickInstancesAndLightScale
-	// @ 0x5aa170 from the main loop] — beside EffectWorld.advance_fixed_tick.
+	// The 62 Hz lifecycle decay (engine: runtime/renderer/light_scene.h) — beside EffectWorld.advance_fixed_tick.
 	void advance_fixed_tick();
-	// One weapon fire with the ammo MF_Light flag [orig: Entity_UpdateMuzzleGlow-
-	// Effect @ 0x56c960, called per shot from both fire arms]. Owner = the
+	// One weapon fire with the ammo MF_Light flag (engine: runtime/renderer/light_scene.h). Owner = the
 	// shooter, so the per-draw owner select (render_model_frame) admits the
 	// glow only on draws declaring that owner: the shooter's skinned person
 	// draws. The rigid held gun re-scopes to (0, robj) and the first-person
@@ -175,8 +169,7 @@ public:
 	// AmmoDef_ProcessImpactEffect @ 0x40a2b3 — spawned radius/2 above the
 	// impact, mode 2 fade, render flag 0x100]. The 0x100 flag's one witnessed
 	// reader is the corona walk: the billboards re-center radius/2 below the
-	// light, back onto the impact point [orig: EffectWorld_RenderLightCoronas
-	// @ 0x5ab037..0x5ab05c].
+	// light, back onto the impact point (engine: runtime/renderer/light_scene.h).
 	void on_impact_light(const Vector3 &p_world_pos, float p_radius, const Color &p_color,
 			int p_duration_ticks);
 	// One husk death flash [orig: Entity_SpawnDeathPieces @ 0x49351a — at the
@@ -300,8 +293,7 @@ private:
 	// round presentation id -> pool light handle (the light_move follow).
 	HashMap<int64_t, int64_t> round_handles_;
 	// This frame's corona quads for the post-particle overlay stage, from the
-	// portable corona walk [orig: EffectWorld_RenderLightCoronas @ 0x5aaf40 —
-	// the witness map lives on renderer::LightScene::collect_corona_quads].
+	// portable corona walk (engine: runtime/renderer/light_scene.h).
 	std::vector<opennova::renderer::LightCoronaQuad> coronas_;
 	// The weapon Inset pass's own walk this frame (render_inset_frame).
 	std::vector<opennova::renderer::LightCoronaQuad> inset_coronas_;

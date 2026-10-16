@@ -7,6 +7,8 @@
 
 namespace godot {
 
+class ResourceRoot;
+
 // What a mission load shows on the loading screen (the former
 // loading_screen_info.gd, ADR 0043 slice G10): the .bms name driving the
 // sidecar background lookup, whether the load carries an MP session (the
@@ -24,6 +26,14 @@ public:
 			const String &p_custom_text);
 	// A single-player load: only the mission file matters (no session overlay).
 	static Ref<LoadingScreenInfo> for_mission(const String &p_mission_file);
+	// A listen host's own load: the session band from the mounted `p_root`, its
+	// game type (the mission's own with `p_game_type_auto`) and MISSIONNAME the
+	// engine's (inmatch/host_boot.h host_loading_band: the session serializer's
+	// rule over the mission text and header the boot reads), so the host shows
+	// what its joiners receive.
+	static Ref<LoadingScreenInfo> for_host(const Ref<ResourceRoot> &p_root,
+			const String &p_mission_file, const String &p_server_name, int p_game_type,
+			bool p_game_type_auto, const String &p_custom_text);
 
 	String get_mission_file() const { return mission_file_; }
 	void set_mission_file(const String &p_value) { mission_file_ = p_value; }

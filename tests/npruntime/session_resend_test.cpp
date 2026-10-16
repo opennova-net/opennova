@@ -318,7 +318,7 @@ bool check_s2c_loss_requests_0x44_and_host_reconstructs() {
     if (!expect(ctx.np_protocol.connection_list[0].link.nak_backoff_pending,
         "valid NAK arms the recipient backoff")) return false;
 	// The same callback raises the host's outgoing link error (flag 1)
-	// [orig: sub_4C62A0 @0x4c62ce].
+	// [orig: NapiNPServer_OnResendListCallback @0x4c62ce].
 	if (!expect(ctx.net_quality_link_errors == inmatch::kNetQualityLinkErrorOutgoing,
 	            "a joiner's valid 0x44 raises the host's outgoing link error"))
 		return false;

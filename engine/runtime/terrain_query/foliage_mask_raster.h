@@ -10,6 +10,7 @@
 
 #include <formats/foliage/foliage.h>
 #include <formats/pcx/pcx.h>
+#include <formats/trn/trn.h>
 #include <runtime/terrain_query/foliage_mask_map.h>
 #include <runtime/terrain_query/height_field.h>
 
@@ -48,5 +49,12 @@ FoliageMaskMap foliage_mask_grid(const TerrainHeightField &field);
 // The sampler over a raster and a terrain's grid: its masks, or (`codes`) the codes as read; the empty sampler
 // (nothing grows) for an empty raster.
 FoliageMaskMap foliage_mask_map(const FoliageMaskRaster &raster, const TerrainHeightField &field, bool codes = false);
+
+// The sampler over a loaded foliage map's codes (the PCX indices the game's reader keeps) and a
+// .trn's sector grid, origin and wraps: the code the game's MODEL tier reads at a candidate before
+// its definition-slot gate [orig: Foliage_GenerateModelTileInstances @ 0x600B85 ->
+// Foliage_SampleFoliageMapMask @ 0x606620], a non-wrapping axis clamping an off-grid cell to the
+// grid's edge. The empty sampler (nothing grows) for an empty map.
+FoliageMaskMap foliage_code_map(const FoliageMap &codes, const TrnConfig &trn);
 
 } // namespace opennova::terrain

@@ -15,12 +15,7 @@ namespace {
 // byte = int(channel * 255 + 0.5); alpha packs opaque like a Godot Color's
 // default 1.0 did.
 uint32_t pack_rgb(const Rgb &color) {
-	const auto to_byte = [](float v) -> uint32_t {
-		return static_cast<uint32_t>(
-				std::clamp(static_cast<int>(v * 255.0f + 0.5f), 0, 255));
-	};
-	return to_byte(color.b) | (to_byte(color.g) << 8) |
-			(to_byte(color.r) << 16) | (255u << 24);
+	return rgb01_to_packed(color, 0xFFu);
 }
 
 } // namespace

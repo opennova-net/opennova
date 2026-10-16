@@ -267,6 +267,27 @@ int main() {
     CHECK(hud::emplacement_health_band(-1, 100) == hud::SeatHealthBand::Bad);
     CHECK(hud::seat_health_band(-1, 100) == hud::SeatHealthBand::Good);
 
+    // --- the local player's panel: the root's items.def id (+100000) and the
+    //     hull's own health; nothing while L rides nothing.
+    {
+        Rig r;
+        hud::HudVehiclePanelState state;
+        CHECK(!local_vehicle_panel_root(r.w).shown);
+        CHECK(!fill_local_vehicle_panel(r.w, r.block, state));
+        CHECK(state.hull_health == 0 && state.seats.empty());
+        r.w.cached.local_player = r.driver;
+        CHECK(!local_vehicle_panel_root(r.w).shown); // on foot
+        r.seat_occupant(r.veh, 8, r.driver);
+        const VehiclePanelRoot root = local_vehicle_panel_root(r.w);
+        CHECK(root.shown && root.item_id == 1291 + 100000);
+        r.e(r.veh).health = 1200;
+        CHECK(fill_local_vehicle_panel(r.w, r.block, state));
+        CHECK(state.hull_health == 1200 && state.hull_max_health == 3000);
+        std::vector<hud::HudVehicleSeat> rows;
+        fill_vehicle_panel_seats(r.w, r.veh, r.driver, r.block, rows);
+        CHECK(state.seats.size() == rows.size());
+    }
+
     if (failures != 0) {
         std::printf("%d failure(s)\n", failures);
         return 1;

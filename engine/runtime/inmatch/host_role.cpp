@@ -64,9 +64,6 @@ void HostRole::set_item_catalog(
 		state.client_runtime->view().set_item_catalog(item_catalog_);
 }
 
-// The rules word out of a session [orig: `mov [esi+2Ch], 4204h` @0x51E957].
-constexpr uint32_t kSpRulesWord = 0x4204u;
-
 // The is_in_session fact the mission-data block's rules word tests: a socket
 // session (a LAN or NovaWorld host, a serve host) is in session, and the
 // shell's socketless single player is not, as retail's single player creates
@@ -119,7 +116,7 @@ void HostRole::apply_rule_words(const inmatch::GameConfig &config, bool serve_an
 	//  0x51E957; the scope-zero floor's `test g_RulesFlags,10000h` @0x4dbd15]. A DFX2
 	// authority then ORs the scope-zero bit 0x10000 into the word, in a session or out
 	// (DFX2-18) [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51b89e (dfx2.exe)].
-	const uint32_t rules_word = (in_session ? config.mp_attributes : kSpRulesWord) |
+	const uint32_t rules_word = (in_session ? config.mp_attributes : GameConfig::kSpRulesWord) |
 			title_in_match(title).rules_word_bits;
 	kernel.world.rules.mpattrib = rules_word;
 	kernel.world.rules.hit_feedback = config.hit_feedback;
@@ -619,7 +616,7 @@ void HostRole::run_tick(const TickInput &input) {
 		// The own client's 0x0F / 0x50 track legs: the map POI list outside
 		// the waypoint gametypes (the route stays the promotion's).
 		apply_replica_track(kernel.world, state.client_runtime->state(),
-				state.client_runtime->view().game_type(), /*route_from_wire=*/false, track_seen_);
+				state.client_runtime->game_type(), /*route_from_wire=*/false, track_seen_);
 	}
 	ctx.net_quality_link_errors = 0;
 	last_net_us_ = static_cast<int64_t>(io::perf_now_us()) - net_start;

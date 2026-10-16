@@ -75,6 +75,24 @@ LightRuntime eval_light_runtime(uint8_t style,
                                 uint32_t time_ms,
                                 int32_t ctrl_value);
 
+// One model light as the object pass evaluates it: its LGHT record's index in
+// the model and its colour/intensity this frame.
+struct ModelLightEval {
+    size_t index = 0;
+    LightRuntime runtime;
+};
+
+// The model's LGHT records the object lights draw, each evaluated: a record
+// with DISABLE_OBJECTS is skipped; a style that names a CTRL register has its
+// phase byte rewritten from the model-local index to the global ordinal (the
+// loader's fixup, as PANM's), and the styles that read the bus take that
+// global slot's value; every record then runs eval_light_runtime at the PANM
+// clock. [orig: model light fixups @ 0x5B5F4F..0x5B5F62; Light_GetPointLightParams
+// @ 0x5A9180; RgbGen_EvaluateColor @ 0x5B23D0]
+std::vector<ModelLightEval> eval_model_lights(const opennova::threedi::Threedi3di3& model,
+                                              int64_t time_ms,
+                                              const ControlRegisterValues& ctrl_values);
+
 // Compute the animation frame index from raw .3di animation params + ctrl regs.
 // max_anim_frames clamps cycle length when the engine pads slot tables; pass 0
 // for no clamp. ctrl_names/ctrl_values use the same loader-patched global-bus

@@ -9,7 +9,8 @@
 // [orig: Config_ParseSettingsLine @ 0x550D74 (game.cfg +0x124);
 //  apply_session_settings_to_globals @ 0x551565..0x551574 (the copy's +0x18,
 //  g_SessionParticleDensity @ 0x24D2058); the Accepts write
-//  g_CfgParticleDensity @ 0x25507DC only (sub_55A710 @ 0x55A905..0x55A926,
+//  g_GameConfigState.graphicsQuality_10C.particleDensity_18 @ 0x25507DC only
+//  (Options_HandleAcceptOrBack @ 0x55A905..0x55A926,
 //  UI_IngameOptionsDialogEventHandler @ 0x554F14..0x554F35)]
 
 #include <cstdint>
@@ -56,8 +57,8 @@ enum class ParticleScenePass : uint8_t { Main, NvgScene };
 // [orig: Render_ProcessMainSceneFrame @ 0x5CA8B8..0x5CA8DE; Render_WeaponInsetScene
 //  @ 0x5C9DB3..0x5C9DD9; the cinematic views @ 0x5706E5..0x57070B and
 //  @ 0x5708A0..0x5708C6 (flt_7C3310 = 1/65536); NVG_RenderSceneToTarget
-//  @ 0x5D088F..0x5D08B5 (flt_7DC620 = 1/131072); EffectWorld_SetParticleDensityScale
-//  @ 0x5F6DB0 (g_EffectWorld +0x3F4)]
+//  @ 0x5D088F..0x5D08B5 (flt_7DC620 = 1/131072); the density setter
+//  EffectWorld_SetParticleDensityScale @ 0x5F6DB0 (g_EffectWorld +0x3F4)]
 inline constexpr float particle_density_scale(int32_t session_density, ParticleScenePass pass) {
 	const int density = clamp_particle_density(session_density);
 	const float fixed = static_cast<float>(0x10000 >> (kParticleDensityMax - density));

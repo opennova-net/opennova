@@ -11,8 +11,8 @@
 // record's done byte, and marks the route done through each new co-op
 // checkpoint its 0x0A carries (DFX2-9).
 // [orig: NapiNPClientMsg_0x00F @0x42e447..0x42e4fd; NapiNPClientMsg_TeamAssign
-//  @0x431b10..0x431b2d; Entity_BuildMapPoiLists @0x42de40] [orig:
-//  NapiNPClientMsg_0x00F @0x42ffe7..0x42fffc, NapiNPClientMsg_0x00A @0x431e05..0x431e62
+//  @0x431b10..0x431b2d; Entity_BuildMapPoiLists @0x42de40]
+// [orig: NapiNPClientMsg_0x00F @0x42ffe7..0x42fffc, NapiNPClientMsg_0x00A @0x431e05..0x431e62
 //  (dfx2.exe)]
 
 #include <cstdint>

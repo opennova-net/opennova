@@ -89,7 +89,7 @@ public:
 
 	// Writes `rect` (char-map texels: x, z the column and row, w, h the size) of the char map the
 	// store holds from `src`, `stride` bytes a row (stride >= w), in place, as JO's mission editor
-	// paints a class into its char map a texel at a time [orig: JOTACmed sub_41D6B0 @ 0x41D7D4 ->
+	// paints a class into its char map a texel at a time [orig: JOTACmed.exe sub_41D6B0 @ 0x41D7D4 ->
 	// sub_45E3B0]: the surface view keeps pointing at the same raster, so every copy of it reads the
 	// new classes (an editor's brush stroke, no rebuild). It writes under every live copy of the view
 	// (the world's, the kernel's), so a patch and the reads it serves share one thread, or the caller

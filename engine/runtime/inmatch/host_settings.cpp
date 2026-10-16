@@ -171,8 +171,8 @@ TitlePlayerCaps title_player_caps(int title) {
     TitlePlayerCaps caps;
     if (title == gameprofile::GAME_DFX2) {
         caps.session = kMaxPlayersCapDfx2;
-        // [orig: g_HostMaxPlayersCap @0x835f0c = 100 (dfx2.exe), against
-        //  Jointops.exe's dword_83C79C = 64]
+        // [orig: dfx2.exe g_HostMaxPlayersCap @0x835f0c = 100], against Jointops.exe's 64
+        // [orig: dword_83C79C @0x83C79C]
         caps.host_screen = 100;
     }
     return caps;

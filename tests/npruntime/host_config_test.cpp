@@ -5,8 +5,10 @@
 #include <base/gameprofile/game_type.h>
 #include <formats/def/def.h>
 #include <formats/gamecfg/game_cfg.h>
+#include <formats/playersav/player_sav.h>
 #include <formats/rtxt/rtxt.h>
 #include <runtime/inmatch/host_config.h>
+#include <runtime/inmatch/host_role.h> // singleplayer_game_config
 #include <runtime/inmatch/host_settings.h>
 
 #include "common/test_expect.h"
@@ -245,6 +247,60 @@ int main() {
 		TEST_EXPECT(blank.mp_max_players == 1 && blank_host.config.max_players == 1u);
 		TEST_EXPECT(blank_host.config.player_slot_limit() == 2u);
 		TEST_EXPECT(blank_host.config.unlimited_vehicles == 7);
+	}
+
+	// --- the game shell's in-process host record (shell_host_config): a LAN
+	//     host's from its host-screen config, else single player's from the
+	//     profile record; the cfg block's create words over either, the same
+	//     words host_session_settings copies.
+	{
+		gamecfg::GameCfg block = gamecfg::defaults();
+		block.mp_reset = 1;
+		block.mp_use_lineup_queue = 1;
+		block.mp_lineup_queue_size = 6;
+		block.mp_host_punt_same_pcids = 1;
+		playersav::ProfileRecord profile{};
+		profile.auto_medic_off = 1;
+
+		GameConfig lan;
+		lan.server_name.clear();
+		lan.game_type = game_type::kTeamDeathmatch;
+		ShellHostSource source;
+		source.lan_config = &lan;
+		source.lan_max_players = 9;
+		source.lan_serve_and_play = false;
+		source.lan_network_type = NetworkType::NovaWorld;
+		source.profile = &profile;
+		source.cfg_block = &block;
+		HostConfig host = shell_host_config(source);
+		TEST_EXPECT(host.config.server_name == "OpenNova LAN Host");
+		TEST_EXPECT(host.config.game_type == game_type::kTeamDeathmatch);
+		TEST_EXPECT(host.config.max_players == 9u && host.config.dedicated_server);
+		TEST_EXPECT(host.socket_mode == SocketMode::Lan && !host.serve_and_play);
+		TEST_EXPECT(host.network_type == NetworkType::NovaWorld);
+		TEST_EXPECT(host.config.multiplayer_reset == 1 && host.config.use_lineup_queue == 1 &&
+				host.config.lineup_queue_size == 6 && host.config.punt_duplicate_pcids == 1);
+		TEST_EXPECT(host.local_auto_medic_disabled == 1u);
+		// The same words host_session_settings takes from the same block.
+		const HostScreenState from_block = host_session_settings(block);
+		TEST_EXPECT(from_block.config.multiplayer_reset == host.config.multiplayer_reset &&
+				from_block.config.use_lineup_queue == host.config.use_lineup_queue &&
+				from_block.config.lineup_queue_size == host.config.lineup_queue_size &&
+				from_block.config.punt_duplicate_pcids == host.config.punt_duplicate_pcids);
+
+		// Single player: the profile's session record, socketless, serve-and-play.
+		ShellHostSource sp;
+		sp.sp_game_type = game_type::kObjectiveCoop;
+		sp.profile = &profile;
+		host = shell_host_config(sp);
+		const GameConfig expected = singleplayer_game_config(game_type::kObjectiveCoop, &profile);
+		TEST_EXPECT(host.config.game_type == expected.game_type);
+		TEST_EXPECT(host.socket_mode == SocketMode::Socketless && host.serve_and_play);
+		TEST_EXPECT(host.network_type == NetworkType::Lan);
+		TEST_EXPECT(host.config.multiplayer_reset == 0); // no block: the stock word
+		TEST_EXPECT(host.local_auto_medic_disabled == 1u);
+		sp.profile = nullptr;
+		TEST_EXPECT(shell_host_config(sp).local_auto_medic_disabled == 0u);
 	}
 
 	std::printf("host_config: ok\n");

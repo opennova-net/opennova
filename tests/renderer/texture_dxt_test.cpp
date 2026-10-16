@@ -84,6 +84,14 @@ void test_level_count() {
 	CHECK(texture_level_count(256, 256, 0x40000u) == 1, "0x40000 keeps one level");
 	CHECK(texture_level_count(256, 256, 0x80000u) == 3, "0x80000 keeps three");
 	CHECK(texture_level_count(2, 2, 0) == 2, "0 is D3DX's full chain to 1x1");
+	// Pixel-built textures (TGA/MDT/PCX rows, normal maps, the checkerboard) with no creation
+	// flags: one level per halving while the smaller side exceeds 2.
+	// [orig: GTexture_CreateFromPixelData_0 @ 0x6877BC..0x6877D8]
+	CHECK(texture_level_count(256, 256, 0) == 7 && texture_level_count(128, 128, 0) == 6 &&
+					texture_level_count(256, 64, 0) == 5 && texture_level_count(3, 8, 0) == 1 &&
+					texture_level_count(48, 48, 0) == 5,
+			"pixel-built chains end at the last level above a smaller side of 2");
+	CHECK(texture_level_count(2, 8, 0) == 4, "a smaller side of 2 takes the full chain of the larger");
 }
 
 void test_dxt1_blocks() {

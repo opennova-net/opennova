@@ -2,6 +2,7 @@
 
 #include <runtime/world/world.h>
 
+#include <formats/mission/mission.h> // kItemIdOffset
 #include <runtime/hud/hud_vehicle_panel.h>
 
 #include <cstdio>
@@ -168,6 +169,42 @@ void fill_vehicle_panel_seats(const World &world, EntityHandle root_h,
         if (!unresolved) row.label = label;
         out.push_back(row);
     }
+}
+
+namespace {
+
+const Entity *local_panel_root_entity(const World &world, EntityHandle &root_h) {
+    const Entity *local = world.registry.get(world.cached.local_player);
+    if (local == nullptr) return nullptr;
+    root_h = vehicle_panel_root(world, *local);
+    return root_h.valid() ? world.registry.get(root_h) : nullptr;
+}
+
+} // namespace
+
+VehiclePanelRoot local_vehicle_panel_root(const World &world) {
+    VehiclePanelRoot v;
+    EntityHandle root_h;
+    const Entity *root = local_panel_root_entity(world, root_h);
+    if (root == nullptr) return v;
+    v.shown = true;
+    v.item_id = root->item_id + mission::kItemIdOffset;
+    return v;
+}
+
+bool fill_local_vehicle_panel(const World &world, const opennova::def::DefVehicleHudBlock &block,
+                              hud::HudVehiclePanelState &out,
+                              const VehicleOccupancySource *source) {
+    out.seats.clear();
+    out.hull_health = 0;
+    out.hull_max_health = 0;
+    EntityHandle root_h;
+    const Entity *root = local_panel_root_entity(world, root_h);
+    if (root == nullptr) return false;
+    out.hull_health = root->health;
+    out.hull_max_health = root->health_max;
+    fill_vehicle_panel_seats(world, root_h, world.cached.local_player, block, out.seats, source);
+    return true;
 }
 
 } // namespace opennova::world

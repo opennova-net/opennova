@@ -91,7 +91,8 @@ struct TracerView {
 	TracerVec3 forward{0.0f, 0.0f, 1.0f};
 	// The projection's _11 (cot(horizontal fov / 2)) [orig: `g_ProjectionMatrix` @ 0x2721980].
 	float projection_x_scale = 1.0f;
-	// The wall clock in milliseconds [orig: GetTickCount @ 0x5DC104].
+	// The wall clock in milliseconds [orig: CEffectChannel_RenderRibbon @ 0x5DB8A0, the
+	// GetTickCount call @ 0x5DC104].
 	std::uint32_t tick_ms = 0;
 };
 

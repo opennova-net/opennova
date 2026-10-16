@@ -36,7 +36,8 @@ struct SessionView;
 //   0x10 the marker3 ammo from its point, 0x8 the easyrocket ammo and then a different advancedrocket from the
 //   rocket point), each byte the item's as the organic init resolves it (world::resolve_organic_weapons over the
 //   project's ammo.def and the rig's model: an ai_function of the person classes alone runs the init
-//   [orig: g_EntityClassEventCallbackTable @0x813018 / @0x813030 -> Entity_InitOrganicAI @0x4BFCC0]); nothing
+//   [orig: g_EntityClassEventCallbackTable @0x813000 (the org0 / org1 rows @0x813018 / @0x813030) ->
+//   Entity_InitOrganicAI @0x4BFCC0]); nothing
 //   else gates it: no magazine, no weapon state [orig: @0x4BF42A..0x4BF45A];
 // - where: the launch point on the person's own model as the clip poses it on that tick (the point's bone carried
 //   from the rest to the pose), or the body's origin where the byte is zero, along the body's own heading and pitch

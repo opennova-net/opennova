@@ -20,6 +20,15 @@ static func tap(k: Key) -> void:
 	hold(k, false)
 
 
+## The live `useitem` row's first key (retail default Shift; rebindable in
+## Options -> Controls): USE, the armory opener and, while the WEAPON screen is
+## up, its ACCEPT accelerator (ArmoryPresenter.is_accept_hotkey). KEY_NONE when
+## the row has no key.
+static func use_item_key() -> Key:
+	var keys := ControlsBindings.model().godot_keys_for_token("useitem")
+	return (keys[0] as Key) if not keys.is_empty() else KEY_NONE
+
+
 ## Press or release a mouse button.
 static func mouse_btn(b: MouseButton, down: bool) -> void:
 	var e := InputEventMouseButton.new()

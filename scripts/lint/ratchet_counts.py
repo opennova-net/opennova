@@ -25,7 +25,7 @@ in maturity_baseline.json:
                         the allowlisted infra libs (citation is inapplicable
                         there) -- the faithful-port rule's coverage floor.
   godot_orig_cites      "[orig:" citations across the whole Godot side --
-                        godot/src C++ plus the godot/game and godot/probes GDScript -- as ONE count (ADR 0043 merged
+                        godot/src C++ plus the godot/game, godot/editor and godot/probes GDScript -- as ONE count (ADR 0043 merged
                         the former adapter_cpp_orig_cites / gd_orig_cites
                         pair). A cite moves freely between the two Godot-side
                         languages; the gauge falls only when witnessed code
@@ -33,11 +33,14 @@ in maturity_baseline.json:
                         code -- bank it with --write-baseline. The one cite
                         marker is `[orig: Name @0xADDR]` (ADR 0042 d7).
   gd_foreign_private_accesses
-                        lines in the shipping GDScript (godot/game) that access an _underscore member of
-                        ANOTHER object (self._ excluded) -- a "method annex"
+                        lines in the shipping GDScript (godot/game, godot/editor) that access an _underscore member of
+                        ANOTHER object (self._ excluded, and a local the file's
+                        own class built with `ClassName.new()`: privacy is the
+                        class's, not the instance's) -- a "method annex"
                         reaching into its owner's privates is not a class
-                        boundary (ADR 0043). Non-increasing; target zero.
-  mcp_boundary_cites    "[orig:" citations in godot/game/mcp GDScript plus
+                        boundary (ADR 0043). An ABSOLUTE zero floor like
+                        mcp_boundary_cites (reached 2026-10-15); no baseline key.
+  mcp_boundary_cites    "[orig:" citations in the godot/game/mcp and godot/editor/mcp GDScript plus
                         the typed debug-control table
                         (godot/src/devtools/debug_control_table.{h,cpp},
                         ADR 0043 d12). An ABSOLUTE zero floor, not
@@ -56,12 +59,19 @@ in maturity_baseline.json:
                         2500-line limit as oversize_cpp_files (the .cpp glob
                         never saw headers).
   gd_dict_key_sites     Dictionary-keyed reads (`x["key"]`, `.get("key"`) on
-                        code lines of the shipping GDScript (godot/game), excluding godot/game/mcp (the
-                        sanctioned JSON transport edge) and godot/game/probe
+                        code lines of the shipping GDScript (godot/game, godot/editor), excluding
+                        godot/game/mcp and godot/editor/mcp (the
+                        sanctioned JSON transport edges) and godot/game/probe
                         (the probe model: its arguments are JSON Schema and
                         its status pages are the game_probe wire by design,
                         ADR 0041 / ADR 0043 d12). Each is a record that
                         crosses untyped (ADR 0017); typed records burn it down.
+  godot_src_dictionary_params
+                        Binding parameters (`p_` by Godot's convention) of type
+                        Dictionary or TypedArray<Dictionary> in godot/src/**/*.h:
+                        the INPUT half of godot_src_dictionary_returns, the
+                        untyped records GDScript still hands a binding (ADR 0017,
+                        ADR 0042 d5). Non-increasing from its 2026-10-15 seed.
   godot_src_dictionary_returns
                         Binding methods declared to return Dictionary or
                         TypedArray<Dictionary> in godot/src/**/*.h -- the seams
@@ -76,12 +86,14 @@ in maturity_baseline.json:
 Modes:
   (default)         report counts vs baseline; exit 0 regardless (soft mode)
   --enforce         exit 1 if any counter exceeds its baseline (the ratchet)
+                    OR sits below it unbanked
   --write-baseline  rewrite the baseline to current counts (maintainer
-                    action; log the bump in docs/maturity-program.md)
+                    action for a bump, logged in docs/maturity-program.md;
+                    the slice's own action for a decrease)
 
-Decreases are reported and SHOULD be committed into the baseline by the
-slice that earned them (run --write-baseline in that slice) so the ratchet
-only ever tightens.
+A decrease is banked by the slice that earned it (--write-baseline in that
+slice, named in its commit): --enforce fails on an unbanked one, since a
+baseline above the tree lets the same number of sites come back unseen.
 """
 
 from __future__ import annotations
@@ -119,6 +131,25 @@ def _in_build_dir(parts) -> bool:
         parts[2].startswith("build")
 
 
+CLASS_NAME_LINE = re.compile(r"^class_name\s+([A-Za-z_]\w*)", re.M)
+
+
+FUNC_LINE = re.compile(r"^\s*(?:static\s+)?func\s")
+
+
+def _own_class_local(text: str):
+    """The pattern of a local the file's own class builds (`var snapshot :=
+    GameRenderDiagnostics.new()` in GameRenderDiagnostics), or None with no class_name:
+    reaching such a local's privates is the class's own business, as self._ is (a static
+    factory filling the instance it made). It holds from its `var` to the end of that
+    function, never in another function of the file."""
+    declared = CLASS_NAME_LINE.search(text)
+    if not declared:
+        return None
+    name = re.escape(declared.group(1))
+    return re.compile(r"\bvar\s+(\w+)\s*(?::\s*%s\s*)?:?=\s*%s\.new\(" % (name, name))
+
+
 def _count_private_pokes(subdirs: tuple[str, ...]) -> int:
     count = 0
     for sub in subdirs:
@@ -130,10 +161,18 @@ def _count_private_pokes(subdirs: tuple[str, ...]) -> int:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
+            local_decl = _own_class_local(text)
+            own: list[re.Pattern] = []
             for line in text.splitlines():
+                if FUNC_LINE.match(line):
+                    own = []        # a new function: the last one's locals are out of scope
+                if local_decl is not None:
+                    own += [re.compile(r"\b%s\._" % re.escape(v)) for v in local_decl.findall(line)]
                 # Code only: a comment naming `GameWorld._runtime` documents a
                 # seam, it does not poke one.
                 stripped = SELF_POKE.sub("", line.split("#", 1)[0])
+                for local in own:
+                    stripped = local.sub("", stripped)
                 if PRIVATE_POKE.search(stripped):
                     count += 1
     return count
@@ -144,11 +183,11 @@ def count_test_private_pokes() -> int:
 
 
 def count_gd_foreign_private_accesses() -> int:
-    """Foreign `._member` accesses in the SHIPPING GDScript (godot/game): the annex pattern -- a RefCounted "method annex" split
+    """Foreign `._member` accesses in the SHIPPING GDScript (godot/game, godot/editor): the annex pattern -- a RefCounted "method annex" split
     off its owner for size and reaching back through `_owner._field` -- is
     C++ `friend` without the keyword. A class owns its state; an object that
     needs another's privates is a method of that other class (ADR 0043)."""
-    return _count_private_pokes(("game",))
+    return _count_private_pokes(("game", "editor"))
 
 
 CLASS_NAME_DECL = re.compile(r"^class_name\s+([A-Za-z_]\w*)", re.M)
@@ -160,7 +199,7 @@ TEST_EXTENDS = re.compile(r"^\s*(?:class\s+\w+\s+)?extends\s+([A-Za-z_]\w*)\s*:?
 
 def _production_class_names() -> set[str]:
     names: set[str] = set()
-    for sub in ("game",):
+    for sub in ("game", "editor"):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
             if "addons" in parts or _in_build_dir(parts):
@@ -245,7 +284,7 @@ def count_godot_orig_cites() -> int:
         except OSError:
             continue
         count += text.count("[orig:")
-    for sub in ("game", "probes"):
+    for sub in ("game", "editor", "probes"):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
             if "addons" in parts or _in_build_dir(parts):
@@ -270,13 +309,14 @@ MCP_BOUNDARY_EXTRA_FILES = (
 
 
 def count_mcp_boundary_cites() -> int:
-    """`[orig:` citations in godot/game/mcp GDScript plus the typed
-    debug-control table: an ABSOLUTE zero floor (ADR 0042 d7), not a
+    """`[orig:` citations in the godot/game/mcp and godot/editor/mcp GDScript (the
+    game's and the editor's MCP services) plus the typed debug-control table: an ABSOLUTE zero floor (ADR 0042 d7), not a
     baseline-relative ratchet. The MCP boundary converts typed engine records
     to JSON; a converter that needs a witness cite is re-deriving engine
     facts at the boundary."""
     count = 0
-    for path in (REPO / "godot" / "game" / "mcp").rglob("*.gd"):
+    for path in [*(REPO / "godot" / "game" / "mcp").rglob("*.gd"),
+                 *(REPO / "godot" / "editor" / "mcp").rglob("*.gd")]:
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -335,7 +375,7 @@ def count_gd_prints_outside_debug() -> int:
     godot/probes log through their ProbeContext, so they are in scope.
     godot/src is C++-only (ADR 0034 d6); its .gd leg here is a tripwire."""
     count = 0
-    for sub in ("src", "game", "probes"):
+    for sub in ("src", "game", "editor", "probes"):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -362,7 +402,7 @@ def count_has_method_guards() -> int:
     has_method() probe is the same duck dispatch, just invisible to GDScript
     greps."""
     count = 0
-    for sub in ("src", "game", "probes"):
+    for sub in ("src", "game", "editor", "probes"):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -453,20 +493,20 @@ GD_DICT_KEY_SITE = re.compile(r'\["[A-Za-z_]\w*"\]|\.get\("')
 
 
 def count_gd_dict_key_sites() -> int:
-    """Dictionary-keyed reads in the shipping GDScript (godot/game; godot/game/mcp excluded as the sanctioned JSON transport
-    edge, godot/game/probe as the probe model whose arguments are JSON Schema
+    """Dictionary-keyed reads in the shipping GDScript (godot/game, godot/editor; the two mcp
+    folders excluded as the sanctioned JSON transport edges, godot/game/probe as the probe model whose arguments are JSON Schema
     and whose status pages are the game_probe wire by design): `row["key"]`
     and `.get("key"` on code lines. Each site is a record crossing a seam
     untyped (ADR 0017); a typed RefCounted row removes its sites. The floor
     is the documented transport edges (the dict-contract allowlist in this
     file's baseline)."""
     count = 0
-    for sub in ("game",):
+    for sub in ("game", "editor"):
         for path in (REPO / "godot" / sub).rglob("*.gd"):
             parts = path.relative_to(REPO).parts
             if "addons" in parts or _in_build_dir(parts):
                 continue
-            if sub == "game" and len(parts) > 2 and parts[2] in ("mcp", "probe"):
+            if len(parts) > 2 and parts[2] in ("mcp", "probe"):
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
@@ -487,6 +527,29 @@ GODOT_FIXED_DICTIONARY_VIRTUALS = {"_get_line_syntax_highlighting"}
 # A declaration that takes the `override` specifier (after its parameters and a const), not a word
 # of a comment.
 GODOT_OVERRIDE_SPECIFIER = re.compile(r"\)\s*(const\s*)?override\s*;")
+
+
+GODOT_SRC_DICTIONARY_PARAM = re.compile(
+    r"(?:\(|,)\s*(?:const\s+)?(?:TypedArray<Dictionary>|Dictionary)\s*&?\s*p_\w+")
+
+
+def count_godot_src_dictionary_params() -> int:
+    """Binding parameters of type Dictionary / TypedArray<Dictionary> (`p_` names, Godot's
+    binding convention; an `r_` out-parameter or a helper's `d` is no input seam) in
+    godot/src/**/*.h, one per parameter: the untyped records GDScript hands a binding.
+    ADR 0043 G11 left two such setters; the gauge keeps the count from regrowing. A
+    declaration wrapped so a parameter opens its line counts too (the leading `(`)."""
+    count = 0
+    for path in (REPO / "godot" / "src").rglob("*.h"):
+        if _in_build_dir(path.relative_to(REPO).parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            count += len(GODOT_SRC_DICTIONARY_PARAM.findall("(" + line.split("//", 1)[0]))
+    return count
 
 
 def count_godot_src_dictionary_returns() -> int:
@@ -558,7 +621,6 @@ def main() -> int:
 
     current = {
         "test_private_pokes": count_test_private_pokes(),
-        "gd_foreign_private_accesses": count_gd_foreign_private_accesses(),
         "gd_test_production_subclasses": count_gd_test_production_subclasses(),
         "engine_uncited_src_files": count_engine_uncited_src_files(allowlist),
         "godot_orig_cites": count_godot_orig_cites(),
@@ -570,13 +632,15 @@ def main() -> int:
         "has_method_guards": count_has_method_guards(),
         "gd_dict_key_sites": count_gd_dict_key_sites(),
         "godot_src_dictionary_returns": count_godot_src_dictionary_returns(),
+        "godot_src_dictionary_params": count_godot_src_dictionary_params(),
     }
 
     # Absolute floors, no baseline key: the MCP boundary carries zero witness
-    # cites (ADR 0042 d7) and godot/ hangs zero facts on node metadata,
-    # forever — neither relaxes via --write-baseline.
+    # cites (ADR 0042 d7), godot/ hangs zero facts on node metadata, and the
+    # shipping GDScript reaches into no other object's privates, forever — neither relaxes via --write-baseline.
     mcp_cites = count_mcp_boundary_cites()
     meta_sites = count_godot_node_meta_sites()
+    foreign_privates = count_gd_foreign_private_accesses()
 
     if args.write_baseline:
         config["counters"] = current
@@ -590,6 +654,9 @@ def main() -> int:
         if meta_sites > 0:
             print(f"[ratchet] WARNING: godot_node_meta_sites is {meta_sites} — the "
                   f"floor is 0 and has no baseline; --enforce will fail.")
+        if foreign_privates > 0:
+            print(f"[ratchet] WARNING: gd_foreign_private_accesses is {foreign_privates}: "
+                  f"the floor is 0 and has no baseline; --enforce will fail.")
         return 0
 
     failed = False
@@ -607,6 +674,14 @@ def main() -> int:
               "nobody can find. Put it on the node class as a typed property, "
               "on a RefCounted record, or in the owner's own table.")
         failed = True
+    private_marker = "OK" if foreign_privates == 0 else "ABOVE FLOOR"
+    print(f"[ratchet] gd_foreign_private_accesses: {foreign_privates} (absolute floor 0) "
+          f"{private_marker}")
+    if foreign_privates > 0:
+        print("[ratchet]   a script reaching into another object's _privates is a method "
+              "annex, not a class (ADR 0043): make the member public or move the code "
+              "onto the class that owns it.")
+        failed = True
     for name, value in current.items():
         base = baseline.get(name)
         if base is None:
@@ -614,17 +689,19 @@ def main() -> int:
             failed = True
             continue
         delta = value - base
-        marker = "OK" if delta <= 0 else "INCREASED"
+        marker = "OK" if delta == 0 else ("INCREASED" if delta > 0 else "UNBANKED")
         print(f"[ratchet] {name}: {value} (baseline {base}, {delta:+d}) {marker}")
         if delta > 0:
             failed = True
         elif delta < 0:
-            print(f"[ratchet]   improvement — commit it: "
+            failed = True
+            print(f"[ratchet]   improvement, bank it in this change: "
                   f"python scripts/lint/ratchet_counts.py --write-baseline")
 
     if failed and args.enforce:
-        print("[ratchet] FAIL: a counter increased, lacks a baseline, or sits "
-              "above an absolute floor. Fix the regression, or (baseline "
+        print("[ratchet] FAIL: a counter increased, fell without being banked, lacks a "
+              "baseline, or sits above an absolute floor. Fix the regression, bank an "
+              "improvement with --write-baseline (named in the commit), or (baseline "
               "counters only) a maintainer bumps the baseline and logs it in "
               "docs/maturity-program.md.")
         return 1

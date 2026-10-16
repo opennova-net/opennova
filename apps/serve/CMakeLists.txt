@@ -44,3 +44,11 @@ target_link_libraries(opennova_serve
 
 target_compile_features(opennova_serve PRIVATE cxx_std_17)
 set_target_properties(opennova_serve PROPERTIES OUTPUT_NAME "opennova-serve")
+
+# The install, host-file, loose-root and credentials paths arrive as arguments: without a UTF-8
+# manifest Windows hands them over in the ANSI code page, and the engine opens files from UTF-8
+# strings (io/os_path.h), so a non-ASCII path fails to open. The same manifest as opennova-3di
+# (MSVC merges a .manifest source into the one it embeds).
+if(MSVC)
+    target_sources(opennova_serve PRIVATE ${CMAKE_SOURCE_DIR}/apps/3di/utf8.manifest)
+endif()

@@ -1,7 +1,9 @@
 // Retail terrain TGAs through the carried form: every colour map (_c.tga), detail blend map (_d1.tga) and tile
 // atlas (trntile*.tga) directly under the extracted asset tree reads a form (each ends with the TGA 2.0 footer),
-// and decoded the way the game's reader decodes it and written again in that form, is the same bytes. Reports
-// Skipped without OPENNOVA_JO_ASSETS.
+// and decoded the way the game's reader decodes it and written again in that form, is the same bytes. Then every
+// TGA anywhere under the tree that the editor paints as a plane (a form tga_read_form reads,
+// editor/documents/texture_raster.cpp read_tga) is written again as the same bytes: the raster core's claim that a
+// file read and written again is its bytes. Reports Skipped without OPENNOVA_JO_ASSETS.
 
 #include <formats/tga/tga.h>
 #include <formats/tga/tga_read.h>
@@ -65,7 +67,36 @@ int main() {
 		std::printf("FAIL: no _c.tga, _d1.tga and trntile*.tga under %s\n", assets.c_str());
 		return 1;
 	}
-	std::printf("%s: %d colour maps, %d detail blend maps, %d tile atlases, %d failures\n", failures == 0 ? "OK" : "FAIL",
-	            colour, blend, atlas, failures);
+	// Every paintable TGA in the tree, the terrain maps among them.
+	int paintable = 0, whole = 0;
+	for (const std::filesystem::directory_entry &entry : std::filesystem::recursive_directory_iterator(assets)) {
+		if (!entry.is_regular_file() || lower(entry.path().extension().string()) != ".tga") continue;
+		const std::vector<uint8_t> bytes = test_io::read_file(entry.path().string());
+		opennova::tga::TgaForm form;
+		opennova::tga::TgaImage image;
+		std::string error;
+		if (!opennova::tga::tga_read_form(bytes.data(), bytes.size(), form)) {
+			++whole;
+			continue;
+		}
+		++paintable;
+		std::vector<uint8_t> again;
+		if (!opennova::tga::tga_decode_retail(bytes.data(), bytes.size(), image, error) ||
+		    !opennova::tga::tga_write(image.rgba.data(), uint32_t(image.width), uint32_t(image.height), form, again,
+		                              error) ||
+		    again != bytes) {
+			std::printf("FAIL: %s written again in its form differs (%zu bytes, written %zu)\n",
+			            entry.path().string().c_str(), bytes.size(), again.size());
+			++failures;
+		}
+	}
+	if (paintable < colour + blend + atlas) {
+		std::printf("FAIL: %d paintable TGA in the tree, fewer than its %d terrain maps\n", paintable,
+		            colour + blend + atlas);
+		return 1;
+	}
+	std::printf("%s: %d colour maps, %d detail blend maps, %d tile atlases; %d paintable TGA in the tree written "
+	            "again (%d held whole), %d failures\n",
+	            failures == 0 ? "OK" : "FAIL", colour, blend, atlas, paintable, whole, failures);
 	return failures == 0 ? 0 : 1;
 }

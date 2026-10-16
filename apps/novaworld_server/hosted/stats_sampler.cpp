@@ -3,6 +3,7 @@
 #include "stats_repository.h"
 
 #include <base/io/cp1252.h>
+#include <base/io/strutil.h>
 #include <net/novaworld/host_repository.h>
 
 #include <algorithm>
@@ -13,15 +14,6 @@
 #include <vector>
 
 namespace opennova::novaworld_server::hosted {
-
-namespace {
-
-std::string lower(std::string text) {
-	for (char &c : text) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
-	return text;
-}
-
-} // namespace
 
 bool StatsSampler::sample(db::Database &db, int64_t now, const LinkLookup &links) {
 	const int64_t minute = now - now % 60;
@@ -55,7 +47,7 @@ bool StatsSampler::sample(db::Database &db, int64_t now, const LinkLookup &links
 		// Its admin link's scene, and a mission started in the game scene.
 		if (links) {
 			if (const auto link = links(s.id)) {
-				sample.scene = lower(link->scene);
+				sample.scene = strutil::to_lower(link->scene);
 				sample.link_up = link->up;
 			}
 		}

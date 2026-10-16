@@ -26,7 +26,38 @@ struct CorpseDeath {
 	bool ragdolls = false;
 	ragdoll::Kick kick;
 };
-CorpseDeath corpse_death(int anim_state, uint32_t seed);
+// `wire_key` is the corpse's wire handle (the low 16 bits every peer decodes).
+// The kick's seed mixes it with the clip id, the two values every machine
+// holds alike for the corpse (corpse_kick_seed), never a per-machine count
+// such as a respawn revision a late joiner never saw.
+CorpseDeath corpse_death(int anim_state, uint32_t wire_key);
+uint32_t corpse_kick_seed(uint32_t wire_key, int anim_state);
+
+// Whether a corpse whose hips stand at `hips_height` (presentation frame, world
+// units) may start a ragdoll: a body that dies in the water keeps retail's
+// float, its clip, so a ragdoll starts only above the water plane; a world with
+// no water starts one anywhere (ADR 0060 d6).
+bool corpse_ragdoll_may_start(const World &world, float hips_height);
+
+// The ragdoll set's key for the local avatar, the one subject with no row of
+// its own: no wire handle reaches bit 31.
+inline constexpr uint32_t kLocalAvatarRagdollKey = 0x80000000u;
+
+// The local avatar's life: one more at every dead -> alive edge of the local
+// player's Dead flag, counted as the pool rows count theirs (inmatch
+// present_rows' respawn revision), so its ragdoll ends at once on a respawn
+// (ADR 0060 d6). Another entity taking the local player's place is a new life
+// as well.
+class LocalAvatarLife {
+public:
+	int32_t observe(const World &world);
+
+private:
+	uint64_t spawn_id_ = 0;
+	bool dead_known_ = false;
+	bool dead_ = false;
+	int32_t life_ = 0;
+};
 
 // The world a ragdoll collides with: the terrain's bilinear height and
 // surface normal, and static geometry through the aim trace's walk (no

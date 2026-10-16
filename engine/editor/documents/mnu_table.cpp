@@ -1410,20 +1410,16 @@ constexpr KindRow kKinds[] = {
 };
 constexpr size_t kKindCount = std::size(kKinds);
 
-constexpr bool same_text(const char *a, const char *b) {
-	while (*a && *a == *b) ++a, ++b;
-	return *a == *b;
-}
 constexpr NodeKind kind_index(const char *token) {
 	for (size_t i = 0; i < kKindCount; ++i)
-		if (same_text(kKinds[i].token, token)) return NodeKind(i);
+		if (strutil::same_text(kKinds[i].token, token)) return NodeKind(i);
 	return -1;
 }
 constexpr bool kinds_well_formed() {
 	if (kKinds[0].shape != mnu::SchemaShape::Screen || kKinds[1].shape != mnu::SchemaShape::Window) return false;
 	for (size_t i = 0; i < kKindCount; ++i)
 		for (size_t j = i + 1; j < kKindCount; ++j)
-			if (same_text(kKinds[i].token, kKinds[j].token)) return false;
+			if (strutil::same_text(kKinds[i].token, kKinds[j].token)) return false;
 	return true;
 }
 static_assert(size_t(MenuKind::Screen) == 0 && size_t(MenuKind::Window) == 1, "a screen and a window come first");

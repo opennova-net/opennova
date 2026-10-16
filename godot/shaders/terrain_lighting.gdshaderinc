@@ -142,7 +142,7 @@ vec4 sample_retail_detail_mips(sampler2D source, vec2 uv) {
 	// The device mode (texfilter_level + 1) gives a 0x8 stage MIN LINEAR /
 	// MIP POINT (mode 1), trilinear (mode 2), or MIN ANISOTROPIC with
 	// MAXANISOTROPY 2 (mode 3) or the device's cap (mode 4)
-	// [orig: Terrain_RenderSkyboxPass @ 0x610be8..0x610c1d; per-stage filter
+	// [orig: Terrain_RenderMainSectorPass @ 0x610be8..0x610c1d; per-stage filter
 	// select @ 0x67e37d..0x67e45b]. Bilinear on the nearest level is the
 	// shader's (opennova_texfilter_device 0); the hardware sampler does the
 	// rest, its anisotropy the viewport's. The explicit longest-gradient scale
@@ -281,7 +281,7 @@ vec3 terrain_surface_color_from_colormap(vec4 cm, vec2 colormap_uv,
 	// base pass and never reaches t0.
 	// [orig: PolyTrn_RenderTile @ 0x60da70; Terrain_GenerateNormalMap
 	// @ 0x603210; Terrain_SetupLightingAndShader @ 0x604420 pushes
-	//  c0 <- g_PolyTrnPSConstC0SkyColorR @ 0x31a183c, c1 <- PolyTrn_PSConstC1_Light
+	//  c0 <- g_PolyTrnPSConstC0SkyColorR @ 0x31a183c, c1 <- g_PolyTrnPSConstC1LightColorR
 	//  @ 0x31a182c; values from Terrain_InitLightingColorRamps @ 0x604ee0
 	//  <- Render_TerrainScene @ 0x610c80 (g_EnvLightBlock / g_EnvSkyBlock)]
 	vec3 ambient = (cm.a * u_sun_light + u_sky_ambient) * 0.5;

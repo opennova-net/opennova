@@ -89,8 +89,8 @@ AdminConfig parse(const char *text, size_t size);
 // parse() over the file at `path`. False (and an empty config) when the file
 // does not open: File_ParseASCIIFileWithCallback returns 1 and LoadConfig
 // E_FAIL, and the console still listens with no users and no whitelist.
-// [orig: File_ParseASCIIFileWithCallback @0x53D9C9; CAdminServer_LoadConfig
-//  @0x406DB2]
+// [orig: File_ParseASCIIFileWithCallback @0x53D9C9; CAdminServer_LoadConfig @0x406D80 -
+//  the parse @0x406D98, E_FAIL @0x406DA0..0x406DA4]
 bool load_file(const std::string &path, AdminConfig &out);
 
 // The whitelist match of one pattern against a source address. `source_ip`

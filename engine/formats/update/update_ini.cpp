@@ -1,5 +1,7 @@
 #include "update_ini.h"
 
+#include <base/io/strutil.h>
+
 namespace opennova::update {
 
 namespace {
@@ -35,14 +37,6 @@ bool opens_section(std::string_view line) {
 
 } // namespace
 
-std::string ascii_upper(std::string_view text) {
-	std::string out(text);
-	for (char &c : out)
-		if (c >= 'a' && c <= 'z')
-			c = char(c - 'a' + 'A');
-	return out;
-}
-
 // [orig: IniFile_Load @ 0x403840 (UPDATE.EXE): each CR LF becomes a line's end]
 UpdateIni::UpdateIni(std::string_view text) {
 	size_t start = 0;
@@ -65,7 +59,7 @@ std::string UpdateIni::line(size_t index, size_t buffer) const {
 }
 
 std::optional<size_t> UpdateIni::find_section(std::string_view section) const {
-	const std::string wanted = ascii_upper(section);
+	const std::string wanted = strutil::to_upper(section);
 	for (size_t i = 0; i < lines_.size(); ++i) {
 		const std::optional<std::string> run = section_run(scan_text(lines_[i]));
 		if (run && *run == wanted)
@@ -79,7 +73,7 @@ std::optional<std::string> UpdateIni::value(
 	const std::optional<size_t> first = find_section(section);
 	if (!first)
 		return std::nullopt;
-	const std::string wanted = ascii_upper(key);
+	const std::string wanted = strutil::to_upper(key);
 	for (size_t i = *first; i < lines_.size(); ++i) {
 		const std::string text = line(i, kIniKeyLineBytes);
 		const std::string_view scanned = scan_text(text);

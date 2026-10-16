@@ -208,7 +208,7 @@ void NwuHostRole::set_player_slot(const HostPlayerSlot &slot) {
 
 // The slot's vars leave the session's PlayerList in any state; ClientHostPlayerRemoved fires only
 // while hosting is established (state 6).
-// [orig: Server_PlayerRemove — the state-6 wrapper @0x51b5f3 (@0x4d0e40), then
+// [orig: Server_HandlePlayerDisconnect @0x51B5C0 — the state-6 wrapper @0x51b5f3 (@0x4d0e40), then
 //  NapiLinkedList_RemoveByUserData on the PlayerList @0x51b601]
 void NwuHostRole::clear_player_slot(int slot) {
 	if (players_.erase(slot) == 0) return;

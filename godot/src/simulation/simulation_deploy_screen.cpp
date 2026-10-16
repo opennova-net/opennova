@@ -87,9 +87,8 @@ TypedArray<DeployListRow> Simulation::get_deploy_list_rows(const String &p_defau
 	TypedArray<DeployListRow> out;
 	if (!kernel_ || !runtime_) return out;
 	opennova::world::DeployListInput in;
-	// [orig: "<c4040FF>", or "<cFF2020>" when Team == 2 @0x553adb..0x553af1]
-	in.team_color_tag =
-			opennova::inmatch::deploy_list_team(role_view()) == 2 ? "<cFF2020>" : "<c4040FF>";
+	in.team_color_tag = opennova::world::deploy_list_team_color_tag(
+			opennova::inmatch::deploy_list_team(role_view()));
 	in.default_key = opennova::to_std(p_default_key);
 	in.default_home = opennova::to_std(p_default_home);
 	in.zones = deploy_zone_rows();

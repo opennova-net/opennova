@@ -17,8 +17,8 @@ namespace opennova {
 // player's: its connection, name, address or PCID differs, a leave and a re-join between two
 // syncs included), the players to add, and the kept players whose PlayerTeam / PlayerType alone
 // changed.
-// [orig: Server_PlayerRemove — ClientHostPlayerRemoved @0x51b5f3; Server_PlayerAdd —
-//  ClientHostPlayerAdded @0x51d4b5]
+// [orig: Server_HandlePlayerDisconnect @0x51B5C0 — ClientHostPlayerRemoved @0x51b5f3;
+//  Server_PlayerAdd @0x51cbc0 — ClientHostPlayerAdded @0x51d4b5]
 struct RosterSync {
 	std::vector<int> removed;
 	std::vector<HostPlayerSlot> added;

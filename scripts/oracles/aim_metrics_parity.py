@@ -4,14 +4,17 @@
 Executes the original Entity_ComputeRelativePositionMetrics @0x545710 (the frame
 transpose, the Q22 point transform, both fild/fsqrt/fistp distances and the two
 fpatan angles) under the game's nearest-even control word on synthetic frames
-and points. Each frame is a quarter-turn yaw placement, whose Q22 rotation the
-port's collision_matrix_from_euler builds exactly, written straight into the
-matrix the function reads. No engine calls are mocked. Requires pefile and
+and points. Each frame is a quarter-turn yaw placement, its Q22 rotation the one
+the game's euler builder makes (Math_BuildFixedPointMatrixFromEulerAngles @0x613F40:
+the sine and cosine of the angle times dbl_7C3608, each truncated to Q22, so a
+quarter turn's cosine is -201, not 0) and the port's collision_matrix_from_euler
+builds, written straight into the matrix the function reads. No engine calls are mocked. Requires pefile and
 unicorn; the native test consumes the committed vectors.
 """
 import argparse
 import hashlib
 import itertools
+import math
 import struct
 from pathlib import Path
 
@@ -28,12 +31,21 @@ MATRIX, POINT, OUT, STACK = P + 0x1000, P + 0x2000, P + 0x3000, P + 0xF000
 STOP = P
 Q22 = 0x400000
 U = 65536
-# cos, sin per quarter turn of yaw (heading 0, 0x40000000, 0x80000000, 0xC0000000).
-QUARTERS = [(Q22, 0), (0, Q22), (-Q22, 0), (0, -Q22)]
-
-
 def signed(n):
     return (int(n) + 2**31) % 2**32 - 2**31
+
+
+RADIANS_PER_BAM = 1.4629627251502471e-9  # dbl_7C3608
+
+
+def q22_trig(bam):
+    """cos, sin of a BAM as the euler builder takes them: x dbl_7C3608, x 2^22, truncated."""
+    angle = signed(bam) * RADIANS_PER_BAM
+    return int(math.cos(angle) * Q22), int(math.sin(angle) * Q22)
+
+
+# cos, sin per quarter turn of yaw (heading 0, 0x40000000, 0x80000000, 0xC0000000).
+QUARTERS = [q22_trig(q << 30) for q in range(4)]
 
 
 class Machine:

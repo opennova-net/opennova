@@ -268,7 +268,7 @@ func _process(_delta: float) -> void:
 		close()
 		return
 	# The shroud reveal and, inside it, the content refresh on each 16-tick
-	# boundary [orig: UI_UpdateDeathScreenContent every 16 ticks @0x55477d].
+	# boundary (engine: runtime/world/deploy_screen_feed.h).
 	var tick := sim.get_logic_tick()
 	if bool(sim.is_death_shroud_revealed()):
 		_set_shroud_shown(true)
@@ -346,7 +346,7 @@ func _populate_spawn_list(sim: Simulation) -> void:
 		# residue in D-HUD-19): the engine text keeps retail's <cRRGGBB>/<b>
 		# tags, the list shows them stripped. The sort already ran over the
 		# tagged text, so the row order is retail's. The stripper is retail's own
-		# (the engine's hud::strip_inline_tags [orig: Chat_StripHtmlTags @0x4983f0]).
+		# (the engine's hud::strip_inline_tags (engine: runtime/hud/feed_format.cpp)).
 		var label := Simulation.strip_inline_tags(row.text)
 		_spawn_rows.append(SpawnRow.new(label, row.value))
 	# The list takes the engine's items (MenuDriver.set_deploy_list_items: the same

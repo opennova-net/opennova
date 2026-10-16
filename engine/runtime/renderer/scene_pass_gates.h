@@ -60,6 +60,17 @@ inline ScenePassGates scene_pass_gates(uint32_t blink_flags,
 	return gates;
 }
 
+// The two water passes' gate: the authored water letter (accum bit 0x8)
+// skips them unless the frame's occlusion pass latched the water visible
+// (g_BlinkWaterVisible: the exterior latched, a camera building straddling
+// the water plane); before that pass runs, the letter alone decides
+// (`occlusion_water_visible` false).
+// [orig: Terrain_RenderWorldScene @ 0x5c93cb / @ 0x5c95d2..0x5c95ea;
+//  g_BlinkWaterVisible @ 0x29ACE40]
+inline bool scene_water_visible(uint32_t blink_flags, bool occlusion_water_visible) {
+	return (blink_flags & world::kBlinkWaterOffBit) == 0 || occlusion_water_visible;
+}
+
 // The passes a letter change reopens. The letters gate the frame they are
 // read in: retail reads them at the top of the main frame, ahead of its
 // terrain traversal and sector pass [orig: Render_ProcessMainSceneFrame

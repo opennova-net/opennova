@@ -40,15 +40,15 @@ void follow_carrier_motion(const Entity &parent, CarrierMotionPose &p) {
 		return;
 	const auto q22c = [](int32_t bam) {
 		return static_cast<int32_t>(
-				std::cos(static_cast<double>(bam) * 1.4629627251502471e-9) * io::kQ22One);
+				std::cos(static_cast<double>(bam) * io::kRadiansPerBamX87) * io::kQ22One);
 	};
 	const auto q22s = [](int32_t bam) {
 		return static_cast<int32_t>(
-				std::sin(static_cast<double>(bam) * 1.4629627251502471e-9) * io::kQ22One);
+				std::sin(static_cast<double>(bam) * io::kRadiansPerBamX87) * io::kQ22One);
 	};
 	const auto q22s_neg = [](int32_t bam) {
 		return static_cast<int32_t>(
-				std::sin(static_cast<double>(bam) * 1.4629627251502471e-9) * -io::kQ22One);
+				std::sin(static_cast<double>(bam) * io::kRadiansPerBamX87) * -io::kQ22One);
 	};
 	const auto m22 = [](int32_t a, int32_t b) {
 		return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);

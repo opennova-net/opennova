@@ -30,6 +30,10 @@
 #include <runtime/hud/hud_vehicle_panel.h> // the seat-marker policy
 #include <vector>
 
+namespace opennova::world {
+enum class SeatType : uint8_t; // world/entity.h
+}
+
 namespace opennova::hud {
 
 // Texture slots the embedder registers at configure time; draw-list quads
@@ -123,8 +127,8 @@ enum HudTexture : int32_t {
 	kHudTexSlotBarMoreAv,
 	// The tip panel ("MrClippy"): its box atlas border3.tga (no second stage)
 	// and the two icons, keyboard k_tip.tga and gameplay g_tip.tga
-	// [orig: CTipSystem_Init @0x5b6970 — the panel slot @0x5b6978, border3
-	//  @0x5b698c, k_tip @0x5b69ae, g_tip @0x5b69b6].
+	// [orig: CTipSystem_Init @0x5b6970 — the panel slot @0x5b6978, border3.tga
+	//  @0x5b698c, k_tip.tga @0x5b69ae, g_tip.tga @0x5b69b6].
 	kHudTexTipBox,
 	kHudTexTipKeyboard,
 	kHudTexTipGameplay,
@@ -564,6 +568,21 @@ struct HudAttachLabel {
 	bool nearest = false;
 };
 
+// The label text per seat type, from the gametext table's Overlays section
+// with the witnessed missing-string fallbacks. The Gunner label prefers the
+// weapon's attachtextid key: a PRESENT key resolves even to an empty string
+// (the parse stores GameText_GetString's result, "" on a miss, and the label
+// draws it); only an ABSENT key (an empty `attach_text_key`) falls to the
+// STROVER_USEGUN default.
+// [orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e -- STROVER_SIT "!sit"
+//  (dword_2723860) / STROVER_CONTROL "!Control" (g_HUDLabelTextControl, the
+//  ctrlx and drvrx arms @0x5a34db / @0x5a34fb) / STROVER_USEGUN "!UseGun"
+//  (dword_2723868) / STROVER_USEARMORY "!UseArmory" (dword_272386C); the USEGUN
+//  def-text pick (def+0x3A0) @0x5a350c..0x5a3544; the parse resolve @0x544d87.
+//  The STROVER_USEARMORYD delay variant rides the MP armory delay, D-HUD-14.]
+std::string attach_label_text(const GameTextLookup &gametext, world::SeatType seat_type,
+		const std::string &attach_text_key);
+
 // One projected friendly tag (D-HUD-20) [orig: HUD_DrawEntityLabel @ 0x5a39b0
 // via HUD_DrawFriendlyTagsPass @ 0x5a4480]. The presenter projects the anchor
 // (entity position + the per-tick eye offset + 0.25 u [orig: @ 0x5a3a84..
@@ -711,7 +730,7 @@ struct HudScoreboardState {
 // THE CHAT INPUT LINE (hud/hud_chat_entry.h owns the capture and its
 // editing): the open capture's prompt, typed text, the dispatch's color
 // (chat_input_line_color) and the per-main-frame counter the cursor blinks on
-// [orig: StdCtype_Destructor (IDB misnomer) @0x5b8f30, called from
+// [orig: HUD_DrawChatInputLine @0x5b8f30, called from
 // HUD_DrawOverlayPanels @0x5c014e while g_InputCaptureMode is set and != 3].
 struct HudChatInputState {
 	bool shown = false;
@@ -800,9 +819,10 @@ struct HudLfpPanelState {
 	int local_team = 0;
 	// The HUD frame counter the blink masks (g_HUDFrameCounter & 0x18).
 	int frame_counter = 0;
-	// The game's AAS-vs-conquest arm: the conquest arm is unmodelled and the
-	// element draws nothing under it [orig: g_GameType == 0x50010 @0x5a24a1].
-	bool conquest_mode = false;
+	// The session game type: the drawer's conquest arm (g_GameType ==
+	// 0x50010) is unmodelled and the element draws nothing under it
+	// [orig: @0x5a24a1].
+	uint32_t game_type = 0;
 	std::string under_attack_text; // Overlays/STROVER_UNDERATTACK
 	std::string ready_text;        // Overlays/STROVER_READYFORTAKEOVER
 	std::vector<HudLfpZone> zones;
@@ -1003,7 +1023,7 @@ struct HudFrameState {
 	// the stdbox (8, top+8, 1015, bottom-8) of the overlay safe area
 	// [orig: HUD_DrawEndRoundStatsOverlay @0x5b7cd0 — HUD_DrawLabelBox
 	//  @0x5b7d3e, each line HUD_DrawTextCentered_HalfBright(Impact38, 512, y)
-	//  through HUD_DrawTextCenteredScaled (ex sub_580B80) @0x580b80].
+	//  through HUD_DrawTextCenteredScaled @0x580b80].
 	HudEndRoundOverlayState end_round;
 	// The toggled SP "Show Score" statistics panel [orig: HUD_DrawOverlayPanels @0x5c0083
 	// draws HUD_DrawEndRoundStatistics @0x5b7600 while dword_24C18AC].

@@ -94,7 +94,8 @@ bool registration_url_parse(std::string_view url,
 		out.bank_key = extract_plain_value(url, bk);
 	}
 	// [orig: LN= copied '&'-terminated then `*lobby_num = atol(temp_str)` @0x54e33e;
-	//  GS= copied '&'-terminated into g_GsBuf @0x54e38a (never read afterwards)]
+	//  GS= copied '&'-terminated @0x54e38a into the caller's g_GsBuf @0xC8FDFC (never read
+	//  afterwards)]
 	if (const size_t ln = find_token(url, "LN="); ln != std::string_view::npos) {
 		out.ln = io::retail_atol(extract_plain_value(url, ln).c_str());
 	}

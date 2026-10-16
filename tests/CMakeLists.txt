@@ -100,6 +100,12 @@ target_link_libraries(threedi_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(threedi_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_roundtrip COMMAND threedi_roundtrip_test)
 
+# A 3DI written and read under a UTF-8 path no ANSI code page spells (io::fopen_utf8).
+add_executable(threedi_utf8_path_test threedi/utf8_path_test.cpp)
+target_link_libraries(threedi_utf8_path_test PRIVATE opennova_formats)
+target_include_directories(threedi_utf8_path_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_utf8_path COMMAND threedi_utf8_path_test)
+
 # Every retail model through the reader and the writer the editor saves by:
 # byte-identical and a fixed point (OPENNOVA_JO_ASSETS).
 add_executable(threedi_retail_rewrite_test threedi/retail_rewrite_test.cpp)
@@ -689,8 +695,12 @@ target_include_directories(minimal_gamecfg_gen_test PRIVATE ${CMAKE_CURRENT_SOUR
 add_test(NAME minimal_gamecfg_gen COMMAND minimal_gamecfg_gen_test)
 
 add_executable(gamecfg_roundtrip_test gamecfg/gamecfg_roundtrip_test.cpp)
-target_link_libraries(gamecfg_roundtrip_test PRIVATE opennova_formats)
+# opennova_runtime for game_cfg_weapon_roster (the retail leg's roster from weapon.def).
+target_link_libraries(gamecfg_roundtrip_test PRIVATE opennova_formats opennova_runtime)
 target_include_directories(gamecfg_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+# The core row only. The install leg (--retail) reads the install's own game.cfg, a
+# player-machine file the reference data never carries (gamecfg/game-cfg-re.md), so a
+# retail row could never be exercised in CI: run `gamecfg_roundtrip_test --retail` by hand.
 add_test(NAME gamecfg_roundtrip COMMAND gamecfg_roundtrip_test)
 
 add_executable(gamecfg_parse_test gamecfg/gamecfg_parse_test.cpp)
@@ -842,6 +852,13 @@ add_executable(pff_stream_writer_test pff/pff_stream_writer_test.cpp)
 target_link_libraries(pff_stream_writer_test PRIVATE opennova_formats)
 target_include_directories(pff_stream_writer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME pff_stream_writer COMMAND pff_stream_writer_test)
+
+# The writer against retail's own archives: every JO:CA .pff written again with nothing changed is
+# its bytes (the directory in payload order, the packer's footer; ADR 0008 as amended).
+add_executable(pff_retail_rewrite_test pff/pff_retail_rewrite_test.cpp)
+target_link_libraries(pff_retail_rewrite_test PRIVATE opennova_formats)
+target_include_directories(pff_retail_rewrite_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+opennova_add_gated_test(pff_retail_rewrite COMMAND pff_retail_rewrite_test)
 
 # Game profile table tests
 add_executable(gameprofile_test gameprofile/gameprofile_test.cpp)
@@ -1168,6 +1185,9 @@ target_link_libraries(extract_cli_test PRIVATE opennova_formats)
 target_include_directories(extract_cli_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(extract_cli_test PRIVATE cxx_std_17)
 add_dependencies(extract_cli_test opennova_extract)
+if(MSVC)  # the exe's manifest, so this test's std::system hands it the UTF-8 command line
+    target_sources(extract_cli_test PRIVATE ${CMAKE_SOURCE_DIR}/apps/3di/utf8.manifest)
+endif()
 add_test(NAME extract_cli COMMAND extract_cli_test $<TARGET_FILE:opennova_extract> ${CMAKE_CURRENT_BINARY_DIR})
 
 add_executable(resource_index_mus_test resource_index/resource_index_mus_test.cpp)
@@ -1278,8 +1298,8 @@ add_test(NAME mission_def_table_read COMMAND mission_def_table_read_test)
 
 # Object renderer/shader tests
 foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_wind light_runtime light_scene light_terrain_pass material_classify material_eval material_texture
-        particle_atlas_contract particle_frame_compiler_contract render_order
-        frame_fx_effects nvg_scope_lens q3_frame render_slot_shadow
+        particle_atlas_contract particle_frame_compiler_contract particle_quad_inputs render_order
+        frame_fx_effects nvg_scope_lens q3_frame render_slot_frame render_slot_shadow
         scene_overlay state_vectors tracer_frame precipitation_frame texture_dxt texture_load_rules
         texture_registry texture_authoring d3dx_image_codecs device_texture texture_filter d3d9_raster shader_effect_info
         texture_roles fixed_texture_names)
@@ -3937,6 +3957,10 @@ add_executable(netsim_present_rows_test netsim/present_rows_test.cpp)
 target_link_libraries(netsim_present_rows_test PRIVATE opennova_runtime)
 add_test(NAME netsim_present_rows COMMAND netsim_present_rows_test)
 
+add_executable(netsim_occlusion_collect_test netsim/occlusion_collect_test.cpp)
+target_link_libraries(netsim_occlusion_collect_test PRIVATE opennova_runtime)
+add_test(NAME netsim_occlusion_collect COMMAND netsim_occlusion_collect_test)
+
 add_executable(netsim_client_replica_pipeline_recoil_test
     netsim/client_replica_pipeline_recoil_test.cpp)
 target_link_libraries(netsim_client_replica_pipeline_recoil_test PRIVATE opennova_runtime)
@@ -4497,6 +4521,7 @@ add_test(NAME opennova_serve_status_console COMMAND opennova_serve_status_consol
 # with the service's tests (novaworld/service_tests.cmake).
 add_executable(opennova_serve_lister_options_test serve/opennova_serve_lister_options_test.cpp)
 target_link_libraries(opennova_serve_lister_options_test PRIVATE opennova_serve_core)
+target_include_directories(opennova_serve_lister_options_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME opennova_serve_lister_options COMMAND opennova_serve_lister_options_test)
 
 # P5 — the headless CLIENT runtime (inmatch::ClientRuntime / Client_ProcessNetworkFrame). Always-on

@@ -170,6 +170,9 @@ public:
 	// Actual port selected by start(), including an OS-assigned port when the
 	// configured value is zero.
 	uint16_t bound_port() const { return bound_port_; }
+	// Whether the in-match JO host runs (ServerConfig::embedded_jo_host); read
+	// after start() returns, which waits for the worker to set it up.
+	bool embedded_jo_host_running() const { return jo_owner_ != nullptr; }
 
 	// The receive loop's turns so far (one per receive, which waits at most a
 	// pump period): the stall watchdog's progress counter (health.h).

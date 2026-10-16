@@ -517,8 +517,8 @@ void player_view_binocular_sway_offset(float unit_random,
     // each truncated at Q22 BEFORE multiplication by eight.
     // [orig: Binoculars_RandomizeSwayOffsets @0x4dd830..0x4dd874]
     constexpr double q22 = 4194304.0;
-    // Retail's dbl_7C3608 is about 30.5 ppm above exact 2pi / 2^32.
-    constexpr double radians_per_bam = 1.4629627251502471e-9;
+    // Retail's dbl_7C3608 (io::kRadiansPerBamX87), not the exact 2pi / 2^32.
+    constexpr double radians_per_bam = io::kRadiansPerBamX87;
     const double signed_bam = (unit_random >= 0.5f ? unit_random - 1.0 : unit_random) * 4294967296.0;
     const double angle = signed_bam * radians_per_bam;
     const int32_t yaw_q22 = static_cast<int32_t>(std::sin(angle) * q22);
@@ -739,7 +739,7 @@ void view_axes_mission(double yaw_deg, double pitch_deg, float fwd[3],
 // the engine ground frame (x, y) -> the renderer atlas (x, -y) mapping the
 // head-bone floor uses.
 float terrain_height_at(const terrain::TerrainHeightField *terrain, float x, float y) {
-    return terrain::height_field_height_world_bilinear(*terrain, x, -y);
+    return terrain::height_field_height_mission_bilinear(*terrain, x, y);
 }
 
 // THE CHASE (mode 1). One path serves the on-foot orbit and the control-seat
@@ -867,7 +867,7 @@ void compose_chase_camera(PlayerViewState &v, const float position[3],
 
         // The look-ahead eases a thirty-second per axis on EVERY compose —
         // the logic quantum's and the rendered frame's — and rides the target
-        // [orig: g_camera_lookahead += (target - lookahead + 16) >> 5
+        // [orig: g_CameraLookaheadX..Z += (target - lookahead + 16) >> 5
         //  @0x43885A..0x4388AF; added onto the look-at deltas @0x43887B /
         //  @0x43888F / @0x4388A0].
         for (int i = 0; i < 3; ++i) {
@@ -902,9 +902,8 @@ void player_view_floor_eye_to_terrain(const terrain::TerrainHeightField *terrain
     //  skip @ 0x4b6c08/@ 0x4b6c16 (the heightmap has no interiors)]
     if (terrain == nullptr || !terrain->valid() || indoors) return;
     // Engine ground plane is (x, y); the renderer-loaded atlas samples in
-    // Godot coords (x, -y) — the calc_average_ground_height mapping.
     const auto sample = [&](float x, float y) {
-        return terrain::height_field_height_world_bilinear(*terrain, x, -y) +
+        return terrain::height_field_height_mission_bilinear(*terrain, x, y) +
                kEyeTerrainClearance; // [orig: each sample + 0x1000 @ 0x4b6c2d]
     };
     // The eye column, then ±0x4000 along each ground axis, max-folded

@@ -34,13 +34,6 @@ void value_or_null(crow::json::wvalue &out, const char *key, const std::optional
 		out[key] = nullptr;
 }
 
-void text_or_null(crow::json::wvalue &out, const char *key, const std::string &text) {
-	if (text.empty())
-		out[key] = nullptr;
-	else
-		out[key] = text;
-}
-
 // The listing's TimeLeft (whole minutes of the round clock; below 0 none), in seconds.
 std::optional<int64_t> time_left_seconds(const std::string &minutes) {
 	const std::string text = strutil::trim(minutes);

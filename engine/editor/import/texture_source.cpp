@@ -23,8 +23,6 @@ namespace opennova::editor {
 
 namespace {
 
-std::string extension_of(const std::string &name) { return strutil::to_lower(utf8_of(path_of(name).extension())); }
-
 Diagnostic refused(const std::string &message, const std::string &asset) {
 	return make_finding(CoreFinding::TextureReplace, DiagnosticSeverity::Error, message, asset);
 }
@@ -63,7 +61,7 @@ std::string texture_words(const std::string &name, const std::vector<uint8_t> &b
 	std::string form;
 	switch (header.reader) {
 	case TextureReader::Tga:
-		form = extension_of(name) == ".mdt" ? "a TGA under .mdt" : header.tga_bits == 32 ? "a 32-bit TGA" : "a " + std::to_string(header.tga_bits) + "-bit TGA";
+		form = file_extension(name) == ".mdt" ? "a TGA under .mdt" : header.tga_bits == 32 ? "a 32-bit TGA" : "a " + std::to_string(header.tga_bits) + "-bit TGA";
 		break;
 	case TextureReader::Pcx: form = header.pcx_rgb() ? "a 24-bit PCX" : "an 8-bit PCX"; break;
 	case TextureReader::Dds:
@@ -115,7 +113,7 @@ bool layered(TextureSourcePlan &plan, const std::string &name, const std::vector
 ImportOptions texture_reproducing_options(const std::string &name, const std::vector<uint8_t> &bytes,
                                           const std::string &source_name, bool indexed_source) {
 	ImportOptions out;
-	const std::string extension = extension_of(name);
+	const std::string extension = file_extension(name);
 	const TextureHeader header = bytes.empty() ? TextureHeader() : texture_header(name, bytes);
 	if (extension == ".tga") {
 		out["format"] = header.read && !header.alpha ? "tga24" : "tga";
@@ -145,7 +143,7 @@ TextureSourcePlan plan_texture_replace(const ProjectPaths &paths, const AssetSca
                                        const ImportOptions &overrides, const TextureUseAsks &asks) {
 	TextureSourcePlan plan;
 	const std::string image = basename_of(image_name);
-	const std::string extension = extension_of(image);
+	const std::string extension = file_extension(image);
 	if (extension != ".png" && extension != ".tga" && extension != ".pcx") {
 		plan.refusals.push_back(refused(image + " is no image the importer reads: a PNG, a TGA or a PCX.", texture));
 		return plan;
@@ -213,7 +211,7 @@ TextureSourcePlan plan_texture_replace(const ProjectPaths &paths, const AssetSca
 		                                plan.texture));
 		return plan;
 	}
-	if (asks.indices && extension_of(plan.texture) == ".pcx") options["palette"] = "indices";
+	if (asks.indices && file_extension(plan.texture) == ".pcx") options["palette"] = "indices";
 	const std::string wanted = std::to_string(decoded.image.width) + "x" + std::to_string(decoded.image.height);
 	if (!asks.size.empty() && strutil::to_lower(asks.size) != wanted && !overrides.count("size") && !options.count("size")) {
 		options["size"] = asks.size;
@@ -237,7 +235,7 @@ TextureSourcePlan plan_texture_replace(const ProjectPaths &paths, const AssetSca
 	const std::string source_extension = as_png ? std::string(".png") : extension;
 	// The source: the old source's own path where it is of the source's form, else a free name in art/ after the
 	// texture's own stem (body.dds's art/body.png), whatever the image is called.
-	if (!plan.old_source.empty() && extension_of(plan.old_source) == source_extension) {
+	if (!plan.old_source.empty() && file_extension(plan.old_source) == source_extension) {
 		plan.source = plan.old_source;
 		plan.old_source.clear();
 		plan.changes.push_back(plan.source + " is written over with " + image + " (its old bytes kept in " + kReplacedFolder + "/).");
@@ -308,7 +306,7 @@ TextureSourcePlan plan_texture_source(const ProjectPaths &paths, const AssetScan
 		plan.refusals.push_back(refused(entry->logical_name + " is no texture.", entry->relative_path));
 		return plan;
 	}
-	const std::string extension = extension_of(entry->logical_name);
+	const std::string extension = file_extension(entry->logical_name);
 	if (extension == ".png") {
 		plan.source = entry->relative_path; // the game reads it as it is: edited in place
 		return plan;
@@ -388,7 +386,7 @@ TextureSourcePlan plan_texture_dds(const ProjectPaths &paths, const AssetScan &s
 	if (!entry) return refuse("The project has no texture named '" + texture + "'.", texture);
 	plan.texture = entry->logical_name;
 	if (entry->kind != AssetKind::Texture) return refuse(entry->logical_name + " is no texture.", entry->relative_path);
-	if (extension_of(entry->logical_name) != ".tga")
+	if (file_extension(entry->logical_name) != ".tga")
 		return refuse(entry->logical_name + " is no .tga: only a .tga has a .dds its loaders read before it.", entry->relative_path);
 	const std::string dds = file_stem(entry->logical_name) + ".dds";
 	if (!reads_tga.empty())

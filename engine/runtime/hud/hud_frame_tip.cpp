@@ -123,7 +123,7 @@ void HudFrameCompiler::element_tip(const HudFrameState &state, bool alternate, f
 	// The header at (x + 80, y + 42) and the body at (x + 28, y + 92), both
 	// left-aligned through the alpha-keeping half-bright drawer
 	// [orig: Render_DrawTextScaled @0x5b70af / @0x5b710d -> mode 0
-	//  HUD_DrawTextLeft_HalfBrightKeepAlpha (ex sub_580560) @0x580560:
+	//  HUD_DrawTextLeft_HalfBrightKeepAlpha @0x580560:
 	//  (color & 0xFF000000) + ((color >> 1) & 0x7F7F7F)].
 	const auto emit_line = [&](const std::string &text, int dx, int dy, uint32_t argb) {
 		if (text.empty()) return;

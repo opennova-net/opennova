@@ -12,6 +12,7 @@
 #include <editor/project/project_files.h>
 #include <editor/model/raster_document.h>
 #include <editor/preview/mission_scene.h>
+#include <editor/preview/preview_units.h>
 #include <editor/preview/terrain_patch.h>
 #include <formats/env/env.h>
 #include <formats/foliage/runtime.h>
@@ -52,12 +53,6 @@ static_assert(sizeof(kSurfaceWords) / sizeof(kSurfaceWords[0]) == TIL_TSD_SURFAC
 static_assert(kCharmapLegendCount == TIL_TSD_SURFACE_NAME_COUNT, "a legend colour per class");
 
 bool known(int surface) { return surface >= 0 && surface < TIL_TSD_SURFACE_NAME_COUNT; }
-
-std::string metres(double value) {
-	char text[32];
-	std::snprintf(text, sizeof(text), "%.1f m", value);
-	return text;
-}
 
 // "Snow (surface 3, TSD_SNOW"; the caller closes it.
 std::string class_words(int surface) {
@@ -526,7 +521,7 @@ std::string mission_ground_line(const MissionGroundFacts &facts) {
 	if (facts.on == MissionGroundOn::Nothing) return std::string();
 	const std::string slots = slot_words(facts);
 	if (facts.under_water) {
-		std::string line = metres(facts.water_height - facts.at[2]) + " under the water: footsteps play " + slots +
+		std::string line = metres(facts.water_height - facts.at[2], 1) + " under the water: footsteps play " + slots +
 				"; a round from above meets the water first, " + row_words(facts.impact_row) + ".";
 		if (facts.on == MissionGroundOn::Record) line += " On " + facts.record + ".";
 		else if (facts.surface >= 0) line += " Below it: " + class_words(facts.surface) + ")." + foliage_words(facts);

@@ -9,11 +9,12 @@ extends RefCounted
 ##  @0x527be0 (ex "PlaySoundOnDedicatedServer") when g_GameConfigState.enableSlotMachine_1F4
 ##  @0x25508ac; Config_SetDefaults @0x54d165 stores 0; parsed by atol @0x54fdfb]
 
-# The word in the process's cfg block (GameCfgStore): game.cfg reads it and
-# never writes it back, so only a hand-edited file sets it.
+# The word in the process's cfg block (GameCfgStore), read at each landing as
+# the handler reads g_GameConfigState at the play [orig: the
+# enableSlotMachine_1F4 test @0x42257d], so a block change after the HUD's
+# construction applies (the Options screens read and write the same word,
+# @0x554b67 / @0x55ab3d).
 const CONFIG_KEY := "enable_slotmachine"
-
-var _enabled: bool = GameCfgStore.block().get_word(CONFIG_KEY) != 0
 
 
 ## Consume the sim's score-feedback edge and play its tone set when enabled.
@@ -24,7 +25,7 @@ func update(sim: Simulation, world: GameWorld) -> void:
 	if feedback == null:
 		return
 	var tone := feedback.tone
-	if tone.is_empty() or not _enabled or world == null:
+	if tone.is_empty() or GameCfgStore.block().get_word(CONFIG_KEY) == 0 or world == null:
 		return
 	var audio: MissionAudio = world.get_mission_audio()
 	if audio != null:

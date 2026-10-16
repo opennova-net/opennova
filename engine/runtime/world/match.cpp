@@ -14,6 +14,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/carrier_motion.h>
 #include <runtime/world/collision.h>
+#include <runtime/world/shell_sort_by_value.h>
 #include <base/gameprofile/game_type.h>
 #include <runtime/world/vehicle_motor.h>
 #include <runtime/world/world.h>
@@ -49,10 +50,10 @@ constexpr int32_t kTeam4Bay = 4102;       // [orig: @0x4dd216 (0x1006, team 4)]
 constexpr int32_t kTeam3Bay = 4103;       // [orig: @0x4dd208 (0x1007, team 3)]
 constexpr int32_t kHill = def::DEF_TYPE_KOTH_CENTRE; // [orig: @0x5089e8 (0x1776)]
 
-// The drop's radian-per-BAM word, the verbatim retail double (30.5 ppm off
-// 2pi/2^32, base/io/bam.h); its Q22 partner dbl_7C3600 is io::kQ22One.
+// The drop's radian-per-BAM word, the verbatim retail double
+// (io::kRadiansPerBamX87); its Q22 partner dbl_7C3600 is io::kQ22One.
 // [orig: Entity_DropCarriedObject `fmul dbl_7C3608` @0x439e58]
-constexpr double kDropRadiansPerBam = 1.4629627251502471e-9;
+constexpr double kDropRadiansPerBam = io::kRadiansPerBamX87;
 
 bool is_flag(int32_t item_id) {
     return item_id == kBlueFlag || item_id == kRedFlag || item_id == kNeutralFlag;
@@ -108,11 +109,6 @@ bool within_2d(const Vec3 &a, const Vec3 &b, float radius) {
     const double dx = static_cast<double>(a.x) - static_cast<double>(b.x);
     const double dy = static_cast<double>(a.y) - static_cast<double>(b.y);
     return dx * dx + dy * dy <= static_cast<double>(radius) * radius;
-}
-
-int32_t wrap_add(int32_t value, int32_t delta) {
-    return static_cast<int32_t>(static_cast<uint32_t>(value) +
-                                static_cast<uint32_t>(delta));
 }
 
 // The 32-bit `imul` the score multiplier rides.
@@ -181,22 +177,9 @@ void sort_scoreboard_players(std::vector<MatchResultPlayer> &players, uint32_t g
               [](const MatchResultPlayer &a, const MatchResultPlayer &b) {
                   return a.identity.slot < b.identity.slot;
               });
-    const size_t count = players.size();
-    size_t gap = 1;
-    while (gap <= count / 9)
-        gap = 3 * gap + 1;
-    for (; gap > 0; gap /= 3) {
-        for (size_t i = gap; i < count; ++i) {
-            MatchResultPlayer insert = std::move(players[i]);
-            const int32_t key = scoreboard_sort_key(insert, game_type);
-            size_t j = i;
-            while (j >= gap && scoreboard_sort_key(players[j - gap], game_type) < key) {
-                players[j] = std::move(players[j - gap]);
-                j -= gap;
-            }
-            players[j] = std::move(insert);
-        }
-    }
+    shell_sort_by_value(players, [game_type](const MatchResultPlayer &row) {
+        return scoreboard_sort_key(row, game_type);
+    });
 }
 
 // ItemDef+0x5C == 3, the scorer's person test.
@@ -382,7 +365,7 @@ const MatchStats &Match::team_stats(uint8_t team) const {
 void Match::share_experience(const World &world, MatchPlayer &recipient, int32_t amount) {
     if (amount == 0) return;
     recipient.stats[MatchStats::kPoints] =
-            wrap_add(recipient.stats[MatchStats::kPoints], amount);
+            io::bam_add(recipient.stats[MatchStats::kPoints], amount);
     const Entity *entity = world.registry.get(recipient.identity.entity);
     if (amount <= 0 || entity == nullptr) return;
     const Entity *first = world.registry.get(entity->primary_occupant);
@@ -391,7 +374,7 @@ void Match::share_experience(const World &world, MatchPlayer &recipient, int32_t
         if (MatchPlayer *linked = player(handle)) {
             share_experience(world, *linked, share);
             linked->stats[MatchStats::kSharedPointAwards] =
-                    wrap_add(linked->stats[MatchStats::kSharedPointAwards], 1);
+                    io::bam_add(linked->stats[MatchStats::kSharedPointAwards], 1);
         }
     };
     award(first->handle, amount >> 1);
@@ -471,12 +454,12 @@ void Match::add_event(const World &world, MatchPlayer &player, size_t counter,
                       int32_t points, int32_t raw_delta, bool share) {
     if (!gt::has_score_table(rules_.game_type))
         return;
-    player.stats[counter] = wrap_add(player.stats[counter], raw_delta);
+    player.stats[counter] = io::bam_add(player.stats[counter], raw_delta);
     if (share)
         share_experience(world, player, points);
     else
         player.stats[MatchStats::kPoints] =
-            wrap_add(player.stats[MatchStats::kPoints], points);
+            io::bam_add(player.stats[MatchStats::kPoints], points);
 }
 
 void Match::add_points(const World &world, MatchPlayer &player, int32_t points) {
@@ -490,7 +473,7 @@ void Match::add_team_points(uint8_t team, int32_t points) {
         team >= teams_.size())
         return;
     teams_[team][MatchStats::kPoints] =
-        wrap_add(teams_[team][MatchStats::kPoints], points);
+        io::bam_add(teams_[team][MatchStats::kPoints], points);
 }
 
 // The scorer resolves the actor's TeamRecords row only when g_GameType carries
@@ -509,9 +492,9 @@ void Match::add_team_record_event(uint8_t team, size_t counter, int32_t points,
                                   int32_t raw_delta) {
     if (!gt::has_score_table(rules_.game_type) || team >= teams_.size())
         return;
-    teams_[team][counter] = wrap_add(teams_[team][counter], raw_delta);
+    teams_[team][counter] = io::bam_add(teams_[team][counter], raw_delta);
     teams_[team][MatchStats::kPoints] =
-        wrap_add(teams_[team][MatchStats::kPoints], points);
+        io::bam_add(teams_[team][MatchStats::kPoints], points);
 }
 
 void Match::ensure_objective_census(const World &world) {
@@ -996,7 +979,7 @@ void Match::score_kill(World &world, EntityHandle killer_handle,
         share_experience(world, *link,
                          static_cast<int32_t>(static_cast<uint32_t>(score_value(3)) >> 1));
         link->stats[MatchStats::kSharedPointAwards] =
-            wrap_add(link->stats[MatchStats::kSharedPointAwards], 1);
+            io::bam_add(link->stats[MatchStats::kSharedPointAwards], 1);
         return;
     }
     const Entity *victim_entity = world.registry.get(victim_handle);
@@ -1356,7 +1339,7 @@ void Match::update_objective_proximity(const World &world) {
         //  @0x530968..0x530990]
         if (live && !match_player.respawn_pending && world.rules.mp_session) {
             match_player.periodic_score_ticks =
-                wrap_add(match_player.periodic_score_ticks, 1);
+                io::bam_add(match_player.periodic_score_ticks, 1);
             int32_t scoring_interval = score_value(36);
             if (scoring_interval < 1)
                 scoring_interval = 0xffff;

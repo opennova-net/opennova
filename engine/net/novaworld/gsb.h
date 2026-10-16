@@ -106,6 +106,16 @@ struct GsbServerEntry {
 //  operator new @0x63db15]
 inline constexpr size_t GSB_ROW_NAMES_MAX = 0x7FFF;
 
+// The most rows an SVRS record carries. A stock browser reads the record's u16
+// server count as a signed word, skips the rows only when it is zero, and counts
+// it down to zero one row at a time, so a count of 0x8000 or more walks the rows
+// some four billion times past the record's end; and it adds the count, signed,
+// to its server total. A record never says more than 0x7FFF.
+// [orig: NapiGameList_ProcessEncryptedResponse @0x63d740 - `movsx eax, word ptr
+//  [edi]` @0x63da49, the zero-only skip `test; jbe` @0x63da4f..0x63da55, the
+//  countdown `sub; jnz` @0x63dc11..0x63dc16, the total @0x63dc26]
+inline constexpr size_t GSB_SERVERS_MAX = 0x7FFF;
+
 // Build the complete GSB response body as it appears on the wire (the chunk
 // sequence GSB/FLDS/SVRS/XXXX, no bare header). Caller writes this verbatim as
 // the HTTP body (`application/octet-stream`).

@@ -45,6 +45,7 @@ void test_spectator_field_follows_the_slot() {
 	inmatch::NapiNPServerCtx ctx;
 	ctx.world = &world;
 	ctx.is_authority = ctx.is_in_session = 1;
+	ctx.config.max_players = 4; // the 0x22 pull answers slots inside the table only
 	auto &roster = ctx.np_protocol.connection_list;
 	roster.push_back(conn_fixture::make_conn(1, 1, &a, ns::TransportMode::Client,
 			world.registry.spawn(0, person), true)); // the requester, a player
@@ -80,6 +81,74 @@ void test_spectator_field_follows_the_slot() {
 	CHECK(field_1000(1) == 1);
 	CHECK(field_1000(2) == 1); // still loading: the +100579 test is dead
 	CHECK(field_1000(3) == 0);
+}
+
+// B-20: the C2S 0x22 pull reads and answers as retail's handler does. The flags word reads only
+// when both its bytes follow the slot byte and a missing slot byte reads 0; the reply carries the
+// request mask minus bit 0x8000 with no default field set; an in-table empty slot answers the
+// removal record, a slot at or past the table nothing; and a requester with no player slot yet
+// gets nothing. [orig: NapiNPServerMsg_0x022 @0x514C90 - the session player and slot @0x514ca1..
+//  0x514cb8, the reads @0x514cca..0x514ce7, `cmp eax, g_PlayerSlotCapacity` @0x514cf1;
+//  NetPacket_SerializePlayerSync0x46 @0x505E80 - `& 0x7FFF` @0x505efb, the ack OR @0x505f07]
+void test_pull_reads_and_answers_as_retail() {
+	auto heap = std::make_unique<w::World>();
+	w::World &world = *heap;
+	world.registry.configure_pool(0, 8);
+	w::Entity person;
+	person.kind = w::EntityKind::Organic;
+	person.flags = person.engine_flags = w::kEntityFlagPlayer;
+	ns::LoopbackChannel a, b;
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = ctx.is_in_session = 1;
+	ctx.config.max_players = 3; // slots 0..2; slot 2 holds no player
+	auto &roster = ctx.np_protocol.connection_list;
+	roster.push_back(conn_fixture::make_conn(1, 1, &a, ns::TransportMode::Client,
+			world.registry.spawn(0, person), true)); // the requester
+	roster.push_back(conn_fixture::make_conn(2, 1, &b, ns::TransportMode::Client,
+			world.registry.spawn(0, person), true));
+	for (size_t i = 0; i < roster.size(); ++i) {
+		roster[i].reply.player_slot = static_cast<uint8_t>(i);
+		roster[i].phase = inmatch::ConnectionPhase::PlayerAdded;
+	}
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = &ctx;
+	const auto pull = [&](std::vector<uint8_t> body) {
+		std::vector<std::vector<uint8_t>> out;
+		for (const ProtocolMessage &m : inmatch::dispatch_session_replies(ctx.config, roster[0],
+				{make_protocol_message(c2s::PLAYER_SYNC_REQUEST, std::move(body))}, 100, roster,
+				&world, inputs))
+			if (m.tag == s2c::PLAYER_SYNC) out.push_back(m.payload);
+		return out;
+	};
+	const auto index_of = [&](size_t slot) {
+		return static_cast<uint8_t>(roster[slot].link.owned_entity.packed & 0xFFu);
+	};
+	using Bytes = std::vector<uint8_t>;
+	// A zero mask answers the header and the pool index alone, an ack-only mask the same with the
+	// ack: no default field set.
+	CHECK((pull({1, 0x00, 0x00}) == std::vector<Bytes>{Bytes{1, 0x00, 0x00, index_of(1)}}));
+	CHECK((pull({1, 0x00, 0x40}) == std::vector<Bytes>{Bytes{1, 0x00, 0x40, index_of(1)}}));
+	// Bit 0x8000 in the request is dropped for an active slot, the rest kept.
+	{
+		const std::vector<Bytes> r = pull({1, 0x04, 0xC0});
+		CHECK(r.size() == 1);
+		PlayerSync sync;
+		CHECK(!r.empty() && decode_player_sync(r[0].data(), r[0].size(), sync));
+		CHECK(!sync.removal && sync.field_bitmask == 0x4004u && sync.slot_id == 1);
+	}
+	// A short body: no slot byte reads slot 0, a slot byte with fewer than two more reads mask 0.
+	CHECK((pull({}) == std::vector<Bytes>{Bytes{0, 0x00, 0x00, index_of(0)}}));
+	CHECK((pull({1}) == std::vector<Bytes>{Bytes{1, 0x00, 0x00, index_of(1)}}));
+	CHECK((pull({1, 0xF7}) == std::vector<Bytes>{Bytes{1, 0x00, 0x00, index_of(1)}}));
+	// An in-table slot with no player answers the removal record, ack echoed.
+	CHECK((pull({2, 0xF7, 0x5C}) == std::vector<Bytes>{Bytes{2, 0x00, 0xC0}}));
+	// The retail walk's inclusive last request, slot == the table size, gets nothing.
+	CHECK((pull({3, 0xF7, 0x5C}).empty()));
+	CHECK((pull({0xFF, 0xF7, 0x1C}).empty()));
+	// A requester not yet bound to a player slot gets nothing.
+	roster[0].phase = inmatch::ConnectionPhase::PendingSpawn;
+	CHECK((pull({1, 0xF7, 0x1C}).empty()));
 }
 
 // D-NET-295: on a NovaWorld host the admission JOIN's CD cookie loads the
@@ -219,7 +288,7 @@ void test_join_ticket_rides_the_admission_join() {
 // The JOIN keeps its last CD (D-NET-412 review): each CD the walk meets replaces the cookie,
 // so an overlapping run of overrunning CDs (each re-read from the previous one's value) costs
 // nothing, and only the last CD's pairs are the joiner's; a CD of no length leaves none.
-// [orig: NapiNPServer_HandlePlayerJoinMessage - the "CD" store @0x512C5D -> sub_4C6060
+// [orig: NapiNPServer_HandlePlayerJoinMessage - the "CD" store @0x512C5D -> CNetPlayer_SetCookieBuffer @0x4C6060
 //  @0x4C6072..0x4C6095]
 void test_join_keeps_the_last_cd() {
 	const auto admit = [](const std::vector<uint8_t> &body) {
@@ -276,6 +345,7 @@ void test_join_keeps_the_last_cd() {
 
 int main() {
 	test_spectator_field_follows_the_slot();
+	test_pull_reads_and_answers_as_retail();
 	test_novaworld_account_fields_follow_the_join_cookie();
 	test_join_ticket_rides_the_admission_join();
 	test_join_keeps_the_last_cd();

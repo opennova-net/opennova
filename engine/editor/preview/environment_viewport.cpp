@@ -14,6 +14,7 @@
 #include <editor/preview/option_reads.h>
 #include <editor/preview/orbit_canvas.h>
 #include <editor/preview/viewport_device.h>
+#include <editor/project/project_files.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
 #include <formats/env/tod_clock.h>
@@ -43,12 +44,6 @@ constexpr ViewportState kHeadlessSize{ 1024, 768 };
 // A new camera: a person's eye a metre behind the point it orbits, looking a little up at the horizon.
 constexpr float kEyeDistance = 1.0f;
 constexpr float kEyePitch = -0.08f;
-
-std::string stem_of(const std::string &path) {
-	std::string name = io::utf8_file_name(path);
-	if (const size_t dot = name.find_last_of('.'); dot != std::string::npos) name.erase(dot);
-	return name;
-}
 
 std::string hex_of(const env::Rgb &rgb) {
 	const auto byte = [](float c) { return std::clamp(int(c * 255.0f + 0.5f), 0, 255); };
@@ -352,7 +347,7 @@ bool EnvironmentViewport::place_(const SessionView &view) {
 		if (!options_.mission.empty() && each.mission == options_.mission) use = &each;
 	if (!use && !uses_.missions.empty()) use = &uses_.missions.front();
 	MissionSceneHeader header;
-	header.environment = stem_of(path());
+	header.environment = file_stem(path());
 	std::string name;
 	if (use) {
 		header.terrain = use->terrain;

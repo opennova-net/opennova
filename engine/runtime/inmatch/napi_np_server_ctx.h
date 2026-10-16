@@ -91,7 +91,7 @@ struct NapiNPProtocol {
 	// (SessionStartup::title); with none (null), no hello is answered and no join admitted.
 	// [orig: CNapiNetwork_Init @0x4ca4a0 - the stores @0x4ca72f..0x4ca8c2]
 	const TitleIdentity *identity = nullptr;
-	bool reject_new_connections = false; // [orig +0x1F7, JFC6 @0x62be8f]
+	bool reject_new_connections = false; // [orig: +0x1F7, NapiNPProtocol_HandleClientJoin's JFC6 leg @0x62be8f]
 	uint32_t server_flags = 0;          // [orig +0x500] P1 TLV (server config flag word)
 	uint32_t build_flags = 0;           // [orig +0x504] P2 TLV (CNapiServerConfig_BuildFlags)
 	uint32_t max_players = 1;           // [orig +0x524] MP TLV; clamped 1..251
@@ -387,9 +387,11 @@ struct NapiNPServerCtx {
 	bool mission_text_loaded = false;
 	std::string mission_briefing3;
 	std::string mission_briefing2;
-	// The mission text's [info] title the NovaWorld listing's MissionName reads ("" with no
-	// mission table or no entry; the column then reads the mission header's name).
-	// [orig: MissionText_GetString("info", "title") from Lobby_UpdateServerInfo @0x4FE993]
+	// The mission text's [info] title the NovaWorld listing's MissionName, the session
+	// variables' MISSIONNAME and the S2C 0x7B summary read ("" with no mission table or no
+	// entry; each then reads the mission header's name, session_mission_name).
+	// [orig: MissionText_GetString("info", "title") from Lobby_UpdateServerInfo @0x4FE993;
+	//  Game_SerializeMissionInfoToDataStream @0x5237df; NapiNPMsg_0x7B_BuildPayload @0x507835]
 	std::string mission_text_title;
 	// MissionText [Locations]/LOCATION%03i labels for each BMS type-2044
 	// marker the spawn admitted, in spawn order, each keyed by its record's
@@ -433,7 +435,7 @@ struct NapiNPServerCtx {
 	// shell's NovaWorld host binding beside the GSID; 0 on a LAN host. The
 	// authority's status page shows it on its NovaWorld server line.
 	// [orig: ctx+0x1194 — CNapiNetwork_RandomizeTimeout @0x4c4da3, read back
-	//  by sub_4C4DB0 @0x4c4db0 (Server_DrawStatusScreen @0x50a7fa)]
+	//  by CNapiNPCtx_GetAppId @0x4c4db0 (Server_DrawStatusScreen @0x50a7fa)]
 	uint32_t novaworld_app_id = 0;
 	// The host's own CD-key ids, the wire forms its registry key decodes to: a DFX2 LAN host
 	// refuses a joiner sending either (code 12, server_join_check.h). Empty for a host that
@@ -591,7 +593,7 @@ inline void set_server_text(NapiNPServerCtx &ctx, ServerTextTable text) {
 // two ticket words (the NovaWorld session's +0x4FC the 0x01 tests and its
 // +0x120 bit 0x40 the watchdog tests) as the one novaworld_join_tickets_armed.
 // [orig: the C2S 0x01 handler @0x512ED0 - is_in_session @0x512F87, the
-//  transport @0x512F90, dword_B604DC @0x512F99, state 3 @0x512FA2..0x512FA6,
+//  transport @0x512F90, g_HostRequiresJoinTicketMaybe @0x512F99, state 3 @0x512FA2..0x512FA6,
 //  state 6 @0x512FAF..0x512FB3; Server_ValidatePlayerJoinRequest
 //  @0x5128E2..0x5128F8]
 inline bool join_tickets_required(const NapiNPServerCtx &ctx) {

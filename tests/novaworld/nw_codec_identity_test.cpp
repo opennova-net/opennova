@@ -296,7 +296,7 @@ std::vector<Case> build_corpus() {
 		in.weapon.preround_timer = 1; in.weapon.slot_state360 = 2; in.weapon.slot_state368 = 3;
 		in.weapon.slot_state364 = 4; in.weapon.slot_state356 = 5; in.weapon.slot_state460 = 6;
 		in.weapon.reload_seconds = 0xFF; in.weapon.uniform_team_mask = 0x12345678;
-		in.state_flag_byte = 0x07; in.carried_handle = 0xFFFF; in.health = 96; in.state_word = -3;
+		in.state_flag_byte = 0x07; in.carried_handle = 0xFFFF; in.health = 96; in.armor = -3;
 		FrameUpdateRecord p; p.handle = 0x0001; p.type_id = 100; p.cls = EntityClass::Player;
 		p.player.carrier_handle = 0xFFFF; p.player.pos_x_compressed = 0x1234; p.player.yaw_byte = 0x40;
 		in.records.push_back(p);

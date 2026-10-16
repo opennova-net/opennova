@@ -113,7 +113,8 @@ int deploy_protection() {
 // dfx2.exe keeps the medic dispatcher's tests over two empty functions: an admitted interaction
 // revives and heals nothing. Its server tick has no downed-state resend either, so the resend's
 // 62-tick countdown never runs. [orig: GameEvent_HandleMedicInteraction @0x4e6790; Server_TickUpdate
-//  @0x51E2D0..0x51E378] [orig: @0x4e38d0 (nullsub_114 @0x4fcff0, nullsub_115 @0x4fd000);
+//  @0x51E2D0..0x51E378]
+// [orig: @0x4e38d0 (nullsub_114 @0x4fcff0, nullsub_115 @0x4fd000);
 //  Server_TickUpdate @0x51a810 (dfx2.exe)]
 int no_revive_heal_or_downed_resend() {
 	for (const int title : {kJo, kDfx2}) {

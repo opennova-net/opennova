@@ -790,10 +790,11 @@ const std::vector<opennova::TerrainTilePageBinding> &Terrain::_compose_pages(
 	// see docs/terrain/terrain-re.md] — never the Godot-axes vector
 	// get_light_direction() serves, which would swap x/z a second time.
 	Vector3 page_tile_tint(1.0f, 1.0f, 1.0f);
-	// The unseeded 45-degree default in GODOT axes; EnvironmentState's
-	// kDefaultSunDirRender is the same numbers in the render basis, which after
-	// the x/z swap points up+east while this points up+south (open grill item).
-	Vector3 page_light_direction(0.0f, 0.70710678f, 0.70710678f);
+	// With no loaded environment the page lights by the tuple an environment
+	// holds before its first seed (EnvironmentState::kDefaultSunDirRender), in
+	// the same render basis the loaded getter serves.
+	constexpr opennova::env::Vec3 kUnseeded = opennova::env::EnvironmentState::kDefaultSunDirRender;
+	Vector3 page_light_direction(kUnseeded.x, kUnseeded.y, kUnseeded.z);
 	if (cached_env_node && cached_env_node->is_loaded()) {
 		page_tile_tint = cached_env_node->get_tile_overlay_tint();
 		page_light_direction =

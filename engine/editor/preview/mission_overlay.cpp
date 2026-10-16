@@ -9,6 +9,7 @@
 #include <editor/preview/mission_hint.h>
 #include <editor/preview/mission_label_picks.h>
 #include <editor/preview/mission_options.h>
+#include <editor/preview/preview_units.h>
 #include <editor/preview/viewport_device.h>
 #include <formats/mission/bms.h>
 #include <runtime/world/presentation_frame.h>
@@ -31,10 +32,6 @@ constexpr uint8_t kMissionShadowAlpha = 170;
 std::string capitalized(std::string text) {
 	if (!text.empty() && text[0] >= 'a' && text[0] <= 'z') text[0] = char(text[0] - 'a' + 'A');
 	return text;
-}
-
-double snapped(double value, float snap) {
-	return snap > 0.0f ? std::round(value / double(snap)) * double(snap) : value;
 }
 
 PreviewVec3 along(const PreviewVec3 &from, const PreviewVec3 &direction, float t) {

@@ -115,9 +115,9 @@ public:
 	// The per-section interior visibility masks (the portal traversal) are
 	// apply_frame's.
 	//
-	// Re-apply the letter gates after a sim tick. `forces_indoors` is
-	// GameWorld._mission_forces_indoors, passed per call — the mission
-	// attribute is mission state and stays (test-pinned) on the world.
+	// Re-apply the letter gates after a sim tick. `forces_indoors` is the
+	// loaded mission's attribute (GameWorld::mission_forces_indoors, the
+	// kernel's mission), passed per call.
 	// Returns the passes the new letters reopen (renderer::
 	// scene_pass_gate_edges): the frame's terrain and water legs already ran
 	// under the old letters, so the caller re-runs the reopened ones.
@@ -174,8 +174,7 @@ public:
 	void rebind_placed_nodes();
 	// Unload teardown. The ordering replicates the pre-extraction unload
 	// EXACTLY:
-	// 1. the blink letter gates restore [orig: the letter-bit clear @ 0x525c45
-	//    at mission start] — an unload while indoors must not leave the next
+	// 1. the blink letter gates restore (engine: runtime/mission/mission_load_plan.h) — an unload while indoors must not leave the next
 	//    mission's terrain/sky/water hidden;
 	// 2. every occlusion override releases (the hidden bits this frame set
 	//    clear onto each node's own present intent) and the sim delta

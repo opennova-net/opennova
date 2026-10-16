@@ -367,8 +367,7 @@ int64_t EffectLightDirector::_spawn_light_at(const Ref<ModelLight> &p_info,
 // The blink-box owner at one world point: retail runs ONE query at the
 // spawning entity's position before walking its LGHT records, and slot 0's
 // hit names the containing building + section every unattached record binds
-// to [orig: Entity_SpawnGlowEffects @ 0x56c7fc -> Entity_QueryBlinkBoxesAtPoint
-// @ 0x4af350]. Owner 0 outdoors. Both individual ObjectModels and batched
+// to (engine: runtime/renderer/light_scene.h). Owner 0 outdoors. Both individual ObjectModels and batched
 // buildings resolve into the active-group domain their respective draw
 // contexts declare.
 EffectLightDirector::BlinkOwner EffectLightDirector::_blink_owner_at(const Vector3 &p_world_pos) {
@@ -785,9 +784,9 @@ EffectLightDirector::BlinkOwner EffectLightDirector::_local_player_interior_grou
 // walk for the post-particle overlay stage (append_overlay). The
 // models/owners arrays are the per-model pass's own walk — models with an
 // occlusion section-mask verdict gate their owned coronas on the
-// visible-section bit [orig: Terrain_IsBuildingSectionBitSet @ 0x5c6960];
+// visible-section bit (engine: runtime/renderer/light_scene.h);
 // the env fog rides in as the fog-to-black fold
-// [orig: CD3DDevice_SetFogAndBlendMode(dev, 2) @ 0x5aafb6].
+// (engine: runtime/renderer/light_scene.h).
 void EffectLightDirector::_render_coronas(Camera3D *p_camera, const Vector3 &p_gain,
 		int p_time_ms, Weather *p_weather, const TypedArray<Node3D> &p_models, const PackedInt64Array &p_owners,
 		MissionEnvironment *p_env) {
@@ -848,48 +847,22 @@ void EffectLightDirector::advance_fixed_tick() {
 }
 
 void EffectLightDirector::on_muzzle_fire(int64_t p_shooter_handle, const Vector3 &p_world_pos) {
+	// The shooter's handle word, the engine's re-arm rule (renderer::LightScene::fire_muzzle_glow).
 	const int64_t owner_id = LightScene::owner_id_for_wire(p_shooter_handle);
-	int64_t handle = 0;
-	if (const int64_t *cached = entity_effect_handles_.getptr(owner_id)) {
-		handle = *cached;
-	}
-	if (handle == 0) {
-		handle = scene()->spawn_glow(GlowSpawn::make(p_world_pos, LightScene::muzzle_glow_radius(),
-				LightScene::muzzle_glow_color())
-						->fading(3, -1)
-						->owned_by(owner_id, 0));
-		if (handle == 0) {
-			return;
-		}
+	const int64_t *cached = entity_effect_handles_.getptr(owner_id);
+	const int64_t handle = scene()->fire_muzzle_glow(cached ? *cached : 0, p_world_pos, owner_id);
+	if (handle != 0) {
 		entity_effect_handles_.insert(owner_id, handle);
 	}
-	scene()->set_light_fade(handle, LightScene::muzzle_glow_fade_mode(),
-			LightScene::muzzle_glow_fade_ticks());
-	scene()->set_light_owner(handle, owner_id, 0);
-	scene()->set_light_position(handle, p_world_pos);
-	scene()->set_light_blend(handle, 1.0f);
 }
 
 void EffectLightDirector::on_impact_light(const Vector3 &p_world_pos, float p_radius,
 		const Color &p_color, int p_duration_ticks) {
-	if (p_radius <= 0.0f) {
-		return;
-	}
-	Ref<GlowSpawn> spawn =
-			GlowSpawn::make(p_world_pos + Vector3(0.0f, p_radius * 0.5f, 0.0f), p_radius, p_color);
-	spawn->fading(2, p_duration_ticks);
-	spawn->set_corona_lower_half_radius(true);
-	scene()->spawn_glow(spawn);
+	scene()->spawn_impact_flash(p_world_pos, p_radius, p_color, p_duration_ticks);
 }
 
 void EffectLightDirector::on_death_light(const Vector3 &p_world_pos, float p_radius) {
-	if (p_radius <= 0.0f) {
-		return;
-	}
-	scene()->spawn_glow(GlowSpawn::make(p_world_pos, p_radius, LightScene::death_flash_color())
-								->fading(LightScene::death_flash_fade_mode(),
-										LightScene::death_flash_fade_ticks())
-								->masking(true, false, false));
+	scene()->spawn_death_flash(p_world_pos, p_radius);
 }
 
 void EffectLightDirector::sync_round_glow_records(const Array &p_rows) {

@@ -31,7 +31,7 @@ std::string listed_name(const std::vector<std::string> *list, size_t index, size
 
 // What the original editor's rebuilds count before it writes the path and group sections, over its items
 // whatever their kind: a path's stops, the waypoint items (type 6005) whose waypoint_id is the path [orig:
-// JOTACmed.exe sub_44CFD0 @0x44cfd0], and a group's members, the items whose group_id is the group [orig:
+// JOTACmed.exe sub_44CFD0 @0x44cfd0], and a group's members, the items whose group_id is the group [orig: JOTACmed.exe
 // sub_44D160 @0x44d160]. One pass over the four pools.
 struct HeldCounts {
 	std::array<size_t, 256> stops{};
@@ -443,7 +443,7 @@ MisHeights mis_heights(const bms::Entity &entity, bms::MisFrame frame, const int
 	// The .bms's frame over the terrain: the original's document frame is the .bms's z less the
 	// terrain's height, as its .bms export's undo takes it [orig: JOTACmed.exe sub_44E5F0 @
 	// 0x44e5f0, from @ 0x450cf2] (an unlocked base, relative, untouched); its save then adds the
-	// height back to a locked item's z and base [orig: sub_44E640 @ 0x44e640, from MIS_SaveDocument
+	// height back to a locked item's z and base [orig: JOTACmed.exe sub_44E640 @ 0x44e640, from MIS_SaveDocument
 	// @ 0x4546b5], whose base our frame carries absolute already.
 	if (entity.mis_height_lock != 0)
 		return { entity.z, entity.mis_extra_bheight, entity.mis_height_lock };
@@ -639,13 +639,13 @@ void mis_items_to_bms_frame(bms::File &file, const MisTerrain &terrain) {
 		// The original's read takes a locked item's z and base less the terrain's height under it,
 		// the point its x and y [orig: JOTACmed.exe sub_44E6A0 @ 0x44e6a0, from MIS_LoadDocument @
 		// 0x45460e; the lock tested nonzero], and its .bms export adds the height back to every
-		// item's z and base [orig: sub_44E5A0 @ 0x44e5a0, from sub_44F920 @ 0x44fa4e]: a locked
+		// item's z and base [orig: JOTACmed.exe sub_44E5A0 @ 0x44e5a0, from sub_44F920 @ 0x44fa4e]: a locked
 		// item's both stand absolute, as read; an unlocked one's z takes the height, its base
 		// (which reaches no .bms byte) staying relative.
 		if (entity.mis_height_lock == 0)
 			entity.z = detail::wrapped_add(entity.z, height);
 	});
-	// The area markers likewise, then the areas the export makes of them over the terrain [orig:
+	// The area markers likewise, then the areas the export makes of them over the terrain [orig: JOTACmed.exe
 	// sub_44F920 @ 0x44fa4e, then the rebuild @ 0x44fbeb]: their z absolute. A zone it makes no
 	// area of keeps its markers as read, in the .mis's frame, which the writer writes back as they
 	// were.

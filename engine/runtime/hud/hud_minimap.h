@@ -82,6 +82,16 @@ struct HudMinimapTerrain {
 	int sector_count = 0;
 	int sector_rows = 0;
 	bool present = false;
+	// The .trn's polytrn_wrapx / polytrn_wrapy: an axis that wraps takes the
+	// tile's grid cell by its low four bits, one that does not clamps an
+	// off-grid cell to 0 / 15 (the cell OOB masks, 0 or -16; D-TERRAIN-16).
+	// Wrapping is the masks' zeroed state, before a terrain sets them.
+	// [orig: Render_TerrainDecal -- `test g_TerrainCellOOBMaskX, ecx` @0x60741d,
+	//  `test g_TerrainCellOOBMaskY, eax` @0x60742a, `sar 1Fh; not` and `and 0Fh`
+	//  @0x607425..0x60743d; the masks set from the .trn, PolyTrn_LoadTerrainConfig
+	//  @0x60e4b1..0x60e4cb: wrap -> 0, else -16]
+	bool wrap_x = true;
+	bool wrap_z = true;
 	// The base pass samples the original 1024x1024 colormap atlas through its
 	// four 512x512 quadrant ids. Retail binds Colormap0..3 directly; the device
 	// keeps one atlas and clamps each quadrant with a half-texel inset.

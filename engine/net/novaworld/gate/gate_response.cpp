@@ -17,8 +17,6 @@ namespace {
 
 constexpr const char *LINE_TAG = "VAR";
 
-bool ieq(std::string_view a, std::string_view b) { return opennova::strutil::iequals(a, b); }
-
 bool is_line_break(char c) { return c == '\n' || c == '\r'; }
 
 // One octet: a digit at once (no white space, no sign), then digits to the first
@@ -93,7 +91,7 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 		// [orig: CNapiGateManager_ProcessResponse @0x4cf0b7 -> CNapiFileReader_ReadAndTokenizeLine
 		//  @0x6336E0 -> String_TokenizeQuotedToArray @0x616d60 (the call @0x633758)]
 		const auto tokens = tokenize_quoted(line);
-		if (tokens.size() < 3 || !ieq(tokens[0], LINE_TAG)) {
+		if (tokens.size() < 3 || !strutil::iequals(tokens[0], LINE_TAG)) {
 			continue; // matches `v7 >= 3 && str1 == "VAR"` gate in the binary
 		}
 
@@ -108,27 +106,27 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 		// [orig: _atol for METPING @0x4CF292, METEXT @0x4CF2BC, USEJUNCTION @0x4CF40F,
 		//  CLEARJUNCTION @0x4CF439, GLSVSSRIMS @0x4CF487, GLSVSSAGRMS @0x4CF4AE]
 		bool matched = true;
-		if (ieq(key, "POSTIPADDRESS")) {
+		if (strutil::iequals(key, "POSTIPADDRESS")) {
 			parse_ipv4_octets(value, out.post_ip);
-		} else if (ieq(key, "POSTIPPORT")) {
+		} else if (strutil::iequals(key, "POSTIPPORT")) {
 			uint32_t parsed = 0;
 			if (napi_parse_literal_value(value, parsed)) out.post_port = parsed;
-		} else if (ieq(key, "LOBBYNAME")) {
+		} else if (strutil::iequals(key, "LOBBYNAME")) {
 			out.lobby_name = std::string(value);
-		} else if (ieq(key, "METIPADDRESS")) {
+		} else if (strutil::iequals(key, "METIPADDRESS")) {
 			out.met_ip = std::string(value);
-		} else if (ieq(key, "METIPPORT")) {
+		} else if (strutil::iequals(key, "METIPPORT")) {
 			uint32_t parsed = 0;
 			if (napi_parse_literal_value(value, parsed)) out.met_port = parsed;
-		} else if (ieq(key, "METLABEL")) {
+		} else if (strutil::iequals(key, "METLABEL")) {
 			out.met_label = std::string(value);
-		} else if (ieq(key, "METPING")) {
+		} else if (strutil::iequals(key, "METPING")) {
 			out.met_ping = io::retail_atol(value.c_str());
-		} else if (ieq(key, "METEXT")) {
+		} else if (strutil::iequals(key, "METEXT")) {
 			out.met_ext = io::retail_atol(value.c_str());
-		} else if (ieq(key, "STARTUPURL")) {
+		} else if (strutil::iequals(key, "STARTUPURL")) {
 			out.startup_url = std::string(value);
-		} else if (ieq(key, "UDPNOVAWORLD")) {
+		} else if (strutil::iequals(key, "UDPNOVAWORLD")) {
 			// Each line is kept, in order: Napi_CopyString into the next 64-byte entry (to the
 			// value's first NUL, at most 63 characters) while fewer than 16 are kept; a 17th
 			// is not kept (the table stays at 16), though the line still counts toward
@@ -139,28 +137,28 @@ bool gate_response_parse(std::string_view body, GateResponse &out) {
 				const std::string entry = value.substr(0, value.find('\0'));
 				out.udp_novaworld.push_back(entry.substr(0, kGateUdpNovaWorldChars));
 			}
-		} else if (ieq(key, "UDPCODE1")) {
+		} else if (strutil::iequals(key, "UDPCODE1")) {
 			out.udp_code1 = std::string(value);
-		} else if (ieq(key, "UDPCODE2")) {
+		} else if (strutil::iequals(key, "UDPCODE2")) {
 			out.udp_code2 = std::string(value);
-		} else if (ieq(key, "REFLECTEDIPADDRESS")) {
+		} else if (strutil::iequals(key, "REFLECTEDIPADDRESS")) {
 			parse_ipv4_octets(value, out.reflected_ip);
-		} else if (ieq(key, "REFLECTEDPORTNUMBER")) {
+		} else if (strutil::iequals(key, "REFLECTEDPORTNUMBER")) {
 			uint32_t parsed = 0;
 			if (napi_parse_literal_value(value, parsed)) out.reflected_port = parsed;
-		} else if (ieq(key, "USEJUNCTION")) {
+		} else if (strutil::iequals(key, "USEJUNCTION")) {
 			out.use_junction = io::retail_atol(value.c_str());
-		} else if (ieq(key, "CLEARJUNCTION")) {
+		} else if (strutil::iequals(key, "CLEARJUNCTION")) {
 			out.clear_junction = io::retail_atol(value.c_str());
-		} else if (ieq(key, "GLSVSSREQUEST")) {
+		} else if (strutil::iequals(key, "GLSVSSREQUEST")) {
 			out.glsvss_request = std::string(value);
-		} else if (ieq(key, "GLSVSSRIMS")) {
+		} else if (strutil::iequals(key, "GLSVSSRIMS")) {
 			out.glsvss_rims = io::retail_atol(value.c_str());
-		} else if (ieq(key, "GLSVSSAGRMS")) {
+		} else if (strutil::iequals(key, "GLSVSSAGRMS")) {
 			out.glsvss_agrms = io::retail_atol(value.c_str());
-		} else if (ieq(key, "CUS")) {
+		} else if (strutil::iequals(key, "CUS")) {
 			// Phantom key: counted for read-result parity but not retained.
-		} else if (ieq(key, "PVT")) {
+		} else if (strutil::iequals(key, "PVT")) {
 			// Phantom key: counted for read-result parity but not retained.
 		} else {
 			matched = false;

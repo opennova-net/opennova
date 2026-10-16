@@ -179,8 +179,8 @@ std::array<float, 4> point_light_attenuation(int32_t range_fixed);
 // inherits the same two device constants (its combine is
 // t0 x (t1 x (t1.a*c1 + c0)) x v0 x 8 with t1 = the planar lightmap tile).
 // [orig: Terrain_CompilePixelShaders @ 0x605260 (the shared PS shape);
-//  Terrain_SetupLightingAndShader @ 0x604420 (c0 <- PolyTrn_PSConstC0_Sky,
-//  c1 <- PolyTrn_PSConstC1_Light); Terrain_InitLightingColorRamps
+//  Terrain_SetupLightingAndShader @ 0x604420 (c0 <- g_PolyTrnPSConstC0SkyColorR,
+//  c1 <- g_PolyTrnPSConstC1LightColorR); Terrain_InitLightingColorRamps
 //  @ 0x604ee0 <- Render_TerrainScene @ 0x610c80 (g_EnvLightBlock/g_EnvSkyBlock;
 //  NVG / vehicle-scope overrides); Foliage_CreateLightmapBlendPS @ 0x5ff7a0]
 std::array<float, 3> terrain_surface_light(float sun_mask,

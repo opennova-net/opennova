@@ -55,30 +55,10 @@ ObjectSelectInputs object_select_inputs(int p_time_ms, const Weather *weather,
 	return sel;
 }
 
-// godot (x, y, z) <-> mission (x, -z, y): the same conversion the mission
-// placer and the render fixtures use.
-int32_t clamp_int64(int64_t value) {
-	if (value <= static_cast<int64_t>(std::numeric_limits<int32_t>::min())) {
-		return std::numeric_limits<int32_t>::min();
-	}
-	if (value >= static_cast<int64_t>(std::numeric_limits<int32_t>::max())) {
-		return std::numeric_limits<int32_t>::max();
-	}
-	return static_cast<int32_t>(value);
-}
-
-std::array<int32_t, 3> mission_fixed_from_godot(const Vector3 &world) {
-	return {
-		opennova::io::float_to_fp16_16_round_sat(static_cast<double>(world.x)),
-		opennova::io::float_to_fp16_16_round_sat(-static_cast<double>(world.z)),
-		opennova::io::float_to_fp16_16_round_sat(static_cast<double>(world.y)),
-	};
-}
-
 opennova::renderer::LightDrawContext entity_draw_context(
 		const Vector3 &position, int32_t bound_radius_q16) {
 	return opennova::renderer::entity_light_draw_context({
-			mission_fixed_from_godot(position), bound_radius_q16});
+			godot_to_mission_q16(position), bound_radius_q16});
 }
 
 void collect_entity_light_models(ObjectModel *model, std::vector<ObjectModel *> &out) {
@@ -169,7 +149,7 @@ constexpr bool kObjectLightD3DFill = false;
 int64_t LightScene::spawn_model_light(const Ref<ModelLightSpawn> &p_config) {
 	if (p_config.is_null()) return 0;
 	opennova::renderer::LightSpawnParams params;
-	params.position_fixed = mission_fixed_from_godot(p_config->get_position());
+	params.position_fixed = godot_to_mission_q16(p_config->get_position());
 	// radius = atten_end * 65536 (the spawner scale; witness map in
 	// engine/runtime/renderer/light_scene.h).
 	params.radius_fixed = static_cast<int32_t>(Math::round(
@@ -216,7 +196,7 @@ int64_t LightScene::spawn_model_light(const Ref<ModelLightSpawn> &p_config) {
 int64_t LightScene::spawn_glow(const Ref<GlowSpawn> &p_config) {
 	if (p_config.is_null()) return 0;
 	opennova::renderer::LightSpawnParams params;
-	params.position_fixed = mission_fixed_from_godot(p_config->get_position());
+	params.position_fixed = godot_to_mission_q16(p_config->get_position());
 	params.radius_fixed = static_cast<int32_t>(Math::round(
 			p_config->get_radius() * opennova::io::kFp16One));
 	const Color color = p_config->get_color();
@@ -234,6 +214,27 @@ int64_t LightScene::spawn_glow(const Ref<GlowSpawn> &p_config) {
 	// docs/render/render-lighting-re.md].
 	params.corona_lower_half_radius = p_config->get_corona_lower_half_radius();
 	return encode_handle(scene_.spawn(params));
+}
+
+int64_t LightScene::fire_muzzle_glow(int64_t p_cached, const Vector3 &p_muzzle, int64_t p_shooter) {
+	return encode_handle(scene_.fire_muzzle_glow(decode_handle(p_cached),
+			godot_to_mission_q16(p_muzzle), static_cast<uint64_t>(p_shooter)));
+}
+
+int64_t LightScene::spawn_impact_flash(const Vector3 &p_impact, float p_radius, const Color &p_color,
+		int p_ticks) {
+	if (p_radius <= 0.0f) return 0;
+	return encode_handle(scene_.spawn(opennova::renderer::impact_flash_spawn(
+			godot_to_mission_q16(p_impact),
+			static_cast<int32_t>(Math::round(p_radius * opennova::io::kFp16One)),
+			{ color_byte(p_color.r), color_byte(p_color.g), color_byte(p_color.b) }, p_ticks)));
+}
+
+int64_t LightScene::spawn_death_flash(const Vector3 &p_position, float p_radius) {
+	if (p_radius <= 0.0f) return 0;
+	return encode_handle(scene_.spawn(opennova::renderer::death_flash_spawn(
+			godot_to_mission_q16(p_position),
+			static_cast<int32_t>(Math::round(p_radius * opennova::io::kFp16One)))));
 }
 
 void LightScene::despawn(int64_t p_handle) {
@@ -260,7 +261,7 @@ void LightScene::advance_fixed_tick() {
 }
 
 void LightScene::set_light_position(int64_t p_handle, const Vector3 &p_world) {
-	scene_.set_position(decode_handle(p_handle), mission_fixed_from_godot(p_world));
+	scene_.set_position(decode_handle(p_handle), godot_to_mission_q16(p_world));
 }
 
 bool LightScene::is_alive(int64_t p_handle) const {
@@ -328,7 +329,7 @@ int LightScene::camera_global_select(const Vector3 &p_camera_world,
 	// keeps the owned-light-unscoped approximation for census only and
 	// publishes nothing to materials.
 	const std::array<int32_t, 3> center =
-			mission_fixed_from_godot(p_camera_world);
+			godot_to_mission_q16(p_camera_world);
 	const double radius = std::isfinite(static_cast<double>(p_query_radius)) ?
 			MAX(static_cast<double>(p_query_radius), 0.0) :
 			static_cast<double>(std::numeric_limits<int32_t>::max()) / opennova::io::kFp16OneD;
@@ -336,8 +337,8 @@ int LightScene::camera_global_select(const Vector3 &p_camera_world,
 	std::array<int32_t, 3> qmin{};
 	std::array<int32_t, 3> qmax{};
 	for (int axis = 0; axis < 3; ++axis) {
-		qmin[axis] = clamp_int64(static_cast<int64_t>(center[axis]) - half);
-		qmax[axis] = clamp_int64(static_cast<int64_t>(center[axis]) + half);
+		qmin[axis] = opennova::io::saturate_i32(static_cast<int64_t>(center[axis]) - half);
+		qmax[axis] = opennova::io::saturate_i32(static_cast<int64_t>(center[axis]) + half);
 	}
 	std::array<opennova::renderer::LightHandle, opennova::renderer::LightScene::kQueryLimit> handles{};
 	const size_t found = scene_.query_camera_global(qmin, qmax, handles);
@@ -410,14 +411,14 @@ void LightScene::slot_shadow_lights(const Vector3 &p_world_pos,
 	// opennova::renderer::pick_dominant_light, see
 	// docs/render/render-lighting-re.md].
 	r_out.clear();
-	const std::array<int32_t, 3> center = mission_fixed_from_godot(p_world_pos);
+	const std::array<int32_t, 3> center = godot_to_mission_q16(p_world_pos);
 	const int64_t half =
 			static_cast<int64_t>(opennova::io::float_to_fp16_16_round_sat(MAX(p_radius, 0.0f)));
 	std::array<int32_t, 3> qmin{};
 	std::array<int32_t, 3> qmax{};
 	for (int axis = 0; axis < 3; ++axis) {
-		qmin[axis] = clamp_int64(static_cast<int64_t>(center[axis]) - half);
-		qmax[axis] = clamp_int64(static_cast<int64_t>(center[axis]) + half);
+		qmin[axis] = opennova::io::saturate_i32(static_cast<int64_t>(center[axis]) - half);
+		qmax[axis] = opennova::io::saturate_i32(static_cast<int64_t>(center[axis]) + half);
 	}
 	// The shared objects-target select inputs (object_select_inputs) for the
 	// flicker and the ambient scale; the slot path takes no target gate.
@@ -554,9 +555,7 @@ int LightScene::select_model_frame(const TypedArray<Node3D> &p_models,
 					// A building draw declares itself as interior section zero, then
 					// the model collector re-scopes the OWNER section per ROBJ. The
 					// group gate falls back from interior section zero to this value.
-					// [orig: Terrain_RenderSectorModels @0x5c5e07;
-					// Render_CollectRenderObjectsForBatch @0x5d8ff7, see
-					// docs/render/render-lighting-re.md]
+					// (engine: runtime/renderer/light_scene.cpp)
 					const opennova::renderer::SubmitOwnerGroup owner =
 							opennova::renderer::submit_owner_group(owner_entity, false, false,
 									part.robj_index);
@@ -1006,14 +1005,13 @@ void LightScene::build_corona_inputs(const Vector3 &p_camera_pos,
 	}
 	inputs.owner_masks = owner_masks.data();
 	inputs.owner_mask_count = owner_masks.size();
-	// The fog-to-black fold [orig: CD3DDevice_SetFogAndBlendMode(dev, 2)
-	// @0x5aafb6, see docs/render/render-lighting-re.md]: primary fog params,
+	// The fog-to-black fold (engine: runtime/renderer/light_scene.h): primary fog params,
 	// color forced black engine-side.
 	inputs.fog_enabled = p_fog.is_valid() && p_fog->fog_enabled;
 	inputs.fog_type = p_fog.is_valid() ? static_cast<int32_t>(p_fog->fog_type) : 0;
 	inputs.fog_start = p_fog.is_valid() ? p_fog->fog_start : 0.0f;
 	inputs.fog_end = p_fog.is_valid() ? p_fog->fog_end : 0.0f;
-	inputs.camera_fixed = mission_fixed_from_godot(p_camera_pos);
+	inputs.camera_fixed = godot_to_mission_q16(p_camera_pos);
 	// The camera depth plane in mission space: depth grows in front of the
 	// camera, zero at the camera origin (the batch-sort plane retail feeds
 	// the fade [orig: EffectWorld_RenderLightCoronas @0x5aaf40 (the plane
@@ -1267,19 +1265,6 @@ namespace {
 
 } // namespace
 
-float LightScene::muzzle_glow_radius() {
-	return static_cast<float>(opennova::renderer::LightScene::kMuzzleGlowRadiusFixed) / opennova::io::kFp16One;
-}
-Color LightScene::muzzle_glow_color() {
-	return opennova::color_from_rgb24(opennova::renderer::LightScene::kMuzzleGlowColorRgb);
-}
-int LightScene::muzzle_glow_fade_mode() { return opennova::renderer::LightScene::kMuzzleGlowFadeMode; }
-int LightScene::muzzle_glow_fade_ticks() { return opennova::renderer::LightScene::kMuzzleGlowFadeTicks; }
-Color LightScene::death_flash_color() {
-	return opennova::color_from_rgb24(opennova::renderer::LightScene::kDeathFlashColorRgb);
-}
-int LightScene::death_flash_fade_mode() { return opennova::renderer::LightScene::kDeathFlashFadeMode; }
-int LightScene::death_flash_fade_ticks() { return opennova::renderer::LightScene::kDeathFlashFadeTicks; }
 
 void LightScene::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("spawn_model_light", "config"),

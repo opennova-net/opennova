@@ -1,7 +1,7 @@
 // THE CHAT INPUT LINE element: the open capture's titled stdbox with the
 // typed line and its blinking cursor. The capture, its prompt and the
 // dispatch color are hud/hud_chat_entry.h's.
-// [orig: StdCtype_Destructor (IDB misnomer — the chat input line) @0x5b8f30,
+// [orig: HUD_DrawChatInputLine @0x5b8f30,
 //  called from HUD_DrawOverlayPanels @0x5c014e as (ctx, 50, dword_24C190C)
 //  whenever g_InputCaptureMode is nonzero and not the save-rename mode 3
 //  (@0x5c0132..0x5c0143)]

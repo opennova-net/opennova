@@ -325,7 +325,7 @@ popped inner `[tag][body]` via `frame_in_match_s2c` and routes inbound raw `0x43
   target incapable of pulling it (there is no toggle).
 - **§5.44 housekeeping ported** into `ClientRuntime` (the P5 deferred-and-logged set): `0x34` keepalive
   (29760-tick, both roles), `0x4C` net-quality (310-tick, Joiner in-match), `0x2C` RTT ping (every
-  deployed frame), and the `send_holdoff_countdown` send-block gate — all `[orig @0x42c1a9..0x42c4bc]`,
+  deployed frame), and the `send_holdoff_countdown` send-block gate — all `[orig: Client_ProcessNetworkFrame @0x42c1a9..0x42c4bc]`,
   via a new public `JoinerConnection::frame_inner(tag,body)` so they ride the same `0x43`/SCRK envelope
   as the `0x0C`. **Witness correction (re-doc §5.44):** `g_Tag2CSendCooldown` (`@0xA860D8`) is set-to-62
   + self-decremented but is **NOT read as a send gate** (the only three xrefs are this fn's read/dec/set)

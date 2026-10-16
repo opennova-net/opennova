@@ -42,6 +42,7 @@
 #include <runtime/world/local_player.h>
 #include <runtime/world/entity_spawn.h>  // entity_reset_to_spawn_state — the deploy revive (§5.61)
 #include <runtime/world/spawn_select.h>  // deploy target validation + one spawn-pose resolver
+#include <runtime/world/shell_sort_by_value.h> // CPairList_ShellSortByValue (the 0x16 rows)
 #include <runtime/world/vehicle_attach.h> // entity_process_vehicle_attach / entity_detach_from_vehicle (0x26/0x27)
 #include <runtime/world/world.h>  // world::World::registry (the authoritative roster, §6.9)
 #include <runtime/audio/sound_profile.h> // compose_entity_sound_set — the 0x2E MEDIC_REQUEST composite
@@ -191,6 +192,21 @@ void append_cstr(std::vector<uint8_t> &out, const std::string &s) {
 	out.push_back(0);
 }
 
+// The advertised mission's title arm, the session-variable stream's and the
+// 0x7B summary's alike: the mission text's [info]/title, else (empty) the
+// header's name. [orig: Game_SerializeMissionInfoToDataStream @0x523620
+// @0x5237df..0x52380d; NapiNPMsg_0x7B_BuildPayload @0x507740 @0x507835..0x50784f]
+const std::string &mission_title_or_header(const std::string &mission_text_title,
+		const std::string &header_name) {
+	return mission_text_title.empty() ? header_name : mission_text_title;
+}
+
+// The host context's resolved mission title; none on the World-less unit path.
+const std::string &context_mission_text_title(const NapiNPServerCtx *ctx) {
+	static const std::string kNone;
+	return ctx != nullptr ? ctx->mission_text_title : kNone;
+}
+
 bool is_default_ash_session_config(const GameConfig &cfg) {
 	return cfg.mission_name == "AS - Dormant Volcano Isle" && cfg.mission_file == "ASH_I5A.BMS";
 }
@@ -224,25 +240,27 @@ std::vector<uint8_t> build_tag7a_pcid(const NapiNPConnection &conn) {
 // recipient player_name, PCID, server_name, advertised mission, map filename,
 // gametype(u32), empty_str, expansion. Retail's field-4 source switches at
 // @0x507822: waypoint-family modes use the active filename while other modes
-// use the resolved MissionText title. The objective bit does not affect that
-// selection. Field 5 is always g_MapFileName.
+// use the resolved MissionText title, else (empty) the header's name
+// (@0x507835..0x50784f). The objective bit does not affect that selection.
+// Field 5 is always g_MapFileName.
 // (The PCID slot previously carried an invented "DEV-A02-0001" literal — D-NET-127; now sourced.)
 std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg,
+                                                 const std::string &mission_text_title,
                                                  const NapiNPConnection &conn) {
 	std::vector<uint8_t> payload;
 	const std::string &advertised_mission =
 			game_type::is_waypoint_family(cfg.game_type)
 					? cfg.mission_file
-					: cfg.mission_name;
+					: mission_title_or_header(mission_text_title, cfg.mission_name);
 	append_cstr(payload, conn.player_name.empty() ? conn.reply.player_name
 	                                             : conn.player_name); // recipient player_data+128
-	append_cstr(payload, conn.account.pcid); // [orig player+0x250 @0x5077ac] the recipient's PCID
-	append_cstr(payload, cfg.server_name); // [orig g_ServerNameStr]
+	append_cstr(payload, conn.account.pcid); // [orig: NapiNPMsg_0x7B_BuildPayload @0x5077ac, player+0x250] the recipient's PCID
+	append_cstr(payload, cfg.server_name); // [orig: g_ServerNameStr @0x24D1FC4]
 	append_cstr(payload, advertised_mission);
-	append_cstr(payload, cfg.mission_file);// [orig g_MapFileName]
-	append_u32_le(payload, cfg.game_type);  // [orig g_GameType]
-	payload.push_back(0);                  // [orig g_EmptyStr] empty C string
-	append_cstr(payload, cfg.expansion);   // [orig g_ExpansionName]
+	append_cstr(payload, cfg.mission_file);// [orig: g_MapFileName @0x24D1F3E]
+	append_u32_le(payload, cfg.game_type);  // [orig: g_GameType @0x24D2128]
+	payload.push_back(0);                  // [orig: g_EmptyStr @0x7C08C6] empty C string
+	append_cstr(payload, cfg.expansion);   // [orig: g_ExpansionName @0xB4C584]
 	return payload;
 }
 
@@ -291,9 +309,11 @@ uint32_t chunk_request_offset(const std::vector<uint8_t> &payload, uint32_t live
 // tag=0x60 chunked server-info KV transfer: the authority's session-variable
 // stream (host_session_vars). [orig: NapiNPClientMsg_HandleFileTransferChunk @0x432350;
 // the stream Game_SerializeMissionInfoToDataStream @0x523620]
-std::vector<uint8_t> build_tag60_server_info(const GameConfig &cfg, uint32_t transfer_id,
-                                             uint32_t offset) {
-	const std::vector<uint8_t> info_body = encode_session_vars(host_session_vars(cfg));
+std::vector<uint8_t> build_tag60_server_info(const GameConfig &cfg,
+                                             const std::string &mission_text_title,
+                                             uint32_t transfer_id, uint32_t offset) {
+	const std::vector<uint8_t> info_body =
+			encode_session_vars(host_session_vars(cfg, mission_text_title));
 	return build_transfer_chunk(transfer_id, info_body.data(),
 	                            static_cast<uint32_t>(info_body.size()), offset);
 }
@@ -420,23 +440,7 @@ std::vector<uint8_t> build_reply_tag_16(const GameConfig &config,
 	          [](const ScoredPlayerListEntry &a, const ScoredPlayerListEntry &b) {
 	              return a.row.slot < b.row.slot;
 	          });
-	{
-		const size_t count = rows.size();
-		size_t gap = 1;
-		while (gap <= count / 9)
-			gap = 3 * gap + 1;
-		for (; gap > 0; gap /= 3) {
-			for (size_t i = gap; i < count; ++i) {
-				ScoredPlayerListEntry insert = rows[i];
-				size_t j = i;
-				while (j >= gap && rows[j - gap].score < insert.score) {
-					rows[j] = rows[j - gap];
-					j -= gap;
-				}
-				rows[j] = insert;
-			}
-		}
-	}
+	world::shell_sort_by_value(rows, [](const ScoredPlayerListEntry &e) { return e.score; });
 	for (const ScoredPlayerListEntry &entry : rows)
 		frame.players.push_back(entry.row);
 	frame.teams.resize(size_t(frame.team_count) + 1);
@@ -562,9 +566,9 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 std::vector<uint8_t> build_tag04_slot_assignment(uint8_t difficulty, uint8_t player_slot,
                                                  uint8_t slot_capacity, uint8_t team) {
 	std::vector<uint8_t> payload(24, 0);
-	payload[16] = difficulty;    // [orig dword_24D2110 low byte @0x502B96]
+	payload[16] = difficulty;    // [orig: dword_24D2110's low byte, NetPacket_WriteSlotAssignment @0x502B96]
 	payload[17] = player_slot;   // the joiner's assigned slot index [orig slot+20]
-	payload[18] = slot_capacity; // player-slot array capacity [orig `g_PlayerSlotCapacity` @0x24c0ca4]
+	payload[18] = slot_capacity; // player-slot array capacity [orig: g_PlayerSlotCapacity @0x24c0ca4]
 	payload[23] = team;          // [orig slot+416]
 	return payload;
 }
@@ -623,7 +627,7 @@ void emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
 	//  sends @0x5130AC..0x5131D5, game state 7 @0x51319C; Server_PlayerAdd's row pick
 	//  @0x51CC9A; CNapiServer_ProcessPendingPlayerSpawns's cap @0x4C8E13]
 	const uint8_t capacity =
-			static_cast<uint8_t>(cfg.total_player_slot_capacity()); // [orig @0x24c0ca4]
+			static_cast<uint8_t>(cfg.total_player_slot_capacity()); // [orig: g_PlayerSlotCapacity @0x24c0ca4]
 	(void)Server_ReservePlayerSlot(roster, conn, capacity);
 	// Team is allocated at admission, even though it is intentionally not serialized until
 	// the later spawn-pump packet. Player-add consumes this reservation, so the delayed 0x04
@@ -645,7 +649,8 @@ void emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
 	out.push_back(make_protocol_message(s2c::SYNC_STATE, {0x01, 0x00, 0x00, 0x00}));
 	out.push_back(make_protocol_message(s2c::PLAYER_NAME, build_tag7a_pcid(conn)));
 	out.push_back(make_protocol_message(
-			s2c::FULL_PLAYER_INFO, build_tag7b_session_summary(cfg, conn)));
+			s2c::FULL_PLAYER_INFO,
+			build_tag7b_session_summary(cfg, context_mission_text_title(ctx), conn)));
 	// [u8 1][u16 count=1][u16 mask=1] — the golden's live restriction record shape.
 	out.push_back(make_protocol_message(s2c::SYNC_TICK, {0x01, 0x01, 0x00, 0x01, 0x00}));
 }
@@ -697,7 +702,7 @@ void cache_client_pose(const std::vector<uint8_t> &payload, SessionReplyState &s
 // connection's cookie buffer (the previous one freed, a CD of no length leaving
 // none), so the last CD is the cookie, however the walk's fields overlap.
 // [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 - the "CD" compare
-//  @0x512C45, the store @0x512C5D -> sub_4C6060 (frees +0x2DC @0x4C6072, zeroes
+//  @0x512C45, the store @0x512C5D -> CNetPlayer_SetCookieBuffer @0x4C6060 (frees +0x2DC @0x4C6072, zeroes
 //  +0x2DC / +0x2E0 @0x4C6080..0x4C6086, keeps none for a length below 1
 //  @0x4C608E..0x4C6095, else a copy of the declared length); KeyValueBuffer_FindValue
 //  @0x4C2A30]
@@ -736,9 +741,10 @@ std::vector<std::pair<std::string, std::string>> parse_join_identity_pairs(
 } // namespace
 
 // The authority's session variables as its serializer writes them: the
-// configured server name; the mission title, or the map filename for the
-// stock Co-op selector (objective/waypoint Co-op, bit 0x20000, and every other
-// mode keep MissionText's display title); the game type; the custom text; the
+// configured server name; session_mission_name (the map filename for the
+// stock Co-op selector; objective/waypoint Co-op, bit 0x20000, and every other
+// mode keep MissionText's display title, else the header's name); the game
+// type; the custom text; the
 // map file; score.ini's EXP_FANFARE lo/hi thresholds (the joiner arms its
 // kill / headshot tones only when lo is nonzero and lo < hi, so {0,0}
 // silences them).
@@ -747,11 +753,18 @@ std::vector<std::pair<std::string, std::string>> parse_join_identity_pairs(
 //  [info]/title @0x5237df, GAMETYPE @0x5238c7, CUSTOMTEXT @0x523914,
 //  MISSIONFILENAME @0x5239a6, EXP_FANFARE word_24C1170 @0x523a39;
 //  NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]
-SessionVars host_session_vars(const GameConfig &cfg) {
+std::string session_mission_name(uint32_t game_type, const std::string &mission_file,
+		const std::string &mission_text_title, const std::string &header_name) {
+	return game_type::is_stock_coop(game_type)
+			? mission_file
+			: mission_title_or_header(mission_text_title, header_name);
+}
+
+SessionVars host_session_vars(const GameConfig &cfg, const std::string &mission_text_title) {
 	SessionVars vars;
 	vars.server_name = cfg.server_name;
-	vars.mission_name =
-			game_type::is_stock_coop(cfg.game_type) ? cfg.mission_file : cfg.mission_name;
+	vars.mission_name = session_mission_name(
+			cfg.game_type, cfg.mission_file, mission_text_title, cfg.mission_name);
 	vars.game_type = cfg.game_type;
 	vars.custom_text = cfg.custom_text;
 	vars.mission_file = cfg.mission_file;
@@ -760,7 +773,7 @@ SessionVars host_session_vars(const GameConfig &cfg) {
 }
 
 std::vector<ProtocolMessage> build_spawn_pump_metadata(
-		const GameConfig &config, NapiNPConnection &conn,
+		const GameConfig &config, const std::string &mission_text_title, NapiNPConnection &conn,
 		const std::vector<NapiNPConnection> &roster, world::World *world,
 		const HostRotation *rotation, const HostSlotRow *host_slot) {
 	std::vector<ProtocolMessage> messages;
@@ -793,7 +806,7 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 			0x04, build_tag04_slot_assignment(
 					config.config_bytes[6], *player_slot, capacity, team)));
 	messages.push_back(make_protocol_message(
-			s2c::FULL_PLAYER_INFO, build_tag7b_session_summary(config, conn)));
+			s2c::FULL_PLAYER_INFO, build_tag7b_session_summary(config, mission_text_title, conn)));
 	return messages;
 }
 
@@ -1273,20 +1286,33 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				break;
 			case c2s::PLAYER_SYNC_REQUEST: { // player-sync request [u8 slot][u16 fieldFlags] -> S2C 0x46 player-sync.
 				// [orig: NapiNPServerMsg_0x022 @0x514C90; §5.33] The client requests a SPECIFIC slot
-				// (body byte 0) + a fieldFlags word (bytes 1-2); reply 0x46 for THAT slot so the joiner
-				// binds it. The ACK-WALK is CLIENT-driven: the server ECHOES bit 0x4000 from the request
-				// into the reply (NetPacket_SerializePlayerSync0x46 @0x505f05 `if (fieldFlags &
-				// 0x4000) adjusted |= 0x4000`), and the CLIENT, on seeing the echoed ack, re-requests
-				// slot+1 with fieldFlags 0x5CF7 until slot+1 >= its max-player count g_MaxPlayerSlots
-				// (NapiNPClientMsg_PlayerSync @0x431370 tail) — the server never terminates the walk.
-				// An inactive slot / NULL entity forces a 0x8000 removal reply (@0x505ecb..0x505ee0).
+				// (body byte 0) + a fieldFlags word (bytes 1-2); an added requester asking for an
+				// in-table slot gets the 0x46 for THAT slot, so the joiner binds it. The ACK-WALK is
+				// CLIENT-driven: the server ECHOES bit 0x4000 from the request into the reply
+				// (NetPacket_SerializePlayerSync0x46 @0x505f07 `adjusted |= 0x4000`), and the
+				// CLIENT, on seeing the echoed ack, re-requests slot+1 with fieldFlags 0x5CF7 while
+				// slot < its max-player count g_MaxPlayerSlots (NapiNPClientMsg_PlayerSync @0x43175a),
+				// so its final request is slot == the 0x04 capacity byte, which the capacity gate
+				// below leaves unanswered — the server never terminates the walk. An in-table
+				// inactive slot / NULL entity answers the 0x8000 removal record (@0x505ecb..0x505ee0).
 				// Without the walk the joiner only ever binds its OWN slot, leaving other players (the
 				// host's serve-and-play player) unbound (residual 0x0F flood grill 2026-07-01).
-				const uint8_t req_slot = msg.payload.empty() ? rep.player_slot : msg.payload[0];
+				// The requester must be an added player: retail reads the connection's session
+				// player (conn+0x160) and its server player slot (+0xC0) and sends nothing when
+				// either is null [orig: @0x514ca1..0x514cb8]; our analogue of the bound slot is the
+				// PlayerAdded phase (the 0x0F query's gate below).
+				if (conn.phase < ConnectionPhase::PlayerAdded) break;
+				// Lenient reads: a missing slot byte reads 0, and the flags word reads only when
+				// both of its bytes follow the slot byte, else 0 [orig: @0x514cca..0x514ce7].
+				const uint8_t req_slot = msg.payload.empty() ? 0 : msg.payload[0];
 				const uint16_t req_flags =
 						msg.payload.size() >= 3
 								? static_cast<uint16_t>(msg.payload[1] | (msg.payload[2] << 8))
 								: 0;
+				// A slot at or past the slot table sends nothing at all, removal record included
+				// [orig: `cmp eax, g_PlayerSlotCapacity` @0x514cf1, `jge` @0x514cf7]. The retail
+				// walk's inclusive final request (slot == the 0x04 capacity byte) lands here.
+				if (req_slot >= config.total_player_slot_capacity()) break;
 				bool slot_has_player = false;
 				for (const NapiNPConnection &c : roster) {
 					if (c.phase >= ConnectionPhase::PlayerAdded && c.link.owned_entity.valid() &&
@@ -1295,24 +1321,21 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						break;
 					}
 				}
-				// Answer EXACTLY the requested fieldFlags — ack bit included [orig:
-				// NetPacket_SerializePlayerSync0x46 @0x505E80 serializes the request mask
-				// verbatim; ack echo @0x505f05]. The retail client stops the walk itself at
-				// its max-player count g_MaxPlayerSlots (fed by our 0x04 slot-config byte 18), so
-				// no server-side cap. A zero/absent mask answers the 0x1CF7 field set.
+				// An active slot answers the request mask minus bit 0x8000, the ack bit riding
+				// along; there is no default field set, so a zero or ack-only mask answers the
+				// header and the pool index alone [orig: NetPacket_SerializePlayerSync0x46
+				// @0x505E80 - `fieldFlags & 0x7FFF` @0x505efb, the ack OR @0x505f07]. The retail
+				// client stops the walk itself at its max-player count g_MaxPlayerSlots (fed by
+				// our 0x04 slot-config byte 18).
 				const bool echo_ack = (req_flags & kPlayerSyncAck) != 0;
-				const uint16_t reply_flags =
-						(req_flags & static_cast<uint16_t>(~(kPlayerSyncAck | kPlayerSyncRemoval))) != 0
-								? static_cast<uint16_t>(req_flags & ~kPlayerSyncRemoval)
-								: static_cast<uint16_t>(kPlayerSyncJoinBroadcastFields |
-										(echo_ack ? kPlayerSyncAck : 0u));
+				const uint16_t reply_flags = static_cast<uint16_t>(req_flags & ~kPlayerSyncRemoval);
 				if (slot_has_player) {
 					const PlayerReplicationState prs = rep_for_slot(config, roster, req_slot, rep, world);
 					replies.push_back(
 							make_protocol_message(s2c::PLAYER_SYNC, encode_player_sync(prs, reply_flags)));
 				} else {
-					// Empty/disconnected slot: the 0x8000 removal record (|0x4000 when the
-					// request asked for the ack) — the walk terminator [orig: @0x505ecb..ee0].
+					// An in-table empty or disconnected slot: the 0x8000 removal record (|0x4000
+					// when the request asked for the ack) [orig: @0x505ecb..0x505ee0, @0x505f37].
 					replies.push_back(
 							make_protocol_message(s2c::PLAYER_SYNC, encode_player_sync_removal(req_slot, echo_ack)));
 				}
@@ -1327,7 +1350,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				replies.push_back(make_protocol_message(
 						s2c::FILE_TRANSFER_CHUNK,
 						build_tag60_server_info(
-								config, inputs.server_info_transfer_id,
+								config, context_mission_text_title(inputs.server_ctx),
+								inputs.server_info_transfer_id,
 								chunk_request_offset(msg.payload, inputs.server_info_transfer_id))));
 				break;
 			case c2s::MISSION_CHUNK_REQUEST: // mission-file request -> 0x64 chunk only [orig: NapiNPServerMsg_0x037_SendCircularBuffer @0x5152E0]
@@ -1544,6 +1568,13 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// share Server_ReleasePlayerDeployment. [orig: SpawnWaveList_TryQueuePlayer
 				// @0x52A490; Server_SendSpawnWaveStatusToPlayer @0x50FF10]
 				if (!conn.burst.spawned) break;
+				// The round-over gate leads the handler: once the round ended no pick
+				// deploys, queues or answers, the round-end linger's dead joiners
+				// included (g_SpawnSuccessGate, our match outcome's `ended`, as the 0x29
+				// and 0x5D cases read it). [orig: Server_ProcessClientRequestRespawn
+				// @0x519AF0 - `cmp g_SpawnSuccessGate, ebp` @0x519AF6, `jnz` @0x519B00 to
+				// the bare return @0x519DF2, ahead of the authority test @0x519B06]
+				if (world != nullptr && world->match.outcome().ended) break;
 				if (world == nullptr || !conn.link.owned_entity.valid()) {
 					// World-less/unit-test path: the golden frame-82540 hint byte, as before.
 					replies.push_back(

@@ -90,6 +90,16 @@ std::vector<renderer::DxtSurface> build_detail_layer_levels(
 		const Rgba8Image *far_detail,
 		int32_t session_texcompression_level);
 
+// The minimap's `depthspin` shore texture, 256 x 256, from the 1024 x 1024 height atlas: each texel
+// sums the four taps at (4x, 4z), (4x + 2, 4z), (4x, 4z + 2) and (4x + 2, 4z + 2) and keeps the sum
+// >> 10, the integer height byte (retail stores (sum << 14) | 0xFFFFFF, the byte its alpha)
+// [orig: PolyTrn_InitTextures @ 0x60BA20..0x60BB11, the texture made @ 0x60BB3B]. Packed RG8 for
+// the device: R that byte, G the water plane the shore pass's alpha test compares it with (the
+// plane floored, clamped 0..254; hud_minimap.h, the alpha-tested redraw), so the device samples
+// both and tests after filtering. Empty (no texture) for an atlas of another size, a non-finite
+// plane, or a plane below 1, where the pass draws nothing.
+std::vector<uint8_t> build_depthspin_rg8(const std::vector<uint16_t> &depth, float water_height_wu);
+
 // D3DXFilterTexture(D3DX_FILTER_BOX) level chain used by ordinary TGA
 // textures. Retail allocates while min(width,height)>2, so the terminal
 // level for the shipped power-of-two terrain scorch images is 4x4.

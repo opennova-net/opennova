@@ -2,8 +2,8 @@ extends GutTest
 
 # TerrainTileEntry / TerrainTileInfo carry every byte of a .til record: the whole flags byte (bits past
 # the flips and rotate the game draws, Nile's selection mark 0x08 among them) and MED's +10 layer, and a
-# save writes MED's header (12 * count + 16 at +8) [orig: JOTACmed MapTileStore_Serialize @ 0x433EC0;
-# docs/tiles/til-re.md D-TIL-6].
+# save writes MED's header (12 * count + 16 at +8) [orig: JOTACmed.exe MapTileStore_Serialize
+# @ 0x433EC0; docs/tiles/til-re.md D-TIL-6].
 
 var _dir := ""
 

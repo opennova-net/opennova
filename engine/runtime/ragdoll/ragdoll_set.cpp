@@ -131,6 +131,13 @@ void RagdollSet::feed(uint32_t key, const Xform &node, const Vec3 &anchor) {
 
 void RagdollSet::step(int ticks, const Collider &collider) {
 	ticks = std::max(ticks, 0);
+	// The awake budget holds through a step: a sleeper whose anchor drifted
+	// wakes only while fewer than kMaxAwake step; past the budget it stays
+	// asleep, its drift kept, and wakes on a later tick that has room.
+	int awake = 0;
+	for (const auto &[key, e] : entries_)
+		if (e.ragdoll != nullptr && !e.ragdoll->asleep())
+			++awake;
 	for (auto it = entries_.begin(); it != entries_.end();) {
 		Entry &e = it->second;
 		if (!e.observed)
@@ -138,7 +145,14 @@ void RagdollSet::step(int ticks, const Collider &collider) {
 		if (e.ragdoll != nullptr) {
 			if (e.observed) {
 				for (int t = 0; t < ticks && !e.ragdoll->failed(); ++t) {
+					if (awake < kMaxAwake && e.ragdoll->drifted(e.anchor)) {
+						e.ragdoll->wake();
+						++awake;
+					}
+					const bool stepping = !e.ragdoll->asleep();
 					e.ragdoll->step(collider, e.anchor, kTickSeconds);
+					if (stepping && (e.ragdoll->asleep() || e.ragdoll->failed()))
+						--awake;
 				}
 				if (e.ragdoll->failed()) {
 					end(e);
@@ -148,6 +162,7 @@ void RagdollSet::step(int ticks, const Collider &collider) {
 				}
 			} else if (!e.ragdoll->asleep()) {
 				e.ragdoll->sleep();
+				--awake;
 			}
 		} else if (e.blend_left > 0) {
 			e.blend_left = std::max(0, e.blend_left - ticks);

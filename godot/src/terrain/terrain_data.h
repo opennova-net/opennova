@@ -279,12 +279,11 @@ public:
 	float get_height(const Vector3 &p_world_pos) const;
 	float get_height_world(const Vector3 &p_world_pos) const;
 	float get_height_world_bilinear(const Vector3 &p_world_pos) const;
-	// Exact gameplay-map shore mask. Retail builds a 256x256 `depthspin`
-	// texture by reducing the raw 1024x1024 CPT heights 4:1 (four taps,
-	// sum >> 10), then linearly samples it and alpha-tests the UNORM8 result
-	// against the integer water plane at raster time. This equivalent keeps
-	// BOTH operands in an RG8 data texture (R = reduced terrain height,
-	// G = integer water plane); the HUD's map-water shader performs the same
+	// Exact gameplay-map shore mask: the engine's 256x256 `depthspin` texels
+	// (engine: runtime/terrain/texture_preprocess.h build_depthspin_rg8) as an
+	// RG8 data texture (R = reduced terrain height, G = integer water plane).
+	// Retail linearly samples the height and alpha-tests it against the plane
+	// at raster time; the HUD's map-water shader performs the same
 	// sample-then-quantize comparison, so shoreline texels resolve exactly —
 	// a pre-thresholded binary mask is NOT equivalent there.
 	Ref<ImageTexture> build_minimap_water_mask(
@@ -292,8 +291,14 @@ public:
 	// Detail grass reads the flat, 1024-wrapped foliagemap at the candidate's
 	// source-atlas position (foliage::WorldSamplers::detail_foliage_mask_at).
 	int get_detail_foliage_index_fixed(int32_t atlas_x_fixed, int32_t atlas_z_fixed) const;
-	// MODEL masks and gameplay queries use the sector-grid-routed foliagemap.
+	// The foliage code at a Godot-plane position (x, z = -mission y), as
+	// get_foliage_index_fixed reads it (the editor's devices and tests).
 	int get_foliage_index_world(float world_x, float world_z) const;
+	// The foliage code at a 16.16 mission position, as the game's MODEL tier
+	// reads it: routed through the sector grid, a non-wrapping axis clamping
+	// to the edge (engine: terrain::foliage_code_map). 0 with no map or on an
+	// empty sector. C++ only.
+	int get_foliage_index_fixed(int32_t mission_x_fixed, int32_t mission_y_fixed) const;
 	// Runtime world->atlas transform: wraps the 16x16 sector grid and preserves
 	// raw sector ids/local offsets like the retail terrain samplers.
 	Vector2 world_to_runtime_source_coords(float world_x, float world_z) const;

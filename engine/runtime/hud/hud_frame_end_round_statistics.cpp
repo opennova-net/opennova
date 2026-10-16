@@ -6,8 +6,8 @@
 // [orig: HUD_DrawEndRoundStatistics @0x5b7600, called from the frame drawer
 //  HUD_DrawOverlayPanels @0x5c0092 while the dword_24C18AC toggle is set — the label box
 //  HUD_DrawLabelBox(ctx, 128, top, 896, top + 340, SCORE_TITLE, -1) @0x5b7671,
-//  labels left at x 200 via HUD_DrawTextLeftScaled (ex sub_580B40) -> HUD_DrawTextLeft_HalfBright, values
-//  right-aligned at x 620 via HUD_DrawTextRightAlignedScaled (ex sub_580BC0) -> HUD_DrawTextRightAligned_HalfBright,
+//  labels left at x 200 via HUD_DrawTextLeftScaled -> HUD_DrawTextLeft_HalfBright, values
+//  right-aligned at x 620 via HUD_DrawTextRightAlignedScaled -> HUD_DrawTextRightAligned_HalfBright,
 //  all in g_HUDLabelFontLarge.]
 
 #include <runtime/hud/hud_frame.h>

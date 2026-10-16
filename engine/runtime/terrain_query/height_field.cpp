@@ -49,6 +49,15 @@ float height_field_height_world(const TerrainHeightField &f, float world_x, floa
 	return f.heightmap[hz * hm_size + hx] / 256.0f;
 }
 
+float height_field_height_mission(const TerrainHeightField &f, float mission_x, float mission_y) {
+	return height_field_height_world(f, mission_x, -mission_y);
+}
+
+float height_field_height_mission_bilinear(const TerrainHeightField &f, float mission_x,
+		float mission_y) {
+	return height_field_height_world_bilinear(f, mission_x, -mission_y);
+}
+
 float height_field_height_world_bilinear(const TerrainHeightField &f, float world_x, float world_z) {
 	if (!f.valid()) return 0.0f;
 
@@ -152,7 +161,7 @@ TerrainHeightGradient height_field_gradient_fixed(
 				static_cast<std::size_t>(taps.z(ty)) * f.dim + taps.x(tx)]);
 	};
 	// Unsigned raw16 neighbours, plus-minus, without /256 or /2. The motor
-	// applies its own fixed-point gain. [orig: @0x60648F..0x60650C]
+	// applies its own fixed-point gain. [orig: Terrain_GetHeightGradient @ 0x606429..0x606488]
 	return {raw_at(x + 1, y) - raw_at(x - 1, y),
 	        raw_at(x, y + 1) - raw_at(x, y - 1)};
 }

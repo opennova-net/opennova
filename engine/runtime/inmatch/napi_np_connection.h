@@ -38,7 +38,7 @@ inline constexpr uint32_t kFirstJoinerDcb = kHostPlayerDcb + 1;
 // [orig: NapiNP_HandleResendList @0x6239ef..0x623a37 (cb_server_6 /
 //  cb_client_3); CNapiNPConnection_SendMissingSeqList @0x623780..0x6237bd
 //  (cb_server_5 / cb_client_2); the callbacks CNapiNetwork_Init installs
-//  @0x4ca948..0x4ca9cd: sub_4C62A0 and Network_LogOutgoingPacketError raise
+//  @0x4ca948..0x4ca9cd: NapiNPServer_OnResendListCallback @0x4c62a0 and Network_LogOutgoingPacketError raise
 //  flag 1, @0x4c4681 and Network_LogIncomingPacketError flag 2]
 inline constexpr uint32_t kNetQualityLinkErrorOutgoing = 1u;
 inline constexpr uint32_t kNetQualityLinkErrorIncoming = 2u;
@@ -471,6 +471,10 @@ struct ClientGameEnvironment {
 	int32_t db = 0;
 	int32_t mbn = 0;
 	int32_t sopd = 0;
+	// The "APPID" tag, the NovaWorld game session's AppId the .joi's CK carries
+	// (NapiNetConfig app_id, the player's +0x10C); 0 when absent (a LAN join).
+	// [orig: NapiNetConfig_LoadFromConnTags @0x4C7260, the APPID leg @0x4C7415]
+	int32_t app_id = 0;
 };
 
 struct NapiNPConnection {

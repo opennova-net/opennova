@@ -3,6 +3,8 @@
 // [orig: HUD_RenderAllOverlays @ 0x5a8070 -> HUD_RenderOverlays @ 0x5a7bb0]
 
 #include <runtime/hud/hud_frame.h>
+
+#include <runtime/world/entity.h> // SeatType
 #include <runtime/hud/hud_game_text.h>
 #include <runtime/hud/hud_medic_cross.h>
 
@@ -15,6 +17,26 @@
 using namespace opennova::fnt;
 
 namespace opennova::hud {
+
+std::string attach_label_text(const GameTextLookup &gametext, world::SeatType seat_type,
+		const std::string &attach_text_key) {
+	using world::SeatType;
+	switch (seat_type) {
+		case SeatType::Passenger:
+			return game_text(gametext, kGameTextOverlays, "STROVER_SIT", "!sit");
+		case SeatType::Controller:
+		case SeatType::Driver:
+			return game_text(gametext, kGameTextOverlays, "STROVER_CONTROL", "!Control");
+		case SeatType::Gunner:
+			if (attach_text_key.empty())
+				return game_text(gametext, kGameTextOverlays, "STROVER_USEGUN", "!UseGun");
+			return game_text(gametext, kGameTextOverlays, attach_text_key.c_str(), "");
+		case SeatType::ArmoryPoint:
+			return game_text(gametext, kGameTextOverlays, "STROVER_USEARMORY", "!UseArmory");
+		default:
+			return std::string();
+	}
+}
 
 namespace {
 
@@ -1931,7 +1953,7 @@ void HudFrameCompiler::element_end_round_overlay(const HudFrameState &state,
 	// overlay safe area, then each resolved line centred on design x 512 in
 	// the Impact38 slot, half-bright like every HUD text
 	// [orig: HUD_DrawLabelBox(ctx, 8, top+8, 1015, bottom-8) @0x5b7d3e;
-	//  HUD_DrawTextCenteredScaled (ex sub_580B80) -> Viewport_ScaleToVirtualCoords + HUD_DrawTextCentered_HalfBright].
+	//  HUD_DrawTextCenteredScaled -> Viewport_ScaleToVirtualCoords + HUD_DrawTextCentered_HalfBright].
 	const HudEndRoundOverlayState &er = state.end_round;
 	if (!er.shown) return;
 	emit_stdbox(sx(8.0f, w), sy(static_cast<float>(er.top + 8), h),
@@ -1991,7 +2013,7 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 	}
 	// Both loops draw in the BOLD label slot at its own scale, not the hudpos
 	// HUD slot [orig: push offset g_HUDLabelFontBold @0x59ae09 / @0x59aea6 into
-	// sub_580560 @0x580560, which hands the slot's scale pair to
+	// HUD_DrawTextLeft_HalfBrightKeepAlpha @0x580560, which hands the slot's scale pair to
 	// CGameFont_DrawText @0x5805b3..0x5805c0]; layout-only embedders fall back
 	// to the HUD slot.
 	const bool have_bold = label_font_bold_.font() != nullptr;
@@ -2029,7 +2051,7 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 			int alpha = 255 * remaining / kMessageExpiryStagger;
 			if (alpha <= 0) continue;
 			if (alpha > 255) alpha = 255;
-			// The drawer halves the RGB and keeps the alpha [orig: sub_580560
+			// The drawer halves the RGB and keeps the alpha [orig: HUD_DrawTextLeft_HalfBrightKeepAlpha
 			// @0x59ae0e — (c & 0xFF000000) + ((c >> 1) & 0x7F7F7F)].
 			emit_slot_text(bf, bscale, line.text.c_str(), static_cast<float>(cx),
 					static_cast<float>(row_y),
@@ -2060,7 +2082,7 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 		int row_y = ay;
 		for (int i = first; i < static_cast<int>(live.size()); ++i) {
 			const HudMessageLine *line = live[static_cast<size_t>(i)];
-			// The same halving drawer [orig: sub_580560 @0x59aeab].
+			// The same halving drawer [orig: HUD_DrawTextLeft_HalfBrightKeepAlpha @0x59aeab].
 			emit_slot_text(bf, bscale, line->text.c_str(), static_cast<float>(ax),
 					static_cast<float>(row_y), half_bright_keep_alpha(line->color), 0u);
 			row_y += row_h;

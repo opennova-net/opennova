@@ -1,5 +1,6 @@
 #include <net/novaworld/db/database.h>
 
+#include <base/io/file_io.h>
 #include <base/io/log.h>
 #include <base/io/sha256.h>
 
@@ -12,7 +13,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <fstream>
 #include <map>
 #include <sstream>
 #include <utility>
@@ -662,13 +662,10 @@ void ConnectionPool::release(std::unique_ptr<Database> db) {
 namespace {
 
 std::string read_file(const std::filesystem::path &p) {
-	std::ifstream in(p, std::ios::binary);
-	if (!in) {
-		throw std::runtime_error("could not open " + p.string());
-	}
-	std::ostringstream os;
-	os << in.rdbuf();
-	return os.str();
+	std::string text;
+	std::string error;
+	if (!io::read_file_text(p.string(), text, error)) throw std::runtime_error(error);
+	return text;
 }
 
 // The database's contract: byte-transparent text (SQL_ASCII, as SQLite kept

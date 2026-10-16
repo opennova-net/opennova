@@ -295,8 +295,8 @@ public:
 	// machine's UI frames, then the in-match frame); the busy spins pass receive + send every
 	// few microseconds, so a running countdown is out before the next datagram; the timed
 	// loops call the send pump only once MORE than their pace passed since the last call.
-	// [orig: MultiPlayer_JoinSessionStateMachine @0x56a320 states 5/6 (@0x56a5dd, sub_424740
-	//  @0x424767); SaveFile_SendAndWaitForServerAck @0x5204b0; InitRandomSeedOrRequest
+	// [orig: MultiPlayer_JoinSessionStateMachine @0x56a320 states 5/6 (@0x56a5dd, MultiPlayer_PumpJoinVerificationFrame
+	//  @0x424740 - its send @0x424767); SaveFile_SendAndWaitForServerAck @0x5204b0; InitRandomSeedOrRequest
 	//  @0x51e8f0; NapiClient_WaitForDisconnect @0x42cb20; NapiClient_WaitForGameStart @0x42cc10;
 	//  Game_StartMission's 0x0F wait @0x52628d..0x5262df; Client_ProcessNetworkFrame @0x42c3dd]
 	enum class SendPumpLoop : uint8_t {
@@ -497,9 +497,10 @@ public:
 	// NWJoin .joi CK and uploads as the ClientAuth APPID conn-tag; a NovaWorld
 	// host validates it (reject code 9). Configure before start(); unset keeps
 	// "0" (the LAN default; LAN sends no APPID and no host checks one).
-	// [orig: net_config.bt = atol(decoded CK) @0x569b8e; the host reads the
-	//  APPID tag into that field, NapiNetConfig_LoadFromConnTags @0x4c7260 ->
-	//  Server_ValidatePlayerJoinRequest @0x512100 @0x5122c5]
+	// [orig: UI_JoinSelectedSession @0x5699d0 - net_config.app_id (+0x40) =
+	//  atol(decoded CK) @0x569b8e; the host reads the APPID tag into that field,
+	//  NapiNetConfig_LoadFromConnTags @0x4c7260 (@0x4C7415) ->
+	//  Server_ValidatePlayerJoinRequest @0x512100 @0x5122C3]
 	void set_app_id(std::string token) {
 		app_id_ = token.empty() ? std::string("0") : std::move(token);
 	}
@@ -991,9 +992,11 @@ private:
 	// the same S2C 0x04 body at byte 18. A value of 4 walks slots 0..4.
 	// [orig: g_MaxPlayerSlots read at NapiNPClientMsg_PlayerSync @0x431370]
 	uint8_t max_player_slot_ = 0;
-	// Client net-frame counter echoed as the padding echo's third dword. Retail increments its
-	// global once per client net pump and never resets it for a rejoin.
-	// [orig: @0xA822A4, ++ in NetClient_HandleGameEnd @0x424752]
+	// Client net-frame counter echoed as the padding echo's third dword, never reset for a
+	// rejoin. Retail steps it only in the join screen's state-6 busy loop; ours on every
+	// pump (a ledgered residual: the retail count is CPU-bound).
+	// [orig: g_ClientNetFrameCounter @0xA822A4, ++ in MultiPlayer_PumpJoinVerificationFrame
+	//  @0x424740 (@0x424776), its one caller MultiPlayer_JoinSessionStateMachine @0x56A685]
 	uint32_t net_frame_counter_ = 0;
 	LoadoutKit loadout_kit_;      // binding-injected submission content (see set_loadout_kit)
 	bool loadout_kit_set_ = false;

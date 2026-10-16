@@ -14,17 +14,8 @@ int main() {
     // Empty layer -> no member.
     {
         SoundSelector s;
-        TEST_EXPECT(s.select(SoundSelector::make_key(0, 0, 0), 0, mode::kFirst) == -1);
+        TEST_EXPECT(s.select(SoundSelector::make_key(0, 0, 0), 0, mode::kSequential) == -1);
         TEST_EXPECT(s.select(SoundSelector::make_key(0, 0, 0), -3, mode::kRandom) == -1);
-    }
-
-    // FIRST (reimpl preview extension; no engine equivalent): always index 0.
-    {
-        SoundSelector s;
-        const uint64_t k = SoundSelector::make_key(0, 0, 0);
-        for (int i = 0; i < 8; ++i) {
-            TEST_EXPECT(s.select(k, 5, mode::kFirst) == 0);
-        }
     }
 
     // SEQUENTIAL (flag 0x10): 0,1,2,0,1,2 wrapping [orig: @ 0x75cd6f..0x75cd79].

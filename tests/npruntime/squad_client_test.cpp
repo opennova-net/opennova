@@ -6,7 +6,7 @@
 // (hud/squad_feed.h).
 // [orig: NapiNPClientMsg_HandleSquadJoin @0x425600, NapiNPClientMsg_0x072
 //  @0x425710, NapiNPClientMsg_0x073 @0x425770, NapiNPClientMsg_PlayerRecruited
-//  @0x4258a0, NapiNPClientMsg_0x078 @0x425970, NapiNPClientMsg_0x033
+//  @0x4258b0, NapiNPClientMsg_0x078 @0x425970, NapiNPClientMsg_0x033
 //  @0x425fa0, NapiNPClientMsg_0x07C @0x426020, Waypoint_CreateForPlayer
 //  @0x4dfcb0, CMap_HandleWaypointCreateConfirm @0x54a0d0,
 //  CMap_DestroyFirstActiveLoadingEntity @0x547990,

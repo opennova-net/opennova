@@ -35,7 +35,7 @@ bool requirement_row_enabled(const ProjectDocument &doc, const RequiredResource 
 	// mp.mnu is the shell's: the startup screen's NW_MULTI_PLAYER and NW_ACTIVATE controls load it with no
 	// mission [orig: sub_555890 @0x5558c7, @0x5558e5 -> sub_5557A0 -> UI_EnterNovaWorldMenu @0x5588fa], so
 	// Multiplayer alone puts it on the checklist, whatever the manifest's phase.
-	// pre.mnu likewise: a join from the shell's multiplayer screens loads it before any mission [orig: sub_5693E0 @
+	// pre.mnu likewise: a join from the shell's multiplayer screens loads it before any mission [orig: PreMenu_Init @
 	// 0x5693e0, the load @ 0x56944a].
 	if (role == "mp_menu" || role == "pre_menu") return doc.features.multiplayer;
 	if (!requirement_phase_enabled(doc, resource.phase)) return false;

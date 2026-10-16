@@ -114,6 +114,12 @@ std::string weapons() {
 	       "\tround_type AMMO_TEST\n\tflags sighted\n\tflags nocardswitch\n\tscope_max_mag 2 0\n"
 	       "\tpos 25 -5 -145 0 0 0\n\ttpos -1 12 -138 2 359 9\n"
 	       "\taction \"fire\"\n\t\tanim anim_wpn_fire\n\t\tsoundsetend GS_TEST\n\t\tdelayend 4\n\t\tparticle Flash\n"
+	       "\t\tparticleuserpoint muzzle\n\t\tfunction wpn_std_fire\n\tend\nend\n"
+	       // An inaccurate rifle: five degrees of ERROR in every stance.
+	       "weapon \"WPN_SPREAD\"\n\tclipsize 5\n\tstartrounds 10\n\tanimadm gun\n\tgfx1 gun\n\tgfx3 gun\n"
+	       "\tround_type AMMO_TEST\n\terror 5 5 5 5 5 5\n"
+	       "\tpos 25 -5 -145 0 0 0\n\ttpos -1 12 -138 0 0 0\n"
+	       "\taction \"fire\"\n\t\tanim anim_wpn_fire\n\t\tsoundsetend GS_TEST\n\t\tdelayend 4\n\t\tparticle Flash\n"
 	       "\t\tparticleuserpoint muzzle\n\t\tfunction wpn_std_fire\n\tend\nend\n";
 }
 
@@ -370,6 +376,28 @@ int test_surfaces() {
 	TEST_EXPECT(events_of(*project.range(), Kind::Impact).empty());
 	TEST_EXPECT(events_of(*project.range(), Kind::Fired).size() == 1);
 	TEST_EXPECT(project.range()->scar_count() == 0);
+	return 0;
+}
+
+// The range fires as the game's single player does: its world takes the rules word out of a session, whose
+// 0x4000 spreads a player's shot by the weapon's ERROR, so the inaccurate rifle's round strikes the target off the
+// line the accurate one's follows [orig: CNapiGameSession_InitRandomSeedOrRequest @0x51E957; RoundData_SpawnRound
+// `test g_RulesFlags, 4000h` @0x4EC442, the offset @0x4EC4A7..0x4EC4BA].
+int test_spread() {
+	const auto stop = [](const char *weapon, world::Vec3 &at) {
+		WeaponProject project;
+		if (!project.made || !project.select(weapon) || !project.options(R"({"weapon": "first"})") ||
+		    !project.perform(R"([{"tick": 0, "gesture": "fire"}])", 40) || project.range() == nullptr)
+			return false;
+		const std::vector<WeaponRangeEvent> impacts = events_of(*project.range(), Kind::Impact);
+		if (impacts.size() != 1) return false;
+		at = impacts[0].at;
+		return true;
+	};
+	world::Vec3 straight, spread;
+	TEST_EXPECT(stop("WPN_TEST", straight));
+	TEST_EXPECT(stop("WPN_SPREAD", spread));
+	TEST_EXPECT(std::fabs(spread.y - straight.y) > 0.01f || std::fabs(spread.z - straight.z) > 0.01f);
 	return 0;
 }
 
@@ -857,6 +885,7 @@ int main() {
 	TEST_EXPECT(test_a_shot_in_first_person() == 0);
 	TEST_EXPECT(test_the_eye() == 0);
 	TEST_EXPECT(test_surfaces() == 0);
+	TEST_EXPECT(test_spread() == 0);
 	TEST_EXPECT(test_hold_reload_scope_switch() == 0);
 	TEST_EXPECT(test_the_run_again() == 0);
 	TEST_EXPECT(test_scope() == 0);

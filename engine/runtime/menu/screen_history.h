@@ -20,7 +20,7 @@
 //  @0x54e514); UIScene_ReturnToHistoryScreen @0x63dfa0 (the menu mode's re-entry,
 //  Menu_InitShellResources @0x552682, pop_extra 1; an in-game screen's close,
 //  UI_CloseMenuScreen @0x54e635, pop_extra 0); UIScene_ClearScreenHistory @0x63b3d0
-//  (CUIScene_DestroyAllContent; the push gate @0x63b40e, CGameMenu_ctor @0x63e0d5)]
+//  (CUIScene_DestroyAllContent; the push gate @0x63b40e, CGameMenu_Construct @0x63e0d5)]
 
 #include <string>
 #include <vector>

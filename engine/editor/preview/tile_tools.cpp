@@ -17,7 +17,7 @@ namespace {
 
 constexpr NodeKind kTile = node_kind(TilKind::Tile);
 
-// The two quarter-turn tables over the low three bits, in the file's encoding [orig: gobj sub_1000EDDA @
+// The two quarter-turn tables over the low three bits, in the file's encoding [orig: gobj.dll sub_1000EDDA @
 // 0x1000EE12..0x1000EE89: a3 set, the plane's clockwise turn as the game draws the cell (MED's sub_433740); a3 clear,
 // counter-clockwise (MED's sub_4336E0)]. Through the game's drawing (til_transform_local_uv, the cell's first row along
 // the north edge), flags 4 shows the cell turned a quarter counter-clockwise, and 7 a quarter clockwise.
@@ -56,7 +56,7 @@ void sets_to(const TilRow &row, const TilOverlayEntry &to, std::vector<Edit> &ou
 }
 
 // MED's step on one axis of its frame: `step` 16.16, positive rounding up first, then snapped down to whole units
-// [orig: JOTACmed sub_43F0B0 @ 0x43F169..0x43F1A0].
+// [orig: JOTACmed.exe sub_43F0B0 @ 0x43F169..0x43F1A0].
 int32_t med_step(int32_t value, int32_t step) {
 	int64_t v = value;
 	if (step > 0) v += 0xFFFF;
@@ -81,7 +81,8 @@ size_t tile_at(const TilFile &file, double x, double y) {
 	for (size_t i = file.entries.size(); i-- > 0;) {
 		const TileSquare s = tile_square(file.entries[i]);
 		// PtInRect over the plane's (x, y): left <= x < right, top <= y < bottom, the rectangle's top the square's
-		// south edge [orig: gobj sub_10013364 @ 0x100133C9..0x100133E8; the pick point (x, +y) @ 0x10013392..0x100133AB].
+		// south edge [orig: gobj.dll sub_10013364 @ 0x100133C9..0x100133E8; the pick point (x, +y) @
+		// 0x10013392..0x100133AB].
 		if (double(s.x0) <= px && px < double(s.x1) && double(s.y0) <= py && py < double(s.y1)) return i;
 	}
 	return size_t(-1);
@@ -112,14 +113,15 @@ uint8_t tile_turned(uint8_t flags, int quarter_turns) {
 }
 
 uint8_t tile_flipped(uint8_t flags, bool across) {
-	// [orig: gobj sub_1000EEED @ 0x1000EF0B..0x1000EF36: across (a3 set) flips U unturned, V turned; down the other]
+	// [orig: gobj.dll sub_1000EEED @ 0x1000EF0B..0x1000EF36: across (a3 set) flips U unturned, V turned; down the
+	// other]
 	const bool turned = (flags & TIL_FLAG_ROTATE_90) != 0;
 	const uint8_t bit = (across != turned) ? TIL_FLAG_FLIP_X : TIL_FLAG_FLIP_Y;
 	return uint8_t(flags ^ bit);
 }
 
 TilOverlayEntry tile_nudged(const TilOverlayEntry &entry, int dx, int dy, bool big) {
-	// MED's step: 0x100 or 0x10000 scaled by 16 [orig: JOTACmed sub_440FD0 @ 0x44162E..0x44166B; sub_43F0B0 @
+	// MED's step: 0x100 or 0x10000 scaled by 16 [orig: JOTACmed.exe sub_440FD0 @ 0x44162E..0x44166B; sub_43F0B0 @
 	// 0x43F0E2..0x43F0E4], so a press moves one whole unit (by the rounding) or sixteen. Its frame's second axis
 	// is the stored z, the plane's y: a step north is a positive step there.
 	const int32_t unit = big ? 0x100000 : 0x1000;
@@ -133,8 +135,8 @@ std::vector<TilOverlayEntry> tiles_turned_about_centroid(const std::vector<TilOv
 	std::vector<TilOverlayEntry> out = entries;
 	if (entries.empty() || direction == 0) return out;
 	// MED keeps a tile by its centre, in its frame (x, the stored z less 8 units: the plane's x east and y north)
-	// [orig: JOTACmed MapTileStore_Serialize @ 0x433FA0..0x433FA6]; the centroid is the centres' integer mean, the sum
-	// over 64 bits divided toward zero [orig: sub_43E910 @ 0x43E9C4..0x43EA12].
+	// [orig: JOTACmed.exe MapTileStore_Serialize @ 0x433FA0..0x433FA6]; the centroid is the centres' integer mean, the
+	// sum over 64 bits divided toward zero [orig: JOTACmed.exe sub_43E910 @ 0x43E9C4..0x43EA12].
 	int64_t sum_x = 0, sum_s = 0;
 	for (const TilOverlayEntry &e : entries) {
 		sum_x += int64_t(e.x_fixed) + 0x80000;
@@ -178,8 +180,8 @@ bool tile_corner_at(double x, double y, bool grid, int32_t &x_fixed, int32_t &z_
 		z_fixed = int32_t(int64_t(north) * io::kFp16OneInt);
 		return true;
 	}
-	// Nile's stamp: the point's 16.16 words, truncated, plus 0x7FFF, the fraction cleared [orig: gobj sub_1000B4A1 @
-	// 0x1000B4C8..0x1000B542]; the stored z is the plane's y.
+	// Nile's stamp: the point's 16.16 words, truncated, plus 0x7FFF, the fraction cleared [orig: gobj.dll sub_1000B4A1
+	// @ 0x1000B4C8..0x1000B542]; the stored z is the plane's y.
 	if (!std::isfinite(x) || !std::isfinite(y) || std::abs(x) > 65536.0 || std::abs(y) > 65536.0) return false;
 	const int64_t px = int64_t(std::trunc(x * io::kFp16OneD));
 	const int64_t pz = int64_t(std::trunc(y * io::kFp16OneD));
@@ -247,7 +249,7 @@ std::vector<Edit> plan_tile_layer(const TilDocument &document, const std::vector
 	const std::vector<const TilRow *> picked = selected(document, rows);
 	if (picked.empty()) return out;
 	// Nile walks the array in order: to the front, each selected tile moves to the end after the ones before it;
-	// to the back, each to the start after the ones before it [orig: gobj sub_1000EC29 @ 0x1000EC60..0x1000ECA4,
+	// to the back, each to the start after the ones before it [orig: gobj.dll sub_1000EC29 @ 0x1000EC60..0x1000ECA4,
 	// @ 0x1000ED2B..0x1000EDB4]. A Move to the end appends; to the start, moving them last first keeps their order.
 	const auto move = [&](const TilRow &row, size_t position) {
 		Edit edit;

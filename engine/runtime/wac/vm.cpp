@@ -1,6 +1,8 @@
 #include <runtime/wac/vm.h>
 #include <formats/mus/mus.h>
 
+#include <base/io/bits.h>
+
 #include <algorithm>
 #include <cmath>
 
@@ -17,8 +19,6 @@ namespace opennova::wac {
 namespace {
 
 bool ieq(const char *a, const char *b) { return opennova::strutil::iequals(a, b); }
-
-uint32_t rol32(uint32_t x, int n) { return (x << n) | (x >> (32 - n)); }
 
 // [orig: Math_PowFloat @0x4F9BA0] binary32 input, exponentiation by
 // squaring, then the VM keeps EAX from the SSE2 conversion.
@@ -79,7 +79,7 @@ uint32_t WacVm::next_rand(opennova::world::World &w) {
     //  then the SIGNED carry: sar edx,1Fh; and edx,1ABB09h; add. Same idiom
     //  (and same seed) as the weather PRNG @ 0x57e9fc (env #22/#25).]
     uint32_t &seed = w.script.vars.wac.dornd_seed;
-    uint32_t v = rol32(seed, 9);
+    uint32_t v = io::rotl32(seed, 9);
     v += static_cast<uint32_t>(static_cast<int32_t>(v) >> 31) & 0x1ABB09u;
     seed = v;
     return v;

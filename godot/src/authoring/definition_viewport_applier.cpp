@@ -1,4 +1,5 @@
 #include "authoring/definition_viewport_applier.h"
+#include "authoring/preview_godot.h"
 
 #include <godot_cpp/classes/node3d.hpp>
 #include <godot_cpp/classes/viewport.hpp>
@@ -27,10 +28,6 @@ namespace {
 
 const opennova::editor::DefinitionViewport &definition_of(const opennova::editor::ViewportModel &model) {
 	return static_cast<const opennova::editor::DefinitionViewport &>(model);
-}
-
-Vector3 to_godot(const opennova::editor::PreviewVec3 &v) {
-	return Vector3(v.x, v.y, v.z);
 }
 
 } // namespace

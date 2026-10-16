@@ -545,7 +545,7 @@ void Simulation::finish_kernel_boot() {
 
 // The kernel boot's bringup_net_session hook: the active role's own bring-up
 // (the listen host stands its inmatch session up between the world wiring
-// and the system registration [orig: SinglePlayer_StartMission @0x561af0];
+// and the system registration (engine: runtime/inmatch/host_role.cpp);
 // a joiner (re)builds its non-authority ClientRuntime at the same point; the
 // bare no-net world installs nothing), then the binding's tail: the live
 // runtime pointer, the retained join inputs on a fresh joiner runtime, the
@@ -567,7 +567,7 @@ std::function<void(bool)> Simulation::role_bringup_tail() {
 		}
 		if (is_joiner()) {
 			net_.joiner_applied_loadout_revision = 0;
-			net_.deploy_zone_registry_built = false; // fresh world -> fresh zone registry
+			net_.deploy_zone_registry.invalidate(); // fresh world -> fresh zone registry
 			// Re-arm the 0x2F submission seam from the carried sim state. The fresh
 			// kernel holds an EMPTY weapon catalog, so this is a deliberate no-op
 			// that leaves the capture-default fallback armed; the real arm happens
@@ -821,7 +821,7 @@ void Simulation::restore_world_baseline() {
 		// its registry carriers. Force one exact rematerialization fold; retain the
 		// already-built portal tables because their handles remain identical and
 		// the occlusion models' weld records are intentionally one-shot mutable.
-		net_.deploy_zone_registry_built = false;
+		net_.deploy_zone_registry.invalidate();
 	}
 	if (assets_.collision_item_db.is_valid())
 		resolve_collision_instances(assets_.collision_item_db);
@@ -1035,7 +1035,7 @@ Error Simulation::debug_set_entity_position(int p_index, const Vector3 &p_missio
 // outright so an unattended round can reach a scripted win condition that an
 // autofiring bot cannot reliably produce (00TRg's event 31 needs GroupDestroyed(16),
 // i.e. six specific AI dead). It drives the SAME EntityCommands::kill_group the BMS
-// KILL_GROUP action uses [orig: EventAction_Dispatch case 2 @0x4542e0]; it invents no
+// KILL_GROUP action uses (engine: formats/mission/bms.h); it invents no
 // state and fakes no event -- the win chain still has to evaluate on its own.
 // Sibling of debug_teleport_local_player, which exists for the same reason.
 int Simulation::debug_kill_group(int p_group) {
@@ -1147,7 +1147,7 @@ Ref<RoundOutcome> Simulation::get_round_outcome_debug() const {
 bool Simulation::has_event_fired(int index) const {
 	if (!kernel_ || index < 0) return false;
 	// The active latch + delay-elapsed window — the same read the original's Event
-	// trigger category makes [orig: EventTrigger_EvaluateCondition @0x453620 case 3].
+	// trigger category makes (engine: formats/mission/mission_params.h).
 	return kernel_->events.event_fired(static_cast<size_t>(index));
 }
 

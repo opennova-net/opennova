@@ -253,7 +253,7 @@ void test_designator_lock_keys_on_the_unit_type() {
 // [orig: Entity_UpdateInfantryPlayerBody @0x4B4E90..0x4B4EA1 -> @0x4B4F90;
 //  Entity_BuildCameraView @0x4B0E30 -- fire pose @0x4B0E46, the parentSlot-2
 //  pitch clear @0x4B0E50..0x4B0E61, (1000, 0, 0) @0x4B0EDF; the start
-//  g_view_pos @0x4B4FDE / @0x4B5006 / @0x4B501B]
+//  g_ViewPosX (ex g_view_pos) pushed @0x4B4FDE / @0x4B5006 / @0x4B501B]
 void test_camera_leg_aims_the_fire_pose_from_the_composed_eye() {
     LocalWorld lw;
     CollisionWorld collision;

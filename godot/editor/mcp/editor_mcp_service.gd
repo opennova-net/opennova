@@ -14,9 +14,11 @@ var tools: EditorMcpTools = null
 var app: Node = null
 
 
-## Start the endpoint on `port` (loopback only; 0 binds an ephemeral port for tests).
-func setup(editor_app: Node, port: int) -> Error:
-	if editor_app == null or not editor_app.has_method("query_json") or port < 0 or port > 65535:
+## Start the endpoint on `port` (loopback only; 0 binds an ephemeral port for tests). The app
+## is typed: this script loads only where the editor-enabled library registers EditorApp (the
+## editor's export and source runs), so no duck check of its seam is needed.
+func setup(editor_app: EditorApp, port: int) -> Error:
+	if editor_app == null or port < 0 or port > 65535:
 		return ERR_INVALID_PARAMETER
 	app = editor_app
 	_open_endpoint("EditorMcpServer", "opennova-editor", "OpenNova Editor", (

@@ -43,8 +43,7 @@ int Simulation::spawn_local_player_at_start() {
 	// bring-up via the SAME retail spawn-pose operation
 	// (Server_BuildPlayerInfoAndAdd), so when a player already exists this is
 	// a no-op success. The bare path runs the kernel's marker-select spawn
-	// [orig: Server_PositionPlayerForSpawn @0x50cf60 ->
-	// Entity_FindBestSpawnPoint @0x50ccc0; net-re §5.2c].
+	// (engine: runtime/world/spawn_select.h).
 	if (has_local_player()) return 1;
 	const int status = kernel_->spawn_local_player_at_start(mission_game_type());
 	reset_local_player_view_effects();
@@ -76,8 +75,7 @@ int Simulation::get_local_player_mount_target_handle() const {
 }
 
 // One frame of movement keys: the kernel folds the sim-owned stance latch in
-// and runs the witnessed movement-held unscope [orig:
-// Player_PackInputStateToEntity @ 0x4df450]; this binding only converts the
+// and runs the witnessed movement-held unscope (engine: runtime/world/local_player.cpp); this binding only converts the
 // device booleans.
 void Simulation::set_player_input(bool p_forward, bool p_back, bool p_left, bool p_right,
                                       bool p_lean_left, bool p_lean_right, bool p_jump) {
@@ -87,7 +85,7 @@ void Simulation::set_player_input(bool p_forward, bool p_back, bool p_left, bool
 
 // One frame of mouse pixels onto the kernel's look accumulator
 // (the center-lock accumulator, the scoped sensitivity reduction, the prone
-// up-limit) [orig: Input_ProcessMouseAxisBindings @ 0x499680].
+// up-limit) (engine: runtime/world/local_player.cpp).
 void Simulation::add_local_player_look(float p_dx_px, float p_dy_px) {
 	kernel_->local.look(p_dx_px, p_dy_px);
 }
@@ -150,9 +148,9 @@ Vector3 Simulation::get_local_player_eye_offset() const {
 	const opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);
 	if (!e) return Vector3();
 	// The entity's 16.16 CameraOffset mirror (the USE scan's eye above Position),
-	// mission (x,y,z) -> Godot (x, z, -y).
-	return Vector3(e->eye_offset_x / 65536.0f, e->eye_offset_z / 65536.0f,
-			-e->eye_offset_y / 65536.0f);
+	// mission -> Godot (util/axes.h).
+	const int32_t eye[3] = {e->eye_offset_x, e->eye_offset_y, e->eye_offset_z};
+	return godot_from_fixed3(eye);
 }
 
 bool Simulation::local_player_position_q16(int32_t (&r_pos)[3]) const {
@@ -321,7 +319,7 @@ bool Simulation::get_local_player_anim_phase_parked() const {
 
 // HUD health/team. The original rebuilds these into its per-frame HUD info struct every frame
 // (health ratio at +92 = currentHealth/maxHealth, team byte at +374). We surface the raw values
-// and let the HUD compute the ratio. [orig: HUD_BuildEntityInfo @0x4b8440]
+// and let the HUD compute the ratio. (engine: runtime/hud/hud_frame.h)
 int Simulation::get_local_player_health() const {
 	return opennova::world::local_player_health(kernel_->world);
 }

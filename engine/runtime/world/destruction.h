@@ -607,7 +607,7 @@ public:
 // The death schedule's witnessed names and numbers, which the class callbacks and the death
 // dispatch read (and a death's description, the OpenNova Editor's, names).
 // The gnrc callback's first authority kill marks the item dead and arms a four-tick think whose
-// expiry runs the death transforms [orig: sub_407020 @0x4070b2..0x4070e2 (+0x2AC = 4), the expiry
+// expiry runs the death transforms [orig: GnrcClass_HandleEvent @0x4070b2..0x4070e2 (+0x2AC = 4), the expiry
 // @0x40706e].
 inline constexpr int32_t kGnrcDeathThinkTicks = 4;
 // The gnl2 callback's think (+0x2AC = 0x20): its first authority kill arms it, and its expiry (the

@@ -419,7 +419,7 @@ godot::Ref<godot::Texture2D> load_texture_from_dir(const godot::String &dir, con
 			return path.is_empty() ? godot::PackedByteArray() : godot::FileAccess::get_file_as_bytes(path);
 		}
 		const godot::String path = resolve_file_in_dir(dir, to_gd(load.file));
-		if (path.is_empty() || !godot::read_nova_payload_file(path, bytes)) {
+		if (path.is_empty() || !godot::read_payload_file(path, bytes)) {
 			return godot::PackedByteArray();
 		}
 		return bytes;
@@ -624,7 +624,7 @@ godot::Ref<godot::Texture> material_texture_from_dir(
         if (cached == g_texture_cache.end()) {
             godot::PackedByteArray bytes;
             godot::Ref<godot::Texture2D> loaded;
-            if (godot::read_nova_payload_file(path, bytes)) {
+            if (godot::read_payload_file(path, bytes)) {
                 loaded = load_material_image_from_bytes(selected, bytes);
             }
             cached = g_texture_cache.emplace(key, loaded).first;

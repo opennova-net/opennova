@@ -18,6 +18,7 @@
 #include <array>
 #include <vector>
 
+#include <runtime/renderer/render_slot_frame.h>
 #include <runtime/renderer/render_slot_shadow.h>
 
 #include "render/slot_capture_adapter.h"
@@ -83,8 +84,7 @@ public:
 	SlotShadow();
 
 	void set_environment_node(MissionEnvironment *p_environment);
-	// The terrain the anchor march probes [orig: Terrain_GetHeightAtPosition
-	// @0x606720 inside RenderSlot_UpdateEntityLight]; without it the anchor
+	// The terrain the anchor march probes (engine: runtime/renderer/render_slot_shadow.h); without it the anchor
 	// stays at the entity (the march's step-0 exit on a ground-standing
 	// caster).
 	void set_terrain_data(const Ref<TerrainData> &p_terrain);
@@ -98,8 +98,7 @@ public:
 	void set_shadow_detail(int p_detail);
 	// The local player's model: halved slot priority, the every-frame
 	// refresh exception, and the first-person drape gates (detail >= 2, not
-	// prone) [orig: RenderSlot_DrawAllDrapes @0x5d6e70..0x5d6e90, see
-	// docs/render/render-lighting-re.md].
+	// prone) (engine: runtime/renderer/render_slot_shadow.cpp).
 	void set_local_player_model(ObjectModel *p_model);
 	// The model of the vehicle the local player rides (null on foot): it
 	// shares the local player's halved priority and every-frame refresh
@@ -155,11 +154,11 @@ protected:
 private:
 	struct CasterInfo {
 		ObjectModel *model = nullptr;
-		opennova::renderer::SlotCandidateState state;  // bound_radius = entity+0 (lod, light query)
-		// The model sphere (gpm[5]) the silhouette capture extent and the
-		// depth clip size from [orig: RenderSlot_RenderEntityAndChildren
-		// @0x5d7835 reads the model's +0x14, not entity+0].
-		float capture_radius = 1.0f;
+		// The caster's slot-frame facts (engine: runtime/renderer/render_slot_frame.h
+		// SlotFrameCaster): the plan's state (bound_radius = entity+0: lod, light
+		// query), the model sphere sizing the capture, the origin, the march
+		// offset.
+		opennova::renderer::SlotFrameCaster caster;
 	};
 	// The registry row behind CasterInfo: identity plus the derived values a
 	// frame used to re-read from the node every frame. An unstamped model
@@ -240,6 +239,8 @@ private:
 			drape_mat_stamps_{};
 	// The per-slot dominant-light query buffer (reused across frames).
 	std::vector<opennova::renderer::SlotPointLight> slot_lights_;
+	// The latest per-slot frame (renderer::slot_frame; refilled in place).
+	opennova::renderer::SlotFrame slot_frame_;
 	// One drape patch mesh per capture order (retail's per-slot patch vertex
 	// range of the shared static buffer, RenderSlot_RebuildPatchVertexBuffer
 	// @0x5d5130): the mesh and its scenario instance, the origin/lod the

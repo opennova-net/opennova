@@ -27,9 +27,9 @@ namespace opennova::inmatch {
 namespace {
 
 // §5.44 housekeeping cadences/constants, witnessed in [orig: Client_ProcessNetworkFrame @0x42c180].
-constexpr uint32_t kKeepaliveInterval = 29760; // 0x34 keepalive period in ticks [orig @0x42c1c0]
-constexpr uint32_t kNetQualityInterval = 310;  // 0x4C net-quality report period [orig @0x42c23e]
-constexpr uint32_t kTag2CCooldown = 62;        // 0x2C vestigial/telemetry set-value [orig @0x42c412], never a gate
+constexpr uint32_t kKeepaliveInterval = 29760; // 0x34 keepalive period in ticks [orig: Client_ProcessNetworkFrame @0x42c1c0]
+constexpr uint32_t kNetQualityInterval = 310;  // 0x4C net-quality report period [orig: Client_ProcessNetworkFrame @0x42c23e]
+constexpr uint32_t kTag2CCooldown = 62;        // 0x2C vestigial/telemetry set-value [orig: Client_ProcessNetworkFrame @0x42c412], never a gate
 
 // Retail's x86 IMUL/ADD timer arithmetic wraps at 32 bits. Perform the
 // operations in unsigned space, then recover the same signed two's-complement
@@ -809,8 +809,8 @@ void ClientRuntime::raise_net_quality_link_errors(uint32_t mask) {
 
 // The link-error callbacks at the clock they fire on: bit 0 raises flag 1
 // (outgoing), bit 1 flag 2 (incoming) [orig: CNetQuality_SetLinkErrorFlag
-// @0x4c34f0, which Network_LogOutgoingPacketError @0x4c4943 / sub_4C62A0
-// @0x4c62ce and Network_LogIncomingPacketError @0x4c48b3 / @0x4c468f inline].
+// @0x4c34f0, which Network_LogOutgoingPacketError @0x4c4943 / NapiNPServer_OnResendListCallback
+// @0x4c62a0 (@0x4c62ce) and Network_LogIncomingPacketError @0x4c48b3 / @0x4c468f inline].
 void ClientRuntime::apply_net_quality_link_errors(uint32_t mask) {
 	const uint32_t now = view_.state().local_clock_ms;
 	if ((mask & kNetQualityLinkErrorOutgoing) != 0)
@@ -980,11 +980,11 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	// RULES text's elapsed read compares (retail's GetTickCount): free-running
 	// one fixed tick per client net frame, independent of the seeded tick
 	// above [orig: SessionStatus_ParseFromBuffer @0x5310a5 stamps
-	// GetTickCount; SessionStatus_GetElapsedMS @0x52d5fc reads it].
+	// GetTickCount; CSessionTimer_GetElapsedMS @0x52d5f0 reads it (@0x52d5fc)].
 	view_.state().local_clock_ms += static_cast<uint32_t>(io::kTickMs);
 
 	// (0x34) keepalive — runs for EVERYONE (NOT authority-gated), emitted before the recv pump in the
-	// original [orig @0x42c1a9..0x42c1ec]. Only a Joiner has a 0x43 framing path here (the HostClient's
+	// original [orig: Client_ProcessNetworkFrame @0x42c1a9..0x42c1ec]. Only a Joiner has a 0x43 framing path here (the HostClient's
 	// own-loopback keepalive is a no-op over the wire — deferred-and-logged, P6 §5.44). Suppressed in
 	// golden-replay mode.
 	if (joiner_ != nullptr && !replay_mode_ && current_tick_ != 0 &&
@@ -1399,7 +1399,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	}
 
 	// (0x4C) net-quality / anti-cheat report — after the recv pump; gated is_in_session &&
-	// is_mp_session_peer (a Joiner in-match satisfies both). [orig @0x42c23e..0x42c279]
+	// is_mp_session_peer (a Joiner in-match satisfies both). [orig: Client_ProcessNetworkFrame @0x42c23e..0x42c279]
 	if (!replay_mode_ && joiner_->in_match()) {
 		if (++net_quality_timer_ > kNetQualityInterval) {
 			net_quality_timer_ = 0;
@@ -1413,7 +1413,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		}
 	}
 
-	// Vestigial/telemetry counter self-decrement [orig @0x42c386]. The 0x2C
+	// Vestigial/telemetry counter self-decrement [orig: Client_ProcessNetworkFrame @0x42c386]. The 0x2C
 	// send below sets it to 62, but the full @0x42C180 control flow never
 	// compares it: after the field-3 gate @0x42C3DD, the deployed branch writes
 	// 62 @0x42C412 and unconditionally queues 0x2C @0x42C44A. It therefore fires
@@ -1422,7 +1422,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 	if (tag2c_send_cooldown_ > 0) --tag2c_send_cooldown_;
 
 	// (2) SEND BLOCK — gated send_holdoff_countdown == 0 (NapiNPConnection+0x648; the original skips the
-	// whole block when set). [orig @0x42c3dd] The transport recv pump decrements
+	// whole block when set). [orig: Client_ProcessNetworkFrame @0x42c3dd] The transport recv pump decrements
 	// the countdown once per tick BEFORE this gate [orig: PumpFlags 0x10 via
 	// PumpClientProtocolRecv flags=26 @0x4c4fe0], and the send pump RE-ARMS it
 	// from the stored CS field-3 period when the boundary opened [orig: PumpFlags
@@ -1471,7 +1471,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 		const bool deployed_joiner =
 				joiner_->in_match() && is_deployed() && joiner_->has_self_handle();
 
-		// (0x2C) RTT timestamp ping — Joiner only. [orig @0x42c3fa..0x42c44a]. Body = [u32 ts][u8 1]
+		// (0x2C) RTT timestamp ping — Joiner only. [orig: Client_ProcessNetworkFrame @0x42c3fa..0x42c44a]. Body = [u32 ts][u8 1]
 		// (NetPacket_WriteInt32AndByte; echoFlag=1 requests the S2C 0x57 pong, §5.34). Retail uses
 		// wall-clock milliseconds (GetTickCount), not the network-role simulation tick.
 		if (!replay_mode_ && deployed_joiner) {
@@ -1484,7 +1484,7 @@ std::vector<std::vector<uint8_t>> ClientRuntime::run_frame(
 			send_messages.push_back(std::move(ping_message));
 		}
 
-		// (0x0C) the C2S player uplink — unchanged P5 path, same deploy gate. [orig @0x42c46f..0x42c4a3]
+		// (0x0C) the C2S player uplink — unchanged P5 path, same deploy gate. [orig: Client_ProcessNetworkFrame @0x42c46f..0x42c4a3]
 		PlayerExtendedUplink built_uplink;
 		if (build_uplink != nullptr && deployed_joiner && (*build_uplink)(built_uplink)) {
 			const PlayerExtendedUplink *uplink = &built_uplink;

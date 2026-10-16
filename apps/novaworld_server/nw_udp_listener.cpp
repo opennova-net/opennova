@@ -411,7 +411,9 @@ bool NwUdpListener::start(const ServerConfig &config) {
 	stop_requested_.store(false);
 	std::promise<bool> leased;
 	std::future<bool> lease_taken = leased.get_future();
-	worker_ = std::thread([this, socket = std::move(socket), leased = std::move(leased)]() mutable {
+	const bool embedded_jo_host = config.embedded_jo_host;
+	worker_ = std::thread([this, socket = std::move(socket), leased = std::move(leased),
+			embedded_jo_host]() mutable {
 		std::optional<db::ConnectionPool::Lease> db_conn;
 		if (db_pool_) {
 			try {
@@ -422,7 +424,8 @@ bool NwUdpListener::start(const ServerConfig &config) {
 				return;
 			}
 		}
-		initialize_jo_host();
+		// The in-match JO host only when the config asks for it (ONNET_EMBEDDED_JO_HOST).
+		if (embedded_jo_host) initialize_jo_host();
 		leased.set_value(true);
 		run_loop(std::move(socket), std::move(db_conn));
 	});

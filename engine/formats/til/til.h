@@ -59,7 +59,7 @@ struct TilAtlasLayout {
 // record's (x, z) is, in mission x and y, the north-west corner of the square the game draws it over: the
 // page pass reads z negated on the terrain's row axis, which runs south (docs/tiles/til-re.md "Where a
 // record lies on the mission's plane"; the surface walk reads the square's mirror, D-TIL-9); +10 is MED's u16 layer (its sort order), written by the editor and never read by the
-// game [orig: JOTACmed MapTileStore_Append @ 0x433BBF; MapTileStore_Serialize @ 0x433F88 writes the
+// game [orig: JOTACmed.exe MapTileStore_Append @ 0x433BBF; MapTileStore_Serialize @ 0x433F88 writes the
 // records grouped by ascending layer]. Every byte is a field, so a record writes back as it was read.
 struct TilOverlayEntry {
 	int32_t x_fixed = 0;

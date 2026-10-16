@@ -88,6 +88,17 @@ void GameWorld::_ready() {
 	// The occlusion frame's retained render nodes exist from here on; its
 	// per-mission members arrive with each load.
 	occlusion_->setup(terrain_, dispatcher_, sky_dome_, celestial_, water_, env_);
+	// The glare's fine rays and the glint's eye ray walk the running mission's
+	// entities (the celestial leg asks; no mission = nothing blocks).
+	if (celestial_ != nullptr) {
+		celestial_->set_entities_clear(
+				[this](const opennova::env::Vec3 &p_from, const opennova::env::Vec3 &p_to) {
+					const Ref<Simulation> sim = get_sim();
+					const float from[3] = { p_from.x, p_from.y, p_from.z };
+					const float to[3] = { p_to.x, p_to.y, p_to.z };
+					return sim.is_null() || sim->sun_ray_clear_of_entities(from, to);
+				});
+	}
 	if (clear_color_ != nullptr && clear_color_->get_environment().is_valid()) {
 		idle_frame_clear_color_ = clear_color_->get_environment()->get_bg_color();
 	}
@@ -393,6 +404,11 @@ Ref<Simulation> GameWorld::get_sim() const {
 	return runtime != nullptr ? runtime->get_sim() : Ref<Simulation>();
 }
 
+bool GameWorld::mission_forces_indoors() const {
+	const Ref<Simulation> s = get_sim();
+	return s.is_valid() && s->mission_forces_indoors();
+}
+
 Ref<WeaponDatabase> GameWorld::get_weapon_database() {
 	if (weapon_db_.is_null()) {
 		if (resource_root_.is_null()) {
@@ -690,7 +706,7 @@ void GameWorld::_bind_methods() {
 	// during the pre-load wait: server/mission names + the exact wire-header
 	// world about to be constructed. The shell refreshes its loading screen
 	// from this -- retail's connect stream fills the same session vars before
-	// its header-backed load [orig: Client_ParseServerSessionVariables @ 0x5202f0].
+	// its header-backed load (engine: net/npwire/session_vars.h).
 	ADD_SIGNAL(MethodInfo(kSignalJoinSessionIdentified,
 			PropertyInfo(Variant::OBJECT, "info", PROPERTY_HINT_RESOURCE_TYPE, "LoadingScreenInfo")));
 	// A joiner crossed the authoritative admission edge. Wire-header world
@@ -711,8 +727,7 @@ void GameWorld::_bind_methods() {
 	// it EXITS THE MISSION with a reason. The shell's analog is return-to-menu
 	// with `reason` surfaced the same way a join failure is. Emitted at most
 	// ONCE per session.
-	// [orig: CNapiNetwork_Init @ 0x4ca4a0 (timeout stores @ 0x4caa81/@ 0x4cab54) ->
-	//  CNapiNetwork_OnDisconnectedFromServer @ 0x4c63d0]
+	// (engine: runtime/inmatch/joiner_connection.h)
 	ADD_SIGNAL(MethodInfo(kSignalSessionLost, PropertyInfo(Variant::STRING, "reason")));
 	// Mission-load progress, 0..100, emitted when each stage of the engine's
 	// mission load plan starts (MissionData.load_progress_percent -- the

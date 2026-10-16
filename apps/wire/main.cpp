@@ -862,9 +862,9 @@ void print_tag_0a(const std::vector<uint8_t> &body) {
 		            fu.objective.state[0], fu.objective.state[1],
 		            fu.objective.state[2], fu.objective.state[3]);
 
-	std::printf("            header: state=0x%02x carried=%s health=%d state_word=0x%04x\n",
+	std::printf("            header: state=0x%02x carried=%s health=%d armor=%d\n",
 	            unsigned(fu.state_flag_byte), handle_str(fu.carried_handle).c_str(),
-	            int(fu.health), unsigned(uint16_t(fu.state_word)));
+	            int(fu.health), int(fu.armor));
 
 	if (fu.passenger.present) {
 		if (fu.passenger.has_mount)

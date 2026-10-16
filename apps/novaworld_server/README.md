@@ -1075,6 +1075,10 @@ for a docker bridge or NAT (leave unset in production): `ONNET_CLIENT_REFLECT_IP
 listed with no owner; "Listed servers and owners" above).
 `ONNET_CD_KEY_AUTO_MINT=0` stops minting a DFX2 account's first CD key at its first
 activation (default on; "CD keys (DFX2 activation)" above).
+`ONNET_EMBEDDED_JO_HOST=1` runs an in-match JO host in the service process on the
+NovaWorld UDP port, which serves a Hello carrying JO's complete in-match identity as a
+game session; the `nw_host_register_e2e` harness turns it on (default off: the service
+runs no game host).
 Billing takes the `STRIPE_*` set and `ONNET_SITE_URL`, `ONNET_STRIPE_CURL`,
 `ONNET_BILLING_AUTOMATIC_TAX` and `ONNET_BILLING_RECONCILE_MINUTES` ("Billing (monthly
 support tiers)" above). Outbound mail takes `ONNET_MAIL_FROM`, `ONNET_MAIL_REGION` and

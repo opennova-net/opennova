@@ -101,7 +101,6 @@ add_library(opennova_bindings OBJECT
     env/weather.cpp
     env/precipitation.cpp
     env/water_core.cpp
-    env/glare_occlusion.cpp
     particle/particle_effect.cpp
     particle/particle_file.cpp
     lights/effect_light_director.cpp
@@ -116,7 +115,10 @@ add_library(opennova_bindings OBJECT
     particle/effect_world.cpp
     particle/particle_compositor.cpp
     particle/particle_far_pass.cpp
+    particle/particle_first_person_batch.cpp
+    particle/particle_material_cache.cpp
     particle/particle_renderer.cpp
+    particle/particle_atlas_device.cpp
     particle/particle_atlas_page_upload.cpp
     render/d3d9_raster_device.cpp
     render/environment_cube_blit.cpp
@@ -146,7 +148,6 @@ add_library(opennova_bindings OBJECT
     object/object_data_materials.cpp
     object/object_data_geometry.cpp
     object/object_data_runtime_eval.cpp
-    object/object_data_build.cpp
     object/object_shader_cache.cpp
     object/item_database.cpp
     object/model_light.cpp
@@ -391,6 +392,7 @@ if(OPENNOVA_EDITOR)
         authoring/mission_map_viewport_applier.cpp
         authoring/mission_viewport_applier.cpp
         authoring/model_viewport_applier.cpp
+        authoring/object_data_build.cpp
         authoring/play_logic_link.cpp
         authoring/preview_backdrop.cpp
         authoring/preview_scene_layers.cpp

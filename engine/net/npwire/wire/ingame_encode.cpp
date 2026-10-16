@@ -565,7 +565,7 @@ std::vector<uint8_t> encode_frame_update(const FrameUpdate &fu,
 	w.u8(fu.state_flag_byte);
 	w.u16(fu.carried_handle);
 	w.u16(uint16_t(fu.health));
-	w.u16(uint16_t(fu.state_word));
+	w.u16(uint16_t(fu.armor));
 
 	// Conditional mounted-weapon ammo record.
 	if ((fu.flags2 & 0x0F) == 8) {
@@ -764,8 +764,9 @@ std::vector<uint8_t> encode_player_sync_removal(uint8_t slot, bool with_ack) {
 	Writer w{out};
 	w.u8(slot);
 	// 0x8000 removal + optional 0x4000 ack (golden's 0xC000): the client clears the slot and, with the
-	// ack bit, requests the next one — so the walk terminates at max_players. [orig: NapiNPClientMsg_PlayerSync
-	// @0x431370 — a 0x8000 record reads NO entity slot / fields, just [u8 slot][u16 flags].]
+	// ack bit, requests the next one while the slot is below its max-player count (@0x43175a), which
+	// ends the walk. [orig: NapiNPClientMsg_PlayerSync @0x431370 — a 0x8000 record reads NO entity
+	// slot / fields, just [u8 slot][u16 flags].]
 	w.u16(static_cast<uint16_t>(kPlayerSyncRemoval | (with_ack ? kPlayerSyncAck : 0u)));
 	return out;
 }

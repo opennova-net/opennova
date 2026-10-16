@@ -64,8 +64,9 @@ std::string material_dds_sibling(std::string_view name);
 //   loose-first @ 0x58A4F5, the DDS probe @ 0x58A53E), from sub_58A580 @ 0x58A5DA
 //   and sub_58CE10 @ 0x58CE6A]
 // - 16 to 18: the name as written, read as a chunk container whatever it is
-//   called. [orig: dispatch @ 0x5B17D4, @ 0x5B17DD, @ 0x5B17E6; chunk loaders
-//   @ 0x58F350, @ 0x58F470, @ 0x58F590]
+//   called. [orig: dispatch @ 0x5B17D4, @ 0x5B17DD, @ 0x5B17E6;
+//   Texture_LoadNQ8BChunk @ 0x58F350; Texture_LoadHRZ8Chunk @ 0x58F470;
+//   Texture_LoadAOC8Chunk @ 0x58F590, the AOC8 chunk]
 // - any other type: none, the dispatcher's default (@ 0x5B17F4).
 MaterialTextureSource material_texture_source(std::string_view name, uint8_t type,
 		const MaterialTextureFileTest &exists, const MaterialTextureFileTest &loose_first = {});
@@ -81,15 +82,6 @@ MaterialTextureSource material_texture_source(std::string_view name, uint8_t typ
 // [orig: Texture_LoadByNameWithChannel @ 0x58B4E1..0x58B4FA,
 // @ 0x58B53C..0x58B598, @ 0x58B66F..0x58B6E6]
 bool material_texture_dds_only(const char *name, uint8_t type, std::string &opens, std::string &loads);
-
-// The mip chain of a texture built from decoded pixels (TGA/MDT/PCX rows,
-// every normal map, the missing-texture checkerboard): one level per halving
-// while the smaller side exceeds 2, so a 256x256 chain ends at 4x4; a texture
-// whose smaller side is already 2 or less gets D3DX's full chain (0 here).
-// DDS rows keep their file's chain instead.
-// [orig: GTexture_CreateFromPixelData_0 @ 0x6877BC..0x6877D8 (MipLevels),
-//  @ 0x6878B9 (D3DXFilterTexture BOX); GTexture_FindOrCreateFromData @ 0x676CC0]
-uint32_t pixel_texture_mip_levels(uint32_t width, uint32_t height);
 
 // The loader copies an authored texture type into the runtime row only for
 // the dispatcher's producers (0..2, 4..8, 16..18); 3, 9..15 and anything past
@@ -133,7 +125,8 @@ struct MaterialTexturePixels {
 // [orig: Texture_GenerateEnvironmentMap @0x58A220; AO generator @0x58CB90]
 MaterialTexturePixels horizon_volume_from_height(const uint8_t *rgba, uint32_t width, uint32_t height);
 MaterialTexturePixels ambient_occlusion_from_height(const uint8_t *rgba, uint32_t width, uint32_t height);
-// [orig: NQ8B @0x58F350; HRZ8 @0x58F470; AOC8 @0x58F590]
+// [orig: Texture_LoadNQ8BChunk @ 0x58F350; Texture_LoadHRZ8Chunk @ 0x58F470;
+// Texture_LoadAOC8Chunk @ 0x58F590, the AOC8 chunk]
 MaterialTexturePixels load_material_chunk(const uint8_t *bytes, size_t size, uint8_t type);
 // The bytes of a chunk container at [position, position + size) into `out`; false past its end.
 using MaterialChunkReader = std::function<bool(uint64_t position, uint8_t *out, size_t size)>;
@@ -143,8 +136,9 @@ using MaterialChunkReader = std::function<bool(uint64_t position, uint8_t *out, 
 // scan types a file no name types by this).
 bool material_chunk_loads(uint64_t size, const MaterialChunkReader &read, uint8_t type);
 // Bytes a model's chunk row reads (runtime types 16 to 18): the runtime's own chunk
-// loader takes them as one of its three chunks [orig: NQ8B @ 0x58F350; HRZ8 @ 0x58F470;
-// AOC8 @ 0x58F590] (load_material_chunk), whatever the file is named.
+// loader takes them as one of its three chunks [orig: Texture_LoadNQ8BChunk @ 0x58F350;
+// Texture_LoadHRZ8Chunk @ 0x58F470; Texture_LoadAOC8Chunk @ 0x58F590, the AOC8 chunk]
+// (load_material_chunk), whatever the file is named.
 bool is_material_chunk_container(const std::vector<uint8_t> &bytes);
 // The same answer for the file at `path` (UTF-8), read by its chunk headers alone
 // (material_chunk_loads: the 8-byte header, each chunk's tag and size, the found chunk's

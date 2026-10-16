@@ -50,7 +50,7 @@ uint32_t effective_flags(const HudMinimapInput &input);
 MapView make_view(const HudMinimapInput &input, uint32_t flags);
 
 // Mission Q16 -> map pixels through the map transform.
-// [orig: Terrain_FixedPointToWorldFloat_Default @0x607060]
+// [orig: Terrain_FixedPointToWorldFloat @0x607060]
 void view_project(const MapView &view, const HudMinimapInput &input,
 		int32_t world_x_q16, int32_t world_y_q16, float &out_x, float &out_y);
 // The same transform with the identity rotation the label legs pass

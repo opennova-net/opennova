@@ -35,9 +35,11 @@ namespace opennova::renderer {
 inline constexpr const char *kRainTexture = "eraindrp.tga";
 inline constexpr const char *kSnowTexture = "jsnwflk.tga";
 
-// The camera-side inputs in the RENDER (Godot) frame: mission (x, y, z)
-// 16.16 maps to (x, z, -y) / 65536 [orig: Math_FixedPointToFloat3_YNegated
-// @ 0x611210 — the same axis swap under the D3D basis].
+// The camera-side inputs in the presentation frame: mission (x, y, z) 16.16
+// maps to (x, z, -y) / 65536. Retail's render-float frame is (-y, z, x)
+// [orig: Math_FixedPointToFloat3_YNegated @ 0x611210], the same with x and z
+// swapped; every vector the drawer takes is in the one frame, so the geometry
+// is the same.
 struct PrecipitationCamera {
 	int32_t position_q16[3] = {0, 0, 0}; // mission frame 16.16
 	float right[3] = {1.0f, 0.0f, 0.0f}; // render frame, unit

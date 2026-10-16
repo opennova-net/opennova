@@ -145,6 +145,7 @@ class DebugPickCard;     // the entity picker's card (simulation/debug_pick_card
 
 #include <runtime/inmatch/host_boot.h>                // the one host boot, its two phases (ADR 0051 d4)
 #include <runtime/inmatch/host_role.h>                // HostRole: the listen/dedicated host's state + frame (ADR 0043 d3)
+#include <runtime/inmatch/server_info.h>              // HostPlayerListRow (the NovaWorld roster rows)
 #include <runtime/inmatch/joiner_role.h>              // JoinerRole: the joiner's runtime, bridge and frame
 #include <runtime/inmatch/local_role.h>               // LocalRole: the bare no-net tick
 #include <runtime/inmatch/loopback_channel.h>          // LoopbackChannel (the host role's own dcb-2 client)
@@ -369,8 +370,7 @@ public:
 
 	// Seat-bone type codes, surfaced so GDScript reads ONE source — the values
 	// are pinned to engine/runtime/world's SeatType by static_assert in the .cpp.
-	// [orig: Entity_FindBestSeatSlot @0x4351f0 classifies "sitex"->1,
-	// "ctrlx"->2, "UseGun"->3, armory scan ->4 @0x436417, "drvrx"->5]
+	// (engine: runtime/world/entity.h)
 	enum SeatCode {
 		SEAT_NONE = 0,
 		SEAT_PASSENGER = 1,
@@ -722,10 +722,6 @@ private:
 		return opennova::world::local_usegun_switch_is_instant(
 				kernel_->world, kernel_->local.weapon);
 	}
-	void sync_local_usegun_weapon_transition() {
-		opennova::world::sync_local_usegun_weapon_transition(
-				kernel_->world, kernel_->local.weapon);
-	}
 	void commit_local_usegun_weapon_switch() {
 		opennova::world::commit_local_usegun_weapon_switch(
 				kernel_->world, kernel_->local.weapon);
@@ -1035,16 +1031,10 @@ public:
 	// The NovaWorld UDP session the shell keeps through the match (in use, flags, hosting/playing
 	// word, its own exit store): the N icon's inputs and the 62-frame NovaWorld exit's (D-NET-220).
 	void set_nwu_session(bool p_in_use, uint32_t p_flags, int32_t p_role, int32_t p_exit_reason);
-	// The added players as the NovaWorld host's PlayerList sees them (Server_PlayerAdd's five
-	// per-slot vars), keyed by roster slot; the host's own (`own`) takes the gate binding's identity.
-	struct HostPeerSlot {
-		int slot = 0;
-		uint32_t connection_id = 0; // the add's connection: a re-join is a new one
-		bool own = false;
-		String player_name, ip_and_port, pcid; // "a.b.c.d:port"; the decrypted PUBPCID or ""
-		String team, type; // the match's PlayerTeam / PlayerType ("%ld")
-	};
-	std::vector<HostPeerSlot> host_peer_slots() const;
+	// The added players as the NovaWorld host's PlayerList sees them (the engine's
+	// inmatch::host_player_list_rows over the host context; empty without one); the host's
+	// own (`own`) takes the gate binding's identity.
+	std::vector<opennova::inmatch::HostPlayerListRow> host_player_list_rows() const;
 	// The host role's server context (null without one): the NovaWorld listing's live columns.
 	opennova::inmatch::NapiNPServerCtx *host_ctx();
 	const opennova::inmatch::NapiNPServerCtx *host_ctx() const;
@@ -1480,8 +1470,7 @@ public:
 	// g_PlayerStanceProneLatch, see docs/render/render-lighting-re.md].
 	Stance get_local_player_stance_latch() const { return static_cast<Stance>(kernel_->local.stance_latch()); }
 	// The HUD stance icon index (0 stand / 1 crouch / 2 prone) from the sim's
-	// authoritative stance state [orig: HUD_BuildEntityInfo @0x4b860c —
-	// entity+300 flags 0x200=crouch -> 1, 0x100=prone -> 2]. The witnessed
+	// authoritative stance state (engine: runtime/world/local_player_view.cpp). The witnessed
 	// source is the body state, never the anim clip name.
 	Stance get_local_player_stance() const;
 	int get_local_player_anim_phase_ticks() const;
@@ -1591,7 +1580,6 @@ public:
 	// world/presentation_frame.h (no presenter spells the swizzle).
 	static Vector3 presentation_forward(float p_yaw_deg, float p_pitch_deg);
 	static Vector3 aim_ray_endpoint(const Vector3 &p_eye, float p_yaw_deg, float p_pitch_deg);
-	static int rangefinder_units(const Vector3 &p_position, const Vector3 &p_endpoint);
 	// The FP viewmodel rig's frame math (renderer/fp_viewmodel_spec.h): the
 	// view-frame -> camera-local axis map, the def rotation bias as camera
 	// euler radians, the rig yaw, the renderfov default, the TEX_TEAM byte.
@@ -1832,7 +1820,7 @@ public:
 	int64_t get_last_occlusion_probe_us() const {
 		return static_cast<int64_t>(present_.last_occlusion_probe_us);
 	}
-	// Script-disable gate [orig: dword_C6EB28].
+	// Script-disable gate (engine: runtime/wac/wac_system.h).
 	void set_wac_paused(bool p_paused);
 	bool is_wac_paused() const;
 
@@ -1966,7 +1954,7 @@ public:
 	// resolved graphics per type): the count the seat-install pins read.
 	int get_mounted_graphic_source_count() const;
 	// Whole-bank snapshots of the script variable stores (V0..V511 / G0..G255 /
-	// M0..M15 [orig: g_WacMissionVars / dword_C6BA40 / music bank]): ONE packed call
+	// M0..M15 (engine: runtime/world/var_store.h)): ONE packed call
 	// for a low-Hz overlay refresh instead of hundreds of boxed scalar reads.
 	// Always bank-sized; all zeros when no mission is loaded.
 	PackedInt32Array get_mission_variables_snapshot() const;
@@ -2104,8 +2092,7 @@ public:
 	// tier generates around: crouched or prone (MoveOrder stance bits 8-9) and
 	// standing on terrain, not on another entity. Retail tests every visible
 	// sector entity, but only infantry ever carry the stance bits.
-	// [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded
-	// (MoveOrder & 0x300), groundEntity gate @ 0x5c7dd5..0x5c7df7]
+	// (engine: runtime/inmatch/occlusion_collect.cpp)
 	PackedVector3Array get_foliage_mask_anchor_positions() const;
 	// PF_PHASE/PF_ACTIVE jointly encode one exact signed dword: PHASE carries
 	// low16 and ACTIVE carries high16+1 (zero means unpublished). This avoids
@@ -2264,13 +2251,13 @@ public:
 	const std::vector<opennova::inmatch::EntityLightingChange> &draw_lighting_changes(
 			const Vector3 &p_light_dir);
 	int get_local_player_sun_quality() const { return present_.entity_lighting.local_quality; }
-	// Quality (1..4) -> the effectScale the render-state stack multiplies —
-	// engine-owned so the mapping has ONE writer (renderer::
-	// sun_visibility_factor carries the Entity_ComputeSunVisibility cite,
-	// see docs/render/render-lighting-re.md). Both
-	// presentation consumers (the occlusion sun feed and the local-player
-	// body) call this instead of re-deriving the 0.25 step.
+	// Quality (1..4) -> the render-state stack's effectScale, ONE writer (renderer::
+	// sun_visibility_factor, its cite): the occlusion sun feed and the local-player body call this.
 	float sun_quality_factor(int p_quality) const;
+	// The glare's fine rays and the glint's eye ray: no entity of the mission blocks the segment
+	// between two mission points (world::CollisionWorld::sun_ray_clear_of_entities). Native only.
+	bool sun_ray_clear_of_entities(
+			const float p_from_mission[3], const float p_to_mission[3]) const;
 	// The present pass's visibility intent for one placed entity — the
 	// occlusion release edge lands a node on the sim's CURRENT visibility so a
 	// hidden entity never flashes for a frame.
@@ -2279,6 +2266,8 @@ public:
 	// full frame state (the occlusion A/B seam and shell cache resets use it).
 	void reset_occlusion_apply_baseline();
 	bool occlusion_water_visible() const;
+	// The loaded mission's force-indoors attribute (engine world/occlusion_camera.h).
+	bool mission_forces_indoors() const;
 	// The world's entity-update counter (native, unbound): the water noise
 	// pair's frame counter (Water::advance_frame carries the witness).
 	uint32_t entity_update_counter() const { return kernel_->world.entity_update_counter; }
@@ -2472,8 +2461,7 @@ public:
 	// Parse weapon.def from the resource root and install the armory table on the sim world
 	// (world::World::weapons) — the server-side source for the 0x2F/0x5A loadout service, the
 	// extended-uplink equipped-weapon gate, and the player-spawn WPN_M4AUTO default
-	// (D-NET-141/143). [orig: Game_StartMission @0x5254bd -> WeaponDefs_LoadFile @0x5450A0,
-	// right after AnimDef_InitAll @0x5254b3]. Idempotent; call after load.
+	// (D-NET-141/143). (engine: runtime/inmatch/integrity_weapon_image.h). Idempotent; call after load.
 	Error load_weapon_table(const Ref<class ResourceRoot> &p_resource_root,
 	                        const String &p_name = "weapon.def");
 

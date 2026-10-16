@@ -1,4 +1,5 @@
 #include "authoring/ground_overlay_upload.h"
+#include "authoring/preview_godot.h"
 
 #include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/variant/color.hpp>
@@ -9,12 +10,6 @@
 #include "terrain/terrain.h"
 
 namespace godot {
-
-namespace {
-
-int64_t now_us() { return int64_t(Time::get_singleton()->get_ticks_usec()); }
-
-} // namespace
 
 void GroundOverlayUpload::apply(Terrain &terrain, const opennova::editor::MissionOverlayImage &overlay) {
 	const int64_t start = now_us();

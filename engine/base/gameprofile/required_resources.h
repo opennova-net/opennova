@@ -1,6 +1,8 @@
 #pragma once
 
+#include <functional>
 #include <string>
+#include <vector>
 
 namespace opennova::gameprofile {
 
@@ -120,6 +122,13 @@ bool gameprofile_expansion_names_fit_archive(const std::string &expansion);
    GAMEMUS.SBF/.BIN, whose M<n>.* and G<n>.* take their place [orig: Expansion_LoadAssets
    @ 0x4a4906..0x4a494a]), so a stock launch under /exp never reads `name` itself. */
 bool gameprofile_replaced_under_expansion(const std::string &name);
+
+/* The boot manifest's FATAL rows a mount can be asked for by name, each `has_file` lacks, in
+   manifest order. The archive-table trio is not asked: its all-missing gate is the mount's own
+   [orig: the fatal check @ 0x4a6f44 after PFF_OpenAllArchives @ 0x4a4310]; a pattern row names
+   no literal file. */
+std::vector<std::string> gameprofile_missing_boot_resources(
+        const std::function<bool(const std::string &name)> &has_file);
 
 /* The boot's text tables, in the order Game_InitSubsystems loads them right after the boot
    archives open (each a manifest row, gameprofile_required_resource_find): gameerr.bin's lack

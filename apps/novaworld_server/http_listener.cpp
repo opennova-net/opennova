@@ -33,6 +33,7 @@
 #include <net/novaworld/unknown_tracker.h>
 
 #include <base/io/cp1252.h>
+#include <base/io/file_io.h>
 #include <base/io/strutil.h>
 #include <base/os_random/os_random.h>
 
@@ -47,11 +48,9 @@
 #include <cstdlib>
 #include <cstdio>
 #include <filesystem>
-#include <fstream>
 #include <map>
 #include <mutex>
 #include <set>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -83,11 +82,18 @@ std::string next_pcid() {
 	return pcid;
 }
 
-std::string read_file_text(const std::filesystem::path &p) {
-	std::ifstream in(p, std::ios::binary);
-	std::ostringstream os;
-	os << in.rdbuf();
-	return os.str();
+// `res` is the file at `p` as a 200 of `type`; a file the route found that no
+// longer reads (gone since, or unreadable) is a 404, never an empty 200.
+void serve_file(crow::response &res, const std::filesystem::path &p, const std::string &type) {
+	std::string body;
+	std::string error;
+	if (!io::read_file_text(p.string(), body, error)) {
+		res.code = 404;
+		return;
+	}
+	res.code = 200;
+	res.set_header("Content-Type", type);
+	res.body = std::move(body);
 }
 
 // ---- cookie + form helpers (Phase E.1; cookie reading: http_cookies.h) ----
@@ -818,11 +824,14 @@ void HttpListener::register_public_api_routes() {
 				games_json.push_back(std::move(game));
 			}
 		} catch (const db::Error &e) {
+			// An outage answers 500 like every other route, never an empty
+			// list the lobby page would show as "no servers".
 			std::fprintf(stderr, "[http] /api/lobbies failed: %s\n", e.what());
+			return json_error(500, "db_error");
 		}
 		crow::json::wvalue out;
 		out["games"] = std::move(games_json);
-		return out;
+		return json_reply(200, out);
 	});
 
 	// Phase I.5: aggregate counts for the Vue dashboard.
@@ -842,9 +851,9 @@ void HttpListener::register_public_api_routes() {
 			out["stats"] = std::move(stats);
 		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[http] /api/stats failed: %s\n", e.what());
-			out["error"] = "db_error";
+			return json_error(500, "db_error");
 		}
-		return out;
+		return json_reply(200, out);
 	});
 
 	// POST /api/login, POST /api/logout, GET /api/me (web_access.cpp).
@@ -938,9 +947,9 @@ void HttpListener::register_public_api_routes() {
 			out["games"] = std::move(arr);
 		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[http] /api/games failed: %s\n", e.what());
-			out["error"] = "db_error";
+			return json_error(500, "db_error");
 		}
-		return out;
+		return json_reply(200, out);
 	});
 
 	CROW_ROUTE(app, "/api/health")([]() {
@@ -2198,9 +2207,7 @@ void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
 			    "(run `npm run build` in web/).\n";
 			return res;
 		}
-		res.code = 200;
-		res.set_header("Content-Type", "text/html");
-		res.body = read_file_text(path);
+		serve_file(res, path, "text/html");
 		return res;
 	});
 
@@ -2242,9 +2249,7 @@ void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
 		// served from apps/novaworld_server/static/.
 		if (subpath.rfind("static/", 0) == 0) {
 			if (const auto path = file_under_root(static_dir, subpath.substr(7))) {
-				res.code = 200;
-				res.set_header("Content-Type", content_type_for(*path));
-				res.body = read_file_text(*path);
+				serve_file(res, *path, content_type_for(*path));
 				return res;
 			}
 			record_http_404();
@@ -2259,9 +2264,7 @@ void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
 		const auto ext = std::filesystem::path(subpath).extension().string();
 		if (ext == ".htm" || ext == ".mnx" || ext == ".joi") {
 			if (const auto path = template_file(templates_dir, subpath)) {
-				res.code = 200;
-				res.set_header("Content-Type", content_type_for(*path));
-				res.body = read_file_text(*path);
+				serve_file(res, *path, content_type_for(*path));
 				return res;
 			}
 		}
@@ -2277,9 +2280,7 @@ void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
 			res.set_header("Content-Type", "text/plain");
 			return res;
 		}
-		res.code = 200;
-		res.set_header("Content-Type", content_type_for(*path));
-		res.body = read_file_text(*path);
+		serve_file(res, *path, content_type_for(*path));
 		return res;
 	});
 }

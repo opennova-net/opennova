@@ -85,7 +85,7 @@ constexpr RepeatedName kRepeatedNames[] = {
 	{DefRecordKind::Ammo,
 	 "An earlier ammo record has this name: the game keeps both, and a lookup by the name finds the earlier one."},
 	// A class the table has is found, and its limit written over [orig: WeaponDefs_ParseLineCallback @
-	// 0x543680, sub_540590 @0x543802 -> the store @0x543873].
+	// 0x543680, its AmmoClass_FindIdByName call @0x543802 -> the store @0x543873].
 	{DefRecordKind::Carry, "An earlier carry limit names this class: the game reads this line's limit in its place."},
 	// The lookup by name returns the first row of it [orig: PowerUpDef_FindByName @0x442660, stricmp over the
 	// rows in order]: a later one no item binds.

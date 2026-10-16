@@ -152,11 +152,8 @@ int RtxtStringFile::add_entry(const String &p_key, const String &p_text, int p_s
 	entry.section_index = static_cast<uint32_t>(p_section_index < 0 ? 0 : p_section_index);
 	entry.position.x = static_cast<int16_t>(p_position.x);
 	entry.position.y = static_cast<int16_t>(p_position.y);
-	// Insert at the end of the section's contiguous run: the engine derives entry
-	// indices by accumulating section string_counts and requires grouped entries
-	// [orig: TextResource_FindEntryBySectionAndKey @ 0x75D250, see docs/interface/rtxt-strings-re.md].
-	const int index = _section_insert_index(entry.section_index);
-	file_.entries.insert(file_.entries.begin() + index, std::move(entry));
+	// At the end of the section's run (engine rtxt::File::insert_entry).
+	const int index = static_cast<int>(file_.insert_entry(std::move(entry)));
 	_refresh();
 	emit_signal("entries_structure_changed");
 	return index;
@@ -172,19 +169,6 @@ void RtxtStringFile::remove_entry(int p_index) {
 void RtxtStringFile::set_entry_text(int p_index, const String &p_text) {
 	ERR_FAIL_INDEX(p_index, static_cast<int>(file_.entries.size()));
 	file_.entries[p_index].text = gd_to_std(p_text);
-}
-
-int RtxtStringFile::_section_insert_index(uint32_t p_section_index) const {
-	// One past the last entry that belongs to a section <= the target: the end
-	// of the target section's run in a grouped file, and a sane append point in
-	// a not-yet-normalized one.
-	int index = 0;
-	for (size_t i = 0; i < file_.entries.size(); ++i) {
-		if (file_.entries[i].section_index <= p_section_index) {
-			index = static_cast<int>(i) + 1;
-		}
-	}
-	return index;
 }
 
 bool RtxtStringFile::is_grouped() const {
@@ -206,7 +190,7 @@ int RtxtStringFile::add_section(const String &p_name) {
 
 Error RtxtStringFile::load_from_path(const String &p_path) {
 	PackedByteArray packed;
-	if (!read_nova_payload_file(p_path, packed)) {
+	if (!read_payload_file(p_path, packed)) {
 		return ERR_FILE_CANT_OPEN;
 	}
 	return load_from_byte_array(packed);
@@ -296,11 +280,7 @@ Ref<RtxtStringFile> RtxtStringFile::load_mission_table(const Ref<ResourceRoot> &
 		const String &mission_file_basename) {
 	if (root.is_null()) return Ref<RtxtStringFile>();
 	const opennova::ResourceIndex *index = &root->native_index();
-	opennova::mission::BootFileSource files;
-	files.has_file = [index](const std::string &name) { return index->has_file(name); };
-	files.read_file = [index](const std::string &name, std::vector<uint8_t> &out) {
-		return index->read_file(name, out);
-	};
+	const opennova::mission::BootFileSource files = opennova::mission::boot_files_from_index(*index);
 	std::vector<uint8_t> bytes;
 	opennova::mission::resolve_mission_text(files,
 			opennova::to_std(mission_file_basename), bytes);

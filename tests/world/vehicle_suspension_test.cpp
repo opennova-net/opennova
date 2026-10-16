@@ -866,11 +866,17 @@ void test_mounted_action_recoil() {
 	for (const auto &f : v.veh.chassis_forces)
 		CHECK(f.rate == 0, "applied force slots are consumed");
 	// No slot def is the raw leg: no point, the gun's raw forward stands in
-	// (mission yaw 0 faces +Y).
+	// (mission yaw 0 faces +Y). The quarter-turn heading's dbl_7C3608 trig
+	// (io::kRadiansPerBamX87) gives the forward column (-201, 4194303, 0) / 2^22,
+	// read >> 6 as (-4, 65535, 0); negated and normalized, (4, -65535, 0) x
+	// 65536 / |v| truncates to -65535 on Y [orig: Math_BuildFixedPointMatrixFromEulerAngles
+	// `fld dbl_7C3608` @0x613F5D, the raw leg's build @0x545E4C].
 	points.point = 0;
 	w.vehicles.weapon_recoil(person, 20, nullptr, 6, 1);
 	CHECK(points.point == 0, "a slot without a def poses no point");
-	CHECK(v.veh.chassis_impulse_direction[1] == -65536, "the raw gun forward stands in");
+	CHECK(v.veh.chassis_impulse_direction[0] == 4 &&
+	              v.veh.chassis_impulse_direction[1] == -65535,
+	      "the raw gun forward stands in");
 	w.pose_provider = nullptr;
 	person.mount_type = SeatType::Driver;
 	w.vehicles.weapon_recoil(person, 55, fired, 6, 1);

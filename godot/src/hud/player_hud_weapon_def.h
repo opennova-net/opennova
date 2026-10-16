@@ -22,9 +22,8 @@ namespace godot {
 // `error_deg` is the 6-row dispersion table in DEGREES -- rows hip
 // prone/crouch/stand then scoped prone/crouch/stand; the crosshair spread
 // reads row stance + 3*scoped [orig: parse @0x543b21 (16.16); HUD_DrawCrosshair
-// @0x592b84]. The clip graphic (HUDCLIPGFX [orig: parse @0x54427f]) and the
-// per-round row (HUDRNDGFX [orig: parse @0x5442fc -> weapon +644..+656,
-// divisor byte +727]) drive the clip indicator.
+// @0x592b84]. The clip graphic (HUDCLIPGFX (engine: formats/def/def_weapons.cpp)) and the
+// per-round row (HUDRNDGFX (engine: formats/def/def_weapons.cpp)) drive the clip indicator.
 class PlayerHudWeaponDef : public RefCounted {
 	GDCLASS(PlayerHudWeaponDef, RefCounted)
 
@@ -69,7 +68,7 @@ public:
 	// Standard SIGHTS-card contents. The simulation owns the dynamic card
 	// selector; this record only preserves every authored row (WeaponSightRow)
 	// in draw order and virtual 1024x768 space.
-	// [orig: HUD_DrawWeaponSightOverlays @0x4dce00]
+	// (engine: runtime/hud/hud_frame.cpp)
 	TypedArray<WeaponSightRow> get_sights() const { return sights_; }
 	void set_sights(const TypedArray<WeaponSightRow> &p_value) { sights_ = p_value; }
 	// The card's `slide` multiplier at the def's default zero

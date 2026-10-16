@@ -4,6 +4,7 @@
 #include <base/crt/crt_rng.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 #include <formats/threedi/threedi_panm.h>
+#include <formats/threedi/threedi_panm_pose.h> // threedi_panm_runtime_time_ms
 
 #include <algorithm>
 #include <array>
@@ -500,6 +501,38 @@ int compute_anim_frame(const ThreediMaterial& mat,
     int frame = mul_shift16(frame_count, ctrl);
     if (frame >= frame_count) frame = frame_count - 1;
     return frame;
+}
+
+std::vector<ModelLightEval> eval_model_lights(const opennova::threedi::Threedi3di3& model,
+                                              int64_t time_ms,
+                                              const ControlRegisterValues& ctrl_values) {
+    using namespace opennova::threedi;
+    std::vector<ModelLightEval> out;
+    for (size_t i = 0; i < model.light_count; ++i) {
+        const ThreediLight& light = model.lights[i];
+        if ((light.flags & THREEDI_LIGHT_FLAG_DISABLE_OBJECTS) != 0) continue;
+        uint8_t phase = light.phase;
+        if (threedi_generator_names_register(light.style)) {
+            const char* name = nullptr;
+            if (model.ctrl.registers != nullptr && phase < model.ctrl.count)
+                name = model.ctrl.registers[phase].name;
+            phase = threedi_ctrl_register_loader_ordinal(name);
+        }
+        const std::array<uint8_t, 4> color_start = {light.color_start[0], light.color_start[1],
+                                                    light.color_start[2], light.color_start[3]};
+        const std::array<uint8_t, 4> color_end = {light.color_end[0], light.color_end[1],
+                                                  light.color_end[2], light.color_end[3]};
+        const int32_t ctrl_value =
+                threedi_generator_reads_register(THREEDI_GENERATOR_CONSUMER_LIGHT, light.style)
+                        ? ctrl_values[phase]
+                        : 0;
+        ModelLightEval eval;
+        eval.index = i;
+        eval.runtime = eval_light_runtime(light.style, phase, light.rate, color_start, color_end,
+                                          threedi_panm_runtime_time_ms(time_ms), ctrl_value);
+        out.push_back(eval);
+    }
+    return out;
 }
 
 }  // namespace opennova::renderer

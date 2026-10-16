@@ -46,9 +46,9 @@ using namespace sim_internal;
 void Simulation::advance_facial_presentation(const Vector3 &p_camera) {
     if (!kernel_ || !p_camera.is_finite()) return;
     std::vector<opennova::world::FacialDraw> rows;
-    kernel_->world.facials.compile_draws(kernel_->world,
-            static_cast<int32_t>(p_camera.x * 65536.0),
-            static_cast<int32_t>(-p_camera.z * 65536.0),
+    int32_t camera[3];
+    fixed3_from_godot(p_camera, camera);
+    kernel_->world.facials.compile_draws(kernel_->world, camera[0], camera[1],
             kernel_->local.view.camera_mode == 0, rows);
     // JO renders these targets then writes two unused globals. The complete
     // .text/.rdata/.data audit found no texture sink; model materials retain
@@ -379,7 +379,7 @@ uint8_t Simulation::sound_listener_view_flags() const {
 
 // The presenting shell's listener stamp — the camera position, once per frame
 // before the tick batch, feeding the sim's fire-sound distance gate
-// [orig: listener_pos @ 0x24D6630; world/fire_sound.h]. Never called on a
+// (engine: runtime/world/fire_sound.h). Never called on a
 // dedicated host, which is the witnessed peer gate.
 void Simulation::set_sound_listener(const Vector3 &p_listener_godot) {
 	if (!world_installed_) return;
@@ -391,8 +391,7 @@ void Simulation::set_sound_listener(const Vector3 &p_listener_godot) {
 // sets, and expired propagation-delayed slots, in play order on the logic
 // clock. The shell plays each row positionally; the set's max-range cull
 // stays at play time in the audio bank (D-AI-8).
-// [orig: Entity_PlaySound3D_FullVolume @ 0x528e20 / the pending drain
-//  Sound_TickPendingSlots @ 0x529310]
+// (engine: runtime/world/fire_sound.h)
 void Simulation::drain_fire_sounds(std::vector<opennova::world::ReadyFireSound> &r_sounds) {
 	r_sounds.clear();
 	if (!world_installed_) return;
@@ -618,9 +617,7 @@ Vector3 Simulation::get_entity_position(int p_index) const {
 	AiEntity *e = kernel_->world.ai.at(p_index);
 	if (!e) return Vector3();
 	// mission (x, y, z) 16.16 -> Godot (x, z, -y) world units. [orig render remap: (x, z, -y).]
-	return Vector3(static_cast<float>(e->pos[0] / kFixed16),
-	               static_cast<float>(e->pos[2] / kFixed16),
-	               static_cast<float>(-e->pos[1] / kFixed16));
+	return godot_from_fixed3(e->pos);
 }
 
 float Simulation::get_entity_yaw_deg(int p_index) const {
@@ -771,8 +768,7 @@ std::shared_ptr<const SimulationPresentSnapshot> Simulation::build_present_snaps
 	// ADR 0011 Decision 1 (as amended, D-NET-140 closed): every authoritative live mission is an
 	// in-process listen server in standalone MainGame/GameWorld, and the listen host presents
 	// from its OWN pools — retail's local client reads process memory and its loopback 0x0A is
-	// header-only [orig: NetPacket_SerializeEntityStatesToPacket @0x50f07e;
-	// Terrain_CollectVisibleEntitiesForTerrain @0x5c8c60]. A joiner renders the host's stream
+	// header-only (engine: runtime/inmatch/present_rows.h). A joiner renders the host's stream
 	// wire-direct from the state its ClientReplicaPipeline decoded (ClientState).
 	// Empty when no runtime is active (a bare sim) — scalar getters (get_entity_*) read the
 	// AI pool for tooling.

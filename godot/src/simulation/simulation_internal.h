@@ -45,7 +45,7 @@
 #include <formats/mission/bms.h>
 #include <formats/mission/mission.h>          // kItemIdOffset (wire type id -> items.def id)
 #include <runtime/mission/placement_traits.h> // visual_item_id_for_runtime_type / kPlayerVisualItemId
-#include <runtime/anim/aim_overlay.h> // the torso-bend overlay blends [orig: @0x4b1290]
+#include <runtime/anim/aim_overlay.h> // the torso-bend overlay blends (engine: runtime/anim/aim_overlay.h)
 #include <base/io/bam.h>           // bam_add/bam_sar: the FP roll term composition
 #include <base/io/strutil.h>       // iequals: the loadout sub-variant ammo-class compare
 #include <runtime/world/angle.h>
@@ -76,7 +76,7 @@ using opennova::world::World;
 
 namespace sim_internal {
 
-inline constexpr double kFixed16 = 65536.0;
+inline constexpr double kFixed16 = opennova::io::kFp16OneD;
 // Canonical definition lives in engine/runtime/mission placement_traits.h
 // (the presentation visual-item policy home).
 inline constexpr int kPlayerVisualItemId = opennova::mission::kPlayerVisualItemId;
@@ -147,13 +147,6 @@ using opennova::inmatch::write_present_overlay;
 // declarations keep this header's call sites unchanged.
 using opennova::world::model_bound_radius_from_3di;
 
-
-// Coordinate converter shared by the debug reports and present getters.
-// Mission-space 16.16 triple -> Godot world space: (x, y, z) -> (x, z, -y) units.
-inline Vector3 godot_from_fixed3(const int32_t p[3]) {
-	return Vector3(static_cast<float>(p[0] / 65536.0), static_cast<float>(p[2] / 65536.0),
-	               static_cast<float>(-p[1] / 65536.0));
-}
 
 // The host screen's START over the mounted catalog (simulation_rotation.cpp).
 void seed_host_rotation(SimulationNetState &p_net, const Ref<ResourceRoot> &p_root);

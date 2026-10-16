@@ -1,5 +1,7 @@
 #include <formats/scr/scr.h>
 
+#include <base/io/bits.h>
+
 #include <string.h>
 
 #include <utility>
@@ -10,10 +12,6 @@ namespace opennova::scr {
    then per-byte XOR with the rotating keystream below). Both retail call sites
    strip the 4-byte header before calling it; see scr_decrypt_buf. Divergence
    notes live in docs/audio/mus-sbf-re.md (D-SCR-*). */
-
-static uint32_t rol32(uint32_t value, int shift) {
-    return (value << shift) | (value >> (32 - shift));
-}
 
 static void reverse_bytes(uint8_t *data, size_t size) {
     uint8_t *front, *back, tmp;
@@ -33,7 +31,7 @@ static void xor_with_keystream(uint8_t *data, size_t size, uint32_t key) {
     /* [orig: Scr_DecryptBuffer @ 0x53D090, keystream update @ 0x53D0D3] */
     size_t i;
     for (i = 0; i < size; ++i) {
-        key = rol32(key + rol32(key, 11), 4) ^ 1;
+        key = opennova::io::rotl32(key + opennova::io::rotl32(key, 11), 4) ^ 1;
         data[i] ^= (uint8_t)key;
     }
 }

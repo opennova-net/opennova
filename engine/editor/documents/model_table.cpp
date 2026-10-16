@@ -285,7 +285,7 @@ std::vector<Entry> model_entries() {
 		{fixed(integer("skinned", 0, 1, "Skinned")),
 				[](const void *d, int) -> Value { return int64_t(as<ThreediHeader>(d).mesh_type == THREEDI_MESH_SKINNED); }},
 		// The largest LOD's bounding radius, derived from the geometry, unsigned 16.16
-		// [orig: WriteGHDR @ 0x452B40] (docs/threedi/3di-gp-format-re.md).
+		// [orig: WriteGHDR @ 0x452B40 (ModSuperOed.exe)] (docs/threedi/3di-gp-format-re.md).
 		{fixed(in(realf("max_radius", "Largest LOD radius"), "m")),
 				[](const void *d, int) -> Value {
 					return static_cast<double>(static_cast<uint32_t>(as<ThreediHeader>(d).max_radius_fp16)) / io::kFp16OneD;

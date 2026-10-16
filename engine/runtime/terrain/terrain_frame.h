@@ -11,8 +11,8 @@
 // GPU meshes from the same CPT tiles at load time and writing the draw list onto
 // its instance pool.
 // [orig: Terrain_CollectVisibleSectors @ 0x5C9120 (jodemo.exe) — the 512-unit sector
-//  window feeding Terrain_TraverseQuadTreeNode @ 0x5C89C0 (jodemo.exe);
-//  Terrain_GetLodSlotFamily @ 0x60288E..0x6028B1 — the per-batch family select, called from
+//  window feeding Terrain_TraverseQuadTreeNode @ 0x5C89C0 (jodemo.exe)]
+// [orig: Terrain_GetLodSlotFamily @ 0x60288E..0x6028B1 — the per-batch family select, called from
 //  Terrain_RenderSectorBatch @ 0x609581]
 
 #include <runtime/terrain/foliage_detail_collector.h>
@@ -145,7 +145,7 @@ bool plan_terrain_region_refresh(const CptFile &cpt, const TrnConfig &trn,
 // [orig: PolyTrn_RenderFrame @ 0x60EAC0 — ctx[3] fov @0x60eaf6, ctx[6] view
 //  distance @0x60eb7e; Render_SceneWithWaterReflection @ 0x5d7ea0 fills
 //  ctx[3] from dword_A7839C/65536 @0x5d8037 and ctx[6] from g_EnvFogDistCurrentHigh
-//  @0x5d8052]
+//  (read @0x5d7f9a, stored @0x5d8052)]
 struct TerrainViewInput {
 	float cam_x = 0.0f;
 	float cam_y = 0.0f;

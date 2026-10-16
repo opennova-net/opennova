@@ -59,8 +59,8 @@ inline constexpr int kModelTileInstanceCap = 21;
 
 struct DetailCell {
 	// Exact retail packed cell key. It is both the deterministic seed and the
-	// encoded 16-unit cell origin: HIGH15 = X-min, LOW15 = Z-min on the Godot
-	// plane (retail's -camera_y sector axis); bit 31 marks a flat sector. Its
+	// encoded 16-unit cell origin: HIGH15 = X-min, LOW15 = Z-min on the render
+	// plane (x, -y), retail's -camera_y sector axis; bit 31 marks a flat sector. Its
 	// key consumes a cache slot but generates empty geometry.
 	uint32_t key = 0;
 	float camera_distance = 0.0f;
@@ -104,7 +104,7 @@ struct FrameRequest {
 struct WorldSamplers {
 	// Detail grass samples the flat, 1024-wrapped foliage map at the
 	// candidate's ATLAS position (DetailCell::atlas_x/atlas_z plus the local
-	// offsets; z on the Godot plane). The recovered
+	// offsets; z on the render plane, -y). The recovered
 	// Terrain_GetSurfaceTypeAtFixedPoint name is a misnomer; its backing
 	// buffer is the authored foliage map remapped to definition slots.
 	std::function<uint32_t(int32_t atlas_x_fixed, int32_t atlas_z_fixed)>
@@ -233,7 +233,7 @@ struct FdMipChain {
 	int width = 0;
 	int height = 0;
 	// Retail levels include mip zero and stop at a minimum dimension of four.
-	// The packed payload continues through 2x2/1x1 for Godot Image parity.
+	// The packed payload continues through 2x2/1x1, a whole chain in one buffer.
 	int retail_level_count = 0;
 	std::vector<uint8_t> rgba;
 };
@@ -247,7 +247,7 @@ public:
 	void reset();
 	// The cached cells whose instances may read a ground or map texel a region changed (an editor's sculpt or
 	// paint, ADR 0046 S25; the game changes neither in a match): every slot's detail cell and model tile whose
-	// area, widened by what its instances read around it, meets the Godot-plane rect [x0, x1) x [z0, z1) (whole
+	// area, widened by what its instances read around it, meets the render-plane rect [x0, x1) x [z0, z1) (whole
 	// units), dropped. A detail cell's instances read their candidate's bilinear tap one unit on, and the
 	// expanded geometry the embedder builds over them reads `detail_reach[slot]` units past an instance (its
 	// source vertices' planar extent and their normals' taps: renderer::FoliageFrameCompiler's; 0 where none is
@@ -267,7 +267,7 @@ public:
 	// dimensions are at least four. Mip zero preserves source RGB and
 	// replaces only alpha with the wrapped 3x3 filter. Lower retail levels blend
 	// progressively toward 0x808080 while always retaining base-chain alpha.
-	// The result is packed base-to-1x1 for direct Godot Image::set_data use.
+	// The result is packed base-to-1x1, a whole mip chain in one buffer.
 	// Invalid input leaves r_chain untouched.
 	// [orig: Foliage_LoadDefAssets @ 0x601260]
 	bool build_fd_rgba_mip_chain(const uint8_t *pixels, int width, int height,

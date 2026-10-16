@@ -3,7 +3,9 @@
 // [orig: HUD_RenderOverlays @ 0x5a7bb0; CGameFont_MeasureText @ 0x674e70;
 //  CGameFont_DrawText @ 0x6752c0]
 
+#include <base/gameprofile/game_type.h>
 #include <runtime/hud/game_font.h>
+#include <runtime/world/entity.h> // SeatType
 #include <runtime/hud/hud_config_tokens.h>
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_lfp_panel.h>
@@ -1558,7 +1560,7 @@ void test_compiler_waypoint_uses_bold_slot(const fnt_font_t *font) {
 // doubles it on the device. The untextured lines beside it keep the raw colour.
 // [orig: GameFont_LoadFromBlob @0x674825 (0x651 per page); the waypoint's
 //  HUD_DrawTextLeft_HalfBright @0x5949fc and its wireframe box @0x594b0c; the
-//  zone marker's sub_580B80 @0x598a1b with the point colour pushed @0x598a05;
+//  zone marker's HUD_DrawTextCenteredScaled @0x598a1b with the point colour pushed @0x598a05;
 //  the label box's HUD_DrawTextLeft_HalfBright @0x51f13a; the board's
 //  HUD_DrawTextAligned rows]
 void test_text_draws_the_drawers_halved_diffuse(const fnt_font_t *font) {
@@ -1954,7 +1956,7 @@ void test_compiler_scoreboard_paging(const fnt_font_t *font) {
 
 // The chat input line: a titled stdbox with the typed line, a '_' cursor
 // while bits 4..5 of the main-frame counter are set, drawn at level 3 too,
-// nothing when closed [orig: StdCtype_Destructor @0x5b8f30; the
+// nothing when closed [orig: HUD_DrawChatInputLine @0x5b8f30; the
 // `dword_A8705C & 0x30` blink @0x5b8fbb; HUD_DrawOverlayPanels @0x5c014e].
 void test_compiler_chat_input(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
@@ -2411,7 +2413,7 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 		CHECK(std::fabs(icons[1].v0 - 0.0f) < 1e-6f, "the attack frame is a blink");
 	}
 	// The conquest arm draws nothing (unmodelled, never invented).
-	lp.conquest_mode = true;
+	lp.game_type = opennova::game_type::kConquerAndControl;
 	const HudDrawList &list_c = compiler.compile(state, 1024.0f, 768.0f);
 	size_t conquest_icons = 0;
 	for (const HudQuad &q : list_c.quads)
@@ -2938,8 +2940,51 @@ void test_seat_weapon_and_stance_transitions(const fnt_font_t *font) {
 			"whole-HUD hide suppresses the seat-specific display too");
 }
 
+// The attach-label text, the friendly-tag anchor and the round-icon divisor's
+// byte read, the binding-side facts moved into the HUD (D-13).
+void test_attach_label_text_anchor_and_round_divisor() {
+	using opennova::world::SeatType;
+	const opennova::hud::GameTextLookup none;
+	CHECK(opennova::hud::attach_label_text(none, SeatType::Passenger, "") == "!sit", "sit fallback");
+	CHECK(opennova::hud::attach_label_text(none, SeatType::Driver, "") == "!Control", "driver -> Control");
+	CHECK(opennova::hud::attach_label_text(none, SeatType::Gunner, "") == "!UseGun", "no key -> UseGun");
+	CHECK(opennova::hud::attach_label_text(none, SeatType::Gunner, "STROVER_MG").empty(),
+			"a named key the table lacks draws empty");
+	CHECK(opennova::hud::attach_label_text(none, SeatType::ArmoryPoint, "") == "!UseArmory", "armory");
+	const opennova::hud::GameTextLookup table = [](const char *section, const char *key,
+			const char *fallback) -> std::string {
+		if (std::strcmp(section, "Overlays") == 0 && std::strcmp(key, "STROVER_MG") == 0) return "Use MG";
+		if (std::strcmp(section, "Overlays") == 0 && std::strcmp(key, "STROVER_SIT") == 0) return "Sit";
+		return fallback;
+	};
+	CHECK(opennova::hud::attach_label_text(table, SeatType::Gunner, "STROVER_MG") == "Use MG", "the def key");
+	CHECK(opennova::hud::attach_label_text(table, SeatType::Passenger, "") == "Sit", "the table's sit");
+
+	const float position[3] = {1.0f, 2.0f, 3.0f};
+	float anchor[3];
+	opennova::hud::friendly_tag_anchor(position, 0x18000, anchor);
+	CHECK(anchor[0] == 1.0f && anchor[1] == 2.0f && anchor[2] == 3.0f + (1.5f + 0.25f),
+			"anchor z = position + eye + 0.25");
+
+	CHECK(opennova::hud::rounds_per_icon_from_layout(1) == 1, "divisor 1");
+	CHECK(opennova::hud::rounds_per_icon_from_layout(257) == 1, "the low byte only");
+	CHECK(opennova::hud::rounds_per_icon_from_layout(0x1FF) == 0xFF, "0x1FF -> 255");
+
+	// The LFP panel's status strings: the table's entries, else retail's literals.
+	CHECK(opennova::hud::lfp_under_attack_text(none) == "!Under\nAttack!!", "under-attack fallback");
+	CHECK(opennova::hud::lfp_ready_text(none) == "!Ready for\nTakeover!", "ready fallback");
+	const opennova::hud::GameTextLookup lfp = [](const char *section, const char *key,
+			const char *fallback) -> std::string {
+		if (std::strcmp(section, "Overlays") == 0 && std::strcmp(key, "STROVER_UNDERATTACK") == 0)
+			return "Contested";
+		return fallback;
+	};
+	CHECK(opennova::hud::lfp_under_attack_text(lfp) == "Contested", "the table's under-attack text");
+}
+
 int main() {
 	fnt_font_t font = test_font::uniform_test_font();
+	test_attach_label_text_anchor_and_round_divisor();
 	test_seat_weapon_and_stance_transitions(&font);
 	test_launcher_reload_keeps_ammo_flash(&font);
 	test_stance_obeys_weapon_group_declutter(&font);

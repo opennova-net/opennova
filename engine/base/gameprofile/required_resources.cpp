@@ -86,8 +86,8 @@ const RequiredResource k_required_resources[] = {
     { "loading.pcx", BOOT_PHASE_BOOT, RES_OPTIONAL, 0,
       "graceful texture miss",
       "[orig: Game_ShowLoadingScreen @ 0x4a544f]", "loading_pcx" },
-    { "*.npj/*.npz", BOOT_PHASE_BOOT, RES_REQUIRED, RES_F_PATTERN,
-      "none found -> empty mission list (the only wildcard scan at boot)",
+    { "*.bms/*.npj/*.npz", BOOT_PHASE_BOOT, RES_REQUIRED, RES_F_PATTERN,
+      "none found -> empty mission list (the only wildcard scan at boot: the loose *.bms, *.npj and *.npz walks, then the archives' entries, where every stock .bms lists from; OpenNova lists no .npj/.npz, PERMANENT: D-MNU-25 / D-MIS-7)",
       "[orig: MissionList_ScanAndBuildFromFiles @ 0x563170]", "mission_scan" },
     { "hiscore.txt", BOOT_PHASE_BOOT, RES_OPTIONAL, RES_F_PLAYER_FILE,
       "silent skip",
@@ -414,6 +414,18 @@ bool gameprofile_replaced_under_expansion(const std::string &name) {
         }
     }
     return false;
+}
+
+std::vector<std::string> gameprofile_missing_boot_resources(
+        const std::function<bool(const std::string &name)> &has_file) {
+    std::vector<std::string> missing;
+    for (int i = 0; i < gameprofile_required_resource_count(); ++i) {
+        const RequiredResource *row = gameprofile_required_resource_at(i);
+        if (row->severity != RES_FATAL) continue;
+        if ((row->flags & (RES_F_PFF_TABLE_ANY | RES_F_PATTERN)) != 0) continue;
+        if (!has_file(row->name)) missing.push_back(row->name);
+    }
+    return missing;
 }
 
 } // namespace opennova::gameprofile

@@ -24,10 +24,6 @@ namespace {
 constexpr const char *NL = "\r\n";
 
 
-int clamp_int(int value, int min_value, int max_value) {
-	return std::max(min_value, std::min(max_value, value));
-}
-
 float clamp_float(float value, float min_value, float max_value) {
 	return std::max(min_value, std::min(max_value, value));
 }
@@ -49,9 +45,9 @@ void parse_rgb(const io::ConfigTokens &tokens, Rgb &out, float scale = 1.0f) {
 }
 
 std::string rgb_to_string(const Rgb &color) {
-	const int r = clamp_int(static_cast<int>(color.r * 255.0f + 0.5f), 0, 255);
-	const int g = clamp_int(static_cast<int>(color.g * 255.0f + 0.5f), 0, 255);
-	const int b = clamp_int(static_cast<int>(color.b * 255.0f + 0.5f), 0, 255);
+	const int r = std::clamp<int>(static_cast<int>(color.r * 255.0f + 0.5f), 0, 255);
+	const int g = std::clamp<int>(static_cast<int>(color.g * 255.0f + 0.5f), 0, 255);
+	const int b = std::clamp<int>(static_cast<int>(color.b * 255.0f + 0.5f), 0, 255);
 	char buffer[32];
 	std::snprintf(buffer, sizeof(buffer), "%d,%d,%d", r, g, b);
 	return buffer;
@@ -105,7 +101,7 @@ void parse_rgb_baked(const io::ConfigTokens &tokens, Rgb &out, float envscale) {
 	token_rgb(tokens, rgb);
 	float *channels[3] = {&out.r, &out.g, &out.b};
 	for (int i = 0; i < 3; ++i) {
-		const int baked = clamp_int(static_cast<int>(static_cast<float>(rgb[i]) * envscale), 0, 255);
+		const int baked = std::clamp<int>(static_cast<int>(static_cast<float>(rgb[i]) * envscale), 0, 255);
 		*channels[i] = static_cast<float>(baked) / 255.0f;
 	}
 }
@@ -159,9 +155,9 @@ void assign_tod_color(Keyframe &keyframe, const std::string &key, const io::Conf
 // (The original has no lower clamp and packs garbage for negative inputs; we
 // clamp at 0 — tracked divergence #11 in docs/env/env-tod-re.md.)
 int quantize_channel(float normalized, float envscale) {
-	const int byte_value = clamp_int(static_cast<int>(normalized * 255.0f + 0.5f), 0, 255);
+	const int byte_value = std::clamp<int>(static_cast<int>(normalized * 255.0f + 0.5f), 0, 255);
 	const int scaled = static_cast<int>(static_cast<float>(byte_value) * envscale);
-	return clamp_int(scaled, 0, 255);
+	return std::clamp<int>(scaled, 0, 255);
 }
 
 // Integer channel lerp with round-half-up [orig: Color_InterpolateRGB888 @ 0x57c2f0].

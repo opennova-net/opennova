@@ -845,7 +845,7 @@ int test_frame_update_roundtrip() {
 		in.weapon.preround_timer = 1; in.weapon.slot_state360 = 2; in.weapon.slot_state368 = 3;
 		in.weapon.slot_state364 = 4; in.weapon.slot_state356 = 5; in.weapon.slot_state460 = 6;
 		in.weapon.reload_seconds = 0xFF; in.weapon.uniform_team_mask = 0x12345678;
-		in.state_flag_byte = 0x07; in.carried_handle = 0xFFFF; in.health = 96; in.state_word = -3;
+		in.state_flag_byte = 0x07; in.carried_handle = 0xFFFF; in.health = 96; in.armor = -3;
 
 		FrameUpdateRecord p; p.handle = 0x0001; p.type_id = 100; p.cls = EntityClass::Player;
 		p.player.carrier_handle = 0xFFFF; p.player.pos_x_compressed = 0x1234; p.player.yaw_byte = 0x40;
@@ -869,7 +869,7 @@ int test_frame_update_roundtrip() {
 		EXPECT(out.anchor_x == in.anchor_x && out.anchor_y == in.anchor_y && out.anchor_z == in.anchor_z);
 		EXPECT(out.flags1 == 0x02 && out.flags2 == 0x00);
 		EXPECT(out.weapon.present && out.weapon.uniform_team_mask == 0x12345678 && out.weapon.slot_state460 == 6);
-		EXPECT(out.health == 96 && out.state_word == -3 && out.carried_handle == 0xFFFF);
+		EXPECT(out.health == 96 && out.armor == -3 && out.carried_handle == 0xFFFF);
 		EXPECT(out.records.size() == 3);
 		EXPECT(out.records[0].cls == EntityClass::Player && out.records[0].handle == 0x0001);
 		EXPECT(out.records[0].player.pos_x_compressed == 0x1234);

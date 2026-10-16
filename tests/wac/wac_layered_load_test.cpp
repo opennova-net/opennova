@@ -397,10 +397,7 @@ void test_effect_catalog_load_seeds_the_mission_start_names() {
 	root.write("weapon.def", kWeaponDef);
 	root.write("powerup.def", kPowerupDef);
 	mission::BootFileSource files = root.files();
-	files.list_files = [](const std::string &extension) {
-		return extension == ".ptl" ? std::vector<std::string>{"script.ptl"}
-				: std::vector<std::string>{};
-	};
+	files.effect_files = []() { return std::vector<std::string>{"script.ptl"}; };
 	opennova::particle::EffectCatalogNames effects;
 	wc::load_script_effect_catalog(files, effects);
 	const std::vector<std::string> names = effects.interned_names();

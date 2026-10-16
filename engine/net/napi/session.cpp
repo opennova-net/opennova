@@ -87,7 +87,7 @@ std::string novaworld_gate_error_tag(int gate_result, bool response_phase) {
 	return response_phase ? "NWEC16" : "NWEC15";
 }
 
-// [orig: UI_ShowNovaWorldConnectError @0x5584A0 - `add eax, 17h; cmp eax, 16h; ja`
+// [orig: UI_ShowNetworkErrorByCode @0x5584A0 - `add eax, 17h; cmp eax, 16h; ja`
 //  @0x5584A4..0x5584AA, the table @0x5586F8 (row i -> NWEC(48 - i)), the default @0x5586DF]
 std::string novaworld_connect_error_tag(int code) {
 	if (code < -23 || code > -1)
@@ -176,11 +176,6 @@ NapiField str_field(const char *name, const std::string &value) {
 	return f;
 }
 
-// Napi_CopyString(dst, src, N): at most N-1 characters, always NUL-terminated.
-std::string copy_capped(const std::string &s, size_t n) {
-	return s.size() < n ? s : s.substr(0, n - 1);
-}
-
 } // namespace
 
 std::string novaworld_server_msg_code_key(int msg_code) {
@@ -207,15 +202,15 @@ std::map<std::string, std::string> parse_host_commands(const NapiMessage &result
 		if (!strutil::iequals(child.name, "ServerVarList")) continue;
 		std::string list_name;
 		for (const NapiField &f : child.fields) {
-			if (strutil::iequals(f.name, "VarList")) list_name = copy_capped(field_to_string(f), 64);
+			if (strutil::iequals(f.name, "VarList")) list_name = napi_copy_string(field_to_string(f), 64);
 		}
 		if (!strutil::iequals(list_name, "HostCommands")) continue;
 		for (const NapiMessage &var : child.children) {
 			if (!strutil::iequals(var.name, "ServerVar")) continue;
 			std::string name, value;
 			for (const NapiField &f : var.fields) {
-				if (strutil::iequals(f.name, "VarName")) name = copy_capped(field_to_string(f), 64);
-				else if (strutil::iequals(f.name, "VarValue")) value = copy_capped(field_to_string(f), 4096);
+				if (strutil::iequals(f.name, "VarName")) name = napi_copy_string(field_to_string(f), 64);
+				else if (strutil::iequals(f.name, "VarValue")) value = napi_copy_string(field_to_string(f), 4096);
 			}
 			if (!name.empty()) out[name] = value;
 		}
@@ -514,7 +509,7 @@ bool parse_server_command(const NapiMessage &container, ServerCommand &out) {
 	bool have_cmd = false;
 	for (const NapiField &f : container.fields) {
 		if (strutil::iequals(f.name, "Cmd")) {
-			cmd = copy_capped(field_to_string(f), SERVER_COMMAND_CMD_CAP);
+			cmd = napi_copy_string(field_to_string(f), SERVER_COMMAND_CMD_CAP);
 			have_cmd = true;
 		}
 	}

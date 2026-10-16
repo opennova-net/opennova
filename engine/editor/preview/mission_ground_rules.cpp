@@ -13,6 +13,7 @@
 #include <editor/preview/mission_ground_facts.h>
 #include <editor/preview/mission_items.h>
 #include <editor/preview/mission_scene.h>
+#include <editor/preview/preview_units.h>
 #include <editor/preview/viewport_follow.h>
 #include <formats/def/def.h>
 #include <formats/mission/bms.h>
@@ -53,11 +54,6 @@ bool touch_type(int32_t type) {
 	       type == world::bvol_type::kVehicleVC || type == world::bvol_type::kPlayerCP;
 }
 
-std::string metres(double value) {
-	char text[32];
-	std::snprintf(text, sizeof(text), "%.1f m", value);
-	return text;
-}
 std::string height_words(double value) {
 	char text[32];
 	std::snprintf(text, sizeof(text), "%.2f", value);
@@ -606,19 +602,19 @@ std::string under_words(const MissionGroundVerdict &verdict) {
 std::string mission_ground_message(const MissionGroundVerdict &verdict, const std::string &title) {
 	switch (verdict.state) {
 	case MissionGroundState::Floats:
-		return title + " floats " + metres(verdict.bottom - verdict.support) + " above " + under_words(verdict) +
+		return title + " floats " + metres(verdict.bottom - verdict.support, 1) + " above " + under_words(verdict) +
 				", touching nothing: the game draws an item or a building where its record stands it, and nothing "
 				"sets it down.";
 	case MissionGroundState::Buried:
-		return title + " is buried: the top of its model stands " + metres(verdict.support - verdict.top) +
+		return title + " is buried: the top of its model stands " + metres(verdict.support - verdict.top, 1) +
 				" under the terrain, touching nothing, and the game draws it where its record stands it, out of "
 				"sight.";
 	case MissionGroundState::Falls:
-		return title + " starts " + metres(verdict.base - verdict.support) + " above " + under_words(verdict) +
+		return title + " starts " + metres(verdict.base - verdict.support, 1) + " above " + under_words(verdict) +
 				": the game sets a person down only where his feet stand under a metre over the terrain, so he "
 				"falls there at the mission's start.";
 	case MissionGroundState::Hangs:
-		return title + " starts " + metres(verdict.base - verdict.support) + " above " + under_words(verdict) +
+		return title + " starts " + metres(verdict.base - verdict.support, 1) + " above " + under_words(verdict) +
 				": the game sets a person down only where his feet stand under a metre over the terrain, and his "
 				"class (" + verdict.why.substr(verdict.why.find(':') + 1) + ") has no motor to move him, so he stays "
 				"in the air.";

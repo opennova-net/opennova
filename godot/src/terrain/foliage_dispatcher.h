@@ -77,8 +77,7 @@ private:
 // MultiMesh per MODEL submission over the slot's normalized mesh, retained
 // scenario-instance pooling, material binding, and the opaque-pass depth
 // masks (FoliageMaskPass).
-// [orig: Foliage_GenerateInstances_0 @ 0x5ffdd0;
-// Foliage_GenerateModelTileInstances @ 0x600980, see docs/foliage/foliage-re.md]
+// (engine: formats/foliage/runtime.cpp)
 class FoliageDispatcher : public Node3D {
   GDCLASS(FoliageDispatcher, Node3D)
 
@@ -222,7 +221,7 @@ public:
   // crouched/prone infantry standing on terrain, supplied per frame by the
   // binding from the simulation's occlusion frame. Callers without entity
   // data leave this empty.
-  // [orig: Terrain_RenderSectorEntitiesBySide @ 0x5c7dc2/0x5c7ded, see docs/foliage/foliage-re.md].
+  // (engine: runtime/inmatch/present_rows.cpp).
   void set_silhouette_anchors(const PackedVector3Array &p_anchors);
   PackedVector3Array get_silhouette_anchors() const;
 

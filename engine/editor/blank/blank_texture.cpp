@@ -169,9 +169,9 @@ bool make_blank_pointer(const BlankRequest &request, std::vector<uint8_t> &out, 
 }
 
 // The player preview's environment cube (HwmCube.dds, DI-33): a cube map, as the game loads it [orig:
-// PlayerInfo_InitPreviewModel @ 0x5600d0 -> sub_58A690 -> D3DXCreateCubeTextureFromFileInMemory @ 0x68464e],
-// each of its six faces the checkerboard the game draws for a texture it cannot load, at its own 128 a side,
-// through the DDS writer's cube form.
+// PlayerInfo_InitPreviewModel @ 0x5600d0 -> sub_58A690 -> GEnvCube_CreateFromMemory @ 0x684620 (the
+// D3DXCreateCubeTextureFromFileInMemory call @ 0x68464e)], each of its six faces the checkerboard the game draws for a
+// texture it cannot load, at its own 128 a side, through the DDS writer's cube form.
 bool make_blank_cube(const BlankRequest &request, std::vector<uint8_t> &out, Diagnostic &error) {
 	const std::vector<uint8_t> face = renderer::missing_material_texture_rgba();
 	const uint8_t *const faces[6] = {face.data(), face.data(), face.data(), face.data(), face.data(), face.data()};

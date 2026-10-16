@@ -7,6 +7,7 @@
 #include <vector>
 
 #include <net/novaworld/gsb.h>        // GsbResponse / gsb_parse_response (reused)
+#include <net/novaworld/proxy_rendezvous.h> // ProxyRendezvousConfig (proxy_rendezvous_from_join)
 #include <net/novaworld/http_login.h> // CookieJar / LoginFormField / build_login_post_body / parse_joi_connection_string
 
 #include <net/novacrypto/epask.h> // EpaskParams / epask_to_string / epask_from_string
@@ -97,6 +98,15 @@ struct JoinResult {
 	std::vector<uint8_t> cd_cookie; // when Resolved
 	std::string reason;       // when Failed
 };
+
+// The proxy-assisted join's install from a resolved .joi: node = inet_addr(NI) /
+// atol(NP), cookie = atol(BK), relay = inet_addr of the NK-decoded host / the NK port,
+// each atol the CRT's (io::retail_atol; D-NET-384). A field that does not parse stays 0,
+// which the all-six gate (ProxyRendezvousConfig::enabled) reads as no proxy, as a .joi
+// without NI/NP/BK.
+// [orig: CNapiGameSession_InitTransportConnection @0x4c9e10 - the install @0x4ca051..0x4ca0c7:
+//  _atol of BK @0x4ca05b, of NP @0x4ca08a, the relay port's @0x4ca0b9]
+ProxyRendezvousConfig proxy_rendezvous_from_join(const JoinResult &resolved);
 
 // --- host ---
 // The NovaWorld menu's Host leg: the hosting page the main page names answers, through its relay,

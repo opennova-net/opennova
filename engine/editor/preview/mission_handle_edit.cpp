@@ -8,6 +8,7 @@
 #include <base/io/bam.h>
 #include <editor/model/document.h>
 #include <editor/preview/mission_camera.h>
+#include <editor/preview/preview_units.h>
 #include <editor/preview/viewport_device.h>
 #include <editor/preview/viewport_model.h>
 #include <formats/mission/bms.h>
@@ -27,10 +28,6 @@ constexpr HandleToken kHandles[] = {
 	{ MissionHandle::XMaxYMax, "x_max_y_max" }, { MissionHandle::XMinYMax, "x_min_y_max" }, { MissionHandle::ZMin, "z_min" },
 	{ MissionHandle::ZMax, "z_max" },
 };
-
-double snapped(double value, float snap) {
-	return snap > 0.0f ? std::round(value / double(snap)) * double(snap) : value;
-}
 
 // A Set of the position field `field` to `value` where its 16.16 word is another than the word the
 // row holds now (the file's own step: less moves nothing it writes).

@@ -29,8 +29,7 @@ class ResourceRoot;
 //
 // Mutations also maintain the engine's grouping invariant — entries stay
 // contiguous per section, because the original derives entry indices from
-// accumulated section string_counts [orig: TextResource_FindEntryBySectionAndKey
-// @ 0x75D250]. Loading stays faithful: an ungrouped file is loaded as-is (so
+// accumulated section string_counts (engine: formats/rtxt/rtxt.h). Loading stays faithful: an ungrouped file is loaded as-is (so
 // unedited bytes save back exactly) and flagged via is_grouped().
 class RtxtStringFile : public Resource {
 	GDCLASS(RtxtStringFile, Resource)
@@ -39,7 +38,6 @@ private:
 	opennova::rtxt::File file_;
 
 	void _refresh();  // rebuild lookup + recompute section counts
-	int _section_insert_index(uint32_t p_section_index) const;
 
 protected:
 	static void _bind_methods();
@@ -51,7 +49,7 @@ public:
 	String get_string(const StringName &p_key) const;
 	bool has_string(const StringName &p_key) const;
 	// Engine-faithful section-scoped lookup (first matching section, first
-	// matching key within its contiguous run) [orig: 0x75D250 / 0x75D1E0, see docs/interface/rtxt-strings-re.md].
+	// matching key within its contiguous run) (engine: formats/rtxt/rtxt.h).
 	String get_string_in_section(const String &p_section, const StringName &p_key) const;
 	bool has_string_in_section(const String &p_section, const StringName &p_key) const;
 	int get_entry_count() const;

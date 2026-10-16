@@ -1919,6 +1919,49 @@ bool run_revive_deploy_respawns_l_on_its_record_edge() {
 			"revive: no grant folds, so L keeps the kit it died with");
 }
 
+// The 0x0A tail's last word is the host's copy of L's +0x120 (Armor; ammo class
+// 1's carried pool): the joiner stores it on L every frame that carries the
+// tail, alive or dead (B-4).
+// [orig: NapiNPClientMsg_0x00A read @0x430442, store @0x4305EB]
+bool run_tail_armor_lands_on_l() {
+	Harness h;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+			1, 0, /*self_handle=*/0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	auto &self_row = h.role.runtime->state().upsert(0x0005);
+	self_row.cls = EntityClass::Player;
+	self_row.type_id = w::kPlayerInfantryTypeId;
+	SessionSequencing seq = inmatch::make_jo_game_session_sequencing();
+	auto frame = [&](int16_t health, int16_t armor, uint8_t state_flags) {
+		FrameUpdate fu;
+		fu.carried_handle = 0xFFFF;
+		fu.health = health;
+		fu.armor = armor;
+		FrameUpdateRecord rec;
+		rec.handle = 0x0005;
+		rec.type_id = w::kPlayerInfantryTypeId;
+		rec.cls = EntityClass::Player;
+		rec.player.carrier_handle = 0xFFFF;
+		rec.player.state_flags = state_flags;
+		fu.records.push_back(rec);
+		std::vector<uint8_t> packet;
+		frame_session_packet(seq, SessionCrypto{kServerScrk, {}, kClientKey},
+				{make_protocol_message(s2c::PER_FRAME_UPDATE, encode_frame_update(fu))}, packet);
+		auto datagram = nw_encode_outbound(SESSION_OPCODE_SERVER_PROTOCOL_MESSAGE, std::move(packet));
+		h.role.runtime->receive(datagram.data(), datagram.size());
+		h.role.run_tick(h.input);
+	};
+	frame(100, 33, 0x00);
+	const w::Entity *local = h.kernel->local.player();
+	if (!expect(local != nullptr && local->mana == 33, "armor: the tail's word lands on L"))
+		return false;
+	frame(100, -1, 0x00);
+	if (!expect(local->mana == -1, "armor: a negative word lands raw")) return false;
+	frame(0, 7, w::kEntityFlagDead);
+	return expect(!local->alive && local->mana == 7, "armor: a dead L still takes the word");
+}
+
 // D-COL-21: the redeploy release's reset ends in the candidate-slice rebuild and
 // L's own list, so L walks a slice built at its redeployed pose at once, where it
 // kept the one built at its death spot until the next 17-tick edge.
@@ -2363,6 +2406,7 @@ int main() {
 	ok &= run_end_round_header_holds_the_entity_update();
 	ok &= run_world_state_load_resnaps_local_pose();
 	ok &= run_revive_deploy_respawns_l_on_its_record_edge();
+	ok &= run_tail_armor_lands_on_l();
 	ok &= run_redeploy_release_rebuilds_the_candidate_slices();
 	ok &= run_proxy_rendezvous_pump();
 	ok &= run_respawn_key_resets_input_and_sends_0x41();

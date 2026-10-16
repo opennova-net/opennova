@@ -2,6 +2,7 @@
 #include <runtime/renderer/texture_compression.h>
 #include <runtime/renderer/texture_dxt.h>
 
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <vector>
@@ -237,6 +238,41 @@ int main() {
 			ok &= expect(paired[level].blocks == encoded.blocks,
 					"each paired level is encoded straight from its blended texels");
 		}
+	}
+
+	{
+		// The minimap's depthspin texel: the four taps at (4x, 4z), (+2, 0), (0, +2) and (+2, +2)
+		// summed, kept as sum >> 10; the odd taps between them are never read; G is the water plane,
+		// floored and clamped at 254. [orig: PolyTrn_InitTextures @ 0x60BA30..0x60BB11]
+		std::vector<uint16_t> depth(1024u * 1024u, 0);
+		const auto at = [&depth](int x, int z) -> uint16_t & { return depth[static_cast<size_t>(z) * 1024 + x]; };
+		at(0, 0) = 2560;
+		at(2, 0) = 2816;
+		at(0, 2) = 3072;
+		at(2, 2) = 3328; // sum 11776, >> 10 = 11
+		at(1, 0) = 65535;
+		at(1, 1) = 65535;
+		at(3, 3) = 65535; // between the taps: not read
+		at(12, 20) = 65535;
+		at(14, 20) = 65535;
+		at(12, 22) = 65535;
+		at(14, 22) = 65535; // texel (3, 5): 262140 >> 10 = 255
+		const std::vector<uint8_t> rg = opennova::terrain::build_depthspin_rg8(depth, 12.7f);
+		ok &= expect(rg.size() == 256u * 256u * 2u, "depthspin is 256 x 256 RG8");
+		if (rg.size() == 256u * 256u * 2u) {
+			ok &= expect(rg[0] == 11 && rg[1] == 12, "texel (0, 0) keeps sum >> 10 and the floored plane");
+			ok &= expect(rg[2] == 0, "texel (1, 0) reads its own taps only");
+			const size_t texel = (5u * 256u + 3u) * 2u;
+			ok &= expect(rg[texel] == 255 && rg[texel + 1] == 12, "texel (3, 5) reads (12, 20)..(14, 22)");
+		}
+		const std::vector<uint8_t> high = opennova::terrain::build_depthspin_rg8(depth, 300.0f);
+		ok &= expect(high.size() == 256u * 256u * 2u && high[1] == 254, "the water plane clamps at 254");
+		ok &= expect(opennova::terrain::build_depthspin_rg8(depth, 0.5f).empty(),
+				"a plane below 1 draws nothing");
+		ok &= expect(opennova::terrain::build_depthspin_rg8(depth, std::nanf("")).empty(),
+				"a non-finite plane draws nothing");
+		ok &= expect(opennova::terrain::build_depthspin_rg8(std::vector<uint16_t>(16), 12.0f).empty(),
+				"an atlas of another size has no depthspin");
 	}
 
 	if (!ok) {

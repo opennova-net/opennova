@@ -1280,7 +1280,7 @@ typedef struct DefHudPosDef {
     /* PAUSEDPOS x y — the SP pause text's anchor (STROVER7, right-aligned
        Impact38); unauthored the drawer falls back to (1000, 4).
        [orig: HUD_ParseHudposToken @0x59FC8D..0x59FCC8 -> dword_272360C /
-       dword_2723610 (atof, ftol); the reader sub_59D650 @0x59D656..0x59D670] */
+       dword_2723610 (atof, ftol); the reader HUD_DrawPausedText @0x59D656..0x59D670] */
     int paused_pos[2];
     /* NETWORKINDICATOR x0 y0 x1 y1 x2 y2 — the three connection indicators'
        corners (quality, link error, NovaWorld). Unauthored, the CNetQuality

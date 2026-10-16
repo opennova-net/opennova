@@ -9,7 +9,7 @@
 // session settings, a mission start copies it and the session keeps that copy.
 // [orig: Config_ParseSettingsLine @ 0x54F740 (the 'n' arm's `NoBlood`, game.cfg
 //  +0x174); the /NOBLOOD switch Game_ParseCommandLineAndInit @ 0x4A7952; the
-//  session copy Game_ApplySessionSettingsToGlobals @ 0x551553 (byte_24D261C,
+//  session copy Game_ApplySessionSettingsToGlobals @ 0x551553 (g_SessionNoBlood,
 //  which no instruction reads)]
 
 #include <cstdint>

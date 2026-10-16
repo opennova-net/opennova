@@ -3,6 +3,8 @@
 
 #include <runtime/renderer/render_order.h>
 #include <runtime/renderer/scene_pass_gates.h>
+#include <runtime/world/collision.h> // BlinkAccum::hit_owner
+#include <runtime/world/occlusion_camera.h> // mission_forces_indoors
 
 #include <cstdint>
 #include <cstdio>
@@ -202,6 +204,26 @@ int main() {
 			const ScenePassGateEdges e = scene_pass_gate_edges(pair[0], pair[1]);
 			CHECK(!e.terrain_opened && !e.water_opened);
 		}
+	}
+
+	// The water passes: the water letter skips them unless the occlusion pass
+	// latched the water visible; the other letters never touch them.
+	{
+		CHECK(scene_water_visible(0, false));
+		CHECK(!scene_water_visible(0x8, false));
+		CHECK(scene_water_visible(0x8, true));
+		CHECK(scene_water_visible(0x2 | 0x4 | 0x20, false));
+	}
+	// The force-indoors attribute and the blink hit's owning building.
+	{
+		using opennova::world::BlinkAccum;
+		using opennova::world::EntityHandle;
+		CHECK(opennova::world::mission_forces_indoors(0x10));
+		CHECK(opennova::world::mission_forces_indoors(0x10 | 0x4));
+		CHECK(!opennova::world::mission_forces_indoors(0x4));
+		CHECK(!BlinkAccum::hit_owner(0).valid());
+		const EntityHandle owner = BlinkAccum::hit_owner((5u << 20) | (3u << 12) | 1u);
+		CHECK(owner.valid() && owner.pool() == 2 && owner.slot() == 5);
 	}
 
 	if (failures != 0) {

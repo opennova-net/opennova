@@ -20,6 +20,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/damage_pair.h>
+#include <runtime/world/impact_damage.h>
 #include <runtime/world/impact_scar.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/collision_force.h>
@@ -35,8 +36,10 @@ namespace opennova::world {
 namespace {
 
 constexpr double kPi = io::kPi;
-// BAM32 -> radians (full turn = 2^32) [orig: engine-wide BAM convention, angle.h].
-constexpr double kRadPerBam = io::kRadiansPerBam;
+// BAM32 -> radians: retail's x87 double, which every spawner's trig multiplies
+// by [orig: `fld dbl_7C3608` @0x4EC515 / @0x4EBA25 / @0x4EBCCD; the knife's
+// Math_BuildFixedPointMatrixFromEulerAngles @0x613F5D].
+constexpr double kRadPerBam = io::kRadiansPerBamX87;
 constexpr int32_t kProjectileGravityQ16 = 167;
 constexpr int32_t kDragTableSize = 1220;
 // The glass-section break sound: row 29 of the 84-row {char name[32]; int *handle}
@@ -460,28 +463,11 @@ const std::array<int32_t, kDragTableSize> &projectile_drag_table() {
     return table;
 }
 
-// Convert a modulo-2^32 result to the signed value represented by the same bits
-// without relying on implementation-defined unsigned-to-signed conversion.
-int32_t signed_from_u32(uint32_t value) {
-    if (value <= static_cast<uint32_t>(std::numeric_limits<int32_t>::max()))
-        return static_cast<int32_t>(value);
-    return -1 - static_cast<int32_t>(std::numeric_limits<uint32_t>::max() - value);
-}
-
-int32_t wrapped_signed_product(int32_t lhs, int32_t rhs) {
-    return signed_from_u32(static_cast<uint32_t>(lhs) * static_cast<uint32_t>(rhs));
-}
-
 int32_t drag_speed_index(int32_t magnitude_q16) {
     const int64_t scaled = static_cast<int64_t>(magnitude_q16) * io::kTicksPerSecondInt;
     if (scaled <= 0) return 0;
     const int64_t index = scaled >> 16;
     return static_cast<int32_t>(index > 1219 ? 1219 : index);
-}
-
-int32_t arithmetic_shift_right_16(int64_t value) {
-    if (value >= 0) return static_cast<int32_t>(value >> 16);
-    return -static_cast<int32_t>((-value + 0xffff) >> 16);
 }
 
 Vec3 vec_from_fixed(const FixedVec3 &v) {
@@ -583,141 +569,10 @@ void apply_aerodynamic_drag(FixedVec3 &velocity, const AmmoTableEntry &ammo,
     }
 }
 
-bool impact_is_critical(const Entity &target, int32_t hit_zone,
-                        int32_t hit_bone) {
-    if (target.item_type != 3) return false;
-    return (target.item_attrib & kItemAttribLandable) != 0
-        ? seat_hit_bone_is_critical(hit_bone)
-        : hit_zone_is_critical(hit_zone);
-}
-
-// `fild; fsqrt; fistp` under the default round-to-nearest control word, then
-// `shl 8`. A negative operand is an invalid fsqrt whose integer-indefinite
-// result shifts to 0. [orig: @0x4E9142..0x4E9150, @0x4E915B..0x4E9169]
-int32_t fistp_sqrt_shl8(int32_t value) {
-    if (value < 0) return 0;
-    const int32_t root = static_cast<int32_t>(std::nearbyint(std::sqrt(double(value))));
-    return signed_from_u32(uint32_t(root) << 8);
-}
-
-bool subtract_material_energy(FixedVec3 &velocity, int32_t mass, int32_t cost) {
-    if (cost == 0) return true;
-    const int32_t squared = signed_from_u32(
-            uint32_t(retail_q16_mul_rhu(velocity.x, velocity.x)) +
-            uint32_t(retail_q16_mul_rhu(velocity.y, velocity.y)) +
-            uint32_t(retail_q16_mul_rhu(velocity.z, velocity.z)));
-    const int32_t energy = retail_q16_mul_rhu(squared, mass);
-    if (energy <= cost) return false; // [orig: signed `jle` @0x4E9116]
-    const int32_t remaining_squared = static_cast<int32_t>(
-            (int64_t(energy - cost) * io::kFp16OneInt) / mass);
-    const int32_t speed = fistp_sqrt_shl8(squared);
-    const int32_t remaining_speed = fistp_sqrt_shl8(remaining_squared);
-    if (speed == 0) return false; // [orig: `test ecx, ecx; jz` @0x4E916C]
-    const int32_t ratio = static_cast<int32_t>(
-            (int64_t(remaining_speed) * io::kFp16OneInt) / speed);
-    velocity.x = retail_q16_mul_rhu(velocity.x, ratio);
-    velocity.y = retail_q16_mul_rhu(velocity.y, ratio);
-    velocity.z = retail_q16_mul_rhu(velocity.z, ratio);
-    return true;
-}
-
-// Armor removes kinetic energy, independently of the face-material cost.
-// [orig: Projectile_ApplyDragDeceleration @0x4e5cd0]
-void apply_armor_deceleration(FixedVec3 &velocity, const AmmoTableEntry &ammo,
-                             int32_t density) {
-    int32_t speed = arithmetic_shift_right_16(
-            wrapped_signed_product(fixed_magnitude(velocity), io::kTicksPerSecondInt));
-    speed = std::min(speed, 1219);
-    const double energy = double(wrapped_signed_product(speed, speed)) -
-            double(wrapped_signed_product(density, 2)) * 1000000.0 / ammo.weight_in_grains;
-    const int32_t new_speed = energy > 0.0
-            ? wrapped_signed_product(static_cast<int32_t>(std::sqrt(energy)), 65536) /
-                    io::kTicksPerSecondInt
-            : 0;
-    const double length = std::sqrt(double(velocity.x) * velocity.x +
-            double(velocity.y) * velocity.y + double(velocity.z) * velocity.z);
-    if (length == 0.0 || new_speed == 0) {
-        velocity = {};
-        return;
-    }
-    const double normalize = 65536.0 / length;
-    velocity.x = retail_q16_mul_rhu(new_speed, static_cast<int32_t>(velocity.x * normalize));
-    velocity.y = retail_q16_mul_rhu(new_speed, static_cast<int32_t>(velocity.y * normalize));
-    velocity.z = retail_q16_mul_rhu(new_speed, static_cast<int32_t>(velocity.z * normalize));
-}
-
 // The surface multiplier every type-3 (person) hit hands the drag/bounce
 // force after the armor arms [orig: Weapon_CalcImpactDamage `push 23h`
 // @0x4ecc38].
 constexpr int32_t kPersonHitDragSurface = 35;
-
-// The kinetic damage number [orig: Weapon_CalcImpactDamage @ 0x4EC920]. `vel` is
-// units/tick; the original wraps 62 * |vel|_16.16 as signed 32-bit, shifts it by 16,
-// applies only an upper clamp of 1219 (@0x4ecad6), then wraps the signed speed*weight
-// product before /875 (@0x4ecb1a). It next applies the hit-zone multiplier (now fed by posed
-// COBJ hit zones) and the shooter-class byte (0.9 / 1.1 — replicated from the loadout's per-ammo
-// class table), floors at min_damage (@0x4ecb3a), and caps at max_damage when > 0 (@0x4ecb42);
-// dfx2.exe floors and caps first, over its own zone table [orig: @0x4e9a50 (dfx2.exe)]. MP
-// authority and OneShotKill are explicit inputs, including the non-authority zero return @0x4ec933.
-int32_t calc_impact_damage(FixedVec3 &velocity_q16, const AmmoTableEntry &ammo,
-                           int32_t hit_zone, int32_t hit_bone, const Entity &target,
-                           const Entity *shooter, int32_t ammo_index,
-                           const World &world) {
-    if (world.rules.mp_session) {
-        if (!world.rules.projectile_authority) return 0;
-        if (world.rules.one_shot_kill) return 2000;
-    }
-    uint8_t damage_class = 0;
-    if (shooter != nullptr && ammo_index >= 0 &&
-        static_cast<size_t>(ammo_index) < shooter->ammo_damage_class.size())
-        damage_class = shooter->ammo_damage_class[static_cast<size_t>(ammo_index)];
-    const bool body_armor = target.item_type == 3 &&
-            (target.item_attrib & kItemAttribLandable) == 0 &&
-            hit_zone >= 0 && hit_zone <= 4 && (target.carry_flags & 8u) != 0;
-    const int armor_class = damage_class == 1 || damage_class == 2 ? damage_class : 0;
-    if (body_armor)
-        apply_armor_deceleration(velocity_q16, ammo, ammo.armor_density[armor_class]);
-    int32_t speed_scaled = arithmetic_shift_right_16(
-        wrapped_signed_product(fixed_magnitude(velocity_q16), io::kTicksPerSecondInt));
-    if (speed_scaled >= 1219) speed_scaled = 1219;
-    int32_t damage = wrapped_signed_product(speed_scaled, ammo.weight_in_grains) / 875;
-    const bool dfx2 = world.rules.title == gameprofile::GAME_DFX2; // clamps first (DFX2-16)
-    if (dfx2) damage = clamp_impact_damage(damage, ammo);
-    if (target.item_type == 3) {
-        // The zone/bone -> multiplier tables live in round_sim.h (the debug views read them too).
-        double zone_scale = 1.0;
-        if ((target.item_attrib & kItemAttribLandable) != 0) {
-            // The attrib-0x200 seat branch reads the primary/reaction section
-            // ray[31] (hitZoneData+124 @0x4ec977), NOT the damage zone ray[32]
-            // the normal-infantry table below reads (@0x4ec9bf). The two differ
-            // whenever the bone walk crosses more than one sphere.
-            zone_scale = seat_hit_bone_damage_multiplier(hit_bone);
-        } else {
-            zone_scale = dfx2 ? dfx2_hit_zone_damage_multiplier(hit_zone)
-                              : hit_zone_damage_multiplier(hit_zone);
-        }
-        damage = static_cast<int32_t>(static_cast<double>(damage) * zone_scale);
-
-        if (damage_class == 1)
-            damage = static_cast<int32_t>(static_cast<double>(damage) *
-                                          static_cast<double>(0.9f));
-        else if (damage_class == 2)
-            damage = static_cast<int32_t>(static_cast<double>(damage) *
-                                          static_cast<double>(1.1f));
-    }
-    if (!dfx2) damage = clamp_impact_damage(damage, ammo);
-    if (target.item_type != 3) return damage;
-    if (body_armor)
-        apply_armor_deceleration(velocity_q16, ammo, ammo.armor_density[armor_class]);
-    // Every person hit then bleeds the round through the drag/bounce force
-    // with the fixed surface multiplier 35, armored or not: the three armor
-    // arms and the no-armor path all fall into the same call.
-    // [orig: Weapon_CalcImpactDamage — the type-3 gate @0x4ecb96, the
-    //  `push 23h; push 1; push esi; call Entity_ApplyDragAndBounceForce`
-    //  leg @0x4ecc38..0x4ecc42]
-    apply_aerodynamic_drag(velocity_q16, ammo, 0, 0, kPersonHitDragSurface);
-    return damage;
-}
 
 // Normalized flight direction for the impact descriptor
 // [orig: Projectile_SpawnImpactEffect @ 0x4e9b80].
@@ -725,6 +580,39 @@ Vec3 flight_direction(const Vec3 &vel) {
     const float len = std::sqrt(vel.x * vel.x + vel.y * vel.y + vel.z * vel.z);
     if (len <= 0.0f) return Vec3{0.0f, 0.0f, 1.0f};
     return Vec3{vel.x / len, vel.y / len, vel.z / len};
+}
+
+// The Q22 product the spawners round each term through: the 64-bit `imul`,
+// then `shrd eax, edx, 16h` (the low dword of the product >> 22).
+int32_t mul22(int32_t a, int32_t b) {
+    return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);
+}
+
+// A round's launch speed in Q16 units per tick: the ammo velocity << 16 divided
+// by the 62-tick second as a signed integer (the magic-multiply divide).
+// [orig: RoundData_SpawnRound `shl ecx, 10h` @0x4EC595, `imul 84210843h`
+//  @0x4EC598..0x4EC5AB; Weapon_SpawnProjectileBurst @0x4EBAA3..0x4EBAB9;
+//  Weapon_SpawnProjectileBurstWithSpread @0x4EBD72..0x4EBD88]
+int32_t round_launch_speed_q16(int32_t velocity) {
+    return signed_from_u32(static_cast<uint32_t>(velocity) << 16) / io::kTicksPerSecondInt;
+}
+
+// A round's launch velocity (Q16 units per tick, mission axes): each angle
+// times retail's radians-per-BAM double into fsin / fcos, each scaled to Q22
+// and truncated by `_ftol2_sse`; the heading pair takes the pitch cosine, each
+// product >> 22, then every axis the speed's product >> 22.
+// [orig: RoundData_SpawnRound @0x4EC511..0x4EC58A, the velocity stores
+//  @0x4EC5DD..0x4EC60D; Weapon_SpawnProjectileBurst @0x4EBA21..0x4EBAF1;
+//  Weapon_SpawnProjectileBurstWithSpread @0x4EBCC9..0x4EBDAA]
+FixedVec3 round_launch_velocity_q16(int32_t yaw_bam, int32_t pitch_bam, int32_t speed_q16) {
+    const double pitch = static_cast<double>(pitch_bam) * kRadPerBam;
+    const int32_t sp = static_cast<int32_t>(std::sin(pitch) * io::kQ22One);
+    const int32_t cp = static_cast<int32_t>(std::cos(pitch) * io::kQ22One);
+    const double yaw = static_cast<double>(yaw_bam) * kRadPerBam;
+    const int32_t sy = static_cast<int32_t>(std::sin(yaw) * io::kQ22One);
+    const int32_t cy = static_cast<int32_t>(std::cos(yaw) * io::kQ22One);
+    return FixedVec3{mul22(mul22(cy, cp), speed_q16), mul22(mul22(sy, cp), speed_q16),
+                     mul22(sp, speed_q16)};
 }
 
 // The fire descriptor's engine-frame BAM pair projected into mission axes.
@@ -1173,22 +1061,29 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         final_pitch = io::bam_add(final_pitch, offset.pitch_bam);
     }
 
-    // Wire fire direction -> mission-frame unit vector. The 0x06 yaw BAM IS the mission
+    // Wire fire direction -> mission-frame velocity. The 0x06 yaw BAM IS the mission
     // bearing directly — NOT the 0x0A euler_z heading frame (which is 90deg - mission
     // yaw): wire-validated on the v29 duel baselines (wire yaw -122.0/45.6 deg vs true
     // shooter->victim bearings -122.4/44.2 deg; the old 90-minus mapping missed by 26 deg
     // and only coincided on the 45-deg diagonal — the asymmetric-kill bug, D-NET-153).
-    // The original spawner builds X=sinYaw*cosPitch, Y=cosYaw*cosPitch, Z=sinPitch in
-    // engine axes [orig: RoundData_SpawnRound @0x4ec5e9 / Weapon_SpawnSingleProjectile
-    // @0x4ebf51]; in this mission frame that lands as (cos yaw, sin yaw, sin pitch).
-    const double bearing = double(final_yaw) * kRadPerBam;
-    const double pitch = double(final_pitch) * kRadPerBam;
-    const double cp = std::cos(pitch);
-    double speed_per_tick = double(ammo->velocity) / io::kTicksPerSecondInt; // [orig: speed/62 @0x4ec508]
+    // The spawner stores X = cosYaw*cosPitch, Y = sinYaw*cosPitch, Z = sinPitch
+    // (+0x98 / +0x9C / +0xA0) [orig: RoundData_SpawnRound @0x4ec5dd..0x4ec60d]. Its
+    // trig reads the final angles with their low words masked off, while the round
+    // keeps the unmasked words [orig: `and eax, 0FFFF0000h` @0x4EC508 (pitch) /
+    // `and ecx, 0FFFF0000h` @0x4EC542 (yaw); the round's angle copy
+    // @0x4EC61D..0x4EC626].
+    int32_t speed_q16 = round_launch_speed_q16(ammo->velocity);
     // The PowerThrow charge byte scales the launch speed for 1..254; 0 and 255
-    // mean full [orig: (charge - 1) <= 0xFD gate @ 0x4ec5bb, x charge/256].
+    // mean full: the speed times charge << 8, rounded, >> 16 [orig: (charge - 1)
+    // <= 0xFD gate @ 0x4ec5bb, `mov dh, al` @0x4EC5BF, the rounded shrd
+    // @0x4EC5C9..0x4EC5D5].
     if (static_cast<uint8_t>(params.charge - 1u) <= 0xFDu)
-        speed_per_tick = speed_per_tick * double(params.charge) / 256.0;
+        speed_q16 = static_cast<int32_t>(
+                (static_cast<int64_t>(speed_q16) * (static_cast<int32_t>(params.charge) << 8) +
+                 0x8000) >> 16);
+    const FixedVec3 launch_q16 = round_launch_velocity_q16(
+            static_cast<int32_t>(static_cast<uint32_t>(final_yaw) & 0xFFFF0000u),
+            static_cast<int32_t>(static_cast<uint32_t>(final_pitch) & 0xFFFF0000u), speed_q16);
 
     LiveRound &r = rounds[static_cast<size_t>(slot)];
     r = LiveRound{};
@@ -1204,9 +1099,7 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
     r.presentation_generation = next_presentation_generation_++;
     r.pos = params.origin;
     r.prev_z_q16 = to_fixed(params.origin.z); // [orig: +0x80..+0x88 = Position @0x4ec643..0x4ec655]
-    r.vel.x = static_cast<float>(std::cos(bearing) * cp * speed_per_tick);
-    r.vel.y = static_cast<float>(std::sin(bearing) * cp * speed_per_tick);
-    r.vel.z = static_cast<float>(std::sin(pitch) * speed_per_tick);
+    r.vel = vec_from_fixed(launch_q16);
     r.age_ticks = 0;
     // noage rounds never expire on time [orig: flag 0x4000]; everything else uses the
     // ammo max_age (already in 62 Hz ticks).
@@ -1367,10 +1260,8 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
                     base_pitch + static_cast<uint32_t>(
                             (pieslice * r2 + 0x8000) >> 16));
         }
-        const double bearing = double(yaw) * kRadPerBam;
-        const double pitch_rad = double(pitch) * kRadPerBam;
-        const double cp = std::cos(pitch_rad);
-        const double speed = double(ammo.velocity) / io::kTicksPerSecondInt;
+        const FixedVec3 launch_q16 = round_launch_velocity_q16(
+                yaw, pitch, round_launch_speed_q16(ammo.velocity));
         LiveRound &r = rounds[static_cast<size_t>(slot)];
         r = LiveRound{};
         r.active = true;
@@ -1385,9 +1276,7 @@ int RoundSim::spawn_burst(World &world, const RoundSpawnParams &params,
         r.presentation_generation = next_presentation_generation_++;
         r.pos = params.origin;
         r.prev_z_q16 = to_fixed(params.origin.z); // [orig: the spawn's +0x80 copy @0x4ec655]
-        r.vel.x = static_cast<float>(std::cos(bearing) * cp * speed);
-        r.vel.y = static_cast<float>(std::sin(bearing) * cp * speed);
-        r.vel.z = static_cast<float>(std::sin(pitch_rad) * speed);
+        r.vel = vec_from_fixed(launch_q16);
         r.max_age_ticks = ammo.max_age_ticks;
         r.team = owner_ent != nullptr ? static_cast<uint8_t>(owner_ent->team)
                                       : params.shooter_team;
@@ -2219,6 +2108,26 @@ void RoundSim::tick(World &world, const terrain::TerrainHeightField *terrain,
             copy_round_to_hit_record(hit_record, r, velocity_q16);
         } else if (collision.hit_class == ProjectileHitClass::Water) {
             imp.effect_tag = kWaterImpactEffectTag;
+            // The splash stands 0.375 u on along the round's tick-start ray on X
+            // and Y, each a round-half-up Q16 product of the normalized ray, on
+            // the water plane; the Z product is computed and dropped.
+            // [orig: Projectile_SpawnImpactEffect — `mov eax, 6000h; imul;
+            //  add eax, 8000h; adc; shrd 10h` @0x4E9CA5..0x4E9CB6 (X) /
+            //  @0x4E9CC3..0x4E9CD4 (Y), the dropped Z @0x4E9CDA..0x4E9CF2, the
+            //  adds @0x4E9D13 / @0x4E9D29, Z = g_EnvWaterHeightFixed @0x4E9D24;
+            //  the ray the caller passes is the ray record's
+            //  @0x4EA241..0x4EA25F, Projectile_UpdatePhysics @0x4EA82F]
+            const int32_t magnitude = fixed_magnitude(incoming_velocity_q16);
+            const int32_t inverse =
+                    magnitude != 0 ? int32_t(0x100000000LL / magnitude) : 0;
+            const int32_t ray_x = retail_q16_mul_rhu(incoming_velocity_q16.x, inverse);
+            const int32_t ray_y = retail_q16_mul_rhu(incoming_velocity_q16.y, inverse);
+            imp.position = Vec3{
+                static_cast<float>(from_fixed(io::bam_add(
+                        impact_q16.x, retail_q16_mul_rhu(0x6000, ray_x)))),
+                static_cast<float>(from_fixed(io::bam_add(
+                        impact_q16.y, retail_q16_mul_rhu(0x6000, ray_y)))),
+                static_cast<float>(from_fixed(world.env.water_z))};
         } else if (person_collision) {
             // The person leg. Bullets reach a person ONLY through the bone-section
             // pass — Projectile_RaycastProximitySlots walks pool 2 (statics) for

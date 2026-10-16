@@ -12,6 +12,8 @@
 #include <godot_cpp/variant/packed_int32_array.hpp>
 #include <godot_cpp/variant/packed_vector2_array.hpp>
 #include <godot_cpp/variant/rect2.hpp>
+#include <godot_cpp/variant/rect2i.hpp>
+#include <godot_cpp/variant/typed_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 #include <godot_cpp/variant/vector2.hpp>
 #include <godot_cpp/variant/vector2i.hpp>
@@ -57,7 +59,7 @@ public:
 	~HudPos();
 
 	// The virtual design space hudpos.def positions are authored in; the HUD
-	// scales these to the real surface. [orig: Viewport_ScaleToVirtualCoords @0x5d2b20, see docs/interface/hud-re.md]
+	// scales these to the real surface. (engine: runtime/hud/hud_math.h)
 	enum {
 		DESIGN_WIDTH = 1024,
 		DESIGN_HEIGHT = 768,
@@ -195,6 +197,9 @@ public:
 	static Color loading_msg_label_color();
 	static Vector2i loading_bar_pos();
 	static Vector2i loading_bar_size();
+	// The bar's [outer, gray, track, fill] rects on a surface of `p_surface`
+	// px at `p_displayed` percent (engine hud/loading_screen.h loading_bar_rects).
+	static TypedArray<Rect2i> loading_bar_rects(const Vector2 &p_surface, int p_displayed);
 	static Color loading_bar_border_gray();
 	static Color loading_bar_fill_color();
 	// The SP start-mission splash strings.

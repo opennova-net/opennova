@@ -14,16 +14,16 @@ namespace opennova::editor {
 //
 // The tokenizer [orig: @ 0x53CB60] copies a line (at most 1000 bytes, @ 0x53CBBB) into a global buffer (@ 0x24E5DF0),
 // cuts it at spaces, tabs and commas, keeps a quoted run whole, stops at "//" and at the first ';' (which no token
-// holds but the one it is attached to), and records at most 30 token pointers in a global table (the count @
-// 0x24E61E0, the slots from @ 0x24E61E4); each line resets the count and slots 0 to 2 to "" alone, so a slot past a
-// line's tokens keeps the pointer an earlier, longer line left there (into the buffer, which each line overwrites),
-// or NULL until some line first reached it. The file walk [orig: File_ParseASCIIFile @ 0x53D8F8] cuts lines at CR LF
-// (a last line with none loses its last byte, @ 0x53D8E9) and hands every line with a token not starting '/' to the
-// section callback. The parsers' next-token helper [orig: sub_5DFFB0 @ 0x5DFFB0] steps to the next slot with no
-// bound: it reads the slot (faulting on NULL, @ 0x5E0000), skips a lone ';' ',' or '=', strips those three from the
+// holds but the one it is attached to), and records at most 30 token pointers in a global table (the count @ 0x24E61E0,
+// the slots from @ 0x24E61E4); each line resets the count and slots 0 to 2 to "" alone, so a slot past a line's tokens
+// keeps the pointer an earlier, longer line left there (into the buffer, which each line overwrites), or NULL until
+// some line first reached it. The file walk [orig: File_ParseASCIIFile @ 0x53D8F8] cuts lines at CR LF (a last line
+// with none loses its last byte, @ 0x53D8E9) and hands every line with a token not starting '/' to the section
+// callback. The parsers' next-token helper [orig: CParticleDefEntry_NextToken @ 0x5DFFB0] steps to the next slot with
+// no bound: it reads the slot (faulting on NULL, @ 0x5E0000), skips a lone ';' ',' or '=', strips those three from the
 // token in place (sub_5DFF00 @ 0x5DFF00; the set @ 0x5E897C) and, where it stripped a ';', ends the statement: the
-// helper answers NULL from then on. A list therefore stops at a ';' attached to its last token, and otherwise reads
-// on into the slots past the line:
+// helper answers NULL from then on. A list therefore stops at a ';' attached to its last token, and otherwise reads on
+// into the slots past the line:
 // - `flags` and `move` take tokens while each is a name of their table [orig: CParticleDef_ParseProperties @
 //   0x5EA5B3..0x5EA66A, the flag names @ 0x846A20; @ 0x5EA4B3..0x5EA56F, the move names @ 0x848808]: the game's own
 //   writer ends the list " ;" (FlagTable_BuildString's trailing space, @ 0x5DF9C0), so it always reads the slot past

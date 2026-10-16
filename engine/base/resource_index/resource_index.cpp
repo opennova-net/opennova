@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <system_error>
+#include <unordered_set>
 
 #include <base/io/file_time.h>
 #include <base/io/os_path.h>
@@ -242,33 +243,62 @@ std::string ResourceIndex::particle_extension() const {
 }
 
 std::vector<std::string> ResourceIndex::effect_files() const {
-	// Retail parses an archived `.ptl` or gore-set file once per entry its walk admits, by
-	// name through the front door [orig: CEffectSystem_Init @ 0x5f6070 — slots 0..5
-	// ascending @ 0x5f6485, `cmp dword ptr [ebp-4], 0` @ 0x5f64c0 skipping a zero-stamped
-	// entry, strrchr('.') + stricmp(".ptl" / the gore extension) @ 0x5f64cd..0x5f64f3,
-	// File_ParseASCIIFile by name @ 0x5f6545]: a name every mounted entry of which is
-	// stamped 0 is never read, and one stamped entry is enough.
-	std::vector<std::string> names;
+	// Retail's loader reads its loose `ptl\*.ptl` leg first, then walks the archive slots 0..5 in
+	// turn, each archive's directory in its table's order (sorted by upper-cased name at open), and
+	// parses every `.ptl` or gore-set entry it admits, the two extensions interleaved, by name
+	// through the front door [orig: CEffectSystem_Init @ 0x5f6070 — the loose leg @ 0x5f6228;
+	// slots ascending @ 0x5f6485, the entry walk @ 0x5f64c0..0x5f6560, `cmp dword ptr [ebp-4], 0`
+	// @ 0x5f64c0 skipping a zero-stamped entry, strrchr('.') + stricmp(".ptl" / the gore extension)
+	// @ 0x5f64cd..0x5f64f3, File_ParseASCIIFile by name @ 0x5f6545]. Since the first registration
+	// of an id wins (D-PTL-24), the order picks the definition two files share. A name every
+	// mounted entry of which is stamped 0 is never read; one stamped entry admits it, at that
+	// entry's place in the walk. A name no archive carries is OpenNova's loose leg (D-VFS-13), ahead
+	// of the walk as retail's loose leg is, in effect_file_order's order. A mount with no retail
+	// slots (ScanAll, a loose root) has no walk to follow: its archived names follow the loose leg
+	// in effect_file_order's order.
+	const std::string gore = particle_extension();
+	std::vector<std::string> loose;
+	std::vector<std::string> archived;
 	for (const ResourceFileEntry &entry : impl_->records) {
 		if (entry.kind != "particle") continue;
-		if (impl_->vfs.archive_stamp(entry.logical_name) == VfsArchiveStamp::Unstamped)
-			continue;
-		names.push_back(entry.logical_name);
+		const VfsArchiveStamp stamp = impl_->vfs.archive_stamp(entry.logical_name);
+		if (stamp == VfsArchiveStamp::Unstamped) continue;
+		(stamp == VfsArchiveStamp::NotArchived ? loose : archived).push_back(entry.logical_name);
 	}
-	return effect_file_order(names, particle_extension());
+	std::vector<std::string> out = effect_file_order(loose, gore);
+	std::unordered_set<std::string> listed;
+	for (const std::string &name : out) listed.insert(strutil::to_upper(name));
+	bool slotted = false;
+	for (int slot = 0; slot < kArchiveSlotCount; ++slot) {
+		for (const VfsArchiveEntry &entry : impl_->vfs.archive_slot_entries(slot)) {
+			slotted = true;
+			if (entry.timestamp == 0) continue;
+			if (!strutil::ends_with_icase(entry.name, ".ptl") && !strutil::ends_with_icase(entry.name, gore))
+				continue;
+			if (listed.insert(strutil::to_upper(entry.name)).second) out.push_back(entry.name);
+		}
+	}
+	if (!slotted) {
+		const std::vector<std::string> rest = effect_file_order(archived, gore);
+		out.insert(out.end(), rest.begin(), rest.end());
+	}
+	return out;
 }
 
 std::vector<std::string> effect_file_order(const std::vector<std::string> &names, const std::string &gore_extension) {
+	// One archive's walk: every `.ptl` and gore-set name, the two interleaved, by the upper-cased
+	// name, the table's order [orig: CEffectSystem_Init @ 0x5f64c0..0x5f6560 over the table
+	// PFF_SortEntries @ 0x768280 sorted]. Retail's loose gore leg finds nothing: it searches
+	// `ptl\` with the extension appended and no wildcard (the string @ 0x7de188 stored @ 0x5f6356,
+	// the extension appended @ 0x5f6387, FindFirstFileA @ 0x5f63a3), which names only a file called
+	// `.ptu`.
 	std::vector<std::string> out;
-	for (const std::string &extension : {std::string(".ptl"), gore_extension}) {
-		std::vector<std::string> listed;
-		for (const std::string &name : names)
-			if (strutil::ends_with_icase(name, extension)) listed.push_back(name);
-		std::sort(listed.begin(), listed.end(), [](const std::string &a, const std::string &b) {
-			return strutil::to_lower(a) < strutil::to_lower(b);
-		});
-		out.insert(out.end(), listed.begin(), listed.end());
-	}
+	for (const std::string &name : names)
+		if (strutil::ends_with_icase(name, ".ptl") || strutil::ends_with_icase(name, gore_extension))
+			out.push_back(name);
+	std::stable_sort(out.begin(), out.end(), [](const std::string &a, const std::string &b) {
+		return strutil::to_upper(a) < strutil::to_upper(b);
+	});
 	return out;
 }
 

@@ -12,10 +12,6 @@ namespace {
 
 constexpr float kDegreesToRadians = 3.14159265358979323846f / 180.0f;
 
-float dot(const PreviewVec3 &a, const PreviewVec3 &b) {
-	return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-
 // The plane through `eye` (or offset along its normal by `offset`) whose inside is along `normal`, normalized.
 void set_plane(float out[4], PreviewVec3 normal, const PreviewVec3 &eye, float offset) {
 	const float length = std::sqrt(dot(normal, normal));

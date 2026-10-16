@@ -225,6 +225,14 @@ inline int32_t body_anim_slot_from_state(int state) {
 
 uint32_t infantry_anim_flags(int state);
 
+// Whether a weapon-channel hold state poses the drawn weapon at the hand
+// rather than at the entity triple: flag 0x80 of the state's anim flags
+// [orig: the gate @0x4b21b6 / branch @0x4b220f; the state's writer
+// Entity_UpdateInfantryPlayerBody @0x4b5dad..0x4b5ea9].
+inline bool infantry_weapon_at_hand(int state) {
+    return (infantry_anim_flags(state) & 0x80u) != 0;
+}
+
 // The gait->stance transition-clip pair map [orig: AnimMap_UpdateEntity
 // @0x40b662..0x40b737]: a forward gait retargeting to its crouch/prone walk
 // first plays the matching 169-172 transition clip and defers the real target

@@ -1,5 +1,6 @@
 #include <runtime/inmatch/host_boot.h>
 
+#include <base/gameprofile/game_type.h> // host_loading_band's auto game type
 #include <base/io/fixed.h>
 #include <base/io/log.h>
 #include <formats/mission/bms_edit.h>
@@ -11,8 +12,11 @@
 #include <runtime/inmatch/integrity_sources.h>
 #include <runtime/inmatch/server_console.h>
 #include <runtime/inmatch/server_log_recorder.h>
+#include <runtime/inmatch/server_message_dispatch.h> // session_mission_name
 #include <runtime/inmatch/session_status.h>
+#include <runtime/mission/mission_sidecars.h> // mission_base_name
 
+#include <cstring>
 #include <string_view>
 #include <utility>
 
@@ -71,6 +75,47 @@ void load_environment_and_water(const mission::BootFileSource &files,
 }
 
 } // namespace
+
+mission::MissionText read_host_mission_text(const mission::BootFileSource &files,
+		const std::string &mission_basename, const std::vector<uint8_t> &text_override_table) {
+	mission::MissionText out;
+	std::vector<uint8_t> text;
+	(void)mission::resolve_mission_text(files, mission_basename, text);
+	std::string text_error;
+	if (!text.empty() && !mission::parse_mission_text(text.data(), text.size(), out, text_error))
+		io::logf(io::LogLevel::kWarn, "host boot: the mission text did not parse: %s",
+				text_error.c_str());
+	if (!text_override_table.empty()) {
+		auto override_table = std::make_shared<rtxt::File>();
+		if (rtxt::parse(text_override_table.data(), text_override_table.size(), *override_table,
+					text_error))
+			out.override_table = std::move(override_table);
+		else
+			io::logf(io::LogLevel::kWarn, "host boot: the text-override table did not parse: %s",
+					text_error.c_str());
+	}
+	return out;
+}
+
+HostLoadingBand host_loading_band(const mission::BootFileSource &files,
+		const std::string &mission_file, uint32_t game_type, bool game_type_auto,
+		const std::vector<uint8_t> &text_override_table) {
+	HostLoadingBand band;
+	// The header's name and mode word (an unreadable header leaves both zero, as
+	// the scan's zeroed header does).
+	bms::Header header{};
+	std::vector<uint8_t> bytes;
+	std::string error;
+	if (files.valid() && files.read_file(mission_file, bytes) && bytes.size() >= bms::kHeaderSize)
+		(void)bms::parse_header_blob(bytes.data(), bms::kHeaderSize, header, error);
+	band.game_type = game_type_auto ? game_type::for_mission_attribs(header.attrib_flags) : game_type;
+	const mission::MissionText text = read_host_mission_text(
+			files, mission::mission_base_name(mission_file), text_override_table);
+	band.mission_name = session_mission_name(band.game_type, mission_file,
+			text.get_string("info", "title"),
+			std::string(header.mission_name, ::strnlen(header.mission_name, sizeof(header.mission_name))));
+	return band;
+}
 
 bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &error) {
 	boot.kernel = nullptr;
@@ -142,24 +187,7 @@ bool boot_host_mission(HostBootRequest request, HostBoot &boot, std::string &err
 	// name resolver (resolve_mission_text carries the fallback witness). Its
 	// lookups search the mount's override table first, with or without a
 	// mission table (mission_text.h).
-	{
-		std::vector<uint8_t> text;
-		(void)mission::resolve_mission_text(files, basename, text);
-		std::string text_error;
-		if (!text.empty() &&
-				!mission::parse_mission_text(text.data(), text.size(), boot.mission_text, text_error))
-			io::logf(io::LogLevel::kWarn, "host boot: the mission text did not parse: %s",
-					text_error.c_str());
-		if (!request.text_override_table.empty()) {
-			auto override_table = std::make_shared<rtxt::File>();
-			if (rtxt::parse(request.text_override_table.data(), request.text_override_table.size(),
-						*override_table, text_error))
-				boot.mission_text.override_table = std::move(override_table);
-			else
-				io::logf(io::LogLevel::kWarn, "host boot: the text-override table did not parse: %s",
-						text_error.c_str());
-		}
-	}
+	boot.mission_text = read_host_mission_text(files, basename, request.text_override_table);
 
 	// The gametext "Server" strings the host's handlers print through, which
 	// every host carries (D-NET-344) [orig: Game_InitSubsystems @0x4A6CD0

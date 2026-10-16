@@ -16,8 +16,9 @@ class ProjectAssetSource;
 struct AssetScan;
 
 // The effect catalog as the game loads it at a mission's start (ADR 0046 DI-14), of a project's files:
-// every particle file in the effect system's order (opennova::effect_file_order: every .ptl, then the
-// gore set's files, .ptg where the project holds fgn2.bin, else .ptu [orig: CEffectSystem_Init @
+// every particle file in the effect system's order (opennova::effect_file_order: every .ptl and the
+// gore set's files, .ptg where the project holds fgn2.bin, else .ptu, interleaved by the upper-cased
+// name as one archive's table walks them [orig: CEffectSystem_Init @
 // 0x5F6070; Game_LoadConfig @ 0x5514E8..0x5514FA]), each read through the game's reader
 // (formats/particle load_particles) from the project's files as the game would read them were they
 // saved now (ProjectAssetSource: an open document stands in for its file), and read again only when its

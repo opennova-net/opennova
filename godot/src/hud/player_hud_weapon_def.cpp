@@ -1,5 +1,6 @@
 #include "hud/player_hud_weapon_def.h"
 
+#include <runtime/hud/hud_math.h> // rounds_per_icon_from_layout
 #include <runtime/hud/scope_circle_mask.h>
 
 using namespace godot;
@@ -33,7 +34,7 @@ Ref<PlayerHudWeaponDef> PlayerHudWeaponDef::from_weapon_def(const Ref<WeaponDef>
 }
 
 int PlayerHudWeaponDef::rounds_per_icon_from_layout(const Vector3i &p_layout) {
-	return p_layout.z & 0xFF;
+	return opennova::hud::rounds_per_icon_from_layout(p_layout.z);
 }
 
 float PlayerHudWeaponDef::error_row_deg(int p_row) const {

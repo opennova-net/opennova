@@ -268,10 +268,10 @@ void test_water_sides() {
 		CHECK(!list.commands.empty());
 		for (const r::FoliageDrawCommand &command : list.commands) {
 			CHECK(command.far_side);
-			// The far wave's masks lead the far-side alpha rung.
-			// [orig: Terrain_RenderWorldScene @ 0x5c955f, @ 0x5c9596]
-			CHECK(command.render_rung == opennova::renderer::kRungAlphaFarSide);
-			CHECK(command.sorting_offset == r::kFoliageMaskSortingOffset);
+			// The far wave's masks take their rung, just before the far-side
+			// alpha. [orig: Terrain_RenderWorldScene @ 0x5c955f, @ 0x5c9596]
+			CHECK(command.render_rung == opennova::renderer::kRungFoliageMaskFarSide);
+			CHECK(command.sorting_offset == 0.0f);
 		}
 	}
 	{
@@ -283,11 +283,11 @@ void test_water_sides() {
 		CHECK(!list.commands.empty());
 		for (const r::FoliageDrawCommand &command : list.commands) {
 			CHECK(!command.far_side);
-			// The camera wave's masks follow the water pass and lead the
+			// The camera wave's masks follow the water pass, just before the
 			// scars. [orig: Terrain_RenderWorldScene @ 0x5c95dc,
 			// @ 0x5c9638, @ 0x5c9658]
-			CHECK(command.render_rung == opennova::renderer::kRungScars);
-			CHECK(command.sorting_offset == r::kFoliageMaskSortingOffset);
+			CHECK(command.render_rung == opennova::renderer::kRungFoliageMaskCameraSide);
+			CHECK(command.sorting_offset == 0.0f);
 		}
 	}
 	{

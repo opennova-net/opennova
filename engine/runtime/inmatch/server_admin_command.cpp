@@ -30,8 +30,6 @@ constexpr int8_t kServerChatChannel = 10;   // TextChatServer / TextChatPlayer /
 constexpr int8_t kCommandEchoChannel = 14;  // CmdEchoPlayer
 constexpr uint8_t kNoSenderSlot = 0xFF;
 
-bool ieq(std::string_view a, std::string_view b) { return strutil::iequals(a, b); }
-
 // The CRT atol as the game links it: base 10, leading whitespace and sign, 0
 // when nothing parses, and a value past the int32 range saturating on every
 // host (an LP64 strtol read 64 bits and the narrowing cast wrapped, so
@@ -107,7 +105,7 @@ NapiNPConnection *slot_by_name(NapiNPServerCtx &ctx, const std::string &text) {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (conn.phase < ConnectionPhase::PlayerAdded || conn.phase >= ConnectionPhase::Goodbye)
 			continue;
-		if (!ieq(conn.reply.player_name, text)) continue;
+		if (!strutil::iequals(conn.reply.player_name, text)) continue;
 		if (found != nullptr) return nullptr;
 		found = &conn;
 	}
@@ -117,9 +115,9 @@ NapiNPConnection *slot_by_name(NapiNPServerCtx &ctx, const std::string &text) {
 // The four suffix lookups, in retail's test order [orig: @0x4D23F2..0x4D2505].
 NapiNPConnection *resolve_target(NapiNPServerCtx &ctx, std::string_view suffix,
 		const std::string &token) {
-	if (ieq(suffix, "ByIndex")) return slot_by_index(ctx, atol_token(token));
-	if (ieq(suffix, "ByIpAndPort")) return slot_by_ip_and_port(ctx, token);
-	if (ieq(suffix, "ByName")) return slot_by_name(ctx, token);
+	if (strutil::iequals(suffix, "ByIndex")) return slot_by_index(ctx, atol_token(token));
+	if (strutil::iequals(suffix, "ByIpAndPort")) return slot_by_ip_and_port(ctx, token);
+	if (strutil::iequals(suffix, "ByName")) return slot_by_name(ctx, token);
 	// ByPCID: PlayerSlot_FindByEntityTypeName @0x5009E0 matches the slot
 	// entity's items.def type name; every pool-0 player here is the one
 	// infantry type, so the lookup cannot single out a slot.
@@ -157,11 +155,11 @@ int32_t parse_winner_team(const std::vector<std::string> &args) {
 		if (numeric < 0) return 0;
 		return numeric > 4 ? 4 : numeric;
 	}
-	if (ieq(args[0], "Green")) return 0;
-	if (ieq(args[0], "Blue")) return 1;
-	if (ieq(args[0], "Red")) return 2;
-	if (ieq(args[0], "Yellow")) return 3;
-	if (ieq(args[0], "Violet")) return 4;
+	if (strutil::iequals(args[0], "Green")) return 0;
+	if (strutil::iequals(args[0], "Blue")) return 1;
+	if (strutil::iequals(args[0], "Red")) return 2;
+	if (strutil::iequals(args[0], "Yellow")) return 3;
+	if (strutil::iequals(args[0], "Violet")) return 4;
 	return 0;
 }
 
@@ -203,7 +201,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 	//  TimeOfDay @0x4D2BCB..0x4D2BDD, Cycle / EndMission / GameOver
 	//  @0x4D30DE..0x4D30F0 (authority, ctx+0x68); SetMPReset @0x4D2E12 (tokens)]
 	const bool hosting = ctx.is_authority != 0 && ctx.is_in_session != 0;
-	if (ieq(verb, "SetMPReset")) {
+	if (strutil::iequals(verb, "SetMPReset")) {
 		// atol of the argument into the config, then Game_SaveConfig
 		// [orig: @0x4D2E1B..0x4D2E2D]. The word's reader is the next session
 		// create, which ends the process when it is nonzero (create_session's
@@ -216,15 +214,15 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		return outcome;
 	}
 	if (!hosting) return outcome;
-	const bool targeted = ieq(verb, "PuntPlayer") || ieq(verb, "TextChatPlayer") ||
-	                      ieq(verb, "CmdEchoPlayer") || ieq(verb, "KillPlayer");
+	const bool targeted = strutil::iequals(verb, "PuntPlayer") || strutil::iequals(verb, "TextChatPlayer") ||
+	                      strutil::iequals(verb, "CmdEchoPlayer") || strutil::iequals(verb, "KillPlayer");
 	if (targeted) {
 		if (world == nullptr) return outcome;
-		const size_t needed = (ieq(verb, "TextChatPlayer") || ieq(verb, "CmdEchoPlayer")) ? 2 : 1;
+		const size_t needed = (strutil::iequals(verb, "TextChatPlayer") || strutil::iequals(verb, "CmdEchoPlayer")) ? 2 : 1;
 		if (args.size() < needed) return outcome;
 		NapiNPConnection *target = resolve_target(ctx, target_suffix, args[0]);
 		if (target == nullptr) return outcome;
-		if (ieq(verb, "PuntPlayer")) {
+		if (strutil::iequals(verb, "PuntPlayer")) {
 			// The host's own slot stops hosting instead [orig: @0x4D2515..0x4D251F];
 			// a remote gets the chat-coded punt 39 carrying the target token
 			// [orig: CNapiNPConnection_TrySendChatMessage(slot, "", 39, token) @0x4D254D].
@@ -241,10 +239,10 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 			Server_StageHostDisconnect(*target, event);
 			return outcome;
 		}
-		if (ieq(verb, "TextChatPlayer") || ieq(verb, "CmdEchoPlayer")) {
+		if (strutil::iequals(verb, "TextChatPlayer") || strutil::iequals(verb, "CmdEchoPlayer")) {
 			// send_mask 0x20 = the resolved slot only [orig: @0x4D2738/@0x4D289F].
 			outcome.handled = true;
-			const int8_t channel = ieq(verb, "TextChatPlayer") ? kServerChatChannel : kCommandEchoChannel;
+			const int8_t channel = strutil::iequals(verb, "TextChatPlayer") ? kServerChatChannel : kCommandEchoChannel;
 			send_reliable(*target, s2c::CHAT_BROADCAST, chat_body(channel, args[1]));
 			return outcome;
 		}
@@ -267,7 +265,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		world->round_sim.deaths.push_back(death);
 		return outcome;
 	}
-	if (ieq(verb, "TextChatServer")) {
+	if (strutil::iequals(verb, "TextChatServer")) {
 		// Channel 10 from no slot to every in-game player [orig: @0x4D25A5..0x4D25E6;
 		// a dedicated host also shows it locally @0x4D2603 — the listen host's
 		// copy rides its loopback slot here].
@@ -276,7 +274,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		fan_in_game(ctx, s2c::CHAT_BROADCAST, chat_body(kServerChatChannel, args[0]));
 		return outcome;
 	}
-	if (ieq(verb, "ChangeTeam") || ieq(verb, "SwapTeam")) {
+	if (strutil::iequals(verb, "ChangeTeam") || strutil::iequals(verb, "SwapTeam")) {
 		// A target token is required, the slot must be in the game with an
 		// entity; team 2 -> 1, 1 -> 2, any other team unchanged, then the
 		// "Changing team...." chat (channel 10, mask 0x20) to the slot even when
@@ -297,7 +295,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		send_reliable(*target, s2c::CHAT_BROADCAST, chat_body(kServerChatChannel, "Changing team...."));
 		return outcome;
 	}
-	if (ieq(verb, "Cycle") || ieq(verb, "EndMission") || ieq(verb, "GameOver")) {
+	if (strutil::iequals(verb, "Cycle") || strutil::iequals(verb, "EndMission") || strutil::iequals(verb, "GameOver")) {
 		// The round end with the parsed winner, then the 620-tick linger in
 		// place of the 2790 Server_ProcessRoundEnd stored [orig: @0x4D31BF..0x4D31CA].
 		if (world == nullptr) return outcome;
@@ -306,7 +304,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		ctx.round_end_linger_override_ticks = 0x26C;
 		return outcome;
 	}
-	if (ieq(verb, "Earthquake")) {
+	if (strutil::iequals(verb, "Earthquake")) {
 		// g_EnvQuakeTicks = 6 * seconds; the argument is clamped 0..40 and
 		// defaults to 30 [orig: @0x4D2AC2..0x4D2B13].
 		if (world == nullptr) return outcome;
@@ -320,7 +318,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		world->commands.quake(seconds);
 		return outcome;
 	}
-	if (ieq(verb, "Lightning")) {
+	if (strutil::iequals(verb, "Lightning")) {
 		// Timer A = 16 locally and the "SETFLASH1 16" text command to every
 		// in-game player [orig: @0x4D2B5D..0x4D2BAC, the S2C 0x24 via
 		// NetBuffer_WriteString2 @0x5079C0 and SendFiltered(0x24, 1, 0x136)].
@@ -333,7 +331,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		fan_in_game(ctx, s2c::TEXT_COMMAND, body);
 		return outcome;
 	}
-	if (ieq(verb, "TimeOfDay")) {
+	if (strutil::iequals(verb, "TimeOfDay")) {
 		// HHMM, 1200 when absent or outside 0..2399; hours = floor(v * 0.01),
 		// minutes = the remainder, packed as a minute of day
 		// [orig: @0x4D2BE3..0x4D2C94 -> Environment_SetCurrentTime @0x57C4B0;
@@ -350,7 +348,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		world->commands.set_time_of_day_minutes(hours * 60 + minutes);
 		return outcome;
 	}
-	if (ieq(verb, "SetServerName")) {
+	if (strutil::iequals(verb, "SetServerName")) {
 		// Napi_CopyString(..., 32) into the config, the wire name and the
 		// session name, then the HostSetup / Host "ServerName" vars and
 		// Game_SaveConfig [orig: @0x4D2CF5..0x4D2DDF].
@@ -361,7 +359,7 @@ ServerCommandOutcome Server_ExecuteServerCommand(NapiNPServerCtx &ctx, world::Wo
 		ctx.np_protocol.session_name = ctx.config.server_name;
 		return outcome;
 	}
-	if (ieq(verb, "SetServerMsg")) {
+	if (strutil::iequals(verb, "SetServerMsg")) {
 		// Napi_CopyString(..., 128) into the custom text, then the Host "Msg"
 		// var and Game_SaveConfig [orig: @0x4D2D8A..0x4D2DDF].
 		if (args.empty()) return outcome;

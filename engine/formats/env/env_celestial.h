@@ -138,8 +138,10 @@ void water_glint_tick(WaterGlintState &state, bool visible);
 // caller's per-frame lift), then interpolate along sun * 2048 to the
 // surface]. Mission axes (x, y ground plane, z = height), world units.
 // Returns false when the geometry rejects (clip >= water height — no glint).
-// The caller then jitters the point x/z by +-2 from the frame index bits
-// [orig: @ 0x5ad26a..0x5ad27e] before the visibility rays.
+// The caller casts its two terrain rays from this point, then jitters it x/z
+// by +-2 from the frame index bits [orig: Environment_UpdateSunGlare
+// @ 0x5ad25e..0x5ad27e] before the camera's entity ray (celestial_frame.h
+// advance_water_glint).
 bool water_glint_point(const Vec3 &cam_mission, const Vec3 &sun_mission,
                        float water_height, float view_z_jitter,
                        Vec3 &out_mission);

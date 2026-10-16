@@ -2,6 +2,8 @@
 
 #include <runtime/inmatch/charattr_table.h>
 
+#include <runtime/world/world.h>
+
 #include <base/io/crc32_mpeg2.h>
 #include <base/io/crt_ftol.h>
 
@@ -179,6 +181,13 @@ std::array<uint32_t, charattr::kClassCount> charattr_class_attribute_rows(const 
 	for (size_t i = 0; i < charattr::kClassCount; ++i)
 		out[i] = state.table.rows[i].active ? state.table.rows[i].attributes : 0u;
 	return out;
+}
+
+void install_class_attribute_flags(world::World &world, const CharAttrTable *live,
+		const CharAttrTable &boot) {
+	const CharAttrTable &table = live != nullptr ? *live : boot;
+	world.tables.class_attribute_flags = charattr_class_attribute_rows(table);
+	world.tables.charattr_disabled_word = charattr_pack_disabled(table);
 }
 
 } // namespace opennova::inmatch

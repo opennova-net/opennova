@@ -18,7 +18,8 @@ constexpr K U = K::Unused;
 
 // --- the sub-types by name ---------------------------------------------------------------------------
 
-// [orig: EventTrigger_EvaluateCondition cat 1 @0x45364a; dfx2med Med_TriggerConditionName @0x446330]
+// [orig: EventTrigger_EvaluateCondition cat 1 @0x45364a]
+// [orig: dfx2med.exe Med_TriggerConditionName @0x446330]
 constexpr MissionChoice kGroupSubTypes[] = {
 	{"Null", 0},                    {"GroupSeesGroup", 1},     {"GroupHasTargetedGroup", 2},
 	{"GroupAtRedAlert", 3},         {"GroupDestroyed", 4},     {"GroupAlive", 5},
@@ -62,7 +63,8 @@ constexpr MissionChoice kPlayerSubTypes[] = {
 constexpr MissionChoice kNullSubType[] = {{"Null", 0}};
 
 // The AI sub-types, shared by ChangeGroupAI (3), AreaAiRed / AreaAiBlue (12, 13) and ChangeSingleAI
-// (21) [orig: Entity_ApplyCommand @0x43ab60; dfx2med Med_ActionSubTypeName @0x445EE0].
+// (21) [orig: Entity_ApplyCommand @0x43ab60] [orig: dfx2med.exe Med_ActionSubTypeName
+// @0x445EE0].
 constexpr MissionChoice kAiSubTypes[] = {
 	{"GuardBit", 2},      {"RedAlert", 5},       {"GreenAlert", 6},           {"Accuracy", 8},
 	{"BlindBit", 15},     {"BerserkBit", 16},    {"ClimberBit", 17},          {"CowardBit", 21},

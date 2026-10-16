@@ -364,6 +364,7 @@ bool check_scoreboard_row_team_is_the_slot_team() {
 bool check_player_sync_and_0x75_carry_the_slot_team() {
 	opennova::inmatch::GameConfig config;
 	config.game_type = opennova::game_type::kTeamDeathmatch;
+	config.max_players = 2; // the 0x22 pull answers slots inside the table only
 	opennova::world::World world;
 	world.registry.configure_pool(0, 4);
 	auto spawn_player = [&](uint8_t team) {
@@ -3626,9 +3627,20 @@ bool check_default_spawn_requires_no_team_zone() {
 
 	config.default_spawn_requires_no_team_zone = 0;
 	reset_player();
-	return expect(!dispatch(default_pick).empty() &&
-	                      world.registry.get(player)->health == 100,
-	              "the retail-default disabled rule permits Default Spawn");
+	if (!expect(!dispatch(default_pick).empty() &&
+	                    world.registry.get(player)->health == 100,
+	            "the retail-default disabled rule permits Default Spawn"))
+		return false;
+
+	// B-5: the round-over gate leads the handler, so a dead joiner's pick in
+	// the round-end linger deploys nothing, queues nothing and answers nothing.
+	// The host's round end raises it (Server_ProcessRoundEnd @0x5168E4: our
+	// Match::finish). [orig: Server_ProcessClientRequestRespawn @0x519AF6..0x519B00]
+	world.match.finish(0, world);
+	reset_player();
+	return expect(dispatch(default_pick).empty() &&
+	                      world.registry.get(player)->health == 0,
+	              "a pick after the round ended deploys nothing");
 }
 
 // A spawnable type-1 item is a mobile deploy target. The request handler first
@@ -4173,10 +4185,62 @@ bool check_score_ini_drives_session_status_values() {
 
 	opennova::inmatch::GameConfig flag_me;
 	flag_me.game_type = opennova::game_type::kFlagMe;
-	return expect(!opennova::inmatch::load_session_score_config(flag_me, score_ini) &&
-	                      !flag_me.session_status_stat_values.has_value() &&
-	                      flag_me.scoreboard_fields.empty(),
-	              "Flag Me's out-of-range retail score row cannot inherit COOP score.ini");
+	if (!expect(!opennova::inmatch::load_session_score_config(flag_me, score_ini) &&
+	                    !flag_me.session_status_stat_values.has_value() &&
+	                    flag_me.scoreboard_fields.empty(),
+	            "Flag Me's out-of-range retail score row cannot inherit COOP score.ini"))
+		return false;
+	// The fanfare pair is the file's for any VERSION 40 file, beside the row tests: a
+	// session whose row the file has no block for (CTF over a TDM-only file) and Flag
+	// Me both store it [orig: ScoreConfig_LoadFile @0x52DC59..0x52DC9F beside
+	// `if (currentGameType)` @0x52DB7C / @0x52DC05].
+	{
+		const std::string tdm_only = "VERSION 40\r\nEXP_FANFARE 5 10\r\nGAMETYPE \"TDM\"\r\n";
+		opennova::inmatch::GameConfig ctf;
+		ctf.game_type = opennova::game_type::kCaptureTheFlag;
+		if (!expect(!opennova::inmatch::load_session_score_config(ctf, tdm_only) &&
+		                    ctf.exp_fanfare == 0x0A05u && !ctf.session_status_stat_values.has_value(),
+		            "a VERSION 40 file's fanfare stands without a block for the session's row"))
+			return false;
+		opennova::inmatch::GameConfig flag;
+		flag.game_type = opennova::game_type::kFlagMe;
+		if (!expect(!opennova::inmatch::load_session_score_config(flag, tdm_only) &&
+		                    flag.exp_fanfare == 0x0A05u,
+		            "Flag Me stores the file's fanfare too"))
+			return false;
+	}
+	// The file is read as ScoreConfig_LoadFile reads it (formats/score): a known FIELD
+	// whose value is no number clears the row's list and stores atol's 0
+	// [orig: @0x52DBBE..0x52DBE4], and a lone CR ends a line [orig: Text_ReadLine
+	// @0x52D110].
+	{
+		opennova::inmatch::GameConfig coop;
+		coop.game_type = 0x10020u;
+		if (!expect(opennova::inmatch::load_session_score_config(coop,
+		                    "VERSION 40\rGAMETYPE \"COOP\"\rFIELD \"NUMENEMYKILLS\" x\rVAR \"FIRE\" 7\r") &&
+		                    coop.scoreboard_fields.size() == 1 &&
+		                    coop.scoreboard_fields[0].first == 3 &&
+		                    coop.scoreboard_fields[0].second == 0 &&
+		                    coop.session_status_stat_values.has_value() &&
+		                    (*coop.session_status_stat_values)[0] == 7,
+		            "a non-numeric FIELD value stores 0 and a lone CR ends each line"))
+			return false;
+	}
+	// Two blocks of one row: every block's VARs overlay in file order, and the FIELD
+	// list is the last block's that names one [orig: @0x52DBC3, @0x52DC50].
+	opennova::inmatch::GameConfig twice;
+	twice.game_type = 0x10020u;
+	return expect(opennova::inmatch::load_session_score_config(twice,
+	                      "VERSION 40\nGAMETYPE \"COOP\"\nFIELD \"NUMDEATHS\" 1\nVAR \"FIRE\" 3\n"
+	                      "GAMETYPE \"TDM\"\nVAR \"FIRE\" 9\n"
+	                      "GAMETYPE \"COOP\"\nVAR \"HIT\" 4\n"
+	                      "GAMETYPE \"COOP\"\nFIELD \"NUMSUICIDES\" 2\n") &&
+	                      twice.scoreboard_fields.size() == 1 &&
+	                      twice.scoreboard_fields[0].first == 1 &&
+	                      twice.scoreboard_fields[0].second == 2 &&
+	                      (*twice.session_status_stat_values)[0] == 3 &&
+	                      (*twice.session_status_stat_values)[1] == 4,
+	              "a row's blocks overlay their VARs; its FIELD list is the last block's");
 }
 
 // The host carries the persistent unnumbered capture transaction all the way to

@@ -4,10 +4,12 @@
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <base/io/fixed.h> // kFp16OneD
 #include <formats/env/env.h>
 #include <runtime/mission/placement_traits.h>
 
 #include <array>
+#include <cstdint>
 
 namespace godot {
 
@@ -17,7 +19,7 @@ namespace godot {
 //
 // Derivation: the original getters serve celestial tuples in the RENDER FLOAT
 // basis — mission fixed (x east, y north, z up) maps through
-// [orig: Math_FixedPointToFloat3_YNegated @ 0x611210, see docs/env/env-tod-re.md] as
+// (engine: runtime/world/occlusion.h) as
 // (x, y, z)_mission -> (-y, z, x)_render (render x = south, y = up,
 // z = east). OpenNova's Godot world was built from mission axes as
 // (x, y, z)_mission -> (x, z, -y)_godot (godot x = east, y = up, z = south).
@@ -62,12 +64,44 @@ inline Transform3D mission_to_godot_transform() {
 	return Transform3D(Basis(Vector3(1, 0, 0), Vector3(0, 0, -1), Vector3(0, 1, 0)), Vector3());
 }
 
+// The same map from a mission 16.16 triple: each axis divided by 65536 in
+// double, then rounded to float (the division is exact, so the float the
+// division by 65536.0f of the float-converted word gives is the same).
+inline Vector3 godot_from_fixed3(const int32_t p[3]) {
+	return Vector3(static_cast<float>(p[0] / opennova::io::kFp16OneD),
+			static_cast<float>(p[2] / opennova::io::kFp16OneD),
+			static_cast<float>(-(p[1] / opennova::io::kFp16OneD)));
+}
+inline Vector3 godot_from_fixed3(const std::array<int32_t, 3> &p) {
+	return godot_from_fixed3(p.data());
+}
+
+// Its inverse into a mission 16.16 triple, each axis truncated toward zero
+// (the int conversion of the scaled float), the rule every binding site that
+// rebuilds a 16.16 point from a Godot position uses.
+inline void fixed3_from_godot(const Vector3 &v, int32_t out[3]) {
+	out[0] = static_cast<int32_t>(v.x * 65536.0f);
+	out[1] = static_cast<int32_t>(-v.z * 65536.0f);
+	out[2] = static_cast<int32_t>(v.y * 65536.0f);
+}
+
 // The inverse, into any {x, y, z} float struct: env::Vec3 by default,
 // world::Vec3 for the record constructors that author Godot-space rows.
 template <typename V = opennova::env::Vec3>
 inline V godot_to_mission(const Vector3 &v) {
 	return V{static_cast<float>(v.x), static_cast<float>(-v.z),
 			static_cast<float>(v.y)};
+}
+
+// The same inverse into the mission's 16.16 position, each axis rounded to
+// nearest and saturated (io::float_to_fp16_16_round_sat): the one form a
+// binding hands the engine's fixed-point queries a Godot position in.
+inline std::array<int32_t, 3> godot_to_mission_q16(const Vector3 &v) {
+	return {
+		opennova::io::float_to_fp16_16_round_sat(static_cast<double>(v.x)),
+		opennova::io::float_to_fp16_16_round_sat(-static_cast<double>(v.z)),
+		opennova::io::float_to_fp16_16_round_sat(static_cast<double>(v.y)),
+	};
 }
 
 // The one BMS rotation -> Godot basis wrapper over the engine's witnessed

@@ -41,8 +41,7 @@
 // light colour folded onto every vertex — and resolves each entity-ring owner
 // to its live model node. Every viewing peer runs it: retail draws its own
 // caches on every client from the same impact processor
-// [orig: Scar_RenderAllCaches @0x5CDF70 from Terrain_CollectVisibleEntities
-//  @0x5c91b7].
+// (engine: runtime/renderer/scar_draw_list.h).
 //
 // [orig map — docs/world/world-wac-ai-re.md §24.9:
 //  Scar_RenderAllCaches @0x5CDF70 (the shared ring first, then every live

@@ -340,8 +340,8 @@ const char *ai_subject(int32_t type) {
 	return "AI";
 }
 
-// The AI commands of the four AI actions [orig: Entity_ApplyCommand @0x43ab60; dfx2med's tokens,
-// section 8.2]: what each does to its subject, {s} the subject ("group 4", "Hostage #10034"), {2}..{4}
+// The AI commands of the four AI actions [orig: Entity_ApplyCommand @0x43ab60] (dfx2med's tokens,
+// section 8.2): what each does to its subject, {s} the subject ("group 4", "Hostage #10034"), {2}..{4}
 // the action's parameters.
 struct AiRow {
 	int32_t sub;

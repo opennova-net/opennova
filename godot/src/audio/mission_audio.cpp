@@ -53,7 +53,7 @@ constexpr const char *kSfxBus = "SFX";
 constexpr const char *kVoiceBus = "Voice";
 // Marker -> sound set resolution is the marker item's items.def soundloop_1..7
 // set names (e.g. id 106178 "snd: Lp Flourescent Light" -> soundloop_1
-// LPNV_LIGHT) [orig: ItemDef_ParseProperty @ 0x49fec4]; the engine is
+// LPNV_LIGHT) (engine: runtime/audio/envs_markers.h); the engine is
 // name-keyed (docs/audio/lwf-dbf-sound-re.md) and resolves it natively
 // (audio/envs_markers.h resolve_envs_markers).
 
@@ -65,7 +65,7 @@ constexpr double kMinutesPerHour = 60.0;
 constexpr double kSilentDb = opennova::audio::kVolumeSilentDb;
 // Time-of-day region cuts (4/10/17/21 h) and the ~5-game-minute crossfade margin
 // live with the eval in engine/runtime/audio (ambient_mixer.cpp time_of_day_region)
-// [orig: Entity_CalcTimeOfDayRegion @ 0x408110; margin @ 0x408203].
+// (engine: runtime/audio/ambient_mixer.cpp).
 
 String dynamic_emitter_key(int64_t p_source_spawn_id, int p_lane) {
 	return vformat("%d:%d", p_source_spawn_id, p_lane);
@@ -220,8 +220,7 @@ Ref<MissionAudioStats> MissionAudio::setup(const Ref<MissionData> &p_mission, co
 	bank_->set_occlusion_override(occlusion_override_);
 	const String mission_base = p_mission_name.get_file().get_basename();
 	// The global slots in the engine's order -- expansion pair (when one is
-	// mounted) ahead of the statics [orig: slot table @ 0x82A5B0, walk
-	// @ 0x525443; expansion fill @ 0x4a4989 / @ 0x4a495e]. The witnessed table
+	// mounted) ahead of the statics (engine: base/gameprofile/required_resources.cpp). The witnessed table
 	// lives native (audio/bank_chain.h); missing files skip like retail's
 	// SoundBank_LoadIfExists (D-SND-2 closed). A set is searched for in these
 	// slots alone: the mission's own <mission>.lwf is its dialog bank's sounds,
@@ -639,7 +638,7 @@ AudioStreamPlayer *MissionAudio::_spawn_dialog_voice(const Ref<AudioStreamWAV> &
 	}
 	voice->set_stream(p_stream);
 	// The line plays at the play factor 0x10000, centred: the dialog's play hook writes both into the
-	// line's record before the open [orig: sub_527560 @ 0x52757c, called through dword_A8A23C
+	// line's record before the open [orig: Dialog_ApplyDialogueVolumeAndPlayFactor @ 0x52757c, called through dword_A8A23C
 	// @ 0x44de50]. A decoded wave's player takes its scale through WavLoader::pitch_scale_for (the
 	// mixer's step of the wave, a boxed rate's too).
 	voice->set_pitch_scale(static_cast<float>(WavLoader::pitch_scale_for(p_stream, 1.0)));

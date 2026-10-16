@@ -25,7 +25,7 @@ inline std::vector<uint8_t> from_pba(const PackedByteArray &p_bytes) {
 	return std::vector<uint8_t>(p_bytes.ptr(), p_bytes.ptr() + p_bytes.size());
 }
 
-bool decode_nova_payload_bytes(PackedByteArray &p_bytes);
-bool read_nova_payload_file(const String &p_path, PackedByteArray &r_bytes);
+bool decode_payload_bytes(PackedByteArray &p_bytes);
+bool read_payload_file(const String &p_path, PackedByteArray &r_bytes);
 
 } // namespace godot

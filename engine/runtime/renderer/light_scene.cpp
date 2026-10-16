@@ -1,5 +1,6 @@
 #include <runtime/renderer/light_scene.h>
 
+#include <base/io/fixed.h>
 #include <runtime/renderer/device_fog.h>
 #include <runtime/renderer/light_scene_internal.h>
 #include <runtime/renderer/material_eval.h>
@@ -18,12 +19,6 @@ using detail::axis_distance_term; // [orig: Light_CollectNearbyZonesByAABB @ 0x5
 using detail::kHandleFlag;
 using detail::kHandleIndexMask;
 using detail::saturating_add;
-
-int32_t clamp_i32(int64_t value) {
-	return static_cast<int32_t>(std::clamp<int64_t>(value,
-			std::numeric_limits<int32_t>::min(),
-			std::numeric_limits<int32_t>::max()));
-}
 
 } // namespace
 
@@ -92,10 +87,10 @@ LightHandle LightScene::spawn(const LightSpawnParams &params) {
 	slot.fade_initial = params.fade_duration;
 	for (int axis = 0; axis < 3; ++axis) {
 		// The spawn AABB is position +/- radius [orig: @ 0x5a8df8..0x5a8e2a].
-		slot.aabb_min[axis] = clamp_i32(
+		slot.aabb_min[axis] = io::saturate_i32(
 				static_cast<int64_t>(params.position_fixed[axis]) -
 				params.radius_fixed);
-		slot.aabb_max[axis] = clamp_i32(
+		slot.aabb_max[axis] = io::saturate_i32(
 				static_cast<int64_t>(params.position_fixed[axis]) +
 				params.radius_fixed);
 	}
@@ -132,6 +127,61 @@ void LightScene::set_blend(LightHandle handle, float amount) {
 	}
 	slot->blend = amount;
 	slot->hidden = hidden;
+}
+
+LightHandle LightScene::fire_muzzle_glow(LightHandle cached,
+		const std::array<int32_t, 3> &muzzle_fixed, uint64_t shooter) {
+	// [orig: Entity_UpdateMuzzleGlowEffect @ 0x56c960 — a zero entity+0x1B4 word spawns, then the
+	// fade, owner, position and blend setters on the word]
+	LightHandle handle = cached;
+	if (handle.is_null()) {
+		handle = spawn(muzzle_glow_spawn(muzzle_fixed, shooter));
+		if (handle.is_null()) return handle;
+	}
+	set_fade(handle, kMuzzleGlowFadeMode, kMuzzleGlowFadeTicks);
+	set_owner(handle, shooter, 0);
+	set_position(handle, muzzle_fixed);
+	set_blend(handle, 1.0f);
+	return handle;
+}
+
+LightSpawnParams muzzle_glow_spawn(const std::array<int32_t, 3> &muzzle_fixed, uint64_t shooter) {
+	LightSpawnParams params;
+	params.position_fixed = muzzle_fixed;
+	params.radius_fixed = LightScene::kMuzzleGlowRadiusFixed;
+	params.rgb = {static_cast<uint8_t>(LightScene::kMuzzleGlowColorRgb >> 16),
+			static_cast<uint8_t>(LightScene::kMuzzleGlowColorRgb >> 8),
+			static_cast<uint8_t>(LightScene::kMuzzleGlowColorRgb)};
+	params.owner_entity = shooter;
+	params.owner_section = 0;
+	return params;
+}
+
+LightSpawnParams impact_flash_spawn(const std::array<int32_t, 3> &impact_fixed,
+		int32_t radius_fixed, const std::array<uint8_t, 3> &rgb, int32_t ticks) {
+	LightSpawnParams params;
+	params.position_fixed = impact_fixed;
+	params.position_fixed[2] = io::saturate_i32(static_cast<int64_t>(impact_fixed[2]) + (radius_fixed >> 1));
+	params.radius_fixed = radius_fixed;
+	params.rgb = rgb;
+	params.fade_mode = 2;
+	params.fade_duration = ticks;
+	params.corona_lower_half_radius = true;
+	return params;
+}
+
+LightSpawnParams death_flash_spawn(const std::array<int32_t, 3> &position_fixed,
+		int32_t radius_fixed) {
+	LightSpawnParams params;
+	params.position_fixed = position_fixed;
+	params.radius_fixed = radius_fixed;
+	params.rgb = {static_cast<uint8_t>(LightScene::kDeathFlashColorRgb >> 16),
+			static_cast<uint8_t>(LightScene::kDeathFlashColorRgb >> 8),
+			static_cast<uint8_t>(LightScene::kDeathFlashColorRgb)};
+	params.fade_mode = LightScene::kDeathFlashFadeMode;
+	params.fade_duration = LightScene::kDeathFlashFadeTicks;
+	params.disable_corona = true;
+	return params;
 }
 
 void LightScene::set_owner(LightHandle handle, uint64_t owner_entity,
@@ -217,10 +267,10 @@ void LightScene::set_position(LightHandle handle,
 	}
 	slot->params.position_fixed = position_fixed;
 	for (int axis = 0; axis < 3; ++axis) {
-		slot->aabb_min[axis] = clamp_i32(
+		slot->aabb_min[axis] = io::saturate_i32(
 				static_cast<int64_t>(position_fixed[axis]) -
 				slot->params.radius_fixed);
-		slot->aabb_max[axis] = clamp_i32(
+		slot->aabb_max[axis] = io::saturate_i32(
 				static_cast<int64_t>(position_fixed[axis]) +
 				slot->params.radius_fixed);
 	}
@@ -746,19 +796,19 @@ size_t LightScene::collect_corona_quads(const LightCoronaFrameInputs &inputs,
 		// spawned radius/2 above the impact; its corona drops back down
 		// [orig: @ 0x5ab037..0x5ab05c].
 		if (slot.params.corona_lower_half_radius) {
-			pos_fixed[2] = clamp_i32(static_cast<int64_t>(pos_fixed[2]) -
+			pos_fixed[2] = io::saturate_i32(static_cast<int64_t>(pos_fixed[2]) -
 					(static_cast<int64_t>(slot.params.radius_fixed) >> 1));
 		}
 		// The per-frame sub-centimeter jitter: +-512 fixed on x (frames
 		// 0/1) or y (frames 2/3) [orig: the frame & 3 switch @ 0x5ab06e].
 		switch (inputs.frame_index & 3u) {
-			case 0: pos_fixed[0] = clamp_i32(
+			case 0: pos_fixed[0] = io::saturate_i32(
 					static_cast<int64_t>(pos_fixed[0]) + 512); break;
-			case 1: pos_fixed[0] = clamp_i32(
+			case 1: pos_fixed[0] = io::saturate_i32(
 					static_cast<int64_t>(pos_fixed[0]) - 512); break;
-			case 2: pos_fixed[1] = clamp_i32(
+			case 2: pos_fixed[1] = io::saturate_i32(
 					static_cast<int64_t>(pos_fixed[1]) + 512); break;
-			default: pos_fixed[1] = clamp_i32(
+			default: pos_fixed[1] = io::saturate_i32(
 					static_cast<int64_t>(pos_fixed[1]) - 512); break;
 		}
 		// Camera distance cull at 100 wu, in fixed units like retail's

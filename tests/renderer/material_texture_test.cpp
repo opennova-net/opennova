@@ -12,6 +12,8 @@
 
 #include <base/io/os_path.h>
 
+#include "common/temp_dir.h"
+
 using namespace opennova::renderer;
 
 void expect(bool condition, const char *message) {
@@ -90,14 +92,6 @@ int main() {
 	expect(material_texture_transform(3, "Body.tga", true) == MaterialTextureTransform::Checkerboard &&
 			material_texture_transform(0, "Missing.tga", false) == MaterialTextureTransform::Checkerboard,
 			"unsupported runtime rows and failed loads bind the checkerboard");
-	// Pixel-built textures (TGA/MDT/PCX rows, normal maps, the checkerboard)
-	// get one level per halving while the smaller side exceeds 2.
-	// [orig: GTexture_CreateFromPixelData_0 @0x6877BC..0x6877D8]
-	expect(pixel_texture_mip_levels(256, 256) == 7 && pixel_texture_mip_levels(128, 128) == 6 &&
-			pixel_texture_mip_levels(256, 64) == 5 && pixel_texture_mip_levels(4, 4) == 1 &&
-			pixel_texture_mip_levels(3, 8) == 1 && pixel_texture_mip_levels(2, 2) == 0 &&
-			pixel_texture_mip_levels(48, 48) == 5,
-			"pixel-built mip chains end at the last level above min-dim 2");
 	// The name cut and the DDS sibling the loaders build.
 	// [orig: Texture_LoadByNameWithChannel @0x58B4E1..0x58B598]
 	expect(material_texture_query("Jbark_2.dds.tga") == "Jbark_2.dds" &&
@@ -349,7 +343,8 @@ int main() {
     {
         // A large file of another kind: a megabyte of zeros reads as empty chunks, walked no further
         // than kChunkHeaderReads headers for each chunk type.
-        const std::filesystem::path file = std::filesystem::temp_directory_path() / "opennova_material_chunk_filler.bin";
+        test_temp::TempDir temp("opennova_material_chunk_filler");
+        const std::filesystem::path file = opennova::io::os_path(temp.file("filler.bin"));
         { std::ofstream out(file, std::ios::binary); const std::vector<char> zeros(1 << 20, 0); out.write(zeros.data(), std::streamsize(zeros.size())); }
         uint64_t read = 0;
         expect(!is_material_chunk_file(opennova::io::utf8_path(file), read) && read > 0 &&

@@ -2,6 +2,7 @@
 
 #include "hosted/owner_file.h"
 #include "loggable.h"
+#include "text_util.h"
 
 #include <base/io/strutil.h>
 #include <base/os_random/os_random.h>
@@ -50,8 +51,6 @@ bool is_path_char(char c) {
 }
 
 bool is_url_char(char c) { return is_path_char(c) || c == '.' || c == ':'; }
-
-bool starts_with(std::string_view text, std::string_view head) { return text.substr(0, head.size()) == head; }
 
 // `text` as a double-quoted curl config value ('\' and '"' escaped); nullopt
 // when it holds a control byte, which no line of the file may carry.

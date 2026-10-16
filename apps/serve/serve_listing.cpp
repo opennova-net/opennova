@@ -3,7 +3,6 @@
 #include "lister.h"
 
 #include <base/io/log.h>
-#include <net/npwire/peer_addr.h>
 #include <runtime/inmatch/host_config.h> // run_host_server_command
 #include <runtime/inmatch/napi_np_connection.h>
 #include <runtime/inmatch/napi_np_server_ctx.h>
@@ -95,28 +94,16 @@ HostRegistration ServeListing::registration() const {
 	return r;
 }
 
-// One PlayerList slot per player the match added: a remote connection past its player add, at
-// its slot, with its UDP source as inet_ntoa:port, its cookie's PCID and the PlayerTeam /
-// PlayerType the match keeps for it (NapiNPConnection::player_list_team / player_list_type). A
-// mode-1 host builds no local connection, so its own slot 0 is never published.
-// [orig: Server_PlayerAdd @0x51cbc0 — PlayerIpAndPort @0x51d3d1..0x51d3f2 (Napi_FormatAddress
-//  @0x62ded0), the five vars @0x51d441..0x51d4aa; CNapiGameSession_CreateSession @0x4c9b73]
+// The match's PlayerList roster (inmatch::host_player_list_rows, the game shell's too). A mode-1
+// host builds no local connection, so its own slot 0 is never published.
+// [orig: CNapiGameSession_CreateSession @0x4c9b73]
 std::vector<HostPlayerSlot> ServeListing::wanted_roster(const std::map<int, HostPlayerSlot> &current) const {
 	(void)current;
 	std::vector<HostPlayerSlot> out;
 	if (role_ == nullptr) return out;
-	for (const inmatch::NapiNPConnection &c : role_->state.host_owner.ctx.np_protocol.connection_list) {
-		if (c.type != inmatch::NapiNPConnection::kTypeServerSide || c.phase < inmatch::ConnectionPhase::PlayerAdded)
-			continue;
-		HostPlayerSlot slot;
-		slot.slot = static_cast<int>(c.reply.player_slot);
-		slot.connection_id = c.connection_id;
-		slot.player_name = c.player_name;
-		slot.ip_and_port = peer_addr_to_string(c.peer);
-		slot.pcid = c.account.pcid;
-		slot.team = std::to_string(c.player_list_team);
-		slot.type = std::to_string(c.player_list_type);
-		out.push_back(std::move(slot));
+	for (inmatch::HostPlayerListRow &row : inmatch::host_player_list_rows(role_->state.host_owner.ctx)) {
+		if (row.own) continue;
+		out.push_back(std::move(row.slot));
 	}
 	return out;
 }
@@ -138,7 +125,7 @@ std::vector<HostPlayerSlot> ServeListing::wanted_roster(const std::map<int, Host
 // executor's stand-in for ctx+0x68, stays clear on purpose: retail's own +0x58 is already set
 // in the hosting wait (CNapiNetwork_SetNetworkType @0x4C4A85, from @0x4A6614), but no verb's
 // gate reads it.
-// [orig: CNapiGameSession_HandleServerCommand — PuntPlayer @0x4D2515..0x4D254D; SetServerName's
+// [orig: CNapiGameSession_HandleServerCommand — the PuntPlayer arm @0x4D2515..0x4D254D; SetServerName's
 //  block copy @0x4D2CFC, SetServerMsg's @0x4D2DAD, SetMPReset's @0x4D2E28; Game_SaveConfig
 //  @0x4D2DDF (SetServerName / SetServerMsg) and @0x4D2E2D (SetMPReset); the gates, SetServerName's
 //  ctx+0x68 test @0x4D2CE9 and SetMPReset's lone token count @0x4D2E12;

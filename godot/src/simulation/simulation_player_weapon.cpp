@@ -132,7 +132,7 @@ Ref<PlayerAimOverlay> Simulation::get_local_player_aim_overlay() const {
 	opennova::anim::AimOverlayInputs in = aim_overlay_inputs_for(*p, *entity);
 	// The pitch-kick term carries the arms-dip feed (the +0x371 weapon-switch
 	// window drops it 0x2800000/tick; infantry_weapon_channel owns the decay)
-	// [orig: @ 0x4b5cab..0x4b5cd5]. The lean term is the sim's lean angle
+	// (engine: runtime/world/infantry_weapon_channel.cpp). The lean term is the sim's lean angle
 	// (entity+0xB0; ramp/decay in infantry_lean_tick); roll is the slope-conform
 	// visual roll (entity+0x18) and torso_roll its sixteenth-step chaser
 	// (entity+0x2DC, infantry_torso_roll_tick); body_pitch is the slope-conform
@@ -154,18 +154,16 @@ Ref<PlayerAimOverlay> Simulation::get_local_player_aim_overlay() const {
 	// The basis is not one of the nine classes above — see the anim contract.
 	out->set_angles(mission_euler_from_overlay(angles[opennova::anim::kOverlayBody]), packed,
 			mission_euler_from_overlay(opennova::anim::compute_held_weapon_attach_angles(in)));
-	// Which of the two attach frames retail would use for this body — the same 0x80 test
-	// on the weapon channel's hold state that the wire path publishes as
-	// PF_HELD_WEAPON_HAND_FRAME, read here from our own infantry state so the local and
-	// remote legs cannot drift. [orig: gate @ 0x4b21b6 / branch @ 0x4b220f]
+	// Which of the two attach frames this body uses: the engine's hand-frame test
+	// (world::infantry_weapon_at_hand) over our own infantry state, the one the wire
+	// path publishes as PF_HELD_WEAPON_HAND_FRAME.
 	out->set_weapon(local_held_weapon_visible(*entity),
-			(opennova::world::infantry_anim_flags(p->inf.wpn_state) & 0x80u) != 0);
+			opennova::world::infantry_weapon_at_hand(p->inf.wpn_state));
 	return out;
 }
 
 // The local-player branch of retail's held-weapon draw gate — the policy is
-// world::local_held_weapon_visible [orig: Entity_CanFireWeapon @ 0x4dcb10,
-// the `entityPtr == g_LocalPlayerEntity` branch @ 0x4dcbcf..0x4dcc5d];
+// world::local_held_weapon_visible (engine: runtime/world/player_weapon.cpp);
 // this wrapper supplies the sim's own state aggregates.
 bool Simulation::local_held_weapon_visible(
 		const opennova::world::Entity &p_entity) const {

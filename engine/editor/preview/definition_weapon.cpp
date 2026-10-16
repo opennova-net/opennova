@@ -34,9 +34,6 @@ template <size_t N> std::string text_of(const char (&field)[N]) { return strutil
 
 PreviewVec3 add(const PreviewVec3 &a, const PreviewVec3 &b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 PreviewVec3 scale(const PreviewVec3 &a, float s) { return {a.x * s, a.y * s, a.z * s}; }
-PreviewVec3 cross(const PreviewVec3 &a, const PreviewVec3 &b) {
-	return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
-}
 float length(const PreviewVec3 &a) { return std::sqrt(a.x * a.x + a.y * a.y + a.z * a.z); }
 PreviewVec3 unit(const PreviewVec3 &a) {
 	const float n = length(a);

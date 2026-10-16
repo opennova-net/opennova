@@ -202,7 +202,7 @@ public:
 	Ref<ModelUserPoint> get_user_point_info(int p_index) const;
 	// The item-effect attach scan: name -> 16-bit mask over the FIRST 16
 	// userpoints (case-insensitive; duplicate names all match) — one impl in
-	// engine/formats/threedi. [orig: ItemDef_GetBoneMaskByName @ 0x49ea40]
+	// engine/formats/threedi. (engine: formats/threedi/threedi_3di3.h)
 	int get_user_point_bone_mask(const String &p_name) const;
 	bool has_collision() const;
 	// The model carries GPM-family occlusion/portal records (OVRT/OPLN/OFAC/OOBJ)
@@ -223,7 +223,7 @@ public:
 	// The skeletal runtime feeds these to SkeletalAnim in place of the .bad's lossy
 	// BadBone.position (roughly half the .bad corpus triplicates X into all 3 slots). Matches the
 	// original engine, which sources bone pivots from the model bone-def table, not the .bad.
-	// [orig: the modelDef+56 pivot table read by BoneAnim_BuildWorldMatrices @0x40c400.]
+	// (engine: runtime/anim/anim_sample.h)
 	PackedVector3Array get_bone_origins(int p_lod_index = 0) const;
 	// Per-part parent index (raw ThreediRenderObject.parent_index), indexed by part index, for
 	// the given LOD -- the model's authoritative bone hierarchy, paired with get_bone_origins as

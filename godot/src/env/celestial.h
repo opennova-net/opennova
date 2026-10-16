@@ -13,14 +13,15 @@
 #include <godot_cpp/variant/node_path.hpp>
 
 #include <array>
+#include <functional>
 #include <memory>
 #include <unordered_map>
 
 #include <runtime/environment/celestial_frame.h>
+#include <runtime/environment/glare_occlusion.h>
 #include <runtime/renderer/q3_frame.h>
 
 #include "env/env_file.h"
-#include "env/glare_occlusion.h"
 #include "object/object_data.h"
 #include "resource_index/resource_root.h"
 #include "terrain/terrain_data.h"
@@ -32,8 +33,8 @@ class ObjectModel;
 
 // The celestial applier — the ADR 0033 device leg over the engine's
 // per-frame body selection (environment/celestial_frame.h) and the witnessed
-// fixed-point math already in engine/formats/env (env_celestial.h behind the
-// GlareOcclusion device helper). Renders the sun/moon/glare 3DI bodies named
+// fixed-point math already in engine/formats/env (env_celestial.h, the glare
+// occlusion state runtime/environment/glare_occlusion.h advances). Renders the sun/moon/glare 3DI bodies named
 // in the mission .env, attached to the sky at camera + direction * 64; retail
 // loads the star 3DI but never draws it (env_celestial.h carries the
 // witness). This node keeps only device work: the ObjectModel children with
@@ -52,6 +53,14 @@ public:
 	// The loaded terrain for the glare occlusion rays; no terrain =
 	// unobstructed.
 	void set_terrain_data(const Ref<TerrainData> &p_data);
+	// The entities' line of sight between two mission points for the glare's
+	// fine rays and the glint's eye ray (true = nothing blocks): the running
+	// mission's pool walk (world::CollisionWorld::sun_ray_clear_of_entities),
+	// which the game world installs. Unset (an editor viewport, no mission) =
+	// nothing blocks. C++ only.
+	using EntitiesClear =
+			std::function<bool(const opennova::env::Vec3 &, const opennova::env::Vec3 &)>;
+	void set_entities_clear(EntitiesClear p_clear) { entities_clear_ = std::move(p_clear); }
 	Ref<TerrainData> get_terrain_data() const { return terrain_data_; }
 	void set_resource_root(const Ref<ResourceRoot> &p_root);
 	void set_environment_capture_layer_mask(uint32_t p_mask);
@@ -135,7 +144,7 @@ public:
 	// The frozen-fixture glare settle (GameWorld's capture-refresh seam):
 	// the occlusion brightness needs ~4 frames to fill the 8-sample window
 	// and up to 16 more to step +-16 onto the dead-band target
-	// [orig: Render_SkyboxSunGlow @ 0x5acdfb..0x5acf7f, see docs/env/env-tod-re.md], so a single
+	// (engine: formats/env/env_render.cpp), so a single
 	// zero-delta advance leaves a fresh accumulator dark at any pose. Runs
 	// ONLY the witnessed per-frame occlusion leg (two jittered rays + tick)
 	// until the dead-band holds across a full window turnover (frame cap
@@ -148,7 +157,7 @@ public:
 	// opacity/visibility (the last advanced frame's values).
 	Dictionary get_diagnostics() const;
 
-	// The last advanced frame's sun-veil outputs [orig: // Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0, see docs/env/env-tod-re.md]: the fullscreen
+	// The last advanced frame's sun-veil outputs (engine: formats/env/env_celestial.h): the fullscreen
 	// white veil alpha (0..1 after the > 2 draw gate — consumed by the
 	// PlayerViewEffects veil rect via the opennova_sun_veil_alpha shader
 	// global this node pushes) and the modulator-2 exposure stop-down input
@@ -225,14 +234,20 @@ private:
 	// the redraw's own register value (celestial_frame.h GlareFrame), pushed
 	// to the Q3 registry per surface.
 	void _set_body_q3_pose(Body &p_body, const Ref<ObjectData> &p_data, int32_t p_q3_upl);
-	// Terrain line-of-sight between two points (the glare and water-glint
-	// visibility rays): clear when the raycast misses.
+	// Terrain line-of-sight between two points (the glare's gate ray and the
+	// water glint's two terrain rays): clear when the raycast misses.
 	bool _segment_clear(const Vector3 &p_from, const Vector3 &p_to);
+	// The entities' line of sight between two mission points (entities_clear_;
+	// clear when unset).
+	bool _entities_clear(const opennova::env::Vec3 &p_from, const opennova::env::Vec3 &p_to) const {
+		return !entities_clear_ || entities_clear_(p_from, p_to);
+	}
 	// One frame of the glare occlusion at this camera: the engine's ray
-	// sequence (GlareOcclusion::advance) over _segment_clear.
+	// sequence (env::advance_glare_occlusion) over _segment_clear and
+	// _entities_clear.
 	void _advance_glare_occlusion(const opennova::env::EnvironmentState &p_state,
 			const Vector3 &p_cam_pos, const Vector3 &p_sun_dir);
-	// One frame of the water-glint leg [orig: Environment_UpdateSunGlare @ 0x5ad130, see docs/env/env-tod-re.md]:
+	// One frame of the water-glint leg (engine: formats/env/env_celestial.h):
 	// tick the accumulator at this camera, place the mirrored glint body and
 	// write its submit value.
 	void _advance_water_glint(const opennova::env::EnvironmentState &p_state,
@@ -247,8 +262,12 @@ private:
 
 	NodePath environment_path_;
 	Ref<TerrainData> terrain_data_;
+	EntitiesClear entities_clear_;
 	Ref<ResourceRoot> resource_root_;
-	std::unique_ptr<GlareOcclusion> glare_occlusion_;
+	// The sun glare's occlusion window and hysteresis brightness, which the
+	// engine's ray sequence advances (engine: runtime/environment/
+	// glare_occlusion.h; env #14, docs/env/env-tod-re.md "Celestial bodies").
+	opennova::env::GlareOcclusionState glare_occlusion_{};
 	HashMap<String, Body> bodies_;
 	// name-signature change detection (undo/scrub safe rebuilds).
 	HashMap<String, String> loaded_names_;
@@ -269,7 +288,7 @@ private:
 			RenderingServer *p_rs, const StringName &p_name, const Variant &p_value);
 	int sun_veil_stopdown_ = 0;
 	// The water-reflected sun glint accumulator
-	// [orig: Environment_UpdateSunGlare @ 0x5ad130, see docs/env/env-tod-re.md].
+	// (engine: formats/env/env_celestial.h).
 	opennova::env::WaterGlintState water_glint_;
 	// The weapon Inset pass's camera this frame and its glint draw.
 	ObjectID inset_camera_id_;

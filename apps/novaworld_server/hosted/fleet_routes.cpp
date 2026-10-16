@@ -18,21 +18,9 @@ namespace opennova::novaworld_server::hosted {
 
 namespace {
 
-void text_or_null(crow::json::wvalue &out, const char *key, const std::string &text) {
-	if (text.empty())
-		out[key] = nullptr;
-	else
-		out[key] = text;
-}
-
 // A path's id; 0 (no row's) past int64.
 int64_t id_of(uint64_t id) {
 	return id <= static_cast<uint64_t>(INT64_MAX) ? static_cast<int64_t>(id) : 0;
-}
-
-crow::response no_store(crow::response res) {
-	res.set_header("Cache-Control", "no-store");
-	return res;
 }
 
 crow::response machine_reply(int code, db::Database &db, int64_t id) {

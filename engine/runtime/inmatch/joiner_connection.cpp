@@ -363,10 +363,10 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// NovaWorld host validates: a mismatch (or an absent APPID, our old bug) is
 	// the code-9 punt. Witnessed live 2026-08-31 in a stock client's successful
 	// join to a genuine .204 host: `CU BT="0"`, `CU APPID="3225"` (= atol(decoded
-	// CK)). [orig: net_config.bt = atol(decoded CK) @0x569b8e; the host reads
-	// the APPID tag into that same field and the BT tag into char_name —
-	// NapiNetConfig_LoadFromConnTags @0x4c7260 — then
-	// Server_ValidatePlayerJoinRequest @0x512100 compares it @0x5122c5]
+	// CK)). [orig: UI_JoinSelectedSession @0x5699d0 - net_config.app_id (+0x40)
+	// = atol(decoded CK) @0x569b8e; the host reads the APPID tag into the same
+	// field, NapiNetConfig_LoadFromConnTags @0x4c7260 (@0x4C7415), then
+	// Server_ValidatePlayerJoinRequest @0x512100 compares it @0x5122C3]
 	// The four build values are the title's (TitleJoinBuild: its net config's defaults, which
 	// each title's host checks against its own), the same for JO and DFX2.
 	const TitleJoinBuild &build = title_join_build(title_);
@@ -1416,13 +1416,15 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910]
 			TeamAssign assign;
 			std::size_t assign_consumed = 0;
-			if (decode_team_assign(m.payload.data(), m.payload.size(), assign,
-					assign_consumed) &&
-			    world::EntityHandle{assign.entity_handle}.valid() &&
-			    world::EntityHandle{assign.entity_handle}.pool() < world::kEntityPoolCount) {
+			decode_team_assign(m.payload.data(), m.payload.size(), assign, assign_consumed);
+			const world::EntityHandle assigned{assign.entity_handle};
+			if (assigned.valid() && assigned.pool() < world::kEntityPoolCount &&
+			    static_cast<std::size_t>(assigned.slot()) <
+			            world::retail_pool_capacity(assigned.pool())) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				// Retail's header gates: not the 0xFFFF sentinel, and the pool
-				// nibble must address one of the five entity pools.
+				// Retail's header gates: not the 0xFFFF sentinel, the pool nibble
+				// addressing one of the five entity pools, and a slot inside its
+				// pool's table [orig: @0x431984..0x4319b3].
 				out.entity_team_assigns.emplace_back(
 						assign.entity_handle, assign.team);
 				if (has_self_handle_ && assign.entity_handle == self_handle_) {

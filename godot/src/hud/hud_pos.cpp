@@ -126,6 +126,8 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_color"), &HudPos::loading_msg_label_color);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_pos"), &HudPos::loading_bar_pos);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_size"), &HudPos::loading_bar_size);
+	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_rects", "surface", "displayed"),
+			&HudPos::loading_bar_rects);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_border_gray"), &HudPos::loading_bar_border_gray);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_fill_color"), &HudPos::loading_bar_fill_color);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_splash_arrow_image"), &HudPos::loading_splash_arrow_image);
@@ -223,7 +225,7 @@ Error HudPos::parse_bytes_(const PackedByteArray &bytes, const String &src) {
 
 Error HudPos::load(const String &path) {
 	PackedByteArray bytes;
-	if (!read_nova_payload_file(path, bytes)) {
+	if (!read_payload_file(path, bytes)) {
 		clear_();
 		last_error_ = String("Cannot open hudpos.def: ") + path;
 		return ERR_CANT_OPEN;
@@ -543,6 +545,16 @@ Vector2i HudPos::loading_bar_pos() {
 
 Vector2i HudPos::loading_bar_size() {
 	return Vector2i(opennova::hud::kLoadingBarW, opennova::hud::kLoadingBarH);
+}
+
+TypedArray<Rect2i> HudPos::loading_bar_rects(const Vector2 &p_surface, int p_displayed) {
+	const opennova::hud::LoadingBarRects r = opennova::hud::loading_bar_rects(
+			static_cast<float>(p_surface.x), static_cast<float>(p_surface.y), p_displayed);
+	TypedArray<Rect2i> out;
+	for (const opennova::hud::LoadingBarRect &rect : {r.outer, r.gray, r.track, r.fill}) {
+		out.push_back(Rect2i(rect.x, rect.y, rect.w, rect.h));
+	}
+	return out;
 }
 
 Color HudPos::loading_bar_border_gray() {

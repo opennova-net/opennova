@@ -17,6 +17,11 @@ struct PreviewVec3 {
 	float x = 0.0f, y = 0.0f, z = 0.0f;
 };
 
+inline PreviewVec3 cross(const PreviewVec3 &a, const PreviewVec3 &b) {
+	return PreviewVec3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+inline float dot(const PreviewVec3 &a, const PreviewVec3 &b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+
 // A model-space point (a user point, a light, a pivot) in the preview's space.
 inline PreviewVec3 preview_from_model(const float model[3]) { return PreviewVec3{-model[0], model[1], model[2]}; }
 // A point in mission axes (x forward, y left, z up: the collision block's, the projection sphere's) in the

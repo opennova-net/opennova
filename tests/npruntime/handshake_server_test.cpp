@@ -21,6 +21,7 @@
 #include <runtime/world/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
 #include <runtime/inmatch/integrity_sources.h>
 #include <net/npwire/lan_discovery.h>
+#include <runtime/inmatch/server_join_check.h> // Server_ValidatePlayerJoinRequest (the code-9 leg)
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/server_tick.h>
@@ -779,24 +780,32 @@ bool decode_tag60_mission_strings(const ProtocolMessage &message,
 	return !mission_name.empty() && !mission_filename.empty();
 }
 
+// MISSIONNAME: the stock Co-op selector's map file; every other mode the
+// mission text's [info]/title, else (an empty title) the header's name
+// (GameConfig::mission_name). [orig: Game_SerializeMissionInfoToDataStream
+// @0x523620 -- the coop arm @0x523758, [info]/title @0x5237df, dword_A761D4
+// @0x52380d]
 bool run_tag60_mission_name_selects_by_game_type() {
 	struct Case {
 		uint32_t game_type;
-		const char *title;
+		const char *text_title; // the host context's mission text [info]/title
+		const char *header_name; // GameConfig::mission_name
 		const char *file;
 		const char *expected_mission_name;
 		const char *description;
 	};
 	const Case cases[] = {
-			{0x00010020u, "Stock Co-op Display Title", "COOP_FILE.BMS",
+			{0x00010020u, "Stock Co-op Display Title", "Stock Co-op Header", "COOP_FILE.BMS",
 					"COOP_FILE.BMS",
 					"stock Co-op 0x60 uses the active mission filename"},
-			{0x00030020u, "Objective Co-op Display Title", "OBJECTIVE_FILE.BMS",
-					"Objective Co-op Display Title",
+			{0x00030020u, "Objective Co-op Display Title", "Objective Co-op Header",
+					"OBJECTIVE_FILE.BMS", "Objective Co-op Display Title",
 					"objective waypoint variant 0x60 uses MissionText title"},
-			{0x00010000u, "Retail TDM Display Title", "TDM_FILE.BMS",
+			{0x00010000u, "Retail TDM Display Title", "Retail TDM Header", "TDM_FILE.BMS",
 					"Retail TDM Display Title",
-					"TDM 0x60 uses MissionText title"},
+					"TDM 0x60 uses MissionText title over the header's name"},
+			{0x00010000u, "", "Retail TDM Header", "TDM_FILE.BMS", "Retail TDM Header",
+					"an empty MissionText title falls back to the header's name"},
 	};
 
 	uint16_t port = 30120;
@@ -806,12 +815,13 @@ bool run_tag60_mission_name_selects_by_game_type() {
 		inmatch::NapiNPServerCtx ctx;
 		inmatch::GameConfig config;
 		config.server_name = "Tag60 Selector Host";
-		config.mission_name = test_case.title;
+		config.mission_name = test_case.header_name;
 		config.mission_file = test_case.file;
 		config.game_type = test_case.game_type;
 		config.max_players = 4;
 		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
 				inmatch::SocketMode::Lan, kHostKey, &loopback, config);
+		ctx.mission_text_title = test_case.text_title;
 
 		const PeerAddr peer{0x0100007Fu, port++};
 		const std::string client_scrk =
@@ -1589,6 +1599,59 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 		if (!expect(inmatch::connection_count(ctx) == 1 &&
 				ctx.np_protocol.connection_list.front().join_environment.db == 1,
 				"the DB join tag loads into the connection's join environment")) return false;
+	}
+
+	// B-7: the APPID tag loads too, and in a NovaWorld session a joiner whose APPID is
+	// not the session's AppId (absent reads 0) is refused 9, after the build values and
+	// ahead of the expansion; a LAN session runs no app-id leg.
+	// [orig: NapiNetConfig_LoadFromConnTags @0x4C7415; Server_ValidatePlayerJoinRequest
+	//  @0x5122A3..0x5122D5]
+	{
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
+				inmatch::SocketMode::Lan, kHostKey);
+		ClientAuth auth = make_valid_client_auth(1, 0xA0000002u,
+				kHostKey, "AppIdJoiner", scrk);
+		auth.cu.push_back(make_client_cu_chunk(2, "APPID", "3225"));
+		const PeerAddr peer{0x0100007Fu, 31302};
+		auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+		(void)inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+		if (!expect(inmatch::connection_count(ctx) == 1 &&
+				ctx.np_protocol.connection_list.front().join_environment.app_id == 3225,
+				"the APPID join tag loads into the connection's join environment")) return false;
+
+		inmatch::GameConfig config;
+		std::vector<inmatch::NapiNPConnection> roster(1);
+		inmatch::NapiNPConnection &joiner = roster.front();
+		joiner.join_environment = {0, 2, 1, 0, 20042002, 180};
+		joiner.join_environment.app_id = 3225;
+		ctx.is_in_session = 1;
+		ctx.transport_mode = inmatch::NetworkType::NovaWorld;
+		ctx.novaworld_app_id = 3225;
+		const std::vector<uint8_t> join = retail_join_request(config.expansion);
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join, true) == 0,
+				"a NovaWorld joiner naming the session's AppId passes the app-id leg")) return false;
+		joiner.join_environment.app_id = 0;
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join, true) == 9,
+				"a NovaWorld joiner with no APPID is refused 9")) return false;
+		joiner.join_environment.app_id = 3226;
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join, true) == 9,
+				"a NovaWorld joiner naming another AppId is refused 9")) return false;
+		joiner.join_environment.bn = 0;
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join, true) == 2,
+				"the build values' refusal still comes first")) return false;
+		joiner.join_environment.bn = 1;
+		inmatch::GameConfig expansion_config;
+		expansion_config.expansion = "jox01";
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(expansion_config, &ctx, joiner, roster, join, true) == 9,
+				"the app-id leg runs ahead of the expansion's 47")) return false;
+		ctx.is_in_session = 0;
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join, true) == 0,
+				"a NovaWorld host out of session runs no app-id leg")) return false;
+		ctx.is_in_session = 1;
+		ctx.transport_mode = inmatch::NetworkType::Lan;
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join, true) == 0,
+				"a LAN session runs no app-id leg")) return false;
 	}
 
 	// A form post cannot skip the JOIN request. The protocol violation tears
@@ -2506,21 +2569,25 @@ bool run_full_player_info_is_recipient_scoped_lan_metadata() {
 // Retail does not always duplicate the map filename into FULL_PLAYER_INFO field
 // 4. NapiNPMsg_0x7B_BuildPayload @0x507822 selects the active filename for the
 // waypoint family (the objective bit is ignored), and the resolved MissionText
-// title for Deathmatch/TDM. Field 5 remains the map filename on both arms.
+// title for Deathmatch/TDM, else (an empty title) the header's name
+// (@0x507835..0x50784f). Field 5 remains the map filename on both arms.
 bool run_full_player_info_selects_retail_mission_title_branch() {
 	struct MissionIdentityCase {
 		uint32_t game_type;
-		const char *mission_title;
+		const char *text_title; // the host context's mission text [info]/title
+		const char *header_name; // GameConfig::mission_name
 		const char *expected_mission;
 		uint16_t port;
 		const char *message;
 	};
-	const std::array<MissionIdentityCase, 3> cases = {{
-			{0x00000000u, "DM - Awan Atoll", "DM - Awan Atoll", 31213,
+	const std::array<MissionIdentityCase, 4> cases = {{
+			{0x00000000u, "DM - Awan Atoll", "DM header", "DM - Awan Atoll", 31213,
 			 "Deathmatch 0x7B advertises the mission title and exact map filename"},
-			{0x00010000u, "TDM - Awan Atoll", "TDM - Awan Atoll", 31214,
-			 "TDM 0x7B advertises the mission title and exact map filename"},
-			{0x00030020u, "COOP - Awan Atoll", "TDH_I3A.bms", 31215,
+			{0x00010000u, "TDM - Awan Atoll", "TDM header", "TDM - Awan Atoll", 31214,
+			 "TDM 0x7B advertises the mission title over the header's name"},
+			{0x00010000u, "", "TDM header", "TDM header", 31216,
+			 "TDM 0x7B falls back to the header's name on an empty title"},
+			{0x00030020u, "COOP - Awan Atoll", "COOP header", "TDH_I3A.bms", 31215,
 			 "objective waypoint 0x7B advertises the filename in both mission fields"},
 	}};
 
@@ -2532,7 +2599,7 @@ bool run_full_player_info_selects_retail_mission_title_branch() {
 		inmatch::GameConfig config;
 		config.player_name = "RetailHost403";
 		config.server_name = "Untitled ";
-		config.mission_name = test_case.mission_title;
+		config.mission_name = test_case.header_name;
 		config.mission_file = "TDH_I3A.bms";
 		config.game_type = test_case.game_type;
 		config.expansion = "revx02";
@@ -2541,6 +2608,7 @@ bool run_full_player_info_selects_retail_mission_title_branch() {
 				ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 				kHostKey, nullptr, config);
 		ctx.world = &world;
+		ctx.mission_text_title = test_case.text_title;
 
 		const PeerAddr peer{0x0100007Fu, test_case.port};
 		const std::string client_scrk =

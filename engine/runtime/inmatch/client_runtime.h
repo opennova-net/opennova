@@ -352,8 +352,8 @@ public:
 	void set_net_quality_level(int32_t level);
 	// The host protocol's link-error callbacks of one server tick, bit 0 a
 	// joiner's resend request (flag 1), bit 1 our own missing-sequence
-	// request (flag 2) [orig: NapiNP_HandleResendList cb_server_6 = sub_4C62A0
-	// @0x623a0e; SendMissingSeqList cb_server_5 = @0x4c4681 @0x62379b ->
+	// request (flag 2) [orig: NapiNP_HandleResendList cb_server_6 = NapiNPServer_OnResendListCallback
+	// @0x4c62a0, its call @0x623a0e; SendMissingSeqList cb_server_5 = @0x4c4681 @0x62379b ->
 	// the g_NetQuality flag stores]. The host role hands them over after
 	// this client frame, as retail's server tick runs after the indicators'
 	// update.

@@ -4,9 +4,7 @@
 // MissionObjectPlacer supplies typed BMS/ObjectData sources; this adapter
 // resolves the selected retail shadow LOD/ROBJ geometry and material alpha,
 // then writes only the composed page-alpha carrier through the portable leaf.
-// [orig: Terrain_CollectAndRenderTileModels @0x60D250..0x60DA4F;
-// PolyTrn_RenderTile @0x60E0C6..0x60E19D; see
-// docs/terrain/terrain-re.md]
+// (engine: runtime/terrain/terrain_static_shadow_alpha.cpp)
 
 #include "terrain/terrain_tile_cache_device.h"
 

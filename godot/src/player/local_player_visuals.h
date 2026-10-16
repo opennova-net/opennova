@@ -95,8 +95,7 @@ public:
 	// positions it and swaps its visual/shadow policy per first/third person.
 	// In first person the body remains a live SHADOWS_ONLY source, but
 	// neither the gameplay beauty camera nor the water mirror renders it:
-	// retail's reflected entity collector has no player/person leg [orig:
-	// Terrain_CollectVisibleEntitiesForReflection @ 0x5c90a0]. Null when the
+	// retail's reflected entity collector has no player/person leg (engine: runtime/environment/water_mirror.h). Null when the
 	// resource root / item graphic is unavailable. The player runtime type id
 	// is the bound MissionObjectPlacer.PLAYER_RUNTIME_TYPE_ID [net-re §5.2b].
 	ObjectModel *build_local_player_avatar();
@@ -126,12 +125,11 @@ public:
 	// then the CharacterEntity's arms model (blip+8, the Avatars.def combo arms
 	// graphic @0x4df05f/@0x4deff4) with the same bone matrices, after
 	// Avatar_SetArmsCamoCtrl @0x4df008/@0x4df070]. The gun + animadm come from
-	// the mounted root's weapon.def (gfx1 / animadm [orig:
-	// WeaponDef_ParseProperty @0x54d730]; the file's gfx1a/gfx1b tokens are
+	// the mounted root's weapon.def (gfx1 / animadm (engine: formats/def/def.h); the file's gfx1a/gfx1b tokens are
 	// parsed-and-discarded by retail and never name the arms), the arms from
-	// the resolved character. Camera sway / fire-kick / ADS [orig:
-	// Player_UpdateFirstPersonCamera @0x4dd380] are follow-ups. Null when the
-	// placer or both models fail to resolve.
+	// the resolved character. Camera sway / fire-kick / ADS (engine: runtime/world/local_player_view.cpp) ride the viewmodel rig
+	// (player_viewmodel_rig.cpp). Null when the placer or both models fail to
+	// resolve.
 	Node3D *build_local_player_viewmodel();
 	// The FP viewmodel's typed model parts (arms/gun), rebuilt with the
 	// container -- the rig consumes this instead of scanning children (the

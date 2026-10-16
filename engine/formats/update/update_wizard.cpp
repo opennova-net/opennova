@@ -2,18 +2,13 @@
 
 #include "update_ini.h"
 
+#include <base/io/strutil.h>
+
 namespace opennova::update {
 
 namespace {
 
 constexpr std::string_view kHeader = "HEADER";
-
-char ascii_lower(char c) {
-	return (c >= 'A' && c <= 'Z') ? char(c - 'A' + 'a') : c;
-}
-char ascii_upper_char(char c) {
-	return (c >= 'a' && c <= 'z') ? char(c - 'a' + 'A') : c;
-}
 
 bool carries(const std::string &value, size_t max_chars) {
 	if (value.size() > max_chars)
@@ -86,20 +81,20 @@ Territory territory_from_cc_bin(const uint8_t *data, size_t size) {
 
 std::string substitute_territory(std::string_view value, const Territory &territory) {
 	std::string out(value);
-	const std::string lower = { ascii_lower(territory.placeholder[0]),
-		ascii_lower(territory.placeholder[1]) };
+	const std::string lower = { strutil::ascii_tolower(territory.placeholder[0]),
+		strutil::ascii_tolower(territory.placeholder[1]) };
 	size_t at = out.find(lower);
 	if (at != std::string::npos) {
-		out[at] = ascii_lower(territory.code[0]);
-		out[at + 1] = ascii_lower(territory.code[1]);
+		out[at] = strutil::ascii_tolower(territory.code[0]);
+		out[at + 1] = strutil::ascii_tolower(territory.code[1]);
 		return out;
 	}
-	const std::string upper = { ascii_upper_char(territory.placeholder[0]),
-		ascii_upper_char(territory.placeholder[1]) };
+	const std::string upper = { strutil::ascii_toupper(territory.placeholder[0]),
+		strutil::ascii_toupper(territory.placeholder[1]) };
 	at = out.find(upper);
 	if (at != std::string::npos) {
-		out[at] = ascii_upper_char(territory.code[0]);
-		out[at + 1] = ascii_upper_char(territory.code[1]);
+		out[at] = strutil::ascii_toupper(territory.code[0]);
+		out[at + 1] = strutil::ascii_toupper(territory.code[1]);
 	}
 	return out;
 }

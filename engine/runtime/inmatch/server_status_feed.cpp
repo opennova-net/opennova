@@ -55,7 +55,7 @@ void fill_server_status_page(hud::ServerStatusPageState &page, const NapiNPServe
 			slot.objective_seconds = p->objective_ticks;                     // +0x170AC
 		}
 	}
-	// The server line [orig: transport_mode @0x50a7db; sub_4C4DB0 @0x50a7fa;
+	// The server line [orig: transport_mode @0x50a7db; CNapiNPCtx_GetAppId (its call @0x50a7fa);
 	// g_ServerNameStr @0x50a808].
 	page.novaworld = ctx.transport_mode == NetworkType::NovaWorld;
 	page.session_key = ctx.novaworld_app_id;

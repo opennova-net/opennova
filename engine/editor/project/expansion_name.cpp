@@ -26,7 +26,7 @@ std::string expansion_name_problem(std::string_view name, ExpansionNameUse use) 
 	// An installed expansion is a folder the game already mounts by its name: the length binds it, and
 	// that it is a folder's name of `expansion\` (the editor's view mounts it through the file system,
 	// never a command line, and a player's `/exp` can quote a name with a space [orig:
-	// Terrain_TokenizeConfigLine @ 0x53cc51]).
+	// Config_TokenizeLine @ 0x53cc51]).
 	if (use == ExpansionNameUse::BuildsOn) {
 		for (const char c : name) {
 			if (static_cast<unsigned char>(c) < 0x20)

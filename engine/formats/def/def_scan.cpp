@@ -1,4 +1,6 @@
 #include "def_scan.h"
+
+#include <base/io/os_path.h>
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -29,7 +31,7 @@ namespace opennova::defscan {
 /* ========================================================================= */
 
 char *read_file(const char *path, size_t *out_len) {
-    FILE *f = fopen(path, "rb");
+    FILE *f = opennova::io::fopen_utf8(path, "rb");
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
     long len = ftell(f);

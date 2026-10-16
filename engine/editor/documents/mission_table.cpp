@@ -79,16 +79,12 @@ constexpr KindRow kKinds[] = {
 };
 static_assert(std::size(kKinds) == kMissionKindCount, "every MissionKind has exactly one row");
 
-constexpr bool same_text(const char *a, const char *b) {
-	while (*a && *a == *b) ++a, ++b;
-	return *a == *b;
-}
 constexpr bool kinds_in_order() {
 	for (size_t i = 0; i < std::size(kKinds); ++i) {
 		if (size_t(kKinds[i].kind) != i) return false;
 		if (*kKinds[i].add_label && !kKinds[i].top) return false;
 		for (size_t j = i + 1; j < std::size(kKinds); ++j)
-			if (same_text(kKinds[i].token, kKinds[j].token)) return false;
+			if (strutil::same_text(kKinds[i].token, kKinds[j].token)) return false;
 	}
 	return true;
 }
@@ -222,7 +218,7 @@ constexpr FieldLabel kLabels[] = {
 
 const FieldLabel *label_of(MissionRecord record, const char *key) {
 	for (const FieldLabel &row : kLabels)
-		if (row.record == record && same_text(row.key, key)) return &row;
+		if (row.record == record && strutil::same_text(row.key, key)) return &row;
 	return nullptr;
 }
 
@@ -247,7 +243,7 @@ constexpr ChoiceWords kChoiceWords[] = {
 
 const ChoiceWords *choice_words_of(MissionRecord record, const char *key, const char *name) {
 	for (const ChoiceWords &row : kChoiceWords)
-		if (row.record == record && same_text(row.key, key) && same_text(row.name, name)) return &row;
+		if (row.record == record && strutil::same_text(row.key, key) && strutil::same_text(row.name, name)) return &row;
 	return nullptr;
 }
 
@@ -305,7 +301,7 @@ constexpr ReferenceRow kReferences[] = {
 
 const ReferenceRow *reference_of(MissionRecord record, const char *key) {
 	for (const ReferenceRow &row : kReferences)
-		if (row.record == record && same_text(row.key, key)) return &row;
+		if (row.record == record && strutil::same_text(row.key, key)) return &row;
 	return nullptr;
 }
 
@@ -329,7 +325,7 @@ constexpr AppliesRow kApplies[] = {
 	{MissionRecord::Group, "flags", Applicability::Unverified},
 	{MissionRecord::Group, "value", Applicability::Unverified},
 	// Read and discarded [orig: Mission_LoadBMSFile @0x40fc05..0x40fc38]; the original editor's wav list's file
-	// names [orig editor: sub_44F920 @0x4509bc..0x450a14].
+	// names [orig: JOTACmed.exe sub_44F920 @0x4509bc..0x450a14].
 	{MissionRecord::WavList, "file_name", Applicability::Unverified},
 	{MissionRecord::Entity, "next_ssn", Applicability::Unverified},
 	// Read on a waypoint marker alone, a type-6005 or 6006 one: the spawn reads the record's +0x60 in
@@ -353,7 +349,7 @@ constexpr AppliesRow kApplies[] = {
 
 Applicability applies_of(MissionRecord record, const char *key) {
 	for (const AppliesRow &row : kApplies)
-		if (row.record == record && same_text(row.key, key)) return row.applies;
+		if (row.record == record && strutil::same_text(row.key, key)) return row.applies;
 	return Applicability::Reads;
 }
 
@@ -363,7 +359,7 @@ constexpr const char *kDerived[] = {"trigger_index", "trigger_count", "action_in
 bool derived(MissionRecord record, const char *key) {
 	if (record != MissionRecord::Event) return false;
 	for (const char *name : kDerived)
-		if (same_text(name, key)) return true;
+		if (strutil::same_text(name, key)) return true;
 	return false;
 }
 
@@ -520,7 +516,7 @@ LabelledField labelled(const KindRow &kind, const MissionField &field) {
 	entry.flags = field.flags;
 	entry.open_choices = field.open;
 	entry.read_only = !field.set;
-	entry.multiline = field.record == MissionRecord::Header && same_text(field.key, "briefing");
+	entry.multiline = field.record == MissionRecord::Header && strutil::same_text(field.key, "briefing");
 	if (const FieldLabel *label = label_of(field.record, field.key)) {
 		entry.label = label->label;
 		entry.group = label->group;
@@ -544,7 +540,7 @@ LabelledField labelled(const KindRow &kind, const MissionField &field) {
 	// has_flags): left out, the game reads the "-1" its sanitizer inserts [orig:
 	// AIProfile_SanitizeConfigData @ 0x40cfe0] (what a reload reads), while the record keeps the
 	// value it held latent (ADR 0002: a Write writes it again), and a Set of it writes it.
-	if (field.record == MissionRecord::Loadout && same_text(field.key, "flags")) {
+	if (field.record == MissionRecord::Loadout && strutil::same_text(field.key, "flags")) {
 		entry.optional = true;
 		out.value.present = [](const RecordHandle &record) { return record.as<bms::WeaponLoadoutRecord>().has_flags; };
 		out.value.set_present = [](const RecordHandle &record, bool present, std::string &) {
@@ -576,7 +572,7 @@ LabelledField labelled(const KindRow &kind, const MissionField &field) {
 			                                                                              : Applicability::Reads;
 		};
 	}
-	if (field.record == MissionRecord::Trigger && same_text(field.key, "sub_type")) {
+	if (field.record == MissionRecord::Trigger && strutil::same_text(field.key, "sub_type")) {
 		entry.open_choices = true;
 		// Event's and SecondTimeThrough's cases never read it (mission_params.h).
 		out.applies = [](const RecordHandle &record, const RecordOwners &) {
@@ -584,19 +580,19 @@ LabelledField labelled(const KindRow &kind, const MissionField &field) {
 			                                                                           : Applicability::Ignored;
 		};
 	}
-	if (field.record == MissionRecord::Action && same_text(field.key, "action_sub_type")) entry.open_choices = true;
+	if (field.record == MissionRecord::Action && strutil::same_text(field.key, "action_sub_type")) entry.open_choices = true;
 	if (field.record == MissionRecord::Entity) {
 		// The number beside a waypoint list that is a command 123..125 is the SSN of the entity to go
 		// to and board [orig: Entity_UpdateInfantryAI @0x4ba9ad]; beside a path it is the stop to start
 		// at.
-		if (same_text(field.key, "wp_number"))
+		if (strutil::same_text(field.key, "wp_number"))
 			out.reference = [](const RecordHandle &record, const RecordOwners &) {
 				return path_command_names_entity(record.as<bms::Entity>().waypoint_id) ? ReferenceKind::MissionEntity
 				                                                                       : ReferenceKind::None;
 			};
 		// A waypoint name is read on the two waypoint marker types alone [orig: Entity_SpawnFromBMSRecord
 		// @0x40f0aa, @0x40f173].
-		if (same_text(field.key, "ttool_index"))
+		if (strutil::same_text(field.key, "ttool_index"))
 			out.applies = [](const RecordHandle &record, const RecordOwners &) {
 				const int32_t type = record.as<bms::Entity>().type_id;
 				return type == def::DEF_TYPE_WAYPOINT || type == def::DEF_TYPE_KOTH_CENTRE ? Applicability::Reads
@@ -608,7 +604,7 @@ LabelledField labelled(const KindRow &kind, const MissionField &field) {
 		// EventTrigger_MarkLinkedSpawnPoints @0x452ce0; Player_UpdatePerFrame @0x4de649], and the original
 		// editor renumbers it with the events [orig: JOTACmed.exe sub_44D460 @ 0x44d460, the paste;
 		// sub_455B20 @ 0x455b20, the delete (-1, WP_EVENT_DELETED); sub_411C90 @ 0x411c90, the move].
-		if (same_text(field.key, "wp_adv_trigger")) {
+		if (strutil::same_text(field.key, "wp_adv_trigger")) {
 			out.reference = [](const RecordHandle &record, const RecordOwners &) {
 				const bms::Entity &entity = record.as<bms::Entity>();
 				return entity.type_id == def::DEF_TYPE_WAYPOINT && entity.wp_adv_trigger >= 0 ? ReferenceKind::MissionEvent
@@ -624,14 +620,14 @@ LabelledField labelled(const KindRow &kind, const MissionField &field) {
 	// [orig: Entity_UpdateInfantryPlayerBody @0x4b6094, @0x4b609d, @0x4b612a, @0x4b6133, @0x4b613c]; a
 	// Mission box's two words are its mission's name (@0x4b60b6) and any other type's are read by nothing
 	// (the switch's default @0x4b6087).
-	if (field.record == MissionRecord::BoundingBox && same_text(field.key, "ref_id"))
+	if (field.record == MissionRecord::BoundingBox && strutil::same_text(field.key, "ref_id"))
 		out.applies = [](const RecordHandle &record, const RecordOwners &) {
 			return box_value_label(record.as<bms::BoundingBox>().type) ? Applicability::Reads : Applicability::Ignored;
 		};
 	// The box's second word is read as its mission name's last four characters alone [orig:
 	// Entity_UpdateInfantryPlayerBody @0x4b60aa..0x4b611e]: a Mission box's name and second word are read,
 	// any other type's are not.
-	if (field.record == MissionRecord::BoundingBox && (same_text(field.key, "mission") || same_text(field.key, "reserved0")))
+	if (field.record == MissionRecord::BoundingBox && (strutil::same_text(field.key, "mission") || strutil::same_text(field.key, "reserved0")))
 		out.applies = [](const RecordHandle &record, const RecordOwners &) {
 			return record.as<bms::BoundingBox>().type == int32_t(bms::BoundingBoxType::Mission) ? Applicability::Reads
 			                                                                                  : Applicability::Ignored;
@@ -911,7 +907,7 @@ RecordTable make_table() {
 		if (row.kind == K::Event || row.kind == K::Area || row.kind == K::WaypointPath) kind.field(name_field(row.kind));
 		for (const MissionField &field : mission_fields(row.record)) {
 			if (!derived(field.record, field.key)) kind.field(labelled(row, field));
-			if (row.record == MissionRecord::Entity && same_text(field.key, "z")) kind.field(height_lock_field());
+			if (row.record == MissionRecord::Entity && strutil::same_text(field.key, "z")) kind.field(height_lock_field());
 		}
 		switch (row.kind) {
 		case K::Mission:

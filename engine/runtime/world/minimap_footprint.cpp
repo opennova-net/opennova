@@ -7,16 +7,9 @@
 
 #include <cmath>
 
+#include <base/io/fixed.h>
+
 namespace opennova::world {
-
-namespace {
-
-inline int32_t q16_from_float(float value) {
-	return static_cast<int32_t>(
-			std::lround(static_cast<double>(value) * 65536.0));
-}
-
-} // namespace
 
 MinimapFootprintMesh minimap_footprint_from_occlusion(
 		const OcclusionModel &model) {
@@ -50,8 +43,8 @@ MinimapFootprintMesh minimap_footprint_from_occlusion(
 					break;
 				}
 				const OcclusionVertex &v = model.vertices[vertex_row];
-				xy[corner * 2 + 0] = q16_from_float(v.p[0]);
-				xy[corner * 2 + 1] = q16_from_float(v.p[2]);
+				xy[corner * 2 + 0] = io::q16_from_float(v.p[0]);
+				xy[corner * 2 + 1] = io::q16_from_float(v.p[2]);
 			}
 			if (!valid) continue;
 			for (int32_t value : xy) out.fill_xy_q16.push_back(value);
@@ -87,10 +80,10 @@ MinimapFootprintMesh minimap_footprint_from_occlusion(
 					continue;
 				const OcclusionVertex &va = model.vertices[row_a];
 				const OcclusionVertex &vb = model.vertices[row_b];
-				out.edge_xy_q16.push_back(q16_from_float(va.p[0]));
-				out.edge_xy_q16.push_back(q16_from_float(va.p[2]));
-				out.edge_xy_q16.push_back(q16_from_float(vb.p[0]));
-				out.edge_xy_q16.push_back(q16_from_float(vb.p[2]));
+				out.edge_xy_q16.push_back(io::q16_from_float(va.p[0]));
+				out.edge_xy_q16.push_back(io::q16_from_float(va.p[2]));
+				out.edge_xy_q16.push_back(io::q16_from_float(vb.p[0]));
+				out.edge_xy_q16.push_back(io::q16_from_float(vb.p[2]));
 			}
 		}
 	}

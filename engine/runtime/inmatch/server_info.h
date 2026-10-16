@@ -14,8 +14,10 @@
 // [orig: Lobby_UpdateServerInfo @0x4FE8C0 — the Host list SetOrCreates
 //  @0x4FE911..0x4FF3FF; Server_ToggleJoinLock @0x50D750]
 
-#include <net/novaworld/lobby_vars.h> // HostRegistration
+#include <net/novaworld/lobby_vars.h> // HostRegistration, HostPlayerSlot
 #include <runtime/hud/game_text_lookup.h>
+
+#include <vector>
 
 namespace opennova::inmatch {
 
@@ -36,5 +38,20 @@ void read_session_listing_columns(
 //  Lobby_UpdateServerInfo(0) @0x50D762, the new value returned @0x50D767; its one caller,
 //  Input_HandleActionBinding's case 119 @0x49BC36]
 bool Server_ToggleJoinLock(NapiNPServerCtx &ctx);
+
+// One PlayerList row per player the match added, the roster both NovaWorld embedders sync
+// (opennova-serve's ServeListing, the game's SessionDrive): every connection past its
+// player add, at its slot, with the add's connection id, its joiner name bytes, its UDP source
+// as "a.b.c.d:port", its cookie's PCID and the PlayerTeam / PlayerType the match keeps for it
+// (NapiNPConnection::player_list_team / player_list_type). `own` marks the listen host's own
+// client-side connection, whose identity the embedder's NovaWorld login supplies; a mode-1
+// host has none.
+// [orig: Server_PlayerAdd @0x51cbc0 - the PlayerIpAndPort var @0x51d3d1..0x51d3f2 (Napi_FormatAddress
+//  @0x62ded0), the five vars @0x51d441..0x51d4aa]
+struct HostPlayerListRow {
+	HostPlayerSlot slot;
+	bool own = false;
+};
+std::vector<HostPlayerListRow> host_player_list_rows(const NapiNPServerCtx &ctx);
 
 } // namespace opennova::inmatch

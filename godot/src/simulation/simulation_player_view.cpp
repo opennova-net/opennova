@@ -123,7 +123,7 @@ Vector3 Simulation::local_player_viewmodel_rotation_bias_deg() const {
 	int32_t bias[3];
 	opennova::world::local_player_viewmodel_rotation_bias(&kernel_->world,
 			kernel_->local.weapon, kernel_->local.view, bias);
-	constexpr double degrees_per_bam = 360.0 / 4294967296.0;
+	constexpr double degrees_per_bam = opennova::world::kDegreesPerBam;
 	return Vector3(bias[0] * degrees_per_bam, bias[1] * degrees_per_bam,
 			bias[2] * degrees_per_bam);
 }
@@ -164,12 +164,6 @@ Vector3 Simulation::aim_ray_endpoint(const Vector3 &p_eye, float p_yaw_deg, floa
 	opennova::world::aim_ray_endpoint(eye, p_yaw_deg, p_pitch_deg,
 			opennova::world::kAimProjectRange, out);
 	return Vector3(out[0], out[1], out[2]);
-}
-
-int Simulation::rangefinder_units(const Vector3 &p_position, const Vector3 &p_endpoint) {
-	const float pos[3] = {p_position.x, p_position.y, p_position.z};
-	const float end[3] = {p_endpoint.x, p_endpoint.y, p_endpoint.z};
-	return opennova::world::rangefinder_units(pos, end);
 }
 
 Vector3 Simulation::viewmodel_camera_local_from_view(const Vector3 &p_view_units) {

@@ -62,11 +62,6 @@ NapiField str_field(const char *name, const std::string &value) {
 	return f;
 }
 
-// Napi_CopyString(dst, src, N): at most N-1 characters, always NUL-terminated.
-std::string copy_capped(const std::string &s, size_t n) {
-	return s.size() < n ? s : s.substr(0, n - 1);
-}
-
 // The retail atol over a param value (io::retail_atol: the locale's leading white space,
 // 0xA0 included, saturating at 32 bits; D-NET-384).
 // [orig: _atol @0x76AB0A from CNapiGameSession_HandlePlayEnterResponse @0x4D1940]
@@ -557,7 +552,7 @@ void ClientSession::on_server_auth(const std::vector<uint8_t> &body) {
 	if (sa.cr == 0) {
 		jfc_ = sa.jfc;
 		jfp_ = sa.jfp;
-		jfs_ = copy_capped(sa.jfs, 64);
+		jfs_ = napi_copy_string(sa.jfs, 64);
 		state_ = State::Closed;
 		connection_down_ = true;
 		return;
@@ -636,9 +631,10 @@ void ClientSession::on_server_goodbye(const std::vector<uint8_t> &body,
 // session's disconnect callback runs, and the reconnect schedule restarts (the tail acts on it
 // only while the hosting/playing word is set).
 // [orig: CNapiNPConnection_TeardownActiveConnection @0x6253C0 — ++DCNT under conn_flag0
-//  @0x6253c9..0x6253dc; the state-5 burst @0x62549e..0x6254d3 then conn+0xC4 =
-//  CNapiGameSession_OnDisconnect @0x6254d5..0x6254e7; conn_flag1 and the client's
-//  gap/next restart @0x6254f7..0x625525; conn_flag0 cleared @0x625535]
+//  @0x6253c9..0x6253dc; the state-5 burst @0x62549e..0x6254d3 then the conn+0xC4
+//  callback (CNapiGameSession_OnDisconnect @0x4CFAA0) called @0x6254d5..0x6254e7;
+//  conn_flag1 and the client's gap/next restart @0x6254f7..0x625525; conn_flag0 cleared
+//  @0x625535]
 void ClientSession::teardown_connection(std::vector<std::vector<uint8_t>> &out) {
 	const bool connected = receive_clock_armed_;
 	if (connected) {
@@ -1179,7 +1175,7 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 			if (ticket != host_commands.end())
 				host_requires_join_ticket_ = io::retail_atol(ticket->second.c_str());
 			const auto gsid = host_commands.find("GSID");
-			host_gsid_ = gsid != host_commands.end() ? copy_capped(gsid->second, 128) : std::string();
+			host_gsid_ = gsid != host_commands.end() ? napi_copy_string(gsid->second, 128) : std::string();
 			host_state_ = HostState::Established;
 			set_lobby_state(6);
 			// [orig: @0x4d5c17..0x4d5c40 — any word 0..3 becomes 2]
@@ -1280,7 +1276,7 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 			if (!strutil::iequals(f.name, "GLSVSSResults")) continue;
 			Notice notice;
 			notice.kind = Notice::Kind::GlsvssResults;
-			notice.glsvss_results = copy_capped(field_to_string(f), 1024);
+			notice.glsvss_results = napi_copy_string(field_to_string(f), 1024);
 			notices_.push_back(std::move(notice));
 			return;
 		}
@@ -1298,9 +1294,9 @@ void ClientSession::dispatch_server_container(const NapiMessage &container,
 			else if (strutil::iequals(f.name, "Success")) notice.player_enter.success = atol_field(f);
 			else if (strutil::iequals(f.name, "MsgCode")) notice.player_enter.msg_code = atol_field(f);
 			else if (strutil::iequals(f.name, "PlayerTicket"))
-				notice.player_enter.player_ticket = copy_capped(field_to_string(f), 128);
+				notice.player_enter.player_ticket = napi_copy_string(field_to_string(f), 128);
 			else if (strutil::iequals(f.name, "AccessCodeList"))
-				notice.player_enter.access_code_list = copy_capped(field_to_string(f), 0x2000);
+				notice.player_enter.access_code_list = napi_copy_string(field_to_string(f), 0x2000);
 		}
 		notices_.push_back(std::move(notice));
 		return;

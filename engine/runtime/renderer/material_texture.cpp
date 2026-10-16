@@ -90,7 +90,8 @@ MaterialTextureSource material_texture_source(std::string_view name, uint8_t typ
 		if (holds(upper, ".TGA")) return tga_or_sibling(name, exists, loose_first);
 		return {};
 	case 16: case 17: case 18:
-		// [orig: chunk loaders @0x58F350, @0x58F470, @0x58F590]
+		// [orig: Texture_LoadNQ8BChunk @ 0x58F350; Texture_LoadHRZ8Chunk @ 0x58F470;
+		// Texture_LoadAOC8Chunk @ 0x58F590, the AOC8 chunk]
 		return {std::string(name), MaterialTextureReader::Chunk};
 	default:
 		return {};
@@ -106,17 +107,6 @@ bool material_texture_dds_only(const char *name, uint8_t type, std::string &open
 	opens = material_texture_query(name);
 	loads = served.file;
 	return !strutil::iequals(loads, opens);
-}
-
-// [orig: GTexture_CreateFromPixelData_0 @0x6877BC..0x6877D8]
-uint32_t pixel_texture_mip_levels(uint32_t width, uint32_t height) {
-	int32_t side = static_cast<int32_t>(std::min(width, height));
-	uint32_t levels = 0;
-	while (side > 2) {
-		side >>= 1;
-		++levels;
-	}
-	return levels;
 }
 
 // [orig: Material_ConvertDefinition @0x5B045B..0x5B04A0]

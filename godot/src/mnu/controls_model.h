@@ -42,6 +42,11 @@ public:
 		DEVICE_MOUSE = 1,
 		DEVICE_JOYSTICK = 2,
 	};
+	// The HUDLS key label's binding record base (engine controls
+	// kSlotBarKeyRecordBase); the label reads base + the weapon category.
+	enum {
+		SLOT_BAR_KEY_RECORD_BASE = 200,
+	};
 
 	// An Array of PackedStringArray rows, each [class, action, control], for
 	// the given device, from the LIVE binding records.

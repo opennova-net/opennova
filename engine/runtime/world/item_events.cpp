@@ -177,7 +177,7 @@ void emit_class_death_sound_and_effect(World &world, const Entity &target) {
 				DestructionEffectEvent{traits->particledeath, target.position, Vec3{}});
 }
 
-// The "gnrl" event callback [orig: sub_407F80 — row @0x8130D8].
+// The "gnrl" event callback [orig: GnrlClass_HandleEvent — row @0x8130D8].
 void gnrl_death_event(World &world, Entity &target, int phase, int32_t section) {
 	// A husked entity only re-arms its think [orig: @0x407f89 Flags & 4 ->
 	// +0x2AC = 0x3E0]. The 10-slot seat validation walk that follows
@@ -237,7 +237,7 @@ void gnrc_death_expiry(World &world, Entity &target, int32_t section) {
 	land_class_husk(world, target); // the dispatch rows landed it: the guard holds
 }
 
-// The "gnrc" event callback [orig: sub_407020 — row @0x8130C0].
+// The "gnrc" event callback [orig: GnrcClass_HandleEvent — row @0x8130C0].
 void gnrc_death_event(World &world, Entity &target, int phase, int32_t section,
 		int32_t flags) {
 	if (!world.rules.logic_authority) {
@@ -810,8 +810,8 @@ bool tick_item_class_motion(World &world, Entity &entity,
     if (tick_item_section_motion(world, entity)) return true;
     if (entity.death_motion == DeathMotionMode::CraneFalling) {
         int32_t ground = terrain != nullptr && terrain->valid() ? int32_t(
-                terrain::height_field_height_world_bilinear(*terrain,
-                    entity.position.x, -entity.position.y) * 65536) : 0;
+                terrain::height_field_height_mission_bilinear(*terrain,
+                    entity.position.x, entity.position.y) * 65536) : 0;
         if (const Entity *parent = world.registry.get(entity.attach_parent)) {
             if (const auto *traits = world.tables.item_death_traits.get(parent->item_id))
                 ground = io::bam_add(ground, io::bam_sub(

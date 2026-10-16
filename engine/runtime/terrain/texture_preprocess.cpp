@@ -375,4 +375,34 @@ std::vector<Rgba8Image> build_box_mip_chain_to_4x4(
 	return result;
 }
 
+std::vector<uint8_t> build_depthspin_rg8(const std::vector<uint16_t> &depth, float water_height_wu) {
+	constexpr int kSourcePx = 1024;
+	constexpr int kMaskPx = 256;
+	constexpr int kStep = 4;
+	constexpr int kHalfStep = 2;
+	if (depth.size() != static_cast<size_t>(kSourcePx) * kSourcePx || !std::isfinite(water_height_wu))
+		return {};
+	const int water_int = std::clamp(static_cast<int>(std::floor(water_height_wu)), 0, 254);
+	if (water_int <= 0) return {};
+	std::vector<uint8_t> out(static_cast<size_t>(kMaskPx) * kMaskPx * 2);
+	const uint16_t *height = depth.data();
+	// [orig: PolyTrn_InitTextures @ 0x60BA30..0x60BAF3 — the four movzx taps at +0, +4, +0x1000,
+	// +0x1004 bytes, `shl ebx, 0Eh; or ebx, 0FFFFFFh`, unrolled four texels to 0x20 source bytes
+	// @ 0x60BAF6; 0x2000 bytes (four source rows) a texel row @ 0x60BB05]
+	for (int z = 0; z < kMaskPx; ++z) {
+		const int source_z = z * kStep;
+		for (int x = 0; x < kMaskPx; ++x) {
+			const int source_x = x * kStep;
+			const uint32_t sum = height[source_z * kSourcePx + source_x] +
+					height[source_z * kSourcePx + source_x + kHalfStep] +
+					height[(source_z + kHalfStep) * kSourcePx + source_x] +
+					height[(source_z + kHalfStep) * kSourcePx + source_x + kHalfStep];
+			uint8_t *pixel = out.data() + (static_cast<size_t>(z) * kMaskPx + x) * 2;
+			pixel[0] = static_cast<uint8_t>(sum >> 10);
+			pixel[1] = static_cast<uint8_t>(water_int);
+		}
+	}
+	return out;
+}
+
 } // namespace opennova::terrain

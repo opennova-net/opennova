@@ -30,8 +30,6 @@ constexpr OperationRow kRows[] = {
 };
 static_assert(std::size(kRows) == size_t(K::kCount), "a row per texture operation");
 
-std::string extension_of(const std::string &name) { return strutil::to_lower(utf8_of(path_of(name).extension())); }
-
 // The params as an operation reads them: each key once, in lower case.
 bool param(const TextureOperation &operation, const char *key, std::string &out) {
 	for (const auto &[name, value] : operation.params)
@@ -47,7 +45,7 @@ bool param(const TextureOperation &operation, const char *key, std::string &out)
 bool stored_settings(const std::string &name, const std::vector<uint8_t> &bytes, renderer::ImageImportSettings &out, std::string &why) {
 	out = renderer::image_import_settings({});
 	const TextureHeader header = texture_header(name, bytes);
-	const std::string extension = extension_of(name);
+	const std::string extension = file_extension(name);
 	if (extension == ".tga") {
 		out.format = header.tga_bits == 24 || header.tga_bits == 8 ? "tga24" : "tga";
 		if (header.tga_type == 1 || header.tga_type == 3) out.format = "tga24";
@@ -124,7 +122,7 @@ bool encode(const RgbaImage &image, const renderer::ImageImportSettings &setting
 // An 8-bit PCX's indices and palette as the game reads them (decode_pcx_menu_rgba): false, with why, for
 // one of colours or one that does not read.
 bool indexed_pcx(const std::string &name, const std::vector<uint8_t> &bytes, IndexedImage8 &out, std::string &why) {
-	if (extension_of(name) != ".pcx") return false;
+	if (file_extension(name) != ".pcx") return false;
 	RgbaImage colours;
 	PcxIndexed indexed;
 	if (!decode_pcx_menu_rgba(bytes.data(), bytes.size(), colours, why, &indexed) || !indexed.indexed) return false;
@@ -222,7 +220,7 @@ bool format(const std::string &name, const std::vector<uint8_t> &bytes, const Te
 	RgbaImage image;
 	if (!stored_settings(name, bytes, settings, why) || !game_texels(name, bytes, image, why)) return false;
 	const renderer::ImageImportSettings was = settings;
-	const std::string extension = extension_of(name);
+	const std::string extension = file_extension(name);
 	std::string value;
 	// An 8-bit PCX's indices are data: storing it again from its colours would renumber them.
 	IndexedImage8 indices;
@@ -289,14 +287,14 @@ bool reorder_rows(const std::string &name, const std::vector<uint8_t> &bytes, st
 		                 image.pixels.begin() + std::ptrdiff_t(size_t(image.height - 1 - y) * row));
 	renderer::ImageImportSettings settings = renderer::image_import_settings({});
 	settings.format = header.alpha ? "tga" : "tga24";
-	if (extension_of(name) == ".mdt") settings.format = "mdt";
+	if (file_extension(name) == ".mdt") settings.format = "mdt";
 	words = "Rows saved bottom first";
 	return encode(image, settings, out, why);
 }
 
 bool remap_palette(const std::string &name, const std::vector<uint8_t> &bytes, const TextureOperation &operation,
                    std::vector<uint8_t> &out, std::string &words, std::string &why) {
-	if (extension_of(name) != ".pcx") {
+	if (file_extension(name) != ".pcx") {
 		why = "only an 8-bit PCX holds palette indices";
 		return false;
 	}

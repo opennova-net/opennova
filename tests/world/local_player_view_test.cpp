@@ -26,6 +26,7 @@
 #include <runtime/world/local_player.h>
 #include <runtime/world/collision.h>
 #include <cstring>
+#include <runtime/world/player_loadout.h>
 #include <runtime/world/player_present.h>
 #include <runtime/world/player_view.h>
 #include <runtime/world/player_weapon.h>
@@ -2346,6 +2347,50 @@ void test_use_item_vehicle_loadout_zone_gates() {
     CHECK(!local_player_vehicle_zone_team_matches(empty));
 }
 
+// The useitem armory arm: an unmounted local player with the type-6 volume
+// bit (Flags & 0x400000, the entity's own word) [orig: Input_HandleActionBinding_0
+// case 0xB1 -- parentSlot == 0 @0x4e0a91, Flags & 0x400000 @0x4e0aa1].
+void test_use_item_armory_zone_gate() {
+    LocalWorld lw;
+    CHECK(!local_player_in_armory_zone(lw.w));
+    lw.entity().flags |= kEntityFlagArmoryZone;
+    CHECK(local_player_in_armory_zone(lw.w));
+    lw.entity().mounted = true; // a seated player takes the toggle latch instead
+    CHECK(!local_player_in_armory_zone(lw.w));
+    World empty;
+    CHECK(!local_player_in_armory_zone(empty));
+}
+
+// The shell's class pick: 5..9 stamps L, a joiner without L latches it, the
+// rest change nothing; the resident kit is the spawn kit, else the default.
+void test_loadout_class_pick_and_resident_kit() {
+    LocalWorld lw;
+    LocalPlayerLoadout loadout;
+    CHECK(!local_loadout_set_player_class(lw.w, loadout, 4));
+    CHECK(!local_loadout_set_player_class(lw.w, loadout, 10));
+    CHECK(lw.entity().player_class != 4 && lw.entity().player_class != 10);
+    CHECK(local_loadout_set_player_class(lw.w, loadout, 9));
+    CHECK(lw.entity().player_class == 9 && loadout.pending_player_class == -1);
+    World no_player;
+    CHECK(local_loadout_set_player_class(no_player, loadout, 6));
+    CHECK(loadout.pending_player_class == 6);
+
+    CHECK(local_loadout_kit(lw.w, loadout).size() ==
+            weapon_kit_default(lw.w.rules.title).size());
+    loadout.spawn_kit = {WeaponKitEntry{}};
+    loadout.spawn_kit[0].name = "WPN_TEST";
+    loadout.spawn_kit_set = true;
+    const std::vector<WeaponKitEntry> kit = local_loadout_kit(lw.w, loadout);
+    CHECK(kit.size() == 1 && kit[0].name == "WPN_TEST");
+}
+
+// The held weapon's frame bit is the hold state's anim flag 0x80, as the
+// wire leg publishes it [orig: the gate @0x4b21b6 / branch @0x4b220f].
+void test_weapon_hand_frame_bit() {
+    for (int state = 0; state < 512; ++state)
+        CHECK(infantry_weapon_at_hand(state) == ((infantry_anim_flags(state) & 0x80u) != 0));
+}
+
 void test_view_uses_current_motor_offset_and_live_position() {
     LocalWorld lw;
     LocalPlayerWeapon w = scoped_weapon(0);
@@ -3759,6 +3804,9 @@ int main() {
     test_default_wheel_binding_zooms_in_away_from_the_player();
     test_frame_chase_shake_consumes_the_tick();
     test_use_item_vehicle_loadout_zone_gates();
+    test_use_item_armory_zone_gate();
+    test_loadout_class_pick_and_resident_kit();
+    test_weapon_hand_frame_bit();
     test_view_uses_current_motor_offset_and_live_position();
     test_pump_feeds_the_heat_window_water_gate_from_the_body_z();
     test_fsm_reload_scope_legs_run_the_toggle();

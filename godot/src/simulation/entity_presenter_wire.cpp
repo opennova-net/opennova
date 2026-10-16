@@ -922,7 +922,7 @@ void EntityPresenter::present_one_wire_row(WireRow &row, ObjectModel *model,
 		// All four semantic CTRL writers: compact joiner rows release absent
 		// authoritative fields, while direct host/synthetic rows publish
 		// vehicle, zone and attachment heat values.
-		// [orig: Entity_CacheVehicleHUDStats @ 0x4929B0;
+		// [orig: BoneCallback_cveh_PublishControls @ 0x4929B0;
 		//  BoneCallback_gnrc_World @ 0x4E288B..0x4E28FB;
 		//  parent UseGun attachment @ 0x546518 -> cache @ 0x440930]
 		wire_controls_apply(model, snap, base);

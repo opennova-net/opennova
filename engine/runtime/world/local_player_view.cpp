@@ -73,10 +73,8 @@ void enter_death_camera(World &world, const Entity &e, PlayerViewState &v,
         world.ai.terrain;
     const CameraTerrainSampler sampler = [terrain](int32_t x, int32_t y) -> int32_t {
         if (terrain == nullptr || !terrain->valid()) return INT32_MIN / 2;
-        // Engine ground plane (x, y) -> the atlas' (x, -y) sample, the
-        // calc_average_ground_height mapping player_view.cpp uses.
-        return to_fixed(terrain::height_field_height_world_bilinear(
-            *terrain, static_cast<float>(x) / 65536.0f, -static_cast<float>(y) / 65536.0f));
+        return to_fixed(terrain::height_field_height_mission_bilinear(
+            *terrain, static_cast<float>(x) / 65536.0f, static_cast<float>(y) / 65536.0f));
     };
     const CameraRayProbe probe = [&sampler](const int32_t origin[3], const int32_t dir[3],
                                             int32_t lift, int32_t max_dist) {
@@ -129,7 +127,7 @@ void local_player_view_reset(World *world, LocalPlayerWeapon &w, PlayerViewState
     v.binoculars_raised = false;
     t.binocular_yaw_offset_deg = 0.0f;
     t.binocular_pitch_offset_deg = 0.0f;
-    t.binocular_sway_latched = false; // [orig: dword_29D6BA8 @0x5ca4b0]
+    t.binocular_sway_latched = false; // [orig: g_BinocularSwayLatched @0x5ca4b0]
     v.nvg_gain = kNvgGainMin;
     v.nvg_active = world != nullptr &&
                    (world->tables.mission_attrib_flags &
@@ -296,6 +294,13 @@ bool local_player_in_vehicle_loadout_zone(const World &world) {
     const Entity *e = world.registry.get(world.cached.local_player);
     return e != nullptr && !e->mounted &&
            ((e->flags | e->engine_flags) & kEntityFlagVehicleLoadoutZone) != 0;
+}
+
+bool local_player_in_armory_zone(const World &world) {
+    // [orig: Input_HandleActionBinding_0 case 0xB1 -- parentSlot == 0 @0x4e0a91,
+    //  `test eax, 400000h` on Flags (+0x24) @0x4e0aa1]
+    const Entity *e = world.registry.get(world.cached.local_player);
+    return e != nullptr && !e->mounted && (e->flags & kEntityFlagArmoryZone) != 0;
 }
 
 bool local_player_vehicle_zone_team_matches(const World &world) {
@@ -560,7 +565,7 @@ bool local_player_binoculars_toggle(World &world, const LocalPlayerWeapon &w,
 }
 
 // The once-per-activation sway seed [orig: Render_ProcessMainSceneFrame
-// @0x5ca3d3..0x5ca3f8, the clear @0x5ca4b0]. The retail latch dword_29D6BA8
+// @0x5ca3d3..0x5ca3f8, the clear @0x5ca4b0]. The retail latch g_BinocularSwayLatched
 // gates one Binoculars_RandomizeSwayOffsets @ 0x4dd830 call per activation,
 // and is cleared on every frame
 // the optical view is down. The draw comes off the SAME PRNG_Next16 owner
@@ -569,11 +574,11 @@ bool local_player_binoculars_toggle(World &world, const LocalPlayerWeapon &w,
 void local_player_binocular_sway_latch(World &world, const PlayerViewState &v,
                                        LocalPlayerViewTracker &t) {
     if (!v.binoculars_view_active) {
-        t.binocular_sway_latched = false; // [orig: dword_29D6BA8 = 0 @0x5ca4b0]
+        t.binocular_sway_latched = false; // [orig: g_BinocularSwayLatched = 0 @0x5ca4b0]
         return;
     }
     if (t.binocular_sway_latched) return;
-    t.binocular_sway_latched = true; // [orig: dword_29D6BA8 = 1 @0x5ca3e9]
+    t.binocular_sway_latched = true; // [orig: g_BinocularSwayLatched = 1 @0x5ca3e9]
     // PRNG_Next16() << 16 read as a full-circle BAM32 fraction is our
     // `unit_random` in [0, 1); the fixed-radius circle is kBinocularAimOffsetDeg.
     // [orig: Binoculars_RandomizeSwayOffsets @ 0x4dd830]

@@ -6,6 +6,10 @@
 
 #include <formats/mus/mus.h>
 
+#include <base/io/os_path.h>
+
+#include <base/io/le.h>
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -55,12 +59,6 @@ static uint32_t smallest_after(uint32_t lo, const uint32_t *cands, size_t n,
    the instruction's bytecode-relative offset and the source line. The runtime relocates this region but
    never reads it; only MDEdit and the decompiler care. A file of an older header (no table offsets) has its
    section and global entries one after the other past the header. */
-static uint32_t rd32(const uint8_t *p) {
-    uint32_t v;
-    memcpy(&v, p, 4);
-    return v;
-}
-
 static void copy_name(char *dst, size_t cap, const uint8_t *src, size_t max) {
     if (max > cap - 1) max = cap - 1;
     size_t k = 0;
@@ -89,19 +87,19 @@ static void parse_debug_export(const uint8_t *data, size_t size,
 
     uint32_t hdr = base + 256;
     if ((uint64_t)hdr + 0x50 > size) return;
-    uint32_t entry_size = rd32(data + hdr);
+    uint32_t entry_size = io::read_u32_le(data + hdr);
     if (entry_size == 0) entry_size = 48;
     if (entry_size < 0x10 || entry_size > 256) return;
-    const uint32_t section_count = rd32(data + hdr + 0x08), var_count = rd32(data + hdr + 0x10);
-    const uint32_t local_count = rd32(data + hdr + 0x18), function_count = rd32(data + hdr + 0x20);
-    const uint32_t line_count = rd32(data + hdr + 0x28);
+    const uint32_t section_count = io::read_u32_le(data + hdr + 0x08), var_count = io::read_u32_le(data + hdr + 0x10);
+    const uint32_t local_count = io::read_u32_le(data + hdr + 0x18), function_count = io::read_u32_le(data + hdr + 0x20);
+    const uint32_t line_count = io::read_u32_le(data + hdr + 0x28);
     if (section_count > 1024 || var_count > 1024 || local_count > 1024 || function_count > 1024 ||
         line_count > (1u << 20))
         return;
     /* Each table where its offset says, else (an older header) right after the one before. */
     uint64_t next = (uint64_t)hdr + 0x50;
     const auto table_at = [&](uint32_t field, uint64_t count, uint64_t stride) -> uint64_t {
-        const uint32_t rel = rd32(data + hdr + field);
+        const uint32_t rel = io::read_u32_le(data + hdr + field);
         const uint64_t at = rel ? (uint64_t)chunk_off + rel : next;
         next = at + count * stride;
         return next <= size ? at : 0;
@@ -128,7 +126,7 @@ static void parse_debug_export(const uint8_t *data, size_t size,
         out->variable_count = var_count;
         for (uint32_t i = 0; i < var_count; ++i) {
             const uint8_t *e = data + vars_at + (uint64_t)i * entry_size;
-            out->variables[i].byte_offset = rd32(e);
+            out->variables[i].byte_offset = io::read_u32_le(e);
             copy_name(out->variables[i].name, MUS_GLOBAL_NAME_SIZE, e + 0x10, name_max);
         }
     }
@@ -138,7 +136,7 @@ static void parse_debug_export(const uint8_t *data, size_t size,
         out->local_count = local_count;
         for (uint32_t i = 0; i < local_count; ++i) {
             const uint8_t *e = data + locals_at + (uint64_t)i * entry_size;
-            out->locals[i].frame_offset = rd32(e);
+            out->locals[i].frame_offset = io::read_u32_le(e);
             copy_name(out->locals[i].name, MUS_SECTION_NAME_SIZE, e + 0x10, name_max);
         }
     }
@@ -148,8 +146,8 @@ static void parse_debug_export(const uint8_t *data, size_t size,
         out->function_count = function_count;
         for (uint32_t i = 0; i < function_count; ++i) {
             const uint8_t *e = data + functions_at + (uint64_t)i * entry_size;
-            out->functions[i].start = rd32(e);
-            out->functions[i].end = rd32(e + 8);
+            out->functions[i].start = io::read_u32_le(e);
+            out->functions[i].end = io::read_u32_le(e + 8);
             copy_name(out->functions[i].name, MUS_SECTION_NAME_SIZE, e + 0x10, name_max);
         }
     }
@@ -158,8 +156,8 @@ static void parse_debug_export(const uint8_t *data, size_t size,
         if (!out->lines) return;
         out->line_count = line_count;
         for (uint32_t i = 0; i < line_count; ++i) {
-            out->lines[i].code_offset = rd32(data + lines_at + 8ull * i);
-            out->lines[i].line = rd32(data + lines_at + 8ull * i + 4);
+            out->lines[i].code_offset = io::read_u32_le(data + lines_at + 8ull * i);
+            out->lines[i].line = io::read_u32_le(data + lines_at + 8ull * i + 4);
         }
     }
 }
@@ -339,7 +337,7 @@ int mus_open(MusFile *out, const char *path) {
         return -1;
     }
     memset(out, 0, sizeof(*out));
-    FILE *f = fopen(path, "rb");
+    FILE *f = opennova::io::fopen_utf8(path, "rb");
     if (!f) return -30;
     fseek(f, 0, SEEK_END);
     long n = ftell(f);

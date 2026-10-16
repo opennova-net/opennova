@@ -21,14 +21,6 @@ PreviewVec3 sub(const PreviewVec3 &a, const PreviewVec3 &b) {
 	return PreviewVec3{ a.x - b.x, a.y - b.y, a.z - b.z };
 }
 
-PreviewVec3 cross(const PreviewVec3 &a, const PreviewVec3 &b) {
-	return PreviewVec3{ a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x };
-}
-
-float dot(const PreviewVec3 &a, const PreviewVec3 &b) {
-	return a.x * b.x + a.y * b.y + a.z * b.z;
-}
-
 } // namespace
 
 bool segment_meets_box(const PreviewVec3 &low, const PreviewVec3 &high, const PreviewVec3 &a, const PreviewVec3 &b,

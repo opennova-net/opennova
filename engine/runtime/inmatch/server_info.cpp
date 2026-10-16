@@ -3,8 +3,11 @@
 
 #include <base/gameprofile/game_type.h> // host_abbreviation_key
 #include <formats/mission/bms.h>
+#include <net/npwire/peer_addr.h> // peer_addr_to_string (PlayerIpAndPort)
 #include <runtime/inmatch/napi_np_server_ctx.h>
 #include <runtime/world/world.h>
+
+#include <string>
 
 namespace opennova::inmatch {
 
@@ -56,6 +59,25 @@ bool Server_ToggleJoinLock(NapiNPServerCtx &ctx) {
 	if (ctx.on_update_server_info)
 		ctx.on_update_server_info();
 	return ctx.join_locked;
+}
+
+std::vector<HostPlayerListRow> host_player_list_rows(const NapiNPServerCtx &ctx) {
+	std::vector<HostPlayerListRow> rows;
+	for (const NapiNPConnection &c : ctx.np_protocol.connection_list) {
+		if (c.phase < ConnectionPhase::PlayerAdded) continue;
+		HostPlayerListRow row;
+		row.own = c.type == NapiNPConnection::kTypeClientSide;
+		row.slot.slot = static_cast<int>(c.reply.player_slot);
+		row.slot.connection_id = c.connection_id;
+		// The roster's name is the joiner's NA bytes, the page's (D-NET-661).
+		row.slot.player_name = c.player_name;
+		row.slot.ip_and_port = peer_addr_to_string(c.peer);
+		row.slot.pcid = c.account.pcid;
+		row.slot.team = std::to_string(c.player_list_team);
+		row.slot.type = std::to_string(c.player_list_type);
+		rows.push_back(std::move(row));
+	}
+	return rows;
 }
 
 } // namespace opennova::inmatch

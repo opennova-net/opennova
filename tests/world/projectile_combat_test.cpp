@@ -1,5 +1,6 @@
 // Observable projectile consequence tests through RoundSim's public seam:
 // arming/dud substitution, NoDie, and geometric dead/indestructible blockers.
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -240,6 +241,65 @@ FlightResult fly_one_tick(FixedVec3 velocity, uint32_t flags = 0,
         FixedVec3{to_fixed(round.pos.x), to_fixed(round.pos.y), to_fixed(round.pos.z)},
         FixedVec3{to_fixed(round.vel.x), to_fixed(round.vel.y), to_fixed(round.vel.z)},
     };
+}
+
+// The single-round spawn's launch velocity is RoundData_SpawnRound's integer
+// form: the final angles' low words masked off before the trig (the round keeps
+// them unmasked), each sine and cosine of the angle times retail's radians-per-BAM
+// double (dbl_7C3608) truncated to Q22, the heading pair scaled by the pitch
+// cosine with each product >> 22, and the speed the integer (velocity << 16) / 62,
+// a PowerThrow charge then scaling it by (charge << 8) rounded >> 16. The values
+// are that computation's, written out; the exact 2*pi / 2^32 scale, the double
+// trig and a float speed give (483853, 817767, 46575) for the first shot.
+// [orig: RoundData_SpawnRound @0x4EC508..0x4EC60D; the charge @0x4EC5AF..0x4EC5D9]
+void test_single_round_launch_velocity_is_retails() {
+    HeapWorldFixture fixture;
+    World &world = fixture.world;
+    AmmoTableEntry ammo;
+    ammo.name = "LAUNCH";
+    ammo.valid = true;
+    ammo.velocity = 900;
+    ammo.max_age_ticks = 100;
+    world.tables.ammo.entries.push_back(ammo);
+    RoundSpawnParams params;
+    params.origin = {0.0f, 0.0f, 10.0f};
+    params.ammo_index = 0;
+    params.dir_yaw_bam = 0x2A3B4C5D;
+    params.dir_pitch_bam = 0x01FEDCBA;
+    int slot = world.round_sim.spawn(world, params);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    const LiveRound &round = world.round_sim.rounds[static_cast<size_t>(slot)];
+    CHECK(to_fixed(round.vel.x) == 483852);
+    CHECK(to_fixed(round.vel.y) == 817771);
+    CHECK(to_fixed(round.vel.z) == 46498);
+    // The round keeps the unmasked angles [orig: @0x4EC61D..0x4EC626].
+    CHECK(round.yaw_bam == 0x2A3B4C5D && round.pitch_bam == 0x01FEDCBA);
+
+    world.round_sim.reset();
+    params.charge = 100;
+    slot = world.round_sim.spawn(world, params);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    const LiveRound &charged = world.round_sim.rounds[static_cast<size_t>(slot)];
+    CHECK(to_fixed(charged.vel.x) == 189004);
+    CHECK(to_fixed(charged.vel.y) == 319442);
+    CHECK(to_fixed(charged.vel.z) == 18163);
+
+    // A quarter turn back: dbl_7C3608's scale leaves cos at -201 / 2^22, so the
+    // round drifts 32 Q16 units off the axis where an exact scale gives 0.
+    world.round_sim.reset();
+    world.tables.ammo.entries[0].velocity = 620;
+    params.charge = 0;
+    params.dir_yaw_bam = static_cast<int32_t>(0xC0001234u);
+    params.dir_pitch_bam = static_cast<int32_t>(0xFEDC5433u);
+    slot = world.round_sim.spawn(world, params);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    const LiveRound &back = world.round_sim.rounds[static_cast<size_t>(slot)];
+    CHECK(to_fixed(back.vel.x) == -32);
+    CHECK(to_fixed(back.vel.y) == -655104);
+    CHECK(to_fixed(back.vel.z) == -18345);
 }
 
 void test_arming_dud_and_armed_damage() {
@@ -2547,6 +2607,51 @@ void test_terrain_impact_emits_permanent_scorch() {
 // section or target. [orig: Projectile_HandleTerrainImpact
 // Projectile_CopyEntityToHitRecord @0x4E9319..0x4E931F, +0x30 / +0x48 zeroed
 // @0x4E9326 / @0x4E932B]
+// A round into the water: its splash stands 0.375 u on along the round's normalized
+// tick-start ray on X and Y (each a round-half-up Q16 product), on the water plane.
+// [orig: Projectile_SpawnImpactEffect @0x4E9CA5..0x4E9CD8, the adds @0x4E9D13 /
+//  @0x4E9D29, Z = g_EnvWaterHeightFixed @0x4E9D24]
+void test_water_impact_splash_is_pushed_along_the_ray() {
+    World world;
+    world.registry.configure_pool(0, 4);
+    AmmoTableEntry ammo;
+    ammo.name = "SPLASH";
+    ammo.valid = true;
+    ammo.velocity = 620;
+    ammo.max_age_ticks = 20;
+    world.tables.ammo.entries.push_back(ammo);
+    std::vector<uint16_t> heights(512u * 512u, 0);
+    std::vector<int> sectors(256u, 1);
+    opennova::terrain::TerrainHeightField flat;
+    flat.heightmap = heights.data();
+    flat.dim = 512;
+    flat.layout.sector_grid = sectors.data();
+    CollisionWorld collision;
+    collision.terrain = &flat;
+    collision.build_tick_tables(world);
+    world.collision = &collision;
+    world.env.water_z = 1 << 16; // the plane at 1 u, above the terrain at 0
+    RoundSpawnParams params;
+    params.origin = {10.0f, -20.0f, 3.0f};
+    params.ammo_index = 0;
+    const int slot = world.round_sim.spawn(world, params);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    // 10 u a tick along (0.8, 0, -0.6): it crosses the plane a third of the way in,
+    // at x 12.667; the ray's Q16 X is 52424, its push 19659 (0.29997 u). The base point
+    // is the port's exact crossing; retail's backs off 0x800 along the ray first
+    // (@0x4EA603..0x4EA65C, 12.94164 here), D-ITEM-13(b)'s residual, which this pins.
+    world.round_sim.rounds[static_cast<size_t>(slot)].vel = Vec3{8.0f, 0.0f, -6.0f};
+    world.round_sim.tick(world, &flat, &collision);
+    const auto &impacts = world.round_sim.impacts;
+    CHECK(impacts.size() == 1);
+    if (impacts.size() != 1) return;
+    CHECK(impacts[0].effect_tag == kWaterImpactEffectTag);
+    CHECK(std::fabs(impacts[0].position.x - (12.6667f + 0.29997f)) < 0.01f);
+    CHECK(std::fabs(impacts[0].position.y + 20.0f) < 0.001f);
+    CHECK(impacts[0].position.z == 1.0f);
+}
+
 void test_terrain_stop_records_the_round() {
     World world;
     world.registry.configure_pool(0, 4);
@@ -3996,6 +4101,7 @@ void test_jox_tank_round_bullets_class_splashes() {
 
 struct NamedTest { const char *name; void (*fn)(); };
 static const NamedTest kTests[] = {
+    {"test_single_round_launch_velocity_is_retails", test_single_round_launch_velocity_is_retails},
     {"test_armed_expiry_detonates_only_a_kill_zone_class", test_armed_expiry_detonates_only_a_kill_zone_class},
     {"test_impact_producers_apply_their_own_gates", test_impact_producers_apply_their_own_gates},
     {"test_jox_tank_round_bullets_class_splashes", test_jox_tank_round_bullets_class_splashes},
@@ -4028,6 +4134,7 @@ static const NamedTest kTests[] = {
     {"test_terrain_impact_samples_charmap_surface", test_terrain_impact_samples_charmap_surface},
     {"test_terrain_impact_emits_permanent_scorch", test_terrain_impact_emits_permanent_scorch},
     {"test_terrain_stop_records_the_round", test_terrain_stop_records_the_round},
+    {"test_water_impact_splash_is_pushed_along_the_ray", test_water_impact_splash_is_pushed_along_the_ray},
     {"test_visual_dynamic_proxy_projects_decoded_pose_geometry", test_visual_dynamic_proxy_projects_decoded_pose_geometry},
     {"test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises", test_visual_dynamic_proxy_carrier_gate_and_unresolved_model_raises},
     {"test_visual_dynamic_proxy_excludes_shooter_self_slot", test_visual_dynamic_proxy_excludes_shooter_self_slot},

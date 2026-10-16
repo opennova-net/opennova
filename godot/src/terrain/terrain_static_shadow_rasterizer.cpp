@@ -16,6 +16,7 @@
 #include <base/io/hash.h>
 #include <runtime/terrain/terrain_static_shadow_geometry.h>
 #include <runtime/terrain/terrain_static_shadow_planner.h>
+#include <runtime/terrain_query/terrain_field_build.h>
 
 #include <godot_cpp/classes/image.hpp>
 #include <godot_cpp/classes/texture2d.hpp>
@@ -271,6 +272,10 @@ public:
 		}
 		const auto sources =
 				placer->get_static_terrain_shadow_sources();
+		const opennova::terrain::TerrainHeightField ground_field =
+				terrain_data.is_valid() && terrain_data->is_loaded()
+				? opennova::terrain::height_field_from(terrain_data->get_cpt(), terrain_data->get_trn())
+				: opennova::terrain::TerrainHeightField{};
 		records.reserve(static_cast<std::size_t>(sources.size()));
 		for (const auto &source :
 				sources) {
@@ -311,10 +316,10 @@ public:
 			record.graphic = source.graphic;
 			record.world_transform = source.world_transform;
 			record.geometry = geometry;
-			// Point sampler, deliberately: retail grounds each caster at the
-			// entity origin, not by bilinear interpolation.
-			record.ground_y = terrain_data.is_valid()
-					? terrain_data->get_height_world(from_static_source_transform(source.world_transform).origin)
+			// The engine's grounding rule (engine: runtime/terrain/
+			// terrain_static_shadow_planner.h static_shadow_caster_ground).
+			record.ground_y = ground_field.valid()
+					? opennova::terrain::static_shadow_caster_ground(ground_field, source.world_transform)
 					: 0.0f;
 			record.caster_identity = source.asset_id;
 			records.push_back(std::move(record));

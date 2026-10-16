@@ -20,7 +20,7 @@ void clear_direction(Entity::VehicleMotorState &m) {
 
 int32_t dot_q16(const int32_t a[3], const int32_t b[3]) {
 	return io::bam_add(
-			io::bam_add(q16_mul_rhu(a[0], b[0]), q16_mul_rhu(a[1], b[1])), q16_mul_rhu(a[2], b[2]));
+			io::bam_add(retail_q16_mul_rhu(a[0], b[0]), retail_q16_mul_rhu(a[1], b[1])), retail_q16_mul_rhu(a[2], b[2]));
 }
 
 void cross_q16(const int32_t a[3], const int32_t b[3], int32_t out[3]) {
@@ -41,10 +41,10 @@ bool sharp_steering(const Entity::VehicleMotorState &m) {
 
 void velocity_from_direction(
 		Entity::VehicleMotorState &m, const int32_t dir[3], int32_t speed, bool replace_z) {
-	m.vel_x = q16_mul_rhu(speed, dir[0]);
-	m.vel_y = q16_mul_rhu(speed, dir[1]);
+	m.vel_x = retail_q16_mul_rhu(speed, dir[0]);
+	m.vel_y = retail_q16_mul_rhu(speed, dir[1]);
 	if (replace_z)
-		m.slide_z = q16_mul_rhu(speed, dir[2]);
+		m.slide_z = retail_q16_mul_rhu(speed, dir[2]);
 }
 
 // Assemble the direction frame with unnormalized Q16 cross products, rotate
@@ -279,7 +279,7 @@ bool vehicle_traction_velocity(
 			}
 			m.contact_direction[2] = std::min(0, m.contact_direction[2]);
 			velocity_from_direction(m, m.contact_direction, io::bam_abs(m.speed), true);
-			m.wheel_rate_bam = q16_mul_rhu(-16384, m.steer_state >> 2);
+			m.wheel_rate_bam = retail_q16_mul_rhu(-16384, m.steer_state >> 2);
 			return true;
 		}
 		// The straight arm leaves any retained skid frame alone, and only it
@@ -287,7 +287,7 @@ bool vehicle_traction_velocity(
 		// [orig: @0x48A1E6..0x48A2BE, crashed Z gate @0x48A28D..0x48A2AE]
 		if (target_speed != 0 && io::bam_abs(m.speed) > 8192) {
 			velocity_from_direction(m, forward, m.speed, m.crashed == 0);
-			m.wheel_rate_bam = q16_mul_rhu(io::bam_sub(0, m.speed), m.steer_state >> 2);
+			m.wheel_rate_bam = retail_q16_mul_rhu(io::bam_sub(0, m.speed), m.steer_state >> 2);
 			return true;
 		}
 		// The recovery arm advances the stored skid frame but drives along the
@@ -301,7 +301,7 @@ bool vehicle_traction_velocity(
 				turn_contact_direction(m, forward, up, 59652323);
 		}
 		velocity_from_direction(m, forward, m.speed, true);
-		m.wheel_rate_bam = q16_mul_rhu(io::bam_sub(0, m.speed), m.steer_state >> 2);
+		m.wheel_rate_bam = retail_q16_mul_rhu(io::bam_sub(0, m.speed), m.steer_state >> 2);
 		return true;
 	}
 	if (m.handbrake_latched != 0 && m.speed != 0 && vehicle_has_contact_direction(m)) {

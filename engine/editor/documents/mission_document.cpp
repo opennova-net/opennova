@@ -56,7 +56,7 @@ std::string mission_text_table(const std::string &path) {
 }
 std::string mission_text_fallback() { return strutil::to_upper(mission::sidecar_for_role("text")->fallback); }
 
-// The lowest zone id in 1..99 no area trigger row holds [orig editor: dfx2med
+// The lowest zone id in 1..99 no area trigger row holds [orig: dfx2med.exe
 // Med_AreaTriggerDialogProc @0x40f400 lists zones 1..99]; 0 with none free.
 int free_zone_id(const std::vector<std::shared_ptr<const Node>> &rows) {
 	bool taken[100] = {};
@@ -95,7 +95,8 @@ size_t index_among(const std::vector<std::shared_ptr<const Node>> &rows, const N
 // The number each of a path's stops gives its marker (its wp_number), the stops in their order. A marker's
 // number is the key the original editor sorts a path's markers by, not its place: its writer copies the
 // number the marker holds [orig: JOTACmed.exe sub_44C8E0 @ 0x44c9ff, item +0x90 to the record's +0x30] and
-// its rebuild only sorts each path's markers by it [orig: sub_44CFD0 @ 0x44d0e9..0x44d104], never writing
+// its rebuild only sorts each path's markers by it [orig: JOTACmed.exe sub_44CFD0 @ 0x44d0e9..0x44d104],
+// never writing
 // it, so a shipped path holds keys (00TRa's path 1 holds 0, 1, 2, 2, 3 and 03TR's path 5 1 to 9 and 1648).
 // A stop keeps the number its marker was read with on this path (`held`: each marker's path and number as
 // read) while the stops' order is the order those numbers sort to (mission::waypoint_path_markers': by
@@ -1381,7 +1382,8 @@ size_t mission_removed_stop_namers(const MissionDocument &document, const std::v
 // A waypoint marker the edit put in (a Duplicate's copy, a Paste's) stays a stop of the path it carries, among
 // the stops its number sorts with, as the original editor's copy stays on its route: its copy is the whole item
 // [orig: JOTACmed.exe MissionItem_CloneTranslated @ 0x455e70, the qmemcpy keeping +0x8c and +0x90], and its
-// rebuild puts every waypoint marker on the path it carries [orig: sub_44CFD0 @ 0x44d028..0x44d063], sorted by
+// rebuild puts every waypoint marker on the path it carries [orig: JOTACmed.exe sub_44CFD0 @
+// 0x44d028..0x44d063], sorted by
 // number. The stop goes after the last of the path's stops whose marker, held on the path, sorts before the
 // copy (by number, a tie by the marker's place: a duplicate right after its original); `sites` takes the Adds.
 void MissionDocument::copies_keep_their_route(const StagedRows &rows, const RecordShift &shift,

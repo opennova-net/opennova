@@ -1,12 +1,9 @@
 // score.ini — NovaLogic's scoring configuration.
 //
-// STAGED, NOT WIRED (2026-09-20 tidy): the live score.ini reader is
-// inmatch::load_session_score_config (engine/runtime/inmatch/session_status.cpp),
-// which still scans the text itself while applying the witnessed selection
-// rules (the VERSION 40 gate, reset-and-replace on a duplicate GAMETYPE
-// section, the 34-FIELD cap) on top of world::default_match_score_values. It
-// is the owner-to-be: that function reading its rows through score::parse.
-// The editor's score table reads and writes the file through it.
+// The game's score.ini reader (inmatch::load_session_score_config, runtime/inmatch/
+// session_status.cpp) reads the file through parse and takes the session's row
+// through row_of over world::default_match_score_values; the editor's score table
+// reads and writes the file through it.
 //
 // One text file read loose by its bare name from the game's folder (`VERSION 40` in retail JO). The
 // game types' default settings are made first, twelve FIXED 452-BYTE ROWS [orig:
@@ -59,7 +56,7 @@
 // This lib models the file: its blocks as the reader takes them, in the file's order, each the row its
 // GAMETYPE line selects with its FIELD entries (a list, in order, the 34 the row holds) and its VAR values, each
 // entry by its id in its name table, the version and the fanfare; the in-memory row image and the defaults the
-// file is read over are the runtime's (inmatch::load_session_score_config, which still scans the text itself).
+// file is read over are the runtime's (inmatch::load_session_score_config, over row_of).
 // No spelling of the file's is kept: the writer is ScoreConfig_SaveFile's form, which puts down each name from
 // its table by the id, and the shipped score.ini is that writer's output byte for byte.
 #pragma once
@@ -151,8 +148,20 @@ bool parse(const uint8_t *data, size_t size, File &out, std::string &error);
 // reader takes none of them).
 bool write(const File &file, std::vector<uint8_t> &out, std::string &error);
 
+// A row as the reader leaves it over the row's defaults [orig: ScoreConfig_LoadFile @ 0x52D8A0]: the VAR words of
+// every block of the row in the file's order, a later line of an id over an earlier one [orig: @ 0x52DC50]; the FIELD
+// list of the last block of the row holding a FIELD line the table has, each such block's first clearing the row's
+// list before it appends [orig: @ 0x52DBBE..0x52DBCD, then sub_52CD70 @ 0x52DBE4]. `found` where a block selects
+// the row; `has_fields` where one of its blocks holds a FIELD (else the row's default list stands).
+struct Row {
+	bool found = false;
+	bool has_fields = false;
+	std::vector<Entry> fields;
+	std::vector<Entry> vars; // one per id, in the order the ids first appear
+};
+Row row_of(const File &file, int row);
+
 // Value lookups by an entry's name, without case (its table's id).
-const GameTypeBlock *block_at(const File &file, int row);
 int32_t var_value(const GameTypeBlock &block, std::string_view name, int32_t fallback);
 int32_t field_value(const GameTypeBlock &block, std::string_view name, int32_t fallback);
 

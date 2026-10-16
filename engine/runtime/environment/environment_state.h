@@ -395,6 +395,12 @@ public:
 	// Sun by day, moon by night
 	// [orig: Environment_GetLightDirectionFloat @ 0x57d870].
 	Vec3 light_direction() const { return is_night_phase() ? moon_dir_ : sun_dir_; }
+	// The unseeded default light direction: 45 degrees up, in the render-float
+	// basis (a unit vector, not a weight; sqrt(2)/2 by construction). What
+	// light_direction() serves before an environment seeds it, and what a
+	// terrain page composed with no loaded environment lights by (an OpenNova
+	// state: retail loads the environment before it draws the terrain).
+	static constexpr Vec3 kDefaultSunDirRender{0.0f, 0.70710678f, 0.70710678f};
 	bool is_night_phase() const { return weather_->is_night_phase(); }
 	// 0..1 ramp toward the current phase across the 20-minute sunrise/sunset
 	// windows [orig: Environment_ComputeTimeOfDayColors @ 0x57de99].
@@ -568,9 +574,6 @@ private:
 
 	TodState tod_{};
 	bool tod_valid_ = false;
-	// The unseeded default light direction: 45 degrees up, in the render-float
-	// basis (a unit vector, not a weight; sqrt(2)/2 by construction).
-	static constexpr Vec3 kDefaultSunDirRender{0.0f, 0.70710678f, 0.70710678f};
 	Vec3 sun_dir_ = kDefaultSunDirRender;
 	Vec3 moon_dir_{};
 	Vec3 light_dir_ = kDefaultSunDirRender;

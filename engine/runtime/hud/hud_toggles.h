@@ -102,7 +102,7 @@ struct HudToggleState {
 	// closed by its own escape leg, the respawn init, the SP pause row and
 	// the mission start; while it is up the special-key handler takes the
 	// yes / no keys (hud_toggles_quit_dialog_key).
-	// [orig: g_QuitDialogOpen (dword_24C1880) — set @0x49b38f; cleared
+	// [orig: g_QuitDialogOpen — set @0x49b38f; cleared
 	//  @0x49b295, Game_InitRespawnState @0x499368, case 25 @0x49b534,
 	//  Game_StartMission @0x525b2b]
 	bool quit_dialog_open = false;

@@ -204,6 +204,11 @@ void TerrainStaticShadowPlanner::set_light(
 	if (epoch_changed) bump_epoch();
 }
 
+float static_shadow_caster_ground(const TerrainHeightField &field,
+		const std::array<float, 12> &world_transform) {
+	return height_field_height_mission(field, world_transform[9], -world_transform[11]);
+}
+
 void TerrainStaticShadowPlanner::replace_casters(
 		std::vector<TerrainStaticShadowPlannerCaster> casters,
 		bool admitted_geometry_missing) {

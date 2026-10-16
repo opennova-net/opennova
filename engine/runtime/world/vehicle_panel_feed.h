@@ -93,4 +93,16 @@ struct VehiclePanelRoot {
     int32_t item_id = 0;
 };
 
+// The local player's panel root as the embedder joins it: shown and the root's
+// items.def id; not shown when L is absent or rides nothing.
+VehiclePanelRoot local_vehicle_panel_root(const World &world);
+
+// The panel's live half for the local player: the hull's own health (the
+// silhouette's band reads the root, not any rider [orig: the root's health
+// band @0x5a50d1]) and the marker rows (fill_vehicle_panel_seats). False,
+// with the hull zeroed and no rows, when L rides nothing.
+bool fill_local_vehicle_panel(const World &world, const opennova::def::DefVehicleHudBlock &block,
+                              hud::HudVehiclePanelState &out,
+                              const VehicleOccupancySource *source = nullptr);
+
 } // namespace opennova::world

@@ -2380,6 +2380,132 @@ bool run_vehicle_drive_authority() {
 	return true;
 }
 
+// B-9: the priority caches keep one entry per slot for pool 0's 256 and pool 1's 1200
+// (handle & 0xFFF, +256 for pool 1, no 0xFF mask), so pool-1 slots 10 and 266 keep their
+// own last-sent heading where a 512-entry cache aliased them.
+// [orig: NetPacket_SerializeEntityStatesToPacket @0x50F150..0x50F17C;
+//  Server_BuildEntityPriorityList @0x50E601 (the 0x5B0-byte sweep)]
+bool run_0a_priority_caches_hold_every_pool1_slot() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 300);
+	const w::EntityHandle host_h =
+			w::spawn_remote_player(world, player_spawn({100.0f, 100.0f, 10.0f}, 90, 0xFFF0));
+	if (!expect(host_h.valid(), "cache: recipient spawned")) return false;
+	const auto vehicle_at = [&](uint16_t slot, int16_t yaw) {
+		w::Entity veh;
+		veh.kind = w::EntityKind::Item;
+		veh.item_id = 0x050B;
+		veh.net_class_code = uint8_t(nw::EntityClass::Vehicle);
+		veh.health = veh.health_max = 3000;
+		veh.position = {110.0f, 100.0f, 10.0f};
+		veh.yaw = yaw;
+		return world.registry.spawn_at(w::EntityHandle{uint16_t((1u << 12) | slot)}, veh);
+	};
+	const w::EntityHandle low = vehicle_at(10, 90);    // heading BAM 0
+	const w::EntityHandle high = vehicle_at(266, 0);   // a quarter turn away
+	if (!expect(low.valid() && high.valid(), "cache: pool-1 slots 10 and 266 spawned")) return false;
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, host_h, 0});
+	ns::test::emit_all(world, conns);
+	ns::Datagram dg;
+	(void)ch.client_recv(dg);
+	const ns::Connection &c = conns[0];
+	if (!expect(c.s2c_entity_age.size() == 256 + 1200, "cache: 256 + 1200 entries")) return false;
+	if (!expect(c.s2c_entity_heading[256 + 10] == 0x00 && c.s2c_entity_heading[256 + 266] == 0x40,
+	            "cache: slot 266 keeps its own heading, not slot 10's"))
+		return false;
+	// Retail's sweep covers 0x5A0 of the block's 0x5B0 bytes: pool 1's last sixteen slots
+	// never age [orig: Server_BuildEntityPriorityList @0x50E601..0x50E634].
+	conns[0].s2c_entity_age[256 + 1199] = 7;
+	conns[0].s2c_entity_age[256 + 1183] = 7;
+	ns::test::emit_all(world, conns);
+	(void)ch.client_recv(dg);
+	return expect(conns[0].s2c_entity_age[256 + 1199] == 7 && conns[0].s2c_entity_age[256 + 1183] == 8,
+	              "cache: the sweep stops 16 entries short of the block's end");
+}
+
+// B-10: phase 1's round-clock gate tests the whole pre-round countdown dword; only
+// phase 0's copy is its low byte. At 256 s left the clock is still -1.
+// [orig: NetPacket_WritePlayerState - the phase-0 byte @0x4FF82D..0x4FF837, `cmp
+//  g_PreRoundDelayTimer, 0` @0x4FFA81 ahead of the /62 @0x4FFA97]
+bool run_0a_phase1_gate_reads_the_whole_countdown() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	const w::EntityHandle host_h =
+			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+	if (!expect(host_h.valid(), "countdown: recipient spawned")) return false;
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, host_h, 0});
+	world.match.set_remaining_ticks(62 * 100);
+	const auto frames = [&](int16_t &timer, uint8_t &preround) {
+		timer = 0;
+		preround = 0xEE;
+		for (int i = 1; i <= 4; ++i) {
+			ns::test::emit_all(world, conns);
+			ns::Datagram dg;
+			nw::FrameUpdate fu;
+			if (!ch.client_recv(dg) ||
+					!nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu))
+				return false;
+			if (fu.timer.present) timer = fu.timer.timer_seconds;
+			if (fu.weapon.present) preround = fu.weapon.preround_timer;
+		}
+		return true;
+	};
+	int16_t timer = 0;
+	uint8_t preround = 0;
+	world.preround_delay_seconds = 256;
+	if (!expect(frames(timer, preround) && timer == -1 && preround == 0,
+	            "countdown: 256 s left sends -1 and a 0 phase-0 byte")) return false;
+	world.preround_delay_seconds = 0;
+	return expect(frames(timer, preround) && timer == 100,
+	              "countdown: with none running the clock crosses in seconds");
+}
+
+// The tail's last i16 is the recipient's entity+0x120 word (Armor; ammo class 1's
+// carried pool, our Entity::mana), raw, alive or dead; a retail client stores it
+// as its own Armor every frame. It was a constant 0 (B-4).
+// [orig: NetPacket_WritePlayerState @0x4FFD77..0x4FFD8B;
+//  NapiNPClientMsg_0x00A @0x4305EB]
+bool run_0a_tail_carries_the_armor_word() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	const w::EntityHandle h =
+			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+	w::Entity *e = world.registry.get(h);
+	if (!expect(e != nullptr, "armor: player entity resolvable")) return false;
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, h, 0});
+	auto frame_armor = [&](int16_t &armor) {
+		ns::test::emit_all(world, conns);
+		ns::Datagram dg;
+		if (!ch.client_recv(dg)) return false;
+		nw::FrameUpdate fu;
+		if (!nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu) ||
+				!fu.local_tail_present)
+			return false;
+		armor = fu.armor;
+		return true;
+	};
+	int16_t armor = 0;
+	e->mana = 75;
+	if (!expect(frame_armor(armor) && armor == 75, "armor: the tail carries entity+0x120"))
+		return false;
+	// A negative word crosses raw (the signed i16 the client stores).
+	e->mana = -2;
+	if (!expect(frame_armor(armor) && armor == -2, "armor: a negative word crosses raw"))
+		return false;
+	// Dead: retail still writes the word.
+	e->health = 0;
+	e->flags |= 2u;
+	e->mana = 40;
+	return expect(frame_armor(armor) && armor == 40, "armor: a dead recipient's word still rides");
+}
+
 int main() {
 	const bool ok = run_fanout_and_per_connection_anchor() && run_joiner_uplink_snaps_peer() &&
 	                run_self_uplink_rejected() && run_cross_peer_uplink_rejected() &&
@@ -2392,7 +2518,10 @@ int main() {
 	                run_0a_player_record_field_sources() &&
 	                run_0a_anchor_is_the_recipient_eye() &&
 	                run_0a_round_score_and_los_read_the_body() &&
-	                run_0a_deploy_hold_and_tail_stance() && run_0x26_attach_mounted_echo() &&
+	                run_0a_deploy_hold_and_tail_stance() && run_0a_tail_carries_the_armor_word() &&
+	                run_0a_priority_caches_hold_every_pool1_slot() &&
+	                run_0a_phase1_gate_reads_the_whole_countdown() &&
+	                run_0x26_attach_mounted_echo() &&
 	                run_mounted_g_slot_route_echo() &&
 	                run_vehicle_drive_authority() &&
 	                run_grounded_uplink_apply_and_echo() && run_pose_transform_roundtrip() &&

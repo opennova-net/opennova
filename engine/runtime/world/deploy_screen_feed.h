@@ -117,6 +117,10 @@ struct DeployListInput {
 
 std::vector<DeployListRow> build_deploy_rows(const DeployListInput &in);
 
+// The rows' colour tag for the listing team: "<cFF2020>" for team 2, else
+// "<c4040FF>" [orig: the team test and the tag @0x553adb..0x553af1].
+const char *deploy_list_team_color_tag(int team);
+
 // The STATIC_RESPAWN_MSG1 arm: hidden, then the penalty timer wins
 // ("%s  <cFF4040>%i" over Overlays/STROVER_PENALTYTIMER), else the wave zone
 // listing the local player (`word_A85BC0 != -1` and SpawnZoneList_IndexOf

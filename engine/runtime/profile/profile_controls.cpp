@@ -10,7 +10,7 @@ namespace {
 
 // The live record of the row an entry names: the row whose action code is the
 // entry's row word, the slot the boot's re-lay put it in [orig:
-// KeyBinding_SortBySequentialId @0x498260; sub_562DF0 @0x562df4 reads +4].
+// KeyBinding_SortBySequentialId @0x498260; KeyBinding_ApplyProfileEntry @0x562df4 reads +4].
 int row_for_entry(const playersav::BindingEntry &entry) {
 	const controls::ActionDef *row = controls::action_for_code(entry.index);
 	// The live set keeps one record per catalog entry, in the catalog's order.
@@ -23,7 +23,7 @@ SessionInput session_input(const playersav::ProfileRecord &record, bool no_reloa
 	SessionInput out;
 	out.invert_mouse = record.invert_mouse != 0;        // [orig: @0x551612]
 	out.mouse_sensitivity = record.mouse_sensitivity;    // [orig: @0x55161e]
-	// [orig: g_autoReloadEnabled = +1524 @0x551a40; `/noreload` -> 0 @0x551a48]
+	// [orig: g_AutoReloadEnabled = +1524 @0x551a40; `/noreload` -> 0 @0x551a48]
 	out.auto_reload = !no_reload && record.auto_reload != 0;
 	return out;
 }
@@ -40,7 +40,7 @@ void apply_bindings(const playersav::ProfileRecord &record, controls::BindingSet
 		const int row = row_for_entry(entry);
 		if (row < 0) continue;  // retail __debugbreak()s past 768 rows (@0x562dfe)
 		controls::BindingRecord rec;
-		// [orig: sub_562DF0 @0x562e0f..0x562e59]
+		// [orig: KeyBinding_ApplyProfileEntry @0x562e0f..0x562e59]
 		rec.primary = entry.primary;
 		rec.secondary = entry.secondary;
 		rec.primary_mod = entry.primary_mod;

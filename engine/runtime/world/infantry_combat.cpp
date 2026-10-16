@@ -634,7 +634,7 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
             carrier_pose_fixed(*parent_ride, parent_pos, parent_yaw, parent_pitch, parent_roll);
             const int32_t *saved = self_entity->saved_live_valid ? self_entity->saved_live_pos
                                                                  : e.pos;
-            const double angle = static_cast<double>(parent_yaw) * 1.4629627251502471e-9;
+            const double angle = static_cast<double>(parent_yaw) * io::kRadiansPerBamX87;
             const int32_t s = static_cast<int32_t>(std::sin(angle) * 4194304.0);
             const int32_t c = static_cast<int32_t>(std::cos(angle) * 4194304.0);
             const auto shl5 = [](int32_t v) {
@@ -693,11 +693,11 @@ int AiSystem::infantry_combat_think(AiEntity &e, World &world, uint32_t key) {
             carrier_pose_fixed(*parent, parent_pos, parent_yaw, parent_pitch, parent_roll);
             const auto cos22 = [](int32_t angle) {
                 return static_cast<int32_t>(
-                        std::cos(static_cast<double>(angle) * 1.4629627251502471e-9) * 4194304.0);
+                        std::cos(static_cast<double>(angle) * io::kRadiansPerBamX87) * 4194304.0);
             };
             const auto neg_sin22 = [](int32_t angle) {
                 return static_cast<int32_t>(
-                        std::sin(static_cast<double>(angle) * 1.4629627251502471e-9) * -4194304.0);
+                        std::sin(static_cast<double>(angle) * io::kRadiansPerBamX87) * -4194304.0);
             };
             const auto mul22 = [](int32_t a, int32_t b) {
                 return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);

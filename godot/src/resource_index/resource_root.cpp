@@ -74,7 +74,7 @@ Ref<Resource> load_font_path(const String &p_path) {
 		return Ref<Resource>();
 	}
 	PackedByteArray bytes;
-	if (!read_nova_payload_file(p_path, bytes)) {
+	if (!read_payload_file(p_path, bytes)) {
 		return Ref<Resource>();
 	}
 	Ref<FntResource> font;
@@ -168,21 +168,11 @@ PackedStringArray ResourceRoot::list_missing_boot_resources() const {
 	if (root_dir_.is_empty()) {
 		return missing;
 	}
-	for (int i = 0; i < gameprofile_required_resource_count(); ++i) {
-		const RequiredResource *row = gameprofile_required_resource_at(i);
-		if (row->severity != RES_FATAL) {
-			continue;
-		}
-		// The archive-table trio's all-missing gate belongs to mount_runtime
-		// itself [orig: fatal check @ 0x4a6f44, see docs/vfs/vfs-pff-mount-re.md]; pattern rows carry no
-		// probeable literal name.
-		if ((row->flags & (RES_F_PFF_TABLE_ANY | RES_F_PATTERN)) != 0) {
-			continue;
-		}
-		const String name = String::utf8(row->name);
-		if (!has_file(name)) {
-			missing.push_back(name);
-		}
+	// The rows asked and their order are the engine's
+	// (gameprofile_missing_boot_resources); the mount answers.
+	for (const std::string &name : gameprofile_missing_boot_resources(
+				 [this](const std::string &file) { return has_file(String::utf8(file.c_str())); })) {
+		missing.push_back(String::utf8(name.c_str()));
 	}
 	return missing;
 }
@@ -892,8 +882,14 @@ Ref<Resource> ResourceRoot::load_font(const String &name) const {
 			return font;
 		}
 	}
-	// A font a disk root holds under another case is found by walking its directory: a file source has none.
-	if (mount_kind_ == MountKind::Source) {
+	// A runtime mount answers what the game's font loads answer: the session-default read alone,
+	// archive-only without /d (loose and case-insensitive under it), a miss leaving the font out
+	// (docs/fonts/fnt-re.md "Font load path", docs/vfs/vfs-pff-mount-re.md: every font loader reads
+	// through File_LoadResource @ 0x75b540, HUD_LoadFontIntoSlot @ 0x580400 and the loading
+	// screen's Render_LoadingScreen @ 0x521d10 among them). Only a loose root, which the editor
+	// mounts, finds a font it holds under another case by walking its directory; a file source has
+	// none.
+	if (mount_kind_ != MountKind::Loose) {
 		return Ref<Resource>();
 	}
 	return find_font_by_name(file, root_dir_);

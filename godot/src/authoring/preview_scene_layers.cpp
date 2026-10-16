@@ -1,4 +1,5 @@
 #include "authoring/preview_scene_layers.h"
+#include "authoring/preview_godot.h"
 
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/viewport.hpp>
@@ -55,10 +56,6 @@ using opennova::io::JsonValue;
 uint64_t next_scene_state() {
 	static uint64_t next = 0;
 	return ++next;
-}
-
-Vector3 to_godot(const opennova::editor::PreviewVec3 &v) {
-	return Vector3(v.x, v.y, v.z);
 }
 
 // The header's .env name with its extension cut: the name the terrain's load and the placed tiles'

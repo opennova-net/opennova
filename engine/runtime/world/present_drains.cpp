@@ -179,8 +179,11 @@ void drain_fire_presentation_rows(World &world, std::vector<FirePresentationRow>
 		d.adm_arm = (fe.wire_round_flags & round_event_flag::kAltFire) == 0 &&
 				(fe.wire_round_flags & round_event_flag::kAdmIndexed) != 0;
 		d.adm_index = fe.adm_index;
-		const double bearing = static_cast<double>(fe.yaw_bam) * io::kRadiansPerBam;
-		const double pitch = static_cast<double>(fe.pitch_bam) * io::kRadiansPerBam;
+		// Retail's radians-per-BAM double on both presenting arms [orig:
+		//  WeaponSlot_FireAndSpawnEffects `fld dbl_7C3608` @0x53F4C7;
+		//  NetPacket_DeserializeRoundEvent @0x42F601].
+		const double bearing = static_cast<double>(fe.yaw_bam) * io::kRadiansPerBamX87;
+		const double pitch = static_cast<double>(fe.pitch_bam) * io::kRadiansPerBamX87;
 		const double cp = std::cos(pitch);
 		d.forward = Vec3{static_cast<float>(std::cos(bearing) * cp),
 				static_cast<float>(std::sin(bearing) * cp), static_cast<float>(std::sin(pitch))};

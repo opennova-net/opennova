@@ -139,8 +139,7 @@ void FirePresenter::present() {
 // sim resolves each entity's SndProf.def profile slot to its authored set name
 // and emits the (foot-level) position; this plays them full-volume positional
 // with NO propagation-delay leg — footsteps play immediately, unlike fire
-// [orig: the odd/even-tick consumers call Entity_PlaySound3D_FullVolume
-// @ 0x528e20 directly]. The local player's own body sounds DO play (retail
+// (engine: runtime/inmatch/client_effects.cpp). The local player's own body sounds DO play (retail
 // plays your own steps; only fire has an action-slot presentation to defer to).
 // Slots 43/44 (chute flap / freefall) refire by design; a body re-firing the
 // same wave retakes its own channel through the sim's own-channel key
@@ -157,10 +156,8 @@ void FirePresenter::present_slot_sounds(const std::vector<opennova::world::Sound
 		if (ev.set_name[0] == '\0') {
 			continue;
 		}
-		// Mission-frame 16.16 -> godot (x, z, -y), the fire drain's mapping.
-		const Vector3 pos(static_cast<float>(ev.pos[0]) / 65536.0f,
-				static_cast<float>(ev.pos[2]) / 65536.0f,
-				static_cast<float>(-ev.pos[1]) / 65536.0f);
+		// Mission-frame 16.16 -> godot (util/axes.h).
+		const Vector3 pos = godot_from_fixed3(ev.pos);
         const int source_id = sim() ? sim()->sound_source_bms_id(ev.source_handle) : 0;
         const int sound_id = static_cast<int>(
                 opennova::audio::oneshot_sound_id(ev.source_handle, source_id));
@@ -174,8 +171,7 @@ void FirePresenter::present_slot_sounds(const std::vector<opennova::world::Sound
 // the native ambient emitter table and its loudest-eight physical pool. The
 // audio layer replays the bounded latest intents at their producer ticks before
 // advancing to the end of a catch-up frame, preserving the 30-tick keep-alive.
-// [orig: SoundEmitter_RegisterSetLayers @0x528340;
-// SoundEmitter_UpdateAndMixTop8 @0x5284a0]
+// (engine: runtime/audio/ambient_mixer.h)
 void FirePresenter::present_sound_emitters(
 		const std::vector<opennova::world::SoundEmitterEvent> &p_events) {
 	if (p_events.empty()) {
@@ -238,8 +234,7 @@ void FirePresenter::present_fires(const std::vector<opennova::world::FirePresent
 // sets, and expired propagation-delayed slots, gated and counted down on the
 // logic clock (world/fire_sound.h). Each row plays positionally; the set's
 // max-range cull runs in the audio bank (D-AI-8).
-// [orig: Entity_PlaySound3D_FullVolume @ 0x528e20 / Sound_TickPendingSlots
-//  @ 0x529310]
+// (engine: runtime/world/fire_sound.h)
 void FirePresenter::present_fire_sounds(const std::vector<opennova::world::ReadyFireSound> &p_sounds) {
 	if (p_sounds.empty()) {
 		return;

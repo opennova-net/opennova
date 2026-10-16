@@ -12,3 +12,10 @@ set_target_properties(opennova_extract PROPERTIES OUTPUT_NAME opennova-extract)
 target_link_libraries(opennova_extract PRIVATE opennova_base)
 
 target_compile_features(opennova_extract PRIVATE cxx_std_17)
+
+# The install and output paths arrive as arguments: without a UTF-8 manifest Windows hands them
+# over in the ANSI code page and the vfs (which reads UTF-8) cannot mount a folder named outside
+# ASCII. The same manifest as opennova-3di (MSVC merges a .manifest source into the one it embeds).
+if(MSVC)
+    target_sources(opennova_extract PRIVATE ${CMAKE_SOURCE_DIR}/apps/3di/utf8.manifest)
+endif()

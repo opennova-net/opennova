@@ -1,4 +1,5 @@
 #include "authoring/effect_viewport_applier.h"
+#include "authoring/preview_godot.h"
 
 #include <godot_cpp/classes/array_mesh.hpp>
 #include <godot_cpp/classes/base_material3d.hpp>
@@ -29,10 +30,6 @@ namespace {
 
 const opennova::editor::EffectViewport &effect_of(const opennova::editor::ViewportModel &model) {
 	return static_cast<const opennova::editor::EffectViewport &>(model);
-}
-
-Vector3 to_godot(const opennova::editor::PreviewVec3 &v) {
-	return Vector3(v.x, v.y, v.z);
 }
 
 } // namespace

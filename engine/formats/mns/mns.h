@@ -57,7 +57,7 @@ struct StyleSheet {
 };
 
 // The shell's variable list: the {name, value, next} nodes at CGameMenu+0x54 [orig:
-// CGameMenu_ctor @ 0x63e060 zeroes it @ 0x63e0e5]. One node per name, compared case-blind;
+// CGameMenu_Construct @ 0x63e060 zeroes it @ 0x63e0e5]. One node per name, compared case-blind;
 // a later definition replaces the value and keeps the first spelling. Kept here in
 // creation order (retail prepends, so its head is the node made last). It is a stylesheet's
 // model: what the reader makes of the file (its directives decided, its comments, blanks and

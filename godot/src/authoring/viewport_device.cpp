@@ -1,4 +1,5 @@
 #include "authoring/viewport_device.h"
+#include "authoring/preview_godot.h"
 
 #include <godot_cpp/classes/engine.hpp>
 #include <godot_cpp/classes/time.hpp>
@@ -15,10 +16,6 @@
 namespace godot {
 
 namespace {
-
-int64_t now_us() {
-	return int64_t(Time::get_singleton()->get_ticks_usec());
-}
 
 // The process frame now: a canvas's draw, the pump's take and the frame's steps read the same one.
 uint64_t frame_now() {

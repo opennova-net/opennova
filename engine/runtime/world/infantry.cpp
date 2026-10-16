@@ -1804,13 +1804,25 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             fwd = 1024; // [data: retail ADM dump root row 4756]
         }
         // Both motors rotate locomotion by BODY heading. Independent gaze must
-        // not steer a walking actor. [orig: org1 entity+0x8C @0x4BF001;
-        // org2 entity+0x8C @0x4B41E4, Q22 rotation @0x4B41F0..0x4B4255]
+        // not steer a walking actor. org2 reads the Q22 sine table at the
+        // heading's rounded top ten bits, org1 takes the Q22 ftol trig of the
+        // heading times retail's radians-per-BAM double.
+        // [orig: org2 entity+0x8C @0x4B41E4, `add eax, 200000h; shr eax, 16h`
+        //  @0x4B41F0..0x4B41F5, g_BamSinTableQ22 / off_849934 @0x4B41F8..0x4B4206,
+        //  the rotation @0x4B4210..0x4B4255; org1 entity+0x8C `fild; fmul
+        //  dbl_7C3608` @0x4BF001..0x4BF007, the trig @0x4BF00D..0x4BF02A]
         const int32_t move_heading = inf.is_local_player ? player_root_heading : inf.body_heading;
-        const double rad =
-            static_cast<double>(move_heading) * io::kRadiansPerBam;
-        const int32_t c = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
-        const int32_t s = static_cast<int32_t>(std::sin(rad) * io::kQ22One);
+        int32_t c = 0;
+        int32_t s = 0;
+        if (inf.is_local_player) {
+            const int index = io::bam_table_index(static_cast<uint32_t>(move_heading) + 0x200000u);
+            c = static_cast<int32_t>(io::bam_table_cos(index) * io::kQ22One);
+            s = static_cast<int32_t>(io::bam_table_sin(index) * io::kQ22One);
+        } else {
+            const double rad = static_cast<double>(move_heading) * io::kRadiansPerBamX87;
+            c = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
+            s = static_cast<int32_t>(std::sin(rad) * io::kQ22One);
+        }
         int32_t wx = static_cast<int32_t>((static_cast<int64_t>(fwd) * c) >> 22) -
                      static_cast<int32_t>((static_cast<int64_t>(lat) * s) >> 22);
         int32_t wy = static_cast<int32_t>((static_cast<int64_t>(fwd) * s) >> 22) +
@@ -2357,10 +2369,18 @@ void AiSystem::infantry_restamp_eye(AiEntity &e, World &world, const RootMotionF
         const int32_t extent = frame.capsule_top - frame.capsule_bottom;
         const int32_t delta = inf.is_local_player ? std::min(extent, 0xD000)
                                                   : std::max(extent, 0x9000);
-        const double lean_rad = static_cast<double>(inf.lean_angle) *
-                                io::kRadiansPerBam;
-        const int32_t lean_cos =
-            static_cast<int32_t>(std::cos(lean_rad) * io::kQ22One);
+        // The NPC (org1) restamp reads the Q22 sine table at the rounded top
+        // ten bits of the lean and of the heading; the player-body fallback
+        // takes the Q22 ftol cosine of the lean times retail's radians-per-BAM
+        // double, as the player body's own eye leg does.
+        // [orig: org1 @0x4BF09F..0x4BF14C (lean +0xB0 @0x4BF09F..0x4BF0BA,
+        //  heading +0x10 @0x4BF0EE..0x4BF114); org2 `fild; fld dbl_7C3608`
+        //  @0x4B69AB..0x4B69AF, the cosine @0x4B69CC..0x4B69D4]
+        const int lean_index = io::bam_table_index(static_cast<uint32_t>(inf.lean_angle) + 0x200000u);
+        const int32_t lean_cos = inf.is_local_player
+            ? static_cast<int32_t>(std::cos(static_cast<double>(inf.lean_angle) *
+                                            io::kRadiansPerBamX87) * io::kQ22One)
+            : static_cast<int32_t>(io::bam_table_cos(lean_index) * io::kQ22One);
         int32_t eye_z =
             static_cast<int32_t>((static_cast<int64_t>(delta) * lean_cos) >> 22);
         if (inf.is_local_player && eye_z < 0x2000) eye_z = 0x2000;
@@ -2373,16 +2393,16 @@ void AiSystem::infantry_restamp_eye(AiEntity &e, World &world, const RootMotionF
             inf.eye_offset_y = 0;
         } else {
             const int32_t lean_sin =
-                static_cast<int32_t>(std::sin(lean_rad) * io::kQ22One);
+                static_cast<int32_t>(io::bam_table_sin(lean_index) * io::kQ22One);
             const int32_t lat_raw = static_cast<int32_t>(
                 (static_cast<int64_t>(delta) * lean_sin) >> 22);
             const int32_t lat = (lat_raw * 3) >> 2;
-            const double yaw_rad = static_cast<double>(e.heading) *
-                                   io::kRadiansPerBam;
+            const int yaw_index =
+                io::bam_table_index(static_cast<uint32_t>(e.heading) + 0x200000u);
             const int32_t yaw_sin =
-                static_cast<int32_t>(std::sin(yaw_rad) * io::kQ22One);
+                static_cast<int32_t>(io::bam_table_sin(yaw_index) * io::kQ22One);
             const int32_t yaw_cos =
-                static_cast<int32_t>(std::cos(yaw_rad) * io::kQ22One);
+                static_cast<int32_t>(io::bam_table_cos(yaw_index) * io::kQ22One);
             inf.eye_offset_x = static_cast<int32_t>(
                 (static_cast<int64_t>(lat) * yaw_sin) >> 22);
             inf.eye_offset_y = -static_cast<int32_t>(

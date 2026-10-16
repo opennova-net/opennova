@@ -161,6 +161,15 @@ std::string File::get_in_section(const std::string &section_name,
   return entry ? entry->text : "";
 }
 
+size_t File::insert_entry(Entry entry) {
+  size_t index = 0;
+  for (size_t i = 0; i < entries.size(); ++i) {
+    if (entries[i].section_index <= entry.section_index) index = i + 1;
+  }
+  entries.insert(entries.begin() + static_cast<std::ptrdiff_t>(index), std::move(entry));
+  return index;
+}
+
 bool File::is_grouped() const {
   if (sections.empty()) return true;
   std::vector<uint32_t> run_counts(sections.size(), 0);

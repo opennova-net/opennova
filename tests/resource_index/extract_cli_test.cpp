@@ -93,6 +93,27 @@ int main(int argc, char **argv) {
 	            text_of(log).find("expansion: xp1") != std::string::npos);
 	// A shader as stored, its loader's own SCR form.
 	TEST_EXPECT(extract(" --out " + quoted(out.string()) + " glass.fx") == 0 && text_of(out / "glass.fx") == shader);
+
+	// An install and an output folder the ANSI code page cannot spell ("Jos" U+00E9 and the
+	// katakana "moderu", as UTF-8 bytes): the arguments reach the vfs in UTF-8 (the exe's
+	// manifest; this test embeds it too, so its std::system hands them over in UTF-8).
+	const fs::path unicode_install = root / fs::u8path("Jos\xC3\xA9");
+	const fs::path unicode_out = root / fs::u8path("\xE3\x83\xA2\xE3\x83\x87\xE3\x83\xAB");
+	fs::create_directories(unicode_install, ec);
+	fs::create_directories(unicode_out, ec);
+	TEST_EXPECT(archive(unicode_install / "resource.pff", "packed"));
+	TEST_EXPECT(run(cli + " --game " + quoted(unicode_install.u8string()) + " --out " +
+	                quoted(unicode_out.u8string()) + " note.txt > " + quoted(log.string())) == 0 &&
+	            text_of(unicode_out / "note.txt") == "packed");
+	// Each entry is written in place: a file beside it named like a staging file stays as it was.
+	std::ofstream((out / "note.txt.tmp").string(), std::ios::binary) << "keep";
+	TEST_EXPECT(extract(to_out) == 0 && text_of(out / "note.txt") == "packed" && text_of(out / "note.txt.tmp") == "keep");
+	// A write that fails is an error, not a success: the entry's name is a folder at the output.
+	const fs::path blocked = root / "blocked";
+	fs::create_directories(blocked / "note.txt", ec);
+	const int failed_write = run(cli + " --game " + quoted(install.string()) + " --out " + quoted(blocked.string()) +
+	                             " note.txt > " + quoted(log.string()) + " 2>&1");
+	TEST_EXPECT(failed_write != 0 && failed_write != 1);
 	std::printf("extract_cli: OK\n");
 	return 0;
 }

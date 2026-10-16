@@ -637,8 +637,8 @@ static void back_with_markers(World &w) {
 // and not yet done is marked done, and the newest one's pool-3 slot becomes the checkpoint; outside
 // co-op nothing is marked and the checkpoint stays 0xFFFF. Jointops.exe's hook marks by the firing
 // event alone and keeps no checkpoint.
-// [orig: EventTrigger_MarkCoopCheckpoint @0x4534a0 (dfx2.exe); EventTrigger_MarkLinkedSpawnPoints
-//  @0x452ce0]
+// [orig: EventTrigger_MarkCoopCheckpoint @0x4534a0 (dfx2.exe)]
+// [orig: EventTrigger_MarkLinkedSpawnPoints @0x452ce0]
 static void test_dfx2_coop_checkpoint_marking() {
     struct Case { int title; uint32_t game_type; bool marks; bool checkpoint; };
     const Case cases[] = {

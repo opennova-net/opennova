@@ -12,6 +12,9 @@ namespace opennova::particle {
 
 namespace {
 
+// The degrees -> radians float the emitter's roll / yaw / pitch reads take
+// [orig: flt_7DCB00 @ 0x7dcb00 (0x3C8EFA35, pi / 180)]; a float, not
+// io::kRadiansPerDegree's double (engine/CLAUDE.md's float/double rule).
 constexpr float kDegreesToRadians = 0.01745329251994329577f;
 constexpr float kTwoPi = 6.28318530717958647692f;
 constexpr float kInfinity = std::numeric_limits<float>::infinity();

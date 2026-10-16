@@ -15,10 +15,6 @@ namespace {
 
 constexpr float kLn64 = 4.1588830833596718565f; // ln(64)
 
-int clamp_int(int value, int min_value, int max_value) {
-	return std::max(min_value, std::min(max_value, value));
-}
-
 // The 32-bit wrapping negate every `neg` clamp in the weather tick performs.
 int32_t wrap_neg(int32_t v) {
 	return static_cast<int32_t>(0u - static_cast<uint32_t>(v));
@@ -45,11 +41,11 @@ int32_t wrap_sub(int32_t a, int32_t b) {
 }
 
 int rgb_byte(float normalized) {
-	return clamp_int(static_cast<int>(normalized * 255.0f + 0.5f), 0, 255);
+	return std::clamp<int>(static_cast<int>(normalized * 255.0f + 0.5f), 0, 255);
 }
 
 float byte_to_float(int byte_value) {
-	return static_cast<float>(clamp_int(byte_value, 0, 255)) / 255.0f;
+	return static_cast<float>(std::clamp<int>(byte_value, 0, 255)) / 255.0f;
 }
 
 } // namespace
@@ -256,7 +252,7 @@ LightningAdditivesPacked lightning_additives_packed(uint32_t lightning_packed, i
 	// [orig: Environment_SetLightningFlash @ 0x57d320] — pmullw(bytes, level)
 	// then psrlw per slot; exact byte truncation (no rounding).
 	LightningAdditivesPacked out;
-	const int lvl = clamp_int(level, 0, 255);
+	const int lvl = std::clamp<int>(level, 0, 255);
 	const auto slot = [&](int shift) -> uint32_t {
 		uint32_t packed = 0;
 		for (int byte_shift = 0; byte_shift < 32; byte_shift += 8) {
@@ -335,7 +331,7 @@ int WeatherOscillator::tick() {
 	pos += velocity + scaled;
 	smoothed = (pos + 31 * smoothed) >> 5;
 	velocity = (63 * (velocity + ((0x8000 - pos) >> 4))) >> 6;
-	smoothed = clamp_int(smoothed, 0, 0xFFFF);
+	smoothed = std::clamp<int>(smoothed, 0, 0xFFFF);
 	osc_ring[ring_index] = smoothed;
 	return scaled;
 }
@@ -1108,13 +1104,13 @@ WaterRowColors water_strip_row_colors(float row_view_depth, const float right_de
 		diffuse_alpha = 255;
 		const int a = ftol_trunc(
 				static_cast<double>(row_view_depth) * 16711680.0 / fog_end_fp);
-		dist_alpha = clamp_int(255 - a, 0, 255);
+		dist_alpha = std::clamp<int>(255 - a, 0, 255);
 	} else {
 		// [orig: @ 0x5c2e22..0x5c2e9d] — the two lerps ftol-truncate; the
 		// /255 divisions are the 0x80808081 magic (exact truncating idiv).
 		const int alpha_term = ftol_trunc(alpha_lo + (alpha_hi - alpha_lo) * sin_angle);
 		brightness = ftol_trunc(bright_far + (bright_near - bright_far) * (1.0 - sin_angle));
-		const int a = clamp_int(
+		const int a = std::clamp<int>(
 				ftol_trunc(static_cast<double>(row_view_depth) * 16711680.0 / fog_end_fp),
 				0, 255);
 		dist_alpha = 255 - a * a / 255;
@@ -1402,9 +1398,9 @@ GlareResult compute_sun_glare(float view_dot_sun, int occlusion_brightness) {
 		pow32 *= pow32; // dot^32
 	}
 	const float pow128 = pow32 * pow32 * pow32 * pow32; // dot^128
-	const float occlusion = static_cast<float>(clamp_int(occlusion_brightness, 0, 255)) / 255.0f;
-	result.glare = clamp_int(static_cast<int>(pow32 * 192.0f * occlusion), 0, 255);
-	result.fog_whiten = clamp_int(static_cast<int>(pow128 * 40.0f * occlusion), 0, 40);
+	const float occlusion = static_cast<float>(std::clamp<int>(occlusion_brightness, 0, 255)) / 255.0f;
+	result.glare = std::clamp<int>(static_cast<int>(pow32 * 192.0f * occlusion), 0, 255);
+	result.fog_whiten = std::clamp<int>(static_cast<int>(pow128 * 40.0f * occlusion), 0, 40);
 	return result;
 }
 
@@ -1496,7 +1492,7 @@ int celestial_sun_alpha_fixed(int overcast_blend_fixed, int sun_dim_fixed) {
 	const int64_t fold = static_cast<int64_t>(0x10000 - overcast_blend_fixed) *
 			((0x640000 - sun_dim_fixed) / 100);
 	const int alpha = static_cast<int>((fold + 0x8000) >> 16);
-	return clamp_int(alpha, 0, 0x10000);
+	return std::clamp<int>(alpha, 0, 0x10000);
 }
 
 int celestial_moon_alpha_fixed(float fog_distance_world, int overcast_blend_fixed,
@@ -1580,7 +1576,7 @@ int water_glint_alpha_fixed(int view_dot_fixed, int brightness,
 	const int dim_scale = (0x640000 - sun_dim_fixed) >> 8;
 	const int combined = dim_scale * ((brightness * factor) >> 8);
 	const int alpha = (combined / 25600) >> 2;
-	return clamp_int(alpha, 0, 0x10000);
+	return std::clamp<int>(alpha, 0, 0x10000);
 }
 
 GlareRayJitter glare_ray_jitter(uint32_t jitter_index) {
@@ -1640,7 +1636,7 @@ int glare_alpha_tail(int scaled, int overcast_blend_fixed, int sun_dim_fixed,
 			((0x640000 - sun_dim_fixed) >> 8) / 25600;
 	const int alpha = static_cast<int>(
 			(static_cast<int64_t>(0x10000 - overcast_blend_fixed) * dim_fold + 0x8000) >> 16);
-	return clamp_int(alpha, 0, 0x10000);
+	return std::clamp<int>(alpha, 0, 0x10000);
 }
 
 } // namespace

@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include <string>
+#include <vector>
 
 #include <formats/pff/pff.h>
 #include "pff/pff_test_writer.h"
@@ -466,6 +467,200 @@ static int test_rewrite_with_entry(void) {
     return 1;
 }
 
+static uint32_t le32_at(const uint8_t *p) {
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+/* Retail's layout (C-400, ADR 0008 as amended): the payloads and the directory in the entries' own
+   order, never sorted, and the packer's 12-byte footer after the directory (every JO:CA archive:
+   c0a8a939 00000000 'KING') [orig: sub_4040E0 @ 0x4041A3..0x40432F (pack.exe)]. */
+static int test_write_retail_layout(void) {
+    const uint8_t b[] = {9, 8, 7, 6};
+    const uint8_t a[] = {1, 2, 3};
+    const uint8_t m[] = {5};
+    PffWriteEntry e[4] = {
+        { "bravo.dat", b,    (uint32_t)sizeof(b), 0, 11, 21 },   /* out of name order on purpose */
+        { "Alpha.txt", a,    (uint32_t)sizeof(a), 0, 12, 22 },
+        { "empty.bin", NULL, 0,                   0, 13, 23 },
+        { "Mid.bin",   m,    (uint32_t)sizeof(m), 0, 14, 24 },
+    };
+    const char *names[4] = { "bravo.dat", "Alpha.txt", "empty.bin", "Mid.bin" };
+    const uint32_t offsets[4] = { 20, 24, 27, 27 };
+    const char *path = "pff_layout.pff";
+    uint8_t *bytes = NULL;
+    long len = 0;
+    CHECK(pff_write_archive(path, PFF_FORMAT_PFF3, e, 4) == PFF_WRITE_OK, "write");
+    CHECK(read_whole_file(path, &bytes, &len), "read");
+    const uint32_t table = 20 + 4 + 3 + 0 + 1;
+    int ok = len == (long)(table + 4 * PFF_ENTRY_SIZE + PFF_FOOTER_SIZE) && le32_at(bytes + 16) == table &&
+             memcmp(bytes + 20, b, sizeof(b)) == 0 && memcmp(bytes + 24, a, sizeof(a)) == 0 &&
+             bytes[27] == m[0];
+    for (int i = 0; ok && i < 4; ++i) {
+        const uint8_t *rec = bytes + table + 36 * i;
+        char name[17] = {0};
+        memcpy(name, rec + 16, 16);
+        ok = strcmp(name, names[i]) == 0 && le32_at(rec + 4) == offsets[i] && le32_at(rec + 8) == e[i].size &&
+             le32_at(rec + 12) == e[i].timestamp && le32_at(rec + 32) == e[i].checksum;
+    }
+    const uint8_t footer[12] = { 0xC0, 0xA8, 0xA9, 0x39, 0, 0, 0, 0, 'K', 'I', 'N', 'G' };
+    ok = ok && memcmp(bytes + len - 12, footer, 12) == 0 && memcmp(PFF_RETAIL_FOOTER, footer, 12) == 0;
+    free(bytes);
+    CHECK(ok, "payloads and directory in the entries' order, then the retail footer");
+
+    /* The archive's payload order back from the name-sorted directory pff_open keeps (the empty
+       entry before the payload that starts where it does), and written again it is its bytes. */
+    PffArchive ar;
+    CHECK(pff_open(&ar, path) == 0, "open");
+    const std::vector<uint32_t> order = pff_payload_order(ar);
+    std::string walked;
+    for (const uint32_t i : order) walked += pff_entry_stored_name(ar.entries[i]) + ",";
+    pff_close(&ar);
+    CHECK(walked == "bravo.dat,Alpha.txt,empty.bin,Mid.bin,", "payload order");
+    const char *again = "pff_layout_again.pff";
+    CHECK(pff_write_archive_again(path, again) == PFF_WRITE_OK, "written again");
+    uint8_t *b1 = NULL, *b2 = NULL;
+    long l1 = 0, l2 = 0;
+    CHECK(read_whole_file(path, &b1, &l1) && read_whole_file(again, &b2, &l2), "read both");
+    ok = l1 == l2 && memcmp(b1, b2, (size_t)l1) == 0;
+    free(b1);
+    free(b2);
+    CHECK(ok, "an archive written again is its bytes");
+
+    /* An edit keeps the remaining entries in their payload order and adds after them. */
+    std::vector<PffEditEntry> adds(1);
+    adds[0].name = "Zed.new";
+    adds[0].data = {4, 2};
+    adds[0].timestamp = 1700000000u;
+    bool rewritten = false;
+    CHECK(pff_apply_edits(again, adds, {"alpha.txt"}, &rewritten) == PFF_WRITE_OK && rewritten, "edit");
+    CHECK(pff_open(&ar, again) == 0, "open edited");
+    walked.clear();
+    for (const uint32_t i : pff_payload_order(ar)) walked += pff_entry_stored_name(ar.entries[i]) + ",";
+    pff_close(&ar);
+    CHECK(walked == "bravo.dat,empty.bin,Mid.bin,Zed.new,", "kept in order, the add last");
+    remove(path);
+    remove(again);
+    return 1;
+}
+
+/* The footer's second word is the packer's to keep: an archive written again, edited or rewritten
+   with one entry keeps its earlier footer's, a new archive writes 0, and a file whose last bytes are
+   no 'KING' footer keeps nothing [orig: sub_4030E0 @ 0x403133..0x40318A (pack.exe), kept by
+   sub_4040E0 @ 0x4042B7..0x40432F]. */
+static int test_footer_keeps_second_word(void) {
+    const uint8_t a[] = {1, 2, 3};
+    const uint8_t b[] = {4, 5};
+    PffWriteEntry e[2] = {
+        { "one.txt", a, (uint32_t)sizeof(a), 0, 11, 21 },
+        { "two.txt", b, (uint32_t)sizeof(b), 0, 12, 22 },
+    };
+    const char *path = "pff_footer_kept.pff";
+    const char *again = "pff_footer_kept_again.pff";
+    const char *played = "pff_footer_kept_played.pff";
+    CHECK(pff_write_archive(path, PFF_FORMAT_PFF3, e, 2) == PFF_WRITE_OK, "write");
+    PffArchive ar;
+    CHECK(pff_open(&ar, path) == 0 && pff_footer_kept_word(&ar) == 0, "a new archive's second word is 0");
+    pff_close(&ar);
+    /* A footer whose second word an earlier packer left set. */
+    FILE *f = fopen(path, "r+b");
+    CHECK(f != NULL, "open for the patch");
+    const uint8_t word[4] = {0x41, 0xD3, 0xEE, 0x07};
+    fseek(f, -8, SEEK_END);
+    fwrite(word, 1, sizeof(word), f);
+    fclose(f);
+    CHECK(pff_open(&ar, path) == 0 && pff_footer_kept_word(&ar) == 0x07EED341u, "the kept word read back");
+    CHECK(pff_rewrite_with_entry(&ar, 0, b, sizeof(b), played) == PFF_WRITE_OK, "a rewrite with one entry");
+    pff_close(&ar);
+    CHECK(pff_write_archive_again(path, again) == PFF_WRITE_OK, "written again");
+    std::vector<PffEditEntry> adds(1);
+    adds[0].name = "three.txt";
+    adds[0].data = {7};
+    adds[0].timestamp = 1700000000u;
+    bool rewritten = false;
+    CHECK(pff_apply_edits(path, adds, {}, &rewritten) == PFF_WRITE_OK && rewritten, "an edit");
+    const char *outs[3] = { path, again, played };
+    for (int k = 0; k < 3; ++k) {
+        uint8_t *bytes = NULL;
+        long len = 0;
+        CHECK(read_whole_file(outs[k], &bytes, &len) && len >= 12, "read the result");
+        const uint8_t footer[12] = { 0xC0, 0xA8, 0xA9, 0x39, 0x41, 0xD3, 0xEE, 0x07, 'K', 'I', 'N', 'G' };
+        const int ok = memcmp(bytes + len - 12, footer, 12) == 0;
+        free(bytes);
+        CHECK(ok, "the earlier footer's second word kept");
+    }
+    /* No 'KING' at the end: nothing kept. */
+    f = fopen(again, "r+b");
+    CHECK(f != NULL, "open for the second patch");
+    fseek(f, -4, SEEK_END);
+    fwrite("QUIT", 1, 4, f);
+    fclose(f);
+    CHECK(pff_open(&ar, again) == 0 && pff_footer_kept_word(&ar) == 0, "no footer, no kept word");
+    pff_close(&ar);
+    remove(path);
+    remove(again);
+    remove(played);
+    return 1;
+}
+
+/* A stock-updated archive holds a `<DEAD SPACE>` record (flags 1) for every entry an edit
+   removed or replaced [orig: sub_4040E0 @ 0x4041B0..0x4041C4 (pack.exe)], so several share the
+   name; an edit, a rewrite and a Play rewrite leave them out (written compact, D-UPD-1) instead of
+   refusing the archive as two files sharing a name. */
+static int test_edits_drop_dead_space(void) {
+    const uint8_t keep[] = {1, 2, 3};
+    const uint8_t gone_a[] = {9, 9};
+    const uint8_t other[] = {4, 5, 6, 7};
+    const uint8_t gone_b[] = {8};
+    PffTestEntry raw[4] = {
+        { "keep.txt",     keep,   (uint32_t)sizeof(keep),   0 },
+        { "<DEAD SPACE>", gone_a, (uint32_t)sizeof(gone_a), 1 },
+        { "other.bin",    other,  (uint32_t)sizeof(other),  0 },
+        { "<DEAD SPACE>", gone_b, (uint32_t)sizeof(gone_b), 1 },
+    };
+    const char *path = "pff_dead_space.pff";
+    const char *again = "pff_dead_space_again.pff";
+    const char *played = "pff_dead_space_played.pff";
+    CHECK(pff_test_write_modern(path, raw, 4) == 0, "write the stock-updated archive");
+    PffArchive ar;
+    CHECK(pff_open(&ar, path) == 0 && ar.entry_count == 4, "open it: four records");
+    int dead = 0;
+    for (uint32_t i = 0; i < ar.entry_count; ++i) dead += pff_entry_is_dead_space(ar.entries[i]) ? 1 : 0;
+    CHECK(dead == 2, "two dead-space records");
+    const PffEntry *kept = pff_find(&ar, "keep.txt");
+    CHECK(kept != NULL && !pff_entry_is_dead_space(*kept), "a live entry is not dead space");
+    const uint8_t mission[] = {'B', 'M', 'S'};
+    CHECK(pff_rewrite_with_entry(&ar, (uint32_t)(kept - ar.entries), mission, sizeof(mission), played) ==
+          PFF_WRITE_OK, "a Play rewrite of it");
+    pff_close(&ar);
+    CHECK(pff_write_archive_again(path, again) == PFF_WRITE_OK, "written again");
+    std::vector<PffEditEntry> adds(1);
+    adds[0].name = "new.txt";
+    adds[0].data = {1};
+    adds[0].timestamp = 1700000000u;
+    bool rewritten = false;
+    CHECK(pff_apply_edits(path, adds, {}, &rewritten) == PFF_WRITE_OK && rewritten, "an edit of it");
+    const char *outs[3] = { path, again, played };
+    const char *want[3] = { "keep.txt,other.bin,new.txt,", "keep.txt,other.bin,", "keep.txt,other.bin," };
+    for (int k = 0; k < 3; ++k) {
+        CHECK(pff_open(&ar, outs[k]) == 0, "open the result");
+        std::string walked;
+        for (const uint32_t i : pff_payload_order(ar)) walked += pff_entry_stored_name(ar.entries[i]) + ",";
+        pff_close(&ar);
+        CHECK(walked == want[k], "the live entries in their order, no dead space");
+    }
+    CHECK(pff_open(&ar, path) == 0, "open the edit");
+    CHECK(entry_bytes_equal(&ar, "other.bin", other, sizeof(other)), "a live entry's bytes kept");
+    pff_close(&ar);
+    /* Dead space alone never makes an edit write. */
+    CHECK(pff_test_write_modern(path, raw, 4) == 0, "the stock-updated archive again");
+    CHECK(pff_apply_edits(path, {}, {"absent.x"}, &rewritten) == PFF_WRITE_OK && !rewritten,
+          "a no-op edit writes nothing");
+    remove(path);
+    remove(again);
+    remove(played);
+    return 1;
+}
+
 /* F6a: zero-entry archive is valid. */
 static int test_write_zero_entries(void) {
     const char *path = "pff_zero.pff";
@@ -618,6 +813,9 @@ int main(void) {
     RUN_TEST(test_entry_stored_name);
     RUN_TEST(test_write_error_string);
     RUN_TEST(test_rewrite_with_entry);
+    RUN_TEST(test_write_retail_layout);
+    RUN_TEST(test_edits_drop_dead_space);
+    RUN_TEST(test_footer_keeps_second_word);
     RUN_TEST(test_write_zero_entries);
     RUN_TEST(test_write_rejects_overlong_name);
     RUN_TEST(test_write_rejects_duplicate_names);

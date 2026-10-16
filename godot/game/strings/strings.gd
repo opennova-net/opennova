@@ -163,8 +163,7 @@ func _untrack_override_source() -> void:
 	_override_source = null
 
 
-## --- Engine-faithful lookup [orig: TextResource_FindEntryBySectionAndKey
-## @ 0x75D250 via GameErr_GetString @ 0x4C2C60] ---
+## --- Engine-faithful lookup (engine: formats/rtxt/rtxt.h) ---
 
 ## Section-scoped lookup against a named table, override-table-first. A miss
 ## returns "??section:key??", the visible marker the original engine produces,

@@ -1,4 +1,5 @@
 #include "authoring/mission_viewport_applier.h"
+#include "authoring/preview_godot.h"
 
 #include <godot_cpp/classes/environment.hpp>
 #include <godot_cpp/classes/image.hpp>
@@ -69,10 +70,6 @@ using opennova::editor::MissionSceneHeader;
 using opennova::editor::MissionViewport;
 using opennova::editor::NodeId;
 
-Vector3 to_godot(const opennova::editor::PreviewVec3 &v) {
-	return Vector3(v.x, v.y, v.z);
-}
-
 const MissionViewport &mission_of(const opennova::editor::ViewportModel &model) {
 	return static_cast<const MissionViewport &>(model);
 }
@@ -86,10 +83,6 @@ int kind_of(MissionPool pool) {
 	case MissionPool::Organic: return MissionData::KIND_ORGANIC;
 	}
 	return MissionData::KIND_ITEM;
-}
-
-int64_t now_us() {
-	return int64_t(Time::get_singleton()->get_ticks_usec());
 }
 
 } // namespace

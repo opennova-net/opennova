@@ -10,6 +10,7 @@
 #include <runtime/world/angle.h>
 #include <runtime/world/collision.h>
 #include <runtime/world/entity.h> // Entity
+#include <runtime/world/shell_sort_by_value.h> // CPairList_ShellSortByValue
 #include <base/gameprofile/game_type.h>
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
@@ -118,26 +119,6 @@ struct ScoredMarker {
     SpawnPointResult pose;
 };
 
-void retail_shell_sort_descending(std::vector<ScoredMarker> &rows) {
-    // Exact strict comparison and Knuth gap sequence.
-    // [orig: CPairList_ShellSortByValue @0x526CF0]
-    size_t gap = 1;
-    while (gap <= rows.size() / 9)
-        gap = 3 * gap + 1;
-    do {
-        for (size_t i = gap; i < rows.size(); ++i) {
-            const ScoredMarker insert = rows[i];
-            size_t j = i;
-            while (j >= gap && rows[j - gap].score < insert.score) {
-                rows[j] = rows[j - gap];
-                j -= gap;
-            }
-            rows[j] = insert;
-        }
-        gap /= 3;
-    } while (gap != 0);
-}
-
 SpawnPointResult best_marker_pose(World &world, int32_t marker_type,
                                   EntityHandle spawning_player) {
     const std::vector<const Entity *> markers = markers_of_type(world, marker_type);
@@ -186,7 +167,8 @@ SpawnPointResult best_marker_pose(World &world, int32_t marker_type,
         for (ScoredMarker &row : rows)
             row.score = static_cast<uint16_t>(world.crt_rand.next() >> 8);
     }
-    retail_shell_sort_descending(rows);
+    // [orig: Entity_FindBestSpawnPoint's CPairList_ShellSortByValue call @0x50CEC1]
+    shell_sort_by_value(rows, [](const ScoredMarker &m) { return m.score; });
     return rows.front().pose;
 }
 
@@ -668,6 +650,25 @@ const Entity *ZoneSystem::find_spawn_zone_for_team(uint8_t team, uint32_t game_t
         frontier = static_cast<uint32_t>(static_cast<int32_t>(frontier) + step);
         if (frontier == 0 || (mask & (1u << (frontier & 31u))) == 0) return nullptr;
     }
+}
+
+uint16_t deploy_pick_wire_value(int param, const SpawnZoneRegistry &registry) {
+    if (param == 65534) return kDeployPickAutoTeam;
+    if (param > 0) {
+        const size_t idx = static_cast<size_t>(param - 1);
+        if (idx < registry.entries.size()) return registry.entries[idx].packed;
+    }
+    return kDeployPickNone;
+}
+
+const SpawnZoneRegistry &SpawnZoneRegistryCache::get(const World &world,
+                                                     uint64_t world_sync_serial) {
+    if (!built || sync_serial != world_sync_serial) {
+        registry = world.zones.build_spawn_zone_list();
+        built = true;
+        sync_serial = world_sync_serial;
+    }
+    return registry;
 }
 
 } // namespace opennova::world

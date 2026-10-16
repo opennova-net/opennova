@@ -1,5 +1,6 @@
 #include <formats/foliage/runtime.h>
 
+#include <base/io/bits.h>
 #include <base/io/fixed.h>
 
 #include <algorithm>
@@ -36,20 +37,14 @@ constexpr int32_t kQuadrantOffsetFixed = 0x80000;
 constexpr int32_t kTileSizeFixed = 0x100000;
 constexpr uint32_t kTileSnapMask = 0xFFF00000u;
 
-uint32_t rol32(uint32_t value, uint32_t amount) {
-	const uint32_t n = amount & 31u;
-	if (n == 0u) return value;
-	return (value << n) | (value >> (32u - n));
-}
-
 uint32_t seed_for_key(uint32_t key) {
 	// [orig: Foliage_GenerateInstances_0 @ 0x5ffdd0;
 	// Foliage_GenerateModelTileInstances @ 0x600980]
-	return (key & 0x01FF01FFu) + rol32(kSeedConstant, key & 31u);
+	return (key & 0x01FF01FFu) + io::rotl32(kSeedConstant, key & 31u);
 }
 
 uint16_t next_draw(uint32_t &state) {
-	state = rol32(state + rol32(state, 11u), 4u) ^ 1u;
+	state = io::rotl32(state + io::rotl32(state, 11u), 4u) ^ 1u;
 	return static_cast<uint16_t>(state);
 }
 
@@ -58,10 +53,6 @@ int32_t sign_extend_15(uint32_t value) {
 	return (low & 0x4000u) != 0u
 	         ? static_cast<int32_t>(low | 0xFFFF8000u)
 	         : static_cast<int32_t>(low);
-}
-
-int32_t to_fixed(float value) {
-	return static_cast<int32_t>(value * static_cast<float>(kFixedOne));
 }
 
 bool try_to_fixed(float value, int32_t &result) {
@@ -76,17 +67,13 @@ bool try_to_fixed(float value, int32_t &result) {
 	return true;
 }
 
-float from_fixed(int32_t value) {
-	return static_cast<float>(value) / static_cast<float>(kFixedOne);
-}
-
 int32_t midpoint_fixed(int32_t a, int32_t b) {
 	const int64_t sum = static_cast<int64_t>(a) + static_cast<int64_t>(b);
 	if (sum >= 0) return static_cast<int32_t>(sum / 2);
 	return static_cast<int32_t>(-((-sum + 1) / 2));
 }
 
-// One candidate of the shared 6x6 stream. x_fixed/z_fixed are the Godot
+// One candidate of the shared 6x6 stream. x_fixed/z_fixed are the render
 // plane (z = -mission y); the MODEL tier additionally keeps its mission-y
 // value, the frame its key and corner arithmetic run in.
 struct Candidate {
@@ -98,7 +85,7 @@ struct Candidate {
 	int32_t z_fixed = 0;
 };
 
-// Negating a mission-y fixed value into the Godot plane; the one
+// Negating a mission-y fixed value into the render plane; the one
 // unrepresentable input (INT32_MIN) saturates instead of overflowing.
 int32_t negate_fixed(int32_t value) {
 	return value == std::numeric_limits<int32_t>::min()
@@ -129,7 +116,7 @@ Candidate next_candidate(int index, uint32_t &state) {
 
 Candidate detail_candidate(uint32_t key, int index, uint32_t &state) {
 	// The detail key's HIGH15 is the cell's X-min and LOW15 its Z-min on the
-	// Godot plane (the collector packs PolyTrn's -camera_y sector, FB20, into
+	// render plane (the collector packs PolyTrn's -camera_y sector, FB20, into
 	// the low half); local A and local B both ADD. Retail's blocker, map and
 	// height samples all take (keyHi + A, keyLo + B).
 	// [orig: Foliage_GenerateInstances_0 @ 0x5fff84..0x5fffa2 (placement),
@@ -138,8 +125,8 @@ Candidate detail_candidate(uint32_t key, int index, uint32_t &state) {
 	Candidate candidate = next_candidate(index, state);
 	const int32_t base_x = sign_extend_15(key >> 16u);
 	const int32_t base_z = sign_extend_15(key);
-	candidate.x_fixed = to_fixed(static_cast<float>(base_x) + candidate.local_a);
-	candidate.z_fixed = to_fixed(static_cast<float>(base_z) + candidate.local_b);
+	candidate.x_fixed = io::float_to_fp16_16(static_cast<float>(base_x) + candidate.local_a);
+	candidate.z_fixed = io::float_to_fp16_16(static_cast<float>(base_z) + candidate.local_b);
 	return candidate;
 }
 
@@ -147,15 +134,15 @@ Candidate model_candidate(uint32_t key, int index, uint32_t &state,
                           int32_t &r_mission_y_fixed) {
 	// The MODEL key's HIGH15 is the cell's X-min and LOW15 its MISSION-y top
 	// (y_snap + 16); the candidate is (keyHi + A, keyLo - B) in mission x/y,
-	// so on the Godot plane z = B - keyLo.
+	// so on the render plane z = B - keyLo.
 	// [orig: Foliage_GenerateModelTileInstances @ 0x600af5..0x600b0c;
 	// Foliage_UpdateModelTiles @ 0x601fd0..0x60205b (key)]
 	Candidate candidate = next_candidate(index, state);
 	const int32_t base_x = sign_extend_15(key >> 16u);
 	const int32_t base_y = sign_extend_15(key);
-	candidate.x_fixed = to_fixed(static_cast<float>(base_x) + candidate.local_a);
+	candidate.x_fixed = io::float_to_fp16_16(static_cast<float>(base_x) + candidate.local_a);
 	r_mission_y_fixed =
-	    to_fixed(static_cast<float>(base_y) - candidate.local_b);
+	    io::float_to_fp16_16(static_cast<float>(base_y) - candidate.local_b);
 	candidate.z_fixed = negate_fixed(r_mission_y_fixed);
 	return candidate;
 }
@@ -203,7 +190,7 @@ std::array<SilhouetteCell, 4> silhouette_cells(int32_t anchor_x,
 }
 
 float sampled_height(const WorldSamplers &world, int32_t x, int32_t z) {
-	return world.height_at ? world.height_at(from_fixed(x), from_fixed(z)) : 0.0f;
+	return world.height_at ? world.height_at(io::fp16_16_to_float(x), io::fp16_16_to_float(z)) : 0.0f;
 }
 
 bool candidate_is_blocked(const RuntimeSlot &slot,
@@ -211,8 +198,8 @@ bool candidate_is_blocked(const RuntimeSlot &slot,
                           const Candidate &candidate) {
 	if (!placed_tiles_keep_off(slot.attrib_flags)) return false;
 	return world.path_blocked &&
-	       world.path_blocked(from_fixed(candidate.x_fixed),
-	                          from_fixed(candidate.z_fixed),
+	       world.path_blocked(io::fp16_16_to_float(candidate.x_fixed),
+	                          io::fp16_16_to_float(candidate.z_fixed),
 	                          kPlacedTileReach);
 }
 
@@ -256,8 +243,8 @@ std::vector<DetailInstance> generate_detail_cell(
 		const uint32_t mask =
 		    world.detail_foliage_mask_at
 		        ? world.detail_foliage_mask_at(
-		              to_fixed(static_cast<float>(cell.atlas_x) + candidate.local_a),
-		              to_fixed(static_cast<float>(cell.atlas_z) + candidate.local_b))
+		              io::float_to_fp16_16(static_cast<float>(cell.atlas_x) + candidate.local_a),
+		              io::float_to_fp16_16(static_cast<float>(cell.atlas_z) + candidate.local_b))
 		        : 0u;
 		if ((mask & (1u << slot_index)) == 0u) continue;
 
@@ -268,8 +255,8 @@ std::vector<DetailInstance> generate_detail_cell(
 		instance.atlas_x = cell.atlas_x;
 		instance.atlas_z = cell.atlas_z;
 		instance.center = {
-		    from_fixed(candidate.x_fixed),
-		    from_fixed(candidate.z_fixed),
+		    io::fp16_16_to_float(candidate.x_fixed),
+		    io::fp16_16_to_float(candidate.z_fixed),
 		};
 		instance.yaw_radians = candidate.yaw;
 		result.push_back(instance);
@@ -295,8 +282,8 @@ bool make_silhouette_instance(
 	instance.quadrant = quadrant;
 	instance.cell_key = cell_key;
 	instance.center = {
-	    from_fixed(candidate.x_fixed),
-	    from_fixed(candidate.z_fixed),
+	    io::fp16_16_to_float(candidate.x_fixed),
+	    io::fp16_16_to_float(candidate.z_fixed),
 	};
 	instance.yaw_radians = candidate.yaw;
 	instance.alpha_reference = alpha_reference;
@@ -305,7 +292,7 @@ bool make_silhouette_instance(
 	// (keyHi + A', keyLo - B') with (A', B') the rotated footprint offsets,
 	// the edge midpoints are the arithmetic-shift halves of those fixed
 	// coordinates, and every height sample takes mission (x, y), i.e. the
-	// Godot plane (x, -y). [orig: Foliage_GenerateModelTileInstances
+	// render plane (x, -y). [orig: Foliage_GenerateModelTileInstances
 	// @ 0x600bd0..0x600c6a (corners), 0x600c70..0x600d32 (midpoints)]
 	const float cosine = std::cos(candidate.yaw);
 	const float sine = std::sin(candidate.yaw);
@@ -331,8 +318,8 @@ bool make_silhouette_instance(
 		instance.corner_local_b[corner] = rotated_b;
 		const int32_t corner_z = negate_fixed(corner_y[corner]);
 		instance.corners[corner] = {
-		    from_fixed(corner_x[corner]),
-		    from_fixed(corner_z),
+		    io::fp16_16_to_float(corner_x[corner]),
+		    io::fp16_16_to_float(corner_z),
 		    sampled_height(world, corner_x[corner], corner_z),
 		};
 	}
@@ -496,13 +483,13 @@ void Runtime::reset() {
 size_t Runtime::invalidate_cells(int32_t x0, int32_t z0, int32_t x1, int32_t z1,
                                  const std::array<int32_t, FOLIAGE_MAX_DEFS> &detail_reach) {
 	if (x1 <= x0 || z1 <= z0) return 0;
-	// A cell's span on the Godot plane, widened by `reach` each way, against the rect (half-open both).
+	// A cell's span on the render plane, widened by `reach` each way, against the rect (half-open both).
 	const auto meets = [&](int64_t cx0, int64_t cz0, int64_t reach) {
 		return cx0 - reach < x1 && cx0 + 16 + reach > x0 && cz0 - reach < z1 && cz0 + 16 + reach > z0;
 	};
 	size_t dropped = 0;
 	for (int slot_index = 0; slot_index < FOLIAGE_MAX_DEFS; ++slot_index) {
-		// A detail cell keys its X-min and Godot-plane Z-min; its candidates sample the ground bilinearly (one
+		// A detail cell keys its X-min and render-plane Z-min; its candidates sample the ground bilinearly (one
 		// texel on), and the geometry expanded over them reaches the slot's detail reach past each.
 		const int64_t cell_reach = 1 + std::max<int64_t>(0, detail_reach[static_cast<size_t>(slot_index)]);
 		for (DetailCacheEntry &entry : detail_cache_[slot_index]) {
@@ -512,7 +499,7 @@ size_t Runtime::invalidate_cells(int32_t x0, int32_t z0, int32_t x1, int32_t z1,
 			entry = DetailCacheEntry{};
 			++dropped;
 		}
-		// A model tile keys its X-min and its mission-y top (the Godot plane's z from -top); its corners reach the
+		// A model tile keys its X-min and its mission-y top (the render plane's z from -top); its corners reach the
 		// rotated footprint past the tile.
 		const int64_t reach =
 		    static_cast<int64_t>(std::ceil(cached_slots_[slot_index].model_radius * 0.75f * 1.4143f)) + 1;
@@ -756,7 +743,7 @@ FrameOutput Runtime::render_frame(const FrameRequest &request,
 		}
 		if (anchor.view_depth < kSilhouetteDepth) continue;
 		// The anchor enters the MODEL walk as its mission (x, y) position;
-		// the Godot plane's z is -y. [orig: Terrain_RenderSectorEntitiesBySide
+		// the render plane's z is -y. [orig: Terrain_RenderSectorEntitiesBySide
 		// @ 0x5c7e1e..0x5c7e24 (tile_coords = entity +4/+8)]
 		int32_t anchor_x = 0;
 		int32_t anchor_mission_y = 0;

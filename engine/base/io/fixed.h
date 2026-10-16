@@ -48,6 +48,13 @@ inline int32_t saturate_fp16_16(double scaled)
 }
 } // namespace detail
 
+// A 64-bit sum or difference of 16.16 values, saturated to the 32-bit range.
+inline int32_t saturate_i32(int64_t value)
+{
+    return (int32_t)std::clamp<int64_t>(value, std::numeric_limits<int32_t>::min(),
+                                        std::numeric_limits<int32_t>::max());
+}
+
 // Truncating (the default float -> int the original compiles to).
 inline int32_t float_to_fp16_16_sat(double units)
 {
@@ -58,6 +65,14 @@ inline int32_t float_to_fp16_16_sat(double units)
 inline int32_t float_to_fp16_16_round_sat(double units)
 {
     return detail::saturate_fp16_16(std::round(units * 65536.0));
+}
+
+// Round-to-nearest (half away from zero), unsaturated: the float -> 16.16 the
+// presentation-frame feeds take (std::lround over the double product). Binding
+// policy, not witnessed arithmetic.
+inline int32_t q16_from_float(float units)
+{
+    return (int32_t)std::lround((double)units * 65536.0);
 }
 
 // Non-negative, truncating, unsaturated: the env fog-distance form.

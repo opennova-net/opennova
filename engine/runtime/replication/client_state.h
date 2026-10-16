@@ -496,7 +496,7 @@ struct ClientEntityState {
 	// +0x1DC pitch high words): a joiner runs no brains, so an ewep child's
 	// class update publishes its gun words here for the carrier's render
 	// callback. Not a wire field. [orig: Entity_UpdateTransformAndTurret
-	//  @0x440F70..0x441020; HUD_CacheEntityDebugStats @0x449ECF..0x449EE2]
+	//  @0x440F70..0x441020; BoneCallback_tank_PublishControls @0x449ECF..0x449EE2]
 	int16_t carried_gun_yaw_word = 0;
 	int16_t carried_gun_pitch_word = 0;
 	bool carried_gun_words_valid = false;
@@ -999,7 +999,7 @@ struct ClientSessionStatus {
 };
 ClientSessionStatus fold_session_status(const SessionStatusBlock &block, uint32_t now_ms);
 // The session's elapsed milliseconds: 0 while not valid, else the uptime plus
-// the time since the stamp (u32 wrap) [orig: SessionStatus_GetElapsedMS @0x52d5f0].
+// the time since the stamp (u32 wrap) [orig: CSessionTimer_GetElapsedMS @0x52d5f0].
 uint32_t session_status_elapsed_ms(const ClientSessionStatus &status, uint32_t now_ms);
 
 // The S2C 0x7E strings a client keeps: each strncpy'd into its own 1024-byte
@@ -1034,6 +1034,12 @@ struct ClientState {
 	int32_t anchor_y = 0;
 	int32_t anchor_z = 0;
 	int16_t local_health = 0;
+	// The 0x0A header tail's last word: the authority's copy of this client's
+	// own entity+0x120 (Armor; ammo class 1's carried pool shares it), stored
+	// onto the local player on every frame that carries the tail.
+	// [orig: NapiNPClientMsg_0x00A -- the read @0x430442, the store
+	//  g_LocalPlayerEntity->Armor @0x4305EB]
+	int16_t local_armor = 0;
 	// The 0x0A header tail's state byte: the authority's copy of this client's
 	// own stance, bit 0 prone and bit 1 crouch (MoveOrder bits 8/9 >> 8). The
 	// client re-latches its stance from it on every frame that carries the tail
@@ -1280,7 +1286,7 @@ struct ClientState {
 	// (0x4E, {netId}) @0x43266c].
 	std::vector<uint32_t> pending_clan_walk_requests;
 	// The S2C 0x4C player-slot pointer table, replaced whole by every snapshot
-	// [orig: g_PlayerSlotPtrTable / g_PlayerSlotPtrCount @0xA822D0/D4 — freed
+	// [orig: g_PlayerSlotPtrTable @0xA822D0, g_PlayerSlotPtrCount @0xA822D4 — freed
 	//  and zeroed @0x428583..0x4285a1, one entry per snapshot entry @0x428698].
 	std::vector<ClientVisiblePlayer> visible_players;
 	// The 0x22 + 0x23 refresh pairs the 0x4D / 0x50 folds queue.

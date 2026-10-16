@@ -1,5 +1,7 @@
 #include <formats/threedi/threedi.h>
 
+#include <base/io/os_path.h>
+
 #include <formats/threedi/threedi_3di3.h> // THREEDI_3DI3_PARENT_FLAG / _LENGTH_MASK
 
 #include <errno.h>
@@ -120,7 +122,7 @@ int threedi_read_file(const char *path, ThreediFile *out_file)
         return EINVAL;
     }
 
-    FILE *f = fopen(path, "rb");
+    FILE *f = opennova::io::fopen_utf8(path, "rb");
     if (!f) {
         return errno ? errno : -1;
     }

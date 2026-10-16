@@ -192,7 +192,7 @@ Error MusicScript::load_from_path(const String &p_path) {
 	// extension): after the generic payload decode, only an SCR0 magic that
 	// mus_validate accepts is a music script.
 	PackedByteArray bytes;
-	if (!read_nova_payload_file(p_path, bytes)) {
+	if (!read_payload_file(p_path, bytes)) {
 		UtilityFunctions::push_warning("MusicScript: cannot open ", p_path);
 		return ERR_FILE_CANT_OPEN;
 	}

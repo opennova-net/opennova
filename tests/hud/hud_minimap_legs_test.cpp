@@ -148,6 +148,36 @@ void test_mask_and_missing_sector_tiles() {
 			"the big map's tiles reach the rect edge (no disc crop)");
 }
 
+// The tile's grid cell follows the .trn's wrap flags: off the grid a wrapping
+// axis takes the low four bits (cell 15 for sector -1), a clamped one cell 0.
+// [orig: Render_TerrainDecal @0x60741d..0x60743d, the OOB masks]
+void test_terrain_cell_wrap_flags() {
+	HudMinimapInput in = corner();
+	in.terrain.present = true;
+	in.terrain.sector_count = 16;
+	in.terrain.sector_rows = 16;
+	in.terrain.sector_grid.fill(0);
+	for (int row = 0; row < 16; ++row) in.terrain.sector_grid[row * 16] = 1; // column 0 only
+	in.player_x = 0;
+	in.player_y = 0;
+	const auto real_tiles = [](const HudMapPass &p) {
+		int real = 0;
+		for (const HudMapTri &t : p.terrain)
+			if (std::fabs(t.a.u - 0.5f / 1024.0f) > 1e-6f || std::fabs(t.a.v - 0.5f / 1024.0f) > 1e-6f ||
+					std::fabs(t.b.u - 0.5f / 1024.0f) > 1e-6f || std::fabs(t.c.u - 0.5f / 1024.0f) > 1e-6f)
+				++real;
+		return real;
+	};
+	in.terrain.wrap_x = true;
+	HudMinimapCompiler wrapping;
+	const int wrapped = real_tiles(wrapping.compile(in));
+	in.terrain.wrap_x = false;
+	HudMinimapCompiler clamping;
+	const int clamped = real_tiles(clamping.compile(in));
+	CHECK(wrapped > 0, "column 0's sectors draw");
+	CHECK(clamped > wrapped, "a clamped axis draws the west neighbours from column 0");
+}
+
 // A3 — the tip clamps at R - span with the chevron at half-size span; inside
 // that circle the dot sits AT the target at 0.75 span; the distance label
 // draws only when the race (within 34 degrees of screen-up) stored one.
@@ -614,6 +644,7 @@ void test_route_lines() {
 } // namespace
 
 int main() {
+	test_terrain_cell_wrap_flags();
 	test_bit16_squaring_and_width_scale();
 	test_mask_and_missing_sector_tiles();
 	test_pointer_geometry_and_race();

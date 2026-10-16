@@ -143,14 +143,14 @@ VehicleCtrlRegisters vehicle_ctrl_registers(const Entity::VehicleMotorState &sta
 	// entity+0x2B6 is the high word of the vehicle wheel/steer dword. MOVZX
 	// makes a negative wheel deflection a 0..0xFFFF cyclic phase; the following
 	// retail 0x10000 cap is unreachable for a zero-extended word.
-	// [orig: Entity_CacheVehicleHUDStats @0x4929B0;
+	// [orig: BoneCallback_cveh_PublishControls @0x4929B0;
 	//  MOVZX/store @0x4929C0..0x4929D7]
 	out.steering = static_cast<int32_t>(static_cast<uint32_t>(state.steer_state) >> 16);
 
 	// Reproduce CDQ/XOR/SUB as unsigned two's-complement arithmetic before the
     // unsigned 0x10000 cap. In particular INT_MIN becomes 0x80000000 (it does
     // not invoke C++ signed-abs UB) and therefore publishes 0x10000.
-    // [orig: Entity_CacheVehicleHUDStats @0x4929DC..0x4929F1]
+    // [orig: BoneCallback_cveh_PublishControls @0x4929DC..0x4929F1]
     const uint32_t speed_bits = static_cast<uint32_t>(state.speed);
     const uint32_t sign_mask = 0u - (speed_bits >> 31);
     const uint32_t magnitude =
@@ -158,7 +158,7 @@ VehicleCtrlRegisters vehicle_ctrl_registers(const Entity::VehicleMotorState &sta
     out.speed = static_cast<int32_t>(
             std::min(magnitude, uint32_t{0x10000}));
 
-    // The part-animation words [orig: Entity_CacheVehicleHUDStats @0x4929B0 —
+    // The part-animation words [orig: BoneCallback_cveh_PublishControls @0x4929B0 —
     // the rotor angle's +0x466 @0x492ACA..0x492ADE, the wheel phase's +0x2BA
     // @0x4929B4]: the accumulators' high words, zero-extended like the steer
     // word. The tail rotor publishes the same word: ordinal 47 reads the one
@@ -176,7 +176,7 @@ VehicleCtrlRegisters vehicle_ctrl_registers(const Entity::VehicleMotorState &sta
 			return tire(io::bam_sar(io::bam_add(c[a], c[b]), 1));
 		};
 		// The x87 stack retains the 0.33 constant, not the first mean.
-		// [orig: HUD_CacheEntityDebugStats @0x449C10, @0x449D25..0x449D33 /
+		// [orig: BoneCallback_tank_PublishControls @0x449C10, @0x449D25..0x449D33 /
 		// @0x449E25..0x449E3F; flt_7C59B4 = 0.33000001311302185]
 		const auto third = [&](int a, int b, int d) {
 			const int32_t sum = io::bam_add(io::bam_add(c[a], c[b]), c[d]);
@@ -880,9 +880,9 @@ void VehicleSystem::tick_motor(Entity &veh, const VehicleTraits &traits,
 			if (static_cast<int32_t>(std::min(length, detail::kFtolClamp)) > 0) {
 				const int32_t scale = static_cast<int32_t>(
 						double(m.chassis_impulse_amplitude) * double(28.16f)); // flt_7C6FA0
-				m.vel_x = io::bam_add(m.vel_x, q16_mul_rhu(dir[0], scale));
-				m.vel_y = io::bam_add(m.vel_y, q16_mul_rhu(dir[1], scale));
-				m.slide_z = io::bam_add(m.slide_z, q16_mul_rhu(dir[2], scale));
+				m.vel_x = io::bam_add(m.vel_x, retail_q16_mul_rhu(dir[0], scale));
+				m.vel_y = io::bam_add(m.vel_y, retail_q16_mul_rhu(dir[1], scale));
+				m.slide_z = io::bam_add(m.slide_z, retail_q16_mul_rhu(dir[2], scale));
 			}
 			if (!m.chassis_contact_active)
 				std::fill_n(m.chassis_impulse_direction, 3, 0);
@@ -1254,7 +1254,7 @@ int32_t plat_terrain_probe(const World &world, int32_t X, int32_t Y, int32_t Z, 
 
 } // namespace detail
 
-// q16_mul_rhu / q16_normalize / q16_cross moved to vehicle_motor_detail.h
+// q16_normalize / q16_cross moved to vehicle_motor_detail.h (the product is entity.h's retail_q16_mul_rhu)
 // (shared with the wheeled/light solves); the witness notes ride with them.
 
 namespace detail {

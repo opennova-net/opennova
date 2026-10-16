@@ -78,10 +78,10 @@ struct NvgLaserView {
 // (net-re §5.60). Our sim records each spawn (RoundSim.fired) and this pass drains it
 // once per logic tick — the same records, one presentation per shot.]
 //
-// Sound distance model [orig: Sound_PlayWithDistanceAttenuation @ 0x528E40]: a shot
+// Sound distance model (engine: runtime/world/fire_sound.h): a shot
 // heard from >= 30 u arrives LATE by the witnessed propagation delay
 // (62 * dist / 330) >> 2 ticks. The gate and the pending-sound slot pool
-// [orig: Sound_TickPendingSlots @ 0x529310] live in the SIM on the logic clock
+// (engine: runtime/world/fire_sound.h) live in the SIM on the logic clock
 // (world/fire_sound.h, S12a): the runtime stamps the camera listener each frame,
 // the sim gates at fire time and counts down per logic tick, and this pass just
 // plays whatever drain_fire_sounds() returns — including the adm-arm action-row
@@ -91,14 +91,14 @@ struct NvgLaserView {
 // Entity_UpdateMuzzleGlowEffect @ 0x56C960) routes to the EffectLightDirector's
 // light pool per presented fire (on_muzzle_fire).
 //
-// Tracers [orig: RoundData_SpawnRound @ 0x4EC0D0]: every tracer_rate-th round per
+// Tracers (engine: runtime/world/round_sim.cpp): every tracer_rate-th round per
 // shooter (forcetracer 0x8000 = every round) is visible in flight — a channel in the
-// tracer/trail emitter pool [orig: g_TracerEmitterPool @ 0x2BF5270], styled by the
+// tracer/trail emitter pool (engine: runtime/world/tracer_trails.h), styled by the
 // ammo 'tracer_type <friendly> [enemy]' id selected against the LOCAL player's team
 // at spawn (@ 0x4ec740; shooter == local player counts friendly — our sim runs the
 // same select, world/tracer_trails.h). The sim owns the point rings (one pre-move
 // point per 62 Hz tick, drain after death); the witnessed style tables and the
-// ribbon build [orig: CEffectChannel_RenderRibbon @ 0x5DB8A0] live in
+// ribbon build (engine: runtime/renderer/tracer_frame.h) live in
 // engine/runtime/renderer/tracer_frame.{h,cpp} (pinned by the renderer_tracer_frame
 // ctest); this pass compiles the trail rows through it against the render camera
 // and uploads one surface per run of same-material channel draws, in pool order,

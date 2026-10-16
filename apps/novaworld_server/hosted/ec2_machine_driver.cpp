@@ -5,6 +5,7 @@
 #include "loggable.h"
 #include "net_cidr.h"
 #include "owner_file.h"
+#include "text_util.h"
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
@@ -41,9 +42,6 @@ bool is_digit(char c) {
 }
 bool is_lower_hex(char c) {
 	return is_digit(c) || (c >= 'a' && c <= 'f');
-}
-bool is_alnum(char c) {
-	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || is_digit(c);
 }
 bool is_region_char(char c) {
 	return (c >= 'a' && c <= 'z') || is_digit(c) || c == '-';

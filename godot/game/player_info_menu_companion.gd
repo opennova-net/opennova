@@ -284,7 +284,7 @@ func _populate_loadout() -> void:
 	if _weapons == null:
 		return
 	var class_mask := _selected_class_mask()
-	# [orig: g_PlayerInfoTeamMask = 2 - (team != 0) @0x55de60 — native policy]
+	# (engine: runtime/world/player_loadout.cpp)
 	var team_mask := WeaponDatabase.player_info_team_mask(_team)
 	_fill_weapon_slot("PRIMARY", WeaponDatabase.SLOT_PRIMARY, class_mask, team_mask)
 	_fill_weapon_slot("SECONDARY", WeaponDatabase.SLOT_SECONDARY, class_mask, team_mask)

@@ -316,6 +316,9 @@ int main() {
 		}
 	};
 	uint32_t tick = 1;
+	// A NovaWorld join carries the session's AppId as its APPID, the .joi CK's value; the
+	// host refuses a NovaWorld joiner without it (code 9, B-7).
+	client.set_app_id(std::to_string(server.lister()->host_role().app_id()));
 	ship(client.start());
 	bool in_match = false;
 	for (int f = 0; f < 900 && !in_match; ++f) {

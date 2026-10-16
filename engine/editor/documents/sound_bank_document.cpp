@@ -169,7 +169,7 @@ RecordTable make_table() {
 		wave.field(RF{ranged(schema_of("volume", FieldType::Integer, "Dialog volume",
 		                               "The volume, 0 to 255, a mission's dialog line plays this wave at when it names "
 		                               "it, 0 playing at full [orig: Dialog_LoadAudioClip @ 0x44dd10, the entry's byte +33 "
-		                               "through sub_75BE10 @ 0x75be10; the play hook sub_527560 @ 0x527598]; a set's "
+		                               "through sub_75BE10 @ 0x75be10; the play hook Dialog_ApplyDialogueVolumeAndPlayFactor @ 0x527598]; a set's "
 		                               "members carry their own."),
 		                     0, 255, 1),
 		              {[](const RecordHandle &r, Value &out) { return out = int64_t(wave_of(r).volume), true; },

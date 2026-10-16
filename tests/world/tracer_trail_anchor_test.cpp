@@ -58,9 +58,14 @@ int main() {
 	expect(crest.x == moved(at.x, 0) && crest.y == moved(at.y, 0x4000) &&
 	               crest.z == moved(at.z, 0x4000),
 	       "the crest: a quarter unit along local Y and Z");
-	// Heading 90 degrees: local Y swings to -X, Z stays up.
+	// Heading 90 degrees: local Y swings to -X, Z stays up. The matrix takes the
+	// quarter turn's sine and cosine through dbl_7C3608 (io::kRadiansPerBamX87),
+	// so cos is -201 / 2^22 and sin 4194303 / 2^22: X = (0x4000 x -4194303 +
+	// 0x200000) >> 22 = -0x4000, and Y keeps (0x4000 x -201 + 0x200000) >> 22 = -1
+	// [orig: Math_BuildFixedPointMatrixFromEulerAngles `fld dbl_7C3608` @0x613F5D,
+	//  called @0x4E64FE].
 	const w::Vec3 turned = w::tracer_trail_anchor(ch, at, 0x40000000, 0, 0, 8);
-	expect(turned.x == moved(at.x, -0x4000) && turned.y == moved(at.y, 0) &&
+	expect(turned.x == moved(at.x, -0x4000) && turned.y == moved(at.y, -1) &&
 	               turned.z == moved(at.z, 0x4000),
 	       "heading 90: local Y is -X");
 	// 24 x 0x8000000 wraps to entry 768, the trough.

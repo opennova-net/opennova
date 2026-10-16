@@ -197,11 +197,13 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/foliage_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_atlas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_quad_inputs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/q3_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/frame_fx_effects.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/nvg_scope_lens.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/fp_viewmodel_spec.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_order.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_slot_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/render_slot_shadow.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/scene_overlay.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/precipitation_frame.cpp
@@ -352,6 +354,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/world/guided_missile_flight.cpp
     world/guided_round.cpp  # the stng pursuit integrator (D-NET-64)
     ${CMAKE_CURRENT_SOURCE_DIR}/world/round_sim.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/world/impact_damage.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/sound_emitter_mailbox.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/terrain_scorch_events.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/world/throwables.cpp
@@ -435,6 +438,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_emplaced.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_present_projection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/present_rows.cpp            # the PF_* row collectors, both roles (ADR 0043 G3)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/occlusion_collect.cpp       # one view's entity collect (the render gates' walk)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_effects.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_squad.cpp
@@ -466,6 +470,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/host_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/net_debug_report.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_role.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_role_replica_world.cpp  # the replica-world mirror and the authoritative appliers of JoinerRole
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/local_role.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loadout_submit.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/loopback_channel.cpp

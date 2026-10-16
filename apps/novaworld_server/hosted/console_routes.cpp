@@ -21,11 +21,6 @@ namespace {
 
 using Clock = std::chrono::steady_clock;
 
-crow::response no_store(crow::response res) {
-	res.set_header("Cache-Control", "no-store");
-	return res;
-}
-
 // The server's cp1252 as UTF-8 for a JSON reply.
 std::string utf8(const std::string &cp1252) {
 	return cp1252_to_utf8(cp1252);

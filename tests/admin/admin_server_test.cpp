@@ -434,6 +434,11 @@ void test_rights_and_usage() {
 	expect(quit.empty() && !admin.open, "QUIT closes with no reply");
 	expect(inmatch::admin_split_command("a b c d e f g h i j k l m n o p q r s t u v w x y z").back() == "y z",
 	       "the 25th token runs to the end of the line");
+	// B-8: the split is the .ACP CRT isspace, so cp1252's no-break space 0xA0 splits too
+	// [orig: CAdminServer_DispatchCommand @0x4067B5].
+	expect(inmatch::admin_split_command("SET\xA0ServerName x") ==
+	               std::vector<std::string>{ "SET", "ServerName", "x" },
+	       "a no-break space splits like a space");
 }
 
 void test_get_and_set() {
@@ -845,6 +850,9 @@ void test_reply_plan() {
 	                         "MISSION CLEAR"}) {
 		expect_plan(c, line);
 	}
+	// 0xA0 splits on both sides: the console reads `SET`, `Bogus`, `1` and draws the usage and
+	// the not-found error, and the plan counts the same two (D-NET-381).
+	expect_plan(c, "SET\xA0" "Bogus 1");
 	// A NovaWorld host's ban list: BAN draws two.
 	host.conn(0).account.pcid = "A-MM-WXXIB2";
 	host.ctx.bans.pcids = banlist::PcidBanList{};

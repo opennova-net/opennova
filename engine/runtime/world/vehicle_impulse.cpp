@@ -7,8 +7,8 @@ namespace {
 
 int32_t dot16(const int32_t a[3], const int32_t b[3]) {
 	return io::bam_add(
-			io::bam_add(detail::q16_mul_rhu(a[0], b[0]), detail::q16_mul_rhu(a[1], b[1])),
-			detail::q16_mul_rhu(a[2], b[2]));
+			io::bam_add(retail_q16_mul_rhu(a[0], b[0]), retail_q16_mul_rhu(a[1], b[1])),
+			retail_q16_mul_rhu(a[2], b[2]));
 }
 void normalize16(const int32_t in[3], int32_t out[3]) {
 	const double length =
@@ -35,8 +35,8 @@ void impulse_quad(const Entity &e, const VehicleTraits &t, const CollisionMatrix
 	for (int i = 0; i < 4; ++i) {
 		int32_t delta[3];
 		for (int k = 0; k < 3; ++k) {
-			delta[k] = io::bam_add(detail::q16_mul_rhu(xs[i], frame.m[4 * k] >> 6),
-					detail::q16_mul_rhu(ys[i], frame.m[4 * k + 1] >> 6));
+			delta[k] = io::bam_add(retail_q16_mul_rhu(xs[i], frame.m[4 * k] >> 6),
+					retail_q16_mul_rhu(ys[i], frame.m[4 * k + 1] >> 6));
 			corners[i][k] = io::bam_add(position[k], delta[k]);
 		}
 		normalize16(delta, directions[i]);
@@ -208,8 +208,14 @@ void VehicleSystem::weapon_recoil(const Entity &shooter, int32_t amplitude,
 	int32_t pose[6];
 	int32_t point_direction[3];
 	if (!carrier_weapon_world_pose(world_, *gun, fired, slot_clip, column, pose, point_direction)) {
-		// The raw leg writes no direction (retail reads its stack local as it
-		// stands); the gun's raw forward stands in.
+		// D-VEH-6 (OPEN): retail's slot is not left as it stands. WeaponAction_Fire
+		// zeroes it [orig: WeaponAction_Fire @0x542B10, @0x542B95..0x542BAB],
+		// Entity_CalcWeaponFirePosition writes the fire position into it (the call
+		// @0x542BF7), the raw leg never overwrites it [orig:
+		// Entity_ComputeUserpointWorldTransform @0x545C60, @0x545E1F], and the hull
+		// rocks along minus the fire origin's world position (negated
+		// @0x542D60..0x542D7D, passed @0x542D9C). The gun's raw forward stands in
+		// here until the row is ported.
 		const auto frame = detail::vehicle_euler_basis(pose[3], pose[4], 0).q22;
 		point_direction[0] = frame.m[0] >> 6;
 		point_direction[1] = frame.m[4] >> 6;

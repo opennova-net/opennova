@@ -445,6 +445,15 @@ public:
 	// [orig: LightInstance_SetOwnerGroup @ 0x5a8fb0 — record dwords 19/20]
 	void set_owner(LightHandle handle, uint64_t owner_entity, int32_t owner_section);
 
+	// One shot's muzzle glow [orig: Entity_UpdateMuzzleGlowEffect @ 0x56c960]: `cached` is the
+	// shooter's handle word (retail's entity+0x1B4). A null word spawns muzzle_glow_spawn; then
+	// every shot re-arms the light to mode 4 for 5 ticks, owns it to the shooter at section 0,
+	// moves it to the muzzle and sets its blend to 1.0. A stale word re-arms nothing (the
+	// generation lease, D-RLIT-4). Returns the word the shooter keeps (null when a spawn found
+	// the pool full).
+	LightHandle fire_muzzle_glow(LightHandle cached, const std::array<int32_t, 3> &muzzle_fixed,
+			uint64_t shooter);
+
 	// The per-frame decay [orig: EffectWorld_TickInstancesAndLightScale
 	// @ 0x5aa170]: run once per 62 Hz tick. Expired mode-5 slots hide, other
 	// expired slots die; modes 2/5 blend down linearly while counting.
@@ -726,6 +735,23 @@ struct StaticLightRowInputs {
 };
 
 LightActiveGroups static_light_row_groups(const StaticLightRowInputs &inputs);
+
+// The transient spawns' records over a mission 16.16 position (the pool comment above).
+// The muzzle glow's spawn [orig: Entity_UpdateMuzzleGlowEffect @ 0x56c960]: radius 1.5, color
+// 0xFFE0A0, owned by the shooter at section 0. Retail spawns it with mode 3 / duration -1 and
+// re-arms it to mode 4 / 5 ticks in the same shot, before any tick (LightScene::fire_muzzle_glow),
+// so the spawn's own fade is not carried.
+LightSpawnParams muzzle_glow_spawn(const std::array<int32_t, 3> &muzzle_fixed, uint64_t shooter);
+// The impact flash [orig: AmmoDef_ProcessImpactEffect @ 0x40a282..0x40a2c0]: the ammo's
+// light_impact radius and color, spawned radius >> 1 above the impact (@ 0x40a29c..0x40a29e),
+// mode 2 for `ticks` (@ 0x40a2a6, the ammo's +0x88), render flag 0x100 (@ 0x40a2b8..0x40a2c0,
+// corona_lower_half_radius).
+LightSpawnParams impact_flash_spawn(const std::array<int32_t, 3> &impact_fixed,
+		int32_t radius_fixed, const std::array<uint8_t, 3> &rgb, int32_t ticks);
+// The death flash [orig: Entity_SpawnDeathPieces @ 0x4934f4..0x493527]: color 0xFFC080, mode 2 for
+// 31 ticks, corona disabled (render flag 0x200).
+LightSpawnParams death_flash_spawn(const std::array<int32_t, 3> &position_fixed,
+		int32_t radius_fixed);
 
 // The light_move round glow [orig: RoundData_SpawnRound @ 0x4ec8da — mode 1 /
 // duration -1, terrain disabled (flag 1024), handle at round+0x1B4]: the

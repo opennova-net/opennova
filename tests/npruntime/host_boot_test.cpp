@@ -93,6 +93,18 @@ std::string gametext_bytes() {
 	return bytes_string(out);
 }
 
+// A mission text whose [Info] carries one Title entry.
+std::string mission_text_bytes(const char *title) {
+	rtxt::File file;
+	file.sections.push_back({"Info", 0});
+	file.entries.push_back({"Title", title, {}, 0});
+	file.normalize_grouping();
+	std::vector<uint8_t> out;
+	std::string error;
+	if (!rtxt::write(file, out, error)) std::printf("rtxt::write: %s\n", error.c_str());
+	return bytes_string(out);
+}
+
 std::map<std::string, std::string> mount() {
 	std::map<std::string, std::string> files;
 	files["synth.til"] = til_bytes();
@@ -530,6 +542,42 @@ int main() {
 		const inmatch::IntegritySources &sources =
 				host.role.state.host_owner.ctx.config.integrity_sources;
 		CHECK(!sources.ammo_known && !sources.weapon_table_known);
+	}
+
+	// --- the listen host's loading-screen band ahead of its load ---------------
+	// MISSIONNAME as the session serializer advertises it: the mission text's
+	// [info]/title, else (empty) the header's name; the stock Co-op selector
+	// the map file; with game_type_auto the header's own mode
+	// [orig: Game_SerializeMissionInfoToDataStream @0x523620 -- the coop arm
+	//  @0x523758, [info]/title @0x5237df, dword_A761D4 @0x52380d].
+	{
+		std::map<std::string, std::string> files;
+		// The band reads the header alone: a .bms that is its 616-byte header.
+		bms::Header header{};
+		header.magic[0] = 'B';
+		header.magic[1] = 'M';
+		header.magic[2] = 'S';
+		header.magic[3] = static_cast<char>(bms::kMinVersion);
+		std::snprintf(header.mission_name, sizeof(header.mission_name), "Header Name");
+		header.attrib_flags = bms::AttribFlags::Deathmatch;
+		files["band.bms"] = std::string(reinterpret_cast<const char *>(&header), sizeof(header));
+		const mission::BootFileSource src = test_boot::source_over(&files);
+
+		inmatch::HostLoadingBand band = inmatch::host_loading_band(src, "band.bms", 0x10020u, true, {});
+		CHECK(band.mission_name == "Header Name"); // no mission text: the header's name
+		CHECK(band.game_type == game_type::for_mission_attribs(bms::AttribFlags::Deathmatch));
+
+		files["band.bin"] = mission_text_bytes("Text Title");
+		band = inmatch::host_loading_band(src, "band.bms", 0x10000u, false, {});
+		CHECK(band.mission_name == "Text Title" && band.game_type == 0x10000u);
+		band = inmatch::host_loading_band(src, "band.bms", 0x30020u, false, {});
+		CHECK(band.mission_name == "Text Title"); // objective Co-op keeps the title
+		band = inmatch::host_loading_band(src, "band.bms", 0x10020u, false, {});
+		CHECK(band.mission_name == "band.bms"); // the stock Co-op selector: the map file
+
+		files["band.bin"] = mission_text_bytes("");
+		band = inmatch::host_loading_band(src, "band.bms", 0x10000u, false, {});
+		CHECK(band.mission_name == "Header Name"); // an empty title: the header's name
 	}
 
 	if (failures != 0) {

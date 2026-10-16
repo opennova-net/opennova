@@ -309,14 +309,6 @@ constexpr AssetKindRow kRows[] = {
 	        .row,
 };
 
-constexpr bool same_text(const char *a, const char *b) {
-	while (*a && *a == *b) {
-		++a;
-		++b;
-	}
-	return *a == *b;
-}
-
 // One row per kind, at the kind's own index; no two rows share a token; a kind is edited by a type
 // the registry has (what a kind is to the game is assets/asset_kind_words' row). The facts' own shape (names, slots) is the
 // engine table's static_asserts' (base/resource_index/file_kind.cpp), and a new file's name ending
@@ -328,7 +320,7 @@ constexpr bool rows_well_formed() {
 		if (static_cast<size_t>(row.document) > kDocumentTypeCount) return false;
 		if (!row.folder || !row.new_name) return false;
 		for (size_t j = 0; j < i; ++j)
-			if (same_text(row.token, kRows[j].token)) return false;
+			if (strutil::same_text(row.token, kRows[j].token)) return false;
 	}
 	return true;
 }

@@ -271,8 +271,8 @@ std::string slot_fault_words(const ParticleSlotFault &fault) {
 	       " tokens come first (in this file, or in a particle file whose name sorts before it).";
 }
 
-// The particle files as the game parses them at a mission's start (every .ptl, then the gore set the project picks
-// [orig: CEffectSystem_Init @ 0x5F6070]; opennova::effect_file_order) through its line tokenizer's process-wide token
+// The particle files as the game parses them at a mission's start (the .ptl and gore-set files the build packs, in the
+// archive walk's order [orig: CEffectSystem_Init @ 0x5F6070]; opennova::effect_file_order) through its line tokenizer's process-wide token
 // table: each list that reads a slot no line before it filled faults the game (documents/particle_token_slots.h), an
 // error at the line. An open document stands in with its text. An expansion's base game parses its own particle files
 // among them, which the project does not list: none there.

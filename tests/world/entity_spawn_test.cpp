@@ -40,8 +40,8 @@ int main() {
         CHECK(e.flags == 0x4u);
     }
     // The classes whose definition callback is the organic init: the event-callback table's org0
-    // and org1 rows, by a whole-tag stricmp [orig: g_EntityClassEventCallbackTable @0x813018 /
-    // @0x813030].
+    // and org1 rows, by a whole-tag stricmp [orig: g_EntityClassEventCallbackTable @0x813000,
+    // its rows @0x813018 / @0x813030].
     {
         CHECK(organic_init_class("org0") && organic_init_class("ORG1"));
         CHECK(!organic_init_class("org2") && !organic_init_class("org") && !organic_init_class("org0 ") &&

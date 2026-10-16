@@ -28,7 +28,7 @@ struct RemapInput {
 // alone and the records the catalog defaults.
 // [orig: UI_BuildKeyBindingLoadoutTable @0x559e50 (the records, from
 //  UI_OptionsScreenInit @0x554dc5 and UI_PopulateRenderAndAudioSettings
-//  @0x55d503); sub_55A710 @0x55ab5f..0x55ace5 (the front ACCEPT);
+//  @0x55d503); Options_HandleAcceptOrBack @0x55ab5f..0x55ace5 (the front ACCEPT);
 //  UI_IngameOptionsDialogEventHandler @0x554e40 (the in-game Accept)]
 class OptionsScreen {
 public:

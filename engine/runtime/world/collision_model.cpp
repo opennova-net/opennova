@@ -188,7 +188,7 @@ void CollisionMatrix::transform_point(const int32_t in[3], int32_t out[3]) const
 // [orig: Math_FixedPointMatrixToEulerAngles @0x613310 (the _ftol2_sse calls
 //  @0x613358, @0x613382, @0x613391, @0x613414, @0x61342C, @0x61343D, @0x613476)]
 void collision_matrix_to_euler(const CollisionMatrix &matrix, int32_t out[3]) {
-	constexpr double radians = 1.4629627251502471e-9; // dbl_7C3608
+	constexpr double radians = io::kRadiansPerBamX87; // dbl_7C3608
 	const auto product = [](int32_t a, int32_t b) {
 		return static_cast<int32_t>((int64_t(a) * b) >> 22);
 	};
@@ -468,7 +468,8 @@ CollisionMatrix collision_matrix_from_heading(int32_t heading_bam, const int32_t
 // its visual — the 00TRg through-shot root cause once statics kept yaw only.]
 CollisionMatrix collision_matrix_from_euler(int32_t heading_bam, int32_t pitch_bam,
                                             int32_t roll_bam, const int32_t pos[3]) {
-    static constexpr double kRadPerBam = io::kRadiansPerBam;
+    // [orig: `fld dbl_7C3608` @0x613F5D]
+    static constexpr double kRadPerBam = io::kRadiansPerBamX87;
     static constexpr double kQ22 = io::kQ22One;
     const auto trig = [](int32_t bam, int32_t &s, int32_t &c) {
         const double a = static_cast<double>(bam) * kRadPerBam;

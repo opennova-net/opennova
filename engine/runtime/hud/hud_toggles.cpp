@@ -38,7 +38,7 @@ namespace {
 // map mode @0x499395 (the event bit), message log @0x49939a, objectives
 // @0x49939f, the player list @0x4993ae].
 uint32_t respawn_init(HudToggleState &s, bool in_session) {
-	s.quit_dialog_open = false; // [orig: dword_24C1880 @0x499368]
+	s.quit_dialog_open = false; // [orig: g_QuitDialogOpen @0x499368]
 	s.help_open = false;
 	s.map_legend_open = false;
 	s.emotes_menu_open = false; // [orig: dword_24C18D4 @0x499377]
@@ -177,8 +177,10 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// None of them moves the camera by itself — the sim's arbiter resolves the
 	// mode from the preference and the seat (stock JO has no on-foot third
 	// person).
-	// The 412 cycle and the 405-410 orbit actions have no catalog row and are
-	// unreachable from a key. [orig: Input_HandleActionBinding cases 400
+	// The 412 cycle has no catalog row and is unreachable from a key; the
+	// 405-410 orbit actions have none either, but the death screen's chase
+	// sub-mode dispatches them (world player_view_chase_action, [orig:
+	// DeathScreen_FilterInputAction @0x52ad50]). [orig: Input_HandleActionBinding cases 400
 	// @0x49c073, 401 @0x49c0d9, 402 @0x49c0f6..0x49c107; the records @0x8186CC /
 	// @0x818738 / @0x8187A4 (keys F2/F3/F4) — their row flag gates (0x1 /
 	// 0x40 / 0x400 / 0x8000000) ride the unported binding layer, D-CTRL-3;
@@ -273,7 +275,7 @@ uint32_t hud_toggles_poll(HudToggleState &s, const HudKeyPoll &k) {
 	// the audio when it is now set. The row's flags (0x05000800) carry no bit
 	// 0, so it works while paused.
 	// [orig: case 25 @0x49b520 — the in-session return @0x49b527, `xor
-	//  dword_A87050, 1` @0x49b52d, dword_24C1880 = 0 @0x49b534,
+	//  dword_A87050, 1` @0x49b52d, g_QuitDialogOpen = 0 @0x49b534,
 	//  Input_ResetKeyQueue @0x49b53e, Audio_ShutdownChannelsAndDeviceTable
 	//  @0x49b550]
 	if (s.pause.step(k.pause, k.active, k.chorded) && !k.in_session) {
@@ -345,7 +347,7 @@ uint32_t hud_toggles_escape(HudToggleState &s, const HudEscapeInput &in) {
 		s.radio_menu_open = false;
 		return kEscapeClosedWindow;
 	}
-	if (s.quit_dialog_open) { // [orig: dword_24C1880 @0x49b28d, the clear @0x49b295]
+	if (s.quit_dialog_open) { // [orig: g_QuitDialogOpen @0x49b28d, the clear @0x49b295]
 		s.quit_dialog_open = false;
 		return kEscapeClosedWindow;
 	}
@@ -377,7 +379,7 @@ uint32_t hud_toggles_escape(HudToggleState &s, const HudEscapeInput &in) {
 	}
 	// None open: the init keeping the quit-dialog word, then on the
 	// authority's status view in a session the dialog opens, else the menu
-	// [orig: Game_InitRespawnStateKeepingToggle(&dword_24C1880) @0x49b36a;
+	// [orig: Game_InitRespawnStateKeepingToggle(&g_QuitDialogOpen) @0x49b36a;
 	//  @0x49b377..0x49b38f; @0x49b39e..0x49b3be]
 	const uint32_t init = respawn_init_keeping(s, &s.quit_dialog_open, in.in_session);
 	if (in.in_session && in.authority && s.server_status_view) {

@@ -52,16 +52,10 @@ static_assert(static_cast<float>(Simulation::DEFAULT_PLAYER_FOV_H_DEG) ==
 void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_environment_snapshot"), &Simulation::get_environment_snapshot);
 	ClassDB::bind_method(D_METHOD("weather_state_bound"), &Simulation::weather_state_bound);
-	ClassDB::bind_method(D_METHOD("command_rain", "percent", "seconds"), &Simulation::command_rain);
 	ClassDB::bind_method(D_METHOD("command_snow", "percent", "seconds"), &Simulation::command_snow);
-	ClassDB::bind_method(D_METHOD("command_overcast", "percent", "seconds"), &Simulation::command_overcast);
 	ClassDB::bind_method(D_METHOD("command_fog_distance", "metres"), &Simulation::command_fog_distance);
-	ClassDB::bind_method(D_METHOD("command_move_fog", "metres", "seconds"), &Simulation::command_move_fog);
 	ClassDB::bind_method(D_METHOD("command_sky_speed", "rate"), &Simulation::command_sky_speed);
 	ClassDB::bind_method(D_METHOD("command_quake", "seconds"), &Simulation::command_quake);
-	ClassDB::bind_method(D_METHOD("command_time_of_day_minutes", "minute_of_day"),
-			&Simulation::command_time_of_day_minutes);
-	ClassDB::bind_method(D_METHOD("command_fog_type", "type"), &Simulation::command_fog_type);
 	ClassDB::bind_method(D_METHOD("load_from_mission_data", "mission"), &Simulation::load_from_mission_data);
 	ClassDB::bind_method(D_METHOD("build_demo_mission"), &Simulation::build_demo_mission);
 	ClassDB::bind_method(D_METHOD("is_loaded"), &Simulation::is_loaded);
@@ -136,7 +130,6 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_join_screen_status"), &Simulation::get_join_screen_status);
 	ClassDB::bind_method(D_METHOD("is_session_lost"), &Simulation::is_session_lost);
 	ClassDB::bind_method(D_METHOD("get_mission_exit_reason"), &Simulation::get_mission_exit_reason);
-	ClassDB::bind_method(D_METHOD("begin_host_map_change"), &Simulation::begin_host_map_change);
 	ClassDB::bind_method(D_METHOD("begin_joiner_reload"), &Simulation::begin_joiner_reload);
 	ClassDB::bind_method(D_METHOD("round_over_key", "vk", "restart_vk"), &Simulation::round_over_key);
 	ClassDB::bind_method(D_METHOD("ingame_restart"), &Simulation::ingame_restart);
@@ -217,8 +210,6 @@ void Simulation::_bind_methods() {
 	                     &Simulation::request_hud_radar_zoom);
 	ClassDB::bind_method(D_METHOD("request_hud_map_cycle"),
 	                     &Simulation::request_hud_map_cycle);
-	ClassDB::bind_method(D_METHOD("request_waypoint_cycle", "direction"),
-	                     &Simulation::request_waypoint_cycle);
 	ClassDB::bind_method(D_METHOD("request_hud_map_close"),
 	                     &Simulation::request_hud_map_close);
 	ClassDB::bind_method(D_METHOD("get_hud_map_mode"),
@@ -467,9 +458,6 @@ void Simulation::_bind_methods() {
 	                     &Simulation::set_local_player_class);
 	ClassDB::bind_method(D_METHOD("use_player_profile", "profiles"),
 	                     &Simulation::use_player_profile);
-	ClassDB::bind_method(D_METHOD("use_game_config", "block"), &Simulation::use_game_config);
-	ClassDB::bind_method(
-			D_METHOD("session_create_ended_process"), &Simulation::session_create_ended_process);
 	ClassDB::bind_method(D_METHOD("apply_ingame_options", "profiles"),
 	                     &Simulation::apply_ingame_options);
 	ClassDB::bind_method(D_METHOD("get_session_mouse_sensitivity"),

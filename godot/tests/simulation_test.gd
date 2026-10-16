@@ -937,7 +937,7 @@ func test_authoritative_cveh_snapshot_publishes_vehicle_motion_controls() -> voi
 			sim, MissionData.KIND_ITEM, index,
 			Simulation.PF_VEHICLE_SPEED), 0)
 	# The part-animation words ride the same valid bit and rest at zero
-	# (Entity_CacheVehicleHUDStats publishes the rotor/wheel accumulators'
+	# (BoneCallback_cveh_PublishControls publishes the rotor/wheel accumulators'
 	# high words; an unoccupied, unmoved vehicle has none).
 	assert_eq(_present_field_for_origin(
 			sim, MissionData.KIND_ITEM, index,

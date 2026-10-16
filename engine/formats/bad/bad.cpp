@@ -3,6 +3,8 @@
 
 #include <formats/bad/bad.h>
 
+#include <base/io/os_path.h>
+
 #include <base/io/le.h>
 
 #include <stdio.h>
@@ -284,7 +286,7 @@ int bad_parse(const char *path, BadFile *out) {
 
     if (!path || !out) return -1;
 
-    f = fopen(path, "rb");
+    f = opennova::io::fopen_utf8(path, "rb");
     if (!f) return -1;
 
     fseek(f, 0, SEEK_END);

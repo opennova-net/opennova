@@ -19,11 +19,6 @@ namespace opennova::novaworld_server::billing {
 
 namespace {
 
-crow::response no_store(crow::response res) {
-	res.set_header("Cache-Control", "no-store");
-	return res;
-}
-
 crow::response disabled() {
 	return json_error(503, "billing_disabled", "support tiers are not open on this NovaWorld service");
 }
@@ -35,13 +30,6 @@ crow::response disabled() {
 crow::response stripe_unavailable() {
 	return json_error(
 			503, "stripe_unavailable", "Stripe could not take the request; try again in a moment");
-}
-
-void text_or_null(crow::json::wvalue &out, const char *key, const std::string &text) {
-	if (text.empty())
-		out[key] = nullptr;
-	else
-		out[key] = text;
 }
 
 void amount_or_null(crow::json::wvalue &out, const std::optional<PriceInfo> &price) {

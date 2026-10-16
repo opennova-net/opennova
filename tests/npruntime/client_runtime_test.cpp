@@ -38,6 +38,7 @@
 #include <runtime/inmatch/server_tick.h>
 
 #include "common/file_io.h"
+#include "common/temp_dir.h"
 #include "host_test_setup.h"
 #include "conn_fixture.h"
 #include <runtime/inmatch/server_message_dispatch.h>
@@ -945,9 +946,8 @@ bool run_novaworld_join_tokens_ride_the_wire() {
 	};
 
 	// The install root whose CC.BIN is the COUNTRYCODE (the retail installs' bytes).
-	const std::filesystem::path cc_root =
-			std::filesystem::temp_directory_path() / "opennova_join_tokens_cc";
-	std::filesystem::create_directories(cc_root);
+	const test_temp::TempDir cc_dir("opennova_join_tokens_cc");
+	const std::filesystem::path cc_root = cc_dir.path;
 	{
 		std::ofstream cc(cc_root / "cc.bin", std::ios::binary);
 		cc << "usqq0409us";

@@ -14,7 +14,6 @@
 #include <runtime/world/corpse_ragdoll.h>
 #include <runtime/world/world.h>
 
-#include <limits>
 
 namespace godot {
 
@@ -22,8 +21,6 @@ namespace {
 
 using opennova::ragdoll::Xform;
 
-// The local avatar's key: no wire handle reaches bit 31.
-constexpr uint32_t kAvatarKey = 0x80000000u;
 constexpr double kTickSeconds = 1.0 / opennova::io::kTickHz;
 
 Xform xform_of(const ObjectModel *p_model) {
@@ -36,11 +33,6 @@ Xform xform_of(const ObjectModel *p_model) {
 		static_cast<float>(t.origin.z) };
 	x.scale = static_cast<float>(t.basis.get_scale().x);
 	return x;
-}
-
-// A seed every machine derives alike for the same corpse.
-uint32_t kick_seed(uint32_t p_key, int32_t p_life) {
-	return p_key * 0x9E3779B1u ^ static_cast<uint32_t>(p_life) * 0x85EBCA77u;
 }
 
 } // namespace
@@ -92,14 +84,15 @@ std::shared_ptr<const opennova::ragdoll::Rig> CorpseRagdollPresenter::rig_for(
 	return entry.rig;
 }
 
-void CorpseRagdollPresenter::observe(ObjectModel *p_model, uint32_t p_key, int32_t p_life,
+void CorpseRagdollPresenter::observe(const opennova::world::World &p_world,
+		ObjectModel *p_model, uint32_t p_key, uint32_t p_wire_key, int32_t p_life,
 		int32_t p_anim_state, bool p_hidden, bool p_eligible,
-		const opennova::ragdoll::Collider &p_collider, float p_water_y) {
+		const opennova::ragdoll::Collider &p_collider) {
 	opennova::ragdoll::SubjectHead head;
 	head.key = p_key;
 	head.life = p_life;
 	const opennova::world::CorpseDeath death =
-			opennova::world::corpse_death(p_anim_state, kick_seed(p_key, p_life));
+			opennova::world::corpse_death(p_anim_state, p_wire_key);
 	head.dying = death.dying;
 	head.ragdolls = death.ragdolls;
 	head.kick = death.kick;
@@ -122,8 +115,7 @@ void CorpseRagdollPresenter::observe(ObjectModel *p_model, uint32_t p_key, int32
 		set_.feed(p_key, head.node, anchor);
 		return;
 	}
-	// A body that dies in the water keeps retail's float.
-	if (anchor.y <= p_water_y) {
+	if (!opennova::world::corpse_ragdoll_may_start(p_world, anchor.y)) {
 		return;
 	}
 	const std::shared_ptr<const opennova::ragdoll::Rig> rig = rig_for(p_model);
@@ -145,23 +137,27 @@ void CorpseRagdollPresenter::present(
 	}
 	const opennova::world::World &world = p_sim->kernel_->world;
 	const opennova::world::WorldRagdollCollider collider(world);
-	const float water_y = world.env.water_z != 0
-			? static_cast<float>(world.env.water_z) * opennova::io::kInvFp16One
-			: -std::numeric_limits<float>::infinity();
 
 	seen_.clear();
 	if (p_entities != nullptr) {
 		for (const EntityPresenter::RagdollRow &row : p_entities->take_ragdoll_rows()) {
-			observe(row.model, static_cast<uint32_t>(row.handle) & 0xFFFFu, row.life,
-					row.anim_state, row.hidden, !row.severed, collider, water_y);
+			const uint32_t key = static_cast<uint32_t>(row.handle) & 0xFFFFu;
+			observe(world, row.model, key, key, row.life, row.anim_state, row.hidden,
+					!row.severed, collider);
 		}
 	}
 	if (p_avatar != nullptr && p_avatar->get_skeletal_anim().is_valid() &&
 			world.cached.local_player.valid()) {
 		if (const opennova::world::AiEntity *self =
 						world.ai.for_handle(world.cached.local_player)) {
-			observe(p_avatar, kAvatarKey, 0, self->inf.body_clip_state(), !p_avatar->is_visible(),
-					true, collider, water_y);
+			// The avatar's life is the local player's respawn count, so a respawn ends its
+			// ragdoll at once; its kick seeds from the handle the wire knows it by, as every
+			// peer seeds the same corpse.
+			const int32_t life = avatar_life_.observe(world);
+			const uint32_t wire_key =
+					static_cast<uint32_t>(p_sim->get_local_player_wire_handle()) & 0xFFFFu;
+			observe(world, p_avatar, opennova::world::kLocalAvatarRagdollKey, wire_key, life,
+					self->inf.body_clip_state(), !p_avatar->is_visible(), true, collider);
 		}
 	}
 

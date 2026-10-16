@@ -1,7 +1,8 @@
 // The .til reader and writer: every byte of a record is a field (the +9 flags byte whole, the +10 MED
 // layer), the header is computed on save as MED's serializer writes it (til0, count, 12 * count + 16,
 // 0) and never replayed from the file read, and what the game cannot place is refused.
-// [orig: JOTACmed MapTileStore_Serialize @ 0x433EC0; Terrain_LoadTileInfoFile @ 0x60A740]
+// [orig: JOTACmed.exe MapTileStore_Serialize @ 0x433EC0]
+// [orig: Terrain_LoadTileInfoFile @ 0x60A740]
 
 #include <formats/til/til.h>
 #include <formats/til/til_io.h>

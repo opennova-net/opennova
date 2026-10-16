@@ -16,7 +16,7 @@
 #include <runtime/world/infantry.h>
 
 #include "object/object_data.h"
-#include "object/object_data_build.h"
+#include "authoring/object_data_build.h"
 #include "object/object_model.h"
 #include "object/skeletal_anim.h"
 
@@ -27,7 +27,7 @@ namespace godot {
 // level kept (the presenter-driven mode, the mission placer's: a level the camera's distance picks swaps its
 // rows in place), its part animations and material generators on a PanmClock of its own, its textures read
 // through the project's files (each read noted with its stamp). It builds over several frames a unit at a time,
-// as the model device does (S13 V6, ModelViewportApplier; object/object_data_build): each material's textures (a stage's first texture
+// as the model device does (S13 V6, ModelViewportApplier; authoring/object_data_build): each material's textures (a stage's first texture
 // that decodes, a flipbook's frames), each level's meshes (skinned for the rig it binds), then the scene (the
 // data swapped in, the rig bound); a build begun drops one in flight, and the ObjectModel draws the last scene
 // built until the next one is. Nothing here decides what is drawn: its owner says.

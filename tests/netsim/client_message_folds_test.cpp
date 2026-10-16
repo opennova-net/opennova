@@ -107,6 +107,24 @@ void test_team_assign_rebinds_player_identity() {
 			vehicle->spawn_anim_slot == 0);
 }
 
+// S2C 0x50's gates and short bodies: a slot past its pool's table does nothing
+// (`50|00 01 02` names pool-0 slot 256), and a body too short for the handle
+// addresses pool-0 slot 0 with its one byte as the team.
+// [orig: NapiNPClientMsg_TeamAssign @0x431910 - the handle @0x431924..0x431928,
+//  the pool-capacity gate @0x4319a4..0x4319b3, team @0x4319ee]
+void test_team_assign_gates_as_retail() {
+	ClientReplicaPipeline view;
+	const uint64_t before = view.state().revision;
+	view.apply(s2c::TEAM_ASSIGN, std::vector<uint8_t>{0x00, 0x01, 0x02});
+	CHECK(view.state().find(0x0100) == nullptr);
+	CHECK(view.state().revision == before);
+	CHECK(view.state().pending_visible_refreshes.empty());
+	view.apply(s2c::TEAM_ASSIGN, std::vector<uint8_t>{0x02});
+	const ClientEntityState *slot0 = view.state().find(0x0000);
+	CHECK(slot0 != nullptr && slot0->team == 2 && slot0->team_known);
+	CHECK(view.malformed_bodies() == 0);
+}
+
 // S2C 0x51: the entry's team lands off the authority only, a player row takes
 // the identity pair, and a non-player keeps its own.
 // [orig: NapiNPClientMsg_HandlePlayerSpawn @0x431BB0 — Team @0x431c6d behind
@@ -392,6 +410,7 @@ void test_door_row_update_lands_on_the_record() {
 
 int main() {
 	test_team_assign_rebinds_player_identity();
+	test_team_assign_gates_as_retail();
 	test_team_change_confirm_folds_the_entry();
 	test_team_change_confirm_walks_the_list();
 	test_batch_kill_page_kills_silently();

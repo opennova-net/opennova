@@ -239,7 +239,7 @@ void EpilogCine::update_event(CineEvent &e, World &world) {
 		// up from 0, away from the target, so it never lands and never sounds.
 		// (The step's busy flag dword_269721C, raised while the count is off
 		// its target, has no reader.)
-		// [orig: CineNode_CounterStep @0x573390 — the wait @0x5733ab..0x5733b8;
+		// [orig: CineEventEpilogCounter_Step @0x573390 — the wait @0x5733ab..0x5733b8;
 		//  the step @0x5733c0..0x5733fa; the arrival @0x573400..0x57340e ->
 		//  Sound_PlayInterfaceTriggerSet(g_SndTextEnd); the re-arm @0x573416]
 		if (e.points_cooldown != 0) {
@@ -421,7 +421,7 @@ void EpilogCine::build_lose_screen() {
 			hud::kGameTextMissionFailed.key, 0, 120, -2, 100, 140, 1024, 100, 1, 0xFFFFFF));
 	// The banner line, built only when the round stored one; the embedder
 	// holds the banner text and draws nothing for an empty one, so the node
-	// rides every build [orig: `cmp g_BannerText, 0` @0x574645; sub_572E30
+	// rides every build [orig: `cmp g_BannerText, 0` @0x574645; CineEventTextFade_Construct
 	//  @0x574685 — (line_start, 223200, g_BannerText, 0, 230, -2, 140, 140,
 	//  1024, 100, 1, 0xFFFFFF)]. The saved-game list it would offset below it
 	//  (sub_5B72E0 @0x574696) is the unported savegame record (D-SAVE-1).

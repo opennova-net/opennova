@@ -26,6 +26,13 @@
 
 namespace opennova::world {
 
+// The mission attribute that forces the indoors letter into every frame's
+// accum view [orig: g_BmsAttribFlags & 0x10 @ 0x5ca1c8 -> |= 2].
+inline constexpr uint32_t kMissionAttribForceIndoors = 0x10u;
+inline bool mission_forces_indoors(uint32_t bms_attrib_flags) {
+	return (bms_attrib_flags & kMissionAttribForceIndoors) != 0;
+}
+
 // The shell's view, presentation frame: a unit forward/right/up triad, the
 // eye, the vertical field of view, the aspect (tan_h / tan_v of the drawn
 // frustum) and the viewport width in pixels, plus the environment words and

@@ -378,6 +378,27 @@ static bool test_join_resolves() {
 	       "join carries the NI/NP/BK proxy triple verbatim");
 	expect(r.ln == 5, "join carries the .joi lobby number");
 	expect(!f.join_active(), "join machine resets on resolve");
+	// B-13: the engine builds the six proxy fields from the resolved .joi: node =
+	// inet_addr(NI) / atol(NP), cookie = atol(BK), relay = the NK endpoint, and the
+	// all-six gate reads them as a proxy join. [orig: CNapiGameSession_InitTransportConnection
+	//  @0x4ca051..0x4ca0c7]
+	{
+		const opennova::ProxyRendezvousConfig proxy = nw::proxy_rendezvous_from_join(r);
+		expect(proxy.node_addr == opennova::proxy_inet_addr("192.168.5.9") && proxy.node_port == 17479 &&
+		               proxy.cookie == 986119 && proxy.relay_addr == opennova::proxy_inet_addr("10.1.2.3") &&
+		               proxy.relay_port == 3001 && proxy.enabled(),
+		       "the resolved .joi installs all six proxy fields");
+		nw::JoinResult bare = r;
+		bare.ni.clear();
+		bare.np.clear();
+		bare.bk.clear();
+		expect(!nw::proxy_rendezvous_from_join(bare).enabled(),
+		       "a .joi without NI/NP/BK installs no proxy");
+		bare = r;
+		bare.np = " 17479x"; // the CRT atol: leading space skipped, trailing junk ignored
+		expect(nw::proxy_rendezvous_from_join(bare).node_port == 17479,
+		       "NP goes through the retail atol");
+	}
 
 	// A .joi with no connection string fails.
 	nw::LobbyHttpFlow f2;

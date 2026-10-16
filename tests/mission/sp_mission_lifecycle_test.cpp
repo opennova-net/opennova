@@ -140,7 +140,7 @@ int count_sounds(const w::World &world, const char *name) {
 // D-SND-35: a counter's count-up column steps once every five dispatches and
 // plays TEXT_END on the step that lands on its target; the live epilog's -1
 // target and rate step it away from the target, so it never sounds.
-// [orig: CineNode_CounterStep @0x573390 — the wait @0x5733ab, the step
+// [orig: CineEventEpilogCounter_Step @0x573390 — the wait @0x5733ab, the step
 //  @0x5733c0..0x5733fa, TEXT_END @0x573408, the re-arm @0x573416; the start
 //  @0x573370]
 void test_counter_step_plays_text_end_on_arrival() {

@@ -402,8 +402,10 @@ int main() {
 		opennova::ResourceIndex stamp_index;
 		TEST_EXPECT(stamp_index.scan(stamps.string(), "", opennova::VfsMountMode::PackedWithLooseOverride,
 		                             opennova::VfsArchiveDiscovery::RetailTable));
+		// The loose leg, then the walk: localres (slot 3) in its table's order, the zero-stamped
+		// entries skipped, then resource (slot 4), whose shared.ptl entry is stamped.
 		TEST_EXPECT(stamp_index.effect_files() ==
-		            (std::vector<std::string>{"loose.ptl", "shared.ptl", "stamped.ptl", "gore_ok.ptu"}));
+		            (std::vector<std::string>{"loose.ptl", "gore_ok.ptu", "stamped.ptl", "shared.ptl"}));
 		// Only the walk skips: the file still reads by name.
 		std::vector<uint8_t> unstamped;
 		TEST_EXPECT(stamp_index.read_file("unstamped.ptl", unstamped) && as_string(unstamped) == "ptl");
@@ -426,13 +428,44 @@ int main() {
 		TEST_EXPECT(!stamp_index.archive_slot_has_file(opennova::kArchiveSlotResource, "stamped.ptl"));
 		TEST_EXPECT(!stamp_index.archive_slot_has_file(opennova::kArchiveSlotCount, "shared.ptl"));
 
-		// ScanAll mounts the same archives into no slot (the walk still skips by stamp).
+		// ScanAll mounts the same archives into no slot (the walk still skips by stamp): the
+		// archived names follow the loose one in effect_file_order's (one table's) order.
 		TEST_EXPECT(stamp_index.scan(stamps.string()));
 		TEST_EXPECT(stamp_index.archive_slot_entries(opennova::kArchiveSlotLocalres).empty());
 		TEST_EXPECT(stamp_index.effect_files() ==
-		            (std::vector<std::string>{"loose.ptl", "shared.ptl", "stamped.ptl", "gore_ok.ptu"}));
+		            (std::vector<std::string>{"loose.ptl", "gore_ok.ptu", "shared.ptl", "stamped.ptl"}));
 		stamp_index.clear();
 		fs::remove_all(stamps);
+	}
+
+	// The effect walk's order picks the definition two files share (the first id registered
+	// wins, D-PTL-24): slot by slot, each archive's table by the UPPER-cased name ('B' sorts
+	// before '_', which a lower-cased sort reverses), the two extensions interleaved, a name
+	// once. [orig: CEffectSystem_Init @ 0x5f6070 — slots ascending @ 0x5f6485, the entry walk
+	// @ 0x5f64c0..0x5f6560 over the table PFF_SortEntries @ 0x768280 sorted]
+	{
+		const fs::path order = fs::temp_directory_path() / test_paths_unique("opennova_effect_order_test");
+		fs::remove_all(order);
+		write_pff(order / "localres.pff", {
+				{"boat01.ptl", "ptl"},
+				{"a_x.ptl", "ptl"},
+				{"Blood.ptu", "ptu"},
+				{"ab.ptl", "ptl"},
+		});
+		write_pff(order / "resource.pff", {{"aa.ptl", "ptl"}, {"ab.ptl", "ptl"}});
+
+		opennova::ResourceIndex order_index;
+		TEST_EXPECT(order_index.scan(order.string(), "", opennova::VfsMountMode::PackedWithLooseOverride,
+		                             opennova::VfsArchiveDiscovery::RetailTable));
+		TEST_EXPECT(order_index.effect_files() ==
+		            (std::vector<std::string>{"ab.ptl", "a_x.ptl", "Blood.ptu", "boat01.ptl", "aa.ptl"}));
+		// effect_file_order is one table's walk: both extensions interleaved by the upper-cased
+		// name, any other name left out.
+		TEST_EXPECT(opennova::effect_file_order({"zz.ptl", "a_x.ptl", "Blood.ptu", "ab.ptl", "b.txt", "c.ptg"},
+		                                        ".ptu") ==
+		            (std::vector<std::string>{"ab.ptl", "a_x.ptl", "Blood.ptu", "zz.ptl"}));
+		order_index.clear();
+		fs::remove_all(order);
 	}
 
 	// Release mounted .pff handles before deleting the directory: the VFS keeps archives

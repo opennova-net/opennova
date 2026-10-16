@@ -12,7 +12,8 @@ namespace opennova::world {
 namespace {
 
 // The free-fly constants as the image stores them: the 16-bit angle to
-// radians (dbl_7C9BC0, 2*pi/65536 to the double's rounding), the per-tick
+// radians (dbl_7C9BC0, the image's own truncated double, about 8.1e-11 below
+// 2*pi/65536; the HUD's flt_7C7988 is the float rounding), the per-tick
 // scale (flt_7C9BB8, 1/62 as a float) and the eighth-turn per direction index
 // (dbl_7C9BB0). [orig: @0x4b29a8, @0x4b2a73, @0x4b2a8a]
 constexpr double kAngleToRadians = 9.587371826171875e-05;

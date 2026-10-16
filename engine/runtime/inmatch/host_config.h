@@ -16,6 +16,7 @@
 
 #include <formats/gamecfg/game_cfg.h>
 #include <runtime/inmatch/host_file.h>
+#include <runtime/inmatch/host_session.h> // HostConfig
 #include <runtime/inmatch/server_admin_command.h>
 
 #include <string>
@@ -32,6 +33,10 @@ struct File;
 
 namespace opennova {
 class ResourceIndex;
+}
+
+namespace opennova::playersav {
+struct ProfileRecord;
 }
 
 namespace opennova::inmatch {
@@ -74,6 +79,43 @@ gamecfg::DefaultTexts game_cfg_default_texts(const rtxt::File *gametext);
 // [orig: CNapiGameSession_BuildAndCreateSession @0x5694D0;
 //  Game_ApplySessionSettingsToGlobals @0x551500; per field in host_config.cpp]
 HostScreenState host_session_settings(gamecfg::GameCfg &cfg);
+
+// The cfg block's words every session create reads, single player's and a
+// host's alike: mpreset (a nonzero word ends the create, server_session.h),
+// the lineup queue the 0x42 gate admits past the cap and its size, and the
+// join validator's duplicate-PCID word. host_session_settings copies them with
+// the rest of the block; the game shell's in-process hosts take them alone.
+// [orig: CNapiGameSession_BuildAndCreateSession -- game_settings.use_lineup_queue
+//  @0x569632, lineup_queue_size @0x569646; the mpreset exit @0x4C97E7;
+//  puntDuplicatePcids_330, read by Server_ValidatePlayerJoinRequest @0x512771]
+void apply_session_create_words(GameConfig &config, const gamecfg::GameCfg &cfg);
+
+// What the game shell's in-process host is configured from: a LAN host's
+// host-screen session config with its cap, server type and network type, or
+// (none) the single-player listen server's mission game type; the player's
+// profile record and the process's cfg block when the shell has them.
+struct ShellHostSource {
+	const GameConfig *lan_config = nullptr; // the host screen's; null = single player
+	uint32_t lan_max_players = 0;           // the cap session_player_cap left
+	bool lan_serve_and_play = true;         // false = the dedicated server type
+	NetworkType lan_network_type = NetworkType::Lan;
+	uint32_t sp_game_type = 0; // the mission's (game_type::for_mission_attribs)
+	const playersav::ProfileRecord *profile = nullptr;
+	const gamecfg::GameCfg *cfg_block = nullptr;
+};
+
+// The game shell's in-process host record, the faithful §5.0 mode-3 listen
+// server: a LAN host's from its host-screen config (its cap, its dedicated
+// word from the server type, a real socket); else single player's, the
+// profile record's session words (singleplayer_game_config), socketless and
+// always serve-and-play. Either takes the cfg block's create words
+// (apply_session_create_words) and the profile's inverse OPTIONS_AUTOMEDIC
+// word. The embedder adds its own values (the title it speaks, the game
+// root, its character selection).
+// [orig: SinglePlayer_StartMission @0x561af0; the dedicated word the slot
+//  limit adds the host's own slot for, Game_ApplySessionSettingsToGlobals
+//  @0x551B20..0x551B35]
+HostConfig shell_host_config(const ShellHostSource &source);
 
 // The cfg block's side of a ServerCommand that changed the config: the verb's
 // block field takes the value the executor left in the session config

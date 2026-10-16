@@ -81,10 +81,14 @@ int main() {
 	});
 	opennova::novaworld_server::ServerConfig config;
 	config.nw_udp_port = 0;
+	// The JO loss probe below drives the listener's in-match JO host, which is
+	// opt-in (ONNET_EMBEDDED_JO_HOST, off by default).
+	config.embedded_jo_host = true;
 	if (!listener.start(config)) {
 		std::fprintf(stderr, "FAIL: listener.start\n");
 		return 1;
 	}
+	expect(listener.embedded_jo_host_running(), "the opted-in listener runs the JO host");
 	const uint16_t test_nw_port = listener.bound_port();
 	if (test_nw_port == 0) {
 		std::fprintf(stderr, "FAIL: listener reports OS-assigned UDP port\n");

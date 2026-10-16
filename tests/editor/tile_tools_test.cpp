@@ -34,7 +34,7 @@ bool same(TilUv a, TilUv b) { return std::fabs(a.u - b.u) < 1e-6f && std::fabs(a
 
 int test_turns_and_flips() {
 	// Nile's tables, the file's encoding: counter-clockwise on the plane 0>4 1>5 2>6 3>7 4>3 5>2 6>1 7>0, clockwise
-	// 0>7 1>6 2>5 3>4 4>0 5>1 6>2 7>3 [gobj sub_1000EDDA].
+	// 0>7 1>6 2>5 3>4 4>0 5>1 6>2 7>3 [gobj.dll sub_1000EDDA].
 	const uint8_t ccw[8] = {4, 5, 6, 7, 3, 2, 1, 0}, cw[8] = {7, 6, 5, 4, 0, 1, 2, 3};
 	for (uint8_t f = 0; f < 8; ++f) {
 		TEST_EXPECT(tile_turned(f, 1) == ccw[f] && tile_turned(f, -1) == cw[f]);

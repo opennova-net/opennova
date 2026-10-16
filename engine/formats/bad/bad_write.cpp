@@ -4,6 +4,8 @@
 
 #include <formats/bad/bad_write.h>
 
+#include <base/io/os_path.h>
+
 #include <base/io/le.h>
 
 #include <cstdio>
@@ -197,7 +199,7 @@ int bad_write(const char *path, const BadFile *bf) {
     if (path == nullptr) return -1;
     std::vector<uint8_t> bytes;
     if (bad_write_buffer(bf, bytes) != 0) return -1;
-    FILE *f = std::fopen(path, "wb");
+    FILE *f = opennova::io::fopen_utf8(path, "wb");
     if (f == nullptr) return -1;
     const size_t written = bytes.empty() ? 0 : std::fwrite(bytes.data(), 1, bytes.size(), f);
     std::fclose(f);

@@ -102,8 +102,8 @@ void server_console_post(std::vector<ServerConsoleLine> &ring, const std::string
 // [orig: Chat_AddMessageChannel1 @0x4985D0 — the width from HUD_GetChatBoxCoord
 //  @0x5BBE90 rows 2 and 1 @0x498673..0x49869C (g_HUDChatBoxCoords @0x28E4DF8,
 //  written only by the hud.def parser @0x5BB7D1 / @0x5BB7ED), HUD_WordWrapText
-//  @0x580980 over g_hudLabelFontBold @0x4986AC, a 0 count read as 1
-//  @0x4986BB..0x4986C5, the shift @0x4986CC..0x498701, the zeroing @0x498718,
+//  @0x580980 over g_HUDLabelFontBold @0xB4C394 (the count back @0x4986AC), a 0
+//  count read as 1 @0x4986BB..0x4986C5, the shift @0x4986CC..0x498701, the zeroing @0x498718,
 //  slot 1's timer @0x49872C..0x498734, the fill @0x498750..0x4987DA; the lives
 //  930 at every Chat_DispatchToChannel call @0x42B988..0x42BAEA]
 inline constexpr size_t kChatDisplaySlotCount = 40;

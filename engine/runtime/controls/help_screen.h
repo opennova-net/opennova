@@ -6,7 +6,7 @@
 // class; one page is current and holds its rendered rows (the key text and
 // the action's help text).
 // [orig: KeyBinding_BuildHelpScreenTable @0x497340 (built at every mission
-//  start by the profile apply sub_563620 @0x5636c4) -> BMS_PruneEmptyEntities
+//  start by the profile apply Profile_ApplySessionControls @0x5636c4) -> BMS_PruneEmptyEntities
 //  @0x496630 (the prune; its IDB name is a misnomer), qsort with
 //  KeyBinding_CompareEntries @0x4965f0, KeyBinding_BuildCategoryPages
 //  @0x4966c0, HelpScreen_BuildPage @0x4971b0; the page keys

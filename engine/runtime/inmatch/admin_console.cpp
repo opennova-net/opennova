@@ -9,6 +9,7 @@
 #include <runtime/world/world.h>
 
 #include <base/gameprofile/game_type.h>
+#include <base/io/cp1252.h> // cp1252_isspace (the .ACP CRT isspace)
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 #include <formats/gamecfg/game_cfg.h>
@@ -51,12 +52,13 @@ constexpr uint32_t kCycleLingerTicks = 620;
 // [orig: CAdminServer_HandleGet — the buffer at frame +0x18, the cookie at +0x4C]
 constexpr size_t kGameSettingsValueMaxChars = 52 - 21 - 2 - 1 - 1;
 
+// The CRT isspace under the game's ".ACP" LC_CTYPE, pinned to cp1252 (the six C-locale
+// spaces plus 0xA0, D-NET-381 / D-NET-382). The walk passes the byte sign-extended; the CRT's
+// ctype table mirrors its 128..254 rows below index 0, so 0xA0 (-96) splits here too.
+// [orig: CAdminServer_DispatchCommand @0x406720 - `movsx` @0x4067AD, isspace @0x4067B5 ->
+//  @0x76B964; CRT_init_ctype's mirror copy @0x784C59]
 bool is_space(char c) {
-	return c == ' ' || (c >= '\t' && c <= '\r');
-}
-
-bool ieq(std::string_view a, std::string_view b) {
-	return strutil::iequals(a, b);
+	return cp1252_isspace(static_cast<uint8_t>(c));
 }
 
 int32_t atol_of(const std::string &s) {
@@ -77,6 +79,10 @@ std::string itos(int64_t v) {
 
 } // namespace
 
+// The command line's split: the walk NUL-terminates each run of spaces and starts a token
+// at the run's end, at most 25 tokens; the last one runs to the line's end.
+// [orig: CAdminServer_DispatchCommand @0x406720 - the 25-token cap @0x4067A0, the isspace
+//  walk @0x4067A0..0x4067EB]
 std::vector<std::string> admin_split_command(std::string_view line) {
 	std::vector<std::string> tokens;
 	size_t start = std::string_view::npos;
@@ -133,34 +139,34 @@ bool AdminConsole::dispatch(const AdminSession &session, std::string_view line,
 		const Args args(tokens.begin() + 1, tokens.end());
 		const auto stub = [&](const char *usage) {
 			const bool known = !args.empty() &&
-					(ieq(args[0], "LIST") || ieq(args[0], "DELETE") || ieq(args[0], "CREATE"));
+					(strutil::iequals(args[0], "LIST") || strutil::iequals(args[0], "DELETE") || strutil::iequals(args[0], "CREATE"));
 			replies.emplace_back(known ? kNotImplemented : usage);
 		};
-		if (ieq(verb, "QUIT")) return false;
-		if (ieq(verb, "GET") && (rights & kGet)) {
+		if (strutil::iequals(verb, "QUIT")) return false;
+		if (strutil::iequals(verb, "GET") && (rights & kGet)) {
 			handle_get(args, replies);
-		} else if (ieq(verb, "SET") && (rights & kSet)) {
+		} else if (strutil::iequals(verb, "SET") && (rights & kSet)) {
 			handle_set(args, replies);
-		} else if (ieq(verb, "MISSION") && (rights & kMission)) {
+		} else if (strutil::iequals(verb, "MISSION") && (rights & kMission)) {
 			handle_mission(args, replies);
-		} else if (ieq(verb, "PLAYER") && (rights & kPlayer)) {
+		} else if (strutil::iequals(verb, "PLAYER") && (rights & kPlayer)) {
 			handle_player(args, replies);
-		} else if (ieq(verb, "WEAPON") && (rights & kWeapon)) {
+		} else if (strutil::iequals(verb, "WEAPON") && (rights & kWeapon)) {
 			handle_weapon(args, replies);
-		} else if (ieq(verb, "CMD") && (rights & kCmd)) {
+		} else if (strutil::iequals(verb, "CMD") && (rights & kCmd)) {
 			handle_cmd(args, replies);
-		} else if (ieq(verb, "GOTO") && (rights & kGoto)) {
+		} else if (strutil::iequals(verb, "GOTO") && (rights & kGoto)) {
 			handle_goto(args, replies);
-		} else if (ieq(verb, "CHAT") && (rights & kGoto)) {
+		} else if (strutil::iequals(verb, "CHAT") && (rights & kGoto)) {
 			handle_chat(args, replies);
-		} else if (ieq(verb, "ADMINUSER") && (rights & kGoto)) {
+		} else if (strutil::iequals(verb, "ADMINUSER") && (rights & kGoto)) {
 			// [orig: CAdminServer_HandleAdminUserCommand @0x404CB0, @0x404CB8..0x404D5C]
 			stub("USAGE -  ADMINUSER [LIST | DELETE | CREATE]");
-		} else if (ieq(verb, "BANLIST") && (rights & kGoto)) {
+		} else if (strutil::iequals(verb, "BANLIST") && (rights & kGoto)) {
 			// Its usage says BAN. [orig: CAdminServer_HandleBanCommand @0x404D70,
 			//  @0x404D78..0x404E1C]
 			stub("USAGE -  BAN [LIST | DELETE | CREATE]");
-		} else if (ieq(verb, "PETERRABBIT") && (rights & kPeterRabbit)) {
+		} else if (strutil::iequals(verb, "PETERRABBIT") && (rights & kPeterRabbit)) {
 			handle_fun(args, replies);
 		} else {
 			replies.push_back(admin_usage_reply(rights));
@@ -175,11 +181,11 @@ bool AdminConsole::dispatch(const AdminSession &session, std::string_view line,
 void AdminConsole::handle_get(const Args &args, std::vector<std::string> &replies) {
 	if (args.empty()) {
 		replies.emplace_back(kGetUsage);
-	} else if (ieq(args[0], "GAMESTATE")) {
+	} else if (strutil::iequals(args[0], "GAMESTATE")) {
 		replies.emplace_back(scene_ == AdminScene::MainMenu  ? "OK - Current State = Menus"
 		                     : scene_ == AdminScene::GameLoop ? "OK - Current State = Game"
 		                                                      : "OK - Current State = Unknown");
-	} else if (ieq(args[0], "GAMESETTINGS")) {
+	} else if (strutil::iequals(args[0], "GAMESETTINGS")) {
 		replies.push_back(game_settings_reply());
 	} else {
 		replies.emplace_back(kGetUsage);
@@ -291,19 +297,19 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 	}
 	const std::string &key = args[0];
 	if (args.size() < 2) {
-		if (ieq(key, "ServerPassword")) {
+		if (strutil::iequals(key, "ServerPassword")) {
 			if (block != nullptr) block->mp_host_game_password.clear();
 			if (protocol_up) {
 				c.server_password.clear();
 				republish_flags(ctx_);
 			}
-		} else if (ieq(key, "SideAPassword")) {
+		} else if (strutil::iequals(key, "SideAPassword")) {
 			if (block != nullptr) block->mp_host_side_password_a.clear();
 			if (protocol_up) {
 				c.side_a_password.clear();
 				republish_flags(ctx_);
 			}
-		} else if (ieq(key, "SideBPassword")) {
+		} else if (strutil::iequals(key, "SideBPassword")) {
 			if (block != nullptr) block->mp_host_side_password_b.clear();
 			if (protocol_up) {
 				c.side_b_password.clear();
@@ -325,50 +331,50 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 		rules = on ? (rules | bit) : (rules & ~bit);
 		set_live_rules_word(ctx_, rules);
 	};
-	if (ieq(key, "AutoBalanceOnRecycle")) {
+	if (strutil::iequals(key, "AutoBalanceOnRecycle")) {
 		// No shadow write: the save keeps the old autoBalanceOnRecycle_528. [orig: @0x405BC3]
 		c.auto_balance_enabled = v;
-	} else if (ieq(key, "PuntVote")) {
+	} else if (strutil::iequals(key, "PuntVote")) {
 		c.voting_enabled = v;
 		if (block != nullptr) block->mpvoting = v;
-	} else if (ieq(key, "VotePercent")) {
+	} else if (strutil::iequals(key, "VotePercent")) {
 		c.voting_percent = static_cast<float>(io::retail_atof(value.c_str()));
 		if (block != nullptr) block->mpvoting_percent = c.voting_percent;
-	} else if (ieq(key, "VoteNumPlayersReq")) {
+	} else if (strutil::iequals(key, "VoteNumPlayersReq")) {
 		c.voting_min_players = v;
 		if (block != nullptr) block->mpvoting_min_players = v;
-	} else if (ieq(key, "ChangeTeam")) {
+	} else if (strutil::iequals(key, "ChangeTeam")) {
 		set_rule_bit(GameConfig::kMpAttribTeamChoose, v != 0);
 		if (block != nullptr) block->mpchangeteam = v;
-	} else if (ieq(key, "ChangeTeamInterval")) {
+	} else if (strutil::iequals(key, "ChangeTeamInterval")) {
 		c.change_team_interval_seconds = v;
 		if (block != nullptr) block->mpchangeteam_interval = v;
-	} else if (ieq(key, "ChangeTeamPenalty")) {
+	} else if (strutil::iequals(key, "ChangeTeamPenalty")) {
 		c.change_team_penalty_seconds = v;
 		if (block != nullptr) block->mpchangeteam_penalty = v;
-	} else if (ieq(key, "ChangeTeamDelay")) {
+	} else if (strutil::iequals(key, "ChangeTeamDelay")) {
 		c.capture_duration_seconds = v;
 		if (world != nullptr) world->match.live_rules().capture_duration_seconds = v;
 		if (block != nullptr) block->teamchange_time = v;
-	} else if (ieq(key, "StartDelay")) {
+	} else if (strutil::iequals(key, "StartDelay")) {
 		c.start_delay = static_cast<uint32_t>(v);
 		if (block != nullptr) block->startdelay = v;
-	} else if (ieq(key, "DoMinPingCheck")) {
+	} else if (strutil::iequals(key, "DoMinPingCheck")) {
 		c.do_min_ping_check = v;
 		if (block != nullptr) block->dominpingcheck = v;
-	} else if (ieq(key, "MinPing")) {
+	} else if (strutil::iequals(key, "MinPing")) {
 		c.min_ping = static_cast<uint32_t>(v);
 		if (block != nullptr) block->minping = v;
-	} else if (ieq(key, "DoMaxPingCheck")) {
+	} else if (strutil::iequals(key, "DoMaxPingCheck")) {
 		c.do_max_ping_check = v;
 		if (block != nullptr) block->domaxpingcheck = v;
-	} else if (ieq(key, "MaxPing")) {
+	} else if (strutil::iequals(key, "MaxPing")) {
 		c.max_ping = static_cast<uint32_t>(v);
 		if (block != nullptr) block->maxping = v;
-	} else if (ieq(key, "MaxFriendlyKills")) {
+	} else if (strutil::iequals(key, "MaxFriendlyKills")) {
 		c.max_friendly_kills = v;
 		if (block != nullptr) block->numallowablefriendlykills = v;
-	} else if (ieq(key, "GameTime")) {
+	} else if (strutil::iequals(key, "GameTime")) {
 		// The round clock restarts at the full new limit: g_RoundTimeRemaining = 3720 * value.
 		c.respawn_time = static_cast<uint32_t>(v);
 		if (block != nullptr) block->time_limit = v;
@@ -376,40 +382,40 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 			world->match.live_rules().game_time_minutes = static_cast<uint32_t>(v);
 			world->match.set_remaining_ticks(static_cast<int32_t>(3720u * static_cast<uint32_t>(v)));
 		}
-	} else if (ieq(key, "FriendlyFire")) {
+	} else if (strutil::iequals(key, "FriendlyFire")) {
 		set_rule_bit(GameConfig::kMpAttribNoFriendlyFire, v == 0); // inverted
-	} else if (ieq(key, "FriendlyTags")) {
+	} else if (strutil::iequals(key, "FriendlyTags")) {
 		set_rule_bit(GameConfig::kMpAttribNoFriendlyTag, v == 0); // inverted
-	} else if (ieq(key, "TeamTriggerClaymore")) {
+	} else if (strutil::iequals(key, "TeamTriggerClaymore")) {
 		set_rule_bit(GameConfig::kMpAttribClaymorePref, v != 0);
-	} else if (ieq(key, "Tracers")) {
+	} else if (strutil::iequals(key, "Tracers")) {
 		set_rule_bit(GameConfig::kMpAttribNoTracers, v == 0); // inverted
-	} else if (ieq(key, "KOTHLimit")) {
+	} else if (strutil::iequals(key, "KOTHLimit")) {
 		c.time_limit_minutes = static_cast<uint32_t>(v);
 		if (world != nullptr) world->match.live_rules().hill_limit_minutes = static_cast<uint32_t>(v);
 		if (block != nullptr) block->koth_limit = v;
-	} else if (ieq(key, "KillLimit")) {
+	} else if (strutil::iequals(key, "KillLimit")) {
 		// No 500 fold here: a live 500 until the next session apply reads it as unlimited.
 		c.score_limit = static_cast<uint32_t>(v);
 		if (world != nullptr) world->match.live_rules().score_limit = static_cast<uint32_t>(v);
 		if (block != nullptr) block->max_kills = v;
-	} else if (ieq(key, "MaxScore")) {
+	} else if (strutil::iequals(key, "MaxScore")) {
 		c.max_score = static_cast<uint32_t>(v);
 		if (world != nullptr) world->match.live_rules().max_score = static_cast<uint32_t>(v);
 		if (block != nullptr) block->max_score = v;
-	} else if (ieq(key, "FatBullets")) {
+	} else if (strutil::iequals(key, "FatBullets")) {
 		c.fat_bullets = v;
 		if (world != nullptr) world->rules.fat_bullets = v != 0;
 		if (block != nullptr) block->fatbullets = v;
-	} else if (ieq(key, "OneShotKill")) {
+	} else if (strutil::iequals(key, "OneShotKill")) {
 		c.one_shot_kill = v;
 		if (world != nullptr) world->rules.one_shot_kill = v != 0;
 		if (block != nullptr) block->oneshotonekill = v;
-	} else if (ieq(key, "ArmoryTimer")) {
+	} else if (strutil::iequals(key, "ArmoryTimer")) {
 		// The cfg field is the live value. [orig: armoryReuseTime_A38]
 		c.armory_reuse_time = static_cast<uint32_t>(v);
 		if (block != nullptr) block->armory_reuse_time = v;
-	} else if (ieq(key, "ServerName")) {
+	} else if (strutil::iequals(key, "ServerName")) {
 		// Rebuilt from every value token, each followed by one space, a token skipped when it
 		// would take the name past 30 characters; then the protocol's session name.
 		// [orig: @0x4060BF..0x40615A]
@@ -418,21 +424,21 @@ void AdminConsole::handle_set(const Args &args, std::vector<std::string> &replie
 			if (args[i].size() + name.size() + 2 < 0x20) name += args[i] + " ";
 		if (block != nullptr) block->game_name = name;
 		if (protocol_up) ctx_.np_protocol.session_name = name;
-	} else if (ieq(key, "ServerPassword")) {
+	} else if (strutil::iequals(key, "ServerPassword")) {
 		const std::string pw = password_field(value);
 		if (block != nullptr) block->mp_host_game_password = pw;
 		if (protocol_up) {
 			c.server_password = pw;
 			republish_flags(ctx_);
 		}
-	} else if (ieq(key, "SideAPassword")) {
+	} else if (strutil::iequals(key, "SideAPassword")) {
 		const std::string pw = password_field(value);
 		if (block != nullptr) block->mp_host_side_password_a = pw;
 		if (protocol_up) {
 			c.side_a_password = pw;
 			republish_flags(ctx_);
 		}
-	} else if (ieq(key, "SideBPassword")) {
+	} else if (strutil::iequals(key, "SideBPassword")) {
 		const std::string pw = password_field(value);
 		if (block != nullptr) block->mp_host_side_password_b = pw;
 		if (protocol_up) {
@@ -509,7 +515,7 @@ void AdminConsole::handle_mission(const Args &args, std::vector<std::string> &re
 		return;
 	}
 	const std::string &sub = args[0];
-	if (ieq(sub, "LIST")) {
+	if (strutil::iequals(sub, "LIST")) {
 		// An existing but empty rotation sends retail's unwritten 0-byte allocation; "" here
 		// (D-NET-367).
 		if (!in_game() || seams_.rotation == nullptr || !seams_.rotation->list().exists)
@@ -518,7 +524,7 @@ void AdminConsole::handle_mission(const Args &args, std::vector<std::string> &re
 			replies.push_back(rotation_lines(false));
 		return;
 	}
-	if (ieq(sub, "AVAILABLE")) {
+	if (strutil::iequals(sub, "AVAILABLE")) {
 		std::string out;
 		if (seams_.rotation != nullptr) {
 			const std::vector<RotationAdmin::CatalogRow> catalog = seams_.rotation->catalog();
@@ -528,25 +534,25 @@ void AdminConsole::handle_mission(const Args &args, std::vector<std::string> &re
 		replies.push_back(out);
 		return;
 	}
-	if (ieq(sub, "CLEAR")) {
+	if (strutil::iequals(sub, "CLEAR")) {
 		if (seams_.rotation != nullptr) seams_.rotation->clear(in_game());
 		replies.emplace_back("OK - Mission list reset.");
 		return;
 	}
-	if (ieq(sub, "CYCLE")) {
+	if (strutil::iequals(sub, "CYCLE")) {
 		cycle_tail(replies);
 		return;
 	}
-	if (ieq(sub, "ADD")) {
+	if (strutil::iequals(sub, "ADD")) {
 		handle_mission_add(Args(args.begin() + 1, args.end()), replies);
 		return;
 	}
-	if (ieq(sub, "REMOVE") && args.size() >= 2) {
+	if (strutil::iequals(sub, "REMOVE") && args.size() >= 2) {
 		if (seams_.rotation != nullptr) seams_.rotation->remove(atol_of(args[1]));
 		replies.emplace_back("OK - Mission Removed.");
 		return;
 	}
-	if (ieq(sub, "SETNEXT") && args.size() >= 2) {
+	if (strutil::iequals(sub, "SETNEXT") && args.size() >= 2) {
 		if (seams_.rotation != nullptr) seams_.rotation->set_next(atol_of(args[1]));
 		replies.emplace_back("OK - Next Mission Set.");
 		return;
@@ -560,7 +566,7 @@ void AdminConsole::handle_mission(const Args &args, std::vector<std::string> &re
 //  the Game Loop the append or, with a third argument, the insert; `OK - Entry Added\n` in
 //  every scene @0x403D9F..0x403EDD]
 void AdminConsole::handle_mission_add(const Args &args, std::vector<std::string> &replies) {
-	const bool one_shot = args.size() > 3 && ieq(args[3], "ONESHOT");
+	const bool one_shot = args.size() > 3 && strutil::iequals(args[3], "ONESHOT");
 	if (args.empty()) {
 		replies.emplace_back(kMissionAddUsage);
 		return;
@@ -571,7 +577,7 @@ void AdminConsole::handle_mission_add(const Args &args, std::vector<std::string>
 	}
 	const std::vector<RotationAdmin::CatalogRow> catalog = seams_.rotation->catalog();
 	size_t row = 0;
-	while (row < catalog.size() && !ieq(catalog[row].file, args[0])) ++row;
+	while (row < catalog.size() && !strutil::iequals(catalog[row].file, args[0])) ++row;
 	if (row >= catalog.size()) {
 		replies.emplace_back("ERROR - File Not Found.");
 		return;
@@ -623,7 +629,7 @@ void AdminConsole::handle_weapon(const Args &args, std::vector<std::string> &rep
 		replies.emplace_back(kWeaponUsage);
 		return;
 	}
-	if (ieq(args[0], "LIST")) {
+	if (strutil::iequals(args[0], "LIST")) {
 		std::string out;
 		for (int i = 0; i < 255; ++i) {
 			const world::WeaponTableEntry *row = listed(i);
@@ -642,13 +648,13 @@ void AdminConsole::handle_weapon(const Args &args, std::vector<std::string> &rep
 		replies.emplace_back(kWeaponUsage);
 		return;
 	}
-	const bool all = ieq(args[1], "ALL");
+	const bool all = strutil::iequals(args[1], "ALL");
 	const int index = all ? 0 : static_cast<uint8_t>(atol_of(args[1]));
-	if (!ieq(args[0], "SET")) {
+	if (!strutil::iequals(args[0], "SET")) {
 		replies.emplace_back(kWeaponUsage);
 		return;
 	}
-	const int value = ieq(args[2], "ARMORY") ? armory : (ieq(args[2], "NEVER") ? 0 : 1);
+	const int value = strutil::iequals(args[2], "ARMORY") ? armory : (strutil::iequals(args[2], "NEVER") ? 0 : 1);
 	if (all) {
 		for (int i = 0; i < 255; ++i)
 			if (listed(i) != nullptr) set_availability(i, value);
@@ -754,9 +760,9 @@ void AdminConsole::handle_goto(const Args &args, std::vector<std::string> &repli
 		replies.emplace_back(kGotoUsage);
 		return;
 	}
-	if (ieq(args[0], "GAMESTATE")) {
+	if (strutil::iequals(args[0], "GAMESTATE")) {
 		replies.emplace_back(in_game() ? "ERROR - In 'Game' State." : kNotImplemented);
-	} else if (ieq(args[0], "MENUSTATE")) {
+	} else if (strutil::iequals(args[0], "MENUSTATE")) {
 		if (scene_ != AdminScene::MainMenu) {
 			// Input action 3 passes its binding's gate on every host: the dispatcher reads the
 			// flag dword by action code after the start-up re-lay, and record 3 is the `exit` row
@@ -811,7 +817,7 @@ void AdminConsole::chat_send(std::string text) {
 //  D-NET-363); SEND @0x404BE8..0x404C74 (the words, each followed by a space, in a 122-byte
 //  buffer with no bound, D-NET-362, then `OK - Chat sent.` whatever the sender did)]
 void AdminConsole::handle_chat(const Args &args, std::vector<std::string> &replies) {
-	if (!args.empty() && ieq(args[0], "GET")) {
+	if (!args.empty() && strutil::iequals(args[0], "GET")) {
 		// A host with no client reads its own display buffer (chat_display_get); a listen
 		// host reads its HUD's window through the seam.
 		if (ctx_.is_mp_session_peer == 0) {
@@ -826,7 +832,7 @@ void AdminConsole::handle_chat(const Args &args, std::vector<std::string> &repli
 		replies.push_back(out);
 		return;
 	}
-	if (!args.empty() && ieq(args[0], "SEND")) {
+	if (!args.empty() && strutil::iequals(args[0], "SEND")) {
 		std::string text;
 		for (size_t i = 1; i < args.size(); ++i) text += args[i] + " ";
 		chat_send(std::move(text));

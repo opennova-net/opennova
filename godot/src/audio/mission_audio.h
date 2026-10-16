@@ -48,12 +48,11 @@ class Simulation;
 // dialog voice and the WAC voice are its children. Loads the global banks
 // into a SoundBank, resolves each placed
 // envs-class entity's time-of-day slot sets BY NAME (items.def soundloop_1..4
-// = morning/day/evening/night [orig: Entity_UpdateEnvSoundEmitter @ 0x4a8080];
+// = morning/day/evening/night (engine: runtime/audio/envs_markers.h);
 // the engine is name-keyed -- see docs/audio/lwf-dbf-sound-re.md), and
 // retains each layer as lightweight candidate data. tick(camera_pos) runs the
 // witnessed ambient emitter mix: per-voice two-radius distance volumes, region
-// crossfades, and an eight-player physical channel pool [orig:
-// SoundEmitter_UpdateAndMixTop8 @ 0x5284a0]. Also exposes the PlayWavList
+// crossfades, and an eight-player physical channel pool (engine: runtime/audio/ambient_channel_pool.cpp). Also exposes the PlayWavList
 // action seam and the music/reverb bed. The dialog slots and their line
 // timers and the dialog-id resolution are the engine's
 // runtime/audio/dialog_queue, the one table the world owns (this node is its
@@ -123,8 +122,7 @@ public:
 	// registrations, not one-shots: the same (source registry lifetime, lane,
 	// layer) refreshes in place and competes with placed ambience in retail's one
 	// loudest-eight table. Pitch/volume zero is the common keyed clear.
-	// [orig: SoundEmitter_RegisterSetLayers @0x528340;
-	// SoundEmitter_ClearByEntityAndSlot @0x527a50]
+	// (engine: runtime/audio/ambient_mixer.cpp)
 	void apply_sound_emitters(const Array &p_events);
 	// The native leg the fire pass feeds (the bound form above unwraps the
 	// test-authored SoundEmitterRow records into the same rows).
@@ -145,8 +143,7 @@ public:
 	// engine resolves a pre-loaded sound_id handle; the action path plays it at full
 	// emitter volume: ActionSlot_PlaySound @0x4010c0 -> Entity_PlaySound3D_FullVolume
 	// @0x528e20). One-shot volume snapshots the listener distance at fire time, and
-	// the set's cull range gates the fire entirely [orig: Sound_Play3DPositional
-	// @ 0x527cb0; cull @ 0x527cd1].
+	// the set's cull range gates the fire entirely (engine: runtime/audio/oneshot_play.h).
 	// `p_sound_id` is the sim's own-channel reuse key for the source
 	// (audio::oneshot_sound_id, carried on ReadyFireSound); 0 = no identity.
 	bool fire_soundset(const String &p_name, const Vector3 &p_world_pos, int p_source_bms_id = 0,
@@ -161,8 +158,7 @@ public:
 	// passes of SoundBank_FindTriggerByName @ 0x75be90).
 	bool ui_soundset(const String &p_name);
 	// A body slot sound (footstep/foley/landing/scream) from the sim's per-tick
-	// drain: the same full-volume positional one-shot as fire_soundset [orig:
-	// Entity_PlaySound3D_FullVolume @ 0x528e20 -- emitter volume 255], with an
+	// drain: the same full-volume positional one-shot as fire_soundset (engine: runtime/inmatch/client_effects.cpp), with an
 	// shares the finite one-shot pool with the other positional triggers.
 	bool slot_soundset(const String &p_name, const Vector3 &p_world_pos,
 			int p_source_bms_id = 0, int p_sound_id = 0);
@@ -199,13 +195,11 @@ public:
 	// World-driven eval clock: the world tick pushes the sim's logic tick after each
 	// session tick batch, and the native mixer runs the witnessed staggered cohort
 	// walk for the elapsed ticks -- each placed marker re-evaluates every 8th 62.5 Hz
-	// tick [orig: Entity_UpdateAllEntities @ 0x4c225a pool-2 walk;
-	// Entity_UpdateEnvSoundEmitter @ 0x4a8080]. The first world-driven tick rebases the
+	// tick (engine: runtime/audio/ambient_mixer.h). The first world-driven tick rebases the
 	// clock so an editor session that free-ran before Play keeps its slot lifetimes.
 	void advance_ticks(int64_t p_logic_tick);
 	// Occlusion provider (the Simulation) -- emitter/one-shot distances inflate
-	// through the witnessed two-ray LOS so occluded sources sound farther [orig:
-	// Sound_ApplyOcclusionDistance @ 0x529970]. Optional: tests and the menu run
+	// through the witnessed two-ray LOS so occluded sources sound farther (engine: runtime/audio/ambient_mixer.h). Optional: tests and the menu run
 	// without a sim and mix unoccluded.
 	void set_simulation(const Ref<Simulation> &p_sim);
 	// Test-injection seam: a Callable(listener, source, dist_q16, source_id) -> int

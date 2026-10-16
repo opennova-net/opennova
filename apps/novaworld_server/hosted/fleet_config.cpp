@@ -1,4 +1,5 @@
 #include "fleet_config.h"
+#include "text_util.h"
 
 #include <base/io/json.h>
 #include <base/io/strutil.h>
@@ -40,20 +41,6 @@ std::optional<double> decimal_in(const std::string &text, double lo, double hi) 
 	if (!value || !(*value > lo && *value <= hi))
 		return std::nullopt;
 	return *value;
-}
-
-std::vector<std::string> split_list(const std::string &list) {
-	std::vector<std::string> out;
-	size_t pos = 0;
-	while (pos <= list.size()) {
-		const size_t comma = list.find(',', pos);
-		const size_t end = comma == std::string::npos ? list.size() : comma;
-		const std::string entry = strutil::trim(std::string_view(list).substr(pos, end - pos));
-		if (!entry.empty())
-			out.push_back(entry);
-		pos = end + 1;
-	}
-	return out;
 }
 
 struct Reader {

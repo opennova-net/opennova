@@ -14,6 +14,8 @@
 
 #include <formats/mus/mus.h>
 
+#include <base/io/bits.h>
+
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -759,10 +761,6 @@ static void intrinsic_gecho(MusVM *vm) {
     vm_push(vm, 0);
 }
 
-static inline uint32_t mus_rol32(uint32_t v, int s) {
-    return (v << s) | (v >> (32 - s));
-}
-
 /* Jointops.exe!AudioVM_Intrinsic_GGRnd @ 0x672320 (byte-exact port).
    Pops 2 (NOS=lo, TOS=hi). The process-global seed g_AudioVMGGRndSeed @ 0x84F210 is
    statically initialised to 0xBABEFACE in the binary and updated in place:
@@ -774,7 +772,7 @@ static void intrinsic_ggrnd(MusVM *vm) {
     int32_t hi = vm_pop(vm);
     int32_t lo = vm_pop(vm);
     static uint32_t s_ggrnd_seed = 0xBABEFACEu;   /* initial value of dword_84F210 */
-    s_ggrnd_seed = mus_rol32(s_ggrnd_seed + mus_rol32(s_ggrnd_seed, 11), 2);
+    s_ggrnd_seed = opennova::io::rotl32(s_ggrnd_seed + opennova::io::rotl32(s_ggrnd_seed, 11), 2);
     int32_t span = hi - lo + 1;
     int32_t rnd  = 0;
     if (span != 0) rnd = (int32_t)(s_ggrnd_seed & 0xFFFFu) % span;

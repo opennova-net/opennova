@@ -120,7 +120,8 @@ constexpr FileKindFacts kRows[] = {
 	        .row,
 	Kind(FileKind::Texture, ArchiveSlot::Resource).extensions(kTexture).row,
 	// No name gives it: a model's chunk row reads the file it names as a chunk container whatever
-	// the name [orig: NQ8B @0x58F350; HRZ8 @0x58F470; AOC8 @0x58F590] (renderer::load_material_chunk),
+	// the name [orig: Texture_LoadNQ8BChunk @ 0x58F350; Texture_LoadHRZ8Chunk @ 0x58F470;
+	// Texture_LoadAOC8Chunk @ 0x58F590, the AOC8 chunk] (renderer::load_material_chunk),
 	// so a file no rule types by its name is one when its bytes hold one (renderer::
 	// is_material_chunk_container, a peek at its chunk headers); it packs with the art.
 	Kind(FileKind::MaterialChunk, ArchiveSlot::Resource).row,
@@ -260,9 +261,9 @@ constexpr FileKindFacts kRows[] = {
 	// HLSLEffect_InitAndLoadAll @ 0x5b0080, the slots 0..14 @ 0x5b0141, through
 	// HLSLEffect_LoadAllFromPFFArchive @ 0x5afed0], where it is given no override folder, which
 	// would be read alone [orig: @ 0x5b0112..0x5b0118]; both its callers give none [orig:
-	// Render_InitAllSubsystems @ 0x58642f; sub_586480 @ 0x5864a6]. So any slot serves one; retail
-	// packs its 44 in localres.pff (JO:CA, measured 2026-10-09: none in resource.pff, language.pff or
-	// jox01's), the slot that places them.
+	// Render_InitAllSubsystems @ 0x58642f; Render_ReloadEffectsForTexFilter @ 0x5864a6]. So any
+	// slot serves one; retail packs its 44 in localres.pff (JO:CA, measured 2026-10-09: none in
+	// resource.pff, language.pff or jox01's), the slot that places them.
 	Kind(FileKind::Shader, ArchiveSlot::Localres).extensions(kShader).row,
 	// Read from the install's folder before any archive mounts (game.cfg, assets.cd:
 	// docs/required-resources.md); gt.ssc, read loose first from the expansion's folder, is the
@@ -293,13 +294,7 @@ constexpr FileKindFacts kRows[] = {
 	Kind(FileKind::HeightmapInput, ArchiveSlot::None).row,
 };
 
-constexpr bool same_text(const char *a, const char *b) {
-	while (*a && *a == *b) {
-		++a;
-		++b;
-	}
-	return *a == *b;
-}
+using strutil::same_text;
 
 // Whether a null-ended list holds `name`.
 constexpr bool lists(const char *const *names, const char *name) {

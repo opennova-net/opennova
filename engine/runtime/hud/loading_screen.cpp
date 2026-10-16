@@ -146,4 +146,21 @@ TextBlock layout_text_block(const TextExtent &extent, int line_height, const std
 	return out;
 }
 
+LoadingBarRects loading_bar_rects(float surface_w, float surface_h, int displayed) {
+	// The ratio in float (the shell's Vector2 division), the product truncated.
+	const float sx = surface_w / static_cast<float>(kDesignWidth);
+	const float sy = surface_h / static_cast<float>(kDesignHeight);
+	const int x = static_cast<int>(kLoadingBarX * static_cast<double>(sx));
+	const int y = static_cast<int>(kLoadingBarY * static_cast<double>(sy));
+	const int w = static_cast<int>(kLoadingBarW * static_cast<double>(sx));
+	const int h = static_cast<int>(kLoadingBarH * static_cast<double>(sy));
+	LoadingBarRects out;
+	out.outer = {x, y, w + 6, h + 6};
+	out.gray = {x + 1, y + 1, w + 4, h + 4};
+	out.track = {x + 2, y + 2, w + 2, h + 2};
+	const LoadingBarSpan span = loading_bar_fill_span(x, w, displayed);
+	out.fill = {span.left, y + 3, span.right - span.left, h};
+	return out;
+}
+
 } // namespace opennova::hud

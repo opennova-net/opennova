@@ -2,7 +2,8 @@
 // (+8 = 12 * count + 16, +12 = 0, no byte past the records), its records grouped by ascending layer
 // (MED's write order), flags within the game's three bits, whole-unit positions and an index on a
 // 64-cell atlas, and written again by save_til it is the same bytes, the header computed from the
-// model [orig: JOTACmed MapTileStore_Serialize @ 0x433EC0]. Reports Skipped without OPENNOVA_JO_ASSETS.
+// model [orig: JOTACmed.exe MapTileStore_Serialize @ 0x433EC0]. Reports Skipped without
+// OPENNOVA_JO_ASSETS.
 
 #include <formats/til/til.h>
 #include <formats/til/til_io.h>

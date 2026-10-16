@@ -1,5 +1,6 @@
 #include <net/admin/admin_protocol.h>
 
+#include <base/io/cp1252.h> // cp1252_isspace
 #include <base/io/le.h>
 #include <base/io/strutil.h>
 #include <net/novacrypto/nwu.h>
@@ -90,7 +91,8 @@ CipherWords cipher_words(const uint8_t *key, size_t key_len) {
 
 // The challenge string keys the cipher; the server decrypts the whole payload with the inverse
 // (Crypto_DecryptBuffer @0x4375b0), so the zero byte after the fields is encrypted too.
-// [orig: Crypto_EncryptBuffer @0x437510; RAT.exe @0x4012d2..0x401361 (65 bytes, zero-filled)]
+// [orig: Crypto_EncryptBuffer @0x437510] [orig: RAT.exe @0x4012d2..0x401361 (65 bytes,
+// zero-filled)]
 std::array<uint8_t, ADMIN_LOGIN_BYTES> admin_encode_login(const std::vector<uint8_t> &challenge,
                                                           std::string_view user, std::string_view password) {
 	std::array<uint8_t, ADMIN_LOGIN_BYTES> buf{};
@@ -142,8 +144,9 @@ void admin_decrypt_buffer(uint8_t *buf, size_t size, const uint8_t *key, size_t 
 	for (size_t i = 0; i < size; ++i) buf[i] = static_cast<uint8_t>(buf[i] - key[i % key_len]);
 }
 
-// [orig: RAT.exe @0x401492..0x4014f3 (strlen + 1 bytes after the header);
-//  ProcessClientData @0x406f20..0x406f27 (an authenticated packet must end in its NUL)]
+// [orig: RAT.exe @0x401492..0x4014f3 (strlen + 1 bytes after the header)]
+// [orig: CAdminServer_ProcessClientData @0x406f20..0x406f27 (an authenticated packet must end
+//  in its NUL)]
 std::vector<uint8_t> admin_encode_command(std::string_view command) {
 	std::vector<uint8_t> out(command.begin(), command.end());
 	out.push_back(0);
@@ -173,11 +176,14 @@ bool admin_reply_is_error(std::string_view reply) {
 
 namespace {
 
-// DispatchCommand's split: ' ' and '\t'..'\r' separate (the C locale's isspace over a
-// sign-extended char, which reads 0 for every byte >= 0x80), at most 25 tokens, the 25th
-// running to the line's end. [orig: CAdminServer_DispatchCommand @0x4067A0..0x4067EB]
+// DispatchCommand's split, the one the server console makes (admin_console.cpp): the CRT
+// isspace under the game's ".ACP" LC_CTYPE, pinned to cp1252 (the six C-locale spaces plus
+// 0xA0, D-NET-381 / D-NET-382; the sign-extended byte reads the CRT's mirrored rows), at most
+// 25 tokens, the 25th running to the line's end, so the plan counts the replies the server
+// sends. [orig: CAdminServer_DispatchCommand @0x4067A0..0x4067EB - `movsx` @0x4067AD, isspace
+//  @0x4067B5]
 std::vector<std::string_view> split_command(std::string_view line) {
-	const auto is_space = [](char c) { return c == ' ' || (c >= '\t' && c <= '\r'); };
+	const auto is_space = [](char c) { return cp1252_isspace(static_cast<uint8_t>(c)); };
 	std::vector<std::string_view> tokens;
 	size_t i = 0;
 	while (i < line.size() && tokens.size() < 25) {
@@ -190,10 +196,6 @@ std::vector<std::string_view> split_command(std::string_view line) {
 		i = end;
 	}
 	return tokens;
-}
-
-bool ieq(std::string_view a, std::string_view b) {
-	return strutil::iequals(a, b);
 }
 
 // The keys SET writes; any other key with a value draws the usage and then
@@ -220,13 +222,13 @@ AdminReplyPlan admin_reply_plan(std::string_view command) {
 	if (t.empty()) return exact(1); // the usage
 	const std::string_view verb = t[0];
 	// QUIT returns 0 and the slot closes, with no reply. [orig: @0x406811]
-	if (ieq(verb, "QUIT")) return exact(0);
+	if (strutil::iequals(verb, "QUIT")) return exact(0);
 	// SET: no argument, or a key alone (a password cleared, else the usage): one; a key and a
 	// value: one, or the usage and `ERROR - Setting Not Found.` for a key it does not know.
-	if (ieq(verb, "SET")) {
+	if (strutil::iequals(verb, "SET")) {
 		if (t.size() < 3) return exact(1);
 		for (const char *key : kSetKeys) {
-			if (ieq(t[1], key)) return exact(1);
+			if (strutil::iequals(t[1], key)) return exact(1);
 		}
 		return exact(2);
 	}
@@ -236,14 +238,14 @@ AdminReplyPlan admin_reply_plan(std::string_view command) {
 	// more per qualifying slot, or none; any other sub-verb none for a found target.
 	// [orig: CAdminServer_HandlePlayer @0x403EF0 — LIST @0x403F7C, the target @0x40407E..0x404136,
 	//  BAN ALL @0x404298..0x40444B, BAN <#> @0x40445D..0x404539, CEASEFIRE @0x404543..0x404573]
-	if (ieq(verb, "PLAYER")) {
-		if (t.size() < 2 || ieq(t[1], "LIST") || t.size() < 3) return exact(1);
+	if (strutil::iequals(verb, "PLAYER")) {
+		if (t.size() < 2 || strutil::iequals(t[1], "LIST") || t.size() < 3) return exact(1);
 		const std::string_view sub = t[1];
-		if (ieq(sub, "PUNT") || ieq(sub, "SWAPTEAM") || ieq(sub, "KILL") || ieq(sub, "ZEROSCORE") ||
-				ieq(sub, "CEASEFIRE"))
+		if (strutil::iequals(sub, "PUNT") || strutil::iequals(sub, "SWAPTEAM") || strutil::iequals(sub, "KILL") || strutil::iequals(sub, "ZEROSCORE") ||
+				strutil::iequals(sub, "CEASEFIRE"))
 			return exact(1);
-		if (ieq(sub, "BAN")) {
-			if (ieq(t[2], "ALL")) return AdminReplyPlan{ AdminReplyFraming::QuietGap, 0 };
+		if (strutil::iequals(sub, "BAN")) {
+			if (strutil::iequals(t[2], "ALL")) return AdminReplyPlan{ AdminReplyFraming::QuietGap, 0 };
 			return AdminReplyPlan{ AdminReplyFraming::BanTarget, 0 };
 		}
 		return AdminReplyPlan{ AdminReplyFraming::QuietGap, 0 };
@@ -252,9 +254,9 @@ AdminReplyPlan admin_reply_plan(std::string_view command) {
 	// it); GAMESTATE and any other target a reply of their own and then the tail.
 	// [orig: CAdminServer_HandleGotoCommand @0x4049D0 — the usage @0x4049E4, the arms' reply
 	//  @0x404A6F, the tail @0x404A88 / @0x404AAF]
-	if (ieq(verb, "GOTO")) {
+	if (strutil::iequals(verb, "GOTO")) {
 		if (t.size() < 2) return exact(1);
-		if (ieq(t[1], "MENUSTATE")) return AdminReplyPlan{ AdminReplyFraming::MenuState, 0 };
+		if (strutil::iequals(t[1], "MENUSTATE")) return AdminReplyPlan{ AdminReplyFraming::MenuState, 0 };
 		return exact(2);
 	}
 	// GET, MISSION (every sub-verb, ADD's `OK - Entry Added` in any state, AVAILABLE's empty

@@ -11,6 +11,7 @@
 // of every map width; INT32_MIN routed without UB.
 #include <runtime/terrain_query/atlas_routing.h>
 #include <runtime/terrain_query/foliage_mask_map.h>
+#include <runtime/terrain_query/foliage_mask_raster.h>
 #include <runtime/terrain_query/surface_type_map.h>
 #include <runtime/terrain_query/terrain_atlas_rects.h>
 
@@ -184,6 +185,37 @@ int test_wraps() {
 	return 0;
 }
 
+// The MODEL tier's lookup over a loaded foliage map's codes and the .trn (foliage_code_map): an
+// off-grid candidate on an axis the .trn does not wrap reads the grid's edge cell, on a wrapping
+// one the far cell [orig: Foliage_GenerateModelTileInstances @ 0x600B85 ->
+// Foliage_SampleFoliageMapMask @ 0x606620, the OOB masks @ 0x606650..0x606668]; an empty map grows
+// nothing.
+int test_foliage_code_map() {
+	opennova::TrnConfig trn;
+	trn.sector_grid[0][0] = 1; // cell (0, 0): quadrant 0, atlas x 0..511
+	trn.sector_grid[0][15] = 3; // cell (0, 15): quadrant 2, atlas x 512..1023
+	opennova::FoliageMap codes;
+	codes.width = 4; // a 4-wide map: atlas x >> 8
+	codes.height = 4;
+	codes.indices.assign(16, 0);
+	codes.indices[0] = 11; // texel (0, 0): atlas x 0..255
+	codes.indices[2] = 33; // texel (2, 0): atlas x 512..767
+	trn.wrap_x = 0;
+	// Sector column -1: clamped to column 0, texel x 5 -> code 11.
+	TEST_EXPECT(foliage_mask_at_fixed(foliage_code_map(codes, trn), fx(-512 + 5), -fx(7)) == 11);
+	trn.wrap_x = 1;
+	// Wrapped to column 15, quadrant 2: texel x 512 + 5 -> code 33.
+	TEST_EXPECT(foliage_mask_at_fixed(foliage_code_map(codes, trn), fx(-512 + 5), -fx(7)) == 33);
+	// Inside the grid either way: cell (0, 0).
+	TEST_EXPECT(foliage_mask_at_fixed(foliage_code_map(codes, trn), fx(5), -fx(7)) == 11);
+	TEST_EXPECT(foliage_code_map(opennova::FoliageMap(), trn).data == nullptr &&
+			foliage_mask_at_fixed(foliage_code_map(opennova::FoliageMap(), trn), fx(5), -fx(7)) ==
+					0);
+	std::printf(
+			"foliage code map: a clamped axis reads the edge cell, a wrapped one the far cell\n");
+	return 0;
+}
+
 int test_inverse_against_walk() {
 	// The four quadrants over a 2 x 2 block from (0, 0), quadrant 0 locked on x, quadrant 3 on z; the rects
 	// against the walk for the one-texel lookups and every height lookup, at a quadrant's first column (the
@@ -324,8 +356,8 @@ int test_map_rects() {
 } // namespace
 
 int main() {
-	const int failures = test_island() + test_tiled() + test_wraps() + test_inverse_against_walk() + test_samplers() +
-	                     test_map_rects();
+	const int failures = test_island() + test_tiled() + test_wraps() + test_foliage_code_map() +
+			test_inverse_against_walk() + test_samplers() + test_map_rects();
 	if (failures == 0) std::printf("terrain_atlas_routing: all tests passed\n");
 	return failures == 0 ? 0 : 1;
 }

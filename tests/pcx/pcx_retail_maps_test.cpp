@@ -1,7 +1,10 @@
 // Retail terrain maps through the indexed PCX form: every char map (_m.pcx) and foliage map (_f.pcx) directly
 // under the extracted asset tree reads with its carried form (the _f maps' leftover EGA entries among the carried
 // fields; rows both coders write alike, the header picking the shipped coding) and, written again in that form, is
-// the same bytes. Reports Skipped without OPENNOVA_JO_ASSETS.
+// the same bytes. Then every PCX anywhere under the tree that the editor paints as a plane (an 8-bit, one-plane PCX
+// whose rows are its width, editor/documents/texture_raster.cpp read_pcx8) is written again as the same bytes: the
+// raster core's claim that a file read and written again is its bytes. Reports Skipped without
+// OPENNOVA_JO_ASSETS.
 
 #include <formats/pcx/pcx.h>
 #include <formats/pcx/pcx_io.h>
@@ -74,7 +77,35 @@ int main() {
 		std::printf("FAIL: no _m.pcx and _f.pcx under %s\n", assets.c_str());
 		return 1;
 	}
-	std::printf("%s: %d terrain maps (%d foliage) swept, %d failures\n", failures == 0 ? "OK" : "FAIL", swept, foliage,
-	            failures);
+	// Every paintable PCX in the tree, the terrain maps among them.
+	int paintable = 0, whole = 0;
+	for (const std::filesystem::directory_entry &entry : std::filesystem::recursive_directory_iterator(assets)) {
+		if (!entry.is_regular_file() || lower(entry.path().extension().string()) != ".pcx") continue;
+		const std::vector<uint8_t> bytes = test_io::read_file(entry.path().string());
+		opennova::PcxHeader header;
+		opennova::IndexedImage8 image;
+		opennova::PcxIndexedForm form;
+		std::string error;
+		if (!opennova::pcx_read_header(bytes.data(), bytes.size(), header) || header.bits != 8 || header.planes != 1 ||
+		    opennova::pcx_row_fit(header) != opennova::PcxRowFit::Exact ||
+		    !opennova::decode_pcx_indexed(bytes.data(), bytes.size(), image, error, &form) || image.empty()) {
+			++whole;
+			continue;
+		}
+		++paintable;
+		std::vector<uint8_t> again;
+		if (!opennova::encode_pcx_indexed(image, again, error, &form) || again != bytes) {
+			std::printf("FAIL: %s written again in its form differs (%zu bytes, written %zu)\n",
+			            entry.path().string().c_str(), bytes.size(), again.size());
+			++failures;
+		}
+	}
+	if (paintable < swept) {
+		std::printf("FAIL: %d paintable PCX in the tree, fewer than its %d terrain maps\n", paintable, swept);
+		return 1;
+	}
+	std::printf("%s: %d terrain maps (%d foliage) swept; %d paintable PCX in the tree written again (%d held whole), "
+	            "%d failures\n",
+	            failures == 0 ? "OK" : "FAIL", swept, foliage, paintable, whole, failures);
 	return failures == 0 ? 0 : 1;
 }

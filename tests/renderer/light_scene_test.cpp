@@ -1319,6 +1319,44 @@ int main() {
     expect(opennova::renderer::kRoundGlowFollowLift == 0.0f,
            "the per-tick follow re-centers at the raw round position");
 
+    // The transient spawns' records [orig: Entity_UpdateMuzzleGlowEffect @ 0x56c960;
+    // AmmoDef_ProcessImpactEffect @ 0x40a282..0x40a2c0; Entity_SpawnDeathPieces
+    // @ 0x4934f4..0x493527].
+    {
+        using namespace opennova::renderer;
+        const LightSpawnParams muzzle = muzzle_glow_spawn({1 << 16, 2 << 16, 3 << 16}, 42);
+        expect(muzzle.radius_fixed == 0x18000 && muzzle.rgb == (std::array<uint8_t, 3>{0xFF, 0xE0, 0xA0}) &&
+                       muzzle.owner_entity == 42 && muzzle.owner_section == 0 &&
+                       muzzle.position_fixed == (std::array<int32_t, 3>{1 << 16, 2 << 16, 3 << 16}),
+               "the muzzle glow spawns radius 1.5, 0xFFE0A0, owned by the shooter at section 0");
+        const LightSpawnParams impact = impact_flash_spawn({0, 0, 10 << 16}, (3 << 16) + 1, {9, 8, 7}, 12);
+        expect(impact.position_fixed[2] == (10 << 16) + (((3 << 16) + 1) >> 1) &&
+                       impact.radius_fixed == (3 << 16) + 1 && impact.rgb == (std::array<uint8_t, 3>{9, 8, 7}) &&
+                       impact.fade_mode == 2 && impact.fade_duration == 12 && impact.corona_lower_half_radius &&
+                       !impact.disable_corona,
+               "the impact flash rides radius >> 1 above the impact, mode 2 for its ticks, flag 0x100");
+        const LightSpawnParams death = death_flash_spawn({5, 6, 7}, 4 << 16);
+        expect(death.rgb == (std::array<uint8_t, 3>{0xFF, 0xC0, 0x80}) && death.fade_mode == 2 &&
+                       death.fade_duration == 31 && death.disable_corona && !death.disable_terrain &&
+                       death.radius_fixed == (4 << 16),
+               "the death flash is 0xFFC080, mode 2 for 31 ticks, corona off");
+
+        // A shot spawns once and re-arms the light (mode 4, five ticks); the word stays, the slot
+        // dies after five ticks and a stale word re-arms nothing (the generation lease, D-RLIT-4).
+        LightScene scene;
+        const LightHandle first = scene.fire_muzzle_glow(LightHandle{}, {0, 0, 0}, 7);
+        expect(!first.is_null() && scene.alive(first) && scene.inspect().live == 1, "a null word spawns");
+        const LightHandle again = scene.fire_muzzle_glow(first, {1 << 16, 0, 0}, 7);
+        expect(again == first && scene.inspect().live == 1, "a live word is re-armed, not spawned again");
+        for (int tick = 0; tick < 4; ++tick) scene.tick();
+        expect(scene.alive(first), "mode 4 lives through its fourth tick");
+        scene.tick();
+        expect(!scene.alive(first) && scene.inspect().live == 0, "then the slot dies");
+        const LightHandle stale = scene.fire_muzzle_glow(first, {0, 0, 0}, 7);
+        expect(stale == first && !scene.alive(stale) && scene.inspect().live == 0,
+               "a stale word re-arms nothing and spawns nothing");
+    }
+
     std::cout << "light_scene_test passed\n";
     return 0;
 }

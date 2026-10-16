@@ -212,7 +212,7 @@ public:
 	// a zero-tick frame still presenting current render-only entity
 	// rows (camera and local attach/detach change between fixed ticks). The native
 	// session owns bank/clamp, input retention, and per-tick order; the GameWorld leg table
-	// owns the concrete Godot device order [orig: Game_MainLoop @ 0x52b630].
+	// owns the concrete Godot device order (engine: runtime/world/tick_accumulator.h).
 	Ref<MissionFrameOutcome> advance_session_frame(const Ref<MissionFrameInput> &p_input);
 	// The probe counters (built per call; the sim's own counters nest under
 	// the record's JSON edge).
@@ -225,7 +225,7 @@ public:
 	// ONLY pump for the session socket (`Simulation::step` is the sole caller of
 	// host_pump/joiner_pump), so halting it stops the C2S uplink, the keepalive and
 	// the empty-send interval, and the peer reaps us at `cs_dir0.timeout_ms = 120000`
-	// [orig: CNapiNetwork_Init @0x4ca4a0]. Retail multiplayer has no pause at all —
+	// (engine: net/npwire/session_hello.h). Retail multiplayer has no pause at all —
 	// its in-game menu overlays a running match — and on a listen host a stopped
 	// world would do this to every joiner at once. The ESC pause honours the same
 	// rule in the shell; this is the single home so the F3 transport, the perf probe

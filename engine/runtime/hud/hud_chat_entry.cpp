@@ -46,7 +46,7 @@ uint32_t chat_dispatch_flood_color(int dispatch) {
 }
 
 uint32_t chat_input_line_color(int dispatch, bool mp_session_peer) {
-	// [orig: StdCtype_Destructor @0x5b8f41 — switch (Input_GetMountedEntityId()
+	// [orig: HUD_DrawChatInputLine @0x5b8f41 — switch (Input_GetMountedEntityId()
 	// = dword_B3E314)]
 	switch (dispatch) {
 		case kChatDispatchTeam: return kHudColorGreen;          // palette[1] @0x5b8f48

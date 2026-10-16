@@ -495,10 +495,13 @@ void test_stick_pose_exact() {
     CHECK(near_bam(pitch, 0u));
     CHECK(near_bam(roll, 0xE0000000u));
     // The same face with yaw 90 degrees: the normal lands in the yaw-local
-    // -y half, so the PITCH leg carries the +45-degree lean instead.
+    // -y half, so the PITCH leg carries the +45-degree lean instead. The yaw's
+    // dbl_7C3608 cosine (-201 / 2^22) leaves the local x at -2, so the roll leg
+    // reads atan2(46341, -2): 29501 BAM, not 0 [orig: Math_BuildFixedPointRotationMatrixYXZ
+    // @0x61541F].
     throwable_stick_pose(slope, 0x40000000, 0, 0, pitch, roll);
     CHECK(near_bam(pitch, 0x20000000u));
-    CHECK(near_bam(roll, 0u));
+    CHECK(near_bam(roll, 29501u));
 }
 
 // The useownmove sweep is a pool-2 then pool-1 query, not the generic

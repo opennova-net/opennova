@@ -114,8 +114,10 @@ public:
 	// frame (previews, tests).
 	void attach_distortion_row(Node *p_frame_fx);
 
-	// Loads every mounted .ptl AND the active gore set in VFS order, then
-	// opens the catalog once. The gore set is a second extension carrying
+	// Loads every mounted .ptl AND the active gore set in the effect
+	// system's order (ResourceIndex::effect_files: the loose leg, then the
+	// archive slots' walk, the two extensions interleaved by the upper-cased
+	// name), then opens the catalog once. The gore set is a second extension carrying
 	// the same grammar — `.ptu` (US) or `.ptg` (German) — and the
 	// impact-effect definitions that ride only there: Effect_AmHitBody /
 	// Effect_SGvBody (the blood puffs) and the Effect_FX50Cal* impact
@@ -123,15 +125,14 @@ public:
 	// interns as an invisible `stockeffect` clone (D-PTL-8), so every flesh
 	// hit silently renders nothing.
 	// [orig: CEffectSystem_Init @ 0x5f6070 scans loose `ptl\*.ptl` @0x5f6228
-	//  then `ptl\*<ext>` @0x5f6356, and matches each archive entry against
-	//  ".ptl" OR the selected extension @0x5f64f3 — both legs parse through
+	//  (its loose gore leg, `ptl\` + the extension with no wildcard @0x5f6387,
+	//  reads nothing), then matches each archive entry against ".ptl" OR the
+	//  selected extension @0x5f64f3 and parses it through
 	//  CEffectWorld_ParseSectionCallback @ 0x5ecb40.]
 	// Order: the catalog registers EVERY particledef across ALL documents
 	// before it resolves ANY effectdef, so cross-file pdefs resolve
 	// regardless of file order; order only picks which duplicate id wins
-	// (first registration). `.ptl` before the gore set reproduces retail's
-	// outcome on the shipped data, where the joAmmoHit.ptl copies of
-	// AmHitBody_Mist4G/BloodAltG sort ahead of US_BLOOD.PTU.
+	// (first registration), so the walk's order is retail's (D-PTL-24).
 	int load_from_resource_root(const Ref<ResourceRoot> &p_root);
 	// The in-memory entry (the GUT fixtures author documents directly).
 	void load_particle_file(const Ref<ParticleFile> &p_file);
@@ -162,7 +163,7 @@ public:
 	// first-draw pipeline compiles) are paid behind the loading screen
 	// instead of as a ~90 ms hitch on the player's first live shot. Retail
 	// pays this at load — CEffectSystem_Init loads every .ptl AND its
-	// textures up front [orig: @ 0x5f6070 <- Game_StartMission @ 0x524980];
+	// textures up front (engine: runtime/mission/mission_load_plan.h);
 	// the deferred-resolve shell path is what made first fire hitch. The
 	// caller renders a frame or two (advancing the fixed tick so fresh
 	// emitters actually emit and draw), then clears the warm spawns via

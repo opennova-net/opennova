@@ -354,7 +354,7 @@ func test_real_blackhawk_rotor_register_spins_while_crewed() -> void:
 	# accumulates; the cveh callback publishes the angle's high word as
 	# HELO_ROTOR / HELO_TAILROTOR and the present applier stores it on the
 	# carrier model [orig: Entity_UpdatePartSpinAccumulator @0x4928B0;
-	#  Entity_CacheVehicleHUDStats @0x492ACA..0x492ADE].
+	#  BoneCallback_cveh_PublishControls @0x492ACA..0x492ADE].
 	var install_dir := RetailData.install()
 	if install_dir.is_empty():
 		pending("OPENNOVA_JO_DIR / retail JO PFFs are required for the Blackhawk witness")
@@ -560,7 +560,7 @@ func test_real_dbuggy_attachment_nodes_follow_when_driven() -> void:
 	# callback publishes its high word as VEHICLE_WHEELS, which the present
 	# applier stores on the carrier model as an owned CTRL override
 	# [orig: the +0x2B8 accumulate @0x48c4c5..0x48c4d0; the +0x2BA read in
-	#  Entity_CacheVehicleHUDStats @0x4929B4].
+	#  BoneCallback_cveh_PublishControls @0x4929B4].
 	var carrier_model := carrier_node as ObjectModel
 	assert_not_null(carrier_model, "the driven DBuggy presents as an ObjectModel")
 	if carrier_model != null:

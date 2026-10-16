@@ -166,6 +166,14 @@ struct ServerConfig {
 	// admin assigned activates. Service policy: NovaLogic's issuer is unwitnessed.
 	bool cd_key_auto_mint = true;
 
+	// ONNET_EMBEDDED_JO_HOST=1: run an in-match JO host in this process on the
+	// NovaWorld UDP port, so a Hello carrying JO's complete in-match identity
+	// there is served as a game session (NwUdpListener::initialize_jo_host).
+	// The nw_host_register_e2e harness turns it on to drive the listener's
+	// game-session responder; off by default, so the service runs no game host
+	// beside its lobby, HTTP and billing.
+	bool embedded_jo_host = false;
+
 	// Reflection override for the host/join flow (dev/NAT). NovaWorld tells a
 	// hosting client its reachable endpoint and advertises it to joiners. On the
 	// open internet the observed UDP source IS that endpoint, but behind a docker

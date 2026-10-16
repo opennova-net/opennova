@@ -74,7 +74,7 @@ inline constexpr VideoQualityControl kVideoQualityControls[] = {
 // @0x587986..0x58798d / @0x5879c2..0x5879d0), so every row is open on the
 // device OpenNova ports;
 // UI_SyncRenderSettingsToWidgets @0x55a1da..0x55a1f3 (the select by value);
-// sub_55A710 @0x55a820..0x55a83b (the ACCEPT's read)]; game.mnu's in-game
+// Options_HandleAcceptOrBack @0x55a820..0x55a83b (the ACCEPT's read)]; game.mnu's in-game
 // options author the older alias OBJECTDETAIL [orig: UI_OptionsScreenInit
 // @0x554997..0x5549b6 (the select by value);
 // UI_IngameOptionsDialogEventHandler @0x554e40 — "OBJECTDETAIL" read
@@ -90,7 +90,7 @@ inline constexpr const char *kObjectDetailControls[] = {"OBJECTPOLY", "OBJECTDET
 // (g_CfgTexFilterLevelMax, 3 on a shader-model-2 device past 120 MiB:
 // RenderSettings_ComputeFromGPUCaps @0x587969..0x587993), so every row is open
 // on the device OpenNova ports; UI_SyncRenderSettingsToWidgets
-// @0x55a300..0x55a31f (the select by value); sub_55A710 @0x55a97d..0x55a998
+// @0x55a300..0x55a31f (the select by value); Options_HandleAcceptOrBack @0x55a97d..0x55a998
 // (the ACCEPT's read), @0x55ad65..0x55adb1 (a changed word reloads every
 // effect at once)]. The in-game options author no such row.
 inline constexpr const char *kTextureFilterControls[] = {"TEXFILTER"};
@@ -100,11 +100,11 @@ inline constexpr const char *kTextureFilterControls[] = {"TEXFILTER"};
 // screen's PARTICLES combobox and the in-game options' PARTICLES row select
 // the row whose item value is the persisted word and write the selected row's
 // value back [orig: UI_PopulateRenderAndAudioSettings @0x55cfb3..0x55d001
-// locks only the rows above the device's own maximum (g_CfgParticleDensityMax
+// locks only the rows above the device's own maximum (g_GameConfigState+0x158
 // @0x2550810, 2 on every pixel-shader device: RenderSettings_ComputeFromGPUCaps
 // @0x587983, @0x587a15), so every row is open on the device OpenNova ports;
 // UI_SyncRenderSettingsToWidgets @0x55a2a6..0x55a2cb (the select by value);
-// sub_55A710 @0x55a905..0x55a926 (the ACCEPT's read); UI_OptionsScreenInit
+// Options_HandleAcceptOrBack @0x55a905..0x55a926 (the ACCEPT's read); UI_OptionsScreenInit
 // @0x554a0c..0x554a31 and UI_IngameOptionsDialogEventHandler
 // @0x554f14..0x554f35 (the in-game pair)]. Neither Accept touches the session
 // copy, so the word reaches the particles at the next mission start.
@@ -115,9 +115,9 @@ inline constexpr const char *kParticleDensityControls[] = {"PARTICLES"};
 // OPTIONS screen's TEXCOMPRESSION combobox selects the row whose item value is
 // the persisted word and writes the selected row's value back
 // [orig: UI_PopulateRenderAndAudioSettings @0x55d0f3..0x55d141 locks only the
-// rows above g_CfgTexCompressionLevelMax @0x2550828, 2 on every device
+// rows above g_GameConfigState+0x170 @0x2550828, 2 on every device
 // (RenderSettings_ComputeFromGPUCaps @0x587a43); UI_SyncRenderSettingsToWidgets
-// @0x55a34e..0x55a373 (the select by value); sub_55A710 @0x55a957..0x55a972
+// @0x55a34e..0x55a373 (the select by value); Options_HandleAcceptOrBack @0x55a957..0x55a972
 // (the ACCEPT's read)]. The in-game options author no such row. The word
 // reaches the textures the next mission builds.
 inline constexpr const char *kTexCompressionControls[] = {"TEXCOMPRESSION"};
@@ -148,7 +148,7 @@ inline constexpr const char *kVideoPresetButtons[] = {
 // MR_CLIPPY_KEYBOARD / MR_CLIPPY_HINTS: served, seeded
 // from and written back to the two tip words [orig: UI_OptionsScreenInit
 // @0x554d79..0x554dc0 / UI_PopulateRenderAndAudioSettings @0x55d48f..0x55d4d6
-// (seed), UI_IngameOptionsDialogEventHandler @0x5552c8..0x555301 / sub_55A710
+// (seed), UI_IngameOptionsDialogEventHandler @0x5552c8..0x555301 / Options_HandleAcceptOrBack
 // @0x55aca7..0x55ace0 (write back); hud/tip_system.h TipOptions].
 inline constexpr const char *kOptionsUnsupportedControls[] = {
     "DIFFICULTY", "UPDATE",

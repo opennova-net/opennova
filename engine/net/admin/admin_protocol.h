@@ -33,7 +33,7 @@ inline constexpr size_t ADMIN_LOGIN_BYTES = 65;
 inline constexpr size_t ADMIN_LOGIN_FIELD_MAX_CHARS = 31;
 
 // The orderly end: the server closes the connection itself, freeing its slot.
-// [orig: DispatchCommand @0x406811; RAT.exe @0x401475]
+// [orig: CAdminServer_DispatchCommand @0x406811] [orig: RAT.exe @0x401475]
 inline constexpr const char *ADMIN_COMMAND_QUIT = "QUIT";
 
 // One packet around `payload`.
@@ -43,7 +43,7 @@ std::vector<uint8_t> admin_encode_packet(const uint8_t *payload, size_t size);
 bool admin_decode_header(const uint8_t *header, size_t &payload_size);
 
 // The challenge is 32 bytes and a NUL with byte 0 always 0x01; RAT.exe refuses any other.
-// [orig: AcceptConnection @0x4057d5; RAT.exe @0x401323]
+// [orig: CAdminServer_AcceptConnection @0x4057d5] [orig: RAT.exe @0x401323]
 bool admin_challenge_valid(const std::vector<uint8_t> &payload);
 // The login payload for `challenge`: user and password (31 characters each at most) in their
 // 32-byte fields, encrypted under the challenge string. [orig: Crypto_EncryptBuffer @0x437510]

@@ -557,7 +557,7 @@ func test_vehicle_motion_controls_publish_and_release_as_one_owned_pair() -> voi
 	}, "the cveh callback's eleven words publish by semantic retail name")
 
 	# The part-animation words are owned at rest too: literal zero is a write,
-	# exactly like the steer/speed pair (Entity_CacheVehicleHUDStats stores all
+	# exactly like the steer/speed pair (BoneCallback_cveh_PublishControls stores all
 	# five before every model submission).
 	snap.entities[0]["vehicle_rotor"] = 0
 	snap.entities[0]["vehicle_tail_rotor"] = 0

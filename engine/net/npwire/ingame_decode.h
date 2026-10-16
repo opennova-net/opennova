@@ -1037,7 +1037,11 @@ struct FrameUpdate {
 	//  @0x439DF0 / Entity_AttachCarriedObject @0x43C130]
 	uint16_t carried_handle = 0xFFFF;
 	int16_t  health = 0;            // local-player health
-	int16_t  state_word = 0;
+	// The recipient's entity+0x120 word, Armor (ammo class 1's carried pool
+	// shares it), which the client stores as its own every frame.
+	// [orig: NetPacket_WritePlayerState @0x4FFD77..0x4FFD8B; NapiNPClientMsg_0x00A
+	//  read @0x430442, store g_LocalPlayerEntity->Armor @0x4305EB]
+	int16_t  armor = 0;
 	bool     local_tail_present = false; // all seven recipient-local tail bytes decoded
 	FrameWeaponBlock    weapon;     // valid iff sub_block == 0
 	FrameTimerBlock     timer;      // valid iff sub_block == 1
@@ -1162,9 +1166,10 @@ bool decode_destroy_entity_list(const uint8_t *body, size_t len,
                                 DestroyEntityList &out);
 
 // S2C 0x50 — TEAM ASSIGN. `[u16 entityHandle][u8 team][u16 netId][u8 animSlot]`;
-// a short body defaults each REMAINING field to 0 (the handler reads what is
-// there and leaves the rest zero). Gates: handle != 0xFFFF,
-// `(handle & 0xF000) < 0x5000`, slot < that pool's capacity.
+// each field zero-fills when too few bytes remain for it, and a short read does
+// not advance, so a later narrower field still reads what remains (a one-byte
+// body is handle 0 with that byte as its team); the decode never fails. Gates:
+// handle != 0xFFFF, `(handle & 0xF000) < 0x5000`, slot < that pool's capacity.
 // Legs, in the witnessed order:
 //   (1) entity == local player -> `g_LocalTeam = team` @0x4319db — the SAME latch
 //       the S2C 0x04 tail byte writes (our JoinerConnection::assigned_team_);
@@ -1514,8 +1519,9 @@ struct WorldStateWaypoint {
 	uint16_t name_id = 0;
 	// The marker's done byte (entity+536), which both titles' writers emit; JO's handler
 	// reads and discards it, DFX2's stores it onto the marker (DFX2-9).
-	// [orig: NetPacket_WriteWorldStateLoad0x0F @0x502f5f; NapiNPClientMsg_0x00F @0x42e497;
-	//  NetPacket_WriteWorldStateLoad0x0F @0x50008f, NapiNPClientMsg_0x00F @0x42fff0 (dfx2.exe)]
+	// [orig: NetPacket_WriteWorldStateLoad0x0F @0x502f5f; NapiNPClientMsg_0x00F @0x42e497]
+	// [orig: NetPacket_WriteWorldStateLoad0x0F @0x50008f, NapiNPClientMsg_0x00F @0x42fff0
+	//  (dfx2.exe)]
 	uint8_t  done = 0;
 };
 struct WorldStateLoad {

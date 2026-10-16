@@ -58,9 +58,9 @@ ThreediTargetLimits threedi_retail_limits() {
 	// its buffer, and the LOD is left unfilled [orig: allocate_lod_gpu_buffers
 	// @ 0x5B2610, the requests @0x5B26CC, @0x5B2752, @0x5B27F3, @0x5B2882;
 	// CParticleSystem_Init_Wrapper @ 0x5876D0, the pool sizes; GStaticVB_Lock
-	// @ 0x6840D0, the bound @0x6840E0; GStaticIB_Lock @ 0x684430, the bound
+	// @ 0x6840D0, the bound @0x6840E0; the IB twin GStaticIB_Lock @ 0x684430, the bound
 	// @0x684440]. A vertex takes 40 bytes, 56 skinned, 24 more with tangents
-	// [orig: Model_GetRenderVertexStride @ 0x5B1480]. The draw's base vertex
+	// [orig: RenderModel_GetVertexStrideAndDecl @ 0x5B1480]. The draw's base vertex
 	// is the pool offset plus the strip's start vertex, in 32 bits, so 65,535
 	// bounds a strip's index window, never the LOD's buffer
 	// [orig: CRenderBatchQueue_FlushBatches @ 0x5D9F50, DrawIndexedPrimitive

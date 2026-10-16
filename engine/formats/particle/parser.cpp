@@ -225,7 +225,8 @@ void apply_effect_key(EffectDef &effect, const std::string &authored_key,
 	}
 }
 
-// [orig: ParticleDef_ParseField @ 0x433e20 (ParticleEdit_v1_1.exe); JO CParticleDef_ParseProperties @ 0x5ea320]
+// [orig: ParticleDef_ParseField @ 0x433e20 (ParticleEdit_v1_1.exe)]; JO's
+// [orig: CParticleDef_ParseProperties @ 0x5ea320]
 // ParticleEdit confirms: graphic color keys are REMAPPED (g2_color1->color2,
 // g3_color1/2->color3, g4_color1/2->color4); we deliberately map 1:1. See
 // docs/particles/ptl-format-re.md §1 (the ParticleEdit cross-witness grill, D4).

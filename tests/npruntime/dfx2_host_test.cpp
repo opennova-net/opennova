@@ -15,7 +15,8 @@
 // [orig: NetPacket_WriteWorldStateLoad0x0F @0x502da7; CAdminServer_HandleWeaponCommand
 //  @0x40482e; Server_OnPlayerJoin @0x51a6d3..0x51a6f2; Server_DeployPlayer @0x517803..0x517812;
 //  Server_ValidatePlayerJoinRequest @0x512100; NapiNPServer_HandleChatMessage @0x513930;
-//  CNapiGameSession_InitRandomSeedOrRequest @0x51e94b..0x51e957] [orig: @0x4ffeed, @0x40480e,
+//  CNapiGameSession_InitRandomSeedOrRequest @0x51e94b..0x51e957]
+// [orig: @0x4ffeed, @0x40480e,
 //  @0x517717, @0x514a55, @0x50f3e2..0x50f565, @0x510b43..0x510b6a, @0x51b89e (dfx2.exe)]
 
 #include <base/gameprofile/gameprofile.h>

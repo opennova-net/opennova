@@ -6,6 +6,7 @@
 
 #include <formats/pff/pff.h>
 
+#include <base/io/bits.h>
 #include <base/io/os_path.h>
 
 #include <ctype.h>
@@ -34,8 +35,9 @@ static int pff_count_sane(uint32_t num_entries)
 }
 
 /* Normalize a PFF name into an uppercase, trailing-space-trimmed C string. Reads up to
-   raw_cap bytes or until a NUL; result is capped to out_sz - 1 chars. Matches the engine's
-   strupr + trailing-0x20 trim used for sort/lookup (PFF_SortEntries / PFF_FindEntry).
+   raw_cap bytes or until a NUL; result is capped to out_sz - 1 chars. The uppercase is the
+   engine's sort and lookup key (PFF_SortEntries strupr's each name); the trim is OpenNova's
+   own: PFF_FindEntry's trim loop starts on the NUL and never runs (D-VFS-7).
    Declared in pff.h: the writer's sort and normalized_logical_name share it. */
 void pff_norm_name(const char *raw, size_t raw_cap, char *out, size_t out_sz)
 {
@@ -91,7 +93,7 @@ static void pff_xor_buffer(uint8_t *buf, size_t size, uint32_t key)
 {
     size_t i;
     for (i = 0; i < size; ++i) {
-        key = (key << 7) | (key >> (32 - 7)); /* rotl32(key, 7) */
+        key = opennova::io::rotl32(key, 7);
         buf[i] ^= (uint8_t)(key & 0xFFu);
     }
 }
@@ -301,6 +303,23 @@ int pff_extract_raw(const PffArchive *archive, const PffEntry *entry,
     if (fread(out_buf, 1, entry->size, f) != entry->size) return -1;
 
     return 0;
+}
+
+uint32_t pff_footer_kept_word(const PffArchive *archive)
+{
+    FILE *f;
+    uint8_t footer[PFF_FOOTER_SIZE];
+
+    if (!archive) return 0;
+    f = (FILE *)archive->_file;
+    if (!f) return 0;
+    /* The last 12 bytes, kept only when they end in 'KING' [orig: sub_4030E0 @ 0x403133..0x40318A
+       (pack.exe): the seek to 12 before the end, the 12-byte read, the 'KING' test, else zeroed]. */
+    if (fseek(f, -(long)PFF_FOOTER_SIZE, SEEK_END) != 0) return 0;
+    if (fread(footer, 1, sizeof(footer), f) != sizeof(footer)) return 0;
+    if (memcmp(footer + 8, "KING", 4) != 0) return 0;
+    return (uint32_t)footer[4] | ((uint32_t)footer[5] << 8) | ((uint32_t)footer[6] << 16) |
+           ((uint32_t)footer[7] << 24);
 }
 
 int pff_extract(const PffArchive *archive, const PffEntry *entry,

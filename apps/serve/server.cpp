@@ -5,6 +5,7 @@
 
 #include <base/gameprofile/game_type.h>
 #include <base/gameprofile/gameprofile.h>
+#include <base/io/file_io.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/boot_policy.h>
@@ -26,7 +27,6 @@
 
 #include <chrono>
 #include <cstdlib>
-#include <fstream>
 #include <iterator>
 #include <thread>
 #include <utility>
@@ -410,12 +410,12 @@ bool Server::read_config_over_weapons(std::string &error) {
 // line the server serves LAN whatever the cfg says, where retail's default would
 // host on NovaLogic's gs.novaworld.net (D-NET-358, ADR 0051 d6).
 bool Server::read_host_file(std::string &error) {
-	std::ifstream in(options_.host_file, std::ios::binary);
-	if (!in) {
+	std::string text;
+	std::string read_error;
+	if (!io::read_file_text(options_.host_file, text, read_error)) {
 		error = "the host file '" + options_.host_file + "' does not open";
 		return false;
 	}
-	const std::string text((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
 	report_ = inmatch::read_host_file(text.data(), text.size(), config_.cfg(), rotation_, catalog_);
 	for (const std::string &key : report_.unknown_keys)
 		io::logf(io::LogLevel::kWarn, "opennova-serve: the host file key '%s' is not a host setting",

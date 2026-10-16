@@ -4,6 +4,7 @@
 
 #include "net_sockets.h"
 
+#include <base/io/file_io.h>
 #include <base/io/log.h>
 #include <base/io/strutil.h>
 
@@ -12,9 +13,7 @@
 #include <chrono>
 #include <cstdio>
 #include <cstring>
-#include <fstream>
 #include <iterator>
-#include <sstream>
 #include <utility>
 
 #include <fcntl.h>
@@ -30,16 +29,6 @@ uint64_t steady_now_ms() {
 	return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
 			std::chrono::steady_clock::now().time_since_epoch())
 					.count());
-}
-
-bool read_file(const std::string &path, std::string &out) {
-	std::ifstream in(path, std::ios::binary);
-	if (!in)
-		return false;
-	std::ostringstream text;
-	text << in.rdbuf();
-	out = text.str();
-	return static_cast<bool>(in) || in.eof();
 }
 
 // `bytes` at `path`, owner-only, whole or not at all: a file of its own
@@ -141,9 +130,9 @@ void Agent::recovered(const std::string &key, const std::string &text) {
 
 bool Agent::load_saved() {
 	std::string text;
-	if (!read_file(saved_path(), text))
-		return false;
 	std::string error;
+	if (!io::read_file_text(saved_path(), text, error))
+		return false;
 	hosted::MachineBootstrap saved;
 	if (!hosted::decode_machine_bootstrap(text, saved, error)) {
 		warn("saved", "the saved bootstrap " + saved_path() + " does not read (" + error + ")");
@@ -167,7 +156,8 @@ bool Agent::bootstrap() {
 		return true;
 	}
 	std::string token;
-	if (!read_file(config_.token_file, token)) {
+	std::string token_error;
+	if (!io::read_file_text(config_.token_file, token, token_error)) {
 		warn("bootstrap", "no saved bootstrap and no token at " + config_.token_file);
 		return false;
 	}

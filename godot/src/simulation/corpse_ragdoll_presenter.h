@@ -8,6 +8,7 @@
 // world/corpse_ragdoll); this side only reads models and writes their poses.
 
 #include <runtime/ragdoll/ragdoll_set.h>
+#include <runtime/world/corpse_ragdoll.h>
 
 #include <godot_cpp/core/object_id.hpp>
 #include <godot_cpp/classes/ref.hpp>
@@ -19,6 +20,9 @@
 
 namespace opennova::anim {
 class SkeletalClips;
+}
+namespace opennova::world {
+class World;
 }
 
 namespace godot {
@@ -45,12 +49,15 @@ private:
 		std::shared_ptr<const opennova::ragdoll::Rig> rig;
 	};
 	std::shared_ptr<const opennova::ragdoll::Rig> rig_for(ObjectModel *p_model);
-	// `p_water_y`: the water plane's height, or below every body when none.
-	void observe(ObjectModel *p_model, uint32_t p_key, int32_t p_life, int32_t p_anim_state,
-			bool p_hidden, bool p_eligible, const opennova::ragdoll::Collider &p_collider,
-			float p_water_y);
+	// `p_key` keys the subject in the set; `p_wire_key` is its wire handle, which
+	// seeds its kick (the same as the key for a row, the local player's handle
+	// for the avatar).
+	void observe(const opennova::world::World &p_world, ObjectModel *p_model, uint32_t p_key,
+			uint32_t p_wire_key, int32_t p_life, int32_t p_anim_state, bool p_hidden,
+			bool p_eligible, const opennova::ragdoll::Collider &p_collider);
 
 	opennova::ragdoll::RagdollSet set_;
+	opennova::world::LocalAvatarLife avatar_life_;
 	std::unordered_map<const opennova::anim::SkeletalClips *, RigEntry> rigs_;
 	// The models this frame observed, and those carrying an override.
 	std::unordered_map<uint32_t, ObjectID> seen_;

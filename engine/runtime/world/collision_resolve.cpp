@@ -474,7 +474,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                                     // [orig: @ 0x4b340f-0x4b3495]
                                     const double rad =
                                         static_cast<double>(ladder.yaw) *
-                                        io::kRadiansPerBam;
+                                        io::kRadiansPerBamX87;
                                     const int32_t c = static_cast<int32_t>(
                                         std::cos(rad) * io::kQ22One);
                                     const int32_t s = static_cast<int32_t>(
@@ -508,7 +508,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
                         }
                     }
                     // The CD callback is peer-local and runs even with zero force.
-                    // [orig: Entity_ProcessCollisionAndPlatformPhysics @0x4B3505]
+                    // [orig: Entity_MovementCollisionResolver @0x4B3505]
                     if ((res.flags & kTouchDoor) != 0)
                         if (Entity *door = world.registry.get(ch))
                             world.doors.command(world, *door, 6, res.door_sections);
@@ -826,7 +826,7 @@ int32_t CollisionWorld::resolve_entity(World &world, EntityHandle source, Resolv
         (ent == nullptr || ((ent->flags | ent->engine_flags) & kEntityFlagDead) == 0) &&
         ladder_io->body_heading != nullptr) {
         const double rad = static_cast<double>(*ladder_io->body_heading) *
-                           io::kRadiansPerBam;
+                           io::kRadiansPerBamX87;
         const int32_t c = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
         const int32_t s = static_cast<int32_t>(std::sin(rad) * io::kQ22One);
         pos[0] += static_cast<int32_t>((24576LL * c) >> 22);

@@ -10,9 +10,9 @@ namespace opennova::world {
 namespace {
 using io::bam_add;
 using io::bam_sub;
-// Retail dbl_7C3608, including its original scale error (30.5 ppm above the
-// exact 2*pi/2^32).
-constexpr double radians_per_bam = 1.4629627251502471e-9;
+// Retail dbl_7C3608 (io::kRadiansPerBamX87), including its original scale
+// error (30.5 ppm above the exact 2*pi/2^32).
+constexpr double radians_per_bam = io::kRadiansPerBamX87;
 int32_t q16(int64_t value) { return int32_t(uint64_t(value + 0x8000) >> 16); }
 int32_t q22(int64_t value) { return int32_t(uint64_t(value) >> 22); }
 void copy3(int32_t *to, const int32_t *from) { std::copy_n(from, 3, to); }

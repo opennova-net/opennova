@@ -265,7 +265,7 @@ class BindingSet {
   // into the gate (profile::apply_controls).
   // [orig: Input_ProcessToggleBindings @0x499480 -- `cmp dword_24D2088, 0`
   //  @0x499481 returns before Joystick_UpdateInputBitfield @0x49948e;
-  //  writers Game_ApplySessionSettingsToGlobals @0x5515c6, sub_563620
+  //  writers Game_ApplySessionSettingsToGlobals @0x5515c6, Profile_ApplySessionControls
   //  @0x563664, UI_IngameOptionsDialogEventHandler @0x55515e]
   void set_joystick_enabled(bool enabled) { joystick_enabled_ = enabled; }
   bool joystick_enabled() const { return joystick_enabled_; }

@@ -25,9 +25,10 @@
 //   embedder turns a body whose every part is type 3 by its main camera. The
 //   mirror redraw keeps that turn (its own is not carried yet), and other
 //   models' type 3/4 parts take none (divergence D-COL-10).
-// - [orig: Render_SkyboxSunGlow @ 0x5acd00] drives the glare: two jittered
-//   terrain rays per frame into an 8-sample window + hysteresis brightness,
-//   glow alpha = dot_view^4/2 x brightness x folds (env #14, closed).
+// - [orig: Render_SkyboxSunGlow @ 0x5acd00] drives the glare: a terrain gate
+//   ray, then two jittered entity rays per frame into an 8-sample window +
+//   hysteresis brightness, glow alpha = dot_view^4/2 x brightness x folds
+//   (env #14; runtime/environment/glare_occlusion.h).
 // - Every body renders through its AUTHORED material (the stock models are
 //   FF_ST_AD_LUM): the submit alpha is not a blend factor but the value of
 //   the global CTRL register UPL_INTENSITY (ordinal 32; the IDB's
@@ -43,24 +44,39 @@
 #include <formats/env/env_celestial.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 
+#include <cmath>
+
 namespace opennova::env {
 
 // One call of the water-glint leg [orig: Environment_UpdateSunGlare @ 0x5ad130, once
 // per scene pass from Terrain_RenderWorldScene @ 0x5c96c0: the main scene's,
 // then the weapon Inset pass's at its own camera and view, on the same
 // WaterGlintState (runtime/renderer/scene_overlay.h kInsetOverlayOrder)]:
-// one sample per call — the reflected-sun point on the water (with the
-// 0.25 * (frame & 3) reflected-height jitter and the +-2 point x/z jitter),
-// visible when the point sees BOTH the sun (point -> camera + sun * 2048) and
-// the camera over terrain, then the +-16 chase toward popcount * 64 and the
-// mirrored glare submit at camera + sun * 128 with the height term negated.
-// Mission axes throughout (z = height); `segment_clear(a, b)` is the
-// embedder's terrain line-of-sight between two mission points. The embedder
-// checks for water first (no water = no glint) and owns the model writes.
+// one sample per call, the frame index stepped first [orig:
+// Environment_UpdateSunGlare @ 0x5ad1f5 (++dword_27E5694), masked
+// @ 0x5ad200..0x5ad204, re-read @ 0x5ad25e]:
+// - the reflected-sun point on the water, with the 0.25 * (frame & 3)
+//   reflected-height jitter [orig: Water_ComputeReflectedSunPoint @ 0x5ac040
+//   (the call @ 0x5ad21a; viewZ = (idx & 3) << 14 @ 0x5ad200..0x5ad20e)];
+// - visible when that point sees BOTH the sun (point -> camera + sun * 2048)
+//   and the camera over TERRAIN [orig: Terrain_RaycastLoResNoNormal @ 0x610860
+//   (the calls @ 0x5ad234 / @ 0x5ad24e)];
+// - then the point jittered +-2 in x and z [orig: Environment_UpdateSunGlare
+//   @ 0x5ad25e..0x5ad27e] and the ENTITY ray from the camera to it [orig:
+//   Physics_InitRayContext @ 0x5385e0 (the call @ 0x5ad296);
+//   Physics_RaycastAgainstPoolByIndex @ 0x539530 (the calls @ 0x5ad2cb /
+//   @ 0x5ad2e3 / @ 0x5ad2fb), pools 2, 1, 0];
+// then the +-16 chase toward popcount * 64 and the mirrored glare submit at
+// camera + sun * 128 with the height term negated.
+// Mission axes throughout (z = height); `terrain_clear(a, b)` and
+// `entities_clear(a, b)` are the embedder's two lines of sight between two
+// mission points. The embedder checks for water first (no water = no glint)
+// and owns the model writes.
 struct WaterGlintFrame {
 	bool visible = false;   // the accumulator saw the glint this frame
-	Vec3 point_m;           // the sampled (jittered) water point
+	Vec3 point_m;           // the sampled water point (jittered once its terrain rays pass)
 	Vec3 mirrored_sun;      // the sun with its height term negated
+	Vec3 position;          // the glint model's place: camera + mirrored_sun * 128
 	int32_t upl = 0;        // the UPL_INTENSITY submit value, 16.16
 	// The glint submits whenever its brightness accumulator is non-zero,
 	// its alpha 0 included [orig: Environment_UpdateSunGlare @ 0x5ad35c..0x5ad36b ->
@@ -68,22 +84,29 @@ struct WaterGlintFrame {
 	bool drawn = false;
 };
 
-template <typename SegmentClear>
+template <typename TerrainClear, typename EntitiesClear>
 inline WaterGlintFrame advance_water_glint(const EnvironmentState &state,
 		const Vec3 &cam_m, const Vec3 &sun_m, const Vec3 &forward_m,
-		WaterGlintState &glint, SegmentClear &&segment_clear) {
+		WaterGlintState &glint, TerrainClear &&terrain_clear,
+		EntitiesClear &&entities_clear) {
 	WaterGlintFrame out;
-	const float view_z_jitter = 0.25f * static_cast<float>(glint.frame_index & 3u);
+	// This call's frame index, stepped before any read (water_glint_tick
+	// stores it).
+	const uint32_t frame = glint.frame_index + 1u;
+	const float view_z_jitter = 0.25f * static_cast<float>(frame & 3u);
 	bool visible = water_glint_point(cam_m, sun_m, state.water_height(),
 			view_z_jitter, out.point_m);
 	if (visible) {
-		// The +-2 unit point jitter [orig: @ 0x5ad26a..0x5ad27e] — mission x
-		// and mission z (height).
-		out.point_m.x += (glint.frame_index & 1u) ? 2.0f : -2.0f;
-		out.point_m.z += (glint.frame_index & 2u) ? 2.0f : -2.0f;
 		const Vec3 sun_far{cam_m.x + sun_m.x * 2048.0f, cam_m.y + sun_m.y * 2048.0f,
 				cam_m.z + sun_m.z * 2048.0f};
-		visible = segment_clear(out.point_m, sun_far) && segment_clear(out.point_m, cam_m);
+		visible = terrain_clear(out.point_m, sun_far) && terrain_clear(out.point_m, cam_m);
+	}
+	if (visible) {
+		// The +-2 unit point jitter [orig: @ 0x5ad26a..0x5ad27e] — mission x
+		// and mission z (height).
+		out.point_m.x += (frame & 1u) ? 2.0f : -2.0f;
+		out.point_m.z += (frame & 2u) ? 2.0f : -2.0f;
+		visible = entities_clear(cam_m, out.point_m);
 	}
 	water_glint_tick(glint, visible);
 	out.visible = visible;
@@ -92,6 +115,11 @@ inline WaterGlintFrame advance_water_glint(const EnvironmentState &state,
 	// (-(camY + sunY*128), camZ - sunZ*128, camX + sunX*128), the mission ->
 	// render-float map of exactly that mirrored point]).
 	out.mirrored_sun = Vec3{sun_m.x, sun_m.y, -sun_m.z};
+	// The offset is scaled, then added, as two steps (the embedder's Vector3
+	// operators did the same).
+	const Vec3 offset{out.mirrored_sun.x * 128.0f, out.mirrored_sun.y * 128.0f,
+			out.mirrored_sun.z * 128.0f};
+	out.position = Vec3{cam_m.x + offset.x, cam_m.y + offset.y, cam_m.z + offset.z};
 	// Alpha: the view dot of the MIRRORED sun direction [orig: @ 0x5ad384
 	// negates the height term before the view transform] through the witnessed
 	// (dot^4 - 28672/65536) x brightness chain. Summed in the embedder's
@@ -103,6 +131,52 @@ inline WaterGlintFrame advance_water_glint(const EnvironmentState &state,
 			io::float_to_fp16_16(state.sun_dim_pct()));
 	out.drawn = glint.brightness != 0;
 	return out;
+}
+
+// The frame's sun veil: the screen's white quad alpha and the exposure
+// stop-down [orig: Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0, once
+// per main scene frame after the occlusion tick, from Render_ProcessMainSceneFrame
+// @ 0x5cac4b]:
+// - nothing without the sun model (`sun_model`, the gate @ 0x5ad8b3..0x5ad8ba);
+// - the sky term, Environment_ComputeSunGlareAndFogBlend(0) (the call @ 0x5ad8cd):
+//   the view dot of the sun at the occlusion brightness (sun_veil_from_dot);
+// - when the water plane is set (@ 0x5ad8d5..0x5ad8dc), plus the water-reflected
+//   term, Environment_ComputeSunGlareAndFogBlend(1) (the call @ 0x5ad8ea), both
+//   sums clamped 192 (sun_veil_combine). Its direction is the camera's to the
+//   UNJITTERED glint point [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610
+//   — Water_ComputeReflectedSunPoint at view z 0 (the call @ 0x5ad628), the
+//   camera's offset to it normalized @ 0x5ad62d..0x5ad698] at the water glint's
+//   brightness >> 2 [@ 0x5ad6a7].
+// Mission axes (z = height). The two dots and the normalization sum their terms
+// in the embedder's (x, height, y) order, each square a step of its own, so the
+// float rounding is the one it always had; retail computes the secondary's
+// direction in 16.16 (the float port is the standing one).
+inline SunVeil sun_veil_frame(const EnvironmentState &state, bool sun_model,
+		const Vec3 &cam_m, const Vec3 &sun_m, const Vec3 &forward_m,
+		int occlusion_brightness, int glint_brightness) {
+	if (!sun_model) return SunVeil{};
+	const int sun_dim = io::float_to_fp16_16(state.sun_dim_pct());
+	const int overcast = io::float_to_fp16_16(state.overcast_blend());
+	const float view_dot = forward_m.x * sun_m.x + forward_m.z * sun_m.z + forward_m.y * sun_m.y;
+	SunVeil veil = sun_veil_from_dot(io::float_to_fp16_16(view_dot), occlusion_brightness,
+			sun_dim, overcast);
+	if (!state.has_water_height() || state.water_height() == 0.0f) return veil;
+	Vec3 point_m;
+	if (!water_glint_point(cam_m, sun_m, state.water_height(), 0.0f, point_m)) return veil;
+	const Vec3 offset{point_m.x - cam_m.x, point_m.y - cam_m.y, point_m.z - cam_m.z};
+	const float x2 = offset.x * offset.x;
+	const float height2 = offset.z * offset.z;
+	const float y2 = offset.y * offset.y;
+	const float length_squared = x2 + height2 + y2;
+	Vec3 to_glint{0.0f, 0.0f, 0.0f};
+	if (length_squared != 0.0f) {
+		const float length = std::sqrt(length_squared);
+		to_glint = Vec3{offset.x / length, offset.y / length, offset.z / length};
+	}
+	const float glint_dot =
+			forward_m.x * to_glint.x + forward_m.z * to_glint.z + forward_m.y * to_glint.y;
+	return sun_veil_combine(veil, sun_veil_from_dot(io::float_to_fp16_16(glint_dot),
+			glint_brightness >> 2, sun_dim, overcast));
 }
 
 // The CTRL register every celestial submit writes (UPL_INTENSITY).

@@ -127,7 +127,7 @@ PackedColorArray packed_argb_to_colors(const std::vector<uint32_t> &packed) {
 
 PackedVector3Array WaterCore::strip_positions() const {
 	// World positions recovered as (uv0 * 32, plane height): uv0 is the
-	// unprojected world x/z * 0.03125 [orig: flt_7DBFAC @ 0x5c2899, see docs/env/env-tod-re.md] in the
+	// unprojected world x/z * 0.03125 (engine: formats/env/env_water_render.h) in the
 	// render basis, swapped back into Godot axes (see strip_set_view).
 	PackedVector3Array out;
 	const int count = strip_row_count * 3;
@@ -143,7 +143,7 @@ PackedVector3Array WaterCore::strip_positions() const {
 
 PackedColorArray WaterCore::strip_colors() const {
 	// The row-constant diffuse, written to all 3 row vertices
-	// [orig: @ 0x5c2f0a..0x5c2f2b, see docs/env/env-tod-re.md].
+	// (engine: formats/env/env_water_render.h).
 	return packed_argb_to_colors(strip_rows.diffuse);
 }
 
@@ -151,8 +151,7 @@ PackedFloat32Array WaterCore::strip_custom1() const {
 	// The specular as the mesh's ARRAY_CUSTOM1 payload (RGBA_FLOAT custom
 	// arrays only accept PackedFloat32Array): 4 floats per vertex, raw bytes
 	// / 255, no color-space conversion — the ps.1.1 v1 register the shader
-	// adds after the x2/x4 modulates [orig: add r0.rgb, r0, v1 —
-	// Water_InitSurfaceShaders @ 0x5c19b0; row values @ 0x5c2eb5..0x5c2ef4].
+	// adds after the x2/x4 modulates (engine: formats/env/env_water_render.h).
 	PackedFloat32Array out;
 	const int count = strip_row_count * 3;
 	out.resize(count * 4);
@@ -223,8 +222,7 @@ PackedInt32Array WaterCore::strip_indices() const {
 	// The witnessed batch submits unrolled to PRIMITIVE_TRIANGLES: each
 	// <=5-row window locks 8n-10 vertices and draws a TRIANGLESTRIP through
 	// the first 8n-10 entries of the static index table; global vertex =
-	// 3*first_row + entry [orig: word_841328; batch walk @ 0x5c3164..
-	// 0x5c329e, see docs/env/env-tod-re.md]. The strip->list unroll alternates winding per triangle and
+	// 3*first_row + entry (engine: formats/env/env_water_render.h). The strip->list unroll alternates winding per triangle and
 	// SKIPS the {2,6}-style degenerate stitches (any two indices equal) —
 	// they only existed to join row pairs inside one strip call.
 	PackedInt32Array out;

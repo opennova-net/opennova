@@ -1,6 +1,8 @@
 // ADM animation definition file parser: anim slot rows of .bad clip variants.
 
 #include <formats/adm/adm.h>
+
+#include <base/io/os_path.h>
 #include <base/io/ascii_config.h>
 
 #include <ctype.h>
@@ -159,7 +161,7 @@ int adm_parse(const char *path, AdmFile *out) {
 
     if (!path || !out) return -1;
 
-    f = fopen(path, "rb");
+    f = opennova::io::fopen_utf8(path, "rb");
     if (!f) return -1;
 
     fseek(f, 0, SEEK_END);

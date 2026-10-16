@@ -63,9 +63,10 @@ int main() {
 	check(conn.ck == ck, "CK token captured verbatim");
 	// CK decodes to the decimal the retail client atol()s and sends as the
 	// ClientAuth APPID conn-tag; a NovaWorld host validates it (reject code 9).
-	// app_id "20" decodes cleanly, so app_id == "20". [orig: net_config.bt =
-	// atol(decoded CK) @0x569b8e serialized as APPID -> Server_ValidatePlayer
-	// JoinRequest @0x512100 @0x5122c5; wire-witnessed stock CU APPID 2026-08-31]
+	// app_id "20" decodes cleanly, so app_id == "20". [orig: UI_JoinSelectedSession
+	// @0x5699d0 - net_config.app_id = atol(decoded CK) @0x569b8e, serialized as APPID ->
+	// Server_ValidatePlayerJoinRequest @0x512100 @0x5122C3; wire-witnessed stock CU APPID
+	// 2026-08-31]
 	check(conn.app_id == "20", "APPID is atol(decoded CK) — the game-session join token");
 
 	// The encoded NK decodes back to host:port (cross-check / real-NW path).

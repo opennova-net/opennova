@@ -33,7 +33,8 @@ constexpr FindingCodeEntry<ParticleFinding> kFindingEntries[] = {
 	{ ParticleFinding::UnfilledTokenSlot,
 	  game_fails_code("particle.unfilled_token_slot",
 	                  "the game's particle parser reads a token slot of its line tokenizer that no line has filled yet "
-	                  "and faults as the mission loads [orig: sub_5DFFB0 @ 0x5E0000; the tokenizer @ 0x53CB60]") },
+	                  "and faults as the mission loads [orig: CParticleDefEntry_NextToken @ 0x5E0000; the tokenizer @ "
+	                  "0x53CB60]") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(ParticleFinding::kCount),
 		"every ParticleFinding has exactly one row");

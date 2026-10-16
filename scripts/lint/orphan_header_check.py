@@ -183,9 +183,12 @@ def main() -> int:
     stale = sorted(set(allow) - {p.as_posix() for p in orphans})
     for key in stale:
         print(f"[orphan-header] allowlist entry no longer an orphan (delete it): {key}")
-    print(f"[orphan-header] {len(failing)} orphan(s), {len(staged)} staged, "
-          f"{len(orphans) - len(failing)} allowlisted")
+    # The summary is the run's last line, so it counts every failing class: a stale
+    # allowlist row fails --enforce as an orphan does.
+    print(f"[orphan-header] {len(failing)} orphan(s), {len(stale)} stale allowlist "
+          f"row(s), {len(staged)} staged, {len(orphans) - len(failing)} allowlisted")
     if (failing or stale) and args.enforce:
+        print("[orphan-header] FAIL: wire or STAGE each orphan, delete each stale row")
         return 1
     return 0
 

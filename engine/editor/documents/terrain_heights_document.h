@@ -29,8 +29,8 @@ namespace opennova::editor {
 // The side state (HeightsState) holds the rest of the .cpt (its header, its depth section's form, its 341 tiles, each
 // shared) and the input regions whose bake is due (unbaked): the live atlas, what the game would draw now, is the
 // input there and the baked atlas elsewhere. No NovaLogic tool edited heights: JO's MED reads the .cpt [orig:
-// JOTACmed sub_44C2B0 @ 0x44C2B0] and Nile and gobj write none; the brushes are UI over TrnGen's input, baked by the
-// TrnGen port (the session's terrain sculpt).
+// JOTACmed.exe sub_44C2B0 @ 0x44C2B0] and Nile and gobj.dll write none; the brushes are UI over TrnGen's input,
+// baked by the TrnGen port (the session's terrain sculpt).
 inline constexpr size_t kHeightsInput = 0;
 inline constexpr size_t kHeightsAtlas = 1;
 inline constexpr int kHeightsSide = 1024;

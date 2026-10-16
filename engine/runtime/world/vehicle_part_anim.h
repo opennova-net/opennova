@@ -140,7 +140,7 @@ inline void rotor_spawn_full(RotorState &s) {
 }
 
 // The register the PANM feeder reads: the accumulator's HIGH WORD
-// [orig: Entity_CacheVehicleHUDStats @0x4929B0 — the rotor angle's +0x466
+// [orig: BoneCallback_cveh_PublishControls @0x4929B0 — the rotor angle's +0x466
 //  @0x492ACA..0x492ADE for BOTH ordinals 46 and 47 (the tail rotor reads the
 //  same accumulator @0x492AD7), the wheel phase's +0x2BA @0x4929B4; the same
 //  MOVZX idiom as the steer word @0x4929C0..0x4929D7].

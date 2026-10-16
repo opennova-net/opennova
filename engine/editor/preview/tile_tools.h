@@ -29,7 +29,7 @@ class TilDocument;
 inline constexpr int32_t kTileSquareFixed = TIL_FIXED_CELL_UNITS; // 16 units, 16.16
 
 // A tile's square on the plane, 16.16: [x0, x1) east, [y0, y1) north (y1 the stored z), as Nile's click tests it
-// (PtInRect over the plane's (x, y), the rectangle's top its south edge [orig: gobj sub_10013364 @
+// (PtInRect over the plane's (x, y), the rectangle's top its south edge [orig: gobj.dll sub_10013364 @
 // 0x100133C9..0x100133E8]).
 struct TileSquare {
 	int64_t x0 = 0, y0 = 0, x1 = 0, y1 = 0;
@@ -39,28 +39,29 @@ struct TileSquare {
 // last in file order; Nile's click takes the first, which the editor's views draw under the others), npos for none.
 size_t tile_at(const TilFile &file, double x, double y);
 // The tiles a box (two corners, mission units) selects: every tile whose square it crosses, in file order (Nile's
-// drag box: IntersectRect over the stored frame, an edge alone not crossing [orig: gobj sub_10013416 @
+// drag box: IntersectRect over the stored frame, an edge alone not crossing [orig: gobj.dll sub_10013416 @
 // 0x100134B8..0x100134DE]).
 std::vector<size_t> tiles_in_box(const TilFile &file, double x0, double y0, double x1, double y1);
 
 // The flags byte turned `quarter_turns` quarters (positive counter-clockwise on the plane), each quarter one row of
-// Nile's table over the low three bits, the others kept [orig: gobj sub_1000EDDA @ 0x1000EE12..0x1000EE89; MED's
+// Nile's table over the low three bits, the others kept [orig: gobj.dll sub_1000EDDA @ 0x1000EE12..0x1000EE89; MED's
 // sub_433740 / sub_4336E0 are the same tables in its own encoding].
 uint8_t tile_turned(uint8_t flags, int quarter_turns);
 // The flags byte mirrored across (east to west) or down (north to south) as the plane shows it: Nile's rule, which
-// flips the cell's U on an unturned tile and its V on a turned one [orig: gobj sub_1000EEED @ 0x1000EF0B..0x1000EF36].
+// flips the cell's U on an unturned tile and its V on a turned one [orig: gobj.dll sub_1000EEED @
+// 0x1000EF0B..0x1000EF36].
 uint8_t tile_flipped(uint8_t flags, bool across);
 
 // A record nudged (dx, dy) steps on the plane (each -1, 0 or 1), a step 1 unit or, `big`, 16: MED's arrow keys,
 // each coordinate snapped down to whole units after the move, a positive move rounding the coordinate up first
-// [orig: JOTACmed sub_43F0B0 @ 0x43F0DE..0x43F1A7, its second axis the stored z, the plane's y, positive north].
+// [orig: JOTACmed.exe sub_43F0B0 @ 0x43F0DE..0x43F1A7, its second axis the stored z, the plane's y, positive north].
 TilOverlayEntry tile_nudged(const TilOverlayEntry &entry, int dx, int dy, bool big);
 // Records turned a quarter (positive counter-clockwise) about their tiles' centroid, each turned in place too:
 // MED's group turn over the tiles' centres, the centroid their integer mean, each centre's offset turned and the
-// positions snapped down to whole units [orig: JOTACmed sub_43E910 @ 0x43E977..0x43EB54].
+// positions snapped down to whole units [orig: JOTACmed.exe sub_43E910 @ 0x43E977..0x43EB54].
 std::vector<TilOverlayEntry> tiles_turned_about_centroid(const std::vector<TilOverlayEntry> &entries, int direction);
 // The corner a stamp at (x, y) (mission units) places, the square's north-west: Nile's, the point to the nearest whole
-// unit [orig: gobj sub_1000B4A1 @ 0x1000B4C8..0x1000B542]; `grid` takes the north-west corner of the 16-unit grid
+// unit [orig: gobj.dll sub_1000B4A1 @ 0x1000B4C8..0x1000B542]; `grid` takes the north-west corner of the 16-unit grid
 // square the point lies in instead (the editor's own snap). False (the words untouched) where the corner lies past
 // the record's 16.16 range, beyond 32767 units either way.
 bool tile_corner_at(double x, double y, bool grid, int32_t &x_fixed, int32_t &z_fixed);
@@ -84,7 +85,7 @@ std::vector<Edit> plan_tile_turn(const TilDocument &document, const std::vector<
 // The selected tiles mirrored across or down, each in place (Nile's flip).
 std::vector<Edit> plan_tile_flip(const TilDocument &document, const std::vector<NodeId> &rows, bool across);
 // The selected tiles moved to the end of the file (drawn over every other: `to_front`) or its start, in their order:
-// Nile's layer up and down [orig: gobj sub_1000EC29 @ 0x1000EC39..0x1000EDC8]; each takes its new neighbour's layer
+// Nile's layer up and down [orig: gobj.dll sub_1000EC29 @ 0x1000EC39..0x1000EDC8]; each takes its new neighbour's layer
 // (TilDocument::settle_placed_rows).
 std::vector<Edit> plan_tile_layer(const TilDocument &document, const std::vector<NodeId> &rows, bool to_front);
 // The selected tiles nudged (dx, dy) steps (MED's arrows).

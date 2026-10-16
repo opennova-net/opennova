@@ -59,7 +59,9 @@ bool reseed_session_kit_on_side_change(world::World &world,
 
 // The joiner's C2S 0x2F submission content — the wire seam D-NET-168
 // tracked. Builds the full LoadoutKit: the ONE class integer that drives
-// both the wire class and the page pick, the resident-buffer rows, and both
+// both the wire class and the page pick (retail reads it straight out of the
+// assigned side's profile block [orig: Game_StartMission @0x5257a0], never
+// from the sim-side class pick), the resident-buffer rows, and both
 // side blocks for the S2C 0x50 resubmission path. `equipped_combo` is the
 // live equipped slot for the pair's SECOND submit (-1 = none)
 // [orig: Game_StartMission @0x525c2e passes g_CurrentWeaponSlot].

@@ -228,8 +228,7 @@ inline void write_present_held_weapon(
 	// visibility: the frame applies whenever the weapon is DRAWN.
 	// [orig: gate @ 0x4b21b6 / branch @ 0x4b220f; the state's writer
 	//  Entity_UpdateInfantryPlayerBody @ 0x4b5dad..0x4b5ea9]
-	if (p_weapon_hold_state >= 0 &&
-			(world::infantry_anim_flags(p_weapon_hold_state) & 0x80u) != 0)
+	if (p_weapon_hold_state >= 0 && world::infantry_weapon_at_hand(p_weapon_hold_state))
 		r[world::PF_HELD_WEAPON_HAND_FRAME] = 1.0f;
 }
 

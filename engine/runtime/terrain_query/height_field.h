@@ -11,12 +11,12 @@
 // samples the exact same implementation the renderer/editor do.
 //
 // [orig: jodemo.exe Terrain_SampleHeightBilinear @0x5C6770 +
-// Terrain_GetFoliageMapValue @0x5C65E0 world->source mapping (docs §5.2/§4.4.4).
-// Jointops entity grounding goes through Terrain_RaycastHeightmapHiRes_0 @0x60e710,
+// Terrain_GetFoliageMapValue @0x5C65E0 world->source mapping (docs §5.2/§4.4.4)].
+// Jointops entity grounding goes through [orig: Terrain_RaycastHeightmapHiRes_0 @0x60e710],
 // a hi-res lo-res-then-bisect DOWN-raycast that writes the ground height back into
 // the probe position's Z. Its near-vertical result equals this bilinear column
 // height; the sub-cell refinement along the ray is a tracked deviation, faithful
-// enough for terrain-following grounding.]
+// enough for terrain-following grounding.
 
 #include <cstdint>
 
@@ -90,6 +90,16 @@ float height_field_height_world(const TerrainHeightField &f, float world_x, floa
 // column height the AI grounds on. [orig: TerrainData::get_height_world_bilinear /
 // Terrain_SampleHeightBilinear @0x6067B0.] World units.
 float height_field_height_world_bilinear(const TerrainHeightField &f, float world_x, float world_z);
+
+// The same two samples on the MISSION plane (x east, y north), the frame retail's sampler
+// takes [orig: Terrain_SampleHeightBilinear @0x6067B0]. The world_* forms above take the
+// render plane, whose z is the mission y negated, so these are those at (mission_x,
+// -mission_y), the sign flip exact: the same height bit for bit. Engine code samples the
+// terrain through these; the world_* forms are the Godot-plane seam (godot/src and the
+// editor's viewports). World units.
+float height_field_height_mission(const TerrainHeightField &f, float mission_x, float mission_y);
+float height_field_height_mission_bilinear(const TerrainHeightField &f, float mission_x,
+		float mission_y);
 
 // The one per-cell normal kernel shared by the generated terrain normal atlas
 // and runtime surface queries. Inputs are the raw16 neighbours around the cell.

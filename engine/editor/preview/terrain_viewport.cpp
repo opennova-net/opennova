@@ -10,6 +10,7 @@
 #include <editor/documents/terrain_document.h>
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_handle_edit.h>
+#include <editor/project/project_files.h>
 #include <editor/session/terrain_family.h>
 #include <editor/preview/mission_viewport.h>
 #include <editor/preview/option_reads.h>
@@ -41,12 +42,6 @@ using io::json_string;
 constexpr ViewportState kHeadlessSize{ 1024, 768 };
 // The framing: looking down from the south at this pitch (radians, the orbit's: above the target).
 constexpr float kFramePitch = 0.75f;
-
-std::string stem_of(const std::string &path) {
-	std::string name = io::utf8_file_name(path);
-	if (const size_t dot = name.find_last_of('.'); dot != std::string::npos) name.erase(dot);
-	return name;
-}
 
 // A SetViewport's options over `held` (each member optional); `uses` the missions that run on the terrain (a
 // mission named must be one, or kTerrainNeutral).
@@ -301,7 +296,7 @@ ViewportAction TerrainViewport::follow_(const ViewportInput &input, PreviewClock
 	const auto *terrain = dynamic_cast<const TerrainDocument *>(input.document);
 	if (!terrain || !terrain->config()) return stop_(TerrainViewStatus::NoTerrain, std::string());
 	const AssetEntry *entry = view.project.scan ? view.project.scan->at_path(path()) : nullptr;
-	terrain_name_ = stem_of(entry ? entry->logical_name : path());
+	terrain_name_ = file_stem(entry ? entry->logical_name : path());
 	// The game reads the file Save would write: a document that cannot be written leaves none to read, and one
 	// its gate refuses loads no ground (the mission's load aborts).
 	const SerializeResult written = terrain->serialize();

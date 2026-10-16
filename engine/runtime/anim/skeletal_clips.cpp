@@ -489,10 +489,8 @@ void SkeletalClips::eval_pose_blended(const std::string &p_source_key,
 		return;
 	}
 	const float w = std::clamp(weight, 0.0f, 1.0f);
-	if (w <= 0.0f) {
-		eval_pose(source_key, source_seconds, source_variant, r_pose);
-		return;
-	}
+	// A zero weight still samples both clips: the translation rule below holds
+	// from the fade's first tick (blend_poses returns the source pose there).
 	if (w >= 1.0f) {
 		eval_pose(target_key, target_seconds, target_variant, r_pose);
 		return;
@@ -506,6 +504,52 @@ void SkeletalClips::eval_pose_blended(const std::string &p_source_key,
 	eval_pose(source_key, source_seconds, source_variant, source);
 	eval_pose(target_key, target_seconds, target_variant, target);
 	anim::blend_poses(source, target, w, r_pose);
+	// The rotations always cross-fade; the translation scratch is filled by the
+	// two clips' flags & 2: exactly one translated, that clip's rows go in whole
+	// and unweighted, so its translation holds from the fade's first tick. A clip
+	// that does not sample (the bind pose stands in) carries none. Both
+	// translated, retail weights channel B's term by a read past its three-float
+	// row (12 * channel A's bone count bytes on), stack bytes; the origin lerp
+	// above keeps the evident intent (D-ANIM-6).
+	// [orig: AnimChannel_BlendTwoChannels @0x410740 — the flag tests @0x4107A2..0x4107A8
+	//  (channel A) / @0x4107AE (channel B), the one-translated arms @0x41099B..0x4109E1 (channel A) and
+	//  @0x410B12..0x410B58 (channel B); both translated, the over-read `lea ecx,
+	//  [esp+ecx+70h+var_3C]` @0x410D28 with ecx = 12 * A's bone count @0x410CE7..0x410CF9]
+	const auto translated = [this](const std::string &key, int variant) {
+		const LoadedClip *lc = find_clip_variant(key, variant);
+		return lc != nullptr && lc->clip.frame_count != 0 && (lc->clip.flags & 0x02u) != 0;
+	};
+	const bool source_translated = translated(source_key, source_variant);
+	const size_t n = r_pose.size();
+	if (source_translated != translated(target_key, target_variant) && source.size() == n &&
+			target.size() == n && parents_.size() == n) {
+		// The translation is a model-space row added after the bone's carried
+		// pivot (anim_sample: carried + translation)
+		// [orig: BoneAnim_BuildWorldMatrices @0x40C400 - the add @0x40C6E9..0x40C71D],
+		// so it is taken from the translated clip in model space and set back
+		// under the blended parent: the untranslated clip's origin is the rest
+		// pivot, and the translated one's carries R_parent^-1 * T in its own
+		// parent's frame.
+		const std::vector<anim::PoseBone> &moved = source_translated ? source : target;
+		const std::vector<anim::PoseBone> &rest = source_translated ? target : source;
+		std::vector<anim::Quat> moved_world(n), blended_world(n);
+		for (size_t i = 0; i < n; ++i) {
+			const int p = parents_[i];
+			const bool chained = p >= 0 && static_cast<size_t>(p) < i;
+			moved_world[i] = chained ? anim::quat_mul(moved_world[static_cast<size_t>(p)], moved[i].rotation)
+			                         : moved[i].rotation;
+			blended_world[i] = chained ? anim::quat_mul(blended_world[static_cast<size_t>(p)], r_pose[i].rotation)
+			                           : r_pose[i].rotation;
+			anim::Vec3 delta{moved[i].origin.x - rest[i].origin.x, moved[i].origin.y - rest[i].origin.y,
+					moved[i].origin.z - rest[i].origin.z};
+			if (chained) {
+				delta = anim::quat_rotate(anim::quat_inv(blended_world[static_cast<size_t>(p)]),
+						anim::quat_rotate(moved_world[static_cast<size_t>(p)], delta));
+			}
+			r_pose[i].origin = anim::Vec3{rest[i].origin.x + delta.x, rest[i].origin.y + delta.y,
+					rest[i].origin.z + delta.z};
+		}
+	}
 }
 
 void SkeletalClips::splice_weapon_channel(std::vector<anim::PoseBone> &pose,

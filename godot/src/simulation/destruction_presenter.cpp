@@ -537,7 +537,7 @@ void DestructionPresenter::present_pieces(const std::vector<opennova::world::Dea
 		if (is_new_generation) {
 			// The type's trail effect from the ONE native table
 			// (world/destruction death_piece_trail_effect, S12b)
-			// [orig: g_DeathPieceTypes @ 0x8404f0 +0x2C].
+			// (engine: runtime/world/destruction.h).
 			const String trail(opennova::world::death_piece_trail_effect(piece.type_index));
 			// A silent death's piece never submits its trail [orig: @0x493811].
 			if (fx_world != nullptr && !trail.is_empty() && piece.trail) {
@@ -719,7 +719,7 @@ void DestructionPresenter::unregister_effect_anchor(const Variant &p_key) {
 // crackle itself rolls in the SIM on the engine PRNG stream, per logic tick,
 // and arrives as an ordinary transient effect + distance-delay-gated sound
 // (S12b; world/destruction tick_item_death_motion
-// [orig: Entity_UpdateDeadWreckEffects @ 0x493140]).
+// (engine: runtime/world/death_effects.cpp)).
 void DestructionPresenter::tick_wreck_fires() {
 	if (burning_.is_empty()) {
 		return;

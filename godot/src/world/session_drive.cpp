@@ -253,9 +253,7 @@ void SessionDrive::step_preload() {
 	// stalled or incompatible host would leave the player loaded but hidden
 	// forever. The policy reuses the retail ConnectOrHost window from
 	// world-ready and composes a stage-named failure -- the reachable analog of
-	// retail's post-load network-wait failure returns [orig:
-	// NapiClient_WaitForGameStart @ 0x42cc10 failure legs -> "Mission loading
-	// aborted"]. It covers only SERVER-owed transitions: at the player-paced
+	// retail's post-load network-wait failure returns (engine: runtime/inmatch/join_session_policy.h). It covers only SERVER-owed transitions: at the player-paced
 	// deployment pick the watchdog ends (retail's DEATH screen simply waits;
 	// net-re 5.61).
 	// A reload's admission tail has no window either (net-re §5.70.7).
@@ -340,8 +338,7 @@ String SessionDrive::switch_join_expansion(const Ref<ResourceRoot> &p_root,
 	}
 	// A runtime mount that cannot supply the host's expansion aborts the join.
 	// Retail's switch is a no-op when expansion\<name>\<name>.pff is missing
-	// and it connects on its own data set anyway [orig: Expansion_SwitchTo
-	// @ 0x5688c0, missing-.pff gate @ 0x568914] -- that is precisely the ADM
+	// and it connects on its own data set anyway (engine: runtime/inmatch/join_session_policy.h) -- that is precisely the ADM
 	// index-space corruption D-NET-178 records, so we refuse the join instead
 	// (tracked divergence).
 	if (action == NetSessionPolicy::ACTION_FAIL) {
@@ -401,8 +398,7 @@ String SessionDrive::switch_join_expansion(const Ref<ResourceRoot> &p_root,
 // say. The ordering, the latches, the windows, and every reason text live in
 // the policy (loss wins over every admission edge; the deploy latch re-arms
 // when pending clears; admission-ready is once per join and holds for the
-// cold wire drain behind the loading hold [orig: the reap @ 0x4ca4a0 ->
-// @ 0x4c63d0]).
+// cold wire drain behind the loading hold (engine: runtime/inmatch/joiner_connection.h)).
 void SessionDrive::update_joiner_admission_signals() {
 	MissionRoot *runtime = world_->get_runtime();
 	if (runtime == nullptr) {
@@ -669,29 +665,24 @@ void SessionDrive::sync_nwu_session(const Ref<Simulation> &p_sim) {
 // PlayerTeam / PlayerType alone, which the match keeps per connection
 // (NapiNPConnection::player_list_team / player_list_type) and the roster sync
 // carries as vars (NwuHostRole::sync_roster). The PlayerPCID is the joiner's
-// decrypted PUBPCID (the in-match host's account fields) [orig:
-// CNapiGameSession_SendPlayerAdded @0x4d006c]. The ClientPlayerEnterRequest is
+// decrypted PUBPCID (the in-match host's account fields) (engine: runtime/inmatch/napi_np_connection.h). The ClientPlayerEnterRequest is
 // NOT sent from here: the in-match host's join-phase watchdog announces a
 // validating joiner itself (the hook bound in bind_nw_host), before the player
 // is ever added to this roster.
 void SessionDrive::sync_nw_host_roster(opennova::NwuHostRole &p_host, const Ref<Simulation> &p_sim) {
 	std::vector<opennova::HostPlayerSlot> wanted;
 	bool self_listed = false;
-	for (const Simulation::HostPeerSlot &slot : p_sim->host_peer_slots()) {
+	for (const opennova::inmatch::HostPlayerListRow &row : p_sim->host_player_list_rows()) {
 		opennova::HostPlayerSlot player;
-		if (slot.own) {
+		if (row.own) {
 			if (!nw_self_slot_set_) continue;
 			player = nw_self_slot_;
+			player.team = row.slot.team;
+			player.type = row.slot.type;
 			self_listed = true;
 		} else {
-			player.slot = slot.slot;
-			player.connection_id = slot.connection_id;
-			player.player_name = opennova::utf8_to_retail_text(opennova::to_std(slot.player_name));
-			player.ip_and_port = opennova::to_std(slot.ip_and_port);
-			player.pcid = opennova::to_std(slot.pcid);
+			player = row.slot;
 		}
-		player.team = opennova::to_std(slot.team);
-		player.type = opennova::to_std(slot.type);
 		wanted.push_back(std::move(player));
 	}
 	if (nw_self_slot_set_ && !self_listed) wanted.push_back(nw_self_slot_);
@@ -886,10 +877,10 @@ void SessionDrive::bind_nw_host(const Ref<MissionSetupOptions> &p_opts) {
 		// Its PlayerTeam / PlayerType are the match's, as for any added player.
 		self.team = "0";
 		self.type = "0";
-		for (const Simulation::HostPeerSlot &slot : sim->host_peer_slots()) {
-			if (!slot.own) continue;
-			self.team = opennova::to_std(slot.team);
-			self.type = opennova::to_std(slot.type);
+		for (const opennova::inmatch::HostPlayerListRow &row : sim->host_player_list_rows()) {
+			if (!row.own) continue;
+			self.team = row.slot.team;
+			self.type = row.slot.type;
 		}
 		host.set_player_slot(self);
 		nw_self_slot_ = self;

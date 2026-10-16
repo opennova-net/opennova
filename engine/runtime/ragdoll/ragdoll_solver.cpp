@@ -199,6 +199,17 @@ bool Ragdoll::start(
 	return true;
 }
 
+bool Ragdoll::drifted(const Vec3 &anchor) const {
+	if (rig_ == nullptr || !asleep_)
+		return false;
+	return length(anchor - sleep_anchor_) > kWakeDrift * rig_->height * scale_;
+}
+
+void Ragdoll::wake() {
+	asleep_ = false;
+	calm_ = 0;
+}
+
 void Ragdoll::sleep() {
 	asleep_ = true;
 	sleep_anchor_ = last_anchor_;
@@ -423,12 +434,8 @@ void Ragdoll::step(const Collider &collider, const Vec3 &anchor, float dt) {
 			b.x_prev += jump;
 		}
 	}
-	if (asleep_) {
-		if (length(anchor - sleep_anchor_) <= kWakeDrift * stature)
-			return;
-		asleep_ = false;
-		calm_ = 0;
-	}
+	if (asleep_)
+		return;
 	++age_;
 
 	// Each body's static geometry this tick: the first solid along its

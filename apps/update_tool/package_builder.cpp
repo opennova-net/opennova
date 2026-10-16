@@ -29,14 +29,6 @@ namespace {
 const char *const kUpdaterFiles[] = { "update.log", "update.inf", "update.new", "server.lst",
 	"cc.bin" };
 
-std::string lower(std::string_view text) {
-	std::string out(text);
-	for (char &c : out)
-		if (c >= 'A' && c <= 'Z')
-			c = char(c - 'A' + 'a');
-	return out;
-}
-
 bool is_pff(const std::string &name) {
 	return strutil::ends_with_icase(name, ".pff");
 }
@@ -94,10 +86,10 @@ void list_tree(const fs::path &root, const std::vector<std::string> &excludes, b
 		return;
 	for (fs::recursive_directory_iterator it(root, ec), end; !ec && it != end; it.increment(ec)) {
 		const std::string rel = io::utf8_generic_path(fs::relative(it->path(), root, ec));
-		const std::string rel_lower = lower(rel);
+		const std::string rel_lower = strutil::to_lower(rel);
 		bool excluded = rel_lower == "update" || (skip_expansions && rel_lower == "expansion");
 		for (const std::string &ex : excludes) {
-			const std::string ex_lower = lower(ex);
+			const std::string ex_lower = strutil::to_lower(ex);
 			if (rel_lower == ex_lower ||
 					(!ex_lower.empty() && ex_lower.back() == '/' &&
 							(rel_lower + "/").rfind(ex_lower, 0) == 0))
@@ -135,7 +127,7 @@ bool claim_name(std::set<std::string> &names, const std::string &name, std::stri
 		error = "the name \"" + name + "\" does not fit a packed update's 15 characters";
 		return false;
 	}
-	if (!names.insert(lower(name)).second) {
+	if (!names.insert(strutil::to_lower(name)).second) {
 		error = "two files of one product are named \"" + name +
 				"\" (every blob lands in one update directory)";
 		return false;
@@ -211,6 +203,17 @@ bool build_product(const BuildSpec &spec, const ProductSpec &product, update::Sf
 				return false;
 			}
 		}
+		// The precheck fetches a loose row whenever the installed file is empty, so an empty
+		// file shipped as a row is fetched again on every pass and the client loops UPDATE ->
+		// REVUPDAT -> UPDATE without end: refused, like the change it cannot see.
+		// [orig: Cupdate2Dlg_PrecheckCommands @ 0x407820 (UPDATE.EXE), the loose case
+		//  @0x407970..0x4079B9 (UPDATE.EXE): missing or size 0 fetches]
+		if (content.empty()) {
+			error = io::utf8_path(path.filename()) +
+					" is empty: UPDATE.EXE fetches an empty loose file again on every pass, so "
+					"the update would never finish; give it content or leave it out";
+			return false;
+		}
 		const std::string name = io::utf8_path(path.filename());
 		if (!claim_name(names, name, error))
 			return false;
@@ -239,6 +242,17 @@ bool build_product(const BuildSpec &spec, const ProductSpec &product, update::Sf
 	if (spec.removes) {
 		for (const auto &[key, path] : from_files) {
 			if (to_files.count(key))
+				continue;
+			cmd.rows.push_back({ "REMOVE", CommandType::Remove, io::utf8_path(path.filename()), 0,
+					0, std::nullopt });
+			++report.remove_rows;
+		}
+		// An archive `to` lacks goes too: before any TARGET row the target is ".", where a
+		// REMOVE deletes the named file, the archive's file included.
+		// [orig: Cupdate2Dlg_PrecheckCommands @ 0x407820 (UPDATE.EXE), the REMOVE case
+		//  (docs/update/updater-re.md §7)]
+		for (const auto &[key, path] : from_archives) {
+			if (to_archives.count(key))
 				continue;
 			cmd.rows.push_back({ "REMOVE", CommandType::Remove, io::utf8_path(path.filename()), 0,
 					0, std::nullopt });

@@ -404,7 +404,7 @@ HostRegistration Lister::registration() const {
 }
 
 // ClientHostPlayerRemoved for every slot that left or now holds another player, then
-// ClientHostPlayerAdded for every slot that arrived or changed player (Server_PlayerRemove /
+// ClientHostPlayerAdded for every slot that arrived or changed player (Server_HandlePlayerDisconnect /
 // Server_PlayerAdd per slot); a kept player's team or type changes its vars alone, as a team
 // change or a loadout does (NwuHostRole::sync_roster).
 void Lister::sync_roster() {

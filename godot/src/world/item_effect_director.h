@@ -118,7 +118,7 @@ public:
 	// Owner-transform provider for the effect world's owned/attached groups
 	// (Transform3D | Vector3 | null). Int keys are WAC fx2ssn SSNs (the
 	// runtime resolves the live entity transform; null = entity gone, the
-	// group detaches [orig: CEffect_UpdateEmitterTransform @ 0x5f7410]);
+	// group detaches (engine: runtime/world/present_drains.cpp));
 	// String keys are the per-item effect attaches registered by reattach
 	// (the placed entity's current value snapshot; the Node remains only as
 	// a pre-first-tick seed and lifetime fallback for non-sim-owned callers).

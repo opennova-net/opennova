@@ -265,7 +265,8 @@ void Server_BroadcastPlayerInfoToAll(NapiNPServerCtx &ctx) {
 	for (NapiNPConnection &conn : ctx.np_protocol.connection_list) {
 		if (!slot_active(conn) || conn.link.transport == nullptr) continue;
 		conn.link.transport->host_send(s2c::FULL_PLAYER_INFO,
-				build_tag7b_session_summary(ctx.config, conn), /*reliable=*/true);
+				build_tag7b_session_summary(ctx.config, ctx.mission_text_title, conn),
+				/*reliable=*/true);
 	}
 }
 

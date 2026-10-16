@@ -226,8 +226,7 @@ void ObjectShaderCache::_bind_methods() {
 	// engine/runtime/renderer/render_order (maturity REN-3): sky -> viewmodel ->
 	// slot drapes -> far-water-side alpha -> tracers/particles/foliage (far) -> water + decals -> scars
 	// -> foliage (camera) -> camera-side alpha -> tracers (camera) -> sun glow
-	// [orig: Terrain_RenderWorldScene @ 0x5c93a0;
-	// docs/render/render-order-re.md].
+	// (engine: runtime/renderer/render_order.h).
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SKY_DOME", opennova::renderer::kRungSkyDome);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SKY_BODY", opennova::renderer::kRungSkyBody);
 	ClassDB::bind_integer_constant(get_class_static(), "", "RENDER_RUNG_SKY_CLOUDS", opennova::renderer::kRungSkyClouds);
@@ -353,8 +352,7 @@ uint64_t ObjectShaderCache::get_water_plane_generation() const {
 }
 
 int32_t ObjectShaderCache::alpha_rung_for_height(float world_height) const {
-	// The water-plane transparent bracket [orig: @ 0x5d932e..0x5d9354 vs
-	// g_WaterSplitHeightFloat @ 0x8437C4]. No water in the session -> the
+	// The water-plane transparent bracket (engine: runtime/renderer/render_order.h). No water in the session -> the
 	// default camera-side rung. The frame owner publishes the effective render
 	// eye side after camera placement, so the ladder mirrors underwater.
 	if (!water_split_set) {

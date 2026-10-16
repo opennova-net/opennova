@@ -341,15 +341,19 @@ void LocalPlayer::dispatch_to_special(bool keys_held) {
 	}
 }
 
-bool LocalPlayer::toggle_mount() {
+bool LocalPlayer::mount_toggle_allowed() {
 	World &world = world_;
 	const w::Entity *toggle_player = player();
 	if (toggle_player == nullptr || !toggle_player->alive || toggle_player->health <= 0) return false;
 	w::sync_local_usegun_weapon_transition(world, weapon);
 	const w::WeaponSlotState *active_slot = w::active_local_weapon_slot(world, weapon);
-	if (active_slot != nullptr &&
-			!w::weapon_state_allows_mount_toggle(active_slot->current, active_slot->next))
-		return false;
+	return active_slot == nullptr ||
+			w::weapon_state_allows_mount_toggle(active_slot->current, active_slot->next);
+}
+
+bool LocalPlayer::toggle_mount() {
+	World &world = world_;
+	if (!mount_toggle_allowed()) return false;
 	// An unarmed player's UseGun refusal out of a session is the attach's,
 	// after the request turned the body and the process left any seat it held
 	// (VehicleSystem::attach_to_seat) [orig: Entity_AttachToUseGunSlot @0x546b80,
