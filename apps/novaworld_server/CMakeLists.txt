@@ -16,6 +16,8 @@ if(BUILD_NOVAWORLD_HTTP)
         # The admin's user routes (moved out of http_listener.cpp whole).
         admin_user_routes.cpp
         host_routes.cpp
+        # The admin's NovaWorld sessions view.
+        connection_routes.cpp
         # CD keys (migration 0015): the keys, the DFX2 activations, their routes.
         cd_keys.cpp
         cd_key_routes.cpp

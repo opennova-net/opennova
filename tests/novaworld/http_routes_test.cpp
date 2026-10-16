@@ -29,6 +29,7 @@
 #include "billing/billing_repository.h"
 #include "billing/billing_routes.h"
 #include "billing/entitlement.h"
+#include "connection_routes.h"
 #include "novaworld/billing_fake_stripe.h"
 #include "health.h"
 #include "hosted/admin_link.h"
@@ -2558,17 +2559,26 @@ public:
 	// socket, which is what the service keys a connection by).
 	explicit PushHost(uint16_t service_port, uint32_t client_index = 0x48545450u)
 		: session_(config(client_index)) {
-		socket_ = net::ScopedSocket(net::udp_bind(0));
+		socket_ = net::ScopedSocket(net::udp_bind(0, &port_));
 		service_.ip = {127, 0, 0, 1};
 		service_.port = service_port;
 	}
 
-	// Verified, then a ClientHostRequest answered with success; false on a timeout.
-	bool host(const std::string &server_name) {
+	// The session's address as the service sees it.
+	std::string addr() const { return "127.0.0.1:" + std::to_string(port_); }
+
+	// Verified; false on a timeout.
+	bool connect() {
 		if (!socket_.is_valid()) return false;
 		send(session_.start());
 		pump_until(8000, [this] { return session_.is_verified(); });
-		if (!session_.is_verified()) return false;
+		return session_.is_verified();
+	}
+
+	// Verified, then a ClientHostRequest answered with success; false on a timeout.
+	bool host(const std::string &server_name) {
+		if (!connect())
+			return false;
 		session_.queue_statement(opennova::make_client_host_request(
 				0, {{0, "NWUID", session_.server_nwuid()}},
 				{{0, "LobbyName", "jop_2_consumer"}, {0, "MaxPlayers", "8"}},
@@ -2631,6 +2641,7 @@ private:
 
 	opennova::ClientSession session_;
 	net::ScopedSocket socket_;
+	uint16_t port_ = 0;
 	net::Endpoint service_{};
 	std::vector<Notice> notices_;
 };
@@ -3131,6 +3142,61 @@ int test_owner_host_push(Harness &h) {
 	TEST_EXPECT(wait_until([&] {
 		return !row_named(h, "Anonymous Push Host") && !row_named(h, "Erin Push Host");
 	}));
+	return 0;
+}
+
+// GET /api/admin/connections names each connection's times as Unix epoch ms. The registry stamps
+// the steady clock, which counts from the machine's boot: production's sessions read 27514593
+// (7 h 38 min of uptime) and the page showed them as 20,741 days old (January 1970). A stamp
+// converts to the wall time less its age, and a live session's read within a minute of now.
+int test_admin_sessions(Harness &h) {
+	// The production shape: a session made 125 s before the read, on a machine up 7 h 40 min.
+	const int64_t unix_now = 1792120342793; // 2026-10-16 09:39 UTC
+	TEST_EXPECT(nws::unix_ms_of_steady(27514593, 27640000, unix_now) == unix_now - 125407);
+	TEST_EXPECT(nws::unix_ms_of_steady(27640000, 27640000, unix_now) == unix_now);
+	// A stamp ahead of the read reads as now.
+	TEST_EXPECT(nws::unix_ms_of_steady(27640500, 27640000, unix_now) == unix_now);
+
+	const auto connections = [&h]() {
+		return h.send("GET", "/api/admin/connections", { kBearer });
+	};
+	// The row of the session at `addr`, or null.
+	const auto row_at = [](const crow::json::rvalue &json, const std::string &addr) {
+		const crow::json::rvalue *found = nullptr;
+		if (json && json.has("connections")) {
+			for (const auto &c : json["connections"]) {
+				if (str(c["addr"]) == addr)
+					found = &c;
+			}
+		}
+		return found;
+	};
+	const auto unix_ms = [] {
+		return static_cast<int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+				std::chrono::system_clock::now().time_since_epoch())
+						.count());
+	};
+
+	PushHost client(h.nw_udp.bound_port(), 0x53455331u);
+	TEST_EXPECT(client.connect());
+	const int64_t read_at = unix_ms();
+	auto reply = connections();
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	auto json = crow::json::load(body_text(reply));
+	const crow::json::rvalue *row = row_at(json, client.addr());
+	TEST_EXPECT(row != nullptr);
+	if (row != nullptr) {
+		TEST_EXPECT(str((*row)["state"]) == "active");
+		const int64_t created = (*row)["created_ms"].i();
+		const int64_t last_seen = (*row)["last_seen_ms"].i();
+		if (std::llabs(created - read_at) > 60000) {
+			std::fprintf(stderr, "  created_ms %lld, now %lld\n", static_cast<long long>(created),
+					static_cast<long long>(read_at));
+		}
+		TEST_EXPECT(std::llabs(created - read_at) <= 60000);
+		TEST_EXPECT(last_seen >= created && std::llabs(last_seen - read_at) <= 60000);
+	}
+	client.goodbye();
 	return 0;
 }
 
@@ -6622,6 +6688,7 @@ int run(Harness &h) {
 		{ "healthz", test_healthz },
 		{ "admin_host_push", test_admin_host_push },
 		{ "owner_host_push", test_owner_host_push },
+		{ "admin_sessions", test_admin_sessions },
 		{ "hosted_server_routes", test_hosted_server_routes },
 		{ "hosted_listing_owner", test_hosted_listing_owner },
 		{ "hosted_console_routes", test_hosted_console_routes },
