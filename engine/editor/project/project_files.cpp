@@ -4,6 +4,7 @@
 #include <system_error>
 
 #include <base/io/os_path.h>
+#include <base/io/strutil.h>
 #include <editor/assets/asset_kinds.h>
 #include <editor/assets/asset_registry.h>
 #include <editor/assets/asset_type_registry.h>
@@ -68,6 +69,10 @@ std::string basename_of(const std::string &path) {
 
 std::string file_stem(const std::string &path) {
 	return utf8_of(path_of(path).stem());
+}
+
+std::string file_extension(const std::string &path) {
+	return strutil::to_lower(utf8_of(path_of(path).extension()));
 }
 
 bool check_file_name(const std::string &name, AssetKind kind, FileNameProblem &problem, std::string &message) {

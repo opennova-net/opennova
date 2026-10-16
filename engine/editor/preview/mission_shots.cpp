@@ -10,6 +10,7 @@
 #include <base/io/strutil.h>
 #include <editor/preview/mission_people.h>
 #include <editor/preview/mission_world.h>
+#include <editor/preview/preview_units.h>
 #include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/mission.h>
@@ -63,12 +64,6 @@ bool read_vec3(const JsonValue *json, double out[3]) {
 
 const char *tag_name(int tag) {
 	return tag >= 0 && tag < world::kImpactEffectTagCount ? world::kImpactEffectTagNames[tag] : "";
-}
-
-std::string metres(double value) {
-	char text[32];
-	std::snprintf(text, sizeof(text), "%.2f m", value);
-	return text;
 }
 
 std::string at_words(const double at[3]) {
@@ -502,7 +497,7 @@ void MissionShots::step_() {
 		                                 (event.pick.bank_tag ? std::string(" (its ") + tag_name(event.pick.bank_tag) + " row)"
 		                                                      : std::string(" (no row)"))
 		                       : std::string()) +
-		              (event.scar.empty() ? std::string() : ", a scar " + event.scar + " " + metres(event.scar_radius) + " radius") +
+		              (event.scar.empty() ? std::string() : ", a scar " + event.scar + " " + metres(event.scar_radius, 2) + " radius") +
 		              ".";
 		if (!event.effect.empty())
 			spawns_.push_back({event.effect, {event.at[0], event.at[1], event.at[2]}, event.direction, tick, "impact"});
@@ -647,7 +642,7 @@ void MissionShots::step_() {
 		fired.kind = Kind::Fired;
 		fired.direction = world::Vec3{float(direction[0]), float(direction[1]), float(direction[2])};
 		fired.words = "Shot " + std::to_string(number) + ": " + shot.ammo + " fired at " + at_words(shot.at) + " from " +
-		              metres(kMissionShotStandoff) + " short of it.";
+		              metres(kMissionShotStandoff, 2) + " short of it.";
 		events_.push_back(std::move(fired));
 	}
 	// The sounds the queue readied, each at its place.

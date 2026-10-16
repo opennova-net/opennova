@@ -22,12 +22,10 @@ struct Ask {
 
 bool model_row(R role) { return role == R::ModelDiffuse || role == R::ModelDetail || role == R::ModelFlipFrame; }
 
-std::string extension_of(const std::string &name) { return strutil::to_lower(utf8_of(path_of(name).extension())); }
-
 // The format a use asks of its file: the one its name's extension says, a .tga by its role; a sky's cloud
 // layer from a source with an alpha, the .dds its loader reads first.
 std::string format_for(const TextureUse &use, bool source_alpha, std::string &why) {
-	const std::string extension = extension_of(use.name_written);
+	const std::string extension = file_extension(use.name_written);
 	const std::string name = basename_of(use.name_written);
 	if (use.role == R::SkyCloud && source_alpha) {
 		// [orig: Texture_LoadFromArchive @ 0x58BA1B..0x58BA50: the .dds beside the name before it, its alpha
@@ -101,7 +99,7 @@ void choose(TextureImportNeeds &out, const std::string &option, const std::strin
 TextureImportNeeds texture_import_needs(const std::vector<TextureUse> &uses, const std::string &source_name, bool source_alpha) {
 	TextureImportNeeds out;
 	std::vector<Ask> formats, stems, sizes, palettes, normals;
-	const bool indexed_source = extension_of(source_name) == ".pcx";
+	const bool indexed_source = file_extension(source_name) == ".pcx";
 	for (const TextureUse &use : uses) {
 		++out.uses;
 		std::string why;

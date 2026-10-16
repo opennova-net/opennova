@@ -2,6 +2,8 @@
 
 #include <cstddef>
 
+#include <base/io/strutil.h>
+
 namespace opennova::editor {
 
 // The session's compiled-in tables of rows, one row per value of an enum (the request kinds, the request
@@ -9,14 +11,9 @@ namespace opennova::editor {
 // line's verbs): the checks each table's static_asserts make, and its lookup by token. (S26 Cy13, Cy15,
 // Cy16: each table wrote its own.)
 
-// Two C strings equal, at compile time.
-constexpr bool same_text(const char *a, const char *b) {
-	while (*a && *a == *b) {
-		++a;
-		++b;
-	}
-	return *a == *b;
-}
+// Two C strings equal, at compile time (base/io/strutil.h's, which the session's tables and the
+// command line's reach as editor::same_text).
+using strutil::same_text;
 
 // The rows follow their enum's order: row i's `member` is the enum's value i.
 template <class Row, size_t N, class Enum>

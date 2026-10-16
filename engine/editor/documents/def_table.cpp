@@ -94,17 +94,13 @@ constexpr CatalogKindRow kKinds[] = {
 };
 static_assert(std::size(kKinds) == kCatalogKindCount, "every CatalogKind has exactly one row");
 
-constexpr bool same_text(const char *a, const char *b) {
-	while (*a && *a == *b) ++a, ++b;
-	return *a == *b;
-}
 constexpr bool kinds_in_order() {
 	for (size_t i = 0; i < std::size(kKinds); ++i) {
 		if (size_t(kKinds[i].kind) != i) return false;
 		// Every record kind at its own place, the second action block after them.
 		if (i < kDefRecordKindCount && size_t(kKinds[i].record) != i) return false;
 		for (size_t j = i + 1; j < std::size(kKinds); ++j)
-			if (same_text(kKinds[i].token, kKinds[j].token)) return false;
+			if (strutil::same_text(kKinds[i].token, kKinds[j].token)) return false;
 	}
 	return true;
 }

@@ -9,6 +9,7 @@
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_reads.h>
 #include <editor/preview/mission_scene.h>
+#include <editor/preview/preview_units.h>
 #include <editor/preview/viewport_device.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/mission.h>
@@ -25,10 +26,6 @@ Edit set_of(const NodeAddress &record, const char *field, Value value) {
 	edit.field = field;
 	edit.value = std::move(value);
 	return edit;
-}
-
-double snapped(double value, float snap) {
-	return snap > 0.0f ? std::round(value / double(snap)) * double(snap) : value;
 }
 
 } // namespace

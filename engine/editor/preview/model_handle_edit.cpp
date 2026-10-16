@@ -6,6 +6,7 @@
 
 #include <base/io/fixed.h>
 #include <editor/documents/model_document.h>
+#include <editor/preview/preview_units.h>
 #include <formats/threedi/threedi_build.h>
 
 namespace opennova::editor {
@@ -39,10 +40,6 @@ bool invert3(const ThreediMatrix4x4 &m, double out[9]) {
 ThreediBuildVec3 apply(const double r[9], const double v[3]) {
 	return ThreediBuildVec3{v[0] * r[0] + v[1] * r[3] + v[2] * r[6], v[0] * r[1] + v[1] * r[4] + v[2] * r[7],
 	                        v[0] * r[2] + v[1] * r[5] + v[2] * r[8]};
-}
-
-double snapped(double value, float snap) {
-	return snap > 0.0f ? std::round(value / double(snap)) * double(snap) : value;
 }
 
 Edit set(const NodeAddress &record, const char *field, double value, uint64_t gesture) {

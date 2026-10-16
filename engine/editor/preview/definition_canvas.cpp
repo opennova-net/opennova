@@ -37,10 +37,6 @@ const char *eye_words(const char *handle) {
 	return std::string(handle) == "pos" ? "Camera at the hip (pos)" : "Camera aimed (tpos)";
 }
 
-PreviewVec3 cross(const PreviewVec3 &a, const PreviewVec3 &b) {
-	return PreviewVec3{a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
-}
-
 // The game's camera as a frustum: its eye, the picture's corners kFrustumDepth before it (the field of view across,
 // the picture's aspect down) and a triangle over the picture's top for its up.
 void frustum(OverlayList &list, const OrbitCamera &camera, const DefinitionViewport::Eye &eye, float fov_deg,

@@ -18,6 +18,7 @@
 #include <editor/preview/mission_camera.h>
 #include <editor/preview/mission_overlay.h>
 #include <editor/preview/mission_scene.h>
+#include <editor/preview/preview_units.h>
 #include <editor/preview/sound_preview.h>
 #include <editor/session/view/session_view.h>
 #include <formats/def/def.h>
@@ -52,12 +53,6 @@ constexpr size_t kFiredKept = 16;
 // Audio_UpdateAmbientStream @ 0x4edb22] (world::ScriptVoiceChannel::frame's, the runtime's own).
 int32_t script_voice_volume_at_listener() {
 	return audio::calc_distance_volume(0, int64_t(100) * io::kFp16OneInt, (world::kScriptVoiceVolume * 255 + 128) >> 8, 255);
-}
-
-std::string metres(float value) {
-	char text[32];
-	std::snprintf(text, sizeof(text), "%.0f m", double(value));
-	return text;
 }
 
 float distance_between(const PreviewVec3 &a, const PreviewVec3 &b) {
@@ -554,14 +549,14 @@ std::vector<std::string> MissionListen::source_words(NodeId row) const {
 	const std::string status = source->status;
 	if (status == "playing")
 		out.push_back("Plays " + source->set + " on channel " + std::to_string(source->channel + 1) + " at volume " +
-				std::to_string(source->volume) + "/255, " + metres(source->distance) + " away (heard to " +
-				metres(source->falloff) + ").");
+				std::to_string(source->volume) + "/255, " + metres(source->distance, 0) + " away (heard to " +
+				metres(source->falloff, 0) + ").");
 	else if (status == "outranked")
 		out.push_back("Heard at volume " + std::to_string(source->volume) + "/255 but not among the " +
 				std::to_string(audio::kAmbientMixChannels) + " loudest the game's channels take.");
 	else if (status == "out_of_range")
-		out.push_back("Silent here: " + metres(source->distance) + " away, " + source->set + " is heard to " +
-				metres(source->falloff) + ".");
+		out.push_back("Silent here: " + metres(source->distance, 0) + " away, " + source->set + " is heard to " +
+				metres(source->falloff, 0) + ".");
 	else if (status == "quiet")
 		out.push_back("Silent at this hour: its " + std::string(kHours[size_t(source->region)]) + " slot is empty.");
 	else if (status == "no_set")

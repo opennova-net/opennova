@@ -48,6 +48,17 @@ inline std::string to_upper(std::string_view s)
     return out;
 }
 
+// Two NUL-ended strings equal, byte for byte, usable in a constant expression: the compiled-in
+// tables' static_asserts (no two rows share a token) and their lookups by token.
+constexpr bool same_text(const char *a, const char *b)
+{
+    while (*a && *a == *b) {
+        ++a;
+        ++b;
+    }
+    return *a == *b;
+}
+
 inline bool iequals(std::string_view a, std::string_view b)
 {
     if (a.size() != b.size())

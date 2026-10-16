@@ -20,6 +20,7 @@
 #include <editor/preview/mission_overlay.h>
 #include <editor/preview/mission_place.h>
 #include <editor/preview/mission_viewport.h>
+#include <editor/preview/preview_units.h>
 #include <editor/preview/viewport_model.h>
 #include <editor/session/request_factories.h>
 #include <editor/session/view/session_view.h>
@@ -71,10 +72,6 @@ double turned(double from, double to) {
 	return by;
 }
 
-double snapped(double value, float snap) {
-	return snap > 0.0f ? std::round(value / double(snap)) * double(snap) : value;
-}
-
 // The selected records of the frame as a press finds them: the entities, and the areas where `areas`.
 std::vector<MissionPressed> selected_pressed(const MissionCanvasFrame &frame, bool areas, int grabbed_mark,
 		size_t &grabbed) {
@@ -104,11 +101,6 @@ std::string capitalized_words(std::string words) {
 }
 
 // A number of metres as the readout says it.
-std::string metres(double value) {
-	char text[32];
-	std::snprintf(text, sizeof(text), "%.2f m", value);
-	return text;
-}
 
 } // namespace
 
@@ -890,7 +882,7 @@ std::string MissionCanvas::hint(const ViewportContext &context, const CanvasInpu
 		const MissionPressed &held = grab_.pressed[grab_.grabbed];
 		std::string now;
 		if (grab_.copy) {
-			now = "copies go " + metres(grab_.copy_by[0]) + " east, " + metres(grab_.copy_by[1]) + " north";
+			now = "copies go " + metres(grab_.copy_by[0], 2) + " east, " + metres(grab_.copy_by[1], 2) + " north";
 		} else if (const MissionEntityMark *entity = frame_.viewport->scene().entity(held.record.row)) {
 			char text[96];
 			if (grab_.handle == MissionHandle::Yaw)

@@ -19,8 +19,6 @@ constexpr float kMinDistance = 0.01f;
 constexpr float kMaxDistance = 100000.0f;
 constexpr float kFrameMargin = 1.15f; // the sphere with a little room around it
 
-float dot(const PreviewVec3 &a, const PreviewVec3 &b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
-
 PreviewVec3 sub(const PreviewVec3 &a, const PreviewVec3 &b) { return PreviewVec3{a.x - b.x, a.y - b.y, a.z - b.z}; }
 
 float tan_half_fov() { return std::tan(OrbitCamera::fov_horizontal_degrees() * kPi / 360.0f); }

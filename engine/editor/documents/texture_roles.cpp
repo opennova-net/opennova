@@ -1,3 +1,4 @@
+#include <base/io/strutil.h>
 #include <editor/documents/texture_roles.h>
 
 #include <iterator>
@@ -307,20 +308,12 @@ constexpr RoleWords kRows[] = {
 
 static_assert(std::size(kRows) == renderer::kTextureRoleCount, "every TextureRoleId has exactly one row");
 
-constexpr bool same_text(const char *a, const char *b) {
-	while (*a && *a == *b) {
-		++a;
-		++b;
-	}
-	return *a == *b;
-}
-
 constexpr bool rows_well_formed() {
 	for (size_t i = 0; i < renderer::kTextureRoleCount; ++i) {
 		const RoleWords &row = kRows[i];
 		if (static_cast<size_t>(row.id) != i || !*row.token || !*row.words || !*row.witness) return false;
 		for (size_t j = 0; j < i; ++j)
-			if (same_text(row.token, kRows[j].token)) return false;
+			if (strutil::same_text(row.token, kRows[j].token)) return false;
 	}
 	return true;
 }

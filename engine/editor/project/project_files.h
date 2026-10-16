@@ -49,6 +49,9 @@ std::string shown_path(const std::string &path, const std::string &root);
 std::string basename_of(const std::string &path);
 // Its file name less the extension ("menus/main.mnu" -> "main").
 std::string file_stem(const std::string &path);
+// Its extension with the dot, lower-cased ("art/Sky.PCX" -> ".pcx"; "" for none): the form a texture's
+// source is told by.
+std::string file_extension(const std::string &path);
 
 // A name someone chose for a file the editor is about to write into the project: a
 // created document, an imported file, a rename's new name (ADR 0046 d6: the identity

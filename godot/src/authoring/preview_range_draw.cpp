@@ -1,4 +1,5 @@
 #include "authoring/preview_range_draw.h"
+#include "authoring/preview_godot.h"
 
 #include <godot_cpp/classes/base_material3d.hpp>
 #include <godot_cpp/classes/geometry_instance3d.hpp>
@@ -12,10 +13,6 @@
 namespace godot {
 
 namespace {
-
-Vector3 to_godot(const opennova::editor::PreviewVec3 &v) {
-	return Vector3(v.x, v.y, v.z);
-}
 
 ScarDrawList::CompiledFrame device_scar_frame() {
 	// Compiled in the device's space, with no entity rings to resolve (ScarDrawList::from_compiled).
