@@ -3626,9 +3626,20 @@ bool check_default_spawn_requires_no_team_zone() {
 
 	config.default_spawn_requires_no_team_zone = 0;
 	reset_player();
-	return expect(!dispatch(default_pick).empty() &&
-	                      world.registry.get(player)->health == 100,
-	              "the retail-default disabled rule permits Default Spawn");
+	if (!expect(!dispatch(default_pick).empty() &&
+	                    world.registry.get(player)->health == 100,
+	            "the retail-default disabled rule permits Default Spawn"))
+		return false;
+
+	// B-5: the round-over gate leads the handler, so a dead joiner's pick in
+	// the round-end linger deploys nothing, queues nothing and answers nothing.
+	// The host's round end raises it (Server_ProcessRoundEnd @0x5168E4: our
+	// Match::finish). [orig: Server_ProcessClientRequestRespawn @0x519AF6..0x519B00]
+	world.match.finish(0, world);
+	reset_player();
+	return expect(dispatch(default_pick).empty() &&
+	                      world.registry.get(player)->health == 0,
+	              "a pick after the round ended deploys nothing");
 }
 
 // A spawnable type-1 item is a mobile deploy target. The request handler first

@@ -1573,6 +1573,13 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// share Server_ReleasePlayerDeployment. [orig: SpawnWaveList_TryQueuePlayer
 				// @0x52A490; Server_SendSpawnWaveStatusToPlayer @0x50FF10]
 				if (!conn.burst.spawned) break;
+				// The round-over gate leads the handler: once the round ended no pick
+				// deploys, queues or answers, the round-end linger's dead joiners
+				// included (g_SpawnSuccessGate, our match outcome's `ended`, as the 0x29
+				// and 0x5D cases read it). [orig: Server_ProcessClientRequestRespawn
+				// @0x519AF0 - `cmp g_SpawnSuccessGate, ebp` @0x519AF6, `jnz` @0x519B00 to
+				// the bare return @0x519DF2, ahead of the authority test @0x519B06]
+				if (world != nullptr && world->match.outcome().ended) break;
 				if (world == nullptr || !conn.link.owned_entity.valid()) {
 					// World-less/unit-test path: the golden frame-82540 hint byte, as before.
 					replies.push_back(
