@@ -4264,6 +4264,29 @@ int test_db_failure_reply_carries_code_alone(Harness &h) {
 	return 0;
 }
 
+// A database outage on the public reads is a 500, never a 200 with empty data the
+// lobby page would show as "no servers" (B-24): GET /api/lobbies, /api/stats and
+// /api/games, whose reads all start at the games table, answer {"error":"db_error"}
+// while it is gone, and their data again once it is back.
+int test_public_reads_fail_as_500(Harness &h) {
+	h.pool.acquire()->exec("ALTER TABLE games RENAME TO games_harness_away;");
+	bool all_refused = true;
+	for (const char *path : { "/api/lobbies", "/api/stats", "/api/games" }) {
+		const net::HttpReply reply = h.send("GET", path);
+		const bool ok = reply.transport_ok && reply.code == 500 &&
+				body_text(reply) == "{\"error\":\"db_error\"}";
+		if (!ok) std::fprintf(stderr, "  %s: %s, want HTTP 500 db_error\n", path, describe(reply).c_str());
+		all_refused = all_refused && ok;
+	}
+	// The table comes back before any expectation can return, so a failure here
+	// leaves the later tests their schema.
+	h.pool.acquire()->exec("ALTER TABLE games_harness_away RENAME TO games;");
+	TEST_EXPECT(all_refused);
+	for (const char *path : { "/api/lobbies", "/api/stats", "/api/games" })
+		TEST_EXPECT(h.send("GET", path).code == 200);
+	return 0;
+}
+
 // GET /healthz (health.h): outside /api, so a listener whose /api/ refuses the
 // harness (a proxy it is not) still answers it; "ok" while the stall watchdog
 // finds its loops moving and main()'s checks coming, 503 "stalled" (no detail)
@@ -6647,6 +6670,7 @@ int run(Harness &h) {
 		{ "login_row_kept_alive", test_login_row_kept_alive },
 		{ "host_tag_serves_once", test_host_tag_serves_once },
 		{ "db_failure_reply_carries_code_alone", test_db_failure_reply_carries_code_alone },
+		{ "public_reads_fail_as_500", test_public_reads_fail_as_500 },
 		{ "concurrent_requests", test_concurrent_requests },
 	};
 	for (const Case &c : cases) {

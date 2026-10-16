@@ -841,11 +841,14 @@ void HttpListener::register_public_api_routes() {
 				games_json.push_back(std::move(game));
 			}
 		} catch (const db::Error &e) {
+			// An outage answers 500 like every other route, never an empty
+			// list the lobby page would show as "no servers".
 			std::fprintf(stderr, "[http] /api/lobbies failed: %s\n", e.what());
+			return json_error(500, "db_error");
 		}
 		crow::json::wvalue out;
 		out["games"] = std::move(games_json);
-		return out;
+		return json_reply(200, out);
 	});
 
 	// Phase I.5: aggregate counts for the Vue dashboard.
@@ -865,9 +868,9 @@ void HttpListener::register_public_api_routes() {
 			out["stats"] = std::move(stats);
 		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[http] /api/stats failed: %s\n", e.what());
-			out["error"] = "db_error";
+			return json_error(500, "db_error");
 		}
-		return out;
+		return json_reply(200, out);
 	});
 
 	// POST /api/login, POST /api/logout, GET /api/me (web_access.cpp).
@@ -959,9 +962,9 @@ void HttpListener::register_public_api_routes() {
 			out["games"] = std::move(arr);
 		} catch (const db::Error &e) {
 			std::fprintf(stderr, "[http] /api/games failed: %s\n", e.what());
-			out["error"] = "db_error";
+			return json_error(500, "db_error");
 		}
-		return out;
+		return json_reply(200, out);
 	});
 
 	CROW_ROUTE(app, "/api/health")([]() {
