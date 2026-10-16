@@ -74,7 +74,7 @@ Ref<Resource> load_font_path(const String &p_path) {
 		return Ref<Resource>();
 	}
 	PackedByteArray bytes;
-	if (!read_nova_payload_file(p_path, bytes)) {
+	if (!read_payload_file(p_path, bytes)) {
 		return Ref<Resource>();
 	}
 	Ref<FntResource> font;

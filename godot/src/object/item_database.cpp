@@ -125,7 +125,7 @@ Error ItemDatabase::load(const String &path) {
 	release_native_items();
 
 	PackedByteArray bytes;
-	if (!read_nova_payload_file(path, bytes)) {
+	if (!read_payload_file(path, bytes)) {
 		last_error = String("Cannot open item database: ") + path;
 		return ERR_CANT_OPEN;
 	}

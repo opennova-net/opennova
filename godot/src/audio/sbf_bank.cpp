@@ -63,7 +63,7 @@ void SbfBank::load_from_path(const String &p_path) {
 	_model_error.clear();
 	_dirty = false;
 
-	if (!read_nova_payload_file(p_path, _file_bytes)) {
+	if (!read_payload_file(p_path, _file_bytes)) {
 		UtilityFunctions::push_warning("SbfBank: could not open ", p_path);
 		return;
 	}

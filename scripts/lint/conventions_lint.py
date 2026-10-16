@@ -39,9 +39,10 @@ CODE_SUFFIXES = (".cpp", ".cc", ".c", ".h", ".hpp", ".gd", ".tscn", ".tres", ".g
                  ".gdshaderinc", ".py", ".ps1", ".sh", ".cmake", ".txt", ".json", ".cfg")
 HARD_EXCLUDES = ("third_party/", "godot/addons/", "/build/", "scripts/lint/conventions_lint.py")
 
-# The prefix forms ADR 0040 names, at an identifier boundary; the macro form
-# is counted separately (advisory) until the shader constants are renamed.
-NOVA_PREFIX = re.compile(r"(?<![A-Za-z0-9_])(?:nova_[A-Za-z0-9]|Nova[A-Z])")
+# The prefix forms ADR 0040 names, at an identifier boundary or after an
+# underscore inside one (read_nova_payload_file); the macro form is counted
+# separately (advisory) until the shader constants are renamed.
+NOVA_PREFIX = re.compile(r"(?:(?<![A-Za-z0-9_])|(?<=_))nova_[A-Za-z0-9]|(?<![A-Za-z0-9_])Nova[A-Z]")
 NOVA_MACRO = re.compile(r"(?<![A-Za-z0-9_])NOVA_[A-Z]")
 # Every survivor: the proper nouns, and the external project's path.
 NOVA_OK = re.compile(r"NovaWorld|NOVAWORLD|Novaworld|NovaLogic|NOVALOGIC|opennova|OpenNova|OPENNOVA"

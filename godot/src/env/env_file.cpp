@@ -341,7 +341,7 @@ Error EnvFile::load() {
 	}
 
 	PackedByteArray bytes;
-	if (!read_nova_payload_file(source_path, bytes)) {
+	if (!read_payload_file(source_path, bytes)) {
 		UtilityFunctions::push_warning("[EnvFile] Cannot open: ", source_path);
 		return ERR_FILE_CANT_READ;
 	}

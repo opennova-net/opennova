@@ -190,7 +190,7 @@ int RtxtStringFile::add_section(const String &p_name) {
 
 Error RtxtStringFile::load_from_path(const String &p_path) {
 	PackedByteArray packed;
-	if (!read_nova_payload_file(p_path, packed)) {
+	if (!read_payload_file(p_path, packed)) {
 		return ERR_FILE_CANT_OPEN;
 	}
 	return load_from_byte_array(packed);

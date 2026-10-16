@@ -225,7 +225,7 @@ Error HudPos::parse_bytes_(const PackedByteArray &bytes, const String &src) {
 
 Error HudPos::load(const String &path) {
 	PackedByteArray bytes;
-	if (!read_nova_payload_file(path, bytes)) {
+	if (!read_payload_file(path, bytes)) {
 		clear_();
 		last_error_ = String("Cannot open hudpos.def: ") + path;
 		return ERR_CANT_OPEN;

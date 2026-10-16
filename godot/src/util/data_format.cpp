@@ -19,7 +19,7 @@ PackedByteArray godot::to_packed_bytes(const uint8_t *p_data, size_t p_size) {
 	return out;
 }
 
-bool godot::decode_nova_payload_bytes(PackedByteArray &p_bytes) {
+bool godot::decode_payload_bytes(PackedByteArray &p_bytes) {
 	std::vector<uint8_t> bytes(static_cast<size_t>(p_bytes.size()));
 	if (!bytes.empty()) {
 		std::memcpy(bytes.data(), p_bytes.ptr(), bytes.size());
@@ -31,7 +31,7 @@ bool godot::decode_nova_payload_bytes(PackedByteArray &p_bytes) {
 	return true;
 }
 
-bool godot::read_nova_payload_file(const String &p_path, PackedByteArray &r_bytes) {
+bool godot::read_payload_file(const String &p_path, PackedByteArray &r_bytes) {
 	r_bytes = PackedByteArray();
 	Ref<FileAccess> file = FileAccess::open(p_path, FileAccess::READ);
 	if (file.is_null()) {
@@ -39,7 +39,7 @@ bool godot::read_nova_payload_file(const String &p_path, PackedByteArray &r_byte
 	}
 	r_bytes = file->get_buffer(file->get_length());
 	file.unref();
-	if (!decode_nova_payload_bytes(r_bytes)) {
+	if (!decode_payload_bytes(r_bytes)) {
 		r_bytes = PackedByteArray();
 		return false;
 	}

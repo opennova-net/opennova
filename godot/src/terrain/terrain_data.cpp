@@ -623,7 +623,7 @@ Error TerrainData::load() {
 	}
 
 	PackedByteArray trn_bytes;
-	if (!read_nova_payload_file(trn_path, trn_bytes)) {
+	if (!read_payload_file(trn_path, trn_bytes)) {
 		UtilityFunctions::push_warning("TerrainData: Cannot open TRN: ", trn_path);
 		return ERR_FILE_CANT_READ;
 	}
@@ -873,7 +873,7 @@ void TerrainData::_load_pcx_slot(const String &slot_id, const String &filename) 
 	String resolved = opennova::resolve_file_in_dir(load_dir_, filename);
 	if (!resolved.is_empty()) {
 		PackedByteArray bytes;
-		const Error err = read_nova_payload_file(resolved, bytes)
+		const Error err = read_payload_file(resolved, bytes)
 		        ? _import_pcx_slot_bytes(slot_id, resolved.get_file(), bytes)
 		        : ERR_FILE_CANT_READ;
 		if (err != OK) {
@@ -897,7 +897,7 @@ bool TerrainData::_load_heights(const String &cpt_name) {
 	if (load_use_root_) {
 		cpt_bytes = resource_root->read_file(cpt_name);
 	} else {
-		read_nova_payload_file(cpt_path, cpt_bytes);
+		read_payload_file(cpt_path, cpt_bytes);
 	}
 	if (cpt_bytes.is_empty()) {
 		loaded = true;
@@ -1401,7 +1401,7 @@ Ref<TerrainTileInfo> TerrainData::get_tileinfo_resource() const {
 			bytes = resource_root->read_file(lookup_name);
 		}
 	} else {
-		read_nova_payload_file(lookup, bytes);
+		read_payload_file(lookup, bytes);
 	}
 	if (bytes.is_empty()) {
 		UtilityFunctions::push_warning("TerrainData: tileinfo file not found at ", lookup);
