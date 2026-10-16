@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <vector>
 
+#include <base/io/bam.h>
 #include <runtime/world/entity.h>
 
 namespace opennova::world {
@@ -144,15 +145,16 @@ inline bool scar_allowed(int32_t hit_z_q16, int32_t water_z_q16, bool entity_is_
 	return hit_z_q16 > water_z_q16 && !entity_is_husk;
 }
 
-// The quad's spin about the polygon normal [orig: @0x5CCB50..0x5CCC65 —
-// `PRNG_Next16() << 16` taken as a SIGNED BAM32, scaled by dbl_7C3608
-// (2pi / 2^32) and fed to fsin/fcos, whose results are scaled by dbl_7C3600
-// (2^22) for the Q22 rotation of the tangent pair]. One draw per scar, always
-// — unlike the texture roll, every scar is randomly rotated. The shift makes
-// the low word zero, so the angle is exactly word * 2pi / 65536 modulo 2pi.
-inline float scar_spin_radians(uint16_t prng_word) {
-	constexpr float kTau = 6.28318530717958647692f;
-	return static_cast<float>(prng_word) * kTau / 65536.0f;
+// The quad's spin about the polygon normal: `PRNG_Next16() << 16` taken as a
+// SIGNED BAM32 and scaled by retail's radians-per-BAM double, so a word of
+// 0x8000 and above is a negative angle, and the scale is dbl_7C3608's (30.5
+// ppm above 2pi / 2^32), not the exact turn. One draw per scar, always —
+// unlike the texture roll, every scar is randomly rotated. scar_basis takes
+// its sine and cosine to Q22. [orig: Scar_AddEntry `call PRNG_Next16; shl eax,
+// 10h; fild; fmul dbl_7C3608` @0x5CCB48..0x5CCB58]
+inline double scar_spin_radians(uint16_t prng_word) {
+	const int32_t bam = static_cast<int32_t>(static_cast<uint32_t>(prng_word) << 16);
+	return static_cast<double>(bam) * io::kRadiansPerBamX87;
 }
 
 // The ring slot an impact lands in, given how many this entity has taken.

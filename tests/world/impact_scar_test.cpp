@@ -4,6 +4,8 @@
 
 #include <runtime/world/impact_scar.h>
 
+#include <cmath>
+#include <cstdint>
 #include <cstdio>
 
 #include <runtime/renderer/scar_draw_list.h>
@@ -85,13 +87,39 @@ void test_gates() {
 	CHECK(!scar_allowed(0x20000, 0x10000, true), "a husk takes no scar");
 }
 
-// Every scar is spun about its normal — a full BAM16 turn mapped to radians.
+// Every scar is spun about its normal: the word << 16 read as a SIGNED BAM32,
+// times retail's radians-per-BAM double (dbl_7C3608, not the exact turn)
+// [orig: Scar_AddEntry @0x5CCB4D..0x5CCB58].
 void test_spin() {
-	CHECK(scar_spin_radians(0) == 0.0f, "word 0 is no rotation");
-	const float half = scar_spin_radians(32768);
-	CHECK(half > 3.14f && half < 3.15f, "half the word range is half a turn");
-	const float most = scar_spin_radians(65535);
-	CHECK(most > 6.28f && most < 6.284f, "the top of the range is nearly a turn");
+	constexpr double k = 1.4629627251502471e-9; // dbl_7C3608
+	CHECK(scar_spin_radians(0) == 0.0, "word 0 is no rotation");
+	CHECK(scar_spin_radians(0x4000) == 1073741824.0 * k, "a quarter word is dbl_7C3608's quarter turn");
+	CHECK(scar_spin_radians(0x8000) == -2147483648.0 * k,
+			"word 0x8000 is the signed BAM INT32_MIN: minus half a turn");
+	CHECK(scar_spin_radians(0xFFFF) == -65536.0 * k, "the top word is a hair below zero");
+}
+
+// The rotation of the pair, retail's integer form: the sine and cosine each
+// truncated to Q22, every product shifted >> 22 on its own before the add
+// [orig: Scar_AddEntry @0x5CCB5E..0x5CCC65]. Written out here over the
+// unrotated pair (word 0 rotates nothing: cos is exactly 2^22).
+void test_spin_rotation() {
+	const int32_t n[3] = {0x9000, 0x7000, 0xA000};
+	int32_t t[3], b[3];
+	scar_basis(n, 0, t, b);
+	for (const uint16_t word : {uint16_t(0x1234), uint16_t(0x8000), uint16_t(0xC3A1)}) {
+		const double angle = double(int32_t(uint32_t(word) << 16)) * 1.4629627251502471e-9;
+		const int64_t s = int32_t(std::sin(angle) * 4194304.0);
+		const int64_t c = int32_t(std::cos(angle) * 4194304.0);
+		int32_t a2[3], b2[3];
+		scar_basis(n, word, a2, b2);
+		bool same = true;
+		for (int i = 0; i < 3; ++i) {
+			same = same && a2[i] == int32_t((c * t[i]) >> 22) - int32_t((s * b[i]) >> 22);
+			same = same && b2[i] == int32_t((s * t[i]) >> 22) + int32_t((c * b[i]) >> 22);
+		}
+		CHECK(same, "the pair rotates by the Q22 sine and cosine, each product shifted on its own");
+	}
 }
 
 bool perpendicular(int32_t nx, int32_t ny, int32_t nz, const int32_t t[3]) {
@@ -509,6 +537,7 @@ int main() {
 	test_ring_wraps();
 	test_gates();
 	test_spin();
+	test_spin_rotation();
 	test_tangent_ladder();
 	test_basis();
 	test_cache();

@@ -8,6 +8,9 @@
 
 #include <cmath>
 
+#include <base/io/bam.h>
+#include <base/io/fixed.h>
+
 #include <runtime/world/collision.h>
 #include <runtime/world/collision_detail.h>
 #include <runtime/world/world.h>
@@ -153,19 +156,22 @@ void scar_basis(const int32_t normal_q16[3], uint16_t spin_word,
 		t[1] = -t[1];
 		t[2] = -t[2];
 	}
-	// The spin: the PRNG word << 16 read as a SIGNED BAM32, scaled to radians
-	// and fed to fsin/fcos; the Q22 rotation of the pair is
-	// `T' = (T * c - B * s) >> 22`, `B' = (T * s + B * c) >> 22`
-	// [orig: @0x5CCB50..0x5CCC65 — dbl_7C3608 = 2pi / 2^32]. The low word is
-	// zero, so the angle is exactly word * 2pi / 65536 modulo 2pi.
-	const double angle = static_cast<double>(scar_spin_radians(spin_word));
-	const double c = std::cos(angle);
-	const double s = std::sin(angle);
+	// The spin (scar_spin_radians): its sine and cosine each scaled to Q22 and
+	// truncated by `_ftol2_sse`, then every component of the pair rotated with
+	// each product shifted on its own, `T' = (c * T >> 22) - (s * B >> 22)`,
+	// `B' = (s * T >> 22) + (c * B >> 22)`, each `imul; shrd eax, edx, 16h`.
+	// [orig: Scar_AddEntry — the trig @0x5CCB5E..0x5CCB7B (sine @0x5CCB75,
+	//  cosine @0x5CCB8E), the tangent @0x5CCBAE..0x5CCC08, the bitangent
+	//  @0x5CCC0B..0x5CCC65]
+	const double angle = scar_spin_radians(spin_word);
+	const int32_t s = static_cast<int32_t>(std::sin(angle) * io::kQ22One);
+	const int32_t c = static_cast<int32_t>(std::cos(angle) * io::kQ22One);
+	const auto mul22 = [](int32_t a, int32_t b) {
+		return static_cast<int32_t>((static_cast<int64_t>(a) * b) >> 22);
+	};
 	for (int i = 0; i < 3; ++i) {
-		const double ti = static_cast<double>(t[i]);
-		const double bi = static_cast<double>(b[i]);
-		out_a[i] = static_cast<int32_t>(ti * c - bi * s);
-		out_b[i] = static_cast<int32_t>(ti * s + bi * c);
+		out_a[i] = io::bam_sub(mul22(c, t[i]), mul22(s, b[i]));
+		out_b[i] = io::bam_add(mul22(s, t[i]), mul22(c, b[i]));
 	}
 }
 
