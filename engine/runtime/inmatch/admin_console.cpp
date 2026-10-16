@@ -9,6 +9,7 @@
 #include <runtime/world/world.h>
 
 #include <base/gameprofile/game_type.h>
+#include <base/io/cp1252.h> // cp1252_isspace (the .ACP CRT isspace)
 #include <base/io/crt_ftol.h>
 #include <base/io/strutil.h>
 #include <formats/gamecfg/game_cfg.h>
@@ -51,8 +52,13 @@ constexpr uint32_t kCycleLingerTicks = 620;
 // [orig: CAdminServer_HandleGet — the buffer at frame +0x18, the cookie at +0x4C]
 constexpr size_t kGameSettingsValueMaxChars = 52 - 21 - 2 - 1 - 1;
 
+// The CRT isspace under the game's ".ACP" LC_CTYPE, pinned to cp1252 (the six C-locale
+// spaces plus 0xA0, D-NET-381 / D-NET-382). The walk passes the byte sign-extended; the CRT's
+// ctype table mirrors its 128..254 rows below index 0, so 0xA0 (-96) splits here too.
+// [orig: CAdminServer_DispatchCommand @0x406720 - `movsx` @0x4067AD, isspace @0x4067B5 ->
+//  @0x76B964; CRT_init_ctype's mirror copy @0x784C59]
 bool is_space(char c) {
-	return c == ' ' || (c >= '\t' && c <= '\r');
+	return cp1252_isspace(static_cast<uint8_t>(c));
 }
 
 bool ieq(std::string_view a, std::string_view b) {
@@ -77,6 +83,10 @@ std::string itos(int64_t v) {
 
 } // namespace
 
+// The command line's split: the walk NUL-terminates each run of spaces and starts a token
+// at the run's end, at most 25 tokens; the last one runs to the line's end.
+// [orig: CAdminServer_DispatchCommand @0x406720 - the 25-token cap @0x4067A0, the isspace
+//  walk @0x4067A0..0x4067EB]
 std::vector<std::string> admin_split_command(std::string_view line) {
 	std::vector<std::string> tokens;
 	size_t start = std::string_view::npos;
