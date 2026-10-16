@@ -962,6 +962,20 @@ add_test(NAME hosted_agent_protocol COMMAND hosted_agent_protocol_test)
 # slots' rows, the silent machines, and the slots the live servers hold (assigned once, the
 # generation moving on, let go, read back for placement). Compiles the hosted sources it needs
 # directly, so it runs on every service build.
+# The hosted data sets' rows (hosted/data_set_repository.h, migration 0011, ADR 0064): the
+# seeded data sets, trees, the servers' pins, and the migration's mapping of the old columns.
+add_executable(data_set_repository_test
+    novaworld/data_set_repository_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_files.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_repository.cpp)
+target_link_libraries(data_set_repository_test PRIVATE opennova_novaworld_service Threads::Threads)
+target_include_directories(data_set_repository_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common)
+target_compile_definitions(data_set_repository_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+opennova_add_pg_test(data_set_repository COMMAND data_set_repository_test)
+set_tests_properties(data_set_repository PROPERTIES TIMEOUT 300)
+
 add_executable(hosted_fleet_repository_test
     novaworld/hosted_fleet_repository_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/billing_repository.cpp

@@ -56,6 +56,8 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/admin_link.cpp
         hosted/agent_protocol.cpp
         hosted/console_queue.cpp
+        hosted/data_set_files.cpp
+        hosted/data_set_repository.cpp
         hosted/data_sets.cpp
         hosted/docker_machine_driver.cpp
         hosted/ec2_machine_driver.cpp
