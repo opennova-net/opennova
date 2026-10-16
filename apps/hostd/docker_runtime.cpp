@@ -285,8 +285,14 @@ std::vector<std::string> DockerRuntime::run_argv(const ContainerSpec &spec) cons
 						"--log-opt", "mode=non-blocking", "--log-opt", "max-buffer-size=4m" });
 	}
 	argv.insert(argv.end(),
-			{ "--mount", "type=bind,source=" + spec.data_dir + ",target=/opt/game,readonly",
-					"--mount", "type=bind,source=" + spec.work_dir + ",target=/srv/serve" });
+			{ "--mount", "type=bind,source=" + spec.base_dir + ",target=/opt/game,readonly" });
+	if (!spec.expansion_dir.empty()) {
+		argv.push_back("--mount");
+		argv.push_back("type=bind,source=" + spec.expansion_dir + ",target=/opt/game/expansion/" +
+				spec.expansion_code + ",readonly");
+	}
+	argv.push_back("--mount");
+	argv.push_back("type=bind,source=" + spec.work_dir + ",target=/srv/serve");
 	if (!spec.env_file.empty()) {
 		argv.push_back("--env-file");
 		argv.push_back(spec.env_file);

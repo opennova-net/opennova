@@ -21,6 +21,7 @@ add_library(opennova_hostd_core STATIC
     process_runtime.cpp  # the servers as child processes (a machine that is a container)
     reconcile.cpp        # what a sync does, decided as a pure function
     slot_files.cpp       # the slots' working directories
+    tree_store.cpp       # the trees fetched on demand (aws s3 sync) and checked
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
 )
 

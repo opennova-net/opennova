@@ -4795,17 +4795,27 @@ add_test(NAME hud_capture_labels COMMAND hud_capture_labels_test)
 
 # opennova-hostd, the machine agent (apps/hostd; Linux only, as the app). The runtime
 # test drives its platform legs on a stub command runner that checks every argv: the
-# docker runtime's exact `docker run` and its listings, docker's texts read, the per-slot
-# iptables egress counters, the command line. The agent test drives the bootstrap and the
-# sync passes against an in-process fake of the service's routes and a fake container
-# runtime on a hand-stepped clock, with the planner and the slots' directories, and the
+# docker runtime's exact `docker run` (the base and expansion trees' binds) and its
+# listings, docker's texts read, the per-slot iptables egress counters, the command line.
+# The tree store test drives the trees' fetches on a fake fetcher (a tree checked against
+# its manifest, the failures and their retries, the removal of unnamed trees, a restart's
+# scan, the expansion mount point) and the real fetcher's file:// copy and stand-in
+# programs for the AWS CLI. The agent test drives the bootstrap and the
+# sync passes against an in-process fake of the service's routes, a fake container
+# runtime and a fake tree fetcher on a hand-stepped clock, with the planner and the
+# slots' directories, and the
 # real link's walk over the addresses a name lists (one that takes no connection passed
-# over) against an HTTP server on loopback. Neither runs docker or iptables.
+# over) against an HTTP server on loopback. None runs docker, iptables or the AWS CLI.
 if(TARGET opennova_hostd_core)
     add_executable(opennova_hostd_runtime_test hostd/opennova_hostd_runtime_test.cpp)
     target_link_libraries(opennova_hostd_runtime_test PRIVATE opennova_hostd_core)
     target_include_directories(opennova_hostd_runtime_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     add_test(NAME opennova_hostd_runtime COMMAND opennova_hostd_runtime_test)
+
+    add_executable(opennova_hostd_tree_store_test hostd/opennova_hostd_tree_store_test.cpp)
+    target_link_libraries(opennova_hostd_tree_store_test PRIVATE opennova_hostd_core)
+    target_include_directories(opennova_hostd_tree_store_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME opennova_hostd_tree_store COMMAND opennova_hostd_tree_store_test)
 
     add_executable(opennova_hostd_agent_test hostd/opennova_hostd_agent_test.cpp)
     target_link_libraries(opennova_hostd_agent_test PRIVATE opennova_hostd_core)

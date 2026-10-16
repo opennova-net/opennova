@@ -1,5 +1,6 @@
 #include "process_runtime.h"
 
+#include <filesystem>
 #include <base/io/file_io.h>
 
 #include <ctime>
@@ -90,7 +91,7 @@ PullState ProcessRuntime::poll_pull(const std::string &, std::string &) {
 void ProcessRuntime::cancel_pull(const std::string &) {}
 
 std::vector<std::string> ProcessRuntime::run_argv(const ContainerSpec &spec) const {
-	std::vector<std::string> argv = { serve_, "--resource-dir", spec.data_dir };
+	std::vector<std::string> argv = { serve_, "--resource-dir", spec.base_dir };
 	argv.insert(argv.end(), spec.args.begin(), spec.args.end());
 	return argv;
 }
@@ -110,6 +111,22 @@ bool ProcessRuntime::run(const ContainerSpec &spec, int, int &exit_code, std::st
 		}
 		for (std::string &entry : read_env_file_lines(text))
 			environment.push_back(std::move(entry));
+	}
+	// An expansion tree sits in the base tree at expansion/<code>, where /exp finds it:
+	// the agent made that directory (TreeStore::expansion_mount_point, the docker
+	// runtime's mount point), which becomes a link to the expansion tree here.
+	if (!spec.expansion_dir.empty()) {
+		std::error_code ec;
+		const std::filesystem::path at = std::filesystem::path(spec.base_dir) / "expansion" / spec.expansion_code;
+		if (std::filesystem::is_directory(std::filesystem::symlink_status(at, ec)))
+			std::filesystem::remove(at, ec);
+		if (!std::filesystem::is_symlink(std::filesystem::symlink_status(at, ec)))
+			std::filesystem::create_directory_symlink(spec.expansion_dir, at, ec);
+		if (ec) {
+			error = "the expansion tree could not be linked at " + at.string() + ": " + ec.message();
+			exit_code = 125;
+			return false;
+		}
 	}
 	proc::SpawnOptions options;
 	options.argv = run_argv(spec);

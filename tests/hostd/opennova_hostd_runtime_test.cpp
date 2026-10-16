@@ -1,6 +1,7 @@
 // opennova-hostd's platform legs on a stub command runner that checks every argv and
 // answers it: the docker runtime (apps/hostd/docker_runtime.h: the exact `docker run`
-// of a slot's container, the ps-then-inspect listing and its partial answers, the stats,
+// of a slot's container with its base tree's bind and, with one, its expansion tree's,
+// the ps-then-inspect listing and its partial answers, the stats,
 // the stop, kill and removal, every failure's exit code, each call's timeout, the image
 // check and the background pull, run here by stand-in programs), docker's own texts read
 // (inspect's states, exit codes, OOM flags, labels and times; stats' CPU and memory
@@ -88,7 +89,7 @@ hostd::ContainerSpec sample_spec() {
 	spec.slot = 3;
 	spec.image = kImage;
 	spec.uid = hosted::slot_uid(3);
-	spec.data_dir = "/opt/game/jop_2_consumer";
+	spec.base_dir = "/opt/game/12";
 	spec.work_dir = "/srv/slots/slot-3";
 	spec.args = { "/HOST", "server.host", "--credentials", "credentials.txt", "/game", "jo" };
 	spec.cpus = 1.0;
@@ -119,26 +120,36 @@ int test_run_argv() {
 	// Never a pull inside the start: the agent pulls first, in the background.
 	const std::vector<std::string> expected = { kDocker, "run", "--pull", "never", "-d", "--name",
 		"srv-41-g2", "--label", "opennova.hostd=1", "--label", "opennova.slot=3", "--network",
-		"host", "--user",
-		"10004:10004", "--cap-drop", "ALL", "--security-opt", "no-new-privileges", "--read-only",
-		"--tmpfs", "/tmp:size=64m,nosuid,nodev,noexec", "--cpus", "1", "--memory", "512m",
-		"--memory-swap", "512m",
-		"--pids-limit", "128", "--stop-timeout", "60", "--log-driver", "journald", "--log-opt",
-		"tag=srv-41-g2", "--mount",
-		"type=bind,source=/opt/game/jop_2_consumer,target=/opt/game,readonly", "--mount",
+		"host", "--user", "10004:10004", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+		"--read-only", "--tmpfs", "/tmp:size=64m,nosuid,nodev,noexec", "--cpus", "1", "--memory",
+		"512m", "--memory-swap", "512m", "--pids-limit", "128", "--stop-timeout", "60",
+		"--log-driver", "journald", "--log-opt", "tag=srv-41-g2", "--mount",
+		"type=bind,source=/opt/game/12,target=/opt/game,readonly", "--mount",
 		"type=bind,source=/srv/slots/slot-3,target=/srv/serve", kImage, "/HOST", "server.host",
 		"--credentials", "credentials.txt", "/game", "jo" };
 	TEST_EXPECT(docker.run_argv(spec) == expected);
 	// The environment travels in a file, never on the command line.
 	spec.env_file = "/var/lib/opennova-hostd/scratch/env-srv-41-g2";
 	spec.cpus = 0.5;
-	const std::vector<std::string> argv = docker.run_argv(spec);
+	std::vector<std::string> argv = docker.run_argv(spec);
 	TEST_EXPECT(argv[23] == "0.5");
 	size_t image_at = 0;
 	for (size_t i = 0; i < argv.size(); ++i)
 		if (argv[i] == kImage)
 			image_at = i;
 	TEST_EXPECT(argv[image_at - 2] == "--env-file" && argv[image_at - 1] == spec.env_file);
+	// An expansion tree: its bind right after the base tree's, read-only, at
+	// the code's directory under /opt/game; none without one.
+	spec.expansion_dir = "/opt/game/15";
+	spec.expansion_code = "jox01";
+	argv = docker.run_argv(spec);
+	TEST_EXPECT(argv.size() == expected.size() + 4);
+	TEST_EXPECT(argv[36] == "--mount" &&
+			argv[37] == "type=bind,source=/opt/game/12,target=/opt/game,readonly");
+	TEST_EXPECT(argv[38] == "--mount" &&
+			argv[39] == "type=bind,source=/opt/game/15,target=/opt/game/expansion/jox01,readonly");
+	TEST_EXPECT(argv[40] == "--mount" &&
+			argv[41] == "type=bind,source=/srv/slots/slot-3,target=/srv/serve");
 
 	int code = 0;
 	std::string error;
@@ -598,10 +609,10 @@ int test_process_runtime() {
 	hostd::ContainerSpec spec;
 	spec.name = "srv-1-g1";
 	spec.slot = 1;
-	spec.data_dir = "/opt/game/jop_2_consumer";
+	spec.base_dir = "/opt/game/7";
 	spec.args = { "run", "/HOST", "server.host" };
 	TEST_EXPECT(runtime.run_argv(spec) ==
-			(std::vector<std::string>{ serve, "--resource-dir", "/opt/game/jop_2_consumer", "run",
+			(std::vector<std::string>{ serve, "--resource-dir", "/opt/game/7", "run",
 					"/HOST", "server.host" }));
 
 	// Started in its slot's directory with the env file's variables and the system's alone.
@@ -618,7 +629,7 @@ int test_process_runtime() {
 	const std::string seen = read(spec.work_dir + "/started");
 	TEST_EXPECT(seen.find("cwd=" + std::filesystem::canonical(spec.work_dir).string() + "\n") !=
 			std::string::npos);
-	TEST_EXPECT(seen.find("data=/opt/game/jop_2_consumer\n") != std::string::npos);
+	TEST_EXPECT(seen.find("data=/opt/game/7\n") != std::string::npos);
 	TEST_EXPECT(seen.find("note=slot one\n") != std::string::npos);
 	TEST_EXPECT(seen.find("planted=\n") != std::string::npos);
 	const auto c = state_of("srv-1-g1");
@@ -696,12 +707,14 @@ int test_options() {
 	TEST_EXPECT(o.slots_root == "/srv/slots" && o.docker == "/usr/bin/docker" && !o.once);
 	TEST_EXPECT(
 			o.runtime == hostd::RuntimeKind::Docker && o.serve == "/usr/local/bin/opennova-serve");
+	TEST_EXPECT(o.trees_root == "/opt/game" && o.aws == "/usr/local/bin/aws");
 	o = {};
 	TEST_EXPECT(hostd::parse_hostd_options(
 						{ "--machine", "3", "--service", "http://127.0.0.1:8070", "--token-file",
 								"/tmp/t", "--state-dir", "/tmp/s", "--slots-root", "/tmp/slots",
-								"--docker", "/opt/docker", "--iptables", "none", "--ip6tables",
-								"none", "--once", "--verbose" },
+								"--trees-root", "/tmp/trees", "--docker", "/opt/docker", "--aws",
+								"/opt/aws", "--iptables", "none", "--ip6tables", "none", "--once",
+								"--verbose" },
 						o, error) == ParseOutcome::Run);
 	TEST_EXPECT(
 			o.token_file == "/tmp/t" && o.state_dir == "/tmp/s" && o.slots_root == "/tmp/slots");
@@ -710,9 +723,11 @@ int test_options() {
 	o = {};
 	TEST_EXPECT(
 			hostd::parse_hostd_options({ "--machine", "4", "--service", "http://controller:8070",
-											   "--runtime", "process", "--serve", "/opt/serve" },
+											   "--runtime", "process", "--serve", "/opt/serve", "--trees-root",
+											   "/tmp/trees", "--aws", "/opt/aws" },
 					o, error) == ParseOutcome::Run);
 	TEST_EXPECT(o.runtime == hostd::RuntimeKind::Process && o.serve == "/opt/serve");
+	TEST_EXPECT(o.trees_root == "/tmp/trees" && o.aws == "/opt/aws");
 	TEST_EXPECT(o.log_group.empty() && o.log_region.empty());
 	o = {};
 	TEST_EXPECT(hostd::parse_hostd_options(
@@ -735,6 +750,10 @@ int test_options() {
 		{ "--service", "http://10.0.0.1", "--machine", "3", "--iptables", "iptables" },
 		{ "--service", "http://10.0.0.1", "--machine", "3", "--slots-root", "/srv/a,b" },
 		{ "--service", "http://10.0.0.1", "--machine", "3", "--slots-root", "/srv/../etc" },
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--slots-root", "/srv/slots/" },
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--trees-root", "/opt/a,b" },
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--trees-root", "game" },
+		{ "--service", "http://10.0.0.1", "--machine", "3", "--aws", "aws" },
 		{ "--service", "http://10.0.0.1", "--machine", "3", "--frobnicate" },
 		{ "--service", "http://10.0.0.1", "--machine", "3", "--runtime", "podman" },
 		{ "--service", "http://10.0.0.1", "--machine", "3", "--serve", "opennova-serve" },

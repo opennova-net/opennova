@@ -12,14 +12,19 @@
 //     --tmpfs /tmp:size=64m,nosuid,nodev,noexec --cpus <cpus>
 //     --memory <mb>m --memory-swap <mb>m --pids-limit <pids> --stop-timeout 60
 //     <the logs: ContainerLogs below>
-//     --mount type=bind,source=<data set's mount path>,target=/opt/game,readonly
+//     --mount type=bind,source=<base tree's directory>,target=/opt/game,readonly
+//     [--mount type=bind,source=<expansion tree's directory>,
+//        target=/opt/game/expansion/<code>,readonly]
 //     --mount type=bind,source=<slot's directory>,target=/srv/serve
 //     [--env-file <file>] <image> <opennova-serve's arguments>
 //
 // The machine's own network (NovaWorld lists a server at the source of its
 // datagrams; a bridge's NAT would rewrite the port), the slot's user with no
 // capability and no way to gain one, a read-only root, swap no larger than the
-// memory, a pids cap, the game data read-only and the slot's directory its only
+// memory, a pids cap, the game data read-only (the base tree, and the expansion
+// tree inside it where the container has one: its mount point under the base
+// tree is the store's to make, tree_store.h, since a read-only bind cannot have
+// one made in it) and the slot's directory its only
 // writable place but a bounded /tmp. A start never pulls (--pull never): an image the
 // machine lacks is pulled first, in the background, by `docker pull -q
 // <image>` (a child of its own, its standard error kept in a scratch file for
