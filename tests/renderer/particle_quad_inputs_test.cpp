@@ -1,10 +1,8 @@
 // renderer::particle_quad_inputs, the per-particle inputs of retail's billboard
 // builders (CParticleEmitter_BuildBillboardQuads @ 0x5e6d60 and its two
-// siblings; docs/particles/ptl-format-re.md). The colour, scale, tint and
-// flipbook vectors sit where the port's float form and retail's integer and
-// x87 forms agree (a .5 fraction under a truncating pack, the lerp's midpoint),
-// so each pins a witnessed value; D-PTL-X1 and D-PTL-X2 (the scale weights and
-// the colour truncations) are named where a vector would part from retail.
+// siblings; docs/particles/ptl-format-re.md), pinned on witnessed values: the
+// scale blend's weights (D-PTL-35) and the colour curves' and tint's
+// truncations (D-PTL-36) each have a vector off their midpoint.
 
 #include <runtime/renderer/particle_quad_inputs.h>
 
@@ -98,8 +96,8 @@ void colour_luts_read_the_raw_byte_at_the_truncated_phase() {
 }
 
 // The scale curve lerps two bytes by the phase fraction, / 128, then x 0.5
-// into the half extent (@ 0x5e70d4..0x5e7110, @ 0x5e7183). At the midpoint the
-// port's weights and retail's swapped ones (D-PTL-X1) agree.
+// into the half extent (@ 0x5e70d4..0x5e7110, @ 0x5e7183), the NEXT byte
+// weighted by 1 - frac (@ 0x5e7100..0x5e710a, D-PTL-35).
 void scale_lut_lerps_into_the_half_extent() {
 	p::ParticleDef definition;
 	p::GraphicLayer graphic;
@@ -122,13 +120,17 @@ void scale_lut_lerps_into_the_half_extent() {
 			r::particle_quad_inputs(particle, definition, graphic, false, {}, kIdentityView);
 	check(near(last.half_extent, 4.0f * 200.0f / 128.0f * 0.5f), "lut[255] clamps the i + 1 read");
 
-	// Off the midpoint the port keeps its own weights: lut[i] by 1 - frac
-	// gives 64 x 0.75 + 192 x 0.25 = 96 -> 1.5, where retail's lut[i+1] by
-	// 1 - frac gives 160 -> 2.5 (D-PTL-X1, OPEN: porting it updates this).
+	// Off the midpoint: lut[i+1] by 1 - frac, lut[i] by frac, 192 x 0.75 +
+	// 64 x 0.25 = 160 -> 160 / 128 x 4 x 0.5 = 2.5 (D-PTL-35; the swapped
+	// weights gave 96 -> 1.5). At phase 20.0 the blend reads lut[21] whole.
 	particle.curve_phase = 20.25f;
 	const r::ParticleQuadInputs quarter =
 			r::particle_quad_inputs(particle, definition, graphic, false, {}, kIdentityView);
-	check(near(quarter.half_extent, 1.5f), "the port's lerp weights at a quarter phase (D-PTL-X1)");
+	check(near(quarter.half_extent, 2.5f), "retail's blend weights at a quarter phase (D-PTL-35)");
+	particle.curve_phase = 20.0f;
+	const r::ParticleQuadInputs whole =
+			r::particle_quad_inputs(particle, definition, graphic, false, {}, kIdentityView);
+	check(near(whole.half_extent, 3.0f), "frac 0 reads the next byte: 192 / 128 x 4 x 0.5");
 
 	particle.flags = 0;
 	const r::ParticleQuadInputs unscaled =

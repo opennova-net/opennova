@@ -85,7 +85,7 @@ ParticleQuadInputs particle_quad_inputs(const particle::Particle &particle,
 	// CParticleEmitter_RenderTopAlignedBillboards @ 0x5f5a97..0x5f5b57]. The
 	// port carries the channel in float to the one truncating pack below, so
 	// a curved channel under a non-neutral tint can land up to 2 below or
-	// above retail's two integer truncations (D-PTL-X2).
+	// above retail's two integer truncations (D-PTL-36).
 	auto channel_multiplier = [&](std::uint32_t flag, const CurveRef &graphic_curve,
 										const CurveRef &definition_curve) -> float {
 		if ((particle.flags & flag) == 0)
@@ -105,27 +105,28 @@ ParticleQuadInputs particle_quad_inputs(const particle::Particle &particle,
 	const float blue_multiplier =
 			channel_multiplier(BlueCurve, graphic.blue_func, definition.blue_func);
 
-	// The scale curve lerps two LUT bytes by the phase fraction and scales the
+	// The scale curve blends two LUT bytes by the phase fraction and scales the
 	// base size by the result / 128, then by 0.5 into the half extent
 	// [orig: CParticleEmitter_BuildBillboardQuads @ 0x5e70d4..0x5e7110 (flt_7C3DD4
 	// = 1/128) and @ 0x5e7183 (flt_7C3B94 = 0.5); RenderStaticBillboards
 	// @ 0x5f51a7..0x5f51e1; RenderTopAlignedBillboards @ 0x5f5b59..0x5f5b93].
-	// Retail reads lut[i + 1] one byte past the table at i = 255; the port
-	// clamps to lut[255] (D-PTL-11). Retail weights lut[i + 1] by (1 - frac)
-	// and lut[i] by frac (`fld1; fsub` multiplied into the lut[i + 1] load
-	// @ 0x5e7100..0x5e7104, frac into lut[i] @ 0x5e710a); the port weights
-	// lut[i] by (1 - frac) (D-PTL-X1).
+	// The blend weights the NEXT byte by (1 - frac) and the index byte by frac:
+	// `fld1; fsub` multiplied into the lut[i + 1] load, frac into lut[i]
+	// [orig: CParticleEmitter_BuildBillboardQuads @ 0x5e7100..0x5e710a; the
+	// twins CParticleEmitter_RenderStaticBillboards @ 0x5f51c4..0x5f51db and
+	// CParticleEmitter_RenderTopAlignedBillboards @ 0x5f5b76..0x5f5b8d]
+	// (D-PTL-35). Retail reads lut[i + 1] one byte past the table at i = 255;
+	// the port clamps to lut[255] (D-PTL-11).
 	float scale_multiplier = 1.0f;
 	if ((particle.flags & ScaleCurve) != 0) {
 		const CurveRef &curve = resolved_curve(graphic.scale_func, definition.scale_func);
 		if (curve.baked) {
-			const std::uint8_t first_sample = curve.baked_lut[static_cast<std::size_t>(lut_index)];
-			const std::uint8_t second_sample =
+			const std::uint8_t index_sample = curve.baked_lut[static_cast<std::size_t>(lut_index)];
+			const std::uint8_t next_sample =
 					curve.baked_lut[static_cast<std::size_t>(std::min(lut_index + 1, 255))];
-			const float interpolated = static_cast<float>(first_sample) +
-					(static_cast<float>(second_sample) - static_cast<float>(first_sample)) *
-							lut_fraction;
-			scale_multiplier = interpolated / 128.0f;
+			const float blended = static_cast<float>(next_sample) * (1.0f - lut_fraction) +
+					static_cast<float>(index_sample) * lut_fraction;
+			scale_multiplier = blended / 128.0f;
 		}
 	}
 	const float size = particle.size * scale_multiplier;
