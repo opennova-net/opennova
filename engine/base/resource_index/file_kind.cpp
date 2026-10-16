@@ -294,13 +294,7 @@ constexpr FileKindFacts kRows[] = {
 	Kind(FileKind::HeightmapInput, ArchiveSlot::None).row,
 };
 
-constexpr bool same_text(const char *a, const char *b) {
-	while (*a && *a == *b) {
-		++a;
-		++b;
-	}
-	return *a == *b;
-}
+using strutil::same_text;
 
 // Whether a null-ended list holds `name`.
 constexpr bool lists(const char *const *names, const char *name) {
