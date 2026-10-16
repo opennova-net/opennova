@@ -92,8 +92,9 @@ python docs/tools/ledger_check.py --check  # the divergence-ledger scoreboard (d
   `godot/tests/CLAUDE.md` and the `gut` skill.
 - The NovaWorld service (Linux only) builds with `-DOPENNOVA_NOVAWORLD_SERVICE=ON
   -DBUILD_NOVAWORLD_HTTP=ON`; its database tests need a PostgreSQL server,
-  `-DOPENNOVA_TEST_PG=<uri>` (`scripts/dev_postgres.sh up` runs one and prints it), or
-  they skip, which `--suite core` fails.
+  `-DOPENNOVA_TEST_PG=<uri>` (`scripts/dev_postgres.sh up` runs one and prints it), and
+  its HTTP layer's tests a Redis server, `-DOPENNOVA_TEST_REDIS=<url>`
+  (`scripts/dev_redis.sh up`), or they skip, which `--suite core` fails.
 - Full ctest is ~90 s. Scope during focused work:
   `ctest --test-dir build -C Release -R "<pattern>"` (e.g. `-R "mission|terrain"`).
 - For a stale Godot editor, rebuild via `scripts/build_godot.sh` and fully restart it.

@@ -166,12 +166,65 @@ game is the sole live mission runtime (ADR 0025). Formerly named `NovaWorld`.
 _Avoid_: NovaWorld (that name now belongs to the service), world scene
 
 **NovaWorld**:
-NovaLogic's online matchmaking and account service, and our reimplementation of it (`apps/novaworld_server`, `engine/net/novaworld`). Always the service, never the in-game world. It is our NovaWorld server, not an emulator.
+NovaLogic's online matchmaking and account service, and our reimplementation of it (its five **programs**, `apps/novaworld_*`, over `engine/net/novaworld`). Always the service, never the in-game world. It is our NovaWorld server, not an emulator.
 _Avoid_: emulator, lobby server
 
+**Program (of the NovaWorld service)**:
+One of the service's five binaries, each its own image and ECS service: the **gate**, the
+**lobby**, **web** (the retail HTTP routes and the website's API), the **controller** (the
+hosted servers' supervisor and the job schedules, one elected leader) and the **worker**
+(the **jobs**). Each scales on its own and shares nothing with the others but PostgreSQL
+(and web's Redis); what more than one uses is the shared library (`apps/novaworld_common`).
+There is no all-in-one binary.
+_Avoid_: role, service (for one program), tier, microservice, pod
+
 **Gate**:
-The first-contact UDP service (port 7597; the `novaworld_gate` probe leg: `engine/net/novaworld/gate` for the protocol, `GateListener` in `apps/novaworld_server/gate_listener.cpp` for the listener) that bootstraps a client with the HTTP service URL and the NovaWorld UDP endpoint.
-_Avoid_: lobby
+The program that is retail's first contact: UDP port 7597 (the `novaworld_gate` probe leg: `engine/net/novaworld/gate` for the protocol, `GateListener` in `apps/novaworld_gate/gate_listener.cpp` for the listener), which bootstraps a client with the HTTP service URL and the NovaWorld UDP endpoint, the **lobby instance** it assigns that client, and takes the hosts' status blobs on the same port. It holds no session; its address is the one retail's hosts file names.
+_Avoid_: lobby, edge
+
+**Lobby**:
+The program that runs one **lobby instance**, NovaWorld UDP on port 64206, its sessions in
+its own memory; as many run as the deployment wants, each on a public address of its own,
+which it announces (found from its ECS task when no setting names it). Only its own restart
+drops its sessions.
+_Avoid_: edge, lobby server, frontend
+
+**Lobby instance**:
+One lobby's NovaWorld UDP lobby (`lobby_instances`: its endpoint, active or draining, its
+heartbeat). A client's lobby session lives on the instance the gate assigned it for the
+session's life; listings, session rows and **lobby commands** carry the instance's id.
+_Avoid_: lobby server, shard (for one instance)
+
+**Lobby command**:
+A statement for a lobby session that another program sends through the `lobby_commands`
+table (a server command or a stop to a listed server, the end of a session, forgetting an
+owner); the owning **lobby instance** takes and runs it within 250 ms, rechecking the
+owner. Nothing outside the lobby touches the lobby's memory.
+_Avoid_: push queue (the old in-memory one), message
+
+**Controller**:
+The program that runs the hosted servers' supervisor pass, the console drain, the machine
+agents' internal listener and the periodic **job** schedules, while it holds the election
+lock (`controller_leader`, a generation fencing a stale leader). It never calls the cloud
+itself: its pass enqueues jobs.
+_Avoid_: scheduler (for the program), master, leader (alone)
+
+**Worker**:
+The program that runs **jobs**, a pool of threads claiming them from PostgreSQL
+(`ONNET_WORKER_THREADS`).
+_Avoid_: consumer, executor
+
+**Job**:
+One piece of background work in the `jobs` table (a machine launch, describe or terminate,
+a billing sync, a mail, a prune), enqueued in the same transaction as the change that
+causes it, claimed with `SKIP LOCKED` under a lease, retried with backoff, idempotent.
+_Avoid_: task, message, event
+
+**Realm**:
+One NovaWorld: one deployment of the service with its own gate address and database.
+Retail picks a NovaWorld by the address its hosts file gives `gs.novaworld.net`, so a realm
+is never a column inside another realm's tables.
+_Avoid_: shard, tenant (for a realm inside one database), region
 
 **Browser**:
 The in-game server list (`NovaWorldPanel` in `godot/game/novaworld_panel.gd` over the `NovaWorldClient` pump and `engine/net/novaworld/gate/gsb.cpp`) populated from the service's GSB/GLB data.
@@ -506,7 +559,7 @@ game host, instance, dedicated server
 **Support tier**:
 The monthly Stripe subscription that supports the project and sets an account's
 **hosting entitlement**: tier 1, 2 or 3, one, two or three **hosted servers**
-(`apps/novaworld_server/billing/`). Its prices come from the service's configuration,
+(`apps/novaworld_common/billing/`). Its prices come from the service's configuration,
 never from code. The own-machine add-on is a subscription of its own beside it.
 _Avoid_: plan, package, premium, donation, membership
 
@@ -522,7 +575,7 @@ _Avoid_: quota, allowance (in code; the site's meter may say "N of M servers use
 
 **Machine**:
 A virtual machine **hosted servers** run on, one to K of them, each in a **slot** of its
-own (an EC2 instance, ADR 0053; a stand-in on the service's own machine for development):
+own (an EC2 instance, ADR 0053; in the local stack, a container of the serve image):
 a **shared machine** or an **own machine**. The NovaWorld service launches it from the
 launch template of its kind, places servers on it, and ends it (`fleet_machines`:
 launching, booting, ready, draining, ending, ended or failed, and lost while its agent is
@@ -552,9 +605,10 @@ _Avoid_: seat, position (for the place on the machine), player slot (that is a m
 
 **opennova-hostd**:
 The machine agent (`apps/hostd`, target `opennova_hostd`): one per **machine**, it
-redeems the machine's one-time bootstrap token, then syncs with the service's internal
-listener every few seconds, reporting each container (its state, CPU, memory, its slot's
-egress) and running the containers the reply wants. It decides nothing itself.
+redeems the machine's one-time bootstrap token, then syncs with the **controller**'s internal
+listener (by its name, `ONNET_INTERNAL_URL`) every few seconds, reporting each container (its state, CPU, memory, its slot's
+egress) and running the containers the reply wants (a local stack's machine runs them as
+its own processes, `--runtime process`). It decides nothing itself.
 _Avoid_: daemon, node agent, kubelet
 
 **Title**:
