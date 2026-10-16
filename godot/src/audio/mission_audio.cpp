@@ -53,7 +53,7 @@ constexpr const char *kSfxBus = "SFX";
 constexpr const char *kVoiceBus = "Voice";
 // Marker -> sound set resolution is the marker item's items.def soundloop_1..7
 // set names (e.g. id 106178 "snd: Lp Flourescent Light" -> soundloop_1
-// LPNV_LIGHT) [orig: ItemDef_ParseProperty @ 0x49fec4]; the engine is
+// LPNV_LIGHT) (engine: runtime/audio/envs_markers.h); the engine is
 // name-keyed (docs/audio/lwf-dbf-sound-re.md) and resolves it natively
 // (audio/envs_markers.h resolve_envs_markers).
 
@@ -65,7 +65,7 @@ constexpr double kMinutesPerHour = 60.0;
 constexpr double kSilentDb = opennova::audio::kVolumeSilentDb;
 // Time-of-day region cuts (4/10/17/21 h) and the ~5-game-minute crossfade margin
 // live with the eval in engine/runtime/audio (ambient_mixer.cpp time_of_day_region)
-// [orig: Entity_CalcTimeOfDayRegion @ 0x408110; margin @ 0x408203].
+// (engine: runtime/audio/ambient_mixer.cpp).
 
 String dynamic_emitter_key(int64_t p_source_spawn_id, int p_lane) {
 	return vformat("%d:%d", p_source_spawn_id, p_lane);

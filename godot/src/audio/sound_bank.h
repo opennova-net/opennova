@@ -41,8 +41,7 @@ class Simulation;
 // via WavLoader (cached), and spawns AudioStreamPlayer3D voices. The
 // member-selection state machine (engine-faithful: sequential / random-anchor
 // cycle / random default, one shared ROL-LCG stream) lives in portable C++
-// (engine/runtime/audio, via SoundSelector [orig: SoundBank_PlayTriggerEntries @
-// 0x75ccd0]); the one-shot fire decision (the set-range cull, the occlusion
+// (engine/runtime/audio, via SoundSelector (engine: runtime/audio/oneshot_play.h)); the one-shot fire decision (the set-range cull, the occlusion
 // inflate and recheck, the per-layer member pick and the fire-time volume) is
 // the engine's oneshot_play plan over the banks read as the engine's
 // formats/lwf structs (LwfData::engine_file). This is the device half: the
@@ -79,7 +78,7 @@ public:
 	// Return lightweight layer descriptors for the mission ambient mixer. No WAV
 	// is read or decoded here: placed emitters remain data until one of the eight
 	// physical channels actually needs the layer. The emitter path always uses
-	// member 0 of each layer [orig: SoundEmitter_UpdateAndMixTop8 @ 0x528649].
+	// member 0 of each layer (engine: runtime/audio/oneshot_play.cpp).
 	TypedArray<AmbientLayer> describe_ambient(const String &p_name);
 	// Resolve a descriptor returned by describe_ambient(). Description and decode
 	// are separate so hundreds of candidates can be ranked while only selected
@@ -152,8 +151,7 @@ public:
 	static void configure_unattenuated_3d(AudioStreamPlayer3D *p_player);
 	// dB for a 0..255 engine channel volume; 0 -> hard silent (the engine's law).
 	static double volume_db_from_255(int p_vol255);
-	// The witnessed distance volume curve [orig: SoundBank_CalcDistanceVolPan
-	// @ 0x75ca20]: at or beyond `radius` the voice is HARD SILENT; inside it the
+	// The witnessed distance volume curve (engine: formats/lwf/lwf.h): at or beyond `radius` the voice is HARD SILENT; inside it the
 	// volume runs vol * (1 - d/r)^2, ceilinged by `clamp_vol`. The master-fade
 	// global (g_SoundMasterFadeQ24, steady state 0xFF0000) folds in as
 	// (vol * 255) >> 8; the underwater halving flag and the pan half of the packed
@@ -170,8 +168,7 @@ public:
 	// (HIWORD(dist - min) is floor(d - m), NOT min - floor(d): the proximity arm
 	// differs by a unit for fractional d). `vol_byte` is the emitter volume 0..255
 	// (the time-of-day crossfade blend for placed markers); member volume and
-	// clamp scale by it before the curve [orig: SoundEmitter_UpdateAndMixTop8
-	// @ 0x528667..0x5286df, the scale @ 0x5286b9]. With a min_distance the
+	// clamp scale by it before the curve (engine: runtime/audio/ambient_mixer.h). With a min_distance the
 	// falloff REBASES to run min..falloff; inside min_distance the volume RISES
 	// as (d/min)^2 (the proximity fade); a bare falloff runs 0..falloff. The arm
 	// forms live in engine/runtime/audio (ambient_mixer.cpp) beside the mix that
@@ -179,8 +176,7 @@ public:
 	static int emitter_layer_volume(int64_t p_dist_q16, int p_falloff_u, int p_min_u,
 			int p_vol_byte, int p_member_vol, int p_clamp_vol);
 	// One-shot volume at fire time -- the native two-stage composition
-	// (engine/runtime/audio oneshot_layer_volume [orig: SoundBank_PlayTriggerEntries
-	// @ 0x75cf14..0x75cf8b]: proximity feeds falloff un-rebased; a layer with no
+	// (engine/runtime/audio oneshot_layer_volume (engine: runtime/audio/ambient_mixer.h): proximity feeds falloff un-rebased; a layer with no
 	// falloff radius plays at the raw emitter volume). Reimpl emitter volume is
 	// full (255): the engine's fire-time (vol * g_SoundVolumeOption) >> 8 folds the
 	// options slider we map to bus volume (docs/audio/lwf-dbf-sound-re.md D-SND-8).

@@ -47,7 +47,7 @@ class MissionAudioMarker : public RefCounted {
 	PackedStringArray slot_sets_;
 	// The marker's pool-slot nibble: the native mixer derives the walk cohort
 	// AND the (slot << 11) Q16-hours clock stagger from it
-	// [orig: tick & 7 @ 0x4c225a; (poolHandle & 0xF) << 11 @ 0x408158].
+	// (engine: runtime/audio/ambient_mixer.h).
 	int stagger_slot_ = 0;
 	Vector<String> set_names_;
 	Vector<TypedArray<AmbientLayer>> set_layers_;
