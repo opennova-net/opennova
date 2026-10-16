@@ -1054,7 +1054,8 @@ listed with no owner; "Listed servers and owners" above).
 activation (default on; "CD keys (DFX2 activation)" above).
 Billing takes the `STRIPE_*` set and `ONNET_SITE_URL`, `ONNET_STRIPE_CURL`,
 `ONNET_BILLING_AUTOMATIC_TAX` and `ONNET_BILLING_RECONCILE_MINUTES` ("Billing (monthly
-support tiers)" above).
+support tiers)" above). Outbound mail takes `ONNET_MAIL_FROM`, `ONNET_MAIL_REGION` and
+`ONNET_SITE_URL` ("Account email and password resets" below).
 Seeding: `SEED_DEV_USERS=1` applies the dev-only `0002_dev_users.sql` (the
 `test`/`foo` accounts) — leave unset in production. Build + run via Docker:
 [`Dockerfile`](Dockerfile) and the compose files under [`deploy/`](../../deploy/).
@@ -1246,6 +1247,61 @@ the known addresses and the credentials generation below.
   may demote themselves: the Bearer token can always promote again, and with no admin
   left `ONNET_BOOTSTRAP_ADMIN` works once more.
 
+## Account email and password resets
+
+Every account a person registers has an email address (`players.email`,
+`backend/migrations/0005_account_email.sql`): the welcome mail goes there, and so do the
+password reset links. Service policy, not a port: retail's NovaWorld accounts had no
+email the service kept.
+
+- **The address.** `POST /api/register` requires `email` (400 `missing_field` without
+  it). `normalize_email` (`auth.h`) takes at most 254 bytes with exactly one `@`, a local
+  part, and a domain of at least two dot-separated labels, with no space or control byte
+  (400 `invalid_field` otherwise), and stores it with its ASCII letters lowercased, so one
+  address names one account however it was typed: a unique index refuses a second one
+  (400 `email_exists`), and a `CHECK` refuses an upper-case or empty one. The admin's
+  `POST /api/admin/users` takes an optional `email` under the same rules. Accounts older
+  than the column, service accounts and an admin's accounts made without one have none
+  (`NULL`); nothing is backfilled. Every admin user route answers `email` (null for
+  none), read-only: no route changes it.
+- **The welcome mail.** Once `POST /api/register` has made the account, it posts the
+  welcome mail (who we are, the account's name, a link to the site). A mail that does not
+  go out is logged, never the registration's failure.
+- **`POST /api/auth/forgot`** `{email}`: the CSRF header first, then 10 per client
+  address (/64) and one every 3 min, the body (400 `invalid_json`, `invalid_field`,
+  `missing_field`), then 3 per email address and one every 20 min, counted whether or not
+  an account has it (429 `rate_limited` with `Retry-After` past either). Then 202 with no
+  body, the same for every address: when an active player's account has it, a reset link
+  is minted (32 bytes from the OS CSPRNG as 64 hex digits; `password_resets` keeps its
+  SHA-256 alone, an hour, one per account, so a newer request replaces the older link) and
+  mailed to the address as `https://<ONNET_SITE_URL>/reset?token=<token>`. The mail goes
+  out off the request's thread, so the reply's timing does not tell either.
+- **`POST /api/auth/reset`** `{token, password}`: the CSRF header, 10 per client address
+  and one every 3 min, the body; then the token is spent (its row deleted) before the
+  password is hashed, so a link works once and a wrong token costs no bcrypt run: 400
+  `invalid_token` for one that is malformed, unknown, spent or past its hour. The password
+  is then set as an admin reset sets it (`update_user`): the credentials generation moves,
+  and the account's website sessions, its retail login's session row, its hosting keys and
+  its retail pins end. 204. The main tick's sweep prunes links past their hour.
+- **The mailer** (`mailer.h`). The routes post to a `MailOutbox`, whose one worker
+  thread sends each message in turn (at most 100 waiting; a post past them is dropped,
+  logged) and logs each as one line: `[mail] sent <template> to '<address>' (message id
+  ...)`, or `[mail] WARN <template> to '<address>' not sent: <why>`, never the body. The
+  `SesMailer` runs the AWS CLI's `sesv2 send-email` through the command runner, as the EC2
+  machine driver does, on the service instance's role: the request (from `OpenNova
+  <ONNET_MAIL_FROM>`, the recipient, the subject, a plain-text and a minimal HTML body) in
+  a JSON file of its own, owner-only in an owner-only scratch directory and deleted once
+  the CLI ends, so no address or link is on a command line. Each template's text names the
+  account and carries its link; the HTML escapes the name. Infrastructure: the domain's
+  SES identity, its DKIM and MAIL FROM records and the role's permission
+  (`infra/aws/mail.tf`; DEPLOY.md, "Outbound mail (SES)").
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `ONNET_MAIL_FROM` | none | The sender's address, in lower case (`support@<domain>`; infra.env names it). Unset, mail is off: each mail is logged as not sent. |
+| `ONNET_MAIL_REGION` | none | Amazon SES's region (infra.env's). |
+| `ONNET_SITE_URL` | none | The site's origin the mails link to (billing reads it too). Mail is on only with all three; a sender without a site URL or a region boots with mail off and a warning naming why. |
+
 ## Build layout and tests
 
 Every source but `main.cpp` builds as the static library
@@ -1408,6 +1464,17 @@ command in step), the status poll, the reconnect after the child is killed and s
 again on the same port, `QUIT` at the end, and the password in no log or console line;
 `admin_protocol` and `admin_server` pin the reply-count table itself, against the
 engine's own console.
+
+Account email: the route harness's `register_ok` and `register_duplicate` cases the
+required, refused and taken addresses and the welcome mail (the first listener's mail goes
+to a recording mailer through a real outbox), its `password_reset`, `password_reset_links`
+and `password_reset_brakes` cases the reset routes (the same 202 for every address, the
+link's token kept as its hash, its one use, its hour, a newer link replacing the older, an
+inactive account getting none, the sessions and the old password ending, both brakes);
+`mailer` (`BUILD_NOVAWORLD_HTTP`, database-free) the address rule, the SES mailer on a stub
+`CommandRunner` (its argv, the request file owner-only and gone after, the CLI's failures),
+the outbox's order, bound and stop and the templates; `backend_schema` the column, its
+index and rules and `password_resets`.
 
 The support tiers: `billing_stripe` (every build) the transport, the typed client, the
 webhook signature and the settings; `billing_entitlement`

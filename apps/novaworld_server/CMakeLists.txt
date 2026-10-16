@@ -25,6 +25,11 @@ if(BUILD_NOVAWORLD_HTTP)
         rate_limiter.cpp
         web_access.cpp
         web_session.cpp
+        # Account email: the outbound mail (SES through the AWS CLI, the
+        # outbox, the templates) and the password reset links and routes.
+        mailer.cpp
+        password_reset.cpp
+        password_reset_routes.cpp
         # Hosted servers (ADR 0053, proposed): the supervisor, its rows and
         # renders, the admin link and its console routes, the per-server stats
         # (samples, hourly rollups, their routes); the fleet (its rows,

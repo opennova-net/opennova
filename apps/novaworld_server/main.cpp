@@ -26,6 +26,8 @@
 #include "hosted/owner_file.h"
 #include "hosted/supervisor.h"
 #include "http_listener.h"
+#include "mailer.h"
+#include "password_reset.h"
 #include "session_store.h"
 #include "web_session.h"
 
@@ -314,6 +316,63 @@ BillingStack make_billing(const billing_ns::BillingConfig &config, opennova::db:
 	            instance.c_str(), config.site_url.c_str(), config.automatic_tax ? ", Stripe Tax on" : "");
 	return s;
 }
+
+namespace ns = opennova::novaworld_server;
+
+// Outbound mail (mailer.h) as main() runs it: the mailer (SES through the AWS
+// CLI, with its runner and its owner-only scratch directory, removed at the
+// shutdown; a NullMailer while mail is off) and the outbox the routes post
+// to. Declared before the HTTP listener, whose routes post to it.
+struct MailStack {
+	std::filesystem::path scratch_dir;
+	std::unique_ptr<opennova::proc::CommandRunner> runner;
+	std::unique_ptr<ns::Mailer> mailer;
+	std::unique_ptr<ns::MailOutbox> outbox;
+};
+
+// SES over the config's ONNET_MAIL_FROM, ONNET_MAIL_REGION and ONNET_SITE_URL,
+// or mail off, logged: unset (no sender), else a warning naming what is wrong.
+MailStack make_mail(const ns::ServerConfig &config) {
+	MailStack s;
+	const auto off = [&s](bool warn, const std::string &why) {
+		std::fprintf(warn ? stderr : stdout, "[boot] %smail: %s; mail off\n", warn ? "WARN " : "", why.c_str());
+		s.mailer = std::make_unique<ns::NullMailer>();
+		s.outbox = std::make_unique<ns::MailOutbox>(*s.mailer);
+	};
+	if (config.mail_from.empty()) {
+		off(false, "no ONNET_MAIL_FROM");
+		return s;
+	}
+	if (config.site_url.empty()) {
+		off(true, "ONNET_SITE_URL is not set, so no link could be sent");
+		return s;
+	}
+	std::error_code ec;
+	const std::filesystem::path temp = std::filesystem::temp_directory_path(ec);
+	std::string error;
+	const std::filesystem::path scratch = temp / ("opennova-mail-" + hosted_ns::random_secret(12));
+	if (ec || !hosted_ns::make_owner_directory(scratch, error)) {
+		off(true, "no scratch directory for the SES calls" + (error.empty() ? std::string() : ": " + error));
+		return s;
+	}
+	ns::SesMailerConfig ses;
+	ses.region = config.mail_region;
+	ses.from = config.mail_from;
+	ses.scratch_dir = scratch.u8string();
+	if (const std::string why = ns::SesMailer::check_config(ses); !why.empty()) {
+		std::filesystem::remove_all(scratch, ec);
+		off(true, why);
+		return s;
+	}
+	s.scratch_dir = scratch;
+	s.runner = std::make_unique<opennova::proc::ProcessCommandRunner>(
+			opennova::proc::ProcessCommandRunner::service_environment(), ses.scratch_dir);
+	s.mailer = std::make_unique<ns::SesMailer>(ses, *s.runner);
+	s.outbox = std::make_unique<ns::MailOutbox>(*s.mailer);
+	std::printf("[boot] mail: on, SES in %s, from %s, links to %s\n", ses.region.c_str(), ses.from.c_str(),
+	            config.site_url.c_str());
+	return s;
+}
 #endif
 
 } // namespace
@@ -527,9 +586,13 @@ int main() {
 	// A clean reconcile confirms the cache the limits hold doubts.
 	if (billing_stack.billing)
 		billing_stack.billing->sync().set_on_reconciled([&limits_hold] { limits_hold.reconciled(); });
+	// Outbound mail (the welcome mail, the password reset links); its outbox
+	// outlives the HTTP listener, whose routes post to it.
+	MailStack mail_stack = make_mail(config);
 	SessionStore sessions;
 	HttpListener http(manager, *db_pool, sessions);
 	http.set_unknown_tracker(&unknown_tracker);
+	http.set_mail_outbox(mail_stack.outbox.get());
 	http.set_watchdog(&watchdog);
 	http.set_billing(billing_stack.billing.get());
 	http.set_limits_hold(&limits_hold);
@@ -751,8 +814,11 @@ int main() {
 				if (const auto pruned = prune_login_addresses(dbh); pruned > 0) {
 					std::printf("[sweep] pruned %zu stale login address(es)\n", pruned);
 				}
+				if (const auto pruned = prune_password_resets(dbh); pruned > 0) {
+					std::printf("[sweep] pruned %zu expired password reset link(s)\n", pruned);
+				}
 			} catch (const db::Error &e) {
-				std::fprintf(stderr, "[sweep] WARN web session / login address prune: %s\n", e.what());
+				std::fprintf(stderr, "[sweep] WARN web session / login address / reset link prune: %s\n", e.what());
 			}
 			// Webhook events synced more than 30 days ago (the cache keeps no
 			// history Stripe does not).
@@ -811,6 +877,13 @@ int main() {
 	if (!billing_stack.scratch_dir.empty()) {
 		std::error_code billing_ec;
 		std::filesystem::remove_all(billing_stack.scratch_dir, billing_ec);
+	}
+	// Nothing posts mail now: the mail in flight finishes, what is still
+	// queued is dropped (logged), and the SES calls' scratch directory goes.
+	mail_stack.outbox->stop();
+	if (!mail_stack.scratch_dir.empty()) {
+		std::error_code mail_ec;
+		std::filesystem::remove_all(mail_stack.scratch_dir, mail_ec);
 	}
 #endif
 	gate.stop();

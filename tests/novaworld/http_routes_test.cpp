@@ -15,7 +15,8 @@
 // same retail roots with ONNET_API_PROXY_ONLY and a proxy the harness is not,
 // so its /api/ refuses the harness while its retail routes answer. The retail
 // POST /NWLogin.dll cases post an EPASK-encrypted form the way a stock client
-// does.
+// does. The first listener's mail goes to a FakeMailer through a real
+// MailOutbox (novaworld/fake_mailer.h); the other two run with mail off.
 //
 // The listener and the test share one db::ConnectionPool, the way main() wires
 // the server: each Crow handler leases a connection for its request, and the
@@ -40,6 +41,9 @@
 #include "hosted_fake_driver.h"
 #include "http_cookies.h"
 #include "http_listener.h"
+#include "mailer.h"
+#include "novaworld/fake_mailer.h"
+#include "password_reset.h"
 #include "net_http.h"
 #include "net_sockets.h"
 #include "nw_udp_listener.h"
@@ -116,6 +120,8 @@ constexpr const char *kBearer = "Authorization: Bearer harness-admin-token";
 constexpr const char *kJson = "Content-Type: application/json";
 // The CSRF header the site's own pages send (web/src/api/client.ts).
 constexpr const char *kCsrf = "X-OpenNova-Request: 1";
+// The first listener's ONNET_SITE_URL: the links its mail carries.
+constexpr const char *kMailSiteUrl = "https://site.example";
 
 struct Harness {
 	ConnectionPool &pool;
@@ -149,6 +155,9 @@ struct Harness {
 	// The first listener's hosted servers' limits hold (no supervisor sets it
 	// here: the billing admin case does by hand).
 	nws::hosted::LimitsHold *limits_hold = nullptr;
+	// The first listener's mail: its outbox, over a mailer that records.
+	fake_mail::FakeMailer *mailer = nullptr;
+	nws::MailOutbox *outbox = nullptr;
 
 	// Every connect, send and recv waits at most `timeout_ms`.
 	net::HttpReply send(const char *method, const std::string &path,
@@ -308,12 +317,20 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 	return 0;
 }
 
-// POST /api/register: 201 with the public record (a fresh 8-hex PCID, never
-// the hash), and the account authenticates against its bcrypt hash.
+// Every message the first listener's outbox has sent so far, once it has
+// sent all it was handed.
+std::vector<nws::MailMessage> sent_mail(Harness &h) {
+	h.outbox->drain();
+	return h.mailer->messages();
+}
+
+// POST /api/register: 201 with the public record (a fresh 8-hex PCID, the
+// email as stored, lowercased; never the hash), the account authenticates
+// against its bcrypt hash, and its welcome mail went to its address.
 int test_register_ok(Harness &h) {
 	const auto reply = h.send("POST", "/api/register", {kJson, kCsrf},
 	                          "{\"username\":\"harness\",\"password\":\"pw-harness\","
-	                          "\"nwhandle\":\"HarnessPlayer\"}");
+	                          "\"nwhandle\":\"HarnessPlayer\",\"email\":\"Harness@Example.COM\"}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 201);
 	const std::string text = body_text(reply);
 	TEST_EXPECT(text.find("password_hash") == std::string::npos);
@@ -324,57 +341,88 @@ int test_register_ok(Harness &h) {
 	TEST_EXPECT(str(user["nwhandle"]) == "HarnessPlayer");
 	TEST_EXPECT(str(user["nwh"]) == "1");
 	TEST_EXPECT(str(user["account_status"]) == "active");
+	TEST_EXPECT(str(user["email"]) == "harness@example.com");
 	TEST_EXPECT(is_lower_hex8(str(user["pcid"])));
 	TEST_EXPECT(user["id"].i() > 0);
 	h.registered_pcid = str(user["pcid"]);
+
+	const auto mail = sent_mail(h);
+	TEST_EXPECT(mail.size() == 1);
+	TEST_EXPECT(mail[0].kind == "welcome" && mail[0].to == "harness@example.com");
+	TEST_EXPECT(mail[0].text.find("harness") != std::string::npos);
+	TEST_EXPECT(mail[0].text.find(std::string(kMailSiteUrl) + "/") != std::string::npos);
+	h.mailer->clear();
 
 	auto conn = h.pool.acquire();
 	const auto stored = nws::get_user_by_username(*conn, "harness");
 	TEST_EXPECT(stored.has_value());
 	TEST_EXPECT(stored->id == user["id"].i());
 	TEST_EXPECT(stored->pcid == h.registered_pcid);
+	TEST_EXPECT(stored->email == "harness@example.com");
 	TEST_EXPECT(nws::authenticate_user(*conn, "harness", "pw-harness").has_value());
 	TEST_EXPECT(!nws::authenticate_user(*conn, "harness", "wrong").has_value());
 	return 0;
 }
 
-// POST /api/register refusals: a taken username, a missing password, a body
+// POST /api/register refusals: a taken username, a missing password or email,
+// an email that is no address or is another account's (in any case), a body
 // that is not a JSON object, a field of the wrong type, a username over 64
 // bytes or holding a control byte, and a request without the CSRF header.
-// None of them adds an account.
+// None of them adds an account or sends a mail.
 int test_register_duplicate(Harness &h) {
 	auto reply = h.send("POST", "/api/register", {kJson, kCsrf},
 	                    "{\"username\":\"harness\",\"password\":\"pw-harness\","
-	                    "\"nwhandle\":\"HarnessPlayer\"}");
+	                    "\"nwhandle\":\"HarnessPlayer\",\"email\":\"other@example.com\"}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 400);
 	auto json = crow::json::load(body_text(reply));
 	TEST_EXPECT(json && str(json["error"]) == "username_exists");
 
-	reply = h.send("POST", "/api/register", {kJson, kCsrf}, "{\"username\":\"nopw\"}");
+	reply = h.send("POST", "/api/register", {kJson, kCsrf},
+	               "{\"username\":\"nopw\",\"email\":\"nopw@example.com\"}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 400);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(json && str(json["error"]) == "missing_field");
 
-	reply = h.send("POST", "/api/register", {kJson, kCsrf}, "not json");
+	// The email: required, an address, one account's. From an address of
+	// their own: the register brake's bucket for the harness's own is nearly spent.
+	reply = h.send("POST", "/api/register", {kJson, kCsrf, from_ip("10.2.0.1")}, "{\"username\":\"nomail\",\"password\":\"pw\"}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	TEST_EXPECT(str(crow::json::load(body_text(reply))["error"]) == "missing_field");
+	for (const char *bad : { "nomail", "nomail@localhost", "two@at@example.com", "sp ace@example.com" }) {
+		reply = h.send("POST", "/api/register", {kJson, kCsrf, from_ip("10.2.0.1")},
+		               std::string("{\"username\":\"badmail\",\"password\":\"pw\",\"email\":\"") + bad + "\"}");
+		TEST_EXPECT(reply.transport_ok && reply.code == 400);
+		TEST_EXPECT(str(crow::json::load(body_text(reply))["error"]) == "invalid_field");
+	}
+	reply = h.send("POST", "/api/register", {kJson, kCsrf, from_ip("10.2.0.1")},
+	               "{\"username\":\"samemail\",\"password\":\"pw\",\"email\":\"HARNESS@example.com\"}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	TEST_EXPECT(str(crow::json::load(body_text(reply))["error"]) == "email_exists");
+	reply = h.send("POST", "/api/register", {kJson, kCsrf, from_ip("10.2.0.1")},
+	               "{\"username\":\"typedmail\",\"password\":\"pw\",\"email\":7}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400);
+	TEST_EXPECT(body_text(reply) == "{\"error\":\"invalid_field\"}");
+
+	reply = h.send("POST", "/api/register", {kJson, kCsrf, from_ip("10.2.0.1")}, "not json");
 	TEST_EXPECT(reply.transport_ok && reply.code == 400);
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(json && str(json["error"]) == "invalid_json");
 
-	reply = h.send("POST", "/api/register", {kJson, kCsrf}, "[\"username\"]");
+	reply = h.send("POST", "/api/register", {kJson, kCsrf, from_ip("10.2.0.1")}, "[\"username\"]");
 	TEST_EXPECT(reply.transport_ok && reply.code == 400);
 	TEST_EXPECT(body_text(reply) == "{\"error\":\"invalid_json\"}");
-	reply = h.send("POST", "/api/register", {kJson, kCsrf},
+	reply = h.send("POST", "/api/register", {kJson, kCsrf, from_ip("10.2.0.1")},
 	               "{\"username\":\"typed\",\"password\":12345}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 400);
 	TEST_EXPECT(body_text(reply) == "{\"error\":\"invalid_field\"}");
 
 	// The username rule: at most 64 bytes, no control byte.
 	reply = h.send("POST", "/api/register", {kJson, kCsrf},
-	               "{\"username\":\"" + std::string(65, 'u') + "\",\"password\":\"pw\"}");
+	               "{\"username\":\"" + std::string(65, 'u') + "\",\"password\":\"pw\",\"email\":\"u@example.com\"}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 400);
 	TEST_EXPECT(str(crow::json::load(body_text(reply))["error"]) == "invalid_field");
 	reply = h.send("POST", "/api/register", {kJson, kCsrf},
-	               "{\"username\":\"two\\nlines\",\"password\":\"pw\"}");
+	               "{\"username\":\"two\\nlines\",\"password\":\"pw\",\"email\":\"two@example.com\"}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 400);
 	TEST_EXPECT(str(crow::json::load(body_text(reply))["error"]) == "invalid_field");
 
@@ -385,6 +433,7 @@ int test_register_duplicate(Harness &h) {
 	TEST_EXPECT(body_text(reply) == "{\"error\":\"csrf_header_required\"}");
 
 	TEST_EXPECT(nws::list_users(*h.pool.acquire()).size() == 1);
+	TEST_EXPECT(sent_mail(h).empty());
 	return 0;
 }
 
@@ -438,6 +487,7 @@ int test_admin_users_list(Harness &h) {
 	TEST_EXPECT(str(json["users"][0]["username"]) == "harness");
 	TEST_EXPECT(str(json["users"][0]["nwhandle"]) == "HarnessPlayer");
 	TEST_EXPECT(str(json["users"][0]["pcid"]) == h.registered_pcid);
+	TEST_EXPECT(str(json["users"][0]["email"]) == "harness@example.com");
 	return 0;
 }
 
@@ -1431,7 +1481,8 @@ int test_concurrent_requests(Harness &h) {
 			// Each from its own address, past /api/register's per-address brake.
 			const auto reply = h.send("POST", "/api/register",
 			                          {kJson, kCsrf, from_ip("10.20.0." + std::to_string(i))},
-			                          "{\"username\":\"" + username + "\",\"password\":\"pw\"}",
+			                          "{\"username\":\"" + username + "\",\"password\":\"pw\",\"email\":\"" +
+			                                  username + "@example.com\"}",
 			                          kConcurrentTimeoutMs);
 			const auto json = crow::json::load(body_text(reply));
 			if (!reply.transport_ok || reply.code != 201 || !json || !json.has("user")) {
@@ -3607,12 +3658,13 @@ int test_header_values_cannot_split(Harness &h) {
 				{ opennova::db::BindValue(handle), opennova::db::BindValue(username) });
 	};
 	reply = h.send("POST", "/api/register", { kJson, kCsrf, from_ip("10.41.0.1") },
-			"{\"username\":\"split_reg\",\"password\":\"pw-split\","
+			"{\"username\":\"split_reg\",\"password\":\"pw-split\",\"email\":\"split@example.com\","
 			"\"nwhandle\":\"Reg\\r\\nX-Injected: reg\"}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 400);
 	TEST_EXPECT(str(crow::json::load(body_text(reply))["error"]) == "invalid_field");
 	reply = h.send("POST", "/api/register", { kJson, kCsrf, from_ip("10.41.0.1") },
-			"{\"username\":\"split_reg\",\"password\":\"pw-split\",\"nwhandle\":\"Reg\"}");
+			"{\"username\":\"split_reg\",\"password\":\"pw-split\",\"email\":\"split@example.com\","
+			"\"nwhandle\":\"Reg\"}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 201);
 	set_handle("split_reg", "Reg\r\nX-Injected: reg");
 	const auto reg = nws::get_user_by_username(*h.pool.acquire(), "split_reg");
@@ -3997,7 +4049,8 @@ int test_api_proxy_only(Harness &h) {
 			{ std::pair<const char *, const char *>{ "GET", "/api/health" }, { "GET", "/api" },
 					{ "GET", "/api/lobbies" }, { "GET", "/api/server-info" },
 					{ "GET", "/api/no-such-route" }, { "POST", "/api/login" },
-					{ "POST", "/api/register" }, { "GET", "/api/admin/users" },
+					{ "POST", "/api/register" }, { "POST", "/api/auth/forgot" },
+					{ "POST", "/api/auth/reset" }, { "GET", "/api/admin/users" },
 					{ "PUT", "/api/admin/server-status" }, { "GET", "/api/me/hosts" },
 					{ "POST", "/api/me/hosts/1/command" }, { "POST", "/api/me/hosts/1/stop" },
 					{ "GET", "/api/admin/hosts" }, { "POST", "/api/admin/hosts/1/command" },
@@ -4114,18 +4167,18 @@ int test_register_handle_rule(Harness &h) {
 	};
 	const std::size_t before = nws::list_users(*h.pool.acquire()).size();
 	for (const std::string &body :
-			{ "{\"username\":\"handle_long\",\"password\":\"pw\",\"nwhandle\":\"" +
+			{ "{\"username\":\"handle_long\",\"password\":\"pw\",\"email\":\"hl@example.com\",\"nwhandle\":\"" +
 							std::string(31, 'h') + "\"}",
-					"{\"username\":\"" + std::string(31, 'u') + "\",\"password\":\"pw\"}",
-					std::string("{\"username\":\"handle_tab\",\"password\":\"pw\",\"nwhandle\":"
-								"\"a\\tb\"}") }) {
+					"{\"username\":\"" + std::string(31, 'u') + "\",\"password\":\"pw\",\"email\":\"h31@example.com\"}",
+					std::string("{\"username\":\"handle_tab\",\"password\":\"pw\",\"email\":\"ht@example.com\","
+								"\"nwhandle\":\"a\\tb\"}") }) {
 		const auto reply = reg("10.42.0.1", body);
 		TEST_EXPECT(reply.transport_ok && reply.code == 400);
 		TEST_EXPECT(str(crow::json::load(body_text(reply))["error"]) == "invalid_field");
 	}
 	TEST_EXPECT(nws::list_users(*h.pool.acquire()).size() == before);
-	auto reply =
-			reg("10.42.0.2", "{\"username\":\"" + std::string(30, 'u') + "\",\"password\":\"pw\"}");
+	auto reply = reg("10.42.0.2", "{\"username\":\"" + std::string(30, 'u') +
+					"\",\"password\":\"pw\",\"email\":\"h30@example.com\"}");
 	TEST_EXPECT(reply.transport_ok && reply.code == 201);
 	TEST_EXPECT(
 			str(crow::json::load(body_text(reply))["user"]["nwhandle"]) == std::string(30, 'u'));
@@ -4247,7 +4300,8 @@ int test_db_failure_reply_carries_code_alone(Harness &h) {
 	const auto status_before = nws::get_server_status(*h.pool.acquire());
 
 	TEST_EXPECT(refused(h.send("POST", "/api/register", { kJson, kCsrf, from_ip("10.43.0.1") },
-								credentials("db_failure", "pw-db-failure")),
+								"{\"username\":\"db_failure\",\"password\":\"pw-db-failure\","
+								"\"email\":\"db_failure@example.com\"}"),
 			"{\"error\":\"db_error\"}"));
 	TEST_EXPECT(refused(h.send("PUT", "/api/admin/server-status", { kBearer, kJson },
 								"{\"maintenance_enabled\":false,\"message\":\"never\"}"),
@@ -4869,7 +4923,7 @@ int test_hosted_listing_owner(Harness &h) {
 	TEST_EXPECT(h.send("PUT", service_path, { kBearer, kJson }, "{\"nwhandle\":\"Taken\"}").code == 404);
 	TEST_EXPECT(h.send("DELETE", service_path, { kBearer }).code == 404);
 	reply = h.send("POST", "/api/register", { kJson, kCsrf, from_ip("10.52.0.11") },
-			"{\"username\":\"srv-777\",\"password\":\"pw-x\"}");
+			"{\"username\":\"srv-777\",\"password\":\"pw-x\",\"email\":\"srv777@example.com\"}");
 	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
 
 	// A stale row: the hosted server ended while its service account still holds
@@ -6814,6 +6868,202 @@ int test_admin_user_detail(Harness &h) {
 	return 0;
 }
 
+// ---- password resets ----------------------------------------------------------
+
+// An account made straight in the database with an email address.
+int64_t make_account_with_email(Harness &h, const std::string &username, const std::string &password,
+		const std::string &email) {
+	static int next = 0;
+	char pcid[16];
+	std::snprintf(pcid, sizeof(pcid), "%08x", 0x6e550000u + static_cast<unsigned>(next++));
+	nws::CreateUserParams p;
+	p.username = username;
+	p.password = password;
+	p.pcid = pcid;
+	p.nwh = "1";
+	p.nwhandle = username;
+	p.email = email;
+	const auto result = nws::create_user(*h.pool.acquire(), p);
+	if (!result.ok) std::fprintf(stderr, "  create %s: %s\n", username.c_str(), result.error_code.c_str());
+	return result.ok ? result.id : 0;
+}
+
+net::HttpReply forgot(const Harness &h, const std::string &ip, const std::string &email) {
+	return h.send("POST", "/api/auth/forgot", { kJson, kCsrf, from_ip(ip) }, "{\"email\":\"" + email + "\"}");
+}
+
+net::HttpReply reset_password(const Harness &h, const std::string &ip, const std::string &token,
+		const std::string &password) {
+	return h.send("POST", "/api/auth/reset", { kJson, kCsrf, from_ip(ip) },
+			"{\"token\":\"" + token + "\",\"password\":\"" + password + "\"}");
+}
+
+// The token the newest reset mail to `to` links to ("" for none): the 64 hex
+// digits after the link's "/reset?token=".
+std::string reset_token_sent_to(Harness &h, const std::string &to) {
+	std::string token;
+	for (const auto &m : sent_mail(h)) {
+		if (m.kind != "password_reset" || m.to != to) continue;
+		const std::string marker = std::string(kMailSiteUrl) + "/reset?token=";
+		const auto at = m.text.find(marker);
+		if (at == std::string::npos) continue;
+		token = m.text.substr(at + marker.size(), 64);
+	}
+	return token;
+}
+
+// Whether a forgot reply is the one every address gets: 202, no body, not cached.
+bool forgot_answer(const net::HttpReply &reply) {
+	const bool ok = reply.transport_ok && reply.code == 202 && body_text(reply).empty() &&
+			header_value(reply, "Cache-Control") == "no-store";
+	if (!ok) std::fprintf(stderr, "  forgot answered %s\n", describe(reply).c_str());
+	return ok;
+}
+
+// POST /api/auth/forgot answers 202 with no body for every address, an
+// account's (in any case) or none, and mails a link only to an active
+// player's; POST /api/auth/reset spends the link's token once on the new
+// password, ending the account's website sessions and its old password; a
+// spent, wrong or malformed token is 400 invalid_token. The refusals before
+// any of it: the CSRF header, the body's shape, an address that is none.
+int test_password_reset(Harness &h) {
+	const int64_t id = make_account_with_email(h, "reset_me", "pw-old", "reset.me@example.com");
+	TEST_EXPECT(id > 0);
+	const std::string session = login_token(h, "10.60.0.1", "reset_me", "pw-old");
+	TEST_EXPECT(!session.empty());
+	h.mailer->clear();
+
+	// The refusals.
+	auto reply = h.send("POST", "/api/auth/forgot", { kJson, from_ip("10.60.0.2") },
+			"{\"email\":\"reset.me@example.com\"}");
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
+	reply = h.send("POST", "/api/auth/forgot", { kJson, kCsrf, from_ip("10.60.0.2") }, "not json");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_json");
+	reply = h.send("POST", "/api/auth/forgot", { kJson, kCsrf, from_ip("10.60.0.2") }, "{}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "missing_field");
+	reply = forgot(h, "10.60.0.2", "not-an-address");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_field");
+
+	// An address no account has and the account's own get the same answer;
+	// only the account's gets a mail.
+	const auto unknown = forgot(h, "10.60.0.3", "nobody@example.com");
+	const auto known = forgot(h, "10.60.0.4", "Reset.Me@Example.com");
+	TEST_EXPECT(forgot_answer(unknown) && forgot_answer(known));
+	TEST_EXPECT(header_values(unknown, "Set-Cookie").empty() && header_values(known, "Set-Cookie").empty());
+	auto mail = sent_mail(h);
+	TEST_EXPECT(mail.size() == 1 && mail[0].kind == "password_reset" && mail[0].to == "reset.me@example.com");
+	TEST_EXPECT(mail[0].text.find("reset_me") != std::string::npos);
+	const std::string token = reset_token_sent_to(h, "reset.me@example.com");
+	TEST_EXPECT(nws::is_web_session_token(token));
+	// The table keeps the token's hash alone, an hour out.
+	const auto row = h.pool.acquire()->query(
+			"SELECT token_hash, expires_at > now() + interval '59 minutes', "
+			"expires_at <= now() + interval '1 hour' FROM password_resets WHERE user_id = $1;",
+			{ opennova::db::BindValue(id) });
+	TEST_EXPECT(row.size() == 1 && row[0].as_text(0).value() == nws::web_session_token_hash(token));
+	TEST_EXPECT(row[0].as_int(1) == 1 && row[0].as_int(2) == 1);
+
+	// The reset's refusals: no CSRF header, missing fields, a wrong and a
+	// malformed token. None spends the real one.
+	reply = h.send("POST", "/api/auth/reset", { kJson, from_ip("10.60.0.5") },
+			"{\"token\":\"" + token + "\",\"password\":\"pw-new\"}");
+	TEST_EXPECT(reply.code == 403 && error_of_reply(reply) == "csrf_header_required");
+	reply = h.send("POST", "/api/auth/reset", { kJson, kCsrf, from_ip("10.60.0.5") }, "{\"token\":\"" + token + "\"}");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "missing_field");
+	reply = reset_password(h, "10.60.0.5", std::string(64, 'b'), "pw-new");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_token");
+	reply = reset_password(h, "10.60.0.5", "short", "pw-new");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_token");
+	TEST_EXPECT(nws::authenticate_user(*h.pool.acquire(), "reset_me", "pw-old").has_value());
+
+	// The token sets the password: the old one and the old session end, the
+	// credentials generation moves.
+	const int64_t gen_before = nws::get_user_by_id(*h.pool.acquire(), id)->credentials_gen;
+	reply = reset_password(h, "10.60.0.5", token, "pw-new");
+	TEST_EXPECT(reply.transport_ok && reply.code == 204 && body_text(reply).empty());
+	TEST_EXPECT(nws::get_user_by_id(*h.pool.acquire(), id)->credentials_gen == gen_before + 1);
+	TEST_EXPECT(h.send("GET", "/api/me", { with_session(session) }).code == 401);
+	TEST_EXPECT(login(h, "10.60.0.1", "reset_me", "pw-old").code == 401);
+	TEST_EXPECT(login(h, "10.60.0.1", "reset_me", "pw-new").code == 200);
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM password_resets WHERE user_id = $1;",
+						{ opennova::db::BindValue(id) }).empty());
+
+	// Single use: the same link again is refused, and the password stays.
+	reply = reset_password(h, "10.60.0.5", token, "pw-again");
+	TEST_EXPECT(reply.code == 400 && error_of_reply(reply) == "invalid_token");
+	TEST_EXPECT(nws::authenticate_user(*h.pool.acquire(), "reset_me", "pw-new").has_value());
+	return 0;
+}
+
+// A newer link replaces the older one; a link past its hour is refused (and
+// gone); an account that is not active, and one with no email, get no mail.
+int test_password_reset_links(Harness &h) {
+	const int64_t id = make_account_with_email(h, "reset_twice", "pw-1", "twice@example.com");
+	TEST_EXPECT(id > 0);
+	h.mailer->clear();
+	TEST_EXPECT(forgot_answer(forgot(h, "10.61.0.1", "twice@example.com")));
+	const std::string first = reset_token_sent_to(h, "twice@example.com");
+	TEST_EXPECT(forgot_answer(forgot(h, "10.61.0.1", "twice@example.com")));
+	const std::string second = reset_token_sent_to(h, "twice@example.com");
+	TEST_EXPECT(!first.empty() && !second.empty() && first != second);
+	TEST_EXPECT(reset_password(h, "10.61.0.2", first, "pw-2").code == 400);
+	TEST_EXPECT(reset_password(h, "10.61.0.2", second, "pw-2").code == 204);
+	TEST_EXPECT(nws::authenticate_user(*h.pool.acquire(), "reset_twice", "pw-2").has_value());
+
+	// Past its hour.
+	TEST_EXPECT(make_account_with_email(h, "reset_late", "pw-1", "late@example.com") > 0);
+	TEST_EXPECT(forgot_answer(forgot(h, "10.61.0.3", "late@example.com")));
+	const std::string late = reset_token_sent_to(h, "late@example.com");
+	TEST_EXPECT(!late.empty());
+	h.pool.acquire()->exec("UPDATE password_resets SET expires_at = now() - interval '1 second' "
+						   "WHERE token_hash = $1;",
+			{ opennova::db::BindValue(nws::web_session_token_hash(late)) });
+	TEST_EXPECT(error_of_reply(reset_password(h, "10.61.0.4", late, "pw-2")) == "invalid_token");
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM password_resets WHERE token_hash = $1;",
+						{ opennova::db::BindValue(nws::web_session_token_hash(late)) }).empty());
+	TEST_EXPECT(nws::authenticate_user(*h.pool.acquire(), "reset_late", "pw-1").has_value());
+	// The sweep's prune takes what nobody spent once it is past its hour.
+	TEST_EXPECT(forgot_answer(forgot(h, "10.61.0.3", "late@example.com")));
+	h.pool.acquire()->exec("UPDATE password_resets SET expires_at = now() - interval '1 second';");
+	TEST_EXPECT(nws::prune_password_resets(*h.pool.acquire()) >= 1);
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM password_resets;").empty());
+
+	// A banned account: the same answer, no mail, no link.
+	const int64_t banned = make_account_with_email(h, "reset_banned", "pw-1", "banned@example.com");
+	TEST_EXPECT(banned > 0);
+	h.pool.acquire()->exec("UPDATE players SET account_status = 'banned' WHERE id = $1;",
+			{ opennova::db::BindValue(banned) });
+	h.mailer->clear();
+	TEST_EXPECT(forgot_answer(forgot(h, "10.61.0.5", "banned@example.com")));
+	TEST_EXPECT(sent_mail(h).empty());
+	TEST_EXPECT(h.pool.acquire()->query("SELECT 1 FROM password_resets WHERE user_id = $1;",
+						{ opennova::db::BindValue(banned) }).empty());
+	return 0;
+}
+
+// The brakes: POST /api/auth/forgot per email address (3, then 429 with
+// Retry-After, whether or not an account has the address, from any client
+// address) and both routes per client address (10, then 429).
+int test_password_reset_brakes(Harness &h) {
+	for (int i = 0; i < 3; ++i)
+		TEST_EXPECT(forgot_answer(forgot(h, "10.62.0." + std::to_string(i + 1), "brake@example.com")));
+	auto reply = forgot(h, "10.62.0.9", "Brake@Example.com");
+	TEST_EXPECT(reply.code == 429 && is_retry_after(reply));
+	// Another address from the same client is not braked by it.
+	TEST_EXPECT(forgot_answer(forgot(h, "10.62.0.9", "other.brake@example.com")));
+
+	net::HttpReply refusal;
+	const int accepted = accepted_before_429(
+			[&h](int i) { return forgot(h, "10.62.1.1", "ip" + std::to_string(i) + "@example.com"); }, 40, refusal);
+	TEST_EXPECT(accepted == 10);
+	TEST_EXPECT(is_retry_after(refusal));
+	const int resets = accepted_before_429(
+			[&h](int) { return reset_password(h, "10.62.2.1", std::string(64, 'c'), "pw"); }, 40, refusal);
+	TEST_EXPECT(resets == 10);
+	TEST_EXPECT(is_retry_after(refusal));
+	return 0;
+}
+
 int run(Harness &h) {
 	struct Case { const char *name; int (*fn)(Harness &); };
 	const Case cases[] = {
@@ -6836,6 +7086,9 @@ int run(Harness &h) {
 		{ "csrf_before_buckets", test_csrf_before_buckets },
 		{ "login_brake", test_login_brake },
 		{ "register_brake", test_register_brake },
+		{ "password_reset", test_password_reset },
+		{ "password_reset_links", test_password_reset_links },
+		{ "password_reset_brakes", test_password_reset_brakes },
 		{ "nwlogin_brake", test_nwlogin_brake },
 		{ "known_addresses", test_known_addresses },
 		{ "retail_pin_revocation", test_retail_pin_revocation },
@@ -6993,7 +7246,14 @@ int main(int argc, char **argv) {
 		billing_service.sync().pass(nws::billing::unix_now());
 		TEST_EXPECT(billing_service.sync().status().prices_ok);
 		nws::hosted::LimitsHold limits_hold;
+		// The first listener's mail: a real outbox over a mailer that records,
+		// declared before the listener so it outlives it, and the site URL its
+		// links name.
+		fake_mail::FakeMailer mailer;
+		nws::MailOutbox outbox(mailer);
+		config.site_url = kMailSiteUrl;
 		nws::HttpListener http(manager, pool, sessions);
+		http.set_mail_outbox(&outbox);
 		http.set_nw_udp_listener(&nw_udp);
 		http.set_admin_links(&links);
 		http.set_watchdog(&watchdog);
@@ -7066,6 +7326,8 @@ int main(int argc, char **argv) {
 		harness.stripe = &stripe;
 		harness.billing = &billing_service;
 		harness.limits_hold = &limits_hold;
+		harness.mailer = &mailer;
+		harness.outbox = &outbox;
 		rc = run(harness);
 		// Join the Crow threads before the pool and the TempDir go, then the
 		// NW UDP listener the push routes held.

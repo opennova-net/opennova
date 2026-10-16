@@ -13,7 +13,7 @@ no explicit denies. This directory is the source of truth; IAM holds the applied
 | `onnet-deploy-compute` | onnet | EC2 reads, the service instance and its root volume, changing and deleting launch templates, EC2 tags, the hosted data snapshots (EBS direct APIs), `kms:DescribeKey`, the single-host stack's teardown |
 | `onnet-deploy-iam` | onnet | the stack's roles (under the boundary), instance profiles, the GitHub OIDC provider, `iam:PassRole` to EC2, CloudWatch's alarm-actions service-linked role, the policy simulator |
 | `onnet-deploy-data` | onnet | RDS (the database, its subnet and parameter groups, snapshots), the operations bucket, SSM parameters, the converge document, Run Command and Session Manager, CloudWatch Logs |
-| `onnet-deploy-observability` | onnet | alarms and metrics, the alerts topic, the Route 53 health check, budgets, Cost Anomaly Detection, Service Quotas and cost reads |
+| `onnet-deploy-observability` | onnet | alarms and metrics, the alerts topic, the Route 53 health check, budgets, Cost Anomaly Detection, Service Quotas and cost reads; the outbound mail's SES identities |
 | `opennova-role-boundary` | every `aws_iam_role` in `infra/aws` (permissions boundary) | the most any OpenNova role can ever do |
 
 Each file is under the 6,144-character managed-policy limit (IAM does not count white space),
@@ -60,6 +60,11 @@ which is what keeps EC2 in two policies.
   `logs:DescribeLogGroups`, `cloudwatch:GetMetricData`, `ce:Get*`, `servicequotas:Get*`,
   `ssm:GetCommandInvocation`, ...). They read other projects' metadata too (an instance's user
   data among it), never their data.
+- **SES identities** (`MailIdentities`): an identity's ARN is the domain or the address
+  it verifies, and the forward_to address comes from the vault, so no committed policy
+  can name it: the identity actions are on `identity/*` in the account. The service's
+  `ses:SendEmail` is scoped in Terraform (`mail.tf`: the stack's identities, from its
+  sender alone); the boundary allows it on `identity/*`.
 - **Two writes IAM cannot scope:**
   - Route 53 health checks: their ARNs carry an id alone and Route 53 has no tag conditions, so
     `UpdateHealthCheck`, `DeleteHealthCheck` and `ChangeTagsForResource` are on
@@ -88,8 +93,8 @@ edit policies, or remove a boundary. The boundary is the union of what the stack
 need, scoped to OpenNova: SSM's agent and session channels, `/opennova/*` parameters and the
 converge document, Run Command on instances tagged `opennova:service`, the operations bucket,
 `/opennova/*` logs, the AWS-managed keys through SSM and EC2, launching and ending machines
-tagged `opennova:hosted=1` from OpenNova-tagged subnets, groups, templates and snapshots, and
-passing `opennova-*` roles to EC2.
+tagged `opennova:hosted=1` from OpenNova-tagged subnets, groups, templates and snapshots,
+passing `opennova-*` roles to EC2, and sending mail through the account's SES identities.
 
 Every role the stack makes carries it: `permissions_boundary = local.role_boundary_arn`
 (`service.tf`) on `aws_iam_role.service`, `aws_iam_role.machine` and
@@ -179,6 +184,9 @@ naming the action):
   tags also wants `ce:TagResource`, which is granted only on already-tagged monitors), and the
   account's S3 block planned as no change.
 - the next `hosted data-snapshot`: `ebs:StartSnapshot` with its tags and no `ec2:CreateTags`.
+- the first apply with `mail_sender`: `ses:CreateEmailIdentity` with the default tags
+  (`ses:TagResource` is granted beside it), the MAIL FROM attributes, and the service's
+  first send under the boundary (an AccessDenied in the `[mail]` log line).
 
 ## Rollback
 

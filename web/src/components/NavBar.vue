@@ -129,9 +129,11 @@ watch(
 const { user, ready, isAdmin, signOut } = useSession();
 const signingOut = ref(false);
 
-// The login link brings the visitor back to the page they were on.
+// The login link brings the visitor back to the page they were on, but not to
+// one of the account pages a login leaves behind.
+const NO_RETURN = new Set(['/', '/login', '/register', '/forgot', '/reset']);
 const loginLink = computed(() => {
-  if (route.path === '/' || route.path === '/login' || route.path === '/register') return '/login';
+  if (NO_RETURN.has(route.path)) return '/login';
   return { path: '/login', query: { redirect: route.fullPath } };
 });
 

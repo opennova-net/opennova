@@ -63,7 +63,7 @@ for its account:
 
 | Scope | Permission | What needs it (`infra/aws/edge.tf`, `email.tf`) |
 |---|---|---|
-| Zone | DNS / Edit | the site's records |
+| Zone | DNS / Edit | the site's records, the outbound mail's DKIM and MAIL FROM records (`mail.tf`) |
 | Zone | Zone Settings / Edit | SSL/TLS "Full (strict)", Always Use HTTPS, the minimum TLS version; turning Email Routing on |
 | Zone | SSL and Certificates / Edit | the origin certificate (Origin CA) |
 | Zone | Zone WAF / Edit | the Stripe webhook's skip rule (custom rules) |
@@ -96,7 +96,8 @@ It prints item and field names, never a value:
 
 Fill the `REPLACE_ME` fields in the 1Password app (that keeps the keys out of shell
 history): `alerts/email` is where every alarm, budget and cost anomaly writes;
-`email/forward_to` is the mailbox `support@<domain>` forwards to ("Email", section 3);
+`email/forward_to` is the mailbox `support@<domain>` forwards to ("Email", section 3),
+and the sandbox's recipient of the service's own mail ("Outbound mail (SES)");
 in each Stripe item you fill `secret_key` (the Stripe dashboard) and `./deploy/run.sh
 stripe setup` the rest ("Monthly support tiers (Stripe)", below). Optional fields the
 toolbox picks up when present: `app-prod/bootstrap_admin` (section 3) and
@@ -214,8 +215,9 @@ fixed network interface (`10.44.0.10`) and the adopted Elastic IP, its security 
 the machines alone, no 22, no 80), the database, the SSM parameters and converge
 document, the operations bucket, the logs, metrics and alarms, the budgets, the
 Cloudflare records, the origin certificate, the zone's TLS setting, edge authentication
-and the webhook rule, the zone's Email Routing (with a destination), and (with data
-snapshots) the fleet's launch templates. A new database takes 10 to 15 minutes.
+and the webhook rule, the zone's Email Routing (with a destination), the outbound mail's
+SES identities and records (with a sender), and (with data snapshots) the fleet's launch
+templates. A new database takes 10 to 15 minutes.
 
 The state is a 1Password document per deployment, pulled before and pushed after each
 run, so any operator with vault access can run the stack. `infra apply`, `state-rm` and
@@ -330,9 +332,42 @@ Mail to `support@<domain>` (and to each local part in `email_routes`, default
    pending).
 
 It is receive-only: replies leave from the destination mailbox, under its own address.
-Sending as `support@<domain>` needs an outbound mail provider (an SMTP relay with the
-domain's SPF and DKIM), which this stack does not set up. Every address no rule names is
-refused (the zone's catch-all stays off). The token's email permissions are in section 1.
+The service's own mail leaves through Amazon SES as `support@<domain>` ("Outbound mail
+(SES)", next). Every address no rule names is refused (the zone's catch-all stays off).
+The token's email permissions are in section 1.
+
+### Outbound mail (SES)
+
+The service mails each new account a welcome and sends the password reset links
+(apps/novaworld_server/README.md, "Account email and password resets") through Amazon SES,
+as `<mail_sender>@<domain>`: `mail_sender = "support"` in `prod.tfvars`. Empty (the
+default for another deployment) sends nothing; the service then logs each mail as not
+sent. `infra apply` (`infra/aws/mail.tf`) makes, on prod:
+
+- the domain's SES identity with Easy DKIM, its three `_domainkey` CNAMEs in the zone, and
+  a custom MAIL FROM domain, `bounce.<domain>` (its MX to SES's feedback endpoint and its
+  SPF), so the mail passes SPF and DKIM aligned with the domain. The apex's MX and SPF stay
+  Email Routing's. The records are DNS only; the token's DNS permission covers them;
+- an identity for `email/forward_to`, the sandbox's recipient (below);
+- on every deployment, the service role's one permission: `ses:SendEmail` through those
+  identities, from the sender alone; and `ONNET_MAIL_FROM` and `ONNET_MAIL_REGION` in its
+  infra.env. A staging service sends through prod's identities.
+
+Replies to `support@<domain>` reach the mailbox through Email Routing (above).
+
+**The sandbox.** A new AWS account's SES is in the sandbox: it sends only to verified
+addresses and identities, at most 200 a day, so a stranger's welcome mail or reset link is
+refused (logged: `MessageRejected`, "Email address is not verified"; the registration
+itself works). Once, in the console: Amazon SES, Account dashboard, **Request production
+access** (mail type Transactional, the site's URL, and a word on what is sent: a welcome on
+registration and password resets on request, to addresses people gave). Until AWS grants
+it, the `forward_to` identity lets mail to the maintainer's own address through: AWS mails
+that address a verification link after the apply; click it. The console shows each
+identity's state: the domain's turns verified once its DKIM records resolve (minutes).
+
+The IAM pieces an admin applies (`infra/aws/iam/README.md`): the deploy user's
+`MailIdentities` statement (`onnet-deploy-observability`) and the role boundary's
+`SendMail`, both before the first apply that makes them.
 
 ### The first site admin
 

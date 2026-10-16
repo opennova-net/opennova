@@ -25,7 +25,10 @@ the hosted servers' comp grant, `players.comp_servers`, in place of the old
 approval flag). `0002_billing.sql` adds the billing tables: the service's
 instance id, the support tiers' Stripe customers, subscriptions and webhook
 events, the cache of Stripe the hosting entitlement reads
-(apps/novaworld_server/README.md "Hosted servers").
+(apps/novaworld_server/README.md "Hosted servers"). `0005_account_email.sql`
+adds the accounts' email addresses (`players.email`, lowercased, one account's)
+and the password reset links (apps/novaworld_server/README.md "Account email
+and password resets").
 
 ## Migrations are append-only
 

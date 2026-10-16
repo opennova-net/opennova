@@ -87,7 +87,7 @@ int test_migrations_create_expected_tables() {
 		"fleet_slot_reports",
 		"games", "host_keys", "host_players", "host_roster", "hosted_server_console", "hosted_server_events",
 		"hosted_server_hourly", "hosted_server_samples",
-		"hosted_servers", "login_addresses",
+		"hosted_servers", "login_addresses", "password_resets",
 		"player_game_access",
 		"players", "server_status", "service_meta", "unknown_messages", "web_sessions"
 	};
@@ -717,6 +717,46 @@ int test_billing_tables() {
 	return 0;
 }
 
+// The account email (0005_account_email.sql): players.email, NULL for none
+// (as many accounts as like), stored lowercased (an upper-case or empty one is
+// refused) and one account's (a unique index); the password reset links, one
+// per account (a second row for it is refused, the token's hash unique), gone
+// with the account.
+int test_account_email() {
+	TestDatabase scratch({ /*migrate=*/true });
+	Database db = scratch.open();
+	TEST_EXPECT(has_column(db, "players", "email"));
+	TEST_EXPECT(has_index(db, "players", "idx_players_email"));
+	TEST_EXPECT(has_index(db, "password_resets", "idx_password_resets_expires"));
+	auto add = [&db](const char *name, const char *pcid) {
+		db.exec("INSERT INTO players (username, password_hash, pcid, nwh, nwhandle) VALUES ($1, 'x', $2, '1', $1);",
+				{ BindValue(std::string(name)), BindValue(std::string(pcid)) });
+	};
+	add("mail_a", "000000a1");
+	add("mail_b", "000000b1");
+	add("mail_c", "000000c1");
+	// Accounts with no email stand side by side.
+	TEST_EXPECT(db.query("SELECT COUNT(*) FROM players WHERE email IS NULL;").front().as_int(0) == 3);
+	db.exec("UPDATE players SET email = 'a@example.com' WHERE username = 'mail_a';");
+	TEST_EXPECT(refused(db, "UPDATE players SET email = 'a@example.com' WHERE username = 'mail_b';"));
+	TEST_EXPECT(refused(db, "UPDATE players SET email = 'B@example.com' WHERE username = 'mail_b';"));
+	TEST_EXPECT(refused(db, "UPDATE players SET email = '' WHERE username = 'mail_b';"));
+	db.exec("UPDATE players SET email = 'b@example.com' WHERE username = 'mail_b';");
+
+	const char *reset = "INSERT INTO password_resets (user_id, token_hash, expires_at) "
+						"SELECT id, $1, now() + interval '1 hour' FROM players WHERE username = $2;";
+	db.exec(reset, { BindValue(std::string("hash-a")), BindValue(std::string("mail_a")) });
+	TEST_EXPECT(refused(db, "INSERT INTO password_resets (user_id, token_hash, expires_at) "
+							"SELECT id, 'hash-a2', now() FROM players WHERE username = 'mail_a';"));
+	TEST_EXPECT(refused(db, "INSERT INTO password_resets (user_id, token_hash, expires_at) "
+							"SELECT id, 'hash-a', now() FROM players WHERE username = 'mail_b';"));
+	TEST_EXPECT(refused(db, "INSERT INTO password_resets (user_id, token_hash) "
+							"SELECT id, 'hash-c' FROM players WHERE username = 'mail_c';"));
+	db.exec("DELETE FROM players WHERE username = 'mail_a';");
+	TEST_EXPECT(db.query("SELECT 1 FROM password_resets;").empty());
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -734,9 +774,10 @@ int main(int argc, char **argv) {
 	if (test_cd_keys_fresh() != 0)
 		return 1;
 	if (test_billing_tables() != 0) return 1;
+	if (test_account_email() != 0) return 1;
 	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs, "
 				"web sessions + roles, games titles, host keys, credentials generation, hosted "
 				"server games, "
-				"cd keys, billing)\n");
+				"cd keys, billing, account email)\n");
 	return 0;
 }
