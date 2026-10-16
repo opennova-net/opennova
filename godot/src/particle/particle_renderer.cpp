@@ -737,13 +737,13 @@ public:
 		slot_present.fill(false);
 	}
 
-	// The catalog's atlas and pages, built again; the first-person materials
-	// bound the old pages.
+	// The catalog's atlas and pages, built again; every material bound the
+	// old pages (the first-person batch's and pass A's alike).
 	void rebuild_catalog(
 			const ParticleAtlasDevice::Definitions &definitions,
 			const Callable &provider, const String &texture_dir,
 			bool procedural_fallback, std::uint32_t page_flags) {
-		materials.clear_scene_materials();
+		materials.clear_materials();
 		atlas.rebuild(definitions, provider, texture_dir, procedural_fallback, page_flags);
 	}
 

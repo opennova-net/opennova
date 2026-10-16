@@ -33,9 +33,13 @@ public:
 	Ref<ShaderMaterial> far_material_for(const opennova::renderer::ParticleDrawCommand &p_command,
 			opennova::renderer::ParticleThermalMaterial p_thermal,
 			const std::vector<ParticleAtlasDevice::Page> &p_pages);
-	// Drops the scene materials, whose page textures a catalog rebuild
-	// replaces.
-	void clear_scene_materials() { materials_.clear(); }
+	// Drops every material: a catalog rebuild replaces the page textures
+	// both the first-person and the far-pass materials bind, and a cached one
+	// would keep sampling the old page.
+	void clear_materials() {
+		materials_.clear();
+		far_materials_.clear();
+	}
 
 private:
 	Ref<Shader> far_shader_for(opennova::renderer::ParticlePipeline p_pipeline,

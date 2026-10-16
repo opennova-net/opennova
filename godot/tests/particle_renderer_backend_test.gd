@@ -1341,6 +1341,80 @@ func test_atlas_pages_follow_the_session_compression_and_density() -> void:
 			assert_true(bool(page.get("texture_mipmaps", false)), "the page texture is mipmapped")
 
 
+func _solid_texture(color: Color) -> Texture2D:
+	var image := Image.create(32, 32, false, Image.FORMAT_RGBA8)
+	image.fill(color)
+	return ImageTexture.create_from_image(image)
+
+
+func _red_texture(_name: String) -> Texture2D:
+	return _solid_texture(Color.RED)
+
+
+func _green_texture(_name: String) -> Texture2D:
+	return _solid_texture(Color.GREEN)
+
+
+# The page textures pass A's render-list runs bind (ParticleFarPass: the
+# renderer's visible ParticleFarRun children, one material per run).
+func _far_run_textures(renderer: ParticleRenderer) -> Array:
+	var textures := []
+	for node in renderer.find_children("ParticleFarRun*", "MeshInstance3D", true, false):
+		var run := node as MeshInstance3D
+		if not run.visible or run.mesh == null or run.mesh.get_surface_count() == 0:
+			continue
+		var material := run.mesh.surface_get_material(0) as ShaderMaterial
+		textures.append(material.get_shader_parameter("albedo_tex"))
+	return textures
+
+
+# A catalog rebuild (here a new texture provider) builds new atlas pages, and
+# pass A's runs draw with them: the far-pass materials are made again with the
+# pages, never kept from the catalog they were first made for.
+func test_far_pass_materials_follow_a_catalog_rebuild() -> void:
+	var viewport := _main_view()
+	var camera := Camera3D.new()
+	camera.position = Vector3(0.0, 10.0, 5.0)
+	camera.current = true
+	viewport.add_child(camera)
+	var renderer := ParticleRenderer.new()
+	renderer.scene = _single_quad_scene("rebuilt", 0)
+	renderer.texture_provider = _red_texture
+	# The quad at y 1 sits below the plane and the eye above it: pass A. The
+	# uncompressed page words keep the page readable.
+	renderer.set_water_plane(5.0, null)
+	renderer.set_session_render_settings(2, 2)
+	viewport.add_child(renderer)
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+	assert_gt(int(renderer.get_debug_draw_list_report().get("world_far_render_runs", 0)), 0)
+	var before := _far_run_textures(renderer)
+	assert_eq(before.size(), 1, "one pass-A run")
+
+	renderer.texture_provider = _green_texture
+	renderer.render_now(GameWorld.current_frame_clock_ms())
+	var after := _far_run_textures(renderer)
+	assert_eq(after.size(), 1, "one pass-A run after the rebuild")
+	if before.size() != 1 or after.size() != 1:
+		return
+	assert_ne(after[0], before[0], "pass A binds the rebuilt page, not the old one")
+	# The rebuilt page holds the new graphic where the atlas placed it.
+	var entry := {}
+	for value in renderer.get_debug_draw_list_report().get("atlas_entries", []):
+		if bool((value as Dictionary).get("resolved", false)):
+			entry = value
+	assert_false(entry.is_empty(), "the graphic resolved")
+	var image := (after[0] as Texture2D).get_image()
+	assert_not_null(image)
+	if entry.is_empty() or image == null:
+		return
+	var rect: Rect2i = entry.get("pixel_rect", Rect2i())
+	var centre := image.get_pixel(rect.position.x + rect.size.x / 2,
+			rect.position.y + rect.size.y / 2)
+	assert_gt(centre.g, 0.9, "pass A samples the green graphic")
+	assert_lt(centre.r, 0.1, "not the red one the first catalog held")
+	assert_engine_error_count(0)
+
+
 # Every view builds one particle in its scene pass's stride (D-RMAT-24): the
 # main scene's 1, 2 or 4 at particle_density 2, 1 or 0, twice that while the
 # main view renders as the NVG scene (retail Render_ProcessMainSceneFrame
