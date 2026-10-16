@@ -106,6 +106,13 @@ public:
 	// it must outlive the HTTP listener. Null: none.
 	void set_limits_hold(hosted::LimitsHold *hold) { limits_hold_ = hold; }
 
+	// Each container's memory and CPUs (hosted/fleet_config.h's slot limits):
+	// the admin usage view's limits. Set before start(); unset, the defaults.
+	void set_fleet_slots(int memory_mb, double cpus) {
+		fleet_slot_memory_mb_ = memory_mb;
+		fleet_slot_cpus_ = cpus;
+	}
+
 	// The fleet's placement policy (hosted/fleet_config.h) the hosted routes ask
 	// the supervisor's planner with: a start's at_capacity, the list's `full`.
 	// Set before start(); unset, placement.h's defaults.
@@ -228,6 +235,9 @@ private:
 	billing::Billing *billing_ = nullptr;
 	// The hosted servers' limits hold (set_limits_hold); null: none.
 	hosted::LimitsHold *limits_hold_ = nullptr;
+	// The slots' limits (set_fleet_slots).
+	int fleet_slot_memory_mb_ = 512;
+	double fleet_slot_cpus_ = 1.0;
 	// The hosted routes' placement policy (set_fleet_placement).
 	hosted::PlacementPolicy fleet_placement_;
 	// config.public_host, set in start() before Crow runs (host_url() /

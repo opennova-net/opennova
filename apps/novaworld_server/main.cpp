@@ -541,6 +541,8 @@ int main() {
 	http.set_admin_links(admin_links.get());
 	// A start's at_capacity and the list's `full` ask the fleet's planner.
 	http.set_fleet_placement(hosted_fleet.fleet.placement);
+	// The admin usage view's limits: each container's memory and CPUs.
+	http.set_fleet_slots(hosted_fleet.fleet.slot_memory_mb, hosted_fleet.fleet.slot_cpus);
 #endif
 	// The boot's work is done: the listeners and workers below lease their own
 	// connections, some of them on this thread, which then holds none.

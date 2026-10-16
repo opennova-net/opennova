@@ -316,6 +316,36 @@ std::optional<ServerSample> latest_sample(db::Database &db, int64_t server_id, i
 	return row_to_sample(rows[0]);
 }
 
+std::map<int64_t, ServerSample> latest_samples_since(db::Database &db, int64_t since) {
+	const std::string sql = std::string("SELECT DISTINCT ON (server_id) ") + kSampleColumns +
+			" FROM hosted_server_samples WHERE at >= to_timestamp($1::double precision) "
+			"ORDER BY server_id, at DESC;";
+	std::map<int64_t, ServerSample> out;
+	for (const db::Row &r : db.query(sql, { BindValue(since) })) {
+		ServerSample s = row_to_sample(r);
+		out[s.server_id] = std::move(s);
+	}
+	return out;
+}
+
+std::map<int64_t, SampleWindow> sample_windows_since(db::Database &db, int64_t since) {
+	const char *sql =
+			"SELECT server_id, COUNT(*), AVG(cpu_percent), MAX(cpu_percent), MAX(memory_bytes), "
+			"CAST(COALESCE(SUM(egress_bytes), 0) AS bigint) FROM hosted_server_samples "
+			"WHERE at >= to_timestamp($1::double precision) GROUP BY server_id;";
+	std::map<int64_t, SampleWindow> out;
+	for (const db::Row &r : db.query(sql, { BindValue(since) })) {
+		SampleWindow w;
+		w.minutes = int_at(r, 1);
+		w.cpu_percent_mean = double_at(r, 2);
+		w.cpu_percent_peak = double_at(r, 3);
+		w.memory_bytes_peak = r.as_int(4);
+		w.egress_bytes = int_at(r, 5);
+		out[int_at(r, 0)] = w;
+	}
+	return out;
+}
+
 std::optional<int64_t> running_seconds_of(db::Database &db, int64_t server_id, int64_t now) {
 	const auto rows = db.query("SELECT CAST(extract(epoch FROM (to_timestamp($2::double precision) - running_at)) AS bigint) "
 							   "FROM hosted_servers WHERE id = $1 AND state = 'running' AND running_at IS NOT NULL;",
