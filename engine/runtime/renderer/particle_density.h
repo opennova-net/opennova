@@ -58,7 +58,7 @@ enum class ParticleScenePass : uint8_t { Main, NvgScene };
 //  @ 0x5C9DB3..0x5C9DD9; the cinematic views @ 0x5706E5..0x57070B and
 //  @ 0x5708A0..0x5708C6 (flt_7C3310 = 1/65536); NVG_RenderSceneToTarget
 //  @ 0x5D088F..0x5D08B5 (flt_7DC620 = 1/131072); the density setter
-//  sub_5F6DB0 @ 0x5F6DB0 (g_EffectWorld +0x3F4)]
+//  EffectWorld_SetParticleDensityScale @ 0x5F6DB0 (g_EffectWorld +0x3F4)]
 inline constexpr float particle_density_scale(int32_t session_density, ParticleScenePass pass) {
 	const int density = clamp_particle_density(session_density);
 	const float fixed = static_cast<float>(0x10000 >> (kParticleDensityMax - density));
