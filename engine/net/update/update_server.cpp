@@ -96,7 +96,10 @@ UpdateServer::Received UpdateServer::receive(
 					out.keep_open = false;
 					return out;
 				}
-				// The command file's CRC; any other name answers 0, which never matches a file.
+				// The command file's CRC; any other name answers 0. A client whose own command
+				// file is missing or empty computes 0 too (CmdCrc_ComputeFile, update_crc.cpp), so
+				// it takes a 0 answer as a match and goes on to fetch the files, where it fails
+				// with error 14.
 				// [orig: Cupdate2Dlg_OnCrcReply @ 0x405cd0 (UPDATE.EXE)]
 				uint32_t crc = 0;
 				const std::string name = request.args.empty() ? std::string() : request.args[0];
