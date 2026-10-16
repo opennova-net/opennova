@@ -65,18 +65,26 @@ program_task() {
 # root), its output on stdout. The script travels base64-encoded (ECS Exec
 # splits its command on white space), and reads a secret it needs from PID 1's
 # environment (ECS hands the container's secrets to its first process; an exec
-# session gets none of them), never from an argument.
+# session gets none of them), never from an argument. The session plugin ends
+# the session when its stdin reaches end of file, cutting the output short
+# when the toolbox runs without a terminal: its stdin stays open (a sleep the
+# container's end reaps) until the command ends.
 ecs_exec() {
   local task="$1" container="$2" script="$3" b64
   b64="$(printf '%s\n' "$script" | base64 -w0)"
   aws ecs execute-command --cluster "$(ecs_cluster)" --task "$task" --container "$container" \
-    --interactive --command "sh -c 'echo $b64 | base64 -d | sh'"
+    --interactive --command "sh -c 'echo $b64 | base64 -d | sh'" < <(sleep 3600)
 }
 
 # A sh fragment: NAME from PID 1's environment into the shell variable $2.
+# Where PID 1 runs as another user (the programs' images: their USER), the
+# exec session's root lacks CAP_SYS_PTRACE, which reading another user's
+# /proc/<pid>/environ needs, so the read runs as PID 1's own user and group
+# (setpriv, util-linux); where it is the session's own (the backup image, root),
+# it reads directly.
 # shellcheck disable=SC2016  # the task's shell expands it
 proc1_env() {
-  printf '%s="$(tr '"'"'\\000'"'"' '"'"'\\n'"'"' < /proc/1/environ | sed -n '"'"'s/^%s=//p'"'"' | head -n 1)"\n' "$2" "$1"
+  printf '%s="$(if [ "$(stat -c %%u /proc/1)" = "$(id -u)" ]; then cat /proc/1/environ; else setpriv --reuid="$(stat -c %%u /proc/1)" --regid="$(stat -c %%g /proc/1)" --clear-groups cat /proc/1/environ; fi | tr '"'"'\\000'"'"' '"'"'\\n'"'"' | sed -n '"'"'s/^%s=//p'"'"' | head -n 1)"\n' "$2" "$1"
 }
 
 # The service's admin API (apps/novaworld_web: the admin routes) on a web
