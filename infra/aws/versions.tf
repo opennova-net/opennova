@@ -11,6 +11,8 @@
 #   edge.tf        Cloudflare: DNS, the origin certificate, Full (strict),
 #                  edge authentication, the webhook's WAF skip
 #   email.tf       Cloudflare Email Routing: support@<domain> to one mailbox
+#   mail.tf        outbound mail: the domain's Amazon SES identity, its DKIM
+#                  and MAIL FROM records, the service's permission to send
 #   ops_bucket.tf  the operations bucket (backups) and the account's S3 block
 #   fleet.tf       the hosted game servers' machines: shared and own launch templates
 #   observability.tf  logs, metrics, alarms, budgets

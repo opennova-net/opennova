@@ -16,6 +16,8 @@ if(BUILD_NOVAWORLD_HTTP)
         # The admin's user routes (moved out of http_listener.cpp whole).
         admin_user_routes.cpp
         host_routes.cpp
+        # The admin's NovaWorld sessions view.
+        connection_routes.cpp
         # CD keys (migration 0015): the keys, the DFX2 activations, their routes.
         cd_keys.cpp
         cd_key_routes.cpp
@@ -25,6 +27,11 @@ if(BUILD_NOVAWORLD_HTTP)
         rate_limiter.cpp
         web_access.cpp
         web_session.cpp
+        # Account email: the outbound mail (SES through the AWS CLI, the
+        # outbox, the templates) and the password reset links and routes.
+        mailer.cpp
+        password_reset.cpp
+        password_reset_routes.cpp
         # Hosted servers (ADR 0053, proposed): the supervisor, its rows and
         # renders, the admin link and its console routes, the per-server stats
         # (samples, hourly rollups, their routes); the fleet (its rows,

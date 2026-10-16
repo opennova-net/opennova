@@ -36,6 +36,8 @@ struct Connection {
 	uint32_t reported_id = 0;
 	PeerAddr addr;
 	ConnectionState state = ConnectionState::Handshaking;
+	// The caller's clock in ms; the service's is the steady clock, which counts
+	// from no fixed epoch (an admin view converts it to wall time).
 	uint64_t created_ms = 0;
 	uint64_t last_seen_ms = 0;
 	std::string pn;          // the latest CLIENT_HELLO's Protocol Name ("NOVAWORLDUDP", …)

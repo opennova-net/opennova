@@ -96,7 +96,7 @@ describe('the routes', () => {
       [409, 'checkout_in_progress', 'already starting'],
       [503, 'billing_disabled', 'not open on NovaWorld yet'],
       [503, 'billing_misconfigured', 'no payment was taken'],
-      [502, 'stripe_unavailable', 'Stripe did not answer'],
+      [503, 'stripe_unavailable', 'Stripe could not take the request'],
       [403, 'not_eligible', 'cannot buy that right now'],
       [404, 'no_billing_account', 'subscribe to a support tier first'],
       [400, 'invalid_item', 'could not read the request'],

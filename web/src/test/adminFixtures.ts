@@ -14,6 +14,7 @@ export function user(id: number, overrides: Partial<User> = {}): User {
     nwh: '1',
     nwhandle: `Player${id}`,
     account_status: 'active',
+    email: `player${id}@example.com`,
     role: 'player',
     comp_servers: 0,
     max_servers: 0,

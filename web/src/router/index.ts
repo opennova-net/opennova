@@ -2,6 +2,8 @@ import { createRouter, createWebHistory } from 'vue-router';
 import LandingPage from '../pages/LandingPage.vue';
 import LoginPage from '../pages/LoginPage.vue';
 import RegisterPage from '../pages/RegisterPage.vue';
+import ForgotPasswordPage from '../pages/ForgotPasswordPage.vue';
+import ResetPasswordPage from '../pages/ResetPasswordPage.vue';
 import LobbyPage from '../pages/LobbyPage.vue';
 import AccountLayout from '../pages/account/AccountLayout.vue';
 import ServersPage from '../pages/account/ServersPage.vue';
@@ -24,6 +26,7 @@ import OverviewSection from '../pages/admin/OverviewSection.vue';
 import UsersSection from '../pages/admin/UsersSection.vue';
 import UserDetailSection from '../pages/admin/UserDetailSection.vue';
 import FleetSection from '../pages/admin/FleetSection.vue';
+import UsageSection from '../pages/admin/UsageSection.vue';
 import BillingSection from '../pages/admin/BillingSection.vue';
 import ServerStatusSection from '../pages/admin/ServerStatusSection.vue';
 import ConnectionsSection from '../pages/admin/ConnectionsSection.vue';
@@ -38,6 +41,9 @@ const router = createRouter({
     { path: '/', component: LandingPage },
     { path: '/login', component: LoginPage, meta: { title: 'Log in' } },
     { path: '/register', component: RegisterPage, meta: { title: 'Register' } },
+    { path: '/forgot', component: ForgotPasswordPage, meta: { title: 'Forgot password' } },
+    // The link a password reset mail carries: /reset?token=<64 hex digits>.
+    { path: '/reset', component: ResetPasswordPage, meta: { title: 'Reset password' } },
     { path: '/lobby', component: LobbyPage, meta: { title: 'Lobbies' } },
     { path: '/support', component: SupportPage, meta: { title: 'Support tiers' } },
     { path: '/terms', component: TermsPage, meta: { title: 'Terms of service' } },
@@ -93,6 +99,7 @@ const router = createRouter({
             { path: 'machine', component: ServerMachineTab },
           ],
         },
+        { path: 'usage', component: UsageSection },
         { path: 'billing', component: BillingSection },
         { path: 'service', component: ServerStatusSection },
         { path: 'sessions', component: ConnectionsSection },

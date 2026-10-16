@@ -41,6 +41,7 @@ export function pickUser(value: unknown): User | null {
     nwh: str(v.nwh),
     nwhandle: str(v.nwhandle),
     account_status: str(v.account_status),
+    email: typeof v.email === 'string' && v.email !== '' ? v.email : null,
     role: v.role as Role,
     comp_servers: count(v.comp_servers),
     max_servers: count(v.max_servers ?? (v.entitlement as { max_servers?: unknown } | undefined)?.max_servers),

@@ -4,9 +4,10 @@
 #
 # The runtime image needs only the server binary, libpq and its data dirs
 # (migrations, seed, retail templates/static), and for the hosted servers' ec2
-# machine driver the AWS CLI v2 and the machine script. It keeps no state: the
-# database is PostgreSQL (DATABASE_URL, a libpq URI, and DATABASE_PASSWORD
-# beside it; apps/novaworld_server/README.md). Against RDS the URI carries
+# machine driver and the outbound mail (SES) the AWS CLI v2 and the machine
+# script. It keeps no state: the database is PostgreSQL (DATABASE_URL, a libpq
+# URI, and DATABASE_PASSWORD beside it; apps/novaworld_server/README.md).
+# Against RDS the URI carries
 # sslmode=verify-full&sslrootcert=/app/rds-global-bundle.pem, the RDS CA bundle
 # this image pins. The web portal is a separate nginx container.
 
@@ -33,8 +34,9 @@ RUN cmake -S . -B build -G Ninja \
     && cmake --build build --target opennova_novaworld_server
 
 # ---- AWS CLI stage ---------------------------------------------------------
-# The hosted servers' ec2 machine driver (hosted/ec2_machine_driver.h) runs the
-# AWS CLI v2, its credentials the service instance's role (IMDSv2). A pinned release,
+# The hosted servers' ec2 machine driver (hosted/ec2_machine_driver.h) and the
+# outbound mail (mailer.h, sesv2 send-email) run the AWS CLI v2, its
+# credentials the service instance's role (IMDSv2). A pinned release,
 # checked against its SHA-256 before it is unpacked. The sum was taken from the
 # release AWS signed: its .sig verifies against the AWS CLI Team key in the
 # CLI's install guide (fingerprint FB5D B77F D5C1 18B8 0511 ADA8 A631 0ACC 4672
@@ -54,22 +56,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && /tmp/aws/install --install-dir /usr/local/aws-cli --bin-dir /usr/local/bin \
     && /usr/local/bin/aws --version
 
-# The driver calls ec2 alone (sts for a credentials check by hand): the help
-# examples, the completer and its index, and every other service's model go
-# (about 160 MB of the CLI's 270). The models' root files (endpoints.json,
-# partitions.json) stay. Then the check: both services' commands still build,
-# and a real describe-instances runs to its HTTP request (fake keys, a closed
-# local port, so it can reach nothing).
+# The driver calls ec2 and the mailer sesv2 alone (sts for a credentials check
+# by hand): the help examples, the completer and its index, and every other
+# service's model go (about 160 MB of the CLI's 270). The models' root files
+# (endpoints.json, partitions.json) stay. Then the check: the three services'
+# commands still build, and a real describe-instances runs to its HTTP request
+# (fake keys, a closed local port, so it can reach nothing).
 RUN dist=/usr/local/aws-cli/v2/current/dist \
     && data="$dist/awscli/botocore/data" \
-    && test -d "$data/ec2" && test -d "$data/sts" && test -f "$data/endpoints.json" \
+    && test -d "$data/ec2" && test -d "$data/sts" && test -d "$data/sesv2" && test -f "$data/endpoints.json" \
     && rm -rf "$dist/awscli/examples" "$dist/awscli/data/ac.index" "$dist/aws_completer" \
         /usr/local/aws-cli/v2/current/bin/aws_completer /usr/local/bin/aws_completer \
-    && find "$data" -mindepth 1 -maxdepth 1 -type d ! -name ec2 ! -name sts -exec rm -rf {} + \
+    && find "$data" -mindepth 1 -maxdepth 1 -type d ! -name ec2 ! -name sts ! -name sesv2 -exec rm -rf {} + \
     && aws ec2 describe-instances --generate-cli-skeleton >/dev/null \
     && aws ec2 run-instances --generate-cli-skeleton >/dev/null \
     && aws ec2 terminate-instances --generate-cli-skeleton >/dev/null \
     && aws sts get-caller-identity --generate-cli-skeleton >/dev/null \
+    && aws sesv2 send-email --generate-cli-skeleton >/dev/null \
     && out="$(AWS_ACCESS_KEY_ID=AKIAEXAMPLEEXAMPLE00 AWS_SECRET_ACCESS_KEY=example AWS_MAX_ATTEMPTS=1 \
         aws ec2 describe-instances --region us-east-1 --endpoint-url http://127.0.0.1:9 \
         --cli-connect-timeout 2 --output json --no-cli-pager 2>&1 || true)" \

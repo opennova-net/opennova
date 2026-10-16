@@ -104,7 +104,7 @@ function messageFor(code: BillingErrorCode, retryAfterSeconds?: number): string 
     case 'no_billing_account':
       return 'You have no billing account yet: subscribe to a support tier first.';
     case 'stripe_unavailable':
-      return 'Stripe did not answer. Try again in a moment; no payment was taken.';
+      return 'Stripe could not take the request. Try again in a moment; no payment was taken.';
     case 'db_error':
       return 'The server hit a database error. Try again shortly.';
     case 'network':

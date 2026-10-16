@@ -53,3 +53,132 @@ export function serverStats(overrides: Partial<HostedStats> = {}): HostedStats {
     ...overrides,
   };
 }
+
+const MiB = 1024 * 1024;
+
+// A usage reply (GET /api/admin/hosted/usage) as the service answers it: a
+// shared machine with two servers (one running and reporting, one booting),
+// an own machine whose server's newest sample is too old, and a server placed
+// nowhere yet.
+export function fleetUsageReply(): Record<string, unknown> {
+  const usage = (over: Record<string, unknown> = {}) => ({
+    reporting: 0,
+    players: 0,
+    memory_bytes: 0,
+    memory_limit_bytes: 0,
+    cpus_used: 0,
+    cpus_limit: 0,
+    egress_bytes_per_second: 0,
+    egress_bytes_window: 0,
+    ...over,
+  });
+  const window = (over: Record<string, unknown> = {}) => ({
+    minutes: 0,
+    cpu_percent_mean: null,
+    cpu_percent_peak: null,
+    memory_bytes_peak: null,
+    egress_bytes: 0,
+    ...over,
+  });
+  const none = { sample_at: null, players: null, max_players: null, cpu_percent: null, memory_bytes: null, egress_bytes_per_second: null };
+  return {
+    at: '2026-10-16T09:41:30Z',
+    window_seconds: 3600,
+    slot_memory_bytes: 512 * MiB,
+    slot_cpus: 1,
+    totals: {
+      servers_live: 4,
+      machines_live: 2,
+      slots: 13,
+      slots_used: 3,
+      ...usage({
+        reporting: 1,
+        players: 6,
+        memory_bytes: 200 * MiB,
+        memory_limit_bytes: 512 * MiB,
+        cpus_used: 0.25,
+        cpus_limit: 1,
+        egress_bytes_per_second: 150_000,
+        egress_bytes_window: 540_000_000,
+      }),
+    },
+    machines: [
+      {
+        id: 3,
+        kind: 'shared',
+        state: 'ready',
+        instance_type: 't3a.large',
+        slots: 12,
+        slots_used: 2,
+        ...usage({
+          reporting: 1,
+          players: 6,
+          memory_bytes: 200 * MiB,
+          memory_limit_bytes: 512 * MiB,
+          cpus_used: 0.25,
+          cpus_limit: 1,
+          egress_bytes_per_second: 150_000,
+          egress_bytes_window: 520_000_000,
+        }),
+      },
+      { id: 4, kind: 'own', state: 'ready', instance_type: 'c7a.medium', slots: 1, slots_used: 1, ...usage({ egress_bytes_window: 20_000_000 }) },
+    ],
+    servers: [
+      {
+        id: 12,
+        name: 'Booting One',
+        state: 'booting',
+        own_machine: false,
+        owner: { id: 2, username: 'owner2' },
+        machine_ref: 3,
+        slot: 0,
+        uptime_seconds: null,
+        ...none,
+        sample_at: '2026-10-16T09:41:00Z',
+        egress_bytes_per_second: 0,
+        window: window({ minutes: 1 }),
+      },
+      {
+        id: 7,
+        name: 'Night Ops',
+        state: 'running',
+        own_machine: false,
+        owner: { id: 1, username: 'owner1' },
+        machine_ref: 3,
+        slot: 1,
+        uptime_seconds: 3 * 3600 + 5 * 60,
+        sample_at: '2026-10-16T09:41:00Z',
+        players: 6,
+        max_players: 32,
+        cpu_percent: 25,
+        memory_bytes: 200 * MiB,
+        egress_bytes_per_second: 150_000,
+        window: window({ minutes: 60, cpu_percent_mean: 18.4, cpu_percent_peak: 61, memory_bytes_peak: 310 * MiB, egress_bytes: 520_000_000 }),
+      },
+      {
+        id: 9,
+        name: 'Own Box',
+        state: 'running',
+        own_machine: true,
+        owner: null,
+        machine_ref: 4,
+        slot: 0,
+        uptime_seconds: 600,
+        ...none,
+        window: window({ minutes: 5, memory_bytes_peak: 100 * MiB, egress_bytes: 20_000_000 }),
+      },
+      {
+        id: 15,
+        name: 'Waiting',
+        state: 'requested',
+        own_machine: false,
+        owner: { id: 1, username: 'owner1' },
+        machine_ref: null,
+        slot: null,
+        uptime_seconds: null,
+        ...none,
+        window: window(),
+      },
+    ],
+  };
+}

@@ -67,6 +67,9 @@ describe('UserDetailSection', () => {
     const { wrapper } = await mountSection();
     expect(detail).toHaveBeenCalledWith(7);
     expect(wrapper.get('h1').text()).toBe('player7');
+    // The email, read-only: no field edits it.
+    expect(wrapper.get('header').text()).toContain('player7@example.com');
+    expect(wrapper.findAll('input').some((i) => (i.element as HTMLInputElement).value === 'player7@example.com')).toBe(false);
     const hosting = wrapper.get('#user-hosting').element.parentElement!.textContent!;
     expect(hosting).toContain('2 hosted servers');
     expect(hosting).toContain('Tier 2');

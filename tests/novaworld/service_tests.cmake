@@ -488,6 +488,16 @@ if(BUILD_NOVAWORLD_HTTP)
     # below ctest's 1500 s default.
     set_tests_properties(opennova_novaworld_server_http_routes PROPERTIES TIMEOUT 120)
 
+    # The outbound mail (apps/novaworld_server/mailer.h) and the address rule
+    # (auth.h normalize_email): the shapes taken and refused, SesMailer's settings,
+    # argv and SendEmail request on a stub CommandRunner (the request file
+    # owner-only while the CLI runs and gone after, the CLI's failures), the
+    # outbox's order, bound and stop, and the templates. Database-free.
+    add_executable(mailer_test novaworld/mailer_test.cpp)
+    target_link_libraries(mailer_test PRIVATE opennova_novaworld_server_core opennova_novaworld_service)
+    target_include_directories(mailer_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    add_test(NAME mailer COMMAND mailer_test)
+
     # The listing's owner end to end (host_keys): two in-process services (the
     # HTTP, NW UDP and gate listeners over one pooled database each, one with
     # ONNET_REQUIRE_HOST_KEY) and opennova-serve's Lister with
@@ -548,6 +558,23 @@ if(BUILD_NOVAWORLD_HTTP)
     opennova_add_pg_test(hosted_agent_route
         COMMAND hosted_agent_route_test $<TARGET_FILE:hosted_agent_route_test>)
     set_tests_properties(hosted_agent_route PROPERTIES TIMEOUT 180)
+
+    # The support tiers end to end against Stripe's TEST mode: an in-process service (the
+    # same nw_service_harness.h) with billing over the real curl transport; a Checkout
+    # session made through POST /api/billing/checkout and read back from Stripe, a second
+    # one expiring the first, the subscription Checkout would make, Stripe's webhook signed
+    # as Stripe signs it, and the entitlement GET /api/me/billing shows. Needs
+    # ONNET_STRIPE_TEST_SECRET_KEY (a test-mode key; locally from the vault through
+    # deploy/env/billing.e2e.env.tpl): without it, a skip the core suite accepts. A pg test
+    # besides; labelled `stripe`.
+    add_executable(billing_stripe_e2e_test novaworld/billing_stripe_e2e_test.cpp)
+    target_link_libraries(billing_stripe_e2e_test PRIVATE
+        opennova_novaworld_server_core opennova_novaworld_service)
+    target_include_directories(billing_stripe_e2e_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(billing_stripe_e2e_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    opennova_add_pg_test(billing_stripe_e2e COMMAND billing_stripe_e2e_test)
+    set_property(TEST billing_stripe_e2e APPEND PROPERTY LABELS stripe)
+    set_tests_properties(billing_stripe_e2e PROPERTIES TIMEOUT 300)
 endif()
 
 # The server binary's signal shutdown: SIGINT and SIGTERM each run main()'s

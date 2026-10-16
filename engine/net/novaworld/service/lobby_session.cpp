@@ -380,6 +380,17 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
                                            const std::string &remote_ip,
                                            uint16_t remote_port) {
 	const auto &name = inner_message.name;
+	// A statement carrying the session's Cookie list (the verify, play, host and GLSVSS
+	// requests) names the connection's retail login by its LOGINSESSIONTAG: the list is every
+	// name/value pair the game's pages hold, cookies included, so a client that logged in
+	// sends its tag (service policy: the admin's sessions view reads it, nothing gates on it).
+	// [orig: CNapiSession_ReadLocaleInfo @0x4ce390 fills the list from the game menu's store
+	//  ("*"); serialized by CNapiGameSession_SendVerifyRequest @0x4d3694,
+	//  CNapiGameSession_SendPlayRequest @0x4d39b0, CNapiGameSession_SendHostRequest
+	//  @0x4d37b4..0x4d37f6 and CNapiGameSession_SendGLSVSSRequest @0x4d3aa0]
+	if (const VarLists lists = extract_var_lists(inner_message); lists.count("Cookie")) {
+		state.login_session_tag = var_value(lists.at("Cookie"), "LOGINSESSIONTAG");
+	}
 	if      (name == "ClientConnected")             return handle_client_connected(inner_message, state);
 	else if (name == "ClientRequestVerifyResult")   return handle_client_request_verify_result(inner_message, state);
 	else if (name == "ClientHostRequest")           return handle_client_host_request(inner_message, state, remote_ip, remote_port);

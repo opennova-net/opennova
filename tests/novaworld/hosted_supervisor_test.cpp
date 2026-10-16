@@ -1488,17 +1488,68 @@ int test_reconciliation() {
 	TEST_EXPECT(hosted::request_stop(rig.db, lost, "done"));
 
 	// The resumed server's checks wait out its grace, unlisted and uncounted,
-	// and its listing comes back within it.
+	// and its listing comes back within it; past the grace a check finds it.
 	for (int i = 0; i < 2; ++i) {
 		rig.advance(rig.config.health_interval_ms);
 		rig.step();
 	}
 	TEST_EXPECT(rig.state(kept) == State::Running);
 	TEST_EXPECT(list_as(rig.db, *rig.server(kept)->service_user_id, 9104));
-	rig.advance(rig.config.listing_timeout_ms);
+	rig.advance(rig.config.relist_grace_ms);
 	rig.step();
 	TEST_EXPECT(rig.state(kept) == State::Running);
 	TEST_EXPECT(rig.state(lost) == State::Stopped);
+	return 0;
+}
+
+// The relist grace after the service's restart, on either driver: twice the
+// 240 s of receive silence past which a host's lister drops its dead
+// NOVAWORLDUDP session and re-hosts (the 2026-10-16 deploy's two servers
+// listed again 217 s and 228 s after the restart). A running server its agent
+// still reports, unlisted 300 s on, is not failed and lists again; one that
+// never lists again fails once the grace is out and its checks miss.
+int test_relist_grace() {
+	Rig rig("hosted_relist_grace");
+	TEST_EXPECT(rig.config.relist_grace_ms == 2 * 240 * 1000);
+	const int64_t alive = rig.request("relist_alive");
+	TEST_EXPECT(!rig.to_running(alive, 9201).empty());
+	const int64_t dead = rig.request("relist_dead");
+	TEST_EXPECT(!rig.to_running(dead, 9202).empty());
+	// The service restarts: the boot cleared its previous run's listings.
+	for (const uint32_t rid : { 9201u, 9202u })
+		hostdb::remove_host_by_rid(rig.db, rid);
+	rig.make_supervisor();
+	rig.advance(1000);
+	rig.sup->reconcile(rig.now);
+	const uint64_t restarted = rig.now;
+
+	// 300 s unlisted, their agent reporting both running every pass: no check
+	// counts (the listing timeout, 20 s here, is not the grace).
+	while (rig.now - restarted < 300 * 1000) {
+		rig.advance(rig.config.health_interval_ms);
+		rig.step();
+	}
+	TEST_EXPECT(rig.state(alive) == State::Running && rig.state(dead) == State::Running);
+	TEST_EXPECT(rig.running_container(alive) != nullptr && rig.running_container(dead) != nullptr);
+	TEST_EXPECT(rig.server(alive)->restarts == 0 && rig.server(dead)->restarts == 0);
+	TEST_EXPECT(list_as(rig.db, *rig.server(alive)->service_user_id, 9203));
+	// Up to the grace's end the checks still wait.
+	rig.advance(restarted + rig.config.relist_grace_ms - rig.config.health_interval_ms - rig.now);
+	rig.step();
+	TEST_EXPECT(rig.state(alive) == State::Running && rig.state(dead) == State::Running);
+	// Past it they count: the listed one passes them, and the one that never
+	// listed again fails at health_misses misses in a row.
+	for (int check = 1; check < rig.config.health_misses; ++check) {
+		rig.advance(rig.config.health_interval_ms);
+		rig.step();
+		TEST_EXPECT(rig.state(dead) == State::Running);
+	}
+	rig.advance(rig.config.health_interval_ms);
+	rig.step();
+	TEST_EXPECT(rig.state(alive) == State::Running);
+	const auto row = rig.server(dead);
+	TEST_EXPECT(row->state == State::Failed);
+	TEST_EXPECT(contains(row->failure_reason, "no listing at 3 health checks"));
 	return 0;
 }
 
@@ -1643,6 +1694,7 @@ int main(int argc, char **argv) {
 		{ "mass_stop_hold", test_mass_stop_hold },
 		{ "hold_releases", test_hold_releases },
 		{ "reconciliation", test_reconciliation },
+		{ "relist_grace", test_relist_grace },
 		{ "console_ring", test_console_ring },
 		{ "admin_links_follow_running", test_admin_links_follow_running },
 	};

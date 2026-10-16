@@ -4,7 +4,8 @@
 // API version's JSON shapes (basil: current_period_end on each subscription item). It
 // records every request, replays a POST's reply for a repeated idempotency key, honours
 // list pagination (newest first, limit, starting_after, has_more), and answers the next
-// calls with queued failures (fail_next), and holds every call at a gate while a test keeps
+// calls with queued failures (fail_next) and the next calls to one path with Stripe's refusal
+// (refuse_next), and holds every call at a gate while a test keeps
 // it closed (close_gate, wait_at_gate, open_gate). The test drives what Stripe would do on its own
 // side: complete_checkout (the customer paid), the maps themselves (a status change, a
 // renewal), delete_customer. Header-only; thread-safe through `mu` (the sync worker calls
@@ -121,6 +122,15 @@ public:
 				status == 429 ? "rate_limit_error" : "api_error", "fake: failure on request"));
 	}
 
+	// The next call to `path` (after the refusals already queued for it, and after any
+	// fail_next) answers `status` with Stripe's error body for an invalid request:
+	// `code` and `message`, as Stripe refuses a request the account's settings rule out.
+	void refuse_next(const std::string &path, int status, const std::string &code,
+			const std::string &message) {
+		std::lock_guard<std::mutex> lock(mu);
+		refusals_[path].push_back(error_reply(status, code, "invalid_request_error", message));
+	}
+
 	void add_price(const Price &price) {
 		std::lock_guard<std::mutex> lock(mu);
 		prices[price.id] = price;
@@ -207,6 +217,12 @@ public:
 		if (!failures_.empty()) {
 			billing::StripeReply reply = failures_.front();
 			failures_.pop_front();
+			return reply;
+		}
+		if (const auto refused = refusals_.find(request.path);
+				refused != refusals_.end() && !refused->second.empty()) {
+			billing::StripeReply reply = refused->second.front();
+			refused->second.pop_front();
 			return reply;
 		}
 		const bool post = request.method == billing::StripeRequest::Method::Post;
@@ -602,6 +618,7 @@ private:
 	bool gate_closed_ = false;
 	size_t gate_waiting_ = 0;
 	std::deque<billing::StripeReply> failures_;
+	std::map<std::string, std::deque<billing::StripeReply>> refusals_; // by path
 	std::map<std::string, std::pair<std::string, billing::StripeReply>> replayed_;
 };
 

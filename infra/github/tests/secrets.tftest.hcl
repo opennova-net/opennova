@@ -49,6 +49,7 @@ variables {
   billing_email          = "billing@example.com"
   members                = { mock-admin = "admin", mock-member = "member" }
   reference_assets_token = "github_pat_mock"
+  stripe_test_secret_key = "rk_test_mock"
 }
 
 run "reference_assets_token" {
@@ -61,5 +62,18 @@ run "reference_assets_token" {
   assert {
     condition     = github_actions_secret.reference_assets_token.value == var.reference_assets_token
     error_message = "the secret's value is the vault item reference-assets"
+  }
+}
+
+run "stripe_test_secret_key" {
+  command = plan
+
+  assert {
+    condition     = github_actions_secret.stripe_test_secret_key.repository == "opennova" && github_actions_secret.stripe_test_secret_key.secret_name == "STRIPE_TEST_SECRET_KEY"
+    error_message = "test-linux reads STRIPE_TEST_SECRET_KEY from opennova-net/opennova"
+  }
+  assert {
+    condition     = github_actions_secret.stripe_test_secret_key.value == var.stripe_test_secret_key
+    error_message = "the secret's value is the vault item stripe-test's ci_secret_key"
   }
 }

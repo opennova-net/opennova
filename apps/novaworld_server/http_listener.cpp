@@ -5,6 +5,7 @@
 #include "billing/billing_routes.h"
 #include "catalog_repository.h"
 #include "cd_key_routes.h"
+#include "connection_routes.h"
 #include "health.h"
 #include "host_routes.h"
 #include "hosted/console_routes.h"
@@ -13,7 +14,9 @@
 #include "hosted/net_cidr.h"
 #include "hosted/stats_routes.h"
 #include "http_cookies.h"
+#include "mailer.h"
 #include "nw_udp_listener.h"
+#include "password_reset_routes.h"
 #include "server_config.h"
 #include "session_store.h"
 #include "template_engine.h"
@@ -271,28 +274,21 @@ std::string cookie_summary(std::string_view header) {
 	return out;
 }
 
-const char *connection_state_name(ConnectionState s) {
-	switch (s) {
-	case ConnectionState::Handshaking: return "handshaking";
-	case ConnectionState::Active:      return "active";
-	case ConnectionState::Closing:     return "closing";
-	}
-	return "unknown";
-}
-
 } // namespace
 
 struct HttpListener::Impl {
 	explicit Impl(db::ConnectionPool &pool) :
 			access(app, pool),
 			hosts(access, pool),
+			connections(access, pool),
 			hosted_servers(access, pool),
 			fleet(access, pool),
 			stats(access, pool),
 			console(access, pool),
 			cd_keys(access, pool),
 			users(access, pool),
-			billing(access, pool) {}
+			billing(access, pool),
+			resets(access, pool) {}
 
 	WebApp app;
 	// start()'s handshake with the Crow thread: Pending until Crow serves
@@ -309,6 +305,8 @@ struct HttpListener::Impl {
 	WebAccess access;
 	// The listed servers' routes (host_routes.h), over `access`.
 	HostRoutes hosts;
+	// The admin's NovaWorld sessions (connection_routes.h).
+	ConnectionRoutes connections;
 	// The hosted servers' routes (hosted/hosted_routes.h), over `access`.
 	hosted::HostedRoutes hosted_servers;
 	// The admin's fleet view and the machines' routes (hosted/fleet_routes.h).
@@ -323,6 +321,8 @@ struct HttpListener::Impl {
 	AdminUserRoutes users;
 	// The support tiers' routes (billing/billing_routes.h).
 	billing::BillingRoutes billing;
+	// The password reset routes (password_reset_routes.h).
+	PasswordResetRoutes resets;
 	// The games catalogue, loaded once in start() before the routes register
 	// and never written after, so handlers read it without a lock.
 	catalog::GameCatalog games;
@@ -363,6 +363,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->access.configure(config);
 
 	public_host_ = public_host; // host_url() / gsb_url(), with the port Crow binds
+	site_url_ = config.site_url; // the welcome mail's link
 
 	// The games catalogue the retail routes answer from (one lobby per title):
 	// each row's .gsb route registers below, and each retail page fills in its
@@ -378,12 +379,16 @@ bool HttpListener::start(const ServerConfig &config) {
 
 	register_admin_api_routes(public_host);
 	register_public_api_routes();
+	impl_->resets.register_routes(impl_->app, mail_, config.site_url,
+			[this](int64_t id) { forget_revoked_account(id); });
 	impl_->hosts.register_routes(impl_->app, nw_udp_);
+	impl_->connections.register_routes(impl_->app, manager_, nw_udp_);
 	impl_->hosted_servers.configure(config, fleet_placement_);
 	impl_->hosted_servers.register_routes(impl_->app);
 	impl_->fleet.configure(impl_->hosted_servers.enabled(), impl_->hosted_servers.provider(),
 			impl_->hosted_servers.cap());
 	impl_->fleet.register_routes(impl_->app);
+	impl_->stats.configure(fleet_slot_memory_mb_, fleet_slot_cpus_);
 	impl_->stats.register_routes(impl_->app, admin_links_);
 	impl_->console.set_handler_threads(handler_threads());
 	impl_->console.register_routes(impl_->app, admin_links_);
@@ -521,10 +526,10 @@ std::string HttpListener::gsb_url(const catalog::GameRow &game) const {
 	return "http://" + public_host_ + ":" + std::to_string(impl_->app.port()) + game.gsb_route();
 }
 
-// Admin REST API: server status, dev host injection, connection dump, the
-// listing dump with its joiners (/api/hosts), the unknown-message samples
-// (/api/unknowns), and the user routes (admin_user_routes.h; the listed
-// servers and their pushes are host_routes.h's). Every
+// Admin REST API: server status, dev host injection, the listing dump with
+// its joiners (/api/hosts), the unknown-message samples (/api/unknowns), and
+// the user routes (admin_user_routes.h; the listed servers and their pushes
+// are host_routes.h's, the NovaWorld sessions connection_routes.h's). Every
 // handler opens with WebAccess::require_admin: the Bearer
 // ADMIN_API_TOKEN, or an admin-role website session (with the CSRF header on a
 // state change).
@@ -639,34 +644,6 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		out["game"] = row.game;
 		out["server_name"] = row.server_name;
 		crow::response res(201);
-		res.body = out.dump();
-		res.set_header("Content-Type", "application/json");
-		return res;
-	});
-
-	// Connection-registry debug dump.
-	CROW_ROUTE(app, "/api/admin/connections")([this](const crow::request &req) {
-		auto caller = impl_->access.require_admin(req);
-		if (caller.refusal) return std::move(*caller.refusal);
-		auto snapshot = manager_.registry().snapshot();
-		crow::json::wvalue out;
-		out["count"] = snapshot.size();
-		out["heartbeat_timeout_ms"] = manager_.heartbeat_timeout_ms();
-		std::vector<crow::json::wvalue> entries;
-		entries.reserve(snapshot.size());
-		for (const auto &c : snapshot) {
-			crow::json::wvalue e;
-			e["id"]            = c.id;
-			e["state"]         = connection_state_name(c.state);
-			e["pn"]            = c.pn;
-			e["identity"]      = c.identity;
-			e["created_ms"]    = c.created_ms;
-			e["last_seen_ms"]  = c.last_seen_ms;
-			e["addr"]          = peer_addr_to_string(c.addr);
-			entries.push_back(std::move(e));
-		}
-		out["connections"] = std::move(entries);
-		crow::response res(200);
 		res.body = out.dump();
 		res.set_header("Content-Type", "application/json");
 		return res;
@@ -886,8 +863,12 @@ void HttpListener::register_public_api_routes() {
 	// Server auto-generates a unique 8-hex-char PCID. nwhandle defaults
 	// to username when omitted; either takes create_user's rules (a username
 	// of at most 64 bytes, a handle of at most 30, no control byte in either).
-	// Returns the new user's public record on success; 400 on conflict /
-	// missing or refused fields, 500 on DB error.
+	// The email is required: an address normalize_email takes (stored
+	// lowercased) that no other account has (400 email_exists). Returns the
+	// new user's public record on success; 400 on conflict / missing or refused
+	// fields, 500 on DB error. Once the account is made, its welcome mail is
+	// posted to the outbox: a mail that is not sent is logged, never the
+	// registration's failure.
 	// The X-OpenNova-Request header is required, checked first: a cross-site
 	// text/plain form can carry a JSON body (the parse ignores Content-Type),
 	// so without it any page could make its visitors create accounts and drain
@@ -906,14 +887,10 @@ void HttpListener::register_public_api_routes() {
 		const std::string username = body->text_or("username", "");
 		const std::string password = body->text_or("password", "");
 		const std::string nwhandle = body->text_or("nwhandle", username);
+		const std::string email = body->text_or("email", "");
 		if (body->wrong_type()) return json_error(400, "invalid_field");
-		if (username.empty() || password.empty()) {
-			crow::response res(400);
-			res.body = "{\"error\":\"missing_field\","
-			           "\"message\":\"username and password required\"}";
-			res.set_header("Content-Type", "application/json");
-			return res;
-		}
+		if (username.empty() || password.empty() || email.empty())
+			return json_error(400, "missing_field", "username, password and email required");
 		auto db_conn = db_pool_.acquire();
 		// Try up to 5 random PCIDs to avoid the rare collision.
 		MutationResult result;
@@ -925,6 +902,7 @@ void HttpListener::register_public_api_routes() {
 			p.pcid     = pcid;
 			p.nwh      = "1";
 			p.nwhandle = nwhandle;
+			p.email    = email;
 			result = create_user(*db_conn, p);
 			if (result.ok || result.error_code != "pcid_exists") break;
 		}
@@ -942,6 +920,7 @@ void HttpListener::register_public_api_routes() {
 		out["user"] = created ? user_to_json(*db_conn, *created) : crow::json::wvalue{};
 		std::printf("[http] /api/register -> created user '%s' (id=%lld)\n",
 		            loggable(username).c_str(), static_cast<long long>(result.id));
+		if (created) post_mail(mail_, welcome_mail(created->email, created->username, site_url_));
 		crow::response res(201);
 		res.body = out.dump();
 		res.set_header("Content-Type", "application/json");

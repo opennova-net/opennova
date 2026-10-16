@@ -186,6 +186,26 @@ it prunes `active_hosts` rows whose `updated_at` (refreshed by every
 This only catches rows the normal teardown somehow missed; `host_players` rows
 cascade. At boot the table is wiped entirely (previous-run cleanup).
 
+**The admin's view** (`connection_routes.*`, the site's admin page `/admin/sessions`):
+every session the registry holds, who it is and the server it lists, and an end. A
+session's account is the listing's owner while it hosts (the one rule `GET
+/api/admin/hosts` applies, `listing_owner`), else the account whose live retail login
+its latest `Cookie` list named: a stock client's verify, play, host and GLSVSS requests
+carry every name/value pair its pages hold, so after the web login they carry its
+`LOGINSESSIONTAG` (`LobbyState::login_session_tag`; an ended login names no one). The
+registry stamps the steady clock, which counts from the machine's boot, so the route
+sends each time as the wall time less its age.
+
+| Route | Access | Replies |
+| --- | --- | --- |
+| `GET /api/admin/connections` | admin | `{"count", "heartbeat_timeout_ms", "connections"}`, each `id` (the registry's), `state` (`handshaking`, `active`, `closing`), `pn`, `identity` (the ClientAuth `NA`, the game tag: `jop:cus2`), `addr`, `created_ms` and `last_seen_ms` (Unix epoch ms), `account` (`{id, username, via}`, `via` `host_key` or `login`; null while neither names one) and `host` (while it hosts: `rid`, `server_name`, `mission_name` (UTF-8), `players`, `max_players`, `listed` (false while it waits out of the browser for a HostKey naming an account) and `hosted_server_id` (null unless it is a live hosted server's listing); else null) |
+| `POST /api/admin/connections/<id>/end` | admin | `{"addr"}`, the address the list showed beside the id (a freed CI can name another session). 202 `{"status": "queued", "id", "addr"}`: the receive thread latches the pending-disconnect record `{1, 8, 0, 0, "", 0, "NP.C:PMP:PDESTME"}`, sends the client its `ServerGoodBye` burst (CS field 1 times, keyed by its CK; none to a session still signing in) and drops the connection (`Logout`), as the NAPI server role ends a connection it asked to disconnect (the service's end itself is service policy). 400 `invalid_json`, `invalid_field`, `missing_field`; 404 `not_found` for an id no connection holds; 409 `connection_changed` (the id names another address now), `hosting` (with its listing's `rid`: `POST /api/admin/hosts/<rid>/stop` ends it, as ending its session would only park the listing for the reconnect's re-host) or `not_lobby` (a game connection); 503 with no NW UDP listener. Logged as every admin state change is, with the actor and status, and with the session's id, address and game tag; no rate limit, as no admin write has one |
+
+The page lists them sortable by session, account, connection time (newest first) and
+last heard; it shows when each connected in UTC and for how long, links the account to
+its admin page and a hosted server to its fleet page, and ends a session (or, on a
+hosting one, stops its server) after a confirmation.
+
 ## Pushing statements to a listed server
 
 The service can send a hosting connection retail's two administrative statements over
@@ -590,7 +610,13 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   loses that hour's names), and a mission is counted when a game-scene sample sees one
   other than the last such sample's; both are approximations, and the replies say so.
   Samples are kept 48 hours, hours 90 days; the routes read the samples for 1h and 24h
-  and the hours for 7d and 30d.
+  and the hours for 7d and 30d. The admin's usage view (`GET /api/admin/hosted/usage`)
+  reads every live server's newest sample and its last hour of them, nothing sampled
+  anew; the site's **Server usage** page (`/admin/usage`) shows it, read again every
+  30 s: the fleet's totals as tiles, each live machine's share, and each live server by
+  machine and slot, memory in binary units (MiB, GiB), the rate sent to players in bits a
+  second (Mb/s) and the bytes sent in decimal units (MB, GB). The agents report what
+  each slot sends, not what it receives, so the view has no inbound figure.
 - **The admin link** (`hosted/admin_link.*`; ADR 0053 d5). A running server opens
   retail's remote admin on its `game.cfg`'s `remote_admin_port`, its slot's admin port,
   its `admin.cfg` granting the user `svc` (a 31-character random password, new at every
@@ -641,10 +667,13 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   that no live row names is terminated; a live row whose cloud machine is gone ends, its
   servers placed again with no restart counted (a `stopping` one is stopped); a server
   whose files went with the service (`booting`, its container never reported) is placed
-  again; the rest resume where they were (a running one gets the listing timeout for its
-  lister to re-host before the health checks count, since the boot cleared the previous
-  run's listings), their containers answered for without files. A driver that cannot
-  list ends nothing. Every 5 min the sweep half runs again.
+  again; the rest resume where they were, their containers answered for without files.
+  A running one gets 8 min on either driver (`relist_grace_ms`) to list again before
+  its health checks count: the boot cleared the previous run's listings, and its
+  `opennova-serve` drops the NovaWorld session the restart left dead only after 240 s
+  of silence (the service's advertised timeout, retail's), then reconnects and lists
+  again; the grace is twice that. A driver that cannot list ends nothing. Every 5 min
+  the sweep half runs again.
 - **Service accounts.** Each hosted server lists itself with an account of its own,
   `srv-<id>` (`players.kind = 'service'`), minted at its first start with a 32-character
   password from the OS CSPRNG (bcrypt, as every account), whose password is set again at
@@ -780,6 +809,7 @@ service's own message, never database text.
 | `POST /api/admin/fleet/roll` | admin | a fleet roll: every machine that takes servers (launching, booting, ready) drains, its servers moving to machines launched for them, so a new serve image or launch template reaches the fleet; 202 `{"draining": <how many>, "machines": [<their ids>]}` |
 | `GET /api/admin/hosted/<id>/stats` | admin | any server's stats, as the owner's; 404 `not_found` |
 | `GET /api/admin/hosted/stats` | admin | the fleet's: every server together, as the account's |
+| `GET /api/admin/hosted/usage` | admin | what every live server (any state but `stopped` and `failed`, on any machine) uses of its slot, from the samples: `{"at", "window_seconds", "slot_memory_bytes", "slot_cpus", "totals", "machines", "servers"}`. `at` now (ISO 8601 UTC); `window_seconds` 3600, the last hour; `slot_memory_bytes` and `slot_cpus` each container's limits (`ONNET_FLEET_SLOT_MEMORY_MB`, `ONNET_FLEET_SLOT_CPUS`); `totals` the fleet's `servers_live`, `machines_live`, `slots` and `slots_used` (over the live machines) and the usage fields over every live server; `machines` each live machine by id (`id`, `kind`, `state`, `instance_type`, `slots`, `slots_used` and the usage fields over the servers on it); `servers` by machine, then slot, the ones placed nowhere last by id, each `id`, `name`, `state`, `own_machine`, `owner` (`{id, username}`, null once the account is gone), `machine_ref` and `slot` (null with none), `uptime_seconds` (while running, else null), its newest sample within 3 minutes (`sample_at`, `players`, `max_players`, `cpu_percent` (0..100 of the slot's CPUs), `memory_bytes`, `egress_bytes_per_second` (that minute's bytes over 60 s), each null without one) and `window`, its samples in the window summed up (`minutes`, `cpu_percent_mean`, `cpu_percent_peak`, `memory_bytes_peak`, `egress_bytes`). The usage fields: `reporting` (the servers whose newest sample carries their agent's CPU and memory), `players`, `memory_bytes` and `memory_limit_bytes` (the reporting servers' memory and their slots' limits), `cpus_used` and `cpus_limit` (likewise, in CPUs), `egress_bytes_per_second` (the newest samples' rates added up) and `egress_bytes_window`. 429 past the caller's stats bucket; `Cache-Control: no-store` |
 | `POST /api/admin/hosted/<id>/stop` | admin | 404 `not_found`, 409 `not_live`, else 202 `{"server"}` |
 | `POST /api/admin/hosted/stop-all` | admin | the kill switch: every live server to `stopping`; 200 `{"stopping": <how many>}` |
 
@@ -916,6 +946,14 @@ site. Everything here is service policy (`billing/`).
 | `ONNET_BILLING_AUTOMATIC_TAX` | off | `1` turns Stripe Tax on in Checkout (it collects the customer's address). |
 | `ONNET_BILLING_RECONCILE_MINUTES` | 360 | The full reconcile's period, 5 to 10080. |
 
+A Stripe call a route makes that fails (no answer, or a refusal) is 503
+`stripe_unavailable`, never 502: Cloudflare answers an origin's 502 or 504 with a page of
+its own, so the site's page would not see the reply's code. The route's log line names
+Stripe's status, error code and message (`[billing] account '<name>' (id=<n>) checkout ->
+no session: rejected 400 (<code>): <message>`); a refusal of every Checkout session is a
+setting of the Stripe account, such as the terms of service URL Checkout's consent box
+needs (DEPLOY.md, "Monthly support tiers (Stripe)").
+
 Billing is on only when the whole set is complete and well-formed (`REPLACE_ME`, the
 vault's placeholder, counts as unset); otherwise the boot logs `[boot] WARN billing:
 <what is missing>; billing off`, the routes below answer 503 `billing_disabled` (the tiers
@@ -928,13 +966,13 @@ compose stack takes the test-mode set from the vault through
 | --- | --- | --- |
 | `GET /api/billing/tiers` | public | `{"enabled", "currency", "tiers": [{tier, max_servers, amount, interval: "month"}], "own_machine": {amount, interval} \| null}`: `enabled` is billing on with its prices checked out; each `amount` the price sold now in the currency's smallest unit, null until read |
 | `GET /api/me/billing` | a website session | `{"enabled", "max_servers", "comp_servers", "own_machines", "used", "stopping", "can_start", "subscription", "own_machine_subscription", "can_manage", "can_subscribe"}`: `used` the account's live hosted servers, `stopping` how many of those are stopping (the owners' limits count the rest); `subscription` the support tier shown (a granting one, the highest tier, else the newest still open): `{tier, status, entitled, current_period_end (ISO 8601 UTC), cancel_at_period_end}` or null; `own_machine_subscription` `{quantity, status, current_period_end, cancel_at_period_end}` or null; `can_manage` the account has a Stripe customer; `can_subscribe` the prices check out, the account is an active player's and no tier grants. `Cache-Control: no-store` |
-| `POST /api/billing/checkout` | a website session, the CSRF header | `{"item": "tier1" \| "tier2" \| "tier3" \| "own_machine"}`; 429 past the account's bucket (6, then one every 20 s, shared with the portal); 400 `invalid_json` or `invalid_item`; 503 `billing_misconfigured`; 409 `checkout_in_progress` while another checkout of the account is running (one at a time); 403 `not_eligible` (an account not active, or the add-on with no tier granting); 409 `already_subscribed` while a tier grants (the portal changes it); 409 `own_machine_limit` for the add-on once the account has an own machine for every server it may run (each add-on checkout sells one; several are fine below that); 502 `stripe_unavailable`; 200 `{"url"}`. The account's previous session is settled first: expired while open; once complete (paid, the webhook perhaps still on its way), the customer is synced from Stripe and the checkout judged again, so nothing is sold twice (502 when Stripe cannot say). Its customer is made at its first checkout (idempotency key `opennova-<instance>-customer-<id>`), and made again in place of a row of the other Stripe mode; the session asks for the terms of service, lives an hour from its creation (Stripe refuses under 30 min) and stamps the instance and the account on the subscription it makes |
-| `POST /api/billing/portal` | a website session, the CSRF header | 429 (the checkout bucket); 404 `no_billing_account`; 502 `stripe_unavailable`; 200 `{"url"}` |
-| `POST /api/me/billing/sync` | a website session, the CSRF header | the account's customer read back from Stripe now (the success page's, before the webhook comes); 429 past its bucket (3, then one every 10 s); 404 `no_billing_account`; 502 `stripe_unavailable`; else as `GET /api/me/billing` |
+| `POST /api/billing/checkout` | a website session, the CSRF header | `{"item": "tier1" \| "tier2" \| "tier3" \| "own_machine"}`; 429 past the account's bucket (6, then one every 20 s, shared with the portal); 400 `invalid_json` or `invalid_item`; 503 `billing_misconfigured`; 409 `checkout_in_progress` while another checkout of the account is running (one at a time); 403 `not_eligible` (an account not active, or the add-on with no tier granting); 409 `already_subscribed` while a tier grants (the portal changes it); 409 `own_machine_limit` for the add-on once the account has an own machine for every server it may run (each add-on checkout sells one; several are fine below that); 503 `stripe_unavailable`; 200 `{"url"}`. The account's previous session is settled first: expired while open; once complete (paid, the webhook perhaps still on its way), the customer is synced from Stripe and the checkout judged again, so nothing is sold twice (503 when Stripe cannot say). Its customer is made at its first checkout (idempotency key `opennova-<instance>-customer-<id>`), and made again in place of a row of the other Stripe mode; the session asks for the terms of service, lives an hour from its creation (Stripe refuses under 30 min) and stamps the instance and the account on the subscription it makes |
+| `POST /api/billing/portal` | a website session, the CSRF header | 429 (the checkout bucket); 404 `no_billing_account`; 503 `stripe_unavailable`; 200 `{"url"}` |
+| `POST /api/me/billing/sync` | a website session, the CSRF header | the account's customer read back from Stripe now (the success page's, before the webhook comes); 429 past its bucket (3, then one every 10 s); 404 `no_billing_account`; 503 `stripe_unavailable`; else as `GET /api/me/billing` |
 | `POST /api/billing/webhook` | Stripe's signature | above |
 | `GET /api/admin/billing` | admin | `{"enabled", "mode" ("test" \| "live"), "prices_ok", "prices_error", "last_reconcile_at" (ISO or null), "last_reconcile_error", "pending_events", "subscriptions" (each row with an account: `user_id`, `username`, `stripe_customer_id`, `stripe_subscription_id`, `item`, `tier`, `quantity`, `status`, `entitled`, `current_period_end`, `cancel_at_period_end`), "duplicates" (account ids), "unknown_prices" (the prices of our subscriptions that would grant but that no `STRIPE_PRICE_*` list names, as the last reconcile found them), "orphans" (`stripe_customer_id`, `stripe_subscription_id`, `username_hint`, `status`), "recent_events" (the newest 50: `event_id`, `type`, `received_at`, `outcome`), "limits_hold", "limits_hold_reason", "limits_hold_owners" and "limits_hold_servers" (the hosted servers' limits hold and the stops it keeps back, "Hosted servers" above)}; with billing off `{"enabled": false}` and the limits hold alone; `Cache-Control: no-store` |
 | `POST /api/admin/billing/reconcile` | admin | no body or `{}`: a full reconcile on the worker's next pass, at once: 202 `{"reconcile": "requested", "force_limits": false}`; `{"force_limits": true}` also has the supervisor's next pass apply the stops the limits hold keeps back (`"force_limits": true`); 400 `invalid_json`, `invalid_field`; with billing off 503, but an override still applies (202 `{"reconcile": "off", "force_limits": true}`) |
-| `POST /api/admin/billing/link` | admin | `{"user_id", "stripe_customer_id"}`: the customer (an orphan's) made the account's, its metadata stamped with this instance and the account, then synced; 400 `invalid_json`, `missing_field`, `invalid_field`; 404 `not_found` (no such player, or a customer Stripe does not know); 502; 200 `{"user_id", "stripe_customer_id", "outcome"}` |
+| `POST /api/admin/billing/link` | admin | `{"user_id", "stripe_customer_id"}`: the customer (an orphan's) made the account's, its metadata stamped with this instance and the account, then synced; 400 `invalid_json`, `missing_field`, `invalid_field`; 404 `not_found` (no such player, or a customer Stripe does not know); 503 `stripe_unavailable`; 200 `{"user_id", "stripe_customer_id", "outcome"}` |
 
 `DELETE /api/admin/users/<id>` answers 409 `active_subscription` while a subscription of
 the account still grants: Stripe would bill an account that is gone, so it is canceled
@@ -1043,7 +1081,8 @@ game session; the `nw_host_register_e2e` harness turns it on (default off: the s
 runs no game host).
 Billing takes the `STRIPE_*` set and `ONNET_SITE_URL`, `ONNET_STRIPE_CURL`,
 `ONNET_BILLING_AUTOMATIC_TAX` and `ONNET_BILLING_RECONCILE_MINUTES` ("Billing (monthly
-support tiers)" above).
+support tiers)" above). Outbound mail takes `ONNET_MAIL_FROM`, `ONNET_MAIL_REGION` and
+`ONNET_SITE_URL` ("Account email and password resets" below).
 Seeding: `SEED_DEV_USERS=1` applies the dev-only `0002_dev_users.sql` (the
 `test`/`foo` accounts) — leave unset in production. Build + run via Docker:
 [`Dockerfile`](Dockerfile) and the compose files under [`deploy/`](../../deploy/).
@@ -1235,6 +1274,61 @@ the known addresses and the credentials generation below.
   may demote themselves: the Bearer token can always promote again, and with no admin
   left `ONNET_BOOTSTRAP_ADMIN` works once more.
 
+## Account email and password resets
+
+Every account a person registers has an email address (`players.email`,
+`backend/migrations/0005_account_email.sql`): the welcome mail goes there, and so do the
+password reset links. Service policy, not a port: retail's NovaWorld accounts had no
+email the service kept.
+
+- **The address.** `POST /api/register` requires `email` (400 `missing_field` without
+  it). `normalize_email` (`auth.h`) takes at most 254 bytes with exactly one `@`, a local
+  part, and a domain of at least two dot-separated labels, with no space or control byte
+  (400 `invalid_field` otherwise), and stores it with its ASCII letters lowercased, so one
+  address names one account however it was typed: a unique index refuses a second one
+  (400 `email_exists`), and a `CHECK` refuses an upper-case or empty one. The admin's
+  `POST /api/admin/users` takes an optional `email` under the same rules. Accounts older
+  than the column, service accounts and an admin's accounts made without one have none
+  (`NULL`); nothing is backfilled. Every admin user route answers `email` (null for
+  none), read-only: no route changes it.
+- **The welcome mail.** Once `POST /api/register` has made the account, it posts the
+  welcome mail (who we are, the account's name, a link to the site). A mail that does not
+  go out is logged, never the registration's failure.
+- **`POST /api/auth/forgot`** `{email}`: the CSRF header first, then 10 per client
+  address (/64) and one every 3 min, the body (400 `invalid_json`, `invalid_field`,
+  `missing_field`), then 3 per email address and one every 20 min, counted whether or not
+  an account has it (429 `rate_limited` with `Retry-After` past either). Then 202 with no
+  body, the same for every address: when an active player's account has it, a reset link
+  is minted (32 bytes from the OS CSPRNG as 64 hex digits; `password_resets` keeps its
+  SHA-256 alone, an hour, one per account, so a newer request replaces the older link) and
+  mailed to the address as `https://<ONNET_SITE_URL>/reset?token=<token>`. The mail goes
+  out off the request's thread, so the reply's timing does not tell either.
+- **`POST /api/auth/reset`** `{token, password}`: the CSRF header, 10 per client address
+  and one every 3 min, the body; then the token is spent (its row deleted) before the
+  password is hashed, so a link works once and a wrong token costs no bcrypt run: 400
+  `invalid_token` for one that is malformed, unknown, spent or past its hour. The password
+  is then set as an admin reset sets it (`update_user`): the credentials generation moves,
+  and the account's website sessions, its retail login's session row, its hosting keys and
+  its retail pins end. 204. The main tick's sweep prunes links past their hour.
+- **The mailer** (`mailer.h`). The routes post to a `MailOutbox`, whose one worker
+  thread sends each message in turn (at most 100 waiting; a post past them is dropped,
+  logged) and logs each as one line: `[mail] sent <template> to '<address>' (message id
+  ...)`, or `[mail] WARN <template> to '<address>' not sent: <why>`, never the body. The
+  `SesMailer` runs the AWS CLI's `sesv2 send-email` through the command runner, as the EC2
+  machine driver does, on the service instance's role: the request (from `OpenNova
+  <ONNET_MAIL_FROM>`, the recipient, the subject, a plain-text and a minimal HTML body) in
+  a JSON file of its own, owner-only in an owner-only scratch directory and deleted once
+  the CLI ends, so no address or link is on a command line. Each template's text names the
+  account and carries its link; the HTML escapes the name. Infrastructure: the domain's
+  SES identity, its DKIM and MAIL FROM records and the role's permission
+  (`infra/aws/mail.tf`; DEPLOY.md, "Outbound mail (SES)").
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `ONNET_MAIL_FROM` | none | The sender's address, in lower case (`support@<domain>`; infra.env names it). Unset, mail is off: each mail is logged as not sent. |
+| `ONNET_MAIL_REGION` | none | Amazon SES's region (infra.env's). |
+| `ONNET_SITE_URL` | none | The site's origin the mails link to (billing reads it too). Mail is on only with all three; a sender without a site URL or a region boots with mail off and a warning naming why. |
+
 ## Build layout and tests
 
 Every source but `main.cpp` builds as the static library
@@ -1340,8 +1434,9 @@ stopping, the crash restarts (an exit, the OOM kill, a failed start, a refused l
 their limit and the restart window, the timeouts, the health checks, a lost machine
 placing its server again with no restart counted, the owners' changes including a
 withdrawn comp grant and a canceled support tier, the owners' limits (a tier lowered, past
-due, the add-on cut) and their mass-stop hold, the reconciliation, the console ring's cap,
-and the admin links following the running servers; `hosted_fleet`
+due, the add-on cut) and their mass-stop hold, the reconciliation and the relist grace
+after a restart, the console ring's cap, and the admin links following the running
+servers; `hosted_fleet`
 ([`tests/novaworld/hosted_fleet_test.cpp`](../../tests/novaworld/hosted_fleet_test.cpp),
 every build) the fleet's side over the same fake: the desired state each sync gets (the
 files until reported, a stopping server's unstarted container, the drain flag, a
@@ -1397,6 +1492,17 @@ command in step), the status poll, the reconnect after the child is killed and s
 again on the same port, `QUIT` at the end, and the password in no log or console line;
 `admin_protocol` and `admin_server` pin the reply-count table itself, against the
 engine's own console.
+
+Account email: the route harness's `register_ok` and `register_duplicate` cases the
+required, refused and taken addresses and the welcome mail (the first listener's mail goes
+to a recording mailer through a real outbox), its `password_reset`, `password_reset_links`
+and `password_reset_brakes` cases the reset routes (the same 202 for every address, the
+link's token kept as its hash, its one use, its hour, a newer link replacing the older, an
+inactive account getting none, the sessions and the old password ending, both brakes);
+`mailer` (`BUILD_NOVAWORLD_HTTP`, database-free) the address rule, the SES mailer on a stub
+`CommandRunner` (its argv, the request file owner-only and gone after, the CLI's failures),
+the outbox's order, bound and stop and the templates; `backend_schema` the column, its
+index and rules and `password_resets`.
 
 The support tiers: `billing_stripe` (every build) the transport, the typed client, the
 webhook signature and the settings; `billing_entitlement`

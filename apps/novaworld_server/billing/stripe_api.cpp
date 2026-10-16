@@ -90,6 +90,8 @@ std::string scrub(std::string text, const std::string &secret) {
 // however often it arrives (a GET, a POST with its idempotency key) that met no
 // answer, a 429 or a 5xx.
 bool retryable(const StripeRequest &request, const StripeReply &reply) {
+	if (request.method == StripeRequest::Method::Delete)
+		return false;
 	if (request.method == StripeRequest::Method::Post && request.idempotency_key.empty()) return false;
 	if (reply.outcome == StripeReply::Outcome::Unreachable) return true;
 	return reply.status == 429 || reply.status >= 500;
@@ -184,7 +186,10 @@ std::string CurlStripeApi::config_text(const StripeRequest &request, std::string
 
 	std::string text;
 	text += "url = " + *url_value + "\n";
-	text += std::string("request = ") + (post ? "\"POST\"" : "\"GET\"") + "\n";
+	const char *verb = post ? "\"POST\"" : "\"GET\"";
+	if (request.method == StripeRequest::Method::Delete)
+		verb = "\"DELETE\"";
+	text += std::string("request = ") + verb + "\n";
 	text += "header = " + *auth + "\n";
 	text += "header = " + *version + "\n";
 	if (post) {

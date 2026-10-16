@@ -5,14 +5,17 @@
 // (stats_sampler.h), their hourly rollups, each machine's egress by the
 // calendar month, and the reads the stats routes answer from (stats_routes.h):
 // one server's, an account's servers' together, or the whole fleet's, over a
-// range, as a summary and a series of points. Counts alone: no player's name
-// is stored. Crow-free. Each function throws db::Error on a database failure.
+// range, as a summary and a series of points; and every server's newest
+// sample with its last hour summed up (the admin's usage view). Counts alone:
+// no player's name is stored. Crow-free. Each function throws db::Error on a
+// database failure.
 // Service policy, not a port.
 
 #include <net/novaworld/db/database.h>
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -105,6 +108,22 @@ std::vector<StatsPoint> stats_series(db::Database &db, const StatsScope &scope, 
 int64_t machine_egress_month(db::Database &db, int64_t machine_id, int64_t now);
 // Server `server_id`'s newest sample no older than `max_age_s` at `now`.
 std::optional<ServerSample> latest_sample(db::Database &db, int64_t server_id, int64_t now, int64_t max_age_s);
+// Every server's newest sample taken at or after `since` (Unix seconds), by
+// server (the admin's usage view, GET /api/admin/hosted/usage).
+std::map<int64_t, ServerSample> latest_samples_since(db::Database &db, int64_t since);
+
+// A server's samples taken at or after a time, summed up: how many, its mean
+// and peak CPU (of the slot's CPUs, 0..100) and its peak memory over the ones
+// that carry them (unset with none), and the bytes its slot sent.
+struct SampleWindow {
+	int64_t minutes = 0;
+	std::optional<double> cpu_percent_mean;
+	std::optional<double> cpu_percent_peak;
+	std::optional<int64_t> memory_bytes_peak;
+	int64_t egress_bytes = 0;
+};
+// Every server's samples taken at or after `since` (Unix seconds), by server.
+std::map<int64_t, SampleWindow> sample_windows_since(db::Database &db, int64_t since);
 // How long server `server_id` has been running at `now`, in seconds; nullopt
 // when it is not running.
 std::optional<int64_t> running_seconds_of(db::Database &db, int64_t server_id, int64_t now);

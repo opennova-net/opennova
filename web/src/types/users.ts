@@ -15,6 +15,9 @@ export interface User {
   nwh: string;
   nwhandle: string;
   account_status: string;
+  // The account's email address (players.email, lowercased), null for none:
+  // read-only on the admin pages.
+  email: string | null;
   role: Role;
   // An admin's grant of hosted servers (players.comp_servers, 0 to 16).
   comp_servers: number;
@@ -69,6 +72,7 @@ export interface CreateUserPayload {
   pcid: string;
   nwhandle: string;
   nwh?: string;
+  email?: string;
 }
 
 export interface UpdateUserPayload {
@@ -84,6 +88,8 @@ export interface RegisterPayload {
   username: string;
   password: string;
   nwhandle?: string;
+  // Required: the welcome mail and the password reset links go here.
+  email: string;
 }
 
 // The public registration's reply.

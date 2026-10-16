@@ -67,6 +67,7 @@
                 <RouterLink :to="`/admin/users/${u.id}`" class="text-accent hover:text-ink-bright">{{ u.username }}</RouterLink>
                 <span v-if="isSelf(u)" class="ml-1 text-xs font-normal text-ink-muted">(you)</span>
                 <span class="block text-xs font-normal text-ink-muted">Account {{ u.id }}</span>
+                <span v-if="u.email" class="block break-all text-xs font-normal text-ink-muted">{{ u.email }}</span>
               </th>
               <td class="px-4 py-3"><span :class="roleBadgeClass(u.role)">{{ u.role === 'admin' ? 'Admin' : 'Player' }}</span></td>
               <td class="whitespace-nowrap px-4 py-3">
@@ -116,6 +117,13 @@
           <input v-model="newUser.nwhandle" required autocomplete="off" aria-describedby="users-create-handle-hint" :class="inputClass" />
           <span id="users-create-handle-hint" class="block text-xs text-ink-muted">The player's name in the game.</span>
         </label>
+        <label class="space-y-1">
+          <span :class="labelClass">Email</span>
+          <input v-model="newUser.email" type="email" required autocomplete="off" aria-describedby="users-create-email-hint" :class="inputClass" />
+          <span id="users-create-email-hint" class="block text-xs text-ink-muted">
+            The player's address. Made without a PCID, the account gets the welcome mail.
+          </span>
+        </label>
         <div class="flex justify-end sm:col-span-2">
           <button type="submit" :disabled="creating" :class="primaryButton">{{ creating ? 'Creating…' : 'Create account' }}</button>
         </div>
@@ -155,7 +163,7 @@ const message = ref('');
 const error = ref('');
 const filter = ref('');
 
-const newUser = reactive({ username: '', password: '', pcid: '', nwhandle: '' });
+const newUser = reactive({ username: '', password: '', pcid: '', nwhandle: '', email: '' });
 
 const shown = computed(() => {
   const all = users.value ?? [];
@@ -211,13 +219,19 @@ async function createUser() {
   try {
     if (newUser.pcid.trim() === '') {
       // No PCID: the public registration makes one up.
-      await registerUser({ username: name, password: newUser.password, nwhandle: newUser.nwhandle.trim() });
+      await registerUser({
+        username: name,
+        password: newUser.password,
+        nwhandle: newUser.nwhandle.trim(),
+        email: newUser.email.trim(),
+      });
     } else {
       const result = await createUserAdmin({
         username: name,
         password: newUser.password,
         pcid: newUser.pcid.trim(),
         nwhandle: newUser.nwhandle.trim(),
+        email: newUser.email.trim(),
       });
       if (!result.ok) {
         flashError(result.error.message);
@@ -225,14 +239,16 @@ async function createUser() {
       }
     }
     flashMessage(`Created ${name}.`);
-    Object.assign(newUser, { username: '', password: '', pcid: '', nwhandle: '' });
+    Object.assign(newUser, { username: '', password: '', pcid: '', nwhandle: '', email: '' });
     await refresh();
   } catch (e) {
     const code = (e as { response?: { data?: { error?: unknown } } })?.response?.data?.error;
     flashError(
       code === 'username_exists'
         ? 'Another account already has that username.'
-        : 'The account could not be created. Check the fields and try again.',
+        : code === 'email_exists'
+          ? 'Another account already uses that email address.'
+          : 'The account could not be created. Check the fields and try again.',
     );
   } finally {
     creating.value = false;

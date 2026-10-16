@@ -26,6 +26,18 @@ inline constexpr size_t kUsernameMaxBytes = 64;
 // @0x4c8238..0x4c8249, outputSize 0x1F; the copy, sub_64EA90 @0x64eb3e..0x64eb59].
 inline constexpr size_t kHandleMaxBytes = 30;
 
+// The longest email address an account may have (RFC 5321's path limit, less
+// its angle brackets).
+inline constexpr size_t kEmailMaxBytes = 254;
+
+// The address `raw` names, in the one form players.email stores and every
+// lookup compares: its ASCII letters lowercased. nullopt unless it is at most
+// kEmailMaxBytes bytes with exactly one '@', a local part, and a domain that
+// holds a '.' with a label on each side of every one; no space and no control
+// byte anywhere. Service policy, not a port: a check of the shape alone, the
+// mail sent to it being the proof.
+std::optional<std::string> normalize_email(std::string_view raw);
+
 // Resolved player record returned by authenticate_user / get_user_by_*.
 struct UserRecord {
 	int64_t     id = 0;
@@ -49,6 +61,10 @@ struct UserRecord {
 	// records the generation its password check read and counts only while the
 	// account still has it.
 	int64_t credentials_gen = 0;
+	// players.email, normalized (normalize_email); empty for an account that
+	// has none (one an admin made without one, a service account, an account
+	// older than the column).
+	std::string email;
 };
 
 struct GameAccessRecord {
@@ -64,7 +80,7 @@ struct ServerStatusRecord {
 };
 
 // Result of a CRUD mutation. ok=true means success; on failure,
-// `error_code` is one of: "username_exists", "pcid_exists",
+// `error_code` is one of: "username_exists", "pcid_exists", "email_exists",
 // "missing_field", "invalid_field", "not_found", "db_error". Used as the body
 // foundation for /api/admin/users.* HTTP responses, so `error_message` is
 // client-facing: a "db_error" leaves it empty, its text going to the server
@@ -102,6 +118,9 @@ std::optional<UserRecord> authenticate_user(opennova::db::Database &db,
 std::optional<UserRecord> get_user_by_username(opennova::db::Database &db,
                                                 const std::string &username);
 std::optional<UserRecord> get_user_by_id(opennova::db::Database &db, int64_t id);
+// The player account (kind 'player') whose players.email is `email`, an
+// address normalize_email gave; nullopt for none. Throws db::Error.
+std::optional<UserRecord> get_user_by_email(opennova::db::Database &db, const std::string &email);
 // The account whose live retail login set `session_tag` (the LOGINSESSIONTAG
 // POST /NWLogin.dll mints after a password check or a pin resume): its
 // active_user_sessions row, until a logout, the 2 h idle sweep, a boot, the
@@ -155,11 +174,17 @@ struct CreateUserParams {
 	std::string pcid;       // 8-hex-char
 	std::string nwh;        // typically "1"
 	std::string nwhandle;
+	// The account's email address: empty for none (an admin's create may
+	// leave it out; POST /api/register requires it). Stored normalized
+	// (normalize_email).
+	std::string email;
 };
 
 // A username of at most kUsernameMaxBytes bytes and a handle of at most
 // kHandleMaxBytes, neither holding a control byte nor starting with the service
-// accounts' prefix (is_service_username), else invalid_field.
+// accounts' prefix (is_service_username), else invalid_field; an email that
+// normalize_email refuses is invalid_field too, and one another account has is
+// email_exists.
 MutationResult create_user(opennova::db::Database &db, const CreateUserParams &p);
 // Deletes the account with its sessions and hosting keys (ON DELETE CASCADE).
 // A server it has listed stays listed with no owner, and its rows in listed

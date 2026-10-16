@@ -109,6 +109,14 @@ enum class HostPushResult : uint8_t {
 };
 const char *host_push_result_name(HostPushResult result);
 
+// What NwUdpListener::end_session did with a session.
+enum class EndSessionResult : uint8_t {
+	Queued, // the receive thread ends it on its next pass
+	NotLobby, // no lobby connection at the address (a game connection's, or one gone)
+	Hosting, // it hosts: its listing's stop ends it (POST /api/admin/hosts/<rid>/stop)
+};
+const char *end_session_result_name(EndSessionResult result);
+
 // Port-64206 UDP listener for the NAPI NovaWorld session protocol
 // (NWU-encrypted, NAPI-CRC-enveloped, opcode-dispatched).
 //
@@ -179,6 +187,15 @@ public:
 	};
 	std::vector<HostedSnapshot> snapshot_hosted() const;
 
+	// Every lobby connection's state, by its address (the admin's sessions view:
+	// its listing while hosting, the retail login its Cookie lists named).
+	// Thread-safe.
+	struct LobbySnapshot {
+		PeerAddr peer;
+		LobbyState lobby;
+	};
+	std::vector<LobbySnapshot> snapshot_lobby() const;
+
 	// The service's statements to a listed server, over that server's own NWU session (the
 	// ServerCommand admin channel; docs/net/novaworld-net-re.md "the service side"). The RID
 	// resolves here under the lobby lock to the hosting connection; the statement then waits for
@@ -208,6 +225,24 @@ public:
 	HostPushResult push_stop_hosting(uint32_t rid, int msg_code, int msg_param1 = 0,
 	                                 int msg_param2 = 0,
 	                                 std::optional<int64_t> owner = std::nullopt);
+
+	// The admin's End session (service policy: how the retail service ended a session is
+	// unwitnessed): the lobby connection at `peer` ends the way the NAPI server role ends a
+	// connection it asked to disconnect. The receive thread, which owns the socket, latches the
+	// pending-disconnect record {1, 8, 0, 0, "", 0, "NP.C:PMP:PDESTME"}, sends the client its
+	// ServerGoodBye burst keyed by the client's CK (CS field 1 times; a stock client tears its
+	// session down at the first one), then drops the connection (ConnectionManager Logout, whose
+	// on_lost erases its lobby state). One that never completed its 0x42 is dropped with no
+	// burst, as SendDisconnectPacket sends none for it. A hosting connection is refused (Hosting,
+	// its RID in `hosting_rid`): its session's end would only park the listing for the
+	// reconnect's re-host, so the listing's stop ends it. A connection replaced, re-authenticated
+	// or hosting by the time the drain runs is left as it is. Thread-safe; nothing is sent from
+	// the caller.
+	// [orig: NapiNPProtocol_Pump @0x62A650 — the PDESTME latch @0x62a72f..0x62a788, then
+	//  CNapiNPConnection_Destroy @0x62A4B0 -> TeardownActiveConnection @0x6253C0, the burst
+	//  @0x6253ef..0x625424; CNapiNPConnection_SendDisconnectPacket @0x61F2A0, the conn_flag0 gate
+	//  @0x61f30b, opcode 0x86 @0x61f367, the client's key @0x61f3af]
+	EndSessionResult end_session(const PeerAddr &peer, uint32_t *hosting_rid = nullptr);
 
 	// Takes `user_id` off every lobby connection (and parked lobby state) whose listing it owns
 	// (LobbyState::host_user_id): an admin password reset, an inactive status or a delete takes
@@ -254,9 +289,10 @@ private:
 	};
 	HostPushResult queue_host_push(uint32_t rid, NapiMessage statement, bool ends_hosting,
 	                               std::optional<int64_t> owner);
-	// The receive thread's legs between receive batches: the queued pushes, then the
-	// send-interval leg over every lobby connection.
+	// The receive thread's legs between receive batches: the queued pushes, the sessions an admin
+	// ended, then the send-interval leg over every lobby connection.
 	void drain_host_pushes(opennova::net::Socket &socket);
+	void drain_session_ends(opennova::net::Socket &socket);
 	void pump_send_intervals(opennova::net::Socket &socket);
 	void initialize_jo_host();
 	void reset_per_run_state(const char *reason);
@@ -306,6 +342,14 @@ private:
 	std::unordered_map<PeerAddr, ParkedLobbyState, PeerAddrHash> parked_lobby_states_;
 	// The pushes waiting for the receive thread, in queue order. Guarded by lobby_states_mu_.
 	std::vector<HostPush> host_pushes_;
+	// The sessions end_session queued: each address with the SK its connection had (0 for one
+	// that never completed its 0x42), so a connection that changed since is left alone. Guarded
+	// by lobby_states_mu_.
+	struct SessionEnd {
+		PeerAddr peer{};
+		uint32_t server_sk = 0;
+	};
+	std::vector<SessionEnd> session_ends_;
 	std::atomic<bool> push_drain_paused_{false}; // pause_push_drain
 	opennova::db::ConnectionPool *db_pool_ = nullptr;
 	opennova::UnknownTracker *tracker_ = nullptr;

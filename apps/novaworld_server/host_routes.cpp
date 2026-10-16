@@ -12,7 +12,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
-#include <map>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -231,6 +230,23 @@ bool owner_may_send(ServerCommandVerb verb) {
 	return verb != ServerCommandVerb::None && verb != ServerCommandVerb::SetMPReset;
 }
 
+ListingOwner listing_owner(db::Database &db, std::optional<int64_t> host_user_id) {
+	ListingOwner out;
+	if (!host_user_id)
+		return out;
+	// A service account stands for its hosted server's owner only while the
+	// server is live (the one rule, hosted_repository.h).
+	std::optional<int64_t> owner_id = host_user_id;
+	if (const auto hosted_server = hosted::hosted_server_of_account(db, *host_user_id);
+			hosted_server && hosted::is_live(hosted_server->state)) {
+		out.hosted_server_id = hosted_server->server_id;
+		owner_id = hosted_server->owner_user_id;
+	}
+	if (owner_id)
+		out.owner = get_user_by_id(db, *owner_id);
+	return out;
+}
+
 void HostRoutes::register_routes(WebApp &app, NwUdpListener *nw_udp) {
 	nw_udp_ = nw_udp;
 	CROW_ROUTE(app, "/api/admin/hosts").methods("GET"_method)([this](const crow::request &req) {
@@ -269,35 +285,17 @@ crow::response HostRoutes::admin_hosts(const crow::request &req) {
 	try {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
-		std::map<int64_t, std::optional<UserRecord>> owners;
 		for (const auto &h : hostdb::list_hosts(*db_conn)) {
 			crow::json::wvalue e = listed_host_json(h);
-			std::optional<UserRecord> owner;
-			std::optional<hosted::HostedAccount> hosted_server;
-			std::optional<int64_t> owner_id;
-			if (h.host_user_id) {
-				// A service account stands for its hosted server's owner only while
-				// the server is live (the one rule, hosted_repository.h); an ended
-				// server's lingering listing is its account's own.
-				hosted_server = hosted::hosted_server_of_account(*db_conn, *h.host_user_id);
-				if (hosted_server && !hosted::is_live(hosted_server->state))
-					hosted_server.reset();
-				owner_id = hosted_server ? hosted_server->owner_user_id : h.host_user_id;
-			}
-			if (owner_id) {
-				auto it = owners.find(*owner_id);
-				if (it == owners.end())
-					it = owners.emplace(*owner_id, get_user_by_id(*db_conn, *owner_id)).first;
-				owner = it->second;
-			}
-			if (hosted_server)
-				e["hosted_server_id"] = hosted_server->server_id;
+			const ListingOwner listing = listing_owner(*db_conn, h.host_user_id);
+			if (listing.hosted_server_id)
+				e["hosted_server_id"] = *listing.hosted_server_id;
 			else
 				e["hosted_server_id"] = nullptr;
-			if (owner) {
+			if (listing.owner) {
 				crow::json::wvalue o;
-				o["id"] = owner->id;
-				o["username"] = owner->username;
+				o["id"] = listing.owner->id;
+				o["username"] = listing.owner->username;
 				e["owner"] = std::move(o);
 			} else {
 				e["owner"] = nullptr;

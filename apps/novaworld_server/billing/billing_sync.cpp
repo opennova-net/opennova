@@ -22,15 +22,6 @@ std::string meta(const Metadata &metadata, const char *key) {
 
 bool is_terminal(const std::string &status) { return status == "canceled" || status == "incomplete_expired"; }
 
-// "rejected 404 (resource_missing)" for a log line; never a key.
-std::string error_text(const StripeError &e) {
-	std::string out = stripe_error_kind_name(e.kind);
-	if (e.status != 0) out += " " + std::to_string(e.status);
-	if (!e.stripe_code.empty()) out += " (" + e.stripe_code + ")";
-	if (!e.message.empty()) out += ": " + loggable(e.message, 200);
-	return out;
-}
-
 // Stripe no longer knows it (in this mode, on this account).
 bool is_missing(const StripeError &e) { return e.kind == StripeError::Kind::Rejected && e.status == 404; }
 
@@ -195,7 +186,7 @@ std::optional<std::vector<Subscription>> BillingSync::stripe_subscriptions_of(co
 		const StripeResult<SubscriptionPage> listed = client_.list_subscriptions(query);
 		if (!listed.ok()) {
 			std::fprintf(stderr, "[billing] WARN listing %s's subscriptions: %s\n", loggable(stripe_customer_id).c_str(),
-					error_text(listed.error).c_str());
+					stripe_error_text(listed.error).c_str());
 			return std::nullopt;
 		}
 		for (const Subscription &s : listed.value->data) out.push_back(s);
@@ -230,7 +221,7 @@ SyncOutcome BillingSync::sync_customer(db::Database &db, const std::string &stri
 			return finish(SyncOutcome::Deleted);
 		}
 		std::fprintf(stderr, "[billing] WARN customer %s: %s\n", loggable(stripe_customer_id).c_str(),
-				error_text(customer.error).c_str());
+				stripe_error_text(customer.error).c_str());
 		return SyncOutcome::Unreachable;
 	}
 	if (customer.value->deleted) {
@@ -280,12 +271,12 @@ bool BillingSync::validate_prices() {
 			if (!price.ok()) {
 				if (price.error.kind == StripeError::Kind::Unreachable) {
 					std::fprintf(stderr, "[billing] WARN price check: %s: %s\n", loggable(list[i]).c_str(),
-							error_text(price.error).c_str());
+							stripe_error_text(price.error).c_str());
 					return false; // try again later
 				}
 				if (problem.empty())
 					problem = variable + ": Stripe answers no price " + loggable(list[i], 80) + " (" +
-							error_text(price.error) + ")";
+							stripe_error_text(price.error) + ")";
 				continue;
 			}
 			const Price &p = *price.value;
@@ -356,7 +347,9 @@ ReconcileReport BillingSync::reconcile_all(int64_t now) {
 	bool whole = false;
 	for (int page = 0; page < kMaxReconcilePages; ++page) {
 		const StripeResult<SubscriptionPage> listed = client_.list_subscriptions(query);
-		if (!listed.ok()) return fail("Stripe could not list the subscriptions: " + error_text(listed.error));
+		if (!listed.ok())
+			return fail(
+					"Stripe could not list the subscriptions: " + stripe_error_text(listed.error));
 		for (const Subscription &s : listed.value->data) all.push_back(s);
 		if (!listed.value->has_more || listed.value->data.empty()) {
 			whole = true;
@@ -409,7 +402,7 @@ ReconcileReport BillingSync::reconcile_all(int64_t now) {
 				gone.push_back(row.stripe_subscription_id);
 			} else {
 				return fail("Stripe could not be asked for " + loggable(row.stripe_subscription_id, 80) + ": " +
-						error_text(one.error));
+						stripe_error_text(one.error));
 			}
 		}
 	}

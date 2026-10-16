@@ -468,6 +468,11 @@ jobs:
 
       - name: Build and test
         shell: bash
+        # billing_stripe_e2e's Stripe test-mode key (infra/github, secrets.tf). A
+        # fork's pull request gets none, and the vault's REPLACE_ME counts as none:
+        # the test skips.
+        env:
+          ONNET_STRIPE_TEST_SECRET_KEY: ${{ secrets.STRIPE_TEST_SECRET_KEY }}
         run: >-
           scripts/build.sh --no-godot --suite core
           --cmake-arg -DOPENNOVA_NOVAWORLD_SERVICE=ON --cmake-arg -DBUILD_NOVAWORLD_HTTP=ON

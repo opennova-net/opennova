@@ -89,6 +89,9 @@
           </p>
         </form>
         <p class="mt-6 text-sm text-ink-muted">
+          <RouterLink to="/forgot" class="link">Forgot password?</RouterLink>
+        </p>
+        <p class="mt-2 text-sm text-ink-muted">
           No account yet?
           <RouterLink :to="registerLink" class="link">Register</RouterLink>
         </p>
