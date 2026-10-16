@@ -3,21 +3,21 @@
 # reaches AWS or Cloudflare. From the repo root:
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> init -backend=false
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> test
-# Hosting off (no snapshot) plans no machine resource and tells the service so.
-# Hosting on plans two launch templates: shared (t3a.large, unlimited CPU
-# credits) and own (c7a.medium, no credit setting), each terminating on
-# shutdown, IMDSv2 with a hop limit of 1, and mounting every data set's
-# snapshot as an encrypted volume of its own; the slots' game ports to everyone
-# and admin ports to the controller alone, the controller's internal port to
-# the machines alone. The worker's task role's policy pins a launch to the two templates and
-# their two types, IMDSv2, this deployment's tags, gp3 volumes no larger than
-# the largest the templates make, their images and snapshots; it ends only
-# machines carrying both tags. The machine role holds Session Manager and its
-# logs alone. Web's, the controller's and the worker's environment carry the
-# fleet's settings (the machines' log group among them), infra.env what `fleet
-# bake-image` and `fleet logs` need. A t2 or Graviton
-# type, a slot count past 32, and a data set the service does not know are
-# refused.
+# Hosting off (hosted_enabled false, the default) plans no machine resource
+# and tells the service so, with no store. Hosting on plans two launch
+# templates: shared (t3a.large, unlimited CPU credits) and own (c7a.medium, no
+# credit setting), each terminating on shutdown, IMDSv2 with a hop limit of 1,
+# one encrypted root volume (40 GiB: the data trees hostd fetches live there)
+# and no other; the slots' game ports to everyone and admin ports to the
+# controller alone, the controller's internal port to the machines alone. The
+# worker's task role's policy pins a launch to the two templates and their two
+# types, IMDSv2, this deployment's tags, gp3 volumes no larger than the root
+# volume, their images; it ends only machines carrying both tags. The machine
+# role holds Session Manager, its logs and a read of the trees in the store
+# alone. Web's, the controller's and the worker's environment carry
+# the fleet's settings (the machines' log group among them) and the store's
+# URL, infra.env what `fleet bake-image` and `fleet logs` need. A t2 or
+# Graviton type and a slot count past 32 are refused.
 
 mock_provider "aws" {
   override_during = plan
@@ -27,9 +27,6 @@ mock_provider "aws" {
   }
   mock_data "aws_ami" {
     defaults = { id = "ami-0123456789abcdef0", root_device_name = "/dev/sda1" }
-  }
-  mock_data "aws_ebs_snapshot" {
-    defaults = { volume_size = 2 }
   }
   mock_data "aws_caller_identity" {
     defaults = { account_id = "123456789012" }
@@ -285,9 +282,6 @@ mock_provider "aws" {
   mock_data "aws_ami" {
     defaults = { id = "ami-0123456789abcdef0", root_device_name = "/dev/sda1" }
   }
-  mock_data "aws_ebs_snapshot" {
-    defaults = { volume_size = 2 }
-  }
   mock_data "aws_iam_policy_document" {
     defaults = { json = "{\"Version\":\"2012-10-17\",\"Statement\":[]}" }
   }
@@ -344,9 +338,10 @@ run "hosting_off" {
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_INTERNAL_URL"] == "http://controller.prod.opennova.internal:8070" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_FLEET_SHARED_SLOTS"] == "12" &&
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INTERNAL_HTTP_BIND") &&
-      !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_HOSTED_EC2_LOG_GROUP")
+      !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_HOSTED_EC2_LOG_GROUP") &&
+      !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_OBJECT_STORE")
     ]) && strcontains(aws_ssm_parameter.infra_env.value, "ONNET_HOSTED_PROVIDER='none'\n") && !strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_FLEET")
-    error_message = "hosting off: the programs' environment turns the provider off and still names the controller's URL and the fleet's knobs (the controller binds its own task's address); infra.env says so to the toolbox"
+    error_message = "hosting off: the programs' environment turns the provider off, names no store, and still names the controller's URL and the fleet's knobs (the controller binds its own task's address); infra.env says so to the toolbox"
   }
   assert {
     condition     = strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_MACHINES_LOG_GROUP='/opennova/prod/machines'\n")
@@ -385,15 +380,7 @@ run "hosting_on" {
   }
 
   variables {
-    hosted_data_snapshots = {
-      jop_2_consumer = "snap-0123456789abcdef0"
-      dfx2_consumer  = "snap-0fedcba9876543210"
-    }
-  }
-
-  override_data {
-    target = data.aws_ebs_snapshot.hosted["dfx2_consumer"]
-    values = { volume_size = 3 }
+    hosted_enabled = true
   }
 
   assert {
@@ -418,10 +405,10 @@ run "hosting_on" {
   assert {
     condition = alltrue([
       for t in aws_launch_template.fleet :
-      length([for b in t.block_device_mappings : b if b.device_name == "/dev/sdf" && b.ebs[0].snapshot_id == "snap-0fedcba9876543210" && b.ebs[0].volume_size == 3 && b.ebs[0].encrypted == "true"]) == 1 &&
-      length([for b in t.block_device_mappings : b if b.device_name == "/dev/sdg" && b.ebs[0].snapshot_id == "snap-0123456789abcdef0" && b.ebs[0].volume_size == 2 && b.ebs[0].encrypted == "true"]) == 1
+      length(t.block_device_mappings) == 1 &&
+      length([for b in t.block_device_mappings : b if b.device_name == "/dev/sda1" && b.ebs[0].volume_size == 40 && b.ebs[0].volume_type == "gp3" && b.ebs[0].encrypted == "true"]) == 1
     ])
-    error_message = "every machine mounts every data set: a volume each, encrypted, its size its snapshot's"
+    error_message = "every machine: one encrypted 40 GiB gp3 root volume (the trees it fetches live there), no data volume"
   }
   assert {
     condition     = aws_vpc_security_group_ingress_rule.machines_game["0.0.0.0/0"].from_port == 32768 && aws_vpc_security_group_ingress_rule.machines_game["0.0.0.0/0"].to_port == 32779 && aws_vpc_security_group_ingress_rule.machines_game["0.0.0.0/0"].ip_protocol == "udp"
@@ -451,10 +438,12 @@ run "hosting_on" {
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_BOOTSTRAP_CIDRS"] == "10.44.0.0/24,10.44.1.0/24" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_DEPLOYMENT"] == "opennova-prod" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_EC2_LOG_GROUP"] == "/opennova/prod/machines" &&
-      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_DATA_SETS"] == "{\"dfx2_consumer\":{\"missions\":[]},\"jop_2_consumer\":{\"missions\":[]}}" &&
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_OBJECT_STORE_URL"] == "s3://opennova-prod-ops-123456789012/data" &&
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_OBJECT_STORE_REGION"] == "us-east-1" &&
+      !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_HOSTED_DATA_SETS") &&
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "OPENNOVA_FLEET")
     ])
-    error_message = "web, the controller and the worker get the provider, the templates by kind, both zones' subnets, the deployment tag, the machines' log group and the data sets the machines mount"
+    error_message = "web, the controller and the worker get the provider, the templates by kind, both zones' subnets, the deployment tag, the machines' log group and the game data's store (the deployment's bucket under data/)"
   }
   assert {
     condition = (
@@ -518,16 +507,7 @@ run "fleet_policy" {
   }
 
   variables {
-    hosted_data_snapshots = {
-      jop_2_consumer = "snap-0123456789abcdef0"
-      dfx2_consumer  = "snap-0fedcba9876543210"
-    }
-  }
-
-  # The DFX2 snapshot is the largest volume.
-  override_data {
-    target = data.aws_ebs_snapshot.hosted["dfx2_consumer"]
-    values = { volume_size = 20 }
+    hosted_enabled = true
   }
 
   assert {
@@ -560,24 +540,23 @@ run "fleet_policy" {
       if st.sid == "LaunchMachineVolumes" && length([
         for c in st.condition : c
         if(c.test == "StringEqualsIfExists" && c.variable == "ec2:VolumeType" && contains(c.values, "gp3")) ||
-        (c.test == "NumericLessThanEqualsIfExists" && c.variable == "ec2:VolumeSize" && contains(c.values, "20"))
+        (c.test == "NumericLessThanEqualsIfExists" && c.variable == "ec2:VolumeSize" && contains(c.values, "40"))
       ]) == 2
     ]) == 1
-    error_message = "a launch's volumes: gp3 of at most the largest snapshot's 20 GiB"
+    error_message = "a launch's volumes: gp3 of at most the root volume's 40 GiB"
   }
   assert {
     condition = length([
       for st in data.aws_iam_policy_document.fleet_service[0].statement : st
       if st.sid == "LaunchMachineResources" &&
-      contains(st.resources, "arn:aws:ec2:us-east-1::snapshot/snap-0123456789abcdef0") &&
-      contains(st.resources, "arn:aws:ec2:us-east-1::snapshot/snap-0fedcba9876543210") &&
       contains(st.resources, "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0shared") &&
       contains(st.resources, "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0own") &&
       contains(st.resources, "arn:aws:ec2:us-east-1:123456789012:security-group/sg-0machines") &&
       contains(st.resources, "arn:aws:ec2:us-east-1:123456789012:subnet/subnet-0public0a") &&
-      contains(st.resources, "arn:aws:ec2:us-east-1:123456789012:subnet/subnet-0public0b")
+      contains(st.resources, "arn:aws:ec2:us-east-1:123456789012:subnet/subnet-0public0b") &&
+      !anytrue([for r in st.resources : strcontains(r, ":snapshot/")])
     ]) == 1
-    error_message = "a launch may touch both templates, both snapshots, the machines' group and the public subnets"
+    error_message = "a launch may touch both templates, the machines' group and the public subnets, and no snapshot"
   }
   assert {
     condition = length([
@@ -620,8 +599,10 @@ run "fleet_policy" {
       "logs:CreateLogStream",
       "logs:PutLogEvents",
       "logs:DescribeLogStreams",
+      "s3:ListBucket",
+      "s3:GetObject",
     ])
-    error_message = "the machine role holds Session Manager's five actions and its logs alone"
+    error_message = "the machine role holds Session Manager's five actions, its logs and a read of the store's trees alone"
   }
   assert {
     condition = alltrue([
@@ -630,6 +611,20 @@ run "fleet_policy" {
       if st.sid == "ShipMachineLogs"
     ])
     error_message = "the machines write their own log group alone"
+  }
+  assert {
+    condition = (
+      length([
+        for st in data.aws_iam_policy_document.machine[0].statement : st
+        if st.sid == "ListDataTrees" && toset(st.actions) == toset(["s3:ListBucket"]) && toset(st.resources) == toset(["arn:aws:s3:::opennova-prod-ops-123456789012"]) &&
+        length([for c in st.condition : c if c.test == "StringLike" && c.variable == "s3:prefix" && toset(c.values) == toset(["data/trees/*"])]) == 1
+      ]) == 1 &&
+      length([
+        for st in data.aws_iam_policy_document.machine[0].statement : st
+        if st.sid == "ReadDataTrees" && toset(st.actions) == toset(["s3:GetObject"]) && toset(st.resources) == toset(["arn:aws:s3:::opennova-prod-ops-123456789012/data/trees/*"])
+      ]) == 1
+    )
+    error_message = "the machine role lists and reads the trees in the store (the deployment's bucket, data/trees/) and nothing else of the bucket"
   }
 }
 
@@ -644,10 +639,8 @@ run "four_slots" {
   }
 
   variables {
-    hosted_data_snapshots = {
-      jop_2_consumer = "snap-0123456789abcdef0"
-    }
-    shared_slots = 4
+    hosted_enabled = true
+    shared_slots   = 4
   }
 
   assert {
@@ -655,8 +648,33 @@ run "four_slots" {
     error_message = "the port ranges follow shared_slots"
   }
   assert {
-    condition     = { for e in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].environment : e.name => e.value }["ONNET_FLEET_SHARED_SLOTS"] == "4" && length([for b in aws_launch_template.fleet["own"].block_device_mappings : b if b.device_name == "/dev/sdf"]) == 1
-    error_message = "the programs' environment names the slot count; one data set, one volume"
+    condition     = { for e in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].environment : e.name => e.value }["ONNET_FLEET_SHARED_SLOTS"] == "4"
+    error_message = "the programs' environment names the slot count"
+  }
+}
+
+# A larger root volume raises what a launch may make.
+run "root_volume" {
+  command = plan
+
+  # The seed image, as its first apply pins it (the policy names it).
+  override_resource {
+    target          = terraform_data.fleet_seed_image[0]
+    override_during = plan
+    values          = { output = "ami-0123456789abcdef0" }
+  }
+
+  variables {
+    hosted_enabled         = true
+    machine_root_volume_gb = 64
+  }
+
+  assert {
+    condition = alltrue([for t in aws_launch_template.fleet : one(t.block_device_mappings).ebs[0].volume_size == 64]) && length([
+      for st in data.aws_iam_policy_document.fleet_service[0].statement : st
+      if st.sid == "LaunchMachineVolumes" && length([for c in st.condition : c if c.variable == "ec2:VolumeSize" && contains(c.values, "64")]) == 1
+    ]) == 1
+    error_message = "the root volume's size is the templates' and the launch policy's bound"
   }
 }
 
@@ -668,9 +686,7 @@ run "templates_applied" {
   command = apply
 
   variables {
-    hosted_data_snapshots = {
-      jop_2_consumer = "snap-0123456789abcdef0"
-    }
+    hosted_enabled = true
   }
 
   plan_options {
@@ -694,9 +710,7 @@ run "new_canonical_image" {
   command = plan
 
   variables {
-    hosted_data_snapshots = {
-      jop_2_consumer = "snap-0123456789abcdef0"
-    }
+    hosted_enabled = true
   }
 
   override_data {
@@ -743,30 +757,4 @@ run "too_many_slots_refused" {
   }
 
   expect_failures = [var.shared_slots]
-}
-
-# A data set the service does not know (a typo, or an old field's name) and a
-# value that is no snapshot id are refused at plan.
-run "unknown_data_set_refused" {
-  command = plan
-
-  variables {
-    hosted_data_snapshots = {
-      jop_2_consumr = "snap-0123456789abcdef0"
-    }
-  }
-
-  expect_failures = [var.hosted_data_snapshots]
-}
-
-run "no_snapshot_id_refused" {
-  command = plan
-
-  variables {
-    hosted_data_snapshots = {
-      dfx2_consumer = "vol-0123456789abcdef0"
-    }
-  }
-
-  expect_failures = [var.hosted_data_snapshots]
 }

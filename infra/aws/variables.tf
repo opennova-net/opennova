@@ -362,34 +362,10 @@ variable "cache_auth_token" {
 # The fleet: hosted game servers' machines (fleet.tf; DEPLOY.md "Hosted game servers")
 # ---------------------------------------------------------------------------
 
-variable "hosted_data_snapshots" {
-  description = "The data sets hosted game servers run, each the games slug of the lobby it lists in (jop_2_consumer, dfx2_consumer, opennova_0_consumer) to the private, encrypted EBS snapshot in the deployment's account holding its game data, which every machine mounts read-only, a volume per data set (made once per data set and deployment by `./deploy/run.sh --deployment <deployment> hosted data-snapshot --data-set <slug>`). Empty (the default) leaves hosting off: fleet.tf creates nothing. The toolbox reads it from the vault (item `hosted-<deployment>`, one field `data_snapshot_id_<slug>` per data set) as TF_VAR_hosted_data_snapshots."
-  type        = map(string)
-  default     = {}
-
-  validation {
-    condition     = alltrue([for slug in keys(var.hosted_data_snapshots) : contains(["jop_2_consumer", "dfx2_consumer", "opennova_0_consumer"], slug)])
-    error_message = "hosted_data_snapshots takes the data sets jop_2_consumer, dfx2_consumer and opennova_0_consumer alone."
-  }
-  validation {
-    condition     = alltrue([for id in values(var.hosted_data_snapshots) : can(regex("^snap-[0-9a-f]{8,17}$", id))])
-    error_message = "every hosted_data_snapshots value must be a snapshot id (snap-...)."
-  }
-}
-
-variable "hosted_data_set_missions" {
-  description = "Each data set's default map rotation for a new hosted server (ONNET_HOSTED_DATA_SETS in web's, the controller's and the worker's environment): .bms file names by data set slug. A data set left out starts with an empty rotation the owner fills in."
-  type        = map(list(string))
-  default     = {}
-
-  validation {
-    condition     = alltrue([for slug in keys(var.hosted_data_set_missions) : contains(keys(var.hosted_data_snapshots), slug)])
-    error_message = "hosted_data_set_missions names a data set hosted_data_snapshots does not."
-  }
-  validation {
-    condition     = alltrue(flatten([for m in values(var.hosted_data_set_missions) : [for f in m : can(regex("^[A-Za-z0-9_-]+\\.bms$", f))]]))
-    error_message = "every hosted_data_set_missions entry must be a .bms file name of letters, digits, _ and -."
-  }
+variable "hosted_enabled" {
+  description = "Whether hosted game servers are on (DEPLOY.md \"Hosted game servers\"). On: fleet.tf makes the machines' launch templates, image parameter, security group and roles, programs.tf gives web and the worker the game data's store (the deployment's operations bucket under data/, which admins fill from the site's Game data page, ADR 0064), and the programs' environment names the ec2 provider and the store. Off (the default): fleet.tf creates nothing and the programs run with hosting off. The role boundary must hold the store's S3 actions before the apply that turns it on (infra/aws/iam/README.md: the org stack applies it)."
+  type        = bool
+  default     = false
 }
 
 variable "shared_instance_type" {
@@ -450,9 +426,9 @@ variable "hosted_ami_id" {
 }
 
 variable "machine_root_volume_gb" {
-  description = "The machines' root volume (the OS, docker, the serve image and the slots' working directories), in GiB."
+  description = "The machines' root volume, in GiB: the OS, docker, the serve image, the slots' working directories, and the data trees hostd fetches from the store under /opt/game (a tree per data set version its servers pin, about 2 GiB for JO's; a shared machine holds several at once)."
   type        = number
-  default     = 16
+  default     = 40
 }
 
 variable "internal_http_port" {

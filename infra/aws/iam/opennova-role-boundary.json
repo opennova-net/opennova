@@ -27,7 +27,10 @@
     {
       "Sid": "OpsBucket",
       "Effect": "Allow",
-      "Action": "s3:ListBucket",
+      "Action": [
+        "s3:ListBucket",
+        "s3:ListBucketMultipartUploads"
+      ],
       "Resource": "arn:aws:s3:::opennova-*"
     },
     {
@@ -36,6 +39,7 @@
       "Action": [
         "s3:GetObject",
         "s3:PutObject",
+        "s3:DeleteObject",
         "s3:AbortMultipartUpload"
       ],
       "Resource": "arn:aws:s3:::opennova-*/*"
@@ -105,8 +109,7 @@
       "Resource": [
         "arn:aws:ec2:${region}:${account_id}:subnet/*",
         "arn:aws:ec2:${region}:${account_id}:security-group/*",
-        "arn:aws:ec2:${region}:${account_id}:launch-template/*",
-        "arn:aws:ec2:${region}::snapshot/*"
+        "arn:aws:ec2:${region}:${account_id}:launch-template/*"
       ],
       "Condition": {
         "StringLike": {
