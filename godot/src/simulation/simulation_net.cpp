@@ -80,45 +80,25 @@ const opennova::TitleIdentity *session_title(const opennova::TitleIdentity *name
 
 opennova::inmatch::HostConfig Simulation::host_session_cfg(uint32_t p_game_type) {
 	namespace inmatch = opennova::inmatch;
-	inmatch::HostConfig cfg;
-	cfg.title = session_title(net_.title);
+	// The record is the engine's (inmatch/host_config.h shell_host_config); the
+	// binding passes the session's values.
+	inmatch::ShellHostSource source;
 	if (is_host_listening()) {
-		cfg.config = net_.host_session_config; // mission/player/spawn + game_type/mp_attributes from the UI
-		if (cfg.config.server_name.empty()) cfg.config.server_name = "OpenNova LAN Host";
-		cfg.config.max_players = net_.host_max_players; // the UI cap as configure_host_session clamped it (session_player_cap)
-		cfg.config.dedicated_server = !net_.host_serve_and_play; // the slot limit's own slot
-	} else {
-		// The SP listen server's config (docs/net/novaworld-net-re.md §5.0), its
-		// session words the current player profile record's.
-		cfg.config = inmatch::singleplayer_game_config(p_game_type,
-				player_.profile_record_set ? &player_.profile_record : nullptr);
+		source.lan_config = &net_.host_session_config; // the host screen's (configure_host_session)
+		source.lan_max_players = net_.host_max_players;
+		source.lan_serve_and_play = net_.host_serve_and_play;
+		source.lan_network_type = net_.host_network_type;
 	}
-	// Every session create reads the process's cfg block words, single player's
-	// and a host's alike (engine: inmatch/game_config_block.h; the create's
-	// ProcessExit, inmatch/server_session.h): mpreset, and the lineup queue the
-	// 0x42 gate admits past the cap (GameConfig::join_capacity; the session
-	// create's copy, CNapiGameSession_BuildAndCreateSession @0x569626..0x569646).
-	if (net_.game_config.is_valid()) {
-		const opennova::gamecfg::GameCfg &block = net_.game_config->native().cfg();
-		cfg.config.multiplayer_reset = block.mp_reset;
-		cfg.config.use_lineup_queue = block.mp_use_lineup_queue;
-		cfg.config.lineup_queue_size = block.mp_lineup_queue_size;
-		// The join validator reads the block's duplicate-PCID word live
-		// (Server_ValidatePlayerJoinRequest @0x512771).
-		cfg.config.punt_duplicate_pcids = block.mp_host_punt_same_pcids;
-	}
-	cfg.socket_mode = is_host_listening() ? inmatch::SocketMode::Lan : inmatch::SocketMode::Socketless;
-	cfg.serve_and_play = is_host_listening() ? net_.host_serve_and_play : true;
-	cfg.network_type = is_host_listening() ? net_.host_network_type : inmatch::NetworkType::Lan;
+	source.sp_game_type = p_game_type;
+	source.profile = player_.profile_record_set ? &player_.profile_record : nullptr;
+	source.cfg_block = net_.game_config.is_valid() ? &net_.game_config->native().cfg() : nullptr;
+	inmatch::HostConfig cfg = inmatch::shell_host_config(source);
+	cfg.title = session_title(net_.title);
 	// The loose _NSTMOUT.TXT reap/pool override under the install root
 	// (engine session_timeout_config.h; the CNapiNetwork_Init read). Empty
 	// keeps the 120000 ms / 1200-record template.
 	cfg.game_root = host_game_root_;
 	if (net_.local_character_vars_set) cfg.local_character_vars = net_.local_character_vars;
-	// The host's own inverse OPTIONS_AUTOMEDIC word, its record's +1660 (engine
-	// HostConfig::local_auto_medic_disabled carries the witness).
-	if (player_.profile_record_set)
-		cfg.local_auto_medic_disabled = static_cast<uint32_t>(player_.profile_record.auto_medic_off);
 	return cfg;
 }
 

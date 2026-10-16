@@ -4,6 +4,8 @@
 #include <base/resource_index/resource_index.h>
 #include <formats/def/def.h>
 #include <formats/rtxt/rtxt.h>
+#include <formats/playersav/player_sav.h>
+#include <runtime/inmatch/host_role.h> // singleplayer_game_config
 #include <runtime/inmatch/host_settings.h>
 #include <runtime/inmatch/server_session.h>
 
@@ -59,6 +61,39 @@ gamecfg::DefaultTexts game_cfg_default_texts(const rtxt::File *gametext) {
 	return texts;
 }
 
+void apply_session_create_words(GameConfig &config, const gamecfg::GameCfg &cfg) {
+	config.multiplayer_reset = cfg.mp_reset;
+	config.use_lineup_queue = cfg.mp_use_lineup_queue;
+	config.lineup_queue_size = cfg.mp_lineup_queue_size;
+	config.punt_duplicate_pcids = cfg.mp_host_punt_same_pcids;
+}
+
+HostConfig shell_host_config(const ShellHostSource &source) {
+	HostConfig host;
+	if (source.lan_config != nullptr) {
+		host.config = *source.lan_config;
+		// Ours: a host-screen config that carries no name (a tool's or a
+		// test's; the screen seeds Menu/UNTITLED) still advertises one.
+		if (host.config.server_name.empty()) host.config.server_name = "OpenNova LAN Host";
+		host.config.max_players = source.lan_max_players;
+		host.config.dedicated_server = !source.lan_serve_and_play;
+		host.socket_mode = SocketMode::Lan;
+		host.serve_and_play = source.lan_serve_and_play;
+		host.network_type = source.lan_network_type;
+	} else {
+		host.config = singleplayer_game_config(source.sp_game_type, source.profile);
+		host.socket_mode = SocketMode::Socketless;
+		host.serve_and_play = true;
+		host.network_type = NetworkType::Lan;
+	}
+	if (source.cfg_block != nullptr) apply_session_create_words(host.config, *source.cfg_block);
+	// The host's own inverse OPTIONS_AUTOMEDIC word, its record's +1660
+	// (HostConfig::local_auto_medic_disabled carries the witness).
+	if (source.profile != nullptr)
+		host.local_auto_medic_disabled = static_cast<uint32_t>(source.profile->auto_medic_off);
+	return host;
+}
+
 HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	// The block's table is its title's (gamecfg::config_var_rows): dfx2.exe's
 	// carries the one row Jointops.exe's lacks, so the session runs that title.
@@ -76,14 +111,10 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	// by the apply's cap @0x551B30].
 	host.serve_and_play = cfg.dedicated == 0;
 	host.game_type_setting = cfg.mp_gametype;
-	// The lineup queue the 0x42 gate admits past the cap [orig:
-	//  game_settings.use_lineup_queue @0x569632, lineup_queue_size @0x569646;
-	//  CNapiNetwork_ValidateJoinRequest @0x4C6220..0x4C624E].
-	config.use_lineup_queue = cfg.mp_use_lineup_queue;
-	config.lineup_queue_size = cfg.mp_lineup_queue_size;
-	// The join validator's duplicate-PCID word [orig: puntDuplicatePcids_330,
-	//  Server_ValidatePlayerJoinRequest @0x512771].
-	config.punt_duplicate_pcids = cfg.mp_host_punt_same_pcids;
+	// The create's words: mpreset, the lineup queue the 0x42 gate admits past
+	// the cap [CNapiNetwork_ValidateJoinRequest @0x4C6220..0x4C624E] and the
+	// duplicate-PCID word.
+	apply_session_create_words(config, cfg);
 
 	// The identity. The name is copied 31 bytes deep into both of its homes
 	// [orig: Game_ApplySessionSettingsToGlobals @0x551FEB strncpy(g_ServerNameStr,
@@ -176,7 +207,6 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	config.min_ping = static_cast<uint32_t>(cfg.minping);
 	config.do_max_ping_check = cfg.domaxpingcheck;
 	config.max_ping = static_cast<uint32_t>(cfg.maxping);
-	config.multiplayer_reset = cfg.mp_reset;
 	// [orig: net_config.max_packet_bytes = maxPacketSize_338 @0x569840;
 	//  CNapiNetwork_Init @0x4CAA53]
 	config.max_packet_size = cfg.mp_max_packet_size;
