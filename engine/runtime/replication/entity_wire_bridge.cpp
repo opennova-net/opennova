@@ -931,10 +931,9 @@ bool apply_player_intent(world::World &world, const PlayerIntent &intent) {
 	ent->position.x = static_cast<float>(world::from_fixed(wire_x));
 	ent->position.y = static_cast<float>(world::from_fixed(wire_y));
 	ent->position.z = static_cast<float>(world::from_fixed(wire_z));
-	// BAM32 -> mission yaw degrees: yaw = 90 - bam / kBamPerDegree, rounded (the inverse of
-	// snapshot_of's spawn-angle heading), normalized into [0, 360).
-	constexpr double kBamPerDegree = 11930464.0; // 2^32 / 360
-	const long yaw_deg = std::lround(90.0 - static_cast<double>(heading_bam) / kBamPerDegree);
+	// BAM32 -> mission yaw degrees, rounded (the inverse of snapshot_of's spawn-angle
+	// heading), normalized into [0, 360): a value that rounds up to 360 is 0.
+	const long yaw_deg = std::lround(world::mission_yaw_deg_from_bam_heading(heading_bam));
 	ent->yaw = static_cast<int16_t>(((yaw_deg % 360) + 360) % 360);
 
 	// Ingest the uplinked wire-state bytes the 0x0A echo re-broadcasts (the faithful
