@@ -189,10 +189,17 @@ int main() {
 		const LoadingBarRects part = loading_bar_rects(1024.0f, 768.0f, 37);
 		check(part.fill.x == span.left && part.fill.w == span.right - span.left,
 		      "the fill's edges are loading_bar_fill_span's");
-		const LoadingBarRects wide = loading_bar_rects(1920.0f, 1080.0f, 50);
-		check(wide.outer.x == static_cast<int>(kLoadingBarX * static_cast<double>(1920.0f / 1024.0f)) &&
-				      wide.outer.y == static_cast<int>(kLoadingBarY * static_cast<double>(1080.0f / 768.0f)),
-		      "the placement scales by the float ratio, truncated");
+		// An 800 x 640 surface: the float ratio 640/768 is 0.83333331, whose
+		// exact product with y 732 is 609.99998, truncated to 609 (an all-double
+		// or all-float product would give 610); x 287.5 -> 287, w 223.44 -> 223,
+		// h 12.49 -> 12. The arithmetic is the shell's before the move.
+		const LoadingBarRects small = loading_bar_rects(800.0f, 640.0f, 100);
+		check(small.outer.x == 287 && small.outer.y == 609 && small.outer.w == 229 &&
+				      small.outer.h == 18,
+		      "the placement at 800 x 640 truncates the float ratio's exact product");
+		check(small.fill.x == 290 && small.fill.y == 612 && small.fill.w == 223 &&
+				      small.fill.h == 12,
+		      "the full fill at 800 x 640");
 	}
 
 	if (g_failures != 0) {
