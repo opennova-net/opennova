@@ -12,7 +12,6 @@
 #include "simulation/entity_presenter.h"
 #include "simulation/player_weapon_view.h"
 #include "simulation/simulation.h"
-#include "terrain/terrain_data.h"
 #include "util/axes.h"
 
 #include <godot_cpp/classes/camera_attributes.hpp>
@@ -571,35 +570,6 @@ Vector2 LocalPlayerPresenter::aim_screen_point() const {
 	const Vector2 surface_size = surface->get_visible_rect().size;
 	return Vector2((clip.x / clip.w * 0.5f + 0.5f) * surface_size.x,
 			(-clip.y / clip.w * 0.5f + 0.5f) * surface_size.y);
-}
-
-int LocalPlayerPresenter::aim_range_units() const {
-	Node *node = world();
-	if (node == nullptr || camera() == nullptr || !has_player()) {
-		return 1;
-	}
-	const Ref<Simulation> range_sim = sim();
-	const Vector3 pos = range_sim.is_valid() ? range_sim->get_local_player_position() : Vector3();
-	const Vector3 eye = eye_position(pos);
-	const Vector2 angles = aim_angles_deg();
-	Vector3 endpoint = Simulation::aim_ray_endpoint(eye, angles.x, angles.y);
-	// The terrain surface, through the ported retail raycast
-	// (TerrainData.raycast_terrain -> engine/runtime/terrain_query/terrain_raycast.h
-	// [orig: Terrain_RaycastHeightmapHiRes_0 @0x60e710]) rather than a Godot
-	// physics query. The terrain heightfield was the only thing that query
-	// could ever hit in the runtime -- object pick bodies are editor-only -- so
-	// this measures the same surface, and it is now the SAME sampler the round
-	// the player fires traces, so the readout and the bullet agree by
-	// construction.
-	const Ref<TerrainData> terrain = node->call("get_terrain_data");
-	if (terrain.is_valid()) {
-		const Vector3 hit = terrain->raycast_terrain(eye, endpoint);
-		// A miss reports all-NAN.
-		if (!(std::isnan(hit.x) || std::isnan(hit.y) || std::isnan(hit.z))) {
-			endpoint = hit;
-		}
-	}
-	return Simulation::rangefinder_units(pos, endpoint);
 }
 
 Vector2 LocalPlayerPresenter::aim_angles_deg() const {
@@ -1238,7 +1208,6 @@ void LocalPlayerPresenter::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_player"), &LocalPlayerPresenter::has_player);
 	ClassDB::bind_method(D_METHOD("is_local_spectator"), &LocalPlayerPresenter::is_local_spectator);
 	ClassDB::bind_method(D_METHOD("aim_screen_point"), &LocalPlayerPresenter::aim_screen_point);
-	ClassDB::bind_method(D_METHOD("aim_range_units"), &LocalPlayerPresenter::aim_range_units);
 	ClassDB::bind_method(D_METHOD("avatar_root_world"), &LocalPlayerPresenter::avatar_root_world);
 	ClassDB::bind_method(D_METHOD("avatar_head_world"), &LocalPlayerPresenter::avatar_head_world);
 }

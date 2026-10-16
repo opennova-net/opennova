@@ -1114,10 +1114,11 @@ func test_shared_presenter_teardown_releases_captured_mouse() -> void:
 
 
 # --- binocular rangefinder ----------------------------------------------------
-# The range readout traces the ported retail terrain raycast
-# (TerrainData.raycast_terrain -> engine/runtime/terrain_query
-# [orig: Terrain_RaycastHeightmapHiRes_0 @0x60e710]), measured from entity
-# Position to the collision/far endpoint and clamped to the 1..1000 display.
+# The range readout the HUD shows is the engine's (PlayerLocalView.aim_range_units,
+# engine world/local_player_targeting.cpp): the aim trace's hit (terrain and
+# entities alike, else the 1000-unit projection's far point) measured from the
+# entity Position, re-acquired every sixteenth tick
+# [orig: Entity_UpdateInfantryPlayerBody @0x4b4e9b..0x4b5215].
 
 
 func test_aim_range_measures_the_real_terrain_and_clamps_to_the_projection() -> void:
@@ -1136,12 +1137,12 @@ func test_aim_range_measures_the_real_terrain_and_clamps_to_the_projection() -> 
 
 	# Aim well below the horizon.
 	assert_true(_look(presenter, Vector2(0.0, 2500.0)))
-	_frame(world, presenter, camera, 1)
+	_frame(world, presenter, camera, 16)
 	assert_lt(float(sim.get_local_player_pitch_deg()), -40.0)
-	var range_down := presenter.aim_range_units()
+	var range_down := world.local_player_view().aim_range_units
 	assert_between(range_down, 5, 400, "the downward readout measures a real hit")
-	# The readout equals the same measure taken through the public sampler: the
-	# eye is the posed head (floored), the endpoint the 1000-unit projection.
+	# The same heightfield under the same ray: the readout is that hit's
+	# distance from entity Position (the trace's eye is the engine's own).
 	var pos: Vector3 = sim.get_local_player_position()
 	var eye: Vector3 = presenter.avatar_head_world()
 	eye.y = maxf(eye.y, pos.y + Simulation.player_eye_min_above_position())
@@ -1150,17 +1151,16 @@ func test_aim_range_measures_the_real_terrain_and_clamps_to_the_projection() -> 
 	var hit: Vector3 = terrain.raycast_terrain(
 			eye, eye + forward * Simulation.player_aim_project_range())
 	assert_false(is_nan(hit.x), "the downward ray hits the real heightfield")
-	var expected := clampi(int(pos.distance_to(hit)), 1, 1000)
-	assert_between(range_down, expected - 1, expected + 1,
-			"the readout is the terrain-raycast distance from entity Position")
+	assert_almost_eq(float(range_down), pos.distance_to(hit), 2.0,
+			"the readout is the terrain hit's distance from entity Position")
 
-	# Aim at the sky: the raycast misses and the readout clamps to the retail
-	# 1000-unit projection endpoint.
+	# Aim at the sky: nothing is hit and the readout is the 1000-unit
+	# projection's far point.
 	assert_true(_look(presenter, Vector2(0.0, -8000.0)))
-	_frame(world, presenter, camera, 1)
+	_frame(world, presenter, camera, 16)
 	assert_gt(float(sim.get_local_player_pitch_deg()), 45.0)
-	assert_eq(presenter.aim_range_units(), 1000,
-			"a terrain miss falls back to the far endpoint of the projection")
+	assert_between(world.local_player_view().aim_range_units, 999, 1001,
+			"a miss reads the far endpoint of the projection")
 
 
 # --- the real FP viewmodel ----------------------------------------------------

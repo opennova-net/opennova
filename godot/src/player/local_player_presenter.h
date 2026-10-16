@@ -263,10 +263,6 @@ public:
 	// projection" (1P pin, no camera/player, or the far point behind the
 	// camera) -- the HUD falls back to the design center.
 	Vector2 aim_screen_point() const;
-	// The binocular rangefinder targets the same aim ray as the camera; the
-	// endpoint, the truncation and the 1..1000 display clamp are the engine's
-	// (world/presentation_frame.h). This leg samples the terrain surface.
-	int aim_range_units() const;
     // Read-only render-pose diagnostics (Vector3.INF when no skeleton exists).
     // Gameplay eyes come from the current simulation CameraOffset.
 	Vector3 avatar_root_world() const;

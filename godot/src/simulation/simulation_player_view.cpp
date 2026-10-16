@@ -166,12 +166,6 @@ Vector3 Simulation::aim_ray_endpoint(const Vector3 &p_eye, float p_yaw_deg, floa
 	return Vector3(out[0], out[1], out[2]);
 }
 
-int Simulation::rangefinder_units(const Vector3 &p_position, const Vector3 &p_endpoint) {
-	const float pos[3] = {p_position.x, p_position.y, p_position.z};
-	const float end[3] = {p_endpoint.x, p_endpoint.y, p_endpoint.z};
-	return opennova::world::rangefinder_units(pos, end);
-}
-
 Vector3 Simulation::viewmodel_camera_local_from_view(const Vector3 &p_view_units) {
 	const float view[3] = {p_view_units.x, p_view_units.y, p_view_units.z};
 	float out[3];

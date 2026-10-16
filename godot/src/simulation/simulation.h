@@ -1591,7 +1591,6 @@ public:
 	// world/presentation_frame.h (no presenter spells the swizzle).
 	static Vector3 presentation_forward(float p_yaw_deg, float p_pitch_deg);
 	static Vector3 aim_ray_endpoint(const Vector3 &p_eye, float p_yaw_deg, float p_pitch_deg);
-	static int rangefinder_units(const Vector3 &p_position, const Vector3 &p_endpoint);
 	// The FP viewmodel rig's frame math (renderer/fp_viewmodel_spec.h): the
 	// view-frame -> camera-local axis map, the def rotation bias as camera
 	// euler radians, the rig yaw, the renderfov default, the TEX_TEAM byte.
