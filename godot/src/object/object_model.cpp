@@ -13,6 +13,7 @@
 #include <godot_cpp/classes/occluder_instance3d.hpp>
 
 #include <algorithm>
+#include <array>
 #include <limits>
 
 #include "env/slot_shadow.h"
@@ -28,6 +29,7 @@
 #include "object/object_shader_cache.h"
 #include "render/frame_fx.h"
 #include "render/object_lod_frame.h"
+#include "util/axes.h"
 #include "util/texture_path_resolver.h"
 #include <runtime/renderer/foliage_frame.h>
 #include <runtime/renderer/object_lod.h>
@@ -1549,14 +1551,10 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 	// the native bus the evaluations below read (no batch replay: the value
 	// moves every tick anyway).
 	if (object_data_.is_valid() && object_data_->uses_weather_ctrl_registers()) {
-		const Vector3 p = get_global_position(); // Godot (x, up, -y)
+		const std::array<int32_t, 3> p = godot_to_mission_q16(get_global_position());
 		int32_t flicker = 0;
 		int32_t swing = 0;
-		if (ObjectData::weather_ctrl_registers_at(
-					static_cast<int32_t>(std::lround(static_cast<double>(p.x) * 65536.0)),
-					static_cast<int32_t>(std::lround(static_cast<double>(-p.z) * 65536.0)),
-					static_cast<int32_t>(std::lround(static_cast<double>(p.y) * 65536.0)),
-					flicker, swing)) {
+		if (ObjectData::weather_ctrl_registers_at(p[0], p[1], p[2], flicker, swing)) {
 			controls_.sample_weather(flicker, swing);
 		} else {
 			// No rings stand any more (no weather publishes them: a world with

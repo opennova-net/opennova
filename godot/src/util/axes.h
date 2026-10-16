@@ -9,6 +9,7 @@
 #include <runtime/mission/placement_traits.h>
 
 #include <array>
+#include <cstdint>
 
 namespace godot {
 
@@ -90,6 +91,17 @@ template <typename V = opennova::env::Vec3>
 inline V godot_to_mission(const Vector3 &v) {
 	return V{static_cast<float>(v.x), static_cast<float>(-v.z),
 			static_cast<float>(v.y)};
+}
+
+// The same inverse into the mission's 16.16 position, each axis rounded to
+// nearest and saturated (io::float_to_fp16_16_round_sat): the one form a
+// binding hands the engine's fixed-point queries a Godot position in.
+inline std::array<int32_t, 3> godot_to_mission_q16(const Vector3 &v) {
+	return {
+		opennova::io::float_to_fp16_16_round_sat(static_cast<double>(v.x)),
+		opennova::io::float_to_fp16_16_round_sat(-static_cast<double>(v.z)),
+		opennova::io::float_to_fp16_16_round_sat(static_cast<double>(v.y)),
+	};
 }
 
 // The one BMS rotation -> Godot basis wrapper over the engine's witnessed
