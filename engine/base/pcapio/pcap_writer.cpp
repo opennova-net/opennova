@@ -1,5 +1,7 @@
 #include <base/pcapio/pcap_writer.h>
 
+#include <base/io/os_path.h>
+
 #include <base/io/le.h>
 
 #include <chrono>
@@ -100,7 +102,7 @@ PcapUdpWriter::~PcapUdpWriter() { close(); }
 
 bool PcapUdpWriter::open(const std::string &path) {
 	close();
-	file_ = std::fopen(path.c_str(), "wb");
+	file_ = opennova::io::fopen_utf8(path.c_str(), "wb");
 	if (file_ == nullptr) return false;
 	scratch_.clear();
 	append_pcap_global_header(scratch_);

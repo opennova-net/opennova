@@ -6,6 +6,8 @@
 
 #include <formats/mus/mus.h>
 
+#include <base/io/os_path.h>
+
 #include <base/io/le.h>
 
 #include <stdio.h>
@@ -335,7 +337,7 @@ int mus_open(MusFile *out, const char *path) {
         return -1;
     }
     memset(out, 0, sizeof(*out));
-    FILE *f = fopen(path, "rb");
+    FILE *f = opennova::io::fopen_utf8(path, "rb");
     if (!f) return -30;
     fseek(f, 0, SEEK_END);
     long n = ftell(f);

@@ -15,6 +15,8 @@
 
 #include <formats/adm/adm.h>
 
+#include <base/io/os_path.h>
+
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -88,7 +90,7 @@ int adm_write(const char *path, const AdmFile *af) {
     if (path == nullptr) return -1;
     std::string bytes;
     if (adm_write_buffer(af, bytes) != 0) return -1;
-    FILE *f = std::fopen(path, "wb");
+    FILE *f = opennova::io::fopen_utf8(path, "wb");
     if (f == nullptr) return -1;
     const size_t written = std::fwrite(bytes.data(), 1, bytes.size(), f);
     std::fclose(f);

@@ -1,5 +1,7 @@
 #include <formats/threedi/threedi_3di3.h>
 
+#include <base/io/os_path.h>
+
 // The chunk layout this walks is witnessed at its declarations
 // [orig: see engine/formats/threedi/threedi_3di3.h's markers — the 3DI3 container as
 // ModSuperOed.exe / dfvas.exe write it, docs/threedi/3di-gp-format-re.md]; this file
@@ -1750,7 +1752,7 @@ int threedi_3di3_write(const char *path, const Threedi3di3 *model)
     if (threedi_3di3_serialize(model, &buf, NULL) != 0) {
         return -1;
     }
-    FILE *f = fopen(path, "wb");
+    FILE *f = opennova::io::fopen_utf8(path, "wb");
     if (!f) {
         buffer_builder_free(&buf);
         return -1;

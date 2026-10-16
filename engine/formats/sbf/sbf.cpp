@@ -9,6 +9,8 @@
 
 #include <formats/sbf/sbf.h>
 
+#include <base/io/os_path.h>
+
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -45,7 +47,7 @@ int sbf_open(SbfArchive *arc, const char *path) {
     if (!arc || !path) return -1;
     memset(arc, 0, sizeof(*arc));
 
-    FILE *f = fopen(path, "rb");
+    FILE *f = opennova::io::fopen_utf8(path, "rb");
     if (!f) return -10;
 
     uint8_t header[SBF_HEADER_SIZE];

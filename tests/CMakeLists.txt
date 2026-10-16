@@ -100,6 +100,12 @@ target_link_libraries(threedi_roundtrip_test PRIVATE opennova_formats)
 target_include_directories(threedi_roundtrip_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_roundtrip COMMAND threedi_roundtrip_test)
 
+# A 3DI written and read under a UTF-8 path no ANSI code page spells (io::fopen_utf8).
+add_executable(threedi_utf8_path_test threedi/utf8_path_test.cpp)
+target_link_libraries(threedi_utf8_path_test PRIVATE opennova_formats)
+target_include_directories(threedi_utf8_path_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME threedi_utf8_path COMMAND threedi_utf8_path_test)
+
 # Every retail model through the reader and the writer the editor saves by:
 # byte-identical and a fixed point (OPENNOVA_JO_ASSETS).
 add_executable(threedi_retail_rewrite_test threedi/retail_rewrite_test.cpp)
