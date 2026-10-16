@@ -362,7 +362,9 @@ void authored_binding() {
         for (int i = 0; i < 14; ++i) {
             CHECK(bound.minefield.types[i] == i % 4 + 1);
             const auto p = w.minefields.point(bound, i);
-            CHECK(p.x == (yaw == 90 ? 12 * 65536 + i * 32768 : 13 * 65536));
+            // Mission yaw 0 is a quarter-turn heading, whose dbl_7C3608 cosine is
+            // -201 / 2^22: an offset along the row truncates to -1 (x 256) across it.
+            CHECK(p.x == (yaw == 90 ? 12 * 65536 + i * 32768 : 13 * 65536 - (i != 0 ? 256 : 0)));
             CHECK(p.y == (yaw == 90 ? 33 * 65536 : 34 * 65536 + i * 32768));
             CHECK(p.z == 0); // terrain snap after the identity-bone model-global point
         }

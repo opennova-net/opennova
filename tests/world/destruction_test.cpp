@@ -1020,8 +1020,10 @@ void test_bridge_dead_points_emit_water_shocks() {
         CHECK(std::abs(shocks[0].pos.x - 4.75f) < 1.0e-4f);
         CHECK(std::abs(shocks[0].pos.y - 6.5f) < 1.0e-4f);
         CHECK(std::abs(shocks[0].pos.z - 3.25f) < 1.0e-6f);
-        CHECK(std::abs(shocks[1].pos.x - 4.25f) < 1.0e-4f);
-        CHECK(std::abs(shocks[1].pos.y - 5.0f) < 1.0e-4f);
+        // The pose's quarter turns take dbl_7C3608's sine and cosine (cos -201 / 2^22),
+        // which leaves about 1.2e-4 u at these offsets.
+        CHECK(std::abs(shocks[1].pos.x - 4.25f) < 2.0e-4f);
+        CHECK(std::abs(shocks[1].pos.y - 5.0f) < 2.0e-4f);
         CHECK(std::abs(shocks[1].pos.z - 3.25f) < 1.0e-6f);
         CHECK(shocks[0].attach_net_id == 0);
         CHECK(shocks[0].family == 0);
