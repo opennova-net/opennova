@@ -5,25 +5,28 @@
 // on this system with its process runtime (as the local stack's machine
 // containers run it), launched with its token file and reaching the service's
 // internal listener (hosted/internal_listener.h) on loopback; its servers are
-// real opennova-serve children (ctest passes both binaries) over synthetic loose
-// game directories (serve_test_support.h's deathmatch map and game text), one
-// per data set: Joint Operations' and Delta Force Xtreme 2's, each the folder
-// the bootstrap names for it. Built only with BUILD_NOVAWORLD_HTTP; Linux (the
-// agent is).
+// real opennova-serve children (ctest passes both binaries) over synthetic
+// packed trees (hosted_tree_support.h: resource.pff, localres.pff holding
+// serve_test_support.h's deathmatch map, language.pff holding the game text,
+// version.txt), one per data set: the seeded Joint Operations and Delta Force
+// Xtreme 2 rows (migration 0011) each given a ready tree in a local object
+// store (ADR 0064), which the agent fetches into its trees root (--trees-root)
+// from the file:// URL the sync's reply names, checks against the manifest and
+// reports present. Built only with BUILD_NOVAWORLD_HTTP; Linux (the agent is).
 //
 //   * the owner, granted a server (players.comp_servers), starts a Joint
-//     Operations server with POST /api/me/servers; the supervisor launches a
-//     shared machine, whose agent bootstraps and syncs, places the server on
-//     its first slot, mints its service account srv-<id> and renders its
-//     files, which the agent writes to the slot's directory before it starts
-//     opennova-serve over that data set's folder with /game jo and
-//     --loose-root; it logs in as that account, hosts and lists; the server
-//     reaches running;
-//   * a second owner's Delta Force Xtreme 2 server, naming no missions, lands on
-//     the same machine's second slot (no second machine), on its own game port,
-//     with that data set's rotation and /game dfx2, and runs beside the first;
-//     each listing's port is its slot's game port (NovaWorld lists a server at
-//     its datagrams' source port, so two servers share one address);
+//     Operations server with POST /api/me/servers (its data_set_id and the
+//     mission its tree lists); the supervisor launches a shared machine, whose
+//     agent bootstraps and syncs, places the server on its first slot, pins it
+//     to the data set's current tree, mints its service account srv-<id> and
+//     renders its files, which the agent writes to the slot's directory before
+//     it starts opennova-serve over the fetched tree's directory with /game jo;
+//     it logs in as that account, hosts and lists; the server reaches running;
+//   * a second owner's Delta Force Xtreme 2 server lands on the same machine's
+//     second slot (no second machine), on its own game port, with its own tree
+//     and /game dfx2, and runs beside the first; the machine reports both trees
+//     present; each listing's port is its slot's game port (NovaWorld lists a
+//     server at its datagrams' source port, so two servers share one address);
 //   * GET /api/me/hosts shows the first listing as the owner's hosted server;
 //     the owner's SetServerName (POST /api/me/hosts/<rid>/command) reaches it,
 //     and it saves game.cfg in its slot's directory with the name;
@@ -44,10 +47,12 @@
 //     new lobby. (A deployment's lobbies share one address, so its lobby
 //     replacement relists a host without this: lobby_instances_e2e.)
 
+#include "hosted_tree_support.h"
 #include "lobby_client.h"
 #include "nw_service_harness.h"
 
 #include "hosted/admin_link.h"
+#include "hosted/data_set_repository.h"
 #include "hosted/fleet_config.h"
 #include "hosted/fleet_jobs.h"
 #include "hosted/fleet_repository.h"
@@ -56,6 +61,7 @@
 #include "hosted/machine_driver.h"
 #include "hosted/supervisor.h"
 #include "jobs/worker_pool.h"
+#include "local_object_store.h"
 #include "serve/serve_test_support.h"
 #include "web_session.h"
 
@@ -236,8 +242,9 @@ std::string read_text(const fs::path &path) {
 // The test's machine driver: each machine the real agent, opennova-hostd with its
 // process runtime, as a process of this system's (the local stack runs it as a
 // container of its own), its user-data a token file in the machine's directory,
-// <work>/machine-<id> (its state, its slots, its log). Its servers share this
-// system's network, so its profile's slot ports are free ones probed on loopback,
+// <work>/machine-<id> (its state, its slots, its log), its trees root
+// <work>/trees (one machine is expected). Its servers share this system's
+// network, so its profile's slot ports are free ones probed on loopback,
 // admitting loopback.
 class HostdMachines : public hosted::MachineDriver {
 public:
@@ -277,6 +284,10 @@ public:
 	fs::path dir(int64_t machine_id) const {
 		return work_ / ("machine-" + std::to_string(machine_id));
 	}
+	// The machines' trees root (--trees-root), and tree `id`'s directory under
+	// it, where the agent keeps a fetched tree and runs its servers over.
+	fs::path trees_root() const { return work_ / "trees"; }
+	fs::path tree_dir(int64_t id) const { return trees_root() / std::to_string(id); }
 	// The agent's process id; 0 for a machine not running.
 	int64_t pid(const std::string &cloud_id) {
 		std::lock_guard<std::mutex> lock(mu_);
@@ -303,7 +314,8 @@ public:
 		options.argv = { hostd_, "--runtime", "process", "--serve", serve_, "--service",
 			service_url_, "--machine", std::to_string(launch.machine_id), "--token-file",
 			token.u8string(), "--state-dir", (machine / "state").u8string(), "--slots-root",
-			(machine / "slots").u8string(), "--iptables", "none", "--ip6tables", "none" };
+			(machine / "slots").u8string(), "--trees-root", trees_root().u8string(), "--iptables",
+			"none", "--ip6tables", "none" };
 		options.output_path = (machine / "hostd.log").u8string();
 		auto child = std::make_unique<opennova::proc::ChildProcess>();
 		if (!child->spawn(options, error))
@@ -415,7 +427,7 @@ fs::path slot_dir(const HostdMachines &machines, Service &service, int64_t id) {
 	return machines.dir(*row->machine_ref) / "slots" / hosted::slot_dir_name(row->slot);
 }
 
-// What the machine's agent runs over data set folder `data` (the server's argv), empty for none.
+// What the machine's agent runs over tree directory `data` (the server's argv), empty for none.
 std::vector<std::string> command_over(
 		HostdMachines &machines, Service &service, int64_t id, const fs::path &data) {
 	const auto machine = machine_of(service, id);
@@ -480,45 +492,49 @@ int main(int argc, char **argv) {
 	{
 		// Declared first, so the database's files and the working directories go last.
 		test_temp::TempDir temp("hosted_local_e2e");
-		// Two synthetic game directories, two data sets: each one deathmatch map
-		// (named after its data set, so the listing tells which folder a server
-		// mounted) and the game text.
-		const auto write_game = [](const fs::path &dir, const char *map_file, const char *map_name) {
-			fs::create_directories(dir);
-			expect(serve_test::write_bytes(dir / map_file, serve_test::deathmatch_mission(map_name)), "a map");
-			expect(serve_test::write_bytes(dir / "gametext.bin",
-						   serve_test::gametext({
-								   { "NovaWorld",
-										   { { "STRNOVA07", "Jungle" }, { "STRNOVA08", "Desert" },
-												   { "STRNOVA09", "Snow" }, { "STRNOVA10", "None" },
-												   { "STRNOVA11", "Yes" }, { "STRNOVA12", "No" } } },
-								   { "GateTypeAbbrev", { { "DM", "DM" } } },
-						   })),
-					"the game text");
-		};
-		// (Their paths are mount paths: letters, digits and ./_- alone.)
-		const fs::path data = temp.path / "jo_data";
-		const fs::path dfx2_data = temp.path / "dfx2_data";
-		write_game(data, "SERVETST.BMS", "Serve Test Map");
-		write_game(dfx2_data, "DFXTEST.BMS", "DFX2 Test Map");
-		// ONNET_HOSTED_DATA_SETS as a deployment writes it, read as main() reads it:
-		// both loose folders, each with its rotation.
-		const std::string data_sets_json =
-				"{\"jop_2_consumer\":{\"loose_root\":true,\"missions\":[\"servetst.bms\"]},"
-				"\"dfx2_consumer\":{\"loose_root\":true,\"missions\":[\"dfxtest.bms\"]}}";
-		std::vector<hosted::DataSetConfig> data_set_configs;
-		std::string config_error;
-		expect(hosted::parse_data_set_configs(data_sets_json, data_set_configs, config_error),
-				"ONNET_HOSTED_DATA_SETS reads");
-		const std::vector<hosted::DataSet> data_sets = hosted::offered_data_sets(data_set_configs);
-		expect(data_sets.size() == 2, "both data sets are offered");
+		// Two synthetic packed trees, two data sets: each one deathmatch map (named
+		// after its data set, so the listing tells which tree a server mounted)
+		// and the game text, packed as a retail install is; each put in the local
+		// object store under trees/<id>/ as its seeded data set's ready current
+		// tree (the manifest hashed, the missions read from the archives).
+		const fs::path jo_source = temp.path / "jo_source";
+		const fs::path dfx2_source = temp.path / "dfx2_source";
+		expect(hosted_trees::write_base_tree(jo_source, "SERVETST.BMS", "Serve Test Map", "JO V1.7.5.3"),
+				"Joint Operations' tree packs");
+		expect(hosted_trees::write_base_tree(dfx2_source, "DFXTEST.BMS", "DFX2 Test Map", "DFX2 V1.0"),
+				"Delta Force Xtreme 2's tree packs");
+		nws::LocalObjectStore store((temp.path / "store").u8string());
 
 		Service service;
+		int64_t jo_set = 0;
+		int64_t dfx2_set = 0;
+		int64_t jo_tree = 0;
+		int64_t dfx2_tree = 0;
+		{
+			auto db = service.pool.acquire();
+			jo_set = hosted_trees::seeded_data_set(*db, "Joint Operations");
+			dfx2_set = hosted_trees::seeded_data_set(*db, "Delta Force Xtreme 2");
+			expect(jo_set != 0 && dfx2_set != 0, "the seeded data sets are there");
+			jo_tree = hosted_trees::seed_ready_tree(*db, store, jo_set, hosted::DataSetKind::Base, "", jo_source);
+			dfx2_tree = hosted_trees::seed_ready_tree(*db, store, dfx2_set, hosted::DataSetKind::Base, "", dfx2_source);
+			expect(jo_tree != 0 && dfx2_tree != 0, "each data set has a ready tree in the store");
+			const auto offered = hosted::offered_data_sets(*db);
+			expect(offered.size() == 2, "both data sets are offered");
+			const auto lower = [](std::string s) {
+				for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+				return s;
+			};
+			for (const auto &d : offered) {
+				expect(d.missions.size() == 1 &&
+								lower(d.missions[0].file) == (d.id == jo_set ? "servetst.bms" : "dfxtest.bms"),
+						"each offered data set lists its tree's mission");
+			}
+		}
 		const bool up = service.start(source_dir, temp.path, /*require_host_key=*/false,
-				[&data_sets_json](nws::ServerConfig &config) {
+				[&store](nws::ServerConfig &config) {
 					config.hosted_provider = "docker";
 					config.hosted_cap = 5;
-					config.hosted_data_sets = data_sets_json;
+					config.object_store_url = store.url_of("");
 				});
 		expect(up, "the service starts");
 		expect(nws::set_comp_servers(*service.pool.acquire(), service.owner_id, 1).ok, "the owner is granted a server");
@@ -527,7 +543,11 @@ int main(int argc, char **argv) {
 		const fs::path work = temp.path / "work";
 		HostdMachines driver(hostd_binary, serve_binary, work);
 		hosted::SupervisorConfig config;
-		config.data_sets = data_sets;
+		// Where the machines fetch each tree from: the store's URL of trees/<id>/,
+		// as the controller hands it (a file:// copy for the agent).
+		config.tree_url = [&store](int64_t tree_id) {
+			return store.url_of("trees/" + std::to_string(tree_id) + "/");
+		};
 		config.cap = 5;
 		config.master_host = "127.0.0.1";
 		config.master_gate_port = service.gate.bound_port();
@@ -562,13 +582,9 @@ int main(int argc, char **argv) {
 			return opennova::lobbydb::queue_stop_hosting(db, rid, opennova::SERVER_MSG_CODE_NOVAWORLD_SYSOP_PUNT, 0,
 						   0, account) == opennova::lobbydb::PushResult::Queued;
 		});
-		// The machine agents' routes on loopback, as main() wires them, but each data set
-		// at its synthetic folder (a machine mounts it at /opt/game/<data set>).
-		hosted::AgentRouteConfig routes = hosted::agent_route_config(
-				hosted::FleetConfig{}, { "jop_2_consumer", "dfx2_consumer" });
-		routes.data_sets["jop_2_consumer"] = data.u8string();
-		routes.data_sets["dfx2_consumer"] = dfx2_data.u8string();
-		hosted::InternalListener internal(service.pool, supervisor, routes);
+		// The machine agents' routes on loopback, as main() wires them.
+		hosted::InternalListener internal(
+				service.pool, supervisor, hosted::agent_route_config(hosted::FleetConfig{}));
 		// The lobby that replaces the service's own, at a new address (below).
 		ReplacementLobby replacement(service.pool);
 		const bool internal_up = up && internal.start("127.0.0.1", 0);
@@ -586,8 +602,9 @@ int main(int argc, char **argv) {
 		int64_t id = 0;
 		if (!session.empty()) {
 			const auto reply = send(service, "POST", "/api/me/servers", as_owner(session, true),
-					"{\"game\":\"jop_2_consumer\",\"game_name\":\"Hosted E2E\",\"max_players\":8,"
-					"\"missions\":[\"servetst.bms\"]}");
+					"{\"data_set_id\":" + std::to_string(jo_set) +
+							",\"game_name\":\"Hosted E2E\",\"max_players\":8,"
+							"\"missions\":[\"servetst.bms\"]}");
 			const auto json = crow::json::load(body_text(reply));
 			if (reply.code != 202) std::fprintf(stderr, "  start: %d %s\n", reply.code, body_text(reply).c_str());
 			const auto started = reply.code == 202 ? integer_at(json, { "server", "id" }) : std::nullopt;
@@ -626,7 +643,9 @@ int main(int argc, char **argv) {
 		int64_t dfx2_id = 0;
 		if (!second.empty()) {
 			const auto reply = send(service, "POST", "/api/me/servers", as_owner(second, true),
-					"{\"game\":\"dfx2_consumer\",\"game_name\":\"Hosted E2E DFX2\",\"max_players\":8}");
+					"{\"data_set_id\":" + std::to_string(dfx2_set) +
+							",\"game_name\":\"Hosted E2E DFX2\",\"max_players\":8,"
+							"\"missions\":[\"dfxtest.bms\"]}");
 			if (reply.code != 202) std::fprintf(stderr, "  dfx2 start: %d %s\n", reply.code, body_text(reply).c_str());
 			dfx2_id = reply.code == 202 ? integer_at(crow::json::load(body_text(reply)), { "server", "id" }).value_or(0)
 										: 0;
@@ -663,20 +682,33 @@ int main(int argc, char **argv) {
 			const fs::path dir = slot_dir(driver, service, id);
 			expect(fs::exists(dir / "server.host") && fs::exists(dir / "credentials.txt"),
 					"its slot's directory was written from its files");
-			expect(jo->settings.game == "jop_2_consumer" && dfx2->settings.game == "dfx2_consumer" &&
+			expect(jo->settings.data_set_id == jo_set && dfx2->settings.data_set_id == dfx2_set &&
+							!jo->settings.expansion_id && !dfx2->settings.expansion_id &&
+							jo->settings.missions == std::vector<std::string>{ "servetst.bms" } &&
 							dfx2->settings.missions == std::vector<std::string>{ "dfxtest.bms" },
-					"the rows name their data sets (the second its data set's rotation)");
-			const std::vector<std::string> jo_command = command_over(driver, service, id, data);
+					"the rows name their data sets and rotations");
+			expect(jo->base_tree_id == jo_tree && dfx2->base_tree_id == dfx2_tree &&
+							!jo->expansion_tree_id && !dfx2->expansion_tree_id,
+					"each server is pinned to its data set's current tree");
+			// The trees on the machine: fetched from the store, marked, reported present
+			// with their bytes.
+			expect(fs::is_regular_file(driver.tree_dir(jo_tree) / ".ready") &&
+							fs::is_regular_file(driver.tree_dir(jo_tree) / "localres.pff") &&
+							fs::is_regular_file(driver.tree_dir(dfx2_tree) / ".ready") &&
+							fs::is_regular_file(driver.tree_dir(dfx2_tree) / "localres.pff"),
+					"both trees are in the machine's trees root, marked ready");
+			const std::vector<std::string> jo_command =
+					command_over(driver, service, id, driver.tree_dir(jo_tree));
 			const std::vector<std::string> dfx2_command =
-					command_over(driver, service, dfx2_id, dfx2_data);
+					command_over(driver, service, dfx2_id, driver.tree_dir(dfx2_tree));
 			const auto loose = [](const std::vector<std::string> &argv) {
 				return std::find(argv.begin(), argv.end(), "--loose-root") != argv.end();
 			};
 			expect(!jo_command.empty() && jo_command[0] == serve_binary &&
-							has_pair(jo_command, "/game", "jo") && loose(jo_command),
-					"opennova-serve runs over Joint Operations' folder with /game jo, loose");
-			expect(has_pair(dfx2_command, "/game", "dfx2") && loose(dfx2_command),
-					"opennova-serve runs over Delta Force Xtreme 2's folder with /game dfx2");
+							has_pair(jo_command, "/game", "jo") && !loose(jo_command),
+					"opennova-serve runs over Joint Operations' tree with /game jo, packed");
+			expect(has_pair(dfx2_command, "/game", "dfx2") && !loose(dfx2_command),
+					"opennova-serve runs over Delta Force Xtreme 2's tree with /game dfx2");
 
 			// Each listing at its slot's game port: one address, two servers.
 			auto reply = send(service, "GET", "/api/me/servers/" + std::to_string(id), as_owner(session, false));
@@ -783,9 +815,8 @@ int main(int argc, char **argv) {
 			expect(wait_for(
 						   [&] {
 							   return !fs::exists(dir) &&
-									   command_over(driver, service, dfx2_id, dfx2_data).size() >
-									   0 &&
-									   command_over(driver, service, id, data).empty();
+									   command_over(driver, service, dfx2_id, driver.tree_dir(dfx2_tree)).size() > 0 &&
+									   command_over(driver, service, id, driver.tree_dir(jo_tree)).empty();
 						   },
 						   30),
 					"its server and its slot's directory are gone from the machine");
