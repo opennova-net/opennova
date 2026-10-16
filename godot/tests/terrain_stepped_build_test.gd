@@ -116,6 +116,23 @@ func test_a_load_stepped_is_the_load_whole() -> void:
 			whole.get_height_world_bilinear(Vector3(64.0, 0.0, 64.0)))
 
 
+# A terrain whose char map is not in the mount keeps no char map, as the game
+# holds none (its surface sampler then answers 1 everywhere,
+# Terrain_GetSurfaceTypeAtPosition @ 0x606519): no synthesized map of 1s,
+# which answered 7 on every empty sector cell. The foliage map's default (all 0,
+# nothing grows) stays.
+func test_a_missing_char_map_leaves_the_slot_empty() -> void:
+	var root_dir := TestFs.stage_terrain_root("missing_charmap")
+	DirAccess.remove_absolute(root_dir.path_join("Tmap_m.pcx"))
+	var root := ResourceRoot.new()
+	assert_eq(root.set_root_dir(root_dir), OK, "the staged terrain root mounts")
+	var data := TerrainData.new()
+	assert_eq(data.load_from_resource_root(root, TestFs.TMAP_TRN), OK, "the terrain loads without its char map")
+	assert_null(data.get_charmap_tex(), "no char map: the slot stays empty")
+	assert_not_null(data.get_foliagemap_tex(), "the foliage map still loads")
+	TestFs.remove_dir_recursive(root_dir)
+
+
 func test_a_load_is_refused_as_the_whole_load_is() -> void:
 	var data := TerrainData.new()
 	assert_eq(data.begin_load_from_resource_root(null, TestFs.TMAP_TRN), ERR_INVALID_PARAMETER,

@@ -816,30 +816,27 @@ void TerrainData::_use_default_pcx_slot(const String &slot_id) {
 	if (!_resolve_pcx_slot(slot_id, refs)) {
 		return;
 	}
+	if (slot_id == "charmap") {
+		// No char map: the slot stays empty, as the game holds none, so the
+		// kernel's surface sampler answers 1 everywhere, where a map of 1s
+		// answered 7 on every empty sector cell (engine:
+		// runtime/terrain_query/surface_type_map.h, its no-map and empty-cell legs).
+		refs.indices->clear();
+		*refs.width = 0;
+		*refs.height = 0;
+		*refs.tex = Ref<Texture2D>();
+		return;
+	}
+	// No foliage map: the codes all 0, which grow nothing, as the game's null
+	// map grows nothing (engine: runtime/terrain_query/foliage_mask_map.h).
 	constexpr int kDefaultMapSize = 1024;
 	*refs.width = kDefaultMapSize;
 	*refs.height = kDefaultMapSize;
-	refs.indices->assign(kDefaultMapSize * kDefaultMapSize,
-	                     slot_id == "charmap" ? 1 : 0);
+	refs.indices->assign(kDefaultMapSize * kDefaultMapSize, 0);
 	for (int index = 0; index < 256; ++index) {
 		refs.palette[index][0] = static_cast<uint8_t>(index);
 		refs.palette[index][1] = static_cast<uint8_t>(index);
 		refs.palette[index][2] = static_cast<uint8_t>(index);
-	}
-	if (slot_id == "charmap") {
-		static constexpr uint8_t kCharmapColors[][4] = {
-			{0, 0, 0, 0}, {1, 153, 118, 61}, {2, 0, 210, 0},
-			{3, 204, 239, 244}, {4, 152, 152, 152}, {5, 255, 255, 0},
-			{6, 255, 128, 0}, {7, 0, 0, 255}, {8, 255, 0, 0},
-			{9, 114, 64, 0}, {10, 160, 190, 219}, {11, 161, 0, 161},
-			{12, 255, 0, 186}, {13, 158, 78, 0}, {14, 0, 201, 203},
-			{15, 255, 255, 255},
-		};
-		for (const auto &entry : kCharmapColors) {
-			refs.palette[entry[0]][0] = entry[1];
-			refs.palette[entry[0]][1] = entry[2];
-			refs.palette[entry[0]][2] = entry[3];
-		}
 	}
 	*refs.tex = opennova::build_indexed_texture(
 	        *refs.indices, refs.palette, kDefaultMapSize, kDefaultMapSize);
