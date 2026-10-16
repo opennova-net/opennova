@@ -30,6 +30,7 @@
 #include "billing/billing_repository.h"
 #include "billing/billing_routes.h"
 #include "billing/entitlement.h"
+#include "connection_routes.h"
 #include "novaworld/billing_fake_stripe.h"
 #include "health.h"
 #include "hosted/admin_link.h"
@@ -982,30 +983,34 @@ int test_admin_routes_table(Harness &h) {
 
 	struct Route { const char *method; const char *path; const char *body; };
 	const Route routes[] = {
-		{"GET", "/api/admin/server-status", ""},
-		{"PUT", "/api/admin/server-status", "{\"maintenance_enabled\":false,\"message\":\"x\"}"},
-		{"POST", "/api/admin/hosts", "{\"rid\":4242}"},
-		{"GET", "/api/admin/hosts", ""},
-		{"GET", "/api/admin/connections", ""},
-		{"GET", "/api/hosts", ""},
-		{"GET", "/api/unknowns", ""},
-		{"GET", "/api/admin/users", ""},
-		{"POST", "/api/admin/users", "{\"username\":\"never\",\"password\":\"p\",\"pcid\":\"0badbad0\","
-		                             "\"nwhandle\":\"never\"}"},
-		{"DELETE", "/api/admin/users/999999", ""},
-		{"PUT", "/api/admin/users/999999", "{\"nwh\":\"1\"}"},
-		{"PUT", "/api/admin/users/999999/game-access",
-		 "{\"game_slug\":\"jop_2_consumer\",\"status\":\"active\",\"exp_bits\":\"3\"}"},
-		{"POST", "/api/admin/hosts/999999/command", "{\"verb\":\"Cycle\"}"},
-		{"POST", "/api/admin/hosts/999999/stop", ""},
-		{"GET", "/api/admin/cd-keys", ""},
-		{"POST", "/api/admin/cd-keys", "{\"title\":\"dfx2\",\"count\":1}"},
-		{"POST", "/api/admin/cd-keys/999999/assign", "{\"username\":\"web_table_player\"}"},
-		{"POST", "/api/admin/cd-keys/999999/revoke", ""},
-		{"POST", "/api/admin/cd-keys/999999/activations", "{\"nwpssk\":\"ABCDEFGHIJKLMNOPQRSTUVW\"}"},
-		{"GET", "/api/admin/billing", ""},
-		{"POST", "/api/admin/billing/reconcile", ""},
-		{"POST", "/api/admin/billing/link", "{\"user_id\":1,\"stripe_customer_id\":\"cus_never\"}"},
+		{ "GET", "/api/admin/server-status", "" },
+		{ "PUT", "/api/admin/server-status", "{\"maintenance_enabled\":false,\"message\":\"x\"}" },
+		{ "POST", "/api/admin/hosts", "{\"rid\":4242}" },
+		{ "GET", "/api/admin/hosts", "" },
+		{ "GET", "/api/admin/connections", "" },
+		{ "GET", "/api/hosts", "" },
+		{ "GET", "/api/unknowns", "" },
+		{ "GET", "/api/admin/users", "" },
+		{ "POST", "/api/admin/users",
+				"{\"username\":\"never\",\"password\":\"p\",\"pcid\":\"0badbad0\","
+				"\"nwhandle\":\"never\"}" },
+		{ "DELETE", "/api/admin/users/999999", "" },
+		{ "PUT", "/api/admin/users/999999", "{\"nwh\":\"1\"}" },
+		{ "PUT", "/api/admin/users/999999/game-access",
+				"{\"game_slug\":\"jop_2_consumer\",\"status\":\"active\",\"exp_bits\":\"3\"}" },
+		{ "POST", "/api/admin/hosts/999999/command", "{\"verb\":\"Cycle\"}" },
+		{ "POST", "/api/admin/hosts/999999/stop", "" },
+		{ "POST", "/api/admin/connections/999999/end", "{\"addr\":\"127.0.0.1:1\"}" },
+		{ "GET", "/api/admin/cd-keys", "" },
+		{ "POST", "/api/admin/cd-keys", "{\"title\":\"dfx2\",\"count\":1}" },
+		{ "POST", "/api/admin/cd-keys/999999/assign", "{\"username\":\"web_table_player\"}" },
+		{ "POST", "/api/admin/cd-keys/999999/revoke", "" },
+		{ "POST", "/api/admin/cd-keys/999999/activations",
+				"{\"nwpssk\":\"ABCDEFGHIJKLMNOPQRSTUVW\"}" },
+		{ "GET", "/api/admin/billing", "" },
+		{ "POST", "/api/admin/billing/reconcile", "" },
+		{ "POST", "/api/admin/billing/link",
+				"{\"user_id\":1,\"stripe_customer_id\":\"cus_never\"}" },
 	};
 	const auto users_before = nws::list_users(*h.pool.acquire()).size();
 	const auto status_before = nws::get_server_status(*h.pool.acquire());
@@ -2607,19 +2612,59 @@ class PushHost {
 public:
 	// `client_index` tells several hosts' sessions apart in the service's log (each has its own
 	// socket, which is what the service keys a connection by).
-	explicit PushHost(uint16_t service_port, uint32_t client_index = 0x48545450u)
-		: session_(config(client_index)) {
-		socket_ = net::ScopedSocket(net::udp_bind(0));
+	explicit PushHost(uint16_t service_port, uint32_t client_index = 0x48545450u) :
+			session_(config(client_index, &cookies_)) {
+		socket_ = net::ScopedSocket(net::udp_bind(0, &port_));
 		service_.ip = {127, 0, 0, 1};
 		service_.port = service_port;
 	}
 
-	// Verified, then a ClientHostRequest answered with success; false on a timeout.
-	bool host(const std::string &server_name) {
+	// The session's address as the service sees it.
+	std::string addr() const { return "127.0.0.1:" + std::to_string(port_); }
+
+	// The ClientHello alone: the service holds a session still signing in.
+	void hello() {
+		if (socket_.is_valid())
+			send(session_.start());
+	}
+
+	// The service ended the session (its ServerGoodBye landed), pumping up to `ms` for it.
+	bool wait_ended(int ms) {
+		pump_until(ms, [this] { return session_.disconnected_by_peer(); });
+		return session_.disconnected_by_peer();
+	}
+	const opennova::DisconnectEvent &disconnect_event() const {
+		return session_.disconnect_event();
+	}
+
+	// Verified; false on a timeout.
+	bool connect() {
 		if (!socket_.is_valid()) return false;
 		send(session_.start());
 		pump_until(8000, [this] { return session_.is_verified(); });
-		if (!session_.is_verified()) return false;
+		return session_.is_verified();
+	}
+
+	// A cookie the session's Cookie lists carry from its next statement on (a stock client's
+	// whole HTTP cookie jar rides them).
+	void set_cookie(const std::string &name, const std::string &value) {
+		cookies_.emplace_back(name, value);
+	}
+
+	// A ClientPlayRequest answered with success; false on a timeout.
+	bool play() {
+		if (!session_.request_playing(
+					opennova::make_play_setup_vars("Host", "127.0.0.1", "32768", "5699", 0))) {
+			return false;
+		}
+		return wait_notice(Notice::Kind::PlayResult, 3000) != nullptr &&
+				session_.play_state() == opennova::ClientSession::PlayState::Playing;
+	}
+
+	// Verified, then a ClientHostRequest answered with success; false on a timeout.
+	bool host(const std::string &server_name) {
+		if (!connect())
+			return false;
 		session_.queue_statement(opennova::make_client_host_request(
 				0, {{0, "NWUID", session_.server_nwuid()}},
 				{{0, "LobbyName", "jop_2_consumer"}, {0, "MaxPlayers", "8"}},
@@ -2645,13 +2690,16 @@ public:
 	}
 
 private:
-	static opennova::ClientSession::Config config(uint32_t client_index) {
+	using Cookies = std::vector<std::pair<std::string, std::string>>;
+	static opennova::ClientSession::Config config(uint32_t client_index, const Cookies *cookies) {
 		opennova::ClientSession::Config cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		cfg.client_index = client_index;
 		cfg.client_key = 0x50555348u;
 		cfg.na = "http:push";
-		cfg.cookie_vars = []() {
-			return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};
+		cfg.cookie_vars = [cookies]() {
+			Cookies vars{ { "NWUID", "" } };
+			vars.insert(vars.end(), cookies->begin(), cookies->end());
+			return vars;
 		};
 		return cfg;
 	}
@@ -2680,8 +2728,10 @@ private:
 		}
 	}
 
+	Cookies cookies_; // before session_, whose Cookie lists read it
 	opennova::ClientSession session_;
 	net::ScopedSocket socket_;
+	uint16_t port_ = 0;
 	net::Endpoint service_{};
 	std::vector<Notice> notices_;
 };
@@ -3182,6 +3232,205 @@ int test_owner_host_push(Harness &h) {
 	TEST_EXPECT(wait_until([&] {
 		return !row_named(h, "Anonymous Push Host") && !row_named(h, "Erin Push Host");
 	}));
+	return 0;
+}
+
+// GET /api/admin/connections names each connection's times as Unix epoch ms. The registry stamps
+// the steady clock, which counts from the machine's boot: production's sessions read 27514593
+// (7 h 38 min of uptime) and the page showed them as 20,741 days old (January 1970). A stamp
+// converts to the wall time less its age, and a live session's read within a minute of now.
+// Each session names who it is: none until a Cookie list carries a live retail login, then that
+// login's account; a hosting session its listing (name, map, players, listed) and the owner its
+// HostKey names, whatever login it sent; a login that ended names no one.
+int test_admin_sessions(Harness &h) {
+	// The production shape: a session made 125 s before the read, on a machine up 7 h 40 min.
+	const int64_t unix_now = 1792120342793; // 2026-10-16 09:39 UTC
+	TEST_EXPECT(nws::unix_ms_of_steady(27514593, 27640000, unix_now) == unix_now - 125407);
+	TEST_EXPECT(nws::unix_ms_of_steady(27640000, 27640000, unix_now) == unix_now);
+	// A stamp ahead of the read reads as now.
+	TEST_EXPECT(nws::unix_ms_of_steady(27640500, 27640000, unix_now) == unix_now);
+
+	const auto connections = [&h]() {
+		return h.send("GET", "/api/admin/connections", { kBearer });
+	};
+	// The row of the session at `addr`, or null.
+	const auto row_at = [](const crow::json::rvalue &json, const std::string &addr) {
+		const crow::json::rvalue *found = nullptr;
+		if (json && json.has("connections")) {
+			for (const auto &c : json["connections"]) {
+				if (str(c["addr"]) == addr)
+					found = &c;
+			}
+		}
+		return found;
+	};
+	const auto unix_ms = [] {
+		return static_cast<int64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+				std::chrono::system_clock::now().time_since_epoch())
+						.count());
+	};
+
+	PushHost client(h.nw_udp.bound_port(), 0x53455331u);
+	TEST_EXPECT(client.connect());
+	const int64_t read_at = unix_ms();
+	auto reply = connections();
+	TEST_EXPECT(reply.transport_ok && reply.code == 200);
+	auto json = crow::json::load(body_text(reply));
+	const crow::json::rvalue *row = row_at(json, client.addr());
+	TEST_EXPECT(row != nullptr);
+	if (row != nullptr) {
+		TEST_EXPECT(str((*row)["state"]) == "active");
+		const int64_t created = (*row)["created_ms"].i();
+		const int64_t last_seen = (*row)["last_seen_ms"].i();
+		if (std::llabs(created - read_at) > 60000) {
+			std::fprintf(stderr, "  created_ms %lld, now %lld\n", static_cast<long long>(created),
+					static_cast<long long>(read_at));
+		}
+		TEST_EXPECT(std::llabs(created - read_at) <= 60000);
+		TEST_EXPECT(last_seen >= created && std::llabs(last_seen - read_at) <= 60000);
+		// Signed in to the lobby with no retail login yet, hosting nothing.
+		TEST_EXPECT((*row)["account"].t() == crow::json::type::Null);
+		TEST_EXPECT((*row)["host"].t() == crow::json::type::Null);
+	}
+
+	// The player's retail login, then a ClientPlayRequest whose Cookie list carries its tag.
+	const int64_t player = make_account(h, "session_player", "pw-session-player");
+	TEST_EXPECT(player > 0);
+	const auto login = nwlogin_to(h, h.fresh_port, "session_player", "pw-session-player");
+	TEST_EXPECT(nwlogin_succeeded(login));
+	client.set_cookie("LOGINSESSIONTAG", set_cookie_value(login, "LOGINSESSIONTAG"));
+	TEST_EXPECT(client.play());
+	reply = connections();
+	json = crow::json::load(body_text(reply));
+	row = row_at(json, client.addr());
+	TEST_EXPECT(row != nullptr && (*row)["account"].t() == crow::json::type::Object);
+	TEST_EXPECT((*row)["account"]["id"].i() == player);
+	TEST_EXPECT(str((*row)["account"]["username"]) == "session_player");
+	TEST_EXPECT(str((*row)["account"]["via"]) == "login");
+	TEST_EXPECT((*row)["host"].t() == crow::json::type::Null);
+
+	// A host whose HostKey names its owner: the listing, and the owner rather than its login.
+	const int64_t owner = make_account(h, "session_owner", "pw-session-owner");
+	TEST_EXPECT(owner > 0);
+	const std::string key = "ABCDEFGHIJKLMNOPPONMLKJIHGFEDCBAABCDEFGHIJKLMNOP";
+	TEST_EXPECT(opennova::hostdb::is_host_key(key));
+	TEST_EXPECT(record_key_for(h, key, owner));
+	PushHost host(h.nw_udp.bound_port(), 0x53455332u);
+	host.set_cookie("LOGINSESSIONTAG", set_cookie_value(login, "LOGINSESSIONTAG"));
+	TEST_EXPECT(host.host("Sessions Host"));
+	host.present_key(key);
+	TEST_EXPECT(wait_until([&] {
+		const auto listed = row_named(h, "Sessions Host");
+		return listed && listed->host_user_id == owner;
+	}));
+	reply = connections();
+	json = crow::json::load(body_text(reply));
+	row = row_at(json, host.addr());
+	TEST_EXPECT(row != nullptr && (*row)["host"].t() == crow::json::type::Object);
+	const auto &listing = (*row)["host"];
+	TEST_EXPECT(listing["rid"].i() == static_cast<int64_t>(row_named(h, "Sessions Host")->rid));
+	TEST_EXPECT(str(listing["server_name"]) == "Sessions Host");
+	TEST_EXPECT(listing["players"].i() == 1 && listing["max_players"].i() == 8);
+	TEST_EXPECT(listing["listed"].b());
+	TEST_EXPECT(listing["hosted_server_id"].t() == crow::json::type::Null);
+	TEST_EXPECT((*row)["account"]["id"].i() == owner);
+	TEST_EXPECT(str((*row)["account"]["via"]) == "host_key");
+
+	// The login ends (its row goes, as a logout or the idle sweep takes it): no one.
+	nws::clear_active_user_session(*h.pool.acquire(), player);
+	reply = connections();
+	json = crow::json::load(body_text(reply));
+	row = row_at(json, client.addr());
+	TEST_EXPECT(row != nullptr && (*row)["account"].t() == crow::json::type::Null);
+
+	client.goodbye();
+	host.goodbye();
+	TEST_EXPECT(wait_until([&] { return !row_named(h, "Sessions Host"); }));
+	return 0;
+}
+
+// POST /api/admin/connections/<id>/end (admin-gated; the routes table pins the refusals): the body
+// names the session's address, 400 without it and 409 connection_changed for another, and an id
+// no connection holds is a 404. A signed-in session ends: its client reads the ServerGoodBye
+// keyed by its CK with the pending-disconnect record, and the session leaves the list (a second
+// end is a 404). A session still signing in leaves the list too. A hosting session is refused
+// with its listing's RID and stays listed.
+int test_admin_end_session(Harness &h) {
+	const auto end = [&h](const std::string &id, const std::string &body) {
+		return h.send("POST", "/api/admin/connections/" + id + "/end", { kJson, kBearer }, body);
+	};
+	const auto error_of = [](const net::HttpReply &reply) {
+		const auto json = crow::json::load(body_text(reply));
+		return json && json.has("error") ? str(json["error"]) : std::string("<none>");
+	};
+	const auto addr_body = [](const std::string &addr) { return "{\"addr\":\"" + addr + "\"}"; };
+	// The id the list shows beside `addr`, "" when none.
+	const auto id_at = [&h](const std::string &addr) {
+		const auto json =
+				crow::json::load(body_text(h.send("GET", "/api/admin/connections", { kBearer })));
+		std::string id;
+		if (json && json.has("connections")) {
+			for (const auto &c : json["connections"]) {
+				if (str(c["addr"]) == addr)
+					id = std::to_string(c["id"].i());
+			}
+		}
+		return id;
+	};
+
+	PushHost client(h.nw_udp.bound_port(), 0x454e4431u);
+	TEST_EXPECT(client.connect());
+	const std::string id = id_at(client.addr());
+	TEST_EXPECT(!id.empty());
+	auto reply = end(id, "nope");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400 && error_of(reply) == "invalid_json");
+	reply = end(id, "{}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400 && error_of(reply) == "missing_field");
+	reply = end(id, "{\"addr\":3}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400 && error_of(reply) == "invalid_field");
+	for (const char *none : { "999999999", "99999999999" }) {
+		reply = end(none, addr_body(client.addr()));
+		TEST_EXPECT(reply.transport_ok && reply.code == 404 && error_of(reply) == "not_found");
+	}
+	reply = end(id, addr_body("127.0.0.1:1"));
+	TEST_EXPECT(reply.transport_ok && reply.code == 409 && error_of(reply) == "connection_changed");
+
+	reply = end(id, addr_body(client.addr()));
+	if (reply.code != 202)
+		std::fprintf(stderr, "  end: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	auto json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && str(json["status"]) == "queued" && std::to_string(json["id"].i()) == id &&
+			str(json["addr"]) == client.addr());
+	TEST_EXPECT(client.wait_ended(3000));
+	TEST_EXPECT(client.disconnect_event().dc == 8 &&
+			client.disconnect_event().ddstr == "NP.C:PMP:PDESTME");
+	TEST_EXPECT(wait_until([&] { return id_at(client.addr()).empty(); }));
+	reply = end(id, addr_body(client.addr()));
+	TEST_EXPECT(reply.transport_ok && reply.code == 404);
+
+	// A session still signing in (its ClientHello alone).
+	PushHost signing_in(h.nw_udp.bound_port(), 0x454e4432u);
+	signing_in.hello();
+	std::string hello_id;
+	TEST_EXPECT(wait_until([&] { return !(hello_id = id_at(signing_in.addr())).empty(); }));
+	reply = end(hello_id, addr_body(signing_in.addr()));
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	TEST_EXPECT(wait_until([&] { return id_at(signing_in.addr()).empty(); }));
+
+	// A hosting session: its listing's stop ends it.
+	PushHost host(h.nw_udp.bound_port(), 0x454e4433u);
+	TEST_EXPECT(host.host("End Session Host"));
+	const auto listed = row_named(h, "End Session Host");
+	TEST_EXPECT(listed.has_value());
+	reply = end(id_at(host.addr()), addr_body(host.addr()));
+	TEST_EXPECT(reply.transport_ok && reply.code == 409 && error_of(reply) == "hosting");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && json["rid"].i() == static_cast<int64_t>(listed->rid));
+	TEST_EXPECT(!host.wait_ended(300));
+	TEST_EXPECT(row_named(h, "End Session Host").has_value());
+	host.goodbye();
+	TEST_EXPECT(wait_until([&] { return !row_named(h, "End Session Host"); }));
 	return 0;
 }
 
@@ -7107,6 +7356,8 @@ int run(Harness &h) {
 		{ "healthz", test_healthz },
 		{ "admin_host_push", test_admin_host_push },
 		{ "owner_host_push", test_owner_host_push },
+		{ "admin_sessions", test_admin_sessions },
+		{ "admin_end_session", test_admin_end_session },
 		{ "hosted_server_routes", test_hosted_server_routes },
 		{ "hosted_listing_owner", test_hosted_listing_owner },
 		{ "hosted_console_routes", test_hosted_console_routes },

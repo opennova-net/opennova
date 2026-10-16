@@ -5,6 +5,7 @@
 #include "billing/billing_routes.h"
 #include "catalog_repository.h"
 #include "cd_key_routes.h"
+#include "connection_routes.h"
 #include "health.h"
 #include "host_routes.h"
 #include "hosted/console_routes.h"
@@ -267,21 +268,13 @@ std::string cookie_summary(std::string_view header) {
 	return out;
 }
 
-const char *connection_state_name(ConnectionState s) {
-	switch (s) {
-	case ConnectionState::Handshaking: return "handshaking";
-	case ConnectionState::Active:      return "active";
-	case ConnectionState::Closing:     return "closing";
-	}
-	return "unknown";
-}
-
 } // namespace
 
 struct HttpListener::Impl {
 	explicit Impl(db::ConnectionPool &pool) :
 			access(app, pool),
 			hosts(access, pool),
+			connections(access, pool),
 			hosted_servers(access, pool),
 			fleet(access, pool),
 			stats(access, pool),
@@ -306,6 +299,8 @@ struct HttpListener::Impl {
 	WebAccess access;
 	// The listed servers' routes (host_routes.h), over `access`.
 	HostRoutes hosts;
+	// The admin's NovaWorld sessions (connection_routes.h).
+	ConnectionRoutes connections;
 	// The hosted servers' routes (hosted/hosted_routes.h), over `access`.
 	hosted::HostedRoutes hosted_servers;
 	// The admin's fleet view and the machines' routes (hosted/fleet_routes.h).
@@ -381,6 +376,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->resets.register_routes(impl_->app, mail_, config.site_url,
 			[this](int64_t id) { forget_revoked_account(id); });
 	impl_->hosts.register_routes(impl_->app, nw_udp_);
+	impl_->connections.register_routes(impl_->app, manager_, nw_udp_);
 	impl_->hosted_servers.configure(config, fleet_placement_);
 	impl_->hosted_servers.register_routes(impl_->app);
 	impl_->fleet.configure(impl_->hosted_servers.enabled(), impl_->hosted_servers.provider(),
@@ -524,10 +520,10 @@ std::string HttpListener::gsb_url(const catalog::GameRow &game) const {
 	return "http://" + public_host_ + ":" + std::to_string(impl_->app.port()) + game.gsb_route();
 }
 
-// Admin REST API: server status, dev host injection, connection dump, the
-// listing dump with its joiners (/api/hosts), the unknown-message samples
-// (/api/unknowns), and the user routes (admin_user_routes.h; the listed
-// servers and their pushes are host_routes.h's). Every
+// Admin REST API: server status, dev host injection, the listing dump with
+// its joiners (/api/hosts), the unknown-message samples (/api/unknowns), and
+// the user routes (admin_user_routes.h; the listed servers and their pushes
+// are host_routes.h's, the NovaWorld sessions connection_routes.h's). Every
 // handler opens with WebAccess::require_admin: the Bearer
 // ADMIN_API_TOKEN, or an admin-role website session (with the CSRF header on a
 // state change).
@@ -642,34 +638,6 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		out["game"] = row.game;
 		out["server_name"] = row.server_name;
 		crow::response res(201);
-		res.body = out.dump();
-		res.set_header("Content-Type", "application/json");
-		return res;
-	});
-
-	// Connection-registry debug dump.
-	CROW_ROUTE(app, "/api/admin/connections")([this](const crow::request &req) {
-		auto caller = impl_->access.require_admin(req);
-		if (caller.refusal) return std::move(*caller.refusal);
-		auto snapshot = manager_.registry().snapshot();
-		crow::json::wvalue out;
-		out["count"] = snapshot.size();
-		out["heartbeat_timeout_ms"] = manager_.heartbeat_timeout_ms();
-		std::vector<crow::json::wvalue> entries;
-		entries.reserve(snapshot.size());
-		for (const auto &c : snapshot) {
-			crow::json::wvalue e;
-			e["id"]            = c.id;
-			e["state"]         = connection_state_name(c.state);
-			e["pn"]            = c.pn;
-			e["identity"]      = c.identity;
-			e["created_ms"]    = c.created_ms;
-			e["last_seen_ms"]  = c.last_seen_ms;
-			e["addr"]          = peer_addr_to_string(c.addr);
-			entries.push_back(std::move(e));
-		}
-		out["connections"] = std::move(entries);
-		crow::response res(200);
 		res.body = out.dump();
 		res.set_header("Content-Type", "application/json");
 		return res;

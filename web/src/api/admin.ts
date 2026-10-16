@@ -9,7 +9,13 @@
 import { isAxiosError } from 'axios';
 import { adminClient } from './client';
 import { isHostedServer } from './hostedServer';
-import type { AdminConnection, ConnectionsResponse, ServerStatus } from '../types/admin';
+import type {
+  AdminConnection,
+  AdminConnectionAccount,
+  AdminConnectionHost,
+  ConnectionsResponse,
+  ServerStatus,
+} from '../types/admin';
 import type { FleetMachine, FleetQuery, FleetResponse, FleetServer } from '../types/hostedServer';
 
 // The `error` codes these routes answer with, plus `network` (no reply at
@@ -36,6 +42,11 @@ export type AdminErrorCode =
   | 'stripe_unavailable'
   | 'rate_limited'
   | 'db_error'
+  | 'hosting'
+  | 'not_hosting'
+  | 'unknown_rid'
+  | 'connection_changed'
+  | 'not_lobby'
   | 'network'
   | 'unknown';
 
@@ -71,6 +82,11 @@ const KNOWN_ADMIN_CODES: ReadonlySet<string> = new Set<AdminErrorCode>([
   'stripe_unavailable',
   'rate_limited',
   'db_error',
+  'hosting',
+  'not_hosting',
+  'unknown_rid',
+  'connection_changed',
+  'not_lobby',
 ]);
 
 function adminMessageFor(code: AdminErrorCode): string {
@@ -115,6 +131,15 @@ function adminMessageFor(code: AdminErrorCode): string {
       return 'Too many requests. Try again in a little while.';
     case 'db_error':
       return 'The server hit a database error. Try again shortly.';
+    case 'hosting':
+      return 'That session hosts a server now: stop the server instead. Refresh the list.';
+    case 'not_hosting':
+    case 'unknown_rid':
+      return 'That server is no longer listed. Refresh the list.';
+    case 'connection_changed':
+      return 'That session ended and another took its place. Refresh the list.';
+    case 'not_lobby':
+      return 'That is a game connection, not a NovaWorld session; it cannot be ended here.';
     case 'network':
       return 'Could not reach the server. Check your connection and try again.';
     case 'unknown':
@@ -187,6 +212,26 @@ export function updateServerStatus(payload: ServerStatus): Promise<AdminResult<S
   return adminCall(() => adminClient.put<unknown>('/server-status', payload), pickStatus);
 }
 
+function pickConnectionAccount(value: unknown): AdminConnectionAccount | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || typeof v.id !== 'number' || typeof v.username !== 'string') return null;
+  return { id: v.id, username: v.username, via: v.via === 'host_key' ? 'host_key' : 'login' };
+}
+
+function pickConnectionHost(value: unknown): AdminConnectionHost | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || typeof v.rid !== 'number') return null;
+  return {
+    rid: v.rid,
+    server_name: typeof v.server_name === 'string' ? v.server_name : '',
+    mission_name: typeof v.mission_name === 'string' ? v.mission_name : '',
+    players: typeof v.players === 'number' ? v.players : 0,
+    max_players: typeof v.max_players === 'number' ? v.max_players : 0,
+    listed: v.listed !== false,
+    hosted_server_id: typeof v.hosted_server_id === 'number' ? v.hosted_server_id : null,
+  };
+}
+
 function pickConnection(value: unknown): AdminConnection | null {
   const v = value as Record<string, unknown> | null;
   if (typeof v !== 'object' || v === null || typeof v.id !== 'number') return null;
@@ -198,6 +243,8 @@ function pickConnection(value: unknown): AdminConnection | null {
     created_ms: typeof v.created_ms === 'number' ? v.created_ms : 0,
     last_seen_ms: typeof v.last_seen_ms === 'number' ? v.last_seen_ms : 0,
     addr: typeof v.addr === 'string' ? v.addr : '',
+    account: pickConnectionAccount(v.account),
+    host: pickConnectionHost(v.host),
   };
 }
 
@@ -217,6 +264,21 @@ export function fetchConnections(signal?: AbortSignal): Promise<AdminResult<Conn
       };
     },
   );
+}
+
+// POST /api/admin/connections/<id>/end: the NovaWorld service ends one session
+// (202), named by its id and address so a session that took a freed id is not
+// the one ended. A hosting session is refused ('hosting'): its server stops
+// through stopListedServer.
+export function endConnection(c: Pick<AdminConnection, 'id' | 'addr'>): Promise<AdminResult<void>> {
+  return adminPost(`/connections/${c.id}/end`, { addr: c.addr });
+}
+
+// POST /api/admin/hosts/<rid>/stop: a listed server stops (202): a hosted
+// server as its owner's stop would, any other with the sysop punt, which ends
+// its match and takes it out of NovaWorld.
+export function stopListedServer(rid: number): Promise<AdminResult<void>> {
+  return adminPost(`/hosts/${rid}/stop`);
 }
 
 // ---------------------------------------------------------------------------
