@@ -381,9 +381,23 @@ bool write(const File &file, std::vector<uint8_t> &out, std::string &error) {
 	return true;
 }
 
-const GameTypeBlock *block_at(const File &file, int row) {
-	if (row < 0 || static_cast<size_t>(row) >= file.blocks.size()) return nullptr;
-	return &file.blocks[static_cast<size_t>(row)];
+Row row_of(const File &file, int row) {
+	Row out;
+	for (const GameTypeBlock &block : file.blocks) {
+		if (block.row != row) continue;
+		out.found = true;
+		if (!block.fields.empty()) {
+			out.has_fields = true;
+			out.fields = block.fields;
+		}
+		for (const Entry &var : block.vars) {
+			const auto same = std::find_if(out.vars.begin(), out.vars.end(),
+					[&var](const Entry &e) { return e.id == var.id; });
+			if (same != out.vars.end()) same->value = var.value;
+			else out.vars.push_back(var);
+		}
+	}
+	return out;
 }
 
 int32_t var_value(const GameTypeBlock &block, std::string_view name, int32_t fallback) {

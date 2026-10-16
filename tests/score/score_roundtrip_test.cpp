@@ -72,22 +72,38 @@ int main(int argc, char **argv) {
 	TEST_EXPECT(file.exp_fanfare[0] == 0 && file.exp_fanfare[1] == 0 && !score::exp_fanfare_kept(file));
 	TEST_EXPECT(file.blocks.size() == 3);
 
-	// Block ORDER is the engine's row index [orig: ScoreConfig_LoadScoringTableForGameType
-	// @ 0x52D300 — `score_type_index *= 452`].
+	// Each block carries the row its GAMETYPE name selects, in the file's order: the
+	// writer puts row 2 down first under index 0 [orig: @ 0x52CF4C].
 	TEST_EXPECT(file.blocks[0].row == 2);
 	TEST_EXPECT(file.blocks[1].row == 1);
 	TEST_EXPECT(file.blocks[2].row == 2);
 	// A GAMETYPE's row is found by its name, the first of the twelve [orig: sub_52D850 @ 0x52D850].
 	TEST_EXPECT(score::game_type_row("coop") == 2 && score::game_type_row("TDM") == 1 && score::game_type_row("XYZ") == -1);
 
-	const score::GameTypeBlock *coop = score::block_at(file, 2);
-	TEST_EXPECT(coop != nullptr);
-	if (coop != nullptr) {
+	const score::GameTypeBlock *coop = &file.blocks[2]; // the second COOP block
+	{
 		TEST_EXPECT(score::var_value(*coop, "ENEMYKILL", -1) == 5);
 		TEST_EXPECT(score::var_value(*coop, "MEDICSAVE", -1) == 2);
 		TEST_EXPECT(score::var_value(*coop, "enemykill", -1) == 5);
 		TEST_EXPECT(score::var_value(*coop, "NOPE", -7) == -7);
 		TEST_EXPECT(score::field_value(*coop, "NUMENEMYKILLS", -1) == 1);
+	}
+	// The row as the reader leaves it, whatever the blocks' order: a file whose
+	// blocks select rows 1 then 2 holds row 2 in its second block, every block of a
+	// row overlays its VARs, and the row's FIELD list is its last block's that names one.
+	{
+		score::File two;
+		two.version = score::kVersion;
+		two.blocks.push_back({1, {}, {{3, 9}}});
+		two.blocks.push_back({2, {{3, 1}}, {{3, 5}, {1, 2}}});
+		two.blocks.push_back({2, {}, {{3, 6}}});
+		const score::Row row2 = score::row_of(two, 2);
+		TEST_EXPECT(row2.found && row2.has_fields && row2.fields.size() == 1 && row2.fields[0].id == 3);
+		TEST_EXPECT(row2.vars.size() == 2 && row2.vars[0].id == 3 && row2.vars[0].value == 6 &&
+		            row2.vars[1].id == 1 && row2.vars[1].value == 2);
+		const score::Row row1 = score::row_of(two, 1);
+		TEST_EXPECT(row1.found && !row1.has_fields && row1.vars.size() == 1 && row1.vars[0].value == 9);
+		TEST_EXPECT(!score::row_of(two, 5).found);
 	}
 	// The tables [orig: the FIELD names @ 0x830240, the VAR names @ 0x830348].
 	TEST_EXPECT(score::field_id("NUMSUICIDES") == 1 && score::field_id("NUMLFPTAKEOVERS") == 32);
@@ -273,12 +289,12 @@ int main(int argc, char **argv) {
 			score::File rfile;
 			TEST_EXPECT(score::parse(rbytes.data(), rbytes.size(), rfile, error));
 			TEST_EXPECT(rfile.blocks.size() == 12);
-			const score::GameTypeBlock *rcoop = score::block_at(rfile, 2);
+			const score::GameTypeBlock *rcoop = rfile.blocks.size() > 2 ? &rfile.blocks[2] : nullptr;
 			TEST_EXPECT(rcoop != nullptr && rcoop->row == 2);
 		if (rcoop != nullptr) TEST_EXPECT(score::var_value(*rcoop, "ENEMYKILL", -1) == 5);
 			// The 0 -> 2 remap is only unobservable because the shipped blocks
 			// 0 and 2 agree; assert that rather than assume it.
-			const score::GameTypeBlock *r0 = score::block_at(rfile, 0);
+			const score::GameTypeBlock *r0 = rfile.blocks.empty() ? nullptr : &rfile.blocks[0];
 			if (r0 != nullptr && rcoop != nullptr) {
 				score::File a, b;
 				a.blocks.push_back(*r0);

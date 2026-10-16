@@ -2,71 +2,18 @@
 
 #include <algorithm>
 #include <array>
-#include <iomanip>
-#include <sstream>
 #include <string>
 #include <utility>
 
 #include <base/io/le.h>
-#include <base/io/strutil.h>
 #include <base/gameprofile/game_type.h>
+#include <formats/score/score.h>
 #include <runtime/world/match.h>
 #include <runtime/world/world.h>
 
 namespace opennova::inmatch {
 namespace gtype = opennova::game_type;
 namespace {
-
-// [orig: ScoreConfig_LoadFile @0x52D8A0; Server_BuildStatusReport @0x530A60
-// -> Server_BuildAndSerializeSessionStatus @0x4FC990 -> SessionStatus_SerializeToBuffer @0x5310C0 (ex serialize_terrain_tile_texture)]
-constexpr std::array<const char *, 38> kScoreVarNames = {
-	"FIRE", "HIT", "FRIENDLYKILL", "ENEMYKILL", "SUICIDE",
-	"DEATH", "MEDICHEAL", "MEDICSAVE", "RESPAWN", "FLAGSAVE",
-	"FLAGCAPTURE", "FLAGPICKUP", "ZONEQUANTUM", "DESTROYTARGET",
-	"PSPATTEMPT", "PSPTAKEOVER", "MULTIPLEKILL", "HEADSHOTKILL",
-	"KNIFEKILL", "SKILLKILL", "FLAGCARRIERKILL", "THEMINZONEKILL",
-	"MEINZONEKILL", "THEMINMYZONEKILL", "MEINMYZONEKILL",
-	"THEMINTHEIRZONEKILL", "MEINTHEIRZONEKILL", "ASSISTS",
-	"ENEMYSNIPERKILL", "SNIPERSKILLKILLDISTANCEMIN",
-	"SNIPERSKILLKILLDISTANCEMAX", "INAZONE", "INDZONE", "INZONE",
-	"LFPTAKEOVER", "ALIVE", "ALIVEQUANTUM", "VATTACHKILL",
-};
-
-// IDs are one-based and positional in retail's lookup table.
-// [orig: ScoreConfig_LoadFile @0x52D8A0]
-constexpr std::array<const char *, 32> kScoreFieldNames = {
-	"NUMSUICIDES", "NUMFRIENDLYKILLS", "NUMENEMYKILLS", "NUMDEATHS",
-	"NUMSECONDSINZONE", "NUMFLAGSCAPTURED", "NUMFLAGSSAVED",
-	"NUMTARGETSDESTROYED", "NUMSHOTSFIRED", "NUMMEDICSAVES",
-	"NUMREVIVES", "NUMPSPATTEMPTS", "NUMPSPTAKEOVERS",
-	"NUMFLAGCARRIERKILLS", "NUMMULTIPLEKILLS", "NUMHEADSHOTKILLS",
-	"NUMKNIFEKILLS", "NUMTHEMINZONEKILLS", "EXPERIENCEPOINTS",
-	"ITEMPOINTS", "NUMSHOTSPERKILL", "NUMMEINZONEKILLS",
-	"NUMTHEMINMYZONEKILLS", "NUMMEINMYZONEKILLS",
-	"NUMTHEMINTHEIRZONEKILLS", "NUMMEINTHEIRZONEKILLS",
-	"NUMSKILLKILL", "NUMTHEMINFLAGZONEKILLS", "NUMMEINFLAGZONEKILLS",
-	"NUMASSISTS", "NUMENEMYSNIPERKILLS", "NUMLFPTAKEOVERS",
-};
-
-const char *score_game_type_name(uint32_t game_type) {
-	if (game_type == gtype::kDeathmatch) return "DM";
-	if (game_type == gtype::kTeamDeathmatch) return "TDM";
-	if (gtype::is_waypoint_family(game_type)) return "COOP";
-	switch (game_type) {
-	case gtype::kTeamKingOfTheHill: return "TKOTH";
-	case gtype::kKingOfTheHill: return "KOTH";
-	case gtype::kSearchAndDestroy: return "SD";
-	case gtype::kAttackDefend: return "AD";
-	case gtype::kCaptureTheFlag: return "CTF";
-	case gtype::kFlagBall: return "FB";
-	case gtype::kFlagMe: return nullptr;
-	case gtype::kAdvanceAndSecure: return "AAS";
-	case gtype::kConquerAndControl: return "CAC";
-	default:
-		// Retail normalizes its unknown/nonzero row 0 to the Co-op score row.
-		return "COOP";
-	}
-}
 
 void append_cstr_limited(
 		std::vector<uint8_t> &out, const std::string &value,
@@ -84,100 +31,45 @@ void append_u32(std::vector<uint8_t> &out, uint32_t value) {
 } // namespace
 
 bool load_session_score_config(GameConfig &config, std::string_view score_ini) {
-	const char *target_name = score_game_type_name(config.game_type);
+	// The file as ScoreConfig_LoadFile reads it: the lines and tokens, the VERSION 40 gate,
+	// the rows by their GAMETYPE names (formats/score, score::parse). A file of another
+	// version is read for nothing, the defaults standing.
+	// [orig: ScoreConfig_LoadFile @0x52D8A0, `version == 40` @0x52DA8A]
+	score::File file;
+	std::string error;
+	if (!score::parse(reinterpret_cast<const uint8_t *>(score_ini.data()), score_ini.size(), file,
+				error) ||
+			file.version != score::kVersion)
+		return false;
+	// EXP_FANFARE is the file's whatever the session's game type: its arm sits beside the
+	// row tests, inside the version-40 branch alone, and the file is read into every row at
+	// once, so a VERSION 40 file's pair is stored with or without a block for the session's
+	// row, Flag Me's included. The title's pair stands where no line passes the gate.
+	// [orig: GameType_CreateDefaultSettings @0x52DD00 (the title's pair); ScoreConfig_LoadFile
+	//  — the EXP_FANFARE arm @0x52DC59..0x52DC9F beside `if (currentGameType)` @0x52DB7C /
+	//  @0x52DC05; the byte gate @0x52DC84..0x52DC8E, LOBYTE / HIBYTE stores @0x52DC96 /
+	//  @0x52DC9F]
+	config.exp_fanfare = score::exp_fanfare_kept(file)
+			? static_cast<uint16_t>((static_cast<uint32_t>(file.exp_fanfare[0]) & 0xFFu) |
+					((static_cast<uint32_t>(file.exp_fanfare[1]) & 0xFFu) << 8))
+			: world::default_score_exp_fanfare(config.title);
 	// Flag Me's selector is the intentionally invalid row 12. Retail loads no
 	// FIELD/VAR row for it; in particular it never falls through to Co-op.
-	if (target_name == nullptr) return false;
-	std::array<int32_t, 39> parsed =
+	// [orig: ScoreConfig_LoadScoringTableForGameType @0x52D300, the `<= 11` gate @0x52d3db]
+	const int row = score::row_for_game_type(config.game_type);
+	if (row < 0) return false;
+	const score::Row loaded = score::row_of(file, row);
+	if (!loaded.found) return false;
+	std::array<int32_t, 39> values =
 			world::default_match_score_values(config.game_type, config.title);
-	std::vector<std::pair<uint8_t, uint8_t>> parsed_fields;
-	const std::string target = target_name;
-	bool selected = false;
-	bool found_target = false;
-	bool selected_section_has_fields = false;
-	bool saw_score_fields = false;
-	bool saw_version = false;
-	int version = 0;
-	// The pair the title's table seeds, which a line only replaces when it passes the gate.
-	uint16_t exp_fanfare = world::default_score_exp_fanfare(config.title);
-
-	std::istringstream input{std::string(score_ini)};
-	std::string line;
-	while (std::getline(input, line)) {
-		if (!line.empty() && line.back() == '\r') line.pop_back();
-		std::istringstream row(line);
-		std::string directive;
-		if (!(row >> directive) || directive.rfind("//", 0) == 0) continue;
-
-		if (strutil::iequals(directive, "VERSION")) {
-			if (row >> version) saw_version = true;
-			continue;
-		}
-		// EXP_FANFARE lo hi is a top-level directive: stored only when both
-		// operands are nonzero and hi > lo, lo in the low byte.
-		// [orig: ScoreConfig_LoadFile @0x52DC5F — atol @0x52DC75/@0x52DC7C,
-		//  gate @0x52DC8E, LOBYTE/HIBYTE stores @0x52DC96/@0x52DC9F]
-		if (strutil::iequals(directive, "EXP_FANFARE")) {
-			int64_t lo = 0;
-			int64_t hi = 0;
-			if ((row >> lo >> hi) && lo != 0 && hi != 0 && hi > lo) {
-				exp_fanfare = static_cast<uint16_t>(
-						(static_cast<uint32_t>(lo) & 0xFFu) |
-						((static_cast<uint32_t>(hi) & 0xFFu) << 8));
-			}
-			continue;
-		}
-		if (strutil::iequals(directive, "GAMETYPE")) {
-			std::string name;
-			if (row >> std::quoted(name)) {
-				selected = strutil::iequals(name, target);
-				found_target = found_target || selected;
-			} else {
-				selected = false;
-			}
-			selected_section_has_fields = false;
-			continue;
-		}
-		if (!selected) continue;
-
-		std::string name;
-		int64_t value = 0;
-		if (!(row >> std::quoted(name) >> value)) continue;
-		if (strutil::iequals(directive, "FIELD")) {
-			for (std::size_t i = 0; i < kScoreFieldNames.size(); ++i) {
-				if (!strutil::iequals(name, kScoreFieldNames[i])) continue;
-				// The first recognized FIELD after every matching GAMETYPE
-				// replaces the prior/default schema; duplicate matching sections
-				// therefore follow the same reset-and-replace behavior as retail.
-				if (!selected_section_has_fields) {
-					parsed_fields.clear();
-					selected_section_has_fields = true;
-					saw_score_fields = true;
-				}
-				if (parsed_fields.size() < 34) {
-					parsed_fields.emplace_back(
-							static_cast<uint8_t>(i + 1),
-							static_cast<uint8_t>(value));
-				}
-				break;
-			}
-			continue;
-		}
-		if (!strutil::iequals(directive, "VAR")) continue;
-		for (std::size_t i = 0; i < kScoreVarNames.size(); ++i) {
-			if (!strutil::iequals(name, kScoreVarNames[i])) continue;
-			parsed[i] = static_cast<int32_t>(static_cast<uint32_t>(value));
-			break;
-		}
-	}
-
-	if (!saw_version || version != 40 || !found_target) return false;
-	config.session_status_stat_values = parsed;
-	config.exp_fanfare = exp_fanfare;
-	if (saw_score_fields)
-		config.scoreboard_fields = std::move(parsed_fields);
-	else
-		config.scoreboard_fields.clear();
+	for (const score::Entry &var : loaded.vars)
+		if (var.id >= 0 && static_cast<size_t>(var.id) < values.size())
+			values[static_cast<size_t>(var.id)] = var.value;
+	config.session_status_stat_values = values;
+	config.scoreboard_fields.clear();
+	for (const score::Entry &field : loaded.fields)
+		config.scoreboard_fields.emplace_back(
+				static_cast<uint8_t>(field.id), static_cast<uint8_t>(field.value));
 	return true;
 }
 
