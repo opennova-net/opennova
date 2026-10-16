@@ -590,7 +590,13 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   loses that hour's names), and a mission is counted when a game-scene sample sees one
   other than the last such sample's; both are approximations, and the replies say so.
   Samples are kept 48 hours, hours 90 days; the routes read the samples for 1h and 24h
-  and the hours for 7d and 30d.
+  and the hours for 7d and 30d. The admin's usage view (`GET /api/admin/hosted/usage`)
+  reads every live server's newest sample and its last hour of them, nothing sampled
+  anew; the site's **Server usage** page (`/admin/usage`) shows it, read again every
+  30 s: the fleet's totals as tiles, each live machine's share, and each live server by
+  machine and slot, memory in binary units (MiB, GiB), the rate sent to players in bits a
+  second (Mb/s) and the bytes sent in decimal units (MB, GB). The agents report what
+  each slot sends, not what it receives, so the view has no inbound figure.
 - **The admin link** (`hosted/admin_link.*`; ADR 0053 d5). A running server opens
   retail's remote admin on its `game.cfg`'s `remote_admin_port`, its slot's admin port,
   its `admin.cfg` granting the user `svc` (a 31-character random password, new at every
@@ -780,6 +786,7 @@ service's own message, never database text.
 | `POST /api/admin/fleet/roll` | admin | a fleet roll: every machine that takes servers (launching, booting, ready) drains, its servers moving to machines launched for them, so a new serve image or launch template reaches the fleet; 202 `{"draining": <how many>, "machines": [<their ids>]}` |
 | `GET /api/admin/hosted/<id>/stats` | admin | any server's stats, as the owner's; 404 `not_found` |
 | `GET /api/admin/hosted/stats` | admin | the fleet's: every server together, as the account's |
+| `GET /api/admin/hosted/usage` | admin | what every live server (any state but `stopped` and `failed`, on any machine) uses of its slot, from the samples: `{"at", "window_seconds", "slot_memory_bytes", "slot_cpus", "totals", "machines", "servers"}`. `at` now (ISO 8601 UTC); `window_seconds` 3600, the last hour; `slot_memory_bytes` and `slot_cpus` each container's limits (`ONNET_FLEET_SLOT_MEMORY_MB`, `ONNET_FLEET_SLOT_CPUS`); `totals` the fleet's `servers_live`, `machines_live`, `slots` and `slots_used` (over the live machines) and the usage fields over every live server; `machines` each live machine by id (`id`, `kind`, `state`, `instance_type`, `slots`, `slots_used` and the usage fields over the servers on it); `servers` by machine, then slot, the ones placed nowhere last by id, each `id`, `name`, `state`, `own_machine`, `owner` (`{id, username}`, null once the account is gone), `machine_ref` and `slot` (null with none), `uptime_seconds` (while running, else null), its newest sample within 3 minutes (`sample_at`, `players`, `max_players`, `cpu_percent` (0..100 of the slot's CPUs), `memory_bytes`, `egress_bytes_per_second` (that minute's bytes over 60 s), each null without one) and `window`, its samples in the window summed up (`minutes`, `cpu_percent_mean`, `cpu_percent_peak`, `memory_bytes_peak`, `egress_bytes`). The usage fields: `reporting` (the servers whose newest sample carries their agent's CPU and memory), `players`, `memory_bytes` and `memory_limit_bytes` (the reporting servers' memory and their slots' limits), `cpus_used` and `cpus_limit` (likewise, in CPUs), `egress_bytes_per_second` (the newest samples' rates added up) and `egress_bytes_window`. 429 past the caller's stats bucket; `Cache-Control: no-store` |
 | `POST /api/admin/hosted/<id>/stop` | admin | 404 `not_found`, 409 `not_live`, else 202 `{"server"}` |
 | `POST /api/admin/hosted/stop-all` | admin | the kill switch: every live server to `stopping`; 200 `{"stopping": <how many>}` |
 

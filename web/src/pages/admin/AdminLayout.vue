@@ -63,6 +63,7 @@ const sections: AdminSection[] = [
   { to: '/admin/overview', label: 'Overview' },
   { to: '/admin/users', label: 'Users' },
   { to: '/admin/fleet', label: 'Fleet' },
+  { to: '/admin/usage', label: 'Server usage' },
   { to: '/admin/billing', label: 'Billing' },
   { to: '/admin/service', label: 'NovaWorld service' },
   { to: '/admin/sessions', label: 'NovaWorld sessions' },

@@ -5539,6 +5539,221 @@ int test_hosted_stats_routes(Harness &h) {
 	return 0;
 }
 
+// The admin's usage view (GET /api/admin/hosted/usage, hosted/stats_routes.h)
+// over samples written by hand at this minute (no sampler runs here) and the
+// harness's slot limits (256 MiB and 2 CPUs a container): admin only (401
+// with no credential, 403 for a player's session), no-store; every live
+// server and no ended one, by machine then slot with the ones placed nowhere
+// last; each server's owner, place, newest sample (one older than 3 minutes
+// is none) and last hour (a sample past it left out); each machine's slots and
+// the usage of the servers on it; and the fleet's totals.
+int test_hosted_usage_route(Harness &h) {
+	namespace hosted = opennova::novaworld_server::hosted;
+	namespace billing = opennova::novaworld_server::billing;
+	using crow::json::type;
+	const int64_t ana = make_account(h, "usage_ana", "pw-usage-ana");
+	const int64_t ben = make_account(h, "usage_ben", "pw-usage-ben");
+	TEST_EXPECT(ana > 0 && ben > 0);
+	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), ana, 3).ok);
+	TEST_EXPECT(nws::set_comp_servers(*h.pool.acquire(), ben, 2).ok);
+	const std::string ana_s = login_token(h, "10.55.0.1", "usage_ana", "pw-usage-ana");
+	TEST_EXPECT(!ana_s.empty());
+	auto db = h.pool.acquire();
+
+	// A ready shared machine of 4 slots and a ready own machine of 1 (0 when
+	// one did not get there).
+	const auto ready_machine = [&](hosted::MachineKind kind, int slots,
+									   const char *cloud_id) -> int64_t {
+		const auto m =
+				hosted::create_machine(*db, { "local", kind, slots, "opennova-serve:local", 0 });
+		hosted::LaunchedMachine launched;
+		launched.cloud_id = cloud_id;
+		launched.private_address = "10.0.1.8";
+		launched.instance_type = kind == hosted::MachineKind::Shared ? "t3a.large" : "c7a.medium";
+		const bool ready = hosted::mark_launched(*db, m.id, launched) &&
+				hosted::record_sync(*db, m.id, "test-agent", {}).has_value();
+		return ready ? m.id : 0;
+	};
+	const int64_t shared = ready_machine(hosted::MachineKind::Shared, 4, "local-usage-1");
+	const int64_t own = ready_machine(hosted::MachineKind::Own, 1, "local-usage-2");
+	TEST_EXPECT(shared > 0 && own > shared);
+
+	// The servers: Ana's running on the shared machine's slot 1, Ben's booting
+	// on its slot 0, Ana's running on the own machine, Ana's waiting for a
+	// place, and Ben's ended.
+	hosted::HostedSettings settings;
+	settings.game = hosted::kDataSetJointOperations;
+	settings.game_name = "Usage Routes";
+	settings.missions = { "a.bms" };
+	const auto start = [&](int64_t owner, const char *name) {
+		settings.game_name = name;
+		const auto r = hosted::request_server(
+				*db, owner, settings, hosted::known_data_sets(), 50, billing::unix_now());
+		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
+	};
+	const auto to_running = [&](int64_t id) {
+		bool moved = true;
+		for (const auto &[from, to] :
+				{ std::pair<hosted::State, hosted::State>{
+						  hosted::State::Requested, hosted::State::Provisioning },
+						{ hosted::State::Provisioning, hosted::State::Booting },
+						{ hosted::State::Booting, hosted::State::Listing },
+						{ hosted::State::Listing, hosted::State::Running } })
+			moved = moved && hosted::transition(*db, id, from, to, "by the test");
+		return moved;
+	};
+	const int64_t a = start(ana, "Usage A");
+	const int64_t b = start(ben, "Usage B");
+	const int64_t c = start(ana, "Usage C");
+	const int64_t d = start(ana, "Usage D");
+	const int64_t e = start(ben, "Usage E");
+	TEST_EXPECT(a > 0 && b > 0 && c > 0 && d > 0 && e > 0);
+	TEST_EXPECT(hosted::assign_slot(*db, a, shared, 1, 32769) == 1);
+	TEST_EXPECT(hosted::assign_slot(*db, b, shared, 0, 32768) == 1);
+	TEST_EXPECT(hosted::assign_slot(*db, c, own, 0, 32768) == 1);
+	TEST_EXPECT(to_running(a) && to_running(c));
+	TEST_EXPECT(hosted::transition(
+			*db, b, hosted::State::Requested, hosted::State::Provisioning, "by the test"));
+	TEST_EXPECT(hosted::transition(
+			*db, b, hosted::State::Provisioning, hosted::State::Booting, "by the test"));
+	TEST_EXPECT(hosted::transition(
+			*db, e, hosted::State::Requested, hosted::State::Stopped, "by the test"));
+
+	// The minutes, on an empty slate (an earlier case's hand-driven supervisor
+	// pass sampled the servers live then).
+	db->exec("DELETE FROM hosted_server_samples;");
+	const int64_t now = billing::unix_now();
+	const int64_t minute = now - now % 60;
+	const auto put = [&](int64_t id, int64_t at, const char *state, std::optional<int64_t> players,
+							 std::optional<double> cpu, std::optional<int64_t> memory,
+							 int64_t egress) {
+		hosted::ServerSample s;
+		s.server_id = id;
+		s.at = at;
+		s.state = state;
+		s.players = players;
+		s.max_players = players ? std::optional<int64_t>(32) : std::nullopt;
+		s.cpu_percent = cpu;
+		s.memory_bytes = memory;
+		s.egress_bytes = egress;
+		hosted::insert_sample(*db, s);
+	};
+	constexpr int64_t kMiB = 1024 * 1024;
+	put(a, minute, "running", 6, 25.0, 200 * kMiB, 6000);
+	put(a, minute - 60, "running", 4, 75.0, 300 * kMiB, 3000);
+	put(a, minute - 7200, "running", 9, 99.0, 500 * kMiB, 999999); // past the hour
+	put(b, minute, "booting", std::nullopt, std::nullopt, std::nullopt, 0);
+	put(c, minute - 600, "running", 2, 10.0, 100 * kMiB, 1200); // too old to be its newest
+	put(e, minute, "running", 3, 50.0, 50 * kMiB, 700); // ended: not listed
+
+	const std::string path = "/api/admin/hosted/usage";
+	TEST_EXPECT(h.send("GET", path).code == 401);
+	TEST_EXPECT(h.send("GET", path, { with_session(ana_s) }).code == 403);
+	const auto reply = h.send("GET", path, { kBearer });
+	if (reply.code != 200)
+		std::fprintf(stderr, "  %s\n", describe(reply).c_str());
+	const auto json = crow::json::load(body_text(reply));
+	TEST_EXPECT(reply.code == 200 && json && header_value(reply, "Cache-Control") == "no-store");
+	TEST_EXPECT(json["window_seconds"].i() == 3600 && json["slot_memory_bytes"].i() == 256 * kMiB);
+	TEST_EXPECT(std::fabs(json["slot_cpus"].d() - 2.0) < 1e-9 && str(json["at"]).size() == 20 &&
+			str(json["at"]).back() == 'Z');
+
+	// The fleet's totals: A alone reports (B's sample carries no numbers, C's
+	// is too old); the hour counts A's two minutes and C's one.
+	const auto &t = json["totals"];
+	TEST_EXPECT(t["servers_live"].i() == 4 && t["machines_live"].i() == 2);
+	TEST_EXPECT(t["slots"].i() == 5 && t["slots_used"].i() == 3 && t["reporting"].i() == 1 &&
+			t["players"].i() == 6);
+	TEST_EXPECT(t["memory_bytes"].i() == 200 * kMiB && t["memory_limit_bytes"].i() == 256 * kMiB);
+	TEST_EXPECT(std::fabs(t["cpus_used"].d() - 0.5) < 1e-9 &&
+			std::fabs(t["cpus_limit"].d() - 2.0) < 1e-9);
+	TEST_EXPECT(std::fabs(t["egress_bytes_per_second"].d() - 100.0) < 1e-9 &&
+			t["egress_bytes_window"].i() == 10200);
+
+	// The machines, by id, each with the usage of the servers on it.
+	TEST_EXPECT(json["machines"].size() == 2);
+	if (json["machines"].size() == 2) {
+		const auto &m = json["machines"][0];
+		TEST_EXPECT(
+				m["id"].i() == shared && str(m["kind"]) == "shared" && str(m["state"]) == "ready");
+		TEST_EXPECT(str(m["instance_type"]) == "t3a.large" && m["slots"].i() == 4 &&
+				m["slots_used"].i() == 2);
+		TEST_EXPECT(m["reporting"].i() == 1 && m["players"].i() == 6 &&
+				m["memory_bytes"].i() == 200 * kMiB);
+		TEST_EXPECT(m["memory_limit_bytes"].i() == 256 * kMiB &&
+				std::fabs(m["cpus_used"].d() - 0.5) < 1e-9);
+		TEST_EXPECT(std::fabs(m["egress_bytes_per_second"].d() - 100.0) < 1e-9 &&
+				m["egress_bytes_window"].i() == 9000);
+		const auto &o = json["machines"][1];
+		TEST_EXPECT(o["id"].i() == own && str(o["kind"]) == "own" && o["slots"].i() == 1 &&
+				o["slots_used"].i() == 1);
+		TEST_EXPECT(o["reporting"].i() == 0 && o["memory_bytes"].i() == 0 &&
+				o["egress_bytes_window"].i() == 1200);
+		TEST_EXPECT(std::fabs(o["egress_bytes_per_second"].d()) < 1e-9 &&
+				std::fabs(o["cpus_limit"].d()) < 1e-9);
+	}
+
+	// The servers: by machine, then slot; the one placed nowhere last; no ended one.
+	const auto &servers = json["servers"];
+	TEST_EXPECT(servers.size() == 4);
+	if (servers.size() == 4) {
+		TEST_EXPECT(servers[0]["id"].i() == b && servers[1]["id"].i() == a &&
+				servers[2]["id"].i() == c && servers[3]["id"].i() == d);
+		const auto &sa = servers[1];
+		TEST_EXPECT(str(sa["name"]) == "Usage A" && str(sa["state"]) == "running" &&
+				!sa["own_machine"].b());
+		TEST_EXPECT(sa["owner"]["id"].i() == ana && str(sa["owner"]["username"]) == "usage_ana");
+		TEST_EXPECT(sa["machine_ref"].i() == shared && sa["slot"].i() == 1 &&
+				sa["uptime_seconds"].t() == type::Number);
+		TEST_EXPECT(str(sa["sample_at"]) == hosted::iso_utc(minute) && sa["players"].i() == 6 &&
+				sa["max_players"].i() == 32);
+		TEST_EXPECT(std::fabs(sa["cpu_percent"].d() - 25.0) < 1e-9 &&
+				sa["memory_bytes"].i() == 200 * kMiB);
+		TEST_EXPECT(std::fabs(sa["egress_bytes_per_second"].d() - 100.0) < 1e-9);
+		const auto &wa = sa["window"];
+		TEST_EXPECT(wa["minutes"].i() == 2 && std::fabs(wa["cpu_percent_mean"].d() - 50.0) < 1e-9);
+		TEST_EXPECT(std::fabs(wa["cpu_percent_peak"].d() - 75.0) < 1e-9 &&
+				wa["memory_bytes_peak"].i() == 300 * kMiB);
+		TEST_EXPECT(wa["egress_bytes"].i() == 9000);
+		// Booting: its sample, without its agent's numbers, and no uptime.
+		const auto &sb = servers[0];
+		TEST_EXPECT(str(sb["owner"]["username"]) == "usage_ben" && sb["slot"].i() == 0 &&
+				str(sb["state"]) == "booting");
+		TEST_EXPECT(sb["uptime_seconds"].t() == type::Null && sb["sample_at"].t() == type::String);
+		TEST_EXPECT(sb["players"].t() == type::Null && sb["cpu_percent"].t() == type::Null &&
+				sb["memory_bytes"].t() == type::Null);
+		TEST_EXPECT(std::fabs(sb["egress_bytes_per_second"].d()) < 1e-9 &&
+				sb["window"]["minutes"].i() == 1);
+		TEST_EXPECT(sb["window"]["cpu_percent_mean"].t() == type::Null &&
+				sb["window"]["memory_bytes_peak"].t() == type::Null);
+		// Its newest sample too old: none, its hour still counted.
+		const auto &sc = servers[2];
+		TEST_EXPECT(sc["machine_ref"].i() == own && sc["slot"].i() == 0 &&
+				sc["sample_at"].t() == type::Null);
+		TEST_EXPECT(sc["memory_bytes"].t() == type::Null &&
+				sc["egress_bytes_per_second"].t() == type::Null);
+		TEST_EXPECT(sc["window"]["memory_bytes_peak"].i() == 100 * kMiB &&
+				sc["window"]["egress_bytes"].i() == 1200);
+		// Placed nowhere.
+		const auto &sd = servers[3];
+		TEST_EXPECT(sd["machine_ref"].t() == type::Null && sd["slot"].t() == type::Null &&
+				str(sd["state"]) == "requested");
+		TEST_EXPECT(sd["window"]["minutes"].i() == 0 && sd["window"]["egress_bytes"].i() == 0);
+	}
+	// No credential reaches the reply.
+	TEST_EXPECT(body_text(reply).find("password") == std::string::npos &&
+			body_text(reply).find("secret") == std::string::npos);
+
+	// Leave no live server or machine for the cases after.
+	for (const int64_t id : { a, b, c, d })
+		hosted::request_stop(*db, id, "by the test");
+	end_stopping_servers(*db);
+	for (const int64_t m : { shared, own })
+		TEST_EXPECT(hosted::transition_machine(*db, m, hosted::FleetMachineState::Ready,
+				hosted::FleetMachineState::Ended, "by the test"));
+	return 0;
+}
+
 // The console routes (hosted/console_routes.h) over a real admin link
 // (hosted/admin_link.h) to a scripted remote-admin server on loopback
 // (FakeAdminConsole), the hosted row put in running by hand (no supervisor):
@@ -6644,6 +6859,7 @@ int run(Harness &h) {
 		{ "hosted_console_routes", test_hosted_console_routes },
 		{ "admin_fleet_routes", test_admin_fleet_routes },
 		{ "hosted_stats_routes", test_hosted_stats_routes },
+		{ "hosted_usage_route", test_hosted_usage_route },
 		{ "no_agent_routes_on_public_listener", test_no_agent_routes_on_public_listener },
 		{ "billing_routes", test_billing_routes },
 		{ "billing_checkout_guard", test_billing_checkout_guard },
@@ -6783,6 +6999,8 @@ int main(int argc, char **argv) {
 		http.set_watchdog(&watchdog);
 		http.set_billing(&billing_service);
 		http.set_limits_hold(&limits_hold);
+		// The usage view's slot limits: 256 MiB and 2 CPUs a container.
+		http.set_fleet_slots(256, 2.0);
 		TEST_EXPECT(http.start(config));
 		TEST_EXPECT(http.bound_port() != 0);
 

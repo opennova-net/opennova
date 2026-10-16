@@ -103,6 +103,38 @@ export function formatBytes(bytes: number): string {
   return `${shown} ${units[unit]}`;
 }
 
+// "512 MiB", "1.5 GiB": memory in binary units (a container's limit is set in
+// MiB), one decimal under ten.
+export function formatMemory(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) return 'unknown';
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  if (unit === 0) return `${Math.round(value)} B`;
+  const shown = value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
+  return `${shown} ${units[unit]}`;
+}
+
+// "0 b/s", "850 kb/s", "1.2 Mb/s": a rate in bytes a second as bits a second
+// in decimal units, as network links are rated; one decimal under ten.
+export function formatBitRate(bytesPerSecond: number): string {
+  if (!Number.isFinite(bytesPerSecond) || bytesPerSecond < 0) return 'unknown';
+  const units = ['b/s', 'kb/s', 'Mb/s', 'Gb/s'];
+  let value = bytesPerSecond * 8;
+  let unit = 0;
+  while (value >= 1000 && unit < units.length - 1) {
+    value /= 1000;
+    unit++;
+  }
+  if (unit === 0) return `${Math.round(value)} b/s`;
+  const shown = value < 10 ? Math.round(value * 10) / 10 : Math.round(value);
+  return `${shown} ${units[unit]}`;
+}
+
 // "1,284", "12.9K", "4.2M": a count, compact from ten thousand up.
 export function formatCount(n: number): string {
   if (!Number.isFinite(n)) return 'unknown';
