@@ -197,8 +197,11 @@ std::vector<uint8_t> build_fields_payload() {
 //               [u16 LE player_count][player_count × (player name + NUL)]
 std::vector<uint8_t> build_servers_payload(const std::vector<GsbServerEntry> &servers) {
 	std::vector<uint8_t> payload;
-	push_u16_le(payload, static_cast<uint16_t>(servers.size()));
-	for (const auto &s : servers) {
+	// At most GSB_SERVERS_MAX rows, which a stock browser reads as a positive count.
+	const size_t rows = std::min(servers.size(), GSB_SERVERS_MAX);
+	push_u16_le(payload, static_cast<uint16_t>(rows));
+	for (size_t r = 0; r < rows; ++r) {
+		const GsbServerEntry &s = servers[r];
 		push_u32_le(payload, s.rid);   // host id (the @RID@ join value)
 		push_ipv4_dotted(payload, s.ip);  // ping target [orig: 0x63BCF0]
 		for (size_t i = 0; i < GSB_FIELD_COUNT; ++i) {

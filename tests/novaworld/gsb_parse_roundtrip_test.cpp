@@ -161,6 +161,26 @@ int main() {
 		}
 	}
 
+	// A record says at most GSB_SERVERS_MAX (0x7FFF) rows, the most a stock browser
+	// reads as a positive signed count (gsb.h): a list of 0x8000 servers goes out as
+	// its first 0x7FFF, byte for byte; a list of exactly 0x7FFF goes out whole.
+	{
+		GsbServerEntry row = b;
+		row.player_names.clear();
+		const std::vector<GsbServerEntry> many(0x8000, row);
+		const std::vector<GsbServerEntry> exact(many.begin(), many.begin() + GSB_SERVERS_MAX);
+		const auto many_wire = gsb_build_response(many);
+		expect(many_wire == gsb_build_response(exact),
+		       "a list past the bound goes out as its first 0x7FFF rows");
+		GsbResponse many_parsed;
+		if (expect(gsb_parse_response(many_wire.data(), many_wire.size(), many_parsed),
+		           "the clamped record parses")) {
+			expect(many_parsed.servers.size() == GSB_SERVERS_MAX &&
+			               many_parsed.total_servers == 0x7FFF,
+			       "the browser's total counts 0x7FFF");
+		}
+	}
+
 	if (g_failures == 0) {
 		std::printf("OK: GSB build->parse round-trip verified (%zu servers, %zu-byte wire)\n",
 		            servers.size(), wire.size());
