@@ -4518,6 +4518,7 @@ add_test(NAME opennova_serve_status_console COMMAND opennova_serve_status_consol
 # with the service's tests (novaworld/service_tests.cmake).
 add_executable(opennova_serve_lister_options_test serve/opennova_serve_lister_options_test.cpp)
 target_link_libraries(opennova_serve_lister_options_test PRIVATE opennova_serve_core)
+target_include_directories(opennova_serve_lister_options_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME opennova_serve_lister_options COMMAND opennova_serve_lister_options_test)
 
 # P5 — the headless CLIENT runtime (inmatch::ClientRuntime / Client_ProcessNetworkFrame). Always-on

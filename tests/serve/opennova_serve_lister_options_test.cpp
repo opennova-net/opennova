@@ -10,6 +10,8 @@
 
 #include <net/novaworld/gate_probe.h>
 
+#include "common/temp_dir.h"
+
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -29,10 +31,10 @@ int failures = 0;
 		}                                                                                          \
 	} while (0)
 
-std::string write_temp(const char *name, const std::string &text) {
-	const auto path = std::filesystem::temp_directory_path() / name;
-	std::ofstream(path, std::ios::binary) << text;
-	return path.string();
+std::string write_temp(const test_temp::TempDir &dir, const char *name, const std::string &text) {
+	const std::string path = dir.file(name);
+	std::ofstream(opennova::io::os_path(path), std::ios::binary) << text;
+	return path;
 }
 
 } // namespace
@@ -67,31 +69,27 @@ int main() {
 
 	// The credentials file: a comment, a quoted value and a bare one; a key it does not know is
 	// ignored.
+	const test_temp::TempDir dir("opennova_serve_lister_options");
 	{
-		const std::string path = write_temp("opennova_serve_creds_test.txt",
+		const std::string path = write_temp(dir, "creds_test.txt",
 				"# comment\nNOVAWORLD_USER = \"someone\"\nNOVAWORLD_PASS=secret\nOTHER_KEY=x\n");
 		serve::Credentials c;
 		std::string err;
 		CHECK(serve::load_credentials(path, c, err));
 		CHECK(c.user == "someone" && c.pass == "secret" && c.present());
-		std::filesystem::remove(path);
 	}
 	{
 		const std::string path = write_temp(
-				"opennova_serve_creds_half.txt", "; no password\nNOVAWORLD_USER='solo'\n");
+				dir, "creds_half.txt", "; no password\nNOVAWORLD_USER='solo'\n");
 		serve::Credentials c;
 		std::string err;
 		CHECK(serve::load_credentials(path, c, err));
 		CHECK(c.user == "solo" && c.pass.empty() && !c.present());
-		std::filesystem::remove(path);
 	}
 	{
 		serve::Credentials c;
 		std::string err;
-		const auto missing =
-				std::filesystem::temp_directory_path() / "opennova_serve_creds_missing.txt";
-		std::filesystem::remove(missing);
-		CHECK(!serve::load_credentials(missing.string(), c, err) && !err.empty());
+		CHECK(!serve::load_credentials(dir.file("creds_missing.txt"), c, err) && !err.empty());
 	}
 
 	if (failures != 0) {
