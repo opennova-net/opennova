@@ -166,8 +166,16 @@ terrain::TerrainRaycastSample los_field_point_cb(void *vctx, int32_t x, int32_t 
     if (sx != ctx.cached_sx || sz != ctx.cached_sz) {
         ctx.cached_sx = sx;
         ctx.cached_sz = sz;
+        // An off-grid cell clamps to the grid's edge on an axis the .trn does not
+        // wrap: the OOB mask is zero on a wrapping axis, else any bit past the
+        // low nibble sets the cell to 0 or 15 by its sign.
+        // [orig: Terrain_RaycastHeightmapHiRes @0x60C760 — g_TerrainCellOOBMaskX /
+        //  g_TerrainCellOOBMaskY @0x60C95D / @0x60C96A at the start and
+        //  @0x60CA26 / @0x60CA35 at each sector change, `sar 1Fh; not` then
+        //  `and 0Fh` @0x60C962..0x60C977; Terrain_RaycastHeightmapLoRes @0x60CB80
+        //  the same @0x60CD3E / @0x60CE22]
         const terrain::CoordsSectorResolve sector = terrain::coords_resolve_sector(
-            f.layout, sx, sz, terrain::coords_runtime_options());
+            f.layout, sx, sz, terrain::coords_runtime_options(f.wrap_x, f.wrap_z));
         ctx.sector_valid = sector.valid && f.valid();
         ctx.base_x = sector.quadrant_x;
         ctx.base_z = sector.quadrant_z;

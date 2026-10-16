@@ -47,6 +47,32 @@ struct Field {
     }
 };
 
+// The LOS terrain march off the grid: a 1024 atlas whose sector 1 (quadrant
+// 0,0) stands 10 u high and sector 3 (quadrant 512,0) at 0, the grid's columns
+// 0..14 sector 1 and column 15 sector 3. A ray one sector west of the grid
+// reads column 15 when the .trn wraps X and column 0 when it does not. Its end
+// stands at 15 u, above both grounds, so the end-point precheck clears in either
+// mode and the march's own samples (the point callback) decide.
+// [orig: Terrain_RaycastHeightmapHiRes @0x60C760, the OOB masks @0x60C95D /
+//  @0x60CA26]
+bool off_grid_los_blocked(bool wrap) {
+    std::vector<uint16_t> heightmap(1024 * 1024, 0);
+    for (int z = 0; z < 1024; ++z)
+        for (int x = 0; x < 512; ++x)
+            heightmap[z * 1024 + x] = static_cast<uint16_t>(10.0 * 256.0);
+    std::vector<int> grid(256, 1);
+    for (int z = 0; z < 16; ++z) grid[z * 16 + 15] = 3;
+    opennova::terrain::TerrainHeightField field;
+    field.heightmap = heightmap.data();
+    field.dim = 1024;
+    field.layout.sector_grid = grid.data();
+    field.wrap_x = wrap;
+    field.wrap_z = wrap;
+    const int32_t a[3] = {fx(-300.0), fx(-100.0), fx(5.0)};
+    const int32_t b[3] = {fx(-200.0), fx(-100.0), fx(15.0)};
+    return los_terrain_blocked(field, a, b);
+}
+
 // A solid (type-1) box [(-hx,-hy,0)..(hx,hy,height)] in section-local space:
 // six outward Q14 planes, dist = -face offset.
 CollisionModel box_model(double hx, double hy, double height) {
@@ -267,6 +293,15 @@ static void test_los_walks_pool_one_live() {
     CHECK(!rig->world.ai.line_of_sight_clear_cached(rig->world, pa, pb, a, b));
 }
 
+// The LOS terrain march off the grid follows the .trn's wrap flags: a wrapping
+// axis reads the far column (sector 3, ground 0), a clamped one the near (sector 1,
+// 10 u high) [orig: Terrain_RaycastHeightmapHiRes @0x60C760, the OOB masks
+// @0x60C95D / @0x60C96A].
+static void test_los_off_grid_cell_follows_the_wrap_flags() {
+    CHECK(!off_grid_los_blocked(true));
+    CHECK(off_grid_los_blocked(false));
+}
+
 int main() {
     test_hull_blocks_the_ray_to_its_emplaced_child();
     test_rider_sees_out_of_its_hull_but_not_through_its_children();
@@ -274,6 +309,7 @@ int main() {
     test_script_los_splits_at_twenty_units();
     test_los_walks_every_pool_two_building();
     test_los_walks_pool_one_live();
+    test_los_off_grid_cell_follows_the_wrap_flags();
     if (failures != 0) {
         std::printf("%d failure(s)\n", failures);
         return 1;
