@@ -1465,12 +1465,18 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 		// so retail increments the player-slot dword once per periodic second
 		// while a state-6 entity has Flags bit 0x02 set, resets it as soon as
 		// the bit clears, and compares after the increment — punt type 7 lands
-		// after 361 seconds dead, not 361 ticks (5.8 s). The remaining retail
-		// exclusions (local player, bot/spectator, explicit anti-cheat bypass)
-		// have no remote-player representation in this runtime; a normal type-1
-		// connection corresponds to all of them being clear.
+		// after 361 seconds dead, not 361 ticks (5.8 s). The punt's exclusions,
+		// in retail all at the punt and none at the counter: permanent death (ours
+		// `config.permanent_death`), the local slot (+0x5, ours the type-1 test),
+		// the bot byte (+0x178E3, never set), the spectator latch (+0x188D7, ours
+		// `conn.link.spectator`, as the t35 arm tests it), the punt latch
+		// (+0x15F28, ours `conn.host_disconnect_sent`) and /NOPUNT (dword_B4C698,
+		// not modelled).
 		// [orig: Server_TickUpdate @0x51D7E0 — periodic gate reload 62
-		//  @0x51DB93; counter @0x51E066..0x51E07D; punt @0x51E187..0x51E18E]
+		//  @0x51DB93; counter @0x51E062..0x51E07D; the exclusions: permanentDeath
+		//  @0x51E159, +0x5 @0x51E161, +0x178E3 @0x51E167, the spectator latch
+		//  `cmp byte ptr [esi+188D7h], 0` @0x51E170, +0x15F28 @0x51E179,
+		//  dword_B4C698 @0x51E181; punt @0x51E187..0x51E18E]
 		if (periodic_second) {
 			const bool dead_state6 = ctx.is_in_session &&
 					!conn.host_disconnect_sent && conn.type == NapiNPConnection::kTypeServerSide &&
@@ -1486,7 +1492,7 @@ void emit_periodic_session_maintenance(NapiNPServerCtx &ctx, world::World &world
 			}
 			if (dead_state6 &&
 					reply.dead_live_seconds > kDeadLiveSecondLimit &&
-					!ctx.config.permanent_death) {
+					!ctx.config.permanent_death && !conn.link.spectator) {
 				stage_host_punt(conn, kPuntDeadTooLong);
 				continue;
 			}
