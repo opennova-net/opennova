@@ -69,7 +69,7 @@ inline Transform3D mission_to_godot_transform() {
 inline Vector3 godot_from_fixed3(const int32_t p[3]) {
 	return Vector3(static_cast<float>(p[0] / opennova::io::kFp16OneD),
 			static_cast<float>(p[2] / opennova::io::kFp16OneD),
-			static_cast<float>(-p[1] / opennova::io::kFp16OneD));
+			static_cast<float>(-(p[1] / opennova::io::kFp16OneD)));
 }
 inline Vector3 godot_from_fixed3(const std::array<int32_t, 3> &p) {
 	return godot_from_fixed3(p.data());
