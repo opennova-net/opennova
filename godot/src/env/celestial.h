@@ -135,7 +135,7 @@ public:
 	// The frozen-fixture glare settle (GameWorld's capture-refresh seam):
 	// the occlusion brightness needs ~4 frames to fill the 8-sample window
 	// and up to 16 more to step +-16 onto the dead-band target
-	// [orig: Render_SkyboxSunGlow @ 0x5acdfb..0x5acf7f, see docs/env/env-tod-re.md], so a single
+	// (engine: formats/env/env_render.cpp), so a single
 	// zero-delta advance leaves a fresh accumulator dark at any pose. Runs
 	// ONLY the witnessed per-frame occlusion leg (two jittered rays + tick)
 	// until the dead-band holds across a full window turnover (frame cap
@@ -148,7 +148,7 @@ public:
 	// opacity/visibility (the last advanced frame's values).
 	Dictionary get_diagnostics() const;
 
-	// The last advanced frame's sun-veil outputs [orig: // Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0, see docs/env/env-tod-re.md]: the fullscreen
+	// The last advanced frame's sun-veil outputs (engine: formats/env/env_celestial.h): the fullscreen
 	// white veil alpha (0..1 after the > 2 draw gate — consumed by the
 	// PlayerViewEffects veil rect via the opennova_sun_veil_alpha shader
 	// global this node pushes) and the modulator-2 exposure stop-down input
@@ -232,7 +232,7 @@ private:
 	// sequence (GlareOcclusion::advance) over _segment_clear.
 	void _advance_glare_occlusion(const opennova::env::EnvironmentState &p_state,
 			const Vector3 &p_cam_pos, const Vector3 &p_sun_dir);
-	// One frame of the water-glint leg [orig: Environment_UpdateSunGlare @ 0x5ad130, see docs/env/env-tod-re.md]:
+	// One frame of the water-glint leg (engine: formats/env/env_celestial.h):
 	// tick the accumulator at this camera, place the mirrored glint body and
 	// write its submit value.
 	void _advance_water_glint(const opennova::env::EnvironmentState &p_state,
@@ -269,7 +269,7 @@ private:
 			RenderingServer *p_rs, const StringName &p_name, const Variant &p_value);
 	int sun_veil_stopdown_ = 0;
 	// The water-reflected sun glint accumulator
-	// [orig: Environment_UpdateSunGlare @ 0x5ad130, see docs/env/env-tod-re.md].
+	// (engine: formats/env/env_celestial.h).
 	opennova::env::WaterGlintState water_glint_;
 	// The weapon Inset pass's camera this frame and its glint draw.
 	ObjectID inset_camera_id_;

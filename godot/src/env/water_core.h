@@ -15,11 +15,11 @@
 
 namespace godot {
 
-// The per-frame water surface core of [orig: Render_WaterSurface @ 0x5c32c0, see docs/env/env-tod-re.md]:
+// The per-frame water surface core of (engine: formats/env/env_water_render.h):
 // the animated 128x128 ridge color/alpha texture and its DuDv/normal
-// derivative [orig: Water_GenerateNoiseTextures @ 0x5c0360, see docs/env/env-tod-re.md], plus the
+// derivative (engine: formats/env/env_render.cpp), plus the
 // screen-marched strip tessellation of the detailed tier (env #29)
-// [orig: Render_WaterStripDetailed @ 0x5c27d0, see docs/env/env-tod-re.md]. All math lives in engine/formats/env
+// (engine: formats/env/env_water_render.h). All math lives in engine/formats/env
 // (env/env_water_render.h); this C++-only device helper (Water's member — its
 // ClassDB row died with the ADR 0043 d10 env-core sweep; env_render_unit
 // pins the vectors it served GUT) owns the static tables (built once with
@@ -67,8 +67,7 @@ public:
 	void strip_set_view(const Transform3D &p_cam_transform, const Projection &p_cam_projection,
 			const Vector2i &p_viewport_px, float p_fog_end_world);
 
-	// Runs the witnessed row march [orig: Render_WaterStripDetailed
-	// @ 0x5c27d0] against the last strip_set_view; returns the row count
+	// Runs the witnessed row march (engine: formats/env/env_water_render.h) against the last strip_set_view; returns the row count
 	// (3 vertices per row). p_water_color_lit is g_EnvWaterColorLit as a
 	// Color (bytes / 255); p_depth_scale/p_depth_bias the WaterDepthCurve pair.
 	int strip_build(float p_plane_height_world, float p_murk, const Color &p_water_color_lit,
@@ -76,17 +75,16 @@ public:
 
 	// Godot-space world positions reconstructed per vertex from the
 	// witnessed render-basis uv0 = world x/32, z/32 pair + the plane height
-	// [orig: flt_7DBFAC @ 0x5c2899, see docs/env/env-tod-re.md], swapped back
+	// (engine: formats/env/env_water_render.h), swapped back
 	// into Godot axes.
 	PackedVector3Array strip_positions() const;
 	// Row diffuse / specular ARGB per vertex as raw bytes / 255 (no
-	// color-space conversion) [orig: written @ 0x5c2f0a..0x5c2f2b, see docs/env/env-tod-re.md].
+	// color-space conversion) (engine: formats/env/env_water_render.h).
 	PackedColorArray strip_colors() const;
 	// The specular again as 4 floats per vertex (RGBA, raw bytes / 255) —
 	// ARRAY_CUSTOM1 under the RGBA_FLOAT format only accepts a
 	// PackedFloat32Array, and the shader consumes it as CUSTOM1: the ps.1.1
-	// v1 register [orig: add r0.rgb, r0, v1 — the detail>=2 pixel shader
-	// assembled in Water_InitSurfaceShaders @ 0x5c19b0].
+	// v1 register (engine: formats/env/env_water_render.h).
 	PackedFloat32Array strip_custom1() const;
 	// The witnessed texcoord 0 pair = render-basis world x/32, z/32 (Godot
 	// world z/32, x/32). Retail duplicates it into texcoord 3, so the color
@@ -101,13 +99,13 @@ public:
 	PackedFloat32Array strip_custom0() const;
 	// 4 floats per vertex: [t1.x, t1.y, t2.x, t2.y] — the texm3x2
 	// perturbation basis (camera right/forward xz under the witnessed rhw
-	// scales [orig: rows @ 0x5c2f83..0x5c3067, see docs/env/env-tod-re.md]) as the mesh's ARRAY_CUSTOM2;
+	// scales (engine: formats/env/env_water_render.h)) as the mesh's ARRAY_CUSTOM2;
 	// the rows' 3rd components (screen U/V) ride strip_custom0's zw. The
 	// env #30 reflection consumer dots both against the DuDv sample.
 	PackedFloat32Array strip_custom2() const;
 	// PRIMITIVE_TRIANGLES indices unrolled from the witnessed <=5-row
 	// triangle-strip batches through kWaterStripIndexTable
-	// [orig: word_841328; batch walk @ 0x5c3164..0x5c329e, see docs/env/env-tod-re.md].
+	// (engine: formats/env/env_water_render.h).
 	PackedInt32Array strip_indices() const;
 };
 

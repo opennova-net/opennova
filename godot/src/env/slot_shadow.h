@@ -83,8 +83,7 @@ public:
 	SlotShadow();
 
 	void set_environment_node(MissionEnvironment *p_environment);
-	// The terrain the anchor march probes [orig: Terrain_GetHeightAtPosition
-	// @0x606720 inside RenderSlot_UpdateEntityLight]; without it the anchor
+	// The terrain the anchor march probes (engine: runtime/renderer/render_slot_shadow.h); without it the anchor
 	// stays at the entity (the march's step-0 exit on a ground-standing
 	// caster).
 	void set_terrain_data(const Ref<TerrainData> &p_terrain);
@@ -98,8 +97,7 @@ public:
 	void set_shadow_detail(int p_detail);
 	// The local player's model: halved slot priority, the every-frame
 	// refresh exception, and the first-person drape gates (detail >= 2, not
-	// prone) [orig: RenderSlot_DrawAllDrapes @0x5d6e70..0x5d6e90, see
-	// docs/render/render-lighting-re.md].
+	// prone) (engine: runtime/renderer/render_slot_shadow.cpp).
 	void set_local_player_model(ObjectModel *p_model);
 	// The model of the vehicle the local player rides (null on foot): it
 	// shares the local player's halved priority and every-frame refresh
