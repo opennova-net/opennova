@@ -408,7 +408,11 @@ once: the host and the machines pull anonymously.
 
 The host runs the same converge at every boot, so a new host serves the current release
 with no step of yours. Downtime per server change is the server's restart, a few
-seconds.
+seconds for the site and the lobby. The hosted servers keep running but leave the
+browser for up to about 4 min: each `opennova-serve` drops the NovaWorld session the
+restart left dead only after 240 s of silence, then reconnects and lists again (the
+supervisor waits 8 min for that before its health checks count). A web-only release
+(`--web-tag`) avoids it.
 
 ```bash
 ./deploy/run.sh app releases                   # the newest 20, the current one starred

@@ -206,7 +206,7 @@ void Supervisor::reconcile(uint64_t now_ms) {
 			continue;
 		}
 		// Its lister re-hosts over the NWU reconnect; the health checks wait for it.
-		rt.grace_until_ms = now_ms + config_.listing_timeout_ms;
+		rt.grace_until_ms = now_ms + config_.relist_grace_ms;
 		std::printf("[hosted] reconcile: server %lld resumes %s on %s\n", static_cast<long long>(s.id),
 				state_name(s.state), place_text(*s.machine_ref, s.slot).c_str());
 	}

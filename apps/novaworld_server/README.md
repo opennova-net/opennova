@@ -667,10 +667,13 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   that no live row names is terminated; a live row whose cloud machine is gone ends, its
   servers placed again with no restart counted (a `stopping` one is stopped); a server
   whose files went with the service (`booting`, its container never reported) is placed
-  again; the rest resume where they were (a running one gets the listing timeout for its
-  lister to re-host before the health checks count, since the boot cleared the previous
-  run's listings), their containers answered for without files. A driver that cannot
-  list ends nothing. Every 5 min the sweep half runs again.
+  again; the rest resume where they were, their containers answered for without files.
+  A running one gets 8 min on either driver (`relist_grace_ms`) to list again before
+  its health checks count: the boot cleared the previous run's listings, and its
+  `opennova-serve` drops the NovaWorld session the restart left dead only after 240 s
+  of silence (the service's advertised timeout, retail's), then reconnects and lists
+  again; the grace is twice that. A driver that cannot list ends nothing. Every 5 min
+  the sweep half runs again.
 - **Service accounts.** Each hosted server lists itself with an account of its own,
   `srv-<id>` (`players.kind = 'service'`), minted at its first start with a 32-character
   password from the OS CSPRNG (bcrypt, as every account), whose password is set again at
@@ -1427,8 +1430,9 @@ stopping, the crash restarts (an exit, the OOM kill, a failed start, a refused l
 their limit and the restart window, the timeouts, the health checks, a lost machine
 placing its server again with no restart counted, the owners' changes including a
 withdrawn comp grant and a canceled support tier, the owners' limits (a tier lowered, past
-due, the add-on cut) and their mass-stop hold, the reconciliation, the console ring's cap,
-and the admin links following the running servers; `hosted_fleet`
+due, the add-on cut) and their mass-stop hold, the reconciliation and the relist grace
+after a restart, the console ring's cap, and the admin links following the running
+servers; `hosted_fleet`
 ([`tests/novaworld/hosted_fleet_test.cpp`](../../tests/novaworld/hosted_fleet_test.cpp),
 every build) the fleet's side over the same fake: the desired state each sync gets (the
 files until reported, a stopping server's unstarted container, the drain flag, a
