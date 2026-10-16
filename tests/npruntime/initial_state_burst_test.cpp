@@ -539,13 +539,12 @@ int main_impl() {
 		inmatch::Server_ProcessPendingPlayerSpawns(ctx3, w3);
 
 		// Simulate a remote joiner by adding a type-1 connection with PlayerAdded phase.
-		inmatch::NapiNPConnection joiner{};
-		joiner.type = 1;
-		joiner.connection_id = inmatch::kFirstJoinerDcb;
-		joiner.phase = inmatch::ConnectionPhase::PlayerAdded;
-		joiner.burst.sync_state = 0;
-		ctx3.np_protocol.connection_list.push_back(joiner);
-		inmatch::NapiNPConnection &jconn = ctx3.np_protocol.connection_list.back();
+		// Built in place: a NapiNPConnection is several KiB, and this frame's stack is full.
+		inmatch::NapiNPConnection &jconn = ctx3.np_protocol.connection_list.emplace_back();
+		jconn.type = 1;
+		jconn.connection_id = inmatch::kFirstJoinerDcb;
+		jconn.phase = inmatch::ConnectionPhase::PlayerAdded;
+		jconn.burst.sync_state = 0;
 
 		// A REMOTE (type-1) joiner is PACED: each call emits only a few datagrams (kPacedMsgsPerTick),
 		// so the burst takes many calls to stream the player-sync tail — and then PARKS at sync-state
@@ -683,13 +682,11 @@ int main_impl() {
 		ctx4.mission = &mission;
 		inmatch::Server_InitNewRoundState(ctx4);
 		inmatch::Server_ProcessPendingPlayerSpawns(ctx4, w4);
-		inmatch::NapiNPConnection joiner4{};
-		joiner4.type = 1;
-		joiner4.connection_id = inmatch::kFirstJoinerDcb;
-		joiner4.phase = inmatch::ConnectionPhase::PlayerAdded;
-		joiner4.link.spectator = as_spectator;
-		ctx4.np_protocol.connection_list.push_back(joiner4);
-		inmatch::NapiNPConnection &sconn = ctx4.np_protocol.connection_list.back();
+		inmatch::NapiNPConnection &sconn = ctx4.np_protocol.connection_list.emplace_back();
+		sconn.type = 1;
+		sconn.connection_id = inmatch::kFirstJoinerDcb;
+		sconn.phase = inmatch::ConnectionPhase::PlayerAdded;
+		sconn.link.spectator = as_spectator;
 		for (int i = 0; i < 64 && sconn.burst.sync_state != 3; ++i)
 			(void)inmatch::Server_SendInitialGameStateToPlayer(ctx4, sconn, /*now_tick=*/1);
 		if (!expect(sconn.burst.sync_state == 3, "the joiner's player sync parks at state 3"))
