@@ -18,7 +18,8 @@ Reproduce one client/server path without inventing protocol behavior.
 2. Start the scoped server/client path.
 3. Capture from process start through success/failure.
 4. Collect `/api/health`, `/api/hosts`, `/api/lobbies`, and
-   `/api/unknowns` when using OpenNova backend.
+   `/api/unknowns` when using OpenNova backend (`/api/hosts` and
+   `/api/unknowns` with the Bearer `ADMIN_API_TOKEN`).
 5. Collect `/PROFILE` `.sph` logs when applicable.
 6. Decode and compare to known fixtures/tests.
 

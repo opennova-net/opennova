@@ -1082,13 +1082,20 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 					// (a cookie-heavy ClientRequestVerifyResult or ClientHostRequest) spans
 					// several SESSION packets, FRAG_CONT set on every piece but the final.
 					// reassemble_protocol_payload accumulates and returns true only when the
-					// assembled buffer is ready.
+					// assembled buffer is ready; a statement past kLobbyStatementMaxBytes
+					// is dropped.
 					std::vector<uint8_t> assembled;
 					bool was_fragmented = false;
+					bool was_dropped = false;
 					if (!reassemble_protocol_payload(lobby_state.reassembly, pm,
-					                                 assembled, &was_fragmented)) {
-						std::printf("[nwudp]     fragment buffered (assembly=%zuB so far)\n",
-						            lobby_state.reassembly.buffer.size());
+					                                 assembled, &was_fragmented, &was_dropped)) {
+						if (was_dropped) {
+							std::printf("[nwudp]     fragment dropped (the statement passes %zu bytes)\n",
+							            kLobbyStatementMaxBytes);
+						} else {
+							std::printf("[nwudp]     fragment buffered (assembly=%zuB so far)\n",
+							            lobby_state.reassembly.buffer.size());
+						}
 						continue;
 					}
 					if (assembled.empty()) continue; // ack-only

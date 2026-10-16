@@ -98,8 +98,8 @@ std::string codepoint_names(const std::u32string &codepoints) {
 // A listed server for its owner (GET /api/me/hosts) or an admin (GET
 // /api/admin/hosts): its browser columns, the endpoint joiners are sent to and
 // the address its session comes from, and the row's UTC times. The public
-// /api/lobbies and /api/hosts name no owner. A host's text comes in its own code
-// page (a stock host's cp1252), so it goes out as UTF-8 (retail_text_to_utf8).
+// /api/lobbies names no owner. A host's text comes in its own code page (a
+// stock host's cp1252), so it goes out as UTF-8 (retail_text_to_utf8).
 crow::json::wvalue listed_host_json(const hostdb::HostRow &h) {
 	crow::json::wvalue e;
 	e["rid"] = h.rid;

@@ -620,8 +620,10 @@ bool deframe_session_packet(SessionSequencing &seq, const SessionCrypto &crypto,
 bool reassemble_protocol_payload(ProtocolReassemblyState &state,
                                  const ProtocolMessage &msg,
                                  std::vector<uint8_t> &payload_out,
-                                 bool *was_fragmented) {
+                                 bool *was_fragmented,
+                                 bool *was_dropped) {
 	payload_out.clear();
+	if (was_dropped) *was_dropped = false;
 	static_assert((PROTOCOL_MSG_FLAG_FRAG_CONT | PROTOCOL_MSG_FLAG_FRAG_END) == 0x06u,
 	              "the witnessed fragment-state mask");
 	const uint8_t frag_state =
@@ -636,6 +638,19 @@ bool reassemble_protocol_payload(ProtocolReassemblyState &state,
 	if (was_fragmented) *was_fragmented = true;
 	if (frag_state == PROTOCOL_MSG_FLAG_FRAG_CONT) {
 		state.buffer.clear();
+		state.discarding = false;
+	}
+	// The caller's bound (service policy; retail's buffer has none): the stream
+	// that would pass it goes whole, and the rest of its fragments after it.
+	if (!state.discarding && state.max_bytes != 0 &&
+	    state.buffer.size() + msg.payload.size() > state.max_bytes) {
+		std::vector<uint8_t>().swap(state.buffer);
+		state.discarding = true;
+	}
+	if (state.discarding) {
+		if (!msg.flags.frag_cont) state.discarding = false; // its final fragment
+		if (was_dropped) *was_dropped = true;
+		return false;
 	}
 	state.buffer.insert(state.buffer.end(), msg.payload.begin(), msg.payload.end());
 	if (msg.flags.frag_cont) {

@@ -2,6 +2,7 @@
 
 #include <net/napi/tlv.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -46,6 +47,27 @@ struct HostRosterSlot {
 	std::string team;             // PlayerTeam
 	std::string type;             // PlayerType
 };
+
+// The roster's bounds (service policy, not retail's). A slot is a PlayerNumber /
+// VarFNum in 0..kRosterSlotMax, and a listing keeps at most its MaxPlayers plus
+// one rows (its players and itself), or one per slot while it reports no
+// MaxPlayers in 1..kRosterSlotMax. A stock host stays inside both: Jointops.exe
+// hosts at most 64 players (65 dedicated) and dfx2.exe 250 (251)
+// (host_leg_max_players, connect_or_host.h). A slot past them is not kept, so a
+// lobby connection cannot grow its listing's roster, and the GSB row and the
+// database rows made from it, without end.
+inline constexpr int kRosterSlotMax = 255;
+inline bool roster_slot_in_range(int slot) { return slot >= 0 && slot <= kRosterSlotMax; }
+inline std::size_t roster_row_cap(int max_players) {
+	const int rows = max_players >= 1 && max_players <= kRosterSlotMax ? max_players + 1
+	                                                                   : kRosterSlotMax + 1;
+	return static_cast<std::size_t>(rows);
+}
+// The most vars a kept Host / HostSetup / PlayerList list takes from the
+// updates merged into it (service policy): far past a stock host's (its Host list
+// is under 40 vars, its PlayerList five per slot), so a connection cannot grow
+// them without end. A var new past it is not kept; a kept one still changes.
+inline constexpr std::size_t kKeptVarsMax = 2048;
 
 // Per-connection lobby state. Persists across protocol messages on the
 // same UDP session (keyed by Connection.id in the standalone server).
@@ -150,8 +172,10 @@ struct LobbyDispatchResult {
 VarLists extract_var_lists(const NapiMessage &container);
 
 // Group a PlayerList into per-slot roster entries (one HostRosterSlot per
-// distinct VarFNum, in first-seen order).
-std::vector<HostRosterSlot> roster_from_player_list(const VarList &player_list);
+// distinct VarFNum, in first-seen order), inside the roster's bounds for a host
+// reporting `max_players` (0: none reported).
+std::vector<HostRosterSlot> roster_from_player_list(const VarList &player_list,
+                                                    int max_players = 0);
 
 class LobbySession {
 public:

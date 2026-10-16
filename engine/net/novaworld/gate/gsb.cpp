@@ -2,6 +2,7 @@
 
 #include <net/novacrypto/nwu.h>
 
+#include <algorithm>
 #include <cstring>
 #include <string>
 
@@ -203,9 +204,11 @@ std::vector<uint8_t> build_servers_payload(const std::vector<GsbServerEntry> &se
 		for (size_t i = 0; i < GSB_FIELD_COUNT; ++i) {
 			push_ascii_cstr(payload, field_value(s, i));
 		}
-		push_u16_le(payload, static_cast<uint16_t>(s.player_names.size()));
-		for (const auto &name : s.player_names) {
-			push_ascii_cstr(payload, name);
+		// At most GSB_ROW_NAMES_MAX, which a stock browser reads as a positive count.
+		const size_t names = std::min(s.player_names.size(), GSB_ROW_NAMES_MAX);
+		push_u16_le(payload, static_cast<uint16_t>(names));
+		for (size_t i = 0; i < names; ++i) {
+			push_ascii_cstr(payload, s.player_names[i]);
 		}
 	}
 	return payload;

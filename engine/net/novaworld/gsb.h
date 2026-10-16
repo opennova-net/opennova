@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -92,9 +93,18 @@ struct GsbServerEntry {
 
 	// Trailing per-row player-name list (retail row tail). Empty for a server
 	// that reports a count but no names. `players` (the count column) is
-	// independent of this list.
+	// independent of this list. The row carries its first GSB_ROW_NAMES_MAX.
 	std::vector<std::string> player_names{};
 };
+
+// The most names a GSB row carries. A stock browser reads the row's u16 name
+// count as a signed word and sizes its name array from it, so a count of
+// 0x8000 or more makes it ask operator new for 0xFFFFFFFF bytes and die on the
+// throw; a row never says more than 0x7FFF.
+// [orig: NapiGameList_ProcessEncryptedResponse @0x63d740 — `movsx ebx, word
+//  ptr [edi]` @0x63dafc, the size's overflow to 0xFFFFFFFF @0x63db0b..0x63db12,
+//  operator new @0x63db15]
+inline constexpr size_t GSB_ROW_NAMES_MAX = 0x7FFF;
 
 // Build the complete GSB response body as it appears on the wire (the chunk
 // sequence GSB/FLDS/SVRS/XXXX, no bare header). Caller writes this verbatim as

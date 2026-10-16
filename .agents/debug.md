@@ -65,7 +65,8 @@ a gated ctest reports Skipped (exit 77) without its root, never a silent pass.
 ## Logs and Cleanup
 
 - Docker dev: collect `docker compose ... logs --tail=200 novaworld web`,
-  `/api/health`, `/api/hosts`, `/api/lobbies`, and `/api/unknowns`.
+  `/api/health`, `/api/hosts`, `/api/lobbies`, and `/api/unknowns` (`/api/hosts` and
+  `/api/unknowns` take the Bearer `ADMIN_API_TOKEN`).
 - Native server: collect stdout/stderr. It clears active hosts and active user
   sessions at boot and sweeps stale hosts.
 - Godot: fully close the editor after GDExtension rebuilds. If GUT reports odd

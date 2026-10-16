@@ -139,6 +139,28 @@ int main() {
 		       "forged oversized chunk length rejected");
 	}
 
+	// A row says at most GSB_ROW_NAMES_MAX (0x7FFF) names, the most a stock browser
+	// reads as a positive signed count (gsb.h): a row of 40,000 names carries its
+	// first 32,767 and goes out byte for byte as the row of those alone; a row of
+	// exactly 32,767 carries them all.
+	{
+		GsbServerEntry crowd = b;
+		for (int i = 0; i < 40000; ++i) crowd.player_names.push_back("p" + std::to_string(i));
+		GsbServerEntry exact = b;
+		exact.player_names.assign(crowd.player_names.begin(),
+		                          crowd.player_names.begin() + GSB_ROW_NAMES_MAX);
+		const auto crowd_wire = gsb_build_response({crowd});
+		const auto exact_wire = gsb_build_response({exact});
+		expect(crowd_wire == exact_wire, "a row past the bound goes out as its first 0x7FFF names");
+		GsbResponse crowd_parsed;
+		if (expect(gsb_parse_response(crowd_wire.data(), crowd_wire.size(), crowd_parsed) &&
+		           crowd_parsed.servers.size() == 1, "the clamped row parses")) {
+			expect(crowd_parsed.servers[0].player_names == exact.player_names,
+			       "the clamped row carries its first 0x7FFF names");
+			expect(crowd_parsed.total_players == 0x7FFF, "the browser's total counts 0x7FFF");
+		}
+	}
+
 	if (g_failures == 0) {
 		std::printf("OK: GSB build->parse round-trip verified (%zu servers, %zu-byte wire)\n",
 		            servers.size(), wire.size());

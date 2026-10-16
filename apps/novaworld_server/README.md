@@ -54,7 +54,8 @@ session handshake, the browser/host/play container services, and the legacy
   while its server still runs; a link leases a pooled connection to write its console.
 - **The `UnknownTracker` records from listener threads** into an in-memory,
   mutex-guarded accumulator and is flushed to the DB only on the main tick — never
-  per packet.
+  per packet. `GET /api/unknowns` (admin) serves this run's: each signature's first
+  sample as hex and its sender's address.
 - **Each listener's `start()` holds its port before the boot goes on.** The gate and
   NW UDP listeners bind their socket in `start()` and move it into the receive
   thread (which leases its connection), so the port they report is the one they serve,
@@ -376,8 +377,10 @@ HostKey is unwitnessed.
 | --- | --- | --- |
 | `GET /api/me/hosts` | a website session (`require_user`) | `{"hosts": [...]}`, the caller's listed servers, oldest first: `rid`, `gsid`, `game`, `server_name`, `mission_name`, `game_type`, `players`, `max_players`, `host_ip`, `host_port` (the endpoint joiners are sent to), `peer_ip` (the address its session comes from), `created_at`, `updated_at` (UTC), `msg` (the server's message) and `roster`, the host's PlayerList as of its last update (`slot`, `player_name`, `team`, `type`; the slot is what a player verb's `ByIndex` target names); 401 with no live session; `Cache-Control: no-store` |
 | `GET /api/admin/hosts` | admin (the Bearer token or an admin session) | `{"count", "hosts": [...]}`, every listed server with the same fields plus `owner`, `{id, username}` or `null` |
+| `GET /api/hosts` | admin | `{"count", "hosts": [...]}`, every listed server as the lobby stores it: its browser columns, `roster`, and `player_list`, the joiners `/NWJoin.dll` recorded (`nwhandle`, `user_id`, `peer_ip`) |
 
-The public `/api/lobbies`, `/api/hosts` and the GSB name no owner. The owner pushes to
+The public `/api/lobbies` and the GSB name no owner, and no joiner's account or
+address; `GET /api/hosts`, which names both, is an admin route. The owner pushes to
 its own servers through `POST /api/me/hosts/<rid>/command` and `/stop` ("Pushing
 statements to a listed server" above).
 
@@ -1217,9 +1220,10 @@ the known addresses and the credentials generation below.
   throttling reply is witnessed). `POST /api/register` takes 10 then one every 3 min
   per address (/64).
 - **Roles and admin routes.** `players.role` is `player` (every account) or `admin`.
-  Every `/api/admin/*` route accepts the Bearer `ADMIN_API_TOKEN` (machine callers and
-  the deploy toolbox; no CSRF header) or an admin-role session (with the CSRF header on
-  a state change); a player's session gets 403 `forbidden`, no credential 401
+  Every `/api/admin/*` route, and `GET /api/hosts` and `GET /api/unknowns` (they name
+  players' and senders' addresses), accepts the Bearer `ADMIN_API_TOKEN` (machine
+  callers and the deploy toolbox; no CSRF header) or an admin-role session (with the
+  CSRF header on a state change); a player's session gets 403 `forbidden`, no credential 401
   `{"error":"unauthorized"}` with the Bearer challenge. The role is read on every
   request, so a demotion takes effect on the live session. Each admin state change it
   lets through is logged once its handler has answered, with the actor (`token`, or the

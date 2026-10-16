@@ -667,6 +667,109 @@ int test_bad_numbers_are_results() {
 	return 0;
 }
 
+// One ClientHostPlayerAdded statement, as a stock host sends it.
+NapiMessage player_added(const std::string &number, const std::string &player) {
+	NapiMessage added;
+	added.name = "ClientHostPlayerAdded";
+	auto put = [&added](const char *k, const std::string &v) {
+		added.fields.push_back({k, std::vector<uint8_t>(v.begin(), v.end())});
+	};
+	put("PlayerNumber", number); put("PlayerName", player); put("PlayerIpAndPort", "10.0.0.9:32768");
+	put("PlayerPCID", ""); put("PlayerTeam", "1"); put("PlayerType", "0");
+	return added;
+}
+
+// The roster's bounds (lobby_session.h; service policy): a PlayerNumber / VarFNum
+// outside 0..255 is not kept, a listing keeps at most MaxPlayers + 1 rows (a kept
+// slot still changes; a slot freed takes a new player), every slot while it
+// reports no MaxPlayers, and the kept lists take at most kKeptVarsMax new vars (a
+// kept var still changes). The stock lists the other cases send stay inside them.
+int test_roster_bounds() {
+	LobbySession sess;
+	sess.set_gsid_generator([](const std::string &) { return std::string("FIXED"); });
+	LobbyState state;
+	std::vector<test_novaworld::IndexedVar> players;
+	for (const auto &v : player_slot_vars(0, "Host", "10.0.0.5:32780", "", "1", "0")) players.push_back(v);
+	for (const auto &v : player_slot_vars(256, "past", "10.0.0.6:32768", "", "2", "0")) players.push_back(v);
+	for (const auto &v : player_slot_vars(-1, "negative", "10.0.0.7:32768", "", "2", "0")) players.push_back(v);
+	NapiMessage request = make_retail_host_request("880", players);
+	set_list_var(request, "HostSetup", "MaxPlayers", "2");
+	set_list_var(request, "Host", "MaxPlayers", "2"); // the one an update reads first
+	auto r = sess.dispatch(request, state, "10.0.0.1", 64500);
+	TEST_EXPECT(r.label == "ClientHostRequest");
+	TEST_EXPECT(state.max_players == 2);
+	TEST_EXPECT(state.roster.size() == 1 && state.roster[0].player_name == "Host");
+
+	r = sess.dispatch(player_added("256", "past"), state, "10.0.0.1", 64500);
+	TEST_EXPECT(r.label == "ClientHostPlayerAdded:past-roster-bounds" && state.roster.size() == 1);
+	r = sess.dispatch(player_added("-1", "negative"), state, "10.0.0.1", 64500);
+	TEST_EXPECT(r.label == "ClientHostPlayerAdded:past-roster-bounds" && state.roster.size() == 1);
+	r = sess.dispatch(player_added("255", "last"), state, "10.0.0.1", 64500);
+	TEST_EXPECT(r.label == "ClientHostPlayerAdded" && state.roster.size() == 2);
+	r = sess.dispatch(player_added("1", "bob"), state, "10.0.0.1", 64500);
+	TEST_EXPECT(r.label == "ClientHostPlayerAdded" && state.roster.size() == 3);
+	TEST_EXPECT(state.player_count == 3);
+	r = sess.dispatch(player_added("2", "carol"), state, "10.0.0.1", 64500);
+	TEST_EXPECT(r.label == "ClientHostPlayerAdded:past-roster-bounds" && state.roster.size() == 3);
+	TEST_EXPECT(state.player_count == 3);
+	r = sess.dispatch(player_added("1", "bobby"), state, "10.0.0.1", 64500);
+	TEST_EXPECT(r.label == "ClientHostPlayerAdded" && state.roster.size() == 3);
+	TEST_EXPECT(state.roster[2].slot == 1 && state.roster[2].player_name == "bobby");
+
+	// An update's PlayerList takes the same bounds: a kept slot changes, a new one
+	// past the rows and one outside the slots are not kept.
+	NapiMessage update;
+	update.name = "ClientHostUpdate";
+	std::vector<test_novaworld::IndexedVar> changed;
+	for (const auto &v : player_slot_vars(0, "Host2", "10.0.0.5:32780", "", "1", "0")) changed.push_back(v);
+	for (const auto &v : player_slot_vars(3, "dave", "10.0.0.8:32768", "", "1", "0")) changed.push_back(v);
+	for (const auto &v : player_slot_vars(300, "far", "10.0.0.8:32768", "", "1", "0")) changed.push_back(v);
+	update.children.push_back(make_indexed_var_list("PlayerList", changed));
+	sess.dispatch(update, state, "10.0.0.1", 64500);
+	TEST_EXPECT(state.roster.size() == 3 && state.roster[0].player_name == "Host2");
+	for (const auto &s : state.roster) TEST_EXPECT(s.player_name != "dave" && s.player_name != "far");
+
+	// A slot freed takes the next player.
+	NapiMessage removed;
+	removed.name = "ClientHostPlayerRemoved";
+	const std::string last = "255";
+	removed.fields.push_back({"PlayerNumber", std::vector<uint8_t>(last.begin(), last.end())});
+	sess.dispatch(removed, state, "10.0.0.1", 64500);
+	TEST_EXPECT(state.roster.size() == 2);
+	sess.dispatch(update, state, "10.0.0.1", 64500);
+	TEST_EXPECT(state.roster.size() == 3 && state.roster[2].player_name == "dave");
+
+	// A host that reports no MaxPlayers keeps one row per slot, 0..255, however many it names.
+	LobbyState open;
+	NapiMessage unsized = make_retail_host_request("881");
+	set_list_var(unsized, "HostSetup", "MaxPlayers", "0");
+	set_list_var(unsized, "Host", "MaxPlayers", "0");
+	sess.dispatch(unsized, open, "10.0.0.2", 64500);
+	TEST_EXPECT(open.max_players == 0);
+	for (int slot = 0; slot < 1000; ++slot) sess.dispatch(player_added(std::to_string(slot), "p"), open, "10.0.0.2", 64500);
+	TEST_EXPECT(open.roster.size() == 256 && open.roster.back().slot == 255);
+	std::vector<test_novaworld::IndexedVar> many;
+	for (int slot = 256; slot < 600; ++slot) many.push_back({slot, "PlayerName", "q"});
+	NapiMessage flood_players;
+	flood_players.name = "ClientHostUpdate";
+	flood_players.children.push_back(make_indexed_var_list("PlayerList", many));
+	sess.dispatch(flood_players, open, "10.0.0.2", 64500);
+	TEST_EXPECT(open.roster.size() == 256);
+
+	// The kept lists: at most kKeptVarsMax vars, a kept one still changing.
+	NapiMessage flood;
+	flood.name = "ClientHostUpdate";
+	std::vector<std::pair<std::string, std::string>> vars;
+	for (std::size_t i = 0; i < opennova::kKeptVarsMax + 10; ++i) vars.push_back({"V" + std::to_string(i), "x"});
+	vars.push_back({"ServerName", "Renamed Past Bound"});
+	flood.children.push_back(make_client_var_list("Host", vars));
+	sess.dispatch(flood, state, "10.0.0.1", 64500);
+	TEST_EXPECT(state.last_host_update["Host"].size() == opennova::kKeptVarsMax);
+	TEST_EXPECT(state.server_name == "Renamed Past Bound");
+	TEST_EXPECT(open.last_host_update["PlayerList"].size() <= opennova::kKeptVarsMax);
+	return 0;
+}
+
 int test_unknown_message_returns_no_reply_with_label() {
 	LobbySession sess;
 	LobbyState state;
@@ -697,6 +800,7 @@ int main() {
 	if (test_glsvss_request_answers_with_results_only_when_configured() != 0) return 1;
 	if (test_update_vars_is_accepted_without_reply() != 0) return 1;
 	if (test_bad_numbers_are_results() != 0) return 1;
+	if (test_roster_bounds() != 0) return 1;
 	if (test_unknown_message_returns_no_reply_with_label() != 0) return 1;
 	std::printf("OK: LobbySession dispatch (lifecycle, retail Host/PlayerList lists, RID minting, GLSVSS)\n");
 	return 0;

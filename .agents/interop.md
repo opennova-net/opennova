@@ -53,7 +53,8 @@ Godot direct-launch flags, passed after `--` (the full table is
   `.agents/retail-lan-parity.md`.
 - API polling through `/api/health`, `/api/hosts`, `/api/lobbies`,
   `/api/server-info` (the switcher's address, `ONNET_PUBLIC_HOST`), and
-  `/api/unknowns`.
+  `/api/unknowns` (`/api/hosts` and `/api/unknowns` with the Bearer
+  `ADMIN_API_TOKEN`).
 - Packet decode with `opennova-wire`.
 
 Direct LAN host/join no longer requires menu navigation: the debug hook's

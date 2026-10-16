@@ -515,9 +515,10 @@ std::string HttpListener::gsb_url(const catalog::GameRow &game) const {
 	return "http://" + public_host_ + ":" + std::to_string(impl_->app.port()) + game.gsb_route();
 }
 
-// Admin REST API: server status, dev host injection, connection dump, and the
-// user routes (admin_user_routes.h; the listed servers and their pushes are
-// host_routes.h's). Every
+// Admin REST API: server status, dev host injection, connection dump, the
+// listing dump with its joiners (/api/hosts), the unknown-message samples
+// (/api/unknowns), and the user routes (admin_user_routes.h; the listed
+// servers and their pushes are host_routes.h's). Every
 // handler opens with WebAccess::require_admin: the Bearer
 // ADMIN_API_TOKEN, or an admin-role website session (with the CSRF header on a
 // state change).
@@ -665,14 +666,139 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 		return res;
 	});
 
+	// Every listing as the lobby stores it: its columns, its roster, and the
+	// joiners /NWJoin.dll recorded (each one's handle, account id and address).
+	// Admin only, like GET /api/admin/hosts: no page of the site reads it, and
+	// the joiners' addresses are theirs. Backed by active_hosts + host_players.
+	CROW_ROUTE(app, "/api/hosts")([this](const crow::request &req) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
+		std::vector<crow::json::wvalue> entries;
+		try {
+			auto db_conn = db_pool_.acquire();
+			// One snapshot for the rows and every roster and player list read
+			// below, so no host goes out beside a roster from another commit.
+			db::ReadSnapshot snapshot(*db_conn);
+			auto rows = hostdb::list_hosts(*db_conn);
+			entries.reserve(rows.size());
+			// The host's own text comes in its code page (a stock host's cp1252)
+			// and goes out as UTF-8; the GSB keeps the host's bytes.
+			const auto text = [](const std::string &s) { return retail_text_to_utf8(s); };
+			for (const auto &h : rows) {
+				crow::json::wvalue e;
+				e["rid"]          = h.rid;
+				e["gsid"]         = text(h.gsid);
+				e["game"]         = text(h.game);
+				e["app_id"]       = text(h.app_id);
+				e["server_name"]  = text(h.server_name);
+				e["host_ip"]      = text(h.host_ip);
+				e["host_port"]    = h.host_port;
+				e["players"]      = h.player_count;
+				e["max_players"]  = h.max_players;
+				e["region"]       = text(h.region);
+				e["game_type"]    = text(h.game_type);
+				e["mission_name"] = text(h.mission_name);
+				e["country"]      = text(h.country);
+				e["exp"]          = text(h.exp);
+				e["exp_bits"]     = text(h.exp_bits);
+				e["ver1"]         = text(h.ver1);
+				e["time_left"]    = text(h.time_left);
+				e["time_of_day"]  = text(h.time_of_day);
+				e["msg"]          = text(h.msg);
+				e["mod"]          = text(h.mod);
+				e["age"]          = text(h.age);
+				e["pb_server"]    = text(h.pb_server);
+				// The host-reported PlayerList (one entry per slot).
+				std::vector<crow::json::wvalue> roster_entries;
+				try {
+					auto roster = hostdb::list_roster(*db_conn, h.rid);
+					roster_entries.reserve(roster.size());
+					for (const auto &s : roster) {
+						crow::json::wvalue re;
+						re["slot"]        = s.slot;
+						re["player_name"] = text(s.player_name);
+						re["team"]        = text(s.team);
+						re["type"]        = text(s.type);
+						roster_entries.push_back(std::move(re));
+					}
+				} catch (const db::Error &ex) {
+					// The host goes out without its roster.
+					std::fprintf(stderr, "[http] /api/hosts roster failed: %s\n", ex.what());
+				}
+				e["roster"] = std::move(roster_entries);
+				std::vector<crow::json::wvalue> player_entries;
+				try {
+					auto players = hostdb::list_players(*db_conn, h.rid);
+					player_entries.reserve(players.size());
+					for (const auto &p : players) {
+						crow::json::wvalue pe;
+						pe["nwhandle"] = text(p.nwhandle);
+						if (p.user_id) pe["user_id"] = static_cast<int64_t>(*p.user_id);
+						pe["peer_ip"]  = text(p.peer_ip);
+						player_entries.push_back(std::move(pe));
+					}
+				} catch (const db::Error &ex) {
+					// The host goes out without its player list.
+					std::fprintf(stderr, "[http] /api/hosts player list failed: %s\n", ex.what());
+				}
+				e["player_list"] = std::move(player_entries);
+				entries.push_back(std::move(e));
+			}
+		} catch (const db::Error &e) {
+			std::fprintf(stderr, "[http] /api/hosts list failed: %s\n", e.what());
+		}
+		crow::json::wvalue out;
+		out["count"] = entries.size();
+		out["hosts"] = std::move(entries);
+		std::printf("[http] /api/hosts -> %zu host(s)\n", entries.size());
+		return json_reply(200, out);
+	});
+
+	// Live unknown-message snapshot (in-memory, reflects THIS run — the
+	// durable cross-run record is the unknown_messages table). Optional
+	// ?channel= filter. Each entry carries the first captured sample as
+	// lowercase hex so reverse-engineering can eyeball the bytes. Admin only: a
+	// sample is what a client sent (the body of a request that 404'd, a gate or
+	// lobby message's plaintext) and its sample_meta the sender's address.
+	CROW_ROUTE(app, "/api/unknowns")([this](const crow::request &req) {
+		auto caller = impl_->access.require_admin(req);
+		if (caller.refusal) return std::move(*caller.refusal);
+		const std::string channel_filter =
+			req.url_params.get("channel") ? req.url_params.get("channel") : "";
+		std::vector<crow::json::wvalue> arr;
+		if (tracker_) {
+			for (const auto &s : tracker_->snapshot()) {
+				if (!channel_filter.empty() && s.channel != channel_filter) continue;
+				crow::json::wvalue e;
+				e["channel"]       = s.channel;
+				e["signature"]     = s.signature;
+				e["count"]         = static_cast<int64_t>(s.count);
+				e["first_seen_ms"] = static_cast<int64_t>(s.first_seen_ms);
+				e["last_seen_ms"]  = static_cast<int64_t>(s.last_seen_ms);
+				e["sample_meta"]   = s.sample_meta;
+				e["sample_hex"]    = strutil::bytes_to_hex(s.sample);
+				arr.push_back(std::move(e));
+			}
+		}
+		crow::json::wvalue out;
+		out["count"]    = arr.size();
+		out["unknowns"] = std::move(arr);
+		crow::response res(200);
+		res.body = out.dump();
+		res.set_header("Content-Type", "application/json");
+		return res;
+	});
+
 	// The admin user routes (admin_user_routes.h).
 	impl_->users.register_routes(app, [this](int64_t id) { forget_revoked_account(id); });
 }
 
-// Public JSON API consumed by the web portal: lobbies, stats, self-signup,
-// games, hosts, health, unknowns, and the website's session routes (the
-// logged-in account's listed servers are host_routes.h's); and the switcher's
-// server-info.
+// Public JSON API: what the web portal reads (lobbies, stats, self-signup, and
+// the website's session routes; the logged-in account's listed servers are
+// host_routes.h's), the games catalog, the health probes, and the switcher's
+// server-info. None names a joiner, an owner or a sender's address: the
+// listing dump (/api/hosts) and the unknown-message samples (/api/unknowns)
+// are admin routes.
 void HttpListener::register_public_api_routes() {
 	auto &app = impl_->app;
 
@@ -838,89 +964,6 @@ void HttpListener::register_public_api_routes() {
 		return out;
 	});
 
-	CROW_ROUTE(app, "/api/hosts")([this]() {
-		// Phase I.2/I.3: backed by active_hosts + host_players.
-		std::vector<crow::json::wvalue> entries;
-		try {
-			auto db_conn = db_pool_.acquire();
-			// One snapshot for the rows and every roster and player list read
-			// below, so no host goes out beside a roster from another commit.
-			db::ReadSnapshot snapshot(*db_conn);
-			auto rows = hostdb::list_hosts(*db_conn);
-			entries.reserve(rows.size());
-			// The host's own text comes in its code page (a stock host's cp1252)
-			// and goes out as UTF-8; the GSB keeps the host's bytes.
-			const auto text = [](const std::string &s) { return retail_text_to_utf8(s); };
-			for (const auto &h : rows) {
-				crow::json::wvalue e;
-				e["rid"]          = h.rid;
-				e["gsid"]         = text(h.gsid);
-				e["game"]         = text(h.game);
-				e["app_id"]       = text(h.app_id);
-				e["server_name"]  = text(h.server_name);
-				e["host_ip"]      = text(h.host_ip);
-				e["host_port"]    = h.host_port;
-				e["players"]      = h.player_count;
-				e["max_players"]  = h.max_players;
-				e["region"]       = text(h.region);
-				e["game_type"]    = text(h.game_type);
-				e["mission_name"] = text(h.mission_name);
-				e["country"]      = text(h.country);
-				e["exp"]          = text(h.exp);
-				e["exp_bits"]     = text(h.exp_bits);
-				e["ver1"]         = text(h.ver1);
-				e["time_left"]    = text(h.time_left);
-				e["time_of_day"]  = text(h.time_of_day);
-				e["msg"]          = text(h.msg);
-				e["mod"]          = text(h.mod);
-				e["age"]          = text(h.age);
-				e["pb_server"]    = text(h.pb_server);
-				// The host-reported PlayerList (one entry per slot).
-				std::vector<crow::json::wvalue> roster_entries;
-				try {
-					auto roster = hostdb::list_roster(*db_conn, h.rid);
-					roster_entries.reserve(roster.size());
-					for (const auto &s : roster) {
-						crow::json::wvalue re;
-						re["slot"]        = s.slot;
-						re["player_name"] = text(s.player_name);
-						re["team"]        = text(s.team);
-						re["type"]        = text(s.type);
-						roster_entries.push_back(std::move(re));
-					}
-				} catch (const db::Error &ex) {
-					// The host goes out without its roster.
-					std::fprintf(stderr, "[http] /api/hosts roster failed: %s\n", ex.what());
-				}
-				e["roster"] = std::move(roster_entries);
-				std::vector<crow::json::wvalue> player_entries;
-				try {
-					auto players = hostdb::list_players(*db_conn, h.rid);
-					player_entries.reserve(players.size());
-					for (const auto &p : players) {
-						crow::json::wvalue pe;
-						pe["nwhandle"] = text(p.nwhandle);
-						if (p.user_id) pe["user_id"] = static_cast<int64_t>(*p.user_id);
-						pe["peer_ip"]  = text(p.peer_ip);
-						player_entries.push_back(std::move(pe));
-					}
-				} catch (const db::Error &ex) {
-					// The host goes out without its player list.
-					std::fprintf(stderr, "[http] /api/hosts player list failed: %s\n", ex.what());
-				}
-				e["player_list"] = std::move(player_entries);
-				entries.push_back(std::move(e));
-			}
-		} catch (const db::Error &e) {
-			std::fprintf(stderr, "[http] /api/hosts list failed: %s\n", e.what());
-		}
-		crow::json::wvalue out;
-		out["count"] = entries.size();
-		out["hosts"] = std::move(entries);
-		std::printf("[http] /api/hosts -> %zu host(s)\n", entries.size());
-		return out;
-	});
-
 	CROW_ROUTE(app, "/api/health")([]() {
 		crow::json::wvalue out;
 		out["status"] = "ok";
@@ -955,37 +998,6 @@ void HttpListener::register_public_api_routes() {
 		out["novaworld_ip"] = host;
 		crow::response res = json_reply(200, out);
 		res.set_header("Cache-Control", "no-store");
-		return res;
-	});
-
-	// Live unknown-message snapshot (in-memory, reflects THIS run — the
-	// durable cross-run record is the unknown_messages table). Optional
-	// ?channel= filter. Each entry carries the first captured sample as
-	// lowercase hex so reverse-engineering can eyeball the bytes.
-	CROW_ROUTE(app, "/api/unknowns")([this](const crow::request &req) {
-		const std::string channel_filter =
-			req.url_params.get("channel") ? req.url_params.get("channel") : "";
-		std::vector<crow::json::wvalue> arr;
-		if (tracker_) {
-			for (const auto &s : tracker_->snapshot()) {
-				if (!channel_filter.empty() && s.channel != channel_filter) continue;
-				crow::json::wvalue e;
-				e["channel"]       = s.channel;
-				e["signature"]     = s.signature;
-				e["count"]         = static_cast<int64_t>(s.count);
-				e["first_seen_ms"] = static_cast<int64_t>(s.first_seen_ms);
-				e["last_seen_ms"]  = static_cast<int64_t>(s.last_seen_ms);
-				e["sample_meta"]   = s.sample_meta;
-				e["sample_hex"]    = strutil::bytes_to_hex(s.sample);
-				arr.push_back(std::move(e));
-			}
-		}
-		crow::json::wvalue out;
-		out["count"]    = arr.size();
-		out["unknowns"] = std::move(arr);
-		crow::response res(200);
-		res.body = out.dump();
-		res.set_header("Content-Type", "application/json");
 		return res;
 	});
 

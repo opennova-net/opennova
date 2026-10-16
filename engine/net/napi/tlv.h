@@ -64,6 +64,13 @@ struct NapiMessage {
 	std::vector<NapiMessage> children;
 };
 
+// The deepest container nesting the codec takes, the outermost container
+// being depth 1: a bound of ours, not retail's (a stock statement nests 3 or 4
+// deep). Decoding a deeper container fails as malformed input does, so a
+// hostile stream cannot recurse the decoder off its stack; encoding one fails
+// too, so what we write we read.
+inline constexpr size_t NAPI_MAX_CONTAINER_DEPTH = 16;
+
 // Compute the exact serialized size of a message tree, in bytes.
 size_t napi_message_size(const NapiMessage &msg);
 

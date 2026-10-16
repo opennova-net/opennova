@@ -240,6 +240,16 @@ int main(int argc, char **argv) {
 		kept = opennova::hostdb::find_host_by_rid(db, a.rid);
 		TEST_EXPECT(kept.has_value() && kept->player_count == 6 && kept->max_players == 24);
 		TEST_EXPECT(opennova::hostdb::list_roster(db, a.rid).size() == 4);
+
+		// The blob's names stay inside the roster's bounds (lobby_session.h): with
+		// MaxPlayers 24 a 40-name list keeps its first 25.
+		opennova::LobbyStatusBlob crowd;
+		crowd.host_key = "HK-A";
+		for (int i = 0; i < 40; ++i) crowd.player_names.push_back("p" + std::to_string(i));
+		TEST_EXPECT(opennova::hostdb::apply_status_blob(db, crowd));
+		const auto capped = opennova::hostdb::list_roster(db, a.rid);
+		TEST_EXPECT(capped.size() == 25 && capped.back().slot == 24);
+		TEST_EXPECT(capped.back().player_name == "p24");
 	}
 
 	// A re-sent ClientHostRequest updates the row in place: the player /NWJoin.dll
