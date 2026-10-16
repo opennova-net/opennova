@@ -71,4 +71,12 @@ inline uint32_t next_showhud_flags(uint32_t flags) {
 // tag; docs/interface/hud-re.md D-HUD-20].
 inline constexpr float kFriendlyTagLiftUnits = 0.25f;
 
+// The tag's anchor in mission space (z up): the entity position with its
+// per-tick eye offset (16.16) and the lift added to z.
+inline void friendly_tag_anchor(const float position[3], int32_t eye_offset_z, float out[3]) {
+	out[0] = position[0];
+	out[1] = position[1];
+	out[2] = position[2] + (static_cast<float>(eye_offset_z) / 65536.0f + kFriendlyTagLiftUnits);
+}
+
 } // namespace opennova::hud

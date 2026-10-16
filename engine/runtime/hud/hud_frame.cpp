@@ -3,6 +3,8 @@
 // [orig: HUD_RenderAllOverlays @ 0x5a8070 -> HUD_RenderOverlays @ 0x5a7bb0]
 
 #include <runtime/hud/hud_frame.h>
+
+#include <runtime/world/entity.h> // SeatType
 #include <runtime/hud/hud_game_text.h>
 #include <runtime/hud/hud_medic_cross.h>
 
@@ -15,6 +17,26 @@
 using namespace opennova::fnt;
 
 namespace opennova::hud {
+
+std::string attach_label_text(const GameTextLookup &gametext, world::SeatType seat_type,
+		const std::string &attach_text_key) {
+	using world::SeatType;
+	switch (seat_type) {
+		case SeatType::Passenger:
+			return game_text(gametext, kGameTextOverlays, "STROVER_SIT", "!sit");
+		case SeatType::Controller:
+		case SeatType::Driver:
+			return game_text(gametext, kGameTextOverlays, "STROVER_CONTROL", "!Control");
+		case SeatType::Gunner:
+			if (attach_text_key.empty())
+				return game_text(gametext, kGameTextOverlays, "STROVER_USEGUN", "!UseGun");
+			return game_text(gametext, kGameTextOverlays, attach_text_key.c_str(), "");
+		case SeatType::ArmoryPoint:
+			return game_text(gametext, kGameTextOverlays, "STROVER_USEARMORY", "!UseArmory");
+		default:
+			return std::string();
+	}
+}
 
 namespace {
 

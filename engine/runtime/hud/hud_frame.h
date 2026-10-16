@@ -30,6 +30,10 @@
 #include <runtime/hud/hud_vehicle_panel.h> // the seat-marker policy
 #include <vector>
 
+namespace opennova::world {
+enum class SeatType : uint8_t; // world/entity.h
+}
+
 namespace opennova::hud {
 
 // Texture slots the embedder registers at configure time; draw-list quads
@@ -564,6 +568,21 @@ struct HudAttachLabel {
 	bool nearest = false;
 };
 
+// The label text per seat type, from the gametext table's Overlays section
+// with the witnessed missing-string fallbacks. The Gunner label prefers the
+// weapon's attachtextid key: a PRESENT key resolves even to an empty string
+// (the parse stores GameText_GetString's result, "" on a miss, and the label
+// draws it); only an ABSENT key (an empty `attach_text_key`) falls to the
+// STROVER_USEGUN default.
+// [orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e -- STROVER_SIT "!sit"
+//  (dword_2723860) / STROVER_CONTROL "!Control" (g_HUDLabelTextControl, the
+//  ctrlx and drvrx arms @0x5a34db / @0x5a34fb) / STROVER_USEGUN "!UseGun"
+//  (dword_2723868) / STROVER_USEARMORY "!UseArmory" (dword_272386C); the USEGUN
+//  def-text pick (def+0x3A0) @0x5a350c..0x5a3544; the parse resolve @0x544d87.
+//  The STROVER_USEARMORYD delay variant rides the MP armory delay, D-HUD-14.]
+std::string attach_label_text(const GameTextLookup &gametext, world::SeatType seat_type,
+		const std::string &attach_text_key);
+
 // One projected friendly tag (D-HUD-20) [orig: HUD_DrawEntityLabel @ 0x5a39b0
 // via HUD_DrawFriendlyTagsPass @ 0x5a4480]. The presenter projects the anchor
 // (entity position + the per-tick eye offset + 0.25 u [orig: @ 0x5a3a84..
@@ -800,9 +819,10 @@ struct HudLfpPanelState {
 	int local_team = 0;
 	// The HUD frame counter the blink masks (g_HUDFrameCounter & 0x18).
 	int frame_counter = 0;
-	// The game's AAS-vs-conquest arm: the conquest arm is unmodelled and the
-	// element draws nothing under it [orig: g_GameType == 0x50010 @0x5a24a1].
-	bool conquest_mode = false;
+	// The session game type: the drawer's conquest arm (g_GameType ==
+	// 0x50010) is unmodelled and the element draws nothing under it
+	// [orig: @0x5a24a1].
+	uint32_t game_type = 0;
 	std::string under_attack_text; // Overlays/STROVER_UNDERATTACK
 	std::string ready_text;        // Overlays/STROVER_READYFORTAKEOVER
 	std::vector<HudLfpZone> zones;

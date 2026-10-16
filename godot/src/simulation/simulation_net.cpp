@@ -1034,15 +1034,8 @@ bool Simulation::send_deployment_pick(int p_param) {
 	// role's case-12 gate turns a dead permanent-death press into the 0x51
 	// convert or nothing (Role::request_deployment_pick).
 	if (!runtime_ || !kernel_) return false;
-	uint16_t wire = opennova::world::kDeployPickNone;
-	if (p_param == 65534) {
-		wire = opennova::world::kDeployPickAutoTeam;
-	} else if (p_param > 0) {
-		const opennova::world::SpawnZoneRegistry &reg = deploy_zone_registry();
-		const size_t idx = static_cast<size_t>(p_param - 1);
-		if (idx < reg.entries.size()) wire = reg.entries[idx].packed;
-	}
-	return active_role().request_deployment_pick(wire);
+	return active_role().request_deployment_pick(
+			opennova::world::deploy_pick_wire_value(p_param, deploy_zone_registry()));
 }
 
 int Simulation::get_joiner_phase() const {

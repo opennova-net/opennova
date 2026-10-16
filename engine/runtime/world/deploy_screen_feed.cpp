@@ -259,4 +259,8 @@ DeployInstructions build_deploy_instructions(
     return out;
 }
 
+const char *deploy_list_team_color_tag(int team) {
+    return team == 2 ? "<cFF2020>" : "<c4040FF>";
+}
+
 } // namespace opennova::world

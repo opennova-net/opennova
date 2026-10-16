@@ -670,4 +670,13 @@ const Entity *ZoneSystem::find_spawn_zone_for_team(uint8_t team, uint32_t game_t
     }
 }
 
+uint16_t deploy_pick_wire_value(int param, const SpawnZoneRegistry &registry) {
+    if (param == 65534) return kDeployPickAutoTeam;
+    if (param > 0) {
+        const size_t idx = static_cast<size_t>(param - 1);
+        if (idx < registry.entries.size()) return registry.entries[idx].packed;
+    }
+    return kDeployPickNone;
+}
+
 } // namespace opennova::world

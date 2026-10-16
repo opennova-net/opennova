@@ -49,44 +49,16 @@ Ref<VehiclePanelView> Simulation::get_vehicle_panel_view() const {
 	// @0x5a4fd0 draws nothing without it, see docs/interface/hud-re.md].
 	Ref<VehiclePanelView> out;
 	out.instantiate();
-	if (!kernel_->world.cached.local_player.valid()) return out;
-	const opennova::world::Entity *local =
-			kernel_->world.registry.get(kernel_->world.cached.local_player);
-	if (local == nullptr) return out;
-	const opennova::world::EntityHandle root_h =
-			opennova::world::vehicle_panel_root(kernel_->world, *local);
-	const opennova::world::Entity *root =
-			root_h.valid() ? kernel_->world.registry.get(root_h) : nullptr;
-	if (root == nullptr) return out;
-	opennova::world::VehiclePanelRoot v;
-	v.shown = true;
-	v.item_id = root->item_id + opennova::mission::kItemIdOffset;
-	out->assign(v);
+	out->assign(opennova::world::local_vehicle_panel_root(kernel_->world));
 	return out;
 }
 
 bool Simulation::fill_vehicle_panel(const DefVehicleHudBlock &p_block,
 		opennova::hud::HudVehiclePanelState &r_state) const {
-	r_state.seats.clear();
-	r_state.hull_health = 0;
-	r_state.hull_max_health = 0;
-	if (!kernel_->world.cached.local_player.valid()) return false;
-	const opennova::world::Entity *local =
-			kernel_->world.registry.get(kernel_->world.cached.local_player);
-	if (local == nullptr) return false;
-	const opennova::world::EntityHandle root_h =
-			opennova::world::vehicle_panel_root(kernel_->world, *local);
-	const opennova::world::Entity *root =
-			root_h.valid() ? kernel_->world.registry.get(root_h) : nullptr;
-	if (root == nullptr) return false;
-	// The silhouette bands on the HULL's own health, not any rider's
-	// [orig: the root's health band @0x5a50d1].
-	r_state.hull_health = root->health;
-	r_state.hull_max_health = root->health_max;
-	opennova::world::fill_vehicle_panel_seats(kernel_->world, root_h,
-			kernel_->world.cached.local_player, p_block, r_state.seats,
+	// The hull and the marker rows are the engine's (world/vehicle_panel_feed.h
+	// fill_local_vehicle_panel); a joiner's occupancy is its role's.
+	return opennova::world::fill_local_vehicle_panel(kernel_->world, p_block, r_state,
 			is_joiner() ? joiner_role_ : nullptr);
-	return true;
 }
 
 bool Simulation::fill_lfp_zones(int p_local_team,

@@ -128,6 +128,14 @@ struct SpawnZoneRegistry {
 // Registry index of a zone entity, -1 when absent [orig: SpawnZoneList_IndexOf @0x43B990].
 int spawn_zone_index_of(const SpawnZoneRegistry &registry, EntityHandle handle);
 
+// The C2S 0x2C pick a deploy-screen param asks for: 0 -> kDeployPickNone,
+// 65534 -> kDeployPickAutoTeam, else the registry's (param-1)th zone's wire
+// handle; an index that resolves no zone -> kDeployPickNone
+// [orig: Input_HandleActionBinding case 12 @0x49b0c5..0x49b17b --
+//  SpawnZoneList_GetByIndex(param-1), the unresolved fall-through to 0xFFFF
+//  @0x49b17b].
+uint16_t deploy_pick_wire_value(int param, const SpawnZoneRegistry &registry);
+
 
 // One retail spawn-wave group. The original stores eight player pointers,
 // queued_count, the zone pointer, interval/countdown, a second timer word at

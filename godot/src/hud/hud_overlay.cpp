@@ -1191,8 +1191,8 @@ void HudOverlay::set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_b
 		vp.hull_health = 0;
 		vp.hull_max_health = 0;
 	}
-	vp.shown = vp.silhouette_valid && riding;
-	if (!vp.shown) vp.seats.clear();
+	// The compiler's element tests the silhouette (the panel's gate).
+	vp.shown = riding;
 	queue_redraw();
 }
 
@@ -1222,10 +1222,8 @@ void HudOverlay::set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_te
 	// @0x434c23, see docs/interface/hud-re.md], so retail's blink is
 	// frame-rate dependent and matches this fold only at 62 fps.
 	lp.frame_counter = p_frame_counter;
-	// The conquest arm is the other branch of the same drawer and is
-	// unmodelled [orig: g_GameType == 0x50010 @0x5a24a1].
-	lp.conquest_mode = static_cast<uint32_t>(p_game_type) ==
-			opennova::game_type::kConquerAndControl;
+	// The compiler's element branches on it (the unmodelled conquest arm).
+	lp.game_type = static_cast<uint32_t>(p_game_type);
 	lp.under_attack_text =
 			opennova::to_std(String(p_strings.get("under_attack", "")));
 	lp.ready_text = opennova::to_std(String(p_strings.get("ready", "")));
@@ -1285,40 +1283,6 @@ String overlay_text(const Ref<RtxtStringFile> &p_gametext, const String &p_key,
 	return p_fallback;
 }
 
-// The label text per seat type, resolved in the gametext table's Overlays
-// section with the witnessed missing-string fallbacks. The Gunner label
-// prefers the weapon's attachtextid key: a PRESENT key resolves even to an
-// empty string (the original stores the parse-time GameText_GetString result,
-// "" on a miss, and draws it) — only an ABSENT key falls to the STROVER_USEGUN
-// default.
-// [orig: HUD_InitOverlaySystem @0x5a479c..0x5a481e — STROVER_SIT "!sit" /
-//  STROVER_CONTROL "!Control" / STROVER_USEGUN "!UseGun" / STROVER_USEARMORY
-//  "!UseArmory"; the USEGUN def-text pick @0x5a350c..0x5a3544; the parse resolve
-//  @0x544d87. The STROVER_USEARMORYD "Armory in %d Seconds" delay variant is the MP
-//  armory-delay state — deferred with it: docs/interface/hud-re.md (D-HUD-14).]
-String attach_label_text(const Ref<RtxtStringFile> &p_gametext,
-		opennova::world::SeatType p_seat_type, const std::string &p_attach_text_key) {
-	using opennova::world::SeatType;
-	switch (p_seat_type) {
-		case SeatType::Passenger: // sitex [orig: dword_2723860]
-			return overlay_text(p_gametext, "STROVER_SIT", "!sit");
-		case SeatType::Controller:
-		case SeatType::Driver:
-			// ctrlx/drvrx share the Control label [orig: g_HUDLabelTextControl @0x5a34db/0x5a34fb]
-			return overlay_text(p_gametext, "STROVER_CONTROL", "!Control");
-		case SeatType::Gunner: // UseGun [orig: def+0x3A0 else dword_2723868]
-			if (p_attach_text_key.empty()) {
-				return overlay_text(p_gametext, "STROVER_USEGUN", "!UseGun");
-			}
-			// the witnessed empty-label quirk (parse-miss stores "")
-			return overlay_text(p_gametext, opennova::to_gd(p_attach_text_key), "");
-		case SeatType::ArmoryPoint: // armory [orig: dword_272386C]
-			return overlay_text(p_gametext, "STROVER_USEARMORY", "!UseArmory");
-		default:
-			return String();
-	}
-}
-
 } // namespace
 
 void HudOverlay::set_objectives(bool p_shown, const Ref<RtxtStringFile> &p_mission_text,
@@ -1338,6 +1302,7 @@ void HudOverlay::set_attach_labels(const Transform3D &p_camera_xform,
 	state_.attach_labels.clear();
 	std::vector<opennova::world::AttachLabel> labels;
 	if (p_sim.is_valid() && p_sim->fill_attach_labels(labels) && !labels.empty()) {
+		const opennova::hud::GameTextLookup gametext = game_text_lookup(p_gametext);
 		const Viewport *viewport = get_viewport();
 		const Vector2 viewport_size =
 				viewport != nullptr ? viewport->get_visible_rect().size : Vector2();
@@ -1352,7 +1317,7 @@ void HudOverlay::set_attach_labels(const Transform3D &p_camera_xform,
 			opennova::hud::HudAttachLabel label;
 			label.screen_x = screen.x;
 			label.screen_y = screen.y;
-			label.text = opennova::to_std(attach_label_text(p_gametext, l.type, l.attach_text_key));
+			label.text = opennova::hud::attach_label_text(gametext, l.type, l.attach_text_key);
 			label.nearest = l.nearest;
 			state_.attach_labels.push_back(label);
 		}
@@ -1406,12 +1371,11 @@ void HudOverlay::set_friendly_tags(bool p_shown, const Transform3D &p_camera_xfo
 				viewport != nullptr ? viewport->get_visible_rect().size : Vector2();
 		state_.friendly_tags.reserve(tags.size());
 		for (const opennova::world::FriendlyTagSource &t : tags) {
-			// The anchor: the entity position + the eye height above its origin
-			// (16.16 -> float) + the tag lift; the anchor witness lives at the
-			// gather (friendly_tags.h).
-			Vector3 world_pos = mission_to_godot(t.position);
-			world_pos.y += static_cast<float>(t.eye_offset_z) / 65536.0f +
-					opennova::hud::kFriendlyTagLiftUnits;
+			// The anchor is the engine's (hud_config_tokens.h friendly_tag_anchor).
+			const float position[3] = {t.position.x, t.position.y, t.position.z};
+			float anchor[3];
+			opennova::hud::friendly_tag_anchor(position, t.eye_offset_z, anchor);
+			const Vector3 world_pos = mission_to_godot(anchor);
 			Vector2 screen;
 			if (!project_to_overlay(p_camera_xform, p_camera_projection, viewport_size,
 						world_pos, screen)) {

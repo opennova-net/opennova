@@ -6,6 +6,8 @@
 // HudLfpZone per list entry.
 
 #include <runtime/hud/hud_frame.h>
+
+#include <base/gameprofile/game_type.h>
 #include <runtime/hud/hud_lfp_panel.h>
 
 #include <algorithm>
@@ -26,7 +28,7 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 	if (!lp.shown || !layout_.lfp_anchor_present) return;
 	// The conquest arm (one row per marker, text per marker) is unmodelled
 	// [orig: g_GameType == 0x50010 @0x5a24a1]; nothing draws under it here.
-	if (lp.conquest_mode) return;
+	if (lp.game_type == game_type::kConquerAndControl) return;
 	if (font_.font() == nullptr) return;
 
 	// Pass 1: zones per team [orig: @0x5a24c5..0x5a24ea — team byte & 0x1F,

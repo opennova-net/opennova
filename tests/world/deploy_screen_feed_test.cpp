@@ -10,6 +10,7 @@
 #include <vector>
 
 #include <runtime/world/deploy_screen_feed.h>
+#include <runtime/world/spawn_select.h>
 
 using namespace opennova::world;
 
@@ -379,6 +380,23 @@ int main() {
 	test_status_line();
 	test_statics();
 	test_statics_text();
+	// The rows' team tag [orig: @0x553adb..0x553af1].
+	CHECK(std::string(deploy_list_team_color_tag(2)) == "<cFF2020>");
+	CHECK(std::string(deploy_list_team_color_tag(1)) == "<c4040FF>");
+	CHECK(std::string(deploy_list_team_color_tag(0)) == "<c4040FF>");
+	// The deploy pick's wire value [orig: Input_HandleActionBinding case 12
+	// @0x49b0c5..0x49b17b].
+	{
+		SpawnZoneRegistry reg;
+		EntityHandle zone;
+		zone.packed = 0x1234;
+		reg.entries.push_back(zone);
+		CHECK(deploy_pick_wire_value(0, reg) == kDeployPickNone);
+		CHECK(deploy_pick_wire_value(65534, reg) == kDeployPickAutoTeam);
+		CHECK(deploy_pick_wire_value(1, reg) == 0x1234);
+		CHECK(deploy_pick_wire_value(2, reg) == kDeployPickNone);
+		CHECK(deploy_pick_wire_value(-3, reg) == kDeployPickNone);
+	}
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);
 		return 1;

@@ -3,7 +3,9 @@
 // [orig: HUD_RenderOverlays @ 0x5a7bb0; CGameFont_MeasureText @ 0x674e70;
 //  CGameFont_DrawText @ 0x6752c0]
 
+#include <base/gameprofile/game_type.h>
 #include <runtime/hud/game_font.h>
+#include <runtime/world/entity.h> // SeatType
 #include <runtime/hud/hud_config_tokens.h>
 #include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_lfp_panel.h>
@@ -2411,7 +2413,7 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 		CHECK(std::fabs(icons[1].v0 - 0.0f) < 1e-6f, "the attack frame is a blink");
 	}
 	// The conquest arm draws nothing (unmodelled, never invented).
-	lp.conquest_mode = true;
+	lp.game_type = opennova::game_type::kConquerAndControl;
 	const HudDrawList &list_c = compiler.compile(state, 1024.0f, 768.0f);
 	size_t conquest_icons = 0;
 	for (const HudQuad &q : list_c.quads)
@@ -2938,8 +2940,40 @@ void test_seat_weapon_and_stance_transitions(const fnt_font_t *font) {
 			"whole-HUD hide suppresses the seat-specific display too");
 }
 
+// The attach-label text, the friendly-tag anchor and the round-icon divisor's
+// byte read, the binding-side facts moved into the HUD (D-13).
+void test_attach_label_text_anchor_and_round_divisor() {
+	using opennova::world::SeatType;
+	const opennova::hud::GameTextLookup none;
+	CHECK(opennova::hud::attach_label_text(none, SeatType::Passenger, "") == "!sit", "sit fallback");
+	CHECK(opennova::hud::attach_label_text(none, SeatType::Driver, "") == "!Control", "driver -> Control");
+	CHECK(opennova::hud::attach_label_text(none, SeatType::Gunner, "") == "!UseGun", "no key -> UseGun");
+	CHECK(opennova::hud::attach_label_text(none, SeatType::Gunner, "STROVER_MG").empty(),
+			"a named key the table lacks draws empty");
+	CHECK(opennova::hud::attach_label_text(none, SeatType::ArmoryPoint, "") == "!UseArmory", "armory");
+	const opennova::hud::GameTextLookup table = [](const char *section, const char *key,
+			const char *fallback) -> std::string {
+		if (std::strcmp(section, "Overlays") == 0 && std::strcmp(key, "STROVER_MG") == 0) return "Use MG";
+		if (std::strcmp(section, "Overlays") == 0 && std::strcmp(key, "STROVER_SIT") == 0) return "Sit";
+		return fallback;
+	};
+	CHECK(opennova::hud::attach_label_text(table, SeatType::Gunner, "STROVER_MG") == "Use MG", "the def key");
+	CHECK(opennova::hud::attach_label_text(table, SeatType::Passenger, "") == "Sit", "the table's sit");
+
+	const float position[3] = {1.0f, 2.0f, 3.0f};
+	float anchor[3];
+	opennova::hud::friendly_tag_anchor(position, 0x18000, anchor);
+	CHECK(anchor[0] == 1.0f && anchor[1] == 2.0f && anchor[2] == 3.0f + (1.5f + 0.25f),
+			"anchor z = position + eye + 0.25");
+
+	CHECK(opennova::hud::rounds_per_icon_from_layout(1) == 1, "divisor 1");
+	CHECK(opennova::hud::rounds_per_icon_from_layout(257) == 1, "the low byte only");
+	CHECK(opennova::hud::rounds_per_icon_from_layout(0x1FF) == 0xFF, "0x1FF -> 255");
+}
+
 int main() {
 	fnt_font_t font = test_font::uniform_test_font();
+	test_attach_label_text_anchor_and_round_divisor();
 	test_seat_weapon_and_stance_transitions(&font);
 	test_launcher_reload_keeps_ammo_flash(&font);
 	test_stance_obeys_weapon_group_declutter(&font);

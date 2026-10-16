@@ -144,6 +144,10 @@ int weapon_name_x_nudge(bool narrow_surface, int align);
 // weapons), ceil-divided by a >1 rounds-per-icon divisor, capped at 40.
 
 inline constexpr int kMaxRoundIcons = 40; // [orig: @0x599bbf]
+// The divisor as the draw reads it: the low byte of the HUDRNDGFX layout's
+// third value [orig: HUD_DrawAmmoIndicator `mov cl, byte_27235C4` @0x599ba8,
+// `movzx ecx, cl` @0x599bb6; the parse's store @0x5442fc].
+inline int rounds_per_icon_from_layout(int32_t layout_z) { return layout_z & 0xFF; }
 int round_icon_count(int clip, int reserve, int capacity, int divisor);
 
 // ---------------------------------------------------------------------------
