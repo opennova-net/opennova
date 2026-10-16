@@ -140,6 +140,9 @@ int action_code(int row);
 //  @0x4a6de7); Input_HandleActionBinding @0x49ad8d; g_BindingRowMedicReq
 //  @0x81B534 = record 217; HUD_DrawWeaponSlotBar @0x599e8c..0x599e9f]
 const ActionDef *action_for_code(int code);
+// The HUDLS slot bar's key label reads binding record 200 + the weapon
+// category (0..11) [orig: HUD_DrawWeaponSlotBar @0x599e8c..0x599e9f].
+inline constexpr int kSlotBarKeyRecordBase = 200;
 
 // Whether an action is shown in the player-facing remap table — the witnessed
 // per-entry gate (*entry & 0x20) == 0 && (*entry & 0x800) != 0, applied to the

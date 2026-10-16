@@ -463,4 +463,8 @@ void ControlsModel::_bind_methods() {
 	BIND_ENUM_CONSTANT(DEVICE_KEYBOARD);
 	BIND_ENUM_CONSTANT(DEVICE_MOUSE);
 	BIND_ENUM_CONSTANT(DEVICE_JOYSTICK);
+	BIND_CONSTANT(SLOT_BAR_KEY_RECORD_BASE);
 }
+
+static_assert(ControlsModel::SLOT_BAR_KEY_RECORD_BASE == opennova::controls::kSlotBarKeyRecordBase,
+		"SLOT_BAR_KEY_RECORD_BASE drifted from engine controls.h");

@@ -11,8 +11,8 @@ extends Node
 ##  gametext Game_InitSubsystems @0x4a6cd0; mission .bin
 ##  TextResource_LoadMissionTextBin @0x51ed90]
 
-## The HUDLS key label's binding records: 200 + the weapon category 0..11.
-const SLOT_BAR_KEY_RECORD_BASE := 200
+## The HUDLS key label's binding records: ControlsModel.SLOT_BAR_KEY_RECORD_BASE
+## (engine controls kSlotBarKeyRecordBase) + the weapon category 0..11.
 const SLOT_BAR_CATEGORY_COUNT := 12
 const HudSightsCardScript := preload("res://game/world/hud_sights_card.gd")
 
@@ -156,9 +156,6 @@ var _map_footprints_fed := false
 var _map_footprints_next_query_ticks := 0
 var _map_grid_origin_next_query_ticks := 0
 const MAP_FOOTPRINT_QUERY_INTERVAL_TICKS := 62
-# The g_GameType objective bit the Goals row reads (engine gameprofile
-# kObjectiveBit).
-const GAME_TYPE_OBJECTIVE_BIT := 0x20000
 # The F12 legend's resolved gametext (once per mission, on first open).
 var _map_legend_title := ""
 var _map_legend_labels := PackedStringArray()
@@ -325,12 +322,8 @@ func set_crosshair_spread_enabled(enabled: bool) -> void:
 		_game_hud.set_crosshair_spread_enabled(_crosshair_spread)
 
 
-# The in-game HUD over the live runtime: built lazily the first frame a mission has a
-# local player (so net spectators, which have none, never get it). Reads the witnessed
-# hudpos.def layout from the world's mounted VFS. The SIGHTS card and the
-# PlayerViewEffects post stack mount as behind-parent children of the overlay,
-# exactly the child-control stack the ported shell HUD carried.
-# [orig: HUD_RenderAllOverlays @0x5a8070]
+# The HUDLS key labels by weapon category, formatted again only when a binding
+# changed or the HUD was rebuilt.
 func _apply_slot_bar_key_labels() -> void:
 	var model: ControlsModel = ControlsBindings.model()
 	var revision := model.get_binding_revision()
@@ -340,7 +333,7 @@ func _apply_slot_bar_key_labels() -> void:
 	var key_labels := PackedStringArray()
 	for category in SLOT_BAR_CATEGORY_COUNT:
 		key_labels.append(model.display_text_for_action_code(
-				SLOT_BAR_KEY_RECORD_BASE + category))
+				ControlsModel.SLOT_BAR_KEY_RECORD_BASE + category))
 	_game_hud.set_slot_bar_key_labels(key_labels)
 
 
@@ -351,6 +344,12 @@ func get_slot_bar_key_labels_revision() -> int:
 
 ## Build the overlay if the mission has none yet (update() does it on the first
 ## frame with a local player; the GUT files build it over a staged root).
+## The in-game HUD over the live runtime: built lazily the first frame a mission
+## has a local player (so net spectators, which have none, never get it), from
+## the witnessed hudpos.def layout on the world's mounted VFS; the SIGHTS card
+## and the PlayerViewEffects post stack mount as behind-parent children of the
+## overlay, the child-control stack the ported shell HUD carried.
+## [orig: HUD_RenderAllOverlays @0x5a8070]
 func ensure_game_hud() -> void:
 	if _game_hud != null:
 		return
@@ -547,7 +546,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 				weapon.clipsize if weapon != null else -1)
 	var probe_t0 := Time.get_ticks_usec() if stats_on else 0
 	var scope_card := false
-	var fov_deg := 80.0
+	var fov_deg := float(Simulation.DEFAULT_PLAYER_FOV_H_DEG)
 	var binoculars_view_active := false
 	var binocular_range := 1
 	var nvg_mask := false
@@ -707,7 +706,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# modifier-less key or a held mouse button; engine BindingSet::fire_signed).
 	var toggle_events := _toggles.poll(rows_down,
 			hud_keys_chorded, gameplay_input_active, sim.is_mp_session(),
-			(sim.get_session_game_type() & GAME_TYPE_OBJECTIVE_BIT) != 0,
+			(sim.get_session_game_type() & NetProtocol.GAME_TYPE_OBJECTIVE_BIT) != 0,
 			not bool(sim.is_local_player_dead()), _authority(sim), _mp_session_peer(sim),
 			ControlsBindings.model().is_token_fire_signed(
 					HudToggles.row_token(HudToggles.ROW_MOUSE_SCALE)))
