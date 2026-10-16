@@ -933,30 +933,34 @@ int test_admin_routes_table(Harness &h) {
 
 	struct Route { const char *method; const char *path; const char *body; };
 	const Route routes[] = {
-		{"GET", "/api/admin/server-status", ""},
-		{"PUT", "/api/admin/server-status", "{\"maintenance_enabled\":false,\"message\":\"x\"}"},
-		{"POST", "/api/admin/hosts", "{\"rid\":4242}"},
-		{"GET", "/api/admin/hosts", ""},
-		{"GET", "/api/admin/connections", ""},
-		{"GET", "/api/hosts", ""},
-		{"GET", "/api/unknowns", ""},
-		{"GET", "/api/admin/users", ""},
-		{"POST", "/api/admin/users", "{\"username\":\"never\",\"password\":\"p\",\"pcid\":\"0badbad0\","
-		                             "\"nwhandle\":\"never\"}"},
-		{"DELETE", "/api/admin/users/999999", ""},
-		{"PUT", "/api/admin/users/999999", "{\"nwh\":\"1\"}"},
-		{"PUT", "/api/admin/users/999999/game-access",
-		 "{\"game_slug\":\"jop_2_consumer\",\"status\":\"active\",\"exp_bits\":\"3\"}"},
-		{"POST", "/api/admin/hosts/999999/command", "{\"verb\":\"Cycle\"}"},
-		{"POST", "/api/admin/hosts/999999/stop", ""},
-		{"GET", "/api/admin/cd-keys", ""},
-		{"POST", "/api/admin/cd-keys", "{\"title\":\"dfx2\",\"count\":1}"},
-		{"POST", "/api/admin/cd-keys/999999/assign", "{\"username\":\"web_table_player\"}"},
-		{"POST", "/api/admin/cd-keys/999999/revoke", ""},
-		{"POST", "/api/admin/cd-keys/999999/activations", "{\"nwpssk\":\"ABCDEFGHIJKLMNOPQRSTUVW\"}"},
-		{"GET", "/api/admin/billing", ""},
-		{"POST", "/api/admin/billing/reconcile", ""},
-		{"POST", "/api/admin/billing/link", "{\"user_id\":1,\"stripe_customer_id\":\"cus_never\"}"},
+		{ "GET", "/api/admin/server-status", "" },
+		{ "PUT", "/api/admin/server-status", "{\"maintenance_enabled\":false,\"message\":\"x\"}" },
+		{ "POST", "/api/admin/hosts", "{\"rid\":4242}" },
+		{ "GET", "/api/admin/hosts", "" },
+		{ "GET", "/api/admin/connections", "" },
+		{ "GET", "/api/hosts", "" },
+		{ "GET", "/api/unknowns", "" },
+		{ "GET", "/api/admin/users", "" },
+		{ "POST", "/api/admin/users",
+				"{\"username\":\"never\",\"password\":\"p\",\"pcid\":\"0badbad0\","
+				"\"nwhandle\":\"never\"}" },
+		{ "DELETE", "/api/admin/users/999999", "" },
+		{ "PUT", "/api/admin/users/999999", "{\"nwh\":\"1\"}" },
+		{ "PUT", "/api/admin/users/999999/game-access",
+				"{\"game_slug\":\"jop_2_consumer\",\"status\":\"active\",\"exp_bits\":\"3\"}" },
+		{ "POST", "/api/admin/hosts/999999/command", "{\"verb\":\"Cycle\"}" },
+		{ "POST", "/api/admin/hosts/999999/stop", "" },
+		{ "POST", "/api/admin/connections/999999/end", "{\"addr\":\"127.0.0.1:1\"}" },
+		{ "GET", "/api/admin/cd-keys", "" },
+		{ "POST", "/api/admin/cd-keys", "{\"title\":\"dfx2\",\"count\":1}" },
+		{ "POST", "/api/admin/cd-keys/999999/assign", "{\"username\":\"web_table_player\"}" },
+		{ "POST", "/api/admin/cd-keys/999999/revoke", "" },
+		{ "POST", "/api/admin/cd-keys/999999/activations",
+				"{\"nwpssk\":\"ABCDEFGHIJKLMNOPQRSTUVW\"}" },
+		{ "GET", "/api/admin/billing", "" },
+		{ "POST", "/api/admin/billing/reconcile", "" },
+		{ "POST", "/api/admin/billing/link",
+				"{\"user_id\":1,\"stripe_customer_id\":\"cus_never\"}" },
 	};
 	const auto users_before = nws::list_users(*h.pool.acquire()).size();
 	const auto status_before = nws::get_server_status(*h.pool.acquire());
@@ -2567,6 +2571,21 @@ public:
 	// The session's address as the service sees it.
 	std::string addr() const { return "127.0.0.1:" + std::to_string(port_); }
 
+	// The ClientHello alone: the service holds a session still signing in.
+	void hello() {
+		if (socket_.is_valid())
+			send(session_.start());
+	}
+
+	// The service ended the session (its ServerGoodBye landed), pumping up to `ms` for it.
+	bool wait_ended(int ms) {
+		pump_until(ms, [this] { return session_.disconnected_by_peer(); });
+		return session_.disconnected_by_peer();
+	}
+	const opennova::DisconnectEvent &disconnect_event() const {
+		return session_.disconnect_event();
+	}
+
 	// Verified; false on a timeout.
 	bool connect() {
 		if (!socket_.is_valid()) return false;
@@ -3276,6 +3295,91 @@ int test_admin_sessions(Harness &h) {
 	client.goodbye();
 	host.goodbye();
 	TEST_EXPECT(wait_until([&] { return !row_named(h, "Sessions Host"); }));
+	return 0;
+}
+
+// POST /api/admin/connections/<id>/end (admin-gated; the routes table pins the refusals): the body
+// names the session's address, 400 without it and 409 connection_changed for another, and an id
+// no connection holds is a 404. A signed-in session ends: its client reads the ServerGoodBye
+// keyed by its CK with the pending-disconnect record, and the session leaves the list (a second
+// end is a 404). A session still signing in leaves the list too. A hosting session is refused
+// with its listing's RID and stays listed.
+int test_admin_end_session(Harness &h) {
+	const auto end = [&h](const std::string &id, const std::string &body) {
+		return h.send("POST", "/api/admin/connections/" + id + "/end", { kJson, kBearer }, body);
+	};
+	const auto error_of = [](const net::HttpReply &reply) {
+		const auto json = crow::json::load(body_text(reply));
+		return json && json.has("error") ? str(json["error"]) : std::string("<none>");
+	};
+	const auto addr_body = [](const std::string &addr) { return "{\"addr\":\"" + addr + "\"}"; };
+	// The id the list shows beside `addr`, "" when none.
+	const auto id_at = [&h](const std::string &addr) {
+		const auto json =
+				crow::json::load(body_text(h.send("GET", "/api/admin/connections", { kBearer })));
+		std::string id;
+		if (json && json.has("connections")) {
+			for (const auto &c : json["connections"]) {
+				if (str(c["addr"]) == addr)
+					id = std::to_string(c["id"].i());
+			}
+		}
+		return id;
+	};
+
+	PushHost client(h.nw_udp.bound_port(), 0x454e4431u);
+	TEST_EXPECT(client.connect());
+	const std::string id = id_at(client.addr());
+	TEST_EXPECT(!id.empty());
+	auto reply = end(id, "nope");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400 && error_of(reply) == "invalid_json");
+	reply = end(id, "{}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400 && error_of(reply) == "missing_field");
+	reply = end(id, "{\"addr\":3}");
+	TEST_EXPECT(reply.transport_ok && reply.code == 400 && error_of(reply) == "invalid_field");
+	for (const char *none : { "999999999", "99999999999" }) {
+		reply = end(none, addr_body(client.addr()));
+		TEST_EXPECT(reply.transport_ok && reply.code == 404 && error_of(reply) == "not_found");
+	}
+	reply = end(id, addr_body("127.0.0.1:1"));
+	TEST_EXPECT(reply.transport_ok && reply.code == 409 && error_of(reply) == "connection_changed");
+
+	reply = end(id, addr_body(client.addr()));
+	if (reply.code != 202)
+		std::fprintf(stderr, "  end: %s\n", describe(reply).c_str());
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	auto json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && str(json["status"]) == "queued" && std::to_string(json["id"].i()) == id &&
+			str(json["addr"]) == client.addr());
+	TEST_EXPECT(client.wait_ended(3000));
+	TEST_EXPECT(client.disconnect_event().dc == 8 &&
+			client.disconnect_event().ddstr == "NP.C:PMP:PDESTME");
+	TEST_EXPECT(wait_until([&] { return id_at(client.addr()).empty(); }));
+	reply = end(id, addr_body(client.addr()));
+	TEST_EXPECT(reply.transport_ok && reply.code == 404);
+
+	// A session still signing in (its ClientHello alone).
+	PushHost signing_in(h.nw_udp.bound_port(), 0x454e4432u);
+	signing_in.hello();
+	std::string hello_id;
+	TEST_EXPECT(wait_until([&] { return !(hello_id = id_at(signing_in.addr())).empty(); }));
+	reply = end(hello_id, addr_body(signing_in.addr()));
+	TEST_EXPECT(reply.transport_ok && reply.code == 202);
+	TEST_EXPECT(wait_until([&] { return id_at(signing_in.addr()).empty(); }));
+
+	// A hosting session: its listing's stop ends it.
+	PushHost host(h.nw_udp.bound_port(), 0x454e4433u);
+	TEST_EXPECT(host.host("End Session Host"));
+	const auto listed = row_named(h, "End Session Host");
+	TEST_EXPECT(listed.has_value());
+	reply = end(id_at(host.addr()), addr_body(host.addr()));
+	TEST_EXPECT(reply.transport_ok && reply.code == 409 && error_of(reply) == "hosting");
+	json = crow::json::load(body_text(reply));
+	TEST_EXPECT(json && json["rid"].i() == static_cast<int64_t>(listed->rid));
+	TEST_EXPECT(!host.wait_ended(300));
+	TEST_EXPECT(row_named(h, "End Session Host").has_value());
+	host.goodbye();
+	TEST_EXPECT(wait_until([&] { return !row_named(h, "End Session Host"); }));
 	return 0;
 }
 
@@ -6768,6 +6872,7 @@ int run(Harness &h) {
 		{ "admin_host_push", test_admin_host_push },
 		{ "owner_host_push", test_owner_host_push },
 		{ "admin_sessions", test_admin_sessions },
+		{ "admin_end_session", test_admin_end_session },
 		{ "hosted_server_routes", test_hosted_server_routes },
 		{ "hosted_listing_owner", test_hosted_listing_owner },
 		{ "hosted_console_routes", test_hosted_console_routes },

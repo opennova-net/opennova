@@ -3,9 +3,10 @@
 // The admin's NovaWorld sessions view: GET /api/admin/connections, every
 // connection the ConnectionManager's registry holds (a game client's or a
 // host's NovaWorld UDP session, from its ClientHello), with who it is and the
-// server it lists from the NW UDP listener's lobby state. The HttpListener
-// owns one ConnectionRoutes over its Crow app, beside its HostRoutes (README
-// "Connection lifecycle").
+// server it lists from the NW UDP listener's lobby state, and POST
+// /api/admin/connections/<id>/end, which ends one (NwUdpListener::end_session).
+// The HttpListener owns one ConnectionRoutes over its Crow app, beside its
+// HostRoutes (README "Connection lifecycle").
 
 #include "web_access.h"
 
@@ -39,12 +40,14 @@ public:
 	ConnectionRoutes(const ConnectionRoutes &) = delete;
 	ConnectionRoutes &operator=(const ConnectionRoutes &) = delete;
 
-	// Registers the route on `app`. `manager` holds the connections and
-	// `nw_udp` (null: none) their lobby state; both must outlive the routes.
+	// Registers the two routes on `app`. `manager` holds the connections and
+	// `nw_udp` (null: none, and every end is a 503) their lobby state; both must
+	// outlive the routes.
 	void register_routes(WebApp &app, ConnectionManager &manager, NwUdpListener *nw_udp);
 
 private:
 	crow::response list(const crow::request &req);
+	crow::response end(const crow::request &req, uint64_t id);
 
 	WebAccess &access_;
 	db::ConnectionPool &pool_;

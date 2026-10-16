@@ -3,6 +3,7 @@
 #include "auth.h"
 #include "host_routes.h"
 #include "http_json.h"
+#include "loggable.h"
 #include "nw_udp_listener.h"
 
 #include <base/io/cp1252.h>
@@ -53,6 +54,9 @@ void ConnectionRoutes::register_routes(
 	nw_udp_ = nw_udp;
 	CROW_ROUTE(app, "/api/admin/connections")
 			.methods("GET"_method)([this](const crow::request &req) { return list(req); });
+	CROW_ROUTE(app, "/api/admin/connections/<uint>/end")
+			.methods("POST"_method)(
+					[this](const crow::request &req, uint64_t id) { return end(req, id); });
 }
 
 // GET /api/admin/connections — {"count", "heartbeat_timeout_ms", "connections"}:
@@ -136,6 +140,65 @@ crow::response ConnectionRoutes::list(const crow::request &req) {
 	out["heartbeat_timeout_ms"] = manager_->heartbeat_timeout_ms();
 	out["connections"] = std::move(entries);
 	return json_reply(200, out);
+}
+
+// POST /api/admin/connections/<id>/end — {"addr": "<ip:port>"}, the address the
+// admin's list showed beside the id (a client-supplied CI can be another
+// session's id once the first ends, G.7, so the pair names the session). 202
+// {"status": "queued", "id", "addr"} once the receive thread has it to end
+// (NwUdpListener::end_session); 400 invalid_json, invalid_field, or
+// missing_field without the address; 404 not_found for an id no connection
+// holds; 409 connection_changed when the id names another address now, hosting
+// (with the listing's "rid": POST /api/admin/hosts/<rid>/stop ends it) and
+// not_lobby (a game connection, not a NovaWorld session); 503 with no NW UDP
+// listener. Admin-gated like every /api/admin route; AccessMiddleware logs it
+// with its actor and status, and this line names the session.
+crow::response ConnectionRoutes::end(const crow::request &req, uint64_t id) {
+	auto caller = access_.require_admin(req);
+	if (caller.refusal)
+		return std::move(*caller.refusal);
+	auto body = JsonBody::parse(req.body);
+	if (!body)
+		return json_error(400, "invalid_json");
+	const std::optional<std::string> addr = body->text("addr");
+	if (body->wrong_type())
+		return json_error(400, "invalid_field");
+	if (!addr || addr->empty())
+		return json_error(400, "missing_field", "addr is required");
+	if (nw_udp_ == nullptr)
+		return json_error(503, "no_session_listener", "the NovaWorld UDP listener is not wired");
+	std::optional<Connection> conn;
+	if (id <= UINT32_MAX)
+		conn = manager_->registry().find(static_cast<uint32_t>(id));
+	if (!conn)
+		return json_error(404, "not_found", "no NovaWorld session has this id");
+	const std::string at = peer_addr_to_string(conn->addr);
+	if (at != *addr)
+		return json_error(409, "connection_changed", "this id names another session now");
+	uint32_t rid = 0;
+	const EndSessionResult result = nw_udp_->end_session(conn->addr, &rid);
+	std::printf("[http] admin ends NovaWorld session id=%u addr=%s identity='%s' -> %s\n", conn->id,
+			at.c_str(), loggable(conn->identity).c_str(), end_session_result_name(result));
+	switch (result) {
+		case EndSessionResult::Queued: {
+			crow::json::wvalue out;
+			out["status"] = end_session_result_name(result);
+			out["id"] = conn->id;
+			out["addr"] = at;
+			return json_reply(202, out);
+		}
+		case EndSessionResult::Hosting: {
+			crow::json::wvalue out;
+			out["error"] = end_session_result_name(result);
+			out["message"] = "the session hosts a listed server: stop the server instead";
+			out["rid"] = rid;
+			return json_reply(409, out);
+		}
+		case EndSessionResult::NotLobby:
+			break;
+	}
+	return json_error(409, end_session_result_name(EndSessionResult::NotLobby),
+			"a game connection, not a NovaWorld session");
 }
 
 } // namespace opennova::novaworld_server

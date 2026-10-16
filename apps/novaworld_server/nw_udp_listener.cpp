@@ -257,6 +257,18 @@ const char *host_push_result_name(HostPushResult result) {
 	return "unknown";
 }
 
+const char *end_session_result_name(EndSessionResult result) {
+	switch (result) {
+		case EndSessionResult::Queued:
+			return "queued";
+		case EndSessionResult::NotLobby:
+			return "not_lobby";
+		case EndSessionResult::Hosting:
+			return "hosting";
+	}
+	return "unknown";
+}
+
 NwUdpListener::NwUdpListener(ConnectionManager &manager) : manager_(manager) {}
 
 NwUdpListener::~NwUdpListener() { stop(); }
@@ -332,6 +344,7 @@ void NwUdpListener::reset_per_run_state(const char *reason) {
 		lobby_states_.clear();
 		parked_lobby_states_.clear();
 		host_pushes_.clear();
+		session_ends_.clear();
 	}
 
 	jo_peers_.clear();
@@ -546,6 +559,21 @@ HostPushResult NwUdpListener::queue_host_push(uint32_t rid, NapiMessage statemen
 	return known ? HostPushResult::NotHosted : HostPushResult::UnknownRid;
 }
 
+EndSessionResult NwUdpListener::end_session(const PeerAddr &peer, uint32_t *hosting_rid) {
+	std::lock_guard<std::mutex> lk(lobby_states_mu_);
+	if (lobby_peers_.count(peer) == 0)
+		return EndSessionResult::NotLobby;
+	const auto it = lobby_states_.find(peer);
+	if (it != lobby_states_.end() && it->second.lobby.hosting) {
+		if (hosting_rid != nullptr)
+			*hosting_rid = it->second.lobby.rid;
+		return EndSessionResult::Hosting;
+	}
+	session_ends_.push_back({ peer, it == lobby_states_.end() ? 0u : it->second.server_sk });
+	std::printf("[nwudp] END queued for %s\n", peer_addr_to_string(peer).c_str());
+	return EndSessionResult::Queued;
+}
+
 void NwUdpListener::forget_owner(int64_t user_id) {
 	std::lock_guard<std::mutex> lk(lobby_states_mu_);
 	for (auto &[peer, state] : lobby_states_) {
@@ -610,6 +638,55 @@ void NwUdpListener::drain_host_pushes(opennova::net::Socket &socket) {
 		}
 		std::printf("[nwudp] PUSH %s -> %s rid=%u\n", name.c_str(), addr.c_str(), state.lobby.rid);
 		if (push.ends_hosting) lobby_session_.end_hosting(state.lobby, "ServerStopHosting");
+	}
+}
+
+// Each ended session: the ServerGoodBye burst on a connection whose 0x42 was accepted, then the
+// drop (end_session). The drop runs after the lock is released: its on_lost erases the lobby
+// state under the same lock.
+void NwUdpListener::drain_session_ends(opennova::net::Socket &socket) {
+	std::vector<PeerAddr> ended;
+	{
+		std::lock_guard<std::mutex> lk(lobby_states_mu_);
+		if (session_ends_.empty())
+			return;
+		std::vector<SessionEnd> ends;
+		ends.swap(session_ends_);
+		for (const SessionEnd &end : ends) {
+			const std::string addr = peer_addr_to_string(end.peer);
+			const auto it = lobby_states_.find(end.peer);
+			const uint32_t sk = it == lobby_states_.end() ? 0u : it->second.server_sk;
+			if (lobby_peers_.count(end.peer) == 0 || sk != end.server_sk) {
+				std::printf("[nwudp] END %s dropped: the connection changed\n", addr.c_str());
+				continue;
+			}
+			if (it != lobby_states_.end() && it->second.lobby.hosting) {
+				std::printf("[nwudp] END %s dropped: the connection hosts now\n", addr.c_str());
+				continue;
+			}
+			std::size_t sent = 0;
+			if (it != lobby_states_.end()) {
+				const LobbyConnState &state = it->second;
+				const std::vector<uint8_t> datagram = nw_encode_outbound(
+						SESSION_OPCODE_SERVER_GOODBYE,
+						server_goodbye_to_bytes(state.client_ck,
+								make_disconnect_event(1, 8, 0, 0, "", 0, "NP.C:PMP:PDESTME")));
+				const auto to = opennova::net::NetDatagramSocket::to_endpoint(end.peer);
+				const std::size_t count = disconnect_burst_count(state.cs.recv_max_per_tick);
+				for (; sent < count; ++sent) {
+					if (opennova::net::udp_send_to(socket, to, datagram.data(), datagram.size()) <
+							0)
+						break;
+				}
+			}
+			std::printf("[nwudp] END %s: ServerGoodBye x%zu, dropped\n", addr.c_str(), sent);
+			ended.push_back(end.peer);
+		}
+	}
+	for (const PeerAddr &peer : ended) {
+		manager_.notify_logout_addr(peer);
+		// As the GOODBYE leg does, in case no on_lost handler is installed.
+		erase_lobby_state(peer, "ended");
 	}
 }
 
@@ -679,8 +756,10 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 				} while (next_pump <= now);
 			}
 			// The lobby connections' own sends between receive batches: the statements other
-			// threads queued for a hosting connection, then the send-interval leg.
+			// threads queued for a hosting connection, the sessions an admin ended, then the
+			// send-interval leg.
 			drain_host_pushes(socket.get());
+			drain_session_ends(socket.get());
 			pump_send_intervals(socket.get());
 		}
 
