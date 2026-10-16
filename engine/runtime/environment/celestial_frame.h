@@ -44,6 +44,8 @@
 #include <formats/env/env_celestial.h>
 #include <formats/threedi/threedi_ctrl_catalog.h>
 
+#include <cmath>
+
 namespace opennova::env {
 
 // One call of the water-glint leg [orig: Environment_UpdateSunGlare @ 0x5ad130, once
@@ -74,6 +76,7 @@ struct WaterGlintFrame {
 	bool visible = false;   // the accumulator saw the glint this frame
 	Vec3 point_m;           // the sampled water point (jittered once its terrain rays pass)
 	Vec3 mirrored_sun;      // the sun with its height term negated
+	Vec3 position;          // the glint model's place: camera + mirrored_sun * 128
 	int32_t upl = 0;        // the UPL_INTENSITY submit value, 16.16
 	// The glint submits whenever its brightness accumulator is non-zero,
 	// its alpha 0 included [orig: Environment_UpdateSunGlare @ 0x5ad35c..0x5ad36b ->
@@ -112,6 +115,11 @@ inline WaterGlintFrame advance_water_glint(const EnvironmentState &state,
 	// (-(camY + sunY*128), camZ - sunZ*128, camX + sunX*128), the mission ->
 	// render-float map of exactly that mirrored point]).
 	out.mirrored_sun = Vec3{sun_m.x, sun_m.y, -sun_m.z};
+	// The offset is scaled, then added, as two steps (the embedder's Vector3
+	// operators did the same).
+	const Vec3 offset{out.mirrored_sun.x * 128.0f, out.mirrored_sun.y * 128.0f,
+			out.mirrored_sun.z * 128.0f};
+	out.position = Vec3{cam_m.x + offset.x, cam_m.y + offset.y, cam_m.z + offset.z};
 	// Alpha: the view dot of the MIRRORED sun direction [orig: @ 0x5ad384
 	// negates the height term before the view transform] through the witnessed
 	// (dot^4 - 28672/65536) x brightness chain. Summed in the embedder's
@@ -123,6 +131,52 @@ inline WaterGlintFrame advance_water_glint(const EnvironmentState &state,
 			io::float_to_fp16_16(state.sun_dim_pct()));
 	out.drawn = glint.brightness != 0;
 	return out;
+}
+
+// The frame's sun veil: the screen's white quad alpha and the exposure
+// stop-down [orig: Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b0, once
+// per main scene frame after the occlusion tick, from Render_ProcessMainSceneFrame
+// @ 0x5cac4b]:
+// - nothing without the sun model (`sun_model`, the gate @ 0x5ad8b3..0x5ad8ba);
+// - the sky term, Environment_ComputeSunGlareAndFogBlend(0) (the call @ 0x5ad8cd):
+//   the view dot of the sun at the occlusion brightness (sun_veil_from_dot);
+// - when the water plane is set (@ 0x5ad8d5..0x5ad8dc), plus the water-reflected
+//   term, Environment_ComputeSunGlareAndFogBlend(1) (the call @ 0x5ad8ea), both
+//   sums clamped 192 (sun_veil_combine). Its direction is the camera's to the
+//   UNJITTERED glint point [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610
+//   — Water_ComputeReflectedSunPoint at view z 0 (the call @ 0x5ad628), the
+//   camera's offset to it normalized @ 0x5ad62d..0x5ad698] at the water glint's
+//   brightness >> 2 [@ 0x5ad6a7].
+// Mission axes (z = height). The two dots and the normalization sum their terms
+// in the embedder's (x, height, y) order, each square a step of its own, so the
+// float rounding is the one it always had; retail computes the secondary's
+// direction in 16.16 (the float port is the standing one).
+inline SunVeil sun_veil_frame(const EnvironmentState &state, bool sun_model,
+		const Vec3 &cam_m, const Vec3 &sun_m, const Vec3 &forward_m,
+		int occlusion_brightness, int glint_brightness) {
+	if (!sun_model) return SunVeil{};
+	const int sun_dim = io::float_to_fp16_16(state.sun_dim_pct());
+	const int overcast = io::float_to_fp16_16(state.overcast_blend());
+	const float view_dot = forward_m.x * sun_m.x + forward_m.z * sun_m.z + forward_m.y * sun_m.y;
+	SunVeil veil = sun_veil_from_dot(io::float_to_fp16_16(view_dot), occlusion_brightness,
+			sun_dim, overcast);
+	if (!state.has_water_height() || state.water_height() == 0.0f) return veil;
+	Vec3 point_m;
+	if (!water_glint_point(cam_m, sun_m, state.water_height(), 0.0f, point_m)) return veil;
+	const Vec3 offset{point_m.x - cam_m.x, point_m.y - cam_m.y, point_m.z - cam_m.z};
+	const float x2 = offset.x * offset.x;
+	const float height2 = offset.z * offset.z;
+	const float y2 = offset.y * offset.y;
+	const float length_squared = x2 + height2 + y2;
+	Vec3 to_glint{0.0f, 0.0f, 0.0f};
+	if (length_squared != 0.0f) {
+		const float length = std::sqrt(length_squared);
+		to_glint = Vec3{offset.x / length, offset.y / length, offset.z / length};
+	}
+	const float glint_dot =
+			forward_m.x * to_glint.x + forward_m.z * to_glint.z + forward_m.y * to_glint.y;
+	return sun_veil_combine(veil, sun_veil_from_dot(io::float_to_fp16_16(glint_dot),
+			glint_brightness >> 2, sun_dim, overcast));
 }
 
 // The CTRL register every celestial submit writes (UPL_INTENSITY).

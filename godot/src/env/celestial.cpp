@@ -543,44 +543,19 @@ void Celestial::advance_frame(double p_delta) {
 	}
 
 	// The sun-glare screen veil + exposure stop-down, once per frame after
-	// the occlusion tick [orig: Environment_ApplySunVeilAndExposureStopdown
-	// @ 0x5ad8b0 from Render_ProcessMainSceneFrame @ 0x5cac4b, gated on the
-	// sun model, see docs/env/env-tod-re.md]: dot(view_forward, sun) in 16.16 through the witnessed
-	// dot^32/dot^128 chain (env::sun_veil_from_dot), plus the water-reflected
-	// SECONDARY term at the glint brightness >> 2 when water exists, both
-	// sums clamped 192 (env::sun_veil_combine). The veil alpha global
-	// feeds the PlayerViewEffects white overlay; the stop-down is read back
-	// by the world's veil leg into Weather.
+	// the occlusion tick and the glint legs: the engine's composition
+	// (engine: runtime/environment/celestial_frame.h sun_veil_frame), at the
+	// sun model's presence, this frame's camera, the occlusion brightness and
+	// the water glint's. The veil alpha global feeds the PlayerViewEffects
+	// white overlay; the stop-down is read back by the world's veil leg into
+	// Weather.
 	sun_veil_glare_ = 0;
 	sun_veil_stopdown_ = 0;
-	if (bodies_.has("sun") && glare_occlusion_ != nullptr && cam != nullptr) {
-		const int sun_dim_fixed =
-				opennova::io::float_to_fp16_16(state.sun_dim_pct());
-		const int overcast_fixed =
-				opennova::io::float_to_fp16_16(state.overcast_blend());
-		const int view_dot_fixed = opennova::io::float_to_fp16_16(forward.dot(sun_dir));
-		opennova::env::SunVeil veil = opennova::env::sun_veil_from_dot(
-				view_dot_fixed, glare_occlusion_->get_brightness(),
-				sun_dim_fixed, overcast_fixed);
-		if (state.has_water_height() && state.water_height() != 0.0f) {
-			// The secondary reflected-sun ray: direction to the UNJITTERED
-			// glint point (view_z 0 [orig: @ 0x5ad628, see docs/env/env-tod-re.md]), brightness >> 2
-			// [orig: @ 0x5ad6a7, see docs/env/env-tod-re.md].
-			const opennova::env::Vec3 cam_m = godot_to_mission(cam_pos);
-			const opennova::env::Vec3 sun_m = godot_to_mission(sun_dir);
-			opennova::env::Vec3 point_m;
-			if (opennova::env::water_glint_point(cam_m, sun_m,
-					state.water_height(), 0.0f, point_m)) {
-				const Vector3 point_g = mission_to_godot(point_m);
-				const Vector3 to_glint = (point_g - cam_pos).normalized();
-				const int dot2 = opennova::io::float_to_fp16_16(forward.dot(to_glint));
-				const opennova::env::SunVeil secondary =
-						opennova::env::sun_veil_from_dot(dot2,
-								water_glint_.brightness >> 2, sun_dim_fixed,
-								overcast_fixed);
-				veil = opennova::env::sun_veil_combine(veil, secondary);
-			}
-		}
+	if (glare_occlusion_ != nullptr && cam != nullptr) {
+		const opennova::env::SunVeil veil = opennova::env::sun_veil_frame(state,
+				bodies_.has("sun"), godot_to_mission(cam_pos), godot_to_mission(sun_dir),
+				godot_to_mission(forward), glare_occlusion_->get_brightness(),
+				water_glint_.brightness);
 		sun_veil_glare_ = veil.glare;
 		sun_veil_stopdown_ = veil.stopdown;
 	}
@@ -912,8 +887,7 @@ void Celestial::_advance_water_glint(
 			[this](const opennova::env::Vec3 &a, const opennova::env::Vec3 &b) {
 				return _entities_clear(a, b);
 			});
-	const Vector3 mirrored = mission_to_godot(frame.mirrored_sun);
-	p_body.model->set_global_position(p_cam_pos + mirrored * 128.0f);
+	p_body.model->set_global_position(mission_to_godot(frame.position));
 	_set_body_parameter(p_body, "u_sky_anchor_camera", p_cam_pos);
 	_set_body_upl(p_body, frame.upl, 0);
 	p_body.drawn = frame.drawn;

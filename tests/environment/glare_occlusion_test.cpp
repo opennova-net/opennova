@@ -224,6 +224,94 @@ void test_the_glint_skips_the_entity_ray_behind_terrain_and_hides_behind_an_enti
 	CHECK(!frame.visible && blocking.calls.size() == 1 && glint.frame_index == 2u);
 }
 
+// --- the glint's place and the frame's sun veil ------------------------------
+
+// The embedder's composition before the engine held it, in Godot's axes (x, height, -y):
+// Vector3's operators, dot and normalized term for term (godot-cpp variant/vector3.hpp).
+struct G3 {
+	float x, y, z;
+};
+G3 to_godot(const env::Vec3 &v) {
+	return G3{v.x, v.z, -v.y};
+}
+float g_dot(const G3 &a, const G3 &b) {
+	return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+G3 g_normalized(const G3 &v) {
+	const float x2 = v.x * v.x;
+	const float y2 = v.y * v.y;
+	const float z2 = v.z * v.z;
+	const float lengthsq = x2 + y2 + z2;
+	if (lengthsq == 0.0f) return G3{0.0f, 0.0f, 0.0f};
+	const float length = std::sqrt(lengthsq);
+	return G3{v.x / length, v.y / length, v.z / length};
+}
+
+void test_the_glint_is_placed_at_the_camera_plus_the_mirrored_sun() {
+	env::Config cfg{};
+	cfg.water_height_set = true;
+	cfg.water_height = kWater;
+	env::EnvironmentState state;
+	state.set_config(&cfg, true);
+	env::WaterGlintState glint;
+	ScriptedSight terrain;
+	ScriptedSight entities;
+	const env::Vec3 cam{100.3f, -200.7f, 40.1f};
+	const env::Vec3 sun{0.13f, 0.61f, 0.78f};
+	const env::WaterGlintFrame frame = env::advance_water_glint(state, cam, sun,
+			env::Vec3{0.0f, 1.0f, 0.0f}, glint, terrain, entities);
+	// [orig: Environment_UpdateSunGlare @ 0x5ad1ba..0x5ad213]: camera + sun * 128, the height term
+	// negated; the same bits the embedder's camera + mirrored * 128 gave.
+	const G3 c = to_godot(cam);
+	const G3 m = to_godot(env::Vec3{sun.x, sun.y, -sun.z});
+	const G3 scaled{m.x * 128.0f, m.y * 128.0f, m.z * 128.0f};
+	const G3 expected{c.x + scaled.x, c.y + scaled.y, c.z + scaled.z};
+	const G3 placed = to_godot(frame.position);
+	CHECK(placed.x == expected.x && placed.y == expected.y && placed.z == expected.z);
+}
+
+void test_the_sun_veil_composes_the_sky_and_the_water_terms() {
+	env::Config cfg{};
+	cfg.water_height_set = true;
+	cfg.water_height = kWater;
+	env::EnvironmentState state;
+	state.set_config(&cfg, true);
+	const env::Vec3 cam{100.3f, -200.7f, 40.1f};
+	const env::Vec3 sun{0.13f, 0.61f, 0.78f};
+	const int sun_dim = opennova::io::float_to_fp16_16(state.sun_dim_pct());
+	const int overcast = opennova::io::float_to_fp16_16(state.overcast_blend());
+	// No sun model, no veil [orig: Environment_ApplySunVeilAndExposureStopdown @ 0x5ad8b3..0x5ad8ba].
+	const env::SunVeil none = env::sun_veil_frame(state, false, cam, sun, sun, 256, 256);
+	CHECK(none.glare == 0 && none.stopdown == 0);
+	env::Vec3 point;
+	CHECK(env::water_glint_point(cam, sun, kWater, 0.0f, point));
+	const G3 c = to_godot(cam);
+	const G3 s = to_godot(sun);
+	const G3 p = to_godot(point);
+	const G3 to_glint = g_normalized(G3{p.x - c.x, p.y - c.y, p.z - c.z});
+	// Two views: at the sun (the sky term) and at the unjittered glint point (the water term at the
+	// glint brightness >> 2 [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad628, @ 0x5ad6a7]).
+	const env::Vec3 at_glint{to_glint.x, -to_glint.z, to_glint.y};
+	for (const env::Vec3 &forward : {sun, at_glint}) {
+		const G3 f = to_godot(forward);
+		const env::SunVeil sky = env::sun_veil_from_dot(
+				opennova::io::float_to_fp16_16(g_dot(f, s)), 200, sun_dim, overcast);
+		const env::SunVeil water = env::sun_veil_from_dot(
+				opennova::io::float_to_fp16_16(g_dot(f, to_glint)), 252 >> 2, sun_dim, overcast);
+		const env::SunVeil expected = env::sun_veil_combine(sky, water);
+		const env::SunVeil veil = env::sun_veil_frame(state, true, cam, sun, forward, 200, 252);
+		CHECK(veil.glare == expected.glare && veil.stopdown == expected.stopdown);
+	}
+	const env::SunVeil facing_glint = env::sun_veil_frame(state, true, cam, sun, at_glint, 0, 252);
+	CHECK(facing_glint.glare > 0);
+	// No water plane, the sky term alone [orig: @ 0x5ad8d5..0x5ad8dc].
+	env::Config dry_cfg{};
+	env::EnvironmentState dry;
+	dry.set_config(&dry_cfg, true);
+	const env::SunVeil dry_veil = env::sun_veil_frame(dry, true, cam, sun, at_glint, 0, 252);
+	CHECK(dry_veil.glare == 0 && dry_veil.stopdown == 0);
+}
+
 // --- the entities' line of sight ---------------------------------------------
 
 world::Entity person_at(float x, int team) {
@@ -283,6 +371,8 @@ int main() {
 	test_the_sequence_feeds_the_witnessed_window_tick();
 	test_the_glint_steps_its_frame_index_then_rays_terrain_before_the_jitter();
 	test_the_glint_skips_the_entity_ray_behind_terrain_and_hides_behind_an_entity();
+	test_the_glint_is_placed_at_the_camera_plus_the_mirrored_sun();
+	test_the_sun_veil_composes_the_sky_and_the_water_terms();
 	test_the_entity_walk_skips_the_local_player_and_its_near_teammates();
 	std::printf(failures ? "GLARE OCCLUSION TEST FAILED (%d)\n" : "glare occlusion test passed\n",
 	            failures);
