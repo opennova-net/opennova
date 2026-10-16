@@ -54,9 +54,6 @@ int SoundSelector::select(uint64_t key, int member_count, int mode) {
     }
     const uint32_t count = static_cast<uint32_t>(member_count);
     switch (mode) {
-        case kFirst:
-            // Reimpl extension for deterministic authoring/preview; the engine has no such mode.
-            return 0;
         case kSequential: {
             LayerState &st = state_[key];
             if (st.seq >= count) {

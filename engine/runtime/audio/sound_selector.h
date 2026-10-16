@@ -22,11 +22,9 @@
 
 namespace opennova::audio {
 
-// Mirrors the .lwf selection flags (and SoundBank.SELECTION_* / LwfData).
-// kFirst has no engine equivalent (the engine default is kRandom); it is kept as a
-// deterministic authoring/preview mode for the editor.
+// Mirrors the .lwf selection flags (and SoundBank.SELECTION_* / LwfData): the three the
+// engine plays (selection_mode_for_flags).
 enum SelectionMode {
-    kFirst = 0,      // always the first member (reimpl extension, not engine behavior)
     kRandom = 1,     // a scaled-random member each time (the engine DEFAULT for unflagged layers)
     kSequential = 2, // members in order, wrapping (flag 0x10)
     kRandomSeq = 3,  // random anchor, then a full in-order cycle back to the anchor (flag 0x80)

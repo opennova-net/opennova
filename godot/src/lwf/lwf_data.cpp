@@ -21,7 +21,6 @@ namespace {
 // The class-constant mirrors (lwf_data.h) are pinned to their engine
 // homes here so they can never drift: selection modes to
 // opennova::audio::SelectionMode, flags to opennova::lwf::PlaylistFlags.
-static_assert(LwfData::SELECTION_FIRST == opennova::audio::kFirst);
 static_assert(LwfData::SELECTION_RANDOM == opennova::audio::kRandom);
 static_assert(LwfData::SELECTION_SEQUENTIAL == opennova::audio::kSequential);
 static_assert(LwfData::SELECTION_RANDOM_SEQ == opennova::audio::kRandomSeq);
@@ -46,8 +45,8 @@ int selection_mode_from_flags(uint32_t flags) {
 }
 
 // The flag bits a selection mode is written as: the explicit marker the authoring tools
-// write for the engine's default mode (RANDOM), the two the engine tests (lwf.h), none for
-// FIRST (an authoring/preview extension).
+// write for the engine's default mode (RANDOM), the two the engine tests (lwf.h), none for a
+// value that names no mode.
 uint32_t selection_flags(int mode) {
 	switch (mode) {
 		case LwfData::SELECTION_RANDOM: return opennova::lwf::kFlagRandom;
@@ -178,7 +177,6 @@ void LwfData::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("add_layer", "set_index"), &LwfData::add_layer);
 	ClassDB::bind_method(D_METHOD("add_member", "set_index", "layer_index"), &LwfData::add_member);
 
-	BIND_CONSTANT(SELECTION_FIRST);
 	BIND_CONSTANT(SELECTION_RANDOM);
 	BIND_CONSTANT(SELECTION_SEQUENTIAL);
 	BIND_CONSTANT(SELECTION_RANDOM_SEQ);
