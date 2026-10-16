@@ -115,9 +115,9 @@ public:
 	// The per-section interior visibility masks (the portal traversal) are
 	// apply_frame's.
 	//
-	// Re-apply the letter gates after a sim tick. `forces_indoors` is
-	// GameWorld._mission_forces_indoors, passed per call — the mission
-	// attribute is mission state and stays (test-pinned) on the world.
+	// Re-apply the letter gates after a sim tick. `forces_indoors` is the
+	// loaded mission's attribute (GameWorld::mission_forces_indoors, the
+	// kernel's mission), passed per call.
 	// Returns the passes the new letters reopen (renderer::
 	// scene_pass_gate_edges): the frame's terrain and water legs already ran
 	// under the old letters, so the caller re-runs the reopened ones.

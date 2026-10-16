@@ -845,10 +845,10 @@ private:
 	// Nodes).
 	Ref<ItemEffectDirector> item_fx_;
 	Ref<EffectLightDirector> light_director_;
-	// The mission attribute that forces the indoors accum bit every frame.
-	// Stays on the world (mission state); handed to the occlusion frame's
-	// entries as an argument. [orig: g_BmsAttribFlags & 0x10 @ 0x5ca1c8-0x5ca1cd]
-	bool mission_forces_indoors_ = false;
+	// The loaded mission's force-indoors attribute, the kernel's mission's
+	// (Simulation::mission_forces_indoors); handed to the occlusion frame's
+	// entries as an argument.
+	bool mission_forces_indoors() const;
 	// The options' object detail (set_object_polydetail) and the session's
 	// copy of it taken at each mission start (load_mission_internal), which
 	// the LOD frames and the occlusion frame's death pieces read.

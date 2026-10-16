@@ -2274,6 +2274,8 @@ public:
 	// full frame state (the occlusion A/B seam and shell cache resets use it).
 	void reset_occlusion_apply_baseline();
 	bool occlusion_water_visible() const;
+	// The loaded mission's force-indoors attribute (engine world/occlusion_camera.h).
+	bool mission_forces_indoors() const;
 	// The world's entity-update counter (native, unbound): the water noise
 	// pair's frame counter (Water::advance_frame carries the witness).
 	uint32_t entity_update_counter() const { return kernel_->world.entity_update_counter; }

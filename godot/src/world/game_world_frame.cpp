@@ -889,7 +889,7 @@ void GameWorld::append_water_mirror_overlays(SceneOverlaySubmission &r_submissio
 void GameWorld::apply_blink_frame() {
 	if (world_ready_) {
 		const opennova::renderer::ScenePassGateEdges reopened =
-				occlusion_->apply_blink_gates(mission_forces_indoors_);
+				occlusion_->apply_blink_gates(mission_forces_indoors());
 		// The water mirror's clear follows the same gates' mirror flag (the
 		// indoors letter, renderer::ScenePassGates::mirror_sky).
 		if (water_ != nullptr) {
@@ -1089,7 +1089,7 @@ void GameWorld::apply_occlusion_frame() {
 	// Terrain_RenderWorldScene @ 0x5c94f0]
 	if (world_ready_ && !frame_skip_occlusion_) {
 		occlusion_->apply_frame(image_camera(), surface_width(), render_camera_xform(),
-				mission_forces_indoors_, object_detail_);
+				mission_forces_indoors(), object_detail_);
 	}
 }
 
@@ -1209,7 +1209,7 @@ void GameWorld::render_material_frame() {
 		frames[1] = ObjectLodFrame::from_camera(inset, inset_width, object_detail_);
 		frame_count = frames[1].valid ? 2 : 1;
 		if (frame_count == 2 && world_ready_ && !frame_skip_occlusion_) {
-			occlusion_->apply_inset_frame(inset, inset_width, mission_forces_indoors_,
+			occlusion_->apply_inset_frame(inset, inset_width, mission_forces_indoors(),
 					object_detail_);
 			// The Inset pass's own terrain frame, then its foliage frame, after
 			// its own collect and after the main view's

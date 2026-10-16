@@ -494,6 +494,11 @@ bool Simulation::occlusion_water_visible() const {
 	return kernel_->occlusion.water_visible();
 }
 
+bool Simulation::mission_forces_indoors() const {
+	return kernel_ && opennova::world::mission_forces_indoors(
+			static_cast<uint32_t>(kernel_->mission.header.attrib_flags));
+}
+
 bool Simulation::local_player_indoors() const {
 	if (!kernel_) return false;
 	const opennova::world::Entity *e = kernel_->world.registry.get(kernel_->world.cached.local_player);
@@ -514,26 +519,21 @@ int Simulation::local_player_interior_item_id() const {
 	const opennova::world::Entity *player =
 			kernel_->world.registry.get(kernel_->world.cached.local_player);
 	if (player == nullptr || player->blink_hits[0] == 0) return 0;
-	const opennova::world::EntityHandle building =
-			opennova::world::EntityHandle::make(
-					2, static_cast<int32_t>(player->blink_hits[0] >> 20));
-	const opennova::world::Entity *parent = kernel_->world.registry.get(building);
+	const opennova::world::Entity *parent = kernel_->world.registry.get(
+			opennova::world::BlinkAccum::hit_owner(player->blink_hits[0]));
 	return parent == nullptr
 			? 0
 			: static_cast<int>(parent->item_id)
 					+ opennova::mission::kItemIdOffset;
 }
 
-// The pool-2 entity a packed blink hit names, as a bms_id. 0 = the hit's pool
-// slot holds no bms-identified entity (nothing to own a light).
-// [orig: Pool_GetEntryUnchecked(2, hit >> 20) @0x56c8c9, see
-// docs/render/render-lighting-re.md]
+// The building a packed blink hit names (engine BlinkAccum::hit_owner), as a
+// bms_id; 0 = the hit's pool slot holds no bms-identified entity (nothing to
+// own a light; docs/render/render-lighting-re.md).
 int Simulation::blink_hit_owner_bms_id(uint32_t p_hit) const {
-	if (!kernel_ || p_hit == 0) return 0;
-	const opennova::world::EntityHandle building =
-			opennova::world::EntityHandle::make(
-					2, opennova::world::BlinkAccum::hit_pool_entity_index(p_hit));
-	const opennova::world::Entity *parent = kernel_->world.registry.get(building);
+	if (!kernel_) return 0;
+	const opennova::world::Entity *parent =
+			kernel_->world.registry.get(opennova::world::BlinkAccum::hit_owner(p_hit));
 	return parent == nullptr ? 0 : static_cast<int>(parent->bms_id);
 }
 

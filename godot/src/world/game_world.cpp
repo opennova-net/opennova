@@ -393,6 +393,11 @@ Ref<Simulation> GameWorld::get_sim() const {
 	return runtime != nullptr ? runtime->get_sim() : Ref<Simulation>();
 }
 
+bool GameWorld::mission_forces_indoors() const {
+	const Ref<Simulation> s = get_sim();
+	return s.is_valid() && s->mission_forces_indoors();
+}
+
 Ref<WeaponDatabase> GameWorld::get_weapon_database() {
 	if (weapon_db_.is_null()) {
 		if (resource_root_.is_null()) {

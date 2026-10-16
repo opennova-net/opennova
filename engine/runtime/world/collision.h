@@ -399,6 +399,11 @@ struct BlinkAccum {
     static constexpr int32_t hit_pool_entity_index(uint32_t key) {
         return static_cast<int32_t>(key >> 20);
     }
+    // The pool-2 building a packed hit names; invalid for no hit (0)
+    // [orig: Pool_GetEntryUnchecked(2, hit >> 20) @0x56c8c9].
+    static constexpr EntityHandle hit_owner(uint32_t key) {
+        return key == 0 ? EntityHandle{} : EntityHandle::make(2, hit_pool_entity_index(key));
+    }
 };
 
 inline constexpr uint32_t kBlinkIndoorsBit = 0x2;  // accum bit -> kEntityFlagIndoors

@@ -121,7 +121,8 @@ opennova::renderer::ScenePassGateEdges OcclusionFrame::apply_blink_gates(bool p_
 	// (a camera building straddling the water plane, the window latch) ride
 	// the section-mask slice [orig: Terrain_RenderWorldScene
 	// @ 0x5c93cb / @ 0x5c95d2-0x5c95ea].
-	const bool water_off = (flags & static_cast<int>(Simulation::BLINK_WATER_OFF)) != 0;
+	const bool water_off =
+			!opennova::renderer::scene_water_visible(static_cast<uint32_t>(flags), false);
 	if (water_off != blink_water_suppressed_) {
 		blink_water_suppressed_ = water_off;
 		if (Water *w = water()) {
@@ -314,7 +315,8 @@ void OcclusionFrame::apply_frame(Camera3D *p_camera, float p_viewport_width,
 	// @ 0x29ACE40]
 	const int64_t water_apply_start = timing ? ticks_usec() : 0;
 	if (w != nullptr) {
-		w->set_visible(!blink_water_suppressed_ || s->occlusion_water_visible());
+		w->set_visible(opennova::renderer::scene_water_visible(
+				blink_letters_, s->occlusion_water_visible()));
 	}
 	if (timing) {
 		water_apply_us = ticks_usec() - water_apply_start;
