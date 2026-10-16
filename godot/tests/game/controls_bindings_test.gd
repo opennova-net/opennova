@@ -20,7 +20,7 @@ func _fresh_profiles() -> PlayerProfiles:
 	return profiles
 
 
-# The controls apply [orig: sub_563620 @0x563620 -> sub_562E60 @0x562e60]: the
+# The controls apply [orig: sub_563620 @0x563620 -> KeyBinding_ApplyProfileBindings @0x562e60]: the
 # record's table onto the live rows, the ENABLE_JOYSTICK word into the gate. A
 # fresh record carries the catalog defaults and the joystick off.
 func test_the_profile_table_and_joystick_word_reach_the_live_rows() -> void:

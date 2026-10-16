@@ -469,7 +469,7 @@ func test_shaders_decode_the_submitted_modulate2x_flags() -> void:
 # (D-HUD-51). The flat HUD's glyph runs carry the +16 UV.y flag and the map's its
 # +8 UV.x flag, each at the drawer's raw halved diffuse [orig: GameFont_LoadFromBlob
 # @0x674825 (0x651 per page); CGameFont_DrawText @0x6752c0 binds it per page run;
-# sub_580560 @0x59aeab halves the system ring's white].
+# HUD_DrawTextLeft_HalfBrightKeepAlpha @0x59aeab halves the system ring's white].
 func test_glyph_runs_draw_through_the_font_pages_modulate2x() -> void:
 	var fixture := _load_temp_layout(PackedStringArray([
 		"fonthud1_hi Gunpl22b.fnt",

@@ -63,7 +63,7 @@ uint32_t chat_dispatch_flood_color(int dispatch);
 // The input line's packed ARGB by the open dispatch: Team palette[1];
 // Global palette[3] on an MP session peer, else [0]; Red/Blue [3]; Crew the
 // auxiliary [4] (cyan); Squad the auxiliary [0] (magenta); anything else [0]
-// [orig: StdCtype_Destructor (IDB misnomer — the input-line drawer)
+// [orig: HUD_DrawChatInputLine
 // @0x5b8f41..0x5b8f71; the auxiliaries HUD_InitTeamColorTable @0x51f281 /
 // @0x51f2a9].
 uint32_t chat_input_line_color(int dispatch, bool mp_session_peer);

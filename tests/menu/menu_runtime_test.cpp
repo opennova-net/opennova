@@ -1840,7 +1840,7 @@ void test_options_screen() {
 // resetting the record's mouse and joystick words at once, and the joystick
 // rows interactive only with the joystick enabled.
 // [orig: UI_BuildKeyBindingLoadoutTable @0x559e50; UI_OptionsScreenInit
-//  @0x554ba0..0x554d6e; sub_55A710 @0x55ab5f..0x55ace5;
+//  @0x554ba0..0x554d6e; Options_HandleAcceptOrBack @0x55ab5f..0x55ace5;
 //  UI_IngameOptionsDialogEventHandler @0x554e74, @0x5550de..0x5552bc;
 //  sub_55BD90 @0x55be93..0x55beca; sub_55B010 @0x55b010]
 void test_options_profile() {

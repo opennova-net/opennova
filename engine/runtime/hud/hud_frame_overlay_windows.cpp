@@ -212,7 +212,7 @@ void HudFrameCompiler::element_objectives(const HudFrameState &state, float w, f
 	emit_label_box(x, y - 24.0f, static_cast<float>((max_w << 10) / surface_w) + x + 72.0f,
 			y + static_cast<float>(sum_h) + 48.0f, std::string(), 0xFFFFFFFFu, w, h);
 	// Both text draws halve the RGB and keep the alpha [orig:
-	// Render_DrawTextScaled @0x5d3fa0 -> sub_5D2FC0 mode 0 -> sub_580560
+	// Render_DrawTextScaled @0x5d3fa0 -> sub_5D2FC0 mode 0 -> HUD_DrawTextLeft_HalfBrightKeepAlpha
 	// @0x580560 — (c & 0xFF000000) + ((c >> 1) & 0x7F7F7F)].
 	emit_slot_text(label_font_bold_, label_scale_, state.objectives_header.c_str(),
 			sx(x + 24.0f, w), sy(y, h), half_bright_keep_alpha(a24 | 0x00FFFFFFu), 0u);
@@ -263,7 +263,7 @@ void HudFrameCompiler::element_objectives(const HudFrameState &state, float w, f
 }
 
 void HudFrameCompiler::element_briefing(const HudFrameState &state, float w, float h) {
-	// [orig: sub_5BAD00 — HUD_DrawLabelBox(ctx, 200, 40, 824, 728, null, -1)
+	// [orig: HUD_DrawBriefingPanel @0x5bad00 — HUD_DrawLabelBox(ctx, 200, 40, 824, 728, null, -1)
 	//  @0x5bad4a; the text rect (235, 75)..(789, 693) through
 	//  Viewport_ScaleToVirtualCoords @0x5bad73/@0x5bad87; HUD_DrawWrappedText
 	//  in the bold slot, alignment 0, colour -1, skipping the page's start

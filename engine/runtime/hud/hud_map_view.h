@@ -303,7 +303,7 @@ struct CommandMapWaypointAnchor {
 // of it, from the anchor down the name's device height) holds the mouse sets
 // its byte and ends the walk; the slots after it keep their bytes. The
 // device anchor divides by the menu scale into design units (truncated).
-// [orig: CMapWindow_HandleEvent @0x549da5..0x549e7b — Terrain_FixedPointToWorldFloat_Default,
+// [orig: CMapWindow_HandleEvent @0x549da5..0x549e7b — Terrain_FixedPointToWorldFloat,
 //  HUD_MeasureTextWH(name, g_HUDLabelFont[1]), sub_63B1E0 @0x63b1e0]
 void command_map_waypoint_hover(const CommandMapWaypointAnchor *anchors, bool *hover, int count,
 		int32_t mouse_x, int32_t mouse_y, float scale_x, float scale_y, int32_t close_w);

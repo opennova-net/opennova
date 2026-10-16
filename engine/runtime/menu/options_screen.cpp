@@ -143,7 +143,7 @@ void OptionsScreen::seed_profile(MenuRuntime &menu, const playersav::ProfileReco
 }
 
 // The controls words back into the record, each when its control exists
-// [orig: sub_55A710 @0x55ab5f..0x55ac09 (the front ACCEPT);
+// [orig: Options_HandleAcceptOrBack @0x55ab5f..0x55ac09 (the front ACCEPT);
 //  UI_IngameOptionsDialogEventHandler @0x5550de..0x5551b0 and
 //  @0x55526a..0x5552bc (the in-game Accept, which alone reads the auto pair)].
 void OptionsScreen::accept_words(const MenuRuntime &menu, playersav::ProfileRecord &record,
@@ -188,7 +188,7 @@ void OptionsScreen::switch_device(MenuRuntime &menu, controls::Device device) {
 // [orig: UI_IngameOptionsDialogEventHandler @0x554e40 — the Accept's record
 // writes and its copy of the screen's records @0x554e74;
 // UI_RegisterIngameCallbacks @0x555510, OPT_ACCEPT @0x555597 / OPT_CANCEL @0x5555b5,
-// ENABLE_JOYSTICK -> sub_5554B0 @0x5556bc; sub_55A710 (the front ACCEPT) @0x55ab5f..0x55ace5;
+// ENABLE_JOYSTICK -> sub_5554B0 @0x5556bc; Options_HandleAcceptOrBack (the front ACCEPT) @0x55ab5f..0x55ace5;
 // UI_RegisterOptionsCallbacks ENABLE_JOYSTICK -> sub_55B010 @0x55d780;
 // OPTIONS DEFAULTS @0x55bd90; CLEAR_KEY @0x55bfd0]
 int OptionsScreen::activate(MenuRuntime &menu, playersav::ProfileRecord *record, int id) {

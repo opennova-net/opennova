@@ -9,7 +9,7 @@
 // [orig: Config_ParseSettingsLine @ 0x550D74 (game.cfg +0x124);
 //  apply_session_settings_to_globals @ 0x551565..0x551574 (the copy's +0x18,
 //  g_SessionParticleDensity @ 0x24D2058); the Accepts write
-//  g_CfgParticleDensity @ 0x25507DC only (sub_55A710 @ 0x55A905..0x55A926,
+//  g_CfgParticleDensity @ 0x25507DC only (Options_HandleAcceptOrBack @ 0x55A905..0x55A926,
 //  UI_IngameOptionsDialogEventHandler @ 0x554F14..0x554F35)]
 
 #include <cstdint>

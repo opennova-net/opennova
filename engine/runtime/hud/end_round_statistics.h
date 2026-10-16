@@ -30,7 +30,7 @@ namespace opennova::hud {
 // Retail also sprintf's a SECOND value per row (the subgoal bonus score, the
 // damage-received sum, and the two by-others point sums) into the same stack
 // buffer WITHOUT a draw call between format and the next row — dead stores,
-// witnessed at @0x5b76ea/@0x5b77a0/@0x5b7823/@0x5b78a6 (no HUD_DrawTextLeftScaled (ex sub_580B40)/BC0
+// witnessed at @0x5b76ea/@0x5b77a0/@0x5b7823/@0x5b78a6 (no HUD_DrawTextLeftScaled/BC0
 // between them and the next label). They are not modeled.
 //
 // The SP win epilog's score screen draws the SAME four counters as four
@@ -49,7 +49,7 @@ inline constexpr int kEndRoundStatsTopRaised = 140;
 inline constexpr int kEndRoundStatsRowStart = 48;
 inline constexpr int kEndRoundStatsRowStep = 48;
 // Labels left-aligned at x 200 (HUD_DrawTextLeftScaled -> HUD_DrawTextLeft_HalfBright),
-// values RIGHT-aligned at x 620 (HUD_DrawTextRightAlignedScaled (ex sub_580BC0) ->
+// values RIGHT-aligned at x 620 (HUD_DrawTextRightAlignedScaled ->
 // HUD_DrawTextRightAligned_HalfBright) [orig: @0x5b76ad/@0x5b76d7].
 inline constexpr int kEndRoundStatsLabelX = 200;
 inline constexpr int kEndRoundStatsValueX = 620;

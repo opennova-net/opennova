@@ -825,7 +825,7 @@ void CommandMapCompiler::compile(HudMinimapInput &input, CommandMapView &cmap,
 	// in the default-rotation globals, truncated: the hover and delete-button
 	// anchors.
 	// [orig: CMapWindow_HandleEvent @0x549dd7..0x549dfa (the move) and
-	//  @0x549ba0..0x549bc4 (the render) — Terrain_FixedPointToWorldFloat_Default
+	//  @0x549ba0..0x549bc4 (the render) — Terrain_FixedPointToWorldFloat
 	//  @0x6070e0 on entity +4, _ftol2_sse on each axis]
 	const minimap_detail::MapView view =
 			minimap_detail::make_view(input, minimap_detail::effective_flags(input));

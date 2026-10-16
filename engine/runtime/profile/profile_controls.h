@@ -52,7 +52,7 @@ SessionInput ingame_accept_input(const playersav::ProfileRecord &record, const S
 // The record's binding table onto the live records: each entry's eight
 // binding fields onto the record of the row whose action code the entry's
 // row word (+4) names; a row the table does not carry keeps what it held
-// [orig: sub_562E60 @0x562e60 -> sub_562DF0 @0x562df0 (row 54 * entry+4: the
+// [orig: KeyBinding_ApplyProfileBindings @0x562e60 -> sub_562DF0 @0x562df0 (row 54 * entry+4: the
 //  flag word, +24/+26 the keys, +28/+30 their modifiers, +32 the mouse mask,
 //  +34 its modifier, +36 the joystick binding, +37 its modifier)]. The flag
 // word the original copies too is the catalog row's own on every entry the
@@ -63,11 +63,11 @@ void apply_bindings(const playersav::ProfileRecord &record, controls::BindingSet
 // The controls apply every session start runs before the mission loads, and
 // the in-game options Accept with it: the binding table onto the live records
 // and the ENABLE_JOYSTICK word into the joystick gate
-// [orig: sub_563620 @0x563620 — +1432 -> dword_24D2088 @0x563664, sub_562E60
+// [orig: sub_563620 @0x563620 — +1432 -> dword_24D2088 @0x563664, KeyBinding_ApplyProfileBindings
 //  @0x5636bf; callers SinglePlayer_StartMission @0x561bc1,
 //  UI_HandleHostSessionStart @0x556e77, the join's pre-game step sub_5693E0
 //  @0x5693ef, the NovaWorld URL host @0x54f30a; the in-game Accept's
-//  sub_562E60 @0x554e79 and its +1432 -> dword_24D2088 @0x555158..0x55515e].
+//  KeyBinding_ApplyProfileBindings @0x554e79 and its +1432 -> dword_24D2088 @0x555158..0x55515e].
 void apply_controls(const playersav::ProfileRecord &record, controls::BindingSet &live);
 
 // The Options screen's working records as its init builds them from the

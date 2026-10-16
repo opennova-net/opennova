@@ -1191,7 +1191,7 @@ func _expansion_info_bin(exp_name: String, exp_desc: String) -> PackedByteArray:
 # The remap flow edits the Options screen's own records, built from the player
 # profile's table; its ACCEPT stores them into the record, and the live
 # bindings take them at the next session start's controls apply
-# [orig: UI_BuildKeyBindingLoadoutTable @0x559e50; sub_55A710 @0x55ace5;
+# [orig: UI_BuildKeyBindingLoadoutTable @0x559e50; Options_HandleAcceptOrBack @0x55ace5;
 # sub_563620 @0x563620].
 func test_control_mapping_remap_flow() -> void:
 	# after_each restores the catalog defaults even on an early assert failure;

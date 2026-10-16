@@ -1560,7 +1560,7 @@ void test_compiler_waypoint_uses_bold_slot(const fnt_font_t *font) {
 // doubles it on the device. The untextured lines beside it keep the raw colour.
 // [orig: GameFont_LoadFromBlob @0x674825 (0x651 per page); the waypoint's
 //  HUD_DrawTextLeft_HalfBright @0x5949fc and its wireframe box @0x594b0c; the
-//  zone marker's sub_580B80 @0x598a1b with the point colour pushed @0x598a05;
+//  zone marker's HUD_DrawTextCenteredScaled @0x598a1b with the point colour pushed @0x598a05;
 //  the label box's HUD_DrawTextLeft_HalfBright @0x51f13a; the board's
 //  HUD_DrawTextAligned rows]
 void test_text_draws_the_drawers_halved_diffuse(const fnt_font_t *font) {
@@ -1956,7 +1956,7 @@ void test_compiler_scoreboard_paging(const fnt_font_t *font) {
 
 // The chat input line: a titled stdbox with the typed line, a '_' cursor
 // while bits 4..5 of the main-frame counter are set, drawn at level 3 too,
-// nothing when closed [orig: StdCtype_Destructor @0x5b8f30; the
+// nothing when closed [orig: HUD_DrawChatInputLine @0x5b8f30; the
 // `dword_A8705C & 0x30` blink @0x5b8fbb; HUD_DrawOverlayPanels @0x5c014e].
 void test_compiler_chat_input(const fnt_font_t *font) {
 	HudFrameCompiler compiler;
