@@ -1,13 +1,14 @@
 // The machine agent's protocol (apps/novaworld_common/hosted/agent_protocol.h), the
 // one opennova-hostd and the NovaWorld service both build: each message's round trip
 // through its encoder and its strict decoder (the bootstrap's hello and reply, the
-// sync's report, a listing that failed among them, and its reply, the files' bytes in
-// base64, cp1252 and NUL included), the
-// exact member names on the wire, the protocol check every decoder makes first
-// (protocol_of reads it alone), every field's shape (names, images, data sets, mount
-// paths, file names, environment names and values, the uid its slot's, the limits'
-// ranges, one container per slot and per name), the routes' paths, the container
-// names and the secret's digest. Pure functions: no listener, no docker.
+// sync's report, the reason a container never started and a listing that failed among
+// them, and its reply, the files' bytes in base64, cp1252 and NUL included, the trees each
+// container uses and their manifests), the exact member names on the wire, the protocol
+// check every decoder makes first (protocol_of reads it alone), every field's shape (names,
+// images, tree ids, URLs and file names, expansion codes, file names, environment names and
+// values, the uid its slot's, the limits' ranges, one container per slot and per name, a
+// container's trees among the reply's), the routes' paths, the container names and the
+// secret's digest. Pure functions: no listener, no docker.
 
 #include "hosted/agent_protocol.h"
 
@@ -44,9 +45,21 @@ hosted::MachineBootstrap sample_bootstrap() {
 	b.agent_secret = kSecret;
 	b.serve_image = kImage;
 	b.slots = 12;
-	b.data_sets = { { "jop_2_consumer", "/opt/game/jop_2_consumer" },
-		{ "dfx2_consumer", "/opt/game/dfx2_consumer" } };
 	return b;
+}
+
+hosted::TreeSpec sample_tree(const char *url, const char *version) {
+	hosted::TreeSpec t;
+	t.url = url;
+	t.version = version;
+	t.files = { { "resource.pff", 1073741824ull }, { "version.txt", 38 } };
+	return t;
+}
+
+// The trees sample_desired names: 7 the base, 8 the expansion.
+std::map<int64_t, hosted::TreeSpec> sample_trees() {
+	return { { 7, sample_tree("s3://opennova-backups/data/prod/trees/7/", "Joint Operations, V1.7.5.3") },
+		{ 8, sample_tree("file:///var/lib/opennova/store/trees/8/", "Escalation, V1.0") } };
 }
 
 hosted::DesiredContainer sample_desired(int slot) {
@@ -55,7 +68,9 @@ hosted::DesiredContainer sample_desired(int slot) {
 	d.slot = slot;
 	d.image = kImage;
 	d.uid = hosted::slot_uid(slot);
-	d.data_set = "jop_2_consumer";
+	d.base_tree = 7;
+	d.expansion_tree = 8;
+	d.expansion_code = "jox01";
 	d.args = { "/HOST", "server.host", "--credentials", "credentials.txt", "--master-host",
 		"203.0.113.7", "--master-gate-port", "7597", "/game", "jo" };
 	// The host file's cp1252 bytes (0xE9) and a NUL survive the trip.
@@ -139,13 +154,20 @@ int test_paths_and_names() {
 	TEST_EXPECT(!hosted::is_image_reference("") && !hosted::is_image_reference("--privileged") &&
 			!hosted::is_image_reference("a b") &&
 			!hosted::is_image_reference(std::string(256, 'a')));
-	TEST_EXPECT(hosted::is_data_set_name("jop_2_consumer") && !hosted::is_data_set_name("Jop") &&
-			!hosted::is_data_set_name("jop-2") && !hosted::is_data_set_name("") &&
-			!hosted::is_data_set_name("../etc"));
-	TEST_EXPECT(hosted::is_mount_path("/opt/game/jop_2_consumer") && hosted::is_mount_path("/x"));
-	for (const char *bad : { "", "/", "opt/game", "/opt//game", "/opt/game/", "/opt/../etc",
-				 "/opt/./game", "/opt/game,readonly", "/opt/ga me" })
-		TEST_EXPECT(!hosted::is_mount_path(bad));
+	TEST_EXPECT(hosted::is_expansion_code("jox01") && hosted::is_expansion_code("x") &&
+			hosted::is_expansion_code("abcd1234"));
+	for (const char *bad : { "", "JOX01", "jox-1", "jox_01", "abcd12345", "../x" })
+		TEST_EXPECT(!hosted::is_expansion_code(bad));
+	TEST_EXPECT(hosted::is_tree_url("s3://opennova-backups/data/prod/trees/7/") &&
+			hosted::is_tree_url("file:///var/lib/opennova/store/trees/8/") &&
+			hosted::is_tree_url("file:///C:/store/trees/8/"));
+	for (const char *bad : { "", "s3://", "file://", "file://relative", "http://x/", "s3://a b",
+				 "s3://a\tb" })
+		TEST_EXPECT(!hosted::is_tree_url(bad));
+	TEST_EXPECT(!hosted::is_tree_url("s3://" + std::string(600, 'a')));
+	TEST_EXPECT(hosted::is_tree_file_name("resource.pff") && hosted::is_tree_file_name("jox01L.pff"));
+	for (const char *bad : { "", ".", "..", "a/b", "expansion/jox01/x", "a b" })
+		TEST_EXPECT(!hosted::is_tree_file_name(bad));
 	TEST_EXPECT(hosted::is_slot_file_name("server.host") && hosted::is_slot_file_name("game.cfg"));
 	for (const char *bad : { "", ".", "..", "a/b", "a\\b", "a b" })
 		TEST_EXPECT(!hosted::is_slot_file_name(bad));
@@ -174,11 +196,11 @@ int test_hello() {
 	hello.agent_version = "abc1234";
 	const std::string json = hosted::encode_agent_hello(hello);
 	TEST_EXPECT(json.find("\"agent_version\": \"abc1234\"") != std::string::npos);
-	TEST_EXPECT(json.find("\"protocol\": 1") != std::string::npos);
+	TEST_EXPECT(json.find("\"protocol\": 2") != std::string::npos);
 	hosted::AgentHello back;
 	std::string error;
 	TEST_EXPECT(hosted::decode_agent_hello(json, back, error));
-	TEST_EXPECT(back.protocol == 1 && back.agent_version == "abc1234");
+	TEST_EXPECT(back.protocol == 2 && back.agent_version == "abc1234");
 	TEST_EXPECT(
 			!hosted::decode_agent_hello(with_member(json, "agent_version", "\"\""), back, error));
 	TEST_EXPECT(!hosted::decode_agent_hello(
@@ -192,14 +214,14 @@ int test_hello() {
 int test_bootstrap() {
 	const hosted::MachineBootstrap b = sample_bootstrap();
 	const std::string json = hosted::encode_machine_bootstrap(b);
-	for (const char *member : { "\"agent_secret\"", "\"serve_image\"", "\"slots\": 12",
-				 "\"data_sets\"", "\"/opt/game/jop_2_consumer\"" })
+	for (const char *member : { "\"agent_secret\"", "\"serve_image\"", "\"slots\": 12" })
 		TEST_EXPECT(json.find(member) != std::string::npos);
+	// The machine mounts no data set of its own any more: none is named here.
+	TEST_EXPECT(json.find("data_sets") == std::string::npos);
 	hosted::MachineBootstrap back;
 	std::string error;
 	TEST_EXPECT(hosted::decode_machine_bootstrap(json, back, error));
 	TEST_EXPECT(back.agent_secret == kSecret && back.serve_image == kImage && back.slots == 12);
-	TEST_EXPECT(back.data_sets == b.data_sets);
 
 	// Every field in its shape. The error never quotes the secret.
 	TEST_EXPECT(!hosted::decode_machine_bootstrap(
@@ -216,10 +238,9 @@ int test_bootstrap() {
 				!hosted::decode_machine_bootstrap(with_member(json, "slots", slots), back, error));
 	TEST_EXPECT(hosted::decode_machine_bootstrap(with_member(json, "slots", "32"), back, error) &&
 			back.slots == 32);
-	for (const char *sets : { "{}", "[]", "{\"jop\":\"opt/game\"}", "{\"Jop\":\"/opt/game\"}",
-				 "{\"jop\":\"/opt/../etc\"}", "{\"jop\":1}" })
-		TEST_EXPECT(!hosted::decode_machine_bootstrap(
-				with_member(json, "data_sets", sets), back, error));
+	// A reply of the protocol before this one carried the mounts: refused as an unknown member.
+	TEST_EXPECT(!hosted::decode_machine_bootstrap(
+			with_member(json, "data_sets", "{\"jop\":\"/opt/game\"}"), back, error));
 	TEST_EXPECT(
 			!hosted::decode_machine_bootstrap(without_member(json, "serve_image"), back, error));
 	TEST_EXPECT(
@@ -229,23 +250,23 @@ int test_bootstrap() {
 
 int test_protocol() {
 	const std::string json = hosted::encode_machine_bootstrap(sample_bootstrap());
-	TEST_EXPECT(hosted::protocol_of(json) == 1);
-	const std::string other = with_member(json, "protocol", "2");
-	TEST_EXPECT(hosted::protocol_of(other) == 2);
+	TEST_EXPECT(hosted::protocol_of(json) == 2);
+	const std::string other = with_member(json, "protocol", "1");
+	TEST_EXPECT(hosted::protocol_of(other) == 1);
 	TEST_EXPECT(!hosted::protocol_of("{}") && !hosted::protocol_of("[1]") &&
 			!hosted::protocol_of("nope") && !hosted::protocol_of("{\"protocol\":\"1\"}") &&
 			!hosted::protocol_of("{\"protocol\":1.5}"));
 	// Every decoder reads no further than another protocol.
 	hosted::MachineBootstrap b;
 	std::string error;
-	TEST_EXPECT(!hosted::decode_machine_bootstrap(other, b, error) && error == "protocol 2, not 1");
+	TEST_EXPECT(!hosted::decode_machine_bootstrap(other, b, error) && error == "protocol 1, not 2");
 	hosted::SyncRequest request;
 	hosted::SyncReply reply;
 	hosted::AgentHello hello;
-	TEST_EXPECT(!hosted::decode_sync_request("{\"protocol\":2}", request, error) &&
-			error == "protocol 2, not 1");
+	TEST_EXPECT(!hosted::decode_sync_request("{\"protocol\":1}", request, error) &&
+			error == "protocol 1, not 2");
 	TEST_EXPECT(!hosted::decode_sync_reply(
-			"{\"protocol\":0,\"desired\":[],\"drain\":false}", reply, error));
+			"{\"protocol\":0,\"desired\":[],\"trees\":{},\"drain\":false}", reply, error));
 	TEST_EXPECT(!hosted::decode_agent_hello("{\"agent_version\":\"x\"}", hello, error) &&
 			error == "no protocol");
 	return 0;
@@ -264,6 +285,8 @@ int test_sync_request() {
 				 "\"started_at\": 1760443200", "\"started_at\": null", "\"cpu_percent\": 12.5",
 				 "\"memory_bytes\": 123456789", "\"egress_bytes\": 9007199254740991" })
 		TEST_EXPECT(json.find(member) != std::string::npos);
+	// A container that started, runs or exited on its own carries no reason.
+	TEST_EXPECT(json.find("reason") == std::string::npos);
 	hosted::SyncRequest back;
 	std::string error;
 	TEST_EXPECT(hosted::decode_sync_request(json, back, error));
@@ -276,11 +299,44 @@ int test_sync_request() {
 		TEST_EXPECT(
 				a.oom == b.oom && a.started_at == b.started_at && a.cpu_percent == b.cpu_percent);
 		TEST_EXPECT(a.memory_bytes == b.memory_bytes && a.egress_bytes == b.egress_bytes);
+		TEST_EXPECT(b.reason.empty());
 	}
 	// No containers at all is a report too.
 	request.containers.clear();
 	TEST_EXPECT(hosted::decode_sync_request(hosted::encode_sync_request(request), back, error) &&
 			back.containers.empty());
+	// A report of the trees the machine holds (an earlier agent's) is an unknown member.
+	{
+		std::string with_trees = hosted::encode_sync_request(request);
+		with_trees.insert(with_trees.rfind('}'), ", \"trees\": []");
+		TEST_EXPECT(!hosted::decode_sync_request(with_trees, back, error));
+	}
+	// A start that failed for a reason: exited with no start, the reason riding along, a
+	// short printable line, and only there (never with a start, without an exit, or empty).
+	hosted::ContainerReport unfetched = sample_report(3, ContainerState::Exited);
+	unfetched.exit_code = 125;
+	unfetched.oom = false;
+	unfetched.started_at.reset();
+	unfetched.reason = "its data could not be fetched: aws s3 sync exited 1";
+	request.containers = { unfetched, sample_report(0, ContainerState::Running) };
+	const std::string with_reason = hosted::encode_sync_request(request);
+	TEST_EXPECT(with_reason.find("\"reason\": \"its data could not be fetched: aws s3 sync exited 1\"") !=
+			std::string::npos);
+	TEST_EXPECT(with_reason.find("\"reason\"") == with_reason.rfind("\"reason\""));
+	TEST_EXPECT(hosted::decode_sync_request(with_reason, back, error) && back.containers.size() == 2 &&
+			back.containers[0].reason == unfetched.reason && back.containers[1].reason.empty());
+	const auto reason_refused = [&](const std::string &key, const std::string &value) {
+		hosted::SyncRequest out;
+		std::string why;
+		return !hosted::decode_sync_request(
+				with_member(with_reason, key, value, "containers", 0), out, why);
+	};
+	TEST_EXPECT(reason_refused("reason", "\"\"") && reason_refused("reason", "1") &&
+			reason_refused("reason", std::string("\"") + std::string(201, 'x') + "\"") &&
+			reason_refused("reason", "\"tab\\there\""));
+	TEST_EXPECT(!reason_refused("reason", std::string("\"") + std::string(200, 'x') + "\""));
+	TEST_EXPECT(reason_refused("started_at", "1760443200") && reason_refused("exit_code", "null") &&
+			reason_refused("state", "\"running\""));
 
 	request.containers = { sample_report(0, ContainerState::Running) };
 	const std::string one = hosted::encode_sync_request(request);
@@ -334,10 +390,18 @@ int test_sync_reply() {
 	reply.desired = { sample_desired(0), sample_desired(5) };
 	reply.desired[1].files.reset(); // reported once: its files are no longer sent
 	reply.desired[1].env.clear();
+	reply.desired[1].expansion_tree.reset(); // the base game alone
+	reply.desired[1].expansion_code.clear();
+	reply.trees = sample_trees();
 	const std::string json = hosted::encode_sync_reply(reply);
 	for (const char *member : { "\"desired\"", "\"drain\": true", "\"uid\": 10001",
-				 "\"uid\": 10006", "\"data_set\": \"jop_2_consumer\"", "\"args\"", "\"files\"",
-				 "\"env\": {}", "\"cpus\": 1", "\"memory_mb\": 512", "\"pids\": 128" })
+				 "\"uid\": 10006", "\"base_tree\": 7", "\"expansion_tree\": 8",
+				 "\"expansion_tree\": null", "\"expansion_code\": \"jox01\"",
+				 "\"expansion_code\": \"\"", "\"args\"", "\"files\"", "\"env\": {}", "\"cpus\": 1",
+				 "\"memory_mb\": 512", "\"pids\": 128", "\"trees\"", "\"7\"", "\"8\"",
+				 "\"url\": \"s3://opennova-backups/data/prod/trees/7/\"",
+				 "\"version\": \"Escalation, V1.0\"", "\"name\": \"resource.pff\"",
+				 "\"size\": 1073741824" })
 		TEST_EXPECT(json.find(member) != std::string::npos);
 	// The files' bytes travel as base64, never raw.
 	TEST_EXPECT(json.find("Caf") == std::string::npos &&
@@ -350,12 +414,17 @@ int test_sync_reply() {
 		const hosted::DesiredContainer &a = reply.desired[i];
 		const hosted::DesiredContainer &b = back.desired[i];
 		TEST_EXPECT(a.name == b.name && a.slot == b.slot && a.image == b.image && a.uid == b.uid);
-		TEST_EXPECT(a.data_set == b.data_set && a.args == b.args && a.files == b.files &&
-				a.env == b.env);
+		TEST_EXPECT(a.base_tree == b.base_tree && a.expansion_tree == b.expansion_tree &&
+				a.expansion_code == b.expansion_code);
+		TEST_EXPECT(a.args == b.args && a.files == b.files && a.env == b.env);
 		TEST_EXPECT(a.cpus == b.cpus && a.memory_mb == b.memory_mb && a.pids == b.pids);
 	}
 	TEST_EXPECT(back.desired[0].files->at("credentials.txt").size() == 31);
 	TEST_EXPECT(!back.desired[1].files);
+	TEST_EXPECT(back.trees.size() == 2 && back.trees.at(7).url == reply.trees.at(7).url &&
+			back.trees.at(7).version == reply.trees.at(7).version && back.trees.at(7).files.size() == 2 &&
+			back.trees.at(7).files[0].name == "resource.pff" && back.trees.at(7).files[0].size == 1073741824ull &&
+			back.trees.at(8).files[1].size == 38);
 
 	reply.desired = { sample_desired(3) };
 	const std::string one = hosted::encode_sync_reply(reply);
@@ -366,8 +435,60 @@ int test_sync_reply() {
 	};
 	// The uid is its slot's, always: the metadata fence and the egress counters key on it.
 	TEST_EXPECT(refused("uid", "10001") && refused("uid", "0") && refused("slot", "32"));
-	TEST_EXPECT(refused("name", "\"--privileged\"") && refused("image", "\"a b\"") &&
-			refused("data_set", "\"../x\""));
+	TEST_EXPECT(refused("name", "\"--privileged\"") && refused("image", "\"a b\""));
+	// The trees: the base and the expansion among the reply's, the expansion with its code.
+	TEST_EXPECT(refused("base_tree", "0") && refused("base_tree", "9") && refused("base_tree", "\"7\""));
+	TEST_EXPECT(refused("expansion_tree", "9") && refused("expansion_tree", "0"));
+	TEST_EXPECT(refused("expansion_code", "\"\"") && refused("expansion_code", "\"JOX01\"") &&
+			refused("expansion_code", "\"../x\""));
+	TEST_EXPECT(!hosted::decode_sync_reply(with_member(one, "expansion_tree", "null", "desired", 0), back, error));
+	{
+		hosted::SyncReply base_only = reply;
+		base_only.desired[0].expansion_tree.reset();
+		base_only.desired[0].expansion_code.clear();
+		TEST_EXPECT(hosted::decode_sync_reply(hosted::encode_sync_reply(base_only), back, error) &&
+				!back.desired[0].expansion_tree && back.desired[0].expansion_code.empty());
+		base_only.trees.erase(8); // a tree no container uses may be left out
+		TEST_EXPECT(hosted::decode_sync_reply(hosted::encode_sync_reply(base_only), back, error));
+		base_only.trees.erase(7); // the base's cannot
+		TEST_EXPECT(!hosted::decode_sync_reply(hosted::encode_sync_reply(base_only), back, error));
+	}
+	// A tree's shapes: the key an id, the URL a store's, the version a line, the files 1..64
+	// with their sizes, no two of one name; a digest (the manifest before this one carried
+	// one) is an unknown member.
+	const auto tree_refused = [&](const std::string &key, const std::string &value) {
+		io::JsonValue v;
+		std::string why;
+		if (!io::json_parse(one, v, why))
+			return false;
+		io::JsonValue replacement;
+		if (!io::json_parse(value, replacement, why))
+			return false;
+		v.get("trees")->get("7")->set(key, replacement);
+		hosted::SyncReply out;
+		return !hosted::decode_sync_reply(io::json_write(v), out, why);
+	};
+	TEST_EXPECT(tree_refused("url", "\"http://x/\"") && tree_refused("url", "\"\"") &&
+			tree_refused("version", "\"a\\nb\"") && tree_refused("files", "[]") &&
+			tree_refused("files", "{}") && tree_refused("extra", "1"));
+	TEST_EXPECT(tree_refused("files", "[{\"name\":\"../x\",\"size\":1}]"));
+	TEST_EXPECT(tree_refused("files", "[{\"name\":\"a.pff\",\"size\":-1}]"));
+	TEST_EXPECT(tree_refused("files", "[{\"name\":\"a.pff\",\"size\":1,\"sha256\":\"" + std::string(64, 'a') + "\"}]"));
+	TEST_EXPECT(tree_refused("files", "[{\"name\":\"a.pff\",\"size\":1},{\"name\":\"a.pff\",\"size\":2}]"));
+	TEST_EXPECT(!tree_refused("files", "[{\"name\":\"a.pff\",\"size\":1},{\"name\":\"b.pff\",\"size\":0}]"));
+	{
+		io::JsonValue v;
+		std::string why;
+		TEST_EXPECT(io::json_parse(one, v, why));
+		io::JsonValue *trees = v.get("trees");
+		trees->set("07", trees->get("7") ? *trees->get("7") : io::JsonValue());
+		TEST_EXPECT(!hosted::decode_sync_reply(io::json_write(v), back, error));
+		io::JsonValue w;
+		TEST_EXPECT(io::json_parse(one, w, why));
+		w.get("trees")->set("x", *w.get("trees")->get("7"));
+		TEST_EXPECT(!hosted::decode_sync_reply(io::json_write(w), back, error));
+	}
+	TEST_EXPECT(!hosted::decode_sync_reply(without_member(one, "trees"), back, error));
 	TEST_EXPECT(refused("args", "[\"\"]") && refused("args", "[\"a\\u0000b\"]") &&
 			refused("args", "\"/HOST\""));
 	TEST_EXPECT(refused("files", "{\"../etc/passwd\":\"eA==\"}") &&
@@ -400,11 +521,12 @@ int test_sync_reply() {
 	reply.desired = { sample_desired(3), sample_desired(4) };
 	reply.desired[1].name = reply.desired[0].name;
 	TEST_EXPECT(!hosted::decode_sync_reply(hosted::encode_sync_reply(reply), back, error));
-	// Nothing desired: the machine runs nothing.
+	// Nothing desired: the machine runs nothing, and needs no tree.
 	reply.desired.clear();
+	reply.trees.clear();
 	reply.drain = false;
 	TEST_EXPECT(hosted::decode_sync_reply(hosted::encode_sync_reply(reply), back, error) &&
-			back.desired.empty() && !back.drain);
+			back.desired.empty() && back.trees.empty() && !back.drain);
 	return 0;
 }
 

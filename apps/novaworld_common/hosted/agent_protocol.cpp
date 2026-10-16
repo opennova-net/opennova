@@ -16,7 +16,7 @@ using io::JsonValue;
 namespace {
 
 constexpr size_t kMaxReportedContainers = 4 * kMaxSlots;
-constexpr size_t kMaxDataSets = 32;
+constexpr double kMaxTreeId = 9007199254740991.0; // 2^53 - 1, what a JSON number carries whole
 constexpr size_t kMaxArgBytes = 1024;
 constexpr size_t kMaxEnvValueBytes = 4096;
 constexpr size_t kSecretMinChars = 32;
@@ -185,8 +185,8 @@ bool read_report(const JsonValue &v, ContainerReport &out, std::string &error) {
 	if (!v.is_object())
 		return fail(error, "a container is no object");
 	if (!io::json_members_known(v,
-				{ "name", "slot", "state", "exit_code", "oom", "started_at", "cpu_percent",
-						"memory_bytes", "egress_bytes" },
+				{ "name", "slot", "state", "exit_code", "oom", "started_at", "reason",
+						"cpu_percent", "memory_bytes", "egress_bytes" },
 				"container", error))
 		return false;
 	if (!read_string(v, "name", out.name, error))
@@ -210,6 +210,17 @@ bool read_report(const JsonValue &v, ContainerReport &out, std::string &error) {
 		return false;
 	if (!read_optional_whole(v, "started_at", 0, io::kJsonSafeWholeMax, out.started_at, error))
 		return false;
+	// Why it never started: only with an exit code and no start.
+	out.reason.clear();
+	if (const JsonValue *reason = v.get("reason")) {
+		if (!reason->is_string() || reason->string.empty() ||
+				reason->string.size() > kMaxContainerReasonBytes ||
+				!is_printable_ascii(reason->string))
+			return fail(error, "a container's reason is not a short line");
+		if (out.state != ContainerState::Exited || !out.exit_code || out.started_at)
+			return fail(error, "a container's reason comes with an exit and no start alone");
+		out.reason = reason->string;
+	}
 	const JsonValue *cpu = v.get("cpu_percent");
 	if (!cpu || !cpu->is_number() || !(cpu->number >= 0.0 && cpu->number <= 100.0 * kMaxCpus))
 		return fail(error, "cpu_percent is no percentage");
@@ -266,12 +277,47 @@ bool read_env(const JsonValue &v, std::map<std::string, std::string> &out, std::
 	return true;
 }
 
+bool read_tree_spec(const JsonValue &v, TreeSpec &out, std::string &error) {
+	if (!v.is_object())
+		return fail(error, "a tree is no object");
+	if (!io::json_members_known(v, { "url", "version", "files" }, "tree", error))
+		return false;
+	if (!read_string(v, "url", out.url, error))
+		return false;
+	if (!is_tree_url(out.url))
+		return fail(error, "a tree's url is no store URL");
+	const JsonValue *version = v.get("version");
+	if (!version || !version->is_string() || version->string.size() > 128 ||
+			!is_printable_ascii(version->string))
+		return fail(error, "a tree's version is not a short line");
+	out.version = version->string;
+	const JsonValue *files = v.get("files");
+	if (!files || !files->is_array() || files->array.empty() || files->array.size() > kMaxTreeFiles)
+		return fail(error, "a tree's files is no list of 1..64 files");
+	out.files.clear();
+	std::set<std::string> names;
+	for (const JsonValue &entry : files->array) {
+		if (!entry.is_object() ||
+				!io::json_members_known(entry, { "name", "size" }, "tree file", error))
+			return entry.is_object() ? false : fail(error, "a tree file is no object");
+		TreeFileSpec file;
+		if (!read_string(entry, "name", file.name, error))
+			return false;
+		if (!is_tree_file_name(file.name) || !names.insert(file.name).second)
+			return fail(error, "a tree file's name is no file name, or is listed twice");
+		if (!read_count(entry, "size", file.size, error))
+			return false;
+		out.files.push_back(std::move(file));
+	}
+	return true;
+}
+
 bool read_desired(const JsonValue &v, DesiredContainer &out, std::string &error) {
 	if (!v.is_object())
 		return fail(error, "a desired container is no object");
 	if (!io::json_members_known(v,
-				{ "name", "slot", "image", "uid", "data_set", "args", "files", "env", "cpus",
-						"memory_mb", "pids" },
+				{ "name", "slot", "image", "uid", "base_tree", "expansion_tree", "expansion_code",
+						"args", "files", "env", "cpus", "memory_mb", "pids" },
 				"desired container", error))
 		return false;
 	if (!read_string(v, "name", out.name, error))
@@ -291,10 +337,17 @@ bool read_desired(const JsonValue &v, DesiredContainer &out, std::string &error)
 	out.uid = static_cast<uint32_t>(whole);
 	if (out.uid != slot_uid(out.slot))
 		return fail(error, "a desired container's uid is not its slot's");
-	if (!read_string(v, "data_set", out.data_set, error))
+	if (!read_whole(v, "base_tree", 1, kMaxTreeId, whole, error))
 		return false;
-	if (!is_data_set_name(out.data_set))
-		return fail(error, "a desired container's data set is no data set name");
+	out.base_tree = whole;
+	if (!read_optional_whole(v, "expansion_tree", 1, kMaxTreeId, out.expansion_tree, error))
+		return false;
+	if (!read_string(v, "expansion_code", out.expansion_code, error))
+		return false;
+	if (out.expansion_tree.has_value() != !out.expansion_code.empty())
+		return fail(error, "a desired container's expansion tree and code come together");
+	if (!out.expansion_code.empty() && !is_expansion_code(out.expansion_code))
+		return fail(error, "a desired container's expansion code is not one");
 	const JsonValue *args = v.get("args");
 	if (!args || !read_args(*args, out.args, error))
 		return args ? false : fail(error, "no args");
@@ -353,29 +406,21 @@ bool is_image_reference(std::string_view image) {
 	});
 }
 
-bool is_data_set_name(std::string_view name) {
-	if (name.empty() || name.size() > 64)
-		return false;
-	return all_of(name,
-			[](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_'; });
+bool is_tree_file_name(std::string_view name) {
+	return is_slot_file_name(name);
 }
 
-bool is_mount_path(std::string_view path) {
-	if (path.size() < 2 || path.size() > 255 || path[0] != '/')
+bool is_expansion_code(std::string_view code) {
+	return !code.empty() && code.size() <= kMaxExpansionCodeChars &&
+			all_of(code, [](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'); });
+}
+
+bool is_tree_url(std::string_view url) {
+	if (url.empty() || url.size() > kMaxTreeUrlBytes || !is_printable_ascii(url) ||
+			url.find(' ') != std::string_view::npos)
 		return false;
-	if (!all_of(path,
-				[](char c) { return is_alnum(c) || c == '.' || c == '/' || c == '_' || c == '-'; }))
-		return false;
-	// Every part a name: no empty part (no "//", no trailing '/'), no "." or "..".
-	size_t start = 1;
-	while (start <= path.size()) {
-		const size_t end = std::min(path.find('/', start), path.size());
-		const std::string_view part = path.substr(start, end - start);
-		if (part.empty() || part == "." || part == "..")
-			return false;
-		start = end + 1;
-	}
-	return true;
+	return (url.rfind("s3://", 0) == 0 && url.size() > 5) ||
+			(url.rfind("file:///", 0) == 0 && url.size() > 8);
 }
 
 bool is_slot_file_name(std::string_view name) {
@@ -465,10 +510,6 @@ std::string encode_machine_bootstrap(const MachineBootstrap &bootstrap) {
 	v.set("agent_secret", io::json_string(bootstrap.agent_secret));
 	v.set("serve_image", io::json_string(bootstrap.serve_image));
 	v.set("slots", json_int(bootstrap.slots));
-	JsonValue data_sets = JsonValue::make_object();
-	for (const auto &entry : bootstrap.data_sets)
-		data_sets.set(entry.first, io::json_string(entry.second));
-	v.set("data_sets", std::move(data_sets));
 	return io::json_write(v);
 }
 
@@ -477,8 +518,7 @@ bool decode_machine_bootstrap(std::string_view json, MachineBootstrap &out, std:
 	if (!parse_object(json, v, error) || !read_protocol(v, out.protocol, error))
 		return false;
 	if (!io::json_members_known(v,
-				{ "protocol", "agent_secret", "serve_image", "slots", "data_sets" }, "bootstrap",
-				error))
+				{ "protocol", "agent_secret", "serve_image", "slots" }, "bootstrap", error))
 		return false;
 	if (!read_string(v, "agent_secret", out.agent_secret, error))
 		return false;
@@ -492,18 +532,6 @@ bool decode_machine_bootstrap(std::string_view json, MachineBootstrap &out, std:
 	if (!read_whole(v, "slots", 1, kMaxSlots, slots, error))
 		return false;
 	out.slots = static_cast<int>(slots);
-	const JsonValue *data_sets = v.get("data_sets");
-	if (!data_sets || !data_sets->is_object() || data_sets->object.empty() ||
-			data_sets->object.size() > kMaxDataSets)
-		return fail(error, "data_sets is no map of 1..32 data sets");
-	out.data_sets.clear();
-	for (const io::JsonMember &member : data_sets->object) {
-		if (!is_data_set_name(member.key))
-			return fail(error, "a data set's name is not one");
-		if (!member.value.is_string() || !is_mount_path(member.value.string))
-			return fail(error, "a data set's mount path is no absolute path");
-		out.data_sets[member.key] = member.value.string;
-	}
 	return true;
 }
 
@@ -522,14 +550,16 @@ std::string encode_sync_request(const SyncRequest &request) {
 		entry.set("exit_code", c.exit_code ? json_int(*c.exit_code) : JsonValue::make_null());
 		entry.set("oom", JsonValue::make_bool(c.oom));
 		entry.set("started_at", c.started_at ? json_int(*c.started_at) : JsonValue::make_null());
+		// Present only on a container that never started, with why.
+		if (!c.reason.empty())
+			entry.set("reason", io::json_string(c.reason));
 		entry.set("cpu_percent", io::json_number(c.cpu_percent));
 		entry.set("memory_bytes", io::json_number(static_cast<double>(c.memory_bytes)));
 		entry.set("egress_bytes", io::json_number(static_cast<double>(c.egress_bytes)));
 		containers.push(std::move(entry));
 	}
 	v.set("containers", std::move(containers));
-	// Present only when it is so, so an agent that lists its containers sends
-	// what a service of before the member reads.
+	// Present only when it is so.
 	if (request.listing_failed)
 		v.set("listing_failed", JsonValue::make_bool(true));
 	return io::json_write(v);
@@ -579,7 +609,9 @@ std::string encode_sync_reply(const SyncReply &reply) {
 		entry.set("slot", json_int(d.slot));
 		entry.set("image", io::json_string(d.image));
 		entry.set("uid", json_int(d.uid));
-		entry.set("data_set", io::json_string(d.data_set));
+		entry.set("base_tree", json_int(d.base_tree));
+		entry.set("expansion_tree", d.expansion_tree ? json_int(*d.expansion_tree) : JsonValue::make_null());
+		entry.set("expansion_code", io::json_string(d.expansion_code));
 		entry.set("args", io::json_string_array(d.args));
 		if (d.files) {
 			JsonValue files = JsonValue::make_object();
@@ -600,6 +632,22 @@ std::string encode_sync_reply(const SyncReply &reply) {
 		desired.push(std::move(entry));
 	}
 	v.set("desired", std::move(desired));
+	JsonValue trees = JsonValue::make_object();
+	for (const auto &[id, spec] : reply.trees) {
+		JsonValue entry = JsonValue::make_object();
+		entry.set("url", io::json_string(spec.url));
+		entry.set("version", io::json_string(spec.version));
+		JsonValue files = JsonValue::make_array();
+		for (const TreeFileSpec &f : spec.files) {
+			JsonValue file = JsonValue::make_object();
+			file.set("name", io::json_string(f.name));
+			file.set("size", io::json_number(static_cast<double>(f.size)));
+			files.push(std::move(file));
+		}
+		entry.set("files", std::move(files));
+		trees.set(std::to_string(id), std::move(entry));
+	}
+	v.set("trees", std::move(trees));
 	return io::json_write(v);
 }
 
@@ -607,7 +655,7 @@ bool decode_sync_reply(std::string_view json, SyncReply &out, std::string &error
 	JsonValue v;
 	if (!parse_object(json, v, error) || !read_protocol(v, out.protocol, error))
 		return false;
-	if (!io::json_members_known(v, { "protocol", "desired", "drain" }, "sync reply", error))
+	if (!io::json_members_known(v, { "protocol", "desired", "trees", "drain" }, "sync reply", error))
 		return false;
 	if (!read_bool(v, "drain", out.drain, error))
 		return false;
@@ -626,6 +674,30 @@ bool decode_sync_reply(std::string_view json, SyncReply &out, std::string &error
 		if (!slots.insert(d.slot).second)
 			return fail(error, "two desired containers share a slot");
 		out.desired.push_back(std::move(d));
+	}
+	const JsonValue *trees = v.get("trees");
+	if (!trees || !trees->is_object() || trees->object.size() > kMaxReplyTrees)
+		return fail(error, "trees is no map of at most 32 trees");
+	out.trees.clear();
+	for (const io::JsonMember &member : trees->object) {
+		int64_t id = 0;
+		if (member.key.empty() || member.key.size() > 16 ||
+				!all_of(member.key, [](char c) { return c >= '0' && c <= '9'; }) ||
+				member.key.front() == '0')
+			return fail(error, "a tree's key is no tree id");
+		for (const char c : member.key)
+			id = id * 10 + (c - '0');
+		if (id < 1 || static_cast<double>(id) > kMaxTreeId)
+			return fail(error, "a tree's key is no tree id");
+		TreeSpec spec;
+		if (!read_tree_spec(member.value, spec, error))
+			return false;
+		out.trees[id] = std::move(spec);
+	}
+	for (const DesiredContainer &d : out.desired) {
+		if (out.trees.count(d.base_tree) == 0 ||
+				(d.expansion_tree && out.trees.count(*d.expansion_tree) == 0))
+			return fail(error, "a desired container names a tree the reply does not carry");
 	}
 	return true;
 }
