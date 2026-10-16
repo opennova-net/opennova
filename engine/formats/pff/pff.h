@@ -214,7 +214,8 @@ int pff_write_archive_streamed(const char *path, PffFormat format,
    stored bytes as the source holds them (an encrypted one still encrypted, its flags, time and
    checksum kept, pff_extract_raw), the entry at `index` (into source->entries) `size` bytes of
    `data`, stored plain (flags 0) under its own name, time and checksum; every entry in the source's
-   payload order (pff_payload_order), in the source's format (pff_format_for_magic of its magic). The write is pff_write_archive_streamed's (temp file, then the
+   payload order (pff_payload_order), in the source's format (pff_format_for_magic of its magic);
+   a stock packer's dead-space records (pff_entry_is_dead_space) left out. The write is pff_write_archive_streamed's (temp file, then the
    rename onto `path`), so `path` is never the source's own file while it is open. Returns
    PFF_WRITE_OK or a PFF_WRITE_ERR_* code (PFF_WRITE_ERR_IO for an index past the entries). */
 int pff_rewrite_with_entry(const PffArchive *source, uint32_t index, const uint8_t *data, uint32_t size,
@@ -238,12 +239,21 @@ struct PffEditEntry {
    pack.exe; written compact, where pack.exe keeps a removed or replaced entry's bytes as a
    `<DEAD SPACE>` record and refills such holes). Every other entry keeps its stored bytes,
    flags, time and checksum and its place in the archive's payload order (pff_payload_order);
-   the adds follow them. An archive that does not exist is created (PFF3, ADR 0008). Nothing is written when no entry would change (an add identical to the
+   the adds follow them; a stock packer's dead-space records are left out when it is written
+   (pff_entry_is_dead_space; they alone never make it written). An archive that does not exist is created (PFF3, ADR 0008). Nothing is written when no entry would change (an add identical to the
    entry it replaces, a remove of a missing name), and `*rewritten` says whether it was. The new
    archive is written beside `path` ("<path>.new") and then put in its place. Returns PFF_WRITE_OK
    or a PFF_WRITE_ERR_* code. */
 int pff_apply_edits(const char *path, const std::vector<PffEditEntry> &adds,
 		const std::vector<std::string> &removes, bool *rewritten);
+
+/* A record the retail packer keeps for the bytes an edit removed or replaced: its flags word
+   exactly 1, which the packer's directory walk names `<DEAD SPACE>`
+   [orig: sub_4040E0 @ 0x4041B0..0x4041C4 (pack.exe)]. A stock-updated archive holds one per
+   removed or replaced entry (updater-re §14), so several share the name. pff_apply_edits,
+   pff_write_archive_again and pff_rewrite_with_entry leave them out (the archive written
+   compact, D-UPD-1); the game never reads one by name. */
+bool pff_entry_is_dead_space(const PffEntry &entry);
 
 /* pff_apply_edits with nothing to apply, written whatever: the archive at `path` written to
    `out_path` (never `path` itself) with every entry kept as an edit keeps it. A retail archive

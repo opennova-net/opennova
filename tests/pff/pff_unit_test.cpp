@@ -543,6 +543,65 @@ static int test_write_retail_layout(void) {
     return 1;
 }
 
+/* A stock-updated archive holds a `<DEAD SPACE>` record (flags 1) for every entry an edit
+   removed or replaced [orig: sub_4040E0 @ 0x4041B0..0x4041C4 (pack.exe)], so several share the
+   name; an edit, a rewrite and a Play rewrite leave them out (written compact, D-UPD-1) instead of
+   refusing the archive as two files sharing a name. */
+static int test_edits_drop_dead_space(void) {
+    const uint8_t keep[] = {1, 2, 3};
+    const uint8_t gone_a[] = {9, 9};
+    const uint8_t other[] = {4, 5, 6, 7};
+    const uint8_t gone_b[] = {8};
+    PffTestEntry raw[4] = {
+        { "keep.txt",     keep,   (uint32_t)sizeof(keep),   0 },
+        { "<DEAD SPACE>", gone_a, (uint32_t)sizeof(gone_a), 1 },
+        { "other.bin",    other,  (uint32_t)sizeof(other),  0 },
+        { "<DEAD SPACE>", gone_b, (uint32_t)sizeof(gone_b), 1 },
+    };
+    const char *path = "pff_dead_space.pff";
+    const char *again = "pff_dead_space_again.pff";
+    const char *played = "pff_dead_space_played.pff";
+    CHECK(pff_test_write_modern(path, raw, 4) == 0, "write the stock-updated archive");
+    PffArchive ar;
+    CHECK(pff_open(&ar, path) == 0 && ar.entry_count == 4, "open it: four records");
+    int dead = 0;
+    for (uint32_t i = 0; i < ar.entry_count; ++i) dead += pff_entry_is_dead_space(ar.entries[i]) ? 1 : 0;
+    CHECK(dead == 2, "two dead-space records");
+    const PffEntry *kept = pff_find(&ar, "keep.txt");
+    CHECK(kept != NULL && !pff_entry_is_dead_space(*kept), "a live entry is not dead space");
+    const uint8_t mission[] = {'B', 'M', 'S'};
+    CHECK(pff_rewrite_with_entry(&ar, (uint32_t)(kept - ar.entries), mission, sizeof(mission), played) ==
+          PFF_WRITE_OK, "a Play rewrite of it");
+    pff_close(&ar);
+    CHECK(pff_write_archive_again(path, again) == PFF_WRITE_OK, "written again");
+    std::vector<PffEditEntry> adds(1);
+    adds[0].name = "new.txt";
+    adds[0].data = {1};
+    adds[0].timestamp = 1700000000u;
+    bool rewritten = false;
+    CHECK(pff_apply_edits(path, adds, {}, &rewritten) == PFF_WRITE_OK && rewritten, "an edit of it");
+    const char *outs[3] = { path, again, played };
+    const char *want[3] = { "keep.txt,other.bin,new.txt,", "keep.txt,other.bin,", "keep.txt,other.bin," };
+    for (int k = 0; k < 3; ++k) {
+        CHECK(pff_open(&ar, outs[k]) == 0, "open the result");
+        std::string walked;
+        for (const uint32_t i : pff_payload_order(ar)) walked += pff_entry_stored_name(ar.entries[i]) + ",";
+        pff_close(&ar);
+        CHECK(walked == want[k], "the live entries in their order, no dead space");
+    }
+    CHECK(pff_open(&ar, path) == 0, "open the edit");
+    CHECK(entry_bytes_equal(&ar, "other.bin", other, sizeof(other)), "a live entry's bytes kept");
+    pff_close(&ar);
+    /* Dead space alone never makes an edit write. */
+    CHECK(pff_test_write_modern(path, raw, 4) == 0, "the stock-updated archive again");
+    CHECK(pff_apply_edits(path, {}, {"absent.x"}, &rewritten) == PFF_WRITE_OK && !rewritten,
+          "a no-op edit writes nothing");
+    remove(path);
+    remove(again);
+    remove(played);
+    return 1;
+}
+
 /* F6a: zero-entry archive is valid. */
 static int test_write_zero_entries(void) {
     const char *path = "pff_zero.pff";
@@ -696,6 +755,7 @@ int main(void) {
     RUN_TEST(test_write_error_string);
     RUN_TEST(test_rewrite_with_entry);
     RUN_TEST(test_write_retail_layout);
+    RUN_TEST(test_edits_drop_dead_space);
     RUN_TEST(test_write_zero_entries);
     RUN_TEST(test_write_rejects_overlong_name);
     RUN_TEST(test_write_rejects_duplicate_names);

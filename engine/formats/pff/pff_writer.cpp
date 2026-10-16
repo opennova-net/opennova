@@ -160,6 +160,8 @@ EditPlan plan_edits(const PffArchive *source, const std::vector<PffEditEntry> &a
 	if (source != NULL) {
 		for (const uint32_t i : pff_payload_order(*source)) {
 			const PffEntry &entry = source->entries[i];
+			if (pff_entry_is_dead_space(entry))
+				continue;
 			const std::string stored = pff_entry_stored_name(entry);
 			const std::string key = normalized_logical_name(stored);
 			const int64_t add = last_add(key);
@@ -219,6 +221,10 @@ int write_plan(EditPlan &plan, PffFormat format, const char *out_path) {
 }
 
 } // namespace
+
+bool pff_entry_is_dead_space(const PffEntry &entry) {
+	return entry.flags == 1u && pff_entry_stored_name(entry) == "<DEAD SPACE>";
+}
 
 std::vector<uint32_t> pff_payload_order(const PffArchive &archive) {
 	std::vector<uint32_t> order(archive.entry_count);
@@ -357,10 +363,14 @@ int pff_rewrite_with_entry(const PffArchive *source, uint32_t index, const uint8
 {
 	if (source == NULL || path == NULL || index >= source->entry_count || (size != 0 && data == NULL))
 		return PFF_WRITE_ERR_IO;
-	Rewrite rewrite{source, index, data, size, pff_payload_order(*source)};
-	std::vector<PffWriteStreamEntry> entries(source->entry_count);
-	std::vector<std::string> names(source->entry_count);
-	for (uint32_t k = 0; k < source->entry_count; ++k) {
+	Rewrite rewrite{source, index, data, size, {}};
+	for (const uint32_t i : pff_payload_order(*source))
+		if (i == index || !pff_entry_is_dead_space(source->entries[i]))
+			rewrite.order.push_back(i);
+	const uint32_t count = uint32_t(rewrite.order.size());
+	std::vector<PffWriteStreamEntry> entries(count);
+	std::vector<std::string> names(count);
+	for (uint32_t k = 0; k < count; ++k) {
 		const uint32_t i = rewrite.order[k];
 		const PffEntry &entry = source->entries[i];
 		names[k] = pff_entry_stored_name(entry);
