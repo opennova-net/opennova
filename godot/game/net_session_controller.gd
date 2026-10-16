@@ -120,8 +120,8 @@ func _on_lan_host_start_requested(config: HostSessionConfig) -> void:
 	# JO), not a session template or a value copied from one capture.
 	var root := _resource_root()
 	config.expansion = root.get_expansion() if root != null else ""
-	var load_info := LoadingScreenInfo.make(config.mission, true, config.server_name,
-			_resolve_mission_title(config.mission), config.game_type, config.custom_text)
+	var load_info := LoadingScreenInfo.for_host(root, config.mission, config.server_name,
+			config.game_type, config.game_type_auto, config.custom_text)
 	_shell.start_world_load(
 		load_info,
 		_world.load_mission_as_host.bind(config.to_session_options()))
@@ -540,8 +540,8 @@ func _on_novaworld_host_requested(config: HostSessionConfig) -> void:
 		config.server_name = "OpenNova Host"
 	_adopt_held_novaworld_client()
 	_shell.start_world_load(
-			LoadingScreenInfo.make(mission, true, config.server_name,
-					_resolve_mission_title(mission), config.game_type, config.custom_text),
+			LoadingScreenInfo.for_host(_resource_root(), mission, config.server_name,
+					config.game_type, config.game_type_auto, config.custom_text),
 			_world.load_mission_as_host.bind(config.to_session_options()))
 
 
@@ -648,17 +648,3 @@ func _resolve_default_mission() -> String:
 
 func _resource_root() -> ResourceRoot:
 	return _shell.current_resource_root() if _shell != null else null
-
-
-# MISSIONNAME for the loading screen = the mission text .bin's [info]/title
-# [orig: Game_SerializeMissionInfoToDataStream @ 0x523620 ->
-# TextResource_FindEntryBySectionAndKey(g_TextMission, "info", "title"); an
-# empty title falls back to the mission-header title]. Our fallback: the
-# mission basename.
-func _resolve_mission_title(bms_name: String) -> String:
-	var base := bms_name.get_file().get_basename()
-	var table := Strings.load_rtxt(_resource_root(), base + ".bin")
-	if table == null or not table.has_string_in_section("info", "title"):
-		return base
-	var title := table.get_string_in_section("info", "title")
-	return title if not title.is_empty() else base

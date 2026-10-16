@@ -387,9 +387,11 @@ struct NapiNPServerCtx {
 	bool mission_text_loaded = false;
 	std::string mission_briefing3;
 	std::string mission_briefing2;
-	// The mission text's [info] title the NovaWorld listing's MissionName reads ("" with no
-	// mission table or no entry; the column then reads the mission header's name).
-	// [orig: MissionText_GetString("info", "title") from Lobby_UpdateServerInfo @0x4FE993]
+	// The mission text's [info] title the NovaWorld listing's MissionName, the session
+	// variables' MISSIONNAME and the S2C 0x7B summary read ("" with no mission table or no
+	// entry; each then reads the mission header's name, session_mission_name).
+	// [orig: MissionText_GetString("info", "title") from Lobby_UpdateServerInfo @0x4FE993;
+	//  Game_SerializeMissionInfoToDataStream @0x5237df; NapiNPMsg_0x7B_BuildPayload @0x507835]
 	std::string mission_text_title;
 	// MissionText [Locations]/LOCATION%03i labels for each BMS type-2044
 	// marker the spawn admitted, in spawn order, each keyed by its record's

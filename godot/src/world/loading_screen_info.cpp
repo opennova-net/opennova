@@ -1,5 +1,11 @@
 #include "world/loading_screen_info.h"
 
+#include "resource_index/resource_root.h"
+#include "util/string_convert.h"
+
+#include <runtime/inmatch/host_boot.h>
+#include <runtime/mission/runtime_boot.h>
+
 using namespace godot;
 
 Ref<LoadingScreenInfo> LoadingScreenInfo::make(const String &p_mission_file, bool p_in_session,
@@ -20,6 +26,23 @@ Ref<LoadingScreenInfo> LoadingScreenInfo::for_mission(const String &p_mission_fi
 	return make(p_mission_file, false, String(), String(), -1, String());
 }
 
+Ref<LoadingScreenInfo> LoadingScreenInfo::for_host(const Ref<ResourceRoot> &p_root,
+		const String &p_mission_file, const String &p_server_name, int p_game_type,
+		bool p_game_type_auto, const String &p_custom_text) {
+	opennova::mission::BootFileSource files;
+	std::vector<uint8_t> override_table;
+	if (p_root.is_valid()) {
+		files = opennova::mission::boot_files_from_index(p_root->native_index());
+		const PackedByteArray table = p_root->get_expansion_override_table();
+		override_table.assign(table.ptr(), table.ptr() + table.size());
+	}
+	const opennova::inmatch::HostLoadingBand band = opennova::inmatch::host_loading_band(files,
+			opennova::to_std(p_mission_file), static_cast<uint32_t>(p_game_type),
+			p_game_type_auto, override_table);
+	return make(p_mission_file, true, p_server_name, opennova::to_gd(band.mission_name),
+			static_cast<int>(band.game_type), p_custom_text);
+}
+
 void LoadingScreenInfo::_bind_methods() {
 	ClassDB::bind_static_method("LoadingScreenInfo",
 			D_METHOD("make", "mission_file", "in_session", "server_name", "mission_name",
@@ -27,6 +50,10 @@ void LoadingScreenInfo::_bind_methods() {
 			&LoadingScreenInfo::make);
 	ClassDB::bind_static_method("LoadingScreenInfo", D_METHOD("for_mission", "mission_file"),
 			&LoadingScreenInfo::for_mission);
+	ClassDB::bind_static_method("LoadingScreenInfo",
+			D_METHOD("for_host", "root", "mission_file", "server_name", "game_type",
+					"game_type_auto", "custom_text"),
+			&LoadingScreenInfo::for_host);
 	ClassDB::bind_method(D_METHOD("get_mission_file"), &LoadingScreenInfo::get_mission_file);
 	ClassDB::bind_method(D_METHOD("set_mission_file", "value"), &LoadingScreenInfo::set_mission_file);
 	ClassDB::bind_method(D_METHOD("get_in_session"), &LoadingScreenInfo::get_in_session);

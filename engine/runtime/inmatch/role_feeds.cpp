@@ -1235,7 +1235,7 @@ SessionVars scoreboard_session_vars(const RoleView &view) {
 		return view.runtime != nullptr ? view.runtime->session_vars() : SessionVars{};
 	if (view.host == nullptr)
 		return {};
-	SessionVars vars = host_session_vars(view.host->config);
+	SessionVars vars = host_session_vars(view.host->config, view.host->mission_text_title);
 	if (view.host->is_mp_session_peer != 0) {
 		const std::vector<uint8_t> stream = encode_session_vars(vars);
 		decode_session_vars(stream.data(), stream.size(), vars);

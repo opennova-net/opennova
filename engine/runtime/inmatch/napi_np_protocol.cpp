@@ -1432,7 +1432,7 @@ std::vector<TickOut> tick_connections(
 		if (staged_join_ready && !conn.reply.spawn_metadata_pushed) {
 			std::vector<ProtocolMessage> spawn_metadata =
 					build_spawn_pump_metadata(
-							ctx.config, conn,
+							ctx.config, ctx.mission_text_title, conn,
 							ctx.np_protocol.connection_list, ctx.world, ctx.rotation,
 							&ctx.host_slot);
 			std::vector<uint8_t> datagram =

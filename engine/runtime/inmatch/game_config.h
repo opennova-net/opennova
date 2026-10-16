@@ -421,7 +421,10 @@ struct GameConfig {
 	// The server / mission / player fields the reactive NapiNPServerMsg_0x0NN reply handlers read
 	// (server_message_dispatch.h). The replicated-entity / spawn-point inputs are NOT here — the
 	// faithful world-stream burst sources those from World + bms::File.
-	std::string mission_name = "AS - Dormant Volcano Isle"; // [orig title: MissionText "info"/"title" / dword_24D1FA4]
+	// The mission header's name [orig: dword_A761D4, the header's mission_name]; the
+	// MISSIONNAME a session advertises is session_mission_name's (the mission text's
+	// title first, server_message_dispatch.h).
+	std::string mission_name = "AS - Dormant Volcano Isle";
 	std::string mission_file = "ASH_I5A.BMS";               // [orig g_MapFileName @0x24D1F3E]
 	std::string custom_text = "Put your message here.";     // [orig g_SessionVarCustomText @0x522123]
 	std::string expansion = "jox01";                        // [orig g_ExpansionName @0xB4C584] (0x7B)

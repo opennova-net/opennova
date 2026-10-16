@@ -191,6 +191,21 @@ void append_cstr(std::vector<uint8_t> &out, const std::string &s) {
 	out.push_back(0);
 }
 
+// The advertised mission's title arm, the session-variable stream's and the
+// 0x7B summary's alike: the mission text's [info]/title, else (empty) the
+// header's name. [orig: Game_SerializeMissionInfoToDataStream @0x523620
+// @0x5237df..0x52380d; NapiNPMsg_0x7B_BuildPayload @0x507740 @0x507835..0x50784f]
+const std::string &mission_title_or_header(const std::string &mission_text_title,
+		const std::string &header_name) {
+	return mission_text_title.empty() ? header_name : mission_text_title;
+}
+
+// The host context's resolved mission title; none on the World-less unit path.
+const std::string &context_mission_text_title(const NapiNPServerCtx *ctx) {
+	static const std::string kNone;
+	return ctx != nullptr ? ctx->mission_text_title : kNone;
+}
+
 bool is_default_ash_session_config(const GameConfig &cfg) {
 	return cfg.mission_name == "AS - Dormant Volcano Isle" && cfg.mission_file == "ASH_I5A.BMS";
 }
@@ -224,16 +239,18 @@ std::vector<uint8_t> build_tag7a_pcid(const NapiNPConnection &conn) {
 // recipient player_name, PCID, server_name, advertised mission, map filename,
 // gametype(u32), empty_str, expansion. Retail's field-4 source switches at
 // @0x507822: waypoint-family modes use the active filename while other modes
-// use the resolved MissionText title. The objective bit does not affect that
-// selection. Field 5 is always g_MapFileName.
+// use the resolved MissionText title, else (empty) the header's name
+// (@0x507835..0x50784f). The objective bit does not affect that selection.
+// Field 5 is always g_MapFileName.
 // (The PCID slot previously carried an invented "DEV-A02-0001" literal — D-NET-127; now sourced.)
 std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg,
+                                                 const std::string &mission_text_title,
                                                  const NapiNPConnection &conn) {
 	std::vector<uint8_t> payload;
 	const std::string &advertised_mission =
 			game_type::is_waypoint_family(cfg.game_type)
 					? cfg.mission_file
-					: cfg.mission_name;
+					: mission_title_or_header(mission_text_title, cfg.mission_name);
 	append_cstr(payload, conn.player_name.empty() ? conn.reply.player_name
 	                                             : conn.player_name); // recipient player_data+128
 	append_cstr(payload, conn.account.pcid); // [orig player+0x250 @0x5077ac] the recipient's PCID
@@ -291,9 +308,11 @@ uint32_t chunk_request_offset(const std::vector<uint8_t> &payload, uint32_t live
 // tag=0x60 chunked server-info KV transfer: the authority's session-variable
 // stream (host_session_vars). [orig: NapiNPClientMsg_HandleFileTransferChunk @0x432350;
 // the stream Game_SerializeMissionInfoToDataStream @0x523620]
-std::vector<uint8_t> build_tag60_server_info(const GameConfig &cfg, uint32_t transfer_id,
-                                             uint32_t offset) {
-	const std::vector<uint8_t> info_body = encode_session_vars(host_session_vars(cfg));
+std::vector<uint8_t> build_tag60_server_info(const GameConfig &cfg,
+                                             const std::string &mission_text_title,
+                                             uint32_t transfer_id, uint32_t offset) {
+	const std::vector<uint8_t> info_body =
+			encode_session_vars(host_session_vars(cfg, mission_text_title));
 	return build_transfer_chunk(transfer_id, info_body.data(),
 	                            static_cast<uint32_t>(info_body.size()), offset);
 }
@@ -645,7 +664,8 @@ void emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
 	out.push_back(make_protocol_message(s2c::SYNC_STATE, {0x01, 0x00, 0x00, 0x00}));
 	out.push_back(make_protocol_message(s2c::PLAYER_NAME, build_tag7a_pcid(conn)));
 	out.push_back(make_protocol_message(
-			s2c::FULL_PLAYER_INFO, build_tag7b_session_summary(cfg, conn)));
+			s2c::FULL_PLAYER_INFO,
+			build_tag7b_session_summary(cfg, context_mission_text_title(ctx), conn)));
 	// [u8 1][u16 count=1][u16 mask=1] — the golden's live restriction record shape.
 	out.push_back(make_protocol_message(s2c::SYNC_TICK, {0x01, 0x01, 0x00, 0x01, 0x00}));
 }
@@ -736,9 +756,10 @@ std::vector<std::pair<std::string, std::string>> parse_join_identity_pairs(
 } // namespace
 
 // The authority's session variables as its serializer writes them: the
-// configured server name; the mission title, or the map filename for the
-// stock Co-op selector (objective/waypoint Co-op, bit 0x20000, and every other
-// mode keep MissionText's display title); the game type; the custom text; the
+// configured server name; session_mission_name (the map filename for the
+// stock Co-op selector; objective/waypoint Co-op, bit 0x20000, and every other
+// mode keep MissionText's display title, else the header's name); the game
+// type; the custom text; the
 // map file; score.ini's EXP_FANFARE lo/hi thresholds (the joiner arms its
 // kill / headshot tones only when lo is nonzero and lo < hi, so {0,0}
 // silences them).
@@ -747,11 +768,18 @@ std::vector<std::pair<std::string, std::string>> parse_join_identity_pairs(
 //  [info]/title @0x5237df, GAMETYPE @0x5238c7, CUSTOMTEXT @0x523914,
 //  MISSIONFILENAME @0x5239a6, EXP_FANFARE word_24C1170 @0x523a39;
 //  NapiNPClientMsg_ScoreDeltaSound @0x42A0B0]
-SessionVars host_session_vars(const GameConfig &cfg) {
+std::string session_mission_name(uint32_t game_type, const std::string &mission_file,
+		const std::string &mission_text_title, const std::string &header_name) {
+	return game_type::is_stock_coop(game_type)
+			? mission_file
+			: mission_title_or_header(mission_text_title, header_name);
+}
+
+SessionVars host_session_vars(const GameConfig &cfg, const std::string &mission_text_title) {
 	SessionVars vars;
 	vars.server_name = cfg.server_name;
-	vars.mission_name =
-			game_type::is_stock_coop(cfg.game_type) ? cfg.mission_file : cfg.mission_name;
+	vars.mission_name = session_mission_name(
+			cfg.game_type, cfg.mission_file, mission_text_title, cfg.mission_name);
 	vars.game_type = cfg.game_type;
 	vars.custom_text = cfg.custom_text;
 	vars.mission_file = cfg.mission_file;
@@ -760,7 +788,7 @@ SessionVars host_session_vars(const GameConfig &cfg) {
 }
 
 std::vector<ProtocolMessage> build_spawn_pump_metadata(
-		const GameConfig &config, NapiNPConnection &conn,
+		const GameConfig &config, const std::string &mission_text_title, NapiNPConnection &conn,
 		const std::vector<NapiNPConnection> &roster, world::World *world,
 		const HostRotation *rotation, const HostSlotRow *host_slot) {
 	std::vector<ProtocolMessage> messages;
@@ -793,7 +821,7 @@ std::vector<ProtocolMessage> build_spawn_pump_metadata(
 			0x04, build_tag04_slot_assignment(
 					config.config_bytes[6], *player_slot, capacity, team)));
 	messages.push_back(make_protocol_message(
-			s2c::FULL_PLAYER_INFO, build_tag7b_session_summary(config, conn)));
+			s2c::FULL_PLAYER_INFO, build_tag7b_session_summary(config, mission_text_title, conn)));
 	return messages;
 }
 
@@ -1327,7 +1355,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				replies.push_back(make_protocol_message(
 						s2c::FILE_TRANSFER_CHUNK,
 						build_tag60_server_info(
-								config, inputs.server_info_transfer_id,
+								config, context_mission_text_title(inputs.server_ctx),
+								inputs.server_info_transfer_id,
 								chunk_request_offset(msg.payload, inputs.server_info_transfer_id))));
 				break;
 			case c2s::MISSION_CHUNK_REQUEST: // mission-file request -> 0x64 chunk only [orig: NapiNPServerMsg_0x037_SendCircularBuffer @0x5152E0]

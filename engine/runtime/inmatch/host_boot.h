@@ -179,6 +179,28 @@ struct HostBoot {
 // own bring-up (the game's in-memory loads) reads them here.
 ServerTextTable read_host_server_text(const mission::BootFileSource &files);
 
+// The mission text a host's boot reads for `mission_basename` (the mission's
+// name cut at its first '.'): resolve_mission_text's <mission>.bin else
+// medmssn.bin, parsed (a table that does not parse counts as none), the
+// mount's text-override table (`text_override_table`, empty for none)
+// searched first by every lookup.
+mission::MissionText read_host_mission_text(const mission::BootFileSource &files,
+		const std::string &mission_basename, const std::vector<uint8_t> &text_override_table);
+
+// The listen host's loading-screen band ahead of its load (a synchronous load
+// draws the screen before the boot runs): the session game type (the shell's,
+// or with `game_type_auto` the mission header's own, as the mission root
+// resolves it) and MISSIONNAME as the session serializer will advertise it
+// (session_mission_name over the mission text's [info]/title and the header's
+// name, both read as the boot reads them).
+struct HostLoadingBand {
+	std::string mission_name;
+	uint32_t game_type = 0;
+};
+HostLoadingBand host_loading_band(const mission::BootFileSource &files,
+		const std::string &mission_file, uint32_t game_type, bool game_type_auto,
+		const std::vector<uint8_t> &text_override_table);
+
 // Phase A. False with `error` when the session cannot enter its load, the
 // kernel boot fails, or the host's session create asks for the process exit
 // (`boot.session_create`); the session is left Loading for the embedder to

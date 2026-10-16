@@ -779,24 +779,32 @@ bool decode_tag60_mission_strings(const ProtocolMessage &message,
 	return !mission_name.empty() && !mission_filename.empty();
 }
 
+// MISSIONNAME: the stock Co-op selector's map file; every other mode the
+// mission text's [info]/title, else (an empty title) the header's name
+// (GameConfig::mission_name). [orig: Game_SerializeMissionInfoToDataStream
+// @0x523620 -- the coop arm @0x523758, [info]/title @0x5237df, dword_A761D4
+// @0x52380d]
 bool run_tag60_mission_name_selects_by_game_type() {
 	struct Case {
 		uint32_t game_type;
-		const char *title;
+		const char *text_title; // the host context's mission text [info]/title
+		const char *header_name; // GameConfig::mission_name
 		const char *file;
 		const char *expected_mission_name;
 		const char *description;
 	};
 	const Case cases[] = {
-			{0x00010020u, "Stock Co-op Display Title", "COOP_FILE.BMS",
+			{0x00010020u, "Stock Co-op Display Title", "Stock Co-op Header", "COOP_FILE.BMS",
 					"COOP_FILE.BMS",
 					"stock Co-op 0x60 uses the active mission filename"},
-			{0x00030020u, "Objective Co-op Display Title", "OBJECTIVE_FILE.BMS",
-					"Objective Co-op Display Title",
+			{0x00030020u, "Objective Co-op Display Title", "Objective Co-op Header",
+					"OBJECTIVE_FILE.BMS", "Objective Co-op Display Title",
 					"objective waypoint variant 0x60 uses MissionText title"},
-			{0x00010000u, "Retail TDM Display Title", "TDM_FILE.BMS",
+			{0x00010000u, "Retail TDM Display Title", "Retail TDM Header", "TDM_FILE.BMS",
 					"Retail TDM Display Title",
-					"TDM 0x60 uses MissionText title"},
+					"TDM 0x60 uses MissionText title over the header's name"},
+			{0x00010000u, "", "Retail TDM Header", "TDM_FILE.BMS", "Retail TDM Header",
+					"an empty MissionText title falls back to the header's name"},
 	};
 
 	uint16_t port = 30120;
@@ -806,12 +814,13 @@ bool run_tag60_mission_name_selects_by_game_type() {
 		inmatch::NapiNPServerCtx ctx;
 		inmatch::GameConfig config;
 		config.server_name = "Tag60 Selector Host";
-		config.mission_name = test_case.title;
+		config.mission_name = test_case.header_name;
 		config.mission_file = test_case.file;
 		config.game_type = test_case.game_type;
 		config.max_players = 4;
 		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostClient,
 				inmatch::SocketMode::Lan, kHostKey, &loopback, config);
+		ctx.mission_text_title = test_case.text_title;
 
 		const PeerAddr peer{0x0100007Fu, port++};
 		const std::string client_scrk =
@@ -2506,21 +2515,25 @@ bool run_full_player_info_is_recipient_scoped_lan_metadata() {
 // Retail does not always duplicate the map filename into FULL_PLAYER_INFO field
 // 4. NapiNPMsg_0x7B_BuildPayload @0x507822 selects the active filename for the
 // waypoint family (the objective bit is ignored), and the resolved MissionText
-// title for Deathmatch/TDM. Field 5 remains the map filename on both arms.
+// title for Deathmatch/TDM, else (an empty title) the header's name
+// (@0x507835..0x50784f). Field 5 remains the map filename on both arms.
 bool run_full_player_info_selects_retail_mission_title_branch() {
 	struct MissionIdentityCase {
 		uint32_t game_type;
-		const char *mission_title;
+		const char *text_title; // the host context's mission text [info]/title
+		const char *header_name; // GameConfig::mission_name
 		const char *expected_mission;
 		uint16_t port;
 		const char *message;
 	};
-	const std::array<MissionIdentityCase, 3> cases = {{
-			{0x00000000u, "DM - Awan Atoll", "DM - Awan Atoll", 31213,
+	const std::array<MissionIdentityCase, 4> cases = {{
+			{0x00000000u, "DM - Awan Atoll", "DM header", "DM - Awan Atoll", 31213,
 			 "Deathmatch 0x7B advertises the mission title and exact map filename"},
-			{0x00010000u, "TDM - Awan Atoll", "TDM - Awan Atoll", 31214,
-			 "TDM 0x7B advertises the mission title and exact map filename"},
-			{0x00030020u, "COOP - Awan Atoll", "TDH_I3A.bms", 31215,
+			{0x00010000u, "TDM - Awan Atoll", "TDM header", "TDM - Awan Atoll", 31214,
+			 "TDM 0x7B advertises the mission title over the header's name"},
+			{0x00010000u, "", "TDM header", "TDM header", 31216,
+			 "TDM 0x7B falls back to the header's name on an empty title"},
+			{0x00030020u, "COOP - Awan Atoll", "COOP header", "TDH_I3A.bms", 31215,
 			 "objective waypoint 0x7B advertises the filename in both mission fields"},
 	}};
 
@@ -2532,7 +2545,7 @@ bool run_full_player_info_selects_retail_mission_title_branch() {
 		inmatch::GameConfig config;
 		config.player_name = "RetailHost403";
 		config.server_name = "Untitled ";
-		config.mission_name = test_case.mission_title;
+		config.mission_name = test_case.header_name;
 		config.mission_file = "TDH_I3A.bms";
 		config.game_type = test_case.game_type;
 		config.expansion = "revx02";
@@ -2541,6 +2554,7 @@ bool run_full_player_info_selects_retail_mission_title_branch() {
 				ctx, inmatch::ConnectionMode::HostOnly, inmatch::SocketMode::Lan,
 				kHostKey, nullptr, config);
 		ctx.world = &world;
+		ctx.mission_text_title = test_case.text_title;
 
 		const PeerAddr peer{0x0100007Fu, test_case.port};
 		const std::string client_scrk =
