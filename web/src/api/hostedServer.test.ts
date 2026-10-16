@@ -9,6 +9,7 @@ import {
   linksToSupportTier,
   startHostedServer,
   stopHostedServer,
+  updateHostedServer,
 } from './hostedServer';
 import { hostedServer, serversResponse, settings } from '../test/hostedFixtures';
 
@@ -69,9 +70,31 @@ describe('fetchMyServers', () => {
 
   it('drops a malformed data set but keeps the rest', async () => {
     const good = serversResponse([]);
-    get.mockResolvedValue(reply({ ...good, data_sets: [good.data_sets[0], { game: '' }] }));
+    get.mockResolvedValue(reply({ ...good, data_sets: [good.data_sets[0], { id: 'x' }, { ...good.data_sets[1], limits: { max_players: { min: 5, max: 2 } } }] }));
     const result = await fetchMyServers();
-    expect(result.ok && result.value.data_sets.map((d) => d.game)).toEqual(['jop_2_consumer']);
+    expect(result.ok && result.value.data_sets.map((d) => d.id)).toEqual([1]);
+  });
+
+  it('reads the data a server runs on, with defaults for what a reply leaves out', async () => {
+    const server = hostedServer(3, {
+      expansion: { id: 2, code: 'jox01', display_name: 'Escalation' },
+      data: { base: { tree_id: 10, version: '1.7.5.5' }, expansion: { tree_id: 12, version: '1.7.5.5' } },
+      update_available: true,
+    });
+    get.mockResolvedValue(reply(serversResponse([server])));
+    const result = await fetchMyServers();
+    expect(result.ok && result.value.servers[0]).toEqual(server);
+
+    const { data_set: _d, expansion: _e, data: _t, update_available: _a, update_requested: _r, ...bare } = hostedServer(4);
+    get.mockResolvedValue(reply(serversResponse([bare as typeof server])));
+    const filled = await fetchMyServers();
+    expect(filled.ok && filled.value.servers[0]).toMatchObject({
+      data_set: null,
+      expansion: null,
+      data: { base: null, expansion: null },
+      update_available: false,
+      update_requested: false,
+    });
   });
 });
 
@@ -91,6 +114,15 @@ describe('the start, the stop and one server', () => {
     post.mockResolvedValue(reply({ server: hostedServer(8, { state: 'stopping' }) }, 202));
     await stopHostedServer(8);
     expect(post).toHaveBeenLastCalledWith('/me/servers/8/stop');
+
+    post.mockResolvedValue(reply({ server: hostedServer(8, { update_requested: true }) }, 202));
+    const updated = await updateHostedServer(8);
+    expect(post).toHaveBeenLastCalledWith('/me/servers/8/update');
+    expect(updated.ok && updated.value.update_requested).toBe(true);
+    post.mockRejectedValue(refusal(409, { error: 'up_to_date' }));
+    const current = await updateHostedServer(8);
+    expect(!current.ok && current.error.code).toBe('up_to_date');
+    expect(!current.ok && current.error.message).toContain('already runs the current data');
   });
 
   it('reads server_limit with its counts, and links it to the support tiers', async () => {

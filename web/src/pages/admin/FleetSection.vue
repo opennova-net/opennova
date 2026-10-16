@@ -106,7 +106,23 @@
 
     <!-- Servers. -->
     <section class="space-y-4" aria-labelledby="fleet-servers">
-      <h2 id="fleet-servers" class="text-xl font-semibold text-ink">Servers</h2>
+      <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h2 id="fleet-servers" class="text-xl font-semibold text-ink">Servers</h2>
+        <button
+          type="button"
+          :class="secondaryButton"
+          :disabled="busy || outdatedCount === 0"
+          aria-describedby="fleet-update-all-hint"
+          @click="updateOutdated"
+        >
+          Update outdated servers…
+        </button>
+      </div>
+      <p id="fleet-update-all-hint" class="text-xs text-ink-muted">
+        A server keeps the game data it started on until its owner updates it. This restarts every live server
+        that runs older data than its data set's current, dropping their players; the data sets are on
+        <RouterLink to="/admin/data-sets" class="text-accent hover:text-ink-bright">Game data</RouterLink>.
+      </p>
       <form class="flex flex-wrap items-end gap-3" @submit.prevent="applyFilter">
         <label class="space-y-1">
           <span class="block text-xs font-medium text-ink-muted">Owner</span>
@@ -143,16 +159,17 @@
               <th scope="col" class="px-4 py-3">State</th>
               <th scope="col" class="px-4 py-3">Players</th>
               <th scope="col" class="px-4 py-3">Machine and slot</th>
+              <th scope="col" class="px-4 py-3">Data</th>
               <th scope="col" class="px-4 py-3">Since</th>
               <th scope="col" class="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-border text-sm text-ink">
             <tr v-if="fleet === null">
-              <td colspan="7" class="px-4 py-6 text-center text-ink-muted">{{ poll.loading.value ? 'Loading…' : 'Not loaded.' }}</td>
+              <td colspan="8" class="px-4 py-6 text-center text-ink-muted">{{ poll.loading.value ? 'Loading…' : 'Not loaded.' }}</td>
             </tr>
             <tr v-else-if="fleet.servers.length === 0">
-              <td colspan="7" class="px-4 py-6 text-center text-ink-muted">No hosted server matches.</td>
+              <td colspan="8" class="px-4 py-6 text-center text-ink-muted">No hosted server matches.</td>
             </tr>
             <tr v-for="s in fleet?.servers ?? []" :key="s.id" class="fleet-server-row align-top hover:bg-hover">
               <th scope="row" class="px-4 py-3 text-left font-medium">
@@ -160,7 +177,7 @@
                   {{ s.settings.game_name || 'Unnamed server' }}
                 </RouterLink>
                 <span class="block text-xs font-normal text-ink-muted">
-                  Server {{ s.id }}, {{ s.game_display_name || s.settings.game }}<template v-if="s.own_machine">, own machine</template>
+                  Server {{ s.id }}, {{ s.data_set?.display_name || s.game_display_name || 'unknown game' }}<template v-if="s.own_machine">, own machine</template>
                 </span>
               </th>
               <td class="whitespace-nowrap px-4 py-3">
@@ -187,6 +204,17 @@
                   </span>
                 </template>
                 <span v-else class="text-ink-muted">Not placed</span>
+              </td>
+              <td class="fleet-server-data px-4 py-3 text-xs">
+                <template v-if="s.base_tree_id !== null">
+                  <span class="block whitespace-nowrap">{{ pinnedText(s.data.base, s.base_tree_id) }}</span>
+                  <span v-if="s.expansion_tree_id !== null" class="block whitespace-nowrap text-ink-muted">
+                    {{ s.expansion?.display_name || 'Expansion' }} {{ pinnedText(s.data.expansion, s.expansion_tree_id) }}
+                  </span>
+                  <span v-if="s.update_requested" class="block text-warn">Update requested</span>
+                  <span v-else-if="s.outdated" class="inline-block rounded-control bg-warn/10 px-2 py-0.5 font-medium text-warn">Outdated</span>
+                </template>
+                <span v-else class="text-ink-muted">Not pinned</span>
               </td>
               <td class="whitespace-nowrap px-4 py-3 text-xs text-ink-muted">
                 <RelativeTime :value="sinceOf(s)" :now="now" />
@@ -263,21 +291,22 @@
 <script setup lang="ts">
 // /admin/fleet: the fleet (GET /api/admin/hosted?owner=&state=): its machines
 // (its row and cloud id, kind, state, instance type, servers on it of its
-// slots, address, data sent this month) with drain and end while it lives
-// (POST /api/admin/fleet/machines/<id>/...)
+// slots, address, data sent this month) with drain and end while it lives (POST /api/admin/fleet/machines/<id>/...)
 // and the roll (POST /api/admin/fleet/roll), its launches and ends being
 // background jobs (their page, /admin/jobs); its servers (owner and tier,
-// state, players, machine and slot), each to its own page
-// (/admin/fleet/<id>), with a stop; and the kill switch (POST
-// /api/admin/hosted/stop-all) behind a typed confirmation. The page polls,
-// faster while a server changes state.
+// state, players, machine and slot, the data they run on and whether newer
+// waits), each to its own page (/admin/fleet/<id>), with a stop; the update
+// of every outdated server (POST /api/admin/hosted/update-all); and the kill
+// switch (POST /api/admin/hosted/stop-all) behind a typed confirmation. The
+// page polls, faster while a server changes state.
 import { computed, nextTick, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import RelativeTime from '../../components/RelativeTime.vue';
 import StatTile from '../../components/charts/StatTile.vue';
 import { fetchHostedFleet, machineAction, rollFleet, stopAllFleetServers, stopFleetServer } from '../../api/admin';
+import { updateAllServers } from '../../api/dataSets';
 import { usePolling } from '../../composables/usePolling';
-import type { FleetMachine, FleetQuery, FleetResponse, FleetServer } from '../../types/hostedServer';
+import type { FleetMachine, FleetQuery, FleetResponse, FleetServer, PinnedTree } from '../../types/hostedServer';
 import { machineKindLabel, machineStateLabel } from '../../utils/adminView';
 import { formatBytes } from '../../utils/format';
 import { isTransitioning, stateBadgeClass, stateLabel } from '../../utils/hostedState';
@@ -307,7 +336,13 @@ const query = ref<FleetQuery>({});
 let errorFromLoad = false;
 
 const liveCount = computed(() => fleet.value?.servers.filter((s) => s.live).length ?? 0);
+const outdatedCount = computed(() => fleet.value?.servers.filter((s) => s.live && s.outdated && !s.update_requested).length ?? 0);
 const activeMachines = computed(() => (fleet.value?.machines ?? []).filter((m) => m.state !== 'ended'));
+
+// A pinned tree's version, or its id when the reply gave none.
+function pinnedText(tree: PinnedTree | null, treeId: number): string {
+  return tree?.version ? tree.version : `tree ${treeId}`;
+}
 const machineBreakdown = computed(() => {
   const shared = activeMachines.value.filter((m) => m.kind === 'shared').length;
   const own = activeMachines.value.length - shared;
@@ -415,6 +450,25 @@ async function roll() {
   busy.value = false;
   if (!result.ok) fail(result.error.message);
   else flash('The fleet is rolling: shared machines drain one by one.');
+  await poll.readAgain();
+}
+
+// Every live server on older data restarts on its data set's current data.
+async function updateOutdated() {
+  if (busy.value) return;
+  const n = outdatedCount.value;
+  if (!window.confirm(`Update ${n} outdated server${n === 1 ? '' : 's'}? Each restarts on its data set's current data, and its players drop while it does.`)) {
+    return;
+  }
+  busy.value = true;
+  const result = await updateAllServers();
+  busy.value = false;
+  if (!result.ok) {
+    fail(result.error.message);
+    return;
+  }
+  const asked = result.value;
+  flash(asked === 0 ? 'No server runs older data, so none was updated.' : `${asked} server${asked === 1 ? ' is' : 's are'} updating.`);
   await poll.readAgain();
 }
 

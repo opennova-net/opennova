@@ -31,28 +31,32 @@
       </RouterLink>
     </p>
 
-    <!-- The data set: the game the server runs, and the lobby it lists in. -->
-    <fieldset class="min-w-0 space-y-2" :aria-describedby="describedBy('game')">
-      <legend :id="fieldId('game')" tabindex="-1" :class="[labelClass, 'focus:outline-none']">
-        {{ FIELD_LABELS.game }}
+    <!-- The data set: the game the server runs, with the version of its data. -->
+    <fieldset class="min-w-0 space-y-2" :aria-describedby="describedBy('data_set_id')">
+      <legend :id="fieldId('data_set_id')" tabindex="-1" :class="[labelClass, 'focus:outline-none']">
+        {{ FIELD_LABELS.data_set_id }}
       </legend>
       <div class="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:gap-6">
-        <label v-for="option in dataSets" :key="option.game" class="flex items-center gap-3 text-sm text-ink">
+        <label v-for="option in dataSets" :key="option.id" class="flex items-center gap-3 text-sm text-ink">
           <input
-            v-model="form.game"
+            v-model="form.data_set_id"
             type="radio"
-            :name="`${baseId}-game`"
-            :value="option.game"
+            :name="`${baseId}-data_set_id`"
+            :value="option.id"
             :disabled="busy"
             class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
           />
-          {{ option.display_name }}
+          <span>
+            {{ option.display_name }}
+            <span v-if="option.version" class="text-ink-muted">{{ option.version }}</span>
+          </span>
         </label>
       </div>
-      <p :id="hintId('game')" class="text-xs text-ink-muted">
-        Each game lists in its own server browser: players join with that game.
+      <p :id="hintId('data_set_id')" class="text-xs text-ink-muted">
+        Each game lists in its own server browser: players join with that game. Your server runs the game's
+        current data until you update it.
       </p>
-      <p v-if="errors.game" :id="errorId('game')" class="text-xs text-danger">{{ errors.game }}</p>
+      <p v-if="errors.data_set_id" :id="errorId('data_set_id')" class="text-xs text-danger">{{ errors.data_set_id }}</p>
     </fieldset>
     <p v-if="previousGameGone" class="rounded-panel border border-warn/40 bg-warn/10 p-3 text-sm text-warn">
       Your last server ran a game this service no longer hosts, so pick one of these.
@@ -160,35 +164,49 @@
 
     <!-- /exp: shown when the game has an expansion to choose. -->
     <fieldset
-      v-if="expansions.length > 1"
+      v-if="expansions.length > 0"
       class="min-w-0 space-y-2"
-      :aria-describedby="describedBy('expansion')"
+      :aria-describedby="describedBy('expansion_id')"
     >
       <legend
-        :id="fieldId('expansion')"
+        :id="fieldId('expansion_id')"
         tabindex="-1"
         :class="[labelClass, 'focus:outline-none']"
       >
-        {{ FIELD_LABELS.expansion }}
+        {{ FIELD_LABELS.expansion_id }}
       </legend>
       <div class="flex flex-col gap-2 sm:flex-row sm:gap-6">
-        <label v-for="option in expansions" :key="option.code" class="flex items-center gap-3 text-sm text-ink">
+        <label class="flex items-center gap-3 text-sm text-ink">
           <input
-            v-model="form.expansion"
+            v-model="form.expansion_id"
             type="radio"
-            :name="`${baseId}-expansion`"
-            :value="option.code"
+            :name="`${baseId}-expansion_id`"
+            :value="null"
             :disabled="busy"
             class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
           />
-          {{ option.name }}
+          Base game
+        </label>
+        <label v-for="option in expansions" :key="option.id" class="flex items-center gap-3 text-sm text-ink">
+          <input
+            v-model="form.expansion_id"
+            type="radio"
+            :name="`${baseId}-expansion_id`"
+            :value="option.id"
+            :disabled="busy"
+            class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
+          />
+          <span>
+            {{ option.display_name }}
+            <span v-if="option.version" class="text-ink-muted">{{ option.version }}</span>
+          </span>
         </label>
       </div>
-      <p :id="hintId('expansion')" class="text-xs text-ink-muted">
+      <p :id="hintId('expansion_id')" class="text-xs text-ink-muted">
         Players need the same expansion to join: a player without it installed cannot join a server that
-        runs it.
+        runs it. Its missions join the rotation's list.
       </p>
-      <p v-if="errors.expansion" :id="errorId('expansion')" class="text-xs text-danger">{{ errors.expansion }}</p>
+      <p v-if="errors.expansion_id" :id="errorId('expansion_id')" class="text-xs text-danger">{{ errors.expansion_id }}</p>
     </fieldset>
 
     <p
@@ -196,15 +214,16 @@
       class="rounded-panel border border-warn/40 bg-warn/10 p-3 text-sm text-warn"
     >
       Your last server's rotation had
-      {{ droppedMissions.length === 1 ? 'a mission' : `${droppedMissions.length} missions` }} this game no
-      longer offers, so {{ droppedMissions.length === 1 ? 'it was' : 'they were' }} left out:
+      {{ droppedMissions.length === 1 ? 'a mission' : `${droppedMissions.length} missions` }} this game's data no
+      longer holds, so {{ droppedMissions.length === 1 ? 'it was' : 'they were' }} left out:
       <span class="break-all font-mono text-xs">{{ droppedMissions.join(', ') }}</span>.
     </p>
 
     <MissionRotationPicker
       ref="rotation"
       v-model="form.missions"
-      :available="dataSet?.default_missions ?? []"
+      :available="missions"
+      :with-expansion="form.expansion_id !== null"
       :base-id="`${baseId}-missions`"
       :error="errors.missions"
       :disabled="busy"
@@ -249,9 +268,11 @@
 // its entitlement has room. Started from an ended server, it begins with that
 // server's settings (after a failed one, the owner's try again). The
 // own-machine checkbox shows while one of the account's own machines is free.
-// The game (a data set the service offers) comes first and drives the rest:
-// the expansions it offers, the whole-number ranges and the rotation's
-// missions. Every field is checked against the backend's rule
+// The game (a base data set the service offers, by id) comes first and drives
+// the rest: the expansions it offers (expansion data sets with data), the
+// whole-number ranges and the rotation's missions, which are the game's data's
+// own (and the picked expansion's), all of them unless the owner takes some
+// out. Every field is checked against the backend's rule
 // (utils/hostedSettings.ts) before the request; a refusal the backend gives
 // on one field (invalid_settings) marks that field with the rule, never the
 // backend's text.
@@ -269,6 +290,7 @@ import type {
 import { cp1252Length } from '../utils/cp1252';
 import {
   allowsExpansion,
+  availableMissions,
   checkSettings,
   FIELD_LABELS,
   fieldRule,
@@ -276,7 +298,7 @@ import {
   formFrom,
   GAME_NAME_MAX,
   GAME_PASSWORD_MAX,
-  initialGame,
+  initialDataSet,
   initialRotation,
   type IntField,
   type SettingsErrors,
@@ -328,7 +350,7 @@ const NUMBER_FIELDS: { field: IntField; unit?: string; hint?: string; noLimit?: 
 // The fields in the order the page shows them: the first refused one takes
 // the keyboard.
 const FIELD_ORDER: SettingsField[] = [
-  'game',
+  'data_set_id',
   'game_name',
   'game_password',
   'max_players',
@@ -338,37 +360,48 @@ const FIELD_ORDER: SettingsField[] = [
   'respawn',
   'start_delay',
   'team_ff',
-  'expansion',
+  'expansion_id',
   'missions',
 ];
 
 // The game a fresh form picks (the last server's while still offered), and
-// the rotation it begins with for each game: the last server's when it ran
-// that game (each mission once, kept to the game's list), else the game's own.
-const firstGame = initialGame(props.previous, props.dataSets);
+// the rotation it begins with for each game and expansion: the last server's
+// when it ran that game (each mission once, kept to the data's list), else
+// every mission the data holds.
+const firstDataSet = initialDataSet(props.previous, props.dataSets);
 const previousGameGone =
-  props.previous !== null && props.dataSets.length > 0 && firstGame !== props.previous.game;
-function rotationFor(game: string) {
-  return initialRotation(props.previous, findDataSet(props.dataSets, game));
+  props.previous !== null && props.dataSets.length > 0 && firstDataSet !== props.previous.data_set_id;
+function rotationFor(dataSetId: number, expansionId: number | null) {
+  return initialRotation(props.previous, findDataSet(props.dataSets, dataSetId), expansionId);
 }
 
-const form = reactive(
-  formFrom(props.previous, findDataSet(props.dataSets, firstGame), rotationFor(firstGame).missions),
-);
-const dataSet = computed(() => findDataSet(props.dataSets, form.game));
+const firstForm = formFrom(props.previous, findDataSet(props.dataSets, firstDataSet), []);
+firstForm.missions = rotationFor(firstDataSet, firstForm.expansion_id).missions;
+const form = reactive(firstForm);
+const dataSet = computed(() => findDataSet(props.dataSets, form.data_set_id));
 const expansions = computed<HostedExpansionOption[]>(() => dataSet.value?.expansions ?? []);
-// The last server's missions the picked game's rotation left out, said once
+const missions = computed(() => availableMissions(dataSet.value, form.expansion_id));
+// The last server's missions the picked data's list left out, said once
 // above the picker.
-const droppedMissions = computed(() => rotationFor(form.game).dropped);
+const droppedMissions = computed(() => rotationFor(form.data_set_id, form.expansion_id).dropped);
 
 // Another game: its expansions, ranges and missions. An expansion it lacks
-// goes back to its base game, and the rotation starts again from its own.
+// goes back to its base game, and the rotation starts again from the data's.
 watch(
-  () => form.game,
-  (game) => {
-    const picked = findDataSet(props.dataSets, game);
-    if (!picked || !allowsExpansion(picked, form.expansion)) form.expansion = '';
-    form.missions = rotationFor(game).missions;
+  () => form.data_set_id,
+  (id) => {
+    const picked = findDataSet(props.dataSets, id);
+    if (!picked || !allowsExpansion(picked, form.expansion_id)) form.expansion_id = null;
+    form.missions = rotationFor(id, form.expansion_id).missions;
+  },
+);
+
+// Another expansion: its missions join (or leave) the rotation's list, so
+// the rotation starts again from the data's.
+watch(
+  () => form.expansion_id,
+  (expansionId) => {
+    form.missions = rotationFor(form.data_set_id, expansionId).missions;
   },
 );
 

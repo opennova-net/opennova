@@ -67,6 +67,9 @@ export function fleetServer(id: number, overrides: Partial<FleetServer> & Partia
     slot: 3,
     game_port: 32771,
     players: 5,
+    base_tree_id: 10,
+    expansion_tree_id: null,
+    outdated: false,
     ...overrides,
   };
 }

@@ -17,10 +17,16 @@
     <dl class="grid gap-x-6 gap-y-2 rounded-panel border border-border bg-panel p-4 text-sm sm:grid-cols-[auto_1fr]">
       <dt class="text-ink-muted">{{ FIELD_LABELS.game_name }}</dt>
       <dd class="break-words text-ink">{{ server.settings.game_name }}</dd>
-      <dt class="text-ink-muted">{{ FIELD_LABELS.game }}</dt>
-      <dd class="text-ink">{{ server.game_display_name || server.settings.game }}</dd>
-      <dt class="text-ink-muted">{{ FIELD_LABELS.expansion }}</dt>
-      <dd class="text-ink">{{ server.expansion_display_name || server.settings.expansion || 'Base game' }}</dd>
+      <dt class="text-ink-muted">{{ FIELD_LABELS.data_set_id }}</dt>
+      <dd class="text-ink">
+        {{ server.data_set?.display_name || server.game_display_name || 'Unknown game' }}
+        <span v-if="server.data.base" class="text-ink-muted">{{ server.data.base.version }}</span>
+      </dd>
+      <dt class="text-ink-muted">{{ FIELD_LABELS.expansion_id }}</dt>
+      <dd class="text-ink">
+        {{ server.expansion?.display_name || server.expansion_display_name || 'Base game' }}
+        <span v-if="server.data.expansion" class="text-ink-muted">{{ server.data.expansion.version }}</span>
+      </dd>
       <dt class="text-ink-muted">{{ FIELD_LABELS.max_players }}</dt>
       <dd class="text-ink">{{ server.settings.max_players }}</dd>
       <dt class="text-ink-muted">{{ FIELD_LABELS.game_password }}</dt>

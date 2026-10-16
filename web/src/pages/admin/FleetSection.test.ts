@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import FleetSection from './FleetSection.vue';
 import { fetchHostedFleet, machineAction, rollFleet, stopAllFleetServers, stopFleetServer } from '../../api/admin';
+import { updateAllServers } from '../../api/dataSets';
 import { fleetResponse, fleetServer, machine as fleetMachine } from '../../test/adminFixtures';
 import { testRouter } from '../../test/router';
 
@@ -12,12 +13,14 @@ vi.mock('../../api/admin', () => ({
   stopAllFleetServers: vi.fn(),
   stopFleetServer: vi.fn(),
 }));
+vi.mock('../../api/dataSets', () => ({ updateAllServers: vi.fn() }));
 
 const fleet = vi.mocked(fetchHostedFleet);
 const machine = vi.mocked(machineAction);
 const roll = vi.mocked(rollFleet);
 const stopAll = vi.mocked(stopAllFleetServers);
 const stopOne = vi.mocked(stopFleetServer);
+const updateAll = vi.mocked(updateAllServers);
 
 describe('FleetSection', () => {
   let wrapper: ReturnType<typeof mount> | null = null;
@@ -76,6 +79,51 @@ describe('FleetSection', () => {
     expect(rows[0].get('th a').attributes('href')).toBe('/admin/fleet/1');
     expect(rows[1].text()).toContain('Not placed');
     expect(rows[1].text()).toContain('Not listed');
+  });
+
+  it("shows each server's data, and whether newer waits", async () => {
+    fleet.mockResolvedValue({
+      ok: true,
+      value: fleetResponse({
+        servers: [
+          fleetServer(1, { outdated: true }),
+          fleetServer(2, {
+            expansion: { id: 2, code: 'jox01', display_name: 'Escalation' },
+            data: { base: { tree_id: 10, version: '1.7.5.5' }, expansion: { tree_id: 12, version: '1.7.5.5' } },
+            expansion_tree_id: 12,
+            update_requested: true,
+            outdated: true,
+          }),
+          fleetServer(3, { base_tree_id: null, machine_ref: null, state: 'requested' }),
+        ],
+      }),
+    });
+    const page = await mountSection();
+    const servers = page.findAll('tr.fleet-server-row');
+    expect(servers[0].get('.fleet-server-data').text()).toContain('1.7.5.5');
+    expect(servers[0].get('.fleet-server-data').text()).toContain('Outdated');
+    expect(servers[1].get('.fleet-server-data').text()).toContain('Escalation 1.7.5.5');
+    expect(servers[1].get('.fleet-server-data').text()).toContain('Update requested');
+    expect(servers[1].get('.fleet-server-data').text()).not.toContain('Outdated');
+    expect(servers[2].get('.fleet-server-data').text()).toBe('Not pinned');
+  });
+
+  it('updates every outdated server after a confirmation, and offers it only while one is', async () => {
+    updateAll.mockResolvedValue({ ok: true, value: 1 });
+    const page = await mountSection();
+    const button = () => page.findAll('button').find((b) => b.text() === 'Update outdated servers…')!;
+    expect((button().element as HTMLButtonElement).disabled).toBe(true);
+
+    fleet.mockResolvedValue({ ok: true, value: fleetResponse({ servers: [fleetServer(1, { outdated: true })] }) });
+    await page.findAll('button').find((b) => b.text() === 'Refresh')!.trigger('click');
+    await flushPromises();
+    expect((button().element as HTMLButtonElement).disabled).toBe(false);
+    await button().trigger('click');
+    await flushPromises();
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('Update 1 outdated server?'));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('its players drop'));
+    expect(updateAll).toHaveBeenCalledWith();
+    expect(page.get('[role="status"]').text()).toBe('1 server is updating.');
   });
 
   it('filters by owner and state', async () => {
