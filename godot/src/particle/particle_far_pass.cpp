@@ -8,19 +8,9 @@
 #include <godot_cpp/variant/typed_array.hpp>
 
 #include "render/visual_layers.h"
+#include "util/color_convert.h"
 
 namespace godot {
-
-namespace {
-
-Color unpack_argb_bytes(std::uint32_t p_value) {
-	return Color(static_cast<float>((p_value >> 16) & 0xffu) / 255.0f,
-			static_cast<float>((p_value >> 8) & 0xffu) / 255.0f,
-			static_cast<float>(p_value & 0xffu) / 255.0f,
-			static_cast<float>((p_value >> 24) & 0xffu) / 255.0f);
-}
-
-} // namespace
 
 ParticleFarPass::Run &ParticleFarPass::run_at(Node *p_owner, std::size_t p_index) {
 	while (runs_.size() <= p_index) {
@@ -81,7 +71,7 @@ void ParticleFarPass::upload(Node *p_owner,
 						p_draw_list.vertices[first_vertex + index];
 				vertices[index] = Vector3(source.x, source.y, source.z);
 				uvs[index] = Vector2(source.u, source.v);
-				colors[index] = unpack_argb_bytes(source.primary_color);
+				colors[index] = opennova::color_from_argb(source.primary_color);
 				// The SPECULAR colour as RGBA8 in CUSTOM0.
 				custom[index * 4u + 0] = static_cast<std::uint8_t>((source.secondary_color >> 16) & 0xffu);
 				custom[index * 4u + 1] = static_cast<std::uint8_t>((source.secondary_color >> 8) & 0xffu);
