@@ -480,6 +480,18 @@ void test_set() {
 	std::printf("set: awake %d sleeping %d started %d\n", st.awake, st.sleeping, st.started);
 	expect(st.awake <= RagdollSet::kMaxAwake, "no more than the budget step at once");
 	expect(st.started == RagdollSet::kMaxAwake + 4, "every death still gets its ragdoll");
+	// Every corpse's hips drop a tenth of a stature, past the drift that wakes a sleeper:
+	// the sleepers the burst put down wake only into the budget.
+	const Vec3 lower{ anchor.x, anchor.y - 0.1f * rig->height, anchor.z };
+	for (uint32_t k = 100; k < 100 + RagdollSet::kMaxAwake + 4; ++k) {
+		many.observe(head_for(k, kShot));
+		many.feed(k, Xform{}, lower);
+	}
+	many.step(1, ground);
+	const RagdollStats drifted = many.stats();
+	std::printf("set after the drift: awake %d sleeping %d\n", drifted.awake, drifted.sleeping);
+	expect(drifted.awake <= RagdollSet::kMaxAwake, "a drifting sleeper wakes only into the budget");
+	expect(drifted.awake + drifted.sleeping == RagdollSet::kMaxAwake + 4, "...and every ragdoll is kept");
 
 	set.set_enabled(false);
 	const RagdollStats off = set.stats();

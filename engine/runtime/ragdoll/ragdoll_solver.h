@@ -48,7 +48,13 @@ public:
 
 	bool started() const { return rig_ != nullptr; }
 	bool asleep() const { return asleep_; }
+	// Put to sleep at the anchor it last followed.
 	void sleep();
+	// Whether a sleeper's anchor has drifted past the distance that wakes it.
+	// The embedder decides whether it does (RagdollSet keeps its awake budget):
+	// step() never wakes a sleeper itself.
+	bool drifted(const Vec3 &anchor) const;
+	void wake();
 	bool failed() const { return failed_; }
 	int age_ticks() const { return age_; }
 	// The world pivot of a simulated bone's body (tests and probes).
