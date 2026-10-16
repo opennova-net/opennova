@@ -38,7 +38,7 @@ inline constexpr int kObjectTexDetailFull = 3;
 // stores one flag word for slot 1, one for slot 2 and one for slots 8 and 9 (level 0: two halvings each;
 // 1: one, one and two; 2: none, one and one; 3 and up: none), and the stage loader passes the slot's word
 // as the creation flags, slots 3 to 7 (the normal maps and the height producers) none
-// [orig: Render_SetObjectTexDetailFlags @ 0x5B1F40; Material_LoadStageTexture @ 0x5B16F4..0x5B1723, the slot table
+// [orig: Material_SetTextureDetailLoadFlags @ 0x5B1F40; Material_LoadStageTexture @ 0x5B16F4..0x5B1723, the slot table
 // @ 0x5B181C].
 uint32_t object_texdetail_flags(int level, uint8_t slot);
 

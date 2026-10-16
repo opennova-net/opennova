@@ -30,7 +30,7 @@ uint32_t flag_cap(uint32_t flags, uint32_t max_side) {
 
 } // namespace
 
-// [orig: Render_SetObjectTexDetailFlags @ 0x5B1F40: level 0 stores 0x20000 in all three words
+// [orig: Material_SetTextureDetailLoadFlags @ 0x5B1F40: level 0 stores 0x20000 in all three words
 // (@ 0x5B1F4F..0x5B1F59); 1 stores 0x10000, 0x10000, 0x20000 (@ 0x5B1F69..0x5B1F73); 2 stores 0, 0x10000,
 // 0x10000 (@ 0x5B1F81..0x5B1F93); any other 0 in all three (@ 0x5B1F81, @ 0x5B1F99..0x5B1F9F).
 // Material_LoadStageTexture @ 0x5B16F4..0x5B1723: the row's slot byte (+0x10) less one through the table

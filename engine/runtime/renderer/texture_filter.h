@@ -84,7 +84,7 @@ inline constexpr uint32_t kTextureFlagDeviceFilter = 0x8;
 // The switch leaves the mode alone for a word outside 0..3, which the load's
 // clamp never lets through; the mode before the first terrain frame is the
 // zero-initialised 0, which filters as mode 1.
-// [orig: Terrain_RenderSkyboxPass @ 0x610BE8..0x610C1D (g_SessionTexFilterLevel
+// [orig: Terrain_RenderMainSectorPass @ 0x610BE8..0x610C1D (g_SessionTexFilterLevel
 //  into g_GfxDeviceTexFilterMode, device +0x258); the session copy
 //  apply_session_settings_to_globals @ 0x551565..0x551574]
 inline constexpr int texfilter_device_mode(int session_level, int current_mode) {

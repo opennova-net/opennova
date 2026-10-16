@@ -42,7 +42,7 @@ void check_word() {
 }
 
 void check_device_mode() {
-	// Terrain_RenderSkyboxPass: level + 1; a word outside 0..3 keeps the mode.
+	// Terrain_RenderMainSectorPass: level + 1; a word outside 0..3 keeps the mode.
 	CHECK(texfilter_device_mode(0, 0) == 1);
 	CHECK(texfilter_device_mode(1, 0) == 2);
 	CHECK(texfilter_device_mode(2, 0) == 3);

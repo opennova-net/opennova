@@ -90,7 +90,8 @@ MaterialTextureSource material_texture_source(std::string_view name, uint8_t typ
 		if (holds(upper, ".TGA")) return tga_or_sibling(name, exists, loose_first);
 		return {};
 	case 16: case 17: case 18:
-		// [orig: chunk loaders @0x58F350, @0x58F470, @0x58F590]
+		// [orig: Texture_LoadNQ8BChunk @ 0x58F350; Texture_LoadHRZ8Chunk @ 0x58F470;
+		// Texture_LoadTGAAlphaOverlay @ 0x58F590, the AOC8 chunk]
 		return {std::string(name), MaterialTextureReader::Chunk};
 	default:
 		return {};
