@@ -25,6 +25,16 @@ struct Rgb {
 	float b = 0.0f;
 };
 
+// A 0..1 colour packed 0xAARRGGBB, each channel int(v * 255 + 0.5) clamped to a byte, the
+// alpha byte as given.
+inline uint32_t rgb01_to_packed(const Rgb &c, uint32_t alpha = 0) {
+	const auto byte = [](float v) -> uint32_t {
+		const int scaled = static_cast<int>(v * 255.0f + 0.5f);
+		return static_cast<uint32_t>(scaled < 0 ? 0 : (scaled > 255 ? 255 : scaled));
+	};
+	return (byte(c.r) << 16) | (byte(c.g) << 8) | byte(c.b) | ((alpha & 0xFFu) << 24);
+}
+
 // A packed 0xRRGGBB colour as 0..1 floats.
 inline Rgb packed_to_rgb01(uint32_t packed) {
 	Rgb c;

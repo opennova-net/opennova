@@ -30,13 +30,6 @@ uint32_t nonnegative_scaled(float value, double scale) noexcept {
 	return static_cast<uint32_t>(std::llround(scaled));
 }
 
-uint32_t pack_rgb(const Rgb &c) noexcept {
-	const auto byte = [](float v) -> uint32_t {
-		return static_cast<uint32_t>(std::clamp(static_cast<int>(v * 255.0f + 0.5f), 0, 255));
-	};
-	return (byte(c.r) << 16) | (byte(c.g) << 8) | byte(c.b);
-}
-
 } // namespace
 
 world::WeatherSeed weather_seed_from_config(const Config &config, const bms::Header &header) {
@@ -52,7 +45,7 @@ world::WeatherSeed weather_seed_from_config(const Config &config, const bms::Hea
 			tod_advance_per_tick(static_cast<int>(header.minutes_per_day)));
 	seed.fog_type = config.fog_type;
 	// g_EnvLightningColor takes the parser's envscaled byte color.
-	seed.lightning_color = pack_rgb(EnvironmentState::scale_global_color(
+	seed.lightning_color = rgb01_to_packed(EnvironmentState::scale_global_color(
 			config.lightning_rgb, config.envscale));
 	seed.wind_scale = 256;
 	seed.tod_keyframed = !config.keyframes.empty();
