@@ -1195,6 +1195,19 @@ public:
     ProjectileHit trace_squib(World &world, EntityHandle source,
             const FixedVec3 &start, const FixedVec3 &end);
 
+    // The sun glare's fine rays and the water glint's eye ray ask the same walker for a
+    // boolean over pools 2, 1 and 0, the local player excluded: an IntContext ray of radius 0
+    // (a segment under 16 raw is clear), each pool walked with the walker's include arg 1 (a
+    // NoTarget row blocks), the local player and what stands on it skipped, a def-type-3 row a
+    // bound-sphere hit unless it is on the local player's team within 3 u of `start`, any other
+    // row its TYPE-1 solid. True when nothing blocks; the terrain is the caller's.
+    // [orig: Render_SkyboxSunGlow @0x5ace65..0x5acee8; Environment_UpdateSunGlare
+    //  @0x5ad282..0x5ad305 -> Physics_RaycastIntContext @0x5385E0 (radius 0),
+    //  Physics_RaycastAgainstPoolByIndex @0x539530 (2, 1, 0; include 1), ctx[17] =
+    //  g_LocalPlayerEntity @0x5acea7 / @0x5ad2c4]
+    bool sun_ray_clear_of_entities(const World &world, const FixedVec3 &start,
+            const FixedVec3 &end) const;
+
     ProjectileHit trace_knife_impact(const World &world,
                                      const ProjectileTrace &trace) const;
 
@@ -1786,6 +1799,14 @@ private:
     bool entity_blocks_segment(World &world, EntityHandle candidate,
                                const CollisionRay &ray, int32_t radius,
                                int32_t broad_r);
+    // One pool row against the walker's ray [orig: Physics_RaycastAgainstEntityPool @0x538720]:
+    // a row with no def or bound radius, `excluded` itself, a flags-1 row and a row standing on
+    // `excluded` pass; then the bound sphere against the ray's box and line (the walker's ray
+    // radius is 0); then a def-type-3 row is a hit unless it is on `excluded_row`'s team within
+    // 3 u of the ray's start (@0x5389B1..0x5389FB), any other row its TYPE-1 solid's clip.
+    bool pool_row_hits_ray(const World &world, EntityHandle handle, const Entity &e,
+                           const CollisionRay &ray, EntityHandle excluded,
+                           const Entity *excluded_row) const;
     bool candidate_slice_segment_hits_solid(
             World &world, const EntityHandle *slice, int32_t slice_count,
             EntityHandle source_registry_twin, const int32_t a[3],

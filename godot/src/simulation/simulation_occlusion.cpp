@@ -229,6 +229,17 @@ float Simulation::sun_quality_factor(int p_quality) const {
 	return opennova::renderer::sun_visibility_factor(4 - p_quality);
 }
 
+bool Simulation::sun_ray_clear_of_entities(
+		const float p_from_mission[3], const float p_to_mission[3]) const {
+	if (!kernel_)
+		return true;
+	using opennova::world::to_fixed;
+	return kernel_->collision.sun_ray_clear_of_entities(kernel_->world,
+			{ to_fixed(p_from_mission[0]), to_fixed(p_from_mission[1]),
+					to_fixed(p_from_mission[2]) },
+			{ to_fixed(p_to_mission[0]), to_fixed(p_to_mission[1]), to_fixed(p_to_mission[2]) });
+}
+
 // The per-drawn-entity lighting feed (D-RLIT-3 plus the interior lerp): the
 // walk, the two identity domains and the per-identity diff are the engine's
 // (inmatch/role_feeds.h EntityLightingFeed); this leg maps the light

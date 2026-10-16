@@ -882,6 +882,9 @@ void Celestial::_advance_glare_occlusion(const opennova::env::EnvironmentState &
 			p_state.fog_level(),
 			[this](const opennova::env::Vec3 &p_from, const opennova::env::Vec3 &p_to) {
 				return _segment_clear(mission_to_godot(p_from), mission_to_godot(p_to));
+			},
+			[this](const opennova::env::Vec3 &p_from, const opennova::env::Vec3 &p_to) {
+				return _entities_clear(p_from, p_to);
 			});
 }
 
@@ -890,7 +893,8 @@ void Celestial::_advance_water_glint(
 		const Vector3 &p_cam_pos, const Vector3 &p_sun_dir,
 		const Vector3 &p_forward, Body &p_body) {
 	// The glint law is the engine's advance_water_glint (celestial_frame.h);
-	// this leg owns the terrain rays and the model writes. No water = no glint.
+	// this leg answers its terrain and entity rays and owns the model writes.
+	// No water = no glint.
 	if (p_body.model == nullptr) {
 		return;
 	}
@@ -904,6 +908,9 @@ void Celestial::_advance_water_glint(
 			godot_to_mission(p_forward), water_glint_,
 			[this](const opennova::env::Vec3 &a, const opennova::env::Vec3 &b) {
 				return _segment_clear(mission_to_godot(a), mission_to_godot(b));
+			},
+			[this](const opennova::env::Vec3 &a, const opennova::env::Vec3 &b) {
+				return _entities_clear(a, b);
 			});
 	const Vector3 mirrored = mission_to_godot(frame.mirrored_sun);
 	p_body.model->set_global_position(p_cam_pos + mirrored * 128.0f);
@@ -931,6 +938,9 @@ void Celestial::_advance_inset_water_glint(const opennova::env::EnvironmentState
 			godot_to_mission(forward), water_glint_,
 			[this](const opennova::env::Vec3 &a, const opennova::env::Vec3 &b) {
 				return _segment_clear(mission_to_godot(a), mission_to_godot(b));
+			},
+			[this](const opennova::env::Vec3 &a, const opennova::env::Vec3 &b) {
+				return _entities_clear(a, b);
 			});
 	inset_glint_.model = p_body.model;
 	inset_glint_.drawn = frame.drawn;

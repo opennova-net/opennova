@@ -2256,13 +2256,13 @@ public:
 	const std::vector<opennova::inmatch::EntityLightingChange> &draw_lighting_changes(
 			const Vector3 &p_light_dir);
 	int get_local_player_sun_quality() const { return present_.entity_lighting.local_quality; }
-	// Quality (1..4) -> the effectScale the render-state stack multiplies —
-	// engine-owned so the mapping has ONE writer (renderer::
-	// sun_visibility_factor carries the Entity_ComputeSunVisibility cite,
-	// see docs/render/render-lighting-re.md). Both
-	// presentation consumers (the occlusion sun feed and the local-player
-	// body) call this instead of re-deriving the 0.25 step.
+	// Quality (1..4) -> the render-state stack's effectScale, ONE writer (renderer::
+	// sun_visibility_factor, its cite): the occlusion sun feed and the local-player body call this.
 	float sun_quality_factor(int p_quality) const;
+	// The glare's fine rays and the glint's eye ray: no entity of the mission blocks the segment
+	// between two mission points (world::CollisionWorld::sun_ray_clear_of_entities). Native only.
+	bool sun_ray_clear_of_entities(
+			const float p_from_mission[3], const float p_to_mission[3]) const;
 	// The present pass's visibility intent for one placed entity — the
 	// occlusion release edge lands a node on the sim's CURRENT visibility so a
 	// hidden entity never flashes for a frame.

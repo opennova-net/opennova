@@ -13,6 +13,7 @@
 #include <godot_cpp/variant/node_path.hpp>
 
 #include <array>
+#include <functional>
 #include <memory>
 #include <unordered_map>
 
@@ -52,6 +53,14 @@ public:
 	// The loaded terrain for the glare occlusion rays; no terrain =
 	// unobstructed.
 	void set_terrain_data(const Ref<TerrainData> &p_data);
+	// The entities' line of sight between two mission points for the glare's
+	// fine rays and the glint's eye ray (true = nothing blocks): the running
+	// mission's pool walk (world::CollisionWorld::sun_ray_clear_of_entities),
+	// which the game world installs. Unset (an editor viewport, no mission) =
+	// nothing blocks. C++ only.
+	using EntitiesClear =
+			std::function<bool(const opennova::env::Vec3 &, const opennova::env::Vec3 &)>;
+	void set_entities_clear(EntitiesClear p_clear) { entities_clear_ = std::move(p_clear); }
 	Ref<TerrainData> get_terrain_data() const { return terrain_data_; }
 	void set_resource_root(const Ref<ResourceRoot> &p_root);
 	void set_environment_capture_layer_mask(uint32_t p_mask);
@@ -225,11 +234,16 @@ private:
 	// the redraw's own register value (celestial_frame.h GlareFrame), pushed
 	// to the Q3 registry per surface.
 	void _set_body_q3_pose(Body &p_body, const Ref<ObjectData> &p_data, int32_t p_q3_upl);
-	// Terrain line-of-sight between two points (the glare and water-glint
-	// visibility rays): clear when the raycast misses.
+	// Terrain line-of-sight between two points (the glare's gate ray and the
+	// water glint's two terrain rays): clear when the raycast misses.
 	bool _segment_clear(const Vector3 &p_from, const Vector3 &p_to);
+	// The entities' line of sight between two mission points (entities_clear_;
+	// clear when unset).
+	bool _entities_clear(const opennova::env::Vec3 &p_from, const opennova::env::Vec3 &p_to) const {
+		return !entities_clear_ || entities_clear_(p_from, p_to);
+	}
 	// One frame of the glare occlusion at this camera: the engine's ray
-	// sequence (GlareOcclusion::advance) over _segment_clear.
+	// sequence (GlareOcclusion::advance) over _segment_clear and _entities_clear.
 	void _advance_glare_occlusion(const opennova::env::EnvironmentState &p_state,
 			const Vector3 &p_cam_pos, const Vector3 &p_sun_dir);
 	// One frame of the water-glint leg (engine: formats/env/env_celestial.h):
@@ -247,6 +261,7 @@ private:
 
 	NodePath environment_path_;
 	Ref<TerrainData> terrain_data_;
+	EntitiesClear entities_clear_;
 	Ref<ResourceRoot> resource_root_;
 	std::unique_ptr<GlareOcclusion> glare_occlusion_;
 	HashMap<String, Body> bodies_;
