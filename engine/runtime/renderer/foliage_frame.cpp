@@ -454,9 +454,8 @@ const FoliageDrawList &FoliageFrameCompiler::compile(
 		command.alpha_reference =
 				static_cast<float>(first.alpha_reference) / 255.0f;
 		command.far_side = first.far_side;
-		command.render_rung = first.far_side ? kFoliageMaskFarSideRung
-		                                     : kFoliageMaskCameraSideRung;
-		command.sorting_offset = kFoliageMaskSortingOffset;
+		command.render_rung = first.far_side ? kRungFoliageMaskFarSide
+		                                     : kRungFoliageMaskCameraSide;
 		command.first_instance = first_instance;
 		command.instance_count = instance_count;
 		// c9 = (sin(++counter * 0.001) * 0.08, 1, 0, 0): the counter

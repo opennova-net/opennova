@@ -629,8 +629,8 @@ func test_duplicate_silhouette_anchors_submit_twice() -> void:
 
 
 # The MODEL depth masks are immediate draws inside the BySide waves: the far
-# wave's lead the far-side alpha rung, the camera wave's lead the scars, and
-# a sorting offset beyond any view depth keeps each ahead of its rung.
+# wave's take the rung just before the far-side alpha, the camera wave's the
+# rung just before the scars, with no sorting offset.
 func test_model_masks_lead_their_side_rung() -> void:
 	_foliage_index = 1
 	_dispatcher.silhouette_anchors = PackedVector3Array([Vector3(0.0, 0.0, -64.0)])
@@ -642,12 +642,14 @@ func test_model_masks_lead_their_side_rung() -> void:
 	for draw_value in far_draws:
 		var draw := draw_value as Dictionary
 		assert_true(bool(draw.far_side))
-		assert_eq(int(draw.render_priority), ObjectShaderCache.RENDER_RUNG_ALPHA_FAR_SIDE)
+		assert_eq(int(draw.render_priority), ObjectShaderCache.RENDER_RUNG_FOLIAGE_MASK_FAR_SIDE)
 		assert_eq(int((draw.material as ShaderMaterial).render_priority),
-			ObjectShaderCache.RENDER_RUNG_ALPHA_FAR_SIDE,
+			ObjectShaderCache.RENDER_RUNG_FOLIAGE_MASK_FAR_SIDE,
 			"the bound material carries the rung")
-		assert_lt(float(draw.sorting_offset), -100000.0,
-			"the masks sort ahead of every far-side alpha draw")
+		assert_lt(ObjectShaderCache.RENDER_RUNG_FOLIAGE_MASK_FAR_SIDE,
+			ObjectShaderCache.RENDER_RUNG_ALPHA_FAR_SIDE,
+			"the masks draw ahead of every far-side alpha draw")
+		assert_eq(float(draw.sorting_offset), 0.0)
 
 	# Water at -5: the anchor stands above it, on the camera side.
 	_dispatcher.set_water_height(-5.0)
@@ -657,9 +659,10 @@ func test_model_masks_lead_their_side_rung() -> void:
 	for draw_value in camera_draws:
 		var draw := draw_value as Dictionary
 		assert_false(bool(draw.far_side))
-		assert_eq(int(draw.render_priority), ObjectShaderCache.RENDER_RUNG_SCARS)
+		assert_eq(int(draw.render_priority), ObjectShaderCache.RENDER_RUNG_FOLIAGE_MASK_CAMERA_SIDE)
 		assert_eq(int((draw.material as ShaderMaterial).render_priority),
-			ObjectShaderCache.RENDER_RUNG_SCARS)
+			ObjectShaderCache.RENDER_RUNG_FOLIAGE_MASK_CAMERA_SIDE)
+		assert_eq(float(draw.sorting_offset), 0.0)
 
 
 # The detail passes take their own rungs by the patch side of the water, and

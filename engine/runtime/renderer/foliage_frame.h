@@ -129,11 +129,9 @@ bool foliage_entity_far_side(float entity_y, float camera_y, float water_height)
 // inside BySide(camera, 0) @ 0x5c9638, after the water pass @ 0x5c95dc and
 // before the scars [orig: Terrain_RenderWorldScene @ 0x5c93a0 (the
 // Scar_DrawBatches call @ 0x5c9658)].
-// They lead the first rung drawn after them, sorted ahead of everything in
-// it by a sorting offset beyond any view depth.
-inline constexpr int kFoliageMaskFarSideRung = kRungAlphaFarSide;
-inline constexpr int kFoliageMaskCameraSideRung = kRungScars;
-inline constexpr float kFoliageMaskSortingOffset = -1.0e6f;
+// They take the ladder's own rungs, kRungFoliageMaskFarSide and
+// kRungFoliageMaskCameraSide (render_order.h), immediately before the far-side
+// alpha and the scars.
 // The near secondary LOW draw follows its HIGH draw of the same geometry
 // [orig: Foliage_RenderDetailPatches: the primary draw @ 0x60a653, the
 // secondary @ 0x60a659..0x60a694]; an embedder that
