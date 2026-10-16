@@ -157,10 +157,8 @@ void FirePresenter::present_slot_sounds(const std::vector<opennova::world::Sound
 		if (ev.set_name[0] == '\0') {
 			continue;
 		}
-		// Mission-frame 16.16 -> godot (x, z, -y), the fire drain's mapping.
-		const Vector3 pos(static_cast<float>(ev.pos[0]) / 65536.0f,
-				static_cast<float>(ev.pos[2]) / 65536.0f,
-				static_cast<float>(-ev.pos[1]) / 65536.0f);
+		// Mission-frame 16.16 -> godot (util/axes.h).
+		const Vector3 pos = godot_from_fixed3(ev.pos);
         const int source_id = sim() ? sim()->sound_source_bms_id(ev.source_handle) : 0;
         const int sound_id = static_cast<int>(
                 opennova::audio::oneshot_sound_id(ev.source_handle, source_id));

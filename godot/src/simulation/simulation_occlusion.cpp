@@ -710,15 +710,13 @@ int Simulation::debug_spawn_round(const Vector3 &p_from_godot, const Vector3 &p_
 	double sz = dz / len;
 	if (sz > 1.0) sz = 1.0;
 	if (sz < -1.0) sz = -1.0;
-	constexpr double kBamPerRad = 4294967296.0 / (2.0 * 3.14159265358979323846);
 	opennova::world::RoundSpawnParams params;
 	params.owner = kernel_->world.cached.local_player;
 	params.shooter_handle = params.owner.valid() ? params.owner.packed : 0xFFFF;
 	params.ammo_index = ammo_index;
 	params.origin = opennova::world::Vec3{p_from_godot.x, -p_from_godot.z, p_from_godot.y};
-	params.dir_yaw_bam =
-	    static_cast<int32_t>(std::llround(std::atan2(dy, dx) * kBamPerRad));
-	params.dir_pitch_bam = static_cast<int32_t>(std::llround(std::asin(sz) * kBamPerRad));
+	params.dir_yaw_bam = opennova::io::bam_from_radians(std::atan2(dy, dx));
+	params.dir_pitch_bam = opennova::io::bam_from_radians(std::asin(sz));
 	return kernel_->world.round_sim.spawn(kernel_->world, params);
 }
 

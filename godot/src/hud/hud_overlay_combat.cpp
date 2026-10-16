@@ -82,8 +82,7 @@ void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transf
 		HudProjectedPoint out;
 		if (!has_camera || !valid)
 			return out;
-		const Vector3 position = mission_to_godot(opennova::world::Vec3{
-				point[0] / 65536.0f, point[1] / 65536.0f, point[2] / 65536.0f });
+		const Vector3 position = godot_from_fixed3(point);
 		const Vector3 local = camera.xform_inv(position);
 		const Plane clip = projection.xform4(Plane(local, 1));
 		out.clip = -local.z < projection.get_z_near() ? 16 : 0;

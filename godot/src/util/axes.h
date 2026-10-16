@@ -4,6 +4,7 @@
 #include <godot_cpp/variant/transform3d.hpp>
 #include <godot_cpp/variant/vector3.hpp>
 
+#include <base/io/fixed.h> // kFp16OneD
 #include <formats/env/env.h>
 #include <runtime/mission/placement_traits.h>
 
@@ -60,6 +61,27 @@ inline Vector3 mission_to_godot(const std::array<float, 3> &v) {
 // land in Godot world space (the dev tools' overlay view-projection).
 inline Transform3D mission_to_godot_transform() {
 	return Transform3D(Basis(Vector3(1, 0, 0), Vector3(0, 0, -1), Vector3(0, 1, 0)), Vector3());
+}
+
+// The same map from a mission 16.16 triple: each axis divided by 65536 in
+// double, then rounded to float (the division is exact, so the float the
+// division by 65536.0f of the float-converted word gives is the same).
+inline Vector3 godot_from_fixed3(const int32_t p[3]) {
+	return Vector3(static_cast<float>(p[0] / opennova::io::kFp16OneD),
+			static_cast<float>(p[2] / opennova::io::kFp16OneD),
+			static_cast<float>(-p[1] / opennova::io::kFp16OneD));
+}
+inline Vector3 godot_from_fixed3(const std::array<int32_t, 3> &p) {
+	return godot_from_fixed3(p.data());
+}
+
+// Its inverse into a mission 16.16 triple, each axis truncated toward zero
+// (the int conversion of the scaled float), the rule every binding site that
+// rebuilds a 16.16 point from a Godot position uses.
+inline void fixed3_from_godot(const Vector3 &v, int32_t out[3]) {
+	out[0] = static_cast<int32_t>(v.x * 65536.0f);
+	out[1] = static_cast<int32_t>(-v.z * 65536.0f);
+	out[2] = static_cast<int32_t>(v.y * 65536.0f);
 }
 
 // The inverse, into any {x, y, z} float struct: env::Vec3 by default,

@@ -123,7 +123,7 @@ Vector3 Simulation::local_player_viewmodel_rotation_bias_deg() const {
 	int32_t bias[3];
 	opennova::world::local_player_viewmodel_rotation_bias(&kernel_->world,
 			kernel_->local.weapon, kernel_->local.view, bias);
-	constexpr double degrees_per_bam = 360.0 / 4294967296.0;
+	constexpr double degrees_per_bam = opennova::world::kDegreesPerBam;
 	return Vector3(bias[0] * degrees_per_bam, bias[1] * degrees_per_bam,
 			bias[2] * degrees_per_bam);
 }

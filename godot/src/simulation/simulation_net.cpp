@@ -1131,10 +1131,9 @@ void Simulation::present_wire_body_sounds(int p_type_id, int p_character_id,
 	const int32_t capsule_bottom =
 			kernel_->root_motion.capsule_bottom_at(adm_id, p_anim_state, p_to_phase,
 					/*variant=*/0);
-	// Godot (x, y, z) -> mission (x, -z, y) 16.16, the drain's own convention.
-	const int32_t body[3] = { static_cast<int32_t>(p_pos.x * 65536.0f),
-		                      static_cast<int32_t>(-p_pos.z * 65536.0f),
-		                      static_cast<int32_t>(p_pos.y * 65536.0f) };
+	// Godot -> mission 16.16 (util/axes.h).
+	int32_t body[3];
+	fixed3_from_godot(p_pos, body);
 	opennova::world::wire_body_slot_sounds(kernel_->world, words, n, capsule_bottom,
 			p_type_id, static_cast<uint16_t>(p_character_id),
 			static_cast<uint16_t>(p_wire_handle), p_carrier_handle >= 0, body);

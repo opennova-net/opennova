@@ -184,10 +184,8 @@ Ref<SlotSoundRow> SlotSoundRow::make(const String &p_soundset, const Vector3 &p_
 		int p_slot) {
 	opennova::world::SoundSlotEvent v;
 	v.source_handle = static_cast<uint16_t>(p_handle);
-	// Godot (x, y, z) -> mission-frame 16.16 (x, -z, y).
-	v.pos[0] = static_cast<int32_t>(p_pos.x * 65536.0f);
-	v.pos[1] = static_cast<int32_t>(-p_pos.z * 65536.0f);
-	v.pos[2] = static_cast<int32_t>(p_pos.y * 65536.0f);
+	// Godot -> mission-frame 16.16 (util/axes.h).
+	fixed3_from_godot(p_pos, v.pos);
 	v.slot = static_cast<uint8_t>(p_slot);
 	std::snprintf(v.set_name, sizeof(v.set_name), "%s", p_soundset.utf8().get_data());
 	Ref<SlotSoundRow> out;
@@ -198,10 +196,8 @@ Ref<SlotSoundRow> SlotSoundRow::make(const String &p_soundset, const Vector3 &p_
 
 String SlotSoundRow::get_soundset() const { return String(value_.set_name); }
 Vector3 SlotSoundRow::get_pos() const {
-	// Mission-frame 16.16 -> godot (x, z, -y), the fire drain's mapping.
-	return Vector3(static_cast<float>(value_.pos[0]) / 65536.0f,
-			static_cast<float>(value_.pos[2]) / 65536.0f,
-			static_cast<float>(-value_.pos[1]) / 65536.0f);
+	// Mission-frame 16.16 -> godot (util/axes.h).
+	return godot_from_fixed3(value_.pos);
 }
 
 void SlotSoundRow::_bind_methods() {

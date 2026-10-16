@@ -46,9 +46,9 @@ using namespace sim_internal;
 void Simulation::advance_facial_presentation(const Vector3 &p_camera) {
     if (!kernel_ || !p_camera.is_finite()) return;
     std::vector<opennova::world::FacialDraw> rows;
-    kernel_->world.facials.compile_draws(kernel_->world,
-            static_cast<int32_t>(p_camera.x * 65536.0),
-            static_cast<int32_t>(-p_camera.z * 65536.0),
+    int32_t camera[3];
+    fixed3_from_godot(p_camera, camera);
+    kernel_->world.facials.compile_draws(kernel_->world, camera[0], camera[1],
             kernel_->local.view.camera_mode == 0, rows);
     // JO renders these targets then writes two unused globals. The complete
     // .text/.rdata/.data audit found no texture sink; model materials retain
@@ -618,9 +618,7 @@ Vector3 Simulation::get_entity_position(int p_index) const {
 	AiEntity *e = kernel_->world.ai.at(p_index);
 	if (!e) return Vector3();
 	// mission (x, y, z) 16.16 -> Godot (x, z, -y) world units. [orig render remap: (x, z, -y).]
-	return Vector3(static_cast<float>(e->pos[0] / kFixed16),
-	               static_cast<float>(e->pos[2] / kFixed16),
-	               static_cast<float>(-e->pos[1] / kFixed16));
+	return godot_from_fixed3(e->pos);
 }
 
 float Simulation::get_entity_yaw_deg(int p_index) const {
