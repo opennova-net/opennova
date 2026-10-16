@@ -162,16 +162,17 @@ void EffectScene::_bind_methods() {
 Ref<EffectLoadReport> EffectScene::open(
 		const TypedArray<ParticleFile> &p_files,
 		const Dictionary &p_options) {
+	// Each option absent keeps the engine's own default (EffectSceneConfig).
 	opennova::particle::EffectSceneConfig config;
 	config.simulation_tick_seconds = static_cast<float>(
-			static_cast<double>(p_options.get(
-					"simulation_tick_seconds", 1.0 / 62.5)));
-	config.max_live_groups =
-			capacity_from_option(p_options, "max_live_groups", 1024);
-	config.max_live_emitters =
-			capacity_from_option(p_options, "max_live_emitters", 4096);
-	config.random_seed = static_cast<std::uint32_t>(
-			static_cast<int64_t>(p_options.get("random_seed", 1)));
+			static_cast<double>(p_options.get("simulation_tick_seconds",
+					static_cast<double>(config.simulation_tick_seconds))));
+	config.max_live_groups = capacity_from_option(p_options, "max_live_groups",
+			static_cast<int64_t>(config.max_live_groups));
+	config.max_live_emitters = capacity_from_option(p_options, "max_live_emitters",
+			static_cast<int64_t>(config.max_live_emitters));
+	config.random_seed = static_cast<std::uint32_t>(static_cast<int64_t>(
+			p_options.get("random_seed", static_cast<int64_t>(config.random_seed))));
 
 	config.documents.reserve(static_cast<std::size_t>(p_files.size()));
 	int64_t ignored_document_count = 0;
