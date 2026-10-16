@@ -3,12 +3,13 @@
 // opennova-hostd's agent: one machine's side of the agent protocol
 // (apps/novaworld_common/hosted/agent_protocol.h). It bootstraps once (the
 // one-time token from the machine's user-data redeemed for its long-lived
-// secret, the machine's slots and data sets, all saved owner-only so a restart
-// of the agent never needs the token again), then syncs: every pass it lists
-// its containers, reads their CPU and memory (at most every kStatsIntervalMs)
-// and each slot's egress, reports all of it to the service and does what the
-// reply asks (reconcile.h): starts the containers the machine lacks, stops and
-// removes the ones the reply leaves out. A sync that fails (the service down,
+// secret and the machine's slots, saved owner-only so a restart of the agent
+// never needs the token again), then syncs: every pass it lists its
+// containers, reads their CPU and memory (at most every kStatsIntervalMs) and
+// each slot's egress, reports them to the service and does what the reply asks
+// (reconcile.h): fetches the trees the reply names (tree_store.h), starts the
+// containers the machine lacks, stops and removes the ones the reply leaves
+// out. A sync that fails (the service down,
 // a refusal, a reply that does not read, another protocol) changes nothing:
 // the containers keep running as they are, and the agent keeps reporting; a
 // pass that cannot list its containers syncs to say so and does nothing. The
@@ -22,13 +23,16 @@
 // kDockerCallMs, the listing and the stats before a sync share kReportBudgetMs
 // and the reply's acts kActBudgetMs (what the act's time does not reach waits
 // for the next pass), and an image the machine lacks is pulled in the
-// background: the container waits, reported starting, its files kept here,
-// and starts at the first pass after the pull; a pull that fails, or still
-// runs kPullTimeoutMs on, is the start's failure (exited 125).
+// background, as a tree it lacks is fetched: the container waits, reported
+// starting, its files kept here, and starts at the first pass after the pull
+// or the fetch; a pull that fails, or still runs kPullTimeoutMs on, is the
+// start's failure (exited 125), as a fetch the store gave up on is, whose
+// reason then rides the container's report (ContainerReport::reason).
 
 #include "container_runtime.h"
 #include "egress_counters.h"
 #include "slot_files.h"
+#include "tree_store.h"
 
 #include "net_http.h"
 
@@ -109,11 +113,11 @@ public:
 	// A pull still running this long after it began is ended, a failure.
 	static constexpr uint64_t kPullTimeoutMs = 4 * 60 * 1000;
 
-	// `link`, `runtime` and `slots` must outlive the agent. `make_egress`
-	// builds the egress counters for the machine's slots once it is
-	// bootstrapped; unset (or answering null), every slot reports 0.
+	// `link`, `runtime`, `slots` and `trees` must outlive the agent.
+	// `make_egress` builds the egress counters for the machine's slots once it
+	// is bootstrapped; unset (or answering null), every slot reports 0.
 	Agent(AgentConfig config, ServiceLink &link, ContainerRuntime &runtime, SlotFiles &slots,
-			EgressFactory make_egress = {}, Clock now_ms = {});
+			TreeStore &trees, EgressFactory make_egress = {}, Clock now_ms = {});
 	~Agent();
 
 	// The saved bootstrap, or the token redeemed now and saved. False while
@@ -140,6 +144,7 @@ private:
 	struct FailedStart {
 		int slot = 0;
 		int exit_code = 125;
+		std::string reason; // reported with the exit: why ("" for docker's own failures)
 	};
 
 	bool load_saved();
@@ -159,8 +164,9 @@ private:
 	// Starts `desired` (its image pulled first when the machine lacks it);
 	// false when `deadline` left no time for it (the next pass tries).
 	bool start(const hosted::DesiredContainer &desired, uint64_t deadline);
-	// `desired` waits for its image's pull, its files kept here.
-	void wait_for_image(const hosted::DesiredContainer &desired);
+	// `desired` waits for its image's pull or its trees' fetch (`what` says
+	// which, for the log), its files kept here.
+	void wait(const hosted::DesiredContainer &desired, const std::string &what);
 	// The start failed: reported exited `exit_code`, never made again, and
 	// what the runtime made of it removed, its slot's files too.
 	void start_failed(const hosted::DesiredContainer &desired, int exit_code,
@@ -174,6 +180,7 @@ private:
 	ServiceLink &link_;
 	ContainerRuntime &runtime_;
 	SlotFiles &slots_;
+	TreeStore &trees_;
 	EgressFactory make_egress_;
 	Clock now_;
 
@@ -193,8 +200,8 @@ private:
 	std::map<std::string, FailedStart> failed_starts_; // by name
 	std::map<std::string, uint64_t> pulls_; // image -> when its pull began
 	std::set<std::string> images_; // the images the machine holds, as checked
-	// By name: the desired containers whose image pulls, as the reply that
-	// started them gave them (their files with them).
+	// By name: the desired containers whose image pulls or whose trees fetch,
+	// as the reply that started them gave them (their files with them).
 	std::map<std::string, hosted::DesiredContainer> waiting_;
 	std::set<std::string> refused_logged_; // the desired names whose refusal was logged
 	std::map<std::string, std::pair<std::string, uint64_t>> warnings_; // key -> text, when

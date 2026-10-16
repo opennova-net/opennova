@@ -18,6 +18,29 @@ bool absolute(const std::string &path) {
 	return !path.empty() && path[0] == '/';
 }
 
+// A directory that reaches docker's --mount argument: absolute, of letters,
+// digits and ./_- alone (no comma, which --mount splits on), no "." or ".."
+// part, no trailing slash.
+bool is_bind_path(const std::string &path) {
+	if (!absolute(path) || path.size() > 255 || path.back() == '/')
+		return false;
+	size_t start = 1;
+	while (start <= path.size()) {
+		size_t end = path.find('/', start);
+		if (end == std::string::npos)
+			end = path.size();
+		const std::string part = path.substr(start, end - start);
+		if (part.empty() || part == "." || part == "..")
+			return false;
+		for (const char c : part)
+			if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+						c == '.' || c == '_' || c == '-'))
+				return false;
+		start = end + 1;
+	}
+	return true;
+}
+
 } // namespace
 
 const char *hostd_version() {
@@ -43,9 +66,13 @@ const char *hostd_usage() {
 		   "  --runtime <kind>       docker: each server a docker container (the default);\n"
 		   "                         process: each an opennova-serve child of the agent, on a\n"
 		   "                         machine that is itself a container (the local stack's)\n"
+		   "  --trees-root <path>    the trees the containers' game data is fetched into\n"
+		   "                         (default /opt/game)\n"
 		   "  --docker <path>        the docker CLI (default /usr/bin/docker)\n"
 		   "  --serve <path>         the process runtime's opennova-serve\n"
 		   "                         (default /usr/local/bin/opennova-serve)\n"
+		   "  --aws <path>           the AWS CLI a tree's `s3 sync` runs\n"
+		   "                         (default /usr/local/bin/aws)\n"
 		   "  --iptables <path>      the per-slot egress counters' iptables, or none\n"
 		   "                         (default /usr/sbin/iptables)\n"
 		   "  --ip6tables <path>     their ip6tables where the kernel has IPv6, or none\n"
@@ -85,12 +112,16 @@ ParseOutcome parse_hostd_options(
 			target = &out.state_dir;
 		else if (arg == "--slots-root")
 			target = &out.slots_root;
+		else if (arg == "--trees-root")
+			target = &out.trees_root;
 		else if (arg == "--docker")
 			target = &out.docker;
 		else if (arg == "--serve")
 			target = &out.serve;
 		else if (arg == "--runtime")
 			target = &runtime;
+		else if (arg == "--aws")
+			target = &out.aws;
 		else if (arg == "--iptables")
 			target = &out.iptables;
 		else if (arg == "--ip6tables")
@@ -138,7 +169,7 @@ ParseOutcome parse_hostd_options(
 		error = "--runtime takes docker or process";
 		return ParseOutcome::Error;
 	}
-	for (const std::string *path : { &out.token_file, &out.state_dir, &out.docker, &out.serve }) {
+	for (const std::string *path : { &out.token_file, &out.state_dir, &out.docker, &out.serve, &out.aws }) {
 		if (!absolute(*path)) {
 			error = "every path is absolute: " + *path;
 			return ParseOutcome::Error;
@@ -169,9 +200,13 @@ ParseOutcome parse_hostd_options(
 			return ParseOutcome::Error;
 		}
 	}
-	// It reaches docker's --mount argument, so it holds no comma or odd part.
-	if (!hosted::is_mount_path(out.slots_root)) {
+	// Both reach docker's --mount argument, so they hold no comma or odd part.
+	if (!is_bind_path(out.slots_root)) {
 		error = "--slots-root takes an absolute path of letters, digits and ./_-";
+		return ParseOutcome::Error;
+	}
+	if (!is_bind_path(out.trees_root)) {
+		error = "--trees-root takes an absolute path of letters, digits and ./_-";
 		return ParseOutcome::Error;
 	}
 	return ParseOutcome::Run;

@@ -78,6 +78,18 @@ std::string http_failure(const net::HttpReply &reply) {
 	return "the service answered " + std::to_string(reply.code);
 }
 
+// `text` as a report's reason: printable ASCII alone, at most the protocol's
+// length (a fetch's error is a CLI's line, cut here before the service refuses
+// the report).
+std::string reason_text(std::string text) {
+	for (char &c : text)
+		if (c < 0x20 || c > 0x7E)
+			c = ' ';
+	if (text.size() > hosted::kMaxContainerReasonBytes)
+		text.resize(hosted::kMaxContainerReasonBytes);
+	return text;
+}
+
 } // namespace
 
 // --- the link ------------------------------------------------------------------
@@ -113,11 +125,12 @@ net::HttpReply HttpServiceLink::post(
 // --- the agent -----------------------------------------------------------------
 
 Agent::Agent(AgentConfig config, ServiceLink &link, ContainerRuntime &runtime, SlotFiles &slots,
-		EgressFactory make_egress, Clock now_ms) :
+		TreeStore &trees, EgressFactory make_egress, Clock now_ms) :
 		config_(std::move(config)),
 		link_(link),
 		runtime_(runtime),
 		slots_(slots),
+		trees_(trees),
 		make_egress_(std::move(make_egress)),
 		now_(now_ms ? std::move(now_ms) : Clock(steady_now_ms)) {}
 
@@ -224,8 +237,8 @@ bool Agent::bootstrap() {
 		io::logf(LogLevel::kWarn, "the spent token file %s could not be removed: %s",
 				config_.token_file.c_str(), std::strerror(errno));
 	recovered("bootstrap", "bootstrapped");
-	io::logf(LogLevel::kInfo, "machine %lld bootstrapped: %d slots, %zu data sets, image %s",
-			static_cast<long long>(config_.machine_id), machine_.slots, machine_.data_sets.size(),
+	io::logf(LogLevel::kInfo, "machine %lld bootstrapped: %d slots, image %s",
+			static_cast<long long>(config_.machine_id), machine_.slots,
 			machine_.serve_image.c_str());
 	bootstrapped_now();
 	return true;
@@ -326,7 +339,8 @@ hosted::SyncRequest Agent::report(const std::vector<ContainerInfo> &observed) co
 		reported.insert(c.name);
 		request.containers.push_back(std::move(r));
 	}
-	// A container waiting for its image's pull: starting, on its slot.
+	// A container waiting for its image's pull or its trees' fetch: starting,
+	// on its slot.
 	for (const auto &waiting : waiting_) {
 		if (!reported.insert(waiting.first).second)
 			continue;
@@ -345,6 +359,7 @@ hosted::SyncRequest Agent::report(const std::vector<ContainerInfo> &observed) co
 		r.slot = failed.second.slot;
 		r.state = hosted::ContainerState::Exited;
 		r.exit_code = failed.second.exit_code;
+		r.reason = failed.second.reason;
 		r.egress_bytes = egress_of(failed.second.slot);
 		request.containers.push_back(std::move(r));
 	}
@@ -437,7 +452,7 @@ void Agent::poll_pulls(uint64_t now) {
 			}
 			io::logf(LogLevel::kError, "%s did not start on slot %d: its image did not pull",
 					w->first.c_str(), w->second.slot);
-			failed_starts_[w->first] = { w->second.slot, 125 };
+			failed_starts_[w->first] = { w->second.slot, 125, std::string() };
 			w = waiting_.erase(w);
 		}
 	}
@@ -460,6 +475,10 @@ void Agent::act(
 	std::set<std::string> pulling;
 	for (const auto &p : pulls_)
 		pulling.insert(p.first);
+	// The trees the reply names: fetched where the machine lacks them (one at
+	// a time, in the background), so the plan knows where each stands.
+	trees_.want(reply.trees);
+	const std::map<int64_t, TreeStanding> tree_states = trees_.standings();
 	PlanInput in;
 	in.desired = &desired;
 	in.observed = &observed;
@@ -467,7 +486,7 @@ void Agent::act(
 	in.failed_starts = &failed;
 	in.pulling = &pulling;
 	in.machine_slots = machine_.slots;
-	in.data_sets = &machine_.data_sets;
+	in.trees = &tree_states;
 	in.now_ms = now_();
 	const Plan plan = plan_sync(in);
 
@@ -515,8 +534,26 @@ void Agent::act(
 			io::logf(LogLevel::kWarn, "%s cannot start here: %s", name.c_str(),
 					refused.second.c_str());
 	}
+	// A tree the store gave up on: its containers never ran, reported exited
+	// 125, as any start that failed (nothing of theirs is on the machine yet),
+	// with the fetch's reason, which the service shows the owner.
+	for (const auto &failed_data : plan.data_failed) {
+		const hosted::DesiredContainer &d = desired[failed_data.first];
+		const std::string reason = "its data could not be fetched: " + failed_data.second;
+		io::logf(LogLevel::kError, "%s did not start on slot %d: %s", d.name.c_str(), d.slot,
+				reason.c_str());
+		failed_starts_[d.name] = { d.slot, 125, reason_text(reason) };
+		waiting_.erase(d.name);
+	}
+	for (const size_t index : plan.wait_for_tree) {
+		const hosted::DesiredContainer &d = desired[index];
+		std::string what = "its data (tree " + std::to_string(d.base_tree);
+		if (d.expansion_tree)
+			what += " and tree " + std::to_string(*d.expansion_tree);
+		wait(d, what + ") to fetch");
+	}
 	for (const size_t index : plan.wait_for_image)
-		wait_for_image(desired[index]);
+		wait(desired[index], "its image " + desired[index].image + " to pull");
 	for (const size_t index : plan.start) {
 		if (deferred || !start(desired[index], deadline)) {
 			deferred = true;
@@ -524,10 +561,15 @@ void Agent::act(
 		}
 	}
 
-	// Forget what the reply no longer names, and the stops of containers gone.
+	// Forget what the reply no longer names (the trees too: the store lets go
+	// of one unnamed for a while), and the stops of containers gone.
 	std::set<std::string> desired_names;
 	for (const hosted::DesiredContainer &d : reply.desired)
 		desired_names.insert(d.name);
+	std::set<int64_t> wanted_trees;
+	for (const auto &tree : reply.trees)
+		wanted_trees.insert(tree.first);
+	trees_.gc(wanted_trees);
 	std::set<std::string> observed_names;
 	for (const ContainerInfo &c : observed)
 		observed_names.insert(c.name);
@@ -543,17 +585,16 @@ void Agent::act(
 		delay = hosted::kBusySyncIntervalMs;
 }
 
-void Agent::wait_for_image(const hosted::DesiredContainer &desired) {
+void Agent::wait(const hosted::DesiredContainer &desired, const std::string &what) {
 	if (waiting_.emplace(desired.name, desired).second)
-		io::logf(LogLevel::kInfo, "%s waits for its image %s to pull", desired.name.c_str(),
-				desired.image.c_str());
+		io::logf(LogLevel::kInfo, "%s waits for %s", desired.name.c_str(), what.c_str());
 }
 
 void Agent::start_failed(const hosted::DesiredContainer &desired, int exit_code,
 		const std::string &why, uint64_t deadline) {
 	io::logf(LogLevel::kError, "%s did not start on slot %d: %s", desired.name.c_str(),
 			desired.slot, why.c_str());
-	failed_starts_[desired.name] = { desired.slot, exit_code };
+	failed_starts_[desired.name] = { desired.slot, exit_code, std::string() };
 	waiting_.erase(desired.name);
 	std::string ignored;
 	// A container the runtime made but could not start goes, and its files:
@@ -568,7 +609,7 @@ bool Agent::start(const hosted::DesiredContainer &desired, uint64_t deadline) {
 	// Its image first: one the machine lacks is pulled in the background, and
 	// the container waits for it.
 	if (pulls_.count(desired.image)) {
-		wait_for_image(desired);
+		wait(desired, "its image " + desired.image + " to pull");
 		return true;
 	}
 	if (!images_.count(desired.image)) {
@@ -590,7 +631,7 @@ bool Agent::start(const hosted::DesiredContainer &desired, uint64_t deadline) {
 			}
 			io::logf(LogLevel::kInfo, "pulling %s", desired.image.c_str());
 			pulls_[desired.image] = now_();
-			wait_for_image(desired);
+			wait(desired, "its image " + desired.image + " to pull");
 			return true;
 		}
 		images_.insert(desired.image);
@@ -603,7 +644,7 @@ bool Agent::start(const hosted::DesiredContainer &desired, uint64_t deadline) {
 	spec.slot = desired.slot;
 	spec.image = desired.image;
 	spec.uid = desired.uid;
-	spec.data_dir = machine_.data_sets.at(desired.data_set);
+	spec.base_dir = trees_.dir_of(desired.base_tree);
 	spec.work_dir = slots_.dir(desired.slot);
 	spec.args = desired.args;
 	spec.cpus = desired.cpus;
@@ -614,6 +655,14 @@ bool Agent::start(const hosted::DesiredContainer &desired, uint64_t deadline) {
 		start_failed(desired, exit_code, why, deadline);
 		return true;
 	};
+	if (desired.expansion_tree) {
+		// The expansion's mount point under the base tree first: a read-only
+		// bind cannot have one made in it.
+		if (trees_.expansion_mount_point(desired.base_tree, desired.expansion_code, error).empty())
+			return fail(125, error);
+		spec.expansion_dir = trees_.dir_of(*desired.expansion_tree);
+		spec.expansion_code = desired.expansion_code;
+	}
 	if (!slots_.prepare(desired.slot, desired.uid, *desired.files, error))
 		return fail(125, error);
 	if (!desired.env.empty()) {
@@ -634,8 +683,13 @@ bool Agent::start(const hosted::DesiredContainer &desired, uint64_t deadline) {
 		return fail(exit_code, error);
 	}
 	waiting_.erase(desired.name);
-	io::logf(LogLevel::kInfo, "started %s on slot %d (%s)", desired.name.c_str(), desired.slot,
-			desired.data_set.c_str());
+	if (desired.expansion_tree)
+		io::logf(LogLevel::kInfo, "started %s on slot %d (tree %lld, expansion %s tree %lld)",
+				desired.name.c_str(), desired.slot, static_cast<long long>(desired.base_tree),
+				desired.expansion_code.c_str(), static_cast<long long>(*desired.expansion_tree));
+	else
+		io::logf(LogLevel::kInfo, "started %s on slot %d (tree %lld)", desired.name.c_str(),
+				desired.slot, static_cast<long long>(desired.base_tree));
 	return true;
 }
 
