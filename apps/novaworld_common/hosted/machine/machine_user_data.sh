@@ -18,12 +18,13 @@
 #      servers; a baked image has it, held, and skips the install and its
 #      apt-get update), with no user-namespace remapping: a slot's UID in its
 #      container is the machine's, which the fences and the agent's egress
-#      counters match;
-#   4. mounts every data set's volume by its label alone (an ext4 file system
-#      deploy/hosted-data labels by Ec2MachineDriver::volume_label, od-jop2 for
-#      jop_2_consumer), waiting for each label to come up, read-only at
-#      /opt/game/<data set>, where the agent binds it into that data set's
-#      containers, and again at every boot;
+#      counters match; and the AWS CLI v2 the agent fetches the trees with
+#      (the pinned zip, its SHA-256 checked, the same release the service's
+#      images carry: apps/novaworld_common/Dockerfile; a baked image has it);
+#   4. makes the trees root, /opt/game, where the agent fetches each tree the
+#      service names (ADR 0064: one immutable version of a data set's files in
+#      the deployment's object store, which the machine role reads) into its
+#      own directory and binds it read-only into that tree's containers;
 #   5. fences the slots' users (UIDs 10001-10032) off the instance metadata
 #      service (the machine role's credentials, this user-data with its token)
 #      and off the controller's internal port on every destination (the
@@ -34,10 +35,10 @@
 #      copies opennova-hostd out of the hostd image to /usr/local/bin and
 #      starts it under systemd (Restart=always): it redeems the token over the
 #      controller's internal listener (SERVICE_URL, resolved at each request),
-#      then runs what the service places on the machine's slots
-#      (apps/hostd/README.md), each container's output going to the machines'
-#      CloudWatch log group (LOG_GROUP), stream <machine id>/slot-<k>, through
-#      docker's awslogs driver;
+#      then fetches the trees the service names and runs what the service
+#      places on the machine's slots (apps/hostd/README.md), each container's
+#      output going to the machines' CloudWatch log group (LOG_GROUP), stream
+#      <machine id>/slot-<k>, through docker's awslogs driver;
 #   7. ships the agent's own journal (its lines, its unit's starts and exits)
 #      to the same log group, stream <machine id>/hostd, through the same
 #      driver (opennova-hostd-log.service). Docker writes with the machine
@@ -60,16 +61,18 @@ MACHINE_ID='@OPENNOVA_MACHINE_ID@'
 MACHINE_TOKEN='@OPENNOVA_MACHINE_TOKEN@'
 SERVE_IMAGE='@OPENNOVA_SERVE_IMAGE@'
 HOSTD_IMAGE='@OPENNOVA_HOSTD_IMAGE@'
-# "<data set>=<volume label> ...", in the data sets' sorted order.
-DATA_SETS='@OPENNOVA_DATA_SETS@'
 # The machines' CloudWatch log group and its region (the machine's own).
 LOG_GROUP='@OPENNOVA_LOG_GROUP@'
 REGION='@OPENNOVA_REGION@'
 
-readonly GAME_ROOT=/opt/game
+readonly TREES_ROOT=/opt/game
 readonly CONF_DIR=/etc/opennova
 readonly TOKEN_FILE=/etc/opennova/hostd.token
 readonly HOSTD=/usr/local/bin/opennova-hostd
+readonly AWS_CLI=/usr/local/bin/aws
+# The AWS CLI v2 release the service's images carry (apps/novaworld_common/Dockerfile).
+readonly AWSCLI_VERSION=2.36.50
+readonly AWSCLI_SHA256=0f15318b3edc4133ad71ce550303babdf2b5dc66bee6b91b4ac8bf05407a78bf
 readonly SLOT_UIDS=10001-10032
 readonly FIRST_SLOT_UID=10001
 readonly LAST_SLOT_UID=10032
@@ -97,18 +100,18 @@ sysctl -w "net.ipv4.ip_local_reserved_ports=$SLOT_PORTS" >/dev/null
 printf 'net.ipv4.ip_local_reserved_ports = %s\n' "$SLOT_PORTS" > /etc/sysctl.d/60-opennova-slots.conf
 chmod 0644 /etc/sysctl.d/60-opennova-slots.conf
 
-# --- 3. docker -------------------------------------------------------------------
+# --- 3. docker and the AWS CLI ---------------------------------------------------
 export DEBIAN_FRONTEND=noninteractive
 apt_get() { apt-get -o DPkg::Lock::Timeout=300 -q -y "$@"; }
 held="$(apt-mark showhold 2>/dev/null || true)"
 if command -v docker >/dev/null && command -v iptables >/dev/null && command -v curl >/dev/null &&
-  grep -qx docker.io <<<"$held"; then
+  command -v unzip >/dev/null && grep -qx docker.io <<<"$held"; then
   # The baked fleet image: its packages are there and held, so no apt-get update.
   log "docker is installed and held (a baked image)"
 else
   log "installing docker"
   for attempt in 1 2 3; do
-    if apt_get update && apt_get install --no-install-recommends docker.io iptables curl; then break; fi
+    if apt_get update && apt_get install --no-install-recommends docker.io iptables curl unzip; then break; fi
     [ "$attempt" -lt 3 ] || end_machine "apt-get could not install docker"
     sleep 15
   done
@@ -119,36 +122,31 @@ systemctl enable --now docker
 if docker info --format '{{json .SecurityOptions}}' | grep -q userns; then
   end_machine "docker remaps user namespaces"
 fi
+# The AWS CLI v2 the agent syncs each tree with: the pinned release, checked,
+# unless the image has one already.
+if command -v aws >/dev/null; then
+  log "the AWS CLI is installed ($(aws --version))"
+else
+  log "installing the AWS CLI v2 $AWSCLI_VERSION"
+  for attempt in 1 2 3; do
+    if curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64-$AWSCLI_VERSION.zip" -o /tmp/awscliv2.zip; then break; fi
+    [ "$attempt" -lt 3 ] || end_machine "the AWS CLI did not download"
+    sleep 15
+  done
+  echo "$AWSCLI_SHA256  /tmp/awscliv2.zip" | sha256sum -c - >/dev/null || end_machine "the AWS CLI zip does not match its checksum"
+  unzip -q /tmp/awscliv2.zip -d /tmp
+  /tmp/aws/install --install-dir /usr/local/aws-cli --bin-dir /usr/local/bin >/dev/null
+  rm -rf /tmp/awscliv2.zip /tmp/aws
+  log "the AWS CLI is installed ($("$AWS_CLI" --version))"
+fi
 
-# --- 4. the data sets ------------------------------------------------------------
-# Each volume by its label: the launch template's volumes come up in their own
-# time, so each label is waited for (two minutes at most).
-for entry in $DATA_SETS; do
-  data_set="${entry%%=*}"
-  label="${entry#*=}"
-  for _ in $(seq 1 60); do
-    [ -e "/dev/disk/by-label/$label" ] && break
-    udevadm settle || true
-    sleep 2
-  done
-  [ -e "/dev/disk/by-label/$label" ] || end_machine "no volume labelled $label for data set $data_set"
-  source="LABEL=$label"
-  log "mounting data set $data_set ($source)"
-  mkdir -p "$GAME_ROOT/$data_set"
-  printf '%s %s ext4 ro,noload,nodev,nosuid,noexec,nofail 0 0\n' "$source" "$GAME_ROOT/$data_set" >> /etc/fstab
-  mount "$GAME_ROOT/$data_set"
-  # The boot's three archives, which every data set ships, and Escalation's
-  # version.txt, which Joint Operations' alone does (no other data set's
-  # volume passes for its).
-  for archive in resource.pff localres.pff language.pff; do
-    [ -n "$(find "$GAME_ROOT/$data_set" -maxdepth 1 -type f -iname "$archive" -print -quit)" ] \
-      || end_machine "data set $data_set holds no $archive"
-  done
-  if [ "$data_set" = jop_2_consumer ]; then
-    [ -n "$(find "$GAME_ROOT/$data_set" -maxdepth 3 -type f -ipath '*/expansion/jox01/version.txt' -print -quit)" ] \
-      || end_machine "data set $data_set holds no expansion/jox01/version.txt"
-  fi
-done
+# --- 4. the trees root -----------------------------------------------------------
+# Where the agent fetches each tree the service names (<root>/<tree id>, a
+# .partial directory while it syncs) and binds it into that tree's containers,
+# read-only, the base tree at the container's /opt/game and an expansion tree
+# at /opt/game/expansion/<code>. Nothing is mounted here: the trees come from
+# the object store over the machine role, through the AWS CLI above.
+install -d -m 0755 "$TREES_ROOT"
 
 # --- 5. the fences ---------------------------------------------------------------
 printf 'SERVICE_PORT=%s\n' "$SERVICE_PORT" > "$CONF_DIR/fence.conf"
@@ -221,7 +219,7 @@ Wants=network-online.target
 
 [Service]
 ExecStartPre=/usr/local/sbin/opennova-machine-fence
-ExecStart=$HOSTD --service $SERVICE_URL --machine $MACHINE_ID --log-group $LOG_GROUP --log-region $REGION
+ExecStart=$HOSTD --service $SERVICE_URL --machine $MACHINE_ID --trees-root $TREES_ROOT --aws $AWS_CLI --log-group $LOG_GROUP --log-region $REGION
 Restart=always
 RestartSec=5
 

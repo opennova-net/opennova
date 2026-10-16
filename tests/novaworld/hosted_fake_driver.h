@@ -14,9 +14,11 @@
 // (fleet_jobs.h) call it from any worker thread: its state is under a lock. A
 // FakeAgent per machine syncs the way the agent routes do
 // (fleet_repository.h record_sync, then the supervisor's
-// FleetDesiredState::sync), runs each desired container it got files for once
-// its slot is free (running at once, or left starting), and drops the ones the
-// answer leaves out; the test exits its containers. Nothing runs.
+// FleetDesiredState::sync), runs each desired container it got files for, and
+// whose trees the answer carries (as the protocol's decoder insists), once its
+// slot is free (running at once, or left starting), and drops the ones the
+// answer leaves out; the test exits its containers. Nothing runs, nothing is
+// fetched: the container keeps the answer that started it, trees and all.
 
 #include "hosted/agent_protocol.h"
 #include "hosted/fleet_desired_state.h"
@@ -274,7 +276,8 @@ public:
 			it = wanted.count(it->first) != 0 ? std::next(it) : containers.erase(it);
 		for (const hosted::DesiredContainer &d : last.desired) {
 			if (containers.count(d.name) != 0) continue;
-			if (!d.files) {
+			if (!d.files || last.trees.count(d.base_tree) == 0 ||
+					(d.expansion_tree && last.trees.count(*d.expansion_tree) == 0)) {
 				refused.insert(d.name);
 				continue;
 			}
@@ -304,12 +307,14 @@ public:
 		r.exit_code = code;
 		r.oom = oom;
 	}
-	// docker's 125: the container never started.
-	void fail_start(const std::string &name) {
+	// docker's 125: the container never started, with `reason` when the agent
+	// knows why (its data could not be fetched).
+	void fail_start(const std::string &name, const std::string &reason = "") {
 		auto &r = containers.at(name).report;
 		r.state = hosted::ContainerState::Exited;
 		r.exit_code = 125;
 		r.started_at.reset();
+		r.reason = reason;
 	}
 	const Container *find(const std::string &name) const {
 		const auto it = containers.find(name);
@@ -320,7 +325,7 @@ public:
 	hosted::FleetDecision last;
 	int syncs = 0;
 	bool start_running = true;
-	std::set<std::string> refused; // desired containers it could not start (no files)
+	std::set<std::string> refused; // desired containers it could not start (no files, or a tree the answer lacks)
 
 private:
 	int64_t machine_id_ = 0;

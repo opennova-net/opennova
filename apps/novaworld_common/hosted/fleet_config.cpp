@@ -97,12 +97,9 @@ bool parse_launch_templates(
 	return true;
 }
 
-AgentRouteConfig agent_route_config(
-		const FleetConfig &config, const std::vector<std::string> &data_sets) {
+AgentRouteConfig agent_route_config(const FleetConfig &config) {
 	AgentRouteConfig out;
 	out.admitted = config.agent_cidrs;
-	for (const std::string &data_set : data_sets)
-		out.data_sets[data_set] = machine_data_set_path(data_set);
 	return out;
 }
 

@@ -21,16 +21,13 @@ std::optional<SettingsRefusal> out_of_range(const char *field, int value, const 
 		"must be " + std::to_string(range.min) + " to " + std::to_string(range.max) };
 }
 
-// The expansion rule's words: `is "" (the base game) or "jox01"`.
-std::string expansion_rule(const DataSet &data_set) {
-	std::string out = "is";
-	for (size_t i = 0; i < data_set.expansions.size(); ++i) {
-		const Expansion &e = data_set.expansions[i];
-		out += i == 0 ? " " : (i + 1 == data_set.expansions.size() ? " or " : ", ");
-		out += "\"" + e.code + "\"";
-		if (e.code.empty()) out += " (the base game)";
+// Whether `name` is among `missions` by file name, without case (the archives
+// spell their entries in their own case).
+bool lists_mission(const std::vector<TreeMission> &missions, std::string_view name) {
+	for (const TreeMission &m : missions) {
+		if (strutil::iequals(m.file, name)) return true;
 	}
-	return out;
+	return false;
 }
 
 // A host-file value: quoted, in the host's code page (check_settings has
@@ -55,9 +52,10 @@ bool is_mission_file_name(std::string_view name) {
 	return true;
 }
 
-std::optional<SettingsRefusal> check_settings(const HostedSettings &s, const std::vector<DataSet> &offered) {
-	const DataSet *data_set = find_data_set(offered, s.game);
-	if (!data_set) return SettingsRefusal{ "game", "is no game this service hosts" };
+std::optional<SettingsRefusal> check_settings(
+		const HostedSettings &s, const std::vector<OfferedDataSet> &offered) {
+	const OfferedDataSet *data_set = find_offered(offered, s.data_set_id);
+	if (!data_set) return SettingsRefusal{ "data_set_id", "is no data set this service offers" };
 	{
 		std::string bytes;
 		if (has_control_byte(s.game_name) || has_c1_control(s.game_name))
@@ -81,14 +79,19 @@ std::optional<SettingsRefusal> check_settings(const HostedSettings &s, const std
 			return SettingsRefusal{ "game_password",
 				"takes printable ASCII with no space or double quote" };
 	}
-	const HostLimits &limits = data_set->limits;
+	const HostLimits &limits = host_limits_for_title(data_set->title);
 	if (auto r = out_of_range("max_players", s.max_players, limits.max_players)) return r;
 	if (auto r = out_of_range("time_limit", s.time_limit, limits.time_limit)) return r;
 	if (auto r = out_of_range("kill_limit", s.kill_limit, limits.kill_limit)) return r;
 	if (auto r = out_of_range("max_score", s.max_score, limits.max_score)) return r;
 	if (auto r = out_of_range("respawn", s.respawn, limits.respawn)) return r;
 	if (auto r = out_of_range("start_delay", s.start_delay, limits.start_delay)) return r;
-	if (!find_expansion(*data_set, s.expansion)) return SettingsRefusal{ "expansion", expansion_rule(*data_set) };
+	const OfferedExpansion *expansion = nullptr;
+	if (s.expansion_id) {
+		expansion = find_offered_expansion(*data_set, *s.expansion_id);
+		if (!expansion)
+			return SettingsRefusal{ "expansion_id", "is no expansion of this data set with data" };
+	}
 	if (s.missions.empty()) return SettingsRefusal{ "missions", "names no mission" };
 	if (s.missions.size() > kMissionsMax)
 		return SettingsRefusal{ "missions",
@@ -98,6 +101,9 @@ std::optional<SettingsRefusal> check_settings(const HostedSettings &s, const std
 			return SettingsRefusal{ "missions",
 				"names \"" + loggable(m, 40) +
 						"\", which is no .bms file name of letters, digits, _ and -" };
+		if (!lists_mission(data_set->missions, m) && !(expansion && lists_mission(expansion->missions, m)))
+			return SettingsRefusal{ "missions",
+				"names \"" + loggable(m, 40) + "\", which is no mission of this data set" };
 	}
 	return std::nullopt;
 }
@@ -176,31 +182,28 @@ std::string render_credentials(const std::string &username, const std::string &p
 	return "NOVAWORLD_USER=" + username + "\nNOVAWORLD_PASS=" + password + "\n";
 }
 
-LaunchSpec render_launch(const HostedSettings &settings, const DataSet &data_set, const RenderInputs &in) {
+LaunchSpec render_launch(const HostedSettings &settings, std::string_view title,
+		std::string_view expansion_code, const RenderInputs &in) {
 	LaunchSpec spec;
 	spec.server_id = in.server_id;
-	spec.data_set = data_set.game;
 	spec.files.push_back({ kHostFileName, render_host_file(settings, in.server_id), true });
 	spec.files.push_back({ kGameCfgFileName, render_game_cfg(in.plan), false });
 	spec.files.push_back({ kAdminCfgFileName, render_admin_cfg(in.plan, in.admin_password), true });
 	spec.files.push_back({ kCredentialsFileName,
 			render_credentials(in.service_username, in.service_password), true });
-	spec.serve_args = render_serve_args(settings, data_set, in.master_host, in.master_gate_port);
+	spec.serve_args =
+			render_serve_args(settings, title, expansion_code, in.master_host, in.master_gate_port);
 	return spec;
 }
 
-std::vector<std::string> render_serve_args(const HostedSettings &settings, const DataSet &data_set,
-		const std::string &master_host, uint16_t master_gate_port) {
+std::vector<std::string> render_serve_args(const HostedSettings &, std::string_view title,
+		std::string_view expansion_code, const std::string &master_host, uint16_t master_gate_port) {
 	std::vector<std::string> args = { "/HOST", kHostFileName, "--credentials", kCredentialsFileName,
 		"--master-host", master_host, "--master-gate-port", std::to_string(master_gate_port), "/game",
-		data_set.title };
-	// A folder of loose files: the server mounts it as such (its --resource-dir
-	// is the machine's, before these).
-	if (data_set.loose_root)
-		args.push_back("--loose-root");
-	if (!settings.expansion.empty()) {
+		std::string(title) };
+	if (!expansion_code.empty()) {
 		args.push_back("/exp");
-		args.push_back(settings.expansion);
+		args.emplace_back(expansion_code);
 	}
 	return args;
 }

@@ -229,20 +229,6 @@ std::vector<OfferedDataSet> offered_data_sets(db::Database &db) {
 	return out;
 }
 
-const OfferedDataSet *find_offered(const std::vector<OfferedDataSet> &offered, int64_t id) {
-	for (const OfferedDataSet &d : offered)
-		if (d.id == id)
-			return &d;
-	return nullptr;
-}
-
-const OfferedExpansion *find_offered_expansion(const OfferedDataSet &data_set, int64_t id) {
-	for (const OfferedExpansion &e : data_set.expansions)
-		if (e.id == id)
-			return &e;
-	return nullptr;
-}
-
 // --- trees ---
 
 int64_t create_tree(

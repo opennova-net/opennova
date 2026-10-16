@@ -36,6 +36,11 @@ bool parse_object_store_url(std::string_view url, std::string_view region, Objec
 // "." or "..", at most 512 bytes.
 bool is_store_key(std::string_view key);
 
+// The URL hostd fetches `key` (or a prefix) of a store configured as `config` from, with no
+// store built: `s3://<bucket>/<root>/<key>` or `file:///<dir>/<key>` (a local root with no
+// leading slash, a Windows drive's, gets one). ObjectStore::url_of answers the same.
+std::string object_store_url(const ObjectStoreConfig &config, std::string_view key);
+
 struct StoredObject {
 	std::string key; // relative to the root
 	uint64_t size = 0;

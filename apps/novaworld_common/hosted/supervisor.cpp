@@ -69,14 +69,12 @@ Supervisor::~Supervisor() { stop(); }
 
 void Supervisor::start() {
 	if (running_.exchange(true)) return;
-	std::string games;
-	for (const DataSet &d : config_.data_sets) games += (games.empty() ? "" : ", ") + d.game;
 	std::printf("[hosted] supervisor: machines %s (shared machines of %d slots, at most %d shared "
 				"and %d own), "
-				"cap %d, data sets %s, servers list on %s:%u\n",
+				"cap %d, servers list on %s:%u\n",
 			profile_.provider.c_str(), config_.placement.shared_slots, config_.placement.max_shared,
-			config_.placement.max_own, config_.cap, games.empty() ? "(none)" : games.c_str(),
-			config_.master_host.c_str(), static_cast<unsigned>(config_.master_gate_port));
+			config_.placement.max_own, config_.cap, config_.master_host.c_str(),
+			static_cast<unsigned>(config_.master_gate_port));
 	try {
 		reconcile(config_.clock_ms());
 	} catch (const std::exception &e) {
@@ -479,13 +477,74 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 		return;
 	}
 
-	// Its data set, which the deployment may have stopped offering since the
-	// request (no restart mends that).
-	if (!find_data_set(config_.data_sets, s.settings.game)) {
-		finish(db, s, State::Failed, "its game (" + loggable(s.settings.game, 64) + ") is no longer hosted here");
+	// Its data set rows and their data (no restart mends what is missing): the
+	// trees it is pinned to, when it was started before and they are not pruned,
+	// else the data sets' current trees (its first start, or a pin pruned since).
+	if (!data_of(db, s, why)) {
+		finish(db, s, State::Failed, why);
+		return;
+	}
+	if (!pins_hold(db, s) && !current_trees_of(db, s.settings.data_set_id, s.settings.expansion_id)) {
+		const bool base_has_data = current_trees_of(db, s.settings.data_set_id, std::nullopt).has_value();
+		finish(db, s, State::Failed, base_has_data ? "its expansion has no data" : "its data set has no data");
 		return;
 	}
 	place(db, s, rt, now_ms);
+}
+
+std::optional<Supervisor::ServerData> Supervisor::data_of(db::Database &db, const HostedServer &s, std::string &why) {
+	ServerData out;
+	const auto base = s.settings.data_set_id != 0 ? find_data_set(db, s.settings.data_set_id) : std::nullopt;
+	if (!base || base->kind != DataSetKind::Base) {
+		why = "its data set is gone";
+		return std::nullopt;
+	}
+	out.title = base->title;
+	if (s.settings.expansion_id) {
+		const auto expansion = find_data_set(db, *s.settings.expansion_id);
+		if (!expansion || expansion->kind != DataSetKind::Expansion || expansion->parent_id != base->id) {
+			why = "its expansion is gone";
+			return std::nullopt;
+		}
+		out.expansion_code = expansion->expansion_code;
+	}
+	return out;
+}
+
+bool Supervisor::pins_hold(db::Database &db, const HostedServer &s) {
+	if (!s.base_tree_id) return false;
+	const auto base = find_tree(db, *s.base_tree_id);
+	if (!base || base->state == TreeState::Pruned) return false;
+	if (s.settings.expansion_id) {
+		if (!s.expansion_tree_id) return false;
+		const auto expansion = find_tree(db, *s.expansion_tree_id);
+		if (!expansion || expansion->state == TreeState::Pruned) return false;
+	}
+	return true;
+}
+
+std::optional<TreeSpec> Supervisor::tree_spec(db::Database &db, int64_t id) {
+	{
+		std::lock_guard<std::mutex> lock(trees_mu_);
+		const auto it = tree_specs_.find(id);
+		if (it != tree_specs_.end()) return it->second;
+	}
+	const auto tree = find_tree(db, id);
+	if (!tree || tree->files.empty()) return std::nullopt;
+	TreeSpec spec;
+	spec.url = config_.tree_url ? config_.tree_url(id) : std::string();
+	// The version as the reply carries it: one short printable line.
+	for (const char c : tree->version_text) {
+		if (spec.version.size() >= 128) break;
+		spec.version.push_back(c >= ' ' && c <= '~' ? c : ' ');
+	}
+	for (const TreeFile &f : tree->files) spec.files.push_back({ f.name, f.size });
+	// A ready tree is immutable: read once, kept.
+	if (tree->state == TreeState::Ready) {
+		std::lock_guard<std::mutex> lock(trees_mu_);
+		tree_specs_[id] = spec;
+	}
+	return spec;
 }
 
 void Supervisor::place(db::Database &db, const HostedServer &s, Runtime &rt, uint64_t now_ms) {
@@ -594,8 +653,29 @@ bool Supervisor::launch_machine(db::Database &db, const HostedServer &s, Machine
 
 void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const FleetMachineRow &machine,
 		const SlotPlan &plan, Runtime &rt, uint64_t now_ms) {
-	const DataSet *data_set = find_data_set(config_.data_sets, s.settings.game);
-	if (!data_set) return; // checked in this pass; the next one fails it
+	std::string why;
+	const auto data = data_of(db, s, why);
+	if (!data) {
+		release_slot(db, s.id); // checked in this pass; the next one fails it
+		return;
+	}
+	// The trees it runs on: the pins its last start took (a crash restart or a
+	// move keeps them), else the data sets' current trees (its first start, the
+	// owner's update, a pinned tree pruned since). Written with the machine,
+	// in one transaction, below.
+	int64_t base_tree = s.base_tree_id.value_or(0);
+	std::optional<int64_t> expansion_tree = s.expansion_tree_id;
+	const bool kept = pins_hold(db, s) && !s.update_requested;
+	if (!kept) {
+		const auto current = current_trees_of(db, s.settings.data_set_id, s.settings.expansion_id);
+		if (current) {
+			base_tree = current->base_tree_id;
+			expansion_tree = current->expansion_tree_id;
+		} else if (base_tree == 0 || !pins_hold(db, s)) {
+			release_slot(db, s.id); // no data: the next pass fails it
+			return;
+		}
+	}
 	// The service account, with a new password at every start.
 	const std::string username = service_username(s.id);
 	const std::string nw_password = random_secret(kServicePasswordChars);
@@ -619,7 +699,7 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 	inputs.admin_password = admin_password;
 	inputs.master_host = config_.master_host;
 	inputs.master_gate_port = config_.master_gate_port;
-	const LaunchSpec spec = render_launch(s.settings, *data_set, inputs);
+	const LaunchSpec spec = render_launch(s.settings, data->title, data->expansion_code, inputs);
 
 	Start start;
 	start.machine_id = machine.id;
@@ -628,7 +708,9 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 	c.slot = s.slot;
 	c.image = config_.serve_image;
 	c.uid = slot_uid(s.slot);
-	c.data_set = spec.data_set;
+	c.base_tree = base_tree;
+	c.expansion_tree = expansion_tree;
+	c.expansion_code = data->expansion_code;
 	c.args = spec.serve_args;
 	std::map<std::string, std::string> files;
 	for (const LaunchFile &f : spec.files) files[f.name] = f.content;
@@ -643,8 +725,17 @@ void Supervisor::start_on_slot(db::Database &db, const HostedServer &s, const Fl
 		std::lock_guard<std::mutex> lock(starts_mu_);
 		starts_[s.id] = std::move(start);
 	}
-	set_machine(db, s.id, profile_.provider, container, machine.private_address);
-	if (!move(db, s, rt, now_ms, State::Booting, "placed on " + place_text(machine.id, s.slot))) {
+	{
+		// The pins and the machine together: a server on a machine runs the
+		// trees its row names (update_requested cleared with them).
+		db::Transaction tx(db);
+		set_tree_pins(db, s.id, base_tree, expansion_tree);
+		set_machine(db, s.id, profile_.provider, container, machine.private_address);
+		tx.commit();
+	}
+	std::string placed_text = "placed on " + place_text(machine.id, s.slot) + " with tree " + std::to_string(base_tree);
+	if (expansion_tree) placed_text += " and expansion tree " + std::to_string(*expansion_tree);
+	if (!move(db, s, rt, now_ms, State::Booting, placed_text)) {
 		// A stop landed meanwhile: its container never reported, so the stop ends
 		// at the next pass with nothing to stop.
 		std::printf("[hosted] server %lld: placed on %s while it left provisioning\n", static_cast<long long>(s.id),
@@ -1167,8 +1258,9 @@ FleetDecision Supervisor::sync(db::Database &db, const FleetMachineRow &machine,
 	for (const size_t i : unread) {
 		const SlotHolder &h = holders[i];
 		const auto server = find_server(db, h.server_id);
-		const DataSet *data_set = server ? find_data_set(config_.data_sets, server->settings.game) : nullptr;
-		if (!server || !data_set) continue;
+		std::string why;
+		const auto data = server ? data_of(db, *server, why) : std::nullopt;
+		if (!server || !data || !server->base_tree_id) continue;
 		Start start;
 		start.machine_id = machine.id;
 		start.acknowledged = true;
@@ -1177,8 +1269,11 @@ FleetDecision Supervisor::sync(db::Database &db, const FleetMachineRow &machine,
 		c.slot = h.slot;
 		c.image = server->serve_image.empty() ? config_.serve_image : server->serve_image;
 		c.uid = slot_uid(h.slot);
-		c.data_set = data_set->game;
-		c.args = render_serve_args(server->settings, *data_set, config_.master_host, config_.master_gate_port);
+		c.base_tree = *server->base_tree_id;
+		c.expansion_tree = server->expansion_tree_id;
+		c.expansion_code = data->expansion_code;
+		c.args = render_serve_args(server->settings, data->title, data->expansion_code, config_.master_host,
+				config_.master_gate_port);
 		c.cpus = config_.slot_cpus;
 		c.memory_mb = config_.slot_memory_mb;
 		c.pids = config_.slot_pids;
@@ -1194,7 +1289,25 @@ FleetDecision Supervisor::sync(db::Database &db, const FleetMachineRow &machine,
 		wanted[i] = it->second.container;
 	}
 	for (std::optional<DesiredContainer> &w : wanted) {
-		if (w) decision.desired.push_back(std::move(*w));
+		if (!w) continue;
+		// The trees the container uses, each as the agent fetches it (its URL in
+		// the store and its manifest); one with no manifest cannot be answered
+		// for (the reply would not read), so its container is left out.
+		bool complete = true;
+		for (const std::optional<int64_t> id : { std::optional<int64_t>(w->base_tree), w->expansion_tree }) {
+			if (!id || decision.trees.count(*id) != 0) continue;
+			if (const auto spec = tree_spec(db, *id))
+				decision.trees[*id] = *spec;
+			else
+				complete = false;
+		}
+		if (!complete) {
+			std::fprintf(stderr, "[hosted] WARN container %s of machine %lld: a tree it uses has no manifest; "
+								 "not answered for\n",
+					w->name.c_str(), static_cast<long long>(machine.id));
+			continue;
+		}
+		decision.desired.push_back(std::move(*w));
 	}
 	return decision;
 }

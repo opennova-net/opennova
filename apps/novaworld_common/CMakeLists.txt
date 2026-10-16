@@ -58,12 +58,12 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/console_queue.cpp
         hosted/data_set_files.cpp
         hosted/data_set_repository.cpp
-        hosted/data_sets.cpp
         hosted/docker_machine_driver.cpp
         hosted/ec2_machine_driver.cpp
         hosted/fleet_config.cpp
         hosted/fleet_jobs.cpp
         hosted/fleet_repository.cpp
+        hosted/host_limits.cpp
         hosted/hosted_repository.cpp
         hosted/hosted_settings.cpp
         hosted/limits_hold.cpp

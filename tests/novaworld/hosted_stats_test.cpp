@@ -45,9 +45,12 @@ int64_t count_rows(Database &db, const std::string &sql) {
 	return rows.empty() ? 0 : rows[0].as_int(0).value_or(0);
 }
 
-// A live server of `owner`'s in `state` (written by hand).
+// A live server of `owner`'s in `state` (written by hand), on Joint Operations' data set
+// (seeded with a ready tree at the first call).
 int64_t make_server(Database &db, int64_t owner, const char *state) {
-	const auto r = hosted::request_server(db, owner, valid_settings(), hosted::known_data_sets(), 100, kWall);
+	int64_t jo = hosted_rig::seeded_data_set(db, "Joint Operations");
+	if (hosted::offered_data_sets(db).empty()) jo = hosted_rig::seed_data(db).jo;
+	const auto r = hosted::request_server(db, owner, valid_settings(jo), hosted::offered_data_sets(db), 100, kWall);
 	if (r.outcome != hosted::RequestOutcome::Created) return 0;
 	db.exec("UPDATE hosted_servers SET state = $1 WHERE id = $2;", { BindValue(std::string(state)), BindValue(r.id) });
 	return r.id;

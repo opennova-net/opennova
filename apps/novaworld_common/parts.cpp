@@ -1,6 +1,7 @@
 #include "parts.h"
 
 #include "billing/billing_jobs.h"
+#include "hosted/data_set_jobs.h"
 #include "hosted/docker_machine_driver.h"
 #include "hosted/ec2_machine_driver.h"
 #include "hosted/fleet_jobs.h"
@@ -10,7 +11,9 @@
 #include "hosted/supervisor.h"
 #include "jobs/account_jobs.h"
 #include "jobs/maintenance_jobs.h"
+#include "local_object_store.h"
 #include "loggable.h"
+#include "s3_object_store.h"
 
 #include <cstdio>
 #include <optional>
@@ -22,11 +25,11 @@ namespace opennova::novaworld_server {
 
 namespace {
 
-std::vector<std::string> data_set_slugs(const std::vector<hosted::DataSet> &data_sets) {
-	std::vector<std::string> out;
-	for (const hosted::DataSet &d : data_sets)
-		out.push_back(d.game);
-	return out;
+// "the s3 store s3://<bucket>/<root>" or "the local store <dir>", for the boot line.
+std::string store_text(const ObjectStoreConfig &store) {
+	if (store.kind == ObjectStoreConfig::Kind::S3)
+		return "the s3 store s3://" + store.bucket + "/" + store.root + " (" + store.region + ")";
+	return "the local store " + loggable(store.root, 260);
 }
 
 // Whether `host` is no address a machine reaches the gate at: unset, or this
@@ -49,7 +52,6 @@ void setup_ec2(const ServerConfig &config, HostedSetup &setup) {
 		return;
 	}
 	hosted::Ec2MachineConfig &ec2 = setup.fleet.ec2;
-	ec2.data_sets = data_set_slugs(setup.data_sets);
 	std::string error;
 	if (!hosted::load_machine_script(setup.fleet.machine_script_path, ec2.machine_script, error)) {
 		off(loggable(error, 300) + " (ONNET_HOSTED_MACHINE_SCRIPT)");
@@ -90,17 +92,13 @@ void setup_docker(const ServerConfig &config, HostedSetup &setup) {
 		return;
 	}
 	hosted::DockerMachineConfig &docker = setup.fleet.docker;
-	docker.data_sets = data_set_slugs(setup.data_sets);
 	if (const std::string why = hosted::DockerMachineDriver::check_config(docker); !why.empty()) {
 		off("is not configured: " + why);
 		return;
 	}
-	std::string data_sets;
-	for (const std::string &data_set : docker.data_sets)
-		data_sets += (data_sets.empty() ? "" : ",") + data_set;
-	std::printf("[boot] hosted servers: docker machines of %s on network %s, data sets %s from "
-				"%s, deployment %s; the machines reach %s\n",
-			loggable(docker.image, 255).c_str(), docker.network.c_str(), data_sets.c_str(),
+	std::printf("[boot] hosted servers: docker machines of %s on network %s, the store's mounts "
+				"from %s, deployment %s; the machines reach %s\n",
+			loggable(docker.image, 255).c_str(), docker.network.c_str(),
 			docker.data_from.c_str(), docker.deployment.c_str(),
 			loggable(docker.service_url, 255).c_str());
 	setup.profile = hosted::DockerMachineDriver::profile(docker);
@@ -148,6 +146,16 @@ ScratchDir ScratchDir::make(const char *prefix, std::string &error) {
 
 HostedSetup hosted_setup(const ServerConfig &config) {
 	HostedSetup setup;
+	// The store first, driver or none: web's data set routes and the worker's
+	// data set jobs run over it whether or not hosting is on.
+	if (!config.object_store_url.empty()) {
+		std::string error;
+		if (parse_object_store_url(config.object_store_url, config.object_store_region, setup.store, error))
+			setup.store_ok = true;
+		else
+			std::fprintf(stderr, "[boot] WARN the object store: ONNET_OBJECT_STORE_URL %s\n",
+					loggable(error, 300).c_str());
+	}
 	if (config.hosted_provider == "none")
 		return setup;
 	if (config.hosted_provider != "docker" && config.hosted_provider != "ec2") {
@@ -173,17 +181,11 @@ HostedSetup hosted_setup(const ServerConfig &config) {
 				"[boot] WARN hosted servers: the fleet's settings do not read; hosting off\n");
 		return setup;
 	}
-	std::vector<hosted::DataSetConfig> configs;
-	std::string error;
-	if (!hosted::parse_data_set_configs(config.hosted_data_sets, configs, error)) {
-		std::fprintf(stderr, "[boot] WARN hosted servers: %s; hosting off\n",
-				loggable(error, 300).c_str());
-		return setup;
-	}
-	setup.data_sets = hosted::offered_data_sets(configs);
-	if (setup.data_sets.empty()) {
+	// The data sets' trees live in the store: no store, no hosting (ADR 0064).
+	if (!setup.store_ok) {
 		std::fprintf(stderr,
-				"[boot] WARN hosted servers: no data set (ONNET_HOSTED_DATA_SETS names none); "
+				"[boot] WARN hosted servers: no object store (ONNET_OBJECT_STORE_URL, s3://<bucket>/data "
+				"with ONNET_OBJECT_STORE_REGION, or file:///<dir>), where the data sets' trees live; "
 				"hosting off\n");
 		return setup;
 	}
@@ -191,7 +193,35 @@ HostedSetup hosted_setup(const ServerConfig &config) {
 		setup_ec2(config, setup);
 	else
 		setup_docker(config, setup);
+	if (setup.on)
+		std::printf("[boot] hosted servers: the data sets' trees in %s\n", store_text(setup.store).c_str());
 	return setup;
+}
+
+ObjectStoreStack make_object_store(
+		const HostedSetup &setup, const ServerConfig &config, std::string &error) {
+	ObjectStoreStack s;
+	if (!setup.store_ok) {
+		error = "no object store (ONNET_OBJECT_STORE_URL)";
+		return s;
+	}
+	ScratchDir scratch = ScratchDir::make("opennova-store-", error);
+	if (scratch.empty()) {
+		error = "no scratch directory for the object store" + (error.empty() ? std::string() : ": " + error);
+		return s;
+	}
+	s.scratch = std::move(scratch);
+	if (setup.store.kind == ObjectStoreConfig::Kind::Local) {
+		s.store = std::make_unique<LocalObjectStore>(setup.store.root);
+		return s;
+	}
+	// S3 through the AWS CLI, as the EC2 driver and the mailer run it: the
+	// program's role answers for it (the task role on ECS).
+	const std::string scratch_path = s.scratch.path().u8string();
+	s.runner = std::make_unique<proc::ProcessCommandRunner>(
+			proc::ProcessCommandRunner::service_environment(), scratch_path);
+	s.store = std::make_unique<S3ObjectStore>(setup.store, *s.runner, config.aws_cli, scratch_path);
+	return s;
 }
 
 BillingStack make_billing(
@@ -304,6 +334,9 @@ std::vector<jobs::PeriodicJob> periodic_jobs(
 	if (hosting.on)
 		add(hosted::fleet_schedule(
 				static_cast<int64_t>(hosted::SupervisorConfig{}.orphan_sweep_interval_ms)));
+	// The data sets' prune of the trees nothing needs, while there is a store.
+	if (hosting.store_ok)
+		add(hosted::data_set_schedule());
 	return out;
 }
 

@@ -114,7 +114,7 @@ int test_two_controllers() {
 	subscribe(rig.db, owner, 1, "active", "sub_ctl_own");
 	subscribe_machines(rig.db, owner, 1, "sub_ctl_own_machine");
 	rig.fake.fail_next_launch = true;
-	const int64_t own = rig.request_as(owner, valid_settings(), true);
+	const int64_t own = rig.request_as(owner, rig.settings(), true);
 	TEST_EXPECT(own > 0);
 	TEST_EXPECT(wait_until(
 			[&rig] {

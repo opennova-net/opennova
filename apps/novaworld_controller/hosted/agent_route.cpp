@@ -8,8 +8,10 @@
 #include <cstdio>
 #include <exception>
 #include <limits>
+#include <optional>
 #include <set>
 #include <utility>
+#include <vector>
 
 namespace opennova::novaworld_server::hosted {
 
@@ -122,7 +124,6 @@ crow::response AgentRoutes::bootstrap(const crow::request &req, uint64_t raw_id)
 		reply.agent_secret = random_secret(kAgentSecretChars);
 		reply.serve_image = machine->serve_image;
 		reply.slots = machine->slots;
-		reply.data_sets = config_.data_sets;
 		// The reply must read before its secret is stored.
 		const std::string body = encode_machine_bootstrap(reply);
 		MachineBootstrap check;
@@ -185,7 +186,7 @@ crow::response AgentRoutes::sync(const crow::request &req, uint64_t raw_id) {
 			return refuse(peer, "sync", id, "a report that does not read: " + error);
 		// A listing that failed: the agent is heard from, the slots' reports stand,
 		// and the answer is one the agent acts on nothing of.
-		const auto after = request.listing_failed
+		const std::optional<FleetMachineRow> after = request.listing_failed
 				? record_unlisted_sync(db, id, request.agent_version)
 				: record_sync(db, id, request.agent_version, request.containers);
 		if (!after)
@@ -204,6 +205,7 @@ crow::response AgentRoutes::sync(const crow::request &req, uint64_t raw_id) {
 			reported.insert(c.name);
 		SyncReply reply;
 		reply.drain = decision.drain || after->state == FleetMachineState::Draining;
+		reply.trees = decision.trees;
 		for (DesiredContainer d : decision.desired) {
 			if (!slot_valid(d.slot) || d.slot >= after->slots) {
 				std::fprintf(stderr,

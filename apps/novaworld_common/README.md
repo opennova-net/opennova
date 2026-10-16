@@ -813,7 +813,8 @@ An account with a hosting entitlement can have the service run as many `opennova
 servers for it as the entitlement allows, each in a slot of one of the fleet's machines
 (a shared machine, or an own machine of its own), until it stops them (ADR 0053,
 proposed; `hosted/`; the `hosted_servers`, `hosted_server_events` and `fleet_machines`
-tables). Each server runs one data set its owner picks. Everything here is service policy.
+tables). Each server runs the data set its owner picks (and an expansion of it), pinned to the
+data it started on (ADR 0064). Everything here is service policy.
 
 - **The hosting entitlement** (`billing/entitlement.*`): how many hosted servers an account
   may have live, the larger of its support tier's servers (a monthly Stripe subscription:
@@ -832,20 +833,29 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   on a machine of their own (`hosted_servers.own_machine`), and counts only while a tier
   also grants (a comp grant buys no machine).
 
-- **Data sets** (`hosted/data_sets.*`). A data set is a game folder a machine mounts, the
-  title `opennova-serve` speaks over it (`/game <code>`, a `gameprofile` row) and the
-  lobby it lists in (the `games` row whose slug names it). The service knows three, in
-  the order the site offers them: `jop_2_consumer` (Joint Operations, `/game jo`, base
-  game or Escalation, `jox01`), `dfx2_consumer` (Delta Force Xtreme 2, `/game dfx2`, base
-  game only) and `opennova_0_consumer` (OpenNova's own data, `/game jo`, base game only).
-  Each has its own host-screen limits (Joint Operations': 2..64 players, a time limit of
-  1..300, kill and score limits of 1..500, respawn and delay of 0..300; Delta Force Xtreme
-  2's the same but 2..100 players, its host screen's cap; OpenNova's Joint Operations').
-  A deployment offers every one `ONNET_HOSTED_DATA_SETS` names (below), since each machine
-  mounts them all at `/opt/game/<data set>` (a cloud machine its volumes, a local stack's
-  machine the data container's mount); with none, hosting is off. A data set of loose
-  files (`loose_root`) gets `--loose-root` in its servers' arguments. A start names one (`hosted_servers.game`, the games slug), and a server
-  whose data set is no longer offered fails at its next placement (no restart mends that).
+- **Data sets** (`hosted/data_set_repository.*`, `hosted/data_set_files.*`,
+  `backend/migrations/0011_data_sets.sql`; ADR 0064). A data set is a row an admin makes:
+  one product, a **base** game (its `title`, the `gameprofile` code `opennova-serve` speaks
+  with `/game`, `jo` or `dfx2`, and its `game`, the `games` row whose lobby it lists in) or
+  an **expansion** of a base (its `expansion_code`, `/exp jox01`). The migration seeds the
+  four the deployment ran: Joint Operations (`jo`), Escalation under it (`jox01`), Delta
+  Force Xtreme 2 (`dfx2`) and OpenNova's own data (`jo`). Its data lives in the object
+  store (`ONNET_OBJECT_STORE_URL`, below) as **trees**, each one immutable version of the
+  data set's files (a base: `resource.pff`, `localres.pff`, `language.pff`, with
+  `version.txt`, `score.ini`, `_NSTMOUT.TXT` and `gt.ssc` when present; an expansion:
+  `<code>.pff`, `<code>L.pff`, `version.txt`, `gt.ssc`; `hosted/data_set_files.h`) at
+  `trees/<id>/`, uploaded by an admin, with the multiplayer missions its archives list. A base is **offered** (a start may
+  pick it) while it has a ready current tree, with each of its expansions that has one
+  (`offered_data_sets`); the host-screen limits are the title's (`hosted/host_limits.h`:
+  Joint Operations' 2..64 players, a time limit of 1..300, kill and score limits of
+  1..500, respawn and delay of 0..300; Delta Force Xtreme 2's the same but 2..100
+  players, its host screen's cap). Hosting is on only with a store. A start names a data
+  set and an expansion by id (`hosted_servers.data_set_id`, `expansion_id`); at its
+  placement the server is **pinned** to the data sets' current trees (`base_tree_id`,
+  `expansion_tree_id`), which a crash restart or a move keeps, until its owner asks for
+  the update (`update_requested`: placed again on the current trees, no restart counted).
+  One whose data set has no data at its placement (no ready current tree, and no pins to
+  keep) fails there, as does one whose row is gone (no restart mends either).
 
 - **The fleet** (`hosted/placement.*`, `hosted/fleet_repository.*`,
   `backend/migrations/0003_fleet.sql`). Hosted servers run on **machines**: a **shared
@@ -879,8 +889,10 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   live server still waiting for a slot (`fleet_has_room`), a start the fleet could not
   place is `at_capacity`.
 - **The rows.** `hosted_servers` holds one row per start: its owner, its service account,
-  its state, its data set (`game`), the owner's settings (range-checked columns, never a
-  file), its place in the fleet (above), its container's name and the machine's private
+  its state, its data set and expansion (`data_set_id`, `expansion_id`) and the trees it is
+  pinned to (`base_tree_id`, `expansion_tree_id`, `update_requested`), the owner's settings
+  (range-checked columns, never a file), its place in the fleet (above), its container's
+  name and the machine's private
   address (`provider`, `machine_id`, `machine_address`), the serve image its start pinned
   (`serve_image`: a deploy's new image reaches a server at its next start), the
   remote-admin login rendered for the service, the restarts used and why it failed.
@@ -925,9 +937,10 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   controller leads (the internal listener serves by then); each
   pass (every second) asks that the controller still leads, leases a
   pooled connection, steps every live machine (below), then walks every live server:
-  `requested` → `provisioning` (placed; on its slot the service account gets a new
-  password, a new admin password is minted, and the files are rendered for the slot's
-  ports) → `booting` (its container wanted on its slot until its machine's agent reports
+  `requested` → `provisioning` (placed; on its slot the trees are pinned, the service
+  account gets a new password, a new admin password is minted, and the files are
+  rendered for the slot's ports) → `booting` (its container wanted on its slot until its
+  machine's agent, the trees fetched, reports
   it running) → `listing` (until a listed RID holds one of the service account's
   HostKeys) → `running` → `stopping` → `stopped`, or `failed`. Every move past a request
   or a stop is the supervisor's, a compare-and-set on the row's state, so a stop that
@@ -1000,9 +1013,13 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   agent's sync): the containers of the live servers placed on the machine that are
   booting, listing, running or stopping (a stopping one only once its agent has reported
   it, so a server stopped before its start never starts), each with its slot, its user,
-  its pinned image, its data set, `opennova-serve`'s arguments, the slots' limits
-  (`ONNET_FLEET_SLOT_CPUS`, `ONNET_FLEET_SLOT_MEMORY_MB`, 128 processes) and its working
-  directory's files until the agent has reported it once. The files are kept in the
+  its pinned image, the trees it is pinned to (its base tree, bound at the container's
+  `/opt/game`, and its expansion tree, at `/opt/game/expansion/<code>`),
+  `opennova-serve`'s arguments, the slots' limits (`ONNET_FLEET_SLOT_CPUS`,
+  `ONNET_FLEET_SLOT_MEMORY_MB`, 128 processes) and its working directory's files until
+  the agent has reported it once; and, beside the containers, every tree they use, with
+  the store URL the agent fetches it from (`trees/<id>/`) and its manifest (each file's
+  name and size), which the agent checks the fetch against. The files are kept in the
   service's memory alone and dropped once reported: a server whose start the service's
   restart cut short (booting, never reported) is placed again with new credentials, and a
   running server's container is answered for without files. The agent routes force each
@@ -1013,10 +1030,10 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   bootstrap token (kept by the service as its SHA-256 alone, 30 minutes' life, spent at
   the agent's first sync, so a redeem whose reply was lost is made again for a fresh
   secret), which it redeems at `POST /hosted/machines/<id>/bootstrap` for its long-lived
-  secret (stored hashed), the serve image, its slots and the data sets' mount paths; then
-  every 5 s (1 s
-  with work) it posts `POST /hosted/machines/<id>/sync` with every container's state, CPU,
-  memory and its slot's egress, and runs what the reply wants. Both routes are on the
+  secret (stored hashed), the serve image and its slots; then every 5 s (1 s with work)
+  it posts `POST /hosted/machines/<id>/sync` with every container's state, CPU, memory
+  and its slot's egress (and, for one that never started, why: its data could not be
+  fetched), and runs what the reply wants, fetching the trees it lacks first. Both routes are on the
   **internal listener**, the controller's second HTTP server, bound while it leads to
   the controller task's private address at port 8070 (from its ECS task's metadata, with
   `ONNET_INTERNAL_HTTP_BIND` unset; that setting where it is set, `127.0.0.1:8070` by
@@ -1174,12 +1191,13 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   admin login lives in the row's own columns, read by `hosted::admin_login_of` alone:
   `HostedServer` has no field for it, so no reply can carry it. `opennova-serve` runs with
   `/HOST server.host --credentials credentials.txt --master-host <host>
-  --master-gate-port <port> /game <title>` (the data set's) and `/exp jox01` for
-  Escalation. The settings' rules: a game the deployment offers, a name of 1..31 cp1252
-  bytes with no control character or double quote, a password of up to 16 printable
-  ASCII characters with no space or quote, the whole numbers within the data set's
-  limits, an expansion the data set allows, and 1..32 `.bms` names of letters, digits,
-  `_` and `-`.
+  --master-gate-port <port> /game <title>` (the base data set's) and `/exp <code>` with
+  an expansion. The settings' rules (`check_settings`): a data set the service offers, a
+  name of 1..31 cp1252 bytes with no control character or double quote, a password of up
+  to 16 printable ASCII characters with no space or quote, the whole numbers within the
+  data set's title's limits, an expansion of that data set with data, and 1..128 `.bms`
+  names of letters, digits, `_` and `-`, each a mission the base's tree or the
+  expansion's lists (without case); a start naming none takes every mission of both.
 - **Machine drivers** (`hosted/machine_driver.h`): the fleet's one seam to the cloud,
   called by the job workers alone (`hosted/fleet_jobs.*`). A driver launches the machine
   a row stands for (the row's id and its one-time token, nothing else), describes it,
@@ -1196,9 +1214,10 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   (`ONNET_HOSTED_DOCKER_URL`, `http://`; the stack puts a socket proxy there that admits
   the containers API alone): `<deployment>-machine-<id>` (`ONNET_HOSTED_DEPLOYMENT`),
   labelled `opennova.hosted`, `opennova.deployment`, `opennova.machine-id` and
-  `opennova.machine-kind`, its data sets mounted read-only at `/opt/game/<data set>` from
-  a data container (`ONNET_HOSTED_DOCKER_DATA_FROM`), docker's init its PID 1, never
-  restarted. The launch creates it, puts its one-time token in it as a file (the archive
+  `opennova.machine-kind`, the mounts of a data container (`ONNET_HOSTED_DOCKER_DATA_FROM`: the local
+  store's directory at the path the programs see it, from which its agent copies the trees
+  its servers need to `/opt/game/<tree>`, ADR 0064) taken read-only, docker's init its PID
+  1, never restarted. The launch creates it, puts its one-time token in it as a file (the archive
   API, so neither an argument nor a variable `docker inspect` shows carries it: the
   machine's user-data), starts it and reads its address on the network; a name the engine
   holds already is a launch run again (this row's labels: started where it is not yet,
@@ -1213,21 +1232,24 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   clients do. `ONNET_HOSTED_PROVIDER=ec2` (`hosted/ec2_machine_driver.*`) launches EC2
   machines from the launch template of their kind (`ONNET_HOSTED_EC2_LAUNCH_TEMPLATES`,
   `{"shared": "lt-...", "own": "lt-..."}`; `infra/aws`: the deployment's fleet image
-  (Canonical's Ubuntu, or one `fleet bake-image` made with docker installed), the
-  kind's type, every data set's private encrypted snapshot as a volume of its own, the
-  machines' security group, their instance profile, IMDSv2 required), tagged
+  (Canonical's Ubuntu, or one `fleet bake-image` made with docker and the AWS CLI
+  installed), the kind's type, the machines' security group, their instance profile
+  (which reads the deployment's trees in the object store), IMDSv2 required), tagged
   `opennova:hosted`, `opennova:deployment`, `opennova:machine-kind`,
   `opennova:machine-id` and `Name`, with the machine script
   (`hosted/machine/machine_user_data.sh`, shipped in the worker's image, web's and the
-  controller's) as user-data: it mounts
-  every data set read-only at `/opt/game/<slug>` by its volume's ext4 label (`od-jop2`,
-  `od-dfx2`, `od-opennova0`), reserves the slots' ports out of the ephemeral range,
+  controller's) as user-data: it installs docker and the AWS CLI v2 (the release the
+  service's images carry, its zip checked), makes the trees root `/opt/game` (where the
+  agent fetches each tree the service names into its own directory, `aws s3 sync` from
+  the store, checked against the manifest), reserves the slots' ports out of the
+  ephemeral range,
   fences the slots' users off the instance metadata and off the controller's internal
   port on every destination (the controller is reached by a name whose address moves
   with it, so no firewall rule names an address), installs `opennova-hostd`, copied
-  out of the serve image, pointed at `ONNET_INTERNAL_URL`, and ships the agent's log and
-  its containers' output to the machines' log group (`ONNET_HOSTED_EC2_LOG_GROUP`, a
-  stream each: `<machine id>/hostd`, `<machine id>/slot-<k>`). The driver runs the AWS
+  out of the serve image, pointed at `ONNET_INTERNAL_URL` with `--trees-root /opt/game
+  --aws /usr/local/bin/aws`, and ships the agent's log and its containers' output to the
+  machines' log group (`ONNET_HOSTED_EC2_LOG_GROUP`, a stream each: `<machine id>/hostd`,
+  `<machine id>/slot-<k>`). The driver runs the AWS
   CLI v2 (installed in the worker's image, pinned and checksummed) through a `CommandRunner`
   (`apps/common/command_runner.*`: an argv array, no shell, a 20 s timeout, an
   environment of the system's and the `AWS_*` variables alone), its credentials the
@@ -1244,7 +1266,8 @@ tables). Each server runs one data set its owner picks. Everything here is servi
 | --- | --- | --- |
 | `ONNET_HOSTED_PROVIDER` | `none` | The machine driver: `ec2` (EC2 machines), `docker` (containers of the serve image, the local stack's; above); `none` runs no hosted server. Any other value, fleet settings or data sets that do not read, no data set named, or a driver missing or mistyping one of its settings (or with a loopback `ONNET_PUBLIC_HOST`) is `none` with a boot warning naming why. |
 | `ONNET_HOSTED_CAP` | 24 | The most hosted servers live at once, across every account: a backstop beside the fleet's own room. |
-| `ONNET_HOSTED_DATA_SETS` | none | A JSON object keyed by data set (`jop_2_consumer`, `dfx2_consumer`, `opennova_0_consumer`), each member of an entry optional: `missions`, a list of `.bms` names, the rotation a start on it takes when its request names none (the first the starting map) and the missions the site's rotation picker offers (with none, a start must name its missions); `loose_root`, `true` for a folder of loose files with no game archives (its servers run with `--loose-root`: the local stack's synthetic data set). Every data set named is offered (each machine mounts them all). For example `{"jop_2_consumer":{"missions":["ASH_G1A.bms"]}}`. Any other key or member is a boot warning, and hosting is off. |
+| `ONNET_OBJECT_STORE_URL` | none | The object store the data sets' trees live in (`object_store.h`, ADR 0064): `s3://<bucket>/data` (the deployment's own ops bucket, `data/<deployment>`; the AWS CLI through the program's role) or `file:///<dir>` (a directory: a developer's machine, the tests, the local driver's trees). Required for hosting on either driver; read by web (the admin's data set routes), the worker (the data sets' jobs) and the controller (the trees' URLs its supervisor hands the agents) whether or not hosting is on. |
+| `ONNET_OBJECT_STORE_REGION` | none | The S3 store's region (required with an `s3://` URL). |
 | `ONNET_INTERNAL_HTTP_BIND` | `127.0.0.1:8070` | The controller's internal listener, `<IPv4>:<port>`: unset in a deployment, where the controller binds its ECS task's private address at 8070 (from the task metadata); a private or loopback address, never a public or wildcard one. The controller's admin links connect from it, and the ec2 machines' `admin.cfg` admits its /16 (`10.44.*`): with `ec2`, a controller whose bind is not a private address does not boot. |
 | `ONNET_INTERNAL_URL` | none | The internal listener as the machines reach it, `http://<host>:<port>` (a deployment's Cloud Map name for the controller; the controller's compose name in the local stack); every machine's agent calls it (`--service`), and the ec2 machines fence their slots off its port. Required by both drivers: without it hosting is off. |
 | `ONNET_HOSTED_BOOTSTRAP_CIDRS` | none | Comma-separated private IPv4 CIDRs, the networks the agent routes answer (the machines' subnet); each inside 10.0.0.0/8, 172.16.0.0/12 or 192.168.0.0/16. On a loopback bind, 127.0.0.0/8 is admitted besides. |
@@ -1277,14 +1300,14 @@ service's own message, never database text.
 
 | Route | Access | Replies |
 | --- | --- | --- |
-| `GET /api/me/servers` | a website session | `{"enabled", "full", "entitlement", "data_sets", "servers"}`: `enabled` is a machine driver with at least one data set; `full` that a start now would be `at_capacity` (`ONNET_HOSTED_CAP` servers live, or the fleet with no place for a shared server and none for one on an own machine the account still has free); `entitlement` the account's hosting entitlement (`max_servers`, `used`: its live servers, a stopping one included, `own_machines`, `own_used`: those of them on own machines, `can_start`, `source`: `none`, `tier` or `comp`); `data_sets` the ones it offers, in order (empty when hosting is off), each `game`, `display_name`, `expansions` (`code` and `name`, the base game's `""` first), `default_missions` (its `missions`: the rotation a start on it takes when it names none and the missions the site's rotation picker offers) and `limits` (`max_players`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, each `min` and `max`); `servers` its live servers by id, oldest first, then its newest 10 ended ones, newest first, each `id`, `state`, `live`, `own_machine`, `settings` (`game`, `game_name`, `max_players`, `game_password`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, `team_ff`, `expansion`, `missions`), `game_display_name` and `expansion_display_name` (the catalog's names, so an ended server's read the same once its data set is gone), `restarts`, `failure_reason`, `created_at`, `updated_at`, `running_at`, `ended_at` (UTC, null until set) and `listing` (`rid`, `server_name`, `mission_name`, `players`, `max_players`, `host_ip`, `host_port` while listed, else null); `Cache-Control: no-store` |
+| `GET /api/me/servers` | a website session | `{"enabled", "full", "entitlement", "data_sets", "servers"}`: `enabled` is a machine driver with at least one offered data set; `full` that a start now would be `at_capacity` (`ONNET_HOSTED_CAP` servers live, or the fleet with no place for a shared server and none for one on an own machine the account still has free); `entitlement` the account's hosting entitlement (`max_servers`, `used`: its live servers, a stopping one included, `own_machines`, `own_used`: those of them on own machines, `can_start`, `source`: `none`, `tier` or `comp`); `data_sets` the ones a start may pick (the bases with a ready current tree, by id; empty when hosting is off), each `id`, `display_name`, `title`, `version` (its current tree's), `missions` (its tree's multiplayer missions, each `file` and `title`: the site's rotation picker, and the rotation a start on it takes when it names none), `limits` (its title's: `max_players`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, each `min` and `max`) and `expansions` (its expansions with data: `id`, `code`, `display_name`, `version`, `missions`); `servers` its live servers by id, oldest first, then its newest 10 ended ones, newest first, each `id`, `state`, `live`, `own_machine`, `settings` (`data_set_id`, `expansion_id` (null for none), `game_name`, `max_players`, `game_password`, `time_limit`, `kill_limit`, `max_score`, `respawn`, `start_delay`, `team_ff`, `missions`), `data_set` (`{id, display_name}`, null once the row is gone), `expansion` (`{id, code, display_name}` or null), `game_display_name` and `expansion_display_name` (the rows' names), `data` (`base` and `expansion`, each `{tree_id, version}` of the tree it is pinned to, or null before its first start), `update_available` (its data sets have newer data than its pins, while it is live), `update_requested`, `restarts`, `failure_reason`, `created_at`, `updated_at`, `running_at`, `ended_at` (UTC, null until set) and `listing` (`rid`, `server_name`, `mission_name`, `players`, `max_players`, `host_ip`, `host_port` while listed, else null); `Cache-Control: no-store` |
 | `GET /api/me/servers/<id>` | a website session | `{"server"}`, one of the account's servers in any state, as the list's plus `events` (the newest 50 transitions, oldest first: `from`, `to`, `detail`, `at`); 404 `not_found` for an id that is not the account's (another account's server is a 404, never a 403); `Cache-Control: no-store` |
-| `POST /api/me/servers` | a website session, the CSRF header | the settings as JSON (`game_name` required; `game` defaults to the first offered data set and `missions` to that data set's; every other field to its default) and `own_machine` (`true` to run it on an own machine; default `false`, a shared one). 503 `hosting_disabled` with no machine driver; 429 past the account's bucket (6, then one every 20 s, shared with the stop); 400 `invalid_json`, `invalid_field`, or `invalid_settings` with the `field` and why; 403 `not_entitled` with no hosting entitlement (or an account not active), 403 `payment_past_due` while a granting subscription's payment is past due; 409 `server_limit` with `max_servers` and `used` beside the code when every server the account may run is live, 409 `no_own_machine` when each own machine it pays for already runs one, 409 `at_capacity` (`ONNET_HOSTED_CAP` servers live, or the fleet's planner finds it no place: every slot taken, the servers already waiting counted, and the fleet at its maximum machines); 202 `{"server"}`, `requested` |
+| `POST /api/me/servers` | a website session, the CSRF header | the settings as JSON (`game_name` required; `data_set_id` defaults to the first offered data set, `expansion_id` to none, and `missions` to every mission of the base's tree then the expansion's; every other field to its default) and `own_machine` (`true` to run it on an own machine; default `false`, a shared one). 503 `hosting_disabled` with no machine driver or no data set with data; 429 past the account's bucket (6, then one every 20 s, shared with the stop); 400 `invalid_json`, `invalid_field`, or `invalid_settings` with the `field` (`data_set_id`, `expansion_id`, `missions` among them) and why; 403 `not_entitled` with no hosting entitlement (or an account not active), 403 `payment_past_due` while a granting subscription's payment is past due; 409 `server_limit` with `max_servers` and `used` beside the code when every server the account may run is live, 409 `no_own_machine` when each own machine it pays for already runs one, 409 `at_capacity` (`ONNET_HOSTED_CAP` servers live, or the fleet's planner finds it no place: every slot taken, the servers already waiting counted, and the fleet at its maximum machines); 202 `{"server"}`, `requested` |
 | `POST /api/me/servers/<id>/stop` | a website session, the CSRF header | 429 past the bucket; 404 `not_found` for an id that is not the account's; 409 `not_live` once it has ended; 202 `{"server"}`, `stopping` (also when it already was), or `stopped` when the supervisor finished it in between |
 | `GET /api/me/servers/<id>/stats` | a website session | one of the account's servers' stats, in any state: `?range=1h` (a point a minute), `24h` (the default; five minutes), `7d` (an hour) or `30d` (four hours), another 400 `invalid_field`; 404 `not_found` for an id that is not the account's; 429 past the caller's read bucket (60, then two a second). `{"server_id", "range", "live", "summary", "series"}`: `live` the server now, null once it has ended (`state`, `uptime_seconds` while running, else null, `players`, `max_players`, `mission`, `game_type` and `time_left` in seconds from its listing, `scene` (`game`, `menus`, `unknown`) and `link_state` from its admin link, `cpu_percent` and `memory_bytes` from its newest sample; each null where nothing is known); `summary` over the range (`live_seconds`, `running_seconds`, `availability` (running over live, 0..1, null with none), `restarts` (crash restarts), `peak_players`, `avg_players` (players at a time while it ran, null with none), `player_hours`, `unique_players`, `missions`, `egress_bytes`, `egress_bytes_month` (this calendar month, UTC, whatever the range) and `approximate`, the names of the fields counted approximately); `series` (`step_seconds`, and `points`, one per step oldest first: `t` (the step's start, ISO 8601 UTC), `players`, `max_players`, `running`, `cpu_percent`, `egress_bytes`, null where no sample fell); `Cache-Control: no-store` |
 | `GET /api/me/servers/stats` | a website session | the account's servers together, as above with no `server_id` and `live` null: the summary's times added up, its peak the most players at once across them, each point's players and bytes added up and `running` true while any ran |
 | `PUT /api/admin/users/<id>/comp-servers` | admin | `{"comp_servers": 0..16}`, the admin's grant; 200 `{"user"}` (which carries `comp_servers` and `max_servers`, the entitlement); 400 `invalid_json`, `invalid_field` (no whole number in 0..16) or `missing_field`; 404 for an unknown id or a service account. An entitlement down to no server stops the account's hosted server, as a ban does |
-| `GET /api/admin/hosted` | admin | the fleet: `{"enabled", "provider", "cap", "live", "machines", "servers"}`. `machines`: the live machines by id, then the newest 10 ended or failed, each `id`, `provider`, `kind` (`shared` or `own`), `state` (`launching`, `booting`, `ready`, `draining`, `ending`, `ended`, `failed`, `lost`), `cloud_id`, `instance_type`, `slots`, `slots_used` (the live servers on it), `private_address`, `public_address`, `bootstrapped`, `agent_version`, `template_version`, `serve_image`, `reserved_for` (an own machine's server, else null), `last_report_at`, `launched_at`, `ready_at`, `ended_at`, `end_reason` and `egress_bytes_month` (its slots' egress this calendar month, UTC, as the stats count it). `servers`: the newest 100 the query takes, live first (`?owner=<username>`: that account's alone, none for an unknown name; `?state=live`, `ended` or `all`, the default; another state 400 `invalid_field`), each as `GET /api/me/servers`' plus `owner` (`{id, username, tier}`, `tier` its granting support tier or null; null once the account is gone), `service_account` (`{id, username}` or null), `provider`, `container` (its container's name), `machine_address`, `admin_port`, `machine_ref` and `slot` (null with none; an ended server's where it last ran), `game_port` (null before a placement), `generation`, `serve_image` and `players` (its listing's, null when not listed). The background jobs (the machines' launches and ends among them) are `GET /api/admin/jobs/overview`'s ("Background jobs" above). Never the admin password or an agent's credential; `Cache-Control: no-store` |
+| `GET /api/admin/hosted` | admin | the fleet: `{"enabled", "provider", "cap", "live", "machines", "servers"}`. `enabled` a machine driver with at least one offered data set. `machines`: the live machines by id, then the newest 10 ended or failed, each `id`, `provider`, `kind` (`shared` or `own`), `state` (`launching`, `booting`, `ready`, `draining`, `ending`, `ended`, `failed`, `lost`), `cloud_id`, `instance_type`, `slots`, `slots_used` (the live servers on it), `private_address`, `public_address`, `bootstrapped`, `agent_version`, `template_version`, `serve_image`, `reserved_for` (an own machine's server, else null), `last_report_at`, `launched_at`, `ready_at`, `ended_at`, `end_reason` and `egress_bytes_month` (its slots' egress this calendar month, UTC, as the stats count it). `servers`: the newest 100 the query takes, live first (`?owner=<username>`: that account's alone, none for an unknown name; `?state=live`, `ended` or `all`, the default; another state 400 `invalid_field`), each as `GET /api/me/servers`' plus `owner` (`{id, username, tier}`, `tier` its granting support tier or null; null once the account is gone), `service_account` (`{id, username}` or null), `provider`, `container` (its container's name), `machine_address`, `admin_port`, `machine_ref` and `slot` (null with none; an ended server's where it last ran), `game_port` (null before a placement), `generation`, `serve_image`, `base_tree_id` and `expansion_tree_id` (its pins, null before its first start), `outdated` (newer data than its pins, while live), `update_requested` and `players` (its listing's, null when not listed). The background jobs (the machines' launches and ends among them) are `GET /api/admin/jobs/overview`'s ("Background jobs" above). Never the admin password or an agent's credential; `Cache-Control: no-store` |
 | `GET /api/admin/hosted/<id>` | admin | `{"server", "machine"}`: one server in any state as the fleet view's plus `events` (the newest 50 transitions, oldest first), and the machine it is on or last ran on (as above, or null); 404 `not_found`; `Cache-Control: no-store` |
 | `POST /api/admin/fleet/machines/<id>/drain` | admin | the machine takes no new server and the supervisor moves its servers off it one at a time (no restart counted), then ends it; 202 `{"machine"}` (one draining already included); 404 `not_found`; 409 `not_live` once it is ending or ended |
 | `POST /api/admin/fleet/machines/<id>/end` | admin | the machine to `ending`: the next pass terminates it and places its servers again (no restart counted); its agent is refused from then on; 202 `{"machine"}` (one ending already included); 404 `not_found`; 409 `not_live` once it has ended |
@@ -1357,7 +1380,7 @@ of the waiting polls, so a page never meets its own `console_busy`.
 | `POST /api/me/servers/<id>/players/<slot>/punt`, `/ban`, `/swap`, `/kill` | `PLAYER PUNT` / `BAN` / `SWAPTEAM` / `KILL <slot>` | `{"server_id", "slot", "result"}` (`punted`, `banned` with `listed`: the PCID listed, a NovaWorld host's, `swapped`, `killed`); 400 `invalid_slot` (1..255), 404 `player_not_found`, 409 `no_pcid` or `not_connected` (a ban) |
 | `GET /api/me/servers/<id>/missions` | `MISSION AVAILABLE` | `{"server_id", "missions"}`: `index`, `file`, `title` |
 | `GET /api/me/servers/<id>/rotation` | `MISSION LIST` (and `GET GAMESTATE` when it lists none) | `{"server_id", "rotation"}`: `index`, `file`, `swap_sides`, `flipped`, `one_shot`, `current`, `next`; 409 `not_in_game` between matches (retail lists nothing there) |
-| `POST /api/me/servers/<id>/rotation` | `MISSION LIST` (and `GET GAMESTATE` when it lists none), then `MISSION ADD <file> <0\|1>` | body `{"mission": "<file>.bms", "swap_sides": false}`, appended; `{"result": "added"}`; 400 `invalid_mission`, `missing_field`, `invalid_field`; 404 `mission_not_found`; 409 `rotation_full` (32 maps, the start settings' cap: policy, not a server limit), `not_in_game` (retail answers an add OK between matches and appends nothing) |
+| `POST /api/me/servers/<id>/rotation` | `MISSION LIST` (and `GET GAMESTATE` when it lists none), then `MISSION ADD <file> <0\|1>` | body `{"mission": "<file>.bms", "swap_sides": false}`, appended; `{"result": "added"}`; 400 `invalid_mission`, `missing_field`, `invalid_field`; 404 `mission_not_found`; 409 `rotation_full` (128 maps, the start settings' cap: policy, not a server limit), `not_in_game` (retail answers an add OK between matches and appends nothing) |
 | `POST /api/me/servers/<id>/rotation/<index>/remove`, `/next` | `MISSION LIST` (and `GET GAMESTATE` when it lists none), then `MISSION REMOVE` / `SETNEXT <index>` | `{"result": "removed"}` / `"next_set"`; 400 `invalid_index` (0..31); 404 `no_such_entry` (the server answers OK for any index, so the rotation is read first); 409 `last_mission` (the last map stays: an empty rotation ends the session at the round's end), `not_in_game` |
 | `POST /api/me/servers/<id>/rotation/cycle` | `MISSION CYCLE` | `{"result": "cycling"}`: the round ends now and the next map loads; 409 `not_in_game` |
 | `GET /api/me/servers/<id>/chat` | `CHAT GET` | `{"server_id", "lines"}`, the server's chat window oldest first |
@@ -1369,7 +1392,7 @@ of the waiting polls, so a page never meets its own `console_busy`.
 `hosted/console_commands.h`).** Owners get exactly the commands above but `GET
 GAMESETTINGS`; admins get that one wider read besides. There is no passthrough of an
 arbitrary admin line: every line is composed from checked arguments (a slot 1..255, since
-the server compares `(u8)atol` and 256 would be its own slot 0; an index 0..31, a rotation being at most 32 maps (policy); a mission
+the server compares `(u8)atol` and 256 would be its own slot 0; an index 0..127, a rotation being at most 128 maps (policy); a mission
 a `.bms` name of letters, digits, `_` and `-`; chat text as above), so nothing reaches the
 server's files or config (`SET`, `WEAPON SET`, `CMD`), its admin users or ban files
 (`ADMINUSER`, `BANLIST`), or its session's end (`GOTO`, `MISSION CLEAR`, `QUIT`) outside the
@@ -2083,7 +2106,8 @@ hosted servers:
 `hosted_supervisor`
 ([`tests/novaworld/hosted_supervisor_test.cpp`](../../tests/novaworld/hosted_supervisor_test.cpp),
 every build; it compiles `auth`, `web_session` and `hosted/` straight in) drives the
-settings' rules and renders, the data sets, the service accounts, the request's checks
+settings' rules and renders, the host limits and the offered data sets, the trees a start
+pins and the sync carries, the service accounts, the request's checks
 (the fleet's room among them) and every server transition over a fake machine driver
 whose machines' agents the test plays through the supervisor's sync
 ([`tests/novaworld/hosted_fake_driver.h`](../../tests/novaworld/hosted_fake_driver.h),

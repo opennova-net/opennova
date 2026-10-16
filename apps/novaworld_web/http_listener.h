@@ -33,6 +33,7 @@ namespace opennova::novaworld_server {
 struct ServerConfig;
 class RedisPool;
 class Watchdog;
+class ObjectStore;
 
 namespace billing { class Billing; }
 namespace catalog { struct GameRow; }
@@ -105,6 +106,13 @@ public:
 	// listener. Null: billing is off, and those routes answer billing_disabled
 	// (GET /api/billing/tiers answers {"enabled": false}).
 	void set_billing(billing::Billing *billing) { billing_ = billing; }
+
+	// The object store the hosted data sets' trees live in (object_store.h;
+	// parts.h make_object_store), which the admin's data set routes upload into
+	// and read. Set before start(); it must outlive the listener. Null: no store
+	// (those routes answer store_unavailable).
+	void set_object_store(ObjectStore *store) { object_store_ = store; }
+	ObjectStore *object_store() const { return object_store_; }
 
 	// Each container's memory and CPUs (hosted/fleet_config.h's slot limits):
 	// the admin usage view's limits. Set before start(); unset, the defaults.
@@ -243,6 +251,8 @@ private:
 	bool redis_answers();
 	// The billing routes' billing (set_billing); null: billing off.
 	billing::Billing *billing_ = nullptr;
+	// The object store (set_object_store, set_local_object_store); null: none.
+	ObjectStore *object_store_ = nullptr;
 	// The slots' limits (set_fleet_slots).
 	int fleet_slot_memory_mb_ = 512;
 	double fleet_slot_cpus_ = 1.0;

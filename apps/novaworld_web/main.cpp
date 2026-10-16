@@ -101,6 +101,16 @@ int run(const program::Boot &boot) {
 	// Whether the routes queue the welcome and reset mails (mail.send jobs, a
 	// worker's to send): the worker decides alike from the same settings.
 	const MailStack mail = make_mail(config);
+	// The object store the data set routes upload into and read (the admin's
+	// data sets page). Declared before the listener, which it outlives.
+	ObjectStoreStack store;
+	if (hosting.store_ok) {
+		std::string error;
+		store = make_object_store(hosting, config, error);
+		if (!store.store)
+			return program::fatal("the object store: " + error);
+		std::printf("[boot] data sets: routes over the %s store\n", store.store->kind());
+	}
 
 	// The 404s the routes record, flushed by the main loop into
 	// unknown_messages (GET /api/unknowns reads them there).
@@ -114,6 +124,7 @@ int run(const program::Boot &boot) {
 	http.set_mail_enabled(mail.on);
 	http.set_watchdog(&watchdog);
 	http.set_billing(billing_stack->billing.get());
+	http.set_object_store(store.store.get(), dynamic_cast<LocalObjectStore *>(store.store.get()));
 	// A start's at_capacity and the list's `full` ask the fleet's planner.
 	http.set_fleet_placement(hosting.fleet.placement);
 	// The admin usage view's limits: each container's memory and CPUs.

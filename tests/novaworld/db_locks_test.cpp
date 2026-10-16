@@ -155,9 +155,10 @@ int test_request_server_one_count_at_a_time() {
 	const int64_t pia = make_player(db, "pia", 1);
 	const int64_t quin = make_player(db, "quin", 1);
 	TEST_EXPECT(olive > 0 && pia > 0 && quin > 0);
-	const auto start = [](Database &conn, int64_t owner, int cap) {
-		return hosted::request_server(
-				conn, owner, valid_settings(), hosted::known_data_sets(), cap, kWall)
+	const hosted_rig::SeededData data = hosted_rig::seed_data(db);
+	const auto start = [&data](Database &conn, int64_t owner, int cap) {
+		return hosted::request_server(conn, owner, valid_settings(data.jo),
+				hosted::offered_data_sets(conn), cap, kWall)
 				.outcome;
 	};
 	using Outcome = hosted::RequestOutcome;
@@ -297,6 +298,7 @@ int test_edge_writes_do_not_wait_on_web_writes() {
 	Database db = scratch.open();
 	hostdb::upsert_host(db, listed_host("S-1", "m1"));
 	const int64_t sam = make_player(db, "sam", 1);
+	const hosted_rig::SeededData seeded = hosted_rig::seed_data(db);
 	TEST_EXPECT(sam > 0);
 	opennova::LobbyStatusBlob blob;
 	blob.lobby_name = "jop_2_consumer";
@@ -315,7 +317,7 @@ int test_edge_writes_do_not_wait_on_web_writes() {
 				if (!nws::create_user(h, p).ok)
 					throw std::runtime_error("create_user");
 				const auto started = hosted::request_server(
-						h, sam, valid_settings(), hosted::known_data_sets(), 10, kWall);
+						h, sam, valid_settings(seeded.jo), hosted::offered_data_sets(h), 10, kWall);
 				if (started.outcome != hosted::RequestOutcome::Created)
 					throw std::runtime_error("request_server");
 			},
