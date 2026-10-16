@@ -219,7 +219,7 @@ void test_join_ticket_rides_the_admission_join() {
 // The JOIN keeps its last CD (D-NET-412 review): each CD the walk meets replaces the cookie,
 // so an overlapping run of overrunning CDs (each re-read from the previous one's value) costs
 // nothing, and only the last CD's pairs are the joiner's; a CD of no length leaves none.
-// [orig: NapiNPServer_HandlePlayerJoinMessage - the "CD" store @0x512C5D -> sub_4C6060
+// [orig: NapiNPServer_HandlePlayerJoinMessage - the "CD" store @0x512C5D -> CNetPlayer_SetCookieBuffer @0x4C6060
 //  @0x4C6072..0x4C6095]
 void test_join_keeps_the_last_cd() {
 	const auto admit = [](const std::vector<uint8_t> &body) {

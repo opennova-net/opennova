@@ -46,7 +46,7 @@ bool Server_ToggleJoinLock(NapiNPServerCtx &ctx);
 // (NapiNPConnection::player_list_team / player_list_type). `own` marks the listen host's own
 // client-side connection, whose identity the embedder's NovaWorld login supplies; a mode-1
 // host has none.
-// [orig: Server_PlayerAdd @0x51cbc0 - PlayerIpAndPort @0x51d3d1..0x51d3f2 (Napi_FormatAddress
+// [orig: Server_PlayerAdd @0x51cbc0 - the PlayerIpAndPort var @0x51d3d1..0x51d3f2 (Napi_FormatAddress
 //  @0x62ded0), the five vars @0x51d441..0x51d4aa]
 struct HostPlayerListRow {
 	HostPlayerSlot slot;

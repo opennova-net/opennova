@@ -224,8 +224,8 @@ TitleIdentity dfx2_row() {
 	//  @0x4cdcd0]
 	t.gate_tag_keys = "dfx2:0:buffy";
 	// DFXCATEGORY1 after LAN on both host lists (DFX2-7).
-	// [orig: HostSetup @0x4d0e8a..0x4d0eb1, Host @0x4d0faf..0x4d0fd5 in the twin of
-	//  CNapiGameSession_BuildHostVarLists @0x4d0ce0 (dfx2.exe)]
+	// [orig: CNapiGameSession_BuildHostVarLists @0x4d0ce0 (dfx2.exe) - the HostSetup list's
+	//  DFXCATEGORY1 @0x4d0e8a..0x4d0eb1, the Host list's @0x4d0faf..0x4d0fd5]
 	t.host_category_var = true;
 	// The live DFX2 gate's startupurl carries &pfid=38 (docs/titles/dfx2-vs-jo-re.md §6.5).
 	t.pfid = 38;

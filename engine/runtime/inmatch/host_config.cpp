@@ -163,7 +163,7 @@ HostScreenState host_session_settings(gamecfg::GameCfg &cfg) {
 	config.max_players = static_cast<uint32_t>(host.player_limit);
 	config.dedicated_server = !host.serve_and_play;
 	config.num_teams = static_cast<uint8_t>(cfg.mp_numteams); // g_NumTeamsConfig @0x551BAC
-	// The net config's side byte [orig: (char)dword_2550ADC @0x5697C3].
+	// The net config's side byte [orig: (char)g_GameConfigState.sideRequirement_424 @0x5697C3].
 	config.host_side_request = static_cast<int8_t>(cfg.side_req);
 	config.mp_attributes = static_cast<uint32_t>(cfg.mpattrib); // game_settings @0x56967F
 	config.fat_bullets = cfg.fatbullets;              // g_FatBullets @0x551C01

@@ -36,7 +36,9 @@ struct CharAttrTable {
 // latches kept (the memset @ 0x412168 covers the table alone).
 void charattr_load(CharAttrTable &state, const uint8_t *data, size_t size);
 
-// The six session words (dword_24D20E8..F4) the authority's restriction step reads: game.cfg's
+// The four session words (g_SessionNoCharAbilities @0x24D20E8, g_SessionNoWeaponRecoil
+// @0x24D20EC, g_SessionNoCrossHairSpread @0x24D20F0, g_SessionNoScopeDrift @0x24D20F4) the
+// authority's restriction step reads: game.cfg's
 // mp_NoCharAbilities, mp_NoWeaponRecoil, mp_NoCrossHairSpread and mp_NoScopeDrift in a session [orig:
 // Game_ApplySessionSettingsToGlobals @ 0x551E2B..0x551E4D (authority), @ 0x551EA7..0x551EC9], the player
 // profile's words +0x548 / +0x54C / +0x554 / +0x550 in single player (@ 0x551F15..0x551F3F).

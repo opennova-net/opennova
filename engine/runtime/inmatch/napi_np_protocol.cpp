@@ -1137,14 +1137,14 @@ void handle_client_resend_list(NapiNPServerCtx &ctx, const PeerAddr &peer,
 	}
 	// A resend list is not receive activity: the handler reads GetTickCount and discards it,
 	// leaving the reap clock alone [orig: NapiNP_HandleResendList @0x623800 @0x62395f].
-	// The backoff callback (cb_server_6 = sub_4C62A0 -> entity+89876 = 1, the
+	// The backoff callback (cb_server_6 = NapiNPServer_OnResendListCallback @0x4c62a0 -> slot+89876 = 1, the
 	// next 0x0A budget halving) is latched only by a NONZERO requested dword; a
 	// zero-only "send next" list or a key-only body arms nothing.
 	// [orig: NapiNP_HandleResendList @0x6239aa sets the latch on the nonzero
 	//  path only; @0x6239ef gates the callback on it; @0x623974 returns before
 	//  the loop on a key-only body]
 	// The same callback raises the outgoing link error of the host's own
-	// connection indicators [orig: sub_4C62A0 @0x4c62c0..0x4c62d5 — the
+	// connection indicators [orig: NapiNPServer_OnResendListCallback @0x4c62c0..0x4c62d5 — the
 	// g_NetQuality flag-1 store behind the cooldown test].
 	if (std::any_of(requested.begin(), requested.end(),
 			[](uint32_t sequence) { return sequence != 0; })) {

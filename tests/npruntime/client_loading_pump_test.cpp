@@ -23,7 +23,7 @@
 // against a scripted host on a virtual 16 ms clock and pins the frame on which
 // each admission packet leaves.
 // [orig: MultiPlayer_JoinSessionStateMachine @0x56a320 (state 5 @0x56a5bf..
-//  0x56a5dd, state 6 -> sub_424740 @0x424740); SaveFile_SendAndWaitForServerAck
+//  0x56a5dd, state 6 -> MultiPlayer_PumpJoinVerificationFrame @0x424740); SaveFile_SendAndWaitForServerAck
 //  @0x5204b0; CNapiGameSession_InitRandomSeedOrRequest @0x51e8f0;
 //  NapiClient_WaitForDisconnect @0x42cb20; NapiClient_WaitForGameStart @0x42cc10;
 //  Game_StartMission's final loop @0x52628d..0x5262df; the main-loop gate

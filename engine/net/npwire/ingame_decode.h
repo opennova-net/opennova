@@ -1518,8 +1518,9 @@ struct WorldStateWaypoint {
 	uint16_t name_id = 0;
 	// The marker's done byte (entity+536), which both titles' writers emit; JO's handler
 	// reads and discards it, DFX2's stores it onto the marker (DFX2-9).
-	// [orig: NetPacket_WriteWorldStateLoad0x0F @0x502f5f; NapiNPClientMsg_0x00F @0x42e497;
-	//  NetPacket_WriteWorldStateLoad0x0F @0x50008f, NapiNPClientMsg_0x00F @0x42fff0 (dfx2.exe)]
+	// [orig: NetPacket_WriteWorldStateLoad0x0F @0x502f5f; NapiNPClientMsg_0x00F @0x42e497]
+	// [orig: NetPacket_WriteWorldStateLoad0x0F @0x50008f, NapiNPClientMsg_0x00F @0x42fff0
+	//  (dfx2.exe)]
 	uint8_t  done = 0;
 };
 struct WorldStateLoad {

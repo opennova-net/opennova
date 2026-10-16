@@ -256,7 +256,8 @@ void roster_sync() {
 	// A leave and a re-join of the same player into the same slot between two syncs (same name,
 	// address and PCID): the re-join is a new connection, so a removal and an add, as retail's
 	// remove and add each send theirs (D-NET-659).
-	// [orig: Server_PlayerRemove @0x51b5f3; Server_PlayerAdd @0x51d4b5]
+	// [orig: Server_HandlePlayerDisconnect @0x51B5C0 (the removal @0x51b5f3); Server_PlayerAdd
+	//  @0x51cbc0 (the add @0x51d4b5)]
 	HostPlayerSlot rejoined = current[1];
 	rejoined.connection_id = 7;
 	const opennova::RosterSync rejoin =
@@ -275,7 +276,7 @@ void roster_sync() {
 // slot, with the add's connection id, the NA bytes, "a.b.c.d:port", the PCID and the match's
 // PlayerTeam / PlayerType; the listen host's own client-side connection marked `own`; a
 // connection not yet added left out.
-// [orig: Server_PlayerAdd @0x51cbc0 - PlayerIpAndPort @0x51d3d1..0x51d3f2, the five vars
+// [orig: Server_PlayerAdd @0x51cbc0 - the PlayerIpAndPort var @0x51d3d1..0x51d3f2, the five vars
 //  @0x51d441..0x51d4aa]
 void host_player_list_rows() {
 	inmatch::NapiNPServerCtx ctx;

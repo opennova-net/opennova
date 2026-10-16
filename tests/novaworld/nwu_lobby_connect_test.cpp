@@ -7,7 +7,7 @@
 //  CNapiGameSession_ProcessPeriodicUpdate @0x4D4400 - @0x4D4483..0x4D44B1;
 //  CNapiGameSession_PollConnectPhase1 @0x4D4C30; CGameSession_WaitForNWUValidation @0x4D0F20;
 //  CNapiGameSession_PollConnectPhase2 @0x4D4D70; CGameSession_WaitForNWUConnection @0x4D1230;
-//  UI_ShowNovaWorldConnectError @0x5584A0]
+//  UI_ShowNetworkErrorByCode @0x5584A0]
 
 #include <net/napi/envelope.h>
 #include <net/title/title_identity.h>
@@ -197,7 +197,7 @@ std::vector<uint8_t> server_reject_to(
 }
 
 // The menu's map over the connect legs' codes: -23..-1 show NWEC(25 - code), anything else
-// NWEC17. [orig: UI_ShowNovaWorldConnectError @0x5584A0 - @0x5584A4, the table @0x5586F8, the
+// NWEC17. [orig: UI_ShowNetworkErrorByCode @0x5584A0 - @0x5584A4, the table @0x5586F8, the
 //  default @0x5586DF]
 void check_connect_error_tags() {
 	CHECK(novaworld_connect_error_tag(-1) == "NWEC26");

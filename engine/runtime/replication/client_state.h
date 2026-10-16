@@ -999,7 +999,7 @@ struct ClientSessionStatus {
 };
 ClientSessionStatus fold_session_status(const SessionStatusBlock &block, uint32_t now_ms);
 // The session's elapsed milliseconds: 0 while not valid, else the uptime plus
-// the time since the stamp (u32 wrap) [orig: SessionStatus_GetElapsedMS @0x52d5f0].
+// the time since the stamp (u32 wrap) [orig: CSessionTimer_GetElapsedMS @0x52d5f0].
 uint32_t session_status_elapsed_ms(const ClientSessionStatus &status, uint32_t now_ms);
 
 // The S2C 0x7E strings a client keeps: each strncpy'd into its own 1024-byte
@@ -1286,7 +1286,7 @@ struct ClientState {
 	// (0x4E, {netId}) @0x43266c].
 	std::vector<uint32_t> pending_clan_walk_requests;
 	// The S2C 0x4C player-slot pointer table, replaced whole by every snapshot
-	// [orig: g_PlayerSlotPtrTable / g_PlayerSlotPtrCount @0xA822D0/D4 — freed
+	// [orig: g_PlayerSlotPtrTable @0xA822D0, g_PlayerSlotPtrCount @0xA822D4 — freed
 	//  and zeroed @0x428583..0x4285a1, one entry per snapshot entry @0x428698].
 	std::vector<ClientVisiblePlayer> visible_players;
 	// The 0x22 + 0x23 refresh pairs the 0x4D / 0x50 folds queue.

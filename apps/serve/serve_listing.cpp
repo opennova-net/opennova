@@ -125,7 +125,7 @@ std::vector<HostPlayerSlot> ServeListing::wanted_roster(const std::map<int, Host
 // executor's stand-in for ctx+0x68, stays clear on purpose: retail's own +0x58 is already set
 // in the hosting wait (CNapiNetwork_SetNetworkType @0x4C4A85, from @0x4A6614), but no verb's
 // gate reads it.
-// [orig: CNapiGameSession_HandleServerCommand — PuntPlayer @0x4D2515..0x4D254D; SetServerName's
+// [orig: CNapiGameSession_HandleServerCommand — the PuntPlayer arm @0x4D2515..0x4D254D; SetServerName's
 //  block copy @0x4D2CFC, SetServerMsg's @0x4D2DAD, SetMPReset's @0x4D2E28; Game_SaveConfig
 //  @0x4D2DDF (SetServerName / SetServerMsg) and @0x4D2E2D (SetMPReset); the gates, SetServerName's
 //  ctx+0x68 test @0x4D2CE9 and SetMPReset's lone token count @0x4D2E12;

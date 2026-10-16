@@ -69,7 +69,7 @@ ClientSessionStatus fold_session_status(const SessionStatusBlock &block, uint32_
 }
 
 uint32_t session_status_elapsed_ms(const ClientSessionStatus &status, uint32_t now_ms) {
-	// [orig: SessionStatus_GetElapsedMS @0x52d5f0 — `GetTickCount() + (+0x70 -
+	// [orig: CSessionTimer_GetElapsedMS @0x52d5f0 — `GetTickCount() + (+0x70 -
 	//  +0x74)`]
 	if (!status.valid) return 0;
 	return now_ms + (status.uptime_ms - status.stamp_ms);

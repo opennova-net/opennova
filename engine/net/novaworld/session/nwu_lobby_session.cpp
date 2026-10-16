@@ -328,7 +328,7 @@ void NwuLobbySession::abort_connect() {
 //  @0x4D08A1, the connection's destroy 0x62A4B0 @0x4D08A7, the protocol's 0x62B500 @0x4D08B8,
 //  +0x12C..+0x138 = 0 @0x4D08E4..0x4D08F6, the session inactive @0x4D092E;
 //  UI_ProcessLANSessionStateMachine @0x558DE0 - the error leg @0x55915F..0x559160 ->
-//  UI_ShowNovaWorldConnectError @0x5584A0]
+//  UI_ShowNetworkErrorByCode @0x5584A0]
 void NwuLobbySession::fail_connect(int code) {
 	connect_poll_ = ConnectPoll::Done;
 	connect_timed_out_ = false;

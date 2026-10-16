@@ -253,13 +253,13 @@ std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg,
 					: mission_title_or_header(mission_text_title, cfg.mission_name);
 	append_cstr(payload, conn.player_name.empty() ? conn.reply.player_name
 	                                             : conn.player_name); // recipient player_data+128
-	append_cstr(payload, conn.account.pcid); // [orig player+0x250 @0x5077ac] the recipient's PCID
-	append_cstr(payload, cfg.server_name); // [orig g_ServerNameStr]
+	append_cstr(payload, conn.account.pcid); // [orig: NapiNPMsg_0x7B_BuildPayload @0x5077ac, player+0x250] the recipient's PCID
+	append_cstr(payload, cfg.server_name); // [orig: g_ServerNameStr @0x24D1FC4]
 	append_cstr(payload, advertised_mission);
-	append_cstr(payload, cfg.mission_file);// [orig g_MapFileName]
-	append_u32_le(payload, cfg.game_type);  // [orig g_GameType]
-	payload.push_back(0);                  // [orig g_EmptyStr] empty C string
-	append_cstr(payload, cfg.expansion);   // [orig g_ExpansionName]
+	append_cstr(payload, cfg.mission_file);// [orig: g_MapFileName @0x24D1F3E]
+	append_u32_le(payload, cfg.game_type);  // [orig: g_GameType @0x24D2128]
+	payload.push_back(0);                  // [orig: g_EmptyStr @0x7C08C6] empty C string
+	append_cstr(payload, cfg.expansion);   // [orig: g_ExpansionName @0xB4C584]
 	return payload;
 }
 
@@ -581,9 +581,9 @@ PlayerReplicationState make_rep_state(const GameConfig &cfg, const NapiNPConnect
 std::vector<uint8_t> build_tag04_slot_assignment(uint8_t difficulty, uint8_t player_slot,
                                                  uint8_t slot_capacity, uint8_t team) {
 	std::vector<uint8_t> payload(24, 0);
-	payload[16] = difficulty;    // [orig dword_24D2110 low byte @0x502B96]
+	payload[16] = difficulty;    // [orig: dword_24D2110's low byte, NetPacket_WriteSlotAssignment @0x502B96]
 	payload[17] = player_slot;   // the joiner's assigned slot index [orig slot+20]
-	payload[18] = slot_capacity; // player-slot array capacity [orig `g_PlayerSlotCapacity` @0x24c0ca4]
+	payload[18] = slot_capacity; // player-slot array capacity [orig: g_PlayerSlotCapacity @0x24c0ca4]
 	payload[23] = team;          // [orig slot+416]
 	return payload;
 }
@@ -642,7 +642,7 @@ void emit_admission_metadata(const GameConfig &cfg, NapiNPConnection &conn,
 	//  sends @0x5130AC..0x5131D5, game state 7 @0x51319C; Server_PlayerAdd's row pick
 	//  @0x51CC9A; CNapiServer_ProcessPendingPlayerSpawns's cap @0x4C8E13]
 	const uint8_t capacity =
-			static_cast<uint8_t>(cfg.total_player_slot_capacity()); // [orig @0x24c0ca4]
+			static_cast<uint8_t>(cfg.total_player_slot_capacity()); // [orig: g_PlayerSlotCapacity @0x24c0ca4]
 	(void)Server_ReservePlayerSlot(roster, conn, capacity);
 	// Team is allocated at admission, even though it is intentionally not serialized until
 	// the later spawn-pump packet. Player-add consumes this reservation, so the delayed 0x04
@@ -717,7 +717,7 @@ void cache_client_pose(const std::vector<uint8_t> &payload, SessionReplyState &s
 // connection's cookie buffer (the previous one freed, a CD of no length leaving
 // none), so the last CD is the cookie, however the walk's fields overlap.
 // [orig: NapiNPServer_HandlePlayerJoinMessage @0x512AA0 - the "CD" compare
-//  @0x512C45, the store @0x512C5D -> sub_4C6060 (frees +0x2DC @0x4C6072, zeroes
+//  @0x512C45, the store @0x512C5D -> CNetPlayer_SetCookieBuffer @0x4C6060 (frees +0x2DC @0x4C6072, zeroes
 //  +0x2DC / +0x2E0 @0x4C6080..0x4C6086, keeps none for a length below 1
 //  @0x4C608E..0x4C6095, else a copy of the declared length); KeyValueBuffer_FindValue
 //  @0x4C2A30]

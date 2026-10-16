@@ -213,7 +213,7 @@ std::vector<uint8_t> JoinerConnection::finish_receive_pump() {
 // A latched 0x11 that leaves the 0x0A owed means WaitForDisconnect has returned: the 0x0A's
 // loop is WaitForGameStart's. The deploy stages, a death's re-pick included, are in-match.
 // [orig: MultiPlayer_JoinSessionStateMachine @0x56a320 — state 4 queues 0x00 @0x56a53f and
-//  pumps @0x56a569, state 5 pumps @0x56a5bf..0x56a5dd, state 6 spins sub_424740 @0x56a68f
+//  pumps @0x56a569, state 5 pumps @0x56a5bf..0x56a5dd, state 6 spins MultiPlayer_PumpJoinVerificationFrame @0x424740 (the call @0x56a685)
 //  (receive @0x42475d, send @0x424767) beside CUIScene_EndFrame/sub_568810 @0x56a66f..0x56a674;
 //  Game_StartMission @0x524360 -> SaveFile_SendAndWaitForServerAck (the call @0x524801;
 //  `GetTickCount() - last > 50` before its pump), CNapiGameSession_InitRandomSeedOrRequest
@@ -259,7 +259,8 @@ int32_t JoinerConnection::send_pump_loop_pace_ms(SendPumpLoop loop) {
 std::vector<std::vector<uint8_t>> JoinerConnection::pump(uint32_t /*now_tick*/) {
 	std::vector<std::vector<uint8_t>> out;
 	if (session_lost() || phase_ == Phase::Error) return out;
-	// [orig: NetClient_HandleGameEnd @0x424752 increments @0xA822A4 once per client net pump]
+	// [orig: g_ClientNetFrameCounter @0xA822A4; retail steps it only in
+	//  MultiPlayer_PumpJoinVerificationFrame @0x424740 (@0x424776), a ledgered residual]
 	++net_frame_counter_;
 	if (phase_ == Phase::Hello || phase_ == Phase::Auth) {
 		if (handshake_retry_datagram_.empty()) return out;

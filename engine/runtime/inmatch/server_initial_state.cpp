@@ -98,7 +98,7 @@ uint32_t build_server_config_flags_impl(const NapiNPServerCtx &ctx) {
 		if (!gs.side_b_password.empty()) flags |= server_flag::kSideBPassword;
 	}
 	if (r.permanent_death) flags |= 0x8000u;
-	if (r.allow_sniper_scope_zoom) flags |= 0x10000u; // [orig g_mp_allowsniperscopezoom @0x2550CA4]
+	if (r.allow_sniper_scope_zoom) flags |= 0x10000u; // [orig: g_GameConfigState.allowSniperScopeZoom_5EC @0x2550CA4]
 	return flags;
 }
 
@@ -109,14 +109,14 @@ std::vector<uint8_t> serialize_server_config(const NapiNPServerCtx &ctx) {
 	b.reserve(51);
 	put_u32(b, r.respawn_time);
 	put_u32(b, r.time_limit_minutes);
-	put_u32(b, r.replay_enabled);      // [orig g_ReplayEnabled @0x24D2120, SET `replay`]
+	put_u32(b, r.replay_enabled);      // [orig: g_ReplayEnabled @0x24D2120, SET `replay`]
 	put_u32(b, r.game_type);
-	put_u32(b, r.max_team_lives);      // [orig g_MaxTeamLives @0x24D2130, SET `max_team_lives`]
+	put_u32(b, r.max_team_lives);      // [orig: g_MaxTeamLives @0x24D2130, SET `max_team_lives`]
 	put_u32(b, r.score_limit);
-	put_u32(b, r.respawn_timeout);     // [orig g_RespawnTimeout @0x24D214C, SET `timeout`]
+	put_u32(b, r.respawn_timeout);     // [orig: g_RespawnTimeout @0x24D214C, SET `timeout`]
 	put_u32(b, r.start_delay);
-	put_u32(b, r.destroy_buildings);   // [orig g_DestroyBuildings @0x24D2164, SET `destroybuild`]
-	put_u32(b, r.death_messages);      // [orig g_DeathMessages @0x24D2168, SET `deathmes`]
+	put_u32(b, r.destroy_buildings);   // [orig: g_DestroyBuildings @0x24D2164, SET `destroybuild`]
+	put_u32(b, r.death_messages);      // [orig: g_DeathMessages @0x24D2168, SET `deathmes`]
 	for (int i = 0; i < 7; ++i) b.push_back(r.config_bytes[i]);
 	// P2 advertised the create-session snapshot. Keep the later 0x08 record on
 	// that same immutable contract even if a caller mutates ctx.config while a
@@ -258,7 +258,7 @@ std::vector<uint8_t> serialize_world_state_load(NapiNPServerCtx &ctx, const Napi
 	// `pool3.base + word * stride` with it unmasked (@0x42e4a3 ->
 	// Pool_GetEntryUnchecked @0x441fc0, then strncpy into that record). A
 	// 0x3000|node word sent a retail joiner 12288 records past the pool
-	// (corrected 2026-09-10, jo-c cross-check). [orig @0x502e41..0x502edb]
+	// (corrected 2026-09-10, jo-c cross-check). [orig: NetPacket_WriteWorldStateLoad0x0F @0x502e41..0x502edb]
 	const bool waypoint_gametype =
 			game_type::is_waypoint_family(ctx.config.game_type);
 	std::vector<const world::WaypointEntry *> waypoints;

@@ -70,7 +70,7 @@ struct Connection {
 	uint8_t s2c_phase = 0;
 	uint32_t hud_hit_feedback_serial = 0;
     // One-frame NAK backoff; silence keeps reducing each frame until receive.
-    // [orig: sub_4C62A0 @0x4c62a0; Server_SendEntityStateToPlayer @0x517c58]
+    // [orig: NapiNPServer_OnResendListCallback @0x4c62a0; Server_SendEntityStateToPlayer @0x517c58]
     bool nak_backoff_pending = false;
     uint32_t receive_silence_ms = 0;
 

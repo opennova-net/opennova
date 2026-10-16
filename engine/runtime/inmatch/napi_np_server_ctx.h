@@ -91,7 +91,7 @@ struct NapiNPProtocol {
 	// (SessionStartup::title); with none (null), no hello is answered and no join admitted.
 	// [orig: CNapiNetwork_Init @0x4ca4a0 - the stores @0x4ca72f..0x4ca8c2]
 	const TitleIdentity *identity = nullptr;
-	bool reject_new_connections = false; // [orig +0x1F7, JFC6 @0x62be8f]
+	bool reject_new_connections = false; // [orig: +0x1F7, NapiNPProtocol_HandleClientJoin's JFC6 leg @0x62be8f]
 	uint32_t server_flags = 0;          // [orig +0x500] P1 TLV (server config flag word)
 	uint32_t build_flags = 0;           // [orig +0x504] P2 TLV (CNapiServerConfig_BuildFlags)
 	uint32_t max_players = 1;           // [orig +0x524] MP TLV; clamped 1..251
@@ -593,7 +593,7 @@ inline void set_server_text(NapiNPServerCtx &ctx, ServerTextTable text) {
 // two ticket words (the NovaWorld session's +0x4FC the 0x01 tests and its
 // +0x120 bit 0x40 the watchdog tests) as the one novaworld_join_tickets_armed.
 // [orig: the C2S 0x01 handler @0x512ED0 - is_in_session @0x512F87, the
-//  transport @0x512F90, dword_B604DC @0x512F99, state 3 @0x512FA2..0x512FA6,
+//  transport @0x512F90, g_HostRequiresJoinTicketMaybe @0x512F99, state 3 @0x512FA2..0x512FA6,
 //  state 6 @0x512FAF..0x512FB3; Server_ValidatePlayerJoinRequest
 //  @0x5128E2..0x5128F8]
 inline bool join_tickets_required(const NapiNPServerCtx &ctx) {

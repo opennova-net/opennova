@@ -27,7 +27,7 @@ struct SessionStatusView {
 	std::string server_name;
 	std::string mission_name;
 	uint32_t max_players = 0;
-	// SessionStatus_GetElapsedMS at the build: the record's uptime plus the
+	// CSessionTimer_GetElapsedMS at the build: the record's uptime plus the
 	// milliseconds since its stamp [orig: @0x52d5f0].
 	uint32_t elapsed_ms = 0;
 	std::array<int32_t, 39> stats{};

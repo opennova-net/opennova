@@ -553,8 +553,9 @@ namespace {
 // our snapshot admits indexes like pool 0, as before. False only for an index past the arrays
 // (a slot beyond retail's pool capacities), which reads as never sent and stamps nothing.
 // [orig: NetPacket_SerializeEntityStatesToPacket @0x50F070 - `and ebp, 0FFFh` @0x50F150,
-//  +0x100 for pool 1 @0x50F156..0x50F15E, the age reset @0x50F168, the heading @0x50F17C, the
-//  speed @0x50F241; Server_BuildEntityPriorityList @0x50E590 - the pool-0 reads
+//  +0x100 for pool 1 @0x50F156..0x50F15E (the pool test's `jnz` @0x50F15C), the age reset
+//  @0x50F168, the heading @0x50F17C, the speed @0x50F241; Server_BuildEntityPriorityList
+//  @0x50E590 - the pool-0 reads
 //  @0x50E8DE..0x50E8F4, the pool-1 reads @0x50EDA5..0x50EDBB]
 inline bool priority_cache_index(const GameEntitySnapshot &e, std::size_t &index) {
 	index = (e.pool == 1 ? 256u : 0u) + (std::size_t(e.slot) & 0xFFFu);

@@ -188,13 +188,13 @@ std::string novaworld_gate_error_tag(int gate_result, bool response_phase);
 // NWEC(25 - code) (-15 the connect poll's timeout NWEC40, -17 the state-1 give-up NWEC42, -18 a
 // connection down NWEC43, -20 a session not connecting NWEC45, -21 the verify poll's timeout
 // NWEC46, -23 a session not up NWEC48), anything else NWEC17.
-// [orig: UI_ShowNovaWorldConnectError @0x5584A0 - the bias `add eax, 17h` @0x5584A4, the
+// [orig: UI_ShowNetworkErrorByCode @0x5584A0 - the bias `add eax, 17h` @0x5584A4, the
 //  23-entry jump table @0x5586F8 (code -23 -> NWEC48 @0x5586C7 .. code -1 -> NWEC26 @0x5584B7),
 //  the default NWEC17 @0x5586DF; called by UI_ProcessLANSessionStateMachine @0x558DE0 @0x559160]
 std::string novaworld_connect_error_tag(int code);
 
 // The error-display fallback: a null or empty tag shows the "CVUNKNOWN" menutxt entry.
-// [orig: sub_5583E0 @0x5583e0]
+// [orig: UI_ShowNovaWorldErrorMessage @0x5583e0]
 inline constexpr char NWEC_UNKNOWN_TAG[] = "CVUNKNOWN";
 // The menutxt key the punt notification substitutes the MsgCode into ("[[$]]").
 // [orig: CNapiGameSession_HandlePuntNotification @0x4d20b0]
