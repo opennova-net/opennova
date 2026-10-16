@@ -186,6 +186,17 @@ variable "email_routes" {
   }
 }
 
+variable "mail_sender" {
+  description = "The local part the service sends its mail as through Amazon SES (mail.tf): \"support\" sends as support@<domain>, whose replies Email Routing forwards (email.tf). Empty: no outbound mail (no SES identity, no records, the service's mail off)."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.mail_sender == "" || can(regex("^[a-z0-9]([a-z0-9._+-]{0,62}[a-z0-9])?$", var.mail_sender))
+    error_message = "mail_sender is a lowercase local part (letters, digits, '.', '_', '+' and '-', not at either end), at most 64, or empty (mail off)."
+  }
+}
+
 variable "ops_bucket_name" {
   description = "The operations bucket: every deployment's releases (releases/<deployment>/) and database dumps (novaworld/ for prod, novaworld-<deployment>/ otherwise). Prod (the default workspace) owns it; another deployment names the same bucket."
   type        = string

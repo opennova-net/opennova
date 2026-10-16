@@ -48,6 +48,10 @@ cloudflare_web_proxied = true
 # email/forward_to (support@<domain> by default).
 # email_routes = ["support"]
 
+# Outbound mail through Amazon SES (mail.tf): the local part the service sends
+# as (support@<domain>); empty, the default, sends nothing.
+# mail_sender = "support"
+
 # The fleet (fleet.tf; DEPLOY.md "Hosted game servers"). The data snapshots
 # (hosted_data_snapshots, one per data set) come from the vault (item `hosted`,
 # fields data_snapshot_id_<slug>), not this file: hosting is off without one.

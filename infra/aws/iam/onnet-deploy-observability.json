@@ -135,6 +135,21 @@
         "sts:DecodeAuthorizationMessage"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "MailIdentities",
+      "Effect": "Allow",
+      "Action": [
+        "ses:CreateEmailIdentity",
+        "ses:GetEmailIdentity",
+        "ses:DeleteEmailIdentity",
+        "ses:PutEmailIdentityMailFromAttributes",
+        "ses:PutEmailIdentityDkimSigningAttributes",
+        "ses:TagResource",
+        "ses:UntagResource",
+        "ses:ListTagsForResource"
+      ],
+      "Resource": "arn:aws:ses:us-east-1:310045376545:identity/*"
     }
   ]
 }

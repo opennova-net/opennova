@@ -5,9 +5,9 @@
 # Under /opennova/<deployment>/:
 #   infra.env   (String, here) what Terraform knows that the stack needs: the
 #               public address, the site's URL, the database's URL (no
-#               password), the hosted machines' settings, the operations bucket
-#               and log group; one KEY='value' per line, an env file for docker
-#               compose
+#               password), the hosted machines' settings, the mail's sender
+#               (mail.tf), the operations bucket and log group; one KEY='value'
+#               per line, an env file for docker compose
 #   release     (String) the id of the release the host runs; `app deploy` and
 #               `app rollback` write it (Terraform makes it, then leaves its
 #               value alone)
@@ -42,6 +42,7 @@ locals {
     },
     local.database_env,
     local.hosted_env,
+    local.mail_env,
   )
 
   # One KEY='value' per line, sorted: an env file docker compose reads

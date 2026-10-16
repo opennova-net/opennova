@@ -11,3 +11,7 @@ service_eip_allocation_id = "eipalloc-05d28b7cdb8ae7c0a"
 azs = ["us-east-1a", "us-east-1b"]
 
 cloudflare_web_proxied = true
+
+# Outbound mail through Amazon SES (mail.tf): the service sends its welcome
+# mail and password reset links as support@<domain>.
+mail_sender = "support"
