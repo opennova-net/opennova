@@ -3,9 +3,6 @@ extends RefCounted
 ## Mount the CLI-supplied or picked game directory (--loose-root permits a
 ## loose-only root), or OpenNova's own bundled assets/ (ADR 0048).
 
-## Where godot/web/opennova_stage.js copies the site's assets/ (keep in step).
-const WEB_BUNDLED_ASSETS_DIR := "/opennova/assets"
-
 static func mount(dir: String, allow_loose_root: bool) -> ResourceRoot:
 	var root := ResourceRoot.new()
 	var expansion := LaunchFlags.expansion()
@@ -39,12 +36,8 @@ const EXPORT_ARCHIVE := "resource.pff"
 ## The bundled game's folder (ADR 0048 d8). An exported exe's `assets/` beside
 ## it, which the game zip fills with the editor's export of the base game
 ## (scripts/package_godot_windows.ps1). A source run's, the same export of the
-## base game project (project_game_dir). The web build has no exe beside
-## anything: its page stages the site's assets/ into the in-memory filesystem
-## before the engine starts (ADR 0049).
+## base game project (project_game_dir).
 static func bundled_assets_dir() -> String:
-	if OS.has_feature("web"):
-		return WEB_BUNDLED_ASSETS_DIR
 	if OS.has_feature("template"):
 		return OS.get_executable_path().get_base_dir().path_join("assets")
 	return project_game_dir(bundled_project_dir())
@@ -67,9 +60,9 @@ static func project_game_dir(project_dir: String) -> String:
 
 ## Mount the bundled game: the editor's Build of the base game (its boot-table
 ## archives and loose files) mounted as an install is, else, with no archive,
-## the folder as a plain loose root (a source run's unexported project, the web
-## build's staged files). It is OpenNova's own data, which the Build's gate
-## vouched for, so the retail boot manifest is not reported against it. The
+## the folder as a plain loose root (a source run's unexported project). It is
+## OpenNova's own data, which the Build's gate vouched for, so the retail boot
+## manifest is not reported against it. The
 ## expansion it mounts over the base is chosen as for any game folder (mount):
 ## `/exp` (or `/mod`) on the command line, so an expansion shipped beside the
 ## base game in `expansion/<name>/` plays as it does in the original game run in

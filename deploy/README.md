@@ -46,8 +46,6 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
 - `backup/`: the pg_dump sidecar (nightly dumps to S3, `backup now|list|restore`).
 - `hosted-data/`: the helper image `hosted data-snapshot` builds on the operator's docker
   to write one data set's game data into a private encrypted EBS snapshot.
-- `game/`: the web build's image (ADR 0049): the wasm GDExtension, the Godot Web export and
-  the nginx the portal routes `game.<domain>` to.
 
 The only secret an operator handles is `OP_SERVICE_ACCOUNT_TOKEN`. Nothing reaches the
 service instance over SSH: it has no key and no port 22.

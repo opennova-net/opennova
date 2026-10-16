@@ -12,10 +12,10 @@
 #
 # The NovaWorld server runs on the host's network (the retail UDP ports and
 # 8080 straight on the Elastic IP; a bridge would rewrite the source ports the
-# listings take). The portal's nginx and the web build share a bridge network,
-# `edge`: nginx at a fixed address (its X-Real-IP is the one the server trusts,
-# ONNET_TRUSTED_PROXIES in app.prod.env) reaches the server through the host
-# gateway and the web build by name. Every service logs to CloudWatch
+# listings take). The portal's nginx sits on a bridge network, `edge`, at a
+# fixed address (its X-Real-IP is the one the server trusts,
+# ONNET_TRUSTED_PROXIES in app.prod.env) and reaches the server through the host
+# gateway. Every service logs to CloudWatch
 # (/opennova/<deployment>/service, a stream per service; ./deploy/run.sh app logs).
 
 networks:
@@ -114,22 +114,6 @@ services:
         awslogs-region: ${AWS_REGION:?set AWS_REGION (infra.env)}
         awslogs-group: ${OPENNOVA_LOG_GROUP:?set OPENNOVA_LOG_GROUP (infra.env)}
         awslogs-stream: web
-        mode: non-blocking
-        max-buffer-size: 4m
-
-  # The web build's site (:8090 on the edge network alone); the portal's nginx
-  # proxies game.<domain> to it by name.
-  game:
-    image: ${GAME_IMAGE:?set GAME_IMAGE (release.env)}
-    build: !reset null
-    networks:
-      - edge
-    logging:
-      driver: awslogs
-      options:
-        awslogs-region: ${AWS_REGION:?set AWS_REGION (infra.env)}
-        awslogs-group: ${OPENNOVA_LOG_GROUP:?set OPENNOVA_LOG_GROUP (infra.env)}
-        awslogs-stream: game
         mode: non-blocking
         max-buffer-size: 4m
 

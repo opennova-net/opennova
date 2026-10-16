@@ -92,7 +92,7 @@ bool tga_read_form(const uint8_t *bytes, size_t size, TgaForm &out) {
 	    header.map_first != 0 || header.map_length != 0 || header.map_entry_bits != 0 || header.x_origin != 0 ||
 	    header.y_origin != 0 || header.width == 0 || header.height == 0 || (header.bits != 24 && header.bits != 32))
 		return false;
-	// In 64 bits: a 32-bit size_t (a wasm32 build) wraps near the sides' 65535.
+	// In 64 bits: a 32-bit size_t (an ILP32 build) wraps near the sides' 65535.
 	const uint64_t pixels = TGA_HEADER_SIZE + uint64_t(header.width) * header.height * (header.bits / 8);
 	if (uint64_t(size) == pixels) {
 		out.footer = false;

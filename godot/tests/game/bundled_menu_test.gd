@@ -136,7 +136,7 @@ func test_a_project_plays_its_export_once_there_is_one() -> void:
 
 
 # The Build's boot-table archives mount as an install's do; a folder with none
-# (an unbuilt project, the web build's staged files) as a plain loose root.
+# (an unbuilt project) as a plain loose root.
 func test_the_bundled_game_mounts_a_build_packed_and_a_folder_loose() -> void:
 	var build := _temp_dir("build")
 	WorldFixture.stage_shell_archives(self, build, false)

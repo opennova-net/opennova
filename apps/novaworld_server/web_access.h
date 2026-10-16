@@ -91,7 +91,7 @@ public:
 	// needs a CORS preflight this server never grants (it sends no
 	// Access-Control-* header), so a request bearing it came from the site's
 	// own pages. SameSite=Lax already keeps the cookie off cross-site POSTs;
-	// the header also covers same-site origins (game.<domain>) and the routes
+	// the header also covers same-site origins (staging.<domain>) and the routes
 	// no cookie authenticates.
 	static constexpr const char *kCsrfHeader = "X-OpenNova-Request";
 	static bool has_csrf_header(const crow::request &req);

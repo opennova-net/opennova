@@ -55,7 +55,7 @@ struct TerrainBakeInput {
 	const std::atomic<bool> *cancel = nullptr;
 
 	// Every hardware thread, at least one: the desktop sizing. An embedder whose platform fixes its
-	// thread pool up front (the web build's pthread pool) passes a smaller count.
+	// thread pool up front passes a smaller count.
 	static unsigned for_hardware() noexcept;
 };
 

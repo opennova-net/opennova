@@ -11,8 +11,7 @@
 // the AWS CLI and opennova-hostd the docker CLI (apps/common/command_runner.h),
 // and a front end that
 // starts the game (the editor's Play) holds the game through it. Platform
-// plumbing, not a port: CreateProcessW on Windows, fork and execv elsewhere. It
-// is not in the web build: a browser starts no process.
+// plumbing, not a port: CreateProcessW on Windows, fork and execv elsewhere.
 //
 // The child inherits none of this process's handles or descriptors beyond the
 // three standard ones (a service's listening sockets stay its own), with

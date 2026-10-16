@@ -458,8 +458,7 @@ authored from scratch. Today it is the placeholder main menu that says the
 OpenNova game is coming and offers **PLAY RETAIL**, plus the first pieces of the
 game's own data (the `on_ar15` carbine and arms the Blender add-on exports from
 `art/`, not yet referenced). The game mounts it when no `--resource-dir` is given
-(ADR 0048); the web build stages it, minus that unreferenced art, into the page's
-filesystem before boot (ADR 0049).
+(ADR 0048).
 _Avoid_: fixtures (test-only data), retail data
 
 **Serve mode**:

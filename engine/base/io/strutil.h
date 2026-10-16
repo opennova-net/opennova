@@ -186,7 +186,7 @@ inline std::string bytes_to_hex(const std::vector<uint8_t> &bytes)
 // sign, longest numeric prefix, so "12abc" is 12), with nullopt exactly where
 // the std:: form throws (no digits, or out of range). Parsers use these
 // instead of try/catch around the std:: form, which a build without exception
-// catching (the web target) cannot run.
+// catching cannot run.
 inline std::optional<int> parse_int(const std::string &s, int base = 10)
 {
     const char *begin = s.c_str();

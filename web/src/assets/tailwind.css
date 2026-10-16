@@ -38,3 +38,35 @@
   background-color: rgb(var(--surface));
   color: rgb(var(--ink));
 }
+
+/* The site's shared pieces: one place for the button, card and section
+   styles the public pages repeat. */
+@layer components {
+  .page {
+    @apply mx-auto w-full max-w-6xl px-4 sm:px-6;
+  }
+  .eyebrow {
+    @apply text-xs font-semibold uppercase tracking-[0.25em] text-accent;
+  }
+  .card {
+    @apply rounded-panel border border-border bg-panel;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-control px-5 py-2.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-accent text-on-accent hover:bg-accent/90;
+  }
+  .btn-secondary {
+    @apply btn border border-border-strong text-ink hover:border-accent hover:text-ink-bright;
+  }
+  .link {
+    @apply text-accent underline underline-offset-4 transition hover:text-ink-bright;
+  }
+}
+
+@layer base {
+  :focus-visible {
+    @apply outline outline-2 outline-offset-2 outline-accent;
+  }
+}

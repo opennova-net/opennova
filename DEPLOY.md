@@ -1,8 +1,8 @@
 # Deploying your own OpenNova NovaWorld instance
 
 This repository deploys a complete NovaWorld stack to AWS, behind Cloudflare: the gate,
-the NovaWorld server, the legacy HTTP services, the web portal, the browser build of the
-game, a PostgreSQL database, and the fleet of machines the hosted game servers run on.
+the NovaWorld server, the legacy HTTP services, the web portal, a PostgreSQL database,
+and the fleet of machines the hosted game servers run on.
 Anyone can stand up their own instance with the commands the project maintainers use.
 The original games reach your server through a hosts-file line that points
 `gs.novaworld.net` at its Elastic IP (the OpenNova Switcher writes it; DEVELOPING.md,
@@ -157,7 +157,7 @@ Every command takes `--deployment NAME` (or `OPENNOVA_DEPLOYMENT=NAME`), which p
 | var-file | `infra/aws/prod.tfvars` | `infra/aws/staging.tfvars` |
 | SSM parameters | `/opennova/prod/...` | `/opennova/staging/...` |
 | vault items | `app-prod`, `rds`, `stripe-live` | `app-staging`, `rds-staging`, `stripe-test` |
-| site | `example.com`, `www`, `game.example.com` | `staging.example.com`, `game-staging.example.com` |
+| site | `example.com`, `www` | `staging.example.com` |
 | Elastic IP | adopted (below) | its own |
 
 The account-wide pieces belong to prod: the S3 account public access block, the
@@ -346,10 +346,9 @@ public file is one anybody can register first.
 ## 4. Deploy
 
 The images publish to GHCR from CI: `novaworld-server` and `novaworld-web`
-(`.github/workflows/novaworld-images.yml`), `opennova-game` (the web build,
-`game-web.yml`), `opennova-serve` (the hosted servers, `serve-image.yml`; it also carries
-hostd, the machines' agent). Make each package public once: the host and the machines
-pull anonymously.
+(`.github/workflows/novaworld-images.yml`) and `opennova-serve` (the hosted servers,
+`serve-image.yml`; it also carries hostd, the machines' agent). Make each package public
+once: the host and the machines pull anonymously.
 
 ```bash
 ./deploy/run.sh app deploy --tag sha-abc1234 --serve-tag sha-def5678
@@ -358,10 +357,10 @@ pull anonymously.
 `app deploy`:
 
 1. resolves each image to its digest now: `--tag` sets the server and web images
-   (`--server-tag` and `--web-tag` set one alone), `--game-tag`, `--serve-tag` and
-   `--hostd-tag` the others. An image given no tag keeps the current release's digest,
-   so a web-only release (`--web-tag`) never restarts the NovaWorld server and its lobby
-   sessions; the first release takes `latest` for any tag not given;
+   (`--server-tag` and `--web-tag` set one alone), `--serve-tag` and `--hostd-tag` the
+   others. An image given no tag keeps the current release's digest, so a web-only
+   release (`--web-tag`) never restarts the NovaWorld server and its lobby sessions; the
+   first release takes `latest` for any tag not given;
 2. builds a release bundle: the compose files, the committed `deploy/env/app.prod.env`,
    `release.env` (the digests), the backup sidecar's build context, and a manifest (the
    checkout's revision, the images, the previous release); it parses the compose files
@@ -405,19 +404,6 @@ required reviewers, and the variables `AWS_DEPLOY_ROLE_ARN` (the infra output
 deploys prod from the commit it runs on. The role may read the deployment's settings,
 upload its release bundles, point its release and send the converge document to its
 service instance, and nothing else.
-
-### The web build (game.<domain>)
-
-The browser build of the game (ADR 0049), `ghcr.io/<owner>/opennova-game`, is an nginx on
-`:8090` serving the Godot Web export with the COOP/COEP headers the threaded build needs.
-The portal's nginx routes `game.<domain>` (staging: `game-staging.<domain>`) to it on the
-host's `edge` network. To run it locally, from the repo root with the submodules checked
-out:
-
-```bash
-docker build -f deploy/game/Dockerfile -t opennova-game .
-docker run --rm -p 8090:8090 opennova-game          # http://localhost:8090
-```
 
 ## 5. Backups
 
@@ -743,7 +729,7 @@ or secret is a change to the stack: add it, plan, apply. A new image replaces a 
 
 ## Operating
 
-- **Logs.** `./deploy/run.sh app logs [novaworld|web|game|backup] [--follow] [--since 2h]`
+- **Logs.** `./deploy/run.sh app logs [novaworld|web|backup] [--follow] [--since 2h]`
   reads CloudWatch (`/opennova/<deployment>/service`, 30 days). On the host, `docker logs`
   works as well (`app shell`).
 - **Alarms** go to the SNS topic `opennova-server-alerts` (`<name>-alerts`), which emails
@@ -857,9 +843,8 @@ old CDKIID re-mints). Rehearse it on a staging deployment first (with Stripe tes
    else, then type `yes`; the database takes 10 to 15 minutes; the old instance goes,
    and the address moves to the new interface).
 6. `secrets sync`, then `db bootstrap`.
-7. `./deploy/run.sh app deploy --tag sha-<server> --game-tag sha-<game> --serve-tag
-   sha-<serve> --hostd-tag sha-<serve>`: the server's first boot applies every migration
-   to the empty database.
+7. `./deploy/run.sh app deploy --tag sha-<server> --serve-tag sha-<serve> --hostd-tag
+   sha-<serve>`: the server's first boot applies every migration to the empty database.
 8. Make the first site admin (section 3), then turn maintenance off.
 
 **Rollback** (until the new stack is accepted): launch the image into public subnet a

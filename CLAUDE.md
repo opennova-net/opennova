@@ -19,8 +19,7 @@ easier to relay than to rediscover.
   `game/` (the game shell plus its game-level GDScript runtime),
   `probes/` (the registered `game_probe` runtime probes, source-only and
   excluded from every export preset, ADR 0041; see `docs/mcp.md`),
-  `web/` (the `OpenNova Web` export's page shell; the site image is
-  `deploy/game/`, ADR 0049), `tests/` (GUT suite).
+  `tests/` (GUT suite).
 - `apps/` — each app in `apps/<name>` builds target `opennova_<name>` as binary
   `opennova-<name>` (kebab case; DEVELOPING.md "Naming an app"). `common/` is the shared
   socket helpers and the remote-admin TCP pump, deliberately app-layer (pcap I/O lives in

@@ -68,8 +68,8 @@
 #                                 plans to a file and applies that plan after
 #                                 --yes or a typed yes
 #   aws <args...>                 the AWS CLI with the vault's credentials
-#   app deploy [--tag T] [--server-tag T] [--web-tag T] [--game-tag T]
-#              [--serve-tag T] [--hostd-tag T] [--no-hosting]
+#   app deploy [--tag T] [--server-tag T] [--web-tag T] [--serve-tag T]
+#              [--hostd-tag T] [--no-hosting]
 #                                 pin the images by digest (--tag sets server and
 #                                 web; an image given no tag keeps the current
 #                                 release's), upload the release bundle, make it
@@ -1531,22 +1531,21 @@ bundle_check() {
 }
 
 app_deploy() {
-  local tag="" server_tag="" web_tag="" game_tag="" serve_tag="" hostd_tag="" hosting=1
+  local tag="" server_tag="" web_tag="" serve_tag="" hostd_tag="" hosting=1
   while [ $# -gt 0 ]; do
     case "$1" in
-      --tag|--server-tag|--web-tag|--game-tag|--serve-tag|--hostd-tag)
+      --tag|--server-tag|--web-tag|--serve-tag|--hostd-tag)
         if [ $# -lt 2 ] || [ -z "$2" ]; then die "$1 needs a value"; fi
         case "$1" in
           --tag) tag="$2" ;;
           --server-tag) server_tag="$2" ;;
           --web-tag) web_tag="$2" ;;
-          --game-tag) game_tag="$2" ;;
           --serve-tag) serve_tag="$2" ;;
           --hostd-tag) hostd_tag="$2" ;;
         esac
         shift 2 ;;
       --no-hosting) hosting=0; shift ;;
-      *) die "unknown: app deploy $1 (try: --tag T, --server-tag T, --web-tag T, --game-tag T, --serve-tag T, --hostd-tag T, --no-hosting)" ;;
+      *) die "unknown: app deploy $1 (try: --tag T, --server-tag T, --web-tag T, --serve-tag T, --hostd-tag T, --no-hosting)" ;;
     esac
   done
   [ -n "$server_tag" ] || server_tag="$tag"
@@ -1561,10 +1560,9 @@ app_deploy() {
   owner="$(ghcr_owner)"
 
   log "deployment $DEP, current release: $current"
-  local server web game serve hostd hosted_provider
+  local server web serve hostd hosted_provider
   server="$(pick_image server novaworld-server "$server_tag" "$manifest" "$owner")" || die "nothing was changed"
   web="$(pick_image web novaworld-web "$web_tag" "$manifest" "$owner")" || die "nothing was changed"
-  game="$(pick_image game opennova-game "$game_tag" "$manifest" "$owner")" || die "nothing was changed"
   hosted_provider="${INFRA[ONNET_HOSTED_PROVIDER]:-none}"
   if ! serve="$(pick_image serve opennova-serve "$serve_tag" "$manifest" "$owner")"; then
     if [ "$hosted_provider" != none ] && [ "$hosting" -eq 1 ]; then
@@ -1583,7 +1581,6 @@ app_deploy() {
   fi
   log "  server $server"
   log "  web    $web"
-  log "  game   $game"
   log "  serve  ${serve:-none}"
   log "  hostd  ${hostd:-none}"
   if [ "$hosting" -eq 0 ]; then
@@ -1608,18 +1605,17 @@ app_deploy() {
     printf "OPENNOVA_RELEASE='%s'\n" "$id"
     printf "SERVER_IMAGE='%s'\n" "$server"
     printf "WEB_IMAGE='%s'\n" "$web"
-    printf "GAME_IMAGE='%s'\n" "$game"
     printf "ONNET_HOSTED_SERVE_IMAGE='%s'\n" "$serve"
     printf "ONNET_HOSTED_HOSTD_IMAGE='%s'\n" "$hostd"
     if [ "$hosting" -eq 0 ]; then printf "ONNET_HOSTED_PROVIDER='none'\n"; fi
   } > "$work/bundle/env/release.env"
   jq -n --arg id "$id" --arg dep "$DEP" --arg created "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
         --arg rev "$rev" --argjson dirty "$dirty" --arg previous "$current" \
-        --arg server "$server" --arg web "$web" --arg game "$game" --arg serve "$serve" --arg hostd "$hostd" \
+        --arg server "$server" --arg web "$web" --arg serve "$serve" --arg hostd "$hostd" \
         --argjson hosting "$([ "$hosting" -eq 1 ] && echo true || echo false)" \
     '{id: $id, deployment: $dep, created: $created, revision: $rev, dirty: $dirty,
       previous: (if $previous == "none" then null else $previous end),
-      images: ({server: $server, web: $web, game: $game}
+      images: ({server: $server, web: $web}
                + (if $serve == "" then {} else {serve: $serve} end)
                + (if $hostd == "" then {} else {hostd: $hostd} end)),
       hosting: $hosting}' > "$work/bundle/manifest.json"
@@ -1709,7 +1705,7 @@ app_logs() {
 
 # A compose service's name, checked before it goes into a host script.
 service_name() {
-  [[ "$1" =~ ^[a-z][a-z0-9_-]{0,30}$ ]] || die "'$1' is no service name (novaworld, web, game, backup)"
+  [[ "$1" =~ ^[a-z][a-z0-9_-]{0,30}$ ]] || die "'$1' is no service name (novaworld, web, backup)"
   printf '%s' "$1"
 }
 

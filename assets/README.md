@@ -202,15 +202,6 @@ adding it to this table.
   menu (the editor's strict Play, or the game zip's `assets/` with it dropped
   in): it writes its own `game.cfg` and saves on its first run. That drop-in is
   the standing proof that our data and the original game still agree.
-- The web build (ADR 0049, paused) still serves this folder's files beside
-  the page with an `assets/manifest.json` (`scripts/package_godot_web.sh`),
-  and the page copies every listed file into the engine's in-memory filesystem
-  before the game starts: its menu boots, but until it stages the build in
-  their place its mission cannot load. Every visitor downloads all of it
-  first, so the `on_ar15`/`on_arms` art and the music banks (`*.sbf`) stay out
-  of the site (drop them from the script's excludes and `game-web.yml`'s LFS
-  pull then; without its bank the menu is silent); the project file stays out
-  too.
 - The base game's expansions are editor expansion projects of their own beside
   it (`expansions/`, its README; ADR 0046 T5), built over this project's export.
   The game zip ships each as `assets/expansion/<name>/`, which the main menu's
@@ -222,5 +213,3 @@ adding it to this table.
   saves it as `[resources] retail_dir` in `user://opennova.cfg`, and switches
   to that install's own menus; `EXIT` quits. In the original game the first
   two do nothing.
-  On the web build the page's `WebRetailPicker` stages the pick, which is never
-  saved, and `EXIT` does nothing (ADR 0049).
