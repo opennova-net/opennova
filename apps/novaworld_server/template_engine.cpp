@@ -2,12 +2,12 @@
 
 #include "auth.h"
 
+#include <base/io/file_io.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <filesystem>
-#include <fstream>
-#include <sstream>
 #include <system_error>
 
 namespace opennova::novaworld_server {
@@ -151,13 +151,11 @@ std::string render_template_file(const std::string &templates_dir,
 	const auto path = template_file(templates_dir, filename);
 	if (!path)
 		return {};
-	std::ifstream in(*path, std::ios::binary);
-	if (!in) {
+	std::string text;
+	std::string error;
+	if (!io::read_file_text(path->string(), text, error))
 		return {};
-	}
-	std::ostringstream os;
-	os << in.rdbuf();
-	return render_template(os.str(), vars);
+	return render_template(text, vars);
 }
 
 } // namespace opennova::novaworld_server

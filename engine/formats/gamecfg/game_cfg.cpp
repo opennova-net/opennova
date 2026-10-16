@@ -4,6 +4,7 @@
 
 #include <base/io/ascii_config.h>
 #include <base/io/crt_ftol.h>
+#include <base/io/file_io.h>
 #include <base/io/os_path.h>
 
 #include <cstdio>
@@ -734,13 +735,9 @@ LoadResult load(const char *text, size_t size, const LoadOptions &options) {
 LoadResult load_file(const std::string &path, const LoadOptions &options) {
 	// fopen "r" [orig: File_ParseASCIIFileWithCallback @0x53D9A3..0x53D9C9: a
 	// file that does not open parses nothing]
-	std::FILE *f = io::fopen_utf8(path.c_str(), "rb");
-	if (f == nullptr) return load(nullptr, 0, options);
 	std::string text;
-	char chunk[4096];
-	size_t got = 0;
-	while ((got = std::fread(chunk, 1, sizeof(chunk), f)) > 0) text.append(chunk, got);
-	std::fclose(f);
+	std::string error;
+	if (!io::read_file_text(path, text, error)) return load(nullptr, 0, options);
 	return load(text.data(), text.size(), options);
 }
 

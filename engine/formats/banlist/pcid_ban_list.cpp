@@ -3,6 +3,7 @@
 
 #include <base/io/cp1252.h> // cp1252_isspace
 #include <base/io/crt_ftol.h>
+#include <base/io/file_io.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
@@ -136,15 +137,9 @@ std::optional<PcidBanList> parse_pcid_list(const char *text, size_t size) {
 }
 
 std::optional<PcidBanList> load_pcid_list(const std::string &path) {
-	std::FILE *f = io::fopen_utf8(path.c_str(), "rb");
-	if (f == nullptr) return std::nullopt;
 	std::string text;
-	char chunk[4096];
-	size_t got = 0;
-	while ((got = std::fread(chunk, 1, sizeof(chunk), f)) > 0) text.append(chunk, got);
-	const bool read_whole = std::ferror(f) == 0;
-	std::fclose(f);
-	if (!read_whole) return std::nullopt;
+	std::string error;
+	if (!io::read_file_text(path, text, error)) return std::nullopt;
 	return parse_pcid_list(text.data(), text.size());
 }
 

@@ -4,6 +4,7 @@
 #include <base/io/ascii_config.h>
 #include <base/io/cp1252.h>
 #include <base/io/crt_ftol.h>
+#include <base/io/file_io.h>
 #include <base/io/os_path.h>
 
 #include <cstdio>
@@ -74,13 +75,9 @@ AdminConfig parse(const char *text, size_t size) {
 
 bool load_file(const std::string &path, AdminConfig &out) {
 	out = AdminConfig{};
-	std::FILE *f = io::fopen_utf8(path.c_str(), "rb");
-	if (f == nullptr) return false;
 	std::string text;
-	char chunk[4096];
-	size_t got = 0;
-	while ((got = std::fread(chunk, 1, sizeof(chunk), f)) > 0) text.append(chunk, got);
-	std::fclose(f);
+	std::string error;
+	if (!io::read_file_text(path, text, error)) return false;
 	out = parse(text.data(), text.size());
 	return true;
 }
