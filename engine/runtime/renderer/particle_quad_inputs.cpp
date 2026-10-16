@@ -151,7 +151,7 @@ ParticleQuadInputs particle_quad_inputs(const particle::Particle &particle,
 	// @ 0x5e7189..0x5e71a4 (the pack); the twins
 	// CParticleEmitter_RenderStaticBillboards @ 0x5f51e7..0x5f524f /
 	// @ 0x5f525a..0x5f5275 and CParticleEmitter_RenderTopAlignedBillboards
-	// @ 0x5f5b99..0x5f5c01 / @ 0x5f5c0c..0x5f5c25] (D-PTL-36). An
+	// @ 0x5f5b99..0x5f5c01 / @ 0x5f5c0c..0x5f5c27] (D-PTL-36). An
 	// ambient-tinted definition's emitter holds the terrain light, every other
 	// one the doubled modulator [orig: CParticleEmitter_AdvanceFrame
 	// @ 0x5e65f6..0x5e661c — the AMBIENTCOLOR test picks the manager's +0x3E8
