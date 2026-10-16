@@ -11,8 +11,8 @@ export default defineConfig({
       interval: 100
     },
     proxy: {
-      // /api/* requests proxy to the standalone novaworld server
-      // (apps/novaworld_server/opennova-novaworld-server) which binds 8080 by default.
+      // /api/* requests proxy to the NovaWorld service's web program
+      // (apps/novaworld_web, opennova-novaworld-web), which binds 8080 by default.
       // Override with VITE_API_TARGET if you're hitting a different host.
       '/api': {
         target: process.env.VITE_API_TARGET || 'http://127.0.0.1:8080',

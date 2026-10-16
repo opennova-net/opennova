@@ -34,6 +34,8 @@ const productionShape = {
   count: 2,
   connections: [
     {
+      session_id: 41,
+      lobby_id: 1,
       addr: '198.51.100.20:32768',
       last_seen_ms: 1792120317793,
       created_ms: 1792096041000,
@@ -53,6 +55,8 @@ const productionShape = {
       },
     },
     {
+      session_id: 57,
+      lobby_id: 2,
       addr: '198.51.100.21:32769',
       last_seen_ms: 1792120335000,
       created_ms: 1792120218000,
@@ -88,7 +92,7 @@ describe('fetchConnections', () => {
     const { account: _a, host: _h, ...bare } = productionShape.connections[1];
     get.mockResolvedValue(reply({ ...productionShape, connections: [bare] }));
     const result = await fetchConnections();
-    expect(result.ok && result.value.connections[0]).toMatchObject({ id: 2147483649, account: null, host: null });
+    expect(result.ok && result.value.connections[0]).toMatchObject({ session_id: 57, id: 2147483649, account: null, host: null });
   });
 
   it('drops a malformed account or listing and refuses a malformed session', async () => {
@@ -105,26 +109,22 @@ describe('fetchConnections', () => {
 describe('ending a session and stopping a listed server', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('ends a session by its id and address', async () => {
-    post.mockResolvedValue(reply({ status: 'queued', id: 2147483649, addr: '198.51.100.21:32769' }, 202));
-    const result = await endConnection({ id: 2147483649, addr: '198.51.100.21:32769' });
+  it('ends a session by its row id', async () => {
+    post.mockResolvedValue(reply({ status: 'queued', session_id: 57, id: 2147483649, addr: '198.51.100.21:32769' }, 202));
+    const result = await endConnection({ session_id: 57 });
     expect(result.ok).toBe(true);
-    expect(post).toHaveBeenCalledWith('/connections/2147483649/end', { addr: '198.51.100.21:32769' });
+    expect(post).toHaveBeenCalledWith('/connections/57/end', undefined);
   });
 
   it('maps the end refusals to words, never the server text', async () => {
     post.mockRejectedValue(refusal(409, { error: 'hosting', rid: 167772161, message: 'raw server text' }));
-    const hosting = await endConnection({ id: 1, addr: '198.51.100.20:32768' });
+    const hosting = await endConnection({ session_id: 41 });
     expect(!hosting.ok && hosting.error.code).toBe('hosting');
     expect(!hosting.ok && hosting.error.message).toContain('stop the server instead');
     expect(!hosting.ok && hosting.error.message).not.toContain('raw server text');
 
-    post.mockRejectedValue(refusal(409, { error: 'connection_changed' }));
-    const changed = await endConnection({ id: 1, addr: '198.51.100.20:32768' });
-    expect(!changed.ok && changed.error.message).toContain('another took its place');
-
     post.mockRejectedValue(refusal(404, { error: 'not_found' }));
-    const gone = await endConnection({ id: 1, addr: '198.51.100.20:32768' });
+    const gone = await endConnection({ session_id: 41 });
     expect(!gone.ok && gone.error.code).toBe('not_found');
   });
 

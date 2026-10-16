@@ -3,10 +3,10 @@
 # ---------------------------------------------------------------------------
 #
 # 10.44.0.0/16 (var.vpc_cidr) in two availability zones:
-#   public a  10.44.0.0/24   the service instance and the game machines
-#   public b  10.44.1.0/24   spare capacity for machines
-#   private a 10.44.16.0/24  the database
-#   private b 10.44.17.0/24  the database subnet group's second zone
+#   public a  10.44.0.0/24   the programs' tasks, the load balancer's node, machines
+#   public b  10.44.1.0/24   the same, in the second zone
+#   private a 10.44.16.0/24  the database and the cache
+#   private b 10.44.17.0/24  their standby and replica
 # The public subnets route to the internet gateway and hand out public
 # addresses; the private ones have the VPC's local route alone (no NAT: nothing
 # there talks to the internet).

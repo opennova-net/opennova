@@ -1,4 +1,4 @@
-// Support tiers and the account's billing (apps/novaworld_server/billing/,
+// Support tiers and the account's billing (apps/novaworld_common/billing/,
 // README "Support tiers"): GET /api/billing/tiers (public), GET
 // /api/me/billing, POST /api/billing/checkout, POST /api/billing/portal and
 // POST /api/me/billing/sync. The service creates the Stripe Checkout and

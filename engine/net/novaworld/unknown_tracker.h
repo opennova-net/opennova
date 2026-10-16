@@ -34,8 +34,9 @@ inline constexpr std::size_t kUnknownSampleCap = 512;
 
 // Thread-safe accumulator for unhandled inbound signals. The listener
 // threads (gate / nwudp / http) call record() per packet; the main tick
-// loop calls flush() to upsert the dirty set into `unknown_messages`.
-// snapshot() copies the current state out for the /api/unknowns route.
+// loop calls flush() to upsert the dirty set into `unknown_messages`, the one
+// record every process's sightings meet in (the gates and the lobbies, web's
+// 404s), which list() reads for the /api/unknowns route.
 //
 // Threading: every public method takes the internal mutex. record() is
 // cheap (a map lookup + a few field writes), safe to call from any listener
@@ -58,15 +59,25 @@ public:
 	            const std::vector<uint8_t> &sample,
 	            std::string meta, uint64_t now_ms);
 
-	// Upsert every dirty (channel, signature) into `unknown_messages`.
-	// Call from the main tick only. On success clears the dirty set so the
-	// next flush only touches rows that changed since. Throws nothing —
-	// DB errors are swallowed (logged by the caller) and the dirty set is
-	// left intact so a transient failure retries next tick.
+	// Upsert every dirty (channel, signature) into `unknown_messages`, adding
+	// the sightings since this tracker's last flush to the row's count (every
+	// process with a tracker, each gate's, lobby's and web replica's, flushes into
+	// the one row, so none overwrites another's: the count is every process's
+	// sum) and keeping the latest last_seen_ms; the first sample stays the
+	// row's first writer's. Call from the main tick only. On success clears the
+	// dirty set so the next flush only touches rows that changed since. Throws
+	// db::Error (logged by the caller), the dirty set left intact so a
+	// transient failure retries next tick with every sighting since.
 	void flush(db::Database &db);
 
-	// Copy the current accumulator out under the lock (for the API).
+	// Copy the current accumulator out under the lock (this process's).
 	std::vector<UnknownSighting> snapshot() const;
+
+	// The `unknown_messages` rows, every process's flushed sightings, the
+	// latest seen first, at most `limit`; only `channel`'s when it is not
+	// empty. Throws db::Error.
+	static std::vector<UnknownSighting> list(
+			db::Database &db, const std::string &channel, std::size_t limit = 500);
 
 private:
 	using Key = std::pair<std::string, std::string>;
@@ -74,6 +85,8 @@ private:
 	mutable std::mutex mu_;
 	std::map<Key, UnknownSighting> seen_;
 	std::set<Key> dirty_;
+	// Each key's count as its last successful flush added it to the row.
+	std::map<Key, uint64_t> flushed_;
 };
 
 } // namespace opennova

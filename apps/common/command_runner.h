@@ -4,8 +4,8 @@
 // with no shell between (nothing in an argument is ever interpreted), bounded
 // by a timeout, its standard output (the reply) kept apart from its standard
 // error (the tool's diagnostics). The NovaWorld service's EC2 machine driver runs
-// the AWS CLI v2 through it (apps/novaworld_server/hosted/ec2_machine_driver.h),
-// its billing curl (apps/novaworld_server/billing/stripe_api.h), and
+// the AWS CLI v2 through it (apps/novaworld_common/hosted/ec2_machine_driver.h),
+// its billing curl (apps/novaworld_common/billing/stripe_api.h), and
 // opennova-hostd the docker and iptables CLIs (apps/hostd). The seam their
 // tests replace with a stub that checks each argv and answers it
 // (tests/novaworld/hosted_ec2_machine_driver_test.cpp, billing_stripe_test.cpp,

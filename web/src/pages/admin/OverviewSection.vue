@@ -69,6 +69,7 @@
       <RouterLink to="/admin/billing" class="text-accent hover:text-ink-bright">Billing</RouterLink>
       <RouterLink to="/admin/service" class="text-accent hover:text-ink-bright">The NovaWorld service</RouterLink>
       <RouterLink to="/admin/sessions" class="text-accent hover:text-ink-bright">NovaWorld sessions</RouterLink>
+      <RouterLink to="/admin/jobs" class="text-accent hover:text-ink-bright">Background jobs</RouterLink>
     </nav>
   </div>
 </template>

@@ -1,0 +1,133 @@
+name: Local stack
+
+# The local stack (deploy/compose, scripts/dev_stack.sh; DEVELOPING.md "Run the
+# NovaWorld servers locally") end to end, so it cannot silently break: the
+# script passes shellcheck; the five programs' images, the portal's, the machines'
+# serve image and the smoke test's are built from this commit (the binaries
+# compiled here with the compiler cache the Linux jobs share, then laid into
+# the Dockerfiles' build stages: `dev_stack.sh up --prebuilt`, which leaves
+# every runtime stage as it is); the stack comes up with hosted game servers on
+# the synthetic data set (no licensed data); and the smoke test runs against it
+# (scripts/dev_stack.sh smoke: every program's liveness, an account through the
+# site's API, the gate's answer and a lobby session, the jobs admin API, and a
+# hosted server started through the site on a machine the worker launches,
+# running, listed in the lobby, taking console commands, stopped).
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'apps/**'
+      - 'engine/base/**'
+      - 'engine/formats/**'
+      - 'engine/net/**'
+      - 'engine/runtime/**'
+      - 'CMakeLists.txt'
+      - 'backend/**'
+      - 'deploy/compose/**'
+      - 'web/**'
+      - 'scripts/dev_stack.sh'
+      - 'tests/novaworld/stack_smoke.cpp'
+      - 'tests/novaworld/lobby_client.h'
+      - 'tests/serve/serve_test_support.h'
+      - 'tests/novaworld/service_tests.cmake'
+      - '.github/workflows/local-stack.yml'
+  # Every pull request, whatever its base (stacked PRs included).
+  pull_request:
+    paths:
+      - 'apps/**'
+      - 'engine/base/**'
+      - 'engine/formats/**'
+      - 'engine/net/**'
+      - 'engine/runtime/**'
+      - 'CMakeLists.txt'
+      - 'backend/**'
+      - 'deploy/compose/**'
+      - 'web/**'
+      - 'scripts/dev_stack.sh'
+      - 'tests/novaworld/stack_smoke.cpp'
+      - 'tests/novaworld/lobby_client.h'
+      - 'tests/serve/serve_test_support.h'
+      - 'tests/novaworld/service_tests.cmake'
+      - '.github/workflows/local-stack.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: local-stack-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  local-stack:
+    # Pinned: the --prebuilt binaries go into ubuntu:24.04 runtime images
+    # (apps/novaworld_common/Dockerfile, apps/serve/Dockerfile), so they are
+    # built on the same release (its glibc and libstdc++).
+    runs-on: ubuntu-24.04
+    # A cold compiler cache compiles the service, serve and hostd.
+    timeout-minutes: 90
+    env:
+      CMAKE_CXX_COMPILER_LAUNCHER: sccache
+      CMAKE_C_COMPILER_LAUNCHER: sccache
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          lfs: false   # the stack's images and its synthetic data set need no LFS object
+
+      # The stack's script, as infra.yml checks the deploy toolbox's (which also
+      # parses the compose files).
+      - name: shellcheck scripts/dev_stack.sh
+        run: >-
+          docker run --rm -v "$PWD:/mnt:ro" -w /mnt koalaman/shellcheck:v0.10.0 -x
+          scripts/dev_stack.sh
+
+      - name: Install libpq and hiredis
+        run: >-
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          libpq-dev libhiredis-dev libssl-dev
+
+      - name: Restore the compiler cache
+        uses: ./.github/actions/compiler-cache
+        with:
+          flavour: linux-root
+          mode: restore
+
+      # net-linux.yml's configure (the same flags, the same directory), so the
+      # cached objects match.
+      - name: Configure (OPENNOVA_NOVAWORLD_SERVICE=ON, BUILD_NOVAWORLD_HTTP=ON)
+        run: >-
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          -DOPENNOVA_NOVAWORLD_SERVICE=ON -DBUILD_NOVAWORLD_HTTP=ON
+          -DOPENNOVA_TEST_PG=postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          -DOPENNOVA_TEST_REDIS=redis://127.0.0.1:6379
+
+      - name: Build the programs, the machines' binaries and the smoke test
+        run: >-
+          cmake --build build -j "$(nproc)" --target opennova_novaworld_gate
+          opennova_novaworld_lobby opennova_novaworld_web opennova_novaworld_controller
+          opennova_novaworld_worker opennova_serve opennova_hostd opennova_novaworld_stack_smoke
+
+      - name: Bring the stack up (hosted servers on the synthetic data set)
+        run: scripts/dev_stack.sh up --synthetic-data --prebuilt build
+
+      - name: The smoke test
+        run: scripts/dev_stack.sh smoke
+
+      - name: The stack's logs
+        if: failure()
+        run: |
+          scripts/dev_stack.sh status || true
+          scripts/dev_stack.sh logs --no-color --tail 300 || true
+          for id in $(docker ps -aq --filter label=opennova.deployment=dev); do
+            docker logs --tail 200 "$id" 2>&1 || true
+          done
+
+      - name: Bring the stack down
+        if: always()
+        run: scripts/dev_stack.sh reset || true
+
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats

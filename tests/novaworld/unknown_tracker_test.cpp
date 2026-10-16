@@ -1,6 +1,6 @@
 // UnknownTracker unit tests: record/dedup semantics, sample cap, distinct
-// keys, DB flush + upsert against the migrated unknown_messages table, and
-// snapshot.
+// keys, DB flush + upsert against the migrated unknown_messages table (two
+// processes' trackers adding up in one row, and list()), and snapshot.
 
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/unknown_tracker.h>
@@ -145,6 +145,46 @@ int test_flush_multiple_rows() {
 	return 0;
 }
 
+// Two processes' trackers (two edges, an edge and a web replica) flushing one
+// signature: each flush adds its sightings since its last to the one row, so
+// the count is their sum, never the last writer's; the first sample is the
+// first writer's, last_seen the latest of either. list() reads the rows, the
+// latest seen first, one channel's when asked.
+int test_two_trackers_add_up() {
+	test_db::TestDatabase scratch;
+	Database db = scratch.open();
+
+	UnknownTracker edge_a;
+	UnknownTracker edge_b;
+	edge_a.record("gate", "badtag", { 0x0A }, "a", 100);
+	edge_a.record("gate", "badtag", { 0x0B }, "a", 200); // a: 2
+	edge_b.record("gate", "badtag", { 0x0C }, "b", 150); // b: 1
+	edge_a.flush(db);
+	edge_b.flush(db);
+	auto rows = db.query(
+			"SELECT count, first_seen_ms, last_seen_ms, sample_meta FROM unknown_messages;");
+	TEST_EXPECT(rows.size() == 1);
+	TEST_EXPECT(rows[0].as_int(0).value() == 3);
+	TEST_EXPECT(rows[0].as_int(1).value() == 100);
+	TEST_EXPECT(rows[0].as_int(2).value() == 200); // b's older sighting moves it not back
+	TEST_EXPECT(rows[0].as_text(3).value() == "a");
+	// More of each: only what came since each one's last flush is added.
+	edge_b.record("gate", "badtag", { 0x0D }, "b", 300);
+	edge_b.flush(db);
+	edge_a.flush(db); // nothing new: a no-op
+	rows = db.query("SELECT count, last_seen_ms FROM unknown_messages;");
+	TEST_EXPECT(rows[0].as_int(0).value() == 4 && rows[0].as_int(1).value() == 300);
+
+	edge_a.record("http", "GET /nope", nullptr, 0, "c", 50);
+	edge_a.flush(db);
+	const auto listed = UnknownTracker::list(db, "");
+	TEST_EXPECT(listed.size() == 2 && listed[0].signature == "badtag" && listed[0].count == 4 &&
+			(listed[0].sample == std::vector<uint8_t>{ 0x0A }) && listed[1].channel == "http");
+	const auto gate_only = UnknownTracker::list(db, "gate");
+	TEST_EXPECT(gate_only.size() == 1 && gate_only[0].sample_meta == "a");
+	return 0;
+}
+
 int test_snapshot_returns_recorded() {
 	UnknownTracker t;
 	t.record("ptype", "0x123", {0x01}, "meta-x", 42);
@@ -169,6 +209,8 @@ int main(int argc, char **argv) {
 	if (test_distinct_keys() != 0) return 1;
 	if (test_flush_and_upsert() != 0) return 1;
 	if (test_flush_multiple_rows() != 0) return 1;
+	if (test_two_trackers_add_up() != 0)
+		return 1;
 	if (test_snapshot_returns_recorded() != 0) return 1;
 	std::printf("OK: unknown_tracker (record/dedup, sample cap, distinct, flush/upsert, snapshot)\n");
 	return 0;

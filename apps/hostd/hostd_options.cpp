@@ -30,17 +30,22 @@ const char *hostd_usage() {
 		   "The machine agent: runs the hosted servers the NovaWorld service places on this\n"
 		   "machine, each an opennova-serve container on a slot of its own, and reports them.\n"
 		   "Runs as root (systemd). The containers keep running when the agent or the service\n"
-		   "stops.\n"
+		   "stops (with the process runtime they end with it).\n"
 		   "\n"
-		   "  --service <url>        the service's internal listener, http://<private "
-		   "address>:<port>\n"
+		   "  --service <url>        the controller's internal listener, http://<private "
+		   "name or address>:<port>\n"
 		   "  --machine <id>         this machine's id (the service's fleet_machines row)\n"
 		   "  --token-file <path>    the one-time bootstrap token, deleted once redeemed\n"
 		   "                         (default /etc/opennova/hostd.token)\n"
 		   "  --state-dir <path>     the saved bootstrap and the scratch files\n"
 		   "                         (default /var/lib/opennova-hostd)\n"
 		   "  --slots-root <path>    the slots' working directories (default /srv/slots)\n"
+		   "  --runtime <kind>       docker: each server a docker container (the default);\n"
+		   "                         process: each an opennova-serve child of the agent, on a\n"
+		   "                         machine that is itself a container (the local stack's)\n"
 		   "  --docker <path>        the docker CLI (default /usr/bin/docker)\n"
+		   "  --serve <path>         the process runtime's opennova-serve\n"
+		   "                         (default /usr/local/bin/opennova-serve)\n"
 		   "  --iptables <path>      the per-slot egress counters' iptables, or none\n"
 		   "                         (default /usr/sbin/iptables)\n"
 		   "  --ip6tables <path>     their ip6tables where the kernel has IPv6, or none\n"
@@ -53,6 +58,7 @@ const char *hostd_usage() {
 ParseOutcome parse_hostd_options(
 		const std::vector<std::string> &args, HostdOptions &out, std::string &error) {
 	bool machine_given = false;
+	std::string runtime = "docker";
 	for (size_t i = 0; i < args.size(); ++i) {
 		const std::string &arg = args[i];
 		if (arg == "--help" || arg == "-h")
@@ -78,6 +84,10 @@ ParseOutcome parse_hostd_options(
 			target = &out.slots_root;
 		else if (arg == "--docker")
 			target = &out.docker;
+		else if (arg == "--serve")
+			target = &out.serve;
+		else if (arg == "--runtime")
+			target = &runtime;
 		else if (arg == "--iptables")
 			target = &out.iptables;
 		else if (arg == "--ip6tables")
@@ -113,7 +123,15 @@ ParseOutcome parse_hostd_options(
 		error = "--machine is required";
 		return ParseOutcome::Error;
 	}
-	for (const std::string *path : { &out.token_file, &out.state_dir, &out.docker }) {
+	if (runtime == "docker") {
+		out.runtime = RuntimeKind::Docker;
+	} else if (runtime == "process") {
+		out.runtime = RuntimeKind::Process;
+	} else {
+		error = "--runtime takes docker or process";
+		return ParseOutcome::Error;
+	}
+	for (const std::string *path : { &out.token_file, &out.state_dir, &out.docker, &out.serve }) {
 		if (!absolute(*path)) {
 			error = "every path is absolute: " + *path;
 			return ParseOutcome::Error;

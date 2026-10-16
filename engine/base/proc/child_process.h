@@ -5,12 +5,11 @@
 // standard input the null device and its output appended to a file (or
 // discarded; its standard error in a file of its own where asked), then polled,
 // waited for, asked to stop, killed, or released to run on its own. The one
-// child-process seam of the engine's embedders: the NovaWorld service's
-// local machine driver runs opennova-serve through it
-// (apps/novaworld_server/hosted/local_machine_driver.h), its EC2 machine driver
-// the AWS CLI and opennova-hostd the docker CLI (apps/common/command_runner.h),
-// and a front end that
-// starts the game (the editor's Play) holds the game through it. Platform
+// child-process seam of the engine's embedders: opennova-hostd runs
+// opennova-serve through it on a machine that is itself a container
+// (apps/hostd/process_runtime.h) and the docker CLI, the NovaWorld service's EC2
+// machine driver the AWS CLI (apps/common/command_runner.h), and a front end
+// that starts the game (the editor's Play) holds the game through it. Platform
 // plumbing, not a port: CreateProcessW on Windows, fork and execv elsewhere.
 //
 // The child inherits none of this process's handles or descriptors beyond the
@@ -20,8 +19,8 @@
 // `end_with_parent` it ends when this process does: a kill-on-close job object
 // on Windows, the parent-death signal on Linux. The kernel sends that signal
 // when the THREAD that started the child exits, so start children from a
-// thread that lives as long as they should (LocalMachineDriver's machines keep a
-// thread of their own for this). Without `end_with_parent` the child is
+// thread that lives as long as they should (opennova-hostd starts its servers
+// from its main thread for this). Without `end_with_parent` the child is
 // meant to outlive this process: on Windows it breaks away from any job this
 // process is in (where that job allows it), so the job's kill-on-close does not
 // take it down; on POSIX it leads a session of its own (setsid), so a hangup of

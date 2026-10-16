@@ -1,12 +1,13 @@
-// The service's outbound mail (apps/novaworld_server/mailer.h) and the address
+// The service's outbound mail (apps/novaworld_common/mailer.h) and the address
 // rule registration and the password reset share (auth.h normalize_email):
 // normalize_email's accepted and refused shapes; SesMailer's settings check,
 // its argv (no address or link on it) and its SendEmail request on a stub
 // CommandRunner (the request file owner-only while the CLI runs and deleted
 // after a success and after a failure, SES's MessageId read back, the CLI's
-// failures named); the outbox's order, its bound and its stop; and the
-// templates (the account's name escaped in the HTML, the reset link, no em
-// dash). Database-free; links the server core (BUILD_NOVAWORLD_HTTP).
+// failures named); and the templates (the account's name escaped in the HTML,
+// the reset link, no em dash). The mail.send jobs (their queue, their secret,
+// their send) are jobs_test's. Database-free; links the server core
+// (BUILD_NOVAWORLD_HTTP).
 
 #include "auth.h"
 #include "command_runner.h"
@@ -19,16 +20,12 @@
 #include "common/temp_dir.h"
 #include "common/test_expect.h"
 
-#include <chrono>
-#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
-#include <mutex>
 #include <string>
-#include <thread>
 #include <vector>
 
 #ifndef _WIN32
@@ -231,63 +228,6 @@ int test_ses_failures(const std::string &scratch) {
 	return 0;
 }
 
-// A mailer that holds each send until the test releases it.
-class GateMailer final : public nws::Mailer {
-public:
-	nws::MailResult send(const nws::MailMessage &message) override {
-		std::unique_lock<std::mutex> lock(mu);
-		started.push_back(message.to);
-		cv.notify_all();
-		cv.wait(lock, [this] { return open; });
-		nws::MailResult r;
-		r.sent = true;
-		r.message_id = "gate";
-		return r;
-	}
-	std::mutex mu;
-	std::condition_variable cv;
-	bool open = false;
-	std::vector<std::string> started;
-};
-
-// The outbox: messages go out in order off the posting thread; past
-// kMaxQueued a post is refused; a stop lets the one in flight finish and
-// drops the queued ones; a post after it is refused.
-int test_outbox() {
-	{
-		fake_mail::FakeMailer fake;
-		nws::MailOutbox outbox(fake);
-		for (int i = 0; i < 5; ++i)
-			TEST_EXPECT(outbox.post(nws::welcome_mail("p" + std::to_string(i) + "@example.com", "p", "https://x.example")));
-		outbox.drain();
-		const auto sent = fake.messages();
-		TEST_EXPECT(sent.size() == 5);
-		for (int i = 0; i < 5; ++i) TEST_EXPECT(sent[i].to == "p" + std::to_string(i) + "@example.com");
-	}
-	GateMailer gate;
-	nws::MailOutbox outbox(gate);
-	TEST_EXPECT(outbox.post(nws::welcome_mail("first@example.com", "p", "https://x.example")));
-	{
-		std::unique_lock<std::mutex> lock(gate.mu);
-		gate.cv.wait(lock, [&gate] { return !gate.started.empty(); });
-	}
-	for (size_t i = 0; i < nws::MailOutbox::kMaxQueued; ++i)
-		TEST_EXPECT(outbox.post(nws::welcome_mail("q@example.com", "p", "https://x.example")));
-	TEST_EXPECT(!outbox.post(nws::welcome_mail("over@example.com", "p", "https://x.example")));
-	std::thread release([&gate] {
-		std::this_thread::sleep_for(std::chrono::milliseconds(50));
-		std::lock_guard<std::mutex> lock(gate.mu);
-		gate.open = true;
-		gate.cv.notify_all();
-	});
-	outbox.stop();
-	release.join();
-	// The one in flight went; none of the queued ones did.
-	TEST_EXPECT(gate.started.size() == 1 && gate.started[0] == "first@example.com");
-	TEST_EXPECT(!outbox.post(nws::welcome_mail("late@example.com", "p", "https://x.example")));
-	return 0;
-}
-
 // The templates: the account's name, the site's link and the reset link in
 // both bodies; the name escaped in the HTML; plain words (no em dash).
 int test_templates() {
@@ -330,9 +270,9 @@ int main() {
 	if (test_ses_config(scratch) != 0) return 1;
 	if (test_ses_request(scratch) != 0) return 1;
 	if (test_ses_send(scratch) != 0) return 1;
-	if (test_ses_failures(scratch) != 0) return 1;
-	if (test_outbox() != 0) return 1;
+	if (test_ses_failures(scratch) != 0)
+		return 1;
 	if (test_templates() != 0) return 1;
-	std::printf("OK: mailer (normalize_email, SES config, request, send, failures, outbox, templates)\n");
+	std::printf("OK: mailer (normalize_email, SES config, request, send, failures, templates)\n");
 	return 0;
 }

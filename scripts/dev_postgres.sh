@@ -72,7 +72,7 @@ case "$action" in
         cat <<EOF
 $container is up on 127.0.0.1:${port}.
 
-The server (apps/novaworld_server/README.md "Database"):
+The server (apps/novaworld_common/README.md "Database"):
   DATABASE_URL=postgresql://novaworld@127.0.0.1:${port}/novaworld DATABASE_PASSWORD=dev
 
 The service's database tests (each makes and drops its own databases):

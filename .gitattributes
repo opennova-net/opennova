@@ -5,7 +5,7 @@
 fixtures/** filter=lfs diff=lfs merge=lfs -text -eol
 
 # Binary game assets.
-apps/novaworld_server/static/** -text -eol
+apps/novaworld_web/static/** -text -eol
 
 # Tracked Markdown docs under fixtures/ are plain text, not LFS binaries —
 # last-match precedence pulls them back out of the fixtures/** LFS rule above.

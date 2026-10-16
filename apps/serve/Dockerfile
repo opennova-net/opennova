@@ -82,6 +82,6 @@ EXPOSE 32768-32787/udp 32800/tcp
 # volume holds; any arguments given replace them, so they name /HOST too.
 # serve installs its own SIGINT/SIGTERM handlers (a clean stop deregisters
 # from NovaWorld), so it stops cleanly as PID 1 too; `docker run --init` (the
-# compose files' `init: true`) works as for the NovaWorld server image.
+# compose files' `init: true`) works as for the NovaWorld programs' images.
 ENTRYPOINT ["/usr/local/bin/opennova-serve", "--resource-dir", "/opt/game"]
 CMD ["/HOST", "/srv/serve/server.host"]

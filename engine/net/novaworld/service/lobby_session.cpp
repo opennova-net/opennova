@@ -2,6 +2,7 @@
 
 #include <net/napi/session.h>
 #include <net/novaworld/host_repository.h>
+#include <net/novaworld/lobby_repository.h>
 
 #include <algorithm>
 #include <chrono>
@@ -216,13 +217,19 @@ enum class HostRowWrite { Upsert, Update };
 // beside a roster its player count disagrees with, or a roster caught between
 // replace_roster's delete and its last insert. A failure is logged and rolls
 // back both; the lobby keeps serving from its in-memory state.
-void persist_host(opennova::db::Database &db, HostRowWrite write,
-                  const hostdb::HostRow &row, const LobbyState &state, const char *what) {
+void persist_host(opennova::db::Database &db, HostRowWrite write, hostdb::HostRow row,
+		int64_t lobby_id, const LobbyState &state, const char *what) {
+	row.lobby_id = lobby_id;
 	try {
 		opennova::db::Transaction tx(db);
 		if (write == HostRowWrite::Upsert) hostdb::upsert_host(db, row);
 		else                               hostdb::update_host(db, row);
 		if (state.rid != 0) hostdb::replace_roster(db, state.rid, state.roster);
+		if (state.session_row_id != 0) {
+			lobbydb::update_session_listing(db, state.session_row_id, state.rid, state.hosting,
+					state.hosting && !state.awaiting_host_key, state.host_user_id, state.server_name,
+					state.mission_name, state.player_count, state.max_players);
+		}
 		tx.commit();
 	} catch (const std::exception &e) {
 		opennova::io::logf(opennova::io::LogLevel::kWarn,
@@ -327,9 +334,20 @@ LobbySession::LobbySession()
 // session from (GetTickCount + rand) % 9000 + 1000 [orig:
 // CNapiNetwork_RandomizeTimeout @0x4c4d9a, sole caller
 // CNapiGameSession_BuildHostVarLists @0x4d0c6a], so two retail hosts can
-// present the same value. The table is cleared at boot, so a per-process
-// monotonic suffix under the 0x0A prefix is unique for the run.
+// present the same value. Several lobby instances list into one table, so the
+// suffix under the 0x0A prefix comes from one database sequence
+// (lobbydb::next_rid), never a process's own counter; only a lobby with no
+// database (the in-memory tests) counts its own.
 uint32_t LobbySession::mint_rid() {
+	if (db_ != nullptr) {
+		try {
+			return lobbydb::next_rid(*db_);
+		} catch (const std::exception &e) {
+			opennova::io::logf(
+					opennova::io::LogLevel::kWarn, "[lobby] WARN minting a RID: %s", e.what());
+			return 0;
+		}
+	}
 	uint32_t suffix = next_rid_suffix_++ & 0x00FFFFFFu;
 	if (suffix == 0) suffix = next_rid_suffix_++ & 0x00FFFFFFu;
 	return 0x0A000000u | suffix;
@@ -373,6 +391,13 @@ void LobbySession::end_hosting(LobbyState &state, const char *reason) {
 	}
 	opennova::io::logf(opennova::io::LogLevel::kInfo,
 	"[lobby] stopped rid=%u reason=%s", rid, reason);
+}
+
+void LobbySession::relist(const LobbyState &state, const std::string &peer_ip, uint16_t peer_port) {
+	if (!db_ || !state.hosting || state.rid == 0 || state.awaiting_host_key)
+		return;
+	persist_host(*db_, HostRowWrite::Upsert, hostdb::row_from_lobby(state, peer_ip, peer_port),
+			lobby_id_, state, "active_hosts relist");
 }
 
 LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
@@ -471,8 +496,8 @@ LobbyDispatchResult LobbySession::dispatch(const NapiMessage &inner_message,
 		            state.rid, slot.slot, state.player_count, state.max_players);
 		if (db_ && state.rid != 0 && !state.awaiting_host_key) {
 			persist_host(*db_, HostRowWrite::Update,
-			             hostdb::row_from_lobby(state, remote_ip, /*peer_port=*/0), state,
-			             "active_hosts roster update");
+					hostdb::row_from_lobby(state, remote_ip, /*peer_port=*/0), lobby_id_, state,
+					"active_hosts roster update");
 		}
 		return {{}, name};
 	}
@@ -560,6 +585,10 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 	// reconnect re-sends its kept Host list, key included, under the RID the
 	// parked lobby state kept, so its claim holds.
 	if (state.rid == 0) state.rid = rid_gen_ ? rid_gen_() : mint_rid();
+	// No RID (the database failed): no reply, and the host's reliable resend
+	// asks again.
+	if (state.rid == 0)
+		return { {}, "ClientHostRequest:no-rid" };
 	state.owner_key.reset();
 	state.host_user_id.reset();
 	state.awaiting_host_key = false;
@@ -664,8 +693,8 @@ LobbyDispatchResult LobbySession::handle_client_host_request(
 	// tests.
 	if (db_ && !state.awaiting_host_key) {
 		persist_host(*db_, HostRowWrite::Upsert,
-		             hostdb::row_from_lobby(state, remote_ip, remote_port), state,
-		             "active_hosts upsert");
+				hostdb::row_from_lobby(state, remote_ip, remote_port), lobby_id_, state,
+				"active_hosts upsert");
 	}
 
 	return {{std::move(reply)}, "ClientHostRequest"};
@@ -738,8 +767,8 @@ LobbyDispatchResult LobbySession::handle_client_host_update(
 	// key names its owner.
 	if (db_ && !state.awaiting_host_key) {
 		persist_host(*db_, first_listing ? HostRowWrite::Upsert : HostRowWrite::Update,
-		             hostdb::row_from_lobby(state, remote_ip, /*peer_port=*/0), state,
-		             first_listing ? "active_hosts upsert" : "active_hosts update");
+				hostdb::row_from_lobby(state, remote_ip, /*peer_port=*/0), lobby_id_, state,
+				first_listing ? "active_hosts upsert" : "active_hosts update");
 	}
 
 	return {{}, "ClientHostUpdate"};

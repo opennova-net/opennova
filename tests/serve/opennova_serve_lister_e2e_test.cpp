@@ -1,5 +1,5 @@
 // opennova-serve's NovaWorld listing driver end to end: the Lister (apps/serve/lister.h) over real
-// loopback UDP against the real apps/novaworld_server NwUdpListener and an in-test gate, its source
+// loopback UDP against the real apps/novaworld_lobby NwUdpListener and an in-test gate, its source
 // an in-test stand-in for the live match. The host result publishes nothing (D-NET-465); the
 // mission start's update publishes the whole Host list and the roster; a roster edit removes one
 // player while the other keeps its slot, at once; a renamed column rides the next 1860-tick

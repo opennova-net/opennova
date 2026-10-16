@@ -23,7 +23,7 @@ ARG OP_SHA256=a16307ebcecb40fd091d7a6ff4f0c380c3c0897c4f4616de2c5d285e57d5ee28
 # .github/workflows/infra.yml tests with the same version: bump both together.
 ARG TERRAFORM_VERSION=1.11.4
 ARG TERRAFORM_SHA256=1ce994251c00281d6845f0f268637ba50c0005657eb3cf096b92f753b42ef4dc
-# AWS CLI v2: the release apps/novaworld_server/Dockerfile pins, its sum taken
+# AWS CLI v2: the release apps/novaworld_common/Dockerfile pins, its sum taken
 # from the release AWS signed.
 ARG AWSCLI_VERSION=2.36.50
 ARG AWSCLI_SHA256=0f15318b3edc4133ad71ce550303babdf2b5dc66bee6b91b4ac8bf05407a78bf

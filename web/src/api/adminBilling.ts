@@ -1,4 +1,4 @@
-// The admin's billing overview (apps/novaworld_server/billing/billing_routes.cpp):
+// The admin's billing overview (apps/novaworld_web/billing/billing_routes.cpp):
 // GET /api/admin/billing (with the hosted servers' limits hold, billing on or
 // off), POST /api/admin/billing/reconcile (and its override of the hold) and
 // POST /api/admin/billing/link. Each answers an AdminResult (admin.ts).

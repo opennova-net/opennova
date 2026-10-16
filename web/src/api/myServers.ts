@@ -1,5 +1,5 @@
 // The logged-in account's listed servers and its pushes to them
-// (apps/novaworld_server/README.md, "Listed servers and owners"):
+// (apps/novaworld_common/README.md, "Listed servers and owners"):
 // GET /api/me/hosts, POST /api/me/hosts/<rid>/command and POST
 // /api/me/hosts/<rid>/stop. The session cookie authenticates them and
 // `apiClient` sends the CSRF header every POST needs.
@@ -30,7 +30,6 @@ export type HostErrorCode =
   | 'unknown_rid'
   | 'not_hosting'
   | 'server_stopping'
-  | 'no_session_listener'
   | 'db_error'
   | 'network'
   | 'unknown';
@@ -57,7 +56,6 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<HostErrorCode>([
   'unknown_rid',
   'not_hosting',
   'server_stopping',
-  'no_session_listener',
   'db_error',
 ]);
 
@@ -85,8 +83,6 @@ function messageFor(code: HostErrorCode, serverMessage: string, retryAfterSecond
       return 'This server is not hosting right now. Refresh the list.';
     case 'server_stopping':
       return 'This hosted server is being stopped, so it takes no more commands.';
-    case 'no_session_listener':
-      return 'NovaWorld cannot reach game servers right now. Try again shortly.';
     case 'db_error':
       return 'The server hit a database error. Try again shortly.';
     case 'network':

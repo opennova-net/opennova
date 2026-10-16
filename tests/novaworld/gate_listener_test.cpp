@@ -1,9 +1,10 @@
-// The real apps/novaworld_server GateListener over loopback UDP, on port 0.
+// The real GateListener (apps/novaworld_gate) over loopback UDP, on port 0.
 // start() binds the port the OS picks and hands that socket to the receive
 // thread, so bound_port() is the port a probe reaches and the port the reply
 // advertises as POSTIPPORT (the host-status sink). UDPNOVAWORLD and STARTUPURL
-// name the sibling ports the config passed to start() carries (main() passes
-// the ports the NW UDP and HTTP listeners bound). The probe goes out as soon
+// name what the config passed to start() carries (the gate's fallback lobby
+// endpoint, the web endpoint and its port), never a port another listener
+// bound: the lobbies and web are other processes. The probe goes out as soon
 // as start() returns, with no wait: the socket is bound by then. A second
 // listener asking for that same port fails start(), the boot-fatal path.
 //
@@ -16,6 +17,11 @@
 // shape (the POST pair, this service's address); OpenNova's gets its row's; a
 // tag no row answers to gets nothing. A configured GLSVSS leg (ONNET_GLSVSS_*)
 // stands in for a row with none, never for DFX2's own.
+//
+// A gate with no lobby to hand out (no instance takes clients, no fallback)
+// answers no probe, and its heartbeat says so: probes_unanswered counts them
+// since the last heartbeat, lobbies_live the instances that take clients (the
+// deployment's alarm on a gate that answers no one while its /livez says ok).
 
 #include "gate_listener.h"
 #include <net/title/title_identity.h>
@@ -28,6 +34,7 @@
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/gate_response.h>
+#include <net/novaworld/lobby_repository.h>
 
 #include "common/test_database.h"
 #include "common/test_expect.h"
@@ -122,10 +129,10 @@ std::string expected_reply(uint16_t gate_port, uint16_t client_port, const Lobby
 		{ "LobbyName", lobby.name },
 		{ "POSTIPADDRESS", "127.0.0.1" },
 		{ "POSTIPPORT", std::to_string(gate_port) },
-		{ "udpnovaworld", "127.0.0.1:40123" },
+		{ "udpnovaworld", "198.51.100.7:40123" },
 		{ "udpcode1", "abc" },
 		{ "udpcode2", "xyz" },
-		{ "startupurl", "http://127.0.0.1:40456/nwprepare.dll?" + lobby.query },
+		{ "startupurl", "http://nw.example.test:40456/nwprepare.dll?" + lobby.query },
 		{ "usejunction", "0" },
 		{ "clearjunction", "0" },
 	};
@@ -174,9 +181,13 @@ int main(int argc, char **argv) {
 	nws::ServerConfig config;
 	config.public_host = "127.0.0.1";
 	config.gate_udp_port = 0;
-	// The siblings' ports as main() hands them over: what they bound.
-	config.nw_udp_port = 40123;
+	// What the gate's config names (ONNET_LOBBY_ENDPOINT, ONNET_WEB_HOST with
+	// ONNET_HTTP_PORT), never a port another listener bound: the lobbies and web
+	// are other processes, so the NW UDP port this process would bind is not it.
+	config.lobby_endpoint = "198.51.100.7:40123";
+	config.web_host = "nw.example.test";
 	config.http_port = 40456;
+	config.nw_udp_port = 64206;
 
 	nws::GateListener gate;
 	gate.set_db_pool(&pool);
@@ -193,8 +204,8 @@ int main(int argc, char **argv) {
 	}
 	TEST_EXPECT((reply.post_ip == std::array<uint8_t, 4>{127, 0, 0, 1}));
 	TEST_EXPECT(reply.post_port == port);
-	TEST_EXPECT(reply.udp_novaworld == std::vector<std::string>{"127.0.0.1:40123"});
-	const std::string startup = "http://127.0.0.1:40456/nwprepare.dll?";
+	TEST_EXPECT(reply.udp_novaworld == std::vector<std::string>{ "198.51.100.7:40123" });
+	const std::string startup = "http://nw.example.test:40456/nwprepare.dll?";
 	TEST_EXPECT(reply.startup_url.compare(0, startup.size(), startup) == 0);
 
 	// Each tag's lobby: JO's reply unchanged, the JO demo's alias answering as
@@ -241,6 +252,34 @@ int main(int argc, char **argv) {
 	// A tag no row answers to is refused: no reply at all.
 	TEST_EXPECT(!probe_text(port, "jop:cus3", 400).has_value());
 	TEST_EXPECT(!probe_text(port, "opennova_0_consumer", 400).has_value());
+
+	// No lobby instance takes clients and no fallback: no reply, each probe
+	// counted in the heartbeat's probes_unanswered (taken once), lobbies_live 0;
+	// a live instance is counted in the next.
+	{
+		nws::ServerConfig lobbyless = config;
+		lobbyless.lobby_endpoint.clear();
+		nws::GateListener none;
+		none.set_db_pool(&pool);
+		TEST_EXPECT(none.start(lobbyless));
+		TEST_EXPECT(!probe_text(none.bound_port(), kJo.gate_tag, 400).has_value());
+		TEST_EXPECT(!probe_text(none.bound_port(), kJo.gate_tag, 400).has_value());
+		auto db = pool.acquire();
+		nws::Heartbeat beat;
+		beat.program = "gate";
+		none.heartbeat(*db, beat);
+		TEST_EXPECT(beat.probes_unanswered == 2);
+		TEST_EXPECT(beat.lobbies_live == 0);
+		TEST_EXPECT(nws::heartbeat_line(beat) ==
+				"{\"heartbeat\":{\"program\":\"gate\",\"probes_unanswered\":2,"
+				"\"lobbies_live\":0,\"db_lock_timeouts\":0,\"db_deadlocks\":0}}");
+		opennova::lobbydb::register_instance(*db, "198.51.100.9:64206");
+		nws::Heartbeat next;
+		none.heartbeat(*db, next);
+		TEST_EXPECT(next.probes_unanswered == 0);
+		TEST_EXPECT(next.lobbies_live == 1);
+		none.stop();
+	}
 
 	// The port is held: a second listener cannot bind it, and says so.
 	nws::ServerConfig taken = config;

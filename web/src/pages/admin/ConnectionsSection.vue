@@ -54,7 +54,7 @@
             <tr v-else-if="data.connections.length === 0">
               <td :colspan="columns.length" class="px-4 py-6 text-center text-ink-muted">No game client is signed in.</td>
             </tr>
-            <tr v-for="c in rows" :key="c.id" class="session-row align-top hover:bg-hover">
+            <tr v-for="c in rows" :key="c.session_id" class="session-row align-top hover:bg-hover">
               <th scope="row" class="whitespace-nowrap px-4 py-3 text-left font-normal">
                 <span class="block font-mono text-xs">{{ c.id }}</span>
                 <span class="block text-xs text-ink-muted">{{ sessionStateLabel(c.state) }}</span>

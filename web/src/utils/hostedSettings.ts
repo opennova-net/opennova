@@ -1,5 +1,5 @@
 // The hosted server settings form: its defaults, and the backend's rules
-// (apps/novaworld_server/hosted/hosted_settings.h check_settings) checked in
+// (apps/novaworld_common/hosted/hosted_settings.h check_settings) checked in
 // the browser first, so the owner hears what is wrong before a start is spent
 // on it. The game (a data set the service offers) sets the whole-number
 // ranges, the expansions and the rotation's missions. The backend checks them

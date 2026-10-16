@@ -1,15 +1,18 @@
 // opennova-hostd: the machine agent. On each machine of the hosted servers'
 // fleet it runs the opennova-serve containers the NovaWorld service places on
 // the machine's slots and reports them, over the agent protocol
-// (apps/novaworld_server/hosted/agent_protocol.h; agent.h). This file owns the
+// (apps/novaworld_common/hosted/agent_protocol.h; agent.h). This file owns the
 // command line, the log, the stop signals and the pass loop. Linux only: it
 // runs as root under systemd, shipped inside the opennova-serve image and
-// copied out at the machine's bootstrap (README.md).
+// copied out at the machine's bootstrap (README.md); in the local stack it is
+// the machine container's own process, its servers its children (--runtime
+// process).
 
 #include "agent.h"
 #include "docker_runtime.h"
 #include "egress_counters.h"
 #include "hostd_options.h"
+#include "process_runtime.h"
 #include "slot_files.h"
 
 #include "command_runner.h"
@@ -113,7 +116,16 @@ int main(int argc, char **argv) {
 	const std::vector<std::string> environment = proc::filter_environment(
 			{ "PATH", "HOME", "LANG", "LC_*", "TZ", "TMPDIR", "DOCKER_*" });
 	proc::ProcessCommandRunner runner(environment, scratch);
-	DockerRuntime docker(runner, options.docker, environment, scratch);
+	std::unique_ptr<ContainerRuntime> runtime;
+	if (options.runtime == RuntimeKind::Process) {
+		// Each server gets the system's variables (never DOCKER_*) and the env
+		// file's; its lines go where the agent's own do.
+		runtime = std::make_unique<ProcessRuntime>(options.serve,
+				proc::filter_environment({ "PATH", "HOME", "LANG", "LC_*", "TZ", "TMPDIR" }),
+				"/proc/self/fd/2");
+	} else {
+		runtime = std::make_unique<DockerRuntime>(runner, options.docker, environment, scratch);
+	}
 	std::vector<EgressTool> tools;
 	if (options.iptables != "none")
 		tools.push_back({ options.iptables, false });
@@ -131,10 +143,11 @@ int main(int argc, char **argv) {
 	config.state_dir = options.state_dir;
 	config.scratch_dir = scratch;
 	config.token_file = options.token_file;
-	Agent agent(config, link, docker, slots, egress);
+	Agent agent(config, link, *runtime, slots, egress);
 
-	io::logf(io::LogLevel::kInfo, "%s for machine %lld, service %s", hostd_version(),
-			static_cast<long long>(options.machine_id), options.service_url.c_str());
+	io::logf(io::LogLevel::kInfo, "%s for machine %lld, service %s, %s runtime", hostd_version(),
+			static_cast<long long>(options.machine_id), options.service_url.c_str(),
+			options.runtime == RuntimeKind::Process ? "process" : "docker");
 	int code = 0;
 	while (!g_stop.load()) {
 		const int delay = agent.step();
@@ -145,7 +158,9 @@ int main(int argc, char **argv) {
 		wait_ms(delay);
 	}
 	if (g_stop.load())
-		io::logf(io::LogLevel::kInfo, "stopping; the containers keep running");
+		io::logf(io::LogLevel::kInfo,
+				options.runtime == RuntimeKind::Process ? "stopping; the servers end with the agent"
+														: "stopping; the containers keep running");
 	net::shutdown();
 	return code;
 }

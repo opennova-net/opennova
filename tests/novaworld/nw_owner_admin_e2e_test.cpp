@@ -150,6 +150,7 @@ net::HttpReply owner_push(const Service &service, const std::string &session, ui
 
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
+	test_redis::init(argc, argv);
 	opennova::io::set_log_sink(&log_sink);
 	if (net::startup() != 0) {
 		std::fprintf(stderr, "FAIL: net::startup\n");

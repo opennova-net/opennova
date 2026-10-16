@@ -1,4 +1,4 @@
-// The hosted servers' supervisor and what it stands on (apps/novaworld_server/
+// The hosted servers' supervisor and what it stands on (apps/novaworld_common/
 // hosted), on a migrated database with a FakeDriver whose machines' agents the
 // test plays (hosted_fake_driver.h, hosted_fleet_rig.h) and a hand-stepped
 // clock: the data sets (the catalog, the variable's read, what each machine
@@ -258,6 +258,13 @@ int test_renders() {
 	const hosted::LaunchSpec on = hosted::render_launch(s, *hosted::find_data_set(known, hosted::kDataSetOpenNova), in);
 	TEST_EXPECT(on.data_set == "opennova_0_consumer");
 	TEST_EXPECT(on.serve_args.size() == 10 && on.serve_args[8] == "/game" && on.serve_args[9] == "jo");
+	// A data set of loose files: its servers mount it as such.
+	hosted::DataSet loose = *hosted::find_data_set(known, hosted::kDataSetOpenNova);
+	loose.loose_root = true;
+	const std::vector<std::string> loose_args = { "/HOST", "server.host", "--credentials",
+		"credentials.txt", "--master-host", "203.0.113.5", "--master-gate-port", "7597", "/game",
+		"jo", "--loose-root" };
+	TEST_EXPECT(hosted::render_launch(s, loose, in).serve_args == loose_args);
 	return 0;
 }
 
@@ -294,7 +301,7 @@ int test_data_sets() {
 		TEST_EXPECT(opennova::gameprofile::gameprofile_by_code(d.title.c_str()) != nullptr);
 		TEST_EXPECT(!d.display_name.empty() && !d.expansions.empty() && d.expansions[0].code.empty());
 		TEST_EXPECT(d.limits.max_players.min >= 2 && d.limits.max_players.min <= d.limits.max_players.max);
-		TEST_EXPECT(d.missions.empty() && d.resource_dir.empty());
+		TEST_EXPECT(d.missions.empty() && !d.loose_root);
 	}
 	TEST_EXPECT(known[0].title == "jo" && known[1].title == "dfx2" && known[2].title == "jo");
 	TEST_EXPECT(known[0].expansions.size() == 2 && known[0].expansions[1].code == "jox01");
@@ -306,8 +313,8 @@ int test_data_sets() {
 	std::vector<hosted::DataSetConfig> configs;
 	std::string error;
 	TEST_EXPECT(hosted::parse_data_set_configs(
-			"{\"jop_2_consumer\":{\"missions\":[\"a.bms\",\"B-2.BMS\"],\"resource_dir\":\"C:/JO\",\"loose_root\":false},"
-			"\"dfx2_consumer\":{\"resource_dir\":\"/data/dfx2\",\"loose_root\":true},"
+			"{\"jop_2_consumer\":{\"missions\":[\"a.bms\",\"B-2.BMS\"],\"loose_root\":false},"
+			"\"dfx2_consumer\":{\"loose_root\":true},"
 			"\"opennova_0_consumer\":{}}",
 			configs, error));
 	TEST_EXPECT(error.empty() && configs.size() == 3);
@@ -318,12 +325,12 @@ int test_data_sets() {
 		return nullptr;
 	};
 	const auto *jo = config_of("jop_2_consumer");
-	TEST_EXPECT(jo && jo->missions == std::vector<std::string>({ "a.bms", "B-2.BMS" }) && jo->resource_dir == "C:/JO" &&
+	TEST_EXPECT(jo && jo->missions == std::vector<std::string>({ "a.bms", "B-2.BMS" }) &&
 			!jo->loose_root);
 	const auto *dfx2 = config_of("dfx2_consumer");
 	TEST_EXPECT(dfx2 && dfx2->missions.empty() && dfx2->loose_root);
 	const auto *on = config_of("opennova_0_consumer");
-	TEST_EXPECT(on && on->resource_dir.empty() && on->missions.empty());
+	TEST_EXPECT(on && !on->loose_root && on->missions.empty());
 	// Unset, it is an empty object.
 	TEST_EXPECT(hosted::parse_data_set_configs(" ", configs, error) && configs.empty());
 	// Anything else is refused, naming what.
@@ -341,27 +348,25 @@ int test_data_sets() {
 	TEST_EXPECT(refused("{\"jop_2_consumer\":[]}", "jop_2_consumer is no JSON object"));
 	TEST_EXPECT(refused("{\"jop_2_consumer\":{\"missions\":\"a.bms\"}}", "missions is no list"));
 	TEST_EXPECT(refused("{\"jop_2_consumer\":{\"missions\":[\"../a.bms\"]}}", "no .bms file name"));
-	TEST_EXPECT(refused("{\"jop_2_consumer\":{\"resource_dir\":1}}", "resource_dir is no string"));
+	TEST_EXPECT(refused("{\"jop_2_consumer\":{\"resource_dir\":\"C:/JO\"}}", "'resource_dir'"));
 	TEST_EXPECT(refused("{\"jop_2_consumer\":{\"loose_root\":\"1\"}}", "loose_root is no true or false"));
 	TEST_EXPECT(refused("{\"jop_2_consumer\":{\"mission\":[]}}", "'mission'"));
 
-	// What each driver offers, in the catalog's order, with the config's values:
-	// the local driver the data sets with a folder, the ec2 driver every one named
-	// (each cloud machine mounts them all).
+	// What a deployment offers, in the catalog's order, with the config's values:
+	// every data set named (each machine mounts them all).
 	TEST_EXPECT(hosted::parse_data_set_configs(
-			"{\"dfx2_consumer\":{\"resource_dir\":\"/data/dfx2\",\"loose_root\":true,\"missions\":[\"d.bms\"]},"
-			"\"jop_2_consumer\":{\"missions\":[\"a.bms\"],\"resource_dir\":\"C:/JO\"},"
-			"\"opennova_0_consumer\":{\"missions\":[\"o.bms\"]}}",
+			"{\"dfx2_consumer\":{\"loose_root\":true,\"missions\":[\"d.bms\"]},"
+			"\"jop_2_consumer\":{\"missions\":[\"a.bms\"]}}",
 			configs, error));
-	const auto local = hosted::offered_data_sets("local", configs);
-	TEST_EXPECT(local.size() == 2 && local[0].game == "jop_2_consumer" && local[1].game == "dfx2_consumer");
-	TEST_EXPECT(local[0].resource_dir == "C:/JO" && local[0].missions == std::vector<std::string>{ "a.bms" });
-	TEST_EXPECT(local[1].loose_root && local[1].title == "dfx2" && local[1].limits.max_players.max == 100);
-	const auto ec2 = hosted::offered_data_sets("ec2", configs);
-	TEST_EXPECT(ec2.size() == 3 && ec2[0].game == "jop_2_consumer" && ec2[2].game == "opennova_0_consumer" &&
-			ec2[2].missions == std::vector<std::string>{ "o.bms" });
-	TEST_EXPECT(hosted::offered_data_sets("none", configs).empty());
-	TEST_EXPECT(hosted::offered_data_sets("fake", configs).empty());
+	const auto offered = hosted::offered_data_sets(configs);
+	TEST_EXPECT(offered.size() == 2 && offered[0].game == "jop_2_consumer" &&
+			offered[1].game == "dfx2_consumer");
+	TEST_EXPECT(
+			!offered[0].loose_root && offered[0].missions == std::vector<std::string>{ "a.bms" });
+	TEST_EXPECT(offered[1].loose_root && offered[1].title == "dfx2" &&
+			offered[1].limits.max_players.max == 100);
+	TEST_EXPECT(hosted::parse_data_set_configs("{}", configs, error) &&
+			hosted::offered_data_sets(configs).empty());
 	return 0;
 }
 
@@ -619,10 +624,11 @@ int test_lifecycle_and_stop() {
 
 	rig.tick();
 	TEST_EXPECT(rig.state(id) == State::Provisioning && rig.fake.launches == 0);
-	// No machine yet: one is launched, and the server placed on its first slot
-	// at once (it waits for the machine's boot in booting).
+	// No machine yet: one is launched (its row and its launch job, which a
+	// worker runs after the pass), and the next pass places the server on its
+	// first slot (it waits for the machine's boot in booting).
 	rig.tick();
-	TEST_EXPECT(rig.fake.launches == 1);
+	TEST_EXPECT(rig.fake.launches == 1 && rig.state(id) == State::Provisioning);
 	auto machines = hosted::list_live_machines(rig.db);
 	TEST_EXPECT(machines.size() == 1);
 	const hosted::FleetMachineRow launched = machines.front();
@@ -631,6 +637,7 @@ int test_lifecycle_and_stop() {
 			launched.cloud_id == rig.fake.last && launched.private_address == "10.0.1.1" &&
 			launched.serve_image == kServeImage && launched.reserved_for == 0);
 	TEST_EXPECT(rig.fake.machines.at(launched.cloud_id).token.size() == hosted::kMachineTokenChars);
+	rig.tick();
 	auto row = rig.server(id);
 	TEST_EXPECT(row->state == State::Booting && row->machine_ref == launched.id && row->slot == 0);
 	TEST_EXPECT(row->game_port == 32768 && row->generation == 1 && row->serve_image == kServeImage);
@@ -926,15 +933,17 @@ int test_exits_and_crash_restarts() {
 // A machine launch the cloud refuses is the machine's cause, never the server's:
 // no restart counted, however many fail. The driver's own text goes to the log,
 // not to the event the owner reads (written once per wait); the machine's row
-// fails, the heartbeat counts it, and no launch of that kind follows within the
-// launch backoff, after which the server is placed on the next one.
+// fails (its launch job's), the next pass counts it for the heartbeat, and no
+// launch of that kind follows within the launch backoff, after which the server
+// is placed on the next one.
 int test_launch_failure() {
 	Rig rig("hosted_launch_failure");
 	const int64_t id = rig.request("launch_refused");
 	TEST_EXPECT(id > 0);
 	rig.tick(); // -> provisioning
 	rig.fake.fail_next_launch = true;
-	rig.tick();
+	rig.tick(); // the launch, which the cloud refuses
+	rig.tick(); // the refusal counted
 	auto row = rig.server(id);
 	TEST_EXPECT(rig.fake.launches == 1);
 	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 0 && !row->machine_ref);
@@ -954,6 +963,7 @@ int test_launch_failure() {
 		rig.advance(rig.config.launch_backoff_ms);
 		rig.fake.fail_next_launch = true;
 		rig.tick();
+		rig.tick();
 	}
 	row = rig.server(id);
 	TEST_EXPECT(rig.fake.launches == 4 && rig.sup->launch_failures() == 4);
@@ -961,9 +971,58 @@ int test_launch_failure() {
 	TEST_EXPECT(transitions(rig.db, id) ==
 			(std::vector<std::string>{ ">requested", "requested>provisioning", "provisioning>provisioning" }));
 	rig.advance(rig.config.launch_backoff_ms);
-	rig.tick();
+	rig.tick(); // the launch
+	rig.tick(); // the placement
 	TEST_EXPECT(rig.fake.launches == 5 && rig.state(id) == State::Booting);
 	TEST_EXPECT(rig.walk(id, State::Listing) && rig.server(id)->restarts == 0);
+	return 0;
+}
+
+// A refusal that lands while a pass runs (the launch job's worker fails the
+// machine's row after the pass counted the refusals, before it places the
+// server the machine was for): counted before the server launches again, so
+// its backoff holds that launch too, never one more launch inside it.
+int test_launch_refused_mid_pass() {
+	Rig rig("hosted_refused_mid_pass");
+	Database *db = &rig.db;
+	const int64_t a = rig.request("mid_pass_a");
+	const std::string container = rig.to_running(a, 7401);
+	TEST_EXPECT(!container.empty());
+	const int64_t owner = make_player(*db, "mid_pass_owner", 0);
+	subscribe(*db, owner, 1, "active", "sub_mid_pass");
+	subscribe_machines(*db, owner, 1, "sub_mid_pass_machine");
+	const int64_t b = rig.request_as(owner, valid_settings(), true);
+	TEST_EXPECT(b > a);
+	// Passes alone (no job runs): b's own machine, its row and its launch job.
+	rig.sup->tick(rig.now);
+	rig.sup->tick(rig.now);
+	int64_t own = 0;
+	for (const auto &m : hosted::list_live_machines(*db)) {
+		if (m.kind == hosted::MachineKind::Own) own = m.id;
+	}
+	TEST_EXPECT(own > 0 && rig.machine(own)->state == hosted::FleetMachineState::Launching);
+	// a crashes; it is placed again once its restart's backoff is over.
+	rig.agent_of(a)->exit_with(container, 0);
+	rig.sync_all();
+	rig.sup->tick(rig.now);
+	TEST_EXPECT(rig.state(a) == State::Provisioning);
+	rig.advance(rig.config.restart_backoff_ms);
+	// The pass that places a again: as it does, the worker's refusal of b's
+	// machine lands; b, placed after a, launches nothing.
+	rig.fake.on_slot_plan = [db, own] { hosted::fail_refused_launch(*db, own); };
+	rig.sup->tick(rig.now);
+	rig.fake.on_slot_plan = nullptr;
+	TEST_EXPECT(rig.state(a) == State::Booting);
+	TEST_EXPECT(rig.sup->launch_failures() == 1);
+	TEST_EXPECT(hosted::launch_not_before_ms(*db, hosted::MachineKind::Own) ==
+			static_cast<int64_t>(rig.now + rig.config.launch_backoff_ms));
+	int own_rows = 0;
+	for (const auto &m : hosted::list_machines(*db, 10)) own_rows += m.kind == hosted::MachineKind::Own ? 1 : 0;
+	TEST_EXPECT(own_rows == 1 && rig.state(b) == State::Provisioning);
+	TEST_EXPECT(has_event(*db, b, "the launch of its machine failed; it waits for the next (no restart counted)"));
+	// Past the backoff, its next machine.
+	rig.advance(rig.config.launch_backoff_ms);
+	TEST_EXPECT(rig.walk(b, State::Listing));
 	return 0;
 }
 
@@ -1105,8 +1164,10 @@ int test_machine_lost_replaces() {
 		rig.step();
 	}
 	TEST_EXPECT(rig.state(id) == State::Running);
-	// The cloud says it is gone: it ends, and the server is placed again.
+	// The cloud says it is gone (a describe's answer, on its row): it ends at the
+	// next pass, and the server is placed again.
 	rig.fake.vanish(cloud);
+	rig.step();
 	rig.step();
 	TEST_EXPECT(rig.machine(machine)->state == hosted::FleetMachineState::Ended);
 	auto row = rig.server(id);
@@ -1279,7 +1340,7 @@ int test_owner_limits() {
 	// The stopping ones count toward nothing: a pass stops no more.
 	rig.step();
 	TEST_EXPECT(hosted::is_live(rig.state(a1)) && rig.state(a1) != State::Stopping);
-	TEST_EXPECT(!rig.sup->limits_held());
+	TEST_EXPECT(!hosted::limits_hold::held(rig.db));
 
 	// Past due: the servers stay, a start is refused.
 	const int64_t ben = make_player(*db, "lim_ben", 0);
@@ -1320,16 +1381,27 @@ int test_owner_limits() {
 	return 0;
 }
 
+// The owners' limits' hold, its row (hosted/limits_hold.h) as the tests read
+// and move it.
+struct HoldRow {
+	Database &db;
+	hosted::LimitsHoldView view() { return hosted::limits_hold::view(db); }
+	bool held() { return hosted::limits_hold::held(db); }
+	void reconciled() { hosted::limits_hold::reconciled(db); }
+	void force_next_pass() { hosted::limits_hold::force_next_pass(db); }
+	bool take_force() { return hosted::limits_hold::take_force(db); }
+	bool clear() { return hosted::limits_hold::clear(db); }
+};
+
 // The brake on the brake: a pass that would stop the servers of more owners
 // than max(2, half the owners) stops none, logs, and holds (no limit stops,
 // whatever their count, until it releases); cleared while the cause stands, it
-// holds again. A clean reconcile with Stripe (LimitsHold::reconciled) confirms
+// holds again. A clean reconcile with Stripe (limits_hold::reconciled) confirms
 // the cache: the next pass finds some of the same owners still past their
 // entitlements, releases, and stops theirs alone.
 int test_mass_stop_hold() {
 	Rig rig("hosted_hold");
-	hosted::LimitsHold hold;
-	rig.sup->set_limits_hold(&hold);
+	HoldRow hold{ rig.db };
 	Database *db = &rig.db;
 	const int64_t a = rig.request("hold_a");
 	const int64_t b = rig.request("hold_b");
@@ -1339,20 +1411,20 @@ int test_mass_stop_hold() {
 	for (const int64_t id : { a, b, c })
 		TEST_EXPECT(nws::set_comp_servers(*db, *rig.server(id)->owner_user_id, 0).ok);
 	rig.tick();
-	TEST_EXPECT(rig.sup->limits_held() && !rig.sup->limits_hold_reason().empty());
+	TEST_EXPECT(hold.held() && !hold.view().reason.empty());
 	TEST_EXPECT(hold.view().owners == 3 && hold.view().servers == 3);
 	for (const int64_t id : { a, b, c }) TEST_EXPECT(rig.state(id) != State::Stopping && hosted::is_live(rig.state(id)));
 	// Cleared while all three still lapse: held again.
-	rig.sup->clear_limits_hold();
+	TEST_EXPECT(hold.clear());
 	rig.tick();
-	TEST_EXPECT(rig.sup->limits_held());
+	TEST_EXPECT(hold.held());
 	for (const int64_t id : { a, b, c }) TEST_EXPECT(rig.state(id) != State::Stopping);
 	// Two restored: one owner past, below the brake, and still held (no
 	// reconcile has confirmed the cache since).
 	for (const int64_t id : { a, b })
 		TEST_EXPECT(nws::set_comp_servers(*db, *rig.server(id)->owner_user_id, 1).ok);
 	rig.tick();
-	TEST_EXPECT(rig.sup->limits_held() && rig.state(c) != State::Stopping);
+	TEST_EXPECT(hold.held() && rig.state(c) != State::Stopping);
 	TEST_EXPECT(hold.view().owners == 1 && hold.view().servers == 1);
 	// A clean reconcile: the next pass releases, and the one owner still past
 	// (one of those held) is stopped.
@@ -1376,8 +1448,7 @@ int test_hold_releases() {
 	rig.config.cap = 20;
 	rig.config.placement.max_shared = 3; // room for the nine
 	rig.make_supervisor();
-	hosted::LimitsHold hold;
-	rig.sup->set_limits_hold(&hold);
+	HoldRow hold{ rig.db };
 	Database *db = &rig.db;
 	const auto lapse = [&](const std::vector<int64_t> &ids, int comp) {
 		bool ok = true;
@@ -1468,7 +1539,10 @@ int test_reconciliation() {
 	rig.fake.vanish(rig.machine(rig.machine_of(stopping))->cloud_id);
 	rig.make_supervisor();
 	rig.advance(1000);
-	rig.sup->reconcile(rig.now);
+	// The reconciliation's sweep (a job) finds the two machines gone; its first
+	// pass ends them.
+	rig.reconcile();
+	rig.tick();
 
 	TEST_EXPECT(rig.state(kept) == State::Running && rig.machine_of(kept) == kept_machine);
 	auto row = rig.server(lost);
@@ -1481,7 +1555,8 @@ int test_reconciliation() {
 	TEST_EXPECT(agent && agent->last.desired.size() == 1 && agent->last.desired[0].name == kept_container &&
 			!agent->last.desired[0].files && agent->find(kept_container) != nullptr);
 
-	// The next pass places the lost one again at once (no backoff: no crash).
+	// It is placed again at once (no backoff: no crash), on the machine that
+	// pass launched for it.
 	rig.step();
 	TEST_EXPECT(rig.fake.launches == 4);
 	TEST_EXPECT(rig.walk(lost, State::Booting));
@@ -1684,6 +1759,7 @@ int main(int argc, char **argv) {
 		{ "stop_paths", test_stop_paths },
 		{ "exits_and_crash_restarts", test_exits_and_crash_restarts },
 		{ "launch_failure", test_launch_failure },
+		{ "launch_refused_mid_pass", test_launch_refused_mid_pass },
 		{ "restart_window", test_restart_window },
 		{ "timeouts_and_health", test_timeouts_and_health },
 		{ "machine_lost_replaces", test_machine_lost_replaces },

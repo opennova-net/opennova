@@ -2,7 +2,7 @@
 //
 // The in-process tests cover the two halves separately: client_session_loopback
 // drives ClientSession against a mock server, and host_register_list drives a
-// LobbySession directly. Neither exercises the actual apps/novaworld_server
+// LobbySession directly. Neither exercises the actual apps/novaworld_lobby
 // NwUdpListener — the UDP socket, the NWU/CRC envelope decode, the HELLO->AUTH->
 // SESSION opcode dispatch, and the PN routing into the lobby path. This closes
 // that gap: it stands up a real NwUdpListener on a loopback UDP port and drives

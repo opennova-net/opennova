@@ -1,0 +1,164 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "Ec2Read",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:Describe*",
+        "ec2:GetEbsEncryptionByDefault",
+        "ec2:GetEbsDefaultKmsKeyId",
+        "ec2:GetInstanceMetadataDefaults",
+        "ec2:GetLaunchTemplateData",
+        "ec2:GetConsoleOutput",
+        "ec2:GetSecurityGroupsForVpc"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "LaunchTagged",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": [
+        "arn:aws:ec2:${region}:${account_id}:instance/*",
+        "arn:aws:ec2:${region}:${account_id}:volume/*",
+        "arn:aws:ec2:${region}:${account_id}:network-interface/*"
+      ],
+      "Condition": {
+        "StringLike": {
+          "aws:RequestTag/opennova:deployment": "opennova-*"
+        }
+      }
+    },
+    {
+      "Sid": "LaunchFromAnyImage",
+      "Effect": "Allow",
+      "Action": "ec2:RunInstances",
+      "Resource": "arn:aws:ec2:${region}::image/*"
+    },
+    {
+      "Sid": "ManageTagged",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:RunInstances",
+        "ec2:TerminateInstances",
+        "ec2:StopInstances",
+        "ec2:StartInstances",
+        "ec2:RebootInstances",
+        "ec2:ModifyInstanceAttribute",
+        "ec2:ModifyInstanceMetadataOptions",
+        "ec2:ModifyInstanceMaintenanceOptions",
+        "ec2:ModifyInstanceCreditSpecification",
+        "ec2:AssociateIamInstanceProfile",
+        "ec2:ReplaceIamInstanceProfileAssociation",
+        "ec2:DisassociateIamInstanceProfile",
+        "ec2:ModifyVolume",
+        "ec2:CreateLaunchTemplateVersion",
+        "ec2:ModifyLaunchTemplate",
+        "ec2:DeleteLaunchTemplate",
+        "ec2:DeleteSnapshot",
+        "ec2:DeregisterImage"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringLike": {
+          "aws:ResourceTag/opennova:deployment": "opennova-*"
+        }
+      }
+    },
+    {
+      "Sid": "TagAtCreate",
+      "Effect": "Allow",
+      "Action": "ec2:CreateTags",
+      "Resource": "*",
+      "Condition": {
+        "StringEquals": {
+          "ec2:CreateAction": [
+            "CreateVpc",
+            "CreateInternetGateway",
+            "AllocateAddress",
+            "CreateLaunchTemplate",
+            "CreateSubnet",
+            "CreateRouteTable",
+            "CreateSecurityGroup",
+            "CreateNetworkInterface",
+            "AuthorizeSecurityGroupIngress",
+            "AuthorizeSecurityGroupEgress",
+            "RunInstances",
+            "CreateImage"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "TagTagged",
+      "Effect": "Allow",
+      "Action": [
+        "ec2:CreateTags",
+        "ec2:DeleteTags"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringLike": {
+          "aws:ResourceTag/opennova:deployment": "opennova-*"
+        }
+      }
+    },
+    {
+      "Sid": "DataSnapshotStart",
+      "Effect": "Allow",
+      "Action": "ebs:StartSnapshot",
+      "Resource": "arn:aws:ec2:${region}::snapshot/*",
+      "Condition": {
+        "StringLike": {
+          "aws:RequestTag/opennova:deployment": "opennova-*"
+        }
+      }
+    },
+    {
+      "Sid": "DataSnapshotWrite",
+      "Effect": "Allow",
+      "Action": [
+        "ebs:PutSnapshotBlock",
+        "ebs:CompleteSnapshot"
+      ],
+      "Resource": "arn:aws:ec2:${region}::snapshot/*",
+      "Condition": {
+        "StringLike": {
+          "aws:ResourceTag/opennova:deployment": "opennova-*"
+        }
+      }
+    },
+    {
+      "Sid": "EbsKeyMetadata",
+      "Effect": "Allow",
+      "Action": "kms:DescribeKey",
+      "Resource": "arn:aws:kms:${region}:${account_id}:key/*"
+    },
+    {
+      "Sid": "BakeFleetImageOfTagged",
+      "Effect": "Allow",
+      "Action": "ec2:CreateImage",
+      "Resource": "arn:aws:ec2:${region}:${account_id}:instance/*",
+      "Condition": {
+        "StringLike": {
+          "aws:ResourceTag/opennova:deployment": "opennova-*"
+        }
+      }
+    },
+    {
+      "Sid": "BakeFleetImageTagged",
+      "Effect": "Allow",
+      "Action": "ec2:CreateImage",
+      "Resource": [
+        "arn:aws:ec2:${region}::image/*",
+        "arn:aws:ec2:${region}::snapshot/*"
+      ],
+      "Condition": {
+        "StringLike": {
+          "aws:RequestTag/opennova:deployment": "opennova-*"
+        }
+      }
+    }
+  ]
+}

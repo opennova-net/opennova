@@ -1,17 +1,19 @@
-# The service instance (service.tf, service_ssm.tf), planned against mock
-# providers: offline, no credentials, nothing reaches AWS or Cloudflare. From the
-# repo root (the configuration reads deploy/host/ beside infra/):
+# The service's shared pieces (service.tf, service_ssm.tf): the gate's address
+# and what the deploy toolbox reads, planned against mock providers: offline,
+# no credentials, nothing reaches AWS or Cloudflare. From the repo root:
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> init -backend=false
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> test
-# Prod adopts its Elastic IP by allocation id (no managed address, the
-# association on the instance's network interface at its fixed private
-# address), and a prod plan naming none stops at the address's precondition:
-# prod never makes one (tests/staging: another deployment gets a managed
-# address and never adopts one). No SSH: no rule on port 22, the web port from
-# Cloudflare's ranges alone, the retail ports from everywhere. The instance
-# requires IMDSv2 with a hop limit of 1; its role reads its own deployment's
-# parameters alone. infra.env carries the public address; the release
-# parameter starts at none; the converge document holds deploy/host/converge.sh.
+# Prod adopts its Elastic IP by allocation id (no managed address): it is the
+# load balancer's zone-a address, and the programs announce it as the gate's
+# and web's (ONNET_PUBLIC_HOST, ONNET_WEB_HOST); a prod plan naming none stops
+# at the address's precondition: prod never makes one (staging_service.tftest.hcl:
+# staging gets a managed address and never adopts one). Every name carries the
+# deployment (opennova-prod-*), and the operations bucket the deployment and
+# its account. No SSH and no port
+# 80 in any group. infra.env carries what the toolbox needs (the cluster, the
+# templates, the one-off tasks' network, the registry, the bucket) and nothing
+# a task reads; the release parameter starts at none; nothing is left of the
+# instances' converge.
 
 mock_provider "aws" {
   override_during = plan
@@ -37,6 +39,11 @@ mock_provider "aws" {
   mock_data "aws_eip" {
     defaults = { id = "eipalloc-0123456789abcdef0", public_ip = "54.162.79.147" }
   }
+  # The deployment's parameters as the toolbox left them: no release yet (a run
+  # naming one overrides data.aws_ssm_parameters_by_path.deployment).
+  mock_data "aws_ssm_parameters_by_path" {
+    defaults = { names = [], values = [] }
+  }
   mock_resource "aws_eip" {
     defaults = { allocation_id = "eipalloc-0fedcba9876543210", public_ip = "3.3.3.3" }
   }
@@ -45,29 +52,54 @@ mock_provider "aws" {
   mock_resource "aws_iam_instance_profile" {
     defaults = { arn = "arn:aws:iam::123456789012:instance-profile/mock" }
   }
-  mock_resource "aws_iam_policy" {
-    defaults = { arn = "arn:aws:iam::123456789012:policy/mock" }
-  }
   mock_resource "aws_iam_role" {
     defaults = { arn = "arn:aws:iam::123456789012:role/mock" }
   }
   mock_resource "aws_cloudwatch_log_group" {
     defaults = { arn = "arn:aws:logs:us-east-1:123456789012:log-group:/opennova/prod/mock" }
   }
-  mock_resource "aws_ssm_document" {
-    defaults = { arn = "arn:aws:ssm:us-east-1:123456789012:document/opennova-server-converge" }
-  }
   mock_resource "aws_sns_topic" {
-    defaults = { arn = "arn:aws:sns:us-east-1:123456789012:opennova-server-alerts" }
+    defaults = { arn = "arn:aws:sns:us-east-1:123456789012:opennova-prod-alerts" }
+  }
+  mock_resource "aws_ssm_parameter" {
+    defaults = { arn = "arn:aws:ssm:us-east-1:123456789012:parameter/opennova/prod/mock" }
   }
   mock_resource "aws_db_instance" {
-    defaults = { address = "opennova-server-db.abcdefghijkl.us-east-1.rds.amazonaws.com", port = 5432, id = "db-MOCK" }
+    defaults = { address = "opennova-prod-db.abcdefghijkl.us-east-1.rds.amazonaws.com", port = 5432, id = "db-MOCK" }
+  }
+  mock_resource "aws_elasticache_replication_group" {
+    defaults = { primary_endpoint_address = "master.opennova-prod-cache.abcdef.use1.cache.amazonaws.com" }
+  }
+  mock_resource "aws_lb" {
+    defaults = {
+      arn        = "arn:aws:elasticloadbalancing:us-east-1:123456789012:loadbalancer/net/opennova-prod/0123456789abcdef"
+      arn_suffix = "net/opennova-prod/0123456789abcdef"
+      dns_name   = "opennova-prod-0123456789abcdef.elb.us-east-1.amazonaws.com"
+    }
+  }
+  mock_resource "aws_lb_target_group" {
+    defaults = {
+      arn        = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-mock/0123456789abcdef"
+      arn_suffix = "targetgroup/opennova-prod-mock/0123456789abcdef"
+    }
   }
   mock_resource "aws_launch_template" {
     defaults = { arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0123456789abcdef0", id = "lt-0123456789abcdef0" }
   }
-  mock_resource "aws_instance" {
-    defaults = { id = "i-0123456789abcdef0" }
+  mock_resource "aws_ecs_cluster" {
+    defaults = { id = "arn:aws:ecs:us-east-1:123456789012:cluster/opennova-prod", arn = "arn:aws:ecs:us-east-1:123456789012:cluster/opennova-prod" }
+  }
+  mock_resource "aws_ecs_task_definition" {
+    defaults = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/mock:1" }
+  }
+  mock_resource "aws_ecs_service" {
+    defaults = { id = "arn:aws:ecs:us-east-1:123456789012:service/opennova-prod/mock" }
+  }
+  mock_resource "aws_service_discovery_private_dns_namespace" {
+    defaults = { id = "ns-0123456789abcdef", arn = "arn:aws:servicediscovery:us-east-1:123456789012:namespace/ns-0123456789abcdef" }
+  }
+  mock_resource "aws_service_discovery_service" {
+    defaults = { id = "srv-0123456789abcdef", arn = "arn:aws:servicediscovery:us-east-1:123456789012:service/srv-0123456789abcdef" }
   }
 }
 
@@ -80,9 +112,15 @@ mock_provider "cloudflare" {
       ipv6_cidr_blocks = ["2400:cb00::/32"]
     }
   }
+  mock_data "cloudflare_zone" {
+    defaults = { account_id = "fedcba9876543210fedcba9876543210", name = "example.com" }
+  }
+  mock_resource "cloudflare_origin_ca_certificate" {
+    defaults = { certificate = "-----BEGIN CERTIFICATE-----\nMOCK\n-----END CERTIFICATE-----\n" }
+  }
 }
 
-# The ids the assertions compare, known at plan.
+# The ids and ARNs the assertions compare, known at plan.
 override_resource {
   target          = aws_subnet.public["a"]
   override_during = plan
@@ -104,9 +142,34 @@ override_resource {
   values          = { id = "subnet-0private0b" }
 }
 override_resource {
-  target          = aws_security_group.service
+  target          = aws_security_group.program["gate"]
   override_during = plan
-  values          = { id = "sg-0service" }
+  values          = { id = "sg-0gate" }
+}
+override_resource {
+  target          = aws_security_group.program["lobby"]
+  override_during = plan
+  values          = { id = "sg-0lobby" }
+}
+override_resource {
+  target          = aws_security_group.program["web"]
+  override_during = plan
+  values          = { id = "sg-0web" }
+}
+override_resource {
+  target          = aws_security_group.program["controller"]
+  override_during = plan
+  values          = { id = "sg-0controller" }
+}
+override_resource {
+  target          = aws_security_group.program["worker"]
+  override_during = plan
+  values          = { id = "sg-0worker" }
+}
+override_resource {
+  target          = aws_security_group.lb
+  override_during = plan
+  values          = { id = "sg-0lb" }
 }
 override_resource {
   target          = aws_security_group.db
@@ -114,14 +177,107 @@ override_resource {
   values          = { id = "sg-0db" }
 }
 override_resource {
-  target          = aws_network_interface.service
+  target          = aws_security_group.backup
   override_during = plan
-  values          = { id = "eni-0service" }
+  values          = { id = "sg-0backup" }
+}
+override_resource {
+  target          = aws_lb_target_group.public["gate"]
+  override_during = plan
+  values          = { arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-gate/0123456789abcdef", arn_suffix = "targetgroup/opennova-prod-gate/0123456789abcdef" }
+}
+override_resource {
+  target          = aws_lb_target_group.public["https"]
+  override_during = plan
+  values          = { arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-https/0123456789abcdef", arn_suffix = "targetgroup/opennova-prod-https/0123456789abcdef" }
+}
+override_resource {
+  target          = aws_lb_target_group.public["http"]
+  override_during = plan
+  values          = { arn = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-http/0123456789abcdef", arn_suffix = "targetgroup/opennova-prod-http/0123456789abcdef" }
+}
+override_resource {
+  target          = aws_eip.lb_b
+  override_during = plan
+  values          = { allocation_id = "eipalloc-0000000000000000b", public_ip = "5.5.5.5" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["gate"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-gate:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["lobby"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-lobby:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["web"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-web:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["controller"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-controller:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.program["worker"]
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-worker:1" }
+}
+override_resource {
+  target          = aws_ecs_task_definition.backup
+  override_during = plan
+  values          = { arn = "arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-backup:1" }
+}
+override_resource {
+  target          = aws_iam_role.program["gate"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-gate" }
+}
+override_resource {
+  target          = aws_iam_role.program["lobby"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-lobby" }
+}
+override_resource {
+  target          = aws_iam_role.program["web"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-web" }
+}
+override_resource {
+  target          = aws_iam_role.program["controller"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-controller" }
+}
+override_resource {
+  target          = aws_iam_role.program["worker"]
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-worker" }
+}
+override_resource {
+  target          = aws_iam_role.execution
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-execution" }
+}
+override_resource {
+  target          = aws_iam_role.backup
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-backup" }
+}
+override_resource {
+  target          = aws_iam_role.backup_schedule
+  override_during = plan
+  values          = { arn = "arn:aws:iam::123456789012:role/opennova-prod-backup-schedule" }
 }
 
 variables {
-  edge_auth_secret          = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  deployment                = "prod"
+  aws_account_id            = "123456789012"
+  region                    = "us-east-1"
   db_master_password        = "0123456789abcdef0123456789abcdef"
+  cache_auth_token          = "fedcba9876543210fedcba9876543210"
   cloudflare_zone_id        = "0123456789abcdef0123456789abcdef"
   cloudflare_domain         = "example.com"
   service_eip_allocation_id = "eipalloc-0123456789abcdef0"
@@ -135,107 +291,86 @@ run "adopted_eip" {
   }
 
   assert {
-    condition     = length(aws_eip.service) == 0
+    condition     = length(aws_eip.gate) == 0
     error_message = "an adopted Elastic IP is never managed (no plan can release it)"
   }
   assert {
-    condition     = aws_eip_association.service.allocation_id == "eipalloc-0123456789abcdef0" && aws_eip_association.service.network_interface_id == aws_network_interface.service.id && aws_eip_association.service.private_ip_address == "10.44.0.10"
-    error_message = "the adopted address is associated with the host's network interface at its fixed private address"
-  }
-  assert {
-    condition     = output.public_ip == "54.162.79.147" && output.service_private_ip == "10.44.0.10"
-    error_message = "the outputs name the adopted address and the fixed private one"
+    condition     = output.public_ip == "54.162.79.147" && output.service_eip_allocation_id == "eipalloc-0123456789abcdef0"
+    error_message = "the outputs name the adopted address"
   }
   assert {
     condition = (
-      length(aws_ec2_tag.service_eip) == 1 && aws_ec2_tag.service_eip[0].key == "opennova:deployment" &&
-      aws_ec2_tag.service_eip[0].value == "opennova-server" &&
-      aws_instance.service.root_block_device[0].tags["opennova:deployment"] == "opennova-server"
+      length(aws_ec2_tag.gate_eip) == 1 && aws_ec2_tag.gate_eip[0].key == "opennova:deployment" &&
+      aws_ec2_tag.gate_eip[0].value == "opennova-prod"
     )
-    error_message = "the adopted address and the instance's root volume carry the deployment's tag"
+    error_message = "the adopted address carries the deployment's tag"
   }
   assert {
-    condition     = aws_iam_role.service.permissions_boundary == "arn:aws:iam::123456789012:policy/opennova-role-boundary"
-    error_message = "the service role carries the stack's role boundary"
-  }
-  assert {
-    condition     = length(aws_network_interface.service.private_ips) == 1 && contains(aws_network_interface.service.private_ips, "10.44.0.10") && aws_network_interface.service.subnet_id == aws_subnet.public["a"].id
-    error_message = "the network interface holds 10.44.0.10 in public subnet a"
-  }
-  assert {
-    condition     = aws_instance.service.metadata_options[0].http_tokens == "required" && aws_instance.service.metadata_options[0].http_put_response_hop_limit == 1
-    error_message = "the host requires IMDSv2 with a hop limit of 1 (no bridge container reaches it)"
-  }
-  assert {
-    condition     = one([for n in aws_instance.service.network_interface : n.network_interface_id if n.device_index == 0]) == aws_network_interface.service.id && aws_instance.service.tags["opennova:service"] == "prod"
-    error_message = "the instance takes the interface, and the tag the toolbox finds it by"
-  }
-  assert {
-    condition     = aws_instance.service.root_block_device[0].encrypted
-    error_message = "an encrypted root volume"
-  }
-  assert {
-    condition     = alltrue([for r in aws_vpc_security_group_ingress_rule.service : r.from_port != 22 && r.to_port != 22 && r.from_port != 80])
-    error_message = "no SSH, no port 80"
-  }
-  assert {
-    condition     = length([for r in aws_vpc_security_group_ingress_rule.service : r if r.from_port == 443]) == 2 && alltrue([for r in aws_vpc_security_group_ingress_rule.service : contains(["173.245.48.0/20", "103.21.244.0/22"], r.cidr_ipv4) if r.from_port == 443])
-    error_message = "the web port (443) admits Cloudflare's ranges alone"
+    condition = alltrue([
+      for p in ["gate", "lobby", "web", "controller", "worker"] :
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_PUBLIC_HOST"] == "54.162.79.147" &&
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_WEB_HOST"] == "54.162.79.147"
+    ])
+    error_message = "every program names the adopted address as the gate's and web's: no retail client follows a DNS name"
   }
   assert {
     condition = (
-      length([for r in aws_vpc_security_group_ingress_rule.service : r if r.from_port == 7597 && r.ip_protocol == "udp" && r.cidr_ipv4 == "0.0.0.0/0"]) == 1 &&
-      length([for r in aws_vpc_security_group_ingress_rule.service : r if r.from_port == 64206 && r.ip_protocol == "udp" && r.cidr_ipv4 == "0.0.0.0/0"]) == 1 &&
-      length([for r in aws_vpc_security_group_ingress_rule.service : r if r.from_port == 8080 && r.ip_protocol == "tcp" && r.cidr_ipv4 == "0.0.0.0/0"]) == 1
-    )
-    error_message = "the retail ports (gate UDP 7597, NovaWorld UDP 64206, HTTP 8080) are open to all"
-  }
-  assert {
-    condition     = length(aws_vpc_security_group_ingress_rule.service) == 5
-    error_message = "the service admits the three retail ports and Cloudflare's two (mock) ranges, nothing else"
-  }
-  assert {
-    condition = (
-      strcontains(aws_ssm_parameter.infra_env.value, "ONNET_PUBLIC_HOST='54.162.79.147'\n") &&
-      strcontains(aws_ssm_parameter.infra_env.value, "ONNET_SITE_URL='https://example.com'\n") &&
       strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_DEPLOYMENT='prod'\n") &&
+      strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_CLUSTER='opennova-prod'\n") &&
+      strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_TASK_DEFINITIONS='{\"backup\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-backup:1\",\"controller\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-controller:1\",\"gate\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-gate:1\",\"lobby\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-lobby:1\",\"web\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-web:1\",\"worker\":\"arn:aws:ecs:us-east-1:123456789012:task-definition/opennova-prod-worker:1\"}'\n") &&
+      strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_TASK_SUBNETS='subnet-0public0a,subnet-0public0b'\n") &&
+      strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_BACKUP_SECURITY_GROUP='sg-0backup'\n") &&
+      strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_IMAGE_REGISTRY='ghcr.io/opennova-net'\n") &&
+      strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_OPS_BUCKET='opennova-prod-ops-123456789012'\n") &&
+      strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_LOG_GROUP='/opennova/prod/service'\n") &&
       strcontains(aws_ssm_parameter.infra_env.value, "BACKUP_PREFIX='novaworld'\n") &&
+      strcontains(aws_ssm_parameter.infra_env.value, "ONNET_PUBLIC_HOST='54.162.79.147'\n") &&
       aws_ssm_parameter.infra_env.name == "/opennova/prod/infra.env" && aws_ssm_parameter.infra_env.type == "String"
     )
-    error_message = "infra.env carries the public address, the site, the deployment and its backup prefix"
+    error_message = "infra.env hands the toolbox the cluster, each task definition, the one-off tasks' network, the registry, the bucket, the log group and the gate's address"
+  }
+  assert {
+    condition = (
+      !strcontains(aws_ssm_parameter.infra_env.value, "DATABASE_URL") && !strcontains(aws_ssm_parameter.infra_env.value, "ONNET_REDIS_URL") &&
+      !strcontains(aws_ssm_parameter.infra_env.value, "CONVERGE") && !strcontains(aws_ssm_parameter.infra_env.value, "GATE_ALLOCATION")
+    )
+    error_message = "infra.env is the toolbox's alone: the tasks read their task definitions' environment, and no instance converges"
+  }
+  assert {
+    condition = (
+      strcontains(aws_ssm_parameter.infra_env.value, "OPENNOVA_ACCOUNT_ID='123456789012'\n") &&
+      aws_s3_bucket.ops.bucket == "opennova-prod-ops-123456789012" &&
+      aws_ecs_cluster.main.name == "opennova-prod" && aws_db_instance.main.identifier == "opennova-prod-db" &&
+      aws_iam_role.execution.name == "opennova-prod-execution" &&
+      alltrue([for p, r in aws_iam_role.program : r.name == "opennova-prod-${p}"]) &&
+      aws_lb.public.name == "opennova-prod" && aws_elasticache_replication_group.cache.replication_group_id == "opennova-prod-cache"
+    )
+    error_message = "prod's names carry prod (opennova-prod-*), its bucket prod and its account, and infra.env names the account"
   }
   assert {
     condition     = aws_ssm_parameter.release.name == "/opennova/prod/release" && aws_ssm_parameter.release.value == "none"
     error_message = "the release parameter starts at none"
   }
   assert {
-    condition     = strcontains(aws_ssm_document.converge.content, "opennova-converge") && aws_ssm_document.converge.document_type == "Command"
-    error_message = "the converge document holds deploy/host/converge.sh"
+    condition = alltrue(concat(
+      [for r in aws_vpc_security_group_ingress_rule.from_lb : r.from_port != 22 && r.to_port != 22 && r.from_port != 80],
+      [for r in aws_vpc_security_group_ingress_rule.lobby : r.from_port != 22 && r.from_port != 80],
+      [for r in aws_vpc_security_group_ingress_rule.lb : r.from_port != 22 && r.from_port != 80],
+    ))
+    error_message = "no SSH, no port 80"
   }
   assert {
-    condition = alltrue([
-      for st in data.aws_iam_policy_document.service.statement :
-      toset(st.resources) == toset(["arn:aws:ssm:us-east-1:123456789012:parameter/opennova/prod", "arn:aws:ssm:us-east-1:123456789012:parameter/opennova/prod/*"])
-      if length([for a in st.actions : a if startswith(a, "ssm:GetParameter")]) > 0
-    ])
-    error_message = "the host reads its own deployment's parameters alone"
-  }
-  assert {
-    condition = alltrue([
-      for st in data.aws_iam_policy_document.service.statement : !contains(st.resources, "*")
-      if st.sid != "SsmAgent"
-    ])
-    error_message = "every statement but the SSM agent's is scoped to a resource"
-  }
-  assert {
-    condition     = cloudflare_record.web_root[0].name == "@" && cloudflare_record.web_www[0].name == "www" && cloudflare_record.web_root[0].content == "54.162.79.147"
-    error_message = "prod's records (@, www) point at the adopted address"
+    condition = (
+      cloudflare_record.web_root[0].name == "@" && cloudflare_record.web_www[0].name == "www" &&
+      cloudflare_record.web_root[0].type == "CNAME" && cloudflare_record.web_root[0].content == "opennova-prod-0123456789abcdef.elb.us-east-1.amazonaws.com" &&
+      cloudflare_record.web_root[0].proxied
+    )
+    error_message = "prod's records (@, www) are proxied CNAMEs at the load balancer"
   }
 }
 
-# Prod without an allocation id would get a new address (and the association
-# re-pointed at it): the plan stops at the managed address's precondition
-# instead. Prod never makes one.
+# Prod without an allocation id would get a new address: the plan stops at the
+# managed address's precondition instead. Prod never makes one.
 run "managed_eip" {
   command = plan
 
@@ -243,7 +378,7 @@ run "managed_eip" {
     service_eip_allocation_id = ""
   }
 
-  expect_failures = [aws_eip.service]
+  expect_failures = [aws_eip.gate]
 }
 
 run "no_cloudflare" {
@@ -256,22 +391,12 @@ run "no_cloudflare" {
   }
 
   assert {
-    condition     = length(aws_vpc_security_group_ingress_rule.service) == 3 && length(cloudflare_record.web_root) == 0
-    error_message = "without Cloudflare: the retail ports alone, and no record"
-  }
-}
-
-run "private_address" {
-  command = plan
-
-  variables {
-    service_eip_allocation_id = "eipalloc-0123456789abcdef0"
-    service_private_ip_host   = 11
-  }
-
-  assert {
-    condition     = output.service_private_ip == "10.44.0.11"
-    error_message = "service_private_ip_host picks the host's address in public subnet a"
+    condition = (
+      length(aws_vpc_security_group_ingress_rule.lb) == 2 && length(cloudflare_record.web_root) == 0 &&
+      !strcontains(aws_ecs_task_definition.program["web"].container_definitions, "ONNET_SITE_URL") &&
+      strcontains(aws_ecs_task_definition.program["web"].container_definitions, "\"ONNET_COOKIE_SECURE\",\"value\":\"0\"")
+    )
+    error_message = "without Cloudflare: the gate's and the retail port's rules alone, no record, no site URL and no Secure cookie"
   }
 }
 
@@ -283,14 +408,4 @@ run "malformed_allocation_refused" {
   }
 
   expect_failures = [var.service_eip_allocation_id]
-}
-
-run "burstable_host_refused" {
-  command = plan
-
-  variables {
-    instance_type = "t3.large"
-  }
-
-  expect_failures = [var.instance_type]
 }

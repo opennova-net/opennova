@@ -29,9 +29,9 @@ opennova-serve --resource-dir <game dir> /HOST <host file> [/exp <name>] [/d]
 | `--loose-root` | Mount a directory that holds no game archives as loose files. |
 | `--lan-port <n>` | The first port of the bind scan (default: `game.cfg`'s `mplanserverportmin`, 32768 in a stock file). The scan steps by `mplanserverportdelta` up to `mplanserverportmax` and wraps. `0` binds a port the OS picks, which the console's `serving on UDP` line names. |
 | `--log-debug` | Print the engine's debug log lines. |
-| `--master-host <gate>` | The NovaWorld gate to list on (`127.0.0.1` for an `opennova-novaworld-server` on this machine). Without it the server serves LAN only (below). |
+| `--master-host <gate>` | The NovaWorld gate to list on (`127.0.0.1` for a NovaWorld service's gate on this machine). Without it the server serves LAN only (below). |
 | `--master-gate-port <n>` | The gate's UDP port (default 7597). |
-| `--credentials <file>` | `NOVAWORLD_USER=` and `NOVAWORLD_PASS=` lines: the account the listing logs in with to fetch its HOSTKEY, as the game's NovaWorld menu does. Without it the server hosts with no HOSTKEY, which an `opennova-novaworld-server` accepts. |
+| `--credentials <file>` | `NOVAWORLD_USER=` and `NOVAWORLD_PASS=` lines: the account the listing logs in with to fetch its HOSTKEY, as the game's NovaWorld menu does. Without it the server hosts with no HOSTKEY, which the NovaWorld service accepts. |
 | `--allow-public` | Allow NovaLogic's NovaWorld (`novaworld.net` and every host under it), a live shared service. Loopback and any other host, an OpenNova service among them, need no flag. |
 | `/PROFILE <path>` | Record every mission to a `.sph` server log (below). |
 | `/PUNTLOG`, `/PUNT.TXT` | Log the players the server punts to `_PUNT.TXT` (below). |
@@ -282,7 +282,7 @@ and restart the server only on an exit it did not ask for (ADR 0053 d6).
 (tagged `sha-<short>`, the branch, and `latest` on master). It is the server the hosted
 game servers run (ADR 0053): opennova-hostd on each machine pulls it at the digest the
 service pinned for that server and runs it in the server's slot as below, with `/opt/game`
-the server's data set mounted read-only (`apps/novaworld_server/hosted/machine/machine_user_data.sh`,
+the server's data set mounted read-only (`apps/novaworld_common/hosted/machine/machine_user_data.sh`,
 `apps/hostd/README.md`; DEPLOY.md, "Hosted game servers") and `/game <code>` naming its title.
 
 The image holds the binary and no game data. No retail byte goes into it, ever: the game

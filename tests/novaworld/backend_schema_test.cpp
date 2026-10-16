@@ -81,16 +81,16 @@ int test_migrations_create_expected_tables() {
 	            r.applied.size(), rows.size());
 
 	// Expected tables from the backend migration set.
-	const std::vector<std::string> expected = {
-		"active_hosts", "active_user_sessions", "billing_customers", "billing_events",
-		"billing_subscriptions", "cd_key_activations", "cd_keys", "fleet_machine_egress", "fleet_machines",
-		"fleet_slot_reports",
-		"games", "host_keys", "host_players", "host_roster", "hosted_server_console", "hosted_server_events",
-		"hosted_server_hourly", "hosted_server_samples",
-		"hosted_servers", "login_addresses", "password_resets",
-		"player_game_access",
-		"players", "server_status", "service_meta", "unknown_messages", "web_sessions"
-	};
+	const std::vector<std::string> expected = { "active_hosts", "active_user_sessions",
+		"billing_customers", "billing_events", "billing_subscriptions", "billing_sync_backoff",
+		"billing_sync_state", "cd_key_activations", "cd_keys", "controller_leader",
+		"fleet_launch_backoff", "fleet_machine_egress", "fleet_machines", "fleet_slot_reports",
+		"games", "host_keys", "host_players", "host_roster", "hosted_admin_links",
+		"hosted_console_commands", "hosted_console_replies", "hosted_limits_hold",
+		"hosted_server_console", "hosted_server_events", "hosted_server_hourly",
+		"hosted_server_samples", "hosted_servers", "jobs", "lobby_commands", "lobby_instances",
+		"lobby_sessions", "login_addresses", "password_resets", "player_game_access", "players",
+		"server_status", "service_meta", "unknown_messages", "web_sessions" };
 	TEST_EXPECT(rows.size() == expected.size());
 	for (size_t i = 0; i < expected.size(); ++i) {
 		TEST_EXPECT(rows[i].as_text(0).value() == expected[i]);
@@ -108,10 +108,15 @@ int test_migrations_create_expected_tables() {
 	const auto flags = db.query("SELECT table_name || '.' || column_name FROM information_schema.columns "
 								"WHERE table_schema = 'public' AND data_type = 'boolean' ORDER BY 1;");
 	const std::vector<std::string> expected_flags = {
-		"billing_customers.livemode", "billing_events.livemode", "billing_subscriptions.cancel_at_period_end",
-		"billing_subscriptions.livemode", "fleet_slot_reports.oom", "hosted_server_samples.link_up",
+		"billing_customers.livemode", "billing_events.livemode",
+		"billing_subscriptions.cancel_at_period_end", "billing_subscriptions.livemode",
+		"billing_sync_state.prices_checked", "billing_sync_state.prices_ok",
+		"fleet_machines.launch_refused", "fleet_machines.was_draining", "fleet_slot_reports.oom",
+		"hosted_console_commands.record", "hosted_console_commands.sent",
+		"hosted_limits_hold.force_next", "hosted_limits_hold.held", "hosted_server_samples.link_up",
 		"hosted_server_samples.mission_started", "hosted_servers.own_machine",
-		"hosted_servers.team_ff", "server_status.maintenance_enabled",
+		"hosted_servers.team_ff", "lobby_sessions.hosting", "lobby_sessions.listed",
+		"server_status.maintenance_enabled",
 	};
 	TEST_EXPECT(flags.size() == expected_flags.size());
 	for (size_t i = 0; i < flags.size() && i < expected_flags.size(); ++i)
@@ -757,6 +762,97 @@ int test_account_email() {
 	return 0;
 }
 
+// The job queue (0007_jobs.sql): the states and their rules, the dedupe key unique
+// among the queued and running jobs alone, the schedule key unique for good, and the
+// billing sync's one state row.
+int test_jobs_tables() {
+	TestDatabase scratch({ /*migrate=*/true });
+	Database db = scratch.open();
+	TEST_EXPECT(
+			has_index(db, "jobs", "idx_jobs_dedupe") && has_index(db, "jobs", "idx_jobs_queued"));
+	db.exec("INSERT INTO jobs (kind, dedupe_key) VALUES ('k', 'd');");
+	TEST_EXPECT(refused(db, "INSERT INTO jobs (kind, dedupe_key) VALUES ('k', 'd');"));
+	db.exec("UPDATE jobs SET state = 'done' WHERE dedupe_key = 'd';");
+	db.exec("INSERT INTO jobs (kind, dedupe_key) VALUES ('k', 'd');");
+	db.exec("INSERT INTO jobs (kind, schedule_key) VALUES ('k', 's@1');");
+	db.exec("UPDATE jobs SET state = 'failed' WHERE schedule_key = 's@1';");
+	TEST_EXPECT(refused(db, "INSERT INTO jobs (kind, schedule_key) VALUES ('k', 's@1');"));
+	TEST_EXPECT(refused(db, "INSERT INTO jobs (kind, state) VALUES ('k', 'lost');"));
+	TEST_EXPECT(refused(db, "INSERT INTO jobs (kind) VALUES ('');"));
+	TEST_EXPECT(refused(db, "INSERT INTO jobs (kind, max_attempts) VALUES ('k', 0);"));
+	TEST_EXPECT(db.query("SELECT 1 FROM billing_sync_state WHERE id = 1;").size() == 1);
+	TEST_EXPECT(refused(db, "INSERT INTO billing_sync_state (id) VALUES (2);"));
+	TEST_EXPECT(refused(
+			db, "INSERT INTO fleet_launch_backoff (kind, not_before_ms) VALUES ('big', 1);"));
+	return 0;
+}
+
+// The controller's state (0008_controller_state.sql): the leadership's and the
+// limits hold's one rows, the admin links' states (gone with their server), and
+// the console's commands with their replies (gone with their command).
+int test_controller_tables() {
+	TestDatabase scratch({ /*migrate=*/true });
+	Database db = scratch.open();
+	TEST_EXPECT(
+			db.query("SELECT generation FROM controller_leader WHERE id = 1;").front().as_int(0) ==
+			0);
+	TEST_EXPECT(refused(db, "INSERT INTO controller_leader (id) VALUES (2);"));
+	TEST_EXPECT(
+			db.query("SELECT held FROM hosted_limits_hold WHERE id = 1;").front().as_int(0) == 0);
+	TEST_EXPECT(refused(db, "INSERT INTO hosted_limits_hold (id) VALUES (2);"));
+	TEST_EXPECT(has_index(db, "hosted_console_commands", "idx_hosted_console_commands_queued"));
+	TEST_EXPECT(refused(
+			db, "INSERT INTO hosted_admin_links (server_id, state) VALUES (999999, 'up');"));
+	TEST_EXPECT(refused(db,
+			"INSERT INTO hosted_console_commands (server_id, line, actor, deadline_at) "
+			"VALUES (999999, 'GET GAMESTATE', 'owner', now());"));
+	return 0;
+}
+
+// The lobby instances (0009_lobby_instances.sql): one row per endpoint, a state of two, the
+// sessions, commands and listings that name an instance gone with it (a name no instance has
+// refused), the commands' per-instance index, and the RID sequence (1..0xFFFFFF, cycling).
+int test_lobby_instances_tables() {
+	TestDatabase scratch({ /*migrate=*/true });
+	Database db = scratch.open();
+	const int64_t id = db.query("INSERT INTO lobby_instances (endpoint) VALUES ('10.0.0.1:64206') "
+								"RETURNING id;")
+							   .front()
+							   .as_int(0)
+							   .value_or(0);
+	TEST_EXPECT(id > 0);
+	TEST_EXPECT(refused(db, "INSERT INTO lobby_instances (endpoint) VALUES ('10.0.0.1:64206');"));
+	TEST_EXPECT(
+			refused(db, "INSERT INTO lobby_instances (endpoint, state) VALUES ('x:1', 'gone');"));
+	TEST_EXPECT(refused(db,
+			"INSERT INTO lobby_sessions (lobby_id, connection_id, peer_ip, peer_port, state, "
+			"connected_at, last_seen_at) VALUES (999999, 1, '10.0.0.2', 1, 'active', now(), "
+			"now());"));
+	db.exec("INSERT INTO lobby_sessions (lobby_id, connection_id, peer_ip, peer_port, state, "
+			"connected_at, last_seen_at) VALUES ($1, 1, '10.0.0.2', 1, 'active', now(), now());",
+			{ opennova::db::BindValue(id) });
+	const std::string host =
+			"INSERT INTO active_hosts (rid, gsid, game, app_id, server_name, host_ip, "
+			"host_port, peer_ip, peer_port, lobby_id) VALUES ";
+	db.exec(host +
+					"(167772161, 'G', 'jop_2_consumer', '1', 'S', '10.0.0.2', 1, '10.0.0.2', 1, "
+					"$1);",
+			{ opennova::db::BindValue(id) });
+	TEST_EXPECT(refused(db,
+			host +
+					"(167772162, 'G', 'jop_2_consumer', '1', 'S', '10.0.0.2', 1, "
+					"'10.0.0.2', 1, 999999);"));
+	TEST_EXPECT(has_index(db, "lobby_commands", "idx_lobby_commands_lobby"));
+	db.exec("DELETE FROM lobby_instances WHERE id = $1;", { opennova::db::BindValue(id) });
+	TEST_EXPECT(db.query("SELECT 1 FROM lobby_sessions;").empty() &&
+			db.query("SELECT 1 FROM active_hosts;").empty());
+	const auto first = db.query("SELECT nextval('lobby_rid_seq');").front().as_int(0).value_or(0);
+	TEST_EXPECT(first >= 1 && first <= 0xFFFFFF);
+	db.exec("SELECT setval('lobby_rid_seq', 16777215);");
+	TEST_EXPECT(db.query("SELECT nextval('lobby_rid_seq');").front().as_int(0) == 1);
+	return 0;
+}
+
 } // namespace
 
 int main(int argc, char **argv) {
@@ -775,9 +871,15 @@ int main(int argc, char **argv) {
 		return 1;
 	if (test_billing_tables() != 0) return 1;
 	if (test_account_email() != 0) return 1;
+	if (test_jobs_tables() != 0)
+		return 1;
+	if (test_lobby_instances_tables() != 0)
+		return 1;
+	if (test_controller_tables() != 0)
+		return 1;
 	std::printf("OK: backend schema + seed (migrations, seed idempotency, FKs, "
 				"web sessions + roles, games titles, host keys, credentials generation, hosted "
 				"server games, "
-				"cd keys, billing, account email)\n");
+				"cd keys, billing, account email, jobs, controller state)\n");
 	return 0;
 }

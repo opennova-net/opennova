@@ -9,13 +9,20 @@
 
 namespace opennova::hostd {
 
+// How the agent runs its containers (--runtime): docker containers on a cloud
+// machine (docker_runtime.h), or opennova-serve child processes on a machine that
+// is itself a container, the local stack's (process_runtime.h).
+enum class RuntimeKind : uint8_t { Docker, Process };
+
 struct HostdOptions {
-	std::string service_url; // --service: http://<the service's private address>:<port>
+	std::string service_url; // --service: http://<the controller's private name or address>:<port>
 	int64_t machine_id = 0; // --machine
 	std::string token_file = "/etc/opennova/hostd.token";
 	std::string state_dir = "/var/lib/opennova-hostd";
 	std::string slots_root = "/srv/slots";
+	RuntimeKind runtime = RuntimeKind::Docker;
 	std::string docker = "/usr/bin/docker";
+	std::string serve = "/usr/local/bin/opennova-serve"; // --serve: the process runtime's
 	std::string iptables = "/usr/sbin/iptables"; // "none": no egress counters
 	std::string ip6tables = "/usr/sbin/ip6tables"; // "none", or used where the kernel has IPv6
 	bool once = false;

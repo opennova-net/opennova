@@ -1,4 +1,4 @@
-// The logged-in account's hosted servers (apps/novaworld_server/README.md,
+// The logged-in account's hosted servers (apps/novaworld_common/README.md,
 // "Hosted servers"; hosted/hosted_routes.cpp): GET /api/me/servers (the
 // hosting entitlement, the data sets and the servers), GET
 // /api/me/servers/<id>, POST /api/me/servers (a start) and POST

@@ -1,4 +1,4 @@
-// The hosted servers' console commands (apps/novaworld_server/hosted/
+// The hosted servers' console commands (apps/novaworld_common/hosted/
 // console_commands.h): the curated set the console routes may run on a
 // server's admin link (service policy), each line composed from checked
 // arguments, and what each command's replies (retail's strings, docs/net/

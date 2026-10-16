@@ -1,5 +1,5 @@
 // Support tiers and the account's billing, as the NovaWorld service's billing
-// routes answer them (snake_case; apps/novaworld_server/billing/
+// routes answer them (snake_case; apps/novaworld_common/billing/
 // billing_routes.cpp). Amounts are in the currency's smallest unit (cents);
 // times are ISO 8601 UTC.
 

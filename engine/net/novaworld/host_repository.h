@@ -7,6 +7,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -19,7 +20,7 @@ namespace opennova {
 // prepared-statement path as the rest of engine/net/novaworld. The handle is
 // the calling thread's own connection (the standalone server leases one per
 // thread from a db::ConnectionPool); a write that spans several statements
-// (clear_all, replace_roster, apply_status_blob) is one db::Transaction on it,
+// (clear_lobby, replace_roster, apply_status_blob) is one db::Transaction on it,
 // so readers on other connections see it whole. A caller that writes a host
 // row and its roster puts both in one Transaction (replace_roster's own then
 // nests as a savepoint), so the row's player count and its roster agree; a
@@ -33,7 +34,7 @@ namespace opennova {
 //   ClientHostPlayerAdded   -> add_player()
 //   ClientHostPlayerRemoved -> remove_player_by_peer() (a peer can leave
 //     at most one host at a time so the unique-by-peer index is enough)
-//   server boot        -> clear_all() (drop stale rows from prev run)
+//   a lobby's start    -> clear_lobby() (its previous run's rows alone)
 //
 // The listing's owner (host_keys; service policy, the retail
 // service's own check is unwitnessed): /NWHost.dll records each HOSTKEY it
@@ -89,6 +90,9 @@ struct HostRow {
 	std::optional<int64_t> host_user_id;
 	std::string peer_ip;
 	int         peer_port = 0;
+	// The lobby instance holding the listing (lobby_instances, 0: none, NULL:
+	// a listing no lobby holds, the dev inject's); its rows go with it.
+	int64_t lobby_id = 0;
 	// Read back only (the row's own timestamps; a write leaves created_at and
 	// sets updated_at itself): UTC 'YYYY-MM-DD HH:MM:SS'.
 	std::string created_at;
@@ -103,9 +107,15 @@ struct PlayerRow {
 	int         peer_port = 0;
 };
 
-// Every active_hosts / host_players / host_roster row, and every host_keys
-// claim: the RIDs they name were the previous run's.
-void clear_all(db::Database &db);
+// A lobby instance's start, before it serves: the rows of its previous run
+// (lobby instance `lobby_id`, kept across a restart of the same endpoint), its
+// listings (with their players and rosters), its lobby_sessions and the
+// lobby_commands addressed to them (lobby_repository.h); and the rows no
+// instance holds (lobby_id NULL: a lobby's from before instances, a dev
+// inject). Another instance's rows stay. The host_keys claims stay too: RIDs
+// come from one sequence and are never reused (lobbydb::next_rid), so a claim
+// on a RID no listing holds is free already (claim_host_key).
+void clear_lobby(db::Database &db, int64_t lobby_id);
 
 void upsert_host(db::Database &db, const HostRow &row);
 void update_host(db::Database &db, const HostRow &row);
@@ -124,6 +134,11 @@ void remove_player_by_peer(db::Database &db, const std::string &peer_ip, int pee
 void replace_roster(db::Database &db, uint32_t host_rid,
                     const std::vector<HostRosterSlot> &roster);
 std::vector<HostRosterSlot> list_roster(db::Database &db, uint32_t host_rid);
+// The rosters of `host_rids` in one query (host_rid = ANY), each in slot order
+// as list_roster reads it: the .gsb feed's rows, read without a query per host.
+// A RID with no roster rows maps to nothing.
+std::map<uint32_t, std::vector<HostRosterSlot>> list_rosters(
+		db::Database &db, const std::vector<uint32_t> &host_rids);
 
 // Fold a parsed POST status blob (the plaintext Lobby_UpdateServerInfo
 // heartbeat) into the host row that owns its HostKey. Returns false when no
@@ -203,7 +218,7 @@ std::optional<int64_t> claim_host_key(db::Database &db, std::string_view key, ui
 // the rule host_user_id's writes follow, read live rather than as of the row's
 // last write, so a reset, an inactive status or a delete (each takes the
 // account's keys) answers false at once. The owner's push routes ask it
-// (apps/novaworld_server/host_routes.h). Throws db::Error.
+// (apps/novaworld_web/host_routes.h). Throws db::Error.
 bool listing_owned_by(db::Database &db, uint32_t rid, int64_t user_id);
 
 // The main tick's sweep: every key a listed server holds counts as used (at
@@ -213,7 +228,7 @@ std::size_t prune_host_keys(db::Database &db);
 
 // What a game's listing shows in a column its host reported nothing for: the
 // game's own values, its `games` row's ver1 and exp_bits
-// (apps/novaworld_server/catalog_repository.h), the GSB route serving it
+// (apps/novaworld_common/catalog_repository.h), the GSB route serving it
 // passes them.
 struct GsbGameDefaults {
 	std::string ver1;

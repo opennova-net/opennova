@@ -1,5 +1,5 @@
 // The engine NWU driver and host role (net/novaworld/nwu_lobby_session.h, nwu_host_role.h) over
-// real loopback UDP against the real apps/novaworld_server NwUdpListener and an in-test gate
+// real loopback UDP against the real apps/novaworld_lobby NwUdpListener and an in-test gate
 // responder: the gate probe, the handshake to Verified, a duplicate gate reply ignored, the host
 // registration with no update after its result (D-NET-465), a roster change, the 1860-tick
 // refresh carrying a changed column of the live session, the mission start's update with the

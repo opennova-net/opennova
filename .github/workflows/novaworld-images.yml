@@ -1,21 +1,27 @@
 name: NovaWorld images
 
-# Builds and publishes the NovaWorld server + web portal container images to
-# GHCR. The deploy toolbox (deploy/) pulls these so a third party can deploy
-# without building locally. Image names: ghcr.io/<owner>/novaworld-server and
-# ghcr.io/<owner>/novaworld-web.
+# Builds and publishes the NovaWorld service's container images to GHCR, all
+# public (the ECS task definitions pull them with no registry credentials):
+# its five programs from apps/novaworld_common/Dockerfile, one target each
+# (ghcr.io/<owner>/opennova-novaworld-gate, -lobby, -web, -controller and
+# -worker), the web portal's nginx image (ghcr.io/<owner>/novaworld-web, the
+# second container in web's task) and the nightly backup task's
+# (ghcr.io/<owner>/opennova-novaworld-backup, deploy/backup). Each is tagged
+# sha-<short commit>, its branch and, on master, latest: `app deploy --tag`
+# pins every one from one tag (DEPLOY.md).
 
 on:
   push:
     branches: [master]
     paths:
-      - 'apps/novaworld_server/**'
+      - 'apps/novaworld_*/**'
       - 'engine/net/novacrypto/**'
       - 'engine/net/napi/**'
       - 'engine/net/novaworld/**'
       - 'engine/net/npwire/**'
       - 'apps/common/**'
       - 'backend/**'
+      - 'deploy/backup/**'
       - 'third_party/bcrypt/**'
       - 'web/**'
       - 'tests/novacrypto/**'
@@ -25,19 +31,20 @@ on:
   # Every pull request, whatever its base (stacked PRs included).
   pull_request:
     paths:
-      - 'apps/novaworld_server/**'
+      - 'apps/novaworld_*/**'
       - 'engine/net/novaworld/**'
       - 'engine/net/npwire/**'
       - 'engine/net/napi/**'
       - 'engine/net/novacrypto/**'
       - 'backend/**'
+      - 'deploy/backup/**'
       - 'web/**'
       - '.github/workflows/novaworld-images.yml'
   workflow_dispatch:
 
 # A PR's newer push cancels its older run. Master's pushes queue instead of
-# cancelling, so no run is cut off between its two pushes (one image's `latest`
-# and sha tag at the new commit, the other's still at the old).
+# cancelling, so no run is cut off between its pushes (one image's `latest`
+# and sha tag at the new commit, another's still at the old).
 concurrency:
   group: nw-images-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -45,8 +52,8 @@ concurrency:
 jobs:
   # Gate the image builds on the net scope passing with the HTTP layer ON,
   # on Linux (the deploy target): the same job definition ci.yml runs on every
-  # push and PR (.github/workflows/net-linux.yml), the same flag set the server
-  # image uses, so a green here means the image will build.
+  # push and PR (.github/workflows/net-linux.yml), the same flag set the
+  # programs' images use, so a green here means the images will build.
   http-tests:
     uses: ./.github/workflows/net-linux.yml
 
@@ -74,39 +81,63 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Image metadata (server)
-        id: meta_server
+      # The five programs, one target each of one Dockerfile, built one after
+      # another in this job: the builder keeps the shared build stage (the
+      # compile) from the first for the rest. Only pushes export the layer
+      # cache: a PR's layers are readable by that PR alone and crowd the
+      # repository's 10 GB Actions cache. Each image keeps its own scope, and
+      # mode=min exports the final image's layers only (the build stage's `COPY
+      # . .` and compile layers change with every commit, so mode=max would
+      # write blobs no later build could hit).
+      - name: Image metadata (gate)
+        id: meta_gate
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/novaworld-server
+          images: ghcr.io/${{ github.repository_owner }}/opennova-novaworld-gate
           tags: |
             type=sha,format=short
             type=ref,event=branch
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
 
-      # Only pushes export the layer cache: a PR's layers are readable by that
-      # PR alone and crowd the repository's 10 GB Actions cache. Each image
-      # keeps its own scope (one shared scope let the web build's index replace
-      # the server's), and mode=min exports the final image's layers only. The
-      # build stage's `COPY . .` and compile layers change with every commit,
-      # so mode=max wrote ~250 MB of blobs per push that no later build could
-      # hit, and they filled the cache until the 7-day expiry.
-      - name: Build + push server image
+      - name: Build + push gate image
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: apps/novaworld_server/Dockerfile
+          file: apps/novaworld_common/Dockerfile
+          target: gate
           push: ${{ github.event_name == 'push' }}
-          tags: ${{ steps.meta_server.outputs.tags }}
-          labels: ${{ steps.meta_server.outputs.labels }}
-          cache-from: type=gha,scope=novaworld-server
-          cache-to: ${{ github.event_name == 'push' && 'type=gha,scope=novaworld-server,mode=min' || '' }}
+          tags: ${{ steps.meta_gate.outputs.tags }}
+          labels: ${{ steps.meta_gate.outputs.labels }}
+          cache-from: type=gha,scope=opennova-novaworld-gate
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,scope=opennova-novaworld-gate,mode=min' || '' }}
+
+      - name: Image metadata (lobby)
+        id: meta_lobby
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/opennova-novaworld-lobby
+          tags: |
+            type=sha,format=short
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+
+      - name: Build + push lobby image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/novaworld_common/Dockerfile
+          target: lobby
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta_lobby.outputs.tags }}
+          labels: ${{ steps.meta_lobby.outputs.labels }}
+          cache-from: type=gha,scope=opennova-novaworld-lobby
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,scope=opennova-novaworld-lobby,mode=min' || '' }}
 
       - name: Image metadata (web)
         id: meta_web
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/novaworld-web
+          images: ghcr.io/${{ github.repository_owner }}/opennova-novaworld-web
           tags: |
             type=sha,format=short
             type=ref,event=branch
@@ -115,10 +146,99 @@ jobs:
       - name: Build + push web image
         uses: docker/build-push-action@v6
         with:
-          context: web
-          file: web/Dockerfile
+          context: .
+          file: apps/novaworld_common/Dockerfile
+          target: web
           push: ${{ github.event_name == 'push' }}
           tags: ${{ steps.meta_web.outputs.tags }}
           labels: ${{ steps.meta_web.outputs.labels }}
+          cache-from: type=gha,scope=opennova-novaworld-web
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,scope=opennova-novaworld-web,mode=min' || '' }}
+
+      - name: Image metadata (controller)
+        id: meta_controller
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/opennova-novaworld-controller
+          tags: |
+            type=sha,format=short
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+
+      - name: Build + push controller image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/novaworld_common/Dockerfile
+          target: controller
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta_controller.outputs.tags }}
+          labels: ${{ steps.meta_controller.outputs.labels }}
+          cache-from: type=gha,scope=opennova-novaworld-controller
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,scope=opennova-novaworld-controller,mode=min' || '' }}
+
+      - name: Image metadata (worker)
+        id: meta_worker
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/opennova-novaworld-worker
+          tags: |
+            type=sha,format=short
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+
+      - name: Build + push worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/novaworld_common/Dockerfile
+          target: worker
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta_worker.outputs.tags }}
+          labels: ${{ steps.meta_worker.outputs.labels }}
+          cache-from: type=gha,scope=opennova-novaworld-worker
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,scope=opennova-novaworld-worker,mode=min' || '' }}
+
+      # The web portal (nginx), web's second container.
+      - name: Image metadata (portal)
+        id: meta_portal
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/novaworld-web
+          tags: |
+            type=sha,format=short
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+
+      - name: Build + push portal image
+        uses: docker/build-push-action@v6
+        with:
+          context: web
+          file: web/Dockerfile
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta_portal.outputs.tags }}
+          labels: ${{ steps.meta_portal.outputs.labels }}
           cache-from: type=gha,scope=novaworld-web
           cache-to: ${{ github.event_name == 'push' && 'type=gha,scope=novaworld-web,mode=min' || '' }}
+
+      # The nightly backup task's image (pg_dump to S3; deploy/backup).
+      - name: Image metadata (backup)
+        id: meta_backup
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/opennova-novaworld-backup
+          tags: |
+            type=sha,format=short
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
+
+      - name: Build + push backup image
+        uses: docker/build-push-action@v6
+        with:
+          context: deploy/backup
+          file: deploy/backup/Dockerfile
+          push: ${{ github.event_name == 'push' }}
+          tags: ${{ steps.meta_backup.outputs.tags }}
+          labels: ${{ steps.meta_backup.outputs.labels }}
+          cache-from: type=gha,scope=opennova-novaworld-backup
+          cache-to: ${{ github.event_name == 'push' && 'type=gha,scope=opennova-novaworld-backup,mode=min' || '' }}

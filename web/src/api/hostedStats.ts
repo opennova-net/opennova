@@ -1,4 +1,4 @@
-// Hosted server stats (apps/novaworld_server/hosted/stats_routes.cpp): one of
+// Hosted server stats (apps/novaworld_web/hosted/stats_routes.cpp): one of
 // the account's servers (GET /api/me/servers/<id>/stats), the account across
 // its servers (GET /api/me/servers/stats), and the admin's per server (GET
 // /api/admin/hosted/<id>/stats) and fleet (GET /api/admin/hosted/stats), each

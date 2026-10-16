@@ -1,39 +1,44 @@
 name: Deploy
 
-# An approval-gated deploy of the NovaWorld stack to prod (DEPLOY.md, section
-# 4, "The deploy workflow"): the toolbox's own `app deploy`, run here from a
-# short-lived AWS role instead of the vault. Manual runs alone. The job runs in
-# the repository's `production` environment, whose required reviewers approve
-# each run before it starts, and the role (infra/aws/ci.tf, var.github_deploy)
-# trusts that environment's jobs alone. It pins the images by digest, uploads
-# the release bundle built from the commit this run checks out, points prod's
-# release at it and converges the service instance through SSM; an image given no
-# tag keeps the current release's. The repository variables AWS_DEPLOY_ROLE_ARN
-# (the infra output github_deploy_role_arn) and AWS_REGION name the role.
-# Rolling back is the toolbox's `app rollback` (or a run here with the old
-# release's tags).
+# A deploy of the NovaWorld stack (DEPLOY.md, section 4, "The deploy
+# workflow"): the toolbox's own `app deploy`, run here from a short-lived AWS
+# role in the deployment's own account instead of the vault. Manual runs alone.
+#
+# - staging: the images the run names (tags), in the repository environment
+#   `staging`, whose role (infra/org/account/github.tf, made in staging's
+#   account) trusts that environment's jobs alone.
+# - prod: exactly the images staging's current release runs, by digest
+#   (promoted, never built again: no tag input applies), in the environment
+#   `prod`, whose required reviewers approve each run before it starts and
+#   whose role (in prod's account) trusts that environment's jobs alone. A
+#   first job, in `staging`, reads staging's release; the second deploys it.
+#
+# infra/github makes both environments and their variables (AWS_DEPLOY_ROLE_ARN,
+# AWS_REGION, AWS_ACCOUNT_ID, from the vault's aws-<deployment> items). Rolling
+# back is the toolbox's `app rollback`.
 
 on:
   workflow_dispatch:
     inputs:
+      deployment:
+        description: "staging (the tags below), or prod (staging's current release, promoted by digest)"
+        type: choice
+        options: [staging, prod]
+        required: true
       tag:
-        description: "Server and web image tag (sha-abc1234); empty keeps the current release's"
+        description: "staging: the NovaWorld images' tag (sha-abc1234: the five programs, the portal, the backup task); empty keeps the current release's"
         required: false
         default: ""
-      server_tag:
-        description: "Server image tag alone (overrides tag)"
-        required: false
-        default: ""
-      web_tag:
-        description: "Web image tag alone (overrides tag)"
+      images:
+        description: "staging: single images' tags, overriding tag: NAME=TAG separated by spaces (web=sha-abc1234 portal=sha-def5678)"
         required: false
         default: ""
       serve_tag:
-        description: "Serve image tag (the hosted servers); empty keeps the current release's"
+        description: "staging: serve image tag (the hosted servers); empty keeps the current release's"
         required: false
         default: ""
       hostd_tag:
-        description: "hostd image tag (the machines' agent); empty keeps the current release's"
+        description: "staging: hostd image tag (the machines' agent); empty keeps the current release's"
         required: false
         default: ""
       no_hosting:
@@ -42,30 +47,64 @@ on:
         required: false
         default: false
 
-# One deploy at a time; a queued one waits, never cancels the running one.
+# One deploy of a deployment at a time; a queued one waits, never cancels the
+# running one.
 concurrency:
-  group: deploy-prod
+  group: deploy-${{ inputs.deployment }}
   cancel-in-progress: false
 
 permissions:
   contents: read
 
 jobs:
-  deploy:
+  # prod alone: the release staging runs now, read in staging's account.
+  staging-release:
+    if: inputs.deployment == 'prod'
     runs-on: ubuntu-latest
-    environment: production
+    environment: staging
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      images: ${{ steps.read.outputs.images }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: AWS credentials (OIDC, staging's account)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: opennova-promote-read-${{ github.run_id }}
+
+      - name: app images (staging)
+        id: read
+        env:
+          OPENNOVA_ROOT: ${{ github.workspace }}
+          OPENNOVA_SECRETS_DIR: ${{ runner.temp }}/opennova
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          images="$(deploy/bin/on-deploy --deployment staging app images)"
+          printf 'images=%s\n' "$images" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: staging-release
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.deployment }}
     permissions:
       contents: read
       id-token: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: AWS credentials (OIDC)
+      - name: AWS credentials (OIDC, the deployment's account)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-          role-session-name: opennova-deploy-${{ github.run_id }}
+          role-session-name: opennova-deploy-${{ inputs.deployment }}-${{ github.run_id }}
 
       # The inputs reach the script through the environment alone, never
       # through the script's text.
@@ -73,20 +112,31 @@ jobs:
         env:
           OPENNOVA_ROOT: ${{ github.workspace }}
           OPENNOVA_SECRETS_DIR: ${{ runner.temp }}/opennova
-          GHCR_OWNER: ${{ github.repository_owner }}
+          AWS_ACCOUNT_ID: ${{ vars.AWS_ACCOUNT_ID }}
+          IN_DEPLOYMENT: ${{ inputs.deployment }}
+          IN_PROMOTED: ${{ needs.staging-release.outputs.images }}
           IN_TAG: ${{ inputs.tag }}
-          IN_SERVER_TAG: ${{ inputs.server_tag }}
-          IN_WEB_TAG: ${{ inputs.web_tag }}
+          IN_IMAGES: ${{ inputs.images }}
           IN_SERVE_TAG: ${{ inputs.serve_tag }}
           IN_HOSTD_TAG: ${{ inputs.hostd_tag }}
           IN_NO_HOSTING: ${{ inputs.no_hosting }}
         run: |
           set -euo pipefail
           args=()
-          if [ -n "$IN_TAG" ]; then args+=(--tag "$IN_TAG"); fi
-          if [ -n "$IN_SERVER_TAG" ]; then args+=(--server-tag "$IN_SERVER_TAG"); fi
-          if [ -n "$IN_WEB_TAG" ]; then args+=(--web-tag "$IN_WEB_TAG"); fi
-          if [ -n "$IN_SERVE_TAG" ]; then args+=(--serve-tag "$IN_SERVE_TAG"); fi
-          if [ -n "$IN_HOSTD_TAG" ]; then args+=(--hostd-tag "$IN_HOSTD_TAG"); fi
           if [ "$IN_NO_HOSTING" = true ]; then args+=(--no-hosting); fi
-          deploy/bin/on-deploy --deployment prod app deploy ${args[@]+"${args[@]}"}
+          if [ "$IN_DEPLOYMENT" = prod ]; then
+            if [ -n "$IN_TAG$IN_IMAGES$IN_SERVE_TAG$IN_HOSTD_TAG" ]; then
+              echo "prod deploys staging's release alone: leave the tag inputs empty" >&2
+              exit 1
+            fi
+            [ -n "$IN_PROMOTED" ] || { echo "no staging release was read" >&2; exit 1; }
+            # The environment's reviewers approved the run: it is the prompt.
+            printf '%s' "$IN_PROMOTED" \
+              | deploy/bin/on-deploy --deployment prod app deploy --images-from - --yes ${args[@]+"${args[@]}"}
+          else
+            if [ -n "$IN_TAG" ]; then args+=(--tag "$IN_TAG"); fi
+            for image in $IN_IMAGES; do args+=(--image "$image"); done
+            if [ -n "$IN_SERVE_TAG" ]; then args+=(--serve-tag "$IN_SERVE_TAG"); fi
+            if [ -n "$IN_HOSTD_TAG" ]; then args+=(--hostd-tag "$IN_HOSTD_TAG"); fi
+            deploy/bin/on-deploy --deployment staging app deploy ${args[@]+"${args[@]}"}
+          fi

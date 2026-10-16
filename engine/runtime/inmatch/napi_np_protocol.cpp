@@ -416,7 +416,7 @@ HostJoinerPose pose_from_session(NapiNPServerCtx &ctx, const SessionReplyState &
 
 std::vector<uint8_t> frame_session_replies(NapiNPConnection &conn,
                                            const std::vector<ProtocolMessage> &replies) {
-	// [orig: SESSION reply build apps/novaworld_server/nw_udp_listener.cpp:606-627] Host S2C direction:
+	// [orig: SESSION reply build apps/novaworld_lobby/nw_udp_listener.cpp:606-627] Host S2C direction:
 	// encrypt with our server_scrk, stamp session_id = the ClientAuth.ck (retail's local_key). Shared
 	// seq/ack framing via frame_session_packet (ADR 0013).
 	std::vector<uint8_t> body_out;

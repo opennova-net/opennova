@@ -1,5 +1,5 @@
 // Hosted servers, as the NovaWorld service's routes answer them (snake_case;
-// apps/novaworld_server/hosted/hosted_routes.cpp, README "Hosted servers").
+// apps/novaworld_web/hosted/hosted_routes.cpp, README "Hosted servers").
 
 // requested -> provisioning -> booting -> listing -> running -> stopping ->
 // stopped | failed. A crash restart goes back to provisioning, and a stop takes
@@ -253,7 +253,7 @@ export interface StopAllReply {
   stopping: number;
 }
 
-// The console routes (apps/novaworld_server/hosted/console_routes.cpp, README
+// The console routes (apps/novaworld_web/hosted/console_routes.cpp, README
 // "Hosted servers", the console routes' table): the owner's on
 // /api/me/servers/<id>/..., the admin's on /api/admin/hosted/<id>/....
 

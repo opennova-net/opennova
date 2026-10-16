@@ -1,4 +1,4 @@
-// The machine agent's protocol (apps/novaworld_server/hosted/agent_protocol.h), the
+// The machine agent's protocol (apps/novaworld_common/hosted/agent_protocol.h), the
 // one opennova-hostd and the NovaWorld service both build: each message's round trip
 // through its encoder and its strict decoder (the bootstrap's hello and reply, the
 // sync's report, a listing that failed among them, and its reply, the files' bytes in

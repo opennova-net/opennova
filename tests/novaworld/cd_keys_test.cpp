@@ -1,4 +1,4 @@
-// The service's CD keys below the HTTP layer (apps/novaworld_server/cd_keys.h),
+// The service's CD keys below the HTTP layer (apps/novaworld_web/cd_keys.h),
 // over a migrated database: the serial format, the
 // keys an admin generates, lists, assigns and revokes, and the activations, an
 // account's (the retail login's: under its live key, the first key minted when

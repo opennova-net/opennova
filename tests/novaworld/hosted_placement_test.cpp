@@ -1,4 +1,4 @@
-// Where a hosted server runs (apps/novaworld_server/hosted/placement.h) and what a
+// Where a hosted server runs (apps/novaworld_common/hosted/placement.h) and what a
 // slot is (hosted/slots.h): best fit on the fullest shared machine that takes servers,
 // its lowest free slot, the ties (the readier machine, then the older), the launch of a
 // new shared machine below ONNET_FLEET_MAX_SHARED and the wait at it, the own-machine

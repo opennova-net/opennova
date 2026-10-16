@@ -25,9 +25,9 @@ namespace opennova::db {
 // than the lock timeout fails 55P03, one that runs longer than the statement
 // timeout fails 57014, and a connection idle inside a transaction for a minute
 // is ended by the server. The lock timeout stays below the statement timeout:
-// a lock wait is part of its statement (the writer lock is one SELECT
-// pg_advisory_xact_lock), so with the two the other way round the statement
-// timeout ends the wait first and a lock wait never reads lock_timeout().
+// a lock wait is part of its statement (a SELECT ... FOR UPDATE, an advisory
+// lock's SELECT), so with the two the other way round the statement timeout
+// ends the wait first and a lock wait never reads lock_timeout().
 inline constexpr int kDefaultLockTimeoutMs = 5000;
 inline constexpr int kDefaultStatementTimeoutMs = 15000;
 inline constexpr int kIdleInTransactionTimeoutMs = 60000;
@@ -36,11 +36,25 @@ inline constexpr int kIdleInTransactionTimeoutMs = 60000;
 inline constexpr std::size_t kDefaultPoolMax = 16;
 inline constexpr int kPoolAcquireTimeoutMs = 30000;
 
-// The advisory lock keys (pg_advisory_*): every Transaction holds the writer
-// lock until it ends, and run_migrations (and the seeds main applies after
-// it) hold the migration lock for the whole run. Both are per database.
-inline constexpr int64_t kWriterLock = 0x4f4e4e57'00000001; // "ONNW" 1
+// The advisory lock keys (pg_advisory_*), per database, in one list so no two
+// uses share a key. run_migrations, and the seeds main applies after it, hold
+// the migration lock for the whole run (a SessionLock), and bootstrap_admin
+// for its transaction, so two servers booting on one database promote one
+// first admin. hosted::request_server holds the hosted-start lock from its
+// first read to its commit: the global cap and the fleet's room are every
+// account's, so one start at a time counts them. The controller's election
+// holds the controller lock on a connection of its own for as long as it leads
+// (a SessionLock, apps/novaworld_controller/controller.h). A job's claim
+// holds the claim lock for its transaction (apps/novaworld_common/jobs/
+// job_queue.h), so claims serialize with one another alone. An account name's
+// writer (auth.cpp) takes, for each username or handle it checks or writes, the
+// two-key lock (kAccountNameLockSpace, hashtext(lower(name))); the two-key
+// locks are a key space of their own, apart from the one-key ones.
 inline constexpr int64_t kMigrationLock = 0x4f4e4e57'00000002; // "ONNW" 2
+inline constexpr int64_t kHostedStartLock = 0x4f4e4e57'00000003; // "ONNW" 3
+inline constexpr int64_t kControllerLock = 0x4f4e4e57'00000004; // "ONNW" 4
+inline constexpr int64_t kJobsClaimLock = 0x4f4e4e57'00000005; // "ONNW" 5
+inline constexpr int32_t kAccountNameLockSpace = 0x4f4e4e57; // "ONNW"
 
 // Thrown for every failure the wrapper sees: a statement the server refused,
 // a connection that would not open or was lost, a misuse of the wrapper.
@@ -56,9 +70,12 @@ public:
 	const std::string &sqlstate() const noexcept { return sqlstate_; }
 	// 23505: a unique or primary-key constraint refused a row.
 	bool unique_violation() const noexcept { return sqlstate_ == "23505"; }
-	// 55P03: a lock (a row's, the writer lock) not granted within the lock
+	// 55P03: a lock (a row's, an advisory one) not granted within the lock
 	// timeout.
 	bool lock_timeout() const noexcept { return sqlstate_ == "55P03"; }
+	// 40P01: the server ended this statement's transaction to break a
+	// deadlock (two transactions each waiting on a lock the other holds).
+	bool deadlock() const noexcept { return sqlstate_ == "40P01"; }
 	// The connection is gone (class 08 but 08P01, or libpq reported it bad):
 	// nothing this statement wrote is known to have committed.
 	bool connection_lost() const noexcept { return connection_lost_; }
@@ -104,18 +121,28 @@ using BindValue = std::variant<std::monostate, int64_t, double, std::string, std
 // (postgresql://user@host:port/dbname?sslmode=verify-full&sslrootcert=...),
 // `password` the role's password when the URI names none (kept apart: it is a
 // secret, the URI is not). application_name is what the server's views show
-// for the connection. A caller that raises lock_timeout_ms raises
+// for the connection (each NovaWorld program names itself,
+// opennova-novaworld-<program>). A caller that raises lock_timeout_ms raises
 // statement_timeout_ms above it too (the timeouts above).
 struct ConnectOptions {
 	std::string url;
 	std::string password;
-	std::string application_name = "opennova-novaworld-server";
+	std::string application_name = "opennova-novaworld";
 	int lock_timeout_ms = kDefaultLockTimeoutMs;
 	int statement_timeout_ms = kDefaultStatementTimeoutMs;
 };
 
 // `url` with its password (a URI's user:password@) masked, for a log line.
 std::string masked_url(std::string_view url);
+
+// The statements that failed on a lock since the process started, on every
+// connection it opened: lock_timeout() ones (55P03) and deadlock() ones
+// (40P01). Thread-safe; the server's heartbeat reports how many each grew by.
+struct LockFailures {
+	uint64_t lock_timeouts = 0;
+	uint64_t deadlocks = 0;
+};
+LockFailures lock_failures();
 
 // One connection. NOT thread-safe: one thread uses a Database at a time;
 // changes(), the open transaction and the last error belong to the connection.
@@ -188,17 +215,21 @@ private:
 	bool in_read_snapshot_ = false;
 };
 
-// Scoped write transaction: BEGIN, then the writer lock (pg_advisory_xact_lock
-// over kWriterLock), held to COMMIT on commit() or ROLLBACK when the guard is
-// destroyed uncommitted (an exception unwinding past it). So one Transaction
-// runs at a time per database, across every connection and process: a check
-// and the write it decides (a cap counted then a row inserted, a row read then
-// written back) see no other Transaction's write between them. Concurrent
-// readers see the whole transaction or none of it. Taking the lock waits at
-// most the lock timeout, then throws Error (lock_timeout()).
+// Scoped write transaction: BEGIN, then COMMIT on commit() or ROLLBACK when
+// the guard is destroyed uncommitted (an exception unwinding past it).
+// Concurrent readers see the whole transaction or none of it. It takes no lock
+// of its own, so Transactions on other connections run beside it: it is READ
+// COMMITTED, each statement seeing what had committed when it began, so a
+// check and the write it decides (a cap counted then a row inserted, a row
+// read then written back) take the narrow lock their invariant needs (a row's,
+// SELECT ... FOR UPDATE / FOR NO KEY UPDATE / FOR SHARE, or an advisory one,
+// the keys above), or let a unique index refuse the second write and map its
+// 23505. A lock wait ends at the lock timeout (Error lock_timeout()); of two
+// transactions that wait on each other, the server ends one (Error
+// deadlock()).
 //
-// Nothing slow inside one (a bcrypt hash, the AWS CLI, a Stripe call): every
-// other writer waits on it.
+// Nothing slow inside one (a bcrypt hash, the AWS CLI, a Stripe call): the
+// locks it takes are held until it ends.
 //
 // Opened inside another transaction on the same connection it is a SAVEPOINT:
 // commit() releases it into the outer transaction, and destroying it

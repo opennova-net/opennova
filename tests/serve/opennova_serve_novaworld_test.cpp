@@ -1,5 +1,5 @@
 // opennova-serve listed on NovaWorld (ADR 0051 d6), with no retail data and
-// nothing off loopback: the real apps/novaworld_server NwUdpListener and an
+// nothing off loopback: the real apps/novaworld_lobby NwUdpListener and an
 // in-test gate, and the loose game directory of the LAN test plus a
 // gametext.bin. No game.cfg, and --master-host names the gate on this machine:
 // the default network type (1) lists the server there. The server binds its one

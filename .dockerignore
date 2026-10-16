@@ -1,4 +1,4 @@
-# Keep the server image build context lean. The Dockerfile only needs
+# Keep the NovaWorld programs' image build context lean. The Dockerfile only needs
 # engine/, backend/, third_party/, apps/, and the root CMakeLists.
 .git
 build/

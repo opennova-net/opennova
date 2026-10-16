@@ -1,60 +1,70 @@
 # A deployment's Terraform variables: the NON-SECRET knobs.
 #
 # The toolbox passes infra/aws/<deployment>.tfvars to every `infra` run of that
-# deployment (prod.tfvars for prod, staging.tfvars for --deployment staging):
+# deployment (prod.tfvars for --deployment prod, staging.tfvars for
+# --deployment staging), with the deployment's name (TF_VAR_deployment):
 #   cp infra/aws/deployment.tfvars.example infra/aws/prod.tfvars
 # It holds no secret, so committing it keeps every operator on the same knobs.
+# No account id, ARN, bucket name or other account resource id goes here: the
+# toolbox fills those and the region from the deployment's vault item,
+# aws-<deployment> (TF_VAR_aws_account_id, TF_VAR_region, prod's
+# TF_VAR_service_eip_allocation_id), and the provider refuses any other
+# account's credentials.
 # Never name it terraform.tfvars: Terraform would load that one into EVERY
-# workspace (staging would then adopt prod's Elastic IP), so the toolbox refuses
-# to run while one exists.
+# deployment's run (staging would then adopt prod's Elastic IP), so the
+# toolbox refuses to run while one exists.
 #
 # The secrets come from the vault as TF_VAR_* at run time
 # (deploy/env/terraform.env.tpl): cloudflare_api_token, cloudflare_zone_id,
 # cloudflare_domain and the rest. Leave them out of this file (a value here
 # would override the vault's).
 
-region        = "us-east-1"
-instance_type = "c7i.large"
+# The service's programs (programs.tf): each task's size (cpu units, memory
+# MiB: a Fargate pair) and its service's task counts; a field left out keeps
+# its default. Web and worker scale on their CPU between min and max; max (with
+# a deployment's extra tasks) sizes the database's max_connections.
+# gate       = { cpu = 256, memory = 512, min = 1, max = 1, desired = 1 }
+# lobby      = { cpu = 256, memory = 512, min = 1, max = 1, desired = 1 }
+# web        = { cpu = 512, memory = 1024, min = 1, max = 2, desired = 1 }
+# controller = { cpu = 256, memory = 512, min = 1, max = 1, desired = 1 }
+# worker     = { cpu = 512, memory = 1024, min = 1, max = 2, desired = 1 }
+# image_registry = "ghcr.io/opennova-net" # where the images are published (public packages)
+# health_port    = 8081                   # every program's /livez (ONNET_HEALTH_PORT)
 
-# Prod: the allocation id of the Elastic IP retail clients use (the single-host
-# stack's; ./deploy/run.sh aws ec2 describe-addresses). Terraform adopts it and
-# never manages it. Leave it out for a deployment that gets an address of its
-# own (staging).
-# service_eip_allocation_id = "eipalloc-0123456789abcdef0"
+# Prod's gate address (service_eip_allocation_id, the Elastic IP retail clients
+# use, in the prod account) is no knob here: the toolbox fills it from prod's
+# vault item. Terraform adopts it and never manages it: it is the load
+# balancer's zone-a address. Staging names none and gets an address of its own.
 
 # The two availability zones, pinned once the stack exists (public a keeps the
 # zone the single-host stack's subnet was made in; ./deploy/run.sh infra output
 # public_subnet_ids, then aws ec2 describe-subnets).
 # azs = ["us-east-1a", "us-east-1b"]
 
-# The service instance's fixed private address in public subnet a (10.44.0.<n>).
-# service_private_ip_host = 10
-
 # The database (database.tf): PostgreSQL 17 on RDS. Its master password comes
-# from the vault (item rds, rds-<deployment> off prod); bump the version to send
+# from the vault (item rds-<deployment>); bump the version to send
 # a changed one to RDS.
-# db_instance_class          = "db.t4g.micro"
+# db_instance_class          = "db.t4g.small" # burstable, unlimited mode
+# db_multi_az                = true           # a standby in the other zone
+# db_pool_max                = 7              # connections per service process (6..64)
+# db_service_processes       = 14             # processes max_connections is sized for
 # db_master_password_version = 1
 
-# allowed_cidrs   = ["0.0.0.0/0"] # the retail ports and the game machines' slots
-# ops_bucket_name = "opennova-backups"
-# ami_id          = ""            # empty: Canonical's newest Ubuntu 24.04 at the host's creation
+# allowed_cidrs = ["0.0.0.0/0"] # the retail ports and the game machines' slots
 
 # Cloudflare: domain + zone id come from the vault, NOT this file. Only the
 # proxied toggle lives here.
 cloudflare_web_proxied = true
 
-# Email Routing (email.tf, prod's): the local parts that forward to the vault's
-# email/forward_to (support@<domain> by default).
-# email_routes = ["support"]
-
 # Outbound mail through Amazon SES (mail.tf): the local part the service sends
-# as (support@<domain>); empty, the default, sends nothing.
+# as, through the deployment's own identity (support@<domain> on prod,
+# support@staging.<domain> on staging); empty, the default, sends nothing.
 # mail_sender = "support"
 
 # The fleet (fleet.tf; DEPLOY.md "Hosted game servers"). The data snapshots
-# (hosted_data_snapshots, one per data set) come from the vault (item `hosted`,
-# fields data_snapshot_id_<slug>), not this file: hosting is off without one.
+# (hosted_data_snapshots, one per data set, in the deployment's account) come
+# from the vault (item `hosted-<deployment>`, fields data_snapshot_id_<slug>),
+# not this file: hosting is off without one.
 # shared_instance_type   = "t3a.large"   # unlimited CPU credits; x86_64, no t2
 # own_instance_type      = "c7a.medium"
 # shared_slots           = 12            # K servers per shared machine (1..32)
@@ -63,11 +73,10 @@ cloudflare_web_proxied = true
 # fleet_idle_minutes     = 30
 # machine_root_volume_gb = 16
 # hosted_ami_id          = ""            # empty: Canonical's newest Ubuntu 24.04
-# hosted_deployment      = ""            # empty: the stack's resource name
 
-# Alarms and budgets (observability.tf). The alert address comes from the vault
-# (item alerts, field email).
-# budget_monthly_usd         = 250
+# Alarms and budgets (observability.tf), the deployment's account's. The alert
+# address comes from the vault (item alerts, field email).
+# budget_monthly_usd         = 350
 # budget_egress_gb           = 1500
 # cost_anomaly_monitor       = true      # false if the account has one already
 # cost_anomaly_threshold_usd = 20

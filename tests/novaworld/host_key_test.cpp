@@ -10,8 +10,9 @@
 //     every key a listed server holds;
 //   * a claim names the account for a live key of an active account; a key
 //     backs one listed RID at a time, a gone listing frees it, an idle or
-//     revoked key and a banned account claim nothing, a boot's clear_all
-//     releases every claim, the sweep keeps a listed server's key, and a
+//     revoked key and a banned account claim nothing, a lobby start's clear_lobby
+//     leaves the claims (each free with its listing gone), the sweep keeps a
+//     listed server's key, and a
 //     claim releases the account's other keys on its RID (a connection that
 //     stops and hosts again under its RID with a fresh key stays owned);
 //   * listing_owned_by (the owner's push routes) holds only for a listed RID
@@ -306,7 +307,9 @@ int test_record() {
 }
 
 // claim_host_key: the account for a live key of an active account; one listed
-// RID at a time; idle, unknown and banned claim nothing; clear_all releases.
+// RID at a time; idle, unknown and banned claim nothing; a lobby's start
+// (clear_lobby) takes the listings and leaves the claims, each free again with
+// its listing gone.
 int test_claim() {
 	test_db::TestDatabase scratch;
 	opennova::db::Database db = scratch.open();
@@ -327,14 +330,14 @@ int test_claim() {
 	TEST_EXPECT(hostdb::claim_host_key(db, key_of('A'), 0x0A000002u) == alice);
 	TEST_EXPECT(claimed_rid(db, key_of('A')) == 0x0A000002);
 
-	// A boot's clear_all releases every claim with the rows.
+	// A lobby's start takes its listings and leaves the claims: RIDs come from one sequence and
+	// are never reused, so a claim on a RID no listing holds is free already.
 	list_rid(db, 0x0A000002u);
-	hostdb::clear_all(db);
-	TEST_EXPECT(!claimed_rid(db, key_of('A')).has_value());
+	hostdb::clear_lobby(db, 0);
+	TEST_EXPECT(claimed_rid(db, key_of('A')) == 0x0A000002);
 	TEST_EXPECT(key_stored(db, key_of('A')));
-	list_rid(db, 0x0A000002u);  // this run's RID 2, another listing
 	TEST_EXPECT(hostdb::claim_host_key(db, key_of('A'), 0x0A000003u) == alice);
-	hostdb::clear_all(db);
+	hostdb::clear_lobby(db, 0);
 
 	// A banned account's key claims nothing; lifted, it does again.
 	db.exec("UPDATE players SET account_status = 'banned' WHERE id = $1;", {BindValue(alice)});
@@ -548,7 +551,7 @@ int test_rehost_new_key() {
 	hostdb::upsert_host(db, row);
 	hostdb::update_host(db, row);
 	TEST_EXPECT(row_owner(db, kRid) == alice);
-	hostdb::clear_all(db);
+	hostdb::clear_lobby(db, 0);
 
 	// The lobby: host, stop, a fresh key, host again on the same connection.
 	hostdb::record_host_key(db, key_of('D'), alice, 0);

@@ -1,206 +1,118 @@
-# The deploy user's permissions (`onnet`)
+# The OpenNova accounts' IAM
 
-`onnet` is the IAM user whose access key sits in the vault's `aws` item: the deploy toolbox
-(`deploy/bin/on-deploy`) and every `infra` run (Terraform in `infra/aws/`) act as it. The
-account (310045376545, us-east-1) also holds other projects, so `onnet` is allowed OpenNova's
-resources alone: five customer-managed policies that only allow, scoped to OpenNova's tags,
-names and VPC, and one permissions boundary every role Terraform makes must carry. There are
-no explicit denies. This directory is the source of truth; IAM holds the applied copies.
+OpenNova runs in an AWS Organization: the management account holds the organization,
+billing and one principal, `opennova-org`; each deployment runs in a member account of its own,
+`opennova-prod` and `opennova-staging` (DEPLOY.md, "Deployments"). This directory holds every
+IAM document those principals carry. No document names an account: each is a template, filled
+with the account's id and region from the vault.
 
-| Policy (file) | Attached to | Covers |
+| Document | Who carries it | Applied by |
 | --- | --- | --- |
-| `onnet-deploy-network` | onnet | VPC, subnets, route tables, internet gateway, security groups and rules, the service's network interface, Elastic IPs; creating launch templates (with the other creates that name no parent resource) |
-| `onnet-deploy-compute` | onnet | EC2 reads, the service instance and its root volume, changing and deleting launch templates, EC2 tags, the hosted data snapshots (EBS direct APIs), `kms:DescribeKey`, the single-host stack's teardown |
-| `onnet-deploy-iam` | onnet | the stack's roles (under the boundary), instance profiles, the GitHub OIDC provider, `iam:PassRole` to EC2, CloudWatch's alarm-actions service-linked role, the policy simulator |
-| `onnet-deploy-data` | onnet | RDS (the database, its subnet and parameter groups, snapshots), the operations bucket, SSM parameters, the converge document, Run Command and Session Manager, CloudWatch Logs |
-| `onnet-deploy-observability` | onnet | alarms and metrics, the alerts topic, the Route 53 health check, budgets, Cost Anomaly Detection, Service Quotas and cost reads; the outbound mail's SES identities |
-| `opennova-role-boundary` | every `aws_iam_role` in `infra/aws` (permissions boundary) | the most any OpenNova role can ever do |
+| `opennova-org.json` | the IAM user `opennova-org` in the management account | the management account's administrator, by hand (below) |
+| `opennova-deploy-network.json`, `-compute`, `-ecs`, `-iam`, `-data`, `-observability` | the IAM user `opennova-deploy` in each member account | the org stack (`infra/org`), as managed policies |
+| `opennova-role-boundary.json` | every role `infra/aws` makes in a member account (permissions boundary), and the GitHub deploy role | the org stack |
 
-Each file is under the 6,144-character managed-policy limit (IAM does not count white space),
-which is what keeps EC2 in two policies.
+## opennova-org
 
-## How "OpenNova's" is decided
+The org stack's principal (`./deploy/run.sh org plan|apply`; its key in the vault item `aws-org`),
+and nothing else: it reads the organization, makes and tags member accounts
+(`organizations:CreateAccount`, `TagResource`, `UntagResource` on the organization's accounts),
+and assumes each member account's `OrganizationAccountAccessRole`, the administrator role
+Organizations made with the account. Every resource the org stack makes in a member account, and
+the org stack's own state (in prod's state bucket), it reaches through that role. A new account
+adds its role to the document (the org stack's output `org_user_policy` prints the filled
+document after an apply).
 
-- **The deployment tag.** Every resource the stack makes carries `opennova:deployment`
-  (`versions.tf`'s default tag, `local.hosted_deployment`: `opennova-server` for prod,
-  `opennova-server-staging` for staging), and so do the machines the service launches and the
-  data snapshots. EC2 creates require it in the request (`aws:RequestTag/opennova:deployment`
-  like `opennova-*`) on the resource being made, never on the parent it is made in (a subnet's
-  VPC, an interface's subnet, a rule's group must themselves be OpenNova's); EC2 changes and
-  deletes require it on the resource (`aws:ResourceTag/...`); and `ec2:CreateTags` is allowed
-  only as part of a create (`ec2:CreateAction`) or on a resource that already carries it, so no
-  other resource can be tagged into scope. Cost Anomaly Detection and the EBS direct APIs are
-  scoped the same way. The policies assume the tag's value starts with `opennova-` (it does
-  unless `hosted_deployment` is set to something else).
-- **Names**, where the service has no tag conditions or names are the better key: IAM
-  `role/opennova-*`, `instance-profile/opennova-*`, the GitHub OIDC provider; RDS `db:`,
-  `subgrp:`, `pg:`, `snapshot:opennova-*` (plus the default option group
-  `og:default:postgres-*`, as the parent `CreateDBInstance` names); S3 `opennova-*` (and
-  `*.opennova.net`, the retired downloads bucket, in case a state still lists it); SSM
-  `parameter/opennova/*` and `document/opennova-*`; logs `/opennova/*`; alarms, the SNS topic
-  and budgets `opennova-*`; key pairs `opennova-*`. Object access in the bucket is by prefix:
-  `releases/*` read and write, the dumps (`novaworld*`) read only, nothing deletes an object.
-- **Prod's network from before the default tag.** The single-host stack's VPC
-  (`vpc-039f64354e9a338de`, 10.44.0.0/16) and everything in it carry no `opennova:deployment`
-  tag until the first apply of this stack adds it. Inside it, `ec2:Vpc` scopes subnets, route
-  tables, security groups and interfaces (`ManageInProdVpc`); the VPC and its internet gateway
-  (`igw-04b9394fa71df326a`), which have no `ec2:Vpc` key, are named by ARN
-  (`ProdVpcAndGatewayUntilTagged`). Retail clients' Elastic IP (`eipalloc-05d28b7cdb8ae7c0a`,
-  54.162.79.147), which prod adopts and never manages, may be associated, disassociated and
-  tagged by its ARN (`aws_ec2_tag.service_eip` gives it the deployment tag), and never
-  released: `ec2:ReleaseAddress` covers OpenNova-tagged addresses whose tag is not prod's
-  (`opennova-server`), that is staging's.
-- **The single-host stack's teardown** (`LegacyStackTeardown`, `LegacyStackPolicyTeardown`):
-  the old instance `i-0ca78b471e6590605`, the hosted launch templates `lt-087331e4c404fa0a8` and
-  `lt-003967f4cc2ec1ad2`, the key pair `opennova-server-key`, and the old managed policies
-  `policy/opennova-server-*`. The old roles, profiles and security groups fall under the
-  name and VPC rules above. These statements are dead once the cutover apply has run; drop
-  them at the next policy change.
-- **Reads** are on `*` where the action takes no resource (`ec2:Describe*`, `rds:Describe*`,
-  `logs:DescribeLogGroups`, `cloudwatch:GetMetricData`, `ce:Get*`, `servicequotas:Get*`,
-  `ssm:GetCommandInvocation`, ...). They read other projects' metadata too (an instance's user
-  data among it), never their data.
-- **SES identities** (`MailIdentities`): an identity's ARN is the domain or the address
-  it verifies, and the forward_to address comes from the vault, so no committed policy
-  can name it: the identity actions are on `identity/*` in the account. The service's
-  `ses:SendEmail` is scoped in Terraform (`mail.tf`: the stack's identities, from its
-  sender alone); the boundary allows it on `identity/*`.
-- **Two writes IAM cannot scope:**
-  - Route 53 health checks: their ARNs carry an id alone and Route 53 has no tag conditions, so
-    `UpdateHealthCheck`, `DeleteHealthCheck` and `ChangeTagsForResource` are on
-    `healthcheck/*` and reach other projects' checks as well. Once prod's and staging's checks
-    exist (`infra output health_check_id`), an admin can narrow `HealthChecks` to their ARNs.
-  - SNS subscriptions: `GetSubscriptionAttributes`, `SetSubscriptionAttributes` and
-    `Unsubscribe` are authorized against `*`, not the topic (the alerts email subscription
-    Terraform reads and deletes), so they reach other projects' subscriptions as well.
-- **Left out on purpose:** `s3:PutAccountPublicAccessBlock` and
-  `ce:UpdateCostAllocationTagsStatus` (account-wide, no resource scope: Terraform no longer
-  manages the account block, and the cost tag is activated once in the switch below);
-  `iam:CreatePolicy` and `iam:AttachRolePolicy` (the stack makes inline role policies only);
-  ACM and CloudFront (the downloads bucket, its distribution and `launcher_ci` are gone
-  already; the one `downloads.opennova.net` certificate left, `cf14fd0e-...`, is not the one the
-  stack made and is for an admin to delete); and everything about IAM users and groups.
+Make it once, as the management account's administrator (not the toolbox):
+
+```bash
+V=OpenNova-Deploy
+policy="$(sed -e "s/\${management_account_id}/$(op read "op://$V/aws-org/account_id")/" \
+              -e "s/\${organization_id}/$(op read "op://$V/aws-org/organization_id")/" \
+              -e "s/\${prod_account_id}/$(op read "op://$V/aws-prod/account_id")/" \
+              -e "s/\${staging_account_id}/$(op read "op://$V/aws-staging/account_id")/" \
+              infra/aws/iam/opennova-org.json)"
+aws iam create-user --user-name opennova-org
+aws iam put-user-policy --user-name opennova-org --policy-name opennova-org --policy-document "$policy"
+# its key straight into the vault item aws-org, never onto the screen:
+aws iam create-access-key --user-name opennova-org --output json \
+  | jq -r '"access_key_id=\(.AccessKey.AccessKeyId)\nsecret_access_key=\(.AccessKey.SecretAccessKey)"' \
+  | while IFS='=' read -r field value; do op item edit aws-org --vault "$V" "$field[concealed]=$value" >/dev/null; done
+```
+
+Changing it later is the same `put-user-policy` with the edited document.
+
+## The deploy user and its policies
+
+`opennova-deploy`, one per member account, is what the toolbox and every `infra/aws` run act as
+in that account: the org stack makes it, its key, and its policies, and the toolbox writes the
+key into the deployment's vault item (`aws-<deployment>`) from the stack's sensitive output,
+never printed. The account holds one deployment alone, yet the policies keep their scoping to
+OpenNova's names (`opennova-*`) and its deployment tag (`opennova:deployment`, `opennova-prod` or
+`opennova-staging`), which keeps the deploy user off what the org stack made there (the state
+bucket's settings, its own definition, the boundary) and off anything an administrator adds by
+hand.
+
+| Policy | Covers |
+| --- | --- |
+| `opennova-deploy-network` | VPC, subnets, route tables, internet gateway, security groups and rules, network interfaces, Elastic IPs (associating, tagging, accepting the gate's address transferred in at the cutover, releasing any but prod's tagged ones); creating launch templates; the public network load balancer, its target groups and listeners |
+| `opennova-deploy-compute` | EC2 reads, instances and their volumes, changing and deleting launch templates, EC2 tags, the hosted data snapshots (EBS direct APIs), the baked fleet images, `kms:DescribeKey` |
+| `opennova-deploy-ecs` | the ECS cluster, its services, task definitions and tasks (one-off tasks, ECS Exec), Application Auto Scaling, Cloud Map, EventBridge Scheduler (the nightly backup) |
+| `opennova-deploy-iam` | the stack's roles (under the boundary), instance profiles, the GitHub OIDC provider, `iam:PassRole` to EC2, ECS's tasks and EventBridge Scheduler, the service-linked roles ElastiCache, Elastic Load Balancing, ECS, Application Auto Scaling and CloudWatch's alarm actions make on first use, the policy simulator; nothing about IAM users |
+| `opennova-deploy-data` | RDS, ElastiCache, the operations bucket (its releases read and written, its dumps read and written, never deleted), SSM parameters, Session Manager (the machines' break-glass), CloudWatch Logs |
+| `opennova-deploy-observability` | alarms and metrics, the alerts topic, the Route 53 health check and the private zone Cloud Map keeps for the controller, budgets, Cost Anomaly Detection, Service Quotas and cost reads, SES identities |
+
+Beside them the org stack gives the user two inline policies: its Terraform states (in its
+account's state bucket, `infra/aws/*`; prod's also `infra/zone/*` and `infra/github/*`, the shared
+stacks; never `org/*`, the org stack's own) with their lock files, and a guard denying it the
+state bucket's settings and old versions. The state bucket's own policy admits the deploy user,
+the account's `OrganizationAccountAccessRole` and its root alone, over TLS alone.
+
+Each document stays under IAM's 6,144-character limit for a managed policy (white space aside),
+and none holds a statement for the old single-account stack: the member accounts never ran it.
+The single account's own `onnet-deploy-*` policies, applied in the management account before
+these, stay as they are until its cleanup (DEPLOY.md, the cutover's last step), which deletes
+them with `onnet`.
 
 ## The role boundary
 
-`onnet` writes the inline policies of the roles it creates and can run commands on the
-service instance, so without a boundary it could write any policy onto
-`opennova-server-service` and read that role's credentials on the host, which would reach the
-whole account. The boundary is the one guardrail: `onnet` may create a role, or put or change
-its policy or trust, only when the role carries `opennova-role-boundary`
-(`iam:PermissionsBoundary`), and it has no permission to attach managed policies, create or
-edit policies, or remove a boundary. The boundary is the union of what the stack's three roles
-need, scoped to OpenNova: SSM's agent and session channels, `/opennova/*` parameters and the
-converge document, Run Command on instances tagged `opennova:service`, the operations bucket,
-`/opennova/*` logs, the AWS-managed keys through SSM and EC2, launching and ending machines
-tagged `opennova:hosted=1` from OpenNova-tagged subnets, groups, templates and snapshots,
-passing `opennova-*` roles to EC2, and sending mail through the account's SES identities.
+The deploy user writes the inline policies of the roles it creates and runs tasks with them, so
+without a boundary it could write any policy onto a task role and read its credentials in a
+task. It may create a role, or put or change its policy or trust, only when the role carries
+`opennova-role-boundary` (`iam:PermissionsBoundary`), and it can neither attach managed policies,
+create or edit policies, nor take a boundary off. The boundary is the union of what `infra/aws`'s
+roles and the GitHub deploy role need: the session channels (ECS Exec, the machines' Session
+Manager), `/opennova/*` parameters and their names, the operations bucket, `/opennova/*` logs,
+the AWS-managed keys through SSM and EC2, launching and ending machines tagged
+`opennova:hosted=1` from OpenNova-tagged subnets, groups, templates and snapshots, passing
+`opennova-*` roles to EC2, ECS's tasks and EventBridge Scheduler, sending mail through the
+account's SES identities, the lobby's `ec2:DescribeNetworkInterfaces`, running `opennova-*`
+task definitions in an `opennova-*` cluster and tagging their tasks, registering task
+definitions, pointing `opennova-*` services at them and pointing the backup schedule at a
+release's revision. Each role's own policy narrows its part. When a role gains a permission,
+the boundary must gain it too, or the role is refused at run time (an AccessDenied naming the
+boundary).
 
-Every role the stack makes carries it: `permissions_boundary = local.role_boundary_arn`
-(`service.tf`) on `aws_iam_role.service`, `aws_iam_role.machine` and
-`aws_iam_role.github_deploy`. The boundary policy itself is made by an admin, outside
-Terraform (step 1 below): a policy the deploy user could edit would bound nothing.
+## Changing a policy
 
-When a role in `infra/aws` gains a permission, the boundary must gain it too (otherwise the
-role is refused at run time, an AccessDenied naming the boundary).
-
-## Applying
-
-Run as `onnet` itself while it still has `IAMFullAccess`, from the repository root, in this
-order: a user holds at most ten managed policies, so the broad ones come off before the new
-ones go on, and `IAMFullAccess` comes off last. The documents are passed inline (the shell
-reads the file), so this works through the toolbox's `aws` as well.
-
-```bash
-AWS='./deploy/run.sh aws'   # or any shell holding onnet's key
-
-# 0. the one account-wide write onnet keeps no permission for: the cost allocation tag
-$AWS ce update-cost-allocation-tags-status \
-  --cost-allocation-tags-status TagKey=opennova:deployment,Status=Active
-
-# 1. the six policies
-for p in onnet-deploy-network onnet-deploy-compute onnet-deploy-iam onnet-deploy-data \
-         onnet-deploy-observability opennova-role-boundary; do
-  $AWS iam create-policy --policy-name "$p" --policy-document "$(cat "infra/aws/iam/$p.json")" \
-    --description "OpenNova deploy (infra/aws/iam/$p.json)"
-done
-
-# 2. the broad managed policies, all but IAMFullAccess
-for p in AmazonSSMFullAccess AmazonEC2FullAccess AmazonVPCFullAccess AmazonS3FullAccess \
-         AmazonRDSFullAccess CloudWatchFullAccessV2 AmazonSNSFullAccess AmazonRoute53FullAccess; do
-  $AWS iam detach-user-policy --user-name onnet --policy-arn "arn:aws:iam::aws:policy/$p"
-done
-
-# 3. the old inline policies
-for p in acm opennova-hosted-ops opennova-cost; do
-  $AWS iam delete-user-policy --user-name onnet --policy-name "$p"
-done
-
-# 4. the five
-for p in onnet-deploy-network onnet-deploy-compute onnet-deploy-iam onnet-deploy-data \
-         onnet-deploy-observability; do
-  $AWS iam attach-user-policy --user-name onnet --policy-arn "arn:aws:iam::310045376545:policy/$p"
-done
-$AWS iam list-attached-user-policies --user-name onnet   # the five and IAMFullAccess
-$AWS iam list-user-policies --user-name onnet            # none
-
-# 5. the last broad one
-$AWS iam detach-user-policy --user-name onnet --policy-arn arn:aws:iam::aws:policy/IAMFullAccess
-```
-
-Between steps 2 and 4 `onnet` has less than either set; run nothing else meanwhile.
-
-**After step 5 `onnet` can no longer change its own permissions** (nor read them). Any later
-change to these policies, a rollback, or the cleanup of the dead statements needs an admin
-principal (the account's root user or an admin role): `iam create-policy-version
---set-as-default` with the edited file, deleting the oldest version first once a policy has
-five.
-
-Checks after the switch, as `onnet`:
-
-```bash
-$AWS ec2 describe-vpcs --query 'Vpcs[].VpcId'                                          # works
-$AWS s3api list-objects-v2 --bucket opennova-backups --prefix releases/ --max-items 1   # works
-$AWS iam list-attached-user-policies --user-name onnet                                  # AccessDenied
-$AWS s3api list-objects-v2 --bucket <another-project-bucket> --max-items 1                # AccessDenied
-./deploy/run.sh infra plan                                                              # no AccessDenied
-```
+Edit the document (and the boundary with it when a role needs more), then `./deploy/run.sh org
+plan` and `org apply`: the org stack updates both accounts' policies. `opennova-org.json` is the
+administrator's, as above.
 
 ## To verify on the first applies
 
-Checked against the Service Authorization Reference, provider v5.100.0's source and IAM's
-policy simulator, but only a real apply proves these (each would show as an AccessDenied
-naming the action):
+The tests plan against mock providers; only a real run proves these (each would show as an
+AccessDenied naming the action):
 
-- staging: the database's subnet group and instance (RDS's own checks of the subnets and
-  groups; encrypted storage and Performance Insights on the AWS-managed `aws/rds` key, no KMS
-  grant here); `AddRoleToInstanceProfile`'s PassRole check (`iam:PassedToService` is matched
-  only if present); the first alarm with EC2 recover/reboot actions creating
-  `AWSServiceRoleForCloudWatchEvents`; `app shell` and `db psql` (Session Manager document
-  ARNs, `ssmmessages:OpenDataChannel`); a fleet launch and end under the role boundary.
-- prod's cutover: the address moving from the old instance to the new interface, the old
-  instance, launch templates, key pair, groups, roles, profiles and policies going, the
-  budgets, the anomaly monitor and subscription (prod alone makes them; whether a create with
-  tags also wants `ce:TagResource`, which is granted only on already-tagged monitors), and the
-  account's S3 block planned as no change.
-- the next `hosted data-snapshot`: `ebs:StartSnapshot` with its tags and no `ec2:CreateTags`.
-- the first apply with `mail_sender`: `ses:CreateEmailIdentity` with the default tags
-  (`ses:TagResource` is granted beside it), the MAIL FROM attributes, and the service's
-  first send under the boundary (an AccessDenied in the `[mail]` log line).
-
-## Rollback
-
-With an admin principal: detach the five `onnet-deploy-*` policies from `onnet` and restore what
-it had on 2026-10-15:
-
-- managed: `AmazonSSMFullAccess`, `AmazonEC2FullAccess`, `IAMFullAccess`,
-  `AmazonVPCFullAccess`, `AmazonS3FullAccess`, `AmazonRDSFullAccess`, `CloudWatchFullAccessV2`,
-  `AmazonSNSFullAccess`, `AmazonRoute53FullAccess` (all `arn:aws:iam::aws:policy/<name>`);
-- inline `acm`:
-  `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":"acm:*","Resource":"*"},{"Effect":"Allow","Action":"ssm:*","Resource":"*"},{"Effect":"Allow","Action":"cloudfront:*","Resource":"*"}]}`
-- inline `opennova-hosted-ops`:
-  `{"Version":"2012-10-17","Statement":[{"Sid":"HostedDataSnapshot","Effect":"Allow","Action":["ebs:StartSnapshot","ebs:PutSnapshotBlock","ebs:CompleteSnapshot","kms:DescribeKey"],"Resource":"*"},{"Sid":"ReadQuotas","Effect":"Allow","Action":["servicequotas:GetServiceQuota","servicequotas:ListServiceQuotas"],"Resource":"*"},{"Sid":"DecodeAuthorizationMessages","Effect":"Allow","Action":["sts:DecodeAuthorizationMessage"],"Resource":"*"}]}`
-- inline `opennova-cost`:
-  `{"Version":"2012-10-17","Statement":[{"Sid":"Budgets","Effect":"Allow","Action":["budgets:*"],"Resource":"*"},{"Sid":"CostAnomalyDetection","Effect":"Allow","Action":["ce:CreateAnomalyMonitor","ce:UpdateAnomalyMonitor","ce:DeleteAnomalyMonitor","ce:GetAnomalyMonitors","ce:CreateAnomalySubscription","ce:UpdateAnomalySubscription","ce:DeleteAnomalySubscription","ce:GetAnomalySubscriptions","ce:GetAnomalies","ce:TagResource","ce:UntagResource","ce:ListTagsForResource"],"Resource":"*"},{"Sid":"CostAllocationTags","Effect":"Allow","Action":["ce:ListCostAllocationTags","ce:UpdateCostAllocationTagsStatus"],"Resource":"*"}]}`
-
-The role boundary can stay: roles that carry it keep working.
+- the org stack: the import of the organization and both accounts as `opennova-org`, its
+  `sts:AssumeRole` into each `OrganizationAccountAccessRole`, the backend's `assume_role`
+  into prod's for `org/terraform.tfstate`;
+- each account's first `infra apply` as its deploy user: the S3 backend's lock file
+  (`s3:DeleteObject` on it alone), every service-linked role made on first use, the cluster
+  and its services under the deployment's tag, Cloud Map's private namespace, the backup
+  schedule (`iam:PassRole` to `scheduler.amazonaws.com`);
+- prod's cutover: `ec2:AcceptAddressTransfer` of the gate's address, its tag and its
+  association with the load balancer;
+- the first deploy workflow run: its role's `scheduler:UpdateSchedule` under the boundary;
+- the first `hosted data-snapshot` and `fleet bake-image`, and a worker's first machine
+  launch under the boundary.

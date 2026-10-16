@@ -7,6 +7,10 @@ mock_provider "github" {
   mock_data "github_repository" {
     defaults = { repo_id = 123456789 }
   }
+  # The prod environment's approvers (environments.tf): a user id is a number.
+  mock_data "github_user" {
+    defaults = { id = "4242" }
+  }
 }
 
 # imports.tf adopts these, and a mock provider cannot import: each is stood in
@@ -50,6 +54,10 @@ variables {
   members                = { mock-admin = "admin", mock-member = "member" }
   reference_assets_token = "github_pat_mock"
   stripe_test_secret_key = "rk_test_mock"
+  aws_account_id_prod    = "111111111111"
+  aws_account_id_staging = "222222222222"
+  aws_region_prod        = "us-east-1"
+  aws_region_staging     = "us-east-2"
 }
 
 run "reference_assets_token" {
@@ -74,6 +82,6 @@ run "stripe_test_secret_key" {
   }
   assert {
     condition     = github_actions_secret.stripe_test_secret_key.value == var.stripe_test_secret_key
-    error_message = "the secret's value is the vault item stripe-test's ci_secret_key"
+    error_message = "the secret's value is the vault item stripe-test's restricted_key"
   }
 }

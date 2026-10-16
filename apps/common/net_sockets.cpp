@@ -189,6 +189,36 @@ bool resolve_ipv4(const std::string &host, Endpoint &out, bool allow_names) {
 	return true;
 }
 
+std::vector<Endpoint> resolve_ipv4_all(const std::string &host) {
+	std::vector<Endpoint> all;
+	in_addr parsed{};
+	if (::inet_pton(AF_INET, host.c_str(), &parsed) == 1) {
+		all.emplace_back();
+		from_in_addr(static_cast<uint32_t>(parsed.s_addr), all.back());
+		return all;
+	}
+	addrinfo hints{};
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_STREAM;
+	addrinfo *found = nullptr;
+	if (::getaddrinfo(host.c_str(), nullptr, &hints, &found) != 0 || found == nullptr) {
+		return all;
+	}
+	for (const addrinfo *a = found; a != nullptr; a = a->ai_next) {
+		Endpoint ep;
+		from_in_addr(static_cast<uint32_t>(
+							 reinterpret_cast<const sockaddr_in *>(a->ai_addr)->sin_addr.s_addr),
+				ep);
+		bool seen = false;
+		for (const Endpoint &e : all)
+			seen = seen || e.ip == ep.ip;
+		if (!seen)
+			all.push_back(ep);
+	}
+	::freeaddrinfo(found);
+	return all;
+}
+
 std::string local_host_name() {
 	char name[256] = {};
 	if (::gethostname(name, sizeof(name) - 1) != 0) {

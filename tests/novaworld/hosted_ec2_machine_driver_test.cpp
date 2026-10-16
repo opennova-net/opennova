@@ -1,47 +1,65 @@
-// The fleet's machine drivers (apps/novaworld_server/hosted/machine_driver.h)
+// The fleet's machine drivers (apps/novaworld_common/hosted/machine_driver.h)
 // and settings. The EC2 driver (hosted/ec2_machine_driver.h) on a stub
 // CommandRunner that records every AWS CLI argv and answers it from a script:
 // the launch's run-instances (the exact argv, each kind's launch template and
 // a pinned version, the tags, the row's own client token, the user-data file
 // with the machine's values filled in, deleted after; a call cut short made
-// again the same), describe's state mapping from
-// one cached describe-instances (the launch grace, the cache's lifetime, a
-// failure reading Unknown and its back-off), terminate's tag check (a machine
+// again the same; of two subnets the zone holding fewer live machines, ties to
+// the first, a row's own machine's subnet first, each subnet recorded on the row
+// before its first call (one unrecorded called in nothing), a run again calling
+// first where its row recorded an earlier call (no describe: EC2 lists a launch
+// late), else reading its first run's subnet afresh, and a zone without capacity
+// handing the launch to the other under that subnet's token), describe's state mapping from
+// one cached describe-instances (the launch grace by the row's age, judged
+// alike by another worker's driver, the cache's lifetime, a failure reading
+// Unknown and its back-off, describes at once waiting for one read),
+// terminate's tag check (a machine
 // without both of this deployment's tags never ended) and its idempotence,
 // list_tagged's scope and its throw, the slots' ports, and every CLI failure,
 // timeout and malformed reply; its config checks and the data sets' volume
 // labels. The shipped machine script (hosted/machine/machine_user_data.sh):
 // its blanks and their render, no xtrace, the slots' ports reserved before
 // anything runs, the data sets mounted by label read-only, the fences (the
-// metadata service and the internal port, for every slot's user) applied and
-// checked before the agent starts, the agent copied out of the serve image and
-// its unit. The settings (hosted/fleet_config.h): the defaults, every
-// variable's read and its refusals. And the local driver's machine life
-// without a service (hosted/local_machine_driver.h; its agent end to end is
-// hosted_agent_route's). Crow-free and database-free: compiles the sources it
-// needs directly, so it runs on every service build.
+// metadata service and the internal port on every destination, for every
+// slot's user) applied and checked before the agent starts, the agent copied
+// out of the serve image and its unit reaching the controller by its URL. The settings
+// (hosted/fleet_config.h): the defaults, every variable's read and its refusals. And the docker
+// driver, the local stack's (hosted/docker_machine_driver.h), against an engine in memory: its
+// config checks and profile, the machine's command line and create body, the token's archive,
+// a launch's calls in order, a launch run again, its failures (each leaving nothing behind),
+// describe's states, terminate's scope and list_tagged's filter. Crow-free and database-free:
+// compiles the sources it needs directly, so it runs on every service build.
 
 #include "command_runner.h"
 #include "hosted/agent_protocol.h"
+#include "hosted/docker_machine_driver.h"
 #include "hosted/ec2_machine_driver.h"
 #include "hosted/fleet_config.h"
 #include "hosted/hosted_settings.h"
-#include "hosted/local_machine_driver.h"
+
+#include <base/io/json.h>
 
 #include "common/temp_dir.h"
 #include "common/test_expect.h"
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <deque>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <map>
+#include <mutex>
 #include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
+#include <utility>
 #include <vector>
 
 #ifndef OPENNOVA_SOURCE_DIR
@@ -61,17 +79,24 @@ constexpr const char *kRegion = "us-east-1";
 constexpr const char *kShared = "lt-0123456789abcdef0";
 constexpr const char *kOwn = "lt-0abcdef0123456789";
 constexpr const char *kSubnet = "subnet-0123456789abcdef0";
+// The second zone's.
+constexpr const char *kSubnetB = "subnet-0fedcba9876543210";
 constexpr const char *kDeployment = "opennova-server";
 constexpr const char *kImage = "ghcr.io/opennova-net/opennova-serve@sha256:"
 							   "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
 constexpr const char *kHostdImage =
 		"ghcr.io/opennova-net/opennova-serve@sha256:"
 		"fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210";
+// The controller's private address (its internal listener's bind, what admin.cfg
+// admits) and its internal listener's URL by name, as the machines reach it.
 constexpr const char *kService = "10.44.0.10";
+constexpr const char *kServiceUrl = "http://controller.opennova-server.opennova.internal:8070";
 constexpr const char *kMachineA = "i-0aaaaaaaaaaaaaaa1";
 constexpr const char *kMachineB = "i-0bbbbbbbbbbbbbbb2";
 constexpr uint64_t kTtl = 10 * 1000;
 constexpr uint64_t kGrace = 3 * 60 * 1000;
+// A launch's age past the grace (a row launched long ago, or none listed at all).
+constexpr int64_t kLong = static_cast<int64_t>(kGrace) + 1;
 
 // --- the stub ----------------------------------------------------------------------------
 
@@ -111,6 +136,44 @@ public:
 
 	std::vector<Call> calls;
 	std::deque<CommandResult> replies;
+};
+
+// A runner several threads call at once: each call answers `reply`, held while the
+// gate is closed, and is counted.
+class GatedRunner : public opennova::proc::CommandRunner {
+public:
+	explicit GatedRunner(CommandResult reply) : reply_(std::move(reply)) {}
+
+	CommandResult run(const std::vector<std::string> &, int) override {
+		std::unique_lock<std::mutex> lock(mu_);
+		++calls_;
+		cv_.notify_all();
+		cv_.wait(lock, [this] { return open_; });
+		return reply_;
+	}
+	void open() {
+		{
+			std::lock_guard<std::mutex> lock(mu_);
+			open_ = true;
+		}
+		cv_.notify_all();
+	}
+	// Whether `n` calls came within `timeout`.
+	bool wait_calls(int n, std::chrono::milliseconds timeout) {
+		std::unique_lock<std::mutex> lock(mu_);
+		return cv_.wait_for(lock, timeout, [this, n] { return calls_ >= n; });
+	}
+	int calls() {
+		std::lock_guard<std::mutex> lock(mu_);
+		return calls_;
+	}
+
+private:
+	std::mutex mu_;
+	std::condition_variable cv_;
+	bool open_ = false;
+	int calls_ = 0;
+	const CommandResult reply_;
 };
 
 CommandResult answered(const std::string &out) {
@@ -213,7 +276,7 @@ std::string run_instances_reply(
 
 std::string machine_script() {
 	std::ifstream in(fs::u8path(std::string(OPENNOVA_SOURCE_DIR) +
-							 "/apps/novaworld_server/hosted/machine/machine_user_data.sh"),
+							 "/apps/novaworld_common/hosted/machine/machine_user_data.sh"),
 			std::ios::binary);
 	return std::string(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
 }
@@ -222,13 +285,13 @@ hosted::Ec2MachineConfig config_in(const std::string &scratch) {
 	hosted::Ec2MachineConfig c;
 	c.aws_cli = kAws;
 	c.region = kRegion;
-	c.subnet = kSubnet;
+	c.subnets = { kSubnet };
 	c.deployment = kDeployment;
 	c.shared_template = kShared;
 	c.own_template = std::string(kOwn) + ":7";
 	c.serve_image = kImage;
-	c.service_address = kService;
-	c.service_port = 8070;
+	c.service_url = kServiceUrl;
+	c.admin_address = kService;
 	c.data_sets = { hosted::kDataSetJointOperations, hosted::kDataSetDeltaForceXtreme2 };
 	c.machine_script = machine_script();
 	c.scratch_dir = scratch;
@@ -346,14 +409,19 @@ int test_config_checks(const std::string &scratch) {
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.aws_cli = "aws"; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.region = ""; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.region = "US East 1"; }));
-	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.subnet = "sg-0123456789abcdef0"; }));
+	TEST_EXPECT(
+			refused([](hosted::Ec2MachineConfig &c) { c.subnets = { "sg-0123456789abcdef0" }; }));
+	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.subnets.clear(); }));
+	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.subnets = { kSubnet, "subnet-" }; }));
+	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.subnets = { kSubnet, kSubnet }; }));
+	TEST_EXPECT(!refused([](hosted::Ec2MachineConfig &c) { c.subnets = { kSubnet, kSubnetB }; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.deployment = ""; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.deployment = "prod,dev"; }));
 	// The longest deployment still makes a client token EC2 takes (64 at most).
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.deployment = std::string(33, 'd'); }));
 	TEST_EXPECT(!refused([](hosted::Ec2MachineConfig &c) { c.deployment = std::string(32, 'd'); }));
-	TEST_EXPECT(
-			hosted::Ec2MachineDriver::client_token(std::string(32, 'd'), INT64_MAX).size() <= 64);
+	TEST_EXPECT(hosted::Ec2MachineDriver::client_token(std::string(32, 'd'), INT64_MAX, kSubnet)
+						.size() <= 64);
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.launch_attempts = 0; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.shared_template = ""; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.shared_template = "my-template"; }));
@@ -371,12 +439,31 @@ int test_config_checks(const std::string &scratch) {
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.serve_image = "ghcr.io/x y"; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.hostd_image = "--privileged"; }));
 	TEST_EXPECT(!refused([](hosted::Ec2MachineConfig &c) { c.hostd_image = kHostdImage; }));
-	// The internal listener the machines reach: a private address and a port.
-	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.service_address = "127.0.0.1"; }));
-	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.service_address = "54.1.2.3"; }));
-	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.service_address = "0.0.0.0"; }));
-	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.service_address = "10.44.0"; }));
-	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.service_port = 0; }));
+	// The internal listener the machines reach: http://<host>:<port>, by name or address,
+	// nothing a shell word or a URL would read otherwise.
+	TEST_EXPECT(!refused(
+			[](hosted::Ec2MachineConfig &c) { c.service_url = "http://10.44.0.10:8070"; }));
+	for (const char *url : { "", "controller:8070", "https://controller:8070", "http://controller",
+				 "http://controller:", "http://controller:0", "http://controller:70000",
+				 "http://user@controller:8070", "http://controller:8070/",
+				 "http://con troller:8070", "http://con'troller:8070", "http://:8070",
+				 "http://-controller:8070", "http://controller:80x" }) {
+		hosted::Ec2MachineConfig c = good;
+		c.service_url = url;
+		if (hosted::Ec2MachineDriver::check_config(c).empty())
+			std::fprintf(stderr, "  ONNET_INTERNAL_URL %s was taken\n", url);
+		TEST_EXPECT(!hosted::Ec2MachineDriver::check_config(c).empty());
+	}
+	{
+		std::string host;
+		uint16_t port = 0;
+		TEST_EXPECT(hosted::Ec2MachineDriver::parse_service_url(kServiceUrl, host, port) &&
+				host == "controller.opennova-server.opennova.internal" && port == 8070);
+	}
+	// The admin address is the controller's to check (its profile), and the scratch
+	// directory the worker's to make (the driver): every program asks check_config alike.
+	TEST_EXPECT(!refused([](hosted::Ec2MachineConfig &c) { c.admin_address = "127.0.0.1"; }));
+	TEST_EXPECT(!refused([](hosted::Ec2MachineConfig &c) { c.scratch_dir = ""; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.data_sets.clear(); }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.data_sets.push_back("Not A Set"); }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) {
@@ -385,7 +472,6 @@ int test_config_checks(const std::string &scratch) {
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.machine_script = "#!/bin/bash\n"; }));
 	TEST_EXPECT(refused(
 			[](hosted::Ec2MachineConfig &c) { c.machine_script += std::string(16 * 1024, '#'); }));
-	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.scratch_dir = ""; }));
 	return 0;
 }
 
@@ -410,7 +496,7 @@ int test_machine_script(const std::string &) {
 	using hosted::Ec2MachineDriver;
 	const std::string script = machine_script();
 	TEST_EXPECT(!script.empty());
-	for (const char *blank : { Ec2MachineDriver::kBlankServiceAddress,
+	for (const char *blank : { Ec2MachineDriver::kBlankServiceUrl,
 				 Ec2MachineDriver::kBlankServicePort, Ec2MachineDriver::kBlankMachineId,
 				 Ec2MachineDriver::kBlankMachineToken, Ec2MachineDriver::kBlankServeImage,
 				 Ec2MachineDriver::kBlankHostdImage, Ec2MachineDriver::kBlankDataSets })
@@ -436,6 +522,9 @@ int test_machine_script(const std::string &) {
 	TEST_EXPECT(hosted::slot_uid(0) == 10001 && hosted::slot_uid(hosted::kMaxSlots - 1) == 10032);
 	// Docker with no user-namespace remapping.
 	TEST_EXPECT(runs_line(script, "install --no-install-recommends docker.io iptables curl"));
+	// A baked image (docker there and held) skips the install and its apt-get update.
+	TEST_EXPECT(runs_line(script, "grep -qx docker.io <<<\"$held\"; then") &&
+			line_at(script, "grep -qx docker.io") < line_at(script, "apt_get update"));
 	TEST_EXPECT(runs_line(script, "end_machine \"docker remaps user namespaces\""));
 	// Each data set by its volume's label alone (waited for, the machine ended without it),
 	// read-only, at /opt/game/<data set>, at every boot too: no other label, and nothing
@@ -451,12 +540,17 @@ int test_machine_script(const std::string &) {
 	TEST_EXPECT(runs_line(script, "readonly GAME_ROOT=/opt/game"));
 	TEST_EXPECT(runs_line(script, "mount \"$GAME_ROOT/$data_set\""));
 	TEST_EXPECT(runs_line(script, "-ipath '*/expansion/jox01/version.txt'"));
-	// The fences: every slot's UID refused the metadata service and the internal port,
-	// at every start of the agent, and checked for the first and the last slot before it.
+	// The fences: every slot's UID refused the metadata service and the internal port on
+	// every destination (the controller's address moves with it: no rule names one), at
+	// every start of the agent, and checked for the first and the last slot before it.
 	TEST_EXPECT(runs_line(script, "-m owner --uid-owner 10001-10032 -j REJECT"));
 	TEST_EXPECT(runs_line(script, "fence -d 169.254.169.254"));
-	TEST_EXPECT(
-			runs_line(script, "fence -p tcp -d \"$SERVICE_ADDRESS\" --dport \"$SERVICE_PORT\""));
+	TEST_EXPECT(runs_line(script, "fence -p tcp --dport \"$SERVICE_PORT\""));
+	// And every slot's admin port (admin.cfg admits the controller's network, the
+	// machine's own address included): no slot reaches a sibling's remote admin.
+	TEST_EXPECT(runs_line(script, "fence -p tcp --dport 32800:32831"));
+	TEST_EXPECT(script.find("SERVICE_ADDRESS") == std::string::npos);
+	TEST_EXPECT(runs_line(script, "printf 'SERVICE_PORT=%s\\n' \"$SERVICE_PORT\""));
 	TEST_EXPECT(runs_line(script,
 			"ip6tables -w 5 -I OUTPUT -d fd00:ec2::254 -m owner --uid-owner 10001-10032 -j "
 			"REJECT"));
@@ -464,7 +558,7 @@ int test_machine_script(const std::string &) {
 	TEST_EXPECT(runs_line(script, "for uid in \"$FIRST_SLOT_UID\" \"$LAST_SLOT_UID\"; do"));
 	TEST_EXPECT(runs_line(script, "readonly FIRST_SLOT_UID=10001") &&
 			runs_line(script, "readonly LAST_SLOT_UID=10032"));
-	TEST_EXPECT(runs_line(script, "\"http://$SERVICE_ADDRESS:$SERVICE_PORT/\""));
+	TEST_EXPECT(runs_line(script, "\"$SERVICE_URL/\""));
 	TEST_EXPECT(runs_line(script, "[ \"$rc\" -eq 7 ] || end_machine"));
 	const size_t check = line_at(script, "[ \"$rc\" -eq 7 ] || end_machine");
 	const size_t agent = line_at(script, "systemctl enable --now opennova-hostd.service");
@@ -478,14 +572,12 @@ int test_machine_script(const std::string &) {
 	TEST_EXPECT(runs_line(
 			script, "docker cp \"$container:/usr/local/bin/opennova-hostd\" \"$HOSTD.new\""));
 	TEST_EXPECT(runs_line(script, "readonly HOSTD=/usr/local/bin/opennova-hostd"));
-	TEST_EXPECT(runs_line(script,
-			"ExecStart=$HOSTD --service http://$SERVICE_ADDRESS:$SERVICE_PORT --machine "
-			"$MACHINE_ID"));
+	TEST_EXPECT(runs_line(script, "ExecStart=$HOSTD --service $SERVICE_URL --machine $MACHINE_ID"));
 	TEST_EXPECT(runs_line(script, "Restart=always"));
 	TEST_EXPECT(script.size() < Ec2MachineDriver::kMaxUserDataBytes - 1024);
 
 	hosted::MachineUserData values;
-	values.service_address = kService;
+	values.service_url = kServiceUrl;
 	values.service_port = 8070;
 	values.machine_id = 12;
 	values.bootstrap_token = hosted::random_secret(hosted::kMachineTokenChars);
@@ -495,7 +587,7 @@ int test_machine_script(const std::string &) {
 	const auto rendered = Ec2MachineDriver::render_user_data(script, values);
 	TEST_EXPECT(rendered);
 	TEST_EXPECT(rendered->find("@OPENNOVA_") == std::string::npos);
-	TEST_EXPECT(assigned(*rendered, "SERVICE_ADDRESS") == kService);
+	TEST_EXPECT(assigned(*rendered, "SERVICE_URL") == kServiceUrl);
 	TEST_EXPECT(assigned(*rendered, "SERVICE_PORT") == "8070");
 	TEST_EXPECT(assigned(*rendered, "MACHINE_ID") == "12");
 	TEST_EXPECT(assigned(*rendered, "MACHINE_TOKEN") == values.bootstrap_token);
@@ -513,8 +605,12 @@ int test_machine_script(const std::string &) {
 	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.bootstrap_token[3] = '\''; }));
 	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.bootstrap_token.pop_back(); }));
 	TEST_EXPECT(refuses(
-			[](hosted::MachineUserData &v) { v.service_address = "10.0.0.1'; reboot; '"; }));
+			[](hosted::MachineUserData &v) { v.service_url = "http://x'; reboot; ':8070"; }));
+	TEST_EXPECT(
+			refuses([](hosted::MachineUserData &v) { v.service_url = "http://10.0.0.1:8070/x"; }));
 	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.service_port = 0; }));
+	// The fence's port is the URL's own.
+	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.service_port = 8071; }));
 	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.machine_id = 0; }));
 	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.serve_image = "img'"; }));
 	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.hostd_image = ""; }));
@@ -529,12 +625,19 @@ int test_machine_script(const std::string &) {
 int test_slot_plan(const std::string &scratch) {
 	Rig rig(scratch);
 	TEST_EXPECT(std::string(rig.driver.name()) == "ec2");
-	TEST_EXPECT(rig.driver.boot_timeout_ms() == hosted::Ec2MachineDriver::kBootTimeoutMs);
+	// The supervisor's view, made with no driver (no cloud call).
+	const hosted::MachineProfile profile = hosted::Ec2MachineDriver::profile(config_in(scratch));
+	TEST_EXPECT(profile.provider == "ec2" &&
+			profile.boot_timeout_ms == hosted::Ec2MachineDriver::kBootTimeoutMs);
 	for (int slot : { 0, 5, hosted::kMaxSlots - 1 }) {
-		const hosted::SlotPlan plan = rig.driver.slot_plan(kMachineA, slot);
+		const hosted::SlotPlan plan = profile.slot_plan(slot);
 		TEST_EXPECT(plan.game_port == 32768 + slot && plan.admin_port == 32800 + slot);
-		TEST_EXPECT(plan.admin_allowed_ip == kService);
+		// The controller's network, not its one address: a replaced controller's new
+		// address is in it, and the server keeps the admin.cfg its start rendered.
+		TEST_EXPECT(plan.admin_allowed_ip == "10.44.*");
 	}
+	TEST_EXPECT(hosted::Ec2MachineDriver::admin_pattern("172.31.5.9") == "172.31.*");
+	TEST_EXPECT(hosted::Ec2MachineDriver::admin_pattern("not-an-ip") == "not-an-ip");
 	TEST_EXPECT(rig.runner.calls.empty());
 	return 0;
 }
@@ -565,8 +668,8 @@ int test_launch(const std::string &scratch) {
 		"{\"LaunchTemplateId\":\"lt-0123456789abcdef0\",\"Version\":\"$Default\"}", "--subnet-id",
 		kSubnet, "--count", "1", "--client-token" };
 	TEST_EXPECT(std::vector<std::string>(argv.begin(), argv.begin() + 10) == head);
-	// The row's own client token: the same for every call of its launch.
-	TEST_EXPECT(argv[10] == "opennova-opennova-server-m12");
+	// The row's own client token in its subnet: the same for every call of its launch there.
+	TEST_EXPECT(argv[10] == "opennova-server-m12-9abcdef0");
 	TEST_EXPECT(argv[11] == "--tag-specifications");
 	TEST_EXPECT(argv[12] ==
 			"[{\"ResourceType\":\"instance\",\"Tags\":[" + tags +
@@ -578,7 +681,7 @@ int test_launch(const std::string &scratch) {
 	// The user-data: the machine script with this machine's values, and the file gone after.
 	TEST_EXPECT(assigned(call.user_data, "MACHINE_ID") == "12");
 	TEST_EXPECT(assigned(call.user_data, "MACHINE_TOKEN") == launch.bootstrap_token);
-	TEST_EXPECT(assigned(call.user_data, "SERVICE_ADDRESS") == kService);
+	TEST_EXPECT(assigned(call.user_data, "SERVICE_URL") == kServiceUrl);
 	TEST_EXPECT(assigned(call.user_data, "SERVICE_PORT") == "8070");
 	TEST_EXPECT(assigned(call.user_data, "SERVE_IMAGE") == kImage);
 	// No hostd image of its own: the serve image's agent.
@@ -591,12 +694,28 @@ int test_launch(const std::string &scratch) {
 	for (const std::string &arg : argv)
 		TEST_EXPECT(arg.find(launch.bootstrap_token) == std::string::npos);
 
-	// Right after the launch EC2 may not list the machine yet: within the grace it
-	// reads Pending, with the address its launch read.
+	// Right after the launch EC2 may not list the machine yet: within the grace of its
+	// launch as its row dates it, it reads Pending (its addresses the row's, from the
+	// launch), and past the grace Gone.
 	rig.runner.replies.push_back(answered(listing({})));
-	const hosted::CloudMachine status = rig.driver.describe(kMachineA);
-	TEST_EXPECT(status.state == CloudState::Pending && status.private_address == "10.44.0.21");
+	const hosted::CloudMachine status = rig.driver.describe(kMachineA, 1000);
+	TEST_EXPECT(status.state == CloudState::Pending);
 	TEST_EXPECT(rig.runner.calls.size() == 2 && rig.runner.calls[1].argv == describe_argv());
+	TEST_EXPECT(rig.driver.describe(kMachineA, static_cast<int64_t>(kGrace)).state ==
+			CloudState::Pending);
+	TEST_EXPECT(rig.driver.describe(kMachineA, kLong).state == CloudState::Gone);
+	// Another worker's driver, which never launched it, judges it alike: the grace is the
+	// row's, not a process's memory.
+	{
+		StubRunner other_runner;
+		hosted::Ec2MachineDriver other(
+				config_in(scratch), other_runner, [] { return uint64_t{ 9'000'000 }; });
+		other_runner.replies.push_back(answered(listing({})));
+		TEST_EXPECT(other.describe(kMachineA, 1000).state == CloudState::Pending);
+		TEST_EXPECT(other.describe(kMachineA, kLong).state == CloudState::Gone);
+		TEST_EXPECT(other.describe(kMachineA, -1).state == CloudState::Gone);
+		TEST_EXPECT(other_runner.calls.size() == 1);
+	}
 	return 0;
 }
 
@@ -613,10 +732,221 @@ int test_launch_retried(const std::string &scratch) {
 	TEST_EXPECT(machine && machine->cloud_id == kMachineA);
 	TEST_EXPECT(rig.runner.calls.size() == 2);
 	TEST_EXPECT(rig.runner.calls[0].argv == rig.runner.calls[1].argv);
-	TEST_EXPECT(rig.runner.calls[1].argv[10] == "opennova-opennova-server-m31");
+	TEST_EXPECT(rig.runner.calls[1].argv[10] == "opennova-server-m31-9abcdef0");
 	TEST_EXPECT(rig.runner.calls[0].user_data == rig.runner.calls[1].user_data &&
 			assigned(rig.runner.calls[1].user_data, "MACHINE_TOKEN") == launch.bootstrap_token);
 	TEST_EXPECT(!fs::exists(fs::u8path(rig.runner.calls[1].user_data_path)));
+	return 0;
+}
+
+// `instance` (instance_json's) in `subnet`.
+std::string in_subnet(const std::string &instance, const std::string &subnet) {
+	return instance.substr(0, instance.size() - 1) + ",\"SubnetId\":\"" + subnet + "\"}";
+}
+
+// The subnet and the client token run-instances call `call` named.
+std::pair<std::string, std::string> subnet_and_token(const Call &call) {
+	return { call.argv.at(6), call.argv.at(10) };
+}
+
+// Two subnets, one per zone: a launch takes the one holding fewer of the deployment's
+// live machines (ties to the first), a row's own machine's subnet first; a zone that
+// cannot take it hands it to the other under that subnet's own token, while a call cut
+// short is made again in its subnet with the same one.
+int test_launch_zones(const std::string &scratch) {
+	hosted::Ec2MachineConfig config = config_in(scratch);
+	config.subnets = { kSubnet, kSubnetB };
+	uint64_t now = 1'000'000;
+	StubRunner runner;
+	hosted::Ec2MachineDriver driver(config, runner, [&now] { return now; });
+	const std::pair<std::string, std::string> first = { kSubnet, "opennova-server-m40-9abcdef0" };
+	const std::pair<std::string, std::string> second = { kSubnetB, "opennova-server-m40-76543210" };
+	const std::string capacity =
+			"\nAn error occurred (InsufficientInstanceCapacity) when calling the RunInstances "
+			"operation (reached max retries: 2): We currently do not have sufficient c7a.medium "
+			"capacity in the Availability Zone you requested (us-east-1a).\n";
+	const std::string unsupported =
+			"\nAn error occurred (Unsupported) when calling the RunInstances operation: Your "
+			"requested instance type (c7a.medium) is not supported in your requested Availability "
+			"Zone (us-east-1e).\n";
+
+	// One live machine in the first zone, one ending there, one ended in the second:
+	// the second.
+	runner.replies.push_back(answered(listing({
+			in_subnet(instance_json(kMachineA, "running", "10.44.0.21", "7"), kSubnet),
+			in_subnet(instance_json(kMachineB, "shutting-down", "10.44.0.22", "8"), kSubnet),
+			in_subnet(instance_json("i-0ccccccccccccccc3", "terminated", "", "9"), kSubnetB),
+	})));
+	runner.replies.push_back(answered(run_instances_reply("i-0ddddddddddddddd4", "10.44.1.20")));
+	std::string error;
+	TEST_EXPECT(driver.launch(launch_of(40), error));
+	TEST_EXPECT(runner.calls.size() == 2 && runner.calls[0].argv == describe_argv());
+	TEST_EXPECT(subnet_and_token(runner.calls[1]) == second);
+	// The listing is kept kTtl: the next launch counts the one just made, pending (one
+	// live in each zone), so ties go to the first, with no describe.
+	runner.replies.push_back(answered(run_instances_reply("i-0eeeeeeeeeeeeeee5", "10.44.0.23")));
+	TEST_EXPECT(driver.launch(launch_of(41), error));
+	TEST_EXPECT(runner.calls.size() == 3 &&
+			subnet_and_token(runner.calls[2]) ==
+					std::make_pair(
+							std::string(kSubnet), std::string("opennova-server-m41-9abcdef0")));
+
+	// No capacity in the first zone: the second, under its own token, with the same
+	// user-data; the file gone after.
+	now += kTtl;
+	runner.calls.clear();
+	runner.replies.push_back(answered(listing({})));
+	runner.replies.push_back(failed(254, capacity));
+	runner.replies.push_back(answered(run_instances_reply(kMachineA, "10.44.1.21")));
+	const auto moved = driver.launch(launch_of(40), error);
+	TEST_EXPECT(moved && moved->cloud_id == kMachineA && runner.calls.size() == 3);
+	TEST_EXPECT(subnet_and_token(runner.calls[1]) == first);
+	TEST_EXPECT(subnet_and_token(runner.calls[2]) == second);
+	TEST_EXPECT(runner.calls[1].user_data == runner.calls[2].user_data &&
+			!runner.calls[2].user_data.empty() &&
+			!fs::exists(fs::u8path(runner.calls[2].user_data_path)));
+	// Everything else the same call.
+	std::vector<std::string> a = runner.calls[1].argv;
+	std::vector<std::string> b = runner.calls[2].argv;
+	a[6] = b[6] = a[10] = b[10] = "";
+	TEST_EXPECT(a == b);
+
+	// The type not offered in the first zone: the second likewise.
+	now += kTtl;
+	runner.calls.clear();
+	runner.replies.push_back(answered(listing({})));
+	runner.replies.push_back(failed(254, unsupported));
+	runner.replies.push_back(answered(run_instances_reply(kMachineB, "10.44.1.22")));
+	TEST_EXPECT(driver.launch(launch_of(40), error) && runner.calls.size() == 3);
+	TEST_EXPECT(subnet_and_token(runner.calls[2]) == second);
+
+	// Neither zone has room: the launch fails after one call in each.
+	now += kTtl;
+	runner.calls.clear();
+	runner.replies.push_back(answered(listing({})));
+	runner.replies.push_back(failed(254, capacity));
+	runner.replies.push_back(failed(254, capacity));
+	TEST_EXPECT(!driver.launch(launch_of(40), error));
+	TEST_EXPECT(runner.calls.size() == 3 &&
+			error.find("InsufficientInstanceCapacity") != std::string::npos);
+
+	// Any other refusal is the launch's: no other zone.
+	now += kTtl;
+	runner.calls.clear();
+	runner.replies.push_back(answered(listing({})));
+	runner.replies.push_back(failed(254,
+			"\nAn error occurred (UnauthorizedOperation) when calling the RunInstances "
+			"operation: You are not authorized.\n"));
+	TEST_EXPECT(!driver.launch(launch_of(40), error) && runner.calls.size() == 2);
+
+	// A call cut short is made again in its subnet with the same token: a plain retry
+	// stays idempotent.
+	now += kTtl;
+	runner.calls.clear();
+	runner.replies.push_back(answered(listing({})));
+	runner.replies.push_back(timed_out());
+	runner.replies.push_back(answered(run_instances_reply(kMachineA, "10.44.0.21")));
+	TEST_EXPECT(driver.launch(launch_of(40), error) && runner.calls.size() == 3);
+	TEST_EXPECT(runner.calls[1].argv == runner.calls[2].argv);
+	TEST_EXPECT(subnet_and_token(runner.calls[2]) == first);
+
+	// A launch run again (its job's claim lapsed) whose machine EC2 lists already: that
+	// machine's subnet first, so the same token, though the other zone holds fewer.
+	now += kTtl;
+	runner.calls.clear();
+	runner.replies.push_back(answered(listing({
+			in_subnet(instance_json(kMachineB, "pending", "10.44.1.22", "40"), kSubnetB),
+			in_subnet(instance_json("i-0ccccccccccccccc3", "running", "10.44.1.23", "9"), kSubnetB),
+	})));
+	runner.replies.push_back(answered(run_instances_reply(kMachineB, "10.44.1.22")));
+	TEST_EXPECT(driver.launch(launch_of(40), error) && runner.calls.size() == 2);
+	TEST_EXPECT(subnet_and_token(runner.calls[1]) == second);
+
+	// A run again on another worker, whose listing predates its first run's launch (that
+	// launch in the first zone; the listing counts two live there, none in the second):
+	// a describe-instances of its machine id alone, read now, finds that machine, so the
+	// first zone's token again, never a second machine under the second's.
+	{
+		StubRunner other_runner;
+		uint64_t other_now = 2'000'000;
+		hosted::Ec2MachineDriver other(config, other_runner, [&other_now] { return other_now; });
+		other_runner.replies.push_back(answered(listing({
+				in_subnet(instance_json(kMachineA, "running", "10.44.0.21", "7"), kSubnet),
+				in_subnet(instance_json("i-0ccccccccccccccc3", "running", "10.44.0.25", "9"),
+						kSubnet),
+		})));
+		TEST_EXPECT(other.describe(kMachineA, kLong).state == CloudState::Running);
+		other_now += 1000;
+		const std::string first_run = "i-0ddddddddddddddd4";
+		hosted::MachineLaunch again = launch_of(44);
+		again.attempt = 2;
+		other_runner.replies.push_back(answered(listing(
+				{ in_subnet(instance_json(first_run, "pending", "10.44.0.26", "44"), kSubnet) })));
+		other_runner.replies.push_back(answered(run_instances_reply(first_run, "10.44.0.26")));
+		const auto relaunched = other.launch(again, error);
+		TEST_EXPECT(
+				relaunched && relaunched->cloud_id == first_run && other_runner.calls.size() == 3);
+		TEST_EXPECT(other_runner.calls[1].argv ==
+				with_globals({ kAws, "ec2", "describe-instances", "--filters",
+						"[{\"Name\":\"tag:opennova:hosted\",\"Values\":[\"1\"]},"
+						"{\"Name\":\"tag:opennova:deployment\",\"Values\":[\"opennova-server\"]},"
+						"{\"Name\":\"tag:opennova:machine-id\",\"Values\":[\"44\"]}]" }));
+		TEST_EXPECT(subnet_and_token(other_runner.calls[2]) ==
+				std::make_pair(std::string(kSubnet), std::string("opennova-server-m44-9abcdef0")));
+		// A first run there takes the second zone, which holds fewer.
+		other_runner.replies.push_back(
+				answered(run_instances_reply("i-0eeeeeeeeeeeeeee5", "10.44.1.27")));
+		TEST_EXPECT(other.launch(launch_of(45), error) && other_runner.calls.size() == 4 &&
+				subnet_and_token(other_runner.calls[3]).first == kSubnetB);
+		// A run again that cannot read where its first run launched launches nothing.
+		other_runner.replies.push_back(failed(255, "Could not connect to the endpoint URL"));
+		hosted::MachineLaunch blind = launch_of(46);
+		blind.attempt = 3;
+		TEST_EXPECT(!other.launch(blind, error) && other_runner.calls.size() == 5 &&
+				error.find("where its first run launched") != std::string::npos);
+		// A run again whose row recorded its first run's call in the first zone (that
+		// run's mark_launched failed; EC2 lists its machine late, so a describe of its
+		// machine id would find none and the second zone, holding fewer, would launch a
+		// second machine under its own token): the first zone and its token, with no
+		// describe.
+		hosted::MachineLaunch recorded_again = launch_of(48);
+		recorded_again.attempt = 2;
+		recorded_again.subnet = kSubnet;
+		other_runner.replies.push_back(
+				answered(run_instances_reply("i-0bbbbbbbbbbbbbbb8", "10.44.0.29")));
+		TEST_EXPECT(other.launch(recorded_again, error) && other_runner.calls.size() == 6);
+		TEST_EXPECT(subnet_and_token(other_runner.calls[5]) ==
+				std::make_pair(std::string(kSubnet), std::string("opennova-server-m48-9abcdef0")));
+	}
+
+	// Each subnet goes on the row before its first call there (a zone without room
+	// records the next one too); a subnet that cannot be recorded is called in
+	// nothing, and the launch fails.
+	now += kTtl;
+	runner.calls.clear();
+	std::vector<std::string> recorded;
+	hosted::MachineLaunch recording = launch_of(47);
+	recording.record_subnet = [&recorded](const std::string &subnet) {
+		recorded.push_back(subnet);
+		return true;
+	};
+	runner.replies.push_back(answered(listing({})));
+	runner.replies.push_back(failed(254, capacity));
+	runner.replies.push_back(answered(run_instances_reply("i-0aaaaaaaaaaaaaaa7", "10.44.1.28")));
+	TEST_EXPECT(driver.launch(recording, error) && runner.calls.size() == 3);
+	TEST_EXPECT(recorded == std::vector<std::string>({ kSubnet, kSubnetB }));
+	recording.record_subnet = [](const std::string &) { return false; };
+	runner.calls.clear();
+	TEST_EXPECT(!driver.launch(recording, error) && runner.calls.empty() &&
+			error.find("could not be recorded") != std::string::npos);
+
+	// A listing that fails leaves the counts as they were read: the launch goes on.
+	now += kTtl;
+	runner.calls.clear();
+	runner.replies.push_back(failed(255, "Could not connect to the endpoint URL"));
+	runner.replies.push_back(answered(run_instances_reply("i-0fffffffffffffff6", "10.44.0.24")));
+	TEST_EXPECT(driver.launch(launch_of(42), error) && runner.calls.size() == 2);
+	TEST_EXPECT(runner.calls[1].argv.at(2) == "run-instances");
 	return 0;
 }
 
@@ -708,7 +1038,7 @@ int test_launch_failures(const std::string &scratch) {
 		TEST_EXPECT(rig.runner.calls.back().argv == terminate_argv(kMachineA));
 	}
 	const size_t calls = rig.runner.calls.size();
-	TEST_EXPECT(rig.driver.describe(kMachineA).state == CloudState::Gone);
+	TEST_EXPECT(rig.driver.describe(kMachineA, 0).state == CloudState::Gone);
 	TEST_EXPECT(rig.runner.calls.size() == calls);
 	// No machine id, or a token that is not one: nothing is called.
 	std::string error;
@@ -736,21 +1066,21 @@ int test_describe(const std::string &scratch) {
 			instance_json(
 					"i-0aaaaaaaaaaaaaa07", "running", "10.44.0.27", "13", "", kDeployment, false),
 	})));
-	const hosted::CloudMachine a = rig.driver.describe(kMachineA);
+	const hosted::CloudMachine a = rig.driver.describe(kMachineA, 0);
 	TEST_EXPECT(a.state == CloudState::Running && a.private_address == "10.44.0.21");
 	TEST_EXPECT(a.public_address == "54.1.2.3");
 	TEST_EXPECT(rig.runner.calls.size() == 2 && rig.runner.calls[1].argv == describe_argv());
-	TEST_EXPECT(rig.driver.describe(kMachineB).state == CloudState::Pending);
+	TEST_EXPECT(rig.driver.describe(kMachineB, 0).state == CloudState::Pending);
 	for (const char *gone : { "i-0ccccccccccccccc3", "i-0ddddddddddddddd4", "i-0eeeeeeeeeeeeeee5",
 				 "i-0fffffffffffffff6", "i-0aaaaaaaaaaaaaa07", "i-0123456789abcdef9", "local-3-1" })
-		TEST_EXPECT(rig.driver.describe(gone).state == CloudState::Gone);
-	TEST_EXPECT(rig.driver.describe("i-0ccccccccccccccc3").private_address.empty());
+		TEST_EXPECT(rig.driver.describe(gone, kLong).state == CloudState::Gone);
+	TEST_EXPECT(rig.driver.describe("i-0ccccccccccccccc3", kLong).private_address.empty());
 	// All of that from the one describe-instances: the listing is kept kTtl.
 	TEST_EXPECT(rig.runner.calls.size() == 2);
 	rig.now += kTtl;
 	rig.runner.replies.push_back(
 			answered(listing({ instance_json(kMachineA, "shutting-down", "10.44.0.21", "7") })));
-	TEST_EXPECT(rig.driver.describe(kMachineA).state == CloudState::Gone);
+	TEST_EXPECT(rig.driver.describe(kMachineA, 0).state == CloudState::Gone);
 	TEST_EXPECT(rig.runner.calls.size() == 3);
 	return 0;
 }
@@ -764,28 +1094,62 @@ int test_describe_failures(const std::string &scratch) {
 					answered("not json"), answered("{}"), answered("{\"Reservations\":{}}") }) {
 		rig.runner.replies.push_back(std::move(reply));
 		const size_t calls = rig.runner.calls.size();
-		const hosted::CloudMachine status = rig.driver.describe(kMachineA);
+		const hosted::CloudMachine status = rig.driver.describe(kMachineA, 0);
 		TEST_EXPECT(rig.runner.calls.size() == calls + 1);
 		TEST_EXPECT(status.state == CloudState::Unknown && status.private_address == "10.44.0.21");
 		rig.now += kTtl - 1;
-		TEST_EXPECT(rig.driver.describe(kMachineA).state == CloudState::Unknown);
-		TEST_EXPECT(rig.driver.describe(kMachineB).state == CloudState::Unknown);
+		TEST_EXPECT(rig.driver.describe(kMachineA, 0).state == CloudState::Unknown);
+		TEST_EXPECT(rig.driver.describe(kMachineB, 0).state == CloudState::Unknown);
 		TEST_EXPECT(rig.runner.calls.size() == calls + 1);
 		rig.now += 1;
 	}
-	// The sweep's list_tagged reads fresh, back-off or not.
+	// The sweep's list_tagged reads fresh, back-off or not, and answers what EC2 lists
+	// alone: a launch it does not list yet is the sweep's to describe with its row's age
+	// (fleet_jobs.h), never this driver's memory.
 	rig.runner.replies.push_back(
 			answered(listing({ instance_json(kMachineB, "running", "10.44.0.22", "8") })));
 	{
 		const size_t calls = rig.runner.calls.size();
 		const auto tagged = rig.driver.list_tagged();
-		TEST_EXPECT(rig.runner.calls.size() == calls + 1 && tagged.size() == 2);
+		TEST_EXPECT(rig.runner.calls.size() == calls + 1 && tagged.size() == 1 &&
+				tagged[0].cloud_id == kMachineB);
 	}
-	// Past the grace, a launched machine the listing lacks is Gone.
-	rig.now += kGrace + 1;
+	// A launched machine the listing lacks: Pending within the grace of its launch (its
+	// row's age), Gone past it.
+	rig.now += kTtl;
 	rig.runner.replies.push_back(
 			answered(listing({ instance_json(kMachineB, "running", "10.44.0.22", "8") })));
-	TEST_EXPECT(rig.driver.describe(kMachineA).state == CloudState::Gone);
+	TEST_EXPECT(rig.driver.describe(kMachineA, static_cast<int64_t>(kGrace)).state ==
+			CloudState::Pending);
+	TEST_EXPECT(rig.driver.describe(kMachineA, kLong).state == CloudState::Gone);
+	return 0;
+}
+
+// Describes at once in one listing's window (the describe jobs on a worker's threads):
+// one describe-instances runs, and the others wait for its answer rather than each
+// running the CLI.
+int test_describes_at_once(const std::string &scratch) {
+	GatedRunner runner(
+			answered(listing({ instance_json(kMachineA, "running", "10.44.0.21", "7") })));
+	hosted::Ec2MachineDriver driver(
+			config_in(scratch), runner, [] { return uint64_t{ 5'000'000 }; });
+	std::atomic<int> running{ 0 };
+	std::vector<std::thread> threads;
+	for (int i = 0; i < 8; ++i) {
+		threads.emplace_back([&driver, &running] {
+			if (driver.describe(kMachineA, kLong).state == CloudState::Running)
+				++running;
+		});
+	}
+	const bool reading = runner.wait_calls(1, std::chrono::seconds(10));
+	// The others arrive while it is read.
+	std::this_thread::sleep_for(std::chrono::milliseconds(200));
+	const int while_reading = runner.calls();
+	runner.open();
+	for (std::thread &t : threads)
+		t.join();
+	TEST_EXPECT(reading && while_reading == 1 && runner.calls() == 1);
+	TEST_EXPECT(running.load() == 8);
 	return 0;
 }
 
@@ -802,9 +1166,9 @@ int test_terminate(const std::string &scratch) {
 	TEST_EXPECT(rig.runner.calls[calls].argv == describe_one_argv(kMachineA));
 	TEST_EXPECT(rig.runner.calls.back().argv == terminate_argv(kMachineA));
 	calls = rig.runner.calls.size();
-	TEST_EXPECT(rig.driver.describe(kMachineA).state == CloudState::Gone);
+	TEST_EXPECT(rig.driver.describe(kMachineA, 0).state == CloudState::Gone);
 	rig.now += kTtl;
-	TEST_EXPECT(rig.driver.describe(kMachineA).state == CloudState::Gone);
+	TEST_EXPECT(rig.driver.describe(kMachineA, 0).state == CloudState::Gone);
 	TEST_EXPECT(rig.runner.calls.size() == calls);
 	// A machine EC2 no longer knows, at the check or at the end: no error, and Gone.
 	rig.runner.replies.push_back(failed(254,
@@ -819,8 +1183,8 @@ int test_terminate(const std::string &scratch) {
 			"the TerminateInstances operation"));
 	rig.driver.terminate("i-0ddddddddddddddd4");
 	calls = rig.runner.calls.size();
-	TEST_EXPECT(rig.driver.describe(kMachineB).state == CloudState::Gone &&
-			rig.driver.describe("i-0ddddddddddddddd4").state == CloudState::Gone &&
+	TEST_EXPECT(rig.driver.describe(kMachineB, kLong).state == CloudState::Gone &&
+			rig.driver.describe("i-0ddddddddddddddd4", kLong).state == CloudState::Gone &&
 			rig.runner.calls.size() == calls);
 	// One terminated already: nothing to end.
 	rig.runner.replies.push_back(
@@ -855,7 +1219,7 @@ int test_terminate(const std::string &scratch) {
 	rig.now += kTtl;
 	rig.runner.replies.push_back(answered(
 			listing({ instance_json("i-0ccccccccccccccc3", "running", "10.44.0.23", "9") })));
-	TEST_EXPECT(rig.driver.describe("i-0ccccccccccccccc3").state == CloudState::Running);
+	TEST_EXPECT(rig.driver.describe("i-0ccccccccccccccc3", 0).state == CloudState::Running);
 	// Another driver's id: no call at all.
 	calls = rig.runner.calls.size();
 	rig.driver.terminate("local-3-1");
@@ -933,7 +1297,10 @@ int test_fleet_config() {
 		TEST_EXPECT(c.idle_minutes == 30 && c.slot_memory_mb == 512 && c.slot_cpus == 1.0);
 		TEST_EXPECT(
 				c.slot_pids == 128 && c.machine_script_path == "/app/hosted/machine_user_data.sh");
-		TEST_EXPECT(c.ec2.service_address == "127.0.0.1" && c.ec2.service_port == 8070);
+		// No URL unless set: each driver's check asks for one.
+		TEST_EXPECT(c.internal_url.empty() && c.ec2.service_url.empty() &&
+				c.docker.service_url.empty() && c.docker.engine_url.empty());
+		TEST_EXPECT(c.ec2.admin_address == "127.0.0.1");
 	}
 	// A deployment's.
 	{
@@ -941,6 +1308,7 @@ int test_fleet_config() {
 		std::vector<std::string> errors;
 		const bool ok = hosted::parse_fleet_config(
 				env_of({ { "ONNET_INTERNAL_HTTP_BIND", "10.44.0.10:8070" },
+						{ "ONNET_INTERNAL_URL", kServiceUrl },
 						{ "ONNET_HOSTED_BOOTSTRAP_CIDRS", "10.44.0.0/16, 10.45.0.0/20" },
 						{ "ONNET_FLEET_SHARED_SLOTS", "16" }, { "ONNET_FLEET_MAX_SHARED", "3" },
 						{ "ONNET_FLEET_MAX_OWN", "0" }, { "ONNET_FLEET_IDLE_MINUTES", "45" },
@@ -949,12 +1317,16 @@ int test_fleet_config() {
 								"{\"own\": \" lt-0abcdef0123456789:3 \", \"shared\": \"" +
 										std::string(kShared) + "\"}" },
 						{ "ONNET_HOSTED_EC2_REGION", kRegion },
-						{ "ONNET_HOSTED_EC2_SUBNET", kSubnet },
+						{ "ONNET_HOSTED_EC2_SUBNETS",
+								std::string(" ") + kSubnet + " , " + kSubnetB + "," },
 						{ "ONNET_HOSTED_DEPLOYMENT", kDeployment },
 						{ "ONNET_HOSTED_SERVE_IMAGE", kImage },
 						{ "ONNET_HOSTED_HOSTD_IMAGE", kHostdImage },
 						{ "ONNET_HOSTED_AWS_CLI", "/opt/aws/bin/aws" },
-						{ "ONNET_HOSTED_MACHINE_SCRIPT", "/srv/machine.sh" } }),
+						{ "ONNET_HOSTED_MACHINE_SCRIPT", "/srv/machine.sh" },
+						{ "ONNET_HOSTED_DOCKER_URL", " http://docker-api:2375 " },
+						{ "ONNET_HOSTED_DOCKER_NETWORK", "opennova-dev" },
+						{ "ONNET_HOSTED_DOCKER_DATA_FROM", "opennova-dev-machine-data-1" } }),
 				c, errors);
 		for (const std::string &e : errors)
 			std::fprintf(stderr, "  %s\n", e.c_str());
@@ -968,12 +1340,21 @@ int test_fleet_config() {
 		TEST_EXPECT(c.idle_minutes == 45 && c.slot_memory_mb == 768 && c.slot_cpus == 0.5);
 		TEST_EXPECT(
 				c.ec2.shared_template == kShared && c.ec2.own_template == "lt-0abcdef0123456789:3");
-		TEST_EXPECT(c.ec2.region == kRegion && c.ec2.subnet == kSubnet &&
+		TEST_EXPECT(c.ec2.region == kRegion &&
+				c.ec2.subnets == std::vector<std::string>({ kSubnet, kSubnetB }) &&
 				c.ec2.deployment == kDeployment);
 		TEST_EXPECT(c.ec2.serve_image == kImage && c.ec2.aws_cli == "/opt/aws/bin/aws");
 		TEST_EXPECT(c.ec2.hostd_image == kHostdImage);
-		TEST_EXPECT(c.ec2.service_address == "10.44.0.10" && c.ec2.service_port == 8070);
+		// The machines reach the controller by its URL; its admin links come from its bind.
+		TEST_EXPECT(c.internal_url == kServiceUrl && c.ec2.service_url == kServiceUrl);
+		TEST_EXPECT(c.ec2.admin_address == "10.44.0.10");
 		TEST_EXPECT(c.machine_script_path == "/srv/machine.sh");
+		// The docker driver's: its own three, the deployment, image, URL and bind as ec2's.
+		TEST_EXPECT(c.docker.engine_url == "http://docker-api:2375" &&
+				c.docker.network == "opennova-dev" &&
+				c.docker.data_from == "opennova-dev-machine-data-1");
+		TEST_EXPECT(c.docker.deployment == kDeployment && c.docker.image == kImage &&
+				c.docker.service_url == kServiceUrl && c.docker.admin_address == "10.44.0.10");
 		// What the agent routes take from it.
 		const hosted::AgentRouteConfig routes =
 				hosted::agent_route_config(c, { "jop_2_consumer", "dfx2_consumer" });
@@ -1011,6 +1392,9 @@ int test_fleet_config() {
 	TEST_EXPECT(refused("ONNET_INTERNAL_HTTP_BIND", "0.0.0.0:8070"));
 	TEST_EXPECT(refused("ONNET_INTERNAL_HTTP_BIND", "54.1.2.3:8070"));
 	TEST_EXPECT(refused("ONNET_INTERNAL_HTTP_BIND", "localhost:8070"));
+	TEST_EXPECT(refused("ONNET_INTERNAL_URL", "controller:8070"));
+	TEST_EXPECT(refused("ONNET_INTERNAL_URL", "http://controller"));
+	TEST_EXPECT(refused("ONNET_INTERNAL_URL", "http://controller:8070/agent"));
 	TEST_EXPECT(refused("ONNET_HOSTED_BOOTSTRAP_CIDRS", "0.0.0.0/0"));
 	TEST_EXPECT(refused("ONNET_HOSTED_BOOTSTRAP_CIDRS", "10.44.0.0/16,54.0.0.0/8"));
 	TEST_EXPECT(refused("ONNET_HOSTED_BOOTSTRAP_CIDRS", "10.44.0.1/16"));
@@ -1049,36 +1433,438 @@ int test_fleet_config() {
 	return 0;
 }
 
-// --- the local driver, no service -------------------------------------------------------------
+// --- the docker driver (the local stack's machines) ------------------------------------------
 
-int test_local_driver_without_service(const std::string &scratch) {
-	hosted::LocalMachineConfig config;
-	config.serve_binary = "/bin/true";
-	config.work_dir = scratch + "/local";
-	config.service_url = "http://127.0.0.1:1"; // nothing listens: the agent never bootstraps
-	config.bootstrap_retry_ms = 50;
-	hosted::LocalMachineDriver driver(config);
-	TEST_EXPECT(std::string(driver.name()) == "local");
+constexpr const char *kEngineUrl = "http://docker-api:2375";
+constexpr const char *kNetwork = "opennova-dev";
+constexpr const char *kDataFrom = "opennova-dev-machine-data-1";
+constexpr const char *kDevDeployment = "dev";
+constexpr const char *kMachineImage = "opennova-serve:local";
+constexpr const char *kDevServiceUrl = "http://novaworld-controller:8070";
+
+hosted::DockerMachineConfig docker_config() {
+	hosted::DockerMachineConfig c;
+	c.engine_url = kEngineUrl;
+	c.network = kNetwork;
+	c.data_from = kDataFrom;
+	c.deployment = kDevDeployment;
+	c.image = kMachineImage;
+	c.service_url = kDevServiceUrl;
+	c.admin_address = "172.30.0.10";
+	c.data_sets = { "jop_2_consumer" };
+	return c;
+}
+
+// An engine in memory: the containers API's calls the driver makes, each recorded.
+struct EngineCall {
+	std::string method;
+	std::string path;
+	std::string body;
+	std::string content_type;
+};
+
+struct FakeEngine {
+	struct Container {
+		std::string status = "created";
+		std::string address;
+		std::map<std::string, std::string> labels;
+		std::string create_body;
+		std::string archive;
+	};
+	std::vector<EngineCall> calls;
+	std::map<std::string, Container> containers;
+	int next_address = 2;
+	bool down = false; // no answer at all
+	int fail_create = 0; // a status for the create
+	int fail_start = 0;
+	bool start_without_address = false;
+
+	hosted::DockerMachineDriver::EngineCall seam() {
+		return [this](const std::string &method, const std::string &path, const std::string &body,
+					   const std::string &content_type) {
+			return answer(method, path, body, content_type);
+		};
+	}
+
+	static hosted::EngineReply reply(int code, std::string body = {}) {
+		hosted::EngineReply r;
+		r.answered = true;
+		r.code = code;
+		r.body = std::move(body);
+		return r;
+	}
+
+	// The container a path names: /containers/<name>/...
+	static std::string name_in(const std::string &path) {
+		const std::string head = "/containers/";
+		const size_t end = path.find_first_of("/?", head.size());
+		return path.substr(
+				head.size(), end == std::string::npos ? std::string::npos : end - head.size());
+	}
+
+	std::string inspect_json(const Container &c) const {
+		std::string labels;
+		for (const auto &[k, v] : c.labels)
+			labels += (labels.empty() ? "" : ",") + std::string("\"") + k + "\":\"" + v + "\"";
+		return "{\"State\":{\"Status\":\"" + c.status + "\"},\"Config\":{\"Labels\":{" + labels +
+				"}},\"NetworkSettings\":{\"Networks\":{\"" + kNetwork + "\":{\"IPAddress\":\"" +
+				c.address + "\"}}}}";
+	}
+
+	hosted::EngineReply answer(const std::string &method, const std::string &path,
+			const std::string &body, const std::string &content_type) {
+		calls.push_back({ method, path, body, content_type });
+		if (down) {
+			hosted::EngineReply r;
+			r.error = "connection refused";
+			return r;
+		}
+		if (method == "POST" && path.rfind("/containers/create?name=", 0) == 0) {
+			if (fail_create)
+				return reply(fail_create, "{\"message\":\"No such image: opennova-serve:local\"}");
+			const std::string name = path.substr(std::string("/containers/create?name=").size());
+			if (containers.count(name))
+				return reply(
+						409, "{\"message\":\"Conflict. The container name is already in use\"}");
+			Container c;
+			c.create_body = body;
+			opennova::io::JsonValue v;
+			std::string error;
+			if (opennova::io::json_parse(body, v, error))
+				if (const auto *labels = v.get("Labels"); labels && labels->is_object())
+					for (const auto &m : labels->object)
+						c.labels[m.key] = m.value.string;
+			containers[name] = c;
+			return reply(201, "{\"Id\":\"0123abcd\",\"Warnings\":[]}");
+		}
+		if (path.rfind("/containers/json?", 0) == 0) {
+			std::string out = "[";
+			for (const auto &[name, c] : containers) {
+				std::string labels;
+				for (const auto &[k, v] : c.labels)
+					labels += (labels.empty() ? "" : ",") + std::string("\"") + k + "\":\"" + v +
+							"\"";
+				out += (out.size() > 1 ? "," : "") + std::string("{\"Names\":[\"/") + name +
+						"\"],\"State\":\"" + c.status + "\",\"Labels\":{" + labels + "}}";
+			}
+			return reply(200, out + "]");
+		}
+		const std::string name = name_in(path);
+		const auto it = containers.find(name);
+		if (it == containers.end())
+			return reply(404, "{\"message\":\"No such container: " + name + "\"}");
+		Container &c = it->second;
+		if (method == "PUT" && path.find("/archive?") != std::string::npos) {
+			c.archive = body;
+			return reply(200);
+		}
+		if (method == "POST" && path == "/containers/" + name + "/start") {
+			if (fail_start)
+				return reply(fail_start, "{\"message\":\"failed to set up the container\"}");
+			if (c.status == "running")
+				return reply(304);
+			c.status = "running";
+			if (!start_without_address)
+				c.address = "172.30.0." + std::to_string(next_address++);
+			return reply(204);
+		}
+		if (method == "GET" && path == "/containers/" + name + "/json")
+			return reply(200, inspect_json(c));
+		if (method == "DELETE" && path == "/containers/" + name + "?force=1&v=1") {
+			containers.erase(it);
+			return reply(204);
+		}
+		return reply(400, "{\"message\":\"the fake engine does not know this call\"}");
+	}
+
+	size_t count(const std::string &method, const std::string &path_head) const {
+		size_t n = 0;
+		for (const auto &c : calls)
+			n += c.method == method && c.path.rfind(path_head, 0) == 0;
+		return n;
+	}
+};
+
+// A ustar archive's members: name -> (mode, uid, its bytes), each header's checksum checked.
+struct TarMember {
+	unsigned mode = 0;
+	unsigned uid = 0;
+	char type = 0;
+	std::string data;
+};
+
+std::optional<std::map<std::string, TarMember>> read_tar(const std::string &tar) {
+	if (tar.size() % 512 != 0)
+		return std::nullopt;
+	std::map<std::string, TarMember> out;
+	size_t at = 0;
+	while (at + 512 <= tar.size()) {
+		const std::string h = tar.substr(at, 512);
+		if (h == std::string(512, '\0'))
+			return out;
+		unsigned sum = 0;
+		for (size_t i = 0; i < 512; ++i)
+			sum += (i >= 148 && i < 156) ? ' ' : static_cast<unsigned char>(h[i]);
+		const auto octal = [&h](size_t from, size_t width) {
+			return static_cast<unsigned>(std::strtoul(h.substr(from, width).c_str(), nullptr, 8));
+		};
+		if (octal(148, 8) != sum || h.compare(257, 5, "ustar") != 0)
+			return std::nullopt;
+		TarMember m;
+		m.mode = octal(100, 8);
+		m.uid = octal(108, 8);
+		m.type = h[156];
+		const size_t size = octal(124, 12);
+		m.data = tar.substr(at + 512, size);
+		out[h.substr(0, h.find('\0'))] = m;
+		at += 512 + (size + 511) / 512 * 512;
+	}
+	return std::nullopt;
+}
+
+int test_docker_config_and_profile(const std::string &) {
+	using Driver = hosted::DockerMachineDriver;
+	TEST_EXPECT(Driver::check_config(docker_config()).empty());
+	const auto refused = [](void (*change)(hosted::DockerMachineConfig &), const char *names) {
+		hosted::DockerMachineConfig c = docker_config();
+		change(c);
+		const std::string why = Driver::check_config(c);
+		if (why.find(names) == std::string::npos)
+			std::fprintf(stderr, "  want a refusal naming '%s', got '%s'\n", names, why.c_str());
+		return why.find(names) != std::string::npos;
+	};
+	TEST_EXPECT(refused([](auto &c) { c.engine_url = "unix:///var/run/docker.sock"; },
+			"ONNET_HOSTED_DOCKER_URL"));
+	TEST_EXPECT(refused(
+			[](auto &c) { c.engine_url = "http://docker-api"; }, "ONNET_HOSTED_DOCKER_URL"));
+	TEST_EXPECT(refused([](auto &c) { c.network.clear(); }, "ONNET_HOSTED_DOCKER_NETWORK"));
+	TEST_EXPECT(refused([](auto &c) { c.network = "-net"; }, "ONNET_HOSTED_DOCKER_NETWORK"));
+	TEST_EXPECT(refused([](auto &c) { c.data_from = "a b"; }, "ONNET_HOSTED_DOCKER_DATA_FROM"));
+	TEST_EXPECT(refused([](auto &c) { c.deployment.clear(); }, "ONNET_HOSTED_DEPLOYMENT"));
+	TEST_EXPECT(refused(
+			[](auto &c) { c.deployment = std::string(33, 'd'); }, "ONNET_HOSTED_DEPLOYMENT"));
+	TEST_EXPECT(refused([](auto &c) { c.image = "-v"; }, "ONNET_HOSTED_SERVE_IMAGE"));
+	TEST_EXPECT(refused([](auto &c) { c.service_url = "controller:8070"; }, "ONNET_INTERNAL_URL"));
+	TEST_EXPECT(refused([](auto &c) { c.data_sets.clear(); }, "no data set"));
+
+	// The slots' fixed ports (every machine has an address of its own), admitting
+	// the controller's network.
+	const hosted::MachineProfile profile = Driver::profile(docker_config());
+	TEST_EXPECT(profile.provider == "docker" && profile.boot_timeout_ms == Driver::kBootTimeoutMs);
+	const hosted::SlotPlan plan = profile.slot_plan(3);
+	TEST_EXPECT(plan.game_port == 32771 && plan.admin_port == 32803 &&
+			plan.admin_allowed_ip == "172.30.*");
+
+	// The machine: its name, the agent's command line, the create's body.
+	TEST_EXPECT(Driver::machine_name("dev", 7) == "dev-machine-7");
+	TEST_EXPECT(Driver::machine_command(docker_config(), 7) ==
+			(std::vector<std::string>{ "--runtime", "process", "--serve",
+					"/usr/local/bin/opennova-serve", "--service", kDevServiceUrl, "--machine", "7",
+					"--token-file", "/run/opennova/hostd.token", "--state-dir", "/srv/serve/hostd",
+					"--slots-root", "/srv/serve/slots", "--iptables", "none", "--ip6tables",
+					"none" }));
+	hosted::MachineLaunch launch = launch_of(7, MachineKind::Own);
+	opennova::io::JsonValue body;
+	std::string error;
+	TEST_EXPECT(
+			opennova::io::json_parse(Driver::create_body(docker_config(), launch), body, error));
+	TEST_EXPECT(body.get_string("Image", "") == kMachineImage);
+	const auto *entrypoint = body.get("Entrypoint");
+	TEST_EXPECT(entrypoint && entrypoint->array.size() == 1 &&
+			entrypoint->array[0].string == "/usr/local/bin/opennova-hostd");
+	const auto *cmd = body.get("Cmd");
+	TEST_EXPECT(cmd && cmd->array.size() == Driver::machine_command(docker_config(), 7).size());
+	const auto *labels = body.get("Labels");
+	TEST_EXPECT(labels && labels->get_string("opennova.hosted", "") == "1" &&
+			labels->get_string("opennova.deployment", "") == "dev" &&
+			labels->get_string("opennova.machine-id", "") == "7" &&
+			labels->get_string("opennova.machine-kind", "") == "own");
+	const auto *host = body.get("HostConfig");
+	TEST_EXPECT(host && host->get_string("NetworkMode", "") == kNetwork &&
+			host->get_bool("Init", false));
+	const auto *from = host ? host->get("VolumesFrom") : nullptr;
+	TEST_EXPECT(from && from->array.size() == 1 &&
+			from->array[0].string == std::string(kDataFrom) + ":ro");
+	const auto *restart = host ? host->get("RestartPolicy") : nullptr;
+	TEST_EXPECT(restart && restart->get_string("Name", "") == "no");
+	const auto *networking = body.get("NetworkingConfig");
+	const auto *endpoints = networking ? networking->get("EndpointsConfig") : nullptr;
+	TEST_EXPECT(endpoints && endpoints->get(kNetwork) != nullptr);
+	// The token is in no part of it.
+	TEST_EXPECT(Driver::create_body(docker_config(), launch).find(launch.bootstrap_token) ==
+			std::string::npos);
+
+	// The token's archive: opennova/ (0700) and opennova/hostd.token (0600), both the
+	// machine user's.
+	const auto tar = read_tar(Driver::token_archive("tok-123"));
+	TEST_EXPECT(tar && tar->size() == 2);
+	if (tar && tar->size() == 2) {
+		const TarMember &dir = tar->at("opennova/");
+		const TarMember &file = tar->at("opennova/hostd.token");
+		TEST_EXPECT(dir.type == '5' && dir.mode == 0700 && dir.uid == Driver::kMachineUid);
+		TEST_EXPECT(file.type == '0' && file.mode == 0600 && file.uid == Driver::kMachineUid &&
+				file.data == "tok-123");
+	}
+	return 0;
+}
+
+int test_docker_launch(const std::string &) {
+	FakeEngine engine;
+	hosted::DockerMachineDriver driver(docker_config(), engine.seam());
+	TEST_EXPECT(std::string(driver.name()) == "docker");
 	std::string error;
 	TEST_EXPECT(!driver.launch(hosted::MachineLaunch{}, error) && !error.empty());
+
+	// A launch: create, the token, start, its address.
+	const hosted::MachineLaunch launch = launch_of(3);
+	const auto machine = driver.launch(launch, error);
+	TEST_EXPECT(machine && machine->cloud_id == "dev-machine-3");
+	TEST_EXPECT(
+			machine->private_address == "172.30.0.2" && machine->public_address == "172.30.0.2");
+	TEST_EXPECT(
+			machine->instance_type == "container" && machine->template_version == kMachineImage);
+	TEST_EXPECT(engine.calls.size() == 4);
+	TEST_EXPECT(engine.calls[0].method == "POST" &&
+			engine.calls[0].path == "/containers/create?name=dev-machine-3" &&
+			engine.calls[0].content_type == "application/json");
+	TEST_EXPECT(engine.calls[1].method == "PUT" &&
+			engine.calls[1].path == "/containers/dev-machine-3/archive?path=%2Frun&copyUIDGID=1" &&
+			engine.calls[1].content_type == "application/x-tar");
+	TEST_EXPECT(engine.calls[2].method == "POST" &&
+			engine.calls[2].path == "/containers/dev-machine-3/start");
+	TEST_EXPECT(engine.calls[3].method == "GET" &&
+			engine.calls[3].path == "/containers/dev-machine-3/json");
+	const auto tar = read_tar(engine.containers["dev-machine-3"].archive);
+	TEST_EXPECT(tar && tar->count("opennova/hostd.token") &&
+			tar->at("opennova/hostd.token").data == launch.bootstrap_token);
+	// The token rides the archive alone.
+	for (const auto &c : engine.calls)
+		if (c.method != "PUT")
+			TEST_EXPECT(c.path.find(launch.bootstrap_token) == std::string::npos &&
+					c.body.find(launch.bootstrap_token) == std::string::npos);
+
+	// Run again (its first run cut short): the container its first run made is this
+	// row's, already running: no second one, no second start, its address read.
+	engine.calls.clear();
+	const auto again = driver.launch(launch, error);
+	TEST_EXPECT(
+			again && again->cloud_id == "dev-machine-3" && again->private_address == "172.30.0.2");
+	TEST_EXPECT(engine.count("POST", "/containers/create") == 1 &&
+			engine.count("POST", "/containers/dev-machine-3/start") == 0 &&
+			engine.count("PUT", "/containers/") == 0 && engine.containers.size() == 1);
+	// One its first run created but never started: given the token and started now.
+	engine.containers["dev-machine-4"].status = "created";
+	engine.containers["dev-machine-4"].labels = { { "opennova.hosted", "1" },
+		{ "opennova.deployment", "dev" }, { "opennova.machine-id", "4" } };
+	const auto created = driver.launch(launch_of(4), error);
+	TEST_EXPECT(created && created->private_address == "172.30.0.3" &&
+			!engine.containers["dev-machine-4"].archive.empty());
+	// A name held by a container that is not this row's machine: refused, left alone.
+	engine.containers["dev-machine-5"].labels = { { "opennova.hosted", "1" },
+		{ "opennova.deployment", "dev" }, { "opennova.machine-id", "55" } };
+	TEST_EXPECT(!driver.launch(launch_of(5), error) &&
+			error.find("not this machine's") != std::string::npos);
+	TEST_EXPECT(engine.containers.count("dev-machine-5") == 1);
+	return 0;
+}
+
+int test_docker_launch_failures(const std::string &) {
+	std::string error;
+	{
+		// The engine refuses the create: nothing is left.
+		FakeEngine engine;
+		engine.fail_create = 404;
+		hosted::DockerMachineDriver driver(docker_config(), engine.seam());
+		TEST_EXPECT(!driver.launch(launch_of(3), error));
+		TEST_EXPECT(error == "create dev-machine-3: HTTP 404: No such image: opennova-serve:local");
+		TEST_EXPECT(engine.containers.empty());
+	}
+	{
+		// The start fails: the container is removed.
+		FakeEngine engine;
+		engine.fail_start = 500;
+		hosted::DockerMachineDriver driver(docker_config(), engine.seam());
+		TEST_EXPECT(!driver.launch(launch_of(3), error) &&
+				error.rfind("start dev-machine-3: HTTP 500", 0) == 0);
+		TEST_EXPECT(engine.containers.empty() &&
+				engine.count("DELETE", "/containers/dev-machine-3") == 1);
+	}
+	{
+		// It runs with no address on the network: removed, since its agent could
+		// never be admitted.
+		FakeEngine engine;
+		engine.start_without_address = true;
+		hosted::DockerMachineDriver driver(docker_config(), engine.seam());
+		TEST_EXPECT(!driver.launch(launch_of(3), error) &&
+				error == "dev-machine-3 has no address on opennova-dev (running)");
+		TEST_EXPECT(engine.containers.empty());
+	}
+	{
+		// No engine answers.
+		FakeEngine engine;
+		engine.down = true;
+		hosted::DockerMachineDriver driver(docker_config(), engine.seam());
+		TEST_EXPECT(!driver.launch(launch_of(3), error) &&
+				error == "create dev-machine-3: no answer (connection refused)");
+	}
+	return 0;
+}
+
+int test_docker_describe_terminate_list(const std::string &) {
+	FakeEngine engine;
+	hosted::DockerMachineDriver driver(docker_config(), engine.seam());
+	std::string error;
 	const auto a = driver.launch(launch_of(3), error);
 	const auto b = driver.launch(launch_of(4, MachineKind::Own), error);
-	TEST_EXPECT(a && b && a->cloud_id != b->cloud_id);
-	TEST_EXPECT(a->private_address == "127.0.0.1" && a->instance_type == "local");
-	TEST_EXPECT(driver.describe(a->cloud_id).state == CloudState::Running);
-	TEST_EXPECT(driver.describe("local-99-1").state == CloudState::Gone);
-	const auto view = driver.view(a->cloud_id);
-	TEST_EXPECT(view && !view->bootstrapped && view->syncs == 0 && view->containers.empty());
+	TEST_EXPECT(a && b);
+
+	// describe: the engine's states, its address both of the row's.
+	auto seen = driver.describe(a->cloud_id, 0);
+	TEST_EXPECT(seen.state == CloudState::Running && seen.private_address == a->private_address &&
+			seen.public_address == a->private_address);
+	engine.containers["dev-machine-3"].status = "created";
+	TEST_EXPECT(driver.describe(a->cloud_id, 0).state == CloudState::Pending);
+	for (const char *gone : { "exited", "dead", "removing" }) {
+		engine.containers["dev-machine-3"].status = gone;
+		TEST_EXPECT(driver.describe(a->cloud_id, 0).state == CloudState::Gone);
+	}
+	engine.containers["dev-machine-3"].status = "running";
+	TEST_EXPECT(driver.describe("dev-machine-99", 0).state == CloudState::Gone);
+	engine.down = true;
+	TEST_EXPECT(driver.describe(a->cloud_id, 0).state == CloudState::Unknown);
+
+	// list_tagged: this deployment's machines, by both labels, in every state.
+	bool threw = false;
+	try {
+		driver.list_tagged();
+	} catch (const std::runtime_error &) {
+		threw = true;
+	}
+	TEST_EXPECT(threw);
+	engine.down = false;
+	engine.containers["other-machine-1"].labels = { { "opennova.hosted", "1" },
+		{ "opennova.deployment", "other" }, { "opennova.machine-id", "1" } };
+	engine.calls.clear();
 	auto tagged = driver.list_tagged();
-	TEST_EXPECT(tagged.size() == 2);
-	// Slot ports: free ones, a game and an admin port apart, admitting loopback.
-	const hosted::SlotPlan plan = driver.slot_plan(a->cloud_id, 0);
-	TEST_EXPECT(
-			plan.game_port != 0 && plan.admin_port != 0 && plan.admin_allowed_ip == "127.0.0.1");
+	TEST_EXPECT(engine.calls.size() == 1 &&
+			engine.calls[0].path ==
+					"/containers/"
+					"json?all=1&filters=%7B%22label%22%3A%5B%22opennova.hosted%3D1%22%2C%"
+					"22opennova.deployment%3Ddev%22%5D%7D");
+	TEST_EXPECT(tagged.size() == 2 && tagged[0].cloud_id == "dev-machine-3" &&
+			tagged[0].machine_id == 3 && tagged[1].cloud_id == "dev-machine-4" &&
+			tagged[1].machine_id == 4);
+
+	// terminate: never a container that is not this deployment's machine; ours
+	// removed with its volumes; one the engine no longer knows is no error.
+	driver.terminate("other-machine-1");
+	TEST_EXPECT(engine.containers.count("other-machine-1") == 1 &&
+			engine.count("DELETE", "/containers/other-machine-1") == 0);
 	driver.terminate(a->cloud_id);
+	TEST_EXPECT(engine.containers.count("dev-machine-3") == 0 &&
+			engine.count("DELETE", "/containers/dev-machine-3?force=1&v=1") == 1);
 	driver.terminate(a->cloud_id);
-	TEST_EXPECT(
-			driver.describe(a->cloud_id).state == CloudState::Gone && !driver.view(a->cloud_id));
+	TEST_EXPECT(engine.count("DELETE", "/containers/dev-machine-3") == 1);
 	tagged = driver.list_tagged();
 	TEST_EXPECT(tagged.size() == 1 && tagged[0].machine_id == 4);
 	return 0;
@@ -1100,14 +1886,19 @@ int main() {
 		{ "slot_plan", test_slot_plan },
 		{ "launch", test_launch },
 		{ "launch_retried", test_launch_retried },
+		{ "launch_zones", test_launch_zones },
 		{ "launch_per_kind", test_launch_per_kind },
 		{ "launch_failures", test_launch_failures },
 		{ "describe", test_describe },
 		{ "describe_failures", test_describe_failures },
+		{ "describes_at_once", test_describes_at_once },
 		{ "terminate", test_terminate },
 		{ "list_tagged", test_list_tagged },
 		{ "fleet_config", [](const std::string &) { return test_fleet_config(); } },
-		{ "local_driver_without_service", test_local_driver_without_service },
+		{ "docker_config_and_profile", test_docker_config_and_profile },
+		{ "docker_launch", test_docker_launch },
+		{ "docker_launch_failures", test_docker_launch_failures },
+		{ "docker_describe_terminate_list", test_docker_describe_terminate_list },
 	};
 	for (const Case &c : cases) {
 		std::printf("-- %s\n", c.name);

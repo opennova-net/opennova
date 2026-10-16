@@ -1,4 +1,4 @@
-// The hosting entitlement (apps/novaworld_server/billing/entitlement.h) and the
+// The hosting entitlement (apps/novaworld_common/billing/entitlement.h) and the
 // billing tables it reads (billing/billing_repository.h, backend/migrations/
 // 0002_billing.sql). The pure core first: which Stripe statuses grant, the
 // period's 48 h net, a comp grant against a tier, the own-machine add-on that

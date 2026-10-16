@@ -40,7 +40,8 @@
       </div>
       <p id="fleet-roll-hint" class="text-xs text-ink-muted">
         Rolling drains every shared machine and moves its servers to fresh ones (a new image, say); the moves count
-        as no restart.
+        as no restart. Each machine's launch and end runs as a background job: see
+        <RouterLink to="/admin/jobs" class="text-accent hover:text-ink-bright">Background jobs</RouterLink>.
       </p>
       <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
         <table class="min-w-full divide-y divide-border">
@@ -264,7 +265,8 @@
 // (its row and cloud id, kind, state, instance type, servers on it of its
 // slots, address, data sent this month) with drain and end while it lives
 // (POST /api/admin/fleet/machines/<id>/...)
-// and the roll (POST /api/admin/fleet/roll); its servers (owner and tier,
+// and the roll (POST /api/admin/fleet/roll), its launches and ends being
+// background jobs (their page, /admin/jobs); its servers (owner and tier,
 // state, players, machine and slot), each to its own page
 // (/admin/fleet/<id>), with a stop; and the kill switch (POST
 // /api/admin/hosted/stop-all) behind a typed confirmation. The page polls,

@@ -1,4 +1,4 @@
-// The fleet's side of the hosted servers' supervisor (apps/novaworld_server/
+// The fleet's side of the hosted servers' supervisor (apps/novaworld_common/
 // hosted/supervisor.h) on a migrated database, a FakeDriver whose machines'
 // agents the test plays (hosted_fake_driver.h, hosted_fleet_rig.h) and a
 // hand-stepped clock: the desired state each machine's sync gets (the files
@@ -15,7 +15,8 @@
 // an admin's end, and the reconciliation of the driver's machines with the rows
 // (a launch cut short, a cloud machine no row names, a row whose cloud machine
 // is gone, a start whose files went with the service, a listing that fails),
-// and the periodic sweep. Compiles the hosted sources directly.
+// and the periodic sweep (a launch in flight spared). Compiles the hosted sources
+// directly.
 
 #include "hosted_fleet_rig.h"
 
@@ -100,9 +101,11 @@ int test_desired_state() {
 int test_boot_timeout() {
 	Rig rig("fleet_boot_timeout");
 	rig.fake.boot_timeout = 30000;
+	rig.make_supervisor(); // its profile's boot timeout
 	const int64_t id = rig.request("boot_owner");
 	rig.tick(); // -> provisioning
-	rig.tick(); // the launch, the placement
+	rig.tick(); // the launch (its job runs after the pass)
+	rig.tick(); // the placement on the launched machine
 	const int64_t machine = rig.machine_of(id);
 	TEST_EXPECT(machine > 0 && rig.state(id) == State::Booting);
 	rig.muted.insert(machine);
@@ -122,14 +125,16 @@ int test_boot_timeout() {
 	rig.step();
 	TEST_EXPECT(rig.fake.launches == 1 && rig.state(id) == State::Provisioning);
 	rig.advance(rig.config.launch_backoff_ms);
-	rig.tick(); // the pass alone: its agent has not reported yet
+	rig.tick(); // the launch: its agent has not reported yet
+	rig.tick(); // the placement
 	TEST_EXPECT(rig.fake.launches == 2 && rig.state(id) == State::Booting);
 	const int64_t second = rig.machine_of(id);
 	TEST_EXPECT(second != machine);
 	// That one's cloud machine vanishes before its agent reports.
 	rig.muted.insert(second);
 	rig.fake.vanish(rig.machine(second)->cloud_id);
-	rig.step();
+	rig.step(); // its describe finds it gone
+	rig.step(); // the pass reads it
 	TEST_EXPECT(rig.machine(second)->state == FleetMachineState::Failed &&
 			rig.machine(second)->end_reason == "its machine is gone before it booted");
 	TEST_EXPECT(rig.server(id)->restarts == 0 && rig.sup->launch_failures() == 2);
@@ -176,9 +181,12 @@ int test_lost_reports_again() {
 	TEST_EXPECT(!rig.to_running(id, 3201).empty());
 	const int64_t machine = rig.machine_of(id);
 	rig.silence(machine);
+	// The cloud answers nothing from here: each describe since it went lost
+	// reads unknown.
+	rig.fake.unknown = true;
 	rig.step();
 	TEST_EXPECT(rig.machine(machine)->state == FleetMachineState::Lost);
-	rig.fake.unknown = true;
+	TEST_EXPECT(rig.machine(machine)->cloud_state == "unknown");
 	rig.advance(rig.config.lost_end_ms);
 	rig.step();
 	TEST_EXPECT(rig.machine(machine)->state == FleetMachineState::Lost);
@@ -253,8 +261,9 @@ int test_drain_one_at_a_time() {
 	Database *db = &rig.db;
 	TEST_EXPECT(hosted::transition_machine(*db, old_machine, FleetMachineState::Ready, FleetMachineState::Draining,
 			"drained by an admin"));
-	rig.step();
-	// The first moves (a new machine for it: the draining one takes nothing), the second stays.
+	rig.step(); // the first moves: a new machine launched for it (the draining one takes nothing)
+	rig.step(); // its placement there
+	// The first moved, the second stays.
 	TEST_EXPECT(rig.machine_of(a) != old_machine && rig.machine_of(a) != 0 && rig.fake.launches == 2);
 	TEST_EXPECT(rig.machine_of(b) == old_machine && rig.state(b) == State::Running);
 	TEST_EXPECT(has_event(*db, a, "its machine drains; placed again (no restart counted)"));
@@ -283,7 +292,8 @@ int test_drain_while_booting() {
 	Rig rig("fleet_drain_booting");
 	const int64_t id = rig.request("drain_booting_owner");
 	rig.tick(); // -> provisioning
-	rig.tick(); // the launch, the placement
+	rig.tick(); // the launch (its job runs after the pass)
+	rig.tick(); // the placement
 	const int64_t machine = rig.machine_of(id);
 	TEST_EXPECT(machine > 0 && rig.machine(machine)->state == FleetMachineState::Booting);
 	rig.muted.insert(machine);
@@ -369,6 +379,7 @@ int test_reconcile_machines() {
 	TEST_EXPECT(!rig.to_running(gone, 3602).empty());
 	const int64_t cut = rig.request("rec_cut");
 	rig.step();
+	rig.step(); // its machine launched
 	rig.step(); // placed; its machine's agent then muted before it took the files
 	const int64_t cut_machine = rig.machine_of(cut);
 	TEST_EXPECT(cut_machine > 0 && rig.state(cut) == State::Booting);
@@ -390,7 +401,7 @@ int test_reconcile_machines() {
 	rig.fake.fail_list = true;
 	rig.make_supervisor();
 	rig.advance(1000);
-	rig.sup->reconcile(rig.now);
+	rig.reconcile(); // and its sweep job, which fails
 	TEST_EXPECT(!rig.fake.was_terminated(stray) && !rig.fake.was_terminated(left));
 	TEST_EXPECT(rig.machine(gone_machine)->state == FleetMachineState::Ready);
 	TEST_EXPECT(rig.machine(launching.id)->state == FleetMachineState::Failed);
@@ -399,14 +410,18 @@ int test_reconcile_machines() {
 	rig.fake.fail_list = false;
 	rig.make_supervisor();
 	rig.advance(1000);
-	rig.sup->reconcile(rig.now);
+	rig.reconcile(); // and its sweep job
 	TEST_EXPECT(rig.fake.was_terminated(stray) && rig.fake.was_terminated(left));
-	TEST_EXPECT(rig.machine(gone_machine)->state == FleetMachineState::Ended);
-	TEST_EXPECT(rig.state(gone) == State::Provisioning && rig.server(gone)->restarts == 0);
-	TEST_EXPECT(rig.state(running) == State::Running);
+	// The sweep found the row's machine gone; the next pass ends it.
+	TEST_EXPECT(rig.machine(gone_machine)->cloud_state == "gone");
 	auto row = rig.server(cut);
 	TEST_EXPECT(row->state == State::Provisioning && row->restarts == 0 && !row->machine_ref);
 	TEST_EXPECT(has_event(*db, cut, "its start was cut short by the service's restart"));
+	rig.tick();
+	TEST_EXPECT(rig.machine(gone_machine)->state == FleetMachineState::Ended);
+	TEST_EXPECT(has_event(*db, gone, "its machine is gone; placed again (no restart counted)"));
+	TEST_EXPECT(rig.server(gone)->restarts == 0);
+	TEST_EXPECT(rig.state(running) == State::Running);
 	TEST_EXPECT(rig.walk(cut, State::Listing));
 	TEST_EXPECT(rig.server(cut)->generation == cut_generation + 1);
 	TEST_EXPECT(rig.walk(gone, State::Listing));
@@ -427,6 +442,30 @@ int test_orphan_sweep() {
 	rig.step();
 	TEST_EXPECT(rig.fake.was_terminated(stray) && !rig.fake.was_terminated(own_cloud));
 	TEST_EXPECT(rig.state(id) == State::Running);
+	return 0;
+}
+
+// A launch in flight: its cloud machine runs, tagged with its row's id, while the
+// row still launches (no cloud id until the launch's answer is written, a retried
+// run-instances' worth of seconds). The sweep keeps it; once the answer lands it is
+// the row's own, and another cloud machine tagged with that row is an orphan.
+int test_sweep_spares_launch_in_flight() {
+	Rig rig("fleet_sweep_in_flight");
+	const auto launching = hosted::create_machine(
+			rig.db, { "fake", hosted::MachineKind::Shared, 2, kServeImage, 0 });
+	const std::string in_flight = rig.fake.adopt(launching.id);
+	TEST_EXPECT(hosted::enqueue_fleet_sweep(rig.db) != 0);
+	rig.run_jobs();
+	TEST_EXPECT(!rig.fake.was_terminated(in_flight));
+	TEST_EXPECT(rig.machine(launching.id)->state == FleetMachineState::Launching);
+	hosted::LaunchedMachine launched;
+	launched.cloud_id = in_flight;
+	launched.private_address = "10.0.1.99";
+	TEST_EXPECT(hosted::mark_launched(rig.db, launching.id, launched));
+	const std::string second = rig.fake.adopt(launching.id);
+	TEST_EXPECT(hosted::enqueue_fleet_sweep(rig.db) != 0);
+	rig.run_jobs();
+	TEST_EXPECT(!rig.fake.was_terminated(in_flight) && rig.fake.was_terminated(second));
 	return 0;
 }
 
@@ -451,6 +490,7 @@ int main(int argc, char **argv) {
 		{ "admin_end", test_admin_end },
 		{ "reconcile_machines", test_reconcile_machines },
 		{ "orphan_sweep", test_orphan_sweep },
+		{ "sweep_spares_launch_in_flight", test_sweep_spares_launch_in_flight },
 	};
 	for (const Case &c : cases) {
 		std::printf("-- %s\n", c.name);

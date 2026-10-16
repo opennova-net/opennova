@@ -2,19 +2,24 @@
 
 // The hosted servers' supervisor on a fresh migrated database, a FakeDriver and
 // a hand-stepped clock, with each machine's agent played by a FakeAgent
-// (hosted_fake_driver.h); and the fixtures hosted_supervisor_test and
-// hosted_fleet_test share: player accounts, the billing cache's subscriptions,
-// a listing made by hand, the events read back. A step() is what a second of
-// the service does: one pass, then one sync of every machine's agent (a muted
-// machine's agent is silent).
+// (hosted_fake_driver.h) and the fleet's jobs (fleet_jobs.h) run on the test's
+// thread after each pass, as the workers would within the second; and the
+// fixtures hosted_supervisor_test and hosted_fleet_test share: player accounts,
+// the billing cache's subscriptions, a listing made by hand, the events read
+// back. A tick() is one pass, then the periodic sweep's schedule and every job
+// due; a step() is what a second of the service does: a tick, then one sync of
+// every machine's agent (a muted machine's agent is silent).
 
 #include "auth.h"
 #include "billing/billing_repository.h"
+#include "hosted/fleet_jobs.h"
 #include "hosted/fleet_repository.h"
 #include "hosted/hosted_repository.h"
 #include "hosted/hosted_settings.h"
 #include "hosted/supervisor.h"
 #include "hosted_fake_driver.h"
+#include "jobs/scheduler.h"
+#include "jobs/worker_pool.h"
 
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/host_repository.h>
@@ -36,6 +41,7 @@ namespace hosted_rig {
 
 namespace nws = opennova::novaworld_server;
 namespace hosted = opennova::novaworld_server::hosted;
+namespace jobs = opennova::novaworld_server::jobs;
 namespace hostdb = opennova::hostdb;
 using hosted::State;
 using hosted_test::FakeAgent;
@@ -192,6 +198,8 @@ struct Rig {
 	FakeDriver fake;
 	hosted::SupervisorConfig config;
 	std::unique_ptr<hosted::Supervisor> sup;
+	jobs::JobRegistry registry;
+	std::unique_ptr<jobs::Scheduler> scheduler;
 	std::vector<std::pair<uint32_t, int64_t>> pushes;
 	std::map<int64_t, FakeAgent> agents; // by machine row
 	std::set<int64_t> muted;             // machines whose agents stay silent
@@ -219,16 +227,35 @@ struct Rig {
 		config.idle_ms = 10 * 60 * 1000;
 		config.lost_end_ms = 3 * 60 * 1000;
 		config.launch_backoff_ms = 5000;
+		// Every pass that wants a describe asks one (the jobs then run at once).
+		config.describe_interval_ms = 0;
+		config.clock_ms = [this] { return now; };
+		hosted::register_fleet_jobs(registry, fake);
 		make_supervisor();
 	}
 	void make_supervisor() {
-		sup = std::make_unique<hosted::Supervisor>(pool, fake, config);
-		sup->set_stop_listing([this](uint32_t rid, int64_t account) {
+		sup = std::make_unique<hosted::Supervisor>(pool, fake.profile(), config);
+		sup->set_stop_listing([this](opennova::db::Database &, uint32_t rid, int64_t account) {
 			pushes.emplace_back(rid, account);
 			return true;
 		});
+		scheduler = std::make_unique<jobs::Scheduler>(pool,
+				hosted::fleet_schedule(static_cast<int64_t>(config.orphan_sweep_interval_ms)),
+				[this] { return static_cast<int64_t>(now); });
 	}
-	void tick() { sup->tick(now); }
+	// Every job due, run on this thread (it holds none of the pool's leases).
+	size_t run_jobs() { return jobs::run_due(pool, registry); }
+	// One pass, then the sweep's schedule and every job due.
+	void tick() {
+		sup->tick(now);
+		scheduler->tick(db, static_cast<int64_t>(now));
+		run_jobs();
+	}
+	// The supervisor's reconciliation (a new supervisor's start), then its jobs.
+	void reconcile() {
+		sup->reconcile(now);
+		run_jobs();
+	}
 	void advance(uint64_t ms) { now += ms; }
 	// Every live machine's agent syncs once (a muted one's does not).
 	void sync_all() {

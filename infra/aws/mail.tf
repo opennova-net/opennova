@@ -3,50 +3,61 @@
 # ---------------------------------------------------------------------------
 #
 # The service sends the welcome mail and the password reset links as
-# <mail_sender>@<domain> (apps/novaworld_server/mailer.h: `sesv2 send-email`
-# through the AWS CLI, on the service instance's role). Prod makes the domain's
-# SES identity with Easy DKIM (its three CNAMEs in the Cloudflare zone) and a
-# custom MAIL FROM domain, bounce.<domain> (its MX and SPF records), so the mail
-# passes SPF and DKIM aligned with the domain; replies reach the support
-# mailbox through Email Routing (email.tf). A new account's SES is in the
-# sandbox: it sends only to verified addresses, 200 a day, until AWS grants
-# production access (asked for in the console, once). So prod also makes an
-# identity for the vault's email/forward_to address, which AWS asks its owner
-# to verify by mail: mail to it works in the sandbox.
+# <mail_sender>@<web host> (`sesv2 send-email` through the AWS CLI, with the
+# worker's task role: web queues them as mail.send jobs, a worker's to send).
+# Each deployment sends through SES identities of its own, in its own account:
+# prod as support@<domain>, staging as support@staging.<domain>, so a staging
+# mail is never one of prod's and links to staging's site alone
+# (ONNET_SITE_URL, programs.tf). The identity is the deployment's web host with
+# Easy DKIM (its three CNAMEs in the Cloudflare zone, under that host) and a
+# custom MAIL FROM domain, bounce.<web host> (its MX and SPF records), so the
+# mail passes SPF and DKIM aligned with it; replies to prod's support address
+# reach the support mailbox through Email Routing (infra/zone). A new
+# account's SES is in the sandbox: it sends only to verified addresses, 200 a
+# day, until AWS grants production access (asked for in the console, once per
+# account). So each deployment also makes an identity for the vault's
+# email/forward_to address, which AWS asks its owner to verify by mail: mail to
+# it works in the sandbox.
 #
-# Every deployment's service role may send from <mail_sender>@<domain> alone,
-# through those identities (another deployment, such as staging, names prod's
-# by ARN), and its infra.env names the sender (ONNET_MAIL_FROM) and SES's
-# region (ONNET_MAIL_REGION). Off while var.mail_sender is empty or there is no
-# Cloudflare: no identity, no record, no permission, and the service runs with
-# mail off.
+# The worker may send from <mail_sender>@<web host> alone, through those
+# identities; web's environment and the worker's name the sender
+# (ONNET_MAIL_FROM) and SES's region (ONNET_MAIL_REGION), web's to decide
+# whether it queues mail at all. Off while var.mail_sender is empty or there is
+# no Cloudflare: no identity, no record, no permission, and the service runs
+# with mail off.
 
 locals {
-  mail_enabled     = local.dns_enabled && var.mail_sender != ""
-  mail_from        = local.mail_enabled ? "${var.mail_sender}@${var.cloudflare_domain}" : ""
-  mail_from_label  = "bounce"
-  mail_from_domain = "${local.mail_from_label}.${var.cloudflare_domain}"
+  email_forward_to = can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.email_forward_to)) ? var.email_forward_to : ""
+
+  mail_enabled  = local.dns_enabled && var.mail_sender != ""
+  mail_identity = local.web_host
+  mail_from     = local.mail_enabled ? "${var.mail_sender}@${local.mail_identity}" : ""
+  # The records' names in the zone: prod's at the apex, staging's under
+  # staging (bounce.staging, <token>._domainkey.staging).
+  mail_record_suffix = local.is_prod ? "" : ".${local.deployment}"
+  mail_from_label    = "bounce${local.mail_record_suffix}"
+  mail_from_domain   = "bounce.${local.mail_identity}"
   # The domain's identity, and in the sandbox the forward_to address's (SES
   # checks the sender's identity and, while sandboxed, each recipient's).
-  mail_identity_prefix = "arn:${local.partition}:ses:${var.region}:${local.account_id}:identity"
+  mail_identity_prefix = "arn:${local.partition}:ses:${local.region}:${local.account_id}:identity"
   mail_identities = local.mail_enabled ? concat(
-    ["${local.mail_identity_prefix}/${var.cloudflare_domain}"],
+    ["${local.mail_identity_prefix}/${local.mail_identity}"],
     local.email_forward_to != "" ? ["${local.mail_identity_prefix}/${local.email_forward_to}"] : [],
   ) : []
 
   mail_env = local.mail_enabled ? {
     ONNET_MAIL_FROM   = local.mail_from
-    ONNET_MAIL_REGION = var.region
+    ONNET_MAIL_REGION = local.region
   } : {}
 }
 
-# ---- the domain's identity (prod's) ---------------------------------------------
+# ---- the deployment's identity ----------------------------------------------------
 
 # Easy DKIM with SES's 2048-bit keys, named here so the plan knows the block
 # whose tokens the CNAMEs below take.
 resource "aws_sesv2_email_identity" "domain" {
-  count          = local.mail_enabled && local.manage_shared ? 1 : 0
-  email_identity = var.cloudflare_domain
+  count          = local.mail_enabled ? 1 : 0
+  email_identity = local.mail_identity
 
   dkim_signing_attributes {
     next_signing_key_length = "RSA_2048_BIT"
@@ -65,7 +76,7 @@ resource "aws_sesv2_email_identity_mail_from_attributes" "domain" {
 resource "cloudflare_record" "mail_dkim" {
   count   = length(aws_sesv2_email_identity.domain) > 0 ? 3 : 0
   zone_id = var.cloudflare_zone_id
-  name    = "${aws_sesv2_email_identity.domain[0].dkim_signing_attributes[0].tokens[count.index]}._domainkey"
+  name    = "${aws_sesv2_email_identity.domain[0].dkim_signing_attributes[0].tokens[count.index]}._domainkey${local.mail_record_suffix}"
   content = "${aws_sesv2_email_identity.domain[0].dkim_signing_attributes[0].tokens[count.index]}.dkim.amazonses.com"
   type    = "CNAME"
   ttl     = 300
@@ -75,12 +86,12 @@ resource "cloudflare_record" "mail_dkim" {
 }
 
 # The MAIL FROM domain: SES's feedback endpoint takes its bounces, and its SPF
-# names SES (the apex's SPF is Email Routing's, which Cloudflare locks).
+# names SES (prod's apex SPF is Email Routing's, which Cloudflare locks).
 resource "cloudflare_record" "mail_from_mx" {
   count    = length(aws_sesv2_email_identity.domain)
   zone_id  = var.cloudflare_zone_id
   name     = local.mail_from_label
-  content  = "feedback-smtp.${var.region}.amazonses.com"
+  content  = "feedback-smtp.${local.region}.amazonses.com"
   type     = "MX"
   priority = 10
   ttl      = 300
@@ -99,12 +110,13 @@ resource "cloudflare_record" "mail_from_spf" {
   comment = "Managed by Terraform - OpenNova mail (SES MAIL FROM)"
 }
 
-# ---- the sandbox's recipient (prod's) -------------------------------------------
+# ---- the sandbox's recipient ------------------------------------------------------
 
-# The vault's email/forward_to address. AWS mails it a verification link; mail
-# to it works once that is clicked, in the sandbox and out.
+# The vault's email/forward_to address, in this deployment's account. AWS mails
+# it a verification link; mail to it works once that is clicked, in the
+# sandbox and out.
 resource "aws_sesv2_email_identity" "forward_to" {
-  count          = local.mail_enabled && local.manage_shared && local.email_forward_to != "" ? 1 : 0
+  count          = local.mail_enabled && local.email_forward_to != "" ? 1 : 0
   email_identity = local.email_forward_to
 }
 
@@ -127,9 +139,11 @@ data "aws_iam_policy_document" "mail" {
   }
 }
 
+# The worker sends every mail (the mail.send jobs web queues for the
+# registration and the reset links); web sends none.
 resource "aws_iam_role_policy" "mail" {
-  count  = local.mail_enabled ? 1 : 0
-  name   = "${local.name}-mail"
-  role   = aws_iam_role.service.id
-  policy = data.aws_iam_policy_document.mail[0].json
+  for_each = local.mail_enabled ? toset(["worker"]) : toset([])
+  name     = "${local.name}-${each.key}-mail"
+  role     = aws_iam_role.program[each.key].id
+  policy   = data.aws_iam_policy_document.mail[0].json
 }

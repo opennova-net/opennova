@@ -1,5 +1,6 @@
-// The billing seam's pieces below the sync worker and the routes (apps/novaworld_server/
-// billing): the webhook signature check (a fixed vector computed with Python's hmac, several
+// The billing seam's pieces below the sync worker and the routes (apps/novaworld_common/
+// billing, apps/novaworld_web/billing): the webhook signature check (a fixed vector
+// computed with Python's hmac, several
 // v1 signatures, several secrets, the 300 s boundary either way, every malformed header) and
 // the event envelope; form encoding; CurlStripeApi on a stub CommandRunner (the argv exactly
 // {curl, -q, --config, <file>} with no key in it, the config file's lines, its 0600 mode on
