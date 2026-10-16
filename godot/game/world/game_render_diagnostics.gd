@@ -18,9 +18,7 @@ static func from_world(
 		world: GameWorld,
 		camera: Camera3D,
 		viewport: Viewport) -> GameRenderDiagnostics:
-	var snapshot := GameRenderDiagnostics.new()
-	snapshot._sample(world, camera, viewport)
-	return snapshot
+	return GameRenderDiagnostics.new(world, camera, viewport)
 
 
 ## The world's one typed render snapshot for MCP, visual probes, and
@@ -38,7 +36,11 @@ func to_json_value() -> Dictionary:
 	return _value.duplicate(true)
 
 
-func _sample(world: GameWorld, camera: Camera3D, viewport: Viewport) -> void:
+# The snapshot is taken at construction (from_world / sample); a bare new()
+# is the empty record.
+func _init(world: GameWorld = null, camera: Camera3D = null, viewport: Viewport = null) -> void:
+	if world == null:
+		return
 	var env: MissionEnvironment = world.get_environment_node()
 	var weather: Weather = world.get_weather_node()
 	var water: Water = world.get_water_node()
