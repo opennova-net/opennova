@@ -1237,21 +1237,6 @@ Array MenuFrame::options_scroll_ranges() {
 	return out;
 }
 
-Array MenuFrame::video_quality_controls() {
-	Array out;
-	for (const opennova::menu::VideoQualityControl &c : opennova::menu::kVideoQualityControls) {
-		Dictionary row;
-		row["control"] = String(c.control);
-		row["value"] = String(c.semantic_value);
-		out.push_back(row);
-	}
-	return out;
-}
-
-int MenuFrame::video_gamma_reference() {
-	return opennova::menu::kVideoGammaReference;
-}
-
 PackedStringArray MenuFrame::object_detail_controls() {
 	PackedStringArray out;
 	for (const char *name : opennova::menu::kObjectDetailControls) out.push_back(String(name));
@@ -1276,34 +1261,15 @@ PackedStringArray MenuFrame::texture_compression_controls() {
 	return out;
 }
 
-PackedStringArray MenuFrame::video_preset_buttons() {
-	PackedStringArray out;
-	for (const char *name : opennova::menu::kVideoPresetButtons) out.push_back(String(name));
-	return out;
-}
-
 PackedStringArray MenuFrame::options_unsupported_controls() {
 	PackedStringArray out;
 	for (const char *name : opennova::menu::kOptionsUnsupportedControls) out.push_back(String(name));
 	return out;
 }
 
-Array MenuFrame::options_forced_checks() {
-	Array out;
-	for (const opennova::menu::OptionsForcedCheck &c : opennova::menu::kOptionsForcedChecks) {
-		Dictionary row;
-		row["control"] = String(c.control);
-		row["checked"] = c.checked;
-		out.push_back(row);
-	}
-	return out;
-}
-
 void MenuFrame::_bind_methods() {
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("options_scroll_ranges"),
 			&MenuFrame::options_scroll_ranges);
-	ClassDB::bind_static_method("MenuFrame", D_METHOD("video_quality_controls"),
-			&MenuFrame::video_quality_controls);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("object_detail_controls"),
 			&MenuFrame::object_detail_controls);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("texture_filter_controls"),
@@ -1312,14 +1278,8 @@ void MenuFrame::_bind_methods() {
 			&MenuFrame::particle_density_controls);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("texture_compression_controls"),
 			&MenuFrame::texture_compression_controls);
-	ClassDB::bind_static_method("MenuFrame", D_METHOD("video_gamma_reference"),
-			&MenuFrame::video_gamma_reference);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("options_unsupported_controls"),
 			&MenuFrame::options_unsupported_controls);
-	ClassDB::bind_static_method("MenuFrame", D_METHOD("options_forced_checks"),
-			&MenuFrame::options_forced_checks);
-	ClassDB::bind_static_method("MenuFrame", D_METHOD("video_preset_buttons"),
-			&MenuFrame::video_preset_buttons);
 	ClassDB::bind_static_method("MenuFrame", D_METHOD("glyph_shader_code"),
 			&MenuFrame::glyph_shader_code);
 	ClassDB::bind_method(D_METHOD("get_glyph_submissions"), &MenuFrame::get_glyph_submissions);

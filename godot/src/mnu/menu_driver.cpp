@@ -612,7 +612,6 @@ void MenuDriver::set_widget_scroll_range(int p_id, int p_minimum, int p_maximum,
 		int p_value) {
 	runtime_.set_widget_scroll_range(p_id, p_minimum, p_maximum, p_page, p_value);
 }
-void MenuDriver::set_scroll_row(int p_id, int p_row) { runtime_.set_scroll_row(p_id, p_row); }
 Ref<MenuScrollRange> MenuDriver::get_widget_scroll_range(int p_id) const {
 	opennova::menu::MenuScrollRangeState state;
 	Ref<MenuScrollRange> out;
@@ -622,20 +621,6 @@ Ref<MenuScrollRange> MenuDriver::get_widget_scroll_range(int p_id) const {
 	return out;
 }
 
-bool MenuDriver::table_set_column_count(int p_id, int p_count) {
-	return runtime_.table_set_column_count(p_id, p_count);
-}
-
-bool MenuDriver::table_init_column(int p_id, int p_column, int p_width, const String &p_label,
-		int p_justify, int p_vjustify) {
-	return runtime_.table_init_column(p_id, p_column, p_width, to_std(p_label), p_justify,
-			p_vjustify);
-}
-
-void MenuDriver::table_add_row(int p_id, const PackedStringArray &p_cells) {
-	runtime_.table_add_row(p_id, to_std_strings(p_cells));
-}
-void MenuDriver::table_clear_rows(int p_id) { runtime_.table_clear_rows(p_id); }
 int MenuDriver::table_row_count(int p_id) const { return runtime_.table_row_count(p_id); }
 String MenuDriver::table_cell_text(int p_id, int p_row, int p_col) const {
 	return menu_text_to_gd(runtime_.table_cell_text(p_id, p_row, p_col));
@@ -643,26 +628,8 @@ String MenuDriver::table_cell_text(int p_id, int p_row, int p_col) const {
 void MenuDriver::table_select_row(int p_id, int p_row, bool p_additive) {
 	runtime_.table_select_row(p_id, p_row, p_additive);
 }
-int MenuDriver::table_insert_row(int p_id, const String &p_text0, int p_value0, int p_flags,
-		int p_insert_index) {
-	return runtime_.table_insert_row(p_id, to_std(p_text0), p_value0,
-			static_cast<uint32_t>(p_flags), p_insert_index);
-}
-void MenuDriver::table_set_cell_text(int p_id, int p_row, int p_col, const String &p_text) {
-	runtime_.table_set_cell_text(p_id, p_row, p_col, to_std(p_text));
-}
-void MenuDriver::table_set_cell_value(int p_id, int p_row, int p_col, int p_value) {
-	runtime_.table_set_cell_value(p_id, p_row, p_col, p_value);
-}
 int MenuDriver::table_cell_value(int p_id, int p_row, int p_col) const {
 	return runtime_.table_cell_value(p_id, p_row, p_col);
-}
-void MenuDriver::table_remove_row(int p_id, int p_row) { runtime_.table_remove_row(p_id, p_row); }
-int MenuDriver::table_row_state(int p_id, int p_row) const {
-	return runtime_.table_row_state(p_id, p_row);
-}
-void MenuDriver::table_set_row_selected(int p_id, int p_row, bool p_selected) {
-	runtime_.table_set_row_selected(p_id, p_row, p_selected);
 }
 PackedInt32Array MenuDriver::table_selected_rows(int p_id) const {
 	PackedInt32Array out;
@@ -672,9 +639,6 @@ PackedInt32Array MenuDriver::table_selected_rows(int p_id) const {
 void MenuDriver::set_widget_clip_rect(int p_id, const Rect2i &p_rect) {
 	runtime_.set_widget_clip_rect(p_id, true, p_rect.position.x, p_rect.position.y,
 			p_rect.position.x + p_rect.size.x, p_rect.position.y + p_rect.size.y);
-}
-void MenuDriver::clear_widget_clip_rect(int p_id) {
-	runtime_.set_widget_clip_rect(p_id, false, 0, 0, 0, 0);
 }
 
 int MenuDriver::table_sort_column(int p_id) const {
@@ -1141,16 +1105,9 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_widget_scroll_range", "id", "minimum", "maximum", "page",
 								 "value"),
 			&MenuDriver::set_widget_scroll_range);
-	ClassDB::bind_method(D_METHOD("set_scroll_row", "id", "row"), &MenuDriver::set_scroll_row);
 	ClassDB::bind_method(D_METHOD("get_widget_scroll_range", "id"),
 			&MenuDriver::get_widget_scroll_range);
 
-	ClassDB::bind_method(D_METHOD("table_set_column_count", "id", "count"),
-			&MenuDriver::table_set_column_count);
-	ClassDB::bind_method(D_METHOD("table_init_column", "id", "column", "width", "label",
-			"justify", "vjustify"), &MenuDriver::table_init_column);
-	ClassDB::bind_method(D_METHOD("table_add_row", "id", "cells"), &MenuDriver::table_add_row);
-	ClassDB::bind_method(D_METHOD("table_clear_rows", "id"), &MenuDriver::table_clear_rows);
 	ClassDB::bind_method(D_METHOD("table_row_count", "id"), &MenuDriver::table_row_count);
 	ClassDB::bind_method(D_METHOD("table_cell_text", "id", "row", "col"),
 			&MenuDriver::table_cell_text);
@@ -1161,28 +1118,14 @@ void MenuDriver::_bind_methods() {
 			&MenuDriver::fill_stat_results);
 	ClassDB::bind_method(D_METHOD("set_deploy_list_items", "id", "rows"),
 			&MenuDriver::set_deploy_list_items);
-	ClassDB::bind_method(D_METHOD("table_insert_row", "id", "text0", "value0", "flags",
-								 "insert_index"),
-			&MenuDriver::table_insert_row, DEFVAL(0), DEFVAL(-1));
-	ClassDB::bind_method(D_METHOD("table_set_cell_text", "id", "row", "col", "text"),
-			&MenuDriver::table_set_cell_text);
-	ClassDB::bind_method(D_METHOD("table_set_cell_value", "id", "row", "col", "value"),
-			&MenuDriver::table_set_cell_value);
 	ClassDB::bind_method(D_METHOD("table_cell_value", "id", "row", "col"),
 			&MenuDriver::table_cell_value);
-	ClassDB::bind_method(D_METHOD("table_remove_row", "id", "row"), &MenuDriver::table_remove_row);
-	ClassDB::bind_method(D_METHOD("table_row_state", "id", "row"), &MenuDriver::table_row_state);
-	ClassDB::bind_method(D_METHOD("table_set_row_selected", "id", "row", "selected"),
-			&MenuDriver::table_set_row_selected);
 	ClassDB::bind_method(D_METHOD("table_selected_rows", "id"), &MenuDriver::table_selected_rows);
 	ClassDB::bind_method(D_METHOD("set_widget_clip_rect", "id", "rect"),
 			&MenuDriver::set_widget_clip_rect);
-	ClassDB::bind_method(D_METHOD("clear_widget_clip_rect", "id"),
-			&MenuDriver::clear_widget_clip_rect);
 
 	ClassDB::bind_method(D_METHOD("activate", "id"), &MenuDriver::activate);
 	ClassDB::bind_method(D_METHOD("spin_cycle", "id", "delta"), &MenuDriver::spin_cycle);
-	ClassDB::bind_method(D_METHOD("set_item_enabled", "id", "row", "enabled"), &MenuDriver::set_item_enabled);
 	ClassDB::bind_method(D_METHOD("is_item_enabled", "id", "row"), &MenuDriver::is_item_enabled);
 	ClassDB::bind_method(D_METHOD("enable_class_rows", "id", "class_allow_mask"),
 			&MenuDriver::enable_class_rows);
@@ -1194,9 +1137,6 @@ void MenuDriver::_bind_methods() {
 
 	ClassDB::bind_method(D_METHOD("process_mouse", "position", "button_down"),
 			&MenuDriver::process_mouse);
-	ClassDB::bind_method(D_METHOD("move_mouse", "position", "button_down"), &MenuDriver::move_mouse);
-	ClassDB::bind_method(D_METHOD("press_mouse", "position"), &MenuDriver::press_mouse);
-	ClassDB::bind_method(D_METHOD("release_mouse", "position"), &MenuDriver::release_mouse);
 	ClassDB::bind_method(D_METHOD("pump_mouse"), &MenuDriver::pump_mouse);
 	ClassDB::bind_method(D_METHOD("take_mouse_event", "event"), &MenuDriver::take_mouse_event);
 	ClassDB::bind_method(D_METHOD("process_wheel", "position", "steps"),

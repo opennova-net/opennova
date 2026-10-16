@@ -280,19 +280,7 @@ public:
 			int p_value);
 	// Current standalone scroll state, or null until seeded.
 	Ref<MenuScrollRange> get_widget_scroll_range(int p_id) const;
-	// A row owner's first visible row (a list / table's, a multiline edit's
-	// first line; the multiline edit's SetText resets it to 0, docs/interface/
-	// hud-re.md "The windowed map views").
-	void set_scroll_row(int p_id, int p_row);
 
-	// The populate's column layout (CTableWnd's column-count resize, then one
-	// InitRow per column; engine MenuRuntime::table_set_column_count /
-	// table_init_column carry the witnesses).
-	bool table_set_column_count(int p_id, int p_count);
-	bool table_init_column(int p_id, int p_column, int p_width, const String &p_label,
-			int p_justify, int p_vjustify);
-	void table_add_row(int p_id, const PackedStringArray &p_cells);
-	void table_clear_rows(int p_id);
 	int table_row_count(int p_id) const;
 	String table_cell_text(int p_id, int p_row, int p_col) const;
 	void table_select_row(int p_id, int p_row, bool p_additive);
@@ -307,19 +295,11 @@ public:
 	// The death screen's SPAWNPOINTS_LIST items from its compiled rows (engine
 	// world deploy_screen_feed.h deploy_list_items), in the menu's code page.
 	void set_deploy_list_items(int p_id, const TypedArray<DeployListRow> &p_rows);
-	// The CTableWnd operations (engine menu_table_row.h).
-	int table_insert_row(int p_id, const String &p_text0, int p_value0, int p_flags,
-			int p_insert_index);
-	void table_set_cell_text(int p_id, int p_row, int p_col, const String &p_text);
-	void table_set_cell_value(int p_id, int p_row, int p_col, int p_value);
+	// The CTableWnd reads (engine menu_table_row.h).
 	int table_cell_value(int p_id, int p_row, int p_col) const;
-	void table_remove_row(int p_id, int p_row);
-	int table_row_state(int p_id, int p_row) const;
-	void table_set_row_selected(int p_id, int p_row, bool p_selected);
 	PackedInt32Array table_selected_rows(int p_id) const;
-	// CWnd_SetClipRect (absolute design units) and its removal.
+	// CWnd_SetClipRect (absolute design units).
 	void set_widget_clip_rect(int p_id, const Rect2i &p_rect);
-	void clear_widget_clip_rect(int p_id);
 	// The engine runtime, for native screen companions (C++ only).
 	opennova::menu::MenuRuntime &runtime() { return runtime_; }
 
@@ -327,9 +307,8 @@ public:
 	void activate(int p_id);
 	void spin_cycle(int p_id, int p_delta);
 	String spin_value_attr(int p_id) const;
-	// A spin list's row enabled or disabled (MenuRuntime::set_item_enabled), and the armory class
+	// A spin list's row's enabled state (MenuRuntime::is_item_enabled), and the armory class
 	// spin's rows by the host's class mask (engine menu::enable_class_rows).
-	void set_item_enabled(int p_id, int p_row, bool p_enabled) { runtime_.set_item_enabled(p_id, p_row, p_enabled); }
 	bool is_item_enabled(int p_id, int p_row) const { return runtime_.is_item_enabled(p_id, p_row); }
 	void enable_class_rows(int p_id, int p_class_allow_mask);
 	// One ACTION row run as the current screen's (MenuRuntime::dispatch_action).
