@@ -71,7 +71,7 @@ struct TextureImage {
 	std::vector<uint8_t> luminance;
 	TextureAlpha alpha = TextureAlpha::None;
 	// The levels the game's device texture has: a DDS's file chain, else the chain the game builds
-	// from the texels (renderer::pixel_texture_mip_levels; 0 its full chain).
+	// from the texels (renderer::texture_level_count with no creation flags).
 	uint32_t game_levels = 0;
 	// The file stores its rows top first where the game reads every TGA bottom up: the game shows it
 	// upside down (the picture shows it so).

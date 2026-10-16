@@ -57,8 +57,10 @@ TextureDxtFormat select_texture_dxt_format(
 // The level count GTexture_CreateFromPixelData_0 asks D3DXCreateTexture for:
 // one level per halving while the smaller side exceeds 2, so the chain ends at
 // 4 texels; flag 0x40000 keeps one level and 0x80000 at most three. A count of
-// 0 is D3DX's full chain to 1x1.
-// [orig: GTexture_CreateFromPixelData_0 @ 0x6877BA..0x687801]
+// 0 is D3DX's full chain to 1x1. A chain of more than one level is BOX-filtered, each level from
+// the one before.
+// [orig: GTexture_CreateFromPixelData_0 @ 0x6877BA..0x687801; the filter D3DX_FILTER_BOX
+// (`push 5`) @ 0x6878B9 for D3DXFilterTexture @ 0x6878BE]
 uint32_t texture_level_count(uint32_t width, uint32_t height,
 		uint32_t creation_flags);
 

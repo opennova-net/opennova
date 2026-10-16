@@ -127,7 +127,7 @@ int test_decode() {
 	TEST_EXPECT(fact(*image, "format") == "TGA image" && fact(*image, "size") == "4 x 4 (sides are powers of two)");
 	TEST_EXPECT(fact(*image, "texels") == "32 bits: colour and 8 bits of alpha" && fact(*image, "compression") == "none");
 	TEST_EXPECT(fact(*image, "alpha") == "graded: 16 values from 0 to 240" && fact(*image, "loads") == "loads it");
-	TEST_EXPECT(image->game_levels == renderer::pixel_texture_mip_levels(4, 4));
+	TEST_EXPECT(image->game_levels == renderer::texture_level_count(4, 4, 0) && image->game_levels == 1);
 	TEST_EXPECT(fact(*image, "rows") == "bottom row first, as the game reads it");
 	uint8_t texel[4] = {};
 	TEST_EXPECT(texture_texel(*image, 0, 1, 2, texel) && texel[0] == 9 && texel[3] == 144 && !texture_texel(*image, 0, 4, 0, texel));

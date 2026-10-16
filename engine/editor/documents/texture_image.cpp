@@ -69,15 +69,13 @@ void classify_alpha(TextureImage &image) {
 	}
 }
 
-// The game builds the mip chain of a texture made from texels (renderer::pixel_texture_mip_levels).
+// The game builds the mip chain of a texture made from texels with no creation flags
+// (renderer::texture_level_count).
 void built_chain(TextureImage &image) {
-	const uint32_t levels = renderer::pixel_texture_mip_levels(image.width(), image.height());
+	const uint32_t levels = renderer::texture_level_count(image.width(), image.height(), 0);
 	image.game_levels = levels;
 	uint32_t w = image.width(), h = image.height();
-	if (levels == 0) {
-		fact(image, "mips", "Mip levels", "none in the file; the game builds its whole chain, down to 1 x 1");
-		return;
-	}
+	if (levels == 0) return;
 	for (uint32_t i = 1; i < levels; ++i) {
 		w = std::max(1u, w / 2);
 		h = std::max(1u, h / 2);
