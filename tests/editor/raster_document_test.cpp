@@ -19,6 +19,7 @@
 #include <variant>
 #include <vector>
 
+#include "common/temp_dir.h"
 #include "common/test_expect.h"
 #include "editor/raster_blob_document.h"
 
@@ -155,10 +156,10 @@ int test_snapshot_save_refused() {
 	TEST_EXPECT(!snap->apply(raster_edit(std::make_shared<RasterFill>(0, 0, 1, 1, 7)), error));
 	TEST_EXPECT(!snap->can_undo());
 
-	// A save over a file: written, checked against, clean.
-	const std::filesystem::path dir = std::filesystem::temp_directory_path() / "opennova_raster_document_test";
-	std::filesystem::create_directories(dir);
-	const std::filesystem::path file = dir / "map.rb";
+	// A save over a file: written, checked against, clean. The folder is this run's own (two runs
+	// at once never wipe each other's file).
+	const test_temp::TempDir dir("opennova_raster_document_test");
+	const std::filesystem::path file = dir.path / "map.rb";
 	{
 		const std::vector<uint8_t> bytes = raster_blob_file(64, 64, RasterFormat::Rgb8, 1);
 		std::ofstream out(file, std::ios::binary);
@@ -172,7 +173,6 @@ int test_snapshot_save_refused() {
 	const std::vector<uint8_t> on_disk((std::istreambuf_iterator<char>(in)), {});
 	TEST_EXPECT(on_disk == written(saved) && on_disk[8 + 4 + (3 * 64 + 3) * 3] == 6);
 	in.close();
-	std::filesystem::remove_all(dir);
 
 	// A file no codec reads.
 	RasterDocument nothing(editor_test::pick_raster_blob);
