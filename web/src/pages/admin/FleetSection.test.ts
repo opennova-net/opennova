@@ -42,6 +42,12 @@ describe('FleetSection', () => {
     confirm.mockRestore();
   });
 
+  it('sends the background jobs to their own page', async () => {
+    const page = await mountSection();
+    expect(page.find('.fleet-job-row').exists()).toBe(false);
+    expect(page.get('#fleet-roll-hint a').attributes('href')).toBe('/admin/jobs');
+  });
+
   it('lists the machines in words', async () => {
     const page = await mountSection();
     const rows = page.findAll('tr.fleet-machine-row');

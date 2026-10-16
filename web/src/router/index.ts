@@ -30,6 +30,8 @@ import UsageSection from '../pages/admin/UsageSection.vue';
 import BillingSection from '../pages/admin/BillingSection.vue';
 import ServerStatusSection from '../pages/admin/ServerStatusSection.vue';
 import ConnectionsSection from '../pages/admin/ConnectionsSection.vue';
+import JobsSection from '../pages/admin/JobsSection.vue';
+import JobDetailSection from '../pages/admin/JobDetailSection.vue';
 import CdKeysSection from '../pages/admin/CdKeysSection.vue';
 import { requireUser } from './guards';
 
@@ -103,6 +105,8 @@ const router = createRouter({
         { path: 'billing', component: BillingSection },
         { path: 'service', component: ServerStatusSection },
         { path: 'sessions', component: ConnectionsSection },
+        { path: 'jobs', component: JobsSection },
+        { path: 'jobs/:id(\\d+)', component: JobDetailSection },
         { path: 'cd-keys', component: CdKeysSection },
         // The sections' names before the admin pages were rebuilt: old links
         // land on their new pages.

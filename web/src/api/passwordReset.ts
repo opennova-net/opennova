@@ -1,4 +1,4 @@
-// Password resets by email (apps/novaworld_server/README.md, "Account email
+// Password resets by email (apps/novaworld_common/README.md, "Account email
 // and password resets"): POST /api/auth/forgot mails a reset link to an
 // account's address, POST /api/auth/reset sets the new password with the
 // link's token. Both go through the plain `apiClient` (anonymous visitors,

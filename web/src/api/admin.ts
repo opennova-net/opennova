@@ -3,7 +3,7 @@
 // of throwing, with the server's `error` code mapped to a message: the
 // server's own `message` text is never shown. The users' calls are in
 // users.ts, the CD keys' in cdKeys.ts, the billing overview's in
-// adminBilling.ts; here are the NovaWorld service's status and sessions, and
+// adminBilling.ts, the background jobs' in jobs.ts; here are the NovaWorld service's status and sessions, and
 // the hosted fleet (/api/admin/hosted*, /api/admin/fleet/*).
 
 import { isAxiosError } from 'axios';
@@ -45,8 +45,10 @@ export type AdminErrorCode =
   | 'hosting'
   | 'not_hosting'
   | 'unknown_rid'
-  | 'connection_changed'
-  | 'not_lobby'
+  | 'not_failed'
+  | 'not_queued'
+  | 'secret_dropped'
+  | 'already_pending'
   | 'network'
   | 'unknown';
 
@@ -85,8 +87,10 @@ const KNOWN_ADMIN_CODES: ReadonlySet<string> = new Set<AdminErrorCode>([
   'hosting',
   'not_hosting',
   'unknown_rid',
-  'connection_changed',
-  'not_lobby',
+  'not_failed',
+  'not_queued',
+  'secret_dropped',
+  'already_pending',
 ]);
 
 function adminMessageFor(code: AdminErrorCode): string {
@@ -136,10 +140,14 @@ function adminMessageFor(code: AdminErrorCode): string {
     case 'not_hosting':
     case 'unknown_rid':
       return 'That server is no longer listed. Refresh the list.';
-    case 'connection_changed':
-      return 'That session ended and another took its place. Refresh the list.';
-    case 'not_lobby':
-      return 'That is a game connection, not a NovaWorld session; it cannot be ended here.';
+    case 'not_failed':
+      return 'That job has not failed: it is waiting, running or done. Refresh the page.';
+    case 'not_queued':
+      return 'That job is no longer waiting: a worker took it, or it ended. Refresh the page.';
+    case 'secret_dropped':
+      return 'That job carried a secret (a mail, a machine launch token) that was dropped when it ended, so it cannot run again.';
+    case 'already_pending':
+      return 'A job of that kind, or with the same key, is already waiting or running.';
     case 'network':
       return 'Could not reach the server. Check your connection and try again.';
     case 'unknown':
@@ -234,8 +242,10 @@ function pickConnectionHost(value: unknown): AdminConnectionHost | null {
 
 function pickConnection(value: unknown): AdminConnection | null {
   const v = value as Record<string, unknown> | null;
-  if (typeof v !== 'object' || v === null || typeof v.id !== 'number') return null;
+  if (typeof v !== 'object' || v === null || typeof v.id !== 'number' || typeof v.session_id !== 'number') return null;
   return {
+    session_id: v.session_id,
+    lobby_id: typeof v.lobby_id === 'number' ? v.lobby_id : 0,
     id: v.id,
     state: typeof v.state === 'string' ? v.state : '',
     pn: typeof v.pn === 'string' ? v.pn : typeof v.pn === 'number' ? String(v.pn) : '',
@@ -266,12 +276,12 @@ export function fetchConnections(signal?: AbortSignal): Promise<AdminResult<Conn
   );
 }
 
-// POST /api/admin/connections/<id>/end: the NovaWorld service ends one session
-// (202), named by its id and address so a session that took a freed id is not
-// the one ended. A hosting session is refused ('hosting'): its server stops
-// through stopListedServer.
-export function endConnection(c: Pick<AdminConnection, 'id' | 'addr'>): Promise<AdminResult<void>> {
-  return adminPost(`/connections/${c.id}/end`, { addr: c.addr });
+// POST /api/admin/connections/<session id>/end: the NovaWorld service ends one
+// session (202), named by its row's id, which no other session ever takes (a
+// registry id and an address are one lobby instance's alone). A hosting session
+// is refused ('hosting'): its server stops through stopListedServer.
+export function endConnection(c: Pick<AdminConnection, 'session_id'>): Promise<AdminResult<void>> {
+  return adminPost(`/connections/${c.session_id}/end`);
 }
 
 // POST /api/admin/hosts/<rid>/stop: a listed server stops (202): a hosted

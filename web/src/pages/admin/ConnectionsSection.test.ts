@@ -16,6 +16,8 @@ const NOW = Date.UTC(2026, 9, 16, 9, 39, 2);
 
 function session(id: number, over: Partial<AdminConnection> = {}): AdminConnection {
   return {
+    session_id: 1000 + id,
+    lobby_id: 1,
     id,
     state: 'active',
     pn: 'NOVAWORLDUDP',
@@ -169,7 +171,7 @@ describe('ConnectionsSection', () => {
     expect(order()).toEqual(['5', '6', '7']);
   });
 
-  it('ends a session once confirmed, by its id and address', async () => {
+  it('ends a session once confirmed, by its row id', async () => {
     const page = await mountSection([session(11, { account: { id: 9, username: 'gunner', via: 'login' } })]);
     confirm.mockReturnValueOnce(false);
     await page.get('tr.session-row button').trigger('click');
@@ -177,7 +179,7 @@ describe('ConnectionsSection', () => {
     await page.get('tr.session-row button').trigger('click');
     await flushPromises();
     expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining("End gunner's NovaWorld session 11 (198.51.100.11:32768)?"));
-    expect(end).toHaveBeenCalledWith(expect.objectContaining({ id: 11, addr: '198.51.100.11:32768' }));
+    expect(end).toHaveBeenCalledWith(expect.objectContaining({ session_id: 1011, id: 11 }));
     expect(page.text()).toContain('Session 11 is ending.');
     expect(connections).toHaveBeenCalledTimes(2);
   });

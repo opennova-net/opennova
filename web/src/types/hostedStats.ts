@@ -1,5 +1,5 @@
 // Hosted server stats, as the NovaWorld service's stats routes answer them
-// (snake_case; apps/novaworld_server/hosted/stats_routes.cpp): one server's,
+// (snake_case; apps/novaworld_web/hosted/stats_routes.cpp): one server's,
 // the account's across its servers, or the fleet's. The service samples each
 // live server every minute and buckets the series by the range (1h raw, 24h
 // by 5 minutes, 7d hourly, 30d by 4 hours). Times are ISO 8601 UTC.

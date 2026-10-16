@@ -1,5 +1,5 @@
 // The logged-in account's listed servers, as GET /api/me/hosts answers them
-// (snake_case; apps/novaworld_server/host_routes.cpp, README "Listed servers
+// (snake_case; apps/novaworld_web/host_routes.cpp, README "Listed servers
 // and owners").
 
 // One player slot of the host's PlayerList. `slot` is what a player verb's

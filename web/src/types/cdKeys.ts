@@ -1,4 +1,4 @@
-// The CD keys' admin routes (apps/novaworld_server/cd_key_routes.h), in the
+// The CD keys' admin routes (apps/novaworld_web/cd_key_routes.h), in the
 // server's snake_case. Times are the service's UTC 'YYYY-MM-DD HH:MM:SS'
 // (utils/format.ts), null until set.
 

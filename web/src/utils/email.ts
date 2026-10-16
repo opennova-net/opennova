@@ -1,4 +1,4 @@
-// The address rule the server applies (apps/novaworld_server/auth.h,
+// The address rule the server applies (apps/novaworld_common/auth.h,
 // normalize_email): at most 254 bytes, exactly one '@' with something before
 // it, and a domain of dot-separated labels (at least two); no space or control
 // character anywhere. The pages check it before they send, so a typo gets its

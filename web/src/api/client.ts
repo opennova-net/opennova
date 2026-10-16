@@ -24,7 +24,7 @@ export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || fallbackBaseUrl
 
 // The server's CSRF header: every state-changing /api request a session
 // cookie authenticates, and /api/register, /api/login and /api/logout, must
-// carry it (apps/novaworld_server/README.md, "Website sessions and roles"). A
+// carry it (apps/novaworld_common/README.md, "Website sessions and roles"). A
 // cross-site page cannot send it, so it marks a request as the site's own.
 const CSRF_HEADERS = { 'X-OpenNova-Request': '1' };
 

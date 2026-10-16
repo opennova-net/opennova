@@ -1,6 +1,6 @@
 // Windows-1252, the code page a stock game server reads a ServerCommand's text
 // in (the service converts each arg to it and refuses a character it has no
-// byte for; apps/novaworld_server/README.md, "Pushing statements to a listed
+// byte for; apps/novaworld_common/README.md, "Pushing statements to a listed
 // server"). Every character cp1252 has is one byte there, so a text's length
 // on the host is its count of characters.
 

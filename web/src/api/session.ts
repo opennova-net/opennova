@@ -1,5 +1,5 @@
 // The website session: POST /api/login, POST /api/logout and GET /api/me
-// (apps/novaworld_server/README.md, "Website sessions and roles"). The
+// (apps/novaworld_common/README.md, "Website sessions and roles"). The
 // server keeps the session in an HttpOnly cookie (`opennova_session`, or
 // `__Host-opennova_session` behind https), which the browser sends on these
 // same-origin calls by itself; nothing here touches it.

@@ -1,5 +1,5 @@
 // The NovaWorld service's own admin routes (snake_case;
-// apps/novaworld_server/http_listener.cpp).
+// apps/novaworld_web/http_listener.cpp).
 
 // GET/PUT /api/admin/server-status: maintenance mode and the message game
 // clients see when they sign in.
@@ -30,9 +30,14 @@ export interface AdminConnectionHost {
   hosted_server_id: number | null;
 }
 
-// One NovaWorld session from GET /api/admin/connections (the in-memory
-// connection registry's snapshot).
+// One NovaWorld session from GET /api/admin/connections (the lobby instances'
+// session rows).
 export interface AdminConnection {
+  // The session's row: unique across the lobby instances, what ending it names.
+  session_id: number;
+  // The lobby instance holding it.
+  lobby_id: number;
+  // The lobby's registry id (unique within its instance alone).
   id: number;
   // 'handshaking', 'active' or 'closing'.
   state: string;

@@ -58,7 +58,7 @@ interface AdminSection {
 
 // /admin is a pure redirect to /admin/overview, so the route path is always
 // one of the `to` values below or a page under one (a user's, a fleet
-// server's).
+// server's, a job's).
 const sections: AdminSection[] = [
   { to: '/admin/overview', label: 'Overview' },
   { to: '/admin/users', label: 'Users' },
@@ -67,6 +67,7 @@ const sections: AdminSection[] = [
   { to: '/admin/billing', label: 'Billing' },
   { to: '/admin/service', label: 'NovaWorld service' },
   { to: '/admin/sessions', label: 'NovaWorld sessions' },
+  { to: '/admin/jobs', label: 'Background jobs' },
   { to: '/admin/cd-keys', label: 'CD keys' },
 ];
 

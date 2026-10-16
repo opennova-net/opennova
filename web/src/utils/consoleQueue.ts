@@ -1,6 +1,6 @@
 // One page's hosted-console calls, one at a time. The service runs at most one
 // console request per account at once and answers a second 429 console_busy
-// at once, with no wait (apps/novaworld_server/README.md, "The admission"), so
+// at once, with no wait (apps/novaworld_common/README.md, "The admission"), so
 // every console call a page makes that the service admits, its polls and its
 // actions alike, goes through the page's one queue
 // (composables/useConsoleQueue.ts), each starting only once the one before it

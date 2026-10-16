@@ -1,4 +1,4 @@
-// Admin user management (apps/novaworld_server/admin_user_routes.cpp), through
+// Admin user management (apps/novaworld_web/admin_user_routes.cpp), through
 // `adminClient`: an admin-role session's cookie authorizes it, or the bearer
 // token from local storage, which the client attaches when one is stored and
 // drops when refused. Each call answers an AdminResult (admin.ts).

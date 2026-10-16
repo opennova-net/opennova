@@ -1,5 +1,5 @@
 // Player accounts as the admin routes answer them (snake_case;
-// apps/novaworld_server/admin_user_routes.cpp).
+// apps/novaworld_web/admin_user_routes.cpp).
 
 import type { AdminSubscription, TierNumber } from './billing';
 import type { EntitlementSource, HostedServer } from './hostedServer';
