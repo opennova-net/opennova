@@ -298,6 +298,13 @@ bool local_player_in_vehicle_loadout_zone(const World &world) {
            ((e->flags | e->engine_flags) & kEntityFlagVehicleLoadoutZone) != 0;
 }
 
+bool local_player_in_armory_zone(const World &world) {
+    // [orig: Input_HandleActionBinding_0 case 0xB1 -- parentSlot == 0 @0x4e0a91,
+    //  `test eax, 400000h` on Flags (+0x24) @0x4e0aa1]
+    const Entity *e = world.registry.get(world.cached.local_player);
+    return e != nullptr && !e->mounted && (e->flags & kEntityFlagArmoryZone) != 0;
+}
+
 bool local_player_vehicle_zone_team_matches(const World &world) {
     // [orig: @0x4e0ad8 edx = player->groundEntity (+0x28); @0x4e0adb al =
     //  groundEntity->Team byte (+0x162); 0 opens @0x4e0ae3, else it must equal

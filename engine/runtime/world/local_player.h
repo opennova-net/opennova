@@ -200,6 +200,11 @@ public:
     // out-of-session UseGun rejection (rules.mp_session, the retail
     // is_in_session fact, gates it).
     bool toggle_mount();
+    // The toggle's gates, a joiner's request (which then queues C2S 0x26 /
+    // 0x27) and the authority's toggle alike: a live body, the UseGun weapon
+    // transition synced, then the weapon-busy gate (no EquippedSlot passes)
+    // [orig: Entity_ToggleVehicleMount @0x436958..0x436977].
+    bool mount_toggle_allowed();
     // Numbered seat keys share the panel's list and their own idle/overheat
     // gate; a joiner uses the query then waits for the authority's reply.
     bool find_numbered_seat(int index, VehicleSeatSelection &out,

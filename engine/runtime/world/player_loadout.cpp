@@ -79,13 +79,29 @@ bool local_loadout_promote_mission_rules(
     return loadout.spawn_kit_set;
 }
 
+std::vector<WeaponKitEntry> local_loadout_kit(const World &world,
+                                              const LocalPlayerLoadout &loadout) {
+    return loadout.spawn_kit_set ? loadout.spawn_kit : weapon_kit_default(world.rules.title);
+}
+
+bool local_loadout_set_player_class(World &world, LocalPlayerLoadout &loadout,
+                                    int player_class) {
+    if (player_class < 5 || player_class > 9) return false;
+    Entity *e = world.registry.get(world.cached.local_player);
+    if (e == nullptr) {
+        loadout.pending_player_class = player_class;
+        return true;
+    }
+    e->player_class = static_cast<uint8_t>(player_class);
+    return true;
+}
+
 void local_loadout_sync_damage_classes(World &world,
                                        const LocalPlayerLoadout &loadout) {
     Entity *e = world.registry.get(world.cached.local_player);
     if (e == nullptr) return;
     e->ammo_damage_class.assign(world.tables.ammo.entries.size(), 0);
-    const std::vector<WeaponKitEntry> kit =
-            loadout.spawn_kit_set ? loadout.spawn_kit : weapon_kit_default(world.rules.title);
+    const std::vector<WeaponKitEntry> kit = local_loadout_kit(world, loadout);
     weapon_kit_build_damage_classes(kit, world.tables.weapons,
             world.tables.ammo.entries.size(), e->ammo_damage_class);
 }
@@ -99,8 +115,7 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     const WeaponTable &table = world.tables.weapons;
     local_loadout_sync_damage_classes(world, loadout);
     if (table.empty()) return;
-    const std::vector<WeaponKitEntry> kit =
-            loadout.spawn_kit_set ? loadout.spawn_kit : weapon_kit_default(world.rules.title);
+    const std::vector<WeaponKitEntry> kit = local_loadout_kit(world, loadout);
     inventory.reset(table);
     const std::vector<std::string> display =
             weapon_kit_expand_display_list(kit, table);

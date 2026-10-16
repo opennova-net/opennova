@@ -87,6 +87,18 @@ bool local_loadout_promote_mission_rules(
         const std::vector<std::pair<std::string, int32_t>> &availability_rows,
         std::vector<WeaponKitEntry> kit_rows);
 
+// The resident kit: the spawn kit when one is set, else the title's default
+// kit (weapon_kit_default).
+std::vector<WeaponKitEntry> local_loadout_kit(const World &world,
+                                              const LocalPlayerLoadout &loadout);
+
+// The local player's class from the shell's class pick (5..9, the profile's
+// clamp [orig: @0x5516d0..0x5516ec]): stamped on L, or latched in
+// pending_player_class for a joiner whose L has not spawned (the joiner spawn
+// block stamps it). False, changing nothing, outside 5..9.
+bool local_loadout_set_player_class(World &world, LocalPlayerLoadout &loadout,
+                                    int player_class);
+
 // Stamp the local entity's per-ammo damage-class bytes from the resident kit
 // (the default kit when none is set) [orig: the flags byte of each kit tuple;
 // net-re §5.63].

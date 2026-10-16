@@ -281,6 +281,11 @@ WeaponCycleRoute local_player_weapon_cycle_route(World &world, LocalPlayerWeapon
 // the team test (a free-standing player reads team 0 = open).
 bool local_player_in_vehicle_loadout_zone(const World &world);
 bool local_player_vehicle_zone_team_matches(const World &world);
+// The same action's armory arm: an unmounted local player carrying the type-6
+// armory volume bit opens weapon.mnu WEAPON [orig: Input_HandleActionBinding_0
+// case 0xB1 -- parentSlot == 0 @0x4e0a91, Flags & 0x400000 @0x4e0aa1, the open
+// @0x4e0b3f].
+bool local_player_in_armory_zone(const World &world);
 
 // The local player's health pair as the HUD bar, the F3/MCP card and the
 // gamemus var pump all read it: the entity's current health (0 without a

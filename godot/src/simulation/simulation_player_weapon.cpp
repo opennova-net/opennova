@@ -154,12 +154,11 @@ Ref<PlayerAimOverlay> Simulation::get_local_player_aim_overlay() const {
 	// The basis is not one of the nine classes above — see the anim contract.
 	out->set_angles(mission_euler_from_overlay(angles[opennova::anim::kOverlayBody]), packed,
 			mission_euler_from_overlay(opennova::anim::compute_held_weapon_attach_angles(in)));
-	// Which of the two attach frames retail would use for this body — the same 0x80 test
-	// on the weapon channel's hold state that the wire path publishes as
-	// PF_HELD_WEAPON_HAND_FRAME, read here from our own infantry state so the local and
-	// remote legs cannot drift. [orig: gate @ 0x4b21b6 / branch @ 0x4b220f]
+	// Which of the two attach frames this body uses: the engine's hand-frame test
+	// (world::infantry_weapon_at_hand) over our own infantry state, the one the wire
+	// path publishes as PF_HELD_WEAPON_HAND_FRAME.
 	out->set_weapon(local_held_weapon_visible(*entity),
-			(opennova::world::infantry_anim_flags(p->inf.wpn_state) & 0x80u) != 0);
+			opennova::world::infantry_weapon_at_hand(p->inf.wpn_state));
 	return out;
 }
 
