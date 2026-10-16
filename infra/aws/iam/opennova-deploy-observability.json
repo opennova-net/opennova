@@ -12,7 +12,7 @@
         "cloudwatch:ListTagsForResource",
         "cloudwatch:DescribeAlarmHistory"
       ],
-      "Resource": "arn:aws:cloudwatch:us-east-1:310045376545:alarm:opennova-*"
+      "Resource": "arn:aws:cloudwatch:${region}:${account_id}:alarm:opennova-*"
     },
     {
       "Sid": "MetricsRead",
@@ -41,7 +41,7 @@
         "sns:UntagResource",
         "sns:ListTagsForResource"
       ],
-      "Resource": "arn:aws:sns:us-east-1:310045376545:opennova-*"
+      "Resource": "arn:aws:sns:${region}:${account_id}:opennova-*"
     },
     {
       "Sid": "AlertsSubscriptionsHaveNoResourceScope",
@@ -78,7 +78,7 @@
         "budgets:UntagResource",
         "budgets:ListTagsForResource"
       ],
-      "Resource": "arn:aws:budgets::310045376545:budget/opennova-*"
+      "Resource": "arn:aws:budgets::${account_id}:budget/opennova-*"
     },
     {
       "Sid": "AnomalyDetectionCreateTagged",
@@ -106,8 +106,8 @@
         "ce:UntagResource"
       ],
       "Resource": [
-        "arn:aws:ce::310045376545:anomalymonitor/*",
-        "arn:aws:ce::310045376545:anomalysubscription/*"
+        "arn:aws:ce::${account_id}:anomalymonitor/*",
+        "arn:aws:ce::${account_id}:anomalysubscription/*"
       ],
       "Condition": {
         "StringLike": {
@@ -116,9 +116,12 @@
       }
     },
     {
-      "Sid": "CreateHealthCheckNoResourceScope",
+      "Sid": "CreateHealthCheckAndZoneNoResourceScope",
       "Effect": "Allow",
-      "Action": "route53:CreateHealthCheck",
+      "Action": [
+        "route53:CreateHealthCheck",
+        "route53:CreateHostedZone"
+      ],
       "Resource": "*"
     },
     {
@@ -126,6 +129,8 @@
       "Effect": "Allow",
       "Action": [
         "route53:ListHealthChecks",
+        "route53:ListHostedZonesByName",
+        "route53:ListHostedZones",
         "budgets:ViewBudget",
         "ce:Get*",
         "ce:List*",
@@ -135,6 +140,26 @@
         "sts:DecodeAuthorizationMessage"
       ],
       "Resource": "*"
+    },
+    {
+      "Sid": "PrivateZones",
+      "Effect": "Allow",
+      "Action": [
+        "route53:GetHostedZone",
+        "route53:DeleteHostedZone",
+        "route53:UpdateHostedZoneComment",
+        "route53:ListResourceRecordSets",
+        "route53:ChangeResourceRecordSets",
+        "route53:AssociateVPCWithHostedZone",
+        "route53:DisassociateVPCFromHostedZone",
+        "route53:ChangeTagsForResource",
+        "route53:ListTagsForResource",
+        "route53:GetChange"
+      ],
+      "Resource": [
+        "arn:aws:route53:::hostedzone/*",
+        "arn:aws:route53:::change/*"
+      ]
     },
     {
       "Sid": "MailIdentities",
@@ -149,7 +174,7 @@
         "ses:UntagResource",
         "ses:ListTagsForResource"
       ],
-      "Resource": "arn:aws:ses:us-east-1:310045376545:identity/*"
+      "Resource": "arn:aws:ses:${region}:${account_id}:identity/*"
     }
   ]
 }

@@ -10,6 +10,7 @@
         "ec2:GetEbsDefaultKmsKeyId",
         "ec2:GetInstanceMetadataDefaults",
         "ec2:GetLaunchTemplateData",
+        "ec2:GetConsoleOutput",
         "ec2:GetSecurityGroupsForVpc"
       ],
       "Resource": "*"
@@ -19,8 +20,9 @@
       "Effect": "Allow",
       "Action": "ec2:RunInstances",
       "Resource": [
-        "arn:aws:ec2:us-east-1:310045376545:instance/*",
-        "arn:aws:ec2:us-east-1:310045376545:volume/*"
+        "arn:aws:ec2:${region}:${account_id}:instance/*",
+        "arn:aws:ec2:${region}:${account_id}:volume/*",
+        "arn:aws:ec2:${region}:${account_id}:network-interface/*"
       ],
       "Condition": {
         "StringLike": {
@@ -32,7 +34,7 @@
       "Sid": "LaunchFromAnyImage",
       "Effect": "Allow",
       "Action": "ec2:RunInstances",
-      "Resource": "arn:aws:ec2:us-east-1::image/*"
+      "Resource": "arn:aws:ec2:${region}::image/*"
     },
     {
       "Sid": "ManageTagged",
@@ -54,7 +56,8 @@
         "ec2:CreateLaunchTemplateVersion",
         "ec2:ModifyLaunchTemplate",
         "ec2:DeleteLaunchTemplate",
-        "ec2:DeleteSnapshot"
+        "ec2:DeleteSnapshot",
+        "ec2:DeregisterImage"
       ],
       "Resource": "*",
       "Condition": {
@@ -81,7 +84,8 @@
             "CreateNetworkInterface",
             "AuthorizeSecurityGroupIngress",
             "AuthorizeSecurityGroupEgress",
-            "RunInstances"
+            "RunInstances",
+            "CreateImage"
           ]
         }
       }
@@ -104,7 +108,7 @@
       "Sid": "DataSnapshotStart",
       "Effect": "Allow",
       "Action": "ebs:StartSnapshot",
-      "Resource": "arn:aws:ec2:us-east-1::snapshot/*",
+      "Resource": "arn:aws:ec2:${region}::snapshot/*",
       "Condition": {
         "StringLike": {
           "aws:RequestTag/opennova:deployment": "opennova-*"
@@ -118,7 +122,7 @@
         "ebs:PutSnapshotBlock",
         "ebs:CompleteSnapshot"
       ],
-      "Resource": "arn:aws:ec2:us-east-1::snapshot/*",
+      "Resource": "arn:aws:ec2:${region}::snapshot/*",
       "Condition": {
         "StringLike": {
           "aws:ResourceTag/opennova:deployment": "opennova-*"
@@ -129,24 +133,32 @@
       "Sid": "EbsKeyMetadata",
       "Effect": "Allow",
       "Action": "kms:DescribeKey",
-      "Resource": "arn:aws:kms:us-east-1:310045376545:key/*"
+      "Resource": "arn:aws:kms:${region}:${account_id}:key/*"
     },
     {
-      "Sid": "LegacyStackTeardown",
+      "Sid": "BakeFleetImageOfTagged",
       "Effect": "Allow",
-      "Action": [
-        "ec2:TerminateInstances",
-        "ec2:StopInstances",
-        "ec2:AssociateAddress",
-        "ec2:DeleteLaunchTemplate",
-        "ec2:DeleteKeyPair"
-      ],
+      "Action": "ec2:CreateImage",
+      "Resource": "arn:aws:ec2:${region}:${account_id}:instance/*",
+      "Condition": {
+        "StringLike": {
+          "aws:ResourceTag/opennova:deployment": "opennova-*"
+        }
+      }
+    },
+    {
+      "Sid": "BakeFleetImageTagged",
+      "Effect": "Allow",
+      "Action": "ec2:CreateImage",
       "Resource": [
-        "arn:aws:ec2:us-east-1:310045376545:instance/i-0ca78b471e6590605",
-        "arn:aws:ec2:us-east-1:310045376545:launch-template/lt-087331e4c404fa0a8",
-        "arn:aws:ec2:us-east-1:310045376545:launch-template/lt-003967f4cc2ec1ad2",
-        "arn:aws:ec2:us-east-1:310045376545:key-pair/opennova-*"
-      ]
+        "arn:aws:ec2:${region}::image/*",
+        "arn:aws:ec2:${region}::snapshot/*"
+      ],
+      "Condition": {
+        "StringLike": {
+          "aws:RequestTag/opennova:deployment": "opennova-*"
+        }
+      }
     }
   ]
 }

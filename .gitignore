@@ -64,13 +64,15 @@ Testing/Temporary/
 
 # Terraform (state, providers, and operator var-files are never committed; the
 # .terraform.lock.hcl provider pins and *.tfvars.example ARE committed; see DEPLOY.md)
-infra/aws/.terraform/
-infra/github/.terraform/
+infra/*/.terraform/
+# infra/aws's per-deployment provider and backend directories (TF_DATA_DIR)
+infra/aws/.terraform-*/
+# The org stack's first run (deploy/bin/lib/infra.sh: a local state, then moved
+# into prod's state bucket)
+infra/org/backend_override.tf
+infra/org/terraform.tfstate*
 *.tfstate
 *.tfstate.*
-# the toolbox's record of the vault state this checkout last synced with (DEPLOY.md)
-infra/aws/terraform.tfstate.vault-sha256
-infra/github/terraform.tfstate.vault-sha256
 terraform.tfvars
 *.auto.tfvars
 

@@ -2,17 +2,10 @@
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "SsmAgentAndSessionChannels",
+      "Sid": "SessionChannels",
       "Effect": "Allow",
       "Action": [
         "ssm:UpdateInstanceInformation",
-        "ssm:ListInstanceAssociations",
-        "ec2messages:AcknowledgeMessage",
-        "ec2messages:DeleteMessage",
-        "ec2messages:FailMessage",
-        "ec2messages:GetEndpoint",
-        "ec2messages:GetMessages",
-        "ec2messages:SendReply",
         "ssmmessages:CreateControlChannel",
         "ssmmessages:CreateDataChannel",
         "ssmmessages:OpenControlChannel",
@@ -21,46 +14,15 @@
       "Resource": "*"
     },
     {
-      "Sid": "DeploymentParametersAndDocuments",
+      "Sid": "DeploymentParameters",
       "Effect": "Allow",
       "Action": [
         "ssm:GetParameter",
         "ssm:GetParameters",
         "ssm:GetParametersByPath",
-        "ssm:PutParameter",
-        "ssm:GetDocument",
-        "ssm:DescribeDocument"
+        "ssm:PutParameter"
       ],
-      "Resource": [
-        "arn:aws:ssm:us-east-1:310045376545:parameter/opennova/*",
-        "arn:aws:ssm:us-east-1:310045376545:document/opennova-*"
-      ]
-    },
-    {
-      "Sid": "ConvergeDocument",
-      "Effect": "Allow",
-      "Action": "ssm:SendCommand",
-      "Resource": "arn:aws:ssm:us-east-1:310045376545:document/opennova-*"
-    },
-    {
-      "Sid": "ConvergeOnServiceInstances",
-      "Effect": "Allow",
-      "Action": "ssm:SendCommand",
-      "Resource": "arn:aws:ec2:us-east-1:310045376545:instance/*",
-      "Condition": {
-        "Null": {
-          "ssm:resourceTag/opennova:service": "false"
-        }
-      }
-    },
-    {
-      "Sid": "CommandResults",
-      "Effect": "Allow",
-      "Action": [
-        "ssm:GetCommandInvocation",
-        "ssm:ListCommandInvocations"
-      ],
-      "Resource": "*"
+      "Resource": "arn:aws:ssm:${region}:${account_id}:parameter/opennova/*"
     },
     {
       "Sid": "OpsBucket",
@@ -87,8 +49,8 @@
         "logs:DescribeLogStreams"
       ],
       "Resource": [
-        "arn:aws:logs:us-east-1:310045376545:log-group:/opennova/*",
-        "arn:aws:logs:us-east-1:310045376545:log-group:/opennova/*:log-stream:*"
+        "arn:aws:logs:${region}:${account_id}:log-group:/opennova/*",
+        "arn:aws:logs:${region}:${account_id}:log-group:/opennova/*:log-stream:*"
       ]
     },
     {
@@ -102,12 +64,12 @@
         "kms:CreateGrant",
         "kms:DescribeKey"
       ],
-      "Resource": "arn:aws:kms:us-east-1:310045376545:key/*",
+      "Resource": "arn:aws:kms:${region}:${account_id}:key/*",
       "Condition": {
         "StringEquals": {
           "kms:ViaService": [
-            "ssm.us-east-1.amazonaws.com",
-            "ec2.us-east-1.amazonaws.com"
+            "ssm.${region}.amazonaws.com",
+            "ec2.${region}.amazonaws.com"
           ]
         }
       }
@@ -116,7 +78,7 @@
       "Sid": "LaunchMachinesTagged",
       "Effect": "Allow",
       "Action": "ec2:RunInstances",
-      "Resource": "arn:aws:ec2:us-east-1:310045376545:instance/*",
+      "Resource": "arn:aws:ec2:${region}:${account_id}:instance/*",
       "Condition": {
         "StringEquals": {
           "aws:RequestTag/opennova:hosted": "1"
@@ -131,9 +93,9 @@
       "Effect": "Allow",
       "Action": "ec2:RunInstances",
       "Resource": [
-        "arn:aws:ec2:us-east-1:310045376545:volume/*",
-        "arn:aws:ec2:us-east-1:310045376545:network-interface/*",
-        "arn:aws:ec2:us-east-1::image/*"
+        "arn:aws:ec2:${region}:${account_id}:volume/*",
+        "arn:aws:ec2:${region}:${account_id}:network-interface/*",
+        "arn:aws:ec2:${region}::image/*"
       ]
     },
     {
@@ -141,10 +103,10 @@
       "Effect": "Allow",
       "Action": "ec2:RunInstances",
       "Resource": [
-        "arn:aws:ec2:us-east-1:310045376545:subnet/*",
-        "arn:aws:ec2:us-east-1:310045376545:security-group/*",
-        "arn:aws:ec2:us-east-1:310045376545:launch-template/*",
-        "arn:aws:ec2:us-east-1::snapshot/*"
+        "arn:aws:ec2:${region}:${account_id}:subnet/*",
+        "arn:aws:ec2:${region}:${account_id}:security-group/*",
+        "arn:aws:ec2:${region}:${account_id}:launch-template/*",
+        "arn:aws:ec2:${region}::snapshot/*"
       ],
       "Condition": {
         "StringLike": {
@@ -157,8 +119,8 @@
       "Effect": "Allow",
       "Action": "ec2:CreateTags",
       "Resource": [
-        "arn:aws:ec2:us-east-1:310045376545:instance/*",
-        "arn:aws:ec2:us-east-1:310045376545:volume/*"
+        "arn:aws:ec2:${region}:${account_id}:instance/*",
+        "arn:aws:ec2:${region}:${account_id}:volume/*"
       ],
       "Condition": {
         "StringEquals": {
@@ -170,7 +132,7 @@
       "Sid": "EndMachines",
       "Effect": "Allow",
       "Action": "ec2:TerminateInstances",
-      "Resource": "arn:aws:ec2:us-east-1:310045376545:instance/*",
+      "Resource": "arn:aws:ec2:${region}:${account_id}:instance/*",
       "Condition": {
         "StringEquals": {
           "aws:ResourceTag/opennova:hosted": "1"
@@ -194,7 +156,7 @@
       "Sid": "PassMachineRoleToEc2",
       "Effect": "Allow",
       "Action": "iam:PassRole",
-      "Resource": "arn:aws:iam::310045376545:role/opennova-*",
+      "Resource": "arn:aws:iam::${account_id}:role/opennova-*",
       "Condition": {
         "StringEquals": {
           "iam:PassedToService": "ec2.amazonaws.com"
@@ -205,7 +167,79 @@
       "Sid": "SendMail",
       "Effect": "Allow",
       "Action": "ses:SendEmail",
-      "Resource": "arn:aws:ses:us-east-1:310045376545:identity/*"
+      "Resource": "arn:aws:ses:${region}:${account_id}:identity/*"
+    },
+    {
+      "Sid": "ListParameterNames",
+      "Effect": "Allow",
+      "Action": "ssm:DescribeParameters",
+      "Resource": "*"
+    },
+    {
+      "Sid": "LobbyFindsOwnAddress",
+      "Effect": "Allow",
+      "Action": "ec2:DescribeNetworkInterfaces",
+      "Resource": "*"
+    },
+    {
+      "Sid": "RunOpenNovaTasks",
+      "Effect": "Allow",
+      "Action": "ecs:RunTask",
+      "Resource": [
+        "arn:aws:ecs:${region}:${account_id}:task-definition/opennova-*",
+        "arn:aws:ecs:${region}:${account_id}:task-definition/opennova-*:*"
+      ],
+      "Condition": {
+        "ArnLike": {
+          "ecs:cluster": "arn:aws:ecs:${region}:${account_id}:cluster/opennova-*"
+        }
+      }
+    },
+    {
+      "Sid": "DeployRevisions",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeTaskDefinition",
+        "ecs:RegisterTaskDefinition"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "PointOpenNovaServicesAndTagTasks",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:DescribeServices",
+        "ecs:UpdateService",
+        "ecs:TagResource"
+      ],
+      "Resource": [
+        "arn:aws:ecs:${region}:${account_id}:service/opennova-*/*",
+        "arn:aws:ecs:${region}:${account_id}:task/opennova-*/*",
+        "arn:aws:ecs:${region}:${account_id}:task-definition/opennova-*"
+      ]
+    },
+    {
+      "Sid": "PassOpenNovaRolesToEcsTasksAndScheduler",
+      "Effect": "Allow",
+      "Action": "iam:PassRole",
+      "Resource": "arn:aws:iam::${account_id}:role/opennova-*",
+      "Condition": {
+        "StringEquals": {
+          "iam:PassedToService": [
+            "ecs-tasks.amazonaws.com",
+            "scheduler.amazonaws.com"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "PointBackupSchedule",
+      "Effect": "Allow",
+      "Action": [
+        "scheduler:GetSchedule",
+        "scheduler:UpdateSchedule"
+      ],
+      "Resource": "arn:aws:scheduler:${region}:${account_id}:schedule/default/opennova-*"
     }
   ]
 }

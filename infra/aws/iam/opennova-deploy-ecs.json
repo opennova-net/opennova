@@ -1,0 +1,132 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EcsCreateTagged",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:CreateCluster",
+        "ecs:CreateService",
+        "ecs:TagResource"
+      ],
+      "Resource": [
+        "arn:aws:ecs:${region}:${account_id}:cluster/opennova-*",
+        "arn:aws:ecs:${region}:${account_id}:service/opennova-*/*"
+      ],
+      "Condition": {
+        "StringLike": {
+          "aws:RequestTag/opennova:deployment": "opennova-*"
+        }
+      }
+    },
+    {
+      "Sid": "EcsManage",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:UpdateCluster",
+        "ecs:UpdateClusterSettings",
+        "ecs:DeleteCluster",
+        "ecs:UpdateService",
+        "ecs:DeleteService",
+        "ecs:TagResource",
+        "ecs:UntagResource",
+        "ecs:RunTask",
+        "ecs:StartTask",
+        "ecs:StopTask",
+        "ecs:ExecuteCommand"
+      ],
+      "Resource": [
+        "arn:aws:ecs:${region}:${account_id}:cluster/opennova-*",
+        "arn:aws:ecs:${region}:${account_id}:service/opennova-*/*",
+        "arn:aws:ecs:${region}:${account_id}:task/opennova-*/*",
+        "arn:aws:ecs:${region}:${account_id}:task-definition/opennova-*:*",
+        "arn:aws:ecs:${region}:${account_id}:task-definition/opennova-*"
+      ]
+    },
+    {
+      "Sid": "EcsTaskDefinitionsAndReads",
+      "Effect": "Allow",
+      "Action": [
+        "ecs:RegisterTaskDefinition",
+        "ecs:DeregisterTaskDefinition",
+        "ecs:Describe*",
+        "ecs:List*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "TaskCounts",
+      "Effect": "Allow",
+      "Action": [
+        "application-autoscaling:RegisterScalableTarget",
+        "application-autoscaling:DeregisterScalableTarget",
+        "application-autoscaling:PutScalingPolicy",
+        "application-autoscaling:DeleteScalingPolicy",
+        "application-autoscaling:Describe*",
+        "application-autoscaling:TagResource",
+        "application-autoscaling:UntagResource",
+        "application-autoscaling:ListTagsForResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "CloudMapCreateTagged",
+      "Effect": "Allow",
+      "Action": [
+        "servicediscovery:CreatePrivateDnsNamespace",
+        "servicediscovery:CreateService",
+        "servicediscovery:TagResource"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringLike": {
+          "aws:RequestTag/opennova:deployment": "opennova-*"
+        }
+      }
+    },
+    {
+      "Sid": "CloudMapManageTagged",
+      "Effect": "Allow",
+      "Action": [
+        "servicediscovery:DeleteNamespace",
+        "servicediscovery:DeleteService",
+        "servicediscovery:UpdateService",
+        "servicediscovery:UpdatePrivateDnsNamespace",
+        "servicediscovery:TagResource",
+        "servicediscovery:UntagResource"
+      ],
+      "Resource": "*",
+      "Condition": {
+        "StringLike": {
+          "aws:ResourceTag/opennova:deployment": "opennova-*"
+        }
+      }
+    },
+    {
+      "Sid": "CloudMapRead",
+      "Effect": "Allow",
+      "Action": [
+        "servicediscovery:Get*",
+        "servicediscovery:List*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "BackupSchedule",
+      "Effect": "Allow",
+      "Action": [
+        "scheduler:CreateSchedule",
+        "scheduler:UpdateSchedule",
+        "scheduler:DeleteSchedule",
+        "scheduler:GetSchedule"
+      ],
+      "Resource": "arn:aws:scheduler:${region}:${account_id}:schedule/default/opennova-*"
+    },
+    {
+      "Sid": "BackupScheduleRead",
+      "Effect": "Allow",
+      "Action": "scheduler:ListSchedules",
+      "Resource": "*"
+    }
+  ]
+}

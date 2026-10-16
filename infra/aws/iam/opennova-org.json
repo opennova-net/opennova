@@ -1,0 +1,72 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "OrganizationsRead",
+      "Effect": "Allow",
+      "Action": [
+        "organizations:Describe*",
+        "organizations:List*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "MakeAccounts",
+      "Effect": "Allow",
+      "Action": "organizations:CreateAccount",
+      "Resource": "*"
+    },
+    {
+      "Sid": "TagAccounts",
+      "Effect": "Allow",
+      "Action": [
+        "organizations:TagResource",
+        "organizations:UntagResource"
+      ],
+      "Resource": "arn:aws:organizations::${management_account_id}:account/${organization_id}/*"
+    },
+    {
+      "Sid": "IdentityCenter",
+      "Effect": "Allow",
+      "Action": [
+        "sso:*",
+        "identitystore:*"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "IdentityCenterRolesAndProviders",
+      "Effect": "Allow",
+      "Action": [
+        "iam:AttachRolePolicy",
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:DeleteRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:GetRole",
+        "iam:ListAttachedRolePolicies",
+        "iam:ListRolePolicies",
+        "iam:PutRolePolicy",
+        "iam:UpdateRole",
+        "iam:UpdateRoleDescription",
+        "iam:CreateSAMLProvider",
+        "iam:DeleteSAMLProvider",
+        "iam:GetSAMLProvider",
+        "iam:UpdateSAMLProvider"
+      ],
+      "Resource": [
+        "arn:aws:iam::*:role/aws-reserved/sso.amazonaws.com/*",
+        "arn:aws:iam::*:saml-provider/AWSSSO_*"
+      ]
+    },
+    {
+      "Sid": "MemberAccountAdministrators",
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": [
+        "arn:aws:iam::${prod_account_id}:role/OrganizationAccountAccessRole",
+        "arn:aws:iam::${staging_account_id}:role/OrganizationAccountAccessRole"
+      ]
+    }
+  ]
+}

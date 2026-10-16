@@ -22,10 +22,10 @@
         "rds:ListTagsForResource"
       ],
       "Resource": [
-        "arn:aws:rds:us-east-1:310045376545:db:opennova-*",
-        "arn:aws:rds:us-east-1:310045376545:snapshot:opennova-*",
-        "arn:aws:rds:us-east-1:310045376545:subgrp:opennova-*",
-        "arn:aws:rds:us-east-1:310045376545:pg:opennova-*"
+        "arn:aws:rds:${region}:${account_id}:db:opennova-*",
+        "arn:aws:rds:${region}:${account_id}:snapshot:opennova-*",
+        "arn:aws:rds:${region}:${account_id}:subgrp:opennova-*",
+        "arn:aws:rds:${region}:${account_id}:pg:opennova-*"
       ]
     },
     {
@@ -35,12 +35,43 @@
         "rds:CreateDBInstance",
         "rds:ModifyDBInstance"
       ],
-      "Resource": "arn:aws:rds:us-east-1:310045376545:og:default:postgres-*"
+      "Resource": "arn:aws:rds:${region}:${account_id}:og:default:postgres-*"
     },
     {
       "Sid": "RdsRead",
       "Effect": "Allow",
       "Action": "rds:Describe*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "CacheManage",
+      "Effect": "Allow",
+      "Action": [
+        "elasticache:CreateReplicationGroup",
+        "elasticache:ModifyReplicationGroup",
+        "elasticache:DeleteReplicationGroup",
+        "elasticache:CreateCacheSubnetGroup",
+        "elasticache:ModifyCacheSubnetGroup",
+        "elasticache:DeleteCacheSubnetGroup",
+        "elasticache:CreateCacheParameterGroup",
+        "elasticache:ModifyCacheParameterGroup",
+        "elasticache:ResetCacheParameterGroup",
+        "elasticache:DeleteCacheParameterGroup",
+        "elasticache:AddTagsToResource",
+        "elasticache:RemoveTagsFromResource",
+        "elasticache:ListTagsForResource"
+      ],
+      "Resource": [
+        "arn:aws:elasticache:${region}:${account_id}:replicationgroup:opennova-*",
+        "arn:aws:elasticache:${region}:${account_id}:cluster:opennova-*",
+        "arn:aws:elasticache:${region}:${account_id}:parametergroup:opennova-*",
+        "arn:aws:elasticache:${region}:${account_id}:subnetgroup:opennova-*"
+      ]
+    },
+    {
+      "Sid": "CacheRead",
+      "Effect": "Allow",
+      "Action": "elasticache:Describe*",
       "Resource": "*"
     },
     {
@@ -63,10 +94,7 @@
         "s3:PutBucketPublicAccessBlock",
         "s3:PutBucketTagging"
       ],
-      "Resource": [
-        "arn:aws:s3:::opennova-*",
-        "arn:aws:s3:::*.opennova.net"
-      ]
+      "Resource": "arn:aws:s3:::opennova-*"
     },
     {
       "Sid": "Releases",
@@ -80,10 +108,15 @@
       "Resource": "arn:aws:s3:::opennova-*/releases/*"
     },
     {
-      "Sid": "ReadBackups",
+      "Sid": "Dumps",
       "Effect": "Allow",
-      "Action": "s3:GetObject",
-      "Resource": "arn:aws:s3:::opennova-*/novaworld*"
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts"
+      ],
+      "Resource": "arn:aws:s3:::opennova-*/novaworld/*"
     },
     {
       "Sid": "S3AccountRead",
@@ -95,7 +128,7 @@
       "Resource": "*"
     },
     {
-      "Sid": "SsmParametersAndDocuments",
+      "Sid": "SsmParameters",
       "Effect": "Allow",
       "Action": [
         "ssm:PutParameter",
@@ -105,46 +138,26 @@
         "ssm:GetParameterHistory",
         "ssm:DeleteParameter",
         "ssm:DeleteParameters",
-        "ssm:CreateDocument",
-        "ssm:UpdateDocument",
-        "ssm:UpdateDocumentDefaultVersion",
-        "ssm:DeleteDocument",
-        "ssm:DescribeDocument",
-        "ssm:GetDocument",
-        "ssm:DescribeDocumentPermission",
-        "ssm:ListDocumentVersions",
         "ssm:AddTagsToResource",
         "ssm:RemoveTagsFromResource",
         "ssm:ListTagsForResource"
       ],
-      "Resource": [
-        "arn:aws:ssm:us-east-1:310045376545:parameter/opennova/*",
-        "arn:aws:ssm:us-east-1:310045376545:document/opennova-*"
-      ]
+      "Resource": "arn:aws:ssm:${region}:${account_id}:parameter/opennova/*"
     },
     {
-      "Sid": "SsmRunAndSessionDocuments",
+      "Sid": "SsmSessionDocument",
       "Effect": "Allow",
-      "Action": [
-        "ssm:SendCommand",
-        "ssm:StartSession"
-      ],
-      "Resource": [
-        "arn:aws:ssm:us-east-1:310045376545:document/opennova-*",
-        "arn:aws:ssm:us-east-1:310045376545:document/SSM-SessionManagerRunShell",
-        "arn:aws:ssm:us-east-1:*:document/AWS-RunShellScript",
-        "arn:aws:ssm:us-east-1:*:document/AWS-StartInteractiveCommand"
-      ]
+      "Action": "ssm:StartSession",
+      "Resource": "arn:aws:ssm:${region}:${account_id}:document/SSM-SessionManagerRunShell"
     },
     {
-      "Sid": "SsmRunAndSessionOnOpenNovaInstances",
+      "Sid": "SsmSessionOnOpenNovaMachines",
       "Effect": "Allow",
       "Action": [
-        "ssm:SendCommand",
         "ssm:StartSession",
         "ssm:GetConnectionStatus"
       ],
-      "Resource": "arn:aws:ec2:us-east-1:310045376545:instance/*",
+      "Resource": "arn:aws:ec2:${region}:${account_id}:instance/*",
       "Condition": {
         "StringLike": {
           "aws:ResourceTag/opennova:deployment": "opennova-*"
@@ -158,17 +171,13 @@
         "ssm:TerminateSession",
         "ssm:ResumeSession"
       ],
-      "Resource": "arn:aws:ssm:us-east-1:310045376545:session/${aws:username}-*"
+      "Resource": "arn:aws:ssm:${region}:${account_id}:session/*"
     },
     {
       "Sid": "SsmReadAndSessionChannel",
       "Effect": "Allow",
       "Action": [
         "ssm:DescribeParameters",
-        "ssm:GetCommandInvocation",
-        "ssm:ListCommandInvocations",
-        "ssm:ListCommands",
-        "ssm:DescribeInstanceInformation",
         "ssm:DescribeSessions",
         "ssmmessages:OpenDataChannel"
       ],
@@ -199,8 +208,8 @@
         "logs:GetQueryResults"
       ],
       "Resource": [
-        "arn:aws:logs:us-east-1:310045376545:log-group:/opennova/*",
-        "arn:aws:logs:us-east-1:310045376545:log-group:/opennova/*:log-stream:*"
+        "arn:aws:logs:${region}:${account_id}:log-group:/opennova/*",
+        "arn:aws:logs:${region}:${account_id}:log-group:/opennova/*:log-stream:*"
       ]
     },
     {

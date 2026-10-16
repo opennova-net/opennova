@@ -11,10 +11,10 @@
         "ec2:CreateLaunchTemplate"
       ],
       "Resource": [
-        "arn:aws:ec2:us-east-1:310045376545:vpc/*",
-        "arn:aws:ec2:us-east-1:310045376545:internet-gateway/*",
-        "arn:aws:ec2:us-east-1:310045376545:elastic-ip/*",
-        "arn:aws:ec2:us-east-1:310045376545:launch-template/*"
+        "arn:aws:ec2:${region}:${account_id}:vpc/*",
+        "arn:aws:ec2:${region}:${account_id}:internet-gateway/*",
+        "arn:aws:ec2:${region}:${account_id}:elastic-ip/*",
+        "arn:aws:ec2:${region}:${account_id}:launch-template/*"
       ],
       "Condition": {
         "StringLike": {
@@ -31,9 +31,9 @@
         "ec2:CreateSecurityGroup"
       ],
       "Resource": [
-        "arn:aws:ec2:us-east-1:310045376545:subnet/*",
-        "arn:aws:ec2:us-east-1:310045376545:route-table/*",
-        "arn:aws:ec2:us-east-1:310045376545:security-group/*"
+        "arn:aws:ec2:${region}:${account_id}:subnet/*",
+        "arn:aws:ec2:${region}:${account_id}:route-table/*",
+        "arn:aws:ec2:${region}:${account_id}:security-group/*"
       ],
       "Condition": {
         "StringLike": {
@@ -50,8 +50,8 @@
         "ec2:AuthorizeSecurityGroupEgress"
       ],
       "Resource": [
-        "arn:aws:ec2:us-east-1:310045376545:network-interface/*",
-        "arn:aws:ec2:us-east-1:310045376545:security-group-rule/*"
+        "arn:aws:ec2:${region}:${account_id}:network-interface/*",
+        "arn:aws:ec2:${region}:${account_id}:security-group-rule/*"
       ],
       "Condition": {
         "StringLike": {
@@ -108,86 +108,77 @@
       "Sid": "ReleaseAddressesExceptProds",
       "Effect": "Allow",
       "Action": "ec2:ReleaseAddress",
-      "Resource": "arn:aws:ec2:us-east-1:310045376545:elastic-ip/*",
+      "Resource": "arn:aws:ec2:${region}:${account_id}:elastic-ip/*",
       "Condition": {
         "StringLike": {
           "aws:ResourceTag/opennova:deployment": "opennova-*"
         },
         "StringNotEquals": {
-          "aws:ResourceTag/opennova:deployment": "opennova-server"
+          "aws:ResourceTag/opennova:deployment": "opennova-prod"
         }
       }
     },
     {
-      "Sid": "ManageInProdVpc",
+      "Sid": "LoadBalancerCreateTagged",
       "Effect": "Allow",
       "Action": [
-        "ec2:CreateTags",
-        "ec2:DeleteTags",
-        "ec2:ModifySubnetAttribute",
-        "ec2:DeleteSubnet",
-        "ec2:DeleteRouteTable",
-        "ec2:CreateRoute",
-        "ec2:ReplaceRoute",
-        "ec2:DeleteRoute",
-        "ec2:AssociateRouteTable",
-        "ec2:DisassociateRouteTable",
-        "ec2:ReplaceRouteTableAssociation",
-        "ec2:DeleteSecurityGroup",
-        "ec2:AuthorizeSecurityGroupIngress",
-        "ec2:AuthorizeSecurityGroupEgress",
-        "ec2:RevokeSecurityGroupIngress",
-        "ec2:RevokeSecurityGroupEgress",
-        "ec2:ModifySecurityGroupRules",
-        "ec2:UpdateSecurityGroupRuleDescriptionsIngress",
-        "ec2:UpdateSecurityGroupRuleDescriptionsEgress",
-        "ec2:CreateNetworkInterface",
-        "ec2:DeleteNetworkInterface",
-        "ec2:ModifyNetworkInterfaceAttribute",
-        "ec2:AssignPrivateIpAddresses",
-        "ec2:UnassignPrivateIpAddresses",
-        "ec2:AssociateAddress",
-        "ec2:DisassociateAddress",
-        "ec2:RunInstances"
-      ],
-      "Resource": "*",
-      "Condition": {
-        "ArnEquals": {
-          "ec2:Vpc": "arn:aws:ec2:us-east-1:310045376545:vpc/vpc-039f64354e9a338de"
-        }
-      }
-    },
-    {
-      "Sid": "ProdVpcAndGatewayUntilTagged",
-      "Effect": "Allow",
-      "Action": [
-        "ec2:CreateTags",
-        "ec2:DeleteTags",
-        "ec2:ModifyVpcAttribute",
-        "ec2:AttachInternetGateway",
-        "ec2:DetachInternetGateway",
-        "ec2:CreateSubnet",
-        "ec2:CreateRouteTable",
-        "ec2:CreateSecurityGroup",
-        "ec2:AssociateRouteTable",
-        "ec2:DisassociateRouteTable",
-        "ec2:ReplaceRouteTableAssociation"
+        "elasticloadbalancing:CreateLoadBalancer",
+        "elasticloadbalancing:CreateTargetGroup",
+        "elasticloadbalancing:CreateListener",
+        "elasticloadbalancing:AddTags"
       ],
       "Resource": [
-        "arn:aws:ec2:us-east-1:310045376545:vpc/vpc-039f64354e9a338de",
-        "arn:aws:ec2:us-east-1:310045376545:internet-gateway/igw-04b9394fa71df326a"
+        "arn:aws:elasticloadbalancing:${region}:${account_id}:loadbalancer/net/opennova-*",
+        "arn:aws:elasticloadbalancing:${region}:${account_id}:targetgroup/opennova-*",
+        "arn:aws:elasticloadbalancing:${region}:${account_id}:listener/net/opennova-*"
+      ],
+      "Condition": {
+        "StringLike": {
+          "aws:RequestTag/opennova:deployment": "opennova-*"
+        }
+      }
+    },
+    {
+      "Sid": "LoadBalancerManage",
+      "Effect": "Allow",
+      "Action": [
+        "elasticloadbalancing:DeleteLoadBalancer",
+        "elasticloadbalancing:ModifyLoadBalancerAttributes",
+        "elasticloadbalancing:SetSecurityGroups",
+        "elasticloadbalancing:SetSubnets",
+        "elasticloadbalancing:DeleteTargetGroup",
+        "elasticloadbalancing:ModifyTargetGroup",
+        "elasticloadbalancing:ModifyTargetGroupAttributes",
+        "elasticloadbalancing:DeleteListener",
+        "elasticloadbalancing:ModifyListener",
+        "elasticloadbalancing:RegisterTargets",
+        "elasticloadbalancing:DeregisterTargets",
+        "elasticloadbalancing:AddTags",
+        "elasticloadbalancing:RemoveTags"
+      ],
+      "Resource": [
+        "arn:aws:elasticloadbalancing:${region}:${account_id}:loadbalancer/net/opennova-*",
+        "arn:aws:elasticloadbalancing:${region}:${account_id}:targetgroup/opennova-*",
+        "arn:aws:elasticloadbalancing:${region}:${account_id}:listener/net/opennova-*"
       ]
     },
     {
-      "Sid": "ProdElasticIpAssociationAndTag",
+      "Sid": "LoadBalancerRead",
+      "Effect": "Allow",
+      "Action": "elasticloadbalancing:Describe*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "Addresses",
       "Effect": "Allow",
       "Action": [
         "ec2:AssociateAddress",
         "ec2:DisassociateAddress",
         "ec2:CreateTags",
-        "ec2:DeleteTags"
+        "ec2:DeleteTags",
+        "ec2:AcceptAddressTransfer"
       ],
-      "Resource": "arn:aws:ec2:us-east-1:310045376545:elastic-ip/eipalloc-05d28b7cdb8ae7c0a"
+      "Resource": "arn:aws:ec2:${region}:${account_id}:elastic-ip/*"
     }
   ]
 }
