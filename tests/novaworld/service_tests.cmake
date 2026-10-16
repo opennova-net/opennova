@@ -956,6 +956,28 @@ target_compile_definitions(data_set_repository_test PRIVATE OPENNOVA_SOURCE_DIR=
 opennova_add_pg_test(data_set_repository COMMAND data_set_repository_test)
 set_tests_properties(data_set_repository PROPERTIES TIMEOUT 300)
 
+# The data sets' jobs (hosted/data_set_jobs.h, ADR 0064) on a migrated database and a local
+# object store in a scratch directory, each run as the workers run it: a packed synthetic
+# tree finalized (its manifest, missions, version; the refusals; an expansion's pair) and
+# the prune. Compiles the jobs, the data set sources and the local store directly; links
+# the runtime for the mission catalog.
+add_executable(data_set_jobs_test
+    novaworld/data_set_jobs_test.cpp
+    ${OPENNOVA_JOBS_SOURCES}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_files.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_jobs.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/object_store.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/local_object_store.cpp)
+target_link_libraries(data_set_jobs_test
+    PRIVATE opennova_novaworld_service opennova_runtime Threads::Threads)
+target_include_directories(data_set_jobs_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common)
+target_compile_definitions(data_set_jobs_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+opennova_add_pg_test(data_set_jobs COMMAND data_set_jobs_test)
+set_tests_properties(data_set_jobs PROPERTIES TIMEOUT 300)
+
 add_executable(hosted_fleet_repository_test
     novaworld/hosted_fleet_repository_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/billing_repository.cpp
