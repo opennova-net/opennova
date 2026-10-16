@@ -83,9 +83,7 @@ public:
 	// ESC/abort for the only interruptible load leg: the joiner's pre-load
 	// connect/session wait (the SP/host load remains one synchronous call the
 	// SceneTree cannot interrupt). Returns true when an in-flight preload was
-	// aborted; the ordinary load-failure leg reports it to the shell [orig:
-	// the "Mission loading aborted" early return of
-	// Client_CheckDisconnectOrEscDuringLoad @ 0x520270]
+	// aborted; the ordinary load-failure leg reports it to the shell (engine: runtime/inmatch/join_session_policy.cpp)
 	// (docs/interface/loading-screen-re.md D-LOADSCR-7).
 	bool cancel_preload();
 	// ESC/abort for the SECOND interruptible joiner wait: the post-load

@@ -401,8 +401,7 @@ String SessionDrive::switch_join_expansion(const Ref<ResourceRoot> &p_root,
 // say. The ordering, the latches, the windows, and every reason text live in
 // the policy (loss wins over every admission edge; the deploy latch re-arms
 // when pending clears; admission-ready is once per join and holds for the
-// cold wire drain behind the loading hold [orig: the reap @ 0x4ca4a0 ->
-// @ 0x4c63d0]).
+// cold wire drain behind the loading hold (engine: runtime/inmatch/joiner_connection.h)).
 void SessionDrive::update_joiner_admission_signals() {
 	MissionRoot *runtime = world_->get_runtime();
 	if (runtime == nullptr) {
@@ -669,8 +668,7 @@ void SessionDrive::sync_nwu_session(const Ref<Simulation> &p_sim) {
 // PlayerTeam / PlayerType alone, which the match keeps per connection
 // (NapiNPConnection::player_list_team / player_list_type) and the roster sync
 // carries as vars (NwuHostRole::sync_roster). The PlayerPCID is the joiner's
-// decrypted PUBPCID (the in-match host's account fields) [orig:
-// CNapiGameSession_SendPlayerAdded @0x4d006c]. The ClientPlayerEnterRequest is
+// decrypted PUBPCID (the in-match host's account fields) (engine: runtime/inmatch/napi_np_connection.h). The ClientPlayerEnterRequest is
 // NOT sent from here: the in-match host's join-phase watchdog announces a
 // validating joiner itself (the hook bound in bind_nw_host), before the player
 // is ever added to this roster.

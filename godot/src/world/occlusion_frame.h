@@ -174,8 +174,7 @@ public:
 	void rebind_placed_nodes();
 	// Unload teardown. The ordering replicates the pre-extraction unload
 	// EXACTLY:
-	// 1. the blink letter gates restore [orig: the letter-bit clear @ 0x525c45
-	//    at mission start] — an unload while indoors must not leave the next
+	// 1. the blink letter gates restore (engine: runtime/mission/mission_load_plan.h) — an unload while indoors must not leave the next
 	//    mission's terrain/sky/water hidden;
 	// 2. every occlusion override releases (the hidden bits this frame set
 	//    clear onto each node's own present intent) and the sim delta

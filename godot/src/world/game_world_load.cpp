@@ -599,8 +599,7 @@ void GameWorld::load_environment(const String &p_trn_path, const String &p_env_p
 }
 
 // Apply the mission's attrib-gated water/fog overrides onto the loaded env via
-// EnvFile's non-persistent override layer [orig: Game_LoadTerrainDuringConnect
-// @ 0x520710]. The base .env is never mutated.
+// EnvFile's non-persistent override layer (engine: formats/env/env.h). The base .env is never mutated.
 void GameWorld::apply_mission_environment_overrides(const Ref<MissionData> &p_mission) {
 	if (p_mission.is_null()) {
 		return;

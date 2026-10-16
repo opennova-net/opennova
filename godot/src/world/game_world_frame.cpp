@@ -985,7 +985,7 @@ void GameWorld::render_environment_nodes_frame() {
 // (ex-self-clocked Water._process), under retail's per-frame water-active
 // test: the terrain leg just tracked the visible terrain bounds, and the
 // occlusion frame's Blink water verdict is last frame's, as retail reads it
-// [orig: Terrain_SetupViewAndLighting @ 0x60fe40].
+// (engine: runtime/terrain/quadtree.h).
 void GameWorld::render_water_frame() {
 	if (water_ == nullptr) {
 		return;
@@ -1003,8 +1003,7 @@ void GameWorld::render_water_frame() {
 // Select the main scene's per-pass fog after the local player has placed the
 // camera, and before every rendered consumer submits. Camera offsets are
 // part of the render transform, so a v_offset-only waterline crossing must
-// flip the same state as Water/Terrain. [orig: Environment_ApplyFogAndAmbient
-// @ 0x57e440]
+// flip the same state as Water/Terrain. (engine: runtime/environment/environment_state.h)
 void GameWorld::apply_scene_environment_frame() {
 	if (env_ == nullptr) {
 		return;
@@ -1101,8 +1100,7 @@ void GameWorld::sample_iris_frame() {
 	}
 }
 
-// The sun-veil weather feed [orig: Environment_ApplySunVeilAndExposureStopdown
-// @ 0x5ad8b0 runs once per main scene frame]: Celestial computed this frame's
+// The sun-veil weather feed (engine: formats/env/env_celestial.h): Celestial computed this frame's
 // veil pair in its own advance (and pushed the white-quad alpha global);
 // forward the exposure stop-down half to modulator-2's witnessed writer so
 // the next weather ticks chase it. Zero-safe with either node absent.
@@ -1121,8 +1119,7 @@ void GameWorld::render_sun_veil_frame() {
 // frame: render_light_frame pushed this frame's LightScene and light context
 // into the device, the material frame may have rebuilt the model subtrees
 // the capture channels are stamped on, and slot priority plus the capture
-// poses are camera-relative) [orig: Render_ShadowPass @ 0x5d7b70 once per
-// main scene frame].
+// poses are camera-relative) (engine: runtime/renderer/render_slot_shadow.h).
 void GameWorld::render_slot_shadow_frame() {
 	if (slot_shadow_ != nullptr) {
 		slot_shadow_->advance_frame();
@@ -1132,7 +1129,7 @@ void GameWorld::render_slot_shadow_frame() {
 // Retail refreshes TexCubeEnvironment during the offscreen preparation leg:
 // all six 256-square faces together initially/when forced and every 128
 // render frames, centered on the simulation player and clamped above
-// terrain. [orig: EnvCube_Update @ 0x6106a0].
+// terrain. (engine: runtime/renderer/environment_cube.h).
 void GameWorld::render_environment_cube_frame() {
 	if (!world_ready_ || environment_cube_ == nullptr) {
 		return;

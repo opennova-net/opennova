@@ -67,9 +67,7 @@ void GameWorld::route_script_effects() {
 // where the impact is produced, through the fire-sound queue's distance delay
 // (world::play_round_impact_sound), and it reaches the audio bank through the
 // fire presenter's drain.
-// [orig: Projectile_UpdatePhysics @ 0x4e9d70 -> the type-specific impact
-//  handler (terrain @ 0x4e9210, entity @ 0x4e9390, person @ 0x4e98f0, water
-//  @ 0x4e9b80) -> AmmoDef_ProcessImpactEffect @ 0x40a170]
+// (engine: runtime/world/round_sim.h)
 void GameWorld::route_round_impacts() {
 	Ref<Simulation> sim = get_sim();
 	if (sim.is_null()) {
