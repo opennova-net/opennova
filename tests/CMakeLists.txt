@@ -1168,6 +1168,9 @@ target_link_libraries(extract_cli_test PRIVATE opennova_formats)
 target_include_directories(extract_cli_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(extract_cli_test PRIVATE cxx_std_17)
 add_dependencies(extract_cli_test opennova_extract)
+if(MSVC)  # the exe's manifest, so this test's std::system hands it the UTF-8 command line
+    target_sources(extract_cli_test PRIVATE ${CMAKE_SOURCE_DIR}/apps/3di/utf8.manifest)
+endif()
 add_test(NAME extract_cli COMMAND extract_cli_test $<TARGET_FILE:opennova_extract> ${CMAKE_CURRENT_BINARY_DIR})
 
 add_executable(resource_index_mus_test resource_index/resource_index_mus_test.cpp)

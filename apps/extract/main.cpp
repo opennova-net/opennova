@@ -11,15 +11,16 @@
 // runtime serves (base + expansion override), decoded as its loader is served them
 // (vfs_read_served: a shader as stored, its loader unwrapping its own SCR form)
 // — and written to <out>/<basename>.
-// Exit 0 when every entry was written, 1 when any entry was missing, 2 on a usage
-// or mount error.
+// Exit 0 when every entry was written, 1 when any entry was missing, 2 on a usage,
+// mount or write error. Paths are UTF-8 (the exe's manifest opts into the UTF-8 code
+// page; the writes go through base/io/file_io.h).
+#include <base/io/file_io.h>
 #include <base/io/strutil.h>
 #include <base/resource_index/boot_policy.h>
 #include <base/vfs/vfs.h>
 
 #include <cstdio>
 #include <cstring>
-#include <fstream>
 #include <string>
 #include <vector>
 
@@ -114,13 +115,11 @@ int main(int argc, char **argv) {
 			continue;
 		}
 		const std::string path = opennova::boot_path_join(out_dir, basename_of(name));
-		std::ofstream out(path, std::ios::binary);
-		if (!out) {
-			std::fprintf(stderr, "opennova-extract: cannot write %s\n", path.c_str());
+		std::string error;
+		if (!opennova::io::write_file_atomic(path, bytes.data(), bytes.size(), error)) {
+			std::fprintf(stderr, "opennova-extract: %s\n", error.c_str());
 			return 2;
 		}
-		out.write(reinterpret_cast<const char *>(bytes.data()),
-				static_cast<std::streamsize>(bytes.size()));
 		std::printf("%s -> %s (%zu bytes)\n", name.c_str(), path.c_str(), bytes.size());
 	}
 	return missing == 0 ? 0 : 1;
