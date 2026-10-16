@@ -100,13 +100,35 @@ CAMEL = re.compile(r"^[A-Z][a-z0-9]+(?:[A-Z][A-Za-z0-9]*)+$")
 # (docs/README.md: "Jointops.exe retail unless a doc says otherwise"); a marker that names
 # its image, `(retail)` included, still binds its own. Every other record is Jointops-default
 # and labels its other-image markers (correspondence.md, til-re.md, dfx2-vs-jo-re.md, ...).
+# A value is the record's image, or its sections' as (heading prefix, image) in file order:
+# from a heading to the next one listed, None meaning Jointops.exe.
 DOC_DEFAULT_IMAGE = {
     "docs/threedi/3di-lw-format-re.md": "Dflw.exe",
-    # sectioned: section 1/3 ModSuperOed.exe, 2 dfvas.exe, 5 dfbhd.exe
-    "docs/threedi/3di-gp-format-re.md": "ModSuperOed.exe",
+    "docs/threedi/3di-gp-format-re.md": (
+        ("## 1.", "ModSuperOed.exe"),                       # the 3DI3 wire format, OED's writers
+        ("### Retail PANM animation frames", None),         # section 1's retail JO subsections
+        ("## 2.", "dfvas.exe"),
+        ("## 3.", "ModSuperOed.exe"),
+        ("## 4.", "ModSuperOed.exe"),                       # the catalog: mixed rows, skipped as before
+        ("## 5.", "dfbhd.exe"),                             # its JO cites say (Jointops)
+    ),
     # misldr.dll (every 0x100xxxxx), dfx2med.exe and JOTACmed.exe, never mixed in one marker
     "docs/mission/mis-format-re.md": "misldr.dll",
 }
+
+
+def doc_images(path, lines):
+    """The default image of each line of `path` (None: Jointops.exe) from DOC_DEFAULT_IMAGE."""
+    rule = DOC_DEFAULT_IMAGE.get(path)
+    if not isinstance(rule, tuple):
+        return [rule] * len(lines)
+    out, current = [], None
+    for line in lines:
+        for heading, image in rule:
+            if line.startswith(heading):
+                current = image
+        out.append(current)
+    return out
 MAX_CONTINUATION = 6   # lines a wrapped marker may run onto before its `]`
 PRIMER_ROW = re.compile(r"^\|([^|\n]+)\|", re.M)               # a table row's first cell
 PRIMER_IMAGE = re.compile(r"`([^`]+\.(?:exe|dll))`", re.I)     # a binary named in it
@@ -211,8 +233,9 @@ def name_forms(name, _ms=_re.compile(r"^\?(\?[01]|\?_7)?([A-Za-z_]\w*)@((?:[A-Za
         if special == "?_7":
             forms.add("::".join(list(reversed(scopes)) + [leaf]))
         elif special in ("?0", "?1"):
-            path = list(reversed(scopes)) + [leaf]
-            forms.add("::".join(path + [("~" if special == "?1" else "") + leaf]))
+            path = list(reversed(scopes)) + [leaf, ("~" if special == "?1" else "") + leaf]
+            for i in range(len(path) - 1):
+                forms.add("::".join(path[i:]))
         else:
             path = list(reversed(scopes)) + [leaf]
             # the full path and each class-scoped tail of it (`CBlt::BltNone` for
@@ -274,7 +297,7 @@ def extract(paths):
             lines = open(os.path.join(REPO, path), encoding="utf-8", errors="replace").read().split("\n")
         except OSError:
             continue
-        doc_image = DOC_DEFAULT_IMAGE.get(path)
+        doc_image = doc_images(path, lines)
         for i, line in enumerate(lines):
             if not MARKER_LINE.search(line):
                 continue
@@ -282,7 +305,7 @@ def extract(paths):
             for m in PAIR.finditer(text):
                 tok, addr = m.group(1), m.group(2).lower()
                 bound = cite_images.image_at(text, m.start(), m.end())
-                image, spelled = bound if bound else (doc_image or cite_images.DEFAULT_IMAGE, "")
+                image, spelled = bound if bound else (doc_image[i] or cite_images.DEFAULT_IMAGE, "")
                 if image == cite_images.DEFAULT_IMAGE:
                     ctx = "(retail)" if bound else ""
                 elif cite_images.misspelled(image, spelled):
@@ -361,6 +384,20 @@ def label_like(tok):
     return "_" not in tok and "::" not in tok and bool(CAMEL.match(tok))
 
 
+# Every IDB name in its demangled / undecorated forms -> its address: a cite that spells such a
+# name plainly (`D3DXCreateCubeTextureFromFileInMemory`) names a symbol the IDB has, never a label.
+DECORATED_CODE = r'''
+import idautils, json
+payload = {}
+for ea, n in idautils.Names():
+    if n.startswith("?") or ("@" in n and n[:1] in "_@"):
+        for f in name_forms(n):
+            if f != n and f not in payload:
+                payload[f] = "0x%x" % ea
+'''
+DECORATED = {}
+
+
 def classify(tok, addr, ctx, info):
     a = int(addr, 16)
     if ctx.startswith("(image-spelling)"):
@@ -372,6 +409,8 @@ def classify(tok, addr, ctx, info):
     if a >= 0x10000000:
         return "unqualified-image"
     nm, fs, fn, defined, tea, ref, member = info
+    if not tea and tok in DECORATED:
+        tea = DECORATED[tok]
     fn_forms = name_forms(fn)
     sym = symbol_like(tok)
     if not sym or member:
@@ -634,6 +673,7 @@ def main():
         check_primer_images(pairs)
 
     connect()
+    DECORATED.update(py_eval_big(NAME_FORMS_SRC + DECORATED_CODE, rid=90))
     info = {}
     for i in range(0, len(keys), args.batch):
         chunk = keys[i:i + args.batch]

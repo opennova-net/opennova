@@ -91,6 +91,14 @@ TAIL_LEAD = re.compile(r"^[ \t,]*\(?[ \t]*")
 # what may stand between an image named before an address and the address: a name at most
 NAME_GAP = re.compile(r"[\s,:]*(?:[A-Za-z_~][\w:~]*\s*)?")
 SPAN_CAP = 600
+# a marker wrapped onto the next comment line: the line break and the comment lead-in
+COMMENT_CONTINUATION = re.compile(r"\n[ \t]*(?://+|#+|\*+(?!/)|;+|--)?[ \t]*")
+
+
+def flat(text: str) -> str:
+    """`text` with each line break and its comment lead-in (`// `, `# `, ` * `) one space: a
+    wrapped marker read as one line, as cite_sweep.py joins it (the census reads raw files)."""
+    return COMMENT_CONTINUATION.sub(" ", text)
 
 
 def _image_of(spelled: str, is_file: bool) -> str | None:
@@ -183,11 +191,11 @@ def qualifiers(seg: str):
     `; RAT.exe @...`)."""
     out = []
     for s, e, image, spelled in image_tokens(seg):
-        prev = seg[:s].rstrip(" \t")
-        nxt = seg[e:].lstrip(" \t")[:1]
+        prev = flat(seg[:s]).rstrip()
+        nxt = flat(seg[e:e + 12]).lstrip()[:1]
         if prev.endswith("(") and nxt in (")", ",", ":", ";"):
             out.append((s, e, image, spelled))
-        elif prev.endswith((",", ";")) and nxt in ("", ")", "]", ";", ",", "|"):
+        elif prev.endswith((",", ";")) and nxt in ("", ")", "]", ";", ",", "|", "-", "—"):
             out.append((s, e, image, spelled))
         elif nxt == "]":          # the marker's closing word: `...; both misldr.dll]`
             out.append((s, e, image, spelled))
@@ -216,7 +224,7 @@ def image_at(text: str, start: int, end: int):
     one image its clause qualifies, then the one image its marker qualifies (`[orig: A @0x1,
     B @0x2 (dfx2.exe)]`; a marker that qualifies two images, `(retail)` among them, binds
     nothing beyond its qualified addresses)."""
-    tail = text[end:end + 80]
+    tail = flat(text[end:end + 80])
     lead = RANGE_LEAD.match(tail)
     if lead:
         tail = tail[lead.end():]
@@ -230,7 +238,7 @@ def image_at(text: str, start: int, end: int):
     tokens = image_tokens(before)
     if tokens:
         s, e, image, spelled = tokens[-1]
-        if NAME_GAP.fullmatch(before[e:]):
+        if NAME_GAP.fullmatch(flat(before[e:])):
             return image, spelled
     seg = text[span_start:span_end]
     rel = start - span_start

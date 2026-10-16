@@ -134,15 +134,20 @@ def _in_build_dir(parts) -> bool:
 CLASS_NAME_LINE = re.compile(r"^class_name\s+([A-Za-z_]\w*)", re.M)
 
 
-def _own_class_locals(text: str) -> set[str]:
-    """Locals the file's own class builds (`var snapshot := GameRenderDiagnostics.new()` in
-    GameRenderDiagnostics): reaching their privates is the class's own business, as
-    self._ is (a static factory filling the instance it made)."""
+FUNC_LINE = re.compile(r"^\s*(?:static\s+)?func\s")
+
+
+def _own_class_local(text: str):
+    """The pattern of a local the file's own class builds (`var snapshot :=
+    GameRenderDiagnostics.new()` in GameRenderDiagnostics), or None with no class_name:
+    reaching such a local's privates is the class's own business, as self._ is (a static
+    factory filling the instance it made). It holds from its `var` to the end of that
+    function, never in another function of the file."""
     declared = CLASS_NAME_LINE.search(text)
     if not declared:
-        return set()
+        return None
     name = re.escape(declared.group(1))
-    return set(re.findall(r"\bvar\s+(\w+)\s*(?::\s*%s\s*)?:?=\s*%s\.new\(" % (name, name), text))
+    return re.compile(r"\bvar\s+(\w+)\s*(?::\s*%s\s*)?:?=\s*%s\.new\(" % (name, name))
 
 
 def _count_private_pokes(subdirs: tuple[str, ...]) -> int:
@@ -156,8 +161,13 @@ def _count_private_pokes(subdirs: tuple[str, ...]) -> int:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            own = [re.compile(r"\b%s\._" % re.escape(v)) for v in _own_class_locals(text)]
+            local_decl = _own_class_local(text)
+            own: list[re.Pattern] = []
             for line in text.splitlines():
+                if FUNC_LINE.match(line):
+                    own = []        # a new function: the last one's locals are out of scope
+                if local_decl is not None:
+                    own += [re.compile(r"\b%s\._" % re.escape(v)) for v in local_decl.findall(line)]
                 # Code only: a comment naming `GameWorld._runtime` documents a
                 # seam, it does not poke one.
                 stripped = SELF_POKE.sub("", line.split("#", 1)[0])

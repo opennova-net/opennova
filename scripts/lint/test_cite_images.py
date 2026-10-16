@@ -69,6 +69,15 @@ class ImageAt(unittest.TestCase):
         text = "// [orig: A `test byte ptr [eax+54h], 20h` @0x43296C,\n// B @0x54172D (dfx2.exe)]"
         self.assertEqual(bound(text), [("43296c", "dfx2.exe"), ("54172d", "dfx2.exe")])
 
+    def test_a_qualifier_on_a_wrapped_line_still_binds(self):
+        # the census reads the raw file: the comment lead-in of the continuation line is no text
+        text = ("// polytrn_scale (128 where it has none [orig:\n"
+                "// JOTACmed.exe, the arm @ 0x464a38; the default, sub_464B60 @ 0x464bb6]).")
+        self.assertEqual(bound(text), [("464a38", "JOTACmed.exe"), ("464bb6", "JOTACmed.exe")])
+        self.assertEqual(
+            bound("// [orig: YUV_init @0x30019F00, binkw32.dll -- BinkCopyToBufferRect @0x30013220]"),
+            [("30019f00", "binkw32.dll"), ("30013220", "binkw32.dll")])
+
     def test_spelling(self):
         self.assertTrue(cite_images.misspelled("gobj.dll", "gobj"))
         self.assertTrue(cite_images.misspelled("JOTACmed.exe", "JOTACmed"))
