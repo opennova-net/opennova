@@ -26,6 +26,7 @@
 #include "common/retail_mission_files.h"
 #include "common/retail_paths.h"
 
+#include <runtime/inmatch/occlusion_collect.h> // the shell's entity collect
 #include <runtime/mission/collision_resolve.h>
 #include <runtime/mission/placement_traits.h>
 #include <runtime/renderer/scene_pass_gates.h>
@@ -554,30 +555,26 @@ bool run_frame(testrig::RetailMissionRig &rig, const w::Entity &bldg, const Door
 	}
 	out.gates = renderer::scene_pass_gates(out.letters, false);
 
-	// The collector walk the shell runs (Simulation::run_occlusion_frame) and
-	// the building verdicts it applies (get_building_visibility_changes): the
-	// statics table's building rows take the batch verdict, every other row
-	// (the pool-2 decorations and foliage included) the entity gates.
-	std::vector<w::EntityHandle> handles;
+	// The building verdicts the shell applies (get_building_visibility_changes):
+	// the statics table's building rows take the batch verdict; every other
+	// row (the pool-2 decorations and foliage included) takes the entity
+	// collect the shell runs (runtime/inmatch/occlusion_collect.h).
 	rig.world.registry.for_each([&](const w::Entity &e) {
-		if (e.kind == w::EntityKind::Building && w::building_def_row(e)) {
-			if (e.bms_id == 0) return;
-			if (!rig.occlusion.has_instance(e.handle) &&
-					rig.collision.model_for(rig.world, e.handle) == nullptr)
-				return;
-			if (rig.occlusion.building_visible(e.handle)) ++out.visible_buildings;
-			else out.hidden_buildings.insert(e.bms_id);
+		if (e.kind != w::EntityKind::Building || !w::building_def_row(e) || e.bms_id == 0) return;
+		if (!rig.occlusion.has_instance(e.handle) &&
+				rig.collision.model_for(rig.world, e.handle) == nullptr)
 			return;
-		}
-		if (e.kind == w::EntityKind::Marker || e.bms_id == 0) return;
-		handles.push_back(e.handle);
+		if (rig.occlusion.building_visible(e.handle)) ++out.visible_buildings;
+		else out.hidden_buildings.insert(e.bms_id);
 	});
-	for (const w::EntityHandle h : handles) {
-		w::Entity *e = rig.world.registry.get(h);
-		if (e == nullptr) continue;
-		if (!rig.occlusion.entity_render_visible(rig.world, rig.collision, *e, cam))
-			out.culled.insert(e->bms_id);
-	}
+	opennova::inmatch::WireOcclusionLatchMap wire_latch;
+	std::vector<w::EntityHandle> scratch;
+	std::vector<int32_t> culled_bms;
+	std::vector<int32_t> culled_wire;
+	std::vector<w::Vec3> anchors;
+	opennova::inmatch::collect_view_verdicts(opennova::inmatch::PresentRowsContext{rig, nullptr, false},
+			wire_latch, scratch, cam, culled_bms, culled_wire, anchors);
+	out.culled.insert(culled_bms.begin(), culled_bms.end());
 	return true;
 }
 

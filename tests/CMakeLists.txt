@@ -3940,6 +3940,10 @@ add_executable(netsim_present_rows_test netsim/present_rows_test.cpp)
 target_link_libraries(netsim_present_rows_test PRIVATE opennova_runtime)
 add_test(NAME netsim_present_rows COMMAND netsim_present_rows_test)
 
+add_executable(netsim_occlusion_collect_test netsim/occlusion_collect_test.cpp)
+target_link_libraries(netsim_occlusion_collect_test PRIVATE opennova_runtime)
+add_test(NAME netsim_occlusion_collect COMMAND netsim_occlusion_collect_test)
+
 add_executable(netsim_client_replica_pipeline_recoil_test
     netsim/client_replica_pipeline_recoil_test.cpp)
 target_link_libraries(netsim_client_replica_pipeline_recoil_test PRIVATE opennova_runtime)

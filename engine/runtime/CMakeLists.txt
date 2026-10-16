@@ -435,6 +435,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_emplaced.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_replica_present_projection.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/present_rows.cpp            # the PF_* row collectors, both roles (ADR 0043 G3)
+    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/occlusion_collect.cpp       # one view's entity collect (the render gates' walk)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_runtime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_effects.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/client_squad.cpp
