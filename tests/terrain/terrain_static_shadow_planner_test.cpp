@@ -8,6 +8,8 @@
 #include <runtime/mission/placement_traits.h>
 
 #include <algorithm>
+#include <array>
+#include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <utility>
@@ -615,6 +617,40 @@ int main() {
 		follow.replace_casters({caster_at(60.0f, 2, 20)}, false);
 		if (!expect(follow.take_changed_reaches().empty(),
 				"turned off, the planner names nothing")) {
+			return 1;
+		}
+	}
+
+	// A caster stands on the terrain's POINT sample at its origin, not the bilinear one
+	// [orig: Terrain_CollectAndRenderTileModels @ 0x60d8d3..0x60d8ee ->
+	// Terrain_GetHeightAtPosition @ 0x606720]; the record's origin is the Godot plane's
+	// (x, z), the mission point (x, -z).
+	{
+		constexpr int kDim = 1024;
+		std::vector<uint16_t> heights(static_cast<size_t>(kDim) * kDim);
+		for (int z = 0; z < kDim; ++z)
+			for (int x = 0; x < kDim; ++x)
+				heights[static_cast<size_t>(z) * kDim + x] = static_cast<uint16_t>((x + 3 * z) % 256 * 256);
+		std::vector<int> sector_grid(256, 1);
+		TerrainHeightField field;
+		field.heightmap = heights.data();
+		field.dim = kDim;
+		field.layout.sector_grid = sector_grid.data();
+		field.layout.origin_x = -4;
+		field.layout.origin_y = -4;
+		std::array<float, 12> transform{1, 0, 0, 0, 1, 0, 0, 0, 1, 100.5f, 7.0f, -200.75f};
+		const float ground = static_shadow_caster_ground(field, transform);
+		if (!expect(ground == height_field_height_world(field, 100.5f, -200.75f) &&
+						ground == height_field_height_mission(field, 100.5f, 200.75f),
+				"the ground is the point sample at the origin, the mission point (x, -z)")) {
+			return 1;
+		}
+		if (!expect(ground != height_field_height_world_bilinear(field, 100.5f, -200.75f),
+				"the ground is not the bilinear sample")) {
+			return 1;
+		}
+		if (!expect(static_shadow_caster_ground(TerrainHeightField{}, transform) == 0.0f,
+				"no terrain grounds a caster at 0")) {
 			return 1;
 		}
 	}
