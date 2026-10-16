@@ -34,9 +34,12 @@ in maturity_baseline.json:
                         marker is `[orig: Name @0xADDR]` (ADR 0042 d7).
   gd_foreign_private_accesses
                         lines in the shipping GDScript (godot/game) that access an _underscore member of
-                        ANOTHER object (self._ excluded) -- a "method annex"
+                        ANOTHER object (self._ excluded, and a local the file's
+                        own class built with `ClassName.new()`: privacy is the
+                        class's, not the instance's) -- a "method annex"
                         reaching into its owner's privates is not a class
-                        boundary (ADR 0043). Non-increasing; target zero.
+                        boundary (ADR 0043). An ABSOLUTE zero floor like
+                        mcp_boundary_cites (reached 2026-10-15); no baseline key.
   mcp_boundary_cites    "[orig:" citations in godot/game/mcp GDScript plus
                         the typed debug-control table
                         (godot/src/devtools/debug_control_table.{h,cpp},
@@ -62,6 +65,12 @@ in maturity_baseline.json:
                         its status pages are the game_probe wire by design,
                         ADR 0041 / ADR 0043 d12). Each is a record that
                         crosses untyped (ADR 0017); typed records burn it down.
+  godot_src_dictionary_params
+                        Binding parameters (`p_` by Godot's convention) of type
+                        Dictionary or TypedArray<Dictionary> in godot/src/**/*.h:
+                        the INPUT half of godot_src_dictionary_returns, the
+                        untyped records GDScript still hands a binding (ADR 0017,
+                        ADR 0042 d5). Non-increasing from its 2026-10-15 seed.
   godot_src_dictionary_returns
                         Binding methods declared to return Dictionary or
                         TypedArray<Dictionary> in godot/src/**/*.h -- the seams
@@ -76,12 +85,14 @@ in maturity_baseline.json:
 Modes:
   (default)         report counts vs baseline; exit 0 regardless (soft mode)
   --enforce         exit 1 if any counter exceeds its baseline (the ratchet)
+                    OR sits below it unbanked
   --write-baseline  rewrite the baseline to current counts (maintainer
-                    action; log the bump in docs/maturity-program.md)
+                    action for a bump, logged in docs/maturity-program.md;
+                    the slice's own action for a decrease)
 
-Decreases are reported and SHOULD be committed into the baseline by the
-slice that earned them (run --write-baseline in that slice) so the ratchet
-only ever tightens.
+A decrease is banked by the slice that earned it (--write-baseline in that
+slice, named in its commit): --enforce fails on an unbanked one, since a
+baseline above the tree lets the same number of sites come back unseen.
 """
 
 from __future__ import annotations
@@ -119,6 +130,20 @@ def _in_build_dir(parts) -> bool:
         parts[2].startswith("build")
 
 
+CLASS_NAME_LINE = re.compile(r"^class_name\s+([A-Za-z_]\w*)", re.M)
+
+
+def _own_class_locals(text: str) -> set[str]:
+    """Locals the file's own class builds (`var snapshot := GameRenderDiagnostics.new()` in
+    GameRenderDiagnostics): reaching their privates is the class's own business, as
+    self._ is (a static factory filling the instance it made)."""
+    declared = CLASS_NAME_LINE.search(text)
+    if not declared:
+        return set()
+    name = re.escape(declared.group(1))
+    return set(re.findall(r"\bvar\s+(\w+)\s*(?::\s*%s\s*)?:?=\s*%s\.new\(" % (name, name), text))
+
+
 def _count_private_pokes(subdirs: tuple[str, ...]) -> int:
     count = 0
     for sub in subdirs:
@@ -130,10 +155,13 @@ def _count_private_pokes(subdirs: tuple[str, ...]) -> int:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
+            own = [re.compile(r"\b%s\._" % re.escape(v)) for v in _own_class_locals(text)]
             for line in text.splitlines():
                 # Code only: a comment naming `GameWorld._runtime` documents a
                 # seam, it does not poke one.
                 stripped = SELF_POKE.sub("", line.split("#", 1)[0])
+                for local in own:
+                    stripped = local.sub("", stripped)
                 if PRIVATE_POKE.search(stripped):
                     count += 1
     return count
@@ -489,6 +517,29 @@ GODOT_FIXED_DICTIONARY_VIRTUALS = {"_get_line_syntax_highlighting"}
 GODOT_OVERRIDE_SPECIFIER = re.compile(r"\)\s*(const\s*)?override\s*;")
 
 
+GODOT_SRC_DICTIONARY_PARAM = re.compile(
+    r"(?:\(|,)\s*(?:const\s+)?(?:TypedArray<Dictionary>|Dictionary)\s*&?\s*p_\w+")
+
+
+def count_godot_src_dictionary_params() -> int:
+    """Binding parameters of type Dictionary / TypedArray<Dictionary> (`p_` names, Godot's
+    binding convention; an `r_` out-parameter or a helper's `d` is no input seam) in
+    godot/src/**/*.h, one per parameter: the untyped records GDScript hands a binding.
+    ADR 0043 G11 left two such setters; the gauge keeps the count from regrowing. A
+    declaration wrapped so a parameter opens its line counts too (the leading `(`)."""
+    count = 0
+    for path in (REPO / "godot" / "src").rglob("*.h"):
+        if _in_build_dir(path.relative_to(REPO).parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            count += len(GODOT_SRC_DICTIONARY_PARAM.findall("(" + line.split("//", 1)[0]))
+    return count
+
+
 def count_godot_src_dictionary_returns() -> int:
     """Binding methods declared to return Dictionary or TypedArray<Dictionary>
     in godot/src/**/*.h: the seams that still hand GDScript an untyped record
@@ -558,7 +609,6 @@ def main() -> int:
 
     current = {
         "test_private_pokes": count_test_private_pokes(),
-        "gd_foreign_private_accesses": count_gd_foreign_private_accesses(),
         "gd_test_production_subclasses": count_gd_test_production_subclasses(),
         "engine_uncited_src_files": count_engine_uncited_src_files(allowlist),
         "godot_orig_cites": count_godot_orig_cites(),
@@ -570,13 +620,15 @@ def main() -> int:
         "has_method_guards": count_has_method_guards(),
         "gd_dict_key_sites": count_gd_dict_key_sites(),
         "godot_src_dictionary_returns": count_godot_src_dictionary_returns(),
+        "godot_src_dictionary_params": count_godot_src_dictionary_params(),
     }
 
     # Absolute floors, no baseline key: the MCP boundary carries zero witness
-    # cites (ADR 0042 d7) and godot/ hangs zero facts on node metadata,
-    # forever — neither relaxes via --write-baseline.
+    # cites (ADR 0042 d7), godot/ hangs zero facts on node metadata, and the
+    # shipping GDScript reaches into no other object's privates, forever — neither relaxes via --write-baseline.
     mcp_cites = count_mcp_boundary_cites()
     meta_sites = count_godot_node_meta_sites()
+    foreign_privates = count_gd_foreign_private_accesses()
 
     if args.write_baseline:
         config["counters"] = current
@@ -590,6 +642,9 @@ def main() -> int:
         if meta_sites > 0:
             print(f"[ratchet] WARNING: godot_node_meta_sites is {meta_sites} — the "
                   f"floor is 0 and has no baseline; --enforce will fail.")
+        if foreign_privates > 0:
+            print(f"[ratchet] WARNING: gd_foreign_private_accesses is {foreign_privates}: "
+                  f"the floor is 0 and has no baseline; --enforce will fail.")
         return 0
 
     failed = False
@@ -607,6 +662,14 @@ def main() -> int:
               "nobody can find. Put it on the node class as a typed property, "
               "on a RefCounted record, or in the owner's own table.")
         failed = True
+    private_marker = "OK" if foreign_privates == 0 else "ABOVE FLOOR"
+    print(f"[ratchet] gd_foreign_private_accesses: {foreign_privates} (absolute floor 0) "
+          f"{private_marker}")
+    if foreign_privates > 0:
+        print("[ratchet]   a script reaching into another object's _privates is a method "
+              "annex, not a class (ADR 0043): make the member public or move the code "
+              "onto the class that owns it.")
+        failed = True
     for name, value in current.items():
         base = baseline.get(name)
         if base is None:
@@ -614,17 +677,19 @@ def main() -> int:
             failed = True
             continue
         delta = value - base
-        marker = "OK" if delta <= 0 else "INCREASED"
+        marker = "OK" if delta == 0 else ("INCREASED" if delta > 0 else "UNBANKED")
         print(f"[ratchet] {name}: {value} (baseline {base}, {delta:+d}) {marker}")
         if delta > 0:
             failed = True
         elif delta < 0:
-            print(f"[ratchet]   improvement — commit it: "
+            failed = True
+            print(f"[ratchet]   improvement, bank it in this change: "
                   f"python scripts/lint/ratchet_counts.py --write-baseline")
 
     if failed and args.enforce:
-        print("[ratchet] FAIL: a counter increased, lacks a baseline, or sits "
-              "above an absolute floor. Fix the regression, or (baseline "
+        print("[ratchet] FAIL: a counter increased, fell without being banked, lacks a "
+              "baseline, or sits above an absolute floor. Fix the regression, bank an "
+              "improvement with --write-baseline (named in the commit), or (baseline "
               "counters only) a maintainer bumps the baseline and logs it in "
               "docs/maturity-program.md.")
         return 1

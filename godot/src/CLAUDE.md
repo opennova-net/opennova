@@ -33,7 +33,8 @@ Size ratchet: no `.cpp`/`.h` here past 2500 lines — split by responsibility
 (one type per TU pair), never by "leg"; `scripts/lint/ratchet_counts.py` fails
 on any increase. Shipping GDScript has no size ratchet; it has
 `gd_foreign_private_accesses` instead: a script that reaches into another
-object's `_privates` is a method annex, not a class, and the count only falls.
+object's `_privates` is a method annex, not a class, and the count is an
+absolute zero floor.
 
 The game-level GDScript runtime (world, debug, ui, avatar, probe,
 mcp, resource_index, strings, util) lives in `godot/game/` (ADR 0034 d6) — anything
