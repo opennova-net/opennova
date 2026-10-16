@@ -23,7 +23,7 @@ struct NapiNPServerCtx;
 void read_join_cd_key_ids(NapiNPConnection &conn, const std::vector<uint8_t> &join_payload);
 
 // The ladder, in retail's order over the legs the port keeps: the build and ban-type gates
-// (2, 3, 4, 6, 7, 8; the NovaWorld app id's 9 is not ported), the title's LAN CD-key leg (10..13,
+// (2, 3, 4, 6, 7, 8), the NovaWorld app id (9), the title's LAN CD-key leg (10..13,
 // DFX2-13), the expansion (47, 48), the spectator legs (14, 15, 16), the side passwords (18..22)
 // and, with a server context, the bans (29, 30, 31). `ctx` null (the World-less unit path) runs
 // JO's title and no context leg. 0 admits.

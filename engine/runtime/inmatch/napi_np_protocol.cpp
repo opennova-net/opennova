@@ -110,6 +110,9 @@ ClientGameEnvironment parse_client_game_environment(const ClientAuth &auth) {
 			parsed.mbn = value;
 		} else if (strutil::iequals(cu_name, "SOPD")) {
 			parsed.sopd = value;
+		} else if (strutil::iequals(cu_name, "APPID")) {
+			// [orig: NapiNetConfig_LoadFromConnTags @0x4C7260, the APPID leg @0x4C7415]
+			parsed.app_id = value;
 		}
 	}
 	return parsed;

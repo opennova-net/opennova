@@ -83,11 +83,10 @@ parse_set_cookie_values(const std::vector<std::string> &set_cookie_values);
 // same int field and the BT tag into a different one); NI/NP are the plaintext
 // game-node ip/port; BK is the plaintext relay tunnel cookie.
 // [orig: URL_ParseConnectionQueryString @0x54dfb0 (CK key "cfhdcegjigecjehcgjdhe")
-//  -> UI_JoinSelectedSession @0x5699d0 (`net_config.bt = atol(&g_NkExtraBuf[64])`
-//  = atol(decoded CK)); the host side NapiNetConfig_LoadFromConnTags @0x4c7260
-//  ("APPID" -> the same field IDA labels net_cfg.bt, "BT" -> char_name) and the
-//  compare in Server_ValidatePlayerJoinRequest @0x512100 @0x5122c5 (reject
-//  code 9)].
+//  -> UI_JoinSelectedSession @0x5699d0 (`net_config.app_id = atol(&g_NkExtraBuf[64])`
+//  = atol(decoded CK), config +0x40); the host side NapiNetConfig_LoadFromConnTags
+//  @0x4c7260 ("APPID" -> app_id @0x4C7415, "BT" -> bt) and the compare in
+//  Server_ValidatePlayerJoinRequest @0x512100 @0x5122C3 (reject code 9)].
 struct JoiConnection {
 	std::string nk;
 	std::string ck;

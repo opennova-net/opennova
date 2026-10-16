@@ -93,7 +93,7 @@ struct ServerStatusPageState {
 	int slot_limit = 0; // [orig: dword_24D211C, the session's slot limit]
 	std::vector<ServerStatusSlot> slots; // indexed by slot
 	bool novaworld = false;   // [orig: transport_mode == NovaWorld @0x50a7db]
-	uint32_t session_key = 0; // [orig: ctx+0x1194 via sub_4C4DB0 @0x4c4db0]
+	uint32_t session_key = 0; // [orig: ctx+0x1194 via CNapiNPCtx_GetAppId @0x4c4db0]
 	std::string server_name;  // [orig: g_ServerNameStr @0x24D1FC4]
 	uint32_t game_type = 0;   // [orig: g_GameType]
 	// The round tallies [orig: g_RoundWinsTeam1 @0xC8FF0C, g_RoundWinsTeam2

@@ -363,10 +363,10 @@ std::vector<uint8_t> JoinerConnection::build_client_auth() {
 	// NovaWorld host validates: a mismatch (or an absent APPID, our old bug) is
 	// the code-9 punt. Witnessed live 2026-08-31 in a stock client's successful
 	// join to a genuine .204 host: `CU BT="0"`, `CU APPID="3225"` (= atol(decoded
-	// CK)). [orig: net_config.bt = atol(decoded CK) @0x569b8e; the host reads
-	// the APPID tag into that same field and the BT tag into char_name —
-	// NapiNetConfig_LoadFromConnTags @0x4c7260 — then
-	// Server_ValidatePlayerJoinRequest @0x512100 compares it @0x5122c5]
+	// CK)). [orig: UI_JoinSelectedSession @0x5699d0 - net_config.app_id (+0x40)
+	// = atol(decoded CK) @0x569b8e; the host reads the APPID tag into the same
+	// field, NapiNetConfig_LoadFromConnTags @0x4c7260 (@0x4C7415), then
+	// Server_ValidatePlayerJoinRequest @0x512100 compares it @0x5122C3]
 	// The four build values are the title's (TitleJoinBuild: its net config's defaults, which
 	// each title's host checks against its own), the same for JO and DFX2.
 	const TitleJoinBuild &build = title_join_build(title_);

@@ -53,6 +53,18 @@ uint32_t validate_join_environment(const ClientGameEnvironment &env, const Title
 	return 0;
 }
 
+// The NovaWorld app-id leg (code 9), after the build values and ahead of the expansion's (and
+// DFX2's CD-key leg): in a NovaWorld session a joiner whose ClientAuth APPID differs from the
+// session's own AppId (ctx+0x1194) is refused, an absent APPID reading 0. A LAN session runs none
+// of it.
+// [orig: Server_ValidatePlayerJoinRequest @0x512100 - is_in_session @0x5122A3, transport_mode
+//  NovaWorld @0x5122AB, the joiner's +0x10C @0x5122B3, CNapiNPCtx_GetAppId @0x5122BE, the compare
+//  @0x5122C3, the refusal 9 @0x5122C7..0x5122DD]
+uint32_t validate_novaworld_app_id(const NapiNPServerCtx &ctx, const NapiNPConnection &conn) {
+	if (ctx.is_in_session == 0 || ctx.transport_mode != NetworkType::NovaWorld) return 0;
+	return static_cast<uint32_t>(conn.join_environment.app_id) == ctx.novaworld_app_id ? 0 : 9;
+}
+
 // The CD-key leg of DFX2's rewritten check, after the app id (code 9), in a LAN session only
 // (in session and network type 2; a NovaWorld session runs none of it): cdkey::check_lan_join
 // over the joiner's ids, the host's own and every other player's. JO's check has no such leg
@@ -160,6 +172,8 @@ uint32_t Server_ValidatePlayerJoinRequest(const GameConfig &config, NapiNPServer
 		const std::vector<uint8_t> &join_payload, bool pcid_decrypted) {
 	const TitleIdentity *title = ctx != nullptr ? ctx->np_protocol.identity : nullptr;
 	uint32_t reject_dpc = validate_join_environment(conn.join_environment, title_join_build(title));
+	if (reject_dpc == 0 && ctx != nullptr)
+		reject_dpc = validate_novaworld_app_id(*ctx, conn);
 	if (reject_dpc == 0 && ctx != nullptr)
 		reject_dpc = validate_lan_cd_key(*ctx, title_in_match(title), conn, roster);
 	if (reject_dpc == 0)

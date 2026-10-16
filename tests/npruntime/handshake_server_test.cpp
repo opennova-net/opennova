@@ -21,6 +21,7 @@
 #include <runtime/world/ammo_table_build.h>   // build_ammo_table / resolve_weapon_round_types
 #include <runtime/inmatch/integrity_sources.h>
 #include <net/npwire/lan_discovery.h>
+#include <runtime/inmatch/server_join_check.h> // Server_ValidatePlayerJoinRequest (the code-9 leg)
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_spawn.h>
 #include <runtime/inmatch/server_tick.h>
@@ -1598,6 +1599,59 @@ bool run_game_environment_and_admission_fsm_are_enforced() {
 		if (!expect(inmatch::connection_count(ctx) == 1 &&
 				ctx.np_protocol.connection_list.front().join_environment.db == 1,
 				"the DB join tag loads into the connection's join environment")) return false;
+	}
+
+	// B-7: the APPID tag loads too, and in a NovaWorld session a joiner whose APPID is
+	// not the session's AppId (absent reads 0) is refused 9, after the build values and
+	// ahead of the expansion; a LAN session runs no app-id leg.
+	// [orig: NapiNetConfig_LoadFromConnTags @0x4C7415; Server_ValidatePlayerJoinRequest
+	//  @0x5122A3..0x5122D5]
+	{
+		inmatch::NapiNPServerCtx ctx;
+		inmatch::test::bring_up_host(ctx, inmatch::ConnectionMode::HostOnly,
+				inmatch::SocketMode::Lan, kHostKey);
+		ClientAuth auth = make_valid_client_auth(1, 0xA0000002u,
+				kHostKey, "AppIdJoiner", scrk);
+		auth.cu.push_back(make_client_cu_chunk(2, "APPID", "3225"));
+		const PeerAddr peer{0x0100007Fu, 31302};
+		auto dg = craft(SESSION_OPCODE_CLIENT_AUTH, client_auth_to_bytes(auth));
+		(void)inmatch::handle_server_datagram(ctx, peer, dg.data(), dg.size(), 1);
+		if (!expect(inmatch::connection_count(ctx) == 1 &&
+				ctx.np_protocol.connection_list.front().join_environment.app_id == 3225,
+				"the APPID join tag loads into the connection's join environment")) return false;
+
+		inmatch::GameConfig config;
+		std::vector<inmatch::NapiNPConnection> roster(1);
+		inmatch::NapiNPConnection &joiner = roster.front();
+		joiner.join_environment = {0, 2, 1, 0, 20042002, 180};
+		joiner.join_environment.app_id = 3225;
+		ctx.is_in_session = 1;
+		ctx.transport_mode = inmatch::NetworkType::NovaWorld;
+		ctx.novaworld_app_id = 3225;
+		const std::vector<uint8_t> join = retail_join_request(config.expansion);
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join, true) == 0,
+				"a NovaWorld joiner naming the session's AppId passes the app-id leg")) return false;
+		joiner.join_environment.app_id = 0;
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join, true) == 9,
+				"a NovaWorld joiner with no APPID is refused 9")) return false;
+		joiner.join_environment.app_id = 3226;
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join, true) == 9,
+				"a NovaWorld joiner naming another AppId is refused 9")) return false;
+		joiner.join_environment.bn = 0;
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join, true) == 2,
+				"the build values' refusal still comes first")) return false;
+		joiner.join_environment.bn = 1;
+		inmatch::GameConfig expansion_config;
+		expansion_config.expansion = "jox01";
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(expansion_config, &ctx, joiner, roster, join, true) == 9,
+				"the app-id leg runs ahead of the expansion's 47")) return false;
+		ctx.is_in_session = 0;
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join, true) == 0,
+				"a NovaWorld host out of session runs no app-id leg")) return false;
+		ctx.is_in_session = 1;
+		ctx.transport_mode = inmatch::NetworkType::Lan;
+		if (!expect(inmatch::Server_ValidatePlayerJoinRequest(config, &ctx, joiner, roster, join, true) == 0,
+				"a LAN session runs no app-id leg")) return false;
 	}
 
 	// A form post cannot skip the JOIN request. The protocol violation tears

@@ -497,9 +497,10 @@ public:
 	// NWJoin .joi CK and uploads as the ClientAuth APPID conn-tag; a NovaWorld
 	// host validates it (reject code 9). Configure before start(); unset keeps
 	// "0" (the LAN default; LAN sends no APPID and no host checks one).
-	// [orig: net_config.bt = atol(decoded CK) @0x569b8e; the host reads the
-	//  APPID tag into that field, NapiNetConfig_LoadFromConnTags @0x4c7260 ->
-	//  Server_ValidatePlayerJoinRequest @0x512100 @0x5122c5]
+	// [orig: UI_JoinSelectedSession @0x5699d0 - net_config.app_id (+0x40) =
+	//  atol(decoded CK) @0x569b8e; the host reads the APPID tag into that field,
+	//  NapiNetConfig_LoadFromConnTags @0x4c7260 (@0x4C7415) ->
+	//  Server_ValidatePlayerJoinRequest @0x512100 @0x5122C3]
 	void set_app_id(std::string token) {
 		app_id_ = token.empty() ? std::string("0") : std::move(token);
 	}

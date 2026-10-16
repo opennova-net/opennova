@@ -156,11 +156,11 @@ JoiConnection parse_joi_connection_string(const std::string &body) {
 		}
 	}
 	// CK decodes (its own url_cipher key) to a decimal the retail client atol()s
-	// into the game-session BT join field; a NovaWorld host rejects a wrong BT
-	// with code 9. Re-serialize through atol like retail so leading zeros / stray
+	// into the game session's APPID join field; a NovaWorld host rejects a wrong
+	// APPID with code 9. Re-serialize through atol like retail so leading zeros / stray
 	// bytes normalize; a missing/garbage CK keeps the "0" LAN default.
-	// [orig: URL_ParseConnectionQueryString @0x54dfb0 CK arm; net_config.bt =
-	//  atol(decoded CK) @0x569b8e]
+	// [orig: URL_ParseConnectionQueryString @0x54dfb0 CK arm; UI_JoinSelectedSession
+	//  @0x5699d0 - net_config.app_id (+0x40) = atol(decoded CK) @0x569b8e]
 	if (!out.ck.empty()) {
 		const std::string decoded_ck = url_cipher_decode(out.ck, URL_CIPHER_KEY_CK);
 		out.app_id = std::to_string(io::retail_atol(decoded_ck.c_str()));
