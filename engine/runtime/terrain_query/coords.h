@@ -6,9 +6,11 @@
 // bounds-checked terrain raycast. The two callers differ only in three lookup
 // guards, expressed here as explicit options:
 //
-//   * resolve_world_sample (runtime, jodemo.exe Terrain_SampleHeightBilinear
-//     @0x5C6770 / Terrain_GetFoliageMapValue @0x5C65E0): wraps the grid index
-//     with & 0xF, uses the raw sector id, and does not clamp the local offset.
+//   * The runtime options (jodemo.exe Terrain_SampleHeightBilinear @0x5C6770 /
+//     Terrain_GetFoliageMapValue @0x5C65E0): wrap the grid index with & 0xF,
+//     use the raw sector id, and do not clamp the local offset. (The foliage
+//     map's game lookup routes through atlas_routing.h with the .trn's wraps,
+//     foliage_mask_map.h.)
 //   * The bounds-checked raycast path rejects cells outside the configured
 //     rows/cols, clamps the sector id to [0,4], and clamps the local offset to
 //     [0, 512 - 0.001].

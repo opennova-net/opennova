@@ -292,8 +292,14 @@ public:
 	// Detail grass reads the flat, 1024-wrapped foliagemap at the candidate's
 	// source-atlas position (foliage::WorldSamplers::detail_foliage_mask_at).
 	int get_detail_foliage_index_fixed(int32_t atlas_x_fixed, int32_t atlas_z_fixed) const;
-	// MODEL masks and gameplay queries use the sector-grid-routed foliagemap.
+	// The foliage code at a Godot-plane position (x, z = -mission y), as
+	// get_foliage_index_fixed reads it (the editor's devices and tests).
 	int get_foliage_index_world(float world_x, float world_z) const;
+	// The foliage code at a 16.16 mission position, as the game's MODEL tier
+	// reads it: routed through the sector grid, a non-wrapping axis clamping
+	// to the edge (engine: terrain::foliage_code_map). 0 with no map or on an
+	// empty sector. C++ only.
+	int get_foliage_index_fixed(int32_t mission_x_fixed, int32_t mission_y_fixed) const;
 	// Runtime world->atlas transform: wraps the 16x16 sector grid and preserves
 	// raw sector ids/local offsets like the retail terrain samplers.
 	Vector2 world_to_runtime_source_coords(float world_x, float world_z) const;

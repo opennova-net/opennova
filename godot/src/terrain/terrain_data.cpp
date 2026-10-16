@@ -8,6 +8,7 @@
 #include <formats/til/til_io.h>
 #include <base/io/fixed.h>
 #include <runtime/terrain_query/coords.h>
+#include <runtime/terrain_query/foliage_mask_raster.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/terrain_query/terrain_field_build.h>
 #include <runtime/terrain/lighting.h>
@@ -57,37 +58,6 @@ static opennova::FoliageMap foliage_map_from_slot_data(const std::vector<uint8_t
 	map.indices = indices;
 	std::memcpy(map.palette, palette, sizeof(map.palette));
 	return map;
-}
-
-struct TerrainWorldSample {
-	int sector_sx = 0;
-	int sector_sz = 0;
-	int sector_id = 0;
-	float source_x = 0.0f;
-	float source_z = 0.0f;
-};
-
-bool resolve_world_sample(const opennova::TrnConfig &trn,
-                          float world_x,
-                          float world_z,
-                          TerrainWorldSample &out_sample) {
-	// Runtime world->source mapping (jodemo.exe Terrain_SampleHeightBilinear
-	// @0x5C6770 / Terrain_GetFoliageMapValue @0x5C65E0): & 0xF grid wrap, raw
-	// sector id, unclamped local offset. Delegates to the shared coordinate
-	// kernel used by the bounds-checked terrain raycast path below.
-	out_sample = TerrainWorldSample{};
-	opennova::terrain::SectorLayout layout;
-	layout.sector_grid = &trn.sector_grid[0][0];
-	layout.origin_x = trn.origin_x;
-	layout.origin_y = trn.origin_y;
-	const opennova::terrain::CoordsResult<float> r = opennova::terrain::coords_world_to_source<float>(
-	        layout, world_x, world_z, opennova::terrain::coords_runtime_options());
-	out_sample.sector_sx = r.sector_sx;
-	out_sample.sector_sz = r.sector_sz;
-	out_sample.sector_id = r.sector_id;
-	out_sample.source_x = r.source_x;
-	out_sample.source_z = r.source_z;
-	return r.valid;
 }
 
 // The portable TerrainHeightField over the loaded CPT depth buffer + TRN
@@ -1381,31 +1351,22 @@ int TerrainData::get_detail_foliage_index_fixed(int32_t atlas_x_fixed,
 			atlas_x_fixed, atlas_z_fixed));
 }
 
-int TerrainData::get_foliage_index_world(float world_x, float world_z) const {
-	// Engine sub_5C65E0 (Terrain_GetFoliageMapValue) analogue. Uses the same
-	// sector+origin+quadrant math as get_height_world_bilinear — the sector
-	// grid is always 16×16; origin places the active region inside it with a
-	// wraparound mask on the lookup.
+int TerrainData::get_foliage_index_fixed(int32_t mission_x_fixed, int32_t mission_y_fixed) const {
+	// The game's sampler, routed through the sector grid and the .trn's wraps,
+	// over the map's codes (engine: runtime/terrain_query/foliage_mask_raster.h
+	// foliage_code_map, foliage_mask_map.h foliage_mask_at_fixed).
 	if (!loaded || foliage_map_resource.is_null()) {
 		return 0;
 	}
+	return opennova::terrain::foliage_mask_at_fixed(
+			opennova::terrain::foliage_code_map(foliage_map_resource->native(), trn),
+			mission_x_fixed, mission_y_fixed);
+}
 
-	TerrainWorldSample sample;
-	if (!resolve_world_sample(trn, world_x, world_z, sample)) {
-		return 0;
-	}
-
-	const int w = foliage_map_resource->get_width();
-	const int h = foliage_map_resource->get_height();
-	if (w <= 0 || h <= 0) {
-		return 0;
-	}
-	const int map_x = foliage_map_resource->map_x_from_heightmap_x(sample.source_x);
-	const int map_y = foliage_map_resource->map_y_from_heightmap_y(sample.source_z);
-	if (map_x < 0 || map_x >= w || map_y < 0 || map_y >= h) {
-		return 0;
-	}
-	return static_cast<int>(foliage_map_resource->get_index(map_x, map_y));
+int TerrainData::get_foliage_index_world(float world_x, float world_z) const {
+	// The Godot plane's (x, z) is mission (x, -z); the binding's saturating form.
+	return get_foliage_index_fixed(opennova::io::float_to_fp16_16_sat(world_x),
+			opennova::io::float_to_fp16_16_sat(-static_cast<double>(world_z)));
 }
 
 PackedInt32Array TerrainData::get_sector_grid() const {

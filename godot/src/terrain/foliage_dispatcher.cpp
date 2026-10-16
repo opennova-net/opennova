@@ -18,6 +18,7 @@
 #include <godot_cpp/classes/standard_material3d.hpp>
 #include <godot_cpp/variant/utility_functions.hpp>
 
+#include <base/io/bam.h>
 #include <runtime/terrain/foliage_detail_collector.h>
 
 #include <godot_cpp/classes/array_mesh.hpp>
@@ -1937,10 +1938,12 @@ int FoliageDispatcher::_sample_detail_foliage_index(
 
 int FoliageDispatcher::_sample_model_foliage_index(
     int32_t p_world_x_fixed, int32_t p_world_z_fixed) const {
-  const float world_x = static_cast<float>(p_world_x_fixed) / 65536.0f;
-  const float world_z = static_cast<float>(p_world_z_fixed) / 65536.0f;
+  // The candidate's z is the render plane's (the mission y negated); the
+  // game's MODEL sampler takes the mission plane (engine:
+  // runtime/terrain_query/foliage_mask_raster.h foliage_code_map).
+  const int32_t mission_y_fixed = opennova::io::bam_sub(0, p_world_z_fixed);
   if (terrain_data_.is_valid()) {
-    return terrain_data_->get_foliage_index_world(world_x, world_z);
+    return terrain_data_->get_foliage_index_fixed(p_world_x_fixed, mission_y_fixed);
   }
   if (foliage_sampler_.is_valid()) {
     Array arguments;
@@ -1949,7 +1952,7 @@ int FoliageDispatcher::_sample_model_foliage_index(
     return static_cast<int>(foliage_sampler_.callv(arguments));
   }
   if (colormap_source_.is_valid()) {
-    return colormap_source_->get_foliage_index_world(world_x, world_z);
+    return colormap_source_->get_foliage_index_fixed(p_world_x_fixed, mission_y_fixed);
   }
   return 0;
 }

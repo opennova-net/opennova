@@ -1,7 +1,7 @@
 // Terrain world->source coordinate transform kernel (engine/runtime/terrain_query/coords).
 //
 // Characterizes two things the A2 refactor must preserve byte-for-byte:
-//   1. The RUNTIME formula currently inlined as resolve_world_sample() in
+//   1. The RUNTIME formula once inlined as resolve_world_sample() in
 //      godot/src/terrain/terrain_data.cpp (float, & 0xF grid wrap, no
 //      id clamp, no local clamp). ref_resolve_world_sample() below is a verbatim
 //      copy of that formula and is the oracle for the runtime-mode kernel.
@@ -33,8 +33,8 @@ static void check_close(double got, double want, double tol, const char *msg) {
     }
 }
 
-// Verbatim copy of the current resolve_world_sample() formula (the runtime
-// source-of-truth). Kept independent of the kernel so the kernel can be proven
+// Verbatim copy of the former resolve_world_sample() formula (the runtime
+// options' source-of-truth). Kept independent of the kernel so the kernel can be proven
 // equal to it.
 struct RefSample {
     bool valid = false;

@@ -53,6 +53,23 @@ FoliageMaskMap foliage_mask_grid(const TerrainHeightField &field) {
 	return map;
 }
 
+FoliageMaskMap foliage_code_map(const FoliageMap &codes, const TrnConfig &trn) {
+	FoliageMaskMap map;
+	if (codes.width <= 0 || codes.height <= 0 ||
+			codes.indices.size() <
+					static_cast<size_t>(codes.width) * static_cast<size_t>(codes.height))
+		return map;
+	map.data = codes.indices.data();
+	map.width = codes.width;
+	map.height = codes.height;
+	map.sector_grid = &trn.sector_grid[0][0];
+	map.origin_x = trn.origin_x;
+	map.origin_y = trn.origin_y;
+	map.wrap_x = trn.wrap_x != 0;
+	map.wrap_z = trn.wrap_y != 0;
+	return map;
+}
+
 FoliageMaskMap foliage_mask_map(const FoliageMaskRaster &raster, const TerrainHeightField &field, bool codes) {
 	if (raster.empty()) return FoliageMaskMap();
 	FoliageMaskMap map = foliage_mask_grid(field);
