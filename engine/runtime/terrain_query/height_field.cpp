@@ -161,7 +161,7 @@ TerrainHeightGradient height_field_gradient_fixed(
 				static_cast<std::size_t>(taps.z(ty)) * f.dim + taps.x(tx)]);
 	};
 	// Unsigned raw16 neighbours, plus-minus, without /256 or /2. The motor
-	// applies its own fixed-point gain. [orig: @0x60648F..0x60650C]
+	// applies its own fixed-point gain. [orig: Terrain_GetHeightGradient @ 0x606429..0x606488]
 	return {raw_at(x + 1, y) - raw_at(x - 1, y),
 	        raw_at(x, y + 1) - raw_at(x, y - 1)};
 }

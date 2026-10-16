@@ -8,7 +8,7 @@
 // height read t alone [orig: Terrain_GetSurfaceTypeAtPosition @ 0x6065C6; Foliage_SampleFoliageMapMask @
 // 0x606620; Terrain_GetHeightAtPosition @ 0x606720..0x606796]; the ground (the bilinear height every body
 // collides with) reads t and t + 1 [orig: Terrain_SampleHeightBilinear @ 0x6068D0..0x60694E]; the height
-// gradient the motors read takes t - 1 and t + 1 [orig: Terrain_GetHeightGradient @ 0x60648F..0x60650C].
+// gradient the motors read takes t - 1 and t + 1 [orig: Terrain_GetHeightGradient @ 0x606429..0x606488].
 // A tap past its quadrant's edge stays in the quadrant where the .trn locks that quadrant's axis (& 511
 // from its origin) and runs across the atlas where it does not (& 1023) [orig: @ 0x6068FA..0x60694E], so
 // a change at a quadrant's first column also shows in the last unit of every sector drawing the
