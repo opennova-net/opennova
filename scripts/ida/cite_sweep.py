@@ -214,7 +214,11 @@ def name_forms(name, _ms=_re.compile(r"^\?(\?[01]|\?_7)?([A-Za-z_]\w*)@((?:[A-Za
             path = list(reversed(scopes)) + [leaf]
             forms.add("::".join(path + [("~" if special == "?1" else "") + leaf]))
         else:
-            forms.add("::".join(list(reversed(scopes)) + [leaf]))
+            path = list(reversed(scopes)) + [leaf]
+            # the full path and each class-scoped tail of it (`CBlt::BltNone` for
+            # `D3DXTex::CBlt::BltNone`), never the bare leaf
+            for i in range(len(path) - 1):
+                forms.add("::".join(path[i:]))
     m = _dec.match(name or "")
     if m:
         forms.add(m.group(1))
