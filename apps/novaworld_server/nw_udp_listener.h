@@ -176,6 +176,15 @@ public:
 	};
 	std::vector<HostedSnapshot> snapshot_hosted() const;
 
+	// Every lobby connection's state, by its address (the admin's sessions view:
+	// its listing while hosting, the retail login its Cookie lists named).
+	// Thread-safe.
+	struct LobbySnapshot {
+		PeerAddr peer;
+		LobbyState lobby;
+	};
+	std::vector<LobbySnapshot> snapshot_lobby() const;
+
 	// The service's statements to a listed server, over that server's own NWU session (the
 	// ServerCommand admin channel; docs/net/novaworld-net-re.md "the service side"). The RID
 	// resolves here under the lobby lock to the hosting connection; the statement then waits for

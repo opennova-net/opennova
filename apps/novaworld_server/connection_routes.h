@@ -2,8 +2,9 @@
 
 // The admin's NovaWorld sessions view: GET /api/admin/connections, every
 // connection the ConnectionManager's registry holds (a game client's or a
-// host's NovaWorld UDP session, from its ClientHello). The HttpListener owns
-// one ConnectionRoutes over its Crow app, beside its HostRoutes (README
+// host's NovaWorld UDP session, from its ClientHello), with who it is and the
+// server it lists from the NW UDP listener's lobby state. The HttpListener
+// owns one ConnectionRoutes over its Crow app, beside its HostRoutes (README
 // "Connection lifecycle").
 
 #include "web_access.h"

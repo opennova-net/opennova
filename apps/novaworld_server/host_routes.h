@@ -11,6 +11,7 @@
 // app, beside its WebAccess (README "Pushing statements to a listed server",
 // "Listed servers and owners").
 
+#include "auth.h"
 #include "rate_limiter.h"
 #include "web_access.h"
 
@@ -73,6 +74,19 @@ ComposedServerCommand compose_server_command(const std::string &body);
 // the list; it stays an admin's verb. The stop (ServerStopHosting) is the
 // owner's way to end the hosting.
 bool owner_may_send(ServerCommandVerb verb);
+
+// Who a listing stands for, from the account its HostKey claim names
+// (`host_user_id`): that account, or, for a live hosted server's listing (held
+// by the server's service account), the hosted server's owner and the hosted
+// server's id (hosted::hosted_server_of_account; an ended server's lingering
+// listing is its account's own). No owner for an anonymous listing and a
+// hosted one whose owner is gone. The one rule GET /api/admin/hosts and the
+// admin's sessions view read. Throws db::Error.
+struct ListingOwner {
+	std::optional<UserRecord> owner;
+	std::optional<int64_t> hosted_server_id;
+};
+ListingOwner listing_owner(db::Database &db, std::optional<int64_t> host_user_id);
 
 class HostRoutes {
 public:

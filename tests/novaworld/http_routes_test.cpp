@@ -2557,8 +2557,8 @@ class PushHost {
 public:
 	// `client_index` tells several hosts' sessions apart in the service's log (each has its own
 	// socket, which is what the service keys a connection by).
-	explicit PushHost(uint16_t service_port, uint32_t client_index = 0x48545450u)
-		: session_(config(client_index)) {
+	explicit PushHost(uint16_t service_port, uint32_t client_index = 0x48545450u) :
+			session_(config(client_index, &cookies_)) {
 		socket_ = net::ScopedSocket(net::udp_bind(0, &port_));
 		service_.ip = {127, 0, 0, 1};
 		service_.port = service_port;
@@ -2573,6 +2573,22 @@ public:
 		send(session_.start());
 		pump_until(8000, [this] { return session_.is_verified(); });
 		return session_.is_verified();
+	}
+
+	// A cookie the session's Cookie lists carry from its next statement on (a stock client's
+	// whole HTTP cookie jar rides them).
+	void set_cookie(const std::string &name, const std::string &value) {
+		cookies_.emplace_back(name, value);
+	}
+
+	// A ClientPlayRequest answered with success; false on a timeout.
+	bool play() {
+		if (!session_.request_playing(
+					opennova::make_play_setup_vars("Host", "127.0.0.1", "32768", "5699", 0))) {
+			return false;
+		}
+		return wait_notice(Notice::Kind::PlayResult, 3000) != nullptr &&
+				session_.play_state() == opennova::ClientSession::PlayState::Playing;
 	}
 
 	// Verified, then a ClientHostRequest answered with success; false on a timeout.
@@ -2604,13 +2620,16 @@ public:
 	}
 
 private:
-	static opennova::ClientSession::Config config(uint32_t client_index) {
+	using Cookies = std::vector<std::pair<std::string, std::string>>;
+	static opennova::ClientSession::Config config(uint32_t client_index, const Cookies *cookies) {
 		opennova::ClientSession::Config cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
 		cfg.client_index = client_index;
 		cfg.client_key = 0x50555348u;
 		cfg.na = "http:push";
-		cfg.cookie_vars = []() {
-			return std::vector<std::pair<std::string, std::string>>{{"NWUID", ""}};
+		cfg.cookie_vars = [cookies]() {
+			Cookies vars{ { "NWUID", "" } };
+			vars.insert(vars.end(), cookies->begin(), cookies->end());
+			return vars;
 		};
 		return cfg;
 	}
@@ -2639,6 +2658,7 @@ private:
 		}
 	}
 
+	Cookies cookies_; // before session_, whose Cookie lists read it
 	opennova::ClientSession session_;
 	net::ScopedSocket socket_;
 	uint16_t port_ = 0;
@@ -3149,6 +3169,9 @@ int test_owner_host_push(Harness &h) {
 // the steady clock, which counts from the machine's boot: production's sessions read 27514593
 // (7 h 38 min of uptime) and the page showed them as 20,741 days old (January 1970). A stamp
 // converts to the wall time less its age, and a live session's read within a minute of now.
+// Each session names who it is: none until a Cookie list carries a live retail login, then that
+// login's account; a hosting session its listing (name, map, players, listed) and the owner its
+// HostKey names, whatever login it sent; a login that ended names no one.
 int test_admin_sessions(Harness &h) {
 	// The production shape: a session made 125 s before the read, on a machine up 7 h 40 min.
 	const int64_t unix_now = 1792120342793; // 2026-10-16 09:39 UTC
@@ -3195,8 +3218,64 @@ int test_admin_sessions(Harness &h) {
 		}
 		TEST_EXPECT(std::llabs(created - read_at) <= 60000);
 		TEST_EXPECT(last_seen >= created && std::llabs(last_seen - read_at) <= 60000);
+		// Signed in to the lobby with no retail login yet, hosting nothing.
+		TEST_EXPECT((*row)["account"].t() == crow::json::type::Null);
+		TEST_EXPECT((*row)["host"].t() == crow::json::type::Null);
 	}
+
+	// The player's retail login, then a ClientPlayRequest whose Cookie list carries its tag.
+	const int64_t player = make_account(h, "session_player", "pw-session-player");
+	TEST_EXPECT(player > 0);
+	const auto login = nwlogin_to(h, h.fresh_port, "session_player", "pw-session-player");
+	TEST_EXPECT(nwlogin_succeeded(login));
+	client.set_cookie("LOGINSESSIONTAG", set_cookie_value(login, "LOGINSESSIONTAG"));
+	TEST_EXPECT(client.play());
+	reply = connections();
+	json = crow::json::load(body_text(reply));
+	row = row_at(json, client.addr());
+	TEST_EXPECT(row != nullptr && (*row)["account"].t() == crow::json::type::Object);
+	TEST_EXPECT((*row)["account"]["id"].i() == player);
+	TEST_EXPECT(str((*row)["account"]["username"]) == "session_player");
+	TEST_EXPECT(str((*row)["account"]["via"]) == "login");
+	TEST_EXPECT((*row)["host"].t() == crow::json::type::Null);
+
+	// A host whose HostKey names its owner: the listing, and the owner rather than its login.
+	const int64_t owner = make_account(h, "session_owner", "pw-session-owner");
+	TEST_EXPECT(owner > 0);
+	const std::string key = "ABCDEFGHIJKLMNOPPONMLKJIHGFEDCBAABCDEFGHIJKLMNOP";
+	TEST_EXPECT(opennova::hostdb::is_host_key(key));
+	TEST_EXPECT(record_key_for(h, key, owner));
+	PushHost host(h.nw_udp.bound_port(), 0x53455332u);
+	host.set_cookie("LOGINSESSIONTAG", set_cookie_value(login, "LOGINSESSIONTAG"));
+	TEST_EXPECT(host.host("Sessions Host"));
+	host.present_key(key);
+	TEST_EXPECT(wait_until([&] {
+		const auto listed = row_named(h, "Sessions Host");
+		return listed && listed->host_user_id == owner;
+	}));
+	reply = connections();
+	json = crow::json::load(body_text(reply));
+	row = row_at(json, host.addr());
+	TEST_EXPECT(row != nullptr && (*row)["host"].t() == crow::json::type::Object);
+	const auto &listing = (*row)["host"];
+	TEST_EXPECT(listing["rid"].i() == static_cast<int64_t>(row_named(h, "Sessions Host")->rid));
+	TEST_EXPECT(str(listing["server_name"]) == "Sessions Host");
+	TEST_EXPECT(listing["players"].i() == 1 && listing["max_players"].i() == 8);
+	TEST_EXPECT(listing["listed"].b());
+	TEST_EXPECT(listing["hosted_server_id"].t() == crow::json::type::Null);
+	TEST_EXPECT((*row)["account"]["id"].i() == owner);
+	TEST_EXPECT(str((*row)["account"]["via"]) == "host_key");
+
+	// The login ends (its row goes, as a logout or the idle sweep takes it): no one.
+	nws::clear_active_user_session(*h.pool.acquire(), player);
+	reply = connections();
+	json = crow::json::load(body_text(reply));
+	row = row_at(json, client.addr());
+	TEST_EXPECT(row != nullptr && (*row)["account"].t() == crow::json::type::Null);
+
 	client.goodbye();
+	host.goodbye();
+	TEST_EXPECT(wait_until([&] { return !row_named(h, "Sessions Host"); }));
 	return 0;
 }
 

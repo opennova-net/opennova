@@ -75,6 +75,13 @@ struct LobbyState {
 	// Set during handle_client_request_verify_result.
 	std::string sess_id_string;     // hex token returned in ServerVerifyResult
 
+	// The LOGINSESSIONTAG the connection's latest Cookie list carried (its
+	// verify, play or host request: a stock client's whole HTTP cookie jar, so
+	// the tag of its retail login once it logged in), kept for the connection's
+	// life; empty until one did. The admin's sessions view names the account
+	// whose live login it is (service policy). A secret: never logged or sent.
+	std::string login_session_tag;
+
 	// Populated when the client transitions into hosting mode
 	// (ClientHostRequest sets these; ClientHostUpdate refreshes them).
 	bool hosting = false;

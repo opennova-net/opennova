@@ -504,6 +504,15 @@ std::vector<NwUdpListener::HostedSnapshot> NwUdpListener::snapshot_hosted() cons
 	return out;
 }
 
+std::vector<NwUdpListener::LobbySnapshot> NwUdpListener::snapshot_lobby() const {
+	std::vector<LobbySnapshot> out;
+	std::lock_guard<std::mutex> lk(lobby_states_mu_);
+	out.reserve(lobby_states_.size());
+	for (const auto &[peer, state] : lobby_states_)
+		out.push_back({ peer, state.lobby });
+	return out;
+}
+
 HostPushResult NwUdpListener::push_server_command(uint32_t rid, const std::string &cmd,
                                                   std::optional<int64_t> owner) {
 	return queue_host_push(rid, make_server_command(cmd), /*ends_hosting=*/false, owner);
