@@ -280,11 +280,7 @@ Ref<RtxtStringFile> RtxtStringFile::load_mission_table(const Ref<ResourceRoot> &
 		const String &mission_file_basename) {
 	if (root.is_null()) return Ref<RtxtStringFile>();
 	const opennova::ResourceIndex *index = &root->native_index();
-	opennova::mission::BootFileSource files;
-	files.has_file = [index](const std::string &name) { return index->has_file(name); };
-	files.read_file = [index](const std::string &name, std::vector<uint8_t> &out) {
-		return index->read_file(name, out);
-	};
+	const opennova::mission::BootFileSource files = opennova::mission::boot_files_from_index(*index);
 	std::vector<uint8_t> bytes;
 	opennova::mission::resolve_mission_text(files,
 			opennova::to_std(mission_file_basename), bytes);

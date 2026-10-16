@@ -5,6 +5,7 @@
 #include "player/player_info_kit_restore.h"
 #include "rtxt/rtxt_string_file.h"
 #include "simulation/weapon_profile_summary.h"
+#include "util/data_format.h"
 #include "util/string_convert.h"
 
 #include <formats/playersav/player_sav.h>
@@ -38,19 +39,6 @@ namespace {
 
 namespace playersav = opennova::playersav;
 
-std::vector<uint8_t> to_bytes(const PackedByteArray &p_bytes) {
-	std::vector<uint8_t> out(static_cast<size_t>(p_bytes.size()));
-	if (!out.empty()) std::memcpy(out.data(), p_bytes.ptr(), out.size());
-	return out;
-}
-
-PackedByteArray to_packed(const std::vector<uint8_t> &p_bytes) {
-	PackedByteArray out;
-	out.resize(static_cast<int64_t>(p_bytes.size()));
-	if (!p_bytes.empty()) std::memcpy(out.ptrw(), p_bytes.data(), p_bytes.size());
-	return out;
-}
-
 // A save file's bytes: false when there is none; `r_error` the read's error
 // when one exists but cannot be read.
 bool read_save_file(const String &p_path, std::vector<uint8_t> &r_bytes, Error &r_error) {
@@ -60,7 +48,7 @@ bool read_save_file(const String &p_path, std::vector<uint8_t> &r_bytes, Error &
 		r_error = FileAccess::get_open_error();
 		return false;
 	}
-	r_bytes = to_bytes(file->get_buffer(static_cast<int64_t>(file->get_length())));
+	r_bytes = from_pba(file->get_buffer(static_cast<int64_t>(file->get_length())));
 	file->close();
 	return true;
 }
@@ -94,7 +82,7 @@ Error write_save_file(const String &p_path, const std::vector<uint8_t> &p_bytes)
 	const String temp_path = vformat("%s.tmp.%d", p_path, OS::get_singleton()->get_process_id());
 	Ref<FileAccess> file = FileAccess::open(temp_path, FileAccess::WRITE);
 	if (file.is_null()) return FileAccess::get_open_error();
-	file->store_buffer(to_packed(p_bytes));
+	file->store_buffer(to_packed_bytes(p_bytes));
 	file->flush();
 	const Error write_error = file->get_error();
 	file->close();
@@ -182,8 +170,8 @@ Error PlayerProfiles::load(const String &p_dir, const String &p_expansion) {
 
 void PlayerProfiles::load_bytes(const PackedByteArray &p_player_sav, bool p_has_player_sav,
 		const PackedByteArray &p_weapon_sav, bool p_has_weapon_sav, const String &p_user_name) {
-	const std::vector<uint8_t> player_sav = to_bytes(p_player_sav);
-	const std::vector<uint8_t> weapon_sav = to_bytes(p_weapon_sav);
+	const std::vector<uint8_t> player_sav = from_pba(p_player_sav);
+	const std::vector<uint8_t> weapon_sav = from_pba(p_weapon_sav);
 	opennova::profile::PlayerProfiles::LoadInput input;
 	input.player_sav = p_has_player_sav ? &player_sav : nullptr;
 	input.weapon_sav = p_has_weapon_sav ? &weapon_sav : nullptr;
@@ -200,11 +188,11 @@ Error PlayerProfiles::save(const String &p_dir, const String &p_expansion) {
 }
 
 PackedByteArray PlayerProfiles::player_sav_bytes() const {
-	return to_packed(store_.player_sav_bytes());
+	return to_packed_bytes(store_.player_sav_bytes());
 }
 
 PackedByteArray PlayerProfiles::weapon_sav_bytes() const {
-	return to_packed(store_.weapon_sav_bytes());
+	return to_packed_bytes(store_.weapon_sav_bytes());
 }
 
 String PlayerProfiles::weapon_sav_relpath(const String &p_expansion) {

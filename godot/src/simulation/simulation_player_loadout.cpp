@@ -492,14 +492,8 @@ Error Simulation::load_weapon_table(const Ref<ResourceRoot> &p_resource_root,
 	// witnessed WPN_M4AUTO re-stamp (D-NET-143), the mission loadout-chunk
 	// promotion through the SP-vs-net gate and the spawn-kit rebuild are the
 	// kernel's ONE table-load body; this binding hands it the mounted source.
-	const opennova::ResourceIndex *index = &p_resource_root->native_index();
-	opennova::mission::BootFileSource files;
-	files.has_file = [index](const std::string &name) {
-		return index->has_file(name);
-	};
-	files.read_file = [index](const std::string &name, std::vector<uint8_t> &out) {
-		return index->read_file(name, out);
-	};
+	const opennova::mission::BootFileSource files =
+			opennova::mission::boot_files_from_index(p_resource_root->native_index());
 	if (!kernel_->load_weapon_table(files, &p_resource_root->native_assets(),
 				opennova::to_std(file_name)))
 		return ERR_FILE_NOT_FOUND;
@@ -532,14 +526,8 @@ Error Simulation::load_ammo_table(const Ref<ResourceRoot> &p_resource_root,
 	if (file_name.is_empty()) return ERR_INVALID_PARAMETER;
 	// The ballistics build + the weapon round_type resolve + the damage-class
 	// sync are the kernel's one body [orig: AmmoDef_LoadAll @0x40b0b0].
-	const opennova::ResourceIndex *index = &p_resource_root->native_index();
-	opennova::mission::BootFileSource files;
-	files.has_file = [index](const std::string &name) {
-		return index->has_file(name);
-	};
-	files.read_file = [index](const std::string &name, std::vector<uint8_t> &out) {
-		return index->read_file(name, out);
-	};
+	const opennova::mission::BootFileSource files =
+			opennova::mission::boot_files_from_index(p_resource_root->native_index());
 	if (!kernel_->load_ammo_table(files, opennova::to_std(file_name)))
 		return ERR_FILE_NOT_FOUND;
 	return OK;
