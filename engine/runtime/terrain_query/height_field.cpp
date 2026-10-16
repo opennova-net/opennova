@@ -49,6 +49,15 @@ float height_field_height_world(const TerrainHeightField &f, float world_x, floa
 	return f.heightmap[hz * hm_size + hx] / 256.0f;
 }
 
+float height_field_height_mission(const TerrainHeightField &f, float mission_x, float mission_y) {
+	return height_field_height_world(f, mission_x, -mission_y);
+}
+
+float height_field_height_mission_bilinear(const TerrainHeightField &f, float mission_x,
+		float mission_y) {
+	return height_field_height_world_bilinear(f, mission_x, -mission_y);
+}
+
 float height_field_height_world_bilinear(const TerrainHeightField &f, float world_x, float world_z) {
 	if (!f.valid()) return 0.0f;
 

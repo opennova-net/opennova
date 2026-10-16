@@ -91,6 +91,16 @@ float height_field_height_world(const TerrainHeightField &f, float world_x, floa
 // Terrain_SampleHeightBilinear @0x6067B0.] World units.
 float height_field_height_world_bilinear(const TerrainHeightField &f, float world_x, float world_z);
 
+// The same two samples on the MISSION plane (x east, y north), the frame retail's sampler
+// takes [orig: Terrain_SampleHeightBilinear @0x6067B0]. The world_* forms above take the
+// render plane, whose z is the mission y negated, so these are those at (mission_x,
+// -mission_y), the sign flip exact: the same height bit for bit. Engine code samples the
+// terrain through these; the world_* forms are the Godot-plane seam (godot/src and the
+// editor's viewports). World units.
+float height_field_height_mission(const TerrainHeightField &f, float mission_x, float mission_y);
+float height_field_height_mission_bilinear(const TerrainHeightField &f, float mission_x,
+		float mission_y);
+
 // The one per-cell normal kernel shared by the generated terrain normal atlas
 // and runtime surface queries. Inputs are the raw16 neighbours around the cell.
 // [orig: Terrain_GenerateNormalMap @0x603210: (left-right)/256,

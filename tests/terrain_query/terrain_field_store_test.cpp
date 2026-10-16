@@ -4,7 +4,8 @@
 // Covers, over small synthetic cpt/trn/charmap buffers:
 //   1. Dims, sector origins and authored extents land in both field views.
 //   2. The per-quadrant neighbour-tap locks (.trn lock_*) fold into the view.
-//   3. A world-remap bilinear height sample reads the copied heightmap.
+//   3. A world-remap bilinear height sample reads the copied heightmap, and the
+//      mission-plane entries are the render-plane ones at (x, -y), bit for bit.
 //   4. A surface index round-trips through the charmap view
 //      [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510].
 //   5. The store OWNS its copies: wiping the source documents changes nothing.
@@ -144,6 +145,18 @@ int main() {
 	// quadrant offset (0,0) -> source texel (3, 2) = 2*8+3 = 19 height units.
 	check_close(terrain::height_field_height_world_bilinear(field, 3.0f, 2.0f),
 			19.0, 1e-4, "world-remap bilinear height sample");
+	// The mission plane: mission y = -render z, every sample the render plane's at (x, -y).
+	for (const float x : {3.0f, 2.75f, -1.5f, 300.25f})
+		for (const float y : {-2.0f, 0.0f, -6.5f, 1.25f, -200.75f}) {
+			check(terrain::height_field_height_mission_bilinear(field, x, y) ==
+							terrain::height_field_height_world_bilinear(field, x, -y),
+					"mission-plane bilinear = render plane at (x, -y)");
+			check(terrain::height_field_height_mission(field, x, y) ==
+							terrain::height_field_height_world(field, x, -y),
+					"mission-plane nearest = render plane at (x, -y)");
+		}
+	check_close(terrain::height_field_height_mission_bilinear(field, 3.0f, -2.0f), 19.0, 1e-4,
+			"mission (3, -2) is texel (3, 2)");
 
 	// Surface round-trip at fixed-point mission (300, -200): same sector cell,
 	// fine (300, 200), 4-wide raster shift 8 -> texel (1, 0) = charmap[1] = 3.
