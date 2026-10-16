@@ -220,10 +220,14 @@ scripts/dev_stack.sh up --synthetic-data                      # no licensed data
 scripts/dev_stack.sh up --no-hosting                          # neither
 ```
 
-`--data` mounts the folder read-only in every machine as the `jop_2_consumer` data set
-(`--data-set` names another) with the rotation `ASH_G1A.bms` (`--mission` names another).
-Retail data never enters the repository or an image. With no data set hosting stays off
-(web logs `hosted servers: off (provider none ...)` and `up` prints it).
+`--data` uploads the folder's game files (the base kind's: the three boot archives,
+`version.txt`, `score.ini`, `_NSTMOUT.TXT` and `gt.ssc` when present) through the admin API
+as the Joint Operations data set (`--data-set` names another seeded base), the way the Game
+data page uploads them (each file in parts PUT through the site, which web puts in the
+stack's store volume; `curl` and `jq` do it); the worker lists its missions, which are the
+rotation (`--mission` names the one the smoke test's server runs). Retail data never enters
+the repository or an image. With no data set hosting stays off (web logs
+`hosted servers: off (provider none ...)` and `up` prints it).
 
 To start one by hand: log in to the site as `test`, grant an account a server (the admin's
 comp grant, `PUT /api/admin/users/<id>/comp-servers` with `{"comp_servers": 1}`), and start it

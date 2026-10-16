@@ -625,15 +625,36 @@ filled with JO's value.
 _Avoid_: game (when you mean the identity, not the running program)
 
 **Data set**:
-The game data a **hosted server** runs on, with the title it speaks and the expansions it
-allows (ADR 0055): Joint Operations (`jop_2_consumer`, the base game or `jox01`), Delta
-Force Xtreme 2 (`dfx2_consumer`), or OpenNova's own data (`opennova_0_consumer`, JO's wire
-identity in a lobby of its own). Each maps to one `games` row, its lobby. A deployment says
-where each data set's files are, and the site offers only those it has; every cloud
-**machine** mounts each one read-only at `/opt/game/<data set>` (its own volume, labelled
-`od-<slug>`), and a server's container sees its own at `/opt/game`.
+One product a **hosted server** runs on (ADR 0064, amending ADR 0055): a base game (Joint
+Operations, Delta Force Xtreme 2, OpenNova's own data), which speaks a title and lists in a
+lobby (its `games` row), or one expansion of a base (Escalation, `jox01`), holding only its own
+files (the kind's list in `hosted/data_set_files.h`: a base's boot archives and loose root
+files, an expansion's pair and its `version.txt`). An admin creates a data set as a row on the
+Game data page and uploads its files. A server picks a base and, when the base has one, an
+expansion; the site offers only data sets with a ready **tree**.
 _Avoid_: game (for the data), install (a retail install is where a data set's files come
-from), snapshot (one deployment's copy of a data set)
+from), snapshot (gone: the data lives in the object store), slug (a data set has an id and a
+display name; its lobby has the slug)
+
+**Tree**:
+One immutable version of a **data set**'s files in the object store (`trees/<id>/...` with a
+manifest of every file's name and size, and the mission list its archives hold), uploaded by
+an admin on the Game data page. A data set's current tree is what new starts take. A hosted
+server is pinned to the base tree and expansion tree it started on, keeps them through
+restarts and moves, and takes the current ones when its owner asks for the update. A
+**machine** fetches the trees its servers need on demand (`/opt/game/<id>`), checks their
+names and sizes against the manifest, and binds a container's base at `/opt/game` and its
+expansion at `/opt/game/expansion/<code>`.
+_Avoid_: version (a tree has a version line; the tree is the thing), snapshot, volume
+
+**Release**:
+An uploaded `1SFS` packed update (ADR 0061; ADR 0064 decision 5, landing with the
+`hosted/releases` series): one package, one section per product it carries, each mapped to a
+**data set** by its command file. Validated, then a draft; published, it is what the update
+listener serves that data set's updater login, and the worker applies it once to the data
+set's newest uploaded **tree**, making a new current one; retired, or replaced by the next
+publish or a new upload.
+_Avoid_: update (the mechanism), patch, package (the file; a release is the row)
 
 **Required resources**:
 The resource set the engine hard-requires by name at boot (menu set, game strings, music
