@@ -57,6 +57,7 @@
 #include <runtime/renderer/particle_atlas.h>
 #include <runtime/renderer/particle_color.h>
 #include <runtime/renderer/particle_frame.h>
+#include <runtime/renderer/particle_quad_inputs.h>
 #include <runtime/renderer/render_order.h>
 #include <runtime/renderer/particle_density.h>
 #include <runtime/renderer/texture_compression.h>
@@ -100,8 +101,6 @@ enum ParticleDrawSlot : std::size_t {
 
 using ParticleEffectPair = std::array<Ref<ParticleCompositorEffect>, 2>;
 
-using opennova::particle::BlendMode;
-using opennova::particle::CurveRef;
 using opennova::particle::GraphicLayer;
 using opennova::particle::Particle;
 
@@ -162,14 +161,12 @@ struct LayerVisual {
 	bool present = false;
 	std::uint8_t type = 0;
 	int flip_frames = 1;
-	int flip_rate = 0;
 	std::vector<std::size_t> frame_entries;
 };
 
 struct DefinitionVisual {
 	std::array<LayerVisual, kGraphicLayerCount> layers;
-	// AMBIENTCOLOR authored, or forced by a blend-mode-0 graphic at Initialize
-	// (retail CEffectEmitter_Initialize @ 0x5e6038..0x5e605e).
+	// The ambient tint pick (engine: runtime/renderer/particle_quad_inputs.h).
 	bool ambient_lit = false;
 };
 
@@ -258,15 +255,13 @@ std::size_t shader_index_for(opennova::renderer::ParticlePipeline pipeline,
 	}
 }
 
-std::uint8_t unit_byte(float value) {
-	return opennova::renderer::particle_unit_byte(value);
-}
-
-std::uint32_t pack_argb(float red, float green, float blue, float alpha) {
-	return (static_cast<std::uint32_t>(unit_byte(alpha)) << 24) |
-			(static_cast<std::uint32_t>(unit_byte(red)) << 16) |
-			(static_cast<std::uint32_t>(unit_byte(green)) << 8) |
-			static_cast<std::uint32_t>(unit_byte(blue));
+// The view basis rows (world to view) as the engine's particle laws read them.
+std::array<float, 9> basis_rows(const Basis &basis) {
+	std::array<float, 9> rows;
+	for (int row = 0; row < 3; ++row)
+		for (int col = 0; col < 3; ++col)
+			rows[row * 3 + col] = static_cast<float>(basis[row][col]);
+	return rows;
 }
 
 Color unpack_argb(std::uint32_t value) {
@@ -690,12 +685,9 @@ public:
 	float mirror_fog_start = 30000.0f;
 	float mirror_fog_end = 100000.0f;
 	std::int32_t mirror_fog_type = 1;
-	// The manager's two per-frame particle tints (retail byte 128 = 1.0):
-	// +0x3E8 = g_EnvTerrainLightCombined for AMBIENTCOLOR emitters, +0x3F0 =
-	// the modulator block doubled+saturated for the rest
-	// (retail Render_EmitterEffect @ 0x5f70c0; CParticleEmitter_AdvanceFrame
-	//  @ 0x5e6600..0x5e661c selects into emitter+200). Neutral until an
-	// environment source is attached.
+	// The manager's two per-frame particle tints from the environment
+	// (engine: runtime/renderer/particle_quad_inputs.h ParticleQuadTints).
+	// Neutral until an environment source is attached.
 	std::array<float, 3> ambient_tint{1.0f, 1.0f, 1.0f};
 	std::array<float, 3> modulator_tint{1.0f, 1.0f, 1.0f};
 
@@ -1058,8 +1050,7 @@ public:
 			const opennova::particle::ParticleDef &definition =
 					(*definitions)[definition_index];
 			DefinitionVisual &visual = definition_visuals[definition_index];
-			visual.ambient_lit = (definition.flags &
-					opennova::particle::particle_flag::AmbientColor) != 0;
+			visual.ambient_lit = opennova::renderer::particle_def_ambient_tinted(definition);
 			bool any_present = false;
 			for (int layer_index = 0; layer_index < kGraphicLayerCount;
 					++layer_index) {
@@ -1071,11 +1062,8 @@ public:
 				LayerVisual &layer = visual.layers[static_cast<std::size_t>(layer_index)];
 				layer.present = true;
 				layer.type = static_cast<std::uint8_t>(graphic.blend_mode);
-				if (graphic.blend_mode == opennova::particle::BlendMode::Blend)
-					visual.ambient_lit = true;
 				layer.flip_frames = std::clamp(graphic.flip_frames, 1,
 						opennova::particle::kMaxParticleFlipFrames);
-				layer.flip_rate = std::max(0, graphic.flip_rate);
 				layer.frame_entries.reserve(static_cast<std::size_t>(layer.flip_frames));
 				for (int frame = 1; frame <= layer.flip_frames; ++frame) {
 					const std::string name = opennova::renderer::retail_particle_frame_name(
@@ -1252,15 +1240,6 @@ public:
 		return far_distortion_scratch;
 	}
 
-	static std::uint32_t lit_primary_color(const LitQuadInput &lit,
-			const Basis &view_basis) {
-		std::array<float, 9> rows;
-		for (int row = 0; row < 3; ++row)
-			for (int col = 0; col < 3; ++col)
-				rows[row * 3 + col] = static_cast<float>(view_basis[row][col]);
-		return opennova::renderer::particle_lit_primary_color(lit.bump_scale, lit.roll, lit.alpha, rows);
-	}
-
 	// Re-derives the view-dependent Bump/Bumpadd DIFFUSE channel for a second
 	// camera (the one other basis-dependent input, a camera-facing TOPALIGN
 	// quad's roll, keeps the main view's value). Each colour is recomputed from
@@ -1268,9 +1247,11 @@ public:
 	// relight leaves the snapshot lit for exactly this basis no matter which
 	// view compiled (and relit) before it.
 	void relight_render_snapshot(const Basis &view_basis) {
+		const std::array<float, 9> rows = basis_rows(view_basis);
 		for (const LitQuadInput &lit : lit_quads) {
 			render_snapshot.particles[lit.particle_index].primary_color =
-					lit_primary_color(lit, view_basis);
+					opennova::renderer::particle_lit_primary_color(
+							lit.bump_scale, lit.roll, lit.alpha, rows);
 		}
 	}
 
@@ -1301,6 +1282,8 @@ public:
 			return;
 		render_snapshot.emitters.reserve(frame.emitters.size());
 		render_snapshot.particles.reserve(frame.particles.size());
+		const std::array<float, 9> view_rows = basis_rows(view_basis);
+		const opennova::renderer::ParticleQuadTints tints{ambient_tint, modulator_tint};
 
 		for (const opennova::particle::EffectEmitterFrameSnapshot &source_emitter :
 				frame.emitters) {
@@ -1361,125 +1344,25 @@ public:
 				const GraphicLayer &graphic =
 						definition.graphics[static_cast<std::size_t>(layer_index)];
 
-				const float phase = std::max(0.0f, particle.curve_phase);
-				const int lut_index = static_cast<int>(phase) & 0xff;
-				const float lut_fraction = phase - std::floor(phase);
-				auto channel_multiplier = [&](std::uint32_t flag,
-						const CurveRef &graphic_curve,
-						const CurveRef &definition_curve) -> float {
-					if ((particle.flags & flag) == 0)
-						return 1.0f;
-					const CurveRef &curve = graphic_curve.baked ?
-							graphic_curve : definition_curve;
-					if (!curve.baked)
-						return 1.0f;
-					return static_cast<float>(curve.baked_lut[
-							static_cast<std::size_t>(lut_index)]) / 256.0f;
-				};
-
-				using namespace opennova::particle::particle_runtime_flag;
-				const float alpha_multiplier = channel_multiplier(
-						AlphaCurve, graphic.alpha_func, definition.alpha_func);
-				const float red_multiplier = channel_multiplier(
-						RedCurve, graphic.red_func, definition.red_func);
-				const float green_multiplier = channel_multiplier(
-						GreenCurve, graphic.green_func, definition.green_func);
-				const float blue_multiplier = channel_multiplier(
-						BlueCurve, graphic.blue_func, definition.blue_func);
-
-				float scale_multiplier = 1.0f;
-				if ((particle.flags & ScaleCurve) != 0) {
-					const CurveRef &curve = graphic.scale_func.baked ?
-							graphic.scale_func : definition.scale_func;
-					if (curve.baked) {
-						const std::uint8_t first_sample = curve.baked_lut[
-								static_cast<std::size_t>(lut_index)];
-						const std::uint8_t second_sample = curve.baked_lut[
-								static_cast<std::size_t>(std::min(lut_index + 1, 255))];
-						const float interpolated = static_cast<float>(first_sample) +
-								(static_cast<float>(second_sample) -
-										static_cast<float>(first_sample)) * lut_fraction;
-						scale_multiplier = interpolated / 128.0f;
-					}
-				}
-				const float size = particle.size * scale_multiplier;
-
-				// The manager tint `(byte * channel) >> 7`: AMBIENTCOLOR defs — and
-				// every def with a blend-mode-0 graphic, which Initialize forces
-				// into AMBIENTCOLOR (retail CEffectEmitter_Initialize @ 0x5e6038..
-				// 0x5e605e) — take the terrain light; the rest the doubled modulator
-				// (retail CParticleEmitter_AdvanceFrame @ 0x5e6600..0x5e661c;
-				//  BuildBillboardQuads @ 0x5e6d60 / RenderStaticBillboards @ 0x5f4e10).
-				const std::array<float, 3> &tint = visual.ambient_lit ? ambient_tint : modulator_tint;
-				constexpr float byte_to_unit = 1.0f / 255.0f;
-				float red = static_cast<float>(particle.color.r) * byte_to_unit;
-				float green = static_cast<float>(particle.color.g) * byte_to_unit;
-				float blue = static_cast<float>(particle.color.b) * byte_to_unit;
-				red = std::clamp(red * red_multiplier * tint[0], 0.0f, 1.0f);
-				green = std::clamp(green * green_multiplier * tint[1], 0.0f, 1.0f);
-				blue = std::clamp(blue * blue_multiplier * tint[2], 0.0f, 1.0f);
-				const float alpha = std::clamp(
-						static_cast<float>(particle.alpha) * byte_to_unit *
-								alpha_multiplier,
-						0.0f, 1.0f);
-
-				// Flipbook clock: frame = int(4 * flip_rate * elapsed seconds)
-				// wrapped over the frame count, with GFXFLIPRAND offsetting by
-				// a serial-derived start frame [orig:
-				// CParticleEmitter_BuildBillboardQuads @ 0x5e6f17 —
-				// (256 / phase_rate) * flip_rate * phase / 64].
-				int frame_index = 0;
-				if (layer.flip_frames > 1 && layer.flip_rate > 0) {
-					int random_offset = 0;
-					if ((definition.flags &
-							opennova::particle::particle_flag::GfxFlipRand) != 0) {
-						random_offset = static_cast<int>(particle.serial * 9u) %
-								layer.flip_frames;
-					}
-					const float elapsed = particle.phase_rate > 0.0f ?
-							phase / particle.phase_rate : 0.0f;
-					frame_index = (random_offset + static_cast<int>(
-							4.0f * static_cast<float>(layer.flip_rate) * elapsed)) %
-							layer.flip_frames;
-				}
+				// The quad's size, colour pair, flipbook frame and roll
+				// (engine: runtime/renderer/particle_quad_inputs.h).
+				const opennova::renderer::ParticleQuadInputs inputs =
+						opennova::renderer::particle_quad_inputs(particle, definition, graphic,
+								visual.ambient_lit, tints, view_rows);
 
 				opennova::renderer::ParticleQuadSnapshot quad;
 				// Each view's density stride reads the serial at quad build.
 				quad.serial = particle.serial;
 				quad.center = particle_vec(particle.position);
-				quad.half_width = size * 0.5f;
-				quad.half_height = size * 0.5f;
-				quad.roll = particle.rotation;
+				quad.half_width = inputs.half_extent;
+				quad.half_height = inputs.half_extent;
+				quad.roll = inputs.roll;
 				quad.yaw = particle.yaw;
 				quad.pitch = particle.pitch;
 				quad.camera_pull = source_emitter.camera_pull;
-				quad.primary_color = pack_argb(red, green, blue, alpha);
-				quad.alignment = (definition.flags &
-						opennova::particle::particle_flag::YawAndPitch) != 0 ?
-						opennova::renderer::ParticleAlignment::WorldOriented :
-						opennova::renderer::ParticleAlignment::CameraFacing;
-				if ((definition.flags & opennova::particle::particle_flag::TopAlign) != 0) {
-					// TOPALIGN defs run through the rot-head system, whose renderer
-					// overwrites the roll every frame so the quad's top follows the
-					// particle's heading: the velocity is taken into the view frame,
-					// normalized, and the roll is `±acos(dot(dir, up))`, negative
-					// when the direction points right (retail: the CParticleRotHeadSystem
-					// vtable+40 renderer @ 0x5f5640 — head = pos + vel @ 0x5f587f,
-					// normalize @ 0x5f597b, acos and sign @ 0x5f59a0..0x5f59c7). A
-					// world-oriented quad measures against its own yaw/pitch frame.
-					Vector3 heading(particle.velocity.x, particle.velocity.y, particle.velocity.z);
-					if (quad.alignment == opennova::renderer::ParticleAlignment::WorldOriented) {
-						const Basis frame = Basis::from_euler(
-								Vector3(particle.pitch, particle.yaw, 0.0f), EULER_ORDER_YXZ);
-						heading = frame.xform_inv(heading);
-					} else {
-						heading = view_basis.xform(heading);
-					}
-					const float planar = heading.x * heading.x + heading.y * heading.y;
-					if (planar > 1.0e-12f) {
-						quad.roll = std::atan2(-heading.x, heading.y);
-					}
-				}
+				quad.primary_color = inputs.primary_color;
+				quad.secondary_color = inputs.secondary_color;
+				quad.alignment = inputs.alignment;
 				quad.state.pipeline = static_cast<opennova::renderer::ParticlePipeline>(layer.type);
 				quad.state.pass = layer.type == 7 ?
 						opennova::renderer::ParticleRenderPass::Distortion :
@@ -1488,7 +1371,7 @@ public:
 				std::size_t entry_index = kMissingEntry;
 				if (!layer.frame_entries.empty()) {
 					entry_index = layer.frame_entries[
-							static_cast<std::size_t>(std::max(frame_index, 0)) %
+							static_cast<std::size_t>(std::max(inputs.frame, 0)) %
 							layer.frame_entries.size()];
 				}
 				quad.visible = entry_index != kMissingEntry &&
@@ -1503,17 +1386,14 @@ public:
 					quad.state.atlas.inset_v = entry.placement.inset_v;
 				}
 
-				if ((particle.flags & LitColor) != 0) {
+				// A lit quad keeps what another view's relight reads.
+				if (inputs.lit) {
 					LitQuadInput lit;
 					lit.particle_index = render_snapshot.particles.size();
 					lit.bump_scale = definition.bump_scale;
 					lit.roll = particle.rotation;
-					lit.alpha = unit_byte(alpha);
-					quad.primary_color = lit_primary_color(lit, view_basis);
-					quad.secondary_color = pack_argb(red, green, blue, 1.0f);
+					lit.alpha = inputs.lit_alpha;
 					lit_quads.push_back(lit);
-				} else {
-					quad.secondary_color = 0xffffffffu;
 				}
 
 				render_snapshot.particles.push_back(quad);

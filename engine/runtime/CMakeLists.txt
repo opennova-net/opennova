@@ -197,6 +197,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/foliage_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_atlas.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_frame.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/renderer/particle_quad_inputs.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/q3_frame.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/frame_fx_effects.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/renderer/nvg_scope_lens.cpp

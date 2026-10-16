@@ -1298,7 +1298,7 @@ add_test(NAME mission_def_table_read COMMAND mission_def_table_read_test)
 
 # Object renderer/shader tests
 foreach(test device_fog environment_cube foliage_frame_compile foliage_frame_wind light_runtime light_scene light_terrain_pass material_classify material_eval material_texture
-        particle_atlas_contract particle_frame_compiler_contract render_order
+        particle_atlas_contract particle_frame_compiler_contract particle_quad_inputs render_order
         frame_fx_effects nvg_scope_lens q3_frame render_slot_shadow
         scene_overlay state_vectors tracer_frame precipitation_frame texture_dxt texture_load_rules
         texture_registry texture_authoring d3dx_image_codecs device_texture texture_filter d3d9_raster shader_effect_info
