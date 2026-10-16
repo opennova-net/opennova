@@ -85,7 +85,7 @@ bool subtract_material_energy(FixedVec3 &velocity, int32_t mass, int32_t cost) {
 // applies only an upper clamp of 1219 (@0x4ecad6), then wraps the signed speed*weight
 // product before /875 (@0x4ecb1a). It next applies the hit-zone multiplier (now fed by posed
 // COBJ hit zones) and the shooter-class byte (0.9 / 1.1 — replicated from the loadout's per-ammo
-// class table), floors at min_damage (@0x4ecb3a), and caps at max_damage when > 0 (@0x4ecb42);
+// class table), floors at min_damage (@0x4ecb77..0x4ecb81), and caps at max_damage when > 0 (@0x4ecb83..0x4ecb91);
 // dfx2.exe floors and caps first, over its own zone table [orig: @0x4e9a50 (dfx2.exe)]. MP
 // authority and OneShotKill are explicit inputs, including the non-authority zero return @0x4ec933.
 int32_t calc_impact_damage(FixedVec3 &velocity_q16, const AmmoTableEntry &ammo,

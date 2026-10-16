@@ -63,7 +63,8 @@ constexpr double dfx2_hit_zone_damage_multiplier(int32_t hit_zone) {
 // The ammo's floor and ceiling (Def[47], Def[48]): at least the minimum, at
 // most the maximum when that is positive. Jointops.exe takes them after the
 // section and class scales, dfx2.exe before them (DFX2-16).
-// [orig: Weapon_CalcImpactDamage @0x4ecb7f..0x4ecb91] [orig: @0x4e9c4d..0x4e9c63
+// [orig: Weapon_CalcImpactDamage — the floor @0x4ecb77..0x4ecb81, the cap
+//  @0x4ecb83..0x4ecb91] [orig: @0x4e9c4d..0x4e9c63
 //  (dfx2.exe)]
 inline int32_t clamp_impact_damage(int32_t damage, const AmmoTableEntry &ammo) {
     if (damage <= ammo.min_damage) damage = ammo.min_damage;

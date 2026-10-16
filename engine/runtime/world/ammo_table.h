@@ -194,8 +194,8 @@ struct AmmoTableEntry {
     int32_t weight_in_grains = 0;   // +184 — the kinetic damage mass term [orig: @0x4ecb1a]
     int32_t min_stable_velocity = 0; // +176 speed-table index threshold
     int32_t tumble_error_fp16 = 0;  // +180; exact kick size, random frame still deferred
-    int32_t min_damage = 0;         // +188 damage floor [orig: @0x4ecb3a]
-    int32_t max_damage = 0;         // +192 damage cap when > 0 [orig: @0x4ecb42]
+    int32_t min_damage = 0;         // +188 damage floor [orig: Weapon_CalcImpactDamage @0x4ecb77..0x4ecb81]
+    int32_t max_damage = 0;         // +192 damage cap when > 0 [orig: Weapon_CalcImpactDamage @0x4ecb83..0x4ecb91]
     int32_t penetration_impact = 0; // +196 — must reach the target itemDef+400 armor threshold
     int32_t penetration_kz = 0;     // +200 — must reach the target's blast armor (def+0x192)
     uint8_t secondary_anim = 0;     // +224 `secondary_anim`; collision-force selector
