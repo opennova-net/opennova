@@ -1166,9 +1166,10 @@ bool decode_destroy_entity_list(const uint8_t *body, size_t len,
                                 DestroyEntityList &out);
 
 // S2C 0x50 — TEAM ASSIGN. `[u16 entityHandle][u8 team][u16 netId][u8 animSlot]`;
-// a short body defaults each REMAINING field to 0 (the handler reads what is
-// there and leaves the rest zero). Gates: handle != 0xFFFF,
-// `(handle & 0xF000) < 0x5000`, slot < that pool's capacity.
+// each field zero-fills when too few bytes remain for it, and a short read does
+// not advance, so a later narrower field still reads what remains (a one-byte
+// body is handle 0 with that byte as its team); the decode never fails. Gates:
+// handle != 0xFFFF, `(handle & 0xF000) < 0x5000`, slot < that pool's capacity.
 // Legs, in the witnessed order:
 //   (1) entity == local player -> `g_LocalTeam = team` @0x4319db — the SAME latch
 //       the S2C 0x04 tail byte writes (our JoinerConnection::assigned_team_);

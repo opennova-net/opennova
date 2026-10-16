@@ -1804,11 +1804,28 @@ int check_S_50_team_assign() {
 	EXPECT(short_consumed == 3);
 	EXPECT(shortened.entity_handle == 0x0008 && shortened.team == 3);
 	EXPECT(shortened.net_id == 0 && shortened.anim_slot == 0);
-	// A body too short even for the handle is not a team assign.
+	// A body too short for the handle reads handle 0 and does not advance, so its
+	// one byte is the team [orig: NapiNPClientMsg_TeamAssign @0x431924..0x431928,
+	// team @0x431940].
 	const uint8_t stub[1] = {0x08};
-	TeamAssign rejected;
-	size_t rejected_consumed = 1;
-	EXPECT(!decode_team_assign(stub, sizeof(stub), rejected, rejected_consumed));
+	TeamAssign stubbed;
+	size_t stub_consumed = 0;
+	EXPECT(decode_team_assign(stub, sizeof(stub), stubbed, stub_consumed));
+	EXPECT(stub_consumed == 1);
+	EXPECT(stubbed.entity_handle == 0 && stubbed.team == 8);
+	EXPECT(stubbed.net_id == 0 && stubbed.anim_slot == 0);
+	TeamAssign empty;
+	size_t empty_consumed = 1;
+	EXPECT(decode_team_assign(stub, 0, empty, empty_consumed));
+	EXPECT(empty_consumed == 0 && empty.entity_handle == 0 && empty.team == 0);
+	// Four bytes: the NetId does not fit, so the animSlot reads byte 3 [orig: @0x431956,
+	// @0x431970].
+	const uint8_t four[4] = {0x09, 0x00, 0x02, 0x05};
+	TeamAssign fourth;
+	size_t four_consumed = 0;
+	EXPECT(decode_team_assign(four, sizeof(four), fourth, four_consumed));
+	EXPECT(four_consumed == 4 && fourth.entity_handle == 0x0009 && fourth.team == 2);
+	EXPECT(fourth.net_id == 0 && fourth.anim_slot == 5);
 	cover('S', 0x50);
 	return 0;
 }

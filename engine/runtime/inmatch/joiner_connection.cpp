@@ -1416,13 +1416,15 @@ void JoinerConnection::on_server_session(const std::vector<uint8_t> &body, PollR
 			// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910]
 			TeamAssign assign;
 			std::size_t assign_consumed = 0;
-			if (decode_team_assign(m.payload.data(), m.payload.size(), assign,
-					assign_consumed) &&
-			    world::EntityHandle{assign.entity_handle}.valid() &&
-			    world::EntityHandle{assign.entity_handle}.pool() < world::kEntityPoolCount) {
+			decode_team_assign(m.payload.data(), m.payload.size(), assign, assign_consumed);
+			const world::EntityHandle assigned{assign.entity_handle};
+			if (assigned.valid() && assigned.pool() < world::kEntityPoolCount &&
+			    static_cast<std::size_t>(assigned.slot()) <
+			            world::retail_pool_capacity(assigned.pool())) {
 				out.inbound_gameplay.emplace_back(m.tag, m.payload);
-				// Retail's header gates: not the 0xFFFF sentinel, and the pool
-				// nibble must address one of the five entity pools.
+				// Retail's header gates: not the 0xFFFF sentinel, the pool nibble
+				// addressing one of the five entity pools, and a slot inside its
+				// pool's table [orig: @0x431984..0x4319b3].
 				out.entity_team_assigns.emplace_back(
 						assign.entity_handle, assign.team);
 				if (has_self_handle_ && assign.entity_handle == self_handle_) {

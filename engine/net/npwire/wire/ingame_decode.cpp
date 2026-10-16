@@ -1073,20 +1073,32 @@ bool decode_destroy_entity_list(const uint8_t *body, size_t len,
 	return (c.p == c.end);
 }
 
-// S2C 0x50 team assign. A short body leaves every REMAINING field at zero — the
-// handler reads what arrived and never fails on a truncated tail.
-// [orig: NapiNPClientMsg_TeamAssign (0x50) @ 0x431910]
+// S2C 0x50 team assign: every field zero-fills and a short read does not advance,
+// so a later narrower field still reads what remains. A one-byte body is handle 0
+// (pool-0 slot 0, not the 0xFFFF sentinel) with that byte as its team; the handler
+// never refuses a body, so neither does the decode.
+// [orig: NapiNPClientMsg_TeamAssign (0x50) @0x431910 - the handle @0x431924..0x431928
+//  (0 on a short body, the cursor unmoved), team @0x431940, NetId @0x431956,
+//  animSlot @0x431970]
 bool decode_team_assign(const uint8_t *body, size_t len, TeamAssign &out,
                         size_t &consumed) {
 	out = TeamAssign{};
-	consumed = 0;
-	Cursor c{body, body + len, true};
-	out.entity_handle = c.u16();
-	if (!c.ok) return false; // the handle itself is the one mandatory field
-	if (c.p + 1 <= c.end) out.team = c.u8();
-	if (c.p + 2 <= c.end) out.net_id = c.u16();
-	if (c.p + 1 <= c.end) out.anim_slot = c.u8();
-	consumed = size_t(c.p - body);
+	size_t at = 0;
+	const auto u16 = [&]() -> uint16_t {
+		if (at + 2 > len) return uint16_t{0};
+		const uint16_t v = static_cast<uint16_t>(body[at] | (body[at + 1] << 8));
+		at += 2;
+		return v;
+	};
+	const auto u8 = [&]() -> uint8_t {
+		if (at + 1 > len) return uint8_t{0};
+		return body[at++];
+	};
+	out.entity_handle = u16();
+	out.team = u8();
+	out.net_id = u16();
+	out.anim_slot = u8();
+	consumed = at;
 	return true;
 }
 

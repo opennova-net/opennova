@@ -182,7 +182,19 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 	case s2c::TEAM_ASSIGN: {
 		TeamAssign assign;
 		size_t consumed = 0;
-		if (decode_team_assign(body.data(), body.size(), assign, consumed)) {
+		decode_team_assign(body.data(), body.size(), assign, consumed);
+		// The handler's gates: not the 0xFFFF sentinel, a pool below 5, and a slot
+		// inside its pool's table; any other handle does nothing at all
+		// [orig: NapiNPClientMsg_TeamAssign @0x431984..0x4319b3].
+		const world::EntityHandle assigned{assign.entity_handle};
+		if (assigned.valid() && assigned.pool() < world::kEntityPoolCount &&
+				static_cast<std::size_t>(assigned.slot()) <
+						world::retail_pool_capacity(assigned.pool())) {
+			// Retail stores the entity's Team off the authority only [orig: `cmp
+			// g_NapiNPCtx.is_authority` @0x4319e1, the store @0x4319ee]; the listen
+			// host's view still takes it, because two host-view readers (the deploy
+			// zone teams, the effects' sound actor) read it there. A ledgered
+			// divergence: the host view's 0x50 Team store.
 			apply_team_assign(assign.entity_handle, assign.team);
 			// A player's team change asks for its 0x46 team field and a fresh
 			// 0x4C snapshot; the 0x22 slot byte is the handle's low byte (the
@@ -200,8 +212,6 @@ void ClientReplicaPipeline::apply(uint8_t tag, const std::vector<uint8_t> &body)
 				// [orig: `cmp ebp, g_LocalPlayerEntity` @0x431b10]
 				if (assign.entity_handle == spectate_local_handle_) ++state_.local_team_assigns;
 			}
-		} else {
-			++malformed_bodies_;
 		}
 		break;
 	}
