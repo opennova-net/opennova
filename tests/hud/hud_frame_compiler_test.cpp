@@ -536,6 +536,46 @@ void test_compiler_crosshair_user_options(const fnt_font_t *font) {
 			"spread off collapses to the zero-spread geometry (arms centered)");
 }
 
+// The projected (3P / spectate) anchor: an integer surface pixel through the
+// rounding screen-to-design divide, as the target brackets take it (C-310). At
+// 1600 x 900 the aim pixel (801, 451) is design (513, 385): (801 * 1024 + 800)
+// / 1600 = 513, where 801 * 1024 / 1600 truncated is 512; so every arm's left
+// edge sits at scale(513 - 32) = 752, not scale(480) = 750 [orig:
+// HUD_DrawCrosshair -- Viewport_ScreenToVirtual @0x592AD4].
+void test_compiler_crosshair_projected_anchor(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	layout.crosshair_texture_valid = true;
+	layout.crosshair_tex_w = 64;
+	layout.crosshair_tex_h = 64;
+	layout.crosshair_spread_enabled = false;
+	compiler.configure(layout, font);
+	HudFrameState state;
+	state.weapon.active = true;
+	state.aim_valid = true;
+	state.aim_screen_x = 801.0f;
+	state.aim_screen_y = 451.0f;
+	const HudDrawList &list = compiler.compile(state, 1600.0f, 900.0f);
+	CHECK(list.tris.size() == 14, "the five regions draw around the projected anchor");
+	float min_x = 1e9f;
+	for (const HudTri &tri : list.tris)
+		for (const opennova::hud::HudTriVertex *v : {&tri.a, &tri.b, &tri.c}) min_x = std::min(min_x, v->x);
+	CHECK(min_x == static_cast<float>(opennova::hud::scale_axis(513 - 32, 1600, 1024)) && min_x == 752.0f,
+			"the arms' left edge follows the rounded design anchor");
+	// 1P: the centre pixel (w / 2, h / 2) through the same divide, so an odd
+	// surface narrower than 1025 puts the anchor at design 511, not 512
+	// [orig: HUD_DrawCrosshair @0x592896..0x5928AE, @0x592AD4].
+	HudFrameState first_person = state;
+	first_person.aim_valid = false;
+	const HudDrawList &odd = compiler.compile(first_person, 1023.0f, 767.0f);
+	CHECK(opennova::hud::screen_to_design_x(1023 / 2, 1023) == 511, "the odd surface's centre is design 511");
+	float odd_min_x = 1e9f;
+	for (const HudTri &tri : odd.tris)
+		for (const opennova::hud::HudTriVertex *v : {&tri.a, &tri.b, &tri.c}) odd_min_x = std::min(odd_min_x, v->x);
+	CHECK(odd_min_x == static_cast<float>(opennova::hud::scale_axis(511 - 32, 1023, 1024)),
+			"the 1P arms follow the converted centre pixel");
+}
+
 // The hud_color_index scheme swap (the D-HUD-20 good-tier residue + the
 // master overlay color). [orig: HUD_InitTeamColorTable @ 0x51f240 table
 // immediates; the good-tier index test @ 0x5a3c9e (== 2 -> tagcolor_good,
@@ -3065,6 +3105,7 @@ int main() {
 	test_compiler_health_and_order(&font);
 	test_compiler_crosshair(&font);
 	test_compiler_crosshair_user_options(&font);
+	test_compiler_crosshair_projected_anchor(&font);
 	test_compiler_hud_color_schemes(&font);
 	test_spinmap_projection_zoom_and_clip();
 	test_spinmap_compass_screen_rotation_matches_retail_heading();

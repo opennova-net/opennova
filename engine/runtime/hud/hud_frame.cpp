@@ -1286,13 +1286,25 @@ void HudFrameCompiler::element_crosshair(const HudFrameState &state, float w,
 										: layout_.crosshair_texture_valid)) {
 		return;
 	}
-	// The projected aim point in design units; 1P pins the exact center
-	// [orig: @ 0x5928a0 / the projected branch @ 0x592910].
+	// The anchor is an integer surface pixel, 1P the surface's centre pixel
+	// (w / 2, h / 2) and 3P / spectate the projected aim point (the
+	// projection's `>> 16` floors it), mapped into design units through the
+	// rounding screen-to-design divide, as the target brackets map the same
+	// anchor (hud_combat.cpp) [orig: HUD_DrawCrosshair -- the 1P centre
+	// @0x592896..0x5928AE, the projected branch @0x592910..0x59293C
+	// (HUD_ClipPointToFrustumAndProject, its sars @0x592566 / @0x59256B),
+	// Viewport_ScreenToVirtual @0x592AD4 ahead of the five corner quads
+	// @0x592C50..0x592CD2; Viewport_ScreenToVirtual @0x5D2C70].
 	float cx = kDesignW * 0.5f;
 	float cy = kDesignH * 0.5f;
-	if (state.aim_valid && w > 0.0f && h > 0.0f) {
-		cx = state.aim_screen_x * kDesignW / w;
-		cy = state.aim_screen_y * kDesignH / h;
+	if (w > 0.0f && h > 0.0f) {
+		const int32_t surface_w = static_cast<int32_t>(w), surface_h = static_cast<int32_t>(h);
+		const int32_t px = state.aim_valid ? static_cast<int32_t>(std::floor(state.aim_screen_x))
+										   : surface_w / 2;
+		const int32_t py = state.aim_valid ? static_cast<int32_t>(std::floor(state.aim_screen_y))
+										   : surface_h / 2;
+		cx = static_cast<float>(screen_to_design_x(px, surface_w));
+		cy = static_cast<float>(screen_to_design_y(py, surface_h));
 	}
 	// Spread off zeroes the offset and still draws all five arms
 	// [orig: the g_cfgCrossHairSpread arm @ 0x592b82; the disabled fldz

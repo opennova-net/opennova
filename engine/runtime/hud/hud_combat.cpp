@@ -105,9 +105,12 @@ void HudFrameCompiler::element_targeting(const HudFrameState &s, float w, float 
 		// Four diagonal corner strokes around the MAIN aim anchor, not the
 		// tracked target point. [orig: @0x592D32..0x592DD7]
 		if (c.target_brackets) {
-			// [orig: the anchor's Viewport_ScreenToVirtual @0x592D32]
-			const float x = s.aim_valid ? float(design_x(s.aim_screen_x)) : 512;
-			const float y = s.aim_valid ? float(design_y(s.aim_screen_y)) : 384;
+			// [orig: the anchor's Viewport_ScreenToVirtual @0x592D32; the 1P anchor
+			//  the centre pixel (w / 2, h / 2) @0x592896..0x5928AE]
+			const float x = float(s.aim_valid ? design_x(s.aim_screen_x)
+											  : screen_to_design_x(surface_w / 2, surface_w));
+			const float y = float(s.aim_valid ? design_y(s.aim_screen_y)
+											  : screen_to_design_y(surface_h / 2, surface_h));
 			for (int dx : { -1, 1 })
 				for (int dy : { -1, 1 }) {
 					float x0 = x + dx * 13, y0 = y + dy * 13;
