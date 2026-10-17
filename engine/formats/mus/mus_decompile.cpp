@@ -513,8 +513,11 @@ static bool reconstruct_expression(const Instruction *insts, int start, int end_
         if (!m) break;
 
         if (strcmp(m, "push") == 0) {
+            /* Unsigned, as the compiler's lexer reads a literal (mus_compile.cpp): a push of
+               0x80000000 or more printed signed would read back as neg over its magnitude, other
+               bytes. The compiler writes a negative literal as push and neg. */
             int v = (inst->operand_count > 0) ? inst->operands[0] : 0;
-            stk_pushf(&stk, "%d", v);
+            stk_pushf(&stk, "%u", (unsigned)v);
         } else if (strcmp(m, "push_g") == 0) {
             int idx = (inst->operand_count > 0) ? inst->operands[0] : 0;
             char name[64];
