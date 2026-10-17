@@ -282,7 +282,7 @@ void test_ring_band() {
 	ring.color = 0xFF208020u;
 	ring.remaining_ticks = 10;
 	in.markers.push_back(ring);
-	in.ticks = 8; // pulse phase 0: the colour stays
+	in.hud_frame = 8; // pulse phase 0: the colour stays
 	HudMinimapCompiler compiler;
 	const HudMapPass &p = compiler.compile(in);
 	int bands = 0;
@@ -487,7 +487,7 @@ void test_zone_waypoint_labels() {
 	ov.defensive_position_format = "DEF %s";
 	HudMinimapInput in = big(3);
 	in.overlays = &ov;
-	in.ticks = 8; // phase 0
+	in.hud_frame = 8; // phase 0
 	in.markers = {zone_marker(1, 0x80, 1)};
 	HudMinimapCompiler compiler;
 	const HudMapLabel *obj = find_label(compiler.compile(in), "OBJ Alpha");

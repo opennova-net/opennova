@@ -360,6 +360,8 @@ private:
 	FrameOutcome run_ticks(int32_t due, const FrameInput &input);
 	TickOutcome run_one_tick(const TickInput &input);
 	void step_cine_render_frame();
+	// The paused frame's banked frames step the world's main-frame counter.
+	void step_paused_frame_counters(const FrameInput &input);
 	void step_hud_radar_frame();
 	static int64_t now_us();
 

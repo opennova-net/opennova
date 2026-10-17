@@ -72,7 +72,6 @@ struct HudMapLegendState {
 	bool shown = false;
 	std::string title;
 	std::vector<std::string> labels; // kHudMapLegendIconCount entries
-	int frame_counter = 0;           // the pulses' clock [orig: g_HUDFrameCounter @0xA87064]
 };
 
 // The briefing panel's text [orig: HUD_DrawBriefingPanel @0x5bad00 — the authority reads

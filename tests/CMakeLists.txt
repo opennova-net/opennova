@@ -2958,6 +2958,12 @@ target_include_directories(projectile_combat_test PRIVATE ${CMAKE_CURRENT_SOURCE
 target_compile_features(projectile_combat_test PRIVATE cxx_std_17)
 add_test(NAME projectile_combat COMMAND projectile_combat_test)
 
+add_executable(hud_frame_counters_test world/hud_frame_counters_test.cpp)
+target_link_libraries(hud_frame_counters_test PRIVATE opennova_runtime)
+target_include_directories(hud_frame_counters_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_features(hud_frame_counters_test PRIVATE cxx_std_17)
+add_test(NAME hud_frame_counters COMMAND hud_frame_counters_test)
+
 add_executable(fire_sound_test world/fire_sound_test.cpp)
 target_link_libraries(fire_sound_test PRIVATE opennova_runtime)
 target_include_directories(fire_sound_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

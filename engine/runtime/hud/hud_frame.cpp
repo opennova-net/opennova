@@ -306,6 +306,11 @@ int chat_wrap_text(const GameFont &font, float scale, std::string &text,
 	}
 }
 
+void HudFrameCompiler::rebase_message_clock(int delta) {
+	for (std::vector<HudMessageLine> *ring : {&feed_lines_, &chat_lines_, &chat_raw_lines_})
+		for (HudMessageLine &line : *ring) line.expire_tick += delta;
+}
+
 void HudFrameCompiler::push_message(const std::string &text, int now_ticks) {
 	// Mission triggered text posts into the ONE system ring with the default
 	// white — retail routes it through the same sink as every 0x1E line
@@ -795,6 +800,8 @@ void HudFrameCompiler::element_spinmap(const HudFrameState &state, float w,
 	input.surface_w = w;
 	input.surface_h = h;
 	input.ticks = state.ticks;
+	input.hud_frame = state.hud_frame;
+	input.session_frame = state.session_frame;
 	input.item_flash = state.item_flash;
 	input.waypoint_present = state.waypoint.present;
 	input.waypoint_x = state.waypoint.world_x;
@@ -910,6 +917,8 @@ void map_window_input(const HudFrameState &state, float surface_w, float surface
 	input.surface_w = surface_w;
 	input.surface_h = surface_h;
 	input.ticks = state.ticks;
+	input.hud_frame = state.hud_frame;
+	input.session_frame = state.session_frame;
 	// The windowed passes run the same legs as the big map (the CMAP mask is
 	// the big-map mask), so they read the same non-bank feed, flash timers,
 	// FARP target and colours.
@@ -1806,7 +1815,7 @@ void HudFrameCompiler::element_friendly_tags(const HudFrameState &state) {
 			if (tag.has_slot && tag.revive_seconds != 0) {
 				rgb = tag.medic_request
 						? friendly_tag_revive_pulse(kFriendlyTagDownedLightBlue,
-								  state.ticks)
+								  static_cast<int>(state.hud_frame))
 						: kFriendlyTagDownedLightBlue;
 			} else {
 				rgb = kFriendlyTagDownedGray;
@@ -2076,7 +2085,7 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 		const int first = std::max(0, n - kFeedVisibleRows);
 		for (int i = first; i < n; ++i) {
 			const HudMessageLine &line = chat_lines_[static_cast<size_t>(i)];
-			const int remaining = line.expire_tick - state.ticks;
+			const int remaining = line.expire_tick - static_cast<int>(state.main_frame);
 			int alpha = 255 * remaining / kMessageExpiryStagger;
 			if (alpha <= 0) continue;
 			if (alpha > 255) alpha = 255;
@@ -2099,7 +2108,7 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 			surface_h);
 	std::vector<const HudMessageLine *> live;
 	for (const HudMessageLine &line : feed_lines_) {
-		if (line.expire_tick > state.ticks) {
+		if (line.expire_tick > static_cast<int>(state.main_frame)) {
 			live.push_back(&line);
 		}
 	}

@@ -331,7 +331,7 @@ void test_death_compile() {
     HudMinimapInput in;
     in.surface_w = 1024.0f;
     in.surface_h = 768.0f;
-    in.ticks = 8; // pulse phase 0
+    in.hud_frame = 8; // pulse phase 0
     in.markers = {zone_marker(0x1001, a.anchor_x, a.anchor_y),
             zone_marker(0x1002, b.anchor_x, b.anchor_y),
             zone_marker(0x1003, c.anchor_x, c.anchor_y)};
@@ -400,7 +400,7 @@ void test_death_compile() {
     // The pulse: an own-team zone at phase 16 moves half-way to white.
     in.markers[0].flags = 0;
     facts.self_zone_handle = 0xFFFF;
-    in.ticks = 8 + 16;
+    in.hud_frame = 8 + 16;
     compiler.compile(in, frame, facts, out);
     CHECK(has_label(out.zones, "A", 291.0f, 252.0f, 0xFF979FBFu));
     // A def-type-2 zone draws no blip but keeps its letter segment.
@@ -511,7 +511,7 @@ void test_command_toggles_and_compile() {
     HudMinimapInput in;
     in.surface_w = 1024.0f;
     in.surface_h = 768.0f;
-    in.ticks = 8;
+    in.hud_frame = 8;
     DeathMapFacts facts;
     facts.player_present = true;
     facts.player_x = 50 * kWu;

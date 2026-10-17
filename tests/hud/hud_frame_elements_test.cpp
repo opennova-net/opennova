@@ -644,10 +644,10 @@ void test_feed_and_power_label_slots(const fnt_font_t *font) {
 	compiler.configure_label_fonts(font, font, font, 1.25f, 1.6f);
 	const float w = 1280.0f, h = 720.0f;
 	HudFrameState state;
-	state.ticks = 100;
-	compiler.push_chat_line("AB", 0xFFFFFFFFu, state.ticks);
-	compiler.push_chat_line("CD", 0xFFFFFFFFu, state.ticks);
-	compiler.push_message("EF", state.ticks);
+	state.main_frame = 100;
+	compiler.push_chat_line("AB", 0xFFFFFFFFu, 100);
+	compiler.push_chat_line("CD", 0xFFFFFFFFu, 100);
+	compiler.push_message("EF", 100);
 	{
 		const HudDrawList &list = compiler.compile(state, w, h);
 		CHECK(glyphs_on(list, kHudFontSlotHud).empty());

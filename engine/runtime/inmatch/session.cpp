@@ -410,6 +410,19 @@ void Session::step_cine_render_frame() {
 	role_->kernel()->world.epilog.render_pass();
 }
 
+void Session::step_paused_frame_counters(const FrameInput &input) {
+	// Under the menu pause retail's frames still run, their pause-gated legs
+	// held: each banked frame steps the main-frame counter alone (the session
+	// and HUD counters wait on the pause, as the tick does) [orig:
+	// Game_ProcessMainFrame -- `cmp dword_A87050, 0` @0x5265A6 around the tick's
+	// ++g_CurrentTick, Game_TickHudFrameCounters @0x5265D5 every frame].
+	if (role_ == nullptr || role_->kernel() == nullptr) return;
+	world::World &world = role_->kernel()->world;
+	const int32_t due = accumulator_.bank(input.delta_seconds);
+	for (int32_t i = 0; i < due; ++i)
+		world.hud_frames.step(/*menu_paused=*/true, world.epilog_screen_active());
+}
+
 void Session::step_hud_radar_frame() {
 	if (role_ == nullptr || role_->kernel() == nullptr) return;
 	static_assert(kHudRadarGatesDefault == hud::HudFrameCompiler::kRadarGatePass,
@@ -435,6 +448,7 @@ FrameOutcome Session::advance(const FrameInput &input) {
 		// The paused frame still renders and runs its HUD pass: no tick ran,
 		// so nothing ages, and the menu pause holds the lock tone.
 		if (state_ == State::Paused) {
+			step_paused_frame_counters(input);
 			step_cine_render_frame();
 			step_hud_radar_frame();
 		}

@@ -62,7 +62,7 @@ void slot_blip(MapCompile &c, const HudMinimapMarker &marker, uint8_t layer) {
 			//  (@0x5be46a main ring, z := 0 @0x5be47a, dot @0x5be482),
 			//  254 arm @0x5be2a8..0x5be3b5 (main ring @0x5be337, z := 0
 			//  @0x5be34f, rings @0x5be357 / @0x5be393 / @0x5be3ca)]
-			const uint32_t pulse = pulse_color(marker.color, input.ticks);
+			const uint32_t pulse = pulse_color(marker.color, static_cast<int>(input.hud_frame));
 			ring_blip(c, marker.x, marker.y, marker.z, pulse, 0, 4, layer);
 			if (marker.icon == 253) {
 				ring_blip(c, marker.x, marker.y, 0, pulse, pulse, 1, layer);

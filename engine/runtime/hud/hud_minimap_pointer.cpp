@@ -179,7 +179,7 @@ void draw_map_target_pointer(MapCompile &c, int32_t target_x, int32_t target_y,
 		tip_x = tx;
 		tip_y = ty;
 		half = span * 0.75f;
-		if ((static_cast<uint32_t>(input.ticks) & 0x20u) != 0)
+		if ((input.hud_frame & 0x20u) != 0)
 			light = (color & 0xFF000000u) + ((color >> 1) & 0x7F7F7Fu);
 	}
 	if (line) emit_line(c, cx, cy, tip_x, tip_y, line_color_doubled(light));
@@ -332,7 +332,7 @@ void draw_tracked_callout(MapCompile &c) {
 		}
 		return;
 	}
-	if (alpha == 255 && (static_cast<uint32_t>(input.ticks) & 0x20u) != 0)
+	if (alpha == 255 && (input.hud_frame & 0x20u) != 0)
 		color_base = ((color_base >> 1) & 0x7F7F7Fu) + (color_base & 0xFF000000u);
 	c.tracked_color = color_base;
 	if (t.friendly) return;

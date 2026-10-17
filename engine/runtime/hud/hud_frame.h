@@ -701,11 +701,10 @@ struct HudScoreboardState {
 	// The 4-team page inputs (hud_scoreboard.h scoreboard_team_page): the
 	// session's side count — a joiner reads it off the 0x16 team table the
 	// host serializes from its g_NumTeamsConfig [orig: @0x50db3a ->
-	// g_ScoreboardTeamCount @0x42fdda] — and the HUD frame counter, the
-	// per-main-frame clock the LFP panel blinks on too [orig: dword_A87060,
-	// Game_TickHudFrameCounters @0x434c14].
+	// g_ScoreboardTeamCount @0x42fdda] — and the frame's session frame counter
+	// (HudFrameState::session_frame) [orig: dword_A87060, Game_TickHudFrameCounters
+	// @0x434c14].
 	int team_count = 0;
-	int frame_counter = 0;
 	// The row composer's session facts (hud_scoreboard.h ScoreboardRowContext):
 	// the SU gate, solo KOTH's timed flag, the countdown minutes and the local
 	// player's team byte (-1 without a local entity).
@@ -739,7 +738,6 @@ struct HudChatInputState {
 	std::string prompt;
 	std::string text;
 	uint32_t color = 0xFFFFFFFFu;
-	uint32_t frame = 0; // [orig: dword_A8705C]
 };
 
 // One seat box on the mounted-vehicle panel.
@@ -826,8 +824,6 @@ struct HudLfpZone {
 struct HudLfpPanelState {
 	bool shown = false;
 	int local_team = 0;
-	// The HUD frame counter the blink masks (g_HUDFrameCounter & 0x18).
-	int frame_counter = 0;
 	// The session game type: the drawer's conquest arm (g_GameType ==
 	// 0x50010) is unmodelled and the element draws nothing under it
 	// [orig: @0x5a24a1].
@@ -916,7 +912,14 @@ inline uint32_t hud_overlay_master(bool no_hud) {
 
 struct HudFrameState {
 	HudCombatState combat;
+	// The frame's clocks, each reader taking the one its original reads: `ticks` the logic
+	// tick (g_CurrentTick, World::logic_tick: the fades' and flashes' stamps, the kill banner,
+	// the radar's blinks, the item flash timers) and the three per-frame counters
+	// (world::HudFrameCounters) [orig: Game_TickHudFrameCounters @0x434C00].
 	int ticks = 0;
+	uint32_t main_frame = 0;    // g_MainFrameCounter: the message rings' lives, the chat cursor
+	uint32_t session_frame = 0; // dword_A87060: the kill list's page, the map view's zone blinks
+	uint32_t hud_frame = 0;     // g_HUDFrameCounter: the HUD's blinks and pulses
 	// The /NOHUD master word (hud_overlay_master): bit 1 gates the gameplay
 	// overlay pass after its palette/radar work [orig: HUD_RenderAllOverlays
 	// `test dword_840B18, 2` @0x5A81CE]; the whole word gates
@@ -1236,6 +1239,12 @@ public:
 	// line, oldest first, NO expiry test [orig: HUD_DrawMessageLog
 	// @0x5b9d70 walks slots 16..1 of both rings @0x5b9e8a..0x5b9f1a].
 	const std::vector<HudMessageLine> &chat_lines() const { return chat_lines_; }
+	// The rings' lives are retail's per-slot countdowns, which run once per
+	// frame and outlive a mission start (Input_InitBindingSystem @0x525BA5
+	// clears only the flood table); the port stamps an expiry against the
+	// main-frame counter, which a mission start zeroes, so the clock's restart
+	// re-bases every held line by its jump, each keeping the frames it had left.
+	void rebase_message_clock(int delta);
 	void reset_runtime_state();
 	// Respawn clears the overlay clocks, retaining the chat/system rings and
 	// the previous stance/ammo values [orig: HUD_ResetAllOverlayBuffers

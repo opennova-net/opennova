@@ -761,6 +761,29 @@ struct WaterScopeLegs {
     }
 };
 
+// The HUD's frame counters, each stepped once per frame tick (one Game_ProcessMainFrame, the 62 Hz
+// logic tick): the main-frame counter always, the session frame counter unless the menu pause
+// holds the game, the HUD frame counter unless the pause or the epilog screen does; the mission
+// start zeroes them. The port's menu pause runs no frame tick (inmatch::Session's Paused state),
+// so the pause gate holds only for an embedder that steps a paused frame.
+// [orig: Game_TickHudFrameCounters @0x434C00 -- ++g_MainFrameCounter (0xA8705C) @0x434C05;
+//  `cmp dword_A87050, 0; jnz` @0x434C0B, ++dword_A87060 @0x434C14; `cmp g_EpilogScreenActive,
+//  0; jnz` @0x434C1A, ++g_HUDFrameCounter (0xA87064) @0x434C23; called from Game_ProcessMainFrame
+//  @0x5265D5, ahead of the frame's input, server tick and entity update; Game_ResetSessionHudState
+//  @0x434BD0 from Game_StartMission @0x525BAA]
+struct HudFrameCounters {
+    uint32_t main_frame = 0;    // g_MainFrameCounter: the chat debounces, the chat cursor blink
+    uint32_t session_frame = 0; // dword_A87060: the kill list's page, the map blips' blinks
+    uint32_t hud_frame = 0;     // g_HUDFrameCounter: the HUD's blinks and pulses
+
+    void step(bool menu_paused, bool epilog_screen) {
+        ++main_frame;
+        if (menu_paused) return;
+        ++session_frame;
+        if (!epilog_screen) ++hud_frame;
+    }
+};
+
 // What the sim produced this tick for someone else to drain: the wire (entity
 // removals, the round ring, water crossings) and the presentation (effects,
 // destruction, scars, scorches, the sound queues). Nothing in the sim reads
@@ -1067,6 +1090,8 @@ public:
     //  (WacScript_AdvanceTick @0x4f81b1), the BMS normal-event quarter pass runs every 16th
     //  (Server_TickUpdate @0x51d7e0), the AI motor staggers on 2/8/16 internally.]
     uint32_t logic_tick = 0;
+    // The HUD's frame counters, stepped at the head of every frame tick (begin_tick).
+    HudFrameCounters hud_frames;
     // The entity-update counter: the number of completed entity updates. Its
     // one writer is the tail of a non-epilog update_all_entities, and nothing
     // resets it, so it runs one behind logic_tick through the process's first

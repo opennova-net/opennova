@@ -1160,6 +1160,18 @@ int64_t Simulation::get_logic_tick() const {
 	return kernel_ ? static_cast<int64_t>(kernel_->world.logic_tick) : 0;
 }
 
+int64_t Simulation::get_main_frame_counter() const {
+	return kernel_ ? static_cast<int64_t>(kernel_->world.hud_frames.main_frame) : 0;
+}
+
+int64_t Simulation::get_session_frame_counter() const {
+	return kernel_ ? static_cast<int64_t>(kernel_->world.hud_frames.session_frame) : 0;
+}
+
+int64_t Simulation::get_hud_frame_counter() const {
+	return kernel_ ? static_cast<int64_t>(kernel_->world.hud_frames.hud_frame) : 0;
+}
+
 void Simulation::set_panm_time_ms(int64_t p_time_ms) {
 	kernel_->panm_time_override_ms = p_time_ms < 0
 			? -1

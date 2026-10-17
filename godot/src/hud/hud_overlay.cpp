@@ -162,7 +162,10 @@ void HudOverlay::_bind_methods() {
     ClassDB::bind_method(D_METHOD("reset_overlay_buffers"), &HudOverlay::reset_overlay_buffers);
 	ClassDB::bind_method(D_METHOD("push_feed_line", "text", "argb"),
 			&HudOverlay::push_feed_line);
-	ClassDB::bind_method(D_METHOD("set_player_state", "ticks", "health_fraction", "stance", "fov_deg"),
+	ClassDB::bind_method(D_METHOD("set_frame_clocks", "logic_tick", "main_frame", "session_frame",
+								 "hud_frame"),
+			&HudOverlay::set_frame_clocks);
+	ClassDB::bind_method(D_METHOD("set_player_state", "health_fraction", "stance", "fov_deg"),
 			&HudOverlay::set_player_state);
 	ClassDB::bind_method(D_METHOD("set_weapon_state", "active", "clip", "reserve", "heat",
 								  "hud_spread_fp16", "aimed_shot_available",
@@ -172,11 +175,11 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::set_view_state);
 	ClassDB::bind_method(D_METHOD("set_objectives_header", "text"), &HudOverlay::set_objectives_header);
 	ClassDB::bind_method(
-			D_METHOD("set_scoreboard", "shown", "frame_counter", "sim", "gametext"),
+			D_METHOD("set_scoreboard", "shown", "sim", "gametext"),
 			&HudOverlay::set_scoreboard);
 	ClassDB::bind_method(D_METHOD("scoreboard_page_key", "forward", "in_session", "board_open"),
 			&HudOverlay::scoreboard_page_key);
-	ClassDB::bind_method(D_METHOD("set_chat_input", "chat", "frame", "mp_session_peer"),
+	ClassDB::bind_method(D_METHOD("set_chat_input", "chat", "mp_session_peer"),
 			&HudOverlay::set_chat_input);
 	ClassDB::bind_method(D_METHOD("reset_scoreboard_page"), &HudOverlay::reset_scoreboard_page);
 	ClassDB::bind_method(D_METHOD("set_vehicle_panel", "shown", "block", "stance", "sim"),
@@ -185,7 +188,7 @@ void HudOverlay::_bind_methods() {
 			&HudOverlay::push_chat_line);
 	ClassDB::bind_method(D_METHOD("post_feed_lines", "sim", "gametext", "mp_verbose"),
 			&HudOverlay::post_feed_lines);
-	ClassDB::bind_method(D_METHOD("send_command_map_chat", "sim", "all", "text", "frame"),
+	ClassDB::bind_method(D_METHOD("send_command_map_chat", "sim", "all", "text"),
 			&HudOverlay::send_command_map_chat);
 	ClassDB::bind_method(D_METHOD("render_console_messages", "item"),
 			&HudOverlay::render_console_messages);
@@ -197,7 +200,7 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_help_screen", "shown", "title", "page_line", "footer",
 								 "keys", "texts"),
 			&HudOverlay::set_help_screen);
-	ClassDB::bind_method(D_METHOD("set_map_legend", "shown", "title", "labels", "frame_counter"),
+	ClassDB::bind_method(D_METHOD("set_map_legend", "shown", "title", "labels"),
 			&HudOverlay::set_map_legend);
 	ClassDB::bind_static_method("HudOverlay", D_METHOD("map_legend_keys"),
 			&HudOverlay::map_legend_keys);
@@ -210,7 +213,7 @@ void HudOverlay::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_message_log_title", "title"),
 			&HudOverlay::set_message_log_title);
 	ClassDB::bind_method(D_METHOD("set_lfp_panel", "shown", "game_type", "local_team",
-			"frame_counter", "gametext", "sim"), &HudOverlay::set_lfp_panel);
+			"gametext", "sim"), &HudOverlay::set_lfp_panel);
 	ClassDB::bind_method(D_METHOD("set_waypoint", "name", "distance_m",
 			"mission_position", "altitude_wu"),
 			&HudOverlay::set_waypoint, DEFVAL(Vector2()), DEFVAL(0.0f));
@@ -880,7 +883,7 @@ void HudOverlay::set_kill_announcement(const String &text, int64_t tick) {
 }
 
 void HudOverlay::push_message(const String &p_text) {
-	compiler_.push_message(opennova::to_std(p_text), state_.ticks);
+	compiler_.push_message(opennova::to_std(p_text), static_cast<int>(state_.main_frame));
 	queue_redraw();
 }
 
@@ -888,7 +891,7 @@ void HudOverlay::push_feed_line(const String &p_text, int64_t p_argb) {
 	// The SYSTEM feed sink (kills, joins, system lines) — the packed ARGB is
 	// stored raw and drawn as stored (engine: runtime/hud/hud_frame.cpp).
 	compiler_.push_feed_line(opennova::to_std(p_text),
-			static_cast<uint32_t>(p_argb), state_.ticks);
+			static_cast<uint32_t>(p_argb), static_cast<int>(state_.main_frame));
 	queue_redraw();
 }
 
@@ -901,10 +904,10 @@ String HudOverlay::post_feed_lines(const Ref<Simulation> &p_sim,
 	for (const opennova::hud::FeedPost &post : posts) {
 		switch (post.sink) {
 			case opennova::hud::ChatSink::System:
-				compiler_.push_feed_line(post.text, post.argb, state_.ticks);
+				compiler_.push_feed_line(post.text, post.argb, static_cast<int>(state_.main_frame));
 				break;
 			case opennova::hud::ChatSink::Chat:
-				compiler_.push_chat_line(post.text, post.argb, state_.ticks);
+				compiler_.push_chat_line(post.text, post.argb, static_cast<int>(state_.main_frame));
 				break;
 			case opennova::hud::ChatSink::Queue:
 			case opennova::hud::ChatSink::Channel3:
@@ -917,28 +920,40 @@ String HudOverlay::post_feed_lines(const Ref<Simulation> &p_sim,
 }
 
 int HudOverlay::send_command_map_chat(const Ref<Simulation> &p_sim, bool p_all,
-		const String &p_text, int64_t p_frame) {
+		const String &p_text) {
 	if (p_sim.is_null()) return static_cast<int>(opennova::hud::ChatSendResult::Refused);
 	const int dispatch =
 			p_all ? opennova::hud::kChatDispatchGlobal : opennova::hud::kChatDispatchTeam;
 	std::string text = opennova::to_std(p_text);
 	const opennova::hud::ChatSendResult result =
-			p_sim->send_chat_line(dispatch, text, static_cast<uint32_t>(p_frame));
+			p_sim->send_chat_line(dispatch, text, state_.main_frame);
 	if (result == opennova::hud::ChatSendResult::Flooded) {
 		compiler_.push_chat_line(text, opennova::hud::chat_dispatch_flood_color(dispatch),
-				state_.ticks);
+				static_cast<int>(state_.main_frame));
 		queue_redraw();
 	}
 	return static_cast<int>(result);
 }
 
-void HudOverlay::set_player_state(int p_ticks, float p_health_fraction, int p_stance,
-		float p_fov_deg) {
-	state_.ticks = p_ticks;
+void HudOverlay::set_frame_clocks(int64_t p_logic_tick, int64_t p_main_frame,
+		int64_t p_session_frame, int64_t p_hud_frame) {
+	state_.ticks = static_cast<int>(static_cast<uint32_t>(p_logic_tick));
+	// A mission start zeroes the main-frame counter; the message rings' held
+	// lines keep the frames they had left (HudFrameCompiler::rebase_message_clock).
+	const uint32_t main_frame = static_cast<uint32_t>(p_main_frame);
+	if (main_frame < state_.main_frame)
+		compiler_.rebase_message_clock(static_cast<int>(main_frame - state_.main_frame));
+	state_.main_frame = main_frame;
+	state_.session_frame = static_cast<uint32_t>(p_session_frame);
+	state_.hud_frame = static_cast<uint32_t>(p_hud_frame);
 	// The HUD item flash countdown runs once per HUD frame on the logic
 	// tick (hud_declutter.h HudItemFlash::tick).
-	item_flash_.tick(p_ticks);
+	item_flash_.tick(state_.ticks);
 	state_.item_flash = item_flash_.timers();
+	queue_redraw();
+}
+
+void HudOverlay::set_player_state(float p_health_fraction, int p_stance, float p_fov_deg) {
 	state_.health_fraction = p_health_fraction;
 	state_.stance = p_stance;
 	state_.fov_deg = p_fov_deg;
@@ -1024,7 +1039,7 @@ void HudOverlay::set_objectives_header(const String &p_text) {
 	state_.objectives_header = opennova::to_std(p_text);
 }
 
-void HudOverlay::set_scoreboard(bool p_shown, int p_frame_counter, const Ref<Simulation> &p_sim,
+void HudOverlay::set_scoreboard(bool p_shown, const Ref<Simulation> &p_sim,
 		const Ref<RtxtStringFile> &p_gametext) {
 	// The feed resets what it owns and fills it over the board as it stood:
 	// rows and session facts come straight from the role feed, the session
@@ -1053,20 +1068,18 @@ void HudOverlay::set_scoreboard(bool p_shown, int p_frame_counter, const Ref<Sim
 	} else {
 		board = opennova::hud::HudScoreboardState();
 	}
-	set_scoreboard_board(p_shown, p_frame_counter, p_gametext, board);
+	set_scoreboard_board(p_shown, p_gametext, board);
 }
 
-void HudOverlay::set_scoreboard_board(bool p_shown, int p_frame_counter, const Ref<RtxtStringFile> &p_gametext,
+void HudOverlay::set_scoreboard_board(bool p_shown, const Ref<RtxtStringFile> &p_gametext,
 		const opennova::hud::HudScoreboardState &p_board) {
 	// The board as prepared, then what the overlay owns of it: whether it is
-	// up, the 4-team page clock (the shell's 62 Hz HUD tick, the same fold and
-	// the same frame-rate caveat as the LFP panel's blink counter below), and
-	// the drawers' own gametext (class names, the team-score labels, the
-	// flag-carrier label) through the engine's key table.
+	// up and the drawers' own gametext (class names, the team-score labels,
+	// the flag-carrier label) through the engine's key table. Its 4-team page
+	// alternates on the frame's session frame counter (set_frame_clocks).
 	opennova::hud::HudScoreboardState &sb = state_.scoreboard;
 	sb = p_board;
 	sb.shown = p_shown;
-	sb.frame_counter = p_frame_counter;
 	const opennova::hud::ScoreboardText text =
 			opennova::hud::scoreboard_text(game_text_lookup(p_gametext));
 	sb.class_names = text.class_names;
@@ -1083,8 +1096,7 @@ PackedStringArray HudOverlay::get_scoreboard_header_text() const {
 	return out;
 }
 
-void HudOverlay::set_chat_input(const Ref<HudChatEntry> &p_chat, int64_t p_frame,
-		bool p_mp_session_peer) {
+void HudOverlay::set_chat_input(const Ref<HudChatEntry> &p_chat, bool p_mp_session_peer) {
 	opennova::hud::HudChatInputState &ci = state_.chat_input;
 	const bool shown = p_chat.is_valid() && p_chat->is_capturing();
 	if (!shown && !ci.shown) return;
@@ -1094,7 +1106,6 @@ void HudOverlay::set_chat_input(const Ref<HudChatEntry> &p_chat, int64_t p_frame
 		ci.prompt = entry.prompt();
 		ci.text = entry.text();
 		ci.color = opennova::hud::chat_input_line_color(entry.open_dispatch(), p_mp_session_peer);
-		ci.frame = static_cast<uint32_t>(p_frame);
 	}
 	queue_redraw();
 }
@@ -1197,7 +1208,7 @@ void HudOverlay::set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_b
 
 void HudOverlay::push_chat_line(const String &p_text, int64_t p_argb) {
 	compiler_.push_chat_line(opennova::to_std(p_text),
-			static_cast<uint32_t>(p_argb), state_.ticks);
+			static_cast<uint32_t>(p_argb), static_cast<int>(state_.main_frame));
 	queue_redraw();
 }
 
@@ -1212,15 +1223,13 @@ void HudOverlay::set_message_log_title(const String &p_title) {
 }
 
 void HudOverlay::set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_team,
-		int p_frame_counter, const Ref<RtxtStringFile> &p_gametext, const Ref<Simulation> &p_sim) {
+		const Ref<RtxtStringFile> &p_gametext, const Ref<Simulation> &p_sim) {
 	opennova::hud::HudLfpPanelState &lp = state_.lfp_panel;
 	lp.local_team = p_local_team;
-	// The blink clock the marker masks (`& 0x18`). The shell feeds the 62 Hz
-	// HUD tick here; retail's g_HUDFrameCounter increments once per MAIN FRAME
-	// [orig: Game_ProcessMainFrame @0x5265d5 -> Game_TickHudFrameCounters
-	// @0x434c23, see docs/interface/hud-re.md], so retail's blink is
-	// frame-rate dependent and matches this fold only at 62 fps.
-	lp.frame_counter = p_frame_counter;
+	// The marker's blink (`& 0x18`) reads the frame's HUD frame counter
+	// (set_frame_clocks), stepped once per logic tick outside the pause and
+	// the epilog screen [orig: Game_ProcessMainFrame @0x5265d5 ->
+	// Game_TickHudFrameCounters @0x434c23].
 	// The compiler's element branches on it (the unmodelled conquest arm).
 	lp.game_type = static_cast<uint32_t>(p_game_type);
 	const opennova::hud::GameTextLookup gametext = game_text_lookup(p_gametext);

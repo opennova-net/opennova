@@ -38,15 +38,15 @@ void test_zone_states() {
 	CHECK(!lfp_zone_under_attack(2, 1, -3), "an enemy point draining is not yours");
 }
 
-// The mask is NOT a 50/50 blink: phase A is 128 counts of every 512, phase B
-// the other 384. A half-and-half blink would be visibly wrong.
+// The mask is NOT a 50/50 blink: phase A is 8 counts of every 32, phase B
+// the other 24. A half-and-half blink would be visibly wrong.
 void test_blink_duty_cycle() {
 	int a = 0, b = 0;
-	for (int ms = 0; ms < 512; ++ms) {
-		if (lfp_blink_phase_a(ms)) ++a; else ++b;
+	for (int frame = 0; frame < 32; ++frame) {
+		if (lfp_blink_phase_a_counter(frame)) ++a; else ++b;
 	}
-	CHECK(a == 128, "phase A is 128 of every 512");
-	CHECK(b == 384, "phase B is the other 384");
+	CHECK(a == 8, "phase A is 8 of every 32");
+	CHECK(b == 24, "phase B is the other 24");
 	CHECK(b == a * 3, "so B runs three times as long as A");
 }
 

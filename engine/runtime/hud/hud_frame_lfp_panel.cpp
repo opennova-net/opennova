@@ -63,7 +63,7 @@ void HudFrameCompiler::element_lfp_panel(const HudFrameState &state, float w,
 	}
 	if (start >= lp.zones.size()) return;
 
-	const bool phase_a = lfp_blink_phase_a_counter(lp.frame_counter);
+	const bool phase_a = lfp_blink_phase_a_counter(static_cast<int>(state.hud_frame));
 	const bool have_bold = label_font_bold_.font() != nullptr;
 	const GameFont &bf = have_bold ? label_font_bold_ : font_;
 	const float bscale = have_bold ? label_scale_ : 1.0f;

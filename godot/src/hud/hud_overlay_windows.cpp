@@ -32,13 +32,12 @@ void HudOverlay::set_help_screen(bool p_shown, const String &p_title, const Stri
 }
 
 void HudOverlay::set_map_legend(bool p_shown, const String &p_title,
-		const PackedStringArray &p_labels, int p_frame_counter) {
+		const PackedStringArray &p_labels) {
 	opennova::hud::HudMapLegendState &ml = state_.map_legend;
 	ml.shown = p_shown;
 	ml.title = opennova::to_std(p_title);
 	ml.labels.clear();
 	for (int64_t i = 0; i < p_labels.size(); ++i) ml.labels.push_back(opennova::to_std(p_labels[i]));
-	ml.frame_counter = p_frame_counter;
 }
 
 PackedStringArray HudOverlay::map_legend_keys() {

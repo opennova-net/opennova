@@ -255,17 +255,17 @@ void HudViewportApplier::apply_sights_(const opennova::editor::HudViewport &mode
 	}
 }
 
-void HudViewportApplier::apply_board_(const opennova::editor::HudViewport &model, int64_t ticks) {
+void HudViewportApplier::apply_board_(const opennova::editor::HudViewport &model) {
 	HudOverlay *hud = overlay();
 	if (!hud) return;
 	const opennova::editor::HudViewportOptions &options = model.options();
 	if (!options.board) {
-		if (board_shown_) hud->set_scoreboard_board(false, 0, gametext_, opennova::hud::HudScoreboardState());
+		if (board_shown_) hud->set_scoreboard_board(false, gametext_, opennova::hud::HudScoreboardState());
 		board_shown_ = false;
 		return;
 	}
 	// The model's board: its header's strings composed over the project's tables (no rows: a preview has no session).
-	hud->set_scoreboard_board(true, int(ticks), gametext_, model.board());
+	hud->set_scoreboard_board(true, gametext_, model.board());
 	board_shown_ = true;
 }
 
@@ -314,7 +314,7 @@ void HudViewportApplier::apply(const opennova::editor::ViewportModel &model, con
 		effects->call("update_damage_feedback", 0, options.damage, 0, 255);
 	}
 	apply_sights_(hud_model);
-	apply_board_(hud_model, int64_t(clock.ticks()));
+	apply_board_(hud_model);
 	// Where each element of the HUD's walk drew, in the screen's pixels: the boxes of its compile now.
 	const std::vector<opennova::hud::HudElementBox> boxes = opennova::hud::hud_element_boxes(hud->compile_draw_list());
 	report.rects.assign(opennova::hud::kHudElementCount, opennova::editor::ViewportDeviceReport::Rect());
@@ -342,15 +342,16 @@ void HudViewportApplier::tick(const opennova::editor::ViewportModel &model, cons
 			if (veil->is_visible()) veil->set_visible(false);
 	HudOverlay *hud = overlay();
 	if (!hud || !configured_) return;
-	// The player's state on the preview clock's ticks, the HUD's clock (its fades, its flashes).
+	// The preview clock's ticks are the HUD's every clock (the preview has one: its fades, its
+	// flashes, its blinks and pulses, the board's 4-team page), then the player's state.
 	const auto &hud_model = static_cast<const opennova::editor::HudViewport &>(model);
 	const opennova::editor::HudViewportOptions &options = hud_model.options();
 	// The field of view the crosshair's spread is drawn at: the sights' zoomed one while they are up.
 	const opennova::world::LocalPlayerViewFrame *frame = hud_model.scope_frame();
-	hud->set_player_state(int(clock.ticks()), float(options.health) / 100.0f, options.stance,
+	const int64_t ticks = int64_t(clock.ticks());
+	hud->set_frame_clocks(ticks, ticks, ticks, ticks);
+	hud->set_player_state(float(options.health) / 100.0f, options.stance,
 			frame ? frame->fov_h_deg : kFovDegrees);
-	// The 4-team page alternates on the HUD's clock.
-	if (options.board) apply_board_(hud_model, int64_t(clock.ticks()));
 }
 
 void HudViewportApplier::background(opennova::editor::PreviewBackground background) {

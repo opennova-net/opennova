@@ -568,6 +568,10 @@ TickContext World::begin_tick(bool is_authority, TickPhase phase) {
     devtools::ProfileLap lap(profile);
     // The WAC player cache refreshes at bytecode entry, not at this tick
     // boundary. [orig: WacScript_ExecuteBytecode @0x4F58F4]
+    // The frame's HUD counters, ahead of its input, server tick and entity
+    // update [orig: Game_ProcessMainFrame @0x5265D5 -> Game_TickHudFrameCounters];
+    // the menu pause runs no tick here (HudFrameCounters).
+    hud_frames.step(/*menu_paused=*/false, epilog_screen_active());
     TickContext ctx;
     ctx.world = this;
     ctx.logic_tick = logic_tick;

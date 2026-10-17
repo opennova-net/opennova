@@ -125,16 +125,24 @@ public:
 	void install_weapon(const Ref<PlayerHudWeaponDef> &p_weapon, const Ref<RtxtStringFile> &p_gametext);
 	void clear_weapon();
 
-	// A mission triggered-text line for the message feed, stamped at the last
-	// set ticks (the engine ring owns life/stagger policy).
+	// A mission triggered-text line for the message feed, stamped at the frame's
+	// main-frame counter (the engine ring owns life/stagger policy).
 	void push_message(const String &p_text);
     void reset_overlay_buffers();
 	void push_feed_line(const String &p_text, int64_t p_argb);
 
 	// Typed per-frame state (the presenter rebuilds these each tick; the
 	// compiler reads them at the next draw).
-	void set_player_state(int p_ticks, float p_health_fraction, int p_stance,
-			float p_fov_deg);
+	// The frame's clocks, each reader taking the one its original reads: the
+	// logic tick (Simulation.get_logic_tick: the fades' and flashes' stamps, the
+	// kill banner, the radar's blinks, the item flash timers) and the world's
+	// three frame counters (Simulation.get_main_frame_counter: the message rings,
+	// the chat cursor and flood; get_session_frame_counter: the board's 4-team
+	// page, the map view's zone blinks; get_hud_frame_counter: the HUD's blinks
+	// and pulses) (engine: world/world.h HudFrameCounters).
+	void set_frame_clocks(int64_t p_logic_tick, int64_t p_main_frame, int64_t p_session_frame,
+			int64_t p_hud_frame);
+	void set_player_state(float p_health_fraction, int p_stance, float p_fov_deg);
 	void set_weapon_state(bool p_active, int p_clip, int p_reserve, int p_heat,
 			int p_hud_spread_fp16, bool p_aimed_shot_available,
 			bool p_keep_crosshair_while_aimed, bool p_windup_active,
@@ -155,27 +163,28 @@ public:
 	void set_menu_screen_open(bool p_open);
 	// The resolved gametext Overlays/STROVER_MISSIONOBJECTIVES header line.
 	void set_objectives_header(const String &p_text);
-	// The Tab board: whether it is held open, the frame counter its 4-team page
-	// alternates on, the Simulation the session header, rows and session facts
+	// The Tab board: whether it is held open (its 4-team page alternates on the
+	// session frame counter, set_frame_clocks), the Simulation the session header, rows and session facts
 	// are pulled from natively (Simulation::get_scoreboard, fill_scoreboard —
 	// no script-side round-trip), and the gametext table the strings resolve
 	// through (hud::scoreboard_header_strings, the paging hint through the
 	// process's keyhelp table; the drawers' own lookups, hud::scoreboard_text).
 	// Typed cross-class args on the bound API follow the set_minimap_terrain
 	// precedent; pass null when hiding.
-	void set_scoreboard(bool p_shown, int p_frame_counter, const Ref<Simulation> &p_sim,
+	void set_scoreboard(bool p_shown, const Ref<Simulation> &p_sim,
 			const Ref<RtxtStringFile> &p_gametext);
 	// The same board from one an embedder prepared rather than a Simulation's:
 	// `p_board` whole (its game type, its strings, what inmatch::scoreboard_feed
-	// writes), the overlay setting what it owns (whether it is up, the page
-	// clock, the drawers' own gametext). set_scoreboard hands its board here,
+	// writes), the overlay setting what it owns (whether it is up, the
+	// drawers' own gametext). set_scoreboard hands its board here,
 	// so the board has one draw. C++ only (the editor's HUD preview).
-	void set_scoreboard_board(bool p_shown, int p_frame_counter, const Ref<RtxtStringFile> &p_gametext,
+	void set_scoreboard_board(bool p_shown, const Ref<RtxtStringFile> &p_gametext,
 			const opennova::hud::HudScoreboardState &p_board);
 	// The open chat capture's input line off the talk-key object: its prompt,
 	// text and dispatch color (hud::chat_input_line_color, the Global color
-	// keyed on the session-peer bit) and the frame counter the cursor blinks on.
-	void set_chat_input(const Ref<HudChatEntry> &p_chat, int64_t p_frame, bool p_mp_session_peer);
+	// keyed on the session-peer bit); the cursor blinks on the main-frame counter
+	// (set_frame_clocks).
+	void set_chat_input(const Ref<HudChatEntry> &p_chat, bool p_mp_session_peer);
 	// PgUp/PgDn for the Tab board — consumed (true) only in a session with the
 	// board up (hud::scoreboard_takes_page_keys); the open edge resets the page.
 	bool scoreboard_page_key(bool p_forward, bool p_in_session, bool p_board_open);
@@ -210,8 +219,8 @@ public:
 	// compile_console_messages over this overlay's frame state, at its own
 	// surface) drawn into `p_item`, cleared first.
 	void render_console_messages(const RID &p_item);
-	int send_command_map_chat(const Ref<Simulation> &p_sim, bool p_all, const String &p_text,
-			int64_t p_frame);
+	// The flood check reads the frame's main-frame counter (set_frame_clocks).
+	int send_command_map_chat(const Ref<Simulation> &p_sim, bool p_all, const String &p_text);
 	// The Recent Messages (J) window: the OldMessages toggle and its stdbox
 	// title (gametext Overlays/STROVER43, resolved by the shell).
 	// The SP Show Score statistics panel (hud/end_round_statistics.h).
@@ -221,14 +230,13 @@ public:
 	void set_message_log_shown(bool p_shown);
 	// The key-toggled windows (hud_overlay_windows.cpp; engine
 	// runtime/hud/hud_overlay_windows.h): the F1 help page's resolved text,
-	// the F12 legend's title / labels (one per map_legend_keys() entry) and
-	// pulse clock, the I briefing panel (its text read from the sim's
+	// the F12 legend's title / labels (one per map_legend_keys() entry; its
+	// pulses read the HUD frame counter), the I briefing panel (its text read from the sim's
 	// mission text) and the briefing's page keys (direction 0 resets).
 	void set_help_screen(bool p_shown, const String &p_title, const String &p_page_line,
 			const String &p_footer, const PackedStringArray &p_keys,
 			const PackedStringArray &p_texts);
-	void set_map_legend(bool p_shown, const String &p_title, const PackedStringArray &p_labels,
-			int p_frame_counter);
+	void set_map_legend(bool p_shown, const String &p_title, const PackedStringArray &p_labels);
 	static PackedStringArray map_legend_keys();
 	void set_briefing(bool p_shown, const Ref<Simulation> &p_sim);
 	void cycle_briefing_page(int p_direction, bool p_in_session);
@@ -240,14 +248,13 @@ public:
 			const Ref<RtxtStringFile> &p_gametext, const Ref<ControlsModel> &p_controls);
 	void set_message_log_title(const String &p_title);
 	// The AAS zone status panel: shown, the session game type (the conquest
-	// arm is unmodelled and draws nothing), the viewer's team, the HUD frame
-	// counter the blink masks, the gametext table its two status strings
+	// arm is unmodelled and draws nothing), the viewer's team (the blink reads
+	// the HUD frame counter, set_frame_clocks), the gametext table its two status strings
 	// resolve in (engine hud_lfp_panel.h, retail's fallbacks; null = the
 	// fallbacks), and the Simulation the zone rows are pulled from natively
 	// (Simulation::fill_lfp_zones). Pass null when hiding.
 	void set_lfp_panel(bool p_shown, int64_t p_game_type, int p_local_team,
-			int p_frame_counter, const Ref<RtxtStringFile> &p_gametext,
-			const Ref<Simulation> &p_sim);
+			const Ref<RtxtStringFile> &p_gametext, const Ref<Simulation> &p_sim);
 	void set_waypoint(const String &p_name, int p_distance_m,
 			const Vector2 &p_mission_position = Vector2(),
 			float p_altitude_wu = 0.0f);
@@ -345,8 +352,8 @@ public:
 	int get_hud_detail_level() const;
 	// BMS action 28 sub 37: HUD item flash timer `index` takes `value` and the
 	// layer table rebuilds at declutter level 0 (hud_declutter.h HudItemFlash
-	// / HudDeclutter::apply_level). The timers count down on the ticks
-	// set_player_state carries.
+	// / HudDeclutter::apply_level). The timers count down on the logic tick
+	// set_frame_clocks carries.
 	void set_item_flash(int p_index, int p_value);
 	// The showhud 2-bit FP-view flags (engine: runtime/hud/hud_toggles.cpp): bit 0 = the FP gun (consumed by the viewmodel rig, not
 	// here), bit 1 = the corner spinmap block.

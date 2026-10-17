@@ -864,6 +864,9 @@ bool MissionKernel::boot(const KernelBootOptions &options, std::string &error) {
 	// joiner, which runs no pre pass, otherwise ran every even/odd cadence one
 	// tick out of phase.
 	world.logic_tick = 1;
+	// The HUD's frame counters restart with it [orig: Game_StartMission
+	// @0x525BAA -> Game_ResetSessionHudState @0x434BD0].
+	world.hud_frames = w::HudFrameCounters{};
 	mission_start_pending = true;
 	if (!options.defer_mission_start) complete_mission_start();
 	return true;
@@ -1066,6 +1069,10 @@ bool MissionKernel::restore_baseline() {
 	local.weapon.switch_deferred_action = -1;
 	world.restore(baseline); // rewinds registry/vars/env/clock + re-inits systems (incl.
 	                         // AI; WacSystem::on_load also resets its 62-tick accumulator)
+	// The SP restart is a mission start: the HUD's frame counters restart with it
+	// [orig: Game_RestartRoundSP @0x5263DB -> Game_StartMission ->
+	// Game_ResetSessionHudState @0x525BAA].
+	world.hud_frames = w::HudFrameCounters{};
 	if (have_wac_baseline) wac.restore_runtime_state(world, wac_baseline);
 	// Re-ground every soldier from scratch: the restored registry may reuse
 	// handles across epochs, so the high-water mark cannot be trusted.

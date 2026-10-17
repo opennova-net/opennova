@@ -162,7 +162,7 @@ void element() {
 	label.bar_fraction = 0.5f;
 	label.point = { 500.6f, 400.2f, 0, true, 16 << 16 };
 	state.combat.capture_labels = { label };
-	state.ticks = 8; // off the flash phase
+	state.hud_frame = 8; // off the flash phase
 	const HudDrawList &d = compiler.compile(state, 1024, 768);
 	// Out of binoculars: a leading break, then stem | tile + letter.
 	CHECK(d.order_breaks.size() == 3);
@@ -210,10 +210,10 @@ void element() {
 	const HudQuad &fill = bin.quads[c2.quads + 2];
 	CHECK(fill.x0 == 466.0f && fill.x1 == 466.0f + 34.0f && fill.color == 0xFFFF5050u);
 
-	// The flash phase: (ticks & 0x18) == 0 swaps in yellow for the stem,
+	// The flash phase: (g_HUDFrameCounter & 0x18) == 0 swaps in yellow for the stem,
 	// the tile and the texts; the bar keeps entry[2]'s colour.
 	state.combat.capture_labels[0].flash = true;
-	state.ticks = 32;
+	state.hud_frame = 32;
 	const HudDrawList &lit = compiler.compile(state, 1024, 768);
 	CHECK(lit.lines[lit.order_breaks[0].lines].color == 0xFFFFFF00u);
 	CHECK(lit.tris[lit.order_breaks[1].tris].a.color == 0xFF7F7F00u);

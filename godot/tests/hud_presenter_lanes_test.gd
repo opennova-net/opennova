@@ -40,7 +40,8 @@ func _font_overlay() -> HudOverlay:
 	hud.size = Vector2(1024, 768)
 	add_child_autofree(hud)
 	hud.configure(layout, root)
-	hud.set_player_state(50, 1.0, 0, 80.0)
+	hud.set_frame_clocks(50, 50, 50, 50)
+	hud.set_player_state(1.0, 0, 80.0)
 	return hud
 
 
@@ -82,7 +83,8 @@ func test_message_log_lane_shows_history() -> void:
 	var hud := _font_overlay()
 	var lane := MessageLogPresenter.new()
 	hud.push_chat_line("Taylor: moving to bravo", -1)
-	hud.set_player_state(50 + 930, 1.0, 0, 80.0)
+	hud.set_frame_clocks(50 + 930, 50 + 930, 50 + 930, 50 + 930)
+	hud.set_player_state(1.0, 0, 80.0)
 	assert_eq(hud.get_draw_list_stats().glyphs, 0,
 			"The feed has expired the line.")
 	lane.update(hud, true)
@@ -150,7 +152,8 @@ func test_board_page_keys_and_chat_line_gates() -> void:
 	chat.poll_rows(every_row, true, false, null, null, 101)
 	assert_false(chat.is_capturing(), "No session, no chat line.")
 	var before := hud.get_draw_list_stats().glyphs
-	hud.set_chat_input(chat, 101, false)
+	hud.set_frame_clocks(101, 101, 101, 101)
+	hud.set_chat_input(chat, false)
 	assert_eq(hud.get_draw_list_stats().glyphs, before, "A closed chat line draws nothing.")
 	var key := InputEventKey.new()
 	key.keycode = KEY_A

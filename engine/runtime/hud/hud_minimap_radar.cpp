@@ -69,7 +69,7 @@ void scaled_rect(const HudMinimapInput &input, float &x1, float &y1, float &x2, 
 }
 
 // One ring of marks. Each lit sector (red or olive) blinks with bit 3 of the
-// HUD tick and draws a full base x1.25 quad around the rect centre whose
+// logic tick (g_CurrentTick) and draws a full base x1.25 quad around the rect centre whose
 // texture window turns by the sector's angle; on this +Y-down canvas that is
 // the rotated sprite at -theta over the 0.05..0.95 crop.
 // [orig: HUD_DrawWeaponDirectionIndicators @0x59c440..0x59c5e1 (12) /

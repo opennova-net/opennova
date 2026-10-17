@@ -1613,6 +1613,13 @@ public:
 	// pre-mission pass in finish_load already advanced it once, so a freshly
 	// loaded mission reads 1 — consumers should track deltas, not absolutes.
 	int64_t get_logic_tick() const;
+	// The world's HUD frame counters (engine: world/world.h HudFrameCounters), each a uint32 the
+	// HUD's readers take as retail's: the main-frame counter (g_MainFrameCounter: the chat
+	// debounces and cursor blink), the session frame counter (dword_A87060: the kill list's page)
+	// and the HUD frame counter (g_HUDFrameCounter: the HUD's blinks and pulses).
+	int64_t get_main_frame_counter() const;
+	int64_t get_session_frame_counter() const;
+	int64_t get_hud_frame_counter() const;
 	void set_panm_time_ms(int64_t p_time_ms);
 	int64_t get_panm_time_ms() const;
 	void debug_set_panm_time_ms(int64_t p_time_ms);

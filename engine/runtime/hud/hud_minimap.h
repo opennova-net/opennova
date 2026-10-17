@@ -400,7 +400,12 @@ struct HudMinimapInput {
 	// [orig: HUD_InitOverlaySystem @0x5a49bc — g_BmsAttribFlags & 0x20 ->
 	//  g_MapYaw180(0x2723EB0) = 0x80000000]
 	bool flip_180 = false;
+	// The frame's clocks (HudFrameState's): the logic tick the radar's marks
+	// blink on, the HUD frame counter the pulses and the pointers' halving read,
+	// the session frame counter the map view's zone blips blink on.
 	int ticks = 0;
+	uint32_t hud_frame = 0;
+	uint32_t session_frame = 0;
 	// The sixteen HUD item flash timers (hud_declutter.h HudItemFlash): [5]
 	// blinks the waypoint pointer, [14] the FARP chevron, [10]..[13]/[15]
 	// hide blips by cell/colour on their lit phase [orig: HUD_DrawMapOverlay

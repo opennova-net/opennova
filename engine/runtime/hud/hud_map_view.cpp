@@ -714,7 +714,12 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 			scale_axis(8.0, input.surface_w, kDesignWidth));
 	const int32_t label_h = static_cast<int32_t>(
 			scale_axis(16.0, input.surface_h, kDesignHeight));
-	const int32_t frame_counter = input.ticks;
+	// The zone blips blink on the session frame counter, the letters and the
+	// crosshair pulse on the HUD frame counter [orig: sub_597FD0's dword_A87060
+	// @0x598059 / @0x59810C / @0x59813E; MapOverlay_DrawView's g_HUDFrameCounter
+	// @0x5A5B30 / @0x5A5D5A].
+	const int32_t session_frame = static_cast<int32_t>(input.session_frame);
+	const int32_t hud_frame = static_cast<int32_t>(input.hud_frame);
 	char text[16];
 	const auto close_segment = [&zones, &out]() {
 		HudMapWindowSegment segment;
@@ -733,7 +738,7 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 		// [orig: sub_597FD0(entity, rect, 0x40000000 - heading, 0)
 		//  @0x5a5ab9..0x5a5adc; Minimap_DrawBlip @0x597890; the flush
 		//  sub_596780 @0x5a5ae4]
-		const DeathMapZoneBlip blip = death_map_zone_blip(zone, facts, frame_counter);
+		const DeathMapZoneBlip blip = death_map_zone_blip(zone, facts, session_frame);
 		if (blip.draw) {
 			HudMinimapMarker entity = *slot.marker;
 			entity.icon = blip.cell;
@@ -746,7 +751,7 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 			color = 0xFFC8C814u;
 		// Own-team zones pulse; the others brighten a fixed 20/32 unless the
 		// spawn-target hold runs [orig: @0x5a5b30..0x5a5b65].
-		int32_t phase = pulse_phase(frame_counter);
+		int32_t phase = pulse_phase(hud_frame);
 		if (zone.team != facts.player_team) phase = facts.hold_seconds != 0 ? 0 : 20;
 		// Drawn only on game type 0x50010 or a ready zone timer
 		// [orig: CProximityList_FindEntryById(g_ZoneTimerList, e) @0x5a5b6e;
@@ -785,7 +790,7 @@ void DeathMapCompiler::compile(HudMinimapInput &input, const DeathMapFrame &fram
 	}
 
 	// The player crosshair [orig: MapOverlay_DrawView @0x5a5d32..0x5a5ed6].
-	map_view_crosshair(input, frame.rect, facts, frame_counter, out.over_lines);
+	map_view_crosshair(input, frame.rect, facts, hud_frame, out.over_lines);
 }
 
 void map_view_crosshair(const HudMinimapInput &view, const MapViewRect &rect,
@@ -844,8 +849,9 @@ void CommandMapCompiler::compile(HudMinimapInput &input, CommandMapView &cmap,
 		{{x1, y1, 0.0f, 0.0f}, {x2, y2, 0.0f, 0.0f}, {x1, y2, 0.0f, 0.0f}, kClear},
 	};
 	out.map.clear.insert(out.map.clear.begin(), clear, clear + 2);
-	// The crosshair [orig: CMapWindow_HandleEvent @0x54999e..0x549b4a].
-	map_view_crosshair(input, rect, facts, input.ticks, out.over_lines);
+	// The crosshair, pulsing on the HUD frame counter [orig: CMapWindow_HandleEvent
+	// @0x54999e..0x549b4a, the counter @0x5499BF].
+	map_view_crosshair(input, rect, facts, static_cast<int32_t>(input.hud_frame), out.over_lines);
 }
 
 } // namespace opennova::hud

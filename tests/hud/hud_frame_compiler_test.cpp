@@ -461,7 +461,7 @@ void test_compiler_health_and_order(const fnt_font_t *font) {
 	const HudDrawList &with_msg = compiler.compile(state, 1024.0f, 768.0f);
 	CHECK(!with_msg.glyphs.empty(), "a live message emits glyphs");
 	HudFrameState later = state;
-	later.ticks = 100 + 930 + 1;
+	later.main_frame = 100 + 930 + 1;
 	const HudDrawList &expired = compiler.compile(later, 1024.0f, 768.0f);
 	CHECK(expired.glyphs.empty(), "the 930-tick life expires the line");
 }
@@ -1347,7 +1347,7 @@ void test_compiler_friendly_tags(const fnt_font_t *font) {
 	state.friendly_tags[0].dead = true;
 	state.friendly_tags[0].has_slot = true;
 	state.friendly_tags[0].revive_seconds = 87;
-	state.ticks = 8; // t = 0 -> no lift
+	state.hud_frame = 8; // t = 0 -> no lift
 	const HudDrawList &downed = compiler.compile(state, 1024.0f, 768.0f);
 	const uint32_t light_blue =
 			(217u << 24) | (opennova::hud::kFriendlyTagDownedLightBlue & 0xFFFFFFu);
@@ -1358,14 +1358,14 @@ void test_compiler_friendly_tags(const fnt_font_t *font) {
 	CHECK(downed.glyphs.size() == 11 + 4,
 			"the text form appends ': 87' to the name");
 	state.friendly_tags[0].medic_request = true;
-	state.ticks = 8 + 32; // t = 0x20 -> full lift = white
+	state.hud_frame = 8 + 32; // t = 0x20 -> full lift = white
 	const HudDrawList &pulse_peak = compiler.compile(state, 1024.0f, 768.0f);
 	CHECK(!pulse_peak.glyphs.empty() &&
 					pulse_peak.glyphs[0].color ==
 							opennova::hud::half_bright_keep_alpha(
 									(217u << 24) | 0xFFFFFFu),
 			"a medic request pulses to white at the triangle's peak");
-	state.ticks = 8;
+	state.hud_frame = 8;
 	const HudDrawList &pulse_base = compiler.compile(state, 1024.0f, 768.0f);
 	CHECK(!pulse_base.glyphs.empty() &&
 					pulse_base.glyphs[0].color ==
@@ -2111,10 +2111,10 @@ void test_compiler_chat_input(const fnt_font_t *font) {
 	state.chat_input.prompt = "Talk:";
 	state.chat_input.text = "hi";
 	state.chat_input.color = 0xFF00FF00u;
-	state.chat_input.frame = 0x40; // cursor off
+	state.main_frame = 0x40; // cursor off
 	const size_t closed_cursor = compiler.compile(state, 1024.0f, 768.0f).glyphs.size();
 	CHECK(closed_cursor == base + 5 + 2, "the prompt and the line draw");
-	state.chat_input.frame = 0x10; // cursor on
+	state.main_frame = 0x10; // cursor on
 	const size_t open_cursor = compiler.compile(state, 1024.0f, 768.0f).glyphs.size();
 	CHECK(open_cursor == closed_cursor + 1, "the blink adds the '_' cursor");
 	state.hud_detail_level = 3;
@@ -2378,7 +2378,7 @@ void test_message_log_element(const fnt_font_t *font) {
 	compiler.push_chat_line("alpha: hi", 0xFF80A0FFu, 0);
 	compiler.push_feed_line("alpha killed beta", 0xFFAFAFAFu, 0);
 	HudFrameState state;
-	state.ticks = 5000; // both lines are long expired on the feed
+	state.main_frame = 5000; // both lines are long expired on the feed
 	state.hud_detail_level = 0;
 
 	// Hidden: no box, no glyphs from either ring.
@@ -2431,6 +2431,24 @@ void test_message_log_element(const fnt_font_t *font) {
 			"a single line sits in the bottom row, not the top");
 }
 
+// A mission start zeroes the main-frame counter (world::HudFrameCounters); a held ring line keeps
+// the frames it had left, as retail's per-slot countdowns outlive the start [orig:
+// Input_InitBindingSystem @0x525BA5 clears only the flood table, not the rings].
+void test_message_clock_rebase(const fnt_font_t *font) {
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	layout.chat_text = {5, 40, 0, 0, true};
+	compiler.configure(layout, font);
+	compiler.push_chat_line("a", 0xFF102030u, 1000); // expires at 1930
+	compiler.rebase_message_clock(-1000);
+	HudFrameState state;
+	state.main_frame = 929;
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.size() == 1,
+			"the line keeps its frames past the counter's restart");
+	state.main_frame = 930;
+	CHECK(compiler.compile(state, 1024.0f, 768.0f).glyphs.empty(), "and expires when they run out");
+}
+
 // The CHAT feed loop: three newest lines at HUDCHATTEXT, alpha folded from the
 // remaining life (255 * timer / 186, clamped), skipped at zero
 // [orig: HUD_DrawConsoleMessages @0x59ad30, the first loop @0x59adbc..0x59ae2e].
@@ -2442,8 +2460,8 @@ void test_chat_feed_loop(const fnt_font_t *font) {
 
 	compiler.push_chat_line("a", 0xFF102030u, 0);   // expires at 930
 	HudFrameState state;
-	// Fresh: 930 ticks left -> alpha clamps to 255.
-	state.ticks = 0;
+	// Fresh: 930 frames left -> alpha clamps to 255.
+	state.main_frame = 0;
 	{
 		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 		CHECK(list.glyphs.size() == 1, "a fresh chat line draws");
@@ -2453,21 +2471,21 @@ void test_chat_feed_loop(const fnt_font_t *font) {
 				"the stored RGB survives the alpha fold, halved by the drawer");
 	}
 	// 93 ticks left -> 255 * 93 / 186 = 127.
-	state.ticks = 930 - 93;
+	state.main_frame = 930 - 93;
 	{
 		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 		CHECK(list.glyphs.size() == 1 && (list.glyphs[0].color >> 24) == 127u,
 				"the last 186 ticks ramp the alpha down");
 	}
 	// Expired -> skipped, and no rung consumed.
-	state.ticks = 930;
+	state.main_frame = 930;
 	{
 		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 		CHECK(list.glyphs.empty(), "an expired chat line draws nothing");
 	}
 	// Only the newest three of the ring show, oldest at the anchor.
 	for (int i = 0; i < 5; ++i) compiler.push_chat_line("b", 0xFFFFFFFFu, 2000);
-	state.ticks = 2000;
+	state.main_frame = 2000;
 	{
 		const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
 		CHECK(list.glyphs.size() == 3, "three chat rows are walked");
@@ -2494,7 +2512,7 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 	auto &lp = state.lfp_panel;
 	lp.shown = true;
 	lp.local_team = 1;
-	lp.frame_counter = 0; // phase A
+	state.hud_frame = 0; // phase A
 	const auto zone = [](int letter, int team, bool contested) {
 		HudLfpZone z;
 		z.letter_index = letter;
@@ -2546,7 +2564,7 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 		CHECK(icons[0].color == 0xFF7F7F7Fu, "the icon modulate is the flat half-bright");
 	}
 	// Phase B flips C to frame 3 and clears B's attack frame.
-	lp.frame_counter = 8;
+	state.hud_frame = 8;
 	const HudDrawList &list_b = compiler.compile(state, 1024.0f, 768.0f);
 	icons.clear();
 	for (const HudQuad &q : list_b.quads)
@@ -3187,6 +3205,7 @@ int main() {
 	test_compiler_chat_input(&font);
 	test_message_log_element(&font);
 	test_chat_feed_loop(&font);
+	test_message_clock_rebase(&font);
 	test_lfp_panel_element(&font);
 	test_spinmap_medic_marker(&font);
 	test_char_extent(&font);

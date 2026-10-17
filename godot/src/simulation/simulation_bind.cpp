@@ -308,6 +308,10 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("has_event_fired", "index"), &Simulation::has_event_fired);
 	ClassDB::bind_method(D_METHOD("get_event_count"), &Simulation::get_event_count);
 	ClassDB::bind_method(D_METHOD("get_logic_tick"), &Simulation::get_logic_tick);
+	ClassDB::bind_method(D_METHOD("get_main_frame_counter"), &Simulation::get_main_frame_counter);
+	ClassDB::bind_method(D_METHOD("get_session_frame_counter"),
+			&Simulation::get_session_frame_counter);
+	ClassDB::bind_method(D_METHOD("get_hud_frame_counter"), &Simulation::get_hud_frame_counter);
 	ClassDB::bind_method(D_METHOD("get_panm_time_ms"),
 			&Simulation::get_panm_time_ms);
 	ClassDB::bind_method(D_METHOD("debug_set_panm_time_ms", "time_ms"),
