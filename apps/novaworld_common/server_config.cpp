@@ -118,6 +118,9 @@ ServerConfig ServerConfig::from_env() {
 	c.hosted_cap = getenv_int("ONNET_HOSTED_CAP", c.hosted_cap);
 	if (auto v = getenv_safe("ONNET_OBJECT_STORE_URL")) c.object_store_url = strutil::trim(v);
 	if (auto v = getenv_safe("ONNET_OBJECT_STORE_REGION")) c.object_store_region = strutil::trim(v);
+	if (auto v = getenv_safe("ONNET_UPDATE_HOST")) c.update_host = strutil::trim(v);
+	if (auto v = getenv_safe("ONNET_UPDATE_PORTS")) c.update_ports = strutil::trim(v);
+	if (auto v = getenv_safe("ONNET_UPDATE_CACHE_DIR")) c.update_cache_dir = strutil::trim(v);
 
 	return c;
 }
