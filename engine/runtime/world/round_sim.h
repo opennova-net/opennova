@@ -137,6 +137,10 @@ struct RoundSourceState {
     bool person_with_item_def = false;
     bool player = false;
     uint8_t stance_category = 2; // 0 prone, 1 crouch/mounted, 2 standing/air/water
+    // The raw prone bit (+0x12C & 0x100), kept apart from the overridden row:
+    // the spread's up/down limit keys on it [orig: RoundData_SpawnRound
+    // @0x4EC129..0x4EC137, read @0x4EC454].
+    bool prone = false;
     bool scope_raised = false;
     bool underwater = false;
     bool indoors = false; // entity+0x24 & 0x800000, the bit the spawn stamps into its round

@@ -661,6 +661,7 @@ RoundSourceState resolve_round_source(World &world,
 
     source.recoil_pitch = &body->inf.recoil_pitch;
     source.weapon_weight_spread = &body->inf.weapon_weight_spread;
+    source.prone = body->inf.stance == InfantryState::Stance::kProne;
     source.scope_raised = source.scope_raised || body->inf.scope_raised;
     // The standing row is forced by the parachute, drowning and ladder-contact
     // bits or the eye below the water, then a mount forces row 1; an airborne
@@ -1052,8 +1053,13 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                 spread = io::bam_add(
                         spread, io::bam_sar(*source.weapon_weight_spread, 7));
             }
+            // The up/down limit keys on the raw prone bit, not the row: a
+            // prone body whose row a mask bit or a mount overrode still takes
+            // +0xD0 [orig: `cmp outZ, 0; jnz` @0x4EC44E, `cmp outX, 0; jnz`
+            // @0x4EC454 -> push +0xD0 @0x4EC493, else +0xCC @0x4EC46E /
+            // @0x4EC477, the two loaded @0x4EC3DD..0x4EC3ED].
             const int32_t vertical =
-                    (vertical_spread || category == 0)
+                    (vertical_spread || source.prone)
                             ? weapon->error_up_theta_fp16
                             : weapon->error_hip_theta_fp16;
             const RandomSpreadOffset offset =
