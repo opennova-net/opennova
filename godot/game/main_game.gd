@@ -1570,8 +1570,9 @@ func mcp_open_armory() -> Error:
 		return OK
 	if _state != State.WORLD:
 		return ERR_UNAVAILABLE
-	# The armory key's leg minus the zone gate: standing in a type-6 volume is
-	# the useitem key's gameplay rule [orig: Flags & 0x400000 @0x4e0b4d], not a
+	# The armory key's leg minus the arm's gate: a type-6 volume or the pre-round
+	# is the useitem key's gameplay rule (Simulation.local_player_use_item_arm)
+	# [orig: Input_HandleActionBinding_0 Flags & 0x400000 @0x4e0aa1], not a
 	# screen precondition — open() is the presenter's staged direct-open seam.
 	_armory_presenter.set_player_team(int(_chosen_avatar.get("team", 0)))
 	return OK if _armory_presenter.open() else ERR_UNAVAILABLE
