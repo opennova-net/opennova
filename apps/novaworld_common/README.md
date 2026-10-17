@@ -334,23 +334,32 @@ policy, not a port.
 
 **The admin's view** (`jobs/job_admin.*`, `jobs/job_routes.*`; the site's admin page
 **Background jobs**, `/admin/jobs`): what the rows show, read on web from the jobs
-table and the controller's row alone, so every replica answers alike. A worker thread shows
-by the claims it left on the rows (its id, its job's start and lease): one that has run
-nothing for an hour does not show, and one whose lease ran out (its job still `running`,
-`lease_left_seconds` negative) has gone away, its job queued again at the next keeper pass.
-The schedules are the controller's, read from the same settings (`parts.*`
-`periodic_jobs`). Each action is one compare-and-set on the job's state, so none changes a
+table and the controller's row alone, so every replica answers alike. A worker process
+shows by the claims its threads left on the rows (their ids, their jobs' starts and
+leases): one none of whose threads has run anything for an hour does not show, and a
+running job whose lease ran out (its job still `running`) is one whose process has gone
+away, queued again at the next keeper pass. The failures to look at come grouped by the
+database: one group per kind and **failure key**, the error with its UUIDs, ISO 8601
+times, tokens of 8 or more letters, digits, `_` or `-` holding a digit (request ids, cloud
+machine ids) and other numbers taken out (`<id>`, `<time>`, `#`), its first 300
+characters, so fourteen launches that failed alike are one row with a count. The schedules
+are the controller's, read from the same settings (`parts.*` `periodic_jobs`). Each action
+is one compare-and-set on the job's state (a group's retry, one per job), so none changes a
 job a worker holds; each is logged as every admin state change is (its actor and status)
-and once more with the job (`[jobs] job <id> (<kind>) ...`). The page reads the overview
-every 15 s (every 5 s while a job runs or waits) and shows times relative and in UTC,
-durations in seconds, minutes and hours.
+and once more with the job (`[jobs] job <id> (<kind>) ...`). The page shows four counts
+over three tabs (`?tab=`): Overview (the failure groups, each linking to its jobs and with a
+retry of the ones that can run again; the worker processes; each kind's counts), Jobs (the
+filtered, paged list, its filter in the page's query, and the prune) and Schedules (each
+periodic kind, run now). It reads the overview every 15 s (every 5 s while a job runs or
+waits) and shows times relative and in UTC, durations in seconds, minutes and hours.
 
 | Route | Auth | Reply |
 | --- | --- | --- |
-| `GET /api/admin/jobs/overview` | admin | `{"at", "totals", "kinds", "per_minute", "attention", "running", "workers", "schedules", "controller"}`: per kind (and in `totals`) `queued` (due or not), `due`, `running`, `done_hour`, `done_day`, `failed_hour`, `failed_day`, `failed` (kept until the prune), `oldest_wait_seconds` (the oldest due job's wait: the queue's latency; null with none) and `mean_run_seconds` (the last hour's done jobs, claim to end); `per_minute` the last 60 minutes, oldest first (`at`, `done`, `failed`); `attention` the newest 20 jobs failed in the last day, an admin's cancels left out; `running` every running job, its claim oldest first; `workers` each worker thread holding a job or done with one in the last hour (`worker_id`, `process`, `job_id`, `job_kind`, `done`, `failed`, `last_active_at`); `schedules` each periodic kind (`kind`, `interval_seconds`, `at_start`, `conditional`, `last` and `last_finished` (jobs or null), `next_at`, `pending`); `controller` (`leader`, `elected_at`, `last_scheduled_at`). A job, here and below: `id`, `kind`, `state`, `attempts`, `max_attempts`, `last_error`, `run_at`, `created_at`, `started_at`, `finished_at`, `lease_until`, `lease_left_seconds` and `running_seconds` (a running job's, else null), `worker_id`, `dedupe_key`, `schedule_key`, `manual`, `secret_state` (`none`, `held` or `dropped`, never the secret), `retryable`, `cancellable`. Times ISO 8601 UTC; `Cache-Control: no-store` |
-| `GET /api/admin/jobs` | admin | `?state=` (`queued`, `running`, `done`, `failed`), `?kind=`, `?from=` and `?to=` (Unix seconds, on when a job was created; `to` excluded), `?q=` (within the dedupe or schedule key, any case), `?before=<id>` and `?limit=` (1..200, 50): `{"jobs", "total", "next_before"}`, the jobs newest first, how many the filter takes, and the next page's `before` (null on the last); 400 `invalid_field`; `Cache-Control: no-store` |
+| `GET /api/admin/jobs/overview` | admin | `{"at", "totals", "kinds", "attention", "attention_total", "workers", "schedules", "controller"}`: per kind (and in `totals`) `queued` (due or not), `due`, `running`, `done_hour`, `done_day`, `failed_hour`, `failed_day`, `failed` (kept until the prune), `oldest_wait_seconds` (the oldest due job's wait: the queue's latency; null with none) and `mean_run_seconds` (the last hour's done jobs, claim to end); `attention` the newest 20 failure groups, the jobs of one kind failed in the last day with one failure key, an admin's cancels left out (`kind`, `key`, `count`, `retryable` (how many a retry takes), `last_job_id`, `last_error` (the newest one's text), `last_at`), by their newest failure; `attention_total` every job the groups count, shown or not; `workers` each worker process with a thread holding a job or done with one in the last hour (`process`, `threads`, `busy`, `lapsed` (its running jobs whose lease ran out), `lease_left_seconds` (the least left of its others, null with none), `done`, `failed`, `last_active_at`); `schedules` each periodic kind (`kind`, `interval_seconds`, `at_start`, `conditional`, `last` and `last_finished` (jobs or null), `next_at`, `pending`); `controller` (`leader`, `elected_at`, `last_scheduled_at`). A job, here and below: `id`, `kind`, `state`, `attempts`, `max_attempts`, `last_error`, `run_at`, `created_at`, `started_at`, `finished_at`, `lease_until`, `lease_left_seconds` and `running_seconds` (a running job's, else null), `worker_id`, `dedupe_key`, `schedule_key`, `manual`, `secret_state` (`none`, `held` or `dropped`, never the secret), `retryable`, `cancellable`. Times ISO 8601 UTC; `Cache-Control: no-store` |
+| `GET /api/admin/jobs` | admin | `?state=` (`queued`, `running`, `done`, `failed`), `?kind=`, `?from=` and `?to=` (Unix seconds, on when a job was created; `to` excluded), `?q=` (within the dedupe or schedule key, any case), `?failure=` (a failure key, exact: an attention group's `key`, 300 bytes at most), `?before=<id>` and `?limit=` (1..200, 50): `{"jobs", "total", "next_before"}`, the jobs newest first, how many the filter takes, and the next page's `before` (null on the last); 400 `invalid_field`; `Cache-Control: no-store` |
 | `GET /api/admin/jobs/<id>` | admin | `{"job"}` with its `payload`; 404 `not_found` |
 | `POST /api/admin/jobs/<id>/retry` | admin | a failed job queued again to run now with one more attempt than it has used (`max_attempts` becomes `attempts` + 1; its last error kept until it runs): 200 `{"job"}`; 404 `not_found`; 409 `not_failed` (with its `state`), `secret_dropped` (its secret went as it ended: a mail, a machine's launch), `already_pending` (a job with its dedupe key waits or runs) |
+| `POST /api/admin/jobs/retry-group` | admin | `{"kind", "key"}`: each job of that attention group (of `kind`, failed in the last day with failure key `key`, an admin's cancels left out) queued again as its own retry would, oldest first: 200 `{"retried", "secret_dropped", "already_pending", "changed"}` (how many each outcome took: queued again, its secret gone, a job with its dedupe key waiting or running, no longer failed); 400 `invalid_json`, `missing_field`, `invalid_field` |
 | `POST /api/admin/jobs/<id>/cancel` | admin | a queued job failed for good, `cancelled by an admin (<actor>)` its error, its secret dropped: 200 `{"job"}`; 404 `not_found`; 409 `not_queued` (with its `state`: a running job is its worker's) |
 | `POST /api/admin/jobs/run` | admin | `{"kind"}`, a periodic kind this deployment schedules, enqueued now as its schedule would, keyed `<kind>@manual-<ms>`: 202 `{"job"}`; 400 `invalid_json`, `missing_field`, `invalid_field`; 404 `not_found` (no schedule names it); 409 `already_pending` (one of the kind waits or runs) |
 | `POST /api/admin/jobs/prune` | admin | `{"keep_days": 1..14}` (14 when absent): a `jobs.prune` job with that keep, now: 202 `{"job"}`; 400 `invalid_json`, `invalid_field`; 409 `already_pending` |
@@ -2094,9 +2103,11 @@ dropped as a job ends, the periodic buckets, a claim beside a hosted start's loc
 (an admin's keep among them) and the pool's keeper; `job_routes`
 ([`tests/novaworld/job_routes_test.cpp`](../../tests/novaworld/job_routes_test.cpp)) the
 admin's jobs routes on the HTTP listener: every route refused without an admin, the
-overview's counts, latency, minutes, running leases (one run out), workers, schedules and
-controller, the list's filters and pages, a job's detail, the retry, cancel, run-now and
-prune actions each refused in the wrong state, and never a job's secret; `controller`
+overview's counts, latency, failure groups (alike errors apart in their ids and times
+together), worker processes with their leases (one run out), schedules and controller, the
+list's filters (a failure key among them) and pages, a job's detail, the retry, group retry,
+cancel, run-now and prune actions each refused in the wrong state, and never a job's
+secret; `controller`
 ([`tests/novaworld/controller_test.cpp`](../../tests/novaworld/controller_test.cpp), every
 build) two controllers on one database over supervisors of their own, the fleet's jobs on
 worker threads and a hand-stepped clock: one leads and alone runs passes, its lock's

@@ -9,15 +9,17 @@
 // listener and run in order, each starting from an empty jobs table: every route
 // refused without an admin (401, 403 for a player, 403 for a state change with no CSRF
 // header) and nothing touched; the overview's counts by kind and state, the queue's
-// latency, the last hour's minutes, the failed jobs to look at (an admin's cancels left
-// out), the running jobs with their leases (one run out) and the workers they name,
-// the schedules (the last run, the next bucket, a pending one) and the controller's
-// row; the list's filters (state, kind, a time range, a key search) and its pages;
-// one job's detail with its payload; the actions, each a compare-and-set (a retry of a
+// latency, the failures to look at grouped by kind and failure key (their ids, numbers
+// and times apart; an admin's cancels and the ones past a day left out), the worker
+// processes with their threads, busy threads and leases (one run out), the schedules
+// (the last run, the next bucket, a pending one) and the controller's row; the list's
+// filters (state, kind, a time range, a key search, a failure key) and its pages; one
+// job's detail with its payload; the actions, each a compare-and-set (a retry of a
 // failed job only, with one more attempt; refused for a job not failed, one whose
-// secret went, one whose dedupe key another holds; a cancel of a queued job only, a
-// running one left to its worker; a periodic kind run now once, then 409; a prune with
-// its keep that a worker then runs); and never a job's secret in any reply.
+// secret went, one whose dedupe key another holds; a failure group's retry, each of its
+// jobs so; a cancel of a queued job only, a running one left to its worker; a periodic
+// kind run now once, then 409; a prune with its keep that a worker then runs); and
+// never a job's secret in any reply.
 
 #include "auth.h"
 #include "http_listener.h"
@@ -40,6 +42,7 @@
 #include "common/test_expect.h"
 #include "common/test_redis.h"
 
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -204,6 +207,8 @@ int test_access(Harness &h) {
 		{ "GET", "/api/admin/jobs", "", 200 },
 		{ "GET", "/api/admin/jobs/" + std::to_string(queued), "", 200 },
 		{ "POST", "/api/admin/jobs/" + std::to_string(failed) + "/retry", "", 403 },
+		{ "POST", "/api/admin/jobs/retry-group", "{\"kind\":\"test.failing\",\"key\":\"no\"}",
+				403 },
 		{ "POST", "/api/admin/jobs/" + std::to_string(queued) + "/cancel", "", 403 },
 		{ "POST", "/api/admin/jobs/run", "{\"kind\":\"test.every\"}", 403 },
 		{ "POST", "/api/admin/jobs/prune", "{\"keep_days\":1}", 403 },
@@ -235,13 +240,14 @@ int test_access(Harness &h) {
 	return 0;
 }
 
-// The overview: the counts by kind and state, the queue's latency, the last
-// hour's minutes, the failed jobs to look at, the running jobs with their
-// leases and the workers they name, the schedules and the controller's row;
-// and never a secret.
+// The overview: the counts by kind and state, the queue's latency, the
+// failures to look at grouped by kind and failure key (their ids, numbers and
+// times apart), the worker processes with their threads and leases (one run
+// out), the schedules and the controller's row; and never a secret.
 int test_overview(Harness &h) {
 	clear_jobs(h);
-	int64_t expired = 0, held = 0, failed = 0, cancelled = 0;
+	int64_t failed = 0, cancelled = 0;
+	int64_t gamma[4] = {};
 	{
 		auto db = h.pool.acquire();
 		// Two running: one held, one whose lease ran out (its worker went away).
@@ -250,11 +256,9 @@ int test_overview(Harness &h) {
 		auto a = claimed(*db, secretive, "worker-0badcafe-0");
 		auto b = claimed(*db, job_of("test.beta"), "worker-0badcafe-1");
 		TEST_EXPECT(a && b);
-		held = a->id;
-		expired = b->id;
 		db->exec("UPDATE jobs SET started_at = now() - interval '2 minutes', lease_until = now() - "
 				 "interval '30 seconds' WHERE id = $1;",
-				{ BindValue(expired) });
+				{ BindValue(b->id) });
 		// Four done by another process's worker, each 4 s long, one of them two
 		// hours ago (out of the hour, in the day).
 		for (int i = 0; i < 4; ++i) {
@@ -279,12 +283,36 @@ int test_overview(Harness &h) {
 				{ BindValue(due_old) });
 		db->exec("UPDATE jobs SET run_at = now() - interval '5 seconds' WHERE id = $1;",
 				{ BindValue(due_new) });
-		// One failed for good; one an admin cancelled.
+		// One failed for good five minutes ago; one an admin cancelled.
 		auto f = claimed(*db, job_of("test.beta", {}, 1), "worker-feedf00d-0");
 		TEST_EXPECT(f && jobs::fail(*db, *f, "the cloud said no"));
 		failed = f->id;
+		db->exec("UPDATE jobs SET finished_at = now() - interval '5 minutes' WHERE id = $1;",
+				{ BindValue(failed) });
 		cancelled = jobs::enqueue(*db, job_of("test.alpha"));
 		TEST_EXPECT(jobs::cancel(*db, cancelled, "token") == jobs::ActionResult::Done);
+		// Four of test.gamma failed alike, their ids and times apart, by a third
+		// process's worker: the newest with its secret dropped, two ten minutes
+		// ago, and one two days ago (past the attention's day).
+		const char *gamma_errors[] = {
+			"Stripe refused req_AbC123dEf456 for cus_PqR1234567 at 2026-10-16T11:59:02Z",
+			"Stripe refused req_XyZ987uVw654 for cus_ZZZ9876543 at 2026-10-16T12:01:44Z",
+			"Stripe refused req_Mn0Pq1Rs2Tt3 for cus_AAA1111111 at 2026-10-15 08:00:00",
+			"Stripe refused req_Old000000000 for cus_OLD0000000 at 2026-10-14T08:00:00Z",
+		};
+		for (int i = 0; i < 4; ++i) {
+			jobs::NewJob g = job_of("test.gamma", {}, 1);
+			if (i == 1)
+				g.secret = kSecret;
+			auto run = claimed(*db, g, "worker-c0ffee00-0");
+			TEST_EXPECT(run && jobs::fail(*db, *run, gamma_errors[i]));
+			gamma[i] = run->id;
+		}
+		db->exec(
+				"UPDATE jobs SET finished_at = now() - interval '10 minutes' WHERE id IN ($1, $2);",
+				{ BindValue(gamma[0]), BindValue(gamma[2]) });
+		db->exec("UPDATE jobs SET finished_at = now() - interval '2 days' WHERE id = $1;",
+				{ BindValue(gamma[3]) });
 		// A scheduled jobs.prune that ran, and the controller that leads.
 		jobs::NewJob prune = job_of(jobs::kJobJobsPrune, jobs::kJobJobsPrune, 1);
 		prune.schedule_key = jobs::Scheduler::schedule_key(
@@ -303,7 +331,8 @@ int test_overview(Harness &h) {
 	const auto &t = o["totals"];
 	TEST_EXPECT(t["queued"].i() == 3 && t["due"].i() == 2 && t["running"].i() == 2);
 	TEST_EXPECT(t["done_hour"].i() == 4 && t["done_day"].i() == 5); // the prune's among them
-	TEST_EXPECT(t["failed_hour"].i() == 2 && t["failed_day"].i() == 2 && t["failed"].i() == 2);
+	// The beta, the cancel and three gammas this hour; the old gamma kept.
+	TEST_EXPECT(t["failed_hour"].i() == 5 && t["failed_day"].i() == 5 && t["failed"].i() == 6);
 	TEST_EXPECT(t["oldest_wait_seconds"].i() >= 89 && t["oldest_wait_seconds"].i() <= 120);
 	bool alpha_seen = false;
 	for (const auto &k : o["kinds"]) {
@@ -316,38 +345,36 @@ int test_overview(Harness &h) {
 		TEST_EXPECT(k["mean_run_seconds"].d() > 3.9 && k["mean_run_seconds"].d() < 4.1);
 	}
 	TEST_EXPECT(alpha_seen);
-	// The last hour, a minute a point: the finished ones in the newest minute.
-	TEST_EXPECT(o["per_minute"].size() == 60);
-	int64_t done_minutes = 0, failed_minutes = 0;
-	for (const auto &m : o["per_minute"]) {
-		done_minutes += m["done"].i();
-		failed_minutes += m["failed"].i();
-	}
-	TEST_EXPECT(done_minutes == 4 && failed_minutes == 2);
-	// All of them just now: the newest minute, or the one before it should one
-	// have turned meanwhile.
-	TEST_EXPECT(o["per_minute"][58]["done"].i() + o["per_minute"][59]["done"].i() == 4);
-	// Attention: the failure, not the admin's cancel.
-	TEST_EXPECT(o["attention"].size() == 1 && o["attention"][0]["id"].i() == failed);
-	TEST_EXPECT(str(o["attention"][0]["last_error"]) == "the cloud said no");
-	TEST_EXPECT(o["attention"][0]["retryable"].b());
-	// Running: the oldest claim first, its lease run out (negative).
-	TEST_EXPECT(o["running"].size() == 2 && o["running"][0]["id"].i() == expired);
-	TEST_EXPECT(o["running"][0]["lease_left_seconds"].i() < 0);
-	TEST_EXPECT(o["running"][0]["running_seconds"].i() >= 119);
-	TEST_EXPECT(str(o["running"][0]["worker_id"]) == "worker-0badcafe-1");
-	TEST_EXPECT(
-			o["running"][1]["id"].i() == held && o["running"][1]["lease_left_seconds"].i() > 50);
-	TEST_EXPECT(str(o["running"][1]["secret_state"]) == "held");
-	// Workers: each thread a claim named, its process, what it holds.
-	TEST_EXPECT(o["workers"].size() == 4);
-	TEST_EXPECT(str(o["workers"][0]["worker_id"]) == "worker-0badcafe-0" &&
-			str(o["workers"][0]["process"]) == "worker-0badcafe" &&
-			o["workers"][0]["job_id"].i() == held &&
-			str(o["workers"][0]["job_kind"]) == "test.beta");
-	TEST_EXPECT(str(o["workers"][2]["worker_id"]) == "worker-feedf00d-0" &&
-			is_null(o["workers"][2]["job_id"]) && o["workers"][2]["done"].i() == 3 &&
-			o["workers"][2]["failed"].i() == 1);
+	// Attention: one group per kind and failure key, the newest failure first,
+	// the admin's cancel and the gamma of two days ago left out.
+	TEST_EXPECT(o["attention"].size() == 2 && o["attention_total"].i() == 4);
+	const auto &g = o["attention"][0];
+	TEST_EXPECT(str(g["kind"]) == "test.gamma" &&
+			str(g["key"]) == "Stripe refused <id> for <id> at <time>");
+	TEST_EXPECT(g["count"].i() == 3 && g["retryable"].i() == 2); // the newest's secret went
+	TEST_EXPECT(g["last_job_id"].i() == gamma[1] &&
+			str(g["last_error"]) ==
+					"Stripe refused req_XyZ987uVw654 for cus_ZZZ9876543 at 2026-10-16T12:01:44Z");
+	TEST_EXPECT(str(g["last_at"]).back() == 'Z');
+	const auto &b = o["attention"][1];
+	TEST_EXPECT(str(b["kind"]) == "test.beta" && str(b["key"]) == "the cloud said no");
+	TEST_EXPECT(b["count"].i() == 1 && b["retryable"].i() == 1 && b["last_job_id"].i() == failed);
+	// Workers: one row per process, its threads, the busy ones, its leases.
+	TEST_EXPECT(o["workers"].size() == 3);
+	const auto &w0 = o["workers"][0];
+	TEST_EXPECT(str(w0["process"]) == "worker-0badcafe" && w0["threads"].i() == 2 &&
+			w0["busy"].i() == 2);
+	TEST_EXPECT(w0["lapsed"].i() == 1 && w0["lease_left_seconds"].i() > 50); // the held one's
+	TEST_EXPECT(w0["done"].i() == 0 && w0["failed"].i() == 0);
+	const auto &w1 = o["workers"][1];
+	TEST_EXPECT(str(w1["process"]) == "worker-c0ffee00" && w1["threads"].i() == 1 &&
+			w1["busy"].i() == 0 && w1["lapsed"].i() == 0 && is_null(w1["lease_left_seconds"]));
+	TEST_EXPECT(w1["failed"].i() == 3); // the old gamma past the hour
+	const auto &w2 = o["workers"][2];
+	TEST_EXPECT(str(w2["process"]) == "worker-feedf00d" && w2["threads"].i() == 2 &&
+			w2["busy"].i() == 0);
+	TEST_EXPECT(w2["done"].i() == 4 && w2["failed"].i() == 1); // the prune's among them
+	TEST_EXPECT(!is_null(w2["last_active_at"]) && !o.has("running") && !o.has("per_minute"));
 	// Schedules: jobs.prune ran this hour's bucket, so its next is the next hour;
 	// test.every never ran, so its bucket is due; test.cond says it is conditional.
 	TEST_EXPECT(o["schedules"].size() == 3);
@@ -536,6 +563,119 @@ int test_retry(Harness &h) {
 	return 0;
 }
 
+// `text` percent-encoded for a query string, every byte but a letter or digit.
+std::string query_text(const std::string &text) {
+	std::string out;
+	for (const unsigned char c : text) {
+		if (std::isalnum(c)) {
+			out += static_cast<char>(c);
+		} else {
+			char hex[4];
+			std::snprintf(hex, sizeof(hex), "%%%02X", c);
+			out += hex;
+		}
+	}
+	return out;
+}
+
+// A failure group: the overview counts it, the list takes its key (any time,
+// any kind with the same key unless the kind is named too), and its retry
+// queues each of its jobs again, each a compare-and-set: one whose secret went
+// refused, one whose dedupe key another holds left, none of another failure,
+// another kind or failed before the last day.
+int test_retry_group(Harness &h) {
+	clear_jobs(h);
+	int64_t plain = 0, plain2 = 0, secretive = 0, keyed = 0, other = 0, other_kind = 0, old = 0;
+	int64_t holder = 0;
+	{
+		auto db = h.pool.acquire();
+		const auto failed = [&db](const jobs::NewJob &j, const std::string &error) -> int64_t {
+			auto run = claimed(*db, j, "worker-66666666-0");
+			return run && jobs::fail(*db, *run, error) ? run->id : 0;
+		};
+		plain = failed(job_of("test.group", {}, 1),
+				"machine 74 refused (request 6f1d0b9e-6a8b-4c1e-9d6a-2f9a1b2c3d4e)");
+		plain2 = failed(job_of("test.group", {}, 1),
+				"machine 75 refused (request 0a2b0b9e-6a8b-4c1e-9d6a-2f9a1b2c3d4f)");
+		jobs::NewJob with_secret = job_of("test.group", {}, 1);
+		with_secret.secret = kSecret;
+		secretive = failed(
+				with_secret, "machine 76 refused (request 1b2c0b9e-6a8b-4c1e-9d6a-2f9a1b2c3d40)");
+		keyed = failed(job_of("test.group", "test.group:key", 1),
+				"machine 77 refused (request 2c3d0b9e-6a8b-4c1e-9d6a-2f9a1b2c3d41)");
+		other = failed(job_of("test.group", {}, 1), "machine 78 timed out");
+		other_kind = failed(job_of("test.other", {}, 1),
+				"machine 79 refused (request 3d4e0b9e-6a8b-4c1e-9d6a-2f9a1b2c3d42)");
+		old = failed(job_of("test.group", {}, 1),
+				"machine 80 refused (request 4e5f0b9e-6a8b-4c1e-9d6a-2f9a1b2c3d43)");
+		TEST_EXPECT(plain && plain2 && secretive && keyed && other && other_kind && old);
+		db->exec("UPDATE jobs SET finished_at = now() - interval '2 days' WHERE id = $1;",
+				{ BindValue(old) });
+		// Another kind holding the keyed one's dedupe key, queued.
+		holder = jobs::enqueue(*db, job_of("test.keyholder", "test.group:key"));
+		TEST_EXPECT(holder > 0);
+	}
+	const std::string key = "machine # refused (request <id>)";
+	auto json = json_of(h.admin("GET", "/api/admin/jobs/overview"), 200);
+	TEST_EXPECT(json && json["attention"].size() == 3 && json["attention_total"].i() == 6);
+	bool group_seen = false;
+	for (const auto &g : json["attention"]) {
+		if (str(g["kind"]) != "test.group" || str(g["key"]) != key)
+			continue;
+		group_seen = true;
+		TEST_EXPECT(g["count"].i() == 4 && g["retryable"].i() == 3);
+	}
+	TEST_EXPECT(group_seen);
+
+	// The list by failure key: every failure kept with it, whatever its kind
+	// and age, unless the kind narrows it.
+	auto page = json_of(h.admin("GET", "/api/admin/jobs?failure=" + query_text(key)), 200);
+	TEST_EXPECT(page && page["total"].i() == 6);
+	page = json_of(
+			h.admin("GET",
+					"/api/admin/jobs?state=failed&kind=test.group&failure=" + query_text(key)),
+			200);
+	TEST_EXPECT(page && page["total"].i() == 5 && page["jobs"][0]["id"].i() == old);
+	page = json_of(
+			h.admin("GET", "/api/admin/jobs?failure=" + query_text("machine # timed out")), 200);
+	TEST_EXPECT(page && page["total"].i() == 1 && page["jobs"][0]["id"].i() == other);
+	auto reply = h.admin("GET", "/api/admin/jobs?failure=" + std::string(301, 'k'));
+	TEST_EXPECT(reply.code == 400 && error_of(reply) == "invalid_field");
+
+	// The group's retry.
+	const std::string body = "{\"kind\":\"test.group\",\"key\":\"" + key + "\"}";
+	json = json_of(h.admin("POST", "/api/admin/jobs/retry-group", body), 200);
+	TEST_EXPECT(json && json["retried"].i() == 2 && json["secret_dropped"].i() == 1 &&
+			json["already_pending"].i() == 1 && json["changed"].i() == 0);
+	{
+		auto db = h.pool.acquire();
+		TEST_EXPECT(state_of(*db, plain) == "queued" && state_of(*db, plain2) == "queued");
+		TEST_EXPECT(state_of(*db, secretive) == "failed" && state_of(*db, keyed) == "failed");
+		TEST_EXPECT(state_of(*db, other) == "failed" && state_of(*db, other_kind) == "failed" &&
+				state_of(*db, old) == "failed");
+		TEST_EXPECT(
+				count_jobs(*db,
+						"id = " + std::to_string(plain) +
+								" AND attempts = 1 AND max_attempts = 2 AND run_at <= now()") == 1);
+	}
+	// Again: the two queued are no longer the group's.
+	json = json_of(h.admin("POST", "/api/admin/jobs/retry-group", body), 200);
+	TEST_EXPECT(json && json["retried"].i() == 0 && json["secret_dropped"].i() == 1 &&
+			json["already_pending"].i() == 1);
+	// Refusals.
+	reply = h.admin("POST", "/api/admin/jobs/retry-group", "{\"kind\":\"test.group\"}");
+	TEST_EXPECT(reply.code == 400 && error_of(reply) == "missing_field");
+	reply = h.admin("POST", "/api/admin/jobs/retry-group", "{\"kind\":7,\"key\":\"x\"}");
+	TEST_EXPECT(reply.code == 400 && error_of(reply) == "invalid_field");
+	reply = h.admin("POST", "/api/admin/jobs/retry-group",
+			"{\"kind\":\"test.group\",\"key\":\"" + std::string(301, 'k') + "\"}");
+	TEST_EXPECT(reply.code == 400 && error_of(reply) == "invalid_field");
+	reply = h.admin("POST", "/api/admin/jobs/retry-group", "[1]");
+	TEST_EXPECT(reply.code == 400 && error_of(reply) == "invalid_json");
+	TEST_EXPECT(body_text(reply).find(kSecret) == std::string::npos);
+	return 0;
+}
+
 // The cancel: a queued job failed with the admin's name; a running one is its
 // worker's (refused, its claim still finishing), a done one refused.
 int test_cancel(Harness &h) {
@@ -701,6 +841,7 @@ int main(int argc, char **argv) {
 			{ "list", test_list },
 			{ "detail", test_detail },
 			{ "retry", test_retry },
+			{ "retry_group", test_retry_group },
 			{ "cancel", test_cancel },
 			{ "run_and_prune", test_run_and_prune },
 		};

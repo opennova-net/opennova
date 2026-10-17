@@ -2,15 +2,16 @@
 
 // The admin's background jobs routes (README "Background jobs", the site's
 // admin page /admin/jobs), over job_admin.h: GET /api/admin/jobs/overview
-// (the counts by kind, the queue's latency, the last hour's jobs a minute, the
-// failed jobs to look at, the running jobs with their workers and leases, the
-// workers, the schedules and the controller that runs them), GET
-// /api/admin/jobs (a page of jobs by state, kind, time and key, newest
-// first), GET /api/admin/jobs/<id> (one job with its payload), and the
+// (the counts by kind, the queue's latency, the failures to look at grouped
+// by kind and failure key, the worker processes with their threads and
+// leases, the schedules and the controller that runs them), GET
+// /api/admin/jobs (a page of jobs by state, kind, time, key and failure,
+// newest first), GET /api/admin/jobs/<id> (one job with its payload), and the
 // actions: POST /api/admin/jobs/<id>/retry (a failed job, queued again now
-// with one more attempt), /<id>/cancel (a queued job), POST
-// /api/admin/jobs/run (a periodic kind now) and POST /api/admin/jobs/prune
-// (the finished jobs past a keep, as a jobs.prune job). Every one
+// with one more attempt), POST /api/admin/jobs/retry-group (each job of a
+// failure group, so), /<id>/cancel (a queued job), POST /api/admin/jobs/run
+// (a periodic kind now) and POST /api/admin/jobs/prune (the finished jobs
+// past a keep, as a jobs.prune job). Every one
 // require_admin (a state change with the CSRF header unless the Bearer token
 // carries it, and logged with its actor by AccessMiddleware, and here with
 // what it did); they read the jobs table and the controller's row alone, so
@@ -52,6 +53,7 @@ private:
 	crow::response list_route(const crow::request &req);
 	crow::response job_route(const crow::request &req, uint64_t id);
 	crow::response retry_route(const crow::request &req, uint64_t id);
+	crow::response retry_group_route(const crow::request &req);
 	crow::response cancel_route(const crow::request &req, uint64_t id);
 	crow::response run_route(const crow::request &req);
 	crow::response prune_route(const crow::request &req);
