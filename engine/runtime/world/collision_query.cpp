@@ -307,7 +307,8 @@ bool point_in_triangle_2d(const int32_t p[3], const CollisionFace &face,
 // @ 0x4e4cb0 — see the header note for the witnessed gate-by-gate map.]
 // ----------------------------------------------------------------------------
 bool collision_raycast_faces(const CollisionTargetView &target, const int32_t start[3],
-                             const int32_t end[3], uint32_t ammo_flags, RayFaceHit &out) {
+                             const int32_t end[3], uint32_t ammo_flags, RayFaceHit &out,
+                             const int32_t *ray_dir, int32_t ray_length) {
     if (target.model == nullptr || target.matrices == nullptr) return false;
     const CollisionModel &model = *target.model;
     if (model.faces.empty()) return false;
@@ -320,9 +321,13 @@ bool collision_raycast_faces(const CollisionTargetView &target, const int32_t st
                                   static_cast<double>(d[1]) * d[1] +
                                   static_cast<double>(d[2]) * d[2]);
     if (dlen <= 0.0) return false;
-    const int32_t seg_len = static_cast<int32_t>(dlen);
+    int32_t seg_len = static_cast<int32_t>(dlen);
     const double ninv = 65536.0 / dlen;
     for (int i = 0; i < 3; ++i) ndir[i] = static_cast<int32_t>(d[i] * ninv);
+    if (ray_dir != nullptr && ray_length > 0) {
+        seg_len = ray_length;
+        for (int i = 0; i < 3; ++i) ndir[i] = ray_dir[i];
+    }
 
     int32_t best = seg_len; // [orig: rayState[29] preseeded with rayState[9] @ 0x4e534f]
     bool hit = false;

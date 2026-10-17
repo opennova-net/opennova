@@ -258,7 +258,8 @@ bool motor_terrain_test_runs(const LiveRound &r, const AmmoTableEntry &ammo) {
 // ...) calls @ 0x444619..0x444667; the start is savedLivePose @0x44452D].
 bool motor_item_sweep(World &world, CollisionWorld *collision, const LiveRound &r,
                       const FixedVec3 &start, const MotorFrame &from_to, int32_t speed,
-                      ProjectileHit &out) {
+                      ProjectileHit &out, const int32_t *ray_dir = nullptr,
+                      int32_t ray_length = 0) {
     if (collision == nullptr || speed <= 0) return false;
     const CollisionWorld::RayDebugScope ray_scope(
             collision, CollisionWorld::RayDebugCategory::kThrowable);
@@ -281,6 +282,10 @@ bool motor_item_sweep(World &world, CollisionWorld *collision, const LiveRound &
         r.consequence_mode == RoundConsequenceMode::VisualOnly;
     trace.shooter_wire_handle = r.shooter_handle;
     trace.shooter_carrier_wire_handle = r.shooter_carrier_handle;
+    if (ray_dir != nullptr && ray_length > 0) {
+        trace.ray_dir_q16 = FixedVec3{ray_dir[0], ray_dir[1], ray_dir[2]};
+        trace.ray_length_q16 = ray_length;
+    }
     const ProjectileHit hit = collision->trace_projectile(world, trace);
     if (!hit.hit()) return false;
     if (hit.hit_class != ProjectileHitClass::StaticEntity &&
@@ -524,11 +529,26 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
     if (horiz != 0) {
         ProjectileHit hit;
         MotorFrame target = f;
-        if (motor_item_sweep(world, collision, r, saved, target, speed3_q16(f), hit)) {
-            // back the contact off 2048 Q16 [orig: v44 - 2048 @ 0x444694]
-            f.px = hit.position_q16.x;
-            f.py = hit.position_q16.y;
-            f.pz = hit.position_q16.z;
+        // The ray context: the velocity over the horizontal speed (2^32 /
+        // horiz, a Q16 product per axis) and that speed as its length; a hit's
+        // distance is its parameter in that length, kept only below it.
+        // [orig: the direction @0x444493..0x444519, the length dest[9]
+        //  @0x44458B; the face parameter @0x4E51B8; the strict keeps
+        //  @0x444632 / @0x444667]
+        const int32_t inv = static_cast<int32_t>(0x100000000LL / horiz);
+        const int32_t dir[3] = {qmul(inv, f.vx), qmul(inv, f.vy), qmul(inv, f.vz)};
+        if (motor_item_sweep(world, collision, r, saved, target, speed3_q16(f), hit, dir,
+                             horiz) &&
+            hit.distance_q16 < horiz) {
+            // The contact backs off 2048 along the ray: the round lands at the
+            // saved pose plus the direction times max(t - 2048, 0), the effect
+            // and the landing reading it there.
+            // [orig: the back-off @0x444694..0x4446FC, stored @0x444746..0x4447AC]
+            const int32_t t = hit.distance_q16;
+            const int32_t back = t > 2048 ? t - 2048 : 0;
+            f.px = saved.x + qmul(dir[0], back);
+            f.py = saved.y + qmul(dir[1], back);
+            f.pz = saved.z + qmul(dir[2], back);
             // Every sweep return is an item hit; a wire-proxy hit carries no
             // registry identity but still reflects (retail's decoded pool-1
             // entities bounce grenades). reflect_velocity's -v fallback covers

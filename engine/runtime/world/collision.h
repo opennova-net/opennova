@@ -579,8 +579,14 @@ struct RayFaceHit {
     int32_t section = -1;
     int32_t face = -1;
 };
+// `ray_dir` / `ray_length` (both or neither): the caller's ray context
+// direction and length (rayState[6..8] / [9]) where they differ from the
+// segment's; the hit's distance is then |d0| * ray_length / (|d0| + |d1|) and
+// its test point start + ray_dir * that distance [orig: @0x4E51B8;
+// @0x4E51E4..0x4E522A]. Null = the segment's own unit direction and length.
 bool collision_raycast_faces(const CollisionTargetView &target, const int32_t start[3],
-                             const int32_t end[3], uint32_t ammo_flags, RayFaceHit &out);
+                             const int32_t end[3], uint32_t ammo_flags, RayFaceHit &out,
+                             const int32_t *ray_dir = nullptr, int32_t ray_length = 0);
 
 // A person section's hit radius (Q16) about its bone: 45 percent of the
 // authored COBJ radius (65 for section 14, the head) plus the fixed 0xCCC floor
@@ -839,6 +845,20 @@ struct ProjectileTrace {
     bool walk_terrain = true;
     bool walk_water = true;
     bool walk_persons = true;
+    // The ray context's own direction and length (rayState[6..8] and [9]) where
+    // a caller's differ from the segment's: a throwable motor's ray runs along
+    // its velocity over its speed. A pools-2/1 walk (the terrain, water and
+    // person domains off) then gates each slot on the line through the start
+    // along that direction, reads a face hit at start + dir * dist with
+    // dist = |d0| * length / (|d0| + |d1|), and reports that dist as the hit's
+    // distance (its t a fraction of the length). Zero length = the segment's
+    // own unit direction and length, as every bullet's.
+    // [orig: Projectile_RaycastProximitySlots @0x4E5340 -- the seed
+    //  rayState[29] = rayState[9] @0x4E534F, the slot gate's projection onto
+    //  rayState[6..8]; Physics_RaycastAgainstBoneCollision @0x4E4CB0 -- the
+    //  parameter @0x4E51B8, the test point @0x4E51E4..0x4E522A]
+    FixedVec3 ray_dir_q16;
+    int32_t ray_length_q16 = 0;
 };
 
 struct ProjectileHit {
