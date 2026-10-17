@@ -136,6 +136,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/scope_circle_mask.cpp # the scoped-view circle mask + its reticle cross/grid
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/feed_format.cpp   # the 0x1E feed line/color policy
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/loading_screen.cpp # the loading screen's wrapped text block
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/loading_background.cpp # the loading screen's background pick, band edge and splash gate
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_toggles.cpp    # the key-driven HUD toggles and their edge polls
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/tip_system.cpp     # the MrClippy tip: events, gates, countdown, text
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_tip.cpp  # its compile element

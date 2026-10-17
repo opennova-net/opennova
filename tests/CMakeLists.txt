@@ -1697,6 +1697,13 @@ target_link_libraries(hud_loading_screen_test PRIVATE opennova_runtime)
 target_include_directories(hud_loading_screen_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME hud_loading_screen COMMAND hud_loading_screen_test)
 
+# The loading screen's background pick, band edge and SP splash gate
+# (hud/loading_background.h) [orig: Render_LoadingScreen @0x521db5..0x521e94;
+# Game_StartMission @0x525d38..0x525d48].
+add_executable(hud_loading_background_test hud/loading_background_test.cpp)
+target_link_libraries(hud_loading_background_test PRIVATE opennova_runtime)
+add_test(NAME hud_loading_background COMMAND hud_loading_background_test)
+
 add_executable(jo_env_sweep_test env/jo_env_sweep_test.cpp)
 target_link_libraries(jo_env_sweep_test PRIVATE opennova_formats opennova_base)
 target_include_directories(jo_env_sweep_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

@@ -42,10 +42,10 @@ func test_background_prefers_mission_sidecar_then_falls_back() -> void:
 	_touch(dir.path_join("loadscrn.pcx"))
 	var root := ResourceRoot.new()
 	root.set_root_dir(dir)
-	var bg := LoadingScreen.resolve_background(root, "00TRg.bms")
+	var bg := LoadingBackground.resolve(root, "00TRg.bms")
 	assert_eq(bg.name.to_lower(), "00trg.pcx", "sidecar wins when present")
 	assert_true(bg.custom)
-	bg = LoadingScreen.resolve_background(root, "OTHER.bms")
+	bg = LoadingBackground.resolve(root, "OTHER.bms")
 	assert_eq(bg.name, "loadscrn.pcx", "missing sidecar falls back")
 	assert_false(bg.custom)
 
