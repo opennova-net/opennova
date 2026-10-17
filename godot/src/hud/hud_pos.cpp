@@ -549,7 +549,7 @@ Vector2i HudPos::loading_bar_size() {
 
 TypedArray<Rect2i> HudPos::loading_bar_rects(const Vector2 &p_surface, int p_displayed) {
 	const opennova::hud::LoadingBarRects r = opennova::hud::loading_bar_rects(
-			static_cast<float>(p_surface.x), static_cast<float>(p_surface.y), p_displayed);
+			static_cast<int>(p_surface.x), static_cast<int>(p_surface.y), p_displayed);
 	TypedArray<Rect2i> out;
 	for (const opennova::hud::LoadingBarRect &rect : {r.outer, r.gray, r.track, r.fill}) {
 		out.push_back(Rect2i(rect.x, rect.y, rect.w, rect.h));
