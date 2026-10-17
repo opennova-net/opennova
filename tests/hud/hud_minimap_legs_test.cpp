@@ -224,6 +224,50 @@ void test_pointer_geometry_and_race() {
 			"a sideways waypoint leaves only the MAPCOORDS label");
 }
 
+// C-350 — the pointer's d^2 goes through _ftol2_sse unclamped: at the
+// zoom-in clamp (4096 / (210 x 200) world units per pixel) a waypoint 4400 u
+// ahead projects 45,117 px out (d^2 under 2^31: the clamped chevron), one
+// 5000 u ahead 51,270 px (d^2 past int32: the integer indefinite compares
+// below (R - span)^2, so the INSIDE leg puts the tip at the off-map target and
+// the line runs to the rect edge). The tracked callout's outside test reads
+// the same conversion. [orig: HUD_DrawMapTargetPointer @0x599337..0x599351;
+// Render_LaserSightEffect @0x59D269..0x59D289]
+void test_pointer_far_target_indefinite() {
+	HudMinimapInput in = corner();
+	in.zoom_q16 = kSpinmapZoomMin;
+	in.waypoint_present = true;
+	in.waypoint_x = 4400 << 16;
+	HudMinimapCompiler compiler;
+	const HudMapPass &near = compiler.compile(in);
+	const HudMapSprite *tip = nullptr;
+	for (const HudMapSprite &s : near.sprites)
+		if (s.layer == 4) tip = &s;
+	CHECK(tip != nullptr && std::fabs(tip->half_w - 10.0f) < 1e-4f &&
+			std::fabs(tip->center_y - (kCy - (kR - 10.0f))) < 0.05f,
+			"under 2^31 the chevron clamps at R - span");
+	in.waypoint_x = 5000 << 16;
+	const HudMapPass &far = compiler.compile(in);
+	bool chevron = false;
+	for (const HudMapSprite &s : far.sprites)
+		if (s.layer == 4 && std::fabs(s.half_w - 10.0f) < 1e-4f) chevron = true;
+	CHECK(!chevron, "past int32 no clamped chevron draws");
+	CHECK(far.lines.size() == 1 && far.lines[0].y1 < kCy - kR,
+			"past int32 the line runs past the disc toward the off-map target");
+
+	HudMinimapOverlays ov;
+	ov.tracked.ticks = 186;
+	ov.tracked.serial = 1;
+	ov.tracked.friendly = true; // no snapshot blip on the inside leg
+	ov.tracked.snap_x = 4400 << 16;
+	HudMinimapInput t = corner();
+	t.zoom_q16 = kSpinmapZoomMin;
+	t.overlays = &ov;
+	HudMinimapCompiler tracked;
+	CHECK(tracked.compile(t).lines.size() == 1, "the tracked callout's outside leg under 2^31");
+	ov.tracked.snap_x = 5000 << 16;
+	CHECK(tracked.compile(t).lines.empty(), "past int32 the callout takes its inside leg");
+}
+
 // A5 — rings are Render_DrawRingOverlay's anti-aliased band: 253's main ring
 // (R = 4 px -> 16 segments x 6 tris) and its filled 1-px dot (4 x 7), each
 // special drawn on three layer passes.
@@ -648,6 +692,7 @@ int main() {
 	test_bit16_squaring_and_width_scale();
 	test_mask_and_missing_sector_tiles();
 	test_pointer_geometry_and_race();
+	test_pointer_far_target_indefinite();
 	test_ring_band();
 	test_bank_walk_gates();
 	test_blip_crop();

@@ -14,6 +14,7 @@
 #include <cstdio>
 
 #include <base/io/bam.h>
+#include <base/io/crt_ftol.h>
 #include <base/io/fixed.h>
 
 namespace opennova::hud::minimap_detail {
@@ -36,6 +37,15 @@ int32_t race_degrees(int32_t delta) {
 			(static_cast<uint32_t>(delta) - 0x3FFFFFC0u) / 0xB60B60u);
 	if (deg > 180) deg = 360 - deg;
 	return deg;
+}
+
+// The projected d^2, each square and the sum rounded to single precision as
+// the game's 24-bit x87 rounds them; written as three stores so no compiler
+// fuses them.
+float pointer_d2(float ddx, float ddy) {
+	volatile float sx = ddx * ddx;
+	volatile float sy = ddy * ddy;
+	return sx + sy;
 }
 
 // sqrt(dx^2 + dy^2) over the Q16 deltas, clamped to flt_7C19E0 and truncated
@@ -152,10 +162,15 @@ void draw_map_target_pointer(MapCompile &c, int32_t target_x, int32_t target_y,
 	float tip_y = cy + clamp_r * dir_y;
 	const float ddx = tx - cx;
 	const float ddy = ty - cy;
-	const double d2 = std::min(static_cast<double>(ddx) * ddx +
-			static_cast<double>(ddy) * ddy, 2147483647.0);
-	const bool inside = static_cast<double>(static_cast<int32_t>(d2)) <
-			static_cast<double>(clamp_r) * clamp_r;
+	// The d^2 sum through _ftol2_sse with no clamp: past int32 it is the
+	// integer indefinite, which compares below (R - span)^2, so a target that
+	// far takes the inside branch [orig: @0x599337 (_ftol2_sse), the fild and
+	// compare @0x599340..0x599351]. The x87 runs at 24-bit precision in game,
+	// so each square, the sum and (R - span)^2 round to single precision
+	// [orig: CGfxDevice_CreateDevice @0x67e9fd / @0x67ea35].
+	const float d2_sum = pointer_d2(ddx, ddy);
+	const int32_t d2 = io::retail_ftol_sse2(static_cast<double>(d2_sum));
+	const bool inside = static_cast<double>(d2) < static_cast<double>(clamp_r * clamp_r);
 	uint8_t cell = 7;
 	float half = span;
 	uint32_t light = color;
@@ -280,10 +295,12 @@ void draw_tracked_callout(MapCompile &c) {
 	const float clamp_r = view.disc_radius - span;
 	const float ddx = tx - cx;
 	const float ddy = ty - cy;
-	const double d2 = std::min(static_cast<double>(ddx) * ddx +
-			static_cast<double>(ddy) * ddy, 2147483647.0);
-	const bool outside = static_cast<double>(static_cast<int32_t>(d2)) >=
-			static_cast<double>(clamp_r) * clamp_r;
+	// The same unclamped _ftol2_sse d^2 as the pointer's, single precision
+	// alike [orig: Render_LaserSightEffect @0x59D269 (_ftol2_sse), the fild /
+	// fcompp @0x59D276..0x59D289].
+	const float d2_sum = pointer_d2(ddx, ddy);
+	const int32_t d2 = io::retail_ftol_sse2(static_cast<double>(d2_sum));
+	const bool outside = static_cast<double>(d2) >= static_cast<double>(clamp_r * clamp_r);
 	if (t.radio_request) {
 		if (!outside || t.aboard_vehicle) return;
 	}
