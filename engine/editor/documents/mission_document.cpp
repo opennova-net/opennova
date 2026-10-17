@@ -11,6 +11,7 @@
 #include <utility>
 
 #include <base/io/hash.h>
+#include <base/io/le.h>
 #include <base/io/strutil.h>
 #include <editor/documents/mission_file_set.h>
 #include <editor/documents/mission_labels.h>
@@ -1237,23 +1238,45 @@ const MissionDocument::Lookups &MissionDocument::lookups() const {
 		for (size_t i = 0; i < path.stops.size(); ++i)
 			if (path.stops[i] < markers.size()) made.stops[markers[path.stops[i]]->id].push_back({path.number, i});
 	}
-	// The player's route: the first path with the flag, walked as the game walks the record a save lays out of
-	// its stops (mission::lay_out_waypoint_path: the count the path's stops, the slots its first 32, each a
-	// marker's index), as many as bms::player_route_stop_count reads [orig: NetPacket_WriteWorldStateLoad0x0F
-	// @0x502e50, the count capped at 128 @0x502efc, read signed @0x502f01, the walk @0x502f13..0x502f18]. A record
-	// read naming other stops than its markers carry is the game's until a save lays it out (mission.path_rebuilt
-	// says so): the route here is the save's.
-	for (const Node *row : made.by_kind[size_t(K::WaypointPath)]) {
-		const MissionPath &path = static_cast<const PathRow &>(*row).native;
-		if (!bms::is_player_route(path.record)) continue;
-		bms::WaypointRecord laid = path.record;
-		laid.marker_count = static_cast<uint32_t>(path.stops.size());
-		laid.waypoint_numbers.assign(path.stops.begin(),
-		                             path.stops.begin() + std::ptrdiff_t(std::min(path.stops.size(), kMaxWaypointPathMarkers)));
-		const size_t count = bms::player_route_stop_count(laid);
-		for (size_t i = 0; i < count; ++i)
-			if (laid.waypoint_numbers[i] < markers.size()) made.route.insert(markers[laid.waypoint_numbers[i]]->id);
-		break;
+	// The player's route, walked as the game walks the table a save lays out of the paths' stops
+	// (mission::lay_out_waypoint_path: the count a path's stops, its stops over the first slots, a slot word past
+	// them as the record held it; the header's counts synced), each word a marker's index
+	// (bms::player_route_stops: the first path with the flag, as many words as its count, past its 32 slots into
+	// the next records and the header block after the table) [orig: NetPacket_WriteWorldStateLoad0x0F @0x502e50,
+	// the walk @0x502f1e..0x502f7a]. A record read naming other stops than its markers carry is the game's until a
+	// save lays it out (mission.path_rebuilt says so): the route here is the save's.
+	{
+		bms::File table{};
+		const std::vector<const Node *> &mission = made.by_kind[size_t(K::Mission)];
+		if (!mission.empty()) table.header = static_cast<const MissionRow &>(*mission.front()).native.header;
+		table.header.num_items = static_cast<uint32_t>(made.by_kind[size_t(K::Item)].size());
+		table.header.num_buildings = static_cast<uint32_t>(made.by_kind[size_t(K::Building)].size());
+		table.header.num_markers = static_cast<uint32_t>(made.by_kind[size_t(K::Marker)].size());
+		table.header.num_people = static_cast<uint32_t>(made.by_kind[size_t(K::Organic)].size());
+		table.header.num_events = static_cast<uint32_t>(made.by_kind[size_t(K::Event)].size());
+		table.waypoint_records.resize(size_t(bms::kWaypointRecordCount));
+		for (const Node *row : made.by_kind[size_t(K::WaypointPath)]) {
+			const MissionPath &path = static_cast<const PathRow &>(*row).native;
+			if (path.number < 0 || size_t(path.number) >= table.waypoint_records.size()) continue;
+			bms::WaypointRecord &laid = table.waypoint_records[size_t(path.number)];
+			laid = path.record;
+			// The 32 slot words as the record holds them, its stops written over the first.
+			std::vector<uint32_t> words(kMaxWaypointPathMarkers, 0);
+			for (size_t i = 0; i < path.record.waypoint_numbers.size() && i < words.size(); ++i)
+				words[i] = path.record.waypoint_numbers[i];
+			for (size_t i = path.record.waypoint_numbers.size(); i < words.size(); ++i) {
+				const size_t at = (i - path.record.waypoint_numbers.size()) * 4;
+				if (at + 4 <= path.record.padding.size()) words[i] = io::read_u32_le(path.record.padding.data() + at);
+			}
+			const size_t slots = std::min(path.stops.size(), kMaxWaypointPathMarkers);
+			for (size_t i = 0; i < slots; ++i) words[i] = path.stops[i];
+			laid.marker_count = static_cast<uint32_t>(path.stops.size());
+			laid.waypoint_numbers.assign(words.begin(), words.begin() + std::ptrdiff_t(slots));
+			laid.padding.assign((kMaxWaypointPathMarkers - slots) * 4, 0);
+			for (size_t i = slots; i < words.size(); ++i) io::write_u32_le(laid.padding.data() + (i - slots) * 4, words[i]);
+		}
+		for (const uint32_t stop : bms::player_route_stops(table))
+			if (stop < markers.size()) made.route.insert(markers[stop]->id);
 	}
 	made.made = true;
 	made.load_generation = load_generation();

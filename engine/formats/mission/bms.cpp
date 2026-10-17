@@ -3,6 +3,7 @@
 #include <base/io/byte_reader.h>
 #include <base/io/byte_writer.h>
 #include <base/io/cp1252.h>
+#include <base/io/le.h>
 #include <base/io/crt_ftol.h>
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
@@ -825,14 +826,38 @@ bool is_player_route(const WaypointRecord& record) {
     return (static_cast<uint32_t>(record.flags) & static_cast<uint32_t>(WaypointFlags::PlayerRoute)) != 0;
 }
 
-size_t player_route_stop_count(const WaypointRecord& record) {
+// A waypoint record's words: its flags, its count and its 32 slots.
+constexpr size_t kWaypointRecordWords = kWaypointRecordSize / 4;
+
+std::vector<uint32_t> player_route_stops(const File& file) {
+    std::vector<uint32_t> stops;
+    size_t route = 0;
+    while (route < file.waypoint_records.size() && !is_player_route(file.waypoint_records[route])) ++route;
+    if (route == file.waypoint_records.size()) return stops;
     // [orig: NetPacket_WriteWorldStateLoad0x0F, the count capped at 128 @0x502efc], compared as signed
     // ints: a count of 2^31 or more reads negative and walks no stop (the cap's `jle` @0x502f01, the
     // walk's `test eax, eax` / `jle` @0x502f13..0x502f18).
-    const int count = std::min<int>({static_cast<int>(record.marker_count),
-                                     static_cast<int>(record.waypoint_numbers.size()),
-                                     static_cast<int>(kPlayerRouteMaxStops)});
-    return count > 0 ? static_cast<size_t>(count) : 0;
+    const int count = std::min<int>(static_cast<int>(file.waypoint_records[route].marker_count),
+                                    static_cast<int>(kPlayerRouteMaxStops));
+    // The word `at` of the table as the load leaves it, its header block after it.
+    const auto word = [&file](size_t at) -> uint32_t {
+        const size_t record = at / kWaypointRecordWords, k = at % kWaypointRecordWords;
+        if (record < size_t(kWaypointRecordCount)) {
+            if (record >= file.waypoint_records.size()) return 0;
+            const WaypointRecord& w = file.waypoint_records[record];
+            if (k == 0) return static_cast<uint32_t>(w.flags) | (w.marker_count == 1 ? 1u : 0u);
+            if (k == 1) return w.marker_count;
+            const size_t slot = k - 2;
+            if (slot < w.waypoint_numbers.size()) return w.waypoint_numbers[slot];
+            const size_t pad = (slot - w.waypoint_numbers.size()) * 4;
+            return pad + 4 <= w.padding.size() ? io::read_u32_le(w.padding.data() + pad) : 0;
+        }
+        const size_t at_header = (at - size_t(kWaypointRecordCount) * kWaypointRecordWords) * 4;
+        const uint8_t* raw = reinterpret_cast<const uint8_t*>(&file.header);
+        return at_header + 4 <= kHeaderSize ? io::read_u32_le(raw + at_header) : 0;
+    };
+    for (int i = 0; i < count; ++i) stops.push_back(word(route * kWaypointRecordWords + 2 + size_t(i)));
+    return stops;
 }
 
 std::string first_differing_section(const File& file, const std::vector<uint8_t>& a, const std::vector<uint8_t>& b) {

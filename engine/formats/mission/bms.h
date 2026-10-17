@@ -661,20 +661,22 @@ struct WaypointRecord {
 };
 
 // The player's waypoint route is the FIRST waypoint path whose flags carry PlayerRoute, the pick the
-// world-state writer serializes for a team-1 recipient, over its first stops: min(marker_count, the
-// slots read, 128) compared as signed ints (a count of 2^31 or more walks none), each a marker's
-// index as the slot holds it (one past the markers names none) [orig:
-// NetPacket_WriteWorldStateLoad0x0F @0x502e50, the scan stopping on the first hit @0x502e53, the
-// count capped at 128 @0x502efc]. The game reads on past the 32 slots: its walk steps 4 bytes a stop
-// from the record's slots through the 136-byte records laid end to end, so stops 33 on are the next
-// record's flags, its count and its slots (the last record's, the header block after the table),
-// each looked up unchecked as a marker's index [orig: g_BmsWaypointPathTable @0xA71DD0, the stride
-// 0x88 @0x502e59 and @0x502ef0, the table's end g_BmsHeaderBlock @0xA761D0 @0x502e61; the walk
-// @0x502f1e..0x502f7a, Pool_GetEntryUnchecked @0x441fc0 called @0x502f2d]. The port reads the slots
-// alone (D-MIS-X3).
+// world-state writer serializes for a team-1 recipient [orig: NetPacket_WriteWorldStateLoad0x0F
+// @0x502e50, the scan stopping on the first hit @0x502e53]. Its stops are the words the writer walks:
+// min(marker_count, 128) compared as signed ints (a count of 2^31 or more walks none) [orig: the cap
+// @0x502efc, @0x502f01, the walk's test @0x502f13..0x502f18], read 4 bytes a stop from the record's
+// slots on with no 32 bound (@0x502f1e, the step @0x502f70) through the 136-byte records the load
+// reads whole and end to end [orig: g_BmsWaypointPathTable @0xA71DD0, the stride 0x88 @0x502e59;
+// Mission_LoadBMSFile, the read @0x40fb60..0x40fb6a, a record of one stop flagged one-shot
+// @0x40fb72..0x40fbb2]: past the 32 slots the next record's flags as the load leaves them, its count
+// and its slots, and past the last record the header block the load read before the table [orig:
+// g_BmsHeaderBlock @0xA761D0, @0x502e61; read @0x40f56f..0x40f574]. Each word is a marker's index
+// looked up unchecked [orig: Pool_GetEntryUnchecked @0x441fc0, called @0x502f2d] (one past the markers
+// names none).
 inline constexpr size_t kPlayerRouteMaxStops = 128;
+struct File;
 bool is_player_route(const WaypointRecord& record);
-size_t player_route_stop_count(const WaypointRecord& record);
+std::vector<uint32_t> player_route_stops(const File& file);
 
 // [orig editor: Med_WriteBmsFile @0x44f920 packs each 32-byte group as: @0 flags (bit0/bit1 from the editor
 //  group flags), @4=0, @8 = a value, @12 = constant 10, @16..28 = 0. The JO loader keeps @0/@8/@12; @12 is

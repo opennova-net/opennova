@@ -165,18 +165,50 @@ int sections_and_route() {
 	changed.push_back(0);
 	TEST_EXPECT(bms::first_differing_section(file, original, changed) == "length");
 
-	bms::WaypointRecord route{};
-	TEST_EXPECT(!bms::is_player_route(route));
-	route.flags = bms::WaypointFlags::DoesNotLoop | bms::WaypointFlags::PlayerRoute;
-	route.marker_count = 5;
-	route.waypoint_numbers = {4, 1, 7};
-	TEST_EXPECT(bms::is_player_route(route) && bms::player_route_stop_count(route) == 3);
-	route.waypoint_numbers.assign(200, 0);
-	TEST_EXPECT(bms::player_route_stop_count(route) == 5);
-	route.marker_count = 1000;
-	TEST_EXPECT(bms::player_route_stop_count(route) == bms::kPlayerRouteMaxStops && bms::kPlayerRouteMaxStops == 128);
-	route.marker_count = 0x80000000u;
-	TEST_EXPECT(bms::player_route_stop_count(route) == 0);
+	// The player's route: the first flagged path's words as the world-state writer walks them, past its 32 slots
+	// into the next record (its flags as the load leaves them, its count, its slots) and past the table the header
+	// block [orig: NetPacket_WriteWorldStateLoad0x0F @0x502f1e..0x502f7a; Mission_LoadBMSFile @0x40fb72..0x40fbb2].
+	{
+		bms::File routes{};
+		std::memcpy(routes.header.magic, "BMS\x13", 4);
+		routes.waypoint_records.resize(size_t(bms::kWaypointRecordCount));
+		for (bms::WaypointRecord &w : routes.waypoint_records) {
+			w = bms::WaypointRecord{};
+			w.padding.assign(128, 0);
+		}
+		TEST_EXPECT(!bms::is_player_route(routes.waypoint_records[2]) && bms::player_route_stops(routes).empty());
+		bms::WaypointRecord &route = routes.waypoint_records[2];
+		route.flags = bms::WaypointFlags::DoesNotLoop | bms::WaypointFlags::PlayerRoute;
+		route.marker_count = 3;
+		route.waypoint_numbers = {4, 1, 7};
+		route.padding.assign(128 - 12, 0);
+		TEST_EXPECT(bms::is_player_route(route) && bms::player_route_stops(routes) == std::vector<uint32_t>({4, 1, 7}));
+		// 35 stops: the 32 slots, then record 3's flags (one stop: the load flags it one-shot), its count, its slot.
+		route.marker_count = 35;
+		route.waypoint_numbers.assign(32, 9);
+		route.padding.clear();
+		bms::WaypointRecord &next = routes.waypoint_records[3];
+		next.marker_count = 1;
+		next.waypoint_numbers = {6};
+		next.padding.assign(124, 0);
+		const std::vector<uint32_t> walked = bms::player_route_stops(routes);
+		TEST_EXPECT(walked.size() == 35 && walked[31] == 9 && walked[32] == 1 && walked[33] == 1 && walked[34] == 6);
+		route.marker_count = 1000;
+		TEST_EXPECT(bms::player_route_stops(routes).size() == bms::kPlayerRouteMaxStops && bms::kPlayerRouteMaxStops == 128);
+		route.marker_count = 0x80000000u;
+		TEST_EXPECT(bms::player_route_stops(routes).empty());
+		// The last record's walk past its slots reads the header block, its first word the magic and version.
+		route.flags = bms::WaypointFlags::DoesNotLoop;
+		bms::WaypointRecord &last = routes.waypoint_records.back();
+		last.flags = bms::WaypointFlags::PlayerRoute;
+		last.marker_count = 33;
+		last.waypoint_numbers.assign(32, 2);
+		last.padding.clear();
+		const uint8_t *head = reinterpret_cast<const uint8_t *>(&routes.header);
+		const uint32_t first = uint32_t(head[0]) | uint32_t(head[1]) << 8 | uint32_t(head[2]) << 16 | uint32_t(head[3]) << 24;
+		const std::vector<uint32_t> tail = bms::player_route_stops(routes);
+		TEST_EXPECT(tail.size() == 33 && tail[31] == 2 && tail[32] == first);
+	}
 
 	TEST_EXPECT(bms::kEventStepTicks == 64 && (1 << bms::kEventStepShift) == bms::kEventStepTicks);
 	TEST_EXPECT(bms::event_steps_wrap(513) && !bms::event_steps_wrap(512) && !bms::event_steps_wrap(0));

@@ -735,7 +735,7 @@ int test_item_classes() {
 	return 0;
 }
 
-// The player's route as the game walks the record a save lays out (bms::player_route_stop_count over the path's
+// The player's route as the game walks the record a save lays out (bms::player_route_stops over the path's
 // stops, its first 32 slots) [orig: NetPacket_WriteWorldStateLoad0x0F @0x502e50]: the first path with the flag, each
 // of its stops' markers on it, no other marker.
 int test_player_route() {
