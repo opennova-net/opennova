@@ -461,10 +461,10 @@ security group; the database and the cache (Valkey, a primary and a replica); th
 SSM parameters the toolbox reads; the operations bucket (`opennova-<deployment>-ops-<account
 id>`: the releases, the dumps and the game data's store, `data/`, with its lifecycle
 rules); the logs, metrics and alarms; the account's budgets; the deployment's
-Cloudflare records (its site's, proxied), its origin certificate; its outbound mail's SES
-identities and records (with a sender); and (with `hosted_enabled`) the fleet's launch
-templates and image parameter, the machine role and web's and the worker's store policies
-(section 7). A new
+Cloudflare records (its site's, proxied; the update service's, unproxied), its origin
+certificate; its outbound mail's SES identities and records (with a sender); the update
+service's listeners; and (with `hosted_enabled`) the fleet's launch templates and image
+parameter, the machine role and web's and the worker's store policies (section 7). A new
 database takes 10 to 15 minutes, a new cache about as long. The services run no task until the deployment's first release: a
 template's images are unpinned (`image_tag`, `latest`), so no task starts from one, and
 each count's floor is 0 until then; the first `app deploy` starts each program at its
@@ -976,8 +976,9 @@ servers.
 
 Admins create and upload data sets on the admin page **Game data** (`/admin/data-sets`;
 ADR 0064). A data set is one product: of kind base (JO, DFX2, OpenNova: its title and the
-lobby it lists in) or expansion (Escalation, code `jox01`, under JO). Its data is a
-**tree**, one immutable version of its files: **Upload data** takes an install's folder
+lobby it lists in) or expansion (Escalation, code `jox01`, under JO), with the login and
+command file retail `UPDATE.EXE` asks for when OpenNova's update service serves it. Its
+data is a **tree**, one immutable version of its files: **Upload data** takes an install's folder
 from a folder picker, keeps only the files `opennova-serve` reads, sends them through the
 site in 32 MiB parts (each a request to web, which puts it in the bucket; the bucket needs
 no CORS rule), and **Finalize** has the worker check the names and sizes and list the
@@ -993,17 +994,22 @@ missions, which are the data set's map rotation (there is no configured one):
 A data set's **current tree** is what new servers start on; a running server is pinned to
 the trees it started on until its owner presses **Update** on its page (the page says an
 update waits), or an admin's **Update servers** does it for every server of the data set,
-and a crash restart or a fleet roll keeps the pins.
+and a crash restart or a fleet roll keeps the pins. A **release** (a 1SFS package built
+with `opennova-update-tool build`, uploaded on the same page) validated and published is
+applied to the data set's baseline tree, which makes its next current tree, and the update
+service serves the package to retail `UPDATE.EXE` ("The update service", below).
 
 The store is the deployment's operations bucket under `data/` (one bucket per deployment,
 so the prefix carries no deployment): `trees/<tree id>/<file>` with its `manifest.json`
-(each file's name and size, the version line). `ONNET_OBJECT_STORE_URL`
+(each file's name and size, the version line), `updates/<sha256>.sfs` (validated packages)
+and `updates/upload-<release id>.sfs` (before validation). `ONNET_OBJECT_STORE_URL`
 (`s3://opennova-<deployment>-ops-<account id>/data`) and `ONNET_OBJECT_STORE_REGION` name
 it to web, the controller and the worker. The machines' hostd fetches a tree with `aws s3
 sync` under the machine role, which reads `data/trees/` and nothing else of the bucket,
 and checks the names and sizes against the manifest; web's and the worker's task roles
 read, write and delete under `data/` alone. The bucket aborts an upload abandoned for 7
-days, and keeps a deleted tree's objects' old versions 7 days. Nothing of the game data
+days, and keeps a deleted object's old version 7 days (a tree's) or 30 (a package's).
+Nothing of the game data
 goes in git, an image or the vault, and nothing of it crosses between the accounts: each
 deployment's admins upload it on its own site, into its own bucket.
 
@@ -1036,6 +1042,7 @@ deployment's admins upload it on its own site, into its own bucket.
    and the worker's fleet policy, web's and the worker's store policies and the game data's
    lifecycle rules; it changes web's, the controller's and the worker's task definitions
    (the `ONNET_HOSTED_*` settings, the store's URL and region; `app converge` takes them).
+   The update service's listeners and record (below) are there whether or not hosting is on.
 
 5. **Deploy**, so the programs read them and pin the serve and hostd images:
    `./deploy/run.sh --deployment staging app deploy --serve-tag sha-<serve> --hostd-tag sha-<serve>`
@@ -1056,6 +1063,21 @@ deployment's admins upload it on its own site, into its own bucket.
 8. **Subscribe, or grant.** An account hosts once it subscribes to a support tier, or an
    admin gives it a comp grant (`comp_servers`, the admin user page). Run the smoke test
    below.
+
+### The update service
+
+Web serves retail `UPDATE.EXE` (ADR 0061) on the updater's four TCP ports (20044, 20556,
+21068 and 21580: `update_ports`, hardcoded in the updater) behind the load balancer, from
+everyone (`allowed_cidrs`): a listener per port, all four forwarding to one target group on
+web's server (ECS admits five target groups per service, and web holds three), so web
+serves every port and a task sees the updater on the first. Where the updater goes is the
+data set's: with `retail_updater` on, its SERVER.LST names `ftp.novaworld.com`, which the
+Switcher's managed block maps to the gate's address, the balancer's zone-a address, so a
+switched client updates from here; with it off, `update.<domain>` (`update.<deployment>.<domain>`
+off prod), an unproxied CNAME to the balancer the deployment's apply makes with the zone
+(web's `ONNET_UPDATE_HOST`; without a zone it is empty and the listener stays off). The
+packages are the published releases of the Game data page; web fetches one from the store
+the first time the updater asks for it, into its task's storage.
 
 ### Fleet commands
 
@@ -1117,7 +1139,7 @@ game data stays in the bucket).
   `app deploy --serve-tag` (the pulled images go stale) and now and then for OS updates.
   A failed bake leaves the parameter alone and says how to read the builder's console.
 - **New data, or a new data set.** On Game data: a new data set is a row, new data a
-  tree uploaded on it, and new servers start on it at once; a
+  tree uploaded on it (or a release published), and new servers start on it at once; a
   running server moves to it when its owner presses Update (or the admin's Update servers
   does), which restarts it on the new tree. Nothing to apply, no roll: a fleet roll keeps
   every server's pins, so a rolled server comes back on the data it ran on. Staging
@@ -1126,9 +1148,10 @@ game data stays in the bucket).
   mid-way leaves the tree `uploading` with its parts in the bucket. Delete the tree on the
   page (its uploads are aborted), or leave it: the bucket aborts them after 7 days. A tree
   `failed` says why in its row; delete it and upload again.
-- **Pruning.** The worker's `tree.prune` (hourly, and after each finalize) removes a tree
-  that is not current and that no live server pins, an hour after it stopped being either;
-  a running server's data is never deleted under it.
+- **Pruning.** The worker's `tree.prune` (hourly, and after each finalize, validate and
+  apply) removes a tree that is neither current nor the baseline and that no live server
+  pins, an hour after it stopped being any of those; a running server's data is never
+  deleted under it. A deleted release's package goes with the release.
 - **A machine's logs.** Every machine writes CloudWatch `/opennova/<deployment>/machines`
   (30 days), a stream per slot and one for its agent, named by the machine's id (the admin
   fleet view's "Machine N, slot k"): `<id>/slot-<k>` holds the output of each server that
@@ -1331,7 +1354,7 @@ Every command here takes the deployment it reads or changes: `--deployment stagi
   no heartbeat for 5 minutes, more boots in 15 minutes than its `max` and 3 (a crash
   loop), fewer tasks running than its `min` for 5 minutes (these two once the programs
   have a release: before the first `app deploy` no task runs, and silence is no alarm),
-  and its CPU or its memory over 80% for 15 minutes; a load balancer target group (the gate, the lobby, 443, the retail port) with
+  and its CPU or its memory over 80% for 15 minutes; a load balancer target group (the gate, the lobby, 443, the retail port, the update service) with
   an unhealthy target for 10 minutes; a failed hosted server, a lost machine, 3 failed
   launches in 15 minutes, a billing sync older than an hour, 5 refused webhooks in 15
   minutes, the entitlement stops held for 5 minutes (`limits_held`: the supervisor's
@@ -1796,9 +1819,10 @@ every command).
 - **B. Operations.** `app status` shows every program's service at its count, its
   rollout COMPLETED on the release's revision; `app logs` shows a stream per container and
   task; the `Heartbeat` metric has points for each `Program`; the SNS email subscription
-  is confirmed; the Route 53 health check is green; the load balancer's four target
-  groups are healthy (EC2, Target groups); `app shell controller` opens a shell; `backup
-  now` writes a dump.
+  is confirmed; the Route 53 health check is green; the load balancer's five target
+  groups (the gate's, the lobby's, 443, the retail port's, the update service's) are
+  healthy (EC2, Target groups); `app shell controller` opens a shell; `backup now` writes
+  a dump.
 - **C. Accounts.** Register, log in, log out; the admin pages open.
 - **D. Billing.** Stripe's "Send test webhook" answers 2xx; subscribe to Tier 1 ($5, test
   card in test mode) or give a comp grant; the account's entitlement shows it.

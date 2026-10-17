@@ -66,7 +66,8 @@ cloudflare_web_proxied = true
 # data's store (the deployment's operations bucket under data/, which admins
 # fill from the site's Game data page) and web's store policy. Before the apply
 # that turns it on, the role boundary with the store's S3 actions is applied
-# through the org stack (infra/aws/iam/README.md).
+# through the org stack (infra/aws/iam/README.md). The update service's
+# listeners and record are there whether or not hosting is on.
 # hosted_enabled         = false
 # shared_instance_type   = "t3a.large"   # unlimited CPU credits; x86_64, no t2
 # own_instance_type      = "c7a.medium"
@@ -76,6 +77,7 @@ cloudflare_web_proxied = true
 # fleet_idle_minutes     = 30
 # machine_root_volume_gb = 40            # the OS, docker, the images and the data trees
 # hosted_ami_id          = ""            # empty: Canonical's newest Ubuntu 24.04
+# update_ports           = [20044, 20556, 21068, 21580] # retail UPDATE.EXE's, fixed
 
 # Alarms and budgets (observability.tf), the deployment's account's. The alert
 # address comes from the vault (item alerts, field email).

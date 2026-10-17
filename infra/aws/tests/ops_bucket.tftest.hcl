@@ -7,8 +7,9 @@
 # account; the dumps expire and the releases' old versions go as before. The
 # game data (data/, ADR 0064; one bucket per deployment, so no deployment
 # segment): an upload abandoned 7 days aborted, the trees' old versions kept
-# 7 days; no CORS rule (the admin page's uploads pass through the site).
-# Staging's bucket carries the same rules.
+# 7 days and the packages' 30 (a rule per prefix, since of two rules on one
+# key S3 keeps the shorter); no CORS rule (the admin page's uploads pass
+# through the site). Staging's bucket carries the same rules.
 
 mock_provider "aws" {
   override_during = plan
@@ -289,11 +290,12 @@ run "bucket" {
   assert {
     condition = (
       toset([for r in aws_s3_bucket_lifecycle_configuration.ops.rule : r.id]) == toset([
-        "expire-old-backups", "release-old-versions", "data-abandoned-uploads", "data-trees-old-versions",
+        "expire-old-backups", "release-old-versions", "data-abandoned-uploads",
+        "data-trees-old-versions", "data-updates-old-versions",
       ]) &&
       alltrue([for r in aws_s3_bucket_lifecycle_configuration.ops.rule : r.status == "Enabled"])
     )
-    error_message = "the dumps' and the releases' rules as before, and the game data's: the abandoned uploads and the trees"
+    error_message = "the dumps' and the releases' rules as before, and the game data's: the abandoned uploads, the trees and the packages"
   }
   assert {
     condition = alltrue([
@@ -304,12 +306,11 @@ run "bucket" {
     error_message = "an upload abandoned under data/ is aborted after 7 days, and that rule expires nothing"
   }
   assert {
-    condition = alltrue([
-      for r in aws_s3_bucket_lifecycle_configuration.ops.rule :
-      one(r.filter).prefix == "data/trees/" && one(r.noncurrent_version_expiration).noncurrent_days == 7 && length(r.expiration) == 0
-      if r.id == "data-trees-old-versions"
-    ])
-    error_message = "the trees' old versions go after 7 days; the rule expires no current object"
+    condition = alltrue(concat(
+      [for r in aws_s3_bucket_lifecycle_configuration.ops.rule : one(r.filter).prefix == "data/trees/" && one(r.noncurrent_version_expiration).noncurrent_days == 7 && length(r.expiration) == 0 if r.id == "data-trees-old-versions"],
+      [for r in aws_s3_bucket_lifecycle_configuration.ops.rule : one(r.filter).prefix == "data/updates/" && one(r.noncurrent_version_expiration).noncurrent_days == 30 && length(r.expiration) == 0 if r.id == "data-updates-old-versions"],
+    ))
+    error_message = "the trees' old versions go after 7 days, the packages' after 30; neither rule expires a current object"
   }
   assert {
     condition = alltrue([
@@ -333,8 +334,8 @@ run "staging" {
   assert {
     condition = (
       aws_s3_bucket.ops.bucket == "opennova-staging-ops-123456789012" &&
-      length(aws_s3_bucket_lifecycle_configuration.ops.rule) == 4
+      length(aws_s3_bucket_lifecycle_configuration.ops.rule) == 5
     )
-    error_message = "staging's own bucket, the same four rules"
+    error_message = "staging's own bucket, the same five rules"
   }
 }

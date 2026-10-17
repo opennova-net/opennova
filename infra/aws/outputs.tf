@@ -63,9 +63,14 @@ output "web_domain" {
   description = "The site's hostname"
 }
 
+output "update_host" {
+  value       = local.update_host != "" ? local.update_host : null
+  description = "The update service's hostname, an unproxied record at the load balancer (web's ONNET_UPDATE_HOST; retail UPDATE.EXE reaches it on the update ports); null without a zone"
+}
+
 output "ops_bucket" {
   value       = local.ops_bucket_name
-  description = "The deployment's operations bucket: the release manifests (releases/), the game data's store (data/: the data sets' trees) and the database dumps (novaworld/)"
+  description = "The deployment's operations bucket: the release manifests (releases/), the game data's store (data/: the data sets' trees and the update packages) and the database dumps (novaworld/)"
 }
 
 output "ssm_prefix" {

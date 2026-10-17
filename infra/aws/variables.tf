@@ -368,6 +368,17 @@ variable "hosted_enabled" {
   default     = false
 }
 
+variable "update_ports" {
+  description = "The TCP ports retail UPDATE.EXE reaches an update service on, hardcoded in the updater (docs/update/updater-re.md): the load balancer listens on each, forwarding to web, which serves them all (ONNET_UPDATE_PORTS). The updater's are fixed; another set is only for a stack serving another client."
+  type        = list(number)
+  default     = [20044, 20556, 21068, 21580]
+
+  validation {
+    condition     = length(var.update_ports) >= 1 && length(distinct(var.update_ports)) == length(var.update_ports) && alltrue([for p in var.update_ports : p >= 1024 && p <= 65535 && floor(p) == p])
+    error_message = "update_ports takes at least one port, each a whole number 1024..65535, none repeated."
+  }
+}
+
 variable "shared_instance_type" {
   description = "The shared machines' type: up to shared_slots servers each. A burstable type runs with unlimited CPU credits (the launch template sets them). x86_64 only (the serve image's), and no t2."
   type        = string

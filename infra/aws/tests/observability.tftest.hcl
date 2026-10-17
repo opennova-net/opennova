@@ -404,7 +404,7 @@ run "observability" {
   }
   assert {
     condition = (
-      toset(keys(aws_cloudwatch_metric_alarm.lb_unhealthy)) == toset(["gate", "lobby", "http"]) &&
+      toset(keys(aws_cloudwatch_metric_alarm.lb_unhealthy)) == toset(["gate", "lobby", "http", "update"]) &&
       aws_cloudwatch_metric_alarm.lb_unhealthy["gate"].namespace == "AWS/NetworkELB" &&
       aws_cloudwatch_metric_alarm.lb_unhealthy["gate"].metric_name == "UnHealthyHostCount" &&
       aws_cloudwatch_metric_alarm.lb_unhealthy["gate"].dimensions == tomap({ LoadBalancer = "net/opennova-prod/0123456789abcdef", TargetGroup = "targetgroup/opennova-prod-gate/0123456789abcdef" })

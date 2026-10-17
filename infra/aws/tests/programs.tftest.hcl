@@ -10,7 +10,8 @@
 # task with 40 GiB of storage, the others Fargate's 20), health-checked
 # on /livez, an init as PID 1, its logs under its program's prefix, and the
 # environment and secrets its program reads and no other's (web's with the
-# portal's nginx beside it, which starts once the server answers); five
+# portal's nginx beside it, which starts once the server answers, and the
+# update service's host and ports); five
 # services on platform 1.4 in both public subnets with public addresses, ECS
 # Exec on, the deployment circuit breaker rolling back, every deployment
 # new-first, ignoring the deploy's revisions and the scaler's counts; a
@@ -343,18 +344,18 @@ run "task_definitions" {
     condition = (
       toset([for m in jsondecode(aws_ecs_task_definition.program["gate"].container_definitions)[0].portMappings : "${m.protocol}/${m.containerPort}"]) == toset(["udp/7597", "tcp/8081"]) &&
       toset([for m in jsondecode(aws_ecs_task_definition.program["lobby"].container_definitions)[0].portMappings : "${m.protocol}/${m.containerPort}"]) == toset(["udp/64206", "tcp/8081"]) &&
-      toset([for m in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].portMappings : "${m.protocol}/${m.containerPort}"]) == toset(["tcp/8080", "tcp/8081"]) &&
+      toset([for m in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].portMappings : "${m.protocol}/${m.containerPort}"]) == toset(["tcp/8080", "tcp/8081", "tcp/20044", "tcp/20556", "tcp/21068", "tcp/21580"]) &&
       toset([for m in jsondecode(aws_ecs_task_definition.program["controller"].container_definitions)[0].portMappings : "${m.protocol}/${m.containerPort}"]) == toset(["tcp/8070", "tcp/8081"]) &&
       toset([for m in jsondecode(aws_ecs_task_definition.program["worker"].container_definitions)[0].portMappings : "${m.protocol}/${m.containerPort}"]) == toset(["tcp/8081"])
     )
-    error_message = "each container's ports: the gate's UDP, the lobby's UDP, web's HTTP, the controller's internal listener, and every program's health port"
+    error_message = "each container's ports: the gate's UDP, the lobby's UDP, web's HTTP and the updater's four, the controller's internal listener, and every program's health port"
   }
   assert {
     condition = (
       length(aws_ecs_task_definition.program["worker"].ephemeral_storage) == 1 && aws_ecs_task_definition.program["worker"].ephemeral_storage[0].size_in_gib == 40 &&
       alltrue([for p in ["gate", "lobby", "web", "controller"] : length(aws_ecs_task_definition.program[p].ephemeral_storage) == 0])
     )
-    error_message = "the worker's task has 40 GiB of storage (a tree's files pass through it); the others keep Fargate's default"
+    error_message = "the worker's task has 40 GiB of storage (a tree's files and a release's package pass through it); the others keep Fargate's default"
   }
   assert {
     condition = (
@@ -459,6 +460,14 @@ run "environments" {
     error_message = "web trusts its own nginx on the task's loopback, answers /api/ to it alone, sets a Secure cookie on the https site"
   }
   assert {
+    condition = (
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_UPDATE_HOST"] == "update.example.com" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_UPDATE_PORTS"] == "20044,20556,21068,21580" &&
+      alltrue([for p in ["gate", "lobby", "controller", "worker"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_UPDATE_")])
+    )
+    error_message = "web alone serves the update service: at the update record's name, on the updater's four ports"
+  }
+  assert {
     condition = alltrue([
       for p in ["web", "controller", "worker"] :
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_INTERNAL_URL"] == "http://controller.prod.opennova.internal:8070" &&
@@ -476,10 +485,11 @@ run "environments" {
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_CACHE"] == "opennova-prod-cache" &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_RELEASE_PARAMETER"] == "/opennova/prod/release" &&
       jsondecode({ for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_INFRA_TARGET_GROUPS"]) == {
-        gate  = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-gate/0123456789abcdef"
-        lobby = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-mock/0123456789abcdef"
-        http  = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-http/0123456789abcdef"
-        https = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-https/0123456789abcdef"
+        gate   = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-gate/0123456789abcdef"
+        lobby  = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-mock/0123456789abcdef"
+        http   = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-http/0123456789abcdef"
+        https  = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-https/0123456789abcdef"
+        update = "arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-mock/0123456789abcdef"
       } &&
       alltrue([for p in ["gate", "lobby", "controller", "worker"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INFRA_")])
     )

@@ -15,7 +15,7 @@
 # it, web's ephemeral state Valkey (ONNET_REDIS_URL, with ONNET_REDIS_PASSWORD
 # beside it), and the hosted servers' game data the object store (a deployment's
 # S3; here the `store` volume, a directory web and the worker share: the data
-# sets' trees the site's Game data page uploads). The
+# sets' trees and the update packages the site's Game data page uploads). The
 # dev overlay (docker-compose.dev.yml) makes
 # this the local stack: a local PostgreSQL and Valkey, the published ports and
 # the dev environment; the hosting overlay (docker-compose.hosting.yml) adds the
@@ -97,12 +97,12 @@ x-novaworld-env: &novaworld-env
   ONNET_HOSTED_PROVIDER: ${ONNET_HOSTED_PROVIDER:-none}
   ONNET_HOSTED_CAP: ${ONNET_HOSTED_CAP:-}
   # The game data's store (apps/novaworld_common/object_store.h; ADR 0064):
-  # the data sets' trees, which the site's Game data page fills; hosting is
-  # on only with one. A deployment names its bucket in S3 (s3://<bucket>/data,
-  # with the region); this stack a directory, the store volume below, shared
-  # by web (the page's uploads, which it puts there part by part) and the
-  # worker (the trees it finalizes); the controller only builds URLs under it
-  # and mounts nothing.
+  # the data sets' trees and the update packages, which the site's Game data
+  # page fills; hosting is on only with one. A deployment names its bucket in
+  # S3 (s3://<bucket>/data, with the region); this stack a directory, the
+  # store volume below, shared by web (the page's uploads, which it puts there
+  # part by part) and the worker (the trees it builds); the controller only
+  # builds URLs under it and mounts nothing.
   ONNET_OBJECT_STORE_URL: ${ONNET_OBJECT_STORE_URL:-file:///var/lib/opennova/store}
   ONNET_OBJECT_STORE_REGION: ${ONNET_OBJECT_STORE_REGION:-}
   # Billing, the monthly support tiers over Stripe: on only when the set is
@@ -163,6 +163,11 @@ services:
       # or rediss:// host:port[/db], and its AUTH token apart from it.
       ONNET_REDIS_URL: ${ONNET_REDIS_URL:-}
       ONNET_REDIS_PASSWORD: ${ONNET_REDIS_PASSWORD:-}
+      # The update service for retail UPDATE.EXE (ADR 0061): on with a host
+      # name (the one SERVER.LST sends the updater to), on the updater's TCP
+      # ports (unset: 20044,20556,21068,21580; the dev overlay publishes them).
+      ONNET_UPDATE_HOST: ${ONNET_UPDATE_HOST:-}
+      ONNET_UPDATE_PORTS: ${ONNET_UPDATE_PORTS:-}
     volumes:
       - store:/var/lib/opennova/store
 
@@ -213,6 +218,6 @@ services:
       - novaworld-web
 
 volumes:
-  # The local game data store (ONNET_OBJECT_STORE_URL above): the trees the
-  # Game data page uploads; `down -v` wipes it.
+  # The local game data store (ONNET_OBJECT_STORE_URL above): the trees and
+  # packages the Game data page uploads; `down -v` wipes it.
   store:

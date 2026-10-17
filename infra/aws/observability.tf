@@ -318,7 +318,7 @@ resource "aws_cloudwatch_metric_alarm" "program_utilization" {
 
 # A target the load balancer has stopped sending to, for 10 minutes: a gate
 # task (UDP), a lobby task (UDP), web's portal (443) or web's server (the
-# retail port).
+# retail port, the update service), one alarm per target group.
 resource "aws_cloudwatch_metric_alarm" "lb_unhealthy" {
   for_each = local.lb_listeners
 
