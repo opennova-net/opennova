@@ -13,7 +13,7 @@
         {{
           retry
             ? 'That server failed. Check its settings and try again.'
-            : 'Pick your settings and start. Your server stays in the server browser until you stop it.'
+            : 'It stays listed until you stop it.'
         }}
       </p>
     </div>
@@ -72,8 +72,8 @@
           :class="inputClass"
         />
         <p :id="hintId('game_name')" class="text-xs text-ink-muted">
-          {{ cp1252Length(form.game_name.trim()) }} of {{ GAME_NAME_MAX }} characters. Players see it in the
-          server browser. Accented letters work; emoji, most other scripts and double quotes do not.
+          {{ cp1252Length(form.game_name.trim()) }} of {{ GAME_NAME_MAX }} characters. Accented letters work; emoji and
+          double quotes do not.
         </p>
         <p v-if="errors.game_name" :id="errorId('game_name')" class="text-xs text-danger">{{ errors.game_name }}</p>
       </div>
@@ -106,8 +106,8 @@
           </button>
         </div>
         <p :id="hintId('game_password')" class="text-xs text-ink-muted">
-          Leave it empty for a public server. Players type it to join. Up to {{ GAME_PASSWORD_MAX }} letters,
-          digits and ASCII punctuation, with no space or double quote.
+          Empty for a public server. Up to {{ GAME_PASSWORD_MAX }} letters, digits and ASCII punctuation; no spaces or
+          double quotes.
         </p>
         <p v-if="errors.game_password" :id="errorId('game_password')" class="text-xs text-danger">
           {{ errors.game_password }}
@@ -232,7 +232,6 @@
         Own machine
       </label>
       <p :id="`${baseId}-own_machine-hint`" class="text-xs text-ink-muted">
-        Run this server alone on one of your own machines instead of a shared one.
         {{ ownMachinesFree === 1 ? 'One of your own machines is free.' : `${ownMachinesFree} of your own machines are free.` }}
       </p>
     </div>

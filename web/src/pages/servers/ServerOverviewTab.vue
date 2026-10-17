@@ -179,8 +179,8 @@
     <section v-if="server.live && server.state !== 'stopping'" class="space-y-3 rounded-panel border border-danger/40 p-4" :aria-labelledby="ids.stop">
       <h2 :id="ids.stop" class="text-lg font-semibold text-danger">Stop the server</h2>
       <p class="text-sm text-ink-muted">
-        Ends the match for everyone on it.
-        <template v-if="scope === 'owner'">Its settings stay here, so you can start it again. {{ STOPPING_STILL_COUNTS }}</template>
+        Ends the match for everyone.
+        <template v-if="scope === 'owner'">You can start it again. {{ STOPPING_STILL_COUNTS }}</template>
       </p>
       <button
         v-if="!confirmingStop"

@@ -119,8 +119,7 @@
     <section class="space-y-4 rounded-panel border border-border p-4 sm:p-6" aria-labelledby="jobs-prune">
       <h2 id="jobs-prune" class="text-xl font-semibold text-ink">Prune finished jobs</h2>
       <p class="text-sm text-ink-muted">
-        Finished jobs are kept 14 days, then pruned every hour. Prune sooner to delete the done and failed jobs older than
-        the time chosen; a worker does it within a few seconds. Waiting and running jobs are never pruned.
+        Finished jobs are pruned after 14 days. Prune sooner here; waiting and running jobs are kept.
       </p>
       <form class="flex flex-wrap items-end gap-3" @submit.prevent="prune">
         <label class="space-y-1">

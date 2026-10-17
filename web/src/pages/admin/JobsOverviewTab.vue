@@ -4,9 +4,8 @@
     <section class="space-y-4" aria-labelledby="jobs-attention">
       <h2 id="jobs-attention" class="text-xl font-semibold text-ink">Needs attention</h2>
       <p class="text-sm text-ink-muted">
-        Jobs that failed in the last day, their attempts used up or failed for good (an admin's cancels left out), alike
-        failures together: the same kind, and the same error once its ids, numbers and times are set aside. A retry queues
-        each of them again to run now with one more attempt.
+        Jobs that failed in the last day, grouped by kind and error. Retry gives each one more attempt now; Dismiss
+        deletes them.
       </p>
       <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
         <table class="min-w-full divide-y divide-border">
@@ -74,9 +73,8 @@
     <section class="space-y-4" aria-labelledby="jobs-workers">
       <h2 id="jobs-workers" class="text-xl font-semibold text-ink">Workers</h2>
       <p class="text-sm text-ink-muted">
-        A worker holds each job under a lease of a minute that it renews while the job runs. A lease that ran out means its
-        process went away; the keeper queues the job again. A process shows once one of its threads has taken a job in the
-        last hour.
+        Processes that took a job in the last hour. A job's one-minute lease is renewed while it runs; one that runs out
+        puts the job back in the queue.
       </p>
       <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
         <table class="min-w-full divide-y divide-border">

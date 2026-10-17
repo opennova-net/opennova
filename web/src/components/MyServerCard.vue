@@ -85,8 +85,7 @@
           <button type="submit" :disabled="busy" :class="primaryButton">Rename</button>
         </div>
         <p :id="ids.nameHint" class="text-xs text-ink-muted">
-          {{ cp1252Length(name) }} of 31 characters. Accented letters work; emoji and most other
-          scripts do not.
+          {{ cp1252Length(name) }} of 31 characters.
         </p>
       </form>
 

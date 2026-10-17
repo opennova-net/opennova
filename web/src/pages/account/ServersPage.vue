@@ -4,8 +4,7 @@
       <div>
         <h1 ref="heading" tabindex="-1" class="text-3xl font-semibold text-ink focus:outline-none">Servers</h1>
         <p class="mt-1 text-sm text-ink-muted">
-          The servers NovaWorld hosts for you, and the games you host yourself as
-          <span class="font-medium text-ink">{{ user?.username ?? 'your account' }}</span>.
+          Servers NovaWorld hosts for you, and games you host yourself.
         </p>
       </div>
       <div class="flex items-center gap-3">

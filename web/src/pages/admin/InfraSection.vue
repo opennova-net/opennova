@@ -4,8 +4,7 @@
       <div>
         <h1 class="text-3xl font-semibold text-ink">Infrastructure</h1>
         <p class="text-sm text-ink-muted">
-          The deployment as it runs: each program's ECS service and its tasks, the load balancer's targets, the
-          database and the cache, the lobby instances, the controller and the fleet's machines.
+          The deployment as it runs, read from AWS and the database.
         </p>
       </div>
       <div class="flex items-center gap-3">
@@ -277,8 +276,7 @@
       <section class="space-y-4" aria-labelledby="infra-lobbies">
         <h2 id="infra-lobbies" class="text-xl font-semibold text-ink">Lobby instances</h2>
         <p class="text-sm text-ink-muted">
-          One per lobby task, each moving its row every few seconds. Every instance announces the one lobby address; a
-          draining one takes no new client. Their sessions are on
+          One per lobby task; a draining one takes no new client. Their sessions are on
           <RouterLink to="/admin/sessions" class="text-accent hover:text-ink-bright">NovaWorld sessions</RouterLink>.
         </p>
         <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
