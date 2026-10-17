@@ -1255,7 +1255,7 @@ bool write_file(const File& file, const std::string& path, std::string& error) {
         return false;
     }
 
-    std::ofstream out_file(path, std::ios::binary);
+    std::ofstream out_file(io::os_path(path), std::ios::binary); // UTF-8, long-path safe
     if (!out_file) {
         error = "Cannot create file: " + path;
         return false;

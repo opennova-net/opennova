@@ -2,6 +2,7 @@
 #include <base/io/strutil.h>
 
 #include <base/io/le.h>
+#include <base/io/os_path.h>
 
 #include <algorithm>
 #include <cctype>
@@ -389,7 +390,7 @@ bool parse(const uint8_t *data, size_t size, File &out, std::string &error) {
 }
 
 bool parse_file(const std::string &path, File &out, std::string &error) {
-  std::ifstream f(path, std::ios::binary);
+  std::ifstream f(io::os_path(path), std::ios::binary); // UTF-8, long-path safe
   if (!f) {
     error = "Unable to open RTXT file: " + path;
     return false;
@@ -517,7 +518,7 @@ bool write_file(const File &file, const std::string &path, std::string &error) {
     return false;
   }
 
-  std::ofstream f(path, std::ios::binary);
+  std::ofstream f(io::os_path(path), std::ios::binary); // UTF-8, long-path safe
   if (!f) {
     error = "Unable to open file for writing: " + path;
     return false;

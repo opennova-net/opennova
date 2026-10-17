@@ -19,6 +19,7 @@
 #include <sstream>
 
 #include <base/io/cp1252.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
 namespace opennova::mnu {
@@ -1956,7 +1957,7 @@ bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
 
 bool parse_file(const std::string &path, Document &out, std::string &error,
                 std::vector<ParseNote> *notes) {
-  std::ifstream file(path, std::ios::binary);
+  std::ifstream file(io::os_path(path), std::ios::binary); // UTF-8, long-path safe
   if (!file) {
     error = "Failed to open file: " + path;
     return false;

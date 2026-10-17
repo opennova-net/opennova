@@ -106,6 +106,13 @@ target_link_libraries(threedi_utf8_path_test PRIVATE opennova_formats)
 target_include_directories(threedi_utf8_path_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME threedi_utf8_path COMMAND threedi_utf8_path_test)
 
+# The formats' fstream opens (RTXT, CPT, .bms, .mnu, particles) under a UTF-8 path no ANSI code
+# page spells (io::os_path).
+add_executable(utf8_format_paths_test io/utf8_format_paths_test.cpp)
+target_link_libraries(utf8_format_paths_test PRIVATE opennova_formats)
+target_include_directories(utf8_format_paths_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME utf8_format_paths COMMAND utf8_format_paths_test)
+
 # Every retail model through the reader and the writer the editor saves by:
 # byte-identical and a fixed point (OPENNOVA_JO_ASSETS).
 add_executable(threedi_retail_rewrite_test threedi/retail_rewrite_test.cpp)
