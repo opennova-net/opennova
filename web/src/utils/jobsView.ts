@@ -28,6 +28,7 @@ const KIND_LABELS: Record<string, string> = {
   'billing_events.prune': 'Prune old billing events',
   'stats.prune': "Prune old hosted servers' stats and ended machines",
   'jobs.prune': 'Prune finished jobs',
+  'unknown_messages.prune': 'Prune old unknown messages',
 };
 
 // "Launch a fleet machine": what a kind does; the kind itself for one this

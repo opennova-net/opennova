@@ -924,7 +924,8 @@ target_include_directories(ecs_metadata_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}
 add_test(NAME ecs_metadata COMMAND ecs_metadata_test)
 
 # Unknown-message tracker: record/dedup, sample cap, flush/upsert against the
-# migrated unknown_messages table (OPENNOVA_SOURCE_DIR for the SQL on disk), snapshot.
+# migrated unknown_messages table (OPENNOVA_SOURCE_DIR for the SQL on disk), snapshot,
+# the bounded signatures and keys, and the age prune.
 add_executable(unknown_tracker_test novaworld/unknown_tracker_test.cpp)
 target_link_libraries(unknown_tracker_test PRIVATE opennova_novaworld_service)
 target_include_directories(unknown_tracker_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

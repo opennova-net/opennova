@@ -271,19 +271,32 @@ std::string ReleaseCatalog::command_file_name(std::string_view login) const {
 	return product ? product->command_file : std::string();
 }
 
+std::string ReleaseCatalog::path_of(std::string_view login, std::string_view name) const {
+	std::lock_guard<std::mutex> lock(mu_);
+	const Product *product = find(login);
+	if (product == nullptr)
+		return {};
+	const auto it = product->files.find(strutil::to_upper(name));
+	return it == product->files.end() ? std::string() : it->second;
+}
+
+std::unique_ptr<update::UpdateFile> ReleaseCatalog::open_file(
+		std::string_view login, std::string_view name) const {
+	const std::string path = path_of(login, name);
+	if (path.empty())
+		return nullptr;
+	std::unique_ptr<update::UpdateFile> file = update::UpdateFile::from_disk(path);
+	if (!file)
+		std::fprintf(stderr, "[update] WARN %s's %s does not open\n", std::string(login).c_str(),
+				std::string(name).c_str());
+	return file;
+}
+
 bool ReleaseCatalog::read_file(
 		std::string_view login, std::string_view name, std::vector<uint8_t> &out) const {
-	std::string path;
-	{
-		std::lock_guard<std::mutex> lock(mu_);
-		const Product *product = find(login);
-		if (product == nullptr)
-			return false;
-		const auto it = product->files.find(strutil::to_upper(name));
-		if (it == product->files.end())
-			return false;
-		path = it->second;
-	}
+	const std::string path = path_of(login, name);
+	if (path.empty())
+		return false;
 	std::string error;
 	if (!io::read_file_bytes(path, out, error)) {
 		std::fprintf(stderr, "[update] WARN %s's %s does not read: %s\n",

@@ -177,7 +177,7 @@ reach the published ports there too. It prints what to point a client at when it
 |---|---|---|
 | `novaworld-gate` | `7597/udp` | the gate: a retail client's probe, answered with the live lobby |
 | `novaworld-lobby` | `64206/udp` | a lobby instance: sessions, the server browser, listings |
-| `novaworld-web` | `8080/tcp` | the retail `NW*.dll` and `.gsb` routes |
+| `novaworld-web` | `8080/tcp` | the retail `NW*.dll` and `.gsb` routes, through the portal's retail server (its 8082, in front of web's own 8080, as deployed) |
 | `portal` | `http://localhost:8000` | the site (prod's nginx in web's network, as in web's ECS task) and its `/api` |
 | `novaworld-controller`, `novaworld-worker` | none | the supervisor and the jobs; the machines' internal listener at `172.30.77.10:8070` |
 | `postgres`, `valkey` | none | the database (the `pg_data` volume), web's state |

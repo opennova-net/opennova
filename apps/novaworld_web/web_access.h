@@ -34,7 +34,10 @@ struct ServerConfig;
 // served only through the proxy that applies the edge checks (prod's nginx,
 // DEPLOY.md), while the retail routes a stock client reaches on this port
 // directly (the NW*.dll pages, the .gsb feeds, the templates and static
-// files) stay open. After it: the renewed session cookie of a request whose
+// files) stay open; and first of all, a request from the retail port's proxy
+// (ONNET_RETAIL_PROXY) takes the client's address it names in X-Real-IP as
+// its own, before any check or route reads it. After it: the renewed session
+// cookie of a request whose
 // session the store slid forward (WebSessionLookup::slid), whatever route
 // answered it, and the admin state change require_admin let through, logged
 // with its actor once the handler has answered (so the line carries the
@@ -50,6 +53,7 @@ struct AccessMiddleware {
 	// Set by WebAccess::configure before any route runs.
 	bool api_proxy_only = false;
 	std::vector<std::string> trusted_proxies;
+	std::string retail_proxy;
 };
 
 // The HttpListener's Crow app.
@@ -72,7 +76,8 @@ crow::response too_many_requests(int64_t wait);
 // buckets apart, so an address the website login is braked by (an X-Real-IP
 // nginx took from a CF-Connecting-IP, which a Cloudflare Worker can set to
 // any value) never brakes the retail login, which keys on the TCP peer (a
-// stock client reaches :8080 directly, through no proxy).
+// stock client reaches :8080 through no proxy but the retail port's own,
+// ONNET_RETAIL_PROXY, whose X-Real-IP is its TCP peer and stands in for it).
 enum class LoginRoute { Web, Retail };
 
 // The failure buckets one password check drew from (begin_password_check):

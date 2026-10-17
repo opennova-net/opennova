@@ -751,6 +751,14 @@ target_link_libraries(update_server_test PRIVATE opennova_net)
 target_include_directories(update_server_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 add_test(NAME update_server COMMAND update_server_test)
 
+# The update listener's pump (apps/common/update_tcp_server) over loopback: a client that
+# pipelines GETs and reads none of their replies is read no further once they back up, what the
+# listener holds for it bounded, and a client beside it served whole and in order.
+add_executable(update_tcp_server_test update/update_tcp_server_test.cpp)
+target_link_libraries(update_tcp_server_test PRIVATE opennova_net opennova_app_common Threads::Threads)
+target_include_directories(update_tcp_server_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME update_tcp_server COMMAND update_tcp_server_test)
+
 # opennova-update-tool's core: a packed update built from two synthetic trees and served on a
 # loopback port.
 add_executable(update_tool_test update/update_tool_test.cpp)

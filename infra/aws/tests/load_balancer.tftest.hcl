@@ -6,12 +6,13 @@
 # An internet-facing network load balancer across both zones, cross-zone,
 # zone a on the gate's (adopted) Elastic IP and zone b on one of its own; UDP
 # 7597 to the gate's tasks, UDP 64206 to the lobby's, TCP 443 to web's portal,
-# the retail port to web's server, and the updater's four ports to one target
-# group on web's server (ECS admits five per service), IP targets that see
-# each client's own address; health on the gate's and the lobby's /livez
-# (their health port), 443's handshake and /healthz (the retail port's and the
-# update group's); the UDP flows ended with the deregistration delay, the
-# lobby's 10 s; the gate, the lobby, the retail port and the update ports from
+# the retail port to the portal's retail server (8082, in front of web's
+# server; no balancer path reaches web's own 8080), and the updater's four
+# ports to one target group on web's server (ECS admits five per service), IP
+# targets that see each client's own address; health on the gate's and the
+# lobby's /livez (their health port), 443's handshake and /healthz through the
+# retail server (the retail port's and the update group's); the UDP flows
+# ended with the deregistration delay, the lobby's 10 s; the gate, the lobby, the retail port and the update ports from
 # everyone, 443 from Cloudflare's ranges alone; the balancer's group sends to
 # the gate's, the lobby's and web's alone, and theirs admit it; the gate's,
 # the lobby's and web's services register with their target groups; Route
@@ -319,13 +320,14 @@ run "load_balancer" {
       aws_lb_target_group.public["https"].health_check[0].protocol == "TCP" &&
       aws_lb_target_group.public["http"].protocol == "TCP" && aws_lb_target_group.public["http"].port == 8080 &&
       aws_lb_target_group.public["http"].health_check[0].protocol == "HTTP" && aws_lb_target_group.public["http"].health_check[0].path == "/healthz" &&
+      aws_lb_target_group.public["http"].health_check[0].port == "traffic-port" &&
       aws_lb_target_group.public["update"].protocol == "TCP" && aws_lb_target_group.public["update"].port == 20044 &&
-      aws_lb_target_group.public["update"].health_check[0].protocol == "HTTP" && aws_lb_target_group.public["update"].health_check[0].port == "8080" &&
+      aws_lb_target_group.public["update"].health_check[0].protocol == "HTTP" && aws_lb_target_group.public["update"].health_check[0].port == "8082" &&
       aws_lb_target_group.public["update"].health_check[0].path == "/healthz" && aws_lb_target_group.public["update"].health_check[0].matcher == "200" &&
       toset(keys(aws_lb_target_group.public)) == toset(["gate", "lobby", "https", "http", "update"]) &&
       alltrue([for tg in aws_lb_target_group.public : tg.target_type == "ip" && tg.preserve_client_ip == "true"])
     )
-    error_message = "the gate's and the lobby's UDP ports, 443, the retail port and the update service (one group, on the first update port) to IP targets that see each client's own address; health: the gate's and the lobby's /livez on their health port, 443's handshake, /healthz on the retail port"
+    error_message = "the gate's and the lobby's UDP ports, 443, the retail port and the update service (one group, on the first update port) to IP targets that see each client's own address; health: the gate's and the lobby's /livez on their health port, 443's handshake, /healthz through the portal's retail server (the retail group's traffic port, the update group's 8082)"
   }
   assert {
     condition = (
@@ -362,14 +364,14 @@ run "load_balancer" {
   assert {
     condition = (
       toset([for r in aws_vpc_security_group_egress_rule.lb : "${r.referenced_security_group_id} ${r.ip_protocol}/${r.from_port}"]) ==
-      toset(["sg-0gate udp/7597", "sg-0gate tcp/8081", "sg-0lobby udp/64206", "sg-0lobby tcp/8081", "sg-0web tcp/443", "sg-0web tcp/8080", "sg-0web tcp/20044"])
+      toset(["sg-0gate udp/7597", "sg-0gate tcp/8081", "sg-0lobby udp/64206", "sg-0lobby tcp/8081", "sg-0web tcp/443", "sg-0web tcp/8082", "sg-0web tcp/20044"])
     )
-    error_message = "the balancer sends to the gate and the lobby (each its UDP port and its health port) and web (443, the retail port, the update group's port) alone"
+    error_message = "the balancer sends to the gate and the lobby (each its UDP port and its health port) and web (443, the portal's retail server, the update group's port; never web's own 8080) alone"
   }
   assert {
     condition = (
       toset([for r in aws_vpc_security_group_ingress_rule.from_lb : "${r.security_group_id} ${r.ip_protocol}/${r.from_port}"]) ==
-      toset(["sg-0gate udp/7597", "sg-0gate tcp/8081", "sg-0lobby udp/64206", "sg-0lobby tcp/8081", "sg-0web tcp/443", "sg-0web tcp/8080", "sg-0web tcp/20044"]) &&
+      toset(["sg-0gate udp/7597", "sg-0gate tcp/8081", "sg-0lobby udp/64206", "sg-0lobby tcp/8081", "sg-0web tcp/443", "sg-0web tcp/8082", "sg-0web tcp/20044"]) &&
       alltrue([for r in aws_vpc_security_group_ingress_rule.from_lb : r.referenced_security_group_id == "sg-0lb" && r.cidr_ipv4 == null])
     )
     error_message = "the gate, the lobby and web admit the balancer's group on their target ports (the update group's among web's) and health ports"
@@ -384,7 +386,7 @@ run "load_balancer" {
       ]) &&
       toset([for l in aws_ecs_service.program["web"].load_balancer : "${l.container_name}:${l.container_port}=${l.target_group_arn}"]) == toset([
         "portal:443=arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-https/0123456789abcdef",
-        "web:8080=arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-http/0123456789abcdef",
+        "portal:8082=arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-http/0123456789abcdef",
         "web:20044=arn:aws:elasticloadbalancing:us-east-1:123456789012:targetgroup/opennova-prod-update/0123456789abcdef",
       ]) &&
       alltrue([for p in ["controller", "worker"] : length(aws_ecs_service.program[p].load_balancer) == 0]) &&
@@ -392,7 +394,7 @@ run "load_balancer" {
       aws_ecs_service.program["lobby"].network_configuration[0].assign_public_ip &&
       aws_lb.public.enable_deletion_protection
     )
-    error_message = "the gate's service registers its gate container on UDP 7597, the lobby's its lobby container on UDP 64206, web's its portal on 443 and its server on the retail port and the update port (three target groups, under ECS's five); no other program is behind the balancer, which deletion protection keeps"
+    error_message = "the gate's service registers its gate container on UDP 7597, the lobby's its lobby container on UDP 64206, web's its portal on 443 and on the retail server (8082, the retail port's group) and its server on the update port (three target groups, under ECS's five); no other program is behind the balancer, which deletion protection keeps"
   }
   assert {
     condition = (
@@ -412,7 +414,8 @@ run "load_balancer" {
 }
 
 # Without Cloudflare there is no origin certificate (nginx listens on 80):
-# no 443 listener, target group or rule, and web registers its server alone.
+# no 443 listener, target group or rule, and web registers the portal's
+# retail server (the retail port's group) and its server's update port alone.
 run "no_cloudflare" {
   command = plan
 
@@ -428,7 +431,7 @@ run "no_cloudflare" {
       toset(keys(aws_lb_listener.update)) == toset(["20556", "21068", "21580"]) &&
       length([for r in aws_vpc_security_group_egress_rule.lb : r if r.from_port == 443]) == 0 &&
       length([for r in aws_vpc_security_group_ingress_rule.from_lb : r if r.from_port == 443]) == 0 &&
-      toset([for l in aws_ecs_service.program["web"].load_balancer : l.container_name]) == toset(["web"]) &&
+      toset([for l in aws_ecs_service.program["web"].load_balancer : "${l.container_name}:${l.container_port}"]) == toset(["portal:8082", "web:20044"]) &&
       !strcontains(aws_ecs_task_definition.program["web"].container_definitions, "ORIGIN_TLS_CERT")
     )
     error_message = "without Cloudflare: no 443 anywhere, the gate's, the lobby's, the retail port's and the update ports' rules alone, and no origin certificate for the portal"

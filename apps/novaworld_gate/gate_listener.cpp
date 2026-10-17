@@ -313,7 +313,7 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 				using namespace std::chrono;
 				const auto gate_now = static_cast<uint64_t>(
 					duration_cast<milliseconds>(
-						steady_clock::now().time_since_epoch()).count());
+						system_clock::now().time_since_epoch()).count());
 				tracker_->record("gate", tag, plain.data(), plain.size(),
 				                 opennova::net::endpoint_to_string(from),
 				                 gate_now);

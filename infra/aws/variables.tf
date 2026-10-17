@@ -154,7 +154,7 @@ variable "nw_udp_port" {
 }
 
 variable "game_http_port" {
-  description = "TCP port of web's HTTP routes, at the load balancer and on web's tasks (the gate's startup URL carries it, so it does not need to be 80)"
+  description = "TCP port of web's HTTP routes, at the load balancer and on web's tasks (the gate's startup URL carries it, so it does not need to be 80). The portal's nginx (web/nginx.conf) reaches web's server on 127.0.0.1:8080, for /api/ and the retail routes alike, so another value needs its proxy_pass lines changed with it"
   type        = number
   default     = 8080
 }

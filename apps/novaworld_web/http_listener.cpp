@@ -1207,9 +1207,11 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			// buckets: the address's attempts, then one token from the
 			// username's failure buckets, handed back when the password is
 			// right. Keyed by the TCP peer: a stock client reaches this port
-			// directly (the gate's startupurl names ONNET_WEB_HOST and the
-			// HTTP port, through no proxy but a TCP load balancer that keeps
-			// the client's address), so no header names the client and
+			// (the gate's startupurl names ONNET_WEB_HOST and the HTTP port)
+			// through no proxy but a TCP load balancer that keeps the
+			// client's address and the retail port's own proxy, whose
+			// X-Real-IP (its TCP peer) AccessMiddleware put in its place
+			// (ONNET_RETAIL_PROXY), so no header the client sends names it and
 			// nothing the website's brake sees can brake this one; only the
 			// per-username cap is shared, and it spares the account's known
 			// addresses. Its refusal is this route's own failure reply, the
@@ -2226,7 +2228,7 @@ void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
 			using namespace std::chrono;
 			const auto http_now = static_cast<uint64_t>(
 				duration_cast<milliseconds>(
-					steady_clock::now().time_since_epoch()).count());
+					system_clock::now().time_since_epoch()).count());
 			const auto *body_ptr =
 				reinterpret_cast<const uint8_t *>(req.body.data());
 			tracker_->record("http", sig, body_ptr, req.body.size(),

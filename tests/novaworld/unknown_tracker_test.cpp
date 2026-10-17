@@ -1,6 +1,8 @@
 // UnknownTracker unit tests: record/dedup semantics, sample cap, distinct
 // keys, DB flush + upsert against the migrated unknown_messages table (two
-// processes' trackers adding up in one row, and list()), and snapshot.
+// processes' trackers adding up in one row, and list()), snapshot, the
+// signature's printable bounded form, the per-channel key bound, and the
+// age prune.
 
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/unknown_tracker.h>
@@ -185,6 +187,123 @@ int test_two_trackers_add_up() {
 	return 0;
 }
 
+// A signature is kept as its printable form: printable ASCII as it is, every
+// other byte and the backslash as \xNN; past kUnknownSignatureCap bytes it is
+// cut, ".." and the whole raw signature's FNV-1a 64 after it.
+int test_signature_form() {
+	TEST_EXPECT(opennova::unknown_signature("0x47") == "0x47");
+	TEST_EXPECT(opennova::unknown_signature("GET /a b") == "GET /a b");
+	TEST_EXPECT(opennova::unknown_signature(std::string("a\0\xFF\\", 4)) == "a\\x00\\xFF\\x5C");
+	// The escape keeps two raws apart: the text "\x01" is not the byte 0x01.
+	TEST_EXPECT(opennova::unknown_signature("\\x01") != opennova::unknown_signature("\x01"));
+	const std::string fits(opennova::kUnknownSignatureCap, 'x');
+	TEST_EXPECT(opennova::unknown_signature(fits) == fits);
+	// Two long signatures one byte apart at their end still key apart, each
+	// its prefix and a hash.
+	const std::string a = std::string(200, 'y') + "a";
+	const std::string b = std::string(200, 'y') + "b";
+	const std::string sa = opennova::unknown_signature(a);
+	const std::string sb = opennova::unknown_signature(b);
+	TEST_EXPECT(sa != sb);
+	TEST_EXPECT(sa.size() == opennova::kUnknownSignatureCap + 2 + 16);
+	TEST_EXPECT(sa.compare(0, opennova::kUnknownSignatureCap,
+						std::string(opennova::kUnknownSignatureCap, 'y')) == 0);
+	TEST_EXPECT(sa.compare(opennova::kUnknownSignatureCap, 2, "..") == 0);
+	// An escape is never split by the cut.
+	const std::string escapes(100, '\x01');
+	const std::string se = opennova::unknown_signature(escapes);
+	TEST_EXPECT(se.size() == opennova::kUnknownSignatureCap + 2 + 16);
+	TEST_EXPECT(se.compare(0, 4, "\\x01") == 0 && se.compare(124, 4, "\\x01") == 0);
+	return 0;
+}
+
+// What one process keeps is bounded however many distinct signatures arrive:
+// each kept to its printable form's cap, a channel to kUnknownKeysPerChannel
+// of them, every later new one counted in the channel's overflow sighting; a
+// signature already kept goes on counting in its own, and another channel
+// keeps its own room.
+int test_bounded_keys() {
+	UnknownTracker t;
+	const std::size_t extra = 500;
+	const std::size_t n = opennova::kUnknownKeysPerChannel + extra;
+	const std::vector<uint8_t> sample(60000, 0x41);
+	for (std::size_t i = 0; i < n; ++i) {
+		t.record("gate", std::to_string(i) + std::string(60000, 'x'), sample, "peer", 1000 + i);
+	}
+	t.record("gate", "0" + std::string(60000, 'x'), nullptr, 0, "peer", 9000);
+	t.record("nwu", "0x47", nullptr, 0, "peer", 9001);
+
+	const auto snap = t.snapshot();
+	TEST_EXPECT(snap.size() == opennova::kUnknownKeysPerChannel + 2);
+	std::size_t key_bytes = 0;
+	std::size_t sample_bytes = 0;
+	uint64_t gate_count = 0;
+	for (const auto &s : snap) {
+		TEST_EXPECT(s.signature.size() <= opennova::kUnknownSignatureCap + 2 + 16);
+		key_bytes += s.signature.size();
+		sample_bytes += s.sample.size();
+		if (s.channel == "gate")
+			gate_count += s.count;
+	}
+	TEST_EXPECT(key_bytes <= snap.size() * (opennova::kUnknownSignatureCap + 2 + 16));
+	TEST_EXPECT(sample_bytes <= snap.size() * opennova::kUnknownSampleCap);
+	TEST_EXPECT(gate_count == n + 1);
+	const auto *other = find(snap, "gate", opennova::kUnknownOverflowSignature);
+	TEST_EXPECT(other != nullptr);
+	TEST_EXPECT(other->count == extra);
+	TEST_EXPECT(other->first_seen_ms == 1000 + opennova::kUnknownKeysPerChannel);
+	TEST_EXPECT(other->last_seen_ms == 1000 + n - 1);
+	const auto *first =
+			find(snap, "gate", opennova::unknown_signature("0" + std::string(60000, 'x')));
+	TEST_EXPECT(first != nullptr && first->count == 2 && first->last_seen_ms == 9000);
+	const auto *nwu = find(snap, "nwu", "0x47");
+	TEST_EXPECT(nwu != nullptr && nwu->count == 1);
+	return 0;
+}
+
+// A signature with bytes a text column refuses (a NUL, a byte past 0x7F)
+// flushes as its printable form, so one such sighting never fails a flush.
+int test_flush_unprintable_signature() {
+	test_db::TestDatabase scratch;
+	Database db = scratch.open();
+
+	UnknownTracker t;
+	t.record("gate", std::string("ab\0\xFF", 4), nullptr, 0, "peer", 1);
+	t.record("http", "GET /ok", nullptr, 0, "peer", 2);
+	t.flush(db);
+	const auto rows =
+			db.query("SELECT signature FROM unknown_messages WHERE channel = 'gate';");
+	TEST_EXPECT(rows.size() == 1);
+	TEST_EXPECT(rows[0].as_text(0).value() == "ab\\x00\\xFF");
+	TEST_EXPECT(db.query("SELECT 1 FROM unknown_messages;").size() == 2);
+	return 0;
+}
+
+// prune() deletes the rows no process has seen for its keep, by the
+// database's clock against the rows' wall-clock last_seen_ms, and keeps the rest.
+int test_prune_by_age() {
+	test_db::TestDatabase scratch;
+	Database db = scratch.open();
+
+	const auto rows = db.query("SELECT (EXTRACT(EPOCH FROM now()) * 1000)::bigint;");
+	const uint64_t now = static_cast<uint64_t>(rows[0].as_int(0).value());
+	const uint64_t day = 24ull * 60 * 60 * 1000;
+	UnknownTracker t;
+	t.record("gate", "old", nullptr, 0, "peer", now - 31 * day);
+	t.record("gate", "recent", nullptr, 0, "peer", now - 29 * day);
+	t.record("http", "GET /now", nullptr, 0, "peer", now);
+	t.flush(db);
+	TEST_EXPECT(UnknownTracker::prune(db) == 1);
+	TEST_EXPECT(db.query("SELECT 1 FROM unknown_messages WHERE signature = 'old';").empty());
+	TEST_EXPECT(db.query("SELECT 1 FROM unknown_messages;").size() == 2);
+	// A shorter keep takes the next one; nothing is left to take twice.
+	TEST_EXPECT(UnknownTracker::prune(db, static_cast<int64_t>(day)) == 1);
+	TEST_EXPECT(UnknownTracker::prune(db, static_cast<int64_t>(day)) == 0);
+	const auto left = UnknownTracker::list(db, "");
+	TEST_EXPECT(left.size() == 1 && left[0].signature == "GET /now");
+	return 0;
+}
+
 int test_snapshot_returns_recorded() {
 	UnknownTracker t;
 	t.record("ptype", "0x123", {0x01}, "meta-x", 42);
@@ -212,6 +331,11 @@ int main(int argc, char **argv) {
 	if (test_two_trackers_add_up() != 0)
 		return 1;
 	if (test_snapshot_returns_recorded() != 0) return 1;
-	std::printf("OK: unknown_tracker (record/dedup, sample cap, distinct, flush/upsert, snapshot)\n");
+	if (test_signature_form() != 0) return 1;
+	if (test_bounded_keys() != 0) return 1;
+	if (test_flush_unprintable_signature() != 0) return 1;
+	if (test_prune_by_age() != 0) return 1;
+	std::printf("OK: unknown_tracker (record/dedup, sample cap, distinct, flush/upsert, snapshot, "
+				"bounded keys, prune)\n");
 	return 0;
 }
