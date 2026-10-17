@@ -54,7 +54,7 @@ using LoadoutSlotRows = std::vector<int32_t>;
 // no rows.
 // [orig: PlayerInfo_PopulateWeaponSlotLists @0x560430 -- the NONE inserts
 //  @0x56058f / @0x56059d / @0x5605ab; UI_PopulateThreeCategoryLists @0x566db0 --
-//  the !g_ArmoryWeaponAvailability[i] skip @0x566e6b, NONE at row 0 @0x566f15;
+//  the !g_ArmoryWeaponAvailability[i] skip @0x566e6b, NONE at row 0 @0x566f15..0x566f18;
 //  the sorts loadout_labels.h armory_slot_order carries]
 LoadoutSlotRows loadout_fill_slot(MenuRuntime &menu, const def::DefWeaponsFile &weapons,
 		const std::string &control, int slot, int class_mask, int team_mask,
@@ -86,12 +86,16 @@ void loadout_select_weapon_name(MenuRuntime &menu, const def::DefWeaponsFile &we
 // takes adm[23] raw [orig: WeaponLoadout_ApplyFromBuffer @0x565cd0, @0x566166].
 int armory_selected_clips(const MenuRuntime &menu, const std::string &control);
 
-// The WEAPON screen's selection as WeaponLoadout_SerializeSelectionsToBuffer
-// writes it before the apply: each category's weapon name ("" for NONE) and
-// clip count, and one {name, count, -1, -1} entry per grenade position whose
-// GRENADE_AMMO row is past 0, in position order
-// [orig: WeaponLoadout_SerializeSelectionsToBuffer @0x5658b0 -- {name, ammoPri,
-//  ammoSec, flags} per slot into the per-class buffer @0x25DD740 + 2048*class].
+// The WEAPON screen's ACCEPT pick the shell hands its apply: each category's
+// weapon name ("" for NONE) and clip count, and one {name, count, -1, -1} entry
+// per grenade position whose GRENADE_AMMO row is past 0, in position order, the
+// {name, ammoPri, ammoSec, flags} slots of the game's per-class buffer
+// [orig: WeaponLoadout_SerializeSelectionsToBuffer @0x5658b0 -- the buffer
+//  @0x25DD740 + 2048*class]. Retail's buffer also leads with the team's knife
+// and the class-5 medpack, takes each count from the screen's saved pairs
+// and writes a grenade slot only while its control is shown
+// (@0x565bbc..0x565cb2): the shown gates and the per-class buffer memory are
+// tracked deferrals (D-MNU-9, menu-re.md's armory notes).
 struct ArmoryLoadoutPick {
 	std::string names[3];
 	int clips[3] = { -1, -1, -1 };
