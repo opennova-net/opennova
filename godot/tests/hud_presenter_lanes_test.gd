@@ -114,6 +114,24 @@ func test_vehicle_and_zone_lanes_null_paths() -> void:
 	assert_true(is_instance_valid(hud))
 
 
+# The zone lane keeps no game-type rule of its own: it pushes the panel for
+# every session game type and the engine element picks the arm (retail calls
+# HUD_DrawZoneStatusPanel every HUD frame, its one game-type test the conquest
+# arm @0x5a248d..0x5a24a1). A sessionless sim's game type is 0, not AAS: the
+# lane still pushes, and the zone fill finds nothing to draw.
+func test_zone_lane_pushes_every_game_type() -> void:
+	var hud := _font_overlay()
+	var sim := Simulation.new()
+	assert_ne(int(sim.get_session_game_type()), NetProtocol.GAME_TYPE_ADVANCE_AND_SECURE,
+			"A sessionless sim reads a non-AAS game type.")
+	var zones := LfpPanelPresenter.new()
+	zones.update(hud, sim, 0)
+	assert_true(zones._pushed, "A non-AAS game type still pushes the panel.")
+	zones.update(hud, null, 0)
+	assert_false(zones._pushed, "No sim hides the pushed panel once.")
+	assert_true(is_instance_valid(hud))
+
+
 # The Tab board takes PgUp/PgDn only in a session with the board up (the
 # engine's special-key arm); out of a session no talk row opens a chat line,
 # a closed line draws nothing and takes no key (engine hud_chat_entry).
