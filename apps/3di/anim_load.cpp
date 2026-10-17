@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <system_error>
 
+#include <base/io/file_io.h>
 #include <base/io/strutil.h>
 #include <formats/adm/adm.h>
 #include <runtime/anim/adm_clip_index.h>
@@ -20,15 +21,8 @@ namespace opennova::threedi_cli {
 namespace {
 
 bool read_file(const std::string &path, std::vector<uint8_t> &out) {
-	FILE *f = std::fopen(path.c_str(), "rb");
-	if (f == nullptr) return false;
-	std::fseek(f, 0, SEEK_END);
-	const long size = std::ftell(f);
-	std::fseek(f, 0, SEEK_SET);
-	out.assign(size > 0 ? static_cast<size_t>(size) : 0, 0);
-	const size_t read = out.empty() ? 0 : std::fread(out.data(), 1, out.size(), f);
-	std::fclose(f);
-	return read == out.size();
+	std::string ignored; // each caller says what it could not read
+	return opennova::io::read_file_bytes(path, out, ignored);
 }
 
 bool same_name(const std::string &a, const std::string &b) {

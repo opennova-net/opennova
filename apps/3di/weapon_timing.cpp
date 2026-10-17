@@ -14,6 +14,7 @@
 #include <set>
 #include <sstream>
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <base/io/tick_rate.h>
 #include <formats/threedi/scene_text.h>
@@ -453,7 +454,7 @@ std::string weapon_edits_text(const WeaponTimingPlan &plan) {
 }
 
 int cmd_weapon_timing(const char *input, const char *output) {
-	std::ifstream file(input);
+	std::ifstream file(opennova::io::os_path(input));
 	if (!file) {
 		std::fprintf(stderr, "opennova-3di: cannot read %s\n", input);
 		return 1;

@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <formats/dds/dds.h>
 #include <runtime/renderer/texture_authoring.h>
@@ -46,7 +47,7 @@ int cmd_texture(const TextureCommand &command) {
 		std::fprintf(stderr, "opennova-3di: --format and --mips are a .dds's; %s is a 32-bit TGA\n", out.c_str());
 		return 2;
 	}
-	std::ifstream file(in, std::ios::binary);
+	std::ifstream file(opennova::io::os_path(in), std::ios::binary);
 	if (!file) {
 		std::fprintf(stderr, "opennova-3di: cannot open %s\n", in.c_str());
 		return 1;
