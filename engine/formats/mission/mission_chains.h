@@ -80,9 +80,10 @@ bool split_event_chains(const bms::File &file, std::vector<EventChain> &out, Run
 // @0x453000, the signed test @0x453029]).
 void join_event_chains(const std::vector<EventChain> &chains, bms::File &file);
 
-// The most triggers, and the most actions, an event's chain is given by an edit. The counts are bytes;
-// the shipped missions hold 16 triggers and 20 actions at most [corpus], and the original editor's
-// ceiling is not witnessed (D-MIS-3): an edit past what a shipped mission holds is refused.
+// The most triggers, and the most actions, an event's chain is given by an edit: the original editor's event
+// holds 20 slots of each [orig: JOTACmed.exe MIS_ParseToken, the triggers' @ 0x453b99, the actions' @ 0x453c6f],
+// whose rows past them run over the slots after (parse_mis_nested_records). The counts are bytes; the shipped
+// missions hold 16 triggers and 20 actions at most [corpus].
 inline constexpr size_t kMaxEventChainEntries = 20;
 
 } // namespace opennova::mission

@@ -272,13 +272,50 @@ int test_signed_counts() {
 	bms::File back;
 	TEST_EXPECT(parse_mis_text(text, {}, back, error) && back.events.size() == 2 && back.events[0].trigger_count == 200 &&
 	            back.triggers.size() == 3 && back.events[1].action_count == 0);
-	// A declared count of 128..255 holds the rows the game reads, no more: two rows under 200 do not read.
+	// The rows up to a section's `end`, whatever its declared count, as the original editor reads them
+	// [orig: JOTACmed.exe MIS_ParseToken @ 0x453ac5, @ 0x453b59]: the event keeps the declared byte and the run the
+	// game reads of it, the rows past it left out, the records past the rows zero, each noted.
 	std::string two = text;
 	const size_t at = two.find("  begin triggers 200\r\n");
 	const size_t row = two.find("\r\n", at + 4) + 2;
 	const size_t row_end = two.find("\r\n", row) + 2;
 	two.insert(row_end, two.substr(row, row_end - row));
-	TEST_EXPECT(!parse_mis_text(two, {}, back, error));
+	std::vector<MisIssue> issues;
+	TEST_EXPECT(parse_mis_text(two, {}, back, error, &issues) && back.events[0].trigger_count == 200 &&
+	            back.triggers.size() == 3 && issues.size() == 1 &&
+	            issues[0].message.find("declares 200 and holds 2 rows") != std::string::npos);
+	// Event 1's triggers declared 5 over its 2 rows: the byte 5, its two rows and three zero records after them.
+	std::string five = text;
+	const size_t second_triggers = five.find("  begin triggers 2\r\n", five.find("begin event 1\r\n"));
+	TEST_EXPECT(second_triggers != std::string::npos);
+	if (second_triggers != std::string::npos) five.replace(second_triggers, 20, "  begin triggers 5\r\n");
+	issues.clear();
+	TEST_EXPECT(parse_mis_text(five, {}, back, error, &issues) && back.events.size() == 2 &&
+	            back.events[1].trigger_count == 5 && back.triggers.size() == 6 && issues.size() == 1);
+	if (back.triggers.size() == 6)
+		TEST_EXPECT(back.triggers[1].param1 == 100 && back.triggers[2].param1 == 101 && back.triggers[3].param1 == 0 &&
+		            static_cast<int32_t>(back.triggers[5].main_type) == 0);
+	// 21 rows declared 21: more than the original editor's 20 slots, noted [orig: MIS_ParseToken @ 0x453b81,
+	// @ 0x453b99, @ 0x453c6f]; the rows read as written.
+	std::string over = text;
+	const size_t over_at = over.find("  begin triggers 2\r\n", over.find("begin event 1\r\n"));
+	TEST_EXPECT(over_at != std::string::npos);
+	if (over_at != std::string::npos) {
+		const size_t first = over_at + 20, first_end = over.find("\r\n", first) + 2;
+		const std::string row_line = over.substr(first, first_end - first);
+		over.replace(over_at, 20, "  begin triggers 21\r\n");
+		for (int k = 0; k < 19; ++k) over.insert(first + 1, row_line);
+	}
+	issues.clear();
+	TEST_EXPECT(parse_mis_text(over, {}, back, error, &issues) && back.events[1].trigger_count == 21 &&
+	            back.triggers.size() == 22 && issues.size() == 1 &&
+	            issues[0].message.find("20 trigger slots") != std::string::npos);
+	// Declared 1 over the 2: the byte 1 and the first row alone.
+	std::string one = text;
+	const size_t one_at = one.find("  begin triggers 2\r\n", one.find("begin event 1\r\n"));
+	if (one_at != std::string::npos) one.replace(one_at, 20, "  begin triggers 1\r\n");
+	TEST_EXPECT(parse_mis_text(one, {}, back, error) && back.events[1].trigger_count == 1 && back.triggers.size() == 2 &&
+	            back.triggers[1].param1 == 100);
 	return 0;
 }
 
