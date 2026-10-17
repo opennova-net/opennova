@@ -40,6 +40,7 @@ There are three places the service runs, and nothing of one reaches another by a
 | Where | the developer's machine | its own AWS account, `opennova-staging`, in the Organization | its own AWS account, `opennova-prod` |
 | Site | `http://localhost:5173` | `https://staging.<domain>` | `https://<domain>` (and `www`) |
 | Retail gate | the developer's LAN address | its own Elastic IP | the address retail hosts files name (`gs.novaworld.net`), transferred into the prod account |
+| Gate name (OpenNova's client, `opennova-serve --master-host`) | none (`127.0.0.1` in a source run, or `--novaworld-host`) | `nw.staging.<domain>` | `nw.<domain>` |
 | AWS credentials | none | its deploy user's key (vault `aws-staging`), or its GitHub environment's OIDC role | its deploy user's key (vault `aws-prod`), or its GitHub environment's OIDC role |
 | Stripe | test mode, the restricted key (`stripe-test/restricted_key`) | test mode (`stripe-test`) | live mode (`stripe-live`) |
 | Mail | none (no AWS credentials: logged as not sent) | its own SES identity, `staging.<domain>` (off unless `mail_sender` is set) | its own SES identity, `<domain>`, `support@<domain>` |
@@ -461,7 +462,7 @@ security group; the database and the cache (Valkey, a primary and a replica); th
 SSM parameters the toolbox reads; the operations bucket (`opennova-<deployment>-ops-<account
 id>`: the releases, the dumps and the game data's store, `data/`, with its lifecycle
 rules); the logs, metrics and alarms; the account's budgets; the deployment's
-Cloudflare records (its site's, proxied; the update service's, unproxied), its origin
+Cloudflare records (its site's, proxied; the update service's and the gate's, unproxied), its origin
 certificate; its outbound mail's SES identities and records (with a sender); the update
 service's listeners; and (with `hosted_enabled`) the fleet's launch templates and image
 parameter, the machine role and web's and the worker's store policies (section 7). A new
@@ -584,7 +585,10 @@ without them there is no origin certificate and nginx listens on 80). Deletion
 protection is on: the balancer holds the gate's address.
 `ONNET_PUBLIC_HOST` (the gate's `POSTIPADDRESS`) and `ONNET_WEB_HOST` (the startup URL,
 the web domain, `HOST_URL`, `GSB_SERVER`) both name that address, so no retail client
-follows a DNS name; the site's records point at the balancer's DNS name.
+follows a DNS name; the site's records point at the balancer's DNS name. The gate's own
+name, `nw.<domain>` (`nw.<deployment>.<domain>` off prod), is an unproxied A record at that
+address: OpenNova's own client dials it for its OpenNova NovaWorld, and a self-run
+`opennova-serve` lists on it with `--master-host`.
 
 Every lobby task announces that address with the lobby's port (`ONNET_LOBBY_ENDPOINT`,
 `<the gate's address>:64206`), each its own lobby instance behind it, and the gates hand
@@ -1814,7 +1818,7 @@ every command).
   http://<the gate's address>:8080/jop_2.gsb` answers 200; `curl -i http://<the gate's
   address>:8080/api/health` answers 403 (`proxy_required`); `curl -m 5 http://<the gate's
   address>/` times out (no port 80); `curl https://<site host>/api/server-info` names the
-  gate's Elastic IP; `./deploy/run.sh --deployment <deployment> aws ec2 describe-addresses
+  gate's Elastic IP, and so does `nslookup nw.<domain>`; `./deploy/run.sh --deployment <deployment> aws ec2 describe-addresses
   --allocation-ids <id>` shows it on the load balancer's zone-a interface.
 - **B. Operations.** `app status` shows every program's service at its count, its
   rollout COMPLETED on the release's revision; `app logs` shows a stream per container and

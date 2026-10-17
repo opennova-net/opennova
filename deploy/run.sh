@@ -24,6 +24,17 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 tty_flag=""
 { [ -t 0 ] && [ -t 1 ]; } || tty_flag="-T"
 
+# The checkout's commit for a release's manifest, read here on the host: a
+# linked worktree's .git names a directory outside the container's mount, so
+# the container's git cannot read it. Unread (no git here), the container's
+# own git tries.
+if rev="$(git -C "$here/.." rev-parse --short=12 HEAD 2>/dev/null)"; then
+  OPENNOVA_REVISION="$rev"
+  OPENNOVA_INFRA_DIRTY=false
+  [ -z "$(git -C "$here/.." status --porcelain -- infra/aws 2>/dev/null)" ] || OPENNOVA_INFRA_DIRTY=true
+  export OPENNOVA_REVISION OPENNOVA_INFRA_DIRTY
+fi
+
 # A changed deploy/Dockerfile rebuilds the image (cached otherwise), quietly
 # and apart, so no build line ever reaches the command's stdout (a captured
 # value, a dump on a pipe).

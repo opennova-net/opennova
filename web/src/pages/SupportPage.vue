@@ -10,6 +10,11 @@
           keep them running until you stop them. A tier is support for the project, not the sale of any game.
           Hosted servers are pre-1.0 and experimental.
         </p>
+        <p class="max-w-3xl text-base text-ink-muted">
+          Hosted servers run OpenNova's own server, opennova-serve, not the original game. Retail and OpenNova players
+          join them alike. They aim to play exactly like the original servers, but OpenNova is pre-1.0 and we can't
+          guarantee that yet.
+        </p>
       </header>
 
       <p v-if="alertText" role="alert" class="rounded-panel border border-danger/40 bg-danger/10 p-4 text-sm text-danger">
@@ -44,11 +49,12 @@
             <template v-if="tiers.own_machine.amount !== null">
               {{ formatMoney(tiers.own_machine.amount, tiers.currency) }} a month for each.
             </template>
-            Runs one of your tier's servers alone on a machine of its own instead of a shared one. Add it from your
-            support tier page once you have a tier.
+            Runs one of your tier's servers on a machine of its own. Add it from your support tier page.
           </p>
         </section>
       </template>
+
+      <RunItYourself id="support-run-it-yourself" />
     </div>
   </section>
 </template>
@@ -60,6 +66,7 @@
 // checkout starts; a logged-in visitor goes there at once.
 import { onMounted, ref } from 'vue';
 import { RouterLink, useRouter } from 'vue-router';
+import RunItYourself from '../components/RunItYourself.vue';
 import TierPicker from '../components/TierPicker.vue';
 import { fetchTiers } from '../api/billing';
 import { useSession } from '../composables/useSession';

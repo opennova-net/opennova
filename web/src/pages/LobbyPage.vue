@@ -5,7 +5,7 @@
         <div>
           <p class="eyebrow">NovaWorld</p>
           <h1 class="mt-2 text-3xl font-semibold text-ink-bright">Lobbies</h1>
-          <p class="mt-2 text-sm text-ink-muted">Games hosted on NovaWorld right now. Join them from the game's own server browser.</p>
+          <p class="mt-2 text-sm text-ink-muted">Join from your game's server browser.</p>
         </div>
         <button
           class="btn-secondary"
@@ -32,13 +32,14 @@
         <div v-if="totalHosts === 0" class="rounded-panel border border-border bg-panel p-10 text-center">
           <p class="text-lg font-semibold text-ink">No games are being hosted right now</p>
           <p class="mt-2 text-sm text-ink-muted">
-            Host one from your game's own menu once it is <RouterLink :to="{ path: '/', hash: '#online' }" class="link">set up for online play</RouterLink>,
-            or run a managed server with a <RouterLink to="/support" class="link">support tier</RouterLink>.
+            Host one from the game's own menu: OpenNova reaches NovaWorld as it is, and the original game
+            <RouterLink :to="{ path: '/', hash: '#online' }" class="link">through the OpenNova Switcher</RouterLink>.
+            Or run a managed server with a <RouterLink to="/support" class="link">support tier</RouterLink>.
           </p>
         </div>
 
         <template v-else>
-          <div v-for="group in state.games" :key="group.slug" class="space-y-4">
+          <div v-for="group in gamesWithServersFirst" :key="group.slug" class="space-y-4">
             <div class="flex items-center justify-between">
               <h2 class="text-2xl font-semibold text-ink">{{ group.displayName }}</h2>
               <span class="text-sm text-ink-muted">{{ group.hosts.length }} {{ group.hosts.length === 1 ? 'server' : 'servers' }}</span>
@@ -68,6 +69,11 @@ const state = reactive({
 });
 
 const totalHosts = computed(() => state.games.reduce((n, group) => n + group.hosts.length, 0));
+// The games with servers first, each kept in the service's order.
+const gamesWithServersFirst = computed(() => [
+  ...state.games.filter((group) => group.hosts.length > 0),
+  ...state.games.filter((group) => group.hosts.length === 0),
+]);
 
 const load = async (background = false) => {
   // Background polls update the list in place: don't toggle the loading

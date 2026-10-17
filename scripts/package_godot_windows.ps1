@@ -586,6 +586,10 @@ Run opennova.exe. It plays OpenNova's own small game (assets\), more of which
 is coming. To play Joint Operations itself, press PLAY RETAIL and choose your
 Joint Operations folder. The folder is remembered; CHANGE FOLDER picks another.
 
+Online: open NovaWorld from Joint Operations' multiplayer menu and choose
+OpenNova. opennova.exe reaches OpenNova's NovaWorld by itself; the OpenNova
+Switcher is only for the original Jointops.exe and dfx2.exe.
+
 Command line (advanced):
   opennova.exe -- --resource-dir "C:\Games\Joint Operations"
 Loose data:

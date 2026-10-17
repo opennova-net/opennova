@@ -1,11 +1,12 @@
 # `assets/`: OpenNova's own game data
 
-OpenNova's own game is not ready yet. This directory is its base game: an
-OpenNova Editor project (`project.opennova`, a standalone Joint Operations
-project, ADR 0046) holding every file the game reads to boot, today to a
-placeholder main menu (a note that the game is coming soon, and a **PLAY
-RETAIL** button that plays Joint Operations from the player's own install,
-ADR 0048), and the first pieces of the game's own data.
+This directory is OpenNova's own game, small and growing: an OpenNova Editor
+project (`project.opennova`, a standalone Joint Operations project, ADR 0046)
+holding every file the game reads, from its main menu (whose **PLAY RETAIL**
+button plays Joint Operations from the player's own install, ADR 0048) to its
+one mission, "Indigo Shore", for single player and Co-op over LAN. Its
+expansion, "Indigo Storm", is in [`expansions/`](../expansions). Online play in
+it is not part of the game yet.
 
 Every file is OpenNova's own: hand-written, made by the editor's blank
 factories (`engine/editor/blank/`, written through our own writers), minted by

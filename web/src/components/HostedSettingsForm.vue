@@ -13,7 +13,7 @@
         {{
           retry
             ? 'That server failed. Check its settings and try again.'
-            : 'Pick your settings and start. Your server stays in the server browser until you stop it.'
+            : 'It stays listed until you stop it.'
         }}
       </p>
     </div>
@@ -46,16 +46,10 @@
             :disabled="busy"
             class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
           />
-          <span>
-            {{ option.display_name }}
-            <span v-if="option.version" class="text-ink-muted">{{ option.version }}</span>
-          </span>
+          {{ option.display_name }}
         </label>
       </div>
-      <p :id="hintId('data_set_id')" class="text-xs text-ink-muted">
-        Each game lists in its own server browser: players join with that game. Your server runs the game's
-        current data until you update it.
-      </p>
+      <p :id="hintId('data_set_id')" class="text-xs text-ink-muted">{{ dataSet?.version }}</p>
       <p v-if="errors.data_set_id" :id="errorId('data_set_id')" class="text-xs text-danger">{{ errors.data_set_id }}</p>
     </fieldset>
     <p v-if="previousGameGone" class="rounded-panel border border-warn/40 bg-warn/10 p-3 text-sm text-warn">
@@ -78,8 +72,8 @@
           :class="inputClass"
         />
         <p :id="hintId('game_name')" class="text-xs text-ink-muted">
-          {{ cp1252Length(form.game_name.trim()) }} of {{ GAME_NAME_MAX }} characters. Players see it in the
-          server browser. Accented letters work; emoji, most other scripts and double quotes do not.
+          {{ cp1252Length(form.game_name.trim()) }} of {{ GAME_NAME_MAX }} characters. Accented letters work; emoji and
+          double quotes do not.
         </p>
         <p v-if="errors.game_name" :id="errorId('game_name')" class="text-xs text-danger">{{ errors.game_name }}</p>
       </div>
@@ -112,8 +106,8 @@
           </button>
         </div>
         <p :id="hintId('game_password')" class="text-xs text-ink-muted">
-          Leave it empty for a public server. Players type it to join. Up to {{ GAME_PASSWORD_MAX }} letters,
-          digits and ASCII punctuation, with no space or double quote.
+          Empty for a public server. Up to {{ GAME_PASSWORD_MAX }} letters, digits and ASCII punctuation; no spaces or
+          double quotes.
         </p>
         <p v-if="errors.game_password" :id="errorId('game_password')" class="text-xs text-danger">
           {{ errors.game_password }}
@@ -196,16 +190,10 @@
             :disabled="busy"
             class="h-4 w-4 border-border bg-surface text-accent focus:ring-accent"
           />
-          <span>
-            {{ option.display_name }}
-            <span v-if="option.version" class="text-ink-muted">{{ option.version }}</span>
-          </span>
+          {{ option.display_name }}
         </label>
       </div>
-      <p :id="hintId('expansion_id')" class="text-xs text-ink-muted">
-        Players need the same expansion to join: a player without it installed cannot join a server that
-        runs it. Its missions join the rotation's list.
-      </p>
+      <p :id="hintId('expansion_id')" class="text-xs text-ink-muted">{{ expansionHint }}</p>
       <p v-if="errors.expansion_id" :id="errorId('expansion_id')" class="text-xs text-danger">{{ errors.expansion_id }}</p>
     </fieldset>
 
@@ -244,7 +232,6 @@
         Own machine
       </label>
       <p :id="`${baseId}-own_machine-hint`" class="text-xs text-ink-muted">
-        Run this server alone on one of your own machines instead of a shared one.
         {{ ownMachinesFree === 1 ? 'One of your own machines is free.' : `${ownMachinesFree} of your own machines are free.` }}
       </p>
     </div>
@@ -381,6 +368,12 @@ const form = reactive(firstForm);
 const dataSet = computed(() => findDataSet(props.dataSets, form.data_set_id));
 const expansions = computed<HostedExpansionOption[]>(() => dataSet.value?.expansions ?? []);
 const missions = computed(() => availableMissions(dataSet.value, form.expansion_id));
+// The picked expansion's version; players need it installed to join.
+const expansionHint = computed(() => {
+  const picked = expansions.value.find((e) => e.id === form.expansion_id);
+  if (!picked) return 'Players need an expansion installed to join a server running it.';
+  return picked.version ? `${picked.version}. Players need it installed to join.` : 'Players need it installed to join.';
+});
 // The last server's missions the picked data's list left out, said once
 // above the picker.
 const droppedMissions = computed(() => rotationFor(form.data_set_id, form.expansion_id).dropped);

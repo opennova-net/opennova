@@ -26,5 +26,9 @@ services:
     environment:
       OP_SERVICE_ACCOUNT_TOKEN: ${OP_SERVICE_ACCOUNT_TOKEN:?set OP_SERVICE_ACCOUNT_TOKEN to your 1Password service-account token}
       OP_VAULT: ${OP_VAULT:-OpenNova-Deploy}
+      # The checkout's commit and whether infra/aws differs from it, which
+      # run.sh reads on the host (a linked worktree's git is outside the mount).
+      OPENNOVA_REVISION: ${OPENNOVA_REVISION:-}
+      OPENNOVA_INFRA_DIRTY: ${OPENNOVA_INFRA_DIRTY:-}
     stdin_open: true
     tty: true

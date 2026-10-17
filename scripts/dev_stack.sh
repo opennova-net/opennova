@@ -440,6 +440,8 @@ The local NovaWorld stack runs (project $project).
   admin API       Authorization: Bearer $admin_token
   retail client   the OpenNova Switcher: Custom address... $address
                   (or the hosts line: $address gs.novaworld.net); allow UDP 7597 and 64206
+  opennova.exe    its NovaWorld screen's OpenNova target: a source run dials 127.0.0.1;
+                  a packaged one takes --novaworld-host $address
   dev accounts    test/test, foo/foo, test1..3/test
   announced at    $address (gate udp 7597, lobby udp 64206, web http 8080)
 EOF

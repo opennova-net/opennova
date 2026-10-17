@@ -1,11 +1,10 @@
 <template>
-  <div class="space-y-10">
+  <div ref="root" class="space-y-10">
     <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h1 class="text-3xl font-semibold text-ink">Infrastructure</h1>
         <p class="text-sm text-ink-muted">
-          The deployment as it runs: each program's ECS service and its tasks, the load balancer's targets, the
-          database and the cache, the lobby instances, the controller and the fleet's machines.
+          The deployment as it runs, read from AWS and the database.
         </p>
       </div>
       <div class="flex items-center gap-3">
@@ -277,8 +276,7 @@
       <section class="space-y-4" aria-labelledby="infra-lobbies">
         <h2 id="infra-lobbies" class="text-xl font-semibold text-ink">Lobby instances</h2>
         <p class="text-sm text-ink-muted">
-          One per lobby task, each moving its row every few seconds. Every instance announces the one lobby address; a
-          draining one takes no new client. Their sessions are on
+          One per lobby task; a draining one takes no new client. Their sessions are on
           <RouterLink to="/admin/sessions" class="text-accent hover:text-ink-bright">NovaWorld sessions</RouterLink>.
         </p>
         <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
@@ -416,6 +414,7 @@ import RelativeTime from '../../components/RelativeTime.vue';
 import StatTile from '../../components/charts/StatTile.vue';
 import { fetchInfrastructure } from '../../api/infra';
 import { usePolling } from '../../composables/usePolling';
+import { keepInView } from '../../utils/keepInView';
 import type { InfraCloudRead, InfraLobby, InfraMachine, InfraOverview, InfraService, InfraTask } from '../../types/infra';
 import { machineKindLabel, machineStateLabel } from '../../utils/adminView';
 import {
@@ -443,6 +442,7 @@ const secondaryButton =
   'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
 const headRow = 'bg-raised text-left text-xs font-semibold uppercase tracking-wider text-ink-muted';
 
+const root = ref<HTMLElement | null>(null);
 const overview = ref<InfraOverview | null>(null);
 const loadedAt = ref<number | null>(null);
 const now = ref(Date.now());
@@ -585,7 +585,9 @@ const poll = usePolling({
     if (signal.aborted) return false;
     now.value = Date.now();
     if (result.ok) {
-      overview.value = result.value;
+      await keepInView(() => {
+        overview.value = result.value;
+      }, root.value);
       loadedAt.value = now.value;
       pollTrouble.value = false;
       error.value = '';

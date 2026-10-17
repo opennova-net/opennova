@@ -260,6 +260,42 @@ describe('InfraSection', () => {
     expect(page.get('.infra-controller').text()).toContain('None elected');
   });
 
+  it('says a deploy is rolling out while one is, naming the programs it rolled, and labels the updater', async () => {
+    const rolled = { task_definition: 'opennova-prod-web:9', on_release: false };
+    read.mockResolvedValue({
+      ok: true,
+      value: overview({
+        cloud: cloud({
+          services: [
+            service('gate'),
+            service('lobby', {
+              deployments: [
+                { ...service('lobby').deployments[0], rollout_state: 'IN_PROGRESS', task_definition: 'opennova-prod-lobby:8' },
+                { ...service('lobby').deployments[0], id: 'ecs-svc/lobby-old', status: 'ACTIVE' },
+              ],
+            }),
+            service('web', rolled),
+            service('controller', { ...rolled, task_definition: 'opennova-prod-controller:9' }),
+            service('worker'),
+          ],
+          target_groups: [
+            {
+              key: 'update',
+              name: 'opennova-prod-update',
+              targets: [{ id: '10.40.0.13', port: 20044, zone: 'us-east-1a', state: 'healthy', reason: null, description: null }],
+              error: null,
+            },
+          ],
+        }),
+      }),
+    });
+    const page = await mountSection();
+    expect(page.findAll('.infra-warnings li').map((w) => w.text())).toEqual([
+      'A deploy is rolling out (lobby now): web and controller run their new revisions, and the release is recorded once every program does.',
+    ]);
+    expect(page.get('tr.infra-target-row').text()).toContain('The updater (TCP 20044, 20556, 21068, 21580)');
+  });
+
   it('shows a failed read and keeps polling', async () => {
     read.mockResolvedValue({ ok: false, error: { code: 'forbidden', status: 403, message: 'This account is not an admin.' } });
     const page = await mountSection();

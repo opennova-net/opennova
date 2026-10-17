@@ -61,8 +61,8 @@
           </template>
         </StatTile>
       </dl>
-      <p v-if="stats.summary.approximate.length > 0" class="text-xs text-ink-muted">
-        Figures marked "about" are estimates: they add up hourly counts that may count a player twice.
+      <p v-if="tiles.some((t) => t.approximate)" class="text-xs text-ink-muted">
+        "About" marks an estimate from hourly counts.
       </p>
 
       <LineChart
@@ -201,50 +201,53 @@ const tiles = computed<Tile[]>(() => {
   if (!s) return [];
   const sum = s.summary;
   const words = RANGE_WORDS[s.range];
-  const approx = (field: string) => sum.approximate.includes(field);
+  // An estimate of nothing is exactly nothing.
+  const approx = (field: string, value: number) => value !== 0 && sum.approximate.includes(field);
   const out: Tile[] = [];
   if (props.variant === 'server') {
     const restarts = sum.restarts === 0 ? 'no restarts' : sum.restarts === 1 ? '1 restart' : `${sum.restarts} restarts`;
     out.push({
       label: 'Availability',
-      value: sum.availability === null ? 'Not live' : formatFraction(sum.availability),
+      value: sum.availability !== null ? formatFraction(sum.availability) : s.live ? 'Not yet' : 'Not live',
       detail:
         sum.live_seconds > 0
           ? `Running ${formatDuration(sum.running_seconds * 1000)} of the ${formatDuration(sum.live_seconds * 1000)} it was live, ${restarts}`
-          : `Not live ${words}`,
-      approximate: approx('availability'),
+          : s.live
+            ? 'The first sample comes within a minute'
+            : `Not live ${words}`,
+      approximate: approx('availability', sum.availability ?? 0),
     });
   }
   out.push({
     label: 'Peak players',
     value: formatCount(sum.peak_players),
     detail: sum.avg_players === null ? `No players sampled ${words}` : `Average ${Math.round(sum.avg_players * 10) / 10} ${words}`,
-    approximate: approx('peak_players'),
+    approximate: approx('peak_players', sum.peak_players),
     trend: { values: playerValues(s), label: 'Players', format: formatCount },
   });
   out.push({
     label: 'Player-hours',
     value: (Math.round(sum.player_hours * 10) / 10).toLocaleString('en-US'),
     detail: `Hours played by all players together ${words}`,
-    approximate: approx('player_hours'),
+    approximate: approx('player_hours', sum.player_hours),
   });
   out.push({
     label: 'Unique players',
     value: formatCount(sum.unique_players),
     detail: `Different players ${words}`,
-    approximate: approx('unique_players'),
+    approximate: approx('unique_players', sum.unique_players),
   });
   out.push({
     label: 'Missions played',
     value: formatCount(sum.missions),
     detail: `Maps started ${words}`,
-    approximate: approx('missions'),
+    approximate: approx('missions', sum.missions),
   });
   out.push({
     label: 'Data sent',
     value: formatBytes(sum.egress_bytes),
     detail: `To players ${words}`,
-    approximate: approx('egress_bytes'),
+    approximate: approx('egress_bytes', sum.egress_bytes),
   });
   if (props.variant === 'server') {
     const live = s.live;

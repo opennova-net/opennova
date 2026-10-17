@@ -41,6 +41,19 @@ describe('StatsDashboard', () => {
     expect(wrapper.text()).not.toContain('—');
   });
 
+  it('reads a server just started as not sampled yet, and an estimate of zero as plain zero', async () => {
+    const base = serverStats();
+    const fresh = serverStats({
+      summary: { ...base.summary, live_seconds: 0, running_seconds: 0, availability: null, unique_players: 0, approximate: ['unique_players'] },
+    });
+    const { wrapper } = await mountWith(vi.fn(() => Promise.resolve({ ok: true as const, value: fresh })));
+    const byLabel = Object.fromEntries(wrapper.findAll('dl > div').map((t) => [t.get('dt').text(), t.text()]));
+    expect(byLabel['Availability']).toContain('Not yet');
+    expect(byLabel['Availability']).toContain('The first sample comes within a minute');
+    expect(byLabel['Unique players']).not.toContain('about');
+    expect(wrapper.text()).not.toContain('marks an estimate');
+  });
+
   it('draws the players with a gap where the server was not running, and a table of every value', async () => {
     const { wrapper } = await mountWith();
     const chart = wrapper.get('#test-stats-players');
