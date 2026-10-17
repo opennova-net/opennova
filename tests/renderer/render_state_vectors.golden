@@ -3200,13 +3200,13 @@ wave t=0a ph=7fc0 v=33920
 wave t=0a ph=8000 v=32512
 wave t=0a ph=c132 v=54790
 wave t=0a ph=ff80 v=32512
-wave t=0f ph=0000 v=6144
-wave t=0f ph=0180 v=2560
-wave t=0f ph=4000 v=768
-wave t=0f ph=7fc0 v=6912
-wave t=0f ph=8000 v=33536
-wave t=0f ph=c132 v=1024
-wave t=0f ph=ff80 v=5632
+wave t=0f ph=0000 v=0
+wave t=0f ph=0180 v=0
+wave t=0f ph=4000 v=0
+wave t=0f ph=7fc0 v=0
+wave t=0f ph=8000 v=0
+wave t=0f ph=c132 v=0
+wave t=0f ph=ff80 v=0
 uvU scroll+     t=0000 m=[1.000000 0.000000 0.000000 1.000000 0.125000 0.000000]
 uvV scroll+     t=0000 m=[1.000000 0.000000 0.000000 1.000000 0.000000 0.125000]
 uvU scroll+     t=2b67 m=[1.000000 0.000000 0.000000 1.000000 0.633621 0.000000]

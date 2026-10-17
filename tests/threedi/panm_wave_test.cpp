@@ -56,8 +56,12 @@ int main(void) {
     ok &= expect_eq("double-sin band[2304]", t[2304], 127);
     ok &= expect_eq("double-sin band[2311]", t[2311], 137);
 
-    ok &= expect_eq("tail table[2560]", t[2560], 0x18);
-    ok &= expect_eq("tail table[2567]", t[2567], 0x8f);
+    // The style-0xF band is never written: all zero (C-251) [orig:
+    // CWaveformTable_Build @ 0x5DE360 writes 0..2559; the lookup's case 0xF
+    // @ 0x5DE7BD reads table + 2560 @ 0x5DE7C2].
+    bool tail_zero = true;
+    for (int i = 2560; i < THREEDI_PANM_WAVE_TABLE_SIZE; ++i) tail_zero = tail_zero && t[i] == 0;
+    ok &= expect_eq("tail band all zero", tail_zero ? 1 : 0, 1);
 
     return ok ? 0 : 1;
 }
