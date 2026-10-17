@@ -663,6 +663,15 @@ int test_import_choices() {
 	facts.clear();
 	const std::vector<ImportChoice> members = list_import_choices({install + "/resource.pff"}, findings, &facts);
 	TEST_EXPECT(members.size() == 3 && facts.size() == 3 && facts[0].kind == AssetKind::Texture && facts[0].size == 4);
+	// An expansion's archive, <n>.pff (JO:CA's jox01.pff): its music scripts M<n>.bin and G<n>.bin by the
+	// archive's name, a string table such as menutxt.bin as it is (by name alone the two read alike).
+	const std::string expansion_archive = dir.file("exp") + "/jox01.pff";
+	TEST_EXPECT(write_archive(expansion_archive, {"MJox01.bin", "GJox01.bin", "menutxt.bin"}));
+	facts.clear();
+	const std::vector<ImportChoice> expansion = list_import_choices({expansion_archive}, findings, &facts);
+	TEST_EXPECT(expansion.size() == 3 && facts.size() == 3);
+	for (size_t i = 0; i < expansion.size() && i < facts.size(); ++i)
+		TEST_EXPECT(facts[i].kind == (expansion[i].entry == "menutxt.bin" ? AssetKind::Strings : AssetKind::MusicScript));
 	// Through the session: the game data listed to choose from, each with its kind and size.
 	editor_test::FakePlatform platform;
 	MemoryPreferencesStore preferences;
