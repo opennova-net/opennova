@@ -681,6 +681,22 @@ if(BUILD_NOVAWORLD_HTTP)
     target_include_directories(data_set_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
     target_compile_definitions(data_set_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(data_set_routes REDIS COMMAND data_set_routes_test)
+
+    # The update listener (apps/novaworld_web/updater/update_listener.h) over a migrated database
+    # and a local object store: a packed update built from the synthetic trees
+    # (opennova-update-tool's builder) as two data sets' published release, fetched and
+    # unpacked into the listener's cache, the stock client's sequence on a loopback port (the
+    # gateway's login and SERVER.LST, the update server's login, CRC and files), a login no
+    # release serves refused, the release retired and the cache swept after a refresh, a
+    # second release served.
+    add_executable(update_listener_test novaworld/update_listener_test.cpp)
+    target_link_libraries(update_listener_test PRIVATE
+        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service
+        opennova_update_tool_core)
+    target_include_directories(update_listener_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(update_listener_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    opennova_add_pg_test(update_listener COMMAND update_listener_test)
+    set_tests_properties(update_listener PROPERTIES TIMEOUT 120)
     set_tests_properties(data_set_routes PROPERTIES TIMEOUT 120)
 
     # The outbound mail (apps/novaworld_common/mailer.h) and the address rule

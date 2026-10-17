@@ -37,6 +37,10 @@ add_library(opennova_novaworld_web_core STATIC
     # (ADR 0064), and the jobs they enqueue for the worker.
     data_sets/data_set_routes.cpp
     data_sets/release_routes.cpp
+    # The update listener (ADR 0061 d3): UPDATE.EXE's gateway and update server over the
+    # published releases, its catalog cached on disk, on apps/common's TCP listener.
+    updater/release_catalog.cpp
+    updater/update_listener.cpp
     # Billing's routes and the webhook's signature.
     billing/billing_routes.cpp
     billing/stripe_signature.cpp
