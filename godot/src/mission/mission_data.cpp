@@ -11,6 +11,7 @@
 
 #include <formats/mission/bms.h>         // AttribFlags / AreaTrigger / Trigger bit names, parse / write
 #include <formats/mission/bms_edit.h>    // the document's edit operations + typed views (ADR 0043 E11)
+#include <formats/mission/mission_chains.h> // triggers_read / actions_read: an event's runs as the game reads them
 #include <formats/mission/mission.h>     // kItemIdOffset (pins ITEM_ID_OFFSET below)
 #include <formats/mission/mission_mis.h> // the .mis text form
 
@@ -622,8 +623,10 @@ bool MissionData::add_event_trigger(int event_index, int main_type, int sub_type
 	record.param4 = param4;
 	record.condition_flags = condition_flags;
 	std::string error;
+	// Appended after the run the game reads, its count byte signed (mission::triggers_read; D-10).
 	if (!mission::insert_event_trigger(file_, static_cast<size_t>(event_index),
-				static_cast<size_t>(event.trigger_count), record, error)) return edit_failed(error);
+				mission::triggers_read(static_cast<uint8_t>(event.trigger_count)), record, error))
+		return edit_failed(error);
 	modified = true;
 	return true;
 }
@@ -641,8 +644,10 @@ bool MissionData::add_event_action(int event_index, int action_type, int sub_typ
 	record.param3 = param3;
 	record.param4 = param4;
 	std::string error;
+	// Appended after the run the game reads, its count byte signed (mission::actions_read; D-10).
 	if (!mission::insert_event_action(file_, static_cast<size_t>(event_index),
-				static_cast<size_t>(event.action_count), record, error)) return edit_failed(error);
+				mission::actions_read(static_cast<uint8_t>(event.action_count)), record, error))
+		return edit_failed(error);
 	modified = true;
 	return true;
 }

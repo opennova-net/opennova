@@ -930,14 +930,18 @@ bool event_chain(const bms::File &file, size_t index, MissionEventChain &out) {
 		return false;
 	}
 	out.event = to_event_record(file.events[index], index);
-	if (!valid_range(out.event.trigger_index, out.event.trigger_count, file.triggers.size())) {
+	// The runs the game reads, its count bytes signed (triggers_read, actions_read: 128..255 reads the first
+	// trigger alone and no action; D-10).
+	const int trigger_run = static_cast<int>(triggers_read(file.events[index].trigger_count));
+	const int action_run = static_cast<int>(actions_read(file.events[index].action_count));
+	if (!valid_range(out.event.trigger_index, trigger_run, file.triggers.size())) {
 		out.diagnostics.push_back(logic_diagnostic(
 				"logic.trigger_range_out_of_range",
 				"Event trigger range is outside the mission trigger table.",
 				"event",
 				static_cast<int>(index)));
 	} else {
-		for (int i = 0; i < out.event.trigger_count; ++i) {
+		for (int i = 0; i < trigger_run; ++i) {
 			const size_t trigger_index = static_cast<size_t>(out.event.trigger_index + i);
 			MissionTriggerRecord trig = to_trigger_record(file.triggers[trigger_index], trigger_index);
 			out.triggers.push_back(trig);
@@ -958,14 +962,14 @@ bool event_chain(const bms::File &file, size_t index, MissionEventChain &out) {
 			}
 		}
 	}
-	if (!valid_range(out.event.action_index, out.event.action_count, file.actions.size())) {
+	if (!valid_range(out.event.action_index, action_run, file.actions.size())) {
 		out.diagnostics.push_back(logic_diagnostic(
 				"logic.action_range_out_of_range",
 				"Event action range is outside the mission action table.",
 				"event",
 				static_cast<int>(index)));
 	} else {
-		for (int i = 0; i < out.event.action_count; ++i) {
+		for (int i = 0; i < action_run; ++i) {
 			const size_t action_index = static_cast<size_t>(out.event.action_index + i);
 			MissionActionRecord act = to_action_record(file.actions[action_index], action_index);
 			out.actions.push_back(act);

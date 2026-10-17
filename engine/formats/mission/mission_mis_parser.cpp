@@ -7,6 +7,8 @@
 #include "mission_records.h"
 #include "bms_edit.h"
 
+#include <formats/mission/mission_chains.h>
+
 #include <formats/mission/authoring.h> // entity_kind_for_item_type: items.def TYPE -> BMS pool
 
 #include <algorithm>
@@ -566,7 +568,13 @@ bool parse_mis_nested_records(const std::vector<MisLine> &lines,
 		const MisLine &line = lines[pos];
 		const std::vector<std::string> &t = line.tokens;
 		if (t.size() >= 2 && t[0] == "end" && t[1] == section) {
-			if (parsed != expected_count) {
+			// A count of 128..255 holds the rows the game reads of it (triggers_read, actions_read: the writer's
+			// form of a count byte read signed; D-10), the byte kept by the event.
+			const bool signed_run =
+			        expected_count >= 128 && expected_count <= 255 &&
+			        size_t(parsed) == (section == "triggers" ? triggers_read(uint8_t(expected_count))
+			                                                 : actions_read(uint8_t(expected_count)));
+			if (parsed != expected_count && !signed_run) {
 				error = "MIS " + section + " count mismatch in line " + std::to_string(line.line_no);
 				return false;
 			}
@@ -624,12 +632,18 @@ bool parse_mis_event(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 	bms::Event event = {};
 	event.trigger_index = static_cast<int32_t>(file.triggers.size());
 	event.action_index = static_cast<int32_t>(file.actions.size());
+	int32_t declared_triggers = -1, declared_actions = -1; // a section's count as written
 	for (++pos; pos < lines.size();) {
 		const MisLine &line = lines[pos];
 		const std::vector<std::string> &t = line.tokens;
 		if (t.size() >= 2 && t[0] == "end" && t[1] == "event") {
 			event.trigger_count = static_cast<uint8_t>(file.triggers.size() - static_cast<size_t>(event.trigger_index));
 			event.action_count = static_cast<uint8_t>(file.actions.size() - static_cast<size_t>(event.action_index));
+			// A count of 128..255 written over the run the game reads of it is kept as the byte (D-10: the zone
+			// resolvers read a trigger byte of 128..255 as no run, where 1 resolves the first trigger's zone
+			// [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000, @0x453029]).
+			if (declared_triggers >= 128) event.trigger_count = static_cast<uint8_t>(declared_triggers);
+			if (declared_actions >= 128) event.action_count = static_cast<uint8_t>(declared_actions);
 			file.events.push_back(event);
 			++pos;
 			return true;
@@ -650,9 +664,11 @@ bool parse_mis_event(const std::vector<MisLine> &lines, size_t &pos, bms::File &
 		} else if (t.size() >= 3 && t[0] == "begin" && t[1] == "triggers") {
 			if (!token_i32(line, 2, value, error)) return false;
 			if (!parse_mis_nested_records(lines, pos, "triggers", value, file, error)) return false;
+			declared_triggers = value;
 		} else if (t.size() >= 3 && t[0] == "begin" && t[1] == "actions") {
 			if (!token_i32(line, 2, value, error)) return false;
 			if (!parse_mis_nested_records(lines, pos, "actions", value, file, error)) return false;
+			declared_actions = value;
 		} else {
 			if (t[0] != "name") unknown_key(issues, line, "event " + std::to_string(number));
 			++pos;

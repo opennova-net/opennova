@@ -6,6 +6,7 @@
 #include "mission_detail.h"
 
 #include <formats/def/def.h>
+#include <formats/mission/mission_chains.h>
 
 #include <algorithm>
 #include <array>
@@ -389,9 +390,17 @@ void write_mis_events(const bms::File &file, std::string &out, const MisNames *n
 		if (event.delay != 0) {
 			append_kv(out, "  delay_value ", event.delay);
 		}
-		if (event.trigger_count > 0) {
+		// The runs the game reads, its count bytes signed (triggers_read, actions_read: 128..255 reads the first
+		// trigger alone and no action; D-10). A trigger byte of 128..255 is written as the byte, over the one row
+		// read, which the original editor and the reader keep as the byte: the zone resolvers read it as no run,
+		// where 1 resolves the first trigger's zone [orig: EventTrigger_ResolveZoneTriggerRefs @0x453000,
+		// @0x453029; JOTACmed.exe MIS_ParseToken, the count @0x453ac5, sub_44F920's byte @0x450b78]. Every action
+		// reader reads 128..255 as 0, which no section writes.
+		const int trigger_run = static_cast<int>(triggers_read(event.trigger_count));
+		const int action_run = static_cast<int>(actions_read(event.action_count));
+		if (trigger_run > 0) {
 			append_kv(out, "  begin triggers ", static_cast<int>(event.trigger_count));
-			for (int t = 0; t < static_cast<int>(event.trigger_count); ++t) {
+			for (int t = 0; t < trigger_run; ++t) {
 				const int index = event.trigger_index + t;
 				if (index < 0 || static_cast<size_t>(index) >= file.triggers.size()) {
 					continue;
@@ -404,9 +413,9 @@ void write_mis_events(const bms::File &file, std::string &out, const MisNames *n
 			}
 			append_line(out, "  end triggers");
 		}
-		if (event.action_count > 0) {
-			append_kv(out, "  begin actions ", static_cast<int>(event.action_count));
-			for (int a = 0; a < static_cast<int>(event.action_count); ++a) {
+		if (action_run > 0) {
+			append_kv(out, "  begin actions ", action_run);
+			for (int a = 0; a < action_run; ++a) {
 				const int index = event.action_index + a;
 				if (index < 0 || static_cast<size_t>(index) >= file.actions.size()) {
 					continue;

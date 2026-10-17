@@ -12,6 +12,7 @@
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission_chains.h>
+#include <formats/mission/mission_mis.h>
 
 #include "common/file_io.h"
 #include "common/test_expect.h"
@@ -257,6 +258,27 @@ int test_signed_counts() {
 	past.events[0].trigger_index = 3;
 	TEST_EXPECT(!split_event_chains(past, chains, report) && report.triggers == RunLayout::OutOfRange &&
 	            report.event == 0);
+	// The event's chain (bms_edit) and the .mis writer read the runs alike: the first trigger and no action.
+	MissionEventChain chain;
+	TEST_EXPECT(event_chain(held_one, 0, chain) && chain.diagnostics.empty() && chain.triggers.size() == 1);
+	TEST_EXPECT(event_chain(stray, 1, chain) && chain.diagnostics.empty() && chain.actions.empty());
+	std::string text;
+	TEST_EXPECT(write_mis_text(held_one, text, error));
+	const size_t second = text.find("begin event 1\r\n");
+	TEST_EXPECT(second != std::string::npos && text.find("  begin triggers 200\r\n") < second &&
+	            text.find("begin actions", second) == std::string::npos);
+	// Read back: the trigger byte as written over its one row (the zone resolvers read 200 as no run, 1 as one),
+	// the action byte 0, as every action reader reads 255.
+	bms::File back;
+	TEST_EXPECT(parse_mis_text(text, {}, back, error) && back.events.size() == 2 && back.events[0].trigger_count == 200 &&
+	            back.triggers.size() == 3 && back.events[1].action_count == 0);
+	// A declared count of 128..255 holds the rows the game reads, no more: two rows under 200 do not read.
+	std::string two = text;
+	const size_t at = two.find("  begin triggers 200\r\n");
+	const size_t row = two.find("\r\n", at + 4) + 2;
+	const size_t row_end = two.find("\r\n", row) + 2;
+	two.insert(row_end, two.substr(row, row_end - row));
+	TEST_EXPECT(!parse_mis_text(two, {}, back, error));
 	return 0;
 }
 
