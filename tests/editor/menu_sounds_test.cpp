@@ -356,8 +356,11 @@ static int test_bank_keys() {
 	editor_test::handle_to_end(project.session, request::rescan());
 	while (project.session.view().activity.validation.running) project.session.poll();
 	menu = banks.bank(*project.session.view().findings.assets, "menu.lwf", &key);
-	TEST_EXPECT(menu && key == 1 && menu->multis.size() == 1 && menu->multis[0].name == "ONLY");
-	std::printf("bank keys: a bank that does not open takes none, the next 1; read again once its file moves\n");
+	// Read again into fresh playlist records: a key no bank had, so no selection state of the old bank carries over.
+	TEST_EXPECT(menu && key == 2 && menu->multis.size() == 1 && menu->multis[0].name == "ONLY");
+	TEST_EXPECT(banks.bank(*project.session.view().findings.assets, "menu.lwf", &key) == menu && key == 2);
+	std::printf("bank keys: a bank that does not open takes none, the next 1; read again once its file moves, under "
+	            "a key no bank had\n");
 	return 0;
 }
 

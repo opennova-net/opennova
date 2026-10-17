@@ -51,16 +51,22 @@ bool read_menu_sound_options(const io::JsonValue &json, MenuSoundOptions &held, 
 // as the game opens it, by the name the row's text gives as written [orig: CUIElement_ParseXMLDefinition @
 // 0x648ada -> SoundBank_CollectionAddOrRef @ 0x652b40 -> SoundBank_OpenFile @ 0x75caa0] (the project's file of
 // the name, an open document standing in for it). The editor's own part: once the file a named bank is read
-// from moves (its stamp), every bank is opened again, as a menu loaded again would. A name no file answers, or
-// a file that does not read as a bank, is none: the game plays nothing from it.
+// from moves (its stamp), every bank is opened again, as a menu loaded again would, into fresh playlist records:
+// the keys go on past every key given before (the collection's, plus the keys the earlier collections gave), so
+// no reopened bank takes the selection state (a sequence's cursor) a bank had under its old key in the session's
+// one SoundSelector. A name no file answers, or a file that does not read as a bank, is none: the game plays
+// nothing from it.
 class MenuSoundBanks {
 public:
-	// The bank the name names; null for none. `key` (optional) takes its selection key (the collection's).
+	// The bank the name names; null for none. `key` (optional) takes its selection key: the collection's, past the
+	// keys of the collections before it.
 	const lwf::File *bank(const ProjectAssetSource &files, const std::string &name, int32_t *key = nullptr);
 
 private:
 	menu::MenuBankCollection collection_;
 	std::vector<std::pair<std::string, uint64_t>> stamps_; // each name the collection was asked, its file's stamp then
+	int32_t key_base_ = 0; // the keys the earlier collections gave
+	int32_t last_key_ = 0; // the largest key this collection gave
 };
 
 // One window sound the preview fired: the play (`sound`: its seq in the order of every preview sound fired,

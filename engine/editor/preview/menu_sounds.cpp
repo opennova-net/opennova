@@ -72,8 +72,11 @@ const lwf::File *MenuSoundBanks::bank(const ProjectAssetSource &files, const std
 	} else if (held->second != stamp) {
 		collection_.clear();
 		stamps_.assign(1, {name, stamp});
+		key_base_ += last_key_; // fresh playlist records: no key a bank had before
+		last_key_ = 0;
 	}
-	return collection_.bank(
+	int32_t opened = 0;
+	const lwf::File *file = collection_.bank(
 	        name,
 	        [&files](const std::string &named, lwf::File &out) {
 		        std::vector<uint8_t> bytes;
@@ -81,7 +84,10 @@ const lwf::File *MenuSoundBanks::bank(const ProjectAssetSource &files, const std
 		        return files.read(named, bytes) && !bytes.empty() &&
 		               lwf::parse_lwf_buffer(bytes.data(), bytes.size(), out, error);
 	        },
-	        key);
+	        &opened);
+	last_key_ = std::max(last_key_, opened);
+	if (key) *key = opened == 0 ? 0 : key_base_ + opened;
+	return file;
 }
 
 // --- a window's sound ----------------------------------------------------------------------------------
