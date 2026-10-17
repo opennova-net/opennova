@@ -1457,12 +1457,12 @@ void HudFrameCompiler::element_power(const HudFrameState &state, float w,
 	const float x1 = x0 + sx(r.w, w);
 	const float y1 = y0 + sy(r.h, h);
 	emit_wire_rect(x0, y0, x1, y1, color);
+	// The fill clears from x + 1 to x + span, no clamp: at full charge it abuts
+	// the outline's right edge at x + w [orig: Render_DrawWireframeRect
+	// @0x59997D; sub_5D48E0 @0x5999A4, (x + 1, y + 1, x + span, y + h - 1)].
 	const int span = power_fill_span(progress, static_cast<int>(x1 - x0));
 	if (span > 1) {
-		emit_rect(x0 + 1.0f, y0 + 1.0f,
-				x0 + 1.0f + std::min(static_cast<float>(span - 1),
-									 x1 - x0 - 2.0f),
-				y1 - 1.0f, color, true);
+		emit_rect(x0 + 1.0f, y0 + 1.0f, x0 + static_cast<float>(span), y1 - 1.0f, color, true);
 	}
 	char label[16];
 	std::snprintf(label, sizeof(label), "%d%%",

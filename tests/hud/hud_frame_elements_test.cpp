@@ -691,6 +691,24 @@ void test_feed_and_power_label_slots(const fnt_font_t *font) {
 	for (const HudQuad &q : list2.quads)
 		if (!q.filled) outline2 = q.color;
 	CHECK(outline0 != 0u && outline2 == (0xFF000000u | layout.hud_text) && outline0 != outline2);
+	// The fill at full charge (under 31 held ticks the progress is 1.0) clears
+	// from x + 1 to x + span = x + w, abutting the outline's right edge (C-212)
+	// [orig: HUD_DrawPowerThrowChargeBar -- the fld1 arm @0x5998AF for under
+	// 31 ticks, the span @0x599964, sub_5D48E0 @0x5999A4].
+	{
+		HudFrameState full = power;
+		full.windup_held_ticks = 30;
+		const HudDrawList &charged = compiler.compile(full, w, h);
+		const float px0 = static_cast<float>(scale_axis(14.0, w, 1024.0));
+		const float pw = static_cast<float>(scale_axis(160.0, w, 1024.0));
+		bool fill_seen = false;
+		for (const HudQuad &q : charged.quads) {
+			if (!q.filled) continue;
+			fill_seen = true;
+			CHECK(q.x0 == px0 + 1.0f && q.x1 == px0 + pw);
+		}
+		CHECK(fill_seen);
+	}
 	opennova::fnt::fnt_free(&hud_font);
 }
 
