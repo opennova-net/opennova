@@ -11,10 +11,10 @@
 // the bootstrap names for it. Built only with BUILD_NOVAWORLD_HTTP; Linux (the
 // agent is).
 //
+//   * no lobby live (the service's lobby drained): the first start below waits
+//     in provisioning, no machine launched, until the lobby takes clients again;
 //   * the owner, granted a server (players.comp_servers), starts a Joint
-//     Operations server with POST /api/me/servers while the lobby drains (no
-//     lobby live): it waits in provisioning, no machine launched, until the
-//     lobby takes clients again; then the supervisor launches a
+//     Operations server with POST /api/me/servers; the supervisor launches a
 //     shared machine, whose agent bootstraps and syncs, places the server on
 //     its first slot, mints its service account srv-<id> and renders its
 //     files, which the agent writes to the slot's directory before it starts
