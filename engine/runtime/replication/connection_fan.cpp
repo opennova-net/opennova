@@ -1296,8 +1296,10 @@ bool build_connection_s2c(const world::World &w, Connection &conn,
 					}
 				}
 			}
-			hs.tail_health = static_cast<int16_t>(
-					own->health > 32767 ? 32767 : (own->health < 0 ? 0 : own->health));
+			// The +0x11E Health word, raw: a drowned or flag-timed-out body's
+			// -1 crosses as 0xFFFF [orig: NetPacket_WritePlayerState
+			// @0x4FFD56..0x4FFD6A].
+			hs.tail_health = static_cast<int16_t>(own->health);
 			// The +0x120 word, raw [orig: NetPacket_WritePlayerState @0x4FFD77].
 			hs.tail_armor = own->mana;
 		}
