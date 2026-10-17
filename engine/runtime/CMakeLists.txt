@@ -458,9 +458,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_weapon_image.cpp # retail's weapon.def table image
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/join_session_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_doors.cpp  # the C2S 0x1A door request (S2C 0x37 reply)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_team_change.cpp  # the C2S 0x4D team change
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_death_timeout_reset.cpp  # the C2S 0x41 Respawn key
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_kill_page.cpp  # the C2S 0x28 -> S2C 0x4E kill page
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_walks.cpp  # the paged-list walk replies (0x51 -> 0x29)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_disconnect.cpp  # the punt/goodbye/reap/leave family of JoinerConnection

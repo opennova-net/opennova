@@ -1,9 +1,8 @@
 #include <runtime/world/weapon_fire_gate.h>
 #include <runtime/inmatch/server_message_dispatch.h>
 #include <runtime/inmatch/server_visible_players.h>
-#include <runtime/inmatch/server_doors.h>
+#include <runtime/inmatch/server_entity_routes.h> // Server_HandleDoorRowRequest (C2S 0x1A)
 #include <runtime/inmatch/server_team_change.h>
-#include <runtime/inmatch/server_death_timeout_reset.h>
 #include <runtime/inmatch/server_kill_page.h>
 #include <runtime/inmatch/server_emote.h>
 #include <runtime/inmatch/server_radio_call.h>
