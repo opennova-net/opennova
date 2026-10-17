@@ -1,6 +1,6 @@
 // The home page's screenshots and video (web/public/media/), with the words
-// that describe them. Retail shots are the original games' own data, drawn by
-// OpenNova; the editor's are OpenNova's own base game. A gallery tile shows
+// that describe them. The editor's are OpenNova's own game; the hero and the
+// retail shots are the original game's own data, drawn by OpenNova. A gallery tile shows
 // its 800-wide thumbnail and links to the full 1600-wide image.
 
 export interface Shot {
@@ -19,8 +19,10 @@ export const hero = {
   alt: "Joint Operations' training island seen from above, running in OpenNova",
 };
 
-// The first is shown wide, at full size.
-export const gameShots: Shot[] = [
+// Retail Joint Operations, its own data drawn by OpenNova. The first is shown
+// wide, at full size. (dfx2-green-hell-camp.webp waits for the site to name
+// dfx2.exe beside Jointops.exe.)
+export const retailShots: Shot[] = [
   {
     ...shot(
       'jo-blackhawk-dusk',
@@ -35,11 +37,6 @@ export const gameShots: Shot[] = [
     'Joint Operations, Operation Emerald Scorpion: AI riflemen on patrol.'
   ),
   shot('jo-hud', 'First-person view with the HUD, rifle and compass', "Joint Operations' own HUD, weapon and compass."),
-  shot(
-    'dfx2-green-hell-camp',
-    'A jungle camp below a mountain',
-    'Delta Force Xtreme 2, Green Hell: a camp below the mountain.'
-  ),
 ];
 
 export const editorShots: Shot[] = [

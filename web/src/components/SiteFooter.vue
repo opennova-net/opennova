@@ -4,7 +4,7 @@
       <div class="col-span-3 space-y-2 lg:col-span-1">
         <p class="font-semibold text-ink">Open<span class="text-accent">Nova</span></p>
         <p class="text-ink-muted">
-          An open-source reimplementation of NovaLogic's engine for Joint Operations and newer. Pre-1.0 and experimental.
+          A free, open-source game on NovaLogic's engine, rebuilt in the open, that also plays the Joint Operations you own. Pre-1.0 and experimental.
         </p>
       </div>
       <nav aria-label="Project" class="space-y-2">

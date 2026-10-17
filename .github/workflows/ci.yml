@@ -669,11 +669,12 @@ jobs:
           cache: npm
           cache-dependency-path: web/package-lock.json
 
-      - name: Install, test and build
+      - name: Install, test, type-check and build
         working-directory: web
         run: |
           npm ci
           npm test
+          npm run typecheck
           npm run build
 
       - name: Upload web dist

@@ -509,11 +509,10 @@ _Avoid_: ONED (the retired product), mod tools, modtools, terrain editor
 
 **Bundled assets**:
 The `assets/` directory shipped beside `opennova.exe`: OpenNova's own game data,
-authored from scratch. Today it is the placeholder main menu that says the
-OpenNova game is coming and offers **PLAY RETAIL**, plus the first pieces of the
-game's own data (the `on_ar15` carbine and arms the Blender add-on exports from
-`art/`, not yet referenced). The game mounts it when no `--resource-dir` is given
-(ADR 0048).
+authored from scratch: OpenNova's own small game, the "Indigo Shore" mission
+(single player and Co-op over LAN) and its "Indigo Storm" expansion, whose main
+menu also offers **PLAY RETAIL**. The game mounts it when no `--resource-dir` is
+given (ADR 0048).
 _Avoid_: fixtures (test-only data), retail data
 
 **Serve mode**:
