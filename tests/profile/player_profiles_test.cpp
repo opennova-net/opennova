@@ -127,7 +127,7 @@ int test_init_defaults() {
     return 0;
 }
 
-// --- 4. the merge [orig: merge_weapon_slot_params @0x54c3f0] -----------------------
+// --- 4. the merge [orig: KeyBinding_MergeSavedBindings @0x54c3f0] -----------------------
 
 int test_merge_bindings() {
     const std::vector<playersav::BindingEntry> table = profile::default_binding_table();
@@ -263,7 +263,7 @@ int test_name_rules() {
     PlayerProfiles::LoadInput in;
     p.load(in, defaults());
     p.select_slot(1);
-    // [orig: handle_player_name_change @0x55fbb0]
+    // [orig: PlayerInfo_HandlePlayerNameChange @0x55fbb0]
     TEST_EXPECT(!p.rename("Bob!"));
     TEST_EXPECT(p.current().flags == playersav::kRecordFlagNoName);
     TEST_EXPECT(p.rename("Bob.Smith-2"));
