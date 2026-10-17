@@ -28,6 +28,13 @@ namespace opennova::threedi {
 // its first line (version 1 carried strips, bone tables and four bone slots).
 inline constexpr int kThreediO3dVersion = 2;
 
+// Whether a skinned vertex's weights, added in float as the shader adds them,
+// blend it wholly: their sum is 1 within the 1e-4 retail's four-decimal
+// weights reach (ArmGlovD's sum to 1.0001). The reader refuses a v whose
+// weights do not; `opennova-3di scene` leaves a vertex's rest out of its
+// first pair where they already do.
+inline constexpr bool o3d_weights_whole(float sum) { return sum >= 0.9999f && sum <= 1.0001f; }
+
 // Read `.o3d` text into `model`. Every error lands in `findings` (the reader
 // notes nothing: what a target makes of the model is the lowering's); true
 // when there is none, and `model` is then the whole text.

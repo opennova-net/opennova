@@ -129,7 +129,7 @@ bool read_influences(Reader &r, SceneLine &in, ThreediO3dMesh &mesh, ThreediO3dV
 		r.error("a skinned v needs its influences after the uv: part weight, the primary first");
 		return false;
 	}
-	if (!(sum >= 0.9999f && sum <= 1.0001f)) {
+	if (!o3d_weights_whole(sum)) {
 		r.error("skinned v weights sum to " + f9(sum) + ": a vertex's weights blend it wholly, summing to 1");
 		mesh.influences.resize(first);
 		return false;
