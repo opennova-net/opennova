@@ -4776,7 +4776,8 @@ int test_db_failure_reply_carries_code_alone(Harness &h) {
 // A database outage on the public reads is a 500, never a 200 with empty data the
 // lobby page would show as "no servers" (B-24): GET /api/lobbies, /api/stats and
 // /api/games, whose reads all start at the games table, answer {"error":"db_error"}
-// while it is gone, and their data again once it is back.
+// while it is gone, and their data again once it is back; the admin listing
+// /api/hosts the same over active_hosts.
 int test_public_reads_fail_as_500(Harness &h) {
 	h.pool.acquire()->exec("ALTER TABLE games RENAME TO games_harness_away;");
 	bool all_refused = true;
@@ -4793,6 +4794,17 @@ int test_public_reads_fail_as_500(Harness &h) {
 	TEST_EXPECT(all_refused);
 	for (const char *path : { "/api/lobbies", "/api/stats", "/api/games" })
 		TEST_EXPECT(h.send("GET", path).code == 200);
+	// The admin listing /api/hosts reads active_hosts: a failed read is the same
+	// 500, never an empty 200 (B-8).
+	h.pool.acquire()->exec("ALTER TABLE active_hosts RENAME TO active_hosts_harness_away;");
+	const net::HttpReply hosts = h.send("GET", "/api/hosts", {kBearer});
+	const bool hosts_refused = hosts.transport_ok && hosts.code == 500 &&
+			body_text(hosts) == "{\"error\":\"db_error\"}";
+	if (!hosts_refused)
+		std::fprintf(stderr, "  /api/hosts: %s, want HTTP 500 db_error\n", describe(hosts).c_str());
+	h.pool.acquire()->exec("ALTER TABLE active_hosts_harness_away RENAME TO active_hosts;");
+	TEST_EXPECT(hosts_refused);
+	TEST_EXPECT(h.send("GET", "/api/hosts", {kBearer}).code == 200);
 	return 0;
 }
 
