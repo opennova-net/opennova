@@ -805,6 +805,14 @@ void LocalPlayer::tick_view() {
 	w::local_player_camera_compose(world, view, view_tracker, composed, mounted_camera);
 }
 
+void LocalPlayer::respawn_init(bool rebuild_kit) {
+    if (rebuild_kit)
+        local_loadout_rebuild(world_, loadout, weapon, inventory, inventory_valid,
+                              /*select_spawn_default=*/true);
+    local_player_view_reset(&world_, weapon, view, view_tracker);
+    hud_map_control.reset_spawn();
+}
+
 void LocalPlayer::reset_for_new_round() {
     // Round init clears the world's dialog table, its first statement and again
     // after the overlay reset; the second finds it empty
