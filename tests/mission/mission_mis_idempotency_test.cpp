@@ -20,9 +20,11 @@
 #include <unordered_map>
 #include <vector>
 
+#include "common/file_io.h"
 #include "common/retail_paths.h"
 #include "common/test_expect.h"
 #include "common/test_paths.h"
+#include <formats/def/def.h>
 #include <formats/mission/bms.h>
 #include <formats/mission/bms_edit.h>
 #include <formats/mission/mission.h>
@@ -225,6 +227,37 @@ int check(const std::string &path) {
 	return 0;
 }
 
+// 00TRg's default kit (D-MIS-X1): over the install's weapon table, the kit the shipped .bms's loadout leads with is
+// the shipped .mis's, and the .mis's kit read back builds the shipped chunk's records, name for name.
+int check_00trg_kit(const std::string &bms_path, const std::string &weapons_path, const std::string &mis_path) {
+	using namespace opennova::mission;
+	namespace bms = opennova::bms;
+	namespace def = opennova::def;
+	std::string error;
+	bms::File file;
+	TEST_EXPECT(bms::parse_file(bms_path, file, error));
+	const std::vector<uint8_t> weapon_bytes = test_io::read_file(weapons_path);
+	def::DefWeaponsFile weapons{};
+	TEST_EXPECT(def::def_parse_weapons_memory(weapon_bytes.data(), weapon_bytes.size(), &weapons) == 0);
+	const MisWeaponTable table = mis_weapon_table(weapons);
+	def::def_free_weapons(&weapons);
+	TEST_EXPECT(!table.empty() && table[0].name == "None"); // the original's first row [orig: sub_432E50 @ 0x432e8d]
+	TEST_EXPECT(mis_default_kit(file.loadout, &table) == MisDefaultKit({"WPN_M16M203BURST", "WPN_colt45", "WPN_AT4"}));
+	sync_counts(file);
+	std::string written;
+	TEST_EXPECT(write_mis_text(file, written, error, nullptr, nullptr, &table));
+	const std::string shipped = test_io::read_file_text(mis_path);
+	const std::string lines = "  default_primary   WPN_M16M203BURST\r\n  default_secondary WPN_colt45\r\n"
+	                          "  default_accessory WPN_AT4\r\n";
+	TEST_EXPECT(shipped.find(lines) != std::string::npos && written.find(lines) != std::string::npos);
+	bms::File read;
+	TEST_EXPECT(parse_mis_text(shipped, {}, read, error, nullptr, &table));
+	TEST_EXPECT(read.loadout.entries.size() == file.loadout.entries.size());
+	for (size_t i = 0; i < read.loadout.entries.size() && i < file.loadout.entries.size(); ++i)
+		TEST_EXPECT(read.loadout.entries[i].name == file.loadout.entries[i].name);
+	return 0;
+}
+
 int main(int argc, char **argv) {
     retail::configure_mixed(argc, argv);
 	if (check(fixture_path()) != 0) return 1;
@@ -239,5 +272,11 @@ int main(int argc, char **argv) {
 	if (areas.empty()) return retail::skip_leg("OPENNOVA_JO_ASSETS/03TR.bms (a shipped mission with areas)");
 	if (check(areas) != 0) return 1;
 	std::printf("retail leg: 03TR .mis export is idempotent, its areas by zone id\n");
+	const std::string trg = retail::asset_file("00TRg.bms"), weapons = retail::asset_file("weapon.def"),
+	                  trg_mis = retail::asset_file("00TRg.mis");
+	if (trg.empty() || weapons.empty() || trg_mis.empty())
+		return retail::skip_leg("OPENNOVA_JO_ASSETS/00TRg.bms, 00TRg.mis and weapon.def (the shipped kit)");
+	if (check_00trg_kit(trg, weapons, trg_mis) != 0) return 1;
+	std::printf("retail leg: 00TRg's .mis kit is the one its loadout leads with, and builds its records\n");
 	return 0;
 }

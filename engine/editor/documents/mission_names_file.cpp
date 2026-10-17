@@ -362,7 +362,7 @@ bool mission_names_text(const MissionDocument &document, const std::vector<int32
 		}
 		++pool_index;
 	}
-	return mission::write_mis_text(file, text, error, base_heights, &names);
+	return mission::write_mis_text(file, text, error, base_heights, &names, document.weapon_table());
 }
 
 namespace {

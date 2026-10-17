@@ -78,9 +78,11 @@ DocumentSet::DocumentSet(SessionCore &core)
 
 DocumentSet::~DocumentSet() = default;
 
-void DocumentSet::hand_item_classes(DocumentBase &document) {
-	if (auto *mission = dynamic_cast<MissionDocument *>(&document))
+void DocumentSet::hand_catalog_rows(DocumentBase &document) {
+	if (auto *mission = dynamic_cast<MissionDocument *>(&document)) {
 		mission->set_item_classes(mission_item_classes(view_, *rows_, *mission));
+		mission->set_weapon_table(rows_->weapon_table(view_));
+	}
 }
 
 // --- what is open ----------------------------------------------------------------------------
@@ -781,7 +783,7 @@ void DocumentSet::open_document(const EditorRequest &request) {
 		if (!keep) remembered_.erase(asset.relative_path); // read again: its records have new identities
 		forget_file_state(asset.relative_path);
 		read_again(asset.relative_path); // a gesture open in it is over, and what the workspace named of the old read
-		hand_item_classes(*document);
+		hand_catalog_rows(*document);
 		documents_.push_back(document);
 		activate(document->path());
 		if (!keep) select_named(*document);
@@ -1378,7 +1380,7 @@ bool DocumentSet::save_documents(const std::vector<std::string> &asked, bool rew
 	for (const Diagnostic &refused : unbaked) unwritten.push_back(basename_of(refused.asset));
 	for (DocumentBase *document : writes) {
 		Diagnostic error;
-		hand_item_classes(*document); // a mission's AI classes as its items' rows hold them now
+		hand_catalog_rows(*document); // a mission's AI classes and weapon table as the catalogs hold them now
 		const bool over_it = !over.empty() && document->path() == over;
 		const bool outside = over_it && !document->matches_file();
 		if (!document->save(error, over_it)) {
@@ -1452,7 +1454,7 @@ void DocumentSet::rewrite_file(const std::string &path) {
 		core_.touch(ViewConcern::Output);
 		return;
 	}
-	hand_item_classes(*document);
+	hand_catalog_rows(*document);
 	if (!document->save(error)) { // one that does not serialize says why here
 		core_.report(error);
 		view_.activity.status = relative + " could not be saved: see Problems.";
@@ -1693,7 +1695,7 @@ bool DocumentSet::apply_edits(DocumentBase &document, const std::vector<Edit> &r
 			expanded = std::move(seeded);
 			edits = &expanded;
 		}
-		hand_item_classes(document);
+		hand_catalog_rows(document);
 	}
 	NodeAddress owner;
 	Document::Placement at;

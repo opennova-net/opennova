@@ -191,6 +191,12 @@ public:
 	// an item it names none for keeps its record's own. Such a record's name1 reads as its item's and is set
 	// on the item's row, never on the record.
 	void set_item_classes(std::shared_ptr<const MissionItemClasses> classes) { item_classes_ = std::move(classes); }
+	// The original editor's weapon table over the project's weapon.def (standing in for the original's medwep.def,
+	// mission::mis_weapon_table), which the .mis's default kit is written over (mission_names_text: the kit the
+	// mission's loadout leads with, mission::mis_default_kit; D-MIS-X1). The session hands it with the item
+	// classes; null where it has none, each loadout record then standing alone.
+	void set_weapon_table(std::shared_ptr<const mission::MisWeaponTable> table) { weapon_table_ = std::move(table); }
+	const mission::MisWeaponTable *weapon_table() const { return weapon_table_.get(); }
 	// The AI class a save writes for `entity` from its item's row; null where the classes name none.
 	const std::string *item_class(const bms::Entity &entity) const;
 	// The code of each source finding (issues(), in their order): what the parse made of the file.
@@ -330,6 +336,7 @@ private:
 	uint64_t names_state_ = 0;
 	mutable Lookups lookups_;
 	std::shared_ptr<const MissionItemClasses> item_classes_;
+	std::shared_ptr<const mission::MisWeaponTable> weapon_table_;
 };
 
 // The SSN a new entity takes over `rows` (an Add, a Duplicate, a paste's copy told apart): one past

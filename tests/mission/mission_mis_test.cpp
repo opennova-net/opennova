@@ -960,5 +960,71 @@ int main() {
 		TEST_EXPECT(mis_terrain_height(terrain, bms::to_fixed_16_16(-1.0), bms::to_fixed_16_16(-2.0)) == 0);
 	}
 
+	// The default kit (D-MIS-X1): the loadout chunk the original editor's .bms export builds from it over its weapon
+	// table, and the kit a loadout leads with, which the .mis carries [orig: JOTACmed.exe sub_4328A0 @ 0x4328a0;
+	// MIS_ParseToken @ 0x451caa..0x451d1c; MIS_SaveDocument @ 0x454ba7..0x454bcb].
+	{
+		const MisWeaponTable table = {{"WPN_RIFLE", 2}, {"WPN_RIFLE_A", 0}, {"WPN_RIFLE_B", 0}, {"WPN_PISTOL", 0},
+		                              {"WPN_AT", 0}};
+		const auto names_of = [](const bms::WeaponLoadout &loadout) {
+			std::vector<std::string> out;
+			for (const bms::WeaponLoadoutRecord &record : loadout.entries) out.push_back(record.name);
+			return out;
+		};
+		const auto with_tail = [](std::vector<std::string> names) {
+			for (const char *name : kMisLoadoutTail) names.push_back(name);
+			return names;
+		};
+		// Each slot's name (as the kit spells it: the row is found case aside), its row's subclass rows, the tail.
+		const MisDefaultKit kit = {"wpn_rifle", "WPN_PISTOL", "WPN_AT"};
+		const bms::WeaponLoadout built = mis_default_loadout(kit, &table);
+		TEST_EXPECT(names_of(built) == with_tail({"wpn_rifle", "WPN_RIFLE_A", "WPN_RIFLE_B", "WPN_PISTOL", "WPN_AT"}));
+		bool minus_ones = true;
+		for (const bms::WeaponLoadoutRecord &record : built.entries)
+			minus_ones = minus_ones && record.ammo_primary == "-1" && record.ammo_secondary == "-1" &&
+			             record.flags == "-1" && record.has_flags;
+		TEST_EXPECT(minus_ones);
+		TEST_EXPECT(mis_default_kit(built, &table) == kit);
+		// A name no row holds is left out, an empty slot too; with no table each name stands alone.
+		TEST_EXPECT(names_of(mis_default_loadout({"WPN_NONE", "WPN_PISTOL", ""}, &table)) == with_tail({"WPN_PISTOL"}));
+		TEST_EXPECT(names_of(mis_default_loadout(kit, nullptr)) == with_tail({"wpn_rifle", "WPN_PISTOL", "WPN_AT"}));
+		TEST_EXPECT(mis_default_kit(built, nullptr) == MisDefaultKit({"wpn_rifle", "WPN_RIFLE_A", "WPN_RIFLE_B"}));
+		// A loadout short of three leaves the slots past it empty; one with no tail is read whole.
+		bms::WeaponLoadout short_one;
+		short_one.entries = {built.entries[3]};
+		TEST_EXPECT(mis_default_kit(short_one, &table) == MisDefaultKit({"WPN_PISTOL", "", ""}));
+		TEST_EXPECT(mis_default_kit(bms::WeaponLoadout(), &table) == MisDefaultKit());
+
+		// The .mis carries it: written from the file's loadout, read back into the chunk the export builds.
+		bms::File kitted = authored;
+		kitted.loadout = built;
+		sync_counts(kitted);
+		std::string kit_text;
+		TEST_EXPECT(write_mis_text(kitted, kit_text, error, nullptr, nullptr, &table));
+		TEST_EXPECT(kit_text.find("  default_primary   wpn_rifle\r\n  default_secondary WPN_PISTOL\r\n"
+		                          "  default_accessory WPN_AT\r\n") != std::string::npos);
+		bms::File kit_back;
+		TEST_EXPECT(parse_mis_text(kit_text, {}, kit_back, error, nullptr, &table));
+		TEST_EXPECT(names_of(kit_back.loadout) == names_of(built));
+		// An empty slot is written as the original writes one, its key alone, and reads back empty.
+		kitted.loadout = short_one;
+		TEST_EXPECT(write_mis_text(kitted, kit_text, error, nullptr, nullptr, &table));
+		TEST_EXPECT(kit_text.find("  default_primary   WPN_PISTOL\r\n  default_secondary \r\n  default_accessory \r\n") !=
+		            std::string::npos);
+		TEST_EXPECT(parse_mis_text(kit_text, {}, kit_back, error, nullptr, &table));
+		TEST_EXPECT(names_of(kit_back.loadout) == with_tail({"WPN_PISTOL"}));
+		// A .mis naming no slot reads as the original's reset kit [orig: JOTACmed.exe MissionDocument_Reset
+		// @ 0x44f86f..0x44f8dd].
+		std::string unnamed = kit_text;
+		for (const std::string key : {"  default_primary   WPN_PISTOL\r\n", "  default_secondary \r\n",
+		                              "  default_accessory \r\n"}) {
+			const size_t at = unnamed.find(key);
+			TEST_EXPECT(at != std::string::npos);
+			if (at != std::string::npos) unnamed.erase(at, key.size());
+		}
+		TEST_EXPECT(parse_mis_text(unnamed, {}, kit_back, error, nullptr, nullptr));
+		TEST_EXPECT(names_of(kit_back.loadout) == with_tail({"WPN_M4AUTO", "WPN_colt45", "WPN_AT4"}));
+	}
+
 	return 0;
 }
