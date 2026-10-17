@@ -209,7 +209,8 @@ void mis_items_to_bms_frame(bms::File &file, const MisTerrain &terrain);
 // @ 0x44d2d8..0x44d444], the `areatrig` section of its id giving it its flags (`attrib`) and its
 // description; its .bms export writes the area where the item of the least x (the first of a tie)
 // holds an extra_valmode of 0 [orig: JOTACmed.exe sub_44F920 @ 0x450a16..0x450ab3, the test @ 0x450a3a], in zone
-// id order, and leaves the 6013 items out of the markers [orig: @ 0x450785]. rebuild_mis_areas
+// id order, and leaves the 6013 items out of the markers [orig: JOTACmed.exe sub_44F920
+// @ 0x450785]. rebuild_mis_areas
 // makes `file`'s areas so from its mis_area_markers, each area's flags those an area of its id held
 // before (an `areatrig` section's); an area of no marker goes. parse_mis_text reads a 6013 item so
 // (none of the pools) and makes the areas in the file's frame; mis_items_to_bms_frame makes them
