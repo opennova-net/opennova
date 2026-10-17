@@ -793,6 +793,82 @@ int test_retail() {
 
 } // namespace
 
+// A mission's terrain as the game judges it (D-13): the .trn, overcast.def, then the mission's .env through the
+// terrain's parser, and only then the gate [orig: Terrain_LoadEnvironmentConfig @ 0x610940:
+// Environment_LoadTimeOfDayConfig @ 0x6109c0, the gate @ 0x610a2a..0x610a6b]. An .env narrowing a terrain the
+// .trn alone takes is refused, on the .env's line, gating the build; an .env completing a .trn the gate refuses
+// alone is taken, the .trn's own row taken back; a .trn no mission reads keeps its own; a mission whose load is
+// refused as the .trn alone is keeps the .trn's row, with no second.
+int test_mission_terrain() {
+	test_temp::TempDir dir("opennova_environment_terrain_gate");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session{platform, preferences};
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Gate"));
+	editor_test::create_missing_files(session);
+	const SessionView &view = session.view();
+	const std::string root = view.project.root;
+	const std::string rest = "polytrn_detailmap detail.tga\r\npolytrn_polydata island.cpt\r\npolytrn_sectorcount 1\r\n"
+	                         "polytrn_sectors 0\r\n";
+	TEST_EXPECT(test_io::write_text(root + "/island.trn", "polytrn_colormap map.tga\r\n" + rest));
+	TEST_EXPECT(test_io::write_text(root + "/partial.trn", rest)); // no colour map: refused alone
+	TEST_EXPECT(test_io::write_text(root + "/lone.trn", rest));    // the same, and no mission reads it
+	TEST_EXPECT(test_io::write_text(root + "/narrow.env", "sky_height 175\r\npolytrn_sectorcount 3\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/filled.env", "sky_height 175\r\npolytrn_colormap map.tga\r\n"));
+	const auto mission = [&](const char *name, const char *terrain, const char *environment) {
+		opennova::bms::File file;
+		opennova::mission::make_default(file);
+		std::string why;
+		TEST_EXPECT(opennova::mission::set_header_string(file, "terrain", terrain, why) &&
+		            opennova::mission::set_header_string(file, "environment", environment, why));
+		std::vector<uint8_t> bytes;
+		TEST_EXPECT(opennova::bms::write(file, bytes, why));
+		TEST_EXPECT(test_io::write_file(root + "/" + name, bytes));
+		return 0;
+	};
+	TEST_EXPECT(mission("narrow.bms", "island", "narrow") == 0);
+	TEST_EXPECT(mission("filled.bms", "partial", "filled") == 0);
+	editor_test::handle_to_end(session, request::rescan());
+	const auto refused = [&](const char *asset) {
+		std::vector<const Diagnostic *> rows;
+		for (const Diagnostic &d : view.findings.diagnostics)
+			if (d.code() == "terrain.refused" && d.asset == asset) rows.push_back(&d);
+		return rows;
+	};
+	{
+		const std::vector<const Diagnostic *> narrow = refused("narrow.env");
+		TEST_EXPECT(narrow.size() == 1);
+		if (narrow.size() == 1) {
+			TEST_EXPECT(narrow[0]->line == 2 && narrow[0]->severity == DiagnosticSeverity::Error &&
+			            narrow[0]->row() && narrow[0]->row()->gates_build &&
+			            narrow[0]->message.find("narrow.bms") != std::string::npos &&
+			            narrow[0]->message.find("polytrn_sectorcount 3") != std::string::npos);
+		}
+		TEST_EXPECT(refused("island.trn").empty() && refused("narrow.bms").empty());
+	}
+	TEST_EXPECT(refused("partial.trn").empty() && refused("filled.env").empty() && refused("filled.bms").empty());
+	TEST_EXPECT(refused("lone.trn").size() == 1);
+	// A second mission on partial.trn with no .env: refused as the .trn alone is, the .trn's own row again.
+	TEST_EXPECT(mission("bare.bms", "partial", "") == 0);
+	editor_test::handle_to_end(session, request::rescan());
+	TEST_EXPECT(refused("partial.trn").size() == 1 && refused("bare.bms").empty() && refused("filled.env").empty());
+	// The .env's line put right in its open document, unsaved: the row follows the document.
+	editor_test::handle_to_end(session, request::open_document("narrow.env"));
+	auto *narrow = dynamic_cast<EnvironmentDocument *>(session.document_for("narrow.env"));
+	TEST_EXPECT(narrow && narrow->environment_row() && narrow->environment_row()->terrain_keys.size() == 1);
+	if (narrow && narrow->environment_row() && narrow->environment_row()->terrain_keys.size() == 1) {
+		Edit four;
+		four.address = narrow->terrain_key_address(0);
+		four.field = "value";
+		four.value = std::string("4");
+		editor_test::handle_to_end(session, request::edit_record("narrow.env", four));
+		TEST_EXPECT(refused("narrow.env").empty() && refused("narrow.bms").empty());
+	}
+	std::printf("mission terrain: the gate over the .trn, overcast.def and the .env; on the .env's line; the .trn's "
+	            "own row taken back where every mission takes it\n");
+	return 0;
+}
+
 int main(int argc, char **argv) {
 	retail::configure_mixed(argc, argv);
 	const std::string repo = test_paths_repo_root(__FILE__);
@@ -801,6 +877,7 @@ int main(int argc, char **argv) {
 	failures += test_source_issues();
 	failures += test_terrain_keys(repo);
 	failures += test_session();
+	failures += test_mission_terrain();
 	failures += test_retail();
 	if (failures == 0) std::printf("editor_environment_document: all passed\n");
 	return failures == 0 ? 0 : 1;
