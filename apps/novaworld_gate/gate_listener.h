@@ -12,7 +12,6 @@
 #include <optional>
 #include <string>
 #include <thread>
-#include <vector>
 
 namespace opennova {
 class UnknownTracker;
@@ -31,17 +30,18 @@ struct ServerConfig;
 // the blob is told apart from a probe by its "HostKey =" preamble before
 // the NWU tag decrypt runs.
 //
-// The lobby it hands each client (udpnovaworld): one of the lobby instances
-// that take new clients (lobbydb::active_endpoints, read again every
-// lobby_refresh_ms on the receive thread's connection, kLobbyRetryFactor times
-// as long after a read that failed), picked by a stable hash
-// of the client's IPv4 address (pick_lobby), so a client's retries, and its
-// later sessions while the instances stand, land on one lobby; with none, or
-// while its last read failed (an instance read before may have drained and
-// stopped since), the gate's fallback (ONNET_LOBBY_ENDPOINT, optional), and
-// with no fallback the probe goes unanswered (logged every kNoLobbyLogMs at
-// most, and counted in the heartbeat's probes_unanswered), which the client
-// meets as a lost reply. Only udpnovaworld varies by client:
+// The lobby it hands each client (udpnovaworld): the address every lobby
+// instance announces, the deployment's one lobby address (on ECS the load
+// balancer's, which spreads the clients across the lobby tasks and keeps a
+// session's flow on one), while at least one instance takes clients
+// (lobbydb::live_lobbies, read again every lobby_refresh_ms on the receive
+// thread's connection, kLobbyRetryFactor times as long after a read that
+// failed); with none, or while its last read failed (an instance read before
+// may have drained and stopped since), the gate's fallback
+// (ONNET_LOBBY_ENDPOINT, optional), and with no fallback the probe goes
+// unanswered (logged every kNoLobbyLogMs at most, and counted in the
+// heartbeat's probes_unanswered), which the client meets as a lost reply.
+// The reply is the same for every client but its reflected pair:
 // POSTIPADDRESS is this gate, and the web fields name the one web endpoint.
 //
 // One lobby per title: the probe's tag selects its `games` row
@@ -54,19 +54,12 @@ struct ServerConfig;
 // Runs on its own thread. start() returns immediately; the listener stays
 // up until stop() is called or the destructor runs. Designed to be cheap
 // to instantiate and own — the gate program owns one per process.
-// The lobby endpoint a gate hands the client at `client_ip` (host order):
-// `active[h % active.size()]` for a stable hash h of the address (FNV-1a over
-// its four bytes), or `fallback` with none active.
-std::string pick_lobby(
-		uint32_t client_ip, const std::vector<std::string> &active, const std::string &fallback);
-
 class GateListener {
 public:
-	// How long a read of the active instances serves before the next probe
-	// reads them again (lobbydb::kGateRefreshSeconds, which a draining lobby's
-	// stop waits out); after a read that failed (the fallback served
-	// meanwhile), this many times as long: a read while the database is out
-	// blocks this thread up to its connect timeout.
+	// How long a read of the live instances serves before the next probe
+	// reads them again (lobbydb::kGateRefreshSeconds); after a read that
+	// failed (the fallback served meanwhile), this many times as long: a read
+	// while the database is out blocks this thread up to its connect timeout.
 	static constexpr uint64_t kLobbyRefreshMs =
 			static_cast<uint64_t>(lobbydb::kGateRefreshSeconds) * 1000;
 	static constexpr uint64_t kLobbyRetryFactor = 6;
@@ -117,9 +110,10 @@ public:
 	// The gate's heartbeat fields (health.h), from the main loop's connection:
 	// probes_unanswered, the probes left unanswered for want of a lobby (none
 	// takes clients and no fallback) since the last call, and lobbies_live, the
-	// lobby instances that take clients now (read on `db`; a read that throws
-	// leaves the field out, the count already taken). A gate that answers no
-	// one is otherwise healthy: its loops turn and its /livez says ok.
+	// lobby instances that take clients now, behind the one lobby address (read
+	// on `db`; a read that throws leaves the field out, the count already
+	// taken). A gate that answers no one is otherwise healthy: its loops turn
+	// and its /livez says ok.
 	void heartbeat(db::Database &db, Heartbeat &beat);
 
 private:
@@ -142,12 +136,12 @@ private:
 	std::string lobby_endpoint_; // the fallback with no instance active ("": none)
 	std::string web_host_;
 	uint16_t http_port_ = 0;
-	// The receive thread's own: the active instances' endpoints (none after a
-	// read that failed) and when it read them (the steady clock in ms; 0:
-	// never), and whether its last read failed (logged once until one
+	// The receive thread's own: the live instances' address and count (none
+	// after a read that failed) and when it read them (the steady clock in ms;
+	// 0: never), and whether its last read failed (logged once until one
 	// succeeds).
 	uint64_t lobby_refresh_ms_ = kLobbyRefreshMs;
-	std::vector<std::string> active_lobbies_;
+	lobbydb::LiveLobbies live_lobbies_;
 	uint64_t lobbies_read_ms_ = 0;
 	bool lobbies_read_failed_ = false;
 	// The probes left unanswered for want of a lobby since the last line that

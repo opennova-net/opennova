@@ -162,8 +162,9 @@ crow::response ConnectionRoutes::end(const crow::request &req, uint64_t session_
 }
 
 // GET /api/admin/lobbies — {"lobbies"}: every lobby instance (one per lobby
-// process), by id: its endpoint (the gate's udpnovaworld for the clients handed
-// there), its state ("active" takes new clients, "draining" does not), when it
+// process), by id: its endpoint (the gate's udpnovaworld, the lobby address
+// every instance announces), its state ("active" counts as taking clients,
+// "draining" does not), when it
 // started and was last seen (Unix epoch ms; a running lobby moves it every few
 // seconds, and one unseen for five minutes is reaped with its rows), and its sessions.
 crow::response ConnectionRoutes::lobbies(const crow::request &req) {
@@ -198,10 +199,12 @@ crow::response ConnectionRoutes::lobbies(const crow::request &req) {
 	return json_reply(200, out);
 }
 
-// POST /api/admin/lobbies/<id>/drain — the instance takes no new client from
-// any gate from the gates' next read on (a few seconds); the sessions it holds
-// stay until they leave, and its lobby's restart makes it active again. 200
-// {"status": "draining", "id"}; 404 not_found for no such instance.
+// POST /api/admin/lobbies/<id>/drain — no gate counts the instance as taking
+// clients from the gates' next read on (a few seconds: they hand the lobby
+// address while another instance does, and no one with none); the sessions it
+// holds stay until they leave. Which lobby task a client reaches is the load
+// balancer's, which a task leaves by its stop (its target's deregistration).
+// 200 {"status": "draining", "id"}; 404 not_found for no such instance.
 crow::response ConnectionRoutes::drain(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)

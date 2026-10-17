@@ -1,19 +1,28 @@
 # ---------------------------------------------------------------------------
-# The public network load balancer: the gate and web (DEPLOY.md, "Operating")
+# The public network load balancer: the gate, the lobby and web (DEPLOY.md,
+# "Operating")
 # ---------------------------------------------------------------------------
 #
 # One internet-facing network load balancer in both public subnets, cross-zone,
 # each zone's node on an Elastic IP: zone a's is the gate's address
 # (service.tf: prod's adopted one, 54.162.79.147, which retail's hosts file
 # and the Switcher name, never released), zone b's one of its own. Retail
-# clients reach the gate and web's HTTP routes at zone a's address alone
-# (ONNET_PUBLIC_HOST, ONNET_WEB_HOST: no client follows a DNS name); the
-# site's proxied records point at the balancer's DNS name (edge.tf), which
-# answers with both. Listeners, to IP targets (the tasks) that see each
-# client's own address:
+# clients reach the gate, the lobby and web's HTTP routes at zone a's address
+# alone (ONNET_PUBLIC_HOST, ONNET_LOBBY_ENDPOINT, ONNET_WEB_HOST: no client
+# follows a DNS name); the site's proxied records point at the balancer's DNS
+# name (edge.tf), which answers with both. Listeners, to IP targets (the
+# tasks) that see each client's own address:
 #   gate            UDP gate_udp_port to the gate's tasks, from everyone (the
 #                   clients' probes, the hosts' status blobs); health: HTTP
 #                   /livez on health_port
+#   lobby           UDP nw_udp_port to the lobby's tasks, from everyone: the
+#                   one lobby address every lobby announces, so a stock host
+#                   whose lobby task went away reconnects to it and lands on a
+#                   live one (its session never asks the gate again). Each
+#                   flow (a client's address and port) stays on one task, and a
+#                   lobby sees each host's own address and port, which its
+#                   listing's join target is; health: HTTP /livez on
+#                   health_port
 #   https           TCP 443 to web's portal nginx (TLS end to end: Cloudflare's
 #                   proxy to the origin certificate, edge.tf), from
 #                   Cloudflare's published ranges alone; health: the handshake.
@@ -23,16 +32,19 @@
 #                   .gsb routes; plain HTTP, stock clients), from everyone;
 #                   health: /healthz (the stall watchdog, and the cache)
 # The balancer's security group admits those ranges; the gate's and web's
-# admit the balancer's group alone. ECS registers each task with its target
-# groups and holds a deployment until the new tasks pass. Deletion protection
-# is on: the balancer holds the gate's address (DEPLOY.md's rollback from the
-# cutover turns it off first).
+# admit the balancer's group alone (the lobby's its UDP port from everyone
+# too, programs.tf). ECS registers each task with its target groups and holds
+# a deployment until the new tasks pass, and stops an old task only once its
+# targets drained (deregistration_delay below). Deletion protection is on: the
+# balancer holds the gate's address (DEPLOY.md's rollback from the cutover
+# turns it off first).
 
 locals {
   lb_listeners = merge(
     {
-      gate = { program = "gate", container = "gate", protocol = "UDP", port = var.gate_udp_port }
-      http = { program = "web", container = "web", protocol = "TCP", port = var.game_http_port }
+      gate  = { program = "gate", container = "gate", protocol = "UDP", port = var.gate_udp_port }
+      lobby = { program = "lobby", container = "lobby", protocol = "UDP", port = var.nw_udp_port }
+      http  = { program = "web", container = "web", protocol = "TCP", port = var.game_http_port }
     },
     local.edge_proxied ? { https = { program = "web", container = "portal", protocol = "TCP", port = 443 } } : {},
   )
@@ -41,17 +53,20 @@ locals {
   # health checks): out of its group, into the program's.
   lb_target_rules = merge(
     {
-      "gate"        = { program = "gate", protocol = "udp", port = var.gate_udp_port, description = "novaworld_gate UDP (the fixed port of stock clients), through the load balancer" }
-      "gate-health" = { program = "gate", protocol = "tcp", port = var.health_port, description = "The gate /livez, the load balancer health check" }
-      "http"        = { program = "web", protocol = "tcp", port = var.game_http_port, description = "HTTP routes of stock clients (NW*.dll, .gsb), through the load balancer" }
+      "gate"         = { program = "gate", protocol = "udp", port = var.gate_udp_port, description = "novaworld_gate UDP (the fixed port of stock clients), through the load balancer" }
+      "gate-health"  = { program = "gate", protocol = "tcp", port = var.health_port, description = "The gate /livez, the load balancer health check" }
+      "lobby"        = { program = "lobby", protocol = "udp", port = var.nw_udp_port, description = "NovaWorld UDP, the lobby (the port the gate announces), through the load balancer" }
+      "lobby-health" = { program = "lobby", protocol = "tcp", port = var.health_port, description = "The lobby /livez, the load balancer health check" }
+      "http"         = { program = "web", protocol = "tcp", port = var.game_http_port, description = "HTTP routes of stock clients (NW*.dll, .gsb), through the load balancer" }
     },
     local.edge_proxied ? { "https" = { program = "web", protocol = "tcp", port = 443, description = "The portal nginx over TLS (Full strict), through the load balancer" } } : {},
   )
 
-  # Who reaches each listener: everyone on the gate and the retail port,
-  # Cloudflare's proxy alone on 443 (none without proxied records).
+  # Who reaches each listener: everyone on the gate, the lobby and the retail
+  # port, Cloudflare's proxy alone on 443 (none without proxied records).
   lb_ingress = merge(
     { for c in var.allowed_cidrs : "gate ${c}" => { protocol = "udp", port = var.gate_udp_port, cidr = c, description = "novaworld_gate (the fixed UDP port of stock clients; the hosts status blobs)" } },
+    { for c in var.allowed_cidrs : "lobby ${c}" => { protocol = "udp", port = var.nw_udp_port, cidr = c, description = "NovaWorld UDP, the lobby (the port the gate announces)" } },
     { for c in var.allowed_cidrs : "http ${c}" => { protocol = "tcp", port = var.game_http_port, cidr = c, description = "HTTP routes of stock clients (NW*.dll, .gsb); /api/ answers nginx alone" } },
     { for c in(local.edge_proxied ? local.cloudflare_ipv4 : []) : "https ${c}" => { protocol = "tcp", port = 443, cidr = c, description = "The portal over TLS, from the Cloudflare proxy alone" } },
   )
@@ -84,6 +99,8 @@ resource "aws_eip" "lb_b" {
   })
 }
 
+# Its description predates the lobby's listener and stays: a changed one
+# replaces the group, which the balancer holds.
 resource "aws_security_group" "lb" {
   name        = "${local.name}-lb"
   description = "OpenNova NovaWorld load balancer: the gate UDP port and the retail HTTP port to everyone, 443 from Cloudflare alone"
@@ -105,8 +122,8 @@ resource "aws_vpc_security_group_ingress_rule" "lb" {
   cidr_ipv4         = each.value.cidr
 }
 
-# Out: to the gate's and web's tasks alone, on their target ports and the
-# gate's health port.
+# Out: to the gate's, the lobby's and web's tasks alone, on their target ports
+# and the gate's and the lobby's health port.
 resource "aws_vpc_security_group_egress_rule" "lb" {
   for_each = local.lb_target_rules
 
@@ -148,14 +165,26 @@ resource "aws_lb_target_group" "public" {
   target_type = "ip"
   vpc_id      = aws_vpc.main.id
   # The retail routes and the rate limits read the TCP peer; UDP keeps it
-  # always.
-  preserve_client_ip   = "true"
-  deregistration_delay = 30
+  # always (the lobby lists a host at the address and port it sees).
+  preserve_client_ip = "true"
+  # How long a deregistering task keeps the flows it has, which ECS waits out
+  # before it stops the task: 30 s for a gate's reply or a request in flight;
+  # 10 s for the lobby, long enough for an exchange in flight (a join's 3 s
+  # resends, a command's 250 ms take) and short because no session can follow
+  # its task anyway: a host whose flow moves reaches a lobby that holds no
+  # session for it, and lists again by timing out (240 s) and reconnecting,
+  # so a longer delay would only hold the deploy.
+  deregistration_delay = each.key == "lobby" ? 10 : 30
+  # A UDP flow ends with the delay. Left open, a flow its client's keepalives
+  # keep fresh would stay on the deregistered task past its stop, and the
+  # client's reconnect, from the same address and port, would ride it to a
+  # target that is gone.
+  connection_termination = each.value.protocol == "UDP" ? true : null
 
   health_check {
     protocol            = each.key == "https" ? "TCP" : "HTTP"
-    port                = each.key == "gate" ? tostring(var.health_port) : "traffic-port"
-    path                = each.key == "gate" ? "/livez" : each.key == "http" ? "/healthz" : null
+    port                = each.value.protocol == "UDP" ? tostring(var.health_port) : "traffic-port"
+    path                = each.value.protocol == "UDP" ? "/livez" : each.key == "http" ? "/healthz" : null
     matcher             = each.key == "https" ? null : "200"
     interval            = 10
     healthy_threshold   = 3

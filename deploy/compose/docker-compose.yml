@@ -132,8 +132,9 @@ services:
       target: lobby
     environment:
       <<: *novaworld-env
-      # This lobby instance as the gate hands it to clients (host:port; on ECS,
-      # unset: the task's own public address).
+      # The lobby address the gate hands clients (host:port), which every lobby
+      # announces alike (on ECS the load balancer's: the gate's address and the
+      # lobby port).
       ONNET_LOBBY_ENDPOINT: ${ONNET_LOBBY_ENDPOINT:-}
 
   novaworld-web:

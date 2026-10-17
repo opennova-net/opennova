@@ -86,7 +86,7 @@ Manager), `/opennova/*` parameters and their names, the operations bucket, `/ope
 the AWS-managed keys through SSM and EC2, launching and ending machines tagged
 `opennova:hosted=1` from OpenNova-tagged subnets, groups, templates and snapshots, passing
 `opennova-*` roles to EC2, ECS's tasks and EventBridge Scheduler, sending mail through the
-account's SES identities, the lobby's `ec2:DescribeNetworkInterfaces`, running `opennova-*`
+account's SES identities, running `opennova-*`
 task definitions in an `opennova-*` cluster and tagging their tasks, registering task
 definitions, pointing `opennova-*` services at them and pointing the backup schedule at a
 release's revision. Each role's own policy narrows its part. When a role gains a permission,

@@ -523,14 +523,16 @@ target_compile_definitions(nw_server_command_push_e2e_test PRIVATE OPENNOVA_SOUR
 opennova_add_pg_test(nw_server_command_push_e2e COMMAND nw_server_command_push_e2e_test)
 set_tests_properties(nw_server_command_push_e2e PROPERTIES RUN_SERIAL TRUE)
 
-# Several lobby instances on one database (nw_udp_listener.h, gate_listener.h, lobby_repository.h):
-# two real NW UDP listeners, each an instance of its own, and a real gate, over loopback UDP and a
-# migrated, seeded database: the gate spreads clients across the active instances by their address
-# (probes from twenty loopback addresses reach both, each address the same lobby every time), a
-# host on each gets a RID of its own and a push queued for it alone, forget_owner reaches both, a
-# drained instance gets no new client while both listings stay, a lobby's start clears its own
-# previous run and reaps a stale instance and leaves the other's rows, and a clean stop deletes its
-# instance. Serial: its packet windows are protocol assertions. POSIX (it binds 127.0.0.x).
+# Several lobby instances on one database sharing one lobby address (nw_udp_listener.h,
+# gate_listener.h, lobby_repository.h): real NW UDP listeners, each an instance of its own at the
+# one endpoint, and a real gate, over loopback UDP and a migrated, seeded database: the gate hands
+# every client that address, a host on each gets a RID of its own and a push queued for it alone,
+# forget_owner reaches both, one drained leaves the gate handing out the address while both
+# listings stay and both drained leave it silent, a lobby's start reaps a stale instance with its
+# rows and leaves the others', a clean stop deletes its instance, and a host whose lobby was
+# replaced behind the address (its receive window run out by its clock) reconnects there and is
+# listed on the new instance. Serial: its packet windows are protocol assertions. POSIX (it binds
+# 127.0.0.x).
 if(UNIX)
     add_executable(lobby_instances_e2e_test novaworld/lobby_instances_e2e_test.cpp)
     target_link_libraries(lobby_instances_e2e_test PRIVATE
@@ -566,11 +568,11 @@ target_include_directories(host_key_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(host_key_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 opennova_add_pg_test(host_key COMMAND host_key_test)
 
-# The lobby's tables below the listener (net/novaworld/lobby_repository.h, migrations 0006 and
-# 0009): its instances and the RID sequence, its session rows, the pushes, ends and forget_owner
+# The lobby's tables below the listener (net/novaworld/lobby_repository.h, migrations 0006, 0009
+# and 0012): its instances (two at one endpoint) and the RID sequence, its session rows, the pushes, ends and forget_owner
 # the routes and the supervisor queue for it (answered from the session rows as the lobby would,
 # bearing the session's lobby_id, a forget_owner one per instance), each instance's take in
-# insert order with the expiry, a session's delete taking its commands, and clear_lobby. A
+# insert order with the expiry, a session's delete taking its commands, and clear_unheld. A
 # migrated database per case; runs on every service build.
 add_executable(lobby_repository_test novaworld/lobby_repository_test.cpp)
 target_link_libraries(lobby_repository_test PRIVATE opennova_novaworld_service)
@@ -768,10 +770,9 @@ endif()
 #                    no other program's part; the gate's reply and the lobby's
 #                    SessionInit advertise the configured endpoints, never a bound
 #                    port; a gate or a lobby missing its endpoints, or web its own,
-#                    does not boot; a lobby on ECS (a fake task metadata endpoint, a
-#                    stub `aws` at ONNET_HOSTED_AWS_CLI) registered at its task's
-#                    public address; two lobbies, the first one's stop serving past a
-#                    gate's refresh while the second takes clients.
+#                    does not boot; two lobbies at one lobby address, each its own
+#                    instance, a gate handing out that address, the first one's stop
+#                    at once while the second serves on.
 #   signal_shutdown  SIGINT and SIGTERM each run a program's orderly stop (exit 0, its
 #                    listeners in order, the database closed): a lobby's, and a web
 #                    process's past Crow and a held-open request; the second signal;
@@ -848,13 +849,10 @@ target_include_directories(health_listener_test PRIVATE ${CMAKE_CURRENT_SOURCE_D
 add_test(NAME health_listener COMMAND health_listener_test)
 
 # What an ECS task finds from its own metadata (apps/novaworld_common/ecs_metadata.h):
-# the lobby's endpoint (ONNET_LOBBY_ENDPOINT as given, else the task's public IPv4 and
-# its port) and the controller's bind (the task's private IPv4), against a fake
-# metadata endpoint (an HTTP server in the test on loopback) and a stub
-# CommandRunner that checks describe-network-interfaces' argv and answers it; and
-# every refusal: no metadata, an endpoint that does not answer or answers no address,
-# the CLI failing, no interface or two, an interface with no public address.
-# Database-free.
+# the controller's bind (the task's private IPv4) against a fake metadata endpoint (an
+# HTTP server in the test on loopback), the environment's bind standing where it is
+# set or there is no metadata; and every refusal: an endpoint that does not answer or
+# answers an error, no JSON or no address. Database-free.
 add_executable(ecs_metadata_test novaworld/ecs_metadata_test.cpp)
 target_link_libraries(ecs_metadata_test PRIVATE
     opennova_novaworld_common opennova_novaworld_service Threads::Threads)

@@ -11,9 +11,10 @@
 #
 #   gate        UDP gate_udp_port, behind the public network load balancer
 #               (load_balancer.tf), which checks its /livez on health_port
-#   lobby       UDP nw_udp_port on its task's own public address, to everyone:
-#               the gate hands each client a lobby; the lobby finds its address
-#               from the task metadata and EC2 (ec2:DescribeNetworkInterfaces)
+#   lobby       UDP nw_udp_port, behind the same balancer, which checks its
+#               /livez on health_port: every lobby announces that one address
+#               (ONNET_LOBBY_ENDPOINT, the gate's address and the lobby port),
+#               which the gate hands each client
 #   web         the retail HTTP routes and the website's API (game_http_port)
 #               and the portal's nginx (443) in one task, behind the balancer;
 #               nginx reaches the server on the task's loopback
@@ -28,9 +29,9 @@
 # health check asks; a task failing it is replaced. A deployment rolls with
 # the circuit breaker on (a deployment that never turns healthy rolls back)
 # and starts every program's new tasks before it stops the old (the
-# controller's new task waits as the standby, then leads; the gates hand out
-# the old lobby and the new until the old drains at its stop, which its stop
-# grace covers).
+# controller's new task waits as the standby, then leads; the balancer sends
+# new lobby flows to the new lobby task once it passes, and drains the old one
+# before ECS stops it).
 #
 # Terraform makes each program's task definition, the template every deploy
 # clones: `app deploy` registers a revision of it with the release's images
@@ -85,16 +86,14 @@ locals {
   program_processes_max = sum([for k, p in local.programs : ceil(p.max * local.deployment_percent[k].max / 100)])
 
   # Seconds a stopping container gets between SIGTERM and SIGKILL (Fargate
-  # allows 120): the lobby's drain (a gate's refresh and 2 s, while another
-  # lobby takes clients) and its sessions' end; the others' orderly shutdown.
-  stop_timeout = { gate = 30, lobby = 60, web = 30, controller = 30, worker = 30 }
+  # allows 120): each program's orderly shutdown (a lobby's drain and its
+  # sessions' end among them: ECS signals it once the balancer drained it).
+  stop_timeout = { gate = 30, lobby = 30, web = 30, controller = 30, worker = 30 }
 
   # Seconds a new container's failed health checks do not count: its boot
   # (the migrations under their lock among it) before its health listener
-  # binds. The lobby's boot also finds its endpoint from its task (the task
-  # metadata, 3 s at most, then the AWS CLI's describe-network-interfaces, 30 s
-  # at most: apps/novaworld_common/ecs_metadata.cpp).
-  health_start_period = { gate = 60, lobby = 120, web = 60, controller = 60, worker = 60 }
+  # binds.
+  health_start_period = { gate = 60, lobby = 60, web = 60, controller = 60, worker = 60 }
 
   program_subnet_ids = [for k in sort(keys(aws_subnet.public)) : aws_subnet.public[k].id]
 
@@ -159,8 +158,9 @@ resource "aws_vpc_security_group_ingress_rule" "from_lb" {
   referenced_security_group_id = aws_security_group.lb.id
 }
 
-# The lobby's UDP port on its task's own address, fixed by the stock clients
-# (the gate announces it). No SSH.
+# The lobby's UDP port, fixed by the stock clients (the gate announces it),
+# from everyone on the task's own address as well as through the balancer
+# (whose group the lobby admits, load_balancer.tf). No SSH.
 resource "aws_vpc_security_group_ingress_rule" "lobby" {
   for_each = toset(var.allowed_cidrs)
 
@@ -187,7 +187,8 @@ resource "aws_iam_role" "program" {
 
 # ECS Exec (`app shell`, the toolbox's admin calls on web): the session's
 # channels, which take no resource scope. Every program's and the backup
-# task's role (backup.tf).
+# task's role (backup.tf). fleet.tf gives the worker the machines' EC2 calls,
+# mail.tf web and the worker the mail.
 data "aws_iam_policy_document" "exec" {
   statement {
     sid    = "EcsExecChannels"
@@ -207,24 +208,6 @@ resource "aws_iam_role_policy" "exec" {
   name     = "${local.name}-${each.key}-exec"
   role     = aws_iam_role.program[each.key].id
   policy   = data.aws_iam_policy_document.exec.json
-}
-
-# The lobby's own public address: its task's network interface, by its
-# private address (a describe takes no resource scope). fleet.tf gives the
-# worker the machines' EC2 calls, mail.tf web and the worker the mail.
-data "aws_iam_policy_document" "lobby" {
-  statement {
-    sid       = "FindOwnPublicAddress"
-    effect    = "Allow"
-    actions   = ["ec2:DescribeNetworkInterfaces"]
-    resources = ["*"]
-  }
-}
-
-resource "aws_iam_role_policy" "lobby" {
-  name   = "${local.name}-lobby-address"
-  role   = aws_iam_role.program["lobby"].id
-  policy = data.aws_iam_policy_document.lobby.json
 }
 
 # ---- what each program's container gets --------------------------------------------
@@ -248,6 +231,11 @@ locals {
     ONNET_HTTP_PORT     = tostring(var.game_http_port)
   }
 
+  # The lobby address every lobby announces (each its own instance behind it):
+  # the gate's address, where the balancer's lobby listener spreads the
+  # clients across the lobby tasks, and the lobby port.
+  lobby_env = { ONNET_LOBBY_ENDPOINT = "${local.service_public_ip}:${var.nw_udp_port}" }
+
   # The site's origin (billing's returns and the mail's links), with Cloudflare.
   site_env = local.dns_enabled ? { ONNET_SITE_URL = "https://${local.web_host}" } : {}
 
@@ -268,7 +256,7 @@ locals {
 
   program_env = {
     gate       = merge(local.common_env, local.public_env)
-    lobby      = merge(local.common_env, local.public_env)
+    lobby      = merge(local.common_env, local.public_env, local.lobby_env)
     web        = merge(local.common_env, local.public_env, local.site_env, local.web_env, local.cache_env, local.mail_env, local.hosting_env)
     controller = merge(local.common_env, local.public_env, local.site_env, local.hosting_env)
     worker     = merge(local.common_env, local.public_env, local.site_env, local.mail_env, local.hosting_env)

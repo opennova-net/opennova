@@ -22,6 +22,10 @@
 // answers no probe, and its heartbeat says so: probes_unanswered counts them
 // since the last heartbeat, lobbies_live the instances that take clients (the
 // deployment's alarm on a gate that answers no one while its /livez says ok).
+// Two instances sharing one lobby address (as every lobby of a deployment
+// announces its load balancer's): the gate hands every client that address
+// and counts both; one drained, it still hands it out and counts one; both
+// drained, it answers nothing again.
 
 #include "gate_listener.h"
 #include <net/title/title_identity.h>
@@ -255,12 +259,14 @@ int main(int argc, char **argv) {
 
 	// No lobby instance takes clients and no fallback: no reply, each probe
 	// counted in the heartbeat's probes_unanswered (taken once), lobbies_live 0;
-	// a live instance is counted in the next.
+	// then two instances at one lobby address, drained one by one. The gate
+	// reads the instances at every probe here (a refresh of 0).
 	{
 		nws::ServerConfig lobbyless = config;
 		lobbyless.lobby_endpoint.clear();
 		nws::GateListener none;
 		none.set_db_pool(&pool);
+		none.set_lobby_refresh_ms(0);
 		TEST_EXPECT(none.start(lobbyless));
 		TEST_EXPECT(!probe_text(none.bound_port(), kJo.gate_tag, 400).has_value());
 		TEST_EXPECT(!probe_text(none.bound_port(), kJo.gate_tag, 400).has_value());
@@ -273,11 +279,30 @@ int main(int argc, char **argv) {
 		TEST_EXPECT(nws::heartbeat_line(beat) ==
 				"{\"heartbeat\":{\"program\":\"gate\",\"probes_unanswered\":2,"
 				"\"lobbies_live\":0,\"db_lock_timeouts\":0,\"db_deadlocks\":0}}");
-		opennova::lobbydb::register_instance(*db, "198.51.100.9:64206");
+		const std::string shared = "198.51.100.9:64206";
+		const int64_t first = opennova::lobbydb::register_instance(*db, shared);
+		const int64_t second = opennova::lobbydb::register_instance(*db, shared);
+		TEST_EXPECT(first != second);
+		const auto handed = [&none]() -> std::vector<std::string> {
+			const auto got = probe_text(none.bound_port(), kJo.gate_tag, 1000);
+			opennova::GateResponse parsed;
+			if (!got || !opennova::gate_response_parse(got->text, parsed))
+				return {};
+			return parsed.udp_novaworld;
+		};
+		TEST_EXPECT(handed() == std::vector<std::string>{ shared });
 		nws::Heartbeat next;
 		none.heartbeat(*db, next);
 		TEST_EXPECT(next.probes_unanswered == 0);
+		TEST_EXPECT(next.lobbies_live == 2);
+		TEST_EXPECT(opennova::lobbydb::set_instance_state(*db, first, "draining"));
+		TEST_EXPECT(handed() == std::vector<std::string>{ shared });
+		none.heartbeat(*db, next);
 		TEST_EXPECT(next.lobbies_live == 1);
+		TEST_EXPECT(opennova::lobbydb::set_instance_state(*db, second, "draining"));
+		TEST_EXPECT(handed().empty());
+		none.heartbeat(*db, next);
+		TEST_EXPECT(next.probes_unanswered == 1 && next.lobbies_live == 0);
 		none.stop();
 	}
 

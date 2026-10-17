@@ -67,9 +67,9 @@ struct Program {
 	// (opennova-novaworld-<name>). One of the five: no escaping needed.
 	const char *name = "";
 	// Its own settings checked, and completed where its environment leaves one
-	// to be found (the lobby's endpoint, the controller's bind, from the ECS task
-	// metadata), before the database is touched: "" to go on, else what the
-	// FATAL line says. None: nothing to check.
+	// to be found (the controller's bind, from the ECS task metadata), before
+	// the database is touched: "" to go on, else what the FATAL line says.
+	// None: nothing to check.
 	std::function<std::string(ServerConfig &config)> configure;
 	// From its parts' start to its shutdown: the exit code.
 	std::function<int(const Boot &boot)> run;

@@ -593,7 +593,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 	// this server's own NW UDP port (127.0.0.1:64206) so a joining OpenNova
 	// client's JointOperations hello lands on our nw_udp_listener and routes to
 	// the game-runtime PN path. The row (no lobby instance holds it) is wiped by the next lobby's
-	// start (clear_lobby) and by the stale-host sweep; re-inject per run.
+	// start (clear_unheld) and by the stale-host sweep; re-inject per run.
 	CROW_ROUTE(app, "/api/admin/hosts").methods("POST"_method)(
 	    [this, public_host](const crow::request &req) {
 		auto caller = impl_->access.require_admin(req);

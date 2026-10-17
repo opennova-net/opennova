@@ -36,11 +36,13 @@
 //     the row is stopped and the service account deleted; the admin link went
 //     down at stopping; the second server runs on;
 //   * the lobby is replaced at a new address (a second lobby takes clients, the
-//     first drains and stops, its listings with it): the second server's
-//     NovaWorld session reconnects only to the old address, so once its listing
-//     has been gone listing_lost_ms the supervisor places it again, no restart
-//     counted, and it lists through the gate on the new lobby; then it stops the
-//     same way, its ServerStopHosting through the new lobby.
+//     first drains and stops, its listings with it), the supervisor's safety
+//     net: the second server's NovaWorld session reconnects only to the old
+//     address, so once its listing has been gone listing_lost_ms the supervisor
+//     places it again, no restart counted, and it lists through the gate on the
+//     new lobby; then it stops the same way, its ServerStopHosting through the
+//     new lobby. (A deployment's lobbies share one address, so its lobby
+//     replacement relists a host without this: lobby_instances_e2e.)
 
 #include "lobby_client.h"
 #include "nw_service_harness.h"
@@ -190,7 +192,7 @@ bool wait_for(Done done, int seconds) {
 }
 
 // A lobby instance of its own on the service's database, at a new address, as a
-// lobby's replacement on another ECS task runs: the lobby program's NW UDP
+// lobby whose address changed runs: the lobby program's NW UDP
 // listener and its connections, wired as apps/novaworld_lobby/main.cpp wires
 // them, its SessionInit naming the service's web endpoint as the first's does.
 struct ReplacementLobby {
@@ -823,9 +825,10 @@ int main(int argc, char **argv) {
 					static_cast<long long>(id), rid, static_cast<long long>(dfx2_id));
 		}
 
-		// A lobby's replacement at a new address, as an ECS lobby task's (ADR 0063
-		// d8): a second lobby takes clients, the first drains and stops, its
-		// listings going with it. The second server's NovaWorld session reconnects
+		// A lobby's replacement at a new address (a deployment's lobbies share
+		// one, so this is the supervisor's safety net for a host whose lobby
+		// address is gone): a second lobby takes clients, the first drains and
+		// stops, its listings going with it. The second server's NovaWorld session reconnects
 		// only to the old lobby's address (retail's), so its listing stays gone;
 		// listing_lost_ms on (short here) the supervisor places it again with no
 		// restart counted (this test leaves it none), and its new start lists

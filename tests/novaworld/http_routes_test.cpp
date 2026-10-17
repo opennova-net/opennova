@@ -3560,8 +3560,8 @@ int test_admin_end_session(Harness &h) {
 
 // GET /api/admin/lobbies lists the lobby instances (the harness's one lobby: its endpoint, active,
 // seen within the minute, its sessions), and POST /api/admin/lobbies/<id>/drain marks one
-// draining (no gate hands it a new client from its next read on); an id no instance has is a
-// 404. The instance is active again for the cases after.
+// draining (no gate counts it as taking clients from its next read on); an id no instance has
+// is a 404. The instance is active again for the cases after.
 int test_admin_lobbies(Harness &h) {
 	const auto lobbies = [&h]() {
 		return crow::json::load(body_text(h.send("GET", "/api/admin/lobbies", { kBearer })));
@@ -3585,7 +3585,7 @@ int test_admin_lobbies(Harness &h) {
 	TEST_EXPECT(reply.transport_ok && reply.code == 200);
 	json = lobbies();
 	TEST_EXPECT(json && str(json["lobbies"][0]["state"]) == "draining");
-	TEST_EXPECT(opennova::lobbydb::active_endpoints(*h.pool.acquire()).empty());
+	TEST_EXPECT(opennova::lobbydb::live_lobbies(*h.pool.acquire()).instances == 0);
 	TEST_EXPECT(opennova::lobbydb::set_instance_state(*h.pool.acquire(), id, "active"));
 	return 0;
 }

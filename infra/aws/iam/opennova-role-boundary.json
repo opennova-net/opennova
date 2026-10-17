@@ -176,12 +176,6 @@
       "Resource": "*"
     },
     {
-      "Sid": "LobbyFindsOwnAddress",
-      "Effect": "Allow",
-      "Action": "ec2:DescribeNetworkInterfaces",
-      "Resource": "*"
-    },
-    {
       "Sid": "RunOpenNovaTasks",
       "Effect": "Allow",
       "Action": "ecs:RunTask",

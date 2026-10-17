@@ -23,8 +23,8 @@
 //      stalled and exits it alone (70), while the others run on, and a push
 //      still reaches the host;
 //   5. the lobby is restarted: it alone drops its own sessions and listings
-//      (the host's session row and its listing gone), and its new instance
-//      takes clients again.
+//      (the host's session row and its listing gone), and its new run, an
+//      instance of its own at the same address, takes clients again.
 //
 // Built only with BUILD_NOVAWORLD_HTTP; POSIX only. Serial.
 
@@ -477,6 +477,8 @@ int run(const Binaries &bin) {
 	// lobby's restart), then the lobby, alone of its instances, stops at once and
 	// starts again.
 	E2E_EXPECT(session_of(host).has_value() && session_of(sitter).has_value());
+	const auto instance_before = opennova::lobbydb::list_instances(db);
+	E2E_EXPECT(instance_before.size() == 1);
 	host.abandon();
 	sitter.abandon();
 	E2E_EXPECT(stop_program(lobby, SIGTERM));
@@ -484,6 +486,10 @@ int run(const Binaries &bin) {
 		return fail("the lobby boots again");
 	E2E_EXPECT(!session_of(host) && !session_of(sitter));
 	E2E_EXPECT(!opennova::hostdb::find_host_by_rid(db, rid).has_value());
+	const auto instance_after = opennova::lobbydb::list_instances(db);
+	E2E_EXPECT(instance_after.size() == 1 && !instance_before.empty() &&
+			instance_after[0].id != instance_before[0].id &&
+			instance_after[0].endpoint == lobby_endpoint);
 	E2E_EXPECT(gate_hands_out(gate_port) == lobby_endpoint);
 	std::printf("  the lobby restarted: its sessions and its listing went with it, and the gate "
 				"hands it out again\n");

@@ -17,8 +17,9 @@
 # ones in a label; no task and a floor of 0 until the first release, then the
 # counts held between min and max, web and the worker on their CPU; every security group's ingress its
 # program's alone; each task role ECS Exec's channels and its program's own
-# permission alone; the execution role the deployment's secrets and its log
-# group alone; the controller named in Cloud Map. A size Fargate does not
+# permission alone (the lobby none of its own: it announces the balancer's
+# address, ONNET_LOBBY_ENDPOINT); the execution role the deployment's secrets
+# and its log group alone; the controller named in Cloud Map. A size Fargate does not
 # offer and counts out of order are refused.
 
 mock_provider "aws" {
@@ -335,10 +336,9 @@ run "task_definitions" {
   }
   assert {
     condition = (
-      jsondecode(aws_ecs_task_definition.program["lobby"].container_definitions)[0].healthCheck.startPeriod == 120 &&
-      alltrue([for p in ["gate", "web", "controller", "worker"] : jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].healthCheck.startPeriod == 60])
+      alltrue([for p in ["gate", "lobby", "web", "controller", "worker"] : jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].healthCheck.startPeriod == 60])
     )
-    error_message = "the lobby's health checks start counting after 120 s (its boot asks the task metadata and EC2 for its endpoint, up to 33 s, before its health listener binds), the others' after 60 s"
+    error_message = "every program's health checks start counting after 60 s (its boot, the migrations among it)"
   }
   assert {
     condition = (
@@ -352,10 +352,9 @@ run "task_definitions" {
   }
   assert {
     condition = (
-      jsondecode(aws_ecs_task_definition.program["lobby"].container_definitions)[0].stopTimeout == 60 &&
-      alltrue([for p in ["gate", "web", "controller", "worker"] : jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].stopTimeout == 30])
+      alltrue([for p in ["gate", "lobby", "web", "controller", "worker"] : jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].stopTimeout == 30])
     )
-    error_message = "the lobby's stop grace covers its drain (60 s); the others' orderly shutdown 30 s"
+    error_message = "every program's orderly shutdown gets 30 s (the lobby's drain among them: the balancer drained its task before the signal)"
   }
   assert {
     condition = (
@@ -399,10 +398,17 @@ run "environments" {
     condition = alltrue([
       for p in ["gate", "lobby", "web", "controller", "worker"] :
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_ROLE") &&
-      !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_LOBBY_ENDPOINT") &&
       !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_INTERNAL_HTTP_BIND")
     ])
-    error_message = "no program is told a role; the lobby finds its endpoint and the controller its bind address from the task metadata"
+    error_message = "no program is told a role; the controller finds its bind address from the task metadata"
+  }
+  assert {
+    condition = (
+      { for e in jsondecode(aws_ecs_task_definition.program["lobby"].container_definitions)[0].environment : e.name => e.value }["ONNET_LOBBY_ENDPOINT"] == "54.162.79.147:64206" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["lobby"].container_definitions)[0].environment : e.name => e.value }["ONNET_PUBLIC_HOST"] == "54.162.79.147" &&
+      alltrue([for p in ["gate", "web", "controller", "worker"] : !strcontains(aws_ecs_task_definition.program[p].container_definitions, "ONNET_LOBBY_ENDPOINT")])
+    )
+    error_message = "every lobby announces the one lobby address, the gate's (the balancer's zone-a Elastic IP) and its port; no other program is told it (the gate's would be its fallback, answering while no lobby is live)"
   }
   assert {
     condition = (
@@ -476,7 +482,7 @@ run "services" {
     condition = (
       alltrue([for p, s in aws_ecs_service.program : s.deployment_minimum_healthy_percent == 100 && s.deployment_maximum_percent == 200])
     )
-    error_message = "every program starts the new task first (the controller's waits as standby; the old lobby drains as it stops): a bad image stops nothing that runs"
+    error_message = "every program starts the new task first (the controller's waits as standby; the balancer drains the old lobby task before ECS stops it): a bad image stops nothing that runs"
   }
   assert {
     condition = (
@@ -545,14 +551,14 @@ run "security_groups" {
       aws_vpc_security_group_ingress_rule.lobby["0.0.0.0/0"].ip_protocol == "udp" &&
       aws_vpc_security_group_ingress_rule.lobby["0.0.0.0/0"].from_port == 64206 && aws_vpc_security_group_ingress_rule.lobby["0.0.0.0/0"].to_port == 64206
     )
-    error_message = "the lobby admits its UDP port from everyone, on its own address"
+    error_message = "the lobby admits its UDP port from everyone, on its own address as well as through the balancer"
   }
   assert {
     condition = alltrue(concat(
-      [for r in aws_vpc_security_group_ingress_rule.from_lb : contains(["sg-0gate", "sg-0web"], r.security_group_id)],
+      [for r in aws_vpc_security_group_ingress_rule.from_lb : contains(["sg-0gate", "sg-0lobby", "sg-0web"], r.security_group_id)],
       [length(aws_vpc_security_group_ingress_rule.controller_from_machines) == 0],
     ))
-    error_message = "the worker admits nothing, the controller nothing without hosting (fleet.tf adds the machines), the gate and web the balancer alone"
+    error_message = "the worker admits nothing, the controller nothing without hosting (fleet.tf adds the machines), the gate and web the balancer alone, the lobby the balancer and its UDP port"
   }
 }
 
@@ -583,16 +589,9 @@ run "task_roles" {
   }
   assert {
     condition = (
-      aws_iam_role_policy.lobby.role == aws_iam_role.program["lobby"].id &&
-      toset(flatten([for st in data.aws_iam_policy_document.lobby.statement : st.actions])) == toset(["ec2:DescribeNetworkInterfaces"])
-    )
-    error_message = "the lobby may describe network interfaces (its own public address) and nothing else"
-  }
-  assert {
-    condition = (
       length(aws_iam_role_policy.fleet_service) == 0 && length(aws_iam_role_policy.mail) == 0
     )
-    error_message = "without hosting and mail, the gate, the controller, web and the worker hold ECS Exec alone (fleet.tf and mail.tf add the worker's)"
+    error_message = "without hosting and mail, every task role holds ECS Exec alone (fleet.tf and mail.tf add the worker's)"
   }
   assert {
     condition = (

@@ -14,7 +14,7 @@ service on Fargate across two availability zones, whose tasks keep no state of t
 | Program | Runs | Tasks (default) | Reached at |
 |---|---|---|---|
 | gate | the gate (UDP 7597; the hosts' status blobs land there too) | 1, 0.25 vCPU / 0.5 GiB | the public network load balancer, at the gate's Elastic IP |
-| lobby | a lobby instance (UDP 64206) | 1, 0.25 vCPU / 0.5 GiB | its task's own public IPv4, which the gate hands out |
+| lobby | a lobby instance (UDP 64206) | 1, 0.25 vCPU / 0.5 GiB | the public network load balancer, at the gate's Elastic IP: one lobby address for every lobby task, which the gate hands out |
 | web | the retail HTTP routes and the website's API (8080) and the portal's nginx (443) | 1 to 2 on its CPU, 0.5 vCPU / 1 GiB | the load balancer: 443 from Cloudflare, 8080 from everyone |
 | controller | the fleet's reconcile pass, job scheduling, the machines' internal listener (8070) | 1 (elected; a standby may wait beside it), 0.25 vCPU / 0.5 GiB | `controller.<deployment>.opennova.internal`, its Cloud Map name |
 | worker | the background jobs (the fleet's AWS calls, billing sync, mail, prunes) | 1 to 2 on its CPU, 0.5 vCPU / 1 GiB | nothing inbound |
@@ -25,9 +25,9 @@ secrets live in SSM Parameter Store, copied from a 1Password vault, and ECS hand
 its own; a release is each program's task definition revision with its images pinned by
 digest; its logs go to CloudWatch; the nightly database dump is a scheduled task. No SSH
 anywhere: a shell is ECS Exec. The gate's Elastic IP is one no Terraform plan can release,
-the load balancer's address in its first zone, where retail clients reach the gate and
-the retail HTTP routes; the website reaches web through Cloudflare alone, over TLS
-Cloudflare verifies. Hosted game servers run on machines the service launches itself:
+the load balancer's address in its first zone, where retail clients reach the gate, the
+lobby and the retail HTTP routes; the website reaches web through Cloudflare alone, over
+TLS Cloudflare verifies. Hosted game servers run on machines the service launches itself:
 shared machines holding up to 12 servers, and own machines (a paid add-on) holding one.
 
 ## Deployments: dev, staging and prod
@@ -417,17 +417,18 @@ a resource, keep its object), `import ADDRESS ID`, `output`, `list`, and `destro
 What it makes: the VPC (`10.44.0.0/16`: public subnets a/b for the tasks, the load
 balancer and the machines, private a/b with no route out for the database and the
 cache); the ECS cluster; per program a security group (the gate: its UDP port and its
-health port from the load balancer alone; the lobby: its UDP port to everyone; web: 443
-and 8080 from the load balancer alone; the controller: the internal port from the
-machines alone; the worker: nothing; no 22, no 80 anywhere), a task role holding what
+health port from the load balancer alone; the lobby: its UDP port to everyone and its
+health port from the load balancer; web: 443 and 8080 from the load balancer alone; the
+controller: the internal port from the machines alone; the worker: nothing; no 22, no 80
+anywhere), a task role holding what
 that program needs alone, a task definition (the template every deploy clones), an ECS
 service on Fargate in both public subnets with a public IPv4 per task, made with no task
 (nothing runs before the first release, below), and its task counts (Application Auto
 Scaling between the program's `min` and `max`, web and the worker on their CPU); the task
 execution role (the deployment's secrets and the log group); the controller's Cloud Map
 name; the public network load balancer with the gate's Elastic IP (adopted on prod) in
-zone a and one of its own in zone b, and its own security group; the database and the
-cache (Valkey, a primary and a replica); the backup task and its nightly schedule; the
+zone a and one of its own in zone b, carrying the gate, the lobby and web, and its own
+security group; the database and the cache (Valkey, a primary and a replica); the backup task and its nightly schedule; the
 SSM parameters the toolbox reads; the operations bucket (`opennova-<deployment>-ops-<account
 id>`: the releases and the dumps); the logs, metrics and alarms; the account's budgets;
 the deployment's Cloudflare records (its site's, proxied), its origin certificate; its
@@ -543,20 +544,27 @@ users at the next `./deploy/run.sh org apply` (`infra/aws/iam/README.md`).
 
 Retail clients find the gate by its Elastic IP alone. It is the public network load
 balancer's address in zone a (its subnet mapping there; zone b has an address of its
-own), cross-zone, so it reaches the gate's tasks in either zone: the gate's UDP port
-(7597, its target group checking each task's `/livez` on the health port, 8081) and
-web's retail HTTP port (8080, checked on `/healthz`), both to IP targets that keep each
-client's own address, and 443 (the portal's nginx, from Cloudflare's ranges alone; with
-proxied records only, since without them there is no origin certificate and nginx listens
-on 80). Deletion protection is on: the balancer holds the gate's address.
+own), cross-zone, so it reaches the tasks in either zone: the gate's UDP port (7597,
+its target group checking each task's `/livez` on the health port, 8081), the lobby's
+UDP port (64206, checked the same way) and web's retail HTTP port (8080, checked on
+`/healthz`), all to IP targets that keep each client's own address and port, and 443
+(the portal's nginx, from Cloudflare's ranges alone; with proxied records only, since
+without them there is no origin certificate and nginx listens on 80). Deletion
+protection is on: the balancer holds the gate's address.
 `ONNET_PUBLIC_HOST` (the gate's `POSTIPADDRESS`) and `ONNET_WEB_HOST` (the startup URL,
 the web domain, `HOST_URL`, `GSB_SERVER`) both name that address, so no retail client
 follows a DNS name; the site's records point at the balancer's DNS name.
 
-Each lobby task has a public IPv4 of its own: the lobby reads its task's private address
-from the ECS task metadata, asks EC2 for that interface's public address (its task role
-may `ec2:DescribeNetworkInterfaces`), and registers `<public address>:64206` as its lobby
-instance, which the gates hand out. The controller's tasks register in Cloud Map as
+Every lobby task announces that address with the lobby's port (`ONNET_LOBBY_ENDPOINT`,
+`<the gate's address>:64206`), each its own lobby instance behind it, and the gates hand
+that one address out. The balancer spreads the clients across the lobby tasks by flow (a
+client's address and port) and keeps each flow on one task; a lobby sees each host's own
+address and port, which its listing's join target is. A stock host's NovaWorld session
+reconnects only to the lobby address the gate gave it at its first connect and drops a
+silent lobby after 240 s, so a host whose lobby task went away reconnects to the same
+address and lands on a live task. A lobby task leaving (a deploy, a restart) is
+deregistered first: the balancer sends it no new flow, keeps its flows 10 s, then ends
+them, and ECS stops it only then. The controller's tasks register in Cloud Map as
 `controller.<deployment>.opennova.internal` (an A record, TTL 10, in a zone private to
 the VPC); the leader alone binds the internal listener, on its task's private address,
 where the machines' hostd and `ONNET_INTERNAL_URL` reach it, so a new controller in
@@ -765,16 +773,16 @@ credentials).
 
 How each program's tasks are replaced: every program starts the new task first and stops
 the old one once it is healthy, so a bad image stops nothing that runs (the controller's
-new task waits as the standby, then leads once the old one lets the lock go; the gates
-hand out the old lobby and the new from the live list, and the old one's stop drains it:
-no gate hands it a new client, it serves on for a gate's refresh and 2 s, and its stop
-grace is 60 s). A lobby's restart is the one that shows: its players sign in again
-through the gate, landing on a live lobby, and the servers listed on it leave the browser
-for good, since a host's NovaWorld session (retail's, `opennova-serve`'s too) drops the
-dead lobby only after 240 s of silence and then reconnects to that lobby's address alone,
-which the new task does not have. A retail host lists again once it hosts again; the
-supervisor places a hosted server whose listing has been gone 8 min again (no restart
-counted, its match starting over), so it lists again through the gate within about 9 min.
+new task waits as the standby, then leads once the old one lets the lock go; the
+balancer sends new lobby flows to the new lobby task once it passes, then drains the old
+one for 10 s before ECS stops it). A lobby's restart is the one that shows: its players
+sign in again through the gate, and the servers listed on it leave the browser for up to
+about 4.5 min: a host's NovaWorld session (retail's, `opennova-serve`'s too) drops the
+silent lobby after 240 s, reconnects to the one lobby address, lands on the new task,
+re-verifies with CurrentlyHosting=1 and is listed again, with no restart and its match
+going on. Retail players' own hosted games list again the same way. The supervisor's
+8 min, after which it places a hosted server whose listing is gone again (no restart
+counted), is the safety net for a server whose lobby address is gone.
 The controller's and the workers' jobs wait out a restart in the database.
 
 ```bash
@@ -1233,7 +1241,7 @@ Every command here takes the deployment it reads or changes: `--deployment stagi
   no heartbeat for 5 minutes, more boots in 15 minutes than its `max` and 3 (a crash
   loop), fewer tasks running than its `min` for 5 minutes (these two once the programs
   have a release: before the first `app deploy` no task runs, and silence is no alarm),
-  and its CPU or its memory over 80% for 15 minutes; a load balancer target group (the gate, 443, the retail port) with
+  and its CPU or its memory over 80% for 15 minutes; a load balancer target group (the gate, the lobby, 443, the retail port) with
   an unhealthy target for 10 minutes; a failed hosted server, a lost machine, 3 failed
   launches in 15 minutes, a billing sync older than an hour, 5 refused webhooks in 15
   minutes, the entitlement stops held for 5 minutes (`limits_held`: the supervisor's
@@ -1530,7 +1538,9 @@ The gate and the site are down from step 2 until step 10, about an hour.
    ```
 7. [new] `./deploy/run.sh $P infra apply` (type prod): the whole stack, every program at
    no task (nothing runs before the first release); the load balancer takes the gate's
-   address in zone a; the site's records (CNAMEs to the balancer) and the mail's.
+   address in zone a, where it carries the gate (UDP 7597), the lobby (UDP 64206) and web
+   (TCP 8080, and 443 from Cloudflare); the site's records (CNAMEs to the balancer) and the
+   mail's.
 8. [new] `./deploy/run.sh $P db bootstrap`.
 9. [new] The database's rows, from the final dump (as rehearsed):
 
@@ -1696,15 +1706,15 @@ every command).
 - **B. Operations.** `app status` shows every program's service at its count, its
   rollout COMPLETED on the release's revision; `app logs` shows a stream per container and
   task; the `Heartbeat` metric has points for each `Program`; the SNS email subscription
-  is confirmed; the Route 53 health check is green; the load balancer's three target
+  is confirmed; the Route 53 health check is green; the load balancer's four target
   groups are healthy (EC2, Target groups); `app shell controller` opens a shell; `backup
   now` writes a dump.
 - **C. Accounts.** Register, log in, log out; the admin pages open.
 - **D. Billing.** Stripe's "Send test webhook" answers 2xx; subscribe to Tier 1 ($5, test
   card in test mode) or give a comp grant; the account's entitlement shows it.
-- **E. Retail.** A stock JO client signs in through the gate and lists the lobby (the
-  lobby's own address, `app logs lobby` names it); its HTTP requests reach the gate's
-  address on 8080. On staging, with two web tasks, repeat the login until its steps land
+- **E. Retail.** A stock JO client signs in through the gate and lists the lobby (at the
+  gate's address, port 64206; `app logs lobby` names its session); its HTTP requests
+  reach the gate's address on 8080. On staging, with two web tasks, repeat the login until its steps land
   on both (web's logs show it): it completes.
 - **F. A shared machine.** Start a server: a shared machine launches (from the baked
   image, `fleet status`), its hostd reaches the controller by its Cloud Map name, the
@@ -1714,12 +1724,14 @@ every command).
   lobby: `app deploy --image portal=<tag>` (nothing restarts but web's task), then `app
   restart web`, `app restart worker`, `app restart controller` and `app restart gate`:
   the client stays in the lobby and the server stays listed through each.
-- **I. A lobby's replacement.** On staging: `app restart lobby`: the new lobby starts
-  beside the old, which drains as it stops; its players sign in again through the gate
-  onto the new one, and a hosted server listed on the old one is placed again once its
-  listing has been gone 8 minutes (its timeline: `no listing for 480 s ...; placed again
-  (no restart counted)`), then lists again on the new one within about 9 minutes, never
-  `failed`. A lobby
+- **I. A lobby's replacement.** On staging, with a hosted server listed and a retail
+  client hosting its own game: `app restart lobby`: the new lobby task starts beside the
+  old and takes the balancer's new flows once it passes; the old one is drained (10 s)
+  and stopped. Its players sign in again through the gate onto the one lobby address.
+  The hosted server and the retail self-host both list again on the new task within about
+  5 minutes (a host's session times out after 240 s and reconnects to the same address)
+  with no restart: the server's timeline shows no `placed again`, its match goes on, and
+  it is never `failed`. A lobby
   image that never turns healthy (`app deploy --image lobby=<a broken tag>`) leaves the
   old lobby serving while the circuit breaker rolls it back, and the deploy records
   nothing.

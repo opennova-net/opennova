@@ -8,7 +8,7 @@
 // /api/admin/connections/<session id>/end, which ends one through a command for
 // the lobby holding it (lobbydb::queue_end_session); and the lobby instances:
 // GET /api/admin/lobbies, and POST /api/admin/lobbies/<id>/drain, after which no
-// gate hands that instance a new client. None reaches a lobby's memory. The
+// gate counts that instance as taking clients. None reaches a lobby's memory. The
 // HttpListener owns one ConnectionRoutes over its Crow app, beside its
 // HostRoutes (README "Connection lifecycle", "Lobby instances").
 

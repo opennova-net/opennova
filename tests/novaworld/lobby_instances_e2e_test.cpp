@@ -1,36 +1,36 @@
-// Several lobby instances on one database (apps/novaworld_lobby/nw_udp_listener.h,
-// gate_listener.h; engine/net/novaworld/lobby_repository.h): two real NovaWorld UDP listeners,
-// two lobbies each registered as an instance of its own, and a real gate, over loopback
-// UDP in one process.
+// Several lobby instances on one database, sharing one lobby address (apps/novaworld_lobby/
+// nw_udp_listener.h, gate_listener.h; engine/net/novaworld/lobby_repository.h): real NovaWorld
+// UDP listeners, each registered as an instance of its own at the one endpoint every lobby
+// announces (a deployment's load balancer's), and a real gate, over loopback UDP in one process.
+// Each listener binds a port of its own, as the balancer's targets do, and the test's clients
+// reach each at its port, as the balancer's flows would.
 //
-//   - each listener registers its instance as it starts, at its endpoint;
-//   - the gate spreads clients across the active instances by their address (pick_lobby: every
-//     instance takes a share of a thousand addresses, an address always the same one) and a
-//     client's retries land on the same lobby; real probes from several loopback addresses
-//     reach both;
+//   - two listeners register at the one endpoint, each a row of its own; the first one's start
+//     reaps an instance unseen past the stale window with its rows, leaves one unseen for two
+//     minutes (a database failover's outage), and clears a row no instance holds;
+//   - the gate hands every client the one address, every time;
 //   - a host listed on each: their RIDs differ (one sequence), each listing and session row names
 //     its instance, and a push queued as web queues it reaches the host on its own
 //     instance alone;
 //   - forget_owner goes to both instances, each taking its own;
-//   - an instance drained gets no new client from the gate (every probe the other's), and both
-//     listings stay;
 //   - an instance's row reaped while its lobby runs (an outage past the stale window): the lobby's
 //     next heartbeat registers it again and writes its session rows and listing anew, and a push
 //     reaches its host;
-//   - a lobby configured with a running one's endpoint refuses to start, and one whose config
-//     names no endpoint (none is derived from the port it binds);
+//   - a lobby whose config names no endpoint does not start (none is derived from the port it
+//     binds);
 //   - a flood of malformed datagrams at a lobby: its receive batch is bounded, so a push still
 //     reaches its host and its heartbeat still moves its row;
-//   - a gate whose read of the instances failed hands its fallback lobby (an instance it read
-//     may have drained and stopped since) and reads again only kLobbyRetryFactor refreshes later;
+//   - a gate whose read of the instances failed hands its fallback lobby (the instances it read
+//     may all have stopped since) and reads again only kLobbyRetryFactor refreshes later;
+//   - one instance drained: the other takes clients, so the gate still hands out the address,
+//     and both listings stay; both drained, the gate (no fallback) answers no one;
 //   - a drained instance whose row is reaped while its lobby runs registers again drained, its
 //     own lobby's drain or an admin's through the row (which its heartbeat reads);
-//   - a lobby's start takes over its endpoint's row once it stopped moving and clears that
-//     previous run's rows, reaps an instance unseen past the stale window with its rows, and
-//     leaves one unseen for two minutes (a database failover's outage) and the other
-//     instances' rows alone;
 //   - a lobby's sweep deletes its row of no session it holds (a drop whose delete failed);
-//   - a clean stop deletes the instance's row.
+//   - a clean stop deletes the instance's row;
+//   - a lobby replaced behind the address: a host listed on the first, its receive window run
+//     out, reconnects to the address it first had, which the new lobby serves, and is listed on
+//     the new instance.
 
 #include "gate_listener.h"
 #include "nw_udp_listener.h"
@@ -64,9 +64,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <functional>
-#include <map>
 #include <optional>
-#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -81,6 +79,11 @@ using Notice = opennova::ClientSession::Notice;
 using Clock = std::chrono::steady_clock;
 
 const opennova::TitleIdentity &kJo = *opennova::title_identity(opennova::gameprofile::GAME_JO);
+
+// The one lobby address every instance announces (a deployment's load balancer's), and a gate's
+// fallback, an address of its own.
+constexpr const char *kShared = "198.51.100.40:64206";
+constexpr const char *kFallback = "198.51.100.99:64206";
 
 // One probe from loopback address 127.0.0.`host` to the gate at `port`: the udpnovaworld it hands
 // out, "" with no reply.
@@ -258,38 +261,28 @@ struct Lobby {
 		});
 	}
 
-	// At `endpoint`, or with none its own: a port free a moment ago (bound and let go) and the
-	// endpoint that names it, since a lobby announces its config's endpoint, never the port it
-	// bound.
-	bool start(const std::string &endpoint = {}) {
+	// At `endpoint` (the one lobby address every instance announces), bound at `port` (0: one the
+	// OS picks), as a load balancer's target is: a lobby announces its config's endpoint, never
+	// the port it bound.
+	bool start(const std::string &endpoint = kShared, uint16_t port = 0) {
 		nws::ServerConfig config;
-		config.nw_udp_port = 0;
+		config.nw_udp_port = port;
 		config.lobby_endpoint = endpoint;
-		if (endpoint.empty()) {
-			{
-				net::ScopedSocket probe(net::udp_bind(0, &config.nw_udp_port));
-			}
-			config.lobby_endpoint = "127.0.0.1:" + std::to_string(config.nw_udp_port);
-		}
 		return listener.start(config);
+	}
+
+	void stop() {
+		listener.stop();
+		manager.shutdown();
 	}
 };
 
-int test_pick_spreads() {
-	const std::vector<std::string> two = { "198.51.100.1:64206", "198.51.100.2:64206" };
-	std::map<std::string, int> counts;
-	for (uint32_t ip = 0x0A000000u; ip < 0x0A000400u; ++ip) {
-		const std::string first = nws::pick_lobby(ip, two, "fallback");
-		TEST_EXPECT(nws::pick_lobby(ip, two, "fallback") == first); // stable
-		++counts[first];
-	}
-	TEST_EXPECT(counts.size() == 2 && counts[two[0]] > 300 && counts[two[1]] > 300);
-	TEST_EXPECT(nws::pick_lobby(0x0A000001u, {}, "fallback") == "fallback");
-	// No instance and no fallback: no lobby to hand out (the gate answers nothing).
-	TEST_EXPECT(nws::pick_lobby(0x0A000001u, {}, "").empty());
-	TEST_EXPECT(nws::pick_lobby(0x0A000001u, { "only:1" }, "fallback") == "only:1");
-	std::printf("  a thousand addresses: %d and %d\n", counts[two[0]], counts[two[1]]);
-	return 0;
+// Instance `id`'s row, if any.
+std::optional<lobbydb::LobbyInstance> instance_of(opennova::db::Database &db, int64_t id) {
+	for (const lobbydb::LobbyInstance &i : lobbydb::list_instances(db))
+		if (i.id == id)
+			return i;
+	return std::nullopt;
 }
 
 int run() {
@@ -297,11 +290,12 @@ int run() {
 	opennova::db::ConnectionPool pool(database.options());
 	opennova::db::Database db = database.open();
 
-	// A previous run's rows at an endpoint the third lobby will take, and a stale instance's.
-	const std::string reused = "127.0.0.1:1";
-	const int64_t previous = lobbydb::register_instance(db, reused);
+	// Before any lobby starts: an instance whose process went (ten minutes unseen) with a session
+	// row and a listing, one unseen for two minutes (a database failover's outage), and a session
+	// row no instance holds.
+	const int64_t stale = lobbydb::register_instance(db, kShared);
 	lobbydb::SessionRow old_row;
-	old_row.lobby_id = previous;
+	old_row.lobby_id = stale;
 	old_row.connection_id = 1;
 	old_row.peer_ip = "10.9.9.9";
 	old_row.peer_port = 1;
@@ -309,44 +303,55 @@ int run() {
 	old_row.connected_ms = 1;
 	old_row.last_seen_ms = 1;
 	TEST_EXPECT(lobbydb::insert_session(db, old_row) > 0);
+	hostdb::HostRow stale_listing;
+	stale_listing.rid = lobbydb::next_rid(db);
+	stale_listing.game = "jop_2_consumer";
+	stale_listing.server_name = "Stale Host";
+	stale_listing.lobby_id = stale;
+	hostdb::upsert_host(db, stale_listing);
+	db.exec("UPDATE lobby_instances SET last_seen_at = now() - interval '10 minutes' WHERE id = "
+			"$1;",
+			{ opennova::db::BindValue(stale) });
+	const int64_t outage = lobbydb::register_instance(db, kShared);
+	db.exec("UPDATE lobby_instances SET last_seen_at = now() - interval '2 minutes' WHERE id = $1;",
+			{ opennova::db::BindValue(outage) });
+	lobbydb::SessionRow unheld = old_row;
+	unheld.lobby_id = 0;
+	unheld.peer_ip = "10.9.9.7";
+	TEST_EXPECT(lobbydb::insert_session(db, unheld) > 0);
 
+	// Two lobbies at the one address, each its own instance: A's start reaped the stale instance
+	// with its rows and cleared the row no instance holds; the instance in its outage stays.
 	Lobby a(pool);
 	Lobby b(pool);
 	TEST_EXPECT(a.start() && b.start());
 	TEST_EXPECT(a.listener.lobby_id() > 0 && b.listener.lobby_id() > 0 &&
 			a.listener.lobby_id() != b.listener.lobby_id());
-	TEST_EXPECT(a.listener.instance_endpoint() ==
-			"127.0.0.1:" + std::to_string(a.listener.bound_port()));
+	TEST_EXPECT(
+			a.listener.instance_endpoint() == kShared && b.listener.instance_endpoint() == kShared);
+	TEST_EXPECT(!instance_of(db, stale) && instance_of(db, outage));
+	TEST_EXPECT(!hostdb::find_host_by_rid(db, stale_listing.rid));
+	for (const auto &s : lobbydb::list_sessions(db))
+		TEST_EXPECT(s.peer_ip != old_row.peer_ip && s.peer_ip != unheld.peer_ip);
 	auto instances = lobbydb::list_instances(db);
-	TEST_EXPECT(instances.size() == 3); // the previous run's at `reused` waits for its lobby
-	const std::set<std::string> both = { a.listener.instance_endpoint(),
-		b.listener.instance_endpoint() };
+	TEST_EXPECT(instances.size() == 3);
+	for (const auto &i : instances)
+		TEST_EXPECT(i.endpoint == kShared);
+	lobbydb::remove_instance(db, outage);
 
-	// The gate: its fallback A's, the instances read every 100 ms.
+	// The gate, no fallback, reading the instances every 100 ms: every client gets the one
+	// address, every time.
 	nws::GateListener gate;
 	gate.set_db_pool(&pool);
 	gate.set_lobby_refresh_ms(100);
 	nws::ServerConfig gate_config;
 	gate_config.gate_udp_port = 0;
-	gate_config.lobby_endpoint = a.listener.instance_endpoint();
 	gate_config.web_host = "127.0.0.1";
 	TEST_EXPECT(gate.start(gate_config));
-	// `reused` counts among the active ones until its lobby's start; it is no client's here.
-	db.exec("UPDATE lobby_instances SET state = 'draining' WHERE id = $1;",
-			{ opennova::db::BindValue(previous) });
-	std::this_thread::sleep_for(std::chrono::milliseconds(150));
-
-	// Probes from twenty addresses: both lobbies handed out, each address its own every time.
-	std::map<std::string, int> handed;
-	for (uint8_t host = 2; host < 22; ++host) {
-		const std::string first = probe_from(host, gate.bound_port());
-		TEST_EXPECT(both.count(first) == 1);
-		TEST_EXPECT(probe_from(host, gate.bound_port()) == first);
-		++handed[first];
+	for (uint8_t host = 2; host < 12; ++host) {
+		TEST_EXPECT(probe_from(host, gate.bound_port()) == kShared);
+		TEST_EXPECT(probe_from(host, gate.bound_port()) == kShared);
 	}
-	TEST_EXPECT(handed.size() == 2);
-	std::printf("  twenty client addresses: %d and %d to the two lobbies\n", handed.begin()->second,
-			handed.rbegin()->second);
 
 	// A host on each: distinct RIDs, each listing and session row its instance's.
 	Host host_a(a.listener.bound_port(), 0x41414141u);
@@ -409,8 +414,8 @@ int run() {
 						listing->lobby_id == a.listener.lobby_id();
 			},
 			8000));
-	const auto again = lobbydb::find_instance(db, a.listener.instance_endpoint());
-	TEST_EXPECT(again && again->id == a.listener.lobby_id() && again->state == "active");
+	const auto again = instance_of(db, a.listener.lobby_id());
+	TEST_EXPECT(again && again->endpoint == kShared && again->state == "active");
 	bool session_back = false;
 	for (const auto &s : lobbydb::list_sessions(db))
 		if (lobbydb::session_addr(s) == host_a.addr())
@@ -420,14 +425,6 @@ int run() {
 			lobbydb::PushResult::Queued);
 	TEST_EXPECT(host_a.command_lands("A again", 3000));
 
-	// A lobby configured with A's endpoint (two lobbies named alike): A still moves its row, so the
-	// newcomer refuses to start, and the row stays A's.
-	{
-		Lobby twin(pool);
-		TEST_EXPECT(!twin.start(a.listener.instance_endpoint()));
-		const auto still = lobbydb::find_instance(db, a.listener.instance_endpoint());
-		TEST_EXPECT(still && still->id == a.listener.lobby_id());
-	}
 	// A lobby whose config names no endpoint does not start: its instance would announce an
 	// address nobody configured (none is derived from the port it binds).
 	{
@@ -444,8 +441,7 @@ int run() {
 	// receive batch ends every kReceiveBatchMaxDatagrams all the same, so a push still reaches
 	// A's host and A's heartbeat still moves its row.
 	{
-		const int64_t seen_before =
-				lobbydb::find_instance(db, a.listener.instance_endpoint())->last_seen_ms;
+		const int64_t seen_before = instance_of(db, a.listener.lobby_id())->last_seen_ms;
 		Flood flood(a.listener.bound_port(), 8);
 		std::this_thread::sleep_for(std::chrono::milliseconds(300));
 		TEST_EXPECT(lobbydb::queue_server_command(db, row_a->rid, "SetServerName \"Flooded\"") ==
@@ -453,8 +449,8 @@ int run() {
 		TEST_EXPECT(host_a.command_lands("Flooded", 8000));
 		TEST_EXPECT(wait_for(
 				[&] {
-					return lobbydb::find_instance(db, a.listener.instance_endpoint())
-								   ->last_seen_ms != seen_before;
+					const auto now_a = instance_of(db, a.listener.lobby_id());
+					return now_a && now_a->last_seen_ms != seen_before;
 				},
 				8000));
 	}
@@ -479,88 +475,44 @@ int run() {
 			},
 			3000));
 
-	// A second gate (reading every 500 ms) whose read fails (the table renamed away for a moment):
-	// it drops what it read before and hands every client its fallback lobby (A's here), since
-	// an instance it read may have drained and stopped since; it reads again only
-	// kLobbyRetryFactor refreshes later (3 s), not at its next refresh. Its probes come from an
-	// address the gates hand B (A's new id ordered the instances anew).
-	uint8_t to_b = 0;
-	for (uint8_t host = 2; host < 22 && to_b == 0; ++host)
-		if (probe_from(host, gate.bound_port()) == b.listener.instance_endpoint())
-			to_b = host;
-	TEST_EXPECT(to_b != 0);
+	// A second gate (reading every 500 ms, its fallback an address of its own) whose read fails
+	// (the table renamed away for a moment): it drops what it read before and hands every client
+	// its fallback, since the instances it read may all have stopped since; it reads again only
+	// kLobbyRetryFactor refreshes later (3 s), not at its next refresh.
 	nws::GateListener slow_gate;
 	slow_gate.set_db_pool(&pool);
 	slow_gate.set_lobby_refresh_ms(500);
-	TEST_EXPECT(slow_gate.start(gate_config));
-	TEST_EXPECT(probe_from(to_b, slow_gate.bound_port()) == b.listener.instance_endpoint());
+	nws::ServerConfig slow_config = gate_config;
+	slow_config.lobby_endpoint = kFallback;
+	TEST_EXPECT(slow_gate.start(slow_config));
+	TEST_EXPECT(probe_from(2, slow_gate.bound_port()) == kShared);
 	std::this_thread::sleep_for(std::chrono::milliseconds(600));
 	db.exec("ALTER TABLE lobby_instances RENAME TO lobby_instances_away;");
-	TEST_EXPECT(probe_from(to_b, slow_gate.bound_port()) == a.listener.instance_endpoint());
+	TEST_EXPECT(probe_from(2, slow_gate.bound_port()) == kFallback);
 	const auto failed_read = Clock::now();
 	db.exec("ALTER TABLE lobby_instances_away RENAME TO lobby_instances;");
-	// A second past its failed read (past its refresh, short of its retry): still its own
-	// lobby, though B takes clients; past the retry, B again.
+	// A second past its failed read (past its refresh, short of its retry): still its fallback,
+	// though both instances take clients; past the retry, the one address again.
 	std::this_thread::sleep_until(failed_read + std::chrono::milliseconds(1000));
 	const bool within_retry = Clock::now() - failed_read < std::chrono::milliseconds(2500);
-	const std::string held_over = probe_from(to_b, slow_gate.bound_port());
+	const std::string held_over = probe_from(2, slow_gate.bound_port());
 	if (within_retry)
-		TEST_EXPECT(held_over == a.listener.instance_endpoint());
-	TEST_EXPECT(wait_for(
-			[&] {
-				return probe_from(to_b, slow_gate.bound_port()) == b.listener.instance_endpoint();
-			},
-			6000));
+		TEST_EXPECT(held_over == kFallback);
+	TEST_EXPECT(wait_for([&] { return probe_from(2, slow_gate.bound_port()) == kShared; }, 6000));
 	slow_gate.stop();
 
-	// B drains: every probe A's from the gate's next read, and both listings stay.
+	// B drains: A still takes clients, so every probe still gets the one address, and both
+	// listings stay. A drained by an admin through its row too: none takes clients, and the
+	// gate, with no fallback, answers no one.
 	TEST_EXPECT(b.listener.drain());
-	std::this_thread::sleep_for(std::chrono::milliseconds(150));
-	for (uint8_t host = 2; host < 22; ++host)
-		TEST_EXPECT(probe_from(host, gate.bound_port()) == a.listener.instance_endpoint());
+	for (uint8_t host = 2; host < 12; ++host)
+		TEST_EXPECT(probe_from(host, gate.bound_port()) == kShared);
+	TEST_EXPECT(lobbydb::live_lobbies(db).instances == 1);
 	TEST_EXPECT(
 			hostdb::find_host_by_rid(db, row_a->rid) && hostdb::find_host_by_rid(db, row_b->rid));
-
-	// A third lobby starts at `reused`, whose previous run's row stopped moving 20 s ago (past the
-	// live window, inside the stale one): it takes that row over (its id kept), clears its
-	// previous run, and reaps a stale instance (ten minutes unseen) with its rows; an instance
-	// unseen for two minutes (past the old one-minute window: a database failover's outage) stays,
-	// and A's and B's rows stay.
-	db.exec("UPDATE lobby_instances SET last_seen_at = now() - interval '20 seconds' WHERE id = "
-			"$1;",
-			{ opennova::db::BindValue(previous) });
-	const int64_t stale = lobbydb::register_instance(db, "127.0.0.1:2");
-	hostdb::HostRow stale_listing;
-	stale_listing.rid = lobbydb::next_rid(db);
-	stale_listing.game = "jop_2_consumer";
-	stale_listing.server_name = "Stale Host";
-	stale_listing.lobby_id = stale;
-	hostdb::upsert_host(db, stale_listing);
-	db.exec("UPDATE lobby_instances SET last_seen_at = now() - interval '10 minutes' WHERE id = "
-			"$1;",
-			{ opennova::db::BindValue(stale) });
-	const int64_t outage = lobbydb::register_instance(db, "127.0.0.1:3");
-	db.exec("UPDATE lobby_instances SET last_seen_at = now() - interval '2 minutes' WHERE id = $1;",
-			{ opennova::db::BindValue(outage) });
-	Lobby c(pool);
-	TEST_EXPECT(c.start(reused));
-	TEST_EXPECT(c.listener.lobby_id() == previous);
-	bool old_row_left = false;
-	for (const auto &s : lobbydb::list_sessions(db))
-		old_row_left = old_row_left || s.peer_ip == "10.9.9.9";
-	TEST_EXPECT(!old_row_left);
-	TEST_EXPECT(!hostdb::find_host_by_rid(db, stale_listing.rid));
-	instances = lobbydb::list_instances(db);
-	TEST_EXPECT(instances.size() == 4);
-	bool outage_left = false;
-	for (const auto &i : instances) {
-		TEST_EXPECT(i.id != stale);
-		outage_left = outage_left || i.id == outage;
-	}
-	TEST_EXPECT(outage_left);
-	lobbydb::remove_instance(db, outage);
-	TEST_EXPECT(
-			hostdb::find_host_by_rid(db, row_a->rid) && hostdb::find_host_by_rid(db, row_b->rid));
+	const int64_t a_id = a.listener.lobby_id();
+	TEST_EXPECT(lobbydb::set_instance_state(db, a_id, "draining"));
+	TEST_EXPECT(wait_for([&] { return probe_from(2, gate.bound_port()).empty(); }, 3000));
 
 	// B's sweep took the row it holds no session for; a push to its RID finds none.
 	TEST_EXPECT(wait_for(
@@ -575,32 +527,29 @@ int run() {
 			lobbydb::PushResult::UnknownRid);
 
 	// Drained instances whose rows are reaped while their lobbies run register again drained: B,
-	// drained by its own lobby above, and C, drained by an admin through its row (which C's next
-	// heartbeat reads). Under new ids, neither is active, so no gate hands either a new client;
-	// B's listing comes back on its new row.
-	const int64_t c_id = c.listener.lobby_id();
-	TEST_EXPECT(lobbydb::set_instance_state(db, c_id, "draining"));
-	const int64_t c_seen = lobbydb::find_instance(db, reused)->last_seen_ms;
+	// drained by its own lobby, and A, drained by an admin through its row (which A's next
+	// heartbeat reads). Under new ids, neither counts as taking clients; B's listing comes back
+	// on its new row.
+	const int64_t a_seen = instance_of(db, a_id)->last_seen_ms;
 	TEST_EXPECT(wait_for(
 			[&] {
-				const auto now_c = lobbydb::find_instance(db, reused);
-				return now_c && now_c->last_seen_ms != c_seen;
+				const auto now_a = instance_of(db, a_id);
+				return now_a && now_a->last_seen_ms != a_seen;
 			},
 			8000));
 	const int64_t b_id = b.listener.lobby_id();
+	lobbydb::remove_instance(db, a_id);
 	lobbydb::remove_instance(db, b_id);
-	lobbydb::remove_instance(db, c_id);
 	TEST_EXPECT(wait_for(
 			[&] {
-				const auto again_b = lobbydb::find_instance(db, b.listener.instance_endpoint());
-				const auto again_c = lobbydb::find_instance(db, reused);
-				return again_b && again_c && again_b->id != b_id && again_c->id != c_id;
+				return a.listener.lobby_id() != a_id && b.listener.lobby_id() != b_id &&
+						instance_of(db, a.listener.lobby_id()) &&
+						instance_of(db, b.listener.lobby_id());
 			},
 			8000));
-	TEST_EXPECT(lobbydb::find_instance(db, b.listener.instance_endpoint())->state == "draining");
-	TEST_EXPECT(lobbydb::find_instance(db, reused)->state == "draining");
-	TEST_EXPECT(lobbydb::active_endpoints(db) ==
-			std::vector<std::string>{ a.listener.instance_endpoint() });
+	TEST_EXPECT(instance_of(db, a.listener.lobby_id())->state == "draining");
+	TEST_EXPECT(instance_of(db, b.listener.lobby_id())->state == "draining");
+	TEST_EXPECT(lobbydb::live_lobbies(db).instances == 0);
 	TEST_EXPECT(wait_for(
 			[&] {
 				const auto listing = hostdb::find_host_by_rid(db, row_b->rid);
@@ -612,11 +561,129 @@ int run() {
 	host_a.send(host_a.session.build_goodbye());
 	host_b.send(host_b.session.build_goodbye());
 	gate.stop();
-	c.listener.stop();
-	b.listener.stop();
-	a.listener.stop();
+	b.stop();
+	a.stop();
 	TEST_EXPECT(lobbydb::list_instances(db).empty());
 	TEST_EXPECT(lobbydb::list_sessions(db).empty() && hostdb::list_hosts(db).empty());
+	return 0;
+}
+
+// A lobby replaced behind the one lobby address, as a deployment replaces a lobby task behind its
+// load balancer. A host listed on the first lobby: the first stops (its listing with it, nothing
+// sent), and a new lobby serves the same address (bound at the first one's port, as the
+// balancer's flow reaches the new task). The host's receive window runs out (240 s by its clock;
+// what it sent meanwhile reached a lobby that holds no session for it), and it reconnects to the
+// address the gate gave it at its first connect, its one target: it re-probes, re-joins,
+// re-verifies and re-hosts with CurrentlyHosting=1, and is listed on the new instance, its RID a
+// new one. [orig: CNapiNPConnection_PumpStateMachine @0x6292e0, the reconnect tail
+// @0x629487..0x6296cb; CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0, the target walk
+// @0x629183..0x6291B4; CNapiGameSession_HandleConnectVerifyResponse @0x4d5961..0x4d599e]
+int test_relisted_behind_one_address() {
+	test_db::TestDatabase database({ /*migrate=*/true, /*seed_games=*/true });
+	opennova::db::ConnectionPool pool(database.options());
+	opennova::db::Database db = database.open();
+	Lobby first(pool);
+	TEST_EXPECT(first.start());
+	const uint16_t port = first.listener.bound_port();
+
+	net::ScopedSocket socket(net::udp_bind(0));
+	TEST_EXPECT(socket.is_valid());
+	const net::Endpoint address{ { 127, 0, 0, 1 }, port };
+	opennova::ClientSession::Config cfg = opennova::ClientSession::Config::lobby(kJo, kJo.gate_tag);
+	cfg.client_index = 0x524c5354u;
+	cfg.client_key = 0x524c5331u;
+	cfg.na = "relist:host";
+	cfg.cookie_vars = [] {
+		return std::vector<std::pair<std::string, std::string>>{ { "NWUID", "" } };
+	};
+	cfg.next_client_key = [] { return 0x524c5332u; };
+	opennova::ClientSession host(cfg);
+	const auto send = [&](const std::vector<uint8_t> &datagram) {
+		if (!datagram.empty())
+			net::udp_send_to(socket.get(), address, datagram.data(), datagram.size());
+	};
+	// Receive, dispatch and answer until `done` holds (the session's clock stays put).
+	const auto drive = [&](const std::function<bool()> &done, int ms) {
+		const auto deadline = Clock::now() + std::chrono::milliseconds(ms);
+		while (!done() && Clock::now() < deadline) {
+			uint8_t rx[4096];
+			net::Endpoint from;
+			const int n = net::udp_recv_from(socket.get(), rx, sizeof rx, from, 20);
+			std::vector<std::vector<uint8_t>> out;
+			if (n > 0)
+				host.handle_datagram(rx, static_cast<size_t>(n), out);
+			host.finish_receive_batch(out);
+			host.pump(out);
+			host.process_periodic_update();
+			for (const auto &datagram : out)
+				send(datagram);
+		}
+		return done();
+	};
+	const auto listing_on = [&db](int64_t lobby_id) -> std::optional<hostdb::HostRow> {
+		for (const auto &h : hostdb::list_hosts(db))
+			if (h.server_name == "Relisted Host" && h.lobby_id == lobby_id)
+				return h;
+		return std::nullopt;
+	};
+	using HostState = opennova::ClientSession::HostState;
+
+	send(host.start());
+	TEST_EXPECT(drive([&] { return host.is_verified(); }, 8000));
+	opennova::HostRegistration reg;
+	reg.lobby_name = "jop_2_consumer";
+	reg.server_name = "Relisted Host";
+	reg.app_id = 2468;
+	TEST_EXPECT(host.request_hosting(reg, 0));
+	TEST_EXPECT(drive([&] { return host.host_state() == HostState::Established; }, 8000));
+	const int64_t first_id = first.listener.lobby_id();
+	TEST_EXPECT(wait_for([&] { return listing_on(first_id).has_value(); }, 3000));
+	const uint32_t first_rid = listing_on(first_id)->rid;
+
+	// The first lobby stops, its listing with it; the new one serves the same address.
+	first.stop();
+	TEST_EXPECT(!hostdb::find_host_by_rid(db, first_rid));
+	Lobby second(pool);
+	TEST_EXPECT(second.start(kShared, port));
+	const int64_t second_id = second.listener.lobby_id();
+	TEST_EXPECT(second_id != first_id && second.listener.bound_port() == port);
+
+	// The receive window runs out: the host's reap (its 0x46 burst reaches the new lobby, which
+	// holds no session for it) arms its reconnect.
+	host.set_clock_ms(240001);
+	std::vector<std::vector<uint8_t>> burst;
+	host.pump(burst);
+	TEST_EXPECT(host.reconnecting());
+	for (const auto &datagram : burst)
+		send(datagram);
+	// The re-probe: past its first delay, the 0x41 to the address it first had.
+	bool probed = false;
+	for (uint32_t t = 240002; t < 260000 && !probed; t += 10) {
+		host.set_clock_ms(t);
+		std::vector<std::vector<uint8_t>> pumped;
+		host.pump(pumped);
+		for (const auto &datagram : pumped)
+			send(datagram);
+		probed = !pumped.empty();
+	}
+	TEST_EXPECT(probed);
+	// Re-joined, re-verified and re-hosted: listed on the new instance under a new RID.
+	TEST_EXPECT(drive(
+			[&] {
+				return host.host_state() == HostState::Established &&
+						listing_on(second_id).has_value();
+			},
+			10000));
+	TEST_EXPECT(host.host_reconnect_counter() == 1);
+	const auto relisted = listing_on(second_id);
+	TEST_EXPECT(relisted && relisted->rid != first_rid);
+	std::printf("  the host listed on instance %lld relisted on instance %lld behind %s\n",
+			static_cast<long long>(first_id), static_cast<long long>(second_id), kShared);
+
+	send(host.build_goodbye());
+	TEST_EXPECT(wait_for([&] { return !listing_on(second_id).has_value(); }, 3000));
+	second.stop();
+	TEST_EXPECT(lobbydb::list_instances(db).empty());
 	return 0;
 }
 
@@ -625,15 +692,15 @@ int run() {
 int main(int argc, char **argv) {
 	test_db::init(argc, argv);
 	TEST_EXPECT(net::startup() == 0);
-	std::printf("pick_spreads:\n");
-	int rc = test_pick_spreads();
+	std::printf("instances:\n");
+	int rc = run();
 	if (rc == 0) {
-		std::printf("instances:\n");
-		rc = run();
+		std::printf("relisted:\n");
+		rc = test_relisted_behind_one_address();
 	}
 	net::shutdown();
 	if (rc == 0)
-		std::printf("OK: lobby instances spread clients, push their own, drain, clear their own, "
-					"reap the stale\n");
+		std::printf("OK: lobby instances share one address, push their own, drain, reap the "
+					"stale, and a host relists behind the address\n");
 	return rc;
 }
