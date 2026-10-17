@@ -111,7 +111,6 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("objective_header", "gametext"), &HudPos::objective_header);
 	ClassDB::bind_static_method("HudPos", D_METHOD("objective_directive", "mission", "win", "header_id"), &HudPos::objective_directive);
 	ClassDB::bind_static_method("HudPos", D_METHOD("triggered_text", "mission", "text_id"), &HudPos::triggered_text);
-	ClassDB::bind_static_method("HudPos", D_METHOD("weapon_display_name", "gametext", "weapon_id"), &HudPos::weapon_display_name);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_fallback_image"), &HudPos::loading_fallback_image);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_font_small"), &HudPos::loading_font_small);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_font_large"), &HudPos::loading_font_large);
@@ -124,8 +123,6 @@ void HudPos::_bind_methods() {
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_y_frac"), &HudPos::loading_msg_label_y_frac);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_body_y_frac"), &HudPos::loading_msg_body_y_frac);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_msg_label_color"), &HudPos::loading_msg_label_color);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_pos"), &HudPos::loading_bar_pos);
-	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_size"), &HudPos::loading_bar_size);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_rects", "surface", "displayed"),
 			&HudPos::loading_bar_rects);
 	ClassDB::bind_static_method("HudPos", D_METHOD("loading_bar_border_gray"), &HudPos::loading_bar_border_gray);
@@ -537,14 +534,6 @@ double HudPos::loading_msg_body_y_frac() {
 Color HudPos::loading_msg_label_color() {
 	const uint32_t rgb = opennova::hud::kLoadingMsgLabelRgb;
 	return opennova::color_from_rgb24(rgb);
-}
-
-Vector2i HudPos::loading_bar_pos() {
-	return Vector2i(opennova::hud::kLoadingBarX, opennova::hud::kLoadingBarY);
-}
-
-Vector2i HudPos::loading_bar_size() {
-	return Vector2i(opennova::hud::kLoadingBarW, opennova::hud::kLoadingBarH);
 }
 
 TypedArray<Rect2i> HudPos::loading_bar_rects(const Vector2 &p_surface, int p_displayed) {

@@ -174,6 +174,7 @@ public:
 	static String objective_directive(const Ref<RtxtStringFile> &p_mission, bool p_win,
 			int p_header_id);
 	static String triggered_text(const Ref<RtxtStringFile> &p_mission, int p_text_id);
+	// Not bound: HudOverlay's weapon feed is its one caller.
 	static String weapon_display_name(const Ref<RtxtStringFile> &p_gametext,
 			const String &p_weapon_id);
 	// The loading screen's wrapped text block painted into a CanvasItem: the
@@ -195,8 +196,6 @@ public:
 	static double loading_msg_label_y_frac();
 	static double loading_msg_body_y_frac();
 	static Color loading_msg_label_color();
-	static Vector2i loading_bar_pos();
-	static Vector2i loading_bar_size();
 	// The bar's [outer, gray, track, fill] rects on a surface of `p_surface`
 	// px at `p_displayed` percent (engine hud/loading_screen.h loading_bar_rects).
 	static TypedArray<Rect2i> loading_bar_rects(const Vector2 &p_surface, int p_displayed);
