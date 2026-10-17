@@ -2047,7 +2047,7 @@ int mus_encode_file(const MusScript *const *scripts, uint32_t script_count,
     fh.name_strings_blob_offset  = (uint32_t)strings_at;
     fh.name_resolve_table_offset = (uint32_t)resolve_at;
     memcpy(buf, &fh, sizeof(fh));
-    for (uint32_t i = 0; i < script_count; ++i) memcpy(buf + chunk_table_offset + i * 4, &chunk_offs[i], 4);
+    for (uint32_t i = 0; i < script_count; ++i) io::write_u32_le(buf + chunk_table_offset + i * 4, chunk_offs[i]);
     free(chunk_offs);
 
     *out_buf = buf;
