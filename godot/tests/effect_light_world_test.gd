@@ -677,9 +677,12 @@ func test_live_model_light_uses_spawn_time_entity_matrix_only() -> void:
 		return
 	part.position += Vector3(2.0, 0.0, 0.0)
 	var spawn_position := node.global_transform * authored_position
-	var attached_position := node.get_model_light_world_position(0)
+	# The control: the position the moved ROBJ would carry the light to.
+	var attached_position := part.global_transform * authored_position
 	assert_false(attached_position.is_equal_approx(spawn_position),
 			"the control ROBJ transform differs from the entity placement matrix")
+	assert_true(node.get_model_light_world_position(0).is_equal_approx(spawn_position),
+			"the model's light position is the placement matrix's, the subobject an owner group")
 	node.entity_ref = EntityRef.make(-1, -1, 0, 0, 33)
 	var director := EffectLightDirector.new()
 	director.setup(world, null)

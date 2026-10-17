@@ -1875,12 +1875,11 @@ Vector3 ObjectModel::get_model_light_world_position(int p_index) const {
 		return get_global_position();
 	}
 	const Ref<ModelLight> info = object_data_->get_light_info(p_index);
-	const int subobject = info->get_subobject();
-	// Zero is the witnessed unattached sentinel. A nonzero subobject follows
-	// the live rendered part, matching the user-point attachment basis.
-	const Transform3D model_to_world = subobject > 0
-			? subobject_model_to_world(subobject) : get_global_transform();
-	return model_to_world.xform(info->get_position());
+	// By the model matrix alone, as the glow spawn places every model light
+	// (engine/runtime/renderer/light_scene.h carries the witness): the record's
+	// subobject byte names an owner group, never a position transform, so an
+	// animated part does not carry its light.
+	return get_global_transform().xform(info->get_position());
 }
 
 void ObjectModel::apply_point_light_selection_to_robj(int p_robj_index,
