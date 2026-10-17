@@ -260,6 +260,39 @@ void test_health_bar_death_arm(const fnt_font_t *font) {
 	CHECK(half > 60.0f && half < 72.0f); // the target's ratio, not the local one
 }
 
+// THE DMGBAR FILL'S WIDTH (C-211): a whole pixel count, the scaled bar width
+// times the 16.16 ratio rounded, the clear from x0 + 1 to x0 + width. A 100-px
+// bar at 0.503 health: (100 * 32964 + 0x8000) >> 16 = 50, so the fill ends at
+// x0 + 50 (the unrounded product gave x0 + 50.3, one pixel centre more)
+// [orig: HUD_DrawHealthBar @0x5A2EC3..0x5A2EE3; sub_5D48E0 @0x5A2F7A].
+void test_health_bar_fill_rounds(const fnt_font_t *font) {
+	HudLayout layout;
+	layout.health_rect = {2.0f, 739.0f, 100.0f, 18.0f, true};
+	layout.tag_good = 0xFF00FF00u;
+	layout.tag_middle = 0xFFFFFF00u;
+	layout.tag_bad = 0xFFFF0000u;
+	HudFrameCompiler compiler;
+	configure(compiler, layout, font);
+	HudFrameState state;
+	state.health_fraction = 0.503f;
+	const HudDrawList &list = compiler.compile(state, 1024.0f, 768.0f);
+	bool seen = false;
+	for (const HudQuad &q : list.quads) {
+		if (q.color != layout.tag_good && q.color != layout.tag_middle && q.color != layout.tag_bad)
+			continue;
+		seen = true;
+		CHECK(q.x0 == 3.0f && q.x1 == 52.0f);
+	}
+	CHECK(seen);
+	// A negative health word reads full in the good colour: the ratio's cap is
+	// unsigned [orig: HUD_BuildEntityInfo @0x4B87C9..0x4B87D3].
+	state.health_fraction = -0.25f;
+	bool full_good = false;
+	for (const HudQuad &q : compiler.compile(state, 1024.0f, 768.0f).quads)
+		if (q.color == layout.tag_good && q.x0 == 3.0f && q.x1 == 102.0f) full_good = true;
+	CHECK(full_good);
+}
+
 // THE HUDLS SLOT BAR: the HUDLS_SYSTEM gate, the 6,7,8,9,0 visit packing
 // from HUDLS_SLOT 6, the (0,0) stall, the MOREAV marker, the OR'd colour.
 void test_slot_bar(const fnt_font_t *font) {
@@ -668,6 +701,7 @@ int main() {
 	test_clock(&font);
 	test_team_id_line(&font);
 	test_health_bar_death_arm(&font);
+	test_health_bar_fill_rounds(&font);
 	test_slot_bar(&font);
 	test_objectives_panel(&font);
 	test_no_hud(&font);

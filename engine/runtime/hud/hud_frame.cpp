@@ -1073,19 +1073,29 @@ void HudFrameCompiler::element_health(const HudFrameState &state, float w,
 	// info rebuilt for the target [orig: HUD_RenderOverlays @0x5a7bc5..0x5a7c04;
 	// the living arm @0x5a7ca0].
 	if (state.combat.death_screen && !state.session.spectating) return;
-	const float fraction = std::clamp(state.combat.death_screen
-					? state.session.spectated_health_fraction
-					: state.health_fraction,
-			0.0f, 1.0f);
+	// The ratio is HUD_BuildEntityInfo's (health << 16) / max capped UNSIGNED at
+	// 1.0, so a negative health word reads full, as an over-max one does
+	// [orig: HUD_BuildEntityInfo @0x4B87C9..0x4B87D3 (`cmp eax,10000h; jbe`)].
+	const float raw_fraction = state.combat.death_screen
+			? state.session.spectated_health_fraction
+			: state.health_fraction;
+	const float fraction =
+			(raw_fraction >= 0.0f && raw_fraction <= 1.0f) ? raw_fraction : 1.0f;
 	const int32_t ratio_fp16 =
 			static_cast<int32_t>(fraction * 65536.0f);
 	const int band = health_color_band_fp16(ratio_fp16);
 	const uint32_t fill = band == 0 ? layout_.tag_good
 			: band == 1              ? layout_.tag_middle
 									 : layout_.tag_bad;
-	const float fill_w = (x1 - x0) * fraction;
-	if (fill_w > 1.0f) {
-		emit_rect(x0 + 1.0f, y0 + 1.0f, x0 + fill_w,
+	// The fill's width is a whole pixel count, the scaled bar width times the
+	// 16.16 ratio rounded, and its clear runs from x0 + 1 to x0 + width
+	// [orig: HUD_DrawHealthBar @0x5A2EC3..0x5A2EE3 the width, sub_5D48E0
+	// @0x5A2F7A the clear].
+	const int bar_w = static_cast<int>(x1 - x0);
+	const int fill_px = static_cast<int>(
+			(static_cast<int64_t>(bar_w) * ratio_fp16 + 0x8000) >> 16);
+	if (fill_px > 1) {
+		emit_rect(x0 + 1.0f, y0 + 1.0f, x0 + static_cast<float>(fill_px),
 				std::max(y1, y0 + 1.0f), fill, true);
 	}
 	emit_wire_rect(x0, y0, x1, y1, layout_.health_border);
