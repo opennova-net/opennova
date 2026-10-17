@@ -229,8 +229,7 @@ typedef struct DefWeaponAction {
 	   later block of the same name replaces the row, lines included. Lines are
 	   numbered as the retail walk cuts them, at CR LF only (File_ParseASCIIFile
 	   @0x53D810; an unterminated tail line loses its last byte, @0x53D8E9 /
-	   @0x53D8EC). A tool that rewrites the file in place (opennova-3di weapon merge) maps
-	   them back onto the text and checks the retail reading of those lines. */
+	   @0x53D8EC). A finding on the block names its line by them. */
 	size_t open_line;
 	size_t end_line;
 } DefWeaponAction;

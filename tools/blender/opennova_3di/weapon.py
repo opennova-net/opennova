@@ -4,10 +4,9 @@
 # anim slot) and the timing markers on each row's clips compile, through
 # `opennova-3di weapon timing`, into the keys each entry's ACTION blocks need
 # (ANIM, DELAYSTART, DELAYEND) and the view positions its Hip and Aim cameras
-# give (POS, TPOS), measured with the engine's own weapon FSM;
-# `opennova-3di weapon merge` sets them in a copy of a weapon.def
-# (docs/anim/weapon-timing-format.md; ADR 0047 decision 14). Nothing here
-# reads imported provenance or an existing weapon.def.
+# give (POS, TPOS), measured with the engine's own weapon FSM, for the author
+# to set in the entries' weapon.def (docs/anim/weapon-timing-format.md; ADR 0047
+# decision 14). Nothing here reads imported provenance or an existing weapon.def.
 #
 # A row's action is its slot's: the catalog pairs each weapon action with the
 # slot of its own clips, anim_wpn_<action> (emptyidle's is
@@ -335,28 +334,6 @@ def write_edits(path, text):
     finally:
         if os.path.exists(part):
             os.remove(part)
-
-
-def merge(context, model, def_path, out_path):
-    """The model's weapon.def edits set in a copy of `def_path`, written to
-    `out_path` by `opennova-3di weapon merge`: (what it said, notes)."""
-    if not os.path.isfile(def_path):
-        raise ExportError(f"no weapon.def at {def_path}")
-    if os.path.normcase(os.path.abspath(out_path)) == os.path.normcase(os.path.abspath(def_path)):
-        raise ExportError("the merged weapon.def is a new file: choose another name than the one read")
-    notes = NoteList()
-    compiled = compile_timing(context, model, notes)
-    if compiled is None:
-        raise ExportError(notes.notes[0] if notes.notes else f"{model.name} has no weapon entry")
-    with scratch() as tmp:
-        edits = os.path.join(tmp, "edits.txt")
-        with open(edits, "w", encoding="utf-8", newline="\n") as f:
-            f.write(compiled[2])
-        result = run_cli(context, ["weapon", "merge", def_path, edits, "-o", out_path], ExportError, timeout=30,
-                         hide=((edits, "weapon edits"),))
-    for note in cli_notes(result, "note: "):
-        notes.note(note)
-    return result.stdout.strip(), notes.notes
 
 
 def assign(model, action, suffix):

@@ -7,8 +7,8 @@ the opennova-3di the loader names:
 A row's weapon action is its slot's; the model's weapon entries, its rows'
 timing markers and its Hip and Aim cameras make the `weapon timing` request
 (docs/anim/weapon-timing-format.md); export writes the edits beside the table
-and never holds the clips back for a missing fire row; Merge into weapon.def
-sets them in a copy of a def; the preview lives in memory; assigning a clip
+and never holds the clips back for a missing fire row; the preview lives in
+memory and Preview Game Timing keeps it; assigning a clip
 leaves its loop alone; every clip of one action must time alike.
 """
 import hashlib
@@ -248,34 +248,12 @@ def test_camera_off_forward_noted():
           "noted: only its place is used", notes.notes)
 
 
-def test_merge_into_a_copy():
+def test_preview_operator_keeps_the_preview():
     fresh_scene()
     model, arm = armed_gun()
-    folder = os.path.join(OUT, "merge")
-    os.makedirs(folder, exist_ok=True)
-    source = os.path.join(folder, "weapon.def")
-    original = ("weapon \"WPN_TEST\"\r\n\tFLAGS\tAUTO\r\n\tACTION\t\"FIRE\"\r\n\tDELAYEND\t9\r\n"
-                "\tFUNCTION\tWPN_STD_FIRE\r\n\tEND\r\nend\r\n\r\n"
-                "weapon \"WPN_TEST_SEMI\"\r\n\tACTION\t\"FIRE\"\r\n\tDELAYEND\t9\r\n\tEND\r\nend\r\n")
-    with open(source, "w", encoding="latin-1", newline="") as f:
-        f.write(original)
-    target = os.path.join(folder, "weapon_merged.def")
-    said, notes = weapon.merge(bpy.context, model, source, target)
-    merged = open(target, encoding="latin-1", newline="").read()
-    check(open(source, encoding="latin-1", newline="").read() == original, "the def read is left as it was")
-    check("WPN_STD_FIRE" in merged and "DELAYEND\t9" not in merged and "anim_wpn_reload" in merged.lower(),
-          "the copy takes the keys and keeps the rest", merged)
-    why = refusal(lambda: weapon.merge(bpy.context, model, source, source))
-    check(why is not None and "new file" in why, "the merge never writes over the def it reads", why)
-    os.remove(target)
     bpy.context.view_layer.objects.active = model
-    check(bpy.ops.opennova_3di.merge_weapon_def("EXEC_DEFAULT", filepath=source) == {"FINISHED"} and
-          os.path.isfile(target), "Merge into weapon.def writes <def>_merged.def beside the def by default")
     check(bpy.ops.opennova_3di.preview_weapon() == {"FINISHED"} and weapon.last_preview(model) is not None,
           "Preview Game Timing keeps the preview")
-    model.o3d.weapons[0].name = "WPN_ABSENT"
-    why = refusal(lambda: weapon.merge(bpy.context, model, source, target))
-    check(why is not None and "WPN_ABSENT" in why, "an entry the def lacks is refused", why)
 
 
 def folder_hashes(model):

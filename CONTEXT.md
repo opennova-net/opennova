@@ -476,9 +476,9 @@ _Avoid_: animation file, clip file (a `.bad` is one clip)
 The command-line tool (`apps/3di`) over the engine's one `.3di` reader and
 writer: `build` / `scene` over the `.o3d` text, `info`, `compare` and `catalog`,
 `anim build|scene|info|compare` for a rig's `.bad` clips and `.adm` table over the
-`.o3a` text, and `weapon timing` / `weapon merge` (the timing request measured with the
-engine's weapon FSM, and its edits file applied to a `weapon.def` copy;
-`docs/anim/weapon-timing-format.md`). The Blender add-on bundles it.
+`.o3a` text, and `weapon timing` (the timing request measured with the engine's weapon
+FSM, written as the `weapon.def` keys to set; `docs/anim/weapon-timing-format.md`). The
+Blender add-on bundles it.
 _Avoid_: the exporter (the add-on is the front end; the CLI mints the files)
 
 **Blender add-on**:
