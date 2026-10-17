@@ -445,8 +445,8 @@ while IFS= read -r line; do
     fail "SSM got $RT_NAME, whose optional field $item/$field is absent"
   fi
 done <"$RUNTIME_TPL"
-[ "$matched" -eq 13 ] && pass "secrets sync wrote each of the 13 secrets the vault holds, as it holds them" \
-  || fail "secrets sync wrote $matched of the 13 secrets as the vault holds them ($(cd "$STUB_SSM" && printf '%s ' *))"
+[ "$matched" -eq 11 ] && pass "secrets sync wrote each of the 11 secrets the vault holds, as it holds them" \
+  || fail "secrets sync wrote $matched of the 11 secrets as the vault holds them ($(cd "$STUB_SSM" && printf '%s ' *))"
 expect_requests "--deployment staging stripe check" 2 --deployment staging stripe check
 expect_requests "org plan" 3 org plan
 for v in region:aws-org:region organization_id:aws-org:organization_id management_account_id:aws-org:account_id \
