@@ -375,6 +375,11 @@ private:
 	int ctrl_batch_depth_ = 0;
 	bool ctrl_batch_dirty_ = false;
 	int64_t anim_time_ms_ = 0;
+	// The private clock's sub-millisecond carry (a model with no PanmClock):
+	// each frame's delta adds its whole milliseconds and keeps the rest, so the
+	// clock runs at wall rate at any frame rate (advance_private_clock).
+	double anim_time_fraction_ms_ = 0.0;
+	void advance_private_clock(double p_delta);
 	Ref<PanmClock> panm_clock_;
 	int active_lod_ = 0;
 	bool authored_lod_enabled_ = false;

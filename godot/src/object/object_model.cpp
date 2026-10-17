@@ -1399,6 +1399,16 @@ void ObjectModel::_notification(int p_what) {
 // Advance the model's render-time state once. Public for deterministic owners
 // and tests: clocks continue while hidden; render-derived work waits until the
 // model can be submitted again.
+void ObjectModel::advance_private_clock(double p_delta) {
+	// The DWORD clock a model with no PanmClock keeps for itself: whole
+	// milliseconds, the fraction carried to the next frame (dropping it ran the
+	// clock 4% slow at 60 fps, 13.5% at 144, and stopped it from 1000 fps).
+	const double total_ms = anim_time_fraction_ms_ + p_delta * 1000.0;
+	const double whole_ms = std::floor(total_ms);
+	anim_time_fraction_ms_ = total_ms - whole_ms;
+	anim_time_ms_ = (anim_time_ms_ + static_cast<int64_t>(whole_ms)) & 0xffffffff;
+}
+
 void ObjectModel::advance_runtime_frame(double p_delta) {
 	advance_runtime_frame_profiled(p_delta, nullptr);
 }
@@ -1426,8 +1436,7 @@ void ObjectModel::advance_runtime_frame_profiled(double p_delta,
 				? Time::get_singleton()->get_ticks_usec()
 				: 0;
 		if (panm_clock_.is_null() && is_playing_) {
-			anim_time_ms_ = (anim_time_ms_ + static_cast<int64_t>(p_delta * 1000.0)) &
-					0xffffffff;
+			advance_private_clock(p_delta);
 		}
 		if (p_profile != nullptr) {
 			p_profile->clock_animation_us +=
@@ -1520,8 +1529,7 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 	if (panm_clock_.is_valid()) {
 		anim_time_ms_ = panm_clock_->get_time_ms();
 	} else if (is_playing_) {
-		anim_time_ms_ = (anim_time_ms_ + static_cast<int64_t>(p_delta * 1000.0)) &
-				0xffffffff;
+		advance_private_clock(p_delta);
 	}
 	const bool part_changed = advance_part_anims(p_delta);
 	advance_body_animation(p_delta, p_renderable);
