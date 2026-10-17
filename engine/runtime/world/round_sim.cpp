@@ -834,6 +834,13 @@ void person_class_round_legs(World &world, Entity &victim, const HitRecord &reco
                                       /*was_alive=*/true);
 }
 
+int hit_record_death_anim_state(const HitRecord &record, int32_t victim_heading_bam) {
+    const Vec3 vel = vec_from_fixed(record.round_vel_q16);
+    return compute_death_anim_state(record.section,
+            death_quadrant_from_round(victim_heading_bam, vel.x, vel.y),
+            death_cause::kBullet);
+}
+
 void RoundSim::reset() noexcept {
 	rounds.assign(kCapacity, LiveRound{});
 	active_count = 0;

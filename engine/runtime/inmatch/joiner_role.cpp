@@ -990,6 +990,25 @@ void JoinerRole::wire_frame_providers() {
 				out.decay_effect = item->particledeath[0] != '\0';
 				return true;
 			});
+	// The 0x13's class callback reads the joiner world's hit record, which
+	// this peer's own rounds write [orig: NapiNPClientMsg_EntityDeath
+	// @0x42EBF5 -> OrganicClass_HandleEvent @0x40734C].
+	rt.view().set_replica_hit_record_resolver(
+			[this]() -> const world::HitRecord * {
+				return &kernel_->world.round_sim.hit_record;
+			});
+	// The 0x26 route's section store, at the fold, under the gate
+	// apply_item_state_event applies to the same entity (it stores the same
+	// word again when the drain runs the callback).
+	// [orig: Entity_KillBySlotId @0x42BD29..0x42BD47]
+	rt.view().set_replica_kill_section_store(
+			[this](uint16_t handle, int16_t section) {
+				world::World &world = kernel_->world;
+				const world::Entity *e = world.registry.get(world::EntityHandle{handle});
+				if (e != nullptr && e->item_type_index != 0 &&
+						(e->engine_flags & world::kEntityFlagDead) == 0)
+					world.round_sim.hit_record.section = section;
+			});
 	// The FULL replica contact resolver (net-re §5.38e, D-NET-196): with the
 	// joiner world's collision tables live, each armed Player/Infantry row's
 	// settle runs the ported movement collision resolver — candidate-model

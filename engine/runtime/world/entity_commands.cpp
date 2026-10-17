@@ -226,9 +226,17 @@ void hit_record_class_event(World &world, Entity &e, int phase, int32_t flags) {
         if ((flags & kEntityFlagPlayer) == 0) {
             // org0/org1: the phase-1 arm puts the victim and its trigger group
             // on red alert, then runs the round legs while the record holds a
-            // round. Phase 4 only zeroes the health word here.
+            // round. The phase-4 arm zeroes the health word and, while the
+            // record holds a round, restages the death clip from it.
             // [orig: OrganicClass_HandleEvent @0x4073BF..0x4073EA, the round
-            //  test @0x40740D; phase-4 arm @0x40733F..0x407358]
+            //  test @0x40740D; phase-4 arm @0x40733F..0x4073B1]
+            if (phase == 4) {
+                e.health = 0;
+                if (record.has_round)
+                    e.death_anim_state = hit_record_death_anim_state(
+                            record, bam_heading_from_mission_yaw_deg(e.yaw));
+                return;
+            }
             if (phase != 1) return;
             if (AiEntity *ae = world.ai.for_handle(e.handle))
                 ae->slot.bytes()[AiSlot::kAlertByte] = 2;

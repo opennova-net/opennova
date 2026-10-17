@@ -518,6 +518,13 @@ struct HitRecord {
 //  Entity_HandleDamageAndTriggerZones @0x407777..0x407A7C]
 void person_class_round_legs(World &world, Entity &victim, const HitRecord &record);
 
+// The death clip the org class callback's event 4 restages while the hit
+// record holds a round: the record's section and the round's approach
+// quadrant against the victim's heading (entity+0x10), cause 1. The event-1
+// round legs select the same clip.
+// [orig: OrganicClass_HandleEvent @0x40735E..0x4073B1; event 1 @0x407478..0x407483]
+int hit_record_death_anim_state(const HitRecord &record, int32_t victim_heading_bam);
+
 // One presented fire — the origin/direction/ammo of a spawned round, drained by the
 // HOST present layer for the fire sound + muzzle effect (+ the MF-light deferral).
 // [orig: WeaponSlot_FireAndSpawnEffects @ 0x53F440 presents inline at fire time on

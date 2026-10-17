@@ -14,6 +14,7 @@
 #include <runtime/world/ammo_table.h>
 #include <runtime/world/angle.h>
 #include <runtime/world/destruction.h>
+#include <runtime/world/entity_commands.h>
 #include <runtime/world/infantry.h>
 #include <runtime/world/round_sim.h>
 #include <runtime/world/world.h>
@@ -213,11 +214,34 @@ static void test_kill_single_hands_items_the_record() {
     }
 }
 
+// The org callback's event 4 zeroes the health word and, while the record
+// holds a round, restages the death clip from it over whatever was staged;
+// with no round it keeps the staged clip.
+// [orig: OrganicClass_HandleEvent Health = 0 @0x407343, the round test
+//  @0x407353..0x407358, the clip store @0x4073B1]
+static void test_class_event_4_restages_the_death_clip() {
+    KillRig rig;
+    rig.record_round(3);
+    rig.victim().death_anim_state = anim_state::kDeathPungi;
+    hit_record_class_event(*rig.w, rig.victim(), 4);
+    CHECK(rig.victim().health == 0);
+    CHECK(rig.victim().death_anim_state ==
+          compute_death_anim_state(3, 2, death_cause::kBullet));
+    CHECK(rig.w->round_sim.hits.empty());
+
+    KillRig bare;
+    bare.victim().death_anim_state = anim_state::kDeathPungi;
+    hit_record_class_event(*bare.w, bare.victim(), 4);
+    CHECK(bare.victim().health == 0);
+    CHECK(bare.victim().death_anim_state == anim_state::kDeathPungi);
+}
+
 int main() {
     test_kill_single_runs_the_recorded_round_legs();
     test_wac_kill_ssn_zeroes_the_record();
     test_kill_group_runs_the_round_and_keeps_the_attacker();
     test_kill_single_hands_items_the_record();
+    test_class_event_4_restages_the_death_clip();
     if (failures != 0) {
         std::printf("%d failure(s)\n", failures);
         return 1;

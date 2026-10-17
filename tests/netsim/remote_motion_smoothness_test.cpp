@@ -31,6 +31,7 @@
 
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/world/infantry.h> // IRootMotionSource stub for the root-motion legs
+#include <runtime/world/round_sim.h> // HitRecord (the 0x13 class callback's input)
 
 #include <net/npwire/ingame_decode.h>
 #include <net/npwire/ingame_encode.h>
@@ -1565,6 +1566,70 @@ bool run_entity_death_parks_the_death_anim() {
 	return ok;
 }
 
+// The 0x13's class callback (event 4): while the joiner's global hit record
+// holds a round, an org row's callback restages the death state over the wire
+// word from the record's section and the round's approach quadrant against
+// the row's heading, which the death edge then commits; with no round the
+// wire word stands. A +X round reaches a heading-0 body from behind
+// (quadrant 2). [orig: NapiNPClientMsg_EntityDeath @0x42EBF5 ->
+// OrganicClass_HandleEvent @0x40734C..0x4073B1]
+bool run_entity_death_restages_from_the_hit_record() {
+	ns::ClientReplicaPipeline view([](uint16_t type_id) {
+		return type_id == 0x0777 ? nw::EntityClass::Infantry
+		                         : nw::EntityClass::Unknown;
+	});
+	view.set_remote_motion_mode(true);
+	opennova::world::HitRecord record;
+	view.set_replica_hit_record_resolver(
+			[&record]() -> const opennova::world::HitRecord * { return &record; });
+	const uint16_t handle = 0x0033;
+	const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+	seed_row(view, handle, 0x0777);
+	nw::FrameUpdate fu = header_only_frame();
+	fu.anchor_x = ax; fu.anchor_y = ay; fu.anchor_z = az;
+	nw::FrameUpdateRecord r;
+	r.handle = handle;
+	r.type_id = 0x0777;
+	r.cls = nw::EntityClass::Infantry;
+	r.infantry.vehicle_slot_handle = 0xFFFF;
+	r.infantry.anim_byte = opennova::world::anim_state::kIdle;
+	fu.records.push_back(r);
+	view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+	view.tick_remote_motion(0xFFFF);
+	const int16_t wire = opennova::world::anim_state::kDeathBulletBase + 6;
+	const std::vector<uint8_t> body = {
+			static_cast<uint8_t>(handle & 0xFF), static_cast<uint8_t>(handle >> 8),
+			static_cast<uint8_t>(wire & 0xFF), static_cast<uint8_t>(wire >> 8)};
+	// No round recorded: the wire word stands.
+	view.apply(nw::s2c::ENTITY_DEATH, body);
+	const ns::ClientEntityState *es = view.state().find(handle);
+	bool ok = expect(es->heading_bam == 0, "the row faces heading 0");
+	ok &= expect(es->net_death_anim == wire,
+	             "with no round recorded the 0x13 word stands");
+	record.has_round = true;
+	record.section = 3;
+	record.round_vel_q16 = opennova::world::FixedVec3{10 << 16, 0, 0};
+	// A 0x26 earlier in the same pump stores its section into the record at
+	// the fold, through the embedder's gate [orig: Entity_KillBySlotId
+	// @0x42BD47]; here the gate admits slot 0x1005.
+	view.set_replica_kill_section_store([&record](uint16_t slot, int16_t section) {
+		if (slot == 0x1005) record.section = section;
+	});
+	view.apply(nw::s2c::KILL_SYNC, {0x05, 0x10, 14, 0});
+	ok &= expect(record.section == 14, "the 0x26 fold stores its section");
+	view.apply(nw::s2c::ENTITY_DEATH, body);
+	es = view.state().find(handle);
+	const int16_t restaged = static_cast<int16_t>(opennova::world::compute_death_anim_state(
+			14, 2, opennova::world::death_cause::kBullet));
+	ok &= expect(restaged != wire && es->net_death_anim == restaged,
+	             "a recorded round restages the death state from its section and quadrant");
+	view.tick_remote_motion(0xFFFF);
+	es = view.state().find(handle);
+	ok &= expect(es->net_anim_current == restaged && (es->rm_entity_flags & 0x2u) != 0u,
+	             "the death edge commits the restaged state");
+	return ok;
+}
+
 // The corpse leg behind both death edges (D-NET-275): the edge seeds the
 // row's moveTimer from the def's deathtime, a def without LeaveCorpse counts it
 // down, and at 186 the def's decay effect spawns once at the corpse origin; an
@@ -1848,6 +1913,7 @@ int main() {
 	ok &= run_dead_row_takes_its_death_clip_and_respawn_rearms();
 	ok &= run_corpse_follows_its_records();
 	ok &= run_entity_death_parks_the_death_anim();
+	ok &= run_entity_death_restages_from_the_hit_record();
 	ok &= run_dead_tail_counts_down_and_decays();
 	ok &= run_org1_corpse_is_destroyed_at_zero();
 	ok &= run_player_death_edge_drops_the_carried_flag();
