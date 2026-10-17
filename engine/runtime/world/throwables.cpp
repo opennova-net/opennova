@@ -193,13 +193,14 @@ int32_t horizontal_speed_q16(const MotorFrame &f) {
     return static_cast<int32_t>(m);
 }
 
-// Charmap surface material under a motor frame, bounded to the impact-effect
-// table the bounce presentation indexes with material + 4 (no charmap -> 1 ->
-// dirt, the sampler's own default). [orig: Terrain_GetSurfaceTypeAtPosition
-// @ 0x606510; consumed as material + 4 by the bounce presentation @ 0x4447c3]
+// Charmap surface material under a motor frame (no charmap -> 1 -> dirt, the
+// sampler's own default). The bounce presentation plays material + 4 through
+// the impact presenter, whose clamp makes a class past the table the obj row.
+// [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510 (Entity_UpdateGrenadePhysics
+// @ 0x4443d0); consumed as material + 4 @ 0x44481f by AmmoDef_ProcessImpactEffect
+// @ 0x40a170 @ 0x444824, a tag of 28 or more -> 4 @ 0x40a1bc..0x40a1c1]
 int32_t sampled_ground_surface(const World &world, const MotorFrame &f) {
-    const int32_t surface = terrain::surface_type_at_fixed(world.tables.surface_map, f.px, f.py);
-    return (surface >= 0 && surface + 4 < kImpactEffectTagCount) ? surface : 1;
+    return terrain::surface_type_at_fixed(world.tables.surface_map, f.px, f.py);
 }
 
 int32_t speed3_q16(const MotorFrame &f) {
@@ -472,8 +473,8 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
                 f.vz = qmul(f.vz, -13107);
                 ground_hit = true;
                 // Charmap surface at the bounce point (no charmap -> 1 -> dirt)
-                // [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510; the
-                // bounce presentation applies material + 4 @ 0x4447c3]
+                // [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510 @ 0x4443d0;
+                // the bounce presentation applies material + 4 @ 0x44481f]
                 ground_surface = sampled_ground_surface(world, f);
                 const int32_t kick_yaw =
                         (world.next_prng16() % 10) - 5; // [orig: %10-5]
@@ -695,7 +696,8 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
             f.vz = 0;
             speed = 0;
             ground_hit = true;
-            // [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510 at the stop point]
+            // [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510 at the stop point,
+            //  @ 0x447592 (claymore) / @ 0x4485e0 (satchel)]
             ground_surface = sampled_ground_surface(world, f);
             r.parent = EntityHandle{};
             r.parent_spawn_id = 0;
