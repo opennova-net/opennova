@@ -32,7 +32,8 @@ concurrency:
 jobs:
   # A pull request that changes only the private docs pointer and markdown
   # builds and tests nothing: no build or test reads those paths, and the lint
-  # gates that do read them still run in `test`. Every other PR, and every
+  # gates that do read them still run in `gates` (reported through the required
+  # `test` check). Every other PR, and every
   # push, runs everything. The two required checks (`test`,
   # `godot-tests`) gate their steps on `code` instead of skipping the job: a
   # skipped matrix job reports under its bare name, which would leave the
