@@ -90,6 +90,12 @@ int test_png_decode() {
 	truncated.resize(truncated.size() - 20);
 	TEST_EXPECT(!decode_png(truncated, image, error));
 	TEST_EXPECT(!decode_png({1, 2, 3}, image, error) && error.find("Not a PNG") != std::string::npos);
+	// The signature and one length-0 IEND header with no CRC: 16 bytes, fewer than a chunk's 12
+	// framing bytes after its start (the bound once wrapped and the walk read the CRC past the end).
+	const std::vector<uint8_t> cut_chunk = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 'I', 'E', 'N', 'D'};
+	TEST_EXPECT(!decode_png(cut_chunk, image, error) && error.find("runs past the end") != std::string::npos);
+	GrayImage gray_cut;
+	TEST_EXPECT(!decode_png_gray(cut_chunk, gray_cut, error) && error.find("runs past the end") != std::string::npos);
 	std::printf("decode: every color type and depth, the five filters, the refusals\n");
 	return 0;
 }
@@ -191,6 +197,17 @@ int test_png_encode() {
 	            back.pixels[2 * 4 + 3] == 255 && back.pixels[8 * 4 + 3] == 255);
 	TEST_EXPECT(encode_png_indexed(indices.data(), 5, 2, palette.data(), 20, alpha, 21).empty() &&
 	            encode_png_indexed(indices.data(), 5, 2, palette.data(), 20, nullptr, 3).empty());
+	// What its chunks hold, handed back beside the texels: the PLTE's 20 entries and the tRNS's 3 bytes; none for
+	// a palette image without a tRNS, nothing for a true-colour one; the IHDR's depth and colour type.
+	PngPalette held;
+	TEST_EXPECT(decode_png(clear, back, error, &read, &held) && held.entries == 20 &&
+	            held.alpha == std::vector<uint8_t>(alpha, alpha + 3));
+	TEST_EXPECT(decode_png(indexed, back, error, nullptr, &held) && held.entries == 20 && held.alpha.empty());
+	TEST_EXPECT(decode_png(bytes, back, error, nullptr, &held) && held.entries == 0 && held.alpha.empty());
+	uint8_t depth = 0, colour = 0;
+	TEST_EXPECT(png_header_form(clear, depth, colour) && depth == 8 && colour == 3);
+	TEST_EXPECT(png_header_form(bytes, depth, colour) && depth == 8 && colour == 6);
+	TEST_EXPECT(!png_header_form(std::vector<uint8_t>(clear.begin(), clear.begin() + 25), depth, colour));
 	// A grey image (colour type 0, 8 bits a sample): its levels read back as written.
 	const std::vector<uint8_t> grey = encode_png_gray(indices.data(), 5, 2);
 	GrayImage levels;

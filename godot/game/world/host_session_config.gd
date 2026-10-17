@@ -21,9 +21,6 @@ extends HostSessionOptions
 const GAME_TYPE_COOP := NetProtocol.GAME_TYPE_COOP                           # LTGT_COOP (objective)
 const GAME_TYPE_TRAINING_COOP := NetProtocol.GAME_TYPE_TRAINING_COOP         # LTGT_COOP (stock)
 const GAME_TYPE_FLAG_ME := NetProtocol.GAME_TYPE_FLAG_ME                     # LTGT_FM
-## The 0x0A sub-block-3 gate bit (gameprofile game_type::kObjectiveBit):
-## GAME_TYPE_COOP == GAME_TYPE_TRAINING_COOP | GAME_TYPE_OBJECTIVE_BIT.
-const GAME_TYPE_OBJECTIVE_BIT := NetProtocol.GAME_TYPE_OBJECTIVE_BIT
 ## First port of the retail LAN host range — the witness
 ## [orig: game.cfg mplanserverportmin/max, JO_SERVER] lives at the engine home,
 ## engine/net/npwire net_ports.h kRetailLanPortMin/Max (the maturity lint

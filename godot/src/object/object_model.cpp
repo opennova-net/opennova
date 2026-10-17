@@ -284,7 +284,7 @@ Transform3D ObjectModel::compose_entity_transform(const Basis &p_basis,
 	if (entity_uniform_scale_q16_ == 0) {
 		return Transform3D(p_basis, p_origin);
 	}
-	const float scale = static_cast<float>(entity_uniform_scale_q16_) / 65536.0f;
+	const float scale = opennova::io::fp16_16_to_float(entity_uniform_scale_q16_);
 	return Transform3D(p_basis.scaled(Vector3(scale, scale, scale)), p_origin);
 }
 
@@ -295,7 +295,7 @@ void ObjectModel::set_shadow_bound_radii(float p_model_sphere, float p_entity_bo
 }
 
 void ObjectModel::set_bound_radii_q16(int32_t p_model_sphere, int32_t p_entity_bound) {
-	const float sphere = static_cast<float>(MAX(p_model_sphere, 0)) / 65536.0f;
+	const float sphere = opennova::io::fp16_16_to_float(MAX(p_model_sphere, 0));
 	const int32_t bound = MAX(p_entity_bound, 0);
 	if (model_sphere_radius_ != sphere || entity_bound_radius_q16_ != bound) {
 		SlotShadow::bump_caster_group_revision();
@@ -310,7 +310,7 @@ float ObjectModel::get_model_sphere_radius() const {
 }
 
 float ObjectModel::get_entity_bound_radius() const {
-	return static_cast<float>(entity_bound_radius_q16_) / 65536.0f;
+	return opennova::io::fp16_16_to_float(entity_bound_radius_q16_);
 }
 
 void ObjectModel::set_entity_light_owner(ObjectModel *p_owner) {
@@ -712,7 +712,7 @@ void ObjectModel::set_attachment_pixel_cull(bool p_enabled) {
 		return;
 	}
 	// The weapon model's own header sphere (gpm[5]) — the radius the gate
-	// projects. [retail BoneCallback_org0_World @ 0x4e3d2b]
+	// projects (engine: runtime/renderer/object_lod.h).
 	attachment_pixel_cull_radius_q16_ = object_data_.is_valid()
 			? opennova::world::model_bound_radius_q16_from_3di(object_data_->native_model())
 			: 0;
@@ -1285,7 +1285,7 @@ void ObjectModel::stamp_foliage_mask_side(float p_side) {
 // mounted child submitted through its bone callback with its flags) share
 // that wave. The first-person viewmodel is drawn before the scene and never
 // takes the masks (the engine's foliage_entity_far_side carries the wave
-// witness; retail BoneCallback_org0_World @ 0x4e3c87 submits the children).
+// witness; the children's submit, engine: runtime/renderer/render_order.h).
 void ObjectModel::refresh_foliage_mask_frame(float p_camera_y, float p_water_height) {
 	if (foliage_mask_models_.is_empty()) {
 		return;

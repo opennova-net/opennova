@@ -28,6 +28,7 @@
 #include "mission/mission_object_placer.h"
 #include "render/d3d9_raster_device.h"
 #include "terrain/terrain_image_convert.h"
+#include "util/color_convert.h"
 #include "util/string_convert.h"
 #include "world/world_scene.h"
 
@@ -422,8 +423,7 @@ void MissionMapViewportApplier::draw_outlines_(const opennova::editor::MissionMa
 		for (size_t i = begin; i < end; ++i) {
 			to[2 * (i - begin)] = Vector2(lines[4 * i], lines[4 * i + 1]);
 			to[2 * (i - begin) + 1] = Vector2(lines[4 * i + 2], lines[4 * i + 3]);
-			colour[i - begin] = Color(float((rgb[i] >> 16) & 0xFFu) / 255.0f, float((rgb[i] >> 8) & 0xFFu) / 255.0f,
-					float(rgb[i] & 0xFFu) / 255.0f);
+			colour[i - begin] = opennova::color_from_rgb24(rgb[i]);
 		}
 		// Thin lines (a negative width: a pixel whatever the transform), a colour an edge.
 		rs->canvas_item_add_multiline(chunk_items_[chunk], points, colours, -1.0f);

@@ -37,8 +37,8 @@ void write_pose(Entity &e, const int32_t pose[6]) {
 	e.veh.air_pitch_bam = pose[4];
 	e.veh.air_roll_bam = pose[5];
 	e.yaw = static_cast<int16_t>(std::lround(mission_yaw_deg_from_bam_heading(pose[3])));
-	e.pitch = static_cast<int16_t>(std::lround(double(pose[4]) * 360.0 / 4294967296.0));
-	e.roll = static_cast<int16_t>(std::lround(double(pose[5]) * 360.0 / 4294967296.0));
+	e.pitch = degrees_i16_from_bam(pose[4]);
+	e.roll = degrees_i16_from_bam(pose[5]);
 }
 int32_t respawn_ground(World &world, Entity &e) {
 	const int32_t pos[3] = { to_fixed(e.position.x), to_fixed(e.position.y),

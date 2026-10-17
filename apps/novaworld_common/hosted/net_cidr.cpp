@@ -1,5 +1,7 @@
 #include "net_cidr.h"
 
+#include "health.h" // Watchdog::steady_now_ms
+
 #include <chrono>
 #include <iterator>
 #include <utility>
@@ -7,11 +9,6 @@
 namespace opennova::novaworld_server::hosted {
 
 namespace {
-
-uint64_t steady_now_ms() {
-	using namespace std::chrono;
-	return static_cast<uint64_t>(duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
-}
 
 } // namespace
 
@@ -102,7 +99,7 @@ std::string ipv4_cidr_text(const Ipv4Cidr &cidr) {
 	return out + std::to_string(prefix);
 }
 
-LogThrottle::LogThrottle(Clock now_ms) : now_(now_ms ? std::move(now_ms) : Clock(steady_now_ms)) {}
+LogThrottle::LogThrottle(Clock now_ms) : now_(now_ms ? std::move(now_ms) : Clock(Watchdog::steady_now_ms)) {}
 
 bool LogThrottle::admit(const std::string &key) {
 	std::lock_guard<std::mutex> lock(mu_);

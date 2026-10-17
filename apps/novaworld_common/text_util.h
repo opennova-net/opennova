@@ -34,4 +34,18 @@ inline bool is_alnum(char c) {
 	return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
 }
 
+// Every character of `text` passes `ok` (an empty text passes).
+inline bool all_of(std::string_view text, bool (*ok)(char)) {
+	for (const char c : text)
+		if (!ok(c))
+			return false;
+	return true;
+}
+
+// A docker object's or an EC2 deployment's name character: an ASCII letter or digit, '.',
+// '_' or '-'.
+inline bool is_object_name_char(char c) {
+	return is_alnum(c) || c == '.' || c == '_' || c == '-';
+}
+
 } // namespace opennova::novaworld_server

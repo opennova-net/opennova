@@ -9,6 +9,7 @@
 #include <fstream>
 #include <vector>
 
+#include <base/io/os_path.h>
 #include <formats/threedi/threedi_o3d_lower.h>
 #include <runtime/renderer/model_target.h>
 
@@ -17,7 +18,7 @@
 namespace opennova::threedi_cli {
 
 int cmd_build(const char *scene_path, const char *out_path) {
-	std::ifstream file(scene_path);
+	std::ifstream file(opennova::io::os_path(scene_path));
 	if (!file) {
 		std::fprintf(stderr, "opennova-3di: cannot open %s\n", scene_path);
 		return 1;

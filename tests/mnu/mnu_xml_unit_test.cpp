@@ -5,6 +5,7 @@
 #include <climits>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <string>
 
 #include <formats/mnu/mnu_xml.h>
@@ -184,6 +185,48 @@ bool test_end_of_text() {
   return true;
 }
 
+// Elements nest at most kMaxElementDepth (64) deep: one opened deeper stops the reader with a
+// note and the tree read so far is kept; 30,000 nested elements no longer run the stack out (they
+// did destroying the Document). A node frees a deep subtree without recursing.
+bool test_nesting_depth() {
+  using opennova::mnu_xml::kMaxElementDepth;
+  auto nested = [](size_t levels) {
+    std::string xml;
+    for (size_t i = 0; i < levels; ++i) xml += "<A>";
+    for (size_t i = 0; i < levels; ++i) xml += "</A>";
+    return xml;
+  };
+  auto depth_of = [](const Document &doc) {
+    size_t depth = 0;
+    for (const Node *node = doc.roots.empty() ? nullptr : doc.roots[0].get(); node;
+         node = node->children.empty() ? nullptr : node->children[0].get())
+      ++depth;
+    return depth;
+  };
+  Document doc;
+  std::string err;
+  CHECK(kMaxElementDepth == 64, "the bound");
+  CHECK(read(nested(64).c_str(), doc, err) && doc.notes.empty() && depth_of(doc) == 64, "64 levels read whole");
+  CHECK(read(nested(65).c_str(), doc, err) && doc.notes.size() == 1 &&
+            doc.notes[0].message.find("nested more than 64 levels") != std::string::npos && depth_of(doc) == 64,
+        "the 65th level stops the reader with a note, 64 kept");
+  {
+    Document deep;
+    CHECK(read(nested(30000).c_str(), deep, err) && deep.notes.size() == 1 && depth_of(deep) == 64,
+          "30,000 levels stop at 64");
+  }
+  {
+    auto top = std::make_unique<Node>();
+    Node *at = top.get();
+    for (int i = 0; i < 200000; ++i) {
+      at->children.push_back(std::make_unique<Node>());
+      at->children.back()->parent = at;
+      at = at->children.back().get();
+    }
+  } // 200,000 levels freed here
+  return true;
+}
+
 // The CRT primitives [orig: CRT_iswctype @ 0x77f5b1; CRT_wcsicmp @ 0x77085b;
 // CRT_wcstoxl @ 0x76e93b; CRT_wchartodigit @ 0x77fd43].
 bool test_crt_primitives() {
@@ -240,6 +283,7 @@ int main() {
   RUN_TEST(test_entities);
   RUN_TEST(test_raw_text);
   RUN_TEST(test_end_of_text);
+  RUN_TEST(test_nesting_depth);
   RUN_TEST(test_crt_primitives);
   RUN_TEST(test_path_key);
 

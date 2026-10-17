@@ -4,7 +4,8 @@
 // character cp1252 lacks is refused), a section duplicates under a name of its own,
 // undo/redo and the save checkpoint hold, an ungrouped table is regrouped with a
 // warning, the validator flags empty and duplicate keys and section names, and the
-// session creates, opens, edits and saves a table through the generic requests.
+// session creates, opens, edits and saves a table through the generic requests; the retail
+// leg (--retail) takes every install table through the document and writes it again.
 #include <editor/documents/strings_document.h>
 #include <editor/documents/document_types.h>
 #include <editor/graph/asset_graph.h>
@@ -17,9 +18,14 @@
 #include <editor/session/view/session_view.h>
 #include "editor/editor_test_support.h"
 #include "editor/test_platform.h"
+#include "common/retail_paths.h"
 #include "common/test_expect.h"
 
+#include <algorithm>
+
 #include <base/io/cp1252.h>
+#include <base/io/strutil.h>
+#include <base/vfs/vfs.h>
 
 using namespace opennova::editor;
 namespace rtxt = opennova::rtxt;
@@ -451,7 +457,54 @@ int section_names_and_moves() {
 	return 0;
 }
 
-int main() {
+// Every RTXT table the install holds through the document (each mission's text table and the global ones): an
+// unedited save writes the stored bytes, or, for a table whose strings are not grouped as the game reads them (the
+// document's regroup note), the format's regrouped table; none opens blocked.
+int retail_tables() {
+	const std::string install = retail::install();
+	if (install.empty()) return retail::skip_leg("OPENNOVA_JO_DIR (every install string table through the document)");
+	opennova::Vfs vfs;
+	TEST_EXPECT(vfs.mount_game(install.c_str(), std::string(), opennova::VfsMountMode::Packed));
+	size_t tables = 0, same = 0, regrouped = 0;
+	for (const auto &location : vfs.list_files()) {
+		const std::string &name = location.logical_name;
+		if (name.size() < 4 || !opennova::strutil::iequals(name.substr(name.size() - 4), ".bin")) continue;
+		std::vector<uint8_t> bytes;
+		if (!vfs.read_file_raw(name, bytes) || bytes.size() < 16 ||
+		    !(bytes[0] == 'R' && bytes[1] == 'T' && bytes[2] == 'X' && bytes[3] == 'T'))
+			continue; // not RTXT (the music scripts' SCR0 bins)
+		++tables;
+		StringsDocument document;
+		Diagnostic error;
+		TEST_EXPECT(document.load_bytes(bytes, name, AssetKind::Strings, "jo", error) && !document.blocked());
+		const SerializeResult saved = document.serialize();
+		TEST_EXPECT(saved.ok());
+		if (saved.text == std::string(bytes.begin(), bytes.end())) {
+			++same;
+			continue;
+		}
+		const bool noted = std::any_of(document.issues().begin(), document.issues().end(), [](const SourceIssue &issue) {
+			return issue.message.find("saving regroups them") != std::string::npos;
+		});
+		rtxt::File file;
+		std::string why;
+		std::vector<uint8_t> grouped;
+		TEST_EXPECT(rtxt::parse(bytes.data(), bytes.size(), file, why));
+		file.normalize_grouping();
+		TEST_EXPECT(rtxt::write(file, grouped, why));
+		if (!noted || saved.text != std::string(grouped.begin(), grouped.end()))
+			std::printf("  %s: an unedited save writes other bytes\n", name.c_str());
+		TEST_EXPECT(noted && saved.text == std::string(grouped.begin(), grouped.end()));
+		++regrouped;
+	}
+	TEST_EXPECT(tables > 0);
+	std::printf("retail: %zu string tables, %zu saved byte for byte, %zu regrouped as the game reads them\n", tables, same,
+	            regrouped);
+	return 0;
+}
+
+int main(int argc, char **argv) {
+	retail::configure_mixed(argc, argv);
 	return load_edit_save() || validation_and_session() || changes_since_save() || moved_string_reads_itself() ||
-	       section_names_and_moves();
+	       section_names_and_moves() || retail_tables();
 }

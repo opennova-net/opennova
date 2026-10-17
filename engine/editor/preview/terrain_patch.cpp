@@ -22,9 +22,7 @@ bool TerrainFamilyFollow::follow(const SessionView &view, const std::vector<std:
 		Followed state;
 		state.plane = plane;
 		state.path = path;
-		const DocumentBase *document = nullptr;
-		for (const auto &open : view.documents.open)
-			if (open->path() == path) document = open.get();
+		const DocumentBase *document = view.documents.open_at(path);
 		if (document) {
 			state.open = true;
 			state.identity = document->identity();
@@ -85,9 +83,7 @@ bool TerrainStrokeFollow::follow(const SessionView &view, const DocumentBase &do
 		// as before.
 		const bool in_place = (in_place_ & terrain_plane_bit(patch.plane)) != 0;
 		if (!stroking && !in_place) continue;
-		const DocumentBase *open = nullptr;
-		for (const auto &each : view.documents.open)
-			if (each && each->path() == patch.path) open = each.get();
+		const DocumentBase *open = view.documents.open_at(patch.path);
 		// An imported terrain's source stands for the map its import makes (the map the ground read).
 		std::string stands_for;
 		if (resolved && patch.plane != TerrainPlane::Heights) {
@@ -114,18 +110,14 @@ bool TerrainStrokeFollow::follow(const SessionView &view, const DocumentBase &do
 }
 
 bool lay_open_sources(const SessionView &view, const std::string &view_path, MissionGround &ground) {
-	const DocumentBase *document = nullptr;
-	for (const auto &each : view.documents.open)
-		if (each && each->path() == view_path) document = each.get();
+	const DocumentBase *document = view.documents.open_at(view_path);
 	TerrainFamily family;
 	if (!document || !ground.terrain() || !resolve_terrain_family(view, *document, family)) return false;
 	bool laid = false;
 	for (const TerrainPlane plane : {TerrainPlane::Surface, TerrainPlane::Foliage}) {
 		const TerrainFamilyFile &file = family.plane(plane);
 		if (file.import_output.empty() || file.path.empty()) continue;
-		const DocumentBase *open = nullptr;
-		for (const auto &each : view.documents.open)
-			if (each && each->path() == file.path) open = each.get();
+		const DocumentBase *open = view.documents.open_at(file.path);
 		const RasterDocument *raster = open ? open->as_raster() : nullptr;
 		if (!raster || raster->plane_count() != 1) continue;
 		// The whole source, as one region of its texels (MissionGround::patch takes no whole map).

@@ -2,12 +2,13 @@
 // other, and it reads nothing past the chunk. Asserts used to guard these, and release builds
 // compile them out. The editor reads every model in a project, and a file another tool saved
 // badly used to crash it. Each case below builds a minimal valid model in memory and then
-// spoils one chunk.
+// spoils one chunk; the last nests parent chunks past the chunk tree's depth bound.
 #include <cstdint>
 #include <cstdio>
 #include <string>
 #include <vector>
 
+#include <formats/threedi/threedi.h>
 #include <formats/threedi/threedi_3di3.h>
 
 using namespace opennova::threedi;
@@ -189,6 +190,32 @@ int main() {
 			model(good_vert(), good_indx(), {}, { chunk("CMDL", Bytes(64, 0)) }));
 	expect_refused("a material naming more than 24 textures",
 			model(good_vert(), good_indx(), {}, { chunk("MTRL", mtrl_data(25)) }));
+
+	// Parent chunks nested in one another (8 bytes each) around one empty leaf: the tree walk
+	// recursed once a level with no bound, so 10,000 of them (80,016 bytes) ran the stack out.
+	// The root sits at depth 0; a chunk deeper than 64 refuses the file, and the subtree read
+	// before the refusal is freed.
+	const auto nested = [](size_t levels) {
+		Bytes body = chunk("LEAF", {});
+		for (size_t i = 0; i < levels; ++i)
+			body = chunk("NEST", body, true);
+		Bytes file = { '3', 'D', 'I', '3' };
+		put_u32(file, 3);
+		file.insert(file.end(), body.begin(), body.end());
+		return file;
+	};
+	const auto tree_rc = [](const Bytes &file) {
+		ThreediFile tree = {};
+		const int rc = threedi_read_memory(file.data(), file.size(), &tree);
+		if (rc == 0)
+			threedi_free_file(&tree);
+		return rc;
+	};
+	check(nested(10000).size() == 80016, "the nesting case is the 80,016-byte file");
+	check(tree_rc(nested(64)) == 0, "a leaf at depth 64 reads");
+	check(tree_rc(nested(65)) != 0, "a leaf at depth 65 is refused");
+	check(tree_rc(nested(10000)) != 0, "10,000 nested parent chunks are refused");
+	expect_refused("a model nested 10,000 chunks deep", nested(10000));
 
 	if (failures != 0) {
 		std::fprintf(stderr, "%d failure(s)\n", failures);

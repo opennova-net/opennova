@@ -20,9 +20,7 @@ namespace opennova::menu {
 
 namespace {
 
-bool iequals(const std::string &a, const char *b) {
-	return opennova::strutil::iequals(a, b);
-}
+using strutil::iequals;
 
 // The texture-cache key of an IMAGE load: the name and the FLAGS word it was
 // loaded with [orig: CTextureManager_LoadOrFindTexture @ 0x654980 — stricmp on

@@ -105,9 +105,12 @@ DiagnosticSeverity source_severity(MissionFinding code) {
 	return code == MissionFinding::PathRebuilt ? DiagnosticSeverity::Warning : DiagnosticSeverity::Info;
 }
 
-// The pools' limits, past which the game warns (fatal if dismissed) and loads on [orig:
-// BMS_LoadAndValidateHeader @0x40e326]: the pools' capacities (runtime/world/entity.h
-// retail_pool_capacity: organics 0, items 1, buildings 2, markers 3).
+// The pools' capacities (runtime/world/entity.h retail_pool_capacity: organics 0, items 1, buildings 2,
+// markers 3). The load's count checks warn of nothing: each compare is followed by an unconditional jump
+// over its warning dialog [orig: BMS_LoadAndValidateHeader, `jmp short` @0x40e31a (over the "Too many items"
+// sprintf @0x40e326), @0x40e34d, @0x40e380; Mission_LoadBMSFile @0x40f5ba]; past the capacity the pool's
+// allocator answers no slot [orig: Pool_AllocEntry @ 0x442230, @0x44227b] (what the spawn does then is not
+// witnessed).
 const size_t kMaxItems = world::retail_pool_capacity(1), kMaxBuildings = world::retail_pool_capacity(2),
              kMaxMarkers = world::retail_pool_capacity(3), kMaxOrganics = world::retail_pool_capacity(0);
 // The group tables hold 64 (bms::kGroupRecordCount) [orig: docs/mission/bms-event-runtime-re.md 7.2].
@@ -249,7 +252,8 @@ struct Checker {
 			if (count > max)
 				on_file(MissionFinding::PoolLimit, DiagnosticSeverity::Warning,
 				        "The mission places " + std::to_string(count) + " " + pool + ", past the " + std::to_string(max) +
-				                " the game allows: it warns at the load (fatal if dismissed) and goes on.");
+				                " the game's pool holds: the game's load warns of nothing (it jumps over the warning), and "
+				                "the pool's allocator gives the records past them no slot.");
 		};
 		limit(items, kMaxItems, "items");
 		limit(buildings, kMaxBuildings, "buildings");

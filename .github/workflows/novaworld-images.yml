@@ -53,9 +53,11 @@ concurrency:
 
 jobs:
   # Gate the push on the net scope passing with the HTTP layer ON, on Linux
-  # (the deploy target): the same job definition ci.yml runs on every push and
-  # PR (.github/workflows/net-linux.yml), the same flag set the programs'
-  # images use, so a green here means the images will build.
+  # (the deploy target): the job definition serve-image.yml calls too
+  # (.github/workflows/net-linux.yml; ci.yml's test-linux builds a superset of
+  # it its own way on every push and on every PR that changes more than the
+  # docs pointer and markdown), the same flag set the programs' images use,
+  # so a green here means the images will build.
   http-tests:
     uses: ./.github/workflows/net-linux.yml
 

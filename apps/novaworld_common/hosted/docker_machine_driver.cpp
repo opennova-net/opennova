@@ -21,21 +21,10 @@ namespace {
 
 using io::JsonValue;
 
-bool all_of(std::string_view text, bool (*ok)(char)) {
-	for (const char c : text)
-		if (!ok(c))
-			return false;
-	return true;
-}
-
-bool is_name_char(char c) {
-	return is_alnum(c) || c == '.' || c == '_' || c == '-';
-}
-
 // A docker object's name: 1..64 of letters, digits, '.', '_' and '-', a letter
 // or digit first (what the engine takes for a container or a network).
 bool is_docker_name(std::string_view name) {
-	return !name.empty() && name.size() <= 64 && is_alnum(name[0]) && all_of(name, is_name_char);
+	return !name.empty() && name.size() <= 64 && is_alnum(name[0]) && all_of(name, is_object_name_char);
 }
 
 // `text` percent-encoded for a URL's query: every byte but an unreserved one.
@@ -140,7 +129,7 @@ std::string DockerMachineDriver::check_config(const DockerMachineConfig &c) {
 	if (!is_docker_name(c.data_from))
 		return "ONNET_HOSTED_DOCKER_DATA_FROM is no container name";
 	if (c.deployment.empty() || c.deployment.size() > kMaxDeploymentBytes ||
-			!is_alnum(c.deployment[0]) || !all_of(c.deployment, is_name_char))
+			!is_alnum(c.deployment[0]) || !all_of(c.deployment, is_object_name_char))
 		return "ONNET_HOSTED_DEPLOYMENT is not 1.." + std::to_string(kMaxDeploymentBytes) +
 				" letters, digits, '.', '_' and '-', a letter or digit first";
 	if (!is_image_reference(c.image))

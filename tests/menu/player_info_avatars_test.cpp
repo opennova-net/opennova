@@ -1,3 +1,4 @@
+#include <base/crt/crt_rng.h>
 #include <runtime/menu/player_info_avatars.h>
 #include <runtime/menu/menu_runtime.h>
 
@@ -142,10 +143,27 @@ void test_missing_stages_and_invalid_selections() {
 	CHECK(state.nationality == -1 && state.division == -1 && state.preview_changed);
 	CHECK(menu.item_count(menu.widget_id("NATIONALITY")) == 0);
 }
+// The preview's initial facing: the reseed, then rand() % 180 whole degrees at
+// 0xB60B60 BAM a degree, the draw stepping the CRT stream once
+// [orig: PlayerInfo_InitPreviewModel @0x560128, @0x5601a2..0x5601b7].
+void test_preview_initial_yaw() {
+	// srand(1) draws 41 first (base/io/crt_rand.h).
+	CHECK(player_info_preview_initial_yaw_bam(1) == 41 * 0xB60B60);
+	CHECK(opennova::crt::crt_rand_state() == 1u * 214013u + 2531011u);
+	// srand(2) draws 45; the next draw from the same seed repeats it.
+	CHECK(player_info_preview_initial_yaw_bam(2) == 45 * 0xB60B60);
+	CHECK(player_info_preview_initial_yaw_bam(2) == 45 * 0xB60B60);
+	// Every draw lands in [0, 180) whole degrees.
+	for (uint32_t seed = 0; seed < 2000; ++seed) {
+		const int32_t bam = player_info_preview_initial_yaw_bam(seed);
+		CHECK(bam >= 0 && bam % 0xB60B60 == 0 && bam / 0xB60B60 < 180);
+	}
+}
 } // namespace
 int main() {
 	test_cascade_and_voice();
 	test_missing_stages_and_invalid_selections();
+	test_preview_initial_yaw();
 	std::cout << "player_info_avatars: " << failures << " failures\n";
 	return failures != 0;
 }

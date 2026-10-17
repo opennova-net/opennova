@@ -55,7 +55,10 @@ inline int16_t org2_bucket(int32_t dist2d) {
 	return 18;
 }
 
-constexpr double kRadPerBam = opennova::io::kRadiansPerBam;
+// The deck ride's trig multiplies a BAM by retail's radians-per-BAM double, loaded
+// at each motor's ride head [orig: Entity_UpdateInfantryPlayerBody `fld dbl_7C3608`
+// @0x4B528B; Entity_UpdateInfantryAI @0x4BA460].
+constexpr double kRadPerBam = opennova::io::kRadiansPerBamX87;
 
 // The caller-owned org gravity channel (the infantry.cpp world-motor twins)
 // [orig: org2 vel_z -= 208 @0x4b7acf, clamp @0x4b7c77; org1 -= 416
@@ -554,10 +557,13 @@ void row_root_motion_tick(ClientEntityState &es, world::IRootMotionSource &src,
 	// [orig: Entity_UpdateInfantryPlayerBody root+velocity stores
 	// @0x4B7CBF..0x4B7CEF, before resolver call @0x4B7CF4].
 	if (is_self || starved) return;
-	const double rad = static_cast<double>(move_heading) *
-	                   io::kRadiansPerBam;
-	const int32_t c = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
-	const int32_t s = static_cast<int32_t>(std::sin(rad) * io::kQ22One);
+	// The world motor's rotation pair: org2's sine table, org1's trig at
+	// retail's scale [orig: Entity_UpdateInfantryPlayerBody @0x4B41F0..0x4B4206;
+	// Entity_UpdateInfantryAI @0x4BF001..0x4BF02A].
+	const world::RootRotationQ22 rot =
+			world::root_rotation_q22(move_heading, es.cls == EntityClass::Player);
+	const int32_t c = rot.c;
+	const int32_t s = rot.s;
 	int32_t wx =
 			static_cast<int32_t>((static_cast<int64_t>(fwd) * c) >> 22) -
 			static_cast<int32_t>((static_cast<int64_t>(lat) * s) >> 22);

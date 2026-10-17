@@ -117,6 +117,11 @@ private:
 // their normalized form), or "" when it has none of that name.
 std::string install_file_name(const SessionView &view, const std::string &name);
 
+// The item ids the project holds: every item the graph defines and every id a file of the project names
+// (an Item edge's value). A free item id goes past them (documents/def_table.h's free_item_id): the
+// item-id fixes here and Place in mission's free_project_item_id (preview/model_placement.h).
+std::unordered_set<int64_t> project_item_ids(const AssetGraph &graph);
+
 // The fixes for a finding over the view as it is, the first the one a click applies.
 std::vector<ProblemFix> fixes_for(const Diagnostic &diagnostic, const SessionView &view,
                                   const ProblemFixIndex *index = nullptr);

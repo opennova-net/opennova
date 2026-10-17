@@ -73,6 +73,10 @@ private:
 	static float preview_sway_amp_deg();
 	static String preview_skeleton_bad();
 	static String preview_idle_bad();
+	// A fresh preview model's initial facing, radians: the engine's draw
+	// (menu::player_info_preview_initial_yaw_bam, runtime/menu/player_info_avatars.h
+	// carries the witness) reseeded from the wall clock, its BAM word as radians.
+	static double preview_initial_yaw_rad();
 
 protected:
 	static void _bind_methods();
@@ -97,12 +101,6 @@ public:
 	enum { ALIGN_GOOD = opennova::avatars::AVATAR_ALIGN_GOOD, ALIGN_EVIL = opennova::avatars::AVATAR_ALIGN_EVIL };
 	// AvatarDiagnosticSeverity.
 	enum { DIAG_WARNING = opennova::avatars::AVATAR_DIAG_WARNING, DIAG_ERROR = opennova::avatars::AVATAR_DIAG_ERROR };
-	// The preview initial-yaw span: a fresh preview model spawns at
-	// rand() % PREVIEW_INITIAL_YAW_RANGE_DEG degrees (engine
-	// avatars/preview_animation.h carries the witness).
-	enum { PREVIEW_INITIAL_YAW_RANGE_DEG =
-			opennova::avatars::kPreviewInitialYawRangeDeg };
-
 	// The three CTRL registers a combo part's authored `camo` bytes drive
 	// (TEX_CAMO1..3 = .3di control-catalog ordinals 93..95). Retail zero-extends
 	// the bytes into the shared CTRL bus immediately before submitting THAT

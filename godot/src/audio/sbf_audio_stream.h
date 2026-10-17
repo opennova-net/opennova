@@ -2,6 +2,7 @@
 
 #include <godot_cpp/classes/audio_stream.hpp>
 #include <godot_cpp/classes/audio_stream_playback.hpp>
+#include <godot_cpp/classes/audio_stream_wav.hpp>
 #include <godot_cpp/core/class_db.hpp>
 #include <godot_cpp/variant/string.hpp>
 
@@ -9,12 +10,15 @@
 
 namespace godot {
 
-// AudioStream wrapper for one entry inside a SbfBank. Holds a strong Ref to
-// the bank (the entry data it reads at playback time lives inside the bank, and
-// the playback runs on the audio thread, so a raw back-pointer would dangle if
-// the bank were freed mid-mix) plus the entry index. Playback is delegated to
-// SbfAudioStreamPlayback, which opens its own FileAccess so multiple
-// players can stream independently from the same bank.
+// AudioStream wrapper for one entry inside a SbfBank: a strong Ref to the bank
+// plus the entry index. Each playback is a built-in one, Godot's
+// AudioStreamWAV playback over the entry's PCM as the engine decodes it
+// (sbf::sbf_decode_entry), never an extension object: the AudioServer keeps a
+// stopped playback in its list until its own teardown, which Godot's
+// Main::cleanup runs after it has unregistered every extension class, so an
+// extension playback still listed at a forced quit (`--quit-after`, a quit with
+// the music streaming) was freed through its unregistered class (signal 11 at
+// exit; docs/audio/mus-sbf-re.md "Godot playback shutdown").
 class SbfAudioStream : public AudioStream {
 	GDCLASS(SbfAudioStream, AudioStream)
 
@@ -23,6 +27,10 @@ public:
 
 	SbfBank *get_bank() const { return _bank.ptr(); }
 	int get_index() const { return _entry_index; }
+	// The entry's PCM (sbf::sbf_decode_entry) as a 16-bit stereo AudioStreamWAV
+	// at SBF_SAMPLE_RATE: what each playback plays. Null for an entry the bank
+	// does not hold.
+	Ref<AudioStreamWAV> get_wav() const;
 
 	// AudioStream overrides
 	Ref<AudioStreamPlayback> _instantiate_playback() const override;

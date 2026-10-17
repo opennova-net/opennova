@@ -23,7 +23,7 @@ class ParticleCompositorEffect;
 // The effects device of FrameFX's type-0 row (render/frame_fx_distortion.h):
 // the effect world's distortion subset and the tracer pool's distortion
 // ribbons, drawn over the finished frame with slot 2 = the row's work
-// targets (retail FrameFX_DistortionPass @ 0x5838F8 / @ 0x583928).
+// targets (engine: runtime/renderer/frame_fx_effects.h).
 //
 // Main thread: ParticleRenderer publishes the distortion particle subset
 // through its own compositor effect (attached to no camera) plus the frame's
@@ -43,7 +43,7 @@ public:
 	void set_particles_present(bool p_present);
 	void set_ribbon_channels_present(bool p_present);
 	// The pass fog the ribbons blend toward (SetFogAndBlendMode mode 0,
-	// retail CEffectChannel_RenderRibbon @ 0x5DC0A6).
+	// engine: runtime/renderer/tracer_frame.cpp).
 	void set_pass_fog(const std::array<float, 3> &p_color, float p_start, float p_end,
 			std::int32_t p_type);
 	// The distortion ribbons of this frame (compile_tracer_ribbons,

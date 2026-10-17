@@ -137,6 +137,10 @@ struct RoundSourceState {
     bool person_with_item_def = false;
     bool player = false;
     uint8_t stance_category = 2; // 0 prone, 1 crouch/mounted, 2 standing/air/water
+    // The raw prone bit (+0x12C & 0x100), kept apart from the overridden row:
+    // the spread's up/down limit keys on it [orig: RoundData_SpawnRound
+    // @0x4EC129..0x4EC137, read @0x4EC454].
+    bool prone = false;
     bool scope_raised = false;
     bool underwater = false;
     bool indoors = false; // entity+0x24 & 0x800000, the bit the spawn stamps into its round
@@ -161,6 +165,14 @@ struct RoundSourceState {
 // @0x4ec879..0x4ec885; HUD_DrawCrosshair @0x592B59..0x592B65]
 bool entity_eye_below_water(const World &world, int32_t body_z_q16,
                             int32_t eye_offset_z);
+
+// The Flags bits that force the standing stance row (2) on a shot and on the
+// crosshair, beside the below-water eye: Parachute 0x20 | Drowning 0x8000 |
+// LadderContact 0x100000. Neither site tests InAir 0x2000.
+// [orig: RoundData_SpawnRound `test [ebp+24h], 108020h` @0x4ec2d5;
+//  HUD_DrawCrosshair `test [edx+24h], 108020h` @0x592b50]
+inline constexpr uint32_t kStanceRowStandingFlags =
+        kEntityFlagParachute | kEntityFlagDrowning | kEntityFlagLadderContact;
 
 struct RandomSpreadOffset {
     int32_t yaw_bam = 0;

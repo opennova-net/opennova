@@ -508,7 +508,14 @@ static int parse_items_buf(const char *buf, size_t file_len, DefItemsFile *out, 
             /* Authored child-emplacement attachment:
                  <userpoint> <item-def id> [down up right left]
                Packed JOX has three deliberately distinct key spellings. Retain
-               the variant instead of folding G/C into the ordinary record. */
+               the variant instead of folding G/C into the ordinary record.
+               [orig: ItemDef_ParseProperty @0x49eb00, the addeweap arm
+               @0x4A1B42..0x4A1C75: the first free of four userpoint slots (+0x1C3 +
+               16*i, `cmp ebx, 4` @0x4A1B55..0x4A1B63), the item id (`atol - 186A0h`,
+               the def index, @0x4A1BA3..0x4A1BAD; the record keeps the id), the four
+               angles only past three tokens (`cmp [edi], 3; jle` @0x4A1BB4, D-ITEMDEF-8),
+               down / right x 0B60B60h and up / left x 0FF49F4A0h @0x4A1BC6..0x4A1C49,
+               the C and G slot markers @0x4A1C50..0x4A1C75] */
             const int kind = key_is(key, "addeweapg") ? DEF_ITEM_EMPLACEMENT_ADDEWEAP_G
                     : key_is(key, "addeweapc")         ? DEF_ITEM_EMPLACEMENT_ADDEWEAP_C
                                                        : DEF_ITEM_EMPLACEMENT_ADDEWEAP;

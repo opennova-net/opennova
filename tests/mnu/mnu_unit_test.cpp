@@ -541,8 +541,83 @@ bool test_fatal_notes() {
               "WINDOW[W]") == 1,
         "a WINDOW with an empty TYPE");
   CHECK(fatal("<SCREEN><NAME>S</NAME><MUSICVAR></MUSICVAR></SCREEN>", "/MUSICVAR") == 1, "an empty MUSICVAR");
+  {
+    // 400 nested STATIC WINDOWs (23,231 bytes) ran the stack out (the parse recurses once a WINDOW
+    // level, as retail's does); the reader stops past 64 levels with a fatal note, the windows above
+    // it kept: 63 WINDOW elements under the SCREEN, the last cut before its STRING, and a WINDOW with
+    // no child element is not created, so 62 windows.
+    std::string deep = "<SCREEN><NAME>S</NAME>";
+    for (int i = 0; i < 400; ++i) deep += "<WINDOW TYPE=\"STATIC\" NAME=\"W\"><STRING>t</STRING>";
+    for (int i = 0; i < 400; ++i) deep += "</WINDOW>";
+    deep += "</SCREEN>";
+    CHECK(deep.size() == 23231, "the 23,231-byte menu");
+    mnu::Document doc;
+    std::vector<mnu::ParseNote> notes;
+    std::string error;
+    CHECK(mnu::parse(deep, doc, error, &notes), error);
+    bool depth_note = false;
+    for (const mnu::ParseNote &n : notes)
+      depth_note = depth_note || (n.fatal && n.message.find("nested more than 64 levels") != std::string::npos);
+    CHECK(depth_note, "the depth stop is a fatal note");
+    size_t windows = 0;
+    for (const mnu::Window *w = doc.screens.empty() || doc.screens[0].roots.empty() ? nullptr
+                                                                                  : &doc.screens[0].roots[0];
+         w; w = w->children.empty() ? nullptr : &w->children[0])
+      ++windows;
+    CHECK(windows == 62, "the 62 created WINDOW levels kept (" + std::to_string(windows) + ")");
+  }
   CHECK(fatal(screen_of("type=\"radio\" name=\"W\"", std::string(kPos) + "<GROUP>1</GROUP>"), "/GROUP") == -2,
         "a note-free menu");
+  // The four crashes the model holds as read, each a fatal note on its element (docs/mnu/menu-re.md, "Crash
+  // and hang cases"), so a menu holding one cannot ship: a SCREEN action with no FILE [orig: PFF_FindEntry
+  // @ 0x7685f3], a TABLE MIN_ITEM_HEIGHT of 0 [orig: CTableWnd_RecalcLayout @ 0x63f26b], GLOBAL_VAR on an edit
+  // window or a CHECKED checkbox [orig: @ 0x661e5f, @ 0x64ae05], a SCREEN with no NAME [orig: @ 0x639791].
+  CHECK(fatal(screen_of("type=\"button\" name=\"B\"", std::string(kPos) + "<ACTION type=\"SCREEN\">N</ACTION>"),
+              "/ACTION") == 1,
+        "a SCREEN action with no FILE");
+  CHECK(fatal(screen_of("type=\"button\" name=\"B\"",
+                        std::string(kPos) + "<ACTION type=\"SCREEN\" FILE=\"a.mnu\">N</ACTION>"),
+              "/ACTION") == -2,
+        "a SCREEN action with a FILE");
+  CHECK(fatal(screen_of("type=\"table\" name=\"T\"", std::string(kPos) + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == 1,
+        "a TABLE MIN_ITEM_HEIGHT of 0");
+  CHECK(fatal(screen_of("type=\"table\" name=\"T\"",
+                        std::string(kPos) + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT><MIN_ITEM_HEIGHT>9</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == 0,
+        "a TABLE MIN_ITEM_HEIGHT of 0 a later one replaces");
+  CHECK(fatal(screen_of("type=\"static\" name=\"T\"", std::string(kPos) + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == 0,
+        "MIN_ITEM_HEIGHT 0 where it is not read");
+  // Every CListWnd divides by it as its row height [orig: CListWnd_RecalcLayout @ 0x6443d0, idiv @ 0x644444]:
+  // a LIST, a LAN_LIST, a combo's LIST_BOX.
+  CHECK(fatal(screen_of("type=\"list\" name=\"L\"", std::string(kPos) + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == 1,
+        "a LIST MIN_ITEM_HEIGHT of 0");
+  CHECK(fatal(screen_of("type=\"lan_list\" name=\"L\"", std::string(kPos) + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == 1,
+        "a LAN_LIST MIN_ITEM_HEIGHT of 0");
+  CHECK(fatal(screen_of("type=\"combobox\" name=\"C\"",
+                        std::string(kPos) + "<LIST_BOX>" + kPos + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT></LIST_BOX>"),
+              "/LIST_BOX/MIN_ITEM_HEIGHT") == 1,
+        "a combo's LIST_BOX MIN_ITEM_HEIGHT of 0");
+  CHECK(fatal(screen_of("type=\"list\" name=\"L\"", std::string(kPos) + "<MIN_ITEM_HEIGHT>1</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == -2,
+        "a LIST MIN_ITEM_HEIGHT of 1");
+  CHECK(fatal(screen_of("type=\"edit\" name=\"E\" GLOBAL_VAR", kPos), "WINDOW[E]") == 1, "GLOBAL_VAR on an edit");
+  CHECK(fatal(screen_of("type=\"static\" name=\"E\" GLOBAL_VAR", kPos), "WINDOW[E]") == -2,
+        "GLOBAL_VAR on a static");
+  CHECK(fatal(screen_of("type=\"checkbox\" name=\"C\" GLOBAL_VAR", kPos), "WINDOW[C]") == -2,
+        "GLOBAL_VAR on an unchecked checkbox");
+  CHECK(fatal(screen_of("type=\"checkbox\" name=\"C\" CHECKED GLOBAL_VAR", kPos), "WINDOW[C]") == 1,
+        "GLOBAL_VAR on a CHECKED checkbox");
+  CHECK(fatal("<SCREEN><WINDOW type=\"static\" name=\"W\">" + std::string(kPos) + "</WINDOW></SCREEN>",
+              "/SCREEN[0]") == 1,
+        "a SCREEN with no NAME");
+  CHECK(fatal("<SCREEN><NAME></NAME><WINDOW type=\"static\" name=\"W\">" + std::string(kPos) + "</WINDOW></SCREEN>",
+              "/SCREEN[0]") == -2,
+        "a SCREEN with an empty NAME (its text is empty, not null)");
+  CHECK(fatal("<SCREEN><MUSICVAR>1</MUSICVAR></SCREEN>", "/SCREEN[0]") == -2, "a SCREEN with no NAME and no window");
   // A number holding a stylesheet variable: retail reads the variable's value, the model
   // only the number wcstol reads here, so a save would lose it (D-MNU-1).
   CHECK(fatal(screen_of("type=\"static\" name=\"W\"", "<POSITION><LEFT>%X%</LEFT></POSITION>"),
@@ -868,6 +943,25 @@ bool test_write_issues() {
   CHECK(issue_for(d).empty(), "GLOBAL_VAR on an unchecked checkbox writes");
   d.screens[0].roots[0].checked = true;
   CHECK(!issue_for(d).empty(), "GLOBAL_VAR on a checked checkbox");
+  d = base;
+  d.screens[0].roots[0].type = mnu::WindowType::List;
+  d.screens[0].roots[0].table_data.has_min_item_height = true;
+  d.screens[0].roots[0].table_data.min_item_height = 0;
+  CHECK(issue_for(d).find("MIN_ITEM_HEIGHT 0") != std::string::npos, "a LIST MIN_ITEM_HEIGHT of 0");
+  d.screens[0].roots[0].table_data.min_item_height = 1;
+  CHECK(issue_for(d).empty(), "a LIST MIN_ITEM_HEIGHT of 1 writes");
+  // Absent, the field holds the game's default, -1 (a row measured from the font) [orig: CListWnd_Construct
+  // @ 0x643c34; CTableWnd_Construct @ 0x63e92b]: none is an issue, and that latent value written again is
+  // none either (D-12 follow-up).
+  for (const mnu::WindowType type : {mnu::WindowType::List, mnu::WindowType::LanList, mnu::WindowType::Table}) {
+    d = base;
+    d.screens[0].roots[0].type = type;
+    d.screens[0].roots[0].table_data = mnu::TableData();
+    CHECK(d.screens[0].roots[0].table_data.min_item_height == -1 && issue_for(d).empty(),
+          "an absent MIN_ITEM_HEIGHT is the default, no issue");
+    d.screens[0].roots[0].table_data.has_min_item_height = true;
+    CHECK(issue_for(d).empty(), "the default written again writes");
+  }
   d = base;
   d.screens[0].name.clear();
   CHECK(issue_for(d).find("NAME") != std::string::npos, "a SCREEN with no NAME");

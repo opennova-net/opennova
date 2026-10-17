@@ -191,6 +191,8 @@ add_library(opennova_bindings OBJECT
     hud/end_round_transition.cpp
     hud/hud_inset_scope.cpp
     hud/player_hud_weapon_def.cpp
+    hud/hud_entity_info.cpp
+    hud/loading_background.cpp
     devtools/frame_stats.cpp
     devtools/dev_tools.cpp
     devtools/dev_tools_overlay.cpp
@@ -282,7 +284,6 @@ add_library(opennova_bindings OBJECT
     fnt/fnt_resource.cpp
     audio/sbf_bank.cpp
     audio/sbf_audio_stream.cpp
-    audio/sbf_audio_stream_playback.cpp
     audio/music_script.cpp
     audio/music_director.cpp
     audio/music_pair_names.cpp

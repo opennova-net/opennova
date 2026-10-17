@@ -102,7 +102,7 @@ int WaterCore::strip_build(float p_plane_height_world, float p_murk,
 	params.depth_bias = p_depth_bias;
 	// Quantize through the fixed plane so reconstructed positions sit on the
 	// exact plane_y the march ran at (2^-16 is float-exact).
-	strip_plane_height = static_cast<float>(params.plane_height_fp) * (1.0f / 65536.0f);
+	strip_plane_height = opennova::io::fp16_16_to_float(params.plane_height_fp);
 	strip_row_count = opennova::env::water_build_strip_rows(strip_view, params, strip_rows);
 	return strip_row_count;
 }

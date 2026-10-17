@@ -2034,6 +2034,36 @@ bool run_pose_transform_roundtrip() {
 		if (!expect(near_eq(l2.x, lx) && near_eq(l2.y, ly) && near_eq(l2.z, lz),
 		            "arbitrary-pose round-trip within fixed-point rounding")) return false;
 	}
+	// The trig samples a BAM at retail's dbl_7C3608 scale, 30.5 ppm above the exact
+	// 2pi/2^32 [orig: Entity_TransformLocalToWorld @0x43BD0E] [orig:
+	// Entity_TransformWorldToLocal @0x43BB93], and the inverse multiplies by its sines
+	// negated (-2^22, dbl_7C57B0 @0x43BBE0) into flooring products: a half turn's sine is
+	// 402/2^22, not 0, so a 5-unit offset under a half-turned carrier gains a cross term
+	// of 31/65536 lifted and -32/65536 projected (the exact scale gives 0: the projected
+	// word compresses to 0x0000 where retail's compresses to 0x0011). The values are
+	// retail's chains evaluated at its scale.
+	{
+		const nw::WorldPose l = nw::network_transform_world_to_local(327680, 0, 0, 0, 0, 0,
+		                                                             0x80000000u, 0u, 0u);
+		if (!expect(l.x == -327680 && l.y == -32 && l.z == 0,
+		            "half-turn world_to_local at retail's BAM scale")) return false;
+		const nw::WorldPose w = nw::network_transform_local_to_world(327680, 0, 0, 0, 0, 0,
+		                                                             0x80000000u, 0u, 0u);
+		if (!expect(w.x == -327680 && w.y == 31 && w.z == 0,
+		            "half-turn local_to_world at retail's BAM scale")) return false;
+		const nw::WorldPose lq = nw::network_transform_world_to_local(
+				327680, 131072, 65536, 0, 0, 0, 0x40000000u, 0u, 0u);
+		if (!expect(lq.x == 131056 && lq.y == -327687 && lq.z == 65536,
+		            "quarter-turn world_to_local at retail's BAM scale")) return false;
+		const nw::WorldPose lp = nw::network_transform_world_to_local(
+				655360, -327680, 0, 0, 0, 0, 0xC0000000u, 0x10000000u, 0u);
+		if (!expect(lp.x == 302705 && lp.y == 655374 && lp.z == -125390,
+		            "yaw+pitch world_to_local at retail's BAM scale")) return false;
+		const nw::WorldPose wp = nw::network_transform_local_to_world(
+				655360, -327680, 0, 0, 0, 0, 0xC0000000u, 0x10000000u, 0u);
+		if (!expect(wp.x == -327709 && wp.y == -605455 && wp.z == 250802,
+		            "yaw+pitch local_to_world at retail's BAM scale")) return false;
+	}
 	std::printf("PASS pose_transform_roundtrip\n");
 	return true;
 }
@@ -2506,6 +2536,43 @@ bool run_0a_tail_carries_the_armor_word() {
 	return expect(frame_armor(armor) && armor == 40, "armor: a dead recipient's word still rides");
 }
 
+// The tail's Health i16 is the recipient's entity+0x11E word, raw, alive or dead:
+// the drowning and the flag timeout store -1 there and a retail host sends 0xFFFF
+// for it. It was clamped to 0..32767 (B-14).
+// [orig: NetPacket_WritePlayerState @0x4FFD56..0x4FFD6A; the drowning's
+//  `mov word ptr [eax+11Eh],0FFFFh`, Server_UpdatePlayerBreathTimers @0x50D819]
+bool run_0a_tail_carries_the_health_word_raw() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	const w::EntityHandle h =
+			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+	w::Entity *e = world.registry.get(h);
+	if (!expect(e != nullptr, "health: player entity resolvable")) return false;
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, h, 0});
+	auto frame_health = [&](int16_t &health) {
+		ns::test::emit_all(world, conns);
+		ns::Datagram dg;
+		if (!ch.client_recv(dg)) return false;
+		nw::FrameUpdate fu;
+		if (!nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu) ||
+				!fu.local_tail_present)
+			return false;
+		health = fu.health;
+		return true;
+	};
+	int16_t health = 0;
+	e->health = 150;
+	if (!expect(frame_health(health) && health == 150, "health: the tail carries entity+0x11E"))
+		return false;
+	// A drowned body: Health -1 with the dead bit, the word raw (0xFFFF).
+	e->health = -1;
+	e->flags |= 2u;
+	return expect(frame_health(health) && health == -1,
+	              "health: a drowned recipient's -1 crosses raw");
+}
+
 int main() {
 	const bool ok = run_fanout_and_per_connection_anchor() && run_joiner_uplink_snaps_peer() &&
 	                run_self_uplink_rejected() && run_cross_peer_uplink_rejected() &&
@@ -2519,6 +2586,7 @@ int main() {
 	                run_0a_anchor_is_the_recipient_eye() &&
 	                run_0a_round_score_and_los_read_the_body() &&
 	                run_0a_deploy_hold_and_tail_stance() && run_0a_tail_carries_the_armor_word() &&
+	                run_0a_tail_carries_the_health_word_raw() &&
 	                run_0a_priority_caches_hold_every_pool1_slot() &&
 	                run_0a_phase1_gate_reads_the_whole_countdown() &&
 	                run_0x26_attach_mounted_echo() &&

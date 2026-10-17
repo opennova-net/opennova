@@ -197,8 +197,7 @@ static int parse_chunk(const uint8_t *data, size_t size, uint32_t chunk_off,
         out->section_count = ch.section_count;
         const uint8_t *sec_base = data + chunk_off + ch.section_table_offset;
         for (uint32_t i = 0; i < ch.section_count; ++i) {
-            uint32_t code_off;
-            memcpy(&code_off, sec_base + i * 4, 4);
+            uint32_t code_off = io::read_u32_le(sec_base + i * 4);
             /* Convert chunk-relative -> bytecode-relative. */
             if (code_off >= ch.bytecode_offset) code_off -= ch.bytecode_offset;
             out->sections[i].code_offset = code_off;
@@ -275,8 +274,7 @@ int mus_open_memory(MusFile *out, const uint8_t *data, size_t size) {
         if (!out->scripts) { mus_close(out); return -5; }
         const uint8_t *table = data + out->header.chunk_table_offset;
         for (uint32_t i = 0; i < n; ++i) {
-            uint32_t chunk_off;
-            memcpy(&chunk_off, table + i * 4, 4);
+            const uint32_t chunk_off = io::read_u32_le(table + i * 4);
             int rc = parse_chunk(data, size, chunk_off, &out->scripts[i]);
             if (rc != 0) { mus_close(out); return rc; }
         }
@@ -382,6 +380,37 @@ void mus_close(MusFile *file) {
         file->scripts = NULL;
     }
     memset(file, 0, sizeof(*file));
+}
+
+bool mus_reads_the_same(const MusFile *a, const MusFile *b) {
+    if (!a || !b) return false;
+    if (a->intrinsic_count != b->intrinsic_count || a->header.chunk_count != b->header.chunk_count) {
+        return false;
+    }
+    for (uint32_t i = 0; i < a->intrinsic_count; ++i) {
+        if (strncmp(a->intrinsic_names[i], b->intrinsic_names[i], MUS_METHOD_NAME_SIZE) != 0) {
+            return false;
+        }
+    }
+    for (uint32_t i = 0; i < a->header.chunk_count; ++i) {
+        const MusScript &x = a->scripts[i];
+        const MusScript &y = b->scripts[i];
+        if (strncmp(x.name, y.name, MUS_NAME_SIZE) != 0 || x.code_size != y.code_size ||
+            (x.code_size && memcmp(x.code, y.code, x.code_size) != 0) ||
+            x.section_count != y.section_count || x.entry_section_index != y.entry_section_index ||
+            x.globals_size != y.globals_size || x.locals_size != y.locals_size ||
+            x.locals_frame_offset != y.locals_frame_offset || x.string_count != y.string_count ||
+            x.has_message_handler != y.has_message_handler ||
+            (x.has_message_handler && x.message_handler_offset != y.message_handler_offset)) {
+            return false;
+        }
+        for (uint32_t k = 0; k < x.section_count; ++k) {
+            if (x.sections[k].code_offset != y.sections[k].code_offset) {
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 } // namespace opennova::mus

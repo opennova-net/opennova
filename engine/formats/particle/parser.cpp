@@ -12,6 +12,7 @@
 #include <vector>
 
 #include <base/io/crt_ftol.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
 namespace opennova::particle {
@@ -758,7 +759,7 @@ bool load_particles_with_places(const char *data, std::size_t size, ParticleFile
 }
 
 bool load_particles_from_file(const std::string &path, ParticleFile &out, ParseError &error) {
-	std::ifstream stream(path, std::ios::binary);
+	std::ifstream stream(io::os_path(path), std::ios::binary); // UTF-8, long-path safe
 	if (!stream) {
 		error = ParseError();
 		error.message = "Cannot open " + path;

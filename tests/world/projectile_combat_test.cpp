@@ -1265,6 +1265,7 @@ void test_knife_instant_kill_zone_raycast() {
     knife.flags = kAmmoFlagInstantKillZone;
     knife.kztype = ammo_kz::kKnife;
     knife.kz_maxradius = 3.0f;
+    knife.scar_type = 1; // a ring-scar kind: a scarring leg would lease a ring
     world.tables.ammo.entries.push_back(knife);
 
     RoundSpawnParams params;
@@ -1367,6 +1368,36 @@ void test_knife_instant_kill_zone_raycast() {
         CHECK(impact_x >= 32768 - 2 && impact_x <= 32768);
         CHECK(impact.effect_tag == 5);
     }
+
+    // The leaf adds 4 to the face byte with no clamp (it never passes through
+    // AmmoDef_ProcessImpactEffect's), so a byte past the table keeps its tag
+    // and its own-row read finds no row, not the obj row
+    // [orig: Weapon_RaycastAndSpawnImpact `lea esi, [ebx+4]` @0x4e8867, the
+    //  own-table read @0x4e88c3..0x4e88dc].
+    collision.assign_entity(ih, collision.add_model(knife_person_face_model(/*material=*/30)));
+    CHECK(collision.publish_entity_section_matrices(
+        ih, {collision_matrix_from_heading(0, item_pose)}));
+    collision.build_tick_tables(world);
+    world.round_sim.impacts.clear();
+    world.explosions.queue.clear();
+    CHECK(world.round_sim.spawn(world, params) < 0);
+    CHECK(world.round_sim.impacts.size() == 1);
+    if (!world.round_sim.impacts.empty()) {
+        const RoundImpact &impact = world.round_sim.impacts[0];
+        CHECK(impact.effect_tag == 34 && impact.own_row);
+        const ImpactRowPick row = round_impact_row(world.tables.ammo, impact);
+        CHECK(row.effect.empty() && row.sound.empty());
+    }
+
+    // No stab leaves a scar, whatever the ammo's scar_type: the leaf never
+    // reaches the impact presenter that scars [orig: Weapon_RaycastAndSpawnImpact
+    // @0x4e88c3..0x4e896b; AmmoDef_ProcessImpactEffect @0x40a170, its
+    // Impact_SpawnGlassEffectsOrScar call @0x40a264].
+    CHECK(world.out.scars.leased_count() == 0);
+    bool world_ring_live = false;
+    for (const ScarSlot &slot : world.out.scars.world_ring().slots)
+        world_ring_live = world_ring_live || slot.live;
+    CHECK(!world_ring_live);
 }
 
 // Moving decoded pool-1 movers collide through their wire-keyed authored

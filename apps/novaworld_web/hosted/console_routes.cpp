@@ -29,10 +29,6 @@ std::string utf8(const std::string &cp1252) {
 	return cp1252_to_utf8(cp1252);
 }
 
-int64_t server_id_of(uint64_t id) {
-	return id <= static_cast<uint64_t>(INT64_MAX) ? static_cast<int64_t>(id) : 0;
-}
-
 crow::response refused(const ConsoleRefusal &why) {
 	return json_error(400, why.error.c_str(), why.message);
 }
@@ -217,7 +213,7 @@ ConsoleRoutes::Caller ConsoleRoutes::owner_caller(const WebSessionUser &user, ui
 	c.who = "owner '" + loggable(user.username) + "' (id=" + std::to_string(user.id) + ")";
 	try {
 		auto db_conn = pool_.acquire();
-		const auto server = owned_server(*db_conn, server_id_of(id), user.id);
+		const auto server = owned_server(*db_conn, path_id(id), user.id);
 		if (!server) {
 			c.refusal = json_error(404, "not_found", "this account has no hosted server with this id");
 			return c;
@@ -262,7 +258,7 @@ ConsoleRoutes::Caller ConsoleRoutes::admin_caller(const RouteAccess &access, uin
 	c.who = access.user ? "admin '" + loggable(access.user->username) + "'" : std::string("admin (token)");
 	try {
 		auto db_conn = pool_.acquire();
-		const auto server = find_server(*db_conn, server_id_of(id));
+		const auto server = find_server(*db_conn, path_id(id));
 		if (!server) {
 			c.refusal = json_error(404, "not_found", "no hosted server has this id");
 			return c;
@@ -716,7 +712,7 @@ void ConsoleRoutes::register_owner(WebApp &app) {
 				if (access.refusal) return std::move(*access.refusal);
 				Caller c;
 				try {
-					const auto server = owned_server(*pool_.acquire(), server_id_of(id), access.user->id);
+					const auto server = owned_server(*pool_.acquire(), path_id(id), access.user->id);
 					if (!server) return json_error(404, "not_found", "this account has no hosted server with this id");
 					c.server_id = server->id;
 				} catch (const db::Error &e) {
@@ -846,7 +842,7 @@ void ConsoleRoutes::register_admin(WebApp &app) {
 				if (access.refusal) return std::move(*access.refusal);
 				Caller c;
 				try {
-					const auto server = find_server(*pool_.acquire(), server_id_of(id));
+					const auto server = find_server(*pool_.acquire(), path_id(id));
 					if (!server) return json_error(404, "not_found", "no hosted server has this id");
 					c.server_id = server->id;
 				} catch (const db::Error &e) {

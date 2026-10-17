@@ -18,6 +18,8 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 | `engine/` | Native formats, runtime, networking, and service code. |
 | `godot/` | Godot game, project resources, and GDScript tests. |
 | `assets/` | OpenNova's own game, an OpenNova Editor project whose Build ships beside `opennova.exe`: its menus, the "Indigo Shore" mission, and the models, sounds and textures exported from the authoring sources in `art/` (`assets/README.md`). |
+| `expansions/` | OpenNova's own expansions, each an OpenNova Editor expansion project on the base game in `assets/` (today `onjo1`, Indigo Storm); the game zip ships each one built in `assets/expansion/<name>/` ([expansions/README.md](expansions/README.md)). |
+| `art/` | Authoring sources (Blender scenes and their textures, in Git LFS) whose exports land in `assets/`. |
 | `apps/` | Native command-line and NovaWorld service applications. |
 | `switcher/` | OpenNova Switcher: a Windows tray app that points a stock Joint Operations or Delta Force Xtreme 2 install at OpenNova's NovaWorld, NovaLogic's, or an address you enter, through the hosts file (.NET 8, with its xunit tests). Only the original exes need it: `opennova.exe` reaches OpenNova's NovaWorld itself. |
 | `tools/blender/opennova_3di/` | Experimental Blender add-on for importing and exporting NovaLogic 3DI models and their ADM/BAD animations. |

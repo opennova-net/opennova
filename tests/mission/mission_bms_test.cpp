@@ -583,7 +583,9 @@ int main() {
 	TEST_EXPECT(mis_text.find("begin general_information\r\n") != std::string::npos);
 	TEST_EXPECT(mis_text.find("  lowest_elev 0\r\n") != std::string::npos);
 	TEST_EXPECT(mis_text.find("  wp_names_blue 0 0 0 0 0 0 0 0\r\n") != std::string::npos);
-	TEST_EXPECT(mis_text.find("  default_primary   WPN_M16M203BURST\r\n") != std::string::npos);
+	// The kit the fixture's loadout leads with (mis_default_kit with no table: each record alone; D-MIS-X1).
+	TEST_EXPECT(mis_text.find("  default_primary   WPN_M4AUTO\r\n  default_secondary WPN_M9Beretta\r\n"
+	                          "  default_accessory WPN_SATCHEL_CHARGE\r\n") != std::string::npos);
 	TEST_EXPECT(mis_text.find("begin weapon_availability\r\n") != std::string::npos);
 	TEST_EXPECT(mis_text.find("begin item 0\r\n") != std::string::npos);
 	TEST_EXPECT(mis_text.find("  type_id ") != std::string::npos);

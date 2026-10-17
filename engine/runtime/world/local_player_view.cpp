@@ -303,6 +303,23 @@ bool local_player_in_armory_zone(const World &world) {
     return e != nullptr && !e->mounted && (e->flags & kEntityFlagArmoryZone) != 0;
 }
 
+UseItemArm local_player_use_item_arm(const World &world, const LocalViewSessionInputs &session) {
+    const Entity *e = world.registry.get(world.cached.local_player);
+    // [orig: Input_HandleActionBinding_0 -- parentSlot @0x4e0a91..0x4e0a98]
+    if (e == nullptr || e->mounted) return UseItemArm::kMountChain;
+    // [orig: the zone bit @0x4e0aa1, the pre-round timer @0x4e0aa6..0x4e0ab0]
+    const bool preround = session.hud_service.preround_seconds != 0;
+    if (local_player_in_armory_zone(world) || preround) {
+        // [orig: `test ecx, ecx; jnz` skips the rule in the pre-round @0x4e0b1f..0x4e0b27;
+        //  `cmp g_HostWeaponsRule, ecx; jnz done` @0x4e0b29..0x4e0b2f]
+        return !preround && session.armory_reuse_seconds != 0 ? UseItemArm::kArmoryRefused
+                                                              : UseItemArm::kArmory;
+    }
+    // [orig: Flags & 0x800 @0x4e0ab2]
+    if (local_player_in_vehicle_loadout_zone(world)) return UseItemArm::kVehicleLoadout;
+    return UseItemArm::kMountChain;
+}
+
 bool local_player_vehicle_zone_team_matches(const World &world) {
     // [orig: @0x4e0ad8 edx = player->groundEntity (+0x28); @0x4e0adb al =
     //  groundEntity->Team byte (+0x162); 0 opens @0x4e0ae3, else it must equal
@@ -1172,9 +1189,8 @@ bool compose_ground_leg(World &world, const AiEntity &p, const Entity &e,
 // [orig: Render_WeaponInsetScene @0x5C9841..0x5C9903]
 void apply_inset_slot_offsets(World &world, LocalPlayerWeapon &w, LocalPlayerViewFrame &out) {
     const WeaponSlotState *slot = active_local_weapon_slot(world, w);
-    constexpr double degrees_per_bam = 360.0 / 4294967296.0;
-    out.inset_camera.yaw_deg -= float(slot->zero_yaw * degrees_per_bam);
-    out.inset_camera.pitch_deg -= float(slot->zero_pitch * degrees_per_bam);
+    out.inset_camera.yaw_deg -= float(slot->zero_yaw * kDegreesPerBam);
+    out.inset_camera.pitch_deg -= float(slot->zero_pitch * kDegreesPerBam);
 }
 
 } // namespace
@@ -1247,7 +1263,7 @@ bool local_player_camera_compose(World &world, PlayerViewState &v, LocalPlayerVi
         camera_shake_sample_chase(v.shake, world.weather.core.oscillator.prng, world.logic_tick,
                                   d_yaw, d_pitch, d_roll);
     }
-    constexpr float kDegPerBam = 360.0f / 4294967296.0f;
+    constexpr float kDegPerBam = static_cast<float>(kDegreesPerBam);
     out.yaw_deg -= static_cast<float>(d_yaw) * kDegPerBam;
     out.pitch_deg += static_cast<float>(d_pitch) * kDegPerBam;
     out.roll_deg += static_cast<float>(d_roll) * kDegPerBam;

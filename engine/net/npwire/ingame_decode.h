@@ -65,17 +65,19 @@ WorldPose network_transform_local_to_world(int32_t lx, int32_t ly, int32_t lz,
                                            uint32_t yaw_bam, uint32_t pitch_bam,
                                            uint32_t roll_bam);
 
-// Project a WORLD position into a carrier's local frame — the exact inverse of
-// network_transform_local_to_world. [orig: Entity_TransformWorldToLocal @ 0x43BB50 —
-// the op1/op3 write paths of NetPacket_SerializePlayerState @ 0x4C09C0 run it against
-// the mount (+0x16C) or ground entity (+0x28) before compressing a carrier-relative
-// record]: delta = world - carrier position, then the transposed rotation in reverse
-// order — yaw about Z, pitch about Y, roll about X — in 22-bit fixed-point sin/cos.
-// The binary folds the inverse-rotation sign into a -2^22 sine scale (dbl_7C57B0);
-// this port keeps +2^22 sines and writes the subtractions out, which is the same
-// arithmetic. The original is a 6-dword pose transform: out[3] = heading - carrier
-// heading, out[4]/out[5] pitch/roll pass through untouched (@0x43bb7b-0x43bb8d) —
-// callers compose headings with plain BAM subtraction, so this returns position only.
+// Project a WORLD position into a carrier's local frame — the inverse, within the
+// fixed-point rounding, of network_transform_local_to_world.
+// [orig: Entity_TransformWorldToLocal @ 0x43BB50 — the op1/op3 write paths of
+// NetPacket_SerializePlayerState @ 0x4C09C0 run it against the mount (+0x16C) or
+// ground entity (+0x28) before compressing a carrier-relative record]: delta = world -
+// carrier position, then the transposed rotation in reverse order — yaw about Z,
+// pitch about Y, roll about X — in 22-bit fixed-point sin/cos. The binary folds the
+// inverse-rotation sign into a -2^22 sine scale (dbl_7C57B0) and the port multiplies
+// by those negated sines as it does (the products floor, so flipping the sign outside
+// them can differ by one LSB). The original is a 6-dword pose transform: out[3] =
+// heading - carrier heading, out[4]/out[5] pitch/roll pass through untouched
+// (@0x43bb7b-0x43bb8d) — callers compose headings with plain BAM subtraction, so this
+// returns position only.
 WorldPose network_transform_world_to_local(int32_t wx, int32_t wy, int32_t wz,
                                            int32_t px, int32_t py, int32_t pz,
                                            uint32_t yaw_bam, uint32_t pitch_bam,

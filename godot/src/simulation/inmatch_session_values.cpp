@@ -16,18 +16,12 @@ void MissionFrameInput::_bind_methods() {
 			&MissionFrameInput::get_since_render_seconds);
 	ClassDB::bind_method(D_METHOD("get_camera_position"),
 			&MissionFrameInput::get_camera_position);
-	ClassDB::bind_method(D_METHOD("is_listener_valid"),
-			&MissionFrameInput::is_listener_valid);
 	ClassDB::bind_method(D_METHOD("set_movement", "forward", "back", "left",
 			"right", "lean_left", "lean_right", "jump"),
 			&MissionFrameInput::set_movement);
 	ClassDB::bind_method(D_METHOD("set_weapon_input", "fire_held", "fire_pressed",
 			"reload_pressed", "medic_pressed"), &MissionFrameInput::set_weapon_input,
 			DEFVAL(false));
-	ClassDB::bind_method(D_METHOD("set_to_special_input", "held", "dispatched"),
-			&MissionFrameInput::set_to_special_input);
-	ClassDB::bind_method(D_METHOD("set_respawn_input", "dispatched"),
-			&MissionFrameInput::set_respawn_input);
 	ClassDB::bind_method(D_METHOD("set_sequence", "sequence"),
 			&MissionFrameInput::set_sequence);
 	ClassDB::bind_method(D_METHOD("get_sequence"),

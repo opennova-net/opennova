@@ -19,6 +19,7 @@
 #include <godot_cpp/variant/utility_functions.hpp>
 
 #include <base/io/bam.h>
+#include <base/io/fixed.h>
 #include <runtime/terrain/foliage_detail_collector.h>
 
 #include <godot_cpp/classes/array_mesh.hpp>
@@ -1919,14 +1920,14 @@ int FoliageDispatcher::_sample_detail_foliage_index(
   }
   if (detail_foliage_sampler_.is_valid()) {
     Array arguments;
-    arguments.push_back(static_cast<double>(p_atlas_x_fixed) / 65536.0);
-    arguments.push_back(static_cast<double>(p_atlas_z_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_atlas_x_fixed) / opennova::io::kFp16OneD);
+    arguments.push_back(static_cast<double>(p_atlas_z_fixed) / opennova::io::kFp16OneD);
     return static_cast<int>(detail_foliage_sampler_.callv(arguments));
   }
   if (foliage_sampler_.is_valid()) {
     Array arguments;
-    arguments.push_back(static_cast<double>(p_atlas_x_fixed) / 65536.0);
-    arguments.push_back(static_cast<double>(p_atlas_z_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_atlas_x_fixed) / opennova::io::kFp16OneD);
+    arguments.push_back(static_cast<double>(p_atlas_z_fixed) / opennova::io::kFp16OneD);
     return static_cast<int>(foliage_sampler_.callv(arguments));
   }
   if (colormap_source_.is_valid()) {
@@ -1947,8 +1948,8 @@ int FoliageDispatcher::_sample_model_foliage_index(
   }
   if (foliage_sampler_.is_valid()) {
     Array arguments;
-    arguments.push_back(static_cast<double>(p_world_x_fixed) / 65536.0);
-    arguments.push_back(static_cast<double>(p_world_z_fixed) / 65536.0);
+    arguments.push_back(static_cast<double>(p_world_x_fixed) / opennova::io::kFp16OneD);
+    arguments.push_back(static_cast<double>(p_world_z_fixed) / opennova::io::kFp16OneD);
     return static_cast<int>(foliage_sampler_.callv(arguments));
   }
   if (colormap_source_.is_valid()) {

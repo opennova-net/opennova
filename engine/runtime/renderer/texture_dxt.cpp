@@ -1,5 +1,7 @@
 #include <runtime/renderer/texture_dxt.h>
 
+#include <base/io/le.h>
+
 #include <algorithm>
 #include <cstring>
 #include <utility>
@@ -51,13 +53,10 @@ constexpr uint32_t kSteps4[] = {0, 2, 3, 1};
 constexpr uint32_t kSteps6[] = {0, 2, 3, 4, 5, 1};
 constexpr uint32_t kSteps8[] = {0, 2, 3, 4, 5, 6, 7, 1};
 
-uint16_t read_u16(const uint8_t *bytes) {
-	return static_cast<uint16_t>(bytes[0] | (bytes[1] << 8));
-}
-
-void write_u16(uint8_t *bytes, uint16_t value) {
-	bytes[0] = static_cast<uint8_t>(value);
-	bytes[1] = static_cast<uint8_t>(value >> 8);
+// The 4x4 blocks across a side: (side + 3) / 4 without the 32-bit wrap a side past 0xFFFFFFFC
+// takes (to 0 blocks).
+uint32_t blocks_across(uint32_t side) {
+	return side / 4 + ((side & 3u) != 0 ? 1u : 0u);
 }
 
 // Floyd-Steinberg spread of one texel's error over the 4x4 block.
@@ -269,8 +268,8 @@ void encode_color_block(const DxtColor *texels, uint8_t *block, bool colorkey,
 			if (texels[i].a < 0.5f) ++keyed;
 		}
 		if (keyed == 16) {
-			write_u16(block, 0x0000);
-			write_u16(block + 2, 0xFFFF);
+			io::write_u16_le(block, 0x0000);
+			io::write_u16_le(block + 2, 0xFFFF);
 			std::memset(block + 4, 0xFF, 4);
 			return;
 		}
@@ -320,8 +319,8 @@ void encode_color_block(const DxtColor *texels, uint8_t *block, bool colorkey,
 	const uint16_t word_b = encode_565(endpoint_b.r * kInverseLuminanceR,
 			endpoint_b.g * kInverseLuminanceG, endpoint_b.b * kInverseLuminanceB);
 	if (steps == 4 && word_a == word_b) {
-		write_u16(block, word_a);
-		write_u16(block + 2, word_b);
+		io::write_u16_le(block, word_a);
+		io::write_u16_le(block + 2, word_b);
 		std::memset(block + 4, 0, 4);
 		return;
 	}
@@ -335,13 +334,13 @@ void encode_color_block(const DxtColor *texels, uint8_t *block, bool colorkey,
 			decoded_b.b * kLuminanceB, 0.0f};
 	DxtColor step[4];
 	if ((steps == 3) == (word_b >= word_a)) {
-		write_u16(block, word_a);
-		write_u16(block + 2, word_b);
+		io::write_u16_le(block, word_a);
+		io::write_u16_le(block + 2, word_b);
 		step[0] = endpoint_a;
 		step[1] = endpoint_b;
 	} else {
-		write_u16(block, word_b);
-		write_u16(block + 2, word_a);
+		io::write_u16_le(block, word_b);
+		io::write_u16_le(block + 2, word_a);
 		step[0] = endpoint_b;
 		step[1] = endpoint_a;
 	}
@@ -502,7 +501,7 @@ TextureDxtFormat select_texture_dxt_format(
 	return format;
 }
 
-uint32_t texture_level_count(uint32_t width, uint32_t height,
+uint32_t texture_requested_level_count(uint32_t width, uint32_t height,
 		uint32_t creation_flags) {
 	uint32_t levels = 0;
 	for (uint32_t side = std::min(width, height); side > 2; side >>= 1) {
@@ -510,6 +509,12 @@ uint32_t texture_level_count(uint32_t width, uint32_t height,
 	}
 	if ((creation_flags & 0x40000u) != 0) levels = 1;
 	if ((creation_flags & 0x80000u) != 0) levels = std::min(levels, 3u);
+	return levels;
+}
+
+uint32_t texture_level_count(uint32_t width, uint32_t height,
+		uint32_t creation_flags) {
+	uint32_t levels = texture_requested_level_count(width, height, creation_flags);
 	if (levels == 0) {
 		// D3DXCreateTexture's 0: every level down to 1x1.
 		for (uint32_t side = std::max(width, height); side > 0; side >>= 1) {
@@ -657,8 +662,8 @@ void encode_dxt5_block(const DxtBlockColors &texels, bool dither,
 }
 
 void decode_dxt1_block(const uint8_t *block, DxtBlockColors &texels) {
-	const uint16_t word0 = read_u16(block);
-	const uint16_t word1 = read_u16(block + 2);
+	const uint16_t word0 = io::read_u16_le(block);
+	const uint16_t word1 = io::read_u16_le(block + 2);
 	DxtColor palette[4];
 	palette[0] = decode_565(word0);
 	palette[1] = decode_565(word1);
@@ -724,9 +729,11 @@ void decode_dxt5_block(const uint8_t *block, DxtBlockColors &texels) {
 
 bool DxtSurface::is_valid() const noexcept {
 	const size_t bytes = dxt_block_bytes(format);
-	return bytes != 0 && width != 0 && height != 0 &&
-			blocks.size() == static_cast<size_t>((width + 3) / 4) *
-					((height + 3) / 4) * bytes;
+	if (bytes == 0 || width == 0 || height == 0) return false;
+	// The block count compared row by row in 64 bits: the product of two block counts can pass
+	// 64 bits, and a wrapped count would make an empty vector "valid".
+	const uint64_t row_bytes = static_cast<uint64_t>(blocks_across(width)) * bytes;
+	return blocks.size() % row_bytes == 0 && blocks.size() / row_bytes == blocks_across(height);
 }
 
 std::vector<DxtColor> decode_rgba8(const uint8_t *rgba, uint32_t width,
@@ -769,8 +776,8 @@ DxtSurface encode_dxt_surface(const std::vector<DxtColor> &colors,
 	surface.format = format;
 	surface.width = width;
 	surface.height = height;
-	const uint32_t blocks_x = (width + 3) / 4;
-	const uint32_t blocks_y = (height + 3) / 4;
+	const uint32_t blocks_x = blocks_across(width);
+	const uint32_t blocks_y = blocks_across(height);
 	surface.blocks.resize(static_cast<size_t>(blocks_x) * blocks_y * block_bytes);
 	// Past an edge, texel column (row) 1 and 2 repeat texel 0 and column 3
 	// repeats column 1. [orig: v36 = {0, 0, 0, 1} @ 0x6EDE25..0x6EDE34]
@@ -819,8 +826,8 @@ std::vector<DxtColor> decode_dxt_surface(const DxtSurface &surface) {
 	if (!surface.is_valid()) return colors;
 	colors.resize(static_cast<size_t>(surface.width) * surface.height);
 	const size_t block_bytes = dxt_block_bytes(surface.format);
-	const uint32_t blocks_x = (surface.width + 3) / 4;
-	const uint32_t blocks_y = (surface.height + 3) / 4;
+	const uint32_t blocks_x = blocks_across(surface.width);
+	const uint32_t blocks_y = blocks_across(surface.height);
 	for (uint32_t by = 0; by < blocks_y; ++by) {
 		for (uint32_t bx = 0; bx < blocks_x; ++bx) {
 			const uint8_t *block = surface.blocks.data() +

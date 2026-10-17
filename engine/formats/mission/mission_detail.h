@@ -83,11 +83,7 @@ inline int32_t read_i32_at(const uint8_t *bytes, size_t offset) {
 }
 
 inline void write_i32_at(uint8_t *bytes, size_t offset, int32_t value) {
-	const uint32_t v = static_cast<uint32_t>(value);
-	bytes[offset] = static_cast<uint8_t>(v & 0xFF);
-	bytes[offset + 1] = static_cast<uint8_t>((v >> 8) & 0xFF);
-	bytes[offset + 2] = static_cast<uint8_t>((v >> 16) & 0xFF);
-	bytes[offset + 3] = static_cast<uint8_t>((v >> 24) & 0xFF);
+	io::write_u32_le(bytes + offset, static_cast<uint32_t>(value));
 }
 
 inline std::string four_digit(int value) {

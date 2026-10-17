@@ -70,7 +70,6 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_table.cpp # a table's columns and row sort
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_frame_clip.cpp # a widget's clip viewport over its own ops
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_table_row.cpp # the TABLE row records and their CTableWnd operations
-    ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_assets.cpp # which file a menu texture or font name loads
     # menu backdrop movie policy (slots/gating/resolution; witness:
     # docs/mnu/menu-re.md "The menu backdrop (Bink underlay)")
     ${CMAKE_CURRENT_SOURCE_DIR}/menu/menu_video.cpp
@@ -128,6 +127,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/squad_feed.cpp       # the command map squad feed lines
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/session_rules_text.cpp # the CMAP RULELIST text (the session status, rules, briefing)
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_combat.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_entity_info.cpp  # the local player's per-frame HUD info record
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_optical_cues.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_bay_logos.cpp # the vehicle-bay logo walk
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_capture_labels.cpp # the capture-point label walk + element
@@ -136,6 +136,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/scope_circle_mask.cpp # the scoped-view circle mask + its reticle cross/grid
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/feed_format.cpp   # the 0x1E feed line/color policy
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/loading_screen.cpp # the loading screen's wrapped text block
+    ${CMAKE_CURRENT_SOURCE_DIR}/hud/loading_background.cpp # the loading screen's background pick, band edge and splash gate
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_toggles.cpp    # the key-driven HUD toggles and their edge polls
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/tip_system.cpp     # the MrClippy tip: events, gates, countdown, text
     ${CMAKE_CURRENT_SOURCE_DIR}/hud/hud_frame_tip.cpp  # its compile element
@@ -458,9 +459,7 @@ add_library(opennova_runtime STATIC
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/integrity_weapon_image.cpp # retail's weapon.def table image
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/join_session_policy.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_doors.cpp  # the C2S 0x1A door request (S2C 0x37 reply)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_team_change.cpp  # the C2S 0x4D team change
-    ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_death_timeout_reset.cpp  # the C2S 0x41 Respawn key
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/server_kill_page.cpp  # the C2S 0x28 -> S2C 0x4E kill page
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_walks.cpp  # the paged-list walk replies (0x51 -> 0x29)
     ${CMAKE_CURRENT_SOURCE_DIR}/inmatch/joiner_connection_disconnect.cpp  # the punt/goodbye/reap/leave family of JoinerConnection

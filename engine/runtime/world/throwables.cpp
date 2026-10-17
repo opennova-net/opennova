@@ -193,13 +193,14 @@ int32_t horizontal_speed_q16(const MotorFrame &f) {
     return static_cast<int32_t>(m);
 }
 
-// Charmap surface material under a motor frame, bounded to the impact-effect
-// table the bounce presentation indexes with material + 4 (no charmap -> 1 ->
-// dirt, the sampler's own default). [orig: Terrain_GetSurfaceTypeAtPosition
-// @ 0x606510; consumed as material + 4 by the bounce presentation @ 0x4447c3]
+// Charmap surface material under a motor frame (no charmap -> 1 -> dirt, the
+// sampler's own default). The bounce presentation plays material + 4 through
+// the impact presenter, whose clamp makes a class past the table the obj row.
+// [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510 (Entity_UpdateGrenadePhysics
+// @ 0x4443d0); consumed as material + 4 @ 0x44481f by AmmoDef_ProcessImpactEffect
+// @ 0x40a170 @ 0x444824, a tag of 28 or more -> 4 @ 0x40a1bc..0x40a1c1]
 int32_t sampled_ground_surface(const World &world, const MotorFrame &f) {
-    const int32_t surface = terrain::surface_type_at_fixed(world.tables.surface_map, f.px, f.py);
-    return (surface >= 0 && surface + 4 < kImpactEffectTagCount) ? surface : 1;
+    return terrain::surface_type_at_fixed(world.tables.surface_map, f.px, f.py);
 }
 
 int32_t speed3_q16(const MotorFrame &f) {
@@ -472,8 +473,8 @@ static bool motor_nade(World &world, RoundSim &sim, LiveRound &r,
                 f.vz = qmul(f.vz, -13107);
                 ground_hit = true;
                 // Charmap surface at the bounce point (no charmap -> 1 -> dirt)
-                // [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510; the
-                // bounce presentation applies material + 4 @ 0x4447c3]
+                // [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510 @ 0x4443d0;
+                // the bounce presentation applies material + 4 @ 0x44481f]
                 ground_surface = sampled_ground_surface(world, f);
                 const int32_t kick_yaw =
                         (world.next_prng16() % 10) - 5; // [orig: %10-5]
@@ -695,7 +696,8 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
             f.vz = 0;
             speed = 0;
             ground_hit = true;
-            // [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510 at the stop point]
+            // [orig: Terrain_GetSurfaceTypeAtPosition @ 0x606510 at the stop point,
+            //  @ 0x447592 (claymore) / @ 0x4485e0 (satchel)]
             ground_surface = sampled_ground_surface(world, f);
             r.parent = EntityHandle{};
             r.parent_spawn_id = 0;
@@ -743,12 +745,25 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
             ground_surface = hit.surface_type >= 0 ? hit.surface_type : 0;
         }
     }
-    if (ground_hit && ground_surface != 0 && f.pz >= water)
+    // The contact presents through the impact presenter with the grenade's
+    // descriptor, sound only for the first five contacts (0x80000400), then
+    // neither leg (0x400), and no water-height test of its own (the grenade's
+    // alone has one, @0x44480F..0x444818): the presenter's ClipWaterFx gate
+    // drops a round whose Z and +0x88 copy both sit at or under the plane, the
+    // copy each motor tick's tail refreshes, so the Z this tick began at. The
+    // item sweep walks pools 2/1 alone, so the switch's person and water arms
+    // (3, 4) never arise and the face byte is the surface.
+    // [orig: Entity_UpdateClaymorePhysics @0x4478C8..0x44790E, the tail copy
+    //  @0x447C23; Entity_UpdateSatchelPhysics @0x44893D..0x448983, the tail copy
+    //  @0x448CA2; AmmoDef_ProcessImpactEffect @0x40A18D..0x40A1B1]
+    const bool clipped_by_water = (ammo.flags & kAmmoFlagClipWaterFx) != 0 &&
+                                  f.pz <= water && f.prev_z <= water;
+    if (ground_hit && ground_surface != 0 && !clipped_by_water && r.bounce_count <= 5)
         push_motor_effect(world, sim, r, ground_surface + 4,
                           Vec3{static_cast<float>(from_fixed(f.px)),
                                static_cast<float>(from_fixed(f.py)),
                                static_cast<float>(from_fixed(f.pz))},
-                          world.logic_tick);
+                          world.logic_tick, false, true);
 
     // Rest gate [orig: height-over-ground <= 0xFF and not rising].
     if (!rest && ground != INT32_MIN) {

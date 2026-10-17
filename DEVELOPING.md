@@ -403,8 +403,8 @@ red, re-run that single test file in isolation to confirm before treating it as 
 
 ## Lint and format checks
 
-CI's required gates are the `scripts/lint/*.py --enforce` checks in `ci.yml`'s `test`
-job (stdlib Python, no installs). Formatting is advisory for now: the tree is not yet
+CI's required gates are the `scripts/lint/*.py --enforce` checks in `ci.yml`'s `gates`
+job (stdlib Python, no installs), which the required `test` check needs. Formatting is advisory for now: the tree is not yet
 formatted to `.clang-format`, `ruff.toml`, `gdformatrc` or `gdlintrc`, so
 `scripts/lint/format_lint.py` checks only the lines a change adds, against the
 merge-base with `origin/master`, and CI's `format-lint` job annotates the diff

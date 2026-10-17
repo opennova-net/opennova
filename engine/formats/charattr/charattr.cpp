@@ -5,6 +5,7 @@
 #include <formats/cbin/binary_config.h>
 #include <formats/configfile/config_file.h>
 
+#include <base/io/le.h>
 #include <base/io/strutil.h>
 
 #include <cstdio>
@@ -15,10 +16,7 @@ namespace opennova::charattr {
 namespace {
 
 void put_u32(std::array<uint8_t, kRowBytes> &row, size_t offset, uint32_t value) {
-	row[offset + 0] = static_cast<uint8_t>(value);
-	row[offset + 1] = static_cast<uint8_t>(value >> 8);
-	row[offset + 2] = static_cast<uint8_t>(value >> 16);
-	row[offset + 3] = static_cast<uint8_t>(value >> 24);
+	io::write_u32_le(row.data() + offset, value);
 }
 
 uint32_t float_bits(float value) {

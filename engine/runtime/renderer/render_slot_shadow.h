@@ -120,7 +120,7 @@ float silhouette_half_extent(float bound_radius_units);
 // therefore x = -right, y = up, z = -forward (a Godot camera looks down its
 // local -Z): a right-handed frame whose back-face cull keeps the
 // light-facing faces, exactly retail's CULLMODE CCW over its view [orig:
-// CRenderBatchQueue_FlushBatches @ 0x5da3e4..0x5da401]. Taking the look-at
+// CRenderBatchQueue_FlushBatches @ 0x5da0fa..0x5da137]. Taking the look-at
 // columns unmapped mirrors the view (det -1) and culls the light-facing
 // faces instead.
 struct SlotCaptureViewAxes {

@@ -359,14 +359,19 @@ const std::string *MissionDocument::item_class(const bms::Entity &entity) const 
 
 bool MissionDocument::compose(bms::File &out) const {
 	if (!compose_mission(rows(), out)) return false;
-	// Each record's AI class its item's row's, as the original's writer copies it over the record on every save,
-	// zero-filled past it [orig: JOTACmed.exe sub_44C8E0 @ 0x44c8e0, the memset; @ 0x44cabe..0x44caf2].
+	// Each record as both of the original's writers write it on every save, every pool's: w_accuracy1 no more than
+	// w_accuracy2 [orig: sub_44C8E0 @ 0x44c94f..0x44c975 (JOTACmed.exe), from the .bms export sub_44F920's four
+	// calls @ 0x450672, @ 0x45071b, @ 0x450790, @ 0x450835; MIS_SaveDocument @ 0x455600..0x455602 (JOTACmed.exe)];
+	// its AI class its item's row's, zero-filled past it [orig: sub_44C8E0 @ 0x44c8e0, the memset;
+	// @ 0x44cabe..0x44caf2 (JOTACmed.exe)]. The facing the .bms alone wraps (serialize).
 	for (std::vector<bms::Entity> *pool : {&out.items, &out.buildings, &out.markers, &out.organics})
-		for (bms::Entity &entity : *pool)
+		for (bms::Entity &entity : *pool) {
+			if (entity.w_accuracy1 > entity.w_accuracy2) entity.w_accuracy1 = entity.w_accuracy2;
 			if (const std::string *ai_class = item_class(entity)) {
 				std::memset(entity.name1, 0, sizeof(entity.name1));
 				std::memcpy(entity.name1, ai_class->data(), std::min(ai_class->size(), sizeof(entity.name1)));
 			}
+		}
 	return true;
 }
 
@@ -442,7 +447,18 @@ SerializeResult MissionDocument::serialize() const {
 	bms::File file;
 	std::vector<uint8_t> bytes;
 	std::string error;
-	if (!compose(file) || !bms::write(file, bytes, error)) {
+	const bool composed = compose(file);
+	// The .bms packer writes each record's yaw, pitch and roll % 360, the C remainder keeping the sign [orig:
+	// sub_44C8E0 @ 0x44c905..0x44c924 (JOTACmed.exe)]; the .mis writer writes the facing as held [orig:
+	// MIS_SaveDocument @ 0x455321..0x455353 (JOTACmed.exe)], so compose keeps it.
+	if (composed)
+		for (std::vector<bms::Entity> *pool : {&file.items, &file.buildings, &file.markers, &file.organics})
+			for (bms::Entity &entity : *pool) {
+				entity.yaw = static_cast<int16_t>(entity.yaw % 360);
+				entity.pitch = static_cast<int16_t>(entity.pitch % 360);
+				entity.roll = static_cast<int16_t>(entity.roll % 360);
+			}
+	if (!composed || !bms::write(file, bytes, error)) {
 		SourceIssue issue;
 		issue.message = error.empty() ? "The mission could not be written." : error;
 		result.issues.push_back(std::move(issue));
@@ -1205,16 +1221,22 @@ const MissionDocument::Lookups &MissionDocument::lookups() const {
 		for (size_t i = 0; i < path.stops.size(); ++i)
 			if (path.stops[i] < markers.size()) made.stops[markers[path.stops[i]]->id].push_back({path.number, i});
 	}
-	// The player's route: the first path with the flag, its stops by their marker's index, as many as
-	// the game walks (bms::player_route_stop_count: its signed compare walks none for a count of 2^31
-	// or more) [orig: NetPacket_WriteWorldStateLoad0x0F @0x502e50, the count capped at 128 @0x502efc].
+	// The player's route: the first path with the flag, walked as the game walks the record a save lays out of
+	// its stops (mission::lay_out_waypoint_path: the count the path's stops, the slots its first 32, each a
+	// marker's index), as many as bms::player_route_stop_count reads [orig: NetPacket_WriteWorldStateLoad0x0F
+	// @0x502e50, the count capped at 128 @0x502efc, read signed @0x502f01, the walk @0x502f13..0x502f18]. A record
+	// read naming other stops than its markers carry is the game's until a save lays it out (mission.path_rebuilt
+	// says so): the route here is the save's.
 	for (const Node *row : made.by_kind[size_t(K::WaypointPath)]) {
 		const MissionPath &path = static_cast<const PathRow &>(*row).native;
 		if (!bms::is_player_route(path.record)) continue;
-		// The stops a save lays into the record's slots (its first 32), as many as the game walks.
-		const size_t count = std::min({path.stops.size(), kMaxWaypointPathMarkers, bms::kPlayerRouteMaxStops});
+		bms::WaypointRecord laid = path.record;
+		laid.marker_count = static_cast<uint32_t>(path.stops.size());
+		laid.waypoint_numbers.assign(path.stops.begin(),
+		                             path.stops.begin() + std::ptrdiff_t(std::min(path.stops.size(), kMaxWaypointPathMarkers)));
+		const size_t count = bms::player_route_stop_count(laid);
 		for (size_t i = 0; i < count; ++i)
-			if (path.stops[i] < markers.size()) made.route.insert(markers[path.stops[i]]->id);
+			if (laid.waypoint_numbers[i] < markers.size()) made.route.insert(markers[laid.waypoint_numbers[i]]->id);
 		break;
 	}
 	made.made = true;

@@ -1451,6 +1451,38 @@ int test_names_file_chores() {
 // (a save left them out of the original editor's .mis beside it: N1): a folder renamed, several files moved, a move
 // taken back, a rename taken back, a rename while the validation runs, a rename of a file the mission names; and
 // Quit and a project closed.
+// The .mis's default kit through the session (D-MIS-X1): a save writes the kit the mission's loadout leads with over
+// the project's weapon table, a weapon's subclass rows passed over [orig: JOTACmed.exe sub_4328A0 @ 0x4328a0;
+// MIS_SaveDocument @ 0x454ba7..0x454bcb]; the .bms as it was.
+int test_names_file_kit() {
+	NamesProject p("opennova_mission_names_kit");
+	const AssetEntry *weapons = p.view().project.scan->find("weapon.def");
+	const std::string weapons_path = weapons ? weapons->relative_path : std::string("weapon.def");
+	TEST_EXPECT(p.put(weapons_path, std::string("weapon \"WPN_RIFLE\"\r\n\tloadout_subclasses 1\r\nend\r\n\r\n"
+	                                            "weapon \"WPN_RIFLE_GL\"\r\nend\r\n\r\n"
+	                                            "weapon \"WPN_PISTOL\"\r\nend\r\n\r\n"
+	                                            "weapon \"WPN_AT\"\r\nend\r\n")));
+	bms::File kitted = names_mission();
+	const mission::MisWeaponTable table = {{"WPN_RIFLE", 1}, {"WPN_RIFLE_GL", 0}, {"WPN_PISTOL", 0}, {"WPN_AT", 0}};
+	kitted.loadout = mission::mis_default_loadout({"WPN_RIFLE", "WPN_PISTOL", "WPN_AT"}, &table);
+	std::vector<uint8_t> bms_bytes;
+	std::string error;
+	TEST_EXPECT(bms::write(kitted, bms_bytes, error));
+	const std::string path = "missions/kit.bms";
+	TEST_EXPECT(p.put(path, bms_bytes));
+	p.run(request::rescan());
+	p.run(request::open_document(path));
+	TEST_EXPECT(p.mission(path) != nullptr);
+	if (!p.mission(path)) return 1;
+	p.name_event(path, 0, "Get to the bridge"); // a name: the .mis is due where the project has none
+	p.run(request::save(path));
+	TEST_EXPECT(test_io::read_file(p.root + "/" + path) == bms_bytes);
+	// Over the table the rifle's grenade-launcher row is its subclass: the pistol is the secondary, not that row.
+	TEST_EXPECT(p.text("missions/kit.mis").find("  default_primary   WPN_RIFLE\r\n  default_secondary WPN_PISTOL\r\n"
+	                                            "  default_accessory WPN_AT\r\n") != std::string::npos);
+	return 0;
+}
+
 int test_names_unsaved_paths() {
 	NamesProject p("opennova_mission_names_unsaved");
 	const SessionView &v = p.view();
@@ -1723,6 +1755,7 @@ int main() {
 	if (test_names_base_heights() != 0) return 1;
 	if (test_names_refusals() != 0) return 1;
 	if (test_names_unsaved_paths() != 0) return 1;
+	if (test_names_file_kit() != 0) return 1;
 	std::printf("editor_mission_names: all tests passed\n");
 	return 0;
 }

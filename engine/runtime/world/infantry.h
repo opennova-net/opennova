@@ -257,8 +257,9 @@ inline int gait_stance_transition_clip(int current, int target) {
 
 // The two witnessed STANCE bits of the per-state anim-flags word (bits 8-9;
 // the wire player compact carries the same pair as its 2-bit stance lane).
-// [orig: g_AnimStateFlagsTable @0x8139E8; stance read in RoundData_SpawnRound
-// @0x4EC251..0x4EC27A]
+// [orig: g_AnimStateFlagsTable @0x8139E8; NetPacket_SerializePlayerState maps
+// them onto +0x12C (0x100 -> 0x200 crouch, 0x200 -> 0x100 prone)
+// @0x4C11FD..0x4C1242; the stance read in RoundData_SpawnRound @0x4EC129..0x4EC14C]
 inline constexpr uint32_t kAnimStanceFlagCrouched = 0x100;
 inline constexpr uint32_t kAnimStanceFlagProne = 0x200;
 
@@ -272,6 +273,20 @@ struct RootMotionFrame {
     int32_t capsule_bottom = 0; // out[3] = bottom * 65536
     int32_t capsule_top = 0;    // out[4] = top * 65536 + 0x2000
 };
+
+// The root integrate's body-heading rotation, Q22: org2 (the player body) reads the
+// Q22 sine table at the heading's rounded top ten bits, org1 takes the Q22 ftol trig of
+// the heading times retail's radians-per-BAM double. The world motor and the joiner's
+// replica motor both rotate their root deltas by it.
+// [orig: Entity_UpdateInfantryPlayerBody (org2) entity+0x8C @0x4B41E4, `add eax,
+//  200000h; shr eax, 16h` @0x4B41F0..0x4B41F5, g_BamSinTableQ22 / off_849934
+//  @0x4B41F8..0x4B4206; Entity_UpdateInfantryAI (org1) entity+0x8C `fild; fmul
+//  dbl_7C3608` @0x4BF001..0x4BF007, the trig @0x4BF00D..0x4BF02A]
+struct RootRotationQ22 {
+    int32_t c = 0;
+    int32_t s = 0;
+};
+RootRotationQ22 root_rotation_q22(int32_t heading, bool org2_player_body);
 
 // Runtime source for real .bad/.adm data, with tests providing IDA-shaped doubles.
 class IRootMotionSource {

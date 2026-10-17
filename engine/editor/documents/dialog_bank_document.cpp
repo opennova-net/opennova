@@ -26,18 +26,6 @@ constexpr NodeKind kLine = node_kind(DialogBankKind::Line);
 const BankDialog &dialog_of(const RecordHandle &r) { return r.as<BankDialog>(); }
 const BankLine &line_of(const RecordHandle &r) { return r.as<BankLine>(); }
 
-bool whole_of(const Value &value, int64_t &out) {
-	if (const auto *whole = std::get_if<int64_t>(&value)) {
-		out = *whole;
-		return true;
-	}
-	if (const auto *real = std::get_if<double>(&value); real && std::isfinite(*real) && *real == std::floor(*real)) {
-		out = int64_t(*real);
-		return true;
-	}
-	return false;
-}
-
 // A name the game compares: plain printable ASCII within the bytes its field keeps.
 bool set_name(std::string &field, const char *what, const Value &value, std::string &error) {
 	const auto *text = std::get_if<std::string>(&value);
@@ -57,15 +45,6 @@ bool set_name(std::string &field, const char *what, const Value &value, std::str
 	}
 	field = *text;
 	return true;
-}
-
-FieldSchema schema_of(const char *id, FieldType type, const char *label, const char *description) {
-	FieldSchema schema;
-	schema.id = id;
-	schema.type = type;
-	schema.label = label;
-	schema.description = description;
-	return schema;
 }
 
 RecordTable make_table() {
@@ -136,7 +115,7 @@ RecordTable make_table() {
 		              {[](const RecordHandle &r, Value &out) { return out = int64_t(line_of(r).delay), true; },
 		               [](const RecordHandle &r, const Value &v, std::string &e) {
 			               int64_t number = 0;
-			               if (!whole_of(v, number) || number < 0 || number > 255) {
+			               if (!whole_number(v, number) || number < 0 || number > 255) {
 				               e = "A wait is a whole number of tenths of a second from 0 to 255.";
 				               return false;
 			               }

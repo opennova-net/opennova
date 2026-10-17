@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <system_error>
 
+#include <base/io/bits.h>
 #include <base/io/strutil.h>
 #include <editor/documents/texture_image.h>
 #include <editor/import/importer.h>
@@ -406,8 +407,7 @@ TextureSourcePlan plan_texture_dds(const ProjectPaths &paths, const AssetScan &s
 		return refuse(entry->logical_name + " does not read" + (image && !image->refusal.empty() ? ": " + image->refusal : std::string()) + ".",
 		              entry->relative_path);
 	const TextureLevel &level = image->levels.front();
-	const auto power_of_two = [](uint32_t side) { return side != 0 && (side & (side - 1)) == 0; };
-	if (!power_of_two(level.width) || !power_of_two(level.height))
+	if (!io::is_power_of_two(level.width) || !io::is_power_of_two(level.height))
 		return refuse(entry->logical_name + " is " + std::to_string(level.width) + " x " + std::to_string(level.height) +
 		                      ": the game pads a .dds whose sides are not powers of two to the next ones, so a model's UVs would "
 		                      "reach the padding. Make each side a power of two first.",

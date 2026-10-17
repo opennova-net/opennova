@@ -161,9 +161,8 @@ void vehicle_follow_carrier(World &world, Entity &vehicle) {
 	m.air_pitch_bam = pose.pitch_bam;
 	m.air_roll_bam = pose.roll_bam;
 	vehicle.yaw = static_cast<int16_t>(std::lround(mission_yaw_deg_from_bam_heading(m.yaw_bam)));
-	vehicle.pitch =
-			static_cast<int16_t>(std::lround(double(m.air_pitch_bam) * 360.0 / 4294967296.0));
-	vehicle.roll = static_cast<int16_t>(std::lround(double(m.air_roll_bam) * 360.0 / 4294967296.0));
+	vehicle.pitch = degrees_i16_from_bam(m.air_pitch_bam);
+	vehicle.roll = degrees_i16_from_bam(m.air_roll_bam);
 }
 
 int32_t vehicle_probe_pass(World &world, Entity &vehicle, const int32_t (*probes)[3],

@@ -8,6 +8,7 @@
 #include <string>
 #include <utility>
 
+#include <base/io/bits.h>
 #include <base/io/strutil.h>
 #include <formats/pcx/pcx_io.h>
 #include <formats/trn/charmap_legend.h>
@@ -37,8 +38,6 @@ namespace {
 
 using R = renderer::TextureRoleId;
 using F = CoreFinding;
-
-bool power_of_two(uint32_t side) { return side != 0 && (side & (side - 1)) == 0; }
 
 std::string sides(uint32_t width, uint32_t height) { return std::to_string(width) + " x " + std::to_string(height); }
 
@@ -205,7 +204,7 @@ void check_sizes(R role, const std::string &file, const TextureHeader &header, c
 			add(F::TextureFoliageMapShape, DiagnosticSeverity::Warning,
 			    is + ": the game's foliage lookup reads its first texel everywhere once it is wider than 1024, so one "
 			         "code covers the whole map. Make it a square whose side is a power of two, at most 1024.");
-		else if (w != h || !power_of_two(w))
+		else if (w != h || !io::is_power_of_two(w))
 			add(F::TextureFoliageMapShape, DiagnosticSeverity::Warning,
 			    is + ": the game's foliage lookup takes it as a square whose side is a power of two, at most 1024, so "
 			         "its codes land on the wrong ground.");
@@ -225,7 +224,7 @@ void check_sizes(R role, const std::string &file, const TextureHeader &header, c
 			add(F::TextureCharMapShape, DiagnosticSeverity::Warning,
 			    is + ": the game's surface lookup reads its first texel everywhere once it is wider than 1024, so one "
 			         "class covers the whole map. Make it a square whose side is a power of two, at most 1024.");
-		else if (w != h || !power_of_two(w))
+		else if (w != h || !io::is_power_of_two(w))
 			add(F::TextureCharMapShape, DiagnosticSeverity::Warning,
 			    is + ": the game's surface lookup takes it as a square whose side is a power of two, at most 1024, so "
 			         "its classes land on the wrong ground.");
@@ -246,14 +245,14 @@ void check_sizes(R role, const std::string &file, const TextureHeader &header, c
 		// Halved to fit 512 a side [orig: Material_LoadStageTexture @ 0x5B1782, flag 0x1000].
 		if (w > 512 || h > 512)
 			add(F::TextureNormalMapHalved, DiagnosticSeverity::Info, is + ": the game halves it until it fits 512 a side.");
-		if (role == R::ModelHeightNormal && (!power_of_two(w) || !power_of_two(h)))
+		if (role == R::ModelHeightNormal && (!io::is_power_of_two(w) || !io::is_power_of_two(h)))
 			add(F::TextureHeightWrap, DiagnosticSeverity::Warning,
 			    is + ": the game makes its normal map wrapping each texel's neighbours by the side's mask "
 			         "[orig: Texture_LoadAsNormalMap @ 0x58C985..0x58CAED], which is wrong at the edges of a side that is "
 			         "no power of two.");
 		break;
 	case R::TerrainDetailCoefficient:
-		if (!power_of_two(w) || !power_of_two(h))
+		if (!io::is_power_of_two(w) || !io::is_power_of_two(h))
 			add(F::TextureHeightWrap, DiagnosticSeverity::Warning,
 			    is + ": the game builds its coefficient wrapping each texel's neighbours by the side's mask "
 			         "[orig: Texture_GenerateNormalMap @ 0x58C070], which is wrong at the edges of a side that is no "

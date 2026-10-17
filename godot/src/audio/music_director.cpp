@@ -333,6 +333,9 @@ void MusicDirector::_on_play_sound(void *user, uint32_t sbf_entry_index, int wai
 			if (p != nullptr) {
 				p->set_stream(stream);
 				p->play();
+				// The forced-quit regression test waits for this line
+				// (godot/tests/audio/forced_quit_music_test.gd).
+				UtilityFunctions::print_verbose("MusicDirector: playing stream ", (int)sbf_entry_index);
 				Ref<AudioStreamPlayback> playback = p->get_stream_playback();
 				if (playback.is_valid()) {
 					self->_playbacks.push_back(ObjectID(playback->get_instance_id()));

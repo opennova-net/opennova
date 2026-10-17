@@ -1,6 +1,7 @@
 // Round flight and presentation, with authoritative consequences carried explicitly
 // per round. See round_sim.h and docs/net/novaworld-net-re.md §5.60.
 #include <runtime/world/round_sim.h>
+#include <base/io/bits.h>
 #include <base/io/tick_rate.h>
 #include <base/io/fixed.h>
 
@@ -48,20 +49,12 @@ constexpr int32_t kDragTableSize = 1220;
 // @ 0x527687 resolves every row at load].
 constexpr const char *kGlassSmashSound = "GLASS_SMASH";
 
-constexpr uint32_t rotl32(uint32_t value, unsigned count) {
-    return (value << count) | (value >> (32u - count));
-}
-
-constexpr uint32_t rotr32(uint32_t value, unsigned count) {
-    return (value >> count) | (value << (32u - count));
-}
-
 uint32_t spread_hash(uint32_t seed) {
     const uint64_t square = static_cast<uint64_t>(seed) * seed;
     const uint32_t low = static_cast<uint32_t>(square) - seed;
     uint32_t high = static_cast<uint32_t>(square >> 32);
-    high = rotr32((high ^ 0xCC1CDC1Du) + 0xC11ABB09u, 16);
-    uint32_t hash = rotl32(low + high, 18);
+    high = io::rotr32((high ^ 0xCC1CDC1Du) + 0xC11ABB09u, 16);
+    uint32_t hash = io::rotl32(low + high, 18);
     if ((hash & 0x80000000u) != 0) hash += 0x001ABB09u;
     return hash;
 }
@@ -74,7 +67,7 @@ RandomSpreadOffset weapon_calc_random_spread_offset(
     if (spread_fp16 == 0) return {};
 
     const uint32_t hash = spread_hash(seed);
-    uint32_t mixed = rotl32(hash, 12);
+    uint32_t mixed = io::rotl32(hash, 12);
     if ((mixed & 0x80000000u) != 0) mixed += 0x001ABB09u;
     const uint32_t a = mixed & 0xFFFFu;
     const uint32_t b = (hash >> 8) & 0xFFFFu;
@@ -648,10 +641,9 @@ RoundSourceState resolve_round_source(World &world,
     const int32_t source_z =
             body != nullptr ? body->pos[2] : to_fixed(entity->position.z);
     // The below-water classifier projects the per-tick EYE height (the shared
-    // entity_eye_below_water witness) wherever the drowning bit is clear;
-    // retail's stance leg folds the ladder/parachute bits with it (Flags &
-    // 0x108020 [orig: @0x4ec2d5]). eye_offset_z is the ported +0x74 channel
-    // (0 when never stamped, the retail spawn value).
+    // entity_eye_below_water witness) wherever the drowning bit is clear.
+    // eye_offset_z is the ported +0x74 channel (0 when never stamped, the
+    // retail spawn value).
     source.underwater = source.underwater ||
                         entity_eye_below_water(world, source_z,
                                                entity->eye_offset_z);
@@ -662,9 +654,15 @@ RoundSourceState resolve_round_source(World &world,
 
     source.recoil_pitch = &body->inf.recoil_pitch;
     source.weapon_weight_spread = &body->inf.weapon_weight_spread;
+    source.prone = body->inf.stance == InfantryState::Stance::kProne;
     source.scope_raised = source.scope_raised || body->inf.scope_raised;
-    const bool forced_standing = body->inf.airborne || source.underwater ||
-                                 (flags & kEntityFlagInAir) != 0;
+    // The standing row is forced by the parachute, drowning and ladder-contact
+    // bits or the eye below the water, then a mount forces row 1; an airborne
+    // body keeps its stance row. [orig: RoundData_SpawnRound
+    // `test [ebp+24h], 108020h` @0x4ec2d5, the eye @0x4ec2de..0x4ec2ea, row 2
+    // @0x4ec2ec, +0x16C -> row 1 @0x4ec2f4..0x4ec2fd]
+    const bool forced_standing =
+            source.underwater || (flags & kStanceRowStandingFlags) != 0;
     if (entity->mounted) {
         source.stance_category = 1;
     } else if (forced_standing) {
@@ -925,13 +923,19 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                     imp.direction = direction;
                     imp.ammo_index = params.ammo_index;
                     // The leaf reads the ammo's own row at the tag's place
-                    // [orig: @0x4e88c3..0x4e88dc].
+                    // [orig: @0x4e88c3..0x4e88dc]. Its tag is the class or
+                    // the face byte + 4 with no clamp: the leaf never calls
+                    // AmmoDef_ProcessImpactEffect, and a tag past the table
+                    // reads no row (impact_effect_own_row) where retail reads
+                    // past the compacted bank.
                     imp.own_row = true;
                     if (hit.hit_class == ProjectileHitClass::Terrain) {
+                        // [orig: Weapon_RaycastAndSpawnImpact case 0
+                        //  @0x4e8858..0x4e8862]
                         const int32_t surface = terrain::surface_type_at_fixed(
                             world.tables.surface_map, hit.position_q16.x,
                             hit.position_q16.y);
-                        imp.effect_tag = terrain_impact_effect_tag(surface);
+                        imp.effect_tag = surface + kSurfaceImpactTagOffset;
                     } else if (hit.hit_class == ProjectileHitClass::Water) {
                         imp.effect_tag = kWaterImpactEffectTag;
                     } else if (hit.hit_class == ProjectileHitClass::Person &&
@@ -944,19 +948,28 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                         //  vs @0x4e8867]
                         imp.effect_tag = 23;
                     } else {
-                        imp.effect_tag = surface_impact_effect_tag(hit.surface_type);
+                        // [orig: `lea esi, [ebx+4]` @0x4e8867 (cases 1, 2)
+                        //  and @0x4e8880 (case 3)]
+                        imp.effect_tag = hit.surface_type + kSurfaceImpactTagOffset;
                     }
                     imp.tick = world.logic_tick;
                     imp.source_order = next_impact_order++;
                     play_round_impact_sound(world, imp);
                     impacts.push_back(imp);
-                    // The knife leaf feeds the same impact-effect processor,
-                    // so a stab into an entity leaves the same scar by the
-                    // ammo's `scar_type` [orig: Weapon_RaycastAndSpawnImpact
-                    // @0x4e8460 -> AmmoDef_ProcessImpactEffect @0x40a170 ->
-                    // Impact_SpawnGlassEffectsOrScar @0x5cf1b0].
-                    if (const Entity *struck = world.registry.get(hit.geometry_entity))
-                        scar_add_entry(world, hit, *struck, ammo->scar_type);
+                    // The leaf spawns its row's emitter and plays its sound,
+                    // and nothing more: it never reaches
+                    // AmmoDef_ProcessImpactEffect, Impact_SpawnGlassEffectsOrScar's
+                    // one caller; and the knife's kill zone strikes persons
+                    // only and skips the pool-1/2 walks the glass userpoint
+                    // scars sit in, so a stab leaves no scar
+                    // [orig: Weapon_RaycastAndSpawnImpact @0x4e88c3..0x4e896b,
+                    //  its CEffectWorld_SpawnEmitterAtPosition call @0x4e8950
+                    //  and Entity_PlaySound3D_FullVolume call @0x4e896b;
+                    //  AmmoDef_ProcessImpactEffect @0x40a170 (its
+                    //  Impact_SpawnGlassEffectsOrScar call @0x40a264);
+                    //  Projectile_ProcessExplosionQueue's type-1 skip
+                    //  @0x4eb340..0x4eb343; Entity_ApplyVehicleCollisionDamage
+                    //  @0x4e6620].
                 }
             }
         } else {
@@ -1040,8 +1053,13 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                 spread = io::bam_add(
                         spread, io::bam_sar(*source.weapon_weight_spread, 7));
             }
+            // The up/down limit keys on the raw prone bit, not the row: a
+            // prone body whose row a mask bit or a mount overrode still takes
+            // +0xD0 [orig: `cmp outZ, 0; jnz` @0x4EC44E, `cmp outX, 0; jnz`
+            // @0x4EC454 -> push +0xD0 @0x4EC493, else +0xCC @0x4EC46E /
+            // @0x4EC477, the two loaded @0x4EC3DD..0x4EC3ED].
             const int32_t vertical =
-                    (vertical_spread || category == 0)
+                    (vertical_spread || source.prone)
                             ? weapon->error_up_theta_fp16
                             : weapon->error_hip_theta_fp16;
             const RandomSpreadOffset offset =

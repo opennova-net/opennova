@@ -1540,30 +1540,55 @@ void JoinerRole::apply_round_event(const replication::ClientRoundEvent &ev) {
 		// The category follows the retail animation-flags table, not a
 		// hand-maintained list of familiar locomotion clips. In particular,
 		// 170/171 remain crouched, 172 is prone, and idle_mortar (46) is
-		// neither. [orig: g_AnimStateFlagsTable @0x8139E8; category read in
-		// RoundData_SpawnRound @0x4EC252..0x4EC27A]
+		// neither. [orig: g_AnimStateFlagsTable @0x8139E8, mapped onto +0x12C by
+		// NetPacket_SerializePlayerState @0x4C11FD..0x4C1242; category read in
+		// RoundData_SpawnRound @0x4EC129..0x4EC14C, the row @0x4EC2A6..0x4EC2FD]
 		const uint32_t anim_flags = world::infantry_anim_flags(anim);
 		const bool prone = (anim_flags & world::kAnimStanceFlagProne) != 0;
+		// The spread's up/down limit reads the raw prone bit, not the row
+		// [orig: RoundData_SpawnRound @0x4EC137, read @0x4EC454].
+		source.prone = prone;
 		const bool crouched =
 				(anim_flags & world::kAnimStanceFlagCrouched) != 0;
-		const bool swimming = anim == 36 || anim == 37 || anim == 154;
 		const bool mounted =
 				round.shooter_carrier_handle != wire_handle::kInvalid;
+		// The shooter's Flags dword as a retail client holds a decoded peer's:
+		// the spawn word and the client motor's bits (the row's mirror), with the
+		// latest compact record's byte folded in under 0xFD, as the 0x0A fold
+		// does (`Flags ^= (Flags ^ wire) & 0xFD`): Parachute 0x20 rides the
+		// record, Drowning 0x8000 and LadderContact 0x100000 are the motor's.
+		// [orig: NetPacket_SerializePlayerState @0x4C1307..0x4C1311 (a player);
+		//  @0x4C065D..0x4C0662 (an infantry)]
+		const uint32_t mirror = shooter_row->rm_entity_flags;
+		const uint32_t shooter_flags = shooter_row->state_flags_known
+				? (mirror & ~0xFDu) | (shooter_row->state_flags & 0xFDu)
+				: mirror;
 		// Retail tests eye Z (Position.Z + CameraOffset.Z) against the fixed
 		// water plane [orig: RoundData_SpawnRound @0x4EC2DE..0x4EC2EA]. The
 		// decoded row has no CameraOffset carrier, so raw fixed position Z is
-		// the bounded projection; the swimming anim remains an independent
-		// positive witness. Do not invent a standing-eye constant here.
+		// the bounded projection. Do not invent a standing-eye constant here.
 		const bool below_water = world.env.water_z != 0 &&
 				shooter_row->z < world.env.water_z;
 		source.person_with_item_def =
 				shooter_row->cls == EntityClass::Player ||
 				shooter_row->cls == EntityClass::Infantry;
 		source.player = shooter_row->cls == EntityClass::Player;
-		source.underwater = swimming || below_water;
-		// Mounted is the later retail override and therefore wins even while
-		// below water; otherwise the underwater predicate forces standing row 2.
-		source.stance_category = mounted ? 1 : (source.underwater ? 2 :
+		// The recoil's x4 leg: Drowning, or the eye below the water
+		// [orig: RoundData_SpawnRound `test ecx, 8000h` @0x4EC342 (the shotgun
+		//  leg) / @0x4EC86D (the single round), the eye @0x4EC34E..0x4EC35A /
+		//  @0x4EC879..0x4EC885].
+		source.underwater =
+				(shooter_flags & world::kEntityFlagDrowning) != 0u || below_water;
+		// The stance row: Parachute, Drowning or LadderContact, or the eye below
+		// the water, forces the standing row 2; a mount after it wins (row 1).
+		// [orig: RoundData_SpawnRound `test dword ptr [ebp+24h], 108020h`
+		//  @0x4EC2D5, the eye @0x4EC2DE..0x4EC2EA, row 2 @0x4EC2EC, the mount
+		//  @0x4EC2F4..0x4EC2FD]
+		const bool standing_override =
+				(shooter_flags & (world::kEntityFlagParachute | world::kEntityFlagDrowning |
+				                  world::kEntityFlagLadderContact)) != 0u ||
+				below_water;
+		source.stance_category = mounted ? 1 : (standing_override ? 2 :
 				(prone ? 0 : (crouched ? 1 : 2)));
 		source.scope_raised =
 				(shooter_row->state_flags &

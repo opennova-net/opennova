@@ -44,7 +44,6 @@ constexpr int32_t kTouchMargin = 0x4000;
 constexpr int kCellShift = 22;
 
 int32_t fixed(double units) { return bms::to_fixed_16_16(units); }
-double units(int32_t q16) { return double(q16) / kUnit; }
 
 // The volumes a body stands on, leans on or hangs from: the generic solid (CB, 1), the ladder (CL, 4), the
 // vehicles' solid (VC, 7) and the players' (CP, 19) (docs/world/world-wac-ai-re.md 15.4); not the blink,
@@ -412,7 +411,7 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 		const std::string row = world::physics_class_row_name(physics);
 		int32_t terrain = 0;
 		const bool has_terrain = world::terrain_column_height(field, x, y, terrain);
-		verdict.terrain = has_terrain ? units(terrain) : 0.0;
+		verdict.terrain = has_terrain ? io::fp16_16_to_double(terrain) : 0.0;
 
 		if (entity.pool == MissionPool::Organic) {
 			const auto found = pose_of.find(entity.row);
@@ -440,8 +439,8 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 			const int32_t clearance = mission_pose_clearance(*pose, entity.x, entity.y, entity.z, field);
 			const int32_t origin = io::bam_add(z, fixed(pose->rise));
 			const int32_t feet = io::bam_sub(origin, pose->capsule_bottom);
-			verdict.base = units(feet);
-			verdict.support = units(terrain);
+			verdict.base = io::fp16_16_to_double(feet);
+			verdict.support = io::fp16_16_to_double(terrain);
 			verdict.on = MissionSupport::Terrain;
 			if (clearance < world::kOrganicWarmupSettleQ16) {
 				verdict.why = "settled";
@@ -464,7 +463,7 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 				verdict.on_row = 0;
 				verdict.on_name.clear();
 			}
-			verdict.support = units(support);
+			verdict.support = io::fp16_16_to_double(support);
 			const int32_t drop = io::bam_sub(feet, support);
 			if (drop < world::kOrganicWarmupSettleQ16) {
 				verdict.why = "standing";
@@ -478,7 +477,7 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 			verdict.state = (physics == world::PhysicsClass::Org1 || physics == world::PhysicsClass::Org2)
 			                        ? MissionGroundState::Falls
 			                        : MissionGroundState::Hangs;
-			verdict.fix_z = units(io::bam_sub(z, drop));
+			verdict.fix_z = io::fp16_16_to_double(io::bam_sub(z, drop));
 			out.push_back(std::move(verdict));
 			continue;
 		}
@@ -507,9 +506,9 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 		int32_t box_min[3] = { x, y, base }, box_max[3] = { x, y, base };
 		if (r.model->bounds) world::collision_matrix_box_bounds(r.matrix, r.model->box, box_min, box_max);
 		const int32_t bottom = box_min[2], top = box_max[2];
-		verdict.base = units(base);
-		verdict.bottom = units(bottom);
-		verdict.top = units(top);
+		verdict.base = io::fp16_16_to_double(base);
+		verdict.bottom = io::fp16_16_to_double(bottom);
+		verdict.top = io::fp16_16_to_double(top);
 		// What the column under the record meets from a unit over its lowest point: another entity's solid,
 		// else the terrain.
 		int32_t support = terrain;
@@ -521,7 +520,7 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 			support = hit;
 			stood_on(verdict, on);
 		}
-		verdict.support = units(support);
+		verdict.support = io::fp16_16_to_double(support);
 		// Where the fix stands it: its anchor on what lies under it, as the original editor's placer sets an
 		// item down (the height alone), where that leaves its model on it; else its lowest point on it.
 		const auto stand_on = [&](int32_t under) {
@@ -529,7 +528,7 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 			const int32_t lift = io::bam_sub(by_anchor, z);
 			const bool fits = io::bam_add(bottom, lift) <= io::bam_add(under, slack) && io::bam_add(top, lift) > under;
 			verdict.by_anchor = fits;
-			verdict.fix_z = units(fits ? by_anchor : io::bam_sub(z, io::bam_sub(bottom, under)));
+			verdict.fix_z = io::fp16_16_to_double(fits ? by_anchor : io::bam_sub(z, io::bam_sub(bottom, under)));
 		};
 		// Wholly under the terrain, touching nothing (a tunnel's contents stand in its pieces): the game draws
 		// it there, out of sight.
@@ -541,7 +540,7 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 				continue;
 			}
 			stood_on(verdict, nullptr);
-			verdict.support = units(terrain);
+			verdict.support = io::fp16_16_to_double(terrain);
 			verdict.state = MissionGroundState::Buried;
 			stand_on(terrain);
 			out.push_back(std::move(verdict));
@@ -558,7 +557,7 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 				verdict.on = MissionSupport::Water;
 				verdict.on_row = 0;
 				verdict.on_name.clear();
-				verdict.support = units(water_z);
+				verdict.support = io::fp16_16_to_double(water_z);
 				out.push_back(std::move(verdict));
 				continue;
 			}
@@ -566,14 +565,14 @@ std::vector<MissionGroundVerdict> mission_ground_verdicts(const MissionScene &sc
 			verdict.on = MissionSupport::Water;
 			verdict.on_row = 0;
 			verdict.on_name.clear();
-			verdict.support = units(water_z);
+			verdict.support = io::fp16_16_to_double(water_z);
 		}
 		// Its model reaches nothing under it: unless it leans on, hangs from or stands in another entity's
 		// volume (a sign on a wall, a wire between poles, a crate inside a building), it floats.
 		if (const Placed::Entry *touching = placed.touched(box_min, box_max, entity.row)) {
 			verdict.why = "touches";
 			stood_on(verdict, touching);
-			verdict.support = units(support);
+			verdict.support = io::fp16_16_to_double(support);
 			out.push_back(std::move(verdict));
 			continue;
 		}

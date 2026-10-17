@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <base/io/json.h>
@@ -10,6 +11,7 @@
 #include <editor/preview/preview_clip_sounds.h>
 #include <editor/preview/sound_preview.h>
 #include <runtime/audio/sound_selector.h>
+#include <runtime/menu/menu_sound.h>
 
 namespace opennova::mnu {
 struct Document;
@@ -44,29 +46,21 @@ io::JsonValue menu_sound_options_to_json(const MenuSoundOptions &options);
 // value of another type.
 bool read_menu_sound_options(const io::JsonValue &json, MenuSoundOptions &held, std::string &error);
 
-// The banks a menu's SOUND rows name, each read as the game opens it, by the name the row's text gives as
-// written [orig: CUIElement_ParseXMLDefinition @ 0x648ada -> SoundBank_CollectionAddOrRef @ 0x652b40 ->
-// SoundBank_OpenFile @ 0x75caa0] (the project's file of the name, an open document standing in for it), again
-// only when its stamp moves. A name no file answers, or a file that does not read as a bank, is none: the
-// game plays nothing from it.
+// The banks a menu's SOUND rows name: the game's collection (menu::MenuBankCollection, one bank per name
+// without case, opened the first time named, its keys 1, 2, ... in the order the banks opened), each opened
+// as the game opens it, by the name the row's text gives as written [orig: CUIElement_ParseXMLDefinition @
+// 0x648ada -> SoundBank_CollectionAddOrRef @ 0x652b40 -> SoundBank_OpenFile @ 0x75caa0] (the project's file of
+// the name, an open document standing in for it). The editor's own part: once the file a named bank is read
+// from moves (its stamp), every bank is opened again, as a menu loaded again would. A name no file answers, or
+// a file that does not read as a bank, is none: the game plays nothing from it.
 class MenuSoundBanks {
 public:
-	// The bank the name names, read now where its stamp moved; null for none. `key` (optional) takes its
-	// selection key (menu::MenuBankCollection's: 1, 2, ... by its place, 0 for none).
-	const PreviewBank *bank(const ProjectAssetSource &files, const std::string &name, int32_t *key = nullptr);
-	// Every bank read, in the order first named (each keeps its place: a sequential layer's pick is keyed by
-	// it, as one bank's is in the game).
-	const std::vector<PreviewBank> &banks() const { return banks_; }
+	// The bank the name names; null for none. `key` (optional) takes its selection key (the collection's).
+	const lwf::File *bank(const ProjectAssetSource &files, const std::string &name, int32_t *key = nullptr);
 
 private:
-	struct Held {
-		std::string name;
-		uint64_t stamp = 0;
-		bool read = false;
-		size_t index = 0; // its place in banks_
-	};
-	std::vector<Held> held_;
-	std::vector<PreviewBank> banks_;
+	menu::MenuBankCollection collection_;
+	std::vector<std::pair<std::string, uint64_t>> stamps_; // each name the collection was asked, its file's stamp then
 };
 
 // One window sound the preview fired: the play (`sound`: its seq in the order of every preview sound fired,

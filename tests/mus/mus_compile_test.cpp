@@ -717,7 +717,77 @@ static int test_unnamed_sections_and_strings(void) {
     return 1;
 }
 
+/* A `done` statement and a section's closing brace both compile to done (0x3F): the decompiler prints
+   the brace for the done the section's code ends on and the statement for any other, so the minimal
+   script (play, done, brace) decompiles to text that compiles back to its bytes. It printed every done
+   as a brace, and `play / } / }` does not compile. */
+static int test_done_statement_round_trips(void) {
+    std::string text;
+    CHECK(round_trips("script test\nsection Begin\n{\n  play sound_0\n  done\n}\n", &text),
+          "the minimal script round-trips");
+    CHECK(text.find("done\n}") != std::string::npos, "its done a statement before the brace");
+    CHECK(round_trips("script t\nsection A\n{\n  done\n  play sound_1\n}\nsection B\n{\n  play sound_2\n  done\n}\n"),
+          "a done ahead of a statement, then the next section's");
+    CHECK(round_trips("script t\nsection A\n{\n  if ((Var01 == 1))\n  {\n    done\n  }\n  play sound_1\n}\n"),
+          "a done in an if body");
+    CHECK(round_trips("script t\nsection A\n{\n  play sound_1\n}\n"), "a section closed by its brace alone");
+    CHECK(round_trips("script t\nsection A\n{\n  play sound_0\n}\nplay sound_1\n"),
+          "a top-level statement after a section's brace");
+    CHECK(round_trips("script t\nsection A\n{\n  play sound_0\n}\ndone\nsection B\n{\n  play sound_2\n}\n"),
+          "a top-level done after a section's brace");
+    CHECK(round_trips("script t\nsection A\n{\n  play sound_0\n}\nif ((Var01 == 1))\n{\n  done\n}\n"),
+          "a top-level if whose body holds a done, after a section's brace");
+    return 1;
+}
+
+/* An expression the compiler takes whose text runs past the decompiler's 255 characters a slot, or
+   that holds more than 32 pending operands: the decompile fails rather than cut the text (a cut
+   text compiled to other bytes, or not at all). Shorter ones still round-trip. */
+static int test_long_expression_fails_to_decompile(void) {
+    const auto left = [](int n) {
+        std::string expr = "(Var02 + Var03)";
+        for (int i = 1; i < n; ++i) expr = "(" + expr + " + Var03)";
+        return "script t\nsection Begin\n{\n  Var01 = " + expr + "\n}\n";
+    };
+    const auto right = [](int n) {
+        std::string expr = "1";
+        for (int i = 0; i < n; ++i) expr = "(1 + " + expr + ")";
+        return "script t\nsection Begin\n{\n  Var01 = " + expr + "\n}\n";
+    };
+    CHECK(round_trips(left(3).c_str()), "a short left-nested sum round-trips");
+    CHECK(round_trips(right(31).c_str()), "31 right-nested sums round-trip");
+    for (const std::string &src : {left(26), left(40), right(33), right(36)}) {
+        MusScript script = {};
+        int el = 0, ec = 0;
+        const char *em = NULL;
+        CHECK(mus_compile(src.c_str(), &script, &el, &ec, &em) == 0, "the compiler takes it");
+        CHECK(mus_decompile(&script, NULL, 0) < 0, "the decompiler gives no cut text");
+        mus_script_free(&script);
+    }
+    return 1;
+}
+
+/* A literal is read unsigned, the push's 32 bits: one past 4294967295 is refused (it compiled as
+   another number: 4294967297 as 1), and one of 2^31 or more decompiles as itself (it printed
+   negative, which compiles to a neg over the magnitude, other bytes). */
+static int test_literal_range(void) {
+    CHECK(round_trips("script t\nsection Begin\n{\n  Var01 = 7\n}\n"), "7 round-trips");
+    std::string text;
+    CHECK(round_trips("script t\nsection Begin\n{\n  Var01 = 3000000000\n}\n", &text), "3000000000 round-trips");
+    CHECK(text.find("3000000000") != std::string::npos, "printed as itself");
+    CHECK(round_trips("script t\nsection Begin\n{\n  Var01 = 4294967295\n}\n"), "4294967295 round-trips");
+    CHECK(round_trips("script t\nsection Begin\n{\n  Var01 = -5\n}\n"), "a negative literal (neg over 5) round-trips");
+    CHECK(!compiles("script t\nsection Begin\n{\n  Var01 = 4294967296\n}\n"), "4294967296 is refused");
+    CHECK(!compiles("script t\nsection Begin\n{\n  Var01 = 4294967297\n}\n"), "4294967297 is refused");
+    CHECK(!compiles("script t\nsection Begin\n{\n  Var01 = 99999999999\n}\n"), "99999999999 is refused");
+    CHECK(!compiles("script t\nsection Begin\n{\n  frame 3000000000\n}\n"), "a frame count past 255 read unsigned");
+    return 1;
+}
+
 int main(void) {
+    RUN_TEST(test_done_statement_round_trips);
+    RUN_TEST(test_long_expression_fails_to_decompile);
+    RUN_TEST(test_literal_range);
     RUN_TEST(test_unnamed_sections_and_strings);
     RUN_TEST(test_encode_model_fields);
     RUN_TEST(test_parse_method_table);

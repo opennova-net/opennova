@@ -181,8 +181,9 @@ std::vector<int32_t> mission_locks(const MissionDocument &document);
 bool same_locks(const std::vector<int32_t> &a, const std::vector<int32_t> &b);
 bool mission_holds_locks(const MissionDocument &document);
 // The .mis a save writes from the mission (its file as the writer takes it, its names, each entity's base height
-// from `base_heights` where it has one, in the writer's order: mission::write_mis_text): false with the writer's
-// refusal. A locked entity's base is the one the .mis as the mission knows it keeps for it (MissionNamesFile::
+// from `base_heights` where it has one, in the writer's order: mission::write_mis_text; its default kit the one
+// the mission's loadout leads with over MissionDocument::weapon_table): false with the writer's refusal. A
+// locked entity's base is the one the .mis as the mission knows it keeps for it (MissionNamesFile::
 // kept_bases over the mission as it stands), else the ground under it from `base_heights`; `written` takes each
 // entity's lock and base as written, in the writer's order (MissionNamesFile::locks).
 bool mission_names_text(const MissionDocument &document, const std::vector<int32_t> *base_heights, std::string &text,

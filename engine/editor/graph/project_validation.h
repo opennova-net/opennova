@@ -30,9 +30,10 @@ namespace opennova::editor {
 // AssetGraph::update taking those readings, ValidationCache::begin, then
 // ValidationCache::file_findings for each file of validation_files, one step at a time, then
 // ValidationCache::end; and the rows: the files' kept findings, run_use_checks (use_checks.h) and
-// AssetGraph::diagnostics. Only the graph's reading and file_findings read files; the use checks
-// read the graph the update made and which files' records their own checks read, so they run after
-// the last file. The scan and the open documents
+// AssetGraph::diagnostics. Only the graph's reading and file_findings read files, but for what two use
+// checks read of the files they judge (the texture check's headers, the terrain gate's .trn, overcast.def
+// and .env), each again only once its stamp moves; the use checks read the graph the update made and
+// which files' records their own checks read, so they run after the last file. The scan and the open documents
 // (their revisions) stay as the update saw them until the use checks ran: an edit between two
 // steps starts the validation again, or a file's findings would be of another revision than the
 // graph's.

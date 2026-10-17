@@ -417,10 +417,9 @@ void apply_main_scene_optics(World &world, LocalPlayerWeapon &weapon,
 		f.camera.yaw_deg += f.binocular_yaw_offset_deg;
 		f.camera.pitch_deg += f.binocular_pitch_offset_deg;
 	} else if (f.camera_pose_valid && slot != nullptr && f.scope_camera_zero_active) {
-		constexpr double degrees_per_bam = 360.0 / 4294967296.0;
 		// Mission yaw is 90 - BAM heading.
-		f.camera.yaw_deg -= static_cast<float>(slot->zero_yaw * degrees_per_bam);
-		f.camera.pitch_deg -= static_cast<float>(slot->zero_pitch * degrees_per_bam);
+		f.camera.yaw_deg -= static_cast<float>(slot->zero_yaw * kDegreesPerBam);
+		f.camera.pitch_deg -= static_cast<float>(slot->zero_pitch * kDegreesPerBam);
 	}
 }
 
@@ -803,6 +802,14 @@ void LocalPlayer::tick_view() {
 	w::PlayerCameraPose composed;
 	bool mounted_camera = false;
 	w::local_player_camera_compose(world, view, view_tracker, composed, mounted_camera);
+}
+
+void LocalPlayer::respawn_init(bool rebuild_kit) {
+    if (rebuild_kit)
+        local_loadout_rebuild(world_, loadout, weapon, inventory, inventory_valid,
+                              /*select_spawn_default=*/true);
+    local_player_view_reset(&world_, weapon, view, view_tracker);
+    hud_map_control.reset_spawn();
 }
 
 void LocalPlayer::reset_for_new_round() {

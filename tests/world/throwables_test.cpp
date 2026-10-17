@@ -635,6 +635,82 @@ void test_grenade_bounce_samples_charmap_surface() {
         CHECK(bounce.effect_tag == 10); // grass, not the dirt default
 }
 
+// A class past the tag table keeps its material + 4, and the impact presenter's
+// clamp plays the obj row for it, not the dirt row. [orig:
+// Entity_UpdateGrenadePhysics: the class @ 0x4443d0, + 4 @ 0x44481f into
+// AmmoDef_ProcessImpactEffect @ 0x444824; a tag of 28 or more -> 4
+// @ 0x40a1bc..0x40a1c1]
+void test_grenade_bounce_past_the_table_plays_the_obj_row() {
+    static const uint8_t raster[4] = {30, 30, 30, 30};
+    static const int mapped_grid[256] = {1};
+    Rig rig(0);
+    rig.w.tables.surface_map.data = raster;
+    rig.w.tables.surface_map.width = 2;
+    rig.w.tables.surface_map.height = 2;
+    rig.w.tables.surface_map.sector_grid = mapped_grid;
+    const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 2}, 0, 0);
+    CHECK(slot >= 0);
+    rig.tick(80);
+    CHECK(!rig.w.round_sim.impacts.empty());
+    for (const RoundImpact &bounce : rig.w.round_sim.impacts) {
+        CHECK(bounce.effect_tag == 34);
+        CHECK(round_impact_row(rig.w.tables.ammo, bounce).tag == 4);
+    }
+}
+
+// A satchel's ground contact presents through the impact presenter with the
+// grenade's descriptor (sound only for its first five contacts) and no
+// water-height test of its own: under the water plane it still sounds, unless
+// its ammo carries ClipWaterFx, whose presenter gate drops a round whose Z and
+// +0x88 copy (the Z its tick began at, refreshed at each motor tick's tail)
+// both sit at or under the plane.
+// [orig: Entity_UpdateSatchelPhysics @ 0x44893D..0x448983, the tail copy
+//  @ 0x448CA2; AmmoDef_ProcessImpactEffect @ 0x40A18D..0x40A1B1]
+void test_satchel_contact_presents_sound_only_and_no_water_gate() {
+    const auto contacts = [](Rig &rig) {
+        int n = 0;
+        for (const RoundImpact &imp : rig.w.round_sim.impacts)
+            if (imp.ammo_index == kAmmoSatchel && imp.effect_tag != 11) {
+                CHECK(imp.effect_tag == 5); // no char map: class 1, dirt
+                CHECK(!imp.present_effect);
+                CHECK(imp.present_sound);
+                ++n;
+            }
+        return n;
+    };
+    {
+        Rig rig(0);
+        CHECK(rig.throw_ammo(kAmmoSatchel, Vec3{10, 10, 2}, 0, 0) >= 0);
+        rig.tick(120);
+        CHECK(contacts(rig) == 1); // a dry stop
+    }
+    {
+        Rig rig(0);
+        rig.w.env.water_z = 5 << 16; // the stop lies under the plane
+        CHECK(rig.throw_ammo(kAmmoSatchel, Vec3{10, 10, 2}, 0, 0) >= 0);
+        rig.tick(240);
+        CHECK(contacts(rig) == 1); // still sounds: no water-height test
+    }
+    {
+        Rig rig(0);
+        rig.w.env.water_z = 5 << 16;
+        rig.w.tables.ammo.entries[kAmmoSatchel].flags |= kAmmoFlagClipWaterFx;
+        CHECK(rig.throw_ammo(kAmmoSatchel, Vec3{10, 10, 2}, 0, 0) >= 0);
+        rig.tick(240);
+        CHECK(contacts(rig) == 0); // ClipWaterFx, spawned and stopped under it
+    }
+    {
+        Rig rig(0);
+        rig.w.env.water_z = 1 << 16;
+        rig.w.tables.ammo.entries[kAmmoSatchel].flags |= kAmmoFlagClipWaterFx;
+        CHECK(rig.throw_ammo(kAmmoSatchel, Vec3{10, 10, 4}, 0, 0) >= 0);
+        rig.tick(240);
+        // Thrown from above the plane, it sinks and stops under it: the gate
+        // reads the tick's start Z, not the spawn's.
+        CHECK(contacts(rig) == 0);
+    }
+}
+
 void test_grenade_fuse_tick_boundaries() {
     {
         Rig rig(0);
@@ -2049,6 +2125,8 @@ int main() {
     test_control_and_bounce_share_prng16_stream();
     test_grenade_bounce_and_fuse();
     test_grenade_bounce_samples_charmap_surface();
+    test_grenade_bounce_past_the_table_plays_the_obj_row();
+    test_satchel_contact_presents_sound_only_and_no_water_gate();
     test_grenade_fuse_tick_boundaries();
     test_smoke_grenade_expiry_presents_no_second_obj_row();
     test_submerged_fuse_presents_at_the_water_surface();

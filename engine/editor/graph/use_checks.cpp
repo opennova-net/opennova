@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <iterator>
+#include <map>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -23,6 +24,7 @@
 #include <editor/documents/particle_token_slots.h>
 #include <editor/documents/particle_type.h>
 #include <editor/documents/strings_document.h>
+#include <editor/documents/terrain_document.h>
 #include <editor/documents/validation_cache.h>
 #include <editor/graph/asset_graph.h>
 #include <editor/graph/texture_checks.h>
@@ -30,9 +32,11 @@
 #include <editor/model/text_document.h>
 #include <editor/project/project_files.h>
 #include <formats/def/def.h>
+#include <formats/env/env.h>
 #include <formats/mission/authoring.h>
 #include <formats/mns/mns.h>
 #include <formats/mnu/mnu_layout.h>
+#include <formats/trn/trn_io.h>
 #include <runtime/hud/game_text_lookup.h>
 #include <runtime/menu/menu_style.h>
 
@@ -314,11 +318,174 @@ void check_particle_token_slots(const AssetGraph &, const ValidationCache &, con
 	}
 }
 
+// A file's text as this validation reads it: its open document's save, else its bytes (the project's folder,
+// or the paths' source by its logical name); false where neither reads. Its stamp: what it is read from (the open
+// document's identity, load and revision, else the file's size and last write as the scan lists it).
+bool validation_text(const ValidationInput &input, const AssetEntry &asset, std::string &out) {
+	if (const std::shared_ptr<const DocumentBase> open = input.open_document(asset)) {
+		const SerializeResult written = open->serialize();
+		if (written.ok()) {
+			out = written.text;
+			return true;
+		}
+	}
+	std::vector<uint8_t> bytes;
+	std::string error;
+	if (!(input.paths.files ? input.paths.files->read(asset.logical_name, bytes)
+	                        : io::read_file_bytes(join_path(input.paths.root, asset.relative_path), bytes, error)))
+		return false;
+	out.assign(bytes.begin(), bytes.end());
+	return true;
+}
+std::string validation_stamp(const ValidationInput &input, const AssetEntry &asset) {
+	if (const std::shared_ptr<const DocumentBase> open = input.open_document(asset))
+		return asset.relative_path + "|o" + std::to_string(open->identity()) + "." +
+		       std::to_string(open->load_generation()) + "." + std::to_string(open->revision());
+	return asset.relative_path + "|f" + std::to_string(asset.size_bytes) + "." + std::to_string(asset.modified_ticks);
+}
+
+// The keyword whose value a leg of the terrain's gate reads (formats/trn trn_refusal).
+const char *refusal_key(TrnRefusal leg) {
+	switch (leg) {
+	case TrnRefusal::NoColormap: return "polytrn_colormap";
+	case TrnRefusal::NoDetailmap: return "polytrn_detailmap";
+	case TrnRefusal::NoPolydata: return "polytrn_polydata";
+	case TrnRefusal::SectorRows: return "polytrn_sectors";
+	case TrnRefusal::SectorCount: return "polytrn_sectorcount";
+	case TrnRefusal::None: break;
+	}
+	return "";
+}
+
+// A mission's terrain as the game loads it: the .trn, then overcast.def, then the mission's .env through the
+// terrain's parser, and only then the gate [orig: Terrain_LoadEnvironmentConfig @ 0x610940:
+// Environment_LoadTimeOfDayConfig @ 0x6109c0 with Terrain_ParseConfigCallback, the gate @ 0x610a2a..0x610a6b;
+// formats/trn load_mission_trn, D-TERRAIN-18]. What the gate refuses it by, and the .trn's refusal read alone.
+struct TerrainAdmission {
+	std::string terrain; // the .trn's project path
+	bool read = false;   // its .trn read: judged
+	bool admitted = true;
+	std::string why, alone; // the load's refusal and the .trn's read alone, "" where the gate takes it
+	Diagnostic finding;     // the mission's row, where the gate refuses its load
+};
+
+// The terrain each mission loads, judged as the game judges it (TerrainAdmission): a mission whose load the gate
+// refuses gets terrain.refused, on the later file's line that set the value the gate refuses (overcast.def's or
+// the .env's) or else on its terrain reference, unless the .trn's own row says the same (the .trn's then, with its
+// fixes); a .trn every mission reading it loads is taken, its own row taken back (the .trn's own check,
+// documents/terrain_document validate_terrain_file, judges it alone, which stands for a .trn no mission reads).
+// Each mission's judgement is made again only once one of its three files' stamps moves.
+void check_terrain_admission(const AssetGraph &graph, const ValidationCache &files, const ValidationInput &input,
+		std::vector<Diagnostic> &out) {
+	static std::mutex mutex;
+	static std::map<std::string, std::pair<std::string, TerrainAdmission>> made; // by mission: its stamps, its judgement
+	const std::lock_guard<std::mutex> lock(mutex);
+	const AssetEntry *overcast = input.scan.find(env::kOvercastFile);
+	std::map<std::string, std::vector<const TerrainAdmission *>> by_terrain;
+	std::set<std::string> unjudged; // a .trn a mission reads that was not judged (its records unchecked, unread)
+	std::set<std::string> missions;
+	for (const AssetEntry &mission : input.scan.entries) {
+		if (mission.kind != AssetKind::Mission) continue;
+		const GraphEdge *terrain_edge = nullptr;
+		std::string terrain_file, environment_file;
+		for (const GraphEdge *edge : graph.references_of(mission.relative_path)) {
+			std::string file;
+			if (edge->kind == ReferenceKind::Terrain && !terrain_edge) {
+				terrain_edge = edge;
+				if (graph.resolve(*edge, &file) == ReferenceStatus::Present) terrain_file = file;
+			} else if (edge->kind == ReferenceKind::Environment && environment_file.empty() &&
+			           graph.resolve(*edge, &file) == ReferenceStatus::Present) {
+				environment_file = file;
+			}
+		}
+		const AssetEntry *terrain = terrain_file.empty() ? nullptr : input.scan.at_path(terrain_file);
+		if (!terrain) continue;
+		if (!files.records_checked(mission.relative_path)) {
+			unjudged.insert(terrain->relative_path);
+			continue;
+		}
+		const AssetEntry *environment = environment_file.empty() ? nullptr : input.scan.at_path(environment_file);
+		std::string stamp = input.paths.root + "|" + validation_stamp(input, *terrain) + "|" +
+		                    (overcast ? validation_stamp(input, *overcast) : std::string()) + "|" +
+		                    (environment ? validation_stamp(input, *environment) : std::string()) + "|" +
+		                    terrain_edge->record_key + "|" + terrain_edge->field;
+		missions.insert(mission.relative_path);
+		auto &[kept, judged] = made[mission.relative_path];
+		if (kept != stamp) {
+			kept = std::move(stamp);
+			judged = TerrainAdmission();
+			judged.terrain = terrain->relative_path;
+			std::string trn, overcast_text, environment_text;
+			if ((judged.read = validation_text(input, *terrain, trn))) {
+				TrnLaterTexts later;
+				if (overcast && validation_text(input, *overcast, overcast_text)) later.overcast = &overcast_text;
+				if (environment && validation_text(input, *environment, environment_text))
+					later.environment = &environment_text;
+				TrnConfig config;
+				std::vector<TrnLaterLine> taken;
+				TrnRefusal leg = TrnRefusal::None;
+				judged.admitted = load_mission_trn(trn, later, config, judged.why, &taken, &leg);
+				if (!judged.admitted) {
+					load_mission_trn(trn, TrnLaterTexts(), config, judged.alone);
+					// The later line that set the value the gate refuses, the last of them: the finding's place.
+					const TrnLaterLine *at = nullptr;
+					for (const TrnLaterLine &line : taken)
+						if (line.key == refusal_key(leg)) at = &line;
+					const std::string prefix = "TRN rejected: ";
+					const std::string why =
+					        judged.why.rfind(prefix, 0) == 0 ? judged.why.substr(prefix.size()) : judged.why;
+					const std::string loads =
+					        mission.relative_path + " loads " + terrain->relative_path +
+					        (later.overcast ? std::string(", then ") + env::kOvercastFile : std::string()) +
+					        (later.environment ? ", then " + environment->relative_path : std::string()) +
+					        " through the terrain's parser";
+					const std::string refused =
+					        "the game refuses the terrain (" + why + "). The mission stops loading and returns to the menus.";
+					if (at) {
+						const AssetEntry &file = at->file == TrnLaterLine::File::Environment ? *environment : *overcast;
+						judged.finding = make_finding(finding_code(TerrainFinding::Refused), DiagnosticSeverity::Error,
+						                              loads + ", this line last of them: " + refused, file.relative_path,
+						                              "key");
+						judged.finding.line = size_t(at->line);
+					} else {
+						judged.finding = make_finding(finding_code(TerrainFinding::Refused), DiagnosticSeverity::Error,
+						                              loads + ": " + refused, terrain_edge->source, terrain_edge->field);
+						judged.finding.record = terrain_edge->record;
+						judged.finding.record_key = terrain_edge->record_key;
+						judged.finding.record_title = terrain_edge->record_title;
+						judged.finding.row_id = terrain_edge->address.row;
+						judged.finding.child_id = terrain_edge->address.child;
+						judged.finding.record_kind = terrain_edge->address.kind;
+					}
+				}
+			}
+		}
+		if (judged.read) by_terrain[judged.terrain].push_back(&judged);
+		else unjudged.insert(judged.terrain);
+	}
+	for (auto it = made.begin(); it != made.end();) it = missions.count(it->first) ? std::next(it) : made.erase(it);
+	const auto own_row = [](const Diagnostic &d, const std::string &terrain) {
+		return d.asset == terrain && d.code() == finding_code(TerrainFinding::Refused).token;
+	};
+	for (const auto &entry : by_terrain) {
+		const std::string &terrain = entry.first;
+		const std::vector<const TerrainAdmission *> &judged = entry.second;
+		const bool own = std::any_of(out.begin(), out.end(), [&](const Diagnostic &d) { return own_row(d, terrain); });
+		const bool taken = std::all_of(judged.begin(), judged.end(), [](const TerrainAdmission *j) { return j->admitted; });
+		if (own && taken && !unjudged.count(terrain))
+			out.erase(std::remove_if(out.begin(), out.end(), [&](const Diagnostic &d) { return own_row(d, terrain); }),
+			          out.end());
+		for (const TerrainAdmission *j : judged)
+			if (!j->admitted && !(own && j->why == j->alone)) out.push_back(j->finding);
+	}
+}
+
 // The cross-file checks, one row per asset kind, in AssetKind's order.
 constexpr UseCheckRow kUseChecks[] = {
 	{ AssetKind::Texture, check_texture_uses },
 	{ AssetKind::Strings, check_gametext_flow },
 	{ AssetKind::Mission, check_mission_pools },
+	{ AssetKind::Terrain, check_terrain_admission },
 	{ AssetKind::MenuStyle, check_style_uses },
 	{ AssetKind::Particles, check_particle_token_slots },
 };

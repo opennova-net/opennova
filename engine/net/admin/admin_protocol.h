@@ -93,12 +93,21 @@ struct AdminReplyPlan {
 	AdminReplyFraming framing = AdminReplyFraming::QuietGap;
 	int count = 0; // Exact's packets
 };
-// The plan for one command line, split as the dispatcher splits it (isspace: ' ' and
-// '\t'..'\r'; a cp1252 byte >= 0x80 never splits) with its verbs and sub-verbs compared case
-// aside. Every verb not named below, and every verb a session's rights do not open, draws the
-// one usage reply. [orig: CAdminServer_DispatchCommand @0x406720 — the split @0x4067AD..0x4067EB
-//  (movsx -> isspace @0x76B964, the C locale's _pctype[c] & 8, the 256 bytes before the table
-//  at 0x806DA0 all zero), QUIT @0x406811, the usage @0x406A8D..0x406D58]
+// DispatchCommand's split of a command line, the one the server's console makes and the reply
+// plan below counts by: the CRT isspace under the game's ".ACP" LC_CTYPE, pinned to cp1252 (the
+// six C-locale spaces plus 0xA0, D-NET-381 / D-NET-382; the sign-extended byte reads the CRT's
+// mirrored rows), at most 25 tokens, the 25th running to the line's end (the walk stops writing
+// terminators at the cap). The views point into `line`.
+// [orig: CAdminServer_DispatchCommand @0x406720 - the line's length @0x406775..0x406781, the
+//  25-token cap `cmp esi, 19h; jge` @0x4067A0..0x4067A3, the walk @0x4067A0..0x4067EB, `movsx`
+//  @0x4067AD, isspace @0x4067B5 -> @0x76B964; CRT_init_ctype's mirror copy @0x784C59]
+std::vector<std::string_view> admin_split_command(std::string_view line);
+
+// The plan for one command line, split as the dispatcher splits it (admin_split_command) with
+// its verbs and sub-verbs compared case aside. Every verb not named below, and every verb a
+// session's rights do not open, draws the one usage reply.
+// [orig: CAdminServer_DispatchCommand @0x406720 — QUIT @0x406811, the usage
+//  @0x406A8D..0x406D58]
 AdminReplyPlan admin_reply_plan(std::string_view command);
 // Whether `replies` (the packets read so far, in order) are all `plan` draws. Exact: `count`
 // read; BanTarget / MenuState: one read, or two when the first says a second follows;

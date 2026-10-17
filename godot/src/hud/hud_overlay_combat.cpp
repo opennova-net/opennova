@@ -91,14 +91,7 @@ void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transf
 		if (clip.d == 0 || !std::isfinite(clip.d))
 			return out;
 		const float x = clip.normal.x / clip.d, y = clip.normal.y / clip.d;
-		if (x < -1)
-			out.clip |= 1;
-		if (x > 1)
-			out.clip |= 2;
-		if (y > 1)
-			out.clip |= 4;
-		if (y < -1)
-			out.clip |= 8;
+		out.clip |= frustum_clip_mask(x, y, false);
 		out.x = (std::clamp(x, -1.0f, 1.0f) * 0.5f + 0.5f) * surface.x;
 		out.y = (-std::clamp(y, -1.0f, 1.0f) * 0.5f + 0.5f) * surface.y;
 		out.valid = true;

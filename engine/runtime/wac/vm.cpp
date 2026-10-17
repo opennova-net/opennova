@@ -18,8 +18,6 @@
 namespace opennova::wac {
 namespace {
 
-bool ieq(const char *a, const char *b) { return opennova::strutil::iequals(a, b); }
-
 // [orig: Math_PowFloat @0x4F9BA0] binary32 input, exponentiation by
 // squaring, then the VM keeps EAX from the SSE2 conversion.
 // [orig: WacScript_ExecuteBytecode @0x4F615F]
@@ -300,7 +298,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // table before g_WacEventDepths (0xC67E18): its walk stops at once where
     // they lie in unnamed rows, all zero, as here, and a named row's bytes or
     // those below the table are D-EVT-19.
-    if (ieq(n, "reset")) {
+    if (strutil::iequals(n, "reset")) {
         const int event = A(0);
         const auto clear = [&](size_t i) {
             wac.ever_fired[i] = 0;
@@ -337,18 +335,18 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         return 1;
     }
 
-    if (ieq(n, "weaponfired")) return w.script.weapon_input.fire_requested(A(0));
-    if (ieq(n, "blockfire")) return w.script.weapon_input.set_fire_blocked(A(0), A(1) != 0);
+    if (strutil::iequals(n, "weaponfired")) return w.script.weapon_input.fire_requested(A(0));
+    if (strutil::iequals(n, "blockfire")) return w.script.weapon_input.set_fire_blocked(A(0), A(1) != 0);
 
     // ---- temporal / event conditions ----
-    if (ieq(n, "never")) return wac.ever_fired[ce] == 0 ? 1 : 0; // [orig: WacCmd_Never @0x4ED2E0]
+    if (strutil::iequals(n, "never")) return wac.ever_fired[ce] == 0 ? 1 : 0; // [orig: WacCmd_Never @0x4ED2E0]
     // Subtract in unsigned storage before the signed comparison, as the
     // retail dword arithmetic does across the tick counter's wrap.
     // [orig: WacCmd_Past @0x4ED010; WacCmd_Before @0x4ED030]
-    if (ieq(n, "past")) return static_cast<int32_t>(time_ - uint32_t(A(0))) >= 0;
-    if (ieq(n, "before")) return static_cast<int32_t>(time_ - uint32_t(A(0))) < 0;
-    if (ieq(n, "ontick")) return static_cast<int32_t>(time_) == A(0) ? 1 : 0;
-    if (ieq(n, "onptick")) {
+    if (strutil::iequals(n, "past")) return static_cast<int32_t>(time_ - uint32_t(A(0))) >= 0;
+    if (strutil::iequals(n, "before")) return static_cast<int32_t>(time_ - uint32_t(A(0))) < 0;
+    if (strutil::iequals(n, "ontick")) return static_cast<int32_t>(time_) == A(0) ? 1 : 0;
+    if (strutil::iequals(n, "onptick")) {
         // The selected player's slot play-tick dword in whole seconds (a
         // truncating signed /62); an entity without an active slot reads 0.
         // [orig: WacCmd_OnPlayerTick @0x4F0E10 — the Entity_ValidatePtr call
@@ -359,13 +357,13 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         if (w.registry.get(handle) == nullptr || player == nullptr) return 0;
         return static_cast<int32_t>(player->play_ticks) / 62 == A(0) ? 1 : 0;
     }
-    if (ieq(n, "elapse")) {
+    if (strutil::iequals(n, "elapse")) {
         // An event which has never fired is immediately eligible.
         // [orig: WacCmd_Elapse @0x4ECEF0]
         return wac.ever_fired[ce] == 0 ||
                 static_cast<int32_t>(time_ - wac.fired_tick[ce] - uint32_t(A(0))) >= 0;
     }
-    if (ieq(n, "previous") || ieq(n, "chain")) {
+    if (strutil::iequals(n, "previous") || strutil::iequals(n, "chain")) {
         // Skip descendants of the preceding event. The predecessor must
         // have fired more recently than this event; tick-zero stamps retain
         // their retail strict-comparison behavior.
@@ -381,40 +379,40 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         if (wac.ever_fired[size_t(preceding)] == 0 ||
                 static_cast<int32_t>(wac.fired_tick[ce] - prior_tick) >= 0)
             return 0;
-        const uint32_t delay = ieq(n, "chain") ? uint32_t(A(0)) : 0u;
+        const uint32_t delay = strutil::iequals(n, "chain") ? uint32_t(A(0)) : 0u;
         return static_cast<int32_t>(time_ - prior_tick - delay) >= 0;
     }
 
     // ---- group / entity state conditions ----
-    if (ieq(n, "groupdead")) return cmds.group_dead(A(0)) ? 1 : 0;
-    if (ieq(n, "groupalive")) return cmds.group_alive(A(0)) ? 1 : 0;
-    if (ieq(n, "SSNdead")) return cmds.wac_ssn_dead(H(0)) ? 1 : 0;
-    if (ieq(n, "SSNalive")) return cmds.wac_ssn_alive(H(0)) ? 1 : 0;
-    if (ieq(n, "SSNexists")) return cmds.ssn_exists(H(0)) ? 1 : 0;
-    if (ieq(n, "SSNLeadSSN2SSN")) return cmds.ssn_leads_target(H(0), H(1), H(2), A(3));
-    if (ieq(n, "fxrain")) return A(0) != 0 ? cmds.rain_effect(A(0), FX(0), next_rand(w)) : 1;
-    if (ieq(n, "ammo2tgt")) return cmds.fire_ammo_at_target(A(0), A(1));
-    if (ieq(n, "ammo2ssn")) return cmds.fire_ammo_from_ssn(A(0), H(1), H(2));
-    if (ieq(n, "ammoarea")) return cmds.fire_ammo_in_area(A(0), A(1));
-    if (ieq(n, "ammorain"))
+    if (strutil::iequals(n, "groupdead")) return cmds.group_dead(A(0)) ? 1 : 0;
+    if (strutil::iequals(n, "groupalive")) return cmds.group_alive(A(0)) ? 1 : 0;
+    if (strutil::iequals(n, "SSNdead")) return cmds.wac_ssn_dead(H(0)) ? 1 : 0;
+    if (strutil::iequals(n, "SSNalive")) return cmds.wac_ssn_alive(H(0)) ? 1 : 0;
+    if (strutil::iequals(n, "SSNexists")) return cmds.ssn_exists(H(0)) ? 1 : 0;
+    if (strutil::iequals(n, "SSNLeadSSN2SSN")) return cmds.ssn_leads_target(H(0), H(1), H(2), A(3));
+    if (strutil::iequals(n, "fxrain")) return A(0) != 0 ? cmds.rain_effect(A(0), FX(0), next_rand(w)) : 1;
+    if (strutil::iequals(n, "ammo2tgt")) return cmds.fire_ammo_at_target(A(0), A(1));
+    if (strutil::iequals(n, "ammo2ssn")) return cmds.fire_ammo_from_ssn(A(0), H(1), H(2));
+    if (strutil::iequals(n, "ammoarea")) return cmds.fire_ammo_in_area(A(0), A(1));
+    if (strutil::iequals(n, "ammorain"))
         return A(0) != 0 ? cmds.rain_ammo_near_player(A(0), next_rand(w)) : 1;
-    if (ieq(n, "teleport")) { cmds.teleport_group_to_marker(A(0), A(1)); return 0; }
-    if (ieq(n, "SSNcritical")) return cmds.ssn_critical(H(0));
-    if (ieq(n, "SSNride")) return cmds.ssn_has_rider(H(0));
-    if (ieq(n, "ssnname")) return cmds.set_ssn_name(H(0), S(1));
-    if (ieq(n, "ssn2ssn")) return cmds.order_boarding(H(0), H(1));
-    if (ieq(n, "SSNarea") || ieq(n, "SSNarea3D"))
-        return cmds.ssn_in_script_area(H(0), A(1), ieq(n, "SSNarea3D"));
-    if (ieq(n, "SSNloc")) return cmds.ssn_at_location(H(0), A(1));
-    if (ieq(n, "SSNwounded"))
+    if (strutil::iequals(n, "teleport")) { cmds.teleport_group_to_marker(A(0), A(1)); return 0; }
+    if (strutil::iequals(n, "SSNcritical")) return cmds.ssn_critical(H(0));
+    if (strutil::iequals(n, "SSNride")) return cmds.ssn_has_rider(H(0));
+    if (strutil::iequals(n, "ssnname")) return cmds.set_ssn_name(H(0), S(1));
+    if (strutil::iequals(n, "ssn2ssn")) return cmds.order_boarding(H(0), H(1));
+    if (strutil::iequals(n, "SSNarea") || strutil::iequals(n, "SSNarea3D"))
+        return cmds.ssn_in_script_area(H(0), A(1), strutil::iequals(n, "SSNarea3D"));
+    if (strutil::iequals(n, "SSNloc")) return cmds.ssn_at_location(H(0), A(1));
+    if (strutil::iequals(n, "SSNwounded"))
         return cmds.ssn_wounded(H(0)) ? 1 : 0;
-    if (ieq(n, "SSNnearSSN"))
+    if (strutil::iequals(n, "SSNnearSSN"))
         return cmds.ssn_within_distance(H(0),
                                         H(1), A(2)) ? 1 : 0;
-    if (ieq(n, "SSNlosSSN"))
+    if (strutil::iequals(n, "SSNlosSSN"))
         return cmds.ssn_los_clear_within(H(0),
                                          H(1), A(2)) ? 1 : 0;
-    if (ieq(n, "SSNseesSSN"))
+    if (strutil::iequals(n, "SSNseesSSN"))
         return cmds.ssn_sees_within(H(0),
                                     H(1), A(2)) ? 1 : 0;
 
@@ -426,41 +424,41 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // Schema rows: area idx111 @0x4ED0C0, meride idx116 @0x4F1260, SSNonSSN
     // idx16 @0x4F19A0 (see formats/wac/command_table_data.cpp).
     // [orig: WacCmd_Area @0x4ED0C0; Area3D @0x4ED120]
-    if (ieq(n, "area") || ieq(n, "area3D"))
-        return cmds.ssn_in_script_area(w.cached.local_player, A(0), ieq(n, "area3D"));
-    if (ieq(n, "outside")) {
+    if (strutil::iequals(n, "area") || strutil::iequals(n, "area3D"))
+        return cmds.ssn_in_script_area(w.cached.local_player, A(0), strutil::iequals(n, "area3D"));
+    if (strutil::iequals(n, "outside")) {
         // [orig: WacCmd_Outside @0x4ED050] First blink hit, no indoor-flag proxy.
         const world::Entity *player = w.registry.get(w.cached.local_player);
         return player != nullptr && player->blink_hits[0] == 0;
     }
-    if (ieq(n, "location")) return w.script.wac_values.local_location == A(0);
-    if (ieq(n, "meride")) return cmds.local_player_standing_on_ssn(H(0));
-    if (ieq(n, "meattached"))
+    if (strutil::iequals(n, "location")) return w.script.wac_values.local_location == A(0);
+    if (strutil::iequals(n, "meride")) return cmds.local_player_standing_on_ssn(H(0));
+    if (strutil::iequals(n, "meattached"))
         return cmds.local_player_attached_to_ssn(H(0)) ? 1 : 0;
-    if (ieq(n, "medrive"))
+    if (strutil::iequals(n, "medrive"))
         return cmds.local_player_driving_ssn(H(0)) ? 1 : 0;
-    if (ieq(n, "meongun"))
+    if (strutil::iequals(n, "meongun"))
         return cmds.local_player_on_gun_of_ssn(H(0)) ? 1 : 0;
-    if (ieq(n, "SSNonSSN")) {
+    if (strutil::iequals(n, "SSNonSSN")) {
         // [orig: Entity_IsOnTopOfChain @0x4F19A0 — B reachable from A's
         // groundEntity chain within 3 hops]
         return cmds.ssn_on_chain_of(H(0),
                                     H(1)) ? 1 : 0;
     }
-    if (ieq(n, "SSNSpawn")) return cmds.set_ssn_respawns(H(0), A(1));
-    if (ieq(n, "GroupSpawn")) {
+    if (strutil::iequals(n, "SSNSpawn")) return cmds.set_ssn_respawns(H(0), A(1));
+    if (strutil::iequals(n, "GroupSpawn")) {
         cmds.set_group_respawns(A(0), A(1));
         return 1;
     }
-    if (ieq(n, "eq")) return A(0) == A(1) ? 1 : 0;
-    if (ieq(n, "ne")) return A(0) != A(1) ? 1 : 0;
-    if (ieq(n, "lt")) return A(0) < A(1) ? 1 : 0;
-    if (ieq(n, "gt")) return A(0) > A(1) ? 1 : 0;
-    if (ieq(n, "le")) return A(0) <= A(1) ? 1 : 0;
-    if (ieq(n, "ge")) return A(0) >= A(1) ? 1 : 0;
-    if (ieq(n, "true")) return A(0) != 0 ? 1 : 0;
-    if (ieq(n, "false")) return A(0) == 0 ? 1 : 0;
-    if (ieq(n, "random")) {
+    if (strutil::iequals(n, "eq")) return A(0) == A(1) ? 1 : 0;
+    if (strutil::iequals(n, "ne")) return A(0) != A(1) ? 1 : 0;
+    if (strutil::iequals(n, "lt")) return A(0) < A(1) ? 1 : 0;
+    if (strutil::iequals(n, "gt")) return A(0) > A(1) ? 1 : 0;
+    if (strutil::iequals(n, "le")) return A(0) <= A(1) ? 1 : 0;
+    if (strutil::iequals(n, "ge")) return A(0) >= A(1) ? 1 : 0;
+    if (strutil::iequals(n, "true")) return A(0) != 0 ? 1 : 0;
+    if (strutil::iequals(n, "false")) return A(0) == 0 ? 1 : 0;
+    if (strutil::iequals(n, "random")) {
         // [orig: WacCmd_Random @0x4ED280] Always advance, including zero or
         // negative limits. Signed 64-bit IMUL, rounded SHRD, then low-word +1.
         const int64_t product = int64_t(A(0)) * int64_t(next_rand(w) & 0xFFFFu) + 0x8000;
@@ -468,37 +466,37 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         w.script.vars.wac.rnd = result;
         return result == 1 ? 1 : 0;
     }
-    if (ieq(n, "squadevent")) return w.script.squad_events.query(A(0));
-    if (ieq(n, "squadclear")) return w.script.squad_events.clear_selected();
+    if (strutil::iequals(n, "squadevent")) return w.script.squad_events.query(A(0));
+    if (strutil::iequals(n, "squadclear")) return w.script.squad_events.clear_selected();
 
     // ---- variable mutation ----
-    if (ieq(n, "set")) { if (argc >= 2) write(w, args[0], A(1)); return A(1); }
-    if (ieq(n, "add")) { if (argc >= 2) { int32_t v = int32_t(uint32_t(read(w, args[0])) + uint32_t(A(1))); write(w, args[0], v); return v; } return 0; }
-    if (ieq(n, "sub")) { if (argc >= 2) { int32_t v = int32_t(uint32_t(read(w, args[0])) - uint32_t(A(1))); write(w, args[0], v); return v; } return 0; }
-    if (ieq(n, "inc")) { if (argc >= 1) { int32_t v = int32_t(uint32_t(read(w, args[0])) + 1u); write(w, args[0], v); return v; } return 0; }
-    if (ieq(n, "dec")) { if (argc >= 1) { int32_t v = int32_t(uint32_t(read(w, args[0])) - 1u); write(w, args[0], v); return v; } return 0; }
-    if (ieq(n, "store")) { if (argc >= 1) write(w, args[0], acc_); return acc_; }
-    if (ieq(n, "load")) { return A(0); }
+    if (strutil::iequals(n, "set")) { if (argc >= 2) write(w, args[0], A(1)); return A(1); }
+    if (strutil::iequals(n, "add")) { if (argc >= 2) { int32_t v = int32_t(uint32_t(read(w, args[0])) + uint32_t(A(1))); write(w, args[0], v); return v; } return 0; }
+    if (strutil::iequals(n, "sub")) { if (argc >= 2) { int32_t v = int32_t(uint32_t(read(w, args[0])) - uint32_t(A(1))); write(w, args[0], v); return v; } return 0; }
+    if (strutil::iequals(n, "inc")) { if (argc >= 1) { int32_t v = int32_t(uint32_t(read(w, args[0])) + 1u); write(w, args[0], v); return v; } return 0; }
+    if (strutil::iequals(n, "dec")) { if (argc >= 1) { int32_t v = int32_t(uint32_t(read(w, args[0])) - 1u); write(w, args[0], v); return v; } return 0; }
+    if (strutil::iequals(n, "store")) { if (argc >= 1) write(w, args[0], acc_); return acc_; }
+    if (strutil::iequals(n, "load")) { return A(0); }
 
     // ---- entity actions ----
     // The killSSN handler. [orig: WacCmd_KillSsn @0x4F1E40]
-    if (ieq(n, "killSSN")) return cmds.wac_kill_ssn(H(0)) ? 1 : 0;
+    if (strutil::iequals(n, "killSSN")) return cmds.wac_kill_ssn(H(0)) ? 1 : 0;
     // The notifying removal (S2C 0x12, a player's devices, then the destroy).
     // [orig: WacCmd_RemoveSsn @0x4F1EE0 (the Server_RemoveEntityAndNotify call
     //  @0x4F1F28), return 1 @0x4F1F30]
-    if (ieq(n, "removeSSN")) return cmds.server_remove_and_notify(H(0)) ? 1 : 0;
-    if (ieq(n, "remove")) { cmds.remove_group(A(0)); return 0; }
-    if (ieq(n, "ssnuse")) return cmds.use_boarding_target(H(0));
-    if (ieq(n, "SSNHP")) return cmds.set_ssn_hp(H(0), A(1)) ? 1 : 0;
-    if (ieq(n, "SSNADDHP")) return cmds.add_ssn_hp(H(0), A(1)); // 1 only when clamped
-    if (ieq(n, "SSNtoWP")) return cmds.set_ssn_waypoint(H(0), A(1)) ? 1 : 0;
-    if (ieq(n, "SSNMin")) return cmds.set_ssn_engage_min(H(0), A(1)) ? 1 : 0;
-    if (ieq(n, "SSNMax")) return cmds.set_ssn_engage_max(H(0), A(1)) ? 1 : 0;
-    if (ieq(n, "SSNAtt")) return cmds.set_ssn_attack_max(H(0), A(1)) ? 1 : 0;
-    if (ieq(n, "SSNanim")) return cmds.set_ssn_anim(H(0), A(1)) ? 1 : 0;
-    if (ieq(n, "anim")) return cmds.set_local_anim(A(0)) ? 0 : 1;
+    if (strutil::iequals(n, "removeSSN")) return cmds.server_remove_and_notify(H(0)) ? 1 : 0;
+    if (strutil::iequals(n, "remove")) { cmds.remove_group(A(0)); return 0; }
+    if (strutil::iequals(n, "ssnuse")) return cmds.use_boarding_target(H(0));
+    if (strutil::iequals(n, "SSNHP")) return cmds.set_ssn_hp(H(0), A(1)) ? 1 : 0;
+    if (strutil::iequals(n, "SSNADDHP")) return cmds.add_ssn_hp(H(0), A(1)); // 1 only when clamped
+    if (strutil::iequals(n, "SSNtoWP")) return cmds.set_ssn_waypoint(H(0), A(1)) ? 1 : 0;
+    if (strutil::iequals(n, "SSNMin")) return cmds.set_ssn_engage_min(H(0), A(1)) ? 1 : 0;
+    if (strutil::iequals(n, "SSNMax")) return cmds.set_ssn_engage_max(H(0), A(1)) ? 1 : 0;
+    if (strutil::iequals(n, "SSNAtt")) return cmds.set_ssn_attack_max(H(0), A(1)) ? 1 : 0;
+    if (strutil::iequals(n, "SSNanim")) return cmds.set_ssn_anim(H(0), A(1)) ? 1 : 0;
+    if (strutil::iequals(n, "anim")) return cmds.set_local_anim(A(0)) ? 0 : 1;
     // [orig: WacCmd_SsnFace @0x4F1C60]
-    if (ieq(n, "ssnface")) {
+    if (strutil::iequals(n, "ssnface")) {
         const world::Entity *entity = w.registry.get(H(0));
         if (entity == nullptr || entity->item_id == 0 || w.facials.for_entity(*entity) == nullptr)
             return 0;
@@ -506,10 +504,10 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         return 1;
     }
 
-    if (ieq(n, "fall")) return cmds.raise_local_player() ? 1 : 0;
-    if (ieq(n, "ssnturn")) return cmds.set_ssn_turn(H(0), A(1)) ? 1 : 0;
-    if (ieq(n, "tele")) return cmds.teleport_local_to_ssn(H(0)) ? 1 : 0;
-    if (ieq(n, "forceanim")) {
+    if (strutil::iequals(n, "fall")) return cmds.raise_local_player() ? 1 : 0;
+    if (strutil::iequals(n, "ssnturn")) return cmds.set_ssn_turn(H(0), A(1)) ? 1 : 0;
+    if (strutil::iequals(n, "tele")) return cmds.teleport_local_to_ssn(H(0)) ? 1 : 0;
+    if (strutil::iequals(n, "forceanim")) {
         // The notice rides the system ring, not the chat ring.
         // [orig: Script_ForceAnimation @0x4F2610 (the Chat_AddMessageChannel2
         //  call @0x4F266A), return 0 @0x4F2682]
@@ -520,7 +518,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         w.out.effects.push({"debug_text", 0, 0, 0, 0, message});
         return 0;
     }
-    if (ieq(n, "dropflare")) {
+    if (strutil::iequals(n, "dropflare")) {
         // [orig: WacCmd_DropFlare @0x4F2710] Unlike SSNanim, this checks
         // the +0x20 ItemDef pointer, not the +0x1C type index or health.
         world::Entity *entity = w.registry.get(cmds.resolve_target(H(0)));
@@ -528,7 +526,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         w.vehicles.release_flares(*entity);
         return 1;
     }
-    if (ieq(n, "IsPSPallteam")) {
+    if (strutil::iequals(n, "IsPSPallteam")) {
         // [orig: WacCmd_IsPspAllTeam @0x4EE4B0] The spawn registry includes
         // dead points and differs from the Advance & Secure capture chain.
         const world::SpawnZoneRegistry points = w.zones.build_spawn_zone_list();
@@ -541,21 +539,21 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         }
         return 1;
     }
-    if (ieq(n, "event"))
+    if (strutil::iequals(n, "event"))
         return w.script.bms_events != nullptr && w.script.bms_events->is_active(A(0)) ? 1 : 0;
-    if (ieq(n, "dooropen")) return w.doors.group_open(w, A(0)) ? 1 : 0;
-    if (ieq(n, "opendoors") || ieq(n, "closedoors")) {
-        w.doors.command_group(w, A(0), ieq(n, "opendoors"), false);
+    if (strutil::iequals(n, "dooropen")) return w.doors.group_open(w, A(0)) ? 1 : 0;
+    if (strutil::iequals(n, "opendoors") || strutil::iequals(n, "closedoors")) {
+        w.doors.command_group(w, A(0), strutil::iequals(n, "opendoors"), false);
         return 1;
     }
-    if (ieq(n, "setaccuracy"))
+    if (strutil::iequals(n, "setaccuracy"))
         return cmds.set_ssn_accuracy(H(0), A(1), A(2)) ? 1 : 0;
-    if (ieq(n, "ssnguard"))
+    if (strutil::iequals(n, "ssnguard"))
         return cmds.set_ssn_guard(H(0), A(1) != 0) ? 1 : 0;
-    if (ieq(n, "ssncspd") || ieq(n, "ssnpspd")) {
+    if (strutil::iequals(n, "ssncspd") || strutil::iequals(n, "ssnpspd")) {
         const world::EntityHandle ssn = H(0);
         if (!cmds.ssn_exists(ssn)) return 0;
-        cmds.apply_ai_command(ssn, ieq(n, "ssncspd") ? 29 : 30,
+        cmds.apply_ai_command(ssn, strutil::iequals(n, "ssncspd") ? 29 : 30,
                               A(1), 0, 0);
         // Retail reports success for any resolved row with an ItemTypeIndex
         // (ssn_exists); only the AI-event queue is gated on the brain
@@ -567,8 +565,8 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // ---- group actions ----
     // Returns 0 [orig: WacCmd_Kill @0x4EDC90, `xor eax,eax` @0x4EDC9D] after the
     // group walk [orig: Entity_KillAllByNetId @0x43C8E0].
-    if (ieq(n, "kill")) { cmds.kill_group(A(0)); return 0; }
-    if (ieq(n, "Gkill") || ieq(n, "Gremove")) {
+    if (strutil::iequals(n, "kill")) { cmds.kill_group(A(0)); return 0; }
+    if (strutil::iequals(n, "Gkill") || strutil::iequals(n, "Gremove")) {
         const int32_t group = A(0);
         if (group >= 0 && size_t(group) < groups_.size()) {
             for (world::EntityHandle h : groups_[group]) {
@@ -580,7 +578,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
                     // Server_RemoveEntityAndNotify call @0x4F1FF2)]. Both return
                     // 0 [orig: WacCmd_GroupKill @0x4F1F72; WacCmd_GroupRemove
                     // @0x4F2006].
-                    if (ieq(n, "Gkill")) cmds.wac_kill_ssn(h);
+                    if (strutil::iequals(n, "Gkill")) cmds.wac_kill_ssn(h);
                     else cmds.server_remove_and_notify(h);
                 }
             }
@@ -590,19 +588,19 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // Both return 1 whatever they visited [orig: WacCmd_GroupToWaypoint
     // (the GtoWP handler) @0x4ED3E4; WacCmd_GroupHp
     // (the GroupHP handler) @0x4F7BD0].
-    if (ieq(n, "GtoWP")) { cmds.group_to_waypoint(A(0), A(1)); return 1; }
-    if (ieq(n, "GroupHP")) { cmds.set_group_hp(A(0), A(1)); return 1; }
-    if (ieq(n, "GroupMin")) return cmds.set_group_engage_min(A(0), A(1));
-    if (ieq(n, "GroupMax")) return cmds.set_group_engage_max(A(0), A(1));
-    if (ieq(n, "GroupAtt")) return cmds.set_group_attack_max(A(0), A(1));
-    if (ieq(n, "pisteam")) {
+    if (strutil::iequals(n, "GtoWP")) { cmds.group_to_waypoint(A(0), A(1)); return 1; }
+    if (strutil::iequals(n, "GroupHP")) { cmds.set_group_hp(A(0), A(1)); return 1; }
+    if (strutil::iequals(n, "GroupMin")) return cmds.set_group_engage_min(A(0), A(1));
+    if (strutil::iequals(n, "GroupMax")) return cmds.set_group_engage_max(A(0), A(1));
+    if (strutil::iequals(n, "GroupAtt")) return cmds.set_group_attack_max(A(0), A(1));
+    if (strutil::iequals(n, "pisteam")) {
         const world::Entity *entity = w.registry.get(world::EntityHandle{static_cast<uint16_t>(auto_item_)});
         return entity != nullptr && static_cast<int8_t>(entity->team) == A(0);
     }
     // The selected entity must own an active player slot. A Player flag,
     // ItemDef or positive health alone does not establish that ownership.
     // [orig: WacCmd_PlayerIsKills @0x4F0B60; Entity_ValidatePtr @0x500910]
-    if (ieq(n, "pisgold")) {
+    if (strutil::iequals(n, "pisgold")) {
         // The JO node's +744 flags start at zero. Its PlayEnter flag parser
         // consumes/discards every token and clears the entire dword; the
         // recovered executable has no producer that sets the Gold bit.
@@ -611,13 +609,13 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         // CNapiNetwork_ParseServerVarList @0x4C4310, clear @0x4C4387]
         return 0;
     }
-    if (ieq(n, "piskills")) {
+    if (strutil::iequals(n, "piskills")) {
         const world::EntityHandle handle{static_cast<uint16_t>(auto_item_)};
         const world::MatchPlayer *player = w.match.player(handle);
         return w.registry.get(handle) != nullptr && player != nullptr &&
                 player->stats[world::MatchStats::kEnemyKills] >= A(0);
     }
-    if (ieq(n, "pisvar") || ieq(n, "psetvar")) {
+    if (strutil::iequals(n, "pisvar") || strutil::iequals(n, "psetvar")) {
         // Retail checks only the upper bound. Negative indices address other
         // player-slot fields; the portable model rejects them (D-WAC-2).
         // [orig: WacCmd_PlayerIsVar @0x4F0BD0; WacCmd_PlayerSetVar @0x4F0CB0]
@@ -626,53 +624,53 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
         world::MatchPlayer *player = w.match.player(handle);
         if (index < 0 || index > 16 || w.registry.get(handle) == nullptr || player == nullptr)
             return 0;
-        if (ieq(n, "psetvar")) player->script_vars[size_t(index)] = 1;
+        if (strutil::iequals(n, "psetvar")) player->script_vars[size_t(index)] = 1;
         return player->script_vars[size_t(index)] != 0;
     }
-    if (ieq(n, "AddExp")) return w.match.add_experience(w, H(0), A(1));
-    if (ieq(n, "ppunt") || ieq(n, "pkillpunt"))
+    if (strutil::iequals(n, "AddExp")) return w.match.add_experience(w, H(0), A(1));
+    if (strutil::iequals(n, "ppunt") || strutil::iequals(n, "pkillpunt"))
         return w.match.request_player_punt(w, world::EntityHandle{static_cast<uint16_t>(auto_item_)},
-                                           ieq(n, "pkillpunt"));
-    if (ieq(n, "Gsetaccuracy")) {
+                                           strutil::iequals(n, "pkillpunt"));
+    if (strutil::iequals(n, "Gsetaccuracy")) {
         // [orig: WacCmd_GroupSetAccuracy @0x4F7BE0 — return 1 @0x4F7C43]
         cmds.set_group_accuracy(A(0), A(1), A(2));
         return 1;
     }
 
     // ---- environment ---- (world::WeatherState carries the handler cites)
-    if (ieq(n, "fogtype")) { cmds.set_fog_type(A(0)); return 0; }
-    if (ieq(n, "fogdist")) { cmds.set_fog_distance_q16(A(0)); return 0; }
-    if (ieq(n, "movefog")) { cmds.move_fog_q16(A(0), A(1)); return 0; }
-    if (ieq(n, "rain")) { cmds.set_rain(A(0), A(1)); return 0; }
-    if (ieq(n, "snow")) { cmds.set_snow(A(0), A(1)); return 0; }
-    if (ieq(n, "overcast")) { cmds.set_overcast(A(0), A(1)); return 0; }
-    if (ieq(n, "skyspeed")) { cmds.set_sky_speed(A(0)); return 0; }
-    if (ieq(n, "fov")) { cmds.set_fov(A(0)); return 0; }
-    if (ieq(n, "skyheight")) { cmds.set_sky_height(A(0)); return 0; }
+    if (strutil::iequals(n, "fogtype")) { cmds.set_fog_type(A(0)); return 0; }
+    if (strutil::iequals(n, "fogdist")) { cmds.set_fog_distance_q16(A(0)); return 0; }
+    if (strutil::iequals(n, "movefog")) { cmds.move_fog_q16(A(0), A(1)); return 0; }
+    if (strutil::iequals(n, "rain")) { cmds.set_rain(A(0), A(1)); return 0; }
+    if (strutil::iequals(n, "snow")) { cmds.set_snow(A(0), A(1)); return 0; }
+    if (strutil::iequals(n, "overcast")) { cmds.set_overcast(A(0), A(1)); return 0; }
+    if (strutil::iequals(n, "skyspeed")) { cmds.set_sky_speed(A(0)); return 0; }
+    if (strutil::iequals(n, "fov")) { cmds.set_fov(A(0)); return 0; }
+    if (strutil::iequals(n, "skyheight")) { cmds.set_sky_height(A(0)); return 0; }
     // [orig: WacCmd_Tod @0x4EDC70 — return 1 @0x4EDC7F]
-    if (ieq(n, "TOD")) { cmds.set_time_of_day_minutes(A(0)); return 1; }
-    if (ieq(n, "sunfade")) { cmds.sun_fade(A(0), A(1)); return 0; }
-    if (ieq(n, "colorfade")) { cmds.set_color_fade(A(0)); return 0; }
+    if (strutil::iequals(n, "TOD")) { cmds.set_time_of_day_minutes(A(0)); return 1; }
+    if (strutil::iequals(n, "sunfade")) { cmds.sun_fade(A(0), A(1)); return 0; }
+    if (strutil::iequals(n, "colorfade")) { cmds.set_color_fade(A(0)); return 0; }
     // The handlers pack three independent operands, retaining carries between
     // components and dword wrap. Variables are evaluated at each execution.
     // [orig: WacCmd_Sun..SkyFogColor @0x4EDCD0..0x4EDE70]
     const auto rgb = [&]() -> uint32_t {
         return uint32_t(A(2)) + ((uint32_t(A(1)) + (uint32_t(A(0)) << 8)) << 8);
     };
-    if (ieq(n, "lightning")) { cmds.set_lightning_color(rgb()); return 0; }
-    if (ieq(n, "sun")) { cmds.set_weather_color(world::WeatherColorTarget::Sun, rgb()); return 0; }
-    if (ieq(n, "sky")) { cmds.set_weather_color(world::WeatherColorTarget::Sky, rgb()); return 0; }
-    if (ieq(n, "ground")) { cmds.set_weather_color(world::WeatherColorTarget::Ground, rgb()); return 0; }
-    if (ieq(n, "floor")) { cmds.set_weather_color(world::WeatherColorTarget::Floor, rgb()); return 0; }
-    if (ieq(n, "ceiling")) { cmds.set_weather_color(world::WeatherColorTarget::Ceiling, rgb()); return 0; }
-    if (ieq(n, "cloud")) { cmds.set_weather_color(world::WeatherColorTarget::Cloud, rgb()); return 0; }
-    if (ieq(n, "fog") || ieq(n, "fogcolor")) { cmds.set_weather_color(world::WeatherColorTarget::Fog, rgb()); return 0; }
-    if (ieq(n, "skyfog") || ieq(n, "skyfogcolor") || ieq(n, "crash")) { cmds.set_weather_color(world::WeatherColorTarget::SkyFog, rgb()); return 0; }
-    if (ieq(n, "gain")) { cmds.set_weather_color(world::WeatherColorTarget::Gain, rgb()); return 0; }
+    if (strutil::iequals(n, "lightning")) { cmds.set_lightning_color(rgb()); return 0; }
+    if (strutil::iequals(n, "sun")) { cmds.set_weather_color(world::WeatherColorTarget::Sun, rgb()); return 0; }
+    if (strutil::iequals(n, "sky")) { cmds.set_weather_color(world::WeatherColorTarget::Sky, rgb()); return 0; }
+    if (strutil::iequals(n, "ground")) { cmds.set_weather_color(world::WeatherColorTarget::Ground, rgb()); return 0; }
+    if (strutil::iequals(n, "floor")) { cmds.set_weather_color(world::WeatherColorTarget::Floor, rgb()); return 0; }
+    if (strutil::iequals(n, "ceiling")) { cmds.set_weather_color(world::WeatherColorTarget::Ceiling, rgb()); return 0; }
+    if (strutil::iequals(n, "cloud")) { cmds.set_weather_color(world::WeatherColorTarget::Cloud, rgb()); return 0; }
+    if (strutil::iequals(n, "fog") || strutil::iequals(n, "fogcolor")) { cmds.set_weather_color(world::WeatherColorTarget::Fog, rgb()); return 0; }
+    if (strutil::iequals(n, "skyfog") || strutil::iequals(n, "skyfogcolor") || strutil::iequals(n, "crash")) { cmds.set_weather_color(world::WeatherColorTarget::SkyFog, rgb()); return 0; }
+    if (strutil::iequals(n, "gain")) { cmds.set_weather_color(world::WeatherColorTarget::Gain, rgb()); return 0; }
 
     // ---- objective ----
     // [orig: WacAction_Win @0x4ed4a0 — Server_ProcessRoundEnd(team) straight through.]
-    if (ieq(n, "win")) {
+    if (strutil::iequals(n, "win")) {
         w.out.effects.push({"win", A(0), 0, 0, 0, std::string()});
         w.process_round_end(A(0));
         return 1; // [orig: WacAction_Win @0x4ED4AD]
@@ -689,7 +687,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     // the CHAT ring in raw white, not with the triggered text [orig:
     // GameMsg_AddChatLineAndRelay @0x5BA170 (the Chat_AddMessageChannel1(line,
     // -1, 930) call @0x5BA197)].
-    if (ieq(n, "lose")) {
+    if (strutil::iequals(n, "lose")) {
         const int32_t team = A(0);
         if (team != 0 && team != 1) return 0;
         const std::string key = team == 1 ? "STRMISC_KILLEDBLUE" : "STRMISC_KILLEDGREEN";
@@ -705,7 +703,7 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
     }
 
     // ---- debug console ----
-    if (ieq(n, "Help")) {
+    if (strutil::iequals(n, "Help")) {
         // [orig: WacCmd_Help @0x4F6DE0]
         const HelpExportResult result = export_help();
         if (result.help_written)
@@ -717,14 +715,14 @@ int32_t WacVm::dispatch(opennova::world::World &w, int cmd, const uint32_t *args
 
     // The mission-owned voice channel's readiness query; the wave commands
     // themselves are replicated rows (remote_command.cpp). [orig: @0x4ED380]
-    if (ieq(n, "waveready")) return w.script.voice.ready();
+    if (strutil::iequals(n, "waveready")) return w.script.voice.ready();
 
     // ssnrelease(ssn) -- detach a transported AI and CLEAR its boarding order.
     // [orig: WacCmd_SsnRelease (ex sub_4F7420) @0x4f7420, the WAC command table's 0x4f7420 row]
     // Previously fell through to the default effect push, i.e. the mission script
     // said "everybody out" and nothing happened: the occupant stayed mounted at
     // command 125 for the rest of the mission.
-    if (ieq(n, "ssnrelease")) {
+    if (strutil::iequals(n, "ssnrelease")) {
         // Returns 1 once the handle resolves to a live item WITH a parent (a
         // null AI slot still returns 1); every earlier gate returns 0
         // [orig: WacCmd_SsnRelease @0x4F7420 — the +0x1C item test, the

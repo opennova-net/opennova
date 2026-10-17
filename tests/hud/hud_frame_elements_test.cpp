@@ -341,6 +341,7 @@ void test_objectives_panel(const fnt_font_t *font) {
 	HudLayout layout;
 	layout.box_texture_valid = true;
 	layout.box_tex_w = 128;
+	layout.box_tex_h = 128;
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;
@@ -396,6 +397,7 @@ void test_no_hud(const fnt_font_t *font) {
 	layout.health_rect = {2.0f, 739.0f, 139.0f, 18.0f, true};
 	layout.box_texture_valid = true;
 	layout.box_tex_w = 128;
+	layout.box_tex_h = 128;
 	HudFrameCompiler compiler;
 	configure(compiler, layout, font);
 	HudFrameState state;

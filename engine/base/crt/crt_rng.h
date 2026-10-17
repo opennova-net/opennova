@@ -12,8 +12,10 @@ namespace opennova::crt {
 // while this thread-local owner carries the ported RENDER/EFFECTS consumers
 // — scorch texture rolls, material/PANM waveform noise, the GRM gaze jitter
 // (CScarDecal_Update @0x57FA50, gated on the display counter) and the
-// Effect_RollSurfaceEffectProbability glass-reseed target — so their draw
-// and reseed order stays shared among themselves in retail order.
+// Effect_RollSurfaceEffectProbability glass-reseed target, and the PLAYER_INFO
+// preview's clock reseed and initial-yaw draw (PlayerInfo_InitPreviewModel
+// @0x560128 / @0x5601a2, menu/player_info_avatars.h) — so their draw and
+// reseed order stays shared among themselves in retail order.
 // [orig: rand @0x76B00A; srand @0x76AFFD]
 uint16_t crt_rand15(void);
 void crt_srand(uint32_t seed);

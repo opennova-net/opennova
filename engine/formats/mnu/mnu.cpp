@@ -19,6 +19,7 @@
 #include <sstream>
 
 #include <base/io/cp1252.h>
+#include <base/io/os_path.h>
 #include <base/io/strutil.h>
 
 namespace opennova::mnu {
@@ -229,6 +230,13 @@ private:
     reasons_[what] = why;
     if (reads_) fatal_.insert(what);
   }
+  // A fatal note on a read element the model keeps, where retail reads it: retail crashes on what the
+  // element (or its window, through it) holds (docs/mnu/menu-re.md, "Crash and hang cases").
+  void crash_note(const Node &node, const std::string &why) {
+    if (!reads_) return;
+    text_notes_[&node] = why;
+    fatal_.insert(&node);
+  }
   // An attribute with no token (an empty or bare value): retail's comparison or
   // conversion faults on it where its parse reads it.
   void empty_value(const Node &node, const Attribute &attr);
@@ -317,7 +325,8 @@ private:
   SourceEncoding encoding_;
   std::map<const void *, std::string> reasons_;
   std::set<const void *> fatal_;
-  // A read element of which retail reads part of the text (a colour's): its note.
+  // A read element's own note: a colour of which retail reads part of the text, or what retail
+  // crashes on (crash_note).
   std::map<const Node *, std::string> text_notes_;
   // Each FONT colour's element by its window's element and the colour's place in the FONT, so a later
   // one (of any FONT of that window) takes the earlier's note with it.
@@ -656,6 +665,13 @@ bool TreeReader::read_screen(const Node &node, Screen &out) {
                           " belongs in a root WINDOW; this one is left out.");
     }
   }
+  // No NAME leaves the screen's name null, which each created root window copies [orig:
+  // CUIScene_ParseNodeAttributes @ 0x639630, the name cleared @ 0x639642; the copy 0x646c10 called
+  // @ 0x639791]; an empty NAME element's text is "" [orig: NapiXML_ParseElementTree @ 0x769d70, the close
+  // tag's empty text].
+  if (!frame.seen.count("NAME") && !out.roots.empty())
+    crash_note(node, "A SCREEN with no NAME crashes retail as it creates the screen's first window (the window "
+                     "copies the null name).");
   return true;
 }
 
@@ -749,6 +765,12 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
   } else {
     for (const char *name : {"PASSWORD", "NUMBER", "READONLY", "MAXCHAR", "MAXVAL", "MINVAL"}) not_read(node, name, w.type);
   }
+  // GLOBAL_VAR reads the scene, still unset while the parse runs, on an edit window and on a CHECKED
+  // checkbox [orig: CEditWnd_ParseXMLProperties @ 0x661e5f; CCheckWnd_ParseXMLDefinition @ 0x64ae05].
+  if (w.global_var && (reads_edit_attributes(w.type) || (w.type == WindowType::CheckBox && w.checked)))
+    crash_note(node, reads_edit_attributes(w.type)
+                         ? "GLOBAL_VAR on an edit window faults when retail parses it (the scene is not set yet)."
+                         : "GLOBAL_VAR on a CHECKED checkbox faults when retail parses it (the scene is not set yet).");
   // PLAYERLIST sets the browser's list mode, SERVERLIST clears it, by presence, over the attribute
   // list last authored first: the first authored of the two decides [orig:
   // CLanGameBrowser_ParseExtendedXMLDefinition @ 0x65dadf..0x65db16, self[3658]].
@@ -936,6 +958,13 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       singleton(frame, child, "MIN_ITEM_HEIGHT", false);
       w.table_data.min_item_height = number_text(child);
       w.table_data.has_min_item_height = true;
+      // [orig: CTableWnd_RecalcLayout @ 0x63f1a0, idiv @ 0x63f26b: 0 stays 0, only below 0 is replaced
+      //  @ 0x63f1ee]; a list's (every CListWnd: LIST, LAN_LIST, a combo's LIST_BOX) divides by it as its row
+      //  height [orig: CListWnd_ParseXMLDefinition @ 0x645770, the store @ 0x646032; CListWnd_RecalcLayout
+      //  @ 0x6443d0, taken where not below 0 @ 0x6443e0, the idiv @ 0x644444]
+      if (child.read && w.table_data.min_item_height == 0 && (w.type == WindowType::Table || list_rule))
+        crash_note(child, std::string("MIN_ITEM_HEIGHT 0 divides by zero when retail lays the ") +
+                              (list_rule ? "list" : "table") + " out.");
     } else if (tag_is(child, "FIXED_HEADER_HEIGHT")) {
       singleton(frame, child, "FIXED_HEADER_HEIGHT", false);
       w.table_data.fixed_header_height = number_text(child);
@@ -1199,6 +1228,11 @@ void TreeReader::read_action(const Node &node, Action &out) {
       because(&a, "ACTION reads its target from the element text; " + mnu_xml::ascii(a.name) +
                       " is left out.");
   out.target = text_of(node);
+  // A SCREEN action's FILE is the file activation reads, null with none [orig: PFF_FindEntry @ 0x7685d0, the
+  // strncpy @ 0x7685f3]; an empty FILE is empty_value's.
+  if (iequals(out.type, "SCREEN") && !node.attr("FILE"))
+    crash_note(node, "A SCREEN action with no FILE crashes retail when it is activated (it reads a null file "
+                     "name).");
 }
 
 // [orig: @ 0x6494f0] FILE and FLAGS children; the last of each wins.
@@ -1602,8 +1636,15 @@ std::string note_locator(const Node &node) {
 
 // A note covers everything under it; beneath it only a fatal note still comes out (a
 // repeated element merged into the first, or a replaced one, is content retail parses).
+// The walk is a loop over an explicit stack (each element before its children, the
+// children in order), so its depth is not the call stack's.
 void TreeReader::sweep(const mnu_xml::Document &xml, std::vector<ParseNote> &notes) const {
-  std::function<void(const Node &, bool)> visit = [&](const Node &node, bool covered) {
+  std::vector<std::pair<const Node *, bool>> pending;
+  for (auto root = xml.roots.rbegin(); root != xml.roots.rend(); ++root) pending.push_back({root->get(), false});
+  while (!pending.empty()) {
+    const Node &node = *pending.back().first;
+    bool covered = pending.back().second;
+    pending.pop_back();
     const auto text_note = text_notes_.find(&node);
     if (node.read && text_note != text_notes_.end())
       notes.push_back({node.line, mnu_xml::path_key(node), text_note->second, fatal_.count(&node) != 0,
@@ -1627,9 +1668,9 @@ void TreeReader::sweep(const mnu_xml::Document &xml, std::vector<ParseNote> &not
                                  "> is not read by retail's parse; it is left out.",
                        fatal_.count(&a) != 0, note_locator(node)});
     }
-    for (const auto &child : node.children) visit(*child, covered);
-  };
-  for (const auto &root : xml.roots) visit(*root, false);
+    for (auto child = node.children.rbegin(); child != node.children.rend(); ++child)
+      pending.push_back({child->get(), covered});
+  }
 }
 
 }  // namespace
@@ -1906,7 +1947,8 @@ bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
   TreeReader reader(out.source_encoding);
   reader.read_document(xml, out);
   if (notes) {
-    // The reader's own notes are all retail hangs or overruns.
+    // The reader's own notes are all retail hangs or overruns, or the nesting past the
+    // depth it takes (mnu_xml::kMaxElementDepth).
     for (const mnu_xml::Note &n : xml.notes) notes->push_back({n.line, std::string(), n.message, true});
     reader.sweep(xml, *notes);
   }
@@ -1915,7 +1957,7 @@ bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
 
 bool parse_file(const std::string &path, Document &out, std::string &error,
                 std::vector<ParseNote> *notes) {
-  std::ifstream file(path, std::ios::binary);
+  std::ifstream file(io::os_path(path), std::ios::binary); // UTF-8, long-path safe
   if (!file) {
     error = "Failed to open file: " + path;
     return false;

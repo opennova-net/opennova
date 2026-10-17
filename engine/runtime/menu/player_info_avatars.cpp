@@ -1,5 +1,7 @@
 #include <runtime/menu/player_info_avatars.h>
 
+#include <base/crt/crt_rng.h>
+#include <formats/avatars/preview_animation.h>
 #include <runtime/menu/menu_runtime.h>
 #include <runtime/menu/player_info_kit.h>
 
@@ -158,4 +160,12 @@ std::string PlayerInfoAvatars::voice_preview_trigger(const MenuRuntime &menu,
 	}
 	return saved_voice < 0 ? std::string() : "VOICE_" + std::to_string(saved_voice);
 }
+int32_t player_info_preview_initial_yaw_bam(uint32_t seed) {
+	// [orig: PlayerInfo_InitPreviewModel @0x560128 (srand), @0x5601a2..0x5601b7]
+	constexpr int32_t kBamPerWholeDegree = 0xB60B60;
+	crt::crt_srand(seed);
+	const int32_t degrees = static_cast<int32_t>(crt::crt_rand15()) % avatars::kPreviewInitialYawRangeDeg;
+	return degrees * kBamPerWholeDegree;
+}
+
 } // namespace opennova::menu

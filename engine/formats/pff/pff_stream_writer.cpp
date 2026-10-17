@@ -15,6 +15,7 @@
 #include <filesystem>
 #include <system_error>
 
+#include <base/io/le.h>
 #include <base/io/os_path.h>
 
 namespace opennova::pff {
@@ -37,13 +38,6 @@ bool rename_file(const std::string &from, const std::string &to) {
 
 // The largest chunk one read asks the caller for: a budget spans several.
 constexpr uint32_t kChunkBytes = 1u << 20;
-
-void put_u32_le(uint8_t *out, uint32_t value) {
-	out[0] = uint8_t(value);
-	out[1] = uint8_t(value >> 8);
-	out[2] = uint8_t(value >> 16);
-	out[3] = uint8_t(value >> 24);
-}
 
 } // namespace
 
@@ -111,11 +105,11 @@ int PffStreamWriter::open(const char *path, PffFormat format, const PffWriteStre
 
 	// The header, its directory offset patched by finish().
 	uint8_t header[PFF_HEADER_SIZE];
-	put_u32_le(header + 0, PFF_HEADER_SIZE);
-	put_u32_le(header + 4, pff_magic_for_format(format_));
-	put_u32_le(header + 8, n);
-	put_u32_le(header + 12, PFF_ENTRY_SIZE);
-	put_u32_le(header + 16, 0);
+	io::write_u32_le(header + 0, PFF_HEADER_SIZE);
+	io::write_u32_le(header + 4, pff_magic_for_format(format_));
+	io::write_u32_le(header + 8, n);
+	io::write_u32_le(header + 12, PFF_ENTRY_SIZE);
+	io::write_u32_le(header + 16, 0);
 	if (fwrite(header, 1, sizeof(header), file_) != sizeof(header)) return fail(PFF_WRITE_ERR_IO);
 	return PFF_WRITE_OK;
 }
@@ -154,12 +148,12 @@ int PffStreamWriter::finish() {
 	for (const Entry &entry : entries_) {
 		uint8_t record[PFF_ENTRY_SIZE];
 		memset(record, 0, sizeof(record));
-		put_u32_le(record + 0, entry.flags);
-		put_u32_le(record + 4, entry.offset);
-		put_u32_le(record + 8, entry.size);
-		put_u32_le(record + 12, entry.timestamp);
+		io::write_u32_le(record + 0, entry.flags);
+		io::write_u32_le(record + 4, entry.offset);
+		io::write_u32_le(record + 8, entry.size);
+		io::write_u32_le(record + 12, entry.timestamp);
 		memcpy(record + 16, entry.name.data(), std::min<size_t>(entry.name.size(), PFF_NAME_SIZE));
-		put_u32_le(record + 32, entry.checksum);
+		io::write_u32_le(record + 32, entry.checksum);
 		if (fwrite(record, 1, sizeof(record), file_) != sizeof(record)) return fail(PFF_WRITE_ERR_IO);
 	}
 	// The footer after the directory, its second word the one kept from the archive's earlier
@@ -167,11 +161,11 @@ int PffStreamWriter::finish() {
 	// 65.211.238.x machine @ 0x4042DA..0x404318].
 	uint8_t footer[PFF_FOOTER_SIZE];
 	memcpy(footer, PFF_RETAIL_FOOTER, sizeof(footer));
-	put_u32_le(footer + 4, footer_kept_);
+	io::write_u32_le(footer + 4, footer_kept_);
 	if (fwrite(footer, 1, sizeof(footer), file_) != sizeof(footer))
 		return fail(PFF_WRITE_ERR_IO);
 	uint8_t offset[4];
-	put_u32_le(offset, table_offset);
+	io::write_u32_le(offset, table_offset);
 	if (io::fseek64(file_, 16, SEEK_SET) != 0 || fwrite(offset, 1, sizeof(offset), file_) != sizeof(offset))
 		return fail(PFF_WRITE_ERR_IO);
 	const bool closed = fclose(file_) == 0;

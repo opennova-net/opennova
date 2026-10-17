@@ -950,6 +950,149 @@ bool test_unauthored_recoil_kicks_a_flying_round_only() {
 	return true;
 }
 
+// The stance row a shot reads: the parachute, drowning and ladder-contact bits
+// (Flags & 0x108020) or the eye below the water force the standing row 2; InAir
+// 0x2000 and an airborne body keep the stance row. The row picks the ammo's
+// recoil byte, so the kick names it (the drowning bit also takes the underwater
+// shift). [orig: RoundData_SpawnRound `test [ebp+24h], 108020h` @0x4EC2D5, row 2
+// @0x4EC2EC; the recoil add reads the row @0x4EC85B]
+bool test_stance_row_forced_standing_mask() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	w::PlayerSpawn seed;
+	seed.net_id = 44;
+	seed.equipped_adm_index = 1;
+	const w::EntityHandle shooter = w::spawn_player(world, seed);
+	w::AiEntity *body = world.ai.for_handle(shooter);
+	w::Entity *entity = world.registry.get(shooter);
+	if (!expect(shooter.valid() && body != nullptr && entity != nullptr,
+	            "stance-row player spawned"))
+		return false;
+	world.tables.ammo.entries.resize(1);
+	w::AmmoTableEntry &ammo = world.tables.ammo.entries[0];
+	ammo.valid = true;
+	ammo.velocity = 620;
+	ammo.max_age_ticks = 100;
+	ammo.recoil[0] = 1;
+	ammo.recoil[1] = 2;
+	ammo.recoil[2] = 3;
+	world.tables.weapons.entries.resize(2);
+	world.tables.weapons.entries[1].valid = true;
+	world.env.water_z = -(100 << 16); // the eye far above the plane
+	w::RoundSpawnParams params;
+	params.owner = shooter;
+	params.shooter_handle = shooter.packed;
+	params.adm_index = 1;
+	params.ammo_index = 0;
+	const auto kick = [&]() {
+		world.round_sim.reset();
+		body->inf.recoil_pitch = 0;
+		world.round_sim.spawn(world, params);
+		return body->inf.recoil_pitch;
+	};
+	body->inf.stance = w::InfantryState::Stance::kCrouch;
+	if (!expect(kick() == (2 << 18), "a crouched shooter kicks its crouch row")) return false;
+	body->inf.airborne = true;
+	entity->flags |= w::kEntityFlagInAir;
+	if (!expect(kick() == (2 << 18), "an airborne crouched shooter keeps its crouch row"))
+		return false;
+	body->inf.airborne = false;
+	entity->flags &= ~w::kEntityFlagInAir;
+	entity->flags |= w::kEntityFlagLadderContact;
+	if (!expect(kick() == (3 << 18), "a crouched shooter on a ladder takes the standing row"))
+		return false;
+	entity->flags &= ~w::kEntityFlagLadderContact;
+	entity->flags |= w::kEntityFlagParachute;
+	if (!expect(kick() == (3 << 18), "a crouched shooter under a chute takes the standing row"))
+		return false;
+	entity->flags &= ~w::kEntityFlagParachute;
+	entity->flags |= w::kEntityFlagDrowning;
+	if (!expect(kick() == (3 << 20), "a drowning shooter takes the standing row underwater"))
+		return false;
+	entity->flags &= ~w::kEntityFlagDrowning;
+	body->inf.stance = w::InfantryState::Stance::kProne;
+	return expect(kick() == (1 << 18), "a prone shooter kicks its prone row");
+}
+
+// The spread's up/down limit keys on the raw prone bit, not the overridden
+// row: a prone body on a ladder fires off the standing ERROR row with the
+// prone limit (+0xD0), a crouched one off the same row with the hip limit
+// (+0xCC). [orig: RoundData_SpawnRound -- the prone bit @0x4EC137, the row
+// override @0x4EC2D5..0x4EC2EC, the pick `cmp outZ`/`cmp outX` @0x4EC44E..
+// 0x4EC458 -> +0xD0 @0x4EC493, else +0xCC @0x4EC46E]
+bool test_spread_limit_keys_on_the_raw_prone_bit() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	w::PlayerSpawn seed;
+	seed.net_id = 45;
+	seed.equipped_adm_index = 1;
+	const w::EntityHandle shooter = w::spawn_player(world, seed);
+	w::AiEntity *body = world.ai.for_handle(shooter);
+	w::Entity *entity = world.registry.get(shooter);
+	if (!expect(shooter.valid() && body != nullptr && entity != nullptr,
+	            "spread-limit player spawned"))
+		return false;
+	world.tables.ammo.entries.resize(1);
+	w::AmmoTableEntry &ammo = world.tables.ammo.entries[0];
+	ammo.valid = true;
+	ammo.velocity = 620;
+	ammo.max_age_ticks = 100;
+	world.tables.weapons.entries.resize(2);
+	w::WeaponTableEntry &weapon = world.tables.weapons.entries[1];
+	weapon.valid = true;
+	weapon.error_fp16[0] = 0x8000;
+	weapon.error_fp16[1] = 0xC000;
+	weapon.error_fp16[2] = 0x10000;
+	weapon.error_up_theta_fp16 = 0x6000;
+	weapon.error_hip_theta_fp16 = 0x1000;
+	world.rules.mp_session = false;
+	world.rules.mpattrib = 0x4204u; // the out-of-session spread bit
+	world.env.water_z = -(100 << 16);
+	w::RoundSpawnParams params;
+	params.owner = shooter;
+	params.shooter_handle = shooter.packed;
+	params.ammo_index = 0;
+	params.adm_index = 1;
+	params.shot_seq = 11;
+	struct Case {
+		w::InfantryState::Stance stance;
+		bool ladder;
+		int32_t row_error;
+		int32_t limit;
+		const char *what;
+	};
+	const Case cases[] = {
+		{w::InfantryState::Stance::kProne, false, 0x8000, 0x6000,
+		 "a prone shot: the prone row and the prone limit"},
+		{w::InfantryState::Stance::kProne, true, 0x10000, 0x6000,
+		 "a prone shot on a ladder: the standing row, still the prone limit"},
+		{w::InfantryState::Stance::kCrouch, true, 0x10000, 0x1000,
+		 "a crouched shot on a ladder: the standing row and the hip limit"},
+	};
+	for (const Case &c : cases) {
+		world.round_sim.reset();
+		body->inf.recoil_pitch = 0;
+		body->inf.weapon_weight_spread = 0;
+		body->inf.stance = c.stance;
+		if (c.ladder)
+			entity->flags |= w::kEntityFlagLadderContact;
+		else
+			entity->flags &= ~w::kEntityFlagLadderContact;
+		const int slot = world.round_sim.spawn(world, params);
+		if (!expect(slot >= 0, "spread-limit round spawned")) return false;
+		const w::RandomSpreadOffset want =
+				w::weapon_calc_random_spread_offset(c.row_error, 11, c.limit, false);
+		const w::LiveRound &r = world.round_sim.rounds[static_cast<size_t>(slot)];
+		if (!expect(r.yaw_bam == want.yaw_bam && r.pitch_bam == want.pitch_bam, c.what))
+			return false;
+	}
+	// The two limits draw different offsets for this seed, so the pick is pinned.
+	const w::RandomSpreadOffset up = w::weapon_calc_random_spread_offset(0x10000, 11, 0x6000, false);
+	const w::RandomSpreadOffset hip = w::weapon_calc_random_spread_offset(0x10000, 11, 0x1000, false);
+	return expect(up.pitch_bam != hip.pitch_bam || up.yaw_bam != hip.yaw_bam,
+	              "the prone and hip limits draw apart");
+}
+
 struct DismembermentRig {
 	w::World world;
 	w::AiSystem &ai = world.ai;
@@ -1379,6 +1522,8 @@ int main() {
 	if (!test_spawn_spread_then_recoil()) return 1;
 	if (!test_spawn_spread_reads_the_rules_word()) return 1;
 	if (!test_unauthored_recoil_kicks_a_flying_round_only()) return 1;
+	if (!test_stance_row_forced_standing_mask()) return 1;
+	if (!test_spread_limit_keys_on_the_raw_prone_bit()) return 1;
 	if (!test_spawn_aimed_row_and_zero_elevation()) return 1;
 	if (!test_dismemberment_damage_path()) return 1;
 	if (!test_person_hit_presentation_legs_run_on_every_hit()) return 1;

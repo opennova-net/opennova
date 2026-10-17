@@ -101,6 +101,10 @@ public:
 	// what a refresh reads).
 	size_t files_read() const { return files_read_; }
 	size_t items_asked() const { return items_asked_; }
+	// The original editor's weapon table over the project's weapon.def, which stands in for the original's
+	// medwep.def (mission::mis_weapon_table), read again where the file moved; null where the project has none
+	// that reads (MissionDocument::set_weapon_table, D-MIS-X1).
+	std::shared_ptr<const mission::MisWeaponTable> weapon_table(const SessionView &view);
 
 private:
 	struct Model {
@@ -141,6 +145,9 @@ private:
 	std::map<std::string, Catalog> catalogs_;
 	size_t files_read_ = 0;
 	size_t items_asked_ = 0;
+	bool weapons_read_ = false;
+	uint64_t weapons_stamp_ = 0;
+	std::shared_ptr<const mission::MisWeaponTable> weapons_;
 };
 
 // The pool a record of TYPE `type` is placed in, as the game's editor places it

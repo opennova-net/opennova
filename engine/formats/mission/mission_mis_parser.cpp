@@ -214,7 +214,8 @@ void set_header_packed_rgb(uint8_t rgb[3], uint32_t packed) {
 	rgb[2] = static_cast<uint8_t>(packed & 0xFF);
 }
 
-bool parse_mis_general_information(const std::vector<MisLine> &lines, size_t &pos, bms::File &file, std::string &error) {
+bool parse_mis_general_information(const std::vector<MisLine> &lines, size_t &pos, bms::File &file, MisDefaultKit &kit,
+                                   std::string &error) {
 	bms::Header &header = file.header;
 	for (++pos; pos < lines.size(); ++pos) {
 		const MisLine &line = lines[pos];
@@ -313,6 +314,9 @@ bool parse_mis_general_information(const std::vector<MisLine> &lines, size_t &po
 		} else if (key == "bonus_expiration") {
 			if (!token_u32(line, 1, u32, error)) return false;
 			header.bonus_expiration = static_cast<uint16_t>(u32);
+		} else if (key == "default_primary" || key == "default_secondary" || key == "default_accessory") {
+			// The value as it stands, "" where the line gives none [orig: JOTACmed.exe MIS_ParseToken @ 0x451caa..0x451d4c].
+			kit[key == "default_primary" ? 0 : key == "default_secondary" ? 1 : 2] = t.size() > 1 ? t[1] : std::string();
 		} else if (key == "subgoals_win" && t.size() >= 9) {
 			for (size_t i = 0; i < 8; ++i) {
 				if (!token_i32(line, i + 1, i32, error)) return false;
@@ -801,9 +805,9 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 		} else if (key == "waccuracy2") {
 			if (!token_i32(line, 1, v, error)) return false;
 			entity.w_accuracy2 = static_cast<int16_t>(v);
-		} else if (key == "perception2" || key == "perception") { // one word each [orig: @0x452aad, @0x452b08]
+		} else if (key == "perception2" || key == "perception") { // one word each [orig: JOTACmed.exe MIS_ParseToken @0x452aad]
 			if (!token_i32(line, 1, entity.perception2, error)) return false;
-		} else if (key == "perfectionist2" || key == "perfectionist") {
+		} else if (key == "perfectionist2" || key == "perfectionist") { // [orig: JOTACmed.exe MIS_ParseToken @0x452b08]
 			if (!token_i32(line, 1, entity.perfectionist2, error)) return false;
 		} else if (key == "movetimer") {
 			if (!token_i32(line, 1, v, error)) return false;
@@ -870,8 +874,10 @@ bool parse_mis_item(const std::vector<MisLine> &lines, size_t &pos,
 } // namespace
 
 bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &resolve_item_type,
-                           bms::File &out, std::string &error, std::vector<MisIssue> *issues) {
+                           bms::File &out, std::string &error, std::vector<MisIssue> *issues,
+                           const MisWeaponTable *weapons) {
 	initialize_mis_file(out);
+	MisDefaultKit kit = kMisResetKit; // a slot no line names keeps the original's reset kit
 	// The heights as the file holds them (bms::MisFrame::Mis): mis_items_to_bms_frame takes them
 	// to the .bms's over the terrain.
 	out.mis_frame = bms::MisFrame::Mis;
@@ -884,7 +890,7 @@ bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &r
 		}
 		const std::string &section = t[1];
 		if (section == "general_information") {
-			if (!parse_mis_general_information(lines, pos, out, error)) return false;
+			if (!parse_mis_general_information(lines, pos, out, kit, error)) return false;
 		} else if (section == "weapon_availability") {
 			if (!skip_mis_section(lines, pos, "weapon_availability", error)) return false;
 		} else if (section == "briefing") {
@@ -916,6 +922,8 @@ bool parse_mis_text_to_bms(const std::string &text, const MisItemTypeResolver &r
 		}
 	}
 	rebuild_mis_areas(out);
+	// The loadout chunk the original's .bms export builds from the kit (D-MIS-X1).
+	out.loadout = mis_default_loadout(kit, weapons);
 	return true;
 }
 

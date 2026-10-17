@@ -39,9 +39,6 @@ func test_host_session_config_re_exports() -> void:
 	assert_eq(HostSessionConfig.GAME_TYPE_TRAINING_COOP,
 			NetProtocol.GAME_TYPE_TRAINING_COOP,
 			"HostSessionConfig aliases the bound stock Co-op word")
-	assert_eq(HostSessionConfig.GAME_TYPE_OBJECTIVE_BIT,
-			NetProtocol.GAME_TYPE_OBJECTIVE_BIT,
-			"HostSessionConfig aliases the bound objective bit")
 	assert_eq(HostSessionConfig.DEFAULT_LAN_PORT, NetProtocol.DEFAULT_LAN_PORT,
 			"HostSessionConfig aliases the bound LAN default port")
 	assert_eq(HostSessionConfig.DEFAULT_GATE_PORT, NetProtocol.DEFAULT_GATE_PORT,

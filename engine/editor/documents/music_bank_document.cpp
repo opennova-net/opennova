@@ -27,15 +27,6 @@ constexpr NodeKind kStream = node_kind(MusicBankKind::Stream);
 MusicBankRow &bank_of(const RecordHandle &r) { return r.as<MusicBankRow>(); }
 MusicBankStream &stream_of(const RecordHandle &r) { return r.as<MusicBankStream>(); }
 
-FieldSchema schema_of(const char *id, FieldType type, const char *label, const char *description) {
-	FieldSchema schema;
-	schema.id = id;
-	schema.type = type;
-	schema.label = label;
-	schema.description = description;
-	return schema;
-}
-
 size_t valid_bytes(const MusicBankStream &stream) {
 	size_t bytes = 0;
 	if (stream.chunks)
@@ -360,9 +351,9 @@ bool MusicBankDocument::apply_payload(Node &row, const NodeAddress &address, con
 bool music_stream_audio_from_wave(const std::string &wave_name, const std::vector<uint8_t> &wave, MusicStreamAudioEdit &out,
                                   std::string &why) {
 	// The wave's full scale is the stream's: an offset byte's 127 steps at shift 0, which the decoder sounds at
-	// +-127 * 128 (sbf_decode_sample: half the 16-bit range), so a wave at full scale streams at the loudest a stream
-	// plays, never clipped.
-	constexpr float kStreamFullScale = float(127 * 128) / 32767.0f;
+	// +-127 * 256 (sbf_decode_sample: the mixer's 16-bit scale), so a wave at full scale streams at the loudest a
+	// stream plays, never clipped.
+	constexpr float kStreamFullScale = float(127 * 256) / 32767.0f;
 	std::vector<int16_t> pcm;
 	lwf::WaveFormat format;
 	if (!lwf::wave_stereo_pcm16(wave, SBF_SAMPLE_RATE, kStreamFullScale, pcm, why, &format)) return false;

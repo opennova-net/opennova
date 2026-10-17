@@ -95,15 +95,18 @@ func get_menu_driver() -> MenuDriver:
 	return _driver
 
 
-## The armory key: open weapon.mnu's WEAPON screen over LIVE play when the player
-## stands in an armory zone. Returns false when out of zone or the menu cannot
-## build (the key is then ignored, matching the original's silent gate).
+## The armory key: open weapon.mnu's WEAPON screen over LIVE play when the
+## engine's USE-ITEM arm is the armory's (Simulation.local_player_use_item_arm:
+## an unmounted player in an armory zone, or anywhere while the pre-round timer
+## runs, with no armory countdown outside the pre-round). Returns false otherwise
+## or when the menu cannot build (the key is then ignored, matching the
+## original's silent gate).
 func try_open() -> bool:
 	if _view == null:
 		return false
 	var sim: Simulation = _view.sim()
-	if sim == null or not sim.local_player_in_armory_zone():
-		return false  # [orig: Flags & 0x400000 gate @0x4e0b4d]
+	if sim == null or sim.local_player_use_item_arm() != Simulation.USE_ITEM_ARM_ARMORY:
+		return false
 	return open()
 
 

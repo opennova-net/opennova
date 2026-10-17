@@ -3,6 +3,8 @@
 #include <runtime/devtools/debug_control_ids.h>
 #include <runtime/devtools/ui_kit.h>
 
+#include <base/io/fixed.h>
+
 #include <imgui.h>
 
 #include <cstdio>
@@ -30,7 +32,7 @@ const char *stance_name(int32_t stance) {
 	}
 }
 
-double units(int32_t q16) { return static_cast<double>(q16) / 65536.0; }
+double units(int32_t q16) { return static_cast<double>(q16) / io::kFp16OneD; }
 
 }  // namespace
 

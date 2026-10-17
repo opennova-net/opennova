@@ -40,6 +40,9 @@ easier to relay than to rediscover.
   requires, plus the add-on's exports of `art/` (ADR 0048 d7; `assets/README.md`). The
   editor's Build of it must boot in an unmodified `Jointops.exe` as well as OpenNova.
   Models, clips and textures ride LFS.
+- `expansions/` — OpenNova's own expansions (today `onjo1`), each an OpenNova Editor expansion
+  project whose base game is the project in `assets/` (ADR 0046 T5); the game zip ships each
+  one's export in `assets/expansion/<name>/` (ADR 0048 d8; `expansions/README.md`).
 - `art/` — authoring sources (Blender scenes and their textures, all LFS) whose exports
   land in `assets/`.
 - `tests/` — C++ ctest suite (separate from `godot/tests/`; different runners).

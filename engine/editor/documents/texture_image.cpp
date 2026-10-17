@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <optional>
 
+#include <base/io/bits.h>
 #include <base/io/strutil.h>
 #include <formats/bfc1/bfc1.h>
 #include <formats/configfile/config_file.h>
@@ -22,8 +23,6 @@
 namespace opennova::editor {
 
 namespace {
-
-bool power_of_two(uint32_t side) { return side != 0 && (side & (side - 1)) == 0; }
 
 std::string sides(uint32_t width, uint32_t height) { return std::to_string(width) + " x " + std::to_string(height); }
 
@@ -89,7 +88,7 @@ void size_fact(TextureImage &image) {
 	const uint32_t w = image.width(), h = image.height();
 	if (!w || !h) return;
 	fact(image, "size", "Size",
-	     sides(w, h) + (power_of_two(w) && power_of_two(h) ? " (sides are powers of two)" : " (a side is no power of two)"));
+	     sides(w, h) + (io::is_power_of_two(w) && io::is_power_of_two(h) ? " (sides are powers of two)" : " (a side is no power of two)"));
 }
 
 void read_tga(TextureImage &image, const std::vector<uint8_t> &stored) {
@@ -539,7 +538,8 @@ TextureHeader texture_header_as(TextureReader reader, const std::vector<uint8_t>
 		if (png::is_png(bytes)) {
 			// D3DX reads a PNG under a .dds name as the PNG (read_dds).
 			out.read = png::png_header_size(bytes, out.width, out.height);
-			out.alpha = bytes.size() > 25 && (bytes[25] == 4 || bytes[25] == 6);
+			uint8_t depth = 0, colour = 0;
+			out.alpha = png::png_header_form(bytes, depth, colour) && (colour == 4 || colour == 6);
 			return out;
 		}
 		if (!dds::dds_read(bytes.data(), bytes.size(), image, error) || !image.loads) {
@@ -569,7 +569,10 @@ TextureHeader texture_header_as(TextureReader reader, const std::vector<uint8_t>
 	case TextureReader::Png:
 		out.read = png::png_header_size(bytes, out.width, out.height);
 		if (!out.read) out.refusal = "The PNG header is cut short or is not one.";
-		out.alpha = bytes.size() > 25 && (bytes[25] == 4 || bytes[25] == 6);
+		{
+			uint8_t depth = 0, colour = 0;
+			out.alpha = png::png_header_form(bytes, depth, colour) && (colour == 4 || colour == 6);
+		}
 		return out;
 	case TextureReader::None: out.refusal = "No texture reader of the game takes a file of this name."; break;
 	}

@@ -1224,6 +1224,108 @@ bool run_root_rotation_follows_heading() {
 	return ok;
 }
 
+// The replica's root rotation is the world motor's pair (B-11): org2 (a Player
+// row) reads the Q22 sine table at the heading's rounded top ten bits, org1 (an
+// Infantry row) takes the Q22 trig at retail's dbl_7C3608 scale. Off a table
+// step and at a quarter turn the exact 2pi/2^32 trig the replica used gives
+// (-6433, 4194299) and (0, 4194304) instead.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B41F0..0x4B4206 (the table);
+//  Entity_UpdateInfantryAI `fmul dbl_7C3608` @0x4BF007 (the trig)]
+bool run_root_rotation_pair_is_the_world_motors() {
+	const opennova::world::RootRotationQ22 org2 =
+			opennova::world::root_rotation_q22(0x40100000, true);
+	bool ok = expect(org2.c == 0 && org2.s == 4194304,
+	                 "org2 rotates by the sine table's entry 256");
+	const opennova::world::RootRotationQ22 org1 =
+			opennova::world::root_rotation_q22(0x40100000, false);
+	ok &= expect(org1.c == -6635 && org1.s == 4194298,
+	             "org1 rotates by the trig at retail's BAM scale");
+	const opennova::world::RootRotationQ22 quarter =
+			opennova::world::root_rotation_q22(0x40000000, false);
+	ok &= expect(quarter.c == -201 && quarter.s == 4194303,
+	             "org1's quarter turn keeps retail's 30.5 ppm cosine");
+	return ok;
+}
+
+// The replica's root step goes through that pair (B-11). A Player row whose
+// body heading is off a table step (0x40100000) walks its +Y clip with X held
+// exactly, the sine table's entry 256 having a zero cosine, where the exact trig
+// (cosine -6433/2^22 there) would drag X back 7/65536 a tick; an Infantry row
+// facing +Y drifts X back by retail's 30.5 ppm cosine (-201/2^22: one 65536th a
+// tick for the clip's 4096 step, Y 4095 a tick), where the exact trig holds X and
+// walks Y 4096. Each heading is set on the row (a first record does not swing it).
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B41F0..0x4B4255;
+//  Entity_UpdateInfantryAI @0x4BF001..0x4BF074]
+bool run_replica_root_step_takes_the_world_pair() {
+	bool ok = true;
+	{
+		ns::ClientReplicaPipeline view(class_of);
+		view.set_remote_motion_mode(true);
+		WalkSource src;
+		view.set_root_motion_source(&src);
+		const uint16_t handle = 0x0046;
+		seed_row(view, handle, kPlayerType);
+		const int32_t ax = 100 << 16, ay = 20 << 16, az = -50 << 16;
+		nw::FrameUpdate fu = player_frame(handle, ax, ay, az, ax);
+		fu.records[0].player.anim_state_id = opennova::world::anim_state::kWalkForward;
+		view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+		view.state().find(handle)->rm_adm_id = 0;
+		view.tick_remote_motion(0xFFFF); // snap-arm
+		ns::ClientEntityState *es = view.state().find(handle);
+		es->heading_bam = 0x40100000;
+		es->rm_body_heading = 0x40100000;
+		es->net_target_heading_bam = 0x40100000;
+		const int32_t x0 = es->x;
+		const int32_t y0 = es->y;
+		for (int t = 0; t < 16; ++t) view.tick_remote_motion(0xFFFF);
+		es = view.state().find(handle);
+		std::fprintf(stderr, "[root-pair] org2 dX=%d dY=%d heading=%08x\n", es->x - x0,
+		             es->y - y0, static_cast<uint32_t>(es->rm_body_heading));
+		ok &= expect(es->y - y0 == 16 * 4096 && es->x == x0,
+		             "an off-step Player heading walks +Y on the table's zero cosine");
+	}
+	{
+		ns::ClientReplicaPipeline view([](uint16_t type_id) {
+			return type_id == 0x0777 ? nw::EntityClass::Infantry : nw::EntityClass::Unknown;
+		});
+		view.set_remote_motion_mode(true);
+		WalkSource src;
+		view.set_root_motion_source(&src);
+		const uint16_t handle = 0x0047;
+		seed_row(view, handle, 0x0777);
+		nw::FrameUpdate fu = header_only_frame();
+		fu.anchor_x = 100 << 16;
+		fu.anchor_y = 20 << 16;
+		fu.anchor_z = -50 << 16;
+		nw::FrameUpdateRecord r;
+		r.handle = handle;
+		r.type_id = 0x0777;
+		r.cls = nw::EntityClass::Infantry;
+		r.infantry.vehicle_slot_handle = 0xFFFF;
+		r.infantry.pos_x_compressed = nw::network_compress_fixedpoint(0);
+		r.infantry.pos_y_compressed = nw::network_compress_fixedpoint(0);
+		r.infantry.pos_z_compressed = nw::network_compress_fixedpoint(0);
+		r.infantry.yaw_byte = 0x40; // +Y
+		r.infantry.anim_byte = opennova::world::anim_state::kWalkForward;
+		r.infantry.flags_byte = 0;
+		fu.records.push_back(r);
+		view.apply(nw::s2c::PER_FRAME_UPDATE, nw::encode_frame_update(fu));
+		view.state().find(handle)->rm_adm_id = 0;
+		view.tick_remote_motion(0xFFFF);
+		ns::ClientEntityState *row = view.state().find(handle);
+		row->heading_bam = 0x40000000; // a first record does not swing the heading
+		row->net_target_heading_bam = 0x40000000;
+		const int32_t x0 = row->x;
+		const int32_t y0 = row->y;
+		for (int t = 0; t < 16; ++t) view.tick_remote_motion(0xFFFF);
+		const ns::ClientEntityState *es = view.state().find(handle);
+		std::fprintf(stderr, "[root-pair] org1 dX=%d dY=%d\n", es->x - x0, es->y - y0);
+		ok &= expect(es->y - y0 == 16 * 4095 && es->x - x0 == -16,
+		             "an Infantry row facing +Y drifts X back by retail's cosine");
+	}
+	return ok;
+}
+
 // The org1 (Infantry) root path: the AI row dead-reckons by its clip too.
 bool run_infantry_root_motion_dead_reckons() {
 	ns::ClientReplicaPipeline view([](uint16_t type_id) {
@@ -1739,6 +1841,8 @@ int main() {
 	ok &= run_starved_rows_hold_their_pose();
 	ok &= run_self_row_gets_no_root_add();
 	ok &= run_root_rotation_follows_heading();
+	ok &= run_root_rotation_pair_is_the_world_motors();
+	ok &= run_replica_root_step_takes_the_world_pair();
 	ok &= run_infantry_root_motion_dead_reckons();
 	ok &= run_root_transition_blends();
 	ok &= run_dead_row_takes_its_death_clip_and_respawn_rearms();

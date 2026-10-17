@@ -160,7 +160,8 @@ func begin_start_mission_splash() -> bool:
 
 
 ## The shell-policy wrapper the load-complete path calls: gate on a
-## single-player load with a custom (sidecar) background, raise the splash,
+## single-player load with a custom (sidecar) background (the engine's gate,
+## runtime/hud/loading_background.h start_mission_splash_due), raise the splash,
 ## and run its device legs — hide the OS cursor (the splash draws the cursor
 ## art itself [orig: Mouse_SetCallback(0) @ 0x520862], restored on the
 ## dismissal edge) and fire the one-shot START_MISSION (fire-and-forget;
@@ -173,7 +174,8 @@ func begin_start_mission_splash() -> bool:
 ## with no input to dismiss it.
 func maybe_begin_start_mission_splash(audio: MissionAudio,
 		headless_skip: bool = GameRuntimeRoot.is_headless()) -> bool:
-	if is_session_load() or not has_custom_background() or headless_skip:
+	if headless_skip or not LoadingBackground.start_mission_splash_due(
+			is_session_load(), has_custom_background()):
 		return false
 	if not begin_start_mission_splash():
 		return false

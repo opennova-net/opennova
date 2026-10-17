@@ -21,7 +21,9 @@ struct ValidationInput;
 // checks read their records (ValidationCache::records_checked: a file that did not load, or that a
 // source error blocks, reports that alone), and the project's files as the validation's input lists
 // them (the texture check reads its files' headers, each again only once its stamp moves), and adds
-// its findings in the files' order.
+// its findings in the files' order. One row also takes a file's own finding back: the terrain gate,
+// which the game runs over each mission's merged configuration (its .trn, overcast.def, its .env), takes
+// back the .trn's own terrain.refused where every mission reading the .trn loads it.
 using UseCheck = void (*)(const AssetGraph &graph, const ValidationCache &files, const ValidationInput &input,
 		std::vector<Diagnostic> &out);
 

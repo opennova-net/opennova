@@ -198,8 +198,8 @@ func test_accept_hotkey_matches_the_physical_key() -> void:
 
 func test_out_of_zone_try_open_is_the_silent_gate() -> void:
 	# No type-6 armory volume exists in the in-memory mission, so the spawned
-	# player is out of zone and the armory key is silently ignored
-	# [orig: Flags & 0x400000 gate @0x4e0b4d].
+	# player is out of zone and, with no pre-round in SP, the armory key is
+	# silently ignored [orig: Input_HandleActionBinding_0 Flags & 0x400000 @0x4e0aa1].
 	var sim := _real_sim()
 	var world := _make_world(sim, _make_weapons())
 	var overlay := Control.new()

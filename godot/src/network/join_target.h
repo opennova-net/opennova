@@ -6,6 +6,7 @@
 #include <godot_cpp/variant/packed_byte_array.hpp>
 #include <godot_cpp/variant/string.hpp>
 
+#include <net/novaworld/proxy_rendezvous.h> // ProxyRendezvousConfig (the proxy-assisted join)
 #include <net/npwire/net_ports.h>
 #include <runtime/inmatch/napi_np_server_ctx.h> // NetworkType
 #include <runtime/inmatch/server_flags.h>
@@ -74,11 +75,6 @@ public:
 	JOIN_TARGET_TEXT(spectator_password)
 	JOIN_TARGET_TEXT(server_password)
 	JOIN_TARGET_TEXT(join_password)
-	// The proxy-assisted NovaWorld join (the .joi NI/NP next to NK): the game
-	// node "ip:port" the 48-byte rendezvous targets and the relay "ip:port" the
-	// ordinary dial uses. Empty = no proxy (LAN, or a .joi without them).
-	JOIN_TARGET_TEXT(proxy_node)
-	JOIN_TARGET_TEXT(proxy_relay)
 	// The host's expansion as the browse row advertised it (the 0x81 SUS2 a
 	// LAN or preflight row carries, the GSB Exp of a NovaWorld row; "" = base
 	// game). Meaningful only when `expansion_known`: the shell switches the
@@ -124,12 +120,14 @@ public:
 	bool get_role_explicit() const { return role_explicit_; }
 	void set_role_explicit(bool p_value) { role_explicit_ = p_value; }
 
-	// The proxy relay cookie (the .joi BK); 0 = no proxy.
-	int64_t get_proxy_cookie() const { return proxy_cookie_; }
-	void set_proxy_cookie(int64_t p_value) { proxy_cookie_ = p_value; }
-	bool has_join_proxy() const {
-		return proxy_cookie_ != 0 && !proxy_node_.is_empty() && !proxy_relay_.is_empty();
-	}
+	// The proxy-assisted NovaWorld join (the .joi NI/NP/BK next to NK) as the
+	// engine built it (proxy_rendezvous_from_join, net/novaworld/http_flow.h): the
+	// node the 48-byte rendezvous targets, the relay cookie and the NK relay
+	// endpoint. Disabled = no proxy (LAN, or a .joi without them). C++ only;
+	// NovaWorldClient.copy_join_proxy_to fills it.
+	const opennova::ProxyRendezvousConfig &get_join_proxy() const { return join_proxy_; }
+	void set_join_proxy(const opennova::ProxyRendezvousConfig &p_proxy) { join_proxy_ = p_proxy; }
+	bool has_join_proxy() const { return join_proxy_.enabled(); }
 	// The .joi LN lobby number; nonzero means the dial targets the LAN-discovered
 	// endpoint rather than the NK relay. 0 = the ordinary NovaWorld/LAN dial.
 	int get_lobby_number() const { return lobby_number_; }
@@ -196,9 +194,7 @@ private:
 	bool session_password_required_ = false;
 	int64_t session_client_index_ = 0;
 	bool role_explicit_ = false;
-	String proxy_node_;
-	String proxy_relay_;
-	int64_t proxy_cookie_ = 0;
+	opennova::ProxyRendezvousConfig join_proxy_;
 	int lobby_number_ = 0;
 };
 

@@ -1657,6 +1657,7 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	// The shipped border.tga is a 128 px 4x4 grid, so one source cell is 32 px.
 	layout.box_texture_valid = true;
 	layout.box_tex_w = 128;
+	layout.box_tex_h = 128;
 	compiler.configure(layout, font);
 
 	HudFrameState state;
@@ -1712,7 +1713,7 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	constexpr float kCell = 1.0f / 4.0f;
 	bool saw_cropped = false;
 	for (const HudQuad &q : wide) {
-		const bool bottom_row = std::fabs(q.v0 - 2.0f * kCell) < 0.001f;
+		const bool bottom_row = std::fabs(q.v0 - (2.0f * kCell + 0.5f / 128.0f)) < 0.001f;
 		const bool left_col = q.u0 < 0.01f;
 		if (!bottom_row || !left_col) continue;
 		saw_cropped = true;
@@ -1722,6 +1723,33 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 				"and draws into a correspondingly shorter rect");
 	}
 	CHECK(saw_cropped, "the bottom-left corner piece is emitted");
+
+	// Every piece's UV region carries the style load's half texel, (k * 32 +
+	// 0.5) / 128 at each edge, so a piece drawn at its cell's size samples
+	// texel centres (C-351) [orig: BoxTexture_LoadAndSetupUVRegions @0x56acd0
+	// -- the regions @0x56afe3..0x56b2f7].
+	{
+		const auto on_half_texel = [](float uv) {
+			const float t = uv * 128.0f - 0.5f;
+			return std::fabs(t - std::floor(t / 32.0f + 0.5f) * 32.0f) < 1e-3f;
+		};
+		bool pieces_half_texel = true;
+		int pieces_seen = 0;
+		for (const HudQuad &q : wide) {
+			if (q.u0 > 3.0f * kCell - 0.01f) continue; // the fill tiles
+			++pieces_seen;
+			const bool cropped = std::fabs(q.v0 - (2.0f * kCell + 0.5f / 128.0f)) < 0.001f;
+			if (!on_half_texel(q.u0) || !on_half_texel(q.u1) || !on_half_texel(q.v0) ||
+					(!cropped && !on_half_texel(q.v1)))
+				pieces_half_texel = false;
+		}
+		CHECK(pieces_seen >= 8, "the eight border pieces are emitted");
+		CHECK(pieces_half_texel, "every piece's region starts and ends half a texel into its cell");
+		const HudQuad tl = corner_tl(wide);
+		CHECK(tl.u0 == 0.5f / 128.0f && tl.v0 == 0.5f / 128.0f && tl.u1 == 32.5f / 128.0f &&
+						tl.v1 == 32.5f / 128.0f,
+				"the top-left piece samples cell (0,0) from texel 0's centre");
+	}
 
 	// The fill tiles at the cell's own 32 px period, anchored to the ABSOLUTE
 	// screen grid — retail's fill is one wrap-addressed quad, so every tile
@@ -1757,6 +1785,29 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	CHECK(grid_ok, "every fill tile edge sits on the 32 px screen grid or the inset edge");
 	CHECK(slice_ok, "every tile samples the cell slice matching its grid phase");
 	CHECK(full_tiles > 0, "the interior contains full-period tiles");
+	// The half texel (C-351): each tile's UV is (dest - tile + 0.5) / 32 of
+	// the cell, so a tile on the grid starts at texel coordinate 96.5 of the
+	// 128 px atlas (the centre of the cell's first texel), not on the boundary
+	// with cell (2,0)'s transparent last column [orig:
+	// HUD_StdboxDrawFillWrapTiled @0x56B5D0 -- (pos + 0.5) * (1 / cell)].
+	bool half_texel_ok = true;
+	for (const HudQuad &q : fill) {
+		const float tile_x = std::floor(q.x0 / 32.0f + 1e-4f) * 32.0f;
+		const float tile_y = std::floor(q.y0 / 32.0f + 1e-4f) * 32.0f;
+		const float want_u0 = 3.0f * kCell + kCell * ((q.x0 - tile_x + 0.5f) / 32.0f);
+		const float want_v0 = kCell * ((q.y0 - tile_y + 0.5f) / 32.0f);
+		if (std::fabs(q.u0 - want_u0) > 1e-5f || std::fabs(q.v0 - want_v0) > 1e-5f)
+			half_texel_ok = false;
+	}
+	CHECK(half_texel_ok, "every fill tile's UV carries retail's half texel");
+	bool on_grid_tile = false;
+	for (const HudQuad &q : fill) {
+		if (std::fabs(q.x0 - std::floor(q.x0 / 32.0f + 0.5f) * 32.0f) > 0.01f) continue;
+		on_grid_tile = true;
+		CHECK(std::fabs(q.u0 * 128.0f - 96.5f) < 1e-3f,
+				"a grid-aligned fill tile starts at the centre of the cell's first texel");
+	}
+	CHECK(on_grid_tile, "a fill tile starts on the 32 px grid");
 
 	// The pieces' second texture stage: with the boxtile camo loaded every
 	// border piece carries it at the camo's own dims (the screen-anchored UV1
@@ -1806,15 +1857,17 @@ void test_compiler_stdbox_geometry(const fnt_font_t *font) {
 	bool saw_bar = false;
 	bool saw_cap = false;
 	bool saw_plain_tl = false;
+	// Each region starts half a texel into its cell (the 128 px atlas).
+	constexpr float kHalfTexel = 0.5f / 128.0f;
 	for (const HudQuad &q : titled) {
-		const bool row3 = std::fabs(q.v0 - 3.0f * kCell) < 0.001f;
+		const bool row3 = std::fabs(q.v0 - (3.0f * kCell + kHalfTexel)) < 0.001f;
 		if (row3 && q.u0 < 0.01f) saw_stub = true;
-		if (row3 && std::fabs(q.u0 - kCell) < 0.001f) {
+		if (row3 && std::fabs(q.u0 - (kCell + kHalfTexel)) < 0.001f) {
 			saw_bar = true;
 			CHECK(std::fabs((q.x1 - q.x0) - expected_gap) < 0.01f,
 					"the title bar stretches to the measured gap");
 		}
-		if (row3 && std::fabs(q.u0 - 2.0f * kCell) < 0.001f) saw_cap = true;
+		if (row3 && std::fabs(q.u0 - (2.0f * kCell + kHalfTexel)) < 0.001f) saw_cap = true;
 		if (q.u0 < 0.01f && q.v0 < 0.01f) saw_plain_tl = true;
 	}
 	CHECK(saw_stub && saw_bar && saw_cap,
@@ -2228,6 +2281,7 @@ void test_message_log_element(const fnt_font_t *font) {
 	HudLayout layout;
 	layout.box_texture_valid = true;
 	layout.box_tex_w = 128;
+	layout.box_tex_h = 128;
 	compiler.configure(layout, font);
 	compiler.configure_label_fonts(font, font, font, 1.0f, 1.0f);
 
@@ -2420,6 +2474,17 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 		if (q.texture >= opennova::hud::kHudTexLfpTeam1 &&
 				q.texture <= opennova::hud::kHudTexLfpNeutral) ++conquest_icons;
 	CHECK(conquest_icons == 0, "the conquest arm stays unmodelled");
+	// Every other game type takes the AAS arm: retail calls the drawer every HUD
+	// frame and its one game-type test is the conquest arm's
+	// [orig: HUD_RenderAllOverlays @0x5a8530; `cmp g_GameType, 50010h`
+	//  @0x5a248d..0x5a24a1].
+	lp.game_type = opennova::game_type::kTeamDeathmatch;
+	const HudDrawList &list_t = compiler.compile(state, 1024.0f, 768.0f);
+	size_t tdm_icons = 0;
+	for (const HudQuad &q : list_t.quads)
+		if (q.texture >= opennova::hud::kHudTexLfpTeam1 &&
+				q.texture <= opennova::hud::kHudTexLfpNeutral) ++tdm_icons;
+	CHECK(tdm_icons == 3, "a non-conquest game type draws the AAS arm");
 }
 
 // The map medic marker: a local-team medic's blip is REPLACED by the

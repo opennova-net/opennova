@@ -34,14 +34,6 @@ const DEV_TOOLS_KEY := KEY_INSERT
 # with the retail-configurable binding rows (huddetail's default; hudcolor's is
 # Ctrl+F6, D-CTRL-4).
 const PICK_KEY := KEY_F6
-# `-- --boot-smoke` (the package boot smoke, scripts/package_godot_windows.ps1):
-# once the bundled menu is up and its music plays, quit through request_quit(),
-# the window close's path, after BOOT_SMOKE_FRAMES frames. A forced quit
-# (`--quit-after`) with the menu music streaming crashes in Godot's shutdown
-# (audio/mus-sbf-re.md, "Godot playback shutdown"), so the smoke exits as a
-# player does instead, and exercises the music drain.
-const BOOT_SMOKE_FLAG := "--boot-smoke"
-const BOOT_SMOKE_FRAMES := 120
 # ARMORY = the WEAPON screen over LIVE play: the world keeps ticking (the witnessed
 # armory runs with no world-stop leg — and under the listen-server model a pausing
 # host would freeze every peer), only the mouse is released and player input idles.
@@ -484,31 +476,29 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		pick_at_crosshair()
 		get_viewport().set_input_as_handled()
 		return
-	# The USE-ITEM key's armory arm: in-world, standing in an armory volume, the
-	# press opens weapon.mnu [orig: useitem action 177, Flags & 0x400000 @0x4e0b4d].
-	# Every other arm of the key is the input router's per-frame chain over the
-	# polled `useitem` row -- the hold latch, the USE+digit seat pick, the mount
-	# toggle on the release edge (PlayerInputRouter::sample_use_item); the screen
-	# this arm opens leaves gameplay input inactive, which resets that chain.
+	# The USE-ITEM press: the engine decides its arm (Simulation.local_player_use_item_arm,
+	# engine/runtime/world/local_player_view.h) and the shell opens what it names.
+	# The mount chain is the input router's per-frame chain over the polled
+	# `useitem` row (the hold latch, the USE+digit seat pick, the mount toggle on
+	# the release edge, engine/runtime/controls/player_actions); every other arm
+	# takes the press, so that chain never latches it.
 	if is_gameplay_input_active() and _is_use_item_key(ArmoryPresenter.bound_key_of(key)):
-		if _try_open_armory():
-			get_viewport().set_input_as_handled()
-			return
-		# The vehicle-loadout-volume arm @0x4e0bfe (the engine's
-		# local_player_in_vehicle_loadout_zone: an unmounted local player carrying
-		# the type-11 volume touch): the press is consumed here and never latches
-		# the router's chain -- no mount toggle on the release, no USE+digit chord.
-		# The bay's team gate (local_player_vehicle_zone_team_matches: the ground
-		# entity's team 0 or the player's own) selects vehicle.mnu's VEHICLE
-		# screen, unported (D-HUD-14). A mounted player never reaches this arm (the
-		# predicate rejects a seated player), so the seat chain stays unconditional.
 		var use_sim: Simulation = _world.get_sim() if _world != null else null
-		if use_sim != null and use_sim.local_player_in_vehicle_loadout_zone():
-			if _player_presenter != null:
-				_player_presenter.consume_use_hold()
+		var arm: int = Simulation.USE_ITEM_ARM_MOUNT_CHAIN
+		if use_sim != null:
+			arm = use_sim.local_player_use_item_arm()
+		if arm == Simulation.USE_ITEM_ARM_MOUNT_CHAIN:
+			return
+		if _player_presenter != null:
+			_player_presenter.consume_use_hold()
+		if arm == Simulation.USE_ITEM_ARM_ARMORY:
+			_try_open_armory()
+		elif arm == Simulation.USE_ITEM_ARM_VEHICLE_LOADOUT:
+			# The bay's team gate (the ground entity's team 0 or the player's own)
+			# selects vehicle.mnu's VEHICLE screen, unported (D-HUD-14).
 			if use_sim.local_player_vehicle_zone_team_matches():
-				pass  # vehicle.mnu VEHICLE (D-HUD-14)
-			get_viewport().set_input_as_handled()
+				pass
+		get_viewport().set_input_as_handled()
 		return
 
 
@@ -761,17 +751,7 @@ func _enter_bundled_menu() -> bool:
 				+ "or the OpenNova Editor's Export)") % BootRootMount.bundled_project_dir())
 	# The boot marker the CLI startup contract test and the package smoke read (--verbose).
 	print_verbose("OpenNova: bundled menu up from %s (%s)" % [root.get_root_dir(), "build" if built else "loose"])
-	if OS.get_cmdline_user_args().has(BOOT_SMOKE_FLAG):
-		_quit_boot_smoke()
 	return true
-
-
-# The package boot smoke's exit (BOOT_SMOKE_FLAG): the menu runs its frames, its
-# music among them, then the runtime quits as a window close does.
-func _quit_boot_smoke() -> void:
-	for _frame in BOOT_SMOKE_FRAMES:
-		await get_tree().process_frame
-	request_quit()
 
 
 ## PLAY RETAIL: the saved retail install when it still mounts, else the picker.
@@ -940,13 +920,12 @@ func set_local_player_profile(profile: Dictionary) -> void:
 
 
 # The armory key while in-world: the shared ArmoryPresenter opens weapon.mnu's
-# WEAPON screen over LIVE play when the player stands in an armory zone — the
-# world keeps ticking underneath (State.ARMORY rides the presenter's opened signal)
-# [orig: useitem action 177 -> UI_OpenMenuScreen("weapon.mnu", "WEAPON")
-# @0x4e0b44, gated on Flags & 0x400000 @0x4e0b4d + the host weapons rule
-# (dword_A85B6C, BSS 0 in SP = allowed); no world-stop leg]. Returns false when
-# out of zone (key ignored, the original's silent gate). The ACCEPT apply and
-# the class/current-loadout open protocol live on the host.
+# WEAPON screen over LIVE play when the engine's USE-ITEM arm is the armory's —
+# the world keeps ticking underneath (State.ARMORY rides the presenter's opened
+# signal) [orig: useitem action 177 -> UI_OpenMenuScreen("weapon.mnu", "WEAPON")
+# @0x4e0b49; no world-stop leg]. Returns false otherwise (key ignored, the
+# original's silent gate). The ACCEPT apply and the class/current-loadout open
+# protocol live on the host.
 func _try_open_armory() -> bool:
 	if _armory_presenter == null:
 		return false
@@ -1573,8 +1552,9 @@ func mcp_open_armory() -> Error:
 		return OK
 	if _state != State.WORLD:
 		return ERR_UNAVAILABLE
-	# The armory key's leg minus the zone gate: standing in a type-6 volume is
-	# the useitem key's gameplay rule [orig: Flags & 0x400000 @0x4e0b4d], not a
+	# The armory key's leg minus the arm's gate: a type-6 volume or the pre-round
+	# is the useitem key's gameplay rule (Simulation.local_player_use_item_arm)
+	# [orig: Input_HandleActionBinding_0 Flags & 0x400000 @0x4e0aa1], not a
 	# screen precondition — open() is the presenter's staged direct-open seam.
 	_armory_presenter.set_player_team(int(_chosen_avatar.get("team", 0)))
 	return OK if _armory_presenter.open() else ERR_UNAVAILABLE

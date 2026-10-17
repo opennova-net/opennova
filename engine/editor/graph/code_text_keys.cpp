@@ -39,7 +39,7 @@ const CodeTextKey kRows[] = {
 	{"GAMEERR.BIN", "Generic Strings", "PRE_CONNECTING", "MultiPlayer_JoinSessionStateMachine", 0x56A554},
 	{"GAMEERR.BIN", "Generic Strings", "PRE_ENUMSESSION", "UI_EnumerateAndJoinSession", 0x56A0AC},
 	{"GAMEERR.BIN", "Generic Strings", "PRE_JOININGSESSION", "MultiPlayer_JoinSessionStateMachine", 0x56A4B9},
-	{"GAMEERR.BIN", "Generic Strings", "PRE_JOINSESSIONCHOICE", "sub_5691F0", 0x569253},
+	{"GAMEERR.BIN", "Generic Strings", "PRE_JOINSESSIONCHOICE", "PreMenu_HostSetup", 0x569253},
 	{"GAMEERR.BIN", "Generic Strings", "PRE_JOINSESSIONCHOICE", "UI_EnumerateAndJoinSession", 0x56A2BD},
 	{"GAMEERR.BIN", "Generic Strings", "PRE_STARTINGSESSION", "MultiPlayer_JoinSessionStateMachine", 0x56A45A},
 	{"GAMEERR.BIN", "Generic Strings", "PRE_VERIFYING", "MultiPlayer_JoinSessionStateMachine", 0x56A649},

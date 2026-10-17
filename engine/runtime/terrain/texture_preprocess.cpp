@@ -1,4 +1,5 @@
 #include <runtime/terrain/texture_preprocess.h>
+#include <base/io/bits.h>
 #include <runtime/terrain_query/height_field.h>
 #include <runtime/renderer/texture_compression.h>
 
@@ -10,10 +11,6 @@
 namespace opennova::terrain {
 
 namespace {
-
-bool is_power_of_two(uint32_t value) noexcept {
-	return value != 0 && (value & (value - 1)) == 0;
-}
 
 uint8_t encode_coefficient(double value) noexcept {
 	const int encoded = static_cast<int>((value + 1.0) * 127.5);
@@ -52,8 +49,8 @@ bool Rgba8Image::is_valid() const noexcept {
 }
 
 Rgba8Image build_detail_coefficient_map(const Rgba8Image &detailmap) {
-	if (!detailmap.is_valid() || !is_power_of_two(detailmap.width) ||
-			!is_power_of_two(detailmap.height)) {
+	if (!detailmap.is_valid() || !io::is_power_of_two(detailmap.width) ||
+			!io::is_power_of_two(detailmap.height)) {
 		return {};
 	}
 
@@ -153,7 +150,7 @@ Rgba8Image build_heightfield_normal_map(
 		uint32_t width,
 		uint32_t height,
 		const TerrainQuadrantLocks &locks) {
-	if (!is_power_of_two(width) || !is_power_of_two(height) ||
+	if (!io::is_power_of_two(width) || !io::is_power_of_two(height) ||
 			width < 2 || height < 2 ||
 			depth.size() != static_cast<size_t>(width) * height) {
 		return {};
@@ -179,7 +176,7 @@ bool refresh_heightfield_normal_map(
 		const terrain::CoordsRect &rect,
 		std::vector<terrain::CoordsRect> *written) {
 	if (written != nullptr) written->clear();
-	if (!is_power_of_two(width) || !is_power_of_two(height) ||
+	if (!io::is_power_of_two(width) || !io::is_power_of_two(height) ||
 			width < 2 || height < 2 ||
 			depth.size() != static_cast<size_t>(width) * height ||
 			normals.width != width || normals.height != height ||
@@ -289,7 +286,7 @@ std::vector<Rgba8Image> build_paired_detail_mip_chain(
 		const Rgba8Image &far_detail) {
 	if (!base.is_valid() || !far_detail.is_valid() ||
 			base.width != far_detail.width || base.height != far_detail.height ||
-			!is_power_of_two(base.width) || !is_power_of_two(base.height)) {
+			!io::is_power_of_two(base.width) || !io::is_power_of_two(base.height)) {
 		return {};
 	}
 
@@ -359,8 +356,8 @@ std::vector<renderer::DxtSurface> build_detail_layer_levels(
 //  after the 4x4 level, each level a GTexture_Downsample2x2_RGBA8 @0x687000 box reduction]
 std::vector<Rgba8Image> build_box_mip_chain_to_4x4(
 		const Rgba8Image &base) {
-	if (!base.is_valid() || !is_power_of_two(base.width) ||
-			!is_power_of_two(base.height)) {
+	if (!base.is_valid() || !io::is_power_of_two(base.width) ||
+			!io::is_power_of_two(base.height)) {
 		return {};
 	}
 	std::vector<Rgba8Image> result;

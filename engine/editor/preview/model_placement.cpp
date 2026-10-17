@@ -27,16 +27,9 @@ namespace opennova::editor {
 
 namespace {
 
-// The open document at a project path (null: not open).
-const DocumentBase *open_at(const SessionView &view, const std::string &path) {
-	for (const auto &document : view.documents.open)
-		if (document && document->path() == path) return document.get();
-	return nullptr;
-}
-
 // The item rows of an open catalog, each by its id and its name.
 template <typename Visit> void open_items(const SessionView &view, const std::string &catalog, Visit visit) {
-	const DocumentBase *open = open_at(view, catalog);
+	const DocumentBase *open = view.documents.open_at(catalog);
 	const Document *records = open ? records_of(*open) : nullptr;
 	if (!records) return;
 	const NodeKind item = node_kind(def::DefRecordKind::Item);
@@ -65,14 +58,7 @@ std::string item_label(const ModelItemPlan &plan) {
 
 int64_t free_project_item_id(const SessionView &view, const std::string &catalog) {
 	std::unordered_set<int64_t> used;
-	if (const AssetGraph *graph = view.findings.graph.get()) {
-		for (const GraphSymbol *symbol : graph->symbols_of_kind(ReferenceKind::Item))
-			if (const std::optional<int> id = strutil::parse_int(symbol->name)) used.insert(*id);
-		graph->for_each_edge([&](const GraphEdge &edge) {
-			if (edge.kind != ReferenceKind::Item) return;
-			if (const std::optional<int> id = strutil::parse_int(edge.value)) used.insert(*id);
-		});
-	}
+	if (const AssetGraph *graph = view.findings.graph.get()) used = project_item_ids(*graph);
 	open_items(view, catalog, [&](int64_t id, const std::string &) { used.insert(id); });
 	return free_item_id([&](int id) { return used.count(id) != 0; });
 }
@@ -164,7 +150,7 @@ static bool mission_to_place_in(const SessionView &view, const std::string &what
 
 std::string place_in_mission_target(const SessionView &view) {
 	const auto mission_at = [&](const std::string &path) {
-		const DocumentBase *open = path.empty() ? nullptr : open_at(view, path);
+		const DocumentBase *open = path.empty() ? nullptr : view.documents.open_at(path);
 		return open && open->kind() == AssetKind::Mission;
 	};
 	if (mission_at(view.documents.active)) return view.documents.active;
