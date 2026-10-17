@@ -158,16 +158,15 @@ std::vector<DeviceTextureLevel> pixel_device_texture_levels(const uint8_t *rgba,
 	if (level_limit != 0)
 		count = std::min(count, level_limit);
 	// D3DXFilterTexture fills the chain only when the level count the game asked
-	// D3DXCreateTexture for is above 1. Asked 0 (the smaller side 2 or less, no
-	// 0x40000), D3DX makes its full chain and only level 0 is loaded, so levels 1+
-	// keep what the managed pool's creation left there, which no witness reads; the
-	// port leaves them zero (D-RMAT-X1) [orig: GTexture_CreateFromPixelData_0 --
-	// the count @0x6877BA..0x6877E0, D3DXCreateTexture @0x68781A, the level-0 load
-	// @0x6878A0, D3DXFilterTexture only for a count above 1 @0x6878B1..0x6878BE;
-	// the 0-means-full resolution D3DXTex_ValidateAndAdjustTextureParams
-	// @0x690C32..0x690C7D].
-	const bool unfilled_chain = std::min(width, height) <= 2 && (flags & 0x40000u) == 0;
-	const uint32_t filled = unfilled_chain ? std::min(count, 1u) : count;
+	// D3DXCreateTexture for (texture_requested_level_count) is above 1. Asked 0,
+	// D3DX makes its full chain and only level 0 is loaded, so levels 1+ keep what
+	// the managed pool's creation left there, which no witness reads; the port
+	// leaves them zero (D-RMAT-X1) [orig: GTexture_CreateFromPixelData_0 --
+	// D3DXCreateTexture @0x68781A, the level-0 load @0x6878A0, D3DXFilterTexture
+	// only for a request above 1 @0x6878B1..0x6878BE; the 0-means-full resolution
+	// D3DXTex_ValidateAndAdjustTextureParams @0x690C32..0x690C7D].
+	const uint32_t filled =
+			texture_requested_level_count(width, height, flags) > 1 ? count : std::min(count, 1u);
 	const TextureDxtFormat format = select_texture_dxt_format(flags, caps);
 	if (format != TextureDxtFormat::None) {
 		for (const DxtSurface &surface : build_dxt_texture_levels(base.data(), width, height, format, filled)) {
