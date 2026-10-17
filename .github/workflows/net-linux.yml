@@ -1,7 +1,7 @@
 name: Net stack (Linux)
 
 # The Linux net leg the NovaWorld images and serve image workflows gate their
-# image builds on:
+# image pushes on:
 # the NovaWorld service's five programs (OPENNOVA_NOVAWORLD_SERVICE) with the
 # Crow HTTP layer ON plus the
 # net-scoped ctests, on the deploy target's OS and flag set, and a Linux
