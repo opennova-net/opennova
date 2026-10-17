@@ -28,7 +28,7 @@ anywhere: a shell is ECS Exec. The gate's Elastic IP is one no Terraform plan ca
 the load balancer's address in its first zone, where retail clients reach the gate, the
 lobby and the retail HTTP routes; the website reaches web through Cloudflare alone, over
 TLS Cloudflare verifies. Hosted game servers run on machines the service launches itself:
-shared machines holding up to 12 servers, and own machines (a paid add-on) holding one.
+shared machines holding up to 6 servers, and own machines (a paid add-on) holding one.
 
 ## Deployments: dev, staging and prod
 

@@ -76,10 +76,13 @@ export function fleetServer(id: number, overrides: Partial<FleetServer> & Partia
 
 export function fleetResponse(overrides: Partial<FleetResponse> = {}): FleetResponse {
   const servers = overrides.servers ?? [fleetServer(1), fleetServer(2, { state: 'stopped', players: null, machine_ref: null, slot: null, game_port: null })];
+  const live = servers.filter((s) => s.live).length;
   return {
     enabled: true,
-    cap: 24,
-    live: servers.filter((s) => s.live).length,
+    cap: 26,
+    live,
+    shared: { live, room: 24 },
+    own: { live: 0, room: 2 },
     machines: [machine('3'), machine('4', { kind: 'own', slots: 1, slots_used: 1, instance_type: 'c7a.medium' })],
     servers,
     ...overrides,

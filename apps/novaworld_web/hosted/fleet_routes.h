@@ -48,8 +48,9 @@ public:
 
 	// Whether this service has a machine driver, its name and ONNET_HOSTED_CAP
 	// (HostedRoutes::configure decided them; the view's `enabled` adds at least
-	// one offered data set, read at each request). Before register_routes().
-	void configure(bool hosting_on, std::string provider, int cap);
+	// one offered data set, read at each request), and the fleet's placement
+	// policy (the view's room per machine kind). Before register_routes().
+	void configure(bool hosting_on, std::string provider, int cap, const PlacementPolicy &policy);
 	void register_routes(WebApp &app);
 
 private:
@@ -65,6 +66,7 @@ private:
 	bool hosting_on_ = false;
 	std::string provider_ = "none";
 	int cap_ = 24;
+	PlacementPolicy policy_;
 };
 
 } // namespace opennova::novaworld_server::hosted
