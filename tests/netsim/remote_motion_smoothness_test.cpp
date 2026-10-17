@@ -1224,6 +1224,29 @@ bool run_root_rotation_follows_heading() {
 	return ok;
 }
 
+// The replica's root rotation is the world motor's pair (B-11): org2 (a Player
+// row) reads the Q22 sine table at the heading's rounded top ten bits, org1 (an
+// Infantry row) takes the Q22 trig at retail's dbl_7C3608 scale. Off a table
+// step and at a quarter turn the exact 2pi/2^32 trig the replica used gives
+// (-6433, 4194299) and (0, 4194304) instead.
+// [orig: Entity_UpdateInfantryPlayerBody @0x4B41F0..0x4B4206 (the table);
+//  Entity_UpdateInfantryAI `fmul dbl_7C3608` @0x4BF007 (the trig)]
+bool run_root_rotation_pair_is_the_world_motors() {
+	const opennova::world::RootRotationQ22 org2 =
+			opennova::world::root_rotation_q22(0x40100000, true);
+	bool ok = expect(org2.c == 0 && org2.s == 4194304,
+	                 "org2 rotates by the sine table's entry 256");
+	const opennova::world::RootRotationQ22 org1 =
+			opennova::world::root_rotation_q22(0x40100000, false);
+	ok &= expect(org1.c == -6635 && org1.s == 4194298,
+	             "org1 rotates by the trig at retail's BAM scale");
+	const opennova::world::RootRotationQ22 quarter =
+			opennova::world::root_rotation_q22(0x40000000, false);
+	ok &= expect(quarter.c == -201 && quarter.s == 4194303,
+	             "org1's quarter turn keeps retail's 30.5 ppm cosine");
+	return ok;
+}
+
 // The org1 (Infantry) root path: the AI row dead-reckons by its clip too.
 bool run_infantry_root_motion_dead_reckons() {
 	ns::ClientReplicaPipeline view([](uint16_t type_id) {
@@ -1739,6 +1762,7 @@ int main() {
 	ok &= run_starved_rows_hold_their_pose();
 	ok &= run_self_row_gets_no_root_add();
 	ok &= run_root_rotation_follows_heading();
+	ok &= run_root_rotation_pair_is_the_world_motors();
 	ok &= run_infantry_root_motion_dead_reckons();
 	ok &= run_root_transition_blends();
 	ok &= run_dead_row_takes_its_death_clip_and_respawn_rearms();

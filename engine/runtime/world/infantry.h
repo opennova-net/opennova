@@ -273,6 +273,20 @@ struct RootMotionFrame {
     int32_t capsule_top = 0;    // out[4] = top * 65536 + 0x2000
 };
 
+// The root integrate's body-heading rotation, Q22: org2 (the player body) reads the
+// Q22 sine table at the heading's rounded top ten bits, org1 takes the Q22 ftol trig of
+// the heading times retail's radians-per-BAM double. The world motor and the joiner's
+// replica motor both rotate their root deltas by it.
+// [orig: Entity_UpdateInfantryPlayerBody (org2) entity+0x8C @0x4B41E4, `add eax,
+//  200000h; shr eax, 16h` @0x4B41F0..0x4B41F5, g_BamSinTableQ22 / off_849934
+//  @0x4B41F8..0x4B4206; Entity_UpdateInfantryAI (org1) entity+0x8C `fild; fmul
+//  dbl_7C3608` @0x4BF001..0x4BF007, the trig @0x4BF00D..0x4BF02A]
+struct RootRotationQ22 {
+    int32_t c = 0;
+    int32_t s = 0;
+};
+RootRotationQ22 root_rotation_q22(int32_t heading, bool org2_player_body);
+
 // Runtime source for real .bad/.adm data, with tests providing IDA-shaped doubles.
 class IRootMotionSource {
 public:
