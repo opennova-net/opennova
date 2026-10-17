@@ -29,32 +29,47 @@ static int test_decode_sample_silence(void) {
     return 1;
 }
 
+/* The 8-bit buffer the stereo split makes of a chunk, at the mixer's 16-bit
+   scale: ((byte - 128) * 256) >> shift, as an 8-bit AUD1 wave of the same
+   bytes decodes (C-162) [orig: Audio_SubmitStereoSampleSplit @ 0x7BD205;
+   sub_7BD671 @ 0x7BD6A1]. */
 static int test_decode_sample_extremes(void) {
-    /* scale 0: byte 0xFF -> ((127) * 256) >> 0 >> 1 = 16256 */
-    CHECK(sbf_decode_sample(0xFF, 0) == 16256, "0xFF scale 0");
-    /* scale 0: byte 0x00 -> ((-128) * 256) >> 0 >> 1 = -16384 */
-    CHECK(sbf_decode_sample(0x00, 0) == -16384, "0x00 scale 0");
-    /* scale 7: byte 0xFF -> ((127) * 256) >> 7 >> 1 = 127 */
-    CHECK(sbf_decode_sample(0xFF, 7) == 127, "0xFF scale 7");
+    /* scale 0: byte 0xFF -> 127 * 256 = 32512, the loudest a stream plays */
+    CHECK(sbf_decode_sample(0xFF, 0) == 32512, "0xFF scale 0");
+    /* scale 0: byte 0x00 -> -128 * 256 = -32768 */
+    CHECK(sbf_decode_sample(0x00, 0) == -32768, "0x00 scale 0");
+    /* scale 7: byte 0xFF -> (127 * 256) >> 7 = 254 */
+    CHECK(sbf_decode_sample(0xFF, 7) == 254, "0xFF scale 7");
+    CHECK(sbf_decode_sample(0x00, 7) == -256, "0x00 scale 7");
+    /* an 8-bit AUD1 sample's 16-bit value at the same shift */
+    CHECK(sbf_decode_sample(0x81, 3) == (1 * 256) >> 3, "0x81 scale 3");
     return 1;
 }
 
-static int test_decode_chunk_rejects_invalid_scales(void) {
+/* Any shift byte plays: the mixer shifts the channel's coefficients by it,
+   any count, so past 7 a chunk plays quieter and from 15 on silent [orig:
+   AudioChannel_ComputeMixCoefficients @ 0x7BD5E6..0x7BD5F3, psraw]. */
+static int test_decode_chunk_takes_any_shift(void) {
     uint8_t chunk[SBF_CHUNK_HEADER + 2] = {0};
     int16_t decoded[2] = {0};
     SbfChunkHeader h = {};
     h.valid_samples = 2;
+    chunk[SBF_CHUNK_HEADER] = 0x00;
+    chunk[SBF_CHUNK_HEADER + 1] = 0xFF;
 
     h.scale_a = 8;
+    h.scale_b = 14;
     memcpy(chunk, &h, SBF_CHUNK_HEADER);
-    CHECK(sbf_decode_chunk(chunk, sizeof(chunk), decoded, 2) < 0,
-          "scale_a above 7 is rejected");
+    CHECK(sbf_decode_chunk(chunk, sizeof(chunk), decoded, 2) == 2,
+          "a chunk with shifts past 7 decodes");
+    CHECK(decoded[0] == -128 && decoded[1] == 1, "shift 8 and 14");
 
-    h.scale_a = 0;
+    h.scale_a = 15;
     h.scale_b = 255;
     memcpy(chunk, &h, SBF_CHUNK_HEADER);
-    CHECK(sbf_decode_chunk(chunk, sizeof(chunk), decoded, 2) < 0,
-          "scale_b above 7 is rejected");
+    CHECK(sbf_decode_chunk(chunk, sizeof(chunk), decoded, 2) == 2,
+          "a chunk with shifts of 15 and more decodes");
+    CHECK(decoded[0] == 0 && decoded[1] == 0, "from 15 on silent");
     return 1;
 }
 
@@ -152,7 +167,7 @@ static int test_decode_all_tone01_multichunk(void) {
 int main(void) {
     RUN_TEST(test_decode_sample_silence);
     RUN_TEST(test_decode_sample_extremes);
-    RUN_TEST(test_decode_chunk_rejects_invalid_scales);
+    RUN_TEST(test_decode_chunk_takes_any_shift);
     RUN_TEST(test_decode_chunk_tone01);
     RUN_TEST(test_decode_chunk_silence_partial);
     RUN_TEST(test_decode_all_silence);

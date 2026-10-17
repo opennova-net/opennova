@@ -4,9 +4,11 @@
 //   - Sbf_StartEntry          @ 0x004ED910: per-entry block_size /
 //                                            data_offset / total_size init.
 //   - Audio_StreamNextChunk   @ 0x004ED7D0: per-tick chunk read + decode.
-//   - sbf_decode_chunk (libs): algebraically equivalent to the engine's
+//   - sbf_decode_chunk (formats/sbf): the 8-bit buffers
 //                              Audio_SubmitStereoSampleSplit @ 0x007BD205
-//                              at unity gain (see docs/audio/mus-sbf-re.md).
+//                              makes of a chunk, at the mixer's 16-bit scale
+//                              with the shift folded onto the samples
+//                              (sbf_decode_sample; docs/audio/mus-sbf-re.md).
 //
 // Chunk data is read from SbfBank's decoded in-memory byte stream, so
 // SCR-wrapped loose banks and plaintext banks use the same playback path.

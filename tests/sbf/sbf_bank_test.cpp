@@ -86,10 +86,13 @@ int test_from_scratch() {
 	TEST_EXPECT(sbf_write_bank(bank, written, error));
 	TEST_EXPECT(sbf_read_bank(written.data(), written.size(), again, error, &layout) &&
 	            again.streams[0].name == "SIXTEEN_CHARS_XX" && layout.names_with_tails == 0);
-	// A stream stops at a chunk whose shift is past 7.
-	SbfStream stopped = two;
-	stopped.chunks[1].scale_a = 8;
-	TEST_EXPECT(sbf_decode_stream(stopped).size() == size_t(SBF_CHUNK_AUDIO));
+	// A stream plays on through a chunk whose shift is past 7, its side silent from 15 on.
+	SbfStream shifted = two;
+	shifted.chunks[1].scale_a = 15;
+	const std::vector<int16_t> played = sbf_decode_stream(shifted);
+	TEST_EXPECT(played.size() == size_t(SBF_CHUNK_AUDIO) + 100);
+	TEST_EXPECT(played.size() > size_t(SBF_CHUNK_AUDIO) + 1 && played[SBF_CHUNK_AUDIO] == 0 &&
+	            played[SBF_CHUNK_AUDIO + 1] == sbf_decode_sample(0x55, 0));
 	return 0;
 }
 

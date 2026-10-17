@@ -154,9 +154,6 @@ int sbf_decode_chunk(const uint8_t *chunk_bytes, size_t chunk_size,
 
     SbfChunkHeader h;
     memcpy(&h, chunk_bytes, SBF_CHUNK_HEADER);
-    if (h.scale_a > 7 || h.scale_b > 7) {
-        return -4;
-    }
 
     uint32_t want = h.valid_samples;
     if (want > chunk_size - SBF_CHUNK_HEADER) want = (uint32_t)(chunk_size - SBF_CHUNK_HEADER);
@@ -224,7 +221,7 @@ uint8_t sbf_pick_scale(const int16_t *s, size_t count) {
         if (a > max_abs) max_abs = a;
     }
     for (int scale = 7; scale >= 0; --scale) {
-        int32_t enc = ((max_abs << 1) << scale) / 256;
+        int32_t enc = (max_abs << scale) / 256;
         if (enc <= 127) return (uint8_t)scale;
     }
     return 0;
@@ -475,11 +472,6 @@ bool sbf_write_bank(const SbfFile &bank, std::vector<uint8_t> &out, std::string 
 std::vector<int16_t> sbf_decode_stream(const SbfStream &stream) {
     std::vector<int16_t> out;
     for (const SbfChunk &chunk : stream.chunks) {
-        /* A shift past 7 stops the stream at its chunk, as the Godot player
-           does (sbf_decode_chunk refuses the chunk; what the original's mixer
-           does with such a shift is not witnessed, and no shipped chunk has
-           one). */
-        if (chunk.scale_a > 7 || chunk.scale_b > 7) break;
         for (size_t i = 0; i < chunk.audio.size(); ++i)
             out.push_back(sbf_decode_sample(chunk.audio[i], (i & 1) ? chunk.scale_b : chunk.scale_a));
     }
