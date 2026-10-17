@@ -87,12 +87,13 @@ inline constexpr int kLoadingBarH = 15;
 
 // The progress bar's layered rects in surface pixels (left, top, width,
 // height) on a `surface_w` x `surface_h` surface at `displayed` percent: the
-// bar's virtual placement scaled by the surface's float ratio to the design
-// space, each product truncated, then the black outer (w + 6, h + 6), the gray
-// (inset 1), the black track (inset 2) and the fill (left x + 3, top y + 3,
-// height h, its right edge loading_bar_fill_span's; a width <= 0 draws no
-// fill) [orig: LoadingScreen_UpdateAndPresent @ 0x586c78..0x586c90 (the
-// placement through Viewport_ScaleToVirtualCoords @ 0x5d2b20);
+// bar's virtual placement and extent each scaled in integers with retail's
+// round-half-up (hud_math.h design_to_screen_x/y), then the black outer
+// (w + 6, h + 6), the gray (inset 1), the black track (inset 2) and the fill
+// (left x + 3, top y + 3, height h, its right edge loading_bar_fill_span's; a
+// width <= 0 draws no fill) [orig: LoadingScreen_UpdateAndPresent @
+// 0x586c78..0x586cac (the placement and the extent through
+// Viewport_ScaleToVirtualCoords @ 0x5d2b20);
 // HUD_DrawProgressBar_0 @ 0x5d4c40 -- the clears @ 0x5d4cb2 / @ 0x5d4ce2 /
 // @ 0x5d4d0f, the fill's right edge @ 0x5d4d57..0x5d4d64, its inset clear
 // @ 0x5d4dbc..0x5d4e33].
@@ -108,7 +109,7 @@ struct LoadingBarRects {
 	LoadingBarRect track;
 	LoadingBarRect fill;
 };
-LoadingBarRects loading_bar_rects(float surface_w, float surface_h, int displayed);
+LoadingBarRects loading_bar_rects(int surface_w, int surface_h, int displayed);
 
 // Bar colors: the layered border draws black/gray/black [orig: 0, 0xC0C0C0,
 // 0 @ 0x5d4c40]; the fill is the red override [orig: 0xFFEB0000 @ 0x586cd0].
