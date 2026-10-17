@@ -1031,8 +1031,25 @@ static void decompile_block(Buf *out,
             buf_puts(out, "yield\n");
         }
         else if (strcmp(m, "done") == 0) {
+            /* A section's closing brace compiles to done after its last statement, and so does a
+               `done` statement (mus_compile.cpp): the brace is the done the section's code ends on, at
+               the top level, where no instruction but the layout's padding follows it before the next
+               section or handler (or the end); every other done is the statement. */
+            bool closes = !suppress_entries;
+            for (int k = i + 1; closes && k < end_idx; ++k) {
+                const uint32_t next = insts[k].offset;
+                bool starts = is_section_entry(script, next) != 0;
+                for (int f = 0; !starts && f < function_count; ++f) starts = functions[f].start == next;
+                if (starts) break;
+                if (insts[k].opcode != 0) closes = false;
+            }
             place(out, script, inst->offset);
-            buf_puts(out, "}\n");
+            if (closes) {
+                buf_puts(out, "}\n");
+            } else {
+                emit_indent(out, indent);
+                buf_puts(out, "done\n");
+            }
         }
         else if (strcmp(m, "nop") == 0) {
             /* MDEdit's leading nop and its padding are the layout's (the compiler writes them); any other a
