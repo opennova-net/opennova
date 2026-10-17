@@ -421,7 +421,10 @@ std::vector<TableHeaderSetup> table_header_setup(const TableColumn &column);
 struct TableData {
   TableColumn column;
   bool has_min_item_height = false;
-  int min_item_height = 0;      // MIN_ITEM_HEIGHT (LIST and TABLE)
+  // MIN_ITEM_HEIGHT (LIST and TABLE). Absent, the game's default: -1, a row measured from the font
+  // [orig: CListWnd_Construct @ 0x643c34; CTableWnd_Construct @ 0x63e92b; taken where not below 0,
+  // CListWnd_RecalcLayout @ 0x6443e0, CTableWnd_RecalcLayout @ 0x63f1ee].
+  int min_item_height = -1;
   bool has_fixed_header_height = false;
   int fixed_header_height = 0;  // FIXED_HEADER_HEIGHT (TABLE)
 };
