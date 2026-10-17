@@ -864,6 +864,26 @@ int test_mission_terrain() {
 		editor_test::handle_to_end(session, request::edit_record("narrow.env", four));
 		TEST_EXPECT(refused("narrow.env").empty() && refused("narrow.bms").empty());
 	}
+	// A .trn opened and left unchanged is judged as it sits, the file a build packs, not as its save would write it:
+	// no polytrn_sectors row of its own (its save writes one) and three in the .env, three in the load, refused.
+	TEST_EXPECT(test_io::write_text(root + "/rows.trn", "polytrn_colormap map.tga\r\npolytrn_detailmap detail.tga\r\n"
+	                                                    "polytrn_polydata island.cpt\r\npolytrn_sectorcount 1\r\n"));
+	TEST_EXPECT(test_io::write_text(root + "/three.env",
+	                                "sky_height 175\r\npolytrn_sectors 0\r\npolytrn_sectors 0\r\npolytrn_sectors 0\r\n"));
+	TEST_EXPECT(mission("rows.bms", "rows", "three") == 0);
+	editor_test::handle_to_end(session, request::rescan());
+	const auto rows_refused = [&]() {
+		return refused("rows.trn").size() + refused("three.env").size() + refused("rows.bms").size();
+	};
+	const size_t before = rows_refused();
+	TEST_EXPECT(before == 1);
+	editor_test::handle_to_end(session, request::open_document("rows.trn"));
+	TEST_EXPECT(session.document_for("rows.trn") && !session.document_for("rows.trn")->dirty() && rows_refused() == before);
+	// Saved as it stands, the file then holds the row its save writes: four in the load, taken (the judgement follows
+	// the file, not the unchanged document).
+	editor_test::handle_to_end(session, request::save("rows.trn"));
+	TEST_EXPECT(test_io::read_file_text(root + "/rows.trn").find("polytrn_sectors") != std::string::npos &&
+	            rows_refused() == 0);
 	std::printf("mission terrain: the gate over the .trn, overcast.def and the .env; on the .env's line; the .trn's "
 	            "own row taken back where every mission takes it\n");
 	return 0;

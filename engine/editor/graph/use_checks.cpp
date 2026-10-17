@@ -318,11 +318,14 @@ void check_particle_token_slots(const AssetGraph &, const ValidationCache &, con
 	}
 }
 
-// A file's text as this validation reads it: its open document's save, else its bytes (the project's folder,
-// or the paths' source by its logical name); false where neither reads. Its stamp: what it is read from (the open
-// document's identity, load and revision, else the file's size and last write as the scan lists it).
+// A file's text as this validation reads it, the file a build packs: an open document with changes, its save
+// (a build saves first); else the file as it sits, its bytes (the paths' source by its logical name, else the
+// project's folder), an SCR- or BFC-wrapped one decoded as the game reads it; false where none reads. Its stamp
+// follows what it is read from: an open document with changes, its identity, load and revision; else the file's
+// size and last write as the scan lists it (which a save of the document moves).
 bool validation_text(const ValidationInput &input, const AssetEntry &asset, std::string &out) {
-	if (const std::shared_ptr<const DocumentBase> open = input.open_document(asset)) {
+	const std::shared_ptr<const DocumentBase> open = input.open_document(asset);
+	if (open && open->dirty()) {
 		const SerializeResult written = open->serialize();
 		if (written.ok()) {
 			out = written.text;
@@ -331,14 +334,17 @@ bool validation_text(const ValidationInput &input, const AssetEntry &asset, std:
 	}
 	std::vector<uint8_t> bytes;
 	std::string error;
+	const int policy = gameprofile::gameprofile_scr_policy_for_code(input.project.target_game.c_str());
 	if (!(input.paths.files ? input.paths.files->read(asset.logical_name, bytes)
-	                        : io::read_file_bytes(join_path(input.paths.root, asset.relative_path), bytes, error)))
+	                        : io::read_file_bytes(join_path(input.paths.root, asset.relative_path), bytes, error)) ||
+	    !vfs_decode_payload(bytes, policy))
 		return false;
 	out.assign(bytes.begin(), bytes.end());
 	return true;
 }
 std::string validation_stamp(const ValidationInput &input, const AssetEntry &asset) {
-	if (const std::shared_ptr<const DocumentBase> open = input.open_document(asset))
+	const std::shared_ptr<const DocumentBase> open = input.open_document(asset);
+	if (open && open->dirty())
 		return asset.relative_path + "|o" + std::to_string(open->identity()) + "." +
 		       std::to_string(open->load_generation()) + "." + std::to_string(open->revision());
 	return asset.relative_path + "|f" + std::to_string(asset.size_bytes) + "." + std::to_string(asset.modified_ticks);
