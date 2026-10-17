@@ -337,7 +337,8 @@ public:
 	// frame after them (pump_mouse). process_mouse is one whole sample (a scripted pump).
 	void process_mouse(const Vector2 &p_position, bool p_button_down);
 	void move_mouse(const Vector2 &p_position, bool p_button_down);
-	bool press_mouse(const Vector2 &p_position);
+	// `p_double_click`: the platform's double click (InputEventMouseButton::double_click).
+	bool press_mouse(const Vector2 &p_position, bool p_double_click = false);
 	bool release_mouse(const Vector2 &p_position);
 	void pump_mouse();
 	// A mouse event as its message: a motion's point and left button, the left button's press or

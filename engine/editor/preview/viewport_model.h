@@ -161,6 +161,9 @@ struct ViewportMouse {
 	float x = 0.0f;
 	float y = 0.0f;
 	bool down = false;
+	// The press this frame is the second of a double click, as the editor's UI reports one (the
+	// game's menus take the platform's: menu::MenuRuntime::press_mouse).
+	bool double_click = false;
 };
 
 // A viewport (ADR 0046 S13 V5; CONTEXT.md "Viewport"): one document's picture as the game would

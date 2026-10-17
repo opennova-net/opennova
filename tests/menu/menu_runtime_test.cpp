@@ -868,10 +868,10 @@ void test_table_row_operations() {
 }
 
 // Press, then release over the claimed widget (the frame's click signal).
-void click(MenuRuntime &rt, FakeFrame &frame, int index, uint32_t now) {
+void click(MenuRuntime &rt, FakeFrame &frame, int index, bool double_click = false) {
 	frame.claim = index;
-	rt.process_mouse(5, 5, true, now);
-	rt.process_mouse(5, 5, false, now);
+	rt.process_mouse(5, 5, true, double_click);
+	rt.process_mouse(5, 5, false);
 	rt.on_widget_clicked(index, 0);
 }
 
@@ -903,30 +903,30 @@ void test_sound_edges() {
 		return out;
 	};
 	frame.claim = 1; // B
-	rt.process_mouse(5, 5, false, 0);
+	rt.process_mouse(5, 5, false);
 	CHECK(sounds() == "OVER_B");
-	rt.process_mouse(5, 5, true, 0);
+	rt.process_mouse(5, 5, true);
 	CHECK(sounds() == "OVER_B");
 	// The frame's click fires inside its release pump, ahead of the sample.
 	rt.on_widget_clicked(1, 0);
-	rt.process_mouse(5, 5, false, 0);
+	rt.process_mouse(5, 5, false);
 	CHECK(sounds() == "OVER_B CLICK_B");
-	rt.process_mouse(6, 5, false, 0);
+	rt.process_mouse(6, 5, false);
 	CHECK(sounds() == "OVER_B CLICK_B OVER_B");
 	// Left and come back with the button held, then up: nothing.
-	rt.process_mouse(6, 5, true, 0);
+	rt.process_mouse(6, 5, true);
 	frame.claim = 2; // C
-	rt.process_mouse(30, 5, true, 0);
+	rt.process_mouse(30, 5, true);
 	frame.claim = 1;
-	rt.process_mouse(6, 5, false, 0);
+	rt.process_mouse(6, 5, false);
 	CHECK(sounds() == "OVER_B CLICK_B OVER_B");
 	frame.claim = 2;
-	rt.process_mouse(30, 5, false, 0);
+	rt.process_mouse(30, 5, false);
 	CHECK(sounds() == "OVER_B CLICK_B OVER_B OUT_B");
 	// Disabled under the mouse: no hover.
 	rt.set_widget_disabled(3, true);
 	frame.claim = 1;
-	rt.process_mouse(6, 5, false, 0);
+	rt.process_mouse(6, 5, false);
 	CHECK(sounds() == "OVER_B CLICK_B OVER_B OUT_B");
 }
 
@@ -973,24 +973,24 @@ void test_messages_then_the_pump() {
 	CHECK(sounds() == "OVER_C");
 	// The press reaches the windows as it arrives; the pump reads the button it left.
 	const int pressed = frame.press_calls;
-	CHECK(rt.press_mouse(30, 5, 0) && frame.press_calls == pressed + 1);
+	CHECK(rt.press_mouse(30, 5) && frame.press_calls == pressed + 1);
 	CHECK(frame.samples.size() == 1);
 	rt.pump_mouse();
 	CHECK(std::get<2>(frame.samples.back()));
 	// The release lets the capture go as it arrives, and a second press inside the same frame reaches
 	// the windows again; the pump then reads the button down.
 	CHECK(rt.release_mouse(30, 5) && frame.releases == 1);
-	CHECK(rt.press_mouse(30, 5, 0) && frame.press_calls == pressed + 2);
+	CHECK(rt.press_mouse(30, 5) && frame.press_calls == pressed + 2);
 	rt.pump_mouse();
 	CHECK(frame.samples.size() == 3 && std::get<2>(frame.samples.back()));
 	// A whole sample (process_mouse) is its message and the pump.
-	rt.process_mouse(30, 5, false, 0);
+	rt.process_mouse(30, 5, false);
 	CHECK(frame.releases == 2 && frame.samples.size() == 4 && !std::get<2>(frame.samples.back()));
-	rt.process_mouse(30, 5, true, 0);
+	rt.process_mouse(30, 5, true);
 	CHECK(frame.press_calls == pressed + 3 && frame.samples.size() == 5);
-	rt.process_mouse(30, 5, true, 0);
+	rt.process_mouse(30, 5, true);
 	CHECK(frame.press_calls == pressed + 3 && frame.samples.size() == 6);
-	rt.process_mouse(30, 5, false, 0);
+	rt.process_mouse(30, 5, false);
 	CHECK(frame.releases == 3);
 }
 
@@ -1007,18 +1007,18 @@ void test_mouse() {
 	// Hover edges: MOUSEIN entering, MOUSEOUT + MOUSEIN moving, nothing into a
 	// disabled widget.
 	frame.claim = 1;
-	rt.process_mouse(5, 5, false, 0);
+	rt.process_mouse(5, 5, false);
 	CHECK(rec.last(MenuEvent::Kind::Sound)->text2 == "MOUSE_OVER" &&
 			rec.last(MenuEvent::Kind::HoverChanged)->id == 3 &&
 			rec.last(MenuEvent::Kind::HoverChanged)->flag);
 	rt.set_widget_disabled(12, true);
 	rec.events.clear();
 	frame.claim = 10;
-	rt.process_mouse(5, 5, false, 0);
+	rt.process_mouse(5, 5, false);
 	CHECK(rec.count(MenuEvent::Kind::HoverChanged) == 1 && !rec.events.back().flag &&
 			rec.last(MenuEvent::Kind::Sound)->text2 == "MOUSE_OUT");
 	frame.claim = -1;
-	rt.process_mouse(5, 5, false, 0);
+	rt.process_mouse(5, 5, false);
 
 	// A disabled widget's click does nothing; any other fires SELECTED and the
 	// activation.
@@ -1040,97 +1040,105 @@ void test_mouse() {
 	frame.popup_row = 1;
 	frame.claim = 3;
 	rec.events.clear();
-	rt.process_mouse(50, 50, true, 0);
+	rt.process_mouse(50, 50, true);
 	CHECK(!rt.is_combo_popup_open(8) && rt.selected_row(8) == 1 && frame.popup_presses == 1);
 	CHECK(rec.last(MenuEvent::Kind::ValueChanged)->text2 == "combo" &&
 			rec.last(MenuEvent::Kind::ValueChanged)->text3 == "b" &&
 			rec.count(MenuEvent::Kind::HoverChanged) == 0);
-	rt.process_mouse(50, 50, false, 0);
+	rt.process_mouse(50, 50, false);
 	frame.claim = -1;
-	rt.process_mouse(50, 50, false, 0);
+	rt.process_mouse(50, 50, false);
 	// ...and takes its press as it arrives: a row's press and release inside one frame pick it, and
 	// an outside one closes it [orig: CWnd_DispatchMouseEventToChildren @ 0x647917 hands the press to
 	// g_UIActiveComboWnd; CComboWnd_HandleEvent @ 0x65c261..0x65c2bc]...
 	rt.on_widget_clicked(6, 0);
 	frame.popup_row = 0;
-	rt.press_mouse(50, 50, 0);
+	rt.press_mouse(50, 50);
 	rt.release_mouse(50, 50);
 	rt.pump_mouse();
 	CHECK(!rt.is_combo_popup_open(8) && rt.selected_row(8) == 0);
 	rt.on_widget_clicked(6, 0);
 	frame.popup_row = -1;
-	rt.press_mouse(900, 900, 0);
+	rt.press_mouse(900, 900);
 	rt.release_mouse(900, 900);
 	rt.pump_mouse();
 	CHECK(!rt.is_combo_popup_open(8));
 	// ...a press on the closed cell (design rect 10,20 100x40 at scale 2) is dead...
 	rt.on_widget_clicked(6, 0);
 	frame.popup_row = -1;
-	rt.process_mouse(40, 60, true, 0);
+	rt.process_mouse(40, 60, true);
 	CHECK(rt.is_combo_popup_open(8));
-	rt.process_mouse(40, 60, false, 0);
+	rt.process_mouse(40, 60, false);
 	// ...and a press outside both dismisses.
-	rt.process_mouse(900, 900, true, 0);
+	rt.process_mouse(900, 900, true);
 	CHECK(!rt.is_combo_popup_open(8));
-	rt.process_mouse(900, 900, false, 0);
+	rt.process_mouse(900, 900, false);
 	// A screen switch closes it too.
 	rt.on_widget_clicked(6, 0);
 	rt.show_screen("OPTIONS");
 	CHECK(!rt.is_combo_popup_open(8));
 	rt.show_screen("MAIN");
 
-	// A list picks on the press, activating first: the double-click latch fires
-	// on the second press of a row inside 400 ms and re-arms from scratch.
+	// A list picks on the press, activating first; a press the platform reports
+	// as a double click activates the row (WM_LBUTTONDBLCLK, 0x1000004), a plain
+	// one never, however soon it follows.
 	frame.list_row = 2;
 	rec.events.clear();
 	frame.claim = 11;
-	rt.process_mouse(5, 5, true, 1000);
+	rt.process_mouse(5, 5, true);
 	CHECK(rec.first_index(MenuEvent::Kind::WidgetActivated) >= 0 &&
 			rec.first_index(MenuEvent::Kind::WidgetActivated) < rec.first_index(MenuEvent::Kind::ValueChanged));
-	rt.process_mouse(5, 5, false, 1000);
-	rt.process_mouse(5, 5, true, 1300);
+	rt.process_mouse(5, 5, false);
+	rt.process_mouse(5, 5, true, /*double_click=*/true);
 	CHECK(rec.count(MenuEvent::Kind::ListActivated) == 1 &&
 			rec.last(MenuEvent::Kind::ListActivated)->id == 13 &&
 			rec.last(MenuEvent::Kind::ListActivated)->value == 2);
-	rt.process_mouse(5, 5, false, 1300);
-	rt.process_mouse(5, 5, true, 1400);
-	rt.process_mouse(5, 5, false, 1400);
+	rt.process_mouse(5, 5, false);
+	rt.process_mouse(5, 5, true);
+	rt.process_mouse(5, 5, false);
 	CHECK(rec.count(MenuEvent::Kind::ListActivated) == 1);
 	// A press a scrollbar part took never reaches the list.
 	rec.events.clear();
 	frame.scroll_owned = true;
-	rt.process_mouse(5, 5, true, 9000);
+	rt.process_mouse(5, 5, true);
 	CHECK(rec.count(MenuEvent::Kind::ValueChanged) == 0);
-	rt.process_mouse(5, 5, false, 9000);
+	rt.process_mouse(5, 5, false);
 	frame.scroll_owned = false;
 	// A press a root behind the capturing one hands the captured list again is the same message: the
 	// list picks again, in the first press's form, never a double click [orig:
 	// CWnd_DispatchMouseEventToChildren @ 0x647926..0x64793f].
 	rec.events.clear();
 	frame.reach = { MenuPumpWindow{ 11, 0 }, MenuPumpWindow{ 11, 0 } };
-	rt.process_mouse(5, 5, true, 12000);
+	rt.process_mouse(5, 5, true);
 	CHECK(rec.count(MenuEvent::Kind::WidgetActivated) == 2 && rec.count(MenuEvent::Kind::ListActivated) == 0);
-	rt.process_mouse(5, 5, false, 12000);
+	rt.process_mouse(5, 5, false);
+	// A double click handed again is the same double click: the list activates its row once per
+	// root that reaches it [orig: UI_DispatchMouseEvent's root loop @ 0x63abe9 ->
+	// CWnd_DispatchMouseEventToChildren @ 0x64793f].
+	rec.events.clear();
+	rt.process_mouse(5, 5, true, /*double_click=*/true);
+	CHECK(rec.count(MenuEvent::Kind::ListActivated) == 2);
+	rt.process_mouse(5, 5, false);
 	frame.reach.clear();
 	// MULTISELECT toggles the pressed row in the set, no modifier needed.
 	rt.set_selected_set(13, {});
 	frame.list_row = 0;
-	click(rt, frame, 11, 20000);
+	click(rt, frame, 11);
 	CHECK(rt.selected_set(13) == (std::vector<int>{ 0 }));
 	frame.list_row = 2;
-	click(rt, frame, 11, 30000);
+	click(rt, frame, 11);
 	CHECK(rt.selected_set(13) == (std::vector<int>{ 0, 2 }));
 	// A row the toggle took out neither draws nor reads as selected: the list's
 	// selected row is the first still in the set, none once it is empty [orig:
 	// UIList_GetSelectedValue @ 0x644660], and the value change reports it.
 	frame.log.clear();
-	click(rt, frame, 11, 40000);
+	click(rt, frame, 11);
 	CHECK(rt.selected_set(13) == (std::vector<int>{ 0 }) && rt.selected_row(13) == 0 &&
 			frame.saw("selection 11 0 -1 0") && !frame.saw("selection 11 2 -1 0") &&
 			rec.last(MenuEvent::Kind::ValueChanged)->value == 0);
 	frame.list_row = 0;
 	frame.log.clear();
-	click(rt, frame, 11, 45000);
+	click(rt, frame, 11);
 	CHECK(rt.selected_set(13).empty() && rt.selected_row(13) == -1 &&
 			frame.saw("selection 11 -1 -1 0") && rec.last(MenuEvent::Kind::ValueChanged)->value == -1);
 	// TABLE: the hit's row selects (MULTISELECT toggles), column -1 or not, and
@@ -1142,10 +1150,10 @@ void test_mouse() {
 	rt.table_set_cell_value(14, 1, 0, 77);
 	frame.table_row = 0;
 	frame.table_column = -1;
-	click(rt, frame, 12, 50000);
+	click(rt, frame, 12);
 	frame.table_row = 1;
 	frame.table_column = 0;
-	click(rt, frame, 12, 60000);
+	click(rt, frame, 12);
 	CHECK(rt.table_selected_rows(14) == (std::vector<int>{ 0, 1 }));
 	{
 		const MenuEvent *cell = rec.last(MenuEvent::Kind::TableCellClicked);
@@ -1153,7 +1161,7 @@ void test_mouse() {
 				cell->column == 0 && cell->state == kTableRowSelected && cell->cell_value == 77 &&
 				!cell->flag);
 	}
-	click(rt, frame, 12, 60100); // the same row again: toggled off, a double click
+	click(rt, frame, 12, true); // the same row again, a double click: toggled off
 	CHECK(rt.table_selected_rows(14) == (std::vector<int>{ 0 }));
 	{
 		const MenuEvent *cell = rec.last(MenuEvent::Kind::TableCellClicked);
@@ -1161,10 +1169,10 @@ void test_mouse() {
 	}
 	frame.table_row = -1;
 	frame.table_column = 0;
-	click(rt, frame, 12, 70000);
+	click(rt, frame, 12);
 	frame.table_ok = false;
 	frame.table_row = 0;
-	click(rt, frame, 12, 80000);
+	click(rt, frame, 12);
 	CHECK(rt.table_selected_rows(14) == (std::vector<int>{ 0 }));
 	frame.table_ok = true;
 
@@ -1174,13 +1182,13 @@ void test_mouse() {
 	rec.events.clear();
 	frame.spin_arrow = 0;
 	frame.claim = 7;
-	rt.process_mouse(5, 5, true, 0);
+	rt.process_mouse(5, 5, true);
 	CHECK(rt.selected_row(9) == 1 && rec.count(MenuEvent::Kind::WidgetActivated) == 1);
-	rt.process_mouse(5, 5, false, 0);
+	rt.process_mouse(5, 5, false);
 	frame.spin_arrow = 1;
-	rt.process_mouse(5, 5, true, 0); // an arrow press: nothing yet
+	rt.process_mouse(5, 5, true); // an arrow press: nothing yet
 	CHECK(rt.selected_row(9) == 1);
-	rt.process_mouse(5, 5, false, 0);
+	rt.process_mouse(5, 5, false);
 	rt.on_widget_clicked(7, 1);
 	CHECK(rt.selected_row(9) == 2 && rec.last(MenuEvent::Kind::Sound)->text2 == "UP_CLICK");
 	frame.spin_arrow = 2;
@@ -1191,14 +1199,14 @@ void test_mouse() {
 	// Edit focus: a press focuses (read-only refuses); focus parks the caret after
 	// the text (characters, not bytes).
 	frame.claim = 9;
-	rt.process_mouse(5, 5, true, 0);
-	rt.process_mouse(5, 5, false, 0);
+	rt.process_mouse(5, 5, true);
+	rt.process_mouse(5, 5, false);
 	CHECK(rt.focused_widget() == -1);
 	frame.texts[8] = "h\xC3\xA9";
 	frame.log.clear();
 	frame.claim = 8;
-	rt.process_mouse(5, 5, true, 0);
-	rt.process_mouse(5, 5, false, 0);
+	rt.process_mouse(5, 5, true);
+	rt.process_mouse(5, 5, false);
 	CHECK(rt.focused_widget() == 10 && frame.saw("focused 8 1") && frame.saw("caret 8 2"));
 	// A moved widget keeps its rect across a screen round trip [orig: CWnd_SetRect
 	// @0x646560], and the typed text survives it (the focus drops into the store).
@@ -1723,8 +1731,8 @@ void test_host_dialog_multiselect() {
 	const auto key = [](const char *, const char *, const char *fallback) { return std::string(fallback); };
 	frame.list_row = 0;
 	frame.claim = index;
-	menu.process_mouse(5, 5, true, 1000);
-	menu.process_mouse(5, 5, false, 1000);
+	menu.process_mouse(5, 5, true);
+	menu.process_mouse(5, 5, false);
 	CHECK(menu.selected_rows(list) == (std::vector<int>{ 0 }));
 	frame.log.clear();
 	host.add_selected(menu, key);

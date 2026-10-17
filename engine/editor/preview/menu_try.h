@@ -108,10 +108,11 @@ public:
 	// (its windows' state dropped: the game reads a menu anew), the history and the breadcrumb kept.
 	void reload(const MenuTrySource &source);
 
-	// One sample of the game's mouse (design units, the left button), at `now_ms` (the double click's clock).
-	void mouse(const MenuTrySource &source, float x, float y, bool down, uint32_t now_ms);
+	// One sample of the game's mouse (design units, the left button), `double_click` a press that is
+	// the second of a double click.
+	void mouse(const MenuTrySource &source, float x, float y, bool down, bool double_click = false);
 	// The game's click there: the mouse onto the point, pressed and let go.
-	void click(const MenuTrySource &source, float x, float y, uint32_t now_ms);
+	void click(const MenuTrySource &source, float x, float y);
 	// One wheel notch (+1 down, -1 up); true when something scrolled.
 	bool wheel(const MenuTrySource &source, float x, float y, int steps);
 	// One key press as Windows delivers it (WM_KEYDOWN then WM_CHAR): the Options remap capture's while it

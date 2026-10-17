@@ -27,7 +27,6 @@
 #include <godot_cpp/classes/input.hpp>
 #include <godot_cpp/classes/input_event_mouse_button.hpp>
 #include <godot_cpp/classes/input_event_mouse_motion.hpp>
-#include <godot_cpp/classes/time.hpp>
 #include <godot_cpp/core/object.hpp>
 #include <godot_cpp/variant/callable.hpp>
 
@@ -704,17 +703,15 @@ void MenuDriver::on_frame_scroll_value_(int p_index, int p_value) {
 }
 
 void MenuDriver::process_mouse(const Vector2 &p_position, bool p_button_down) {
-	runtime_.process_mouse(p_position.x, p_position.y, p_button_down,
-			static_cast<uint32_t>(Time::get_singleton()->get_ticks_msec()));
+	runtime_.process_mouse(p_position.x, p_position.y, p_button_down);
 }
 
 void MenuDriver::move_mouse(const Vector2 &p_position, bool p_button_down) {
 	runtime_.move_mouse(p_position.x, p_position.y, p_button_down);
 }
 
-bool MenuDriver::press_mouse(const Vector2 &p_position) {
-	return runtime_.press_mouse(p_position.x, p_position.y,
-			static_cast<uint32_t>(Time::get_singleton()->get_ticks_msec()));
+bool MenuDriver::press_mouse(const Vector2 &p_position, bool p_double_click) {
+	return runtime_.press_mouse(p_position.x, p_position.y, p_double_click);
 }
 
 bool MenuDriver::release_mouse(const Vector2 &p_position) {
@@ -736,7 +733,9 @@ bool MenuDriver::take_mouse_event(const Ref<InputEvent> &p_event) {
 	}
 	const Ref<InputEventMouseButton> button = p_event;
 	if (button.is_null() || button->get_button_index() != MOUSE_BUTTON_LEFT) return false;
-	if (button->is_pressed()) press_mouse(button->get_position());
+	// The platform's double click (Godot's Windows backend sets it from WM_LBUTTONDBLCLK),
+	// as retail takes the OS's (engine MenuRuntime::press_mouse).
+	if (button->is_pressed()) press_mouse(button->get_position(), button->is_double_click());
 	else release_mouse(button->get_position());
 	return true;
 }

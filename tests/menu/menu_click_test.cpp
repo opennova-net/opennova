@@ -139,7 +139,7 @@ void test_latch() {
 	}
 	{
 		// The open dropdown takes the press: the capture is its list's until the release, so the window
-		// under the mouse when it closes is never held [orig: list_wnd_on_command @ 0x643f19].
+		// under the mouse when it closes is never held [orig: CListWnd_OnCommand @ 0x643f19].
 		MenuClickLatch latch;
 		latch.dropdown_sample(false);
 		latch.dropdown_press(7);
@@ -309,7 +309,7 @@ struct Run {
 		rt.set_sink([this](const MenuEvent &e) { events.push_back(e); });
 		return rt.open_document(&doc, "clicks.mnu", std::string());
 	}
-	void move(float x, float y, bool down) { rt.process_mouse(x, y, down, 1000); }
+	void move(float x, float y, bool down) { rt.process_mouse(x, y, down); }
 	// The activations of a window by NAME since the events were last cleared.
 	int activated(const char *name) const {
 		int n = 0;
@@ -330,7 +330,7 @@ struct Run {
 		return n;
 	}
 	// The messages as they arrive, then the frame's pump.
-	void press(float x, float y, uint32_t now = 1000) { rt.press_mouse(x, y, now); }
+	void press(float x, float y, bool double_click = false) { rt.press_mouse(x, y, double_click); }
 	void release(float x, float y) { rt.release_mouse(x, y); }
 	void pump() { rt.pump_mouse(); }
 	const MenuWidgetState *row(const char *name) const {
@@ -405,7 +405,7 @@ void test_press_on_a_button() {
 	CHECK(run.activated("A") == 1 && run.sounds("CLICK_A") == 1);
 }
 
-// A LIST's press captures (list_wnd_on_command's tail reaches the button handler @ 0x643f19): its row
+// A LIST's press captures (CListWnd_OnCommand's tail reaches the button handler @ 0x643f19): its row
 // picks on the press; a button it is let go over is not clicked; let go over the list, the list's click.
 // A CHECKBOX's press captures too: let go over a button, neither toggles nor clicks.
 void test_lists_and_check_boxes_capture() {
@@ -425,7 +425,7 @@ void test_lists_and_check_boxes_capture() {
 	run.move(150, 350, true);
 	run.move(150, 350, false);
 	// The press activates and picks, the click (let go over another row) activates again and picks
-	// nothing [orig: list_wnd_on_command @ 0x643d0b picks on 0x1000002 / 0x1000004 alone].
+	// nothing [orig: CListWnd_OnCommand @ 0x643d0b picks on 0x1000002 / 0x1000004 alone].
 	CHECK(run.activated("LIST") == 2 && run.rt.selected_row(list) == 1);
 	const int check = run.rt.widget_id("CHECK");
 	const bool checked = run.rt.is_widget_checked(check);
@@ -679,14 +679,15 @@ void test_messages_then_the_pump() {
 	run.release(kBX, kBY);
 	run.pump();
 	CHECK(run.activated("B") == 1 && run.activated("A") == 0);
-	// A double click inside one frame reaches a list twice, the second press its double click's
-	// [orig: list_wnd_on_command @ 0x643d0b picks on 0x1000002 / 0x1000004].
+	// A double click reaches a list twice, the second press the platform's double click
+	// [orig: CListWnd_OnCommand @ 0x643d0b picks on 0x1000002 / 0x1000004, the double event
+	// @ 0x643edc].
 	run.move(150, 330, false);
 	run.events.clear();
-	run.press(150, 330, 2000);
+	run.press(150, 330);
 	run.pump();
 	run.release(150, 330);
-	run.press(150, 330, 2100);
+	run.press(150, 330, /*double_click=*/true);
 	run.pump();
 	run.release(150, 330);
 	run.pump();
