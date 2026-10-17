@@ -1,5 +1,5 @@
 // The local player's per-frame HUD info record (runtime/hud/hud_entity_info.h):
-// the health fraction, the stance and fov defaults, the weapon cluster's ammo
+// the health ratio, the stance and fov defaults, the weapon cluster's ammo
 // pair (the clipsize -1 clip, the capacity-1 fold), the live-FSM gates, the
 // SIGHTS card gate under the binoculars and the NVG scene arm, the
 // vehicle-attack clear of the two selector bytes ahead of the overlay fork,
@@ -51,7 +51,7 @@ world::LocalPlayerViewFrame scoped_view() {
 
 void test_no_view_no_weapon() {
 	const hud::HudEntityInfo info = hud::local_player_entity_info(50, 100, nullptr, nullptr, nullptr);
-	expect(info.health_fraction == 0.5f, "half health is 0.5");
+	expect(info.health_fraction == 0.5f, "half health is 0x8000");
 	expect(info.stance == 0, "no view: stance 0");
 	expect(info.fov_h_deg == 80.0f, "no view: the default 80 degree fov");
 	expect(!info.weapon_drawn && info.clip == -1 && info.reserve == -1, "no FSM: no cluster, -1 pair");
@@ -65,16 +65,20 @@ void test_no_view_no_weapon() {
 	expect(!info.scope_mask_up && info.scope_mask_draw_crosshair, "no view: no mask, no-row argument");
 }
 
+// The 16.16 ratio retail stores, its zero-ceiling 1 and its unsigned cap
+// [orig: HUD_BuildEntityInfo @0x4b8791..0x4b87a4, @0x4b87c1..0x4b87d3].
 void test_health_fraction() {
-	expect(hud::local_player_entity_info(150, 100, nullptr, nullptr, nullptr).health_fraction == 1.0f,
-			"an overhealed body clamps to 1");
-	expect(hud::local_player_entity_info(-5, 100, nullptr, nullptr, nullptr).health_fraction == 0.0f,
-			"a negative health clamps to 0 (D-HUD-X1)");
-	expect(hud::local_player_entity_info(40, 0, nullptr, nullptr, nullptr).health_fraction == 0.0f,
-			"no ceiling reads empty");
-	expect(hud::local_player_entity_info(1, 3, nullptr, nullptr, nullptr).health_fraction ==
-					static_cast<float>(1.0 / 3.0),
-			"the double quotient narrowed once");
+	const auto fraction = [](int32_t health, int32_t max_health) {
+		return hud::local_player_entity_info(health, max_health, nullptr, nullptr, nullptr).health_fraction;
+	};
+	expect(fraction(150, 100) == 1.0f, "an overhealed body caps at 0x10000");
+	expect(fraction(-5, 100) == 1.0f, "a negative health caps unsigned to the full bar");
+	expect(fraction(-1, 100) == 1.0f, "any negative health is past the unsigned cap");
+	expect(fraction(0, 100) == 0.0f, "a dead-even zero reads empty");
+	expect(fraction(40, 0) == 1.0f, "a zero ceiling divides by 1 and caps");
+	expect(fraction(0, 0) == 0.0f, "zero over a zero ceiling reads empty");
+	expect(fraction(1, 3) == 21845.0f / 65536.0f, "the ratio truncates to 1/65536");
+	expect(fraction(30, 100) == 19660.0f / 65536.0f, "30 of 100 is 19660/65536, under 0.3");
 }
 
 void test_ammo_pair() {

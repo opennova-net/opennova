@@ -33,7 +33,7 @@ struct HudEntityWeaponDef {
 };
 
 struct HudEntityInfo {
-	// The health bar's fraction, 0..1.
+	// The health bar's fraction, 0..1: hudInfo+92's 16.16 ratio over 65536.
 	float health_fraction = 0.0f;
 	// The stance icon row (the view frame's seat and weapon overrides applied).
 	int32_t stance = 0;

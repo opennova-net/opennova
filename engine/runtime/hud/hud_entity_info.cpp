@@ -6,7 +6,6 @@
 #include <runtime/world/player_view.h>
 #include <runtime/world/player_weapon.h>
 
-#include <algorithm>
 
 namespace opennova::hud {
 
@@ -14,17 +13,19 @@ HudEntityInfo local_player_entity_info(int32_t health, int32_t max_health,
 		const world::LocalPlayerViewFrame *view, const world::LocalPlayerWeaponView *weapon_view,
 		const HudEntityWeaponDef *weapon) {
 	HudEntityInfo out;
-	// The bar's fraction of the health pair, clamped to [0, 1] and empty
-	// without a ceiling. Retail's record word is 16.16, (health << 16) /
-	// ceiling by idiv with the ceiling 1 when it is zero or the body has no
-	// def, capped UNSIGNED at 0x10000 (`jbe`), so a negative health, and any
-	// health over a zero ceiling, draws a full-width bar there (D-HUD-X1)
-	// [orig: HUD_BuildEntityInfo @0x4b8791..0x4b87a4 (the ceiling),
-	//  @0x4b87ac..0x4b87d3 (hudInfo+92)].
-	const double fraction = max_health > 0
-			? static_cast<double>(health) / static_cast<double>(max_health)
-			: 0.0;
-	out.health_fraction = static_cast<float>(std::clamp(fraction, 0.0, 1.0));
+	// The bar's 16.16 ratio: the signed 16-bit health word (`movsx` of
+	// +0x11E) over the ceiling by idiv,
+	// a zero ceiling (or a body with no def, local_player_max_health's 0) read
+	// as 1, then capped UNSIGNED at 0x10000, so a negative health, and any
+	// health over a zero ceiling, draws the full bar
+	// [orig: HUD_BuildEntityInfo @0x4b8791..0x4b87a4 (the ceiling), the `shl 10h`
+	//  / `sar 10h` / `idiv` @0x4b87ac..0x4b87c7, the store to hudInfo+92 and the
+	//  `jbe` cap @0x4b87ce..0x4b87d3].
+	const int64_t ceiling = max_health != 0 ? max_health : 1;
+	uint32_t ratio = static_cast<uint32_t>(
+			static_cast<int32_t>((static_cast<int64_t>(static_cast<int16_t>(health)) * 65536) / ceiling));
+	if (ratio > 0x10000u) ratio = 0x10000u;
+	out.health_fraction = static_cast<float>(ratio) / io::kFp16One;
 	// The stance icon row the view frame carries, its seat and weapon
 	// overrides applied [orig: HUD_BuildEntityInfo @0x4b860c..0x4b8786]; the
 	// camera's horizontal fov, the default 80 without a composed view
