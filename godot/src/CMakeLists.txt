@@ -294,6 +294,7 @@ add_library(opennova_bindings OBJECT
     mnu/menu_frame.cpp
     mnu/menu_audio.cpp
     mnu/menu_driver.cpp
+    mnu/player_info_loadout.cpp
     mnu/menu_video_underlay.cpp
     mnu/controls_model.cpp
     player/first_person_arms_witness.cpp

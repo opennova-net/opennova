@@ -33,36 +33,18 @@ const PARENT_SLOTS := {
 # values 0/1/2); ACCESSORY and the grenades have none.
 const TYPE_SLOTS := ["PRIMARY", "SECONDARY"]
 const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
-# The three loadout categories in the order the kit page serializes them.
-# retail: the category_names[] array built at 0x55e4bc-0x55e4cc.
-const KIT_SLOT_ORDER := ["PRIMARY", "SECONDARY", "ACCESSORY"]
 
-# The voice table, the DEFAULT_VOICE value and the kit page's fillers,
-# knives, medpack and medic class are the engine's (WeaponDatabase over
-# runtime/menu/player_info_kit.h).
+# The voice table, the DEFAULT_VOICE value and the kit page's order, fillers,
+# knives, medpack and medic class are the engine's (runtime/menu/
+# player_info_kit.h, player_info_loadout.h).
 
 var _db: AvatarDatabase
-var _slot_rows: Dictionary = {}         # control name -> Array[WeaponDef], row-aligned (null = NONE)
 var _team := 0                          # 0 = blue/good, 1 = red/evil (SIDE_BLUE default CHECKED)
-# Per-def picked clip counts, keyed by weapon.def row; -1/absent = the def
-# default (the maxclips row). The interleaved saved-count pair of the original,
-# every pair reset to -1 at each populate
-# [orig: g_PlayerInfoAmmoPriCounts @ 0x25DC560 / g_PlayerInfoAmmoSecCounts
-# @ 0x25DC564 — handlers store selected_row + 1; the reset
-# PlayerInfo_PopulateWeaponAccessoryAmmoUI @0x55e8e0..0x55e8f5].
-var _ammo_pri: Dictionary = {}
-var _ammo_sec: Dictionary = {}
-# The ammo-TYPE byte per team per slot (0=FMJ 1=AP 2=SP)
-# [orig: g_PlayerInfoAmmoTypePri/Sec[teamIndex] @ 0x25DCD64/0x25DCD68].
-var _ammo_type: Dictionary = {}         # "PRIMARY"/"SECONDARY" -> {team -> int}
-var _grenade_rows: Array[WeaponDef] = []  # the first 3 class-3 defs, table order
-# The three grenade slots the last populate's kit restore filled, as weapon.def
-# rows (-1 = "None"): a slot the class/team filter leaves past _grenade_rows
-# keeps the page's (engine menu::player_info_restore_kit).
-var _restored_grenades := PackedInt32Array([-1, -1, -1])
-# The class whose page of the shown side the last populate restored: the page
-# the dialog's next save writes back.
-var _kit_page_class := 0
+# The loadout panel's state, the engine's (runtime/menu/player_info_loadout.h
+# carries the witnesses): the three category lists and the grenade positions
+# as filled, the saved count pairs by weapon.def row, the ammo-type byte per
+# list per team, the grenade slots and the class page the last kit restore left.
+var _loadout := PlayerInfoLoadout.new()
 var _preview                            # AvatarPreview mounted over PLAYER_PREVIEW (null until wired)
 var _preview_id := -1                   # PLAYER_PREVIEW doc id, for the hover-zoom filter
 # NAME (upper) -> Callable(row, value), dispatched by combo value changes.
@@ -221,10 +203,6 @@ func _restore_player_class() -> void:
 
 # --- Loadout (weapon slot lists) ----------------------------------------------
 
-## Inject a weapon database for tests or another shell-owned resource mount. Keeping
-## this as a public seam lets callers exercise the same menu population path without
-## reaching into companion internals. The recorded ammo picks are keyed by table index,
-## so a table swap invalidates them — clear rather than misapply.
 ## Inject the avatar table directly (a unit without a resource root).
 func set_database(db: AvatarDatabase) -> void:
 	_db = db
@@ -243,22 +221,23 @@ func team() -> int:
 	return _team
 
 
+## Inject a weapon database for tests or another shell-owned resource mount. Keeping
+## this as a public seam lets callers exercise the same menu population path without
+## reaching into companion internals. The recorded ammo picks are keyed by table index,
+## so a table swap invalidates them — clear rather than misapply.
 func set_weapon_database(weapons: WeaponDatabase) -> void:
 	_set_weapons(weapons)
-	_ammo_pri.clear()
-	_ammo_sec.clear()
+	_loadout.clear_counts()
 	if _driver != null:
 		_populate_loadout()
 
 
 # The loadout table off the root (MenuCompanion._ensure_weapons). A table read
 # again drops the picks: they are keyed by the old table's rows, and the game
-# resets every count pair at each populate anyway (the reset @0x55e8e0, cited
-# at _ammo_pri).
+# resets every count pair at each populate anyway (the engine's restore).
 func _ensure_player_info_weapons() -> void:
 	if _ensure_weapons("PlayerInfoMenuCompanion", "loadout combos stay empty"):
-		_ammo_pri.clear()
-		_ammo_sec.clear()
+		_loadout.clear_counts()
 
 
 # Fill PRIMARY/SECONDARY/ACCESSORY for the selected class + team, each led by a "NONE" row,
@@ -271,9 +250,12 @@ func _populate_loadout() -> void:
 	var class_mask := _selected_class_mask()
 	# (engine: runtime/world/player_loadout.cpp)
 	var team_mask := WeaponDatabase.player_info_team_mask(_team)
-	_fill_weapon_slot("PRIMARY", WeaponDatabase.SLOT_PRIMARY, class_mask, team_mask)
-	_fill_weapon_slot("SECONDARY", WeaponDatabase.SLOT_SECONDARY, class_mask, team_mask)
-	_fill_weapon_slot("ACCESSORY", WeaponDatabase.SLOT_ACCESSORY, class_mask, team_mask)
+	# The three lists in the engine's row order under NONE (engine:
+	# runtime/menu/loadout_screen.h loadout_fill_slot).
+	_populating = true
+	_loadout.fill_slots(_driver, _weapons, class_mask, team_mask, _menu_text("NONE", "None"),
+			Strings.get_table(Strings.TABLE_GAMETEXT))
+	_populating = false
 	_restore_kit()
 	for control in PARENT_SLOTS:
 		_populate_slot_ammo(control)
@@ -283,85 +265,20 @@ func _populate_loadout() -> void:
 
 
 # The shown side's saved kit page, the one its class byte picks in the current
-# record, into the lists and the picks the ammo fills then read: every count
-# pair reset and the page's restored, each category list selected by the
-# weapon the page names (a weapon the list lacks leaves it with none), the
-# team's ammo-type bytes and the grenade slots (engine
-# menu::player_info_restore_kit). Catalog rows come back; weapon.def's row is one
-# less, the "None" row -1.
+# record, into the lists and the picks the ammo fills then read: the count
+# pairs, each category list's selection, the team's ammo-type bytes and the
+# grenade slots (engine menu::player_info_restore_kit and
+# PlayerInfoLoadout::restore).
 func _restore_kit() -> void:
-	var restored := PlayerProfile.store().restore_player_info_kit(_team, _weapons)
-	_kit_page_class = restored.page_class
-	_ammo_pri.clear()
-	_ammo_sec.clear()
-	var primary := restored.ammo_primary
-	var secondary := restored.ammo_secondary
-	for row in primary.size():
-		if primary[row] != -1:
-			_ammo_pri[row - 1] = primary[row]
-		if secondary[row] != -1:
-			_ammo_sec[row - 1] = secondary[row]
-	for i in KIT_SLOT_ORDER.size():
-		var asked := restored.get_selection(i)
-		if asked >= 0:
-			_select_slot_weapon(KIT_SLOT_ORDER[i], asked - 1)
-	for i in TYPE_SLOTS.size():
-		if restored.has_ammo_type(i):
-			_slot_type_store(TYPE_SLOTS[i])[_team] = restored.get_ammo_type(i)
-	var slots := restored.grenade_slots
-	for i in GRENADE_CONTROLS.size():
-		_restored_grenades[i] = slots[i] - 1
-
-
-# Select the list row carrying a weapon.def row, or no row when the list lacks it.
-func _select_slot_weapon(control: String, weapon_row: int) -> void:
-	var combo := _id(control)
-	if combo < 0:
-		return
-	var defs: Array = _slot_rows.get(control, [])
-	var found := -1
-	for row in defs.size():
-		var w: WeaponDef = defs[row]
-		if w != null and w.index == weapon_row:
-			found = row
-			break
-	_driver.select_row(combo, found, false)
-
-
-# The rows take the engine's order, the WEAPON screen's too: case-insensitive
-# ascending by label, each row keeping its weapon, then NONE goes in at row 0
-# (loadout_labels.h armory_slot_order carries the witness; D-PLAYERINFO-21). The
-# grenade fill sorts nothing.
-func _fill_weapon_slot(control: String, slot: int, class_mask: int, team_mask: int) -> void:
-	var combo := _id(control)
-	if combo < 0:
-		return
-	var weapons := _weapons.get_slot_weapons(slot, class_mask, team_mask)
-	var labels := PackedStringArray()
-	for w: WeaponDef in weapons:
-		labels.append(_weapons.weapon_label(w.index, Strings.get_table(Strings.TABLE_GAMETEXT)))
-	var rows := PackedStringArray()
-	var defs: Array[WeaponDef] = []
-	rows.append(_menu_text("NONE", "None"))  # NONE at index 0 [orig: @ 0x560430]
-	defs.append(null)
-	for i in WeaponDatabase.armory_slot_order(labels):
-		rows.append(labels[i])
-		defs.append(weapons[i])
-	_slot_rows[control] = defs
-	_set_combo_items(combo, rows)
+	_loadout.restore(_driver, PlayerProfile.store().restore_player_info_kit(_team, _weapons), _team)
 
 
 # The selected weapon.def row for a loadout control. NONE and an absent
 # control both resolve to null.
 func _selected_weapon(control: String) -> WeaponDef:
-	var combo := _id(control)
-	var defs: Array = _slot_rows.get(control, [])
-	if combo < 0:
+	if _weapons == null:
 		return null
-	var row := _driver.selected_row(combo)
-	if row < 0 or row >= defs.size():
-		return null
-	return defs[row]
+	return _weapons.get_weapon(_loadout.selected_weapon(_driver, control))
 
 
 # PLAYERCLASS carries values 5..9 (Medic..Engineer); the class mask is the matching
@@ -406,44 +323,30 @@ func _on_class_selected(_row: int, _value: String) -> void:
 
 # --- Loadout ammo combos (D-PLAYERINFO-11) --------------------------------------
 
-# Populate through the native menu runtime; this shell carries the saved picks.
+# Populate through the native menu runtime from the panel's saved picks.
 func _populate_slot_ammo(control: String) -> void:
-	var w := _selected_weapon(control)
-	var index := w.index if w != null else -1
-	var types := _slot_type_store(control)
 	_populating = true
-	types[_team] = _driver.fill_player_info_ammo(_weapons, control, index,
-			int(_ammo_pri.get(index, -1)), int(_ammo_sec.get(index, -1)),
-			int(types.get(_team, 0)), Strings.get_table(Strings.TABLE_GAMETEXT))
+	_loadout.fill_ammo(_driver, _weapons, control, _team, Strings.get_table(Strings.TABLE_GAMETEXT))
 	_populating = false
 
 
 func _populate_grenades(class_mask: int, team_mask: int) -> void:
 	_populating = true
-	_grenade_rows = _driver.fill_player_info_grenades(_weapons, class_mask, team_mask,
-			_ammo_pri, Strings.get_table(Strings.TABLE_GAMETEXT))
+	_loadout.fill_grenades(_driver, _weapons, class_mask, team_mask,
+			Strings.get_table(Strings.TABLE_GAMETEXT))
 	_populating = false
-
-
-func _slot_type_store(control: String) -> Dictionary:
-	if not _ammo_type.has(control):
-		_ammo_type[control] = {}
-	return _ammo_type[control]
 
 
 ## The recorded clip pick for a parent slot's selected weapon, -1 = untouched (the
 ## def default). Public read seam (ADR 0018), mirroring the original's saved-count
 ## array rather than the combo position — retail serializes -1 until the user picks.
 func selected_clips(control: String) -> int:
-	var w := _selected_weapon(control)
-	if w == null:
-		return -1
-	return int(_ammo_pri.get(w.index, -1))
+	return _loadout.selected_clips(_driver, control)
 
 
 ## The ammo-TYPE byte for a slot on the current team (0=FMJ 1=AP 2=SP).
 func selected_ammo_type(control: String) -> int:
-	return int(_slot_type_store(control).get(_team, 0))
+	return _loadout.selected_ammo_type(control, _team)
 
 
 func _on_weapon_slot_selected(_row: int, _value: String, control: String) -> void:
@@ -455,22 +358,24 @@ func _on_weapon_slot_selected(_row: int, _value: String, control: String) -> voi
 	_update_icons()
 
 
+# The handlers' picks are the engine's (PlayerInfoLoadout carries the
+# witnesses): AMMO1 / AMMO2 store the row + 1 for the selected weapon, the type
+# list the row's authored value byte for the team (the driver's aggregate
+# signal carries the display text, the statics keep their authored items), a
+# grenade list its row; then the combined weight and icon refresh
+# [orig: @ 0x55f480].
 func _on_ammo1_selected(row: int, _value: String, control: String) -> void:
 	if _populating:
 		return
-	var w := _selected_weapon(control)
-	if w != null:
-		_ammo_pri[w.index] = row + 1  # [orig: @ 0x55f730 — stores selected_row + 1]
+	_loadout.pick_clips(_driver, control, false, row)
 	_update_weight()
-	_update_icons()  # the original's combined refresh [orig: @ 0x55f480]
+	_update_icons()
 
 
 func _on_ammo2_selected(row: int, _value: String, control: String) -> void:
 	if _populating:
 		return
-	var w := _selected_weapon(control)
-	if w != null:
-		_ammo_sec[w.index] = row + 1  # [orig: @ 0x55f730 ctx 1 — the interleaved pair]
+	_loadout.pick_clips(_driver, control, true, row)
 	_update_weight()
 	_update_icons()
 
@@ -478,26 +383,15 @@ func _on_ammo2_selected(row: int, _value: String, control: String) -> void:
 func _on_type_selected(row: int, _value: String, control: String) -> void:
 	if _populating:
 		return
-	# The driver's aggregate signal carries the row's display text; the semantic
-	# byte is the authored value= attr of the selected row (the statics keep their
-	# authored items, so the document lookup is the value source).
-	var type_combo := _id(control + "_AMMO1_TYPE")
-	var value := _driver.item_value(type_combo, row) if type_combo >= 0 and row >= 0 else ""
-	# [orig: @ 0x55f760/0x55f7e0 — the row VALUE byte, stored per team]
-	_slot_type_store(control)[_team] = int(value) if value.is_valid_int() else 0
+	_loadout.pick_ammo_type(_driver, control, _team, row)
 	_update_weight()
-	_update_icons()  # the original's combined refresh [orig: @ 0x55f480]
+	_update_icons()
 
 
 func _on_grenade_selected(row: int, _value: String, i: int) -> void:
 	if _populating:
 		return
-	if i < _grenade_rows.size():
-		# Rows start at 0, so the row IS the clip count. (Retail stores the row
-		# VALUE — rounds — which equals clips only because grenade defs use
-		# clipsize 1; we store clips, the consistent half of that quirk
-		# [orig: @ 0x55fb70].)
-		_ammo_pri[_grenade_rows[i].index] = row
+	_loadout.pick_grenade(i, row)
 	_update_weight()
 	_update_icons()
 
@@ -507,11 +401,7 @@ func _on_grenade_selected(row: int, _value: String, i: int) -> void:
 func _update_weight() -> void:
 	if _weapons == null:
 		return
-	var parents: Array[WeaponDef] = []
-	for control in PARENT_SLOTS:
-		parents.append(_selected_weapon(control))
-	var total := _driver.player_info_loadout_weight(
-			_weapons, parents, _grenade_rows, _ammo_pri, _ammo_sec)
+	var total := _loadout.weight(_driver, _weapons)
 	var label := _id("STATIC_TOTAL_WEIGHT")
 	if label >= 0:
 		# The readout's format, bands and menu tokens are the engine's
@@ -763,7 +653,7 @@ func snapshot() -> Dictionary:
 			"accessory_clips": selected_clips("ACCESSORY"),
 			"kit": kit_entries(),
 			# The page the populate restored, which a class pick has already left.
-			"kit_class": _kit_page_class,
+			"kit_class": _loadout.page_class,
 		})
 	return profile
 
@@ -785,44 +675,13 @@ func kit_entries() -> Array[Dictionary]:
 	if _weapons == null or not _weapons.is_loaded():
 		return out
 	# The order, the per-side knife, the medic's medpack and the fixed grenade
-	# slots are the engine's page builder; this companion supplies its picks:
-	# the three category selections with their recorded count pairs (-1 =
-	# untouched) and the team's ammo-type byte for PRIMARY/SECONDARY, then the
-	# three grenade slots: the class/team filter's, and past them the slot the
-	# kit restore left (-1, the "None" row, unless the page named a grenade there).
-	var indices := PackedInt32Array()
-	var pri := PackedInt32Array()
-	var sec := PackedInt32Array()
-	var flags := PackedInt32Array()
-	for control in KIT_SLOT_ORDER:
-		var index := _slot_weapon_index(control)
-		indices.append(index)
-		pri.append(int(_ammo_pri.get(index, -1)))
-		sec.append(int(_ammo_sec.get(index, -1)))
-		flags.append(selected_ammo_type(control) if control in TYPE_SLOTS else -1)
-	var grenade_indices := PackedInt32Array()
-	var grenade_pri := PackedInt32Array()
-	var grenade_sec := PackedInt32Array()
-	for i in GRENADE_CONTROLS.size():
-		var index := _grenade_rows[i].index if i < _grenade_rows.size() else _restored_grenades[i]
-		grenade_indices.append(index)
-		grenade_pri.append(int(_ammo_pri.get(index, -1)))
-		grenade_sec.append(int(_ammo_sec.get(index, -1)))
-	for row in _weapons.player_info_kit_entries(_team, _selected_player_class(), indices,
-			pri, sec, flags, grenade_indices, grenade_pri, grenade_sec):
+	# slots are the engine's page builder over the panel's picks (engine:
+	# runtime/menu/player_info_loadout.h kit_selection): the three category
+	# selections (NONE serializes the catalog's "None" row) with their count
+	# pairs and type bytes, then the three grenade slots.
+	for row in _loadout.kit_entries(_driver, _weapons, _team, _selected_player_class()):
 		out.append(row)
 	return out
-
-
-# The weapon.def row of a loadout list's selection, -1 for NONE. The game's
-# lists carry catalog rows, whose row 0 is the "None" WeaponDef_LoadAll seeds,
-# so the NONE row's value 0 serializes "None" (the kit builder maps the row).
-# retail: the NONE insert UIList_AddRow(list, "NONE", 0, 0, 0) @ 0x56058f in
-# PlayerInfo_PopulateWeaponSlotLists @ 0x560430, read back through
-# UIList_GetSelectedValue @ 0x644660 at 0x55e6e8.
-func _slot_weapon_index(control: String) -> int:
-	var w := _selected_weapon(control)
-	return w.index if w != null else -1
 
 
 # The ACCEPT: the dialog saved into the current record, then the selection

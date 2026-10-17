@@ -176,18 +176,11 @@ public:
 	String options_control_text(int p_action, int p_device) const;
 	void show_ingame_main() { opennova::menu::OptionsScreen::show_ingame_main(runtime_); }
 
-	int fill_player_info_ammo(const Ref<WeaponDatabase> &p_weapons, const String &p_control,
-			int p_parent, int p_primary, int p_secondary, int p_type, const Ref<RtxtStringFile> &p_text);
 	void fill_armory_ammo(const Ref<WeaponDatabase> &p_weapons, const String &p_control,
 			int p_parent, const String &p_current_name, int p_current_clips, const Ref<RtxtStringFile> &p_text);
-	TypedArray<WeaponDef> fill_player_info_grenades(const Ref<WeaponDatabase> &p_weapons,
-			int p_class_mask, int p_team_mask, const Dictionary &p_counts, const Ref<RtxtStringFile> &p_text);
 	TypedArray<WeaponDef> fill_armory_grenades(const Ref<WeaponDatabase> &p_weapons,
 			int p_class_mask, int p_team_mask, const Array &p_current, const Callable &p_availability,
 			const Ref<RtxtStringFile> &p_text);
-	double player_info_loadout_weight(const Ref<WeaponDatabase> &p_weapons,
-			const TypedArray<WeaponDef> &p_parents, const TypedArray<WeaponDef> &p_grenades,
-			const Dictionary &p_primary, const Dictionary &p_secondary) const;
 	double armory_loadout_weight(const Ref<WeaponDatabase> &p_weapons,
 			const TypedArray<WeaponDef> &p_parents, const TypedArray<WeaponDef> &p_grenades) const;
 
