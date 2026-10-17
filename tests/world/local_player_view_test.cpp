@@ -2942,6 +2942,25 @@ void test_scope_zero_bake_max_range() {
     CHECK(zero.max_range_q16 == 655359); // below stable on the first tick
 }
 
+// The bake's launch turns its bisected BAM into radians with retail's x87
+// double, not the exact 2pi/2^32: each solve's Q22 (cos, sin) pair, and so the
+// baked rows, follow it [orig: WeaponSlot_CalcElevationTable `fild; fmul
+// ds:dbl_7C3608` @0x5451F2..0x5451FE, fsin / fcos x dbl_7C3600 @0x545204..0x545217].
+void test_scope_zero_bake_rows_follow_the_x87_scale() {
+    AmmoTableEntry ammo;
+    ammo.velocity = 853;
+    WeaponScopeZero zero;
+    zero.max_steps = 5; zero.step_metres = 100;
+    weapon_scope_zero_bake(zero, ammo);
+    // The exact scale baked 379892, 823348, 1266150, 1772514 and 2216134.
+    CHECK(zero.elevation[0] == 10);
+    CHECK(zero.elevation[1] == 379880);
+    CHECK(zero.elevation[2] == 823324);
+    CHECK(zero.elevation[3] == 1266112);
+    CHECK(zero.elevation[4] == 1772460);
+    CHECK(zero.elevation[5] == 2216066);
+}
+
 // Direct mounts retain the current pose and velocities. Published bias alone
 // clears, then the next step uses the newly bound def's hip reference.
 void test_direct_mount_retains_running_pose_and_forced_mount_targets_ads() {
@@ -3763,6 +3782,7 @@ int main() {
     test_scope_zero_install_seeds_the_yaw_term();
     test_scope_zero_yaw_term();
     test_scope_zero_bake_max_range();
+    test_scope_zero_bake_rows_follow_the_x87_scale();
     test_mounted_first_person_camera_belongs_to_the_carrier();
     test_seat_bone_pose_rider_legs();
     test_unadmitted_seat_takes_the_ground_or_person_leg();
