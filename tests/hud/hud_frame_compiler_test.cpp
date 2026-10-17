@@ -3033,6 +3033,57 @@ void test_bordered_image_sites(const fnt_font_t *font) {
 	CHECK(tile_count(0x10000u, true, 2) == 0, "either tile missing: none");
 }
 
+// The death screen's dispatcher arm: with the HUD level cycled back up on the
+// death screen, the element dispatcher draws only its death arm and returns
+// before the static frame, so no frame and no stance draw, and the stance
+// does not restamp [orig: HUD_RenderOverlays @0x5A7BC5..0x5A7C68].
+void test_death_arm_skips_the_dispatcher(const fnt_font_t *font) {
+	using namespace opennova::hud;
+	HudLayout layout;
+	layout.stance_pos = {100, 600, 0, 0, true};
+	layout.stance_texture_valid.fill(true);
+	layout.stance_frame_w.fill(32);
+	layout.stance_frame_h.fill(32);
+	layout.alpha_fade_ramp_ticks = 62;
+	layout.alpha_fade_base_alpha = 255;
+	layout.frame_texture_valid = true;
+	layout.frame_pos = {10, 20, 0, 0, true};
+	layout.frame_tex_w = 200;
+	layout.frame_tex_h = 100;
+	HudFrameCompiler compiler;
+	compiler.configure(layout, font);
+	HudFrameState state;
+	state.ticks = 100;
+	state.stance = 2;
+	auto count = [&](int32_t texture_from, int32_t texture_to) {
+		int n = 0;
+		for (const auto &q : compiler.compile(state, 1024, 768).quads)
+			if (q.texture >= texture_from && q.texture <= texture_to) ++n;
+		return n;
+	};
+	CHECK(count(kHudTexFrame, kHudTexFrame) == 1 && count(kHudTexStance0 + 2, kHudTexStance0 + 2) == 1,
+			"alive: the frame and the stance draw");
+	state.combat.death_screen = true;
+	state.ticks = 400;
+	state.stance = 1;
+	CHECK(count(kHudTexFrame, kHudTexFrame) == 0 && count(kHudTexStance0, kHudTexStance0 + 7) == 0,
+			"the death arm draws no frame and no stance");
+	state.combat.death_screen = false;
+	state.ticks = 401;
+	// Back alive, the stance restamps on this frame, so the frame held through the
+	// death screen has not begun to fade yet (the ramp's elapsed-0 alpha is 0; a
+	// restamp on the death screen would have it drawn here), and draws a tick on.
+	auto stance_quads = [&](int frame) {
+		int n = 0;
+		for (const auto &q : compiler.compile(state, 1024, 768).quads)
+			if (q.texture == kHudTexStance0 + frame) ++n;
+		return n;
+	};
+	CHECK(stance_quads(1) == 1 && stance_quads(2) == 0, "the restamp waits for the living dispatcher");
+	state.ticks = 402;
+	CHECK(stance_quads(2) == 1, "the held frame fades under the new one a tick on");
+}
+
 // The breath bar [orig: HUD_DrawBreathBar @0x59D6F0, called from
 // HUD_DrawGameplayOverlays @0x5BDED3]: the gates (round over @0x5BDECA, the
 // BREATHTIME slot @0x59D6F3, breathtime @0x59D70F, a zero count @0x59D742),
@@ -3268,6 +3319,7 @@ int main() {
 	test_launcher_reload_keeps_ammo_flash(&font);
 	test_stance_obeys_weapon_group_declutter(&font);
 	test_bordered_image_sites(&font);
+	test_death_arm_skips_the_dispatcher(&font);
 	test_compiler_breath_bar(&font);
 	test_scope_details(&font);
 	test_optical_distance_long_format(&font);

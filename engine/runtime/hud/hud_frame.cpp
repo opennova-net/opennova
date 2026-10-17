@@ -587,31 +587,48 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 	// dispatcher [orig: HUD_DrawGameTimerOverlay @0x5A8499].
 	element_(HudElement::GameInfo, [&] { element_game_info(state, surface_w, surface_h); });
 
+	// On the death screen the element dispatcher runs its death arm alone: the
+	// spectate arm's health bar and TEAMID line, or else the waypoint, then the
+	// timer and the score, and it returns before the static frame, so the
+	// frame, the stance, the weapon cluster, the heat and power bars, the slot
+	// bar, the vehicle panel and the seat labels never draw there (each drawer
+	// below keeps its own death-screen rule) [orig: HUD_RenderOverlays
+	// @0x5A7BC5..0x5A7C68, the returns @0x5A7C68 and (no CLOCK) @0x5A7C53 ->
+	// @0x5A7E01, both before the frame's gate @0x5A7C70].
+	const bool death_arm = state.combat.death_screen;
+
 	// The stance cross-fade restamp [orig: @ 0x599f8a; it lives inside the
-	// stance drawer, so a blanked level-3 pass never restamps — matched by
-	// placing it under the early-out].
-	if (hud_stance_group_visible(state) && state.stance != stance_.cur) {
+	// stance drawer, so a blanked level-3 pass or the death arm never restamps —
+	// matched by placing it under the early-out and the death arm].
+	if (!death_arm && hud_stance_group_visible(state) && state.stance != stance_.cur) {
 		stance_.prev = stance_.cur;
 		stance_.cur = state.stance;
 		stance_.stamp = state.ticks;
 	}
 
-	element_(HudElement::Frame, [&] { element_frame(surface_w, surface_h); });
+	if (!death_arm) element_(HudElement::Frame, [&] { element_frame(surface_w, surface_h); });
 	element_(HudElement::Health, [&] { element_health(state, surface_w, surface_h); });
 	element_(HudElement::Instruments, [&] { element_instruments(state, surface_w, surface_h); });
-	element_(HudElement::OpticalCues, [&] { element_optical_cues(state, surface_w, surface_h); });
-	element_(HudElement::Stance, [&] { element_stance(state, surface_w, surface_h); });
-	element_weapon_cluster(state, surface_w, surface_h);
-	element_(HudElement::Heat, [&] { element_heat(state, surface_w, surface_h); });
-	// The CLOCK pair follows the heat bar and the icons in the dispatcher
-	// [orig: HUD_RenderOverlays @0x5A7D75..0x5A7D7C].
-	element_(HudElement::Clock, [&] { element_clock(state, surface_w, surface_h); });
-	element_(HudElement::Power, [&] { element_power(state, surface_w, surface_h); });
-	element_(HudElement::Waypoint, [&] { element_waypoint(state, surface_w, surface_h); });
-	// The TEAMID line then the HUDLS bar close the dispatcher's walk
-	// [orig: @0x5A7DE9, @0x5A7DF7].
-	element_(HudElement::TeamIdLine, [&] { element_team_id_line(state, surface_w, surface_h); });
-	element_(HudElement::WeaponSlotBar, [&] { element_weapon_slot_bar(state, surface_w, surface_h); });
+	if (death_arm) {
+		// The death arm's tail: the TEAMID line (spectating) or the waypoint, then
+		// the CLOCK pair [orig: @0x5A7C12 / @0x5A7C47, then @0x5A7C59 / @0x5A7C5E].
+		element_(HudElement::TeamIdLine, [&] { element_team_id_line(state, surface_w, surface_h); });
+		element_(HudElement::Waypoint, [&] { element_waypoint(state, surface_w, surface_h); });
+		element_(HudElement::Clock, [&] { element_clock(state, surface_w, surface_h); });
+	} else {
+		element_(HudElement::Stance, [&] { element_stance(state, surface_w, surface_h); });
+		element_weapon_cluster(state, surface_w, surface_h);
+		element_(HudElement::Heat, [&] { element_heat(state, surface_w, surface_h); });
+		// The CLOCK pair follows the heat bar and the icons in the dispatcher
+		// [orig: HUD_RenderOverlays @0x5A7D75..0x5A7D7C].
+		element_(HudElement::Clock, [&] { element_clock(state, surface_w, surface_h); });
+		element_(HudElement::Power, [&] { element_power(state, surface_w, surface_h); });
+		element_(HudElement::Waypoint, [&] { element_waypoint(state, surface_w, surface_h); });
+		// The TEAMID line then the HUDLS bar close the dispatcher's walk
+		// [orig: @0x5A7DE9, @0x5A7DF7].
+		element_(HudElement::TeamIdLine, [&] { element_team_id_line(state, surface_w, surface_h); });
+		element_(HudElement::WeaponSlotBar, [&] { element_weapon_slot_bar(state, surface_w, surface_h); });
+	}
 	// The AAS zone status panel draws BEFORE the map overlay in the retail
 	// walk [orig: HUD_RenderAllOverlays @0x5a8070 — HUD_DrawZoneStatusPanel
 	//  @0x5a8530, then HUD_DrawVehicleBayLogos (ex Radar_DrawBlips) @0x5a8535,
@@ -632,7 +649,9 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 	// [orig: HUD_DrawVehicleBayLogos @0x5a8535; the fork @0x5a850d..0x5a852b].
 	element_(HudElement::VehicleBayLogos, [&] { element_vehicle_bay_logos(state, surface_w, surface_h); });
 	element_(HudElement::Spinmap, [&] { element_spinmap(state, surface_w, surface_h); });
-	element_(HudElement::AttachLabels, [&] { element_attach_labels(state); });
+	// The seat and armory labels are the dispatcher's [orig: HUD_RenderOverlays
+	// @0x5A7DAA], so the death arm skips them.
+	if (!death_arm) element_(HudElement::AttachLabels, [&] { element_attach_labels(state); });
 	// Friendly tags draw after the overlay cluster and before the console
 	// messages, exactly the retail pass order [orig: HUD_DrawFriendlyTagsPass
 	// @ 0x5a87cc, then HUD_DrawConsoleMessages @ 0x5a87d1].
@@ -644,7 +663,7 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 	// panel arm of its own, so a hidden WPNGRP hides it there too
 	// [orig: HUD_RenderOverlays -- no root @0x5A7CAE; the panel calls
 	//  @0x5A7CE4 / @0x5A7CFF / @0x5A7D23; `cmp eax,1; jnz` @0x5A7CF5..0x5A7CF8].
-    if (hud_stance_group_visible(state))
+    if (!death_arm && hud_stance_group_visible(state))
         element_(HudElement::VehiclePanel,
                 [&] { element_vehicle_panel(state, surface_w, surface_h); });
 	// The console messages close the overlay pass [orig: HUD_DrawConsoleMessages
@@ -654,6 +673,11 @@ void HudFrameCompiler::compile_overlay_pass(const HudFrameState &state, float su
 	//  the earlier call @0x5a8508 off the death screen draws the same two
 	//  lines at the same place first].
 	element_(HudElement::SquadOrders, [&] { element_squad_orders(state, surface_w, surface_h); });
+	// The optical cues (the LollyPop marker, STROVER_DIST) close the pass, after
+	// the console messages, the squad orders and the takeover status, with no
+	// death-screen test [orig: HUD_RenderAllOverlays @0x5A87EF..0x5A89DA, after
+	// HUD_DrawTakeoverStatus @0x5A87E4].
+	element_(HudElement::OpticalCues, [&] { element_optical_cues(state, surface_w, surface_h); });
 }
 
 // The overlay-panel pass's middle legs, after the message log: the F9 emotes
