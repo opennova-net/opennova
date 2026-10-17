@@ -1,6 +1,7 @@
 // Round flight and presentation, with authoritative consequences carried explicitly
 // per round. See round_sim.h and docs/net/novaworld-net-re.md §5.60.
 #include <runtime/world/round_sim.h>
+#include <base/io/bits.h>
 #include <base/io/tick_rate.h>
 #include <base/io/fixed.h>
 
@@ -48,20 +49,12 @@ constexpr int32_t kDragTableSize = 1220;
 // @ 0x527687 resolves every row at load].
 constexpr const char *kGlassSmashSound = "GLASS_SMASH";
 
-constexpr uint32_t rotl32(uint32_t value, unsigned count) {
-    return (value << count) | (value >> (32u - count));
-}
-
-constexpr uint32_t rotr32(uint32_t value, unsigned count) {
-    return (value >> count) | (value << (32u - count));
-}
-
 uint32_t spread_hash(uint32_t seed) {
     const uint64_t square = static_cast<uint64_t>(seed) * seed;
     const uint32_t low = static_cast<uint32_t>(square) - seed;
     uint32_t high = static_cast<uint32_t>(square >> 32);
-    high = rotr32((high ^ 0xCC1CDC1Du) + 0xC11ABB09u, 16);
-    uint32_t hash = rotl32(low + high, 18);
+    high = io::rotr32((high ^ 0xCC1CDC1Du) + 0xC11ABB09u, 16);
+    uint32_t hash = io::rotl32(low + high, 18);
     if ((hash & 0x80000000u) != 0) hash += 0x001ABB09u;
     return hash;
 }
@@ -74,7 +67,7 @@ RandomSpreadOffset weapon_calc_random_spread_offset(
     if (spread_fp16 == 0) return {};
 
     const uint32_t hash = spread_hash(seed);
-    uint32_t mixed = rotl32(hash, 12);
+    uint32_t mixed = io::rotl32(hash, 12);
     if ((mixed & 0x80000000u) != 0) mixed += 0x001ABB09u;
     const uint32_t a = mixed & 0xFFFFu;
     const uint32_t b = (hash >> 8) & 0xFFFFu;
