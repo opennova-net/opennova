@@ -10,14 +10,16 @@
 #include <editor/model/core_finding.h>
 #include <editor/model/diagnostic.h>
 #include <editor/project/project_files.h>
+#include <formats/pff/pff.h>
 
 namespace opennova::editor {
 
 namespace {
 
-// A file name of the format's extension: no folder, at most the archives' 16 characters.
+// A file name of the format's extension: no folder, a name an archive takes (pff::logical_name_fits_archive: at
+// most PFF_NAME_SIZE bytes, not empty once normalized).
 bool name_form(const std::string &value) {
-	return !value.empty() && value.size() <= 16 && value.find_first_of("/\\:") == std::string::npos &&
+	return pff::logical_name_fits_archive(value) && value.find_first_of("/\\:") == std::string::npos &&
 	       value.find('.') != std::string::npos;
 }
 
