@@ -734,8 +734,36 @@ static int test_done_statement_round_trips(void) {
     return 1;
 }
 
+/* An expression the compiler takes whose text runs past the decompiler's 255 characters a slot, or
+   that holds more than 32 pending operands: the decompile fails rather than cut the text (a cut
+   text compiled to other bytes, or not at all). Shorter ones still round-trip. */
+static int test_long_expression_fails_to_decompile(void) {
+    const auto left = [](int n) {
+        std::string expr = "(Var02 + Var03)";
+        for (int i = 1; i < n; ++i) expr = "(" + expr + " + Var03)";
+        return "script t\nsection Begin\n{\n  Var01 = " + expr + "\n}\n";
+    };
+    const auto right = [](int n) {
+        std::string expr = "1";
+        for (int i = 0; i < n; ++i) expr = "(1 + " + expr + ")";
+        return "script t\nsection Begin\n{\n  Var01 = " + expr + "\n}\n";
+    };
+    CHECK(round_trips(left(3).c_str()), "a short left-nested sum round-trips");
+    CHECK(round_trips(right(31).c_str()), "31 right-nested sums round-trip");
+    for (const std::string &src : {left(26), left(40), right(33), right(36)}) {
+        MusScript script = {};
+        int el = 0, ec = 0;
+        const char *em = NULL;
+        CHECK(mus_compile(src.c_str(), &script, &el, &ec, &em) == 0, "the compiler takes it");
+        CHECK(mus_decompile(&script, NULL, 0) < 0, "the decompiler gives no cut text");
+        mus_script_free(&script);
+    }
+    return 1;
+}
+
 int main(void) {
     RUN_TEST(test_done_statement_round_trips);
+    RUN_TEST(test_long_expression_fails_to_decompile);
     RUN_TEST(test_unnamed_sections_and_strings);
     RUN_TEST(test_encode_model_fields);
     RUN_TEST(test_parse_method_table);

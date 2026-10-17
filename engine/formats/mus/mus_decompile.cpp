@@ -421,16 +421,30 @@ static int analyze_control_flow(const Instruction *insts, int n, const MusScript
 /* ---- Expression reconstruction (matches Python `reconstruct_expression`) ---- */
 
 struct Stack {
-    char  buf[32][256];     /* up to 32 expressions, each up to 256 chars */
+    char  buf[32][256];     /* up to 32 expressions, each up to 255 chars */
     int   top;
+    int   overflow;         /* an operand past the 32 or a text past 255 chars: no text is given */
 };
 
-static void stk_push(Stack *s, const char *str) {
-    if (s->top < 32) {
-        snprintf(s->buf[s->top], sizeof(s->buf[0]), "%s", str);
-        ++s->top;
+/* Push one operand's text, formatted. One that does not fit (a 33rd pending operand, a text past
+   255 characters, both of which the compiler takes) sets `overflow` rather than cutting it: a cut
+   text compiles to other bytes, or not at all. */
+static void stk_pushf(Stack *s, const char *fmt, ...) {
+    if (s->top >= 32) {
+        s->overflow = 1;
+        return;
     }
+    va_list ap;
+    va_start(ap, fmt);
+    const int n = vsnprintf(s->buf[s->top], sizeof(s->buf[0]), fmt, ap);
+    va_end(ap);
+    if (n < 0 || n >= (int)sizeof(s->buf[0])) {
+        s->overflow = 1;
+        return;
+    }
+    ++s->top;
 }
+static void stk_push(Stack *s, const char *str) { stk_pushf(s, "%s", str); }
 static const char *stk_pop(Stack *s) {
     if (s->top > 0) {
         --s->top;
@@ -480,12 +494,18 @@ static int is_expr_end_op(const char *m) {
         || strcmp(m, "setstate") == 0 || strcmp(m, "enter") == 0;
 }
 
-static void reconstruct_expression(const Instruction *insts, int start, int end_excl,
+/* The expression's text into `out` (its capacity at least a slot's 256): false, `out` empty,
+   where the text would not fit the stack (stk_pushf), so the caller fails the decompile. */
+static bool reconstruct_expression(const Instruction *insts, int start, int end_excl,
                                    const MusScript *script, char *out, size_t out_cap,
                                    const FunctionView *fn = NULL) {
     Stack stk{};
     out[0] = 0;
-    char tmp[256];
+    const auto result = [&]() {
+        if (stk.overflow) return false;
+        snprintf(out, out_cap, "%s", stk_peek(&stk));
+        return true;
+    };
     int i = start;
     while (i < end_excl) {
         const Instruction *inst = &insts[i];
@@ -494,8 +514,7 @@ static void reconstruct_expression(const Instruction *insts, int start, int end_
 
         if (strcmp(m, "push") == 0) {
             int v = (inst->operand_count > 0) ? inst->operands[0] : 0;
-            snprintf(tmp, sizeof(tmp), "%d", v);
-            stk_push(&stk, tmp);
+            stk_pushf(&stk, "%d", v);
         } else if (strcmp(m, "push_g") == 0) {
             int idx = (inst->operand_count > 0) ? inst->operands[0] : 0;
             char name[64];
@@ -511,30 +530,25 @@ static void reconstruct_expression(const Instruction *insts, int start, int end_
             stk_push(&stk, "Me");
         } else if (strcmp(m, "pushstr") == 0) {
             int v = (inst->operand_count > 0) ? inst->operands[0] : 0;
-            snprintf(tmp, sizeof(tmp), "\"str_%04X\"", (unsigned)v);
-            stk_push(&stk, tmp);
+            stk_pushf(&stk, "\"str_%04X\"", (unsigned)v);
         } else if (binop_str(m)) {
             const char *op = binop_str(m);
             if (stk.top >= 2) {
                 char b[256], a[256];
                 snprintf(b, sizeof(b), "%s", stk_pop(&stk));
                 snprintf(a, sizeof(a), "%s", stk_pop(&stk));
-                snprintf(tmp, sizeof(tmp), "(%s %s %s)", a, op, b);
-                stk_push(&stk, tmp);
+                stk_pushf(&stk, "(%s %s %s)", a, op, b);
             } else {
-                snprintf(tmp, sizeof(tmp), "?%s?", op);
-                stk_push(&stk, tmp);
+                stk_pushf(&stk, "?%s?", op);
             }
         } else if (unaryop_str(m)) {
             const char *op = unaryop_str(m);
             if (stk.top >= 1) {
                 char a[256];
                 snprintf(a, sizeof(a), "%s", stk_pop(&stk));
-                snprintf(tmp, sizeof(tmp), "%s%s", op, a);
-                stk_push(&stk, tmp);
+                stk_pushf(&stk, "%s%s", op, a);
             } else {
-                snprintf(tmp, sizeof(tmp), "%s?", op);
-                stk_push(&stk, tmp);
+                stk_pushf(&stk, "%s?", op);
             }
         } else if (strcmp(m, "method") == 0) {
             int idx = (inst->operand_count > 0) ? inst->operands[0] : 0;
@@ -548,26 +562,24 @@ static void reconstruct_expression(const Instruction *insts, int start, int end_
                 snprintf(arg, sizeof(arg), "%s", stk_pop(&stk));
             }
             if (obj[0]) {
-                if (arg[0]) snprintf(tmp, sizeof(tmp), "%s.%s(%s)", obj, mth, arg);
-                else        snprintf(tmp, sizeof(tmp), "%s.%s()", obj, mth);
+                if (arg[0]) stk_pushf(&stk, "%s.%s(%s)", obj, mth, arg);
+                else        stk_pushf(&stk, "%s.%s()", obj, mth);
             } else {
-                if (arg[0]) snprintf(tmp, sizeof(tmp), "%s(%s)", mth, arg);
-                else        snprintf(tmp, sizeof(tmp), "%s()", mth);
+                if (arg[0]) stk_pushf(&stk, "%s(%s)", mth, arg);
+                else        stk_pushf(&stk, "%s()", mth);
             }
-            stk_push(&stk, tmp);
         } else if (strcmp(m, "empty") == 0) {
             /* Expression ended; keep stack as-is, return what's on top. */
-            snprintf(out, out_cap, "%s", stk_peek(&stk));
-            return;
+            return result();
         } else if (is_expr_end_op(m) || strcmp(m, "tablexec") == 0) {
-            snprintf(out, out_cap, "%s", stk_peek(&stk));
-            return;
+            return result();
         } else {
             break;
         }
+        if (stk.overflow) return false;
         ++i;
     }
-    snprintf(out, out_cap, "%s", stk_peek(&stk));
+    return result();
 }
 
 /* find_expr_start: scan backwards to find where this expression began. */
@@ -638,7 +650,7 @@ struct Buf {
     char    *p;
     size_t   cap;
     size_t   used;
-    int      failed;  /* the program nests past kMaxNesting: it does not decompile */
+    int      failed;  /* the program nests past kMaxNesting, or an expression's text would be cut: it does not decompile */
     uint32_t line = 1; /* the line the next character goes on */
 };
 
@@ -802,7 +814,7 @@ static void decompile_block(Buf *out,
         if (block && block->type == CF_TYPE_IF) {
             int es = find_expr_start(insts, end_idx, i);
             char expr[256];
-            reconstruct_expression(insts, es, i + 1, script, expr, sizeof(expr), fn);
+            if (!reconstruct_expression(insts, es, i + 1, script, expr, sizeof(expr), fn)) out->failed = 1;
             if (!expr[0]) snprintf(expr, sizeof(expr), "condition");
             place(out, script, insts[es].offset);
             emit_indent(out, indent);
@@ -832,7 +844,7 @@ static void decompile_block(Buf *out,
         if (block && block->type == CF_TYPE_IF_ELSE) {
             int es = find_expr_start(insts, end_idx, i);
             char expr[256];
-            reconstruct_expression(insts, es, i + 1, script, expr, sizeof(expr), fn);
+            if (!reconstruct_expression(insts, es, i + 1, script, expr, sizeof(expr), fn)) out->failed = 1;
             if (!expr[0]) snprintf(expr, sizeof(expr), "condition");
             place(out, script, insts[es].offset);
             emit_indent(out, indent);
@@ -898,7 +910,7 @@ static void decompile_block(Buf *out,
             int es = find_expr_start(insts, end_idx, i);
             if (es < i) {
                 char expr[256];
-                reconstruct_expression(insts, es, i + 1, script, expr, sizeof(expr), fn);
+                if (!reconstruct_expression(insts, es, i + 1, script, expr, sizeof(expr), fn)) out->failed = 1;
                 if (expr[0]) {
                     place(out, script, insts[es].offset);
                     emit_indent(out, indent);
@@ -912,7 +924,7 @@ static void decompile_block(Buf *out,
                                 script->variables, script->variable_count);
             int es = find_expr_start(insts, end_idx, i);
             char expr[256];
-            reconstruct_expression(insts, es, i, script, expr, sizeof(expr), fn);
+            if (!reconstruct_expression(insts, es, i, script, expr, sizeof(expr), fn)) out->failed = 1;
             place(out, script, insts[es < i ? es : i].offset);
             emit_indent(out, indent);
             if (expr[0]) buf_printf(out, "%s = %s\n", buf256, expr);
@@ -923,7 +935,7 @@ static void decompile_block(Buf *out,
             resolve_local_into(buf256, sizeof(buf256), idx, fn);
             int es = find_expr_start(insts, end_idx, i);
             char expr[256];
-            reconstruct_expression(insts, es, i, script, expr, sizeof(expr), fn);
+            if (!reconstruct_expression(insts, es, i, script, expr, sizeof(expr), fn)) out->failed = 1;
             place(out, script, insts[es < i ? es : i].offset);
             emit_indent(out, indent);
             if (expr[0]) buf_printf(out, "%s = %s\n", buf256, expr);
@@ -976,7 +988,7 @@ static void decompile_block(Buf *out,
             int target = (inst->operand_count > 0) ? inst->operands[0] : 0;
             int es = find_expr_start(insts, end_idx, i);
             char expr[256];
-            reconstruct_expression(insts, es, i, script, expr, sizeof(expr), fn);
+            if (!reconstruct_expression(insts, es, i, script, expr, sizeof(expr), fn)) out->failed = 1;
             char fb[32];
             const char *target_name = resolve_branch_target(
                 script, target, suppress_entries, fb, sizeof(fb));
@@ -987,7 +999,7 @@ static void decompile_block(Buf *out,
             int target = (inst->operand_count > 0) ? inst->operands[0] : 0;
             int es = find_expr_start(insts, end_idx, i);
             char expr[256];
-            reconstruct_expression(insts, es, i, script, expr, sizeof(expr), fn);
+            if (!reconstruct_expression(insts, es, i, script, expr, sizeof(expr), fn)) out->failed = 1;
             char fb[32];
             const char *target_name = resolve_branch_target(
                 script, target, suppress_entries, fb, sizeof(fb));
@@ -1087,7 +1099,7 @@ static void decompile_block(Buf *out,
             int inner_op    = inst->operand_count > 1 ? inst->operands[1] : 0;
             int es = find_expr_start(insts, end_idx, i);
             char expr[256];
-            reconstruct_expression(insts, es, i, script, expr, sizeof(expr), fn);
+            if (!reconstruct_expression(insts, es, i, script, expr, sizeof(expr), fn)) out->failed = 1;
             if (!expr[0]) snprintf(expr, sizeof(expr), "condition");
             place(out, script, insts[es < i ? es : i].offset);
 
@@ -1383,7 +1395,8 @@ static int decompile_into_buf(const MusScript *script,
         free(insts);
     }
     /* A malformed program (an instruction cut short, a branch into an instruction or
-       past the end) or one nested past kMaxNesting does not decompile. */
+       past the end), one nested past kMaxNesting, or one whose expression's text would be cut (past
+       32 pending operands or 255 characters, reconstruct_expression) does not decompile. */
     if (b.failed) return -3;
 
     /* Two-pass: first call (out=NULL) returns required size; second call
