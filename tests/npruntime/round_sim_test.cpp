@@ -950,6 +950,70 @@ bool test_unauthored_recoil_kicks_a_flying_round_only() {
 	return true;
 }
 
+// The stance row a shot reads: the parachute, drowning and ladder-contact bits
+// (Flags & 0x108020) or the eye below the water force the standing row 2; InAir
+// 0x2000 and an airborne body keep the stance row. The row picks the ammo's
+// recoil byte, so the kick names it (the drowning bit also takes the underwater
+// shift). [orig: RoundData_SpawnRound `test [ebp+24h], 108020h` @0x4EC2D5, row 2
+// @0x4EC2EC; the recoil add reads the row @0x4EC85B]
+bool test_stance_row_forced_standing_mask() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	w::PlayerSpawn seed;
+	seed.net_id = 44;
+	seed.equipped_adm_index = 1;
+	const w::EntityHandle shooter = w::spawn_player(world, seed);
+	w::AiEntity *body = world.ai.for_handle(shooter);
+	w::Entity *entity = world.registry.get(shooter);
+	if (!expect(shooter.valid() && body != nullptr && entity != nullptr,
+	            "stance-row player spawned"))
+		return false;
+	world.tables.ammo.entries.resize(1);
+	w::AmmoTableEntry &ammo = world.tables.ammo.entries[0];
+	ammo.valid = true;
+	ammo.velocity = 620;
+	ammo.max_age_ticks = 100;
+	ammo.recoil[0] = 1;
+	ammo.recoil[1] = 2;
+	ammo.recoil[2] = 3;
+	world.tables.weapons.entries.resize(2);
+	world.tables.weapons.entries[1].valid = true;
+	world.env.water_z = -(100 << 16); // the eye far above the plane
+	w::RoundSpawnParams params;
+	params.owner = shooter;
+	params.shooter_handle = shooter.packed;
+	params.adm_index = 1;
+	params.ammo_index = 0;
+	const auto kick = [&]() {
+		world.round_sim.reset();
+		body->inf.recoil_pitch = 0;
+		world.round_sim.spawn(world, params);
+		return body->inf.recoil_pitch;
+	};
+	body->inf.stance = w::InfantryState::Stance::kCrouch;
+	if (!expect(kick() == (2 << 18), "a crouched shooter kicks its crouch row")) return false;
+	body->inf.airborne = true;
+	entity->flags |= w::kEntityFlagInAir;
+	if (!expect(kick() == (2 << 18), "an airborne crouched shooter keeps its crouch row"))
+		return false;
+	body->inf.airborne = false;
+	entity->flags &= ~w::kEntityFlagInAir;
+	entity->flags |= w::kEntityFlagLadderContact;
+	if (!expect(kick() == (3 << 18), "a crouched shooter on a ladder takes the standing row"))
+		return false;
+	entity->flags &= ~w::kEntityFlagLadderContact;
+	entity->flags |= w::kEntityFlagParachute;
+	if (!expect(kick() == (3 << 18), "a crouched shooter under a chute takes the standing row"))
+		return false;
+	entity->flags &= ~w::kEntityFlagParachute;
+	entity->flags |= w::kEntityFlagDrowning;
+	if (!expect(kick() == (3 << 20), "a drowning shooter takes the standing row underwater"))
+		return false;
+	entity->flags &= ~w::kEntityFlagDrowning;
+	body->inf.stance = w::InfantryState::Stance::kProne;
+	return expect(kick() == (1 << 18), "a prone shooter kicks its prone row");
+}
+
 struct DismembermentRig {
 	w::World world;
 	w::AiSystem &ai = world.ai;
@@ -1379,6 +1443,7 @@ int main() {
 	if (!test_spawn_spread_then_recoil()) return 1;
 	if (!test_spawn_spread_reads_the_rules_word()) return 1;
 	if (!test_unauthored_recoil_kicks_a_flying_round_only()) return 1;
+	if (!test_stance_row_forced_standing_mask()) return 1;
 	if (!test_spawn_aimed_row_and_zero_elevation()) return 1;
 	if (!test_dismemberment_damage_path()) return 1;
 	if (!test_person_hit_presentation_legs_run_on_every_hit()) return 1;

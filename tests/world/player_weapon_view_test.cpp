@@ -243,13 +243,22 @@ void test_crosshair_spread_rows() {
 	CHECK(rig.view().hud_spread_row == 2);
 	body.pos[2] = body_z;
 	CHECK(rig.view().hud_spread_row == 0);
-	// Airborne forces stand.
+	// An airborne body and the in-air flag keep the stance row: the crosshair
+	// tests neither. The parachute, drowning and ladder-contact bits force
+	// stand, and a mount finally forces crouch.
+	// [orig: HUD_DrawCrosshair `test [edx+24h], 108020h` @0x592b50, row 2
+	//  @0x592b67, +0x16C -> row 1 @0x592b6c..0x592b76]
 	body.inf.airborne = true;
-	CHECK(rig.view().hud_spread_row == 2);
-	body.inf.airborne = false;
-	// The in-air entity flag forces stand too, and a mount finally forces crouch.
 	rig.entity().flags |= kEntityFlagInAir;
-	CHECK(rig.view().hud_spread_row == 2);
+	CHECK(rig.view().hud_spread_row == 0);
+	body.inf.airborne = false;
+	rig.entity().flags &= ~kEntityFlagInAir;
+	for (const uint32_t bit : {kEntityFlagParachute, kEntityFlagDrowning, kEntityFlagLadderContact}) {
+		rig.entity().flags |= bit;
+		CHECK(rig.view().hud_spread_row == 2);
+		rig.entity().flags &= ~bit;
+	}
+	rig.entity().flags |= kEntityFlagLadderContact;
 	rig.entity().mounted = true;
 	CHECK(rig.view().hud_spread_row == 1);
 	// No authored def: the live error is the shifted terms alone.
