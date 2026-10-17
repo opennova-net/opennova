@@ -15,7 +15,9 @@ retail games are tracked in the [divergence ledger](docs/divergence-ledger.md).
 | --- | --- |
 | `engine/` | Native formats, runtime, networking, and service code. |
 | `godot/` | Godot game, project resources, and GDScript tests. |
-| `assets/` | OpenNova's own game data, shipped beside `opennova.exe`: today the placeholder main menu and a first-person carbine and arms exported from the Blender scene in `art/` (not used yet). |
+| `assets/` | OpenNova's own base game, an OpenNova Editor project: every file the game reads to boot (today to the placeholder main menu) and the first pieces of its own game, a mission on its own terrain with first-person weapons, HUD, sounds and music. The game zip ships the editor's build of it in `assets/` beside `opennova.exe` ([assets/README.md](assets/README.md)). |
+| `expansions/` | OpenNova's own expansions, each an OpenNova Editor expansion project on the base game in `assets/` (today `onjo1`, Indigo Storm); the game zip ships each one built in `assets/expansion/<name>/` ([expansions/README.md](expansions/README.md)). |
+| `art/` | Authoring sources (Blender scenes and their textures, in Git LFS) whose exports land in `assets/`. |
 | `apps/` | Native command-line and NovaWorld service applications. |
 | `switcher/` | OpenNova Switcher: a Windows tray app that points a stock Joint Operations install at OpenNova's NovaWorld, NovaLogic's, or an address you enter, through the hosts file (.NET 8, with its xunit tests). |
 | `tools/blender/opennova_3di/` | Experimental Blender add-on for importing and exporting NovaLogic 3DI models and their ADM/BAD animations. |
