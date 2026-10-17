@@ -187,7 +187,7 @@ int test_serve(const update::SfsPackage &package) {
 	TEST_EXPECT(!catalog.bind("NOPEus", "NOPE.CMD", { package }, error));
 	TEST_EXPECT(net::startup() == 0);
 	update::UpdateServer server(catalog);
-	update_tool::UpdateTcpServer listener(server);
+	net::UpdateTcpServer listener(server);
 	TEST_EXPECT(listener.listen({ 0 }, true));
 	if (listener.ports().empty())
 		return 1;

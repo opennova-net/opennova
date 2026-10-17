@@ -3,6 +3,7 @@ add_library(opennova_app_common STATIC
     command_runner.cpp   # a command-line tool from an argv array, no shell (base/proc)
     net_http.cpp
     net_sockets.cpp
+    update_tcp_server.cpp # the updater's TCP listener over net/update's machine (ADR 0061)
 )
 
 target_include_directories(opennova_app_common

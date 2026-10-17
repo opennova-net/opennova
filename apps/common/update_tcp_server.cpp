@@ -2,13 +2,13 @@
 
 #include <array>
 
-namespace opennova::update_tool {
+namespace opennova::net {
 
 namespace {
 
 constexpr int kListenBacklog = 16;
 
-bool same_peer(const net::Endpoint &a, const net::Endpoint &b) {
+bool same_peer(const Endpoint &a, const Endpoint &b) {
 	return a.ip == b.ip;
 }
 
@@ -18,7 +18,7 @@ bool UpdateTcpServer::listen(const std::vector<uint16_t> &ports, bool loopback_o
 	close();
 	for (uint16_t port : ports) {
 		uint16_t bound = 0;
-		net::Socket listener = net::tcp_listen(port, kListenBacklog, &bound, loopback_only);
+		Socket listener = tcp_listen(port, kListenBacklog, &bound, loopback_only);
 		if (!listener.is_valid()) {
 			close();
 			return false;
@@ -32,18 +32,18 @@ bool UpdateTcpServer::listen(const std::vector<uint16_t> &ports, bool loopback_o
 bool UpdateTcpServer::pump() {
 	bool busy = false;
 	const auto now = std::chrono::steady_clock::now();
-	for (net::Socket &listener : listeners_) {
-		net::Endpoint from;
-		net::Socket accepted = net::tcp_accept(listener, from);
+	for (Socket &listener : listeners_) {
+		Endpoint from;
+		Socket accepted = tcp_accept(listener, from);
 		if (!accepted.is_valid())
 			continue;
 		busy = true;
 		size_t from_peer = 0;
 		for (const Client &client : clients_)
 			from_peer += same_peer(client.peer, from) ? 1 : 0;
-		if (clients_.size() >= kMaxConnections || from_peer >= kMaxPerPeer) {
+		if (clients_.size() >= max_connections_ || from_peer >= kMaxPerPeer) {
 			log("refused " + net::endpoint_to_string(from) + " (connection limit)");
-			net::close_socket(accepted);
+			close_socket(accepted);
 			continue;
 		}
 		Client client;
@@ -60,7 +60,7 @@ bool UpdateTcpServer::pump() {
 		Client &client = clients_[i];
 		bool drop = false;
 		if (!client.closing) {
-			const int n = net::tcp_recv_nonblocking(client.socket, buffer.data(), buffer.size());
+			const int n = tcp_recv_nonblocking(client.socket, buffer.data(), buffer.size());
 			if (n > 0) {
 				busy = true;
 				client.last = now;
@@ -78,7 +78,7 @@ bool UpdateTcpServer::pump() {
 			}
 		}
 		if (!drop && client.sent < client.outbox.size()) {
-			const int n = net::tcp_send_nonblocking(client.socket,
+			const int n = tcp_send_nonblocking(client.socket,
 					client.outbox.data() + client.sent, client.outbox.size() - client.sent);
 			if (n > 0) {
 				busy = true;
@@ -101,7 +101,7 @@ bool UpdateTcpServer::pump() {
 		if (drop) {
 			log("close " + net::endpoint_to_string(client.peer));
 			server_.close(client.id);
-			net::close_socket(client.socket);
+			close_socket(client.socket);
 			clients_.erase(clients_.begin() + static_cast<std::ptrdiff_t>(i));
 			busy = true;
 			continue;
@@ -114,13 +114,13 @@ bool UpdateTcpServer::pump() {
 void UpdateTcpServer::close() {
 	for (Client &client : clients_) {
 		server_.close(client.id);
-		net::close_socket(client.socket);
+		close_socket(client.socket);
 	}
 	clients_.clear();
-	for (net::Socket &listener : listeners_)
-		net::close_socket(listener);
+	for (Socket &listener : listeners_)
+		close_socket(listener);
 	listeners_.clear();
 	ports_.clear();
 }
 
-} // namespace opennova::update_tool
+} // namespace opennova::net

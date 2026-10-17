@@ -1,14 +1,14 @@
 # opennova-update-tool: the update service's tooling (ADR 0061): builds a packed update (1SFS)
 # from two install trees, inspects one, and serves packed updates over UPDATE.EXE's protocol with
-# no database. The formats and the wire are the engine's (formats/update, net/update); the app
-# owns the tree diff, the package catalog, the sockets (apps/common) and the console.
+# no database. The formats and the wire are the engine's (formats/update, net/update), the
+# listener's sockets apps/common's (update_tcp_server); the app owns the tree diff, the package
+# catalog and the console.
 #
 # The core is a STATIC library so the executable and the update_tool ctests drive the very same
 # code.
 add_library(opennova_update_tool_core STATIC
     package_builder.cpp   # two trees to a packed update
     package_catalog.cpp   # packed updates as the server's products
-    update_tcp_server.cpp # the listeners and connections, pumped into net/update's machine
 )
 
 target_include_directories(opennova_update_tool_core
@@ -19,7 +19,7 @@ target_include_directories(opennova_update_tool_core
 target_link_libraries(opennova_update_tool_core
     PUBLIC
         opennova_net         # the wire and the server machine (net/update); formats below it
-        opennova_app_common  # the TCP sockets (PUBLIC-links ws2_32 on Windows)
+        opennova_app_common  # the TCP sockets and the update listener's (PUBLIC-links ws2_32 on Windows)
 )
 
 target_compile_features(opennova_update_tool_core PUBLIC cxx_std_17)
