@@ -9,7 +9,8 @@
 # handed to the portal through SSM SecureStrings under the deployment's prefix.
 # Unproxied or without Cloudflare: no certificate. The update service's record
 # (update, at the balancer; update.staging off prod) is never proxied, and
-# goes only without a zone. The zone's own settings and rules (Full strict,
+# goes only without a zone; so does the gate's (nw, an A record at the
+# gate's zone-a address; nw.staging off prod). The zone's own settings and rules (Full strict,
 # edge authentication, the webhook's WAF skip) are infra/zone's: none of them
 # is made here.
 
@@ -318,6 +319,15 @@ run "edge" {
     )
     error_message = "the update service's record is an unproxied CNAME at the balancer (retail UPDATE.EXE speaks plain TCP to it), the name web serves"
   }
+  assert {
+    condition = (
+      cloudflare_record.novaworld[0].name == "nw" && cloudflare_record.novaworld[0].type == "A" &&
+      cloudflare_record.novaworld[0].content == "54.162.79.147" &&
+      !cloudflare_record.novaworld[0].proxied && cloudflare_record.novaworld[0].ttl == 300 &&
+      output.novaworld_host == "nw.example.com"
+    )
+    error_message = "the gate's record is nw, an unproxied A record at the gate's own address (the gate speaks UDP; zone b never answers for it)"
+  }
 }
 
 # Staging's records and certificate: its own first-level name alone.
@@ -352,6 +362,13 @@ run "staging_edge" {
     )
     error_message = "staging's update record is update.staging, unproxied, and is staging's web's update host"
   }
+  assert {
+    condition = (
+      cloudflare_record.novaworld[0].name == "nw.staging" && !cloudflare_record.novaworld[0].proxied &&
+      cloudflare_record.novaworld[0].content == "3.3.3.3" && output.novaworld_host == "nw.staging.example.com"
+    )
+    error_message = "staging's gate record is nw.staging, unproxied, at staging's own gate address"
+  }
 }
 
 run "unproxied" {
@@ -365,9 +382,10 @@ run "unproxied" {
     condition = (
       length(tls_private_key.origin) == 0 && length(cloudflare_origin_ca_certificate.origin) == 0 &&
       !strcontains(aws_ecs_task_definition.program["web"].container_definitions, "ORIGIN_TLS_CERT") &&
-      length(cloudflare_record.update) == 1 && !cloudflare_record.update[0].proxied
+      length(cloudflare_record.update) == 1 && !cloudflare_record.update[0].proxied &&
+      length(cloudflare_record.novaworld) == 1 && !cloudflare_record.novaworld[0].proxied
     )
-    error_message = "unproxied records: no origin certificate (the portal reads none); the update record stays (it was never proxied)"
+    error_message = "unproxied records: no origin certificate (the portal reads none); the update and gate records stay (they were never proxied)"
   }
 }
 
@@ -383,8 +401,9 @@ run "no_cloudflare" {
     condition = (
       length(aws_ssm_parameter.origin_tls_cert) == 0 && length(cloudflare_record.web_root) == 0 &&
       length(cloudflare_record.update) == 0 && output.update_host == null &&
+      length(cloudflare_record.novaworld) == 0 && output.novaworld_host == null &&
       { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_UPDATE_HOST"] == ""
     )
-    error_message = "without Cloudflare: none of it, no update record, and web's update host empty (its listener stays off)"
+    error_message = "without Cloudflare: none of it, no update or gate record, and web's update host empty (its listener stays off)"
   }
 }

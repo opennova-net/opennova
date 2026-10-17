@@ -68,6 +68,11 @@ output "update_host" {
   description = "The update service's hostname, an unproxied record at the load balancer (web's ONNET_UPDATE_HOST; retail UPDATE.EXE reaches it on the update ports); null without a zone"
 }
 
+output "novaworld_host" {
+  value       = local.novaworld_host != "" ? local.novaworld_host : null
+  description = "The gate's hostname, an unproxied A record at the gate's address (OpenNova's client's OpenNova NovaWorld; opennova-serve's --master-host); null without a zone"
+}
+
 output "ops_bucket" {
   value       = local.ops_bucket_name
   description = "The deployment's operations bucket: the release manifests (releases/), the game data's store (data/: the data sets' trees and the update packages) and the database dumps (novaworld/)"
