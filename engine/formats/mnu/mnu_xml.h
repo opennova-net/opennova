@@ -18,6 +18,12 @@
 //   text inside a tag name or a RAW_TEXT body (retail's E_FAIL: the file loads
 //   nothing). Where retail crashes or hangs instead, the reader stops gracefully:
 //   parse() fails, or keeps what it built with a note, as each case says.
+// - Elements nest at most kMaxElementDepth deep: an element opened deeper stops the
+//   reader with a note, keeping what it built. Retail's reader is a loop and takes any
+//   depth, but its parse recurses once a WINDOW level [orig: CUIElement_ParseXMLDefinition
+//   @ 0x648120, the CUIScene_CreateWidgetByType call @ 0x649789] and runs out of stack at
+//   some depth; ours recurses once an element level in the walks over the tree, so a
+//   small file of nested elements would run the stack out instead.
 #pragma once
 
 #include <cstddef>
@@ -30,6 +36,10 @@ namespace opennova::mnu_xml {
 
 // The reader works on wide characters, as retail does after the decode.
 using Text = std::u32string;
+
+// The deepest element the reader takes: a top-level element is at depth 1 (a shipped
+// menu nests a handful of levels).
+constexpr size_t kMaxElementDepth = 64;
 
 struct Attribute {
 	Text name;
@@ -54,6 +64,12 @@ struct Node {
 	int screen_ordinal = -1;            // a top-level SCREEN's index among the top-level SCREENs
 	mutable bool read = false;          // set when the typed layer consumes it
 
+	Node() = default;
+	Node(const Node &) = delete;
+	Node &operator=(const Node &) = delete;
+	// Frees the subtree without recursing once a level.
+	~Node();
+
 	// The attribute a consumer that walks the whole list and overwrites keeps: the
 	// first authored of that name (retail's list is in reverse order). Null when absent.
 	const Attribute *attr(const char *name) const;
@@ -62,7 +78,8 @@ struct Node {
 	const Attribute *last_attr(const char *name) const;
 };
 
-// What the reader kept going past: a retail crash or hang it stops at gracefully.
+// What the reader kept going past: a retail crash or hang it stops at gracefully, or
+// an element nested past kMaxElementDepth.
 struct Note {
 	size_t line = 0;
 	std::string message;

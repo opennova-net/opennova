@@ -4,6 +4,9 @@
 
 #include <climits>
 #include <cstdint>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace opennova::mnu_xml {
 
@@ -117,6 +120,7 @@ private:
 	size_t line_pos_ = 0, line_ = 1;
 	Node *current_ = nullptr; // where text and children go
 	Node *created_ = nullptr; // where attributes go: the element created last
+	size_t depth_ = 0;        // current_'s depth: 0 at the top level
 	int screens_ = 0;         // top-level SCREENs so far
 };
 
@@ -217,6 +221,7 @@ bool Reader::run(std::string &error) {
 				if (!current_)
 					return fail(error, "A close tag at the top level: retail crashes loading this file.");
 				current_ = current_->parent;
+				--depth_;
 			} else if (starts_with(tag_start, "!--")) {
 				// The terminator search starts where the tag name stopped, so <!--x-->
 				// with no whitespace runs on to the next "-->".
@@ -249,6 +254,12 @@ bool Reader::run(std::string &error) {
 					if (!at(pos_)) return fail(error, "The file ends inside RAW_TEXT.");
 				}
 			} else {
+				if (depth_ >= kMaxElementDepth) {
+					note("An element nested more than " + std::to_string(kMaxElementDepth) +
+					     " levels deep: OpenNova's reader stops here (retail's parse recurses once a WINDOW "
+					     "level and runs out of stack at some depth); the rest of the file is not read.");
+					return true;
+				}
 				auto node = std::make_unique<Node>();
 				node->tag.assign(s_, tag_start, pos_ - tag_start);
 				node->parent = current_;
@@ -258,6 +269,7 @@ bool Reader::run(std::string &error) {
 				(current_ ? current_->children : out_.roots).push_back(std::move(node));
 				current_ = raw;
 				created_ = raw;
+				++depth_;
 			}
 			if (!attributes()) return true;
 		} else if (ch == '&') {
@@ -286,6 +298,18 @@ bool Reader::run(std::string &error) {
 }
 
 } // namespace
+
+Node::~Node() {
+	// The subtree's nodes taken one at a time, each emptied of its children before it
+	// goes, so no destructor recurses into the next level.
+	std::vector<std::unique_ptr<Node>> pending = std::move(children);
+	while (!pending.empty()) {
+		std::unique_ptr<Node> node = std::move(pending.back());
+		pending.pop_back();
+		for (std::unique_ptr<Node> &child : node->children) pending.push_back(std::move(child));
+		node->children.clear();
+	}
+}
 
 bool Attribute::token(Text &out) const {
 	out.clear();

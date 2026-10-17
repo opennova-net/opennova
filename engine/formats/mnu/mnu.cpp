@@ -1635,8 +1635,15 @@ std::string note_locator(const Node &node) {
 
 // A note covers everything under it; beneath it only a fatal note still comes out (a
 // repeated element merged into the first, or a replaced one, is content retail parses).
+// The walk is a loop over an explicit stack (each element before its children, the
+// children in order), so its depth is not the call stack's.
 void TreeReader::sweep(const mnu_xml::Document &xml, std::vector<ParseNote> &notes) const {
-  std::function<void(const Node &, bool)> visit = [&](const Node &node, bool covered) {
+  std::vector<std::pair<const Node *, bool>> pending;
+  for (auto root = xml.roots.rbegin(); root != xml.roots.rend(); ++root) pending.push_back({root->get(), false});
+  while (!pending.empty()) {
+    const Node &node = *pending.back().first;
+    bool covered = pending.back().second;
+    pending.pop_back();
     const auto text_note = text_notes_.find(&node);
     if (node.read && text_note != text_notes_.end())
       notes.push_back({node.line, mnu_xml::path_key(node), text_note->second, fatal_.count(&node) != 0,
@@ -1660,9 +1667,9 @@ void TreeReader::sweep(const mnu_xml::Document &xml, std::vector<ParseNote> &not
                                  "> is not read by retail's parse; it is left out.",
                        fatal_.count(&a) != 0, note_locator(node)});
     }
-    for (const auto &child : node.children) visit(*child, covered);
-  };
-  for (const auto &root : xml.roots) visit(*root, false);
+    for (auto child = node.children.rbegin(); child != node.children.rend(); ++child)
+      pending.push_back({child->get(), covered});
+  }
 }
 
 }  // namespace
@@ -1939,7 +1946,8 @@ bool parse(const uint8_t *data, size_t size, Document &out, std::string &error,
   TreeReader reader(out.source_encoding);
   reader.read_document(xml, out);
   if (notes) {
-    // The reader's own notes are all retail hangs or overruns.
+    // The reader's own notes are all retail hangs or overruns, or the nesting past the
+    // depth it takes (mnu_xml::kMaxElementDepth).
     for (const mnu_xml::Note &n : xml.notes) notes->push_back({n.line, std::string(), n.message, true});
     reader.sweep(xml, *notes);
   }

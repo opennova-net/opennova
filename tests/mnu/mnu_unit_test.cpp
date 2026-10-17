@@ -541,6 +541,31 @@ bool test_fatal_notes() {
               "WINDOW[W]") == 1,
         "a WINDOW with an empty TYPE");
   CHECK(fatal("<SCREEN><NAME>S</NAME><MUSICVAR></MUSICVAR></SCREEN>", "/MUSICVAR") == 1, "an empty MUSICVAR");
+  {
+    // 400 nested STATIC WINDOWs (23,231 bytes) ran the stack out (the parse recurses once a WINDOW
+    // level, as retail's does); the reader stops past 64 levels with a fatal note, the windows above
+    // it kept: 63 WINDOW elements under the SCREEN, the last cut before its STRING, and a WINDOW with
+    // no child element is not created, so 62 windows.
+    std::string deep = "<SCREEN><NAME>S</NAME>";
+    for (int i = 0; i < 400; ++i) deep += "<WINDOW TYPE=\"STATIC\" NAME=\"W\"><STRING>t</STRING>";
+    for (int i = 0; i < 400; ++i) deep += "</WINDOW>";
+    deep += "</SCREEN>";
+    CHECK(deep.size() == 23231, "the 23,231-byte menu");
+    mnu::Document doc;
+    std::vector<mnu::ParseNote> notes;
+    std::string error;
+    CHECK(mnu::parse(deep, doc, error, &notes), error);
+    bool depth_note = false;
+    for (const mnu::ParseNote &n : notes)
+      depth_note = depth_note || (n.fatal && n.message.find("nested more than 64 levels") != std::string::npos);
+    CHECK(depth_note, "the depth stop is a fatal note");
+    size_t windows = 0;
+    for (const mnu::Window *w = doc.screens.empty() || doc.screens[0].roots.empty() ? nullptr
+                                                                                  : &doc.screens[0].roots[0];
+         w; w = w->children.empty() ? nullptr : &w->children[0])
+      ++windows;
+    CHECK(windows == 62, "the 62 created WINDOW levels kept (" + std::to_string(windows) + ")");
+  }
   CHECK(fatal(screen_of("type=\"radio\" name=\"W\"", std::string(kPos) + "<GROUP>1</GROUP>"), "/GROUP") == -2,
         "a note-free menu");
   // The four crashes the model holds as read, each a fatal note on its element (docs/mnu/menu-re.md, "Crash
