@@ -1,8 +1,8 @@
 # 1Password references for a run of a deployment's stack (infra/aws): the
-# Cloudflare credentials and the TF_VAR_* secrets. `op run` resolves them
-# against the vault at deploy time; the values reach terraform's environment
-# alone, never the disk outside the toolbox's tmpfs. Edit the vault, not this
-# file. The AWS credentials are the deployment's deploy user's, which the
+# Cloudflare credentials and the TF_VAR_* secrets. The toolbox resolves them
+# from its run's cache of the vault (each item read once per run; on-deploy,
+# "The vault"); the values reach terraform's environment alone, never the disk
+# outside the toolbox's tmpfs. Edit the vault, not this file. The AWS credentials are the deployment's deploy user's, which the
 # toolbox puts in the environment before it runs terraform
 # (deploy/env/aws.env.tpl), and the account, region and prod's gate address
 # come from the same vault item, aws-<deployment>. The

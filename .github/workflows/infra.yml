@@ -8,7 +8,8 @@ name: Infra
 # toolbox (on-deploy, the files it sources, followed with -x, and its tests),
 # the backup task's scripts, the fleet image's builder, the portal's
 # entrypoint and the hosted machines' script, the toolbox's deployment guard
-# test, and `docker compose config` on the local stack's compose files.
+# and vault requests tests, and `docker compose config` on the local stack's
+# compose files.
 # Path-filtered: it runs when one of those changes.
 
 on:
@@ -97,6 +98,12 @@ jobs:
       # every AWS, vault and terraform call is a stub.)
       - name: deployment guard test
         run: docker run --rm -v "$PWD:/w:ro" -w /w bash:5.2 sh -c 'apk add --no-cache jq >/dev/null && bash deploy/bin/tests/deployment_guard_test.sh'
+      # The toolbox's 1Password requests: one token check, one listing and one
+      # read of each item a run needs (the service account is rate-limited),
+      # every template resolved from those to the vault's values, the retry,
+      # the cache in the tmpfs. op, aws, terraform and curl are stubs.
+      - name: vault requests test
+        run: docker run --rm -v "$PWD:/w:ro" -w /w bash:5.2 sh -c 'apk add --no-cache jq >/dev/null && bash deploy/bin/tests/vault_requests_test.sh'
 
   # The local stack's compose files parse (deploy/compose: the five programs,
   # the portal, PostgreSQL and Valkey, the hosting overlay's machines; the

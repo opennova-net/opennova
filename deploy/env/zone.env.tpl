@@ -4,8 +4,9 @@
 # every deployment's edge secret: prod's from app-prod, staging's from
 # app-staging (`secrets init` makes each). Email Routing forwards support@
 # and the member accounts' root addresses (aws-prod@, aws-staging@) to
-# email/forward_to. `op run` resolves them against the
-# vault at run time; the values reach terraform's environment alone. The
+# email/forward_to. The toolbox resolves them from its run's
+# cache of the vault (each item read once per run; on-deploy, "The vault");
+# the values reach terraform's environment alone. The
 # toolbox fills in @VAULT@ (OP_VAULT, default OpenNova-Deploy).
 TF_VAR_cloudflare_api_token=op://@VAULT@/cloudflare/api_token
 TF_VAR_cloudflare_zone_id=op://@VAULT@/cloudflare/zone_id

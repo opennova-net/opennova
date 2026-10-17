@@ -1,7 +1,8 @@
 # 1Password references for a run of the Organization's stack (infra/org): the
 # Organization and each member account's name, root address and id, which the
-# stack adopts and builds on. `op run` resolves them against the vault at run
-# time; the values reach terraform's environment alone. The AWS credentials are
+# stack adopts and builds on. The toolbox resolves them from its run's cache of
+# the vault (each item read once per run; on-deploy, "The vault"); the values
+# reach terraform's environment alone. The AWS credentials are
 # the management account's opennova-org user's (item aws-org), which the
 # toolbox puts in the environment before it runs terraform. The toolbox fills
 # in @VAULT@ (OP_VAULT, default OpenNova-Deploy).

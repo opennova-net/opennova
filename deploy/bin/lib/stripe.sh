@@ -49,8 +49,9 @@ stripe_auth() {
   local mode="$1" key=""
   require_op
   vault_has_item "$STRIPE_ITEM" || die "vault item '$STRIPE_ITEM' is absent: ./deploy/run.sh$DEP_FLAG secrets init makes it"
-  key="$(op read --no-newline "op://$VAULT/$STRIPE_ITEM/secret_key" 2>/dev/null)" \
-    || die "reading $STRIPE_ITEM/secret_key failed"
+  vault_value "$STRIPE_ITEM" secret_key || die "reading $STRIPE_ITEM/secret_key failed: $VAULT_ERR"
+  key="$VAULT_VALUE"
+  VAULT_VALUE=""
   if [ -z "$key" ] || [ "$key" = REPLACE_ME ]; then
     die "$STRIPE_ITEM/secret_key is a placeholder: put the $mode mode key there (Stripe, Developers, API keys)"
   fi
@@ -65,8 +66,10 @@ stripe_auth() {
   (umask 077 && printf 'header = "Authorization: Bearer %s"\nheader = "Stripe-Version: %s"\n' \
     "$key" "$STRIPE_API_VERSION" > "$STRIPE_CFG")
   key=""
-  STRIPE_DOMAIN="$(op read --no-newline "op://$VAULT/cloudflare/domain" 2>/dev/null)" \
-    || die "reading cloudflare/domain failed (the site's domain: the webhook's and the portal's URLs)"
+  vault_value cloudflare domain \
+    || die "reading cloudflare/domain failed (the site's domain: the webhook's and the portal's URLs): $VAULT_ERR"
+  STRIPE_DOMAIN="$VAULT_VALUE"
+  VAULT_VALUE=""
   [[ "$STRIPE_DOMAIN" =~ ^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$ ]] \
     || die "cloudflare/domain '$STRIPE_DOMAIN' is no domain name"
   # The deployment's site, as infra/aws/locals.tf names it: prod's the domain,
@@ -143,13 +146,14 @@ stripe_portal_args() {
 # Set fields of vault item $1 (which exists): each further argument
 # label:TYPE, its value in VAULT_VALUES[label]. A field there is overwritten,
 # a missing one added; the values reach op through a template in the tmpfs,
-# never an argument, and are never printed.
+# never an argument, and are never printed. The item is read fresh first (the
+# vault's own, not the run's cache), and leaves the cache once written.
 declare -A VAULT_VALUES=()
 vault_set_fields() {
   local title="$1" json="$SECRETS_DIR/item.set.json" new="$SECRETS_DIR/item.set-new.json" spec label type labels=()
   shift
-  (umask 077 && op item get "$title" --vault "$VAULT" --format json > "$json") \
-    || die "reading vault item '$title' failed"
+  vault_item_load "$title" fresh || die "reading vault item '$title' failed: $VAULT_ERR"
+  (umask 077 && cp "$(vault_item_file "$title")" "$json") || die "reading vault item '$title' failed"
   for spec in "$@"; do
     label="${spec%%:*}" type="${spec#*:}"
     labels+=("$label")
@@ -160,7 +164,7 @@ vault_set_fields() {
       || die "preparing vault item '$title' failed"
     mv -f "$new" "$json"
   done
-  op item edit "$title" --vault "$VAULT" --template "$json" </dev/null >/dev/null \
+  vault_item_edit "$title" "$json" \
     || { rm -f "$json"; die "writing ${labels[*]} to vault item '$title' failed"; }
   rm -f "$json"
 }
@@ -253,7 +257,7 @@ stripe_setup() {
     fi
     [ "$field" = price_own_machine ] || tier_pairs+=("$product_id:$price_id")
   done
-  rm -f "$vault_json" "$products"
+  rm -f "$products"
   if [ "${#wrote[@]}" -gt 0 ]; then
     vault_set_fields "$STRIPE_ITEM" "${wrote[@]}"
     log "  vault $STRIPE_ITEM: wrote ${wrote[*]%%:*}"
@@ -380,7 +384,6 @@ stripe_check() {
     fi
     log "  $field    OK ($first, $cents usd cents a month$( [ "$value" = "$first" ] || printf ', and %s grandfathered' "${value#*,}"))"
   done
-  rm -f "$vault_json"
 
   # The Customer Portal configuration.
   stripe_call GET /v1/billing_portal/configurations --data-urlencode "active=true" --data-urlencode "limit=100"
