@@ -564,6 +564,21 @@ bool test_fatal_notes() {
   CHECK(fatal(screen_of("type=\"static\" name=\"T\"", std::string(kPos) + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT>"),
               "/MIN_ITEM_HEIGHT") == 0,
         "MIN_ITEM_HEIGHT 0 where it is not read");
+  // Every CListWnd divides by it as its row height [orig: CListWnd_RecalcLayout @ 0x6443d0, idiv @ 0x644444]:
+  // a LIST, a LAN_LIST, a combo's LIST_BOX.
+  CHECK(fatal(screen_of("type=\"list\" name=\"L\"", std::string(kPos) + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == 1,
+        "a LIST MIN_ITEM_HEIGHT of 0");
+  CHECK(fatal(screen_of("type=\"lan_list\" name=\"L\"", std::string(kPos) + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == 1,
+        "a LAN_LIST MIN_ITEM_HEIGHT of 0");
+  CHECK(fatal(screen_of("type=\"combobox\" name=\"C\"",
+                        std::string(kPos) + "<LIST_BOX>" + kPos + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT></LIST_BOX>"),
+              "/LIST_BOX/MIN_ITEM_HEIGHT") == 1,
+        "a combo's LIST_BOX MIN_ITEM_HEIGHT of 0");
+  CHECK(fatal(screen_of("type=\"list\" name=\"L\"", std::string(kPos) + "<MIN_ITEM_HEIGHT>1</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == -2,
+        "a LIST MIN_ITEM_HEIGHT of 1");
   CHECK(fatal(screen_of("type=\"edit\" name=\"E\" GLOBAL_VAR", kPos), "WINDOW[E]") == 1, "GLOBAL_VAR on an edit");
   CHECK(fatal(screen_of("type=\"static\" name=\"E\" GLOBAL_VAR", kPos), "WINDOW[E]") == -2,
         "GLOBAL_VAR on a static");
@@ -903,6 +918,13 @@ bool test_write_issues() {
   CHECK(issue_for(d).empty(), "GLOBAL_VAR on an unchecked checkbox writes");
   d.screens[0].roots[0].checked = true;
   CHECK(!issue_for(d).empty(), "GLOBAL_VAR on a checked checkbox");
+  d = base;
+  d.screens[0].roots[0].type = mnu::WindowType::List;
+  d.screens[0].roots[0].table_data.has_min_item_height = true;
+  d.screens[0].roots[0].table_data.min_item_height = 0;
+  CHECK(issue_for(d).find("MIN_ITEM_HEIGHT 0") != std::string::npos, "a LIST MIN_ITEM_HEIGHT of 0");
+  d.screens[0].roots[0].table_data.min_item_height = 1;
+  CHECK(issue_for(d).empty(), "a LIST MIN_ITEM_HEIGHT of 1 writes");
   d = base;
   d.screens[0].name.clear();
   CHECK(issue_for(d).find("NAME") != std::string::npos, "a SCREEN with no NAME");
