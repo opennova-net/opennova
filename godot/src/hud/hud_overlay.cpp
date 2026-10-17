@@ -22,6 +22,7 @@
 #include <formats/def/def.h> // DefVehicleHudBlock (the VEHICLE_HUD block the panel feed reads)
 #include <formats/def/def_hudpos_write.h> // hudpos_unauthored (the layout of a file with no key)
 #include <runtime/hud/feed_format.h> // kGameTextLineColor (the 0x32 join/leave lines)
+#include <runtime/hud/hud_combat.h> // frustum_clip_mask (the label projector's clip rule)
 #include <runtime/hud/hud_lfp_panel.h> // lfp_under_attack_text / lfp_ready_text (D-25)
 #include <base/gameprofile/game_type.h> // the conquest arm of the zone panel
 
@@ -1256,8 +1257,9 @@ void HudOverlay::clear_waypoint() {
 namespace {
 
 // The play camera's projection of a world point to overlay pixels: false when
-// the point is behind the near plane (Camera3D::is_position_behind's test),
-// else Camera3D::unproject_position's math over the viewport's visible size.
+// the point is behind the near plane (Camera3D::is_position_behind's test) or
+// past a side plane (any flag of the engine's hud::frustum_clip_mask), else
+// Camera3D::unproject_position's math over the viewport's visible size.
 bool project_to_overlay(const Transform3D &p_camera, const Projection &p_projection,
 		const Vector2 &p_viewport_size, const Vector3 &p_world, Vector2 &r_screen) {
 	const Vector3 eyedir = -p_camera.basis.get_column(2).normalized();
@@ -1270,6 +1272,9 @@ bool project_to_overlay(const Transform3D &p_camera, const Projection &p_project
 		return false;
 	}
 	p.normal /= p.d;
+	if (opennova::hud::frustum_clip_mask(p.normal.x, p.normal.y, false) != 0) {
+		return false;
+	}
 	r_screen = Vector2((p.normal.x * 0.5f + 0.5f) * p_viewport_size.x,
 			(-p.normal.y * 0.5f + 0.5f) * p_viewport_size.y);
 	return true;
@@ -1313,7 +1318,10 @@ void HudOverlay::set_attach_labels(const Transform3D &p_camera_xform,
 			Vector2 screen;
 			if (!project_to_overlay(p_camera_xform, p_camera_projection, viewport_size,
 						world_pos, screen)) {
-				continue; // [orig: HUD_ClipPointToFrustumAndProject nonzero = clipped @0x5a3655]
+				// [orig: HUD_DrawVehicleSeatAndArmoryLabels -- HUD_ClipPointToFrustumAndProject,
+				//  then `test eax,eax; jnz` past the label: the seat loop @0x5a3655..0x5a365f,
+				//  the armory loop @0x5a3879..0x5a3883]
+				continue;
 			}
 			opennova::hud::HudAttachLabel label;
 			label.screen_x = screen.x;
@@ -1380,7 +1388,7 @@ void HudOverlay::set_friendly_tags(bool p_shown, const Transform3D &p_camera_xfo
 			Vector2 screen;
 			if (!project_to_overlay(p_camera_xform, p_camera_projection, viewport_size,
 						world_pos, screen)) {
-				continue; // [orig: the nonzero-clip bail @0x5a3b80]
+				continue; // [orig: HUD_DrawEntityLabel @0x5a3b7e..0x5a3b80 -- any clip flag bails]
 			}
 			opennova::hud::HudFriendlyTag tag;
 			tag.screen_x = screen.x;
