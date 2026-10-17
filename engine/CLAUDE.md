@@ -301,10 +301,12 @@
   by RESPONSIBILITY (one type per TU pair: the ladder climb, the combat pass, the remote
   anim are responsibilities; "the tail of tick_infantry" is not), never by leg; a TU
   under ~100 lines with one owner folds back into it (ADR 0043). Never bump the baseline.
-  Exception: in `engine/editor`, a document type's or a view's own TU pair stays its own
-  whatever its size, its one includer the registry that lists it (`document_types.cpp`,
-  `ui/document_views.cpp`); one type per TU pair is how the editor is laid out (decided
-  2026-10-15, audit E-12).
+  Exception: in `engine/editor`, a document type's, a view's, a viewport view's or a session
+  operation's own TU pair stays its own whatever its size, its one includer the registry or
+  owner that lists it (`document_types.cpp`, `ui/document_views.cpp`, `ui/viewport_views.cpp`;
+  the operations' `session/session_core.cpp` and `session/rename_controller.cpp`); one type
+  per TU pair is how the editor is laid out (decided 2026-10-15, audit E-12; the viewport
+  views and the operations named 2026-10-17, review D-44).
 - Tests for this code live in `/tests/<domain>/` (ctest), not `godot/tests/`.
 - 3DI models: 3DI3 only, consumed directly (ADR 0027). `threedi_3di3_read` produces
   `Threedi3di3` (engine/formats/threedi/threedi_3di3.h) and that parsed struct IS
