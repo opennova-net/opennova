@@ -63,9 +63,7 @@ const CodeRow kCodes[kMenuFrameNoteCodeCount] = {
 	{ Code::MarqueeRuntimeContent, "marquee_runtime_content", Basis::PortPolicy },
 };
 
-bool iequals(const std::string &a, const char *b) {
-	return strutil::iequals(a, b);
-}
+using strutil::iequals;
 
 const char *state_token(int slot) {
 	switch (slot) {
