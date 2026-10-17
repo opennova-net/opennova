@@ -29,15 +29,15 @@ hosted_known_data_set() {
 # The deployment's data sets' snapshots in its vault item (hosted-<deployment>,
 # one field per data set, data_snapshot_id_<slug>: snapshots in the
 # deployment's own account), as a JSON object slug -> snapshot id on stdout.
-# The item is read once; a failed read, a field naming no data set, a value
-# that is no snapshot id, or an item naming no data set at all fails (the
-# reason on stderr), so nothing reads a broken item as hosting off. Run it in a
-# command substitution and check its status.
+# The item is read once (the run's cache); a failed read, a field naming no
+# data set, a value that is no snapshot id, or an item naming no data set at
+# all fails (the reason on stderr), so nothing reads a broken item as hosting
+# off. Run it in a command substitution and check its status.
 hosted_snapshot_map() {
-  local item fields label value slug map="{}"
-  item="$(op item get "$HOSTED_ITEM" --vault "$VAULT" --format json)" \
-    || die "reading vault item '$HOSTED_ITEM' failed (fix the vault access, or delete the item to turn $DEP's hosting off)"
-  fields="$(jq -r '.fields[]? | select((.label // "") | startswith("data_snapshot_id")) | [.label, (.value // "")] | @tsv' <<<"$item")" \
+  local fields label value slug map="{}"
+  vault_item_load "$HOSTED_ITEM" \
+    || die "reading vault item '$HOSTED_ITEM' failed (fix the vault access, or delete the item to turn $DEP's hosting off): $VAULT_ERR"
+  fields="$(jq -r '.fields[]? | select((.label // "") | startswith("data_snapshot_id")) | [.label, (.value // "")] | @tsv' "$(vault_item_file "$HOSTED_ITEM")")" \
     || die "vault item '$HOSTED_ITEM' came back unreadable (no JSON with fields)"
   while IFS=$'\t' read -r label value; do
     [ -n "$label" ] || continue
@@ -111,11 +111,10 @@ tf_init() {
 }
 
 # terraform with the TF_VAR_* secrets of deploy/env/terraform.env.tpl in its
-# environment alone (the AWS credentials are aws_auth's, inherited).
+# environment alone, from the run's vault cache (the AWS credentials are
+# aws_auth's, inherited).
 tf_op() {
-  local env_file
-  env_file="$(render_tpl "$TF_ENV_TPL")"
-  TF_DATA_DIR="$TF_DIR/.terraform-$DEP" op run --env-file="$env_file" -- terraform -chdir="$TF_DIR" "$@"
+  TF_DATA_DIR="$TF_DIR/.terraform-$DEP" vault_env_run "$TF_ENV_TPL" terraform -chdir="$TF_DIR" "$@"
 }
 
 # The types whose destruction (or replacement) loses what no apply makes again,
@@ -235,9 +234,7 @@ stack_tf_op() {
     stack_tf "$@"
     return
   fi
-  local env_file
-  env_file="$(render_tpl "$STACK_ENV_TPL")"
-  TF_DATA_DIR="$STACK_DATA_DIR" op run --env-file="$env_file" -- terraform -chdir="$STACK_DIR" "$@"
+  TF_DATA_DIR="$STACK_DATA_DIR" vault_env_run "$STACK_ENV_TPL" terraform -chdir="$STACK_DIR" "$@"
 }
 
 # plan|apply|import|output|list of the stack the STACK_* name, its state in
@@ -307,7 +304,6 @@ cmd_org() {
   prod_json="$(item_json aws-prod)"
   prod_account="$(json_field "$prod_json" account_id)"
   prod_bucket="$(json_field "$prod_json" state_bucket)"
-  rm -f "$prod_json"
   [[ "$prod_account" =~ ^[0-9]{12}$ ]] || die "aws-prod names no account_id (DEPLOY.md, \"The Organization and the accounts\")"
   if [ -n "$prod_bucket" ]; then
     # An interrupted first run can leave its local-backend override behind.

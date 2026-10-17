@@ -1,8 +1,9 @@
 # A deployment's runtime secrets. `./deploy/run.sh --deployment NAME secrets
-# sync` reads each reference below from the vault and writes it to SSM
-# Parameter Store as a SecureString, /opennova/<deployment>/secret/<NAME>; ECS
-# hands each to the containers whose task definitions name it
-# (infra/aws/programs.tf), as they start. Edit the vault, not this file.
+# sync` reads each reference below from the vault (its run's cache: each item
+# read once) and writes it to SSM Parameter Store as a SecureString,
+# /opennova/<deployment>/secret/<NAME>; ECS hands each to the containers whose
+# task definitions name it (infra/aws/programs.tf), as they start. Edit the
+# vault, not this file.
 #
 # The toolbox fills in @VAULT@ (OP_VAULT, default OpenNova-Deploy), @APP_ITEM@
 # (app-<deployment>) and @STRIPE_ITEM@ (stripe-live for prod, stripe-test for

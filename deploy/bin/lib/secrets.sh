@@ -52,7 +52,6 @@ stripe_check_item() {
     fi
   done
   value=""
-  rm -f "$json"
   if [ "${#failed[@]}" -gt 0 ]; then
     STRIPE_STATE=failed
     STRIPE_DETAIL="FAILED: $(IFS=,; printf '%s' "${failed[*]}" | sed 's/,/, /g')"
@@ -69,7 +68,7 @@ stripe_check_item() {
 # label:kind:arg:type: kind `gen` makes `openssl rand -hex <arg>`, `value`
 # writes <arg>; type CONCEALED or STRING. Never overwrites a field; prints no
 # value (the values reach op through a template file in the tmpfs, never an
-# argument).
+# argument). The item is read fresh (the vault's own, not the run's cache).
 ensure_item() {
   local title="$1" category="$2" json new spec label kind arg type creating=0 generated
   shift 2
@@ -77,11 +76,11 @@ ensure_item() {
   json="$SECRETS_DIR/item.ensure.json"
   new="$SECRETS_DIR/item.ensure-new.json"
   if vault_has_item "$title"; then
-    op item get "$title" --vault "$VAULT" --format json > "$json" \
-      || die "reading vault item '$title' failed"
+    vault_item_load "$title" fresh || die "reading vault item '$title' failed: $VAULT_ERR"
+    (umask 077 && cp "$(vault_item_file "$title")" "$json")
   else
     creating=1
-    jq -n --arg t "$title" --arg c "$category" '{title: $t, category: $c, fields: []}' > "$json"
+    (umask 077 && jq -n --arg t "$title" --arg c "$category" '{title: $t, category: $c, fields: []}' > "$json")
   fi
   chmod 600 "$json"
   for spec in "$@"; do
@@ -101,15 +100,13 @@ ensure_item() {
     added+=("$label")
   done
   generated=""
-  # stdin from /dev/null: op takes a piped stdin (a run with no terminal) for a
-  # second template and refuses the call.
   if [ "${#added[@]}" -eq 0 ]; then
     log "  $title: has ${kept[*]}"
   elif [ "$creating" -eq 1 ]; then
-    op item create --vault "$VAULT" --template "$json" </dev/null >/dev/null || die "creating vault item '$title' failed"
+    vault_item_create "$json" || die "creating vault item '$title' failed"
     log "  $title: created with ${added[*]}"
   else
-    op item edit "$title" --vault "$VAULT" --template "$json" </dev/null >/dev/null || die "adding ${added[*]} to vault item '$title' failed"
+    vault_item_edit "$title" "$json" || die "adding ${added[*]} to vault item '$title' failed"
     log "  $title: added ${added[*]}${kept[*]:+ (kept ${kept[*]})}"
   fi
   rm -f "$json" "$new"
@@ -182,14 +179,12 @@ parse_runtime_line() {
 
 # Whether reference op://vault/item/field names a field the item has.
 ref_field_exists() {
-  local path="${1#op://}" item field json rc=0
+  local path="${1#op://}" item field json
   item="$(cut -d/ -f2 <<<"$path")"
   field="$(cut -d/ -f3 <<<"$path")"
   vault_has_item "$item" || return 1
   json="$(item_json "$item")"
-  json_has_field "$json" "$field" || rc=1
-  rm -f "$json"
-  return "$rc"
+  json_has_field "$json" "$field"
 }
 
 secrets_check() {
@@ -197,21 +192,20 @@ secrets_check() {
   log "checking vault '$VAULT' for deployment $DEP (no value is printed)…"
   local rc=0 tpl line
   for tpl in "$TF_ENV_TPL" "$AWS_ENV_TPL"; do
-    if op inject -f -i "$(render_tpl "$tpl")" -o /dev/null >/dev/null; then
+    if vault_tpl_resolve "$tpl" check; then
       log "  $(basename "$tpl")    OK"
     else
-      err "  $(basename "$tpl")    FAILED"; rc=1
+      err "  $(basename "$tpl")    FAILED: $VAULT_ERR"; rc=1
     fi
   done
   # The zone's (infra/zone): every deployment's edge secret, so it resolves
   # once each deployment's secrets init ran.
-  if op inject -f -i "$(render_tpl "$ZONE_ENV_TPL")" -o /dev/null >/dev/null 2>&1; then
+  if vault_tpl_resolve "$ZONE_ENV_TPL" check; then
     log "  $(basename "$ZONE_ENV_TPL")    OK"
   else
     log "  $(basename "$ZONE_ENV_TPL")    not yet (secrets init for each deployment makes its app item's edge_auth_secret; zone plan needs both)"
   fi
   # The runtime secrets: each required reference must resolve.
-  tpl="$(render_tpl "$RUNTIME_TPL")"
   while IFS= read -r line || [ -n "$line" ]; do
     parse_runtime_line "$line" || continue
     case "$RT_FLAG" in
@@ -220,12 +214,13 @@ secrets_check() {
         if ref_field_exists "$RT_REF"; then log "  $RT_NAME    OK (optional)"; else log "  $RT_NAME    absent (optional)"; fi
         continue ;;
     esac
-    if op read --no-newline "$RT_REF" >/dev/null 2>&1; then
+    if vault_ref "$RT_REF"; then
       log "  $RT_NAME    OK"
     else
       err "  $RT_NAME    FAILED ($RT_REF)"; rc=1
     fi
-  done < "$tpl"
+    VAULT_VALUE=""
+  done < <(tpl_text "$RUNTIME_TPL")
   # The Stripe items: test mode's and live mode's.
   local item mode
   for item in stripe-test stripe-live; do
@@ -242,7 +237,9 @@ secrets_check() {
   # The test mode's restricted key (the local stack's and CI's): never a
   # secret key, never a live one.
   local restricted=""
-  if vault_has_item stripe-test && restricted="$(op read --no-newline "op://$VAULT/stripe-test/restricted_key" 2>/dev/null)"; then
+  if vault_has_item stripe-test && vault_value stripe-test restricted_key; then
+    restricted="$VAULT_VALUE"
+    VAULT_VALUE=""
     if [ -z "$restricted" ] || [ "$restricted" = REPLACE_ME ]; then
       log "  stripe-test/restricted_key    placeholder (the local stack's billing and CI's billing test off)"
     elif [[ "$restricted" =~ ^rk_test_[A-Za-z0-9]{10,}$ ]]; then
@@ -255,8 +252,7 @@ secrets_check() {
   fi
   restricted=""
   # Where the alarms and budgets write: a placeholder sends nothing.
-  local email
-  if email="$(op read --no-newline "op://$VAULT/alerts/email" 2>/dev/null)" && [[ "$email" == *@*.* ]]; then
+  if vault_value alerts email && [[ "$VAULT_VALUE" == *@*.* ]]; then
     log "  alerts/email    OK"
   else
     log "  alerts/email    placeholder or absent: the alarms, budgets and cost anomalies email nobody"
@@ -266,12 +262,12 @@ secrets_check() {
   # terraform.env.tpl names the field, so an absent item fails its line above.
   if ! vault_has_item email; then
     err "  email/forward_to    absent: every infra run needs it (secrets init makes it, REPLACE_ME: email routing off)"; rc=1
-  elif email="$(op read --no-newline "op://$VAULT/email/forward_to" 2>/dev/null)" && [[ "$email" == *@*.* ]]; then
+  elif vault_value email forward_to && [[ "$VAULT_VALUE" == *@*.* ]]; then
     log "  email/forward_to    OK: support@<domain> forwards there (once Cloudflare's verification link is clicked)"
   else
     log "  email/forward_to    placeholder: email routing off (support@<domain> receives nothing)"
   fi
-  email=""
+  VAULT_VALUE=""
   # Optional: the deployment's hosted game servers are off without it (DEPLOY.md,
   # "Hosted game servers").
   local snapshots
@@ -289,8 +285,8 @@ secrets_check() {
 # Copy the deployment's runtime secrets (runtime.env.tpl) from the vault to
 # SSM SecureStrings, /opennova/<deployment>/secret/<NAME>, which ECS hands the
 # tasks whose task definitions name them. Each value goes
-# vault -> a 0600 file in the tmpfs -> `put-parameter --value file://...`:
-# never an argument, never printed.
+# vault (the run's cache) -> a 0600 file in the tmpfs -> `put-parameter
+# --value file://...`: never an argument, never printed.
 secrets_sync() {
   local prune=0 yes=0
   while [ $# -gt 0 ]; do
@@ -311,14 +307,14 @@ secrets_sync() {
     *) log "billing: off ($STRIPE_ITEM $STRIPE_DETAIL); its parameters are not synced" ;;
   esac
   log "syncing vault '$VAULT' -> $SSM_PREFIX/secret/ (deployment $DEP)…"
-  local tpl line value_file="$SECRETS_DIR/value.sync" synced=()
-  tpl="$(render_tpl "$RUNTIME_TPL")"
+  local line value_file="$SECRETS_DIR/value.sync" synced=()
   while IFS= read -r line || [ -n "$line" ]; do
     parse_runtime_line "$line" || continue
     if [ "$RT_FLAG" = billing ] && [ "$billing" -eq 0 ]; then continue; fi
     if [ "$RT_FLAG" = optional ] && ! ref_field_exists "$RT_REF"; then continue; fi
-    op read --no-newline "$RT_REF" > "$value_file" 2>/dev/null \
-      || { rm -f "$value_file"; die "reading $RT_NAME ($RT_REF) failed; nothing more was synced"; }
+    vault_ref "$RT_REF" || die "reading $RT_NAME ($RT_REF) failed: $VAULT_ERR; nothing more was synced"
+    (umask 077 && printf '%s' "$VAULT_VALUE" > "$value_file")
+    VAULT_VALUE=""
     chmod 600 "$value_file"
     if [ ! -s "$value_file" ]; then rm -f "$value_file"; die "$RT_NAME ($RT_REF) is empty"; fi
     aws ssm put-parameter --name "$SSM_PREFIX/secret/$RT_NAME" --type SecureString --tier Standard \
@@ -332,7 +328,7 @@ secrets_sync() {
       || die "tagging $SSM_PREFIX/secret/$RT_NAME failed"
     synced+=("$RT_NAME")
     log "  $RT_NAME"
-  done < "$tpl"
+  done < <(tpl_text "$RUNTIME_TPL")
   # What SSM holds that the vault no longer names.
   local names name stale=()
   names="$(aws ssm get-parameters-by-path --path "$SSM_PREFIX/secret" --recursive \

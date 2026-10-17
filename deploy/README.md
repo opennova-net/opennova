@@ -58,7 +58,9 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
   `github`), `app.sh` (the releases on ECS, ECS Exec, the one-off tasks), `db.sh` (`db`,
   `backup`) and `fleet.sh` (`fleet`, `hosted`). The toolbox runs it from the repo, mounted
   at `/workspace`, so the image copies none of it. `bin/tests/deployment_guard_test.sh`
-  checks the deployment guard offline (CI's infra workflow runs it).
+  checks the deployment guard offline, `bin/tests/vault_requests_test.sh` the vault's
+  requests (each command's counted) and the values the templates resolve to (CI's infra
+  workflow runs both).
 - `Dockerfile`, `docker-compose.deploy.yml`: the toolbox image (Debian: the docker CLI
   with compose and buildx, op, Terraform, the AWS CLI v2, the Session Manager plugin, which
   ECS Exec uses; each a pinned, checksummed release).
@@ -76,7 +78,14 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
   its deployment's deploy user's (`aws-<deployment>`) or, for `org`, `opennova-org`'s
   (`aws-org`); `billing.*.env.tpl`: Stripe's test mode for local work and CI,
   through the restricted key alone). No tracked file holds a value: the vault holds
-  every identifier a rebuild needs (DEPLOY.md, "Rebuilding from the vault").
+  every identifier a rebuild needs (DEPLOY.md, "Rebuilding from the vault"). The toolbox
+  resolves the references itself, with no `op run`, `op inject` or `op read`: a run checks
+  the token once, lists the vault once and reads each item it needs once, by its id, into
+  a cache in the tmpfs that goes when the command ends, and every field and template
+  resolves from that cache into a command's environment (Terraform's, the AWS CLI's) or a
+  tmpfs file (SSM's), never an argument or an output. The service account's requests are
+  rate-limited (DEPLOY.md, "2. Mint the service-account token", says what each command
+  costs).
 - `backup/`: the backup task's image (nightly dumps to the deployment's own bucket,
   `backup now|list|restore`).
 - `hosted-data/`: the helper image `hosted data-snapshot` builds on the operator's docker

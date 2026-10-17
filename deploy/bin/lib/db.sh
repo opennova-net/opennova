@@ -14,13 +14,15 @@
 # The master password, lent to the backup task for one command: a
 # SecureString, /opennova/<deployment>/bootstrap/db-master-password, which the
 # task reads once (its role may) and cleanup deletes when the command ends.
-# Vault -> tmpfs file -> put-parameter file://: never an argument, never
-# printed.
+# Vault (the run's cache) -> tmpfs file -> put-parameter file://: never an
+# argument, never printed.
 db_master_param_put() {
   require_op
   local f="$SECRETS_DIR/value.master"
-  op read --no-newline "op://$VAULT/$RDS_ITEM/master_password" > "$f" 2>/dev/null \
-    || { rm -f "$f"; die "reading op://$VAULT/$RDS_ITEM/master_password failed (secrets init makes it)"; }
+  vault_value "$RDS_ITEM" master_password \
+    || die "reading op://$VAULT/$RDS_ITEM/master_password failed (secrets init makes it): $VAULT_ERR"
+  (umask 077 && printf '%s' "$VAULT_VALUE" > "$f")
+  VAULT_VALUE=""
   chmod 600 "$f"
   DB_MASTER_PARAM="$SSM_PREFIX/bootstrap/db-master-password"
   aws ssm put-parameter --name "$DB_MASTER_PARAM" --type SecureString --tier Standard \

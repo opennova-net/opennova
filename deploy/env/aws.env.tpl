@@ -5,8 +5,9 @@
 # user (item aws-org). A command reads the one item its deployment names; the
 # other deployment's only for the two one-way reads that say so by their flag
 # (`backup import --from-deployment prod`, `app deploy --promote staging`),
-# each in a subshell of its own. The toolbox resolves them once per
-# command; the values never touch the disk outside the toolbox's tmpfs. On a
+# each in a subshell of its own. The toolbox resolves them from its run's
+# cache of the vault (each item read once per run; on-deploy, "The vault");
+# the values never touch the disk outside the toolbox's tmpfs. On a
 # CI runner with credentials of its own (the deploy workflow's OIDC role) the
 # toolbox reads none of this. The toolbox fills in @VAULT@ (OP_VAULT, default
 # OpenNova-Deploy) and @AWS_ITEM@.

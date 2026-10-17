@@ -274,6 +274,36 @@ are still placeholders (an absent `email` item fails: every Terraform run reads 
 `deploy/Dockerfile` changed and runs it with the repository mounted. The toolbox is a
 Debian image with pinned, checksummed releases of every tool.
 
+A service account's requests are rate-limited: per hour per token, and per day for the
+whole 1Password account (1Password's "Service account rate limits": on a Teams account,
+1,000 reads an hour and 5,000 requests a day). `op read` and `op item get` by name cost
+three read requests each, by the item's and the vault's ids one. So the toolbox resolves
+the `deploy/env/` references itself, with no `op run`, `op inject` or `op read`: a run
+checks the token once (`op whoami`), lists the vault once (`op item list`, 3 reads), reads
+each item it needs once by its ids (1 read each) into a cache in the container's tmpfs
+(gone when the command ends), and resolves every field and template from that cache into
+Terraform's or the AWS CLI's environment, or a tmpfs file for SSM. A command that writes
+the vault (`secrets init`, `stripe setup`, `org apply`) reads the item fresh before each
+write. A read that meets a rate limit or a server error is tried once more after a few
+seconds; one that still fails stops the command, naming the item. What a command costs in
+read requests, besides its one `op whoami` (`deploy/bin/tests/vault_requests_test.sh`
+counts them):
+
+| Command | Read requests |
+|---|---|
+| `app`, `fleet`, `backup`, `hosted` and `aws` commands | 4 (5 for `app deploy --promote staging` and `backup import --from-deployment prod`, which read the other deployment's item) |
+| `db bootstrap`, `db reset-db` | 5 |
+| `secrets sync` | 6 |
+| `secrets check` | 13 |
+| `stripe check` | 5 |
+| `infra plan`, `infra apply` | 10 |
+| `org plan` | 6 |
+| `org apply` | 9, and its 3 writes |
+| `zone plan`, `github plan` | 8 |
+
+`op service-account ratelimit` (with the token in `OP_SERVICE_ACCOUNT_TOKEN`) shows what
+is left of the hour and the day.
+
 ## 3. The Organization and the accounts
 
 Once, in this order. Each step names who runs it and the vault field it fills:

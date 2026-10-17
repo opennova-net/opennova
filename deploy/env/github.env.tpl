@@ -3,8 +3,9 @@
 # GITHUB_TOKEN, and the inputs kept out of this public repository as TF_VAR_*
 # (the billing email, the members as JSON, the secrets' values, and each
 # deployment's AWS account and region, from which the deploy environments'
-# variables name their roles). `op run` resolves them against the vault at run
-# time; the values reach terraform's environment alone. The toolbox fills in
+# variables name their roles). The toolbox resolves them from its run's cache of
+# the vault (each item read once per run; on-deploy, "The vault"); the values
+# reach terraform's environment alone. The toolbox fills in
 # @VAULT@ (OP_VAULT, default OpenNova-Deploy). DEPLOY.md, "GitHub", says what
 # each item holds; edit the vault, not this file.
 GITHUB_TOKEN=op://@VAULT@/github-terraform/token

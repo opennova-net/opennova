@@ -3,7 +3,8 @@
 # toolbox container (deploy/Dockerfile), or on a CI runner holding AWS
 # credentials of its own (.github/workflows/deploy.yml). The operator supplies
 # only OP_SERVICE_ACCOUNT_TOKEN; every other secret is read from the 1Password
-# vault at run time into a tmpfs (/run/secrets) that never touches disk. The
+# vault at run time into a tmpfs (/run/secrets) that never touches disk, each
+# item once per run (the service account's requests are rate-limited). The
 # service's five programs (gate, lobby, web, controller, worker) run as ECS
 # services on Fargate in the deployment's cluster; nothing is reached over SSH:
 # a shell is ECS Exec, the database's commands one-off tasks.
@@ -214,12 +215,17 @@ log()  { printf '\033[1;36m[deploy]\033[0m %s\n' "$*" >&2; }
 err()  { printf '\033[1;31m[deploy:error]\033[0m %s\n' "$*" >&2; }
 die()  { err "$*"; exit 1; }
 
-# Whatever a command leaves in the tmpfs goes when it ends, and so does the
-# master password a db command lent the backup task (db_master_param_put).
+# The run's cache of the vault (below, "The vault"): this process's own
+# directory in the tmpfs, which its subshells share.
+VAULT_CACHE="$SECRETS_DIR/vault.$$"
+
+# Whatever a command leaves in the tmpfs goes when it ends (the vault cache
+# among it), and so does the master password a db command lent the backup task
+# (db_master_param_put).
 DB_MASTER_PARAM=""
 cleanup() {
-  rm -f "$SECRETS_DIR"/item.*.json "$SECRETS_DIR"/value.* "$SECRETS_DIR"/*.rendered \
-    "$SECRETS_DIR"/tfplan "$SECRETS_DIR"/aws.env 2>/dev/null || true
+  rm -f "$SECRETS_DIR"/item.*.json "$SECRETS_DIR"/value.* "$SECRETS_DIR"/tfplan 2>/dev/null || true
+  rm -rf "$VAULT_CACHE" 2>/dev/null || true
   if [ -n "$DB_MASTER_PARAM" ]; then
     aws ssm delete-parameter --name "$DB_MASTER_PARAM" >/dev/null 2>&1 \
       || err "deleting $DB_MASTER_PARAM failed: delete it by hand (./deploy/run.sh$DEP_FLAG aws ssm delete-parameter --name $DB_MASTER_PARAM)"
@@ -286,7 +292,6 @@ deployment_identity() {
     REGION="$(json_field "$json" region)"
     STATE_BUCKET="$(json_field "$json" state_bucket)"
     GATE_EIP_ALLOCATION_ID="$(json_field "$json" gate_eip_allocation_id)"
-    rm -f "$json"
   else
     ACCOUNT_ID="${AWS_ACCOUNT_ID:-}"
     REGION="${AWS_REGION:-}"
@@ -346,34 +351,111 @@ take_yes() {
   done
 }
 
-# A deploy/env template with the toolbox's placeholders filled in, in the tmpfs.
-render_tpl() {
-  local out
-  out="$SECRETS_DIR/$(basename "$1").rendered"
+# A deploy/env template's text with the toolbox's placeholders filled in (the
+# vault and the deployment's items: references, no values), on stdout.
+tpl_text() {
   sed -e "s|@VAULT@|$VAULT|g" -e "s|@APP_ITEM@|${APP_ITEM:-}|g" -e "s|@AWS_ITEM@|${AWS_ITEM:-}|g" \
-      -e "s|@STRIPE_ITEM@|${STRIPE_ITEM:-}|g" -e "s|@RDS_ITEM@|${RDS_ITEM:-}|g" "$1" > "$out"
-  chmod 600 "$out"
-  printf '%s' "$out"
+      -e "s|@STRIPE_ITEM@|${STRIPE_ITEM:-}|g" -e "s|@RDS_ITEM@|${RDS_ITEM:-}|g" "$1"
 }
 
+# ---------------------------------------------------------------------------
+# The vault: each item read once per run
+# ---------------------------------------------------------------------------
+#
+# The service account's requests are rate-limited (hourly per token, daily per
+# 1Password account: DEPLOY.md, "2. Mint the service-account token"), and a
+# name costs more than an id: `op item get NAME --vault NAME` (or `op read`) is
+# three read requests, `op item get ID --vault ID` one. So a run checks its
+# token once (op whoami), lists the vault once (`op item list`, which names
+# every item's id and the vault's), and reads each item it needs once, by those
+# ids, into its cache: VAULT_CACHE in the tmpfs (0700, its files 0600), which
+# the run's subshells share and cleanup removes. Every field, every op://
+# reference and every deploy/env template resolves from that cache, so no
+# value is read with op read, op inject or op run, and none reaches an
+# argument, an output or a disk outside the tmpfs. A write reads its item
+# fresh first (read, change, write back, as 1Password's template edit wants)
+# and drops it from the cache after, so a later read in the run sees the write;
+# a create drops the listing too. A read that fails on a rate limit or a
+# server error is tried once more after VAULT_RETRY_DELAY seconds.
+
+VAULT_RETRY_DELAY=3
+# Why the last vault call failed (never a value), and the value the last
+# vault_value or vault_ref resolved (callers take it and clear it).
+VAULT_ERR=""
+VAULT_VALUE=""
+
+vault_cache_dir() {
+  [ -d "$VAULT_CACHE" ] || (umask 077 && mkdir -p "$VAULT_CACHE") || die "cannot make the vault cache $VAULT_CACHE"
+}
+
+# Whether op's error ($1) is worth one more try: a rate limit, a server error,
+# or the malformed-request answer a throttled service account also gets. The
+# hourly limit's own answer (retry in N minutes) is not.
+vault_transient() {
+  case "$1" in
+    *"Too many requests"*|*rate-limit*|*"rate limit"*|*"(429)"*|*"(500)"*|*"(502)"*|*"(503)"*|*"(504)"* \
+      |*"Internal Server Error"*|*"Bad Gateway"*|*"Service Unavailable"*|*"Gateway Timeout"* \
+      |*"structure of request was invalid"*) return 0 ;;
+  esac
+  return 1
+}
+
+# op "$@" (a read), its stdin /dev/null and its output into file $1 in the
+# cache (0600; written whole or not at all), tried once more after a
+# transient failure. Fails with op's last error line in VAULT_ERR.
+vault_op() {
+  local out="$1" err="$VAULT_CACHE/op.err" try
+  shift
+  vault_cache_dir
+  for try in 1 2; do
+    if (umask 077 && op "$@" </dev/null >"$out.part" 2>"$err"); then
+      mv -f "$out.part" "$out"
+      rm -f "$err"
+      return 0
+    fi
+    VAULT_ERR="$(grep -v '^[[:space:]]*$' "$err" | tail -n 1 | sed -E 's/^\[ERROR\] [0-9/]+ [0-9:]+ //' | cut -c1-300)" || true
+    [ -n "$VAULT_ERR" ] || VAULT_ERR="op $1 failed with no message"
+    if [ "$try" -eq 2 ] || ! vault_transient "$VAULT_ERR"; then break; fi
+    log "1Password: $VAULT_ERR; trying once more in ${VAULT_RETRY_DELAY}s"
+    sleep "$VAULT_RETRY_DELAY"
+  done
+  rm -f "$out.part" "$err"
+  return 1
+}
+
+# The token, checked once per run.
 require_op() {
   [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || die "OP_SERVICE_ACCOUNT_TOKEN is not set"
-  op whoami >/dev/null 2>&1 || die "1Password auth failed (check OP_SERVICE_ACCOUNT_TOKEN)"
+  [ ! -e "$VAULT_CACHE/authed" ] || return 0
+  vault_op "$VAULT_CACHE/whoami" whoami || die "1Password auth failed (check OP_SERVICE_ACCOUNT_TOKEN): $VAULT_ERR"
+  mv -f "$VAULT_CACHE/whoami" "$VAULT_CACHE/authed"
 }
 
-# Whether vault $VAULT holds an item titled $1. Asked by title in the vault's
-# listing, never read off an error's wording; a listing that fails, comes back
-# empty (the deploy vault is never empty: its own items are in it) or is not a
-# JSON array stops the command, so no vault hiccup reads as an absent item.
+# The vault's listing ($VAULT_CACHE/list.json), read once per run. A listing
+# that fails, comes back empty (the deploy vault is never empty: its own items
+# are in it) or is not a JSON array stops the command, so no vault hiccup reads
+# as an absent item.
+vault_list_load() {
+  local list="$VAULT_CACHE/list.json" rc=0
+  [ ! -s "$list" ] || return 0
+  require_op
+  vault_op "$list" item list --vault "$VAULT" --format json \
+    || die "listing vault '$VAULT' failed. Refusing to go on with its items unknown (run again once the vault answers): $VAULT_ERR"
+  [ -s "$list" ] \
+    || { rm -f "$list"; die "listing vault '$VAULT' came back empty. Refusing to go on with its items unknown (run again once the vault answers)"; }
+  jq -e 'if type == "array" then true else error("no array") end' "$list" >/dev/null 2>&1 || rc=$?
+  [ "$rc" -eq 0 ] || { rm -f "$list"; die "vault '$VAULT' listing unreadable (jq exit $rc)"; }
+}
+
+# A created item is in the vault but not in the run's listing: the next look
+# lists again.
+vault_list_drop() { rm -f "$VAULT_CACHE/list.json"; }
+
+# Whether vault $VAULT holds an item titled $1, by the run's listing.
 vault_has_item() {
-  local title="$1" list rc=0
-  list="$(op item list --vault "$VAULT" --format json)" \
-    || die "listing vault '$VAULT' failed. Refusing to go on with its items unknown (run again once the vault answers)"
-  [ -n "$list" ] \
-    || die "listing vault '$VAULT' came back empty. Refusing to go on with its items unknown (run again once the vault answers)"
-  printf '%s' "$list" \
-    | jq -e --arg t "$title" 'if type == "array" then any(.[]; .title == $t) else error("no array") end' \
-      >/dev/null 2>&1 || rc=$?
+  local rc=0
+  vault_list_load
+  jq -e --arg t "$1" 'any(.[]; .title == $t)' "$VAULT_CACHE/list.json" >/dev/null 2>&1 || rc=$?
   case "$rc" in
     0) return 0 ;;
     1) return 1 ;;
@@ -381,18 +463,150 @@ vault_has_item() {
   esac
 }
 
-# An item's JSON (its fields' values among it) into the tmpfs; echoes the path.
+# The cache file of the item titled $1.
+vault_item_file() { printf '%s/item.%s.json' "$VAULT_CACHE" "${1//[^A-Za-z0-9._-]/_}"; }
+
+# The item titled $1 into the run's cache, unless it is there ($2 = fresh
+# reads it again, for a write): one `op item get` by its id and the vault's,
+# from the listing (the title as it is, else in any case, as op matches a
+# reference's). Fails, VAULT_ERR saying why, when the listing names no such
+# item or more than one, or the read fails twice.
+vault_item_load() {
+  local title="$1" file list="$VAULT_CACHE/list.json" matches n id vault_id
+  file="$(vault_item_file "$title")"
+  [ "${2:-}" != fresh ] || rm -f "$file"
+  [ ! -s "$file" ] || return 0
+  vault_list_load
+  matches="$(jq -r --arg t "$title" '
+      [.[] | select(.title == $t)] as $exact
+      | (if ($exact | length) > 0 then $exact
+         else [.[] | select(((.title // "") | ascii_downcase) == ($t | ascii_downcase))] end)
+      | .[] | [(.id // ""), (.vault.id // "")] | @tsv' "$list")" \
+    || { VAULT_ERR="vault '$VAULT' listing unreadable"; return 1; }
+  n="$(grep -c . <<<"$matches")" || true
+  case "$n" in
+    1) ;;
+    0) VAULT_ERR="vault '$VAULT' holds no item '$title'"; return 1 ;;
+    *) VAULT_ERR="vault '$VAULT' holds $n items titled '$title' (keep one)"; return 1 ;;
+  esac
+  IFS=$'\t' read -r id vault_id <<<"$matches"
+  [ -n "$id" ] || { VAULT_ERR="vault '$VAULT' lists '$title' with no id"; return 1; }
+  vault_op "$file" item get "$id" --vault "${vault_id:-$VAULT}" --format json || return 1
+  if ! jq -e 'type == "object"' "$file" >/dev/null 2>&1; then
+    rm -f "$file"
+    VAULT_ERR="vault item '$title' came back unreadable (no JSON object)"
+    return 1
+  fi
+}
+
+# Item $1 leaves the run's cache (it was written): the next read reads it again.
+vault_item_drop() { rm -f "$(vault_item_file "$1")"; }
+
+# An item's JSON (its fields' values among it), from the run's cache; echoes
+# the path. The file is the run's cache: callers read it and leave it.
 item_json() {
-  local out="$SECRETS_DIR/item.$1.json"
-  op item get "$1" --vault "$VAULT" --format json > "$out" \
-    || die "reading vault item '$1' failed (run again once the vault answers)"
-  chmod 600 "$out"
-  printf '%s' "$out"
+  vault_item_load "$1" || die "reading vault item '$1' failed (run again once the vault answers): $VAULT_ERR"
+  vault_item_file "$1"
 }
 
 # Whether the item JSON at $1 has a field labelled $2.
 json_has_field() {
   jq -e --arg l "$2" 'any(.fields[]?; .label == $l)' "$1" >/dev/null
+}
+
+# Field $2 of item $1 into VAULT_VALUE, as it is (op read's value: a field
+# with no value is empty), the field found as op finds a reference's: by its
+# label, else its id, else its label in any case. Fails, VAULT_ERR saying
+# why, when the item or the field is missing. Runs in the caller's shell: the
+# value is no output.
+vault_value() {
+  local file
+  VAULT_VALUE=""
+  vault_item_load "$1" || return 1
+  file="$(vault_item_file "$1")"
+  # The value, then x (kept apart from the value's own trailing newlines).
+  if ! VAULT_VALUE="$(jq -j --arg l "$2" '
+      (.fields // []) as $f
+      | [$f[] | select(.label == $l)] as $m | if ($m | length) > 0 then $m else [$f[] | select(.id == $l)] end
+      | if length > 0 then . else [$f[] | select(((.label // "") | ascii_downcase) == ($l | ascii_downcase))] end
+      | if length > 0 then (.[0].value // "") else error("no field") end' "$file" 2>/dev/null && printf x)"; then
+    VAULT_VALUE=""
+    VAULT_ERR="vault item '$1' has no field '$2'"
+    return 1
+  fi
+  VAULT_VALUE="${VAULT_VALUE%x}"
+}
+
+# Reference $1 (op://<vault>/<item>/<field>) into VAULT_VALUE, as vault_value.
+vault_ref() {
+  VAULT_VALUE=""
+  [[ "$1" =~ ^op://([^/]+)/([^/]+)/([^/]+)$ ]] || { VAULT_ERR="'$1' is no op://vault/item/field reference"; return 1; }
+  [ "${BASH_REMATCH[1]}" = "$VAULT" ] || { VAULT_ERR="'$1' names vault '${BASH_REMATCH[1]}', not '$VAULT'"; return 1; }
+  vault_value "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}"
+}
+
+# Every NAME=op://... line of env template $1 (deploy/env/*.tpl), resolved
+# from the cache: with $2 = export, each NAME exported into this shell (only
+# the NAMEs after $2, when any are given); with $2 = check, nothing kept.
+# Fails at the first line that does not resolve, VAULT_ERR naming the
+# template, the variable and the reference (never a value).
+vault_tpl_resolve() {
+  local tpl="$1" mode="$2" line name ref
+  shift 2
+  [ -r "$tpl" ] || { VAULT_ERR="no template $tpl"; return 1; }
+  while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in ''|'#'*) continue ;; esac
+    if [[ ! "$line" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(op://[^[:space:]]+)[[:space:]]*$ ]]; then
+      VAULT_ERR="deploy/env/${tpl##*/}: '${line%%=*}' is no NAME=op://vault/item/field line"
+      VAULT_VALUE=""
+      return 1
+    fi
+    name="${BASH_REMATCH[1]}" ref="${BASH_REMATCH[2]}"
+    [ $# -eq 0 ] || [[ " $* " == *" $name "* ]] || continue
+    if ! vault_ref "$ref"; then
+      VAULT_ERR="deploy/env/${tpl##*/}: $name ($ref): $VAULT_ERR"
+      VAULT_VALUE=""
+      return 1
+    fi
+    [ "$mode" != export ] || export "$name=$VAULT_VALUE"
+  done < <(tpl_text "$tpl")
+  VAULT_VALUE=""
+}
+
+# Run "$@" with env template $1's variables in its environment alone: in a
+# subshell, each value from the cache, exported, never an argument or a file
+# (what `op run --env-file` did, with no request of its own).
+vault_env_run() {
+  local tpl="$1"
+  shift
+  (
+    vault_tpl_resolve "$tpl" export \
+      || die "$VAULT_ERR. Nothing was run (secrets check names what the vault lacks; secrets init adds the generated secrets and the placeholders)"
+    "$@"
+  )
+}
+
+# The writes, with template file $2 (in the tmpfs: no value is an argument).
+# An edit goes by the item's id and the vault's, from the item read fresh into
+# the cache first (vault_item_load ITEM fresh); the item then leaves the
+# cache. A create drops the listing.
+vault_item_edit() {
+  local title="$1" tpl="$2" file id vault_id rc=0
+  file="$(vault_item_file "$title")"
+  id="$(jq -r '.id // empty' "$file" 2>/dev/null)"
+  vault_id="$(jq -r '.vault.id // empty' "$file" 2>/dev/null)"
+  [ -n "$id" ] || { VAULT_ERR="vault item '$title' is not in the run's cache"; return 1; }
+  # stdin from /dev/null: op takes a piped stdin (a run with no terminal) for a
+  # second template and refuses the call.
+  op item edit "$id" --vault "${vault_id:-$VAULT}" --template "$tpl" </dev/null >/dev/null || rc=$?
+  vault_item_drop "$title"
+  return "$rc"
+}
+vault_item_create() {
+  local rc=0
+  op item create --vault "$VAULT" --template "$1" </dev/null >/dev/null || rc=$?
+  vault_list_drop
+  return "$rc"
 }
 
 # ---------------------------------------------------------------------------
@@ -424,25 +638,14 @@ aws_auth() {
   aws_account_check "$DEP's" "$AWS_ITEM"
 }
 
-# The access key of vault item $1 (access_key_id, secret_access_key) into this
+# The access key of vault item $1 (access_key_id, secret_access_key: the
+# references of deploy/env/aws.env.tpl, from the run's cache) into this
 # process's environment, in place of any other credentials. Fails when the
 # item holds none.
 vault_credentials() {
   require_op
-  local tpl out="$SECRETS_DIR/aws.env" line key
-  tpl="$(AWS_ITEM="$1" render_tpl "$AWS_ENV_TPL")"
-  if ! op inject -f -i "$tpl" -o "$out" >/dev/null 2>&1; then
-    rm -f "$out" "$tpl"
-    return 1
-  fi
-  chmod 600 "$out"
   unset AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_PROFILE
-  while IFS= read -r line || [ -n "$line" ]; do
-    case "$line" in ''|'#'*) continue ;; esac
-    key="${line%%=*}"
-    case "$key" in AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY) export "$key=${line#*=}" ;; esac
-  done < "$out"
-  rm -f "$out" "$tpl"
+  AWS_ITEM="$1" vault_tpl_resolve "$AWS_ENV_TPL" export AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY || return 1
   [[ "${AWS_ACCESS_KEY_ID:-}" =~ ^A[KS]IA[A-Z0-9]{12,}$ ]]
 }
 
@@ -471,7 +674,6 @@ org_auth() {
   json="$(item_json aws-org)"
   ACCOUNT_ID="$(json_field "$json" account_id)"
   REGION="$(json_field "$json" region)"
-  rm -f "$json"
   [[ "$ACCOUNT_ID" =~ ^[0-9]{12}$ ]] \
     || die "vault item aws-org names no management account (account_id; DEPLOY.md, \"The Organization and the accounts\")"
   [[ "$REGION" =~ ^[a-z]{2}(-[a-z]+)+-[0-9]$ ]] || die "vault item aws-org names no region ('$REGION')"
