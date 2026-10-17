@@ -158,6 +158,8 @@ jobs:
           python -B -m unittest discover -s scripts/ci -p test_test_suites.py
           # The cite image rule cite_census.py and scripts/ida/cite_sweep.py share.
           python -B -m unittest discover -s scripts/lint -p "test_*.py"
+          # cite_sweep.py's classifier (the sweep itself needs a live IDA).
+          python -B -m unittest discover -s scripts/ida -p "test_*.py"
           # The scripted game launch starts behind every window and never takes
           # the foreground (game_mcp.BehindLaunch; docs/mcp.md "Launching").
           python -B -m unittest discover -s scripts/mcp -p "test_*.py"
