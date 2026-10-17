@@ -1,8 +1,6 @@
 class_name ArmoryMenuCompanion
 extends MenuCompanion
 
-const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
-
 # Drives the JO in-game armory — weapon.mnu's WEAPON screen — by control NAME, as a
 # companion the game-agnostic MenuShell (menu_shell.gd) delegates to (the
 # mp_menu_companion / player_info_menu_companion pattern), riding a MenuDriver
@@ -22,12 +20,11 @@ const GRENADE_CONTROLS := ["GRENADE_AMMO1", "GRENADE_AMMO2", "GRENADE_AMMO3"]
 # the parallel action 218 @0x49b8e3 ships with no binding row] — the presenter owns
 # that key + gate and the ACCEPT apply (sim + FP viewmodel rebuild).
 #
-# Slot population is the witnessed class/team/availability filter of the
-# WEAPON-screen populate [orig: UI_PopulateThreeCategoryLists @0x566db0 via
-# WeaponDatabase.get_slot_weapons + the g_ArmoryWeaponAvailability term
-# @0x566e6b — value semantics in net-re §5.63], rows sorted case-insensitively
-# ascending [orig: ListWidget_SortRows -> cmp @0x6448a0, mode (string, asc)]
-# under NONE at row 0; every slot reselects from the canonical parent tuples.
+# Slot population is the engine's (runtime/menu/loadout_screen.h
+# loadout_fill_slot): the witnessed class/team/availability filter of the
+# WEAPON-screen populate (the availability values' semantics in net-re §5.63),
+# the rows sorted case-insensitively ascending under NONE at row 0; every slot
+# reselects from the canonical parent tuples (loadout_select_weapon_name).
 # Deferred (tracked in the armory RE notes): the per-class 2048-byte loadout
 # buffer MEMORY (save-on-flip + remembered counts) [orig:
 # g_ArmoryLoadoutBufferByClass @0x25DD740 -> UI_PopulateAmmoTypeComboBoxes
@@ -59,8 +56,9 @@ var _current_parent_clips := {}
 # Availability lookup (name -> value); banned (0) weapons drop from the lists
 # [orig: the g_ArmoryWeaponAvailability term @0x566e6b]. Invalid = allow all.
 var _availability_lookup := Callable()
-# Selected weapon dicts per slot control name ("" row 0 = NONE).
-var _slot_rows := {}                 # control name -> Array[WeaponDef] (row-1 aligned)
+# Each category list's weapon.def rows by list row as its fill left them (row 0
+# NONE, -1; engine loadout_screen.h loadout_fill_slot).
+var _slot_rows := {}                 # control name -> PackedInt32Array
 # The grenade definitions assigned to GRENADE_AMMO1..3 in weapon.def table order.
 # Each authored control selects a count for its definition rather than a weapon row
 # [orig: WeaponDef_UISlotSelectCallback registration args 0/1/2 @0x567020].
@@ -273,48 +271,33 @@ func _populate_slots() -> void:
 		_populate_ammo(slot_name)
 
 
-func _available_slot_weapons(slot: int, team_mask: int) -> Array[WeaponDef]:
-	var defs := _weapons.get_slot_weapons(slot, _class_mask(), team_mask)
-	if _availability_lookup.is_valid():
-		defs = defs.filter(func(w: WeaponDef) -> bool:
-			return int(_availability_lookup.call(w.name)) != 0)
-	return defs
-
-
+# The list's rows (the class/team filter, the map availability term, the
+# engine's row order under NONE), then the reselect of the canonical parent
+# tuple's weapon by name; the per-class buffer MEMORY stays deferred (engine
+# loadout_screen.h loadout_fill_slot / loadout_select_weapon_name carry the
+# witnesses).
 func _fill_slot(control: String, slot: int, team_mask: int) -> void:
-	var combo := _id(control)
-	if combo < 0:
+	if _id(control) < 0:
 		return
-	var defs := _available_slot_weapons(slot, team_mask)
-	# The map availability term: banned (0) weapons never list; every nonzero value
-	# (allowed / armory-zone-only / mission-allowed) does
-	# [orig: the !g_ArmoryWeaponAvailability[i] skip @0x566e6b].
-	# The rows take the engine's order (case-insensitive ascending by display
-	# label, loadout_labels.h armory_slot_order); NONE is prepended at row 0.
-	var gametext := Strings.get_table(Strings.TABLE_GAMETEXT)
-	var labels := PackedStringArray()
-	for w: WeaponDef in defs:
-		labels.append(_weapons.weapon_label(w.index, gametext))
-	var rows := PackedStringArray()
-	rows.append(Strings.menu_text("NONE", "None"))
-	var sorted: Array[WeaponDef] = []
-	for i in WeaponDatabase.armory_slot_order(labels):
-		rows.append(labels[i])
-		sorted.append(defs[i])
-	_slot_rows[control] = sorted
-	_set_combo_items(combo, rows)
-	# Each slot re-selects its row from the canonical parent tuples [orig: UIList_SelectByValue @0x645240
-	# select-by-adm-index in @0x564930]; the per-class buffer MEMORY stays deferred.
-	var current := ""
+	_populating = true
+	var rows := _driver.fill_loadout_slot(_weapons, control, slot, _class_mask(), team_mask,
+			_availability_lookup, Strings.menu_text("NONE", "None"),
+			Strings.get_table(Strings.TABLE_GAMETEXT))
+	_populating = false
+	_slot_rows[control] = rows
+	_driver.select_loadout_weapon_name(_weapons, control, rows, _current_weapon_name(control))
+
+
+# The canonical parent tuple's weapon name for a category ("" for none).
+func _current_weapon_name(control: String) -> String:
 	match control:
-		"PRIMARY": current = _current_primary
-		"SECONDARY": current = _current_secondary
-		"ACCESSORY": current = _current_accessory
-	if not current.is_empty():
-		for i in sorted.size():
-			if sorted[i].name.nocasecmp_to(current) == 0:
-				_driver.select_row(combo, i + 1, false)
-				break
+		"PRIMARY":
+			return _current_primary
+		"SECONDARY":
+			return _current_secondary
+		"ACCESSORY":
+			return _current_accessory
+	return ""
 
 
 func _populate_grenades(team_mask: int) -> void:
@@ -328,14 +311,14 @@ func _populate_grenades(team_mask: int) -> void:
 # The slot's selected weapon.def row (null = NONE). Public read seam (ADR
 # 0018): tests and diagnostics read the selection here.
 func selected_weapon(control: String) -> WeaponDef:
-	var combo := _id(control)
-	if combo < 0:
+	if _weapons == null or _driver == null:
 		return null
-	var row := _driver.selected_row(combo)
-	var defs: Array = _slot_rows.get(control, [])
-	if row <= 0 or row > defs.size():
-		return null  # NONE
-	return defs[row - 1]
+	return _weapons.get_weapon(_driver.loadout_selected_weapon(control, _rows_of(control)))
+
+
+# A category list's rows as its last fill left them (none before one).
+func _rows_of(control: String) -> PackedInt32Array:
+	return _slot_rows.get(control, PackedInt32Array())
 
 
 func _on_slot_selected(control: String) -> void:
@@ -349,45 +332,19 @@ func _populate_ammo(control: String) -> void:
 	if _id(control + "_AMMO1") < 0:
 		return
 	var w := selected_weapon(control)
-	var current_name := ""
-	match control:
-		"PRIMARY": current_name = _current_primary
-		"SECONDARY": current_name = _current_secondary
-		"ACCESSORY": current_name = _current_accessory
 	_populating = true
 	_driver.fill_armory_ammo(_weapons, control, w.index if w != null else -1,
-			current_name, int(_current_parent_clips.get(control, -1)),
+			_current_weapon_name(control), int(_current_parent_clips.get(control, -1)),
 			Strings.get_table(Strings.TABLE_GAMETEXT))
 	_populating = false
 	_update_weight()
 
 
-# The slot's selected clip count. Public read seam (ADR 0018), paired with
-# selected_weapon.
+# The slot's selected clip count, -1 the def default (engine loadout_screen.h
+# armory_selected_clips carries the witness). Public read seam (ADR 0018),
+# paired with selected_weapon.
 func selected_clips(control: String) -> int:
-	var combo := _id(control + "_AMMO1")
-	if combo < 0 or _driver.selected_row(combo) < 0 \
-			or _driver.item_count(combo) == 0:
-		# -1 = the def default; the original's main leg takes adm[23] RAW as the total
-		# (only the sub-weapon leg multiplies by clipsize) [orig: @0x565cd0 0x566166].
-		return -1
-	return _driver.selected_row(combo) + 1
-
-
-func _selected_grenade_loadout() -> Array[Dictionary]:
-	var selected: Array[Dictionary] = []
-	for i in _grenade_rows.size():
-		var combo := _id(GRENADE_CONTROLS[i])
-		var clips := _driver.selected_row(combo) if combo >= 0 else 0
-		if clips <= 0:
-			continue
-		selected.append({
-			"name": _grenade_rows[i].name,
-			"ammo_primary": clips,
-			"ammo_secondary": -1,
-			"flags": -1,
-		})
-	return selected
+	return _driver.armory_selected_clips(control) if _driver != null else -1
 
 
 # --- Weight ----------------------------------------------------------------------
@@ -430,19 +387,21 @@ func weight_line() -> String:
 # host applies the full canonical kit to the sim; the selected slot then remounts
 # its first-person viewmodel.
 func _on_accept() -> void:
-	var primary := selected_weapon("PRIMARY")
-	var secondary := selected_weapon("SECONDARY")
-	var accessory := selected_weapon("ACCESSORY")
+	# The selection is the engine's pick (engine loadout_screen.h
+	# armory_loadout_pick); this builds the presenter's loadout record from it.
+	var pick: ArmoryLoadoutPick = _driver.armory_loadout_pick(_weapons, _rows_of("PRIMARY"),
+			_rows_of("SECONDARY"), _rows_of("ACCESSORY"), _grenade_rows) \
+			if _driver != null else ArmoryLoadoutPick.new()
 	var loadout := {
 		"player_class": _selected_class_value,
 		"team": _team,
-		"primary": primary.name if primary != null else "",
-		"primary_clips": selected_clips("PRIMARY"),
-		"secondary": secondary.name if secondary != null else "",
-		"secondary_clips": selected_clips("SECONDARY"),
-		"accessory": accessory.name if accessory != null else "",
-		"accessory_clips": selected_clips("ACCESSORY"),
-		"grenades": _selected_grenade_loadout(),
+		"primary": pick.names[0],
+		"primary_clips": pick.clips[0],
+		"secondary": pick.names[1],
+		"secondary_clips": pick.clips[1],
+		"accessory": pick.names[2],
+		"accessory_clips": pick.clips[2],
+		"grenades": pick.grenades,
 	}
 	loadout_accepted.emit(loadout)
 

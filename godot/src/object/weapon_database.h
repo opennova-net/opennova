@@ -141,12 +141,10 @@ public:
 	Array kit_entry_rows(const opennova::menu::PlayerInfoKitSelection &p_selection) const;
 	// The loadout screens' shared text compositions (one impl in
 	// engine/runtime/menu loadout_labels.h): the WepDes weapon label with its
-	// raw-id fallback, the WEAPON and PLAYER screens'
-	// case-insensitive row order over display labels, and the weight readout
-	// with its encumbrance band token (the Menu-section fold: menutxt first,
-	// then gameui, then the fallback).
+	// raw-id fallback, and the weight readout with its encumbrance band token
+	// (the Menu-section fold: menutxt first, then gameui, then the fallback).
+	// The lists' row order is the engine's fill's (MenuDriver.fill_loadout_slot).
 	String weapon_label(int p_index, const Ref<RtxtStringFile> &p_gametext) const;
-	static PackedInt32Array armory_slot_order(const PackedStringArray &p_labels);
 	static String loadout_weight_line(double p_total, const Ref<RtxtStringFile> &p_menutxt,
 			const Ref<RtxtStringFile> &p_gameui);
 	// The armory screen's open-time class policy (one impl in

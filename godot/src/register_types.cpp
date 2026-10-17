@@ -185,6 +185,7 @@
 #include "mnu/menu_audio.h"
 #include "mnu/menu_driver.h"
 #include "mnu/player_info_loadout.h"
+#include "mnu/armory_loadout_pick.h"
 #include "mnu/menu_video_underlay.h"
 #include "mnu/controls_model.h"
 #include "player/first_person_arms_witness.h"
@@ -449,6 +450,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(MenuScrollRange);
 	GDREGISTER_CLASS(MenuDriver);
 	GDREGISTER_CLASS(PlayerInfoLoadout);
+	GDREGISTER_CLASS(ArmoryLoadoutPick);
 	GDREGISTER_CLASS(MenuVideoUnderlay);
 	// The scenario driver's scripted input device (inert until a probe arms
 	// it), ahead of the binding model it attaches to.

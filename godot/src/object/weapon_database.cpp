@@ -60,8 +60,6 @@ void WeaponDatabase::_bind_methods() {
 			&WeaponDatabase::player_info_class_mask);
 	ClassDB::bind_method(D_METHOD("weapon_label", "index", "gametext"),
 			&WeaponDatabase::weapon_label);
-	ClassDB::bind_static_method("WeaponDatabase", D_METHOD("armory_slot_order", "labels"),
-			&WeaponDatabase::armory_slot_order);
 	ClassDB::bind_static_method("WeaponDatabase",
 			D_METHOD("loadout_weight_line", "total", "menutxt", "gameui"),
 			&WeaponDatabase::loadout_weight_line);
@@ -217,15 +215,6 @@ String WeaponDatabase::weapon_label(int p_index, const Ref<RtxtStringFile> &p_ga
 	const opennova::def::DefWeaponDef *w = row(p_index);
 	if (w == nullptr) return String();
 	return opennova::to_gd(opennova::menu::weapon_label(*w, game_text_lookup(p_gametext)));
-}
-
-PackedInt32Array WeaponDatabase::armory_slot_order(const PackedStringArray &p_labels) {
-	std::vector<std::string> labels;
-	labels.reserve(static_cast<size_t>(p_labels.size()));
-	for (int i = 0; i < p_labels.size(); ++i) labels.push_back(opennova::to_std(p_labels[i]));
-	PackedInt32Array out;
-	for (int index : opennova::menu::armory_slot_order(labels)) out.push_back(index);
-	return out;
 }
 
 String WeaponDatabase::loadout_weight_line(double p_total, const Ref<RtxtStringFile> &p_menutxt,

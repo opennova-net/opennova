@@ -1,4 +1,5 @@
 #include "mnu/menu_driver.h"
+#include "mnu/armory_loadout_pick.h"
 
 #include "audio/music_director.h"
 #include "mnu/menu_audio.h"
@@ -903,6 +904,64 @@ void MenuDriver::fill_armory_ammo(const Ref<WeaponDatabase> &p_weapons, const St
 			p_parent, to_std(p_current_name), p_current_clips, game_text_lookup(p_text));
 }
 
+namespace {
+
+opennova::menu::LoadoutSlotRows slot_rows(const PackedInt32Array &p_rows) {
+	opennova::menu::LoadoutSlotRows out;
+	out.reserve(static_cast<size_t>(p_rows.size()));
+	for (int i = 0; i < p_rows.size(); ++i) out.push_back(p_rows[i]);
+	return out;
+}
+
+const opennova::def::DefWeaponsFile &weapons_file(const Ref<WeaponDatabase> &p_weapons) {
+	static const opennova::def::DefWeaponsFile empty{};
+	return p_weapons.is_valid() ? p_weapons->native_file() : empty;
+}
+
+} // namespace
+
+PackedInt32Array MenuDriver::fill_loadout_slot(const Ref<WeaponDatabase> &p_weapons, const String &p_control,
+		int p_slot, int p_class_mask, int p_team_mask, const Callable &p_availability,
+		const String &p_none_label, const Ref<RtxtStringFile> &p_text) {
+	opennova::menu::WeaponAvailability availability;
+	if (p_availability.is_valid())
+		availability = [p_availability](const std::string &name) {
+			return int(p_availability.call(String(name.c_str())));
+		};
+	PackedInt32Array out;
+	for (const int32_t row : opennova::menu::loadout_fill_slot(runtime_, weapons_file(p_weapons),
+				 to_std(p_control), p_slot, p_class_mask, p_team_mask, availability, to_std(p_none_label),
+				 game_text_lookup(p_text)))
+		out.push_back(row);
+	return out;
+}
+
+int MenuDriver::loadout_selected_weapon(const String &p_control, const PackedInt32Array &p_rows) const {
+	return opennova::menu::loadout_selected_weapon(runtime_, to_std(p_control), slot_rows(p_rows));
+}
+
+void MenuDriver::select_loadout_weapon_name(const Ref<WeaponDatabase> &p_weapons, const String &p_control,
+		const PackedInt32Array &p_rows, const String &p_name) {
+	opennova::menu::loadout_select_weapon_name(runtime_, weapons_file(p_weapons), to_std(p_control),
+			slot_rows(p_rows), to_std(p_name));
+}
+
+int MenuDriver::armory_selected_clips(const String &p_control) const {
+	return opennova::menu::armory_selected_clips(runtime_, to_std(p_control));
+}
+
+Ref<ArmoryLoadoutPick> MenuDriver::armory_loadout_pick(const Ref<WeaponDatabase> &p_weapons,
+		const PackedInt32Array &p_primary, const PackedInt32Array &p_secondary,
+		const PackedInt32Array &p_accessory, const TypedArray<WeaponDef> &p_grenades) const {
+	const opennova::menu::LoadoutSlotRows rows[3] = { slot_rows(p_primary), slot_rows(p_secondary),
+		slot_rows(p_accessory) };
+	Ref<ArmoryLoadoutPick> out;
+	out.instantiate();
+	out->assign(opennova::menu::armory_loadout_pick(runtime_, weapons_file(p_weapons), rows,
+			loadout_indices(p_grenades)));
+	return out;
+}
+
 TypedArray<WeaponDef> MenuDriver::fill_armory_grenades(const Ref<WeaponDatabase> &p_weapons,
 		int p_class_mask, int p_team_mask, const Array &p_current, const Callable &p_availability,
 		const Ref<RtxtStringFile> &p_text) {
@@ -975,6 +1034,11 @@ void MenuDriver::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("player_info_avatar_combo", "db"), &MenuDriver::player_info_avatar_combo);
 	ClassDB::bind_method(D_METHOD("preview_player_info_voice", "db", "voice"), &MenuDriver::preview_player_info_voice);
 	ClassDB::bind_method(D_METHOD("fill_armory_ammo", "weapons", "control", "parent", "current_name", "current_clips", "text"), &MenuDriver::fill_armory_ammo);
+	ClassDB::bind_method(D_METHOD("fill_loadout_slot", "weapons", "control", "slot", "class_mask", "team_mask", "availability", "none_label", "text"), &MenuDriver::fill_loadout_slot);
+	ClassDB::bind_method(D_METHOD("loadout_selected_weapon", "control", "rows"), &MenuDriver::loadout_selected_weapon);
+	ClassDB::bind_method(D_METHOD("select_loadout_weapon_name", "weapons", "control", "rows", "name"), &MenuDriver::select_loadout_weapon_name);
+	ClassDB::bind_method(D_METHOD("armory_selected_clips", "control"), &MenuDriver::armory_selected_clips);
+	ClassDB::bind_method(D_METHOD("armory_loadout_pick", "weapons", "primary", "secondary", "accessory", "grenades"), &MenuDriver::armory_loadout_pick);
 	ClassDB::bind_method(D_METHOD("fill_armory_grenades", "weapons", "class_mask", "team_mask", "current", "availability", "text"), &MenuDriver::fill_armory_grenades);
 	ClassDB::bind_method(D_METHOD("armory_loadout_weight", "weapons", "parents", "grenades"), &MenuDriver::armory_loadout_weight);
 	ClassDB::bind_method(D_METHOD("set_mission_controls", "lists", "briefings", "accepts"), &MenuDriver::set_mission_controls);
