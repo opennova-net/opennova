@@ -57,17 +57,14 @@ constexpr FindingCodeRow code(const char *token, FindingFix fixes = FindingFix::
 // rows write past the block's rounding: where the allocator split the free block it took (one more than a header
 // larger than asked, @ 0x769812..0x769819) the next block's header starts there, and a texel (0xFF its top byte) on
 // its pointer faults the game's next FastMem call; a block it gave whole holds up to a header's 36 bytes more of its
-// own, so only the bytes past those reach a header whatever the block (pcx_overrun_past_any_block). Within the
+// own, so only the bytes past those reach a header whatever the block (configfile::fastmem_overrun_reaches_header,
+// the one rule of the ConfigFile pool's row too). Within the
 // rounding each row's extra texels land on the next row's start, which its own row then writes: the image reads
 // right. A request of no bytes (a width or height of 0) is one byte's block [orig: FastMem_Alloc, below 1 raised
 // to 1 @ 0x7697C1..0x7697C6].
 uint64_t pcx_overrun_past_block(const TextureHeader &header, uint64_t end) {
 	const uint64_t block = (std::max<uint64_t>(uint64_t(header.width) * header.height * 4, 1) + 63) / 64 * 64;
 	return end * 4 > block ? end * 4 - block : 0;
-}
-uint64_t pcx_overrun_past_any_block(const TextureHeader &header, uint64_t end) {
-	const uint64_t past = pcx_overrun_past_block(header, end);
-	return past > configfile::kFastMemHeaderBytes ? past - configfile::kFastMemHeaderBytes : 0;
 }
 
 constexpr FindingCodeEntry<F> kFindingEntries[] = {
@@ -76,7 +73,8 @@ constexpr FindingCodeEntry<F> kFindingEntries[] = {
 	{F::TgaZeroed, code("texture.tga_zeroed")},
 	{F::TgaUpsideDown, code("texture.tga_upside_down", FindingFix::TextureRows)},
 	{F::TgaColourMapSkipped, code("texture.tga_colour_map_skipped")},
-	// An error of it alone gates: the last row written past any block the allocator gives (pcx_overrun_past_any_block);
+	// An error of it alone gates: the last row written past any block the allocator gives
+	// (configfile::fastmem_overrun_reaches_header);
 	// past the rounding alone, or within it, a warning.
 	{F::PcxOverrun,
 	 game_fails_code("texture.pcx_overrun",
@@ -321,7 +319,7 @@ std::vector<Diagnostic> validate_texture_file(const DocumentBase &document) {
 				const uint32_t extra = long_rows ? header.pcx_bytes_per_line - header.width : 0;
 				const uint64_t over = end - buffer;
 				const uint64_t past = pcx_overrun_past_block(header, end);
-				const uint64_t past_any = pcx_overrun_past_any_block(header, end);
+				const bool past_any = configfile::fastmem_overrun_reaches_header(past);
 				add(F::PcxOverrun, past_any ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning,
 				    (long_rows ? "Its rows hold " + std::to_string(header.pcx_bytes_per_line) + " bytes for " +
 				                         std::to_string(header.width) + " texels: the game's PCX reader writes each row's " +

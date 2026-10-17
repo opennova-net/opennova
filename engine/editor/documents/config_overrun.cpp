@@ -32,10 +32,15 @@ std::string config_overrun_words(const std::string &file, const configfile::Data
 	words += ": the game's ConfigFile reader keeps those in a buffer of " + std::to_string(pool.pool_bytes) +
 	         " bytes (rounded up to its allocator's 64) and then clears that buffer one byte per value, so it "
 	         "writes " +
-	         count_of(pool.overrun(), "byte", "bytes") +
-	         " of zeros past the buffer into the game's memory, and the game crashes later, as a mission starts "
-	         "(ConfigFile_ParseText @ 0x7609e8). Value " +
-	         std::to_string(pool.pool_bytes + 1) + ", here, is the first past it.";
+	         count_of(pool.overrun(), "byte", "bytes") + " of zeros past the buffer" +
+	         (configfile::fastmem_overrun_reaches_header(pool.overrun())
+	                  ? std::string(", past any block the allocator gives it (one it does not split holds up to 36 "
+	                                "bytes more), into the game's memory, and the game crashes later, as a mission "
+	                                "starts (ConfigFile_ParseText @ 0x7609e8).")
+	                  : std::string(": into the block's own spare bytes where the allocator gives it whole with that "
+	                                "many spare (up to 36), else over the next block's header (the game then crashes "
+	                                "later, as a mission starts; ConfigFile_ParseText @ 0x7609e8).")) +
+	         " Value " + std::to_string(pool.pool_bytes + 1) + ", here, is the first past it.";
 	return words;
 }
 
@@ -53,7 +58,11 @@ std::vector<Diagnostic> config_overrun_findings(const DocumentBase &document) {
 			configfile::parse_config_text(reinterpret_cast<const uint8_t *>(written.data()), written.size());
 	// The value whose byte of the clear is the first past the pool, in the reader's order.
 	const size_t offset = configfile::data_strings_overrun_offset(sections, pool);
-	Diagnostic d = text_finding(finding_code(CoreFinding::DocumentConfigOverrun), DiagnosticSeverity::Error,
+	// Past the block's 36-byte slack it gates; within it, a warning (configfile::fastmem_overrun_reaches_header).
+	const DiagnosticSeverity severity = configfile::fastmem_overrun_reaches_header(pool.overrun())
+	                                            ? DiagnosticSeverity::Error
+	                                            : DiagnosticSeverity::Warning;
+	Diagnostic d = text_finding(finding_code(CoreFinding::DocumentConfigOverrun), severity,
 	                            config_overrun_words(file, pool), *text, offset);
 	findings.push_back(std::move(d));
 	return findings;

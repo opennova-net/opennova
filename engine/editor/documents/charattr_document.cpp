@@ -428,8 +428,11 @@ std::vector<Diagnostic> validate_charattr_file(const DocumentBase &document) {
 		if (!doc->dirty() && composed && pool_of(saved).overrun() == 0)
 			words += " Saving it writes the table in the editor's form, from what the game reads of it, which holds " +
 			         std::to_string(pool_of(saved).values) + " values: under the line.";
-		Diagnostic d = make_finding(CoreFinding::DocumentConfigOverrun, DiagnosticSeverity::Error, std::move(words),
-		                            document.path());
+		// Past the block's 36-byte slack it gates; within it, a warning (configfile::fastmem_overrun_reaches_header).
+		Diagnostic d = make_finding(CoreFinding::DocumentConfigOverrun,
+		                            configfile::fastmem_overrun_reaches_header(pool.overrun()) ? DiagnosticSeverity::Error
+		                                                                                       : DiagnosticSeverity::Warning,
+		                            std::move(words), document.path());
 		d.line = line_of(packed, configfile::data_strings_overrun_offset(sections, pool));
 		findings.push_back(std::move(d));
 	}
