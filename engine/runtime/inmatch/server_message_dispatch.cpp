@@ -162,29 +162,13 @@ namespace {
 // @0x506bb0): D-NET-127 closed, its last 0x46 fields with D-NET-295 (net-re §8).
 // ---------------------------------------------------------------------------
 
-void append_u16_le(std::vector<uint8_t> &out, uint16_t v) {
-	opennova::io::append_u16_le(out, v);
-}
-
-void append_u32_le(std::vector<uint8_t> &out, uint32_t v) {
-	opennova::io::append_u32_le(out, v);
-}
-
-void write_u32_le(std::vector<uint8_t> &out, size_t off, uint32_t v) {
-	opennova::io::write_u32_le(out.data() + off, v);
-}
-
-uint32_t read_u32_le(const uint8_t *data) {
-	return opennova::io::read_u32_le(data);
-}
-
 bool validates_padding_echo(
 		const NapiNPConnection &conn, const std::vector<uint8_t> &payload) {
 	// The server challenge advertises paddingLen=256. Retail echoes exactly that many bytes,
 	// preserving the first two position dwords and replacing the third with its net-frame counter.
 	return payload.size() == 256 &&
-	       read_u32_le(payload.data()) == conn.admission_padding_x &&
-	       read_u32_le(payload.data() + 4) == conn.admission_padding_y;
+	       io::read_u32_le(payload.data()) == conn.admission_padding_x &&
+	       io::read_u32_le(payload.data() + 4) == conn.admission_padding_y;
 }
 
 void append_cstr(std::vector<uint8_t> &out, const std::string &s) {
@@ -218,7 +202,7 @@ bool is_default_ash_session_config(const GameConfig &cfg) {
 // tag=0x02 server push. [orig: NapiNPClientMsg_HandleJoinResponse @0x42E0F0 reads 12 B; D-NET-127 carried 512.]
 std::vector<uint8_t> build_tag02_push(uint32_t now_tick) {
 	std::vector<uint8_t> payload(512, 0);
-	write_u32_le(payload, 0, now_tick);
+	io::write_u32_le(payload.data(), now_tick);
 	payload[4] = 0x02;
 	payload[8] = 0x00;
 	payload[9] = 0x01;
@@ -258,7 +242,7 @@ std::vector<uint8_t> build_tag7b_session_summary(const GameConfig &cfg,
 	append_cstr(payload, cfg.server_name); // [orig: g_ServerNameStr @0x24D1FC4]
 	append_cstr(payload, advertised_mission);
 	append_cstr(payload, cfg.mission_file);// [orig: g_MapFileName @0x24D1F3E]
-	append_u32_le(payload, cfg.game_type);  // [orig: g_GameType @0x24D2128]
+	io::append_u32_le(payload, cfg.game_type);  // [orig: g_GameType @0x24D2128]
 	payload.push_back(0);                  // [orig: g_EmptyStr @0x7C08C6] empty C string
 	append_cstr(payload, cfg.expansion);   // [orig: g_ExpansionName @0xB4C584]
 	return payload;
@@ -282,9 +266,9 @@ std::vector<uint8_t> build_transfer_chunk(uint32_t transfer_id, const uint8_t *s
 	const uint32_t clamped_offset = std::min(offset, total);
 	const uint32_t copy_len = std::min(total - clamped_offset, kTransferChunkBytes);
 	std::vector<uint8_t> reply(12, 0);
-	write_u32_le(reply, 0, transfer_id);
-	write_u32_le(reply, 4, total);
-	write_u32_le(reply, 8, clamped_offset);
+	io::write_u32_le(reply.data(), transfer_id);
+	io::write_u32_le(reply.data() + 4, total);
+	io::write_u32_le(reply.data() + 8, clamped_offset);
 	reply.insert(reply.end(), stream + clamped_offset, stream + clamped_offset + copy_len);
 	return reply;
 }
@@ -337,7 +321,7 @@ std::vector<uint8_t> build_tag64_mission_metadata(
 // then computes RTT + runs the min/max-ping kick; no reply.)
 std::vector<uint8_t> build_tag57_pong(uint32_t timestamp) {
 	std::vector<uint8_t> b;
-	append_u32_le(b, timestamp);
+	io::append_u32_le(b, timestamp);
 	b.push_back(0);
 	return b;
 }
@@ -1086,8 +1070,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				conn.join_ticket_validation =
 						inputs.server_ctx != nullptr && join_tickets_required(*inputs.server_ctx);
 				std::vector<uint8_t> challenge = build_tag02_push(now_tick);
-				conn.admission_padding_x = read_u32_le(challenge.data());
-				conn.admission_padding_y = read_u32_le(challenge.data() + 4);
+				conn.admission_padding_x = io::read_u32_le(challenge.data());
+				conn.admission_padding_y = io::read_u32_le(challenge.data() + 4);
 				replies.push_back(
 						make_protocol_message(s2c::JOIN_PADDING_PROBE, std::move(challenge)));
 				conn.admission_stage = GameAdmissionStage::AwaitPaddingEcho;
@@ -1196,10 +1180,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// [orig: NapiNPServerMsg_ValidateTimeSync @0x502210, reset @0x502273]
 				st.time_sync_unanswered_count = 0;
 				if (msg.payload.size() == 8 &&
-						read_u32_le(msg.payload.data()) == st.time_sync_sequence &&
+						io::read_u32_le(msg.payload.data()) == st.time_sync_sequence &&
 						st.time_sync_round_host_ms != 0) {
 					const uint32_t client_ms =
-							read_u32_le(msg.payload.data() + 4);
+							io::read_u32_le(msg.payload.data() + 4);
 					if (st.time_sync_client_baseline_ms == 0)
 						st.time_sync_client_baseline_ms = client_ms;
 					if (st.time_sync_previous_client_ms == 0) {
