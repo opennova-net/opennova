@@ -273,6 +273,15 @@ void test_dds_levels() {
 		CHECK(decode_dds_levels(file.data(), file.size(), first, 1) && !first.levels[0].rgba.empty() &&
 				first.levels[1].rgba.empty(), "the first level alone");
 	}
+	// A surface wider than 0xFFFFFFFC: its block count no longer wraps to 0 across, so no block vector
+	// short of its blocks is valid and nothing is sized from its sides (once 0xFFFFFFFD * 4 texels).
+	DxtSurface wide;
+	wide.format = TextureDxtFormat::Dxt1;
+	wide.width = 0xFFFFFFFDu;
+	wide.height = 4;
+	CHECK(!wide.is_valid() && decode_dxt_surface(wide).empty(), "a wrapping width holds no blocks");
+	wide.blocks.assign(64, 0);
+	CHECK(!wide.is_valid() && decode_dxt_surface(wide).empty(), "nor 64 bytes of them");
 	std::vector<uint8_t> argb;
 	std::string error;
 	CHECK(opennova::dds::dds_write_a8r8g8b8(rgba.data(), 8, 8, argb, error), "an A8R8G8B8 file written");
