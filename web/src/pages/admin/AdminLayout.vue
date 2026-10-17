@@ -44,7 +44,7 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, ref, watch } from 'vue';
+import { nextTick, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import AdminGate from '../../components/AdminGate.vue';
 import { clearAdminToken, hasAdminToken } from '../../api/authToken';
@@ -92,9 +92,11 @@ function revealCurrent() {
   const offset = current.getBoundingClientRect().left - row.getBoundingClientRect().left;
   row.scrollLeft += offset - (row.clientWidth - current.offsetWidth) / 2;
 }
-onMounted(revealCurrent);
+// The menu renders once the gate opens (after mount, the session read), then
+// on every move between sections.
 watch(
-  () => route.path,
+  [() => route.path, menu],
   () => void nextTick(revealCurrent),
+  { immediate: true },
 );
 </script>
