@@ -1,6 +1,7 @@
 #include <net/novaworld/gsb.h>
 
 #include <net/novacrypto/nwu.h>
+#include <net/npwire/wire_cursor.h>
 
 #include <algorithm>
 #include <cstring>
@@ -222,31 +223,11 @@ std::vector<uint8_t> build_servers_payload(const std::vector<GsbServerEntry> &se
 namespace {
 
 // ---- GSB parse (client-direction inverse of the builder) ----------------
+//
+// The parse walks the protocol cursor (net/npwire/wire_cursor.h): the first short
+// read poisons it, and every reader below returns false at that point.
 
-bool read_u16_le(const uint8_t *data, size_t len, size_t &pos, uint16_t &out) {
-	if (pos + 2 > len) return false;
-	out = static_cast<uint16_t>(data[pos]) | (static_cast<uint16_t>(data[pos + 1]) << 8);
-	pos += 2;
-	return true;
-}
-
-bool read_u32_le(const uint8_t *data, size_t len, size_t &pos, uint32_t &out) {
-	if (pos + 4 > len) return false;
-	out = static_cast<uint32_t>(data[pos]) | (static_cast<uint32_t>(data[pos + 1]) << 8) |
-	      (static_cast<uint32_t>(data[pos + 2]) << 16) | (static_cast<uint32_t>(data[pos + 3]) << 24);
-	pos += 4;
-	return true;
-}
-
-// Read a NUL-terminated ASCII string from a decrypted payload.
-bool read_cstr(const std::vector<uint8_t> &buf, size_t &pos, std::string &out) {
-	const size_t start = pos;
-	while (pos < buf.size() && buf[pos] != 0x00) ++pos;
-	if (pos >= buf.size()) return false; // no terminator
-	out.assign(reinterpret_cast<const char *>(buf.data() + start), pos - start);
-	++pos; // skip the NUL
-	return true;
-}
+using npwire_detail::Cursor;
 
 // One decrypted chunk: 4-byte magic + the SUBTRACT-chain-decrypted payload.
 struct GsbChunk {
@@ -254,23 +235,22 @@ struct GsbChunk {
 	std::vector<uint8_t> payload;
 };
 
-// Read one chunk at `pos`: [4-byte magic][u32 LE len][len bytes].
+// Read one chunk at the cursor: [4-byte magic][u32 LE len][len bytes].
 // Decrypts the payload in place with the SUBTRACT chain (our nwu_encrypt) — the
 // inverse of append_chunk's nwu_decrypt.
-bool read_chunk(const uint8_t *data, size_t len, size_t &pos, GsbChunk &out) {
-	if (pos + 8 > len) return false; // need magic(4) + length(4)
-	std::memcpy(out.magic, data + pos, 4);
-	pos += 4;
-	uint32_t payload_len = 0;
-	if (!read_u32_le(data, len, pos, payload_len)) return false;
-	// Bounds check in 64-bit so a wire-controlled payload_len near UINT32_MAX
-	// can't wrap the addition on a 32-bit build and slip an OOB read past the
-	// `pos + payload_len > len` test. gsb_parse_response runs on server bytes.
-	if (static_cast<uint64_t>(pos) + payload_len > static_cast<uint64_t>(len)) {
-		return false;
-	}
-	out.payload.assign(data + pos, data + pos + payload_len);
-	pos += payload_len;
+bool read_chunk(Cursor &c, GsbChunk &out) {
+	const uint8_t *magic = c.p;
+	c.skip(4);
+	const uint32_t payload_len = c.u32(); // need magic(4) + length(4)
+	if (!c.ok) return false;
+	std::memcpy(out.magic, magic, 4);
+	// Bounds check against the bytes left, so a wire-controlled payload_len near
+	// UINT32_MAX can't wrap a pointer sum and slip an OOB read past the test.
+	// gsb_parse_response runs on server bytes.
+	if (payload_len > static_cast<size_t>(c.end - c.p)) return false;
+	const uint8_t *body = c.p;
+	c.skip(payload_len);
+	out.payload.assign(body, body + payload_len);
 	if (!out.payload.empty()) {
 		nwu_encrypt(out.payload.data(), out.payload.size(), GSB_NWU_KEY);
 	}
@@ -323,14 +303,14 @@ void assign_field(GsbServerEntry &e, const std::string &name, const std::string 
 
 // FLDS: [u16 count][count × field-name cstr].
 bool parse_fields(const std::vector<uint8_t> &payload, std::vector<std::string> &names) {
-	size_t pos = 0;
-	uint16_t count = 0;
-	if (!read_u16_le(payload.data(), payload.size(), pos, count)) return false;
+	Cursor c{payload.data(), payload.data() + payload.size()};
+	const uint16_t count = c.u16();
+	if (!c.ok) return false;
 	names.clear();
 	names.reserve(count);
 	for (uint16_t i = 0; i < count; ++i) {
-		std::string name;
-		if (!read_cstr(payload, pos, name)) return false;
+		std::string name = c.cstr();
+		if (!c.ok) return false;
 		names.push_back(std::move(name));
 	}
 	return true;
@@ -344,27 +324,28 @@ bool parse_fields(const std::vector<uint8_t> &payload, std::vector<std::string> 
 bool parse_servers(const std::vector<uint8_t> &payload,
                    const std::vector<std::string> &field_names,
                    std::vector<GsbServerEntry> &servers) {
-	size_t pos = 0;
-	uint16_t count = 0;
-	if (!read_u16_le(payload.data(), payload.size(), pos, count)) return false;
+	Cursor c{payload.data(), payload.data() + payload.size()};
+	const uint16_t count = c.u16();
+	if (!c.ok) return false;
 	servers.reserve(servers.size() + count);
 	for (uint16_t i = 0; i < count; ++i) {
 		GsbServerEntry e{};
-		if (!read_u32_le(payload.data(), payload.size(), pos, e.rid)) return false;  // host id
-		if (pos + 4 > payload.size()) return false;
-		e.ip = ipv4_bytes_to_dotted(payload.data() + pos);  // in_addr wire bytes
-		pos += 4;
+		e.rid = c.u32();  // host id
+		const uint8_t *ip = c.p;
+		c.skip(4);
+		if (!c.ok) return false;
+		e.ip = ipv4_bytes_to_dotted(ip);  // in_addr wire bytes
 		for (const std::string &name : field_names) {
-			std::string value;
-			if (!read_cstr(payload, pos, value)) return false;
+			const std::string value = c.cstr();
+			if (!c.ok) return false;
 			assign_field(e, name, value);
 		}
-		uint16_t player_count = 0;
-		if (!read_u16_le(payload.data(), payload.size(), pos, player_count)) return false;
+		const uint16_t player_count = c.u16();
+		if (!c.ok) return false;
 		e.player_names.reserve(player_count);
 		for (uint16_t p = 0; p < player_count; ++p) {
-			std::string name;
-			if (!read_cstr(payload, pos, name)) return false;
+			std::string name = c.cstr();
+			if (!c.ok) return false;
 			e.player_names.push_back(std::move(name));
 		}
 		servers.push_back(std::move(e));
@@ -378,11 +359,11 @@ bool gsb_parse_response(const uint8_t *data, size_t len, GsbResponse &out) {
 	out = GsbResponse{};
 	if (!data || len < 8) return false; // need at least one chunk header
 
-	size_t pos = 0;
+	Cursor cursor{data, data + len};
 	bool reached_terminator = false;
-	while (pos < len) {
+	while (cursor.p < cursor.end) {
 		GsbChunk chunk;
-		if (!read_chunk(data, len, pos, chunk)) return false;
+		if (!read_chunk(cursor, chunk)) return false;
 		if (magic_is(chunk, "GSB ")) {
 			// Reset record: honored only when the payload starts with u32
 			// 0x00010000 [orig: 0x63d740 @ 0x63d8f2] — retail then frees the
