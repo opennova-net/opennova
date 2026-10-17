@@ -1007,7 +1007,7 @@ bool AiSystem::ai_handle_command(World &world, AiEntity &e, const AiEventEntry &
         // fadd 2^32 when negative [orig: flt_7C3288 @0x4658a4/@0x4658da],
         // fmul 1000.0 [orig: flt_7C6EC0], fmul the stored float32 of
         // 1/225000 [orig: flt_7C6EBC = 4.444444584805751e-06], fmul 65536
-        // [orig: flt_7C32BC], ftol2_sse @0x76bc00 (out-of-range converts to
+        // [orig: flt_7C32BC], _ftol2_sse @0x76bc00 (out-of-range converts to
         // the x87 indefinite 0x80000000 — the branch below).
         double value = static_cast<double>(ev.f[3]);
         if (value < 0.0) value += 4294967296.0;

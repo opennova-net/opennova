@@ -60,14 +60,14 @@ constexpr ReservedItem kRows[] = {
 	{2143, kAny, R::Warn, "Preloaded item", "", "The engine loads this item's models at every mission start."},
 	// The flags: the capture proximity [orig: Server_UpdateCaptureZoneProximity @ 0x5086a0, @0x508834],
 	// the scoring [orig: GameEvent_ProcessScoring @ 0x52f7e1], the waypoint name STRWPNAMEFLAG [orig:
-	// get_waypoint_name @ 0x594630, @0x5946B1..0x5946CD], the minimap [orig: Entity_ClassifyForMinimap @
+	// HUD_GetWaypointName @ 0x594630, @0x5946B1..0x5946CD], the minimap [orig: Entity_ClassifyForMinimap @
 	// 0x50fa70, @0x50FC14..0x50FC44]. 4096 and 4097, which retail ships no row of, at every site beside them.
 	{4091, kObject, R::Refuse, "Blue flag", "Flag, blue", "The flag games (Capture the Flag, Flag Ball) carry, capture and score this item as a flag."},
 	{4093, kObject, R::Refuse, "Red flag", "Flag, red", "The flag games (Capture the Flag, Flag Ball) carry, capture and score this item as a flag."},
 	{4095, kObject, R::Refuse, "Green flag", "Flag, green", "The flag games (Capture the Flag, Flag Ball) carry, capture and score this item as a flag."},
 	{4096, kObject, R::Refuse, "Flag", "", "The flag games check this item as a flag (retail ships no row of it)."},
 	{4097, kObject, R::Refuse, "Flag", "", "The flag games check this item as a flag (retail ships no row of it)."},
-	// The flag bays: STRWPNAMEFLAGBAY [orig: get_waypoint_name @ 0x594630, @0x5946E2..0x5946F0], the enemy
+	// The flag bays: STRWPNAMEFLAGBAY [orig: HUD_GetWaypointName @ 0x594630, @0x5946E2..0x5946F0], the enemy
 	// capture point [orig: SpawnPoint_FindNearestEnemyCapturePoint @ 0x4dd180, @0x4DD1EC], the minimap
 	// [orig: Entity_ClassifyForMinimap @ 0x50fa70, @0x50FC68..0x50FC80], the map's points [orig:
 	// Entity_BuildMapPoiLists @ 0x42de40, @0x42DF27]. 4101..4103, which retail ships no row of, beside them.
@@ -109,7 +109,7 @@ constexpr ReservedItem kRows[] = {
 	{6007, kMarker, R::Refuse, "Spawn zone scatter point", "LFP remote spawn",
 	 "A player spawning at a zone takes one of the first 32 of these within its radius."},
 	// The multiplayer map's points [orig: Entity_BuildMapPoiLists @ 0x42de40, @0x42E053..0x42E06F], their
-	// names [orig: assign_entity_overlay_names @ 0x523b20, @0x523C87], the HUD map [orig: HUD_DrawMapOverlay @
+	// names [orig: Game_AssignEntityOverlayNames @ 0x523b20, @0x523C87], the HUD map [orig: HUD_DrawMapOverlay @
 	// 0x5a5f40, @0x5A7614..0x5A76C5].
 	{6026, kMarker, R::Refuse, "Map point (alpha)", "waypoint, mp, alpha", "The multiplayer map shows this marker as a point."},
 	{6027, kMarker, R::Refuse, "Map point (red base)", "waypoint, mp, red base", "The multiplayer map shows this marker as the red base."},

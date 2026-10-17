@@ -111,7 +111,7 @@ bool text_of(const Table &table, std::string &text, std::string &error) {
 			if (spec.real) {
 				const float real = real_value(row, spec.property);
 				// A key the section lacks reads 0: the table is cleared first [orig: CharAttr_LoadFromDef @
-				// 0x412168] and the accessor zeroes its output [orig: effect_get_param_value_0 @ 0x75fa00]. Only a
+				// 0x412168] and the accessor zeroes its output [orig: Effect_GetParamValue_0 @ 0x75fa00]. Only a
 				// float of all-zero bits is that 0 (a -0.0 is written).
 				if (same_bits(real, 0.0f)) continue;
 				if (!spell_float(real, value)) {
