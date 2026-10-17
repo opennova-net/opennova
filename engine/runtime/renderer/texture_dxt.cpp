@@ -51,6 +51,12 @@ constexpr uint32_t kSteps4[] = {0, 2, 3, 1};
 constexpr uint32_t kSteps6[] = {0, 2, 3, 4, 5, 1};
 constexpr uint32_t kSteps8[] = {0, 2, 3, 4, 5, 6, 7, 1};
 
+// The 4x4 blocks across a side: (side + 3) / 4 without the 32-bit wrap a side past 0xFFFFFFFC
+// takes (to 0 blocks).
+uint32_t blocks_across(uint32_t side) {
+	return side / 4 + ((side & 3u) != 0 ? 1u : 0u);
+}
+
 uint16_t read_u16(const uint8_t *bytes) {
 	return static_cast<uint16_t>(bytes[0] | (bytes[1] << 8));
 }
@@ -724,9 +730,11 @@ void decode_dxt5_block(const uint8_t *block, DxtBlockColors &texels) {
 
 bool DxtSurface::is_valid() const noexcept {
 	const size_t bytes = dxt_block_bytes(format);
-	return bytes != 0 && width != 0 && height != 0 &&
-			blocks.size() == static_cast<size_t>((width + 3) / 4) *
-					((height + 3) / 4) * bytes;
+	if (bytes == 0 || width == 0 || height == 0) return false;
+	// The block count compared row by row in 64 bits: the product of two block counts can pass
+	// 64 bits, and a wrapped count would make an empty vector "valid".
+	const uint64_t row_bytes = static_cast<uint64_t>(blocks_across(width)) * bytes;
+	return blocks.size() % row_bytes == 0 && blocks.size() / row_bytes == blocks_across(height);
 }
 
 std::vector<DxtColor> decode_rgba8(const uint8_t *rgba, uint32_t width,
@@ -769,8 +777,8 @@ DxtSurface encode_dxt_surface(const std::vector<DxtColor> &colors,
 	surface.format = format;
 	surface.width = width;
 	surface.height = height;
-	const uint32_t blocks_x = (width + 3) / 4;
-	const uint32_t blocks_y = (height + 3) / 4;
+	const uint32_t blocks_x = blocks_across(width);
+	const uint32_t blocks_y = blocks_across(height);
 	surface.blocks.resize(static_cast<size_t>(blocks_x) * blocks_y * block_bytes);
 	// Past an edge, texel column (row) 1 and 2 repeat texel 0 and column 3
 	// repeats column 1. [orig: v36 = {0, 0, 0, 1} @ 0x6EDE25..0x6EDE34]
@@ -819,8 +827,8 @@ std::vector<DxtColor> decode_dxt_surface(const DxtSurface &surface) {
 	if (!surface.is_valid()) return colors;
 	colors.resize(static_cast<size_t>(surface.width) * surface.height);
 	const size_t block_bytes = dxt_block_bytes(surface.format);
-	const uint32_t blocks_x = (surface.width + 3) / 4;
-	const uint32_t blocks_y = (surface.height + 3) / 4;
+	const uint32_t blocks_x = blocks_across(surface.width);
+	const uint32_t blocks_y = blocks_across(surface.height);
 	for (uint32_t by = 0; by < blocks_y; ++by) {
 		for (uint32_t bx = 0; bx < blocks_x; ++bx) {
 			const uint8_t *block = surface.blocks.data() +
