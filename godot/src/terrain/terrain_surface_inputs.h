@@ -8,6 +8,7 @@
 #include <godot_cpp/variant/dictionary.hpp>
 #include <godot_cpp/variant/rect2i.hpp>
 
+#include <runtime/renderer/device_texture.h>
 #include <runtime/terrain/texture_preprocess.h>
 
 #include <runtime/terrain_query/coords.h>
@@ -30,6 +31,8 @@ private:
 	Ref<TerrainTileInfo> tile_info_override;
 	// The session's texcompression_level (the fresh profile's until handed one).
 	int texcompression_level = 1;
+	// The session's terrain_texdetail (the fresh profile's until handed one).
+	int terrain_texdetail = opennova::renderer::kTerrainTexDetailFreshProfile;
 
 	Ref<Texture2D> detail_coefficient_texture;
 	Ref<Texture2D> normalized_blend_texture;
@@ -57,6 +60,10 @@ public:
 	// cache builds (renderer/texture_compression.h, D-RMAT-24).
 	void set_texcompression_level(int p_level) { texcompression_level = p_level; }
 	int get_texcompression_level() const { return texcompression_level; }
+	// The session's game.cfg terrain_texdetail: the detail layers' halving word
+	// (rebuild_detail_textures; renderer::terrain_texdetail_flags).
+	void set_terrain_texdetail(int p_level) { terrain_texdetail = p_level; }
+	int get_terrain_texdetail() const { return terrain_texdetail; }
 
 	bool rebuild(const Ref<TerrainData> &p_data,
 			const Ref<TerrainTileInfo> &p_tile_info = Ref<TerrainTileInfo>());

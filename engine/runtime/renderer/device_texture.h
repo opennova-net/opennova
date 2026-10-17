@@ -45,8 +45,17 @@ uint32_t object_texdetail_flags(int level, uint8_t slot);
 // The terrain texture detail: game.cfg `terrain_texdetail` (0..3, 3 full detail) [orig:
 // Config_ParseSettingsLine @ 0x551135], copied into the session's settings with the rest [orig:
 // Game_ApplySessionSettingsToGlobals @ 0x551565..0x551574, g_TerrainTexDetail @ 0x24D2044], which
-// Terrain_Init hands the terrain's settings setter [orig: Terrain_Init @ 0x60FC2A..0x60FC36].
+// Terrain_Init loads and hands the terrain's settings setter [orig: Terrain_Init @ 0x60FC0D, the push
+// @ 0x60FC2A..0x60FC36]; nothing writes it mid-mission.
 inline constexpr int kTerrainTexDetailFull = 3;
+// The word a fresh profile starts at: the first-launch quality pass writes quality_levels[1] = 3 on a
+// card with the shader-model-2 mark and a CPU past 2980 MHz, else 2, one less without more than 120 MB
+// of video memory, plus the preset offset (0 on the first launch), then the 0..3 clamp; the reference
+// machine has all three, so full detail [orig: Renderer_ComputeQualityLevels @0x58617E..0x586193
+// (caps[8] && caps[0] ? 3 : 2, --without caps[3]), the clamp @0x58629A..0x5862A9; sub_587790's caps
+// @0x5877F5 (CPU > 2980 MHz), @0x587834 (display memory > 0x7800000), @0x58787A (the SM2 mark);
+// the first launch's offset 0 @0x53ED0D].
+inline constexpr int kTerrainTexDetailFreshProfile = kTerrainTexDetailFull;
 
 // The halving flag the terrain's detail (splat) layers load with at terrain texture detail `level`:
 // two halvings at 0, one at 1 or 2, none at any other [orig: sub_605D70 @ 0x605DBF (0x20000),

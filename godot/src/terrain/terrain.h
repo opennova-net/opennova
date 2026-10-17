@@ -334,6 +334,11 @@ public:
 	// over before it builds the mission's terrain.
 	void set_texcompression_level(int p_level);
 	int get_texcompression_level() const;
+	// The session's game.cfg terrain_texdetail the detail layers are halved by
+	// (renderer::terrain_texdetail_flags), from the next build, handed over as
+	// texcompression_level is.
+	void set_terrain_texdetail(int p_level);
+	int get_terrain_texdetail() const;
 
 	void set_environment_path(const NodePath& p_path);
 	NodePath get_environment_path() const;
