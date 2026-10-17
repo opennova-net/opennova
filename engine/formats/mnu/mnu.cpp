@@ -958,9 +958,12 @@ void TreeReader::read_window_body(const Node &node, Window &w, ReadScope &frame)
       w.table_data.min_item_height = number_text(child);
       w.table_data.has_min_item_height = true;
       // [orig: CTableWnd_RecalcLayout @ 0x63f1a0, idiv @ 0x63f26b: 0 stays 0, only below 0 is replaced
-      //  @ 0x63f1ee]
-      if (child.read && w.table_data.min_item_height == 0 && w.type == WindowType::Table)
-        crash_note(child, "MIN_ITEM_HEIGHT 0 divides by zero when retail lays the table out.");
+      //  @ 0x63f1ee]; a list's (every CListWnd: LIST, LAN_LIST, a combo's LIST_BOX) divides by it as its row
+      //  height [orig: CListWnd_ParseXMLDefinition @ 0x645770, the store @ 0x646032; CListWnd_RecalcLayout
+      //  @ 0x6443d0, taken where not below 0 @ 0x6443e0, the idiv @ 0x644444]
+      if (child.read && w.table_data.min_item_height == 0 && (w.type == WindowType::Table || list_rule))
+        crash_note(child, std::string("MIN_ITEM_HEIGHT 0 divides by zero when retail lays the ") +
+                              (list_rule ? "list" : "table") + " out.");
     } else if (tag_is(child, "FIXED_HEADER_HEIGHT")) {
       singleton(frame, child, "FIXED_HEADER_HEIGHT", false);
       w.table_data.fixed_header_height = number_text(child);

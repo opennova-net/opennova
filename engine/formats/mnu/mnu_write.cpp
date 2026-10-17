@@ -749,9 +749,13 @@ void IssueCheck::window(const Window &w, const std::string &locator, const char 
 	};
 	for (const auto &[part, part_tag] : typed_parts)
 		if (*part) window(**part, at(locator, strutil::to_lower(part_tag).c_str(), 0), part_tag, true);
-	// [orig: CTableWnd_RecalcLayout @ 0x63f1a0, idiv @ 0x63f26b]
-	if (w.type == WindowType::Table && w.table_data.has_min_item_height && w.table_data.min_item_height == 0)
-		add(name, locator, "min_item_height", "MIN_ITEM_HEIGHT 0 divides by zero when retail creates the table.");
+	// [orig: CTableWnd_RecalcLayout @ 0x63f1a0, idiv @ 0x63f26b; every CListWnd's row height, LIST, LAN_LIST and a
+	//  combo's LIST_BOX: CListWnd_RecalcLayout @ 0x6443d0, idiv @ 0x644444, from CListWnd_Init @ 0x644d6f, the LAN
+	//  list's @ 0x65bddf, CComboWnd_Init @ 0x65c3d3]
+	if (list && w.table_data.has_min_item_height && w.table_data.min_item_height == 0)
+		add(name, locator, "min_item_height",
+		    std::string("MIN_ITEM_HEIGHT 0 divides by zero when retail lays the ") +
+		            (w.type == WindowType::Table ? "table" : "list") + " out.");
 	// [orig: CEditWnd_ParseXMLProperties @ 0x661e5f; CCheckWnd_ParseXMLDefinition @ 0x64ae05]
 	const bool edit = w.type == WindowType::Edit || w.type == WindowType::MultilineEdit ||
 	                  w.type == WindowType::RadioEdit;
