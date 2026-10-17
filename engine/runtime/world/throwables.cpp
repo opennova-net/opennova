@@ -709,9 +709,15 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
         ProjectileHit hit;
         const FixedVec3 start{to_fixed(r.pos.x), to_fixed(r.pos.y), to_fixed(r.pos.z)};
         if (motor_item_sweep(world, collision, r, start, f, speed, hit)) {
-            f.px = hit.position_q16.x;
-            f.py = hit.position_q16.y;
-            f.pz = hit.position_q16.z;
+            // An item contact puts the round back at its start-of-tick pose
+            // (+0x80..+0x88, the previous tail's copy), where the stick and the
+            // contact's payload read it [orig: Entity_UpdateSatchelPhysics
+            // @0x448818..0x44882A, stored @0x448914..0x44891E, the payload
+            // @0x448931..0x448956; Entity_UpdateClaymorePhysics
+            // @0x4477CA..0x4477E4, stored @0x44789A..0x4478A4].
+            f.px = start.x;
+            f.py = start.y;
+            f.pz = start.z;
             ++r.bounce_count;
             {
                 const int32_t n[3] = {hit.normal_q16.x, hit.normal_q16.y,

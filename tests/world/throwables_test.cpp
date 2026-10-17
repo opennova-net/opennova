@@ -558,6 +558,36 @@ void test_motor_sweep_ignores_non_pool_domains() {
     run_case(false, false, true);  // person at x≈16 used to mask the item
 }
 
+// An item contact puts a satchel back at its start-of-tick pose (+0x80..+0x88),
+// where the stick and the contact's payload read it, not at the hit point.
+// [orig: Entity_UpdateSatchelPhysics @0x448818..0x44882A, stored
+//  @0x448914..0x44891E]
+void test_satchel_item_contact_restores_the_tick_start_pose() {
+    Rig rig(0);
+    rig.w.tables.ammo.entries[kAmmoSatchel].flags |= 0x80u; // no terrain leg
+    Entity item;
+    item.kind = EntityKind::Item;
+    item.alive = true;
+    item.position = Vec3{18.0f, 10.0f, -4.0f};
+    item.yaw = 90; // identity model placement [orig: entity matrix @0x613F40]
+    item.bound_radius = 0.4f;
+    const EntityHandle item_h = rig.w.registry.spawn(1, item);
+    CHECK(item_h.valid());
+    CollisionWorld collision;
+    collision.assign_entity(item_h, collision.add_model(projectile_wall_model(0.4)));
+    collision.build_tick_tables(rig.w);
+    const int slot = rig.throw_ammo(kAmmoSatchel, Vec3{10.0f, 10.0f, 4.0f}, 0, 0);
+    CHECK(slot >= 0);
+    if (slot < 0) return;
+    LiveRound &round = rig.w.round_sim.rounds[size_t(slot)];
+    round.vel = Vec3{10.0f, 0.0f, -10.0f};
+    const FixedVec3 before{to_fixed(round.pos.x), to_fixed(round.pos.y), to_fixed(round.pos.z)};
+    rig.w.round_sim.tick(rig.w, nullptr, &collision);
+    CHECK(round.bounce_count == 1); // the wall took the contact
+    CHECK(to_fixed(round.pos.x) == before.x && to_fixed(round.pos.y) == before.y &&
+          to_fixed(round.pos.z) == before.z);
+}
+
 // Retail's grenade-bounce spin and the host's retained S2C 0x39 seed both call
 // PRNG_Next16 over the one process-global dword_31BFBB0. A network control draw
 // must therefore advance the exact stream consumed by the next bounce kick.
@@ -2127,6 +2157,7 @@ int main() {
     test_grenade_bounce_samples_charmap_surface();
     test_grenade_bounce_past_the_table_plays_the_obj_row();
     test_satchel_contact_presents_sound_only_and_no_water_gate();
+    test_satchel_item_contact_restores_the_tick_start_pose();
     test_grenade_fuse_tick_boundaries();
     test_smoke_grenade_expiry_presents_no_second_obj_row();
     test_submerged_fuse_presents_at_the_water_surface();
