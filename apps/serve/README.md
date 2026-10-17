@@ -6,8 +6,10 @@ Godot, configured by a host file, retail's own dedicated-server format, over the
 `/game` names another title) the way `opennova.exe` mounts it, boots the starting mission through the engine's one host boot
 (`engine/runtime/inmatch/host_boot.h`, the same two phases the game's hosts run), binds
 `game.cfg`'s LAN port range (or, given a NovaWorld gate, its NovaWorld one, listing itself there),
-answers LAN browsers and admits joiners, retail clients included, and takes retail's remote
-admin when `game.cfg` names its port. Pre-1.0 and experimental.
+answers LAN browsers and admits joiners, and takes retail's remote admin when `game.cfg`
+names its port. A stock retail client has joined it as DFX2 (`/game dfx2`: a retail `dfx2.exe`
+on LAN and through OpenNova's NovaWorld, 2026-10-14, `docs/titles/dfx2-vs-jo-re.md` §7.13); a stock
+`Jointops.exe` join is not yet recorded. Pre-1.0 and experimental.
 
 ## Usage
 
