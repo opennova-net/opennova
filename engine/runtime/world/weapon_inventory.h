@@ -20,6 +20,9 @@
 
 namespace opennova::world {
 
+class World;
+struct Entity;
+
 // Weapon-slot combo = category*65 + rank; 12 categories x 65 ranks = 780 slots
 // [orig: slot = table + 100*(rank + 65*category) @ 0x5415D3; scans clamp @ 780].
 namespace weapon_combo {
@@ -267,23 +270,49 @@ int32_t weapon_inventory_loadout_weight_fp16(const WeaponTable &table,
 // clamped by what the pool affords; def+0xDC selects the shared loaded-round bucket.
 void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &inv);
 
-// The owner's seat as the slot-table ammo accessors read it, entity+0x168: on a UseGun
-// seat (3) the redraw returns at once; on a controller seat (2) every loaded-round
-// bucket reads 0 and takes no write, a draw spends nothing, and each pool reads as the
-// seated carrier's own reserve when the carrier is an EWeap item, else 0 - ammo class 1
-// always 0. Every other seat reads the owner's own tables.
-// [orig: WeaponSlots_RecalculateAmmoFromCapacity @0x54228D..0x542294; sub_5405F0
-//  @0x540608..0x540627; sub_540670 @0x540684..0x540692; WeaponSlot_DecrementAmmo
-//  @0x540920 (seat 2 -> 0); Entity_GetScoreValueBySlotType @0x540721..0x540739 (the
-//  carrier's EWeap bit), the class-1 leg @0x54073F..0x540757 (seat 2 -> 0 @0x540794),
-//  @0x540764..0x540769 (sub_546120 @0x546120), @0x54078F..0x540799]
+// The owner's seat as the slot-table ammo accessors read it: entity+0x168 and the
+// seated carrier (entity+0x16C). A UseGun seat (3) reads each pool as the carrier's
+// MountSlot reserve (ammo class 1 as its +0x120 word) and each loaded-round bucket as
+// its MountSlot clip, writes no bucket, and its redraw returns at once; a controller
+// seat (2) reads each bucket as 0 and writes none, spends nothing, and reads each pool
+// as the carrier's reserve when the carrier is an EWeap item, else 0 (ammo class 1
+// always 0). Every other seat reads the owner's own tables. The carrier's reserve and
+// clip are its one MountSlot's here (retail reads its +710 / +708 words, or +1158 /
+// +1156 under its def's PlayerControl bit; 0 without an item def).
+// [orig: Entity_GetScoreValueBySlotType @0x5406E0 - the carrier @0x540707..0x54071A,
+//  its EWeap bit @0x540721..0x540739, the class-1 leg @0x54073F..0x540763, sub_546120
+//  @0x540764..0x540774, seat 2 -> 0 @0x54078F..0x540799; sub_5405F0 @0x540604..0x540627
+//  (sub_5461A0 @0x5461A0); sub_540670 @0x540684..0x540692; WeaponSlot_DecrementAmmo
+//  @0x540920; WeaponSlots_RecalculateAmmoFromCapacity @0x54228D..0x542294]
 struct WeaponAmmoSeat {
-    int32_t parent_slot = 0;            // entity+0x168: 2 controller, 3 UseGun
-    bool carrier_reserve_valid = false; // a controller seat under an EWeap carrier
-    int32_t carrier_reserve = 0;        // that carrier's MountSlot reserve word
+    int32_t parent_slot = 0;      // entity+0x168: 2 controller, 3 UseGun
+    bool carrier = false;         // a seated carrier exists
+    bool carrier_eweap = false;   // its item def's EWeap bit
+    int32_t carrier_reserve = 0;  // sub_546120: its MountSlot reserve word
+    int32_t carrier_clip = 0;     // sub_5461A0: its MountSlot clip word
+    int32_t carrier_class1 = 0;   // its +0x120 word
 };
+// The entity's seat, read off its mount [orig: entity+0x168 / +0x16C].
+WeaponAmmoSeat entity_ammo_seat(const World &world, const Entity &entity);
+// A pool read through the seat; `own` is the owner's own pool for the class.
+// [orig: Entity_GetScoreValueBySlotType @0x5406E0]
+int32_t weapon_seat_pool(const WeaponAmmoSeat &seat, int class_id, int32_t own);
+// A loaded-round bucket read through the seat; `own` is the owner's own bucket.
+// [orig: sub_5405F0 @0x5405F0]
+int32_t weapon_seat_bucket(const WeaponAmmoSeat &seat, int32_t own);
+// Whether the seat writes the owner's buckets [orig: sub_540670 @0x540684..0x540692].
+bool weapon_seat_writes_buckets(const WeaponAmmoSeat &seat);
 void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &inv,
                                    const WeaponAmmoSeat &seat);
+// The total clips and the loadout weight with the owner's seat (the seatless forms are
+// the unseated owner) [orig: WeaponSlot_GetTotalClips @0x5425F0 - the pool
+//  @0x542638, the bucket @0x542651; Server_RecalculateAllPlayerScores @0x501546 /
+//  @0x5015CF; Terrain_AccumulateSectorScores @0x425220].
+int32_t weapon_inventory_total_clips(const WeaponTable &table, const WeaponInventory &inv,
+                                     int32_t combo, const WeaponAmmoSeat &seat);
+int32_t weapon_inventory_loadout_weight_fp16(const WeaponTable &table,
+                                             const WeaponInventory &inv,
+                                             const WeaponAmmoSeat &seat);
 
 // The eligibility ammo score [orig: Score_CalculateKillScore @ 0x5407E0 in its
 // slot-predicate role: pool for the def's ammo class + the slot's loaded rounds].

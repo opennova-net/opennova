@@ -1490,6 +1490,40 @@ bool check_kit_weight_recompute() {
 			"the host's own spent clip lightens its kit on the periodic second");
 }
 
+// The kit weight reads its clip counts through the player's seat: on a UseGun seat
+// the rifle's count is the carrier's MountSlot reserve plus the slot's own clip.
+// [orig: Server_RecalculateAllPlayerScores @0x5014E0 - WeaponSlot_GetTotalClips
+//  @0x501546 with the slot's entity; Entity_GetScoreValueBySlotType @0x540707..0x540774]
+bool check_kit_weight_reads_the_seat() {
+	w::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 4);
+	install_rifle_armory(world);
+	const w::EntityHandle remote = w::spawn_remote_player(world, player_spawn(3, 0, 0));
+	std::vector<inmatch::NapiNPConnection> roster;
+	roster.push_back(make_seeded_conn(3, 1, nullptr, ns::TransportMode::Client, remote, true));
+	inmatch::NapiNPConnection &conn = roster.front();
+	conn.weapon_slots[3 * 65 + 2] = inmatch::WeaponSlotState{5, 30};
+	conn.reply.ammo_pools[0] = 60;
+	auto weight = [&]() -> int32_t {
+		inmatch::Server_RecalculateAllPlayerKitWeights(roster, world);
+		const w::AiEntity *body = world.ai.for_handle(remote);
+		return body != nullptr ? body->inf.loadout_weight_fp16 : -1;
+	};
+	if (!expect(weight() == 0x60000, "an unseated rifle counts 60 + 30 -> 3 clips"))
+		return false;
+	w::Entity carrier;
+	carrier.has_item_def = true;
+	carrier.primary_weapon_slot.reserve = 90;
+	w::Entity *body = world.registry.get(remote);
+	body->mounted = true;
+	body->mount_type = w::SeatType::Gunner;
+	body->mount_target = world.registry.spawn(1, carrier);
+	return expect(weight() == 0x70000,
+			"a UseGun seat counts the carrier's reserve: 90 + 30 -> 4 clips");
+}
+
 // --------------------------------------------------------------------------
 // The deploy's kit rebuild from the loadout buffer (D-NET-378).
 // --------------------------------------------------------------------------
@@ -2768,6 +2802,7 @@ int main() {
 	ok = check_armory_reuse_cooldown() && ok;
 	ok = check_priority_target_sweep() && ok;
 	ok = check_kit_weight_recompute() && ok;
+	ok = check_kit_weight_reads_the_seat() && ok;
 	ok = check_deploy_rebuilds_the_kit_from_the_loadout_buffer() && ok;
 	ok = check_loadout_damage_class_bytes() && ok;
 	ok = check_loadout_sub_variant_rows() && ok;

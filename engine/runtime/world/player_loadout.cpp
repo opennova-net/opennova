@@ -131,10 +131,14 @@ void local_loadout_rebuild(World &world, LocalPlayerLoadout &loadout,
     for (const std::string &w : fill.warnings)
         io::logf(io::LogLevel::kWarn, "%s", w.c_str()); // [orig: ErrorLog_WriteTimestamped]
     weapon_inventory_seed_pools(table, inventory, seed_class);
-    weapon_inventory_recalc_clips(table, inventory);
+    // The redraw and the weight read through the player's seat (an unseated
+    // spawn reads its own tables) [orig: WeaponSlots_RecalculateAmmoFromCapacity
+    //  @0x54228D; WeaponSlot_GetTotalClips @0x542638 / @0x542651].
+    const WeaponAmmoSeat seat = e != nullptr ? entity_ammo_seat(world, *e) : WeaponAmmoSeat{};
+    weapon_inventory_recalc_clips(table, inventory, seat);
     // The loadout weight the next 0x5A apply would stamp into entity+0x37C
     // [orig: Terrain_AccumulateSectorScores @0x425220 via @0x4296f9].
-    loadout.weight_fp16 = weapon_inventory_loadout_weight_fp16(table, inventory);
+    loadout.weight_fp16 = weapon_inventory_loadout_weight_fp16(table, inventory, seat);
     if (e != nullptr) e->carry_flags = (e->carry_flags & ~0x18u) | inventory.carry_flags;
     inventory_valid = true;
     weapon.switch_in_flight = false;
@@ -233,11 +237,17 @@ bool local_loadout_apply_accept(World &world, LocalPlayerLoadout &loadout,
             break; // the FIRST different-class sub-variant [orig: @ 0x5027c8 shape]
         }
     }
-    weapon_inventory_recalc_clips(table, inventory);
+    // Both read through the player's seat; a joiner applying before L
+    // exists reads its own tables [orig: WeaponSlots_RecalculateAmmoFromCapacity
+    //  @0x54228D; WeaponSlot_GetTotalClips @0x542638 / @0x542651].
+    const Entity *seated = world.registry.get(world.cached.local_player);
+    const WeaponAmmoSeat seat =
+            seated != nullptr ? entity_ammo_seat(world, *seated) : WeaponAmmoSeat{};
+    weapon_inventory_recalc_clips(table, inventory, seat);
     // The S2C 0x5A apply's last leg: the loadout weight into the local
     // entity's +0x37C (the run-promotion band) [orig:
     // NapiNPClientMsg_HandleWeaponLoadoutSync @0x4296f9 -> @0x425220].
-    loadout.weight_fp16 = weapon_inventory_loadout_weight_fp16(table, inventory);
+    loadout.weight_fp16 = weapon_inventory_loadout_weight_fp16(table, inventory, seat);
     return true;
 }
 

@@ -199,7 +199,9 @@ void action_pickup(World &world, const PowerupDef &def, const PowerupAction &act
     if (def.allammo) {
         if (inv != nullptr) {
             weapon_inventory_seed_pools(table, *inv, picker.player_class);
-            weapon_inventory_recalc_clips(table, *inv);
+            // The redraw reads through the picker's seat [orig:
+            //  WeaponSlots_RecalculateAmmoFromCapacity @0x54228D, the call @0x4DC38F].
+            weapon_inventory_recalc_clips(table, *inv, entity_ammo_seat(world, picker));
             // Retail's slot table IS the running weapon's magazine (slot+16);
             // here the held weapon's FSM carries its own copy, which the next
             // pump mirrors back into the inventory, so the redrawn clip has to

@@ -814,7 +814,8 @@ void test_recalc_seat_legs() {
     CHECK(inv.slot(3 * 65 + 1)->clip == 0 && inv.slot(3 * 65 + 2)->clip == 0 &&
           inv.pools[1] == 50 && inv.pools[2] == 50);
     seat.parent_slot = 2;
-    seat.carrier_reserve_valid = true;
+    seat.carrier = true;
+    seat.carrier_eweap = true;
     seat.carrier_reserve = 4;
     weapon_inventory_recalc_clips(t, inv, seat);
     CHECK(inv.slot(3 * 65 + 1)->clip == 0);
@@ -822,8 +823,49 @@ void test_recalc_seat_legs() {
     CHECK(inv.pools[1] == 50 && inv.pools[2] == 50);
 }
 
+// The clip counts and the loadout weight read through the seat: a UseGun seat counts
+// the carrier's MountSlot reserve against the slot's own loaded rounds, a controller
+// seat under a carrier that is no EWeap item counts no pool.
+// [orig: WeaponSlot_GetTotalClips @0x5425F0 - the pool @0x542638, the slot word
+//  @0x54265B; Entity_GetScoreValueBySlotType @0x540707..0x540799;
+//  Terrain_AccumulateSectorScores @0x425220]
+void test_total_clips_seat_legs() {
+    WeaponTable t;
+    t.ammo_class_names = {"", "CLASS_MANA", "CLS_B"};
+    t.ammo_class_caps = {1000, 1000, 1000};
+    t.entries.resize(3);
+    WeaponTableEntry &e = t.entries[2];
+    e.name = "WPN_SEATED";
+    e.valid = true;
+    e.category = 3;
+    e.rank = 2;
+    e.clipsize = 10;
+    e.ammo_class_id = 2;
+    e.ammo_class_count = 1;
+    e.weaponweight_fp16 = 0x10000;
+    e.clipweight_fp16 = 0x10000;
+    WeaponInventory inv;
+    inv.reset(t);
+    inv.slots[3 * 65 + 2].adm_index = 2;
+    inv.slots[3 * 65 + 2].clip = 5;
+    inv.pools[2] = 25;
+    CHECK(weapon_inventory_total_clips(t, inv, 3 * 65 + 2) == 3);
+    CHECK(weapon_inventory_loadout_weight_fp16(t, inv) == 0x40000);
+    WeaponAmmoSeat seat;
+    seat.parent_slot = 3;
+    seat.carrier = true;
+    seat.carrier_reserve = 40;
+    seat.carrier_clip = 7;
+    CHECK(weapon_inventory_total_clips(t, inv, 3 * 65 + 2, seat) == 4);
+    CHECK(weapon_inventory_loadout_weight_fp16(t, inv, seat) == 0x50000);
+    seat.parent_slot = 2;
+    CHECK(weapon_inventory_total_clips(t, inv, 3 * 65 + 2, seat) == 0);
+    CHECK(weapon_inventory_loadout_weight_fp16(t, inv, seat) == 0x10000);
+}
+
 int main() {
     test_recalc_seat_legs();
+    test_total_clips_seat_legs();
     test_slot_bar_scan();
     test_fill_seeds_the_slot_zoom();
     test_two_weapons_share_loaded_ammo();

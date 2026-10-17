@@ -82,20 +82,14 @@ bool loadout_envelope_accepted(const LoadoutSubmit &req, uint32_t game_type);
 // Resolve the accepted submission into the granted kit: the S2C 0x5A reply, the authority
 // ammo pool image, the per-ammo damage classes, the carry flags and the rebuilt slot rows.
 // The rebuild starts from the slot's pools and buckets and reads its revive latch, team
-// and the entity's seat (player_ammo_seat). A null/empty `table` is the resource-less
-// request-echo fallback.
+// and the entity's seat (world::entity_ammo_seat). A null/empty `table` is the
+// resource-less request-echo fallback.
 GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 										  uint16_t class_allow_mask,
 										  const world::WeaponTable *table,
 										  const NapiNPConnection &conn,
 										  const world::WeaponAmmoSeat &seat);
 
-// The player's seat as its slot table's ammo accessors read it: entity+0x168 while
-// mounted, and on a controller seat the carrier's own reserve when the carrier is an
-// EWeap item (WeaponAmmoSeat). [orig: Entity_GetScoreValueBySlotType @0x5406E0 - the
-//  carrier entity+0x16C @0x540707, its def's EWeap bit @0x540727..0x540739;
-//  sub_546120 @0x546120, ported over the carrier's one MountSlot]
-world::WeaponAmmoSeat player_ammo_seat(const world::World &world, const world::Entity &player);
 
 // The accept's damage-class stores onto the slot's table (NapiNPConnection::
 // ammo_damage_classes), the accept's alone: the deploy's rebuild writes none.

@@ -124,7 +124,7 @@ void reinit_listed_slots(const world::WeaponTable &table, world::WeaponInventory
 		world::weapon_slot_init_from_def(*def, static_cast<int16_t>(adm), *slot, player_class,
 				/*allow_sniper_scope_zoom=*/true);
 		const uint32_t bucket = static_cast<uint32_t>(def->ammo_bucket);
-		if (seat.parent_slot != 2 && seat.parent_slot != 3 && bucket < inv.shared_clips.size())
+		if (world::weapon_seat_writes_buckets(seat) && bucket < inv.shared_clips.size())
 			inv.shared_clips[bucket] = 0;
 	}
 }
@@ -157,7 +157,7 @@ void clear_loaded_rounds(const world::WeaponTable &table, world::WeaponInventory
 		const world::WeaponTableEntry *def =
 				table.by_index(static_cast<uint8_t>(slot->adm_index));
 		if (def == nullptr || def->ammo_class_count == 0) continue;
-		if (def->ammo_bucket != 0 && seat.parent_slot == 2) continue;
+		if (def->ammo_bucket != 0 && !world::weapon_seat_writes_buckets(seat)) continue;
 		world::weapon_inventory_set_loaded_rounds(table, inv, combo, 0);
 	}
 }
@@ -248,19 +248,6 @@ void finish_grant(const world::WeaponTable &table, const world::WeaponInventory 
 }
 
 } // namespace
-
-world::WeaponAmmoSeat player_ammo_seat(const world::World &world, const world::Entity &player) {
-	world::WeaponAmmoSeat seat;
-	if (!player.mounted) return seat;
-	seat.parent_slot = static_cast<int32_t>(player.mount_type);
-	const world::Entity *carrier = world.registry.get(player.mount_target);
-	if (seat.parent_slot == 2 && carrier != nullptr && carrier->has_item_def &&
-	    (carrier->item_attrib & world::kItemAttribEweap) != 0) {
-		seat.carrier_reserve_valid = true;
-		seat.carrier_reserve = static_cast<int16_t>(carrier->primary_weapon_slot.reserve);
-	}
-	return seat;
-}
 
 // The 0x2F submission envelope, checked BEFORE anything is applied: the team byte must be 1..4 —
 // above 4 passes only in a team-less game type — and a NONZERO class byte must be 5..9. Both header
@@ -415,7 +402,7 @@ void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &wor
                                        world::Entity &player) {
 	const world::WeaponTable &table = world.tables.weapons;
 	if (!conn.reply.loadout_buffer_set || table.empty()) return;
-	const world::WeaponAmmoSeat seat = player_ammo_seat(world, player);
+	const world::WeaponAmmoSeat seat = world::entity_ammo_seat(world, player);
 	const LoadoutSubmit &buffer = conn.reply.loadout_buffer;
 	const uint8_t cls = static_cast<uint8_t>(conn.slot_class);
 	const std::vector<KitEntry> entries = admitted_entries(buffer, buffer.player_class, table);

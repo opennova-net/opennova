@@ -94,7 +94,8 @@ void Server_ApplyPowerupGrants(std::vector<NapiNPConnection> &roster, world::Wor
 		if (grant.allammo) {
 			world::weapon_inventory_seed_pools(
 					table, inventory, body != nullptr ? body->player_class : 0);
-			world::weapon_inventory_recalc_clips(table, inventory);
+			world::weapon_inventory_recalc_clips(table, inventory,
+					body != nullptr ? world::entity_ammo_seat(world, *body) : world::WeaponAmmoSeat{});
 		}
 		for (const auto &[class_id, amount] : grant.ammo_adds)
 			world::weapon_pool_add(table, inventory, class_id, amount);
