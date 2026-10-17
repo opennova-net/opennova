@@ -1593,13 +1593,11 @@ void Server_RearmMinimapInitialScan(NapiNPServerCtx &ctx) {
 // different ammo class at the main clipweight, and store the 16.16 sum into
 // entity+892 (the run-promotion band input). The listen host's own player rows
 // ARE its local inventory (LocalPlayerLoadout::weight_fp16 mirrors into its
-// body every tick); a remote player's rows are the granted combos with their
-// live clips over the authority pool table, stamped straight onto the body
-// the host already runs player_body_select for. Called once per periodic
-// second and after every accepted loadout. The sub-variant rows of a remote
-// kit are not modeled host-side (their pools never reach the 0x0F image), so
-// a remote weight omits the differing-class sub term; that is the D-NET-152
-// shared-pool tail, not a second mechanism.
+// body every tick); a remote player's rows are its rebuilt slot table (the kit
+// and its sub-variants, D-NET-509) with their live clips over the authority
+// pool table, stamped straight onto the body the host already runs
+// player_body_select for. Called once per periodic second and after every
+// accepted loadout.
 // [orig: Server_RecalculateAllPlayerScores @0x5014E0 — slot walk @0x5014f9..0x501604,
 //  byte+4 @0x501502, weaponweight @0x501538, WeaponSlot_GetTotalClips @0x501546
 //  (-> @0x5425F0), clipweight @0x501564, sub-variant loop @0x501568..0x5015cf,

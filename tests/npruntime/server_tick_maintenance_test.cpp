@@ -1739,6 +1739,193 @@ bool check_loadout_damage_class_bytes() {
 }
 
 // --------------------------------------------------------------------------
+// The 0x2F grant's sub-variant rows (D-NET-509).
+// --------------------------------------------------------------------------
+
+// The armory of the sub-variant case: adm 1 an automatic rifle at combo 195 whose
+// two loadout_subclasses sub-variants follow it, adm 2 its semi mode at combo 196
+// sharing its ammo class and loaded-round bucket, and adm 3 its launcher at combo 200,
+// outside the rifle's two skipped slots, on a class of its own with a two-round clip;
+// adm 4 another weapon on the rifle's combo 195. Their ammo classes are 0, 2 and 3:
+// ammo class 1 reads its own legs (a controller seat reads it as 0).
+void install_sub_variant_armory(w::World &world) {
+	w::WeaponTable &table = world.tables.weapons;
+	table.entries.resize(5);
+	auto weapon = [&](uint8_t adm, const char *name, int32_t rank, int32_t clipsize,
+			int32_t startrounds, int32_t maxclips, int32_t ammo_class) -> w::WeaponTableEntry & {
+		w::WeaponTableEntry &e = table.entries[adm];
+		e.name = name;
+		e.valid = true;
+		e.category = 3;
+		e.rank = rank;
+		e.clipsize = clipsize;
+		e.startrounds = startrounds;
+		e.maxclips = maxclips;
+		e.charfilter = 0xFF;
+		e.teamfilter = 0x03;
+		e.loadout_selectable = 1;
+		e.ammo_class_id = ammo_class;
+		e.ammo_class = table.ammo_class_names[static_cast<size_t>(ammo_class)];
+		e.ammo_class_count = 1;
+		e.ammo_index = adm;
+		return e;
+	};
+	table.ammo_class_names = {"CLS_A", "CLS_ONE", "CLS_B", "CLS_C"};
+	table.ammo_class_caps = {1000, 1000, 1000, 1000};
+	w::WeaponTableEntry &automatic = weapon(1, "WPN_TESTAUTO", 0, 30, 300, 10, 0);
+	automatic.loadout_subclasses = 2;
+	automatic.ammo_bucket = 1;
+	weapon(2, "WPN_TESTSEMI", 1, 30, 300, 10, 0).ammo_bucket = 1;
+	weapon(3, "WPN_TESTGL", 5, 2, 6, 6, 2);
+	weapon(4, "WPN_TESTOTHER", 0, 10, 50, 5, 3);
+}
+
+// The accept loads each kit weapon's sub-variants into the slot's table beside it,
+// the first weapon on a combo keeping it; the 0x5A walk skips each row's sub-variant
+// slots, so a sub-variant outside them is a row of its own, and a row's second count
+// is the first other-class sub-variant's. A negative second count takes that
+// sub-variant's start rounds times its clipsize at the accept and unmultiplied at the
+// deploy's rebuild.
+// [orig: NapiNPServerMsg_HandlePlayerLoadout - AvatarDef_BuildDisplayList @0x515DA6,
+//  WeaponSlotTable_LoadAllFromDefs @0x515DBF (the incumbent kept @0x5415D6), the
+//  sub-variant pools @0x515E99..0x515F33; PlayerSlot_InitWeaponsFromLoadout
+//  @0x5156EF..0x515752; Server_SendWeaponSlotListToPlayer @0x5027B3..0x50284E]
+bool check_loadout_sub_variant_rows() {
+	w::World world;
+	world.rules.mp_session = true;
+	world.registry.configure_pool(0, 8);
+	world.registry.configure_pool(1, 4);
+	install_sub_variant_armory(world);
+	const w::EntityHandle remote = w::spawn_remote_player(world, player_spawn(3, 0, 0));
+	if (!expect(remote.valid(), "the sub-variant fixture spawned a remote player")) return false;
+	inmatch::NapiNPServerCtx ctx;
+	ctx.world = &world;
+	ctx.is_authority = 1;
+	ctx.is_in_session = 1;
+	ctx.config.game_type = game_type::kTeamDeathmatch;
+	w::MatchRules rules;
+	rules.game_type = ctx.config.game_type;
+	world.match.configure(rules);
+	ns::UdpSessionTransport remote_wire(ns::UdpSessionTransport::Role::Host);
+	auto &roster = ctx.np_protocol.connection_list;
+	roster.push_back(make_seeded_conn(3, 1, &remote_wire, ns::TransportMode::Client, remote, true));
+	inmatch::NapiNPConnection &conn = roster[0];
+	w::Entity *body = world.registry.get(remote);
+
+	body->flags |= w::kEntityFlagDead; // the armory-window gate admits a dead player
+	LoadoutSubmit request;
+	request.team = 1;
+	request.player_class = 8;
+	request.weapon_slot_index = 3 * 65;
+	request.entries.push_back(LoadoutSubmitEntry{1, 0xFF, 0xFF, 0});
+	request.entries.push_back(LoadoutSubmitEntry{4, 0xFF, 0xFF, 0});
+	(void)inmatch::dispatch_session_replies(ctx.config, conn,
+			{make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(request))},
+			100, roster, &world);
+	WeaponLoadout granted;
+	if (!expect(decode_weapon_loadout(conn.reply.last_loadout_reply.data(),
+					conn.reply.last_loadout_reply.size(), granted),
+			"the accept's 0x5A decodes"))
+		return false;
+	// The rifle's pool 300 draws a clip into the shared bucket twice (the semi mode
+	// returns it first): 270 + 30 -> 10 clips. The launcher's 6 x 2 = 12 draws one
+	// clip: 10 + 2 -> 6 clips, its own row and the rifle's second count.
+	if (!expect(granted.slots.size() == 2 &&
+					granted.slots[0].type_id == 1 && granted.slots[0].ammo_primary == 10 &&
+					granted.slots[0].ammo_secondary == 6 &&
+					granted.slots[1].type_id == 3 && granted.slots[1].ammo_primary == 6 &&
+					granted.slots[1].ammo_secondary == 0xFF,
+			"the rifle's row skips its semi mode; the launcher outside the skip is a row"))
+		return false;
+	auto row_adm = [&](uint16_t combo) -> int {
+		const auto it = conn.weapon_slots.find(combo);
+		return it != conn.weapon_slots.end() ? it->second.adm_index : -1;
+	};
+	if (!expect(conn.weapon_slots.size() == 3 && row_adm(195) == 1 && row_adm(196) == 2 &&
+					row_adm(200) == 3,
+			"the host rows hold the rifle, its semi mode and its launcher; the rifle keeps its combo"))
+		return false;
+	if (!expect(conn.reply.ammo_pools[0] == 270 && conn.reply.ammo_pools[2] == 10 &&
+					conn.reply.shared_clips[1] == 30 && conn.weapon_slots[200].clip == 2,
+			"the pools and the shared bucket after the accept's draw"))
+		return false;
+
+	// The deploy's rebuild takes the launcher's start rounds unmultiplied: 6 draws one
+	// clip, 4 + 2 -> 3 clips.
+	body->flags |= w::kEntityFlagDead;
+	body->alive = false;
+	body->health = 0;
+	const std::vector<ProtocolMessage> replies =
+			inmatch::Server_ReleasePlayerDeployment(ctx.config, conn, world, {}, 0xFFFF);
+	WeaponLoadout deployed;
+	bool decoded = false;
+	for (const ProtocolMessage &m : replies)
+		if (m.tag == 0x5A)
+			decoded = decode_weapon_loadout(m.payload.data(), m.payload.size(), deployed);
+	if (!expect(decoded && deployed.slots.size() == 2 && deployed.slots[0].type_id == 1 &&
+					deployed.slots[0].ammo_primary == 10 &&
+					deployed.slots[0].ammo_secondary == 3 && deployed.slots[1].type_id == 3 &&
+					deployed.slots[1].ammo_primary == 3 && conn.reply.ammo_pools[2] == 4,
+			"the deploy's rebuild sets the launcher's pool from its start rounds alone"))
+		return false;
+
+	auto accept = [&](std::vector<LoadoutSubmitEntry> entries) {
+		LoadoutSubmit kit = request;
+		kit.entries = std::move(entries);
+		conn.link.preround_loadout_latch = true; // the post-deploy submit bypasses the window
+		conn.link.armory_reuse_seconds = 0;
+		(void)inmatch::dispatch_session_replies(ctx.config, conn,
+				{make_protocol_message(c2s::LOADOUT_SUBMIT, encode_loadout_submit(kit))},
+				100, roster, &world);
+	};
+	// The seed zeroes every pool first: a kit of the other weapon alone leaves the
+	// rifle's and the launcher's classes empty, its own 50 less one 10-round clip.
+	// [orig: WeaponSlots_SeedAmmoPoolsFromDefs @0x54169C..0x5416A5]
+	accept({{4, 0xFF, 0xFF, 0}});
+	if (!expect(conn.reply.ammo_pools[0] == 0 && conn.reply.ammo_pools[2] == 0 &&
+					conn.reply.ammo_pools[3] == 40 && conn.reply.shared_clips[1] == 0 &&
+					conn.weapon_slots.size() == 1 && conn.weapon_slots[195].adm_index == 4,
+			"a kit change leaves the dropped classes at zero"))
+		return false;
+
+	// From a UseGun seat every redraw returns at once and no bucket is written: the
+	// pools are the counts, no clip is drawn. [orig: WeaponSlots_RecalculateAmmoFromCapacity
+	//  @0x54228D..0x542294; WeaponOverlay_UpdateAllPerFrame @0x5423C5]
+	body->flags &= ~w::kEntityFlagDead;
+	body->alive = true;
+	body->health = 100;
+	body->mounted = true;
+	body->mount_type = w::SeatType::Gunner;
+	accept({{1, 0xFF, 0xFF, 0}});
+	if (!expect(conn.reply.ammo_pools[0] == 300 && conn.reply.ammo_pools[2] == 12 &&
+					conn.reply.ammo_pools[3] == 0 && conn.reply.shared_clips[1] == 0 &&
+					conn.weapon_slots[200].clip == 0,
+			"a UseGun seat's accept draws no clip"))
+		return false;
+
+	// From a controller seat under an EWeap carrier each draw reads the carrier's
+	// reserve and spends nothing, and no bucket is written: the launcher's slot takes
+	// min(2, 1) rounds, the rifle's bucket none. [orig: Entity_GetScoreValueBySlotType
+	//  @0x540727..0x540769; WeaponSlot_DecrementAmmo @0x540920; sub_5405F0 @0x540624;
+	//  sub_540670 @0x540684..0x540692]
+	w::Entity carrier;
+	carrier.has_item_def = true;
+	carrier.item_attrib = w::kItemAttribEweap;
+	carrier.primary_weapon_slot.reserve = 1;
+	body->mount_type = w::SeatType::Controller;
+	body->mount_target = world.registry.spawn(1, carrier);
+	accept({{1, 0xFF, 0xFF, 0}});
+	WeaponLoadout seated;
+	return expect(decode_weapon_loadout(conn.reply.last_loadout_reply.data(),
+					conn.reply.last_loadout_reply.size(), seated) &&
+					seated.slots.size() == 2 && seated.slots[0].ammo_primary == 10 &&
+					seated.slots[0].ammo_secondary == 6 && conn.reply.ammo_pools[0] == 300 &&
+					conn.reply.ammo_pools[2] == 12 && conn.reply.shared_clips[1] == 0 &&
+					conn.weapon_slots[200].clip == 1,
+			"a controller seat's draws read the carrier's reserve and spend nothing");
+}
+
+// --------------------------------------------------------------------------
 // SpawnWaveList_TryQueuePlayer's unconditional other-row eviction.
 // --------------------------------------------------------------------------
 
@@ -2530,6 +2717,7 @@ int main() {
 	ok = check_kit_weight_recompute() && ok;
 	ok = check_deploy_rebuilds_the_kit_from_the_loadout_buffer() && ok;
 	ok = check_loadout_damage_class_bytes() && ok;
+	ok = check_loadout_sub_variant_rows() && ok;
 	ok = check_try_queue_evicts_on_failed_pick() && ok;
 	ok = check_respawn_pick_admission() && ok;
 	ok = check_revived_pick_takes_no_target() && ok;

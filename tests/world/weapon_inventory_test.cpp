@@ -782,7 +782,48 @@ void test_slot_bar_scan() {
     CHECK(scan[7].def_category == -1);
 }
 
+// The redraw's seat legs: a UseGun seat redraws nothing; a controller seat spends
+// nothing, reads ammo class 1 as 0 and every other class as the EWeap carrier's
+// reserve. [orig: WeaponSlots_RecalculateAmmoFromCapacity @0x54228D..0x542294;
+//  Entity_GetScoreValueBySlotType @0x54073F..0x540769; WeaponSlot_DecrementAmmo
+//  @0x540920]
+void test_recalc_seat_legs() {
+    WeaponTable t;
+    t.ammo_class_names = {"", "CLASS_MANA", "CLS_B"};
+    t.ammo_class_caps = {1000, 1000, 1000};
+    t.entries.resize(3);
+    for (int adm : {1, 2}) {
+        WeaponTableEntry &e = t.entries[static_cast<size_t>(adm)];
+        e.name = adm == 1 ? "WPN_CLASSONE" : "WPN_CLASSTWO";
+        e.valid = true;
+        e.category = 3;
+        e.rank = static_cast<uint8_t>(adm);
+        e.clipsize = 10;
+        e.ammo_class_id = adm;
+        e.ammo_class_count = 1;
+    }
+    WeaponInventory inv;
+    inv.reset(t);
+    inv.slots[3 * 65 + 1].adm_index = 1;
+    inv.slots[3 * 65 + 2].adm_index = 2;
+    inv.pools[1] = 50;
+    inv.pools[2] = 50;
+    WeaponAmmoSeat seat;
+    seat.parent_slot = 3;
+    weapon_inventory_recalc_clips(t, inv, seat);
+    CHECK(inv.slot(3 * 65 + 1)->clip == 0 && inv.slot(3 * 65 + 2)->clip == 0 &&
+          inv.pools[1] == 50 && inv.pools[2] == 50);
+    seat.parent_slot = 2;
+    seat.carrier_reserve_valid = true;
+    seat.carrier_reserve = 4;
+    weapon_inventory_recalc_clips(t, inv, seat);
+    CHECK(inv.slot(3 * 65 + 1)->clip == 0);
+    CHECK(inv.slot(3 * 65 + 2)->clip == 4);
+    CHECK(inv.pools[1] == 50 && inv.pools[2] == 50);
+}
+
 int main() {
+    test_recalc_seat_legs();
     test_slot_bar_scan();
     test_fill_seeds_the_slot_zoom();
     test_two_weapons_share_loaded_ammo();

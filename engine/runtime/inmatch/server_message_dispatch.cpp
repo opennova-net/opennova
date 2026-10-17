@@ -21,7 +21,7 @@
 #include <runtime/inmatch/server_vehicle_spawn.h> // the 0x40 / 0x42 handlers
 #include <runtime/inmatch/napi_np_server_ctx.h>  // ServerDispatchInputs::server_ctx
 #include <runtime/inmatch/session_status.h>
-#include <runtime/world/weapon_table_build.h> // loadout_entry_permitted / resolve_loadout_ammo (D-NET-141)
+#include <runtime/world/weapon_table_build.h> // loadout_entry_permitted (D-NET-141)
 
 #include <runtime/replication/connection_fan.h>     // apply_connection_uplink — the in-order 0x0C read-apply
 #include <runtime/replication/entity_wire_bridge.h> // build_full_entity_spawn — the 0x0F -> 0x18 repair record
@@ -921,7 +921,7 @@ std::vector<ProtocolMessage> Server_ReleasePlayerDeployment(
 	//  PlayerSlot_InitWeaponsFromLoadout call @0x5178E1]
 	if (!revive_deploy) {
 		if (!conn.link.spectator) world.commands.remove_placed_devices_by_owner(player->handle);
-		PlayerSlot_InitWeaponsFromLoadout(config, conn, world.tables.weapons);
+		PlayerSlot_InitWeaponsFromLoadout(conn, world, *player);
 	}
 	conn.discard_pre_deploy_uplinks = true;
 	// No +360 store; the +364 hold clears only for a raw handle other than
@@ -1414,7 +1414,8 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 					break;
 				}
 				const GrantedWeaponLoadout grant =
-						grant_weapon_loadout(req, config.class_allow_mask, armory);
+						grant_weapon_loadout(req, config.class_allow_mask, armory, conn,
+								player_ammo_seat(*world, *loadout_player));
 				// The accepted entries become the slot's loadout buffer, which every
 				// deploy rebuilds the kit from (D-NET-378) [orig: @0x515CBD..0x515D83].
 				st.loadout_buffer = req;

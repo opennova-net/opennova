@@ -13,11 +13,13 @@
 
 #include <net/npwire/ingame_decode.h> // LoadoutSubmit / WeaponLoadout
 
-#include <runtime/inmatch/game_config.h> // GameConfig::class_allow_mask
 #include <runtime/inmatch/napi_np_connection.h>
+
+#include <runtime/world/weapon_inventory.h> // WeaponAmmoSeat
 
 namespace opennova::world {
 class World;
+struct Entity;
 struct WeaponTable;
 }
 
@@ -27,18 +29,20 @@ namespace opennova::inmatch {
 // [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515790 — parses the request, validates the
 // envelope (loadout_envelope_accepted), clamps the in-range soldier type to [5,9]-else-8
 // (@0x515913), stamps entity+660 playerClass (@0x515ab0), loads the entries
-// into the player's 780-slot weapon table, then Server_SendWeaponSlotListToPlayer @0x502550
-// walks that table ascending by weapon-slot combo (category*65 + rank, @0x5026e5..@0x5028a0),
-// filtering each slot by the team/char masks (@0x502716) and emitting one 4-byte group:
+// with their loadout_subclasses sub-variants into the player's 780-slot weapon table (the first
+// weapon on a combo keeps it), then Server_SendWeaponSlotListToPlayer @0x502550 walks that
+// table ascending by weapon-slot combo (category*65 + rank, @0x5026e5..@0x5028a0), filtering
+// each slot by the team/char masks (@0x502716) and emitting one 4-byte group:
 // [admIdx = AvatarDef_FindIndexByName @0x50273b][ammoPrimary = WeaponSlot_GetTotalClips
 // @0x502794][ammoSecondary = the same count for the first different-ammoclass sub-variant in
 // parent+1..parent+LSC (@0x5027c8), else 0xFF][the slot's player+89688 damage-class byte at
-// the weapon's own AdmDef index (@0x50286A..0x50288A)].]
+// the weapon's own AdmDef index (@0x50286A..0x50288A)], then skipping the weapon's LSC slots
+// (@0x50284E), so a sub-variant outside them is a row of its own (D-NET-509).]
 //
-// With the armory table fed (world::World::weapons), the reply resolves REAL counts through the
-// witnessed rules (weapon_table_build: loadout_entry_permitted / resolve_loadout_ammo) — the
-// golden ASH_I5A reply {2:255, 3:10, 21:10, 76:1, 77:2, 78:3, 83:3} reproduces from the host's
-// own resolved weapon.def (D-NET-141). Table-less hosts (unit paths / no resource root) keep the
+// With the armory table fed (world::World::weapons), the reply resolves REAL counts from the
+// rebuilt table (weapon_inventory) — the golden ASH_I5A reply {2:255, 3:10, 21:10, 76:1, 77:2,
+// 78:3, 83:3} reproduces from the host's own resolved weapon.def (D-NET-141). Table-less hosts
+// (unit paths / no resource root) keep the
 // prior request-echo: the client clamps echoed bytes on apply [orig: @0x4295d7-0x4295e9], a
 // tracked divergence for that configuration only. The accepted fourth byte is stored RAW in the
 // slot's player+89688 table at the weapon's round ammo index (write_ammo_damage_classes), and
@@ -58,7 +62,7 @@ struct GrantedWeaponLoadout {
 	std::vector<std::pair<int16_t, uint8_t>> damage_class_writes;
 	uint32_t carry_flags = 0;
 	// The host-side 780-row weapon-slot table this accept rebuilds, one row per
-	// granted combo with the clip the rebuild drew (rounds) — the rows the C2S
+	// populated combo (sub-variants included) with the clip the rebuild drew — the rows the C2S
 	// 0x06 clip check / 0x25 relay refill and the 1 Hz kit-weight recompute
 	// read. [orig: playerSlot+464 + 100*combo, slot+16 loaded rounds after
 	//  WeaponSlots_RecalculateAmmoFromCapacity @0x515db5..0x515f4d]
@@ -77,10 +81,21 @@ bool loadout_envelope_accepted(const LoadoutSubmit &req, uint32_t game_type);
 
 // Resolve the accepted submission into the granted kit: the S2C 0x5A reply, the authority
 // ammo pool image, the per-ammo damage classes, the carry flags and the rebuilt slot rows.
-// A null/empty `table` is the resource-less request-echo fallback.
+// The rebuild starts from the slot's pools and buckets and reads its revive latch, team
+// and the entity's seat (player_ammo_seat). A null/empty `table` is the resource-less
+// request-echo fallback.
 GrantedWeaponLoadout grant_weapon_loadout(const LoadoutSubmit &req,
 										  uint16_t class_allow_mask,
-										  const world::WeaponTable *table);
+										  const world::WeaponTable *table,
+										  const NapiNPConnection &conn,
+										  const world::WeaponAmmoSeat &seat);
+
+// The player's seat as its slot table's ammo accessors read it: entity+0x168 while
+// mounted, and on a controller seat the carrier's own reserve when the carrier is an
+// EWeap item (WeaponAmmoSeat). [orig: Entity_GetScoreValueBySlotType @0x5406E0 - the
+//  carrier entity+0x16C @0x540707, its def's EWeap bit @0x540727..0x540739;
+//  sub_546120 @0x546120, ported over the carrier's one MountSlot]
+world::WeaponAmmoSeat player_ammo_seat(const world::World &world, const world::Entity &player);
 
 // The accept's damage-class stores onto the slot's table (NapiNPConnection::
 // ammo_damage_classes), the accept's alone: the deploy's rebuild writes none.
@@ -103,13 +118,13 @@ void apply_granted_loadout(NapiNPConnection &conn, const GrantedWeaponLoadout &g
 // The deploy's kit rebuild: the slot's weapon table, ammo pools and clips rebuilt
 // from its loadout buffer (the last accepted 0x2F's entries and counts under the
 // stamped class), so a redeployed player starts every life with the kit it was
-// granted, full again. Nothing else changes: no class stamp, no damage-class table,
-// no carry-flag clear, no cooldown. A slot with no buffer, or a host with no weapon
-// table, keeps its state. (D-NET-378)
+// granted, full again; the entity's carry bits are the fill's. Nothing else changes:
+// no class stamp, no damage-class table, no cooldown. A slot with no buffer, or a host
+// with no weapon table, keeps its state. (D-NET-378)
 // [orig: PlayerSlot_InitWeaponsFromLoadout @0x515550, called from
 //  Server_DeployPlayer @0x5178E1 on a deploy that is not a revive]
-void PlayerSlot_InitWeaponsFromLoadout(const GameConfig &config, NapiNPConnection &conn,
-                                       const world::WeaponTable &table);
+void PlayerSlot_InitWeaponsFromLoadout(NapiNPConnection &conn, world::World &world,
+                                       world::Entity &player);
 
 // The player's live soldier class (entity+660), the header byte a current-slot-list
 // re-send carries.

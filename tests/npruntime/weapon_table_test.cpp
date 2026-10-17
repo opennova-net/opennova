@@ -6,9 +6,6 @@
 // Witnessed rules under test (docs/net/novaworld-net-re.md §5.57, 2026-07-02 grill):
 //   index    — null@0 [orig: AnimDef_InitAll @0x543615]; weapon blocks reuse-by-name else
 //              lowest-free [orig: WeaponDefs_ParseLineCallback @0x5436e1] => file order.
-//   ammo     — primary = pool/clipsize, clipsize -1 -> 0xFF, clamp 127 [orig:
-//              WeaponSlot_GetTotalClips @0x5425F0]; secondary = first different-ammoclass
-//              sub-variant in parent+1..parent+LSC [orig: @0x5027c8].
 //   filters  — team red=1/blue=2, char medic..engineer bits; class/type masks
 //              [orig: @0x502666/@0x502693/@0x502716].
 
@@ -291,30 +288,6 @@ int main(int argc, char **argv) {
 	const world::WeaponTableEntry *knife = table.by_index(1);
 	CHECK(knife != nullptr && knife->clipsize == -1 && knife->startrounds == -1);
 	CHECK(knife->charfilter == 0x1Fu && knife->teamfilter == 0x02u);
-
-	// --- ammo resolution branches.
-	{
-		world::LoadoutAmmoBytes a = world::resolve_loadout_ammo(table, 2, 0xFF); // KNIFE2: no-clip
-		CHECK(a.primary == 0xFF && a.secondary == 0xFF);
-		a = world::resolve_loadout_ammo(table, 3, 0xFF); // colt45: 35/7
-		CHECK(a.primary == 5 && a.secondary == 0xFF);
-		a = world::resolve_loadout_ammo(table, 9, 0xFF); // M4AUTO: 300/30; variant M4 shares class
-		CHECK(a.primary == 10 && a.secondary == 0xFF);
-		a = world::resolve_loadout_ammo(table, 9, 4); // requested 4 -> min(4, maxclips 10)
-		CHECK(a.primary == 4 && a.secondary == 0xFF);
-		a = world::resolve_loadout_ammo(table, 9, 200); // requested over maxclips -> clamp to 10
-		CHECK(a.primary == 10);
-		// M4M203AUTO @11 (LSC 2): M4M203 shares CLASS_556MM, M4M203HE is CLASS_40MMNADE -> 6/1.
-		CHECK(table.index_of("WPN_M4M203AUTO") == 11);
-		a = world::resolve_loadout_ammo(table, 11, 0xFF);
-		CHECK(a.primary == 10 && a.secondary == 6);
-		const int he = table.index_of("WPN_GRENADEHE");
-		CHECK(he > 0);
-		a = world::resolve_loadout_ammo(table, static_cast<uint8_t>(he), 0xFF); // 3/1
-		CHECK(a.primary == 3 && a.secondary == 0xFF);
-		a = world::resolve_loadout_ammo(table, 250, 0xFF); // no entry
-		CHECK(a.primary == 0xFF && a.secondary == 0xFF);
-	}
 
 	// --- permission masks.
 	{

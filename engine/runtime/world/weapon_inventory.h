@@ -228,7 +228,7 @@ WeaponFillResult weapon_inventory_load_from_display(
         WeaponInventory &inv, int32_t owner_class, bool allow_sniper_scope_zoom);
 
 // The spawn pool seeding [orig: WeaponSlots_SeedAmmoPoolsFromDefs @ 0x541690, ex the
-// 'WeaponOverlay_BuildTypeLookup' misnomer]: for every populated slot,
+// 'WeaponOverlay_BuildTypeLookup' misnomer]: every pool zeroed, then for every populated slot,
 // pools[def.ammo_class_id] = classrounds[value(player_class)] when the def authors one,
 // else startrounds. player_class 5..9 -> classrounds indices 1/2/3/5/6; other classes
 // take plain startrounds. Walk order is slot order, later slots overwrite (witnessed).
@@ -264,9 +264,26 @@ int32_t weapon_inventory_loadout_weight_fp16(const WeaponTable &table,
 // The clip normalization [orig: WeaponSlots_RecalculateAmmoFromCapacity @ 0x542280]:
 // for each populated slot with ammo_class_count (pool-units/round) nonzero and
 // clipsize != -1: return the current clip to the pool, then draw one full clip
-// clamped by what the pool affords. The def+0xDC pass-type leg (shared-pool "clip"
-// weapons) is deferred — see the RE record's divergence entry.
+// clamped by what the pool affords; def+0xDC selects the shared loaded-round bucket.
 void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &inv);
+
+// The owner's seat as the slot-table ammo accessors read it, entity+0x168: on a UseGun
+// seat (3) the redraw returns at once; on a controller seat (2) every loaded-round
+// bucket reads 0 and takes no write, a draw spends nothing, and each pool reads as the
+// seated carrier's own reserve when the carrier is an EWeap item, else 0 - ammo class 1
+// always 0. Every other seat reads the owner's own tables.
+// [orig: WeaponSlots_RecalculateAmmoFromCapacity @0x54228D..0x542294; sub_5405F0
+//  @0x540608..0x540627; sub_540670 @0x540684..0x540692; WeaponSlot_DecrementAmmo
+//  @0x540920 (seat 2 -> 0); Entity_GetScoreValueBySlotType @0x540721..0x540739 (the
+//  carrier's EWeap bit), the class-1 leg @0x54073F..0x540757 (seat 2 -> 0 @0x540794),
+//  @0x540764..0x540769 (sub_546120 @0x546120), @0x54078F..0x540799]
+struct WeaponAmmoSeat {
+    int32_t parent_slot = 0;            // entity+0x168: 2 controller, 3 UseGun
+    bool carrier_reserve_valid = false; // a controller seat under an EWeap carrier
+    int32_t carrier_reserve = 0;        // that carrier's MountSlot reserve word
+};
+void weapon_inventory_recalc_clips(const WeaponTable &table, WeaponInventory &inv,
+                                   const WeaponAmmoSeat &seat);
 
 // The eligibility ammo score [orig: Score_CalculateKillScore @ 0x5407E0 in its
 // slot-predicate role: pool for the def's ammo class + the slot's loaded rounds].

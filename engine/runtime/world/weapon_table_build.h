@@ -45,21 +45,6 @@ uint8_t teamfilter_bit(const char *token);
 bool loadout_entry_permitted(const world::WeaponTableEntry &entry, uint8_t team,
                              uint8_t player_class);
 
-// The S2C 0x5A per-slot ammo bytes for one accepted request entry.
-//   primary  = the slot's TOTAL AMMO IN CLIPS [orig: WeaponSlot_GetTotalClips @0x5425F0]:
-//              clipsize -1 -> 0xFF (@0x542669); pool/clipsize (@0x542673) clamped 127
-//              (@0x542678); pool = requested != 0xFF ? min(requested, maxclips)*clipsize
-//              : startrounds (the 0x2F accept fill, §5.57 @0x515550).
-//   secondary = the same count for the FIRST different-ammoclass sub-variant in
-//              parent+1..parent+loadout_subclasses (its own startrounds fill), else 0xFF
-//              [orig: @0x5027c8-@0x502847].
-struct LoadoutAmmoBytes {
-	uint8_t primary = 0xFF;
-	uint8_t secondary = 0xFF;
-};
-LoadoutAmmoBytes resolve_loadout_ammo(const world::WeaponTable &table, uint8_t adm_index,
-                                      uint8_t requested);
-
 // Build the armory table from a parsed weapon.def. Index allocation is the witnessed rule:
 // entry 0 = the engine "null" [orig: AnimDef_InitAll @0x543615]; each weapon block reuses an
 // existing same-name entry (case-insensitive) else takes the lowest free slot [orig:
