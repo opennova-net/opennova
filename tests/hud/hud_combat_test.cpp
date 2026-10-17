@@ -632,6 +632,21 @@ static void integer_screen_mapping() {
 	}));
 }
 
+// The projector's clip mask: each side plane its own flag, a point on a plane
+// inside, the near plane 16; any flag skips an attach label or a friendly tag
+// (C-213). [orig: HUD_ClipPointToFrustumAndProject @0x591E50]
+static void frustum_clip_flags() {
+	CHECK(frustum_clip_mask(0.0f, 0.0f, false) == 0);
+	CHECK(frustum_clip_mask(-1.0f, 1.0f, false) == 0); // on the left and top planes
+	CHECK(frustum_clip_mask(1.0f, -1.0f, false) == 0); // on the right and bottom planes
+	CHECK(frustum_clip_mask(-1.01f, 0.0f, false) == 1);
+	CHECK(frustum_clip_mask(1.01f, 0.0f, false) == 2);
+	CHECK(frustum_clip_mask(0.0f, 1.01f, false) == 4);
+	CHECK(frustum_clip_mask(0.0f, -1.01f, false) == 8);
+	CHECK(frustum_clip_mask(0.0f, 0.0f, true) == 16);
+	CHECK(frustum_clip_mask(1.5f, 1.5f, true) == (2 | 4 | 16));
+}
+
 // The vehicle-bay logo walk and its three marker types.
 // [orig: HUD_DrawVehicleBayLogos (ex Radar_DrawBlips) @0x5a2c00 ->
 //  HUD_DrawEntityMarker types 5/6/7 @0x59355d..0x5936a0]
@@ -773,6 +788,7 @@ static void vehicle_bay_logos() {
 
 int main() {
 	integer_screen_mapping();
+	frustum_clip_flags();
 	vehicle_bay_logos();
 	geometry_and_draw();
 	mortar_map_callbacks();

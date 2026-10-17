@@ -6,6 +6,19 @@
 #include <runtime/hud/hud_frame.h>
 
 namespace opennova::hud {
+uint8_t frustum_clip_mask(float ndc_x, float ndc_y, bool short_of_near) {
+	uint8_t clip = short_of_near ? 16 : 0;
+	if (ndc_x < -1)
+		clip |= 1;
+	if (ndc_x > 1)
+		clip |= 2;
+	if (ndc_y > 1)
+		clip |= 4;
+	if (ndc_y < -1)
+		clip |= 8;
+	return clip;
+}
+
 int hud_silhouette_alpha(int elapsed, int ramp, int base, int maximum) {
 	if (ramp <= 0)
 		return 0;
