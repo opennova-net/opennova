@@ -171,7 +171,8 @@ static inline uint8_t sbf_encode_sample(int16_t sample, uint8_t scale) {
 /* Pick the largest scale 0..7 whose chunk-wide max byte stays inside [0,255].
    Smaller scale = more headroom; larger scale = more precision but clips
    sooner. Falls through to 0 when the chunk's amplitude exceeds even scale 0
-   (only -32768, which encodes to the 0x00 rail exactly). */
+   (only the most negative 16-bit sample, which encodes to the 0x00 rail
+   exactly). */
 uint8_t sbf_pick_scale(const int16_t *samples, size_t count);
 
 /* Encode `sample_count` int16 samples (treated as L/R interleaved bytes by the
