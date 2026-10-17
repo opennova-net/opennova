@@ -35,12 +35,6 @@ Document::Document(const Document &other)
 
 namespace {
 
-bool fail(Diagnostic &error, const std::string &path, CoreFinding code, const std::string &message,
-          const std::string &field = {}) {
-	error = make_finding(code, DiagnosticSeverity::Error, message, path, field);
-	return false;
-}
-
 // True for an edit that may change what a row holds (an Apply's payload may too): a later edit
 // of its batch finds its record by walking the clone.
 bool structural(EditOperation operation) {
@@ -576,7 +570,7 @@ bool Document::move_out_edits(const Edit &move, std::vector<Edit> &, std::string
 }
 
 bool Document::set_file_value(std::shared_ptr<const FileState> &, const Edit &, Diagnostic &error) {
-	return fail(error, path(), CoreFinding::DocumentValue, "This document has no file-wide values.");
+	return fail_with(error, path(), CoreFinding::DocumentValue, "This document has no file-wide values.");
 }
 
 bool Document::read_source(const std::vector<uint8_t> &decoded, bool adopt,
@@ -667,11 +661,11 @@ bool Document::stage_restore(StagedRows &staged, Diagnostic &error) {
 	std::vector<SourceIssue> issues;
 	Diagnostic unread;
 	if (!parse(bytes, rows, state, issues, unread))
-		return fail(error, path(), CoreFinding::DocumentPayload,
+		return fail_with(error, path(), CoreFinding::DocumentPayload,
 		            "The file with every line ending CR LF does not read: " + unread.message);
 	for (const SourceIssue &issue : issues)
 		if (issue.blocks)
-			return fail(error, path(), CoreFinding::DocumentPayload,
+			return fail_with(error, path(), CoreFinding::DocumentPayload,
 			            "The file with every line ending CR LF does not read as the game reads it: " + issue.message);
 	std::vector<NodeId> old;
 	old.reserve(staged.rows().size());
@@ -744,7 +738,7 @@ bool Document::apply_edits(const std::vector<Edit> &edits, Diagnostic &error) {
 	if (!accept_step(step, staged, refusal)) {
 		const std::string message = refusal.message.empty() ? "This document refuses that change." : refusal.message;
 		if (!refusal.code) {
-			fail(error, path(), CoreFinding::DocumentStructure, message);
+			fail_with(error, path(), CoreFinding::DocumentStructure, message);
 			return refused();
 		}
 		error = make_finding(*refusal.code, DiagnosticSeverity::Error, message, path(), refusal.field);
@@ -801,7 +795,7 @@ bool Document::stage_edits(const std::vector<Edit> &edits, StagedRows &staged,
 	// A refusal: `code` in `words`, on `field` where it names one.
 	const auto refuse = [&](C code, const std::string &words,
 	                        const std::string &field = std::string()) {
-		return fail(error, path(), code, words, field);
+		return fail_with(error, path(), code, words, field);
 	};
 	// A record of one kind where the address says another.
 	const auto wrong_kind = [&](NodeKind is, NodeKind says) {
@@ -1296,7 +1290,7 @@ bool Document::renumber_place_lists(NodeId row, const std::vector<std::vector<No
 		std::vector<Edit> sites;
 		std::string message;
 		if (!renumber_places(staged, row, list, shift, sites, message))
-			return fail(error, path(), CoreFinding::DocumentCollection,
+			return fail_with(error, path(), CoreFinding::DocumentCollection,
 			            message.empty() ? "This collection cannot accept that edit." : message);
 		std::vector<NodeId> made, added;
 		if (!sites.empty() && !stage_edits(sites, staged, made, added, error)) return false;
@@ -1347,7 +1341,7 @@ bool Document::renumber(const std::vector<TargetedCollection> &targets,
 		std::vector<Edit> sites;
 		std::string message;
 		if (!renumber_references(staged, shift, sites, message))
-			return fail(error, path(), CoreFinding::DocumentCollection,
+			return fail_with(error, path(), CoreFinding::DocumentCollection,
 			            message.empty() ? "This collection cannot accept that edit." : message);
 		// The type's Sets, in the same step, against the rows as the edit left them.
 		std::vector<NodeId> made, added;

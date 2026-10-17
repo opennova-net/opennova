@@ -24,15 +24,6 @@ constexpr NodeKind kClass = node_kind(CharAttrKind::Class);
 
 const charattr::ClassRow &class_of(const RecordHandle &r) { return r.as<charattr::ClassRow>(); }
 
-FieldSchema schema_of(const char *id, FieldType type, const char *label, const char *description) {
-	FieldSchema schema;
-	schema.id = id;
-	schema.type = type;
-	schema.label = label;
-	schema.description = description;
-	return schema;
-}
-
 // The camouflage keys, by the mission's camouflage they serve (charattr::cammo_property_for_camouflage: the BMS
 // camouflage selector 1 JUNGLE_CAMMO (10), 2 ARCTIC_CAMMO (12), any other DESERT_CAMMO (11) [orig:
 // Entity_SpawnFromAnimSlotProperty @ 0x43c399..0x43c3be]).

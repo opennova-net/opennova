@@ -44,5 +44,7 @@ bool written(const Document &document, const NodeAddress &address, const FieldSc
 std::string counted(size_t count, const char *noun);
 // The same with the noun's two forms given ("1 entity", "2 entities").
 std::string counted(size_t count, const char *one, const char *many);
+// The same in plain digits ("1234 values"): the findings' messages that print a count so.
+std::string counted_digits(size_t count, const char *one, const char *many);
 
 } // namespace opennova::editor

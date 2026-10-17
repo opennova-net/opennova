@@ -40,13 +40,13 @@ uint64_t fingerprint(const std::string &text) {
 	return fingerprint(reinterpret_cast<const uint8_t *>(text.data()), text.size());
 }
 
-bool fail(Diagnostic &error, const std::string &path, CoreFinding code, const std::string &message,
-          const std::string &field = {}) {
+} // namespace
+
+bool fail_with(Diagnostic &error, const std::string &path, CoreFinding code, const std::string &message,
+               const std::string &field) {
 	error = make_finding(code, DiagnosticSeverity::Error, message, path, field);
 	return false;
 }
-
-} // namespace
 
 DocumentBase::DocumentBase() : identity_(++g_next_identity) {}
 
@@ -59,9 +59,9 @@ DocumentBase::DocumentBase(const DocumentBase &other)
 
 bool DocumentBase::apply(const std::vector<Edit> &edits, Diagnostic &error) {
 	if (snapshot_)
-		return fail(error, path(), CoreFinding::DocumentSnapshot, "A snapshot is read, never edited.");
+		return fail_with(error, path(), CoreFinding::DocumentSnapshot, "A snapshot is read, never edited.");
 	if (blocked_ && !takes_while_blocked(edits))
-		return fail(error, path(), CoreFinding::DocumentParse,
+		return fail_with(error, path(), CoreFinding::DocumentParse,
 		            "Fix the reported source errors and reload this document before editing.");
 	const uint64_t before = revision();
 	if (!apply_edits(edits, error)) return false;
@@ -151,16 +151,16 @@ bool DocumentBase::decode_and_read(std::vector<uint8_t> bytes, bool adopt,
 	// the bytes as stored (base/vfs vfs_loader_takes_stored).
 	if (!opennova::vfs_loader_takes_stored(relative_path_) &&
 			!opennova::vfs_decode_payload(bytes, gameprofile::gameprofile_scr_policy_for_code(game_.c_str())))
-		return fail(error, relative_path_, CoreFinding::DocumentDecode, "The file could not be decoded.");
+		return fail_with(error, relative_path_, CoreFinding::DocumentDecode, "The file could not be decoded.");
 	return read_source(bytes, adopt, issues, error);
 }
 
 bool DocumentBase::load(const std::string &absolute, const std::string &relative, AssetKind kind,
                         const std::string &game, Diagnostic &error) {
-	if (snapshot_) return fail(error, relative, CoreFinding::DocumentSnapshot, "A snapshot is never loaded.");
+	if (snapshot_) return fail_with(error, relative, CoreFinding::DocumentSnapshot, "A snapshot is never loaded.");
 	std::vector<uint8_t> bytes;
 	std::string message;
-	if (!io::read_file_bytes(absolute, bytes, message)) return fail(error, relative, CoreFinding::DocumentRead, message);
+	if (!io::read_file_bytes(absolute, bytes, message)) return fail_with(error, relative, CoreFinding::DocumentRead, message);
 	if (!load_bytes(bytes, relative, kind, game, error)) return false;
 	absolute_path_ = absolute;
 	return true;
@@ -168,7 +168,7 @@ bool DocumentBase::load(const std::string &absolute, const std::string &relative
 
 bool DocumentBase::load_bytes(const std::vector<uint8_t> &bytes, const std::string &relative,
                               AssetKind kind, const std::string &game, Diagnostic &error) {
-	if (snapshot_) return fail(error, relative, CoreFinding::DocumentSnapshot, "A snapshot is never loaded.");
+	if (snapshot_) return fail_with(error, relative, CoreFinding::DocumentSnapshot, "A snapshot is never loaded.");
 	const uint64_t hash = fingerprint(bytes);
 	std::vector<SourceIssue> issues;
 	// The kind reads the source as the file it names (its path, kind and game); a source that
@@ -200,19 +200,19 @@ bool DocumentBase::load_bytes(const std::vector<uint8_t> &bytes, const std::stri
 
 bool DocumentBase::save(Diagnostic &error, bool over) {
 	if (snapshot_)
-		return fail(error, path(), CoreFinding::DocumentSnapshot, "A snapshot is read, never saved.");
+		return fail_with(error, path(), CoreFinding::DocumentSnapshot, "A snapshot is read, never saved.");
 	if (absolute_path_.empty())
-		return fail(error, path(), CoreFinding::DocumentNoFile, "This document was read from bytes, not from a file: it has no file to save to.");
+		return fail_with(error, path(), CoreFinding::DocumentNoFile, "This document was read from bytes, not from a file: it has no file to save to.");
 	if (const SourceIssue *blocking = first_blocking())
-		return fail(error, path(), CoreFinding::DocumentUnserializable, blocking->message, blocking->field);
+		return fail_with(error, path(), CoreFinding::DocumentUnserializable, blocking->message, blocking->field);
 	const SerializeResult output = serialize();
 	if (!output.ok())
-		return fail(error, path(), CoreFinding::DocumentUnserializable, output.issues.front().message, output.issues.front().field);
+		return fail_with(error, path(), CoreFinding::DocumentUnserializable, output.issues.front().message, output.issues.front().field);
 	if (!over && !matches_file())
-		return fail(error, path(), CoreFinding::DocumentConflict,
+		return fail_with(error, path(), CoreFinding::DocumentConflict,
 		            "This file changed outside the editor: reload it, or keep your edits and save over it.");
 	std::string message;
-	if (!io::write_file_atomic(absolute_path_, output.text, message)) return fail(error, path(), CoreFinding::DocumentWrite, message);
+	if (!io::write_file_atomic(absolute_path_, output.text, message)) return fail_with(error, path(), CoreFinding::DocumentWrite, message);
 	file_fingerprint_ = fingerprint(output.text);
 	wrote_file_ = true;
 	save_notes_ = output.notes;

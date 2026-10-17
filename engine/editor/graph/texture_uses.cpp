@@ -23,12 +23,6 @@ using io::json_number;
 using io::json_string;
 using R = renderer::TextureRoleId;
 
-int64_t whole(const Value &value) {
-	if (const int64_t *i = std::get_if<int64_t>(&value)) return *i;
-	if (const double *d = std::get_if<double>(&value)) return int64_t(*d);
-	return 0;
-}
-
 std::string text(const Value &value) {
 	const std::string *s = std::get_if<std::string>(&value);
 	return s ? *s : std::string();

@@ -46,15 +46,7 @@ TrnKeyLine &terrain_key_of(const RecordHandle &record) { return record.as<TrnKey
 
 // A whole number from a Value: a whole number, or a real holding one (the wire's numbers).
 bool whole_of(const Value &value, int64_t &out, std::string &error) {
-	if (const auto *whole = std::get_if<int64_t>(&value)) {
-		out = *whole;
-		return true;
-	}
-	if (const auto *real = std::get_if<double>(&value); real && std::isfinite(*real) && std::floor(*real) == *real &&
-	                                                    std::fabs(*real) < 9.0e15) {
-		out = static_cast<int64_t>(*real);
-		return true;
-	}
+	if (whole_number(value, out)) return true;
 	error = "A whole number.";
 	return false;
 }

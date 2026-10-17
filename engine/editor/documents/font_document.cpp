@@ -27,15 +27,6 @@ constexpr NodeKind kGlyph = node_kind(FontKind::Glyph);
 FontRow &font_of(const RecordHandle &r) { return r.as<FontRow>(); }
 FontGlyph &glyph_of(const RecordHandle &r) { return r.as<FontGlyph>(); }
 
-FieldSchema schema_of(const char *id, FieldType type, const char *label, const char *description) {
-	FieldSchema schema;
-	schema.id = id;
-	schema.type = type;
-	schema.label = label;
-	schema.description = description;
-	return schema;
-}
-
 FieldSchema ranged(FieldSchema schema, double min, double max) {
 	schema.ranged = true;
 	schema.min = min;
@@ -44,21 +35,9 @@ FieldSchema ranged(FieldSchema schema, double min, double max) {
 	return schema;
 }
 
-bool whole_of(const Value &value, int64_t &out) {
-	if (const auto *whole = std::get_if<int64_t>(&value)) {
-		out = *whole;
-		return true;
-	}
-	if (const auto *real = std::get_if<double>(&value); real && std::isfinite(*real) && *real == std::floor(*real)) {
-		out = int64_t(*real);
-		return true;
-	}
-	return false;
-}
-
 bool set_whole(int64_t &out, const Value &value, int64_t min, int64_t max, const char *what, std::string &error) {
 	int64_t number = 0;
-	if (!whole_of(value, number) || number < min || number > max) {
+	if (!whole_number(value, number) || number < min || number > max) {
 		error = std::string(what) + " is a whole number from " + std::to_string(min) + " to " + std::to_string(max) + ".";
 		return false;
 	}

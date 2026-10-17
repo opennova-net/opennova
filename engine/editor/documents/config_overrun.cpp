@@ -5,6 +5,7 @@
 #include <editor/assets/asset_kinds.h>
 #include <editor/documents/text_types.h>
 #include <editor/model/core_finding.h>
+#include <editor/model/field_text.h>
 #include <editor/model/text_document.h>
 #include <editor/project/project_files.h>
 #include <formats/configfile/config_file.h>
@@ -17,22 +18,18 @@ configfile::DataStringsPool pool_of(const std::string &text) {
 	return configfile::data_strings_pool(reinterpret_cast<const uint8_t *>(text.data()), text.size());
 }
 
-std::string count_of(size_t n, const char *one, const char *many) {
-	return std::to_string(n) + " " + (n == 1 ? one : many);
-}
-
 } // namespace
 
 std::string config_overrun_words(const std::string &file, const configfile::DataStringsPool &pool) {
-	std::string words = file + " holds " + count_of(pool.values, "value", "values") +
+	std::string words = file + " holds " + counted_digits(pool.values, "value", "values") +
 	                    (pool.string_bytes == 0 ? std::string(" and no text value")
 	                                            : ", and its text values take " +
-	                                                      count_of(pool.string_bytes, "byte", "bytes") +
+	                                                      counted_digits(pool.string_bytes, "byte", "bytes") +
 	                                                      " (each its length and one)");
 	words += ": the game's ConfigFile reader keeps those in a buffer of " + std::to_string(pool.pool_bytes) +
 	         " bytes (rounded up to its allocator's 64) and then clears that buffer one byte per value, so it "
 	         "writes " +
-	         count_of(pool.overrun(), "byte", "bytes") +
+	         counted_digits(pool.overrun(), "byte", "bytes") +
 	         " of zeros past the buffer into the game's memory, and the game crashes later, as a mission starts "
 	         "(ConfigFile_ParseText @ 0x7609e8). Value " +
 	         std::to_string(pool.pool_bytes + 1) + ", here, is the first past it.";

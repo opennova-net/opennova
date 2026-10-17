@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -178,6 +179,41 @@ struct FieldSchema {
 	// / blue, a matrix row): neighbours in the kind's fields sharing it ("" = a row alone).
 	std::string group;
 };
+
+// A field's schema of the four parts every document type's own table sets, its id, its type, its label and
+// its description; the rest set on the schema it returns.
+inline FieldSchema schema_of(const std::string &id, FieldType type, const char *label, const char *description) {
+	FieldSchema schema;
+	schema.id = id;
+	schema.type = type;
+	schema.label = label;
+	schema.description = description;
+	return schema;
+}
+
+// A whole number from a Value: a whole number, or a real holding one within 9e15 (the wire's numbers: a real
+// past 2^53 is no exact whole number, one past int64_t's range no number to cast). False for anything else.
+inline bool whole_number(const Value &value, int64_t &out) {
+	if (const auto *number = std::get_if<int64_t>(&value)) {
+		out = *number;
+		return true;
+	}
+	if (const auto *real = std::get_if<double>(&value);
+	    real && std::isfinite(*real) && std::floor(*real) == *real && std::fabs(*real) < 9.0e15) {
+		out = static_cast<int64_t>(*real);
+		return true;
+	}
+	return false;
+}
+
+// A field's whole number as a reading of it takes one: a whole number as it is, a real cast toward zero, 0 for
+// a text and for a real no int64_t holds (a NaN among them).
+inline int64_t whole(const Value &value) {
+	if (const auto *number = std::get_if<int64_t>(&value)) return *number;
+	if (const auto *real = std::get_if<double>(&value))
+		return *real >= -9223372036854775808.0 && *real < 9223372036854775808.0 ? static_cast<int64_t>(*real) : 0;
+	return 0;
+}
 
 // A finding about the source text. A blocking one names input the typed model cannot
 // carry: editing and saving wait for the source to be corrected. A non-blocking one
