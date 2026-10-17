@@ -54,8 +54,12 @@ public sealed class EdgeCaseTests : IDisposable
         new HostsSwitcher(store, new NoFlush()).Switch(NovaWorldMode.OpenNova, "203.0.113.10", false);
 
         Assert.Equal(
-            HostsDocument.BeginMarker + "\r\n# mode: opennova\r\n203.0.113.10 gs.novaworld.net\r\n" + HostsDocument.EndMarker +
-            "\r\n10.0.0.5 nas.lan\r\n",
+            HostsDocument.BeginMarker + "\r\n# mode: opennova\r\n" +
+            "203.0.113.10 gs.novaworld.net\r\n" +
+            "203.0.113.10 ftp.novaworld.com\r\n" +
+            "203.0.113.10 ftp2.novaworld.com\r\n" +
+            "203.0.113.10 ftp4.novaworld.com\r\n" +
+            HostsDocument.EndMarker + "\r\n10.0.0.5 nas.lan\r\n",
             store.Text);
     }
 
