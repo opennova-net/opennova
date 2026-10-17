@@ -203,6 +203,28 @@ void test_pixel_device_texture_levels() {
 	const auto halved = pixel_device_texture_levels(rgba.data(), 16, 16, kTextureFlagHalveOnce);
 	CHECK(!halved.empty() && halved[0].width == 8 && halved.size() == 2, "0x10000 halves first");
 	CHECK(pixel_device_texture_levels(nullptr, 16, 16, 0).empty(), "no pixels, no levels");
+	// C-43: a smaller side of 2 or less asks D3DXCreateTexture for 0 levels, its
+	// full chain, and the game loads level 0 alone: D3DXFilterTexture runs only
+	// for a count above 1, so levels 1+ are not the box filter's (the port leaves
+	// them zero) [orig: GTexture_CreateFromPixelData_0 @0x6877C7..0x6877E0,
+	// @0x6878B5..0x6878BE]. An 8 x 2 texture keeps its 4 levels, 8x2 to 1x1.
+	{
+		std::vector<uint8_t> strip(8 * 2 * 4, 0xC8);
+		const auto thin = pixel_device_texture_levels(strip.data(), 8, 2, 0x100001u);
+		CHECK(thin.size() == 4 && thin[0].rgba == strip && thin[3].width == 1 && thin[3].height == 1,
+				"the full chain, level 0 the pixels");
+		bool zero = thin.size() == 4;
+		for (size_t i = 1; zero && i < thin.size(); ++i)
+			for (uint8_t b : thin[i].rgba) zero = zero && b == 0;
+		CHECK(zero, "levels 1+ unfilled (zero), not box-filtered");
+		const auto thin_dxt = pixel_device_texture_levels(strip.data(), 8, 2, 0x500201u);
+		CHECK(thin_dxt.size() == 4 && thin_dxt[1].rgba == std::vector<uint8_t>(4 * 1 * 4, 0),
+				"the DXT chain's levels 1+ likewise");
+		// An 8 x 8 asks for 2 levels and filters level 1.
+		std::vector<uint8_t> square(8 * 8 * 4, 0xC8);
+		const auto eight = pixel_device_texture_levels(square.data(), 8, 8, 0x100001u);
+		CHECK(eight.size() == 2 && eight[1].rgba != std::vector<uint8_t>(4 * 4 * 4, 0), "a count above 1 is filtered");
+	}
 }
 
 void test_model_row_device_texture() {

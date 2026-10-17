@@ -157,23 +157,41 @@ std::vector<DeviceTextureLevel> pixel_device_texture_levels(const uint8_t *rgba,
 	uint32_t count = texture_level_count(width, height, flags);
 	if (level_limit != 0)
 		count = std::min(count, level_limit);
+	// D3DXFilterTexture fills the chain only when the level count the game asked
+	// D3DXCreateTexture for is above 1. Asked 0 (the smaller side 2 or less, no
+	// 0x40000), D3DX makes its full chain and only level 0 is loaded, so levels 1+
+	// keep what the managed pool's creation left there, which no witness reads; the
+	// port leaves them zero (D-RMAT-X1) [orig: GTexture_CreateFromPixelData_0 --
+	// the count @0x6877BA..0x6877E0, D3DXCreateTexture @0x68781A, the level-0 load
+	// @0x6878A0, D3DXFilterTexture only for a count above 1 @0x6878B1..0x6878BE;
+	// the 0-means-full resolution D3DXTex_ValidateAndAdjustTextureParams
+	// @0x690C32..0x690C7D].
+	const bool unfilled_chain = std::min(width, height) <= 2 && (flags & 0x40000u) == 0;
+	const uint32_t filled = unfilled_chain ? std::min(count, 1u) : count;
 	const TextureDxtFormat format = select_texture_dxt_format(flags, caps);
 	if (format != TextureDxtFormat::None) {
-		for (const DxtSurface &surface : build_dxt_texture_levels(base.data(), width, height, format, count)) {
+		for (const DxtSurface &surface : build_dxt_texture_levels(base.data(), width, height, format, filled)) {
 			DeviceTextureLevel level;
 			level.width = surface.width;
 			level.height = surface.height;
 			level.rgba = encode_rgba8(decode_dxt_surface(surface));
 			levels.push_back(std::move(level));
 		}
-		return levels;
+	} else {
+		DeviceTextureLevel level0;
+		level0.width = width;
+		level0.height = height;
+		level0.rgba = std::move(base);
+		levels.push_back(std::move(level0));
+		extend_box_chain(levels, filled);
 	}
-	DeviceTextureLevel level0;
-	level0.width = width;
-	level0.height = height;
-	level0.rgba = std::move(base);
-	levels.push_back(std::move(level0));
-	extend_box_chain(levels, count);
+	for (uint32_t i = static_cast<uint32_t>(levels.size()); i < count; ++i) {
+		DeviceTextureLevel level;
+		level.width = std::max(1u, width >> i);
+		level.height = std::max(1u, height >> i);
+		level.rgba.assign(static_cast<size_t>(level.width) * level.height * 4, 0);
+		levels.push_back(std::move(level));
+	}
 	return levels;
 }
 
