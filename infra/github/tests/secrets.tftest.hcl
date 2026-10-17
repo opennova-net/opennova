@@ -4,9 +4,6 @@
 mock_provider "github" {
   override_during = plan
 
-  mock_data "github_repository" {
-    defaults = { repo_id = 123456789 }
-  }
   # The prod environment's approvers (environments.tf): a user id is a number.
   mock_data "github_user" {
     defaults = { id = "4242" }
