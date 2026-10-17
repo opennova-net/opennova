@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <optional>
 
+#include <base/io/bits.h>
 #include <base/io/strutil.h>
 #include <formats/bfc1/bfc1.h>
 #include <formats/configfile/config_file.h>
@@ -22,8 +23,6 @@
 namespace opennova::editor {
 
 namespace {
-
-bool power_of_two(uint32_t side) { return side != 0 && (side & (side - 1)) == 0; }
 
 std::string sides(uint32_t width, uint32_t height) { return std::to_string(width) + " x " + std::to_string(height); }
 
@@ -89,7 +88,7 @@ void size_fact(TextureImage &image) {
 	const uint32_t w = image.width(), h = image.height();
 	if (!w || !h) return;
 	fact(image, "size", "Size",
-	     sides(w, h) + (power_of_two(w) && power_of_two(h) ? " (sides are powers of two)" : " (a side is no power of two)"));
+	     sides(w, h) + (io::is_power_of_two(w) && io::is_power_of_two(h) ? " (sides are powers of two)" : " (a side is no power of two)"));
 }
 
 void read_tga(TextureImage &image, const std::vector<uint8_t> &stored) {
