@@ -1034,6 +1034,51 @@ int test_parse_findings() {
 		            findings[0].severity == DiagnosticSeverity::Error && findings[0].row()->blocks_save &&
 		            findings[0].row()->gates_build && findings[0].row()->game_refusal);
 	}
+	// A count byte the game reads signed [orig: EventTrigger_EvaluateChain @ 0x45405f, @ 0x45408f;
+	// EventTrigger_UpdateEntry @ 0x454c95]: 128..255 evaluates the run's first trigger alone and dispatches no
+	// action, so nothing is read past a table. The first event holding its first trigger alone and no action, both
+	// counts 200: no finding, and Save writes both bytes back as read.
+	{
+		std::vector<mission::EventChain> chains;
+		mission::RunReport report;
+		TEST_EXPECT(mission::split_event_chains(file, chains, report) && !chains.empty() &&
+		            !chains[0].triggers.empty());
+		chains[0].triggers.resize(1);
+		chains[0].actions.clear();
+		chains[0].event.trigger_count = 200;
+		chains[0].event.action_count = 200;
+		bms::File high = file;
+		mission::join_event_chains(chains, high);
+		TEST_EXPECT(high.events[0].trigger_count == 200 && high.events[0].action_count == 200);
+		std::vector<uint8_t> out;
+		TEST_EXPECT(bms::write(high, out, message));
+		std::unique_ptr<Document> document = open(out, "signed.bms");
+		TEST_EXPECT(document && !document->blocked() && document->issues().empty());
+		TEST_EXPECT(type.validate_file(*document).empty());
+		TEST_EXPECT(bytes_of(*document) == std::string(out.begin(), out.end()));
+	}
+	// The same count of 200 over a table of fewer records, one past the runs in none: the game reads the first and
+	// never the rest, so listed, a closed mission packed as it stands (read as 200 records, it was
+	// mission.runs_past_table, the build refused).
+	{
+		std::vector<mission::EventChain> chains;
+		mission::RunReport report;
+		TEST_EXPECT(mission::split_event_chains(file, chains, report) && !chains[0].triggers.empty());
+		chains[0].triggers.resize(1);
+		chains[0].event.trigger_count = 200;
+		bms::File high = file;
+		mission::join_event_chains(chains, high);
+		high.triggers.push_back(high.triggers.back());
+		high.trigger_count = int32_t(high.triggers.size());
+		TEST_EXPECT(high.triggers.size() < 200 && high.events[0].trigger_index == 0);
+		std::vector<uint8_t> out;
+		TEST_EXPECT(bms::write(high, out, message));
+		std::unique_ptr<Document> document = open(out, "unowned.bms");
+		TEST_EXPECT(document && document->blocked());
+		const std::vector<Diagnostic> findings = type.validate_file(*document);
+		TEST_EXPECT(findings.size() == 1 && findings[0].code() == "mission.invalid_input" &&
+		            !findings[0].row()->gates_build);
+	}
 	// Bytes the writer writes otherwise (two zero bytes inside the loadout chunk's length, as the
 	// shipped missions with a damaged chunk hold): noted by the section, Save writes the chunk as the
 	// game reads it.

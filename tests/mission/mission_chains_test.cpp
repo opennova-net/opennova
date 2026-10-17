@@ -3,7 +3,8 @@
 // file whose runs partition its tables in another order joins canonical and reparses with every
 // event holding the records it held; a record shared by two runs, one in no run and a run past its
 // table are refused, the event or the record named; an empty run's index is the running offset, at
-// the front, in the middle and at the end.
+// the front, in the middle and at the end; a count byte of 128..255 holds the records the game reads of
+// it (the first trigger, no action) and is written back as read.
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -216,6 +217,49 @@ int test_event_references() {
 	return 0;
 }
 
+int test_signed_counts() {
+	// The walks read a count byte signed [orig: EventTrigger_EvaluateChain @0x45405f/@0x45408f;
+	// EventTrigger_UpdateEntry @0x454c95]: 128..255 reads the run's first trigger alone and no action.
+	TEST_EXPECT(triggers_read(0) == 0 && triggers_read(1) == 1 && triggers_read(127) == 127 &&
+	            triggers_read(128) == 1 && triggers_read(200) == 1 && triggers_read(255) == 1);
+	TEST_EXPECT(actions_read(0) == 0 && actions_read(127) == 127 && actions_read(128) == 0 && actions_read(255) == 0);
+	std::vector<EventChain> chains;
+	RunReport report;
+	std::string error;
+	// A trigger count of 200 at the front of a table of 10, the 9 after it in no run: the game evaluates the
+	// first and never reads the rest, so the run is not past the table (it was, read as 200 records).
+	bms::File front = made({{10, 0}});
+	front.events[0].trigger_count = 200;
+	TEST_EXPECT(!split_event_chains(front, chains, report) && report.triggers == RunLayout::Unowned &&
+	            report.record == 1);
+	// The first record alone in its run: the chains hold it, split then join is the identity, the byte written
+	// back as read (its size, 1, would have the game resolve the trigger's zone).
+	bms::File held_one = made({{1, 1}, {2, 0}});
+	held_one.events[0].trigger_count = 200;
+	held_one.events[1].action_count = 255;
+	const std::vector<uint8_t> before = written(held_one);
+	TEST_EXPECT(split_event_chains(held_one, chains, report) && report.canonical() && chains.size() == 2);
+	TEST_EXPECT(chains[0].triggers.size() == 1 && chains[0].triggers[0].param1 == 0 && chains[1].actions.empty());
+	bms::File joined = held_one;
+	join_event_chains(chains, joined);
+	TEST_EXPECT(joined.events[0].trigger_count == 200 && joined.events[1].action_count == 255 &&
+	            written(joined) == before);
+	// A chain edited to another size is written with its size.
+	chains[0].triggers.push_back(chains[0].triggers[0]);
+	join_event_chains(chains, joined);
+	TEST_EXPECT(joined.events[0].trigger_count == 2);
+	// No action read, so an action index past the table is never dereferenced: reordered, not out of range.
+	bms::File stray = held_one;
+	stray.events[1].action_index = 999;
+	TEST_EXPECT(split_event_chains(stray, chains, report) && report.actions == RunLayout::Reordered);
+	// The first trigger is read, so a 200-count run starting past its table is.
+	bms::File past = held_one;
+	past.events[0].trigger_index = 3;
+	TEST_EXPECT(!split_event_chains(past, chains, report) && report.triggers == RunLayout::OutOfRange &&
+	            report.event == 0);
+	return 0;
+}
+
 } // namespace
 
 int main() {
@@ -223,5 +267,6 @@ int main() {
 	if (test_empty_runs() != 0) return 1;
 	if (test_reordered() != 0) return 1;
 	if (test_refused() != 0) return 1;
+	if (test_signed_counts() != 0) return 1;
 	return test_event_references();
 }
