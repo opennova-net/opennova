@@ -671,7 +671,9 @@ void test_feed_and_power_label_slots(const fnt_font_t *font) {
 	}
 	// The power-throw label: bold slot, the outline in the per-frame colour.
 	HudFrameState power;
-	power.ticks = 100000;
+	// Far past the feed lines above: their life runs on the main frame clock
+	// (g_MainFrameCounter), so they have expired and only the label is bold.
+	power.main_frame = 100000;
 	power.windup_active = true;
 	power.windup_held_ticks = 31;
 	power.hud_color_index = 0;
