@@ -117,6 +117,7 @@ enum class AnimationMapFinding {
 	Row,
 	KeyUnknown,
 	SlotRepeated,
+	ClipNameLong, // a clip whose file loads, its name 32 characters or more as the game registers it (gates)
 	kCount
 };
 const FindingCodeRow &finding_code(AnimationMapFinding code);

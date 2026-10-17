@@ -333,6 +333,15 @@ constexpr FindingCodeEntry<AnimationMapFinding> kFindingEntries[] = {
 	{ AnimationMapFinding::Row, listed_code("animation_map.row") },
 	{ AnimationMapFinding::KeyUnknown, { "animation_map.key_unknown" } },
 	{ AnimationMapFinding::SlotRepeated, { "animation_map.slot_repeated" } },
+	// A clip whose file loads is registered under its name cut at its last '.' with ".bad" appended, copied into
+	// a 40-byte node over the bone pointer and link already stored at +32 and +36: a name of 32 characters or more
+	// writes over them. It gates.
+	{ AnimationMapFinding::ClipNameLong,
+	  game_fails_code("animation_map.clip_name_long",
+	                  "the game copies a clip's name, cut at its last '.' with \".bad\" appended, into a 40-byte node "
+	                  "after storing the clip's bone pointer and link at +32 and +36, so a name of 32 characters or "
+	                  "more writes over them and the game corrupts its node [orig: AnimMap_FindOrLoadBoneFile "
+	                  "@ 0x40c030, the name @ 0x40c089..0x40c0c6, the copies @ 0x40c194, @ 0x40c1e3, @ 0x40c246]") },
 };
 static_assert(std::size(kFindingEntries) == static_cast<size_t>(AnimationMapFinding::kCount),
 		"every AnimationMapFinding has exactly one row");

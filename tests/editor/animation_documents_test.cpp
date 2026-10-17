@@ -498,6 +498,12 @@ int validation_and_graph() {
 	TEST_EXPECT(test_io::write_text(root + "/soldier.adm",
 	                                    "anim_reset\t\"idle.bad\"\r\nanim_nosuchslot\t\"idle.bad\"\r\nanim_idle\t\"gone.bad\"\r\n"));
 	TEST_EXPECT(test_io::write_file(root + "/idle.bad", test_io::read_file(anim_dir() + "/idle.bad")));
+	// A clip whose file loads under a name the game's 40-byte node cannot hold (32 characters with ".bad"), and one
+	// of the same length whose file is not there (the game takes failsafe.bad's node, which fits).
+	TEST_EXPECT(test_io::write_text(root + "/long.adm", "anim_reset\t\"idle.bad\"\r\n"
+	                                                    "anim_idle\t\"a_clip_name_twenty_eight_xxx.bad\"\r\n"
+	                                                    "anim_walk\t\"a_clip_name_twenty_eight_yyy.bad\"\r\n"));
+	TEST_EXPECT(test_io::write_file(root + "/a_clip_name_twenty_eight_xxx.bad", test_io::read_file(anim_dir() + "/idle.bad")));
 	TEST_EXPECT(test_io::write_text(root + "/noreset.adm", "anim_idle\t\"idle.bad\"\r\n"));
 	// S12: a comment line, a comment after a row, a slot two rows name, a second reset row; a
 	// row of ten clips (no finding: the game registers every one).
@@ -544,6 +550,16 @@ int validation_and_graph() {
 	TEST_EXPECT(reset && reset->record == "anim_reset" && reset->message.find("last reset clip") != std::string::npos);
 	TEST_EXPECT(!find("animation_map.slot_repeated", "twice.adm", 2) && !has("animation_map.slot_repeated", "soldier.adm"));
 	TEST_EXPECT(!find("animation_map.invalid_input", "ten.adm"));
+	// The clip whose file loads under 32 characters gates; the one whose file is not there does not.
+	{
+		const Diagnostic *long_name = find("animation_map.clip_name_long", "long.adm");
+		TEST_EXPECT(long_name && long_name->severity == DiagnosticSeverity::Error && long_name->row() &&
+		            long_name->row()->gates_build && long_name->message.find("32 characters") != std::string::npos);
+		// On the row whose clip's file is there.
+		TEST_EXPECT(long_name && long_name->record.rfind("anim_idle", 0) == 0 &&
+		            long_name->message.find("_xxx.bad") != std::string::npos);
+		TEST_EXPECT(!find("animation_map.clip_name_long", "long.adm", 1));
+	}
 	// A bone whose parent comes after it: on that bone's parent (the rule the runtime's rig is
 	// FK-safe by); a retail clip has none.
 	const Diagnostic *order = find("animation.parent_order", "late.bad");

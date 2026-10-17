@@ -18,6 +18,7 @@
 #include <base/io/strutil.h>
 #include <base/resource_index/resource_index.h>
 #include <base/vfs/vfs_decode.h>
+#include <editor/documents/animation_map_document.h>
 #include <editor/documents/mission_table.h>
 #include <editor/documents/mission_validation.h>
 #include <editor/documents/mns_document.h>
@@ -486,8 +487,42 @@ void check_terrain_admission(const AssetGraph &graph, const ValidationCache &fil
 	}
 }
 
+// The clips the project's animation maps name whose file loads under a name the game's node cannot hold: the game
+// registers a clip that loads under its name cut at its last '.' with ".bad" appended, copied into a 40-byte node
+// over the bone pointer and link it stored at +32 and +36, so a name of 32 characters or more corrupts the node
+// [orig: AnimMap_FindOrLoadBoneFile @ 0x40c030, the name @ 0x40c089..0x40c0c6, the bone pointer @ 0x40c188 /
+// @ 0x40c1d7 / @ 0x40c232, the copies @ 0x40c194 / @ 0x40c1e3 / @ 0x40c246]. It loads the file of that name alone,
+// so the name built is the one looked for; a clip with no file of it takes failsafe.bad's node, which fits
+// (@ 0x40c295): it is the reference's own finding.
+void check_animation_clip_names(const AssetGraph &graph, const ValidationCache &files, const ValidationInput &,
+		std::vector<Diagnostic> &out) {
+	graph.for_each_edge([&](const GraphEdge &edge) {
+		if (edge.kind != ReferenceKind::Animation || !strutil::ends_with_icase(edge.source, ".adm") ||
+				!files.records_checked(edge.source))
+			return;
+		std::string name = edge.value;
+		const size_t dot = name.rfind('.');
+		if (dot != std::string::npos) name.resize(dot);
+		name += ".bad";
+		if (name.size() < 32 || !graph.has_file(name)) return;
+		Diagnostic d = make_finding(finding_code(AnimationMapFinding::ClipNameLong), DiagnosticSeverity::Error,
+				"The game registers the clip " + edge.value + " as " + name + ", " + std::to_string(name.size()) +
+						" characters, into a node whose name holds 31: it writes over the clip's bone pointer and "
+						"corrupts the node. Give its file a shorter name.",
+				edge.source, edge.field);
+		d.record = edge.record;
+		d.record_key = edge.record_key;
+		d.record_title = edge.record_title;
+		d.row_id = edge.address.row;
+		d.child_id = edge.address.child;
+		d.record_kind = edge.address.kind;
+		out.push_back(std::move(d));
+	});
+}
+
 // The cross-file checks, one row per asset kind, in AssetKind's order.
 constexpr UseCheckRow kUseChecks[] = {
+	{ AssetKind::AnimationMap, check_animation_clip_names },
 	{ AssetKind::Texture, check_texture_uses },
 	{ AssetKind::Strings, check_gametext_flow },
 	{ AssetKind::Mission, check_mission_pools },
