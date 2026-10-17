@@ -412,7 +412,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->hosted_servers.configure(config, fleet_placement_);
 	impl_->hosted_servers.register_routes(impl_->app);
 	impl_->fleet.configure(impl_->hosted_servers.hosting_on(), impl_->hosted_servers.provider(),
-			impl_->hosted_servers.cap());
+			impl_->hosted_servers.cap(), fleet_placement_);
 	impl_->fleet.register_routes(impl_->app);
 	impl_->stats.configure(fleet_slot_memory_mb_, fleet_slot_cpus_);
 	impl_->stats.register_routes(impl_->app);

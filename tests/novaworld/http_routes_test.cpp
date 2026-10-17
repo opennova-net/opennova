@@ -5309,6 +5309,10 @@ int test_hosted_server_routes(Harness &h) {
 	reply = h.send("GET", "/api/admin/hosted", { kBearer });
 	json = crow::json::load(body_text(reply));
 	TEST_EXPECT(reply.code == 200 && json && json["cap"].i() == 4 && json["live"].i() == 4);
+	// The room per machine kind, from the placement policy (the defaults: 2
+	// shared machines of 12 slots, 2 own machines).
+	TEST_EXPECT(json["shared"]["live"].i() + json["own"]["live"].i() == 4 && json["shared"]["room"].i() == 24 &&
+			json["own"]["room"].i() == 2);
 	TEST_EXPECT(json["enabled"].b() && str(json["provider"]) == "docker");
 	TEST_EXPECT(body_text(reply).find("planted-admin-secret") == std::string::npos);
 	TEST_EXPECT(!json.has("jobs")); // the jobs routes' now (job_routes_test)

@@ -65,7 +65,8 @@ describe('FleetSection', () => {
     expect(rows[1].text()).toContain('Own machine');
     expect(rows[1].text()).toContain('c7a.medium');
     expect(page.text()).toContain('1 shared, 1 own');
-    expect(page.text()).toContain('1 of 24');
+    expect(page.text()).toContain('1 of 24 shared');
+    expect(page.text()).toContain('0 of 2 own');
   });
 
   it('lists the servers with owner, tier, players and slot, each to its own page', async () => {

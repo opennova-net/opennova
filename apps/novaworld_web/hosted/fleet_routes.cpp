@@ -65,10 +65,11 @@ crow::json::wvalue machine_json(db::Database &db, const FleetMachineRow &m) {
 	return out;
 }
 
-void FleetRoutes::configure(bool hosting_on, std::string provider, int cap) {
+void FleetRoutes::configure(bool hosting_on, std::string provider, int cap, const PlacementPolicy &policy) {
 	hosting_on_ = hosting_on;
 	provider_ = std::move(provider);
 	cap_ = cap;
+	policy_ = policy;
 }
 
 void FleetRoutes::register_routes(WebApp &app) {
@@ -88,7 +89,10 @@ void FleetRoutes::register_routes(WebApp &app) {
 
 // GET /api/admin/hosted[?owner=<username>][&state=live|ended|all] — the fleet:
 // {"enabled" (a machine driver and at least one offered data set), "provider",
-// "cap", "live" (how many servers are live), "machines" (the live machines by
+// "cap", "live" (how many servers are live), "shared" and "own" ({live, room}:
+// the live servers of each machine kind, and the most the placement policy's
+// machines of that kind hold, ONNET_FLEET_MAX_SHARED x ONNET_FLEET_SHARED_SLOTS
+// and ONNET_FLEET_MAX_OWN), "machines" (the live machines by
 // id, then the newest kEndedMachinesShown ended or failed ones, newest first;
 // machine_json, with the trees each holds), "servers"} (the newest
 // kServersShown the filter takes, live first: `owner` an account's username
@@ -124,7 +128,13 @@ crow::response FleetRoutes::fleet(const crow::request &req) {
 		out["enabled"] = hosting_on_ && !offered_data_sets(*db_conn).empty();
 		out["provider"] = provider_;
 		out["cap"] = cap_;
-		out["live"] = count_live(*db_conn);
+		const int live = count_live(*db_conn);
+		const int own_live = count_own_live(*db_conn);
+		out["live"] = live;
+		out["shared"]["live"] = live - own_live;
+		out["shared"]["room"] = policy_.max_shared * policy_.shared_slots;
+		out["own"]["live"] = own_live;
+		out["own"]["room"] = policy_.max_own;
 		std::vector<crow::json::wvalue> machines;
 		for (const FleetMachineRow &m : list_machines(*db_conn, kEndedMachinesShown))
 			machines.push_back(machine_json(*db_conn, m));

@@ -25,7 +25,7 @@
 
     <dl v-if="fleet" class="grid grid-cols-1 gap-3 min-[420px]:grid-cols-3">
       <StatTile label="Hosting" :value="fleet.enabled ? 'On' : 'Off'" :detail="fleet.enabled ? 'Owners can start servers' : 'No server can start'" />
-      <StatTile label="Live servers" :value="`${fleet.live} of ${fleet.cap}`" detail="The service's cap on live servers" />
+      <StatTile label="Live servers" :value="`${fleet.shared.live} of ${fleet.shared.room} shared`" :detail="`${fleet.own.live} of ${fleet.own.room} own`" />
       <StatTile label="Machines" :value="String(activeMachines.length)" :detail="machineBreakdown" />
     </dl>
 
