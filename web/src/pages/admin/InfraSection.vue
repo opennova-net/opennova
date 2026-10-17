@@ -88,8 +88,8 @@
                   }}</span>: {{ d.running }} of {{ d.desired }} running<template
                     v-if="d.failed > 0"
                     >, <span class="text-danger">{{ countLabel(d.failed, 'task') }} failed</span></template
-                  >, rollout {{ rolloutLabel(d.rollout_state).toLowerCase() }}
-                  <template v-if="d.created_at">, began <RelativeTime :value="d.created_at" :now="now" /></template>
+                  >, rollout {{ rolloutLabel(d.rollout_state).toLowerCase()
+                  }}<template v-if="d.created_at">, began <RelativeTime :value="d.created_at" :now="now" /></template>
                 </li>
               </ul>
               <p v-else-if="primaryDeployment(s)?.created_at" class="text-xs text-ink-muted">
