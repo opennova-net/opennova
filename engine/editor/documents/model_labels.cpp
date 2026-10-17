@@ -217,7 +217,8 @@ std::string model_record_label(const Document &document, const NodeAddress &addr
 		const bool spot = (l.flags & THREEDI_LIGHT_FLAG_TYPE_TARGET) != 0;
 		char reach[32];
 		std::snprintf(reach, sizeof(reach), "%.3g m", static_cast<double>(l.atten_end));
-		// Part 0 is the unattached sentinel (ObjectModel::get_model_light_world_position's rule).
+		// The subobject byte names the light's owner group, never a part it rides; 0 names none, the blink box
+		// under the light owning it then [orig: Entity_SpawnGlowEffects @ 0x56c89a..0x56c8db].
 		return "Light " + std::to_string(i + 1) + ": " + (spot ? "spot" : "omni") + ", " + reach +
 		       (l.subobj_index ? ", on " + model_part_name(*row, l.subobj_index) : std::string());
 	}

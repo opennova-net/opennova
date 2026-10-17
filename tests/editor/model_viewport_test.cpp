@@ -1513,7 +1513,46 @@ static int test_auto_lod() {
 	return 0;
 }
 
+// A light's marker is where the game spawns the light: its offset through the model's matrix alone, its
+// subobject byte only the light's owner group [orig: Entity_SpawnGlowEffects @ 0x56c7c0, @ 0x56c838..0x56c8ae].
+// The armory with part 1 sliding and light 0 on subobject 1: the part moves, the light's marker does not.
+static int test_light_by_model() {
+	namespace threedi = opennova::threedi;
+	threedi::Threedi3di3 model{};
+	TEST_EXPECT(threedi::threedi_3di3_read(synth("armory_special1_slide_part1.3di").c_str(), &model) == 0);
+	TEST_EXPECT(model.light_count > 0 && model.lods && model.lods[0].render_object_count > 1);
+	if (model.light_count == 0 || !model.lods || model.lods[0].render_object_count < 2) {
+		threedi::threedi_3di3_free(&model);
+		return 1;
+	}
+	model.lights[0].subobj_index = 1;
+	int32_t rest[96] = {}, driven[96];
+	for (int32_t &slot : driven) slot = 4 * 65536; // whichever slot its register reads
+	ModelOverlayOptions options;
+	options.pivots = true;
+	const auto find = [](const std::vector<ModelOverlay> &marks, ModelOverlayKind kind, int index) {
+		for (const ModelOverlay &mark : marks)
+			if (mark.kind == kind && mark.index == index) return std::optional<ModelOverlay>(mark);
+		return std::optional<ModelOverlay>();
+	};
+	const std::vector<ModelOverlay> still = model_overlays(model, 0, 0, rest, options);
+	const std::vector<ModelOverlay> slid = model_overlays(model, 0, 0, driven, options);
+	const std::optional<ModelOverlay> pivot0 = find(still, ModelOverlayKind::Pivot, 1), pivot1 = find(slid, ModelOverlayKind::Pivot, 1);
+	const std::optional<ModelOverlay> light0 = find(still, ModelOverlayKind::Light, 0), light1 = find(slid, ModelOverlayKind::Light, 0);
+	TEST_EXPECT(pivot0 && pivot1 && light0 && light1);
+	if (pivot0 && pivot1 && light0 && light1) {
+		TEST_EXPECT(!near(pivot0->at.x, pivot1->at.x, 1e-3) || !near(pivot0->at.y, pivot1->at.y, 1e-3) ||
+		            !near(pivot0->at.z, pivot1->at.z, 1e-3));
+		TEST_EXPECT(near(light0->at.x, light1->at.x, 1e-6) && near(light0->at.y, light1->at.y, 1e-6) &&
+		            near(light0->at.z, light1->at.z, 1e-6) && light1->part == -1);
+	}
+	threedi::threedi_3di3_free(&model);
+	std::printf("light by model: a light on subobject 1 stays where its offset is while part 1 slides\n");
+	return 0;
+}
+
 int main() {
+	TEST_EXPECT(test_light_by_model() == 0);
 	TEST_EXPECT(test_status_and_builds() == 0);
 	TEST_EXPECT(test_unknown_and_empty_changes() == 0);
 	TEST_EXPECT(test_overlays() == 0);
