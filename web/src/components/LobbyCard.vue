@@ -1,5 +1,8 @@
 <template>
-  <div class="rounded-panel border border-border bg-panel p-5">
+  <RouterLink
+    :to="`/lobby/${host.id}`"
+    class="block rounded-panel border border-border bg-panel p-5 transition hover:border-accent/60 hover:bg-hover"
+  >
     <div class="flex items-center justify-between gap-3">
       <p class="min-w-0 truncate text-lg font-semibold text-ink">{{ host.serverName || 'Unnamed server' }}</p>
       <span class="shrink-0 rounded-control bg-hover px-3 py-1 text-xs font-semibold text-accent">
@@ -14,10 +17,11 @@
       <span v-if="host.locked" class="rounded-control bg-hover px-2 py-0.5 text-ink-muted">Password</span>
     </p>
     <p v-if="host.hostIp" class="mt-2 font-mono text-xs text-ink-muted">{{ host.hostIp }}:{{ host.hostPort }}</p>
-  </div>
+  </RouterLink>
 </template>
 
 <script setup lang="ts">
+import { RouterLink } from 'vue-router';
 import type { LobbyHost } from '../types/lobby';
 
 interface Props {
