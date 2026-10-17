@@ -40,6 +40,7 @@
       <p id="fleet-roll-hint" class="text-xs text-ink-muted">
         Moves every server to fresh shared machines (a new image, say), not counted as a restart. Launches run as
         <RouterLink to="/admin/jobs" class="text-accent hover:text-ink-bright">background jobs</RouterLink>.
+        <HistoryToggle v-model="showMachineHistory" :count="replacedMachineIds.size" class="ml-1" />
       </p>
       <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
         <table class="min-w-full divide-y divide-border">
@@ -63,7 +64,7 @@
             <tr v-else-if="fleet.machines.length === 0">
               <td colspan="8" class="px-4 py-6 text-center text-ink-muted">No machine is running.</td>
             </tr>
-            <tr v-for="m in fleet?.machines ?? []" :key="m.id" class="fleet-machine-row align-top hover:bg-hover">
+            <tr v-for="m in machinesShown" :key="m.id" class="fleet-machine-row align-top hover:bg-hover">
               <th scope="row" class="whitespace-nowrap px-4 py-3 text-left font-mono text-xs font-normal">
                 {{ m.id }}
                 <span v-if="m.cloud_id" class="block text-ink-muted">{{ m.cloud_id }}</span>
@@ -146,6 +147,7 @@
           </select>
         </label>
         <button type="submit" :class="secondaryButton">Apply</button>
+              <HistoryToggle v-model="showServerHistory" :count="replacedServerIds.size" class="self-center" />
       </form>
       <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
         <table class="min-w-full divide-y divide-border">
@@ -169,7 +171,7 @@
             <tr v-else-if="fleet.servers.length === 0">
               <td colspan="8" class="px-4 py-6 text-center text-ink-muted">No hosted server matches.</td>
             </tr>
-            <tr v-for="s in fleet?.servers ?? []" :key="s.id" class="fleet-server-row align-top hover:bg-hover">
+            <tr v-for="s in serversShown" :key="s.id" class="fleet-server-row align-top hover:bg-hover">
               <th scope="row" class="px-4 py-3 text-left font-medium">
                 <RouterLink :to="`/admin/fleet/${s.id}`" class="break-words text-accent hover:text-ink-bright">
                   {{ s.settings.game_name || 'Unnamed server' }}
@@ -296,6 +298,8 @@
 // of every outdated server (POST /api/admin/hosted/update-all); and the kill
 // switch (POST /api/admin/hosted/stop-all) behind a typed confirmation. The
 // page polls, faster while a server changes state.
+import HistoryToggle from '../../components/HistoryToggle.vue';
+import { replacedMachines, replacedServers } from '../../utils/history';
 import { computed, nextTick, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import RelativeTime from '../../components/RelativeTime.vue';
@@ -335,6 +339,21 @@ let errorFromLoad = false;
 const liveCount = computed(() => fleet.value?.servers.filter((s) => s.live).length ?? 0);
 const outdatedCount = computed(() => fleet.value?.servers.filter((s) => s.live && s.outdated && !s.update_requested).length ?? 0);
 const activeMachines = computed(() => (fleet.value?.machines ?? []).filter((m) => m.state !== 'ended' && m.state !== 'failed'));
+
+// The ended rows a later start or launch replaced (utils/history.ts), shown
+// on request; the Ended only filter shows every ended server.
+const showMachineHistory = ref(false);
+const showServerHistory = ref(false);
+const replacedMachineIds = computed(() => replacedMachines(fleet.value?.machines ?? []));
+const machinesShown = computed(() =>
+  (fleet.value?.machines ?? []).filter((m) => showMachineHistory.value || !replacedMachineIds.value.has(m.id)),
+);
+const replacedServerIds = computed(() =>
+  query.value.state === 'ended' ? new Set<number>() : replacedServers(fleet.value?.servers ?? [], (s) => s.owner?.id ?? null),
+);
+const serversShown = computed(() =>
+  (fleet.value?.servers ?? []).filter((s) => showServerHistory.value || !replacedServerIds.value.has(s.id)),
+);
 
 // A pinned tree's version; data that ships no version.txt has none.
 function pinnedText(tree: PinnedTree | null): string {

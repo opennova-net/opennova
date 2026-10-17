@@ -129,10 +129,13 @@
 
       <!-- Hosted servers. -->
       <section class="space-y-3" aria-labelledby="user-servers">
-        <h2 id="user-servers" class="text-xl font-semibold text-ink">Hosted servers</h2>
+        <div class="flex flex-wrap items-baseline justify-between gap-2">
+          <h2 id="user-servers" class="text-xl font-semibold text-ink">Hosted servers</h2>
+          <HistoryToggle v-model="showServerHistory" :count="replacedServerIds.size" />
+        </div>
         <p v-if="detail.servers.length === 0" class="text-sm text-ink-muted">None yet.</p>
         <ul v-else class="divide-y divide-border rounded-panel border border-border bg-panel">
-          <li v-for="s in detail.servers" :key="s.id" class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
+          <li v-for="s in serversShown" :key="s.id" class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
             <RouterLink :to="`/admin/fleet/${s.id}`" class="font-medium text-accent hover:text-ink-bright">
               {{ s.settings.game_name || 'Unnamed server' }}
             </RouterLink>
@@ -240,6 +243,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { RouterLink, useRoute, useRouter } from 'vue-router';
 import RelativeTime from '../../components/RelativeTime.vue';
+import HistoryToggle from '../../components/HistoryToggle.vue';
 import { hasAdminToken } from '../../api/authToken';
 import { stripeDashboardUrl } from '../../api/adminBilling';
 import { fetchAccountCdKeys } from '../../api/cdKeys';
@@ -247,6 +251,7 @@ import { deleteUser, fetchUser, listUsers, setCompServers, updateUser } from '..
 import { useSession } from '../../composables/useSession';
 import type { CdKeyAccountResponse } from '../../types/cdKeys';
 import { COMP_SERVERS_MAX, type Role, type User, type UserDetail, type UserListEntry } from '../../types/users';
+import { replacedServers } from '../../utils/history';
 import { accountStatusLabel, entitlementLabel, isActiveAccount } from '../../utils/adminView';
 import { subscriptionStatusLabel } from '../../utils/billingView';
 import { stateBadgeClass, stateLabel } from '../../utils/hostedState';
@@ -267,6 +272,13 @@ const router = useRouter();
 const { user: sessionUser, refresh: refreshSession } = useSession();
 
 const detail = ref<UserDetail | null>(null);
+// An ended server its owner started again since is history, shown on request
+// (utils/history.ts).
+const showServerHistory = ref(false);
+const replacedServerIds = computed(() => replacedServers(detail.value?.servers ?? []));
+const serversShown = computed(() =>
+  (detail.value?.servers ?? []).filter((s) => showServerHistory.value || !replacedServerIds.value.has(s.id)),
+);
 const keys = ref<CdKeyAccountResponse | null>(null);
 const keysError = ref('');
 const loading = ref(false);
