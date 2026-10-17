@@ -22,7 +22,9 @@
 // anything runs, the data sets mounted by label read-only, the fences (the
 // metadata service and the internal port on every destination, for every
 // slot's user) applied and checked before the agent starts, the agent copied
-// out of the serve image and its unit reaching the controller by its URL. The settings
+// out of the serve image and its unit reaching the controller by its URL, sending
+// the containers' output to the machines' log group, and the agent's own journal
+// relayed there through docker's awslogs driver. The settings
 // (hosted/fleet_config.h): the defaults, every variable's read and its refusals. And the docker
 // driver, the local stack's (hosted/docker_machine_driver.h), against an engine in memory: its
 // config checks and profile, the machine's command line and create body, the token's archive,
@@ -76,6 +78,7 @@ namespace {
 
 constexpr const char *kAws = "/usr/local/bin/aws";
 constexpr const char *kRegion = "us-east-1";
+constexpr const char *kLogGroup = "/opennova/server/machines";
 constexpr const char *kShared = "lt-0123456789abcdef0";
 constexpr const char *kOwn = "lt-0abcdef0123456789";
 constexpr const char *kSubnet = "subnet-0123456789abcdef0";
@@ -293,6 +296,7 @@ hosted::Ec2MachineConfig config_in(const std::string &scratch) {
 	c.service_url = kServiceUrl;
 	c.admin_address = kService;
 	c.data_sets = { hosted::kDataSetJointOperations, hosted::kDataSetDeltaForceXtreme2 };
+	c.log_group = kLogGroup;
 	c.machine_script = machine_script();
 	c.scratch_dir = scratch;
 	c.describe_ttl_ms = kTtl;
@@ -409,6 +413,10 @@ int test_config_checks(const std::string &scratch) {
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.aws_cli = "aws"; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.region = ""; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.region = "US East 1"; }));
+	// The machines' log group: required, and nothing that could leave its quotes.
+	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.log_group = ""; }));
+	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.log_group = "/opennova/x y"; }));
+	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.log_group = "/opennova/'x"; }));
 	TEST_EXPECT(
 			refused([](hosted::Ec2MachineConfig &c) { c.subnets = { "sg-0123456789abcdef0" }; }));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.subnets.clear(); }));
@@ -499,7 +507,8 @@ int test_machine_script(const std::string &) {
 	for (const char *blank : { Ec2MachineDriver::kBlankServiceUrl,
 				 Ec2MachineDriver::kBlankServicePort, Ec2MachineDriver::kBlankMachineId,
 				 Ec2MachineDriver::kBlankMachineToken, Ec2MachineDriver::kBlankServeImage,
-				 Ec2MachineDriver::kBlankHostdImage, Ec2MachineDriver::kBlankDataSets })
+				 Ec2MachineDriver::kBlankHostdImage, Ec2MachineDriver::kBlankDataSets,
+				 Ec2MachineDriver::kBlankLogGroup, Ec2MachineDriver::kBlankRegion })
 		TEST_EXPECT(script.find(blank) != std::string::npos);
 	TEST_EXPECT(!traces_commands(script));
 	TEST_EXPECT(traces_commands("set -euxo pipefail\n") && traces_commands("  set -o xtrace\n"));
@@ -572,8 +581,26 @@ int test_machine_script(const std::string &) {
 	TEST_EXPECT(runs_line(
 			script, "docker cp \"$container:/usr/local/bin/opennova-hostd\" \"$HOSTD.new\""));
 	TEST_EXPECT(runs_line(script, "readonly HOSTD=/usr/local/bin/opennova-hostd"));
-	TEST_EXPECT(runs_line(script, "ExecStart=$HOSTD --service $SERVICE_URL --machine $MACHINE_ID"));
+	TEST_EXPECT(runs_line(script,
+			"ExecStart=$HOSTD --service $SERVICE_URL --machine $MACHINE_ID "
+			"--log-group $LOG_GROUP --log-region $REGION"));
 	TEST_EXPECT(runs_line(script, "Restart=always"));
+	// The agent's own journal to the same log group, its stream <machine id>/hostd,
+	// through docker's awslogs driver, never blocking, and never ending the machine.
+	TEST_EXPECT(runs_line(script,
+			"journalctl --unit=opennova-hostd.service --boot --lines=all "
+			"--follow --quiet"));
+	TEST_EXPECT(runs_line(script, "--cursor-file=/var/lib/opennova-hostd-log/cursor |"));
+	TEST_EXPECT(runs_line(script,
+			"--log-driver awslogs --log-opt \"awslogs-region=$REGION\" "
+			"--log-opt \"awslogs-group=$LOG_GROUP\""));
+	TEST_EXPECT(runs_line(script,
+			"--log-opt \"awslogs-stream=$MACHINE_ID/hostd\" --log-opt "
+			"mode=non-blocking"));
+	TEST_EXPECT(runs_line(script, "--entrypoint /usr/bin/cat \"$HOSTD_IMAGE\" >/dev/null"));
+	TEST_EXPECT(runs_line(script, "--network none --read-only --cap-drop ALL"));
+	TEST_EXPECT(runs_line(script, "systemctl enable --now opennova-hostd-log.service || log"));
+	TEST_EXPECT(agent < line_at(script, "systemctl enable --now opennova-hostd-log.service"));
 	TEST_EXPECT(script.size() < Ec2MachineDriver::kMaxUserDataBytes - 1024);
 
 	hosted::MachineUserData values;
@@ -584,6 +611,8 @@ int test_machine_script(const std::string &) {
 	values.serve_image = kImage;
 	values.hostd_image = kHostdImage;
 	values.data_sets = { { "jop_2_consumer", "od-jop2" }, { "dfx2_consumer", "od-dfx2" } };
+	values.log_group = kLogGroup;
+	values.region = kRegion;
 	const auto rendered = Ec2MachineDriver::render_user_data(script, values);
 	TEST_EXPECT(rendered);
 	TEST_EXPECT(rendered->find("@OPENNOVA_") == std::string::npos);
@@ -594,6 +623,8 @@ int test_machine_script(const std::string &) {
 	TEST_EXPECT(assigned(*rendered, "SERVE_IMAGE") == kImage);
 	TEST_EXPECT(assigned(*rendered, "HOSTD_IMAGE") == kHostdImage);
 	TEST_EXPECT(assigned(*rendered, "DATA_SETS") == "jop_2_consumer=od-jop2 dfx2_consumer=od-dfx2");
+	TEST_EXPECT(assigned(*rendered, "LOG_GROUP") == kLogGroup);
+	TEST_EXPECT(assigned(*rendered, "REGION") == kRegion);
 	// The token appears once, in its assignment.
 	TEST_EXPECT(rendered->find(values.bootstrap_token) == rendered->rfind(values.bootstrap_token));
 	// A value that could leave its quotes, or one outside its shape, is refused.
@@ -618,6 +649,9 @@ int test_machine_script(const std::string &) {
 	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.data_sets.clear(); }));
 	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.data_sets[0].second = "od jop2"; }));
 	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.data_sets[0].first = "a=b"; }));
+	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.log_group = ""; }));
+	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.log_group = "/x'; reboot; '"; }));
+	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.region = "us east 1"; }));
 	TEST_EXPECT(!Ec2MachineDriver::render_user_data("#!/bin/bash\n", values));
 	return 0;
 }
@@ -689,6 +723,9 @@ int test_launch(const std::string &scratch) {
 	// In the order the template attaches the volumes: the data sets' sorted one.
 	TEST_EXPECT(assigned(call.user_data, "DATA_SETS") ==
 			"dfx2_consumer=od-dfx2 jop_2_consumer=od-jop2");
+	// The machines' log group, in the driver's own region.
+	TEST_EXPECT(assigned(call.user_data, "LOG_GROUP") == kLogGroup);
+	TEST_EXPECT(assigned(call.user_data, "REGION") == kRegion);
 	TEST_EXPECT(!call.user_data.empty() && !fs::exists(fs::u8path(call.user_data_path)));
 	// The token is in the user-data alone, never on the command line.
 	for (const std::string &arg : argv)
@@ -1317,6 +1354,7 @@ int test_fleet_config() {
 								"{\"own\": \" lt-0abcdef0123456789:3 \", \"shared\": \"" +
 										std::string(kShared) + "\"}" },
 						{ "ONNET_HOSTED_EC2_REGION", kRegion },
+						{ "ONNET_HOSTED_EC2_LOG_GROUP", kLogGroup },
 						{ "ONNET_HOSTED_EC2_SUBNETS",
 								std::string(" ") + kSubnet + " , " + kSubnetB + "," },
 						{ "ONNET_HOSTED_DEPLOYMENT", kDeployment },
@@ -1344,7 +1382,7 @@ int test_fleet_config() {
 				c.ec2.subnets == std::vector<std::string>({ kSubnet, kSubnetB }) &&
 				c.ec2.deployment == kDeployment);
 		TEST_EXPECT(c.ec2.serve_image == kImage && c.ec2.aws_cli == "/opt/aws/bin/aws");
-		TEST_EXPECT(c.ec2.hostd_image == kHostdImage);
+		TEST_EXPECT(c.ec2.hostd_image == kHostdImage && c.ec2.log_group == kLogGroup);
 		// The machines reach the controller by its URL; its admin links come from its bind.
 		TEST_EXPECT(c.internal_url == kServiceUrl && c.ec2.service_url == kServiceUrl);
 		TEST_EXPECT(c.ec2.admin_address == "10.44.0.10");

@@ -44,7 +44,8 @@ guide is [DEPLOY.md](../DEPLOY.md) at the repo root.
   - `db bootstrap|psql|reset-db|snapshot`, `backup now|list|restore|import`: the RDS
     database and its pg_dump copies, through one-off tasks of the backup task definition
     (`backup import --from-deployment prod KEY` brings prod's dump into staging alone);
-  - `fleet status|drain|end|roll|bake-image`: the hosted game servers' machines;
+  - `fleet status|logs|drain|end|roll|bake-image`: the hosted game servers' machines
+    (`fleet logs MACHINE [SLOT|hostd]`: a machine's logs from CloudWatch);
   - `hosted data-snapshot --data-set <slug>`: a data set's game data into a snapshot in
     the deployment's account;
   - `aws <args...>`: the AWS CLI in the deployment's account.

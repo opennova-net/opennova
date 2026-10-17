@@ -85,7 +85,7 @@ expect_refused "the old default workspace's name" "prod or staging" --deployment
 
 echo "--- a read-only command reads prod unless told, and says so"
 for cmd in "app status" "app releases" "app logs web" "app images" "secrets check" "stripe check" \
-           "infra output" "infra list" "fleet status" "backup list"; do
+           "infra output" "infra list" "fleet status" "fleet logs 12 3" "backup list"; do
   # shellcheck disable=SC2086
   expect_run "'$cmd' alone" "ran DEP=prod DEFAULTED=1" $cmd
 done
@@ -167,6 +167,57 @@ if grep -q -- '--desired-count' "$calls"; then fail "app down's zero counts read
 SSM_DOWN_REPLY=missing
 ( set_deployment staging; service_roll web td:2 ) >/dev/null 2>&1
 if grep -q -- '--desired-count 1' "$calls"; then pass "zero counts with no marker are the first release's"; else fail "first release: $(cat "$calls")"; fi
+unset -f aws
+
+echo "--- fleet logs reads the machines' log group alone"
+# The real command (cmd_fleet alone is stubbed above) on a stub aws that records
+# every call: CloudWatch reads of the one stream asked for, an EC2 id read as
+# its machine-id tag, nothing sent to a machine.
+infra_get() { case "$1" in OPENNOVA_MACHINES_LOG_GROUP) echo /opennova/staging/machines ;; *) echo "stub-$1" ;; esac; }
+aws() {
+  echo "aws $*" >>"$calls"
+  case "$1 $2" in
+    "ec2 describe-instances")
+      case "$*" in
+        *i-0aaaaaaaaaaaaaaa1*) echo 12 ;;
+        *i-0bbbbbbbbbbbbbbb2*) echo None ;;
+        *) echo "An error occurred (InvalidInstanceID.NotFound)" >&2; return 254 ;;
+      esac ;;
+  esac
+}
+# expect_logs NAME WANT ARGS...: fleet_logs ARGS makes WANT its last aws call.
+expect_logs() {
+  local name="$1" want="$2" got
+  shift 2
+  : >"$calls"
+  ( set_deployment staging; fleet_logs "$@" ) >/dev/null 2>&1 || { fail "$name (refused: $( (set_deployment staging; fleet_logs "$@") 2>&1 | tail -n 1))"; return; }
+  got="$(tail -n 1 "$calls")"
+  if [ "$got" = "$want" ]; then pass "$name"; else fail "$name (got '$got', want '$want')"; fi
+}
+expect_logs "a slot's stream" \
+  "aws logs tail /opennova/staging/machines --log-stream-names 12/slot-3 --since 1h --format short" \
+  12 3
+expect_logs "hostd's stream, followed, since 2h" \
+  "aws logs tail /opennova/staging/machines --log-stream-names 12/hostd --since 2h --format short --follow" \
+  12 hostd --since 2h --follow
+expect_logs "every stream of the machine, each line naming its stream" \
+  "aws logs tail /opennova/staging/machines --log-stream-name-prefix 12/ --since 1h --format detailed" \
+  12
+expect_logs "an EC2 id read as its machine-id tag" \
+  "aws logs tail /opennova/staging/machines --log-stream-names 12/slot-0 --since 1h --format short" \
+  i-0aaaaaaaaaaaaaaa1 0
+if grep -vq '^aws \(logs tail\|ec2 describe-instances\) ' "$calls"; then fail "fleet logs called more than CloudWatch and EC2's describe: $(cat "$calls")"; else pass "fleet logs calls CloudWatch's tail and EC2's describe alone"; fi
+for args in "" "x" "0 3" "12 32" "12 03" "12 slot-3" "12 3 4" "12 --tail" "i-0bbbbbbbbbbbbbbb2" "i-0ccccccccccccccc3" "i-XYZ"; do
+  : >"$calls"
+  # shellcheck disable=SC2086  # the words are the command's arguments
+  if ( set_deployment staging; fleet_logs $args ) >/dev/null 2>&1; then
+    fail "fleet logs '$args' was taken"
+  elif grep -q '^aws logs' "$calls"; then
+    fail "fleet logs '$args' read the logs before refusing"
+  else
+    pass "fleet logs '$args' is refused"
+  fi
+done
 unset -f aws
 
 echo "--- the org stack's first run moves its state before the vault learns of it"

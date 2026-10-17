@@ -41,8 +41,11 @@
 #     machines on its internal port (var.internal_http_port, its second
 #     listener, on its task's private address: hostd's bootstrap and sync);
 #   - the machine role: the five actions Session Manager needs for break-glass
-#     and its logs (/opennova/<deployment>/machines), nothing else (no machine
-#     has an SSH key or database credentials);
+#     and its logs (/opennova/<deployment>/machines, which docker's awslogs
+#     driver writes: a stream per slot, <machine id>/slot-<k>, and the agent's,
+#     <machine id>/hostd; the service hands each machine the group,
+#     ONNET_HOSTED_EC2_LOG_GROUP), nothing else (no machine has an SSH key or
+#     database credentials);
 #   - the worker's task role's policy: launch only from these templates, only their
 #     two types with IMDSv2 required, gp3 volumes no larger than the largest
 #     the templates make, the seed image or an image this account baked for
@@ -227,7 +230,8 @@ resource "aws_iam_role" "machine" {
 }
 
 # Session Manager for break-glass (aws ssm start-session): the agent's
-# registration and its session channels; and the machine's logs. Not the managed
+# registration and its session channels; and the machine's logs (the docker
+# daemon's awslogs driver makes each stream and writes it). Not the managed
 # AmazonSSMManagedInstanceCore, which also reads every SSM parameter in the
 # account. (The machine also fences the slots' UIDs off the metadata service,
 # so no server holds even these.)
@@ -562,6 +566,7 @@ locals {
   hosted_env = merge(local.fleet_env, local.hosted_enabled ? {
     ONNET_HOSTED_PROVIDER             = "ec2"
     ONNET_HOSTED_EC2_REGION           = local.region
+    ONNET_HOSTED_EC2_LOG_GROUP        = aws_cloudwatch_log_group.machines.name
     ONNET_HOSTED_EC2_LAUNCH_TEMPLATES = jsonencode({ for kind, t in aws_launch_template.fleet : kind => t.id })
     # Both public subnets, comma-separated: the service picks one per launch.
     ONNET_HOSTED_EC2_SUBNETS     = join(",", [for k in sort(keys(aws_subnet.public)) : aws_subnet.public[k].id])

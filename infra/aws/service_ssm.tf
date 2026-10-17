@@ -10,7 +10,7 @@
 #               template a deploy clones) and the backup task's, the subnets
 #               and security group of the toolbox's one-off tasks, the image
 #               registry, the database's names, the hosted machines' settings,
-#               the account, the operations bucket and the log group; one
+#               the account, the operations bucket and the log groups; one
 #               KEY='value' per line
 #   release     (String) the deployment's release: its manifest (the images by
 #               digest, the task definition revision each program runs), which
@@ -32,13 +32,14 @@ locals {
 
   infra_env = merge(
     {
-      OPENNOVA_DEPLOYMENT = local.deployment
-      OPENNOVA_ACCOUNT_ID = var.aws_account_id
-      OPENNOVA_OPS_BUCKET = local.ops_bucket_name
-      OPENNOVA_LOG_GROUP  = aws_cloudwatch_log_group.service.name
-      AWS_REGION          = local.region
-      BACKUP_BUCKET       = local.ops_bucket_name
-      BACKUP_PREFIX       = local.backup_prefix
+      OPENNOVA_DEPLOYMENT         = local.deployment
+      OPENNOVA_ACCOUNT_ID         = var.aws_account_id
+      OPENNOVA_OPS_BUCKET         = local.ops_bucket_name
+      OPENNOVA_LOG_GROUP          = aws_cloudwatch_log_group.service.name
+      OPENNOVA_MACHINES_LOG_GROUP = aws_cloudwatch_log_group.machines.name
+      AWS_REGION                  = local.region
+      BACKUP_BUCKET               = local.ops_bucket_name
+      BACKUP_PREFIX               = local.backup_prefix
       # The cluster and its services (the programs' names), each program's
       # task definition as Terraform made it and the backup task's, as JSON.
       OPENNOVA_CLUSTER          = aws_ecs_cluster.main.name

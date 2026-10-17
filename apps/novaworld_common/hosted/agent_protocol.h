@@ -112,13 +112,18 @@ std::string agent_secret_digest(std::string_view secret);
 // (absolute, at most 255 of letters, digits and ./_-, no "." or ".." part); a
 // working-directory file name (1..64 of letters, digits, '.', '_', '-', never
 // "." or ".."); an environment name (a letter or '_' first, then letters,
-// digits and '_', at most 128).
+// digits and '_', at most 128). And the machines' log group and its region,
+// which the user-data hands the agent's command line (not the protocol): a
+// CloudWatch log group (1..512 of letters, digits and ./_-) and an AWS region
+// (1..32 of a-z, 0-9 and '-', a letter first).
 bool is_container_name(std::string_view name);
 bool is_image_reference(std::string_view image);
 bool is_data_set_name(std::string_view name);
 bool is_mount_path(std::string_view path);
 bool is_slot_file_name(std::string_view name);
 bool is_env_name(std::string_view name);
+bool is_log_group_name(std::string_view name);
+bool is_aws_region(std::string_view region);
 
 // The `protocol` member of any of these messages, or nullopt when `json` is no
 // object with a whole-number `protocol`.

@@ -43,7 +43,8 @@
 //
 // and, for the ec2 driver, the variables its provider read before:
 // ONNET_HOSTED_EC2_REGION, ONNET_HOSTED_EC2_SUBNETS (comma-separated, a subnet
-// per zone), ONNET_HOSTED_DEPLOYMENT, ONNET_HOSTED_SERVE_IMAGE,
+// per zone), ONNET_HOSTED_EC2_LOG_GROUP (the machines' CloudWatch log group),
+// ONNET_HOSTED_DEPLOYMENT, ONNET_HOSTED_SERVE_IMAGE,
 // ONNET_HOSTED_AWS_CLI and ONNET_HOSTED_MACHINE_SCRIPT (the path of
 // machine/machine_user_data.sh); for the docker driver (the local stack's),
 // ONNET_HOSTED_DOCKER_URL (the Docker Engine API, http://<host>:<port>),

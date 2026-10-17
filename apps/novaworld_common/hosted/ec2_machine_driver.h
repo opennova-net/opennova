@@ -15,12 +15,15 @@
 // a name the deployment's Cloud Map namespace keeps on whichever task runs the
 // controller) and that URL's port, the machine's id and one-time bootstrap
 // token, the serve image its containers run, the hostd image the agent is
-// copied out of, and the data sets (sorted) with their volumes' labels. The
-// script installs docker, mounts the data sets, fences the slots' users off
+// copied out of, the data sets (sorted) with their volumes' labels, and the
+// machines' CloudWatch log group (ONNET_HOSTED_EC2_LOG_GROUP) with the region.
+// The script installs docker, mounts the data sets, fences the slots' users off
 // the instance metadata and off the internal port on every destination (no
-// address of the controller's is pinned in a firewall rule), and starts
-// opennova-hostd (apps/hostd), which redeems the token. A machine is
-// terminated at its end, never stopped.
+// address of the controller's is pinned in a firewall rule), starts
+// opennova-hostd (apps/hostd), which redeems the token, and ships the agent's
+// log and its containers' output to that log group (a stream per slot,
+// <machine id>/slot-<k>, and <machine id>/hostd). A machine is terminated at
+// its end, never stopped.
 //
 // The driver runs the AWS CLI v2 through a CommandRunner (an argv array, no
 // shell, a timeout), its credentials the worker task's IAM role. Every call
@@ -132,6 +135,9 @@ struct Ec2MachineConfig {
 	// own (fleet.tf's var.hosted_data_snapshots), each one's volume attached in
 	// their sorted order.
 	std::vector<std::string> data_sets;
+	// The log group the machines write (ONNET_HOSTED_EC2_LOG_GROUP; fleet.tf's
+	// /opennova/<deployment>/machines, which the machine role may write alone).
+	std::string log_group;
 	std::string machine_script; // machine/machine_user_data.sh's text (ONNET_HOSTED_MACHINE_SCRIPT)
 	// Owner-only: the user-data files the CLI reads. The worker's, made before
 	// it constructs the driver (check_config does not ask for it).
@@ -157,6 +163,8 @@ struct MachineUserData {
 	// Each data set the machine mounts and its volume's label, in the order
 	// the launch template attaches the volumes (the data sets' sorted order).
 	std::vector<std::pair<std::string, std::string>> data_sets;
+	std::string log_group; // the machines' CloudWatch log group
+	std::string region; // its region (the machine's own)
 };
 
 class Ec2MachineDriver : public MachineDriver {
@@ -173,6 +181,8 @@ public:
 	static constexpr const char *kBlankServeImage = "@OPENNOVA_SERVE_IMAGE@";
 	static constexpr const char *kBlankHostdImage = "@OPENNOVA_HOSTD_IMAGE@";
 	static constexpr const char *kBlankDataSets = "@OPENNOVA_DATA_SETS@";
+	static constexpr const char *kBlankLogGroup = "@OPENNOVA_LOG_GROUP@";
+	static constexpr const char *kBlankRegion = "@OPENNOVA_REGION@";
 	// EC2's raw user-data cap.
 	static constexpr size_t kMaxUserDataBytes = 16 * 1024;
 	// ONNET_HOSTED_DEPLOYMENT's longest: its client tokens then fit EC2's 64.

@@ -152,6 +152,14 @@ int test_paths_and_names() {
 	TEST_EXPECT(hosted::is_env_name("OPENNOVA_SLOT") && hosted::is_env_name("_x1"));
 	for (const char *bad : { "", "1X", "A-B", "A=B", "A B" })
 		TEST_EXPECT(!hosted::is_env_name(bad));
+	TEST_EXPECT(hosted::is_log_group_name("/opennova/prod/machines") &&
+			hosted::is_log_group_name(std::string(512, 'a')));
+	for (const std::string &bad : { std::string(), std::string(513, 'a'), std::string("/a b"),
+				 std::string("/a'b"), std::string("/a:b"), std::string("/a%b") })
+		TEST_EXPECT(!hosted::is_log_group_name(bad));
+	TEST_EXPECT(hosted::is_aws_region("us-east-1") && hosted::is_aws_region("eu-central-2"));
+	for (const char *bad : { "", "US-EAST-1", "us east 1", "-us-east-1", "1us", "us_east_1" })
+		TEST_EXPECT(!hosted::is_aws_region(bad));
 
 	for (const ContainerState s :
 			{ ContainerState::Starting, ContainerState::Running, ContainerState::Exited })

@@ -124,7 +124,8 @@ int main(int argc, char **argv) {
 				proc::filter_environment({ "PATH", "HOME", "LANG", "LC_*", "TZ", "TMPDIR" }),
 				"/proc/self/fd/2");
 	} else {
-		runtime = std::make_unique<DockerRuntime>(runner, options.docker, environment, scratch);
+		runtime = std::make_unique<DockerRuntime>(runner, options.docker, environment, scratch,
+				ContainerLogs{ options.log_group, options.log_region, options.machine_id });
 	}
 	std::vector<EgressTool> tools;
 	if (options.iptables != "none")
@@ -148,6 +149,11 @@ int main(int argc, char **argv) {
 	io::logf(io::LogLevel::kInfo, "%s for machine %lld, service %s, %s runtime", hostd_version(),
 			static_cast<long long>(options.machine_id), options.service_url.c_str(),
 			options.runtime == RuntimeKind::Process ? "process" : "docker");
+	if (!options.log_group.empty())
+		io::logf(io::LogLevel::kInfo,
+				"the containers' output: CloudWatch %s (%s), streams %lld/slot-<k>",
+				options.log_group.c_str(), options.log_region.c_str(),
+				static_cast<long long>(options.machine_id));
 	int code = 0;
 	while (!g_stop.load()) {
 		const int delay = agent.step();

@@ -43,9 +43,6 @@ bool is_digit(char c) {
 bool is_lower_hex(char c) {
 	return is_digit(c) || (c >= 'a' && c <= 'f');
 }
-bool is_region_char(char c) {
-	return (c >= 'a' && c <= 'z') || is_digit(c) || c == '-';
-}
 bool is_name_char(char c) {
 	return is_alnum(c) || c == '.' || c == '_' || c == '-';
 }
@@ -193,7 +190,7 @@ std::string Ec2MachineDriver::volume_label(std::string_view data_set) {
 std::string Ec2MachineDriver::check_config(const Ec2MachineConfig &c) {
 	if (c.aws_cli.empty() || c.aws_cli[0] != '/')
 		return "ONNET_HOSTED_AWS_CLI is no absolute path";
-	if (c.region.empty() || c.region.size() > 32 || !all_of(c.region, is_region_char))
+	if (!is_aws_region(c.region))
 		return "ONNET_HOSTED_EC2_REGION is no region name";
 	if (c.subnets.empty())
 		return "ONNET_HOSTED_EC2_SUBNETS names no subnet";
@@ -233,8 +230,11 @@ std::string Ec2MachineDriver::check_config(const Ec2MachineConfig &c) {
 	for (const std::string &data_set : c.data_sets)
 		if (!is_data_set_name(data_set) || volume_label(data_set).empty())
 			return "data set '" + loggable(data_set) + "' has no volume label";
+	if (!is_log_group_name(c.log_group))
+		return "ONNET_HOSTED_EC2_LOG_GROUP is no log group name";
 	for (const char *blank : { kBlankServiceUrl, kBlankServicePort, kBlankMachineId,
-				 kBlankMachineToken, kBlankServeImage, kBlankHostdImage, kBlankDataSets })
+				 kBlankMachineToken, kBlankServeImage, kBlankHostdImage, kBlankDataSets,
+				 kBlankLogGroup, kBlankRegion })
 		if (c.machine_script.find(blank) == std::string::npos)
 			return std::string(
 						   "the machine script (ONNET_HOSTED_MACHINE_SCRIPT) lacks its blank ") +
@@ -277,7 +277,8 @@ std::optional<std::string> Ec2MachineDriver::render_user_data(
 			values.service_port != service_port || values.machine_id <= 0 ||
 			values.bootstrap_token.size() != kMachineTokenChars ||
 			!all_of(values.bootstrap_token, is_alnum) || !is_image_reference(values.serve_image) ||
-			!is_image_reference(values.hostd_image) || values.data_sets.empty())
+			!is_image_reference(values.hostd_image) || values.data_sets.empty() ||
+			!is_log_group_name(values.log_group) || !is_aws_region(values.region))
 		return std::nullopt;
 	std::string data_sets;
 	for (const auto &[data_set, label] : values.data_sets) {
@@ -294,7 +295,8 @@ std::optional<std::string> Ec2MachineDriver::render_user_data(
 			fill(out, kBlankMachineId, std::to_string(values.machine_id)) &
 			fill(out, kBlankMachineToken, values.bootstrap_token) &
 			fill(out, kBlankServeImage, values.serve_image) &
-			fill(out, kBlankHostdImage, values.hostd_image) & fill(out, kBlankDataSets, data_sets);
+			fill(out, kBlankHostdImage, values.hostd_image) & fill(out, kBlankDataSets, data_sets) &
+			fill(out, kBlankLogGroup, values.log_group) & fill(out, kBlankRegion, values.region);
 	if (!filled || out.size() > kMaxUserDataBytes)
 		return std::nullopt;
 	return out;
@@ -428,6 +430,8 @@ std::optional<LaunchedMachine> Ec2MachineDriver::launch(
 	std::sort(data_sets.begin(), data_sets.end());
 	for (const std::string &data_set : data_sets)
 		values.data_sets.emplace_back(data_set, volume_label(data_set));
+	values.log_group = config_.log_group;
+	values.region = config_.region;
 	const std::optional<std::string> user_data = render_user_data(config_.machine_script, values);
 	if (!user_data) {
 		error = "the machine script did not render";

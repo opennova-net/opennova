@@ -56,6 +56,59 @@ fleet_status() {
     || err "the service did not answer (app status, app logs web)"
 }
 
+# fleet logs MACHINE [SLOT|hostd] [--since 1h] [--follow]: a machine's logs,
+# read from CloudWatch alone (the machines' log group, infra.env's
+# OPENNOVA_MACHINES_LOG_GROUP), so no shell on the machine and no SSM: slot k's
+# container output (stream <machine id>/slot-<k>, each server on the slot in
+# turn), hostd's journal (<machine id>/hostd), or with neither every stream of
+# the machine, each line naming its stream. MACHINE is the service's id (the
+# admin fleet view's "Machine N, slot k", fleet status's id column), or the
+# EC2 machine's (i-...), whose opennova:machine-id tag names it while EC2 still
+# lists it. The streams outlive the machine (the group keeps 30 days).
+fleet_logs() {
+  local machine="" slot="" since=1h follow=() streams=() format=short id group
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --follow|-f) follow=(--follow); shift ;;
+      --since) [ $# -ge 2 ] || die "--since needs a value (10m, 2h, 1d)"; since="$2"; shift 2 ;;
+      -*) die "unknown: fleet logs $1 (try: MACHINE [SLOT|hostd] [--since 1h] [--follow])" ;;
+      *)
+        if [ -z "$machine" ]; then machine="$1"
+        elif [ -z "$slot" ]; then slot="$1"
+        else die "fleet logs takes one MACHINE and one SLOT (or hostd): $1"
+        fi
+        shift ;;
+    esac
+  done
+  [ -n "$machine" ] || die "fleet logs needs a MACHINE: its id (the admin fleet view's, fleet status)"
+  case "$slot" in
+    ""|hostd|[0-9]|[12][0-9]|3[01]) ;;
+    *) die "'$slot' is no slot (0 to 31) and not hostd" ;;
+  esac
+  aws_auth
+  infra_env_load
+  group="$(infra_get OPENNOVA_MACHINES_LOG_GROUP)"
+  if [[ "$machine" =~ ^[1-9][0-9]{0,17}$ ]]; then
+    id="$machine"
+  elif [[ "$machine" =~ ^i-[0-9a-f]{8,17}$ ]]; then
+    # shellcheck disable=SC2016  # a JMESPath literal, not a shell expansion
+    id="$(aws ec2 describe-instances --instance-ids "$machine" \
+            --query 'Reservations[0].Instances[0].Tags[?Key==`opennova:machine-id`]|[0].Value' \
+            --output text)" \
+      || die "EC2 does not list $machine (an ended machine's logs are read by its id: the admin fleet view's)"
+    [[ "$id" =~ ^[1-9][0-9]{0,17}$ ]] || die "$machine carries no opennova:machine-id tag: no machine of the fleet"
+    log "$machine is machine $id"
+  else
+    die "'$machine' is no machine id (a number, or an EC2 machine's i-...; fleet status lists them)"
+  fi
+  case "$slot" in
+    "") streams=(--log-stream-name-prefix "$id/"); format=detailed ;;
+    hostd) streams=(--log-stream-names "$id/hostd") ;;
+    *) streams=(--log-stream-names "$id/slot-$slot") ;;
+  esac
+  aws logs tail "$group" "${streams[@]}" --since "$since" --format "$format" ${follow[@]+"${follow[@]}"}
+}
+
 # fleet bake-image: the machines' image, baked. A one-off builder instance
 # (FLEET_BUILDER_TYPE, no instance role, the machines' security group, public
 # subnet a) boots Canonical's newest Ubuntu 24.04 with deploy/host/fleet-image.sh
@@ -153,6 +206,7 @@ cmd_fleet() {
   shift || true
   case "$action" in
     status) fleet_status "$@" ;;
+    logs) fleet_logs "$@" ;;
     bake-image) fleet_bake_image "$@" ;;
     drain|end)
       take_yes "$@"
@@ -168,7 +222,7 @@ cmd_fleet() {
       confirm_prod "roll every machine onto new ones (their servers move, one machine at a time)" "$OPT_YES"
       aws_auth
       admin_api POST "$FLEET_API/roll" || die "the service refused or did not answer (app logs web)" ;;
-    *) die "unknown: fleet $action (try: status|drain|end|roll|bake-image)" ;;
+    *) die "unknown: fleet $action (try: status|logs|drain|end|roll|bake-image)" ;;
   esac
 }
 

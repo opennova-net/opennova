@@ -1224,8 +1224,10 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   `od-dfx2`, `od-opennova0`), reserves the slots' ports out of the ephemeral range,
   fences the slots' users off the instance metadata and off the controller's internal
   port on every destination (the controller is reached by a name whose address moves
-  with it, so no firewall rule names an address), and installs `opennova-hostd`, copied
-  out of the serve image, pointed at `ONNET_INTERNAL_URL`. The driver runs the AWS
+  with it, so no firewall rule names an address), installs `opennova-hostd`, copied
+  out of the serve image, pointed at `ONNET_INTERNAL_URL`, and ships the agent's log and
+  its containers' output to the machines' log group (`ONNET_HOSTED_EC2_LOG_GROUP`, a
+  stream each: `<machine id>/hostd`, `<machine id>/slot-<k>`). The driver runs the AWS
   CLI v2 (installed in the worker's image, pinned and checksummed) through a `CommandRunner`
   (`apps/common/command_runner.*`: an argv array, no shell, a 20 s timeout, an
   environment of the system's and the `AWS_*` variables alone), its credentials the
@@ -1256,6 +1258,7 @@ tables). Each server runs one data set its owner picks. Everything here is servi
 | `ONNET_HOSTED_HOSTD_IMAGE` | the serve image | `ec2`: the image `opennova-hostd` is copied out of (pinned at deploy). |
 | `ONNET_HOSTED_EC2_LAUNCH_TEMPLATES` | none | `ec2`: the launch templates by machine kind, `{"shared": "lt-...", "own": "lt-..."}` (each `lt-<id>` at its default version, or `lt-<id>:<version>`). |
 | `ONNET_HOSTED_EC2_REGION` | none | `ec2`: the region every AWS CLI call names. |
+| `ONNET_HOSTED_EC2_LOG_GROUP` | none | `ec2`: the CloudWatch log group the machines write (`/opennova/<deployment>/machines`): hostd's log and each slot's container output, through docker's `awslogs` driver (`apps/hostd/README.md`, "Logs"); required. |
 | `ONNET_HOSTED_EC2_SUBNETS` | none | `ec2`: the subnets (`subnet-...`, comma-separated, one per zone) machines launch into, each giving its machines a public IPv4. A launch takes the one holding fewer of the deployment's live machines (ties to the first listed) and, when that zone cannot take it (`InsufficientInstanceCapacity`, `Unsupported`), the next. |
 | `ONNET_HOSTED_DEPLOYMENT` | none | The `opennova:deployment` tag (`ec2`) or `opennova.deployment` label (`docker`) every machine carries and every describe, list and terminate is scoped to, so two stacks in one account (or on one Docker) never touch each other's machines (letters, digits, `.`, `_`, `-`; `docker`: also its containers' names, `<deployment>-machine-<id>`). |
 | `ONNET_HOSTED_AWS_CLI` | `/usr/local/bin/aws` | The AWS CLI v2, an absolute path (run as given, no `PATH` search): the `ec2` driver's, and also the mailer's SES calls and the lobby's ECS discovery. |

@@ -50,6 +50,9 @@ const char *hostd_usage() {
 		   "                         (default /usr/sbin/iptables)\n"
 		   "  --ip6tables <path>     their ip6tables where the kernel has IPv6, or none\n"
 		   "                         (default /usr/sbin/ip6tables)\n"
+		   "  --log-group <group>    with --log-region <region>: the containers' output to that\n"
+		   "                         CloudWatch log group, a stream <machine>/slot-<k> each\n"
+		   "                         (docker's awslogs driver; unset, the journal)\n"
 		   "  --once                 one pass, then exit (0 when the sync was answered)\n"
 		   "  --verbose              debug lines too\n"
 		   "  --version, --help\n";
@@ -92,6 +95,10 @@ ParseOutcome parse_hostd_options(
 			target = &out.iptables;
 		else if (arg == "--ip6tables")
 			target = &out.ip6tables;
+		else if (arg == "--log-group")
+			target = &out.log_group;
+		else if (arg == "--log-region")
+			target = &out.log_region;
 		else if (arg != "--machine") {
 			error = "unknown argument " + arg;
 			return ParseOutcome::Error;
@@ -140,6 +147,25 @@ ParseOutcome parse_hostd_options(
 	for (const std::string *tool : { &out.iptables, &out.ip6tables }) {
 		if (*tool != "none" && !absolute(*tool)) {
 			error = "--iptables and --ip6tables take an absolute path or none";
+			return ParseOutcome::Error;
+		}
+	}
+	if (out.log_group.empty() != out.log_region.empty()) {
+		error = "--log-group and --log-region go together";
+		return ParseOutcome::Error;
+	}
+	if (!out.log_group.empty()) {
+		if (out.runtime != RuntimeKind::Docker) {
+			error = "--log-group is the docker runtime's (the process runtime's servers log "
+					"where the agent does)";
+			return ParseOutcome::Error;
+		}
+		if (!hosted::is_log_group_name(out.log_group)) {
+			error = "--log-group takes a log group name of letters, digits and ./_-";
+			return ParseOutcome::Error;
+		}
+		if (!hosted::is_aws_region(out.log_region)) {
+			error = "--log-region takes an AWS region (a-z, 0-9, -)";
 			return ParseOutcome::Error;
 		}
 	}
