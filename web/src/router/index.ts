@@ -85,6 +85,7 @@ const router = createRouter({
     {
       path: '/admin',
       component: AdminLayout,
+      meta: { wide: true },
       children: [
         { path: '', redirect: '/admin/overview' },
         { path: 'overview', component: OverviewSection },
