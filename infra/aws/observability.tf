@@ -359,8 +359,8 @@ resource "aws_cloudwatch_metric_alarm" "db_cpu" {
   tags = var.tags
 }
 
-# A burstable database's CPU credits (a db.t4g.small earns 24 an hour and holds
-# at most 576). RDS runs its T classes in unlimited mode: past a spent balance
+# A burstable database's CPU credits (a db.t4g.micro earns 12 an hour and holds
+# at most 288). RDS runs its T classes in unlimited mode: past a spent balance
 # it is not throttled but bills surplus credits by the vCPU-hour, so a low
 # balance means hours of load past the class's baseline.
 resource "aws_cloudwatch_metric_alarm" "db_cpu_credits" {

@@ -60,12 +60,12 @@ variable "lobby" {
 }
 
 variable "web" {
-  description = "Web: the retail HTTP routes and the website's API (game_http_port) and the portal's nginx (443) in one task, behind the public network load balancer. Scales on its CPU between min and max; two or more keep the site up through a zone's loss."
+  description = "Web: the retail HTTP routes and the website's API (game_http_port) and the portal's nginx (443) in one task, behind the public network load balancer. Scales on its CPU between min and max (one task at the defaults, while traffic is small); two or more keep the site up through a zone's loss."
   type = object({
     cpu     = optional(number, 512)
     memory  = optional(number, 1024)
     min     = optional(number, 1)
-    max     = optional(number, 2)
+    max     = optional(number, 1)
     desired = optional(number, 1)
   })
   default = {}
@@ -84,12 +84,12 @@ variable "controller" {
 }
 
 variable "worker" {
-  description = "The worker: the background jobs (the fleet's AWS calls, billing sync, mail, prunes). Scales on its CPU between min and max: more tasks, more jobs at once."
+  description = "The worker: the background jobs (the fleet's AWS calls, billing sync, mail, prunes). Scales on its CPU between min and max (one task at the defaults): more tasks, more jobs at once."
   type = object({
     cpu     = optional(number, 512)
     memory  = optional(number, 1024)
     min     = optional(number, 1)
-    max     = optional(number, 2)
+    max     = optional(number, 1)
     desired = optional(number, 1)
   })
   default = {}
@@ -235,9 +235,9 @@ variable "mail_sender" {
 # ---------------------------------------------------------------------------
 
 variable "db_instance_class" {
-  description = "The database's instance class (PostgreSQL 17 on RDS). db.t4g.small (2 vCPU, 2 GiB) by default: burstable, and RDS runs its T classes in unlimited mode, so a load past the baseline spends surplus credits, billed by the vCPU-hour, and is never throttled; the db-cpu-credits alarm says when the balance runs low."
+  description = "The database's instance class (PostgreSQL 17 on RDS). db.t4g.micro (2 vCPU, 1 GiB) by default, sized for small traffic: burstable, and RDS runs its T classes in unlimited mode, so a load past the baseline spends surplus credits, billed by the vCPU-hour, and is never throttled; the db-cpu-credits alarm says when the balance runs low (db.t4g.small doubles the memory)."
   type        = string
-  default     = "db.t4g.small"
+  default     = "db.t4g.micro"
 
   validation {
     condition     = can(regex("^db\\.[a-z0-9-]+\\.[a-z0-9]+$", var.db_instance_class))
@@ -246,9 +246,9 @@ variable "db_instance_class" {
 }
 
 variable "db_multi_az" {
-  description = "Whether the database runs Multi-AZ: a synchronous standby in the other private subnet's zone, which RDS fails over to on its own (a minute or two). Off saves half the instance's cost and gives up the standby."
+  description = "Whether the database runs Multi-AZ: a synchronous standby in the other private subnet's zone, which RDS fails over to on its own (a minute or two). Off by default while traffic is small: half the instance's cost, and a zone's loss or a patch takes the database (and the service) down for minutes; the nightly dumps and RDS's own backups stay."
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "db_pool_max" {
@@ -263,9 +263,9 @@ variable "db_pool_max" {
 }
 
 variable "db_service_processes" {
-  description = "The most program processes connected to the database at once: every program's tasks at its max, and the extra tasks a deployment runs beside them (a deployment's maximum percent, 200: every program starts its new tasks first), so 2 + 2 + 4 + 2 + 4 = 14 at the defaults; the plan refuses less than that. The database's max_connections is db_pool_max for each of them, plus 10 for the backup task, the operator's psql and the reserved superuser and RDS connections. Changing it is a parameter group change RDS applies at the next reboot."
+  description = "The most program processes connected to the database at once: every program's tasks at its max, and the extra tasks a deployment runs beside them (a deployment's maximum percent, 200: every program starts its new tasks first), so 2 + 2 + 2 + 2 + 2 = 10 at the defaults; the plan refuses less than that. The database's max_connections is db_pool_max for each of them, plus 10 for the backup task, the operator's psql and the reserved superuser and RDS connections. Changing it is a parameter group change RDS applies at the next reboot."
   type        = number
-  default     = 14
+  default     = 10
 
   validation {
     condition     = var.db_service_processes >= 1 && var.db_service_processes <= 64 && floor(var.db_service_processes) == var.db_service_processes
@@ -337,13 +337,24 @@ variable "db_backup_retention_days" {
 # ---------------------------------------------------------------------------
 
 variable "cache_node_type" {
-  description = "The cache's node type (ElastiCache for Valkey; two nodes, a primary and its replica in the other zone). Web's sessions, pins and rate limits are small: cache.t4g.micro holds about half a GiB."
+  description = "The cache's node type (ElastiCache for Valkey; cache_node_count nodes). Web's sessions, pins and rate limits are small: cache.t4g.micro holds about half a GiB."
   type        = string
   default     = "cache.t4g.micro"
 
   validation {
     condition     = can(regex("^cache\\.[a-z0-9-]+\\.[a-z0-9]+$", var.cache_node_type))
     error_message = "cache_node_type must be an ElastiCache node type (cache.<family>.<size>)."
+  }
+}
+
+variable "cache_node_count" {
+  description = "The cache's nodes: 1 by default while traffic is small (a node's loss or a patch drops web's sessions, pins and rate limits: players log in again), 2 or more for a primary with replicas in the other zones, failing over on their own."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.cache_node_count >= 1 && var.cache_node_count <= 6 && floor(var.cache_node_count) == var.cache_node_count
+    error_message = "cache_node_count must be a whole number 1..6."
   }
 }
 
@@ -380,9 +391,9 @@ variable "update_ports" {
 }
 
 variable "shared_instance_type" {
-  description = "The shared machines' type: up to shared_slots servers each. A burstable type runs with unlimited CPU credits (the launch template sets them). x86_64 only (the serve image's), and no t2."
+  description = "The shared machines' type: up to shared_slots servers each. t3a.medium by default (2 vCPU, 4 GiB): its 6 slots' memory limits (512 MiB each) take 3 GiB, and bursts run on CPU credits. A burstable type runs with unlimited CPU credits (the launch template sets them). x86_64 only (the serve image's), and no t2."
   type        = string
-  default     = "t3a.large"
+  default     = "t3a.medium"
 
   validation {
     condition     = !can(regex("^t2\\.", var.shared_instance_type)) && !can(regex("^[a-z]+[0-9]+[a-z]*g[a-z]*\\.", var.shared_instance_type))
@@ -404,7 +415,7 @@ variable "own_instance_type" {
 variable "shared_slots" {
   description = "K: the servers a shared machine holds (slot k: game UDP 32768+k, admin TCP 32800+k). The service reads it (ONNET_FLEET_SHARED_SLOTS); set it from measuring a full machine."
   type        = number
-  default     = 12
+  default     = 6
 
   validation {
     condition     = var.shared_slots >= 1 && var.shared_slots <= 32 && floor(var.shared_slots) == var.shared_slots
@@ -459,9 +470,9 @@ variable "alert_email" {
 }
 
 variable "budget_monthly_usd" {
-  description = "The deployment's monthly cost budget (its account's, which holds it alone), in USD: an email at 80% spent and at a 100% forecast. Sized for prod's service tier (the five programs on Fargate, the load balancer, a Multi-AZ db.t4g.small and the cache, about $190: DEPLOY.md, \"Cost\") and a few machines; staging.tfvars sets its own."
+  description = "The deployment's monthly cost budget (its account's, which holds it alone), in USD: an email at 80% spent and at a 100% forecast. Sized for prod's service tier (the five programs on Fargate, the load balancer, a single-zone db.t4g.micro and the cache, about $145: DEPLOY.md, \"Cost\") and a few machines; staging.tfvars sets its own."
   type        = number
-  default     = 350
+  default     = 250
 }
 
 variable "budget_egress_gb" {

@@ -15,12 +15,12 @@ service on Fargate across two availability zones, whose tasks keep no state of t
 |---|---|---|---|
 | gate | the gate (UDP 7597; the hosts' status blobs land there too) | 1, 0.25 vCPU / 0.5 GiB | the public network load balancer, at the gate's Elastic IP |
 | lobby | a lobby instance (UDP 64206) | 1, 0.25 vCPU / 0.5 GiB | the public network load balancer, at the gate's Elastic IP: one lobby address for every lobby task, which the gate hands out |
-| web | the retail HTTP routes and the website's API (8080) and the portal's nginx (443, and 8082 in front of the retail routes) | 1 to 2 on its CPU, 0.5 vCPU / 1 GiB | the load balancer: 443 from Cloudflare, 8080 from everyone (to the portal's 8082) |
+| web | the retail HTTP routes and the website's API (8080) and the portal's nginx (443, and 8082 in front of the retail routes) | 1 (up to its `max` on its CPU), 0.5 vCPU / 1 GiB | the load balancer: 443 from Cloudflare, 8080 from everyone (to the portal's 8082) |
 | controller | the fleet's reconcile pass, job scheduling, the machines' internal listener (8070) | 1 (elected; a standby may wait beside it), 0.25 vCPU / 0.5 GiB | `controller.<deployment>.opennova.internal`, its Cloud Map name |
-| worker | the background jobs (the fleet's AWS calls, billing sync, mail, prunes) | 1 to 2 on its CPU, 0.5 vCPU / 1 GiB | nothing inbound |
+| worker | the background jobs (the fleet's AWS calls, billing sync, mail, prunes) | 1 (up to its `max` on its CPU), 0.5 vCPU / 1 GiB | nothing inbound |
 
-Its database is RDS PostgreSQL 17 in private subnets, Multi-AZ on a small burstable
-class; web's sessions and rate limits live in ElastiCache for Valkey beside it; its
+Its database is RDS PostgreSQL 17 in private subnets, on a small burstable class in
+one zone while traffic is small; web's sessions and rate limits live in ElastiCache for Valkey beside it; its
 secrets live in SSM Parameter Store, copied from a 1Password vault, and ECS hands each task
 its own; a release is each program's task definition revision with its images pinned by
 digest; its logs go to CloudWatch; the nightly database dump is a scheduled task. No SSH
@@ -522,19 +522,21 @@ reaches the task as a short-lived SecureString its role may read, which the comm
 deletes when it ends. TLS is required (`rds.force_ssl`), and every client verifies the
 server (`sslmode=verify-full` against the pinned RDS CA bundle).
 
-The instance is `db.t4g.small` (`db_instance_class`: 2 vCPUs, 2 GiB), a burstable class
+The instance is `db.t4g.micro` (`db_instance_class`: 2 vCPUs, 1 GiB), a burstable class
 RDS runs in unlimited mode: a load past its baseline spends surplus CPU credits, billed
 by the vCPU-hour, and is never throttled (the `db-cpu-credits` alarm says when its
-balance runs low: a larger class, or Performance Insights' top statements). Multi-AZ
-(`db_multi_az`): a synchronous standby in the other private subnet's zone that RDS fails
-over to on its own, the endpoint's name following it, in a minute or two.
-`max_connections` is sized rather than left to RDS's memory formula (about 200 for
-2 GiB): `db_pool_max` (7, the programs' `DATABASE_POOL_MAX`; at least 6, a worker's four
-job threads, its keeper and its main loop) for each of `db_service_processes` (14)
+balance runs low: a larger class such as `db.t4g.small`, or Performance Insights' top
+statements). It runs in private subnet a's zone alone while traffic is small: a zone's
+loss or a patch takes it, and the service, down for minutes. Multi-AZ (`db_multi_az =
+true`) adds a synchronous standby in the other private subnet's zone that RDS fails over
+to on its own, the endpoint's name following it, in a minute or two.
+`max_connections` is sized rather than left to RDS's memory formula (about 100 for
+1 GiB): `db_pool_max` (7, the programs' `DATABASE_POOL_MAX`; at least 6, a worker's four
+job threads, its keeper and its main loop) for each of `db_service_processes` (10)
 program processes, plus 10 for the backup task, the operator's psql and the reserved
-connections (108). The 14 are every program's tasks at its `max`, doubled for the new
-tasks a deployment starts beside them: gate 1, lobby 1, web 2, controller 1, worker 2 (2
-+ 2 + 4 + 2 + 4); the plan refuses a `max` past them (raise
+connections (80). The 10 are every program's tasks at its `max`, doubled for the new
+tasks a deployment starts beside them: a task each (2 + 2 + 2 + 2 + 2); the plan refuses
+a `max` past them (raise
 `db_service_processes` with it; the `db-connections` alarm says when more connect).
 A class change, a Multi-AZ change and `max_connections` (a static parameter) wait for
 the weekly maintenance window (Sunday 09:00 UTC; `apply_immediately` is off). To take
@@ -548,9 +550,10 @@ new `db_pool_max` or `db_service_processes`) waits for a reboot of its own:
 
 ### The cache
 
-`infra/aws/cache.tf` makes web's ephemeral store: ElastiCache for Valkey 8, a primary and
-a replica in the two private subnets' zones (`cache_node_type`, default
-`cache.t4g.micro`), failing over on its own; in-transit TLS required, encrypted at rest,
+`infra/aws/cache.tf` makes web's ephemeral store: ElastiCache for Valkey 8, one node
+(`cache_node_count`, 1 while traffic is small: its loss drops the sessions, pins and rate
+limits, and players log in again; 2 or more add replicas in the other zones that it fails
+over to on its own; `cache_node_type`, default `cache.t4g.micro`); in-transit TLS required, encrypted at rest,
 no snapshots, cluster mode off (one script writes a pin and its account's index
 together), `maxmemory-policy volatile-lru` (every key has a TTL: a full node evicts the
 key touched longest ago rather than fail a login; the evictions alarm says the node is
@@ -967,8 +970,8 @@ set's files, which its machine fetches from the store.
 The service places each server on a machine it launches itself (its EC2 machine driver,
 in the worker's jobs, with the worker's task role), in either public subnet:
 
-- **shared machines**, `t3a.large` with unlimited CPU credits, holding up to 12 servers
-  (`shared_slots`) of any accounts, packed best-fit; an idle one ends after 30 minutes
+- **shared machines**, `t3a.medium` with unlimited CPU credits, holding up to 6 servers
+  (`shared_slots`; each slot's 512 MiB memory limit, so 3 of its 4 GiB) of any accounts, packed best-fit; an idle one ends after 30 minutes
   (`fleet_idle_minutes`);
 - **own machines**, `c7a.medium`, exactly one server: the own-machine add-on.
 
@@ -1039,7 +1042,7 @@ deployment's admins upload it on its own site, into its own bucket.
 
 3. **Check the vCPU quota.** The machines alone use the account's On-Demand Standard
    instances quota (L-1216C47A; the programs run on Fargate, whose quota is its own):
-   each `t3a.large` 2, each `c7a.medium` 1, and 2 for the image builder while it bakes.
+   each `t3a.medium` 2, each `c7a.medium` 1, and 2 for the image builder while it bakes.
    The defaults need 8 (2 x 2 + 2 x 1 + 2), in each deployment's account. Request 32 in
    the Service Quotas console to leave room for a roll:
 
@@ -1400,11 +1403,11 @@ Every command here takes the deployment it reads or changes: `--deployment stagi
 
 ### Cost
 
-About $190 a month for prod's service tier before the machines (approximate: us-east-1
-on-demand list prices, rounded: Fargate Linux x86 $0.04048 a vCPU-hour and $0.004445 a
-GB-hour, a public IPv4 address $0.005 an hour, a network load balancer $0.0225 an hour
-and its LCUs, `db.t4g.small` Multi-AZ $0.064 an hour, RDS gp3 Multi-AZ $0.23 a GB-month,
-`cache.t4g.micro` Valkey $0.0128 an hour, 730 hours a month):
+About $145 a month for each deployment's service tier before the machines (approximate:
+us-east-1 on-demand list prices, rounded: Fargate Linux x86 $0.04048 a vCPU-hour and
+$0.004445 a GB-hour, a public IPv4 address $0.005 an hour, a network load balancer
+$0.0225 an hour and its LCUs, `db.t4g.micro` single-AZ $0.016 an hour, RDS gp3 $0.115 a
+GB-month, `cache.t4g.micro` Valkey $0.0128 an hour, 730 hours a month):
 
 | | a month |
 |---|---|
@@ -1414,20 +1417,23 @@ and its LCUs, `db.t4g.small` Multi-AZ $0.064 an hour, RDS gp3 Multi-AZ $0.23 a G
 | the controller, a 0.25 vCPU / 0.5 GiB task and its public IPv4 | $13 |
 | the worker, a 0.5 vCPU / 1 GiB task and its public IPv4 | $22 |
 | the load balancer, its LCUs at this traffic and its two Elastic IPs | $25 |
-| the database, `db.t4g.small` Multi-AZ (two instances), 20 GiB gp3 each, backups | $51 |
-| the cache, two `cache.t4g.micro` Valkey nodes | $19 |
+| the database, `db.t4g.micro` in one zone, 20 GiB gp3, backups | $14 |
+| the cache, one `cache.t4g.micro` Valkey node | $9 |
 | CloudWatch logs, metrics, about 45 alarms; the health check; Cloud Map's zone | $12 |
 | S3 (releases, dumps, baked images), SSM, the nightly backup task, the schedule | about $1 |
 
-Each further web or worker task adds about $22, a further lobby about $13 (staging, with
-its second web task, about $210 while it runs). A deployment's extra tasks (every
+Each further web or worker task adds about $22, a further lobby about $13; Multi-AZ
+doubles the database's $14, and each further cache node adds $9. Staging has prod's shape
+(about $145) and costs about $70 while `app down` (the database, the cache, the load
+balancer and its addresses stay). A deployment's extra tasks (every
 program's new tasks start beside the old) run for minutes. The database adds its surplus CPU credits, if any (unlimited mode: about $0.075 a
 vCPU-hour past its baseline over a day), none while it stays under its baseline. The
-monthly budget of prod's account (`budget_monthly_usd`, 350) leaves about $160 for the
-machines and their egress; staging's account has its own (250).
+monthly budget of prod's account (`budget_monthly_usd`, 250) leaves about $105 for the
+machines and their egress; staging's account has its own (200).
 
-The machines: a full shared machine (`t3a.large`, its address and volumes, about $60) is
-about $5 a server at 12 servers, before egress; an own machine (`c7a.medium`) about $43.
+The machines: a full shared machine (`t3a.medium`, its address and volume, about $34) is
+about $5.70 a server at 6 servers, before egress (its CPU credits add a little under a
+sustained load); an own machine (`c7a.medium`) about $43.
 Egress is about $0.09 a GB, and a full 64-player server sends about 1.8 GB an hour, so
 egress can cost more than the machine: the egress budget is the alarm. The first shared
 machine runs at a loss until it fills.

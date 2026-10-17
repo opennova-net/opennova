@@ -8,7 +8,7 @@
 # role); each runs opennova-hostd, which reaches the controller's internal
 # listener by its Cloud Map name (ONNET_INTERNAL_URL), and one opennova-serve
 # container per slot. Two kinds:
-#   shared  var.shared_instance_type (t3a.large, unlimited CPU credits), up to
+#   shared  var.shared_instance_type (t3a.medium, unlimited CPU credits), up to
 #           var.shared_slots servers of any accounts, packed best-fit;
 #   own     var.own_instance_type (c7a.medium), exactly one server, the paid
 #           own-machine add-on.
@@ -566,6 +566,8 @@ locals {
     ONNET_FLEET_MAX_SHARED   = tostring(var.fleet_max_shared)
     ONNET_FLEET_MAX_OWN      = tostring(var.fleet_max_own)
     ONNET_FLEET_IDLE_MINUTES = tostring(var.fleet_idle_minutes)
+    # The live servers the service takes: what the fleet holds at its most.
+    ONNET_HOSTED_CAP = tostring(var.fleet_max_shared * var.shared_slots + var.fleet_max_own)
   }
 
   hosted_env = merge(local.fleet_env, local.hosted_enabled ? {
