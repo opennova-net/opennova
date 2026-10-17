@@ -141,6 +141,11 @@ public:
 
 	// The mission row (null before a load); the rows of each kind in their band's order.
 	const MissionRow *mission_row() const;
+	// Its header (null before a load).
+	const bms::Header *header() const {
+		const MissionRow *mission = mission_row();
+		return mission ? &mission->native.header : nullptr;
+	}
 	std::vector<const Node *> rows_of(MissionKind kind) const;
 	// The row the game's lookups find for an SSN (the first in pool order: organics, items, buildings,
 	// markers [orig: Entity_KillByNetId @0x43DBD0]) and for a zone id (the first in file order [orig:

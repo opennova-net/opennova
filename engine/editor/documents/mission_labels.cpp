@@ -88,11 +88,6 @@ std::string shown_name(const MissionDocument &document, const Node &entity, cons
 	return std::string();
 }
 
-const bms::Header *header_of(const MissionDocument &document) {
-	const MissionRow *mission = document.mission_row();
-	return mission ? &mission->native.header : nullptr;
-}
-
 // The words the events lane's sentences (documents/mission_sentence.h) take what a parameter names
 // in: the document's own (DocumentMissionNames: an entity by its record's title, a zone by its area's,
 // an event by its place), an entity with the project's names by its item's name and the name the game
@@ -125,14 +120,6 @@ private:
 	const MissionDocument &document_;
 	const NameSource *names_;
 };
-
-// A parameter's value by its slot.
-int32_t param_of(const bms::Trigger &trigger, int slot) {
-	return slot == 0 ? trigger.param1 : slot == 1 ? trigger.param2 : slot == 2 ? trigger.param3 : trigger.param4;
-}
-int32_t param_of(const bms::Action &action, int slot) {
-	return slot == 0 ? action.param1 : slot == 1 ? action.param2 : slot == 2 ? action.param3 : action.param4;
-}
 
 // What a stop number is read for: an entity's start stop, a waypoint trigger's visited stop (a bit of the
 // visited word), a Redirect's node.
@@ -213,7 +200,7 @@ bool param_display(const MissionDocument &document, ParamKind kind, int64_t valu
 // Path parameter.
 template <class Record, class KindOf> int64_t path_param(const Record &record, KindOf kind_of) {
 	for (int slot = 0; slot < 4; ++slot)
-		if (kind_of(record, slot) == ParamKind::Path) return param_of(record, slot);
+		if (kind_of(record, slot) == ParamKind::Path) return record.param(slot);
 	return 0;
 }
 
@@ -576,11 +563,11 @@ std::string mission_trigger_words(const MissionDocument &document, const bms::Tr
 }
 
 std::string mission_action_words(const MissionDocument &document, const bms::Action &action, const NameSource *names) {
-	return action_words(action, LabelNames(document, names), header_of(document));
+	return action_words(action, LabelNames(document, names), document.header());
 }
 
 std::string mission_event_title(const MissionDocument &document, const Node &row, const NameSource *names) {
-	return event_sentence(static_cast<const EventRow &>(row).native, LabelNames(document, names), header_of(document));
+	return event_sentence(static_cast<const EventRow &>(row).native, LabelNames(document, names), document.header());
 }
 
 std::unique_ptr<MissionNames> mission_label_names(const MissionDocument &document, const NameSource *names) {
@@ -735,7 +722,7 @@ std::string mission_record_brief(const Document &base, const NodeAddress &addres
 			if (!static_cast<const EventRow &>(*row).name.empty()) return event_heading(document->index_of(*row), *row);
 			const std::string number = "Event " + std::to_string(document->index_of(*row) + 1) + ": ";
 			if (!chain.triggers.empty()) return number + trigger_words(chain.triggers.front(), brief);
-			if (!chain.actions.empty()) return number + action_words(chain.actions.front(), brief, header_of(*document));
+			if (!chain.actions.empty()) return number + action_words(chain.actions.front(), brief, document->header());
 			return number + "nothing";
 		}
 		default: return std::string();
@@ -748,7 +735,7 @@ std::string mission_record_brief(const Document &base, const NodeAddress &addres
 	if (static_cast<K>(address.kind) == K::Trigger && index < event.native.triggers.size())
 		return trigger_words(event.native.triggers[index], brief);
 	if (static_cast<K>(address.kind) == K::Action && index < event.native.actions.size())
-		return action_words(event.native.actions[index], brief, header_of(*document));
+		return action_words(event.native.actions[index], brief, document->header());
 	return std::string();
 }
 

@@ -830,6 +830,21 @@ struct Trigger {
         if (is_xor()) return "xor";
         return "and";
     }
+
+    // The parameter in `slot`, 0..3 for param1..param4; a slot past them holds none: it reads 0
+    // and takes nothing.
+    int32_t param(int slot) const {
+        return slot == 0 ? param1 : slot == 1 ? param2 : slot == 2 ? param3 : slot == 3 ? param4 : 0;
+    }
+    void set_param(int slot, int32_t value) {
+        switch (slot) {
+        case 0: param1 = value; break;
+        case 1: param2 = value; break;
+        case 2: param3 = value; break;
+        case 3: param4 = value; break;
+        default: break;
+        }
+    }
 };
 
 // [orig: EventAction_Dispatch @0x4542e0 — switch(action_type) reads param1..4 as actionEntry[3..6]]
@@ -847,6 +862,20 @@ struct Action {
     int32_t param3;
     int32_t param4;
     int32_t reserved1;
+
+    // The parameter in `slot`, as Trigger::param and Trigger::set_param.
+    int32_t param(int slot) const {
+        return slot == 0 ? param1 : slot == 1 ? param2 : slot == 2 ? param3 : slot == 3 ? param4 : 0;
+    }
+    void set_param(int slot, int32_t value) {
+        switch (slot) {
+        case 0: param1 = value; break;
+        case 1: param2 = value; break;
+        case 2: param3 = value; break;
+        case 3: param4 = value; break;
+        default: break;
+        }
+    }
 };
 
 // What a bounding box is to the game: its type, read by the player body's walk over the boxes (the

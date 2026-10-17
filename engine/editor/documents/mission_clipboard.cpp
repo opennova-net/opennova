@@ -130,23 +130,16 @@ size_t index_among(const std::vector<std::shared_ptr<const Node>> &rows, NodeId 
 	return SIZE_MAX;
 }
 
-int32_t &param_of(bms::Trigger &trigger, int slot) {
-	return slot == 0 ? trigger.param1 : slot == 1 ? trigger.param2 : slot == 2 ? trigger.param3 : trigger.param4;
-}
-int32_t &param_of(bms::Action &action, int slot) {
-	return slot == 0 ? action.param1 : slot == 1 ? action.param2 : slot == 2 ? action.param3 : action.param4;
-}
-
 // The parameters of a fragment's events and the riders of its entities that name an SSN or a
 // zone by id: each `old` made `now`.
 void follow_id(bms::File &fragment, ParamKind kind, int32_t old, int32_t now) {
 	if (old == now) return;
 	for (bms::Trigger &trigger : fragment.triggers)
 		for (int slot = 0; slot < 4; ++slot)
-			if (trigger_param_kind(trigger, slot) == kind && param_of(trigger, slot) == old) param_of(trigger, slot) = now;
+			if (trigger_param_kind(trigger, slot) == kind && trigger.param(slot) == old) trigger.set_param(slot, now);
 	for (bms::Action &action : fragment.actions)
 		for (int slot = 0; slot < 4; ++slot)
-			if (action_param_kind(action, slot) == kind && param_of(action, slot) == old) param_of(action, slot) = now;
+			if (action_param_kind(action, slot) == kind && action.param(slot) == old) action.set_param(slot, now);
 	if (kind != ParamKind::Entity) return;
 	for (std::vector<bms::Entity> *pool : {&fragment.items, &fragment.buildings, &fragment.markers, &fragment.organics})
 		for (bms::Entity &entity : *pool)
