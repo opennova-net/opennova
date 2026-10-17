@@ -141,10 +141,13 @@ int sbf_decode_all(const uint8_t *raw_bytes, size_t raw_size,
    interleaved (left then right) at SBF_SAMPLE_RATE: from the entry's start, one
    block_size chunk at a time until the entry's bytes run out, each decoded at its
    shifts (sbf_decode_chunk) and kept as whole frames, the split counting a
-   chunk's frames as its valid count >> 1 [orig: AudioStream_Update @ 0x671C60 --
-   the entry's end @ 0x671C7D, the block read @ 0x671CBC, the split @ 0x671D56,
-   the countdown @ 0x671D61; Audio_SubmitStereoSampleSplit @ 0x7BD222]. A chunk
-   the decoder refuses, or one past the bytes, ends the stream. The Godot player
+   chunk's frames as its valid count >> 1 and queueing nothing for a chunk of
+   under 4 frames or over 2048, the pump going on to the next block
+   [orig: AudioStream_Update @ 0x671C60 -- the entry's end @ 0x671C7D, the block
+   read @ 0x671CBC, the split @ 0x671D56, the countdown @ 0x671D61;
+   Audio_SubmitStereoSampleSplit @ 0x7BD222..0x7BD233, `shr ecx,1; cmp ecx,3;
+   jbe` / `cmp ecx,800h; ja` to the return before any store]. A chunk the
+   decoder refuses, or one past the bytes, ends the stream. The Godot player
    hands this PCM to the mixer whole (godot/src/audio/sbf_audio_stream.cpp). */
 std::vector<int16_t> sbf_decode_entry(const uint8_t *entry_bytes, size_t size,
                                       uint32_t block_size);
@@ -289,6 +292,11 @@ bool sbf_write_bank(const SbfFile &bank, std::vector<uint8_t> &out, std::string 
    right) at SBF_SAMPLE_RATE: each chunk's bytes decoded at its shifts, in
    order (sbf_decode_sample: a shift of 15 or more decodes to silence). */
 std::vector<int16_t> sbf_decode_stream(const SbfStream &stream);
+
+/* The same stream as the game plays it: each chunk through the stereo split's
+   frame rule, as sbf_decode_entry plays an entry's blocks (the editor's
+   preview). */
+std::vector<int16_t> sbf_play_stream(const SbfStream &stream);
 
 /* A stream of `pcm` (int16, left/right interleaved), encoded chunk by chunk
    as sbf_encode_chunk encodes one: full SBF_CHUNK_AUDIO chunks, the last

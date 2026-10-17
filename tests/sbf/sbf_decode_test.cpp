@@ -200,25 +200,44 @@ static int test_decode_entry_matches_streaming(void) {
     return 1;
 }
 
-/* Chunk by chunk to the entry's end, each chunk's whole frames: an odd count's
-   last byte is not played and a short chunk does not end the stream (the split
-   counts frames as count >> 1 and the pump reads the next block until the
-   entry's bytes run out) [orig: Audio_SubmitStereoSampleSplit @ 0x7BD222;
-   AudioStream_Update @ 0x671D61]. */
+/* Chunk by chunk to the entry's end, each chunk's whole frames, a chunk of under
+   4 frames queueing nothing: an odd count's last byte is not played, and neither
+   it nor a short chunk ends the stream (the split counts frames as count >> 1 and
+   returns before any store under 4 frames or over 2048; the pump reads the next
+   block until the entry's bytes run out) [orig: Audio_SubmitStereoSampleSplit
+   @ 0x7BD222..0x7BD233; AudioStream_Update @ 0x671D61]. */
 static int test_decode_entry_walks_every_chunk(void) {
-    const uint32_t block = SBF_CHUNK_HEADER + 8;
-    uint8_t entry[2 * (SBF_CHUNK_HEADER + 8)] = {0};
+    const uint32_t block = SBF_CHUNK_HEADER + 10;
+    uint8_t entry[3 * (SBF_CHUNK_HEADER + 10)] = {0};
     SbfChunkHeader h = {};
-    h.valid_samples = 5;
+    h.valid_samples = 9; /* 4 frames and an odd byte */
     memcpy(entry, &h, SBF_CHUNK_HEADER);
-    for (int i = 0; i < 8; ++i) entry[SBF_CHUNK_HEADER + i] = (uint8_t)(0x81 + i);
-    h.valid_samples = 4;
+    for (int i = 0; i < 10; ++i) entry[SBF_CHUNK_HEADER + i] = (uint8_t)(0x81 + i);
+    h.valid_samples = 6; /* 3 frames: the split queues nothing */
     memcpy(entry + block, &h, SBF_CHUNK_HEADER);
-    for (int i = 0; i < 8; ++i) entry[block + SBF_CHUNK_HEADER + i] = (uint8_t)(0x91 + i);
+    for (int i = 0; i < 10; ++i) entry[block + SBF_CHUNK_HEADER + i] = (uint8_t)(0xA1 + i);
+    h.valid_samples = 8; /* 4 frames */
+    memcpy(entry + 2 * block, &h, SBF_CHUNK_HEADER);
+    for (int i = 0; i < 10; ++i) entry[2 * block + SBF_CHUNK_HEADER + i] = (uint8_t)(0x91 + i);
     const std::vector<int16_t> pcm = sbf_decode_entry(entry, sizeof(entry), block);
-    CHECK(pcm.size() == 8, "two whole frames from each chunk");
-    CHECK(pcm.size() == 8 && pcm[3] == sbf_decode_sample(0x84, 0) && pcm[4] == sbf_decode_sample(0x91, 0),
-          "the odd byte dropped, the next chunk on the left again");
+    CHECK(pcm.size() == 16, "four whole frames from the first and the last chunk, none from the 3-frame one");
+    CHECK(pcm.size() == 16 && pcm[7] == sbf_decode_sample(0x88, 0) && pcm[8] == sbf_decode_sample(0x91, 0),
+          "the odd byte dropped, the short chunk skipped, the last chunk on the left again");
+    return 1;
+}
+
+/* The bank model's stream as the game plays it (the editor's preview): the same
+   split rule over its chunks [orig: Audio_SubmitStereoSampleSplit
+   @ 0x7BD222..0x7BD233]. */
+static int test_play_stream_takes_the_split_rule(void) {
+    SbfStream stream;
+    for (size_t count : {(size_t)9, (size_t)6, (size_t)8}) {
+        SbfChunk chunk;
+        chunk.audio.assign(count, 0x90);
+        stream.chunks.push_back(chunk);
+    }
+    CHECK(sbf_decode_stream(stream).size() == 23, "the model's decode keeps every byte");
+    CHECK(sbf_play_stream(stream).size() == 16, "the played stream keeps the split's whole frames");
     return 1;
 }
 
@@ -232,6 +251,7 @@ int main(void) {
     RUN_TEST(test_decode_all_tone01_multichunk);
     RUN_TEST(test_decode_entry_matches_streaming);
     RUN_TEST(test_decode_entry_walks_every_chunk);
+    RUN_TEST(test_play_stream_takes_the_split_rule);
     printf("\n%d passed, %d failed\n", passed, failed);
     return failed == 0 ? 0 : 1;
 }

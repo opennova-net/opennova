@@ -151,7 +151,7 @@ bool music_stream_pcm(const std::vector<uint8_t> &bytes, int place, lwf::WavPcm 
 		error = "the bank has no stream " + std::to_string(place);
 		return false;
 	}
-	const std::vector<int16_t> samples = sbf_decode_stream(bank.streams[size_t(place)]);
+	const std::vector<int16_t> samples = sbf_play_stream(bank.streams[size_t(place)]);
 	out = lwf::WavPcm();
 	out.channels = SBF_CHANNELS;
 	out.sample_rate = SBF_SAMPLE_RATE;

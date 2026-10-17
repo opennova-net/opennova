@@ -186,6 +186,14 @@ int sbf_decode_all(const uint8_t *raw, size_t raw_size,
     return (int)produced;
 }
 
+/* The samples the stereo split keeps of a chunk that decoded `samples`: its
+   whole frames (samples >> 1), none for under 4 frames or over 2048 [orig:
+   Audio_SubmitStereoSampleSplit @ 0x7BD222..0x7BD233]. */
+static size_t sbf_split_kept_samples(size_t samples) {
+    const size_t frames = samples >> 1;
+    return (frames <= 3 || frames > 0x800) ? 0 : frames * 2;
+}
+
 std::vector<int16_t> sbf_decode_entry(const uint8_t *entry_bytes, size_t size,
                                       uint32_t block_size) {
     std::vector<int16_t> out;
@@ -197,7 +205,13 @@ std::vector<int16_t> sbf_decode_entry(const uint8_t *entry_bytes, size_t size,
         const int n = sbf_decode_chunk(entry_bytes + off, this_chunk, out.data() + produced,
                                        out.size() - produced);
         if (n < 0) break;
-        produced += (size_t)n & ~(size_t)1;
+        /* The split's rule reads the header's own count, past the block's bytes
+           too (retail's static block buffer holds stale bytes there); the port
+           plays the bytes the block holds [orig: AudioStream_Update @ 0x671D24 /
+           @ 0x671D41, ecx = the block's first dword]. */
+        uint32_t header_count = 0;
+        memcpy(&header_count, entry_bytes + off, sizeof(header_count));
+        produced += std::min(sbf_split_kept_samples(header_count), (size_t)n & ~(size_t)1);
     }
     out.resize(produced);
     return out;
@@ -491,6 +505,16 @@ std::vector<int16_t> sbf_decode_stream(const SbfStream &stream) {
     std::vector<int16_t> out;
     for (const SbfChunk &chunk : stream.chunks) {
         for (size_t i = 0; i < chunk.audio.size(); ++i)
+            out.push_back(sbf_decode_sample(chunk.audio[i], (i & 1) ? chunk.scale_b : chunk.scale_a));
+    }
+    return out;
+}
+
+std::vector<int16_t> sbf_play_stream(const SbfStream &stream) {
+    std::vector<int16_t> out;
+    for (const SbfChunk &chunk : stream.chunks) {
+        const size_t kept = sbf_split_kept_samples(chunk.audio.size());
+        for (size_t i = 0; i < kept; ++i)
             out.push_back(sbf_decode_sample(chunk.audio[i], (i & 1) ? chunk.scale_b : chunk.scale_a));
     }
     return out;
