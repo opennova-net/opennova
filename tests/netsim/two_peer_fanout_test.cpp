@@ -2536,6 +2536,43 @@ bool run_0a_tail_carries_the_armor_word() {
 	return expect(frame_armor(armor) && armor == 40, "armor: a dead recipient's word still rides");
 }
 
+// The tail's Health i16 is the recipient's entity+0x11E word, raw, alive or dead:
+// the drowning and the flag timeout store -1 there and a retail host sends 0xFFFF
+// for it. It was clamped to 0..32767 (B-14).
+// [orig: NetPacket_WritePlayerState @0x4FFD56..0x4FFD6A; the drowning's
+//  `mov word ptr [eax+11Eh],0FFFFh`, Server_UpdatePlayerBreathTimers @0x50D819]
+bool run_0a_tail_carries_the_health_word_raw() {
+	w::World world;
+	world.registry.configure_pool(0, 8);
+	const w::EntityHandle h =
+			w::spawn_remote_player(world, player_spawn({1.0f, 2.0f, 3.0f}, 0, 0xFFF0));
+	w::Entity *e = world.registry.get(h);
+	if (!expect(e != nullptr, "health: player entity resolvable")) return false;
+	std::vector<ns::Connection> conns;
+	ns::LoopbackChannel ch;
+	conns.push_back(ns::Connection{&ch, ns::TransportMode::Loopback, h, 0});
+	auto frame_health = [&](int16_t &health) {
+		ns::test::emit_all(world, conns);
+		ns::Datagram dg;
+		if (!ch.client_recv(dg)) return false;
+		nw::FrameUpdate fu;
+		if (!nw::decode_frame_update(dg.body.data(), dg.body.size(), ns::class_for_type_id, fu) ||
+				!fu.local_tail_present)
+			return false;
+		health = fu.health;
+		return true;
+	};
+	int16_t health = 0;
+	e->health = 150;
+	if (!expect(frame_health(health) && health == 150, "health: the tail carries entity+0x11E"))
+		return false;
+	// A drowned body: Health -1 with the dead bit, the word raw (0xFFFF).
+	e->health = -1;
+	e->flags |= 2u;
+	return expect(frame_health(health) && health == -1,
+	              "health: a drowned recipient's -1 crosses raw");
+}
+
 int main() {
 	const bool ok = run_fanout_and_per_connection_anchor() && run_joiner_uplink_snaps_peer() &&
 	                run_self_uplink_rejected() && run_cross_peer_uplink_rejected() &&
@@ -2549,6 +2586,7 @@ int main() {
 	                run_0a_anchor_is_the_recipient_eye() &&
 	                run_0a_round_score_and_los_read_the_body() &&
 	                run_0a_deploy_hold_and_tail_stance() && run_0a_tail_carries_the_armor_word() &&
+	                run_0a_tail_carries_the_health_word_raw() &&
 	                run_0a_priority_caches_hold_every_pool1_slot() &&
 	                run_0a_phase1_gate_reads_the_whole_countdown() &&
 	                run_0x26_attach_mounted_echo() &&
