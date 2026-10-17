@@ -27,16 +27,9 @@ namespace opennova::editor {
 
 namespace {
 
-// The open document at a project path (null: not open).
-const DocumentBase *open_at(const SessionView &view, const std::string &path) {
-	for (const auto &document : view.documents.open)
-		if (document && document->path() == path) return document.get();
-	return nullptr;
-}
-
 // The item rows of an open catalog, each by its id and its name.
 template <typename Visit> void open_items(const SessionView &view, const std::string &catalog, Visit visit) {
-	const DocumentBase *open = open_at(view, catalog);
+	const DocumentBase *open = view.documents.open_at(catalog);
 	const Document *records = open ? records_of(*open) : nullptr;
 	if (!records) return;
 	const NodeKind item = node_kind(def::DefRecordKind::Item);
@@ -157,7 +150,7 @@ static bool mission_to_place_in(const SessionView &view, const std::string &what
 
 std::string place_in_mission_target(const SessionView &view) {
 	const auto mission_at = [&](const std::string &path) {
-		const DocumentBase *open = path.empty() ? nullptr : open_at(view, path);
+		const DocumentBase *open = path.empty() ? nullptr : view.documents.open_at(path);
 		return open && open->kind() == AssetKind::Mission;
 	};
 	if (mission_at(view.documents.active)) return view.documents.active;
