@@ -1189,9 +1189,8 @@ bool compose_ground_leg(World &world, const AiEntity &p, const Entity &e,
 // [orig: Render_WeaponInsetScene @0x5C9841..0x5C9903]
 void apply_inset_slot_offsets(World &world, LocalPlayerWeapon &w, LocalPlayerViewFrame &out) {
     const WeaponSlotState *slot = active_local_weapon_slot(world, w);
-    constexpr double degrees_per_bam = 360.0 / 4294967296.0;
-    out.inset_camera.yaw_deg -= float(slot->zero_yaw * degrees_per_bam);
-    out.inset_camera.pitch_deg -= float(slot->zero_pitch * degrees_per_bam);
+    out.inset_camera.yaw_deg -= float(slot->zero_yaw * kDegreesPerBam);
+    out.inset_camera.pitch_deg -= float(slot->zero_pitch * kDegreesPerBam);
 }
 
 } // namespace
@@ -1264,7 +1263,7 @@ bool local_player_camera_compose(World &world, PlayerViewState &v, LocalPlayerVi
         camera_shake_sample_chase(v.shake, world.weather.core.oscillator.prng, world.logic_tick,
                                   d_yaw, d_pitch, d_roll);
     }
-    constexpr float kDegPerBam = 360.0f / 4294967296.0f;
+    constexpr float kDegPerBam = static_cast<float>(kDegreesPerBam);
     out.yaw_deg -= static_cast<float>(d_yaw) * kDegPerBam;
     out.pitch_deg += static_cast<float>(d_pitch) * kDegPerBam;
     out.roll_deg += static_cast<float>(d_roll) * kDegPerBam;
