@@ -14,6 +14,10 @@ RoundSpawnParams ammo_fire_params(EntityHandle owner, FixedVec3 p,
     params.dir_pitch_bam = pitch;
     params.ammo_index = ammo_index;
     params.adm_index = ammo_index;
+    // The ammo-def arm (targetId 1) spawns with no weapon [orig:
+    //  Entity_FireWeaponAndSendPacket @0x42BF53..0x42BF5D; the authority leg's
+    //  re-entry reaches RoundData_AddRound with flags 1, @0x4FDB95].
+    params.no_weapon = true;
     return params;
 }
 

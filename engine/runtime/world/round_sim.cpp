@@ -1012,7 +1012,8 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
         return spawn_burst(world, params, *ammo, mode);
     }
     const RoundSourceState source = resolve_round_source(world, params);
-    const WeaponTableEntry *weapon = world.tables.weapons.by_index(params.adm_index);
+    const WeaponTableEntry *weapon =
+            params.no_weapon ? nullptr : world.tables.weapons.by_index(params.adm_index);
     if ((ammo->flags & kAmmoFlagShotgun) != 0) {
         // Shotgun is a separate pellet-fan leaf: it never reads weapon ERROR or
         // the rules gate, but the ordinary ammo recoil is applied after the fan.

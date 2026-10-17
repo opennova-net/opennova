@@ -2173,9 +2173,23 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// adm's load-time-resolved round_type (+4; +84 is the stat id); an
 				// armory- or ammo-less host skips the sim (fire still echoes).
 				if (round_lands && !world->tables.ammo.empty()) {
+					// The round's ammo: the fired weapon's round on the primary path;
+					// on the alt path the request's byte is the ammo index itself, and
+					// the weapon rides only under the adm-indexed flag bit.
+					// [orig: Server_ClientFiredRound - the alt read of +81 @0x50BB0F,
+					//  deltaZ @0x50BB7B into roundParams[3] @0x50BDF1; RoundData_AddRound
+					//  @0x4FDB95..0x4FDBB5 (the flags & 2 adm entry), the ammo
+					//  hit_params[2] @0x4FDC10]
 					const world::WeaponTableEntry *fire_adm =
 							world->tables.weapons.by_index(fired_adm);
-					if (fire_adm != nullptr && fire_adm->ammo_index >= 0) {
+					int32_t round_ammo = fire_adm != nullptr ? fire_adm->ammo_index : -1;
+					if (alt_fire) {
+						round_ammo = fr.adm_index < world->tables.ammo.entries.size() &&
+										world->tables.ammo.entries[fr.adm_index].valid
+								? int32_t(fr.adm_index)
+								: -1;
+					}
+					if (round_ammo >= 0) {
 						world::RoundSpawnParams rp;
 						rp.owner = conn.link.owned_entity;
 						rp.shooter_handle = fr.shooter_handle;
@@ -2184,8 +2198,9 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						rp.origin.z = opennova::io::fp16_16_to_float(fr.pos_z);
 						rp.dir_yaw_bam = ev.dir_yaw;
 						rp.dir_pitch_bam = ev.dir_pitch;
-						rp.ammo_index = fire_adm->ammo_index;
+						rp.ammo_index = round_ammo;
 						rp.adm_index = fired_adm;
+						rp.no_weapon = alt_fire && (fr.fire_flags & 0x02) == 0;
 						rp.shot_seq = shot_seq;
 						rp.subtype = ev.subtype;
 						// PowerThrow charge from fireRequest+80; RoundData_SpawnRound

@@ -800,7 +800,55 @@ bool check_the_ring_takes_the_fire_actions_words() {
 			"the primary ring takes the pre-spend clip's mode byte, the alt ring its slot's sequence word");
 }
 
+// An alt-fire round's byte is an ammo index: the host spawns that ammo, not the
+// round of a weapon at that index. [orig: Server_ClientFiredRound @0x50BB0F /
+//  @0x50BDF1; RoundData_AddRound hit_params[2] @0x4FDC10]
+bool check_an_alt_round_takes_its_ammo_byte() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	const auto shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
+	std::vector<inmatch::NapiNPConnection> roster;
+	roster.push_back(make_seeded_conn(2, 1, nullptr, ns::TransportMode::Client, shooter, true));
+	auto &conn = roster[0];
+	world.tables.weapons.entries.resize(4);
+	// A loaded table's slot 0 is the engine's valid "null" def.
+	world.tables.weapons.entries[0].name = "null";
+	world.tables.weapons.entries[0].valid = true;
+	auto &weapon = world.tables.weapons.entries[2];
+	weapon.name = "ADM_TWO";
+	weapon.valid = true;
+	weapon.clipsize = 20;
+	weapon.category = 3;
+	weapon.rank = 2;
+	weapon.ammo_index = 1;
+	world.tables.ammo.entries.resize(3);
+	world.tables.ammo.entries[1].name = "ADM_TWOS_ROUND";
+	world.tables.ammo.entries[1].velocity = 100;
+	world.tables.ammo.entries[1].max_age_ticks = 62;
+	world.tables.ammo.entries[1].valid = true;
+	world.tables.ammo.entries[2].name = "ALT_ROUND";
+	world.tables.ammo.entries[2].velocity = 300;
+	world.tables.ammo.entries[2].max_age_ticks = 62;
+	world.tables.ammo.entries[2].spread_error_fp16 = 30 << 16;
+	world.tables.ammo.entries[2].valid = true;
+	dispatch_fire(conn, roster, world,
+			fire_body(shooter.packed, 0x01, 2, 0, 0, 0, 0, 0, 0xFFFF, 1, 12, 0));
+	if (!expect(world.out.rounds.count == 1 && world.round_sim.active_count == 1 &&
+					world.round_sim.rounds[0].ammo_index == 2,
+			"the alt round flies as ammo 2, its byte"))
+		return false;
+	// With no weapon the spawn takes the ammo's ERROR leg: a fire straight down +x
+	// leaves the axis. [orig: RoundData_SpawnRound @0x4EC38D..0x4EC4D2]
+	const w::RandomSpreadOffset spread =
+			w::weapon_calc_random_spread_offset(30 << 16, /*seed=*/1, 0, false);
+	const w::LiveRound &round = world.round_sim.rounds[0];
+	return expect((spread.yaw_bam != 0 || spread.pitch_bam != 0) &&
+					(round.vel.y != 0.0f || round.vel.z != 0.0f),
+			"the weaponless alt round spreads by its ammo's ERROR");
+}
+
 int main() {
+	if (!check_an_alt_round_takes_its_ammo_byte()) return 1;
 	if (!check_the_ring_takes_the_fire_actions_words()) return 1;
 	if (!check_the_fire_action_rejudges_the_round()) return 1;
 	if (!check_controller_seat_reads_no_bucket()) return 1;

@@ -211,6 +211,12 @@ struct RoundSpawnParams {
     int32_t dir_pitch_bam = 0;
     int32_t ammo_index = -1;          // resolved adm round_type -> AmmoTable index
     uint8_t adm_index = 0;
+    // The ammo-def arm's round carries no weapon: RoundData_AddRound resolves its
+    // byte as a weapon only under the flags' adm-indexed bit, so the spawn's spread
+    // takes the ammo's ERROR leg. [orig: RoundData_AddRound @0x4FDB95..0x4FDBB5;
+    //  RoundData_SpawnRound's null-weapon test @0x4EC38D..0x4EC397, the ammo leg
+    //  @0x4EC4BF..0x4EC4D2]
+    bool no_weapon = false;
     uint16_t shot_seq = 0;
     // Shooter fire-context composite (ring+31). Bit 7 selects the vertical
     // projectile ERROR row; the remaining bits are opaque here.
