@@ -790,6 +790,13 @@ struct HudVehiclePanelState {
 	std::vector<HudVehicleSeat> seats;
 };
 
+// The panel's anchor from the layout: the HUDVEHSTANCEPOS pair and the HUDSTANCE
+// offset of the rider's stance, the same tables the stance icon reads (the producer
+// yields stance 0..5; the index is clamped to the tables' six rows)
+// [orig: HUD_DrawVehicleHealthBars @0x5A50B3 / @0x5A50B9, the stance byte
+// byte_27235C0 indexing dword_2723B24 / dword_2723B44].
+void set_vehicle_panel_anchor(const HudLayout &layout, int stance, HudVehiclePanelState &panel);
+
 // One contestable AAS zone on the status panel, in the spawn-zone list's order
 // (hud/hud_lfp_panel.h owns the policy). The feed (world/lfp_feed.h) resolves
 // everything from the registry + the zone-timer entry; the element draws.

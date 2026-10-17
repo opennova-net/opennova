@@ -1,6 +1,7 @@
 // The mounted-vehicle panel policy: seat-marker colour banding and geometry.
 // [orig: HUD_DrawVehicleHealthBars @0x5A4FD0]
 
+#include <runtime/hud/hud_frame.h>
 #include <runtime/hud/hud_vehicle_panel.h>
 
 #include <cstdio>
@@ -70,7 +71,25 @@ void test_base_anchor() {
 	CHECK(x0 == 293 && y0 == 413, "seat offsets are relative to the moved base");
 }
 
+// The panel's anchor is the layout's (C-312): HUDVEHSTANCEPOS and the HUDSTANCE
+// row of the rider's stance, the index clamped to the six rows.
+void test_anchor_from_layout() {
+	HudLayout layout;
+	layout.veh_stance_pos = {300, 400, 0, 0, true};
+	for (int i = 0; i < 6; ++i) {
+		layout.stance_offset_x[static_cast<size_t>(i)] = -10 * i;
+		layout.stance_offset_y[static_cast<size_t>(i)] = 3 * i;
+	}
+	HudVehiclePanelState panel;
+	set_vehicle_panel_anchor(layout, 2, panel);
+	CHECK(panel.anchor_x == 300 && panel.anchor_y == 400 && panel.stance_offset_x == -20 &&
+			panel.stance_offset_y == 6, "the anchor and the stance's offset row");
+	set_vehicle_panel_anchor(layout, 9, panel);
+	CHECK(panel.stance_offset_x == -50 && panel.stance_offset_y == 15, "the index clamps to the last row");
+}
+
 int main() {
+	test_anchor_from_layout();
 	test_bands();
 	test_geometry();
 	test_base_anchor();

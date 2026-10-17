@@ -1174,13 +1174,8 @@ void HudOverlay::set_vehicle_panel(bool p_shown, const Ref<VehicleHudBlock> &p_b
 			silhouette->get_height() > 0;
 	vp.silhouette_w = vp.silhouette_valid ? silhouette->get_width() : 0;
 	vp.silhouette_h = vp.silhouette_valid ? silhouette->get_height() : 0;
-	// The base is the HUDVEHSTANCEPOS anchor plus the rider's HUDSTANCE
-	// offset — the panel rides the stance icon.
-	const int stance = CLAMP(p_stance, 0, 5);
-	vp.anchor_x = layout_.veh_stance_pos.x;
-	vp.anchor_y = layout_.veh_stance_pos.y;
-	vp.stance_offset_x = layout_.stance_offset_x[static_cast<size_t>(stance)];
-	vp.stance_offset_y = layout_.stance_offset_y[static_cast<size_t>(stance)];
+	// The base rides the stance icon (the engine's hud::set_vehicle_panel_anchor).
+	opennova::hud::set_vehicle_panel_anchor(layout_, p_stance, vp);
 	// Hull band + seat rows straight from the sim's feed, no script round-trip
 	// (the state from the args, the rows from the sim; a null sim leaves the
 	// rows empty). The panel's one witnessed gate
