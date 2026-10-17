@@ -3,8 +3,8 @@
 # repo root:
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> init -backend=false
 #   docker run --rm -v "$PWD:/w" -w /w/infra/aws hashicorp/terraform:<the toolbox's> test
-# PostgreSQL 17 in the private subnets on db.t4g.small, Multi-AZ (or,
-# off, single-AZ in private subnet a's zone), never public, encrypted, TLS
+# PostgreSQL 17 in the private subnets on db.t4g.micro, single-AZ in private
+# subnet a's zone (or, on, Multi-AZ), never public, encrypted, TLS
 # forced, max_connections sized for the programs' pools at their maxima with a
 # deployment's extra tasks, 14 days of point-in-time recovery, a final snapshot
 # and deletion protection; reached from the five programs' security groups and
@@ -280,12 +280,12 @@ run "database" {
   command = plan
 
   assert {
-    condition     = aws_db_instance.main.engine == "postgres" && aws_db_instance.main.engine_version == "17" && aws_db_instance.main.instance_class == "db.t4g.small"
-    error_message = "PostgreSQL 17 on db.t4g.small"
+    condition     = aws_db_instance.main.engine == "postgres" && aws_db_instance.main.engine_version == "17" && aws_db_instance.main.instance_class == "db.t4g.micro"
+    error_message = "PostgreSQL 17 on db.t4g.micro"
   }
   assert {
-    condition     = !aws_db_instance.main.publicly_accessible && aws_db_instance.main.multi_az
-    error_message = "private and Multi-AZ (a standby RDS fails over to)"
+    condition     = !aws_db_instance.main.publicly_accessible && !aws_db_instance.main.multi_az && aws_db_instance.main.availability_zone == aws_subnet.private["a"].availability_zone
+    error_message = "private, single-AZ in private subnet a's zone"
   }
   assert {
     condition     = aws_db_instance.main.storage_encrypted && aws_db_instance.main.storage_type == "gp3" && aws_db_instance.main.allocated_storage == 20 && aws_db_instance.main.max_allocated_storage == 100
@@ -312,8 +312,8 @@ run "database" {
     error_message = "the parameter group forces TLS and logs statements over a second"
   }
   assert {
-    condition     = length([for p in aws_db_parameter_group.main.parameter : p if p.name == "max_connections" && p.value == "108" && p.apply_method == "pending-reboot"]) == 1
-    error_message = "max_connections: 7 connections for each of 14 program processes, plus 10 (static: the next reboot)"
+    condition     = length([for p in aws_db_parameter_group.main.parameter : p if p.name == "max_connections" && p.value == "80" && p.apply_method == "pending-reboot"]) == 1
+    error_message = "max_connections: 7 connections for each of 10 program processes, plus 10 (static: the next reboot)"
   }
   assert {
     condition     = toset(aws_db_subnet_group.main.subnet_ids) == toset([aws_subnet.private["a"].id, aws_subnet.private["b"].id])
@@ -361,17 +361,17 @@ run "database_wiring" {
   }
 }
 
-# Single-AZ: the instance sits in private subnet a's zone.
-run "single_az" {
+# Multi-AZ: a standby RDS fails over to, in no zone of its own choosing.
+run "multi_az" {
   command = plan
 
   variables {
-    db_multi_az = false
+    db_multi_az = true
   }
 
   assert {
-    condition     = !aws_db_instance.main.multi_az && aws_db_instance.main.availability_zone == aws_subnet.private["a"].availability_zone
-    error_message = "single-AZ: in private subnet a's zone"
+    condition     = aws_db_instance.main.multi_az
+    error_message = "Multi-AZ: a standby RDS fails over to"
   }
 }
 
@@ -405,13 +405,13 @@ run "processes_past_sizing_refused" {
   expect_failures = [aws_db_parameter_group.main]
 }
 
-# The programs' maxima alone (7 processes) fit 12, but a deployment's extra
-# tasks (every program's doubled) make 14.
+# The programs' maxima alone (5 processes) fit 8, but a deployment's extra
+# tasks (every program's doubled) make 10.
 run "replacement_surge_counted" {
   command = plan
 
   variables {
-    db_service_processes = 12
+    db_service_processes = 8
   }
 
   expect_failures = [aws_db_parameter_group.main]

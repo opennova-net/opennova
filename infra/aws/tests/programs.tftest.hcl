@@ -471,7 +471,8 @@ run "environments" {
       for p in ["web", "controller", "worker"] :
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_INTERNAL_URL"] == "http://controller.prod.opennova.internal:8070" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_PROVIDER"] == "none" &&
-      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_FLEET_SHARED_SLOTS"] == "12" &&
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_FLEET_SHARED_SLOTS"] == "6" &&
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_HOSTED_CAP"] == "14" &&
       { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_SITE_URL"] == "https://example.com"
     ])
     error_message = "web, the controller and the worker read hosting's settings (off without a data set) and the controller's Cloud Map URL"
@@ -546,11 +547,11 @@ run "task_counts" {
   }
   assert {
     condition = (
-      aws_appautoscaling_target.program["web"].max_capacity == 2 && aws_appautoscaling_target.program["worker"].max_capacity == 2 &&
+      aws_appautoscaling_target.program["web"].max_capacity == 1 && aws_appautoscaling_target.program["worker"].max_capacity == 1 &&
       aws_appautoscaling_target.program["gate"].max_capacity == 1 && aws_appautoscaling_target.program["lobby"].max_capacity == 1 &&
       aws_appautoscaling_target.program["controller"].max_capacity == 1
     )
-    error_message = "web and the worker up to 2, the others 1"
+    error_message = "every program one task at the defaults"
   }
   assert {
     condition = (
