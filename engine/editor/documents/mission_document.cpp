@@ -357,6 +357,22 @@ const std::string *MissionDocument::item_class(const bms::Entity &entity) const 
 	return found == item_classes_->end() ? nullptr : &found->second;
 }
 
+std::vector<Edit> MissionDocument::save_clamps() const {
+	std::vector<Edit> out;
+	for (const auto &row : rows()) {
+		if (!row || !is_entity_kind(row->kind)) continue;
+		const bms::Entity &entity = static_cast<const EntityRow &>(*row).native;
+		if (entity.w_accuracy1 <= entity.w_accuracy2) continue;
+		Edit set;
+		set.operation = EditOperation::Set;
+		set.address = NodeAddress{row->id, row->kind, 0};
+		set.field = "accuracy";
+		set.value = int64_t(entity.w_accuracy2);
+		out.push_back(std::move(set));
+	}
+	return out;
+}
+
 bool MissionDocument::compose(bms::File &out) const {
 	if (!compose_mission(rows(), out)) return false;
 	// Each record as both of the original's writers write it on every save, every pool's: w_accuracy1 no more than

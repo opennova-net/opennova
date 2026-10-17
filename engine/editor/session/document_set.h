@@ -276,6 +276,9 @@ private:
 	// MissionDocument::set_item_classes) and the weapon table its .mis's default kit is written over (D-MIS-X1,
 	// MissionDocument::set_weapon_table).
 	void hand_catalog_rows(DocumentBase &document);
+	// What a save stores back into a mission's records first, as the original editor's writers do: the clamps
+	// MissionDocument::save_clamps names, applied as one edit step (none where there are none).
+	void apply_save_clamps(DocumentBase &document);
 	// A document's companion (DocumentType::companions, S24 Names: a mission's .mis): where it is (beside the
 	// document's file, in its folder: the project's file there of the document's base name and its extension, in
 	// any case, else that name), "" for a type with none; read and handed to the document before it reads its file

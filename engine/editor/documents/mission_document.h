@@ -204,6 +204,12 @@ public:
 	const mission::MisWeaponTable *weapon_table() const { return weapon_table_.get(); }
 	// The AI class a save writes for `entity` from its item's row; null where the classes name none.
 	const std::string *item_class(const bms::Entity &entity) const;
+	// The Sets a save makes of the records before it writes, as both of the original editor's writers store
+	// their clamp back into the item: each entity's w_accuracy1 (field "accuracy") above its w_accuracy2 set to
+	// it [orig: JOTACmed.exe sub_44C8E0 @ 0x44c95d, the .bms writer's store; MIS_SaveDocument
+	// @ 0x455600..0x455602, the .mis writer's]. The session applies them, one step, before each save
+	// (DocumentSet); compose clamps the bytes alike.
+	std::vector<Edit> save_clamps() const;
 	// The code of each source finding (issues(), in their order): what the parse made of the file.
 	const std::vector<MissionFinding> &issue_codes() const { return issue_codes_; }
 

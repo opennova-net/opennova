@@ -78,6 +78,13 @@ DocumentSet::DocumentSet(SessionCore &core)
 
 DocumentSet::~DocumentSet() = default;
 
+void DocumentSet::apply_save_clamps(DocumentBase &document) {
+	if (const auto *mission = dynamic_cast<const MissionDocument *>(&document)) {
+		const std::vector<Edit> clamps = mission->save_clamps();
+		if (!clamps.empty()) apply_edits(document, clamps, false);
+	}
+}
+
 void DocumentSet::hand_catalog_rows(DocumentBase &document) {
 	if (auto *mission = dynamic_cast<MissionDocument *>(&document)) {
 		mission->set_item_classes(mission_item_classes(view_, *rows_, *mission));
@@ -1381,6 +1388,7 @@ bool DocumentSet::save_documents(const std::vector<std::string> &asked, bool rew
 	for (DocumentBase *document : writes) {
 		Diagnostic error;
 		hand_catalog_rows(*document); // a mission's AI classes and weapon table as the catalogs hold them now
+		apply_save_clamps(*document);
 		const bool over_it = !over.empty() && document->path() == over;
 		const bool outside = over_it && !document->matches_file();
 		if (!document->save(error, over_it)) {
@@ -1455,6 +1463,7 @@ void DocumentSet::rewrite_file(const std::string &path) {
 		return;
 	}
 	hand_catalog_rows(*document);
+	apply_save_clamps(*document);
 	if (!document->save(error)) { // one that does not serialize says why here
 		core_.report(error);
 		view_.activity.status = relative + " could not be saved: see Problems.";

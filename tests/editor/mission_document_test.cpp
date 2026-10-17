@@ -1484,6 +1484,39 @@ int test_pool_check() {
 	return 0;
 }
 
+// A save stores the writers' clamp back into the record, as the original editor's writers store it into the item on
+// both writes [orig: JOTACmed.exe sub_44C8E0 @ 0x44c95d; MIS_SaveDocument @ 0x455600..0x455602]: an item whose
+// w_accuracy1 an edit set above its w_accuracy2 holds the clamped value after the save, the file and the row alike.
+int test_save_clamp() {
+	test_temp::TempDir dir("opennova_mission_save_clamp");
+	editor_test::NoProcess platform;
+	MemoryPreferencesStore preferences;
+	ProjectSession session(platform, preferences);
+	editor_test::handle_to_end(session, request::new_project(dir.file("project"), "Clamp"));
+	editor_test::create_missing_files(session);
+	const std::string root = session.view().project.root;
+	TEST_EXPECT(test_io::write_file(root + "/missions/clamp.bms", fixture_bytes()));
+	editor_test::handle_to_end(session, request::rescan());
+	editor_test::handle_to_end(session, request::open_document("missions/clamp.bms"));
+	Document *mission = session.document_for("missions/clamp.bms");
+	TEST_EXPECT(mission && !as_mission(*mission).rows_of(MissionKind::Item).empty());
+	if (!mission || as_mission(*mission).rows_of(MissionKind::Item).empty()) return 1;
+	const NodeAddress item = row_at(*mission, MissionKind::Item, 0);
+	editor_test::handle_to_end(session, request::edit_record(mission->path(), edit_of(EditOperation::Set, item, "w_accuracy2", int64_t(20))));
+	editor_test::handle_to_end(session, request::edit_record(mission->path(), edit_of(EditOperation::Set, item, "accuracy", int64_t(80))));
+	Value held;
+	TEST_EXPECT(mission->get(item, "accuracy", held) && std::get<int64_t>(held) == 80);
+	editor_test::handle_to_end(session, request::save(mission->path()));
+	TEST_EXPECT(mission->get(item, "accuracy", held) && std::get<int64_t>(held) == 20 && !mission->dirty());
+	bms::File saved;
+	std::string message;
+	const std::vector<uint8_t> bytes = test_io::read_file(root + "/missions/clamp.bms");
+	TEST_EXPECT(bms::parse(bytes.data(), bytes.size(), saved, message) && !saved.items.empty() &&
+	            saved.items[0].w_accuracy1 == 20);
+	std::printf("save clamp: a save stores w_accuracy1's clamp back into the record\n");
+	return 0;
+}
+
 // A mission renamed takes the files the game finds by its name that the project has (ADR 0046 S14):
 // the plan lists them as companions (its own derived edges rewriting nothing), the commit moves
 // them with it (an open companion with unsaved edits joining the unsaved prompt, then reopened at
@@ -1979,6 +2012,7 @@ int main(int argc, char **argv) {
 	if (test_stop_places() != 0) return 1;
 	if (test_item_classes() != 0) return 1;
 	if (test_record_pack() != 0) return 1;
+	if (test_save_clamp() != 0) return 1;
 	if (test_player_route() != 0) return 1;
 	if (test_parse_findings() != 0) return 1;
 	if (test_reads_and_symbols() != 0) return 1;
