@@ -665,7 +665,13 @@ struct WaypointRecord {
 // slots read, 128) compared as signed ints (a count of 2^31 or more walks none), each a marker's
 // index as the slot holds it (one past the markers names none) [orig:
 // NetPacket_WriteWorldStateLoad0x0F @0x502e50, the scan stopping on the first hit @0x502e53, the
-// count capped at 128 @0x502efc].
+// count capped at 128 @0x502efc]. The game reads on past the 32 slots: its walk steps 4 bytes a stop
+// from the record's slots through the 136-byte records laid end to end, so stops 33 on are the next
+// record's flags, its count and its slots (the last record's, the header block after the table),
+// each looked up unchecked as a marker's index [orig: g_BmsWaypointPathTable @0xA71DD0, the stride
+// 0x88 @0x502e59 and @0x502ef0, the table's end g_BmsHeaderBlock @0xA761D0 @0x502e61; the walk
+// @0x502f1e..0x502f7a, Pool_GetEntryUnchecked @0x441fc0 called @0x502f2d]. The port reads the slots
+// alone (D-MIS-X3).
 inline constexpr size_t kPlayerRouteMaxStops = 128;
 bool is_player_route(const WaypointRecord& record);
 size_t player_route_stop_count(const WaypointRecord& record);
