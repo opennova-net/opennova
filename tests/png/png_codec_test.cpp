@@ -90,6 +90,12 @@ int test_png_decode() {
 	truncated.resize(truncated.size() - 20);
 	TEST_EXPECT(!decode_png(truncated, image, error));
 	TEST_EXPECT(!decode_png({1, 2, 3}, image, error) && error.find("Not a PNG") != std::string::npos);
+	// The signature and one length-0 IEND header with no CRC: 16 bytes, fewer than a chunk's 12
+	// framing bytes after its start (the bound once wrapped and the walk read the CRC past the end).
+	const std::vector<uint8_t> cut_chunk = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, 'I', 'E', 'N', 'D'};
+	TEST_EXPECT(!decode_png(cut_chunk, image, error) && error.find("runs past the end") != std::string::npos);
+	GrayImage gray_cut;
+	TEST_EXPECT(!decode_png_gray(cut_chunk, gray_cut, error) && error.find("runs past the end") != std::string::npos);
 	std::printf("decode: every color type and depth, the five filters, the refusals\n");
 	return 0;
 }

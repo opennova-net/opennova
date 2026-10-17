@@ -12,7 +12,7 @@ namespace {
 
 const uint8_t kSignature[8] = {0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A};
 // The largest image the reader takes, per side: far past any texture the game
-// draws, small enough that a corrupt header cannot ask for gigabytes.
+// draws.
 constexpr uint32_t kMaxSidePixels = 16384;
 
 uint32_t read_be32(const uint8_t *p) {
@@ -120,7 +120,9 @@ bool read_scanlines(const std::vector<uint8_t> &bytes, Scanlines &image, std::st
 		}
 		const uint32_t length = read_be32(&bytes[pos]);
 		const uint8_t *type = &bytes[pos + 4];
-		if (length > bytes.size() - pos - 12) {
+		// The chunk's header, data and CRC: fewer than the 12 framing bytes left is a cut-off chunk
+		// too (the subtraction below would wrap).
+		if (bytes.size() - pos < 12 || length > bytes.size() - pos - 12) {
 			error = "Truncated PNG: a chunk runs past the end of the file.";
 			return false;
 		}
