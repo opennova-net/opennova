@@ -50,10 +50,9 @@ const PARTICLE_DENSITY_KEY := "particle_density"
 const TEXCOMPRESSION_LEVEL_KEY := "texcompression_level"
 # The terrain texture detail persists as retail's game.cfg word
 # `terrain_texdetail` (0..3, the block's read clamping it: a -1 reads as 0, two
-# halvings; engine gamecfg clamp_graphics_options; the TERRAINTEX row stays
-# pinned at full detail, menu/options_policy.h); the world copies it at each
-# mission start (engine renderer/device_texture.h; GameWorld re-exports the
-# fresh profile's word).
+# halvings; engine gamecfg clamp_graphics_options), which the front-end row
+# TERRAINTEX edits; the world copies it at each mission start (engine
+# renderer/device_texture.h; GameWorld re-exports the fresh profile's word).
 const TERRAIN_TEXDETAIL_KEY := "terrain_texdetail"
 
 # The slider ranges are the engine's witnessed Options ranges

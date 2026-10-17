@@ -753,6 +753,46 @@ func test_particle_and_compression_rows_seed_by_value_and_write_the_words_back()
 	_cleanup(dir)
 
 
+# The terrain-texture-detail row is game.cfg's terrain_texdetail, served the
+# same way (engine runtime/menu/options_policy.h kTerrainTexDetailControls):
+# the combobox selects the row whose value is the persisted word (a profile
+# below full detail shows its own rung), stays editable, and a pick writes the
+# row's value back at once. The seeded 1 is neither row 0 (a list's unselected
+# read) nor the fresh profile's 3.
+func test_terrain_texture_row_seeds_by_value_and_writes_the_word_back() -> void:
+	var options := PlayerOptions.new()
+	var seeded := options.current()
+	seeded.terrain_texdetail = 1
+	options.update(seeded)
+	var dir := _make_dir()
+	var list_box := ('<LIST_BOX><POSITION><LEFT>0</LEFT><TOP>20</TOP><RIGHT>200</RIGHT>'
+			+ '<BOTTOM>100</BOTTOM></POSITION><ITEMS>%s</ITEMS></LIST_BOX>')
+	var rows := ""
+	for level in 4:
+		rows += '<ITEM value="%d">Level %d</ITEM>' % [level, level]
+	var body := MenuDriverFixture.wnd("scroll", "MUSICVOLUME", 20)
+	body += MenuDriverFixture.wnd("combobox", "TERRAINTEX", 60, list_box % rows)
+	TestFs.write_bytes(self, dir.path_join("options.mnu"),
+			MenuDriverFixture.screen_xml("OPTIONS", body).to_utf8_buffer())
+	var shell = _make_shell(dir, options)
+	if shell == null:
+		pending("temp resource root unavailable")
+		_cleanup(dir)
+		return
+	assert_true(shell.open_menu("options.mnu", ""), "the options document opens")
+	var driver: MenuDriver = shell.get_driver()
+	assert_true(driver.is_options_surface())
+	var terrain := driver.widget_id("TERRAINTEX")
+	assert_gte(terrain, 0)
+	assert_eq(driver.item_value(terrain, driver.selected_row(terrain)), "1",
+			"the row whose value is the persisted word is selected")
+	assert_false(driver.is_widget_disabled(terrain), "the terrain-texture row is editable")
+	driver.select_row(terrain, 0)
+	assert_eq(options.current().terrain_texdetail, 0, "the pick writes the word")
+	assert_eq(PlayerOptions.new().current().terrain_texdetail, 0, "the word persists")
+	_cleanup(dir)
+
+
 # A root switch reloads every text table: a root without menutxt.BIN clears
 # the previous root's registration instead of keeping its strings alive.
 func test_root_switch_drops_the_previous_roots_text_table() -> void:

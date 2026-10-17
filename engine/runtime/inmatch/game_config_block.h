@@ -65,8 +65,8 @@ namespace opennova::inmatch {
 // on a capable device (renderer/aspect_ratio.h, object_lod.h, texture_filter.h,
 // particle_density.h, texture_compression.h, device_texture.h's terrain texture
 // detail carry each word's witness). Its other words (the terrain polygon,
-// shadow, water and antialias rungs, the gamma) have no consumer here and keep
-// the defaults' values.
+// object texture, shadow, water and antialias rungs, the gamma) have no
+// consumer here and keep the defaults' values.
 // [orig: Game_RunVideoTestDialog @0x53EC10 from Game_InitSubsystems @0x4A7125]
 void run_video_test(gamecfg::GameCfg &cfg, int32_t desktop_width, int32_t desktop_height);
 
