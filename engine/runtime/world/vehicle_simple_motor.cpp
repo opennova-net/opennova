@@ -330,8 +330,8 @@ void VehicleSystem::tick_simple_motor(
 	}
 	e.position = { float(from_fixed(x)), float(from_fixed(y)), float(from_fixed(z)) };
 	e.yaw = int16_t(std::lround(mission_yaw_deg_from_bam_heading(m.yaw_bam)));
-	e.pitch = int16_t(std::lround(double(m.air_pitch_bam) * 360.0 / 4294967296.0));
-	e.roll = int16_t(std::lround(double(m.air_roll_bam) * 360.0 / 4294967296.0));
+	e.pitch = degrees_i16_from_bam(m.air_pitch_bam);
+	e.roll = degrees_i16_from_bam(m.air_roll_bam);
 	// The rebuilt entity matrix sets the matrix bit (Flags 0x20000), homed on
 	// engine_flags, where its clears land.
 	// [orig: Entity_ProcessInfantryPhysics @0x46F9BD, OR @0x46F9C5;

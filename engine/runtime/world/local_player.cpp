@@ -417,10 +417,9 @@ void apply_main_scene_optics(World &world, LocalPlayerWeapon &weapon,
 		f.camera.yaw_deg += f.binocular_yaw_offset_deg;
 		f.camera.pitch_deg += f.binocular_pitch_offset_deg;
 	} else if (f.camera_pose_valid && slot != nullptr && f.scope_camera_zero_active) {
-		constexpr double degrees_per_bam = 360.0 / 4294967296.0;
 		// Mission yaw is 90 - BAM heading.
-		f.camera.yaw_deg -= static_cast<float>(slot->zero_yaw * degrees_per_bam);
-		f.camera.pitch_deg -= static_cast<float>(slot->zero_pitch * degrees_per_bam);
+		f.camera.yaw_deg -= static_cast<float>(slot->zero_yaw * kDegreesPerBam);
+		f.camera.pitch_deg -= static_cast<float>(slot->zero_pitch * kDegreesPerBam);
 	}
 }
 
