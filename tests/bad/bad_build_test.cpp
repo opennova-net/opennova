@@ -370,6 +370,23 @@ int main(int argc, char **argv) {
         problems.clear();
         TEST_EXPECT(!bad_build_mint_set(many, "many.adm", kRetail, test_slots, files, problems) &&
                     problems.size() == 5 && files.empty());
+        // A 29th clip the table writes bare, its line's 30th token: one with a space does not read back, refused
+        // with the writer's rule (adm::adm_bare_token), naming the clip; a bare one passes.
+        {
+            BadBuildSet tail;
+            tail.clips = {rst};
+            tail.rows.push_back(BadBuildRow{"anim_reset", {"rst"}});
+            std::vector<std::string> clips(28, "rst");
+            clips.push_back("rst two");
+            tail.rows.push_back(BadBuildRow{"anim_idle", clips});
+            problems.clear();
+            bad_build_check_set(tail, kRetail, test_slots, problems);
+            TEST_EXPECT(found("names 'rst two' as its 29th clip", -1, -1, 1));
+            tail.rows[1].variants.back() = "rst";
+            problems.clear();
+            bad_build_check_set(tail, kRetail, test_slots, problems);
+            TEST_EXPECT(!found("as its 29th clip", -1, -1, 1));
+        }
         // The assembly refuses the long hold itself, naming bone and key.
         BadAssembled built;
         std::string error;

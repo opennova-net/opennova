@@ -104,5 +104,9 @@ int adm_write(const char *path, const AdmFile *af);
 // Why the writer refuses a row (the reasons above, as a sentence), or null when
 // it writes it.
 const char *adm_row_problem(const AdmEntry &entry);
+// Whether `text` is written bare as one token that reads back as written: no
+// control character, space, tab, comma, quote, ';' or "//" (a row's key, and a
+// 29th clip, the line's 30th token the line reader never closes).
+bool adm_bare_token(const char *text);
 
 } // namespace opennova::adm

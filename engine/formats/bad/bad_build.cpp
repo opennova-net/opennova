@@ -459,6 +459,13 @@ bool bad_build_check_set(const BadBuildSet &set, const BadTargetLimits &limits, 
             if (variant.size() > limits.variant_bytes)
                 problem("row '" + row.key + "' names '" + variant + "', " + std::to_string(variant.size()) +
                         " bytes; a table row's clip holds " + std::to_string(limits.variant_bytes), -1, -1, at);
+        // The table writes a 29th clip bare, the line's 30th token, which the game's line reader never closes
+        // (adm::adm_row_problem) [orig: Config_TokenizeLine @0x53CB60, the 30 cap @0x53CC8C..0x53CC93].
+        if (row.variants.size() == static_cast<size_t>(adm::ADM_MAX_VARIANTS) &&
+                !adm::adm_bare_token(row.variants.back().c_str()))
+            problem("row '" + row.key + "' names '" + row.variants.back() + "' as its 29th clip, which the table "
+                    "writes bare, its line's 30th token, which the game's line reader never closes: a space, tab, "
+                    "comma, quote, ';' or \"//\" there does not read back", -1, -1, at);
     }
     for (size_t c = 0; c < set.clips.size(); ++c) {
         const BadBuildClip &clip = set.clips[c];

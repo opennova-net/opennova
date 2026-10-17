@@ -34,12 +34,6 @@ bool has_control(const char *s) {
     return false;
 }
 
-// The key is written bare: one token, nothing that splits, quotes or cuts it.
-bool plain_key(const char *key) {
-    if (has_control(key) || std::strstr(key, "//") != nullptr) return false;
-    return std::strpbrk(key, " \t,\";") == nullptr;
-}
-
 // A variant is written quoted: no quote inside, no control character, no
 // leading '/' (it would end the row) and no edge whitespace (trimmed on read).
 bool plain_variant(const char *v) {
@@ -49,6 +43,12 @@ bool plain_variant(const char *v) {
 }
 
 } // namespace
+
+// A bare token: one token, nothing that splits, quotes or cuts it.
+bool adm_bare_token(const char *text) {
+    if (has_control(text) || std::strstr(text, "//") != nullptr) return false;
+    return std::strpbrk(text, " \t,\";") == nullptr;
+}
 
 // The line a row is written as, its length: the key, four tabs, each clip quoted and a space between them, the
 // line's last clip bare when it is the line's 30th token (adm_write_buffer).
@@ -62,7 +62,7 @@ static size_t written_row_length(const AdmEntry &e) {
 const char *adm_row_problem(const AdmEntry &e) {
     if (std::memchr(e.key, '\0', sizeof(e.key)) == nullptr || adm_slot_name(e.key).empty())
         return "A key names its slot past its first five characters (anim_...).";
-    if (!plain_key(e.key)) return "A key is one plain token: no space, tab, comma, quote, ';' or \"//\".";
+    if (!adm_bare_token(e.key)) return "A key is one plain token: no space, tab, comma, quote, ';' or \"//\".";
     if (e.variants.empty()) return "A row names at least one clip.";
     if (e.variants.size() > static_cast<size_t>(ADM_MAX_VARIANTS))
         return "A row names at most 29 clips: the game's line reader takes 30 tokens, its key and 29 clips.";
@@ -72,7 +72,7 @@ const char *adm_row_problem(const AdmEntry &e) {
                    "and has no space at either end.";
     // The line reader stops at its 30th token's start, so that token is never cut at a closing quote: a 29th clip
     // is written bare [orig: Config_TokenizeLine @0x53CB60, the 30 cap @0x53CC8C..0x53CC93].
-    if (e.variants.size() == static_cast<size_t>(ADM_MAX_VARIANTS) && !plain_key(e.variants.back().text))
+    if (e.variants.size() == static_cast<size_t>(ADM_MAX_VARIANTS) && !adm_bare_token(e.variants.back().text))
         return "A row's 29th clip is written bare, the line's 30th token, which the game's line reader never closes: "
                "no space, tab, comma, quote, ';' or \"//\" in it.";
     // The line reader keeps 1000 characters of a line [orig: Config_TokenizeLine @0x53CB60, the clamp
