@@ -33,6 +33,7 @@
 #include <runtime/world/mount_controls.h> // emplaced_gun_frame_heading
 #include <runtime/world/ai.h>
 #include <runtime/world/entity.h>
+#include <runtime/world/infantry.h> // infantry_anim_flags (the crouched state)
 #include <runtime/world/player_spawn.h>
 #include <runtime/world/player_loadout.h>
 #include <runtime/world/player_weapon.h>
@@ -2371,6 +2372,84 @@ bool run_pool1_shooter_round_takes_its_indoors_state() {
 	return ok;
 }
 
+// A decoded shooter's stance row (A-27's joiner half): Parachute 0x20, Drowning
+// 0x8000 and LadderContact 0x100000 in the row's Flags dword force the standing
+// row 2, a crouched body otherwise keeps row 1; Drowning also takes the recoil's
+// x4 leg. Observed through the ammo recoil each row's spawn adds to the row.
+// [orig: RoundData_SpawnRound `test dword ptr [ebp+24h], 108020h` @0x4EC2D5,
+//  row 2 @0x4EC2EC; the single round's recoil row and `test ecx, 8000h`
+//  @0x4EC85B..0x4EC8A3]
+bool run_round_event_stance_reads_the_flags_legs() {
+	Harness h;
+	auto &world = h.kernel->world;
+	h.role.poll_preload();
+	h.role.runtime->seed_session(kSessionId, kClientKey, kClientScrk, kServerScrk,
+	                             1, 0, 0x0005, w::kPlayerInfantryTypeId);
+	h.role.run_tick(h.input);
+	world.tables.ammo.entries.resize(1);
+	w::AmmoTableEntry &ammo = world.tables.ammo.entries[0];
+	ammo.valid = true;
+	ammo.velocity = 620;
+	ammo.max_age_ticks = 100;
+	ammo.recoil[0] = 1; // prone
+	ammo.recoil[1] = 2; // crouched / mounted
+	ammo.recoil[2] = 3; // standing / the override
+	world.tables.weapons.entries.resize(2);
+	world.tables.weapons.entries[1].valid = true;
+	world.tables.weapons.entries[1].ammo_index = 0;
+	int crouch = -1;
+	for (int st = 0; st < w::kInfantryAnimStateCount && crouch < 0; ++st)
+		if ((w::infantry_anim_flags(st) & (w::kAnimStanceFlagCrouched | w::kAnimStanceFlagProne)) ==
+				w::kAnimStanceFlagCrouched)
+			crouch = st;
+	if (!expect(crouch >= 0, "a crouched anim state exists")) return false;
+	// The row's Flags dword is the motor mirror with the latest record's byte
+	// folded in under 0xFD: a spawn word's stale Parachute or Drowning (0x8020
+	// seeded the mirror, the motor cleared 0x8000, the record carries 0) is gone.
+	// [orig: NetPacket_SerializePlayerState @0x4C1307..0x4C1311]
+	struct Case {
+		uint8_t state_flags;
+		uint32_t mirror_flags;
+		uint32_t spawn_flags;
+		int32_t recoil;
+		const char *what;
+	};
+	const Case cases[] = {
+		{0, 0, 0, 2 << 18, "a crouched shooter keeps the crouched row"},
+		{0x20, 0, 0, 3 << 18, "a parachuting shooter takes the standing row"},
+		{0, 0x100000, 0, 3 << 18, "a shooter on a ladder takes the standing row"},
+		{0, 0x8000, 0, 3 << 20, "a drowning shooter takes the standing row and the x4 leg"},
+		{0, 0x20, 0x8020, 2 << 18, "a spawn word's parachute and drowning do not outlive the record"},
+	};
+	bool ok = true;
+	constexpr uint16_t kShooter = 0x0003;
+	for (const Case &c : cases) {
+		auto &row = h.role.runtime->state().upsert(kShooter);
+		row.type_id = w::kPlayerInfantryTypeId;
+		row.cls = EntityClass::Player;
+		row.anim_state_id = crouch;
+		row.carrier_handle = 0xFFFF;
+		row.state_flags = c.state_flags;
+		row.state_flags_known = true;
+		row.rm_entity_flags = c.mirror_flags;
+		row.spawn_entity_flags = c.spawn_flags;
+		row.recoil_pitch = 0;
+		world.round_sim.reset();
+		FrameUpdate frame;
+		frame.carried_handle = 0xFFFF;
+		frame.health = 100;
+		RoundEventRecord ev;
+		ev.flags = kRoundEventFlagAdmIndexed;
+		ev.adm_index = 1;
+		ev.shooter_handle = kShooter;
+		frame.round_events.push_back(ev);
+		h.role.runtime->view().apply(s2c::PER_FRAME_UPDATE, encode_frame_update(frame));
+		const auto *after = h.role.runtime->state().find(kShooter);
+		ok &= expect(after != nullptr && after->recoil_pitch == c.recoil, c.what);
+	}
+	return ok;
+}
+
 int main() {
 	if (!run_local_replica_turret_channel()) return 1;
 	if (!run_replica_turret_channel()) return 1;
@@ -2415,6 +2494,7 @@ int main() {
 	ok &= run_respawn_key_resets_input_and_sends_0x41();
 	ok &= run_deploy_action_converts_a_dead_permanent_death_player();
 	ok &= run_pool1_shooter_round_takes_its_indoors_state();
+	ok &= run_round_event_stance_reads_the_flags_legs();
 	if (!ok) return 1;
 	std::printf("joiner_role_test: OK\n");
 	return 0;
