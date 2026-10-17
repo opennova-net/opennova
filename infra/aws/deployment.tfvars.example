@@ -25,9 +25,9 @@
 # a deployment's extra tasks) sizes the database's max_connections.
 # gate       = { cpu = 256, memory = 512, min = 1, max = 1, desired = 1 }
 # lobby      = { cpu = 256, memory = 512, min = 1, max = 1, desired = 1 }
-# web        = { cpu = 512, memory = 1024, min = 1, max = 2, desired = 1 }
+# web        = { cpu = 512, memory = 1024, min = 1, max = 1, desired = 1 }
 # controller = { cpu = 256, memory = 512, min = 1, max = 1, desired = 1 }
-# worker     = { cpu = 512, memory = 1024, min = 1, max = 2, desired = 1 }
+# worker     = { cpu = 512, memory = 1024, min = 1, max = 1, desired = 1 }
 # image_registry = "ghcr.io/opennova-net" # where the images are published (public packages)
 # health_port    = 8081                   # every program's /livez (ONNET_HEALTH_PORT)
 
@@ -44,10 +44,11 @@
 # The database (database.tf): PostgreSQL 17 on RDS. Its master password comes
 # from the vault (item rds-<deployment>); bump the version to send
 # a changed one to RDS.
-# db_instance_class          = "db.t4g.small" # burstable, unlimited mode
-# db_multi_az                = true           # a standby in the other zone
+# db_instance_class          = "db.t4g.micro" # burstable, unlimited mode
+# db_multi_az                = false          # true: a standby in the other zone
 # db_pool_max                = 7              # connections per service process (6..64)
-# db_service_processes       = 14             # processes max_connections is sized for
+# db_service_processes       = 10             # processes max_connections is sized for
+# cache_node_count           = 1              # 2..6: Valkey replicas that fail over on their own
 # db_master_password_version = 1
 
 # allowed_cidrs = ["0.0.0.0/0"] # the retail ports and the game machines' slots
@@ -69,9 +70,9 @@ cloudflare_web_proxied = true
 # through the org stack (infra/aws/iam/README.md). The update service's
 # listeners and record are there whether or not hosting is on.
 # hosted_enabled         = false
-# shared_instance_type   = "t3a.large"   # unlimited CPU credits; x86_64, no t2
+# shared_instance_type   = "t3a.medium"  # unlimited CPU credits; x86_64, no t2
 # own_instance_type      = "c7a.medium"
-# shared_slots           = 12            # K servers per shared machine (1..32)
+# shared_slots           = 6             # K servers per shared machine (1..32)
 # fleet_max_shared       = 2
 # fleet_max_own          = 2
 # fleet_idle_minutes     = 30
@@ -81,7 +82,7 @@ cloudflare_web_proxied = true
 
 # Alarms and budgets (observability.tf), the deployment's account's. The alert
 # address comes from the vault (item alerts, field email).
-# budget_monthly_usd         = 350
+# budget_monthly_usd         = 250
 # budget_egress_gb           = 1500
 # cost_anomaly_monitor       = true      # false if the account has one already
 # cost_anomaly_threshold_usd = 20

@@ -340,7 +340,7 @@ run "observability" {
   }
   assert {
     condition = (
-      aws_cloudwatch_metric_alarm.program_crash_loop["lobby"].threshold == 4 && aws_cloudwatch_metric_alarm.program_crash_loop["web"].threshold == 5 &&
+      aws_cloudwatch_metric_alarm.program_crash_loop["lobby"].threshold == 4 && aws_cloudwatch_metric_alarm.program_crash_loop["web"].threshold == 4 &&
       aws_cloudwatch_metric_alarm.program_crash_loop["worker"].metric_name == "Boots" && aws_cloudwatch_metric_alarm.program_crash_loop["worker"].dimensions == tomap({ Program = "worker" }) &&
       aws_cloudwatch_metric_alarm.program_crash_loop["worker"].comparison_operator == "GreaterThanThreshold" && aws_cloudwatch_metric_alarm.program_crash_loop["worker"].period == 900
     )
@@ -414,10 +414,10 @@ run "observability" {
   assert {
     condition = (
       aws_cloudwatch_metric_alarm.db_cpu.namespace == "AWS/RDS" && aws_cloudwatch_metric_alarm.db_cpu.threshold == 80 &&
-      aws_cloudwatch_metric_alarm.db_connections.metric_name == "DatabaseConnections" && aws_cloudwatch_metric_alarm.db_connections.threshold == 86 &&
+      aws_cloudwatch_metric_alarm.db_connections.metric_name == "DatabaseConnections" && aws_cloudwatch_metric_alarm.db_connections.threshold == 64 &&
       aws_cloudwatch_metric_alarm.db_free_storage.threshold == 2147483648
     )
-    error_message = "the database's CPU, its connections at 80% of max_connections (108), and its free storage alarm"
+    error_message = "the database's CPU, its connections at 80% of max_connections (80), and its free storage alarm"
   }
   assert {
     condition = (

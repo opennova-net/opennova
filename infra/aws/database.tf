@@ -2,11 +2,11 @@
 # The service database: PostgreSQL 17 on RDS (DEPLOY.md, section 3)
 # ---------------------------------------------------------------------------
 #
-# One instance in the private subnets on db.t4g.small (burstable, which RDS runs
-# in unlimited mode: billed past its baseline, never throttled), Multi-AZ: RDS
-# keeps a synchronous standby in the other private subnet's zone
-# and fails over to it on its own, the endpoint's name following (var.db_multi_az
-# off: single-AZ, in private subnet a's zone). Reached from the five programs'
+# One instance in the private subnets on db.t4g.micro (burstable, which RDS runs
+# in unlimited mode: billed past its baseline, never throttled), single-AZ in
+# private subnet a's zone while traffic is small (var.db_multi_az on: RDS keeps a
+# synchronous standby in the other private subnet's zone and fails over to it on
+# its own, the endpoint's name following). Reached from the five programs'
 # security groups and the backup task's alone (programs.tf, backup.tf).
 # max_connections is sized, not left to RDS's memory formula: db_pool_max
 # connections for each of db_service_processes program processes, plus 10 for

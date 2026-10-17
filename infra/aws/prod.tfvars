@@ -18,10 +18,9 @@ azs = ["us-east-1a", "us-east-1b"]
 
 cloudflare_web_proxied = true
 
-# The database (database.tf): Multi-AZ, max_connections sized for
-# db_service_processes processes of db_pool_max connections each.
-db_instance_class = "db.t4g.small"
-db_multi_az       = true
+# The database (database.tf) and the cache (cache.tf) keep their defaults while
+# traffic is small: a db.t4g.micro in one zone and one cache node. Their
+# standbys come back with db_multi_az = true and cache_node_count = 2.
 
 # Outbound mail through Amazon SES (mail.tf): the service sends its welcome
 # mail and password reset links as support@<domain>, through prod's own
