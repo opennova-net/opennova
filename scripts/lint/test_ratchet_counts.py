@@ -1,5 +1,6 @@
-"""Pins scripts/lint/ratchet_counts.py's godot_src_dictionary_params gauge: it counts the
-Dictionary parameters of the methods godot/src binds, whatever their names.
+"""Pins scripts/lint/ratchet_counts.py's godot_src_dictionary_params gauge (the Dictionary
+parameters of the methods godot/src binds, whatever their names) and the citation
+allowlist's stale-row check.
 
 Run: python -B -m unittest discover -s scripts/lint -p "test_*.py" (CI's gates job).
 """
@@ -7,8 +8,10 @@ Run: python -B -m unittest discover -s scripts/lint -p "test_*.py" (CI's gates j
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import ratchet_counts  # noqa: E402
@@ -78,6 +81,40 @@ class Browser : public RefCounted {
 };
 """
         self.assertEqual(params(header), [])
+
+
+class CitationAllowlist(unittest.TestCase):
+    FILES = {
+        "engine/base/pcapio/pcap.cpp": "// a public format\n",            # a whole lib, uncited
+        "engine/formats/lwf/lwf.cpp": "// [orig: Lwf_Load @0x401000]\n",
+        "engine/formats/lwf/wav_pcm.cpp": "// [orig: Wav_Read @0x401100]\n",  # its row exempts nothing
+        "engine/net/novaworld/service/a.cpp": "// the service\n",          # a subtree, uncited
+        "engine/net/novaworld/service/b.cpp": "// [orig: X @0x401200]\n",
+        "engine/net/novaworld/server_browser.cpp": "// no cite, no row\n",
+    }
+
+    def uncited(self, allowlist):
+        with tempfile.TemporaryDirectory() as root:
+            for rel, text in self.FILES.items():
+                path = Path(root, rel)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            with mock.patch.object(ratchet_counts, "REPO", Path(root)):
+                return ratchet_counts.engine_uncited_src_files(set(allowlist))
+
+    def test_a_row_that_exempts_an_uncited_file_is_live(self):
+        self.assertEqual(self.uncited({"pcapio", "net/novaworld/service"}), (1, []))
+
+    def test_a_row_whose_files_all_cite_is_stale(self):
+        self.assertEqual(self.uncited({"pcapio", "net/novaworld/service", "formats/lwf/wav_pcm.cpp"}),
+                         (1, ["formats/lwf/wav_pcm.cpp"]))
+
+    def test_a_row_naming_nothing_is_stale(self):
+        self.assertEqual(self.uncited({"pcapio", "net/novaworld/service", "formats/gone.cpp", "bfc1"}),
+                         (1, ["bfc1", "formats/gone.cpp"]))
+
+    def test_the_count_is_unchanged_by_the_check(self):
+        self.assertEqual(self.uncited(set())[0], 3)
 
 
 if __name__ == "__main__":
