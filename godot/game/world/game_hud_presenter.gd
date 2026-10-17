@@ -506,12 +506,6 @@ func tick(gameplay_input_active: bool = false) -> void:
 	elif _hud_draw_timing_armed:
 		_game_hud.set_draw_timing_enabled(false)
 	_hud_draw_timing_armed = stats_on
-	var max_h: int = sim.get_local_player_max_health()
-	var frac := float(sim.get_local_player_health()) / float(max_h) if max_h > 0 else 0.0
-	# The view frame supplies the HUD stance, including seat/weapon overrides.
-	# [orig: HUD_BuildEntityInfo @0x4b860c..0x4b8786]
-	var stance := 0
-
 	# The equipped weapon's HUD slice: re-resolve on weapon change only. The
 	# overlay takes the record's fields typed; the card takes the authored
 	# SIGHTS rows. [orig: HUD_BuildEntityInfo @0x4b8561 weapon-def pointer;
@@ -529,40 +523,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 					_world.get_resource_root() if _world != null else null,
 					_session_texcompression_level())
 
-	# Live weapon/view state (the FSM clip/reserve + ADS + fov), mirroring the info
-	# struct's ammo fields; an infinite-capacity weapon reads clip -1
-	# (hud_math.displayed_clip carries the witness).
-	var clip := -1
-	var reserve := -1
-	var weapon_active := false
-	var wv: PlayerWeaponView = _world.local_player_weapon_view()
-	if wv != null and wv.active:
-		weapon_active = true
-		clip = HudPos.displayed_clip(wv.clip, weapon.clipsize) if weapon != null else wv.clip
-		# Capacity-1 weapons fold the chambered round into the displayed reserve
-		# (hud_math.folded_reserve carries the witness).
-		# (engine: runtime/hud/hud_math.cpp)
-		reserve = HudPos.folded_reserve(clip, wv.reserve,
-				weapon.clipsize if weapon != null else -1)
 	var probe_t0 := Time.get_ticks_usec() if stats_on else 0
-	var scope_card := false
-	var fov_deg := float(Simulation.DEFAULT_PLAYER_FOV_H_DEG)
-	var binoculars_view_active := false
-	var binocular_range := 1
-	var nvg_mask := false
-	var nvg_lens := false
-	var nvg_sights_in_scene := false
-	var nvg_gain := 0
-	var vehicle_attack_context := false
-	var keep_crosshair_while_aimed := false
-	# The three fullscreen damage-feedback quads plus the HUD-overlay early
-	# return that rides the white one. The engine reduces the raw words to these
-	# draw values (engine/runtime/world/player_view.h carries the witnesses).
-	var flash_white := 0
-	var flash_red := 0
-	var flash_revive := 0
-	var flash_revive_channel := 255
-	var hud_overlays_suppressed := false
 	# The live HUD consumes the frame the player presenter composed and
 	# stamped this display frame. A standalone HUD without a camera presenter
 	# observes the last composed view; neither read composes a camera.
@@ -570,23 +531,14 @@ func tick(gameplay_input_active: bool = false) -> void:
 	var lv: PlayerLocalView = _player_presenter.presented_view() \
 			if _player_presenter != null else _world.local_player_view()
 	if lv != null:
-		scope_card = lv.scope_card_active
 		_sight_slide_multiplier = lv.sight_slide_multiplier
-		binocular_range = lv.aim_range_units
-		fov_deg = lv.fov_h_deg
-		binoculars_view_active = lv.binoculars_view_active
-		nvg_mask = lv.nvg_mask_visible
-		nvg_lens = lv.nvg_lens_active
-		nvg_sights_in_scene = lv.nvg_sights_in_scene
-		nvg_gain = lv.nvg_gain
-		vehicle_attack_context = lv.vehicle_attack_context
-		stance = lv.hud_stance
-		keep_crosshair_while_aimed = lv.hud_keep_crosshair_while_aimed
-		flash_white = lv.screen_flash_white_alpha
-		flash_red = lv.screen_flash_red_alpha
-		flash_revive = lv.screen_flash_revive
-		flash_revive_channel = lv.screen_flash_revive_channel
-		hud_overlays_suppressed = lv.hud_overlays_suppressed
+	# The frame's HUD info record, the shell's mirror of the original
+	# rebuilding its 576-byte info struct each frame: the engine fills it from
+	# that view, the equipped weapon's FSM view, the def slice and the health
+	# pair (engine: runtime/hud/hud_entity_info.h carries the witnesses); this
+	# presenter writes its fields into the overlay and its children.
+	var info := HudEntityInfo.build(sim.get_local_player_health(),
+			sim.get_local_player_max_health(), lv, _world.local_player_weapon_view(), weapon)
 
 	var probe_t1 := Time.get_ticks_usec() if stats_on else 0
 	_apply_attach_labels()
@@ -623,10 +575,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	var probe_t2 := Time.get_ticks_usec() if stats_on else 0
 	var waypoint := _build_waypoint_entry()
 	var probe_t3 := Time.get_ticks_usec() if stats_on else 0
-	# The typed per-frame state feed — the shell's mirror of the original
-	# rebuilding its 576-byte HUD info struct each frame.
-	# [orig: HUD_BuildEntityInfo @0x4b8440]
-	_game_hud.set_player_state(_hud_ticks(), clampf(frac, 0.0, 1.0), stance, fov_deg)
+	_game_hud.set_player_state(_hud_ticks(), info.health_fraction, info.stance, info.fov_h_deg)
 	_game_hud.set_player_context(lv)
 	# The radar-contact legs (spinmap content-mask bit 10): the session steps
 	# the contact table once per frame behind the overlay pass's gates and ages
@@ -723,28 +672,14 @@ func tick(gameplay_input_active: bool = false) -> void:
 			_authority(sim), status_gametext)
 	_game_hud.set_server_status_page(_toggles.is_server_status_view(),
 			_toggles.is_server_status_score_list_open(), status_gametext, sim)
-	# Weapon-cluster state: clip/reserve as the info struct carried them, heat
-	# 0..0xFFFF (only emplaced/vehicle heavy guns author heat_values, so 0 on
-	# foot [orig: hudInfo+60 = WeaponSlot_CalcAccumulatedHeat @0x53f780,
-	# @0x4b8533]); the exact crosshair dispersion including both live body
-	# accumulators — the simulation owns the stance/aimed-shot row (body-state
-	# predicates), the HUD owns only projection [orig: @0x592b07..0x592bf5];
-	# the sim's promoted aimed-shot verdict gates the reticle [orig: the
-	# @0x4de4f7 promoter; Player_IsOpticalViewVisible @0x5cf780], with the equipped
-	# weapon's Inset keep-up predicate from the native view frame; and
-	# the PowerThrow windup driving the charge bar [orig: g_FireChargeStartTick
-	# @0xB76800 read by HUD_DrawPowerThrowChargeBar @0x599830].
-	var live := wv != null and wv.active
-	_game_hud.set_weapon_state(weapon_active and weapon != null, clip, reserve,
-			wv.heat if live else 0,
-			wv.hud_spread_fp16 if live else 0,
-			wv.aimed_shot_available if live else false,
-			keep_crosshair_while_aimed,
-			live and wv.windup_active,
-			wv.windup_held_ticks if live else 0)
-	# The clip-flash key's def halves (HudOverlay.set_weapon_ammo_key).
-	_game_hud.set_weapon_ammo_key(wv.ammo_bucket if live else 0,
-			wv.ammo_class_id if live else 0)
+	# The weapon cluster as the info record carries it: the ammo pair, heat,
+	# the crosshair dispersion, the aimed-shot verdict with the Inset keep-up
+	# predicate, the PowerThrow charge, then the clip-flash key's def halves
+	# (HudOverlay.set_weapon_ammo_key).
+	_game_hud.set_weapon_state(info.weapon_drawn, info.clip, info.reserve, info.heat,
+			info.spread_fp16, info.aimed_shot_available, info.keep_crosshair_while_aimed,
+			info.windup_active, info.windup_held_ticks)
+	_game_hud.set_weapon_ammo_key(info.ammo_bucket, info.ammo_class_id)
 	# The crosshair's witnessed anchor: Vector2.INF in first person (the overlay
 	# pins the design center @0x5928a0), the projected aim in 3P/spectate
 	# (@0x592910).
@@ -758,56 +693,39 @@ func tick(gameplay_input_active: bool = false) -> void:
 			hud_view_projection(combat_camera) if combat_camera != null else Projection.IDENTITY,
 			combat_camera != null, Strings.get_table(Strings.TABLE_GAMETEXT),
 			ControlsBindings.model().display_text_for_token("useitem"))
-	_game_hud.set_view_state(binoculars_view_active,
+	_game_hud.set_view_state(info.binoculars_view_active,
 			_player_presenter.aim_screen_point() \
 					if _player_presenter != null else Vector2.INF)
 	_vehicle_panel.update(_game_hud, _hud_pos,
-			_world.get_item_db() if _world != null else null, sim, stance)
+			_world.get_item_db() if _world != null else null, sim, info.stance)
 	if waypoint != null:
 		_game_hud.set_waypoint(waypoint.text_name, waypoint.distance_m,
 				waypoint.mission_position, waypoint.altitude_wu)
 	else:
 		_game_hud.clear_waypoint()
 	_apply_objectives()
-	# The SIGHTS card switch [orig: Player_IsEquippedWeaponScoped @0x4dcc80],
-	# suppressed by the binocular view like the ported shell HUD folded it.
-	# The NVG Sighted arm draws the card into the NVG scene instead of over the
-	# frame (lv.nvg_sights_in_scene, the engine's frame_fx_nvg_view).
+	# The SIGHTS card (over the frame, or drawn into the NVG scene), the
+	# scoped-view circle mask the overlay fork chains (the def parser never
+	# adds a row whose texture is not on the mount, so JO:CA's Colt .45 draws
+	# the reticle) and the view effects, as the info record decides them.
 	if _sights_card != null:
-		_sights_card.set_card_up(scope_card and not binoculars_view_active
-				and not nvg_sights_in_scene)
-		_publish_nvg_scene_card(nvg_sights_in_scene)
-	# The scoped-view circle mask. retail: the scene frame's overlay fork picks
-	# binoculars, then the Sighted card, then the Scoped card -- and only the
-	# Scoped arm chains the mask, unconditionally, with one argument saying the
-	# record holds no SIGHTS row (the def parser never adds a row whose texture
-	# is not on the mount, so JO:CA's Colt .45 has none).
-	# The fork itself is the engine's (HudPos.scoped_view_overlay ->
-	# runtime/hud/scope_circle_mask.h); the vehicle-attack context clears both
-	# selector bytes before it. See docs/interface/hud-re.md. Under the NVG
-	# composite's Scoped arm the lens draws its own ring, so only the
-	# unit-scale reticle rides here (lv.nvg_lens_active, the engine's
-	# frame_fx_nvg_view).
+		_sights_card.set_card_up(info.sights_card_up)
+		_publish_nvg_scene_card(info.nvg_sights_in_scene)
 	if _scope_circle_mask != null:
-		var card_selectors := scope_card and not vehicle_attack_context \
-				and weapon != null
-		var overlay_branch := HudPos.scoped_view_overlay(binoculars_view_active,
-				card_selectors and weapon.sighted_selector,
-				card_selectors and weapon.scoped_selector)
-		_scope_circle_mask.set_mask_state(overlay_branch == 3 or nvg_lens,
-				weapon == null or weapon.sights.is_empty(), nvg_lens)
+		_scope_circle_mask.set_mask_state(info.scope_mask_up, info.scope_mask_draw_crosshair,
+				info.scope_mask_nvg_lens)
 	if _view_effects != null:
-		_view_effects.update_view(binoculars_view_active, binocular_range,
-				nvg_mask, nvg_gain)
-		_view_effects.update_damage_feedback(flash_white, flash_red,
-				flash_revive, flash_revive_channel)
+		_view_effects.update_view(info.binoculars_view_active, info.binocular_range,
+				info.nvg_mask, info.nvg_gain)
+		_view_effects.update_damage_feedback(info.flash_white, info.flash_red,
+				info.flash_revive, info.flash_revive_channel)
 	# retail: while the white hit flash burns, the whole HUD overlay pass
 	# early-returns, so a collision or explosion blanks the gameplay HUD for up
 	# to 64 ticks. The overlay's own draw list is what that pass covers; its
 	# children (this node's view effects, the SIGHTS card) belong to the scene
 	# frame and keep drawing, which is exactly what self_modulate leaves alone.
 	# The addressed witness lives in docs/interface/hud-re.md.
-	_game_hud.self_modulate = Color(1.0, 1.0, 1.0, 0.0) if hud_overlays_suppressed \
+	_game_hud.self_modulate = Color(1.0, 1.0, 1.0, 0.0) if info.overlays_suppressed \
 			else Color.WHITE
 	var probe_t4 := Time.get_ticks_usec() if stats_on else 0
 	# Effects drain synchronously during _world.tick(), before this HUD update.
