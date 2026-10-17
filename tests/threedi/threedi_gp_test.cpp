@@ -160,6 +160,13 @@ int synthetic_gpp() {
 	TEST_EXPECT(lod.render_objects[0].num_strips == 1 && lod.render_objects[1].num_strips == 0);
 	TEST_EXPECT(std::strcmp(m.materials[0].shader_name, "VS_SKBASIC") == 0);
 	threedi_3di3_free(&m);
+	// A palette length past the 16 matrices a strip's table holds (the +47 byte takes any value): refused,
+	// never written as a 3DI3 our reader refuses; 16 still migrates.
+	file.lods[0].primitives[0].palette_length = 16;
+	TEST_EXPECT(gp::migrate(file, out, notes, error));
+	file.lods[0].primitives[0].palette_length = 17;
+	out.clear();
+	TEST_EXPECT(!gp::migrate(file, out, notes, error) && error.find("more than 16") != std::string::npos);
 	return 0;
 }
 
