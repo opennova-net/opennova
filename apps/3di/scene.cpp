@@ -33,6 +33,7 @@
 #include <base/io/strutil.h>
 #include <formats/threedi/threedi_3di3.h>
 #include <formats/threedi/threedi_build.h>
+#include <formats/threedi/threedi_o3d_read.h>
 #include <formats/threedi/threedi_panm.h>
 #include <formats/threedi/threedi_strip_decode.h>
 
@@ -225,14 +226,21 @@ std::vector<int> strip_vertices(const ThreediLod &lod, const ThreediTriangleStri
 // bone table names no part, so its weight goes and the rest is renormalized
 // (`stray` counts such vertices: retail FSldr03 weights slot 255). A weight
 // below zero (the hair retail's four-decimal weights leave slot 3, ArmGlovD)
-// stays out, so the stored three come back as they are.
+// stays out, so the stored three come back as they are. Slot 3's weight on
+// the first pair's part is added to it only where the pairs do not already
+// blend the vertex wholly by the reader's rule (o3d_weights_whole): that rest
+// is what the build gives the first part itself (its padding slots repeat the
+// first, threedi_o3d_lower), so the pair prints the float its slot stores and
+// a rebuild stores the same floats. Added always, a rest over 1e-6 the build
+// left there (SASBODY1, sasmg: 1 - 0.999998987) printed a sum the next build
+// stored, a second round changing the bytes.
 std::string influence_pairs(const ThreediVertex &v, const ThreediTriangleStrip &st, size_t &stray) {
 	const float rest = 1.0f - (v.bone_weights[0] + v.bone_weights[1] + v.bone_weights[2]);
 	const float weight[4] = {v.bone_weights[0], v.bone_weights[1], v.bone_weights[2], rest};
 	const int32_t table = std::min(st.bone_table_length, kThreediStripBoneTableMax);
 	std::vector<std::pair<int, double>> pairs;
 	std::vector<int> slot_of; // each pair's slot byte
-	double dropped = 0.0;
+	double dropped = 0.0, rest_of_first = 0.0;
 	for (int k = 0; k < 4; ++k) {
 		const int slot = v.bone_indices[k];
 		const double w = weight[k];
@@ -244,12 +252,17 @@ std::string influence_pairs(const ThreediVertex &v, const ThreediTriangleStrip &
 		size_t at = 0;
 		while (at < pairs.size() && slot_of[at] != slot && pairs[at].first != part) ++at;
 		if (at < pairs.size()) {
-			if (w > 1e-6) pairs[at].second += w;
+			if (k == 3 && at == 0) rest_of_first = std::max(0.0, w);
+			else if (w > 1e-6) pairs[at].second += w;
 			continue;
 		}
 		pairs.push_back({part, std::max(0.0, w)});
 		slot_of.push_back(slot);
 	}
+	float stored = 0.0f; // the pairs' sum as the reader adds it
+	for (const auto &p : pairs) stored += static_cast<float>(p.second);
+	// Renormalized (a slot past the table dropped), the rest stays with the vertex too.
+	if (rest_of_first > 1e-6 && (dropped > 0.0 || !o3d_weights_whole(stored))) pairs[0].second += rest_of_first;
 	if (dropped > 0.0) {
 		++stray;
 		double total = 0.0;
