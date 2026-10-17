@@ -36,6 +36,7 @@ class Watchdog;
 
 namespace billing { class Billing; }
 namespace catalog { struct GameRow; }
+namespace infra { class InfraStatus; }
 
 // Crow-backed HTTP listener. start() registers its route families, each in
 // its own registrar (bodies in http_listener.cpp, the listed servers' in
@@ -62,6 +63,11 @@ namespace catalog { struct GameRow; }
 //                         Stripe webhook and the admin's billing view
 //   background jobs     — JobRoutes (jobs/job_routes.h): the admin's view of
 //                         the job queue and its actions on it
+//   infrastructure      — InfraRoutes (infra/infra_routes.h): the admin's
+//                         read-only view of the deployment as it runs (the
+//                         programs' ECS services and tasks, the balancer, the
+//                         database, the cache, the lobbies, the controller,
+//                         the machines)
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
@@ -105,6 +111,10 @@ public:
 	// listener. Null: billing is off, and those routes answer billing_disabled
 	// (GET /api/billing/tiers answers {"enabled": false}).
 	void set_billing(billing::Billing *billing) { billing_ = billing; }
+	// The cloud's reader the infrastructure view's AWS sections come from
+	// (infra/infra_status.h). Set before start(); it must outlive the HTTP
+	// listener. Null: the view says no cloud is read here.
+	void set_infra(infra::InfraStatus *status) { infra_ = status; }
 
 	// Each container's memory and CPUs (hosted/fleet_config.h's slot limits):
 	// the admin usage view's limits. Set before start(); unset, the defaults.
@@ -243,6 +253,8 @@ private:
 	bool redis_answers();
 	// The billing routes' billing (set_billing); null: billing off.
 	billing::Billing *billing_ = nullptr;
+	// The infrastructure view's cloud reader (set_infra); null: none.
+	infra::InfraStatus *infra_ = nullptr;
 	// The slots' limits (set_fleet_slots).
 	int fleet_slot_memory_mb_ = 512;
 	double fleet_slot_cpus_ = 1.0;

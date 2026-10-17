@@ -36,6 +36,12 @@ add_library(opennova_novaworld_web_core STATIC
     # Billing's routes and the webhook's signature.
     billing/billing_routes.cpp
     billing/stripe_signature.cpp
+    # The admin's infrastructure view: its route, and its AWS reads (signed by
+    # curl, the Query APIs' XML read here).
+    infra/aws_api.cpp
+    infra/aws_xml.cpp
+    infra/infra_routes.cpp
+    infra/infra_status.cpp
 )
 target_include_directories(opennova_novaworld_web_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 # The shared library directly: the hiredis containment

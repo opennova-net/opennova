@@ -10,7 +10,8 @@ The service as a whole, its five programs, their settings, the database, Redis, 
 checks and the tests: [`../novaworld_common/README.md`](../novaworld_common/README.md). The
 image is the `web` target of [`../novaworld_common/Dockerfile`](../novaworld_common/Dockerfile).
 
-- `http_listener.*` and the route files (`*_routes.*`, `hosted/`, `billing/`, `jobs/`), the
+- `http_listener.*` and the route files (`*_routes.*`, `hosted/`, `billing/`, `jobs/`, and
+  `infra/`: the admin's infrastructure view and its AWS reads), the
   stores it keeps in Redis (`session_store`, `retail_pins`, `rate_limiter`), the CD keys:
   `opennova_novaworld_web_core`.
 - `templates/`, `static/`: the retail pages and images the `NW*.dll` flow downloads (in its

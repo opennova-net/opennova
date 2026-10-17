@@ -1541,6 +1541,55 @@ Tests: `cdkey` (the codec, the RE record's section 9.7 vectors, the LAN join cod
 activation through `NWStart.dll` and `NWLogin.dll`, its NWACT read back to the account's
 wire key).
 
+## Infrastructure (the admin's view)
+
+The site's admin page **Infrastructure** (`/admin/infrastructure`) shows the deployment as
+it runs, read on web (`apps/novaworld_web/infra/`) in one route. From the database, which
+every replica reads alike: the lobby instances (`lobby_instances`, each with its session
+rows and listings, live when seen in the last 15 s), the controller that leads
+(`controller_leader`) and the fleet's machines (`fleet_machines`, the live ones then the
+newest ten ended; the fleet's own page, `/admin/fleet`, acts on them). From AWS, with web's
+task role (`infra/infra_status.*`): each program's ECS service (its desired, running and
+pending counts, its deployments and their rollout state, its task definition and whether
+that is the revision the recorded release names, its newest events), its tasks (running,
+and the stopped ones ECS still lists, about an hour, with their stop reasons and exit
+codes: status, health, start, zone, private address, size, each container's image and the
+digest ECS pulled), the one-off tasks (the backup, the toolbox's database tasks), each of
+the load balancer's target groups with its targets' health, the database's and the
+cache's status (Multi-AZ, zones, class, the cache's nodes and their roles) and each
+machine's zone and state as EC2 has it.
+
+The AWS calls are curl's, signed by curl itself (`--aws-sigv4`, Signature Version 4), run
+the way billing's Stripe calls are (`infra/aws_api.*`): POSTs to the JSON APIs (ECS, SSM)
+and the Query APIs (Elastic Load Balancing, RDS, ElastiCache, EC2), whose XML replies
+`infra/aws_xml.*` reads. Not the AWS CLI the worker runs: a CLI run spends about a second
+of CPU starting its Python, and one read makes a dozen calls on web's half vCPU. The
+credentials are the task role's, which the ECS agent serves each task
+(`AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`), read for each refresh and kept no longer; they
+travel in each call's owner-only curl config file, never on a command line, and no reply or
+log line holds them. One read runs its calls at once and is kept 20 s: however many admins
+look, a web process reads AWS at most once in that window (a read in flight is waited for).
+A call that fails leaves its section's error (AWS's own code and message: `rds answered
+403: AccessDenied: ...`) and the others stand; the credentials failing stop the read.
+Without AWS (the local stack: no `ONNET_INFRA_CLUSTER`, or no task role) nothing is called
+and the page says why: it never shows made-up data. Web's task role holds these reads
+alone, each scoped to the deployment's own resources where the API takes one
+(`infra/aws/programs.tf`, `infra_read`; the role boundary holds the same). The page polls
+every 30 s.
+
+| Route | Auth | Reply |
+| --- | --- | --- |
+| `GET /api/admin/infrastructure` | admin | `{"at"` (the database's now), `"cloud"`, `"lobbies"`, `"controller"`, `"hosting"` (`enabled`, `provider`), `"machines"}`. `cloud`: `{"configured": false, "unavailable"}` (why AWS is not read here), or `configured` true with `read_at`, `cluster`, `region`, `error` (the read failed as a whole), `release` (`id`, `created`, `revision`; null with none), `release_none` (none recorded yet), `services` (each `name`, `status`, `desired`, `running`, `pending`, `task_definition` (`<family>:<revision>`), `on_release` (true, false, or null when the release names none), `deployments` (`id`, `status`, `rollout_state`, `rollout_reason`, `task_definition`, `desired`, `running`, `pending`, `failed`, `created_at`, `updated_at`), `events` (the newest ten: `at`, `message`), `tasks` and `stopped_tasks` (the newest three)), `missing_services`, `one_off_tasks`, `one_off_stopped_tasks`, `target_groups` (`key`: gate, lobby, http or https; `name`; `targets`: `id`, `port`, `zone`, `state`, `reason`, `description`; `error`), `database` (`identifier`, `status`, `engine`, `engine_version`, `instance_class`, `multi_az`, `zone`, `secondary_zone`, `storage_type`, `storage_gb`), `cache` (`id`, `status`, `multi_az`, `automatic_failover`, `node_type`, `engine`, `nodes`: `id`, `role`, `zone`), and each section's error (`services_error`, `tasks_error`, `release_error`, `database_error`, `cache_error`, `machines_error`; null when it read). A task: `id`, `program` (null for a one-off), `group`, `task_definition`, `on_release`, `last_status`, `desired_status`, `health`, `created_at`, `started_at`, `stopping_at`, `stopped_at`, `stopped_reason`, `stop_code`, `zone`, `private_ip`, `cpu` (units), `memory` (MiB), `containers` (`name`, `image`, `image_digest`, `last_status`, `health`, `exit_code`, `reason`). A lobby: `id`, `endpoint`, `state`, `started_at`, `last_seen_at`, `seen_ago_seconds`, `live`, `sessions`, `listings`. `controller`: `leader`, `generation`, `elected_at`. A machine: `id`, `provider`, `kind`, `state`, `slots`, `slots_used`, `cloud_id`, `instance_type`, `cloud_state` (the worker's last describe), `launched_at`, `ready_at`, `ended_at`, `end_reason`, `zone` and `ec2_state` (EC2's; null when AWS was not read or does not list it). Times ISO 8601 UTC; 500 `db_error`; `Cache-Control: no-store` |
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `ONNET_INFRA_CLUSTER` | none | Web: the deployment's ECS cluster, whose services (the programs) and tasks the view reads. Unset (the local stack), AWS is not read. |
+| `ONNET_INFRA_REGION` | none | Web: the region of every AWS call the view makes. |
+| `ONNET_INFRA_TARGET_GROUPS` | none | Web: the load balancer's target groups, a JSON object of listener to target group ARN (`{"gate": "arn:...", "lobby": ..., "http": ..., "https": ...}`). |
+| `ONNET_INFRA_DATABASE` | none | Web: the RDS instance's identifier. |
+| `ONNET_INFRA_CACHE` | none | Web: the ElastiCache replication group's id. |
+| `ONNET_INFRA_RELEASE_PARAMETER` | none | Web: the SSM parameter holding the release (`/opennova/<deployment>/release`), whose revisions say whether each program runs the release's. |
+
 ## The switcher's address
 
 `GET /api/server-info` answers `{"novaworld_ip": "<ONNET_PUBLIC_HOST>"}` with

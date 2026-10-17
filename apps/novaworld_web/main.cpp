@@ -9,6 +9,7 @@
 
 #include "auth.h"
 #include "http_listener.h"
+#include "infra/infra_status.h"
 #include "loggable.h"
 #include "parts.h"
 #include "program.h"
@@ -102,6 +103,11 @@ int run(const program::Boot &boot) {
 	// worker's to send): the worker decides alike from the same settings.
 	const MailStack mail = make_mail(config);
 
+	// The admin's infrastructure view's AWS reads (infra/infra_status.h): the
+	// deployment's ECS services, balancer, database and cache through web's task
+	// role; none on the local stack, which the view says.
+	const infra::InfraStack infra_stack = infra::make_infra();
+
 	// The 404s the routes record, flushed by the main loop into
 	// unknown_messages (GET /api/unknowns reads them there).
 	UnknownTracker unknown_tracker;
@@ -114,6 +120,7 @@ int run(const program::Boot &boot) {
 	http.set_mail_enabled(mail.on);
 	http.set_watchdog(&watchdog);
 	http.set_billing(billing_stack->billing.get());
+	http.set_infra(infra_stack.status.get());
 	// A start's at_capacity and the list's `full` ask the fleet's planner.
 	http.set_fleet_placement(hosting.fleet.placement);
 	// The admin usage view's limits: each container's memory and CPUs.
@@ -147,8 +154,8 @@ int run(const program::Boot &boot) {
 	const int exit_code = program::run_main_loop("web", boot, watchdog, hooks);
 
 	// Crow's threads joined (no request still holds a lease or a Redis
-	// connection); then the billing's and the mail's scratch directories go
-	// with their stacks.
+	// connection); then the billing's, the mail's and the infrastructure
+	// view's scratch directories go with their stacks.
 	std::printf("[shutdown] stopping listeners\n");
 	http.stop();
 	return exit_code;
