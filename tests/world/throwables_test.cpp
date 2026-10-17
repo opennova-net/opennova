@@ -635,6 +635,29 @@ void test_grenade_bounce_samples_charmap_surface() {
         CHECK(bounce.effect_tag == 10); // grass, not the dirt default
 }
 
+// A class past the tag table keeps its material + 4, and the impact presenter's
+// clamp plays the obj row for it, not the dirt row. [orig:
+// Entity_UpdateGrenadePhysics: the class @ 0x4443d0, + 4 @ 0x44481f into
+// AmmoDef_ProcessImpactEffect @ 0x444824; a tag of 28 or more -> 4
+// @ 0x40a1bc..0x40a1c1]
+void test_grenade_bounce_past_the_table_plays_the_obj_row() {
+    static const uint8_t raster[4] = {30, 30, 30, 30};
+    static const int mapped_grid[256] = {1};
+    Rig rig(0);
+    rig.w.tables.surface_map.data = raster;
+    rig.w.tables.surface_map.width = 2;
+    rig.w.tables.surface_map.height = 2;
+    rig.w.tables.surface_map.sector_grid = mapped_grid;
+    const int slot = rig.throw_ammo(kAmmoGrenade, Vec3{10, 10, 2}, 0, 0);
+    CHECK(slot >= 0);
+    rig.tick(80);
+    CHECK(!rig.w.round_sim.impacts.empty());
+    for (const RoundImpact &bounce : rig.w.round_sim.impacts) {
+        CHECK(bounce.effect_tag == 34);
+        CHECK(round_impact_row(rig.w.tables.ammo, bounce).tag == 4);
+    }
+}
+
 void test_grenade_fuse_tick_boundaries() {
     {
         Rig rig(0);
@@ -2049,6 +2072,7 @@ int main() {
     test_control_and_bounce_share_prng16_stream();
     test_grenade_bounce_and_fuse();
     test_grenade_bounce_samples_charmap_surface();
+    test_grenade_bounce_past_the_table_plays_the_obj_row();
     test_grenade_fuse_tick_boundaries();
     test_smoke_grenade_expiry_presents_no_second_obj_row();
     test_submerged_fuse_presents_at_the_water_surface();

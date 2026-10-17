@@ -925,13 +925,19 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                     imp.direction = direction;
                     imp.ammo_index = params.ammo_index;
                     // The leaf reads the ammo's own row at the tag's place
-                    // [orig: @0x4e88c3..0x4e88dc].
+                    // [orig: @0x4e88c3..0x4e88dc]. Its tag is the class or
+                    // the face byte + 4 with no clamp: the leaf never calls
+                    // AmmoDef_ProcessImpactEffect, and a tag past the table
+                    // reads no row (impact_effect_own_row) where retail reads
+                    // past the compacted bank.
                     imp.own_row = true;
                     if (hit.hit_class == ProjectileHitClass::Terrain) {
+                        // [orig: Weapon_RaycastAndSpawnImpact case 0
+                        //  @0x4e8858..0x4e8862]
                         const int32_t surface = terrain::surface_type_at_fixed(
                             world.tables.surface_map, hit.position_q16.x,
                             hit.position_q16.y);
-                        imp.effect_tag = terrain_impact_effect_tag(surface);
+                        imp.effect_tag = surface + kSurfaceImpactTagOffset;
                     } else if (hit.hit_class == ProjectileHitClass::Water) {
                         imp.effect_tag = kWaterImpactEffectTag;
                     } else if (hit.hit_class == ProjectileHitClass::Person &&
@@ -944,7 +950,9 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                         //  vs @0x4e8867]
                         imp.effect_tag = 23;
                     } else {
-                        imp.effect_tag = surface_impact_effect_tag(hit.surface_type);
+                        // [orig: `lea esi, [ebx+4]` @0x4e8867 (cases 1, 2)
+                        //  and @0x4e8880 (case 3)]
+                        imp.effect_tag = hit.surface_type + kSurfaceImpactTagOffset;
                     }
                     imp.tick = world.logic_tick;
                     imp.source_order = next_impact_order++;
