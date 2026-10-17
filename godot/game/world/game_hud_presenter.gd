@@ -75,9 +75,9 @@ var _nvg_scene_card_published := false
 var _scope_circle_mask: HudScopeCircleMask = null # child of the overlay (the scoped annulus)
 var _view_effects: PlayerViewEffects = null # child of the overlay (binocular/NVG stack)
 var _warned_no_player := false
-# The HUD clock's tick the tip countdown last advanced to (-1 = not yet this
-# mission): each frame advances the countdown by the main frames since.
-var _tip_ticks_seen := -1
+# The main-frame counter the tip countdown last advanced to (-1 = not yet
+# this mission): each frame advances the countdown by the main frames since.
+var _tip_frames_seen := -1
 # The binding revision the HUDLS key labels were last formatted at (-1 = not
 # yet for this HUD): the labels rebuild only on a binding change or a new HUD.
 var _slot_bar_key_labels_revision := -1
@@ -220,7 +220,7 @@ func teardown(restart := false) -> void:
 		_toggles.restart_round()
 	else:
 		_toggles.reset_mission()
-	_tip_ticks_seen = -1
+	_tip_frames_seen = -1
 	_slot_bar_key_labels_revision = -1
 	_chat.reset()
 	_scoreboard.reset()
@@ -495,6 +495,13 @@ func tick(gameplay_input_active: bool = false) -> void:
 	ensure_game_hud()
 	if _game_hud == null:
 		return
+	# The frame's four clocks ahead of every setter and push, each HUD reader
+	# on the one its original reads: the logic tick and the world's
+	# main-frame, session-frame and HUD-frame counters (HudOverlay
+	# set_frame_clocks; engine world/world.h HudFrameCounters carries the
+	# witnesses).
+	_game_hud.set_frame_clocks(sim.get_logic_tick(), sim.get_main_frame_counter(),
+			sim.get_session_frame_counter(), sim.get_hud_frame_counter())
 	if stats_on:
 		# HudOverlay._draw runs in Godot's deferred flush after this tick; the
 		# previous frame's compile + canvas emit land here. Timing arms only
@@ -548,17 +555,19 @@ func tick(gameplay_input_active: bool = false) -> void:
 			_toggles.is_radio_menu_open(), _toggles.is_paused())
 	_game_hud.set_menu_screen_open(_menu_screen_open)
 	# The tip (engine hud/tip_system.h): the world's producer events in the
-	# order they were raised, then the countdown by the HUD clock's main
-	# frames since the last frame (paused or not), then the draw feed.
+	# order they were raised, then the countdown by the main frames since the
+	# last frame (paused or not), then the draw feed: the countdown steps once
+	# a main frame, the frame that steps the main-frame counter (engine
+	# hud/tip_system.h, world/world.h HudFrameCounters).
 	_toggles.apply_tip_events(sim.take_tip_events())
 	# The 0x0F's death-screen HUD blank: the replica fold queues it only with
 	# the death screen up (the engine's gate); this drain applies it.
 	if sim.take_hud_detail_blank():
 		apply_death_screen_hud_detail()
-	var tip_ticks := _hud_ticks()
-	if _tip_ticks_seen >= 0:
-		_toggles.advance_tip_frames(maxi(tip_ticks - _tip_ticks_seen, 0))
-	_tip_ticks_seen = tip_ticks
+	var tip_frames := sim.get_main_frame_counter()
+	if _tip_frames_seen >= 0:
+		_toggles.advance_tip_frames(maxi(tip_frames - _tip_frames_seen, 0))
+	_tip_frames_seen = tip_frames
 	_game_hud.set_tip(_toggles.get_tip(), _toggles.get_tip_countdown(),
 			bool(sim.is_local_player_dead()), Strings.get_table(Strings.TABLE_GAMETEXT),
 			ControlsBindings.model())
@@ -575,7 +584,7 @@ func tick(gameplay_input_active: bool = false) -> void:
 	var probe_t2 := Time.get_ticks_usec() if stats_on else 0
 	var waypoint := _build_waypoint_entry()
 	var probe_t3 := Time.get_ticks_usec() if stats_on else 0
-	_game_hud.set_player_state(_hud_ticks(), info.health_fraction, info.stance, info.fov_h_deg)
+	_game_hud.set_player_state(info.health_fraction, info.stance, info.fov_h_deg)
 	_game_hud.set_player_context(lv)
 	# The radar-contact legs (spinmap content-mask bit 10): the session steps
 	# the contact table once per frame behind the overlay pass's gates and ages
@@ -639,14 +648,16 @@ func tick(gameplay_input_active: bool = false) -> void:
 	# and the window toggles are the engine's poll.
 	var hud_keys_chorded := Input.is_key_pressed(KEY_SHIFT) or Input.is_key_pressed(KEY_ALT)
 	# The talk rows ride the same sampler; the dispatch gates, the capture and
-	# the line editor are the engine's chat entry.
+	# the line editor are the engine's chat entry, its talk-key debounce and
+	# flood on the main-frame counter (engine hud/hud_chat_entry.h
+	# ChatEntryFacts::frame, inmatch/chat_flood.h).
 	var talk_rows := 0
 	for row in HudChatEntry.ROW_COUNT:
 		if ControlsBindings.pressed(HudChatEntry.row_token(row)):
 			talk_rows |= 1 << row
 	_chat.poll_rows(talk_rows, gameplay_input_active, hud_keys_chorded, sim,
-			Strings.get_table(Strings.TABLE_GAMETEXT), _hud_ticks())
-	_game_hud.set_chat_input(_chat, _hud_ticks(), sim.is_mp_session())
+			Strings.get_table(Strings.TABLE_GAMETEXT), sim.get_main_frame_counter())
+	_game_hud.set_chat_input(_chat, sim.is_mp_session())
 	var rows_down := 0
 	for row in HudToggles.ROW_COUNT:
 		if ControlsBindings.pressed(HudToggles.row_token(row)):
@@ -729,18 +740,22 @@ func tick(gameplay_input_active: bool = false) -> void:
 			else Color.WHITE
 	var probe_t4 := Time.get_ticks_usec() if stats_on else 0
 	# Effects drain synchronously during _world.tick(), before this HUD update.
-	# Flush afterward so GameHud.push_message stamps the current 62 Hz tick.
+	# Flush afterward so GameHud.push_message stamps this frame's main-frame
+	# counter.
 	_flush_pending_hud_messages()
 	_flush_feed_lines()
-	_game_hud.set_kill_announcement(sim.get_kill_announcement_text(), sim.get_kill_announcement_tick(_hud_ticks()))
+	# The banner's life is on the logic tick (engine hud/feed_format.h
+	# KillAnnouncement).
+	_game_hud.set_kill_announcement(sim.get_kill_announcement_text(),
+			sim.get_kill_announcement_tick(sim.get_logic_tick()))
 	_score_fanfare.update(sim, _world)
 	# The three overlay windows follow the engine's toggle flags (the ShowScore
 	# gate, the sibling close and the respawn clears are its rules).
 	_message_log.update(_game_hud, _toggles.is_message_log_open())
 	_update_overlay_windows(sim)
 	_end_round_stats.update(_game_hud, sim, _toggles.is_end_round_stats_open())
-	_lfp_panel.update(_game_hud, sim, _hud_ticks())
-	_scoreboard.update(_game_hud, _world, _toggles.is_scoreboard_open(), _hud_ticks())
+	_lfp_panel.update(_game_hud, sim)
+	_scoreboard.update(_game_hud, _world, _toggles.is_scoreboard_open())
 	if stats_on:
 		var probe_t5 := Time.get_ticks_usec()
 		_frame_stats.add(FrameStats.HUD_SCALARS, probe_t1 - probe_t0)
@@ -750,10 +765,10 @@ func tick(gameplay_input_active: bool = false) -> void:
 		_frame_stats.add(FrameStats.HUD_FLUSH, probe_t5 - probe_t4)
 
 
-# The HUD's presentation clock driving the fade/message timers — the engine's
-# ms -> tick quantum count (world/tick_accumulator.h ticks_from_ms carries the
-# (engine: runtime/world/world.cpp) witness). Adopting the engine's exact 16 ms
-# quantum corrects the old 0.062 ticks/ms approximation (62 Hz vs 62.5 Hz).
+# The wall clock in ticks the map queries' ~1 Hz retry reads (a shell
+# throttle; every HUD reader takes its retail clock from set_frame_clocks) —
+# the engine's ms -> tick quantum count (world/tick_accumulator.h
+# ticks_from_ms; engine: runtime/world/world.cpp).
 func _hud_ticks() -> int:
 	return Simulation.ticks_from_ms(_world.frame_clock_ms)
 
@@ -986,7 +1001,7 @@ func _update_overlay_windows(sim: Simulation) -> void:
 		_game_hud.set_help_screen(false, "", "", "", PackedStringArray(), PackedStringArray())
 	if legend_open and _map_legend_labels.is_empty():
 		_map_legend_labels = _resolve_map_legend_labels()
-	_game_hud.set_map_legend(legend_open, _map_legend_title, _map_legend_labels, _hud_ticks())
+	_game_hud.set_map_legend(legend_open, _map_legend_title, _map_legend_labels)
 	_game_hud.set_briefing(_toggles.get_briefing_mode() != 0 and not sim.is_mp_session(), sim)
 
 
@@ -1013,12 +1028,14 @@ func is_chat_capturing() -> bool:
 ## A flooded repeat echoes into the CHAT ring in its sender's color.
 func handle_chat_key(key: InputEventKey) -> bool:
 	var sim: Simulation = _world.get_sim() if _world != null else null
-	if not _chat.key_event(key, sim, Strings.get_table(Strings.TABLE_GAMETEXT), _hud_ticks()):
+	# The flood check reads the main-frame counter (engine inmatch/chat_flood.h).
+	var main_frame := sim.get_main_frame_counter() if sim != null else 0
+	if not _chat.key_event(key, sim, Strings.get_table(Strings.TABLE_GAMETEXT), main_frame):
 		return false
 	if _game_hud != null:
 		if _chat.last_events() & HudChatEntry.EVENT_FLOOD_ECHO:
 			_game_hud.push_chat_line(_chat.get_echo_text(), _chat.get_echo_argb())
-		_game_hud.set_chat_input(_chat, _hud_ticks(), sim != null and sim.is_mp_session())
+		_game_hud.set_chat_input(_chat, sim != null and sim.is_mp_session())
 	return true
 
 
@@ -1483,7 +1500,8 @@ func _flush_feed_lines() -> void:
 	var announcement := _game_hud.post_feed_lines(sim,
 			Strings.get_table(Strings.TABLE_GAMETEXT), _toggles.is_mp_verbose())
 	if not announcement.is_empty():
-		sim.retain_feed_announcement(announcement, _hud_ticks())
+		# Stamped with the logic tick (engine hud/feed_format.h KillAnnouncement).
+		sim.retain_feed_announcement(announcement, sim.get_logic_tick())
 
 
 func _flush_pending_hud_messages() -> void:

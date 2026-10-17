@@ -14,7 +14,8 @@ extends RefCounted
 ## The zone rows never round-trip through script (the overlay pulls them
 ## natively through Simulation.fill_lfp_zones); the two status strings resolve
 ## natively too, in the gametext table this lane hands over (engine
-## hud_lfp_panel.h, retail's literal fallbacks).
+## hud_lfp_panel.h, retail's literal fallbacks); the blink reads the HUD frame
+## counter the overlay holds (HudOverlay.set_frame_clocks).
 
 var _pushed := false
 
@@ -29,18 +30,18 @@ func is_pushed() -> bool:
 	return _pushed
 
 
-func update(hud: HudOverlay, sim: Simulation, frame_counter: int) -> void:
+func update(hud: HudOverlay, sim: Simulation) -> void:
 	if hud == null:
 		return
 	if sim == null:
 		_hide(hud)
 		return
 	hud.set_lfp_panel(true, int(sim.get_session_game_type()), sim.get_local_player_team(),
-			frame_counter, Strings.get_table(Strings.TABLE_GAMETEXT), sim)
+			Strings.get_table(Strings.TABLE_GAMETEXT), sim)
 	_pushed = true
 
 
 func _hide(hud: HudOverlay) -> void:
 	if _pushed:
-		hud.set_lfp_panel(false, 0, 0, 0, null, null)
+		hud.set_lfp_panel(false, 0, 0, null, null)
 		_pushed = false

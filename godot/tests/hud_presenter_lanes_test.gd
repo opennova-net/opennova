@@ -106,8 +106,8 @@ func test_vehicle_and_zone_lanes_null_paths() -> void:
 	vehicle.update(hud, null, null, null, 0)
 	vehicle.update(null, null, null, null, 0)
 	var zones := LfpPanelPresenter.new()
-	zones.update(hud, null, 0)
-	zones.update(null, null, 0)
+	zones.update(hud, null)
+	zones.update(null, null)
 	var after := hud.get_draw_list_stats()
 	assert_eq(after.elements_drawn, before.elements_drawn,
 			"The null paths draw nothing and crash nothing.")

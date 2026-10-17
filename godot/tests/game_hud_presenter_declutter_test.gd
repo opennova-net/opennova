@@ -166,16 +166,16 @@ func test_kill_banner_retains_text_after_expiry() -> void:
 	presenter.set_hud_detail_level(3)
 	presenter.tick(false)
 	var baseline: int = hud.get_draw_list_stats().glyphs
-	var now := Simulation.ticks_from_ms(world.frame_clock_ms)
+	var now := sim.get_logic_tick()
 	sim.retain_feed_announcement("ABC", now)
 	presenter.tick(false)
 	assert_eq(hud.get_draw_list_stats().glyphs, baseline + 3,
 			"the banner is drawn through the presenter even at detail 3")
-	now = Simulation.ticks_from_ms(world.frame_clock_ms)
+	now = sim.get_logic_tick()
 	sim.retain_feed_announcement("XYZ", now - 187)
 	presenter.tick(false)
 	assert_eq(hud.get_draw_list_stats().glyphs, baseline,
-			"the presenter expires the banner using the HUD clock")
+			"the presenter expires the banner on the logic tick")
 	assert_eq(sim.get_kill_announcement_text(), "XYZ",
 			"expiration retains the death-screen text")
 	presenter.set_hud_detail_level(start)
