@@ -1221,16 +1221,22 @@ const MissionDocument::Lookups &MissionDocument::lookups() const {
 		for (size_t i = 0; i < path.stops.size(); ++i)
 			if (path.stops[i] < markers.size()) made.stops[markers[path.stops[i]]->id].push_back({path.number, i});
 	}
-	// The player's route: the first path with the flag, its stops by their marker's index, as many as
-	// the game walks (bms::player_route_stop_count: its signed compare walks none for a count of 2^31
-	// or more) [orig: NetPacket_WriteWorldStateLoad0x0F @0x502e50, the count capped at 128 @0x502efc].
+	// The player's route: the first path with the flag, walked as the game walks the record a save lays out of
+	// its stops (mission::lay_out_waypoint_path: the count the path's stops, the slots its first 32, each a
+	// marker's index), as many as bms::player_route_stop_count reads [orig: NetPacket_WriteWorldStateLoad0x0F
+	// @0x502e50, the count capped at 128 @0x502efc, read signed @0x502f01, the walk @0x502f13..0x502f18]. A record
+	// read naming other stops than its markers carry is the game's until a save lays it out (mission.path_rebuilt
+	// says so): the route here is the save's.
 	for (const Node *row : made.by_kind[size_t(K::WaypointPath)]) {
 		const MissionPath &path = static_cast<const PathRow &>(*row).native;
 		if (!bms::is_player_route(path.record)) continue;
-		// The stops a save lays into the record's slots (its first 32), as many as the game walks.
-		const size_t count = std::min({path.stops.size(), kMaxWaypointPathMarkers, bms::kPlayerRouteMaxStops});
+		bms::WaypointRecord laid = path.record;
+		laid.marker_count = static_cast<uint32_t>(path.stops.size());
+		laid.waypoint_numbers.assign(path.stops.begin(),
+		                             path.stops.begin() + std::ptrdiff_t(std::min(path.stops.size(), kMaxWaypointPathMarkers)));
+		const size_t count = bms::player_route_stop_count(laid);
 		for (size_t i = 0; i < count; ++i)
-			if (path.stops[i] < markers.size()) made.route.insert(markers[path.stops[i]]->id);
+			if (laid.waypoint_numbers[i] < markers.size()) made.route.insert(markers[laid.waypoint_numbers[i]]->id);
 		break;
 	}
 	made.made = true;
