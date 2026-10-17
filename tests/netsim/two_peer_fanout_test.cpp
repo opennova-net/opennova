@@ -2034,6 +2034,36 @@ bool run_pose_transform_roundtrip() {
 		if (!expect(near_eq(l2.x, lx) && near_eq(l2.y, ly) && near_eq(l2.z, lz),
 		            "arbitrary-pose round-trip within fixed-point rounding")) return false;
 	}
+	// The trig samples a BAM at retail's dbl_7C3608 scale, 30.5 ppm above the exact
+	// 2pi/2^32 [orig: Entity_TransformLocalToWorld @0x43BD0E] [orig:
+	// Entity_TransformWorldToLocal @0x43BB93], and the inverse multiplies by its sines
+	// negated (-2^22, dbl_7C57B0 @0x43BBE0) into flooring products: a half turn's sine is
+	// 402/2^22, not 0, so a 5-unit offset under a half-turned carrier gains a cross term
+	// of 31/65536 lifted and -32/65536 projected (the exact scale gives 0: the projected
+	// word compresses to 0x0000 where retail's compresses to 0x0011). The values are
+	// retail's chains evaluated at its scale.
+	{
+		const nw::WorldPose l = nw::network_transform_world_to_local(327680, 0, 0, 0, 0, 0,
+		                                                             0x80000000u, 0u, 0u);
+		if (!expect(l.x == -327680 && l.y == -32 && l.z == 0,
+		            "half-turn world_to_local at retail's BAM scale")) return false;
+		const nw::WorldPose w = nw::network_transform_local_to_world(327680, 0, 0, 0, 0, 0,
+		                                                             0x80000000u, 0u, 0u);
+		if (!expect(w.x == -327680 && w.y == 31 && w.z == 0,
+		            "half-turn local_to_world at retail's BAM scale")) return false;
+		const nw::WorldPose lq = nw::network_transform_world_to_local(
+				327680, 131072, 65536, 0, 0, 0, 0x40000000u, 0u, 0u);
+		if (!expect(lq.x == 131056 && lq.y == -327687 && lq.z == 65536,
+		            "quarter-turn world_to_local at retail's BAM scale")) return false;
+		const nw::WorldPose lp = nw::network_transform_world_to_local(
+				655360, -327680, 0, 0, 0, 0, 0xC0000000u, 0x10000000u, 0u);
+		if (!expect(lp.x == 302705 && lp.y == 655374 && lp.z == -125390,
+		            "yaw+pitch world_to_local at retail's BAM scale")) return false;
+		const nw::WorldPose wp = nw::network_transform_local_to_world(
+				655360, -327680, 0, 0, 0, 0, 0xC0000000u, 0x10000000u, 0u);
+		if (!expect(wp.x == -327709 && wp.y == -605455 && wp.z == 250802,
+		            "yaw+pitch local_to_world at retail's BAM scale")) return false;
+	}
 	std::printf("PASS pose_transform_roundtrip\n");
 	return true;
 }

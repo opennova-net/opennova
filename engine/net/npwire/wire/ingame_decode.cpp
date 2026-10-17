@@ -9,6 +9,7 @@
 
 #include <cmath>
 #include <cstring>
+#include <base/io/bam.h>
 #include <base/io/fixed.h>
 
 // Decoders for S2C 0x0D / 0x20 — see docs/net/novaworld-net-re.md §5.11/§5.12.
@@ -21,15 +22,16 @@ namespace {
 
 // The 22-bit fixed-point euler trig both transforms sample: each BAM angle
 // through the x87 sin/cos scaled by 2^22 (fild loads the dword signed; ftol
-// truncates), roll/pitch/yaw.
+// truncates), roll/pitch/yaw. The BAM-to-radian scale is retail's own double
+// dbl_7C3608, not the exact 2pi/2^32 [orig: Entity_TransformLocalToWorld @ 0x43BD0E]
+// [orig: Entity_TransformWorldToLocal @ 0x43BB93].
 struct EulerQ22 {
 	int32_t sr, cr, sp, cp, sy, cy;
 };
 
 EulerQ22 euler_q22(uint32_t yaw_bam, uint32_t pitch_bam, uint32_t roll_bam) {
-	const double k = 6.283185307179586476925286766559 / 4294967296.0; // 2pi / 2^32
-	auto q = [k](uint32_t bam, int32_t &s, int32_t &c) {
-		const double a = double(int32_t(bam)) * k; // fild loads the dword signed
+	auto q = [](uint32_t bam, int32_t &s, int32_t &c) {
+		const double a = double(int32_t(bam)) * io::kRadiansPerBamX87; // fild loads the dword signed
 		s = int32_t(std::sin(a) * io::kQ22One);      // *2^22, ftol truncates
 		c = int32_t(std::cos(a) * io::kQ22One);
 	};
@@ -69,28 +71,30 @@ WorldPose network_transform_local_to_world(int32_t lx, int32_t ly, int32_t lz,
 	return w;
 }
 
-// [orig: Entity_TransformWorldToLocal @ 0x43BB50] — see ingame_decode.h. The exact
+// [orig: Entity_TransformWorldToLocal @ 0x43BB50] — see ingame_decode.h. The
 // transpose of the chain above, applied in reverse order (yaw, pitch, roll). The
-// disassembly stores sines scaled by -2^22 (dbl_7C57B0) and subtracts the products
-// (@0x4c... via imul/shrd-22); writing the sines positive and flipping those signs is
-// the identical arithmetic. Position only — the original's out[3..5] pose tail is
-// heading subtraction + pitch/roll pass-through, composed by callers.
+// sines are scaled by -2^22 (dbl_7C57B0 @0x43BBE0) and multiply in negated: the
+// truncating ftol makes each the positive sine's exact negation, but the
+// imul/shrd-22 floors, so m(a, -s) is not -m(a, s) and the negated operands are
+// kept as the disassembly has them. Position only — the original's out[3..5]
+// pose tail is heading subtraction + pitch/roll pass-through, composed by callers.
 WorldPose network_transform_world_to_local(int32_t wx, int32_t wy, int32_t wz,
                                            int32_t px, int32_t py, int32_t pz,
                                            uint32_t yaw_bam, uint32_t pitch_bam,
                                            uint32_t roll_bam) {
 	const auto [sr, cr, sp, cp, sy, cy] = euler_q22(yaw_bam, pitch_bam, roll_bam);
+	const int32_t nsr = -sr, nsp = -sp, nsy = -sy; // ftol(sin * -2^22) @0x43BBE0..0x43BC0D
 	const auto m = mul_q22;
-	const int32_t dx = wx - px;                // @0x43bb65-0x43bb78: delta first
+	const int32_t dx = wx - px;                 // @0x43bb65-0x43bb78: delta first
 	const int32_t dy = wy - py;
 	const int32_t dz = wz - pz;
-	const int32_t tx = m(dx, cy) + m(dy, sy);  // yaw^-1 about Z (@0x43bc17-0x43bc38)
-	const int32_t ty = m(dy, cy) - m(dx, sy);  //                (@0x43bc44-0x43bc88)
+	const int32_t tx = m(dx, cy) - m(dy, nsy);  // yaw^-1 about Z (@0x43bc17-0x43bc38)
+	const int32_t ty = m(dy, cy) + m(dx, nsy);  //                (@0x43bc44-0x43bc88)
 	WorldPose l;
-	l.x = m(tx, cp) + m(dz, sp);               // pitch^-1 about Y (@0x43bc6e-0x43bcb2)
-	const int32_t tz = m(dz, cp) - m(tx, sp);  //                  (@0x43bc90-0x43bcae)
-	l.y = m(ty, cr) + m(tz, sr);               // roll^-1 about X (@0x43bcb4-0x43bcd0)
-	l.z = m(tz, cr) - m(ty, sr);               //                 (@0x43bcd3-0x43bcf0)
+	l.x = m(tx, cp) - m(dz, nsp);               // pitch^-1 about Y (@0x43bc6e-0x43bcac)
+	const int32_t tz = m(dz, cp) + m(tx, nsp);  //                  (@0x43bc90-0x43bcaa)
+	l.y = m(ty, cr) - m(tz, nsr);               // roll^-1 about X (@0x43bcb4-0x43bcce)
+	l.z = m(tz, cr) + m(ty, nsr);               //                 (@0x43bcd3-0x43bcee)
 	return l;
 }
 
