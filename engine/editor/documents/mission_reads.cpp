@@ -14,8 +14,6 @@ namespace {
 using K = MissionKind;
 constexpr NodeKind k(K kind) { return node_kind(kind); }
 
-double units(int32_t fixed) { return double(fixed) / io::kFp16OneD; }
-
 MissionEntityRead read_entity(const EntityRow &row) {
 	const bms::Entity &e = row.native;
 	MissionEntityRead out;
@@ -23,9 +21,9 @@ MissionEntityRead read_entity(const EntityRow &row) {
 	out.pool = static_cast<K>(row.kind);
 	out.item_id = mission::entity_item_id(e);
 	out.ssn = e.id;
-	out.x = units(e.x);
-	out.y = units(e.y);
-	out.z = units(e.z);
+	out.x = io::fp16_16_to_double(e.x);
+	out.y = io::fp16_16_to_double(e.y);
+	out.z = io::fp16_16_to_double(e.z);
 	const mission::EntityTransform transform = mission::entity_transform(e);
 	out.pitch = transform.pitch;
 	out.yaw = transform.yaw;
@@ -44,12 +42,12 @@ MissionAreaRead read_area(const AreaRow &row) {
 	MissionAreaRead out;
 	out.address = {row.id, row.kind, 0};
 	out.id = a.id;
-	out.x_min = units(a.x_min);
-	out.x_max = units(a.x_max);
-	out.y_min = units(a.y_min);
-	out.y_max = units(a.y_max);
-	out.z_min = units(a.z_min);
-	out.z_max = units(a.z_max);
+	out.x_min = io::fp16_16_to_double(a.x_min);
+	out.x_max = io::fp16_16_to_double(a.x_max);
+	out.y_min = io::fp16_16_to_double(a.y_min);
+	out.y_max = io::fp16_16_to_double(a.y_max);
+	out.z_min = io::fp16_16_to_double(a.z_min);
+	out.z_max = io::fp16_16_to_double(a.z_max);
 	out.constrains_z = a.constrains_z();
 	out.mission_area = a.is_active();
 	return out;
