@@ -450,6 +450,14 @@ public:
 		WEAPON_CATEGORY_MEDPACK = static_cast<int>(opennova::controls::WeaponCategory::kMedpack),
 	};
 
+	// The USE-ITEM press's arm (runtime/world/local_player_view.h UseItemArm).
+	enum UseItemArm {
+		USE_ITEM_ARM_MOUNT_CHAIN = static_cast<int>(opennova::world::UseItemArm::kMountChain),
+		USE_ITEM_ARM_ARMORY = static_cast<int>(opennova::world::UseItemArm::kArmory),
+		USE_ITEM_ARM_ARMORY_REFUSED = static_cast<int>(opennova::world::UseItemArm::kArmoryRefused),
+		USE_ITEM_ARM_VEHICLE_LOADOUT = static_cast<int>(opennova::world::UseItemArm::kVehicleLoadout),
+	};
+
 	// Collision-face flag bits (world/collision.h kFaceFlag* carries the
 	// witness) — the hitbox debug view's face styling reads them.
 	enum FaceFlag {
@@ -2425,6 +2433,9 @@ public:
 
 	// Loadout-zone gates for the host's armory key (engine: formats/def/def.h).
 	bool local_player_in_armory_zone() const;
+	// The arm the USE-ITEM press takes (engine local_player_use_item_arm over the
+	// session's pre-round timer and armory countdown); the mount chain without a kernel.
+	UseItemArm local_player_use_item_arm() const;
 	// The USE key's vehicle-loadout arm (engine: runtime/world/local_player_view.h):
 	// the unmounted local player's type-11 volume touch, and the bay's team gate
 	// (the ground entity's team 0 or the player's own; a free-standing player
@@ -2486,3 +2497,4 @@ VARIANT_ENUM_CAST(godot::Simulation::JoinTerrainTilState);
 VARIANT_ENUM_CAST(godot::Simulation::SessionRole);
 VARIANT_ENUM_CAST(godot::Simulation::Stance);
 VARIANT_ENUM_CAST(godot::Simulation::WeaponCategory);
+VARIANT_ENUM_CAST(godot::Simulation::UseItemArm);

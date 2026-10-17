@@ -41,6 +41,12 @@ bool Simulation::local_player_in_armory_zone() const {
 	return kernel_ && opennova::world::local_player_in_armory_zone(kernel_->world);
 }
 
+Simulation::UseItemArm Simulation::local_player_use_item_arm() const {
+	if (!kernel_) return USE_ITEM_ARM_MOUNT_CHAIN;
+	return static_cast<UseItemArm>(opennova::world::local_player_use_item_arm(
+			kernel_->world, kernel_->local.view_session_inputs));
+}
+
 bool Simulation::local_player_in_vehicle_loadout_zone() const {
 	// The useitem vehicle-loadout arm's gate (engine local_player_in_vehicle_loadout_zone:
 	// unmounted + the type-11 volume touch).

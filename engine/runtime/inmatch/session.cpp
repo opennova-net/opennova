@@ -173,6 +173,7 @@ world::LocalViewSessionInputs Role::view_session_inputs_for(
 	s.hud_hit_feedback_frames = runtime != nullptr ? runtime->state().hud_hit_feedback_frames : 0;
 	if (runtime) {
 		s.hud_service.preround_seconds = runtime->state().preround_delay_seconds;
+		s.armory_reuse_seconds = runtime->state().armory_reuse_seconds;
 		s.hud_service.reload_seconds = runtime->state().vehicle_reload_seconds;
 		s.hud_service.owned_zone_mask = runtime->state().owned_zone_mask;
 		// Keep link order: an equal-distance designation retains the first.

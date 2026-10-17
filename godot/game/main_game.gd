@@ -484,31 +484,29 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		pick_at_crosshair()
 		get_viewport().set_input_as_handled()
 		return
-	# The USE-ITEM key's armory arm: in-world, standing in an armory volume, the
-	# press opens weapon.mnu [orig: useitem action 177, Flags & 0x400000 @0x4e0b4d].
-	# Every other arm of the key is the input router's per-frame chain over the
-	# polled `useitem` row -- the hold latch, the USE+digit seat pick, the mount
-	# toggle on the release edge (PlayerInputRouter::sample_use_item); the screen
-	# this arm opens leaves gameplay input inactive, which resets that chain.
+	# The USE-ITEM press: the engine decides its arm (Simulation.local_player_use_item_arm,
+	# engine/runtime/world/local_player_view.h) and the shell opens what it names.
+	# The mount chain is the input router's per-frame chain over the polled
+	# `useitem` row (the hold latch, the USE+digit seat pick, the mount toggle on
+	# the release edge, engine/runtime/controls/player_actions); every other arm
+	# takes the press, so that chain never latches it.
 	if is_gameplay_input_active() and _is_use_item_key(ArmoryPresenter.bound_key_of(key)):
-		if _try_open_armory():
-			get_viewport().set_input_as_handled()
-			return
-		# The vehicle-loadout-volume arm @0x4e0bfe (the engine's
-		# local_player_in_vehicle_loadout_zone: an unmounted local player carrying
-		# the type-11 volume touch): the press is consumed here and never latches
-		# the router's chain -- no mount toggle on the release, no USE+digit chord.
-		# The bay's team gate (local_player_vehicle_zone_team_matches: the ground
-		# entity's team 0 or the player's own) selects vehicle.mnu's VEHICLE
-		# screen, unported (D-HUD-14). A mounted player never reaches this arm (the
-		# predicate rejects a seated player), so the seat chain stays unconditional.
 		var use_sim: Simulation = _world.get_sim() if _world != null else null
-		if use_sim != null and use_sim.local_player_in_vehicle_loadout_zone():
-			if _player_presenter != null:
-				_player_presenter.consume_use_hold()
+		var arm: int = Simulation.USE_ITEM_ARM_MOUNT_CHAIN
+		if use_sim != null:
+			arm = use_sim.local_player_use_item_arm()
+		if arm == Simulation.USE_ITEM_ARM_MOUNT_CHAIN:
+			return
+		if _player_presenter != null:
+			_player_presenter.consume_use_hold()
+		if arm == Simulation.USE_ITEM_ARM_ARMORY:
+			_try_open_armory()
+		elif arm == Simulation.USE_ITEM_ARM_VEHICLE_LOADOUT:
+			# The bay's team gate (the ground entity's team 0 or the player's own)
+			# selects vehicle.mnu's VEHICLE screen, unported (D-HUD-14).
 			if use_sim.local_player_vehicle_zone_team_matches():
-				pass  # vehicle.mnu VEHICLE (D-HUD-14)
-			get_viewport().set_input_as_handled()
+				pass
+		get_viewport().set_input_as_handled()
 		return
 
 
@@ -940,13 +938,12 @@ func set_local_player_profile(profile: Dictionary) -> void:
 
 
 # The armory key while in-world: the shared ArmoryPresenter opens weapon.mnu's
-# WEAPON screen over LIVE play when the player stands in an armory zone — the
-# world keeps ticking underneath (State.ARMORY rides the presenter's opened signal)
-# [orig: useitem action 177 -> UI_OpenMenuScreen("weapon.mnu", "WEAPON")
-# @0x4e0b44, gated on Flags & 0x400000 @0x4e0b4d + the host weapons rule
-# (dword_A85B6C, BSS 0 in SP = allowed); no world-stop leg]. Returns false when
-# out of zone (key ignored, the original's silent gate). The ACCEPT apply and
-# the class/current-loadout open protocol live on the host.
+# WEAPON screen over LIVE play when the engine's USE-ITEM arm is the armory's —
+# the world keeps ticking underneath (State.ARMORY rides the presenter's opened
+# signal) [orig: useitem action 177 -> UI_OpenMenuScreen("weapon.mnu", "WEAPON")
+# @0x4e0b49; no world-stop leg]. Returns false otherwise (key ignored, the
+# original's silent gate). The ACCEPT apply and the class/current-loadout open
+# protocol live on the host.
 func _try_open_armory() -> bool:
 	if _armory_presenter == null:
 		return false

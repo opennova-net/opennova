@@ -3618,6 +3618,20 @@ func test_vehicle_loadout_zone_gates_off_a_bay() -> void:
 			"a free-standing player reads ground team 0 = open")
 
 
+# The USE-ITEM press's arm (the engine's local_player_use_item_arm): no kernel
+# and an SP player off every volume (no pre-round, no countdown) both take the
+# mount chain. The armory, refused and bay orders are the local_player_view ctest.
+func test_use_item_arm_off_every_volume_is_the_mount_chain() -> void:
+	var sim := Simulation.new()
+	assert_eq(sim.local_player_use_item_arm(), Simulation.USE_ITEM_ARM_MOUNT_CHAIN,
+			"no world: the mount chain")
+	sim.build_demo_mission()
+	assert_true(sim.spawn_local_player(Vector3.ZERO, 0.0, 1))
+	sim.step()
+	assert_eq(sim.local_player_use_item_arm(), Simulation.USE_ITEM_ARM_MOUNT_CHAIN,
+			"the demo mission authors no armory or bay volume")
+
+
 # The view actions' producers of the BMS input-action word (the cat-7 player
 # triggers' LIVE word): viewchase (402) sets 0x8000000, view1st (400)
 # 0x4000000, viewwithgun (401) 0x10000000, the PlayerCockpitView bit. The

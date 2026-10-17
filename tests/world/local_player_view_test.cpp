@@ -2361,6 +2361,41 @@ void test_use_item_armory_zone_gate() {
     CHECK(!local_player_in_armory_zone(empty));
 }
 
+// The arm a USE-ITEM press takes [orig: Input_HandleActionBinding_0 case 0xB1 --
+// parentSlot @0x4e0a91..0x4e0a98; the zone bit @0x4e0aa1 or g_ClientPreRoundTimer
+// @0x4e0aa6..0x4e0ab0 into the armory arm; outside the pre-round
+// `cmp g_HostWeaponsRule, ecx; jnz done` @0x4e0b29..0x4e0b2f; Flags & 0x800
+// @0x4e0ab2; else the mount chain @0x4e0b5e].
+void test_use_item_arm_order() {
+    LocalWorld lw;
+    LocalViewSessionInputs s;
+    CHECK(local_player_use_item_arm(lw.w, s) == UseItemArm::kMountChain);
+    // The armory volume opens weapon.mnu; a running countdown refuses it.
+    lw.entity().flags |= kEntityFlagArmoryZone;
+    CHECK(local_player_use_item_arm(lw.w, s) == UseItemArm::kArmory);
+    s.armory_reuse_seconds = 30;
+    CHECK(local_player_use_item_arm(lw.w, s) == UseItemArm::kArmoryRefused);
+    // The pre-round opens it anywhere, the countdown unread.
+    lw.entity().flags &= ~kEntityFlagArmoryZone;
+    CHECK(local_player_use_item_arm(lw.w, s) == UseItemArm::kMountChain);
+    s.hud_service.preround_seconds = 12;
+    CHECK(local_player_use_item_arm(lw.w, s) == UseItemArm::kArmory);
+    // The armory arm comes before the vehicle bay: a bay touch in the
+    // pre-round still opens the armory.
+    lw.entity().flags |= kEntityFlagVehicleLoadoutZone;
+    CHECK(local_player_use_item_arm(lw.w, s) == UseItemArm::kArmory);
+    s.hud_service.preround_seconds = 0;
+    s.armory_reuse_seconds = 0;
+    CHECK(local_player_use_item_arm(lw.w, s) == UseItemArm::kVehicleLoadout);
+    // A seated player takes the mount chain whatever else holds.
+    lw.entity().flags |= kEntityFlagArmoryZone;
+    s.hud_service.preround_seconds = 12;
+    lw.entity().mounted = true;
+    CHECK(local_player_use_item_arm(lw.w, s) == UseItemArm::kMountChain);
+    World empty;
+    CHECK(local_player_use_item_arm(empty, s) == UseItemArm::kMountChain);
+}
+
 // The shell's class pick: 5..9 stamps L, a joiner without L latches it, the
 // rest change nothing; the resident kit is the spawn kit, else the default.
 void test_loadout_class_pick_and_resident_kit() {
@@ -3825,6 +3860,7 @@ int main() {
     test_frame_chase_shake_consumes_the_tick();
     test_use_item_vehicle_loadout_zone_gates();
     test_use_item_armory_zone_gate();
+    test_use_item_arm_order();
     test_loadout_class_pick_and_resident_kit();
     test_weapon_hand_frame_bit();
     test_view_uses_current_motor_offset_and_live_position();
