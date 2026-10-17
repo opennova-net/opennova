@@ -2,6 +2,7 @@
 // NoBlood switch, the body plan, the solver (settling, joint limits, ground and
 // wall contact, the tether, the kick's direction, determinism), the set's
 // lifecycle, and the death clip reading every machine decodes the same way.
+#include <base/crt/crt_rng.h>
 #include <runtime/ragdoll/ragdoll_option.h>
 #include <runtime/ragdoll/ragdoll_rig.h>
 #include <runtime/ragdoll/ragdoll_set.h>
@@ -589,6 +590,58 @@ void test_corpse_rules() {
 
 } // namespace
 
+// ADR 0060 d3 and its Stands: the ragdoll draws no random number from the
+// simulation and writes nothing back to it, so a mission plays the same ticks
+// with NoBlood 0 or 2 (the option only decides whether the presentation runs a
+// set at all). A corpse ragdolled over a live World's collider leaves every
+// World PRNG stream and the CRT rand stream where they were, and two Worlds
+// whose streams differ drive it to the same pose: its variation is its own
+// hash (ragdoll_solver.cpp `jitter`).
+void test_ragdoll_leaves_the_simulation_alone() {
+	const auto rig = make_rig();
+	const std::vector<anim::PoseBone> pose = make_source().rest;
+	const Vec3 anchor{ 0.0f, 0.5f, 0.0f };
+	constexpr int kAlive = 1;
+	constexpr int kShot = world::anim_state::kDeathBulletBase + 4;
+	const auto run = [&](world::World &w, std::vector<anim::PoseBone> &r_pose) {
+		const world::WorldRagdollCollider collider(w);
+		RagdollSet set;
+		set.set_enabled(true);
+		set.observe(head_for(1, kAlive));
+		set.step(1, collider);
+		const SubjectHead dead = head_for(1, kShot);
+		if (set.observe(dead) != Need::Start) return false;
+		if (!set.start(dead, rig, pose, nullptr, anchor, collider)) return false;
+		for (int i = 0; i < 60; ++i) {
+			set.observe(dead);
+			set.feed(1, Xform{}, anchor);
+			set.step(1, collider);
+		}
+		const RagdollOutput *out = set.output(1);
+		if (out == nullptr) return false;
+		r_pose = out->pose;
+		return true;
+	};
+	world::World a;
+	const uint32_t a16 = a.prng16_state, a16b = a.prng16_b_state, a16c = a.prng16_c_state;
+	const uint32_t adestr = a.destruction_rng.state, crt = crt::crt_rand_state();
+	std::vector<anim::PoseBone> pose_a, pose_b;
+	if (!expect(run(a, pose_a), "the corpse ragdolls over a World's collider")) return;
+	expect(a.prng16_state == a16 && a.prng16_b_state == a16b && a.prng16_c_state == a16c &&
+					a.destruction_rng.state == adestr && crt::crt_rand_state() == crt,
+			"the ragdoll draws no World or CRT random number");
+	world::World b;
+	b.next_prng16();
+	b.next_prng16_b();
+	b.next_prng16_c();
+	b.destruction_rng.next16();
+	if (!expect(run(b, pose_b), "the second World's corpse ragdolls too")) return;
+	expect(pose_a.size() == pose_b.size() &&
+					std::memcmp(pose_a.data(), pose_b.data(),
+							pose_a.size() * sizeof(anim::PoseBone)) == 0,
+			"another simulation stream leaves the ragdoll's pose bit for bit");
+}
+
 int main() {
 	test_option();
 	test_rig();
@@ -602,6 +655,7 @@ int main() {
 	test_set();
 	test_corpse_death();
 	test_corpse_rules();
+	test_ragdoll_leaves_the_simulation_alone();
 	if (failures == 0)
 		std::printf("ragdoll: all passed\n");
 	return failures == 0 ? 0 : 1;
