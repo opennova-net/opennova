@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -116,12 +117,16 @@ ThreediTargetLimits threedi_retail_limits() {
 	// with no bound, its 129th over the frame's security cookie, which ends
 	// the game [orig: Terrain_BuildClipPlanesFromCollision @ 0x5b34e0, the
 	// list var_104 the store @ 0x5b3711 fills, the cookie checked @ 0x5b3a6b;
-	// reached from Terrain_BuildPortalOccluderPlanes @ 0x5c44c0]: so 128 planes
-	// a record. (The portal walk's 32-bit clip mask is over the caller's
-	// planes, not the record's [orig: Render_VisibilityPortalTraversal
-	// @ 0x5c4ae0, @ 0x5c4c7c..0x5c4e05].)
+	// reached from Terrain_BuildPortalOccluderPlanes @ 0x5c44c0]. The list
+	// takes a face's plane byte (@ 0x5b3580) once (@ 0x5b36f2..0x5b370a), so
+	// what bounds a record is the distinct planes its faces name, 128 (a plane
+	// no face names is never listed). (The portal walk's 32-bit clip mask is
+	// over the caller's planes, not the record's [orig:
+	// Render_VisibilityPortalTraversal @ 0x5c4ae0, @ 0x5c4c7c..0x5c4e05].) A
+	// face names its plane in a byte: planes 0..255.
 	l.occlusion_vertices = {128};
 	l.occlusion_planes = {128};
+	l.occlusion_face_plane = {256};
 	// WriteLGHT packs the rate times 256 into a u16 and the cone into a byte
 	// of whole degrees [orig: WriteLGHT @ 0x456DF0 (ModSuperOed.exe)].
 	l.light_rate = {256};
@@ -687,13 +692,22 @@ void lower_points_and_lights(Lowering &lw) {
 
 void lower_occlusion(Lowering &lw) {
 	for (const ThreediO3dOcclusion &o : lw.in.occlusion) {
+		// The planes its faces name (given planes: the reader has each face name one; derived ones stay within
+		// the exporter's 32).
+		std::set<int> named;
+		for (const std::array<int, 4> &f : o.faces)
+			if (f[3] >= 0) named.insert(f[3]);
+		const int highest = named.empty() ? -1 : *named.rbegin();
 		if (!lw.part_byte(o.section, o.line, "the occlusion record's section") ||
 				!lw.part_byte(o.connecting, o.line, "the occlusion record's connecting section") ||
 				!lw.within(lw.lim.occlusion_vertices, static_cast<long long>(o.vertices.size()), o.line,
 						"the occlusion record holds " + std::to_string(o.vertices.size()) + " vertices",
 						"its edge words index them in 7 bits") ||
-				!lw.within(lw.lim.occlusion_planes, static_cast<long long>(o.planes.size()), o.line,
-						"the occlusion record holds " + std::to_string(o.planes.size()) + " planes",
+				(highest >= 0 && !lw.within(lw.lim.occlusion_face_plane, static_cast<long long>(highest) + 1, o.line,
+						"a face of the occlusion record names plane " + std::to_string(highest),
+						"a face names its plane in a byte, planes 0 to 255")) ||
+				!lw.within(lw.lim.occlusion_planes, static_cast<long long>(named.size()), o.line,
+						"the occlusion record's faces name " + std::to_string(named.size()) + " planes",
 						"the game's occluder walk lists 128 planes at most"))
 			continue;
 		if (!lw.out.add_occ_record(o.type, static_cast<int>(o.section), static_cast<int>(o.connecting), o.vertices,

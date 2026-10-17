@@ -526,7 +526,9 @@ int main(int argc, char **argv) {
 		builds_saying("texture-chunk", swap(base, "texture skin.tga", "texture field.nq8 1 16"), "note: texture", false);
 		builds_saying("texture-plain", swap(base, "texture skin.tga", "texture skin.png 1 1"), "note: texture", false);
 		std::string planes = base + "occ 0 0 0\nov 0 0 0\nov 1 0 0\nov 0 1 0\n";
-		for (int i = 0; i < 129; ++i) planes += "op 0 0 1 " + std::to_string(i) + "\n"; // the game's 128 (D-25)
+		for (int i = 0; i < 129; ++i) planes += "op 0 0 1 " + std::to_string(i) + "\n";
+		// Faces naming 129 planes: past the game's 128 (D-25).
+		for (int i = 0; i < 129; ++i) planes += "of 0 1 2 " + std::to_string(i) + "\n";
 		refuses("strict-occ-planes", planes);
 		std::string verts = base + "occ 0 0 0\n";
 		for (int i = 0; i < 129; ++i) verts += "ov " + std::to_string(i) + " 0 0\n";

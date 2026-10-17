@@ -271,8 +271,10 @@ void test_limits() {
 		std::string occ = "o3d 2\nmodel L\nlod 0\npart 0 0 0 0\nocc 0 0 0\n";
 		for (int i = 0; i < 129; ++i) occ += "ov " + num(i) + " 0 0\n";
 		refuses_at("occlusion-vertices", occ, 5, "the occlusion record holds 129 vertices");
-		// The game's occluder walk lists 128 planes [orig: Terrain_BuildClipPlanesFromCollision @ 0x5b34e0, the
-		// 128-entry list @ 0x5b3711]: 128 planes given build, 129 do not.
+		// The game's occluder walk lists the distinct planes a record's faces name, 128 at most [orig:
+		// Terrain_BuildClipPlanesFromCollision @ 0x5b34e0, the 128-entry list @ 0x5b3711]: 128 planes given build,
+		// 129 planes given build where the faces name fewer, 129 faces naming 129 do not; a face names its plane
+		// in a byte.
 		const std::string mesh = "o3d 2\nmodel L\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nmesh 0\n"
 		                         "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"
 		                         "occ 0 0 0\nov 0 0 0\nov 1 0 0\nov 0 1 0\n";
@@ -280,9 +282,15 @@ void test_limits() {
 		for (int i = 0; i < 128; ++i) occ += "op 0 0 1 " + num(i) + "\n";
 		std::vector<SceneFinding> findings;
 		check(build(occ + "of 0 1 2 127\n", findings), "occlusion-planes: 128 given build" + dump(findings));
-		occ = "o3d 2\nmodel L\nlod 0\npart 0 0 0 0\nocc 0 0 0\nov 0 0 0\n";
+		occ = mesh;
 		for (int i = 0; i < 129; ++i) occ += "op 0 0 1 " + num(i) + "\n";
-		refuses_at("occlusion-planes", occ, 5, "the occlusion record holds 129 planes");
+		findings.clear();
+		check(build(occ + "of 0 1 2 0\n", findings), "occlusion-planes: 129 given, one named, build" + dump(findings));
+		std::string all = occ;
+		for (int i = 0; i < 129; ++i) all += "of 0 1 2 " + num(i) + "\n";
+		refuses_at("occlusion-planes", all, 11, "the occlusion record's faces name 129 planes");
+		for (int i = 129; i < 257; ++i) occ += "op 0 0 1 " + num(i) + "\n";
+		refuses_at("occlusion-face-plane", occ + "of 0 1 2 256\n", 11, "names plane 256");
 		// The exporter's rule derives at most 32 [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)]: a cone of
 		// 40 faces (the box's six planes and each face's own) is refused, saying to give the planes.
 		occ = mesh.substr(0, mesh.find("occ 0 0 0\n")) + "occ 0 0 0\nov 0 0 1\n";
