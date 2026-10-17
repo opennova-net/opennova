@@ -83,9 +83,12 @@ ThreediTargetLimits threedi_retail_limits() {
 	// bone table entry, LGHT and OOBJ), and a PANM parent of -1 is the byte
 	// 255.
 	l.parts = {255};
-	// GHDR and USRP give a name 16 bytes; 15 keeps the NUL the loader's C
-	// strings end on (no JO name is longer than 9, so nothing witnesses how
-	// an unterminated one reads).
+	// GHDR and USRP give a name 16 bytes, which the loader copies to its NUL:
+	// the model's with strcpy into 16 bytes before the LOD count it wrote
+	// first, which an unterminated name overruns [orig: ThreediGp_LoadFromFile
+	// @ 0x5b5780, the count @ 0x5b597b, the strcpy @ 0x5b597e]; each user
+	// point's byte by byte into its 48-byte record's last 16 [orig: @ 0x5b5b04
+	// ..0x5b5b1d]. So 15 characters and the NUL.
 	l.model_name = {15};
 	l.user_point_name = {15};
 	l.shader = {32};
