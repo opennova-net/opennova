@@ -85,6 +85,9 @@ std::vector<uint8_t> encode_login_reply(int32_t id, int8_t result);
 // (UPDATE.EXE)]
 std::vector<uint8_t> encode_get_reply(
 		std::string_view name, int32_t id, const uint8_t *data, size_t size, int8_t result = 0);
+// The same reply's header alone, its `size` payload bytes to follow it.
+std::vector<uint8_t> encode_get_reply_header(
+		std::string_view name, int32_t id, uint64_t size, int8_t result = 0);
 // `CRC <n>`, the command file's CRC as a signed decimal. [orig: Cupdate2Dlg_OnCrcReply
 // @ 0x405cd0 (UPDATE.EXE)]
 std::vector<uint8_t> encode_crc_reply(uint32_t crc, int32_t id);

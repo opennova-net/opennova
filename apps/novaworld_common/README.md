@@ -1395,8 +1395,10 @@ set with an updater login serves the section of its published release that carri
 command file, the package fetched from `updates/<sha256>.sfs` into the cache
 (`ONNET_UPDATE_CACHE_DIR`, or a scratch directory of the process's own) as `<sha256>.sfs`
 and the section unpacked beside it as `<sha256>/<section index>/<UPPER NAME>`, one file
-per entry, read from disk per request and never held in memory; a package no published
-section names any more leaves the cache. `SERVER.LST` names one host (so the client never
+per entry, streamed from disk as a reply's socket takes it and never held whole in memory (a
+connection is read, and its next replies made, only while less than 64 KiB of its replies
+wait unsent, each step at most 64 KiB more); a package no published section names any more
+leaves the cache. `SERVER.LST` names one host (so the client never
 load-tests): `ftp.novaworld.com` for a data set marked `retail_updater` (a retail install
 reaches it through the Switcher's hosts block), else `ONNET_UPDATE_HOST`. A login no
 published release serves is refused. Logged as `opennova-update-tool serve` logs, under

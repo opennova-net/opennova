@@ -59,22 +59,25 @@ bool UpdateTcpServer::pump() {
 	for (size_t i = 0; i < clients_.size();) {
 		Client &client = clients_[i];
 		bool drop = false;
-		if (!client.closing) {
-			const int n = tcp_recv_nonblocking(client.socket, buffer.data(), buffer.size());
-			if (n > 0) {
+		const size_t unsent = client.outbox.size() - client.sent;
+		if (!client.closing && unsent < kOutboxCap) {
+			if (client.more) {
 				busy = true;
-				client.last = now;
-				const std::string text(reinterpret_cast<const char *>(buffer.data()), size_t(n));
-				const size_t eol = text.find("\r\n");
-				log(net::endpoint_to_string(client.peer) + " < " + text.substr(0, eol));
-				update::UpdateServer::Received received =
-						server_.receive(client.id, buffer.data(), static_cast<size_t>(n));
-				client.outbox.insert(
-						client.outbox.end(), received.send.begin(), received.send.end());
-				if (!received.keep_open)
-					client.closing = true;
-			} else if (n == 0 || n == -1) {
-				drop = true;
+				take(client, server_.receive(client.id, nullptr, 0));
+			} else {
+				const int n = tcp_recv_nonblocking(client.socket, buffer.data(), buffer.size());
+				if (n > 0) {
+					busy = true;
+					if (unsent == 0)
+						client.last = now;
+					const std::string text(
+							reinterpret_cast<const char *>(buffer.data()), size_t(n));
+					const size_t eol = text.find("\r\n");
+					log(net::endpoint_to_string(client.peer) + " < " + text.substr(0, eol));
+					take(client, server_.receive(client.id, buffer.data(), static_cast<size_t>(n)));
+				} else if (n == 0 || n == -1) {
+					drop = true;
+				}
 			}
 		}
 		if (!drop && client.sent < client.outbox.size()) {
@@ -109,6 +112,23 @@ bool UpdateTcpServer::pump() {
 		++i;
 	}
 	return busy;
+}
+
+void UpdateTcpServer::take(Client &client, update::UpdateServer::Received received) {
+	client.outbox.erase(
+			client.outbox.begin(), client.outbox.begin() + static_cast<std::ptrdiff_t>(client.sent));
+	client.sent = 0;
+	client.outbox.insert(client.outbox.end(), received.send.begin(), received.send.end());
+	client.more = received.more;
+	if (!received.keep_open)
+		client.closing = true;
+}
+
+size_t UpdateTcpServer::queued_bytes() const {
+	size_t total = 0;
+	for (const Client &client : clients_)
+		total += client.outbox.size();
+	return total;
 }
 
 void UpdateTcpServer::close() {
