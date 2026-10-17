@@ -37,13 +37,6 @@ bool is_name_char(char c) {
 	return is_alnum(c) || c == '-' || c == '_';
 }
 
-bool all_of(std::string_view text, bool (*ok)(char)) {
-	for (const char c : text)
-		if (!ok(c))
-			return false;
-	return true;
-}
-
 // `text` as a JSON string literal.
 std::string json_text(std::string_view text) {
 	std::string out = "\"";
