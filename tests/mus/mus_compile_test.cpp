@@ -761,9 +761,27 @@ static int test_long_expression_fails_to_decompile(void) {
     return 1;
 }
 
+/* A literal is read unsigned, the push's 32 bits: one past 4294967295 is refused (it compiled as
+   another number: 4294967297 as 1), and one of 2^31 or more decompiles as itself (it printed
+   negative, which compiles to a neg over the magnitude, other bytes). */
+static int test_literal_range(void) {
+    CHECK(round_trips("script t\nsection Begin\n{\n  Var01 = 7\n}\n"), "7 round-trips");
+    std::string text;
+    CHECK(round_trips("script t\nsection Begin\n{\n  Var01 = 3000000000\n}\n", &text), "3000000000 round-trips");
+    CHECK(text.find("3000000000") != std::string::npos, "printed as itself");
+    CHECK(round_trips("script t\nsection Begin\n{\n  Var01 = 4294967295\n}\n"), "4294967295 round-trips");
+    CHECK(round_trips("script t\nsection Begin\n{\n  Var01 = -5\n}\n"), "a negative literal (neg over 5) round-trips");
+    CHECK(!compiles("script t\nsection Begin\n{\n  Var01 = 4294967296\n}\n"), "4294967296 is refused");
+    CHECK(!compiles("script t\nsection Begin\n{\n  Var01 = 4294967297\n}\n"), "4294967297 is refused");
+    CHECK(!compiles("script t\nsection Begin\n{\n  Var01 = 99999999999\n}\n"), "99999999999 is refused");
+    CHECK(!compiles("script t\nsection Begin\n{\n  frame 3000000000\n}\n"), "a frame count past 255 read unsigned");
+    return 1;
+}
+
 int main(void) {
     RUN_TEST(test_done_statement_round_trips);
     RUN_TEST(test_long_expression_fails_to_decompile);
+    RUN_TEST(test_literal_range);
     RUN_TEST(test_unnamed_sections_and_strings);
     RUN_TEST(test_encode_model_fields);
     RUN_TEST(test_parse_method_table);

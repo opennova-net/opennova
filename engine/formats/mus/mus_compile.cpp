@@ -142,7 +142,8 @@ struct Lexer {
 
     Tok         cur_kind;
     char        cur_text[256];
-    int32_t     cur_int;
+    int32_t     cur_int;        /* a Number's value as the push's 32 bits (0..4294967295 read unsigned) */
+    bool        cur_out_of_range = false; /* a Number past 4294967295, which no push holds */
     int         cur_line = 1;   /* the line the current token is on (the line table's numbering) */
     int         phys_line = 1;  /* the text's own line, which a `#line` does not move: an error's line */
     size_t      cur_start = 0;  /* the current token's first byte (it ends at `pos`) */
@@ -199,6 +200,7 @@ static bool is_digit(char c) { return c >= '0' && c <= '9'; }
 void Lexer::advance() {
     cur_text[0] = 0;
     cur_int = 0;
+    cur_out_of_range = false;
     if (skip_ws(this)) {
         cur_kind = Tok::Eof;
         cur_line = line;
@@ -244,13 +246,16 @@ void Lexer::advance() {
 
     /* Number (decimal). Handle leading '-' in expression parser, not here. */
     if (is_digit(c)) {
-        int32_t v = 0;
+        /* Read unsigned, the push's 32 bits: past 0xFFFFFFFF the literal is out of range (the parser
+           refuses it), never wrapped. */
+        uint64_t v = 0;
         while (pos < len && is_digit(src[pos])) {
-            v = v * 10 + (src[pos] - '0');
+            if (v <= 0xFFFFFFFFull) v = v * 10 + (uint64_t)(src[pos] - '0');
             ++pos; ++col;
         }
         cur_kind = Tok::Number;
-        cur_int = v;
+        cur_out_of_range = v > 0xFFFFFFFFull;
+        cur_int = (int32_t)(uint32_t)v;
         return;
     }
 
@@ -941,6 +946,10 @@ int Compiler::parse_expr(const char **err) {
 
     /* Number literal */
     if (lex.cur_kind == Tok::Number) {
+        if (lex.cur_out_of_range) {
+            *err = "number out of range (a push holds 0..4294967295)";
+            return -1;
+        }
         emit_push_int(lex.cur_int);
         lex.advance();
         return 0;
@@ -991,7 +1000,7 @@ int Compiler::parse_stmt_at(const char **err) {
     /* frame N: the frame setup outside a function's start [orig: AudioVM_Op_Enter @ 0x672C20]. */
     if (lex.cur_kind == Tok::KwFrame) {
         lex.advance();
-        if (lex.cur_kind != Tok::Number || lex.cur_int > 255) {
+        if (lex.cur_kind != Tok::Number || lex.cur_out_of_range || (uint32_t)lex.cur_int > 255) {
             *err = "expected an argument count (1..255) after 'frame'";
             return -1;
         }
