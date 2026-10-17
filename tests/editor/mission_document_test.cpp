@@ -36,6 +36,7 @@
 #include <editor/documents/document_types.h>
 #include <editor/documents/mission_document.h>
 #include <editor/documents/mission_file_set.h>
+#include <editor/documents/mission_names_file.h>
 #include <editor/documents/mission_reads.h>
 #include <editor/documents/mission_validation.h>
 #include <editor/graph/asset_graph.h>
@@ -731,6 +732,42 @@ int test_item_classes() {
 	TEST_EXPECT(bytes_of(*document) == unclassed &&
 	            document->apply(edit_of(EditOperation::Set, walker, "name1", std::string("OTHER")), error));
 	std::printf("item classes: an entity's AI class its item's on every save\n");
+	return 0;
+}
+
+// The original editor's .bms packer writes every record with w_accuracy1 no more than w_accuracy2 and yaw, pitch and
+// roll % 360, the sign kept [orig: sub_44C8E0 @ 0x44c94f..0x44c975, @ 0x44c905..0x44c924 (JOTACmed.exe)] (the field
+// "accuracy" is w_accuracy1): a save writes 80/20 as 20/20 and 400 as 40, -400 as -40; the .mis writer clamps alike
+// and writes the facing as held [orig: MIS_SaveDocument @ 0x455600..0x455602, @ 0x455321..0x455353
+// (JOTACmed.exe)]; the row keeps what it holds.
+int test_record_pack() {
+	std::unique_ptr<Document> document = open(fixture_bytes());
+	TEST_EXPECT(document && !as_mission(*document).rows_of(MissionKind::Item).empty());
+	if (!document || as_mission(*document).rows_of(MissionKind::Item).empty()) return 1;
+	const std::string unedited = bytes_of(*document);
+	const NodeAddress item = row_at(*document, MissionKind::Item, 0);
+	Diagnostic error;
+	for (const auto &[field, value] : std::vector<std::pair<const char *, int64_t>>{
+	             {"accuracy", 80}, {"w_accuracy2", 20}, {"yaw", 400}, {"pitch", -400}, {"roll", 359}})
+		TEST_EXPECT(document->apply(edit_of(EditOperation::Set, item, field, value), error));
+	bms::File saved;
+	std::string message;
+	const std::string written = bytes_of(*document);
+	TEST_EXPECT(bms::parse(reinterpret_cast<const uint8_t *>(written.data()), written.size(), saved, message) &&
+	            !saved.items.empty());
+	if (!saved.items.empty()) {
+		const bms::Entity &packed = saved.items[0];
+		TEST_EXPECT(packed.w_accuracy1 == 20 && packed.w_accuracy2 == 20 && packed.yaw == 40 && packed.pitch == -40 &&
+		            packed.roll == 359);
+	}
+	std::string mis, why;
+	TEST_EXPECT(mission_names_text(as_mission(*document), nullptr, mis, why) &&
+	            mis.find("  facing 400 -400 359") != std::string::npos && mis.find("  waccuracy1 20") != std::string::npos);
+	Value held;
+	TEST_EXPECT(document->get(item, "accuracy", held) && std::get<int64_t>(held) == 80);
+	while (document->can_undo()) document->undo();
+	TEST_EXPECT(bytes_of(*document) == unedited);
+	std::printf("record pack: a save clamps w_accuracy1 to w_accuracy2 and writes yaw, pitch and roll %% 360\n");
 	return 0;
 }
 
@@ -1921,6 +1958,7 @@ int main(int argc, char **argv) {
 	if (test_stop_numbers() != 0) return 1;
 	if (test_stop_places() != 0) return 1;
 	if (test_item_classes() != 0) return 1;
+	if (test_record_pack() != 0) return 1;
 	if (test_parse_findings() != 0) return 1;
 	if (test_reads_and_symbols() != 0) return 1;
 	if (test_item_type_on_symbol() != 0) return 1;
