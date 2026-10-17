@@ -306,6 +306,20 @@ void test_limits() {
 		findings.clear();
 		check(build(fan(63), findings), "occlusion-edges: 127 build" + dump(findings));
 		refuses_at("occlusion-edges", fan(64), 11, "the occlusion record's faces name 129 edges");
+		// A frame's 14 occluders fill 448 edge rows at most [orig: Terrain_BuildPortalOccluderPlanes @ 0x5c44c0]: four
+		// fans of 127 edges (508) are refused at the first occ line, three (381) build; a type-2 record is no occluder.
+		const auto fans = [&](int count, int type) {
+			std::string text = fan(63);
+			const std::string block = text.substr(text.find("occ 0 0 0\n"));
+			for (int i = 1; i < count; ++i) text += block;
+			if (type != 0) text.replace(text.rfind("occ 0 0 0\n"), 9, "occ " + num(type) + " 0 0");
+			return text;
+		};
+		findings.clear();
+		check(build(fans(3, 0), findings), "occlusion-frame: three occluders build" + dump(findings));
+		refuses_at("occlusion-frame", fans(4, 0), 11, "largest portal occluders name 508 edges");
+		findings.clear();
+		check(build(fans(4, 2), findings), "occlusion-frame: the fourth of type 2 is no occluder" + dump(findings));
 		// The exporter's rule derives at most 32 [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)]: a cone of
 		// 40 faces (the box's six planes and each face's own) is refused, saying to give the planes.
 		occ = mesh.substr(0, mesh.find("occ 0 0 0\n")) + "occ 0 0 0\nov 0 0 1\n";

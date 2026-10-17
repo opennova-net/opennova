@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <functional>
 #include <set>
 #include <string>
 #include <unordered_map>
@@ -138,6 +139,22 @@ ThreediTargetLimits threedi_retail_limits() {
 	// name, so 128 of them a record. (No shipped record names more than 48:
 	// Cbunker1's, the 2026-10 review's sweep of the 806 JOCA records.)
 	l.occlusion_edges = {128};
+	// A frame keeps 14 portal occluders, the type 0 and 1 records in view (a
+	// slot takes no other type [orig: Terrain_CollectVisibleSectorUserpoints
+	// @ 0x5c6ddd], the count clamped to 14 after the priority sort [orig:
+	// Terrain_SortPortalSlotsByPriority @ 0x5c44a2..0x5c44a4, called before
+	// each build @ 0x5c9188 / @ 0x5c912c]). Their silhouette edges and front
+	// planes, 16-byte rows, go into two 0x1C00-byte arenas a frame, 448 rows
+	// each, one slot after another with no bound [orig:
+	// Terrain_BuildPortalOccluderPlanes @ 0x5c44c0: the arenas 0x2980570 and
+	// 0x2982170 @ 0x5c44d5 / @ 0x5c44d0, handed to the record's walk
+	// @ 0x5c4518 / @ 0x5c450c, stepped by its counts @ 0x5c4561 / @ 0x5c4563];
+	// the face arena's 449th row lands on the slots' occluder table
+	// (0x2983D70). So a model's 14 largest such records name 448 edges, and
+	// 448 planes, at most: it alone in view fills no more. (The JOCA models
+	// name 180 and 60 at most, IBlock02's.)
+	l.occlusion_slots = {14};
+	l.occlusion_frame_rows = {448};
 	// WriteLGHT packs the rate times 256 into a u16 and the cone into a byte
 	// of whole degrees [orig: WriteLGHT @ 0x456DF0 (ModSuperOed.exe)].
 	l.light_rate = {256};
@@ -702,6 +719,9 @@ void lower_points_and_lights(Lowering &lw) {
 }
 
 void lower_occlusion(Lowering &lw) {
+	// Each portal occluder's rows at most (its distinct edges, its distinct planes), for the frame's arenas.
+	std::vector<std::pair<long long, long long>> occluders;
+	int first_occluder = 0;
 	for (const ThreediO3dOcclusion &o : lw.in.occlusion) {
 		// The planes its faces name (given planes: the reader has each face name one; derived ones stay within
 		// the exporter's 32).
@@ -732,6 +752,28 @@ void lower_occlusion(Lowering &lw) {
 			lw.error_at(o.line, "occ: the record's faces need more than " + std::to_string(kOedPlaneTable) +
 					" planes by the exporter's rule, whose table holds " + std::to_string(kOedPlaneTable) +
 					" [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)]: give the record its planes (op lines)");
+		if (o.type <= 1) {
+			// Derived planes: at most one a face, within the exporter's table.
+			const long long planes = o.planes.empty()
+			                                 ? std::min<long long>(static_cast<long long>(o.faces.size()), kOedPlaneTable)
+			                                 : static_cast<long long>(named.size());
+			if (occluders.empty()) first_occluder = o.line;
+			occluders.push_back({static_cast<long long>(edges.size()), planes});
+		}
+	}
+	// The model's largest occluders a frame keeps, their edge rows and their face rows summed apart.
+	const size_t kept = std::min(occluders.size(), static_cast<size_t>(lw.lim.occlusion_slots.max));
+	for (const bool edges_of : {true, false}) {
+		std::vector<long long> rows;
+		for (const auto &each : occluders) rows.push_back(edges_of ? each.first : each.second);
+		std::sort(rows.begin(), rows.end(), std::greater<long long>());
+		long long sum = 0;
+		for (size_t i = 0; i < kept; ++i) sum += rows[i];
+		if (!lw.within(lw.lim.occlusion_frame_rows, sum, first_occluder,
+				"the model's " + std::to_string(kept) + " largest portal occluders name " + std::to_string(sum) +
+						(edges_of ? " edges" : " planes"),
+				std::string("one frame's ") + (edges_of ? "edge" : "face") + " rows hold 448 at most"))
+			break;
 	}
 }
 
