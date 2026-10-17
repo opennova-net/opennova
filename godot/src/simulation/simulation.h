@@ -2107,7 +2107,7 @@ public:
 	UseItemArm take_use_item_press();
 	// A useitem key's release clears the press latch (engine
 	// LocalPlayer::release_use_item_key).
-	void release_use_item_key();
+	void release_use_item_key(bool p_system_key_up);
 	// Whether the press latch is held: the WEAPON screen's ACCEPT and CANCEL
 	// do nothing while it is (engine LocalPlayer::armory_press_latched).
 	bool is_armory_press_latched() const;

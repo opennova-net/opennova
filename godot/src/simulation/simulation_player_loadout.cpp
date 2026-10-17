@@ -52,8 +52,8 @@ Simulation::UseItemArm Simulation::take_use_item_press() {
 	return static_cast<UseItemArm>(kernel_->local.take_use_item_press());
 }
 
-void Simulation::release_use_item_key() {
-	if (kernel_) kernel_->local.release_use_item_key();
+void Simulation::release_use_item_key(bool p_system_key_up) {
+	if (kernel_) kernel_->local.release_use_item_key(p_system_key_up);
 }
 
 bool Simulation::is_armory_press_latched() const {

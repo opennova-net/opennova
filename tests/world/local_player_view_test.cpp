@@ -3454,8 +3454,12 @@ void test_armory_press_latch_freezes_input() {
     CHECK(f.player.move_order.stance == InfantryState::Stance::kCrouch);
     CHECK(!f.player.move_order.lean_left);
     CHECK(f.player.move_order.direction_bits == 0 && !f.player.move_order.moving);
-    // The release clears it; the next frame's keys reach the pack.
-    f.player.release_use_item_key();
+    // A system key-up (WM_SYSKEYUP) leaves it; a plain release clears it, and
+    // the next frame's keys reach the pack [orig: Input_HandleMenuKeyRelease
+    // @0x4DE2D0..0x4DE2E2].
+    f.player.release_use_item_key(/*system_key_up=*/true);
+    CHECK(f.player.armory_press_latched);
+    f.player.release_use_item_key(/*system_key_up=*/false);
     CHECK(!f.player.armory_press_latched);
     f.player.set_movement_keys(true, true, false, false, false, false, false);
     f.player.apply_player_input_pre_tick(/*pack_input=*/true);

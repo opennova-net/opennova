@@ -127,8 +127,9 @@ public:
     // The USE-ITEM press: the arm local_player_use_item_arm names over
     // view_session_inputs, through the press latch.
     UseItemArm take_use_item_press();
-    // A useitem key's release clears the press latch.
-    void release_use_item_key();
+    // A useitem key's release clears the press latch; a system key-up
+    // (WM_SYSKEYUP: a release with Alt held, or Alt's or F10's own) does not.
+    void release_use_item_key(bool system_key_up);
     // One frame of movement keys: stores the keys plus the sim-owned stance
     // latch onto `input` and refreshes the view aggregates, whose binocular
     // suppression reads the input word this frame's fold will leave. The

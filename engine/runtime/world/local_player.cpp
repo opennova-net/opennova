@@ -102,8 +102,13 @@ UseItemArm LocalPlayer::take_use_item_press() {
 	return arm;
 }
 
-void LocalPlayer::release_use_item_key() {
-	// [orig: Input_HandleMenuKeyRelease @0x4DE2F8 / @0x4DE309]
+void LocalPlayer::release_use_item_key(bool system_key_up) {
+	// The hook takes WM_KEYUP (0x101) alone; the window procedure hands it
+	// WM_SYSKEYUP (0x105) too, through the key release's hook walk
+	// [orig: Game_WindowProc @0x7627C6..0x7627C9; Input_HandleKeyRelease
+	// @0x760BF0; Input_HandleMenuKeyRelease `cmp msgType, 101h`
+	// @0x4DE2D0..0x4DE2E2, the clears @0x4DE2F8 / @0x4DE309].
+	if (system_key_up) return;
 	armory_press_latched = false;
 }
 

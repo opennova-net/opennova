@@ -420,7 +420,13 @@ func _input(event: InputEvent) -> void:
 			and _is_use_item_key(ArmoryPresenter.bound_key_of(event as InputEventKey)):
 		var release_sim: Simulation = _world.get_sim()
 		if release_sim != null:
-			release_sim.release_use_item_key()
+			# Windows posts a release with Alt held (without Ctrl, which AltGr
+			# also carries), or Alt's or F10's own, as WM_SYSKEYUP, which the
+			# hook ignores.
+			var released := event as InputEventKey
+			release_sim.release_use_item_key(
+					(released.alt_pressed and not released.ctrl_pressed) \
+					or released.keycode == KEY_ALT or released.keycode == KEY_F10)
 	# A useitem key-down, a press or an OS repeat (echo), sets the key again
 	# after a menu close's reset (engine controls::PlayerActions::reset_use_key
 	# carries the witness).
