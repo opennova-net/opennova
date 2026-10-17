@@ -13,12 +13,6 @@ namespace opennova::editor {
 
 namespace {
 
-const DocumentBase *open_at(const SessionView &view, const std::string &path) {
-	for (const auto &document : view.documents.open)
-		if (document && document->path() == path) return document.get();
-	return nullptr;
-}
-
 DocumentTypeId type_of(const DocumentBase &document) {
 	return asset_kind_row(document.kind()).document;
 }
@@ -69,7 +63,7 @@ void Viewports::track(const SessionView &view) {
 	slots_.erase(std::remove_if(slots_.begin(), slots_.end(),
 						 [&](const Slot &slot) {
 							 if (draws_selected_file(view, slot.model->path(), slot.model->kind())) return false;
-							 const DocumentBase *document = open_at(view, slot.model->path());
+							 const DocumentBase *document = view.documents.open_at(slot.model->path());
 							 return !document ||
 									 !viewport_kind_shows(slot.model->kind(), type_of(*document));
 						 }),
@@ -77,7 +71,7 @@ void Viewports::track(const SessionView &view) {
 	for (size_t i = 0; i < kViewportKindCount; ++i) {
 		const auto kind = static_cast<ViewportKind>(i);
 		const std::string &target = view.documents.previews[kind].path;
-		const DocumentBase *document = target.empty() ? nullptr : open_at(view, target);
+		const DocumentBase *document = target.empty() ? nullptr : view.documents.open_at(target);
 		if ((document && viewport_kind_shows(kind, type_of(*document))) || draws_selected_file(view, target, kind))
 			ensure(target, kind);
 	}
@@ -99,7 +93,7 @@ void Viewports::dispatch_(const SessionView &view) {
 }
 
 void Viewports::follow_(const SessionView &view, Slot &slot) {
-	const DocumentBase *document = open_at(view, slot.model->path());
+	const DocumentBase *document = view.documents.open_at(slot.model->path());
 	// What changed in the document since the viewport last followed it: what the document says
 	// changed since that state (S13 V8), everything when it cannot say.
 	ChangeClass change = ChangeClass::None;
@@ -174,7 +168,7 @@ bool Viewports::addressed_(const SessionView &view, const std::string &path, Vie
 		std::string &at, ViewportKind &kind, std::string &error) const {
 	// No path: the active document, as every pathless read and edit names it (ADR 0046 S13 A5).
 	at = path.empty() ? view.documents.active : path;
-	const DocumentBase *document = at.empty() ? nullptr : open_at(view, at);
+	const DocumentBase *document = at.empty() ? nullptr : view.documents.open_at(at);
 	// A file Files selects that a files kind draws (S18), its document open or not.
 	if (!document)
 		for (size_t i = 0; i < kViewportKindCount; ++i) {
