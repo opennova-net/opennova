@@ -29,8 +29,6 @@
 namespace opennova::wac {
 namespace {
 
-bool ieq(std::string_view a, std::string_view b) { return opennova::strutil::iequals(a, b); }
-
 // The constants' spelling (wac_lexis.h's wac_hash4).
 constexpr uint32_t hash4(char a, char b, char c, char d) { return wac_hash4(a, b, c, d); }
 
@@ -1111,7 +1109,7 @@ private:
 		const char last = static_cast<char>(f.locals[kTokenAt + f.token_length - 1]);
 		// Table 0, the declared names. [orig: @0x4F2960..0x4F2993 -> @0x4F2A39]
 		for (size_t i = 0; i < declarations_.size(); ++i) {
-			if (!ieq(declarations_[i].name, name)) continue;
+			if (!strutil::iequals(declarations_[i].name, name)) continue;
 			out_type = 1;
 			return Operand{encode_operand(OperandKind::MissionVar, static_cast<uint32_t>(256 + i)), {}};
 		}
@@ -1119,7 +1117,7 @@ private:
 		// for an IfName slot, else the fired dword. [orig: @0x4F2995..0x4F29C2
 		// -> @0x4F2A4E..0x4F2A8A]
 		for (int i = 0; i < event_count_; ++i) {
-			if (!ieq(event_names_[size_t(i)], name)) continue;
+			if (!strutil::iequals(event_names_[size_t(i)], name)) continue;
 			if (expected == int(ParamType::Variable)) return std::nullopt;
 			if (expected == int(ParamType::IfName)) return pooled(f, i, int(ParamType::IfName), expected);
 			if (!event_named_[size_t(i)]) return std::nullopt;
@@ -1127,7 +1125,7 @@ private:
 		}
 		// Table 2, the named values. [orig: @0x4F29C4..0x4F29F1 -> @0x4F2A8F]
 		for (const NamedValue &row : kNamedValues) {
-			if (!ieq(row.name, name)) continue;
+			if (!strutil::iequals(row.name, name)) continue;
 			out_type = 1;
 			return Operand{encode_operand(OperandKind::Builtin, static_cast<uint32_t>(row.id)), {}};
 		}
@@ -1213,7 +1211,7 @@ private:
 			if (env_.sounds) {
 				const std::vector<std::string> &names = env_.sounds->names();
 				for (size_t i = 0; i < names.size(); ++i) {
-					if (ieq(set, names[i])) {
+					if (strutil::iequals(set, names[i])) {
 						handle = int32_t(i + 1);
 						break;
 					}
