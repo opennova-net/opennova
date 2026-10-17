@@ -69,9 +69,10 @@ namespace infra { class InfraStatus; }
 //                         programs' ECS services and tasks, the balancer, the
 //                         database, the cache, the lobbies, the controller,
 //                         the machines)
-//   game data           — DataSetRoutes (data_sets/): the hosted data sets and
-//                         their tree uploads into the object store, each part
-//                         through this program (ADR 0064)
+//   game data           — DataSetRoutes and ReleaseRoutes (data_sets/): the
+//                         hosted data sets, their tree uploads into the object
+//                         store and the update releases, each part through
+//                         this program (ADR 0064)
 //   legacy login chain  — retail NW*.dll prepare/start/login/logout/account
 //   legacy host/join    — *.gsb browser blobs, /NWJoin.dll, /NWHost.dll
 //   static + catch-all  — web/dist, /static/*, bare templates, 404 tracker
@@ -120,10 +121,11 @@ public:
 	// listener. Null: the view says no cloud is read here.
 	void set_infra(infra::InfraStatus *status) { infra_ = status; }
 
-	// The object store the hosted data sets' trees live in (object_store.h;
-	// parts.h make_object_store), which the admin's data set routes upload into
-	// and read. Set before start(); it must outlive the listener. Null: no store
-	// (those routes answer store_unavailable).
+	// The object store the hosted data sets' trees and the update packages
+	// live in (object_store.h; parts.h make_object_store), which the admin's
+	// data set and release routes upload into and read. Set before start(); it
+	// must outlive the listener. Null: no store (those routes answer
+	// store_unavailable).
 	void set_object_store(ObjectStore *store) { object_store_ = store; }
 	ObjectStore *object_store() const { return object_store_; }
 

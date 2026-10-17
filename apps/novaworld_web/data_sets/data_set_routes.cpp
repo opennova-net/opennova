@@ -91,6 +91,16 @@ bool valid_expansion_code(std::string_view code) {
 					[](char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'); });
 }
 
+bool valid_updater_login(std::string_view login) {
+	return !login.empty() && login.size() <= DataSetRoutes::kUpdaterLoginMax &&
+			printable_ascii(login);
+}
+
+bool valid_command_file(std::string_view name) {
+	return name.size() > 4 && name.size() <= DataSetRoutes::kCommandFileMax &&
+			printable_ascii(name) && strutil::ends_with_icase(name, ".CMD");
+}
+
 // A multipart upload's id as the store minted it: S3's tokens and the local store's UUIDs are
 // both printable and bounded.
 bool valid_upload_id(std::string_view id) {
@@ -114,6 +124,9 @@ crow::json::wvalue data_set_json(db::Database &db, const DataSetRow &d) {
 	out["expansion_code"] = d.expansion_code;
 	out["title"] = d.title;
 	out["game"] = d.game;
+	out["updater_login"] = d.updater_login;
+	out["command_file"] = d.command_file;
+	out["retail_updater"] = d.retail_updater;
 	std::optional<DataSetTree> current;
 	if (d.current_tree_id)
 		current = find_tree(db, *d.current_tree_id);
@@ -123,6 +136,17 @@ crow::json::wvalue data_set_json(db::Database &db, const DataSetRow &d) {
 		out["current_tree"]["ready_at"] = current->ready_at;
 	} else {
 		out["current_tree"] = nullptr;
+	}
+	id_or_null(out, "baseline_tree_id", d.baseline_tree_id);
+	std::optional<ReleaseRow> published;
+	if (d.published_release_id)
+		published = find_release(db, *d.published_release_id);
+	if (published) {
+		out["published_release"]["id"] = published->id;
+		out["published_release"]["name"] = published->name;
+		out["published_release"]["sha256"] = published->sha256;
+	} else {
+		out["published_release"] = nullptr;
 	}
 	out["servers_live"] = count_live_servers_of(db, d.id);
 	out["servers_outdated"] = count_outdated_servers_of(db, d.id);
@@ -168,6 +192,8 @@ crow::json::wvalue tree_json(db::Database &db, const DataSetTree &t) {
 	crow::json::wvalue out;
 	out["id"] = t.id;
 	out["state"] = tree_state_name(t.state);
+	out["source"] = tree_source_name(t.source);
+	id_or_null(out, "release_id", t.release_id);
 	out["version"] = t.version_text;
 	out["bytes"] = t.bytes;
 	out["files"] = static_cast<int64_t>(t.files.size());
@@ -217,9 +243,10 @@ void DataSetRoutes::register_routes(WebApp &app) {
 
 // GET /api/admin/data-sets — {"store" ({"kind": "s3" or "local"}, null with none), "titles"
 // (what a base may speak), "games" (the lobbies, each {slug, display_name}), "data_sets"}:
-// each data set {id, display_name, kind, parent_id, expansion_code, title, game, current_tree
-// ({id, version, ready_at} or null), servers_live, servers_outdated, trees (its trees newest
-// first, pruned ones left out, each as tree_json)}.
+// each data set {id, display_name, kind, parent_id, expansion_code, title, game, updater_login,
+// command_file, retail_updater, current_tree ({id, version, ready_at} or null),
+// baseline_tree_id, published_release ({id, name, sha256} or null), servers_live,
+// servers_outdated, trees (its trees newest first, pruned ones left out, each as tree_json)}.
 crow::response DataSetRoutes::list(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -254,10 +281,12 @@ crow::response DataSetRoutes::list(const crow::request &req) {
 	return no_store(json_reply(200, out));
 }
 
-// POST /api/admin/data-sets — {display_name, kind, parent_id?, expansion_code?, title?, game?}:
-// a new base (title one of the titles, game a games slug) or expansion (parent_id a base,
-// expansion_code [a-z0-9]{1,8}). 201 {"data_set"}; 400 invalid_json, missing_field,
-// invalid_field (with the field); 409 duplicate_expansion, no_such_parent.
+// POST /api/admin/data-sets — {display_name, kind, parent_id?, expansion_code?, title?, game?,
+// updater_login?, command_file?, retail_updater?}: a new base (title one of the titles, game a
+// games slug) or expansion (parent_id a base, expansion_code [a-z0-9]{1,8}); the updater's
+// product both or neither (a login of 1..32 printable characters, a command file of 1..15
+// ending .CMD). 201 {"data_set"}; 400 invalid_json, missing_field, invalid_field (with the
+// field); 409 duplicate_login, duplicate_expansion, no_such_parent.
 crow::response DataSetRoutes::create(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -282,6 +311,12 @@ crow::response DataSetRoutes::create(const crow::request &req) {
 	note("title");
 	const auto game = body->text("game");
 	note("game");
+	const auto updater_login = body->text("updater_login");
+	note("updater_login");
+	const auto command_file = body->text("command_file");
+	note("command_file");
+	const auto retail_updater = body->flag("retail_updater");
+	note("retail_updater");
 	if (wrong != nullptr)
 		return field_error(400, "invalid_field", wrong, "the member has the wrong type");
 	if (!display_name)
@@ -326,6 +361,20 @@ crow::response DataSetRoutes::create(const crow::request &req) {
 		data_set.parent_id = *parent_id;
 		data_set.expansion_code = *expansion_code;
 	}
+	if (updater_login.has_value() != command_file.has_value())
+		return field_error(400, "invalid_field", updater_login ? "command_file" : "updater_login",
+				"updater_login and command_file come together");
+	if (updater_login) {
+		if (!valid_updater_login(*updater_login))
+			return field_error(400, "invalid_field", "updater_login",
+					"updater_login is 1 to 32 printable characters without spaces");
+		if (!valid_command_file(*command_file))
+			return field_error(400, "invalid_field", "command_file",
+					"command_file is 1 to 15 characters ending in .CMD");
+		data_set.updater_login = *updater_login;
+		data_set.command_file = *command_file;
+	}
+	data_set.retail_updater = retail_updater.value_or(false);
 
 	try {
 		auto db_conn = pool_.acquire();
@@ -336,6 +385,9 @@ crow::response DataSetRoutes::create(const crow::request &req) {
 		switch (create_data_set(*db_conn, data_set, id)) {
 			case DataSetOutcome::Ok:
 				break;
+			case DataSetOutcome::DuplicateLogin:
+				return json_error(
+						409, "duplicate_login", "another data set holds this updater login");
 			case DataSetOutcome::DuplicateExpansion:
 				return json_error(
 						409, "duplicate_expansion", "the base has an expansion of this code");
@@ -355,8 +407,9 @@ crow::response DataSetRoutes::create(const crow::request &req) {
 	}
 }
 
-// PATCH /api/admin/data-sets/<id> — any of {display_name, game (a base's)}, the shapes as the
-// create's; 200 {"data_set"}; 400 invalid_json, invalid_field; 404 not_found.
+// PATCH /api/admin/data-sets/<id> — any of {display_name, game (a base's), updater_login,
+// command_file, retail_updater}, the shapes as the create's; 200 {"data_set"}; 400
+// invalid_json, invalid_field; 404 not_found; 409 duplicate_login.
 crow::response DataSetRoutes::patch(const crow::request &req, uint64_t id) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -374,6 +427,12 @@ crow::response DataSetRoutes::patch(const crow::request &req, uint64_t id) {
 	note("display_name");
 	patch.game = body->text("game");
 	note("game");
+	patch.updater_login = body->text("updater_login");
+	note("updater_login");
+	patch.command_file = body->text("command_file");
+	note("command_file");
+	patch.retail_updater = body->flag("retail_updater");
+	note("retail_updater");
 	if (wrong != nullptr)
 		return field_error(400, "invalid_field", wrong, "the member has the wrong type");
 	if (patch.display_name && !valid_display_name(*patch.display_name))
@@ -391,11 +450,26 @@ crow::response DataSetRoutes::patch(const crow::request &req, uint64_t id) {
 			if (catalog::GameCatalog::load(*db_conn).by_slug(*patch.game) == nullptr)
 				return field_error(400, "invalid_field", "game", "game is no games slug");
 		}
+		const std::string login = patch.updater_login.value_or(row->updater_login);
+		const std::string command_file = patch.command_file.value_or(row->command_file);
+		if (login.empty() != command_file.empty())
+			return field_error(400, "invalid_field",
+					login.empty() ? "updater_login" : "command_file",
+					"updater_login and command_file come together");
+		if (!login.empty() && !valid_updater_login(login))
+			return field_error(400, "invalid_field", "updater_login",
+					"updater_login is 1 to 32 printable characters without spaces");
+		if (!command_file.empty() && !valid_command_file(command_file))
+			return field_error(400, "invalid_field", "command_file",
+					"command_file is 1 to 15 characters ending in .CMD");
 		switch (update_data_set(*db_conn, row->id, patch)) {
 			case DataSetOutcome::Ok:
 				break;
 			case DataSetOutcome::NotFound:
 				return no_such_data_set();
+			case DataSetOutcome::DuplicateLogin:
+				return json_error(
+						409, "duplicate_login", "another data set holds this updater login");
 			default:
 				return json_error(500, "internal_error");
 		}
@@ -704,9 +778,9 @@ crow::response DataSetRoutes::tree_finalize(const crow::request &req, uint64_t i
 // DELETE /api/admin/data-sets/<id>/trees/<t> — an uploading tree: its uploads aborted, its
 // objects removed, the row pruned, 204; a ready or failed one: the row marked pruned and a
 // tree.prune job in the same transaction, 202 {"tree"}; a pruned one 204 (nothing to do).
-// 404 not_found; 409 current, pinned (with "servers", how many live ones) for a tree a data
-// set or a live server still needs, in_progress for one the worker is finalizing; 502
-// store_error; 503 store_unavailable.
+// 404 not_found; 409 current, baseline, pinned (with "servers", how many live ones) for a
+// tree a data set or a live server still needs, in_progress for one the worker is
+// finalizing or building; 502 store_error; 503 store_unavailable.
 crow::response DataSetRoutes::tree_remove(const crow::request &req, uint64_t id, uint64_t tree) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -723,8 +797,9 @@ crow::response DataSetRoutes::tree_remove(const crow::request &req, uint64_t id,
 			case TreeState::Pruned:
 				return crow::response(204);
 			case TreeState::Finalizing:
-				return json_error(
-						409, "in_progress", "the worker is finalizing this tree; wait for it");
+			case TreeState::Building:
+				return json_error(409, "in_progress",
+						"the worker is finalizing or building this tree; wait for it");
 			case TreeState::Uploading: {
 				if (store_ == nullptr)
 					return store_unavailable();
@@ -746,6 +821,8 @@ crow::response DataSetRoutes::tree_remove(const crow::request &req, uint64_t id,
 		const std::string hold = tree_hold(*db_conn, t->id, pinned_by);
 		if (hold == "current")
 			return json_error(409, "current", "this tree is what new starts take");
+		if (hold == "baseline")
+			return json_error(409, "baseline", "this tree is what a release applies to");
 		if (hold == "pinned") {
 			crow::json::wvalue body;
 			body["error"] = "pinned";
