@@ -452,8 +452,6 @@ func open_novaworld_panel(start_client := true) -> void:
 	# A return from a match hands the panel its session (or its error) instead
 	# of starting a fresh connect.
 	_novaworld_panel.start_client_on_ready = start_client
-	# Dev default: localhost. A prod build sets the server host from the
-	# resolved server IP before showing the panel.
 	# Hand the panel the mounted menu root so its host Map picker can list .bms missions (the world's
 	# own root is null until a mission loads). Set BEFORE add_child so _ready can populate the scene.
 	_novaworld_panel.resource_root = _resource_root()
