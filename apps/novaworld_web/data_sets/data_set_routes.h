@@ -10,7 +10,7 @@
 //   GET    /api/admin/data-sets                       the store, the titles, the games, every
 //                                                     data set with its trees
 //   POST   /api/admin/data-sets                       a new data set (a base or an expansion)
-//   PATCH  /api/admin/data-sets/<id>                  its name, lobby
+//   PATCH  /api/admin/data-sets/<id>                  its name, lobby, updater product
 //   DELETE /api/admin/data-sets/<id>                  its trees marked pruned, the row gone
 //   POST   /api/admin/data-sets/<id>/trees            a tree upload begun: {files:[{name,size}]}
 //   PUT    /api/admin/data-sets/<id>/trees/<t>/files/<name>/parts/<n>?upload_id=<u>
@@ -24,7 +24,7 @@
 // transaction of the state move that causes them (hosted/data_set_jobs.h). Without a store
 // (hosting off) every store route answers 503 store_unavailable. The admin's update-all (POST
 // /api/admin/hosted/update-all) sits with the fleet routes. The HttpListener owns one
-// DataSetRoutes.
+// DataSetRoutes beside its ReleaseRoutes (release_routes.h).
 
 #include "web_access.h"
 
@@ -45,9 +45,9 @@ namespace hosted {
 
 struct DataSetTree; // hosted/data_set_repository.h
 
-// A tree as the admin's JSON: {id, state, version, bytes, files (how many), missions (how
-// many), pinned_by (the live servers pinning it), error, created_by, created_at, ready_at ("" until
-// ready)}.
+// A tree as the admin's JSON: {id, state, source, release_id, version, bytes, files (how
+// many), missions (how many), pinned_by (the live servers pinning it), error, created_by,
+// created_at, ready_at ("" until ready)}.
 crow::json::wvalue tree_json(db::Database &db, const DataSetTree &tree);
 
 // The key a tree's file is stored under (under tree_prefix, hosted/data_set_jobs.h).
@@ -61,6 +61,8 @@ public:
 	static constexpr int kMaxParts = 10000;
 	// The shapes a data set's fields take.
 	static constexpr size_t kDisplayNameMax = 64;
+	static constexpr size_t kUpdaterLoginMax = 32;
+	static constexpr size_t kCommandFileMax = 15;
 	static constexpr size_t kExpansionCodeMax = 8;
 
 	DataSetRoutes(WebAccess &access, db::ConnectionPool &pool) : access_(access), pool_(pool) {}

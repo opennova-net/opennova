@@ -7,6 +7,7 @@
 #include "cd_key_routes.h"
 #include "connection_routes.h"
 #include "data_sets/data_set_routes.h"
+#include "data_sets/release_routes.h"
 #include "health.h"
 #include "host_routes.h"
 #include "hosted/console_routes.h"
@@ -292,7 +293,8 @@ struct HttpListener::Impl {
 			billing(access, pool, redis),
 			resets(access, pool, redis),
 			jobs(access, pool),
-			data_sets(access, pool) {}
+			data_sets(access, pool),
+			releases(access, pool) {}
 
 	WebApp app;
 	// start()'s handshake with the Crow thread: Pending until Crow serves
@@ -329,8 +331,10 @@ struct HttpListener::Impl {
 	PasswordResetRoutes resets;
 	// The admin's background jobs routes (jobs/job_routes.h).
 	jobs::JobRoutes jobs;
-	// The hosted data sets' routes over the object store (data_sets/data_set_routes.h).
+	// The hosted data sets' and the update releases' routes over the object store
+	// (data_sets/data_set_routes.h, data_sets/release_routes.h).
 	hosted::DataSetRoutes data_sets;
+	hosted::ReleaseRoutes releases;
 	// The games catalogue, loaded once in start() before the routes register
 	// and never written after, so handlers read it without a lock.
 	catalog::GameCatalog games;
@@ -413,6 +417,8 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->jobs.register_routes(impl_->app);
 	impl_->data_sets.set_store(object_store_);
 	impl_->data_sets.register_routes(impl_->app);
+	impl_->releases.set_store(object_store_);
+	impl_->releases.register_routes(impl_->app);
 	if (object_store_ != nullptr)
 		std::printf("[http] game data routes over the %s object store\n", object_store_->kind());
 	else
