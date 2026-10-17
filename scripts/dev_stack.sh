@@ -436,7 +436,7 @@ cmd_up() {
 
 The local NovaWorld stack runs (project $project).
   site            http://localhost:$site_port  (the portal; its API at /api)
-  site admin      log in as test / test (the seeded dev admin); /admin pages' basic auth admin / dev
+  site admin      log in as test / test (the seeded dev admin)
   admin API       Authorization: Bearer $admin_token
   retail client   the OpenNova Switcher: Custom address... $address
                   (or the hosts line: $address gs.novaworld.net); allow UDP 7597 and 64206

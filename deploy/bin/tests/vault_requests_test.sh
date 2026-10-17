@@ -79,8 +79,7 @@ make_vault() {
   mkitem aws-org API_CREDENTIAL account_id=333333333333 organization_id=o-abcdefghij region=us-east-1 \
     sso_given_name=Ada sso_family_name=Lovelace sso_email=ada@example.org \
     access_key_id=AKIAORGKEY0000000001 secret_access_key=SECRETVALUEawsorg
-  mkitem app-staging SERVER admin_api_token=SECRETVALUEadminapistaging admin_basic_auth_user=admin \
-    admin_basic_auth_password=SECRETVALUEbasicstaging database_password=SECRETVALUEdbstaging \
+  mkitem app-staging SERVER admin_api_token=SECRETVALUEadminapistaging database_password=SECRETVALUEdbstaging \
     redis_password=SECRETVALUEredisstaging edge_auth_secret=SECRETVALUEedgestaging \
     edge_auth_secret_previous=SECRETVALUEedgepreviousstaging
   mkitem app-prod SERVER edge_auth_secret=SECRETVALUEedgeprod

@@ -130,7 +130,7 @@ the manual steps below (each fills the vault field it names), then the applies
 | `aws-prod`, `aws-staging` | `state_bucket`, `access_key_id`, `secret_access_key`, `github_deploy_role_arn` | `./deploy/run.sh org apply` |
 | `aws-prod` | `gate_eip_allocation_id` | hand: the gate address's transfer into the prod account (accept-address-transfer prints it) |
 | `cloudflare` | `api_token`, `zone_id`, `domain` | hand (section 1) |
-| `app-prod`, `app-staging` | `admin_api_token`, `admin_basic_auth_user`, `admin_basic_auth_password`, `database_password`, `redis_password`, `edge_auth_secret` | `secrets init` |
+| `app-prod`, `app-staging` | `admin_api_token`, `database_password`, `redis_password`, `edge_auth_secret` | `secrets init` |
 | `rds-prod`, `rds-staging` | `master_password` | `secrets init` |
 | `stripe-test`, `stripe-live` | `secret_key` (and `restricted_key` in `stripe-test`) | hand (Stripe's dashboard) |
 | `stripe-test`, `stripe-live` | `webhook_secret`, `price_*` | `stripe setup` |
@@ -207,7 +207,7 @@ a value:
 
 | Item | Fields | What `secrets init` puts there |
 |---|---|---|
-| `app-<deployment>` | `admin_api_token`, `admin_basic_auth_user`, `admin_basic_auth_password`, `database_password`, `redis_password`, `edge_auth_secret` | random values (`admin` for the user) |
+| `app-<deployment>` | `admin_api_token`, `database_password`, `redis_password`, `edge_auth_secret` | random values |
 | `rds-<deployment>` | `master_password` | random |
 | `aws-<deployment>` | `account_id`, `root_email` | `REPLACE_ME` |
 | `aws-<deployment>` | `account_name`, `region` | `opennova-<deployment>`, `us-east-1` |

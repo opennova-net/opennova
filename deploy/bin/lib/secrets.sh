@@ -124,8 +124,7 @@ secrets_init() {
   # The deployment's own: its app item (the edge authentication secret among
   # it: each deployment's web hostnames carry their own, infra/zone) and its
   # database's master password.
-  ensure_item "$APP_ITEM" SERVER admin_api_token:gen:24:CONCEALED admin_basic_auth_user:value:admin:STRING \
-    admin_basic_auth_password:gen:16:CONCEALED database_password:gen:24:CONCEALED \
+  ensure_item "$APP_ITEM" SERVER admin_api_token:gen:24:CONCEALED database_password:gen:24:CONCEALED \
     redis_password:gen:32:CONCEALED edge_auth_secret:gen:32:CONCEALED
   ensure_item "$RDS_ITEM" SECURE_NOTE \
     master_password:gen:24:CONCEALED

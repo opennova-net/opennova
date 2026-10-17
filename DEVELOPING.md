@@ -184,8 +184,7 @@ reach the published ports there too. It prints what to point a client at when it
 | `docker-api`, `machine-data`, `dev-machine-<id>` | none | hosted servers (below) |
 
 The dev values: the admin token `dev-admin-token` (`Authorization: Bearer`), the seeded
-accounts `test`/`test` (the first site admin), `foo`/`foo` and `test1`..`test3`/`test`, and the
-portal's `/admin` pages' basic auth `admin`/`dev`. The site's API answers through the portal
+accounts `test`/`test` (the first site admin), `foo`/`foo` and `test1`..`test3`/`test`. The site's API answers through the portal
 alone (`ONNET_API_PROXY_ONLY`, as deployed), so call `http://localhost:8000/api/...`, not
 `:8080`. Billing is off unless the `STRIPE_*` settings are in the shell (`op run
 --env-file=deploy/env/billing.dev.env.tpl -- scripts/dev_stack.sh up`); its webhooks need

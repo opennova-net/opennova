@@ -494,11 +494,11 @@ locals {
   # Web's second container: the portal's nginx on 443 with the Cloudflare
   # Origin CA certificate (edge.tf, SSM tls/*, which Terraform makes beside
   # the proxied records; its entrypoint writes it under ORIGIN_TLS_DIR; without
-  # it, nginx listens on 80 and the balancer has no 443), edge authentication
-  # and the admin pages' basic auth, /api/ proxied to the server on 127.0.0.1.
-  # It starts once the server answers /livez.
+  # it, nginx listens on 80 and the balancer has no 443) and edge
+  # authentication, /api/ proxied to the server on 127.0.0.1. It starts once
+  # the server answers /livez.
   portal_secrets = concat(
-    [for n in ["ADMIN_BASIC_AUTH_USER", "ADMIN_BASIC_AUTH_PASSWORD", "EDGE_AUTH_SECRET"] : { name = n, valueFrom = "${local.ssm_parameter_prefix}/secret/${n}" }],
+    [{ name = "EDGE_AUTH_SECRET", valueFrom = "${local.ssm_parameter_prefix}/secret/EDGE_AUTH_SECRET" }],
     local.edge_proxied ? [for n in ["ORIGIN_TLS_CERT", "ORIGIN_TLS_KEY"] : { name = n, valueFrom = "${local.ssm_parameter_prefix}/tls/${n}" }] : [],
   )
   portal_container = {
