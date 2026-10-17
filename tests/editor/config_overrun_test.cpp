@@ -103,9 +103,10 @@ std::string charattr_text(const std::vector<std::string> &words, bool zeros) {
 // The first offset of `part` in `text` at or after `from`.
 size_t at(const std::string &text, const std::string &part, size_t from = 0) { return text.find(part, from); }
 
-const Diagnostic *overrun_of(const std::vector<Diagnostic> &findings) {
-	if (findings.size() != 1 || findings[0].code() != "document.config_overrun" ||
-	    findings[0].severity != DiagnosticSeverity::Error)
+// The one document.config_overrun of `findings` at `severity`: an error past the block's 36-byte slack (it gates),
+// a warning within it (configfile::fastmem_overrun_reaches_header).
+const Diagnostic *overrun_of(const std::vector<Diagnostic> &findings, DiagnosticSeverity severity) {
+	if (findings.size() != 1 || findings[0].code() != "document.config_overrun" || findings[0].severity != severity)
 		return nullptr;
 	return &findings[0];
 }
@@ -131,7 +132,7 @@ int test_rule_charattr() {
 	if (!document) return 1;
 	TEST_EXPECT(config_overrun_findings(*document).empty()); // a record document's is its validator's
 	const std::vector<Diagnostic> findings = charattr_overrun(*document);
-	const Diagnostic *d = overrun_of(findings);
+	const Diagnostic *d = overrun_of(findings, DiagnosticSeverity::Warning); // 1 byte past: within the slack
 	TEST_EXPECT(d != nullptr);
 	if (!d) return 1;
 	// Over the file as it sits, which a build packs while nothing is changed: at value 65, the first past the 64-byte
@@ -156,7 +157,7 @@ int test_rule_charattr() {
 	Diagnostic error;
 	TEST_EXPECT(document->apply(editor_test::set_edit(first, "stealth", 26.0), error) && charattr_overrun(*document).empty());
 	document->undo();
-	TEST_EXPECT(overrun_of(charattr_overrun(*document)) != nullptr);
+	TEST_EXPECT(overrun_of(charattr_overrun(*document), DiagnosticSeverity::Warning) != nullptr);
 	// At the line: none.
 	std::unique_ptr<DocumentBase> at_line = loaded(fixture_text("pool_at_line.def"), "charattr.def", AssetKind::CharAttrDefs);
 	TEST_EXPECT(at_line && charattr_overrun(*at_line).empty());
@@ -165,7 +166,8 @@ int test_rule_charattr() {
 			charattr_text({ "AutoScope", "Medic", "AutoScope", "AutoScope", "KnifeBonus", "KnifeBonus" }, true);
 	std::unique_ptr<DocumentBase> old_base = loaded(earlier, "charattr.def", AssetKind::CharAttrDefs);
 	const std::vector<Diagnostic> old_findings = old_base ? charattr_overrun(*old_base) : std::vector<Diagnostic>();
-	const Diagnostic *old_d = overrun_of(old_findings);
+	// 8 bytes past, the witnessed run: a warning (the mission started, docs/mnu/menu-re.md).
+	const Diagnostic *old_d = overrun_of(old_findings, DiagnosticSeverity::Warning);
 	TEST_EXPECT(old_d && contains(old_d->message, "72 values") && contains(old_d->message, "8 bytes of zeros") &&
 	            contains(old_d->message, "holds 60 values: under the line"));
 	TEST_EXPECT(old_base && pool_of(saved_text(*old_base)).values == 60 &&
@@ -175,9 +177,12 @@ int test_rule_charattr() {
 			{ "AutoScope", "", "", "", "Medic", "AutoScope", "SpreadBonus", "KnifeBonus", "KnifeBonus" }, false);
 	std::unique_ptr<DocumentBase> tried = loaded(first_try, "charattr.def", AssetKind::CharAttrDefs);
 	const std::vector<Diagnostic> tried_findings = tried ? charattr_overrun(*tried) : std::vector<Diagnostic>();
-	const Diagnostic *tried_d = overrun_of(tried_findings);
+	// 41 bytes past, the witnessed crash: past the slack, an error that gates.
+	const Diagnostic *tried_d = overrun_of(tried_findings, DiagnosticSeverity::Error);
 	TEST_EXPECT(tried_d && contains(tried_d->message, "105 values") && contains(tried_d->message, "41 bytes of zeros") &&
+	            contains(tried_d->message, "past any block the allocator gives it") && blocks_build(*tried_d) &&
 	            tried_d->message.find("Saving it") == std::string::npos && tried_d->planned.empty());
+	TEST_EXPECT(old_d && contains(old_d->message, "into the block's own spare bytes") && !blocks_build(*old_d));
 	TEST_EXPECT(tried && pool_of(saved_text(*tried)).values == 105);
 	// Lines the loader never reads are values too: a legacy block's "//KEY = n" entries (no ConfigFile comment), a
 	// section of no class, a class after the first the file lacks (CHARACTER9 after a missing 7, which
@@ -186,7 +191,7 @@ int test_rule_charattr() {
 	                                     "[CHARACTER9]\r\nSTEALTH = 1\r\n";
 	std::unique_ptr<DocumentBase> with_legacy = loaded(legacy, "charattr.def", AssetKind::CharAttrDefs);
 	const std::vector<Diagnostic> legacy_findings = with_legacy ? charattr_overrun(*with_legacy) : std::vector<Diagnostic>();
-	const Diagnostic *legacy_d = overrun_of(legacy_findings);
+	const Diagnostic *legacy_d = overrun_of(legacy_findings, DiagnosticSeverity::Warning);
 	TEST_EXPECT(legacy_d && contains(legacy_d->message, "77 values") && contains(legacy_d->message, "holds 60 values"));
 	int unread = 0;
 	if (with_legacy)
@@ -209,7 +214,7 @@ int test_rule_other_kinds() {
 	std::unique_ptr<DocumentBase> text_credits = loaded(credits, "credits.kda", AssetKind::Credits);
 	const std::vector<Diagnostic> credit_findings =
 			text_credits ? config_overrun_findings(*text_credits) : std::vector<Diagnostic>();
-	const Diagnostic *d = overrun_of(credit_findings);
+	const Diagnostic *d = overrun_of(credit_findings, DiagnosticSeverity::Warning);
 	TEST_EXPECT(d && contains(d->message, "credits.kda holds 71 values and no text value") &&
 	            contains(d->message, "7 bytes of zeros") && d->planned.empty());
 	// The same in the CBIN form: the binary reader's, whose pools are cleared at their sizes.
@@ -273,9 +278,13 @@ int test_session() {
 	editor_test::create_missing_files(session);
 	const AssetEntry *entry = session.view().project.scan->find("charattr.def");
 	const std::string path = entry ? entry->relative_path : std::string("charattr.def");
-	const std::string past = fixture_text("pool_past_line.def");
-	TEST_EXPECT(test_io::write_file(session.view().project.root + "/" + path,
-	                                     std::vector<uint8_t>(past.begin(), past.end())));
+	const auto write = [&](const std::string &text) {
+		return test_io::write_file(session.view().project.root + "/" + path, std::vector<uint8_t>(text.begin(), text.end()));
+	};
+	// The witnessed crash: nine classes, 105 values, 41 bytes past the pool and its block's 36-byte slack.
+	const std::string crash = charattr_text(
+			{ "AutoScope", "", "", "", "Medic", "AutoScope", "SpreadBonus", "KnifeBonus", "KnifeBonus" }, false);
+	TEST_EXPECT(write(crash));
 	editor_test::handle_to_end(session, request::rescan());
 	const auto finding = [&]() -> const Diagnostic * {
 		for (const Diagnostic &d : session.view().findings.diagnostics)
@@ -285,7 +294,8 @@ int test_session() {
 	const Diagnostic *d = finding();
 	TEST_EXPECT(d && session.document_for(path) == nullptr);
 	if (!d) return 1;
-	TEST_EXPECT(blocks_build(*d) && blocker_is_the_games(*d) && contains(blocker_reason(*d), "0x7609e8"));
+	TEST_EXPECT(d->severity == DiagnosticSeverity::Error && blocks_build(*d) && blocker_is_the_games(*d) &&
+	            contains(blocker_reason(*d), "0x7609e8"));
 	// The build is refused for it, the game's heap corrupt from that load on: the row is its refusal, named.
 	const SessionView &v = session.view();
 	const auto refused_for_it = [&]() {
@@ -293,31 +303,37 @@ int test_session() {
 		bool row = false, named = false;
 		for (const Diagnostic &b : v.activity.last_build->diagnostics) {
 			if (b.code() == "document.config_overrun" && b.asset == path && blocks_build(b)) row = true;
-			if (b.code() == "build.blocked" && contains(b.message, "1 problem stops it: charattr.def holds 65 values"))
+			if (b.code() == "build.blocked" && contains(b.message, "1 problem stops it: charattr.def holds 105 values"))
 				named = true;
 		}
 		return row && named;
 	};
 	editor_test::handle_to_end(session, request::build());
 	TEST_EXPECT(refused_for_it());
-	TEST_EXPECT(contains(v.activity.status, "Build refused: charattr.def holds 65 values"));
+	TEST_EXPECT(contains(v.activity.status, "Build refused: charattr.def holds 105 values"));
 	d = finding();
 	TEST_EXPECT(d != nullptr && fixes_for(*d, session.view()).empty());
-	// Opened and saved, the file holds the editor's form, under the line: the project builds.
+	// One byte past the pool, within the slack: a warning, and the project builds.
+	const std::string past = fixture_text("pool_past_line.def");
+	TEST_EXPECT(write(past));
+	editor_test::handle_to_end(session, request::rescan());
+	d = finding();
+	TEST_EXPECT(d && d->severity == DiagnosticSeverity::Warning && !blocks_build(*d));
+	editor_test::handle_to_end(session, request::build());
+	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok && !v.activity.last_build->refused);
+	// Opened and saved, the file holds the editor's form, under the line: no row.
 	editor_test::handle_to_end(session, request::open_document(path));
 	editor_test::handle_to_end(session, request::save(path));
 	TEST_EXPECT(session.outcome().done() && !finding());
-	editor_test::handle_to_end(session, request::build());
-	TEST_EXPECT(v.activity.has_build && v.activity.last_build->ok && !v.activity.last_build->refused);
-	// The file past the line again, written outside the editor and reloaded: the row and the refusal again.
+	// The crash written again outside the editor and reloaded: the row and the refusal again.
 	editor_test::handle_to_end(session, request::close_document(path));
-	TEST_EXPECT(test_io::write_file(session.view().project.root + "/" + path,
-	                                     std::vector<uint8_t>(past.begin(), past.end())));
+	TEST_EXPECT(write(crash));
 	editor_test::handle_to_end(session, request::rescan());
 	TEST_EXPECT(finding() != nullptr);
 	editor_test::handle_to_end(session, request::build());
 	TEST_EXPECT(refused_for_it());
-	std::printf("session: the closed charattr.def's row refuses the build; the file saved (the build lands) and written again\n");
+	std::printf("session: 41 bytes past refuse the build, 1 byte past builds (a warning); saved under the line; the "
+	            "crash written again refuses it again\n");
 	return 0;
 }
 
