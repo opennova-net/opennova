@@ -19,8 +19,15 @@ namespace opennova::png {
 // `indexed`, where the caller asks it: a palette image's texels as the indices they hold
 // (the top row first) and its palette, an entry the PLTE leaves out black (ADR 0046 S20,
 // a terrain's surface map, whose indices are its classes); any other image leaves it empty.
+// `palette`, where the caller asks it: what a palette image's chunks hold as the file holds them
+// (an editor's texture writes the file again in its form): its PLTE's entries and its tRNS bytes, an
+// entry's alpha each (none: empty); any other image leaves it empty.
+struct PngPalette {
+	uint32_t entries = 0;
+	std::vector<uint8_t> alpha;
+};
 bool decode_png(const std::vector<uint8_t> &bytes, RgbaImage &out, std::string &error,
-                IndexedImage8 *indexed = nullptr);
+                IndexedImage8 *indexed = nullptr, PngPalette *palette = nullptr);
 
 // A PNG as one grey value a texel, at its own depth (ADR 0046 S20, a heightmap's form): a 16-bit
 // image's samples whole (`max_value` 65535), an 8-bit one's as they are (255), a sub-byte grey scaled
@@ -38,5 +45,8 @@ bool is_png(const std::vector<uint8_t> &bytes);
 // decoding the image (a texture probe measures a menu's PNG with it): false when
 // the bytes are not a PNG that starts with one.
 bool png_header_size(const std::vector<uint8_t> &bytes, uint32_t &width, uint32_t &height);
+// The bit depth and the colour type its IHDR states (0 grey, 2 RGB, 3 palette, 4 grey and alpha, 6 RGBA),
+// read as png_header_size reads the size.
+bool png_header_form(const std::vector<uint8_t> &bytes, uint8_t &bit_depth, uint8_t &color_type);
 
 } // namespace opennova::png
