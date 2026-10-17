@@ -866,11 +866,8 @@ bool Runtime::build_fd_rgba_mip_chain(const uint8_t *pixels,
 	                                  FdMipChain &r_chain) const {
 	// [orig: Foliage_LoadDefAssets @ 0x601260;
 	// GTexture_CreateFromPixelDataWithAlphaBlend]
-	const auto is_power_of_two = [](int value) {
-		return value > 0 && (value & (value - 1)) == 0;
-	};
-	if (pixels == nullptr || !is_power_of_two(width) ||
-	    !is_power_of_two(height) || std::min(width, height) <= 2) {
+	if (pixels == nullptr || width <= 0 || height <= 0 || !io::is_power_of_two(static_cast<uint32_t>(width)) ||
+	    !io::is_power_of_two(static_cast<uint32_t>(height)) || std::min(width, height) <= 2) {
 		return false;
 	}
 	const size_t width_size = static_cast<size_t>(width);
