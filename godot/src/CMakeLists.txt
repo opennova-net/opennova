@@ -191,6 +191,7 @@ add_library(opennova_bindings OBJECT
     hud/end_round_transition.cpp
     hud/hud_inset_scope.cpp
     hud/player_hud_weapon_def.cpp
+    hud/hud_entity_info.cpp
     devtools/frame_stats.cpp
     devtools/dev_tools.cpp
     devtools/dev_tools_overlay.cpp

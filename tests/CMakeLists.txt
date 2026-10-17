@@ -1628,6 +1628,14 @@ add_executable(hud_math_test hud/hud_math_test.cpp)
 target_link_libraries(hud_math_test PRIVATE opennova_runtime)
 add_test(NAME hud_math COMMAND hud_math_test)
 
+# The local player's per-frame HUD info record (hud/hud_entity_info.h): the
+# health fraction, the stance and fov defaults, the ammo pair, the live-FSM
+# gates, the SIGHTS card gate, the selector clear ahead of the overlay fork and
+# the circle mask's inputs [orig: HUD_BuildEntityInfo @0x4b8440].
+add_executable(hud_entity_info_test hud/hud_entity_info_test.cpp)
+target_link_libraries(hud_entity_info_test PRIVATE opennova_runtime)
+add_test(NAME hud_entity_info COMMAND hud_entity_info_test)
+
 # Which hudpos.def values place each HUD element (hud/hud_element_layout.h): the element -> key
 # table, its HUDDECLUT rows, the positioned texts' hidden / alignment indices and a coordinate's
 # value as the game reads it (the NETWORKINDICATOR reset corners, PAUSEDPOS's fallback).

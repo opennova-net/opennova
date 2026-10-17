@@ -105,6 +105,7 @@
 #include "simulation/present_event_records.h"
 #include "object/skeletal_anim.h"
 #include "hud/player_hud_weapon_def.h"
+#include "hud/hud_entity_info.h"
 #include "hud/hud_draw_list_stats.h"
 #include "hud/hud_overlay.h"
 #include "hud/map_view_state.h"
@@ -336,6 +337,7 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(EndRoundTransition);
 	GDREGISTER_CLASS(HudInsetScope);
 	GDREGISTER_CLASS(PlayerHudWeaponDef);
+	GDREGISTER_CLASS(HudEntityInfo);
 	GDREGISTER_CLASS(MissionInfo);
 	GDREGISTER_CLASS(MissionData);
 	GDREGISTER_CLASS(MissionCatalogRow);
