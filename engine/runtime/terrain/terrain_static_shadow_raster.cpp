@@ -383,7 +383,8 @@ bool prepare_triangle(const TerrainStaticShadowRasterTriangle &triangle,
 	// The ordinary tile-model pass uses CULLMODE CCW: in D3D screen
 	// coordinates (Y down), positive signed area is the retained clockwise
 	// front face. The material two-sided bit switches to CULLMODE NONE.
-	// [orig: CRenderBatchQueue_FlushBatches @0x5DA3E4..0x5DA401]
+	// [orig: CRenderBatchQueue_FlushBatches @0x5DA0FA..0x5DA137: the material's +0x202 bit 4 sets
+	// CULLMODE NONE, else CCW (3) while the batch's +0x348 is clear]
 	if (!triangle.two_sided && area < 0.0f) return false;
 	const float orientation = area > 0.0f ? 1.0f : -1.0f;
 	const TextureDerivatives derivatives =
