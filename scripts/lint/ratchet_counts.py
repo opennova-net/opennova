@@ -24,7 +24,10 @@ in maturity_baseline.json:
                         no src/ level) with zero "[orig" citations, excluding
                         the allowlisted infra libs (citation is inapplicable
                         there) -- the faithful-port rule's coverage floor.
-  godot_orig_cites      "[orig:" citations across the whole Godot side --
+                        An allowlist row that exempts no uncited file is
+                        stale and fails --enforce (delete it): a file it
+                        names that loses its cites must be counted.
+  godot_orig_cites     "[orig:" citations across the whole Godot side --
                         godot/src C++ plus the godot/game, godot/editor and godot/probes GDScript -- as ONE count (ADR 0043 merged
                         the former adapter_cpp_orig_cites / gd_orig_cites
                         pair). A cite moves freely between the two Godot-side
@@ -90,7 +93,8 @@ in maturity_baseline.json:
 Modes:
   (default)         report counts vs baseline; exit 0 regardless (soft mode)
   --enforce         exit 1 if any counter exceeds its baseline (the ratchet)
-                    OR sits below it unbanked
+                    OR sits below it unbanked, or a
+                    citation_allowlist_engine row is stale
   --write-baseline  rewrite the baseline to current counts (maintainer
                     action for a bump, logged in docs/maturity-program.md;
                     the slice's own action for a decrease)
@@ -239,8 +243,10 @@ def count_gd_test_production_subclasses() -> int:
     return count
 
 
-def count_engine_uncited_src_files(allowlist: set[str]) -> int:
+def engine_uncited_src_files(allowlist: set[str]) -> tuple[int, list[str]]:
+    """(the uncited files no allowlist row covers, the rows that cover no uncited file)."""
     count = 0
+    live: set[str] = set()
     engine = REPO / "engine"
     # engine/<group>/<lib>: the libs are one level below the four group dirs.
     # Post-flatten (2026-08-10) sources sit directly in the lib dir (nested
@@ -251,21 +257,25 @@ def count_engine_uncited_src_files(allowlist: set[str]) -> int:
     # codec); docs/maturity-program.md records why each is there.
     prefixes = tuple(entry for entry in allowlist if "/" in entry)
     for lib_dir in sorted(p for p in engine.glob("*/*") if p.is_dir()):
-        if lib_dir.name in allowlist:
-            continue
         for path in lib_dir.rglob("*"):
             if path.suffix.lower() not in (".c", ".cc", ".cpp"):
-                continue
-            rel = path.relative_to(engine).as_posix()
-            if any(rel == prefix or rel.startswith(prefix.rstrip("/") + "/") for prefix in prefixes):
                 continue
             try:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            if "[orig:" not in text:
+            if "[orig:" in text:
+                continue
+            rel = path.relative_to(engine).as_posix()
+            covering = [prefix for prefix in prefixes
+                        if rel == prefix or rel.startswith(prefix.rstrip("/") + "/")]
+            if lib_dir.name in allowlist:
+                covering.append(lib_dir.name)
+            if covering:
+                live.update(covering)
+            else:
                 count += 1
-    return count
+    return count, sorted(allowlist - live)
 
 
 # One cite marker, one count (ADR 0042 d7 + ADR 0043): a witness citation is
@@ -686,11 +696,12 @@ def main() -> int:
     config = json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
     allowlist = set(config.get("citation_allowlist_engine", []))
     baseline = config.get("counters", {})
+    uncited, stale_allowlist = engine_uncited_src_files(allowlist)
 
     current = {
         "test_private_pokes": count_test_private_pokes(),
         "gd_test_production_subclasses": count_gd_test_production_subclasses(),
-        "engine_uncited_src_files": count_engine_uncited_src_files(allowlist),
+        "engine_uncited_src_files": uncited,
         "godot_orig_cites": count_godot_orig_cites(),
         "engine_stdout_prints": count_engine_stdout_prints(),
         "gd_prints_outside_debug": count_gd_prints_outside_debug(),
@@ -765,13 +776,19 @@ def main() -> int:
             failed = True
             print(f"[ratchet]   improvement, bank it in this change: "
                   f"python scripts/lint/ratchet_counts.py --write-baseline")
+    print(f"[ratchet] citation_allowlist_engine: {len(allowlist)} rows, "
+          f"{len(stale_allowlist)} stale {'OK' if not stale_allowlist else 'STALE'}")
+    for entry in stale_allowlist:
+        print(f"[ratchet]   {entry}: exempts no uncited file (its files cite, or it is gone); "
+              f"delete the row from maturity_baseline.json")
+        failed = True
 
     if failed and args.enforce:
         print("[ratchet] FAIL: a counter increased, fell without being banked, lacks a "
-              "baseline, or sits above an absolute floor. Fix the regression, bank an "
-              "improvement with --write-baseline (named in the commit), or (baseline "
-              "counters only) a maintainer bumps the baseline and logs it in "
-              "docs/maturity-program.md.")
+              "baseline, or sits above an absolute floor, or a citation allowlist row is "
+              "stale. Fix the regression, bank an improvement with --write-baseline (named "
+              "in the commit), delete the stale row, or (baseline counters only) a "
+              "maintainer bumps the baseline and logs it in docs/maturity-program.md.")
         return 1
     return 0
 
