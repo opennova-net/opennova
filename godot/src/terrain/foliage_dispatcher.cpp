@@ -20,6 +20,7 @@
 
 #include <base/io/bam.h>
 #include <base/io/fixed.h>
+#include <formats/foliage/runtime.h>
 #include <runtime/terrain/foliage_detail_collector.h>
 
 #include <godot_cpp/classes/array_mesh.hpp>
@@ -78,15 +79,6 @@ bool finite_vector(const Vector3 &p_value) {
          std::isfinite(static_cast<float>(p_value.z));
 }
 
-uint32_t pack_preview_detail_key(int p_cell_min_x, int p_cell_min_z) {
-  // The same packing as the runtime collector: HIGH15 = the cell's X-min,
-  // LOW15 = its Z-min (engine/runtime/terrain/foliage_detail_collector.cpp
-  // carries the witness).
-  const uint32_t x = static_cast<uint32_t>(p_cell_min_x) & 0x7FFFu;
-  const uint32_t z = static_cast<uint32_t>(p_cell_min_z) & 0x7FFFu;
-  return (x << 16u) | z;
-}
-
 // The pass names and per-draw uniform names the applier writes every frame.
 // Function-local statics: a godot::StringName cannot be a file-scope static
 // (its constructor needs godot-cpp's interface, which is not bound when the
@@ -124,11 +116,6 @@ const DrawUniformNames &draw_uniform_names() {
   return names;
 }
 
-int32_t decode_foliage_cell_axis(uint32_t p_packed) {
-  const int32_t value = static_cast<int32_t>(p_packed & 0x7FFFu);
-  return (value & 0x4000) != 0 ? value - 0x8000 : value;
-}
-
 // The material set of one water side: 0 = the far side, 1 = the camera's.
 size_t side_index(bool p_far_side) { return p_far_side ? 0u : 1u; }
 
@@ -140,8 +127,9 @@ static_assert(sizeof(opennova::renderer::FoliageModelInstance) ==
               "a MultiMesh TRANSFORM_3D + custom instance is the block");
 
 Vector2 foliage_detail_cell_center(uint32_t p_cell_key) {
-  const int32_t minimum_x = decode_foliage_cell_axis(p_cell_key >> 16u);
-  const int32_t minimum_z = decode_foliage_cell_axis(p_cell_key);
+  const int32_t minimum_x =
+      opennova::foliage::decode_detail_cell_axis(p_cell_key >> 16u);
+  const int32_t minimum_z = opennova::foliage::decode_detail_cell_axis(p_cell_key);
   return Vector2(static_cast<float>(minimum_x) + 8.0f,
                  static_cast<float>(minimum_z) + 8.0f);
 }
@@ -1842,8 +1830,8 @@ FoliageDispatcher::_preview_cells(const Vector3 &p_camera_position) const {
       // and without a sector routing its world minimum stands in for the
       // atlas minimum.
       cells.push_back(opennova::foliage::DetailCell{
-          pack_preview_detail_key(static_cast<int>(min_x),
-                                  static_cast<int>(min_z)),
+          opennova::foliage::pack_detail_cell_key(static_cast<int32_t>(min_x),
+                                                  static_cast<int32_t>(min_z)),
           distance,
           center_y,
           static_cast<int32_t>(min_x),

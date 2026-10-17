@@ -46,10 +46,7 @@ float foliage_detail_wind_phase(uint32_t time_ms, int32_t wind_osc_ring0) {
 // [orig: Terrain_CollectNearFoliagePatches @ 0x603fc1 (the patch's sector
 // origin FB20 << 9 stored for the draw); the header carries the rest]
 float foliage_detail_wind_sector_origin_z(uint32_t cell_key) {
-	int32_t z_min = static_cast<int32_t>(cell_key & 0x7FFFu);
-	if ((z_min & 0x4000) != 0) {
-		z_min -= 0x8000;
-	}
+	const int32_t z_min = foliage::decode_detail_cell_axis(cell_key);
 	// Arithmetic floor to the 512-unit sector (a negative Z-min floors down).
 	const int32_t sector = z_min >= 0 ? z_min / 512 : -((-z_min + 511) / 512);
 	return static_cast<float>(sector * 512);

@@ -1,7 +1,8 @@
 // foliage::Runtime::invalidate_cells (ADR 0046 S25: an editor's sculpt or paint): the cached detail cells and model
 // tiles whose instances read the changed region dropped, reported evicted with the next frame and generated again
 // when visible (a new revision); every other cell kept (a hit, its revision unchanged); an empty rect drops nothing;
-// reset forgets what was dropped.
+// reset forgets what was dropped. And the detail cell key every reader shares: pack_detail_cell_key and
+// decode_detail_cell_axis.
 #include <formats/foliage/runtime.h>
 
 #include <array>
@@ -34,7 +35,26 @@ WorldSamplers flat_world(float height) {
 
 // A detail cell's key: its X-min and Godot-plane Z-min, 16 units on.
 uint32_t detail_key(int32_t x, int32_t z) {
-	return (static_cast<uint32_t>(x & 0x7FFF) << 16) | static_cast<uint32_t>(z & 0x7FFF);
+	return pack_detail_cell_key(x, z);
+}
+
+void test_detail_cell_key() {
+	// HIGH15 the X-min, LOW15 the Z-min, each its low 15 bits.
+	check(pack_detail_cell_key(-32, 48) == 0x7FE00030u, "(-32, 48) packs as 0x7FE00030");
+	check(pack_detail_cell_key(0x12345, -1) == 0x23457FFFu, "each half keeps its coordinate's low 15 bits");
+	// Bit 14 the sign; the bits above 15 (the collector's flag bits) ignored.
+	check(decode_detail_cell_axis(0x7FE0u) == -32, "0x7FE0 decodes to -32");
+	check(decode_detail_cell_axis(0x0030u) == 48, "0x0030 decodes to 48");
+	check(decode_detail_cell_axis(0x4000u) == -16384, "0x4000 decodes to -16384");
+	check(decode_detail_cell_axis(0x3FFFu) == 16383, "0x3FFF decodes to 16383");
+	check(decode_detail_cell_axis(0x80008030u) == 48, "the bits above 15 are ignored");
+	bool round_trip = true;
+	for (int32_t v = -16384; v <= 16383; v += 16) {
+		const uint32_t key = pack_detail_cell_key(v, -v - 16);
+		round_trip = round_trip && decode_detail_cell_axis(key >> 16u) == v &&
+		             decode_detail_cell_axis(key) == -v - 16;
+	}
+	check(round_trip, "every 16-unit cell in the signed 15-bit range packs and decodes back");
 }
 
 FrameRequest request_of(const std::vector<uint32_t> &keys, bool silhouette) {
@@ -114,6 +134,7 @@ void test_model_tiles() {
 } // namespace
 
 int main() {
+	test_detail_cell_key();
 	test_detail_cells();
 	test_model_tiles();
 	if (g_fail == 0) std::printf("foliage_runtime_invalidate: all tests passed\n");

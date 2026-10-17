@@ -1,5 +1,6 @@
 #include <runtime/terrain/foliage_detail_collector.h>
 
+#include <formats/foliage/runtime.h>
 #include <runtime/terrain_query/coords.h>
 
 #include <cmath>
@@ -114,14 +115,12 @@ private:
 		}
 
 		// HIGH15 = the cell's X-min, LOW15 = its Z-min: retail packs the
-		// PolyTrn sector of -camera_y (FB20, the Godot-Z axis) plus the
+		// PolyTrn sector of -camera_y (FB20, the render plane's z) plus the
 		// node's minimum into the low half, and the generator adds local B
 		// to it. [orig: Terrain_CollectNearFoliagePatches @ 0x603f69..0x603f8a;
 		// Foliage_GenerateInstances_0 @ 0x5fff84..0x5fffa2]
-		const uint32_t x_min = static_cast<uint32_t>(world_x) & 0x7fffu;
-		const uint32_t z_min = static_cast<uint32_t>(world_z) & 0x7fffu;
-		patches.push_back({key_flags | (x_min << 16) | z_min, distance, maximum_y,
-				atlas_x, atlas_z});
+		patches.push_back({key_flags | foliage::pack_detail_cell_key(world_x, world_z),
+				distance, maximum_y, atlas_x, atlas_z});
 	}
 };
 

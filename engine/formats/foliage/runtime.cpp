@@ -48,13 +48,6 @@ uint16_t next_draw(uint32_t &state) {
 	return static_cast<uint16_t>(state);
 }
 
-int32_t sign_extend_15(uint32_t value) {
-	const uint32_t low = value & 0x7FFFu;
-	return (low & 0x4000u) != 0u
-	         ? static_cast<int32_t>(low | 0xFFFF8000u)
-	         : static_cast<int32_t>(low);
-}
-
 bool try_to_fixed(float value, int32_t &result) {
 	if (!std::isfinite(value)) return false;
 	const double scaled =
@@ -123,8 +116,8 @@ Candidate detail_candidate(uint32_t key, int index, uint32_t &state) {
 	// 0x5fffb8..0x60000e (blocker), 0x600021..0x600065 (samples);
 	// Terrain_CollectNearFoliagePatches @ 0x603f69..0x603f8a (key)]
 	Candidate candidate = next_candidate(index, state);
-	const int32_t base_x = sign_extend_15(key >> 16u);
-	const int32_t base_z = sign_extend_15(key);
+	const int32_t base_x = decode_detail_cell_axis(key >> 16u);
+	const int32_t base_z = decode_detail_cell_axis(key);
 	candidate.x_fixed = io::float_to_fp16_16(static_cast<float>(base_x) + candidate.local_a);
 	candidate.z_fixed = io::float_to_fp16_16(static_cast<float>(base_z) + candidate.local_b);
 	return candidate;
@@ -138,8 +131,8 @@ Candidate model_candidate(uint32_t key, int index, uint32_t &state,
 	// [orig: Foliage_GenerateModelTileInstances @ 0x600af5..0x600b0c;
 	// Foliage_UpdateModelTiles @ 0x601fd0..0x60205b (key)]
 	Candidate candidate = next_candidate(index, state);
-	const int32_t base_x = sign_extend_15(key >> 16u);
-	const int32_t base_y = sign_extend_15(key);
+	const int32_t base_x = decode_detail_cell_axis(key >> 16u);
+	const int32_t base_y = decode_detail_cell_axis(key);
 	candidate.x_fixed = io::float_to_fp16_16(static_cast<float>(base_x) + candidate.local_a);
 	r_mission_y_fixed =
 	    io::float_to_fp16_16(static_cast<float>(base_y) - candidate.local_b);
@@ -296,8 +289,8 @@ bool make_silhouette_instance(
 	// @ 0x600bd0..0x600c6a (corners), 0x600c70..0x600d32 (midpoints)]
 	const float cosine = std::cos(candidate.yaw);
 	const float sine = std::sin(candidate.yaw);
-	const int32_t base_x = sign_extend_15(cell_key >> 16u);
-	const int32_t base_y = sign_extend_15(cell_key);
+	const int32_t base_x = decode_detail_cell_axis(cell_key >> 16u);
+	const int32_t base_y = decode_detail_cell_axis(cell_key);
 	std::array<int32_t, 4> corner_x{};
 	std::array<int32_t, 4> corner_y{};
 
@@ -493,7 +486,7 @@ size_t Runtime::invalidate_cells(int32_t x0, int32_t z0, int32_t x1, int32_t z1,
 		// texel on), and the geometry expanded over them reaches the slot's detail reach past each.
 		const int64_t cell_reach = 1 + std::max<int64_t>(0, detail_reach[static_cast<size_t>(slot_index)]);
 		for (DetailCacheEntry &entry : detail_cache_[slot_index]) {
-			if (!entry.valid || !meets(sign_extend_15(entry.key >> 16u), sign_extend_15(entry.key), cell_reach))
+			if (!entry.valid || !meets(decode_detail_cell_axis(entry.key >> 16u), decode_detail_cell_axis(entry.key), cell_reach))
 				continue;
 			dropped_detail_.push_back(CacheIdentity{static_cast<uint8_t>(slot_index), entry.key, entry.revision});
 			entry = DetailCacheEntry{};
@@ -504,7 +497,7 @@ size_t Runtime::invalidate_cells(int32_t x0, int32_t z0, int32_t x1, int32_t z1,
 		const int64_t reach =
 		    static_cast<int64_t>(std::ceil(cached_slots_[slot_index].model_radius * 0.75f * 1.4143f)) + 1;
 		for (ModelCacheEntry &entry : model_cache_[slot_index]) {
-			if (!entry.valid || !meets(sign_extend_15(entry.key >> 16u), -int64_t(sign_extend_15(entry.key)), reach))
+			if (!entry.valid || !meets(decode_detail_cell_axis(entry.key >> 16u), -int64_t(decode_detail_cell_axis(entry.key)), reach))
 				continue;
 			dropped_model_.push_back(CacheIdentity{static_cast<uint8_t>(slot_index), entry.key, entry.revision});
 			model_cache_index_[slot_index].erase(entry.key);
