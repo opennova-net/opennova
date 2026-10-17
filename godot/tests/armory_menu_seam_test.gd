@@ -427,38 +427,6 @@ func test_accept_emits_loadout_and_cancel_closes() -> void:
 	assert_signal_emitted(companion, "armory_closed", "CANCEL closes without applying")
 
 
-# The ACCEPT hotkey: the WEAPON screen's on-show registers the USE-ITEM binding row's
-# runtime keys (the armory opener — Shift) on the ACCEPT control, debounced until the
-# opener press releases once [orig: UI_InitTeamClassSelection @0x567370 adds
-# g_UseItemBindingKey0/1 to control "ACCEPT" via CUIWidget_AddScreenHotkey
-# @0x5674a8/@0x5674c0; the open stamps g_WeaponScreenOpenDebounce @0x4e0b21,
-# cleared only by the row's KEYUP — Input_HandleMenuKeyRelease @0x4de2d0].
-# on_menu_built = the on-show: it stamps the debounce; ArmoryPresenter routes the
-# key edges here while its overlay is open.
-func test_armory_accept_hotkey_debounces_until_release() -> void:
-	var companion := ArmoryMenuCompanion.new()
-	companion.set_weapon_database(_load_weapons())
-	companion.set_player_class(8)
-	companion.set_current_loadout("WPN_M4AUTO")
-	var driver := _make_weapon_driver()
-	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
-	watch_signals(companion)
-
-	assert_false(companion.accept_hotkey_edge(true),
-		"the still-held opener press must not ACCEPT [orig: @0x4e0b21]")
-	assert_signal_not_emitted(companion, "loadout_accepted")
-	assert_false(companion.accept_hotkey_edge(false),
-		"the release arms the key, no ACCEPT of its own [orig: @0x4de2d0]")
-	assert_true(companion.accept_hotkey_edge(true),
-		"the armed press is the ACCEPT accelerator [orig: @0x5674a8]")
-	assert_signal_emitted(companion, "loadout_accepted")
-
-	# A re-show re-stamps the debounce — the next press is swallowed again.
-	companion.on_menu_built(driver, "weapon.mnu", "WEAPON", null)
-	assert_false(companion.accept_hotkey_edge(true),
-		"the on-show re-stamps the open debounce [orig: @0x4e0b21]")
-
-
 # A present weapon.def with no weapon rows is a LOADED, empty table, never "not
 # loaded": the game builds its loadout catalog whatever the walk finds
 # [orig: WeaponDef_LoadAll @0x54dd10 seeds the "None" row and never reads the

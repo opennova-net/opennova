@@ -63,11 +63,6 @@ var _slot_rows := {}                 # control name -> PackedInt32Array
 # Each authored control selects a count for its definition rather than a weapon row
 # [orig: WeaponDef_UISlotSelectCallback registration args 0/1/2 @0x567020].
 var _grenade_rows: Array[WeaponDef] = []
-# The ACCEPT-hotkey debounce: the opener press that showed the screen must release
-# once before the key acts as ACCEPT — the open stamps it, only the row's KEYUP
-# arms it [orig: g_WeaponScreenOpenDebounce = 1 at the open @0x4e0b21; cleared by
-# Input_HandleMenuKeyRelease @0x4de2d0].
-var _accept_hotkey_armed := false
 
 signal loadout_accepted(loadout: Dictionary)
 signal armory_closed
@@ -169,11 +164,11 @@ func on_menu_built(driver: MenuDriver, file: String, screen: String, root: Resou
 				_activation_handlers[control] = _on_accept
 			"cancel_loadout":
 				_activation_handlers[control] = _on_cancel
-	# The on-show re-registers the ACCEPT hotkeys and the open re-stamps the
-	# debounce [orig: the calls of CUIWidget_ResetScreenHotkeys @0x649ce0 and
-	# CUIWidget_AddScreenHotkey @0x649e20 @0x567483..0x5674c0;
-	# g_WeaponScreenOpenDebounce = 1 @0x4e0b21].
-	_accept_hotkey_armed = false
+	# The on-show's ACCEPT hotkeys (the use-item keys) have no state here:
+	# ArmoryPresenter routes their presses to trigger_accept past the engine's
+	# armory press latch
+	# [orig: the calls of CUIWidget_ResetScreenHotkeys @0x649ce0 and
+	# CUIWidget_AddScreenHotkey @0x649e20 @0x567483..0x5674c0].
 	_update_weight()
 
 
@@ -415,22 +410,6 @@ func _on_accept() -> void:
 ## Same collect + apply as clicking the button.
 func trigger_accept() -> void:
 	_on_accept()
-
-
-## One armory-hotkey edge (true = pressed). Returns true when the edge triggered
-## ACCEPT. The release ARMS the key (the opener press that showed the screen must
-## release once [orig: Input_HandleMenuKeyRelease @0x4de2d0 clears the open
-## debounce]); an armed press is the ACCEPT accelerator [orig: the on-show
-## registration @0x5674a8]. ArmoryPresenter routes key input here while open.
-func accept_hotkey_edge(pressed: bool) -> bool:
-	if not pressed:
-		_accept_hotkey_armed = true
-		return false
-	if not _accept_hotkey_armed:
-		return false
-	_accept_hotkey_armed = false
-	trigger_accept()
-	return true
 
 
 func _on_cancel() -> void:

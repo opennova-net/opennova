@@ -243,16 +243,18 @@ func _process(_delta: float) -> void:
 	_driver.tick(_view.frame_clock_ms)
 
 
-# Route the armory-key edges to the companion's debounced ACCEPT accelerator
-# while the screen is open (the companion owns the armed state — its
-# on_menu_built stamp is the original's open-debounce [orig: @0x4e0b21]).
+# A useitem key's press while the screen is open is the ACCEPT accelerator,
+# unless the engine's armory press latch holds it: the press that opened the
+# screen latched it, and only a useitem release clears it (MainGame._input;
+# engine LocalPlayer::armory_press_latched carries the witness).
 func _unhandled_key_input(event: InputEvent) -> void:
 	if not is_open():
 		return
 	var key := event as InputEventKey
-	if key == null or key.echo or not is_accept_hotkey(bound_key_of(key)):
+	if key == null or key.echo or not key.pressed or not is_accept_hotkey(bound_key_of(key)):
 		return
-	if _armory.accept_hotkey_edge(key.pressed):
+	if can_dismiss():
+		_armory.trigger_accept()
 		get_viewport().set_input_as_handled()
 
 
