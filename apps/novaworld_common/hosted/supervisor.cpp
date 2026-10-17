@@ -5,6 +5,8 @@
 #include "hosted_settings.h"
 #include "loggable.h"
 
+#include <net/novaworld/lobby_repository.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -205,6 +207,18 @@ void Supervisor::tick(uint64_t now_ms) {
 	if (pass_guard_ && !pass_guard_(db))
 		return;
 	pass_reserved_.clear();
+	// A lobby that takes clients, read as the gates read it: with none, no
+	// server starts and an exit costs no restart (the class comment).
+	const bool lobby_live = lobbydb::live_lobbies(db).instances > 0;
+	if (lobby_live != lobby_live_) {
+		if (lobby_live)
+			std::printf("[hosted] a lobby instance is live: the servers waiting for one start\n");
+		else
+			std::fprintf(stderr,
+					"[hosted] WARN no lobby instance is live: no hosted server starts, and "
+					"an exit counts no restart, until one is\n");
+		lobby_live_ = lobby_live;
+	}
 	// The servers this pass stopped for their owners' limits: stepped from the
 	// next pass on, as stopping (their rows here hold the state before it).
 	std::set<int64_t> limited;
@@ -447,6 +461,16 @@ void Supervisor::on_provisioning(db::Database &db, const HostedServer &s, Runtim
 		return;
 	}
 	if (now_ms < rt.not_before_ms) return; // a restart's backoff
+	// No lobby live: the gate would hand its opennova-serve none. It waits here
+	// unplaced, no machine launched for it, and starts once one is (its owner
+	// and its place read then, below).
+	if (!lobby_live_) {
+		if (!rt.lobby_wait_logged)
+			std::printf(
+					"[hosted] server %lld waits for a live lobby\n", static_cast<long long>(s.id));
+		rt.lobby_wait_logged = true;
+		return;
+	}
 
 	// The owner read again right before credentials are minted (a crash
 	// restart's backoff gives an admin time to withdraw a grant).
@@ -667,6 +691,13 @@ void Supervisor::on_exit(db::Database &db, const HostedServer &s, Runtime &rt, u
 	else
 		reason = "opennova-serve exited with code " +
 				(report.exit_code ? std::to_string(*report.exit_code) : std::string("unknown"));
+	if (!lobby_live_) {
+		// NovaWorld's cause, not the server's: with no lobby live opennova-serve
+		// gives up on the gate (retail's 30 s probe). Placed again, no restart
+		// counted; it waits for a lobby in provisioning.
+		replace(db, s, now_ms, reason + " while no lobby instance was live");
+		return;
+	}
 	attempt_failed(db, s, rt, now_ms, reason);
 }
 
@@ -714,8 +745,9 @@ void Supervisor::on_listing(db::Database &db, const Fleet &fleet, const HostedSe
 		return;
 	}
 	// While its machine is lost the listing's clock waits: the machine's end,
-	// not a missed listing, decides then (as for a running server's checks).
-	if (machine->state == FleetMachineState::Lost) {
+	// not a missed listing, decides then (as for a running server's checks). So
+	// it does while no lobby is live, which nothing lists on.
+	if (machine->state == FleetMachineState::Lost || !lobby_live_) {
 		rt.since_ms = now_ms;
 		return;
 	}
@@ -754,7 +786,9 @@ void Supervisor::on_running(db::Database &db, const Fleet &fleet, const HostedSe
 	// Its listing: gone for listing_lost_ms, the lobby it listed on went away,
 	// and its NovaWorld session reconnects only to that lobby's address (the
 	// config's derivation), so a new start lists it again, no restart counted.
-	if (s.service_user_id && listing_rid_of(db, *s.service_user_id)) {
+	// While no lobby is live the clock waits: its session reconnects to that
+	// address until a lobby is back there, and a new start could not list.
+	if (!lobby_live_ || (s.service_user_id && listing_rid_of(db, *s.service_user_id))) {
 		rt.listing_seen_ms = now_ms;
 	} else {
 		const uint64_t gone_ms = now_ms - std::max(rt.listing_seen_ms, rt.since_ms);

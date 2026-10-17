@@ -98,9 +98,18 @@
 // waits for the next one;
 // the brake on a fleet that cannot launch is the per-kind launch backoff and
 // the heartbeat's launch_failures (refused launches and machines that never
-// booted alike), not the servers' restarts. A stopped or failed server's
-// service account is deleted with the transition that ends it. Always on:
-// nothing reaps an idle server, and nothing ends one for its age.
+// booted alike), not the servers' restarts. Nor is NovaWorld's own cause a
+// crash: while no lobby instance is live (lobbydb::live_lobbies, the gates'
+// read: a lobby outage, a deployment's first release before its lobby runs)
+// the gate hands a starting opennova-serve no lobby, and it gives up past its
+// 30 s probe and exits (retail's, SESSION_GATE_PROBE_TIMEOUT_MS). So then no
+// server is placed (each waits in provisioning, "waits for a live lobby"), an
+// exit places the server again with no restart counted, and the listing's
+// clocks wait (a listing server's timeout, a running one's listing_lost_ms:
+// its lister reconnects to the lobby address and lists again once a lobby is
+// back there); once one is live, the waiting servers start. A stopped or
+// failed server's service account is deleted with the transition that ends it.
+// Always on: nothing reaps an idle server, and nothing ends one for its age.
 //
 // The machines (fleet_repository.h, each move a compare-and-set):
 //
@@ -351,6 +360,7 @@ private:
 		bool stop_pushed = false;
 		uint64_t stop_pushed_ms = 0;
 		bool waiting_logged = false;  // "waits for a slot", once
+		bool lobby_wait_logged = false; // "waits for a live lobby", once
 		bool launch_failure_noted = false; // its machine's failed launch, in its events once
 	};
 	// A start the supervisor rendered: the container it wants on the server's
@@ -450,6 +460,9 @@ private:
 	StopListing stop_listing_;
 	AdminLinks *admin_links_ = nullptr;
 	std::map<int64_t, Runtime> runtimes_;
+	// Whether a lobby instance took clients at this pass's start (the class
+	// comment's "no lobby is live"); the pass thread's alone.
+	bool lobby_live_ = true;
 	// This pass's servers placed on a machine the cloud has not answered for yet
 	// (no address: launching), by machine and slot: the slot each will take once
 	// it has one, which the servers placed after it in the pass see as held (so

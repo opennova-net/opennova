@@ -17,7 +17,8 @@
 // never read from an exit code), a launch the cloud refused costing the server
 // no restart, the restart window, the boot and listing timeouts, the health
 // checks, a lost machine placing its server again with no restart counted (and
-// holding its listing's clock), an owner's account banned
+// holding its listing's clock), no lobby live (nothing placed, an exit costing
+// no restart, the listing's clocks waiting), an owner's account banned
 // or deleted, its comp grant withdrawn or its support tier canceled (also
 // during a crash restart's backoff), the owners' limits and their hold, the
 // reconciliation at the service's start, and the admin links kept in step with
@@ -1273,6 +1274,96 @@ int test_listing_waits_while_lost() {
 	return 0;
 }
 
+// No lobby live (a lobby outage; a deployment's first release, whose controller
+// rolls before any lobby: prod's cutover of 2026-10-17 failed both restored
+// servers, their restarts used up, when each opennova-serve gave up on a gate
+// that handed it no lobby): nothing is placed and no machine launched, an exit
+// counts no restart, the listing's clocks wait; once a lobby is live the
+// waiting server starts, and an exit counts again.
+int test_waits_for_lobby() {
+	Rig rig("hosted_waits_for_lobby");
+	rig.lobby_down();
+	const int64_t id = rig.request("lobby_wait");
+	for (int i = 0; i < 5; ++i) {
+		rig.advance(1000);
+		rig.step();
+	}
+	auto row = rig.server(id);
+	TEST_EXPECT(row->state == State::Provisioning && !row->machine_ref && row->restarts == 0);
+	TEST_EXPECT(rig.fake.launches == 0 && hosted::list_live_machines(rig.db).empty());
+	// A lobby takes clients: the server starts.
+	rig.lobby_up();
+	TEST_EXPECT(!rig.to_running(id, 8201).empty());
+	TEST_EXPECT(rig.fake.launches == 1 && rig.server(id)->restarts == 0);
+	const int64_t machine = rig.machine_of(id);
+	// Its restarts used up (two crashes while a lobby is live), so a counted
+	// restart would fail it.
+	for (int crash = 1; crash <= rig.config.restart_limit; ++crash) {
+		rig.agent_of(id)->exit_with(rig.container(id), 1);
+		rig.sync_all();
+		rig.tick();
+		TEST_EXPECT(rig.state(id) == State::Provisioning && rig.server(id)->restarts == crash);
+		hostdb::remove_host_by_rid(rig.db, 8200 + static_cast<uint32_t>(crash));
+		TEST_EXPECT(!rig.back_to_running(id, 8201 + static_cast<uint32_t>(crash)).empty());
+	}
+	uint32_t rid = 8201 + static_cast<uint32_t>(rig.config.restart_limit);
+
+	// The lobby goes, its listings with it: the running server's listing clock
+	// waits however long (its lister reconnects to the lobby address), and it
+	// keeps its container.
+	rig.lobby_down();
+	hostdb::remove_host_by_rid(rig.db, rid);
+	const std::string container = rig.container(id);
+	const uint64_t down_at = rig.now;
+	while (rig.now < down_at + 2 * rig.config.listing_lost_ms) {
+		rig.advance(60 * 1000);
+		rig.step();
+		TEST_EXPECT(rig.state(id) == State::Running && rig.container(id) == container);
+	}
+	// Its exit: placed again with no restart counted (though none is left), and
+	// it waits unplaced.
+	rig.agent_of(id)->exit_with(container, 1);
+	rig.sync_all();
+	rig.tick();
+	row = rig.server(id);
+	TEST_EXPECT(row->state == State::Provisioning && row->restarts == rig.config.restart_limit &&
+			!row->machine_ref);
+	TEST_EXPECT(contains(last_detail(rig.db, id),
+			"exited with code 1 while no lobby instance was live; placed again (no restart "
+			"counted)"));
+	for (int i = 0; i < 5; ++i) {
+		rig.advance(rig.config.restart_backoff_ms);
+		rig.step();
+	}
+	TEST_EXPECT(rig.state(id) == State::Provisioning && !rig.server(id)->machine_ref);
+
+	// A lobby back: it starts on its machine. Gone again while the server waits
+	// for its listing: the listing's clock waits, and its exit costs no restart.
+	rig.lobby_up();
+	TEST_EXPECT(rig.walk(id, State::Listing) && rig.machine_of(id) == machine);
+	rig.lobby_down();
+	rig.advance(2 * rig.config.listing_timeout_ms);
+	rig.step();
+	TEST_EXPECT(rig.state(id) == State::Listing);
+	rig.agent_of(id)->exit_with(rig.container(id), 1);
+	rig.sync_all();
+	rig.tick();
+	row = rig.server(id);
+	TEST_EXPECT(row->state == State::Provisioning && row->restarts == rig.config.restart_limit);
+
+	// Live again: it starts and runs, and an exit counts once more: with no
+	// restart left, it fails.
+	rig.lobby_up();
+	TEST_EXPECT(!rig.to_running(id, ++rid).empty());
+	TEST_EXPECT(rig.machine_of(id) == machine && rig.fake.launches == 1);
+	rig.agent_of(id)->exit_with(rig.container(id), 1);
+	rig.sync_all();
+	rig.tick();
+	row = rig.server(id);
+	TEST_EXPECT(row->state == State::Failed && contains(row->failure_reason, "no restart left"));
+	return 0;
+}
+
 int test_owner_changes() {
 	Rig rig("hosted_owners");
 	// A banned owner's running server is stopped.
@@ -1828,6 +1919,7 @@ int main(int argc, char **argv) {
 		{ "listing_lost", test_listing_lost },
 		{ "machine_lost_replaces", test_machine_lost_replaces },
 		{ "listing_waits_while_lost", test_listing_waits_while_lost },
+		{ "waits_for_lobby", test_waits_for_lobby },
 		{ "owner_changes", test_owner_changes },
 		{ "limit_at_provisioning", test_limit_at_provisioning },
 		{ "owner_limits", test_owner_limits },

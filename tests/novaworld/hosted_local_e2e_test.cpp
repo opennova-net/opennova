@@ -11,6 +11,8 @@
 // the bootstrap names for it. Built only with BUILD_NOVAWORLD_HTTP; Linux (the
 // agent is).
 //
+//   * no lobby live (the service's lobby drained): the first start below waits
+//     in provisioning, no machine launched, until the lobby takes clients again;
 //   * the owner, granted a server (players.comp_servers), starts a Joint
 //     Operations server with POST /api/me/servers; the supervisor launches a
 //     shared machine, whose agent bootstraps and syncs, places the server on
@@ -582,7 +584,13 @@ int main(int argc, char **argv) {
 		const std::string session = internal_up ? site_login(service, kOwner, kOwnerPassword) : std::string();
 		expect(!internal_up || !session.empty(), "the owner logs in to the site");
 
-		// The first start.
+		// The first start, while no lobby is live (the service's own drained, as an
+		// admin's drain marks its row): it waits in provisioning, no machine
+		// launched, and starts once the lobby takes clients again.
+		const bool drained = !session.empty() &&
+				opennova::lobbydb::set_instance_state(
+						*service.pool.acquire(), service.nwudp.lobby_id(), "draining");
+		expect(session.empty() || drained, "the lobby drains");
 		int64_t id = 0;
 		if (!session.empty()) {
 			const auto reply = send(service, "POST", "/api/me/servers", as_owner(session, true),
@@ -593,6 +601,18 @@ int main(int argc, char **argv) {
 			const auto started = reply.code == 202 ? integer_at(json, { "server", "id" }) : std::nullopt;
 			expect(reply.transport_ok && started.has_value(), "POST /api/me/servers is accepted");
 			id = started.value_or(0);
+		}
+		if (id != 0 && drained) {
+			std::this_thread::sleep_for(std::chrono::seconds(2));
+			const auto row = server_row(service, id);
+			expect(row && row->state == hosted::State::Provisioning && !row->machine_ref &&
+							hosted::list_live_machines(*service.pool.acquire()).empty(),
+					"with no lobby live the start waits in provisioning, no machine launched");
+		}
+		if (drained) {
+			expect(opennova::lobbydb::set_instance_state(
+						   *service.pool.acquire(), service.nwudp.lobby_id(), "active"),
+					"the lobby takes clients again");
 		}
 		bool running = false;
 		if (id != 0) {
