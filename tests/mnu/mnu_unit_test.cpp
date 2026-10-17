@@ -925,6 +925,18 @@ bool test_write_issues() {
   CHECK(issue_for(d).find("MIN_ITEM_HEIGHT 0") != std::string::npos, "a LIST MIN_ITEM_HEIGHT of 0");
   d.screens[0].roots[0].table_data.min_item_height = 1;
   CHECK(issue_for(d).empty(), "a LIST MIN_ITEM_HEIGHT of 1 writes");
+  // Absent, the field holds the game's default, -1 (a row measured from the font) [orig: CListWnd_Construct
+  // @ 0x643c34; CTableWnd_Construct @ 0x63e92b]: none is an issue, and that latent value written again is
+  // none either (D-12 follow-up).
+  for (const mnu::WindowType type : {mnu::WindowType::List, mnu::WindowType::LanList, mnu::WindowType::Table}) {
+    d = base;
+    d.screens[0].roots[0].type = type;
+    d.screens[0].roots[0].table_data = mnu::TableData();
+    CHECK(d.screens[0].roots[0].table_data.min_item_height == -1 && issue_for(d).empty(),
+          "an absent MIN_ITEM_HEIGHT is the default, no issue");
+    d.screens[0].roots[0].table_data.has_min_item_height = true;
+    CHECK(issue_for(d).empty(), "the default written again writes");
+  }
   d = base;
   d.screens[0].name.clear();
   CHECK(issue_for(d).find("NAME") != std::string::npos, "a SCREEN with no NAME");
