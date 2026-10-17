@@ -650,7 +650,70 @@ bool check_the_slot_weapon_fires() {
 			"the held rifle's empty clip refuses, though the requested weapon has no clip");
 }
 
+// A controller seat (under a carrier that is no EWeap item, so the personal route)
+// reads every loaded-round bucket as 0 and every pool as 0: a bucket rifle and a
+// clipless weapon with a cost refuse, a clip weapon fires from its slot.
+// [orig: WeaponSlot_CanFire @0x541C6D..0x541C89 / @0x541CC7..0x541CF6 -> sub_5405F0
+//  @0x540624..0x540627, Entity_GetScoreValueBySlotType @0x54078F..0x540799]
+bool check_controller_seat_reads_no_bucket() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	world.registry.configure_pool(1, 4);
+	const auto shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
+	std::vector<inmatch::NapiNPConnection> roster;
+	roster.push_back(make_seeded_conn(2, 1, nullptr, ns::TransportMode::Client, shooter, true));
+	auto &conn = roster[0];
+	world.tables.weapons.ammo_class_names = {"", "CLASS_MANA", "CLS_B"};
+	world.tables.weapons.ammo_class_caps = {1000, 1000, 1000};
+	world.tables.weapons.entries.resize(8);
+	auto weapon = [&](uint8_t adm, int32_t rank, int32_t clipsize, int32_t bucket) {
+		auto &e = world.tables.weapons.entries[adm];
+		e.name = "SEATED_WEAPON_" + std::to_string(adm);
+		e.valid = true;
+		e.category = 3;
+		e.rank = rank;
+		e.clipsize = clipsize;
+		e.ammo_class_id = 2;
+		e.ammo_class_count = 1;
+		e.ammo_bucket = bucket;
+		e.ammo_index = 1;
+	};
+	weapon(5, 2, 20, 1);  // a bucket rifle
+	weapon(6, 3, 20, 0);  // a clip rifle
+	weapon(7, 4, -1, 0);  // a clipless weapon, one unit a shot
+	conn.weapon_slots[uint16_t(3 * 65 + 2)] = inmatch::WeaponSlotState{5, 0};
+	conn.weapon_slots[uint16_t(3 * 65 + 3)] = inmatch::WeaponSlotState{6, 3};
+	conn.weapon_slots[uint16_t(3 * 65 + 4)] = inmatch::WeaponSlotState{7, 0};
+	conn.reply.shared_clips[1] = 5;
+	conn.reply.ammo_pools[2] = 50;
+	w::Entity carrier;
+	carrier.has_item_def = true; // no EWeap bit: the personal route
+	w::Entity *player = world.registry.get(shooter);
+	player->mounted = true;
+	player->mount_type = w::SeatType::Controller;
+	player->mount_target = world.registry.spawn(1, carrier);
+	const auto shoot = [&](uint8_t adm) {
+		dispatch_fire(conn, roster, world,
+				fire_body(shooter.packed, 0x22, adm, 0, 0, 0, 0, 0, 0xFFFF, 1, 12, 0));
+	};
+	shoot(5);
+	shoot(7);
+	if (!expect(world.out.rounds.count == 0 && conn.reply.shared_clips[1] == 5,
+			"a controller seat reads the bucket and the pool as 0: both refuse"))
+		return false;
+	shoot(6);
+	if (!expect(world.out.rounds.count == 1 && conn.weapon_slots[uint16_t(3 * 65 + 3)].clip == 2,
+			"a clip weapon fires from its own slot word"))
+		return false;
+	player->mounted = false;
+	player->mount_type = w::SeatType::None;
+	shoot(5);
+	return expect(world.out.rounds.count == 2 && conn.reply.shared_clips[1] == 4,
+			"off the seat the bucket rifle fires from the player's bucket");
+}
+
 int main() {
+	if (!check_controller_seat_reads_no_bucket()) return 1;
 	if (!check_ungranted_combo_is_refused()) return 1;
 	if (!check_the_slot_weapon_fires()) return 1;
 	if (!check_refused_fire_mirrors_the_weapon()) return 1;

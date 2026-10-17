@@ -21,6 +21,7 @@
 #include <runtime/inmatch/server_vehicle_spawn.h> // the 0x40 / 0x42 handlers
 #include <runtime/inmatch/napi_np_server_ctx.h>  // ServerDispatchInputs::server_ctx
 #include <runtime/inmatch/session_status.h>
+#include <runtime/world/weapon_inventory.h> // the slot-ammo seat legs (WeaponAmmoSeat)
 #include <runtime/world/weapon_table_build.h> // loadout_entry_permitted (D-NET-141)
 
 #include <runtime/replication/connection_fan.h>     // apply_connection_uplink — the in-order 0x0C read-apply
@@ -2024,27 +2025,53 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
                     fire_def.flags = slot_def->flags;
                     fire_def.clip_capacity = slot_def->clipsize;
                     fire_def.ammo_cost = slot_def->ammo_class_count;
+                    // The can-fire reads its pool and bucket through the shooter's seat
+                    // [orig: WeaponSlot_CanFire @0x541BA0 - the bucket @0x541C6D..0x541C79
+                    //  (sub_5405F0), the pool @0x541CC7 (Entity_GetScoreValueBySlotType)].
+                    const world::WeaponAmmoSeat seat = world::entity_ammo_seat(*world, *shooter);
                     world::WeaponSlotState fire_slot;
                     const int pool = slot_def->ammo_class_id;
-                    fire_slot.reserve = pool >= 0 && pool < 128 ? st.ammo_pools[pool] : 0;
+                    fire_slot.reserve = world::weapon_seat_pool(seat, pool,
+                            pool >= 0 && pool < 128 ? st.ammo_pools[pool] : 0);
                     fire_slot.clip = 1; // the real mounted/personal clip is checked below
                     if (!world::weapon_fsm_can_fire(fire_def, fire_slot, fire_inputs)) break;
 					if (slot_def->clipsize != -1) {
-						if (mounted_slot != nullptr) {
+						// A bucket weapon's loaded rounds read through the seat: a UseGun
+						// seat reads the carrier's MountSlot clip and spends its +710 word, a
+						// controller seat reads 0 (so refuses); otherwise the player's own
+						// bucket. [orig: WeaponSlot_CanFire @0x541C6D..0x541C89;
+						//  Weapon_ConsumeAmmo @0x540850 - the seat legs @0x54086B..0x540894,
+						//  the bucket @0x5408B5..0x5408C9, the slot word @0x540907..0x540913;
+						//  sub_5461D0 @0x5461D0]
+						if (slot_def->ammo_bucket != 0) {
+							const uint32_t bucket = static_cast<uint32_t>(slot_def->ammo_bucket);
+							const bool own_bucket = bucket < st.shared_clips.size() &&
+									bucket < world->tables.weapons.ammo_class_names.size();
+							// A bucket past the class count reads 0 at any seat
+							// [orig: sub_5405F0 @0x5405FC..0x540603].
+							if (!own_bucket ||
+									world::weapon_seat_bucket(seat, st.shared_clips[bucket]) == 0)
+								break;
+							if (seat.parent_slot == 3) {
+								world::Entity *carrier = world->registry.get(shooter->mount_target);
+								if (carrier != nullptr) {
+									int32_t word = static_cast<int16_t>(carrier->primary_weapon_slot.reserve);
+									if (word != -1) {
+										word -= slot_def->ammo_class_count;
+										if (word < 0) word = 0;
+										carrier->primary_weapon_slot.reserve = static_cast<int16_t>(word);
+									}
+								}
+							} else if (st.shared_clips[bucket] != 0) {
+								--st.shared_clips[bucket];
+							}
+						} else if (mounted_slot != nullptr) {
 							if (static_cast<int16_t>(mounted_slot->clip) == 0) break;
 							--mounted_slot->clip;
 						} else {
 							WeaponSlotState &slot = *personal;
-							if (slot_def->ammo_bucket != 0) {
-                                const uint32_t bucket = static_cast<uint32_t>(slot_def->ammo_bucket);
-                                if (bucket >= st.shared_clips.size() ||
-                                        bucket >= world->tables.weapons.ammo_class_names.size() ||
-                                        st.shared_clips[bucket] == 0) break;
-                                --st.shared_clips[bucket];
-                            } else {
-                                if (slot.clip == 0) break;
-                                --slot.clip;
-                            }
+							if (slot.clip == 0) break;
+							--slot.clip;
 						}
 					}
 					// The accepted fire re-points the shooter's EquippedSlot: the borrowed
