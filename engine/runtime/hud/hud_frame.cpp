@@ -2152,19 +2152,36 @@ void HudFrameCompiler::element_feed(const HudFrameState &state, float w,
 // across the middle of every box.
 
 // One border piece: cell (col,row) of the 4x4 atlas stretched into the dest
-// rect. The bottom row keeps only its top 90% of BOTH the destination and the
-// source cell — cropped, not squashed [orig: the crop arm @0x56b454-0x56b470,
-// flt_7C459C = 0.9; the bottom trio passes the flag @0x56bbc0/@0x56bc22/
-// @0x56bc80].
+// rect. The cell's UV region is the one the style's load stored, the half
+// texel baked in: u = (col * (W >> 2) + 0.5) / W .. ((col + 1) * (W >> 2) +
+// 0.5) / W, v alike over H, each worked in double and stored as a float
+// [orig: BoxTexture_LoadAndSetupUVRegions @0x56acd0 -- the regions rec+0x48
+// .. rec+0x150 @0x56afe3..0x56b2f7], which HUD_DrawTexturedQuad_0 maps onto
+// the piece as given [orig: @0x56b3fc..0x56b424]; so a piece drawn at its
+// cell's size samples texel centres, never the neighbouring cell's edge.
+// Cell (1,1), the MrClippy fill's region rec+0x160, steps its rows by W >> 2
+// where every other region steps by H >> 2 [orig: @0x56b31d, @0x56b338] (the
+// same on every shipped atlas, all square). The bottom row keeps only its top
+// 90% of BOTH the destination and the source cell — cropped, not squashed
+// [orig: the crop arm @0x56b454-0x56b470, flt_7C459C = 0.9; the bottom trio
+// passes the flag @0x56bbc0/@0x56bc22/@0x56bc80].
 void HudFrameCompiler::emit_stdbox_piece(float x0, float y0, float x1, float y1,
-		int col, int row, bool crop_bottom, uint32_t color, int32_t texture) {
-	if (x1 <= x0 || y1 <= y0) return;
-	constexpr float kCell = 1.0f / 4.0f;
-	const float u0 = static_cast<float>(col) * kCell;
-	const float v0 = static_cast<float>(row) * kCell;
-	const float vh = crop_bottom ? kCell * kBoxBottomCrop : kCell;
+		int col, int row, bool crop_bottom, uint32_t color, int32_t texture, int tex_w,
+		int tex_h) {
+	if (x1 <= x0 || y1 <= y0 || tex_w <= 0 || tex_h <= 0) return;
+	const int qw = tex_w >> 2;
+	const int qh = tex_h >> 2;
+	const int row_step = (col == 1 && row == 1) ? qw : qh;
+	const auto region = [](int texels, int extent) {
+		return static_cast<float>((static_cast<double>(texels) + 0.5) / static_cast<double>(extent));
+	};
+	const float u0 = region(col * qw, tex_w);
+	const float u1 = region((col + 1) * qw, tex_w);
+	const float v0 = region(row * row_step, tex_h);
+	const float v1 = region(row * row_step + qh, tex_h);
+	const float v1_drawn = crop_bottom ? (v1 - v0) * kBoxBottomCrop + v0 : v1;
 	const float dh = crop_bottom ? (y1 - y0) * kBoxBottomCrop : (y1 - y0);
-	emit_rect_uv(x0, y0, x1, y0 + dh, u0, v0, u0 + kCell, v0 + vh, color, texture);
+	emit_rect_uv(x0, y0, x1, y0 + dh, u0, v0, u1, v1_drawn, color, texture);
 	// The combined material's second stage: the boxtile camo at its own
 	// dims, screen-anchored [orig: HUD_DrawTexturedQuad_0 @0x56b3e0 with the
 	// style's boxtile w/h @0x56b97a..0x56bcbb]. Only the stdbox style was
@@ -2218,26 +2235,32 @@ void HudFrameCompiler::emit_stdbox(float x0, float y0, float x1, float y1,
 				const float cx2 = std::min(tx + period, fx2);
 				if (cx2 <= cx1) continue;
 				// A clipped tile samples the matching slice of the cell, so
-				// the texel phase stays locked to the screen grid.
+				// the texel phase stays locked to the screen grid. Each UV
+				// carries retail's half texel, (dest + 0.5) / cell, so pixel i
+				// samples the centre of the cell's texel i - tile and never
+				// the neighbouring cell's edge [orig: HUD_StdboxDrawFillWrapTiled
+				// @0x56B5D0 -- u = (x + 0.5) * (1 / cell_w), v = (y + 0.5) *
+				// (1 / cell_h) at each vertex @0x56B690..0x56B6E9].
 				emit_rect_uv(cx1, cy1, cx2, cy2,
-						fu0 + kCell * ((cx1 - tx) / period),
-						kCell * ((cy1 - ty) / period),
-						fu0 + kCell * ((cx2 - tx) / period),
-						kCell * ((cy2 - ty) / period), color,
+						fu0 + kCell * ((cx1 - tx + 0.5f) / period),
+						kCell * ((cy1 - ty + 0.5f) / period),
+						fu0 + kCell * ((cx2 - tx + 0.5f) / period),
+						kCell * ((cy2 - ty + 0.5f) / period), color,
 						kHudTexBoxBorder);
 			}
 		}
 	}
 
 	// 2. The border pieces, over the fill.
-	emit_box_pieces(x0, y0, x1, y1, cw, ch, color, title_gap_w, kHudTexBoxBorder);
+	emit_box_pieces(x0, y0, x1, y1, cw, ch, color, title_gap_w, kHudTexBoxBorder,
+			layout_.box_tex_w, layout_.box_tex_h);
 }
 
 // The eight border pieces (and the titled top row) of any registered box
 // style over its own atlas: the same piece pass for every style
 // [orig: Render_HUDBoxOverlay @0x56b700, the piece calls @0x56b937..0x56bcbb].
 void HudFrameCompiler::emit_box_pieces(float x0, float y0, float x1, float y1, float cw,
-		float ch, uint32_t color, float title_gap_w, int32_t texture) {
+		float ch, uint32_t color, float title_gap_w, int32_t texture, int tex_w, int tex_h) {
 	const float ix1 = x0 + cw;   // inner x after the left column
 	const float ix2 = x1 - cw;   // inner x before the right column
 	const float iy1 = y0 + ch;
@@ -2250,24 +2273,24 @@ void HudFrameCompiler::emit_box_pieces(float x0, float y0, float x1, float y1, f
 		// x0+cw+gap, cap (2,3) width cw; the shared edge pick-up @0x56ba57].
 		const float bar_x2 = x0 + cw + title_gap_w;
 		const float cap_x2 = bar_x2 + cw;
-		emit_stdbox_piece(x0, y0, x0 + cw, y0 + ch, 0, 3, false, color, texture);
-		emit_stdbox_piece(x0 + cw, y0, bar_x2, y0 + ch, 1, 3, false, color, texture);
-		emit_stdbox_piece(bar_x2, y0, cap_x2, y0 + ch, 2, 3, false, color, texture);
+		emit_stdbox_piece(x0, y0, x0 + cw, y0 + ch, 0, 3, false, color, texture, tex_w, tex_h);
+		emit_stdbox_piece(x0 + cw, y0, bar_x2, y0 + ch, 1, 3, false, color, texture, tex_w, tex_h);
+		emit_stdbox_piece(bar_x2, y0, cap_x2, y0 + ch, 2, 3, false, color, texture, tex_w, tex_h);
 		if (ix2 > cap_x2)
-			emit_stdbox_piece(cap_x2, y0, ix2, y0 + ch, 1, 0, false, color, texture);
+			emit_stdbox_piece(cap_x2, y0, ix2, y0 + ch, 1, 0, false, color, texture, tex_w, tex_h);
 	} else {
-		emit_stdbox_piece(x0, y0, x0 + cw, y0 + ch, 0, 0, false, color, texture);   // TL
+		emit_stdbox_piece(x0, y0, x0 + cw, y0 + ch, 0, 0, false, color, texture, tex_w, tex_h);   // TL
 		if (ix2 > ix1)
-			emit_stdbox_piece(ix1, y0, ix2, y0 + ch, 1, 0, false, color, texture);  // top
+			emit_stdbox_piece(ix1, y0, ix2, y0 + ch, 1, 0, false, color, texture, tex_w, tex_h);  // top
 	}
-	emit_stdbox_piece(ix2, y0, x1, y0 + ch, 2, 0, false, color, texture);       // TR
-	emit_stdbox_piece(x0, iy2, x0 + cw, y1, 0, 2, true, color, texture);        // BL
-	emit_stdbox_piece(ix2, iy2, x1, y1, 2, 2, true, color, texture);            // BR
+	emit_stdbox_piece(ix2, y0, x1, y0 + ch, 2, 0, false, color, texture, tex_w, tex_h);       // TR
+	emit_stdbox_piece(x0, iy2, x0 + cw, y1, 0, 2, true, color, texture, tex_w, tex_h);        // BL
+	emit_stdbox_piece(ix2, iy2, x1, y1, 2, 2, true, color, texture, tex_w, tex_h);            // BR
 	if (ix2 > ix1)
-		emit_stdbox_piece(ix1, iy2, ix2, y1, 1, 2, true, color, texture);       // bottom
+		emit_stdbox_piece(ix1, iy2, ix2, y1, 1, 2, true, color, texture, tex_w, tex_h);       // bottom
 	if (iy2 > iy1) {
-		emit_stdbox_piece(x0, iy1, x0 + cw, iy2, 0, 1, false, color, texture);  // left
-		emit_stdbox_piece(ix2, iy1, x1, iy2, 2, 1, false, color, texture);      // right
+		emit_stdbox_piece(x0, iy1, x0 + cw, iy2, 0, 1, false, color, texture, tex_w, tex_h);  // left
+		emit_stdbox_piece(ix2, iy1, x1, iy2, 2, 1, false, color, texture, tex_w, tex_h);      // right
 	}
 }
 

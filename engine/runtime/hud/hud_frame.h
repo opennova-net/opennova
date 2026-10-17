@@ -369,6 +369,7 @@ struct HudLayout {
 	// is a quarter of it), the same texture-derived rule the icon strips use.
 	bool box_texture_valid = false;
 	int box_tex_w = 0;
+	int box_tex_h = 0;
 	// The boxtile camo's own dims, the border pieces' second-stage UV
 	// divisors [orig: stored into the style as floats @0x56b357 / @0x56b361,
 	// passed to HUD_DrawTexturedQuad_0 for every piece @0x56b97a..0x56bcbb].
@@ -432,6 +433,7 @@ struct HudLayout {
 	// width) and the two icons.
 	bool tip_box_texture_valid = false;
 	int tip_box_tex_w = 0;
+	int tip_box_tex_h = 0;
 	bool tip_keyboard_texture_valid = false;
 	bool tip_gameplay_texture_valid = false;
 	// The six stance frames' authored per-frame offsets + frame-0 dims.
@@ -1359,12 +1361,13 @@ private:
 	// [orig: the outTechnique arm @0x56b937, cells rec+0x108/0x120/0x138].
 	void emit_stdbox(float x0, float y0, float x1, float y1, float surface_w,
 			uint32_t alpha, float title_gap_w);
+	// One piece of a box style's atlas `texture`, `tex_w` x `tex_h` texels.
 	void emit_stdbox_piece(float x0, float y0, float x1, float y1, int col,
-			int row, bool crop_bottom, uint32_t color, int32_t texture = kHudTexBoxBorder);
+			int row, bool crop_bottom, uint32_t color, int32_t texture, int tex_w, int tex_h);
 	// The eight border pieces of a box style over its atlas `texture`, each
 	// piece cw x ch output pixels (title_gap_w as in emit_stdbox).
 	void emit_box_pieces(float x0, float y0, float x1, float y1, float cw, float ch,
-			uint32_t color, float title_gap_w, int32_t texture);
+			uint32_t color, float title_gap_w, int32_t texture, int tex_w, int tex_h);
 	void emit_net_icon(float x0, float y0, float x1, float y1, int quality);
 	void emit_wire_rect(float x0, float y0, float x1, float y1, uint32_t color);
 	// The three-quad progress bar in surface pixels: the border rect, the

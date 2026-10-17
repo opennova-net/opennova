@@ -257,6 +257,7 @@ void test_draw(const fnt::fnt_font_t *font) {
 	layout.tip_alternate = {8, 340, 64, 108};
 	layout.tip_box_texture_valid = true;
 	layout.tip_box_tex_w = 128;
+	layout.tip_box_tex_h = 128;
 	layout.tip_keyboard_texture_valid = true;
 	layout.tip_gameplay_texture_valid = true;
 	HudFrameCompiler compiler;
@@ -275,8 +276,11 @@ void test_draw(const fnt::fnt_font_t *font) {
 		// One fill of cell (1,1) then the eight pieces.
 		CHECK(box.size() == 9);
 		if (box.size() == 9) {
-			CHECK(box[0].u0 == 0.25f && box[0].v0 == 0.25f && box[0].u1 == 0.5f &&
-					box[0].v1 == 0.5f);
+			// The cell's region carries the load's half texel: (32 + 0.5) / 128
+			// to (64 + 0.5) / 128 [orig: BoxTexture_LoadAndSetupUVRegions
+			// @0x56acd0 -- rec+0x160 @0x56b2ff..0x56b338].
+			CHECK(box[0].u0 == 32.5f / 128.0f && box[0].v0 == 32.5f / 128.0f &&
+					box[0].u1 == 64.5f / 128.0f && box[0].v1 == 64.5f / 128.0f);
 			// The fill insets one 32-px cell (scale 1024/1024) from the rect.
 			CHECK(box[0].x0 == 8.0f + 32.0f && box[0].y0 == 100.0f + 32.0f);
 			// alpha 255, the raw 0x7F7F7F diffuse the box material's
