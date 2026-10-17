@@ -226,7 +226,6 @@ void initialize_opennova_module(ModuleInitializationLevel p_level) {
 	GDREGISTER_CLASS(TerrainFoliageDef);
 	GDREGISTER_CLASS(TerrainFoliageMap);
 	GDREGISTER_CLASS(FoliageFrameStats);
-	GDREGISTER_CLASS(VegGraphicRow);
 	GDREGISTER_CLASS(FoliageDispatcher);
 	GDREGISTER_CLASS(FoliageMaskCompositorEffect);
 	GDREGISTER_CLASS(TerrainTileEntry);

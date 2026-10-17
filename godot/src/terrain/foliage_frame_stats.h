@@ -49,7 +49,7 @@ namespace godot {
 	X(int64_t, backend_visibility_writes)       \
 	X(int64_t, terrain_scene_counter)           \
 	X(bool, native_detail_source)               \
-	X(bool, preview_detail_source)              \
+	X(bool, harness_detail_source)              \
 	X(bool, path_blocker_available)
 
 // One FoliageDispatcher.get_frame_stats snapshot: the frame counters plus the

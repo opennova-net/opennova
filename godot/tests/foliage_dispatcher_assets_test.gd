@@ -24,33 +24,6 @@ func after_each() -> void:
 	TestFs.remove_dir_recursive(_fixture_root())
 
 
-func test_list_graphics_preserves_actual_model_path_case() -> void:
-	var resource_root := _prepare_veg_fixture("Mveg6.3di")
-	var graphics := _dispatcher.list_graphics(resource_root, true)
-	var mveg6_path := ""
-	for entry in graphics:
-		if String(entry.basename) == "mveg6":
-			mveg6_path = String(entry.model_path)
-			break
-
-	assert_eq(
-		mveg6_path,
-		resource_root.get_root_dir().path_join("Mveg6.3di"),
-		"Vegetation asset lookup should retain the real file case for portable object paths."
-	)
-
-
-func test_list_graphics_cache_returns_caller_safe_copy() -> void:
-	var resource_root := _prepare_veg_fixture("Mveg6.3di")
-	var graphics := _dispatcher.list_graphics(resource_root, true)
-	assert_gt(graphics.size(), 0, "Vegetation asset lookup should find configured .3di graphics.")
-
-	graphics.clear()
-	var cached_again := _dispatcher.list_graphics(resource_root)
-
-	assert_gt(cached_again.size(), 0, "Callers should not be able to mutate the shared vegetation graphics cache.")
-
-
 func test_resolve_slot_meshes_preserves_slots_and_loads_known_graphic() -> void:
 	var resource_root := _prepare_veg_fixture("Mveg6.3di")
 	var def := TerrainFoliageDef.new()
@@ -206,24 +179,22 @@ func test_cache_epoch_is_monotonic_and_bumped_by_mount() -> void:
 
 func test_caches_self_clear_when_epoch_moves() -> void:
 	var resource_root := _prepare_veg_fixture("Mveg6.3di")
-	_dispatcher.list_graphics(resource_root, true)
+	assert_not_null(_dispatcher.load_mesh(resource_root, "Mveg6"))
 	assert_gt(_dispatcher.asset_cache_entry_count(), 0,
-		"Listing should fill the graphics cache.")
+		"Loading should fill the listing and mesh caches.")
 
 	# Any mount/rescan/clear in this process bumps the global epoch; the next
 	# cache access self-clears before refilling, so a rescanned resource dir is
 	# never served a stale listing or mesh.
 	ResourceRoot.bump_cache_epoch()
-	# A root-less listing is the cheapest public access: it runs the epoch
-	# check (the self-clear) and refills nothing.
-	_dispatcher.list_graphics(null)
+	# The count is itself a cache reader: it runs the epoch check (the
+	# self-clear) and refills nothing.
 	assert_eq(_dispatcher.asset_cache_entry_count(), 0,
 		"An epoch move should drop every cache (listing and mesh) on next access.")
 
 
 func test_clear_asset_cache_drops_every_entry() -> void:
 	var resource_root := _prepare_veg_fixture("Mveg6.3di")
-	_dispatcher.list_graphics(resource_root, true)
 	assert_not_null(_dispatcher.load_mesh(resource_root, "Mveg6"))
 	assert_gt(_dispatcher.asset_cache_entry_count(), 0,
 		"Listing and loading fill the dispatcher's asset caches.")

@@ -45,27 +45,6 @@ class Weather;
 class TerrainData;
 class TerrainTileInfo;
 
-// One top-level *veg*.3di graphic of a resource root
-// (FoliageDispatcher.list_graphics): the lower-cased basename and the
-// resolved model path (the logical VFS name or the on-disk path in its real
-// case).
-class VegGraphicRow : public RefCounted {
-  GDCLASS(VegGraphicRow, RefCounted)
-
-public:
-  String get_basename() const { return basename_; }
-  void set_basename(const String &p_value) { basename_ = p_value; }
-  String get_model_path() const { return model_path_; }
-  void set_model_path(const String &p_value) { model_path_ = p_value; }
-
-protected:
-  static void _bind_methods();
-
-private:
-  String basename_;
-  String model_path_;
-};
-
 // Godot render applier for the portable foliage frame (ADR 0033 R2).
 //
 // opennova::renderer::FoliageFrameCompiler owns the whole frame compilation: the anchor
@@ -131,10 +110,6 @@ public:
   // registry was emptied without exposing any cache for mutation (a cache
   // reader: it runs the epoch self-clear first).
   int asset_cache_entry_count();
-  // Enumerate all top-level *veg*.3di graphics in the resource root, sorted
-  // by basename (a caller-safe copy of the cached listing).
-  TypedArray<VegGraphicRow> list_graphics(const Ref<ResourceRoot> &p_resource_root,
-                                          bool p_force_refresh = false);
   // Resolve each def's `graphic` name to the first Mesh built from its .3di.
   // Returns an Array parallel to `defs`; a null entry disables that retail
   // slot. The fresh dispatcher never manufactures placeholder geometry.
@@ -207,7 +182,7 @@ public:
 
   // Optional samplers: (x, z) -> height / foliage palette index. Detail uses
   // retail's flat wrapped map lookup at the candidate's source-atlas
-  // position (world in the preview, which has no sector routing);
+  // position (world in the test harness frame, which has no sector routing);
   // foliage_sampler retains the
   // sector-routed MODEL lookup and is the compatibility fallback for detail.
   void set_height_sampler(const Callable &p_sampler);
@@ -229,9 +204,12 @@ public:
   // Terrain::get_foliage_detail_patches_native().
   void render_frame(const Transform3D &p_camera_xform, int64_t p_time_ms);
 
-  // Standalone frame. Builds a deterministic 16-unit preview cell set whose
-  // sampled terrain centers are at most 42 units in 3D from the camera.
-  void render_preview(const Transform3D &p_camera_xform, int64_t p_time_ms);
+  // The test harness's terrain-less frame, no game path: a deterministic
+  // 16-unit cell set whose sampled centers are at most 42 units in 3D from
+  // the camera stands in for the Terrain's collected patches. Its one reach
+  // is the GUT adapter tests (godot/tests/foliage_runtime_adapter_test.gd),
+  // which drive the slots, samplers and draw list without a staged terrain.
+  void render_test_harness_frame(const Transform3D &p_camera_xform, int64_t p_time_ms);
 
   // The weapon Inset pass's own foliage frame, compiled after the main frame
   // and after the Inset's own collect: its detail cells from its own terrain
@@ -265,7 +243,7 @@ public:
   // `mask` is the opaque-pass depth-mask pass (FoliageMaskPass::get_report).
   Dictionary get_backend_report() const;
   // Immediate diagnostic control for the current retained draw list. Raster
-  // probes use this after render_frame/render_preview to pin wind, optionally
+  // probes use this after render_frame to pin wind, optionally
   // isolate one retail pass family, and nudge its fade without discovering
   // server instances through scene children. The next compiled frame restores
   // ordinary runtime state through the normal diff applier.
@@ -341,7 +319,8 @@ private:
   HashMap<String, Ref<Mesh>> asset_mesh_cache_;
   HashMap<String, Ref<Texture2D>> asset_fd_texture_cache_;
   HashMap<String, String> asset_model_path_cache_;
-  HashMap<String, TypedArray<VegGraphicRow>> asset_graphics_cache_by_root_;
+  // The roots whose *veg*.3di graphics _list_graphics has recorded.
+  HashMap<String, bool> asset_listed_roots_;
   // The global cache epoch (ResourceRoot.cache_epoch) the caches above were
   // built under; any root mount/rescan/clear moves it and the next access
   // self-clears.
@@ -355,6 +334,10 @@ private:
   // uses. Returns null if the material has no resolvable texture.
   static Ref<Texture2D> _load_diffuse_texture(const Ref<ObjectData> &p_data,
                                               int p_material_index);
+  // Record every top-level *veg*.3di graphic of the root in the model-path
+  // cache (the first entry of each lower-cased basename, its path in its real
+  // case), once per root: _find_model_path's first source.
+  void _list_graphics(const Ref<ResourceRoot> &p_resource_root);
   String _find_model_path(const Ref<ResourceRoot> &p_resource_root,
                           const String &p_basename);
   static String _asset_root_key(const Ref<ResourceRoot> &p_resource_root);
@@ -503,7 +486,7 @@ private:
   opennova::renderer::FoliageViewInput
   _view_input(const Transform3D &p_camera_xform, int64_t p_time_ms) const;
   std::vector<opennova::foliage::DetailCell>
-  _preview_cells(const Vector3 &p_camera_position) const;
+  _test_harness_cells(const Vector3 &p_camera_position) const;
   void _compile_and_apply(const opennova::renderer::FoliageViewInput &p_view);
   opennova::renderer::FoliageExpansionSamplers _expansion_samplers();
   // `p_mirror_debug`: the main view's list feeds the frame counters; the
