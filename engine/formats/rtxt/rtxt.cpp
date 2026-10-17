@@ -28,12 +28,6 @@ inline uint32_t read_u32(const uint8_t *data, size_t off) {
   return opennova::io::read_u32_le(data + off);
 }
 
-inline void write_u32(std::vector<uint8_t> &buf, uint32_t val) {
-  uint8_t tmp[4];
-  opennova::io::write_u32_le(tmp, val);
-  buf.insert(buf.end(), tmp, tmp + 4);
-}
-
 inline void write_u32_at(std::vector<uint8_t> &buf, size_t off, uint32_t val) {
   opennova::io::write_u32_le(&buf[off], val);
 }
@@ -436,13 +430,13 @@ bool write(const File &file, std::vector<uint8_t> &out, std::string &error) {
   std::vector<uint8_t> section_meta;
 
   // Section count.
-  write_u32(section_meta, section_count);
+  io::append_u32_le(section_meta, section_count);
 
   // Section info entries (first-key offsets filled in once keys are laid out).
   size_t section_info_start = section_meta.size();
   for (const auto &section : file.sections) {
-    write_u32(section_meta, 0);  // First-key offset placeholder
-    write_u32(section_meta, section.string_count);
+    io::append_u32_le(section_meta, 0);  // First-key offset placeholder
+    io::append_u32_le(section_meta, section.string_count);
   }
 
   // Section names (walked sequentially by the engine; no per-name offsets).
@@ -484,23 +478,23 @@ bool write(const File &file, std::vector<uint8_t> &out, std::string &error) {
   uint32_t section_meta_size = static_cast<uint32_t>(section_meta.size() - 4);
 
   // Write header.
-  write_u32(out, RTXT_MAGIC);
-  write_u32(out, static_cast<uint32_t>(text_data_end));
-  write_u32(out, section_meta_size);
-  write_u32(out, entry_count);
+  io::append_u32_le(out, RTXT_MAGIC);
+  io::append_u32_le(out, static_cast<uint32_t>(text_data_end));
+  io::append_u32_le(out, section_meta_size);
+  io::append_u32_le(out, entry_count);
 
   // Write entry table.
   for (size_t i = 0; i < file.entries.size(); ++i) {
     const auto &entry = file.entries[i];
-    write_u32(out, text_offsets[i]);
+    io::append_u32_le(out, text_offsets[i]);
 
     // Pack X/Y into single uint32.
     uint32_t packed_xy = (static_cast<uint32_t>(entry.position.x) & 0xFFFF) |
                          ((static_cast<uint32_t>(entry.position.y) & 0xFFFF) << 16);
-    write_u32(out, packed_xy);
+    io::append_u32_le(out, packed_xy);
 
-    write_u32(out, entry.section_index);
-    write_u32(out, 0);  // Unused
+    io::append_u32_le(out, entry.section_index);
+    io::append_u32_le(out, 0);  // Unused
   }
 
   // Write text data.
