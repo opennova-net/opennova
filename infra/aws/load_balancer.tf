@@ -1,6 +1,6 @@
 # ---------------------------------------------------------------------------
-# The public network load balancer: the gate, the lobby and web (DEPLOY.md,
-# "Operating")
+# The public network load balancer: the gate, the lobby, web and the update
+# service (DEPLOY.md, "Operating")
 # ---------------------------------------------------------------------------
 #
 # One internet-facing network load balancer in both public subnets, cross-zone,
@@ -10,8 +10,9 @@
 # clients reach the gate, the lobby and web's HTTP routes at zone a's address
 # alone (ONNET_PUBLIC_HOST, ONNET_LOBBY_ENDPOINT, ONNET_WEB_HOST: no client
 # follows a DNS name); the site's proxied records point at the balancer's DNS
-# name (edge.tf), which answers with both. Listeners, to IP targets (the
-# tasks) that see each client's own address:
+# name (edge.tf), which answers with both, and so does the update service's
+# unproxied one. Target groups, of IP targets (the tasks) that see each
+# client's own address, each with its listener on its port:
 #   gate            UDP gate_udp_port to the gate's tasks, from everyone (the
 #                   clients' probes, the hosts' status blobs); health: HTTP
 #                   /livez on health_port
@@ -31,6 +32,15 @@
 #   http            TCP game_http_port to web's server (the retail NW*.dll and
 #                   .gsb routes; plain HTTP, stock clients), from everyone;
 #                   health: /healthz (the stall watchdog, and the cache)
+#   update          TCP, the first of var.update_ports, to web's server: the
+#                   update service retail UPDATE.EXE speaks (ADR 0061; web
+#                   serves every update port, ONNET_UPDATE_PORTS), from
+#                   everyone; health: the same /healthz on game_http_port.
+#                   The other update ports get a listener each
+#                   (aws_lb_listener.update), all forwarding to this one group
+#                   (ECS admits five target groups per service; web holds
+#                   three), so a task sees the updater on the first update
+#                   port whichever it dialled
 # The balancer's security group admits those ranges; the gate's and web's
 # admit the balancer's group alone (the lobby's its UDP port from everyone
 # too, programs.tf). ECS registers each task with its target groups and holds
@@ -42,12 +52,17 @@
 locals {
   lb_listeners = merge(
     {
-      gate  = { program = "gate", container = "gate", protocol = "UDP", port = var.gate_udp_port }
-      lobby = { program = "lobby", container = "lobby", protocol = "UDP", port = var.nw_udp_port }
-      http  = { program = "web", container = "web", protocol = "TCP", port = var.game_http_port }
+      gate   = { program = "gate", container = "gate", protocol = "UDP", port = var.gate_udp_port }
+      lobby  = { program = "lobby", container = "lobby", protocol = "UDP", port = var.nw_udp_port }
+      http   = { program = "web", container = "web", protocol = "TCP", port = var.game_http_port }
+      update = { program = "web", container = "web", protocol = "TCP", port = var.update_ports[0] }
     },
     local.edge_proxied ? { https = { program = "web", container = "portal", protocol = "TCP", port = 443 } } : {},
   )
+
+  # The update ports after the first: a listener each, forwarding to the
+  # update group (its own listener is the one above, on the first port).
+  lb_update_ports = { for p in slice(var.update_ports, 1, length(var.update_ports)) : tostring(p) => p }
 
   # What the balancer sends each target group's tasks (their traffic and its
   # health checks): out of its group, into the program's.
@@ -58,16 +73,19 @@ locals {
       "lobby"        = { program = "lobby", protocol = "udp", port = var.nw_udp_port, description = "NovaWorld UDP, the lobby (the port the gate announces), through the load balancer" }
       "lobby-health" = { program = "lobby", protocol = "tcp", port = var.health_port, description = "The lobby /livez, the load balancer health check" }
       "http"         = { program = "web", protocol = "tcp", port = var.game_http_port, description = "HTTP routes of stock clients (NW*.dll, .gsb), through the load balancer" }
+      "update"       = { program = "web", protocol = "tcp", port = var.update_ports[0], description = "The update service of retail UPDATE.EXE (every update port lands here), through the load balancer" }
     },
     local.edge_proxied ? { "https" = { program = "web", protocol = "tcp", port = 443, description = "The portal nginx over TLS (Full strict), through the load balancer" } } : {},
   )
 
-  # Who reaches each listener: everyone on the gate, the lobby and the retail
-  # port, Cloudflare's proxy alone on 443 (none without proxied records).
+  # Who reaches each listener: everyone on the gate, the lobby, the retail
+  # port and the update ports, Cloudflare's proxy alone on 443 (none without
+  # proxied records).
   lb_ingress = merge(
     { for c in var.allowed_cidrs : "gate ${c}" => { protocol = "udp", port = var.gate_udp_port, cidr = c, description = "novaworld_gate (the fixed UDP port of stock clients; the hosts status blobs)" } },
     { for c in var.allowed_cidrs : "lobby ${c}" => { protocol = "udp", port = var.nw_udp_port, cidr = c, description = "NovaWorld UDP, the lobby (the port the gate announces)" } },
     { for c in var.allowed_cidrs : "http ${c}" => { protocol = "tcp", port = var.game_http_port, cidr = c, description = "HTTP routes of stock clients (NW*.dll, .gsb); /api/ answers nginx alone" } },
+    merge([for p in var.update_ports : { for c in var.allowed_cidrs : "update_${p} ${c}" => { protocol = "tcp", port = p, cidr = c, description = "The update service of retail UPDATE.EXE (one of its fixed TCP ports)" } }]...),
     { for c in(local.edge_proxied ? local.cloudflare_ipv4 : []) : "https ${c}" => { protocol = "tcp", port = 443, cidr = c, description = "The portal over TLS, from the Cloudflare proxy alone" } },
   )
 
@@ -99,8 +117,8 @@ resource "aws_eip" "lb_b" {
   })
 }
 
-# Its description predates the lobby's listener and stays: a changed one
-# replaces the group, which the balancer holds.
+# Its description predates the lobby's listener and the update ports and
+# stays: a changed one replaces the group, which the balancer holds.
 resource "aws_security_group" "lb" {
   name        = "${local.name}-lb"
   description = "OpenNova NovaWorld load balancer: the gate UDP port and the retail HTTP port to everyone, 443 from Cloudflare alone"
@@ -123,7 +141,8 @@ resource "aws_vpc_security_group_ingress_rule" "lb" {
 }
 
 # Out: to the gate's, the lobby's and web's tasks alone, on their target ports
-# and the gate's and the lobby's health port.
+# (the update group's the first update port) and the gate's and the lobby's
+# health port.
 resource "aws_vpc_security_group_egress_rule" "lb" {
   for_each = local.lb_target_rules
 
@@ -181,10 +200,12 @@ resource "aws_lb_target_group" "public" {
   # target that is gone.
   connection_termination = each.value.protocol == "UDP" ? true : null
 
+  # The update group speaks the updater's protocol on its port, so its check
+  # goes to the retail port's /healthz.
   health_check {
     protocol            = each.key == "https" ? "TCP" : "HTTP"
-    port                = each.value.protocol == "UDP" ? tostring(var.health_port) : "traffic-port"
-    path                = each.value.protocol == "UDP" ? "/livez" : each.key == "http" ? "/healthz" : null
+    port                = each.value.protocol == "UDP" ? tostring(var.health_port) : each.key == "update" ? tostring(var.game_http_port) : "traffic-port"
+    path                = each.value.protocol == "UDP" ? "/livez" : each.key == "http" || each.key == "update" ? "/healthz" : null
     matcher             = each.key == "https" ? null : "200"
     interval            = 10
     healthy_threshold   = 3
@@ -206,6 +227,22 @@ resource "aws_lb_listener" "public" {
   default_action {
     type             = "forward"
     target_group_arn = aws_lb_target_group.public[each.key].arn
+  }
+
+  tags = var.tags
+}
+
+# The other update ports, each to the one update group.
+resource "aws_lb_listener" "update" {
+  for_each = local.lb_update_ports
+
+  load_balancer_arn = aws_lb.public.arn
+  port              = each.value
+  protocol          = "TCP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.public["update"].arn
   }
 
   tags = var.tags

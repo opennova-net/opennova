@@ -19,7 +19,8 @@
 # set for every deployment: infra/zone's stack, not this one.
 
 # The site's records, both at the public load balancer (load_balancer.tf):
-# prod's @ and www; staging's `staging` (locals.tf). CNAMEs to its
+# prod's @ and www; staging's `staging` (locals.tf); and the update service's,
+# below. CNAMEs to its
 # DNS name (Cloudflare flattens the apex's), whose answers are its two zones'
 # Elastic IPs. Proxied by default so the site gets Cloudflare TLS. Retail
 # clients follow no name: the gate announces the balancer's zone-a address
@@ -46,6 +47,25 @@ resource "cloudflare_record" "web_www" {
   proxied = var.cloudflare_web_proxied
 
   comment = "Managed by Terraform - OpenNova web (www)"
+}
+
+# The update service's name (local.update_host), never proxied: retail
+# UPDATE.EXE speaks plain TCP on the updater's ports (load_balancer.tf), which
+# Cloudflare's proxy would not pass, so the name resolves straight to the
+# balancer. The service's SERVER.LST sends the updater here for a data set
+# served by OpenNova's update service; one served the retail way names
+# ftp.novaworld.com, which the Switcher's managed block maps to the gate's
+# address, the balancer's zone-a address (ADR 0064).
+resource "cloudflare_record" "update" {
+  count   = local.dns_enabled ? 1 : 0
+  zone_id = var.cloudflare_zone_id
+  name    = local.is_prod ? "update" : "update.${local.deployment}"
+  content = aws_lb.public.dns_name
+  type    = "CNAME"
+  ttl     = 300
+  proxied = false
+
+  comment = "Managed by Terraform - OpenNova update service (plain TCP, never proxied)"
 }
 
 locals {

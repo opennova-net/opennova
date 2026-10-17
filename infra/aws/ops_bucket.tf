@@ -1,9 +1,9 @@
 # ---------------------------------------------------------------------------
 # The deployment's operations bucket, in its own account: the release
 # manifests (releases/<id>.json, which `app deploy` and `app rollback` write
-# and read), the hosted game servers' game data (data/: the data sets' trees,
-# ADR 0064; fleet.tf and programs.tf scope the roles to it) and the database
-# dumps (novaworld/, the backup task's). Named after
+# and read), the hosted game servers' game data (data/: the data sets' trees
+# and the update packages, ADR 0064; fleet.tf and programs.tf scope the roles
+# to it) and the database dumps (novaworld/, the backup task's). Named after
 # the deployment and its account (opennova-prod-ops-<account id>), so no other
 # deployment names it; one bucket per deployment, so the game data's prefix
 # carries no deployment segment. The account's S3 public access block is
@@ -94,7 +94,10 @@ resource "aws_s3_bucket_lifecycle_configuration" "ops" {
   }
 
   # The trees (immutable: a pruned tree's objects are deleted, and the
-  # versions that leaves are kept 7 days).
+  # versions that leaves are kept 7 days) and the update packages (a deleted
+  # release's package stays recoverable for 30 days). One rule per prefix: of
+  # two rules on one key with two expirations, S3 keeps the shorter, so no
+  # rule on data/ as a whole could keep the packages longer.
   rule {
     id     = "data-trees-old-versions"
     status = "Enabled"
@@ -105,6 +108,19 @@ resource "aws_s3_bucket_lifecycle_configuration" "ops" {
 
     noncurrent_version_expiration {
       noncurrent_days = 7
+    }
+  }
+
+  rule {
+    id     = "data-updates-old-versions"
+    status = "Enabled"
+
+    filter {
+      prefix = "data/updates/"
+    }
+
+    noncurrent_version_expiration {
+      noncurrent_days = 30
     }
   }
 }

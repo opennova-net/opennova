@@ -15,8 +15,9 @@
 #               /livez on health_port: every lobby announces that one address
 #               (ONNET_LOBBY_ENDPOINT, the gate's address and the lobby port),
 #               which the gate hands each client
-#   web         the retail HTTP routes and the website's API (game_http_port)
-#               and the portal's nginx (443) in one task, behind the balancer;
+#   web         the retail HTTP routes and the website's API (game_http_port),
+#               the update service of retail UPDATE.EXE (update_ports) and
+#               the portal's nginx (443) in one task, behind the balancer;
 #               nginx reaches the server on the task's loopback
 #   controller  the internal listener (internal_http_port, the leader alone) on
 #               its task's private address, from the machines alone (fleet.tf),
@@ -213,8 +214,10 @@ resource "aws_iam_role_policy" "exec" {
 # The game data's store (ADR 0064; fleet.tf names it: the deployment's
 # operations bucket under local.data_prefix, data/), with hosting on: web
 # starts the admin page's uploads (multipart; the browser sends each part
-# through the site and web puts it) and removes an abandoned tree's; the
-# worker finalizes a tree and prunes. Both read, write and delete under data/
+# through the site and web puts it), removes an abandoned tree's and reads the
+# packages the update service serves; the worker finalizes a tree, validates
+# and applies a release (server-side copies among it) and prunes. Both read,
+# write and delete under data/
 # alone, list it, and list the uploads in flight (that listing takes no prefix
 # condition; aborting one is scoped by its key). The machines read the trees
 # alone (fleet.tf); the controller needs no call (it builds URLs alone).
@@ -296,6 +299,15 @@ locals {
     ONNET_API_PROXY_ONLY  = "1"
   }
 
+  # The update service (ADR 0061, 0064): web serves retail UPDATE.EXE on the
+  # updater's ports behind the balancer (load_balancer.tf), at the update
+  # record's name (edge.tf); without a zone there is no name, and an empty
+  # host leaves the listener off.
+  update_env = {
+    ONNET_UPDATE_HOST  = local.update_host
+    ONNET_UPDATE_PORTS = join(",", [for p in var.update_ports : tostring(p)])
+  }
+
   # Hosting (fleet.tf), for the programs that read it: the controller's URL
   # and the fleet's settings. The release adds the serve and hostd images
   # (`app deploy --serve-tag --hostd-tag`, pinned by digest).
@@ -304,7 +316,7 @@ locals {
   program_env = {
     gate       = merge(local.common_env, local.public_env)
     lobby      = merge(local.common_env, local.public_env, local.lobby_env)
-    web        = merge(local.common_env, local.public_env, local.site_env, local.web_env, local.cache_env, local.mail_env, local.hosting_env)
+    web        = merge(local.common_env, local.public_env, local.site_env, local.web_env, local.update_env, local.cache_env, local.mail_env, local.hosting_env)
     controller = merge(local.common_env, local.public_env, local.site_env, local.hosting_env)
     worker     = merge(local.common_env, local.public_env, local.site_env, local.mail_env, local.hosting_env)
   }
@@ -340,14 +352,14 @@ locals {
   program_ports = {
     gate       = [{ port = var.gate_udp_port, protocol = "udp" }, { port = var.health_port, protocol = "tcp" }]
     lobby      = [{ port = var.nw_udp_port, protocol = "udp" }, { port = var.health_port, protocol = "tcp" }]
-    web        = [{ port = var.game_http_port, protocol = "tcp" }, { port = var.health_port, protocol = "tcp" }]
+    web        = concat([{ port = var.game_http_port, protocol = "tcp" }, { port = var.health_port, protocol = "tcp" }], [for p in var.update_ports : { port = p, protocol = "tcp" }])
     controller = [{ port = var.internal_http_port, protocol = "tcp" }, { port = var.health_port, protocol = "tcp" }]
     worker     = [{ port = var.health_port, protocol = "tcp" }]
   }
 
-  # The worker's task storage, in GiB: a tree's files pass through its disk
-  # (the finalize job, a GiB or two at once; Fargate's default is 20). The
-  # others keep the default.
+  # The worker's task storage, in GiB: a tree's files and a release's package
+  # pass through its disk (the finalize, validate and apply jobs, a GiB or two
+  # each at once; Fargate's default is 20). The others keep the default.
   task_ephemeral_storage_gib = { worker = 40 }
 
   # The service's log group, a stream per container and task under the

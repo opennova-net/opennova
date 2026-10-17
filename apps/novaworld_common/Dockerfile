@@ -17,9 +17,9 @@
 # (templates, static); web, the controller and the
 # worker the machine script (every program that decides whether hosting is on
 # checks it; the worker renders it); the lobby (its own public address, from
-# EC2), web (the game data's store: the admin page's uploads) and the worker
-# (the fleet's machines, the store, the outbound mail) the AWS CLI v2. No
-# image keeps state: the database is
+# EC2), web (the game data's store: the admin page's uploads, the update
+# service's packages) and the worker (the fleet's machines, the store, the
+# outbound mail) the AWS CLI v2. No image keeps state: the database is
 # PostgreSQL (DATABASE_URL, DATABASE_PASSWORD), web's state Redis
 # (ONNET_REDIS_URL, ONNET_REDIS_PASSWORD), the game data the store (S3 on a
 # deployment; the compose stack's directory volume mounts under
@@ -202,7 +202,9 @@ ENTRYPOINT ["/app/opennova-novaworld-lobby"]
 # Web alone links hiredis (its Redis pool, the shared library's one hiredis
 # user: scripts/lint/link_graph_check.py), so its image alone carries it. It
 # runs the AWS CLI for the game data's store (the admin page's uploads, which
-# it puts there part by part).
+# it puts there part by part, and the update service's packages) and serves
+# retail UPDATE.EXE on the updater's ports (ONNET_UPDATE_PORTS, with
+# ONNET_UPDATE_HOST set).
 FROM runtime-aws AS web
 RUN apt-get update && apt-get install -y --no-install-recommends libhiredis1.1.0 \
     && rm -rf /var/lib/apt/lists/*
@@ -216,7 +218,7 @@ ENV TEMPLATES_DIR=/app/templates \
     ONNET_HOSTED_MACHINE_SCRIPT=/app/hosted/machine_user_data.sh \
     ONNET_HOSTED_AWS_CLI=/usr/local/bin/aws
 USER 10002
-EXPOSE 8080/tcp
+EXPOSE 8080/tcp 20044/tcp 20556/tcp 21068/tcp 21580/tcp
 # GET /livez on its own HTTP port: the process's liveness (GET /healthz, the
 # load balancer's, also asks Redis).
 HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 \
