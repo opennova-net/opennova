@@ -7,13 +7,9 @@
         :to="{ path: '/me/servers/new', query: { from: String(server.id) } }"
         class="text-sm text-accent hover:text-ink-bright"
       >
-        Start a new server with these settings
+        Start a new server with these
       </RouterLink>
     </div>
-    <p class="text-sm text-ink-muted">
-      The settings it {{ server.live ? 'runs' : 'ran' }} with. A server keeps them while it is live; its console
-      changes the rotation as it runs.
-    </p>
     <dl class="grid gap-x-6 gap-y-2 rounded-panel border border-border bg-panel p-4 text-sm sm:grid-cols-[auto_1fr]">
       <dt class="text-ink-muted">{{ FIELD_LABELS.game_name }}</dt>
       <dd class="break-words text-ink">{{ server.settings.game_name }}</dd>
@@ -58,8 +54,13 @@
       <dd class="text-ink">{{ server.settings.team_ff ? 'On' : 'Off' }}</dd>
       <dt class="text-ink-muted">{{ FIELD_LABELS.missions }}</dt>
       <dd class="min-w-0 text-ink">
-        <ol class="list-inside list-decimal space-y-0.5 font-mono text-xs">
-          <li v-for="(mission, index) in server.settings.missions" :key="index" class="break-all">{{ mission }}</li>
+        <ol class="list-inside list-decimal space-y-0.5">
+          <li v-for="(mission, index) in server.settings.missions" :key="index" class="break-all">
+            <template v-if="titles.get(mission.toLowerCase())">
+              {{ titles.get(mission.toLowerCase()) }} <span class="font-mono text-xs text-ink-muted">{{ mission }}</span>
+            </template>
+            <span v-else class="font-mono text-xs">{{ mission }}</span>
+          </li>
         </ol>
       </dd>
     </dl>
@@ -70,12 +71,13 @@
 // A hosted server page's settings tab (the owner's Settings, the admin's Game
 // settings): the game settings it was started with, and for the owner a new
 // start from them (/me/servers/new?from=<id>).
-import { ref } from 'vue';
+import { onMounted, ref } from 'vue';
 import { RouterLink } from 'vue-router';
+import { fetchMyServers } from '../../api/hostedServer';
 import type { HostedServer } from '../../types/hostedServer';
 import { FIELD_LABELS } from '../../utils/hostedSettings';
 
-defineProps<{
+const props = defineProps<{
   server: HostedServer;
   scope: 'owner' | 'admin';
   now: number;
@@ -88,6 +90,22 @@ defineEmits<{
 }>();
 
 const showPassword = ref(false);
+
+// Each mission's title, as the games the owner may start name them (the
+// admin's view lists the files).
+const titles = ref(new Map<string, string>());
+onMounted(async () => {
+  if (props.scope !== 'owner') return;
+  const result = await fetchMyServers();
+  if (!result.ok) return;
+  const named = new Map<string, string>();
+  for (const game of result.value.data_sets) {
+    for (const m of [...game.missions, ...game.expansions.flatMap((e) => e.missions)]) {
+      if (m.title) named.set(m.file.toLowerCase(), m.title);
+    }
+  }
+  titles.value = named;
+});
 
 // KillLimit and MaxScore at 500 are the host screen's "no limit".
 function limitText(value: number): string {

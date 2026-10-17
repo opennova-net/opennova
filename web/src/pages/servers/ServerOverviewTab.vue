@@ -50,6 +50,13 @@
           <dd class="text-ink"><RelativeTime :value="server.ended_at" :now="now" /></dd>
         </template>
       </dl>
+      <RouterLink
+        v-if="scope === 'owner' && !server.live"
+        :to="{ path: '/me/servers/new', query: { from: String(server.id) } }"
+        class="btn-primary w-fit"
+      >
+        Start again
+      </RouterLink>
     </section>
 
     <!-- The data it runs on, and the update waiting when its data set has
@@ -221,6 +228,7 @@
 // owner's POST /api/me/servers/<id>/stop, the admin's POST
 // /api/admin/hosted/<id>/stop).
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
+import { RouterLink } from 'vue-router';
 import MyServerCard from '../../components/MyServerCard.vue';
 import RelativeTime from '../../components/RelativeTime.vue';
 import { stopFleetServer } from '../../api/admin';
@@ -286,7 +294,7 @@ const expansionName = computed(() => props.server.expansion?.display_name || pro
 
 function dataVersionText(tree: PinnedTree | null): string {
   if (!tree) return 'Not placed on data yet';
-  return tree.version ? `version ${tree.version}` : `tree ${tree.tree_id}`;
+  return tree.version || 'No version';
 }
 
 // The data set's (and expansion's) current versions, read when an update
