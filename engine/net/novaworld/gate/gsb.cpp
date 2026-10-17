@@ -244,12 +244,12 @@ bool read_chunk(Cursor &c, GsbChunk &out) {
 	const uint32_t payload_len = c.u32(); // need magic(4) + length(4)
 	if (!c.ok) return false;
 	std::memcpy(out.magic, magic, 4);
-	// Bounds check against the bytes left, so a wire-controlled payload_len near
-	// UINT32_MAX can't wrap a pointer sum and slip an OOB read past the test.
-	// gsb_parse_response runs on server bytes.
-	if (payload_len > static_cast<size_t>(c.end - c.p)) return false;
+	// The cursor tests a wire-controlled payload_len (up to UINT32_MAX) against the
+	// bytes left, so it can't wrap a pointer sum and slip an OOB read past the
+	// test. gsb_parse_response runs on server bytes.
 	const uint8_t *body = c.p;
 	c.skip(payload_len);
+	if (!c.ok) return false;
 	out.payload.assign(body, body + payload_len);
 	if (!out.payload.empty()) {
 		nwu_encrypt(out.payload.data(), out.payload.size(), GSB_NWU_KEY);
