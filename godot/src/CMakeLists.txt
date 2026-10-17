@@ -282,7 +282,6 @@ add_library(opennova_bindings OBJECT
     fnt/fnt_resource.cpp
     audio/sbf_bank.cpp
     audio/sbf_audio_stream.cpp
-    audio/sbf_audio_stream_playback.cpp
     audio/music_script.cpp
     audio/music_director.cpp
     audio/music_pair_names.cpp

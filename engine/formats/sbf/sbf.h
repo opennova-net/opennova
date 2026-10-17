@@ -137,6 +137,18 @@ int sbf_decode_chunk(const uint8_t *chunk_bytes, size_t chunk_size,
 int sbf_decode_all(const uint8_t *raw_bytes, size_t raw_size,
                    int16_t *out_samples, size_t out_capacity);
 
+/* An entry's audio as the stream pump plays it, int16 PCM, byte-paired stereo
+   interleaved (left then right) at SBF_SAMPLE_RATE: from the entry's start, one
+   block_size chunk at a time until the entry's bytes run out, each decoded at its
+   shifts (sbf_decode_chunk) and kept as whole frames, the split counting a
+   chunk's frames as its valid count >> 1 [orig: AudioStream_Update @ 0x671C60 --
+   the entry's end @ 0x671C7D, the block read @ 0x671CBC, the split @ 0x671D56,
+   the countdown @ 0x671D61; Audio_SubmitStereoSampleSplit @ 0x7BD222]. A chunk
+   the decoder refuses, or one past the bytes, ends the stream. The Godot player
+   hands this PCM to the mixer whole (godot/src/audio/sbf_audio_stream.cpp). */
+std::vector<int16_t> sbf_decode_entry(const uint8_t *entry_bytes, size_t size,
+                                      uint32_t block_size);
+
 /* --- Encoder ---
 
    No engine equivalent: original game shipped pre-encoded SBFs. The encoder is
