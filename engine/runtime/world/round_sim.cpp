@@ -956,13 +956,20 @@ int RoundSim::spawn(World &world, const RoundSpawnParams &descriptor,
                     imp.source_order = next_impact_order++;
                     play_round_impact_sound(world, imp);
                     impacts.push_back(imp);
-                    // The knife leaf feeds the same impact-effect processor,
-                    // so a stab into an entity leaves the same scar by the
-                    // ammo's `scar_type` [orig: Weapon_RaycastAndSpawnImpact
-                    // @0x4e8460 -> AmmoDef_ProcessImpactEffect @0x40a170 ->
-                    // Impact_SpawnGlassEffectsOrScar @0x5cf1b0].
-                    if (const Entity *struck = world.registry.get(hit.geometry_entity))
-                        scar_add_entry(world, hit, *struck, ammo->scar_type);
+                    // The leaf spawns its row's emitter and plays its sound,
+                    // and nothing more: it never reaches
+                    // AmmoDef_ProcessImpactEffect, Impact_SpawnGlassEffectsOrScar's
+                    // one caller; and the knife's kill zone strikes persons
+                    // only and skips the pool-1/2 walks the glass userpoint
+                    // scars sit in, so a stab leaves no scar
+                    // [orig: Weapon_RaycastAndSpawnImpact @0x4e88c3..0x4e896b,
+                    //  its CEffectWorld_SpawnEmitterAtPosition call @0x4e8950
+                    //  and Entity_PlaySound3D_FullVolume call @0x4e896b;
+                    //  AmmoDef_ProcessImpactEffect @0x40a170 (its
+                    //  Impact_SpawnGlassEffectsOrScar call @0x40a264);
+                    //  Projectile_ProcessExplosionQueue's type-1 skip
+                    //  @0x4eb340..0x4eb343; Entity_ApplyVehicleCollisionDamage
+                    //  @0x4e6620].
                 }
             }
         } else {
