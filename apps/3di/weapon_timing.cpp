@@ -430,8 +430,7 @@ bool plan_weapon_timing(const WeaponTimingRequest &request, WeaponTimingPlan &ou
 std::string weapon_edits_text(const WeaponTimingPlan &plan) {
 	std::ostringstream s;
 	s << "weapon_edits 1\n"
-	  << "# opennova-3di weapon timing: the weapon.def keys each entry sets, and no others.\n"
-	  << "# Apply them with: opennova-3di weapon merge <weapon.def> <this file> -o <out.def>\n";
+	  << "# opennova-3di weapon timing: the weapon.def keys each entry sets, and no others.\n";
 	for (const auto &e : plan.entries) {
 		s << "\nentry " << e.name << " " << e.mode << "\n"
 		  << "# " << e.cycle_ticks << " ticks a shot at " << io::kTickHz << " Hz: " << rpm_text(e.cycle_ticks)
