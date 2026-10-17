@@ -988,7 +988,7 @@ add_executable(data_set_jobs_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/object_store.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/local_object_store.cpp)
 target_link_libraries(data_set_jobs_test
-    PRIVATE opennova_novaworld_service opennova_runtime Threads::Threads)
+    PRIVATE opennova_novaworld_service opennova_runtime opennova_update_tool_core Threads::Threads)
 target_include_directories(data_set_jobs_test PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common)
