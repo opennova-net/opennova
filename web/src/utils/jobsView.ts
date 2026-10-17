@@ -1,9 +1,10 @@
-// The admin's background jobs in words (pages/admin/JobsSection.vue,
-// JobDetailSection.vue): what each kind does, a job's state, an interval, a
-// lease, what comes next on a schedule. Durations arrive as whole seconds and
-// leave as words (utils/format.ts), never as raw numbers with a unit code.
+// The admin's background jobs in words (pages/admin/JobsSection.vue and its
+// tabs, JobDetailSection.vue): what each kind does, a job's state, an
+// interval, a lease, what comes next on a schedule, what a group's retry did.
+// Durations arrive as whole seconds and leave as words (utils/format.ts),
+// never as raw numbers with a unit code.
 
-import type { Job, JobSchedule } from '../types/jobs';
+import type { Job, JobGroupRetry, JobSchedule, JobWorker } from '../types/jobs';
 import { formatDuration, formatRelative, timeMs } from './format';
 
 // What last_error says of a job an admin cancelled
@@ -25,7 +26,7 @@ const KIND_LABELS: Record<string, string> = {
   'login_addresses.prune': 'Prune old login addresses',
   'password_resets.prune': 'Prune expired password reset links',
   'billing_events.prune': 'Prune old billing events',
-  'stats.prune': "Prune old hosted servers' stats",
+  'stats.prune': "Prune old hosted servers' stats and ended machines",
   'jobs.prune': 'Prune finished jobs',
 };
 
@@ -115,15 +116,39 @@ export function scheduleNextLabel(schedule: JobSchedule, now: number): string {
   return formatRelative(next, now);
 }
 
-// The finished jobs (done and failed) of each of the last hour's minutes,
-// oldest first.
-export function finishedPerMinute(minutes: { done: number; failed: number }[]): number[] {
-  return minutes.map((m) => m.done + m.failed);
-}
-
 // A datetime-local input's value read as UTC: Unix seconds; null for none.
 export function utcInputSeconds(value: string): number | null {
   if (!value) return null;
   const ms = Date.parse(`${value.length === 16 ? `${value}:00` : value}Z`);
   return Number.isNaN(ms) ? null : Math.floor(ms / 1000);
+}
+
+// Unix seconds as a datetime-local input's value in UTC ("2026-10-16T09:30").
+export function utcInputValue(seconds: number): string {
+  return new Date(seconds * 1000).toISOString().slice(0, 16);
+}
+
+function counted(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+// A worker process's leases: the ones that ran out (the process went away)
+// first; else when the soonest of the others runs out; '' while it holds none.
+export function workerLeaseLabel(worker: Pick<JobWorker, 'lapsed' | 'lease_left_seconds'>): string {
+  if (worker.lapsed > 0) return `${counted(worker.lapsed, 'lease', 'leases')} ran out: the process went away`;
+  if (worker.lease_left_seconds === null) return '';
+  return `Current: the soonest runs out in ${secondsLabel(worker.lease_left_seconds)}`;
+}
+
+// What a failure group's retry did, in a sentence or two.
+export function groupRetryMessage(result: JobGroupRetry): string {
+  const parts = [`${counted(result.retried, 'job is', 'jobs are')} queued again to run now.`];
+  if (result.secret_dropped > 0) {
+    parts.push(`${counted(result.secret_dropped, 'job', 'jobs')} cannot run again: the secret went when it ended.`);
+  }
+  if (result.already_pending > 0) {
+    parts.push(`${counted(result.already_pending, 'job waits', 'jobs wait')} behind another with the same key.`);
+  }
+  if (result.changed > 0) parts.push(`${counted(result.changed, 'job had', 'jobs had')} already left the failed state.`);
+  return parts.join(' ');
 }

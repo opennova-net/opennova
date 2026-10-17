@@ -120,10 +120,12 @@ const router = createRouter({
   ],
   // Back and Forward return to where the page was; a #section link scrolls to
   // it below the fixed header; a server page's tab change keeps the scroll (the
-  // header and the tabs stay put); any other navigation starts at the top.
+  // header and the tabs stay put), as does a change of the jobs page's tab or
+  // filter (its query); any other navigation starts at the top.
   scrollBehavior(to, from, savedPosition) {
     if (savedPosition) return savedPosition;
     if (to.hash) return { el: to.hash, top: 72 };
+    if (to.path === '/admin/jobs' && from.path === '/admin/jobs') return false;
     const onServerPage = to.matched.some((record) => record.components?.default === ServerDetailLayout);
     if (onServerPage && to.params.id === from.params.id) return false;
     return { top: 0 };

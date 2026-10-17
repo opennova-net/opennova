@@ -149,6 +149,9 @@ void JobRoutes::register_routes(WebApp &app) {
 	CROW_ROUTE(app, "/api/admin/jobs/run").methods("POST"_method)([this](const crow::request &req) {
 		return run_route(req);
 	});
+	CROW_ROUTE(app, "/api/admin/jobs/retry-group")
+			.methods("POST"_method)(
+					[this](const crow::request &req) { return retry_group_route(req); });
 	CROW_ROUTE(app, "/api/admin/jobs/prune")
 			.methods("POST"_method)([this](const crow::request &req) { return prune_route(req); });
 	CROW_ROUTE(app, "/api/admin/jobs/<uint>")
@@ -176,17 +179,19 @@ const PeriodicJob *JobRoutes::schedule_of(const std::string &kind) const {
 // `done_day`, `failed_hour`, `failed_day`, `failed` (kept until the prune),
 // `oldest_wait_seconds` (the oldest due job's wait: the queue's latency) and
 // `mean_run_seconds` (the last hour's done jobs); the totals with no kind),
-// "per_minute" (the last 60 minutes, oldest first: `at`, `done`, `failed`),
-// "attention" (the newest 20 jobs failed in the last day, an admin's cancels
-// left out), "running" (each running job, its claim oldest first, with its
-// worker, `running_seconds` and `lease_left_seconds`, negative once its lease
-// ran out), "workers" (each worker thread holding a job or done with one in
-// the last hour: `worker_id`, `process`, `job_id` and `job_kind` (null while
-// it holds none), `done`, `failed`, `last_active_at`), "schedules" (each
-// periodic kind: `kind`, `interval_seconds`, `at_start`, `conditional`,
-// `last` and `last_finished` (jobs or null), `next_at`, `pending`),
-// "controller" (`leader`, `elected_at`, `last_scheduled_at`, each null for
-// none)}. One snapshot; no-store.
+// "attention" (the newest 20 failure groups: the jobs of one kind failed in
+// the last day with one failure key, an admin's cancels left out: `kind`,
+// `key`, `count`, `retryable` (how many a retry takes), `last_job_id`,
+// `last_error` (the newest one's text) and `last_at`), "attention_total"
+// (every job the groups count, shown or not), "workers" (each worker process
+// with a thread holding a job or done with one in the last hour: `process`,
+// `threads`, `busy`, `lapsed` (its running jobs whose lease ran out),
+// `lease_left_seconds` (the least left of its others, null with none),
+// `done`, `failed`, `last_active_at`), "schedules" (each periodic kind:
+// `kind`, `interval_seconds`, `at_start`, `conditional`, `last` and
+// `last_finished` (jobs or null), `next_at`, `pending`), "controller"
+// (`leader`, `elected_at`, `last_scheduled_at`, each null for none)}. One
+// snapshot; no-store.
 crow::response JobRoutes::overview_route(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -202,24 +207,28 @@ crow::response JobRoutes::overview_route(const crow::request &req) {
 		for (const KindSummary &k : o.kinds)
 			kinds.push_back(kind_json(k));
 		out["kinds"] = std::move(kinds);
-		std::vector<crow::json::wvalue> minutes;
-		for (const MinuteCount &m : o.per_minute) {
+		std::vector<crow::json::wvalue> attention;
+		for (const FailureGroup &g : o.attention) {
 			crow::json::wvalue e;
-			e["at"] = m.at;
-			e["done"] = m.done;
-			e["failed"] = m.failed;
-			minutes.push_back(std::move(e));
+			e["kind"] = g.kind;
+			e["key"] = g.key;
+			e["count"] = g.count;
+			e["retryable"] = g.retryable;
+			e["last_job_id"] = g.last_job_id;
+			e["last_error"] = g.last_error;
+			text_or_null(e, "last_at", g.last_at);
+			attention.push_back(std::move(e));
 		}
-		out["per_minute"] = std::move(minutes);
-		out["attention"] = jobs_json(o.attention);
-		out["running"] = jobs_json(o.running);
+		out["attention"] = std::move(attention);
+		out["attention_total"] = o.attention_total;
 		std::vector<crow::json::wvalue> workers;
 		for (const WorkerView &w : o.workers) {
 			crow::json::wvalue e;
-			e["worker_id"] = w.worker_id;
 			e["process"] = w.process;
-			value_or_null(e, "job_id", w.job_id);
-			text_or_null(e, "job_kind", w.job_kind);
+			e["threads"] = w.threads;
+			e["busy"] = w.busy;
+			e["lapsed"] = w.lapsed;
+			value_or_null(e, "lease_left_seconds", w.lease_left_s);
 			e["done"] = w.done;
 			e["failed"] = w.failed;
 			text_or_null(e, "last_active_at", w.last_active_at);
@@ -258,14 +267,15 @@ crow::response JobRoutes::overview_route(const crow::request &req) {
 	return no_store(json_reply(200, out));
 }
 
-// GET /api/admin/jobs[?state=][&kind=][&from=][&to=][&q=][&before=][&limit=]
+// GET /api/admin/jobs[?state=][&kind=][&from=][&to=][&q=][&failure=][&before=][&limit=]
 // — {"jobs" (newest first, as the overview's), "total" (every job the filter
 // takes), "next_before" (the next page's `before`, null on the last page)}.
 // `state` queued, running, done or failed; `kind` exact; `from` and `to`
 // (Unix seconds) bound when a job was created, `to` excluded; `q` a text
-// within the dedupe or schedule key, any case; `before` a job id (the page
-// after it); `limit` 1..200 (50). 400 invalid_field for another state, a
-// number that is none or a text past 128 bytes; no-store.
+// within the dedupe or schedule key, any case; `failure` a failure key (an
+// attention group's `key`), exact; `before` a job id (the page after it);
+// `limit` 1..200 (50). 400 invalid_field for another state, a number that is
+// none, a kind or q past 128 bytes or a failure past 300; no-store.
 crow::response JobRoutes::list_route(const crow::request &req) {
 	auto caller = access_.require_admin(req);
 	if (caller.refusal)
@@ -283,6 +293,10 @@ crow::response JobRoutes::list_route(const crow::request &req) {
 		filter.search = search;
 	if (filter.kind.size() > kFilterTextMax || filter.search.size() > kFilterTextMax)
 		return json_error(400, "invalid_field", "kind and q are at most 128 bytes");
+	if (const char *failure = req.url_params.get("failure"))
+		filter.failure = failure;
+	if (filter.failure.size() > kFailureKeyMax)
+		return json_error(400, "invalid_field", "failure is at most 300 bytes");
 	bool bad = false;
 	filter.from_s = query_number(req, "from", bad);
 	filter.to_s = query_number(req, "to", bad);
@@ -375,6 +389,49 @@ crow::response JobRoutes::retry_route(const crow::request &req, uint64_t id) {
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/admin/jobs/%llu/retry failed: %s\n",
 				static_cast<unsigned long long>(id), e.what());
+	}
+	return json_error(500, "db_error");
+}
+
+// POST /api/admin/jobs/retry-group — {"kind", "key"}: an attention group's
+// jobs (of `kind`, failed in the last day with failure key `key`, an admin's
+// cancels left out) each queued again as POST .../<id>/retry would, each its
+// own compare-and-set. 200 {"retried", "secret_dropped" (their secret went as
+// they ended: they cannot run again), "already_pending" (a job with their
+// dedupe key waits or runs), "changed" (no longer failed)}; 400 invalid_json,
+// missing_field, invalid_field (a kind past 128 bytes, a key past 300).
+crow::response JobRoutes::retry_group_route(const crow::request &req) {
+	auto caller = access_.require_admin(req);
+	if (caller.refusal)
+		return std::move(*caller.refusal);
+	auto body = JsonBody::parse(req.body);
+	if (!body)
+		return json_error(400, "invalid_json");
+	const auto kind = body->text("kind");
+	const auto key = body->text("key");
+	if (body->wrong_type())
+		return json_error(400, "invalid_field", "kind and key are texts");
+	if (!kind || kind->empty() || !key)
+		return json_error(400, "missing_field", "kind and key are required");
+	if (kind->size() > kFilterTextMax || key->size() > kFailureKeyMax)
+		return json_error(400, "invalid_field", "kind is at most 128 bytes, key 300");
+	try {
+		auto db_conn = pool_.acquire();
+		const GroupRetry result = retry_group(*db_conn, *kind, *key);
+		std::printf("[jobs] %lld failed %s job(s) queued again by an admin (%s); left: %lld "
+					"whose secret went, %lld pending, %lld changed\n",
+				static_cast<long long>(result.retried), loggable(*kind).c_str(),
+				actor_of(caller).c_str(), static_cast<long long>(result.secret_dropped),
+				static_cast<long long>(result.already_pending),
+				static_cast<long long>(result.changed));
+		crow::json::wvalue out;
+		out["retried"] = result.retried;
+		out["secret_dropped"] = result.secret_dropped;
+		out["already_pending"] = result.already_pending;
+		out["changed"] = result.changed;
+		return json_reply(200, out);
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[http] POST /api/admin/jobs/retry-group failed: %s\n", e.what());
 	}
 	return json_error(500, "db_error");
 }

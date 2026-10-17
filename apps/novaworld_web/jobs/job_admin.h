@@ -6,12 +6,15 @@
 // a worker's or the controller's memory, so every web replica answers alike:
 // what it shows of a worker is what the claims leave on the rows (worker_id,
 // started_at, lease_until), so a worker thread shows once it has claimed a
-// job. Each action is one compare-and-set on a job's state (a retry takes a
-// failed job only, a cancel a queued one only), so none ever changes a job a
-// worker holds. Times are the database's, ISO 8601 UTC text ("" for none), and
-// durations whole seconds. Never a job's secret: only whether it holds one, or
-// held one that went as it ended (job_queue.h). Crow-free; each function
-// throws db::Error on a database failure. Service policy, not a port.
+// job. The failures to look at come grouped: one group per kind and failure
+// key (the error with its ids, numbers and times taken out), counted by the
+// database, so the page never reads every failed job. Each action is one
+// compare-and-set on a job's state (a retry takes a failed job only, a cancel
+// a queued one only; a group's retry is one per job), so none ever changes a
+// job a worker holds. Times are the database's, ISO 8601 UTC text ("" for
+// none), and durations whole seconds. Never a job's secret: only whether it
+// holds one, or held one that went as it ended (job_queue.h). Crow-free; each
+// function throws db::Error on a database failure. Service policy, not a port.
 
 #include "jobs/job_queue.h"
 #include "jobs/scheduler.h"
@@ -27,17 +30,26 @@
 namespace opennova::novaworld_server::jobs {
 
 // What the last_error of a job an admin cancelled starts with: the overview's
-// attention list leaves such a job out.
+// attention groups leave such a job out.
 inline constexpr const char *kCancelledByAdmin = "cancelled by an admin";
-// The failed jobs the overview lists for attention (the newest, of the last
-// day), and a list's page: its default and its most.
+// The failure groups the overview shows for attention (the newest, of the jobs
+// failed in the last day), and a list's page: its default and its most.
 inline constexpr size_t kAttentionShown = 20;
 inline constexpr size_t kListDefault = 50;
 inline constexpr size_t kListMax = 200;
-// The overview's finished jobs per minute: the last hour's minutes.
-inline constexpr int kPerMinuteBuckets = 60;
+// The longest failure key: the first this many characters of the normalized
+// error (failure_key_sql).
+inline constexpr size_t kFailureKeyMax = 300;
 // The window a worker shows in after its last finished job.
 inline constexpr int64_t kWorkerWindowS = 60 * 60;
+
+// The SQL expression of a failure's key over the text column `column`: its
+// error with every UUID and ISO 8601 time, every token of 8 or more letters,
+// digits, '_' or '-' that holds a digit (a request id, a cloud machine's id),
+// then every other run of digits taken out ("<id>", "<time>", "#"), its
+// whitespace collapsed, at most kFailureKeyMax characters. Two failures with
+// the same key are the same failure.
+std::string failure_key_sql(const std::string &column);
 
 // A job as the admin sees it.
 struct JobView {
@@ -93,20 +105,29 @@ struct KindSummary {
 	std::optional<double> mean_run_s;
 };
 
-// One minute's finished jobs.
-struct MinuteCount {
-	std::string at; // the minute's start
-	int64_t done = 0;
-	int64_t failed = 0;
+// The jobs of one kind that failed the same way (their failure key) in the
+// last day, an admin's cancels left out.
+struct FailureGroup {
+	std::string kind;
+	std::string key; // failure_key_sql of their errors
+	int64_t count = 0;
+	int64_t retryable = 0; // the ones a retry takes: their secret not dropped
+	int64_t last_job_id = 0; // the newest one
+	std::string last_error; // the newest one's own text
+	std::string last_at; // when the newest one failed
 };
 
-// A worker thread as the rows show it: one that holds a job now, or finished
-// one within kWorkerWindowS.
+// A worker process as its threads' claims show it: its threads that hold a
+// job now or finished one within kWorkerWindowS (a thread's id is its pool's
+// and its index, "worker-1a2b3c4d-0").
 struct WorkerView {
-	std::string worker_id;
-	std::string process; // its pool's (the id less its thread's index)
-	std::optional<int64_t> job_id; // the job it holds now
-	std::string job_kind;
+	std::string process;
+	int64_t threads = 0; // its threads seen
+	int64_t busy = 0; // the ones holding a job now
+	// Its running jobs whose lease ran out (the process went away, and the
+	// keeper queues them again), and the least lease left of the rest.
+	int64_t lapsed = 0;
+	std::optional<int64_t> lease_left_s;
 	int64_t done = 0; // finished within the window
 	int64_t failed = 0;
 	std::string last_active_at; // its newest claim or end
@@ -116,13 +137,11 @@ struct JobsOverview {
 	std::string at; // the database's now
 	KindSummary totals;
 	std::vector<KindSummary> kinds; // by kind
-	std::vector<MinuteCount> per_minute; // kPerMinuteBuckets, oldest first
-	// The newest kAttentionShown jobs failed in the last day, an admin's cancels
-	// left out.
-	std::vector<JobView> attention;
-	// Every running job, its claim oldest first.
-	std::vector<JobView> running;
-	std::vector<WorkerView> workers; // by id
+	// The newest kAttentionShown failure groups, by their newest failure, and
+	// how many jobs every group counts (shown or not).
+	std::vector<FailureGroup> attention;
+	int64_t attention_total = 0;
+	std::vector<WorkerView> workers; // by process
 	// The controller that leads (controller_leader: "" before an election) and
 	// since when, and the newest job a schedule enqueued.
 	std::string leader;
@@ -154,6 +173,7 @@ struct JobFilter {
 	std::optional<int64_t> from_s; // created at or after (Unix seconds)
 	std::optional<int64_t> to_s; // created before
 	std::string search; // within the dedupe or schedule key, any case
+	std::string failure; // exact: a failure key (failure_key_sql of its error)
 	std::optional<int64_t> before_id; // the page after the one that ended there
 	size_t limit = kListDefault; // 1..kListMax
 };
@@ -179,6 +199,16 @@ const char *action_result_name(ActionResult result);
 // used (max_attempts = attempts + 1, its attempts kept); its last error stays
 // until it runs again.
 ActionResult retry_now(db::Database &db, int64_t id);
+// A failure group's retry: each job of `kind` failed in the last day with
+// failure key `key` (an admin's cancels left out), oldest first, through
+// retry_now, so each is its own compare-and-set. How many each outcome took.
+struct GroupRetry {
+	int64_t retried = 0;
+	int64_t secret_dropped = 0;
+	int64_t already_pending = 0;
+	int64_t changed = 0; // no longer failed (retried or cancelled meanwhile)
+};
+GroupRetry retry_group(db::Database &db, const std::string &kind, const std::string &key);
 // A queued job failed for good, "<kCancelledByAdmin> (<actor>)" its error and
 // its secret dropped.
 ActionResult cancel(db::Database &db, int64_t id, const std::string &actor);

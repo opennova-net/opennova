@@ -866,7 +866,17 @@ void Supervisor::finish(db::Database &db, const HostedServer &s, State to, const
 
 void Supervisor::launch_failed(db::Database &db, MachineKind kind, uint64_t now_ms) {
 	launch_failures_.fetch_add(1, std::memory_order_relaxed);
-	set_launch_not_before_ms(db, kind, static_cast<int64_t>(now_ms + config_.launch_backoff_ms));
+	const auto backoff = note_launch_failure(db, kind, static_cast<int64_t>(now_ms),
+			config_.launch_backoff_ms, config_.launch_backoff_max_ms);
+	if (!backoff)
+		return; // a launch made before the backoff that holds
+	std::fprintf(stderr,
+			"[fleet] WARN a launch of a %s machine failed (%lld in a row): no %s launch for %s\n",
+			machine_kind_text(kind), static_cast<long long>(backoff->failures),
+			machine_kind_text(kind),
+			seconds_text(
+					static_cast<uint64_t>(backoff->not_before_ms - static_cast<int64_t>(now_ms)))
+					.c_str());
 }
 
 void Supervisor::note_refused_launches(db::Database &db, uint64_t now_ms) {

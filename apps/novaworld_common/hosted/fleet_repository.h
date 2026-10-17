@@ -155,6 +155,14 @@ bool machine_reported_within(db::Database &db, int64_t id, int64_t seconds);
 std::vector<int64_t> drain_machines(db::Database &db, const std::string &reason);
 // How many machines are in `state` (the heartbeat's machines_lost).
 int count_machines(db::Database &db, FleetMachineState state);
+// How long an ended or failed machine's row stays after its end (the admin's
+// fleet view lists the newest of them), as long as a finished job's.
+inline constexpr int64_t kEndedMachineKeepS = 14 * 24 * 60 * 60;
+// The ended and failed machines that ended more than `keep_s` ago deleted,
+// with their slot reports and egress months; a stopped or failed server that
+// last ran on one keeps no machine (its machine_ref nulled, as the schema
+// says), and one a live server still names stays. How many went.
+size_t prune_ended_machines(db::Database &db, int64_t keep_s = kEndedMachineKeepS);
 
 // --- what the cloud answered (the fleet's jobs, fleet_jobs.h) ---
 
@@ -200,9 +208,28 @@ void save_machine_runtime(db::Database &db, const FleetMachineRow &m);
 bool mark_machine_lost(db::Database &db, int64_t id, const std::string &reason, int64_t now_ms);
 // The pass asked for a describe of machine `id` at `now_ms`.
 void note_describe_asked(db::Database &db, int64_t id, int64_t now_ms);
-// No launch of `kind` before the value (0: none held).
+
+// --- each kind's launch backoff (fleet_launch_backoff, 0010_launch_backoff_failures.sql) ---
+
+// A kind's backoff: its failed launches in a row (counted once per backoff),
+// and no launch of it before not_before_ms (0: none held).
+struct LaunchBackoff {
+	int64_t failures = 0;
+	int64_t not_before_ms = 0;
+};
+// The wait after a kind's `failures`-th failed launch in a row (from 1):
+// `base_ms` doubled per failure past the first, at most `cap_ms`.
+uint64_t launch_backoff_wait_ms(int64_t failures, uint64_t base_ms, uint64_t cap_ms);
+LaunchBackoff launch_backoff(db::Database &db, MachineKind kind);
 int64_t launch_not_before_ms(db::Database &db, MachineKind kind);
-void set_launch_not_before_ms(db::Database &db, MachineKind kind, int64_t not_before_ms);
+// A launch of `kind` failed at `now_ms`: its failures in a row counted, and no
+// launch of it for launch_backoff_wait_ms of them; the backoff after. nullopt
+// (nothing changed) while a backoff holds: a failure landing then came from a
+// launch made before it began.
+std::optional<LaunchBackoff> note_launch_failure(
+		db::Database &db, MachineKind kind, int64_t now_ms, uint64_t base_ms, uint64_t cap_ms);
+// A machine of `kind` booted: its failures back to 0, no backoff held.
+void clear_launch_backoff(db::Database &db, MachineKind kind);
 
 // --- the agent's credentials ---
 
@@ -241,8 +268,8 @@ struct SlotReport {
 };
 
 // One sync's report, in one transaction: last_report_at and agent_version, the
-// bootstrap token spent, a booting machine ready (its agent reports), and the
-// machine's slot rows
+// bootstrap token spent, a booting machine ready (its agent reports: its kind's
+// launch backoff cleared), and the machine's slot rows
 // replaced by `containers` (one per slot: the running one where a slot holds
 // several, else the last; a slot past the machine's is dropped). The row
 // after, or nullopt when the machine is no longer one that syncs (booting,

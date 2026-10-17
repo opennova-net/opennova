@@ -1,7 +1,6 @@
 #include "job_admin.h"
 
 #include <algorithm>
-#include <cctype>
 #include <ctime>
 #include <map>
 #include <utility>
@@ -102,22 +101,32 @@ std::string contains_pattern(const std::string &text) {
 	return out + "%";
 }
 
-// The worker's pool: its id less the thread's index ("worker-1a2b3c4d-0" is
-// "worker-1a2b3c4d"'s).
-std::string process_of(const std::string &worker_id) {
-	const size_t dash = worker_id.rfind('-');
-	if (dash == std::string::npos || dash + 1 >= worker_id.size())
-		return worker_id;
-	for (size_t i = dash + 1; i < worker_id.size(); ++i) {
-		if (!std::isdigit(static_cast<unsigned char>(worker_id[i])))
-			return worker_id;
-	}
-	return worker_id.substr(0, dash);
-}
+// The failed jobs the attention groups count: those failed in the last day, an
+// admin's cancels ($1: kCancelledByAdmin) left out.
+constexpr const char *kAttentionWhere =
+		"state = 'failed' AND finished_at > now() - interval '1 day' AND NOT "
+		"starts_with(last_error, $1)";
 
 constexpr const char *kManualKey = "@manual-";
 
 } // namespace
+
+std::string failure_key_sql(const std::string &column) {
+	// Innermost first: the UUIDs and the times before the tokens they would
+	// otherwise split, the tokens before the digits left.
+	// No backslash in any pattern: [[:<:]] starts a word, [.] is a dot.
+	std::string e = column;
+	e = "regexp_replace(" + e +
+			", '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', '<id>', 'gi')";
+	e = "regexp_replace(" + e +
+			", '[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}(:[0-9]{2}([.][0-9]+)?)?"
+			"(Z|[+-][0-9]{2}(:?[0-9]{2})?)?', '<time>', 'g')";
+	e = "regexp_replace(" + e +
+			", '[[:<:]](?=[[:alnum:]_-]{8})[[:alnum:]_-]*[0-9][[:alnum:]_-]*', '<id>', 'g')";
+	e = "regexp_replace(" + e + ", '[0-9]+', '#', 'g')";
+	e = "regexp_replace(" + e + ", '[[:space:]]+', ' ', 'g')";
+	return "left(btrim(" + e + "), " + std::to_string(kFailureKeyMax) + ")";
+}
 
 const char *secret_name(JobView::Secret secret) {
 	switch (secret) {
@@ -198,54 +207,58 @@ JobsOverview overview(db::Database &db) {
 	if (out.totals.done_hour > 0)
 		out.totals.mean_run_s = run_s_sum / static_cast<double>(out.totals.done_hour);
 
-	for (const db::Row &r : db.query(
-				 "SELECT g.m, COUNT(j.id) FILTER (WHERE j.state = 'done'), "
-				 "COUNT(j.id) FILTER (WHERE j.state = 'failed') "
-				 "FROM generate_series(date_trunc('minute', now()) - make_interval(mins => "
-				 "$1::int), "
-				 "date_trunc('minute', now()), interval '1 minute') AS g(m) "
-				 "LEFT JOIN jobs j ON j.state IN ('done', 'failed') AND j.finished_at >= g.m AND "
-				 "j.finished_at < g.m + interval '1 minute' "
-				 "GROUP BY g.m ORDER BY g.m;",
-				 { BindValue(static_cast<int64_t>(kPerMinuteBuckets - 1)) })) {
-		MinuteCount m;
-		m.at = iso(r.as_text(0));
-		m.done = r.as_int(1).value_or(0);
-		m.failed = r.as_int(2).value_or(0);
-		out.per_minute.push_back(std::move(m));
+	// The failures to look at, grouped by kind and failure key in the database.
+	const std::string key = failure_key_sql("last_error");
+	for (const db::Row &r : db.query("SELECT kind, " + key +
+						 " AS failure_key, COUNT(*), COUNT(*) FILTER (WHERE secret IS NULL), "
+						 "(array_agg(id ORDER BY finished_at DESC, id DESC))[1], "
+						 "(array_agg(last_error ORDER BY finished_at DESC, id DESC))[1], "
+						 "MAX(finished_at), CAST(SUM(COUNT(*)) OVER () AS bigint) FROM jobs "
+						 "WHERE " +
+						 kAttentionWhere +
+						 " GROUP BY kind, failure_key ORDER BY MAX(finished_at) DESC, kind, "
+						 "failure_key LIMIT $2;",
+				 { BindValue(std::string(kCancelledByAdmin)),
+						 BindValue(static_cast<int64_t>(kAttentionShown)) })) {
+		FailureGroup g;
+		g.kind = r.as_text(0).value_or("");
+		g.key = r.as_text(1).value_or("");
+		g.count = r.as_int(2).value_or(0);
+		g.retryable = r.as_int(3).value_or(0);
+		g.last_job_id = r.as_int(4).value_or(0);
+		g.last_error = r.as_text(5).value_or("");
+		g.last_at = iso(r.as_text(6));
+		out.attention_total = r.as_int(7).value_or(0);
+		out.attention.push_back(std::move(g));
 	}
 
-	out.attention = views(db,
-			"SELECT " + view_columns(false) +
-					" FROM jobs WHERE state = 'failed' AND finished_at > now() - interval '1 day' "
-					"AND NOT starts_with(last_error, $1) ORDER BY finished_at DESC, id DESC "
-					"LIMIT $2;",
-			{ BindValue(std::string(kCancelledByAdmin)),
-					BindValue(static_cast<int64_t>(kAttentionShown)) });
-	out.running = views(db,
-			"SELECT " + view_columns(false) +
-					" FROM jobs WHERE state = 'running' ORDER BY started_at, id;");
-
+	// The workers by process: a thread's id less its index ("worker-1a2b3c4d-0"
+	// is "worker-1a2b3c4d"'s).
 	const BindValue window(static_cast<double>(kWorkerWindowS));
 	for (const db::Row &r : db.query(
-				 "SELECT worker_id, MAX(id) FILTER (WHERE state = 'running'), "
-				 "MAX(kind) FILTER (WHERE state = 'running'), "
+				 "SELECT regexp_replace(worker_id, '-[0-9]+$', '') AS process, "
+				 "COUNT(DISTINCT worker_id), "
+				 "COUNT(DISTINCT worker_id) FILTER (WHERE state = 'running'), "
+				 "COUNT(*) FILTER (WHERE state = 'running' AND lease_until < now()), "
+				 "CAST(floor(extract(epoch FROM MIN(lease_until) FILTER (WHERE state = 'running' "
+				 "AND lease_until >= now()) - now())) AS bigint), "
 				 "COUNT(*) FILTER (WHERE state = 'done' AND finished_at > now() - "
 				 "make_interval(secs => $1)), "
 				 "COUNT(*) FILTER (WHERE state = 'failed' AND finished_at > now() - "
 				 "make_interval(secs => $1)), "
 				 "GREATEST(MAX(started_at), MAX(finished_at)) "
 				 "FROM jobs WHERE worker_id IS NOT NULL AND (state = 'running' OR finished_at > "
-				 "now() - make_interval(secs => $1)) GROUP BY worker_id ORDER BY worker_id;",
+				 "now() - make_interval(secs => $1)) GROUP BY process ORDER BY process;",
 				 { window })) {
 		WorkerView w;
-		w.worker_id = r.as_text(0).value_or("");
-		w.process = process_of(w.worker_id);
-		w.job_id = r.as_int(1);
-		w.job_kind = r.as_text(2).value_or("");
-		w.done = r.as_int(3).value_or(0);
-		w.failed = r.as_int(4).value_or(0);
-		w.last_active_at = iso(r.as_text(5));
+		w.process = r.as_text(0).value_or("");
+		w.threads = r.as_int(1).value_or(0);
+		w.busy = r.as_int(2).value_or(0);
+		w.lapsed = r.as_int(3).value_or(0);
+		w.lease_left_s = r.as_int(4);
+		w.done = r.as_int(5).value_or(0);
+		w.failed = r.as_int(6).value_or(0);
+		w.last_active_at = iso(r.as_text(7));
 		out.workers.push_back(std::move(w));
 	}
 
@@ -329,6 +342,8 @@ JobPage list_jobs(db::Database &db, const JobFilter &filter) {
 		const std::string pattern = bind(contains_pattern(filter.search));
 		where += " AND (dedupe_key ILIKE " + pattern + " OR schedule_key ILIKE " + pattern + ")";
 	}
+	if (!filter.failure.empty())
+		where += " AND " + failure_key_sql("last_error") + " = " + bind(filter.failure);
 	JobPage page;
 	page.total = db.query("SELECT COUNT(*) FROM jobs WHERE " + where + ";", binds)
 						 .front()
@@ -392,6 +407,31 @@ ActionResult retry_now(db::Database &db, int64_t id) {
 	if (job->state == "failed" && job->secret == JobView::Secret::Dropped)
 		return ActionResult::SecretDropped;
 	return ActionResult::WrongState;
+}
+
+GroupRetry retry_group(db::Database &db, const std::string &kind, const std::string &key) {
+	GroupRetry out;
+	for (const db::Row &r : db.query(std::string("SELECT id FROM jobs WHERE ") + kAttentionWhere +
+						 " AND kind = $2 AND " + failure_key_sql("last_error") +
+						 " = $3 ORDER BY id;",
+				 { BindValue(std::string(kCancelledByAdmin)), BindValue(kind), BindValue(key) })) {
+		switch (retry_now(db, r.as_int(0).value_or(0))) {
+			case ActionResult::Done:
+				++out.retried;
+				break;
+			case ActionResult::SecretDropped:
+				++out.secret_dropped;
+				break;
+			case ActionResult::AlreadyPending:
+				++out.already_pending;
+				break;
+			case ActionResult::NotFound:
+			case ActionResult::WrongState:
+				++out.changed;
+				break;
+		}
+	}
+	return out;
 }
 
 ActionResult cancel(db::Database &db, int64_t id, const std::string &actor) {

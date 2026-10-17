@@ -102,11 +102,15 @@
 //   launching -> booting   its machine.launch job's launch answered
 //                          (mark_launched); a launch the cloud refused leaves
 //                          the row failed, which the next pass counts: no
-//                          launch of that kind for launch_backoff_ms. One whose
-//                          job never finished in the boot timeout fails too
-//   booting -> ready       its agent's first sync (the agent routes); one that
-//                          never reports in the driver's boot_timeout_ms is
-//                          terminated and failed, a failed launch as above
+//                          launch of that kind for launch_backoff_ms, doubled
+//                          per failure in a row to launch_backoff_max_ms (a
+//                          failure while that backoff holds, of a launch made
+//                          before it, counts once). One whose job never
+//                          finished in the boot timeout fails too
+//   booting -> ready       its agent's first sync (the agent routes), which
+//                          ends its kind's backoff; one that never reports in
+//                          the driver's boot_timeout_ms is terminated and
+//                          failed, a failed launch as above
 //   ready -> lost          its agent silent for machine_silence_s (60): the
 //                          cloud is asked; gone, it ends now, running, it is
 //                          terminated lost_end_ms (3 min) on, and an agent that
@@ -233,8 +237,12 @@ struct SupervisorConfig {
 	// one still running is terminated lost_end_ms later.
 	int64_t machine_silence_s = 60;
 	uint64_t lost_end_ms = 3 * 60 * 1000;
-	// After a launch the cloud refused, none of that kind for this long.
+	// After a failed launch of a kind (the cloud refused it, or its machine
+	// never booted), none of that kind for this long, doubled per failure in a
+	// row (1, 2, 4, 8 ... min) to launch_backoff_max_ms; a machine of the kind
+	// that boots ends it (fleet_launch_backoff).
 	uint64_t launch_backoff_ms = 60 * 1000;
+	uint64_t launch_backoff_max_ms = 30 * 60 * 1000;
 	// The wall clock, Unix seconds, the owners' hosting entitlements are read
 	// at (a subscription's period end is a date); the tests step it by hand.
 	std::function<int64_t()> wall_clock_s = billing::unix_now;
@@ -396,8 +404,10 @@ private:
 	// its server's event written, once per wait.
 	void note_refused_launches(db::Database &db, uint64_t now_ms);
 	// A launch of `kind` failed (the cloud refused it, or its machine never
-	// booted): counted for the heartbeat's launch_failures, and no launch of
-	// that kind for launch_backoff_ms (the row fleet_launch_backoff).
+	// booted): counted for the heartbeat's launch_failures, and, unless a
+	// backoff of the kind already holds, one more failure in a row: no launch of
+	// that kind for launch_backoff_ms doubled per failure before it, at most
+	// launch_backoff_max_ms (the row fleet_launch_backoff).
 	void launch_failed(db::Database &db, MachineKind kind, uint64_t now_ms);
 	// A machine.describe of `machine`, at most every describe_interval_ms; its
 	// answer lands on the row (cloud_state) for a later pass.

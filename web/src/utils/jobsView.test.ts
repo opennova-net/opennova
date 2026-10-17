@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   everyLabel,
+  groupRetryMessage,
   isCancelled,
   jobKindLabel,
   jobStateLabel,
@@ -8,6 +9,8 @@ import {
   scheduleNextLabel,
   secondsLabel,
   utcInputSeconds,
+  utcInputValue,
+  workerLeaseLabel,
 } from './jobsView';
 import { NOW, ago, schedule } from '../test/jobsFixtures';
 
@@ -38,7 +41,7 @@ describe('the background jobs in words', () => {
     expect(jobStateLabel({ state: 'failed', last_error: "cancelled by an admin (token)" })).toBe('Cancelled');
     expect(jobStateLabel({ state: 'failed', last_error: 'the launch failed' })).toBe('Failed');
     expect(jobStateLabel({ state: 'queued', last_error: '' })).toBe('Waiting');
-    expect(jobKindLabel('stats.prune')).toBe("Prune old hosted servers' stats");
+    expect(jobKindLabel('stats.prune')).toBe("Prune old hosted servers' stats and ended machines");
     expect(jobKindLabel('something.new')).toBe('something.new');
   });
 
@@ -49,9 +52,25 @@ describe('the background jobs in words', () => {
     expect(scheduleNextLabel(schedule('jobs.prune', { pending: true }), NOW)).toBe('After the one waiting or running');
   });
 
-  it('reads a datetime-local value as UTC', () => {
+  it('reads a datetime-local value as UTC, and writes one back', () => {
     expect(utcInputSeconds('2026-10-16T09:30')).toBe(Date.UTC(2026, 9, 16, 9, 30) / 1000);
     expect(utcInputSeconds('')).toBeNull();
     expect(utcInputSeconds('not a date')).toBeNull();
+    expect(utcInputValue(Date.UTC(2026, 9, 16, 9, 30) / 1000)).toBe('2026-10-16T09:30');
+  });
+
+  it('says how a worker process holds its leases', () => {
+    expect(workerLeaseLabel({ lapsed: 1, lease_left_seconds: 50 })).toBe('1 lease ran out: the process went away');
+    expect(workerLeaseLabel({ lapsed: 2, lease_left_seconds: null })).toBe('2 leases ran out: the process went away');
+    expect(workerLeaseLabel({ lapsed: 0, lease_left_seconds: 57 })).toBe('Current: the soonest runs out in 57 seconds');
+    expect(workerLeaseLabel({ lapsed: 0, lease_left_seconds: null })).toBe('');
+  });
+
+  it('says what a failure group’s retry did', () => {
+    expect(groupRetryMessage({ retried: 3, secret_dropped: 0, already_pending: 0, changed: 0 })).toBe('3 jobs are queued again to run now.');
+    expect(groupRetryMessage({ retried: 1, secret_dropped: 2, already_pending: 1, changed: 1 })).toBe(
+      '1 job is queued again to run now. 2 jobs cannot run again: the secret went when it ended. ' +
+        '1 job waits behind another with the same key. 1 job had already left the failed state.',
+    );
   });
 });

@@ -12,7 +12,10 @@
 // describe writes,
 // and the slots: assigned with the generation moving on, never twice to two
 // live servers (the index holds it whatever writes the row), let go, and read
-// back for placement.
+// back for placement; each kind's launch backoff (growing per failure in a row
+// to its cap, counted once while it holds, cleared by a machine of the kind
+// that boots); and the prune of the machines ended 14 days ago (the
+// references a server keeps nulled, one a live server names kept).
 
 #include "hosted/agent_protocol.h"
 #include "hosted/fleet_repository.h"
@@ -578,6 +581,128 @@ int test_slots() {
 	return 0;
 }
 
+// --- each kind's launch backoff -------------------------------------------------------
+
+// The wait doubles per failure in a row from its base (1, 2, 4, 8 ... minutes)
+// to its cap (30); a failure while the backoff holds (of a launch made before
+// it began) changes nothing; each kind has its own; a machine of the kind that
+// boots (its agent's first sync) clears that kind's, and a later sync of a
+// ready machine clears nothing.
+int test_launch_backoff() {
+	constexpr uint64_t kMin = 60 * 1000;
+	constexpr uint64_t kCap = 30 * kMin;
+	const uint64_t waits[] = { 1, 2, 4, 8, 16, 30, 30 };
+	for (int64_t n = 1; n <= 7; ++n)
+		TEST_EXPECT(hosted::launch_backoff_wait_ms(n, kMin, kCap) == waits[n - 1] * kMin);
+	TEST_EXPECT(hosted::launch_backoff_wait_ms(5000, kMin, kCap) == kCap);
+
+	TestDatabase scratch;
+	Database db = scratch.open();
+	TEST_EXPECT(hosted::launch_not_before_ms(db, MachineKind::Shared) == 0);
+	int64_t now = 1760000000000;
+	auto b = hosted::note_launch_failure(db, MachineKind::Shared, now, kMin, kCap);
+	TEST_EXPECT(b && b->failures == 1 && b->not_before_ms == now + static_cast<int64_t>(kMin));
+	// Another refusal inside it, of a launch made before it began: nothing changes.
+	TEST_EXPECT(!hosted::note_launch_failure(db, MachineKind::Shared, now + 59999, kMin, kCap));
+	TEST_EXPECT(hosted::launch_backoff(db, MachineKind::Shared).failures == 1);
+	TEST_EXPECT(hosted::launch_not_before_ms(db, MachineKind::Shared) == now + 60000);
+	// Each one after it doubles the next, to the cap.
+	for (int i = 1; i < 7; ++i) {
+		now = hosted::launch_not_before_ms(db, MachineKind::Shared);
+		b = hosted::note_launch_failure(db, MachineKind::Shared, now, kMin, kCap);
+		TEST_EXPECT(b && b->failures == i + 1 &&
+				b->not_before_ms == now + static_cast<int64_t>(waits[i] * kMin));
+	}
+	// The own machines' is their own.
+	TEST_EXPECT(hosted::launch_not_before_ms(db, MachineKind::Own) == 0);
+	b = hosted::note_launch_failure(db, MachineKind::Own, now, kMin, kCap);
+	TEST_EXPECT(b && b->failures == 1);
+	// A shared machine boots: the shared kind's backoff is over, the own one's holds.
+	const hosted::CreatedMachine m = booting_machine(db, MachineKind::Shared, 4);
+	TEST_EXPECT(hosted::record_sync(db, m.id, "v1", {}));
+	const hosted::LaunchBackoff shared = hosted::launch_backoff(db, MachineKind::Shared);
+	TEST_EXPECT(shared.failures == 0 && shared.not_before_ms == 0);
+	TEST_EXPECT(hosted::launch_backoff(db, MachineKind::Own).failures == 1);
+	// The next failure starts from the base again; the ready machine's next sync is
+	// no boot and clears nothing.
+	b = hosted::note_launch_failure(db, MachineKind::Shared, now, kMin, kCap);
+	TEST_EXPECT(b && b->failures == 1 && b->not_before_ms == now + static_cast<int64_t>(kMin));
+	TEST_EXPECT(hosted::record_sync(db, m.id, "v1", {}));
+	TEST_EXPECT(hosted::launch_backoff(db, MachineKind::Shared).failures == 1);
+	return 0;
+}
+
+// The prune of the ended machines: one ended or failed more than 14 days ago
+// goes with its slot reports and egress months, a stopped server that last ran
+// on it left with no machine (machine_ref nulled); a younger one, a live one
+// and one a live server still names stay, the last until that server stops.
+int test_prune_ended_machines() {
+	TestDatabase scratch;
+	Database db = scratch.open();
+	const auto ended_at = [&db](int64_t id, const char *ago) {
+		db.exec("UPDATE fleet_machines SET ended_at = now() - $2::interval WHERE id = $1;",
+				{ BindValue(id), BindValue(std::string(ago)) });
+	};
+	// A launch refused 15 days ago.
+	hosted::NewMachine refused;
+	refused.provider = "ec2";
+	refused.kind = MachineKind::Own;
+	refused.serve_image = kImage;
+	const int64_t old_failed = hosted::create_machine(db, refused).id;
+	TEST_EXPECT(hosted::fail_refused_launch(db, old_failed));
+	ended_at(old_failed, "15 days");
+	// One that ran a server (its slot report, its month's egress) and ended 20 days ago.
+	const int64_t old_ended = booting_machine(db, MachineKind::Shared, 4, "i-0eeeeeeeeeeeeeee1").id;
+	TEST_EXPECT(hosted::record_sync(
+			db, old_ended, "v1", { report("srv-7-g1", 0, hosted::ContainerState::Running, 100) }));
+	db.exec("INSERT INTO fleet_machine_egress (machine_id, month, egress_bytes) VALUES ($1, "
+			"CAST(date_trunc('month', now()) AS date), 100);",
+			{ BindValue(old_ended) });
+	const int64_t stopped = server_row(db, "stopped");
+	db.exec("UPDATE hosted_servers SET machine_ref = $2, slot = 0 WHERE id = $1;",
+			{ BindValue(stopped), BindValue(old_ended) });
+	TEST_EXPECT(hosted::transition_machine(
+			db, old_ended, FleetMachineState::Ready, FleetMachineState::Ended, "idle"));
+	ended_at(old_ended, "20 days");
+	// Ended 13 days ago; ready a month; ended 20 days ago with a live server on it.
+	const int64_t young = booting_machine(db, MachineKind::Shared, 4, "i-0eeeeeeeeeeeeeee2").id;
+	TEST_EXPECT(hosted::transition_machine(
+			db, young, FleetMachineState::Booting, FleetMachineState::Ended, "idle"));
+	ended_at(young, "13 days");
+	const int64_t live = booting_machine(db, MachineKind::Shared, 4, "i-0eeeeeeeeeeeeeee3").id;
+	TEST_EXPECT(hosted::record_sync(db, live, "v1", {}));
+	db.exec("UPDATE fleet_machines SET launched_at = now() - interval '30 days' WHERE id = $1;",
+			{ BindValue(live) });
+	const int64_t named = booting_machine(db, MachineKind::Shared, 4, "i-0eeeeeeeeeeeeeee4").id;
+	TEST_EXPECT(hosted::transition_machine(
+			db, named, FleetMachineState::Booting, FleetMachineState::Failed, "gone"));
+	ended_at(named, "20 days");
+	const int64_t running = server_row(db, "running");
+	db.exec("UPDATE hosted_servers SET machine_ref = $2, slot = 1 WHERE id = $1;",
+			{ BindValue(running), BindValue(named) });
+
+	TEST_EXPECT(hosted::prune_ended_machines(db) == 2);
+	TEST_EXPECT(!hosted::find_machine(db, old_failed) && !hosted::find_machine(db, old_ended));
+	TEST_EXPECT(hosted::find_machine(db, young) && hosted::find_machine(db, live) &&
+			hosted::find_machine(db, named));
+	TEST_EXPECT(hosted::slot_reports(db, old_ended).empty());
+	TEST_EXPECT(db.query("SELECT 1 FROM fleet_machine_egress WHERE machine_id = $1;",
+						  { BindValue(old_ended) })
+					.empty());
+	TEST_EXPECT(db.query("SELECT 1 FROM hosted_servers WHERE id = $1 AND machine_ref IS NULL;",
+						  { BindValue(stopped) })
+						.size() == 1);
+	TEST_EXPECT(db.query("SELECT 1 FROM hosted_servers WHERE id = $1 AND machine_ref = $2;",
+						  { BindValue(running), BindValue(named) })
+						.size() == 1);
+	// Its server stopped, the next prune takes it; a shorter keep the younger one.
+	db.exec("UPDATE hosted_servers SET state = 'stopped' WHERE id = $1;", { BindValue(running) });
+	TEST_EXPECT(hosted::prune_ended_machines(db) == 1 && !hosted::find_machine(db, named));
+	TEST_EXPECT(hosted::prune_ended_machines(db, 12 * 24 * 60 * 60) == 1);
+	TEST_EXPECT(!hosted::find_machine(db, young) && hosted::find_machine(db, live));
+	return 0;
+}
+
 int test_schema() {
 	TestDatabase scratch;
 	Database db = scratch.open();
@@ -613,6 +738,8 @@ int main(int argc, char **argv) {
 		{ "record_sync", test_record_sync },
 		{ "silent_machines", test_silent_machines },
 		{ "slots", test_slots },
+		{ "launch_backoff", test_launch_backoff },
+		{ "prune_ended_machines", test_prune_ended_machines },
 		{ "schema", test_schema },
 	};
 	for (const Case &c : cases) {

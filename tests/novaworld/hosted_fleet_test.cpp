@@ -97,7 +97,7 @@ int test_desired_state() {
 // terminated, a failed launch (the heartbeat counts it, and its kind waits out
 // the launch backoff); its server, the machine's cause, is placed again with no
 // restart counted, on a new machine. One whose cloud machine vanishes before it
-// booted is the same.
+// booted is the same, the second failure in a row: its backoff twice as long.
 int test_boot_timeout() {
 	Rig rig("fleet_boot_timeout");
 	rig.fake.boot_timeout = 30000;
@@ -138,6 +138,10 @@ int test_boot_timeout() {
 	TEST_EXPECT(rig.machine(second)->state == FleetMachineState::Failed &&
 			rig.machine(second)->end_reason == "its machine is gone before it booted");
 	TEST_EXPECT(rig.server(id)->restarts == 0 && rig.sup->launch_failures() == 2);
+	// The second failure in a row: twice the backoff.
+	rig.advance(rig.config.launch_backoff_ms);
+	rig.step();
+	TEST_EXPECT(rig.fake.launches == 2 && rig.state(id) == State::Provisioning);
 	rig.advance(rig.config.launch_backoff_ms);
 	TEST_EXPECT(rig.walk(id, State::Listing));
 	TEST_EXPECT(rig.machine_of(id) != machine && rig.machine_of(id) != second && rig.fake.launches == 3);

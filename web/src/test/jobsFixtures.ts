@@ -2,7 +2,7 @@
 // answer them (apps/novaworld_web/jobs/job_routes.cpp), for the jobs pages'
 // tests. NOW is the reply's `at`.
 
-import type { Job, JobKindSummary, JobPage, JobSchedule, JobsOverview } from '../types/jobs';
+import type { Job, JobFailureGroup, JobKindSummary, JobPage, JobSchedule, JobWorker, JobsOverview } from '../types/jobs';
 
 export const NOW = Date.UTC(2026, 9, 16, 12, 0, 0);
 
@@ -68,9 +68,34 @@ export function schedule(kind: string, overrides: Partial<JobSchedule> = {}): Jo
   };
 }
 
+export function failureGroup(kind: string, overrides: Partial<JobFailureGroup> = {}): JobFailureGroup {
+  return {
+    kind,
+    key: 'the launch failed',
+    count: 1,
+    retryable: 1,
+    last_job_id: 77,
+    last_error: 'the launch failed',
+    last_at: ago(600),
+    ...overrides,
+  };
+}
+
+export function worker(process: string, overrides: Partial<JobWorker> = {}): JobWorker {
+  return {
+    process,
+    threads: 1,
+    busy: 0,
+    lapsed: 0,
+    lease_left_seconds: null,
+    done: 0,
+    failed: 0,
+    last_active_at: ago(40),
+    ...overrides,
+  };
+}
+
 export function overview(overrides: Partial<JobsOverview> = {}): JobsOverview {
-  const perMinute = Array.from({ length: 60 }, (_, i) => ({ at: ago((59 - i) * 60), done: i % 2, failed: 0 }));
-  perMinute[59] = { at: ago(0), done: 4, failed: 1 };
   return {
     at: ago(0),
     totals: kindSummary('', {
@@ -80,8 +105,8 @@ export function overview(overrides: Partial<JobsOverview> = {}): JobsOverview {
       done_hour: 34,
       done_day: 800,
       failed_hour: 1,
-      failed_day: 2,
-      failed: 5,
+      failed_day: 16,
+      failed: 20,
       oldest_wait_seconds: 12,
       mean_run_seconds: 1.5,
     }),
@@ -94,57 +119,29 @@ export function overview(overrides: Partial<JobsOverview> = {}): JobsOverview {
         done_hour: 4,
         done_day: 100,
         failed_hour: 1,
-        failed_day: 2,
-        failed: 5,
+        failed_day: 14,
+        failed: 18,
         oldest_wait_seconds: 12,
         mean_run_seconds: 42,
       }),
     ],
-    per_minute: perMinute,
+    // Fourteen launches failed alike, none of which can run again (their
+    // tokens went as they ended); one mail failure that can.
     attention: [
-      job(77, {
-        kind: 'machine.launch',
-        state: 'failed',
-        attempts: 5,
-        max_attempts: 5,
-        last_error: 'the launch failed',
-        finished_at: ago(600),
-        retryable: true,
-      }),
-      job(78, {
-        kind: 'mail.send',
-        state: 'failed',
-        attempts: 1,
-        max_attempts: 1,
-        last_error: 'SES refused the address',
-        finished_at: ago(3600),
-        secret_state: 'dropped',
+      failureGroup('machine.launch', { count: 14, retryable: 0, last_job_id: 86, last_at: ago(60) }),
+      failureGroup('mail.send', {
+        key: 'SES refused the address <id>',
+        count: 2,
+        retryable: 2,
+        last_job_id: 78,
+        last_error: 'SES refused the address a1b2c3d4e5',
+        last_at: ago(3600),
       }),
     ],
-    running: [
-      job(80, {
-        kind: 'machine.launch',
-        state: 'running',
-        finished_at: null,
-        worker_id: 'worker-1a2b3c4d-1',
-        running_seconds: 125,
-        lease_until: ago(30),
-        lease_left_seconds: -30,
-      }),
-      job(81, {
-        kind: 'billing.sync',
-        state: 'running',
-        finished_at: null,
-        worker_id: 'worker-5e6f7a8b-0',
-        running_seconds: 3,
-        lease_until: ago(-57),
-        lease_left_seconds: 57,
-      }),
-    ],
+    attention_total: 16,
     workers: [
-      { worker_id: 'worker-5e6f7a8b-0', process: 'worker-5e6f7a8b', job_id: 81, job_kind: 'billing.sync', done: 10, failed: 0, last_active_at: ago(3) },
-      { worker_id: 'worker-1a2b3c4d-1', process: 'worker-1a2b3c4d', job_id: 80, job_kind: 'machine.launch', done: 2, failed: 1, last_active_at: ago(125) },
-      { worker_id: 'worker-1a2b3c4d-0', process: 'worker-1a2b3c4d', job_id: null, job_kind: null, done: 22, failed: 0, last_active_at: ago(40) },
+      worker('worker-1a2b3c4d', { threads: 2, busy: 1, lapsed: 1, done: 24, failed: 1, last_active_at: ago(125) }),
+      worker('worker-5e6f7a8b', { threads: 4, busy: 1, lease_left_seconds: 57, done: 10, last_active_at: ago(3) }),
     ],
     schedules: [
       schedule('hosts.prune'),
@@ -168,9 +165,17 @@ export function jobPage(overrides: Partial<JobPage> = {}): JobPage {
       job(90, { kind: 'mail.send', state: 'queued', finished_at: null, started_at: null, worker_id: null, cancellable: true }),
       job(89, { kind: 'machine.launch', state: 'failed', last_error: 'the launch failed', retryable: true }),
       job(88, { kind: 'hosts.prune', schedule_key: 'hosts.prune@59000', dedupe_key: 'hosts.prune' }),
+      job(87, {
+        kind: 'billing.sync',
+        state: 'running',
+        finished_at: null,
+        running_seconds: 125,
+        lease_until: ago(30),
+        lease_left_seconds: -30,
+      }),
     ],
     total: 120,
-    next_before: 88,
+    next_before: 87,
     ...overrides,
   };
 }

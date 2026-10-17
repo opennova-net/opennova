@@ -329,28 +329,37 @@ policy, not a port.
 | `billing.sync` | the customers with an event to sync | each fresh webhook event; every minute while one waits | 1 |
 | `mail.send` | one mail, at most once | the welcome and reset routes | 4 |
 | `hosts.prune`, `host_keys.prune`, `web_sessions.prune`, `active_user_sessions.prune`, `login_addresses.prune`, `password_resets.prune`, `billing_events.prune` | the prunes (`active_user_sessions.prune`: the retail logins' rows unused for 2 h) | every `HOST_SWEEP_INTERVAL_MS` | 1 |
-| `stats.prune` | the hosted servers' samples past 48 h, their hours past 90 days, the machines' months past 13 | hourly | 1 |
+| `stats.prune` | the hosted servers' samples past 48 h, their hours past 90 days, the machines' months past 13, the fleet's machines ended or failed 14 days ago | hourly | 1 |
 | `jobs.prune` | finished jobs past 14 days (or its payload's `keep_s`) | hourly, an admin | 1 |
 
 **The admin's view** (`jobs/job_admin.*`, `jobs/job_routes.*`; the site's admin page
 **Background jobs**, `/admin/jobs`): what the rows show, read on web from the jobs
-table and the controller's row alone, so every replica answers alike. A worker thread shows
-by the claims it left on the rows (its id, its job's start and lease): one that has run
-nothing for an hour does not show, and one whose lease ran out (its job still `running`,
-`lease_left_seconds` negative) has gone away, its job queued again at the next keeper pass.
-The schedules are the controller's, read from the same settings (`parts.*`
-`periodic_jobs`). Each action is one compare-and-set on the job's state, so none changes a
+table and the controller's row alone, so every replica answers alike. A worker process
+shows by the claims its threads left on the rows (their ids, their jobs' starts and
+leases): one none of whose threads has run anything for an hour does not show, and a
+running job whose lease ran out (its job still `running`) is one whose process has gone
+away, queued again at the next keeper pass. The failures to look at come grouped by the
+database: one group per kind and **failure key**, the error with its UUIDs, ISO 8601
+times, tokens of 8 or more letters, digits, `_` or `-` holding a digit (request ids, cloud
+machine ids) and other numbers taken out (`<id>`, `<time>`, `#`), its first 300
+characters, so fourteen launches that failed alike are one row with a count. The schedules
+are the controller's, read from the same settings (`parts.*` `periodic_jobs`). Each action
+is one compare-and-set on the job's state (a group's retry, one per job), so none changes a
 job a worker holds; each is logged as every admin state change is (its actor and status)
-and once more with the job (`[jobs] job <id> (<kind>) ...`). The page reads the overview
-every 15 s (every 5 s while a job runs or waits) and shows times relative and in UTC,
-durations in seconds, minutes and hours.
+and once more with the job (`[jobs] job <id> (<kind>) ...`). The page shows four counts
+over three tabs (`?tab=`): Overview (the failure groups, each linking to its jobs and with a
+retry of the ones that can run again; the worker processes; each kind's counts), Jobs (the
+filtered, paged list, its filter in the page's query, and the prune) and Schedules (each
+periodic kind, run now). It reads the overview every 15 s (every 5 s while a job runs or
+waits) and shows times relative and in UTC, durations in seconds, minutes and hours.
 
 | Route | Auth | Reply |
 | --- | --- | --- |
-| `GET /api/admin/jobs/overview` | admin | `{"at", "totals", "kinds", "per_minute", "attention", "running", "workers", "schedules", "controller"}`: per kind (and in `totals`) `queued` (due or not), `due`, `running`, `done_hour`, `done_day`, `failed_hour`, `failed_day`, `failed` (kept until the prune), `oldest_wait_seconds` (the oldest due job's wait: the queue's latency; null with none) and `mean_run_seconds` (the last hour's done jobs, claim to end); `per_minute` the last 60 minutes, oldest first (`at`, `done`, `failed`); `attention` the newest 20 jobs failed in the last day, an admin's cancels left out; `running` every running job, its claim oldest first; `workers` each worker thread holding a job or done with one in the last hour (`worker_id`, `process`, `job_id`, `job_kind`, `done`, `failed`, `last_active_at`); `schedules` each periodic kind (`kind`, `interval_seconds`, `at_start`, `conditional`, `last` and `last_finished` (jobs or null), `next_at`, `pending`); `controller` (`leader`, `elected_at`, `last_scheduled_at`). A job, here and below: `id`, `kind`, `state`, `attempts`, `max_attempts`, `last_error`, `run_at`, `created_at`, `started_at`, `finished_at`, `lease_until`, `lease_left_seconds` and `running_seconds` (a running job's, else null), `worker_id`, `dedupe_key`, `schedule_key`, `manual`, `secret_state` (`none`, `held` or `dropped`, never the secret), `retryable`, `cancellable`. Times ISO 8601 UTC; `Cache-Control: no-store` |
-| `GET /api/admin/jobs` | admin | `?state=` (`queued`, `running`, `done`, `failed`), `?kind=`, `?from=` and `?to=` (Unix seconds, on when a job was created; `to` excluded), `?q=` (within the dedupe or schedule key, any case), `?before=<id>` and `?limit=` (1..200, 50): `{"jobs", "total", "next_before"}`, the jobs newest first, how many the filter takes, and the next page's `before` (null on the last); 400 `invalid_field`; `Cache-Control: no-store` |
+| `GET /api/admin/jobs/overview` | admin | `{"at", "totals", "kinds", "attention", "attention_total", "workers", "schedules", "controller"}`: per kind (and in `totals`) `queued` (due or not), `due`, `running`, `done_hour`, `done_day`, `failed_hour`, `failed_day`, `failed` (kept until the prune), `oldest_wait_seconds` (the oldest due job's wait: the queue's latency; null with none) and `mean_run_seconds` (the last hour's done jobs, claim to end); `attention` the newest 20 failure groups, the jobs of one kind failed in the last day with one failure key, an admin's cancels left out (`kind`, `key`, `count`, `retryable` (how many a retry takes), `last_job_id`, `last_error` (the newest one's text), `last_at`), by their newest failure; `attention_total` every job the groups count, shown or not; `workers` each worker process with a thread holding a job or done with one in the last hour (`process`, `threads`, `busy`, `lapsed` (its running jobs whose lease ran out), `lease_left_seconds` (the least left of its others, null with none), `done`, `failed`, `last_active_at`); `schedules` each periodic kind (`kind`, `interval_seconds`, `at_start`, `conditional`, `last` and `last_finished` (jobs or null), `next_at`, `pending`); `controller` (`leader`, `elected_at`, `last_scheduled_at`). A job, here and below: `id`, `kind`, `state`, `attempts`, `max_attempts`, `last_error`, `run_at`, `created_at`, `started_at`, `finished_at`, `lease_until`, `lease_left_seconds` and `running_seconds` (a running job's, else null), `worker_id`, `dedupe_key`, `schedule_key`, `manual`, `secret_state` (`none`, `held` or `dropped`, never the secret), `retryable`, `cancellable`. Times ISO 8601 UTC; `Cache-Control: no-store` |
+| `GET /api/admin/jobs` | admin | `?state=` (`queued`, `running`, `done`, `failed`), `?kind=`, `?from=` and `?to=` (Unix seconds, on when a job was created; `to` excluded), `?q=` (within the dedupe or schedule key, any case), `?failure=` (a failure key, exact: an attention group's `key`, 300 bytes at most), `?before=<id>` and `?limit=` (1..200, 50): `{"jobs", "total", "next_before"}`, the jobs newest first, how many the filter takes, and the next page's `before` (null on the last); 400 `invalid_field`; `Cache-Control: no-store` |
 | `GET /api/admin/jobs/<id>` | admin | `{"job"}` with its `payload`; 404 `not_found` |
 | `POST /api/admin/jobs/<id>/retry` | admin | a failed job queued again to run now with one more attempt than it has used (`max_attempts` becomes `attempts` + 1; its last error kept until it runs): 200 `{"job"}`; 404 `not_found`; 409 `not_failed` (with its `state`), `secret_dropped` (its secret went as it ended: a mail, a machine's launch), `already_pending` (a job with its dedupe key waits or runs) |
+| `POST /api/admin/jobs/retry-group` | admin | `{"kind", "key"}`: each job of that attention group (of `kind`, failed in the last day with failure key `key`, an admin's cancels left out) queued again as its own retry would, oldest first: 200 `{"retried", "secret_dropped", "already_pending", "changed"}` (how many each outcome took: queued again, its secret gone, a job with its dedupe key waiting or running, no longer failed); 400 `invalid_json`, `missing_field`, `invalid_field` |
 | `POST /api/admin/jobs/<id>/cancel` | admin | a queued job failed for good, `cancelled by an admin (<actor>)` its error, its secret dropped: 200 `{"job"}`; 404 `not_found`; 409 `not_queued` (with its `state`: a running job is its worker's) |
 | `POST /api/admin/jobs/run` | admin | `{"kind"}`, a periodic kind this deployment schedules, enqueued now as its schedule would, keyed `<kind>@manual-<ms>`: 202 `{"job"}`; 400 `invalid_json`, `missing_field`, `invalid_field`; 404 `not_found` (no schedule names it); 409 `already_pending` (one of the kind waits or runs) |
 | `POST /api/admin/jobs/prune` | admin | `{"keep_days": 1..14}` (14 when absent): a `jobs.prune` job with that keep, now: 202 `{"job"}`; 400 `invalid_json`, `invalid_field`; 409 `already_pending` |
@@ -844,7 +853,10 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   been silent 60 s. The live servers' slots are `hosted_servers.machine_ref`, `slot`,
   `game_port` and `generation` (its starts; its container is `srv-<id>-g<generation>`),
   two live servers never holding one slot (a unique index), and an ended server's row
-  keeping where it last ran.
+  keeping where it last ran. An ended or failed machine's row is deleted 14 days after
+  its end by the hourly `stats.prune` job, with its slot reports and egress months; an
+  ended server that last ran on it keeps no machine (`machine_ref` null), and a machine a
+  live server still names stays.
 - **Placement** (`hosted/placement.h`, pure functions): a shared server goes to the
   fullest shared machine that takes servers (launching, booting or ready; never one
   draining, ending or gone) with a free slot, its lowest free slot, so machines fill one
@@ -969,7 +981,11 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   to. A machine row moved to `ending` (an admin's end) is terminated at the next pass. A
   launch the cloud refuses (its job fails the row; the next pass counts it), or a machine
   that never booted, counts toward the heartbeat's `launch_failures` and holds every
-  launch of that kind for 60 s.
+  launch of that kind for a while that doubles with each failure in a row: 1, 2, 4, 8 and
+  16 minutes, then 30 (`fleet_launch_backoff.failures`; a failure that lands while the
+  backoff holds came from a launch made before it began and counts once with it). A
+  machine of the kind that boots (its agent's first sync) ends the backoff and sets the
+  count back to 0.
 - **The desired state** (`hosted/fleet_desired_state.h`, the supervisor's answer to each
   agent's sync): the containers of the live servers placed on the machine that are
   booting, listing, running or stopping (a stopping one only once its agent has reported
@@ -2053,8 +2069,9 @@ whose machines' agents the test plays through the supervisor's sync
 ([`tests/novaworld/hosted_fake_driver.h`](../../tests/novaworld/hosted_fake_driver.h),
 [`hosted_fleet_rig.h`](../../tests/novaworld/hosted_fleet_rig.h)) on a hand-stepped clock:
 two servers on one shared machine's slots, the own machine, the stops, any exit while
-stopping, the crash restarts (an exit, the OOM kill, a failed start, a refused launch),
-their limit and the restart window, the timeouts, the health checks, a lost machine
+stopping, the crash restarts (an exit, the OOM kill, a failed start, a refused launch and
+the launch backoff doubling to its cap, ended by a boot), their limit and the restart
+window, the timeouts, the health checks, a lost machine
 placing its server again with no restart counted, the owners' changes including a
 withdrawn comp grant and a canceled support tier, the owners' limits (a tier lowered, past
 due, the add-on cut) and their mass-stop hold, the reconciliation and the relist grace
@@ -2086,9 +2103,11 @@ dropped as a job ends, the periodic buckets, a claim beside a hosted start's loc
 (an admin's keep among them) and the pool's keeper; `job_routes`
 ([`tests/novaworld/job_routes_test.cpp`](../../tests/novaworld/job_routes_test.cpp)) the
 admin's jobs routes on the HTTP listener: every route refused without an admin, the
-overview's counts, latency, minutes, running leases (one run out), workers, schedules and
-controller, the list's filters and pages, a job's detail, the retry, cancel, run-now and
-prune actions each refused in the wrong state, and never a job's secret; `controller`
+overview's counts, latency, failure groups (alike errors apart in their ids and times
+together), worker processes with their leases (one run out), schedules and controller, the
+list's filters (a failure key among them) and pages, a job's detail, the retry, group retry,
+cancel, run-now and prune actions each refused in the wrong state, and never a job's
+secret; `controller`
 ([`tests/novaworld/controller_test.cpp`](../../tests/novaworld/controller_test.cpp), every
 build) two controllers on one database over supervisors of their own, the fleet's jobs on
 worker threads and a hand-stepped clock: one leads and alone runs passes, its lock's
@@ -2101,9 +2120,12 @@ answered link down by the next leader's drain; `hosted_stats`
 ([`tests/novaworld/hosted_stats_test.cpp`](../../tests/novaworld/hosted_stats_test.cpp))
 the sampler on a hand-stepped wall clock (the counter's differences and its restart, the
 CPU's share, the unique players never stored, the missions, the rollup, the machines'
-month, the `stats.prune` job's prune, which a sample never runs) and the reads over each range for one server, an account and the
+month, the `stats.prune` job's prune, which a sample never runs, the old ended machines
+among it) and the reads over each range for one server, an account and the
 fleet; `hosted_placement` the planner (and the request's
-`place_after`); `hosted_fleet_repository` the fleet's rows; `hosted_agent_route` the agent
+`place_after`); `hosted_fleet_repository` the fleet's rows (each kind's launch backoff
+growing to its cap and cleared by a boot, the ended machines' prune among them);
+`hosted_agent_route` the agent
 routes on the internal listener, and the real `opennova-hostd` (its process runtime) end to
 end against them; `hosted_ec2_machine_driver` the EC2 driver on a stub `CommandRunner` and the
 docker driver against an engine in memory; `command_runner`

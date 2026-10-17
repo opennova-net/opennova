@@ -284,6 +284,17 @@ std::vector<int64_t> drain_machines(db::Database &db, const std::string &reason)
 	return out;
 }
 
+size_t prune_ended_machines(db::Database &db, int64_t keep_s) {
+	// An ended machine's row with no end time (none should be) ages from its launch.
+	db.exec(std::string("DELETE FROM fleet_machines m WHERE m.state IN ('ended', 'failed') AND "
+						"COALESCE(m.ended_at, m.launched_at) < now() - make_interval(secs => $1) "
+						"AND NOT EXISTS (SELECT 1 FROM hosted_servers s WHERE s.machine_ref = m.id "
+						"AND s.") +
+					kLiveServerSql + ");",
+			{ BindValue(static_cast<double>(keep_s)) });
+	return static_cast<size_t>(db.changes());
+}
+
 int count_machines(db::Database &db, FleetMachineState state) {
 	const auto rows = db.query("SELECT COUNT(*) FROM fleet_machines WHERE state = $1;",
 			{ BindValue(std::string(fleet_machine_state_text(state))) });
@@ -380,16 +391,61 @@ void note_describe_asked(db::Database &db, int64_t id, int64_t now_ms) {
 			{ BindValue(id), BindValue(now_ms) });
 }
 
-int64_t launch_not_before_ms(db::Database &db, MachineKind kind) {
-	const auto rows = db.query("SELECT not_before_ms FROM fleet_launch_backoff WHERE kind = $1;",
-			{ BindValue(std::string(machine_kind_text(kind))) });
-	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
+// --- each kind's launch backoff ---
+
+uint64_t launch_backoff_wait_ms(int64_t failures, uint64_t base_ms, uint64_t cap_ms) {
+	uint64_t wait = std::min(base_ms, cap_ms);
+	for (int64_t i = 1; i < failures && wait > 0 && wait < cap_ms; ++i)
+		wait = std::min(wait * 2, cap_ms);
+	return wait;
 }
 
-void set_launch_not_before_ms(db::Database &db, MachineKind kind, int64_t not_before_ms) {
-	db.exec("INSERT INTO fleet_launch_backoff (kind, not_before_ms) VALUES ($1, $2) "
-			"ON CONFLICT (kind) DO UPDATE SET not_before_ms = EXCLUDED.not_before_ms;",
-			{ BindValue(std::string(machine_kind_text(kind))), BindValue(not_before_ms) });
+LaunchBackoff launch_backoff(db::Database &db, MachineKind kind) {
+	LaunchBackoff out;
+	const auto rows =
+			db.query("SELECT failures, not_before_ms FROM fleet_launch_backoff WHERE kind = $1;",
+					{ BindValue(std::string(machine_kind_text(kind))) });
+	if (!rows.empty()) {
+		out.failures = rows.front().as_int(0).value_or(0);
+		out.not_before_ms = rows.front().as_int(1).value_or(0);
+	}
+	return out;
+}
+
+int64_t launch_not_before_ms(db::Database &db, MachineKind kind) {
+	return launch_backoff(db, kind).not_before_ms;
+}
+
+std::optional<LaunchBackoff> note_launch_failure(
+		db::Database &db, MachineKind kind, int64_t now_ms, uint64_t base_ms, uint64_t cap_ms) {
+	const BindValue name(std::string(machine_kind_text(kind)));
+	// The kind's row read and written under its lock: a boot's clear waits.
+	db::Transaction tx(db);
+	db.exec("INSERT INTO fleet_launch_backoff (kind, not_before_ms) VALUES ($1, 0) "
+			"ON CONFLICT (kind) DO NOTHING;",
+			{ name });
+	const auto rows = db.query(
+			"SELECT failures, not_before_ms FROM fleet_launch_backoff WHERE kind = $1 FOR UPDATE;",
+			{ name });
+	LaunchBackoff b;
+	if (!rows.empty()) {
+		b.failures = rows.front().as_int(0).value_or(0);
+		b.not_before_ms = rows.front().as_int(1).value_or(0);
+	}
+	if (now_ms < b.not_before_ms)
+		return std::nullopt;
+	++b.failures;
+	b.not_before_ms =
+			now_ms + static_cast<int64_t>(launch_backoff_wait_ms(b.failures, base_ms, cap_ms));
+	db.exec("UPDATE fleet_launch_backoff SET failures = $2, not_before_ms = $3 WHERE kind = $1;",
+			{ name, BindValue(b.failures), BindValue(b.not_before_ms) });
+	tx.commit();
+	return b;
+}
+
+void clear_launch_backoff(db::Database &db, MachineKind kind) {
+	db.exec("UPDATE fleet_launch_backoff SET failures = 0, not_before_ms = 0 WHERE kind = $1;",
+			{ BindValue(std::string(machine_kind_text(kind))) });
 }
 
 // --- the agent's credentials ---
@@ -485,6 +541,11 @@ std::optional<FleetMachineRow> authenticate_agent(
 std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 		const std::string &agent_version, const std::vector<ContainerReport> &containers) {
 	db::Transaction tx(db);
+	// A booting machine's row, locked until this sync moves it to ready: its
+	// launch succeeded, so its kind's launch backoff ends with it.
+	const auto booting = db.query(
+			"SELECT kind FROM fleet_machines WHERE id = $1 AND state = 'booting' FOR UPDATE;",
+			{ BindValue(id) });
 	// The agent's first sync spends the bootstrap token (redeem_bootstrap_token).
 	const auto updated = db.query(
 			"UPDATE fleet_machines SET last_report_at = now(), agent_version = $2, "
@@ -496,6 +557,10 @@ std::optional<FleetMachineRow> record_sync(db::Database &db, int64_t id,
 			{ BindValue(id), BindValue(agent_version) });
 	if (updated.empty())
 		return std::nullopt;
+	if (!booting.empty()) {
+		if (const auto kind = parse_machine_kind(booting.front().as_text(0).value_or("")))
+			clear_launch_backoff(db, *kind);
+	}
 	const int slots = static_cast<int>(updated.front().as_int(0).value_or(0));
 	// One report per slot: a running container wins its slot, else the last.
 	std::map<int, const ContainerReport *> by_slot;

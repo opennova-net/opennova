@@ -7,7 +7,8 @@
 // counter that started over counted from 0), the unique players counted from
 // the roster and never stored, the missions started in the game scene, the
 // hourly rollup, the machine's monthly egress, and the prune (the stats.prune
-// job, the pass's sample never); then the reads the
+// job, the pass's sample never, which takes the fleet's machines ended 14 days
+// ago too); then the reads the
 // stats routes answer from, over hand-written samples: the summary (live and
 // running time, availability, the peak and the average players, the
 // player-hours, the egress, the restarts, the month's egress) and the series'
@@ -223,12 +224,19 @@ int test_sampler() {
 	const auto schedule = hosted::stats_schedule();
 	TEST_EXPECT(schedule.size() == 1 && schedule[0].kind == hosted::kJobStatsPrune &&
 			schedule[0].period_ms == 60 * 60 * 1000);
+	// The same job takes the fleet's machines ended more than 14 days ago.
+	const auto gone =
+			hosted::create_machine(db, { "fake", hosted::MachineKind::Own, 1, kServeImage, 0 });
+	TEST_EXPECT(hosted::fail_refused_launch(db, gone.id));
+	db.exec("UPDATE fleet_machines SET ended_at = now() - interval '15 days' WHERE id = $1;",
+			{ BindValue(gone.id) });
 	jobs::NewJob prune;
 	prune.kind = hosted::kJobStatsPrune;
 	TEST_EXPECT(jobs::enqueue(db, prune) > 0);
 	TEST_EXPECT(jobs::run_due(pool, registry) == 1);
 	TEST_EXPECT(!sample_at(db, id, old.at) && count_rows(db, old_hours) == 0);
 	TEST_EXPECT(sample_at(db, id, t0).has_value()); // within 48 h: kept
+	TEST_EXPECT(!hosted::find_machine(db, gone.id) && hosted::find_machine(db, machine.id));
 	return 0;
 }
 

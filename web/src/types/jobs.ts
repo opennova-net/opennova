@@ -54,18 +54,31 @@ export interface JobKindSummary {
   mean_run_seconds: number | null;
 }
 
-export interface JobMinute {
-  at: string;
-  done: number;
-  failed: number;
+// The jobs of one kind that failed the same way in the last day (an admin's
+// cancels left out): their failure key is their error with its ids, numbers
+// and times taken out.
+export interface JobFailureGroup {
+  kind: string;
+  key: string;
+  count: number;
+  // How many a retry takes: the rest carried a secret that went as they ended.
+  retryable: number;
+  last_job_id: number;
+  // The newest one's own error, and when it failed.
+  last_error: string;
+  last_at: string | null;
 }
 
-// A worker thread as the claims show it.
+// A worker process as its threads' claims show it (those holding a job, or
+// done with one in the last hour).
 export interface JobWorker {
-  worker_id: string;
   process: string;
-  job_id: number | null;
-  job_kind: string | null;
+  threads: number;
+  busy: number;
+  // Its running jobs whose lease ran out (the process went away), and the
+  // least lease left of the others.
+  lapsed: number;
+  lease_left_seconds: number | null;
   done: number;
   failed: number;
   last_active_at: string | null;
@@ -95,12 +108,20 @@ export interface JobsOverview {
   at: string;
   totals: JobKindSummary;
   kinds: JobKindSummary[];
-  per_minute: JobMinute[];
-  attention: Job[];
-  running: Job[];
+  // The newest failure groups, and how many jobs every group counts.
+  attention: JobFailureGroup[];
+  attention_total: number;
   workers: JobWorker[];
   schedules: JobSchedule[];
   controller: JobsController;
+}
+
+// What a failure group's retry did with each of its jobs.
+export interface JobGroupRetry {
+  retried: number;
+  secret_dropped: number;
+  already_pending: number;
+  changed: number;
 }
 
 export interface JobQuery {
@@ -111,6 +132,8 @@ export interface JobQuery {
   to?: number;
   // Within its dedupe or schedule key.
   q?: string;
+  // A failure group's key, exact.
+  failure?: string;
   // The page after the one that ended at this id.
   before?: number;
   limit?: number;

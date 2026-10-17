@@ -1,7 +1,7 @@
 import { AxiosError, AxiosHeaders, type AxiosResponse } from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { adminClient } from './client';
-import { cancelJob, fetchJob, fetchJobs, fetchJobsOverview, pruneJobs, retryJob, runJobNow } from './jobs';
+import { cancelJob, fetchJob, fetchJobs, fetchJobsOverview, pruneJobs, retryJob, retryJobGroup, runJobNow } from './jobs';
 
 vi.mock('./client', () => ({
   apiClient: { get: vi.fn(), post: vi.fn() },
@@ -67,15 +67,25 @@ const wireOverview = {
   at: '2026-10-16T12:00:00Z',
   totals: wireKind,
   kinds: [{ kind: 'machine.launch', ...wireKind }],
-  per_minute: [{ at: '2026-10-16T11:59:00Z', done: 3, failed: 0 }],
-  attention: [wireJob],
-  running: [],
+  attention: [
+    {
+      kind: 'machine.launch',
+      key: 'the launch failed',
+      count: 14,
+      retryable: 0,
+      last_job_id: 77,
+      last_error: 'the launch failed',
+      last_at: '2026-10-16T11:55:04Z',
+    },
+  ],
+  attention_total: 14,
   workers: [
     {
-      worker_id: 'worker-1a2b3c4d-0',
       process: 'worker-1a2b3c4d',
-      job_id: null,
-      job_kind: null,
+      threads: 4,
+      busy: 1,
+      lapsed: 0,
+      lease_left_seconds: 55,
       done: 3,
       failed: 1,
       last_active_at: '2026-10-16T11:55:04Z',
@@ -109,13 +119,14 @@ describe('the background jobs client', () => {
     if (!result.ok) return;
     expect(result.value.totals.oldest_wait_seconds).toBe(4);
     expect(result.value.kinds[0].kind).toBe('machine.launch');
-    expect(result.value.attention[0]).toMatchObject({ id: 77, secret_state: 'dropped', retryable: false });
-    expect(result.value.workers[0].job_id).toBeNull();
+    expect(result.value.attention[0]).toEqual(wireOverview.attention[0]);
+    expect(result.value.attention_total).toBe(14);
+    expect(result.value.workers[0]).toEqual(wireOverview.workers[0]);
     expect(result.value.controller).toEqual({ leader: 'controller-0f0f0f0f', elected_at: '2026-10-16T10:00:00Z', last_scheduled_at: null });
   });
 
   it('refuses a reply it cannot read', async () => {
-    get.mockResolvedValueOnce(reply({ ...wireOverview, attention: [{ id: 'x' }] }));
+    get.mockResolvedValueOnce(reply({ ...wireOverview, attention: [{ kind: 'machine.launch', count: 'x' }] }));
     const result = await fetchJobsOverview();
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -124,9 +135,17 @@ describe('the background jobs client', () => {
 
   it('sends the list query as given, leaving out what is unset', async () => {
     get.mockResolvedValueOnce(reply({ jobs: [wireJob], total: 9, next_before: 77 }));
-    const result = await fetchJobs({ state: 'failed', kind: 'machine.launch', from: 1792000000, q: '', before: 90, limit: 50 });
+    const result = await fetchJobs({
+      state: 'failed',
+      kind: 'machine.launch',
+      from: 1792000000,
+      q: '',
+      failure: 'the launch failed',
+      before: 90,
+      limit: 50,
+    });
     expect(get).toHaveBeenCalledWith('/jobs', {
-      params: { state: 'failed', kind: 'machine.launch', from: '1792000000', before: '90', limit: '50' },
+      params: { state: 'failed', kind: 'machine.launch', from: '1792000000', failure: 'the launch failed', before: '90', limit: '50' },
       signal: undefined,
     });
     expect(result.ok && result.value.total === 9 && result.value.next_before === 77).toBe(true);
@@ -149,6 +168,10 @@ describe('the background jobs client', () => {
     expect(post).toHaveBeenLastCalledWith('/jobs/run', { kind: 'hosts.prune' });
     expect((await pruneJobs(7)).ok).toBe(true);
     expect(post).toHaveBeenLastCalledWith('/jobs/prune', { keep_days: 7 });
+    post.mockResolvedValueOnce(reply({ retried: 2, secret_dropped: 1, already_pending: 0, changed: 0 }));
+    const group = await retryJobGroup('mail.send', 'SES refused <id>');
+    expect(post).toHaveBeenLastCalledWith('/jobs/retry-group', { kind: 'mail.send', key: 'SES refused <id>' });
+    expect(group.ok && group.value).toEqual({ retried: 2, secret_dropped: 1, already_pending: 0, changed: 0 });
 
     for (const [code, words] of [
       ['secret_dropped', 'cannot run again'],
