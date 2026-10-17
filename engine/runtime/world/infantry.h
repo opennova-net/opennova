@@ -257,8 +257,9 @@ inline int gait_stance_transition_clip(int current, int target) {
 
 // The two witnessed STANCE bits of the per-state anim-flags word (bits 8-9;
 // the wire player compact carries the same pair as its 2-bit stance lane).
-// [orig: g_AnimStateFlagsTable @0x8139E8; stance read in RoundData_SpawnRound
-// @0x4EC251..0x4EC27A]
+// [orig: g_AnimStateFlagsTable @0x8139E8; NetPacket_SerializePlayerState maps
+// them onto +0x12C (0x100 -> 0x200 crouch, 0x200 -> 0x100 prone)
+// @0x4C11FD..0x4C1242; the stance read in RoundData_SpawnRound @0x4EC129..0x4EC14C]
 inline constexpr uint32_t kAnimStanceFlagCrouched = 0x100;
 inline constexpr uint32_t kAnimStanceFlagProne = 0x200;
 

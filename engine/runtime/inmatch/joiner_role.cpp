@@ -1540,10 +1540,14 @@ void JoinerRole::apply_round_event(const replication::ClientRoundEvent &ev) {
 		// The category follows the retail animation-flags table, not a
 		// hand-maintained list of familiar locomotion clips. In particular,
 		// 170/171 remain crouched, 172 is prone, and idle_mortar (46) is
-		// neither. [orig: g_AnimStateFlagsTable @0x8139E8; category read in
-		// RoundData_SpawnRound @0x4EC252..0x4EC27A]
+		// neither. [orig: g_AnimStateFlagsTable @0x8139E8, mapped onto +0x12C by
+		// NetPacket_SerializePlayerState @0x4C11FD..0x4C1242; category read in
+		// RoundData_SpawnRound @0x4EC129..0x4EC14C, the row @0x4EC2A6..0x4EC2FD]
 		const uint32_t anim_flags = world::infantry_anim_flags(anim);
 		const bool prone = (anim_flags & world::kAnimStanceFlagProne) != 0;
+		// The spread's up/down limit reads the raw prone bit, not the row
+		// [orig: RoundData_SpawnRound @0x4EC137, read @0x4EC454].
+		source.prone = prone;
 		const bool crouched =
 				(anim_flags & world::kAnimStanceFlagCrouched) != 0;
 		const bool swimming = anim == 36 || anim == 37 || anim == 154;
