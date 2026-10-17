@@ -148,6 +148,13 @@ static int test_required_files() {
 	TEST_EXPECT(file_kind_for_required_name("gametext.bin") == FileKind::Strings);
 	TEST_EXPECT(file_kind_for_required_name("menutxt.bin") == FileKind::Strings);
 	TEST_EXPECT(file_kind_for_required_name("MENUMUS.BIN") == FileKind::MusicScript);
+	// An expansion's music scripts (JO:CA's jox01.pff holds MJox01.bin and GJox01.bin, both SCR0) by
+	// the expansion's name; by name alone a string table, as the base game's menutxt.bin is.
+	TEST_EXPECT(file_kind_for_required_name("MJox01.bin", "jox01") == FileKind::MusicScript);
+	TEST_EXPECT(file_kind_for_required_name("GJox01.bin", "jox01") == FileKind::MusicScript);
+	TEST_EXPECT(file_kind_for_required_name("menutxt.bin", "jox01") == FileKind::Strings);
+	TEST_EXPECT(file_kind_for_required_name("jox01.bin", "jox01") == FileKind::Strings);
+	TEST_EXPECT(file_kind_for_required_name("MJox01.bin") == FileKind::Strings);
 	TEST_EXPECT(file_kind_for_required_name("fgn2.bin") == FileKind::RawBin);
 	TEST_EXPECT(file_kind_for_required_name("CC.BIN") == FileKind::CountryCode);
 	TEST_EXPECT(file_kind_for_required_name("main.mnu") == FileKind::Menu);

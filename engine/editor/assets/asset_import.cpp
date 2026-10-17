@@ -48,11 +48,14 @@ std::vector<ImportChoice> list_import_choices(const std::vector<std::string> &pa
 				                                  "Could not open archive: " + path));
 				continue;
 			}
+			// An expansion's archive is <n>.pff (expansion\<n>\<n>.pff), whose stem names the files the
+			// game forms from the expansion's name (M<n>.bin, G<n>.bin); no other archive holds one.
+			const std::string stem = utf8_of(path_of(path).stem());
 			for (const auto &file : archive.list_files()) {
 				sources.push_back({path, file.logical_name});
 				if (!facts) continue;
 				uint64_t stored = 0;
-				facts->push_back({file_kind_for_required_name(file.logical_name),
+				facts->push_back({file_kind_for_required_name(file.logical_name, stem),
 				                  archive.file_size(file.logical_name, stored) ? stored : 0});
 			}
 		} else {
@@ -112,9 +115,13 @@ std::vector<ImportChoice> list_retail_import_choices(const std::string &retail_r
 		return sources;
 	}
 	sources.reserve(view.files().size());
+	// The expansion whose name the files' names carry: the project's own where they are renamed to
+	// it, else the installed expansion mounted.
+	const std::string expansion = !view.spec().project_expansion.empty() ? view.spec().project_expansion
+	                                                                     : view.spec().expansion;
 	for (const InstallFile &file : view.files()) {
 		sources.push_back(install_choice(retail_root, file));
-		if (facts) facts->push_back({file_kind_for_required_name(file.name), view.size(file)});
+		if (facts) facts->push_back({file_kind_for_required_name(file.name, expansion), view.size(file)});
 	}
 	return sources;
 }
