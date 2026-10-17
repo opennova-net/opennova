@@ -704,7 +704,9 @@ opennova_add_editor_test(score MIXED SOURCES score_document_test.cpp)
 # Avatars.def (base and each expansion) through the document byte for byte.
 opennova_add_editor_test(avatars MIXED SOURCES avatars_document_test.cpp)
 
-opennova_add_editor_test(strings SOURCES strings_document_test.cpp)
+# The string-table document (ADR 0046 S6b); --retail: every RTXT table of the install through the document, an unedited
+# save the stored bytes or, for a table the game reads regrouped, the format's regrouped table.
+opennova_add_editor_test(strings MIXED SOURCES strings_document_test.cpp)
 
 # The menu document (S6c), the edits that must not lose authored data (S9d) and the
 # retail sweep through it: a SKIP-LEG per root (OPENNOVA_JO_DIR's installed menus,
