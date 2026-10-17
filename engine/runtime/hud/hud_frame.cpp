@@ -1633,53 +1633,62 @@ void HudFrameCompiler::element_waypoint(const HudFrameState &state, float w,
 	// The frame overlay color [orig: the g_HUDFrameOverlayColor reads
 	// @0x5949dd..0x594c9d in the waypoint pair].
 	const uint32_t color = active_color(state);
-	const float ax = static_cast<float>(gp.x);
-	const float ay = static_cast<float>(gp.y);
-	// Measures in font pixels, folded to design via the surface ratio.
-	auto measure_design_w = [&](const char *text) {
-		int mw = 0;
-		int mh = 0;
-		wf.measure(text, ws, ws, &mw, &mh);
-		return static_cast<float>(mw) * kDesignW / std::max(w, 1.0f);
-	};
+	// Only the HUDWPDINFO anchor scales; the label is laid out from it in
+	// SCREEN pixels, every measure and every gap (4 px, the box's -2 / -1) a
+	// pixel count [orig: HUD_DrawWaypointNameAndDistance -- the anchor
+	// Viewport_ScaleToVirtualCoords @0x59488D, the distance's width
+	// GameFont_MeasureTextWidth @0x5948AC, the name's width and height
+	// HUD_MeasureTextWH @0x594A15 / @0x594A82 / @0x594ACB, the name at
+	// dist_w + x + 4 @0x5949FC, the align-1 shift -4 - name_w + x @0x594AE0, the
+	// align-2 shift x - 4 @0x594A8E, the box right dist_w + x + 4 @0x594AEB and
+	// its rows y - 2 / y + text_h - 1 @0x594B0C].
+	const float ax = sx(static_cast<float>(gp.x), w);
+	const float ay = sy(static_cast<float>(gp.y), h);
+	// The name's box measure at the slot's scale: its width and its height,
+	// each truncated [orig: HUD_MeasureTextWH @0x580AB0].
+	int name_w = 0;
+	int name_h = 0;
+	wf.measure(state.waypoint.name.c_str(), ws, ws, &name_w, &name_h);
 	// The text through the half-bright drawers, alpha forced opaque; the box keeps
 	// the raw colour [orig: HUD_DrawTextLeft_HalfBright @0x5949fc / @0x594a69,
 	//  HUD_DrawTextRightAligned_HalfBright @0x594ab2 / @0x594b31; the wireframe
 	//  box Render_DrawWireframeRect @0x594b0c].
 	const uint32_t text_color = half_bright_argb(color);
-	auto draw = [&](const char *text, float design_x, uint32_t flags) {
-		emit_slot_text(label_font_bold_, label_scale_, text, sx(design_x, w), sy(ay, h),
-				text_color, flags);
+	auto draw = [&](const char *text, float x, uint32_t flags) {
+		emit_slot_text(label_font_bold_, label_scale_, text, x, ay, text_color, flags);
 	};
-	const float dist_w = measure_design_w(dist);
-	const float text_h = wf.line_height(ws) * kDesignH / std::max(h, 1.0f);
+	// The distance's width: the unscaled extent times the slot's scale, truncated
+	// [orig: GameFont_MeasureTextWidth @0x580A50 -- CGameFont_GetTextExtent at
+	// 1.0 @0x580A66, the multiply @0x580A6F, the truncation @0x580A76].
+	int dist_extent = 0;
+	wf.measure(dist, 1.0f, 1.0f, &dist_extent, nullptr);
+	const float dist_w = static_cast<float>(static_cast<int>(static_cast<double>(dist_extent) * ws));
+	const float text_h = static_cast<float>(name_h);
 	float dist_x = ax;
-	float box_left = ax;
-	float box_right = ax + dist_w + 4.0f;
 	if (!state.waypoint.name.empty()) {
 		switch (gp.align) {
-			case 1: {
+			case 1:
 				draw(state.waypoint.name.c_str(), ax, kFontAlignRight);
-				const float name_w = measure_design_w(state.waypoint.name.c_str());
-				dist_x = ax - 4.0f - name_w;
-				box_left = dist_x - dist_w;
-				box_right = dist_x + 4.0f;
+				dist_x = ax - 4.0f - static_cast<float>(name_w);
 				break;
-			}
 			case 2:
 				draw(state.waypoint.name.c_str(), ax, 0u);
 				dist_x = ax - 4.0f;
-				box_left = dist_x - dist_w;
-				box_right = dist_x + 4.0f;
 				break;
 			default:
 				draw(state.waypoint.name.c_str(), ax + dist_w + 4.0f, 0u);
 				break;
 		}
 	}
+	// Align 1 or 2 boxes the distance left of its anchor, any other to the
+	// right [orig: @0x594A3E..0x594A47, @0x594AEB]. (Retail's no-name arm
+	// @0x594A1D is dead: HUD_GetWaypointName @0x594630 always yields a string,
+	// as the shipping presenter's label, waypoint_label_text, always is.)
+	const bool left_box = gp.align == 1 || gp.align == 2;
+	const float box_left = left_box ? dist_x - dist_w : dist_x;
+	const float box_right = left_box ? dist_x + 4.0f : dist_x + dist_w + 4.0f;
 	if (gp.hidden == 0) {
-		emit_wire_rect(sx(box_left, w), sy(ay - 2.0f, h), sx(box_right, w),
-				sy(ay + text_h - 1.0f, h), color);
+		emit_wire_rect(box_left, ay - 2.0f, box_right, ay + text_h - 1.0f, color);
 	}
 	draw(dist, dist_x, kFontAlignRight);
 	++draw_list_.elements_drawn;

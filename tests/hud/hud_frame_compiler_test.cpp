@@ -1595,6 +1595,56 @@ void test_compiler_waypoint_uses_bold_slot(const fnt_font_t *font) {
 	CHECK(bold == 8 && hud == 0, "the waypoint's 5 name + 3 distance glyphs ride the bold slot");
 }
 
+// The waypoint label off 1024 x 768 (C-311): only the HUDWPDINFO anchor scales;
+// the label is laid out in screen pixels at the bold slot's scale (1920 / 1024
+// = 1.875 at 1920 wide). At 1920 x 1080 the anchor (512, 60) is (960, 84); the
+// distance's width is its unscaled extent times the scale, truncated
+// (GameFont_MeasureTextWidth), the box's height the name's measured height
+// (HUD_MeasureTextWH), the gaps 4, -2 and -1 px [orig:
+// HUD_DrawWaypointNameAndDistance @0x59488D, @0x5948AC, @0x5949FC, @0x594AEB,
+// @0x594B0C; GameFont_MeasureTextWidth @0x580A50..0x580A72].
+void test_compiler_waypoint_lays_out_in_screen_pixels(const fnt_font_t *font) {
+	const float scale = 1920.0f / 1024.0f;
+	HudFrameCompiler compiler;
+	HudLayout layout;
+	layout.wpd_info = {512, 60, 0, 0, true};
+	compiler.configure(layout, font);
+	compiler.configure_label_fonts(font, font, font, scale, scale);
+	opennova::hud::GameFont measure;
+	measure.set_font(font);
+	int extent = 0;
+	measure.measure("120", 1.0f, 1.0f, &extent, nullptr);
+	const int dist_w = int(double(extent) * scale);
+	int name_w = 0, name_h = 0;
+	measure.measure("Alpha", scale, scale, &name_w, &name_h);
+	HudFrameState state;
+	state.waypoint.present = true;
+	state.waypoint.name = "Alpha";
+	state.waypoint.distance_m = 120;
+	const HudDrawList &list = compiler.compile(state, 1920.0f, 1080.0f);
+	bool box_seen = false;
+	for (const opennova::hud::HudQuad &q : list.quads) {
+		if (q.filled) continue;
+		box_seen = true;
+		CHECK(q.x0 == 960.0f && q.x1 == 960.0f + float(dist_w) + 4.0f,
+				"the box's columns are the anchor and dist_w + 4 px right of it");
+		CHECK(q.y0 == 82.0f && q.y1 == 84.0f + float(name_h) - 1.0f,
+				"the box's rows are y - 2 and y + the name's height - 1 px");
+	}
+	CHECK(box_seen, "the waypoint box draws");
+	CHECK(!list.glyphs.empty(), "the label draws");
+	// The distance is right-aligned at the anchor (its glyphs left of 960), the
+	// name left-aligned dist_w + 4 px right of it: the first glyph past the
+	// anchor is the name's laid out from there.
+	float name_left = 1e9f;
+	for (const opennova::hud::GameFontQuad &g : list.glyphs)
+		if (g.x_top_left >= 960.0f) name_left = std::min(name_left, g.x_top_left);
+	const opennova::hud::GameFontRun name_run =
+			measure.layout("Alpha", 960.0f + float(dist_w) + 4.0f, 84.0f, scale, scale, 0u, 0u);
+	CHECK(!name_run.quads.empty() && name_left == name_run.quads.front().x_top_left,
+			"the name starts dist_w + 4 px right of the anchor");
+}
+
 // D-HUD-51: every HUD text is laid out at its drawer's raw diffuse, the halved
 // colour; the font page's material (hud::kFontPageMaterialWord, MODULATE2X)
 // doubles it on the device. The untextured lines beside it keep the raw colour.
@@ -3114,6 +3164,7 @@ int main() {
 	test_compiler_label_fonts(&font);
 	test_compiler_hud_font_falls_back_to_bold(&font);
 	test_compiler_waypoint_uses_bold_slot(&font);
+	test_compiler_waypoint_lays_out_in_screen_pixels(&font);
 	test_text_draws_the_drawers_halved_diffuse(&font);
 	test_static_frame_pick();
 	test_sights_card_element(&font);
