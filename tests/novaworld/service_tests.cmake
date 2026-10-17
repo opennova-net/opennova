@@ -376,6 +376,7 @@ set_tests_properties(command_runner PROPERTIES TIMEOUT 120)
 # the agent routes' networks must lie in, and the refusal log's throttle. Pure functions.
 add_executable(hosted_net_cidr_test
     novaworld/hosted_net_cidr_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/health.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/net_cidr.cpp)
 target_compile_features(hosted_net_cidr_test PRIVATE cxx_std_17)
 target_include_directories(hosted_net_cidr_test PRIVATE
@@ -1077,6 +1078,7 @@ opennova_add_pg_test(hosted_fleet_repository COMMAND hosted_fleet_repository_tes
 # compiles the hosted sources it needs directly.
 add_executable(hosted_ec2_machine_driver_test
     novaworld/hosted_ec2_machine_driver_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/health.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/docker_machine_driver.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/ec2_machine_driver.cpp

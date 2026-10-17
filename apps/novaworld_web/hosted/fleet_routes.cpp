@@ -19,11 +19,6 @@ namespace opennova::novaworld_server::hosted {
 
 namespace {
 
-// A path's id; 0 (no row's) past int64.
-int64_t id_of(uint64_t id) {
-	return id <= static_cast<uint64_t>(INT64_MAX) ? static_cast<int64_t>(id) : 0;
-}
-
 crow::response machine_reply(int code, db::Database &db, int64_t id) {
 	crow::json::wvalue out;
 	if (const auto machine = find_machine(db, id))
@@ -162,7 +157,7 @@ crow::response FleetRoutes::server(const crow::request &req, uint64_t id) {
 	try {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
-		const auto s = find_server(*db_conn, id_of(id));
+		const auto s = find_server(*db_conn, path_id(id));
 		if (!s) return json_error(404, "not_found", "no hosted server has this id");
 		crow::json::wvalue e = server_json(*db_conn, *s, true);
 		std::vector<crow::json::wvalue> events;
@@ -198,7 +193,7 @@ crow::response FleetRoutes::drain(const crow::request &req, uint64_t id) {
 	if (caller.refusal) return std::move(*caller.refusal);
 	try {
 		auto db_conn = pool_.acquire();
-		const int64_t machine_id = id_of(id);
+		const int64_t machine_id = path_id(id);
 		const auto machine = find_machine(*db_conn, machine_id);
 		if (!machine) return json_error(404, "not_found", "no fleet machine has this id");
 		if (machine->state == FleetMachineState::Draining) return machine_reply(202, *db_conn, machine_id);
@@ -228,7 +223,7 @@ crow::response FleetRoutes::end(const crow::request &req, uint64_t id) {
 	if (caller.refusal) return std::move(*caller.refusal);
 	try {
 		auto db_conn = pool_.acquire();
-		const int64_t machine_id = id_of(id);
+		const int64_t machine_id = path_id(id);
 		const auto machine = find_machine(*db_conn, machine_id);
 		if (!machine) return json_error(404, "not_found", "no fleet machine has this id");
 		if (machine->state == FleetMachineState::Ending) return machine_reply(202, *db_conn, machine_id);

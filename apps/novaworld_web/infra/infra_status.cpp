@@ -2,6 +2,7 @@
 
 #include "aws_xml.h"
 #include "billing/stripe_api.h"
+#include "health.h" // Watchdog::steady_now_ms
 #include "hosted/stats_repository.h"
 #include "loggable.h"
 #include "text_util.h"
@@ -25,12 +26,6 @@ using io::JsonValue;
 constexpr const char *kEcsTarget = "AmazonEC2ContainerServiceV20141113.";
 // ListTasks pages of running tasks one read follows at most (100 a page).
 constexpr int kTaskPages = 3;
-
-int64_t steady_now_ms() {
-	using namespace std::chrono;
-	return static_cast<int64_t>(
-			duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
-}
 
 int64_t wall_now_ms() {
 	using namespace std::chrono;
@@ -343,7 +338,7 @@ InfraStatus::InfraStatus(InfraConfig config, proc::CommandRunner &runner, Clock 
 		config_(std::move(config)),
 		unavailable_(check_infra_config(config_)),
 		api_(runner, config_.aws),
-		now_(now_ms ? std::move(now_ms) : Clock(steady_now_ms)) {}
+		now_(now_ms ? std::move(now_ms) : Clock(Watchdog::steady_now_ms)) {}
 
 std::shared_ptr<const CloudSnapshot> InfraStatus::snapshot(
 		const std::vector<std::string> &instance_ids) {

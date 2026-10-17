@@ -1,6 +1,7 @@
 #include "ec2_machine_driver.h"
 
 #include "agent_protocol.h"
+#include "health.h" // Watchdog::steady_now_ms
 #include "hosted_settings.h"
 #include "loggable.h"
 #include "net_cidr.h"
@@ -23,12 +24,6 @@ namespace opennova::novaworld_server::hosted {
 namespace fs = std::filesystem;
 
 namespace {
-
-uint64_t steady_now_ms() {
-	using namespace std::chrono;
-	return static_cast<uint64_t>(
-			duration_cast<milliseconds>(steady_clock::now().time_since_epoch()).count());
-}
 
 bool all_of(std::string_view text, bool (*ok)(char)) {
 	for (const char c : text)
@@ -168,7 +163,7 @@ Ec2MachineDriver::Ec2MachineDriver(
 		Ec2MachineConfig config, proc::CommandRunner &runner, Clock now_ms) :
 		config_(std::move(config)),
 		runner_(runner),
-		now_(now_ms ? std::move(now_ms) : Clock(steady_now_ms)) {}
+		now_(now_ms ? std::move(now_ms) : Clock(Watchdog::steady_now_ms)) {}
 
 std::string Ec2MachineDriver::check_config(const Ec2MachineConfig &c) {
 	if (c.aws_cli.empty() || c.aws_cli[0] != '/')
