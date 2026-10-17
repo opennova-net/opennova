@@ -284,7 +284,7 @@ Transform3D ObjectModel::compose_entity_transform(const Basis &p_basis,
 	if (entity_uniform_scale_q16_ == 0) {
 		return Transform3D(p_basis, p_origin);
 	}
-	const float scale = static_cast<float>(entity_uniform_scale_q16_) / 65536.0f;
+	const float scale = opennova::io::fp16_16_to_float(entity_uniform_scale_q16_);
 	return Transform3D(p_basis.scaled(Vector3(scale, scale, scale)), p_origin);
 }
 
@@ -295,7 +295,7 @@ void ObjectModel::set_shadow_bound_radii(float p_model_sphere, float p_entity_bo
 }
 
 void ObjectModel::set_bound_radii_q16(int32_t p_model_sphere, int32_t p_entity_bound) {
-	const float sphere = static_cast<float>(MAX(p_model_sphere, 0)) / 65536.0f;
+	const float sphere = opennova::io::fp16_16_to_float(MAX(p_model_sphere, 0));
 	const int32_t bound = MAX(p_entity_bound, 0);
 	if (model_sphere_radius_ != sphere || entity_bound_radius_q16_ != bound) {
 		SlotShadow::bump_caster_group_revision();
@@ -310,7 +310,7 @@ float ObjectModel::get_model_sphere_radius() const {
 }
 
 float ObjectModel::get_entity_bound_radius() const {
-	return static_cast<float>(entity_bound_radius_q16_) / 65536.0f;
+	return opennova::io::fp16_16_to_float(entity_bound_radius_q16_);
 }
 
 void ObjectModel::set_entity_light_owner(ObjectModel *p_owner) {
