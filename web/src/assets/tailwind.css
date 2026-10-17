@@ -37,6 +37,9 @@
 
   background-color: rgb(var(--surface));
   color: rgb(var(--ink));
+  /* The scrollbar's room kept on a short page too, so the layout does not
+     shift sideways between a short page and a long one. */
+  scrollbar-gutter: stable;
 }
 
 /* The site's shared pieces: one place for the button, card and section
@@ -44,6 +47,10 @@
 @layer components {
   .page {
     @apply mx-auto w-full max-w-6xl px-4 sm:px-6;
+  }
+  /* The admin pages' width: their tables want the screen. */
+  .page-wide {
+    @apply mx-auto w-full max-w-screen-2xl px-4 sm:px-6;
   }
   .eyebrow {
     @apply text-xs font-semibold uppercase tracking-[0.25em] text-accent;

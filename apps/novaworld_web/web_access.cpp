@@ -52,12 +52,18 @@ bool is_api_path(const std::string &url) {
 } // namespace
 
 void AccessMiddleware::before_handle(crow::request &req, crow::response &res, context &) {
+	// The TCP peer, which the API check below reads whatever address the retail
+	// proxy names: a request through the retail port is never a trusted proxy's.
+	const std::string peer = req.remote_ip_address;
+	if (!retail_proxy.empty() && peer == retail_proxy) {
+		const std::string client = req.get_header_value("X-Real-IP");
+		if (!client.empty())
+			req.remote_ip_address = client;
+	}
 	if (!api_proxy_only || !is_api_path(req.url))
 		return;
-	if (std::find(trusted_proxies.begin(), trusted_proxies.end(), req.remote_ip_address) !=
-			trusted_proxies.end()) {
+	if (std::find(trusted_proxies.begin(), trusted_proxies.end(), peer) != trusted_proxies.end())
 		return;
-	}
 	res.code = 403;
 	res.body = "{\"error\":\"proxy_required\"}";
 	res.set_header("Content-Type", "application/json");
@@ -103,6 +109,7 @@ void WebAccess::configure(const ServerConfig &config) {
 	auto &middleware = app_.get_middleware<AccessMiddleware>();
 	middleware.api_proxy_only = config.api_proxy_only;
 	middleware.trusted_proxies = config.trusted_proxies;
+	middleware.retail_proxy = config.retail_proxy;
 	std::printf("[http] admin api: Bearer token %s; admin-role sessions accepted\n",
 	            admin_token_.empty() ? "DISABLED (set ADMIN_API_TOKEN to enable)" : "ENABLED");
 	std::printf("[http] session cookie %s%s; %zu trusted proxy address(es)\n", cookie_name_.c_str(),
@@ -111,6 +118,10 @@ void WebAccess::configure(const ServerConfig &config) {
 	if (config.api_proxy_only) {
 		std::printf("[http] /api/ answers only its trusted proxies (ONNET_API_PROXY_ONLY)%s\n",
 				trusted_proxies_.empty() ? ": none is set, so every /api/ request is refused" : "");
+	}
+	if (!config.retail_proxy.empty()) {
+		std::printf("[http] the retail port's proxy is %s: its X-Real-IP names the client\n",
+				config.retail_proxy.c_str());
 	}
 }
 

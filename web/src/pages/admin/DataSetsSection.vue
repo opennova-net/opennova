@@ -4,14 +4,11 @@
       <div>
         <h1 class="text-3xl font-semibold text-ink">Game data</h1>
         <p class="text-sm text-ink-muted">
-          The data hosted servers run: each data set is one product, a base game or one expansion of it, with
-          the files you upload here (a tree) or an update you publish builds. New servers start on a data set's
-          current tree; a running server keeps the tree it started on until its owner updates it, or you update
-          every outdated one.
+          A data set is a base game or an expansion. New servers start on its current data; running ones keep theirs
+          until updated.
         </p>
         <p v-if="data" class="mt-1 text-xs text-ink-muted">
-          Files go from this browser through the site to {{ data.store.kind === 's3' ? 'S3' : "the service's local store" }},
-          in {{ formatMemory(PART_SIZE) }} parts.
+          Uploads go to {{ data.store.kind === 's3' ? 'S3' : "the service's local store" }} in {{ formatMemory(PART_SIZE) }} parts.
         </p>
       </div>
       <div class="flex items-center gap-3">
@@ -146,7 +143,8 @@
                 </td>
                 <td class="px-4 py-3">
                   <template v-if="d.current_tree">
-                    <span class="block font-mono">{{ d.current_tree.version || `tree ${d.current_tree.id}` }}</span>
+                    <span v-if="d.current_tree.version" class="block font-mono">{{ d.current_tree.version }}</span>
+                    <span v-else class="block text-ink-muted">No version</span>
                     <span v-if="d.current_tree.ready_at" class="block text-xs text-ink-muted">
                       ready <RelativeTime :value="d.current_tree.ready_at" :now="now" />
                     </span>
@@ -301,12 +299,11 @@
       </div>
       <p class="text-sm text-ink-muted">
         <template v-if="uploader.dataSet.kind === 'base'">
-          Pick the game's install folder. Only the files a server needs are taken from its root:
-          {{ ruleList(uploader.dataSet) }}. Nothing else is uploaded.
+          Pick the game's install folder. Only {{ ruleList(uploader.dataSet) }} are uploaded.
         </template>
         <template v-else>
-          Pick the expansion's own folder (expansion/{{ uploader.dataSet.expansion_code }} in the game's install). Only
-          {{ ruleList(uploader.dataSet) }} are taken. Nothing else is uploaded.
+          Pick the expansion's folder (expansion/{{ uploader.dataSet.expansion_code }} in the game's install). Only
+          {{ ruleList(uploader.dataSet) }} are uploaded.
         </template>
       </p>
 
@@ -395,9 +392,8 @@
     <section class="space-y-4" aria-labelledby="ds-releases-heading">
       <h2 id="ds-releases-heading" class="text-xl font-semibold text-ink">Releases</h2>
       <p class="text-sm text-ink-muted">
-        An update package (1SFS, as opennova-update-tool builds it) carries one section per product. Uploaded, it
-        is checked; a draft publishes to the update service for retail UPDATE.EXE and builds each section's data set
-        a new tree from its baseline. Retire it to stop serving it.
+        A 1SFS update package (from opennova-update-tool), one section per product. Publishing a checked draft serves
+        it to UPDATE.EXE and builds each data set's new data; retiring it stops that.
       </p>
       <form class="flex flex-wrap items-end gap-4 rounded-panel border border-border bg-panel p-4 sm:p-6" novalidate @submit.prevent="uploadRelease">
         <label class="space-y-1">

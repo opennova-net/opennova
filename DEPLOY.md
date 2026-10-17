@@ -15,7 +15,7 @@ service on Fargate across two availability zones, whose tasks keep no state of t
 |---|---|---|---|
 | gate | the gate (UDP 7597; the hosts' status blobs land there too) | 1, 0.25 vCPU / 0.5 GiB | the public network load balancer, at the gate's Elastic IP |
 | lobby | a lobby instance (UDP 64206) | 1, 0.25 vCPU / 0.5 GiB | the public network load balancer, at the gate's Elastic IP: one lobby address for every lobby task, which the gate hands out |
-| web | the retail HTTP routes and the website's API (8080) and the portal's nginx (443) | 1 to 2 on its CPU, 0.5 vCPU / 1 GiB | the load balancer: 443 from Cloudflare, 8080 from everyone |
+| web | the retail HTTP routes and the website's API (8080) and the portal's nginx (443, and 8082 in front of the retail routes) | 1 to 2 on its CPU, 0.5 vCPU / 1 GiB | the load balancer: 443 from Cloudflare, 8080 from everyone (to the portal's 8082) |
 | controller | the fleet's reconcile pass, job scheduling, the machines' internal listener (8070) | 1 (elected; a standby may wait beside it), 0.25 vCPU / 0.5 GiB | `controller.<deployment>.opennova.internal`, its Cloud Map name |
 | worker | the background jobs (the fleet's AWS calls, billing sync, mail, prunes) | 1 to 2 on its CPU, 0.5 vCPU / 1 GiB | nothing inbound |
 
@@ -40,6 +40,7 @@ There are three places the service runs, and nothing of one reaches another by a
 | Where | the developer's machine | its own AWS account, `opennova-staging`, in the Organization | its own AWS account, `opennova-prod` |
 | Site | `http://localhost:5173` | `https://staging.<domain>` | `https://<domain>` (and `www`) |
 | Retail gate | the developer's LAN address | its own Elastic IP | the address retail hosts files name (`gs.novaworld.net`), transferred into the prod account |
+| Gate name (OpenNova's client, `opennova-serve --master-host`) | none (`127.0.0.1` in a source run, or `--novaworld-host`) | `nw.staging.<domain>` | `nw.<domain>` |
 | AWS credentials | none | its deploy user's key (vault `aws-staging`), or its GitHub environment's OIDC role | its deploy user's key (vault `aws-prod`), or its GitHub environment's OIDC role |
 | Stripe | test mode, the restricted key (`stripe-test/restricted_key`) | test mode (`stripe-test`) | live mode (`stripe-live`) |
 | Mail | none (no AWS credentials: logged as not sent) | its own SES identity, `staging.<domain>` (off unless `mail_sender` is set) | its own SES identity, `<domain>`, `support@<domain>` |
@@ -447,7 +448,7 @@ What it makes: the VPC (`10.44.0.0/16`: public subnets a/b for the tasks, the lo
 balancer and the machines, private a/b with no route out for the database and the
 cache); the ECS cluster; per program a security group (the gate: its UDP port and its
 health port from the load balancer alone; the lobby: its UDP port to everyone and its
-health port from the load balancer; web: 443 and 8080 from the load balancer alone; the
+health port from the load balancer; web: 443 and 8082 from the load balancer alone; the
 controller: the internal port from the machines alone; the worker: nothing; no 22, no 80
 anywhere), a task role holding what
 that program needs alone, a task definition (the template every deploy clones), an ECS
@@ -461,7 +462,7 @@ security group; the database and the cache (Valkey, a primary and a replica); th
 SSM parameters the toolbox reads; the operations bucket (`opennova-<deployment>-ops-<account
 id>`: the releases, the dumps and the game data's store, `data/`, with its lifecycle
 rules); the logs, metrics and alarms; the account's budgets; the deployment's
-Cloudflare records (its site's, proxied; the update service's, unproxied), its origin
+Cloudflare records (its site's, proxied; the update service's and the gate's, unproxied), its origin
 certificate; its outbound mail's SES identities and records (with a sender); the update
 service's listeners; and (with `hosted_enabled`) the fleet's launch templates and image
 parameter, the machine role and web's and the worker's store policies (section 7). A new
@@ -577,14 +578,19 @@ Retail clients find the gate by its Elastic IP alone. It is the public network l
 balancer's address in zone a (its subnet mapping there; zone b has an address of its
 own), cross-zone, so it reaches the tasks in either zone: the gate's UDP port (7597,
 its target group checking each task's `/livez` on the health port, 8081), the lobby's
-UDP port (64206, checked the same way) and web's retail HTTP port (8080, checked on
-`/healthz`), all to IP targets that keep each client's own address and port, and 443
+UDP port (64206, checked the same way) and web's retail HTTP port (8080, to the portal
+nginx's retail server on 8082, which caps each request's body and hands it to web's
+server with the client's address; checked on `/healthz` through it), all to IP targets
+that keep each client's own address and port, and 443
 (the portal's nginx, from Cloudflare's ranges alone; with proxied records only, since
 without them there is no origin certificate and nginx listens on 80). Deletion
 protection is on: the balancer holds the gate's address.
 `ONNET_PUBLIC_HOST` (the gate's `POSTIPADDRESS`) and `ONNET_WEB_HOST` (the startup URL,
 the web domain, `HOST_URL`, `GSB_SERVER`) both name that address, so no retail client
-follows a DNS name; the site's records point at the balancer's DNS name.
+follows a DNS name; the site's records point at the balancer's DNS name. The gate's own
+name, `nw.<domain>` (`nw.<deployment>.<domain>` off prod), is an unproxied A record at that
+address: OpenNova's own client dials it for its OpenNova NovaWorld, and a self-run
+`opennova-serve` lists on it with `--master-host`.
 
 Every lobby task announces that address with the lobby's port (`ONNET_LOBBY_ENDPOINT`,
 `<the gate's address>:64206`), each its own lobby instance behind it, and the gates hand
@@ -635,8 +641,13 @@ the origin. The retail HTTP port (8080) has nothing to do with this: stock clien
 plain HTTP to it at the gate's address, which the gate announces in its startup URL
 (`ONNET_WEB_HOST`), and `ONNET_API_PROXY_ONLY=1` refuses its `/api/` to anyone but the
 portal's nginx, which reaches web's server on the task's loopback
-(`ONNET_TRUSTED_PROXIES=127.0.0.1`). The balancer hands each connection to a web task
-from the client's own address, as the retail routes and the rate limits need.
+(`ONNET_TRUSTED_PROXIES=127.0.0.1`). The balancer hands each connection to the portal
+nginx's retail server (8082, `web/nginx.conf`) from the client's own address; it refuses a
+request body past 16 KiB (413; a stock client's login form is a few KiB at the most) and
+hands the rest to web's server from `127.0.0.2` (`ONNET_RETAIL_PROXY`), naming the client
+in `X-Real-IP`, which web takes as the request's address, as the retail routes and the
+rate limits need. `127.0.0.2` is no trusted proxy, so the retail port's `/api/` is still
+refused.
 
 Behind the proxied records every request reaches nginx from a Cloudflare edge, so nginx
 takes the visitor's address from `CF-Connecting-IP`, for Cloudflare's published ranges
@@ -1814,7 +1825,7 @@ every command).
   http://<the gate's address>:8080/jop_2.gsb` answers 200; `curl -i http://<the gate's
   address>:8080/api/health` answers 403 (`proxy_required`); `curl -m 5 http://<the gate's
   address>/` times out (no port 80); `curl https://<site host>/api/server-info` names the
-  gate's Elastic IP; `./deploy/run.sh --deployment <deployment> aws ec2 describe-addresses
+  gate's Elastic IP, and so does `nslookup nw.<domain>`; `./deploy/run.sh --deployment <deployment> aws ec2 describe-addresses
   --allocation-ids <id>` shows it on the load balancer's zone-a interface.
 - **B. Operations.** `app status` shows every program's service at its count, its
   rollout COMPLETED on the release's revision; `app logs` shows a stream per container and

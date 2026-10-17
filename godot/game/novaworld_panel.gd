@@ -16,9 +16,6 @@ extends Control
 # handshake against our server -> on a verified session the browser fills from
 # the server list -> Host a Game registers a row other clients can see.
 
-# Where to reach the server. Dev default is localhost (matching the dev
-# compose). Prod sets this from the resolved server IP.
-@export var server_host := "127.0.0.1"
 @export var gate_port := NovaWorldSettings.GATE_PORT
 @export var player_name := "Player"
 @export var start_client_on_ready := true
@@ -318,12 +315,14 @@ func _unwire_client(client: NovaWorldClient) -> void:
 			client.disconnect(signal_name, handler)
 
 
-# OpenNova uses the configured/injected server_host (dev: localhost). "Original
-# NovaWorld" points the same client at NovaLogic's live gate (gs.novaworld.net).
+# OpenNova dials our service's gate (NovaWorldSettings.opennova_host: the live
+# one in an exported build, loopback in a source run, --novaworld-host over
+# both). "Original NovaWorld" points the same client at NovaLogic's live gate
+# (gs.novaworld.net), which no flag moves.
 func _resolved_host() -> String:
 	if _target == NovaWorldSettings.Target.REAL:
 		return NovaWorldSettings.REAL_NOVAWORLD_HOST
-	return server_host
+	return NovaWorldSettings.opennova_host()
 
 
 func _on_target_selected(index: int) -> void:

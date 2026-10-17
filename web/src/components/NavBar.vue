@@ -1,6 +1,6 @@
 <template>
   <header @keydown.esc="closeMenuToToggle" class="fixed inset-x-0 top-0 z-20 border-b border-border bg-surface/95 backdrop-blur">
-    <div class="page flex h-16 items-center justify-between gap-6">
+    <div :class="[wide ? 'page-wide' : 'page', 'flex h-16 items-center justify-between gap-6']">
       <RouterLink to="/" class="flex items-center gap-2 text-lg font-semibold tracking-wide text-ink" aria-label="OpenNova home">
         <img src="/favicon.svg" alt="" class="h-6 w-6" width="24" height="24" />
         <span>Open<span class="text-accent">Nova</span></span>
@@ -118,6 +118,8 @@ const closeMenuToToggle = () => {
 };
 
 const route = useRoute();
+// The admin pages are wide; the nav lines up with them.
+const wide = computed(() => route.matched.some((record) => record.meta.wide));
 const router = useRouter();
 watch(
   () => route.fullPath,

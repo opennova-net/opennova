@@ -172,7 +172,7 @@ int PffStreamWriter::finish() {
 		return fail(PFF_WRITE_ERR_IO);
 	uint8_t offset[4];
 	put_u32_le(offset, table_offset);
-	if (fseek(file_, 16, SEEK_SET) != 0 || fwrite(offset, 1, sizeof(offset), file_) != sizeof(offset))
+	if (io::fseek64(file_, 16, SEEK_SET) != 0 || fwrite(offset, 1, sizeof(offset), file_) != sizeof(offset))
 		return fail(PFF_WRITE_ERR_IO);
 	const bool closed = fclose(file_) == 0;
 	file_ = nullptr;

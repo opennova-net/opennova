@@ -8,7 +8,8 @@
 // `<sha256>.sfs` (fetched from the store's updates/<sha256>.sfs when it is not there yet),
 // and each served section unpacked to `<sha256>/<section index>/<UPPER NAME>`, one file per
 // entry, so a cumulative package of hundreds of megabytes is read once and never held in
-// memory; a file reply reads the entry from disk. A package no published section names
+// memory; a file reply streams the entry from disk as its socket takes it (open_file). A
+// package no published section names
 // any more is deleted from the cache. The table the server reads is swapped under a mutex,
 // so the refresh runs on a thread of its own beside the listener's pump. SERVER.LST names
 // one host, so UPDATE.EXE never load-tests: ftp.novaworld.com for a data set served
@@ -23,6 +24,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <set>
 #include <string>
@@ -62,6 +64,8 @@ public:
 	std::string command_file_name(std::string_view login) const override;
 	bool read_file(std::string_view login, std::string_view name,
 			std::vector<uint8_t> &out) const override;
+	std::unique_ptr<update::UpdateFile> open_file(
+			std::string_view login, std::string_view name) const override;
 
 	const std::string &cache_dir() const { return cache_dir_; }
 
@@ -93,6 +97,8 @@ private:
 	void sweep(const std::set<std::string> &live);
 
 	const Product *find(std::string_view login) const; // under mu_
+	// The cached file the product serves by `name`; empty when it has none.
+	std::string path_of(std::string_view login, std::string_view name) const;
 
 	std::string cache_dir_;
 	std::string update_host_;

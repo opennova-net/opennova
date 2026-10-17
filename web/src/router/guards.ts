@@ -9,6 +9,8 @@ declare module 'vue-router' {
   interface RouteMeta {
     // Only a logged-in visitor may open this route.
     requiresUser?: boolean;
+    // The page (and the nav and footer around it) takes the wide width.
+    wide?: boolean;
   }
 }
 

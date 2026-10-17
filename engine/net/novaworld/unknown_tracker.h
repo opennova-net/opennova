@@ -6,6 +6,7 @@
 #include <mutex>
 #include <set>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -17,6 +18,7 @@ namespace db { class Database; }
 // (channel, signature): every later sighting bumps `count` and updates
 // `last_seen_ms`; the very first sighting's bytes are kept in `sample`
 // (capped) and `sample_meta` describes its origin (peer addr, method, etc).
+// The times are the wall clock's (Unix ms), so every process's rows compare.
 struct UnknownSighting {
 	std::string channel;     // "gate" | "nwu" | "container" | "ptype" | "pn" | "http"
 	std::string signature;   // e.g. "0x47", "ClientFooRequest", "JointOperations", "GET /foo"
@@ -32,6 +34,24 @@ struct UnknownSighting {
 // overwrite it.
 inline constexpr std::size_t kUnknownSampleCap = 512;
 
+// What one process keeps of what peers send it unasked, so none can grow it
+// without bound: a signature is kept to kUnknownSignatureCap bytes of its
+// printable form (unknown_signature), and a channel to kUnknownKeysPerChannel
+// distinct signatures, every later new one counted in its channel's
+// kUnknownOverflowSignature sighting. The rows go after kUnknownKeepMs unseen
+// (UnknownTracker::prune, the periodic unknown_messages.prune job).
+inline constexpr std::size_t kUnknownSignatureCap = 128;
+inline constexpr std::size_t kUnknownKeysPerChannel = 1024;
+inline constexpr const char *kUnknownOverflowSignature = "(other)";
+inline constexpr int64_t kUnknownKeepMs = int64_t(30) * 24 * 60 * 60 * 1000;
+
+// The signature a sighting is keyed and stored by: `raw` with each byte outside
+// printable ASCII, and the backslash, as \xNN (so two raws never meet in one
+// key, and every key is text a row takes); past kUnknownSignatureCap bytes cut,
+// with ".." and the 64-bit FNV-1a of the whole of `raw` as 16 hex digits after
+// it, so two long signatures still key apart.
+std::string unknown_signature(std::string_view raw);
+
 // Thread-safe accumulator for unhandled inbound signals. The listener
 // threads (gate / nwudp / http) call record() per packet; the main tick
 // loop calls flush() to upsert the dirty set into `unknown_messages`, the one
@@ -46,10 +66,13 @@ class UnknownTracker {
 public:
 	UnknownTracker() = default;
 
-	// Record a sighting. Dedups by (channel, signature): increments count,
-	// updates last_seen_ms, and on the FIRST sighting captures up to
-	// kUnknownSampleCap bytes of `sample` plus `meta`. `sample` may be null
-	// (sample_len 0) when there's nothing to capture.
+	// Record a sighting. Dedups by (channel, unknown_signature(signature)):
+	// increments count, updates last_seen_ms, and on the FIRST sighting
+	// captures up to kUnknownSampleCap bytes of `sample` plus `meta`; a new
+	// signature past its channel's kUnknownKeysPerChannel counts in the
+	// channel's kUnknownOverflowSignature sighting instead. `sample` may be null
+	// (sample_len 0) when there's nothing to capture. `now_ms` is the wall
+	// clock (Unix ms).
 	void record(std::string channel, std::string signature,
 	            const uint8_t *sample, std::size_t sample_len,
 	            std::string meta, uint64_t now_ms);
@@ -79,6 +102,10 @@ public:
 	static std::vector<UnknownSighting> list(
 			db::Database &db, const std::string &channel, std::size_t limit = 500);
 
+	// Delete the `unknown_messages` rows no process has seen for `keep_ms`
+	// (by the database's clock); how many went. Throws db::Error.
+	static std::size_t prune(db::Database &db, int64_t keep_ms = kUnknownKeepMs);
+
 private:
 	using Key = std::pair<std::string, std::string>;
 
@@ -87,6 +114,8 @@ private:
 	std::set<Key> dirty_;
 	// Each key's count as its last successful flush added it to the row.
 	std::map<Key, uint64_t> flushed_;
+	// Each channel's distinct signatures in seen_, its overflow sighting left out.
+	std::map<std::string, std::size_t> keys_per_channel_;
 };
 
 } // namespace opennova

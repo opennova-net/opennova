@@ -177,7 +177,7 @@ reach the published ports there too. It prints what to point a client at when it
 |---|---|---|
 | `novaworld-gate` | `7597/udp` | the gate: a retail client's probe, answered with the live lobby |
 | `novaworld-lobby` | `64206/udp` | a lobby instance: sessions, the server browser, listings |
-| `novaworld-web` | `8080/tcp` | the retail `NW*.dll` and `.gsb` routes |
+| `novaworld-web` | `8080/tcp` | the retail `NW*.dll` and `.gsb` routes, through the portal's retail server (its 8082, in front of web's own 8080, as deployed) |
 | `portal` | `http://localhost:8000` | the site (prod's nginx in web's network, as in web's ECS task) and its `/api` |
 | `novaworld-controller`, `novaworld-worker` | none | the supervisor and the jobs; the machines' internal listener at `172.30.77.10:8070` |
 | `postgres`, `valkey` | none | the database (the `pg_data` volume), web's state |
@@ -380,11 +380,15 @@ Its **OpenNova service URL...** setting points it at a local stack, `http://loca
    `$GODOT_BIN --path godot -- --resource-dir <game dir>`, or run it with no arguments and
    press **PLAY RETAIL** on the placeholder menu.
 2. From the menu, open **NovaWorld**. The panel (`godot/game/novaworld_panel.gd`) creates a
-   `NovaWorldClient` that probes the local gate at `127.0.0.1:7597` (its `server_host` /
-   `gate_port` exports), runs the session handshake against the dev server, fills the
-   server browser, and exposes **Host a Game**.
+   `NovaWorldClient` whose OpenNova target probes the local gate at `127.0.0.1:7597` in a
+   source run (`NovaWorldSettings.opennova_host`; an exported build dials the live service,
+   `nw.opennova.net`), runs the session handshake against the dev server, fills the
+   server browser, and exposes **Host a Game**. `--novaworld-host <address>` points either
+   kind of run at another gate: a packaged `opennova.exe` at this stack, or a source run at
+   staging (`nw.staging.opennova.net`).
 3. For a two-client host/join, run a second instance, or a second machine with
-   `ONNET_PUBLIC_HOST` set to your LAN IP so the gate advertises a reachable address.
+   `ONNET_PUBLIC_HOST` set to your LAN IP so the gate advertises a reachable address (and
+   `--novaworld-host <that IP>` on the other machine's client).
 
 ## Run the test suites
 

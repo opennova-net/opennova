@@ -5,6 +5,10 @@ OpenNova's NovaWorld and NovaLogic's own, by managing one block in the Windows h
 file. Your game files stay stock: no patched executable, no injected DLL, no config
 edit in the game folder. It is pre-1.0 and experimental.
 
+It is for the original executables alone: `opennova.exe` reaches OpenNova's NovaWorld by
+itself (its NovaWorld screen's OpenNova target dials `nw.opennova.net`), so it needs no
+Switcher.
+
 It covers JO and newer titles: retail Joint Operations (Combined Arms included) looks
 up NovaWorld by the gate name below, and Delta Force Xtreme 2's client names the same
 one; their updater, `UPDATE.EXE`, looks up the three gateway names beside it, so a

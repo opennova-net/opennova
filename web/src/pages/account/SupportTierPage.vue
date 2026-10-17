@@ -3,8 +3,8 @@
     <header>
       <h1 class="text-3xl font-semibold text-ink">Support tier</h1>
       <p class="mt-1 max-w-3xl text-sm text-ink-muted">
-        A monthly support tier funds OpenNova and lets you run hosted servers on NovaWorld. It is support for the
-        project, not the sale of any game. Hosted servers are pre-1.0 and experimental.
+        A monthly tier funds OpenNova and lets you run hosted servers. It supports the project; it is not the sale
+        of a game. Hosted servers are pre-1.0 and experimental.
       </p>
     </header>
 
@@ -103,8 +103,7 @@
           </button>
         </div>
         <p v-if="!billing.subscription.cancel_at_period_end" id="support-cancel-hint" class="text-xs text-ink-muted">
-          Changes and cancellations happen in Stripe's billing portal. A cancellation takes effect at the end of the
-          period you paid for: your servers keep running until then.
+          Change or cancel in Stripe's billing portal. Your servers run until the paid period ends.
         </p>
       </section>
 
@@ -149,8 +148,8 @@
           </p>
         </div>
         <p class="text-sm text-ink-muted">
-          Runs one of your tier's servers alone on a machine of its own instead of a shared one. It adds no servers:
-          each own machine holds one of the servers your tier covers, and each is a monthly subscription of its own.
+          Runs one of your tier's servers on a machine of its own. It adds no servers; each is its own monthly
+          subscription.
         </p>
         <p v-if="billing.own_machine_subscription" class="text-sm text-ink">
           You have {{ ownMachines }} own machine{{ ownMachines === 1 ? '' : 's' }}

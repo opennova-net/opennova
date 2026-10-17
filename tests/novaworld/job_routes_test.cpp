@@ -209,6 +209,8 @@ int test_access(Harness &h) {
 		{ "POST", "/api/admin/jobs/" + std::to_string(failed) + "/retry", "", 403 },
 		{ "POST", "/api/admin/jobs/retry-group", "{\"kind\":\"test.failing\",\"key\":\"no\"}",
 				403 },
+		{ "POST", "/api/admin/jobs/dismiss-group", "{\"kind\":\"test.failing\",\"key\":\"no\"}",
+				403 },
 		{ "POST", "/api/admin/jobs/" + std::to_string(queued) + "/cancel", "", 403 },
 		{ "POST", "/api/admin/jobs/run", "{\"kind\":\"test.every\"}", 403 },
 		{ "POST", "/api/admin/jobs/prune", "{\"keep_days\":1}", 403 },
@@ -673,6 +675,19 @@ int test_retry_group(Harness &h) {
 	reply = h.admin("POST", "/api/admin/jobs/retry-group", "[1]");
 	TEST_EXPECT(reply.code == 400 && error_of(reply) == "invalid_json");
 	TEST_EXPECT(body_text(reply).find(kSecret) == std::string::npos);
+
+	// The group's dismissal: the two it still counts deleted, every other kept.
+	json = json_of(h.admin("POST", "/api/admin/jobs/dismiss-group", body), 200);
+	TEST_EXPECT(json && json["dismissed"].i() == 2);
+	{
+		auto db = h.pool.acquire();
+		TEST_EXPECT(count_jobs(*db, "id = " + std::to_string(secretive) + " OR id = " +
+						std::to_string(keyed)) == 0);
+		TEST_EXPECT(state_of(*db, plain) == "queued" && state_of(*db, other) == "failed" &&
+				state_of(*db, other_kind) == "failed" && state_of(*db, old) == "failed");
+	}
+	reply = h.admin("POST", "/api/admin/jobs/dismiss-group", "{\"kind\":\"test.group\"}");
+	TEST_EXPECT(reply.code == 400 && error_of(reply) == "missing_field");
 	return 0;
 }
 

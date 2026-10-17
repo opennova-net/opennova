@@ -92,11 +92,7 @@
         </span>
       </div>
       <p :id="ids.rotationHint" class="text-xs text-ink-muted">
-        The server plays these maps in order and starts over.
-        <template v-if="isOwner">
-          Play next picks the map that follows this one; the last map always stays.
-        </template>
-        Cycle ends the round now and loads the next map.
+        Played top to bottom, then from the top again. Cycle ends the round and loads the next map.
       </p>
       <p v-if="notices.rotation" aria-hidden="true" :class="noticeClass(notices.rotation)">{{ notices.rotation.text }}</p>
       <p v-if="rotation === null" class="text-sm text-ink-muted">Reading the rotation…</p>
@@ -110,13 +106,18 @@
         class="divide-y divide-border rounded-panel border border-border"
       >
         <li
-          v-for="entry in rotation"
+          v-for="(entry, position) in playOrder"
           :key="entry.index"
           class="flex flex-wrap items-center gap-2 px-3 py-2 text-sm"
           :aria-current="entry.current ? 'true' : undefined"
         >
-          <span class="w-6 shrink-0 text-right font-mono text-xs text-ink-muted">{{ entry.index }}.</span>
-          <span class="min-w-0 flex-1 break-all font-mono text-ink">{{ entry.file }}</span>
+          <span class="w-6 shrink-0 text-right font-mono text-xs text-ink-muted">{{ position + 1 }}.</span>
+          <span class="min-w-0 flex-1 break-all text-ink">
+            <template v-if="titleOf(entry)">
+              {{ titleOf(entry) }} <span class="font-mono text-xs text-ink-muted">{{ entry.file }}</span>
+            </template>
+            <span v-else class="font-mono">{{ entry.file }}</span>
+          </span>
           <span v-if="entry.current" class="rounded-control bg-online/15 px-2 py-0.5 text-xs text-online">
             Playing now<template v-if="entry.flipped">, second half</template>
           </span>
@@ -453,6 +454,19 @@ async function onEntry(entry: RotationEntry, action: RotationEntryAction) {
 async function onCycle() {
   if (!window.confirm(`Cycle ${serverLabel()} to the next map? The round ends now for everyone playing.`)) return;
   await cycle();
+}
+
+// The rotation in play order from the map playing now (the server lists it
+// from the map after it, the current one last), each with the title the
+// server's missions give it.
+const playOrder = computed(() => {
+  const list = rotation.value ?? [];
+  const at = list.findIndex((entry) => entry.current);
+  return at <= 0 ? list : [...list.slice(at), ...list.slice(0, at)];
+});
+const titles = computed(() => new Map((missions.value ?? []).map((m) => [m.file.toLowerCase(), m.title])));
+function titleOf(entry: RotationEntry): string {
+  return titles.value.get(entry.file.toLowerCase()) ?? '';
 }
 
 // The rotation picker: the missions the server has whose file an add takes.

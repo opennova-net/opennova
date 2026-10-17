@@ -2,19 +2,55 @@
 
 #include <net/novaworld/db/database.h>
 
+#include <base/io/hash.h>
+
 #include <algorithm>
+#include <cstdio>
 #include <utility>
 #include <variant>
 
 namespace opennova {
 
+std::string unknown_signature(std::string_view raw) {
+	std::string out;
+	out.reserve(std::min(raw.size(), kUnknownSignatureCap));
+	bool cut = false;
+	for (const char c : raw) {
+		const auto byte = static_cast<unsigned char>(c);
+		char escaped[5];
+		const bool plain = byte >= 0x20 && byte < 0x7F && byte != '\\';
+		if (!plain)
+			std::snprintf(escaped, sizeof(escaped), "\\x%02X", static_cast<unsigned>(byte));
+		const std::string_view piece = plain ? std::string_view(&c, 1) : std::string_view(escaped, 4);
+		if (out.size() + piece.size() > kUnknownSignatureCap) {
+			cut = true;
+			break;
+		}
+		out.append(piece);
+	}
+	if (cut)
+		out += ".." + io::hex64(io::fnv1a64_bytes(io::kFnv1a64Offset, raw.data(), raw.size()));
+	return out;
+}
+
 void UnknownTracker::record(std::string channel, std::string signature,
                             const uint8_t *sample, std::size_t sample_len,
                             std::string meta, uint64_t now_ms) {
-	Key key{std::move(channel), std::move(signature)};
+	Key key{std::move(channel), unknown_signature(signature)};
 
 	std::lock_guard<std::mutex> lk(mu_);
 	auto it = seen_.find(key);
+	if (it == seen_.end() && key.second != kUnknownOverflowSignature) {
+		// A new signature: its own sighting while the channel has room, else
+		// the channel's overflow sighting's.
+		std::size_t &keys = keys_per_channel_[key.first];
+		if (keys < kUnknownKeysPerChannel) {
+			++keys;
+		} else {
+			key.second = kUnknownOverflowSignature;
+			it = seen_.find(key);
+		}
+	}
 	if (it == seen_.end()) {
 		UnknownSighting s;
 		s.channel = key.first;
@@ -137,6 +173,13 @@ std::vector<UnknownSighting> UnknownTracker::list(
 		out.push_back(std::move(s));
 	}
 	return out;
+}
+
+std::size_t UnknownTracker::prune(db::Database &db, int64_t keep_ms) {
+	db.exec("DELETE FROM unknown_messages "
+	        "WHERE last_seen_ms < (EXTRACT(EPOCH FROM now()) * 1000)::bigint - $1;",
+	        { static_cast<int64_t>(keep_ms) });
+	return static_cast<std::size_t>(db.changes());
 }
 
 std::vector<UnknownSighting> UnknownTracker::snapshot() const {

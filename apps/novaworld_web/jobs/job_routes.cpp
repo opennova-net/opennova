@@ -152,6 +152,9 @@ void JobRoutes::register_routes(WebApp &app) {
 	CROW_ROUTE(app, "/api/admin/jobs/retry-group")
 			.methods("POST"_method)(
 					[this](const crow::request &req) { return retry_group_route(req); });
+	CROW_ROUTE(app, "/api/admin/jobs/dismiss-group")
+			.methods("POST"_method)(
+					[this](const crow::request &req) { return dismiss_group_route(req); });
 	CROW_ROUTE(app, "/api/admin/jobs/prune")
 			.methods("POST"_method)([this](const crow::request &req) { return prune_route(req); });
 	CROW_ROUTE(app, "/api/admin/jobs/<uint>")
@@ -432,6 +435,38 @@ crow::response JobRoutes::retry_group_route(const crow::request &req) {
 		return json_reply(200, out);
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/admin/jobs/retry-group failed: %s\n", e.what());
+	}
+	return json_error(500, "db_error");
+}
+
+// POST /api/admin/jobs/dismiss-group — {"kind", "key"}: the failure group's
+// jobs (as retry-group takes them) deleted. 200 {"dismissed"}; 400 as
+// retry-group's.
+crow::response JobRoutes::dismiss_group_route(const crow::request &req) {
+	auto caller = access_.require_admin(req);
+	if (caller.refusal)
+		return std::move(*caller.refusal);
+	auto body = JsonBody::parse(req.body);
+	if (!body)
+		return json_error(400, "invalid_json");
+	const auto kind = body->text("kind");
+	const auto key = body->text("key");
+	if (body->wrong_type())
+		return json_error(400, "invalid_field", "kind and key are texts");
+	if (!kind || kind->empty() || !key)
+		return json_error(400, "missing_field", "kind and key are required");
+	if (kind->size() > kFilterTextMax || key->size() > kFailureKeyMax)
+		return json_error(400, "invalid_field", "kind is at most 128 bytes, key 300");
+	try {
+		auto db_conn = pool_.acquire();
+		const int64_t dismissed = dismiss_group(*db_conn, *kind, *key);
+		std::printf("[jobs] %lld failed %s job(s) dismissed by an admin (%s)\n",
+				static_cast<long long>(dismissed), loggable(*kind).c_str(), actor_of(caller).c_str());
+		crow::json::wvalue out;
+		out["dismissed"] = dismissed;
+		return json_reply(200, out);
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[http] POST /api/admin/jobs/dismiss-group failed: %s\n", e.what());
 	}
 	return json_error(500, "db_error");
 }

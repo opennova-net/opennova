@@ -209,6 +209,14 @@ export function retryJobGroup(kind: string, key: string): Promise<AdminResult<Jo
   return adminCall(() => adminClient.post<unknown>('/jobs/retry-group', { kind, key }), pickGroupRetry);
 }
 
+// POST /api/admin/jobs/dismiss-group: a failure group's jobs deleted; how many.
+export function dismissJobGroup(kind: string, key: string): Promise<AdminResult<number>> {
+  return adminCall(
+    () => adminClient.post<unknown>('/jobs/dismiss-group', { kind, key }),
+    (data) => (typeof (data as { dismissed?: unknown })?.dismissed === 'number' ? (data as { dismissed: number }).dismissed : null),
+  );
+}
+
 // POST /api/admin/jobs/<id>/cancel: a queued job failed for good.
 export function cancelJob(id: number): Promise<AdminResult<Job>> {
   return adminCall(() => adminClient.post<unknown>(`/jobs/${id}/cancel`), pickJobReply);

@@ -2,6 +2,7 @@
 
 #include <net/novaworld/host_repository.h>
 #include <net/novaworld/lobby_repository.h>
+#include <net/novaworld/unknown_tracker.h>
 
 #include <algorithm>
 #include <cstdio>
@@ -45,6 +46,14 @@ void register_maintenance_jobs(JobRegistry &registry, const MaintenanceConfig &c
 				return JobResult::done();
 			},
 			1 });
+	registry.add({ kJobUnknownsPrune,
+			[](JobContext &ctx) {
+				auto lease = ctx.pool.acquire();
+				if (const size_t pruned = UnknownTracker::prune(*lease); pruned > 0)
+					std::printf("[sweep] pruned %zu unknown message row(s)\n", pruned);
+				return JobResult::done();
+			},
+			1 });
 }
 
 std::vector<PeriodicJob> maintenance_schedule(const MaintenanceConfig &config) {
@@ -59,6 +68,10 @@ std::vector<PeriodicJob> maintenance_schedule(const MaintenanceConfig &config) {
 	jobs.kind = kJobJobsPrune;
 	jobs.period_ms = config.jobs_prune_interval_ms;
 	out.push_back(std::move(jobs));
+	PeriodicJob unknowns;
+	unknowns.kind = kJobUnknownsPrune;
+	unknowns.period_ms = config.unknowns_prune_interval_ms;
+	out.push_back(std::move(unknowns));
 	return out;
 }
 

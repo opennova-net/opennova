@@ -18,6 +18,7 @@
 #include "http_cookies.h"
 #include "infra/infra_routes.h"
 #include "jobs/job_routes.h"
+#include "lobby_routes.h"
 #include "mailer.h"
 #include "object_store.h"
 #include "password_reset_routes.h"
@@ -289,6 +290,7 @@ struct HttpListener::Impl {
 			fleet(access, pool),
 			stats(access, pool, redis),
 			console(access, pool, redis),
+			lobbies(pool),
 			cd_keys(access, pool),
 			users(access, pool),
 			billing(access, pool, redis),
@@ -323,6 +325,8 @@ struct HttpListener::Impl {
 	hosted::StatsRoutes stats;
 	// Their console routes over the admin links (hosted/console_routes.h).
 	hosted::ConsoleRoutes console;
+	// The lobby browser's listings and a listing's page (lobby_routes.h).
+	LobbyRoutes lobbies;
 	// The CD keys' admin routes and the retail login's DFX2 activation (cd_key_routes.h).
 	CdKeyRoutes cd_keys;
 	// The admin's user routes (admin_user_routes.h).
@@ -414,6 +418,7 @@ bool HttpListener::start(const ServerConfig &config) {
 	impl_->stats.register_routes(impl_->app);
 	impl_->console.set_handler_threads(handler_threads());
 	impl_->console.register_routes(impl_->app);
+	impl_->lobbies.register_routes(impl_->app);
 	impl_->cd_keys.configure(config);
 	impl_->cd_keys.register_routes(impl_->app);
 	impl_->billing.set_billing(billing_);
@@ -822,54 +827,7 @@ void HttpListener::register_admin_api_routes(const std::string &public_host) {
 void HttpListener::register_public_api_routes() {
 	auto &app = impl_->app;
 
-	CROW_ROUTE(app, "/api/lobbies")([this]() {
-		// Phase I.4: game-centric format mirroring onnet's api.py:21-49.
-		// {"games":[{"slug","displayName","hosts":[...]}]}
-		// Vue lobby browser keys off this exact shape. One group per games
-		// row, live from the table; a listing lands under the row whose
-		// LobbyName it registered with (active_hosts.game).
-		std::vector<crow::json::wvalue> games_json;
-		try {
-			auto db_conn   = db_pool_.acquire();
-			auto games     = catalog::list_games(*db_conn);
-			auto host_rows = hostdb::list_hosts(*db_conn);
-			games_json.reserve(games.size());
-			for (const auto &g : games) {
-				crow::json::wvalue game;
-				game["slug"]        = g.slug;
-				game["displayName"] = g.display_name;
-				std::vector<crow::json::wvalue> hosts;
-				for (const auto &h : host_rows) {
-					if (h.game != g.lobby_name) continue;
-					// camelCase to match the web LobbyHost type (snake_case here rendered
-					// every host as "Unnamed Server 0/0" — the Vue card reads
-					// serverName/maxPlayers). hostIp/hostPort surface the join
-					// address so a host is identifiable, not just named. The host's own
-					// text comes in its code page (a stock host's cp1252) and goes out
-					// as UTF-8; the GSB keeps the host's bytes for stock clients.
-					crow::json::wvalue hj;
-					hj["id"]          = h.rid;
-					hj["serverName"]  = retail_text_to_utf8(h.server_name);
-					hj["hostIp"]      = retail_text_to_utf8(h.host_ip);
-					hj["hostPort"]    = h.host_port;
-					hj["players"]     = h.player_count;
-					hj["maxPlayers"]  = h.max_players;
-					hj["region"]      = retail_text_to_utf8(h.region);
-					hosts.push_back(std::move(hj));
-				}
-				game["hosts"] = std::move(hosts);
-				games_json.push_back(std::move(game));
-			}
-		} catch (const db::Error &e) {
-			// An outage answers 500 like every other route, never an empty
-			// list the lobby page would show as "no servers".
-			std::fprintf(stderr, "[http] /api/lobbies failed: %s\n", e.what());
-			return json_error(500, "db_error");
-		}
-		crow::json::wvalue out;
-		out["games"] = std::move(games_json);
-		return json_reply(200, out);
-	});
+	// GET /api/lobbies and /api/lobbies/<rid> are lobby_routes.h's.
 
 	// Phase I.5: aggregate counts for the Vue dashboard.
 	CROW_ROUTE(app, "/api/stats")([this]() {
@@ -1249,9 +1207,11 @@ void HttpListener::register_legacy_login_routes(const std::string &templates_dir
 			// buckets: the address's attempts, then one token from the
 			// username's failure buckets, handed back when the password is
 			// right. Keyed by the TCP peer: a stock client reaches this port
-			// directly (the gate's startupurl names ONNET_WEB_HOST and the
-			// HTTP port, through no proxy but a TCP load balancer that keeps
-			// the client's address), so no header names the client and
+			// (the gate's startupurl names ONNET_WEB_HOST and the HTTP port)
+			// through no proxy but a TCP load balancer that keeps the
+			// client's address and the retail port's own proxy, whose
+			// X-Real-IP (its TCP peer) AccessMiddleware put in its place
+			// (ONNET_RETAIL_PROXY), so no header the client sends names it and
 			// nothing the website's brake sees can brake this one; only the
 			// per-username cap is shared, and it spares the account's known
 			// addresses. Its refusal is this route's own failure reply, the
@@ -2268,7 +2228,7 @@ void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
 			using namespace std::chrono;
 			const auto http_now = static_cast<uint64_t>(
 				duration_cast<milliseconds>(
-					steady_clock::now().time_since_epoch()).count());
+					system_clock::now().time_since_epoch()).count());
 			const auto *body_ptr =
 				reinterpret_cast<const uint8_t *>(req.body.data());
 			tracker_->record("http", sig, body_ptr, req.body.size(),

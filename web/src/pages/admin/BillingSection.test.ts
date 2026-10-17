@@ -68,6 +68,18 @@ describe('BillingSection', () => {
     expect(text).toContain('Test');
   });
 
+  it('reads a canceled subscription as canceled, not canceling', async () => {
+    billing.mockResolvedValue({
+      ok: true,
+      value: adminBilling({ subscriptions: [subscriptionRow(9, { status: 'canceled', entitled: false, cancel_at_period_end: true })] }),
+    });
+    const wrapper = await mountSection();
+    const row = wrapper.findAll('tr').find((r) => r.text().includes('player9'))!;
+    expect(row.text()).toContain('Canceled');
+    expect(row.text()).not.toContain('canceling');
+    expect(wrapper.text()).toContain('Canceling (0)');
+  });
+
   it("links Stripe's test dashboard in test mode", async () => {
     const wrapper = await mountSection();
     const hrefs = wrapper.findAll('a').map((a) => a.attributes('href') ?? '');

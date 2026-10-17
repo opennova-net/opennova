@@ -1,11 +1,10 @@
 <template>
-  <div class="space-y-10">
+  <div ref="root" class="space-y-10">
     <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h1 class="text-3xl font-semibold text-ink">Infrastructure</h1>
         <p class="text-sm text-ink-muted">
-          The deployment as it runs: each program's ECS service and its tasks, the load balancer's targets, the
-          database and the cache, the lobby instances, the controller and the fleet's machines.
+          The deployment as it runs, read from AWS and the database.
         </p>
       </div>
       <div class="flex items-center gap-3">
@@ -277,8 +276,7 @@
       <section class="space-y-4" aria-labelledby="infra-lobbies">
         <h2 id="infra-lobbies" class="text-xl font-semibold text-ink">Lobby instances</h2>
         <p class="text-sm text-ink-muted">
-          One per lobby task, each moving its row every few seconds. Every instance announces the one lobby address; a
-          draining one takes no new client. Their sessions are on
+          One per lobby task; a draining one takes no new client. Their sessions are on
           <RouterLink to="/admin/sessions" class="text-accent hover:text-ink-bright">NovaWorld sessions</RouterLink>.
         </p>
         <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
@@ -346,8 +344,9 @@
           <RouterLink to="/admin/fleet" class="text-sm text-accent hover:text-ink-bright">The fleet: machines, servers and their moves</RouterLink>
         </div>
         <p class="text-sm text-ink-muted">
-          The machines hosted servers run on, live then the newest ended.
+          The machines hosted servers run on.
           <template v-if="!overview.hosting.enabled">Hosting is off on this service.</template>
+          <HistoryToggle v-model="showMachineHistory" :count="replacedMachineIds.size" class="ml-1" />
         </p>
         <p v-if="cloud?.machines_error" class="text-sm text-danger">EC2 could not be read: {{ cloud.machines_error }}</p>
         <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
@@ -369,7 +368,7 @@
               <tr v-if="overview.machines.length === 0">
                 <td colspan="8" class="px-4 py-6 text-center text-ink-muted">No machine has run.</td>
               </tr>
-              <tr v-for="m in overview.machines" :key="m.id" class="infra-machine-row align-top hover:bg-hover">
+              <tr v-for="m in machinesShown" :key="m.id" class="infra-machine-row align-top hover:bg-hover">
                 <th scope="row" class="whitespace-nowrap px-4 py-3 text-left font-normal">
                   <RouterLink to="/admin/fleet" class="font-mono text-xs text-accent hover:text-ink-bright">{{ m.id }}</RouterLink>
                 </th>
@@ -413,9 +412,12 @@
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import RelativeTime from '../../components/RelativeTime.vue';
+import HistoryToggle from '../../components/HistoryToggle.vue';
 import StatTile from '../../components/charts/StatTile.vue';
 import { fetchInfrastructure } from '../../api/infra';
 import { usePolling } from '../../composables/usePolling';
+import { replacedMachines } from '../../utils/history';
+import { keepInView } from '../../utils/keepInView';
 import type { InfraCloudRead, InfraLobby, InfraMachine, InfraOverview, InfraService, InfraTask } from '../../types/infra';
 import { machineKindLabel, machineStateLabel } from '../../utils/adminView';
 import {
@@ -443,6 +445,9 @@ const secondaryButton =
   'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
 const headRow = 'bg-raised text-left text-xs font-semibold uppercase tracking-wider text-ink-muted';
 
+const root = ref<HTMLElement | null>(null);
+// The ended machines a later launch replaced (utils/history.ts), shown on request.
+const showMachineHistory = ref(false);
 const overview = ref<InfraOverview | null>(null);
 const loadedAt = ref<number | null>(null);
 const now = ref(Date.now());
@@ -452,6 +457,10 @@ const pollTrouble = ref(false);
 // AWS's sections, when they were read.
 const cloud = computed<InfraCloudRead | null>(() => (overview.value?.cloud.configured ? overview.value.cloud : null));
 const warnings = computed(() => (overview.value ? infraWarnings(overview.value) : []));
+const replacedMachineIds = computed(() => replacedMachines(overview.value?.machines ?? []));
+const machinesShown = computed(() =>
+  (overview.value?.machines ?? []).filter((m) => showMachineHistory.value || !replacedMachineIds.value.has(m.id)),
+);
 // The cloud's tiles say why they are empty.
 const noCloud = computed(() => {
   if (!overview.value) return '';
@@ -585,7 +594,9 @@ const poll = usePolling({
     if (signal.aborted) return false;
     now.value = Date.now();
     if (result.ok) {
-      overview.value = result.value;
+      await keepInView(() => {
+        overview.value = result.value;
+      }, root.value);
       loadedAt.value = now.value;
       pollTrouble.value = false;
       error.value = '';

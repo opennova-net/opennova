@@ -86,6 +86,7 @@ ServerConfig ServerConfig::from_env() {
 	c.cookie_secure = getenv_bool("ONNET_COOKIE_SECURE", c.cookie_secure);
 	if (auto v = getenv_safe("ONNET_TRUSTED_PROXIES")) c.trusted_proxies = split_list(v);
 	c.api_proxy_only = getenv_bool("ONNET_API_PROXY_ONLY", c.api_proxy_only);
+	if (auto v = getenv_safe("ONNET_RETAIL_PROXY")) c.retail_proxy = v;
 	if (auto v = getenv_safe("ONNET_BOOTSTRAP_ADMIN")) c.bootstrap_admin = v;
 	c.require_host_key = getenv_bool("ONNET_REQUIRE_HOST_KEY", c.require_host_key);
 	c.cd_key_auto_mint = getenv_bool("ONNET_CD_KEY_AUTO_MINT", c.cd_key_auto_mint);

@@ -126,6 +126,7 @@ LaunchFlags parse_launch_flags(const std::vector<std::string> &args) {
     f.callsign = value_after(args, kLaunchFlagCallsign);
     f.capture_pcap = value_after(args, kLaunchFlagCapturePcap);
     f.mcp_port = int_after(args, kLaunchFlagMcpPort, 1, 65535, 0);
+    f.novaworld_host = value_after(args, kLaunchFlagNovaWorldHost);
     f.working_dir = value_after(args, kLaunchFlagWorkingDir);
     f.no_hud = has_flag(args, kLaunchFlagNoHud); // [orig: @0x4A79F6..0x4A7A09]
     f.no_reload = has_flag(args, kLaunchFlagNoReload); // [orig: @0x4A76D7..0x4A76E9]

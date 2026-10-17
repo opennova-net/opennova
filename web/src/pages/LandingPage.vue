@@ -1,6 +1,6 @@
 <template>
   <div>
-    <!-- Hero: what OpenNova is, over a retail map running in it. -->
+    <!-- Hero: OpenNova, over a map running in it. -->
     <section class="relative isolate overflow-hidden border-b border-border" aria-labelledby="hero-title">
       <img
         :src="hero.src"
@@ -15,23 +15,21 @@
 
       <div class="page py-20 sm:py-28 lg:py-32">
         <div class="max-w-2xl">
-          <p class="eyebrow">Open source</p>
-          <h1 id="hero-title" class="mt-4 text-4xl font-bold leading-tight text-ink-bright sm:text-5xl lg:text-6xl">
-            NovaLogic's engine, rebuilt in the open.
-          </h1>
+          <p class="eyebrow">Open source · Pre-1.0</p>
+          <h1 id="hero-title" class="mt-4 text-5xl font-bold leading-tight text-ink-bright sm:text-6xl lg:text-7xl">OpenNova</h1>
+          <p class="mt-4 text-2xl font-semibold text-ink-bright sm:text-3xl">A game on NovaLogic's engine, rebuilt in the open.</p>
           <p class="mt-6 text-lg text-ink">
-            OpenNova is an open-source reimplementation of the engine behind Joint Operations and newer. It plays the
-            data from the copy you own, and our own NovaWorld keeps Joint Operations and Delta Force Xtreme 2 online.
+            Play our own game, make yours with the OpenNova Editor, or use OpenNova in place of Jointops.exe with the
+            Joint Operations you own.
           </p>
           <p class="mt-4 text-base text-ink-muted">
-            Run your own server on NovaWorld with a
-            <RouterLink to="/support" class="link">support tier</RouterLink>: we host it, list it in the game's
-            server browser and keep it running.
+            Our own NovaWorld keeps Joint Operations and Delta Force Xtreme 2 online, and a
+            <RouterLink to="/support" class="link">support tier</RouterLink> hosts a server of your own on it.
           </p>
 
           <div class="mt-8 flex flex-wrap items-center gap-3">
             <a href="#downloads" class="btn-primary">Download</a>
-            <a href="#online" class="btn-secondary">Play online</a>
+            <a href="#editor" class="btn-secondary">Make your own</a>
             <RouterLink to="/support" class="btn-secondary">Host a server</RouterLink>
           </div>
           <p class="mt-3 text-sm text-ink-muted">Windows x64. Pre-1.0 and experimental.</p>
@@ -44,30 +42,63 @@
       </div>
     </section>
 
-    <!-- What it is, in four parts. -->
-    <section class="page py-16 sm:py-20" aria-labelledby="what-title">
-      <p class="eyebrow">What OpenNova is</p>
-      <h2 id="what-title" class="mt-3 max-w-2xl text-3xl font-semibold text-ink-bright">The original games, on an engine anyone can read.</h2>
-      <div class="mt-10 grid gap-4 sm:grid-cols-2">
-        <article v-for="pillar in pillars" :key="pillar.title" class="card p-6">
-          <h3 class="text-lg font-semibold text-ink-bright">{{ pillar.title }}</h3>
-          <p class="mt-2 text-ink-muted">{{ pillar.body }}</p>
-        </article>
+    <!-- Our own game: what a download plays with no retail install. -->
+    <section id="game" class="page scroll-mt-20 py-16 sm:py-20" aria-labelledby="game-title">
+      <p class="eyebrow">Our game</p>
+      <h2 id="game-title" class="mt-3 max-w-2xl text-3xl font-semibold text-ink-bright">Indigo Shore, and more to come</h2>
+      <div class="mt-3 max-w-2xl space-y-3 text-ink-muted">
+        <p>
+          OpenNova comes with a small game of its own, made in the OpenNova Editor with no file from the original
+          games. Land on a jungle island in the rain and clear a rebel camp, alone or in Co-op over LAN, then play it
+          again at night in a storm with the Indigo Storm expansion.
+        </p>
+        <p>
+          A carbine, a pistol, a knife, grenades and binoculars; rebels who patrol, stand guard and raise the alarm.
+          It is small and growing. Online play in our own game is coming.
+        </p>
       </div>
     </section>
 
-    <!-- Retail games running in OpenNova. -->
-    <section class="border-y border-border bg-panel/40 py-16 sm:py-20" aria-labelledby="shots-title">
+    <!-- The editor that made it. -->
+    <section id="editor" class="scroll-mt-20 border-y border-border bg-panel/40 py-16 sm:py-20" aria-labelledby="editor-title">
       <div class="page">
-        <p class="eyebrow">Screenshots</p>
-        <h2 id="shots-title" class="mt-3 text-3xl font-semibold text-ink-bright">Retail games, running in OpenNova</h2>
+        <p class="eyebrow">The OpenNova Editor</p>
+        <h2 id="editor-title" class="mt-3 text-3xl font-semibold text-ink-bright">Make your own</h2>
         <p class="mt-3 max-w-2xl text-ink-muted">
-          Every frame here is the original game's own data, loaded and drawn by OpenNova.
+          The editor that built our game. Make maps, missions and whole games in the formats Joint Operations reads,
+          then Build them and Play them in OpenNova or in the original game.
         </p>
-        <div class="mt-10 grid gap-4 sm:grid-cols-3">
-          <figure v-for="(shot, i) in gameShots" :key="shot.src" :class="i === 0 ? 'sm:col-span-3' : ''">
+        <div class="mt-10 grid gap-8 lg:grid-cols-5">
+          <figure class="lg:col-span-3">
+            <video
+              class="aspect-video w-full rounded-panel border border-border bg-panel"
+              :poster="timelapse.poster"
+              controls
+              muted
+              loop
+              playsinline
+              preload="none"
+              width="1280"
+              height="720"
+              :aria-label="timelapse.alt"
+            >
+              <source v-for="source in timelapse.sources" :key="source.src" :src="source.src" :type="source.type" />
+            </video>
+            <figcaption class="mt-2 text-sm text-ink-muted">{{ timelapse.caption }}</figcaption>
+          </figure>
+          <div class="lg:col-span-2">
+            <ul class="space-y-3">
+              <li v-for="feature in editorFeatures" :key="feature" class="flex gap-3 text-ink">
+                <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true"></span>
+                <span>{{ feature }}</span>
+              </li>
+            </ul>
+          </div>
+        </div>
+        <div class="mt-8 grid gap-4 sm:grid-cols-3">
+          <figure v-for="shot in editorShots" :key="shot.src">
             <a :href="shot.src" target="_blank" rel="noopener" class="block overflow-hidden rounded-panel border border-border">
-              <img :src="shot.thumb" :alt="shot.alt" loading="lazy" decoding="async" width="1600" height="900" class="aspect-video w-full object-cover" />
+              <img :src="shot.thumb" :alt="shot.alt" loading="lazy" decoding="async" width="800" height="450" class="aspect-video w-full object-cover" />
             </a>
             <figcaption class="mt-2 text-sm text-ink-muted">{{ shot.caption }}</figcaption>
           </figure>
@@ -75,45 +106,84 @@
       </div>
     </section>
 
-    <!-- Playing online with a retail game. -->
-    <section id="online" class="page scroll-mt-20 py-16 sm:py-20" aria-labelledby="online-title">
-      <p class="eyebrow">NovaWorld</p>
-      <h2 id="online-title" class="mt-3 text-3xl font-semibold text-ink-bright">Play online today</h2>
-      <p class="mt-3 max-w-2xl text-ink-muted">
-        Connect your own Joint Operations or Delta Force Xtreme 2 to our NovaWorld with the OpenNova Switcher. OpenNova
-        itself joins the same servers.
-      </p>
-      <ol class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <li v-for="(step, i) in steps" :key="step.title" class="card p-6">
-          <p class="text-sm font-semibold text-accent">Step {{ i + 1 }}</p>
-          <h3 class="mt-1 text-lg font-semibold text-ink-bright">{{ step.title }}</h3>
-          <p class="mt-2 text-sm text-ink-muted">{{ step.body }}</p>
-          <RouterLink v-if="step.to" :to="step.to" class="link mt-3 inline-block text-sm">{{ step.link }}</RouterLink>
-          <a v-else-if="step.href" :href="step.href" class="link mt-3 inline-block text-sm">{{ step.link }}</a>
-        </li>
-      </ol>
+    <!-- Retail Joint Operations, run by OpenNova. -->
+    <section id="retail" class="page scroll-mt-20 py-16 sm:py-20" aria-labelledby="retail-title">
+      <p class="eyebrow">Joint Operations</p>
+      <h2 id="retail-title" class="mt-3 text-3xl font-semibold text-ink-bright">Your Joint Operations, too</h2>
+      <div class="mt-3 max-w-2xl space-y-3 text-ink-muted">
+        <p>
+          OpenNova runs in place of Jointops.exe. Press PLAY RETAIL, pick the folder of the Joint Operations you own,
+          and OpenNova plays its maps, missions, models and sounds. It ships no retail files.
+        </p>
+        <p>
+          The aim is parity with the game as it shipped, not a remake. OpenNova is pre-1.0, so expect differences,
+          and please <a :href="ISSUES_URL" target="_blank" rel="noopener" class="link">report them on GitHub</a>.
+        </p>
+      </div>
+      <div class="mt-10 grid gap-4 sm:grid-cols-3">
+        <figure v-for="(shot, i) in retailShots" :key="shot.src" :class="i === 0 ? 'sm:col-span-3' : ''">
+          <a :href="shot.src" target="_blank" rel="noopener" class="block overflow-hidden rounded-panel border border-border">
+            <img :src="shot.thumb" :alt="shot.alt" loading="lazy" decoding="async" width="1600" height="900" class="aspect-video w-full object-cover" />
+          </a>
+          <figcaption class="mt-2 text-sm text-ink-muted">{{ shot.caption }}</figcaption>
+        </figure>
+      </div>
     </section>
 
-    <!-- Managed server hosting through a support tier. -->
-    <section class="border-y border-border bg-panel/40 py-16 sm:py-20" aria-labelledby="hosting-title">
-      <div class="page grid gap-10 lg:grid-cols-2 lg:items-center">
+    <!-- Online: OpenNova needs nothing; an original exe needs the Switcher. -->
+    <section id="online" class="scroll-mt-20 border-y border-border bg-panel/40 py-16 sm:py-20" aria-labelledby="online-title">
+      <div class="page">
+        <p class="eyebrow">NovaWorld</p>
+        <h2 id="online-title" class="mt-3 text-3xl font-semibold text-ink-bright">Play online</h2>
+        <p class="mt-3 max-w-2xl text-ink-muted">
+          NovaWorld is the online service these games log in to. We run our own, with accounts, lobbies and the
+          in-game server browser. First <RouterLink to="/register" class="link">make a NovaWorld account</RouterLink>:
+          the handle and password you log in with in-game. Then pick your way in.
+        </p>
+        <div class="mt-10 grid gap-4 lg:grid-cols-2">
+          <article class="card p-6">
+            <h3 class="text-lg font-semibold text-ink-bright">With OpenNova</h3>
+            <p class="mt-2 text-ink-muted">
+              Open NovaWorld from Joint Operations' multiplayer menu in OpenNova and choose OpenNova. Nothing else to
+              install.
+            </p>
+          </article>
+          <article class="card p-6">
+            <h3 class="text-lg font-semibold text-ink-bright">With the original Jointops.exe or dfx2.exe</h3>
+            <p class="mt-2 text-ink-muted">
+              The OpenNova Switcher points the original game at our NovaWorld. It manages one block in the Windows
+              hosts file, for gs.novaworld.net, so it asks for administrator rights. Your game files stay as they are,
+              and it switches back to NovaLogic's NovaWorld whenever you like.
+            </p>
+            <a href="#downloads" class="link mt-3 inline-block text-sm">Get the Switcher</a>
+          </article>
+        </div>
+        <p class="mt-6 text-ink-muted">
+          Both ways meet in the same lobbies. <RouterLink to="/lobby" class="link">See who is playing</RouterLink>.
+        </p>
+      </div>
+    </section>
+
+    <!-- Hosted servers, and running one yourself. -->
+    <section class="page py-16 sm:py-20" aria-labelledby="hosting-title">
+      <div class="grid gap-10 lg:grid-cols-2 lg:items-center">
         <div>
-          <p class="eyebrow">Support tiers</p>
-          <h2 id="hosting-title" class="mt-3 text-3xl font-semibold text-ink-bright">Managed server hosting</h2>
+          <p class="eyebrow">Server hosting</p>
+          <h2 id="hosting-title" class="mt-3 text-3xl font-semibold text-ink-bright">Hosted servers</h2>
           <p class="mt-4 text-ink">
             A monthly support tier funds OpenNova and runs your own servers on NovaWorld. We start them on our machines,
-            list them in the game's server browser and keep them running until you stop them. Retail and OpenNova
-            players both join.
+            list them in the game's server browser and keep them running until you stop them. Pick the map rotation
+            and game settings, watch the stats and use the server console, all from this site.
           </p>
           <p class="mt-3 text-ink-muted">
-            Pick the map rotation and game settings, watch the stats and use the server console, all from this site.
+            Hosted servers run OpenNova's own server, opennova-serve, not the original game. Retail and OpenNova players
+            join them alike. They aim to play exactly like the original servers, but OpenNova is pre-1.0 and we can't
+            guarantee that yet.
           </p>
           <div class="mt-6">
             <RouterLink to="/support" class="btn-primary">{{ tiersState === 'open' ? 'Choose a tier' : 'See support tiers' }}</RouterLink>
           </div>
-          <p class="mt-4 text-xs text-ink-muted">
-            A tier is support for the project, not the sale of any game. Hosted servers are pre-1.0 and experimental.
-          </p>
+          <p class="mt-4 text-xs text-ink-muted">A tier is support for the project, not the sale of any game.</p>
         </div>
 
         <div>
@@ -137,50 +207,8 @@
           </p>
         </div>
       </div>
-    </section>
 
-    <!-- The editor. -->
-    <section class="page py-16 sm:py-20" aria-labelledby="editor-title">
-      <p class="eyebrow">Tools</p>
-      <h2 id="editor-title" class="mt-3 text-3xl font-semibold text-ink-bright">The OpenNova Editor</h2>
-      <p class="mt-3 max-w-2xl text-ink-muted">
-        Make maps, missions and whole games for Joint Operations and newer, in the formats the games read.
-      </p>
-      <div class="mt-10 grid gap-8 lg:grid-cols-5">
-        <figure class="lg:col-span-3">
-          <video
-            class="aspect-video w-full rounded-panel border border-border bg-panel"
-            :poster="timelapse.poster"
-            controls
-            muted
-            loop
-            playsinline
-            preload="none"
-            width="1280"
-            height="720"
-            :aria-label="timelapse.alt"
-          >
-            <source v-for="source in timelapse.sources" :key="source.src" :src="source.src" :type="source.type" />
-          </video>
-          <figcaption class="mt-2 text-sm text-ink-muted">{{ timelapse.caption }}</figcaption>
-        </figure>
-        <div class="lg:col-span-2">
-          <ul class="space-y-3">
-            <li v-for="feature in editorFeatures" :key="feature" class="flex gap-3 text-ink">
-              <span class="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-accent" aria-hidden="true"></span>
-              <span>{{ feature }}</span>
-            </li>
-          </ul>
-        </div>
-      </div>
-      <div class="mt-8 grid gap-4 sm:grid-cols-3">
-        <figure v-for="shot in editorShots" :key="shot.src">
-          <a :href="shot.src" target="_blank" rel="noopener" class="block overflow-hidden rounded-panel border border-border">
-            <img :src="shot.thumb" :alt="shot.alt" loading="lazy" decoding="async" width="800" height="450" class="aspect-video w-full object-cover" />
-          </a>
-          <figcaption class="mt-2 text-sm text-ink-muted">{{ shot.caption }}</figcaption>
-        </figure>
-      </div>
+      <RunItYourself id="run-it-yourself" class="mt-10" />
     </section>
 
     <!-- Downloads. -->
@@ -189,8 +217,8 @@
         <p class="eyebrow">Downloads</p>
         <h2 id="downloads-title" class="mt-3 text-3xl font-semibold text-ink-bright">Get OpenNova</h2>
         <p class="mt-3 max-w-2xl text-ink-muted">
-          Windows x64. Pre-1.0 and experimental. No game data is included: playing a retail title needs your own
-          purchased copy. Each release on GitHub carries these files:
+          Windows x64. Pre-1.0 and experimental. The game comes with OpenNova's own game; playing Joint Operations
+          needs your own purchased copy. Each release on GitHub carries these files:
         </p>
         <ul class="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <li v-for="item in downloads" :key="item.file" class="card p-5">
@@ -216,29 +244,11 @@ import { computed, onMounted, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import { fetchStats } from '../api/stats';
 import { fetchTiers } from '../api/billing';
+import RunItYourself from '../components/RunItYourself.vue';
 import type { TiersResponse } from '../types/billing';
 import { formatMoney } from '../utils/format';
-import { GITHUB_URL, RELEASES_URL } from '../utils/links';
-import { editorShots, gameShots, hero, timelapse } from '../utils/media';
-
-const pillars = [
-  {
-    title: 'A faithful engine',
-    body: "A C++ reimplementation of NovaLogic's engine, ported from how the original works. The aim is parity with the games as they shipped, not a remake.",
-  },
-  {
-    title: 'Your own game data',
-    body: 'OpenNova ships no retail files. Point it at the Joint Operations install you own and it plays that data: its maps, missions, models and sounds.',
-  },
-  {
-    title: 'Our own NovaWorld',
-    body: "NovaWorld is the online service these games log in to. We run our own, with accounts, lobbies and the in-game server browser, so Delta Force Xtreme 2 activates without NovaLogic's retired service.",
-  },
-  {
-    title: 'Plays with the originals',
-    body: 'OpenNova speaks the original network protocol: retail players join OpenNova servers and OpenNova joins theirs, on LAN and on NovaWorld.',
-  },
-];
+import { GITHUB_URL, ISSUES_URL, RELEASES_URL } from '../utils/links';
+import { editorShots, hero, retailShots, timelapse } from '../utils/media';
 
 const editorFeatures = [
   'Missions in a 3D view of their terrain, with their event logic beside them',
@@ -248,46 +258,16 @@ const editorFeatures = [
   'Build packs the game archives; Play runs them in OpenNova or the original game',
 ];
 
-const steps: { title: string; body: string; link?: string; to?: string; href?: string }[] = [
-  {
-    title: 'Install your game',
-    body: 'Joint Operations or Delta Force Xtreme 2, from your own copy.',
-  },
-  {
-    title: 'Make an account',
-    body: 'Register a NovaWorld account here: the handle and password you log in with in-game.',
-    link: 'Create an account',
-    to: '/register',
-  },
-  {
-    title: 'Run the Switcher',
-    body: "Pick OpenNova's NovaWorld in the Switcher. Your game files stay as they are.",
-    link: 'Get the Switcher',
-    href: '#downloads',
-  },
-  {
-    title: 'Log in and play',
-    body: "Start the game, log in with your account and join from its server browser. Or host a game from it yourself.",
-    link: 'See who is playing',
-    to: '/lobby',
-  },
-];
-
 const downloads = [
   {
     name: 'OpenNova',
-    body: "The game. Plays retail Joint Operations from your install, and OpenNova's own base game.",
+    body: 'The game: our own game, and a drop-in for Jointops.exe that plays the Joint Operations you own.',
     file: 'opennova-game-windows',
   },
   {
     name: 'OpenNova Editor',
-    body: 'The editor, ready to run on its own.',
+    body: 'The editor that made our game, ready to run on its own.',
     file: 'opennova-editor-windows',
-  },
-  {
-    name: 'OpenNova Switcher',
-    body: "A tray app that points your Joint Operations or Delta Force Xtreme 2 at our NovaWorld, NovaLogic's, or an address of your own.",
-    file: 'opennova-switcher-windows',
   },
   {
     name: 'Blender add-on',
@@ -296,8 +276,13 @@ const downloads = [
   },
   {
     name: 'Tools and dedicated server',
-    body: 'The command-line tools and opennova-serve, a headless server retail and OpenNova players both join.',
+    body: 'The command-line tools and opennova-serve, the server our hosted servers run. Retail and OpenNova players both join it.',
     file: 'opennova-apps-windows',
+  },
+  {
+    name: 'OpenNova Switcher',
+    body: "Only for the original Jointops.exe or dfx2.exe: a tray app that points them at our NovaWorld, NovaLogic's, or an address of your own. OpenNova itself doesn't need it.",
+    file: 'opennova-switcher-windows',
   },
 ];
 

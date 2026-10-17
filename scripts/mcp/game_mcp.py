@@ -76,6 +76,7 @@ GAME_VALUE_FLAGS = (
     ("lan_mode", "--lan-mode"),
     ("lan_max_players", "--lan-max-players"),
     ("capture_pcap", "--capture-pcap"),
+    ("novaworld_host", "--novaworld-host"),
 )
 
 
@@ -1000,6 +1001,9 @@ def build_parser() -> argparse.ArgumentParser:
     launch.add_argument("--lan-mode", default=None, help="host LAN rate mode 1..4")
     launch.add_argument("--lan-max-players", default=None, help="listen-host capacity 1..64")
     launch.add_argument("--capture-pcap", default=None, help="record the session's datagrams to this pcap")
+    launch.add_argument("--novaworld-host", default=None, metavar="HOST",
+                        help="the gate the NovaWorld screen's OpenNova target dials (default: the build's own, "
+                             "loopback in a source run)")
     launch.add_argument("game_args", nargs="*", help="further game flags, after --")
     launch.set_defaults(func=cmd_launch)
 
