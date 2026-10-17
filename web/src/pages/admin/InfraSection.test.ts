@@ -1,0 +1,276 @@
+import { flushPromises, mount } from '@vue/test-utils';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import InfraSection from './InfraSection.vue';
+import { fetchInfrastructure } from '../../api/infra';
+import { NOW, ago, cloud, localOverview, overview, service } from '../../test/infraFixtures';
+import { testRouter } from '../../test/router';
+
+vi.mock('../../api/infra', () => ({ fetchInfrastructure: vi.fn() }));
+
+const read = vi.mocked(fetchInfrastructure);
+
+describe('InfraSection', () => {
+  let wrapper: ReturnType<typeof mount> | null = null;
+
+  async function mountSection() {
+    const router = await testRouter('/admin/infrastructure');
+    wrapper = mount(InfraSection, { global: { plugins: [router] } });
+    await flushPromises();
+    return wrapper;
+  }
+
+  function tiles(page: ReturnType<typeof mount>) {
+    return Object.fromEntries(page.findAll('dl.infra-tiles > div').map((tile) => [tile.get('dt').text(), tile.findAll('dd').map((d) => d.text())]));
+  }
+
+  function card(page: ReturnType<typeof mount>, name: string) {
+    const found = page.findAll('article.infra-service').find((a) => a.get('h3').text() === name);
+    if (!found) throw new Error(`no card for ${name}`);
+    return found;
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
+    read.mockResolvedValue({ ok: true, value: overview() });
+  });
+
+  afterEach(() => {
+    wrapper?.unmount();
+    wrapper = null;
+    vi.useRealTimers();
+  });
+
+  it('sums the deployment up in six cards and warns of what to look at first', async () => {
+    const page = await mountSection();
+    expect(page.get('h1').text()).toBe('Infrastructure');
+    expect(read).toHaveBeenCalledTimes(1);
+    const t = tiles(page);
+    expect(Object.keys(t)).toEqual(['Programs', 'Tasks running', 'Load balancer targets', 'Release', 'Lobby instances', 'Fleet machines']);
+    expect(t['Programs']).toEqual(['4 of 5 steady', 'web rolling out']);
+    expect(t['Tasks running']).toEqual(['5 of 6', '1 starting']);
+    expect(t['Load balancer targets']).toEqual(['4 of 6 healthy', 'Across 4 listeners']);
+    expect(t['Release']).toEqual(['abc1234', '20261017T120000Z-abc1234. Every program runs it']);
+    expect(t['Lobby instances']).toEqual(['1 live', '1 taking clients, 3 sessions']);
+    expect(t['Fleet machines']).toEqual(['1', '4 of 12 slots used']);
+    expect(page.findAll('.infra-warnings li').map((w) => w.text())).toEqual([
+      'The website (TCP 443): 1 target unhealthy (Target.FailedHealthChecks).',
+    ]);
+    expect(page.find('.infra-unavailable').exists()).toBe(false);
+    const text = page.text();
+    expect(text).not.toMatch(/\d+ ?ms\b/);
+    expect(text).not.toContain('_seconds');
+    expect(text).not.toContain('undefined');
+    expect(text).not.toContain('null');
+  });
+
+  it('shows each program with its rollout, its revision against the release, its tasks and events', async () => {
+    const page = await mountSection();
+    const names = page.findAll('article.infra-service h3').map((h) => h.text());
+    expect(names).toEqual(['gate', 'lobby', 'web', 'controller', 'worker']);
+
+    const gate = card(page, 'gate');
+    expect(gate.text()).toContain('Steady');
+    expect(gate.text()).toContain('1 of 1 running');
+    expect(gate.text()).toContain("The release's revision");
+    expect(gate.text()).toContain('opennova-novaworld-gate@sha256:0123456789ab');
+    expect(gate.findAll('li.infra-deployment')).toHaveLength(0);
+    expect(gate.get('details summary').text()).toBe('Recent events (1)');
+    expect(gate.get('li.infra-event').text()).toContain('(service gate) has reached a steady state.');
+
+    const web = card(page, 'web');
+    expect(web.text()).toContain('Rolling out');
+    expect(web.text()).toContain('1 of 2 running');
+    expect(web.text()).toContain('1 starting');
+    expect(web.text()).toContain("Not the release's revision");
+    const deployments = web.findAll('li.infra-deployment').map((d) => d.text());
+    expect(deployments).toHaveLength(2);
+    expect(deployments[0]).toContain('New opennova-prod-web:43: 0 of 1 running, 1 task failed, rollout in progress');
+    expect(deployments[1]).toContain('Old opennova-prod-web:42: 1 of 1 running, rollout completed');
+    const tasks = web.findAll('li.infra-task');
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0].text()).toContain('4444dddd');
+    expect(tasks[0].text()).toContain('Healthy');
+    expect(tasks[0].text()).toContain('10.40.0.14');
+    expect(tasks[0].text()).toContain('0.5 vCPU, 1 GiB');
+    expect(tasks[0].text()).not.toContain('Revision');
+    expect(tasks[1].text()).toContain('Health unknown');
+    expect(tasks[1].text()).toContain('Pending');
+    expect(tasks[1].text()).toContain('Revision 43');
+    expect(tasks[1].text()).toContain('not started');
+    expect(tasks[1].text()).toContain('us-east-1b');
+    expect(tasks[1].get('span[title="Task 3333cccc3333cccc3333cccc3333cccc"]').text()).toBe('3333cccc');
+    const stopped = web.findAll('li.infra-stopped-task');
+    expect(stopped).toHaveLength(1);
+    expect(stopped[0].text()).toContain('9999ffff');
+    expect(stopped[0].text()).toContain('1 min ago');
+    expect(stopped[0].text()).toContain('Essential container in task exited; web exited with code 1');
+    expect(web.get('details summary').text()).toBe('Recent events (2)');
+
+    const oneOff = page.get('.infra-one-off');
+    expect(oneOff.text()).toContain('7777aaaa');
+    expect(oneOff.text()).toContain('opennova-prod-backup');
+    expect(oneOff.text()).toContain('started 10 min ago');
+  });
+
+  it('lists the target groups, the database and the cache, the lobbies, the controller and the machines', async () => {
+    const page = await mountSection();
+    const targets = page.findAll('tr.infra-target-row');
+    expect(targets).toHaveLength(6);
+    expect(targets[0].text()).toContain('The gate (UDP 7597)');
+    expect(targets[0].text()).toContain('10.40.0.11:7597');
+    expect(targets[0].text()).toContain('Healthy');
+    expect(targets[3].text()).toContain('Registering');
+    expect(targets[3].text()).toContain('Target registration is in progress');
+    expect(targets[5].text()).toContain('The website (TCP 443)');
+    expect(targets[5].text()).toContain('Unhealthy');
+    expect(targets[5].text()).toContain('Health checks failed');
+    expect(targets[5].text()).toContain('Target.FailedHealthChecks');
+
+    const db = page.get('.infra-database');
+    expect(db.text()).toContain('opennova-prod-db');
+    expect(db.text()).toContain('available');
+    expect(db.text()).toContain('postgres 17.4');
+    expect(db.text()).toContain('db.t4g.small');
+    expect(db.text()).toContain('Multi-AZYes');
+    expect(db.text()).toContain('us-east-1a, standby in us-east-1b');
+    expect(db.text()).toContain('20 GiB gp3');
+    const cache = page.get('.infra-cache');
+    expect(cache.text()).toContain('opennova-prod-cache');
+    expect(cache.text()).toContain('cache.t4g.micro');
+    expect(cache.text()).toContain('FailoverAutomatic');
+    expect(cache.text()).toContain('Primary, us-east-1a');
+    expect(cache.text()).toContain('Replica, us-east-1b');
+
+    const lobbies = page.findAll('tr.infra-lobby-row');
+    expect(lobbies).toHaveLength(2);
+    expect(lobbies[0].text()).toContain('Taking clients');
+    expect(lobbies[0].text()).toContain('3 sessions');
+    expect(lobbies[0].text()).toContain('1 listed server');
+    expect(lobbies[1].text()).toContain('Not seen');
+    expect(lobbies[1].text()).toContain('2 min ago');
+
+    const controller = page.get('.infra-controller');
+    expect(controller.text()).toContain('controller-1234abcd');
+    expect(controller.text()).toContain('1 hour ago');
+    expect(controller.text()).toContain('The 3rd');
+
+    const machines = page.findAll('tr.infra-machine-row');
+    expect(machines).toHaveLength(2);
+    expect(machines[0].text()).toContain('Shared machine');
+    expect(machines[0].text()).toContain('Ready');
+    expect(machines[0].text()).toContain('4 of 12');
+    expect(machines[0].text()).toContain('i-0aaaaaaaaaaaaaaa1');
+    expect(machines[0].text()).toContain('EC2: running');
+    expect(machines[0].text()).toContain('us-east-1b');
+    expect(machines[0].get('a').attributes('href')).toBe('/admin/fleet');
+    expect(machines[1].text()).toContain('Ended');
+    expect(machines[1].text()).toContain('drained');
+    expect(page.findAll('a').some((a) => a.attributes('href') === '/admin/fleet' && a.text().startsWith('The fleet'))).toBe(true);
+  });
+
+  it('on the local stack says AWS is not read and shows the database sections alone', async () => {
+    read.mockResolvedValue({ ok: true, value: localOverview() });
+    const page = await mountSection();
+    expect(page.get('.infra-unavailable').text()).toContain('ONNET_INFRA_CLUSTER is unset');
+    expect(page.findAll('article.infra-service')).toHaveLength(0);
+    expect(page.find('#infra-programs').exists()).toBe(false);
+    expect(page.find('#infra-targets').exists()).toBe(false);
+    expect(page.find('.infra-database').exists()).toBe(false);
+    const t = tiles(page);
+    expect(t['Programs']).toEqual(['Unknown', 'Not read on this stack']);
+    expect(t['Load balancer targets']).toEqual(['Unknown', 'Not read on this stack']);
+    expect(t['Lobby instances']).toEqual(['1 live', '1 taking clients, 3 sessions']);
+    expect(page.findAll('tr.infra-lobby-row')).toHaveLength(2);
+    expect(page.findAll('tr.infra-machine-row')[0].text()).toContain('dev-machine-1');
+    expect(page.findAll('tr.infra-machine-row')[0].text()).not.toContain('EC2');
+  });
+
+  it('says why AWS or one of its sections could not be read, the others standing', async () => {
+    read.mockResolvedValue({
+      ok: true,
+      value: overview({ cloud: cloud({ error: "the ECS agent's credentials endpoint did not answer: curl exited with code 7" }) }),
+    });
+    let page = await mountSection();
+    expect(page.get('.infra-cloud-error').text()).toBe(
+      "AWS could not be read: the ECS agent's credentials endpoint did not answer: curl exited with code 7",
+    );
+    expect(page.find('#infra-programs').exists()).toBe(false);
+    expect(tiles(page)['Programs']).toEqual(['Unknown', 'AWS could not be read']);
+    page.unmount();
+
+    const groups = cloud().target_groups;
+    groups[1] = { ...groups[1], targets: [], error: 'elasticloadbalancing answered 403: AccessDenied: not authorized' };
+    read.mockResolvedValue({
+      ok: true,
+      value: overview({
+        cloud: cloud({
+          target_groups: groups,
+          database: null,
+          database_error: 'rds answered 403: AccessDenied: User is not authorized to perform: rds:DescribeDBInstances',
+          machines_error: 'ec2 answered 403: UnauthorizedOperation: You are not authorized',
+        }),
+      }),
+    });
+    page = await mountSection();
+    expect(page.findAll('tr.infra-target-row')[1].text()).toContain(
+      'Could not be read: elasticloadbalancing answered 403: AccessDenied: not authorized',
+    );
+    expect(page.get('.infra-database').text()).toContain('rds answered 403: AccessDenied');
+    expect(page.get('.infra-cache').text()).toContain('available');
+    expect(page.text()).toContain('EC2 could not be read: ec2 answered 403: UnauthorizedOperation');
+    expect(tiles(page)['Load balancer targets']).toEqual(['3 of 5 healthy', '1 target group could not be read']);
+  });
+
+  it('warns of a failed rollout, a program short of tasks, a missing service, a busy database and no lobby or controller', async () => {
+    read.mockResolvedValue({
+      ok: true,
+      value: overview({
+        cloud: cloud({
+          services: [
+            service('gate', {
+              deployments: [{ ...service('gate').deployments[0], rollout_state: 'FAILED', rollout_reason: 'tasks failed to start' }],
+            }),
+            service('worker', { running: 0, tasks: [] }),
+            service('controller', { task_definition: 'opennova-prod-controller:9', on_release: false }),
+          ],
+          missing_services: ['lobby (MISSING)'],
+          database: { ...cloud().database!, status: 'modifying' },
+          target_groups: [],
+        }),
+        lobbies: [],
+        controller: { leader: null, generation: 0, elected_at: null },
+      }),
+    });
+    const page = await mountSection();
+    expect(page.findAll('.infra-warnings li').map((w) => w.text())).toEqual([
+      "gate's last rollout failed: tasks failed to start. ECS rolls a failed deployment back.",
+      'worker has 0 of 1 tasks running.',
+      'ECS has no service lobby (MISSING).',
+      'The database is modifying.',
+      "controller runs opennova-prod-controller:9, not the release's revision: a deploy or a rollback did not finish.",
+      'No lobby instance has been seen taking clients in the last 15 seconds.',
+      'No controller has been elected yet: nothing schedules the periodic jobs or runs the fleet.',
+    ]);
+    expect(card(page, 'gate').text()).toContain('Rollout failed');
+    expect(card(page, 'worker').text()).toContain('Short of tasks');
+    expect(card(page, 'worker').text()).toContain('No task runs.');
+    expect(tiles(page)['Release'][1]).toBe('20261017T120000Z-abc1234. controller runs another revision');
+    expect(page.get('.infra-controller').text()).toContain('None elected');
+  });
+
+  it('shows a failed read and keeps polling', async () => {
+    read.mockResolvedValue({ ok: false, error: { code: 'forbidden', status: 403, message: 'This account is not an admin.' } });
+    const page = await mountSection();
+    expect(page.get('[role="alert"]').text()).toBe('This account is not an admin.');
+    expect(page.find('article.infra-service').exists()).toBe(false);
+  });
+
+  it('reads no release yet as none', async () => {
+    read.mockResolvedValue({ ok: true, value: overview({ cloud: cloud({ release: null, release_none: true }) }) });
+    const page = await mountSection();
+    expect(tiles(page)['Release']).toEqual(['None yet', 'No app deploy has recorded a release']);
+    expect(ago(0)).toBe('2026-10-17T12:01:30Z');
+  });
+});

@@ -3,7 +3,8 @@
 // of throwing, with the server's `error` code mapped to a message: the
 // server's own `message` text is never shown. The users' calls are in
 // users.ts, the CD keys' in cdKeys.ts, the billing overview's in
-// adminBilling.ts, the background jobs' in jobs.ts; here are the NovaWorld service's status and sessions, and
+// adminBilling.ts, the background jobs' in jobs.ts, the infrastructure view's in infra.ts; here are the
+// NovaWorld service's status and sessions, and
 // the hosted fleet (/api/admin/hosted*, /api/admin/fleet/*).
 
 import { isAxiosError } from 'axios';

@@ -68,6 +68,7 @@ const sections: AdminSection[] = [
   { to: '/admin/service', label: 'NovaWorld service' },
   { to: '/admin/sessions', label: 'NovaWorld sessions' },
   { to: '/admin/jobs', label: 'Background jobs' },
+  { to: '/admin/infrastructure', label: 'Infrastructure' },
   { to: '/admin/cd-keys', label: 'CD keys' },
 ];
 
