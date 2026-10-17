@@ -13,7 +13,6 @@
     "formats/bad/bad_o3a_read.cpp",
     "formats/threedi/threedi_o3d_read.cpp",
     "formats/threedi/scene_text.cpp",
-    "formats/threedi/threedi.cpp",
     "formats/threedi/threedi_3di3_ground_anchor.cpp",
     "formats/wac/command_table.cpp",
     "runtime/assets/asset_store.cpp",
