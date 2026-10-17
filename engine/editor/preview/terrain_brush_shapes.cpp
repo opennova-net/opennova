@@ -3,11 +3,13 @@
 #include <algorithm>
 #include <cmath>
 
+#include <base/io/bam.h>
+
 namespace opennova::editor {
 
 namespace {
 
-constexpr double kTwoPi = 6.283185307179586;
+constexpr double kTwoPi = 2.0 * io::kPi;
 
 // A ring of `radius` metres about `centre`, each point on the ground (or at `flat_height`), as lines on the picture.
 void ring(const TerrainBrushSpace &space, TerrainPoint centre, double radius, bool flat, double flat_height, uint32_t rgb,
