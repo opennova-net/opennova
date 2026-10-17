@@ -72,6 +72,12 @@ describe('JobDetailSection', () => {
     expect(field(page, 'Last error')).toBe('the launch failed');
     expect(JSON.parse(page.get('pre.job-payload').text())).toEqual({ machine_id: 12, kind: 'shared', slots: 4 });
     expect(page.text()).not.toMatch(/\d+ ?ms\b/);
+    // Back to the jobs page, and to the Jobs tab's list of its kind.
+    const crumbs = page.findAll('nav.job-breadcrumb a');
+    expect(crumbs.map((a) => [a.text(), a.attributes('href')])).toEqual([
+      ['Background jobs', '/admin/jobs'],
+      ['Launch a fleet machine jobs', '/admin/jobs?tab=jobs&kind=machine.launch'],
+    ]);
   });
 
   it('retries a failed job with one more attempt, once asked', async () => {

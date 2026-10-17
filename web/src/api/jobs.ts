@@ -7,8 +7,9 @@ import { adminClient } from './client';
 import { adminCall, type AdminResult } from './admin';
 import type {
   Job,
+  JobFailureGroup,
+  JobGroupRetry,
   JobKindSummary,
-  JobMinute,
   JobPage,
   JobQuery,
   JobSchedule,
@@ -82,20 +83,30 @@ function pickKind(value: unknown): JobKindSummary | null {
   };
 }
 
-function pickMinute(value: unknown): JobMinute | null {
-  if (!isObject(value) || typeof value.at !== 'string') return null;
-  return { at: value.at, done: isCount(value.done) ? value.done : 0, failed: isCount(value.failed) ? value.failed : 0 };
+function pickGroup(value: unknown): JobFailureGroup | null {
+  if (!isObject(value) || typeof value.kind !== 'string' || typeof value.key !== 'string' || !isCount(value.count)) return null;
+  return {
+    kind: value.kind,
+    key: value.key,
+    count: value.count,
+    retryable: isCount(value.retryable) ? value.retryable : 0,
+    last_job_id: isCount(value.last_job_id) ? value.last_job_id : 0,
+    last_error: text(value.last_error),
+    last_at: textOrNull(value.last_at),
+  };
 }
 
 function pickWorker(value: unknown): JobWorker | null {
-  if (!isObject(value) || typeof value.worker_id !== 'string') return null;
+  if (!isObject(value) || typeof value.process !== 'string') return null;
+  const count = (key: string) => (isCount(value[key]) ? (value[key] as number) : 0);
   return {
-    worker_id: value.worker_id,
-    process: text(value.process) || value.worker_id,
-    job_id: isCount(value.job_id) ? value.job_id : null,
-    job_kind: textOrNull(value.job_kind),
-    done: isCount(value.done) ? value.done : 0,
-    failed: isCount(value.failed) ? value.failed : 0,
+    process: value.process,
+    threads: count('threads'),
+    busy: count('busy'),
+    lapsed: count('lapsed'),
+    lease_left_seconds: numberOrNull(value.lease_left_seconds),
+    done: count('done'),
+    failed: count('failed'),
     last_active_at: textOrNull(value.last_active_at),
   };
 }
@@ -125,20 +136,17 @@ export function pickOverview(data: unknown): JobsOverview | null {
   if (!isObject(data) || typeof data.at !== 'string') return null;
   const totals = pickKind(data.totals);
   const kinds = every(data.kinds, pickKind);
-  const perMinute = every(data.per_minute, pickMinute);
-  const attention = pickJobs(data.attention);
-  const running = pickJobs(data.running);
+  const attention = every(data.attention, pickGroup);
   const workers = every(data.workers, pickWorker);
   const schedules = every(data.schedules, pickSchedule);
-  if (!totals || !kinds || !perMinute || !attention || !running || !workers || !schedules) return null;
+  if (!totals || !kinds || !attention || !workers || !schedules) return null;
   const controller = isObject(data.controller) ? data.controller : {};
   return {
     at: data.at,
     totals,
     kinds,
-    per_minute: perMinute,
     attention,
-    running,
+    attention_total: isCount(data.attention_total) ? data.attention_total : 0,
     workers,
     schedules,
     controller: {
@@ -187,6 +195,18 @@ export function fetchJob(id: number, signal?: AbortSignal): Promise<AdminResult<
 // one attempt more than it has used.
 export function retryJob(id: number): Promise<AdminResult<Job>> {
   return adminCall(() => adminClient.post<unknown>(`/jobs/${id}/retry`), pickJobReply);
+}
+
+function pickGroupRetry(data: unknown): JobGroupRetry | null {
+  if (!isObject(data) || !isCount(data.retried)) return null;
+  const count = (key: string) => (isCount(data[key]) ? (data[key] as number) : 0);
+  return { retried: data.retried, secret_dropped: count('secret_dropped'), already_pending: count('already_pending'), changed: count('changed') };
+}
+
+// POST /api/admin/jobs/retry-group: each job of a failure group queued again
+// as its own retry would.
+export function retryJobGroup(kind: string, key: string): Promise<AdminResult<JobGroupRetry>> {
+  return adminCall(() => adminClient.post<unknown>('/jobs/retry-group', { kind, key }), pickGroupRetry);
 }
 
 // POST /api/admin/jobs/<id>/cancel: a queued job failed for good.

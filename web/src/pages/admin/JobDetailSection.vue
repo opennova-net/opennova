@@ -1,6 +1,10 @@
 <template>
   <div class="space-y-10">
-    <RouterLink to="/admin/jobs" class="text-sm text-accent hover:text-ink-bright">Background jobs</RouterLink>
+    <nav aria-label="Breadcrumb" class="job-breadcrumb flex flex-wrap items-center gap-2 text-sm text-ink-muted">
+      <RouterLink to="/admin/jobs" class="text-accent hover:text-ink-bright">Background jobs</RouterLink>
+      <span aria-hidden="true">/</span>
+      <RouterLink :to="jobsLink" class="text-accent hover:text-ink-bright">{{ job ? `${jobKindLabel(job.kind)} jobs` : 'Jobs' }}</RouterLink>
+    </nav>
 
     <div role="status" class="sr-only">{{ message }}</div>
     <div role="alert" class="sr-only">{{ error }}</div>
@@ -97,6 +101,8 @@
 // (never the secret), its last error and its payload; a retry for a failed
 // one (POST .../retry: one more attempt) and a cancel for a waiting one (POST
 // .../cancel), each asked first. Read again every 5 s while it waits or runs.
+// Its breadcrumb leads back to the jobs page and to the Jobs tab's list of
+// its kind.
 import { computed, ref } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import RelativeTime from '../../components/RelativeTime.vue';
@@ -127,6 +133,9 @@ const id = computed(() => Number(route.params.id));
 
 const job = ref<Job | null>(null);
 const busy = ref(false);
+
+// The Jobs tab, listing this job's kind once it is known.
+const jobsLink = computed(() => ({ path: '/admin/jobs', query: job.value ? { tab: 'jobs', kind: job.value.kind } : { tab: 'jobs' } }));
 const now = ref(Date.now());
 const message = ref('');
 const error = ref('');
