@@ -731,6 +731,12 @@ static int test_done_statement_round_trips(void) {
     CHECK(round_trips("script t\nsection A\n{\n  if ((Var01 == 1))\n  {\n    done\n  }\n  play sound_1\n}\n"),
           "a done in an if body");
     CHECK(round_trips("script t\nsection A\n{\n  play sound_1\n}\n"), "a section closed by its brace alone");
+    CHECK(round_trips("script t\nsection A\n{\n  play sound_0\n}\nplay sound_1\n"),
+          "a top-level statement after a section's brace");
+    CHECK(round_trips("script t\nsection A\n{\n  play sound_0\n}\ndone\nsection B\n{\n  play sound_2\n}\n"),
+          "a top-level done after a section's brace");
+    CHECK(round_trips("script t\nsection A\n{\n  play sound_0\n}\nif ((Var01 == 1))\n{\n  done\n}\n"),
+          "a top-level if whose body holds a done, after a section's brace");
     return 1;
 }
 
