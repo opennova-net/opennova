@@ -834,12 +834,16 @@ bool run_host_answers_the_sweep_request() {
 			make_in_match_conn(3, 1, &udp_requester, ns::TransportMode::Client, b));
 
 	const std::vector<ProtocolMessage> request{make_protocol_message(0x32, {})};
+	// The handler answers on the authority only (NapiNPServerMsg_SendEmptySlots
+	// @0x51A600..0x51A607), so every request below runs with the host context.
+	inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = &ctx;
 
 	// Prior state: pool 0 is fully occupied below the high-water mark, so the sweep
 	// is EMPTY. (An empty 0x5D is still the witnessed answer.)
 	{
 		const std::vector<ProtocolMessage> replies = inmatch::dispatch_session_replies(
-				inmatch::GameConfig{}, roster[1], request, 100, roster, &world);
+				inmatch::GameConfig{}, roster[1], request, 100, roster, &world, inputs);
 		int sweeps = 0;
 		for (const ProtocolMessage &m : replies) {
 			if (m.tag != 0x5D) continue;
@@ -864,7 +868,7 @@ bool run_host_answers_the_sweep_request() {
 	{
 		std::vector<uint16_t> listed;
 		for (const ProtocolMessage &m : inmatch::dispatch_session_replies(
-					inmatch::GameConfig{}, roster[1], request, 100, roster, &world)) {
+					inmatch::GameConfig{}, roster[1], request, 100, roster, &world, inputs)) {
 			if (m.tag != 0x5D) continue;
 			DestroyEntityList decoded;
 			if (!expect(decode_destroy_entity_list(
@@ -885,7 +889,7 @@ bool run_host_answers_the_sweep_request() {
 	world.registry.despawn(b);
 	{
 		const std::vector<ProtocolMessage> replies = inmatch::dispatch_session_replies(
-				inmatch::GameConfig{}, roster[1], request, 101, roster, &world);
+				inmatch::GameConfig{}, roster[1], request, 101, roster, &world, inputs);
 		std::vector<uint16_t> listed;
 		for (const ProtocolMessage &m : replies) {
 			if (m.tag != 0x5D) continue;
@@ -909,7 +913,7 @@ bool run_host_answers_the_sweep_request() {
 	{
 		std::vector<uint16_t> listed;
 		for (const ProtocolMessage &m : inmatch::dispatch_session_replies(
-					inmatch::GameConfig{}, roster[1], request, 101, roster, &world)) {
+					inmatch::GameConfig{}, roster[1], request, 101, roster, &world, inputs)) {
 			if (m.tag != 0x5D) continue;
 			DestroyEntityList decoded;
 			if (!expect(decode_destroy_entity_list(
@@ -937,10 +941,41 @@ bool run_host_answers_the_sweep_request() {
 			return false;
 	}
 
+	// The authority and an added requester (B-12): no host context, a
+	// non-authority, and a requester whose player is not yet added draw no
+	// sweep. [orig: NapiNPServerMsg_SendEmptySlots @0x51A600..0x51A607 (the
+	// authority), @0x51A61F..0x51A632 (the session player conn+0x160 and its
+	// server slot +0xC0)]
+	{
+		const auto sweeps = [&](const inmatch::ServerDispatchInputs &in) {
+			int n = 0;
+			for (const ProtocolMessage &m : inmatch::dispatch_session_replies(
+						inmatch::GameConfig{}, roster[1], request, 101, roster, &world, in))
+				if (m.tag == 0x5D) ++n;
+			return n;
+		};
+		if (!expect(sweeps(inmatch::ServerDispatchInputs{}) == 0,
+				"sweep-host: with no host context there is no sweep"))
+			return false;
+		ctx.is_authority = 0;
+		if (!expect(sweeps(inputs) == 0, "sweep-host: a non-authority sends no sweep"))
+			return false;
+		ctx.is_authority = 1;
+		roster[1].phase = inmatch::ConnectionPhase::PendingSpawn;
+		if (!expect(sweeps(inputs) == 0,
+				"sweep-host: a requester not yet added gets no sweep"))
+			return false;
+		roster[1].phase = inmatch::ConnectionPhase::PlayerAdded;
+		if (!expect(sweeps(inputs) == 1,
+				"sweep-host: an added requester's sweep is answered"))
+			return false;
+		roster[1].phase = inmatch::ConnectionPhase::InMatch;
+	}
+
 	// Round over -> the handler is skipped entirely.
 	world.process_round_end(0);
 	const std::vector<ProtocolMessage> after_round = inmatch::dispatch_session_replies(
-			inmatch::GameConfig{}, roster[1], request, 102, roster, &world);
+			inmatch::GameConfig{}, roster[1], request, 102, roster, &world, inputs);
 	for (const ProtocolMessage &m : after_round)
 		if (!expect(m.tag != 0x5D, "sweep-host: no sweep once the round has ended"))
 			return false;

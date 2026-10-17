@@ -2151,12 +2151,16 @@ bool check_sparse_empty_slot_sweep_fragments_without_loss() {
 	            "sparse-sweep fixture establishes a 1024-slot high-water mark"))
 		return false;
 
+	// The sweep answers on the authority only [orig: NapiNPServerMsg_SendEmptySlots
+	// @0x51A600..0x51A607].
+	opennova::inmatch::ServerDispatchInputs inputs;
+	inputs.server_ctx = &owner.ctx;
 	std::vector<opennova::ProtocolMessage> replies =
 			opennova::inmatch::dispatch_session_replies(
 					config, remote,
 					{opennova::make_protocol_message(
 							opennova::c2s::EMPTY_SLOT_SWEEP_REQUEST, {})},
-					100, owner.ctx.np_protocol.connection_list, &sparse_world);
+					100, owner.ctx.np_protocol.connection_list, &sparse_world, inputs);
 	if (!expect(replies.size() == 1 &&
 	                    replies.front().tag == opennova::s2c::EMPTY_SLOT_SWEEP &&
 	                    replies.front().payload.size() >
