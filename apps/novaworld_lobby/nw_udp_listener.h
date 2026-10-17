@@ -184,19 +184,15 @@ public:
 
 	// Binds the UDP socket, which the receive thread then owns until stop(),
 	// so the port start() reports is the one it serves. With a database, the
-	// receive thread then registers this lobby instance
-	// (lobbydb::register_instance) at config.lobby_endpoint, which it needs
-	// then (never derived from the port it bound), deletes the
-	// instances not seen for kInstanceStaleSeconds with their rows
-	// (reap_stale_instances), and clears its own previous run's rows and the
-	// rows no instance holds (hostdb::clear_lobby), all before it serves. An
-	// endpoint whose row another running lobby still moves (seen within
-	// kInstanceLiveSeconds, and moved while this start watches it until it is
-	// that old) is refused: two lobbies configured with one endpoint. A row
-	// that stopped moving (this lobby's previous run, or a replaced lobby's)
-	// is taken over. False when a database is set and the config names no
-	// endpoint, when the bind, the DB lease or the registration fails, or the
-	// endpoint is refused; the lobby program treats that as fatal.
+	// receive thread then registers this lobby instance, a row of its own
+	// (lobbydb::register_instance), at config.lobby_endpoint, which it needs
+	// then (never derived from the port it bound): the deployment's one lobby
+	// address, which every instance announces alike. It deletes the instances
+	// not seen for kInstanceStaleSeconds with their rows
+	// (reap_stale_instances) and clears the rows no instance holds
+	// (hostdb::clear_unheld), all before it serves. False when a database is
+	// set and the config names no endpoint, or when the bind, the DB lease or
+	// the registration fails; the lobby program treats that as fatal.
 	bool start(const ServerConfig &config);
 	// The receive thread joined, every connection dropped (their rows with
 	// them), then this instance's row deleted (and whatever still names it).
@@ -205,13 +201,15 @@ public:
 	// This lobby instance's id (lobby_instances; 0 without a database or
 	// before start()).
 	int64_t lobby_id() const { return lobby_id_.load(); }
-	// The endpoint its instance row names (the gate's udpnovaworld for the
-	// clients handed here).
+	// The endpoint its instance row names (the gate's udpnovaworld: the lobby
+	// address every instance announces).
 	const std::string &instance_endpoint() const { return instance_endpoint_; }
 	// Marks the instance draining (the lobby's own as it stops; an admin's goes
-	// through the row): no gate hands it a new client from then on, and the
-	// sessions it holds stay. On a connection of the calling thread's; false
-	// when it could not. Thread-safe.
+	// through the row): no gate counts it among the instances that take
+	// clients from then on, and the sessions it holds stay. Which lobby a
+	// client reaches is the load balancer's (a task leaves it by its
+	// deregistration, before its stop). On a connection of the calling
+	// thread's; false when it could not. Thread-safe.
 	bool drain();
 
 	// Actual port selected by start(), including an OS-assigned port when the
@@ -283,9 +281,9 @@ private:
 	// The last-heard times that moved since they were written, every kSessionSeenWriteMs, and the
 	// rows of no session this lobby holds deleted (a drop's delete that failed).
 	void write_sessions_seen(db::Database &db);
-	// start()'s instance on the receive thread's connection (register, reap, clear); false, logged,
-	// when another running lobby serves the endpoint; throws db::Error.
-	bool register_instance(db::Database &db);
+	// start()'s instance on the receive thread's connection (register, reap, clear); throws
+	// db::Error.
+	void register_instance(db::Database &db);
 	// The instance's heartbeat, every kInstanceTouchSeconds on the receive thread's connection,
 	// which reads its row's state (draining_): a row found gone (reaped while this lobby could
 	// not reach the database, its rows with it) registers the instance again

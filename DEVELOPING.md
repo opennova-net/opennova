@@ -283,7 +283,7 @@ ONNET_HEALTH_PORT=8084 ./build/apps/novaworld_worker/opennova-novaworld-worker
 
 There is no all-in-one binary: each program is its own process (`apps/novaworld_common/README.md`
 "Programs"). The lobby needs `ONNET_LOBBY_ENDPOINT` (the endpoint it announces, which the
-gate hands clients; on ECS it finds its own); the gate, the lobby and web need
+gate hands clients; in a deployment the load balancer's, shared by every lobby); the gate, the lobby and web need
 `ONNET_WEB_HOST` (the address the gate, the lobby and the pages announce for HTTP), and the
 gate `ONNET_PUBLIC_HOST`. On one machine each program but web answers `GET /livez` on its
 own `ONNET_HEALTH_PORT`. Hosted servers need machines of their own (containers, or

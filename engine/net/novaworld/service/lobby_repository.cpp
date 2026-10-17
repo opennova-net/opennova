@@ -141,20 +141,10 @@ PushResult queue_push(db::Database &db, CommandKind kind, uint32_t rid, std::opt
 const char *command_kind_name(CommandKind kind) { return kind_name_of(kind); }
 
 int64_t register_instance(db::Database &db, const std::string &endpoint, bool draining) {
-	const auto rows = db.query("INSERT INTO lobby_instances (endpoint, state) VALUES ($1, $2) "
-							   "ON CONFLICT (endpoint) DO UPDATE SET state = EXCLUDED.state, "
-							   "started_at = now(), last_seen_at = now() RETURNING id;",
-			{ str(endpoint), str(draining ? "draining" : "active") });
+	const auto rows =
+			db.query("INSERT INTO lobby_instances (endpoint, state) VALUES ($1, $2) RETURNING id;",
+					{ str(endpoint), str(draining ? "draining" : "active") });
 	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
-}
-
-std::optional<LobbyInstance> find_instance(db::Database &db, const std::string &endpoint) {
-	const auto rows = db.query(std::string("SELECT ") + kInstanceColumns +
-					" FROM lobby_instances WHERE endpoint = $1;",
-			{ str(endpoint) });
-	if (rows.empty())
-		return std::nullopt;
-	return row_to_instance(rows.front());
 }
 
 std::optional<std::string> touch_instance(db::Database &db, int64_t id) {
@@ -192,14 +182,17 @@ std::vector<LobbyInstance> list_instances(db::Database &db) {
 	return out;
 }
 
-std::vector<std::string> active_endpoints(db::Database &db) {
-	std::vector<std::string> out;
-	for (const auto &r :
-			db.query("SELECT endpoint FROM lobby_instances WHERE state = 'active' "
-					 "AND last_seen_at >= now() - make_interval(secs => $1) ORDER BY id;",
-					{ i64(kInstanceLiveSeconds) }))
-		out.push_back(r.as_text(0).value_or(""));
-	return out;
+LiveLobbies live_lobbies(db::Database &db) {
+	const auto rows = db.query(
+			"SELECT endpoint, count(*) OVER () FROM lobby_instances WHERE state = 'active' "
+			"AND last_seen_at >= now() - make_interval(secs => $1) ORDER BY id DESC LIMIT 1;",
+			{ i64(kInstanceLiveSeconds) });
+	LiveLobbies live;
+	if (!rows.empty()) {
+		live.endpoint = rows.front().as_text(0).value_or("");
+		live.instances = static_cast<std::size_t>(rows.front().as_int(1).value_or(0));
+	}
+	return live;
 }
 
 uint32_t next_rid(db::Database &db) {

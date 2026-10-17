@@ -1,76 +1,43 @@
 // opennova-novaworld-lobby: one lobby instance (program.h), as many as the
 // deployment runs. The NovaWorld UDP listener (ONNET_NW_UDP_PORT, 64206)
-// registers its instance at the endpoint it announces as it starts
-// (ONNET_LOBBY_ENDPOINT, or its ECS task's public address: ecs_metadata.h),
-// clearing its own previous run's rows and reaping the instances whose process
-// is gone; holds its sessions in memory alone, writes their rows
-// (lobby_sessions, active_hosts) and takes the commands web and the controller
-// address to them (lobby_commands). The gates hand it clients by their
-// address while it takes them. A redeploy of any other program leaves it
-// serving; its own stop drains its instance first, and while another instance
-// takes clients it serves on until every gate has read the drain.
+// registers its instance, a row of its own, at the endpoint every instance
+// announces (ONNET_LOBBY_ENDPOINT: the deployment's one lobby address, on ECS
+// the load balancer's, the gate's Elastic IP and the lobby port, which spreads
+// the clients across the lobby tasks), reaping the instances whose process is
+// gone; holds its sessions in memory alone, writes their rows (lobby_sessions,
+// active_hosts) and takes the commands web and the controller address to them
+// (lobby_commands). A redeploy of any other program leaves it serving. Its own
+// stop drains its instance and stops at once: on ECS the load balancer has
+// sent it no new client since its deregistration and ended its flows before
+// the stop's signal, and a host whose session it held reconnects to the same
+// address, which reaches a live lobby.
 
-#include "ecs_metadata.h"
 #include "loggable.h"
 #include "nw_udp_listener.h"
 #include "program.h"
 
 #include <net/novaworld/connection/manager.h>
 #include <net/novaworld/host_repository.h>
-#include <net/novaworld/lobby_repository.h>
 #include <net/novaworld/unknown_tracker.h>
 
-#include <chrono>
 #include <cstdio>
-#include <filesystem>
 #include <string>
-#include <system_error>
-#include <thread>
 
 namespace {
 
 using namespace opennova;
 using namespace opennova::novaworld_server;
 
-// How much longer than a gate's refresh (lobbydb::kGateRefreshSeconds) a
-// draining lobby serves on at its stop, while another instance takes clients:
-// every gate has read the drain by then. Service policy, well inside the
-// deployment's stop grace (the ECS task's stop timeout).
-constexpr uint64_t kDrainMarginMs = 2000;
-
-// Whether a lobby instance other than `own` takes new clients (active, seen
-// within kInstanceLiveSeconds): false with none, or when the database cannot
-// say (no gate reads it then either).
-bool other_lobby_takes_clients(db::ConnectionPool &pool, const std::string &own) {
-	try {
-		auto lease = pool.acquire();
-		for (const std::string &endpoint : lobbydb::active_endpoints(*lease))
-			if (endpoint != own)
-				return true;
-	} catch (const db::Error &e) {
-		std::fprintf(stderr, "[shutdown] WARN reading the lobby instances: %s\n", e.what());
-	}
-	return false;
-}
-
 std::string configure(ServerConfig &config) {
 	if (config.web_host.empty())
 		return "the lobby needs ONNET_WEB_HOST, the web endpoint its SessionInit names";
-	// The endpoint it announces: the configured one, or its ECS task's public
-	// address. The AWS CLI's two output files go to the system's temporary
-	// directory (the container's own); nothing secret is in them.
-	std::error_code ec;
-	const std::filesystem::path temp = std::filesystem::temp_directory_path(ec);
-	proc::ProcessCommandRunner runner(
-			proc::ProcessCommandRunner::service_environment(), ec ? "/tmp" : temp.u8string());
-	ecs::Sources sources;
-	sources.configured = config.lobby_endpoint;
-	sources.metadata_uri = ecs::metadata_uri_from_env();
-	sources.port = config.nw_udp_port;
-	sources.aws_cli = config.aws_cli;
-	std::string error;
-	config.lobby_endpoint = ecs::lobby_endpoint(sources, runner, error);
-	return error;
+	if (config.lobby_endpoint.empty())
+		return "the lobby needs ONNET_LOBBY_ENDPOINT, <host>:<port>, the lobby address the gates "
+			   "hand its clients (on ECS the load balancer's: the gate's address and the lobby "
+			   "port)";
+	if (!program::is_endpoint(config.lobby_endpoint))
+		return "ONNET_LOBBY_ENDPOINT is no <host>:<port>";
+	return {};
 }
 
 int run(const program::Boot &boot) {
@@ -111,9 +78,8 @@ int run(const program::Boot &boot) {
 		nwudp.erase_lobby_state(c.addr, drop_reason_name(r));
 	});
 
-	// Its start registers its instance and clears its previous run's rows
-	// before it serves: the UDP HELLO from any surviving retail process will
-	// fail anyway, so those rows are dead state.
+	// Its start registers its instance and reaps the instances whose process
+	// is gone, with their rows, before it serves.
 	if (!nwudp.start(config))
 		return program::fatal("NW UDP listener start failed");
 
@@ -141,23 +107,14 @@ int run(const program::Boot &boot) {
 
 	// The main loop's lease is back (what stops below leases on this thread:
 	// the NW UDP listener's stop() and the manager's shutdown clean up their
-	// lobby rows). The instance drains first, so no gate hands it a new client
-	// from its next read of the instances. While another instance takes
-	// clients, the lobby serves on for a gate's refresh and a margin, so every
-	// gate has read the drain before it stops: a client a gate hands here
-	// meanwhile still finds it. Alone, it stops at once (no gate has another
-	// lobby to hand out). Then the NW UDP receive thread (it returns its lease
-	// as it exits; the lobby's stop deletes its instance), then the
-	// connections.
+	// lobby rows). The instance drains first, so no gate counts it as taking
+	// clients from its next read of the instances; then the NW UDP receive
+	// thread (it returns its lease as it exits; the lobby's stop deletes its
+	// instance), then the connections. No wait: which lobby a client reaches
+	// is the load balancer's, which stopped sending this task new clients at
+	// its deregistration and ended its flows before the signal (ECS stops a
+	// task behind a load balancer only once its target has drained).
 	nwudp.drain();
-	if (other_lobby_takes_clients(boot.pool, nwudp.instance_endpoint())) {
-		const uint64_t grace_ms =
-				static_cast<uint64_t>(lobbydb::kGateRefreshSeconds) * 1000 + kDrainMarginMs;
-		std::printf("[shutdown] the lobby serves on %llu ms while the gates read its drain\n",
-				static_cast<unsigned long long>(grace_ms));
-		std::fflush(stdout);
-		std::this_thread::sleep_for(std::chrono::milliseconds(grace_ms));
-	}
 	std::printf("[shutdown] stopping listeners\n");
 	nwudp.stop();
 	manager.shutdown();

@@ -817,8 +817,9 @@ int test_controller_tables() {
 	return 0;
 }
 
-// The lobby instances (0009_lobby_instances.sql): one row per endpoint, a state of two, the
-// sessions, commands and listings that name an instance gone with it (a name no instance has
+// The lobby instances (0009_lobby_instances.sql, 0012_lobby_instances_share_endpoint.sql): a row
+// per lobby, two of them at one endpoint (the deployment's one lobby address), a state of two,
+// the sessions, commands and listings that name an instance gone with it (a name no instance has
 // refused), the commands' per-instance index, and the RID sequence (1..0xFFFFFF, cycling).
 int test_lobby_instances_tables() {
 	TestDatabase scratch({ /*migrate=*/true });
@@ -829,7 +830,12 @@ int test_lobby_instances_tables() {
 							   .as_int(0)
 							   .value_or(0);
 	TEST_EXPECT(id > 0);
-	TEST_EXPECT(refused(db, "INSERT INTO lobby_instances (endpoint) VALUES ('10.0.0.1:64206');"));
+	const int64_t beside = db.query("INSERT INTO lobby_instances (endpoint) "
+									"VALUES ('10.0.0.1:64206') RETURNING id;")
+								   .front()
+								   .as_int(0)
+								   .value_or(0);
+	TEST_EXPECT(beside > id);
 	TEST_EXPECT(
 			refused(db, "INSERT INTO lobby_instances (endpoint, state) VALUES ('x:1', 'gone');"));
 	TEST_EXPECT(refused(db,
@@ -854,6 +860,7 @@ int test_lobby_instances_tables() {
 	db.exec("DELETE FROM lobby_instances WHERE id = $1;", { opennova::db::BindValue(id) });
 	TEST_EXPECT(db.query("SELECT 1 FROM lobby_sessions;").empty() &&
 			db.query("SELECT 1 FROM active_hosts;").empty());
+	TEST_EXPECT(db.query("SELECT id FROM lobby_instances;").size() == 1);
 	const auto first = db.query("SELECT nextval('lobby_rid_seq');").front().as_int(0).value_or(0);
 	TEST_EXPECT(first >= 1 && first <= 0xFFFFFF);
 	db.exec("SELECT setval('lobby_rid_seq', 16777215);");

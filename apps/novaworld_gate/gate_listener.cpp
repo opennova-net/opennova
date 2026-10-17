@@ -68,10 +68,9 @@ namespace {
 // Every address it names comes from the config or the lobby instances' rows,
 // never from a port another listener bound (the lobbies and web run in other
 // processes): the POST pair is this gate (ONNET_PUBLIC_HOST and its own port),
-// udpnovaworld the lobby the client is handed (pick_lobby over the active
-// instances' endpoints; with none, the gate's fallback ONNET_LOBBY_ENDPOINT,
-// and with no fallback no reply) and the startupurl the one web endpoint
-// (ONNET_WEB_HOST, ONNET_HTTP_PORT).
+// udpnovaworld the lobby address every live instance announces (with none,
+// the gate's fallback ONNET_LOBBY_ENDPOINT, and with no fallback no reply) and
+// the startupurl the one web endpoint (ONNET_WEB_HOST, ONNET_HTTP_PORT).
 struct GateResponseFields {
 	std::string lobby_name;
 	std::string startup_query;
@@ -128,18 +127,6 @@ std::string build_gate_response(const GateResponseFields &f) {
 }
 
 } // namespace
-
-std::string pick_lobby(
-		uint32_t client_ip, const std::vector<std::string> &active, const std::string &fallback) {
-	if (active.empty())
-		return fallback;
-	uint32_t h = 2166136261u;
-	for (int shift = 24; shift >= 0; shift -= 8) {
-		h ^= (client_ip >> shift) & 0xFFu;
-		h *= 16777619u;
-	}
-	return active[h % active.size()];
-}
 
 GateListener::GateListener() = default;
 
@@ -246,7 +233,7 @@ void GateListener::stop() {
 void GateListener::heartbeat(db::Database &db, Heartbeat &beat) {
 	beat.probes_unanswered =
 			static_cast<int64_t>(probes_unanswered_.exchange(0, std::memory_order_relaxed));
-	beat.lobbies_live = static_cast<int64_t>(lobbydb::active_endpoints(db).size());
+	beat.lobbies_live = static_cast<int64_t>(lobbydb::live_lobbies(db).instances);
 }
 
 void GateListener::run_loop(opennova::net::ScopedSocket socket,
@@ -341,13 +328,12 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 		// is the configured reflect addr, not the observed source (the docker
 		// gateway behind a bridge). Empty/0 => advertise the observed source
 		// (the prod path).
-		// The lobby instances that take new clients, read again every lobby_refresh_ms_, and the
-		// one this client's address picks. A read that fails drops what the last one read, so
-		// the gate hands its fallback lobby (lobby_endpoint_; none: no reply) until a read
-		// answers: an instance read before may have drained and stopped since (a lobby's stop
-		// waits a refresh and a margin, never the retry). The next read is kLobbyRetryFactor
-		// refreshes later: a read during a database outage waits out the connect timeout on
-		// this thread, which answers every probe.
+		// The lobby address the live instances announce, read again every lobby_refresh_ms_. A
+		// read that fails drops what the last one read, so the gate hands its fallback lobby
+		// (lobby_endpoint_; none: no reply) until a read answers: the instances read before may
+		// all have stopped since. The next read is kLobbyRetryFactor refreshes later: a read
+		// during a database outage waits out the connect timeout on this thread, which answers
+		// every probe.
 		if (db_conn) {
 			const uint64_t now =
 					static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -358,7 +344,7 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 			if (lobbies_read_ms_ == 0 || now - lobbies_read_ms_ >= wait_ms) {
 				lobbies_read_ms_ = now;
 				try {
-					active_lobbies_ = lobbydb::active_endpoints(**db_conn);
+					live_lobbies_ = lobbydb::live_lobbies(**db_conn);
 					if (lobbies_read_failed_)
 						std::printf("[gate] the lobby instances read again\n");
 					lobbies_read_failed_ = false;
@@ -368,18 +354,16 @@ void GateListener::run_loop(opennova::net::ScopedSocket socket,
 								"[gate] WARN reading the lobby instances: %s; handing out the "
 								"fallback lobby, if any, until a read answers\n",
 								e.what());
-					active_lobbies_.clear();
+					live_lobbies_ = {};
 					lobbies_read_failed_ = true;
 				}
 			}
 		}
-		const uint32_t from_ip = (static_cast<uint32_t>(from.ip[0]) << 24) |
-				(static_cast<uint32_t>(from.ip[1]) << 16) |
-				(static_cast<uint32_t>(from.ip[2]) << 8) | static_cast<uint32_t>(from.ip[3]);
 		// No lobby to hand out (none takes clients, or none could be read, and no
 		// fallback): no reply, which a client meets as a lost one and asks again. A
 		// line every kNoLobbyLogMs at most, with the probes dropped since.
-		const std::string lobby_endpoint = pick_lobby(from_ip, active_lobbies_, lobby_endpoint_);
+		const std::string &lobby_endpoint =
+				live_lobbies_.endpoint.empty() ? lobby_endpoint_ : live_lobbies_.endpoint;
 		if (lobby_endpoint.empty()) {
 			++no_lobby_dropped_;
 			probes_unanswered_.fetch_add(1, std::memory_order_relaxed);

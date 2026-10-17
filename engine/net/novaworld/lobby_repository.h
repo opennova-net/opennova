@@ -11,8 +11,9 @@
 namespace opennova {
 
 // Thin SQL wrapper around the lobby's tables (backend/migrations/0006_lobby_commands.sql,
-// 0009_lobby_instances.sql): `lobby_instances`, the lobbies that run (one per lobby process,
-// each its advertised endpoint), `lobby_sessions`, the NovaWorld sessions each lobby holds, which
+// 0009_lobby_instances.sql, 0012_lobby_instances_share_endpoint.sql): `lobby_instances`, the
+// lobbies that run (one per lobby process, each its own id, all announcing the deployment's one
+// lobby address), `lobby_sessions`, the NovaWorld sessions each lobby holds, which
 // that lobby alone writes and everything else reads, and `lobby_commands`, what the HTTP routes
 // and the hosted servers' supervisor address to the lobby that holds a session, which that lobby
 // alone takes and runs. A lobby is a NovaWorld UDP listener (apps/novaworld_lobby/
@@ -31,7 +32,7 @@ namespace lobbydb {
 // A lobby that runs (lobby_instances' comment). The times are Unix epoch ms.
 struct LobbyInstance {
 	int64_t id = 0;
-	std::string endpoint; // host:port, the gate's udpnovaworld for the clients it hands here
+	std::string endpoint; // host:port, the address the gates hand clients (every instance's)
 	std::string state; // "active" or "draining"
 	int64_t started_ms = 0;
 	int64_t last_seen_ms = 0;
@@ -39,26 +40,22 @@ struct LobbyInstance {
 };
 
 // A running lobby moves its row's last_seen_at every kInstanceTouchSeconds. One seen within
-// kInstanceLiveSeconds runs: the gates hand it clients, and another lobby starting at its
-// endpoint refuses to (nw_udp_listener.h). One not seen for kInstanceStaleSeconds ran on a
-// process that is gone: a lobby's start and the hosts.prune job delete it with its rows. The
-// stale window stands well past a database failover (RDS Multi-AZ: 60 to 120 s, when no lobby
-// can move its row), the listings' own prune window (hostdb::prune_stale_hosts, 300 s); a
-// running lobby whose row was reaped all the same registers again and writes its rows anew.
-// A gate reads the instances that take clients again every kGateRefreshSeconds, so a draining
-// lobby that serves on that long (and a margin) past its drain is named by no gate's read.
+// kInstanceLiveSeconds runs: while one active instance does, the gates hand clients the lobby
+// address. One not seen for kInstanceStaleSeconds ran on a process that is gone: a lobby's start
+// and the hosts.prune job delete it with its rows. The stale window stands well past a database
+// failover (RDS Multi-AZ: 60 to 120 s, when no lobby can move its row), the listings' own prune
+// window (hostdb::prune_stale_hosts, 300 s); a running lobby whose row was reaped all the same
+// registers again and writes its rows anew. A gate reads the live instances again every
+// kGateRefreshSeconds.
 inline constexpr int64_t kInstanceTouchSeconds = 5;
 inline constexpr int64_t kInstanceLiveSeconds = 15;
 inline constexpr int64_t kInstanceStaleSeconds = 300;
 inline constexpr int64_t kGateRefreshSeconds = 5;
 
-// The lobby at `endpoint` starts: its row (the one its endpoint already has, kept with its id, or
-// a new one), active (draining when `draining`: a running lobby registering again keeps the
-// drain its row had), started and seen now. Its id. Whether another lobby still serves the
-// endpoint is the caller's to rule out first (find_instance).
+// A lobby starts, or registers again: a row of its own (a new id: instances share their
+// endpoint, the deployment's one lobby address), active (draining when `draining`: a running
+// lobby registering again keeps the drain its row had), started and seen now. Its id.
 int64_t register_instance(db::Database &db, const std::string &endpoint, bool draining = false);
-// The instance at `endpoint`, if any.
-std::optional<LobbyInstance> find_instance(db::Database &db, const std::string &endpoint);
 // Its row's last_seen_at now, and the row's state ("active" or "draining": an admin's drain
 // goes through the row); nullopt when the row is gone (reaped as stale while this lobby could
 // not reach the database, its rows with it: the lobby registers again).
@@ -72,9 +69,16 @@ void remove_instance(db::Database &db, int64_t id);
 std::size_t reap_stale_instances(db::Database &db, int64_t max_age_seconds, int64_t keep = 0);
 // Every instance, by id.
 std::vector<LobbyInstance> list_instances(db::Database &db);
-// The endpoints of the active instances seen within kInstanceLiveSeconds, by id: what a gate
-// hands clients (gate_listener.h).
-std::vector<std::string> active_endpoints(db::Database &db);
+
+// What a gate hands clients (gate_listener.h): the instances that take clients (active, seen
+// within kInstanceLiveSeconds) all announce the deployment's one lobby address, the load
+// balancer's that spreads clients across them, so the newest one's endpoint is that address;
+// and how many there are. endpoint "" and instances 0 with none.
+struct LiveLobbies {
+	std::string endpoint;
+	std::size_t instances = 0;
+};
+LiveLobbies live_lobbies(db::Database &db);
 
 // The next host RID (lobby_rid_seq): 0x0A000000 and a suffix of 1..0xFFFFFF, the same sequence
 // for every instance, so no two mint one RID. The sequence cycles: a suffix a listing

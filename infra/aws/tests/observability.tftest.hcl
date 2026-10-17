@@ -407,12 +407,12 @@ run "observability" {
   }
   assert {
     condition = (
-      toset(keys(aws_cloudwatch_metric_alarm.lb_unhealthy)) == toset(["gate", "http"]) &&
+      toset(keys(aws_cloudwatch_metric_alarm.lb_unhealthy)) == toset(["gate", "lobby", "http"]) &&
       aws_cloudwatch_metric_alarm.lb_unhealthy["gate"].namespace == "AWS/NetworkELB" &&
       aws_cloudwatch_metric_alarm.lb_unhealthy["gate"].metric_name == "UnHealthyHostCount" &&
       aws_cloudwatch_metric_alarm.lb_unhealthy["gate"].dimensions == tomap({ LoadBalancer = "net/opennova-prod/0123456789abcdef", TargetGroup = "targetgroup/opennova-prod-gate/0123456789abcdef" })
     )
-    error_message = "a gate or web task out of the load balancer for 10 minutes alarms, per target group"
+    error_message = "a gate, lobby or web task out of the load balancer for 10 minutes alarms, per target group"
   }
   assert {
     condition = (

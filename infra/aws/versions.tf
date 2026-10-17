@@ -13,7 +13,7 @@
 #   programs.tf    the five programs: gate, lobby, web, controller, worker (an
 #                  ECS service on Fargate each), their security groups, task
 #                  roles, task definitions and task counts
-#   load_balancer.tf  the public network load balancer: the gate and web
+#   load_balancer.tf  the public network load balancer: the gate, the lobby and web
 #   backup.tf      the nightly pg_dump, a scheduled ECS task
 #   service_ssm.tf what the deploy toolbox reads (infra.env) and the release
 #   database.tf    PostgreSQL 17 on RDS

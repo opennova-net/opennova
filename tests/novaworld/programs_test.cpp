@@ -10,21 +10,21 @@
 //     the gate alone (no NW UDP, no HTTP, no job pool, no election), GET /livez
 //     on its health port; with no lobby instance it hands out its fallback
 //     lobby, and with no fallback either it answers no probe (and says so);
-//   - lobby: one missing ONNET_WEB_HOST, or ONNET_LOBBY_ENDPOINT with no ECS
-//     task metadata to find its own, does not boot. Booted: the NW UDP listener
-//     alone, its instance registered at the configured endpoint, GET /livez;
-//     a gate started beside it hands that endpoint and the web endpoint its
-//     config names (ONNET_WEB_HOST and ONNET_HTTP_PORT), never a port bound
-//     beside it, and so does the lobby's 0x82 SessionInit (its web domain);
-//   - a lobby on ECS (no ONNET_LOBBY_ENDPOINT; ECS_CONTAINER_METADATA_URI_V4
-//     naming a fake task metadata endpoint, ONNET_HOSTED_AWS_CLI a stub `aws`
-//     script answering describe-network-interfaces as EC2 does): its instance
-//     registered at its task's public IPv4 and its port, the CLI asked in the
-//     task's region by its private address and MAC;
-//   - two lobbies, each its own instance: the first one's SIGTERM drains its
-//     instance, and it serves on past a gate's refresh (5 s) before its row
-//     goes, while the second takes clients; the second, then alone, stops at
-//     once;
+//   - lobby: one missing ONNET_WEB_HOST or ONNET_LOBBY_ENDPOINT, or with an
+//     ONNET_LOBBY_ENDPOINT that is no <host>:<port>, does not boot. Booted: the
+//     NW UDP listener alone, its instance registered at the configured
+//     endpoint, GET /livez; a gate started beside it hands that endpoint and
+//     the web endpoint its config names (ONNET_WEB_HOST and ONNET_HTTP_PORT),
+//     never a port bound beside it, and so does the lobby's 0x82 SessionInit
+//     (its web domain);
+//   - two lobbies sharing one lobby address (a deployment's load balancer's),
+//     each its own instance: both register under ids of their own, the
+//     second's start reaps an instance unseen past the stale window with its
+//     listing, and a gate beside them hands out the shared address; the
+//     first one's SIGTERM drains its instance and stops at once (its row
+//     goes), while the second serves on and the gate still hands out the
+//     address; with the second stopped too and no fallback, the gate answers
+//     no probe;
 //   - web: one with no ONNET_WEB_HOST does not boot; booted, the HTTP listener
 //     alone (and no health listener of its own: GET /livez and /healthz answer
 //     on its HTTP port), its menus' HOST_URL naming the web endpoint;
@@ -35,7 +35,6 @@
 // Every program then stops on SIGTERM with exit 0 and every database
 // connection closed. POSIX only.
 
-#include "fake_ecs_metadata.h"
 #include "program_process.h"
 
 #include <net/title/title_identity.h>
@@ -44,13 +43,13 @@
 #include <net/novaworld/client_session.h>
 #include <net/novaworld/gate_probe.h>
 #include <net/novaworld/gate_response.h>
+#include <net/novaworld/host_repository.h>
+#include <net/novaworld/lobby_repository.h>
 
 #include "common/test_expect.h"
 #include "common/test_redis.h"
 
 #include <cstdio>
-#include <filesystem>
-#include <fstream>
 #include <string>
 #include <vector>
 
@@ -280,6 +279,15 @@ int exercise_lobby(const Binaries &bin, const test_temp::TempDir &temp,
 					log_path, "[boot] FATAL: the lobby needs ONNET_LOBBY_ENDPOINT") != 0)
 			return 1;
 	}
+	{
+		ProgramProcess process;
+		std::vector<std::string> env = ports;
+		env.push_back(web);
+		env.push_back("ONNET_LOBBY_ENDPOINT=nowhere");
+		if (refused(process, "lobby", bin.lobby, env_of(temp, database.conninfo(), env), temp,
+					log_path, "[boot] FATAL: ONNET_LOBBY_ENDPOINT is no <host>:<port>") != 0)
+			return 1;
+	}
 	ProgramProcess process;
 	std::vector<std::string> env = ports;
 	env.push_back("ONNET_LOBBY_ENDPOINT=" + lobby);
@@ -292,7 +300,7 @@ int exercise_lobby(const Binaries &bin, const test_temp::TempDir &temp,
 	// Its parts alone.
 	TEST_EXPECT(!has(log, kGateLine) && !has(log, kHttpLine) && !has(log, "[jobs]") &&
 			!has(log, "[controller]"));
-	TEST_EXPECT(has(log, "previous-run cleanup"));
+	TEST_EXPECT(has(log, "[lobby] instance ") && has(log, " at " + lobby + " registered;"));
 	if (livez_ok(process, log_path) != 0)
 		return 1;
 	std::string web_domain;
@@ -329,127 +337,111 @@ int exercise_lobby(const Binaries &bin, const test_temp::TempDir &temp,
 	return 0;
 }
 
-// A lobby on ECS finds its own endpoint: ECS_CONTAINER_METADATA_URI_V4 names
-// the task metadata endpoint (a fake one here, fake_ecs_metadata.h), and
-// ONNET_HOSTED_AWS_CLI the AWS CLI it asks EC2 for its interface's public
-// address through (a stub script here, keeping its argv and answering as EC2
-// does). Its instance registers at that address and its own port.
-int exercise_lobby_on_ecs(const Binaries &bin, const test_temp::TempDir &temp,
-		const test_db::TestDatabase &database, const std::string &log_path) {
-	fake_ecs::FakeMetadata metadata(200, fake_ecs::kTask);
-	const std::string aws = temp.file("aws");
-	const std::string argv_path = temp.file("aws.argv");
-	{
-		std::ofstream script(aws, std::ios::binary);
-		// Shell builtins alone: the CLI runs with the service's environment
-		// (command_runner.h), no PATH of the test's.
-		script << "#!/bin/sh\n"
-			   << "for arg in \"$@\"; do printf '%s\\n' \"$arg\"; done > '" << argv_path << "'\n"
-			   << "printf '%s\\n' '" << fake_ecs::kInterfaces << "'\n";
-	}
-	std::filesystem::permissions(aws, std::filesystem::perms::owner_all);
-	const uint16_t nw_port = free_udp_port();
-	ProgramProcess process;
-	if (!boot(process, bin.lobby,
-				env_of(temp, database.conninfo(),
-						{ "ONNET_NW_UDP_PORT=" + std::to_string(nw_port),
-								std::string("ONNET_WEB_HOST=") + kWebHost,
-								"ECS_CONTAINER_METADATA_URI_V4=" + metadata.uri(),
-								"ONNET_HOSTED_AWS_CLI=" + aws }),
-				temp.root(), log_path))
-		return 1;
-	const std::string endpoint = "3.91.20.7:" + std::to_string(nw_port);
-	TEST_EXPECT(has(read_text(log_path),
-			"[boot] lobby: its ECS task's interface 10.44.1.37 (us-east-1) is public at "
-			"3.91.20.7"));
-	TEST_EXPECT(
-			metadata.requests() == 1 && metadata.last_line() == "GET /v4/abc-123/task HTTP/1.0");
-	{
-		opennova::db::Database db = database.open();
-		const auto rows = db.query("SELECT endpoint, state FROM lobby_instances;");
-		TEST_EXPECT(rows.size() == 1);
-		TEST_EXPECT(rows.front().as_text(0).value_or("") == endpoint);
-		TEST_EXPECT(rows.front().as_text(1).value_or("") == "active");
-	}
-	const std::string argv = read_text(argv_path);
-	for (const char *arg : { "ec2\n", "describe-network-interfaces\n", "--region\nus-east-1\n",
-				 "Name=addresses.private-ip-address,Values=10.44.1.37\n",
-				 "Name=mac-address,Values=0e:9e:32:c7:48:85\n" }) {
-		if (!has(argv, arg))
-			std::fprintf(stderr, "  no '%s' in the CLI's argv:\n%s\n", arg, argv.c_str());
-		TEST_EXPECT(has(argv, arg));
-	}
-	if (stop_cleanly(process, "lobby", database, log_path) != 0)
-		return 1;
-	std::printf("  lobby on ECS: announced at %s, its task's public address\n", endpoint.c_str());
-	return 0;
-}
-
-// Two lobbies on one database, each its own instance. The first one's SIGTERM
-// drains its instance, and while the second takes clients it serves on past a
-// gate's refresh (lobbydb::kGateRefreshSeconds, 5 s) before it stops: its row
-// goes no sooner than that after it went draining, so no gate's read still
-// names it by then. The second, alone after that, stops at once.
+// Two lobbies on one database, each its own instance at the one lobby address
+// both announce (a deployment's load balancer's; here an address no one serves,
+// since what the gate hands out is the rows' endpoint): both register under ids
+// of their own, the second's start reaps an instance unseen past the stale
+// window with its listing, and a gate beside them hands out that address. The
+// first one's SIGTERM drains its instance and stops at once: which task a
+// client reaches is the load balancer's, which a task leaves by its
+// deregistration before the signal, so nothing waits on the gates. Its row
+// goes, the second's stays active, the second still answers a session, and the
+// gate still hands out the address. With the second stopped too and no
+// fallback, the gate answers no probe once it reads the instances again.
 int exercise_two_lobbies(const Binaries &bin, const test_temp::TempDir &temp,
 		const test_db::TestDatabase &database, const std::string &log_path) {
+	const std::string shared = "198.51.100.20:64206";
 	const uint16_t port_a = free_udp_port();
 	uint16_t port_b = free_udp_port();
 	while (port_b == port_a)
 		port_b = free_udp_port();
+	const std::string web = std::string("ONNET_WEB_HOST=") + kWebHost;
 	const auto lobby_env = [&](uint16_t nw_port) {
 		return env_of(temp, database.conninfo(),
-				{ "ONNET_NW_UDP_PORT=" + std::to_string(nw_port),
-						"ONNET_LOBBY_ENDPOINT=127.0.0.1:" + std::to_string(nw_port),
-						std::string("ONNET_WEB_HOST=") + kWebHost });
+				{ "ONNET_NW_UDP_PORT=" + std::to_string(nw_port), "ONNET_LOBBY_ENDPOINT=" + shared,
+						"ONNET_HTTP_PORT=8123", web });
 	};
-	const std::string endpoint_a = "127.0.0.1:" + std::to_string(port_a);
 	const std::string log_b = temp.file("lobby_b.log");
 	ProgramProcess a;
-	ProgramProcess b;
-	if (!boot(a, bin.lobby, lobby_env(port_a), temp.root(), log_path) ||
-			!boot(b, bin.lobby, lobby_env(port_b), temp.root(), log_b))
+	if (!boot(a, bin.lobby, lobby_env(port_a), temp.root(), log_path))
 		return 1;
-	using Ms = std::chrono::milliseconds;
-	Clock::time_point drained{};
-	Clock::time_point gone{};
+	// Each read on a connection of its own, closed before the run's end counts them.
+	const auto instances_now = [&database] {
+		opennova::db::Database db = database.open();
+		return opennova::lobbydb::list_instances(db);
+	};
+	// An instance whose process went ten minutes ago (its row unseen since), with a listing.
+	int64_t stale = 0;
+	opennova::hostdb::HostRow stale_listing;
 	{
 		opennova::db::Database db = database.open();
-		const auto state_of_a = [&db, &endpoint_a]() -> std::string {
-			const auto rows = db.query("SELECT state FROM lobby_instances WHERE endpoint = $1;",
-					{ opennova::db::BindValue(endpoint_a) });
-			return rows.empty() ? "" : rows.front().as_text(0).value_or("");
-		};
-		TEST_EXPECT(state_of_a() == "active");
-		TEST_EXPECT(::kill(a.pid, SIGTERM) == 0);
-		const auto deadline = Clock::now() + std::chrono::seconds(20);
-		while (Clock::now() < deadline) {
-			const std::string state = state_of_a();
-			if (state == "draining" && drained == Clock::time_point{})
-				drained = Clock::now();
-			if (state.empty()) {
-				gone = Clock::now();
-				break;
-			}
-			std::this_thread::sleep_for(Ms(20));
-		}
+		stale = opennova::lobbydb::register_instance(db, "198.51.100.30:64206");
+		stale_listing.rid = opennova::lobbydb::next_rid(db);
+		stale_listing.game = "jop_2_consumer";
+		stale_listing.server_name = "Stale Host";
+		stale_listing.lobby_id = stale;
+		opennova::hostdb::upsert_host(db, stale_listing);
+		db.exec("UPDATE lobby_instances SET last_seen_at = now() - interval '10 minutes' "
+				"WHERE id = $1;",
+				{ opennova::db::BindValue(stale) });
 	}
-	TEST_EXPECT(drained != Clock::time_point{} && gone != Clock::time_point{});
-	const auto served_ms = std::chrono::duration_cast<Ms>(gone - drained).count();
-	if (served_ms < 5000)
-		std::fprintf(stderr, "  the first lobby went %lld ms after its drain\n",
-				static_cast<long long>(served_ms));
-	TEST_EXPECT(served_ms >= 5000);
-	TEST_EXPECT(a.wait_exit(std::chrono::seconds(20)) && a.exit_code() == 0);
-	TEST_EXPECT(has(read_text(log_path), "[shutdown] the lobby serves on"));
-	// The second, alone now: no wait (its log says so; no wall-clock bound,
-	// which a loaded runner could break).
+	ProgramProcess b;
+	if (!boot(b, bin.lobby, lobby_env(port_b), temp.root(), log_b))
+		return 1;
+	auto instances = instances_now();
+	TEST_EXPECT(instances.size() == 2);
+	TEST_EXPECT(instances[0].id != instances[1].id);
+	for (const auto &i : instances)
+		TEST_EXPECT(i.endpoint == shared && i.state == "active" && i.id != stale);
+	{
+		opennova::db::Database db = database.open();
+		TEST_EXPECT(!opennova::hostdb::find_host_by_rid(db, stale_listing.rid));
+	}
+	TEST_EXPECT(has(read_text(log_b), "1 stale instance(s) reaped with their rows"));
+	const int64_t id_b = instances[1].id; // A registered first
+
+	const std::string gate_log = temp.file("gate.log");
+	ProgramProcess gate;
+	if (!boot(gate, bin.gate,
+				env_of(temp, database.conninfo(),
+						{ web, "ONNET_GATE_UDP_PORT=0", "ONNET_HTTP_PORT=8123" }),
+				temp.root(), gate_log))
+		return 1;
+	const uint16_t gate_port = logged_port(read_text(gate_log), kGateLine);
+	opennova::GateResponse reply;
+	TEST_EXPECT(probe_gate(gate_port, reply));
+	TEST_EXPECT(reply.udp_novaworld == std::vector<std::string>{ shared });
+
+	// A stops: drained, then gone at once; B serves on.
+	TEST_EXPECT(::kill(a.pid, SIGTERM) == 0);
+	TEST_EXPECT(a.wait_exit(kExitDeadline) && a.exit_code() == 0);
+	TEST_EXPECT(logged_in_order(read_text(log_path),
+			{ " draining: no gate counts it as taking clients", "[shutdown] stopping listeners" }));
+	instances = instances_now();
+	TEST_EXPECT(instances.size() == 1 && instances[0].id == id_b && instances[0].state == "active");
+	std::string web_domain;
+	if (session_web_domain(port_b, web_domain) != 0)
+		return 1;
+	TEST_EXPECT(web_domain == std::string(kWebHost) + ":8123");
+	TEST_EXPECT(probe_gate(gate_port, reply));
+	TEST_EXPECT(reply.udp_novaworld == std::vector<std::string>{ shared });
+
+	// B stops too: no instance left, no fallback, and the gate answers nothing from its next
+	// read of the instances on.
 	TEST_EXPECT(::kill(b.pid, SIGTERM) == 0);
 	TEST_EXPECT(b.wait_exit(kExitDeadline) && b.exit_code() == 0);
-	TEST_EXPECT(!has(read_text(log_b), "[shutdown] the lobby serves on"));
+	TEST_EXPECT(instances_now().empty());
+	const auto deadline = Clock::now() + std::chrono::seconds(20);
+	bool silent = false;
+	while (!silent && Clock::now() < deadline)
+		silent = !probe_gate(gate_port, reply, 500);
+	TEST_EXPECT(silent);
+	TEST_EXPECT(::kill(gate.pid, SIGTERM) == 0 && gate.wait_exit(kExitDeadline) &&
+			gate.exit_code() == 0);
 	TEST_EXPECT(connections_left(database) == 0);
-	std::printf("  two lobbies: the first served %lld ms past its drain; the second, alone, "
-				"stopped at once\n",
-			static_cast<long long>(served_ms));
+	std::printf("  two lobbies at %s: both registered, the first stopped at once while the "
+				"second served on; none left, the gate answered no one\n",
+			shared.c_str());
 	return 0;
 }
 
@@ -562,8 +554,6 @@ int main(int argc, char **argv) {
 	int rc = run_case(bin, exercise_gate, "gate");
 	if (rc == 0)
 		rc = run_case(bin, exercise_lobby, "lobby");
-	if (rc == 0)
-		rc = run_case(bin, exercise_lobby_on_ecs, "lobby_on_ecs");
 	if (rc == 0)
 		rc = run_case(bin, exercise_two_lobbies, "two_lobbies");
 	if (rc == 0)

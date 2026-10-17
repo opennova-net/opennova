@@ -39,8 +39,8 @@ heartbeat, its stall watchdog, its health listener, the shutdown signal).
 
 | Program | Its parts | Scales by |
 | --- | --- | --- |
-| gate (`apps/novaworld_gate`) | the gate listener: each client's lobby, picked from the lobby instances that take clients, and the hosts' status blobs ("Lobbies: one per title" below) | more gate tasks behind the gate's one address (stateless but for its cached read of the instances) |
-| lobby (`apps/novaworld_lobby`) | one lobby instance: the NW UDP listener, its `ConnectionManager` tick, its lobby command drain, its session rows; its instance's registration at the endpoint it announces and its previous run's cleanup ("Lobby instances" below) | more lobbies, each its own instance and its own public address |
+| gate (`apps/novaworld_gate`) | the gate listener: each client's lobby, the one address every lobby instance announces while one takes clients, and the hosts' status blobs ("Lobbies: one per title" below) | more gate tasks behind the gate's one address (stateless but for its cached read of the instances) |
+| lobby (`apps/novaworld_lobby`) | one lobby instance: the NW UDP listener, its `ConnectionManager` tick, its lobby command drain, its session rows; its instance's registration, a row of its own, at the one lobby address ("Lobby instances" below) | more lobbies behind the one lobby address, each its own instance |
 | web (`apps/novaworld_web`) | the HTTP listener (the retail `NW*.dll` and `.gsb` routes, the website's API, `GET /livez` and `GET /healthz`), billing's routes and webhook, the Redis pool (a `PING` at boot), the mail it queues; the first site admin (`ONNET_BOOTSTRAP_ADMIN`) | replicas behind one load balancer |
 | controller (`apps/novaworld_controller`) | the election ("The controller" below); while it leads the internal listener (bound only then), the hosted servers' supervisor with its admin links, the console drain and the periodic jobs' scheduler | one leader (a standby waits) |
 | worker (`apps/novaworld_worker`) | the job pool and its handlers ("Background jobs" below): the prunes, the account jobs, the mail it sends, the billing sync, the fleet's machine driver | more workers, more threads each |
@@ -59,7 +59,8 @@ its executable; what more than one program uses lives here.
   mail are, the periodic jobs.
 - **Every address a program announces comes from the config**, never from a port another
   bound: the gate's `POSTIPADDRESS` is `ONNET_PUBLIC_HOST` (where status blobs land), its
-  `udpnovaworld` the endpoint a lobby instance announced (its row), and its `startupurl`,
+  `udpnovaworld` the one lobby address every lobby instance announces (its row), and its
+  `startupurl`,
   the lobby's SessionInit web domain and the menus' `HOST_URL` and `GSB_SERVER` all name
   the one web endpoint, `ONNET_WEB_HOST` with `ONNET_HTTP_PORT`, so all three agree. The
   hosted servers' master address and gate port are `ONNET_PUBLIC_HOST` and
@@ -67,14 +68,9 @@ its executable; what more than one program uses lives here.
   the gate's public address); the machines reach the controller at `ONNET_INTERNAL_URL`, a
   name that follows it.
 - **What an ECS task finds from itself** (`ecs_metadata.*`), where no setting can name
-  it before the task runs: the lobby, with `ONNET_LOBBY_ENDPOINT` unset, announces its
-  task's public IPv4 with its `ONNET_NW_UDP_PORT` (the task's private IPv4 from the task
-  metadata endpoint, `ECS_CONTAINER_METADATA_URI_V4`, then that interface's public
-  address from `aws ec2 describe-network-interfaces` in the task's region, filtered by
-  the address and the interface's MAC, with the task role's credentials, through the
-  `CommandRunner`); neither, and it does not boot. The controller, with
-  `ONNET_INTERNAL_HTTP_BIND` unset and the metadata there, binds its task's private IPv4
-  at 8070.
+  it before the task runs: the controller, with `ONNET_INTERNAL_HTTP_BIND` unset and the
+  task metadata endpoint there (`ECS_CONTAINER_METADATA_URI_V4`), binds its task's
+  private IPv4 at 8070.
 - **Each process logs `{"boot":{"program":"<program>"}}` once as it starts** (stdout, its
   first line, so a crash loop on a missing setting counts too: the log pipeline counts
   boots per program), keeps printing the `[boot] migrations:` line, logs its own
@@ -85,10 +81,11 @@ its executable; what more than one program uses lives here.
   retail login's `active_user_sessions` rows are never wiped at boot (their 2 h idle prune
   and their account's next login end them); a restarted controller resumes from rows (its
   reconciliation), a restarted worker's leases run out and its jobs run again. A lobby's
-  restart drops its own sessions and listings alone, and its stop drains it first.
+  restart drops its own sessions and listings alone, and its hosts list again at the one
+  lobby address ("Lobby instances" below).
 - **Deployment**: one ECS Fargate service per program (`infra/aws/programs.tf`), the
-  gate (UDP 7597) and web (TCP 443 through the portal's nginx in web's task, TCP 8080)
-  behind one network load balancer, each lobby on a public address of its own, the
+  gate (UDP 7597), the lobby (UDP 64206) and web (TCP 443 through the portal's nginx in
+  web's task, TCP 8080) behind one network load balancer at the gate's address, the
   controller registered in Cloud Map; DEPLOY.md. The local stack (`deploy/compose/`,
   `scripts/dev_stack.sh`; DEVELOPING.md) runs the five, each its own container, plus
   PostgreSQL, Valkey, the portal in web's network as in web's task, and with a data set
@@ -99,7 +96,7 @@ its executable; what more than one program uses lives here.
 | --- | --- | --- |
 | `ONNET_WEB_HOST` | none | The one load-balanced web endpoint (a name or an address) the gate's `startupurl`, the lobby's SessionInit web domain and the menus' `HOST_URL` / `GSB_SERVER` name, with `ONNET_HTTP_PORT`. Required by the gate, the lobby and web. |
 | `ONNET_PUBLIC_HOST` | `127.0.0.1` | The gate's public address: its `POSTIPADDRESS` (where the hosts' status blobs land), the hosted servers' master address, the switcher's (web's `GET /api/server-info`). The gate requires it set in its environment (an explicit `127.0.0.1` too): a gate left on the default would announce loopback to every client. |
-| `ONNET_LOBBY_ENDPOINT` | none | The lobby: the endpoint it announces, `<host>:<port>` (its instance row, the gates' `udpnovaworld`); unset on ECS, where it finds its task's public address, and required elsewhere. The gate: optional, the lobby it hands out while no instance takes clients; with none either, a probe goes unanswered (the client asks again) and the gate logs it, once every 10 s at most. |
+| `ONNET_LOBBY_ENDPOINT` | none | The lobby: the one lobby address every lobby announces, `<host>:<port>` (its instance row, the gates' `udpnovaworld`; on ECS the load balancer's, the gate's address and 64206); required. The gate: optional, the lobby it hands out while no instance takes clients; with none either, a probe goes unanswered (the client asks again) and the gate logs it, once every 10 s at most. |
 | `ONNET_INTERNAL_URL` | none | The controller's internal listener as the machines' agents reach it, `http://<host>:<port>` (`controller.<deployment>.opennova.internal:8070`, the deployment's Cloud Map name, in a deployment; the controller's compose name in the local stack). Required with hosting on. |
 | `ONNET_HEALTH_PORT` | 8081 | The TCP port `GET /livez` answers on in the gate, the lobby, the controller and the worker (web's is its HTTP port); 0 lets the OS pick (the tests). |
 
@@ -138,7 +135,7 @@ its executable; what more than one program uses lives here.
   (`unique_violation()`, `lock_timeout()`, `connection_lost()`) and its text
   names the failing statement, never a bound value, so it goes to the server
   log alone: a reply to a database failure carries only its error code
-  (`db_error`). A write that spans statements (`clear_lobby`, `replace_roster`,
+  (`db_error`). A write that spans statements (`clear_unheld`, `replace_roster`,
   `apply_status_blob`, the lobby's host row with its roster, a registration's
   checks and insert) is one `db::Transaction`, which takes the narrow locks its
   invariant needs ("Database" below), and a read that spans them (`/api/hosts`
@@ -182,9 +179,9 @@ its executable; what more than one program uses lives here.
   also with port 0 (the OS's pick). The HTTP listener's `start()` returns once Crow
   serves (Crow's first tick tells it, with the port Crow bound). A bind that fails
   stops the boot.
-- **A gate hands out only a lobby that serves**: a lobby registers its instance (and
-  so becomes one a gate reads) only once its socket is bound, and its stop drains the
-  instance first ("Lobby instances" below). What each listener advertises is the
+- **A gate hands out the lobby address only while a lobby serves**: a lobby registers
+  its instance (and so counts for the gates) only once its socket is bound, and its stop
+  drains the instance first ("Lobby instances" below). What each listener advertises is the
   config's ("Programs" above), never a port another bound; the HTTP menus' `HOST_URL` /
   `GSB_SERVER` name `ONNET_WEB_HOST` and the port Crow serves (`ONNET_HTTP_PORT`; a
   test's port 0, the OS's pick).
@@ -475,62 +472,75 @@ A **backstop sweep** runs as the periodic `hosts.prune` job (every
 `ClientHostUpdate` heartbeat) is older than `host_stale_window_ms` (default 5 min).
 This only catches rows the normal teardown somehow missed; `host_players` rows
 cascade. The same job reaps the lobby instances whose process is gone ("Lobby
-instances" below), with their rows. A lobby's start clears its own previous run's
-listings, sessions and commands (previous-run cleanup, `hostdb::clear_lobby`, scoped to
-its instance) and the rows no instance holds; another instance's stay, and no other
-program's boot touches them.
+instances" below), with their rows. A lobby's start clears the rows no instance holds
+(`hostdb::clear_unheld`: the dev inject's listing); every instance's stay (each start
+registers an instance of its own: a previous run's rows went at its clean stop, or go
+with its stale row), and no other program's boot touches them.
 
 **Lobby instances** (`backend/migrations/0009_lobby_instances.sql`,
-`lobbydb::register_instance` and its neighbours; service policy). Each lobby process is
-one instance, named by the endpoint it announces (`ONNET_LOBBY_ENDPOINT`, or on ECS its
-task's public address), and as many lobbies run as the deployment wants:
+`0012_lobby_instances_share_endpoint.sql`, `lobbydb::register_instance` and its neighbours;
+service policy). Each lobby process is one instance, a row of its own, and as many lobbies
+run as the deployment wants, all behind one lobby address (`ONNET_LOBBY_ENDPOINT`), which
+every lobby announces alike: on ECS the network load balancer's, the gate's Elastic IP and
+UDP 64206, which spreads the clients across the lobby tasks by flow (a client's address and
+port) and keeps each flow on one task.
 
+- **Why one address**: a stock host's NovaWorld session reconnects only to the lobby
+  address the gate gave it at its first connect (it never asks the gate again) and drops a
+  silent lobby only after 240 s [orig: CNapiNPConnection_PumpEnumeratorAndSend @0x6290C0,
+  the target walk @0x629183..0x6291B4; CNapiNPConnection_PumpStateMachine @0x6292e0, case 5
+  @0x6295a2..0x62961c]. With one address, a host whose lobby went away times out,
+  reconnects to that address, lands on a live lobby, re-verifies with CurrentlyHosting=1
+  and is listed again, about 271 s at most after its listing went (240 s of silence, the
+  1 s first delay, a 10 s probe window, a 20 s join); retail self-hosts recover the same
+  way. The new lobby holds no session for the host's datagrams before that and drops
+  them unanswered, so the host's own timeout is what moves it.
 - **Its row** (`lobby_instances`: id, endpoint, `active` or `draining`, `started_at`,
-  `last_seen_at`). The NW UDP listener's start registers it under the row its endpoint
-  already has (a restart at the same endpoint keeps its id), deletes every instance not seen
-  for 5 min with its rows (`reap_stale_instances`, `kInstanceStaleSeconds`: well past a
-  database failover, 60 to 120 s, when no lobby can move its row), and clears its own
-  previous run, all before it serves. An endpoint whose row another running lobby still
-  moves (seen within 15 s, and moved while the start watches it) is refused, a FATAL
-  boot (two lobbies named alike); one that stopped moving (the lobby's previous run, or a
-  replaced lobby's at the same address) is taken over. Its receive thread moves
-  `last_seen_at` every 5 s; a row found gone all the same (reaped while the lobby could
-  not reach the database for longer than that) is registered again under a new id,
-  draining still when it was (its own stop's drain, or an admin's, which each move of
-  `last_seen_at` reads back), and the lobby writes its session rows and listings anew
-  from its memory and serves on (a command the reap took is lost, as any command may
-  be); a clean stop drains it, then
-  deletes it, and its rows with it. Every row the lobby writes names its instance
-  (`lobby_id`): its session rows, its listings (`active_hosts.lobby_id`), and the
-  commands addressed to them.
-- **The gate hands each client one lobby**: of the instances active and seen within
-  15 s (read every 5 s, `lobbydb::kGateRefreshSeconds`, on the gate's own connection;
-  after a read that failed, its fallback lobby serves every client, or none is answered,
-  since an instance it read before may have drained and
-  stopped since, and the next read comes six refreshes later, so a database outage does
-  not hold the gate's thread for a connect timeout at every refresh), the one a stable
-  hash of the client's
-  IPv4 address picks (`pick_lobby`, FNV-1a over its four bytes, over the instances by
-  id), so a client's retries land on the same lobby; with none, its fallback
-  `ONNET_LOBBY_ENDPOINT`, and with no fallback no reply at all (the client asks again; the
-  gate logs it every 10 s at most). The reply is the gate's one send, to the probe's
-  source at once: it sends no datagram of its own, so behind a UDP load balancer every
-  datagram it sends rides the probe's flow back. Only
-  `udpnovaworld` varies by client: `POSTIPADDRESS` stays this gate (the hosts' status
-  blobs land there, `apply_status_blob` finds the listing by its key whichever lobby
-  holds it) and the web fields stay `ONNET_WEB_HOST`.
+  `last_seen_at`). The NW UDP listener's start registers a new row, deletes every instance
+  not seen for 5 min with its rows (`reap_stale_instances`, `kInstanceStaleSeconds`: well
+  past a database failover, 60 to 120 s, when no lobby can move its row), and clears the
+  rows no instance holds, all before it serves. Its receive thread moves `last_seen_at`
+  every 5 s; a row found gone all the same (reaped while the lobby could not reach the
+  database for longer than that) is registered again under a new id, draining still when
+  it was (its own stop's drain, or an admin's, which each move of `last_seen_at` reads
+  back), and the lobby writes its session rows and listings anew from its memory and
+  serves on (a command the reap took is lost, as any command may be); a clean stop
+  drains it, then deletes it, and its rows with it. Every row the lobby writes names its
+  instance (`lobby_id`): its session rows, its listings (`active_hosts.lobby_id`), and
+  the commands addressed to them.
+- **The gate hands every client the one lobby address** while at least one instance takes
+  clients (active and seen within 15 s; read every 5 s, `lobbydb::kGateRefreshSeconds`,
+  on the gate's own connection: `lobbydb::live_lobbies`, the newest live instance's
+  endpoint, which every instance shares, and their count). After a read that failed its
+  fallback lobby serves every client, or none is answered, since the instances it read
+  before may all have stopped since, and the next read comes six refreshes later, so a
+  database outage does not hold the gate's thread for a connect timeout at every
+  refresh. With none live, its fallback `ONNET_LOBBY_ENDPOINT`, and with no fallback no
+  reply at all (the client asks again; the gate logs it every 10 s at most). The reply is
+  the gate's one send, to the probe's source at once: it sends no datagram of its own,
+  so behind a UDP load balancer every datagram it sends rides the probe's flow back.
+  `POSTIPADDRESS` stays this gate (the hosts' status blobs land there,
+  `apply_status_blob` finds the listing by its key whichever lobby holds it) and the web
+  fields stay `ONNET_WEB_HOST`.
+- **The lobby behind the balancer**: its target group (UDP 64206, IP targets, client
+  addresses and ports preserved, so a lobby lists a host at its own address and port)
+  checks each task's `/livez` on the health port. A deployment starts the new lobby task
+  first; once it passes, ECS deregisters the old one: the balancer sends it no new flow,
+  keeps its flows 10 s (the deregistration delay), then ends them, and ECS signals the
+  task only then. A lobby always answers on the flow a datagram came in on, so its
+  replies and pushes ride that flow back through the balancer.
 - **Draining**: an instance marked `draining` (`POST /api/admin/lobbies/<id>/drain`, or its
-  own lobby as it stops) gets no new client from any gate from the gates' next read; its
-  sessions stay until they leave. Its lobby's restart makes it active again; its row
-  reaped while its lobby runs, it registers again draining. A lobby's stop drains its
-  instance, then, while another instance takes clients, serves on for a gate's refresh
-  and 2 s (7 s, inside the lobby task's 60 s stop timeout) so every gate has read the
-  drain before the lobby and its row go; alone, it stops at once.
+  own lobby as it stops) no longer counts for the gates: they hand out the lobby address
+  while another instance is live, and nothing with none. Its sessions stay until they
+  leave. Which task a client reaches is the balancer's, which a task leaves by its
+  deregistration (its stop); an admin's drain does not take it out of the balancer. Its
+  row reaped while its lobby runs, it registers again draining. A lobby's stop drains its
+  instance and stops at once: the balancer drained its task before the signal.
 - **RIDs come from one sequence** (`lobby_rid_seq`, `lobbydb::next_rid`: 0x0A000000 and
   1..0xFFFFFF, cycling, a suffix a listing or a session row still holds passed over), so
   two instances never mint one RID, and none is reused short of the cycle nor while it
   is held: a hosting key's claim on a RID no listing holds is free already, and no boot
-  resets the claims.
+  resets the claims. A host that relists on another instance gets a new RID.
 - **Pushes need no instance named**: a push or an end takes its session row's `lobby_id`
   as it is inserted, each instance takes only its own instance's commands, and a
   `forget_owner` goes to every instance (one row each, active or draining).
@@ -1097,10 +1107,12 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   listing no check has found for 8 min (`listing_lost_ms`) places the server again, no
   restart counted: a lobby's replacement takes its listings, and a host's NovaWorld
   session (retail's) drops the dead lobby only after 240 s of silence, then reconnects to
-  that lobby's address alone, so a lobby back at that address (the local stack's fixed
-  endpoint) lists it again within about 4.5 min and one at a new address (an ECS task's)
-  never does; a new start goes through the gate. While its machine is lost, the
-  listing's clock waits. Always on: nothing reaps an idle server or ends one for its age.
+  that lobby's address alone. Every lobby of a deployment shares one address (its load
+  balancer's; the local stack's fixed endpoint), so a lobby's replacement lists the
+  server again within about 4.5 min, no restart; the 8 min are the safety net for a
+  server whose lobby address is gone, and a new start goes through the gate. While its
+  machine is lost, the listing's clock waits. Always on: nothing reaps an idle server or
+  ends one for its age.
 - **Reconciliation** at the supervisor's start: a machine row still `launching` whose
   launch job is gone fails (one whose job waits or runs resumes: the job outlives the
   service); a `fleet.sweep` job runs (every cloud machine the driver lists, `list_tagged`,
@@ -1966,10 +1978,10 @@ each program alone: its boot line, the listeners it binds and no other, its `GET
 exit 1 before the database; the gate handing out its fallback lobby with no instance and
 answering nothing with neither; a gate beside a lobby handing out the lobby's configured
 endpoint and the web endpoint rather than a bound port, and the lobby's SessionInit
-naming that web endpoint; a lobby on ECS (no `ONNET_LOBBY_ENDPOINT`, a fake task metadata
-endpoint and a stub `aws` at `ONNET_HOSTED_AWS_CLI`) registered at its task's public
-address; two lobbies, the first one's serving on past a gate's refresh
-after its drain while the second takes clients; web's `HOST_URL`, the controller elected,
+naming that web endpoint; two lobbies at one lobby address, each its own instance (the
+second's start reaping a stale instance with its listing), a gate handing out that address,
+the first one's stop at once while the second serves on, and with none left and no
+fallback the gate answering no one; web's `HOST_URL`, the controller elected,
 the worker's pool. `nw_programs_e2e`
 ([`tests/novaworld/nw_programs_e2e_test.cpp`](../../tests/novaworld/nw_programs_e2e_test.cpp),
 serial) runs the five as five processes on one database and one Redis: a retail-protocol
@@ -1984,8 +1996,7 @@ restarted, which alone drops its own sessions and listing. `health_listener`
 the replies to each request and the listener over loopback, healthy and stalled, a slow
 probe bounded; `ecs_metadata`
 ([`tests/novaworld/ecs_metadata_test.cpp`](../../tests/novaworld/ecs_metadata_test.cpp))
-the lobby's endpoint and the controller's bind from a fake task metadata endpoint and a
-stub AWS CLI (its argv checked), and every refusal. The ctest
+the controller's bind from a fake task metadata endpoint, and every refusal. The ctest
 `gate_listener` ([`tests/novaworld/gate_listener_test.cpp`](../../tests/novaworld/gate_listener_test.cpp))
 starts the real `GateListener` on port 0 over the migrated and seeded games table and
 checks that its reported port answers a probe and comes back as POSTIPPORT, that
@@ -2038,27 +2049,27 @@ administers it from the website's routes: its match takes the owner's
 account's push is a 404, and the owner's stop ends the listing. The lobby's tables:
 `lobby_repository`
 ([`tests/novaworld/lobby_repository_test.cpp`](../../tests/novaworld/lobby_repository_test.cpp),
-every service build) the lobby instances (registered by endpoint, found by it, touched, drained,
-the live window the gates read, an instance unseen past the old one-minute window left alone, the
-stale reaped with their rows, a clean stop's delete) and the RIDs from one sequence (a held suffix
+every service build) the lobby instances (a row each, two at one endpoint, touched, drained,
+the live lobbies the gates read, an instance unseen past the old one-minute window left alone,
+the stale reaped with their rows, a clean stop's delete) and the RIDs from one sequence (a held suffix
 passed over past the wrap), the session rows and the lobby's sweep of its own,
 the queue's answers and inserts (each command bearing its session's `lobby_id`, a
 `forget_owner` one per instance), each instance's take in insert order with the expiry and
-never another's, a session's delete taking its commands, and `clear_lobby` leaving another
+never another's, a session's delete taking its commands, and `clear_unheld` leaving every
 instance's rows; `lobby_instances_e2e`
 ([`tests/novaworld/lobby_instances_e2e_test.cpp`](../../tests/novaworld/lobby_instances_e2e_test.cpp),
-POSIX) two real NW UDP listeners, each its own instance, and a real gate: clients spread by
-address (probes from twenty loopback addresses reach both, each the same lobby every time), a
-host on each with a RID of its own and a push reaching it alone, `forget_owner` reaching both,
-a drained instance handed no client while both listings stay, an instance reaped while its
-lobby runs registering again and writing its rows anew (a drained one, by its lobby or an
-admin, registering again drained), a lobby named like a running one
-refusing to start, a malformed-datagram flood leaving the commands and the heartbeat running,
-a gate's failed read handing its fallback lobby for six refreshes, a lobby's start taking
-over its endpoint's
-stopped row, clearing that previous run and reaping a stale instance (not one two minutes
-unseen), and a lobby's sweep of a row it holds no session for; `opennova_novaworld_programs`
-two lobby processes, the first one serving on past a gate's refresh after its drain;
+POSIX) real NW UDP listeners at one lobby address, each its own instance, and a real gate:
+every client handed that address, a host on each with a RID of its own and a push reaching it
+alone, `forget_owner` reaching both, one instance drained leaving the gate handing out the
+address while both listings stay and both drained leaving it silent, an instance reaped while
+its lobby runs registering again and writing its rows anew (a drained one, by its lobby or an
+admin, registering again drained), a malformed-datagram flood leaving the commands and the
+heartbeat running, a gate's failed read handing its fallback lobby for six refreshes, a
+lobby's start reaping a stale instance (not one two minutes unseen) and clearing the rows no
+instance holds, a lobby's sweep of a row it holds no session for, and a lobby replaced behind
+the address: its host, its receive window run out by its clock, reconnects there and is
+listed on the new instance; `opennova_novaworld_programs` two lobby processes at one
+address, the first one stopping at once while the second serves on;
 `nw_server_command_push_e2e` and
 `opennova_serve_server_command_push` (each over a migrated database of its own) a session's row
 from its Hello to its goodbye and pushes the test inserts on its own connection, taken and sent

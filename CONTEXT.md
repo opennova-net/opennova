@@ -179,20 +179,22 @@ There is no all-in-one binary.
 _Avoid_: role, service (for one program), tier, microservice, pod
 
 **Gate**:
-The program that is retail's first contact: UDP port 7597 (the `novaworld_gate` probe leg: `engine/net/novaworld/gate` for the protocol, `GateListener` in `apps/novaworld_gate/gate_listener.cpp` for the listener), which bootstraps a client with the HTTP service URL and the NovaWorld UDP endpoint, the **lobby instance** it assigns that client, and takes the hosts' status blobs on the same port. It holds no session; its address is the one retail's hosts file names.
+The program that is retail's first contact: UDP port 7597 (the `novaworld_gate` probe leg: `engine/net/novaworld/gate` for the protocol, `GateListener` in `apps/novaworld_gate/gate_listener.cpp` for the listener), which bootstraps a client with the HTTP service URL and the NovaWorld UDP endpoint, the one lobby address every **lobby instance** announces, and takes the hosts' status blobs on the same port. It holds no session; its address is the one retail's hosts file names.
 _Avoid_: lobby, edge
 
 **Lobby**:
 The program that runs one **lobby instance**, NovaWorld UDP on port 64206, its sessions in
-its own memory; as many run as the deployment wants, each on a public address of its own,
-which it announces (found from its ECS task when no setting names it). Only its own restart
-drops its sessions.
+its own memory; as many run as the deployment wants, all behind one lobby address, which
+each announces (`ONNET_LOBBY_ENDPOINT`: on ECS the load balancer's at the gate's address,
+which spreads the clients across them). Only its own restart drops its sessions, and its
+hosts reconnect to the same address and list again.
 _Avoid_: edge, lobby server, frontend
 
 **Lobby instance**:
-One lobby's NovaWorld UDP lobby (`lobby_instances`: its endpoint, active or draining, its
-heartbeat). A client's lobby session lives on the instance the gate assigned it for the
-session's life; listings, session rows and **lobby commands** carry the instance's id.
+One lobby's NovaWorld UDP lobby (`lobby_instances`: its own id, the endpoint every
+instance shares, active or draining, its heartbeat). A client's lobby session lives on the
+instance its flow reached through the load balancer for the session's life; listings,
+session rows and **lobby commands** carry the instance's id.
 _Avoid_: lobby server, shard (for one instance)
 
 **Lobby command**:

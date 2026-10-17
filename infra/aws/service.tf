@@ -4,9 +4,9 @@
 # ---------------------------------------------------------------------------
 #
 # Five programs, each its own image and an ECS service on Fargate: gate (UDP,
-# behind load_balancer.tf's network load balancer), lobby (UDP on each task's
-# own public address), web (the HTTP routes and the website's API, with the
-# portal's nginx, behind the same balancer), controller (the fleet's reconcile
+# behind load_balancer.tf's network load balancer), lobby (UDP, behind the same
+# balancer), web (the HTTP routes and the website's API, with the portal's
+# nginx, behind the same balancer), controller (the fleet's reconcile
 # pass, the jobs' scheduling, the machines' internal listener) and worker (the
 # jobs). No task keeps state of its own: secrets live in SSM Parameter Store
 # (the tasks read them at their start), the release in SSM and the operations
@@ -20,8 +20,9 @@
 # account): Terraform only reads it, so no plan can release it. Prod never
 # makes an address, and staging never adopts one: it gets an address of its
 # own, managed here. A plan that breaks either rule stops at its precondition. The address is the load balancer's in
-# zone a (its subnet mapping, load_balancer.tf), where the gate's UDP port and
-# web's HTTP routes listen: ONNET_PUBLIC_HOST and ONNET_WEB_HOST name it.
+# zone a (its subnet mapping, load_balancer.tf), where the gate's UDP port, the
+# lobby's UDP port and web's HTTP routes listen: ONNET_PUBLIC_HOST and
+# ONNET_WEB_HOST name it, and ONNET_LOBBY_ENDPOINT names it with the lobby's port.
 # No SSH anywhere: a shell is ECS Exec (`app shell`).
 
 data "aws_caller_identity" "current" {}

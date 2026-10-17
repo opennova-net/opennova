@@ -131,14 +131,14 @@ std::vector<HostRow> query_hosts(opennova::db::Database &db, const std::string &
 
 } // namespace
 
-void clear_lobby(opennova::db::Database &db, int64_t lobby_id) {
+void clear_unheld(opennova::db::Database &db) {
 	opennova::db::Transaction tx(db);
 	// The listings' players and rosters cascade with them.
-	db.exec("DELETE FROM active_hosts WHERE lobby_id = $1 OR lobby_id IS NULL;", {i64(lobby_id)});
-	// The lobby's sessions were the previous run's too, and the commands addressed to them
-	// (lobby_repository.h) with them.
-	db.exec("DELETE FROM lobby_commands WHERE lobby_id = $1 OR lobby_id IS NULL;", {i64(lobby_id)});
-	db.exec("DELETE FROM lobby_sessions WHERE lobby_id = $1 OR lobby_id IS NULL;", {i64(lobby_id)});
+	db.exec("DELETE FROM active_hosts WHERE lobby_id IS NULL;");
+	// The sessions no instance holds, and the commands addressed to them (lobby_repository.h)
+	// with them.
+	db.exec("DELETE FROM lobby_commands WHERE lobby_id IS NULL;");
+	db.exec("DELETE FROM lobby_sessions WHERE lobby_id IS NULL;");
 	tx.commit();
 }
 

@@ -33,10 +33,11 @@ struct ServerConfig {
 	// the lobby and web.
 	std::string web_host;
 
-	// A lobby instance's endpoint as the gates hand it to clients
-	// (ONNET_LOBBY_ENDPOINT, <host>:<port>): their udpnovaworld. The lobby
-	// announces it (its instance row); unset on ECS, the lobby finds it from its
-	// task (ecs_metadata.h): its public IPv4 and nw_udp_port. The gate's is
+	// The lobby address the gates hand clients (ONNET_LOBBY_ENDPOINT,
+	// <host>:<port>): their udpnovaworld. Every lobby announces it (its
+	// instance row), the deployment's one lobby address: on ECS the load
+	// balancer's, the gate's Elastic IP and the lobby port, which spreads the
+	// clients across the lobby tasks. Required by the lobby; the gate's is
 	// optional, the one it hands out while no lobby instance takes clients.
 	// Never derived from the port a lobby bound.
 	std::string lobby_endpoint;

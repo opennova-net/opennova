@@ -402,9 +402,9 @@ bool NwUdpListener::start(const ServerConfig &config) {
 	reset_per_run_state("restart");
 
 	// The endpoint its instance announces, the one the gates hand out: the
-	// config's (ONNET_LOBBY_ENDPOINT, or the ECS task's address the lobby's boot
-	// found), never derived from the port this listener binds. With a database
-	// it registers an instance, which needs one.
+	// config's (ONNET_LOBBY_ENDPOINT: the deployment's one lobby address), never
+	// derived from the port this listener binds. With a database it registers
+	// an instance, which needs one.
 	if (db_pool_ != nullptr && config.lobby_endpoint.empty()) {
 		std::fprintf(stderr,
 				"[nwudp] no lobby endpoint (ONNET_LOBBY_ENDPOINT) for its instance "
@@ -455,10 +455,7 @@ bool NwUdpListener::start(const ServerConfig &config) {
 		if (db_pool_) {
 			try {
 				db_conn.emplace(db_pool_->acquire());
-				if (!register_instance(**db_conn)) {
-					leased.set_value(false);
-					return;
-				}
+				register_instance(**db_conn);
 			} catch (const db::Error &e) {
 				std::fprintf(stderr, "[nwudp] db open or lobby instance failed: %s\n", e.what());
 				leased.set_value(false);
@@ -505,40 +502,23 @@ void NwUdpListener::stop() {
 	}
 }
 
-bool NwUdpListener::register_instance(db::Database &db) {
-	// Another lobby serving this endpoint (two lobbies configured with one) moves its row every
-	// kInstanceTouchSeconds; this lobby's previous run, or a replaced lobby's at the same endpoint,
-	// no longer does. A row seen within kInstanceLiveSeconds is read again until it is that old
-	// (or gone): moved meanwhile, the endpoint is another lobby's, and this one does not start.
-	std::optional<lobbydb::LobbyInstance> seen = lobbydb::find_instance(db, instance_endpoint_);
-	const int64_t first_seen_ms = seen ? seen->last_seen_ms : 0;
-	while (seen && seen->seen_ago_ms < lobbydb::kInstanceLiveSeconds * 1000) {
-		std::this_thread::sleep_for(std::chrono::milliseconds(250));
-		seen = lobbydb::find_instance(db, instance_endpoint_);
-		if (seen && seen->last_seen_ms != first_seen_ms) {
-			std::fprintf(stderr,
-					"[lobby] FATAL another running lobby serves %s (instance %lld, seen %lld ms "
-					"ago): two lobbies name one endpoint\n",
-					loggable(instance_endpoint_).c_str(), static_cast<long long>(seen->id),
-					static_cast<long long>(seen->seen_ago_ms));
-			return false;
-		}
-	}
+void NwUdpListener::register_instance(db::Database &db) {
+	// A row of its own: every instance announces the same endpoint (the deployment's one lobby
+	// address), so neither the endpoint nor a previous run's row names this one.
 	const int64_t id = lobbydb::register_instance(db, instance_endpoint_);
 	const size_t reaped = lobbydb::reap_stale_instances(db, lobbydb::kInstanceStaleSeconds, id);
-	hostdb::clear_lobby(db, id);
+	hostdb::clear_unheld(db);
 	lobby_id_.store(id);
 	lobby_session_.set_lobby_id(id);
 	last_instance_touch_ms_ = now_ms();
-	std::printf("[lobby] instance %lld at %s: its previous run's listings, sessions and commands "
-				"cleared (previous-run cleanup); %zu stale instance(s) reaped\n",
+	std::printf("[lobby] instance %lld at %s registered; %zu stale instance(s) reaped with their "
+				"rows\n",
 			static_cast<long long>(id), loggable(instance_endpoint_).c_str(), reaped);
-	return true;
 }
 
 void NwUdpListener::reregister_instance(db::Database &db) {
-	// Drained (its own stop, or an admin's through the row), it stays drained: no gate
-	// hands it a new client for coming back.
+	// Drained (its own stop, or an admin's through the row), it stays drained: coming back does
+	// not make it count as taking clients again.
 	const bool draining = draining_.load();
 	const int64_t id = lobbydb::register_instance(db, instance_endpoint_, draining);
 	lobby_id_.store(id);
@@ -581,7 +561,7 @@ bool NwUdpListener::drain() {
 		}
 		const bool marked = lobbydb::set_instance_state(*db, id, "draining");
 		if (marked)
-			std::printf("[lobby] instance %lld draining: no new client is handed here\n",
+			std::printf("[lobby] instance %lld draining: no gate counts it as taking clients\n",
 					static_cast<long long>(id));
 		return marked;
 	} catch (const std::exception &e) {

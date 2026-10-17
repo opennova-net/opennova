@@ -46,15 +46,14 @@ RUN cmake -S . -B build -G Ninja \
         opennova_novaworld_web opennova_novaworld_controller opennova_novaworld_worker
 
 # ---- AWS CLI stage ---------------------------------------------------------
-# The lobby's own public address (ecs_metadata.h: ec2
-# describe-network-interfaces), the hosted servers' ec2 machine driver
-# (hosted/ec2_machine_driver.h) and the outbound mail (mailer.h, sesv2
-# send-email) run the AWS CLI v2, their credentials the ECS task role's. A
-# pinned release, checked against its SHA-256 before it is unpacked. The sum
-# was taken from the release AWS signed: its .sig verifies against the AWS CLI
-# Team key in the CLI's install guide (fingerprint FB5D B77F D5C1 18B8 0511
-# ADA8 A631 0ACC 4672 475C). A bump moves both ARGs: fetch the new zip and its
-# .sig, verify, and record the new sum.
+# The hosted servers' ec2 machine driver (hosted/ec2_machine_driver.h) and
+# the outbound mail (mailer.h, sesv2 send-email) run the AWS CLI v2, their
+# credentials the ECS task role's. A pinned release, checked against its
+# SHA-256 before it is unpacked. The sum was taken from the release AWS
+# signed: its .sig verifies against the AWS CLI Team key in the CLI's install
+# guide (fingerprint FB5D B77F D5C1 18B8 0511 ADA8 A631 0ACC 4672 475C). A bump
+# moves both ARGs: fetch the new zip and its .sig, verify, and record the new
+# sum.
 FROM ubuntu:24.04 AS awscli
 
 ARG AWSCLI_VERSION=2.36.50
@@ -82,7 +81,6 @@ RUN dist=/usr/local/aws-cli/v2/current/dist \
         /usr/local/aws-cli/v2/current/bin/aws_completer /usr/local/bin/aws_completer \
     && find "$data" -mindepth 1 -maxdepth 1 -type d ! -name ec2 ! -name sts ! -name sesv2 -exec rm -rf {} + \
     && aws ec2 describe-instances --generate-cli-skeleton >/dev/null \
-    && aws ec2 describe-network-interfaces --generate-cli-skeleton >/dev/null \
     && aws ec2 run-instances --generate-cli-skeleton >/dev/null \
     && aws ec2 terminate-instances --generate-cli-skeleton >/dev/null \
     && aws sts get-caller-identity --generate-cli-skeleton >/dev/null \
@@ -151,8 +149,7 @@ RUN useradd --uid 10002 --user-group --no-create-home --home-dir /nonexistent \
 # a second SIGTERM ends a stuck shutdown only when the program is not PID 1,
 # which the kernel shields from default-action signals (program.cpp).
 
-# The AWS CLI, at the absolute path the programs run it by: the lobby's and the
-# worker's.
+# The AWS CLI, at the absolute path the programs run it by: the worker's.
 FROM runtime AS runtime-aws
 COPY --from=awscli /usr/local/aws-cli /usr/local/aws-cli
 RUN ln -s /usr/local/aws-cli/v2/current/bin/aws /usr/local/bin/aws && aws --version
@@ -168,15 +165,12 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 \
 ENTRYPOINT ["/app/opennova-novaworld-gate"]
 
 # ---- lobby -----------------------------------------------------------------
-FROM runtime-aws AS lobby
+FROM runtime AS lobby
 COPY --from=build /src/build/apps/novaworld_lobby/opennova-novaworld-lobby /app/
 RUN ! ldd /app/opennova-novaworld-lobby | grep -q 'not found'
 USER 10002
 EXPOSE 64206/udp 8081/tcp
-# A longer start period: on ECS its boot first finds its endpoint from its task
-# (the task metadata, then EC2 through the AWS CLI, 30 s at most) before its
-# health listener binds (infra/aws/programs.tf, health_start_period).
-HEALTHCHECK --interval=10s --timeout=3s --start-period=120s --retries=3 \
+HEALTHCHECK --interval=10s --timeout=3s --start-period=60s --retries=3 \
     CMD curl -fsS --max-time 2 "http://127.0.0.1:${ONNET_HEALTH_PORT}/livez" || exit 1
 ENTRYPOINT ["/app/opennova-novaworld-lobby"]
 

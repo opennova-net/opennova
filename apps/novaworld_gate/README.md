@@ -1,8 +1,8 @@
 # opennova-novaworld-gate
 
 The NovaWorld service's gate: retail's first contact on UDP 7597 (`ONNET_GATE_UDP_PORT`).
-It answers each probe with the lobby instance it picks for the client from those that take
-clients (a stable hash of the client's address), this gate as `POSTIPADDRESS`
+It answers each probe with the lobby address every lobby instance announces (the
+deployment's one, its load balancer's), while one takes clients, this gate as `POSTIPADDRESS`
 (`ONNET_PUBLIC_HOST`) and the one web endpoint (`ONNET_WEB_HOST`, `ONNET_HTTP_PORT`), and
 takes the hosts' status blobs on the same port. `ONNET_LOBBY_ENDPOINT`, optional, is the lobby
 it hands out while no instance takes clients; with neither, a probe goes unanswered (logged,

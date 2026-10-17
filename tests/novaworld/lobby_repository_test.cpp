@@ -1,9 +1,10 @@
 // The lobby's tables below the listener (engine/net/novaworld/lobby_repository.h, migrations
-// 0006_lobby_commands.sql and 0009_lobby_instances.sql), on a migrated database per case: the
-// lobby instances (registered by endpoint, the id kept across a restart, found by it with how
-// long ago it was seen, touched, drained, the active ones' endpoints those seen within the live
-// window, one unseen for longer than a database failover left alone, the stale reaped with their
-// rows, a clean stop's delete), the RIDs from one sequence (a held suffix passed over past the
+// 0006_lobby_commands.sql, 0009_lobby_instances.sql and 0012_lobby_instances_share_endpoint.sql),
+// on a migrated database per case: the lobby instances (each registration a row of its own, two
+// at one endpoint, listed with how long ago each was seen, touched, drained, the live ones those
+// active and seen within the live window and named by the newest one's endpoint, one unseen for
+// longer than a database failover left alone, the stale reaped with their rows, a clean stop's
+// delete), the RIDs from one sequence (a held suffix passed over past the
 // wrap), the session rows the lobby writes and the routes read (its sweep of the rows it holds
 // no session for, its own instance's alone), and the commands the
 // routes and the supervisor queue for it. A push answers from the session rows what the lobby
@@ -11,8 +12,8 @@
 // the lobby would take it, bearing the session's lobby_id; an end names its session by its row's
 // id; forget_owner names none and goes to every instance; each lobby takes its own instance's in
 // insert order, each once, with their expiry, never another's; a session's delete takes its
-// commands; a lobby's start (hostdb::clear_lobby) takes its own previous run's rows and the rows
-// no instance holds, never another instance's.
+// commands; a lobby's start (hostdb::clear_unheld) takes the rows no instance holds, never an
+// instance's.
 
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/host_repository.h>
@@ -66,6 +67,14 @@ lobbydb::SessionRow hosting(lobbydb::SessionRow s, uint32_t rid,
 
 std::size_t command_count(Database &db) {
 	return db.query("SELECT 1 FROM lobby_commands;").size();
+}
+
+// Instance `id`'s row, if any.
+std::optional<lobbydb::LobbyInstance> instance_of(Database &db, int64_t id) {
+	for (const lobbydb::LobbyInstance &i : lobbydb::list_instances(db))
+		if (i.id == id)
+			return i;
+	return std::nullopt;
 }
 
 bool refused(Database &db, const std::string &sql) {
@@ -301,53 +310,69 @@ int test_take_and_cascade() {
 	// A push whose session went: the unknown RID's answer, nothing inserted.
 	TEST_EXPECT(lobbydb::queue_server_command(db, rid, "Cycle") == PushResult::UnknownRid);
 
-	// A lobby's start takes its own previous run's sessions and commands, and those no instance
-	// holds; another instance's stay.
+	// A lobby's start takes the sessions and commands no instance holds (an end addressed to a
+	// session with none); every instance's own stay, since each start registers an instance of
+	// its own.
 	lobbydb::queue_forget_owner(db, 9);
 	lobbydb::SessionRow orphan = session(6, 40006);
 	orphan.id = lobbydb::insert_session(db, orphan);
-	opennova::hostdb::clear_lobby(db, lobby);
+	TEST_EXPECT(lobbydb::queue_end_session(db, orphan.id).result ==
+			lobbydb::EndSession::Result::Queued);
+	TEST_EXPECT(command_count(db) == 4);
+	opennova::hostdb::clear_unheld(db);
 	const auto left = lobbydb::list_sessions(db);
-	TEST_EXPECT(left.size() == 1 && left[0].id == theirs.id);
-	auto commands = db.query("SELECT lobby_id FROM lobby_commands;");
-	TEST_EXPECT(commands.size() == 1 && commands[0].as_int(0) == elsewhere);
+	TEST_EXPECT(left.size() == 2);
+	for (const auto &s : left)
+		TEST_EXPECT(s.id == other.id || s.id == theirs.id);
+	TEST_EXPECT(db.query("SELECT 1 FROM lobby_commands WHERE lobby_id IS NULL;").empty());
+	TEST_EXPECT(command_count(db) == 3); // other's end, each instance's forget_owner
 	return 0;
 }
 
-// The instances: registered by endpoint (a restart keeps the id, active again; a running lobby's
-// registration again keeps its drain), touched (the touch reading the row's state), drained
-// (out of the active endpoints, which list only the recently seen), reaped once stale with their
-// sessions, commands and listings, deleted at a clean stop with theirs; the RIDs, one sequence
-// for every instance, never collide.
+// The instances: each registration a row of its own (two lobbies at one endpoint, the
+// deployment's one lobby address, under ids of their own; a running lobby's registration again
+// keeps its drain), touched (the touch reading the row's state), drained (out of the live
+// lobbies, which count the active ones seen within the live window and name the newest one's
+// endpoint), reaped once stale with their sessions, commands and listings, deleted at a clean
+// stop with theirs; the RIDs, one sequence for every instance, never collide.
 int test_instances_and_rids() {
 	test_db::TestDatabase scratch;
 	Database db = scratch.open();
-	const int64_t a = lobbydb::register_instance(db, "198.51.100.1:64206");
-	const int64_t b = lobbydb::register_instance(db, "198.51.100.2:64206");
+	const std::string shared = "198.51.100.1:64206";
+	const int64_t a = lobbydb::register_instance(db, shared);
+	const int64_t b = lobbydb::register_instance(db, shared);
 	TEST_EXPECT(a > 0 && b > a);
-	TEST_EXPECT(lobbydb::active_endpoints(db) ==
-			(std::vector<std::string>{ "198.51.100.1:64206", "198.51.100.2:64206" }));
-	const std::optional<lobbydb::LobbyInstance> found =
-			lobbydb::find_instance(db, "198.51.100.1:64206");
-	TEST_EXPECT(found && found->id == a && found->state == "active" && found->seen_ago_ms >= 0 &&
-			found->seen_ago_ms < 5000);
-	TEST_EXPECT(!lobbydb::find_instance(db, "198.51.100.9:64206"));
+	lobbydb::LiveLobbies live = lobbydb::live_lobbies(db);
+	TEST_EXPECT(live.endpoint == shared && live.instances == 2);
+	const std::optional<lobbydb::LobbyInstance> found = instance_of(db, a);
+	TEST_EXPECT(found && found->endpoint == shared && found->state == "active" &&
+			found->seen_ago_ms >= 0 && found->seen_ago_ms < 5000);
+	TEST_EXPECT(!instance_of(db, 999999));
 	TEST_EXPECT(lobbydb::set_instance_state(db, b, "draining"));
 	TEST_EXPECT(!lobbydb::set_instance_state(db, b, "gone") &&
 			!lobbydb::set_instance_state(db, 999999, "active"));
-	TEST_EXPECT(
-			lobbydb::active_endpoints(db) == (std::vector<std::string>{ "198.51.100.1:64206" }));
-	// B's restart: the same id, active again, its previous run's rows its start's to clear.
-	TEST_EXPECT(lobbydb::register_instance(db, "198.51.100.2:64206") == b);
-	TEST_EXPECT(lobbydb::list_instances(db).at(1).state == "active");
+	live = lobbydb::live_lobbies(db);
+	TEST_EXPECT(live.endpoint == shared && live.instances == 1);
 	TEST_EXPECT(lobbydb::touch_instance(db, a) == std::optional<std::string>("active"));
-	// A drained lobby registering again (its row reaped while it ran) stays drained.
-	TEST_EXPECT(lobbydb::register_instance(db, "198.51.100.2:64206", true) == b);
 	TEST_EXPECT(lobbydb::touch_instance(db, b) == std::optional<std::string>("draining"));
-	TEST_EXPECT(
-			lobbydb::active_endpoints(db) == (std::vector<std::string>{ "198.51.100.1:64206" }));
-	TEST_EXPECT(lobbydb::register_instance(db, "198.51.100.2:64206") == b);
-	TEST_EXPECT(lobbydb::touch_instance(db, b) == std::optional<std::string>("active"));
+	// A drained lobby registering again (its row reaped while it ran): a new row, drained still,
+	// so not live.
+	const int64_t b_again = lobbydb::register_instance(db, shared, true);
+	TEST_EXPECT(b_again > b);
+	TEST_EXPECT(lobbydb::touch_instance(db, b_again) == std::optional<std::string>("draining"));
+	TEST_EXPECT(lobbydb::live_lobbies(db).instances == 1);
+	lobbydb::remove_instance(db, b_again);
+	// The newest live instance's endpoint is the one handed out.
+	const int64_t elsewhere = lobbydb::register_instance(db, "198.51.100.2:64206");
+	live = lobbydb::live_lobbies(db);
+	TEST_EXPECT(live.endpoint == "198.51.100.2:64206" && live.instances == 2);
+	lobbydb::remove_instance(db, elsewhere);
+	// None live: no endpoint.
+	TEST_EXPECT(lobbydb::set_instance_state(db, a, "draining"));
+	live = lobbydb::live_lobbies(db);
+	TEST_EXPECT(live.endpoint.empty() && live.instances == 0);
+	TEST_EXPECT(lobbydb::set_instance_state(db, a, "active"));
+	TEST_EXPECT(lobbydb::set_instance_state(db, b, "active"));
 	TEST_EXPECT(refused(db, "INSERT INTO lobby_instances (endpoint) VALUES ('');"));
 	TEST_EXPECT(refused(db, "UPDATE lobby_instances SET state = 'gone';"));
 
@@ -380,12 +405,12 @@ int test_instances_and_rids() {
 	TEST_EXPECT(lobbydb::queue_server_command(db, rid_a, "Cycle") == PushResult::Queued);
 
 	// A's heartbeat stops for two minutes (a database failover's outage, longer than one takes):
-	// no gate hands it a client, and no reap takes it or its rows.
+	// no gate counts it as taking clients, and no reap takes it or its rows.
 	db.exec("UPDATE lobby_instances SET last_seen_at = now() - interval '2 minutes' WHERE id = $1;",
 			{ BindValue(a) });
-	TEST_EXPECT(
-			lobbydb::active_endpoints(db) == (std::vector<std::string>{ "198.51.100.2:64206" }));
-	TEST_EXPECT(lobbydb::find_instance(db, "198.51.100.1:64206")->seen_ago_ms >= 119000);
+	live = lobbydb::live_lobbies(db);
+	TEST_EXPECT(live.endpoint == shared && live.instances == 1);
+	TEST_EXPECT(instance_of(db, a)->seen_ago_ms >= 119000);
 	TEST_EXPECT(lobbydb::reap_stale_instances(db, lobbydb::kInstanceStaleSeconds, b) == 0);
 	TEST_EXPECT(lobbydb::reap_stale_instances(db, lobbydb::kInstanceStaleSeconds) == 0);
 	TEST_EXPECT(opennova::hostdb::find_host_by_rid(db, rid_a) && command_count(db) == 1);
@@ -439,6 +464,6 @@ int main(int argc, char **argv) {
 	if (test_instances_and_rids() != 0)
 		return 1;
 	std::printf("OK: lobby repository (instances, RIDs, session rows, pushes, ends, forget_owner, "
-				"take, cascade, clear_lobby)\n");
+				"take, cascade, clear_unheld)\n");
 	return 0;
 }

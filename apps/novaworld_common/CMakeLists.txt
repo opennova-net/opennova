@@ -1,7 +1,7 @@
 # opennova_novaworld_common: the NovaWorld service's shared library, what more
 # than one of its five programs uses (README.md "Programs"): the shared boot and
 # main loop (program.*), the config, the health (the watchdog, the heartbeat,
-# the /livez listener), the addresses an ECS task finds from its own metadata,
+# the /livez listener), the address an ECS task finds from its own metadata,
 # the games catalogue; with the HTTP layer, the accounts and sessions, the
 # Redis pool, the mail, the background jobs' queue, pool and scheduler, the
 # hosted servers' and billing's logic, and what several programs build alike
@@ -13,8 +13,8 @@ set(NOVAWORLD_COMMON_SOURCES
     catalog_repository.cpp
     # The stall watchdog and the heartbeat line (health.h), GET /livez on
     # ONNET_HEALTH_PORT for the programs with no HTTP of their own
-    # (health_listener.h), and an ECS task's own addresses (ecs_metadata.h:
-    # the lobby's public endpoint, the controller's private bind).
+    # (health_listener.h), and an ECS task's own address (ecs_metadata.h:
+    # the controller's private bind).
     health.cpp
     health_listener.cpp
     ecs_metadata.cpp

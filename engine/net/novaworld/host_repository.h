@@ -20,7 +20,7 @@ namespace opennova {
 // prepared-statement path as the rest of engine/net/novaworld. The handle is
 // the calling thread's own connection (the standalone server leases one per
 // thread from a db::ConnectionPool); a write that spans several statements
-// (clear_lobby, replace_roster, apply_status_blob) is one db::Transaction on it,
+// (clear_unheld, replace_roster, apply_status_blob) is one db::Transaction on it,
 // so readers on other connections see it whole. A caller that writes a host
 // row and its roster puts both in one Transaction (replace_roster's own then
 // nests as a savepoint), so the row's player count and its roster agree; a
@@ -34,7 +34,7 @@ namespace opennova {
 //   ClientHostPlayerAdded   -> add_player()
 //   ClientHostPlayerRemoved -> remove_player_by_peer() (a peer can leave
 //     at most one host at a time so the unique-by-peer index is enough)
-//   a lobby's start    -> clear_lobby() (its previous run's rows alone)
+//   a lobby's start    -> clear_unheld() (the rows no lobby instance holds)
 //
 // The listing's owner (host_keys; service policy, the retail
 // service's own check is unwitnessed): /NWHost.dll records each HOSTKEY it
@@ -107,15 +107,16 @@ struct PlayerRow {
 	int         peer_port = 0;
 };
 
-// A lobby instance's start, before it serves: the rows of its previous run
-// (lobby instance `lobby_id`, kept across a restart of the same endpoint), its
-// listings (with their players and rosters), its lobby_sessions and the
-// lobby_commands addressed to them (lobby_repository.h); and the rows no
-// instance holds (lobby_id NULL: a lobby's from before instances, a dev
-// inject). Another instance's rows stay. The host_keys claims stay too: RIDs
-// come from one sequence and are never reused (lobbydb::next_rid), so a claim
-// on a RID no listing holds is free already (claim_host_key).
-void clear_lobby(db::Database &db, int64_t lobby_id);
+// A lobby instance's start, before it serves: the rows no instance holds
+// (lobby_id NULL, as the dev inject's listing): such listings (with their
+// players and rosters), lobby_sessions and lobby_commands
+// (lobby_repository.h). Every instance's own rows stay: each start registers
+// an instance of its own, and a previous run's rows went at its clean stop or
+// go with its stale row (lobbydb::reap_stale_instances). The host_keys claims
+// stay too: RIDs come from one sequence and are never reused
+// (lobbydb::next_rid), so a claim on a RID no listing holds is free already
+// (claim_host_key).
+void clear_unheld(db::Database &db);
 
 void upsert_host(db::Database &db, const HostRow &row);
 void update_host(db::Database &db, const HostRow &row);

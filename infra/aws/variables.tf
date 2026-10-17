@@ -48,7 +48,7 @@ variable "gate" {
 }
 
 variable "lobby" {
-  description = "The lobby: one lobby instance per task, UDP nw_udp_port on the task's own public IPv4 (the gate hands it out). More tasks, more lobby instances. A deployment starts the new task beside the old (the gates hand out both), then stops the old, which drains."
+  description = "The lobby: one lobby instance per task, UDP nw_udp_port behind the load balancer at the gate's address, which every lobby announces (the gate hands it out) and which spreads the clients across the tasks. More tasks, more lobby instances. A deployment starts the new task beside the old, then the balancer drains the old (10 s) and ECS stops it."
   type = object({
     cpu     = optional(number, 256)
     memory  = optional(number, 512)
@@ -119,7 +119,7 @@ variable "health_port" {
 }
 
 variable "allowed_cidrs" {
-  description = "CIDRs allowed to reach the retail ports (the gate and the HTTP routes at the load balancer, each lobby's UDP port) and the game machines' slots"
+  description = "CIDRs allowed to reach the retail ports (the gate and the HTTP routes at the load balancer, the lobby's UDP port) and the game machines' slots"
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
@@ -148,7 +148,7 @@ variable "gate_udp_port" {
 }
 
 variable "nw_udp_port" {
-  description = "UDP port of the lobby (the one the gate announces), on each lobby task's own public address"
+  description = "UDP port of the lobby (the one the gate announces), at the load balancer and on each lobby task"
   type        = number
   default     = 64206
 }
