@@ -42,12 +42,6 @@ const KIT_SLOT_ORDER := ["PRIMARY", "SECONDARY", "ACCESSORY"]
 # runtime/menu/player_info_kit.h).
 
 var _db: AvatarDatabase
-var _weapons: WeaponDatabase     # weapon.def loadout table (PRIMARY/SECONDARY/ACCESSORY)
-# The mount _weapons was read from (LoadoutWeaponTable.mount_key). This companion
-# lives the whole session, so a CHANGE FOLDER or a Mods switch reads weapon.def
-# again; an injected table stands.
-var _weapons_mount := ""
-var _weapons_injected := false
 var _slot_rows: Dictionary = {}         # control name -> Array[WeaponDef], row-aligned (null = NONE)
 var _team := 0                          # 0 = blue/good, 1 = red/evil (SIDE_BLUE default CHECKED)
 # Per-def picked clip counts, keyed by weapon.def row; -1/absent = the def
@@ -140,7 +134,7 @@ func _wire(_file: String, _screen: String) -> void:
 	_wire_preview()
 	# Loadout: PLAYERCLASS drives the class mask, the team radios the team mask; both
 	# filter the weapon slot lists [orig: PlayerInfo_PopulateWeaponSlotLists @ 0x560430].
-	_ensure_weapons()
+	_ensure_player_info_weapons()
 	_connect_combo("PLAYERCLASS", _on_class_selected)
 	# The witnessed per-control recompute graph [orig: PlayerInfo_RegisterAllControls
 	# @ 0x561470]: weapon selects refill that slot's ammo + weight/icons; ammo/type/
@@ -250,30 +244,21 @@ func team() -> int:
 
 
 func set_weapon_database(weapons: WeaponDatabase) -> void:
-	_weapons = weapons
-	_weapons_injected = weapons != null
+	_set_weapons(weapons)
 	_ammo_pri.clear()
 	_ammo_sec.clear()
 	if _driver != null:
 		_populate_loadout()
 
 
-# Load weapon.def into the loadout table, again whenever the mount changed. A
-# missing or empty file is an empty table, so each list shows only NONE
-# (D-MNU-27).
-func _ensure_weapons() -> void:
-	if _weapons_injected or _root == null:
-		return
-	var mount := LoadoutWeaponTable.mount_key(_root)
-	if _weapons != null and mount == _weapons_mount:
-		return
-	_weapons = LoadoutWeaponTable.load_weapon_database(_root, "PlayerInfoMenuCompanion",
-			"loadout combos stay empty")
-	_weapons_mount = mount
-	# The picks are keyed by the old table's rows, and the game resets every
-	# count pair at each populate anyway (the reset @0x55e8e0, cited at _ammo_pri).
-	_ammo_pri.clear()
-	_ammo_sec.clear()
+# The loadout table off the root (MenuCompanion._ensure_weapons). A table read
+# again drops the picks: they are keyed by the old table's rows, and the game
+# resets every count pair at each populate anyway (the reset @0x55e8e0, cited
+# at _ammo_pri).
+func _ensure_player_info_weapons() -> void:
+	if _ensure_weapons("PlayerInfoMenuCompanion", "loadout combos stay empty"):
+		_ammo_pri.clear()
+		_ammo_sec.clear()
 
 
 # Fill PRIMARY/SECONDARY/ACCESSORY for the selected class + team, each led by a "NONE" row,
