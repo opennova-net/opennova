@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "common/test_paths.h"
+#include "pff/pff_sparse_archive.h"
 #include "pff/pff_test_writer.h"
 #include <base/vfs/vfs.h>
 #include <base/vfs/vfs_decode.h>
@@ -732,6 +733,32 @@ static int test_expansion_paths_and_names() {
     return 1;
 }
 
+// An archive whose directory and a payload lie past 2 GiB (a sparse file) mounts and serves its
+// files: every archive read goes through pff_open / pff_extract, whose seeks were a 32-bit long on
+// Windows, so the archive was refused and its slot left empty.
+static int test_archive_past_2gib() {
+    fs::path d = fresh_dir("archive_past_2gib");
+    const std::string path = (d / "big.pff").string();
+    const PffSparseEntry entries[] = {
+        { "near.txt", opennova::pff::PFF_HEADER_SIZE, "NEAR" },
+        { "far.txt", 0x80000010u, "FAR PAST 2 GIB" },
+    };
+    const uint32_t dir_offset = 0x80000100u;
+    const uint64_t size = uint64_t(dir_offset) + 2 * opennova::pff::PFF_ENTRY_SIZE + opennova::pff::PFF_FOOTER_SIZE;
+    if (!pff_sparse_write(path.c_str(), size, dir_offset, entries, 2, 0)) {
+        printf("(no sparse file here: skipped) ");
+        return 1;
+    }
+    Vfs v;
+    CHECK(v.add_secondary_archive(path), "the archive past 2 GiB mounts");
+    CHECK(v.has_file("far.txt") && v.has_file("near.txt"), "both files listed");
+    std::vector<uint8_t> raw;
+    CHECK(v.read_file_raw("far.txt", raw) && std::string(raw.begin(), raw.end()) == "FAR PAST 2 GIB",
+          "the payload past 2 GiB reads");
+    CHECK(read_vfs(v, "near.txt") == "NEAR", "the payload at the start reads");
+    return 1;
+}
+
 int main() {
     std::error_code ec;
     g_root = (fs::temp_directory_path(ec) / test_paths_unique("opennova_vfs_test")).string();
@@ -759,6 +786,7 @@ int main() {
     RUN_TEST(test_expansion_records);
     RUN_TEST(test_expansion_override_table);
     RUN_TEST(test_expansion_paths_and_names);
+    RUN_TEST(test_archive_past_2gib);
 
     fs::remove_all(g_root, ec);
     printf("\n%d passed, %d failed\n", passed, failed);

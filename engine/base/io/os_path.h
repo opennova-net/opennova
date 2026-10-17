@@ -11,16 +11,25 @@
 // back for a path the system enumerated (std::filesystem::path::string() would throw
 // on a name the code page cannot hold). No exceptions, no <windows.h>; on other
 // systems they are plain pass-throughs (paths there are bytes and PATH_MAX is large).
-// The whole-file reads and writes built on them are base/io/file_io.h.
+// The whole-file reads and writes built on them are base/io/file_io.h. fseek64()/ftell64() are the
+// stdio seek and tell at 64 bits on every system (Windows' fseek takes a 32-bit long, so a position
+// past 2 GiB fails there).
 //
 // Platform file I/O, not a port: nothing here is witnessed engine behaviour.
 #pragma once
 
+#include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <system_error>
+
+#ifndef _WIN32
+#include <sys/types.h>
+#endif
 
 namespace opennova::io {
 
@@ -192,6 +201,33 @@ inline std::FILE *fopen_utf8(const char *utf8, const char *mode) {
 }
 
 #endif
+
+// fseek at 64 bits: `offset` from `origin` (SEEK_SET, SEEK_CUR, SEEK_END), 0 on success. A position
+// past 2 GiB is reachable on every system, where fseek's long is 32 bits on Windows (and on 32-bit
+// POSIX without large-file offsets, where an offset off_t cannot hold fails with EOVERFLOW).
+inline int fseek64(std::FILE *f, int64_t offset, int origin) {
+#ifdef _WIN32
+	return _fseeki64(f, offset, origin);
+#else
+	if constexpr (sizeof(off_t) < sizeof(int64_t)) {
+		if (offset > static_cast<int64_t>(std::numeric_limits<off_t>::max()) ||
+		    offset < static_cast<int64_t>(std::numeric_limits<off_t>::min())) {
+			errno = EOVERFLOW;
+			return -1;
+		}
+	}
+	return fseeko(f, static_cast<off_t>(offset), origin);
+#endif
+}
+
+// ftell at 64 bits: the stream's position, -1 on failure.
+inline int64_t ftell64(std::FILE *f) {
+#ifdef _WIN32
+	return _ftelli64(f);
+#else
+	return static_cast<int64_t>(ftello(f));
+#endif
+}
 
 // A std::string or a C string converts to both a string_view and a path: name the UTF-8 one.
 inline std::filesystem::path os_path(const std::string &utf8) { return os_path(std::string_view(utf8)); }

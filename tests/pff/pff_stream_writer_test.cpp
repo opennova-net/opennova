@@ -255,10 +255,31 @@ static int test_dropped_writer_leaves_nothing() {
 	return 1;
 }
 
+// The writer's limit is the directory's 32-bit offset, not 2 GiB: payloads ending exactly at
+// 0xFFFFFFFF open (the directory then starts there), one byte more is refused before a byte is
+// written. Nothing is read: the writer is aborted after open().
+static int test_payloads_up_to_the_32_bit_offset() {
+	const char *path = "pff_stream_top.pff";
+	const uint32_t first = 0x80000000u;
+	const uint32_t last = 0xFFFFFFFFu - PFF_HEADER_SIZE - first;
+	PffWriteStreamEntry fits[2] = {{"a.bin", first, 0, 0, 0}, {"b.bin", last, 0, 0, 0}};
+	PffStreamWriter writer;
+	CHECK(writer.open(path, PFF_FORMAT_PFF3, fits, 2, read_chunk, nullptr) == PFF_WRITE_OK &&
+	      writer.payload_bytes() == 0xFFFFFFFFull - PFF_HEADER_SIZE, "payloads ending at 0xFFFFFFFF open");
+	writer.abort();
+	CHECK(!exists("pff_stream_top.pff.tmp") && !exists(path), "aborted: nothing");
+	PffWriteStreamEntry over[2] = {{"a.bin", first, 0, 0, 0}, {"b.bin", last + 1, 0, 0, 0}};
+	PffStreamWriter refused;
+	CHECK(refused.open(path, PFF_FORMAT_PFF3, over, 2, read_chunk, nullptr) == PFF_WRITE_ERR_TOO_LARGE &&
+	      !refused.is_open() && !exists("pff_stream_top.pff.tmp"), "one byte past the 32-bit offsets refused");
+	return 1;
+}
+
 int main(void) {
 	RUN_TEST(test_budgets_match_the_recorded_archives);
 	RUN_TEST(test_single_call_forms_match);
 	RUN_TEST(test_dropped_writer_leaves_nothing);
+	RUN_TEST(test_payloads_up_to_the_32_bit_offset);
 	printf("\n%d passed, %d failed\n", passed, failed);
 	return failed > 0 ? 1 : 0;
 }
