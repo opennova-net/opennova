@@ -209,8 +209,6 @@ services:
     network_mode: "service:novaworld-web"
     restart: unless-stopped
     environment:
-      ADMIN_BASIC_AUTH_USER: ${ADMIN_BASIC_AUTH_USER:-}
-      ADMIN_BASIC_AUTH_PASSWORD: ${ADMIN_BASIC_AUTH_PASSWORD:-}
       # Edge authentication (DEPLOY.md): unset, off.
       EDGE_AUTH_SECRET: ${EDGE_AUTH_SECRET:-}
       EDGE_AUTH_SECRET_PREVIOUS: ${EDGE_AUTH_SECRET_PREVIOUS:-}

@@ -372,8 +372,6 @@ run "task_definitions" {
       jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[1].dependsOn == [{ containerName = "web", condition = "HEALTHY" }] &&
       jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[1].logConfiguration.options["awslogs-stream-prefix"] == "web" &&
       toset([for s in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[1].secrets : s.valueFrom]) == toset([
-        "arn:aws:ssm:us-east-1:123456789012:parameter/opennova/prod/secret/ADMIN_BASIC_AUTH_USER",
-        "arn:aws:ssm:us-east-1:123456789012:parameter/opennova/prod/secret/ADMIN_BASIC_AUTH_PASSWORD",
         "arn:aws:ssm:us-east-1:123456789012:parameter/opennova/prod/secret/EDGE_AUTH_SECRET",
         "arn:aws:ssm:us-east-1:123456789012:parameter/opennova/prod/tls/ORIGIN_TLS_CERT",
         "arn:aws:ssm:us-east-1:123456789012:parameter/opennova/prod/tls/ORIGIN_TLS_KEY",
@@ -383,7 +381,7 @@ run "task_definitions" {
       } &&
       alltrue([for p in ["gate", "lobby", "controller", "worker"] : length(jsondecode(aws_ecs_task_definition.program[p].container_definitions)) == 1])
     )
-    error_message = "web's task carries the portal's nginx on 443, started once the server answers, with the basic auth, edge authentication and the origin certificate (the previous edge secret optional, in its label); no other task carries it"
+    error_message = "web's task carries the portal's nginx on 443, started once the server answers, with edge authentication and the origin certificate (the previous edge secret optional, in its label); no other task carries it"
   }
 }
 

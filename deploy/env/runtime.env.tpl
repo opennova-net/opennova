@@ -18,8 +18,6 @@
 # billing ones are in its `opennova.optional-secrets` label, and a deploy names
 # those SSM holds.
 ADMIN_API_TOKEN=op://@VAULT@/@APP_ITEM@/admin_api_token
-ADMIN_BASIC_AUTH_USER=op://@VAULT@/@APP_ITEM@/admin_basic_auth_user
-ADMIN_BASIC_AUTH_PASSWORD=op://@VAULT@/@APP_ITEM@/admin_basic_auth_password
 # The service's database role's password (`db bootstrap` sets it on the role).
 DATABASE_PASSWORD=op://@VAULT@/@APP_ITEM@/database_password
 # The cache's AUTH token (infra/aws/cache.tf takes the same field).

@@ -79,8 +79,7 @@ make_vault() {
   mkitem aws-org API_CREDENTIAL account_id=333333333333 organization_id=o-abcdefghij region=us-east-1 \
     sso_given_name=Ada sso_family_name=Lovelace sso_email=ada@example.org \
     access_key_id=AKIAORGKEY0000000001 secret_access_key=SECRETVALUEawsorg
-  mkitem app-staging SERVER admin_api_token=SECRETVALUEadminapistaging admin_basic_auth_user=admin \
-    admin_basic_auth_password=SECRETVALUEbasicstaging database_password=SECRETVALUEdbstaging \
+  mkitem app-staging SERVER admin_api_token=SECRETVALUEadminapistaging database_password=SECRETVALUEdbstaging \
     redis_password=SECRETVALUEredisstaging edge_auth_secret=SECRETVALUEedgestaging \
     edge_auth_secret_previous=SECRETVALUEedgepreviousstaging
   mkitem app-prod SERVER edge_auth_secret=SECRETVALUEedgeprod
@@ -446,8 +445,8 @@ while IFS= read -r line; do
     fail "SSM got $RT_NAME, whose optional field $item/$field is absent"
   fi
 done <"$RUNTIME_TPL"
-[ "$matched" -eq 13 ] && pass "secrets sync wrote each of the 13 secrets the vault holds, as it holds them" \
-  || fail "secrets sync wrote $matched of the 13 secrets as the vault holds them ($(cd "$STUB_SSM" && printf '%s ' *))"
+[ "$matched" -eq 11 ] && pass "secrets sync wrote each of the 11 secrets the vault holds, as it holds them" \
+  || fail "secrets sync wrote $matched of the 11 secrets as the vault holds them ($(cd "$STUB_SSM" && printf '%s ' *))"
 expect_requests "--deployment staging stripe check" 2 --deployment staging stripe check
 expect_requests "org plan" 3 org plan
 for v in region:aws-org:region organization_id:aws-org:organization_id management_account_id:aws-org:account_id \

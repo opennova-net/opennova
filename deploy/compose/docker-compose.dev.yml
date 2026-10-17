@@ -179,13 +179,6 @@ services:
     environment:
       <<: *dev-env
 
-  # The portal's /admin pages' basic auth (dev values; the site's own admin
-  # session is the `test` account above).
-  portal:
-    environment:
-      ADMIN_BASIC_AUTH_USER: ${ADMIN_BASIC_AUTH_USER:-admin}
-      ADMIN_BASIC_AUTH_PASSWORD: ${ADMIN_BASIC_AUTH_PASSWORD:-dev}
-
   # The site via the Vite dev server, for web/ work: edits hot-reload at
   # http://localhost:5173 with no image rebuild. Vite proxies /api to the
   # portal (see web/vite.config.ts; its polling watch makes file changes
