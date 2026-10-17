@@ -1158,7 +1158,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 						loggable(hello.pn).c_str());
 				if (tracker_) {
 					tracker_->record("pn", hello.pn, body.data(), body.size(),
-					                 client_label, now_ms());
+					                 client_label, static_cast<uint64_t>(unix_now_ms()));
 				}
 				break;
 			}
@@ -1465,7 +1465,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 						if (tracker_) {
 							tracker_->record("ptype", hex_sig(pm.full_tag, 3),
 							                 pm.payload.data(), pm.payload.size(),
-							                 client_label, now_ms());
+							                 client_label, static_cast<uint64_t>(unix_now_ms()));
 						}
 						continue;                            // only Layer-4 lobby
 					}
@@ -1538,7 +1538,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 									result.label.substr(sizeof(kUnknownPrefix) - 1);
 								tracker_->record("container", name,
 								                 assembled.data(), assembled.size(),
-								                 client_label, now_ms());
+								                 client_label, static_cast<uint64_t>(unix_now_ms()));
 							}
 						}
 						for (auto &reply_container : result.reply_containers) {
@@ -1553,7 +1553,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 						client_label.c_str(), loggable(conn_opt->session_pn).c_str());
 				if (tracker_) {
 					tracker_->record("pn", conn_opt->session_pn, body.data(), body.size(),
-					                 client_label, now_ms());
+					                 client_label, static_cast<uint64_t>(unix_now_ms()));
 				}
 			}
 
@@ -1653,7 +1653,7 @@ void NwUdpListener::run_loop(opennova::net::ScopedSocket socket,
 			             client_label.c_str(), opcode);
 			if (tracker_) {
 				tracker_->record("nwu", hex_sig(opcode), body.data(), body.size(),
-				                 client_label, now_ms());
+				                 client_label, static_cast<uint64_t>(unix_now_ms()));
 			}
 			break;
 		}

@@ -2268,7 +2268,7 @@ void HttpListener::register_static_routes(const std::filesystem::path &web_dist,
 			using namespace std::chrono;
 			const auto http_now = static_cast<uint64_t>(
 				duration_cast<milliseconds>(
-					steady_clock::now().time_since_epoch()).count());
+					system_clock::now().time_since_epoch()).count());
 			const auto *body_ptr =
 				reinterpret_cast<const uint8_t *>(req.body.data());
 			tracker_->record("http", sig, body_ptr, req.body.size(),

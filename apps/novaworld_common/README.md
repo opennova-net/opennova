@@ -172,7 +172,11 @@ its executable; what more than one program uses lives here.
   (each flush adds its sightings since the last to the row's count, so several gates,
   lobbies and web replicas sum up rather than overwrite one another),
   the latest seen first (500 at most, `?channel=` one channel's): each signature's
-  first sample as hex and its sender's address.
+  first sample as hex and its sender's address. What a process keeps is bounded: a
+  signature is its printable form cut at 128 bytes (a longer one ends in a hash of the
+  whole), a channel keeps 1024 distinct signatures and counts every later new one in its
+  `(other)` row, the times are the wall clock's, and `unknown_messages.prune` deletes
+  the rows unseen for 30 days.
 - **Each listener's `start()` holds its port before the boot goes on.** The gate and
   NW UDP listeners bind their socket in `start()` and move it into the receive
   thread (which leases its connection), so the port they report is the one they serve,
@@ -328,6 +332,7 @@ policy, not a port.
 | `hosts.prune`, `host_keys.prune`, `web_sessions.prune`, `active_user_sessions.prune`, `login_addresses.prune`, `password_resets.prune`, `billing_events.prune` | the prunes (`active_user_sessions.prune`: the retail logins' rows unused for 2 h) | every `HOST_SWEEP_INTERVAL_MS` | 1 |
 | `stats.prune` | the hosted servers' samples past 48 h, their hours past 90 days, the machines' months past 13, the fleet's machines ended or failed 14 days ago | hourly | 1 |
 | `jobs.prune` | finished jobs past 14 days (or its payload's `keep_s`) | hourly, an admin | 1 |
+| `unknown_messages.prune` | the unknown-message rows no process has seen for 30 days | hourly | 1 |
 
 **The admin's view** (`jobs/job_admin.*`, `jobs/job_routes.*`; the site's admin page
 **Background jobs**, `/admin/jobs`): what the rows show, read on web from the jobs

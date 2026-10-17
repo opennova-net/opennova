@@ -408,14 +408,15 @@ int test_prune() {
 		TEST_EXPECT(jobs::enqueue(*db, job_of(jobs::kJobJobsPrune)) > 0);
 		TEST_EXPECT(jobs::enqueue(*db, job_of(jobs::kJobHostsPrune)) > 0);
 		TEST_EXPECT(jobs::enqueue(*db, job_of(jobs::kJobHostKeysPrune)) > 0);
+		TEST_EXPECT(jobs::enqueue(*db, job_of(jobs::kJobUnknownsPrune)) > 0);
 	}
-	TEST_EXPECT(jobs::run_due(pool, registry) == 3);
+	TEST_EXPECT(jobs::run_due(pool, registry) == 4);
 	auto db = pool.acquire();
 	TEST_EXPECT(db->query("SELECT 1 FROM jobs WHERE kind = 'test.old';").empty());
 	TEST_EXPECT(
 			db->query("SELECT 1 FROM jobs WHERE kind = 'test.live' AND state = 'queued';").size() ==
 			1);
-	TEST_EXPECT(jobs::prune_finished(*db, 0) == 3); // the prunes' own, done just now
+	TEST_EXPECT(jobs::prune_finished(*db, 0) == 4); // the prunes' own, done just now
 
 	// An admin's prune names its keep in its payload, a day at the least: one
 	// finished two days ago goes, one finished two hours ago stays.
