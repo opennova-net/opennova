@@ -271,9 +271,27 @@ void test_limits() {
 		std::string occ = "o3d 2\nmodel L\nlod 0\npart 0 0 0 0\nocc 0 0 0\n";
 		for (int i = 0; i < 129; ++i) occ += "ov " + num(i) + " 0 0\n";
 		refuses_at("occlusion-vertices", occ, 5, "the occlusion record holds 129 vertices");
+		// The game's occluder walk lists 128 planes [orig: Terrain_BuildClipPlanesFromCollision @ 0x5b34e0, the
+		// 128-entry list @ 0x5b3711]: 128 planes given build, 129 do not.
+		const std::string mesh = "o3d 2\nmodel L\nmaterial FF_ST_OP\nlod 0\npart 0 0 0 0\nmesh 0\n"
+		                         "v 0 0 0 0 0 1 0 0\nv 1 0 0 0 0 1 1 0\nv 0 1 0 0 0 1 0 1\nt 0 1 2\n"
+		                         "occ 0 0 0\nov 0 0 0\nov 1 0 0\nov 0 1 0\n";
+		occ = mesh;
+		for (int i = 0; i < 128; ++i) occ += "op 0 0 1 " + num(i) + "\n";
+		std::vector<SceneFinding> findings;
+		check(build(occ + "of 0 1 2 127\n", findings), "occlusion-planes: 128 given build" + dump(findings));
 		occ = "o3d 2\nmodel L\nlod 0\npart 0 0 0 0\nocc 0 0 0\nov 0 0 0\n";
-		for (int i = 0; i < 33; ++i) occ += "op 0 0 1 " + num(i) + "\n";
-		refuses_at("occlusion-planes", occ, 5, "the occlusion record holds 33 planes");
+		for (int i = 0; i < 129; ++i) occ += "op 0 0 1 " + num(i) + "\n";
+		refuses_at("occlusion-planes", occ, 5, "the occlusion record holds 129 planes");
+		// The exporter's rule derives at most 32 [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)]: a cone of
+		// 40 faces (the box's six planes and each face's own) is refused, saying to give the planes.
+		occ = mesh.substr(0, mesh.find("occ 0 0 0\n")) + "occ 0 0 0\nov 0 0 1\n";
+		for (int i = 0; i < 40; ++i) {
+			const double a = 6.283185307179586 * i / 40;
+			occ += "ov " + std::to_string(2 * std::cos(a)) + " " + std::to_string(2 * std::sin(a)) + " 0\n";
+		}
+		for (int i = 0; i < 40; ++i) occ += "of 0 " + num(1 + i) + " " + num(1 + (i + 1) % 40) + "\n";
+		refuses_at("occlusion-derived-planes", occ, 11, "planes by the exporter's rule");
 	}
 	// A render vertex 32,768 m out overflows GHDR's 16.16 radius.
 	refuses_at("model-radius", kRigid + "v 40000 0 0 0 0 1 0 0\nv 0 1 0 0 0 1 0 1\nv 0 0 1 0 0 1 0 1\nt 0 1 2\n", 8,
