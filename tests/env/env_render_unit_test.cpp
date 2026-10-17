@@ -197,9 +197,11 @@ int main() {
 		const GlareResult full = compute_sun_glare(1.0f, 255);
 		if (!expect(full.glare == 192 && full.fog_whiten == 40, "dot 1.0 gives glare 192 / whiten 40")) return 1;
 
+		// [orig: @ 0x5ad7a5..0x5ad7b1 (the veil on dot^16), @ 0x5ad7c1..0x5ad7fc
+		//  (the whitening on dot^64)]
 		const GlareResult partial = compute_sun_glare(0.95f, 255);
-		if (!expect(partial.glare == 37, "dot 0.95: 0.95^32 * 192 = 37")) return 1;
-		if (!expect(partial.fog_whiten == 0, "dot 0.95: 0.95^128 * 40 truncates to 0")) return 1;
+		if (!expect(partial.glare == 84, "dot 0.95: 0.95^16 * 192 = 84")) return 1;
+		if (!expect(partial.fog_whiten == 1, "dot 0.95: 0.95^64 * 40 = 1.5 truncates to 1")) return 1;
 
 		const GlareResult occluded = compute_sun_glare(1.0f, 128);
 		if (!expect(occluded.glare == 96, "occlusion brightness scales glare (192*128/255)")) return 1;

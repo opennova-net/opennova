@@ -21,7 +21,7 @@ extends GutTest
 #   ([orig: Name @ 0xADDR] or a D-/divergence entry) in the same commit.
 # - Divergences are pinned AS SHIPPED, never "corrected" (env-tod-re.md
 #   Divergences table + docs/env/env-honored-matrix.md):
-#     #14 glare occlusion held at full brightness (dot^32 curve only),
+#     #14 glare occlusion held at full brightness (dot^16 curve only),
 #     #17 iris auto-exposure unconsumed (getters pinned, no consumer),
 #     #19 get_terrain_lighting_attenuation returns identity Vector3.ONE,
 #     #20 sky dome as the C7 structural port (builder formula pinned).
@@ -93,7 +93,7 @@ extends GutTest
 #   dead-band hysteresis + jitter pattern, asset-free [orig:
 #   Render_SkyboxSunGlow @ 0x5acd00]; the key moved to the env_render_unit
 #   ctest with the ADR 0043 d10 sweep, like the smoother/* ColorSmoother keys).
-#   celestial/glare_sweep + glare_occlusion (the dot^32 curve @ 0x5ad610,
+#   celestial/glare_sweep + glare_occlusion (the dot^16 curve @ 0x5ad610,
 #   still live via its sub_5AD8B0 caller) stayed byte-identical.
 #   #17 CLOSED 2026-07-06 (REN-5, the modulator chain going LIVE): the
 #   weather core now ticks modulator-2 -> modulator -> the color blocks in
@@ -188,7 +188,7 @@ const FLOAT_EPSILON := 1e-4
 # [orig: Environment_ComputeTimeOfDayColors @ 0x57de40 windows].
 const GRID_TIMES: Array[int] = [0, 550, 600, 615, 1200, 1830, 1845, 1900, 2200]
 
-# Glare sweep inputs (EnvFile.compute_sun_glare pins the dot^32 curve
+# Glare sweep inputs (EnvFile.compute_sun_glare pins the dot^16 curve
 # [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610]).
 const GLARE_DOTS: Array[float] = [-1.0, -0.5, 0.0, 0.25, 0.5, 0.75, 0.9, 0.95, 0.975, 0.99, 1.0]
 const GLARE_BRIGHTNESS: Array[int] = [0, 32, 64, 128, 192, 255]
@@ -252,7 +252,11 @@ const EXPECTED_BYTES := {
 	"c2/t2200": "273748 14212C 2B2D40 FFFFFF 1C1C1C 273748 2B2D40 2B2D40 1C1C1C 2B2D40 14212C 14212C FFFFFF FFFFFF 1E3C5A FFFFFF FFFFFF 808080 01 01",
 	"c2/t2200/water": "102750",
 	"celestial/glare_occlusion": "0000 1805 300A 6014 901E C028",
-	"celestial/glare_sweep": "0000 0000 0000 0000 0000 0000 0600 2500 5501 8B0B C028",
+	# Re-dumped 2026-10-17 with the witnessed powers: the veil on dot^16 and the
+	# whitening on dot^64 [orig: Environment_ComputeSunGlareAndFogBlend
+	# @ 0x5ad7a5..0x5ad7b1, @ 0x5ad7c1..0x5ad7fc] (the dump had pinned dot^32 /
+	# dot^128, one square too many on each).
+	"celestial/glare_sweep": "0000 0000 0000 0000 0000 0100 2300 5401 8007 A315 C028",
 	"envfile/derived": "9AFFFF 9A9A9A 7A5F43",
 	"sky/flat": "01 2D3C4B",
 	"sky/mesh": "441 2400 0 22 21 0 1 22 1 23 22 1 2 23",

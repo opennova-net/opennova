@@ -1378,31 +1378,37 @@ std::vector<WaterStripBatch> water_strip_batches(int row_count) {
 // Sun glare
 
 GlareResult compute_sun_glare(float view_dot_sun, int occlusion_brightness) {
-	// [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610]: dot^32 -> glare
-	// (x192, clamp 255); dot^128 -> fog whitening (x40, clamp 40); both scaled
-	// by the occlusion brightness (0..255).
+	// [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610]: dot^16 -> glare
+	// (x192, clamp 255; four squarings @ 0x5ad745..0x5ad7a1, the scale
+	// @ 0x5ad7a5..0x5ad7b1); dot^64 -> fog whitening (x40, clamp 40; two more
+	// @ 0x5ad7c1..0x5ad7e9, the scale @ 0x5ad7ed..0x5ad7fc); both scaled by
+	// the occlusion brightness (0..255).
 	GlareResult result;
 	if (view_dot_sun <= 0.0f) {
 		return result;
 	}
 	const float dot = std::min(view_dot_sun, 1.0f);
-	float pow32 = dot;
-	for (int i = 0; i < 5; ++i) {
-		pow32 *= pow32; // dot^32
+	float pow16 = dot;
+	for (int i = 0; i < 4; ++i) {
+		pow16 *= pow16; // dot^16
 	}
-	const float pow128 = pow32 * pow32 * pow32 * pow32; // dot^128
+	const float pow32 = pow16 * pow16;
+	const float pow64 = pow32 * pow32; // dot^64
 	const float occlusion = static_cast<float>(std::clamp<int>(occlusion_brightness, 0, 255)) / 255.0f;
-	result.glare = std::clamp<int>(static_cast<int>(pow32 * 192.0f * occlusion), 0, 255);
-	result.fog_whiten = std::clamp<int>(static_cast<int>(pow128 * 40.0f * occlusion), 0, 40);
+	result.glare = std::clamp<int>(static_cast<int>(pow16 * 192.0f * occlusion), 0, 255);
+	result.fog_whiten = std::clamp<int>(static_cast<int>(pow64 * 40.0f * occlusion), 0, 40);
 	return result;
 }
 
 SunVeil sun_veil_from_dot(int view_dot_fixed, int occlusion_brightness,
                           int sun_dim_fixed, int overcast_blend_fixed) {
 	// [orig: Environment_ComputeSunGlareAndFogBlend @ 0x5ad610] — the exact 16.16
-	// chain: five squarings to dot^32, two more to dot^128, brightness >> 8,
-	// the x192 / x40 scales, then the SunDim (x(0x640000 - dim)>>8,
-	// /25600) and overcast (x(1 - overcast)) folds on BOTH outputs.
+	// chain over the view dot it is handed (retail's own @ 0x5ad718..0x5ad734;
+	// the caller, runtime/environment/celestial_frame.h, computes it in float):
+	// four squarings to dot^16 for the veil, two more to dot^64 for the
+	// stop-down, brightness >> 8, the x192 / x40 scales, then the SunDim
+	// (x(0x640000 - dim)>>8, /25600) and overcast (x(1 - overcast)) folds on
+	// BOTH outputs.
 	SunVeil veil;
 	int glare_value = 0;
 	int fog_value = 0;
@@ -1415,14 +1421,15 @@ SunVeil sun_veil_from_dot(int view_dot_fixed, int occlusion_brightness,
 		const int32_t dot4 = sq(dot2);             // @ 0x5ad771
 		const int32_t dot8 = sq(dot4);             // @ 0x5ad789
 		const int32_t dot16 = sq(dot8);            // @ 0x5ad7a1
-		const int32_t dot32 = sq(dot16);
-		glare_value = (192 * ((occlusion_brightness * dot32) >> 8)) >> 16; // @ 0x5ad7b1
+		// The veil reads dot^16 itself (`imul eax, ebp` @ 0x5ad7a5 on the
+		// value just stored), not a fifth square.
+		glare_value = (192 * ((occlusion_brightness * dot16) >> 8)) >> 16; // @ 0x5ad7b1
 		if (glare_value > 255) {
 			glare_value = 255; // @ 0x5ad7ba
 		}
-		const int32_t dot64 = sq(dot32);  // @ 0x5ad7d5
-		const int32_t dot128 = sq(dot64);
-		fog_value = (40 * ((occlusion_brightness * dot128) >> 8)) >> 16; // @ 0x5ad7fc
+		const int32_t dot32 = sq(dot16);  // @ 0x5ad7d5
+		const int32_t dot64 = sq(dot32);  // @ 0x5ad7d9..0x5ad7e9, kept in eax
+		fog_value = (40 * ((occlusion_brightness * dot64) >> 8)) >> 16; // @ 0x5ad7fc
 		if (fog_value > 40) {
 			fog_value = 40; // @ 0x5ad802
 		}
