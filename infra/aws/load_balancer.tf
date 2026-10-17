@@ -8,10 +8,10 @@
 # (service.tf: prod's adopted one, 54.162.79.147, which retail's hosts file
 # and the Switcher name, never released), zone b's one of its own. Retail
 # clients reach the gate, the lobby and web's HTTP routes at zone a's address
-# alone (ONNET_PUBLIC_HOST, ONNET_LOBBY_ENDPOINT, ONNET_WEB_HOST: no client
-# follows a DNS name); the site's proxied records point at the balancer's DNS
-# name (edge.tf), which answers with both, and so does the update service's
-# unproxied one. Target groups, of IP targets (the tasks) that see each
+# alone (ONNET_PUBLIC_HOST, ONNET_LOBBY_ENDPOINT, ONNET_WEB_HOST), which the
+# gate's own unproxied name, nw, also names (edge.tf; OpenNova's client dials
+# it); the site's proxied records point at the balancer's DNS name (edge.tf),
+# which answers with both, and so does the update service's unproxied one. Target groups, of IP targets (the tasks) that see each
 # client's own address, each with its listener on its port:
 #   gate            UDP gate_udp_port to the gate's tasks, from everyone (the
 #                   clients' probes, the hosts' status blobs); health: HTTP

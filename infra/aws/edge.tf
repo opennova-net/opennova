@@ -23,8 +23,9 @@
 # below. CNAMEs to its
 # DNS name (Cloudflare flattens the apex's), whose answers are its two zones'
 # Elastic IPs. Proxied by default so the site gets Cloudflare TLS. Retail
-# clients follow no name: the gate announces the balancer's zone-a address
-# (ONNET_WEB_HOST, service.tf).
+# clients follow no name to the gate (gs.novaworld.net, the Switcher's hosts
+# line) and the gate announces the balancer's zone-a address (ONNET_WEB_HOST,
+# service.tf); OpenNova's own client follows the gate's name, below.
 resource "cloudflare_record" "web_root" {
   count   = local.dns_enabled ? 1 : 0
   zone_id = var.cloudflare_zone_id
@@ -66,6 +67,24 @@ resource "cloudflare_record" "update" {
   proxied = false
 
   comment = "Managed by Terraform - OpenNova update service (plain TCP, never proxied)"
+}
+
+# The gate's name (local.novaworld_host), never proxied: the gate speaks UDP,
+# which Cloudflare's proxy would not pass. An A record at the balancer's zone-a
+# address, the one the gate announces and /api/server-info reports (the
+# Switcher's hosts line), so it names the gate alone, never zone b. OpenNova's
+# own client dials it for its OpenNova NovaWorld (ADR 0010 d2), and a
+# self-run opennova-serve lists on it with --master-host.
+resource "cloudflare_record" "novaworld" {
+  count   = local.dns_enabled ? 1 : 0
+  zone_id = var.cloudflare_zone_id
+  name    = local.is_prod ? "nw" : "nw.${local.deployment}"
+  content = local.service_public_ip
+  type    = "A"
+  ttl     = 300
+  proxied = false
+
+  comment = "Managed by Terraform - OpenNova NovaWorld gate (UDP, never proxied)"
 }
 
 locals {
