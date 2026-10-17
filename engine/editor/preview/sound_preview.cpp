@@ -29,6 +29,14 @@ std::vector<const PreviewBank *> chain_banks(const std::vector<PreviewBank> &ban
 	return out;
 }
 
+const PreviewBank *chain_set(const std::vector<PreviewBank> &banks, const std::string &expansion,
+                             const std::string &name, int32_t &index) {
+	for (const PreviewBank *bank : chain_banks(banks, expansion))
+		if ((index = audio::find_bank_set(bank->file, name)) >= 0) return bank;
+	index = -1;
+	return nullptr;
+}
+
 PreviewPlay plan_set_play(const std::vector<PreviewBank> &banks, const std::string &expansion, const std::string &set,
                           const std::string &only, audio::SoundSelector &selector, uint8_t view_flags,
                           const audio::SetHearing *heard) {
@@ -39,24 +47,24 @@ PreviewPlay plan_set_play(const std::vector<PreviewBank> &banks, const std::stri
 		return play;
 	}
 	// Where the game looks: the one bank asked, else the chain in its order.
-	std::vector<const PreviewBank *> search;
+	const PreviewBank *bank = nullptr;
+	int32_t index = -1;
 	if (!only.empty()) {
-		for (const PreviewBank &bank : banks)
-			if (strutil::iequals(bank.name, only) || strutil::iequals(bank.path, only)) search.push_back(&bank);
+		std::vector<const PreviewBank *> search;
+		for (const PreviewBank &held : banks)
+			if (strutil::iequals(held.name, only) || strutil::iequals(held.path, only)) search.push_back(&held);
 		if (search.empty()) {
 			play.words = "The project has no sound bank " + only + ".";
 			return play;
 		}
+		for (const PreviewBank *candidate : search)
+			if ((index = audio::find_bank_set(candidate->file, set)) >= 0) {
+				bank = candidate;
+				break;
+			}
 	} else {
-		search = chain_banks(banks, expansion);
+		bank = chain_set(banks, expansion, set, index);
 	}
-	const PreviewBank *bank = nullptr;
-	int32_t index = -1;
-	for (const PreviewBank *candidate : search)
-		if ((index = audio::find_bank_set(candidate->file, set)) >= 0) {
-			bank = candidate;
-			break;
-		}
 	if (!bank) {
 		if (only.empty())
 			play.words = "No sound bank the game searches (gamelocl.lwf, game.lwf, game3.lwf, game2.lwf, an expansion's own) "

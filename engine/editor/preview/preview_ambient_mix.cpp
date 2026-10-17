@@ -35,10 +35,7 @@ PreviewAmbientMix::~PreviewAmbientMix() = default;
 const PreviewBank *PreviewAmbientMix::find_set(const ClipSoundSources &banks, const std::string &name, int32_t &index) {
 	index = -1;
 	if (name.empty()) return nullptr;
-	for (const PreviewBank *bank : chain_banks(banks.banks(), banks.expansion()))
-		if ((index = audio::find_bank_set(bank->file, name)) >= 0) return bank;
-	index = -1;
-	return nullptr;
+	return chain_set(banks.banks(), banks.expansion(), name, index);
 }
 
 void PreviewAmbientMix::close() {
