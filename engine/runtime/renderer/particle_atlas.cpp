@@ -192,26 +192,22 @@ ParticleAtlasPageTexture particle_atlas_page_texture(const ParticleRgbaImage &pa
 		return texture;
 	// [orig: @ 0x687717..0x687766 (the format)]
 	texture.format = select_texture_dxt_format(creation_flags, caps);
-	// [orig: @ 0x687785 -> GTexture_DownsampleToLimits @ 0x687170 (the halvings
-	//  the flags ask for, each GTexture_Downsample2x2_RGBA8)]
-	std::uint32_t width = static_cast<std::uint32_t>(page.width);
-	std::uint32_t height = static_cast<std::uint32_t>(page.height);
-	std::vector<std::uint8_t> base = page.rgba;
-	halve_rgba_times(base, width, height, pixel_texture_halvings(width, height, creation_flags));
-	// [orig: @ 0x6877BA..0x687801 (the count over the halved sides)]
-	const std::uint32_t count = texture_level_count(width, height, creation_flags);
-	if (texture.format != TextureDxtFormat::None) {
-		texture.dxt_levels = build_dxt_texture_levels(base.data(), width, height,
-				texture.format, count);
+	// The creator's halvings, count, level-0 load and box chain
+	// (pixel_device_texture_levels) [orig: @ 0x687785 -> GTexture_DownsampleToLimits
+	// @ 0x687170; @ 0x6877BA..0x687801 (the count over the halved sides); the load
+	// @ 0x6878A0; D3DXFilterTexture @ 0x6878BE, filter 5 (BOX)]
+	std::vector<DeviceTextureLevel> levels = pixel_device_texture_levels(page.rgba.data(),
+			static_cast<std::uint32_t>(page.width), static_cast<std::uint32_t>(page.height), creation_flags, caps,
+			0, kReferenceMaxTextureSide, &texture.dxt_levels);
+	if (texture.format != TextureDxtFormat::None)
 		return texture;
+	for (DeviceTextureLevel &level : levels) {
+		ParticleRgbaImage image;
+		image.width = static_cast<int>(level.width);
+		image.height = static_cast<int>(level.height);
+		image.rgba = std::move(level.rgba);
+		texture.rgba_levels.push_back(std::move(image));
 	}
-	ParticleRgbaImage level0;
-	level0.width = static_cast<int>(width);
-	level0.height = static_cast<int>(height);
-	level0.rgba = std::move(base);
-	texture.rgba_levels.push_back(std::move(level0));
-	// [orig: D3DXFilterTexture @ 0x6878BE, filter 5 (BOX)]
-	extend_box_chain(texture.rgba_levels, count);
 	return texture;
 }
 

@@ -217,9 +217,28 @@ void test_pixel_device_texture_levels() {
 		for (size_t i = 1; zero && i < thin.size(); ++i)
 			for (uint8_t b : thin[i].rgba) zero = zero && b == 0;
 		CHECK(zero, "levels 1+ unfilled (zero), not box-filtered");
-		const auto thin_dxt = pixel_device_texture_levels(strip.data(), 8, 2, 0x500201u);
-		CHECK(thin_dxt.size() == 4 && thin_dxt[1].rgba == std::vector<uint8_t>(4 * 1 * 4, 0),
-				"the DXT chain's levels 1+ likewise");
+		// D-RMAT-X2: as DXT the texture is D3DX's 8 x 4, the strip on top and the rest transparent
+		// black, then 4 x 2, 2 x 1, 1 x 1 [orig: D3DXTex_ValidateAndAdjustTextureParams
+		// @0x690B99..0x690BCE; BltNone @0x6E0D57].
+		std::vector<DxtSurface> blocks_out;
+		const auto thin_dxt = pixel_device_texture_levels(strip.data(), 8, 2, 0x500201u, kReferenceTextureDxtCaps, 0,
+				kReferenceMaxTextureSide, &blocks_out);
+		CHECK(thin_dxt.size() == 4 && thin_dxt[0].width == 8 && thin_dxt[0].height == 4 && thin_dxt[1].width == 4 &&
+						thin_dxt[1].height == 2 && thin_dxt[1].rgba == std::vector<uint8_t>(4 * 2 * 4, 0),
+				"the DXT chain at D3DX's sides, its levels 1+ likewise");
+		CHECK(thin_dxt.size() == 4 && thin_dxt[0].rgba[(2 * 8) * 4 + 3] == 0 && thin_dxt[0].rgba[3] == 255,
+				"the rounded rows transparent black under the strip");
+		CHECK(blocks_out.size() == 4 && blocks_out[0].width == 8 && blocks_out[0].height == 4 &&
+						blocks_out[3].blocks == std::vector<uint8_t>(8, 0),
+				"the blocks handed back, the unloaded levels zero blocks");
+		// A side halved to 0 is D3DX's 1 (an A8R8G8B8 1 x 1, one level), loaded over the creator's
+		// own 2 x 2 rect from an empty buffer: 0 [orig: GTexture_DownsampleToLimits @0x687200;
+		// D3DXTex_ValidateAndAdjustTextureParams @0x690A2B / @0x690A37].
+		std::vector<uint8_t> tiny(2 * 2 * 4, 0xC8);
+		const auto gone = pixel_device_texture_levels(tiny.data(), 2, 2, kTextureFlagHalveTwice);
+		CHECK(gone.size() == 1 && gone[0].width == 1 && gone[0].height == 1 &&
+						gone[0].rgba == std::vector<uint8_t>(4, 0),
+				"a side halved to 0: a 1 x 1 of 0");
 		// An 8 x 8 asks for 2 levels and filters level 1.
 		std::vector<uint8_t> square(8 * 8 * 4, 0xC8);
 		const auto eight = pixel_device_texture_levels(square.data(), 8, 8, 0x100001u);

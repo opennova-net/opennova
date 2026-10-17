@@ -106,6 +106,50 @@ void test_level_count() {
 			"a request above 0 is the level count");
 }
 
+// D3DX's sides and levels (D-RMAT-X2): a 0 side made 1, a DXT side rounded up to a multiple of 4,
+// the chain counted from those sides [orig: D3DXTex_ValidateAndAdjustTextureParams @ 0x690A2B /
+// @ 0x690A37, @ 0x690B99..0x690BCE, @ 0x690C32..0x690C7D].
+void test_d3dx_sides_and_levels() {
+	CHECK(d3dx_texture_side(0, TextureDxtFormat::None) == 1 && d3dx_texture_side(3, TextureDxtFormat::None) == 3,
+			"an A8R8G8B8 side: 0 made 1, any other kept");
+	CHECK(d3dx_texture_side(0, TextureDxtFormat::Dxt1) == 4 && d3dx_texture_side(2, TextureDxtFormat::Dxt1) == 4 &&
+					d3dx_texture_side(5, TextureDxtFormat::Dxt5) == 8 && d3dx_texture_side(8, TextureDxtFormat::Dxt5) == 8,
+			"a DXT side rounded up to a multiple of 4");
+	CHECK(d3dx_texture_level_count(8, 4, 0) == 4 && d3dx_texture_level_count(4, 4, 0) == 3 &&
+					d3dx_texture_level_count(16, 16, 2) == 2 && d3dx_texture_level_count(1, 1, 5) == 1,
+			"the larger side's bit length, or fewer when asked");
+	CHECK(texture_level_count(2, 2, 0, TextureDxtFormat::Dxt1) == 3 &&
+					texture_level_count(2, 2, 0) == 2 && texture_level_count(8, 2, 0, TextureDxtFormat::Dxt1) == 4,
+			"a DXT full chain counts from the rounded sides");
+	// The FILTER_NONE load: the source rect at the source's pitch, transparent black past it, a
+	// texel past the written ones 0. A 6 x 4 halving loaded over its creator's 12 x 8 rect into an
+	// 8 x 4 DXT level reads on into the next halved row, then past the buffer.
+	std::vector<uint8_t> halved(6 * 4 * 4);
+	for (size_t i = 0; i < halved.size(); ++i) halved[i] = static_cast<uint8_t>(i / 4 + 1);
+	const std::vector<uint8_t> level = load_rgba8_filter_none(halved.data(), 6 * 4, 6, 12, 8, 8, 4);
+	const auto at = [&](uint32_t x, uint32_t y) { return level[(static_cast<size_t>(y) * 8 + x) * 4]; };
+	CHECK(level.size() == 8 * 4 * 4 && at(0, 0) == 1 && at(5, 0) == 6 && at(6, 0) == 7 && at(7, 0) == 8,
+			"a row reads the rect's width at the halved pitch, on into the next row");
+	CHECK(at(5, 3) == 24 && at(6, 3) == 0 && at(7, 3) == 0, "past the written texels: 0");
+	const std::vector<uint8_t> padded = load_rgba8_filter_none(halved.data(), 6 * 4, 6, 6, 4, 8, 8);
+	CHECK(padded[(0 * 8 + 6) * 4] == 0 && padded[(4 * 8 + 0) * 4 + 3] == 0 && padded[(3 * 8 + 5) * 4] == 24,
+			"past the rect: transparent black");
+	// A DXT level built from an 8 x 2 strip is 8 x 4, its rows 2 and 3 transparent black, then 4 x 2,
+	// 2 x 1 and 1 x 1 (the box chain at the rounded sides).
+	std::vector<uint8_t> strip(8 * 2 * 4, 0xC8);
+	const std::vector<DxtSurface> chain = build_dxt_texture_levels(strip.data(), 8, 2, TextureDxtFormat::Dxt1, 4);
+	CHECK(chain.size() == 4 && chain[0].width == 8 && chain[0].height == 4 && chain[1].width == 4 &&
+					chain[1].height == 2 && chain[3].width == 1 && chain[3].height == 1,
+			"the strip's chain at D3DX's sides");
+	if (chain.size() == 4) {
+		const std::vector<uint8_t> top = encode_rgba8(decode_dxt_surface(chain[0]));
+		bool pad = true, opaque = true;
+		for (size_t i = 0; i < 8 * 2; ++i) opaque = opaque && top[i * 4 + 3] == 255;
+		for (size_t i = 8 * 2; i < 8 * 4; ++i) pad = pad && top[i * 4 + 3] == 0 && top[i * 4] == 0;
+		CHECK(opaque && pad, "the strip on top, the rounded rows transparent black");
+	}
+}
+
 void test_dxt1_blocks() {
 	uint8_t block[8];
 	// A solid colour: both endpoints the same 5:6:5 word, every index 0.
@@ -309,6 +353,7 @@ int main() {
 	test_dds_levels();
 	test_format_selection();
 	test_level_count();
+	test_d3dx_sides_and_levels();
 	test_dxt1_blocks();
 	test_dxt5_blocks();
 	test_level_chain();

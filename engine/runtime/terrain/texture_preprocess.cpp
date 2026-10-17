@@ -354,18 +354,19 @@ std::vector<renderer::DxtSurface> build_detail_layer_levels(
 				renderer::pixel_texture_halvings(out.width, out.height, kDetailLayerFlags));
 		return out;
 	};
-	const Rgba8Image layer = halved(base);
 	if (far_detail != nullptr) {
-		for (const Rgba8Image &level : build_paired_detail_mip_chain(layer, halved(*far_detail))) {
+		for (const Rgba8Image &level : build_paired_detail_mip_chain(halved(base), halved(*far_detail))) {
 			levels.push_back(renderer::encode_dxt_surface(
 					renderer::decode_rgba8(level.pixels.data(), level.width, level.height),
 					level.width, level.height, format));
 		}
 		return levels;
 	}
-	return renderer::build_dxt_texture_levels(layer.pixels.data(), layer.width,
-			layer.height, format,
-			renderer::texture_level_count(layer.width, layer.height, kDetailLayerFlags));
+	// The plain creator: its halvings, count, level-0 load and box chain
+	// (renderer::pixel_device_texture_levels) [orig: GTexture_CreateFromPixelData_0 @ 0x6876C0].
+	renderer::pixel_device_texture_levels(base.pixels.data(), base.width, base.height, kDetailLayerFlags,
+			renderer::kReferenceTextureDxtCaps, 0, renderer::kReferenceMaxTextureSide, &levels);
+	return levels;
 }
 
 // [orig: GTexture_CreateFromPixelDataWithAlphaBlend @0x687270 — the custom mip builder stops

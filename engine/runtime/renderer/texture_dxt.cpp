@@ -512,16 +512,38 @@ uint32_t texture_requested_level_count(uint32_t width, uint32_t height,
 	return levels;
 }
 
-uint32_t texture_level_count(uint32_t width, uint32_t height,
-		uint32_t creation_flags) {
-	uint32_t levels = texture_requested_level_count(width, height, creation_flags);
-	if (levels == 0) {
-		// D3DXCreateTexture's 0: every level down to 1x1.
-		for (uint32_t side = std::max(width, height); side > 0; side >>= 1) {
-			++levels;
+uint32_t d3dx_texture_side(uint32_t side, TextureDxtFormat format) {
+	side = std::max(side, 1u);
+	return format == TextureDxtFormat::None ? side : (side + 3u) & ~3u;
+}
+
+uint32_t d3dx_texture_level_count(uint32_t width, uint32_t height, uint32_t requested) {
+	uint32_t bits = 0;
+	for (uint32_t side = std::max(width, height); side > 0; side >>= 1) {
+		++bits;
+	}
+	return (requested == 0 || requested > bits) ? bits : requested;
+}
+
+uint32_t texture_level_count(uint32_t width, uint32_t height, uint32_t creation_flags,
+		TextureDxtFormat format) {
+	return d3dx_texture_level_count(d3dx_texture_side(width, format), d3dx_texture_side(height, format),
+			texture_requested_level_count(width, height, creation_flags));
+}
+
+std::vector<uint8_t> load_rgba8_filter_none(const uint8_t *rgba, size_t texels, uint32_t pitch,
+		uint32_t rect_w, uint32_t rect_h, uint32_t dest_w, uint32_t dest_h) {
+	std::vector<uint8_t> out(static_cast<size_t>(dest_w) * dest_h * 4, 0);
+	const uint32_t rows = std::min(rect_h, dest_h);
+	const uint32_t columns = std::min(rect_w, dest_w);
+	for (uint32_t y = 0; y < rows; ++y) {
+		for (uint32_t x = 0; x < columns; ++x) {
+			const size_t source = static_cast<size_t>(y) * pitch + x;
+			if (rgba == nullptr || source >= texels) continue;
+			std::memcpy(out.data() + (static_cast<size_t>(y) * dest_w + x) * 4, rgba + source * 4, 4);
 		}
 	}
-	return levels;
+	return out;
 }
 
 size_t dxt_block_bytes(TextureDxtFormat format) {
@@ -913,10 +935,12 @@ std::vector<DxtSurface> build_dxt_texture_levels(const uint8_t *rgba,
 			dxt_block_bytes(format) == 0) {
 		return levels;
 	}
-	levels.push_back(encode_dxt_surface(decode_rgba8(rgba, width, height),
-			width, height, format));
-	uint32_t level_w = width;
-	uint32_t level_h = height;
+	uint32_t level_w = d3dx_texture_side(width, format);
+	uint32_t level_h = d3dx_texture_side(height, format);
+	const std::vector<uint8_t> level0 = load_rgba8_filter_none(rgba, static_cast<size_t>(width) * height,
+			width, width, height, level_w, level_h);
+	levels.push_back(encode_dxt_surface(decode_rgba8(level0.data(), level_w, level_h),
+			level_w, level_h, format));
 	while (levels.size() < level_count && (level_w > 1 || level_h > 1)) {
 		const std::vector<DxtColor> filtered =
 				box_filter_half(decode_dxt_surface(levels.back()), level_w, level_h);

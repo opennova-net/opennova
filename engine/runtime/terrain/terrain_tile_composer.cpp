@@ -181,7 +181,7 @@ TerrainTileQuadrantChain quadrant_device_chain(const Rgba8Image &base, uint32_t 
 	// [orig: GTexture_CreateFromPixelData_0 @ 0x6877BA..0x687801 (the count), @ 0x6878A0 (level 0),
 	//  @ 0x6878B5..0x6878BE (each later level the box filter of the one before)]
 	chain.dxt = renderer::build_dxt_texture_levels(base.pixels.data(), base.width, base.height, format,
-			renderer::texture_level_count(base.width, base.height, creation_flags));
+			renderer::texture_level_count(base.width, base.height, creation_flags, format));
 	for (const renderer::DxtSurface &surface : chain.dxt) {
 		Rgba8Image image;
 		image.width = surface.width;
@@ -314,9 +314,11 @@ std::vector<Rgba8Image> build_terrain_tile_set_mips(const Rgba8Image &atlas) {
 	if (!atlas.is_valid() || format == renderer::TextureDxtFormat::None) {
 		return retail_box_levels(atlas);
 	}
-	const std::vector<renderer::DxtSurface> levels = renderer::build_dxt_texture_levels(
-			atlas.pixels.data(), atlas.width, atlas.height, format,
-			renderer::texture_level_count(atlas.width, atlas.height, kTileSetAtlasFlags));
+	// The plain creator [orig: GTexture_CreateFromPixelData_0 @ 0x6876C0]: its halvings,
+	// count, level-0 load and box chain (renderer::pixel_device_texture_levels).
+	std::vector<renderer::DxtSurface> levels;
+	renderer::pixel_device_texture_levels(atlas.pixels.data(), atlas.width, atlas.height, kTileSetAtlasFlags,
+			renderer::kReferenceTextureDxtCaps, 0, renderer::kReferenceMaxTextureSide, &levels);
 	std::vector<Rgba8Image> result;
 	result.reserve(levels.size());
 	for (const renderer::DxtSurface &level : levels) {

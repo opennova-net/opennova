@@ -128,19 +128,27 @@ struct DeviceTextureLevel {
 
 // The levels of the device texture the game builds from `width` x `height` RGBA8 pixels under
 // `flags`, as their texels decode: halved as pixel_texture_halvings asks (each halving
-// GTexture_Downsample2x2_RGBA8), in the format select_texture_dxt_format picks for `caps`, with
-// texture_level_count's levels over the halved sides (at most `level_limit` of them when it is not 0).
-// An A8R8G8B8 texture's level 0 is the halved pixels and, when the count it asked for is above 1,
-// every later level D3DX's box filter of the bytes the level before was stored as; a DXT texture's
-// levels are build_dxt_texture_levels' blocks, decoded. A texture that asked for 0 levels (the
-// smaller side 2 or less, no 0x40000) gets D3DX's full chain with level 0 alone loaded and its
-// levels 1+ zero here (D-RMAT-X1) [orig: GTexture_CreateFromPixelData_0 @ 0x687717..0x687766 (the
-// format), @ 0x687785 (the halvings), @ 0x6877BA..0x6877E0 (the count), @ 0x6878A0 (level 0,
-// D3DXLoadSurfaceFromMemory), @ 0x6878B1..0x6878BE (D3DXFilterTexture, D3DX_FILTER_BOX, each level
-// from the one before, for a count above 1)].
+// GTexture_Downsample2x2_RGBA8, a side able to reach 0), in the format select_texture_dxt_format
+// picks for `caps`, at D3DX's sides (d3dx_texture_side: a 0 side made 1, a DXT side rounded up to a
+// multiple of 4) with D3DX's levels for the request over the halved sides (texture_level_count; at
+// most `level_limit` of them when it is not 0). Level 0 is the creator's FILTER_NONE load: its
+// source rect the creator's own un-halved sides, at the halved pitch (load_rgba8_filter_none), so a
+// halved texture widened by the rounding reads on into the next halved row and its unwritten tail
+// as zero. When the count it asked for is above 1 every later level is D3DX's box filter of the
+// level before (an A8R8G8B8 level of the bytes it was stored as, a DXT level of its blocks); a
+// texture that asked for 0 levels (the smaller side 2 or less, no 0x40000) gets D3DX's full chain
+// with level 0 alone loaded and its levels 1+ zero here (D-RMAT-X1). A DXT texture's blocks go to
+// `dxt` too when it is given (its unloaded levels zero blocks).
+// [orig: GTexture_CreateFromPixelData_0 @ 0x687717..0x687766 (the format), @ 0x687785 (the
+// halvings), @ 0x6877BA..0x6877E0 (the count), @ 0x68781A (D3DXCreateTexture), @ 0x6878A0 (level 0,
+// D3DXLoadSurfaceFromMemory: no destination rect @ 0x687895, the source rect {0, 0, width, height}
+// of the creator's arguments @ 0x687869..0x68789C, the pitch 4 x the halved width
+// @ 0x687876..0x68788A, D3DX_FILTER_NONE @ 0x68787E), @ 0x6878B1..0x6878BE (D3DXFilterTexture,
+// D3DX_FILTER_BOX, each level from the one before, for a count above 1)].
 std::vector<DeviceTextureLevel> pixel_device_texture_levels(const uint8_t *rgba, uint32_t width,
 		uint32_t height, uint32_t flags, const TextureDxtCaps &caps = kReferenceTextureDxtCaps,
-		uint32_t level_limit = 0, uint32_t max_side = kReferenceMaxTextureSide);
+		uint32_t level_limit = 0, uint32_t max_side = kReferenceMaxTextureSide,
+		std::vector<DxtSurface> *dxt = nullptr);
 
 // What a DDS file states of itself, as GTexture_InitFromMemory reads it.
 struct DdsSource {

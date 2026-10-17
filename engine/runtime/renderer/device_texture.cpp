@@ -152,13 +152,21 @@ DeviceTexture pixel_device_texture(uint32_t width, uint32_t height, uint32_t fla
 // [orig: GTexture_CreateFromPixelData_0 @ 0x6876C0]
 std::vector<DeviceTextureLevel> pixel_device_texture_levels(const uint8_t *rgba, uint32_t width,
 		uint32_t height, uint32_t flags, const TextureDxtCaps &caps, uint32_t level_limit,
-		uint32_t max_side) {
+		uint32_t max_side, std::vector<DxtSurface> *dxt) {
 	std::vector<DeviceTextureLevel> levels;
+	if (dxt != nullptr)
+		dxt->clear();
 	if (rgba == nullptr || width == 0 || height == 0)
 		return levels;
+	// The source rect D3DX loads level 0 from is the creator's own sides, whatever the halvings.
+	const uint32_t rect_w = width;
+	const uint32_t rect_h = height;
 	std::vector<uint8_t> base(rgba, rgba + static_cast<size_t>(width) * height * 4);
 	halve_rgba_times(base, width, height, pixel_texture_halvings(width, height, flags, max_side));
-	uint32_t count = texture_level_count(width, height, flags);
+	const TextureDxtFormat format = select_texture_dxt_format(flags, caps);
+	const uint32_t device_w = d3dx_texture_side(width, format);
+	const uint32_t device_h = d3dx_texture_side(height, format);
+	uint32_t count = texture_level_count(width, height, flags, format);
 	if (level_limit != 0)
 		count = std::min(count, level_limit);
 	// D3DXFilterTexture fills the chain only when the level count the game asked
@@ -171,28 +179,42 @@ std::vector<DeviceTextureLevel> pixel_device_texture_levels(const uint8_t *rgba,
 	// D3DXTex_ValidateAndAdjustTextureParams @0x690C32..0x690C7D].
 	const uint32_t filled =
 			texture_requested_level_count(width, height, flags) > 1 ? count : std::min(count, 1u);
-	const TextureDxtFormat format = select_texture_dxt_format(flags, caps);
+	std::vector<uint8_t> level0 = load_rgba8_filter_none(base.data(), static_cast<size_t>(width) * height, width,
+			rect_w, rect_h, device_w, device_h);
 	if (format != TextureDxtFormat::None) {
-		for (const DxtSurface &surface : build_dxt_texture_levels(base.data(), width, height, format, filled)) {
+		std::vector<DxtSurface> surfaces = build_dxt_texture_levels(level0.data(), device_w, device_h, format, filled);
+		for (const DxtSurface &surface : surfaces) {
 			DeviceTextureLevel level;
 			level.width = surface.width;
 			level.height = surface.height;
 			level.rgba = encode_rgba8(decode_dxt_surface(surface));
 			levels.push_back(std::move(level));
 		}
+		if (dxt != nullptr)
+			*dxt = std::move(surfaces);
 	} else {
-		DeviceTextureLevel level0;
-		level0.width = width;
-		level0.height = height;
-		level0.rgba = std::move(base);
-		levels.push_back(std::move(level0));
+		DeviceTextureLevel first;
+		first.width = device_w;
+		first.height = device_h;
+		first.rgba = std::move(level0);
+		levels.push_back(std::move(first));
 		extend_box_chain(levels, filled);
 	}
 	for (uint32_t i = static_cast<uint32_t>(levels.size()); i < count; ++i) {
 		DeviceTextureLevel level;
-		level.width = std::max(1u, width >> i);
-		level.height = std::max(1u, height >> i);
+		level.width = std::max(1u, device_w >> i);
+		level.height = std::max(1u, device_h >> i);
 		level.rgba.assign(static_cast<size_t>(level.width) * level.height * 4, 0);
+		if (dxt != nullptr) {
+			DxtSurface blank;
+			blank.format = format;
+			blank.width = level.width;
+			blank.height = level.height;
+			blank.blocks.assign(static_cast<size_t>((level.width + 3) / 4) * ((level.height + 3) / 4) *
+							dxt_block_bytes(format),
+					0);
+			dxt->push_back(std::move(blank));
+		}
 		levels.push_back(std::move(level));
 	}
 	return levels;
