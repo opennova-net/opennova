@@ -107,9 +107,10 @@ DiagnosticSeverity source_severity(MissionFinding code) {
 
 // The pools' capacities (runtime/world/entity.h retail_pool_capacity: organics 0, items 1, buildings 2,
 // markers 3). The load's count checks warn of nothing: each compare is followed by an unconditional jump
-// over its warning dialog [orig: BMS_LoadAndValidateHeader, `jmp short` @0x40e31a, @0x40e34d, @0x40e380;
-// Mission_LoadBMSFile @0x40f5ba]; past the capacity the pool's allocator answers no slot [orig:
-// Pool_AllocEntry @ 0x442230, @0x44227b] (what the spawn does then is not witnessed).
+// over its warning dialog [orig: BMS_LoadAndValidateHeader, `jmp short` @0x40e31a (over the "Too many items"
+// sprintf @0x40e326), @0x40e34d, @0x40e380; Mission_LoadBMSFile @0x40f5ba]; past the capacity the pool's
+// allocator answers no slot [orig: Pool_AllocEntry @ 0x442230, @0x44227b] (what the spawn does then is not
+// witnessed).
 const size_t kMaxItems = world::retail_pool_capacity(1), kMaxBuildings = world::retail_pool_capacity(2),
              kMaxMarkers = world::retail_pool_capacity(3), kMaxOrganics = world::retail_pool_capacity(0);
 // The group tables hold 64 (bms::kGroupRecordCount) [orig: docs/mission/bms-event-runtime-re.md 7.2].
