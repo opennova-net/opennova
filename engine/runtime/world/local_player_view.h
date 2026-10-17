@@ -408,7 +408,11 @@ struct LocalPlayerViewFrame {
     bool scope_camera_zero_active = false;
     bool scope_details_active = false;
     bool scope_details_scoped = false;
-    uint32_t scope_weapon_flags = 0;
+    // The weapon def's two scope readouts, decoded from its flag word:
+    // SHOWRANGE (0x400) gates the distance, SHOWELEVATION (0x800) the zeroing
+    // [orig: HUD_DrawScopeOverlayDetails @0x59E4A9 / @0x59E8A2].
+    bool scope_rangefinder = false;
+    bool scope_zeroable = false;
     int32_t scope_magnification = 1;
     int32_t scope_max_range_q16 = 0;
     int16_t scope_zero_word = 0;

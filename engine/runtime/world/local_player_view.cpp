@@ -1090,7 +1090,8 @@ void fill_view_context(World *world, LocalPlayerWeapon &w, const PlayerViewState
         active_slot != nullptr && active_slot->current != weapon_action::kSwitchFrom;
     out.scope_details_active = optical_view && (out.scope_details_scoped || details_sighted) &&
         !v.binoculars_view_active;
-    out.scope_weapon_flags = w.def.flags;
+    out.scope_rangefinder = (w.def.flags & DEF_WEAPON_FLAG_SHOWRANGE) != 0;
+    out.scope_zeroable = (w.def.flags & DEF_WEAPON_FLAG_SHOWELEVATION) != 0;
     out.scope_magnification = active_slot != nullptr ? active_slot->scope_zoom : 1;
     out.scope_max_range_q16 = w.def.scope_zero.max_range_q16;
     out.scope_zero_word = active_slot != nullptr ? active_slot->scope_zero : 0;

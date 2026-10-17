@@ -974,8 +974,8 @@ void HudOverlay::set_scope_state(const Ref<PlayerLocalView> &p_view, const Ref<R
         const auto &v = p_view->native_frame();
         scope.active = v.scope_details_active;
         scope.scoped = v.scope_details_scoped;
-        scope.rangefinder = (v.scope_weapon_flags & 0x400u) != 0;
-        scope.zeroable = (v.scope_weapon_flags & 0x800u) != 0;
+        scope.rangefinder = v.scope_rangefinder;
+        scope.zeroable = v.scope_zeroable;
         scope.range_q16 = v.aim_range_q16;
         scope.max_range_q16 = v.scope_max_range_q16;
         scope.zero_word = v.scope_zero_word;
