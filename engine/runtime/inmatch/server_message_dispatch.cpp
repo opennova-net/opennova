@@ -1950,8 +1950,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 
 				if (((shooter->flags | shooter->engine_flags) & 0x102u) == 0x102u) break;
 				const bool alt_fire = (fr.fire_flags & 0x01) != 0; // [orig: @0x50bb0d]
-				// The weapon whose round fires: the request's, or the personal slot's.
+				// The weapon whose round fires: the request's, or the slot's.
 				uint8_t fired_adm = fr.adm_index;
+				// Whether the round clears the fire action's re-entry (below).
+				bool round_lands = true;
 				// ADM + ammo authority — armory-fed hosts only (a table-less host accepts,
 				// mirroring the 0x5A echo fallback, D-NET-141). Alt fire skips the adm lookup,
 				// the clip, and the equipped mirror [orig: @0x50bb0f / the @0x50be2b alt path].
@@ -2084,6 +2086,22 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 						conn.equipped_slot.kind = NapiNPConnection::EquippedSlotRef::kPersonal;
 						conn.equipped_slot.combo = uint16_t(adm->category) * 65u + adm->rank;
 					}
+					// The slot's fire action re-enters the handler with the weapon that
+					// fires, whose local pass judges the round again: the owner checks
+					// on that weapon, then the claimed origin's reach from the shooter.
+					// A refusal there drops the round, its score and the spawn-protection
+					// clear; the clip is spent either way (the spend follows the
+					// re-entry) and the fire-tick floor still stamps (the network pass
+					// returned 0). [orig: WeaponAction_Fire @0x542C5E ->
+					//  Entity_FireWeaponAndSendPacket @0x42BF34 -> Server_ClientFiredRound's
+					//  local pass - the owner checks @0x50C083..0x50C0B9, the reach
+					//  @0x50C33C..0x50C6FA; Weapon_ConsumeAmmo @0x542C75; the 0x06
+					//  handler's stamp @0x51370E..0x513740]
+					const world::FixedVec3 claimed{fr.pos_x, fr.pos_y, fr.pos_z};
+					round_lands =
+							world::weapon_fire_owner_status(*world, *shooter, slot_def, false) == 0 &&
+							world::weapon_fire_origin_status(*world, *shooter, *slot_def, claimed,
+									/*replay_client_action=*/false) == 0;
 				}
 				// Stamp the claimed target on the shooter; the tag-2 serializer reads it LIVE
 				// [orig: @0x50c2ad shooter+104->+12; NetPacket_SerializeRoundEvent @0x50485a].
@@ -2098,15 +2116,17 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				// pose checks; alt fire returns through RoundData_AddRound first.
 				// [orig: Server_ClientFiredRound @0x50BAA0 — alt @0x50BB0D, the
 				//  event-1 call @0x50C727]
-				if (!alt_fire) world->match.record_shot(*world, conn.link.owned_entity);
-				// The validated round ends the shooter's spawn protection: an in-session
-				// authority clears entity+292 for a non-spectator slot whose value is
-				// nonzero. A rejected fire never reaches this store. The listen host's own
-				// fire takes the same clear through Entity_FireWeaponAndSendPacket's
-				// authority leg (world/player_weapon.cpp local commit).
-				// [orig: Server_ClientFiredRound @0x50BAA0 @0x50c736..0x50c75d]
-				if (world->rules.mp_session && shooter->damage_state != 0 &&
-				    !conn.link.spectator)
+				if (!alt_fire && round_lands)
+					world->match.record_shot(*world, conn.link.owned_entity);
+				// The landed primary round ends the shooter's spawn protection: an
+				// in-session authority clears entity+292 for a non-spectator slot whose
+				// value is nonzero, on the same local pass, so alt fire never clears it.
+				// The listen host's own fire takes the same clear through
+				// Entity_FireWeaponAndSendPacket's authority leg (world/player_weapon.cpp
+				// local commit). [orig: Server_ClientFiredRound @0x50BAA0
+				//  @0x50c736..0x50c75d; the alt return @0x50BE4B..0x50BE65]
+				if (!alt_fire && round_lands && world->rules.mp_session &&
+				    shooter->damage_state != 0 && !conn.link.spectator)
 					shooter->damage_state = 0;
 
 				// Ring append [orig: RoundData_AddRound @0x4fdb40]. The ring stores the
@@ -2126,13 +2146,13 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				ev.subtype = uint8_t((fr.extra_byte2 & 0x3F) | ((fr.extra_byte2 >> 7) << 7));
 				ev.slot_byte = fr.misc_byte; // [orig: ring+32 <- fireRequest+80 @0x4fdcfc]
 				ev.adm_index = fired_adm;
-				world->out.rounds.add(ev);
+				if (round_lands) world->out.rounds.add(ev);
 				// The authoritative round spawns SYNCHRONOUSLY with the ring append
 				// [orig: RoundData_AddRound @0x4fdb40 inline-calls RoundData_SpawnRound
 				// @0x4ec0d0 — the ring is only the tag-2 fan-out log; §5.60]. Ammo = the
 				// adm's load-time-resolved round_type (+4; +84 is the stat id); an
 				// armory- or ammo-less host skips the sim (fire still echoes).
-				if (!world->tables.ammo.empty()) {
+				if (round_lands && !world->tables.ammo.empty()) {
 					const world::WeaponTableEntry *fire_adm =
 							world->tables.weapons.by_index(fired_adm);
 					if (fire_adm != nullptr && fire_adm->ammo_index >= 0) {

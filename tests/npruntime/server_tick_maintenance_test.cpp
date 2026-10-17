@@ -311,15 +311,29 @@ bool check_spawn_protection_cleared_by_validated_fire() {
 	if (!expect(world.out.rounds.count == 0 && entity->damage_state == 500,
 			"a rejected fire leaves the protection intact"))
 		return false;
+	// Alt fire returns through RoundData_AddRound ahead of the clear
+	// [orig: Server_ClientFiredRound @0x50BE4B..0x50BE65].
+	{
+		ClientFiredRound alt;
+		alt.current_tick = ++client_tick;
+		alt.shooter_handle = shooter.packed;
+		alt.target_handle = 0xFFFF;
+		alt.adm_index = 5;
+		alt.fire_flags = 0x23; // bit 0: alt fire
+		dispatch_fire(encode_client_fired_round(alt));
+	}
+	if (!expect(world.out.rounds.count == 1 && entity->damage_state == 500,
+			"an alt-fire round keeps the protection"))
+		return false;
 	dispatch_fire(fire_body(conn, shooter.packed, 5, client_tick));
-	if (!expect(world.out.rounds.count == 1 && entity->damage_state == 0,
+	if (!expect(world.out.rounds.count == 2 && entity->damage_state == 0,
 			"the first validated fire clears the protection"))
 		return false;
 	// Outside a session the clear is not the fire's concern (the tick arm owns it).
 	world.rules.mp_session = false;
 	entity->damage_state = 77;
 	dispatch_fire(fire_body(conn, shooter.packed, 5, client_tick));
-	return expect(world.out.rounds.count == 2 && entity->damage_state == 77,
+	return expect(world.out.rounds.count == 3 && entity->damage_state == 77,
 			"the fire clear is gated on the live session");
 }
 

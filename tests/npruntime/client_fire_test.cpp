@@ -451,10 +451,11 @@ bool check_fire_owner_environment_and_origin() {
     std::vector<inmatch::NapiNPConnection> roster;
     roster.push_back(make_seeded_conn(3, 1, &udp, ns::TransportMode::Client, shooter, true));
     roster[0].weapon_slots[uint16_t(65)] = inmatch::WeaponSlotState{1, 4}; // the grant's
-    auto shoot = [&] {
+    auto shoot_at = [&](int32_t px) {
         dispatch_fire(roster[0], roster, world,
-                fire_body(shooter.packed, 2, 1, 100 * 65536, 0, 0, 0, 0, 0xFFFF, 1, 0, 0));
+                fire_body(shooter.packed, 2, 1, px, 0, 0, 0, 0, 0xFFFF, 1, 0, 0));
     };
+    auto shoot = [&] { shoot_at(0); };
     player->flags |= 2;
     shoot();
     if (!expect(world.out.rounds.count == 0, "dead player cannot fire")) return false;
@@ -474,7 +475,12 @@ bool check_fire_owner_environment_and_origin() {
     if (!expect(world.out.rounds.count == 0, "no-clip weapon still needs its ammo cost")) return false;
     roster[0].reply.ammo_pools[1] = 2;
     shoot();
-    if (!expect(world.out.rounds.count == 1, "client action replay skips the distance gate")) return false;
+    if (!expect(world.out.rounds.count == 1, "the clipless weapon fires once its cost is held")) return false;
+    // The fire action's re-entry judges the claimed origin's reach: a round claimed
+    // 100 m off the shooter is dropped [orig: Server_ClientFiredRound's local pass
+    //  @0x50C33C..0x50C6FA, the re-entry @0x42BF34].
+    shoot_at(100 * 65536);
+    if (!expect(world.out.rounds.count == 1, "a claimed origin beyond the reach fires no round")) return false;
     // The server's real CanFire path follows groundEntity into a carried
     // vehicle and its friendly FARP; it does not reject arbitrary busy children.
     w::Entity farp;
@@ -712,7 +718,54 @@ bool check_controller_seat_reads_no_bucket() {
 			"off the seat the bucket rifle fires from the player's bucket");
 }
 
+// The slot's fire action re-enters with the weapon that fires and judges the round
+// again: a slot weapon the owner checks refuse, or a claimed origin beyond the
+// shooter's reach, drops the round while its clip is still spent.
+// [orig: Server_ClientFiredRound's local pass - the -14 @0x50C0A8..0x50C0B9, the reach
+//  @0x50C33C..0x50C6FA; Weapon_ConsumeAmmo @0x542C75]
+bool check_the_fire_action_rejudges_the_round() {
+	w::World world;
+	world.registry.configure_pool(0, 4);
+	const auto shooter = w::spawn_remote_player(world, player_spawn(0xFFF1));
+	std::vector<inmatch::NapiNPConnection> roster;
+	roster.push_back(make_seeded_conn(2, 1, nullptr, ns::TransportMode::Client, shooter, true));
+	auto &conn = roster[0];
+	world.tables.weapons.entries.resize(7);
+	for (const uint8_t adm : {uint8_t{5}, uint8_t{6}}) {
+		auto &weapon = world.tables.weapons.entries[adm];
+		weapon.name = adm == 5 ? "MEDIC_ROUND_RIFLE" : "PLAIN_RIFLE";
+		weapon.valid = true;
+		weapon.clipsize = 20;
+		weapon.category = 3;
+		weapon.rank = 2;
+		weapon.ammo_index = adm == 5 ? 0 : 1; // the zero-index round: Medic only
+	}
+	const uint16_t combo = uint16_t(3 * 65 + 2);
+	conn.weapon_slots[combo] = inmatch::WeaponSlotState{5, 3};
+	w::Entity *player = world.registry.get(shooter);
+	const auto shoot = [&](uint8_t adm, int32_t px) {
+		dispatch_fire(conn, roster, world,
+				fire_body(shooter.packed, 0x22, adm, px, 0, 0, 0, 0, 0xFFFF, 1, 12, 0));
+	};
+	// The request's weapon passes the first pass; the slot's fails the second.
+	shoot(6, 0);
+	if (!expect(world.out.rounds.count == 0 && conn.weapon_slots[combo].clip == 2,
+			"the slot weapon's -14 drops the round and still spends the clip"))
+		return false;
+	world.tables.weapons.entries[5].ammo_index = 1;
+	player->flags |= w::kEntityFlagPlayer;
+	shoot(6, 3 * 65536); // three metres off the shooter's position
+	if (!expect(world.out.rounds.count == 0 && conn.weapon_slots[combo].clip == 1,
+			"a claimed origin beyond the reach drops the round and spends the clip"))
+		return false;
+	shoot(6, 0);
+	return expect(world.out.rounds.count == 1 && world.out.rounds.records[0].adm_index == 5 &&
+			conn.weapon_slots[combo].clip == 0,
+			"a round within reach lands");
+}
+
 int main() {
+	if (!check_the_fire_action_rejudges_the_round()) return 1;
 	if (!check_controller_seat_reads_no_bucket()) return 1;
 	if (!check_ungranted_combo_is_refused()) return 1;
 	if (!check_the_slot_weapon_fires()) return 1;
@@ -772,7 +825,7 @@ int main() {
 
 	// --- 1. Valid primary fire: ring append + clip decrement + mirrors, no replies. ---
 	const std::vector<uint8_t> body =
-			fire_body(hb.packed, /*flags=*/0x22, /*adm=*/5, 0x100000, 0x200000, 0x30000,
+			fire_body(hb.packed, /*flags=*/0x22, /*adm=*/5, 0x10000, 0x8000, 0x18000,
 	                  /*dx=*/0x1234, /*dy=*/int32_t(0xFFFFAAAA), hc.packed,
 	                  /*hit_part=*/1025, /*extra2=*/12, /*misc=*/64);
 	if (!expect(body.size() == 45, "crafted 0x06 body is 45 B"))
@@ -784,8 +837,8 @@ int main() {
 		const w::RoundEvent &ev = world.out.rounds.records[0];
 		if (!expect(ev.shooter_handle == hb.packed, "ring shooter = the connection's entity"))
 			return 1;
-		if (!expect(ev.origin_x == 0x100000 && ev.origin_y == 0x200000 && ev.origin_z == 0x30000,
-		            "ring origin = the claimed fire origin"))
+		if (!expect(ev.origin_x == 0x10000 && ev.origin_y == 0x8000 && ev.origin_z == 0x18000,
+		            "ring origin = the claimed fire origin (within the shooter's reach)"))
 			return 1;
 		if (!expect(ev.dir_yaw == int32_t(0x1234u << 16) &&
 		                    ev.dir_pitch == int32_t(0xAAAAu << 16),
