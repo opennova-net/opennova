@@ -9,8 +9,8 @@ name: NovaWorld images
 # (ghcr.io/<owner>/opennova-novaworld-backup, deploy/backup). Each is tagged
 # sha-<short commit>, its branch and, on master, latest: `app deploy --tag`
 # pins every one from one tag (DEPLOY.md). All seven build as one bake
-# (apps/novaworld_common/docker-bake.hcl) while http-tests runs, and push
-# once it has passed.
+# (apps/novaworld_common/docker-bake.hcl) while http-tests runs, and each
+# pushes once it has passed.
 
 on:
   push:
@@ -91,17 +91,35 @@ jobs:
           files: apps/novaworld_common/docker-bake.hcl
 
   # On push events alone (PRs from forks can't push to GHCR), once http-tests
-  # and the build have passed: the same bake with each image's tags, pushed.
-  # Its checkout is the build's, so every step hits the cache the build just
-  # exported for this commit and the job compiles nothing, only uploads (a
-  # missed cache costs time alone: the same images build again here).
+  # and the build have passed: each image pushed by a job of its own, its bake
+  # target built again with its tags. The checkout is the build's, so every
+  # step hits the layer cache the build exported for this commit and nothing
+  # compiles; each job only uploads (a missed cache costs time alone: the
+  # image builds again, the same). One target per job, not the seven in one
+  # bake: a bake whose targets share the build stage but read different cache
+  # scopes misses that stage and compiles it again. fail-fast is off so one
+  # failed push stops no other image's.
   push:
+    name: push (${{ matrix.target }})
     needs: [http-tests, build]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { target: gate, image: opennova-novaworld-gate }
+          - { target: lobby, image: opennova-novaworld-lobby }
+          - { target: web, image: opennova-novaworld-web }
+          - { target: controller, image: opennova-novaworld-controller }
+          - { target: worker, image: opennova-novaworld-worker }
+          # The web portal (nginx), web's second container.
+          - { target: portal, image: novaworld-web }
+          # The nightly backup task's image (pg_dump to S3; deploy/backup).
+          - { target: backup, image: opennova-novaworld-backup }
     steps:
       - uses: actions/checkout@v4
         with:
@@ -118,100 +136,27 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # One bake file of tags and labels per image, each for the bake
-      # definition's meta-<image> target.
-      - name: Image metadata (gate)
-        id: meta_gate
+      # The image's tags and labels as a bake file for the bake definition's
+      # meta-<target> target.
+      - name: Image metadata
+        id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/${{ github.repository_owner }}/opennova-novaworld-gate
-          bake-target: meta-gate
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image }}
+          bake-target: meta-${{ matrix.target }}
           tags: |
             type=sha,format=short
             type=ref,event=branch
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
 
-      - name: Image metadata (lobby)
-        id: meta_lobby
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/opennova-novaworld-lobby
-          bake-target: meta-lobby
-          tags: |
-            type=sha,format=short
-            type=ref,event=branch
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
-
-      - name: Image metadata (web)
-        id: meta_web
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/opennova-novaworld-web
-          bake-target: meta-web
-          tags: |
-            type=sha,format=short
-            type=ref,event=branch
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
-
-      - name: Image metadata (controller)
-        id: meta_controller
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/opennova-novaworld-controller
-          bake-target: meta-controller
-          tags: |
-            type=sha,format=short
-            type=ref,event=branch
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
-
-      - name: Image metadata (worker)
-        id: meta_worker
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/opennova-novaworld-worker
-          bake-target: meta-worker
-          tags: |
-            type=sha,format=short
-            type=ref,event=branch
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
-
-      # The web portal (nginx), web's second container.
-      - name: Image metadata (portal)
-        id: meta_portal
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/novaworld-web
-          bake-target: meta-portal
-          tags: |
-            type=sha,format=short
-            type=ref,event=branch
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
-
-      # The nightly backup task's image (pg_dump to S3; deploy/backup).
-      - name: Image metadata (backup)
-        id: meta_backup
-        uses: docker/metadata-action@v5
-        with:
-          images: ghcr.io/${{ github.repository_owner }}/opennova-novaworld-backup
-          bake-target: meta-backup
-          tags: |
-            type=sha,format=short
-            type=ref,event=branch
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
-
-      - name: Push the images
+      - name: Push the image
         uses: docker/bake-action@v6
         env:
           GHA_CACHE: read
         with:
           source: .
           push: true
+          targets: ${{ matrix.target }}
           files: |
             apps/novaworld_common/docker-bake.hcl
-            ${{ steps.meta_gate.outputs.bake-file }}
-            ${{ steps.meta_lobby.outputs.bake-file }}
-            ${{ steps.meta_web.outputs.bake-file }}
-            ${{ steps.meta_controller.outputs.bake-file }}
-            ${{ steps.meta_worker.outputs.bake-file }}
-            ${{ steps.meta_portal.outputs.bake-file }}
-            ${{ steps.meta_backup.outputs.bake-file }}
+            ${{ steps.meta.outputs.bake-file }}

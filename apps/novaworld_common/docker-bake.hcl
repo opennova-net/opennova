@@ -8,7 +8,8 @@
 # task's (deploy/backup).
 #
 # Tags and labels come from the workflow: docker/metadata-action writes one
-# bake file per image whose target is meta-<image>. The empty meta-* targets
+# bake file per image whose target is meta-<image>, and each image pushes from
+# a bake of its own target (the workflow says why). The empty meta-* targets
 # below stand in for those files anywhere else (a local bake builds untagged).
 
 # The GitHub Actions layer cache, a scope per image (each image's own name):
