@@ -2420,6 +2420,17 @@ void test_lfp_panel_element(const fnt_font_t *font) {
 		if (q.texture >= opennova::hud::kHudTexLfpTeam1 &&
 				q.texture <= opennova::hud::kHudTexLfpNeutral) ++conquest_icons;
 	CHECK(conquest_icons == 0, "the conquest arm stays unmodelled");
+	// Every other game type takes the AAS arm: retail calls the drawer every HUD
+	// frame and its one game-type test is the conquest arm's
+	// [orig: HUD_RenderAllOverlays @0x5a8530; `cmp g_GameType, 50010h`
+	//  @0x5a248d..0x5a24a1].
+	lp.game_type = opennova::game_type::kTeamDeathmatch;
+	const HudDrawList &list_t = compiler.compile(state, 1024.0f, 768.0f);
+	size_t tdm_icons = 0;
+	for (const HudQuad &q : list_t.quads)
+		if (q.texture >= opennova::hud::kHudTexLfpTeam1 &&
+				q.texture <= opennova::hud::kHudTexLfpNeutral) ++tdm_icons;
+	CHECK(tdm_icons == 3, "a non-conquest game type draws the AAS arm");
 }
 
 // The map medic marker: a local-team medic's blip is REPLACED by the
