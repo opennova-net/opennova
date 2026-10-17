@@ -23,6 +23,12 @@ func reset() -> void:
 	_pushed = false
 
 
+## Whether the lane's last update pushed the panel (ADR 0018 read seam for
+## tests and diagnostics).
+func is_pushed() -> bool:
+	return _pushed
+
+
 func update(hud: HudOverlay, sim: Simulation, frame_counter: int) -> void:
 	if hud == null:
 		return
