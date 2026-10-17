@@ -50,7 +50,7 @@ const router = createRouter({
     // The link a password reset mail carries: /reset?token=<64 hex digits>.
     { path: '/reset', component: ResetPasswordPage, meta: { title: 'Reset password' } },
     { path: '/lobby', component: LobbyPage, meta: { title: 'Lobbies' } },
-    { path: '/lobby/:id(\d+)', component: LobbyServerPage, meta: { title: 'Server' } },
+    { path: '/lobby/:id(\\d+)', component: LobbyServerPage, meta: { title: 'Server' } },
     { path: '/lobbies', redirect: '/lobby' },
     { path: '/support', component: SupportPage, meta: { title: 'Support tiers' } },
     { path: '/terms', component: TermsPage, meta: { title: 'Terms of service' } },

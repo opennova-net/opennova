@@ -1,0 +1,19 @@
+import { describe, expect, it } from 'vitest';
+import router from './index';
+import LobbyServerPage from '../pages/LobbyServerPage.vue';
+import NotFoundPage from '../pages/NotFoundPage.vue';
+
+// The routes whose paths take a numeric id resolve a real one: a pattern's
+// \\d in a string literal must stay escaped, or it matches the letter d.
+describe('router', () => {
+  it.each([
+    ['/lobby/167772175', LobbyServerPage],
+  ])('resolves %s', (path, page) => {
+    const matched = router.resolve(path).matched;
+    expect(matched.at(-1)?.components?.default).toBe(page);
+  });
+
+  it('sends a lobby id that is no number to the not-found page', () => {
+    expect(router.resolve('/lobby/abc').matched.at(-1)?.components?.default).toBe(NotFoundPage);
+  });
+});
