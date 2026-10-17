@@ -38,18 +38,23 @@ namespace opennova::hud {
 
 // Texture slots the embedder registers at configure time; draw-list quads
 // reference these (negative = untextured fill/wireframe).
+// The HUDSTANCE records the stance indicator draws: the six stance frames and the two team tiles.
+inline constexpr int kHudStanceRecords = 8;
+
 enum HudTexture : int32_t {
 	kHudTexNone = -1,
 	kHudTexFrame = 0,
 	kHudTexCrosshair,
 	kHudTexClipGfx,
 	kHudTexRoundGfx,
-	kHudTexStance0, // six consecutive stance frames
+	kHudTexStance0, // the eight HUDSTANCE records: six stance frames, then the two team tiles
 	kHudTexStance1,
 	kHudTexStance2,
 	kHudTexStance3,
 	kHudTexStance4,
 	kHudTexStance5,
+	kHudTexStance6, // team 1's tile
+	kHudTexStance7, // team 2's tile
 	kHudTexMapTerrain,
 	kHudTexMapWater,
 	kHudTexMapIcons,
@@ -436,12 +441,14 @@ struct HudLayout {
 	int tip_box_tex_h = 0;
 	bool tip_keyboard_texture_valid = false;
 	bool tip_gameplay_texture_valid = false;
-	// The six stance frames' authored per-frame offsets + frame-0 dims.
-	std::array<int, 6> stance_offset_x{};
-	std::array<int, 6> stance_offset_y{};
-	int stance_frame0_w = 0;
-	int stance_frame0_h = 0;
-	std::array<bool, 6> stance_texture_valid{};
+	// The eight HUDSTANCE records (the six stance frames, then the team tiles 6 and 7): their
+	// authored offsets and their images' own sizes [orig: the info records 0x27239E0..0x2723A60,
+	// {texture, shader, width, height}, HUD_LoadTextureWithInfo @0x591750].
+	std::array<int, kHudStanceRecords> stance_offset_x{};
+	std::array<int, kHudStanceRecords> stance_offset_y{};
+	std::array<int, kHudStanceRecords> stance_frame_w{};
+	std::array<int, kHudStanceRecords> stance_frame_h{};
+	std::array<bool, kHudStanceRecords> stance_texture_valid{};
 	int frame_tex_w = 0;
 	int frame_tex_h = 0;
 	int crosshair_tex_w = 0;
@@ -1367,6 +1374,11 @@ private:
 	uint32_t hud_palette(int index) const;
 	void emit_rect(float x0, float y0, float x1, float y1, uint32_t color,
 			bool filled, int32_t texture = kHudTexNone, bool additive = false);
+	// HUD_DrawTexturedQuadWithBorder's draw of an image of tex_w x tex_h at design (x, y), the quad
+	// its image size: the corners scaled, the texture window off the on-screen extent
+	// (bordered_quad_uv) [orig: HUD_DrawTexturedQuadWithBorder @0x590C40].
+	void emit_bordered_quad(float x, float y, int tex_w, int tex_h, uint32_t argb, int32_t texture,
+			float surface_w, float surface_h);
 	void emit_rect_uv(float x0, float y0, float x1, float y1, float u0, float v0,
 			float u1, float v1, uint32_t color, int32_t texture);
 	// The retail stdbox panel and the per-row connection icon. The box takes

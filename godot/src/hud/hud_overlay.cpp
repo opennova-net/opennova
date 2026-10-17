@@ -697,18 +697,18 @@ void HudOverlay::configure(const Ref<HudPos> &p_hudpos, const Ref<ResourceRoot> 
 		layout_.hudls.moreav_tex_h = moreav.is_valid() ? moreav->get_height() : 0;
 	}
 
-	// The six stance frames' textures by slot (the engine resolved the
-	// HUDSTANCE ids and offsets).
-	for (int i = 0; i < 6; ++i) {
-		const Ref<Texture2D> tex =
-				load_hud_texture_(opennova::to_gd(assets.stance_textures[static_cast<size_t>(i)]),
-						ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kStanceRole));
+	// The eight HUDSTANCE records' textures by slot (the six stance frames,
+	// then the team tiles; the engine resolved the ids and offsets), each with
+	// its image's own size.
+	for (int i = 0; i < opennova::hud::kHudStanceRecords; ++i) {
+		const size_t r = static_cast<size_t>(i);
+		const Ref<Texture2D> tex = load_hud_texture_(opennova::to_gd(assets.stance_textures[r]),
+				ResourceRoot::loader_of(opennova::hud::HudLayoutAssets::kStanceRole));
 		textures_[opennova::hud::kHudTexStance0 + i] = tex;
-		layout_.stance_texture_valid[static_cast<size_t>(i)] = tex.is_valid();
+		layout_.stance_texture_valid[r] = tex.is_valid();
+		layout_.stance_frame_w[r] = tex.is_valid() ? tex->get_width() : 0;
+		layout_.stance_frame_h[r] = tex.is_valid() ? tex->get_height() : 0;
 	}
-	const Ref<Texture2D> frame0 = textures_[opennova::hud::kHudTexStance0];
-	layout_.stance_frame0_w = frame0.is_valid() ? frame0->get_width() : 0;
-	layout_.stance_frame0_h = frame0.is_valid() ? frame0->get_height() : 0;
 
 	load_crosshair_texture_();
 	apply_crosshair_options_();

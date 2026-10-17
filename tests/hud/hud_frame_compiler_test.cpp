@@ -2927,7 +2927,8 @@ void test_stance_obeys_weapon_group_declutter(const fnt_font_t *font) {
     HudLayout layout;
     layout.stance_pos = {32, 700, 0, 0, true};
     layout.stance_texture_valid.fill(true);
-    layout.stance_frame0_w = layout.stance_frame0_h = 64;
+    layout.stance_frame_w.fill(64);
+    layout.stance_frame_h.fill(64);
     layout.alpha_fade_ramp_ticks = 62;  // alphafade 100 0 1
     layout.alpha_fade_base_alpha = 255;
     HudFrameCompiler compiler;
@@ -2937,6 +2938,99 @@ void test_stance_obeys_weapon_group_declutter(const fnt_font_t *font) {
     CHECK(!compiler.compile(state, 1024, 768).quads.empty(), "on-foot stance draws when WPNGRP is visible");
     state.declutter_visible[kDeclutterWpnGrp] = false;
     CHECK(compiler.compile(state, 1024, 768).quads.empty(), "on-foot stance hides with WPNGRP");
+}
+
+// The bordered image draws (C-210): the stance records each at their own image size scaled by frame
+// 0's factor, the team tile under them in a team session, the static frame as a bordered quad of its
+// image size [orig: HUD_DrawStanceIndicator @0x599f10 -> HUD_DrawTexturedQuadWithBorder @0x590C40
+// at @0x59a173 / @0x59a21c / @0x59a2e3; the team gate @0x59a084..0x59a0eb; HUD_RenderOverlays
+// @0x5A7C91].
+void test_bordered_image_sites(const fnt_font_t *font) {
+	using namespace opennova::hud;
+	auto same_uv = [](const HudQuad &q, int tex_w, int tex_h) {
+		const BorderedQuadUv uv = bordered_quad_uv(tex_w, tex_h, q.x0, q.y0, q.x1, q.y1);
+		return q.u0 == uv.u0 && q.v0 == uv.v0 && q.u1 == uv.u1 && q.v1 == uv.v1 && q.u0 > 0.0f &&
+				q.u1 > 1.0f;
+	};
+	HudLayout layout;
+	layout.stance_pos = {100, 600, 0, 0, true};
+	layout.stance_texture_valid.fill(true);
+	layout.stance_frame_w.fill(32);
+	layout.stance_frame_h.fill(32);
+	layout.stance_frame_h[2] = 16; // frame 2 is 32 x 16: 128 x 64 at frame 0's factor of 4
+	layout.stance_offset_x[2] = 3;
+	layout.stance_offset_y[2] = 5;
+	layout.stance_frame_w[7] = 16; // team 2's tile is 16 x 16: 64 x 64
+	layout.stance_frame_h[7] = 16;
+	layout.stance_tint = 0x40FF8020u;
+	layout.alpha_fade_ramp_ticks = 62;
+	layout.alpha_fade_base_alpha = 255;
+	layout.frame_texture_valid = true;
+	layout.frame_pos = {10, 20, 0, 0, true};
+	layout.frame_tex_w = 200;
+	layout.frame_tex_h = 100;
+	HudFrameCompiler compiler;
+	compiler.configure(layout, font);
+	HudFrameState state;
+	state.ticks = 100;
+	state.stance = 2;
+	{
+		const HudQuad *frame = nullptr, *stance = nullptr;
+		int tiles = 0;
+		const auto &list = compiler.compile(state, 1024, 768);
+		for (const auto &q : list.quads) {
+			if (q.texture == kHudTexFrame) frame = &q;
+			if (q.texture == kHudTexStance0 + 2) stance = &q;
+			if (q.texture == kHudTexStance0 + 6 || q.texture == kHudTexStance0 + 7) ++tiles;
+		}
+		CHECK(frame != nullptr && frame->x0 == 10.0f && frame->y0 == 20.0f && frame->x1 == 210.0f &&
+						frame->y1 == 120.0f && frame->color == 0xFFFFFFFFu && same_uv(*frame, 200, 100),
+				"the static frame is a bordered quad of its image size");
+		// Frame 0 scales to 128 x 128, so the centring is 0 on both axes; frame 2 keeps its own size.
+		CHECK(stance != nullptr && stance->x0 == 103.0f && stance->y0 == 605.0f && stance->x1 == 231.0f &&
+						stance->y1 == 669.0f && same_uv(*stance, 32, 16) &&
+						(stance->color & 0x00FFFFFFu) == 0x00FF8020u,
+				"a stance frame draws at its own image size, bordered");
+		CHECK(tiles == 0, "no team tile outside a session");
+	}
+	state.session.in_session = true;
+	state.session.game_type = 0x10000u;
+	state.session.team = 2;
+	{
+		const HudQuad *tile = nullptr;
+		int other_tiles = 0, tile_at = -1, stance_at = -1;
+		const auto &list = compiler.compile(state, 1024, 768);
+		for (size_t i = 0; i < list.quads.size(); ++i) {
+			const HudQuad &q = list.quads[i];
+			if (q.texture == kHudTexStance0 + 7) {
+				tile = &q;
+				tile_at = int(i);
+			}
+			if (q.texture == kHudTexStance0 + 6) ++other_tiles;
+			if (q.texture == kHudTexStance0 + 2 && stance_at < 0) stance_at = int(i);
+		}
+		CHECK(tile != nullptr && other_tiles == 0 && tile->color == 0xFFFFFFFFu && tile->x0 == 100.0f &&
+						tile->y0 == 600.0f && tile->x1 == 164.0f && tile->y1 == 664.0f && same_uv(*tile, 16, 16),
+				"team 2's tile, record 7, in white at its own size");
+		CHECK(tile_at >= 0 && stance_at > tile_at, "the tile draws under the stance frame");
+	}
+	auto tile_count = [&](uint32_t game_type, bool in_session, int team) {
+		state.session.game_type = game_type;
+		state.session.in_session = in_session;
+		state.session.team = team;
+		int n = 0;
+		for (const auto &q : compiler.compile(state, 1024, 768).quads)
+			if (q.texture == kHudTexStance0 + 6 || q.texture == kHudTexStance0 + 7) ++n;
+		return n;
+	};
+	CHECK(tile_count(0x10000u, true, 1) == 1, "team 1 draws its tile");
+	CHECK(tile_count(0x30000u, true, 1) == 0, "a game type with 0x20000 draws none");
+	CHECK(tile_count(0x00000u, true, 1) == 0, "a game type without 0x10000 draws none");
+	CHECK(tile_count(0x10000u, false, 1) == 0, "outside a session none");
+	CHECK(tile_count(0x10000u, true, 0) == 0, "no team, no tile");
+	layout.stance_texture_valid[6] = false;
+	compiler.configure(layout, font);
+	CHECK(tile_count(0x10000u, true, 2) == 0, "either tile missing: none");
 }
 
 // The breath bar [orig: HUD_DrawBreathBar @0x59D6F0, called from
@@ -3058,8 +3152,8 @@ void test_seat_weapon_and_stance_transitions(const fnt_font_t *font) {
 	layout.clip_pos = {40, 650, 0, 0, true};
 	layout.stance_pos = {20, 700, 0, 0, true};
 	layout.stance_texture_valid.fill(true);
-	layout.stance_frame0_w = 32;
-	layout.stance_frame0_h = 32;
+	layout.stance_frame_w.fill(32);
+	layout.stance_frame_h.fill(32);
 	layout.alpha_fade_ramp_ticks = 62;  // alphafade 100 100 1
 	layout.alpha_fade_base_alpha = layout.alpha_fade_max_alpha = 255;
 	layout.crosshair_texture_valid = true;
@@ -3173,6 +3267,7 @@ int main() {
 	test_seat_weapon_and_stance_transitions(&font);
 	test_launcher_reload_keeps_ammo_flash(&font);
 	test_stance_obeys_weapon_group_declutter(&font);
+	test_bordered_image_sites(&font);
 	test_compiler_breath_bar(&font);
 	test_scope_details(&font);
 	test_optical_distance_long_format(&font);

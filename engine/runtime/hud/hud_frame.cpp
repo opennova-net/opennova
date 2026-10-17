@@ -1047,16 +1047,26 @@ void HudFrameCompiler::element_sights_card(const HudFrameState &state,
 	++draw_list_.elements_drawn;
 }
 
+void HudFrameCompiler::emit_bordered_quad(float x, float y, int tex_w, int tex_h, uint32_t argb,
+		int32_t texture, float surface_w, float surface_h) {
+	const float x0 = sx(x, surface_w);
+	const float y0 = sy(y, surface_h);
+	const float x1 = sx(x + static_cast<float>(tex_w), surface_w);
+	const float y1 = sy(y + static_cast<float>(tex_h), surface_h);
+	const BorderedQuadUv uv = bordered_quad_uv(tex_w, tex_h, x0, y0, x1, y1);
+	emit_rect_uv(x0, y0, x1, y1, uv.u0, uv.v0, uv.u1, uv.v1, argb, texture);
+}
+
 void HudFrameCompiler::element_frame(float w, float h) {
 	if (!layout_.frame_texture_valid) {
 		return;
 	}
+	// A bordered quad of the frame's image size [orig: HUD_RenderOverlays
+	// @0x5A7C91 -> HUD_DrawTexturedQuadWithBorder @0x590C40, the record
+	// 0x2723970's size as both the texture and the quad extent].
 	const float x = static_cast<float>(layout_.frame_pos.x);
 	const float y = static_cast<float>(layout_.frame_pos.y);
-	emit_rect(sx(x, w), sy(y, h),
-			sx(x + static_cast<float>(layout_.frame_tex_w), w),
-			sy(y + static_cast<float>(layout_.frame_tex_h), h), 0xFFFFFFFFu,
-			true, kHudTexFrame);
+	emit_bordered_quad(x, y, layout_.frame_tex_w, layout_.frame_tex_h, 0xFFFFFFFFu, kHudTexFrame, w, h);
 	++draw_list_.elements_drawn;
 }
 
@@ -1126,8 +1136,7 @@ void HudFrameCompiler::element_stance(const HudFrameState &state, float w,
 			return;
 		}
 	}
-	const int32_t q16 =
-			stance_scale_q16(layout_.stance_frame0_w, layout_.stance_frame0_h);
+	const int32_t q16 = stance_scale_q16(layout_.stance_frame_w[0], layout_.stance_frame_h[0]);
 	if (q16 <= 0) {
 		return;
 	}
@@ -1136,28 +1145,48 @@ void HudFrameCompiler::element_stance(const HudFrameState &state, float w,
 	const int cur_a = stance_current_alpha(elapsed, ramp, base_alpha);
 	const int prev_a = stance_prev_alpha(elapsed, ramp);
 
-	const int scaled_w = stance_scaled_dim(layout_.stance_frame0_w, q16);
-	const int scaled_h = stance_scaled_dim(layout_.stance_frame0_h, q16);
+	// The centring off frame 0's scaled size; a frame past 128 there draws nothing
+	// [orig: @0x59a023..0x59a07e].
+	const int scaled_w = stance_scaled_dim(layout_.stance_frame_w[0], q16);
+	const int scaled_h = stance_scaled_dim(layout_.stance_frame_h[0], q16);
+	if (scaled_w > 128 || scaled_h > 128) {
+		return;
+	}
 	const int center_x = stance_center_axis(scaled_w);
 	const int center_y = stance_center_axis(scaled_h);
 
-	auto emit_frame = [&](int idx, int alpha) {
-		const float dx = static_cast<float>(layout_.stance_pos.x +
-				layout_.stance_offset_x[static_cast<size_t>(idx)] + center_x);
-		const float dy = static_cast<float>(layout_.stance_pos.y +
-				layout_.stance_offset_y[static_cast<size_t>(idx)] + center_y);
-		emit_rect(sx(dx, w), sy(dy, h),
-				sx(dx + static_cast<float>(scaled_w), w),
-				sy(dy + static_cast<float>(scaled_h), h),
-				with_alpha(layout_.stance_tint, alpha), true,
-				kHudTexStance0 + idx);
+	// Each record is a bordered quad of its own image scaled by the shared
+	// factor, its texture window off its image size [orig:
+	// HUD_DrawTexturedQuadWithBorder @0x590C40 (x, y, tex_w, tex_h, w, h, shader,
+	// argb) at @0x59a173 / @0x59a21c / @0x59a2e3, tex the record's +8 / +0xC and
+	// the quad (q16 * size + 0x8000) >> 16].
+	auto emit_frame = [&](int idx, uint32_t argb) {
+		const size_t r = static_cast<size_t>(idx);
+		const float dx = static_cast<float>(layout_.stance_pos.x + layout_.stance_offset_x[r] + center_x);
+		const float dy = static_cast<float>(layout_.stance_pos.y + layout_.stance_offset_y[r] + center_y);
+		const float x0 = sx(dx, w);
+		const float y0 = sy(dy, h);
+		const float x1 = sx(dx + static_cast<float>(stance_scaled_dim(layout_.stance_frame_w[r], q16)), w);
+		const float y1 = sy(dy + static_cast<float>(stance_scaled_dim(layout_.stance_frame_h[r], q16)), h);
+		const BorderedQuadUv uv =
+				bordered_quad_uv(layout_.stance_frame_w[r], layout_.stance_frame_h[r], x0, y0, x1, y1);
+		emit_rect_uv(x0, y0, x1, y1, uv.u0, uv.v0, uv.u1, uv.v1, argb, kHudTexStance0 + idx);
 	};
+	// Under the frames, in a team session (a game type with 0x10000 and
+	// without 0x20000) with both team tiles loaded, the HUD entity's team tile
+	// in white: team 1 record 6, team 2 record 7 [orig: @0x59a084..0x59a0eb,
+	// the call @0x59a173].
+	if ((state.session.game_type & 0x10000u) != 0u && (state.session.game_type & 0x20000u) == 0u &&
+			state.session.in_session && layout_.stance_texture_valid[6] &&
+			layout_.stance_texture_valid[7] && (state.session.team == 1 || state.session.team == 2)) {
+		emit_frame(state.session.team == 1 ? 6 : 7, 0xFFFFFFFFu);
+	}
 	if (stance_.cur >= 0 && stance_.cur < kStanceFrames) {
-		emit_frame(stance_.cur, cur_a);
+		emit_frame(stance_.cur, with_alpha(layout_.stance_tint, cur_a));
 	}
 	if (prev_a > 0 && stance_.prev != stance_.cur && stance_.prev >= 0 &&
 			stance_.prev < kStanceFrames) {
-		emit_frame(stance_.prev, prev_a);
+		emit_frame(stance_.prev, with_alpha(layout_.stance_tint, prev_a));
 	}
 	++draw_list_.elements_drawn;
 }
@@ -1250,11 +1279,11 @@ void HudFrameCompiler::element_clip_indicator(const HudFrameState &state,
 	if (wep.clip_texture_valid) {
 		const float bx = ax + static_cast<float>(wep.clipgfx_offset_x);
 		const float by = ay + static_cast<float>(wep.clipgfx_offset_y);
-		emit_rect(sx(bx, w), sy(by, h),
-				sx(bx + static_cast<float>(wep.clip_tex_w), w),
-				sy(by + static_cast<float>(wep.clip_tex_h), h),
-				with_alpha(layout_.stance_tint, base_alpha), true,
-				kHudTexClipGfx);
+		// The background's alpha is ORed onto the stance colour, its own alpha
+		// byte kept [orig: HUD_DrawAmmoIndicator @0x599B71, `(base << 24) |
+		// dword_2723AE8`].
+		emit_bordered_quad(bx, by, wep.clip_tex_w, wep.clip_tex_h,
+				(static_cast<uint32_t>(base_alpha) << 24) | layout_.stance_tint, kHudTexClipGfx, w, h);
 	}
 	if (wep.round_texture_valid) {
 		const int count = round_icon_count(wep.clip, wep.reserve, wep.capacity,
@@ -1262,11 +1291,9 @@ void HudFrameCompiler::element_clip_indicator(const HudFrameState &state,
 		float px = ax + static_cast<float>(wep.rndgfx_offset_x);
 		float py = ay + static_cast<float>(wep.rndgfx_offset_y);
 		for (int i = 0; i < count; ++i) {
-			emit_rect(sx(px, w), sy(py, h),
-					sx(px + static_cast<float>(wep.round_tex_w), w),
-					sy(py + static_cast<float>(wep.round_tex_h), h),
-					with_alpha(layout_.stance_tint, flash), true,
-					kHudTexRoundGfx);
+			// [orig: @0x599BF7, the round icon a bordered quad of its image size]
+			emit_bordered_quad(px, py, wep.round_tex_w, wep.round_tex_h,
+					with_alpha(layout_.stance_tint, flash), kHudTexRoundGfx, w, h);
 			px += static_cast<float>(wep.rndgfx_step_x);
 			py += static_cast<float>(wep.rndgfx_step_y);
 		}

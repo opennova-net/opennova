@@ -212,9 +212,13 @@ void hud_layout_from_hudpos(const DefHudPosFile &file, HudLayout &out,
 
 	// HUDSTANCE's explicit id addresses the retail slot arrays; file order is
 	// irrelevant and a later record for the same id replaces the earlier one.
+	// The loader walks eight records (the six frames, then the team tiles 6
+	// and 7); the parse does not bound the id, so an id past 7 writes past the
+	// tables in retail, which the port ignores (D-HUD-X2) [orig: the HUDSTANCE
+	// arm @0x5A0B62..0x5A0BBC; the records 0x27239E0..0x2723A60].
 	for (size_t i = 0; i < hud.stances_count; ++i) {
 		const DefHudStance &stance = hud.stances[i];
-		if (stance.id < 0 || stance.id >= 6) continue;
+		if (stance.id < 0 || stance.id >= kHudStanceRecords) continue;
 		const size_t slot = static_cast<size_t>(stance.id);
 		assets.stance_textures[slot] = stance.texture;
 		out.stance_offset_x[slot] = stance.offset_x;

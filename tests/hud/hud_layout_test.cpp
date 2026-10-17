@@ -243,7 +243,7 @@ static void synthetic() {
 	// no presence gate.
 	CHECK(layout.breath_time.x == 0 && layout.breath_time.y == 0 && layout.breath_time.align == 0);
 	// The device-owned fields are untouched by the fill.
-	CHECK(!layout.frame_texture_valid && layout.stance_frame0_w == 0 && !layout.box_texture_valid);
+	CHECK(!layout.frame_texture_valid && layout.stance_frame_w[0] == 0 && !layout.box_texture_valid);
 	// No NETWORKINDICATOR line: the connection indicators keep the reset corners.
 	CHECK(layout.net_indicator_pos == kNetIndicatorResetPos);
 	def_free_hudpos(&file);
