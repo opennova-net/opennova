@@ -25,14 +25,15 @@ int32_t saved_count(const LoadoutAmmoCounts &counts, int index) {
 }
 
 // An authored value attribute as a number: an optional sign and decimal digits,
-// else 0.
+// else 0; read as a 64-bit integer and kept as its low 32 bits, as the screen's
+// script read it before the move (strtol saturates where Windows' long is 32-bit).
 int32_t authored_int(const std::string &value) {
 	size_t i = (!value.empty() && (value[0] == '+' || value[0] == '-')) ? 1 : 0;
 	if (i == value.size()) return 0;
 	for (size_t k = i; k < value.size(); ++k) {
 		if (value[k] < '0' || value[k] > '9') return 0;
 	}
-	return static_cast<int32_t>(std::strtol(value.c_str(), nullptr, 10));
+	return static_cast<int32_t>(static_cast<uint32_t>(std::strtoll(value.c_str(), nullptr, 10)));
 }
 
 bool team_index(int team) { return team == 0 || team == 1; }

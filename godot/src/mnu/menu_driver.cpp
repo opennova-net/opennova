@@ -942,8 +942,11 @@ int MenuDriver::loadout_selected_weapon(const String &p_control, const PackedInt
 
 void MenuDriver::select_loadout_weapon_name(const Ref<WeaponDatabase> &p_weapons, const String &p_control,
 		const PackedInt32Array &p_rows, const String &p_name) {
+	// The name back to the bytes a WeaponDef record's name reads from (Latin-1 both
+	// ways: String(const char *) and godot-cpp's ascii()),
+	// as the list's weapons hold them.
 	opennova::menu::loadout_select_weapon_name(runtime_, weapons_file(p_weapons), to_std(p_control),
-			slot_rows(p_rows), to_std(p_name));
+			slot_rows(p_rows), std::string(p_name.ascii().get_data()));
 }
 
 int MenuDriver::armory_selected_clips(const String &p_control) const {
