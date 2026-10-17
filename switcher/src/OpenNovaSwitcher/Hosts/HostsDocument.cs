@@ -8,6 +8,9 @@ namespace OpenNova.Switcher.Hosts;
 /// # >>> OpenNova Switcher managed block - do not edit between markers >>>
 /// # mode: opennova
 /// 203.0.113.10 gs.novaworld.net
+/// 203.0.113.10 ftp.novaworld.com
+/// 203.0.113.10 ftp2.novaworld.com
+/// 203.0.113.10 ftp4.novaworld.com
 /// # &lt;&lt;&lt; OpenNova Switcher managed block &lt;&lt;&lt;
 /// </code>
 /// The mode line names the choice the block was written for, so the tray can tell

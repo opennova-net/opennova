@@ -58,7 +58,11 @@ public class HostsSwitcherTests
         Assert.True(switcher.Switch(NovaWorldMode.OpenNova, "54.162.79.147", removeForeign: false));
 
         Assert.Equal(
-            Stock + "\r\n" + HostsDocument.BeginMarker + "\r\n# mode: opennova\r\n54.162.79.147 gs.novaworld.net\r\n" +
+            Stock + "\r\n" + HostsDocument.BeginMarker + "\r\n# mode: opennova\r\n" +
+            "54.162.79.147 gs.novaworld.net\r\n" +
+            "54.162.79.147 ftp.novaworld.com\r\n" +
+            "54.162.79.147 ftp2.novaworld.com\r\n" +
+            "54.162.79.147 ftp4.novaworld.com\r\n" +
             HostsDocument.EndMarker + "\r\n",
             store.Text);
         Assert.Equal(1, flusher.Flushes);

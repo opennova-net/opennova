@@ -1,8 +1,9 @@
 namespace OpenNova.Switcher.Hosts;
 
 /// <summary>
-/// The hostnames a stock NovaLogic client looks up to reach NovaWorld: the one
-/// set the switcher maps. Witnessed in docs/net/novaworld-net-re.md (NW-L2, NW-L1).
+/// The hostnames a stock NovaLogic client looks up to reach NovaWorld and its
+/// updater: the one set the switcher maps, all to one address. Witnessed in
+/// docs/net/novaworld-net-re.md (NW-L2, NW-L1) and docs/update/updater-re.md (section 3).
 /// </summary>
 public static class NovaWorldHosts
 {
@@ -23,5 +24,27 @@ public static class NovaWorldHosts
     /// </summary>
     public const string GateHost = "gs.novaworld.net";
 
-    public static IReadOnlyList<string> Names { get; } = new[] { GateHost };
+    /// <summary>
+    /// The updater's gateways: retail UPDATE.EXE dials <c>ftp.novaworld.com</c>,
+    /// <c>ftp2.novaworld.com</c> and <c>ftp4.novaworld.com</c> on its fixed TCP ports
+    /// (20044, 20556, 21068, 21580), hardcoded in its state machine [orig:
+    /// Cupdate2Dlg_StateTick @ 0x408170 (UPDATE.EXE)]; docs/update/updater-re.md,
+    /// section 3. OpenNova's NovaWorld serves the updater at the gate's address (ADR 0061
+    /// d1; ADR 0054 as amended by ADR 0064: the update listeners sit behind the same
+    /// load balancer as the gate), so the block maps the three gateways to it beside
+    /// the gate host, and a data set served the retail way (its SERVER.LST naming
+    /// <c>ftp.novaworld.com</c>) updates from OpenNova while the block is on.
+    /// </summary>
+    public static readonly IReadOnlyList<string> UpdateGateways = new[]
+    {
+        "ftp.novaworld.com",
+        "ftp2.novaworld.com",
+        "ftp4.novaworld.com",
+    };
+
+    /// <summary>
+    /// Every name the managed block maps, in the order the block lists them: the gate
+    /// host, then the updater's gateways. One address for all four.
+    /// </summary>
+    public static IReadOnlyList<string> Names { get; } = new[] { GateHost }.Concat(UpdateGateways).ToArray();
 }

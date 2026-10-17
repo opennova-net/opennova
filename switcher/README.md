@@ -6,7 +6,9 @@ file. Your game files stay stock: no patched executable, no injected DLL, no con
 edit in the game folder. It is pre-1.0 and experimental.
 
 It covers JO and newer titles: retail Joint Operations (Combined Arms included) looks
-up NovaWorld by the name below, and Delta Force Xtreme 2's client names the same one.
+up NovaWorld by the gate name below, and Delta Force Xtreme 2's client names the same
+one; their updater, `UPDATE.EXE`, looks up the three gateway names beside it, so a
+switched install updates from OpenNova too.
 
 ## Using it
 
@@ -54,18 +56,23 @@ replace it where it is:
 # >>> OpenNova Switcher managed block - do not edit between markers >>>
 # mode: opennova
 203.0.113.10 gs.novaworld.net
+203.0.113.10 ftp.novaworld.com
+203.0.113.10 ftp2.novaworld.com
+203.0.113.10 ftp4.novaworld.com
 # <<< OpenNova Switcher managed block <<<
 ```
 
 - The mode line (`opennova` or `custom`) records which choice wrote the block.
 - Lines outside the markers keep their exact bytes and line endings, and adding then
   removing the block gives back the file as it was, a missing final newline included.
-- The block holds only the switcher's own lines. A line you add between the markers is
-  kept, moved after the block, at the next switch. A block whose end marker was deleted
-  ends at its first line that is not the switcher's, its first blank line, or a second
-  line for `gs.novaworld.net`, and everything after it stays (such a second line is then
-  an entry the switcher did not write, below). Until the next switch the menu shows
-  either as a hand-edited block.
+- The block holds only the switcher's own lines: one per name below, all to one address.
+  A line you add between the markers is kept, moved after the block, at the next switch. A
+  block whose end marker was deleted ends at its first line that is not the switcher's,
+  its first blank line, or a second line for a name it already holds, and everything
+  after it stays (such a second line is then an entry the switcher did not write, below).
+  Until the next switch the menu shows either as a hand-edited block, and so does a block
+  an earlier switcher wrote with the gate name alone: the next switch rewrites it with
+  every name.
 - Each change goes to a temp file, flushed to disk, that then replaces the hosts file in
   one step. The file it replaced is kept as `hosts.opennova-switcher.bak`, and the file
   as it was before the switcher's first change as `hosts.opennova-switcher.orig`, which
@@ -76,11 +83,12 @@ replace it where it is:
 - A hosts file saved as UTF-16 (Unicode), or holding NUL bytes, is left alone with a
   message: save it as ANSI or UTF-8 in an elevated editor first.
 
-### The hostname
+### The hostnames
 
 | Name | Why |
 | --- | --- |
 | `gs.novaworld.net` | The NovaWorld gate (UDP 7597), the one host retail's gate config names. Its reply names the service by address, and the NovaWorld session, the server browser and the login, HOSTKEY and NWJoin web pages follow that address. |
+| `ftp.novaworld.com`, `ftp2.novaworld.com`, `ftp4.novaworld.com` | The updater's gateways: retail `UPDATE.EXE` dials them on its fixed TCP ports (20044, 20556, 21068, 21580), hardcoded in it. OpenNova's NovaWorld serves the updater at the gate's address, so a switched install takes its updates from OpenNova; with the block gone, from NovaLogic. |
 
 Retail JO:CA's `Jointops.exe` names three NovaWorld hosts in all: `gs.novaworld.net`,
 `novaworld.net` (a default the game overwrites with `gs.novaworld.net` before it looks
@@ -88,11 +96,12 @@ anything up) and `www.novaworld2.com` (the patch page, outside NovaWorld). The
 NovaWorld menus OpenNova's service sends name a fourth, `assets.novaworld.net`, for
 their icons and flags; the switcher leaves it alone (the service does not serve those
 files), so those icons still come from NovaLogic's host in every mode. The evidence is in
-`docs/net/novaworld-net-re.md` (NW-L1 and NW-L2) and ADR 0054.
+`docs/net/novaworld-net-re.md` (NW-L1 and NW-L2), `docs/update/updater-re.md` (section 3,
+the updater's gateways and ports), ADR 0054 and ADR 0061.
 
 ### Entries the switcher did not write
 
-If the hosts file already maps `gs.novaworld.net` outside the block (an entry you or
+If the hosts file already maps one of the names outside the block (an entry you or
 another tool added), the menu says so. The switcher never removes such a line without
 asking: a switch shows the lines and asks to remove them first, since Windows uses the
 first entry it finds and the switch would not take effect reliably otherwise. Say no and
@@ -134,20 +143,24 @@ from any signed-in user, says the first is already running.
 
 Windows Defender flags some hosts-file edits as `SettingsModifier:Win32/HostsFileHijack`,
 because malware redirects security sites that way. The switcher's block maps only the
-NovaWorld gate name, and you can read the hosts file at any time. If Defender reverts
-the change, allow it from Defender's protection history and switch again.
+NovaWorld gate name and the updater's three gateway names, and you can read the hosts
+file at any time. If Defender reverts the change, allow it from Defender's protection
+history and switch again.
 
 ## Checking it by hand
 
 What CI cannot run, with a stock JO:CA install and two machines (or two installs):
 
 1. Start the switcher, pick **OpenNova NovaWorld**, and read the hosts file: the block
-   names the address `https://opennova.net/api/server-info` gives.
+   maps the four names to the address `https://opennova.net/api/server-info` gives.
 2. Start `Jointops.exe`, open NovaWorld, and log in with an OpenNova account.
 3. Host a game on NovaWorld; it shows in the site's server list.
 4. On the second client (also switched to OpenNova), find the game in the browser and
    join it.
-5. Pick **NovaLogic NovaWorld**: the block is gone, the hosts file matches
+5. With a data set's release published on OpenNova's Game data page, run the install's
+   `UPDATE.EXE` (or the game's update check): it reaches OpenNova's update service through
+   the block and installs the release.
+6. Pick **NovaLogic NovaWorld**: the block is gone, the hosts file matches
    `hosts.opennova-switcher.orig` when the switcher had made no other change, and the
    game's NovaWorld login reaches NovaLogic's service again.
 

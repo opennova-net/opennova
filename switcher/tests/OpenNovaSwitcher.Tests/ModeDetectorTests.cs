@@ -17,9 +17,22 @@ public class ModeDetectorTests
            HostsDocument.EndMarker + "\r\n";
 
     [Fact]
-    public void TheNameSetIsTheGateHostAlone()
+    public void TheNameSetIsTheGateHostAndTheUpdatersGateways()
     {
-        Assert.Equal(new[] { "gs.novaworld.net" }, NovaWorldHosts.Names);
+        Assert.Equal(new[] { "gs.novaworld.net", "ftp.novaworld.com", "ftp2.novaworld.com", "ftp4.novaworld.com" }, NovaWorldHosts.Names);
+        Assert.Equal(NovaWorldHosts.GateHost, NovaWorldHosts.Names[0]);
+        Assert.Equal(NovaWorldHosts.UpdateGateways, NovaWorldHosts.Names.Skip(1));
+    }
+
+    // A block an earlier switcher wrote (the gate host alone) reads as hand-edited
+    // until the next switch, which rewrites it with every name.
+    [Fact]
+    public void ABlockOfTheGateHostAlone_IsUnrecognizedWithTheFullNameSet()
+    {
+        var state = Detect(Block(ModeDetector.OpenNovaTag, "54.162.79.147 gs.novaworld.net"), NovaWorldHosts.Names);
+
+        Assert.Equal(NovaWorldMode.Unrecognized, state.Mode);
+        Assert.False(state.HasForeignLines);
     }
 
     [Theory]
