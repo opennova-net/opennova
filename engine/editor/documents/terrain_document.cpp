@@ -944,6 +944,9 @@ constexpr FindingCodeEntry<TerrainFinding> kFindingEntries[] = {
 	// Save refused).
 	{ TerrainFinding::InvalidInput, unwritable_code("terrain.invalid_input") },
 	{ TerrainFinding::IgnoredInput, { "terrain.ignored_input", FindingFix::Rewrite, "with each line as the game reads it" } },
+	// The gate over the .trn alone here; over each mission's load (the .trn, overcast.def, the mission's .env) the
+	// use check's (graph/use_checks check_terrain_admission), which takes this row back where every mission
+	// reading the .trn loads it.
 	{ TerrainFinding::Refused,
 	  game_fails_code("terrain.refused",
 	                  "the terrain's load refuses the config, and the mission does not start [orig: Game_StartMission "

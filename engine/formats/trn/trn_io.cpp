@@ -217,7 +217,7 @@ std::string values_of(const io::ConfigTokens &tokens) {
 
 void ignore_line(const std::string &, int, const io::ConfigTokens &) {}
 
-bool finish_trn(TrnConfig &out, TrnWalk &walk, std::string &error) {
+bool finish_trn(TrnConfig &out, TrnWalk &walk, std::string &error, TrnRefusal *refusal = nullptr) {
 	// A block no `end` closed (the load ran out, or its `end` is the
 	// unterminated last line, read `en`) still wrote its keys into its slot, and
 	// the runtime takes all four slots whose graphic is named, not the closed
@@ -233,7 +233,9 @@ bool finish_trn(TrnConfig &out, TrnWalk &walk, std::string &error) {
 	// parsed grid to 16 columns and rows (periodically under wrap, else the
 	// last column and row copied outward) and returns 0 on every path
 	// [orig: @0x60F2A5..0x60F317, @0x60F31A]; trn_extend_sector_grid below is it.
-	switch (trn_refusal(out, walk.seen_sector_rows)) {
+	const TrnRefusal leg = trn_refusal(out, walk.seen_sector_rows);
+	if (refusal != nullptr) *refusal = leg;
+	switch (leg) {
 	case TrnRefusal::None: break;
 	case TrnRefusal::NoColormap: error = "TRN rejected: polytrn_colormap is empty"; return false;
 	case TrnRefusal::NoDetailmap: error = "TRN rejected: polytrn_detailmap is empty"; return false;
@@ -301,7 +303,7 @@ bool load_trn(std::istream &f, TrnConfig &out, std::string &error) {
 }
 
 bool load_mission_trn(const std::string &terrain, const TrnLaterTexts &later, TrnConfig &out, std::string &error,
-		std::vector<TrnLaterLine> *taken) {
+		std::vector<TrnLaterLine> *taken, TrnRefusal *refusal) {
 	out = TrnConfig();
 	if (taken != nullptr) taken->clear();
 	TrnWalk walk;
@@ -315,7 +317,7 @@ bool load_mission_trn(const std::string &terrain, const TrnLaterTexts &later, Tr
 	// overcast.def after the .trn, then the .env [orig: Environment_LoadTimeOfDayConfig @ 0x57dc3b, @ 0x57dcbf].
 	pass(later.overcast, TrnLaterLine::File::Overcast);
 	pass(later.environment, TrnLaterLine::File::Environment);
-	return finish_trn(out, walk, error);
+	return finish_trn(out, walk, error, refusal);
 }
 
 bool read_mission_trn(const TrnTextReader &read, const std::string &terrain_file, const std::string &environment_file,
