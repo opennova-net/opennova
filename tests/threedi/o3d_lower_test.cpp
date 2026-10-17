@@ -291,6 +291,21 @@ void test_limits() {
 		refuses_at("occlusion-planes", all, 11, "the occlusion record's faces name 129 planes");
 		for (int i = 129; i < 257; ++i) occ += "op 0 0 1 " + num(i) + "\n";
 		refuses_at("occlusion-face-plane", occ + "of 0 1 2 256\n", 11, "names plane 256");
+		// The silhouette-edge list holds 128 words [orig: Terrain_BuildClipPlanesFromCollision @ 0x5b34e0, the store
+		// @ 0x5b36b2]: a fan of 63 faces names 127 edges and builds, one of 64 names 129 and is refused.
+		const auto fan = [&mesh](int faces) {
+			std::string text = mesh.substr(0, mesh.find("occ 0 0 0\n")) + "occ 0 0 0\nov 0 0 0\n";
+			for (int i = 0; i <= faces; ++i) {
+				const double a = 3.0 * i / faces;
+				text += "ov " + std::to_string(2 * std::cos(a)) + " " + std::to_string(2 * std::sin(a)) + " 0\n";
+			}
+			text += "op 0 0 1 0\n";
+			for (int i = 1; i <= faces; ++i) text += "of 0 " + num(i) + " " + num(i + 1) + " 0\n";
+			return text;
+		};
+		findings.clear();
+		check(build(fan(63), findings), "occlusion-edges: 127 build" + dump(findings));
+		refuses_at("occlusion-edges", fan(64), 11, "the occlusion record's faces name 129 edges");
 		// The exporter's rule derives at most 32 [orig: ConvertToInternal @ 0x4268B3 (ModSuperOed.exe)]: a cone of
 		// 40 faces (the box's six planes and each face's own) is refused, saying to give the planes.
 		occ = mesh.substr(0, mesh.find("occ 0 0 0\n")) + "occ 0 0 0\nov 0 0 1\n";

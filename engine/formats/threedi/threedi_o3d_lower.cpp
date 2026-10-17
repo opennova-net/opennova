@@ -12,6 +12,7 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include <base/io/strutil.h>
@@ -127,6 +128,16 @@ ThreediTargetLimits threedi_retail_limits() {
 	l.occlusion_vertices = {128};
 	l.occlusion_planes = {128};
 	l.occlusion_face_plane = {256};
+	// A back-facing face's three edge words go into the silhouette list, a
+	// 128-word stack list var_204 below the front list: an edge already listed
+	// (its low 15 bits, the vertex pair) is taken out, any other appended with
+	// no bound [orig: Terrain_BuildClipPlanesFromCollision @ 0x5b34e0, the
+	// compare @ 0x5b3680..0x5b3690, the store @ 0x5b36b2], its 129th over the
+	// front list and its 257th over the frame's security cookie (@ 0x5b3a6b).
+	// The list never holds more than the distinct edges the record's faces
+	// name, so 128 of them a record. (No shipped record names more than 48:
+	// Cbunker1's, the 2026-10 review's sweep of the 806 JOCA records.)
+	l.occlusion_edges = {128};
 	// WriteLGHT packs the rate times 256 into a u16 and the cone into a byte
 	// of whole degrees [orig: WriteLGHT @ 0x456DF0 (ModSuperOed.exe)].
 	l.light_rate = {256};
@@ -695,8 +706,11 @@ void lower_occlusion(Lowering &lw) {
 		// The planes its faces name (given planes: the reader has each face name one; derived ones stay within
 		// the exporter's 32).
 		std::set<int> named;
-		for (const std::array<int, 4> &f : o.faces)
+		std::set<std::pair<int, int>> edges; // each face's three, a vertex pair, its direction aside
+		for (const std::array<int, 4> &f : o.faces) {
 			if (f[3] >= 0) named.insert(f[3]);
+			for (int k = 0; k < 3; ++k) edges.insert({std::min(f[k], f[(k + 1) % 3]), std::max(f[k], f[(k + 1) % 3])});
+		}
 		const int highest = named.empty() ? -1 : *named.rbegin();
 		if (!lw.part_byte(o.section, o.line, "the occlusion record's section") ||
 				!lw.part_byte(o.connecting, o.line, "the occlusion record's connecting section") ||
@@ -708,7 +722,10 @@ void lower_occlusion(Lowering &lw) {
 						"a face names its plane in a byte, planes 0 to 255")) ||
 				!lw.within(lw.lim.occlusion_planes, static_cast<long long>(named.size()), o.line,
 						"the occlusion record's faces name " + std::to_string(named.size()) + " planes",
-						"the game's occluder walk lists 128 planes at most"))
+						"the game's occluder walk lists 128 planes at most") ||
+				!lw.within(lw.lim.occlusion_edges, static_cast<long long>(edges.size()), o.line,
+						"the occlusion record's faces name " + std::to_string(edges.size()) + " edges",
+						"the game's silhouette-edge list holds 128 edges at most"))
 			continue;
 		if (!lw.out.add_occ_record(o.type, static_cast<int>(o.section), static_cast<int>(o.connecting), o.vertices,
 					o.faces, o.planes, o.sphere_given ? &o.sphere : nullptr, kOedPlaneTable))
