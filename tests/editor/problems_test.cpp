@@ -1582,9 +1582,10 @@ static int test_plan_refusals_are_rows() {
 	            opennova::pff::PFF_WRITE_OK);
 	TEST_EXPECT(test_io::write_text(v.project.root + "/scripts/a_name_far_too_long.wac", "// a script\r\n"));
 	// A closed animation map with a row of nine clips: the game registers every one, and the table holds them all,
-	// so it raises nothing. One of thirty quoted clips: the line reader's 30th token is never closed, so its 29th
-	// clip reads with the quotes and the 30th inside it; the writer cannot write that row back, so its finding is
-	// an error, and a build packs the file as stored, so it refuses nothing, in the result's words as in the gate.
+	// so it raises nothing of its own (its clips' files are not there, which are their references' findings). One
+	// of thirty quoted clips: the line reader's 30th token is never closed, so its 29th clip reads with the quotes
+	// and the 30th inside it; the writer cannot write that row back, so its finding is an error, and a build packs
+	// the file as stored, so it refuses nothing, in the result's words as in the gate.
 	TEST_EXPECT(test_io::write_text(v.project.root + "/anims/nine.adm",
 	                                    "\r\nanim_reset\t\t\t\t\"a\" \"b\" \"c\" \"d\" \"e\" \"f\" \"g\" \"h\" \"i\"\r\n\r\n\r\n"));
 	{
@@ -1603,7 +1604,8 @@ static int test_plan_refusals_are_rows() {
 	TEST_EXPECT(rows.size() == 1 && blocks_the_build(rows[0], v));
 	TEST_EXPECT(rows_of("animation_map.invalid_input").empty());
 	size_t nine_rows = 0;
-	for (const Diagnostic &d : v.findings.diagnostics) nine_rows += d.asset == "anims/nine.adm" ? 1 : 0;
+	for (const Diagnostic &d : v.findings.diagnostics)
+		nine_rows += d.asset == "anims/nine.adm" && d.code().rfind("animation_map.", 0) == 0 ? 1 : 0;
 	TEST_EXPECT(nine_rows == 0);
 	const std::vector<size_t> thirty = rows_of("animation_map.row");
 	TEST_EXPECT(thirty.size() == 1 && v.findings.diagnostics[thirty[0]].asset == "anims/thirty.adm" &&
