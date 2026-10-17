@@ -172,9 +172,10 @@ crow::response AgentRoutes::sync(const crow::request &req, uint64_t raw_id) {
 		if (protocol && *protocol != kAgentProtocol) {
 			const std::string reason = "its agent speaks protocol " + std::to_string(*protocol) +
 					", not " + std::to_string(kAgentProtocol);
-			if (transition_machine(db, id,
-						{ FleetMachineState::Booting, FleetMachineState::Ready,
-								FleetMachineState::Lost },
+			// A lost machine stays lost: its agent is never heard, so the
+			// supervisor's describe and lost_end_ms end it and its servers move.
+			// Drained again at every call, it went lost and back for good.
+			if (transition_machine(db, id, { FleetMachineState::Booting, FleetMachineState::Ready },
 						FleetMachineState::Draining, reason))
 				std::fprintf(stderr, "[fleet] WARN machine %lld drains: %s\n",
 						static_cast<long long>(id), reason.c_str());

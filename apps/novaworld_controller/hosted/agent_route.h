@@ -19,7 +19,8 @@
 // report names left out, each container's uid its slot's, one whose slot is
 // past the machine's dropped, and drain set whenever the machine's row is
 // draining. A sync in another protocol version
-// is not read: its machine is drained. A sync whose agent could not list its
+// is not read: its machine is drained (a lost one stays lost, ended by the
+// supervisor). A sync whose agent could not list its
 // containers (listing_failed) records that the agent was heard from alone
 // (record_unlisted_sync), logged at most once per peer per minute.
 //
