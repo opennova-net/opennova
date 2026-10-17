@@ -15,6 +15,8 @@
 
 namespace opennova::editor {
 
+enum class CoreFinding;
+
 class Document;
 class RasterDocument;
 class TextDocument;
@@ -45,6 +47,11 @@ inline constexpr const char *kLineEndsRestoreToken = "restore_line_ends";
 Edit line_ends_restore();
 // Whether `edit` is that edit.
 bool is_line_ends_restore(const Edit &edit);
+
+// `error` the Error finding of `code` on `path` (and `field`), and false: what a document's load, save or edit
+// returns where it stops (model/document.cpp, model/document_base.cpp).
+bool fail_with(Diagnostic &error, const std::string &path, CoreFinding code, const std::string &message,
+               const std::string &field = {});
 
 // An editable file (ADR 0046 d9, S13 D6): the lifecycle every document shares, whatever its
 // content. It is read from the project's file (or from a file's bytes, which an import reads

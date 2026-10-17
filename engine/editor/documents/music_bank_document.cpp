@@ -27,15 +27,6 @@ constexpr NodeKind kStream = node_kind(MusicBankKind::Stream);
 MusicBankRow &bank_of(const RecordHandle &r) { return r.as<MusicBankRow>(); }
 MusicBankStream &stream_of(const RecordHandle &r) { return r.as<MusicBankStream>(); }
 
-FieldSchema schema_of(const char *id, FieldType type, const char *label, const char *description) {
-	FieldSchema schema;
-	schema.id = id;
-	schema.type = type;
-	schema.label = label;
-	schema.description = description;
-	return schema;
-}
-
 size_t valid_bytes(const MusicBankStream &stream) {
 	size_t bytes = 0;
 	if (stream.chunks)

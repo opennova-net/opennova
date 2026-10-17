@@ -48,18 +48,6 @@ bool number_of(const Value &value, double &out) {
 	return false;
 }
 
-bool whole_of(const Value &value, int64_t &out) {
-	if (const auto *whole = std::get_if<int64_t>(&value)) {
-		out = *whole;
-		return true;
-	}
-	if (const auto *real = std::get_if<double>(&value); real && std::isfinite(*real) && *real == std::floor(*real)) {
-		out = int64_t(*real);
-		return true;
-	}
-	return false;
-}
-
 // A name the game looks up: plain printable ASCII within the bytes its field keeps.
 bool set_name(std::string &field, size_t bytes, const char *what, const Value &value, std::string &error) {
 	const auto *text = std::get_if<std::string>(&value);
@@ -96,21 +84,12 @@ bool set_ratio(uint32_t &field, const Value &value, const char *what, std::strin
 
 bool set_whole(uint32_t &field, const Value &value, int64_t max, const char *what, std::string &error) {
 	int64_t number = 0;
-	if (!whole_of(value, number) || number < 0 || number > max) {
+	if (!whole_number(value, number) || number < 0 || number > max) {
 		error = std::string(what) + " is a whole number from 0 to " + std::to_string(max) + ".";
 		return false;
 	}
 	field = uint32_t(number);
 	return true;
-}
-
-FieldSchema schema_of(const char *id, FieldType type, const char *label, const char *description) {
-	FieldSchema schema;
-	schema.id = id;
-	schema.type = type;
-	schema.label = label;
-	schema.description = description;
-	return schema;
 }
 
 FieldSchema ranged(FieldSchema schema, double min, double max, double step = 0.0) {
