@@ -322,6 +322,8 @@ size_t MissionDocument::index_of(const Node &row) const {
 }
 
 bool MissionDocument::on_player_route(const Node &row) const { return lookups().route.count(row.id) != 0; }
+const std::vector<uint32_t> &MissionDocument::player_route_words() const { return lookups().route_words; }
+NodeId MissionDocument::player_route_path() const { return lookups().route_path; }
 
 NodeId MissionDocument::numbered_holder(int64_t number) const {
 	const Lookups &made = lookups();
@@ -1275,8 +1277,14 @@ const MissionDocument::Lookups &MissionDocument::lookups() const {
 			laid.padding.assign((kMaxWaypointPathMarkers - slots) * 4, 0);
 			for (size_t i = slots; i < words.size(); ++i) io::write_u32_le(laid.padding.data() + (i - slots) * 4, words[i]);
 		}
-		for (const uint32_t stop : bms::player_route_stops(table))
+		made.route_words = bms::player_route_stops(table);
+		for (const uint32_t stop : made.route_words)
 			if (stop < markers.size()) made.route.insert(markers[stop]->id);
+		for (const Node *row : made.by_kind[size_t(K::WaypointPath)])
+			if (bms::is_player_route(static_cast<const PathRow &>(*row).native.record)) {
+				made.route_path = row->id;
+				break;
+			}
 	}
 	made.made = true;
 	made.load_generation = load_generation();

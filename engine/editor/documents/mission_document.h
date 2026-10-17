@@ -178,6 +178,10 @@ public:
 	// NetPacket_WriteWorldStateLoad0x0F @0x502e50, the 128 cap @0x502efc; runtime/mission/promote.cpp's
 	// waypoint track], whose names the waypoint HUD shows.
 	bool on_player_route(const Node &row) const;
+	// The words the game's walk of the player's route reads over the table a save lays out, each a marker's pool
+	// slot (bms::player_route_stops), and the path whose record it starts at (0 for none).
+	const std::vector<uint32_t> &player_route_words() const;
+	NodeId player_route_path() const;
 	// What the windows show for a record (S15): the mission's own words without the project's names
 	// (mission_record_label, documents/mission_labels.h): an event as its sentence, "When <trigger> and
 	// <trigger>, then <action>; <action>." (documents/mission_sentence.h, Events and scripts), a trigger as
@@ -325,6 +329,8 @@ private:
 		std::unordered_map<NodeId, size_t> places;
 		std::vector<size_t> groups;
 		std::unordered_set<NodeId> route; // the markers the player's route stops at
+		std::vector<uint32_t> route_words; // the words its walk reads (bms::player_route_stops)
+		NodeId route_path = 0;              // the first path with the player-route flag
 		std::unordered_map<int32_t, NodeId> numbered; // the first type-6088 marker of each wp_number
 		std::unordered_map<NodeId, std::vector<StopPlace>> stops; // each marker's stops
 	};

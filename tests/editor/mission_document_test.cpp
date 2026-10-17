@@ -755,6 +755,73 @@ int test_player_route() {
 	return 0;
 }
 
+// The player's route past its 32 slots, as the game walks the table a save lays out (bms::player_route_stops)
+// [orig: NetPacket_WriteWorldStateLoad0x0F @0x502f1e..0x502f7a]: a route of 35 stops on path 5 reads path 6's flags,
+// its count and its first slot after its 32; one of 33 on the last path reads the header past its slots, whose
+// first word (the magic) is past the marker pool, which gates (mission.route_past_pool).
+int test_player_route_past_slots() {
+	const DocumentType &type = *document_type_for(AssetKind::Mission);
+	const std::vector<uint8_t> bytes = fixture_bytes();
+	bms::File file;
+	std::string message;
+	TEST_EXPECT(bms::parse(bytes.data(), bytes.size(), file, message) && file.waypoint_records.size() == 128);
+	if (file.waypoint_records.size() != 128) return 1;
+	for (bms::WaypointRecord &record : file.waypoint_records) record.flags = bms::WaypointFlags::None;
+	const int item = int(mission::kItemIdOffset + opennova::def::DEF_TYPE_WAYPOINT);
+	bool added = true;
+	const auto add = [&](size_t path, int count) {
+		std::vector<uint32_t> made;
+		for (int i = 0; i < count; ++i) {
+			size_t at = 0;
+			added = mission::add_waypoint_marker(file, path, item, {}, -1, message, &at) && added;
+			made.push_back(uint32_t(at));
+		}
+		return made;
+	};
+	const std::vector<uint32_t> route = add(5, 35);
+	const std::vector<uint32_t> next = add(6, 2);
+	TEST_EXPECT(added);
+	file.waypoint_records[5].flags = bms::WaypointFlags::PlayerRoute;
+	mission::sync_counts(file);
+	std::vector<uint8_t> out;
+	TEST_EXPECT(bms::write(file, out, message));
+	std::unique_ptr<Document> document = open(out, "route.bms");
+	TEST_EXPECT(document);
+	if (!document) return 1;
+	const MissionDocument &m = as_mission(*document);
+	// The route's 32 slots, then path 6's flags word (none set), its count (2) and its first stop.
+	std::set<uint32_t> walked(route.begin(), route.begin() + 32);
+	walked.insert(uint32_t(file.waypoint_records[6].flags));
+	walked.insert(2);
+	walked.insert(next[0]);
+	TEST_EXPECT(m.player_route_words().size() == 35);
+	const std::vector<const Node *> markers = m.rows_of(MissionKind::Marker);
+	for (size_t i = 0; i < markers.size(); ++i) TEST_EXPECT(m.on_player_route(*markers[i]) == (walked.count(uint32_t(i)) != 0));
+	for (const Diagnostic &d : type.validate_file(*document)) TEST_EXPECT(d.code() != "mission.route_past_pool");
+	// The route on the last path, 33 stops: its 33rd word the header's first, "BMS" and the version, past the pool.
+	file.waypoint_records[5].flags = bms::WaypointFlags::None;
+	add(127, 33);
+	TEST_EXPECT(added);
+	file.waypoint_records[127].flags = bms::WaypointFlags::PlayerRoute;
+	mission::sync_counts(file);
+	TEST_EXPECT(bms::write(file, out, message));
+	std::unique_ptr<Document> last = open(out, "last.bms");
+	TEST_EXPECT(last);
+	if (!last) return 1;
+	size_t gated = 0;
+	for (const Diagnostic &d : type.validate_file(*last))
+		if (d.code() == "mission.route_past_pool") {
+			++gated;
+			TEST_EXPECT(d.severity == DiagnosticSeverity::Error && d.message.find("stop 33") != std::string::npos);
+			// On the route's path, the last.
+			const std::vector<const Node *> paths = as_mission(*last).rows_of(MissionKind::WaypointPath);
+			TEST_EXPECT(paths.size() == 128 && d.row_id == paths.back()->id);
+		}
+	TEST_EXPECT(gated == 1);
+	std::printf("player route: past its 32 slots into the next record, and past the marker pool from the header gated\n");
+	return 0;
+}
+
 // The original editor's .bms packer writes every record with w_accuracy1 no more than w_accuracy2 and yaw, pitch and
 // roll % 360, the sign kept [orig: sub_44C8E0 @ 0x44c94f..0x44c975, @ 0x44c905..0x44c924 (JOTACmed.exe)] (the field
 // "accuracy" is w_accuracy1): a save writes 80/20 as 20/20 and 400 as 40, -400 as -40; the .mis writer clamps alike
@@ -2014,6 +2081,7 @@ int main(int argc, char **argv) {
 	if (test_record_pack() != 0) return 1;
 	if (test_save_clamp() != 0) return 1;
 	if (test_player_route() != 0) return 1;
+	if (test_player_route_past_slots() != 0) return 1;
 	if (test_parse_findings() != 0) return 1;
 	if (test_reads_and_symbols() != 0) return 1;
 	if (test_item_type_on_symbol() != 0) return 1;

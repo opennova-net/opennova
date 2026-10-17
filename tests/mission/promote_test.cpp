@@ -1367,6 +1367,18 @@ int main() {
         // The raw route-flags word rides the nav channel (bit1 = the blue mark).
         CHECK((wai.nav.channel(2)->loopflag &
                static_cast<int32_t>(bms::WaypointFlags::PlayerRoute)) != 0);
+        // A word no marker fills reads the zeroed pool-3 slot [orig: Pool_GetEntryUnchecked @0x441fc0; Pool_Clear
+        // @0x442060]: listed at origin, radius 0, name 0; a word past the pool's 768 is none.
+        wm.waypoint_records[2].marker_count = 3;
+        wm.waypoint_records[2].waypoint_numbers = {0, 7, 800};
+        World zw;
+        mission::promote_mission(wm, zw);
+        CHECK(zw.script.waypoints.entries.size() == 2);
+        if (zw.script.waypoints.entries.size() == 2) {
+            const WaypointEntry &slot = zw.script.waypoints.entries[1];
+            CHECK(slot.node == 7 && slot.x == 0 && slot.y == 0 && slot.z == 0 && slot.radius == 0 && slot.name_id == 0 &&
+                  slot.linked_event == 0 && !slot.chain_back && !slot.done);
+        }
     }
 
     // ---- command 125: BMS wp_number is a target entity serial, not a path node ----

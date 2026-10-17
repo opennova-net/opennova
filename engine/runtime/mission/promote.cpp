@@ -847,8 +847,20 @@ PromoteResult promote_mission(const bms::File &m, World &world,
     // (bms::player_route_stops).
     world.script.waypoints.clear();
     for (const uint32_t stop : bms::player_route_stops(m)) {
+        // Each word looked up unchecked in pool 3 [orig: Pool_GetEntryUnchecked @0x441fc0, from @0x502f2d]:
+        // a slot no marker fills is the zeroed entry Pool_Clear leaves at the mission's reset [orig:
+        // Pool_Clear @0x442060] (position 0, radius 0, name 0, not done); a word past the pool's 768
+        // [orig: EntityPool_Allocate, the capacity @0x442203] reads memory past the pool, the next pool's
+        // entities among it, which the editor's build refuses (mission.route_past_pool), so none is listed.
+        if (stop >= world::retail_pool_capacity(3)) continue;
         const int idx = static_cast<int>(stop);
-        if (idx < 0 || idx >= static_cast<int>(m.markers.size())) continue;
+        if (idx >= static_cast<int>(m.markers.size())) {
+            WaypointEntry zeroed;
+            zeroed.node = idx;
+            zeroed.radius = 0;
+            world.script.waypoints.entries.push_back(zeroed);
+            continue;
+        }
         const bms::Entity &mk = m.markers[static_cast<size_t>(idx)];
         WaypointEntry e;
         e.node = idx;

@@ -80,6 +80,15 @@ constexpr FindingCodeEntry<MissionFinding> kFindingEntries[] = {
 	                  "dispatches records from past the table's allocation, and the zone resolvers rewrite words in "
 	                  "place there [orig: EventTrigger_LoadAllData @ 0x453ff9, @ 0x45400a; "
 	                  "EventTrigger_ResolveZoneTriggerRefs @ 0x453095]") },
+	// A word of the player route's walk past the marker pool: looked up unchecked, its entry read from past the
+	// pool, the next pool's entities among it. It gates.
+	{ MissionFinding::RoutePastPool,
+	  game_fails_code("mission.route_past_pool",
+	                  "the player route's walk looks each word up in the marker pool unchecked, and a word past the "
+	                  "pool's 768 entries reads memory past the pool, the next pool's entities among it, as the stop's "
+	                  "entity [orig: "
+	                  "NetPacket_WriteWorldStateLoad0x0F @ 0x502f2d; Pool_GetEntryUnchecked @ 0x441fc0; "
+	                  "EntityPool_Allocate, the capacity @ 0x442203]") },
 	// The .mis beside the mission (S24 Names, mission_names_file.h), which the game never reads: what the editor
 	// took from it and what a save made of it, listed with the fixes its maker planned (Take the names that still
 	// match, Read the names again, Write it from the mission: edits of the mission, Diagnostic::planned).
@@ -264,6 +273,27 @@ struct Checker {
 	void paths() {
 		const std::vector<const Node *> marker_rows = document.rows_of(K::Marker);
 		const size_t markers = marker_rows.size();
+		// The player route's walk: a word past the marker pool (bms::player_route_stops over the table a save
+		// lays out; MissionDocument::player_route_words).
+		{
+			const std::vector<uint32_t> &words = document.player_route_words();
+			for (size_t i = 0; i < words.size(); ++i) {
+				if (words[i] < kMaxMarkers) continue;
+				const Node *route = document.row(document.player_route_path());
+				if (route)
+					on(NodeAddress{route->id, route->kind, 0}, MissionFinding::RoutePastPool, DiagnosticSeverity::Error,
+					   "The player route's walk reads " + std::to_string(words[i]) + " as its stop " +
+					           std::to_string(i + 1) + " (" +
+					           (i < kMaxWaypointPathMarkers ? std::string("one of its slots")
+					                                       : std::string("a word past its 32 slots, the next record's or "
+					                                                     "the header's")) +
+					           "), past the marker pool's " + std::to_string(kMaxMarkers) +
+					           " entries: the game reads memory past the pool, the next pool's entities among it, as that "
+					           "stop.",
+					   "marker_count");
+				break;
+			}
+		}
 		std::map<uint32_t, int> carried; // a marker and the path whose stop names it first
 		for (const Node *row : document.rows_of(K::WaypointPath)) {
 			const PathRow &path = static_cast<const PathRow &>(*row);
