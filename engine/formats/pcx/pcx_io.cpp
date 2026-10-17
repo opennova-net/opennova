@@ -1,5 +1,7 @@
 #include <formats/pcx/pcx_io.h>
 
+#include <base/io/le.h>
+
 #include <algorithm>
 #include <vector>
 
@@ -143,34 +145,25 @@ std::vector<uint8_t> coded_rows(const IndexedImage8 &image, PcxCoding coding) {
 	return out;
 }
 
-uint16_t u16_at(const uint8_t *data, size_t at) {
-	return static_cast<uint16_t>(data[at] | (data[at + 1] << 8));
-}
-
-void put_u16(uint8_t *data, size_t at, uint16_t value) {
-	data[at] = static_cast<uint8_t>(value & 0xFF);
-	data[at + 1] = static_cast<uint8_t>(value >> 8);
-}
-
 // The form a decoded indexed image's file holds: its header bytes, and the coding its rows show. The rows
 // can be either coder's only where the header says one 8-bit plane of RLE rows exactly the width long and
 // the palette follows them.
 PcxIndexedForm read_indexed_form(const uint8_t *data, size_t size, size_t rows_end, const IndexedImage8 &image) {
 	PcxIndexedForm form;
 	form.version = data[1];
-	form.window_x = u16_at(data, 4);
-	form.window_y = u16_at(data, 6);
-	form.hdpi = u16_at(data, 12);
-	form.vdpi = u16_at(data, 14);
+	form.window_x = io::read_u16_le(data + 4);
+	form.window_y = io::read_u16_le(data + 6);
+	form.hdpi = io::read_u16_le(data + 12);
+	form.vdpi = io::read_u16_le(data + 14);
 	for (size_t entry = 0; entry < form.ega.size(); ++entry)
 		std::copy(data + 16 + entry * 3, data + 19 + entry * 3, form.ega[entry].begin());
 	form.reserved = data[64];
-	form.palette_info = u16_at(data, 68);
-	form.hscreen = u16_at(data, 70);
-	form.vscreen = u16_at(data, 72);
+	form.palette_info = io::read_u16_le(data + 68);
+	form.hscreen = io::read_u16_le(data + 70);
+	form.vscreen = io::read_u16_le(data + 72);
 	form.coding = PcxCoding::Other;
 	const bool plain = data[2] == 1 && data[3] == 8 && data[65] == 1 &&
-	                   u16_at(data, 66) == static_cast<uint16_t>(image.width) && rows_end == size - 769;
+	                   io::read_u16_le(data + 66) == static_cast<uint16_t>(image.width) && rows_end == size - 769;
 	if (!plain) return form;
 	const size_t body = rows_end - 128;
 	const auto matches = [&](PcxCoding coding) {
@@ -617,20 +610,20 @@ bool encode_pcx_indexed(const IndexedImage8 &image, std::vector<uint8_t> &out, s
 	header[1] = f.version;
 	header[2] = 1;
 	header[3] = 8;
-	put_u16(header, 4, f.window_x);
-	put_u16(header, 6, f.window_y);
-	put_u16(header, 8, static_cast<uint16_t>(f.window_x + image.width - 1));
-	put_u16(header, 10, static_cast<uint16_t>(f.window_y + image.height - 1));
-	put_u16(header, 12, f.hdpi);
-	put_u16(header, 14, f.vdpi);
+	io::write_u16_le(header + 4, f.window_x);
+	io::write_u16_le(header + 6, f.window_y);
+	io::write_u16_le(header + 8, static_cast<uint16_t>(f.window_x + image.width - 1));
+	io::write_u16_le(header + 10, static_cast<uint16_t>(f.window_y + image.height - 1));
+	io::write_u16_le(header + 12, f.hdpi);
+	io::write_u16_le(header + 14, f.vdpi);
 	for (size_t entry = 0; entry < f.ega.size(); ++entry)
 		std::copy(f.ega[entry].begin(), f.ega[entry].end(), header + 16 + entry * 3);
 	header[64] = f.reserved;
 	header[65] = 1;
-	put_u16(header, 66, static_cast<uint16_t>(image.width));
-	put_u16(header, 68, f.palette_info);
-	put_u16(header, 70, f.hscreen);
-	put_u16(header, 72, f.vscreen);
+	io::write_u16_le(header + 66, static_cast<uint16_t>(image.width));
+	io::write_u16_le(header + 68, f.palette_info);
+	io::write_u16_le(header + 70, f.hscreen);
+	io::write_u16_le(header + 72, f.vscreen);
 	// Bytes 74..127, the filler: zero, as every shipped map and MED's writer hold it.
 
 	const std::vector<uint8_t> rows = coded_rows(image, f.coding);

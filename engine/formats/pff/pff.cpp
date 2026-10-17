@@ -7,6 +7,7 @@
 #include <formats/pff/pff.h>
 
 #include <base/io/bits.h>
+#include <base/io/le.h>
 #include <base/io/os_path.h>
 
 #include <ctype.h>
@@ -318,8 +319,7 @@ uint32_t pff_footer_kept_word(const PffArchive *archive)
     if (fseek(f, -(long)PFF_FOOTER_SIZE, SEEK_END) != 0) return 0;
     if (fread(footer, 1, sizeof(footer), f) != sizeof(footer)) return 0;
     if (memcmp(footer + 8, "KING", 4) != 0) return 0;
-    return (uint32_t)footer[4] | ((uint32_t)footer[5] << 8) | ((uint32_t)footer[6] << 16) |
-           ((uint32_t)footer[7] << 24);
+    return io::read_u32_le(footer + 4);
 }
 
 int pff_extract(const PffArchive *archive, const PffEntry *entry,

@@ -457,11 +457,6 @@ bool decode_credits(const uint8_t* data, size_t size, Credits& out, std::string&
     return true;
 }
 
-// Helper to write a uint32_t to a buffer
-inline void write_u32(std::vector<uint8_t>& buf, uint32_t val) {
-    io::append_u32_le(buf, val);
-}
-
 bool encode(const Credits& credits, std::vector<uint8_t>& out, std::string& error) {
     out.clear();
 
@@ -614,51 +609,51 @@ bool encode(const Credits& credits, std::vector<uint8_t>& out, std::string& erro
     std::vector<uint8_t> entry_table;
 
     // Label count (2: env and text)
-    write_u32(entry_table, 2);
+    io::append_u32_le(entry_table, 2);
 
     // Label entries - elem_count is number of name entries (not counting terminator)
-    write_u32(entry_table, env_idx);
-    write_u32(entry_table, static_cast<uint32_t>(env_elements.size()));
-    write_u32(entry_table, text_idx);
-    write_u32(entry_table, static_cast<uint32_t>(text_elements.size()));
+    io::append_u32_le(entry_table, env_idx);
+    io::append_u32_le(entry_table, static_cast<uint32_t>(env_elements.size()));
+    io::append_u32_le(entry_table, text_idx);
+    io::append_u32_le(entry_table, static_cast<uint32_t>(text_elements.size()));
 
     // Name entries for ENV
     for (const auto& e : env_elements) {
-        write_u32(entry_table, e.name_idx);
-        write_u32(entry_table, e.type);
+        io::append_u32_le(entry_table, e.name_idx);
+        io::append_u32_le(entry_table, e.type);
     }
     // ENV terminator (str_idx=0, type=0), none for a label of no entry [orig: the writer @ 0x75e429]
     if (!env_elements.empty()) {
-        write_u32(entry_table, 0);
-        write_u32(entry_table, 0);
+        io::append_u32_le(entry_table, 0);
+        io::append_u32_le(entry_table, 0);
     }
 
     // Name entries for TEXT
     for (const auto& e : text_elements) {
-        write_u32(entry_table, e.name_idx);
-        write_u32(entry_table, e.type);
+        io::append_u32_le(entry_table, e.name_idx);
+        io::append_u32_le(entry_table, e.type);
     }
     // TEXT terminator (str_idx=0, type=0), none for a label of no entry
     if (!text_elements.empty()) {
-        write_u32(entry_table, 0);
-        write_u32(entry_table, 0);
+        io::append_u32_le(entry_table, 0);
+        io::append_u32_le(entry_table, 0);
     }
 
     // Value entries
     // ENV values (one per element)
     for (const auto& e : env_elements) {
-        write_u32(entry_table, e.value_raw);
-        write_u32(entry_table, e.flags);
+        io::append_u32_le(entry_table, e.value_raw);
+        io::append_u32_le(entry_table, e.flags);
     }
 
     // TEXT values - for type=2, write main and font CONSECUTIVELY
     for (const auto& e : text_elements) {
-        write_u32(entry_table, e.value_raw);
-        write_u32(entry_table, e.flags);
+        io::append_u32_le(entry_table, e.value_raw);
+        io::append_u32_le(entry_table, e.flags);
         // For type=2, immediately write the font value
         if (e.type == 2) {
-            write_u32(entry_table, e.extra_value_raw);
-            write_u32(entry_table, e.extra_flags);
+            io::append_u32_le(entry_table, e.extra_value_raw);
+            io::append_u32_le(entry_table, e.extra_flags);
         }
     }
 
@@ -701,11 +696,11 @@ bool encode(const Credits& credits, std::vector<uint8_t>& out, std::string& erro
 
     // Build final output
     // Header
-    write_u32(out, kMagic);
-    write_u32(out, static_cast<uint32_t>(string_offset));
-    write_u32(out, static_cast<uint32_t>(blob_length));
-    write_u32(out, static_cast<uint32_t>(strings.size()));
-    write_u32(out, xor_key);
+    io::append_u32_le(out, kMagic);
+    io::append_u32_le(out, static_cast<uint32_t>(string_offset));
+    io::append_u32_le(out, static_cast<uint32_t>(blob_length));
+    io::append_u32_le(out, static_cast<uint32_t>(strings.size()));
+    io::append_u32_le(out, xor_key);
 
     // Encoded data
     out.insert(out.end(), encoded_data.begin(), encoded_data.end());
