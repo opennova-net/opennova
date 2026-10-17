@@ -32,8 +32,9 @@
         <div v-if="totalHosts === 0" class="rounded-panel border border-border bg-panel p-10 text-center">
           <p class="text-lg font-semibold text-ink">No games are being hosted right now</p>
           <p class="mt-2 text-sm text-ink-muted">
-            Host one from your game's own menu once it is <RouterLink :to="{ path: '/', hash: '#online' }" class="link">set up for online play</RouterLink>,
-            or run a managed server with a <RouterLink to="/support" class="link">support tier</RouterLink>.
+            Host one from the game's own menu: OpenNova reaches NovaWorld as it is, and the original game
+            <RouterLink :to="{ path: '/', hash: '#online' }" class="link">through the OpenNova Switcher</RouterLink>.
+            Or run a managed server with a <RouterLink to="/support" class="link">support tier</RouterLink>.
           </p>
         </div>
 

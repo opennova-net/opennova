@@ -40,10 +40,10 @@ project database: the project file is plain text and every asset is a readable f
 That keeps source ownership visible and makes retail compatibility the acceptance test.
 
 OpenNova ships the runtime and format libraries plus its own bundled
-`assets/` (authored from scratch: today the placeholder main menu whose PLAY
-RETAIL picks and remembers a retail install, ADR 0048, and a first-person
-carbine exported from the Blender sources in `art/`); it never distributes
-retail game data. Users point it at their own game-data directory, on the
+`assets/` (authored from scratch: OpenNova's own small game, the "Indigo Shore"
+mission and its "Indigo Storm" expansion, made in the OpenNova Editor from the
+sources in `art/`, whose main menu's PLAY RETAIL picks and remembers a retail
+install, ADR 0048); it never distributes retail game data. Users point it at their own game-data directory, on the
 command line (`--resource-dir`, ADR 0045) or through that picker. The editor is
 a separate download and a separate application. Test-only synthetic fixtures
 remain separate from both products.
