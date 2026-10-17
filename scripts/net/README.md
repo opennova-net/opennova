@@ -20,6 +20,7 @@ trees or the corpus the way the retired manifest did.
 | `capture.ps1` | Start or stop a tagged local packet capture. |
 | `decode.ps1` | Decode a capture with the native `opennova-wire` application. |
 | `diff_0a.py` | Per-FIELD shape diff of the S2C 0x0A stream vs a retail-host golden (sub-block cycle, record-class mix, field population); caches `<golden>.0a.json` beside the input. |
+| `read_integrity_profile.py` | Read a running retail `Jointops.exe`'s ammo-definition CRC rows (read-only, Windows; D-NET-181): the oracle the computed integrity rows must reproduce (`tests/npruntime/integrity_oracles.h`, the `npruntime_integrity_sources` ctest). |
 | `host_opennova.ps1` | Start an OpenNova LAN host on launch flags, await LAN discovery and its MCP endpoint. |
 | `join_opennova.ps1` | Start an OpenNova LAN joiner on launch flags with its MCP endpoint. |
 | `run_lan_pair.ps1` | Start a local OpenNova host/joiner pair (MCP ports 8975/8976). |
