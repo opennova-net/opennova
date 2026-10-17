@@ -15,10 +15,6 @@ using io::read_u32_le;
 using io::write_f32_le;
 using io::write_u32_le;
 
-int32_t read_i32_le(const uint8_t *p) {
-	return io::read_s32_le(p);
-}
-
 void write_i32_le(uint8_t *p, int32_t value) {
 	write_u32_le(p, (uint32_t)value);
 }
@@ -49,7 +45,7 @@ fnt_error_t fnt_parse_header(const uint8_t *data, size_t size,
 		*num_pages = pages;
 	}
 	if (glyph_spacing) {
-		*glyph_spacing = read_i32_le(data + 12);
+		*glyph_spacing = io::read_s32_le(data + 12);
 	}
 	return FNT_OK;
 }
