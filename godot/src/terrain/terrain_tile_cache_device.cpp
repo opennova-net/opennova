@@ -644,7 +644,7 @@ TerrainTileCacheDevice::compose_frame(
 		}
 	}
 	// Retail composes every missing visible page inside the sweep, before the
-	// batch draws bind them. (retail PolyTrn_RenderFrame @ 0x60F080..0x60F0E3)
+	// batch draws bind them. (engine: runtime/terrain/terrain_tile_composition_cache.cpp)
 	const auto wait_started = std::chrono::steady_clock::now();
 	async_->wait_idle();
 	const auto wait_done = std::chrono::steady_clock::now();

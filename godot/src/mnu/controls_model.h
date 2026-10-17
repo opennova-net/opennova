@@ -118,8 +118,8 @@ public:
 	bool is_vk_down(int p_vk) const { return vk_down_(p_vk); }
 	bool is_keyboard_captured() const { return bindings_.keyboard_captured(); }
 	// The in-game display string of a token's binding — the death screen's
-	// "call a medic" hint formatter (engine controls format_display_string;
-	// retail KeyBinding_FormatDisplayString @0x496bd0). "" when unbound.
+	// "call a medic" hint formatter (engine: runtime/controls/binding_set.h,
+	// format_display_string). "" when unbound.
 	String display_text_for_token(const String &p_token) const;
 	// The same display string for the binding record read BY ACTION CODE (the
 	// start-up re-lay puts the row dispatching `code` at record `code`; engine

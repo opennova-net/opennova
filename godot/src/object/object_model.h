@@ -527,7 +527,7 @@ private:
 	bool occlusion_hidden_ = false;
 	// The authored-LOD walk's sub-pixel verdict: a world model whose bound
 	// sphere projects to at most 0.75 px in the main view is not drawn there
-	// (retail Render_SectorEntity @ 0x5c42d8..0x5c42de returns before the
+	// (engine: runtime/renderer/object_lod.h: the draw returns before the
 	// RLOD walk; the Inset view keeps its own verdict); an attachment takes
 	// its owner's.
 	bool subpixel_hidden_ = false;

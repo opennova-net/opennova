@@ -712,7 +712,7 @@ void ObjectModel::set_attachment_pixel_cull(bool p_enabled) {
 		return;
 	}
 	// The weapon model's own header sphere (gpm[5]) — the radius the gate
-	// projects. [retail BoneCallback_org0_World @ 0x4e3d2b]
+	// projects (engine: runtime/renderer/object_lod.h).
 	attachment_pixel_cull_radius_q16_ = object_data_.is_valid()
 			? opennova::world::model_bound_radius_q16_from_3di(object_data_->native_model())
 			: 0;
@@ -1285,7 +1285,7 @@ void ObjectModel::stamp_foliage_mask_side(float p_side) {
 // mounted child submitted through its bone callback with its flags) share
 // that wave. The first-person viewmodel is drawn before the scene and never
 // takes the masks (the engine's foliage_entity_far_side carries the wave
-// witness; retail BoneCallback_org0_World @ 0x4e3c87 submits the children).
+// witness; the children's submit, engine: runtime/renderer/render_order.h).
 void ObjectModel::refresh_foliage_mask_frame(float p_camera_y, float p_water_height) {
 	if (foliage_mask_models_.is_empty()) {
 		return;

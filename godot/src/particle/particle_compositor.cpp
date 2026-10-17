@@ -1439,8 +1439,8 @@ void ParticleCompositorEffect::Impl::release_distortion_target() {
 
 // The effect world's flag-4 pass inside FrameFX's type-0 row: the distortion
 // subset draws over the finished frame with texture slot 2 = the row's 256A
-// work target (retail FrameFX_DistortionPass @ 0x5838F8 -> the flag-4 tail of
-// EffectWorld_RenderDistortionPass @ 0x5F72F7). Depth-tested against the frame,
+// work target (engine: runtime/renderer/particle_frame.cpp, the flag-4 tail of
+// the effect world's distortion pass). Depth-tested against the frame,
 // no depth write, each command through its own material as in the scene
 // passes (the thermal word the main scene stored persists into this pass).
 bool ParticleCompositorEffect::Impl::draw_distortion(

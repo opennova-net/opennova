@@ -781,8 +781,8 @@ void GameWorld::render_scene_overlay_frame() {
 	effect_world->publish_scene_overlay(submission);
 }
 
-// The NVG laser beams, the tail's first slot (retail Render_NVGLaserBeamsForVisiblePersons @ 0x5c63b0,
-// called @ 0x5c9695): the local view's g_NVGActive and g_CameraMode gate
+// The NVG laser beams, the tail's first slot (engine: runtime/world/nvg_laser.h): the local view's
+// g_NVGActive and g_CameraMode gate
 // every beam (the defaults with no local player or for a spectator), the
 // frame's render camera builds the ribbons and the frame's scene fog folds
 // into them; the entity presenter's third-person guns carry the action

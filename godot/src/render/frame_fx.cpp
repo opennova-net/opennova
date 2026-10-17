@@ -1345,7 +1345,7 @@ bool FrameFxCompositorEffect::Impl::run_nvg(ViewTarget &target,
 				target.size, draws))
 			return false;
 		// The Sighted arm's card draws into the scene before its glow and tint
-		// read it (retail NVG_RenderSceneToTarget @0x5d08cb..0x5d0952).
+		// read it (engine: runtime/renderer/frame_fx_effects.h).
 		if (nvg.sighted && screen != nullptr && !screen->nvg_sights.empty()) {
 			const std::size_t before = draws;
 			std::string reason;
@@ -1947,7 +1947,7 @@ void FrameFx::advance_screen_effects() {
 			[]() { return opennova::crt::crt_rand15(); });
 	frame->distortion = distortion_drawer_;
 	// The lens spans the surface's overlay rect, (0, 0)..(W - 1, H - 1)
-	// (retail Viewport_SetFullScreen @0x5d30e0 over overlayCtx), rebuilt only
+	// (engine: runtime/hud/scope_circle_mask.h, over overlayCtx), rebuilt only
 	// when the surface resizes.
 	if (frame->plan.nvg.lens) {
 		Viewport *viewport = get_viewport();
