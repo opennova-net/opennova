@@ -1,6 +1,7 @@
 #include "network/novaworld_client.h"
 
 #include "network/host_session_options.h"
+#include "network/join_target.h"
 #include "network/novaworld_identity.h"
 #include "resource_index/launch_flags.h"
 #include "rtxt/rtxt_string_file.h"
@@ -117,9 +118,7 @@ void NovaWorldClient::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("stop_hosting"), &NovaWorldClient::stop_hosting);
 	ClassDB::bind_method(D_METHOD("stop_playing"), &NovaWorldClient::stop_playing);
 	ClassDB::bind_method(D_METHOD("has_join_proxy"), &NovaWorldClient::has_join_proxy);
-	ClassDB::bind_method(D_METHOD("get_join_proxy_node"), &NovaWorldClient::get_join_proxy_node);
-	ClassDB::bind_method(D_METHOD("get_join_proxy_cookie"), &NovaWorldClient::get_join_proxy_cookie);
-	ClassDB::bind_method(D_METHOD("get_join_proxy_relay"), &NovaWorldClient::get_join_proxy_relay);
+	ClassDB::bind_method(D_METHOD("copy_join_proxy_to", "target"), &NovaWorldClient::copy_join_proxy_to);
 	ClassDB::bind_method(D_METHOD("get_join_lobby_number"), &NovaWorldClient::get_join_lobby_number);
 	// Bound so the HTTPRequest.request_completed signals can target them.
 	ClassDB::bind_method(
@@ -215,17 +214,8 @@ void NovaWorldClient::set_gametext(const Ref<RtxtStringFile> &gametext) {
 
 Ref<NovaWorldGateInfo> NovaWorldClient::get_server_info() const { return server_info_; }
 
-// The proxy addresses are the service's .joi bytes.
-String NovaWorldClient::get_join_proxy_node() const {
-	if (!join_proxy_.enabled()) return String();
-	return opennova::cp1252_to_gd(join_proxy_node_ip_) + ":" +
-	       String::num_int64(static_cast<int64_t>(join_proxy_.node_port));
-}
-
-String NovaWorldClient::get_join_proxy_relay() const {
-	if (!join_proxy_.enabled()) return String();
-	return opennova::cp1252_to_gd(join_proxy_relay_ip_) + ":" +
-	       String::num_int64(static_cast<int64_t>(join_proxy_.relay_port));
+void NovaWorldClient::copy_join_proxy_to(const Ref<JoinTarget> &p_target) const {
+	if (p_target.is_valid()) p_target->set_join_proxy(join_proxy_);
 }
 
 std::string NovaWorldClient::get_login_pcid() const {
@@ -1022,8 +1012,6 @@ void NovaWorldClient::start_playing(const opennova::JoinResult &resolved) {
 	// installs on its NP connection (engine/net/novaworld/proxy_rendezvous.h).
 	// The engine's install of the six fields (net/novaworld/http_flow.h).
 	join_proxy_ = opennova::proxy_rendezvous_from_join(resolved);
-	join_proxy_node_ip_ = resolved.ni;
-	join_proxy_relay_ip_ = resolved.host_ip;
 	opennova::ClientSession *session = lobby_.session();
 	if (!session || !session->is_verified()) {
 		enter_state(STATE_CONNECTED);
