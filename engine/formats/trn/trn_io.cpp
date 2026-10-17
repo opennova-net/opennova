@@ -72,11 +72,13 @@ void walk_trn(const std::string &text, TrnConfig &out, TrnWalk &walk, bool own, 
 			} else if (key == "color_upper") {
 				def.color_upper = io::retail_atol(value);
 			} else if (key == "match") {
-				// Up to 7 args as bytes, to the line's count; only the first
-				// FOLIAGE_MATCH_CODES are ever consumed (foliage.h), so the rest
-				// are read and dropped here [orig: the match arm, `idx < 8` and
-				// `idx >= count` @0x60f330].
-				def.match.fill(FOLIAGE_MATCH_UNSET);
+				// Up to 7 args as bytes, to the line's count, each into its own code: a line
+				// stores codes 1..count-1 and clears none, so a later line keeps the codes past
+				// its own and a bare `match` changes nothing [orig: Terrain_ParseConfigCallback
+				// @0x60F4F3..0x60F556: no store ahead of the loop, the byte store @0x60F53D under
+				// `idx < 8` @0x60F520 and `idx < count` @0x60F50D / @0x60F54D]. Only the first
+				// FOLIAGE_MATCH_CODES are ever consumed (foliage.h), so the rest are read and
+				// dropped here.
 				for (int i = 1; i < tokens.count && i < 8; ++i)
 					if (i - 1 < FOLIAGE_MATCH_CODES)
 						def.match[static_cast<size_t>(i - 1)] =
