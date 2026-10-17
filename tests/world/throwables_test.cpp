@@ -658,6 +658,59 @@ void test_grenade_bounce_past_the_table_plays_the_obj_row() {
     }
 }
 
+// A satchel's ground contact presents through the impact presenter with the
+// grenade's descriptor (sound only for its first five contacts) and no
+// water-height test of its own: under the water plane it still sounds, unless
+// its ammo carries ClipWaterFx, whose presenter gate drops a round whose Z and
+// +0x88 copy (the Z its tick began at, refreshed at each motor tick's tail)
+// both sit at or under the plane.
+// [orig: Entity_UpdateSatchelPhysics @ 0x44893D..0x448983, the tail copy
+//  @ 0x448CA2; AmmoDef_ProcessImpactEffect @ 0x40A18D..0x40A1B1]
+void test_satchel_contact_presents_sound_only_and_no_water_gate() {
+    const auto contacts = [](Rig &rig) {
+        int n = 0;
+        for (const RoundImpact &imp : rig.w.round_sim.impacts)
+            if (imp.ammo_index == kAmmoSatchel && imp.effect_tag != 11) {
+                CHECK(imp.effect_tag == 5); // no char map: class 1, dirt
+                CHECK(!imp.present_effect);
+                CHECK(imp.present_sound);
+                ++n;
+            }
+        return n;
+    };
+    {
+        Rig rig(0);
+        CHECK(rig.throw_ammo(kAmmoSatchel, Vec3{10, 10, 2}, 0, 0) >= 0);
+        rig.tick(120);
+        CHECK(contacts(rig) == 1); // a dry stop
+    }
+    {
+        Rig rig(0);
+        rig.w.env.water_z = 5 << 16; // the stop lies under the plane
+        CHECK(rig.throw_ammo(kAmmoSatchel, Vec3{10, 10, 2}, 0, 0) >= 0);
+        rig.tick(240);
+        CHECK(contacts(rig) == 1); // still sounds: no water-height test
+    }
+    {
+        Rig rig(0);
+        rig.w.env.water_z = 5 << 16;
+        rig.w.tables.ammo.entries[kAmmoSatchel].flags |= kAmmoFlagClipWaterFx;
+        CHECK(rig.throw_ammo(kAmmoSatchel, Vec3{10, 10, 2}, 0, 0) >= 0);
+        rig.tick(240);
+        CHECK(contacts(rig) == 0); // ClipWaterFx, spawned and stopped under it
+    }
+    {
+        Rig rig(0);
+        rig.w.env.water_z = 1 << 16;
+        rig.w.tables.ammo.entries[kAmmoSatchel].flags |= kAmmoFlagClipWaterFx;
+        CHECK(rig.throw_ammo(kAmmoSatchel, Vec3{10, 10, 4}, 0, 0) >= 0);
+        rig.tick(240);
+        // Thrown from above the plane, it sinks and stops under it: the gate
+        // reads the tick's start Z, not the spawn's.
+        CHECK(contacts(rig) == 0);
+    }
+}
+
 void test_grenade_fuse_tick_boundaries() {
     {
         Rig rig(0);
@@ -2073,6 +2126,7 @@ int main() {
     test_grenade_bounce_and_fuse();
     test_grenade_bounce_samples_charmap_surface();
     test_grenade_bounce_past_the_table_plays_the_obj_row();
+    test_satchel_contact_presents_sound_only_and_no_water_gate();
     test_grenade_fuse_tick_boundaries();
     test_smoke_grenade_expiry_presents_no_second_obj_row();
     test_submerged_fuse_presents_at_the_water_surface();

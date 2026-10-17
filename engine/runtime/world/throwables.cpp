@@ -745,12 +745,25 @@ static bool motor_charge(World &world, RoundSim &sim, LiveRound &r,
             ground_surface = hit.surface_type >= 0 ? hit.surface_type : 0;
         }
     }
-    if (ground_hit && ground_surface != 0 && f.pz >= water)
+    // The contact presents through the impact presenter with the grenade's
+    // descriptor, sound only for the first five contacts (0x80000400), then
+    // neither leg (0x400), and no water-height test of its own (the grenade's
+    // alone has one, @0x44480F..0x444818): the presenter's ClipWaterFx gate
+    // drops a round whose Z and +0x88 copy both sit at or under the plane, the
+    // copy each motor tick's tail refreshes, so the Z this tick began at. The
+    // item sweep walks pools 2/1 alone, so the switch's person and water arms
+    // (3, 4) never arise and the face byte is the surface.
+    // [orig: Entity_UpdateClaymorePhysics @0x4478C8..0x44790E, the tail copy
+    //  @0x447C23; Entity_UpdateSatchelPhysics @0x44893D..0x448983, the tail copy
+    //  @0x448CA2; AmmoDef_ProcessImpactEffect @0x40A18D..0x40A1B1]
+    const bool clipped_by_water = (ammo.flags & kAmmoFlagClipWaterFx) != 0 &&
+                                  f.pz <= water && f.prev_z <= water;
+    if (ground_hit && ground_surface != 0 && !clipped_by_water && r.bounce_count <= 5)
         push_motor_effect(world, sim, r, ground_surface + 4,
                           Vec3{static_cast<float>(from_fixed(f.px)),
                                static_cast<float>(from_fixed(f.py)),
                                static_cast<float>(from_fixed(f.pz))},
-                          world.logic_tick);
+                          world.logic_tick, false, true);
 
     // Rest gate [orig: height-over-ground <= 0xFF and not rising].
     if (!rest && ground != INT32_MIN) {
