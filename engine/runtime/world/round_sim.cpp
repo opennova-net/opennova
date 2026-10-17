@@ -648,10 +648,9 @@ RoundSourceState resolve_round_source(World &world,
     const int32_t source_z =
             body != nullptr ? body->pos[2] : to_fixed(entity->position.z);
     // The below-water classifier projects the per-tick EYE height (the shared
-    // entity_eye_below_water witness) wherever the drowning bit is clear;
-    // retail's stance leg folds the ladder/parachute bits with it (Flags &
-    // 0x108020 [orig: @0x4ec2d5]). eye_offset_z is the ported +0x74 channel
-    // (0 when never stamped, the retail spawn value).
+    // entity_eye_below_water witness) wherever the drowning bit is clear.
+    // eye_offset_z is the ported +0x74 channel (0 when never stamped, the
+    // retail spawn value).
     source.underwater = source.underwater ||
                         entity_eye_below_water(world, source_z,
                                                entity->eye_offset_z);
@@ -663,8 +662,13 @@ RoundSourceState resolve_round_source(World &world,
     source.recoil_pitch = &body->inf.recoil_pitch;
     source.weapon_weight_spread = &body->inf.weapon_weight_spread;
     source.scope_raised = source.scope_raised || body->inf.scope_raised;
-    const bool forced_standing = body->inf.airborne || source.underwater ||
-                                 (flags & kEntityFlagInAir) != 0;
+    // The standing row is forced by the parachute, drowning and ladder-contact
+    // bits or the eye below the water, then a mount forces row 1; an airborne
+    // body keeps its stance row. [orig: RoundData_SpawnRound
+    // `test [ebp+24h], 108020h` @0x4ec2d5, the eye @0x4ec2de..0x4ec2ea, row 2
+    // @0x4ec2ec, +0x16C -> row 1 @0x4ec2f4..0x4ec2fd]
+    const bool forced_standing =
+            source.underwater || (flags & kStanceRowStandingFlags) != 0;
     if (entity->mounted) {
         source.stance_category = 1;
     } else if (forced_standing) {

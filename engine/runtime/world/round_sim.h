@@ -162,6 +162,14 @@ struct RoundSourceState {
 bool entity_eye_below_water(const World &world, int32_t body_z_q16,
                             int32_t eye_offset_z);
 
+// The Flags bits that force the standing stance row (2) on a shot and on the
+// crosshair, beside the below-water eye: Parachute 0x20 | Drowning 0x8000 |
+// LadderContact 0x100000. Neither site tests InAir 0x2000.
+// [orig: RoundData_SpawnRound `test [ebp+24h], 108020h` @0x4ec2d5;
+//  HUD_DrawCrosshair `test [edx+24h], 108020h` @0x592b50]
+inline constexpr uint32_t kStanceRowStandingFlags =
+        kEntityFlagParachute | kEntityFlagDrowning | kEntityFlagLadderContact;
+
 struct RandomSpreadOffset {
     int32_t yaw_bam = 0;
     int32_t pitch_bam = 0;

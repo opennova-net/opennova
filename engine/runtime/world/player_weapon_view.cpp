@@ -116,7 +116,8 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 	v.kick = static_cast<int>(active_slot.kick);
 	// Crosshair spread remains in retail's exact integer domains through the
 	// presentation edge: choose the stance triplet, then add the two arithmetic
-	// shifts. Category order is prone/crouch/stand; airborne or submerged forces
+	// shifts. Category order is prone/crouch/stand; the parachute, drowning and
+	// ladder-contact bits (Flags & 0x108020) or an eye below the water force
 	// stand, and a parent attachment finally forces crouch. The +3 triplet is the
 	// shared Player_IsOpticalViewVisible verdict stamped before the body tick.
 	// [orig: HUD_DrawCrosshair @0x592b07..0x592b87]
@@ -137,17 +138,20 @@ LocalPlayerWeaponView local_player_weapon_view(const World &world, const LocalPl
 			aimed_shot_available = body->inf.aimed_shot_available;
 			// The shared witnessed eye-projection classifier
 			// (world/round_sim.h entity_eye_below_water)
-			// [orig: HUD_DrawCrosshair @0x592b35]
+			// [orig: HUD_DrawCrosshair @0x592b59..0x592b65]
 			const bool below_water = entity_eye_below_water(
 					world, body->pos[2], local != nullptr ? local->eye_offset_z : 0);
 			if (body->inf.stance == InfantryState::Stance::kProne)
 				category = 0;
 			else if (body->inf.stance == InfantryState::Stance::kCrouch)
 				category = 1;
-			if (body->inf.airborne || below_water ||
+			// The parachute, drowning and ladder-contact bits or the eye
+			// below the water force the standing row; an airborne body keeps
+			// its stance row [orig: HUD_DrawCrosshair @0x592b50..0x592b65].
+			if (below_water ||
 					(local != nullptr &&
 					 ((local->flags | local->engine_flags) &
-							(kEntityFlagInAir | kEntityFlagDrowning)) != 0))
+							kStanceRowStandingFlags) != 0))
 				category = 2;
 		}
 		if (local != nullptr && local->mounted) category = 1;
