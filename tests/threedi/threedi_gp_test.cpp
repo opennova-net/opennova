@@ -13,6 +13,7 @@
 #include "common/file_io.h"
 #include "common/gp_model_bytes.h"
 #include "common/retail_paths.h"
+#include "common/temp_dir.h"
 #include "common/test_expect.h"
 
 #include <cmath>
@@ -203,17 +204,14 @@ int rejections() {
 
 // The files beside a model, listed once, found without case; a folder that is not there holds none.
 int files_beside() {
-	std::error_code ec;
-	const std::filesystem::path dir = std::filesystem::temp_directory_path(ec) / "opennova_threedi_gp_beside";
-	std::filesystem::remove_all(dir, ec);
-	std::filesystem::create_directories(dir, ec);
+	test_temp::TempDir temp("opennova_threedi_gp_beside");
+	const std::filesystem::path dir = temp.path;
 	std::FILE *f = std::fopen((dir / "Bump.MDT").string().c_str(), "wb");
 	TEST_EXPECT(f != nullptr);
 	std::fclose(f);
 	const auto beside = gp::names_beside((dir / "model.3di").string());
 	TEST_EXPECT(beside("bump.mdt") && beside("BUMP.MDT") && !beside("other.mdt"));
 	TEST_EXPECT(!gp::names_beside((dir / "missing" / "model.3di").string())("bump.mdt"));
-	std::filesystem::remove_all(dir, ec);
 	return 0;
 }
 

@@ -4,13 +4,24 @@
 #include <string.h>
 #include <stdint.h>
 
+#include <deque>
 #include <string>
 #include <vector>
 
 #include <formats/pff/pff.h>
+#include "common/temp_dir.h"
 #include "pff/pff_test_writer.h"
 
 using namespace opennova::pff;
+
+// Every archive a test writes lives in this run's own temp directory, so two runs at once (parallel
+// ctest legs, two worktrees on one build) never overwrite or delete each other's files.
+static const char *scratch(const char *name) {
+    static test_temp::TempDir dir("pff_unit");
+    static std::deque<std::string> paths; // stable c_str()s
+    paths.push_back(dir.file(name));
+    return paths.back().c_str();
+}
 
 static int passed = 0;
 static int failed = 0;
@@ -148,7 +159,7 @@ static int test_modern_roundtrip(void) {
         { "Bravo.dat",  b_data, (uint32_t)sizeof(b_data), 0 },
         { "secret.bin", c_data, (uint32_t)sizeof(c_data), 1 },  /* encrypted */
     };
-    const char *path = "pff_rt_modern.pff";
+    const char *path = scratch("pff_rt_modern.pff");
     PffArchive ar;
 
     CHECK(pff_test_write_modern(path, entries, 3) == 0, "write modern pff");
@@ -182,7 +193,7 @@ static int test_modern_roundtrip(void) {
 static int test_find_case_insensitive(void) {
     const uint8_t d[] = {9, 9, 9};
     PffTestEntry entries[1] = { { "MixedCase.TGA", d, 3, 0 } };
-    const char *path = "pff_rt_case.pff";
+    const char *path = scratch("pff_rt_case.pff");
     PffArchive ar;
 
     CHECK(pff_test_write_modern(path, entries, 1) == 0, "write");
@@ -203,7 +214,7 @@ static int test_legacy_roundtrip(void) {
         { "leg1.bin", a_data, (uint32_t)sizeof(a_data), 0 },
         { "leg2.bin", b_data, (uint32_t)sizeof(b_data), 0 },
     };
-    const char *path = "pff_rt_legacy.pff";
+    const char *path = scratch("pff_rt_legacy.pff");
     PffArchive ar;
 
     CHECK(pff_test_write_legacy(path, entries, 2) == 0, "write legacy");
@@ -225,7 +236,7 @@ static int test_write_then_open(void) {
     uint8_t c_cipher[sizeof(c_plain)];
     PffArchive ar;
     const PffEntry *empty;
-    const char *path = "pff_w_open.pff";
+    const char *path = scratch("pff_w_open.pff");
 
     memcpy(c_cipher, c_plain, sizeof(c_plain));
     pff_container_xor(c_cipher, sizeof(c_cipher), 0x0312A4CEu);   /* store as ciphertext */
@@ -255,7 +266,7 @@ static int test_write_deterministic(void) {
         { "bravo.dat", b, (uint32_t)sizeof(b), 0, 0, 0 },   /* deliberately out of sort order */
         { "alpha.txt", a, (uint32_t)sizeof(a), 0, 0, 0 },
     };
-    const char *p1 = "pff_det1.pff", *p2 = "pff_det2.pff";
+    const char *p1 = scratch("pff_det1.pff"), *p2 = scratch("pff_det2.pff");
     uint8_t *b1 = NULL, *b2 = NULL;
     long l1 = 0, l2 = 0;
     int ok;
@@ -308,7 +319,7 @@ static int test_add_delete_resave(void) {
     const uint8_t c_plain[] = "encrypted payload contents";
     const uint8_t g[] = {7, 7, 7, 7};
     uint8_t c_cipher[sizeof(c_plain)];
-    const char *pa = "pff_wr_a.pff", *pb = "pff_wr_b.pff";
+    const char *pa = scratch("pff_wr_a.pff"), *pb = scratch("pff_wr_b.pff");
     PffArchive ar, br;
     const PffEntry *ae, *se, *se2;
     uint8_t alpha_raw[64], secret_raw[64], secret_raw2[64];
@@ -365,7 +376,7 @@ static int test_format_preservation(void) {
     PffWriteEntry e[1] = { { "x.bin", d, 2, 0, 0, 0 } };
     PffFormat fmts[3]  = { PFF_FORMAT_PFF3, PFF_FORMAT_PFF4, PFF_FORMAT_BHD };
     uint32_t  mags[3]  = { PFF_MAGIC_PFF3,  PFF_MAGIC_PFF4,  PFF_MAGIC_BHD  };
-    const char *path = "pff_fmt.pff";
+    const char *path = scratch("pff_fmt.pff");
     int i;
     for (i = 0; i < 3; ++i) {
         PffArchive ar;
@@ -434,7 +445,7 @@ static int test_rewrite_with_entry(void) {
         { "secret.bin", c_cipher, (uint32_t)sizeof(c_cipher), PFF_FLAG_ENCRYPTED, 0x11223344, 0x55667788 },
         { "Mission.BMS", m_cipher, (uint32_t)sizeof(m_cipher), PFF_FLAG_ENCRYPTED, 0x0A0B0C0D, 0x77 },
     };
-    const char *src = "pff_rw_src.pff", *dst = "pff_rw_dst.pff";
+    const char *src = scratch("pff_rw_src.pff"), *dst = scratch("pff_rw_dst.pff");
     PffArchive ar, br;
     CHECK(pff_write_archive(src, PFF_FORMAT_PFF4, ents, 3) == PFF_WRITE_OK, "write source");
     CHECK(pff_open(&ar, src) == 0, "open source");
@@ -486,7 +497,7 @@ static int test_write_retail_layout(void) {
     };
     const char *names[4] = { "bravo.dat", "Alpha.txt", "empty.bin", "Mid.bin" };
     const uint32_t offsets[4] = { 20, 24, 27, 27 };
-    const char *path = "pff_layout.pff";
+    const char *path = scratch("pff_layout.pff");
     uint8_t *bytes = NULL;
     long len = 0;
     CHECK(pff_write_archive(path, PFF_FORMAT_PFF3, e, 4) == PFF_WRITE_OK, "write");
@@ -516,7 +527,7 @@ static int test_write_retail_layout(void) {
     for (const uint32_t i : order) walked += pff_entry_stored_name(ar.entries[i]) + ",";
     pff_close(&ar);
     CHECK(walked == "bravo.dat,Alpha.txt,empty.bin,Mid.bin,", "payload order");
-    const char *again = "pff_layout_again.pff";
+    const char *again = scratch("pff_layout_again.pff");
     CHECK(pff_write_archive_again(path, again) == PFF_WRITE_OK, "written again");
     uint8_t *b1 = NULL, *b2 = NULL;
     long l1 = 0, l2 = 0;
@@ -554,9 +565,9 @@ static int test_footer_keeps_second_word(void) {
         { "one.txt", a, (uint32_t)sizeof(a), 0, 11, 21 },
         { "two.txt", b, (uint32_t)sizeof(b), 0, 12, 22 },
     };
-    const char *path = "pff_footer_kept.pff";
-    const char *again = "pff_footer_kept_again.pff";
-    const char *played = "pff_footer_kept_played.pff";
+    const char *path = scratch("pff_footer_kept.pff");
+    const char *again = scratch("pff_footer_kept_again.pff");
+    const char *played = scratch("pff_footer_kept_played.pff");
     CHECK(pff_write_archive(path, PFF_FORMAT_PFF3, e, 2) == PFF_WRITE_OK, "write");
     PffArchive ar;
     CHECK(pff_open(&ar, path) == 0 && pff_footer_kept_word(&ar) == 0, "a new archive's second word is 0");
@@ -617,9 +628,9 @@ static int test_edits_drop_dead_space(void) {
         { "other.bin",    other,  (uint32_t)sizeof(other),  0 },
         { "<DEAD SPACE>", gone_b, (uint32_t)sizeof(gone_b), 1 },
     };
-    const char *path = "pff_dead_space.pff";
-    const char *again = "pff_dead_space_again.pff";
-    const char *played = "pff_dead_space_played.pff";
+    const char *path = scratch("pff_dead_space.pff");
+    const char *again = scratch("pff_dead_space_again.pff");
+    const char *played = scratch("pff_dead_space_played.pff");
     CHECK(pff_test_write_modern(path, raw, 4) == 0, "write the stock-updated archive");
     PffArchive ar;
     CHECK(pff_open(&ar, path) == 0 && ar.entry_count == 4, "open it: four records");
@@ -663,7 +674,7 @@ static int test_edits_drop_dead_space(void) {
 
 /* F6a: zero-entry archive is valid. */
 static int test_write_zero_entries(void) {
-    const char *path = "pff_zero.pff";
+    const char *path = scratch("pff_zero.pff");
     PffArchive ar;
     CHECK(pff_write_archive(path, PFF_FORMAT_PFF3, NULL, 0) == PFF_WRITE_OK, "write empty");
     CHECK(pff_open(&ar, path) == 0, "open empty");
@@ -678,7 +689,7 @@ static int test_write_rejects_overlong_name(void) {
     const uint8_t d[] = {1};
     PffWriteEntry e[1] = { { "seventeen_chars!!", d, 1, 0, 0, 0 } };
     CHECK(strlen("seventeen_chars!!") == 17, "fixture name is 17 chars");
-    CHECK(pff_write_archive("pff_bad.pff", PFF_FORMAT_PFF3, e, 1) == PFF_WRITE_ERR_NAME_LEN,
+    CHECK(pff_write_archive(scratch("pff_bad.pff"), PFF_FORMAT_PFF3, e, 1) == PFF_WRITE_ERR_NAME_LEN,
           "over-long name rejected");
     return 1;
 }
@@ -687,7 +698,7 @@ static int test_write_rejects_overlong_name(void) {
 static int test_write_rejects_duplicate_names(void) {
     const uint8_t d[] = {1};
     PffWriteEntry e[2] = { { "dup.bin", d, 1, 0, 0, 0 }, { "DUP.BIN", d, 1, 0, 0, 0 } };
-    CHECK(pff_write_archive("pff_dup.pff", PFF_FORMAT_PFF3, e, 2) == PFF_WRITE_ERR_DUP_NAME,
+    CHECK(pff_write_archive(scratch("pff_dup.pff"), PFF_FORMAT_PFF3, e, 2) == PFF_WRITE_ERR_DUP_NAME,
           "duplicate name rejected");
     return 1;
 }
@@ -715,7 +726,7 @@ static int test_normalized_logical_name(void) {
 static int test_write_preserves_name_case(void) {
     const uint8_t d[] = {1, 2, 3};
     PffWriteEntry e[1] = { { "Bravo.dat", d, 3, 0, 0, 0 } };
-    const char *path = "pff_case.pff";
+    const char *path = scratch("pff_case.pff");
     PffArchive ar;
     const PffEntry *fe;
     CHECK(pff_write_archive(path, PFF_FORMAT_PFF3, e, 1) == PFF_WRITE_OK, "write");
@@ -755,7 +766,7 @@ static int test_write_progress_callback(void) {
         { "b.bin",     2, 0, 0, 0 },
     };
     ProgCount pc = { 0, 0, 0 };
-    const char *path = "pff_prog.pff";
+    const char *path = scratch("pff_prog.pff");
     PffArchive ar;
 
     CHECK(pff_write_archive_streamed_progress(path, PFF_FORMAT_PFF3, se, 3,
@@ -784,10 +795,10 @@ static int test_write_rejects_offset_overflow(void) {
         { "c.bin", 0x60000000u, 0, 0, 0 },
     };
     const uint8_t *datas[3] = { NULL, NULL, NULL };
-    CHECK(pff_write_archive_streamed("pff_huge.pff", PFF_FORMAT_PFF3, se, 3,
+    CHECK(pff_write_archive_streamed(scratch("pff_huge.pff"), PFF_FORMAT_PFF3, se, 3,
               prog_read_entry, (void *)datas) == PFF_WRITE_ERR_TOO_LARGE,
           "total payload over 4GB rejected");
-    remove("pff_huge.pff");
+    remove(scratch("pff_huge.pff"));
     return 1;
 }
 

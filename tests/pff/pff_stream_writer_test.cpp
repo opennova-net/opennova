@@ -17,10 +17,19 @@
 #include <formats/pff/pff.h>
 #include <formats/pff/pff_stream_writer.h>
 
+#include "common/temp_dir.h"
+
 using namespace opennova::pff;
 
 static int passed = 0;
 static int failed = 0;
+
+// Every archive a test writes lives in this run's own temp directory, so two runs at once (parallel
+// ctest legs, two worktrees on one build) never overwrite or delete each other's files.
+static std::string scratch(const std::string &name) {
+	static test_temp::TempDir dir("pff_stream_writer");
+	return dir.file(name.c_str());
+}
 
 #define RUN_TEST(fn) do { \
 	printf("Running %s... ", #fn); \
@@ -181,7 +190,7 @@ bool write_streamed(const Fixture &fixture, uint64_t budget, const char *path, s
 static int test_budgets_match_the_recorded_archives() {
 	for (const Fixture &fixture : fixtures()) {
 		for (const uint64_t budget : {uint64_t(1), uint64_t(7), UINT64_MAX}) {
-			const std::string path = std::string("pff_stream_") + fixture.label + ".pff";
+			const std::string path = scratch(std::string("pff_stream_") + fixture.label + ".pff");
 			size_t writes = 0;
 			bool in_order = false;
 			CHECK(write_streamed(fixture, budget, path.c_str(), writes, in_order), "stream write");
@@ -211,7 +220,7 @@ static int test_single_call_forms_match() {
 			flat.push_back({e.name, e.size ? written.source.payloads[i].data() : nullptr, e.size, e.flags, e.timestamp,
 			                e.checksum});
 		}
-		const std::string path = std::string("pff_single_") + fixture.label + ".pff";
+		const std::string path = scratch(std::string("pff_single_") + fixture.label + ".pff");
 		std::vector<uint8_t> bytes;
 		CHECK(pff_write_archive(path.c_str(), fixture.format, flat.empty() ? nullptr : flat.data(),
 		                        uint32_t(flat.size())) == PFF_WRITE_OK, "pff_write_archive");
@@ -232,26 +241,28 @@ static int test_single_call_forms_match() {
 static int test_dropped_writer_leaves_nothing() {
 	const Fixture fixture = fixtures()[1];
 	Written written = prepare(fixture);
-	const char *path = "pff_stream_dropped.pff";
+	const std::string dropped = scratch("pff_stream_dropped.pff");
+	const std::string dropped_tmp = dropped + ".tmp";
+	const char *path = dropped.c_str();
 	remove(path);
 	{
 		PffStreamWriter writer;
 		CHECK(writer.open(path, fixture.format, written.entries.data(), uint32_t(written.entries.size()), read_chunk,
 		                  &written.source) == PFF_WRITE_OK, "open");
 		CHECK(writer.write(100) == PFF_WRITE_OK && !writer.payloads_written() && writer.payload_written() == 100, "a slice");
-		CHECK(exists("pff_stream_dropped.pff.tmp"), "the temp file while it writes");
+		CHECK(exists(dropped_tmp.c_str()), "the temp file while it writes");
 	}
-	CHECK(!exists("pff_stream_dropped.pff.tmp") && !exists(path), "dropped: no temp, no archive");
+	CHECK(!exists(dropped_tmp.c_str()) && !exists(path), "dropped: no temp, no archive");
 	PffStreamWriter aborted;
 	CHECK(aborted.open(path, fixture.format, written.entries.data(), uint32_t(written.entries.size()), read_chunk,
 	                   &written.source) == PFF_WRITE_OK, "open again");
 	aborted.abort();
-	CHECK(!aborted.is_open() && !exists("pff_stream_dropped.pff.tmp") && !exists(path), "aborted: nothing");
+	CHECK(!aborted.is_open() && !exists(dropped_tmp.c_str()) && !exists(path), "aborted: nothing");
 	// A refused set opens nothing.
 	PffWriteStreamEntry twice[2] = {{"dup.bin", 1, 0, 0, 0}, {"DUP.BIN", 1, 0, 0, 0}};
 	PffStreamWriter refused;
 	CHECK(refused.open(path, PFF_FORMAT_PFF3, twice, 2, read_chunk, &written.source) == PFF_WRITE_ERR_DUP_NAME &&
-	      !refused.is_open() && !exists("pff_stream_dropped.pff.tmp"), "a repeated name refused before any write");
+	      !refused.is_open() && !exists(dropped_tmp.c_str()), "a repeated name refused before any write");
 	return 1;
 }
 

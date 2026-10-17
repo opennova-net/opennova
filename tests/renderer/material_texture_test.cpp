@@ -332,8 +332,9 @@ int main() {
         expect(is_material_chunk_container(bytes) && is_material_chunk_container(nested), "a chunk container");
         const std::vector<uint8_t> truncated(bytes.begin(), bytes.end()-1);
         expect(!is_material_chunk_container(truncated), "a truncated chunk is no container");
-        const std::filesystem::path file = std::filesystem::temp_directory_path() /
-            ("opennova_material_chunk_" + std::to_string(type) + ".bin");
+        test_temp::TempDir temp("opennova_material_chunk");
+        const std::filesystem::path file =
+            opennova::io::os_path(temp.file(("chunk_" + std::to_string(type) + ".bin").c_str()));
         { std::ofstream out(file, std::ios::binary); out.write(reinterpret_cast<const char *>(bytes.data()), std::streamsize(bytes.size())); }
         uint64_t read = 0;
         expect(is_material_chunk_file(opennova::io::utf8_path(file), read) && read > 0 && read <= 3 * 8 + 28,
