@@ -254,19 +254,30 @@ struct ServerConfig {
 	// (Ec2MachineDriver); "docker" launches each machine as a container of the
 	// serve image on the local stack's network (DockerMachineDriver,
 	// deploy/compose). ONNET_HOSTED_PROVIDER; any other value is "none", with a
-	// warning, as is a driver no data set is configured for. The fleet's own
+	// warning, as is a driver with no object store (below). The fleet's own
 	// settings (the internal listener, the machines' knobs, each driver's
 	// values, the serve and hostd images) are hosted/fleet_config.h's.
 	std::string hosted_provider = "none";
 	// ONNET_HOSTED_CAP: the most hosted servers live at once, across every
 	// account, a backstop beside the fleet's own room.
 	int hosted_cap = 24;
-	// The data sets (hosted/data_sets.h, which reads the text):
-	// ONNET_HOSTED_DATA_SETS, a JSON object keyed by data set (its default
-	// rotation, "missions", the first the starting map; "loose_root" for a
-	// folder with no archives). Every one named is offered (each machine mounts
-	// them all); none, or a text that does not read, is hosting off.
-	std::string hosted_data_sets;
+	// The object store the hosted game data and the update packages live in
+	// (object_store.h, ADR 0064): ONNET_OBJECT_STORE_URL, `s3://<bucket>/data`
+	// (the deployment's own ops bucket) with ONNET_OBJECT_STORE_REGION, the
+	// bucket's region, or `file:///<dir>` for the local stack and the tests (its
+	// machines copy trees from that directory). Hosting is on only with a store
+	// that parses, on either driver: the data sets' trees live in it, hostd
+	// fetches them from it, and web's admin page uploads into it.
+	std::string object_store_url;
+	std::string object_store_region;
+	// The update listener (web; apps/novaworld_web/updater/update_listener.h, ADR 0064):
+	// ONNET_UPDATE_HOST, the host SERVER.LST sends a client of this deployment to ("" runs
+	// no listener); ONNET_UPDATE_PORTS, its gateway ports as a comma-separated list
+	// (retail's four by default); ONNET_UPDATE_CACHE_DIR, where it keeps the packages ("":
+	// a scratch directory of its own).
+	std::string update_host;
+	std::string update_ports = "20044,20556,21068,21580";
+	std::string update_cache_dir;
 
 	// Build a config by reading env vars, falling back to the defaults
 	// above for anything not set.

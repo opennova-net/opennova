@@ -77,11 +77,11 @@ int test_compose() {
 	}
 	TEST_EXPECT(!hosted::console_player_command(ConsoleVerb::ChatSend, 1, why));
 
-	// Rotation indexes below the rotation's cap (32, the start settings' kMissionsMax: policy).
-	TEST_EXPECT(hosted::kConsoleRotationMax == 32 && hosted::kConsoleIndexMax == 31);
+	// Rotation indexes below the rotation's cap (128, the start settings' kMissionsMax: policy).
+	TEST_EXPECT(hosted::kConsoleRotationMax == 128 && hosted::kConsoleIndexMax == 127);
 	TEST_EXPECT(hosted::console_rotation_command(ConsoleVerb::MissionRemove, 0, why)->line == "MISSION REMOVE 0");
-	TEST_EXPECT(hosted::console_rotation_command(ConsoleVerb::MissionSetNext, 31, why)->line == "MISSION SETNEXT 31");
-	for (const uint64_t index : { uint64_t{ 32 }, uint64_t{ 256 }, uint64_t{ 1 } << 40 }) {
+	TEST_EXPECT(hosted::console_rotation_command(ConsoleVerb::MissionSetNext, 127, why)->line == "MISSION SETNEXT 127");
+	for (const uint64_t index : { uint64_t{ 128 }, uint64_t{ 256 }, uint64_t{ 1 } << 40 }) {
 		why = {};
 		TEST_EXPECT(!hosted::console_rotation_command(ConsoleVerb::MissionRemove, index, why) &&
 				why.error == "invalid_index");

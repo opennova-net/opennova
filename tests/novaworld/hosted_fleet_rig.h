@@ -4,14 +4,17 @@
 // a hand-stepped clock, with each machine's agent played by a FakeAgent
 // (hosted_fake_driver.h) and the fleet's jobs (fleet_jobs.h) run on the test's
 // thread after each pass, as the workers would within the second; and the
-// fixtures hosted_supervisor_test and hosted_fleet_test share: player accounts,
-// the billing cache's subscriptions, a listing made by hand, the events read
-// back. A tick() is one pass, then the periodic sweep's schedule and every job
-// due; a step() is what a second of the service does: a tick, then one sync of
-// every machine's agent (a muted machine's agent is silent).
+// fixtures hosted_supervisor_test and hosted_fleet_test share: the data sets'
+// trees (seed_data: the seeded Joint Operations, Escalation and Delta Force
+// Xtreme 2 rows each given a ready tree, data_set_repository.h), player
+// accounts, the billing cache's subscriptions, a listing made by hand, the
+// events read back. A tick() is one pass, then the periodic sweep's schedule
+// and every job due; a step() is what a second of the service does: a tick,
+// then one sync of every machine's agent (a muted machine's agent is silent).
 
 #include "auth.h"
 #include "billing/billing_repository.h"
+#include "hosted/data_set_repository.h"
 #include "hosted/fleet_jobs.h"
 #include "hosted/fleet_repository.h"
 #include "hosted/hosted_repository.h"
@@ -57,12 +60,64 @@ inline constexpr int64_t kWall = 1760000000;
 // The serve image the rigs' starts pin.
 inline constexpr const char *kServeImage = "ghcr.io/opennova-net/opennova-serve:sha-test";
 
-inline hosted::HostedSettings valid_settings() {
+// The seeded data sets (migration 0011: Joint Operations, Escalation under it,
+// Delta Force Xtreme 2) and the ready tree each got.
+struct SeededData {
+	int64_t jo = 0;
+	int64_t jox = 0; // Escalation, jox01
+	int64_t dfx2 = 0;
+	int64_t jo_tree = 0;
+	int64_t jox_tree = 0;
+	int64_t dfx2_tree = 0;
+};
+
+inline int64_t seeded_data_set(Database &db, const char *display_name) {
+	const auto rows = db.query("SELECT id FROM data_sets WHERE display_name = $1;", { BindValue(display_name) });
+	return rows.empty() ? 0 : rows.front().as_int(0).value_or(0);
+}
+
+// A ready tree of `data_set_id` with `version`, `missions` (each file titled after itself)
+// and a two-file manifest; its id.
+inline int64_t seed_tree(Database &db, int64_t data_set_id, const std::string &version,
+		const std::vector<std::string> &missions, const std::vector<std::string> &files = { "resource.pff", "version.txt" }) {
+	const int64_t id = hosted::create_tree(db, data_set_id, hosted::TreeSource::Baseline, hosted::TreeState::Finalizing, std::nullopt, std::nullopt, "test");
+	hosted::TreeReady ready;
+	for (size_t i = 0; i < files.size(); ++i)
+		ready.files.push_back({ files[i], 1000 + i });
+	for (const std::string &m : missions) ready.missions.push_back({ m, "Map " + m });
+	ready.version_text = version;
+	ready.bytes = 2001;
+	if (!hosted::finish_tree(db, id, hosted::TreeState::Finalizing, ready)) return 0;
+	return id;
+}
+
+// The three seeded data sets each given a ready tree: Joint Operations' lists the two
+// missions valid_settings names and one more, Escalation's one of its own, Delta Force
+// Xtreme 2's two.
+inline SeededData seed_data(Database &db) {
+	SeededData d;
+	d.jo = seeded_data_set(db, "Joint Operations");
+	d.jox = seeded_data_set(db, "Escalation");
+	d.dfx2 = seeded_data_set(db, "Delta Force Xtreme 2");
+	d.jo_tree = seed_tree(db, d.jo, "JO V1.7.5.3", { "second.bms", "SERVETST.BMS", "third.bms" });
+	d.jox_tree = seed_tree(db, d.jox, "JOX V1.0", { "escal.bms" }, { "jox01.pff", "jox01L.pff", "version.txt" });
+	d.dfx2_tree = seed_tree(db, d.dfx2, "DFX2 V1.0", { "dfx2_a.bms", "dfx2_b.bms" });
+	return d;
+}
+
+// The settings of a server on data set `data_set_id` (Joint Operations' for the rig's:
+// its tree lists the two missions).
+inline hosted::HostedSettings valid_settings(int64_t data_set_id) {
 	hosted::HostedSettings s;
-	s.game = hosted::kDataSetJointOperations;
+	s.data_set_id = data_set_id;
 	s.game_name = "Hosted Test";
 	s.missions = { "servetst.bms", "second.bms" };
 	return s;
+}
+
+// The store's URL of tree `id` as the rigs' replies carry it.
+inline std::string tree_url_of(int64_t id) {
+	return "file:///store/trees/" + std::to_string(id) + "/";
 }
 
 // A player with an admin's grant of `comp_servers` hosted servers.
@@ -207,8 +262,10 @@ struct Rig {
 	bool start_running = true;           // a new agent's containers run at once
 	uint64_t now = 1000;
 	int64_t wall = kWall; // the entitlements' clock, Unix seconds
+	SeededData data; // the data sets' rows and their ready trees
 
 	explicit Rig(const char *name) : temp(name), pool(scratch.options()), db(scratch.open()) {
+		data = seed_data(db);
 		config.cap = 3;
 		config.master_host = "203.0.113.5";
 		config.master_gate_port = 7597;
@@ -219,7 +276,7 @@ struct Rig {
 		config.restart_limit = 2;
 		config.restart_backoff_ms = 3000;
 		config.stop_timeout_ms = 60000;
-		config.data_sets = hosted::known_data_sets();
+		config.tree_url = tree_url_of;
 		config.wall_clock_s = [this] { return wall; };
 		config.placement.shared_slots = 4;
 		config.placement.max_shared = 2;
@@ -303,15 +360,20 @@ struct Rig {
 		FakeAgent *agent = agent_of(id);
 		return agent ? agent->find(container(id)) : nullptr;
 	}
+	// valid_settings on Joint Operations' data set.
+	hosted::HostedSettings settings() const { return valid_settings(data.jo); }
+	// What a start may pick now (data_set_repository.h).
+	std::vector<hosted::OfferedDataSet> offered() { return hosted::offered_data_sets(db); }
 	// The request of a new owner an admin granted one server.
-	int64_t request(const std::string &owner, hosted::HostedSettings settings = valid_settings()) {
+	int64_t request(const std::string &owner, std::optional<hosted::HostedSettings> settings = std::nullopt) {
 		const int64_t user = make_player(db, owner, 1);
 		return user == 0 ? 0 : request_as(user, settings);
 	}
 	// `user`'s request.
-	int64_t request_as(int64_t user, hosted::HostedSettings settings = valid_settings(), bool own_machine = false) {
-		const auto r = hosted::request_server(
-				db, user, settings, config.data_sets, config.cap, wall, own_machine, &config.placement);
+	int64_t request_as(int64_t user, std::optional<hosted::HostedSettings> settings = std::nullopt,
+			bool own_machine = false) {
+		const auto r = hosted::request_server(db, user, settings ? *settings : this->settings(), offered(),
+				config.cap, wall, own_machine, &config.placement);
 		return r.outcome == hosted::RequestOutcome::Created ? r.id : 0;
 	}
 	// Steps until the server is in `want`, `passes` at most; whether it got there.

@@ -21,6 +21,13 @@ locals {
   # first-level names only): staging.<domain>.
   web_host = local.is_prod ? var.cloudflare_domain : "${local.deployment}.${var.cloudflare_domain}"
 
+  # The update service's hostname (edge.tf's unproxied record; web's
+  # ONNET_UPDATE_HOST, which the service's SERVER.LST names to retail
+  # UPDATE.EXE): prod update.<domain>, another deployment
+  # update.<deployment>.<domain>; empty without a zone, which leaves web's
+  # update listener off.
+  update_host = local.dns_enabled ? (local.is_prod ? "update.${var.cloudflare_domain}" : "update.${local.deployment}.${var.cloudflare_domain}") : ""
+
   # The two availability zones: var.azs, or the region's first two. Public and
   # private subnet a share the first (the load balancer's zone-a node, the
   # database's primary when single-AZ), b the second.

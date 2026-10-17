@@ -63,7 +63,6 @@
 
 #include <cstdint>
 #include <functional>
-#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -89,9 +88,7 @@ struct FleetConfig {
 	double slot_cpus = 1.0;
 	int slot_pids = kSlotPids;
 	// The ec2 driver's, but its machine script's text (read from
-	// machine_script_path by load_machine_script) and its data sets (the ones
-	// the deployment offers, which the programs' hosting setup knows:
-	// parts.h).
+	// machine_script_path by load_machine_script).
 	Ec2MachineConfig ec2;
 	std::string machine_script_path = "/app/hosted/machine_user_data.sh";
 	// The docker driver's, but its data sets (as the ec2 driver's).
@@ -103,15 +100,10 @@ struct AgentRouteConfig {
 	// The networks the routes answer (FleetConfig::agent_cidrs); one that
 	// agent_cidr_allowed refuses is ignored.
 	std::vector<Ipv4Cidr> admitted;
-	// The bootstrap reply's data sets: each one every machine mounts, and its
-	// mount path (machine_driver.h machine_data_set_path).
-	std::map<std::string, std::string> data_sets;
 };
 
-// The agent routes' settings: `config`'s networks, and each of `data_sets`
-// (the games slugs of the data sets the deployment offers) at its mount path.
-AgentRouteConfig agent_route_config(
-		const FleetConfig &config, const std::vector<std::string> &data_sets);
+// The agent routes' settings: `config`'s networks.
+AgentRouteConfig agent_route_config(const FleetConfig &config);
 
 // Whether `cidr` may be among the agent routes' networks: inside the RFC 1918
 // private ranges (ipv4_cidr_private), or inside 127.0.0.0/8.

@@ -14,6 +14,7 @@
 #include "hostd_options.h"
 #include "process_runtime.h"
 #include "slot_files.h"
+#include "tree_store.h"
 
 #include "command_runner.h"
 #include "net_sockets.h"
@@ -107,14 +108,21 @@ int main(int argc, char **argv) {
 		io::logf(io::LogLevel::kError, "%s", error.c_str());
 		return 1;
 	}
+	// The trees' root, 0755, where it is missing (a baked image has none).
+	if (::mkdir(options.trees_root.c_str(), 0755) != 0 && errno != EEXIST) {
+		io::logf(io::LogLevel::kError, "cannot make %s", options.trees_root.c_str());
+		return 1;
+	}
 	if (net::startup() != 0) {
 		io::logf(io::LogLevel::kError, "the socket layer did not start");
 		return 1;
 	}
 
-	// The CLIs get the system's variables alone.
+	// The CLIs get the system's variables alone (the AWS CLI its own too: a
+	// developer's profile and region; the machine's credentials come from its
+	// instance role).
 	const std::vector<std::string> environment = proc::filter_environment(
-			{ "PATH", "HOME", "LANG", "LC_*", "TZ", "TMPDIR", "DOCKER_*" });
+			{ "PATH", "HOME", "LANG", "LC_*", "TZ", "TMPDIR", "DOCKER_*", "AWS_*" });
 	proc::ProcessCommandRunner runner(environment, scratch);
 	std::unique_ptr<ContainerRuntime> runtime;
 	if (options.runtime == RuntimeKind::Process) {
@@ -127,6 +135,10 @@ int main(int argc, char **argv) {
 		runtime = std::make_unique<DockerRuntime>(runner, options.docker, environment, scratch,
 				ContainerLogs{ options.log_group, options.log_region, options.machine_id });
 	}
+	// The trees the servers' game data comes in (tree_store.h): fetched from the
+	// store on demand, an s3:// one through the AWS CLI, a file:// one copied.
+	ProcessTreeFetcher fetcher(options.aws, environment, scratch);
+	TreeStore trees(options.trees_root, fetcher);
 	std::vector<EgressTool> tools;
 	if (options.iptables != "none")
 		tools.push_back({ options.iptables, false });
@@ -144,7 +156,7 @@ int main(int argc, char **argv) {
 	config.state_dir = options.state_dir;
 	config.scratch_dir = scratch;
 	config.token_file = options.token_file;
-	Agent agent(config, link, *runtime, slots, egress);
+	Agent agent(config, link, *runtime, slots, trees, egress);
 
 	io::logf(io::LogLevel::kInfo, "%s for machine %lld, service %s, %s runtime", hostd_version(),
 			static_cast<long long>(options.machine_id), options.service_url.c_str(),

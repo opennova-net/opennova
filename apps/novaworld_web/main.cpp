@@ -11,16 +11,20 @@
 #include "http_listener.h"
 #include "infra/infra_status.h"
 #include "loggable.h"
+#include "object_store.h"
 #include "parts.h"
 #include "program.h"
 #include "redis_client.h"
+#include "updater/update_listener.h"
 
+#include <base/io/os_path.h>
 #include <net/novaworld/unknown_tracker.h>
 
 #include <cstdio>
 #include <exception>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -62,7 +66,12 @@ void bootstrap_first_admin(const ServerConfig &config, db::Database &db) {
 std::string configure(ServerConfig &config) {
 	if (config.web_host.empty())
 		return "web needs ONNET_WEB_HOST, the web endpoint its pages name";
-	return {};
+	// The update listener's ports (ONNET_UPDATE_PORTS; updater/update_listener.h): a
+	// list that does not read is this boot's FATAL.
+	std::vector<uint16_t> ports;
+	if (!update_service::parse_update_ports(config.update_ports, ports))
+		return "ONNET_UPDATE_PORTS is no comma-separated list of ports 1..65535";
+	return std::string();
 }
 
 int run(const program::Boot &boot) {
@@ -102,6 +111,16 @@ int run(const program::Boot &boot) {
 	// Whether the routes queue the welcome and reset mails (mail.send jobs, a
 	// worker's to send): the worker decides alike from the same settings.
 	const MailStack mail = make_mail(config);
+	// The object store the data set routes upload into and read (the admin's
+	// data sets page). Declared before the listener, which it outlives.
+	ObjectStoreStack store;
+	if (hosting.store_ok) {
+		std::string error;
+		store = make_object_store(hosting, config, error);
+		if (!store.store)
+			return program::fatal("the object store: " + error);
+		std::printf("[boot] data sets: routes over the %s store\n", store.store->kind());
+	}
 
 	// The admin's infrastructure view's AWS reads (infra/infra_status.h): the
 	// deployment's ECS services, balancer, database and cache through web's task
@@ -128,8 +147,47 @@ int run(const program::Boot &boot) {
 	// The admin jobs page's schedules: the controller's, read from the same
 	// settings.
 	http.set_job_schedules(periodic_jobs(config, hosting));
+	// The game data routes (data_sets/) work on the deployment's object store
+	// (ONNET_OBJECT_STORE_URL, ADR 0064), built above: none without one, and those
+	// routes answer 503 store_unavailable.
+	ObjectStore *object_store = store.store.get();
+	http.set_object_store(object_store);
 	if (!http.start(config))
 		return program::fatal("HTTP listener start failed");
+
+	// The update listener (updater/update_listener.h): UPDATE.EXE's gateway and
+	// update server over the published releases, on ONNET_UPDATE_PORTS, when
+	// ONNET_UPDATE_HOST names this deployment's update host; its packages cached
+	// under ONNET_UPDATE_CACHE_DIR, or a scratch directory of its own (fetched again
+	// after a restart). It serves the packages from the object store, so without one
+	// (hosting off) it does not start. Watched by the stall watchdog like the loops.
+	std::string update_error;
+	update_service::UpdateListenerConfig update_config;
+	update_config.update_host = config.update_host;
+	update_config.cache_dir = config.update_cache_dir;
+	update_service::parse_update_ports(config.update_ports, update_config.ports); // checked by configure
+	ScratchDir update_cache;
+	std::optional<update_service::UpdateListener> update_listener;
+	if (!update_config.update_host.empty()) {
+		if (object_store == nullptr) {
+			std::fprintf(stderr,
+					"[boot] WARN update listener not started: no object store (hosting off)\n");
+		} else {
+			if (update_config.cache_dir.empty()) {
+				update_cache = ScratchDir::make("update-cache", update_error);
+				if (update_cache.empty())
+					return program::fatal("update cache: " + update_error);
+				update_config.cache_dir = io::utf8_path(update_cache.path());
+			}
+			update_listener.emplace(boot.pool, *object_store, update_config);
+			if (!update_listener->start())
+				return program::fatal("update listener start failed");
+			watchdog.watch(
+					"update listener", [&update_listener] { return update_listener->turns(); });
+		}
+	} else {
+		std::printf("[boot] update listener off (ONNET_UPDATE_HOST unset)\n");
+	}
 
 	billing::Billing *billing = billing_stack->billing.get();
 	uint64_t webhook_rejects_reported = 0;
@@ -157,6 +215,8 @@ int run(const program::Boot &boot) {
 	// connection); then the billing's, the mail's and the infrastructure
 	// view's scratch directories go with their stacks.
 	std::printf("[shutdown] stopping listeners\n");
+	if (update_listener)
+		update_listener->stop();
 	http.stop();
 	return exit_code;
 }

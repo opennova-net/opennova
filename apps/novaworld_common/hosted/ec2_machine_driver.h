@@ -4,24 +4,24 @@
 // an EC2 machine launched from the launch template of its kind
 // (ONNET_HOSTED_EC2_LAUNCH_TEMPLATES, {"shared": "lt-...", "own": "lt-..."};
 // infra/aws/fleet.tf: the deployment's fleet image, Canonical's Ubuntu or one
-// `fleet bake-image` made with docker installed, the kind's machine type, every
-// data set's private encrypted snapshot as a volume of its own (attached as
-// /dev/sdf, /dev/sdg, ... in the data sets' sorted order), each file system
-// labelled by volume_label, by which alone the machine mounts it, the
-// machines' security group, their instance profile, IMDSv2
-// required and InstanceInitiatedShutdownBehavior=terminate; no user-data).
-// Its user-data is machine/machine_user_data.sh with the machine's values
-// filled in: the controller's internal listener by its URL (ONNET_INTERNAL_URL,
-// a name the deployment's Cloud Map namespace keeps on whichever task runs the
+// `fleet bake-image` made with docker and the AWS CLI installed, the kind's
+// machine type, its root volume (the trees the agent fetches live there), the
+// machines' security group, their instance profile (which reads the
+// deployment's trees in the object store), IMDSv2 required and
+// InstanceInitiatedShutdownBehavior=terminate; no user-data). Its user-data is
+// machine/machine_user_data.sh with the machine's values filled in: the
+// controller's internal listener by its URL (ONNET_INTERNAL_URL, a name the
+// deployment's Cloud Map namespace keeps on whichever task runs the
 // controller) and that URL's port, the machine's id and one-time bootstrap
 // token, the serve image its containers run, the hostd image the agent is
-// copied out of, the data sets (sorted) with their volumes' labels, and the
-// machines' CloudWatch log group (ONNET_HOSTED_EC2_LOG_GROUP) with the region.
-// The script installs docker, mounts the data sets, fences the slots' users off
-// the instance metadata and off the internal port on every destination (no
-// address of the controller's is pinned in a firewall rule), starts
-// opennova-hostd (apps/hostd), which redeems the token, and ships the agent's
-// log and its containers' output to that log group (a stream per slot,
+// copied out of, and the machines' CloudWatch log group
+// (ONNET_HOSTED_EC2_LOG_GROUP) with the region. The script installs docker and
+// the AWS CLI, makes the trees root (/opt/game, where the agent fetches each
+// tree the service names into its own directory, ADR 0064), fences the slots'
+// users off the instance metadata and off the internal port on every
+// destination (no address of the controller's is pinned in a firewall rule),
+// starts opennova-hostd (apps/hostd), which redeems the token, and ships the
+// agent's log and its containers' output to that log group (a stream per slot,
 // <machine id>/slot-<k>, and <machine id>/hostd). A machine is terminated at
 // its end, never stopped.
 //
@@ -131,10 +131,6 @@ struct Ec2MachineConfig {
 	// machines' admin.cfg admits its network (admin_pattern). The
 	// controller's profile alone reads it; check_config does not.
 	std::string admin_address;
-	// The data sets every machine mounts, by their games slugs: the templates'
-	// own (fleet.tf's var.hosted_data_snapshots), each one's volume attached in
-	// their sorted order.
-	std::vector<std::string> data_sets;
 	// The log group the machines write (ONNET_HOSTED_EC2_LOG_GROUP; fleet.tf's
 	// /opennova/<deployment>/machines, which the machine role may write alone).
 	std::string log_group;
@@ -160,9 +156,6 @@ struct MachineUserData {
 	std::string bootstrap_token;
 	std::string serve_image;
 	std::string hostd_image;
-	// Each data set the machine mounts and its volume's label, in the order
-	// the launch template attaches the volumes (the data sets' sorted order).
-	std::vector<std::pair<std::string, std::string>> data_sets;
 	std::string log_group; // the machines' CloudWatch log group
 	std::string region; // its region (the machine's own)
 };
@@ -180,18 +173,15 @@ public:
 	static constexpr const char *kBlankMachineToken = "@OPENNOVA_MACHINE_TOKEN@";
 	static constexpr const char *kBlankServeImage = "@OPENNOVA_SERVE_IMAGE@";
 	static constexpr const char *kBlankHostdImage = "@OPENNOVA_HOSTD_IMAGE@";
-	static constexpr const char *kBlankDataSets = "@OPENNOVA_DATA_SETS@";
 	static constexpr const char *kBlankLogGroup = "@OPENNOVA_LOG_GROUP@";
 	static constexpr const char *kBlankRegion = "@OPENNOVA_REGION@";
 	// EC2's raw user-data cap.
 	static constexpr size_t kMaxUserDataBytes = 16 * 1024;
 	// ONNET_HOSTED_DEPLOYMENT's longest: its client tokens then fit EC2's 64.
 	static constexpr size_t kMaxDeploymentBytes = 32;
-	// An ext4 label holds at most 16 bytes.
-	static constexpr size_t kMaxVolumeLabelBytes = 16;
 	// From the launch to the agent's first report: EC2's pending, cloud-init,
-	// the docker install (its apt retries), the data volumes' wait, the serve
-	// image's pull and the agent's bootstrap.
+	// the docker and AWS CLI installs (their retries), the serve image's pull
+	// and the agent's bootstrap.
 	static constexpr uint64_t kBootTimeoutMs = 15 * 60 * 1000;
 
 	using Clock = std::function<uint64_t()>;
@@ -207,11 +197,6 @@ public:
 	// explicit port; its name and port, false for anything else (a path, a user, a
 	// character a single-quoted shell word or a URL would read otherwise).
 	static bool parse_service_url(std::string_view url, std::string &name, uint16_t &port);
-	// The label of data set `data_set`'s volume: "od-" and the slug without
-	// its "_consumer" suffix and its underscores (jop_2_consumer: od-jop2), or
-	// "" when that is no ext4 label (over kMaxVolumeLabelBytes, or a character
-	// outside a-z, 0-9 and '-'). deploy/hosted-data writes the same.
-	static std::string volume_label(std::string_view data_set);
 	// `script` with its blanks filled from `values`; nullopt when a value holds
 	// anything outside its shape (each goes in single quotes), the script lacks
 	// a blank, or the result passes kMaxUserDataBytes.

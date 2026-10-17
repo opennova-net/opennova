@@ -24,9 +24,6 @@ mock_provider "aws" {
   mock_data "aws_ami" {
     defaults = { id = "ami-0123456789abcdef0", root_device_name = "/dev/sda1" }
   }
-  mock_data "aws_ebs_snapshot" {
-    defaults = { volume_size = 2 }
-  }
   mock_data "aws_caller_identity" {
     defaults = { account_id = "123456789012" }
   }
@@ -392,11 +389,11 @@ run "no_cloudflare" {
 
   assert {
     condition = (
-      length(aws_vpc_security_group_ingress_rule.lb) == 3 && length(cloudflare_record.web_root) == 0 &&
+      length(aws_vpc_security_group_ingress_rule.lb) == 7 && length(cloudflare_record.web_root) == 0 &&
       !strcontains(aws_ecs_task_definition.program["web"].container_definitions, "ONNET_SITE_URL") &&
       strcontains(aws_ecs_task_definition.program["web"].container_definitions, "\"ONNET_COOKIE_SECURE\",\"value\":\"0\"")
     )
-    error_message = "without Cloudflare: the gate's, the lobby's and the retail port's rules alone, no record, no site URL and no Secure cookie"
+    error_message = "without Cloudflare: the gate's, the lobby's, the retail port's and the update ports' rules alone, no record, no site URL and no Secure cookie"
   }
 }
 

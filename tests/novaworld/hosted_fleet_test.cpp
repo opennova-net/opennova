@@ -43,6 +43,18 @@ int test_desired_state() {
 	TEST_EXPECT(c && c->desired.files && c->desired.files->size() == 4);
 	TEST_EXPECT(c->desired.files->count("credentials.txt") == 1 && c->desired.files->count("game.cfg") == 1);
 	TEST_EXPECT(c->desired.uid == hosted::slot_uid(0) && c->desired.image == kServeImage && c->desired.cpus == 1.0);
+	// Its tree, pinned at its start (Joint Operations' current tree, no
+	// expansion), beside it in the answer: where the agent fetches it and its
+	// manifest, and nothing else's tree.
+	TEST_EXPECT(c->desired.base_tree == rig.data.jo_tree && !c->desired.expansion_tree &&
+			c->desired.expansion_code.empty());
+	TEST_EXPECT(agent.last.trees.size() == 1 && agent.last.trees.count(rig.data.jo_tree) == 1);
+	if (agent.last.trees.count(rig.data.jo_tree) == 1) {
+		const hosted::TreeSpec &tree = agent.last.trees.at(rig.data.jo_tree);
+		TEST_EXPECT(tree.url == tree_url_of(rig.data.jo_tree) && tree.version == "JO V1.7.5.3" &&
+				tree.files.size() == 2 && tree.files[0].name == "resource.pff" && tree.files[0].size == 1000 &&
+				tree.files[1].name == "version.txt");
+	}
 	TEST_EXPECT(!agent.last.drain);
 	// Reported once, the files are no longer sent (and no longer kept).
 	rig.sync_all();
@@ -90,6 +102,9 @@ int test_desired_state() {
 	TEST_EXPECT(agent.last.desired[0].name == rig.container(a) && agent.last.desired[0].args == args);
 	TEST_EXPECT(agent.last.desired[0].image == kServeImage && agent.last.desired[0].uid == hosted::slot_uid(0));
 	TEST_EXPECT(!args.empty() && args.back() == "jo");
+	// And the pinned tree from the row, with its spec read again.
+	TEST_EXPECT(agent.last.desired[0].base_tree == rig.data.jo_tree && agent.last.trees.size() == 1 &&
+			agent.last.trees.count(rig.data.jo_tree) == 1);
 	return 0;
 }
 

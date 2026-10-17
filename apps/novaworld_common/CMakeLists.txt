@@ -18,6 +18,11 @@ set(NOVAWORLD_COMMON_SOURCES
     health.cpp
     health_listener.cpp
     ecs_metadata.cpp
+    # The object store the game data lives in (ADR 0064): the seam, S3 through
+    # the AWS CLI, and a directory for a developer's machine and the tests.
+    object_store.cpp
+    s3_object_store.cpp
+    local_object_store.cpp
 )
 
 if(BUILD_NOVAWORLD_HTTP)
@@ -51,12 +56,15 @@ if(BUILD_NOVAWORLD_HTTP)
         hosted/admin_link.cpp
         hosted/agent_protocol.cpp
         hosted/console_queue.cpp
-        hosted/data_sets.cpp
+        hosted/data_set_files.cpp
+        hosted/data_set_jobs.cpp
+        hosted/data_set_repository.cpp
         hosted/docker_machine_driver.cpp
         hosted/ec2_machine_driver.cpp
         hosted/fleet_config.cpp
         hosted/fleet_jobs.cpp
         hosted/fleet_repository.cpp
+        hosted/host_limits.cpp
         hosted/hosted_repository.cpp
         hosted/hosted_settings.cpp
         hosted/limits_hold.cpp

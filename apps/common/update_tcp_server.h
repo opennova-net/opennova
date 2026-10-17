@@ -3,7 +3,9 @@
 // The update listener's sockets: one listener per gateway port, the connections they accept,
 // pumped into the engine's connection machine (net/update/update_server.h). A file reply may
 // be megabytes, so each connection's replies queue and drain as its socket takes them. Socket
-// I/O stays here; the engine takes and returns bytes.
+// I/O stays here; the engine takes and returns bytes. opennova-update-tool's `serve` and the
+// NovaWorld web program's update listener (ADR 0061 d3) run it alike, each over its own
+// catalog, so it lives with the app layer's sockets.
 
 #include "net_sockets.h"
 
@@ -15,15 +17,17 @@
 #include <string>
 #include <vector>
 
-namespace opennova::update_tool {
+namespace opennova::net {
 
 class UpdateTcpServer {
 public:
 	// A line about a connection or a request, for the console.
 	using LogSink = std::function<void(const std::string &line)>;
 
-	UpdateTcpServer(update::UpdateServer &server, LogSink log = {}) :
-			server_(server), log_(std::move(log)) {}
+	// `max_connections`: the slots, kMaxConnections unless the embedder holds fewer.
+	UpdateTcpServer(update::UpdateServer &server, LogSink log = {},
+			size_t max_connections = kMaxConnections) :
+			server_(server), log_(std::move(log)), max_connections_(max_connections) {}
 	~UpdateTcpServer() { close(); }
 	UpdateTcpServer(const UpdateTcpServer &) = delete;
 	UpdateTcpServer &operator=(const UpdateTcpServer &) = delete;
@@ -62,9 +66,10 @@ private:
 
 	update::UpdateServer &server_;
 	LogSink log_;
+	size_t max_connections_ = kMaxConnections;
 	std::vector<net::Socket> listeners_;
 	std::vector<uint16_t> ports_;
 	std::vector<Client> clients_;
 };
 
-} // namespace opennova::update_tool
+} // namespace opennova::net

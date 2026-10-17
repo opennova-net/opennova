@@ -281,9 +281,10 @@ and restart the server only on an exit it did not ask for (ADR 0053 d6).
 `.github/workflows/serve-image.yml` publishes as `ghcr.io/<owner>/opennova-serve`
 (tagged `sha-<short>`, the branch, and `latest` on master). It is the server the hosted
 game servers run (ADR 0053): opennova-hostd on each machine pulls it at the digest the
-service pinned for that server and runs it in the server's slot as below, with `/opt/game`
-the server's data set mounted read-only (`apps/novaworld_common/hosted/machine/machine_user_data.sh`,
-`apps/hostd/README.md`; DEPLOY.md, "Hosted game servers") and `/game <code>` naming its title.
+service pinned for that server and runs it in the server's slot as below, with the server's
+base data set's tree bound read-only at `/opt/game` and, when it runs an expansion, the
+expansion's tree at `/opt/game/expansion/<code>` (ADR 0064; `apps/hostd/README.md`; DEPLOY.md,
+"Hosted game servers"), `/game <code>` naming its title and `/exp <code>` its expansion.
 
 The image holds the binary and no game data. No retail byte goes into it, ever: the game
 data is a game folder you mount yourself, a licensed Joint Operations or Delta Force Xtreme 2
@@ -291,7 +292,8 @@ install or OpenNova's own data, with `/game` naming its title (`jo` or `dfx2`).
 
 | Path | What | Mount |
 |---|---|---|
-| `/opt/game` | The game folder, as `--resource-dir` takes it (`resource.pff`, `localres.pff`, `language.pff`, the loose files the server reads, and for Joint Operations `expansion/jox01/` for `/exp jox01`). The entrypoint names it. | read-only (`:ro`) |
+| `/opt/game` | The game folder, as `--resource-dir` takes it (`resource.pff`, `localres.pff`, `language.pff`, the loose files the server reads). The entrypoint names it. | read-only (`:ro`) |
+| `/opt/game/expansion/<code>` | An expansion's folder (`<code>.pff`, `<code>L.pff`, `version.txt`) for `/exp <code>`: part of the game folder when you mount an install, a second read-only bind on a hosted machine (the expansion's own tree). | read-only (`:ro`) |
 | `/srv/serve` | The working directory (above): `game.cfg`, `activesrvr.txt`, `admin.cfg`, `admin_log.txt`, `banned.txt`, `banlist.txt` and the logs, and by convention the host file and the `--credentials` file. | a writable volume |
 
 ```bash

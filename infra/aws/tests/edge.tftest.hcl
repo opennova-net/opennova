@@ -7,9 +7,11 @@
 # staging's `staging`) and an Origin CA certificate (ECDSA) for its web
 # hostnames alone (staging's names no prod hostname), its certificate and key
 # handed to the portal through SSM SecureStrings under the deployment's prefix.
-# Unproxied or without Cloudflare: no certificate. The zone's own settings and
-# rules (Full strict, edge authentication, the webhook's WAF skip) are
-# infra/zone's: none of them is made here.
+# Unproxied or without Cloudflare: no certificate. The update service's record
+# (update, at the balancer; update.staging off prod) is never proxied, and
+# goes only without a zone. The zone's own settings and rules (Full strict,
+# edge authentication, the webhook's WAF skip) are infra/zone's: none of them
+# is made here.
 
 mock_provider "aws" {
   override_during = plan
@@ -19,9 +21,6 @@ mock_provider "aws" {
   }
   mock_data "aws_ami" {
     defaults = { id = "ami-0123456789abcdef0", root_device_name = "/dev/sda1" }
-  }
-  mock_data "aws_ebs_snapshot" {
-    defaults = { volume_size = 2 }
   }
   mock_data "aws_caller_identity" {
     defaults = { account_id = "123456789012" }
@@ -309,6 +308,16 @@ run "edge" {
     )
     error_message = "the certificate and key reach the portal as base64 SecureStrings under /opennova/<deployment>/tls/"
   }
+  assert {
+    condition = (
+      cloudflare_record.update[0].name == "update" && cloudflare_record.update[0].type == "CNAME" &&
+      cloudflare_record.update[0].content == "opennova-prod-0123456789abcdef.elb.us-east-1.amazonaws.com" &&
+      !cloudflare_record.update[0].proxied && cloudflare_record.update[0].ttl == 300 &&
+      output.update_host == "update.example.com" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_UPDATE_HOST"] == "update.example.com"
+    )
+    error_message = "the update service's record is an unproxied CNAME at the balancer (retail UPDATE.EXE speaks plain TCP to it), the name web serves"
+  }
 }
 
 # Staging's records and certificate: its own first-level name alone.
@@ -335,6 +344,14 @@ run "staging_edge" {
     condition     = aws_ssm_parameter.origin_tls_key[0].name == "/opennova/staging/tls/ORIGIN_TLS_KEY"
     error_message = "staging's certificate reaches staging's portal alone, under /opennova/staging/tls/"
   }
+  assert {
+    condition = (
+      cloudflare_record.update[0].name == "update.staging" && !cloudflare_record.update[0].proxied &&
+      output.update_host == "update.staging.example.com" &&
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_UPDATE_HOST"] == "update.staging.example.com"
+    )
+    error_message = "staging's update record is update.staging, unproxied, and is staging's web's update host"
+  }
 }
 
 run "unproxied" {
@@ -347,9 +364,10 @@ run "unproxied" {
   assert {
     condition = (
       length(tls_private_key.origin) == 0 && length(cloudflare_origin_ca_certificate.origin) == 0 &&
-      !strcontains(aws_ecs_task_definition.program["web"].container_definitions, "ORIGIN_TLS_CERT")
+      !strcontains(aws_ecs_task_definition.program["web"].container_definitions, "ORIGIN_TLS_CERT") &&
+      length(cloudflare_record.update) == 1 && !cloudflare_record.update[0].proxied
     )
-    error_message = "unproxied records: no origin certificate (the portal reads none)"
+    error_message = "unproxied records: no origin certificate (the portal reads none); the update record stays (it was never proxied)"
   }
 }
 
@@ -362,7 +380,11 @@ run "no_cloudflare" {
   }
 
   assert {
-    condition     = length(aws_ssm_parameter.origin_tls_cert) == 0 && length(cloudflare_record.web_root) == 0
-    error_message = "without Cloudflare: none of it"
+    condition = (
+      length(aws_ssm_parameter.origin_tls_cert) == 0 && length(cloudflare_record.web_root) == 0 &&
+      length(cloudflare_record.update) == 0 && output.update_host == null &&
+      { for e in jsondecode(aws_ecs_task_definition.program["web"].container_definitions)[0].environment : e.name => e.value }["ONNET_UPDATE_HOST"] == ""
+    )
+    error_message = "without Cloudflare: none of it, no update record, and web's update host empty (its listener stays off)"
   }
 }

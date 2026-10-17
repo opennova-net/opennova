@@ -56,10 +56,10 @@ hand.
 | Policy | Covers |
 | --- | --- |
 | `opennova-deploy-network` | VPC, subnets, route tables, internet gateway, security groups and rules, network interfaces, Elastic IPs (associating, tagging, accepting the gate's address transferred in at the cutover, releasing any but prod's tagged ones); creating launch templates; the public network load balancer, its target groups and listeners |
-| `opennova-deploy-compute` | EC2 reads, instances and their volumes, changing and deleting launch templates, EC2 tags, the hosted data snapshots (EBS direct APIs), the baked fleet images, `kms:DescribeKey` |
+| `opennova-deploy-compute` | EC2 reads, instances and their volumes, changing and deleting launch templates, EC2 tags, the baked fleet images, `kms:DescribeKey` |
 | `opennova-deploy-ecs` | the ECS cluster, its services, task definitions and tasks (one-off tasks, ECS Exec), Application Auto Scaling, Cloud Map, EventBridge Scheduler (the nightly backup) |
 | `opennova-deploy-iam` | the stack's roles (under the boundary), instance profiles, the GitHub OIDC provider, `iam:PassRole` to EC2, ECS's tasks and EventBridge Scheduler, the service-linked roles RDS, ElastiCache, Elastic Load Balancing, ECS, Application Auto Scaling and CloudWatch's alarm actions make on first use, the policy simulator; nothing about IAM users |
-| `opennova-deploy-data` | RDS, ElastiCache, the operations bucket (its releases read and written, its dumps read and written, never deleted), SSM parameters, Session Manager (the machines' break-glass), CloudWatch Logs |
+| `opennova-deploy-data` | RDS, ElastiCache, the operations bucket (its versioning, lifecycle and encryption; its releases read and written, its dumps read and written, never deleted; the game data, `data/*`, is the tasks' roles' alone, never the deploy user's), SSM parameters, Session Manager (the machines' break-glass), CloudWatch Logs |
 | `opennova-deploy-observability` | alarms and metrics, the alerts topic, the Route 53 health check and the private zone Cloud Map keeps for the controller, budgets, Cost Anomaly Detection, Service Quotas and cost reads, SES identities |
 
 Beside them the org stack gives the user two inline policies: its Terraform states (in its
@@ -82,8 +82,10 @@ task. It may create a role, or put or change its policy or trust, only when the 
 `opennova-role-boundary` (`iam:PermissionsBoundary`), and it can neither attach managed policies,
 create or edit policies, nor take a boundary off. The boundary is the union of what `infra/aws`'s
 roles and the GitHub deploy role need: the session channels (ECS Exec, the machines' Session
-Manager), `/opennova/*` parameters and their names, the operations bucket, `/opennova/*` logs,
-the AWS-managed keys through SSM and EC2, launching and ending machines tagged
+Manager), `/opennova/*` parameters and their names, the operations bucket (its objects read,
+written and deleted, its uploads in flight listed and aborted: the game data's store, `data/`,
+which web's and the worker's task roles narrow to and the machine role reads the trees of),
+`/opennova/*` logs, the AWS-managed keys through SSM and EC2, launching and ending machines tagged
 `opennova:hosted=1` from OpenNova-tagged subnets, groups, templates and snapshots, passing
 `opennova-*` roles to EC2, ECS's tasks and EventBridge Scheduler, sending mail through the
 account's SES identities, running `opennova-*`
@@ -93,7 +95,11 @@ release's revision, and the admin's infrastructure view's reads (web's: listing 
 describing `opennova-*` clusters' tasks, describing `opennova-*` databases and cache
 replication groups, the target groups' health). Each role's own policy narrows its part. When a role gains a permission,
 the boundary must gain it too, or the role is refused at run time (an AccessDenied naming the
-boundary).
+boundary). The org stack applies the boundary, so it goes first: before the `infra apply` that
+turns hosting on (`hosted_enabled = true`, DEPLOY.md "Hosted game servers"), `org apply` with
+this directory's `opennova-role-boundary.json`, which holds the store's `s3:DeleteObject` and
+`s3:ListBucketMultipartUploads`; applied after, every store call of web's and the worker's task
+roles is refused until it is. The deploy user's policies gain nothing for the store.
 
 ## Changing a policy
 
@@ -116,5 +122,10 @@ AccessDenied naming the action):
 - prod's cutover: `ec2:AcceptAddressTransfer` of the gate's address, its tag and its
   association with the load balancer;
 - the first deploy workflow run: its role's `scheduler:UpdateSchedule` under the boundary;
-- the first `hosted data-snapshot` and `fleet bake-image`, and a worker's first machine
-  launch under the boundary.
+- the first `infra apply` with `hosted_enabled`: the game data's lifecycle rules; then, at
+  the first upload on the Game data page, web's `s3:PutObject` of the parts the browser
+  sends it (as its task role, under the boundary); at the first tree deleted on the page or
+  pruned by the worker, `s3:ListBucketMultipartUploads` (no prefix condition: the action's
+  context carries none) and `s3:DeleteObject`; at the first server, the machine role's
+  `aws s3 sync` of a tree (`s3:ListBucket` with `s3:prefix` `data/trees/*`, `s3:GetObject`);
+- the first `fleet bake-image`, and a worker's first machine launch under the boundary.

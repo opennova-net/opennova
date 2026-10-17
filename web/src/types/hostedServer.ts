@@ -14,18 +14,16 @@ export type HostedState =
   | 'stopped'
   | 'failed';
 
-// An expansion's code, as the server's /exp takes it: '' for the data set's
-// base game ('jox01', Escalation, for Joint Operations). The data set names
-// the ones it allows (HostedDataSet.expansions).
-export type HostedExpansion = string;
-
 // The owner's settings, as stored (hosted_settings.h HostedSettings). The
-// backend range-checks each one (check_settings) against the server's data
-// set; utils/hostedSettings.ts mirrors those rules.
+// backend range-checks each one (check_settings) against the data sets it
+// offers; utils/hostedSettings.ts mirrors those rules.
 export interface HostedSettings {
-  // The data set the server runs: its games slug, the lobby it lists in
-  // ('jop_2_consumer', 'dfx2_consumer', 'opennova_0_consumer').
-  game: string;
+  // The data set the server runs (HostedDataSet.id): a base game the service
+  // offers.
+  data_set_id: number;
+  // One of that data set's expansions (HostedExpansionOption.id), or null for
+  // the base game alone.
+  expansion_id: number | null;
   game_name: string;
   max_players: number;
   // '' for none.
@@ -37,15 +35,14 @@ export interface HostedSettings {
   respawn: number;
   start_delay: number;
   team_ff: boolean;
-  expansion: HostedExpansion;
   // The rotation in play order: the first is the map the server starts on.
   missions: string[];
 }
 
 // The settings in POST /api/me/servers's body: every field but game_name may
-// be left out (the backend's default): game defaults to the first data set the
-// service offers, and missions to that data set's rotation (its "missions" in
-// ONNET_HOSTED_DATA_SETS).
+// be left out (the backend's default): data_set_id defaults to the first data
+// set the service offers, expansion_id to none, and missions to every mission
+// of the base and the picked expansion.
 export type StartSettings = Pick<HostedSettings, 'game_name'> & Partial<Omit<HostedSettings, 'game_name'>>;
 
 // POST /api/me/servers's body: the settings, and whether the server runs on
@@ -62,28 +59,68 @@ export interface SettingRange {
   max: number;
 }
 
-// One expansion a data set allows: its code ('' for the base game) and the
-// name the page shows.
-export interface HostedExpansionOption {
-  code: HostedExpansion;
-  name: string;
+// One multiplayer mission a data set's current tree holds: its .bms file and
+// the title the game shows for it ('' when the archive names none).
+export interface HostedMission {
+  file: string;
+  title: string;
 }
 
-// A data set the service offers hosted servers of (hosted/data_sets.h): the
-// game folder a server mounts, the title it speaks and the lobby it lists in.
-export interface HostedDataSet {
-  // Its games slug, the value of HostedSettings.game.
-  game: string;
+// One expansion a base data set offers (an expansion data set with a ready
+// tree): its id (the value of HostedSettings.expansion_id), its /exp code
+// ('jox01'), the name the page shows, the version of its current tree and
+// the missions that tree adds.
+export interface HostedExpansionOption {
+  id: number;
+  code: string;
   display_name: string;
-  // The base game ('') first.
-  expansions: HostedExpansionOption[];
-  // The deployment's rotation for it (its "missions" in ONNET_HOSTED_DATA_SETS),
-  // which a start naming no missions takes, and the missions the rotation
-  // picker offers; empty when none is configured, and a start must then name
-  // its own.
-  default_missions: string[];
+  version: string;
+  missions: HostedMission[];
+}
+
+// A base data set the service offers hosted servers of (one with a ready
+// current tree; ADR 0064): the title it speaks, the version of its current
+// tree, the missions that tree holds, its expansions and the host screen's
+// ranges.
+export interface HostedDataSet {
+  // The value of HostedSettings.data_set_id.
+  id: number;
+  display_name: string;
+  // The title it speaks ('jo', 'dfx2').
+  title: string;
+  // Its current tree's version.txt.
+  version: string;
+  // The missions a rotation may hold (with an expansion's), in catalog order;
+  // a start naming none takes all of them.
+  missions: HostedMission[];
   // The host screen's ranges, per setting.
   limits: Record<HostedIntField, SettingRange>;
+  expansions: HostedExpansionOption[];
+}
+
+// A data set a server runs, as its row names it.
+export interface HostedServerDataSet {
+  id: number;
+  display_name: string;
+}
+
+export interface HostedServerExpansion {
+  id: number;
+  code: string;
+  display_name: string;
+}
+
+// One tree a server is pinned to: the tree and its version.
+export interface PinnedTree {
+  tree_id: number;
+  version: string;
+}
+
+// The data a server runs on: the trees it was pinned to when it started
+// (null before placement, or for the base game alone).
+export interface HostedServerData {
+  base: PinnedTree | null;
+  expansion: PinnedTree | null;
 }
 
 // The listing the server's service account holds now.
@@ -118,9 +155,21 @@ export interface HostedServer {
   own_machine: boolean;
   settings: HostedSettings;
   // The names the service gives the server's game and expansion ("Joint
-  // Operations", "Escalation (jox01)" or "Joint Operations (base game)").
+  // Operations", "Escalation"); the expansion's '' for the base game alone.
   game_display_name: string;
   expansion_display_name: string;
+  // The data set and expansion it runs, as their rows name them; null when
+  // a row is gone.
+  data_set: HostedServerDataSet | null;
+  expansion: HostedServerExpansion | null;
+  // The trees it runs on.
+  data: HostedServerData;
+  // Its data set (or expansion) has newer data than the trees it runs on: the
+  // owner may update it (POST /api/me/servers/<id>/update), which restarts it.
+  update_available: boolean;
+  // An update was asked for: the supervisor restarts it on the current data
+  // shortly.
+  update_requested: boolean;
   // Crash restarts counted toward the limit (3 in the restart window).
   restarts: number;
   // Why it failed, in the service's words; null unless it did.
@@ -224,6 +273,12 @@ export interface FleetServer extends HostedServer {
   game_port: number | null;
   // Players on it now, as its listing says; null while not listed.
   players: number | null;
+  // The trees it is pinned to; null before placement (the expansion's for
+  // the base game alone).
+  base_tree_id: number | null;
+  expansion_tree_id: number | null;
+  // It runs on an older tree than its data set's current one.
+  outdated: boolean;
   // GET /api/admin/hosted/<id> only: its machine.
   machine?: FleetMachine | null;
 }

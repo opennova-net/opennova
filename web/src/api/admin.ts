@@ -9,7 +9,7 @@
 
 import { isAxiosError } from 'axios';
 import { adminClient } from './client';
-import { isHostedServer } from './hostedServer';
+import { parseHostedServer } from './hostedServer';
 import type {
   AdminConnection,
   AdminConnectionAccount,
@@ -50,6 +50,24 @@ export type AdminErrorCode =
   | 'not_queued'
   | 'secret_dropped'
   | 'already_pending'
+  // The game data routes (dataSets.ts).
+  | 'invalid_files'
+  | 'upload_in_flight'
+  | 'store_unavailable'
+  | 'store_error'
+  | 'not_uploading'
+  | 'too_large'
+  | 'duplicate_login'
+  | 'duplicate_expansion'
+  | 'no_such_parent'
+  | 'in_use'
+  | 'current'
+  | 'baseline'
+  | 'pinned'
+  | 'not_draft'
+  | 'not_published'
+  | 'published'
+  | 'up_to_date'
   | 'network'
   | 'unknown';
 
@@ -92,6 +110,23 @@ const KNOWN_ADMIN_CODES: ReadonlySet<string> = new Set<AdminErrorCode>([
   'not_queued',
   'secret_dropped',
   'already_pending',
+  'invalid_files',
+  'upload_in_flight',
+  'store_unavailable',
+  'store_error',
+  'not_uploading',
+  'too_large',
+  'duplicate_login',
+  'duplicate_expansion',
+  'no_such_parent',
+  'in_use',
+  'current',
+  'baseline',
+  'pinned',
+  'not_draft',
+  'not_published',
+  'published',
+  'up_to_date',
 ]);
 
 function adminMessageFor(code: AdminErrorCode): string {
@@ -149,6 +184,40 @@ function adminMessageFor(code: AdminErrorCode): string {
       return 'That job carried a secret (a mail, a machine launch token) that was dropped when it ended, so it cannot run again.';
     case 'already_pending':
       return 'A job of that kind, or with the same key, is already waiting or running.';
+    case 'invalid_files':
+      return 'The files picked do not make a tree of that kind. Check the list and pick the folder again.';
+    case 'upload_in_flight':
+      return 'An upload to this data set is already in progress. Wait for it to finish, or delete the uploading tree first.';
+    case 'store_unavailable':
+      return 'The object store is not reachable right now. Try again shortly.';
+    case 'store_error':
+      return 'The object store refused the request (the server log says why). Try again shortly.';
+    case 'not_uploading':
+      return 'That tree is no longer taking uploads. Refresh the list.';
+    case 'too_large':
+      return 'The server refused an upload part as too large. Reload the page and upload again.';
+    case 'duplicate_login':
+      return 'Another data set already uses that updater login.';
+    case 'duplicate_expansion':
+      return 'That base already has an expansion with that code.';
+    case 'no_such_parent':
+      return 'The base that expansion would belong to no longer exists. Refresh the list.';
+    case 'in_use':
+      return 'That data set is in use: a live server runs it, or an expansion belongs to it. Stop the servers or delete the expansion first.';
+    case 'current':
+      return "That tree is the data set's current data, so it stays. Upload or publish newer data first.";
+    case 'baseline':
+      return 'That tree is the baseline a release applies to, so it stays.';
+    case 'pinned':
+      return 'Live servers run on that tree, so it stays until they update or stop.';
+    case 'not_draft':
+      return 'Only a draft release can be published. Refresh the list.';
+    case 'not_published':
+      return 'That release is not published. Refresh the list.';
+    case 'published':
+      return 'A published release cannot be deleted. Retire it first.';
+    case 'up_to_date':
+      return 'That server already runs the current data.';
     case 'network':
       return 'Could not reach the server. Check your connection and try again.';
     case 'unknown':
@@ -316,12 +385,13 @@ function pickMachine(value: unknown): FleetMachine | null {
 }
 
 function pickFleetServer(value: unknown): FleetServer | null {
-  if (!isHostedServer(value)) return null;
-  const v = value as unknown as Record<string, unknown>;
+  const server = parseHostedServer(value);
+  if (!server) return null;
+  const v = value as Record<string, unknown>;
   const owner = v.owner as Record<string, unknown> | null | undefined;
   const tier = owner?.tier;
   return {
-    ...(value as FleetServer),
+    ...server,
     owner:
       owner && typeof owner.id === 'number' && typeof owner.username === 'string'
         ? { id: owner.id, username: owner.username, tier: tier === 1 || tier === 2 || tier === 3 ? tier : null }
@@ -330,6 +400,9 @@ function pickFleetServer(value: unknown): FleetServer | null {
     slot: isCount(v.slot) ? v.slot : null,
     game_port: isCount(v.game_port) ? v.game_port : null,
     players: isCount(v.players) ? v.players : null,
+    base_tree_id: isCount(v.base_tree_id) ? v.base_tree_id : null,
+    expansion_tree_id: isCount(v.expansion_tree_id) ? v.expansion_tree_id : null,
+    outdated: v.outdated === true,
   };
 }
 

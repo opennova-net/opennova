@@ -366,6 +366,30 @@ int main() {
 			std::string(catalog::kTextTitleKey) == "TITLE" &&
 			std::string(catalog::kTextBriefingKey) == "BRIEFING");
 
+	// One pair over archives opened by the caller (archive_rows): the expansion's pair with no
+	// base mounted, its `.bms` entries titled from its own text archive, a `.bms` in the text
+	// archive never listed, in walk order; with no text archive the header names stand in.
+	{
+		opennova::pff::PffArchive missions{}, texts{};
+		TEST_EXPECT(opennova::pff::pff_open(&missions, (exp / "jox01.pff").string().c_str()) == 0);
+		TEST_EXPECT(opennova::pff::pff_open(&texts, (exp / "jox01L.pff").string().c_str()) == 0);
+		std::vector<catalog::Row> pair = catalog::archive_rows(missions, &texts);
+		TEST_EXPECT(pair.size() == 2u);
+		catalog::sort_rows(pair);
+		TEST_EXPECT(pair.size() == 2u && pair[0].file == "exp.bms" && pair[1].file == "pack.bms");
+		TEST_EXPECT(pair.size() == 2u && pair[0].title == "Expansion Op" &&
+				pair[0].briefing == "From the expansion." && !pair[0].loose &&
+				pair[0].game_mode == static_cast<uint32_t>(AttribFlags::Coop));
+		TEST_EXPECT(pair.size() == 2u && pair[1].title == "Exp Pack Header" && pair[1].briefing.empty());
+		TEST_EXPECT(count_rows(pair, "inl.bms") == 0);
+		const std::vector<catalog::Row> untitled = catalog::archive_rows(missions, nullptr);
+		TEST_EXPECT(untitled.size() == 2u);
+		for (const catalog::Row &row : untitled)
+			TEST_EXPECT(row.title == (row.file == "exp.bms" ? "Exp Header Name" : "Exp Pack Header"));
+		opennova::pff::pff_close(&missions);
+		opennova::pff::pff_close(&texts);
+	}
+
 	// Release the mounted archive handles before deleting the fixture tree
 	// (an open .pff makes remove_all throw).
 	index.clear();

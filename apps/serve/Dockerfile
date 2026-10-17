@@ -52,13 +52,15 @@ FROM ubuntu:24.04 AS runtime
 
 # A fixed non-root user, so a host directory mounted at /srv/serve can be
 # handed to it by number (chown 10001:10001). A fresh named volume copies the
-# image's ownership of /srv/serve and needs nothing. /opt/game is only the
-# mount point: the image ships it empty.
+# image's ownership of /srv/serve and needs nothing. /opt/game ships empty and
+# owned by that user: a deployment's machine binds a tree over it read-only,
+# while the local stack's machine (this image, running hostd itself) fetches
+# its trees into it (--trees-root /opt/game, apps/hostd/README.md).
 RUN groupadd --system --gid 10001 serve \
     && useradd --system --uid 10001 --gid serve --home-dir /srv/serve \
         --no-create-home --shell /usr/sbin/nologin serve \
     && mkdir -p /opt/game /srv/serve \
-    && chown serve:serve /srv/serve
+    && chown serve:serve /opt/game /srv/serve
 
 COPY --from=build /src/build/apps/serve/opennova-serve /usr/local/bin/opennova-serve
 # The machine agent, for the machine to copy out (never run here).

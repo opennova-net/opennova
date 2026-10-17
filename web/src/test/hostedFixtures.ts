@@ -1,6 +1,7 @@
 // Data sets, settings, servers and entitlements for the hosted server tests,
 // shaped as GET /api/me/servers answers them. DFX2's limits differ from JO's
-// here on purpose, so a test can tell whose ranges a form applies.
+// here on purpose, so a test can tell whose ranges a form applies; JO offers
+// Escalation (id 2), whose tree adds a mission of its own.
 
 import type {
   HostedDataSet,
@@ -12,13 +13,14 @@ import type {
 import type { MyServer } from '../types/myServers';
 
 export const JO: HostedDataSet = {
-  game: 'jop_2_consumer',
+  id: 1,
   display_name: 'Joint Operations',
-  expansions: [
-    { code: '', name: 'Joint Operations (base game)' },
-    { code: 'jox01', name: 'Escalation (jox01)' },
+  title: 'jo',
+  version: '1.7.5.5',
+  missions: [
+    { file: 'jo_one.bms', title: 'River Patrol' },
+    { file: 'jo_two.bms', title: '' },
   ],
-  default_missions: ['jo_one.bms', 'jo_two.bms'],
   limits: {
     max_players: { min: 2, max: 64 },
     time_limit: { min: 1, max: 300 },
@@ -27,13 +29,23 @@ export const JO: HostedDataSet = {
     respawn: { min: 0, max: 300 },
     start_delay: { min: 0, max: 300 },
   },
+  expansions: [
+    {
+      id: 2,
+      code: 'jox01',
+      display_name: 'Escalation',
+      version: '1.7.5.5',
+      missions: [{ file: 'jox_one.bms', title: 'Escalation Point' }],
+    },
+  ],
 };
 
 export const DFX2: HostedDataSet = {
-  game: 'dfx2_consumer',
+  id: 3,
   display_name: 'Delta Force Xtreme 2',
-  expansions: [{ code: '', name: 'Delta Force Xtreme 2 (base game)' }],
-  default_missions: ['dfx_one.bms'],
+  title: 'dfx2',
+  version: '1.0.0.1',
+  missions: [{ file: 'dfx_one.bms', title: 'Dust' }],
   limits: {
     max_players: { min: 2, max: 50 },
     time_limit: { min: 1, max: 120 },
@@ -42,11 +54,13 @@ export const DFX2: HostedDataSet = {
     respawn: { min: 0, max: 60 },
     start_delay: { min: 0, max: 60 },
   },
+  expansions: [],
 };
 
 export function settings(overrides: Partial<HostedSettings> = {}): HostedSettings {
   return {
-    game: JO.game,
+    data_set_id: JO.id,
+    expansion_id: null,
     game_name: 'Test Server',
     max_players: 32,
     game_password: '',
@@ -56,13 +70,12 @@ export function settings(overrides: Partial<HostedSettings> = {}): HostedSetting
     respawn: 5,
     start_delay: 0,
     team_ff: false,
-    expansion: '',
     missions: ['jo_one.bms'],
     ...overrides,
   };
 }
 
-// A hosted server, running unless the overrides say otherwise.
+// A hosted server, running JO 1.7.5.5 unless the overrides say otherwise.
 export function hostedServer(id: number, overrides: Partial<HostedServer> = {}): HostedServer {
   const state = overrides.state ?? 'running';
   const live = state !== 'stopped' && state !== 'failed';
@@ -73,7 +86,12 @@ export function hostedServer(id: number, overrides: Partial<HostedServer> = {}):
     own_machine: false,
     settings: settings({ game_name: `Server ${id}` }),
     game_display_name: 'Joint Operations',
-    expansion_display_name: 'Joint Operations (base game)',
+    expansion_display_name: '',
+    data_set: { id: JO.id, display_name: 'Joint Operations' },
+    expansion: null,
+    data: { base: { tree_id: 10, version: '1.7.5.5' }, expansion: null },
+    update_available: false,
+    update_requested: false,
     restarts: 0,
     failure_reason: null,
     created_at: '2026-10-14 12:00:00',

@@ -3,30 +3,35 @@
 // migrated database, driven with apps/common's http_exchange: the bootstrap (the
 // one-time token redeemed for a secret kept as its digest, again for a fresh one
 // until the first sync spends it, the reply's
-// image, slots and data sets, no-store; a wrong, missing or spent token, a
+// image and slots, no-store; a wrong, missing or spent token, a
 // hello that does not read, a machine not yet launched or reached from another
 // address, a reply that would not read: each the one bare 404, the token left
 // unspent), the sync (the agent's secret, the report stored and the machine
-// ready, a listing that failed heard from with nothing stored, the desired
-// containers from a fake FleetDesiredState with the files
-// of a reported container left out, each uid its slot's, a slot past the
-// machine's dropped, drain while draining, another protocol draining the
-// machine, a desired state that throws or does not read), every other path and
-// method the same 404, and a listener whose networks leave loopback out. Then
-// the real agent end to end against the routes: opennova-hostd (ctest passes
-// it) with its process runtime, as the local stack's machine containers run it,
-// this test binary as its opennova-serve: it redeems its token file (deleted
-// then) and the machine is ready, starts a container in its slot's directory
-// with the files owner-only, over the bootstrap's data set folder and with an
-// environment without the agent's secret, reports it running, stops it
-// (SIGTERM) and removes it with its files when the desired state drops it,
-// reports one that exited with its code, never one whose files it lacks, and
-// its own end ends its servers.
+// ready, a listing that failed heard from with
+// nothing stored, the desired containers from a fake FleetDesiredState with the
+// trees they use, the files of a reported container left out, each uid its
+// slot's, a slot past the machine's dropped, drain while draining, another
+// protocol draining the machine, a desired state that throws or does not read),
+// every other path and method the same 404, and a listener whose networks leave
+// loopback out. Then the real agent end to end against the routes:
+// opennova-hostd (ctest passes it) with its process runtime, as the local
+// stack's machine containers run it, this test binary as its opennova-serve: it
+// redeems its token file (deleted then) and the machine is ready, fetches the
+// container's base tree from a local object store (ADR 0064: a file:// copy
+// into its trees root, checked against the reply's manifest), starts the
+// container in its slot's directory with the files owner-only, over that
+// tree's directory and with an environment without the agent's secret,
+// reports it running, stops it (SIGTERM) and removes it with its files when
+// the desired state drops it, reports one that exited with its code, never one
+// whose files it lacks, keeps a container waiting (reported starting, nothing
+// started) on a tree whose URL is not there, and its own end ends its servers.
 
 #include "hosted/agent_protocol.h"
+#include "hosted/data_set_repository.h"
 #include "hosted/fleet_desired_state.h"
 #include "hosted/fleet_repository.h"
 #include "hosted/internal_listener.h"
+#include "local_object_store.h"
 #include "net_http.h"
 #include "net_sockets.h"
 
@@ -75,9 +80,39 @@ namespace {
 std::string g_self;
 std::string g_hostd; // opennova-hostd
 constexpr const char *kImage = "opennova-serve:local";
+// The base tree every desired container here uses (a tree id the fake
+// desired state names; the routes read no tree row), and one whose URL leads
+// nowhere.
+constexpr int64_t kTree = 41;
+constexpr int64_t kMissingTree = 42;
 // What an unknown path gets (Crow's own status text, nothing of the routes'),
 // read by each rig as it starts.
 std::string g_unknown_path_body;
+
+// A tree's spec as a reply carries it: fetched from `url`, holding `files`
+// (name -> bytes), each with its size.
+hosted::TreeSpec tree_spec(const std::string &url, const std::map<std::string, std::string> &files,
+		const std::string &version = "JO V1.7.5.3") {
+	hosted::TreeSpec spec;
+	spec.url = url;
+	spec.version = version;
+	for (const auto &file : files) {
+		hosted::TreeFileSpec f;
+		f.name = file.first;
+		f.size = file.second.size();
+		spec.files.push_back(std::move(f));
+	}
+	return spec;
+}
+
+// The files of the tree the fake decisions name (kTree): any bytes.
+const std::map<std::string, std::string> &tree_files() {
+	static const std::map<std::string, std::string> files = {
+		{ "resource.pff", "PFF3 resource bytes of the synthetic tree\n" },
+		{ "version.txt", "JO V1.7.5.3\r\n" },
+	};
+	return files;
+}
 
 // --- the fake desired state ---------------------------------------------------------------
 
@@ -120,13 +155,23 @@ hosted::DesiredContainer desired(const std::string &name, int slot,
 	d.slot = slot;
 	d.image = kImage;
 	d.uid = hosted::slot_uid(slot);
-	d.data_set = hosted::kDataSetJointOperations;
+	d.base_tree = kTree;
 	d.args = args.empty() ? std::vector<std::string>{ "/HOST", "server.host" } : std::move(args);
 	if (with_files)
 		d.files = std::map<std::string, std::string>{ { "server.host", "GameName \"Caf\xE9\"\r\n" },
 			{ "credentials.txt", "NOVAWORLD_USER=srv-5\nNOVAWORLD_PASS=secretpassword\n" } };
 	d.env = { { "OPENNOVA_SLOT_NOTE", "slot-" + std::to_string(slot) } };
 	return d;
+}
+
+// A decision of `containers`, carrying kTree (a reply names every tree its
+// containers use, or the decoder refuses it) fetched from `tree_url`.
+hosted::FleetDecision decision_of(std::vector<hosted::DesiredContainer> containers,
+		const std::string &tree_url = "file:///store/trees/41/") {
+	hosted::FleetDecision decision;
+	decision.desired = std::move(containers);
+	decision.trees[kTree] = tree_spec(tree_url, tree_files());
+	return decision;
 }
 
 // --- the HTTP side ------------------------------------------------------------------------
@@ -213,25 +258,21 @@ std::string token_hash(Database &db, int64_t id) {
 			.value_or("");
 }
 
-hosted::AgentRouteConfig route_config(
-		std::vector<hosted::Ipv4Cidr> admitted, const std::string &data_set_path) {
+hosted::AgentRouteConfig route_config(std::vector<hosted::Ipv4Cidr> admitted) {
 	hosted::AgentRouteConfig c;
 	c.admitted = std::move(admitted);
-	c.data_sets = { { hosted::kDataSetJointOperations, data_set_path } };
 	return c;
 }
 
 const hosted::Ipv4Cidr kLoopback = { 0x7F000000u, 0xFF000000u };
 
-// A listener on a loopback port over `scratch`'s database, its machines mounting
-// Joint Operations' data set at `data_set_path`.
+// A listener on a loopback port over `scratch`'s database.
 struct Rig {
 	explicit Rig(const TestDatabase &scratch,
-			std::vector<hosted::Ipv4Cidr> admitted = { kLoopback },
-			const std::string &data_set_path = "/opt/game/jop_2_consumer") :
+			std::vector<hosted::Ipv4Cidr> admitted = { kLoopback }) :
 			pool(scratch.options(), 4),
 			db(scratch.open()),
-			listener(pool, fake, route_config(std::move(admitted), data_set_path)) {
+			listener(pool, fake, route_config(std::move(admitted))) {
 		started = listener.start("127.0.0.1", 0);
 		g_unknown_path_body = exchange(listener.bound_port(), "GET", "/no/such/path", "", "").body;
 	}
@@ -283,8 +324,8 @@ int test_bootstrap() {
 	wrong[0] = wrong[0] == 'A' ? 'B' : 'A';
 	TEST_EXPECT(bare_404(rig.post(path, "", hello())));
 	TEST_EXPECT(bare_404(rig.post(path, wrong, hello())));
-	TEST_EXPECT(bare_404(rig.post(path, m.bootstrap_token, hello(2))));
-	TEST_EXPECT(bare_404(rig.post(path, m.bootstrap_token, "{\"protocol\":1}")));
+	TEST_EXPECT(bare_404(rig.post(path, m.bootstrap_token, hello(1))));
+	TEST_EXPECT(bare_404(rig.post(path, m.bootstrap_token, "{\"protocol\":2}")));
 	TEST_EXPECT(bare_404(rig.post(path, m.bootstrap_token, "not json")));
 	TEST_EXPECT(bare_404(rig.post(path, m.bootstrap_token, std::string(300 * 1024, ' '))));
 	TEST_EXPECT(bare_404(
@@ -294,7 +335,7 @@ int test_bootstrap() {
 	TEST_EXPECT(bare_404(exchange(rig.listener.bound_port(), "GET", path, m.bootstrap_token, "")));
 	TEST_EXPECT(token_hash(rig.db, m.id) == hosted::agent_secret_digest(m.bootstrap_token));
 
-	// The redeem: a secret, the image the machine was launched with, its slots, the data sets.
+	// The redeem: a secret, the image the machine was launched with, its slots.
 	const Reply r = rig.post(path, m.bootstrap_token, hello());
 	TEST_EXPECT(r.code == 200 && r.header("Cache-Control: no-store") &&
 			r.header("Content-Type: application/json"));
@@ -303,8 +344,6 @@ int test_bootstrap() {
 	TEST_EXPECT(hosted::decode_machine_bootstrap(r.body, got, error));
 	TEST_EXPECT(got.agent_secret.size() == hosted::kAgentSecretChars);
 	TEST_EXPECT(got.serve_image == kImage && got.slots == 4);
-	TEST_EXPECT(got.data_sets.size() == 1 &&
-			got.data_sets.at("jop_2_consumer") == "/opt/game/jop_2_consumer");
 	auto row = hosted::find_machine(rig.db, m.id);
 	TEST_EXPECT(row && row->bootstrapped && row->agent_version == "test-agent 1");
 	const auto holds_secret = [&rig, &m](const std::string &secret) {
@@ -363,8 +402,8 @@ int test_sync() {
 	TEST_EXPECT(!secret.empty());
 	const std::string path = hosted::machine_sync_path(m.id);
 
-	hosted::FleetDecision decision;
-	decision.desired = { desired("srv-7-g1", 0), desired("srv-8-g1", 1), desired("srv-9-g1", 7) };
+	hosted::FleetDecision decision =
+			decision_of({ desired("srv-7-g1", 0), desired("srv-8-g1", 1), desired("srv-9-g1", 7) });
 	decision.desired[1].uid = 0; // the route sets each uid to its slot's
 	rig.fake.set(m.id, decision);
 
@@ -374,7 +413,7 @@ int test_sync() {
 	std::string wrong = secret;
 	wrong[5] = wrong[5] == 'z' ? 'y' : 'z';
 	TEST_EXPECT(bare_404(rig.post(path, wrong, sync_body({}))));
-	TEST_EXPECT(bare_404(rig.post(path, secret, "{\"protocol\":1,\"agent_version\":\"x\"}")));
+	TEST_EXPECT(bare_404(rig.post(path, secret, "{\"protocol\":2,\"agent_version\":\"x\"}")));
 	TEST_EXPECT(bare_404(rig.post(hosted::machine_sync_path(m.id + 1), secret, sync_body({}))));
 	TEST_EXPECT(rig.fake.calls == 0);
 	TEST_EXPECT(hosted::find_machine(rig.db, m.id)->state == FleetMachineState::Booting);
@@ -405,6 +444,11 @@ int test_sync() {
 	TEST_EXPECT(reply.desired[1].uid == hosted::slot_uid(1) &&
 			reply.desired[0].uid == hosted::slot_uid(0));
 	TEST_EXPECT(reply.desired[1].env.at("OPENNOVA_SLOT_NOTE") == "slot-1");
+	// The tree the containers use rides along: where to fetch it and its manifest.
+	TEST_EXPECT(reply.desired[0].base_tree == kTree && !reply.desired[0].expansion_tree);
+	TEST_EXPECT(reply.trees.size() == 1 && reply.trees.count(kTree) == 1 &&
+			reply.trees.at(kTree).url == "file:///store/trees/41/" &&
+			reply.trees.at(kTree).version == "JO V1.7.5.3" && reply.trees.at(kTree).files.size() == 2);
 	// Stored: the machine ready, its report, and what the desired state was handed.
 	auto row = hosted::find_machine(rig.db, m.id);
 	TEST_EXPECT(row->state == FleetMachineState::Ready && !row->last_report_at.empty());
@@ -413,6 +457,19 @@ int test_sync() {
 			slots.size() == 1 && slots[0].container == "srv-7-g1" && slots[0].egress_bytes == 4096);
 	TEST_EXPECT(rig.fake.calls == 2 && rig.fake.last_machine.state == FleetMachineState::Ready);
 	TEST_EXPECT(rig.fake.reported().size() == 1 && rig.fake.reported()[0].name == "srv-7-g1");
+	// The reason a container never started is stored with its report.
+	hosted::ContainerReport unfetched = running("srv-8-g1", 1);
+	unfetched.state = ContainerState::Exited;
+	unfetched.exit_code = 125;
+	unfetched.started_at.reset();
+	unfetched.reason = "its data could not be fetched: aws s3 sync exited 1";
+	TEST_EXPECT(rig.post(path, secret, sync_body({ running("srv-7-g1", 0), unfetched })).code == 200);
+	{
+		const auto rows = hosted::slot_reports(rig.db, m.id);
+		TEST_EXPECT(rows.size() == 2 && rows[1].container == "srv-8-g1" &&
+				rows[1].state == ContainerState::Exited && rows[1].reason == unfetched.reason);
+	}
+	TEST_EXPECT(rig.post(path, secret, sync_body({ running("srv-7-g1", 0) })).code == 200);
 	// A listing that fails now leaves the slots' reports as they were.
 	TEST_EXPECT(rig.post(path, secret, unlisted_body).code == 200);
 	TEST_EXPECT(hosted::slot_reports(rig.db, m.id).size() == 1 &&
@@ -434,19 +491,22 @@ int test_sync() {
 			reply.drain);
 
 	// A desired state that does not read (two containers on one slot), or throws: nothing sent.
-	hosted::FleetDecision clash;
-	clash.desired = { desired("srv-7-g1", 0), desired("srv-8-g1", 0) };
-	rig.fake.set(m.id, clash);
+	rig.fake.set(m.id, decision_of({ desired("srv-7-g1", 0), desired("srv-8-g1", 0) }));
+	TEST_EXPECT(bare_404(rig.post(path, secret, sync_body({}))));
+	// One naming a tree its reply does not carry: the same.
+	hosted::FleetDecision treeless;
+	treeless.desired = { desired("srv-7-g1", 0) };
+	rig.fake.set(m.id, treeless);
 	TEST_EXPECT(bare_404(rig.post(path, secret, sync_body({}))));
 	rig.fake.throws = true;
 	TEST_EXPECT(bare_404(rig.post(path, secret, sync_body({}))));
 	rig.fake.throws = false;
 
 	// Another protocol: not read, and the machine drains.
-	TEST_EXPECT(bare_404(rig.post(path, secret, sync_body({}, 2))));
+	TEST_EXPECT(bare_404(rig.post(path, secret, sync_body({}, 1))));
 	row = hosted::find_machine(rig.db, m.id);
 	TEST_EXPECT(row->state == FleetMachineState::Draining &&
-			row->end_reason.find("protocol 2") != std::string::npos);
+			row->end_reason.find("protocol 1") != std::string::npos);
 	// An ending machine's agent is refused from then on.
 	TEST_EXPECT(hosted::transition_machine(
 			rig.db, m.id, FleetMachineState::Draining, FleetMachineState::Ending, ""));
@@ -522,21 +582,34 @@ bool reported(FakeDesiredState &fake, const std::string &name, ContainerState st
 
 // opennova-hostd, the real agent, as the local stack's machine containers run it
 // (--runtime process, hostd/process_runtime.h), against the routes: its servers
-// this test binary (the fake opennova-serve below), its data set's folder the
-// bootstrap's path, its environment this test's own (a secret planted in it).
+// this test binary (the fake opennova-serve below), its trees fetched from a
+// local object store under the scratch directory into its trees root
+// (--trees-root), its environment this test's own (a secret planted in it).
 int test_agent_end_to_end(const std::string &scratch_dir) {
 #ifdef _WIN32
 	(void)scratch_dir;
 	return 0;
 #else
 	const fs::path root = fs::u8path(scratch_dir) / "e2e";
-	const fs::path game = root / "game";
+	const fs::path game = root / "game"; // the trees root
 	const fs::path markers = root / "markers";
 	const fs::path slots = root / "slots";
 	fs::create_directories(game);
 	fs::create_directories(markers);
+	// The store: kTree's files under trees/<id>/, as the worker's finalize leaves
+	// a ready tree (its manifest beside them rides along, nothing else); the
+	// replies name the store's URL of that prefix, which the agent copies.
+	opennova::novaworld_server::LocalObjectStore store((root / "store").u8string());
+	const fs::path tree_source = fs::u8path(store.path_of("trees/" + std::to_string(kTree)));
+	fs::create_directories(tree_source);
+	for (const auto &file : tree_files())
+		std::ofstream(tree_source / file.first, std::ios::binary) << file.second;
+	std::ofstream(tree_source / "manifest.json", std::ios::binary) << "{}";
+	const std::string tree_url = store.url_of("trees/" + std::to_string(kTree) + "/");
+	TEST_EXPECT(tree_url == "file://" + tree_source.u8string() + "/");
+	const fs::path tree_dir = game / std::to_string(kTree); // where the agent keeps it
 	TestDatabase scratch;
-	Rig rig(scratch, { kLoopback }, game.u8string());
+	Rig rig(scratch, { kLoopback });
 	TEST_EXPECT(rig.started);
 
 	hosted::NewMachine spec;
@@ -560,8 +633,8 @@ int test_agent_end_to_end(const std::string &scratch_dir) {
 	options.argv = { g_hostd, "--runtime", "process", "--serve", g_self, "--service",
 		"http://127.0.0.1:" + std::to_string(rig.listener.bound_port()), "--machine",
 		std::to_string(m.id), "--token-file", token.u8string(), "--state-dir",
-		(root / "state").u8string(), "--slots-root", slots.u8string(), "--iptables", "none",
-		"--ip6tables", "none", "--verbose" };
+		(root / "state").u8string(), "--slots-root", slots.u8string(), "--trees-root",
+		game.u8string(), "--iptables", "none", "--ip6tables", "none", "--verbose" };
 	options.output_path = (root / "hostd.log").u8string();
 	opennova::proc::ChildProcess hostd;
 	std::string error;
@@ -582,20 +655,25 @@ int test_agent_end_to_end(const std::string &scratch_dir) {
 	if (fs::exists(token))
 		return fail("the token file is deleted once redeemed");
 
-	// A container: started in its slot's directory with its files, over the data
-	// set's folder, with the reply's variable and none of the agent's own.
+	// A container: its tree fetched from the store first (the container waits,
+	// reported starting), then started in its slot's directory with its files,
+	// over the tree's directory, with the reply's variable and none of the
+	// agent's own.
 	const fs::path started = markers / "srv-5-g1.started";
 	const fs::path stopped = markers / "srv-5-g1.stopped";
-	hosted::FleetDecision decision;
-	decision.desired = { desired(
-			"srv-5-g1", 1, { "--marker", (markers / "srv-5-g1").u8string(), "--run" }) };
-	rig.fake.set(m.id, decision);
+	rig.fake.set(m.id,
+			decision_of({ desired("srv-5-g1", 1, { "--marker", (markers / "srv-5-g1").u8string(), "--run" }) },
+					tree_url));
 	if (!wait_for([&] { return fs::exists(started); }))
-		return fail("the agent starts the server");
+		return fail("the agent fetches the tree and starts the server");
+	// The tree is on the machine as the store had it, marked, the manifest kept.
+	TEST_EXPECT(fs::is_regular_file(tree_dir / ".ready") && fs::is_regular_file(tree_dir / "manifest.json"));
+	for (const auto &file : tree_files())
+		TEST_EXPECT(read_file(tree_dir / file.first) == file.second);
 	const fs::path slot_dir = slots / "slot-1";
 	const std::string seen = read_file(started);
 	TEST_EXPECT(marker_value(seen, "cwd") == fs::canonical(slot_dir).u8string());
-	TEST_EXPECT(marker_value(seen, "data") == game.u8string());
+	TEST_EXPECT(marker_value(seen, "data") == tree_dir.u8string());
 	TEST_EXPECT(marker_value(seen, "note") == "slot-1");
 	TEST_EXPECT(seen.find("secret=\n") != std::string::npos);
 	TEST_EXPECT(
@@ -620,9 +698,9 @@ int test_agent_end_to_end(const std::string &scratch_dir) {
 	TEST_EXPECT(wait_for([&] { return hosted::slot_reports(rig.db, m.id).empty(); }));
 
 	// One that exits on its own is reported exited with its code until dropped, never restarted.
-	hosted::FleetDecision exits;
-	exits.desired = { desired(
-			"srv-5-g2", 0, { "--marker", (markers / "srv-5-g2").u8string(), "--exit", "3" }) };
+	const hosted::FleetDecision exits = decision_of(
+			{ desired("srv-5-g2", 0, { "--marker", (markers / "srv-5-g2").u8string(), "--exit", "3" }) },
+			tree_url);
 	rig.fake.set(m.id, exits);
 	TEST_EXPECT(wait_for([&] {
 		const auto rows = hosted::slot_reports(rig.db, m.id);
@@ -632,9 +710,7 @@ int test_agent_end_to_end(const std::string &scratch_dir) {
 	TEST_EXPECT(read_file(markers / "srv-5-g2.started").find("cwd=") != std::string::npos);
 	// A container whose files were never sent cannot start (a lost agent state): it is
 	// never reported.
-	hosted::FleetDecision fileless;
-	fileless.desired = { exits.desired[0], desired("srv-6-g1", 1, {}, false) };
-	rig.fake.set(m.id, fileless);
+	rig.fake.set(m.id, decision_of({ exits.desired[0], desired("srv-6-g1", 1, {}, false) }, tree_url));
 	int calls = 0;
 	{
 		std::lock_guard<std::mutex> lock(rig.fake.mu);
@@ -649,12 +725,38 @@ int test_agent_end_to_end(const std::string &scratch_dir) {
 	rig.fake.set(m.id, hosted::FleetDecision{});
 	TEST_EXPECT(wait_for([&] { return hosted::slot_reports(rig.db, m.id).empty(); }));
 
+	// A tree whose URL leads nowhere: the fetch fails at once and the container
+	// waits (reported starting, nothing started, no partial directory left) for
+	// the tries the store has left; dropped, it is forgotten. (The three tries a
+	// minute apart that end in the container's exit 125 with the fetch's reason
+	// are the agent's and the tree store's own tests', on a hand-stepped clock:
+	// too slow here; the supervisor test reads that reason into the server's
+	// event.)
+	hosted::FleetDecision missing = decision_of(
+			{ desired("srv-6-g2", 1, { "--marker", (markers / "srv-6-g2").u8string(), "--run" }) }, tree_url);
+	missing.desired[0].base_tree = kMissingTree;
+	missing.trees[kMissingTree] =
+			tree_spec(store.url_of("trees/" + std::to_string(kMissingTree) + "/"), tree_files());
+	rig.fake.set(m.id, missing);
+	TEST_EXPECT(wait_for([&] {
+		const auto rows = hosted::slot_reports(rig.db, m.id);
+		return rows.size() == 1 && rows[0].container == "srv-6-g2" &&
+				rows[0].state == ContainerState::Starting;
+	}));
+	TEST_EXPECT(reported(rig.fake, "srv-6-g2", ContainerState::Starting, 1));
+	TEST_EXPECT(!fs::exists(markers / "srv-6-g2.started") && !fs::exists(game / (std::to_string(kMissingTree) + ".partial")));
+	TEST_EXPECT(wait_for([&] {
+		return read_file(root / "hostd.log").find("is no directory") != std::string::npos;
+	}));
+	rig.fake.set(m.id, hosted::FleetDecision{});
+	TEST_EXPECT(wait_for([&] { return hosted::slot_reports(rig.db, m.id).empty(); }));
+	TEST_EXPECT(!fs::exists(markers / "srv-6-g2.started"));
+
 	// A running one ends with its machine: the agent's end ends its servers.
 	const fs::path last_started = markers / "srv-5-g3.started";
-	hosted::FleetDecision last;
-	last.desired = { desired(
-			"srv-5-g3", 0, { "--marker", (markers / "srv-5-g3").u8string(), "--run" }) };
-	rig.fake.set(m.id, last);
+	rig.fake.set(m.id,
+			decision_of({ desired("srv-5-g3", 0, { "--marker", (markers / "srv-5-g3").u8string(), "--run" }) },
+					tree_url));
 	TEST_EXPECT(wait_for([&] { return fs::exists(last_started); }));
 	const auto pid =
 			static_cast<pid_t>(std::atoll(marker_value(read_file(last_started), "pid").c_str()));

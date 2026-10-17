@@ -1,7 +1,8 @@
 // opennova-novaworld-worker: a worker (program.h). The job pool
 // (jobs/worker_pool.h, ONNET_WORKER_THREADS threads) and the handlers it runs:
 // the prunes (the service's, the website's, the hosted stats'), the mail it
-// sends, the billing sync and the fleet's machine driver calls. What it runs
+// sends, the billing sync, the fleet's machine driver calls and the hosted
+// data sets' jobs over the object store. What it runs
 // is what the other programs enqueued (the controller's scheduler and
 // supervisor, web's routes); any number of worker processes share the queue.
 // Its watchdog watches the pool alone: a slow job occupies its worker, never a
@@ -12,6 +13,7 @@
 
 #include "billing/billing_jobs.h"
 #include "billing/entitlement.h"
+#include "hosted/data_set_jobs.h"
 #include "hosted/docker_machine_driver.h"
 #include "hosted/ec2_machine_driver.h"
 #include "hosted/fleet_jobs.h"
@@ -83,6 +85,15 @@ int run(const program::Boot &boot) {
 	}
 	MailStack mail = make_mail(config);
 	const HostedSetup hosting = hosted_setup(config);
+	// The object store the data sets' jobs run over (whether or not hosting is on).
+	ObjectStoreStack store;
+	if (hosting.store_ok) {
+		std::string error;
+		store = make_object_store(hosting, config, error);
+		if (!store.store)
+			return program::fatal("the object store: " + error);
+		std::printf("[boot] data sets: jobs over the %s store\n", store.store->kind());
+	}
 	MachineDriverStack machines;
 	if (hosting.on) {
 		std::string error;
@@ -103,6 +114,8 @@ int run(const program::Boot &boot) {
 	}
 	if (machines.driver)
 		hosted::register_fleet_jobs(registry, *machines.driver);
+	if (store.store)
+		hosted::register_data_set_jobs(registry, *store.store, store.scratch.path().u8string());
 
 	jobs::WorkerPoolConfig worker_config;
 	worker_config.threads = config.worker_threads;

@@ -84,13 +84,15 @@ int test_migrations_create_expected_tables() {
 	const std::vector<std::string> expected = { "active_hosts", "active_user_sessions",
 		"billing_customers", "billing_events", "billing_subscriptions", "billing_sync_backoff",
 		"billing_sync_state", "cd_key_activations", "cd_keys", "controller_leader",
-		"fleet_launch_backoff", "fleet_machine_egress", "fleet_machines", "fleet_slot_reports",
+		"data_set_trees", "data_sets", "fleet_launch_backoff", "fleet_machine_egress",
+		"fleet_machines", "fleet_slot_reports",
 		"games", "host_keys", "host_players", "host_roster", "hosted_admin_links",
 		"hosted_console_commands", "hosted_console_replies", "hosted_limits_hold",
 		"hosted_server_console", "hosted_server_events", "hosted_server_hourly",
 		"hosted_server_samples", "hosted_servers", "jobs", "lobby_commands", "lobby_instances",
 		"lobby_sessions", "login_addresses", "password_resets", "player_game_access", "players",
-		"server_status", "service_meta", "unknown_messages", "web_sessions" };
+		"release_sections", "releases", "server_status", "service_meta", "unknown_messages",
+		"web_sessions" };
 	TEST_EXPECT(rows.size() == expected.size());
 	for (size_t i = 0; i < expected.size(); ++i) {
 		TEST_EXPECT(rows[i].as_text(0).value() == expected[i]);
@@ -111,11 +113,13 @@ int test_migrations_create_expected_tables() {
 		"billing_customers.livemode", "billing_events.livemode",
 		"billing_subscriptions.cancel_at_period_end", "billing_subscriptions.livemode",
 		"billing_sync_state.prices_checked", "billing_sync_state.prices_ok",
-		"fleet_machines.launch_refused", "fleet_machines.was_draining", "fleet_slot_reports.oom",
+		"data_sets.retail_updater", "fleet_machines.launch_refused", "fleet_machines.was_draining",
+		"fleet_slot_reports.oom",
 		"hosted_console_commands.record", "hosted_console_commands.sent",
 		"hosted_limits_hold.force_next", "hosted_limits_hold.held", "hosted_server_samples.link_up",
 		"hosted_server_samples.mission_started", "hosted_servers.own_machine",
-		"hosted_servers.team_ff", "lobby_sessions.hosting", "lobby_sessions.listed",
+		"hosted_servers.team_ff", "hosted_servers.update_requested", "lobby_sessions.hosting",
+		"lobby_sessions.listed",
 		"server_status.maintenance_enabled",
 	};
 	TEST_EXPECT(flags.size() == expected_flags.size());
@@ -654,16 +658,25 @@ int test_hosted_server_game() {
 	db.exec("INSERT INTO hosted_servers (owner_user_id, state, game_name, max_players, time_limit, kill_limit, "
 	        "max_score, respawn, start_delay, missions) "
 	        "SELECT id, 'stopped', 'Default', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players WHERE username = 'host_game';");
-	const auto rows = db.query("SELECT game, team_ff, own_machine FROM hosted_servers WHERE game_name = 'Default';");
-	TEST_EXPECT(rows.size() == 1 && rows[0].as_text(0).value() == "jop_2_consumer");
-	TEST_EXPECT(rows[0].as_int(1) == 0 && rows[0].as_int(2) == 0);
-	db.exec("INSERT INTO hosted_servers (owner_user_id, state, game, game_name, max_players, time_limit, "
-	        "kill_limit, max_score, respawn, start_delay, missions) "
-	        "SELECT id, 'stopped', 'dfx2_consumer', 'Own', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players "
-	        "WHERE username = 'host_game';");
-	const auto own = db.query("SELECT game FROM hosted_servers WHERE game_name = 'Own';");
-	TEST_EXPECT(own.size() == 1 && own[0].as_text(0).value() == "dfx2_consumer");
-	TEST_EXPECT(refused(db, "UPDATE hosted_servers SET game = NULL WHERE game_name = 'Own';"));
+	// A server runs a data set by row (0011_data_sets.sql): the seeded Joint Operations and
+	// its Escalation; the old game and expansion columns are gone.
+	const auto rows = db.query("SELECT data_set_id, team_ff, own_machine, update_requested FROM hosted_servers "
+	                           "WHERE game_name = 'Default';");
+	TEST_EXPECT(rows.size() == 1 && rows[0].is_null(0));
+	TEST_EXPECT(rows[0].as_int(1) == 0 && rows[0].as_int(2) == 0 && rows[0].as_int(3) == 0);
+	TEST_EXPECT(!has_column(db, "hosted_servers", "game") && !has_column(db, "hosted_servers", "expansion"));
+	// A slot's report carries why its container never started (0011).
+	TEST_EXPECT(has_column(db, "fleet_slot_reports", "reason"));
+	db.exec("INSERT INTO hosted_servers (owner_user_id, state, data_set_id, expansion_id, game_name, "
+	        "max_players, time_limit, kill_limit, max_score, respawn, start_delay, missions) "
+	        "SELECT p.id, 'stopped', b.id, e.id, 'Own', 8, 30, 50, 5, 5, 0, 'a.bms' FROM players p, "
+	        "data_sets b, data_sets e WHERE p.username = 'host_game' AND b.game = 'jop_2_consumer' "
+	        "AND e.parent_id = b.id AND e.expansion_code = 'jox01';");
+	const auto own = db.query("SELECT d.game, e.expansion_code FROM hosted_servers s "
+	                          "JOIN data_sets d ON d.id = s.data_set_id JOIN data_sets e ON e.id = s.expansion_id "
+	                          "WHERE s.game_name = 'Own';");
+	TEST_EXPECT(own.size() == 1 && own[0].as_text(0).value() == "jop_2_consumer" && own[0].as_text(1).value() == "jox01");
+	TEST_EXPECT(refused(db, "UPDATE hosted_servers SET data_set_id = 99999 WHERE game_name = 'Own';"));
 	db.exec("UPDATE hosted_servers SET state = 'running' WHERE game_name = 'Own';");
 	db.exec("UPDATE hosted_servers SET state = 'running', own_machine = true WHERE game_name = 'Default';");
 	TEST_EXPECT(db.query("SELECT 1 FROM hosted_servers WHERE state = 'running';").size() == 2);

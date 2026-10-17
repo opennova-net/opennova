@@ -68,6 +68,15 @@ struct HostedServer {
 	std::string failure_reason;
 	// It runs on a machine of its own (the own-machine add-on), not a shared one.
 	bool own_machine = false;
+	// The trees it is pinned to (data_set_repository.h, ADR 0064): the base data
+	// set's and, with an expansion, the expansion's, taken from the data sets'
+	// current trees at its first start and kept through crash restarts and moves
+	// until its owner asks for an update (update_requested: the supervisor starts
+	// it again on the current trees, then clears the flag). Unset before its
+	// first start on this schema.
+	std::optional<int64_t> base_tree_id;
+	std::optional<int64_t> expansion_tree_id;
+	bool update_requested = false;
 	// Its place in the fleet (0003_fleet.sql): the fleet_machines row and the
 	// slot it holds while live (an ended row keeps where it last ran), the game
 	// port its files were rendered with, how many starts it has had (its
@@ -122,7 +131,7 @@ struct RequestResult {
 };
 
 // A start the owner asks for: the settings checked again against the offered
-// data sets (check_settings, as the routes do first), then in one transaction
+// data sets (check_settings over offered_data_sets, as the routes do first), then in one transaction
 // (which holds the hosted-start lock, database.h kHostedStartLock, so no other
 // start lands between a count and the row) the account (a player's, active),
 // its hosting entitlement at `now` (Unix seconds; billing/entitlement.h): some
@@ -132,7 +141,7 @@ struct RequestResult {
 // that placement policy (the supervisor's planner, fleet_repository.h
 // fleet_has_room); and the row written (state requested, its event beside it).
 RequestResult request_server(db::Database &db, int64_t owner_user_id, const HostedSettings &settings,
-		const std::vector<DataSet> &offered, int cap, int64_t now, bool own_machine = false,
+		const std::vector<OfferedDataSet> &offered, int cap, int64_t now, bool own_machine = false,
 		const PlacementPolicy *fleet = nullptr);
 
 std::optional<HostedServer> find_server(db::Database &db, int64_t id);

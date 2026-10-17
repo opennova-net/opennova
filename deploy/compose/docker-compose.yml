@@ -12,8 +12,11 @@
 # Every program answers GET /livez on ONNET_HEALTH_PORT (8081), web on its HTTP
 # port as well. No program keeps state of its own: the database is
 # PostgreSQL, named by DATABASE_URL (a libpq URI) with DATABASE_PASSWORD beside
-# it, and web's ephemeral state Valkey (ONNET_REDIS_URL, with
-# ONNET_REDIS_PASSWORD beside it). The dev overlay (docker-compose.dev.yml) makes
+# it, web's ephemeral state Valkey (ONNET_REDIS_URL, with ONNET_REDIS_PASSWORD
+# beside it), and the hosted servers' game data the object store (a deployment's
+# S3; here the `store` volume, a directory web and the worker share: the data
+# sets' trees and the update packages the site's Game data page uploads). The
+# dev overlay (docker-compose.dev.yml) makes
 # this the local stack: a local PostgreSQL and Valkey, the published ports and
 # the dev environment; the hosting overlay (docker-compose.hosting.yml) adds the
 # hosted game servers' machines. A deployment runs the same images as ECS
@@ -93,7 +96,15 @@ x-novaworld-env: &novaworld-env
   # definitions (infra/aws/fleet.tf).
   ONNET_HOSTED_PROVIDER: ${ONNET_HOSTED_PROVIDER:-none}
   ONNET_HOSTED_CAP: ${ONNET_HOSTED_CAP:-}
-  ONNET_HOSTED_DATA_SETS: ${ONNET_HOSTED_DATA_SETS:-}
+  # The game data's store (apps/novaworld_common/object_store.h; ADR 0064):
+  # the data sets' trees and the update packages, which the site's Game data
+  # page fills; hosting is on only with one. A deployment names its bucket in
+  # S3 (s3://<bucket>/data, with the region); this stack a directory, the
+  # store volume below, shared by web (the page's uploads, which it puts there
+  # part by part) and the worker (the trees it builds); the controller only
+  # builds URLs under it and mounts nothing.
+  ONNET_OBJECT_STORE_URL: ${ONNET_OBJECT_STORE_URL:-file:///var/lib/opennova/store}
+  ONNET_OBJECT_STORE_REGION: ${ONNET_OBJECT_STORE_REGION:-}
   # Billing, the monthly support tiers over Stripe: on only when the set is
   # complete and well-formed, else a boot warning and billing off. The key
   # and the webhook secret are secrets (the vault's stripe-test or
@@ -152,6 +163,13 @@ services:
       # or rediss:// host:port[/db], and its AUTH token apart from it.
       ONNET_REDIS_URL: ${ONNET_REDIS_URL:-}
       ONNET_REDIS_PASSWORD: ${ONNET_REDIS_PASSWORD:-}
+      # The update service for retail UPDATE.EXE (ADR 0061): on with a host
+      # name (the one SERVER.LST sends the updater to), on the updater's TCP
+      # ports (unset: 20044,20556,21068,21580; the dev overlay publishes them).
+      ONNET_UPDATE_HOST: ${ONNET_UPDATE_HOST:-}
+      ONNET_UPDATE_PORTS: ${ONNET_UPDATE_PORTS:-}
+    volumes:
+      - store:/var/lib/opennova/store
 
   novaworld-controller:
     <<: *novaworld
@@ -175,6 +193,8 @@ services:
       <<: *novaworld-env
       # Job threads (unset: 4; at most DATABASE_POOL_MAX less 2).
       ONNET_WORKER_THREADS: ${ONNET_WORKER_THREADS:-}
+    volumes:
+      - store:/var/lib/opennova/store
 
   # The website: the portal's nginx image (web/Dockerfile), which serves the
   # built site and proxies /api/ to web's server on 127.0.0.1:8080. It shares
@@ -196,3 +216,8 @@ services:
       EDGE_AUTH_SECRET_PREVIOUS: ${EDGE_AUTH_SECRET_PREVIOUS:-}
     depends_on:
       - novaworld-web
+
+volumes:
+  # The local game data store (ONNET_OBJECT_STORE_URL above): the trees and
+  # packages the Game data page uploads; `down -v` wipes it.
+  store:

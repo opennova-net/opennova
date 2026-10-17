@@ -8,9 +8,9 @@
 
 import { adminClient, apiClient } from './client';
 import { adminCall, type AdminResult } from './admin';
-import { isHostedServer } from './hostedServer';
+import { parseHostedServer } from './hostedServer';
 import type { AdminSubscription, TierNumber } from '../types/billing';
-import type { EntitlementSource } from '../types/hostedServer';
+import type { EntitlementSource, HostedServer } from '../types/hostedServer';
 import type {
   CreateUserPayload,
   RegisterPayload,
@@ -90,7 +90,7 @@ function pickDetail(data: unknown): UserDetail | null {
   const user = pickUser(v.user);
   if (!user) return null;
   const e = (v.entitlement ?? {}) as Record<string, unknown>;
-  const servers = Array.isArray(v.servers) ? v.servers.filter(isHostedServer) : [];
+  const servers = Array.isArray(v.servers) ? v.servers.map(parseHostedServer).filter((s): s is HostedServer => s !== null) : [];
   const billing = (v.billing ?? {}) as Record<string, unknown>;
   const subscriptions = Array.isArray(billing.subscriptions)
     ? billing.subscriptions.map(pickSubscription).filter((s): s is AdminSubscription => s !== null)

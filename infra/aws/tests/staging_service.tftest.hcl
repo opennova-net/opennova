@@ -6,10 +6,10 @@
 # Staging gets an Elastic IP of its own, managed here, which its load balancer
 # takes in zone a as prod's takes prod's, and which its programs announce;
 # its records, its cluster, its services, its Cloud Map name, its cache, its
-# operations bucket and its backups are its own, every name carrying
-# `staging`. It never adopts an address: an allocation id (a stray var-file
-# holding prod's) stops the plan at the adopted address's precondition, before
-# the address is read.
+# operations bucket (the game data's store among it, with hosting on) and its
+# backups are its own, every name carrying `staging`. It never adopts an
+# address: an allocation id (a stray var-file holding prod's) stops the plan at
+# the adopted address's precondition, before the address is read.
 
 mock_provider "aws" {
   override_during = plan
@@ -19,9 +19,6 @@ mock_provider "aws" {
   }
   mock_data "aws_ami" {
     defaults = { id = "ami-0123456789abcdef0", root_device_name = "/dev/sda1" }
-  }
-  mock_data "aws_ebs_snapshot" {
-    defaults = { volume_size = 2 }
   }
   mock_data "aws_caller_identity" {
     defaults = { account_id = "123456789012" }
@@ -326,6 +323,10 @@ run "own_address" {
     error_message = "staging's record (staging; no www) points at its own load balancer"
   }
   assert {
+    condition     = !strcontains(aws_ecs_task_definition.program["web"].container_definitions, "ONNET_OBJECT_STORE")
+    error_message = "hosting off, no store"
+  }
+  assert {
     condition = (
       aws_ecs_cluster.main.name == "opennova-staging" &&
       alltrue([for p, d in aws_ecs_task_definition.program : d.family == "opennova-staging-${p}"]) &&
@@ -377,4 +378,57 @@ run "adopted_refused" {
   }
 
   expect_failures = [data.aws_eip.gate]
+}
+
+# Hosting on: the store is staging's own bucket under data/, and the roles
+# narrow to it.
+run "hosting_on" {
+  command = plan
+
+  override_resource {
+    target          = aws_security_group.machines[0]
+    override_during = plan
+    values          = { id = "sg-0machines" }
+  }
+  override_resource {
+    target          = aws_launch_template.fleet["shared"]
+    override_during = plan
+    values          = { id = "lt-0shared", arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0shared" }
+  }
+  override_resource {
+    target          = aws_launch_template.fleet["own"]
+    override_during = plan
+    values          = { id = "lt-0own", arn = "arn:aws:ec2:us-east-1:123456789012:launch-template/lt-0own" }
+  }
+  override_resource {
+    target          = terraform_data.fleet_seed_image[0]
+    override_during = plan
+    values          = { output = "ami-0123456789abcdef0" }
+  }
+
+  variables {
+    hosted_enabled = true
+  }
+
+  assert {
+    condition = alltrue([
+      for p in ["web", "controller", "worker"] :
+      { for e in jsondecode(aws_ecs_task_definition.program[p].container_definitions)[0].environment : e.name => e.value }["ONNET_OBJECT_STORE_URL"] == "s3://opennova-staging-ops-123456789012/data"
+    ])
+    error_message = "staging's programs name staging's own bucket under data/"
+  }
+  assert {
+    condition = (
+      length([
+        for st in data.aws_iam_policy_document.data_store[0].statement : st
+        if st.sid == "DataStoreObjects" && toset(st.resources) == toset(["arn:aws:s3:::opennova-staging-ops-123456789012/data/*"])
+      ]) == 1 &&
+      length([
+        for st in data.aws_iam_policy_document.machine[0].statement : st
+        if st.sid == "ReadDataTrees" && toset(st.resources) == toset(["arn:aws:s3:::opennova-staging-ops-123456789012/data/trees/*"])
+      ]) == 1 &&
+      alltrue([for p, r in aws_iam_role_policy.data_store : r.name == "opennova-staging-${p}-data-store"])
+    )
+    error_message = "web's, the worker's and the machines' store access is staging's bucket alone"
+  }
 }

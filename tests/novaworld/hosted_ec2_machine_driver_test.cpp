@@ -295,7 +295,6 @@ hosted::Ec2MachineConfig config_in(const std::string &scratch) {
 	c.serve_image = kImage;
 	c.service_url = kServiceUrl;
 	c.admin_address = kService;
-	c.data_sets = { hosted::kDataSetJointOperations, hosted::kDataSetDeltaForceXtreme2 };
 	c.log_group = kLogGroup;
 	c.machine_script = machine_script();
 	c.scratch_dir = scratch;
@@ -472,31 +471,9 @@ int test_config_checks(const std::string &scratch) {
 	// directory the worker's to make (the driver): every program asks check_config alike.
 	TEST_EXPECT(!refused([](hosted::Ec2MachineConfig &c) { c.admin_address = "127.0.0.1"; }));
 	TEST_EXPECT(!refused([](hosted::Ec2MachineConfig &c) { c.scratch_dir = ""; }));
-	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.data_sets.clear(); }));
-	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.data_sets.push_back("Not A Set"); }));
-	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) {
-		c.data_sets.push_back("a_much_too_long_data_set_name");
-	}));
 	TEST_EXPECT(refused([](hosted::Ec2MachineConfig &c) { c.machine_script = "#!/bin/bash\n"; }));
 	TEST_EXPECT(refused(
 			[](hosted::Ec2MachineConfig &c) { c.machine_script += std::string(16 * 1024, '#'); }));
-	return 0;
-}
-
-int test_volume_labels() {
-	using hosted::Ec2MachineDriver;
-	TEST_EXPECT(Ec2MachineDriver::volume_label("jop_2_consumer") == "od-jop2");
-	TEST_EXPECT(Ec2MachineDriver::volume_label("dfx2_consumer") == "od-dfx2");
-	TEST_EXPECT(Ec2MachineDriver::volume_label("opennova_0_consumer") == "od-opennova0");
-	// Every data set the service knows has one, and ext4's 16 bytes hold it.
-	for (const hosted::DataSet &d : hosted::known_data_sets()) {
-		const std::string label = Ec2MachineDriver::volume_label(d.game);
-		TEST_EXPECT(!label.empty() && label.size() <= Ec2MachineDriver::kMaxVolumeLabelBytes);
-	}
-	TEST_EXPECT(Ec2MachineDriver::volume_label("").empty());
-	TEST_EXPECT(Ec2MachineDriver::volume_label("_").empty());
-	TEST_EXPECT(Ec2MachineDriver::volume_label("abcdefghijklmnop_consumer").empty());
-	TEST_EXPECT(Ec2MachineDriver::volume_label("UPPER").empty());
 	return 0;
 }
 
@@ -507,9 +484,10 @@ int test_machine_script(const std::string &) {
 	for (const char *blank : { Ec2MachineDriver::kBlankServiceUrl,
 				 Ec2MachineDriver::kBlankServicePort, Ec2MachineDriver::kBlankMachineId,
 				 Ec2MachineDriver::kBlankMachineToken, Ec2MachineDriver::kBlankServeImage,
-				 Ec2MachineDriver::kBlankHostdImage, Ec2MachineDriver::kBlankDataSets,
+				 Ec2MachineDriver::kBlankHostdImage,
 				 Ec2MachineDriver::kBlankLogGroup, Ec2MachineDriver::kBlankRegion })
 		TEST_EXPECT(script.find(blank) != std::string::npos);
+	TEST_EXPECT(script.find("@OPENNOVA_DATA_SETS@") == std::string::npos);
 	TEST_EXPECT(!traces_commands(script));
 	TEST_EXPECT(traces_commands("set -euxo pipefail\n") && traces_commands("  set -o xtrace\n"));
 	// The token: written by a builtin to an owner-only file, then forgotten.
@@ -529,26 +507,30 @@ int test_machine_script(const std::string &) {
 	TEST_EXPECT(hosted::slot_game_port(0) == 32768 &&
 			hosted::slot_admin_port(hosted::kMaxSlots - 1) == 32831);
 	TEST_EXPECT(hosted::slot_uid(0) == 10001 && hosted::slot_uid(hosted::kMaxSlots - 1) == 10032);
-	// Docker with no user-namespace remapping.
-	TEST_EXPECT(runs_line(script, "install --no-install-recommends docker.io iptables curl"));
+	// Docker with no user-namespace remapping, and unzip for the AWS CLI's zip.
+	TEST_EXPECT(runs_line(script, "install --no-install-recommends docker.io iptables curl unzip"));
 	// A baked image (docker there and held) skips the install and its apt-get update.
-	TEST_EXPECT(runs_line(script, "grep -qx docker.io <<<\"$held\"; then") &&
+	TEST_EXPECT(runs_line(script, "command -v unzip >/dev/null && grep -qx docker.io <<<\"$held\"; then") &&
 			line_at(script, "grep -qx docker.io") < line_at(script, "apt_get update"));
 	TEST_EXPECT(runs_line(script, "end_machine \"docker remaps user namespaces\""));
-	// Each data set by its volume's label alone (waited for, the machine ended without it),
-	// read-only, at /opt/game/<data set>, at every boot too: no other label, and nothing
-	// found by a device's name or place.
-	TEST_EXPECT(runs_line(script, "for entry in $DATA_SETS; do"));
-	TEST_EXPECT(runs_line(script, "[ -e \"/dev/disk/by-label/$label\" ] && break"));
-	TEST_EXPECT(runs_line(script, "[ -e \"/dev/disk/by-label/$label\" ] || end_machine"));
-	TEST_EXPECT(runs_line(script, "source=\"LABEL=$label\""));
-	for (const char *gone : { "opennova-data", "blkid", "/dev/sd", "lsblk", "UUID=" })
+	// The AWS CLI v2 the agent syncs the trees with: the release the service's images carry
+	// (apps/novaworld_common/Dockerfile), its zip checked against its SHA-256, skipped where an
+	// image has one.
+	TEST_EXPECT(runs_line(script, "readonly AWSCLI_VERSION=2.36.50"));
+	TEST_EXPECT(runs_line(script,
+			"readonly AWSCLI_SHA256=0f15318b3edc4133ad71ce550303babdf2b5dc66bee6b91b4ac8bf05407a78bf"));
+	TEST_EXPECT(runs_line(script, "if command -v aws >/dev/null; then"));
+	TEST_EXPECT(runs_line(script,
+			"\"https://awscli.amazonaws.com/awscli-exe-linux-x86_64-$AWSCLI_VERSION.zip\" -o /tmp/awscliv2.zip"));
+	TEST_EXPECT(runs_line(script, "echo \"$AWSCLI_SHA256  /tmp/awscliv2.zip\" | sha256sum -c -"));
+	TEST_EXPECT(runs_line(script, "/tmp/aws/install --install-dir /usr/local/aws-cli --bin-dir /usr/local/bin"));
+	TEST_EXPECT(runs_line(script, "readonly AWS_CLI=/usr/local/bin/aws"));
+	// The trees root, made and nothing mounted: no volume, no label, no data set.
+	TEST_EXPECT(runs_line(script, "readonly TREES_ROOT=/opt/game"));
+	TEST_EXPECT(runs_line(script, "install -d -m 0755 \"$TREES_ROOT\""));
+	for (const char *gone : { "DATA_SETS", "by-label", "LABEL=", "fstab", "mount \"", "blkid", "/dev/sd", "lsblk", "UUID=",
+				 "jox01" })
 		TEST_EXPECT(script.find(gone) == std::string::npos);
-	TEST_EXPECT(runs_line(
-			script, "printf '%s %s ext4 ro,noload,nodev,nosuid,noexec,nofail 0 0\\n' \"$source\""));
-	TEST_EXPECT(runs_line(script, "readonly GAME_ROOT=/opt/game"));
-	TEST_EXPECT(runs_line(script, "mount \"$GAME_ROOT/$data_set\""));
-	TEST_EXPECT(runs_line(script, "-ipath '*/expansion/jox01/version.txt'"));
 	// The fences: every slot's UID refused the metadata service and the internal port on
 	// every destination (the controller's address moves with it: no rule names one), at
 	// every start of the agent, and checked for the first and the last slot before it.
@@ -581,9 +563,10 @@ int test_machine_script(const std::string &) {
 	TEST_EXPECT(runs_line(
 			script, "docker cp \"$container:/usr/local/bin/opennova-hostd\" \"$HOSTD.new\""));
 	TEST_EXPECT(runs_line(script, "readonly HOSTD=/usr/local/bin/opennova-hostd"));
+	// The agent with its trees root, the CLI it syncs with, and its log group.
 	TEST_EXPECT(runs_line(script,
 			"ExecStart=$HOSTD --service $SERVICE_URL --machine $MACHINE_ID "
-			"--log-group $LOG_GROUP --log-region $REGION"));
+			"--trees-root $TREES_ROOT --aws $AWS_CLI --log-group $LOG_GROUP --log-region $REGION"));
 	TEST_EXPECT(runs_line(script, "Restart=always"));
 	// The agent's own journal to the same log group, its stream <machine id>/hostd,
 	// through docker's awslogs driver, never blocking, and never ending the machine.
@@ -610,7 +593,6 @@ int test_machine_script(const std::string &) {
 	values.bootstrap_token = hosted::random_secret(hosted::kMachineTokenChars);
 	values.serve_image = kImage;
 	values.hostd_image = kHostdImage;
-	values.data_sets = { { "jop_2_consumer", "od-jop2" }, { "dfx2_consumer", "od-dfx2" } };
 	values.log_group = kLogGroup;
 	values.region = kRegion;
 	const auto rendered = Ec2MachineDriver::render_user_data(script, values);
@@ -622,7 +604,6 @@ int test_machine_script(const std::string &) {
 	TEST_EXPECT(assigned(*rendered, "MACHINE_TOKEN") == values.bootstrap_token);
 	TEST_EXPECT(assigned(*rendered, "SERVE_IMAGE") == kImage);
 	TEST_EXPECT(assigned(*rendered, "HOSTD_IMAGE") == kHostdImage);
-	TEST_EXPECT(assigned(*rendered, "DATA_SETS") == "jop_2_consumer=od-jop2 dfx2_consumer=od-dfx2");
 	TEST_EXPECT(assigned(*rendered, "LOG_GROUP") == kLogGroup);
 	TEST_EXPECT(assigned(*rendered, "REGION") == kRegion);
 	// The token appears once, in its assignment.
@@ -646,9 +627,6 @@ int test_machine_script(const std::string &) {
 	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.serve_image = "img'"; }));
 	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.hostd_image = ""; }));
 	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.hostd_image = "-x"; }));
-	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.data_sets.clear(); }));
-	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.data_sets[0].second = "od jop2"; }));
-	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.data_sets[0].first = "a=b"; }));
 	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.log_group = ""; }));
 	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.log_group = "/x'; reboot; '"; }));
 	TEST_EXPECT(refuses([](hosted::MachineUserData &v) { v.region = "us east 1"; }));
@@ -720,9 +698,6 @@ int test_launch(const std::string &scratch) {
 	TEST_EXPECT(assigned(call.user_data, "SERVE_IMAGE") == kImage);
 	// No hostd image of its own: the serve image's agent.
 	TEST_EXPECT(assigned(call.user_data, "HOSTD_IMAGE") == kImage);
-	// In the order the template attaches the volumes: the data sets' sorted one.
-	TEST_EXPECT(assigned(call.user_data, "DATA_SETS") ==
-			"dfx2_consumer=od-dfx2 jop_2_consumer=od-jop2");
 	// The machines' log group, in the driver's own region.
 	TEST_EXPECT(assigned(call.user_data, "LOG_GROUP") == kLogGroup);
 	TEST_EXPECT(assigned(call.user_data, "REGION") == kRegion);
@@ -1393,11 +1368,9 @@ int test_fleet_config() {
 				c.docker.data_from == "opennova-dev-machine-data-1");
 		TEST_EXPECT(c.docker.deployment == kDeployment && c.docker.image == kImage &&
 				c.docker.service_url == kServiceUrl && c.docker.admin_address == "10.44.0.10");
-		// What the agent routes take from it.
-		const hosted::AgentRouteConfig routes =
-				hosted::agent_route_config(c, { "jop_2_consumer", "dfx2_consumer" });
-		TEST_EXPECT(routes.admitted.size() == 2 && routes.data_sets.size() == 2);
-		TEST_EXPECT(routes.data_sets.at("jop_2_consumer") == "/opt/game/jop_2_consumer");
+		// What the agent routes take from it: its networks.
+		const hosted::AgentRouteConfig routes = hosted::agent_route_config(c);
+		TEST_EXPECT(routes.admitted.size() == 2);
 	}
 	// Every refusal names its variable and keeps the default.
 	const auto refused = [](const char *name, const char *value) {
@@ -1489,7 +1462,6 @@ hosted::DockerMachineConfig docker_config() {
 	c.image = kMachineImage;
 	c.service_url = kDevServiceUrl;
 	c.admin_address = "172.30.0.10";
-	c.data_sets = { "jop_2_consumer" };
 	return c;
 }
 
@@ -1683,7 +1655,6 @@ int test_docker_config_and_profile(const std::string &) {
 			[](auto &c) { c.deployment = std::string(33, 'd'); }, "ONNET_HOSTED_DEPLOYMENT"));
 	TEST_EXPECT(refused([](auto &c) { c.image = "-v"; }, "ONNET_HOSTED_SERVE_IMAGE"));
 	TEST_EXPECT(refused([](auto &c) { c.service_url = "controller:8070"; }, "ONNET_INTERNAL_URL"));
-	TEST_EXPECT(refused([](auto &c) { c.data_sets.clear(); }, "no data set"));
 
 	// The slots' fixed ports (every machine has an address of its own), admitting
 	// the controller's network.
@@ -1919,7 +1890,6 @@ int main() {
 	};
 	const Case cases[] = {
 		{ "config_checks", test_config_checks },
-		{ "volume_labels", [](const std::string &) { return test_volume_labels(); } },
 		{ "machine_script", test_machine_script },
 		{ "slot_plan", test_slot_plan },
 		{ "launch", test_launch },

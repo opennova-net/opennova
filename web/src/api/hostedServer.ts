@@ -1,9 +1,10 @@
 // The logged-in account's hosted servers (apps/novaworld_common/README.md,
 // "Hosted servers"; hosted/hosted_routes.cpp): GET /api/me/servers (the
 // hosting entitlement, the data sets and the servers), GET
-// /api/me/servers/<id>, POST /api/me/servers (a start) and POST
-// /api/me/servers/<id>/stop. The session cookie authenticates them and
-// `apiClient` sends the CSRF header both POSTs need. Below them, the console
+// /api/me/servers/<id>, POST /api/me/servers (a start), POST
+// /api/me/servers/<id>/stop and POST /api/me/servers/<id>/update (a restart
+// on the data set's current data). The session cookie authenticates them and
+// `apiClient` sends the CSRF header the POSTs need. Below them, the console
 // routes (hosted/console_routes.cpp), the owner's and the admin's.
 //
 // Each call answers a HostedResult (a ConsoleResult) instead of throwing, with
@@ -22,10 +23,13 @@ import type {
   EntitlementSource,
   HostedDataSet,
   HostedExpansionOption,
+  HostedMission,
   HostedServer,
+  HostedServerData,
   HostedServersResponse,
   HostedSettings,
   HostingEntitlement,
+  PinnedTree,
   PlayerAction,
   PlayerActionReply,
   RotationEntry,
@@ -52,6 +56,7 @@ export type HostedErrorCode =
   | 'at_capacity'
   | 'not_found'
   | 'not_live'
+  | 'up_to_date'
   | 'db_error'
   | 'network'
   | 'unknown';
@@ -90,6 +95,7 @@ const KNOWN_CODES: ReadonlySet<string> = new Set<HostedErrorCode>([
   'at_capacity',
   'not_found',
   'not_live',
+  'up_to_date',
   'db_error',
 ]);
 
@@ -159,6 +165,8 @@ function messageFor(
       return 'That hosted server no longer exists. Refresh the list.';
     case 'not_live':
       return 'That hosted server has already ended.';
+    case 'up_to_date':
+      return 'Your server already runs the current data.';
     case 'db_error':
       return 'The server hit a database error. Try again shortly.';
     case 'network':
@@ -212,7 +220,7 @@ function malformed(status: number): HostedResult<never> {
   return { ok: false, error: { code: 'unknown', status, message: messageFor('unknown') } };
 }
 
-export function isHostedServer(value: unknown): value is HostedServer {
+function isHostedServerShape(value: unknown): value is HostedServer {
   const v = value as Partial<HostedServer> | null;
   return (
     typeof v === 'object' &&
@@ -225,6 +233,45 @@ export function isHostedServer(value: unknown): value is HostedServer {
     v.settings !== null &&
     Array.isArray((v.settings as Partial<HostedSettings>).missions)
   );
+}
+
+// A data set or expansion a server names ({id, display_name}, with an
+// expansion's code), or null.
+function parseNamed<T extends { id: number; display_name: string }>(value: unknown, extra: (v: Record<string, unknown>) => Omit<T, 'id' | 'display_name'>): T | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || !isCount(v.id)) return null;
+  return { id: v.id, display_name: typeof v.display_name === 'string' ? v.display_name : '', ...extra(v) } as T;
+}
+
+function parsePinnedTree(value: unknown): PinnedTree | null {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null || !isCount(v.tree_id)) return null;
+  return { tree_id: v.tree_id, version: typeof v.version === 'string' ? v.version : '' };
+}
+
+function parseServerData(value: unknown): HostedServerData {
+  const v = value as Record<string, unknown> | null;
+  if (typeof v !== 'object' || v === null) return { base: null, expansion: null };
+  return { base: parsePinnedTree(v.base), expansion: parsePinnedTree(v.expansion) };
+}
+
+// A hosted server as the routes answer it, or null when it lacks what every
+// page needs (its id, state, liveness and settings). The data it runs on
+// (its data set, expansion, trees and update flags) is read with defaults,
+// so a reply that leaves them out still shows.
+export function parseHostedServer(value: unknown): HostedServer | null {
+  if (!isHostedServerShape(value)) return null;
+  const v = value as unknown as Record<string, unknown>;
+  return {
+    ...value,
+    game_display_name: typeof v.game_display_name === 'string' ? v.game_display_name : '',
+    expansion_display_name: typeof v.expansion_display_name === 'string' ? v.expansion_display_name : '',
+    data_set: parseNamed(v.data_set, () => ({})),
+    expansion: parseNamed(v.expansion, (e) => ({ code: typeof e.code === 'string' ? e.code : '' })),
+    data: parseServerData(v.data),
+    update_available: v.update_available === true,
+    update_requested: v.update_requested === true,
+  };
 }
 
 const SOURCES: ReadonlySet<unknown> = new Set<EntitlementSource>(['none', 'tier', 'comp']);
@@ -247,23 +294,39 @@ function parseEntitlement(value: unknown): HostingEntitlement | null {
   };
 }
 
-// One expansion of a data set, or null when the entry is malformed.
-function parseExpansion(value: unknown): HostedExpansionOption | null {
-  const v = value as Partial<HostedExpansionOption> | null;
-  if (typeof v !== 'object' || v === null || typeof v.code !== 'string' || typeof v.name !== 'string') return null;
-  return { code: v.code, name: v.name };
+// The missions a tree lists ({file, title}), the malformed entries left out.
+function parseMissions(value: unknown): HostedMission[] {
+  if (!Array.isArray(value)) return [];
+  const out: HostedMission[] = [];
+  for (const m of value as (Record<string, unknown> | null)[]) {
+    if (typeof m?.file !== 'string' || m.file === '') continue;
+    out.push({ file: m.file, title: typeof m.title === 'string' ? m.title : '' });
+  }
+  return out;
 }
 
-// One offered data set, or null when the entry is malformed (no name, no
-// expansion, a range that is no pair of whole numbers): the form never offers
-// a game it could not check.
+// One expansion of a data set, or null when the entry is malformed.
+function parseExpansion(value: unknown): HostedExpansionOption | null {
+  const v = value as Partial<Record<keyof HostedExpansionOption, unknown>> | null;
+  if (typeof v !== 'object' || v === null || !isCount(v.id) || typeof v.code !== 'string') return null;
+  return {
+    id: v.id,
+    code: v.code,
+    display_name: typeof v.display_name === 'string' ? v.display_name : v.code,
+    version: typeof v.version === 'string' ? v.version : '',
+    missions: parseMissions(v.missions),
+  };
+}
+
+// One offered data set, or null when the entry is malformed (no id or name,
+// a malformed expansion, a range that is no pair of whole numbers): the form
+// never offers a game it could not check.
 function parseDataSet(value: unknown): HostedDataSet | null {
   const v = value as Partial<Record<keyof HostedDataSet, unknown>> | null;
   if (typeof v !== 'object' || v === null) return null;
-  if (typeof v.game !== 'string' || v.game === '' || typeof v.display_name !== 'string') return null;
-  if (!Array.isArray(v.expansions)) return null;
-  const expansions = v.expansions.map(parseExpansion);
-  if (expansions.length === 0 || expansions.some((e) => e === null)) return null;
+  if (!isCount(v.id) || typeof v.display_name !== 'string') return null;
+  const expansions = Array.isArray(v.expansions) ? v.expansions.map(parseExpansion) : [];
+  if (expansions.some((e) => e === null)) return null;
   const limitsIn = v.limits as Record<string, { min?: unknown; max?: unknown } | null> | undefined;
   if (typeof limitsIn !== 'object' || limitsIn === null) return null;
   const limits = {} as HostedDataSet['limits'];
@@ -274,15 +337,14 @@ function parseDataSet(value: unknown): HostedDataSet | null {
     if (!Number.isInteger(min) || !Number.isInteger(max) || (min as number) > (max as number)) return null;
     limits[field] = { min: min as number, max: max as number };
   }
-  const missions = Array.isArray(v.default_missions)
-    ? v.default_missions.filter((m): m is string => typeof m === 'string')
-    : [];
   return {
-    game: v.game,
+    id: v.id,
     display_name: v.display_name,
-    expansions: expansions as HostedExpansionOption[],
-    default_missions: missions,
+    title: typeof v.title === 'string' ? v.title : '',
+    version: typeof v.version === 'string' ? v.version : '',
+    missions: parseMissions(v.missions),
     limits,
+    expansions: expansions as HostedExpansionOption[],
   };
 }
 
@@ -298,21 +360,17 @@ export async function fetchMyServers(signal?: AbortSignal): Promise<HostedResult
     if (typeof data !== 'object' || data === null) return malformed(res.status);
     const entitlement = parseEntitlement(data.entitlement);
     const list = data.servers;
-    if (
-      typeof data.enabled !== 'boolean' ||
-      typeof data.full !== 'boolean' ||
-      entitlement === null ||
-      !Array.isArray(list) ||
-      !list.every(isHostedServer)
-    ) {
+    if (typeof data.enabled !== 'boolean' || typeof data.full !== 'boolean' || entitlement === null || !Array.isArray(list)) {
       return malformed(res.status);
     }
+    const servers = list.map(parseHostedServer);
+    if (servers.some((s) => s === null)) return malformed(res.status);
     const dataSets = Array.isArray(data.data_sets)
       ? data.data_sets.map(parseDataSet).filter((d): d is HostedDataSet => d !== null)
       : [];
     return {
       ok: true,
-      value: { enabled: data.enabled, full: data.full, entitlement, data_sets: dataSets, servers: list },
+      value: { enabled: data.enabled, full: data.full, entitlement, data_sets: dataSets, servers: servers as HostedServer[] },
     };
   } catch (err) {
     return { ok: false, error: describeHostedError(err) };
@@ -322,8 +380,8 @@ export async function fetchMyServers(signal?: AbortSignal): Promise<HostedResult
 async function forServer(request: () => Promise<{ status: number; data: unknown }>): Promise<HostedResult<HostedServer>> {
   try {
     const res = await request();
-    const server = (res.data as { server?: unknown } | null)?.server;
-    if (!isHostedServer(server)) return malformed(res.status);
+    const server = parseHostedServer((res.data as { server?: unknown } | null)?.server);
+    if (!server) return malformed(res.status);
     return { ok: true, value: server };
   } catch (err) {
     return { ok: false, error: describeHostedError(err) };
@@ -348,6 +406,14 @@ export function startHostedServer(settings: StartSettings, ownMachine = false): 
 // not_live once it has ended.
 export function stopHostedServer(id: number): Promise<HostedResult<HostedServer>> {
   return forServer(() => apiClient.post<unknown>(`/me/servers/${id}/stop`));
+}
+
+// POST /api/me/servers/<id>/update: the server restarts on its data set's
+// current data (202; again when it was asked already): its match ends and
+// its players drop. 409 not_live once it has ended, up_to_date when it runs
+// the current data already.
+export function updateHostedServer(id: number): Promise<HostedResult<HostedServer>> {
+  return forServer(() => apiClient.post<unknown>(`/me/servers/${id}/update`));
 }
 
 // ---------------------------------------------------------------------------

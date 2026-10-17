@@ -23,10 +23,11 @@
 //
 //   launch      POST /containers/create of the serve image (ONNET_HOSTED_SERVE_IMAGE)
 //               running opennova-hostd (machine_command) on the network
-//               ONNET_HOSTED_DOCKER_NETWORK, the data sets mounted read-only from
-//               the container ONNET_HOSTED_DOCKER_DATA_FROM (each at
-//               /opt/game/<data set>, as a cloud machine mounts its volumes;
-//               machine_driver.h machine_data_set_path), docker's init as PID 1,
+//               ONNET_HOSTED_DOCKER_NETWORK, the mounts of the container
+//               ONNET_HOSTED_DOCKER_DATA_FROM taken read-only (the local object
+//               store's directory, at the path the programs see it: the agent
+//               copies the trees its servers need out of it, ADR 0064), docker's
+//               init as PID 1,
 //               never restarted; then the token as a file (PUT
 //               /containers/<name>/archive: the machine's user-data, never an
 //               argument or a variable `inspect` shows), then POST .../start, then
@@ -65,8 +66,8 @@ namespace opennova::novaworld_server::hosted {
 struct DockerMachineConfig {
 	std::string engine_url; // ONNET_HOSTED_DOCKER_URL: http://<host>:<port>
 	std::string network; // ONNET_HOSTED_DOCKER_NETWORK: the network the machines join
-	// ONNET_HOSTED_DOCKER_DATA_FROM: the container whose mounts (each data set at
-	// /opt/game/<data set>) every machine takes, read-only.
+	// ONNET_HOSTED_DOCKER_DATA_FROM: the container whose mounts (the local object
+	// store's directory, where the trees are) every machine takes, read-only.
 	std::string data_from;
 	std::string deployment; // ONNET_HOSTED_DEPLOYMENT: the label that scopes every call
 	// ONNET_HOSTED_SERVE_IMAGE: the machines' image, opennova-hostd and
@@ -79,8 +80,6 @@ struct DockerMachineConfig {
 	// which its admin links connect from: the machines' admin.cfg admits its
 	// network. The controller's profile alone reads it.
 	std::string admin_address;
-	// The data sets the deployment offers (the programs' hosting setup knows them).
-	std::vector<std::string> data_sets;
 	int call_timeout_ms = 20 * 1000;
 };
 

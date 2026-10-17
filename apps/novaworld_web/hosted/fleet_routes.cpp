@@ -2,6 +2,7 @@
 
 #include "auth.h"
 #include "billing/entitlement.h"
+#include "hosted/data_set_repository.h"
 #include "hosted/hosted_repository.h"
 #include "hosted_routes.h"
 #include "http_json.h"
@@ -64,8 +65,8 @@ crow::json::wvalue machine_json(db::Database &db, const FleetMachineRow &m) {
 	return out;
 }
 
-void FleetRoutes::configure(bool enabled, std::string provider, int cap) {
-	enabled_ = enabled;
+void FleetRoutes::configure(bool hosting_on, std::string provider, int cap) {
+	hosting_on_ = hosting_on;
 	provider_ = std::move(provider);
 	cap_ = cap;
 }
@@ -81,20 +82,25 @@ void FleetRoutes::register_routes(WebApp &app) {
 			.methods("POST"_method)([this](const crow::request &req, uint64_t id) { return end(req, id); });
 	CROW_ROUTE(app, "/api/admin/fleet/roll")
 			.methods("POST"_method)([this](const crow::request &req) { return roll(req); });
+	CROW_ROUTE(app, "/api/admin/hosted/update-all")
+			.methods("POST"_method)([this](const crow::request &req) { return update_all(req); });
 }
 
 // GET /api/admin/hosted[?owner=<username>][&state=live|ended|all] — the fleet:
-// {"enabled", "provider", "cap", "live" (how many servers are live), "machines"
-// (the live machines by id, then the newest kEndedMachinesShown ended or failed
-// ones, newest first; machine_json), "servers"} (the newest kServersShown the
-// filter takes, live first: `owner` an account's username (none by that name:
-// no server), `state` live, ended or all (the default); each as GET
-// /api/me/servers' plus `owner` ({id, username, tier: its granting support
-// tier or null} or null), `service_account` ({id, username} or null),
+// {"enabled" (a machine driver and at least one offered data set), "provider",
+// "cap", "live" (how many servers are live), "machines" (the live machines by
+// id, then the newest kEndedMachinesShown ended or failed ones, newest first;
+// machine_json, with the trees each holds), "servers"} (the newest
+// kServersShown the filter takes, live first: `owner` an account's username
+// (none by that name: no server), `state` live, ended or all (the default);
+// each as GET /api/me/servers' plus `owner` ({id, username, tier: its granting
+// support tier or null} or null), `service_account` ({id, username} or null),
 // `provider`, `container` (its container's name), `machine_address`, `admin_port`,
 // `machine_ref` and `slot` (null with none; an ended server's where it last
 // ran), `game_port` (null before its first placement), `generation`,
-// `serve_image` and `players` (its listing's, null when not listed)). 400
+// `serve_image`, `base_tree_id` and `expansion_tree_id` (its pins, null before
+// its first start), `outdated` (newer data than its pins, while live),
+// `update_requested` and `players` (its listing's, null when not listed)). 400
 // invalid_field for another state. Never the admin password; no-store. The
 // background jobs (the machines' launches and ends among them) are the jobs
 // routes' (jobs/job_routes.h).
@@ -115,7 +121,7 @@ crow::response FleetRoutes::fleet(const crow::request &req) {
 	try {
 		auto db_conn = pool_.acquire();
 		db::ReadSnapshot snapshot(*db_conn);
-		out["enabled"] = enabled_;
+		out["enabled"] = hosting_on_ && !offered_data_sets(*db_conn).empty();
 		out["provider"] = provider_;
 		out["cap"] = cap_;
 		out["live"] = count_live(*db_conn);
@@ -238,6 +244,34 @@ crow::response FleetRoutes::end(const crow::request &req, uint64_t id) {
 	} catch (const db::Error &e) {
 		std::fprintf(stderr, "[http] POST /api/admin/fleet/machines/%llu/end failed: %s\n",
 				static_cast<unsigned long long>(id), e.what());
+		return json_error(500, "db_error");
+	}
+}
+
+// POST /api/admin/hosted/update-all — the force of every live server whose
+// pins are behind its data sets' current trees onto them (data_set_repository.h
+// request_update_all): body {"data_set_id"} (optional: the servers of that data
+// set, as base or expansion, alone), each marked update_requested for the
+// supervisor's next pass (placed again on the current trees, no restart
+// counted). 400 invalid_json / invalid_field; 202 {"updating": how many}.
+crow::response FleetRoutes::update_all(const crow::request &req) {
+	auto caller = access_.require_admin(req);
+	if (caller.refusal) return std::move(*caller.refusal);
+	std::optional<int64_t> data_set_id;
+	if (!req.body.empty()) {
+		auto body = JsonBody::parse(req.body);
+		if (!body) return json_error(400, "invalid_json");
+		data_set_id = body->integer("data_set_id");
+		if (body->wrong_type()) return json_error(400, "invalid_field");
+	}
+	try {
+		const size_t updating = request_update_all(*pool_.acquire(), data_set_id);
+		std::printf("[hosted] update all: %zu server(s) to their data sets' current data\n", updating);
+		crow::json::wvalue out;
+		out["updating"] = updating;
+		return json_reply(202, out);
+	} catch (const db::Error &e) {
+		std::fprintf(stderr, "[http] POST /api/admin/hosted/update-all failed: %s\n", e.what());
 		return json_error(500, "db_error");
 	}
 }

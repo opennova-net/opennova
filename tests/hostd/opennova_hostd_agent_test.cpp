@@ -8,8 +8,13 @@
 // directories wiped; a slot's next container started only once its previous one is
 // gone), a start that fails (reported exited 125, never retried, forgotten once dropped),
 // an image pulled in the background while its containers wait (reported starting, their
-// files kept; a pull that fails or overruns its bound failing them), the pass's time
-// shares, the refusals (no files, a data set or slot the machine lacks), the busy cadence, the
+// files kept; a pull that fails or overruns its bound failing them), the trees a reply
+// names fetched through a fake fetcher while their containers wait the same way (a
+// container started with its base and expansion trees' binds once both are present; a
+// fetch that fails tried again while the container waits, the third failure failing the
+// start with its reason on the report; a tree no
+// reply names let go of after its grace, one still named kept), the pass's time
+// shares, the refusals (no files, a slot the machine lacks), the busy cadence, the
 // drain flag, and every way a sync can fail (the service down, a refusal, a reply that
 // does not read or speaks another protocol, the runtime unlistable), none of which stops
 // or removes anything. The planner (apps/hostd/reconcile.h) and the slots' directories
@@ -21,6 +26,7 @@
 #include "agent.h"
 #include "reconcile.h"
 #include "slot_files.h"
+#include "tree_store.h"
 
 #include <base/io/log.h>
 
@@ -71,6 +77,96 @@ std::string read_text(const std::string &path) {
 	return out.str();
 }
 
+// --- the trees ---------------------------------------------------------------------
+
+using Files = std::map<std::string, std::string>; // name -> bytes
+
+void write_tree(const std::string &dir, const Files &files) {
+	fs::create_directories(dir);
+	for (const auto &file : files)
+		std::ofstream(dir + "/" + file.first, std::ios::binary) << file.second;
+}
+
+// The manifest of `files`, as the service's reply carries it.
+hosted::TreeSpec spec_of(const Files &files, const std::string &url, const std::string &version) {
+	hosted::TreeSpec spec;
+	spec.url = url;
+	spec.version = version;
+	for (const auto &file : files) {
+		hosted::TreeFileSpec f;
+		f.name = file.first;
+		f.size = file.second.size();
+		spec.files.push_back(f);
+	}
+	return spec;
+}
+
+const Files kBase = { { "resource.pff", "RESOURCE" }, { "localres.pff", "LOCAL" },
+	{ "language.pff", "LANG" }, { "version.txt", "1.7.5.3\r\n" } };
+const Files kExpansion = { { "jox01.pff", "ESCALATION" }, { "jox01L.pff", "ESC-L" },
+	{ "version.txt", "1.0.0.1\r\n" } };
+// Tree 1 is stock JO (on the machine from the start), 2 Escalation, 3 a JO
+// tree whose fetch fails.
+const std::map<int64_t, hosted::TreeSpec> kSpecs = {
+	{ 1, spec_of(kBase, "s3://bucket/data/test/trees/1/", "1.7.5.3") },
+	{ 2, spec_of(kExpansion, "s3://bucket/data/test/trees/2/", "1.0.0.1") },
+	{ 3, spec_of(kBase, "s3://bucket/data/test/trees/3/", "1.7.5.4") },
+};
+
+// Records each start; the test ends the fetch under way with end().
+class FakeFetcher : public hostd::TreeFetcher {
+public:
+	struct Fetch {
+		std::string url, dir;
+	};
+	std::vector<Fetch> starts;
+	bool running = false;
+	int cancels = 0;
+
+	bool start(const std::string &url, const std::string &dir, std::string &) override {
+		starts.push_back({ url, dir });
+		running = true;
+		outcome_.reset();
+		return true;
+	}
+	hostd::FetchPoll poll() override {
+		hostd::FetchPoll p;
+		if (!running) {
+			p.running = false;
+			p.error = "no fetch is under way";
+			return p;
+		}
+		if (!outcome_)
+			return p;
+		running = false;
+		p = *outcome_;
+		outcome_.reset();
+		return p;
+	}
+	void cancel() override {
+		++cancels;
+		running = false;
+		outcome_.reset();
+	}
+	// The fetch under way ends with `files` fetched, or with `error`.
+	void end(const Files &files) {
+		write_tree(starts.back().dir, files);
+		hostd::FetchPoll p;
+		p.running = false;
+		p.ok = true;
+		outcome_ = p;
+	}
+	void fail(const std::string &error) {
+		hostd::FetchPoll p;
+		p.running = false;
+		p.error = error;
+		outcome_ = p;
+	}
+
+private:
+	std::optional<hostd::FetchPoll> outcome_;
+};
+
 unsigned mode_of(const std::string &path) {
 	struct stat st{};
 	if (::lstat(path.c_str(), &st) != 0)
@@ -98,7 +194,7 @@ hosted::DesiredContainer desired(int64_t server, int64_t generation, int slot) {
 	d.slot = slot;
 	d.image = kImage;
 	d.uid = hosted::slot_uid(slot);
-	d.data_set = "jop_2_consumer";
+	d.base_tree = 1;
 	d.args = { "/HOST", "server.host", "--credentials", "credentials.txt", "/game", "jo" };
 	d.files = std::map<std::string, std::string>{ { "server.host", "GameName \"Caf\xE9\"\r\n" },
 		{ "credentials.txt", kCredentials } };
@@ -107,7 +203,7 @@ hosted::DesiredContainer desired(int64_t server, int64_t generation, int slot) {
 
 // The service's two routes, in process: the token redeemed until the first sync spends
 // it, the secret checked, each report decoded, the files sent until a container was
-// reported once.
+// reported once, the trees the desired containers name sent with them (kSpecs).
 struct FakeService {
 	hosted::MachineBootstrap machine;
 	std::vector<hosted::DesiredContainer> desired;
@@ -128,7 +224,6 @@ struct FakeService {
 		machine.agent_secret = kSecret;
 		machine.serve_image = kImage;
 		machine.slots = 4;
-		machine.data_sets = { { "jop_2_consumer", "/opt/game/jop_2_consumer" } };
 	}
 
 	net::HttpReply handle(
@@ -167,9 +262,13 @@ struct FakeService {
 		hosted::SyncReply reply;
 		reply.drain = drain;
 		reply.desired = desired;
-		for (hosted::DesiredContainer &d : reply.desired)
+		for (hosted::DesiredContainer &d : reply.desired) {
 			if (reported_once.count(d.name))
 				d.files.reset();
+			reply.trees[d.base_tree] = kSpecs.at(d.base_tree);
+			if (d.expansion_tree)
+				reply.trees[*d.expansion_tree] = kSpecs.at(*d.expansion_tree);
+		}
 		return answer(200, hosted::encode_sync_reply(reply));
 	}
 
@@ -387,14 +486,17 @@ public:
 	}
 };
 
-// One machine: the dirs, the fakes and an agent over them.
+// One machine: the dirs, the fakes and an agent over them. Tree 1 is on the
+// machine from the start (found by the store's scan).
 struct Rig {
 	test_temp::TempDir temp;
-	std::string state_dir, scratch_dir, slots_root, token_file;
+	std::string state_dir, scratch_dir, slots_root, trees_root, token_file;
 	FakeService service;
 	FakeLink link{ service };
 	FakeRuntime runtime;
+	FakeFetcher fetcher;
 	std::unique_ptr<hostd::SlotFiles> slots;
+	std::unique_ptr<hostd::TreeStore> trees;
 	FakeEgress *egress = nullptr; // the agent's, once it bootstrapped
 	uint64_t clock_ms = 1000;
 	std::unique_ptr<hostd::Agent> agent;
@@ -403,6 +505,7 @@ struct Rig {
 		state_dir = temp.file("state");
 		scratch_dir = temp.file("state/scratch");
 		slots_root = temp.file("slots");
+		trees_root = temp.file("trees");
 		token_file = temp.file("hostd.token");
 		fs::create_directories(scratch_dir);
 		if (with_token)
@@ -410,6 +513,10 @@ struct Rig {
 		slots = std::make_unique<hostd::SlotFiles>(slots_root, false);
 		std::string error;
 		slots->ensure_root(error);
+		write_tree(trees_root + "/1", kBase);
+		std::ofstream(trees_root + "/1/.ready");
+		trees = std::make_unique<hostd::TreeStore>(
+				trees_root, fetcher, [this] { return clock_ms; });
 		runtime.clock_ms = &clock_ms;
 		make_agent();
 	}
@@ -422,7 +529,7 @@ struct Rig {
 		config.scratch_dir = scratch_dir;
 		config.token_file = token_file;
 		agent = std::make_unique<hostd::Agent>(
-				config, link, runtime, *slots,
+				config, link, runtime, *slots, *trees,
 				[this](int) {
 					auto made = std::make_unique<FakeEgress>();
 					egress = made.get();
@@ -438,8 +545,13 @@ struct Rig {
 // --- the planner -------------------------------------------------------------------
 
 int test_plan() {
-	const std::map<std::string, std::string> data_sets = { { "jop_2_consumer",
-			"/opt/game/jop_2_consumer" } };
+	const auto tree = [](hostd::TreeFetchState state, const std::string &error = "") {
+		hostd::TreeStanding s;
+		s.state = state;
+		s.error = error;
+		return s;
+	};
+	std::map<int64_t, hostd::TreeStanding> trees = { { 1, tree(hostd::TreeFetchState::Present) } };
 	std::map<std::string, uint64_t> stops;
 	std::set<std::string> failed;
 	std::vector<hosted::DesiredContainer> want;
@@ -450,7 +562,7 @@ int test_plan() {
 	in.stop_requested_ms = &stops;
 	in.failed_starts = &failed;
 	in.machine_slots = 4;
-	in.data_sets = &data_sets;
+	in.trees = &trees;
 	in.now_ms = 100000;
 
 	// Running and wanted: nothing to do, nothing pending.
@@ -499,14 +611,51 @@ int test_plan() {
 	TEST_EXPECT(plan.start == std::vector<size_t>{ 1 });
 	failed.clear();
 
-	// What cannot start here: no files, a data set not mounted, a slot past the machine's.
+	// What cannot start here: no files, a tree the store holds nothing of, a slot past
+	// the machine's.
 	want = { desired(5, 1, 0), desired(6, 1, 1), desired(7, 1, 3) };
 	want[0].files.reset();
-	want[1].data_set = "dfx2_consumer";
+	want[1].base_tree = 9;
 	in.machine_slots = 3;
 	plan = hostd::plan_sync(in);
 	TEST_EXPECT(plan.start.empty() && plan.refused.size() == 3 && !plan.busy);
+	TEST_EXPECT(plan.refused[1].second == "tree 9 is not on this machine");
 	in.machine_slots = 4;
+
+	// A tree still fetching (the store's standing, a failure with a try left among
+	// them): its container waits for it, holding its slot and no start of the pass's
+	// share, busy; a free slot's next container still starts. Once the tree is present
+	// it starts; a tree the store gave up on fails the start with the last fetch's
+	// reason. The expansion tree counts the same as the base.
+	trees[2] = tree(hostd::TreeFetchState::Fetching);
+	trees[3] = tree(hostd::TreeFetchState::Failed, "aws s3 sync exited 1: NoSuchKey");
+	want = { desired(8, 1, 0), desired(9, 1, 1), desired(10, 1, 2), desired(11, 1, 3) };
+	want[0].base_tree = 2;
+	want[1].expansion_tree = 2;
+	want[1].expansion_code = "jox01";
+	want[2].base_tree = 3;
+	want[3].expansion_tree = 3;
+	want[3].expansion_code = "jox01";
+	plan = hostd::plan_sync(in);
+	TEST_EXPECT((plan.wait_for_tree == std::vector<size_t>{ 0, 1 }) && plan.start.empty());
+	TEST_EXPECT(plan.data_failed.size() == 2 && plan.data_failed[0].first == 2 &&
+			plan.data_failed[1].first == 3);
+	TEST_EXPECT(plan.data_failed[0].second == "aws s3 sync exited 1: NoSuchKey" && plan.busy);
+	want.push_back(desired(12, 1, 0)); // the slot a waiting container holds
+	want.push_back(desired(13, 1, 2)); // a free slot (the failed one holds none)
+	plan = hostd::plan_sync(in);
+	TEST_EXPECT((plan.wait_for_tree == std::vector<size_t>{ 0, 1 }) &&
+			(plan.start == std::vector<size_t>{ 5 }));
+	trees[2].state = hostd::TreeFetchState::Present;
+	plan = hostd::plan_sync(in);
+	TEST_EXPECT(plan.wait_for_tree.empty() && (plan.start == std::vector<size_t>{ 0, 1, 5 }));
+	// Nothing of the trees given: nothing starts.
+	in.trees = nullptr;
+	plan = hostd::plan_sync(in);
+	TEST_EXPECT(plan.start.empty() && plan.refused.size() == want.size());
+	in.trees = &trees;
+	trees.erase(2);
+	trees.erase(3);
 
 	// At most max_starts a pass; the rest wait (busy).
 	want.clear();
@@ -639,8 +788,9 @@ int test_sync() {
 	const Started &a = rig.runtime.started[0];
 	TEST_EXPECT(a.spec.name == "srv-1-g1" && a.spec.slot == 0 && a.spec.uid == 10001 &&
 			a.spec.image == kImage);
-	TEST_EXPECT(a.spec.data_dir == "/opt/game/jop_2_consumer" &&
-			a.spec.work_dir == rig.slots_root + "/slot-0");
+	TEST_EXPECT(a.spec.base_dir == rig.trees_root + "/1" && a.spec.expansion_dir.empty() &&
+			a.spec.expansion_code.empty() && a.spec.work_dir == rig.slots_root + "/slot-0");
+	TEST_EXPECT(rig.fetcher.starts.empty());
 	TEST_EXPECT(a.spec.args == rig.service.desired[0].args && a.spec.env_file.empty());
 	TEST_EXPECT(a.spec.cpus == 1.0 && a.spec.memory_mb == 512 && a.spec.pids == 128);
 	TEST_EXPECT(a.dir_mode == 0700 && a.files.size() == 2 &&
@@ -666,6 +816,10 @@ int test_sync() {
 	TEST_EXPECT(
 			ra->cpu_percent == 12.5 && ra->memory_bytes == 47710208u && ra->egress_bytes == 1000u);
 	TEST_EXPECT(rb->egress_bytes == 2000u && rb->cpu_percent == 0.0 && !rb->exit_code);
+	// The machine's one tree stands present in its store; the report says nothing of it.
+	TEST_EXPECT(rig.trees->state_of(1) && rig.trees->state_of(1)->state == hostd::TreeFetchState::Present &&
+			rig.trees->state_of(1)->bytes == 26u);
+	TEST_EXPECT(rig.service.bodies.back().find("trees") == std::string::npos);
 	rig.clock_ms += 5000;
 	TEST_EXPECT(rig.step() == hosted::kSyncIntervalMs && rig.runtime.calls.size() == 2);
 
@@ -754,7 +908,7 @@ int test_failed_start() {
 	TEST_EXPECT(rig.step() == hosted::kSyncIntervalMs);
 	const hosted::ContainerReport *r = rig.service.reported("srv-1-g1");
 	TEST_EXPECT(r && r->state == ContainerState::Exited && r->exit_code == 125 && !r->started_at &&
-			r->slot == 0);
+			r->slot == 0 && r->reason.empty());
 	rig.step();
 	TEST_EXPECT(rig.runtime.count("run srv-1-g1") == 1);
 	// The service restarts it as its next generation: that one starts; the failure is forgotten.
@@ -863,19 +1017,137 @@ int test_pass_budget() {
 int test_refusals() {
 	Rig rig("hostd_agent_refusals");
 	rig.step();
-	// Files omitted (the service believes it was reported), a data set this machine
-	// lacks, a slot past its four: none starts, none is reported, nothing is busy.
-	rig.service.desired = { desired(1, 1, 0), desired(2, 1, 1), desired(3, 1, 3) };
+	// Files omitted (the service believes it was reported), a slot past its four:
+	// neither starts, neither is reported, nothing is busy.
+	rig.service.desired = { desired(1, 1, 0), desired(3, 1, 3), desired(4, 1, 5) };
 	rig.service.reported_once.insert("srv-1-g1");
-	rig.service.desired[1].data_set = "dfx2_consumer";
-	rig.service.desired.push_back(desired(4, 1, 5));
 	TEST_EXPECT(rig.step() == hosted::kBusySyncIntervalMs);
-	TEST_EXPECT(rig.runtime.count("run srv-1-g1") == 0 && rig.runtime.count("run srv-2-g1") == 0);
-	TEST_EXPECT(rig.runtime.count("run srv-3-g1") == 1 && rig.runtime.count("run srv-4-g1") == 0);
+	TEST_EXPECT(rig.runtime.count("run srv-1-g1") == 0 && rig.runtime.count("run srv-3-g1") == 1 &&
+			rig.runtime.count("run srv-4-g1") == 0);
 	rig.step();
-	TEST_EXPECT(!rig.service.reported("srv-1-g1") && !rig.service.reported("srv-2-g1") &&
-			!rig.service.reported("srv-4-g1"));
+	TEST_EXPECT(!rig.service.reported("srv-1-g1") && !rig.service.reported("srv-4-g1"));
 	TEST_EXPECT(rig.step() == hosted::kSyncIntervalMs);
+	return 0;
+}
+
+// A tree the machine lacks is fetched in the background: the container waits for it,
+// reported starting at the busy cadence, and starts with both its trees' binds once
+// they are present (the expansion's mount point made under the base tree first). A
+// fetch that fails is tried again a minute later, the container still waiting, and
+// the third failure is the start's failure (exited 125, the fetch's reason logged). A
+// tree no reply names goes after its grace; one still named stays.
+int test_trees() {
+	Rig rig("hostd_agent_trees");
+	rig.service.desired = { desired(1, 1, 0) };
+	rig.service.desired[0].expansion_tree = 2;
+	rig.service.desired[0].expansion_code = "jox01";
+	TEST_EXPECT(rig.step() == hosted::kBusySyncIntervalMs);
+	TEST_EXPECT(rig.fetcher.starts.size() == 1 && rig.runtime.count("run srv-1-g1") == 0);
+	TEST_EXPECT(rig.fetcher.starts[0].url == "s3://bucket/data/test/trees/2/" &&
+			rig.fetcher.starts[0].dir == rig.trees_root + "/2.partial");
+	// Reported starting on its slot, the tree fetching in the store.
+	TEST_EXPECT(rig.step() == hosted::kBusySyncIntervalMs);
+	const hosted::ContainerReport *a = rig.service.reported("srv-1-g1");
+	TEST_EXPECT(a && a->state == ContainerState::Starting && a->slot == 0 && !a->exit_code);
+	TEST_EXPECT(rig.trees->state_of(1) && rig.trees->state_of(2) &&
+			rig.trees->state_of(2)->state == hostd::TreeFetchState::Fetching);
+	TEST_EXPECT(g_log.find("srv-1-g1 waits for its data (tree 1 and tree 2) to fetch") !=
+			std::string::npos);
+	// Fetched: checked, and the container starts with both binds.
+	rig.fetcher.end(kExpansion);
+	rig.clock_ms += 1000;
+	rig.step();
+	TEST_EXPECT(rig.runtime.count("run srv-1-g1") == 1);
+	const Started &s = rig.runtime.started.back();
+	TEST_EXPECT(s.spec.base_dir == rig.trees_root + "/1" &&
+			s.spec.expansion_dir == rig.trees_root + "/2" && s.spec.expansion_code == "jox01");
+	TEST_EXPECT(fs::is_directory(rig.trees_root + "/1/expansion/jox01"));
+	TEST_EXPECT(fs::is_regular_file(rig.trees_root + "/2/.ready") &&
+			s.files.at("credentials.txt") == kCredentials);
+	rig.step();
+	TEST_EXPECT(rig.service.reported("srv-1-g1")->state == ContainerState::Running);
+	TEST_EXPECT(rig.trees->state_of(2)->state == hostd::TreeFetchState::Present &&
+			rig.trees->state_of(2)->bytes == 24u);
+	TEST_EXPECT(rig.step() == hosted::kSyncIntervalMs);
+
+	// A fetch that fails: the store holds the tree failed with the reason at once,
+	// but the container keeps waiting (starting, busy) through the store's retries,
+	// a minute apart, and only the third failure fails its start: never run, exited
+	// 125 with the last reason on its report.
+	rig.service.desired.push_back(desired(2, 1, 1));
+	rig.service.desired[1].base_tree = 3;
+	rig.step();
+	TEST_EXPECT(rig.fetcher.starts.size() == 2 &&
+			rig.fetcher.starts[1].url.find("/trees/3/") != std::string::npos);
+	rig.fetcher.fail("aws s3 sync exited 1: fatal error: An error occurred (NoSuchKey)");
+	TEST_EXPECT(rig.step() == hosted::kBusySyncIntervalMs);
+	rig.step();
+	const hosted::ContainerReport *b = rig.service.reported("srv-2-g1");
+	TEST_EXPECT(b && b->state == ContainerState::Starting && b->slot == 1 && !b->exit_code &&
+			b->reason.empty());
+	TEST_EXPECT(rig.trees->state_of(3) &&
+			rig.trees->state_of(3)->state == hostd::TreeFetchState::Failed &&
+			rig.trees->state_of(3)->error ==
+					"aws s3 sync exited 1: fatal error: An error occurred (NoSuchKey)");
+	TEST_EXPECT(g_log.find("its data could not be fetched") == std::string::npos);
+	// Not before the minute; then the second try, and the third.
+	rig.clock_ms += hostd::TreeStore::kRetryAfterMs - 1;
+	rig.step();
+	TEST_EXPECT(rig.fetcher.starts.size() == 2);
+	rig.clock_ms += 1;
+	rig.step();
+	TEST_EXPECT(rig.fetcher.starts.size() == 3 && rig.service.reported("srv-2-g1") &&
+			rig.service.reported("srv-2-g1")->state == ContainerState::Starting);
+	rig.fetcher.fail("aws s3 sync exited 1: fatal error: An error occurred (NoSuchKey)");
+	rig.step();
+	rig.clock_ms += hostd::TreeStore::kRetryAfterMs;
+	rig.step();
+	TEST_EXPECT(rig.fetcher.starts.size() == 4 && rig.runtime.count("run srv-2-g1") == 0);
+	rig.fetcher.fail("aws s3 sync exited 1: fatal error: An error occurred (NoSuchKey) again");
+	rig.step();
+	rig.step();
+	b = rig.service.reported("srv-2-g1");
+	TEST_EXPECT(b && b->state == ContainerState::Exited && b->exit_code == 125 && b->slot == 1);
+	TEST_EXPECT(b && !b->started_at &&
+			b->reason ==
+					"its data could not be fetched: aws s3 sync exited 1: fatal error: An error "
+					"occurred (NoSuchKey) again");
+	TEST_EXPECT(rig.runtime.count("run srv-2-g1") == 0 && rig.fetcher.starts.size() == 4);
+	TEST_EXPECT(rig.trees->state_of(3)->error ==
+			"aws s3 sync exited 1: fatal error: An error occurred (NoSuchKey) again");
+	TEST_EXPECT(
+			g_log.find("srv-2-g1 did not start on slot 1: its data could not be fetched: "
+					   "aws s3 sync exited 1: fatal error: An error occurred (NoSuchKey) again") !=
+			std::string::npos);
+	// Spent, the tree stays failed: no fourth try.
+	rig.clock_ms += hostd::TreeStore::kRetryAfterMs * 5;
+	rig.step();
+	TEST_EXPECT(rig.fetcher.starts.size() == 4);
+	// Dropped by the service, the failed tree is forgotten at once, and so is the
+	// failed start.
+	rig.service.desired.pop_back();
+	rig.step();
+	rig.step();
+	TEST_EXPECT(!rig.trees->state_of(3) && rig.trees->standings().size() == 2);
+	TEST_EXPECT(!rig.service.reported("srv-2-g1"));
+
+	// The server moves on to stock JO alone: tree 2 goes unnamed, and after its grace
+	// goes; tree 1, still named, stays.
+	rig.runtime.exit_on_stop = true;
+	rig.service.desired = { desired(1, 2, 0) };
+	rig.step();
+	rig.step();
+	rig.step();
+	TEST_EXPECT(rig.runtime.count("run srv-1-g2") == 1 && rig.trees->standings().size() == 2);
+	rig.clock_ms += hostd::TreeStore::kUnnamedGraceMs - 1;
+	rig.step();
+	TEST_EXPECT(fs::is_directory(rig.trees_root + "/2"));
+	rig.clock_ms += 1;
+	rig.step();
+	TEST_EXPECT(!fs::exists(rig.trees_root + "/2") && fs::is_directory(rig.trees_root + "/1"));
+	rig.step();
+	TEST_EXPECT(rig.trees->standings().size() == 1 && rig.trees->state_of(1));
+	TEST_EXPECT(rig.service.bad_reports == 0);
 	return 0;
 }
 
@@ -999,6 +1271,7 @@ int main() {
 		{ "pull", test_pull },
 		{ "pass_budget", test_pass_budget },
 		{ "refusals", test_refusals },
+		{ "trees", test_trees },
 		{ "sync_failures", test_sync_failures },
 		{ "log_hygiene", test_log_hygiene },
 		{ "link_addresses", test_link_addresses },

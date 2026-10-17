@@ -93,7 +93,6 @@ make_vault() {
     "${STRIPE_PRICES[@]}" restricted_key=rk_test_SECRETVALUErestricted
   mkitem stripe-live API_CREDENTIAL secret_key=REPLACE_ME webhook_secret=REPLACE_ME price_tier1=REPLACE_ME \
     price_tier2=REPLACE_ME price_tier3=REPLACE_ME price_own_machine=REPLACE_ME
-  mkitem hosted-staging SECURE_NOTE data_snapshot_id_jop_2_consumer=snap-0123456789abcdef0
   mkitem github-terraform API_CREDENTIAL token=SECRETVALUEgithubtoken billing_email=billing@example.org \
     "members=$MEMBERS_JSON"
   mkitem reference-assets API_CREDENTIAL token=SECRETVALUEreferenceassets
@@ -411,7 +410,7 @@ expect_tf_var() {
 echo "--- each command's 1Password calls (a fresh run: one token check, one listing, each item once)"
 expect_requests "--deployment staging app status" 1 --deployment staging app status
 expect_requests "--deployment staging aws sts get-caller-identity" 1 --deployment staging aws sts get-caller-identity
-expect_requests "--deployment staging infra plan" 7 --deployment staging infra plan
+expect_requests "--deployment staging infra plan" 6 --deployment staging infra plan
 for v in cloudflare_api_token:cloudflare:api_token cloudflare_zone_id:cloudflare:zone_id \
          cloudflare_domain:cloudflare:domain db_master_password:rds-staging:master_password \
          cache_auth_token:app-staging:redis_password alert_email:alerts:email \
@@ -423,18 +422,16 @@ expect_tf_var AWS_ACCESS_KEY_ID aws-staging access_key_id
 expect_tf_var AWS_SECRET_ACCESS_KEY aws-staging secret_access_key
 [ "$(cat "$STUB_TF_ENV/TF_DATA_DIR" 2>/dev/null)" = "$root/infra/aws/.terraform-staging" ] \
   && pass "terraform runs in the deployment's data directory" || fail "TF_DATA_DIR: $(cat "$STUB_TF_ENV/TF_DATA_DIR" 2>/dev/null)"
-[ "$(cat "$STUB_TF_ENV/TF_VAR_hosted_data_snapshots" 2>/dev/null)" = '{"jop_2_consumer":"snap-0123456789abcdef0"}' ] \
-  && pass "terraform's hosted data snapshots are hosted-staging's" || fail "TF_VAR_hosted_data_snapshots: $(cat "$STUB_TF_ENV/TF_VAR_hosted_data_snapshots" 2>/dev/null)"
 if grep -vE '^(700|600) ' "$STUB_CACHE_MODES" | grep -q . || ! grep -q '^700 ' "$STUB_CACHE_MODES"; then
   fail "the vault cache is not 0700 with 0600 files: $(tr '\n' ' ' <"$STUB_CACHE_MODES")"
 else
   pass "the vault cache is 0700, its files 0600"
 fi
-expect_requests "--deployment staging infra apply" 7 --deployment staging infra apply
+expect_requests "--deployment staging infra apply" 6 --deployment staging infra apply
 [ "$(grep -cE -- ' (plan|apply) ' "$STUB_TF_CALLS")" -eq 2 ] \
   && pass "infra apply's plan and apply both run on the one read of each item" || fail "infra apply's terraform runs: $(cat "$STUB_TF_CALLS")"
 expect_tf_var TF_VAR_db_master_password rds-staging master_password
-expect_requests "--deployment staging secrets check" 10 --deployment staging secrets check
+expect_requests "--deployment staging secrets check" 9 --deployment staging secrets check
 expect_requests "--deployment staging secrets sync" 3 --deployment staging secrets sync
 matched=0
 while IFS= read -r line; do
@@ -509,11 +506,11 @@ fresh_run
 out="$( (
   set_deployment staging
   ensure_item app-staging SERVER admin_api_token:gen:24:CONCEALED bootstrap_admin:value:REPLACE_ME:STRING
-  ensure_item hosted-prod SECURE_NOTE data_snapshot_id_jop_2_consumer:value:snap-0fedcba987654321f:STRING
-  vault_has_item hosted-prod && echo "listed hosted-prod"
+  ensure_item notes-prod SECURE_NOTE note:value:kept:STRING
+  vault_has_item notes-prod && echo "listed notes-prod"
 ) 2>&1)"
 if [ "$(fixture app-staging admin_api_token)" = SECRETVALUEadminapistaging ] && [ "$(fixture app-staging bootstrap_admin)" = REPLACE_ME ] \
-   && [ -e "$STUB_VAULT_DIR/hosted-prod.json" ] && [[ "$out" == *"listed hosted-prod"* ]]; then
+   && [ -e "$STUB_VAULT_DIR/notes-prod.json" ] && [[ "$out" == *"listed notes-prod"* ]]; then
   pass "secrets init adds a missing field, keeps the others, and a created item is listed after"
 else
   fail "ensure_item: $out"

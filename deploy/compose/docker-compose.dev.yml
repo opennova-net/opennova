@@ -157,6 +157,12 @@ services:
     ports:
       - "8080:8080/tcp"                     # web: the retail NW*.dll and .gsb routes
       - "${STACK_SITE_PORT:-8000}:80/tcp"   # the portal: the site and its /api
+      # The update service's ports, retail UPDATE.EXE's (on with
+      # ONNET_UPDATE_HOST; the Switcher maps its gateway names here too).
+      - "20044:20044/tcp"
+      - "20556:20556/tcp"
+      - "21068:21068/tcp"
+      - "21580:21580/tcp"
 
   # At a fixed address on the stack's network, where its internal listener
   # binds (the hosting overlay's ONNET_INTERNAL_HTTP_BIND).

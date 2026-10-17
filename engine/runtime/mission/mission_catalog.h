@@ -24,6 +24,9 @@ class ResourceIndex;
 namespace opennova::rtxt {
 struct File;
 }
+namespace opennova::pff {
+struct PffArchive;
+}
 
 namespace opennova::mission_catalog {
 
@@ -75,6 +78,13 @@ using ReadBms = std::function<bool(const std::string &name, std::vector<uint8_t>
 using ReadText = std::function<bool(const std::string &bin, rtxt::File &out)>;
 std::vector<Row> loose_rows(const std::vector<std::string> &names, const ReadBms &read_bms,
 		const ReadText &read_text);
+// One archive pair as build() walks it, over archives an embedder opened itself (a data set's
+// expansion pair with no base install mounted beside it: the hosted fleet's trees, ADR 0064):
+// every `.bms` entry of `missions` (lists_as_mission, the map projects passed over), its header
+// read from that archive, titled only when `texts` (null: none) holds its `.bin`, which then
+// reads as any table; flagged archived. In walk order: the caller sorts (sort_rows).
+// [orig: Mission_BuildMapListFromPFF @ 0x562910, the entry walk @ 0x56295f..0x562d51]
+std::vector<Row> archive_rows(const pff::PffArchive &missions, const pff::PffArchive *texts);
 // The catalog's order: by file name without case, rows of the same name in the order they came.
 // [orig: qsort(list, count, 0x11E8, Mission_CompareMapNames) @ 0x5635f0 -- Mission_CompareMapNames
 //  @ 0x5628e0, stricmp on entry+0; build() says why the port's sort is stable]

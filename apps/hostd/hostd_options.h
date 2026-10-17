@@ -21,8 +21,10 @@ struct HostdOptions {
 	std::string state_dir = "/var/lib/opennova-hostd";
 	std::string slots_root = "/srv/slots";
 	RuntimeKind runtime = RuntimeKind::Docker;
+	std::string trees_root = "/opt/game"; // --trees-root: the trees' directories (tree_store.h)
 	std::string docker = "/usr/bin/docker";
 	std::string serve = "/usr/local/bin/opennova-serve"; // --serve: the process runtime's
+	std::string aws = "/usr/local/bin/aws"; // --aws: the CLI a tree's `s3 sync` runs
 	std::string iptables = "/usr/sbin/iptables"; // "none": no egress counters
 	std::string ip6tables = "/usr/sbin/ip6tables"; // "none", or used where the kernel has IPv6
 	// --log-group and --log-region, both or neither, the docker runtime's: the

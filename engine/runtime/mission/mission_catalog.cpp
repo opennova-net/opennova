@@ -14,6 +14,7 @@
 #include <base/io/os_path.h>
 #include <base/io/strutil.h>
 #include <formats/mission/bms.h>
+#include <formats/pff/pff.h>
 #include <base/resource_index/resource_index.h>
 #include <formats/rtxt/rtxt.h>
 
@@ -188,6 +189,38 @@ std::vector<Row> build(const ResourceIndex &index) {
 	// stable: two rows with the same name (a loose copy of an archived mission, or one
 	// name in both pairs) come out in its order in retail, in walk order here.
 	sort_rows(rows);
+	return rows;
+}
+
+std::vector<Row> archive_rows(const pff::PffArchive &missions, const pff::PffArchive *texts) {
+	std::vector<Row> rows;
+	for (uint32_t i = 0; i < missions.entry_count; ++i) {
+		const pff::PffEntry &entry = missions.entries[i];
+		const std::string name = pff::pff_entry_stored_name(entry);
+		if (!lists_as_mission(name)) continue;
+		if (!has_extension(name, ".bms")) continue; // a map project (D-MNU-25)
+		Row row;
+		row.file = name;
+		row.loose = false;
+		std::vector<uint8_t> bytes(entry.size ? entry.size : 1);
+		const bool header_ok = pff::pff_extract(&missions, &entry, bytes.data(), bytes.size()) == 0;
+		bytes.resize(entry.size);
+		bms::Header header{};
+		const bool read_ok = header_ok && read_header(bytes, header);
+		rtxt::File text;
+		bool text_ok = false;
+		if (texts != nullptr) {
+			const std::string bin = bin_sibling_name(name);
+			if (const pff::PffEntry *table = pff::pff_find(texts, bin.c_str())) {
+				std::vector<uint8_t> table_bytes(table->size ? table->size : 1);
+				std::string error;
+				text_ok = pff::pff_extract(texts, table, table_bytes.data(), table_bytes.size()) == 0 &&
+						rtxt::parse(table_bytes.data(), table->size, text, error);
+			}
+		}
+		fill_row(row, header, read_ok, text_ok ? &text : nullptr);
+		rows.push_back(std::move(row));
+	}
 	return rows;
 }
 

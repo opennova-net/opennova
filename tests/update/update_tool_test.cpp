@@ -6,6 +6,7 @@
 
 #include "common/temp_dir.h"
 #include "common/test_expect.h"
+#include "update/synthetic_trees.h"
 
 #include "package_builder.h"
 #include "package_catalog.h"
@@ -30,45 +31,9 @@ namespace fs = std::filesystem;
 
 namespace {
 
-std::vector<uint8_t> bytes(std::string_view text) {
-	return std::vector<uint8_t>(text.begin(), text.end());
-}
-
-bool write_text(const std::string &path, std::string_view text) {
-	std::string error;
-	fs::create_directories(fs::path(io::os_path(path)).parent_path());
-	return io::write_file_atomic(path, text.data(), text.size(), error);
-}
-
-bool make_archive(const std::string &path, const std::vector<pff::PffEditEntry> &entries) {
-	fs::create_directories(fs::path(io::os_path(path)).parent_path());
-	bool rewritten = false;
-	return pff::pff_apply_edits(path.c_str(), entries, {}, &rewritten) == pff::PFF_WRITE_OK;
-}
-
-// The baseline and the tree to update it to.
-bool make_trees(const test_temp::TempDir &dir) {
-	const std::string from = dir.file("from"), to = dir.file("to");
-	return write_text(from + "/version.txt", "Synthetic Product, V1.0.0.0; English") &&
-			write_text(from + "/old.txt", "gone in the update") &&
-			write_text(from + "/same.txt", "unchanged") &&
-			write_text(from + "/update.log", "the updater's own file") &&
-			make_archive(from + "/res.pff",
-					{ { "keep.def", bytes("kept"), 1100000000 },
-							{ "wpn.def", bytes("rifle 1"), 1100000000 },
-							{ "drop.def", bytes("x"), 1100000000 } }) &&
-			write_text(from + "/expansion/jox01/version.txt",
-					"Synthetic Expansion, V1.0.0.0; English") &&
-			write_text(to + "/version.txt", "Synthetic Product, V1.0.0.10; English") &&
-			write_text(to + "/same.txt", "unchanged") && write_text(to + "/new.txt", "added") &&
-			write_text(to + "/update.log", "a different log, never shipped") &&
-			make_archive(to + "/res.pff",
-					{ { "keep.def", bytes("kept"), 1100000000 },
-							{ "wpn.def", bytes("rifle 2"), 1700000000 },
-							{ "add.def", bytes("new"), 1700000001 } }) &&
-			write_text(
-					to + "/expansion/jox01/version.txt", "Synthetic Expansion, V1.0.0.11; English");
-}
+using synthetic_trees::bytes;
+using synthetic_trees::make_archive;
+using synthetic_trees::write_text;
 
 const update::CommandRow *row(const update::CommandFile &cmd, const std::string &name) {
 	for (const update::CommandRow &r : cmd.rows)
@@ -222,7 +187,7 @@ int test_serve(const update::SfsPackage &package) {
 	TEST_EXPECT(!catalog.bind("NOPEus", "NOPE.CMD", { package }, error));
 	TEST_EXPECT(net::startup() == 0);
 	update::UpdateServer server(catalog);
-	update_tool::UpdateTcpServer listener(server);
+	net::UpdateTcpServer listener(server);
 	TEST_EXPECT(listener.listen({ 0 }, true));
 	if (listener.ports().empty())
 		return 1;
@@ -269,7 +234,7 @@ int test_serve(const update::SfsPackage &package) {
 
 int main() {
 	test_temp::TempDir dir("update_tool");
-	if (!make_trees(dir)) {
+	if (!synthetic_trees::make_trees(dir)) {
 		std::fprintf(stderr, "update_tool: cannot write the synthetic trees\n");
 		return 1;
 	}

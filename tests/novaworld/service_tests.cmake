@@ -147,7 +147,8 @@ opennova_add_pg_test(jobs COMMAND jobs_test)
 set_tests_properties(jobs PROPERTIES TIMEOUT 300)
 
 # The hosted servers' supervisor (apps/novaworld_common/hosted): the settings and
-# their renders, the data sets, the service accounts, the start request's checks (the
+# their renders, the host limits and the offered data sets, the trees pinned at a start
+# and carried in the sync, the service accounts, the start request's checks (the
 # fleet's room among them), and each server's lifecycle on the fleet over a FakeDriver
 # (novaworld/hosted_fake_driver.h) whose machines' agents the test plays through the
 # supervisor's sync, on a hand-stepped clock: placement onto one shared machine for two
@@ -164,9 +165,11 @@ set(OPENNOVA_HOSTED_SUPERVISOR_SOURCES
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/entitlement.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/admin_link.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_sets.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_files.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_jobs.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/host_limits.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_settings.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/limits_hold.cpp
@@ -329,7 +332,9 @@ add_executable(hosted_admin_link_test
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_repository.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_sets.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_files.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/host_limits.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_settings.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/placement.cpp)
 target_link_libraries(hosted_admin_link_test
@@ -379,7 +384,7 @@ add_test(NAME hosted_net_cidr COMMAND hosted_net_cidr_test)
 add_executable(hosted_console_commands_test
     novaworld/hosted_console_commands_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_web/hosted/console_commands.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_sets.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/host_limits.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_settings.cpp)
 target_link_libraries(hosted_console_commands_test PRIVATE opennova_net)
 target_include_directories(hosted_console_commands_test PRIVATE
@@ -659,6 +664,40 @@ if(BUILD_NOVAWORLD_HTTP)
     target_compile_definitions(infra_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
     opennova_add_pg_test(infra_routes REDIS COMMAND infra_routes_test)
     set_tests_properties(infra_routes PROPERTIES TIMEOUT 120)
+
+    # The hosted data sets' admin routes (apps/novaworld_web/data_sets/, ADR 0064) on the
+    # in-process Crow listener over a migrated database, a Redis namespace and a local
+    # object store in a temp directory: every route refused without the admin, the list's
+    # shapes over the seeded rows, a base and an expansion created (every shape and database
+    # refusal), patched and deleted; a tree upload begun with the kind's files (a missing
+    # and an unexpected name refused), each part PUT through the route (the ETag back; one
+    # over the cap, out of range or of a name the kind lacks refused), each file completed
+    # (a wrong ETag refused), the tree finalized with its tree.finalize job, ready and
+    # current (its delete refused), an upload abandoned, a superseded tree pruned with a
+    # tree.prune job, a pinned one refused.
+    add_executable(data_set_routes_test novaworld/data_set_routes_test.cpp)
+    target_link_libraries(data_set_routes_test PRIVATE
+        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service)
+    target_include_directories(data_set_routes_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(data_set_routes_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    opennova_add_pg_test(data_set_routes REDIS COMMAND data_set_routes_test)
+
+    # The update listener (apps/novaworld_web/updater/update_listener.h) over a migrated database
+    # and a local object store: a packed update built from the synthetic trees
+    # (opennova-update-tool's builder) as two data sets' published release, fetched and
+    # unpacked into the listener's cache, the stock client's sequence on a loopback port (the
+    # gateway's login and SERVER.LST, the update server's login, CRC and files), a login no
+    # release serves refused, the release retired and the cache swept after a refresh, a
+    # second release served.
+    add_executable(update_listener_test novaworld/update_listener_test.cpp)
+    target_link_libraries(update_listener_test PRIVATE
+        opennova_novaworld_web_core opennova_novaworld_common opennova_novaworld_service
+        opennova_update_tool_core)
+    target_include_directories(update_listener_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    target_compile_definitions(update_listener_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+    opennova_add_pg_test(update_listener COMMAND update_listener_test)
+    set_tests_properties(update_listener PROPERTIES TIMEOUT 120)
+    set_tests_properties(data_set_routes PROPERTIES TIMEOUT 120)
 
     # The outbound mail (apps/novaworld_common/mailer.h) and the address rule
     # (auth.h normalize_email): the shapes taken and refused, SesMailer's settings,
@@ -962,13 +1001,51 @@ add_test(NAME hosted_agent_protocol COMMAND hosted_agent_protocol_test)
 # slots' rows, the silent machines, and the slots the live servers hold (assigned once, the
 # generation moving on, let go, read back for placement). Compiles the hosted sources it needs
 # directly, so it runs on every service build.
+# The hosted data sets' rows (hosted/data_set_repository.h, migration 0011, ADR 0064): the
+# seeded data sets, trees, the servers' pins, and the migration's mapping of the old columns.
+add_executable(data_set_repository_test
+    novaworld/data_set_repository_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_files.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_repository.cpp)
+target_link_libraries(data_set_repository_test PRIVATE opennova_novaworld_service Threads::Threads)
+target_include_directories(data_set_repository_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common)
+target_compile_definitions(data_set_repository_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+opennova_add_pg_test(data_set_repository COMMAND data_set_repository_test)
+set_tests_properties(data_set_repository PROPERTIES TIMEOUT 300)
+
+# The data sets' jobs (hosted/data_set_jobs.h, ADR 0064) on a migrated database and a local
+# object store in a scratch directory, each run as the workers run it: a packed synthetic
+# tree finalized (its manifest, missions, version; the refusals; an expansion's pair) and
+# the prune. Compiles the jobs, the data set sources and the local store directly; links
+# the runtime for the mission catalog.
+add_executable(data_set_jobs_test
+    novaworld/data_set_jobs_test.cpp
+    ${OPENNOVA_JOBS_SOURCES}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_files.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_jobs.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/object_store.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/local_object_store.cpp)
+target_link_libraries(data_set_jobs_test
+    PRIVATE opennova_novaworld_service opennova_runtime opennova_update_tool_core Threads::Threads)
+target_include_directories(data_set_jobs_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common)
+target_compile_definitions(data_set_jobs_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+opennova_add_pg_test(data_set_jobs COMMAND data_set_jobs_test)
+set_tests_properties(data_set_jobs PROPERTIES TIMEOUT 300)
+
 add_executable(hosted_fleet_repository_test
     novaworld/hosted_fleet_repository_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/billing_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/billing/entitlement.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_sets.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_files.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_set_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_repository.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/host_limits.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_repository.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_settings.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/placement.cpp)
@@ -986,7 +1063,7 @@ opennova_add_pg_test(hosted_fleet_repository COMMAND hosted_fleet_repository_tes
 # machine's values filled in and deleted after, the subnet of two a launch takes and a zone
 # without capacity handing it to the other, describe's states from one cached listing, a
 # failure reading Unknown and its back-off, terminate's idempotence, list_tagged's scope and its
-# throw, the slots' ports), its config checks and the data sets' volume labels; the shipped
+# throw, the slots' ports) and its config checks; the shipped
 # machine script (hosted/machine/machine_user_data.sh) and its render; the settings
 # (hosted/fleet_config.h); and the docker driver, the local stack's
 # (hosted/docker_machine_driver.h), against an engine in memory. Crow-free and database-free:
@@ -994,10 +1071,10 @@ opennova_add_pg_test(hosted_fleet_repository COMMAND hosted_fleet_repository_tes
 add_executable(hosted_ec2_machine_driver_test
     novaworld/hosted_ec2_machine_driver_test.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/agent_protocol.cpp
-    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/data_sets.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/docker_machine_driver.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/ec2_machine_driver.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/fleet_config.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/host_limits.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/hosted_settings.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/net_cidr.cpp
     ${CMAKE_SOURCE_DIR}/apps/novaworld_common/hosted/owner_file.cpp
@@ -1012,3 +1089,21 @@ target_include_directories(hosted_ec2_machine_driver_test PRIVATE
 target_compile_definitions(hosted_ec2_machine_driver_test PRIVATE OPENNOVA_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
 add_test(NAME hosted_ec2_machine_driver COMMAND hosted_ec2_machine_driver_test)
 set_tests_properties(hosted_ec2_machine_driver PROPERTIES TIMEOUT 120)
+
+# The object store seam (apps/novaworld_common/object_store.h, ADR 0064): the URL forms, the
+# local store over a directory (its multipart uploads part by part), and the S3 store's argv
+# through a recording runner (a part's bytes handed to `upload-part` in a scratch file).
+# Crow-free and database-free.
+add_executable(object_store_test
+    novaworld/object_store_test.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/object_store.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/s3_object_store.cpp
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common/local_object_store.cpp)
+target_link_libraries(object_store_test PRIVATE opennova_app_common Threads::Threads)
+if(WIN32)
+    target_link_libraries(object_store_test PRIVATE advapi32)
+endif()
+target_include_directories(object_store_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_SOURCE_DIR}/apps/novaworld_common)
+add_test(NAME object_store COMMAND object_store_test)

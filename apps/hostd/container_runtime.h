@@ -26,7 +26,11 @@ struct ContainerSpec {
 	int slot = 0;
 	std::string image;
 	uint32_t uid = 0;
-	std::string data_dir; // the data set's mount path, bound read-only at /opt/game
+	std::string base_dir; // the base tree's directory, bound read-only at /opt/game
+	// The expansion tree's directory, bound read-only at
+	// /opt/game/expansion/<expansion_code>; "" (and no code) for none.
+	std::string expansion_dir;
+	std::string expansion_code;
 	std::string work_dir; // the slot's working directory, bound at /srv/serve
 	std::vector<std::string> args;
 	std::string env_file; // a docker --env-file, or "" for no environment

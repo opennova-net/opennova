@@ -34,6 +34,7 @@ import JobsSection from '../pages/admin/JobsSection.vue';
 import JobDetailSection from '../pages/admin/JobDetailSection.vue';
 import InfraSection from '../pages/admin/InfraSection.vue';
 import CdKeysSection from '../pages/admin/CdKeysSection.vue';
+import DataSetsSection from '../pages/admin/DataSetsSection.vue';
 import { requireUser } from './guards';
 
 // A page only a logged-in visitor may open sets `meta: { requiresUser: true }`
@@ -110,6 +111,7 @@ const router = createRouter({
         { path: 'jobs/:id(\\d+)', component: JobDetailSection },
         { path: 'infrastructure', component: InfraSection },
         { path: 'cd-keys', component: CdKeysSection },
+        { path: 'data-sets', component: DataSetsSection },
         // The sections' names before the admin pages were rebuilt: old links
         // land on their new pages.
         { path: 'hosted', redirect: '/admin/fleet' },

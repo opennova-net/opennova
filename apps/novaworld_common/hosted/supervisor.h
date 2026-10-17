@@ -34,11 +34,14 @@
 //                 assigned (fleet_repository.h assign_slot: a new generation),
 //                 the service account srv-<id> gets a new random password, a new
 //                 admin password is minted and the files are rendered from
-//                 scratch for the slot's ports (hosted_settings.h). A server
-//                 past its owner's entitlement, counted in id order among the
-//                 owner's live servers not stopping, is stopped instead, and one
-//                 whose data set this service no longer offers fails, which no
-//                 restart mends
+//                 scratch for the slot's ports (hosted_settings.h), and the
+//                 trees it runs on are pinned (data_set_repository.h, ADR 0064:
+//                 its data sets' current trees at its first start, kept through
+//                 a crash restart or a move). A server past its owner's
+//                 entitlement, counted in id order among the owner's live
+//                 servers not stopping, is stopped instead, and one whose data
+//                 set row is gone or has no data (no ready current tree, and no
+//                 pins to keep) fails, which no restart mends
 //   booting       its container (srv-<id>-g<generation>) is wanted on its slot;
 //                 the machine's agent starts it once the slot is free (its
 //                 boot_timeout_ms counts from the machine's ready)
@@ -49,7 +52,12 @@
 //                 links) the server's admin link answering, every pass its
 //                 agent's report; health_misses checks in a row with no answer
 //                 on its admin link fail it, and its listing gone for
-//                 listing_lost_ms places it again (below)
+//                 listing_lost_ms places it again (below).
+//                 In booting, listing and running alike, the owner's update
+//                 (update_requested: POST /api/me/servers/<id>/update, or the
+//                 admin's update-all) lets go of the slot and places the server
+//                 again at once, no restart counted, and the next start pins it
+//                 to its data sets' current trees (a new generation)
 //   stopping      asked for by the owner, an admin or the supervisor itself (an
 //                 owner's account deleted or no longer active, read every pass
 //                 and again right before a start mints credentials, or a server
@@ -151,11 +159,13 @@
 // once its agent has reported it), each with the files rendered at its start
 // until the agent has reported it once; the service keeps those files in
 // memory alone, so a server whose start the service's restart cut short is
-// rendered again (a new generation, new credentials); drain is set while the
-// machine drains, or is lost after draining (its row's was_draining). sync
-// runs on the internal
-// listener's handler threads; it locks what it shares with the pass, and reads
-// the database outside that lock.
+// rendered again (a new generation, new credentials); the trees those
+// containers are pinned to, each with its URL in the object store (tree_url)
+// and its manifest (a ready tree is immutable: its spec is read once and
+// kept); drain is set while the machine drains, or is lost after draining (its
+// row's was_draining). sync runs on the internal listener's handler threads;
+// it locks what it shares with the pass, and reads the database outside that
+// lock.
 //
 // The admin link (admin_link.h): with set_admin_links, every pass ends by
 // syncing the links with the servers in running, at their machine's private
@@ -172,7 +182,7 @@
 
 #include "admin_link.h"
 #include "billing/entitlement.h"
-#include "data_sets.h"
+#include "data_set_repository.h"
 #include "fleet_desired_state.h"
 #include "fleet_repository.h"
 #include "hosted_repository.h"
@@ -206,9 +216,10 @@ struct SupervisorConfig {
 	// (ONNET_PUBLIC_HOST; a test's own gate).
 	std::string master_host = "127.0.0.1";
 	uint16_t master_gate_port = GATE_DEFAULT_PORT;
-	// The data sets the driver offers (offered_data_sets): a server's game
-	// picks its title (/game) and the data its slot mounts.
-	std::vector<DataSet> data_sets;
+	// Where a machine's agent fetches tree `tree_id` from: the object store's
+	// URL of trees/<id>/ (object_store.h url_of; the controller holds no store,
+	// only this pure function of its config). Unset, the replies name no URL.
+	std::function<std::string(int64_t tree_id)> tree_url;
 	// The fleet (fleet_config.h): placement's knobs, how long a shared machine
 	// with no server lives on, each container's limits, and the serve image a
 	// start pins (ONNET_HOSTED_SERVE_IMAGE; a local stack's machine runs its
@@ -221,9 +232,9 @@ struct SupervisorConfig {
 	std::string serve_image = "opennova-serve:local";
 	// The pass cadence. The rest is service policy.
 	uint64_t tick_interval_ms = 1000;
-	// A container's start, counted once its machine is ready (an image pull
-	// included).
-	uint64_t boot_timeout_ms = 5 * 60 * 1000;
+	// A container's start, counted once its machine is ready: a fresh machine
+	// fetches its trees first (1-2 GB), and an image pull besides.
+	uint64_t boot_timeout_ms = 15 * 60 * 1000;
 	uint64_t listing_timeout_ms = 3 * 60 * 1000;
 	// A server running at the service's start: its health checks wait this
 	// long for it to list again, on either driver. The restart left its
@@ -399,9 +410,23 @@ private:
 	bool launch_machine(db::Database &db, const HostedServer &server, MachineKind kind, Runtime &rt,
 			uint64_t now_ms);
 	// The start on the slot `server` (read after assign_slot) holds on
-	// `machine`: the account, the logins, the files, the container wanted.
+	// `machine`: the trees pinned, the account, the logins, the files, the
+	// container wanted.
 	void start_on_slot(db::Database &db, const HostedServer &server, const FleetMachineRow &machine,
 			const SlotPlan &plan, Runtime &rt, uint64_t now_ms);
+	// The server's data set rows: its base's title (/game) and its expansion's
+	// code (/exp, "" with none); nullopt with `why` when a row is gone.
+	struct ServerData {
+		std::string title;
+		std::string expansion_code;
+	};
+	std::optional<ServerData> data_of(db::Database &db, const HostedServer &server, std::string &why);
+	// Whether the server's pins name trees that are still there (not pruned):
+	// what a crash restart or a move keeps.
+	bool pins_hold(db::Database &db, const HostedServer &server);
+	// Tree `tree_id` as the reply carries it (tree_url and its manifest), from
+	// the cache or its row; nullopt for a tree with no manifest.
+	std::optional<TreeSpec> tree_spec(db::Database &db, int64_t tree_id);
 	// Its container exited while it should run: a crash.
 	void on_exit(db::Database &db, const HostedServer &server, Runtime &rt, uint64_t now_ms,
 			const SlotReport &report);
@@ -474,6 +499,9 @@ private:
 	// starts_mu_.
 	std::mutex starts_mu_;
 	std::map<int64_t, Start> starts_;
+	// The ready trees' specs, by tree id (immutable once ready).
+	std::mutex trees_mu_;
+	std::map<int64_t, TreeSpec> tree_specs_;
 
 	std::thread thread_;
 	std::mutex mu_;

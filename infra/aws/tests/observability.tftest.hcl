@@ -26,9 +26,6 @@ mock_provider "aws" {
   mock_data "aws_ami" {
     defaults = { id = "ami-0123456789abcdef0", root_device_name = "/dev/sda1" }
   }
-  mock_data "aws_ebs_snapshot" {
-    defaults = { volume_size = 2 }
-  }
   mock_data "aws_caller_identity" {
     defaults = { account_id = "123456789012" }
   }
@@ -407,7 +404,7 @@ run "observability" {
   }
   assert {
     condition = (
-      toset(keys(aws_cloudwatch_metric_alarm.lb_unhealthy)) == toset(["gate", "lobby", "http"]) &&
+      toset(keys(aws_cloudwatch_metric_alarm.lb_unhealthy)) == toset(["gate", "lobby", "http", "update"]) &&
       aws_cloudwatch_metric_alarm.lb_unhealthy["gate"].namespace == "AWS/NetworkELB" &&
       aws_cloudwatch_metric_alarm.lb_unhealthy["gate"].metric_name == "UnHealthyHostCount" &&
       aws_cloudwatch_metric_alarm.lb_unhealthy["gate"].dimensions == tomap({ LoadBalancer = "net/opennova-prod/0123456789abcdef", TargetGroup = "targetgroup/opennova-prod-gate/0123456789abcdef" })
