@@ -1859,6 +1859,13 @@ target_include_directories(lan_discovery_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR
 target_compile_features(lan_discovery_test PRIVATE cxx_std_17)
 add_test(NAME lan_discovery COMMAND lan_discovery_test)
 
+# The LAN list's row text (npwire/lan_discovery.h lan_discovery_row_label): the
+# two forms, the expansion test and copy, the row cap
+# [orig: UI_ProcessLANSessionStateMachine @0x559493 / @0x5594b9].
+add_executable(lan_row_label_test npruntime/lan_row_label_test.cpp)
+target_link_libraries(lan_row_label_test PRIVATE opennova_net)
+add_test(NAME lan_row_label COMMAND lan_row_label_test)
+
 add_executable(minimap_markers_test npruntime/minimap_markers_test.cpp)
 target_link_libraries(minimap_markers_test PRIVATE opennova_net opennova_runtime)
 target_include_directories(minimap_markers_test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
