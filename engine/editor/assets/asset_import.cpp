@@ -48,14 +48,19 @@ std::vector<ImportChoice> list_import_choices(const std::vector<std::string> &pa
 				                                  "Could not open archive: " + path));
 				continue;
 			}
-			// An expansion's archive is <n>.pff (expansion\<n>\<n>.pff), whose stem names the files the
-			// game forms from the expansion's name (M<n>.bin, G<n>.bin); no other archive holds one.
-			const std::string stem = utf8_of(path_of(path).stem());
+			// An expansion's archive is <n>.pff in its own folder (expansion\<n>\<n>.pff
+			// [orig: Expansion_LoadAssets @ 0x4a48d6]), whose name forms the files the game reads by it
+			// (M<n>.bin, G<n>.bin). An archive anywhere else names no expansion: its stem could form a
+			// base-game name (ame.pff's G<n>.bin is Game.bin, a string table).
+			const std::filesystem::path archive_path = path_of(path);
+			const std::string stem = utf8_of(archive_path.stem());
+			const std::string expansion =
+			        strutil::iequals(stem, utf8_of(archive_path.parent_path().filename())) ? stem : std::string();
 			for (const auto &file : archive.list_files()) {
 				sources.push_back({path, file.logical_name});
 				if (!facts) continue;
 				uint64_t stored = 0;
-				facts->push_back({file_kind_for_required_name(file.logical_name, stem),
+				facts->push_back({file_kind_for_required_name(file.logical_name, expansion),
 				                  archive.file_size(file.logical_name, stored) ? stored : 0});
 			}
 		} else {
