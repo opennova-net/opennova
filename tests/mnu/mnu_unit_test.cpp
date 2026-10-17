@@ -543,6 +543,41 @@ bool test_fatal_notes() {
   CHECK(fatal("<SCREEN><NAME>S</NAME><MUSICVAR></MUSICVAR></SCREEN>", "/MUSICVAR") == 1, "an empty MUSICVAR");
   CHECK(fatal(screen_of("type=\"radio\" name=\"W\"", std::string(kPos) + "<GROUP>1</GROUP>"), "/GROUP") == -2,
         "a note-free menu");
+  // The four crashes the model holds as read, each a fatal note on its element (docs/mnu/menu-re.md, "Crash
+  // and hang cases"), so a menu holding one cannot ship: a SCREEN action with no FILE [orig: PFF_FindEntry
+  // @ 0x7685f3], a TABLE MIN_ITEM_HEIGHT of 0 [orig: CTableWnd_RecalcLayout @ 0x63f26b], GLOBAL_VAR on an edit
+  // window or a CHECKED checkbox [orig: @ 0x661e5f, @ 0x64ae05], a SCREEN with no NAME [orig: @ 0x639791].
+  CHECK(fatal(screen_of("type=\"button\" name=\"B\"", std::string(kPos) + "<ACTION type=\"SCREEN\">N</ACTION>"),
+              "/ACTION") == 1,
+        "a SCREEN action with no FILE");
+  CHECK(fatal(screen_of("type=\"button\" name=\"B\"",
+                        std::string(kPos) + "<ACTION type=\"SCREEN\" FILE=\"a.mnu\">N</ACTION>"),
+              "/ACTION") == -2,
+        "a SCREEN action with a FILE");
+  CHECK(fatal(screen_of("type=\"table\" name=\"T\"", std::string(kPos) + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == 1,
+        "a TABLE MIN_ITEM_HEIGHT of 0");
+  CHECK(fatal(screen_of("type=\"table\" name=\"T\"",
+                        std::string(kPos) + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT><MIN_ITEM_HEIGHT>9</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == 0,
+        "a TABLE MIN_ITEM_HEIGHT of 0 a later one replaces");
+  CHECK(fatal(screen_of("type=\"static\" name=\"T\"", std::string(kPos) + "<MIN_ITEM_HEIGHT>0</MIN_ITEM_HEIGHT>"),
+              "/MIN_ITEM_HEIGHT") == 0,
+        "MIN_ITEM_HEIGHT 0 where it is not read");
+  CHECK(fatal(screen_of("type=\"edit\" name=\"E\" GLOBAL_VAR", kPos), "WINDOW[E]") == 1, "GLOBAL_VAR on an edit");
+  CHECK(fatal(screen_of("type=\"static\" name=\"E\" GLOBAL_VAR", kPos), "WINDOW[E]") == -2,
+        "GLOBAL_VAR on a static");
+  CHECK(fatal(screen_of("type=\"checkbox\" name=\"C\" GLOBAL_VAR", kPos), "WINDOW[C]") == -2,
+        "GLOBAL_VAR on an unchecked checkbox");
+  CHECK(fatal(screen_of("type=\"checkbox\" name=\"C\" CHECKED GLOBAL_VAR", kPos), "WINDOW[C]") == 1,
+        "GLOBAL_VAR on a CHECKED checkbox");
+  CHECK(fatal("<SCREEN><WINDOW type=\"static\" name=\"W\">" + std::string(kPos) + "</WINDOW></SCREEN>",
+              "/SCREEN[0]") == 1,
+        "a SCREEN with no NAME");
+  CHECK(fatal("<SCREEN><NAME></NAME><WINDOW type=\"static\" name=\"W\">" + std::string(kPos) + "</WINDOW></SCREEN>",
+              "/SCREEN[0]") == -2,
+        "a SCREEN with an empty NAME (its text is empty, not null)");
+  CHECK(fatal("<SCREEN><MUSICVAR>1</MUSICVAR></SCREEN>", "/SCREEN[0]") == -2, "a SCREEN with no NAME and no window");
   // A number holding a stylesheet variable: retail reads the variable's value, the model
   // only the number wcstol reads here, so a save would lose it (D-MNU-1).
   CHECK(fatal(screen_of("type=\"static\" name=\"W\"", "<POSITION><LEFT>%X%</LEFT></POSITION>"),
