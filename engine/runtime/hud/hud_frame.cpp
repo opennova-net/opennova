@@ -732,10 +732,8 @@ void HudFrameCompiler::element_scope_details(const HudFrameState &state, float w
     ++draw_list_.elements_drawn;
 }
 
-// The gameplay pass draws whenever the HUDSPINMAP rect is authored — the
-// retail master switch is a compiled-in constant true and only /NOHUD
-// suppresses the overlay set. [orig: HUD_RenderAllOverlays @0x5a86e8 gate
-//  dword_2723CC4 (static -1); /NOHUD mask @0x4a7a09/@0x840B18]
+// The corner pass draws when the HUDSPINMAP rect is authored and its gates
+// below pass. [orig: /NOHUD mask @0x4a7a09/@0x840B18]
 // The corner map's declutter gates: the whole spinmap block sits inside the
 // showhud bit-1 test, with the HUDDECLUT slot-17 cmp nested inside it (and
 // the level-3 early-out blanks the pass wholesale — compile()'s arm re-enters

@@ -1557,14 +1557,18 @@ void ObjectModel::apply_runtime_state(double p_delta, bool p_renderable,
 		if (ObjectData::weather_ctrl_registers_at(p[0], p[1], p[2], flicker, swing)) {
 			controls_.sample_weather(flicker, swing);
 		} else {
-			// No rings stand. Only the absent set a picture with no world takes
-			// clears them once a weather published them (E13; the editor's
-			// world-less devices, ViewportDevice::publish_scene_state), so a
-			// game model that sampled keeps sampling, as retail's always do,
-			// and one that never sampled has nothing to drop. Here the last
-			// weather's sample goes, the registers read as a model's that never
-			// sampled (the absent set's 0 pair). A value written to or a clear
-			// of either register since stands (ModelControls::drop_weather).
+			// No rings stand. The absent set clears them once a weather
+			// published them: a picture with no world takes it (E13; the
+			// editor's world-less devices, ViewportDevice::publish_scene_state),
+			// and so does a world's teardown (Weather::publish_absent from
+			// release_simulation, bind_simulation(nullptr), _exit_tree and
+			// prepare_autonomous), when the world's own models go with it; while
+			// a world stands its rings stay published, so a game model that
+			// sampled keeps sampling, as retail's always do, and one that never
+			// sampled has nothing to drop. Here the last weather's sample goes,
+			// the registers read as a model's that never sampled (the absent
+			// set's 0 pair). A value written to or a clear of either register
+			// since stands (ModelControls::drop_weather).
 			controls_.drop_weather();
 		}
 	}

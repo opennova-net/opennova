@@ -141,7 +141,9 @@ int weapon_name_x_nudge(bool narrow_surface, int align);
 // ---------------------------------------------------------------------------
 // The clip indicator's round-icon count [orig: HUD_DrawAmmoIndicator
 // @0x599b9c..0x599bc1]: the magazine count (the carried pool for capacity-1
-// weapons), ceil-divided by a >1 rounds-per-icon divisor, capped at 40.
+// weapons), (n + 1) / divisor for a >1 rounds-per-icon divisor (a ceiling only
+// for a divisor of 2) [orig: `add eax,1; idiv ecx` @0x599bae..0x599bba],
+// capped at 40.
 
 inline constexpr int kMaxRoundIcons = 40; // [orig: @0x599bbf]
 // The divisor as the draw reads it: the low byte of the HUDRNDGFX layout's

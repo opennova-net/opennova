@@ -162,6 +162,10 @@ inline SunVeil sun_veil_frame(const EnvironmentState &state, bool sun_model,
 			sun_dim, overcast);
 	if (!state.has_water_height() || state.water_height() == 0.0f) return veil;
 	Vec3 point_m;
+	// A rejected reflection (camera at or below the plane) adds no secondary
+	// term; retail's reads the reflected point's unwritten stack there (env #X3,
+	// class D) [orig: Environment_ComputeSunGlareAndFogBlend @0x5AD622..0x5AD632,
+	// Water_ComputeReflectedSunPoint's reject @0x5AC094].
 	if (!water_glint_point(cam_m, sun_m, state.water_height(), 0.0f, point_m)) return veil;
 	const Vec3 offset{point_m.x - cam_m.x, point_m.y - cam_m.y, point_m.z - cam_m.z};
 	const float x2 = offset.x * offset.x;
