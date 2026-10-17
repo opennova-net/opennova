@@ -1,8 +1,26 @@
 import { AxiosError, AxiosHeaders, type AxiosResponse } from 'axios';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { adminClient } from './client';
-import { completeTreeFile, createDataSet, createTree, deleteDataSet, deleteTree, fetchDataSets, finalizeTree, putTreePart, updateAllServers, updateDataSet } from './dataSets';
-import { dataSet, dataSetsResponse, tree } from '../test/dataSetFixtures';
+import {
+  completeRelease,
+  completeTreeFile,
+  createDataSet,
+  createRelease,
+  createTree,
+  deleteDataSet,
+  deleteRelease,
+  deleteTree,
+  fetchDataSets,
+  fetchReleases,
+  finalizeTree,
+  publishRelease,
+  putReleasePart,
+  putTreePart,
+  retireRelease,
+  updateAllServers,
+  updateDataSet,
+} from './dataSets';
+import { dataSet, dataSetsResponse, release, tree } from '../test/dataSetFixtures';
 
 vi.mock('./client', () => ({
   apiClient: { get: vi.fn(), post: vi.fn() },
@@ -57,10 +75,15 @@ describe('the data sets', () => {
             expansion_code: '',
             title: 'jo',
             game: 'opennova_0_consumer',
+            updater_login: '',
+            command_file: '',
+            retail_updater: false,
             current_tree: null,
+            baseline_tree_id: null,
+            published_release: null,
             servers_live: 0,
             servers_outdated: 0,
-            trees: [{ id: 9, state: 'uploading', version: '', bytes: 0, files: 0, missions: 0, pinned_by: 0, error: '', created_by: 'admin root', created_at: '2026-10-16 10:00:00', ready_at: '' }],
+            trees: [{ id: 9, state: 'uploading', source: 'baseline', release_id: null, version: '', bytes: 0, files: 0, missions: 0, pinned_by: 0, error: '', created_by: 'admin root', created_at: '2026-10-16 10:00:00', ready_at: '' }],
           },
         ],
       }),
@@ -69,6 +92,7 @@ describe('the data sets', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.value.data_sets[0].current_tree).toBeNull();
+    expect(result.value.data_sets[0].published_release).toBeNull();
     expect(result.value.data_sets[0].trees[0].ready_at).toBeNull();
 
     get.mockResolvedValue(reply({ store: { kind: 'local' }, titles: [], games: [], data_sets: [{ id: 'x' }] }));
@@ -79,13 +103,29 @@ describe('the data sets', () => {
 
   it('creates, changes and deletes a data set', async () => {
     post.mockResolvedValue(reply({ data_set: dataSet(5, { display_name: 'Escalation', kind: 'expansion', parent_id: 1, expansion_code: 'jox01' }) }, 201));
-    const created = await createDataSet({ display_name: 'Escalation', kind: 'expansion', parent_id: 1, expansion_code: 'jox01' });
-    expect(post).toHaveBeenCalledWith('/data-sets', { display_name: 'Escalation', kind: 'expansion', parent_id: 1, expansion_code: 'jox01' });
+    const created = await createDataSet({
+      display_name: 'Escalation',
+      kind: 'expansion',
+      parent_id: 1,
+      expansion_code: 'jox01',
+      updater_login: 'JOEus',
+      command_file: 'JOEPTR.CMD',
+      retail_updater: false,
+    });
+    expect(post).toHaveBeenCalledWith('/data-sets', {
+      display_name: 'Escalation',
+      kind: 'expansion',
+      parent_id: 1,
+      expansion_code: 'jox01',
+      updater_login: 'JOEus',
+      command_file: 'JOEPTR.CMD',
+      retail_updater: false,
+    });
     expect(created.ok && created.value.expansion_code).toBe('jox01');
 
     patch.mockResolvedValue(reply({ data_set: dataSet(1, { display_name: 'JO' }) }));
-    const changed = await updateDataSet(1, { display_name: 'JO', game: 'jop_2_consumer' });
-    expect(patch).toHaveBeenCalledWith('/data-sets/1', { display_name: 'JO', game: 'jop_2_consumer' });
+    const changed = await updateDataSet(1, { display_name: 'JO', game: 'jop_2_consumer', retail_updater: true });
+    expect(patch).toHaveBeenCalledWith('/data-sets/1', { display_name: 'JO', game: 'jop_2_consumer', retail_updater: true });
     expect(changed.ok && changed.value.display_name).toBe('JO');
 
     del.mockResolvedValue(reply(null, 204));
@@ -100,6 +140,10 @@ describe('the data sets', () => {
     expect(!code.ok && code.error.message).toContain('expansion with that code');
     expect(!code.ok && code.error.message).not.toContain('raw server text');
 
+    post.mockRejectedValue(refusal(409, { error: 'duplicate_login' }));
+    const login = await createDataSet({ display_name: 'JO', kind: 'base', title: 'jo', game: 'jop_2_consumer' });
+    expect(!login.ok && login.error.code).toBe('duplicate_login');
+    expect(!login.ok && login.error.message).toContain('updater login');
     post.mockRejectedValue(refusal(409, { error: 'no_such_parent' }));
     const parent = await createDataSet({ display_name: 'x', kind: 'expansion', parent_id: 99, expansion_code: 'jox09' });
     expect(!parent.ok && parent.error.code).toBe('no_such_parent');
@@ -223,6 +267,9 @@ describe('the trees', () => {
     del.mockRejectedValue(refusal(409, { error: 'current' }));
     const current = await deleteTree(1, 12);
     expect(!current.ok && current.error.message).toContain('current data');
+    del.mockRejectedValue(refusal(409, { error: 'baseline' }));
+    const baseline = await deleteTree(1, 12);
+    expect(!baseline.ok && baseline.error.message).toContain('baseline');
   });
 
   it('asks every outdated server to update, of one data set or all', async () => {
@@ -231,5 +278,73 @@ describe('the trees', () => {
     expect(post).toHaveBeenLastCalledWith('/hosted/update-all', { data_set_id: 1 });
     expect(await updateAllServers()).toEqual({ ok: true, value: 3 });
     expect(post).toHaveBeenLastCalledWith('/hosted/update-all', {});
+  });
+});
+
+describe('the releases', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('lists them with their sections', async () => {
+    const list = [release(1), release(2, { status: 'draft' })];
+    get.mockResolvedValue(reply({ releases: list }));
+    const result = await fetchReleases();
+    expect(get).toHaveBeenCalledWith('/releases', expect.anything());
+    expect(result).toEqual({ ok: true, value: list });
+    get.mockResolvedValue(reply({ releases: [{ id: 1 }] }));
+    expect((await fetchReleases()).ok).toBe(false);
+  });
+
+  it('opens an upload, puts each part through the site and completes it', async () => {
+    post.mockResolvedValue(reply({ release: { id: 7 }, upload: { key: 'updates/upload-7.sfs', upload_id: 'r7', part_size: 33554432 } }, 201));
+    const opened = await createRelease({ name: 'JO 1.7.5.9', size: 300_000_000 });
+    expect(post).toHaveBeenCalledWith('/releases', { name: 'JO 1.7.5.9', size: 300_000_000 });
+    expect(opened.ok && opened.value).toEqual({ release: { id: 7 }, upload: { key: 'updates/upload-7.sfs', upload_id: 'r7', part_size: 33554432 } });
+
+    put.mockResolvedValue(reply({ etag: '"e3"' }));
+    const blob = new Blob(['abc']);
+    const controller = new AbortController();
+    const stored = await putReleasePart(7, 'r7', 3, blob, controller.signal);
+    expect(put).toHaveBeenCalledWith('/releases/7/parts/3', blob, {
+      params: { upload_id: 'r7' },
+      headers: { 'Content-Type': 'application/octet-stream' },
+      signal: controller.signal,
+    });
+    expect(stored).toEqual({ ok: true, value: { etag: '"e3"' } });
+    put.mockRejectedValue(refusal(409, { error: 'not_uploading' }));
+    const stale = await putReleasePart(7, 'r7', 1, blob);
+    expect(!stale.ok && stale.error.code).toBe('not_uploading');
+
+    post.mockResolvedValue(reply({ release: release(7, { status: 'validating' }) }, 202));
+    const parts = [{ part_number: 1, etag: '"e1"' }];
+    const completed = await completeRelease(7, { upload_id: 'r7', parts });
+    expect(post).toHaveBeenLastCalledWith('/releases/7/complete', { upload_id: 'r7', parts });
+    expect(completed.ok && completed.value.status).toBe('validating');
+
+    post.mockRejectedValue(refusal(400, { error: 'invalid_field', field: 'size' }));
+    expect((await createRelease({ size: -1 })).ok).toBe(false);
+  });
+
+  it('publishes, retires and deletes, each with its refusal', async () => {
+    post.mockResolvedValue(reply({ release: release(7, { status: 'published' }) }, 202));
+    const published = await publishRelease(7);
+    expect(post).toHaveBeenLastCalledWith('/releases/7/publish');
+    expect(published.ok && published.value.status).toBe('published');
+    post.mockRejectedValue(refusal(409, { error: 'not_draft' }));
+    const notDraft = await publishRelease(7);
+    expect(!notDraft.ok && notDraft.error.message).toContain('draft');
+
+    post.mockResolvedValue(reply({ release: release(7, { status: 'retired' }) }, 202));
+    expect((await retireRelease(7)).ok).toBe(true);
+    expect(post).toHaveBeenLastCalledWith('/releases/7/retire');
+    post.mockRejectedValue(refusal(409, { error: 'not_published' }));
+    const notPublished = await retireRelease(7);
+    expect(!notPublished.ok && notPublished.error.code).toBe('not_published');
+
+    del.mockResolvedValue(reply(null, 204));
+    expect((await deleteRelease(7)).ok).toBe(true);
+    expect(del).toHaveBeenCalledWith('/releases/7');
+    del.mockRejectedValue(refusal(409, { error: 'published' }));
+    const stillPublished = await deleteRelease(7);
+    expect(!stillPublished.ok && stillPublished.error.message).toContain('Retire it first');
   });
 });
