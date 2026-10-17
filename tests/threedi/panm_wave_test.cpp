@@ -36,8 +36,16 @@ int main(void) {
     ok &= expect_eq("triangle[769]", t[769], 2);
     ok &= expect_eq("triangle[895]", t[895], 254);
 
-    ok &= expect_eq("rand band[1536]", t[1536], 111);
-    ok &= expect_eq("rand band[1537]", t[1537], 183);
+    // The noise band (C-250): the CRT's default-state stream past the NAPI
+    // cookie ring's draw (41), so the draws 18467, 6334, 26500 ... masked to
+    // 12 bits, smoothed as CWaveformTable_Build smooths them [orig:
+    // CWaveformTable_Build @ 0x5DE360; CSessionIdRing_Init's rand @ 0x4DBC45].
+    ok &= expect_eq("rand band[1536]", t[1536], 0x83);
+    ok &= expect_eq("rand band[1537]", t[1537], 0x8C);
+    ok &= expect_eq("rand band[1538]", t[1538], 0x9D);
+    ok &= expect_eq("rand band[1539]", t[1539], 0xAD);
+    ok &= expect_eq("rand band[1551]", t[1551], 0x92);
+    ok &= expect_eq("rand band[1791]", t[1791], 0x8E);
 
     ok &= expect_eq("sin255 band[1792]", t[1792], 0);
     ok &= expect_eq("sin255 band[1799]", t[1799], 43);
