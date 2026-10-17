@@ -735,6 +735,26 @@ int test_item_classes() {
 	return 0;
 }
 
+// The player's route as the game walks the record a save lays out (bms::player_route_stop_count over the path's
+// stops, its first 32 slots) [orig: NetPacket_WriteWorldStateLoad0x0F @0x502e50]: the first path with the flag, each
+// of its stops' markers on it, no other marker.
+int test_player_route() {
+	std::unique_ptr<Document> document = open(fixture_bytes());
+	TEST_EXPECT(document);
+	if (!document) return 1;
+	const MissionDocument &m = as_mission(*document);
+	const NodeAddress path = row_at(*document, MissionKind::WaypointPath, 1);
+	Diagnostic error;
+	TEST_EXPECT(document->apply(edit_of(EditOperation::Set, path, "flags", int64_t(bms::WaypointFlags::PlayerRoute)), error));
+	const MissionPath &held = static_cast<const PathRow &>(*document->row(path.row)).native;
+	const std::vector<const Node *> markers = m.rows_of(MissionKind::Marker);
+	TEST_EXPECT(!held.stops.empty());
+	std::set<uint32_t> stops(held.stops.begin(), held.stops.end());
+	for (size_t i = 0; i < markers.size(); ++i) TEST_EXPECT(m.on_player_route(*markers[i]) == (stops.count(uint32_t(i)) != 0));
+	std::printf("player route: the first flagged path's stops as a save lays them out\n");
+	return 0;
+}
+
 // The original editor's .bms packer writes every record with w_accuracy1 no more than w_accuracy2 and yaw, pitch and
 // roll % 360, the sign kept [orig: sub_44C8E0 @ 0x44c94f..0x44c975, @ 0x44c905..0x44c924 (JOTACmed.exe)] (the field
 // "accuracy" is w_accuracy1): a save writes 80/20 as 20/20 and 400 as 40, -400 as -40; the .mis writer clamps alike
@@ -1959,6 +1979,7 @@ int main(int argc, char **argv) {
 	if (test_stop_places() != 0) return 1;
 	if (test_item_classes() != 0) return 1;
 	if (test_record_pack() != 0) return 1;
+	if (test_player_route() != 0) return 1;
 	if (test_parse_findings() != 0) return 1;
 	if (test_reads_and_symbols() != 0) return 1;
 	if (test_item_type_on_symbol() != 0) return 1;
