@@ -226,7 +226,9 @@
   streaming encoder wants), `io/fixed.h` (16.16 / 2.14), `io/log.h` (the diagnostic
   sink), `io/strutil.h` ASCII case-insensitive helpers, `io/os_path.h` (a UTF-8 path
   string at an OS file call: `os_path`, `fopen_utf8`, `utf8_path`; Windows reads a
-  narrow path in the ANSI code page and fails one past MAX_PATH without `\\?\`),
+  narrow path in the ANSI code page and fails one past MAX_PATH without `\\?\`; and
+  `fseek64` / `ftell64`, the stdio seek at 64 bits, since Windows' `fseek` takes a 32-bit
+  `long`: every seek into an archive or a sound bank goes through it, D-VFS-16),
   `io/file_io.h` (whole-file reads and the atomic `.tmp`-then-rename write over
   `os_path`, the rename's bounded retry), `io/sha256.h` (FIPS 180-4 SHA-256: the
   streaming `Sha256` and the one-shot `sha256` / `sha256_hex`; infrastructure, not a

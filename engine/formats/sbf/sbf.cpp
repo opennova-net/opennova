@@ -138,7 +138,7 @@ int sbf_read_raw(const SbfArchive *arc, const SbfRawEntry *entry,
     if (buf_size < entry->total_size) return -2;
     if (!arc->_file) return -3;
     FILE *f = (FILE *)arc->_file;
-    if (fseek(f, (long)entry->data_offset, SEEK_SET) != 0) return -4;
+    if (opennova::io::fseek64(f, (int64_t)entry->data_offset, SEEK_SET) != 0) return -4;
     if (fread(out_buf, 1, entry->total_size, f) != entry->total_size) return -5;
     return (int)entry->total_size;
 }
@@ -200,7 +200,7 @@ int sbf_read_chunk(const SbfArchive *arc, const SbfRawEntry *entry,
     if (chunk_off >= entry->total_size) return -4;
     uint64_t off = (uint64_t)entry->data_offset + chunk_off;
     FILE *f = (FILE *)arc->_file;
-    if (fseek(f, (long)off, SEEK_SET) != 0) return -5;
+    if (opennova::io::fseek64(f, (int64_t)off, SEEK_SET) != 0) return -5;
     size_t got = fread(out_buf, 1, entry->block_size, f);
     if (got != entry->block_size) return -6;
     return (int)entry->block_size;
