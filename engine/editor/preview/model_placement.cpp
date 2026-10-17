@@ -65,14 +65,7 @@ std::string item_label(const ModelItemPlan &plan) {
 
 int64_t free_project_item_id(const SessionView &view, const std::string &catalog) {
 	std::unordered_set<int64_t> used;
-	if (const AssetGraph *graph = view.findings.graph.get()) {
-		for (const GraphSymbol *symbol : graph->symbols_of_kind(ReferenceKind::Item))
-			if (const std::optional<int> id = strutil::parse_int(symbol->name)) used.insert(*id);
-		graph->for_each_edge([&](const GraphEdge &edge) {
-			if (edge.kind != ReferenceKind::Item) return;
-			if (const std::optional<int> id = strutil::parse_int(edge.value)) used.insert(*id);
-		});
-	}
+	if (const AssetGraph *graph = view.findings.graph.get()) used = project_item_ids(*graph);
 	open_items(view, catalog, [&](int64_t id, const std::string &) { used.insert(id); });
 	return free_item_id([&](int id) { return used.count(id) != 0; });
 }
