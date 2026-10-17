@@ -56,7 +56,9 @@
                 >
                   Retry all<span class="sr-only"> {{ g.kind }} jobs that failed this way</span>
                 </button>
-                <span v-else class="text-xs text-ink-muted" title="Their secrets were dropped when they ended">Cannot run again</span>
+                <button type="button" :disabled="busy" class="text-ink-muted hover:text-ink disabled:opacity-40" @click="dismiss(g)">
+                  Dismiss<span class="sr-only"> the {{ g.kind }} jobs that failed this way</span>
+                </button>
               </td>
             </tr>
           </tbody>
@@ -161,7 +163,7 @@
 import { computed, ref } from 'vue';
 import { RouterLink } from 'vue-router';
 import RelativeTime from '../../components/RelativeTime.vue';
-import { retryJobGroup } from '../../api/jobs';
+import { dismissJobGroup, retryJobGroup } from '../../api/jobs';
 import type { JobFailureGroup, JobsOverview } from '../../types/jobs';
 import { formatCount } from '../../utils/format';
 import { groupRetryMessage, jobKindLabel, secondsLabel, workerLeaseLabel } from '../../utils/jobsView';
@@ -198,6 +200,16 @@ function failureText(g: JobFailureGroup): string {
 // The Jobs tab filtered to the group's jobs.
 function jobsOf(g: JobFailureGroup) {
   return { path: '/admin/jobs', query: { tab: 'jobs', state: 'failed', kind: g.kind, failure: g.key } };
+}
+
+async function dismiss(g: JobFailureGroup) {
+  if (busy.value) return;
+  if (!window.confirm(`Dismiss ${g.count === 1 ? 'this failed job' : `these ${g.count} failed jobs`}? They are deleted.`)) return;
+  busy.value = true;
+  const result = await dismissJobGroup(g.kind, g.key);
+  busy.value = false;
+  emit('notice', result.ok ? { ok: true, text: `${result.value} dismissed.` } : { ok: false, text: result.error.message });
+  emit('changed');
 }
 
 async function retryAll(g: JobFailureGroup) {

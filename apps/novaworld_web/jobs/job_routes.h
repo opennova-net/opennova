@@ -54,6 +54,7 @@ private:
 	crow::response job_route(const crow::request &req, uint64_t id);
 	crow::response retry_route(const crow::request &req, uint64_t id);
 	crow::response retry_group_route(const crow::request &req);
+	crow::response dismiss_group_route(const crow::request &req);
 	crow::response cancel_route(const crow::request &req, uint64_t id);
 	crow::response run_route(const crow::request &req);
 	crow::response prune_route(const crow::request &req);

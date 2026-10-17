@@ -207,9 +207,9 @@
               </td>
               <td class="fleet-server-data px-4 py-3 text-xs">
                 <template v-if="s.base_tree_id !== null">
-                  <span class="block whitespace-nowrap">{{ pinnedText(s.data.base, s.base_tree_id) }}</span>
+                  <span class="block whitespace-nowrap">{{ pinnedText(s.data.base) }}</span>
                   <span v-if="s.expansion_tree_id !== null" class="block whitespace-nowrap text-ink-muted">
-                    {{ s.expansion?.display_name || 'Expansion' }} {{ pinnedText(s.data.expansion, s.expansion_tree_id) }}
+                    {{ s.expansion?.display_name || 'Expansion' }} {{ pinnedText(s.data.expansion) }}
                   </span>
                   <span v-if="s.update_requested" class="block text-warn">Update requested</span>
                   <span v-else-if="s.outdated" class="inline-block rounded-control bg-warn/10 px-2 py-0.5 font-medium text-warn">Outdated</span>
@@ -339,9 +339,9 @@ const liveCount = computed(() => fleet.value?.servers.filter((s) => s.live).leng
 const outdatedCount = computed(() => fleet.value?.servers.filter((s) => s.live && s.outdated && !s.update_requested).length ?? 0);
 const activeMachines = computed(() => (fleet.value?.machines ?? []).filter((m) => m.state !== 'ended' && m.state !== 'failed'));
 
-// A pinned tree's version, or its id when the reply gave none.
-function pinnedText(tree: PinnedTree | null, treeId: number): string {
-  return tree?.version ? tree.version : `tree ${treeId}`;
+// A pinned tree's version; data that ships no version.txt has none.
+function pinnedText(tree: PinnedTree | null): string {
+  return tree?.version || 'No version';
 }
 const machineBreakdown = computed(() => {
   const shared = activeMachines.value.filter((m) => m.kind === 'shared').length;

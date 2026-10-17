@@ -2,7 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import type { Router } from 'vue-router';
 import JobsSection from './JobsSection.vue';
-import { cancelJob, fetchJobs, fetchJobsOverview, pruneJobs, retryJob, retryJobGroup, runJobNow } from '../../api/jobs';
+import { cancelJob, dismissJobGroup, fetchJobs, fetchJobsOverview, pruneJobs, retryJob, retryJobGroup, runJobNow } from '../../api/jobs';
 import { NOW, ago, job, jobPage, overview, worker } from '../../test/jobsFixtures';
 import { testRouter } from '../../test/router';
 
@@ -11,6 +11,7 @@ vi.mock('../../api/jobs', () => ({
   fetchJobs: vi.fn(),
   retryJob: vi.fn(),
   retryJobGroup: vi.fn(),
+  dismissJobGroup: vi.fn(),
   cancelJob: vi.fn(),
   runJobNow: vi.fn(),
   pruneJobs: vi.fn(),
@@ -18,6 +19,7 @@ vi.mock('../../api/jobs', () => ({
 
 const readOverview = vi.mocked(fetchJobsOverview);
 const readJobs = vi.mocked(fetchJobs);
+const dismissGroup = vi.mocked(dismissJobGroup);
 const retry = vi.mocked(retryJob);
 const retryGroup = vi.mocked(retryJobGroup);
 const cancel = vi.mocked(cancelJob);
@@ -115,8 +117,13 @@ describe('JobsSection', () => {
     expect(rows[0].text()).toContain('14 jobs');
     expect(rows[0].text()).toContain('none can run again');
     expect(rows[0].text()).toContain('1 min ago');
-    expect(rows[0].text()).toContain('Cannot run again');
-    expect(rows[0].find('button').exists()).toBe(false);
+    expect(rows[0].text()).not.toContain('Retry all');
+    // None can run again, so it can only be dismissed (deleted), asked first.
+    dismissGroup.mockResolvedValue({ ok: true, value: 14 });
+    confirm.mockReturnValueOnce(true);
+    await rows[0].get('button').trigger('click');
+    await flushPromises();
+    expect(dismissGroup).toHaveBeenCalledWith('machine.launch', expect.any(String));
     expect(rows[0].findAll('a').map((a) => a.attributes('href'))).toContain('/admin/jobs/86');
     // Two mails alike: their shared words, and a retry of both.
     expect(rows[1].text()).toContain('SES refused the address <id>');
@@ -130,7 +137,7 @@ describe('JobsSection', () => {
     expect(confirm).toHaveBeenLastCalledWith(expect.stringContaining('Retry the 2 failed "Send one mail" jobs that failed this way now?'));
     expect(retryGroup).toHaveBeenCalledWith('mail.send', 'SES refused the address <id>');
     expect(page.text()).toContain('2 jobs are queued again to run now.');
-    expect(readOverview).toHaveBeenCalledTimes(2);
+    expect(readOverview).toHaveBeenCalledTimes(3); // the load, after the dismissal, after the retry
 
     // A group's jobs: the Jobs tab, filtered to them.
     await rows[0].findAll('a').find((a) => a.text().startsWith('Show the jobs'))!.trigger('click');

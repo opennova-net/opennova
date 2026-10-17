@@ -146,7 +146,8 @@
                 </td>
                 <td class="px-4 py-3">
                   <template v-if="d.current_tree">
-                    <span class="block font-mono">{{ d.current_tree.version || `tree ${d.current_tree.id}` }}</span>
+                    <span v-if="d.current_tree.version" class="block font-mono">{{ d.current_tree.version }}</span>
+                    <span v-else class="block text-ink-muted">No version</span>
                     <span v-if="d.current_tree.ready_at" class="block text-xs text-ink-muted">
                       ready <RelativeTime :value="d.current_tree.ready_at" :now="now" />
                     </span>

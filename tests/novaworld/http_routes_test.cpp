@@ -343,6 +343,10 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 	row.player_count = 2;
 	row.max_players = 32;
 	row.region = "us";
+	row.mission_name = "AS - Kombang Valley";
+	row.game_type = "AAS";
+	row.exp = "jox01";
+	row.locked = "Y";
 	{
 		auto conn = h.pool.acquire();
 		opennova::hostdb::upsert_host(*conn, row);
@@ -363,6 +367,11 @@ int test_lobbies_lists_seeded_games(Harness &h) {
 	TEST_EXPECT(hosts[0]["players"].i() == 2);
 	TEST_EXPECT(hosts[0]["maxPlayers"].i() == 32);
 	TEST_EXPECT(str(hosts[0]["region"]) == "us");
+	// The mission, and the expansion a joiner needs by its data set's name.
+	TEST_EXPECT(str(hosts[0]["mission"]) == "AS - Kombang Valley");
+	TEST_EXPECT(str(hosts[0]["gameType"]) == "AAS");
+	TEST_EXPECT(str(hosts[0]["expansion"]) == "Escalation");
+	TEST_EXPECT(hosts[0]["locked"].b());
 	return 0;
 }
 

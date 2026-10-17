@@ -11,6 +11,7 @@
 #include "health.h"
 #include "host_routes.h"
 #include "hosted/console_routes.h"
+#include "hosted/data_set_repository.h"
 #include "hosted/fleet_routes.h"
 #include "hosted/hosted_routes.h"
 #include "hosted/net_cidr.h"
@@ -833,6 +834,18 @@ void HttpListener::register_public_api_routes() {
 			auto db_conn   = db_pool_.acquire();
 			auto games     = catalog::list_games(*db_conn);
 			auto host_rows = hostdb::list_hosts(*db_conn);
+			// An expansion's name by its base's games slug and its /exp code,
+			// the code a listing's Exp column carries ("jox01": "Escalation").
+			std::map<std::pair<std::string, std::string>, std::string> expansion_names;
+			{
+				const auto sets = hosted::list_data_sets(*db_conn);
+				std::map<int64_t, std::string> base_game;
+				for (const auto &d : sets)
+					if (d.kind == hosted::DataSetKind::Base) base_game[d.id] = d.game;
+				for (const auto &d : sets)
+					if (d.kind == hosted::DataSetKind::Expansion && d.parent_id)
+						expansion_names[{ base_game[*d.parent_id], d.expansion_code }] = d.display_name;
+			}
 			games_json.reserve(games.size());
 			for (const auto &g : games) {
 				crow::json::wvalue game;
@@ -855,6 +868,15 @@ void HttpListener::register_public_api_routes() {
 					hj["players"]     = h.player_count;
 					hj["maxPlayers"]  = h.max_players;
 					hj["region"]      = retail_text_to_utf8(h.region);
+					hj["mission"]     = retail_text_to_utf8(h.mission_name);
+					hj["gameType"]    = retail_text_to_utf8(h.game_type);
+					// The expansion a joiner needs installed ("" for the base game
+					// alone), by its data set's name, else its code.
+					std::string expansion = retail_text_to_utf8(h.exp);
+					if (const auto named = expansion_names.find({ g.slug, h.exp }); named != expansion_names.end())
+						expansion = named->second;
+					hj["expansion"]   = expansion;
+					hj["locked"]      = h.locked == "Y";
 					hosts.push_back(std::move(hj));
 				}
 				game["hosts"] = std::move(hosts);

@@ -6,8 +6,13 @@ export interface LobbyHost {
   region?: string | null;
   players: number;
   maxPlayers: number;
-  message?: string | null;
-  game?: string | null;
+  // The mission playing and its game type ("AS - Kombang Valley", "AAS").
+  mission?: string | null;
+  gameType?: string | null;
+  // The expansion a joiner needs installed ("Escalation"); empty for the base game.
+  expansion?: string | null;
+  // A game password guards it.
+  locked?: boolean;
 }
 
 export interface LobbyGroup {

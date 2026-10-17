@@ -434,6 +434,13 @@ GroupRetry retry_group(db::Database &db, const std::string &kind, const std::str
 	return out;
 }
 
+int64_t dismiss_group(db::Database &db, const std::string &kind, const std::string &key) {
+	db.exec(std::string("DELETE FROM jobs WHERE ") + kAttentionWhere + " AND kind = $2 AND " +
+					failure_key_sql("last_error") + " = $3;",
+			{ BindValue(std::string(kCancelledByAdmin)), BindValue(kind), BindValue(key) });
+	return db.changes();
+}
+
 ActionResult cancel(db::Database &db, int64_t id, const std::string &actor) {
 	db.exec("UPDATE jobs SET state = 'failed', finished_at = now(), last_error = $2, "
 			"lease_until = NULL, worker_id = NULL, "
