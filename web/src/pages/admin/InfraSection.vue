@@ -1,5 +1,5 @@
 <template>
-  <div class="space-y-10">
+  <div ref="root" class="space-y-10">
     <header class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h1 class="text-3xl font-semibold text-ink">Infrastructure</h1>
@@ -416,6 +416,7 @@ import RelativeTime from '../../components/RelativeTime.vue';
 import StatTile from '../../components/charts/StatTile.vue';
 import { fetchInfrastructure } from '../../api/infra';
 import { usePolling } from '../../composables/usePolling';
+import { keepInView } from '../../utils/keepInView';
 import type { InfraCloudRead, InfraLobby, InfraMachine, InfraOverview, InfraService, InfraTask } from '../../types/infra';
 import { machineKindLabel, machineStateLabel } from '../../utils/adminView';
 import {
@@ -443,6 +444,7 @@ const secondaryButton =
   'rounded-control border border-border bg-raised px-4 py-2 text-sm font-medium text-ink transition hover:bg-hover disabled:cursor-not-allowed disabled:opacity-40';
 const headRow = 'bg-raised text-left text-xs font-semibold uppercase tracking-wider text-ink-muted';
 
+const root = ref<HTMLElement | null>(null);
 const overview = ref<InfraOverview | null>(null);
 const loadedAt = ref<number | null>(null);
 const now = ref(Date.now());
@@ -585,7 +587,9 @@ const poll = usePolling({
     if (signal.aborted) return false;
     now.value = Date.now();
     if (result.ok) {
-      overview.value = result.value;
+      await keepInView(() => {
+        overview.value = result.value;
+      }, root.value);
       loadedAt.value = now.value;
       pollTrouble.value = false;
       error.value = '';
