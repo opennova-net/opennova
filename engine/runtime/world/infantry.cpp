@@ -101,6 +101,21 @@ int player_directional_state(int base, int move_dir_index) {
 
 } // namespace
 
+// See infantry.h.
+RootRotationQ22 root_rotation_q22(int32_t heading, bool org2_player_body) {
+    RootRotationQ22 r;
+    if (org2_player_body) {
+        const int index = io::bam_table_index(static_cast<uint32_t>(heading) + 0x200000u);
+        r.c = static_cast<int32_t>(io::bam_table_cos(index) * io::kQ22One);
+        r.s = static_cast<int32_t>(io::bam_table_sin(index) * io::kQ22One);
+    } else {
+        const double rad = static_cast<double>(heading) * io::kRadiansPerBamX87;
+        r.c = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
+        r.s = static_cast<int32_t>(std::sin(rad) * io::kQ22One);
+    }
+    return r;
+}
+
 // Shared with infantry_combat.cpp (declared in infantry_internal.h).
 // [orig: BAM bearing scale 683565275.5764316 = 2^31/pi (dbl_7C19D8)]
 int32_t bearing_to(int32_t dx, int32_t dy) {
@@ -1804,25 +1819,15 @@ void AiSystem::tick_infantry(AiEntity &e, World &world, uint32_t logic_tick) {
             fwd = 1024; // [data: retail ADM dump root row 4756]
         }
         // Both motors rotate locomotion by BODY heading. Independent gaze must
-        // not steer a walking actor. org2 reads the Q22 sine table at the
-        // heading's rounded top ten bits, org1 takes the Q22 ftol trig of the
-        // heading times retail's radians-per-BAM double.
-        // [orig: org2 entity+0x8C @0x4B41E4, `add eax, 200000h; shr eax, 16h`
-        //  @0x4B41F0..0x4B41F5, g_BamSinTableQ22 / off_849934 @0x4B41F8..0x4B4206,
-        //  the rotation @0x4B4210..0x4B4255; org1 entity+0x8C `fild; fmul
-        //  dbl_7C3608` @0x4BF001..0x4BF007, the trig @0x4BF00D..0x4BF02A]
+        // not steer a walking actor (root_rotation_q22: org2's sine table, org1's
+        // trig at retail's scale).
+        // [orig: Entity_UpdateInfantryPlayerBody entity+0x8C @0x4B41E4, the
+        //  rotation @0x4B4210..0x4B4255; Entity_UpdateInfantryAI entity+0x8C
+        //  @0x4BF001]
         const int32_t move_heading = inf.is_local_player ? player_root_heading : inf.body_heading;
-        int32_t c = 0;
-        int32_t s = 0;
-        if (inf.is_local_player) {
-            const int index = io::bam_table_index(static_cast<uint32_t>(move_heading) + 0x200000u);
-            c = static_cast<int32_t>(io::bam_table_cos(index) * io::kQ22One);
-            s = static_cast<int32_t>(io::bam_table_sin(index) * io::kQ22One);
-        } else {
-            const double rad = static_cast<double>(move_heading) * io::kRadiansPerBamX87;
-            c = static_cast<int32_t>(std::cos(rad) * io::kQ22One);
-            s = static_cast<int32_t>(std::sin(rad) * io::kQ22One);
-        }
+        const RootRotationQ22 rot = root_rotation_q22(move_heading, inf.is_local_player);
+        const int32_t c = rot.c;
+        const int32_t s = rot.s;
         int32_t wx = static_cast<int32_t>((static_cast<int64_t>(fwd) * c) >> 22) -
                      static_cast<int32_t>((static_cast<int64_t>(lat) * s) >> 22);
         int32_t wy = static_cast<int32_t>((static_cast<int64_t>(fwd) * s) >> 22) +
