@@ -611,37 +611,8 @@ bool Simulation::enable_join(const String &p_host_ip, int p_port,
 	return true;
 }
 
-namespace {
-
-// Split an "a.b.c.d:port" endpoint at its last colon. False when there is no
-// colon, no host or a port outside 1..65535.
-bool split_endpoint(const String &p_endpoint, std::string &r_ip, uint32_t &r_port) {
-	const int colon = p_endpoint.rfind(":");
-	if (colon <= 0) return false;
-	const String port_text = p_endpoint.substr(colon + 1);
-	if (!port_text.is_valid_int()) return false;
-	const int64_t port = port_text.to_int();
-	if (port <= 0 || port > 0xFFFF) return false;
-	r_ip = opennova::to_std(p_endpoint.substr(0, colon));
-	r_port = static_cast<uint32_t>(port);
-	return true;
-}
-
-} // namespace
-
-void Simulation::set_join_proxy(const String &p_node, const String &p_relay, int64_t p_cookie) {
-	if (joiner_role_ == nullptr) return;
-	opennova::inmatch::JoinerRole::JoinProxyOptions options;
-	// A malformed part leaves its fields zero, which the role's all-six gate
-	// reads as "no proxy" -- the same outcome as a .joi without NI/NP/BK.
-	if (split_endpoint(p_node, options.proxy_node_ip, options.proxy_node_port) &&
-			split_endpoint(p_relay, options.proxy_relay_ip, options.proxy_relay_port) &&
-			p_cookie > 0 && p_cookie <= 0xFFFFFFFFLL) {
-		options.proxy_cookie = static_cast<uint32_t>(p_cookie);
-	} else {
-		options = opennova::inmatch::JoinerRole::JoinProxyOptions{};
-	}
-	joiner_role_->set_join_proxy(options);
+void Simulation::set_join_proxy(const opennova::ProxyRendezvousConfig &p_proxy) {
+	if (joiner_role_ != nullptr) joiner_role_->set_join_proxy(p_proxy);
 }
 
 bool Simulation::is_local_spectator() const {

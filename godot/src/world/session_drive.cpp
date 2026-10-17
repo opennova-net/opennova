@@ -167,8 +167,7 @@ int SessionDrive::load_as_joiner(const Ref<JoinTarget> &p_target) {
 	// rendezvous datagram ahead of the first hello, so this lands before the
 	// first preload poll. Empty on a LAN target.
 	if (p_target->has_join_proxy()) {
-		join_preload_sim_->set_join_proxy(p_target->get_proxy_node(), p_target->get_proxy_relay(),
-				p_target->get_proxy_cookie());
+		join_preload_sim_->set_join_proxy(p_target->get_join_proxy());
 	}
 	join_preload_sim_->set_join_world_ready(false);
 	// The JOIN VERSIONCRCSTRING checksum reads the loose

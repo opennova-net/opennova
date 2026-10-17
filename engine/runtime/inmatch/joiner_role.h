@@ -99,8 +99,9 @@ public:
 	// endpoint the ordinary dial uses. All six fields set = the rendezvous is
 	// sent to the node every 3000 ms ahead of each announce while the hello is
 	// outstanding; any field missing = no proxy (LAN, or a .joi without them).
-	// The shell fills these from JoinTarget.proxy_node / proxy_relay /
-	// proxy_cookie. [orig: CNapiGameSession_InitTransportConnection @0x4c9e10
+	// The shell installs the engine's own build of them (the typed overload
+	// below, through JoinTarget's ProxyRendezvousConfig); this one takes the
+	// six as text. [orig: CNapiGameSession_InitTransportConnection @0x4c9e10
 	//  install @0x4ca051..0x4ca0c7; the all-six gate
 	//  CNapiNPConnection_PumpEnumeratorAndSend @0x62914f..0x629159]
 	struct JoinProxyOptions {
