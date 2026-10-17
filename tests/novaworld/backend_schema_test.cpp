@@ -91,7 +91,7 @@ int test_migrations_create_expected_tables() {
 		"hosted_server_console", "hosted_server_events", "hosted_server_hourly",
 		"hosted_server_samples", "hosted_servers", "jobs", "lobby_commands", "lobby_instances",
 		"lobby_sessions", "login_addresses", "password_resets", "player_game_access", "players",
-		"server_status", "service_meta", "unknown_messages",
+		"release_sections", "releases", "server_status", "service_meta", "unknown_messages",
 		"web_sessions" };
 	TEST_EXPECT(rows.size() == expected.size());
 	for (size_t i = 0; i < expected.size(); ++i) {
@@ -113,7 +113,8 @@ int test_migrations_create_expected_tables() {
 		"billing_customers.livemode", "billing_events.livemode",
 		"billing_subscriptions.cancel_at_period_end", "billing_subscriptions.livemode",
 		"billing_sync_state.prices_checked", "billing_sync_state.prices_ok",
-		"fleet_machines.launch_refused", "fleet_machines.was_draining", "fleet_slot_reports.oom",
+		"data_sets.retail_updater", "fleet_machines.launch_refused", "fleet_machines.was_draining",
+		"fleet_slot_reports.oom",
 		"hosted_console_commands.record", "hosted_console_commands.sent",
 		"hosted_limits_hold.force_next", "hosted_limits_hold.held", "hosted_server_samples.link_up",
 		"hosted_server_samples.mission_started", "hosted_servers.own_machine",

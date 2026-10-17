@@ -13,15 +13,22 @@ namespace {
 using db::BindValue;
 
 constexpr std::array<const char *, 2> kKindNames = { "base", "expansion" };
-constexpr std::array<const char *, 5> kTreeStateNames = { "uploading", "finalizing", "ready",
-	"failed", "pruned" };
+constexpr std::array<const char *, 6> kTreeStateNames = { "uploading", "finalizing", "building",
+	"ready", "failed", "pruned" };
+constexpr std::array<const char *, 2> kTreeSourceNames = { "baseline", "release" };
+constexpr std::array<const char *, 6> kReleaseStatusNames = { "uploading", "validating", "invalid",
+	"draft", "published", "retired" };
 
 constexpr const char *kDataSetColumns =
-		"id, display_name, kind, parent_id, expansion_code, title, game, current_tree_id, "
+		"id, display_name, kind, parent_id, expansion_code, title, game, updater_login, "
+		"command_file, retail_updater, current_tree_id, baseline_tree_id, published_release_id, "
 		"created_by, created_at, updated_at";
 constexpr const char *kTreeColumns =
-		"id, data_set_id, state, version_text, manifest::text, missions::text, bytes, error, "
-		"created_by, created_at, ready_at, pruned_at";
+		"id, data_set_id, state, source, release_id, baseline_tree_id, version_text, "
+		"manifest::text, missions::text, bytes, error, created_by, created_at, ready_at, pruned_at";
+constexpr const char *kReleaseColumns =
+		"id, status, sha256, bytes, package_product, name, error, created_by, created_at, "
+		"published_at, retired_at";
 
 BindValue optional_id(std::optional<int64_t> id) {
 	if (!id)
@@ -38,10 +45,15 @@ DataSetRow row_to_data_set(const db::Row &r) {
 	d.expansion_code = r.as_text(4).value_or("");
 	d.title = r.as_text(5).value_or("");
 	d.game = r.as_text(6).value_or("");
-	d.current_tree_id = r.as_int(7);
-	d.created_by = r.as_text(8).value_or("");
-	d.created_at = r.as_text(9).value_or("");
-	d.updated_at = r.as_text(10).value_or("");
+	d.updater_login = r.as_text(7).value_or("");
+	d.command_file = r.as_text(8).value_or("");
+	d.retail_updater = r.as_int(9).value_or(0) != 0;
+	d.current_tree_id = r.as_int(10);
+	d.baseline_tree_id = r.as_int(11);
+	d.published_release_id = r.as_int(12);
+	d.created_by = r.as_text(13).value_or("");
+	d.created_at = r.as_text(14).value_or("");
+	d.updated_at = r.as_text(15).value_or("");
 	return d;
 }
 
@@ -50,16 +62,35 @@ DataSetTree row_to_tree(const db::Row &r) {
 	t.id = r.as_int(0).value_or(0);
 	t.data_set_id = r.as_int(1).value_or(0);
 	t.state = tree_state_from_name(r.as_text(2).value_or("")).value_or(TreeState::Failed);
-	t.version_text = r.as_text(3).value_or("");
-	decode_tree_files(r.as_text(4).value_or("{}"), t.files);
-	decode_tree_missions(r.as_text(5).value_or("[]"), t.missions);
-	t.bytes = r.as_int(6).value_or(0);
-	t.error = r.as_text(7).value_or("");
-	t.created_by = r.as_text(8).value_or("");
-	t.created_at = r.as_text(9).value_or("");
-	t.ready_at = r.as_text(10).value_or("");
-	t.pruned_at = r.as_text(11).value_or("");
+	t.source = r.as_text(3).value_or("") == "release" ? TreeSource::Release : TreeSource::Baseline;
+	t.release_id = r.as_int(4);
+	t.baseline_tree_id = r.as_int(5);
+	t.version_text = r.as_text(6).value_or("");
+	decode_tree_files(r.as_text(7).value_or("{}"), t.files);
+	decode_tree_missions(r.as_text(8).value_or("[]"), t.missions);
+	t.bytes = r.as_int(9).value_or(0);
+	t.error = r.as_text(10).value_or("");
+	t.created_by = r.as_text(11).value_or("");
+	t.created_at = r.as_text(12).value_or("");
+	t.ready_at = r.as_text(13).value_or("");
+	t.pruned_at = r.as_text(14).value_or("");
 	return t;
+}
+
+ReleaseRow row_to_release(const db::Row &r) {
+	ReleaseRow rel;
+	rel.id = r.as_int(0).value_or(0);
+	rel.status = release_status_from_name(r.as_text(1).value_or("")).value_or(ReleaseStatus::Invalid);
+	rel.sha256 = r.as_text(2).value_or("");
+	rel.bytes = r.as_int(3).value_or(0);
+	rel.package_product = r.as_text(4).value_or("");
+	rel.name = r.as_text(5).value_or("");
+	rel.error = r.as_text(6).value_or("");
+	rel.created_by = r.as_text(7).value_or("");
+	rel.created_at = r.as_text(8).value_or("");
+	rel.published_at = r.as_text(9).value_or("");
+	rel.retired_at = r.as_text(10).value_or("");
+	return rel;
 }
 
 std::vector<DataSetRow> query_data_sets(
@@ -76,6 +107,14 @@ std::vector<DataSetTree> query_trees(
 	for (const auto &r : db.query(std::string("SELECT ") + kTreeColumns + " FROM data_set_trees " + tail, binds))
 		out.push_back(row_to_tree(r));
 	return out;
+}
+
+// Whether a release still names a data set that serves it; when none does, it is retired.
+void retire_if_unreferenced(db::Database &db, int64_t release_id) {
+	db.exec("UPDATE releases SET status = 'retired', retired_at = now() "
+			"WHERE id = $1 AND status = 'published' "
+			"AND NOT EXISTS (SELECT 1 FROM data_sets WHERE published_release_id = $1);",
+			{ BindValue(release_id) });
 }
 
 // The servers whose pins are behind their data sets' current trees, as a WHERE over
@@ -111,6 +150,22 @@ std::optional<TreeState> tree_state_from_name(std::string_view name) {
 	return std::nullopt;
 }
 
+const char *tree_source_name(TreeSource source) {
+	return kTreeSourceNames[source == TreeSource::Release ? 1 : 0];
+}
+
+const char *release_status_name(ReleaseStatus status) {
+	const auto i = static_cast<size_t>(status);
+	return i < kReleaseStatusNames.size() ? kReleaseStatusNames[i] : "invalid";
+}
+
+std::optional<ReleaseStatus> release_status_from_name(std::string_view name) {
+	for (size_t i = 0; i < kReleaseStatusNames.size(); ++i)
+		if (name == kReleaseStatusNames[i])
+			return static_cast<ReleaseStatus>(i);
+	return std::nullopt;
+}
+
 // --- data sets ---
 
 DataSetOutcome create_data_set(db::Database &db, const NewDataSet &data_set, int64_t &id) {
@@ -121,6 +176,11 @@ DataSetOutcome create_data_set(db::Database &db, const NewDataSet &data_set, int
 		if (parent.empty() || parent.front().as_text(0).value_or("") != "base")
 			return DataSetOutcome::NoSuchParent;
 	}
+	if (!data_set.updater_login.empty() &&
+			!db.query("SELECT 1 FROM data_sets WHERE upper(updater_login) = upper($1::text);",
+						{ BindValue(data_set.updater_login) })
+					 .empty())
+		return DataSetOutcome::DuplicateLogin;
 	if (data_set.kind == DataSetKind::Expansion &&
 			!db.query("SELECT 1 FROM data_sets WHERE parent_id = $1 AND expansion_code = $2;",
 						{ optional_id(data_set.parent_id), BindValue(data_set.expansion_code) })
@@ -129,12 +189,15 @@ DataSetOutcome create_data_set(db::Database &db, const NewDataSet &data_set, int
 	const bool base = data_set.kind == DataSetKind::Base;
 	const auto rows = db.query(
 			"INSERT INTO data_sets (display_name, kind, parent_id, expansion_code, title, game, "
-			"created_by) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id;",
+			"updater_login, command_file, retail_updater, created_by) "
+			"VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id;",
 			{ BindValue(data_set.display_name), BindValue(data_set_kind_name(data_set.kind)),
 					base ? BindValue(std::monostate{}) : optional_id(data_set.parent_id),
 					BindValue(base ? std::string() : data_set.expansion_code),
 					BindValue(base ? data_set.title : std::string()),
-					BindValue(base ? data_set.game : std::string()), BindValue(data_set.created_by) });
+					BindValue(base ? data_set.game : std::string()),
+					BindValue(data_set.updater_login), BindValue(data_set.command_file),
+					BindValue(db::Bool{ data_set.retail_updater }), BindValue(data_set.created_by) });
 	id = rows.front().as_int(0).value_or(0);
 	tx.commit();
 	return DataSetOutcome::Ok;
@@ -150,8 +213,22 @@ DataSetOutcome update_data_set(db::Database &db, int64_t id, const DataSetPatch 
 		row.display_name = *patch.display_name;
 	if (patch.game && row.kind == DataSetKind::Base)
 		row.game = *patch.game;
-	db.exec("UPDATE data_sets SET display_name = $2, game = $3, updated_at = now() WHERE id = $1;",
-			{ BindValue(id), BindValue(row.display_name), BindValue(row.game) });
+	if (patch.updater_login)
+		row.updater_login = *patch.updater_login;
+	if (patch.command_file)
+		row.command_file = *patch.command_file;
+	if (patch.retail_updater)
+		row.retail_updater = *patch.retail_updater;
+	if (!row.updater_login.empty() &&
+			!db.query("SELECT 1 FROM data_sets WHERE upper(updater_login) = upper($1::text) AND id <> $2;",
+						{ BindValue(row.updater_login), BindValue(id) })
+					 .empty())
+		return DataSetOutcome::DuplicateLogin;
+	db.exec("UPDATE data_sets SET display_name = $2, game = $3, updater_login = $4, "
+			"command_file = $5, retail_updater = $6, updated_at = now() WHERE id = $1;",
+			{ BindValue(id), BindValue(row.display_name), BindValue(row.game),
+					BindValue(row.updater_login), BindValue(row.command_file),
+					BindValue(db::Bool{ row.retail_updater }) });
 	tx.commit();
 	return DataSetOutcome::Ok;
 }
@@ -163,7 +240,9 @@ DataSetOutcome delete_data_set(db::Database &db, int64_t id) {
 	if (count_live_servers_of(db, id) > 0 ||
 			!db.query("SELECT 1 FROM data_sets WHERE parent_id = $1;", { BindValue(id) }).empty())
 		return DataSetOutcome::InUse;
-	db.exec("UPDATE data_sets SET current_tree_id = NULL WHERE id = $1;", { BindValue(id) });
+	db.exec("UPDATE data_sets SET current_tree_id = NULL, baseline_tree_id = NULL, "
+			"published_release_id = NULL WHERE id = $1;",
+			{ BindValue(id) });
 	db.exec("DELETE FROM data_sets WHERE id = $1;", { BindValue(id) });
 	tx.commit();
 	return DataSetOutcome::Ok;
@@ -239,12 +318,15 @@ std::vector<OfferedDataSet> offered_data_sets(db::Database &db) {
 
 // --- trees ---
 
-int64_t create_tree(
-		db::Database &db, int64_t data_set_id, TreeState state, const std::string &created_by) {
+int64_t create_tree(db::Database &db, int64_t data_set_id, TreeSource source, TreeState state,
+		std::optional<int64_t> release_id, std::optional<int64_t> baseline_tree_id,
+		const std::string &created_by) {
 	const auto rows = db.query(
-			"INSERT INTO data_set_trees (data_set_id, state, created_by) VALUES ($1, $2, $3) "
-			"RETURNING id;",
-			{ BindValue(data_set_id), BindValue(tree_state_name(state)), BindValue(created_by) });
+			"INSERT INTO data_set_trees (data_set_id, state, source, release_id, baseline_tree_id, "
+			"created_by) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id;",
+			{ BindValue(data_set_id), BindValue(tree_state_name(state)),
+					BindValue(tree_source_name(source)), optional_id(release_id),
+					optional_id(baseline_tree_id), BindValue(created_by) });
 	return rows.front().as_int(0).value_or(0);
 }
 
@@ -272,15 +354,28 @@ bool finish_tree(db::Database &db, int64_t id, TreeState from, const TreeReady &
 	const auto rows = db.query(
 			"UPDATE data_set_trees SET state = 'ready', ready_at = now(), error = '', "
 			"manifest = $3::jsonb, missions = $4::jsonb, version_text = $5, bytes = $6 "
-			"WHERE id = $1 AND state = $2 RETURNING data_set_id;",
+			"WHERE id = $1 AND state = $2 RETURNING data_set_id, source;",
 			{ BindValue(id), BindValue(tree_state_name(from)), BindValue(encode_tree_files(ready.files)),
 					BindValue(encode_tree_missions(ready.missions)), BindValue(ready.version_text),
 					BindValue(ready.bytes) });
 	if (rows.empty())
 		return false;
 	const int64_t data_set_id = rows.front().as_int(0).value_or(0);
-	db.exec("UPDATE data_sets SET current_tree_id = $2, updated_at = now() WHERE id = $1;",
-			{ BindValue(data_set_id), BindValue(id) });
+	const bool baseline = rows.front().as_text(1).value_or("") == "baseline";
+	const auto locked = db.query(
+			"SELECT published_release_id FROM data_sets WHERE id = $1 FOR NO KEY UPDATE;",
+			{ BindValue(data_set_id) });
+	if (baseline) {
+		db.exec("UPDATE data_sets SET current_tree_id = $2, baseline_tree_id = $2, "
+				"published_release_id = NULL, updated_at = now() WHERE id = $1;",
+				{ BindValue(data_set_id), BindValue(id) });
+		if (!locked.empty())
+			if (const auto release = locked.front().as_int(0))
+				retire_if_unreferenced(db, *release);
+	} else {
+		db.exec("UPDATE data_sets SET current_tree_id = $2, updated_at = now() WHERE id = $1;",
+				{ BindValue(data_set_id), BindValue(id) });
+	}
 	tx.commit();
 	return true;
 }
@@ -292,7 +387,7 @@ std::vector<int64_t> prunable_trees(db::Database &db, int64_t min_age_s, int64_t
 						"(t.state = 'pruned' AND t.pruned_at IS NULL) "
 						"OR (t.state = 'uploading' AND t.created_at < now() - make_interval(secs => $2)) "
 						"OR (t.state IN ('ready', 'failed') AND t.created_at < now() - make_interval(secs => $1) "
-						"    AND NOT EXISTS (SELECT 1 FROM data_sets d WHERE d.current_tree_id = t.id) "
+						"    AND NOT EXISTS (SELECT 1 FROM data_sets d WHERE d.current_tree_id = t.id OR d.baseline_tree_id = t.id) "
 						"    AND NOT EXISTS (SELECT 1 FROM hosted_servers s WHERE ") +
 					kLiveServerSql +
 					"        AND (s.base_tree_id = t.id OR s.expansion_tree_id = t.id))) "
@@ -324,11 +419,159 @@ std::string tree_hold(db::Database &db, int64_t id, int &pinned_by) {
 	pinned_by = 0;
 	if (!db.query("SELECT 1 FROM data_sets WHERE current_tree_id = $1;", { BindValue(id) }).empty())
 		return "current";
+	if (!db.query("SELECT 1 FROM data_sets WHERE baseline_tree_id = $1;", { BindValue(id) }).empty())
+		return "baseline";
 	const auto rows = db.query(std::string("SELECT count(*) FROM hosted_servers WHERE ") +
 					kLiveServerSql + " AND (base_tree_id = $1 OR expansion_tree_id = $1);",
 			{ BindValue(id) });
 	pinned_by = rows.empty() ? 0 : static_cast<int>(rows.front().as_int(0).value_or(0));
 	return pinned_by > 0 ? "pinned" : "";
+}
+
+// --- releases ---
+
+int64_t create_release(db::Database &db, const std::string &name, int64_t bytes,
+		const std::string &created_by) {
+	const auto rows = db.query(
+			"INSERT INTO releases (name, bytes, created_by) VALUES ($1, $2, $3) RETURNING id;",
+			{ BindValue(name), BindValue(bytes), BindValue(created_by) });
+	return rows.front().as_int(0).value_or(0);
+}
+
+std::optional<ReleaseRow> find_release(db::Database &db, int64_t id) {
+	const auto rows = db.query(
+			std::string("SELECT ") + kReleaseColumns + " FROM releases WHERE id = $1;", { BindValue(id) });
+	if (rows.empty())
+		return std::nullopt;
+	return row_to_release(rows.front());
+}
+
+std::optional<int64_t> find_release_by_sha(db::Database &db, std::string_view sha256) {
+	const auto rows = db.query("SELECT id FROM releases WHERE sha256 = $1 AND sha256 <> '';",
+			{ BindValue(std::string(sha256)) });
+	if (rows.empty())
+		return std::nullopt;
+	return rows.front().as_int(0);
+}
+
+std::vector<ReleaseRow> list_releases(db::Database &db) {
+	std::vector<ReleaseRow> out;
+	for (const auto &r : db.query(std::string("SELECT ") + kReleaseColumns + " FROM releases ORDER BY id DESC;"))
+		out.push_back(row_to_release(r));
+	return out;
+}
+
+std::vector<ReleaseSection> list_sections(db::Database &db, int64_t release_id) {
+	std::vector<ReleaseSection> out;
+	for (const auto &r : db.query(
+				 "SELECT release_id, data_set_id, expansion, command_file, version, row_count, "
+				 "blob_bytes, tree_id FROM release_sections WHERE release_id = $1 ORDER BY (expansion <> ''), data_set_id;",
+				 { BindValue(release_id) })) {
+		ReleaseSection s;
+		s.release_id = r.as_int(0).value_or(0);
+		s.data_set_id = r.as_int(1).value_or(0);
+		s.expansion = r.as_text(2).value_or("");
+		s.command_file = r.as_text(3).value_or("");
+		s.version = r.as_text(4).value_or("");
+		s.row_count = r.as_int(5).value_or(0);
+		s.blob_bytes = r.as_int(6).value_or(0);
+		s.tree_id = r.as_int(7);
+		out.push_back(std::move(s));
+	}
+	return out;
+}
+
+bool set_release_status(db::Database &db, int64_t id, ReleaseStatus from, ReleaseStatus to,
+		const std::string &error) {
+	db.exec("UPDATE releases SET status = $3, error = $4 WHERE id = $1 AND status = $2;",
+			{ BindValue(id), BindValue(release_status_name(from)), BindValue(release_status_name(to)),
+					BindValue(error) });
+	return db.changes() > 0;
+}
+
+bool set_release_validated(db::Database &db, int64_t id, const std::string &sha256, int64_t bytes,
+		const std::string &package_product, const std::vector<NewReleaseSection> &sections) {
+	db::Transaction tx(db);
+	db.exec("UPDATE releases SET status = 'draft', error = '', sha256 = $2, bytes = $3, "
+			"package_product = $4 WHERE id = $1 AND status = 'validating';",
+			{ BindValue(id), BindValue(sha256), BindValue(bytes), BindValue(package_product) });
+	if (db.changes() == 0)
+		return false;
+	db.exec("DELETE FROM release_sections WHERE release_id = $1;", { BindValue(id) });
+	for (const NewReleaseSection &s : sections)
+		db.exec("INSERT INTO release_sections (release_id, data_set_id, expansion, command_file, "
+				"version, row_count, blob_bytes) VALUES ($1, $2, $3, $4, $5, $6, $7);",
+				{ BindValue(id), BindValue(s.data_set_id), BindValue(s.expansion),
+						BindValue(s.command_file), BindValue(s.version), BindValue(s.row_count),
+						BindValue(s.blob_bytes) });
+	tx.commit();
+	return true;
+}
+
+bool publish_release(db::Database &db, int64_t id) {
+	db::Transaction tx(db);
+	db.exec("UPDATE releases SET status = 'published', published_at = now(), retired_at = NULL "
+			"WHERE id = $1 AND status = 'draft';",
+			{ BindValue(id) });
+	if (db.changes() == 0)
+		return false;
+	const auto previous = db.query(
+			"SELECT DISTINCT d.published_release_id FROM data_sets d "
+			"JOIN release_sections s ON s.data_set_id = d.id "
+			"WHERE s.release_id = $1 AND d.published_release_id IS NOT NULL AND d.published_release_id <> $1;",
+			{ BindValue(id) });
+	db.exec("UPDATE data_sets SET published_release_id = $1, updated_at = now() "
+			"WHERE id IN (SELECT data_set_id FROM release_sections WHERE release_id = $1);",
+			{ BindValue(id) });
+	for (const auto &r : previous)
+		if (const auto release = r.as_int(0))
+			retire_if_unreferenced(db, *release);
+	tx.commit();
+	return true;
+}
+
+bool retire_release(db::Database &db, int64_t id) {
+	db::Transaction tx(db);
+	db.exec("UPDATE releases SET status = 'retired', retired_at = now() "
+			"WHERE id = $1 AND status = 'published';",
+			{ BindValue(id) });
+	if (db.changes() == 0)
+		return false;
+	db.exec("UPDATE data_sets SET published_release_id = NULL, updated_at = now() "
+			"WHERE published_release_id = $1;",
+			{ BindValue(id) });
+	tx.commit();
+	return true;
+}
+
+bool delete_release(db::Database &db, int64_t id) {
+	db.exec("DELETE FROM releases WHERE id = $1;", { BindValue(id) });
+	return db.changes() > 0;
+}
+
+void set_section_tree(db::Database &db, int64_t release_id, int64_t data_set_id, int64_t tree_id) {
+	db.exec("UPDATE release_sections SET tree_id = $3 WHERE release_id = $1 AND data_set_id = $2;",
+			{ BindValue(release_id), BindValue(data_set_id), BindValue(tree_id) });
+}
+
+std::vector<PublishedSection> published_sections(db::Database &db) {
+	std::vector<PublishedSection> out;
+	for (const auto &r : db.query(
+				 "SELECT d.id, r.id, d.updater_login, s.command_file, s.expansion, r.sha256, d.retail_updater "
+				 "FROM data_sets d JOIN releases r ON r.id = d.published_release_id "
+				 "JOIN release_sections s ON s.release_id = r.id AND s.data_set_id = d.id "
+				 "WHERE d.updater_login <> '' AND r.status = 'published' ORDER BY d.updater_login;")) {
+		PublishedSection p;
+		p.data_set_id = r.as_int(0).value_or(0);
+		p.release_id = r.as_int(1).value_or(0);
+		p.updater_login = r.as_text(2).value_or("");
+		p.command_file = r.as_text(3).value_or("");
+		p.expansion = r.as_text(4).value_or("");
+		p.sha256 = r.as_text(5).value_or("");
+		p.retail_updater = r.as_int(6).value_or(0) != 0;
+		out.push_back(std::move(p));
+	}
+	return out;
 }
 
 // --- the hosted servers' pins ---

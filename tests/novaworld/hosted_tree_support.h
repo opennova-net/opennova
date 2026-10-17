@@ -132,7 +132,7 @@ inline std::string version_of(const fs::path &dir) {
 // tree's id, 0 on a failure.
 inline int64_t seed_ready_tree(opennova::db::Database &db, opennova::novaworld_server::LocalObjectStore &store,
 		int64_t data_set_id, hosted::DataSetKind kind, const std::string &code, const fs::path &source) {
-	const int64_t id = hosted::create_tree(db, data_set_id, hosted::TreeState::Uploading, "test");
+	const int64_t id = hosted::create_tree(db, data_set_id, hosted::TreeSource::Baseline, hosted::TreeState::Uploading, std::nullopt, std::nullopt, "test");
 	if (id == 0) return 0;
 	std::error_code ec;
 	for (const fs::directory_entry &entry : fs::directory_iterator(source, ec)) {

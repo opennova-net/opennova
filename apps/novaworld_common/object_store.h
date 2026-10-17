@@ -1,15 +1,16 @@
 #pragma once
 
-// The object store the hosted game data lives in (ADR 0064): the deployment's private S3
-// bucket, under one root per deployment (`s3://<bucket>/data/<deployment>`,
-// s3_object_store.h), or a directory for a developer's machine and the tests
-// (`file:///<dir>`, local_object_store.h). Keys are flat generic paths under the root
-// (`trees/<tree id>/resource.pff`); a prefix is a key with its trailing slash. What the
-// service does with it: web begins each file's multipart upload, hands the store every part
-// the browser PUTs through it and completes the upload; the worker downloads and uploads
-// whole files; hostd syncs a tree from the URL `url_of` gives it (its own `aws s3 sync`, or
-// a directory copy). Every call answers false with `error` on failure and throws nothing;
-// none holds a lock across a command. Service policy, not a port.
+// The object store the hosted game data and the update packages live in (ADR 0064): the
+// deployment's private S3 bucket, under one root per deployment
+// (`s3://<bucket>/data/<deployment>`, s3_object_store.h), or a directory for a developer's
+// machine and the tests (`file:///<dir>`, local_object_store.h). Keys are flat generic paths
+// under the root (`trees/<tree id>/resource.pff`, `updates/<sha256>.sfs`); a prefix is a key
+// with its trailing slash. What the service does with it: web begins each file's multipart
+// upload, hands the store every part the browser PUTs through it and completes the upload;
+// the worker downloads, applies and uploads whole files and copies a tree server-side; hostd
+// syncs a tree from the URL `url_of` gives it (its own `aws s3 sync`, or a directory copy).
+// Every call answers false with `error` on failure and throws nothing; none holds a lock
+// across a command. Service policy, not a port.
 
 #include <cstdint>
 #include <memory>
@@ -63,6 +64,10 @@ public:
 
 	virtual bool put_file(std::string_view key, const std::string &path, std::string &error) = 0;
 	virtual bool get_file(std::string_view key, const std::string &path, std::string &error) = 0;
+	virtual bool copy(std::string_view from_key, std::string_view to_key, std::string &error) = 0;
+	// Every object under `from_prefix` copied under `to_prefix` (server-side on S3).
+	virtual bool copy_prefix(
+			std::string_view from_prefix, std::string_view to_prefix, std::string &error) = 0;
 	virtual bool list(
 			std::string_view prefix, std::vector<StoredObject> &out, std::string &error) = 0;
 	// Whether `key` is there, and its size when it is.

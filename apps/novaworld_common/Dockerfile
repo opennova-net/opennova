@@ -93,6 +93,7 @@ RUN dist=/usr/local/aws-cli/v2/current/dist \
     && aws s3api list-objects-v2 --generate-cli-skeleton >/dev/null \
     && aws s3api head-object --generate-cli-skeleton >/dev/null \
     && aws s3api upload-part --generate-cli-skeleton >/dev/null \
+    && aws s3api copy-object --generate-cli-skeleton >/dev/null \
     && aws s3api create-multipart-upload --generate-cli-skeleton >/dev/null \
     && aws s3api complete-multipart-upload --generate-cli-skeleton >/dev/null \
     && aws s3api abort-multipart-upload --generate-cli-skeleton >/dev/null \

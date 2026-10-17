@@ -115,6 +115,25 @@ bool S3ObjectStore::get_file(std::string_view key, const std::string &path, std:
 	return run(s3("cp", { s3_url(key), path }), timeouts_.transfer_ms, out, error);
 }
 
+bool S3ObjectStore::copy(std::string_view from_key, std::string_view to_key, std::string &error) {
+	if (!is_store_key(to_key)) {
+		error = "not a store key: " + std::string(to_key);
+		return false;
+	}
+	std::string out;
+	return run(api("copy-object",
+						{ "--copy-source", config_.bucket + "/" + full_key(from_key), "--key",
+								full_key(to_key) }),
+			timeouts_.transfer_ms, out, error);
+}
+
+bool S3ObjectStore::copy_prefix(
+		std::string_view from_prefix, std::string_view to_prefix, std::string &error) {
+	std::string out;
+	return run(s3("sync", { s3_url(with_slash(from_prefix)), s3_url(with_slash(to_prefix)) }),
+			timeouts_.transfer_ms, out, error);
+}
+
 bool S3ObjectStore::list(
 		std::string_view prefix, std::vector<StoredObject> &out, std::string &error) {
 	out.clear();

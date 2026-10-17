@@ -135,6 +135,14 @@ int test_local(const test_temp::TempDir &dir) {
 	std::vector<StoredObject> objects;
 	TEST_EXPECT(store.list("trees/2/", objects, error) && objects.size() == 2);
 	TEST_EXPECT(store.list("trees/", objects, error) && objects.size() == 4);
+	// A copy, and a prefix copied object by object.
+	TEST_EXPECT(store.copy("trees/1/a.txt", "trees/1/c.txt", error));
+	TEST_EXPECT(!store.copy("trees/1/a.txt", "../x", error));
+	TEST_EXPECT(store.copy_prefix("trees/1/", "trees/5/", error));
+	TEST_EXPECT(store.list("trees/5/", objects, error) && objects.size() == 3);
+	TEST_EXPECT(store.head("trees/5/c.txt", exists, size, error) && exists && size == 5);
+	TEST_EXPECT(store.remove_prefix("trees/5/", error) && store.remove("trees/1/c.txt", error));
+	TEST_EXPECT(store.list("trees/", objects, error) && objects.size() == 4);
 	const std::string back = dir.file("back.txt");
 	TEST_EXPECT(store.get_file("trees/2/b.txt", back, error));
 	std::string text;
@@ -217,6 +225,20 @@ int test_s3(const test_temp::TempDir &dir) {
 	TEST_EXPECT(store.remove_prefix("trees/7/", error));
 	TEST_EXPECT(runner.calls.back().argv[2] == "rm" && has_arg(runner.calls.back().argv, "--recursive") &&
 			runner.calls.back().argv[3] == "s3://opennova-backups/data/prod/trees/7/");
+
+	// A copy is server-side: copy-object, and a prefix an s3 sync between two prefixes.
+	runner.replies.push_back(StubRunner::ok(R"({"CopyObjectResult":{"ETag":"\"c\""}})"));
+	TEST_EXPECT(store.copy("trees/7/a.pff", "trees/8/a.pff", error));
+	const std::vector<std::string> &copy = runner.calls.back().argv;
+	TEST_EXPECT(copy[2] == "copy-object" && arg_after(copy, "--copy-source") == "opennova-backups/data/prod/trees/7/a.pff" &&
+			arg_after(copy, "--key") == "data/prod/trees/8/a.pff");
+	TEST_EXPECT(!store.copy("trees/7/a.pff", "../x", error));
+	runner.replies.push_back(StubRunner::ok());
+	TEST_EXPECT(store.copy_prefix("trees/7", "trees/8", error));
+	const std::vector<std::string> &sync = runner.calls.back().argv;
+	TEST_EXPECT(sync[2] == "sync" && sync[3] == "s3://opennova-backups/data/prod/trees/7/" &&
+			sync[4] == "s3://opennova-backups/data/prod/trees/8/");
+	TEST_EXPECT(runner.calls.back().timeout_ms == 20 * 60000);
 
 	// A multipart upload: begin (no checksum asked for), a part's bytes through a scratch
 	// file `upload-part` reads (gone after, the ETag back without its quotes), complete with
