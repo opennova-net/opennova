@@ -492,10 +492,12 @@ void check_terrain_admission(const AssetGraph &graph, const ValidationCache &fil
 // over the bone pointer and link it stored at +32 and +36, so a name of 32 characters or more corrupts the node
 // [orig: AnimMap_FindOrLoadBoneFile @ 0x40c030, the name @ 0x40c089..0x40c0c6, the bone pointer @ 0x40c188 /
 // @ 0x40c1d7 / @ 0x40c232, the copies @ 0x40c194 / @ 0x40c1e3 / @ 0x40c246]. It loads the file of that name alone,
-// so the name built is the one looked for; a clip with no file of it takes failsafe.bad's node, which fits
-// (@ 0x40c295): it is the reference's own finding.
-void check_animation_clip_names(const AssetGraph &graph, const ValidationCache &files, const ValidationInput &,
+// so the name built is the one looked for; a clip with no file of it, or one over the 500,000 bytes the load
+// refuses [orig: BoneFile_Load @ 0x40fff0, the 0x7A120 test @ 0x41005d], takes failsafe.bad's node, which fits
+// (@ 0x40c295): the reference's own finding, or the clip's.
+void check_animation_clip_names(const AssetGraph &graph, const ValidationCache &files, const ValidationInput &input,
 		std::vector<Diagnostic> &out) {
+	constexpr uint64_t kClipLoadBytes = 500000;
 	graph.for_each_edge([&](const GraphEdge &edge) {
 		if (edge.kind != ReferenceKind::Animation || !strutil::ends_with_icase(edge.source, ".adm") ||
 				!files.records_checked(edge.source))
@@ -505,6 +507,8 @@ void check_animation_clip_names(const AssetGraph &graph, const ValidationCache &
 		if (dot != std::string::npos) name.resize(dot);
 		name += ".bad";
 		if (name.size() < 32 || !graph.has_file(name)) return;
+		const AssetEntry *file = input.scan.find(name);
+		if (file && file->size_bytes > kClipLoadBytes) return;
 		Diagnostic d = make_finding(finding_code(AnimationMapFinding::ClipNameLong), DiagnosticSeverity::Error,
 				"The game registers the clip " + edge.value + " as " + name + ", " + std::to_string(name.size()) +
 						" characters, into a node whose name holds 31: it writes over the clip's bone pointer and "

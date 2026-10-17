@@ -498,12 +498,19 @@ int validation_and_graph() {
 	TEST_EXPECT(test_io::write_text(root + "/soldier.adm",
 	                                    "anim_reset\t\"idle.bad\"\r\nanim_nosuchslot\t\"idle.bad\"\r\nanim_idle\t\"gone.bad\"\r\n"));
 	TEST_EXPECT(test_io::write_file(root + "/idle.bad", test_io::read_file(anim_dir() + "/idle.bad")));
-	// A clip whose file loads under a name the game's 40-byte node cannot hold (32 characters with ".bad"), and one
-	// of the same length whose file is not there (the game takes failsafe.bad's node, which fits).
+	// A clip whose file loads under a name the game's 40-byte node cannot hold (32 characters with ".bad"), one of
+	// the same length whose file is not there and one whose file is over the 500,000 bytes the load refuses (the game
+	// takes failsafe.bad's node for both, which fits).
 	TEST_EXPECT(test_io::write_text(root + "/long.adm", "anim_reset\t\"idle.bad\"\r\n"
 	                                                    "anim_idle\t\"a_clip_name_twenty_eight_xxx.bad\"\r\n"
-	                                                    "anim_walk\t\"a_clip_name_twenty_eight_yyy.bad\"\r\n"));
+	                                                    "anim_walk\t\"a_clip_name_twenty_eight_yyy.bad\"\r\n"
+	                                                    "anim_run\t\"a_clip_name_twenty_eight_zzz.bad\"\r\n"));
 	TEST_EXPECT(test_io::write_file(root + "/a_clip_name_twenty_eight_xxx.bad", test_io::read_file(anim_dir() + "/idle.bad")));
+	{
+		std::vector<uint8_t> big = test_io::read_file(anim_dir() + "/idle.bad");
+		big.resize(500001, 0);
+		TEST_EXPECT(test_io::write_file(root + "/a_clip_name_twenty_eight_zzz.bad", big));
+	}
 	TEST_EXPECT(test_io::write_text(root + "/noreset.adm", "anim_idle\t\"idle.bad\"\r\n"));
 	// S12: a comment line, a comment after a row, a slot two rows name, a second reset row; a
 	// row of ten clips (no finding: the game registers every one).
