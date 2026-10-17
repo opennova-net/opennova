@@ -73,8 +73,6 @@ struct Geometry {
 	threedi::ThreediCollisionProbeBoxes probes{};
 };
 
-constexpr double q16(int32_t v) { return v / io::kFp16OneD; }
-
 ThreediBuildVec3 vec(const float p[3]) { return ThreediBuildVec3{p[0], p[1], p[2]}; }
 
 std::shared_ptr<const Geometry> make_geometry(const threedi::Threedi3di3 &model) {
@@ -107,8 +105,12 @@ std::shared_ptr<const Geometry> make_geometry(const threedi::Threedi3di3 &model)
 			const threedi::ThreediBoundingVolume &bv = c->volumes[v];
 			VolumeGeometry &g = out->volumes[v];
 			g.type = bv.collidable_type;
-			g.min = ThreediBuildVec3{q16(bv.min_x_fp16), q16(bv.min_y_fp16), q16(bv.min_z_fp16)};
-			g.max = ThreediBuildVec3{q16(bv.max_x_fp16), q16(bv.max_y_fp16), q16(bv.max_z_fp16)};
+			g.min = ThreediBuildVec3{io::fp16_16_to_double(bv.min_x_fp16),
+					io::fp16_16_to_double(bv.min_y_fp16),
+					io::fp16_16_to_double(bv.min_z_fp16)};
+			g.max = ThreediBuildVec3{io::fp16_16_to_double(bv.max_x_fp16),
+					io::fp16_16_to_double(bv.max_y_fp16),
+					io::fp16_16_to_double(bv.max_z_fp16)};
 			const size_t planes = bv.plane_count > 0 ? size_t(bv.plane_count) : 0;
 			if (c->planes && plane_cursor + planes <= c->plane_count)
 				for (auto &corners : threedi::threedi_volume_solid(bv, c->planes + plane_cursor))
@@ -129,11 +131,17 @@ std::shared_ptr<const Geometry> make_geometry(const threedi::Threedi3di3 &model)
 			SectionGeometry &g = out->sections[o];
 			g.sphere = object.radius >= 0 && object.min[0] <= object.max[0] && object.min[1] <= object.max[1] &&
 			           object.min[2] <= object.max[2];
-			g.center = ThreediBuildVec3{q16(object.med[0]), q16(object.med[1]), q16(object.med[2])};
-			g.min = ThreediBuildVec3{q16(object.min[0]), q16(object.min[1]), q16(object.min[2])};
-			g.max = ThreediBuildVec3{q16(object.max[0]), q16(object.max[1]), q16(object.max[2])};
+			g.center = ThreediBuildVec3{io::fp16_16_to_double(object.med[0]),
+					io::fp16_16_to_double(object.med[1]),
+					io::fp16_16_to_double(object.med[2])};
+			g.min = ThreediBuildVec3{io::fp16_16_to_double(object.min[0]),
+					io::fp16_16_to_double(object.min[1]),
+					io::fp16_16_to_double(object.min[2])};
+			g.max = ThreediBuildVec3{io::fp16_16_to_double(object.max[0]),
+					io::fp16_16_to_double(object.max[1]),
+					io::fp16_16_to_double(object.max[2])};
 			g.radius_q16 = object.radius;
-			g.radius = q16(object.radius);
+			g.radius = io::fp16_16_to_double(object.radius);
 			g.person = world::model_section_is_person_sphere(model, o);
 			g.bone = !g.person && skinned && object.num_faces == 0 && object.num_bounding_volumes == 0;
 			g.breaks = world::collision_section_breaks(uint32_t(object.unk0));
@@ -147,8 +155,10 @@ std::shared_ptr<const Geometry> make_geometry(const threedi::Threedi3di3 &model)
 		out->box_min = ThreediBuildVec3{data.bbox[0], data.bbox[1], data.bbox[2]};
 		out->box_max = ThreediBuildVec3{data.bbox[3], data.bbox[4], data.bbox[5]};
 		const renderer::ObjectProjectionSphere sphere = world::collision_projection_sphere_from_3di(model);
-		out->sphere_center = ThreediBuildVec3{q16(sphere.center_q16[0]), q16(sphere.center_q16[1]), q16(sphere.center_q16[2])};
-		out->sphere_radius = q16(sphere.radius_q16);
+		out->sphere_center = ThreediBuildVec3{io::fp16_16_to_double(sphere.center_q16[0]),
+				io::fp16_16_to_double(sphere.center_q16[1]),
+				io::fp16_16_to_double(sphere.center_q16[2])};
+		out->sphere_radius = io::fp16_16_to_double(sphere.radius_q16);
 		world::EntityBoundRadiusInputs bound;
 		bound.model_radius_q16 = world::model_bound_radius_q16_from_3di(model);
 		bound.has_collision_block = true;
@@ -509,8 +519,12 @@ std::vector<ModelCollisionShape> model_collision_shapes(const assets::Model &sho
 		box.rgb = probe_rgb;
 		box.legend = "Probe boxes";
 		box.name = "Probe box";
-		add_box(box, ThreediBuildVec3{q16(p.box_x_lo), q16(p.box_y_lo), q16(p.box_z_lo)},
-		        ThreediBuildVec3{q16(p.box_x_hi), q16(p.box_y_hi), q16(p.box_z_hi)}, rest, -1, false);
+		add_box(box,
+				ThreediBuildVec3{io::fp16_16_to_double(p.box_x_lo), io::fp16_16_to_double(p.box_y_lo),
+						io::fp16_16_to_double(p.box_z_lo)},
+				ThreediBuildVec3{io::fp16_16_to_double(p.box_x_hi), io::fp16_16_to_double(p.box_y_hi),
+						io::fp16_16_to_double(p.box_z_hi)},
+				rest, -1, false);
 		out.push_back(std::move(box));
 		ModelCollisionShape foot;
 		foot.kind = ModelCollisionKind::ProbeBox;
@@ -518,11 +532,13 @@ std::vector<ModelCollisionShape> model_collision_shapes(const assets::Model &sho
 		foot.rgb = probe_rgb;
 		foot.legend = "Probe boxes";
 		foot.name = "Probe footprint";
-		const double z = q16(p.box_z_lo);
-		std::vector<PreviewVec3> corners = {rest(ThreediBuildVec3{q16(p.foot_x_lo), q16(p.foot_y_lo), z}, -1),
-		                                    rest(ThreediBuildVec3{q16(p.foot_x_hi), q16(p.foot_y_lo), z}, -1),
-		                                    rest(ThreediBuildVec3{q16(p.foot_x_hi), q16(p.foot_y_hi), z}, -1),
-		                                    rest(ThreediBuildVec3{q16(p.foot_x_lo), q16(p.foot_y_hi), z}, -1)};
+		const double z = io::fp16_16_to_double(p.box_z_lo);
+		const double x_lo = io::fp16_16_to_double(p.foot_x_lo), x_hi = io::fp16_16_to_double(p.foot_x_hi);
+		const double y_lo = io::fp16_16_to_double(p.foot_y_lo), y_hi = io::fp16_16_to_double(p.foot_y_hi);
+		std::vector<PreviewVec3> corners = {rest(ThreediBuildVec3{x_lo, y_lo, z}, -1),
+		                                    rest(ThreediBuildVec3{x_hi, y_lo, z}, -1),
+		                                    rest(ThreediBuildVec3{x_hi, y_hi, z}, -1),
+		                                    rest(ThreediBuildVec3{x_lo, y_hi, z}, -1)};
 		for (size_t i = 0; i < corners.size(); ++i) add_edge(foot, corners[i], corners[(i + 1) % corners.size()]);
 		out.push_back(std::move(foot));
 	}

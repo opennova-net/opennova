@@ -12,12 +12,6 @@
 
 namespace opennova::threedi {
 
-namespace {
-
-constexpr double q16(int32_t v) { return v / io::kFp16OneD; }
-
-} // namespace
-
 std::vector<std::vector<ThreediBuildVec3>> threedi_volume_polygons(const ThreediBoundingPlane *planes,
                                                                    size_t count, bool ladder) {
 	std::vector<std::vector<ThreediBuildVec3>> out;
@@ -136,8 +130,12 @@ std::vector<std::vector<ThreediBuildVec3>> threedi_volume_solid(const ThreediBou
 	// Type 4 is the ladder (CL), whose flat volume keeps its facing.
 	const bool ladder = volume.collidable_type == 4;
 	std::vector<std::vector<ThreediBuildVec3>> own = threedi_volume_polygons(planes, count, ladder);
-	const double lo[3] = {q16(volume.min_x_fp16), q16(volume.min_y_fp16), q16(volume.min_z_fp16)};
-	const double hi[3] = {q16(volume.max_x_fp16), q16(volume.max_y_fp16), q16(volume.max_z_fp16)};
+	const double lo[3] = {io::fp16_16_to_double(volume.min_x_fp16),
+			io::fp16_16_to_double(volume.min_y_fp16),
+			io::fp16_16_to_double(volume.min_z_fp16)};
+	const double hi[3] = {io::fp16_16_to_double(volume.max_x_fp16),
+			io::fp16_16_to_double(volume.max_y_fp16),
+			io::fp16_16_to_double(volume.max_z_fp16)};
 	bool past = false;
 	for (const auto &polygon : own)
 		for (const ThreediBuildVec3 &p : polygon) {
