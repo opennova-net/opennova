@@ -526,8 +526,8 @@ crow::response DataSetRoutes::begin_tree(const crow::request &req, uint64_t id) 
 			if (t.state == TreeState::Uploading || t.state == TreeState::Finalizing)
 				return json_error(409, "upload_in_flight",
 						"a tree of this data set is uploading or finalizing; delete it or wait");
-		const int64_t tree_id =
-				create_tree(*db_conn, row->id, TreeState::Uploading, creator_of(caller));
+		const int64_t tree_id = create_tree(*db_conn, row->id, TreeSource::Baseline,
+				TreeState::Uploading, std::nullopt, std::nullopt, creator_of(caller));
 		std::vector<crow::json::wvalue> uploads;
 		for (const std::string &name : names) {
 			const std::string key = tree_file_key(tree_id, name);

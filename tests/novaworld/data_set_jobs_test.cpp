@@ -212,7 +212,7 @@ struct Rig {
 	// A tree of `data_set_id` from the files at `dir`, finalized by the job: its id, 0 when
 	// it did not come out ready.
 	int64_t upload_tree(int64_t data_set_id, const std::string &dir) {
-		const int64_t id = create_tree(db, data_set_id, TreeState::Uploading, "admin");
+		const int64_t id = create_tree(db, data_set_id, TreeSource::Baseline, TreeState::Uploading, std::nullopt, std::nullopt, "admin");
 		if (!put_dir(tree_prefix(id), dir))
 			return 0;
 		if (!set_tree_state(db, id, TreeState::Uploading, TreeState::Finalizing) ||
@@ -269,7 +269,7 @@ int test_finalize_base() {
 	const std::string from = rig.temp.file("from");
 	TEST_EXPECT(make_base_tree(from));
 	const int64_t jo = rig.seeded("Joint Operations");
-	const int64_t id = create_tree(rig.db, jo, TreeState::Uploading, "admin");
+	const int64_t id = create_tree(rig.db, jo, TreeSource::Baseline, TreeState::Uploading, std::nullopt, std::nullopt, "admin");
 	TEST_EXPECT(rig.put_dir(tree_prefix(id), from));
 	// Not finalizing yet: the job has nothing to do and changes nothing.
 	const int64_t early = enqueue_tree_finalize(rig.db, id);
@@ -329,7 +329,7 @@ int test_finalize_refusals() {
 	TEST_EXPECT(make_base_tree(from));
 	const int64_t jo = rig.seeded("Joint Operations");
 	// An extra file.
-	const int64_t extra = create_tree(rig.db, jo, TreeState::Finalizing, "admin");
+	const int64_t extra = create_tree(rig.db, jo, TreeSource::Baseline, TreeState::Finalizing, std::nullopt, std::nullopt, "admin");
 	TEST_EXPECT(rig.put_dir(tree_prefix(extra), from));
 	TEST_EXPECT(rig.put(tree_prefix(extra) + "Jointops.exe", bytes("MZ")));
 	TEST_EXPECT(enqueue_tree_finalize(rig.db, extra) > 0 && rig.run_jobs() >= 1);
@@ -337,7 +337,7 @@ int test_finalize_refusals() {
 	TEST_EXPECT(tree && tree->state == TreeState::Failed &&
 			tree->error.find("Jointops.exe") != std::string::npos);
 	// A required archive missing.
-	const int64_t missing = create_tree(rig.db, jo, TreeState::Finalizing, "admin");
+	const int64_t missing = create_tree(rig.db, jo, TreeSource::Baseline, TreeState::Finalizing, std::nullopt, std::nullopt, "admin");
 	TEST_EXPECT(rig.put_dir(tree_prefix(missing), from));
 	std::string error;
 	TEST_EXPECT(rig.store.remove(tree_prefix(missing) + "language.pff", error));
@@ -346,7 +346,7 @@ int test_finalize_refusals() {
 	TEST_EXPECT(tree && tree->state == TreeState::Failed &&
 			tree->error.find("language.pff") != std::string::npos);
 	// An archive that is none.
-	const int64_t corrupt = create_tree(rig.db, jo, TreeState::Finalizing, "admin");
+	const int64_t corrupt = create_tree(rig.db, jo, TreeSource::Baseline, TreeState::Finalizing, std::nullopt, std::nullopt, "admin");
 	TEST_EXPECT(rig.put_dir(tree_prefix(corrupt), from));
 	TEST_EXPECT(rig.put(tree_prefix(corrupt) + "localres.pff", bytes("not an archive")));
 	TEST_EXPECT(enqueue_tree_finalize(rig.db, corrupt) > 0 && rig.run_jobs() >= 1);
@@ -378,7 +378,7 @@ int test_finalize_expansion() {
 	if (int rc = expect_manifest_matches_store(rig, *tree))
 		return rc;
 	// A spelling that is not the canonical one is refused (hostd fetches by the manifest's).
-	const int64_t spelled = create_tree(rig.db, jox, TreeState::Finalizing, "admin");
+	const int64_t spelled = create_tree(rig.db, jox, TreeSource::Baseline, TreeState::Finalizing, std::nullopt, std::nullopt, "admin");
 	TEST_EXPECT(rig.put_dir(tree_prefix(spelled), from));
 	std::string error;
 	TEST_EXPECT(rig.put_file(tree_prefix(spelled) + "JOX01L.PFF", from + "/jox01L.pff") &&
@@ -405,7 +405,7 @@ int test_prune() {
 	rig.db.exec("UPDATE data_set_trees SET created_at = now() - interval '2 hours' WHERE id = $1;",
 			{ BindValue(first) });
 	// An upload begun eight days ago and never finished.
-	const int64_t abandoned = create_tree(rig.db, jo, TreeState::Uploading, "admin");
+	const int64_t abandoned = create_tree(rig.db, jo, TreeSource::Baseline, TreeState::Uploading, std::nullopt, std::nullopt, "admin");
 	rig.db.exec("UPDATE data_set_trees SET created_at = now() - interval '8 days' WHERE id = $1;",
 			{ BindValue(abandoned) });
 	TEST_EXPECT(rig.put(tree_prefix(abandoned) + "version.txt", bytes("partial")));
@@ -416,7 +416,7 @@ int test_prune() {
 	std::error_code ec;
 	TEST_EXPECT(fs::is_directory(io::os_path(upload_dir), ec));
 	// A fresh failed tree is not old enough.
-	const int64_t fresh = create_tree(rig.db, jo, TreeState::Finalizing, "admin");
+	const int64_t fresh = create_tree(rig.db, jo, TreeSource::Baseline, TreeState::Finalizing, std::nullopt, std::nullopt, "admin");
 	TEST_EXPECT(set_tree_state(rig.db, fresh, TreeState::Finalizing, TreeState::Failed, "x"));
 	TEST_EXPECT(rig.put(tree_prefix(fresh) + "version.txt", bytes("fresh")));
 

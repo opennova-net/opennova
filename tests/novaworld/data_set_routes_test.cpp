@@ -575,7 +575,7 @@ int test_tree_upload(Harness &h) {
 	int64_t t2 = 0;
 	{
 		auto db = h.pool.acquire();
-		t2 = hosted::create_tree(*db, h.jo, hosted::TreeState::Finalizing, "worker");
+		t2 = hosted::create_tree(*db, h.jo, hosted::TreeSource::Baseline, hosted::TreeState::Finalizing, std::nullopt, std::nullopt, "worker");
 		hosted::TreeReady ready;
 		ready.files = { { "resource.pff", 1 } };
 		ready.version_text = "JO V1.7.5.4";
@@ -602,7 +602,7 @@ int test_tree_upload(Harness &h) {
 	{
 		auto db = h.pool.acquire();
 		server = insert_server(*db, h.jo, t2);
-		t3 = hosted::create_tree(*db, h.jo, hosted::TreeState::Finalizing, "worker");
+		t3 = hosted::create_tree(*db, h.jo, hosted::TreeSource::Baseline, hosted::TreeState::Finalizing, std::nullopt, std::nullopt, "worker");
 		hosted::TreeReady ready;
 		ready.files = { { "resource.pff", 1 } };
 		ready.version_text = "JO V1.7.5.5";
