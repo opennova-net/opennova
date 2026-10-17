@@ -303,6 +303,23 @@ bool local_player_in_armory_zone(const World &world) {
     return e != nullptr && !e->mounted && (e->flags & kEntityFlagArmoryZone) != 0;
 }
 
+UseItemArm local_player_use_item_arm(const World &world, const LocalViewSessionInputs &session) {
+    const Entity *e = world.registry.get(world.cached.local_player);
+    // [orig: Input_HandleActionBinding_0 -- parentSlot @0x4e0a91..0x4e0a98]
+    if (e == nullptr || e->mounted) return UseItemArm::kMountChain;
+    // [orig: the zone bit @0x4e0aa1, the pre-round timer @0x4e0aa6..0x4e0ab0]
+    const bool preround = session.hud_service.preround_seconds != 0;
+    if (local_player_in_armory_zone(world) || preround) {
+        // [orig: `test ecx, ecx; jnz` skips the rule in the pre-round @0x4e0b1f..0x4e0b27;
+        //  `cmp g_HostWeaponsRule, ecx; jnz done` @0x4e0b29..0x4e0b2f]
+        return !preround && session.armory_reuse_seconds != 0 ? UseItemArm::kArmoryRefused
+                                                              : UseItemArm::kArmory;
+    }
+    // [orig: Flags & 0x800 @0x4e0ab2]
+    if (local_player_in_vehicle_loadout_zone(world)) return UseItemArm::kVehicleLoadout;
+    return UseItemArm::kMountChain;
+}
+
 bool local_player_vehicle_zone_team_matches(const World &world) {
     // [orig: @0x4e0ad8 edx = player->groundEntity (+0x28); @0x4e0adb al =
     //  groundEntity->Team byte (+0x162); 0 opens @0x4e0ae3, else it must equal

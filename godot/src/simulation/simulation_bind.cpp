@@ -438,6 +438,7 @@ void Simulation::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("compute_iris_samples", "cam_pos", "cam_forward", "light_dir"),
 	                     &Simulation::compute_iris_samples);
 	ClassDB::bind_method(D_METHOD("local_player_in_armory_zone"), &Simulation::local_player_in_armory_zone);
+	ClassDB::bind_method(D_METHOD("local_player_use_item_arm"), &Simulation::local_player_use_item_arm);
 	ClassDB::bind_method(D_METHOD("local_player_in_vehicle_loadout_zone"),
 	                     &Simulation::local_player_in_vehicle_loadout_zone);
 	ClassDB::bind_method(D_METHOD("local_player_vehicle_zone_team_matches"),
@@ -647,6 +648,10 @@ void Simulation::_bind_methods() {
 
 	BIND_CONSTANT(WEAPON_ACTION_FIRE);
 
+	BIND_ENUM_CONSTANT(USE_ITEM_ARM_MOUNT_CHAIN);
+	BIND_ENUM_CONSTANT(USE_ITEM_ARM_ARMORY);
+	BIND_ENUM_CONSTANT(USE_ITEM_ARM_ARMORY_REFUSED);
+	BIND_ENUM_CONSTANT(USE_ITEM_ARM_VEHICLE_LOADOUT);
 	BIND_ENUM_CONSTANT(STANCE_STAND);
 	BIND_ENUM_CONSTANT(STANCE_CROUCH);
 	BIND_ENUM_CONSTANT(STANCE_PRONE);
