@@ -34,6 +34,15 @@ bool pcx_read_header(const uint8_t *data, size_t size, PcxHeader &out);
 enum class PcxRowFit : uint8_t { Exact, Overrun, Short };
 PcxRowFit pcx_row_fit(const PcxHeader &header);
 
+// Where the game's PCX reader stops writing an indexed image's texels, counted in texels from its buffer's start
+// (the buffer holds width x height): each row from width x row, its runs decoded while the row's count is below
+// the bytes a line, and each run written whole, so a run across the line's end writes on past it [orig:
+// Texture_LoadPCXFromPFF32 @ 0x56EA30, the rows @ 0x56ED70..0x56EE02: a run's count @ 0x56EDA3, written whole
+// @ 0x56EDC0..0x56EDD0, the row's test @ 0x56EDE1..0x56EDEB]. It reads the run bytes from 128 to the palette's
+// 768 (the stream it allocates and reads, @ 0x56ED19, @ 0x56ED43); where those end before the rows do, the rest of
+// a row is taken a texel a byte, its bytes a line at least. 0 for no header, a three-plane image or no rows.
+uint64_t pcx_indexed_write_end(const uint8_t *data, size_t size);
+
 // How an 8-bit indexed PCX's rows are run-length coded, as a file shows it. Each row is coded alone, a run
 // of 2 to 63 equal bytes as a count byte (0xC0 | n) and the byte, a byte with its top two bits set as a
 // count of 1 and the byte, and:

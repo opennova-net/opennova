@@ -1,5 +1,6 @@
 #include <editor/documents/texture_document.h>
 
+#include <algorithm>
 #include <iterator>
 #include <utility>
 
@@ -47,25 +48,25 @@ constexpr FindingCodeRow code(const char *token, FindingFix fixes = FindingFix::
 	return row;
 }
 
-// An indexed PCX whose rows run past its width, as the game's 32-bit PCX reader writes its last row: its bytes a
-// line of 4-byte texels from that row's start in a buffer of the image's 4 * width * height bytes from the FastMem
-// arena [orig: Texture_LoadPCXFromPFF32 @ 0x56EA30, the buffer @ 0x56EB1E, the row writes @ 0x56EDC0, @ 0x56EDDB],
-// whose blocks are rounded up to 64 bytes [orig: FastMem_Alloc @ 0x7697B0, @ 0x7697D7] and followed by a header
-// whose first dword is the pool pointer the next allocation and free dereference [orig: sub_7695C0 @ 0x7695D1;
-// @ 0x7695C4, @ 0x769664, @ 0x769709]. The bytes the row writes past the block's rounding: where the allocator split
-// the free block it took (one more than a header larger than asked, @ 0x769812..0x769819) the next block's header
-// starts there, and a texel (0xFF its top byte) on its pointer faults the game's next FastMem call; a block it gave
-// whole holds up to a header's 36 bytes more of its own, so only the bytes past those reach a header whatever the
-// block (pcx_overrun_past_any_block). Within the rounding each row's extra texels land on the next row's start,
-// which its own row then writes: the image reads right.
-uint64_t pcx_overrun_past_block(const TextureHeader &header) {
-	const uint64_t texels = uint64_t(header.width) * header.height * 4;
-	const uint64_t slack = (64 - texels % 64) % 64;
-	const uint64_t spill = (uint64_t(header.pcx_bytes_per_line) - header.width) * 4;
-	return spill > slack ? spill - slack : 0;
+// An indexed PCX whose rows the game's 32-bit PCX reader writes past its buffer: each row's runs whole from that
+// row's start, to its bytes a line at least (formats/pcx pcx_indexed_write_end, `end` its last texel's place), in a
+// buffer of the image's 4 * width * height bytes from the FastMem arena [orig: Texture_LoadPCXFromPFF32 @ 0x56EA30,
+// the buffer @ 0x56EB1E, the row writes @ 0x56EDC0, @ 0x56EDDB], whose blocks are rounded up to 64 bytes [orig:
+// FastMem_Alloc @ 0x7697B0, @ 0x7697D7] and followed by a header whose first dword is the pool pointer the next
+// allocation and free dereference [orig: sub_7695C0 @ 0x7695D1; @ 0x7695C4, @ 0x769664, @ 0x769709]. The bytes the
+// rows write past the block's rounding: where the allocator split the free block it took (one more than a header
+// larger than asked, @ 0x769812..0x769819) the next block's header starts there, and a texel (0xFF its top byte) on
+// its pointer faults the game's next FastMem call; a block it gave whole holds up to a header's 36 bytes more of its
+// own, so only the bytes past those reach a header whatever the block (pcx_overrun_past_any_block). Within the
+// rounding each row's extra texels land on the next row's start, which its own row then writes: the image reads
+// right. A request of no bytes (a width or height of 0) is one byte's block [orig: FastMem_Alloc, below 1 raised
+// to 1 @ 0x7697C1..0x7697C6].
+uint64_t pcx_overrun_past_block(const TextureHeader &header, uint64_t end) {
+	const uint64_t block = (std::max<uint64_t>(uint64_t(header.width) * header.height * 4, 1) + 63) / 64 * 64;
+	return end * 4 > block ? end * 4 - block : 0;
 }
-uint64_t pcx_overrun_past_any_block(const TextureHeader &header) {
-	const uint64_t past = pcx_overrun_past_block(header);
+uint64_t pcx_overrun_past_any_block(const TextureHeader &header, uint64_t end) {
+	const uint64_t past = pcx_overrun_past_block(header, end);
 	return past > configfile::kFastMemHeaderBytes ? past - configfile::kFastMemHeaderBytes : 0;
 }
 
@@ -311,29 +312,42 @@ std::vector<Diagnostic> validate_texture_file(const DocumentBase &document) {
 			add(F::Unloadable, DiagnosticSeverity::Warning,
 			    "The game cannot load it: its PCX reader takes 8 bits a plane alone (this one is " +
 			            std::to_string(header.pcx_bits) + " bits a plane).");
-		} else if (pcx_row_fit(pcx_fields(header)) == PcxRowFit::Overrun) {
-			const uint32_t extra = header.pcx_bytes_per_line - header.width;
-			const uint64_t past = pcx_overrun_past_block(header);
-			const uint64_t past_any = pcx_overrun_past_any_block(header);
-			add(F::PcxOverrun, past_any ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning,
-			    "Its rows hold " + std::to_string(header.pcx_bytes_per_line) + " bytes for " + std::to_string(header.width) +
-			            " texels: the game's PCX reader writes each row's " + std::to_string(extra) +
-			            (extra == 1 ? " extra texel" : " extra texels") + " into the next row, which that row writes again, and the last row's " +
-			            (past_any ? "past its buffer's block by " + std::to_string(past) +
-			                                " bytes, past any block the allocator gives it (one it does not split holds 36 "
-			                                "bytes more), over the next block's header: the game faults loading it."
-			             : past ? std::to_string(past) + " bytes past the spare bytes its buffer's block rounds up to: over "
-			                                                "the next block's header where the allocator split the block it "
-			                                                "gives (the game then faults), into the block's own spare bytes "
-			                                                "where it gives one whole (36 bytes more at most)."
-			                    : std::string("into the spare bytes its buffer's block rounds up to.")) +
-			            " Save it with rows of exactly its width (its bytes a line " + std::to_string(header.width) + ").");
-		} else if (pcx_row_fit(pcx_fields(header)) == PcxRowFit::Short) {
-			add(F::PcxShortRows, DiagnosticSeverity::Warning,
-			    "Its rows hold " + std::to_string(header.pcx_bytes_per_line) + " bytes for " + std::to_string(header.width) +
-			            " texels: the game's PCX reader writes " + std::to_string(header.pcx_bytes_per_line) +
-			            " texels a row and leaves the last " + std::to_string(header.width - header.pcx_bytes_per_line) +
-			            " of each as its buffer held them. Save it with rows of exactly its width.");
+		} else {
+			// Rows longer than the width, or a run the reader writes whole across a row's end, past the buffer.
+			const uint64_t end = pcx_indexed_write_end(texture->bytes().data(), texture->bytes().size());
+			const uint64_t buffer = uint64_t(header.width) * header.height;
+			if (end > buffer) {
+				const bool long_rows = pcx_row_fit(pcx_fields(header)) == PcxRowFit::Overrun;
+				const uint32_t extra = long_rows ? header.pcx_bytes_per_line - header.width : 0;
+				const uint64_t over = end - buffer;
+				const uint64_t past = pcx_overrun_past_block(header, end);
+				const uint64_t past_any = pcx_overrun_past_any_block(header, end);
+				add(F::PcxOverrun, past_any ? DiagnosticSeverity::Error : DiagnosticSeverity::Warning,
+				    (long_rows ? "Its rows hold " + std::to_string(header.pcx_bytes_per_line) + " bytes for " +
+				                         std::to_string(header.width) + " texels: the game's PCX reader writes each row's " +
+				                         std::to_string(extra) + (extra == 1 ? " extra texel" : " extra texels") +
+				                         " into the next row, which that row writes again, and the last row's "
+				               : "A run the game's PCX reader writes whole crosses a row's end, so its rows reach " +
+				                         std::to_string(over) + (over == 1 ? " texel" : " texels") +
+				                         " past the image's buffer, ") +
+				            (past_any ? "past its buffer's block by " + std::to_string(past) +
+				                                " bytes, past any block the allocator gives it (one it does not split holds 36 "
+				                                "bytes more), over the next block's header: the game faults loading it."
+				             : past ? std::to_string(past) + " bytes past the spare bytes its buffer's block rounds up to: over "
+				                                                "the next block's header where the allocator split the block it "
+				                                                "gives (the game then faults), into the block's own spare bytes "
+				                                                "where it gives one whole (36 bytes more at most)."
+				                    : std::string("into the spare bytes its buffer's block rounds up to.")) +
+				            (long_rows ? " Save it with rows of exactly its width (its bytes a line " + std::to_string(header.width) + ")."
+				                       : std::string(" Save it with each row's runs ending at its width.")));
+			}
+			if (pcx_row_fit(pcx_fields(header)) == PcxRowFit::Short) {
+				add(F::PcxShortRows, DiagnosticSeverity::Warning,
+				    "Its rows hold " + std::to_string(header.pcx_bytes_per_line) + " bytes for " + std::to_string(header.width) +
+				            " texels: the game's PCX reader writes " + std::to_string(header.pcx_bytes_per_line) +
+				            " texels a row and leaves the last " + std::to_string(header.width - header.pcx_bytes_per_line) +
+				            " of each as its buffer held them. Save it with rows of exactly its width.");
+			}
 		}
 		break;
 	case TextureReader::Dds: {
