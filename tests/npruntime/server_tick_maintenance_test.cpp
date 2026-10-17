@@ -2642,7 +2642,7 @@ bool check_validated_fire_scores_one_shot() {
 }
 
 // The host's record of a remote player's EquippedSlot: the 0x2F accept points it at
-// the submitted slot and keeps it only for a NoSelect def; an accepted network fire
+// the submitted slot and clears it for an empty slot or a NoSelect def; an accepted network fire
 // re-points it at the fired combo's personal slot; the 0x0C weapon echo never moves it.
 // [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515f52..0x515f8a;
 //  Server_ClientFiredRound @0x50c1d4..0x50c28d]
@@ -2681,12 +2681,15 @@ bool check_host_tracks_the_remote_equipped_slot() {
 				100, roster, &world);
 	};
 	submit(rifle_combo);
-	if (!expect(conn.weapon_slots.count(rifle_combo) == 1 && conn.equipped_slot.kind == Ref::kNone,
-			"a selectable submitted slot leaves the EquippedSlot empty"))
+	if (!expect(conn.weapon_slots.count(rifle_combo) == 1 && conn.equipped_slot.kind == Ref::kPersonal &&
+					conn.equipped_slot.combo == rifle_combo,
+			"a selectable submitted slot is the EquippedSlot"))
+		return false;
+	submit(3 * 65 + 9);
+	if (!expect(conn.equipped_slot.kind == Ref::kNone, "an empty submitted slot clears it"))
 		return false;
 	submit(chute_combo);
-	if (!expect(conn.equipped_slot.kind == Ref::kPersonal && conn.equipped_slot.combo == chute_combo,
-			"a NoSelect submitted slot is kept"))
+	if (!expect(conn.equipped_slot.kind == Ref::kNone, "a NoSelect submitted slot clears it"))
 		return false;
 	uint32_t client_tick = conn.tick_seed;
 	(void)inmatch::dispatch_session_replies(inmatch::GameConfig{}, conn,

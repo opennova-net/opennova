@@ -796,8 +796,8 @@ struct NapiNPConnection {
 
 	// This player's entity EquippedSlot (entity+0x118) as the host points it: the personal
 	// slot of the last accepted network fire's combo or the borrowed mount slot it fired
-	// through, else the 0x2F loadout's submitted slot when that slot's def is NoSelect, else
-	// none. The C2S 0x0C weapon echo moves only entity+0x2B0, so the slot can name a weapon
+	// through, else the 0x2F loadout's submitted slot unless that slot holds no def or a
+	// NoSelect one, else none. The C2S 0x0C weapon echo moves only entity+0x2B0, so the slot can name a weapon
 	// the player no longer holds — exactly what the remote held-weapon draw gate's ammo leg
 	// then reads. [orig: Server_ClientFiredRound @0x50c1d4..0x50c28d;
 	//  NapiNPServerMsg_HandlePlayerLoadout @0x515f52..0x515f8a; Entity_CanFireWeapon

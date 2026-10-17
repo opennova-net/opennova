@@ -1430,8 +1430,10 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 				apply_granted_loadout(conn, grant, armory != nullptr);
 				if (armory != nullptr) {
 					// The accept points the entity's EquippedSlot at the submitted slot and
-					// keeps it only when that slot's def is NoSelect.
-					// [orig: NapiNPServerMsg_HandlePlayerLoadout @0x515f52..0x515f8a]
+					// clears it when that slot holds no def or a NoSelect one (flags2 bit 0).
+					// [orig: NapiNPServerMsg_HandlePlayerLoadout - the store @0x515F52..0x515F62,
+					//  the slot / def tests @0x515F73..0x515F7C, `and ecx, 1` @0x515F81 whose
+					//  zero skips the clear @0x515F88, the clear @0x515F8A]
 					conn.equipped_slot = {};
 					const auto submitted = req.weapon_slot_index <= 0xFFFFu
 							? conn.weapon_slots.find(static_cast<uint16_t>(req.weapon_slot_index))
@@ -1440,7 +1442,7 @@ std::vector<ProtocolMessage> dispatch_session_replies(const GameConfig &config,
 							? armory->by_index(submitted->second.adm_index)
 							: nullptr;
 					if (submitted_def != nullptr &&
-							(submitted_def->flags2 & world::weapon_flag2::kNoSelect) != 0) {
+							(submitted_def->flags2 & world::weapon_flag2::kNoSelect) == 0) {
 						conn.equipped_slot.kind = NapiNPConnection::EquippedSlotRef::kPersonal;
 						conn.equipped_slot.combo = submitted->first;
 					}
