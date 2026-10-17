@@ -11,8 +11,7 @@
       Mission rotation
     </legend>
     <p :id="`${baseId}-hint`" class="text-xs text-ink-muted">
-      Played in order from the first, then again. Up to {{ MISSIONS_MAX }} of the {{ offered.length }}
-      mission{{ offered.length === 1 ? '' : 's' }} the game<template v-if="withExpansion"> and its expansion</template> hold{{ withExpansion ? '' : 's' }}.
+      Played in order from the first, then again. A rotation holds up to {{ MISSIONS_MAX }} maps.
     </p>
     <p v-if="error" :id="`${baseId}-error`" class="text-xs text-danger">{{ error }}</p>
 
@@ -122,9 +121,6 @@ const props = defineProps<{
   modelValue: string[];
   // The missions the picked game and expansion hold, each file once.
   available: HostedMission[];
-  // The form runs the game with an expansion (the hint says whose missions
-  // these are).
-  withExpansion?: boolean;
   // The prefix of every id inside.
   baseId: string;
   // The form's own error for the rotation.

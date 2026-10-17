@@ -211,7 +211,6 @@
       ref="rotation"
       v-model="form.missions"
       :available="missions"
-      :with-expansion="form.expansion_id !== null"
       :base-id="`${baseId}-missions`"
       :error="errors.missions"
       :disabled="busy"
