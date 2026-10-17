@@ -34,6 +34,7 @@
 #include <runtime/renderer/foliage_frame.h>
 #include <runtime/renderer/object_lod.h>
 #include <runtime/world/model_geometry.h>
+#include <runtime/world/occlusion_feed.h>
 #include <runtime/renderer/render_order.h>
 
 using namespace opennova::threedi;
@@ -599,20 +600,11 @@ Dictionary ObjectModel::get_render_part_nodes() const {
 	return result;
 }
 
-// Retail hides part i when bit (i & 31) of entity+0x138 | g_HiddenSectionMask
-// is set; g_HiddenSectionMask (retail @ 0xB7965C) is ~(raw | forced) for a batched building
-// (retail Terrain_RenderSectorModels @ 0x5c5d72..0x5c5e4f) and 0 for every
-// other sector entity (@ 0x5c7b6b), so a model without a verdict hides only
-// its destroyed sections (retail BoneCallback_bldg_World @ 0x4e22cf..0x4e22e2).
+// The engine's section rule (world/occlusion_feed.h section_visible) over the
+// main view's verdict.
 bool ObjectModel::section_part_visible(int p_section) const {
-	const uint32_t bit = 1u << (static_cast<uint32_t>(p_section) & 31u);
-	if ((destroyed_section_mask_ & bit) != 0) {
-		return false;
-	}
-	if (occlusion_section_mask_ == -1) {
-		return true;
-	}
-	return ((static_cast<uint32_t>(occlusion_section_mask_) | forced_section_mask_) & bit) != 0;
+	return opennova::world::section_visible(destroyed_section_mask_, occlusion_section_mask_,
+			forced_section_mask_, p_section);
 }
 
 void ObjectModel::apply_section_visibility() {

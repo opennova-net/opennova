@@ -22,6 +22,7 @@
 #include <base/io/hash.h>
 #include <runtime/renderer/object_lod.h>
 #include <runtime/renderer/render_order.h>
+#include <runtime/world/occlusion_feed.h>
 
 #include <algorithm>
 
@@ -387,14 +388,8 @@ bool ObjectModel::is_inset_view_subpixel_hidden() const {
 }
 
 bool ObjectModel::inset_section_part_visible(int64_t p_mask, int p_section) const {
-	const uint32_t bit = 1u << (static_cast<uint32_t>(p_section) & 31u);
-	if ((destroyed_section_mask_ & bit) != 0) {
-		return false;
-	}
-	if (p_mask == -1) {
-		return true;
-	}
-	return ((static_cast<uint32_t>(p_mask) | forced_section_mask_) & bit) != 0;
+	return opennova::world::section_visible(destroyed_section_mask_, p_mask, forced_section_mask_,
+			p_section);
 }
 
 // Reconcile the two views' verdicts. Equal: one node on the world bits, no
