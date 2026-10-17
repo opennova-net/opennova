@@ -33,15 +33,6 @@
 using namespace sim_internal;
 using namespace opennova::threedi;
 
-// The GDScript-facing seat codes are the SAME values engine/runtime/world computes with —
-// a drifted copy here would silently corrupt every binding-side seat-spec walk.
-static_assert(Simulation::SEAT_NONE == static_cast<int>(opennova::world::SeatType::None));
-static_assert(Simulation::SEAT_PASSENGER == static_cast<int>(opennova::world::SeatType::Passenger));
-static_assert(Simulation::SEAT_CONTROLLER == static_cast<int>(opennova::world::SeatType::Controller));
-static_assert(Simulation::SEAT_GUNNER == static_cast<int>(opennova::world::SeatType::Gunner));
-static_assert(Simulation::SEAT_ARMORY_POINT == static_cast<int>(opennova::world::SeatType::ArmoryPoint));
-static_assert(Simulation::SEAT_DRIVER == static_cast<int>(opennova::world::SeatType::Driver));
-
 // Values the class enum cannot assign straight from the engine home: the
 // userpoint scan limit lives in a C header macro, and the integral fov mirror
 // pins against the engine float.
@@ -634,12 +625,6 @@ void Simulation::_bind_methods() {
 	BIND_ENUM_CONSTANT(EFFECT_STATE_ROTATION_DEG);
 	BIND_ENUM_CONSTANT(EFFECT_STATE_COUNT);
 
-	BIND_ENUM_CONSTANT(SEAT_NONE);
-	BIND_ENUM_CONSTANT(SEAT_PASSENGER);
-	BIND_ENUM_CONSTANT(SEAT_CONTROLLER);
-	BIND_ENUM_CONSTANT(SEAT_GUNNER);
-	BIND_ENUM_CONSTANT(SEAT_ARMORY_POINT);
-	BIND_ENUM_CONSTANT(SEAT_DRIVER);
 
 	BIND_ENUM_CONSTANT(JOIN_TERRAIN_TIL_ABSENT);
 	BIND_ENUM_CONSTANT(JOIN_TERRAIN_TIL_RECEIVING);

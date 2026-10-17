@@ -10,7 +10,6 @@ void EndRoundState::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_game_type"), &EndRoundState::get_game_type);
 	ClassDB::bind_method(D_METHOD("is_team_mode"), &EndRoundState::is_team_mode);
 	ClassDB::bind_method(D_METHOD("get_local_slot"), &EndRoundState::get_local_slot);
-	ClassDB::bind_method(D_METHOD("is_session_open"), &EndRoundState::is_session_open);
 	ClassDB::bind_method(D_METHOD("to_json_value"), &EndRoundState::to_json_value);
 }
 

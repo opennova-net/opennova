@@ -368,18 +368,6 @@ public:
 		EFFECT_STATE_COUNT
 	};
 
-	// Seat-bone type codes, surfaced so GDScript reads ONE source — the values
-	// are pinned to engine/runtime/world's SeatType by static_assert in the .cpp.
-	// (engine: runtime/world/entity.h)
-	enum SeatCode {
-		SEAT_NONE = 0,
-		SEAT_PASSENGER = 1,
-		SEAT_CONTROLLER = 2,
-		SEAT_GUNNER = 3,
-		SEAT_ARMORY_POINT = 4,
-		SEAT_DRIVER = 5,
-	};
-
 	// local_player_blink_flags() letter bits GDScript gates the render passes
 	// on — mirrors world/collision.h kBlinkIndoorsBit/kBlinkWaterOffBit
 	// (static_asserts in simulation_occlusion.cpp pin them).
@@ -2491,7 +2479,6 @@ public:
 
 VARIANT_ENUM_CAST(godot::Simulation::PresentField);
 VARIANT_ENUM_CAST(godot::Simulation::EffectStateField);
-VARIANT_ENUM_CAST(godot::Simulation::SeatCode);
 VARIANT_ENUM_CAST(godot::Simulation::MountCommand);
 VARIANT_ENUM_CAST(godot::Simulation::JoinTerrainTilState);
 VARIANT_ENUM_CAST(godot::Simulation::SessionRole);
