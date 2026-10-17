@@ -141,7 +141,6 @@ struct Harness {
 			return false;
 		};
 		role.kit_seams.push = [this] { seams.push_back("push_kit"); };
-		role.kit_seams.respawn = [this] { seams.push_back("respawn"); };
 	}
 	w::LocalPlayerWeapon &weapon() { return kernel->local.weapon; }
 	w::WeaponInventory &inventory() { return kernel->local.inventory; }
@@ -1901,6 +1900,9 @@ bool run_revive_deploy_respawns_l_on_its_record_edge() {
 	h.role.run_tick(h.input);
 	const uint64_t grants = h.role.runtime->authoritative_loadout_revision();
 	h.seams.clear();
+	// The respawn reset returns the map zoom to its spawn default (the round
+	// init leaves the zooms alone), so a moved zoom marks it.
+	h.kernel->local.hud_map_control.zoom_q16 = 1;
 	frame(100, 0x00); // the revive deploy: no 0x5A, the record alive again
 	frame(100, 0x00); // the next tail revives L
 	local = h.kernel->local.player();
@@ -1909,9 +1911,10 @@ bool run_revive_deploy_respawns_l_on_its_record_edge() {
 					!h.role.runtime->deployment_pick_pending(),
 			"revive: the record's respawn edge releases the deploy and L stands"))
 		return false;
-	bool respawned = false;
-	for (const std::string &seam : h.seams) respawned = respawned || seam == "respawn";
-	if (!expect(respawned, "revive: L runs the respawn reset")) return false;
+	if (!expect(h.kernel->local.hud_map_control.zoom_q16 ==
+					h.kernel->local.hud_map_control.spawn_zoom_q16,
+			"revive: L runs the respawn reset"))
+		return false;
 	if (!expect(local_ai->heading == static_cast<int32_t>(0xCC000000u),
 			"revive: L faces the record's heading byte"))
 		return false;

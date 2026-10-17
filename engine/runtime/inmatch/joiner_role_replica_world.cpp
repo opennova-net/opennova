@@ -344,11 +344,16 @@ void JoinerRole::apply_authoritative_health() {
 					// The embedder clears its device-input latches, seeds the
 					// look heading and resets its view and map; the kit is the
 					// release's 0x5A, already folded (D-NET-378), or after a medic
-					// revive, which sends none, the kit L died with (D-NET-379).
+					// revive, which sends none, the kit L died with (D-NET-379):
+					// retail's client runs Player_InitPlayer only at the mission
+					// start and a team change [orig: Player_InitPlayer @0x4E15F0,
+					// called from Game_StartMission @0x525BBC and
+					// NapiNPClientMsg_TeamAssign @0x431B14;
+					// NapiNPClientMsg_HandleWeaponLoadoutSync @0x4290E0].
 					lp.reset_local_player_input(heading);
                     lp.reset_for_new_round();
                     rt.reset_local_round_state();
-					if (kit_seams.respawn) kit_seams.respawn();
+					lp.respawn_init(/*rebuild_kit=*/false);
 					redeploy_release_pending_ = false;
 					redeploy_health_updates_at_release_ = 0;
 				}
