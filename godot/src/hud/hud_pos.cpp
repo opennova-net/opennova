@@ -17,6 +17,7 @@
 #include "simulation/hud_view_records.h"
 #include "util/data_format.h"
 
+#include <base/io/fixed.h>
 #include <formats/def/def.h>
 #include <runtime/hud/hud_game_text.h>
 #include <runtime/hud/hud_math.h>
@@ -376,7 +377,7 @@ int HudPos::health_color_band(float p_fraction) {
 	// The producer domain is the witnessed 16.16 ratio; the float fraction
 	// re-enters it by truncation, the original data path.
 	return opennova::hud::health_color_band_fp16(
-			static_cast<int32_t>(p_fraction * 65536.0f));
+			static_cast<int32_t>(p_fraction * opennova::io::kFp16One));
 }
 
 int HudPos::message_expire_tick(int p_now_ticks, int p_prev_expire, bool p_has_prev) {

@@ -4,6 +4,7 @@
 #include "util/axes.h"
 #include "util/string_convert.h"
 #include <algorithm>
+#include <base/io/fixed.h>
 #include <cmath>
 #include <godot_cpp/variant/plane.hpp>
 #include <runtime/hud/hud_bay_logos.h>
@@ -86,7 +87,7 @@ void HudOverlay::set_combat_state(const Ref<PlayerLocalView> &view, const Transf
 		const Vector3 local = camera.xform_inv(position);
 		const Plane clip = projection.xform4(Plane(local, 1));
 		out.clip = -local.z < projection.get_z_near() ? 16 : 0;
-		const double depth = -double(local.z) * 65536.0;
+		const double depth = -double(local.z) * opennova::io::kFp16OneD;
 		out.depth_q16 = static_cast<int32_t>(std::clamp(depth, -2147483647.0, 2147483647.0));
 		if (clip.d == 0 || !std::isfinite(clip.d))
 			return out;
