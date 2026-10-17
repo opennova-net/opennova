@@ -1,5 +1,5 @@
-// Bit rotation: the x86 ROL the original compiles its keystreams and PRNGs to (a CPU primitive,
-// not witnessed arithmetic).
+// Bit primitives: the x86 ROL the original compiles its keystreams and PRNGs to, and the power-of-two
+// test (CPU primitives, not witnessed arithmetic).
 
 #pragma once
 
@@ -21,6 +21,12 @@ inline constexpr uint32_t rotr32(uint32_t value, unsigned count)
 {
     count &= 31u;
     return count == 0u ? value : (value >> count) | (value << (32u - count));
+}
+
+// One bit set: a power of two (0 is none). C++17 has no std::has_single_bit.
+inline constexpr bool is_power_of_two(uint32_t value)
+{
+    return value != 0u && (value & (value - 1u)) == 0u;
 }
 
 } // namespace io

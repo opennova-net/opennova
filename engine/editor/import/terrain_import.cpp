@@ -10,6 +10,7 @@
 #include <sstream>
 #include <utility>
 
+#include <base/io/bits.h>
 #include <base/io/strutil.h>
 #include <editor/import/texture_import.h>
 #include <editor/model/core_finding.h>
@@ -128,8 +129,6 @@ bool water_form(const std::string &value) {
 	double water = 0;
 	return number_in(value, 0.0, 255.0, water);
 }
-
-bool power_of_two(int side) { return side > 0 && (side & (side - 1)) == 0; }
 
 std::vector<uint8_t> text_bytes(const std::string &text) { return std::vector<uint8_t>(text.begin(), text.end()); }
 
@@ -495,7 +494,7 @@ bool decode_terrain_image(const std::string &key, const std::string &name, const
 		why = sides + ": the game reads a terrain's colour map as exactly 1024 x 1024 texels";
 		return false;
 	}
-	if (key == "detail" && (!power_of_two(w) || !power_of_two(h))) {
+	if (key == "detail" && (w <= 0 || h <= 0 || !io::is_power_of_two(uint32_t(w)) || !io::is_power_of_two(uint32_t(h)))) {
 		why = sides + ": the game makes a detail's coefficients over sides that are powers of two";
 		return false;
 	}
