@@ -389,13 +389,15 @@ bool TerrainSurfaceInputs::rebuild_detail_textures() {
 		terrain_data->get_detailmap_c3(),
 	};
 	// Every layer is the DXT texture retail creates from it, paired with the
-	// far texture when one is authored.
+	// far texture when one is authored, at full terrain texture detail: the
+	// game does not hand the session's terrain_texdetail on yet (D-RMAT-20).
 	for (int layer = 0; layer < 3; ++layer) {
 		opennova::terrain::Rgba8Image base_source;
 		if (texture_to_rgba8(authored_layers[layer], base_source)) {
 			detail_layer_textures[layer] = texture_from_dxt_levels(
 				opennova::terrain::build_detail_layer_levels(
-					base_source, have_far ? &far_source : nullptr, texcompression_level));
+					base_source, have_far ? &far_source : nullptr, texcompression_level,
+					opennova::renderer::kTerrainTexDetailFull));
 		}
 	}
 

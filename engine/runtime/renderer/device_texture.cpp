@@ -56,6 +56,10 @@ uint32_t object_texdetail_flags(int level, uint8_t slot) {
 	}
 }
 
+uint32_t terrain_texdetail_flags(int level) {
+	return level == 0 ? kTextureFlagHalveTwice : (level == 1 || level == 2) ? kTextureFlagHalveOnce : 0u;
+}
+
 // [orig: GTexture_DownsampleToLimits @ 0x687170 — the cap's halvings while either side exceeds it
 // (@ 0x6871B7..0x6871BD); 0x20000 shifts both sides by 2 and counts two (@ 0x6871C8..0x6871D0), else 0x10000
 // enters the card's loop at its halving (@ 0x6871DB, a halving whatever the size); the card's halvings while

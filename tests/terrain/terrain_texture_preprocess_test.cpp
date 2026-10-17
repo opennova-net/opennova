@@ -1,6 +1,8 @@
 #include <runtime/terrain/texture_preprocess.h>
+#include <runtime/renderer/device_texture.h>
 #include <runtime/renderer/texture_compression.h>
 #include <runtime/renderer/texture_dxt.h>
+#include <runtime/renderer/texture_load_rules.h>
 
 #include <cmath>
 #include <cstdint>
@@ -208,7 +210,8 @@ int main() {
 	{
 		using opennova::renderer::TextureDxtFormat;
 		for (const int level : {0, 1, 2, 3}) {
-			const auto layer = opennova::terrain::build_detail_layer_levels(base, nullptr, level);
+			const auto layer = opennova::terrain::build_detail_layer_levels(base, nullptr, level,
+					opennova::renderer::kTerrainTexDetailFull);
 			ok &= expect(!layer.empty() && layer[0].format == TextureDxtFormat::Dxt1,
 					"the detail layer is DXT1 on the reference adapter at every texcompression level");
 		}
@@ -221,14 +224,16 @@ int main() {
 						opennova::renderer::terrain_detail_layer_compression_flags(1) | 8u, keep) ==
 						TextureDxtFormat::Dxt5,
 				"a keep-DXT5 adapter takes DXT5 from texcompression 1, DXT1 at 0");
-		const auto plain = opennova::terrain::build_detail_layer_levels(base, nullptr, 1);
+		const auto plain = opennova::terrain::build_detail_layer_levels(base, nullptr, 1,
+				opennova::renderer::kTerrainTexDetailFull);
 		const auto plain_chain = opennova::renderer::build_dxt_texture_levels(
 				base.pixels.data(), base.width, base.height, TextureDxtFormat::Dxt1, 2);
 		ok &= expect(plain.size() == 2 && plain[0].format == TextureDxtFormat::Dxt1 &&
 				plain[0].blocks == plain_chain[0].blocks &&
 				plain[1].blocks == plain_chain[1].blocks,
 				"an unpaired detail layer is the DXT1 filtered chain down to 4x4");
-		const auto paired = opennova::terrain::build_detail_layer_levels(base, &far_detail, 1);
+		const auto paired = opennova::terrain::build_detail_layer_levels(base, &far_detail, 1,
+				opennova::renderer::kTerrainTexDetailFull);
 		ok &= expect(paired.size() == mips.size(), "a paired layer keeps the paired level count");
 		for (size_t level = 0; level < paired.size() && level < mips.size(); ++level) {
 			const auto encoded = opennova::renderer::encode_dxt_surface(
@@ -238,6 +243,49 @@ int main() {
 			ok &= expect(paired[level].blocks == encoded.blocks,
 					"each paired level is encoded straight from its blended texels");
 		}
+	}
+
+	// The terrain texture detail's halving word (C-391): two halvings at 0, one at 1 or 2, none
+	// at 3 (or any other), ORed into the layers' word; either creator halves its pixels first,
+	// the far with the base [orig: sub_605D70 @ 0x605DBF..0x605E0A; PolyTrn_InitTextures
+	// @ 0x60AB95..0x60ABE5; GTexture_DownsampleToLimits @ 0x687170 from
+	// GTexture_CreateFromPixelData_0 @ 0x687785 and GTexture_CreateFromPixelDataWithAlphaBlend
+	// @ 0x68735B / @ 0x68736D].
+	{
+		using opennova::renderer::terrain_texdetail_flags;
+		using opennova::renderer::TextureDxtFormat;
+		ok &= expect(terrain_texdetail_flags(0) == 0x20000u && terrain_texdetail_flags(1) == 0x10000u &&
+				terrain_texdetail_flags(2) == 0x10000u && terrain_texdetail_flags(3) == 0u &&
+				terrain_texdetail_flags(-1) == 0u,
+				"terrain_texdetail 0 halves twice, 1 and 2 once, any other none");
+		const auto halved_once = [](const Rgba8Image &image) {
+			Rgba8Image out = image;
+			opennova::renderer::halve_rgba(out.pixels, out.width, out.height);
+			return out;
+		};
+		const Rgba8Image base4 = halved_once(base);
+		const auto plain_half = opennova::terrain::build_detail_layer_levels(base, nullptr, 1, 2);
+		const auto plain_half_chain = opennova::renderer::build_dxt_texture_levels(
+				base4.pixels.data(), base4.width, base4.height, TextureDxtFormat::Dxt1, 1);
+		ok &= expect(plain_half.size() == 1 && plain_half[0].width == 4 && plain_half[0].height == 4 &&
+				plain_half[0].blocks == plain_half_chain[0].blocks,
+				"at terrain_texdetail 2 the unpaired 8x8 layer is its one 4x4 halving's chain");
+		const auto paired_half = opennova::terrain::build_detail_layer_levels(base, &far_detail, 1, 1);
+		const auto paired_half_mips = build_paired_detail_mip_chain(base4, halved_once(far_detail));
+		bool paired_match = !paired_half_mips.empty() && paired_half.size() == paired_half_mips.size() &&
+				paired_half[0].width == 4;
+		for (size_t level = 0; paired_match && level < paired_half.size(); ++level) {
+			const auto encoded = opennova::renderer::encode_dxt_surface(
+					opennova::renderer::decode_rgba8(paired_half_mips[level].pixels.data(),
+							paired_half_mips[level].width, paired_half_mips[level].height),
+					paired_half_mips[level].width, paired_half_mips[level].height, TextureDxtFormat::Dxt1);
+			paired_match = paired_half[level].blocks == encoded.blocks;
+		}
+		ok &= expect(paired_match,
+				"at terrain_texdetail 1 the paired layer pairs the halved base with the halved far");
+		const auto full = opennova::terrain::build_detail_layer_levels(base, nullptr, 1,
+				opennova::renderer::kTerrainTexDetailFull);
+		ok &= expect(!full.empty() && full[0].width == 8, "full terrain detail keeps the layer's size");
 	}
 
 	{

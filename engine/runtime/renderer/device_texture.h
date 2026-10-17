@@ -42,6 +42,18 @@ inline constexpr int kObjectTexDetailFull = 3;
 // @ 0x5B181C].
 uint32_t object_texdetail_flags(int level, uint8_t slot);
 
+// The terrain texture detail: game.cfg `terrain_texdetail` (0..3, 3 full detail) [orig:
+// Config_ParseSettingsLine @ 0x551135], copied into the session's settings with the rest [orig:
+// Game_ApplySessionSettingsToGlobals @ 0x551565..0x551574, g_TerrainTexDetail @ 0x24D2044], which
+// Terrain_Init hands the terrain's settings setter [orig: Terrain_Init @ 0x60FC2A..0x60FC36].
+inline constexpr int kTerrainTexDetailFull = 3;
+
+// The halving flag the terrain's detail (splat) layers load with at terrain texture detail `level`:
+// two halvings at 0, one at 1 or 2, none at any other [orig: sub_605D70 @ 0x605DBF (0x20000),
+// @ 0x605DE4 (0x10000), @ 0x605DF4..0x605E0A (2 -> 0x10000, else 0) into g_TerrainDetailTextureFlags
+// @ 0x31A1820, which PolyTrn_InitTextures ORs into the layers' word @ 0x60AB95..0x60ABE5].
+uint32_t terrain_texdetail_flags(int level);
+
 // The largest side the reference card takes (D3DCAPS9 MaxTextureWidth, which CD3DDevice_InitializeDisplay
 // stores for the halvings [orig: @ 0x679AC2..0x679ACA, dword_32A623C]); a card that takes less halves a
 // texture past its side. Not a witness: the reference machine, as kReferenceTextureDxtCaps is.

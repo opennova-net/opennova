@@ -75,9 +75,11 @@ std::vector<Rgba8Image> build_paired_detail_mip_chain(
 
 // One of the three splat detail layers as the device texture retail creates:
 // the session texcompression_level's flags (0x400100 below 1, else 0x400200:
-// renderer/texture_compression.h) with the terrain-detail flags (0 at full
-// detail) and 8, which pick DXT1 either way on an adapter outside the NVIDIA
-// DXT5 list. Without a far texture the layer's TGA goes through
+// renderer/texture_compression.h) with the terrain texture detail's halving
+// word (renderer::terrain_texdetail_flags, 0 at full detail) and 8, which pick
+// DXT1 either way on an adapter outside the NVIDIA DXT5 list. The pixels (the
+// base and the far alike) are halved first as the word asks. Without a far
+// texture the layer's TGA goes through
 // GTexture_CreateFromPixelData_0 (level 0 loaded, later levels
 // D3DXFilterTexture's chain); with one, GTexture_CreateFromPixelDataWithAlphaBlend
 // loads each paired level with D3DX_FILTER_NONE.
@@ -88,7 +90,8 @@ std::vector<Rgba8Image> build_paired_detail_mip_chain(
 std::vector<renderer::DxtSurface> build_detail_layer_levels(
 		const Rgba8Image &base,
 		const Rgba8Image *far_detail,
-		int32_t session_texcompression_level);
+		int32_t session_texcompression_level,
+		int32_t terrain_texdetail);
 
 // The minimap's `depthspin` shore texture, 256 x 256, from the 1024 x 1024 height atlas: each texel
 // sums the four taps at (4x, 4z), (4x + 2, 4z), (4x, 4z + 2) and (4x + 2, 4z + 2) and keeps the sum

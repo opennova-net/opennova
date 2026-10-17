@@ -1,7 +1,9 @@
 #include <runtime/terrain/texture_preprocess.h>
 #include <base/io/bits.h>
 #include <runtime/terrain_query/height_field.h>
+#include <runtime/renderer/device_texture.h>
 #include <runtime/renderer/texture_compression.h>
+#include <runtime/renderer/texture_load_rules.h>
 
 #include <algorithm>
 #include <cmath>
@@ -329,27 +331,41 @@ std::vector<Rgba8Image> build_paired_detail_mip_chain(
 std::vector<renderer::DxtSurface> build_detail_layer_levels(
 		const Rgba8Image &base,
 		const Rgba8Image *far_detail,
-		int32_t session_texcompression_level) {
-	// The session's compression word and full terrain detail.
-	// [orig: PolyTrn_InitTextures @ 0x60AB9B..0x60ABBC (0x400100 / 0x400200),
-	//  @ 0x60ABA0 (| 8)]
+		int32_t session_texcompression_level,
+		int32_t terrain_texdetail) {
+	// The session's compression word, the terrain detail's halving word and 8.
+	// [orig: PolyTrn_InitTextures @ 0x60AB95 (g_TerrainDetailTextureFlags),
+	//  @ 0x60AB9B..0x60ABBC (0x400100 / 0x400200), @ 0x60ABA0 (| 8), @ 0x60ABE5]
 	const uint32_t kDetailLayerFlags =
-			renderer::terrain_detail_layer_compression_flags(session_texcompression_level) | 8u;
+			renderer::terrain_detail_layer_compression_flags(session_texcompression_level) | 8u |
+			renderer::terrain_texdetail_flags(terrain_texdetail);
 	const renderer::TextureDxtFormat format = renderer::select_texture_dxt_format(
 			kDetailLayerFlags, renderer::kReferenceTextureDxtCaps);
 	std::vector<renderer::DxtSurface> levels;
 	if (!base.is_valid() || format == renderer::TextureDxtFormat::None) return levels;
+	// Either creator halves its pixels first as the word asks, the far with the
+	// base [orig: GTexture_DownsampleToLimits @ 0x687170, from
+	// GTexture_CreateFromPixelData_0 @ 0x687785 and from
+	// GTexture_CreateFromPixelDataWithAlphaBlend @ 0x68735B (the base) and
+	// @ 0x68736D (the far)].
+	const auto halved = [kDetailLayerFlags](const Rgba8Image &image) {
+		Rgba8Image out = image;
+		renderer::halve_rgba_times(out.pixels, out.width, out.height,
+				renderer::pixel_texture_halvings(out.width, out.height, kDetailLayerFlags));
+		return out;
+	};
+	const Rgba8Image layer = halved(base);
 	if (far_detail != nullptr) {
-		for (const Rgba8Image &level : build_paired_detail_mip_chain(base, *far_detail)) {
+		for (const Rgba8Image &level : build_paired_detail_mip_chain(layer, halved(*far_detail))) {
 			levels.push_back(renderer::encode_dxt_surface(
 					renderer::decode_rgba8(level.pixels.data(), level.width, level.height),
 					level.width, level.height, format));
 		}
 		return levels;
 	}
-	return renderer::build_dxt_texture_levels(base.pixels.data(), base.width,
-			base.height, format,
-			renderer::texture_level_count(base.width, base.height, kDetailLayerFlags));
+	return renderer::build_dxt_texture_levels(layer.pixels.data(), layer.width,
+			layer.height, format,
+			renderer::texture_level_count(layer.width, layer.height, kDetailLayerFlags));
 }
 
 // [orig: GTexture_CreateFromPixelDataWithAlphaBlend @0x687270 — the custom mip builder stops
