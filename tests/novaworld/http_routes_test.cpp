@@ -57,6 +57,7 @@
 #include "server_config.h"
 #include "session_store.h"
 #include "template_engine.h"
+#include "web_access.h"
 #include "web_session.h"
 
 #include <base/io/base64.h>
@@ -4515,6 +4516,51 @@ int test_api_proxy_only(Harness &h) {
 	return 0;
 }
 
+// ONNET_RETAIL_PROXY: a request from the retail port's proxy (prod's portal
+// nginx's retail server, from 127.0.0.2) takes the client address it names in
+// X-Real-IP as its own before any check or route reads it, and is still no
+// trusted proxy's: its /api/ is refused as any client's. Any other peer's
+// X-Real-IP is its own claim and changes nothing; without the header the
+// proxy's request keeps the proxy's address.
+int test_retail_proxy_names_client(Harness &) {
+	nws::AccessMiddleware middleware;
+	middleware.api_proxy_only = true;
+	middleware.trusted_proxies = { "127.0.0.1" };
+	middleware.retail_proxy = "127.0.0.2";
+	const auto through = [&](const std::string &peer, const std::string &url,
+								 const std::string &real_ip, crow::response &res) {
+		crow::request req;
+		req.url = url;
+		req.remote_ip_address = peer;
+		if (!real_ip.empty())
+			req.add_header("X-Real-IP", real_ip);
+		nws::AccessMiddleware::context ctx;
+		middleware.before_handle(req, res, ctx);
+		return req.remote_ip_address;
+	};
+	crow::response res;
+	TEST_EXPECT(through("127.0.0.2", "/NWLogin.dll", "203.0.113.7", res) == "203.0.113.7");
+	TEST_EXPECT(!res.is_completed());
+	crow::response api;
+	TEST_EXPECT(through("127.0.0.2", "/api/health", "203.0.113.7", api) == "203.0.113.7");
+	TEST_EXPECT(api.is_completed() && api.code == 403 &&
+			api.body == "{\"error\":\"proxy_required\"}");
+	// Naming a trusted proxy's address makes the retail proxy's request no
+	// trusted proxy's: the API check reads the TCP peer.
+	crow::response named;
+	TEST_EXPECT(through("127.0.0.2", "/api/health", "127.0.0.1", named) == "127.0.0.1");
+	TEST_EXPECT(named.is_completed() && named.code == 403);
+	crow::response bare;
+	TEST_EXPECT(through("127.0.0.2", "/NWStart.dll", "", bare) == "127.0.0.2");
+	crow::response other;
+	TEST_EXPECT(through("198.51.100.4", "/NWStart.dll", "203.0.113.7", other) == "198.51.100.4");
+	TEST_EXPECT(!other.is_completed());
+	crow::response portal;
+	TEST_EXPECT(through("127.0.0.1", "/api/health", "203.0.113.7", portal) == "127.0.0.1");
+	TEST_EXPECT(!portal.is_completed());
+	return 0;
+}
+
 // A value a page is filled with is text: & < > " ' go out as entities, which
 // a stock client's page parser turns back into the characters, so a request's
 // IN / OUT / MSGBASE on /NWStart.dll, a listed server's name in the .joi page
@@ -7779,6 +7825,7 @@ int run(Harness &h) {
 		{ "reset_during_login", test_reset_during_login },
 		{ "join_identity", test_join_identity },
 		{ "api_proxy_only", test_api_proxy_only },
+		{ "retail_proxy_names_client", test_retail_proxy_names_client },
 		{ "template_values_escaped", test_template_values_escaped },
 		{ "register_handle_rule", test_register_handle_rule },
 		{ "login_row_kept_alive", test_login_row_kept_alive },

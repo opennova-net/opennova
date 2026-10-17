@@ -455,7 +455,7 @@ EOF
 
 cmd_smoke() {
     [[ -f "$env_file" ]] || die "no stack (scripts/dev_stack.sh up first)"
-    local args=(run --web novaworld-web:8080 --site novaworld-web:80 --gate novaworld-gate:7597
+    local args=(run --web novaworld-web:8082 --site novaworld-web:80 --gate novaworld-gate:7597
         --livez novaworld-gate:8081 --livez novaworld-lobby:8081
         --livez novaworld-controller:8081 --livez novaworld-worker:8081
         --admin-token "$(state_value ADMIN_API_TOKEN)" --timeout 300)

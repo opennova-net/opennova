@@ -197,10 +197,12 @@ services:
       - store:/var/lib/opennova/store
 
   # The website: the portal's nginx image (web/Dockerfile), which serves the
-  # built site and proxies /api/ to web's server on 127.0.0.1:8080. It shares
-  # novaworld-web's network as the two containers of web's ECS task share the
-  # task's, so that loopback is web's (a port of the portal's, 80 here or 443
-  # with TLS, is published on novaworld-web).
+  # built site and proxies /api/ to web's server on 127.0.0.1:8080, and on 8082
+  # the retail port's server, every retail request's body capped and proxied
+  # to web's server from 127.0.0.2. It shares novaworld-web's network as the
+  # two containers of web's ECS task share the task's, so that loopback is
+  # web's (the portal's ports, 80 here or 443 with TLS, and 8082, are published
+  # on novaworld-web).
   portal:
     image: ${PORTAL_IMAGE:-opennova-portal:local}
     build:

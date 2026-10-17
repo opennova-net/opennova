@@ -370,12 +370,15 @@ locals {
 
   # Web behind its own nginx: the website cookie Secure on an https site, the
   # proxy whose X-Real-IP names the client (nginx on the task's loopback, and
-  # the toolbox's admin calls from there), /api/ for it alone (8080 is open to
-  # the internet for the retail routes).
+  # the toolbox's admin calls from there), /api/ for it alone (the retail port
+  # is open to the internet), and the retail port's own proxy, the portal
+  # nginx's retail server (web/nginx.conf), which reaches web from 127.0.0.2
+  # and names each client in X-Real-IP, no trusted proxy.
   web_env = {
     ONNET_COOKIE_SECURE   = local.edge_proxied ? "1" : "0"
     ONNET_TRUSTED_PROXIES = "127.0.0.1"
     ONNET_API_PROXY_ONLY  = "1"
+    ONNET_RETAIL_PROXY    = "127.0.0.2"
   }
 
   # The admin's infrastructure view (apps/novaworld_web/infra/infra_status.h):
@@ -495,8 +498,10 @@ locals {
   # Origin CA certificate (edge.tf, SSM tls/*, which Terraform makes beside
   # the proxied records; its entrypoint writes it under ORIGIN_TLS_DIR; without
   # it, nginx listens on 80 and the balancer has no 443) and edge
-  # authentication, /api/ proxied to the server on 127.0.0.1. It starts once
-  # the server answers /livez.
+  # authentication, /api/ proxied to the server on 127.0.0.1; and on
+  # portal_retail_port the retail port's server (load_balancer.tf), each
+  # request's body capped, proxied to the server from 127.0.0.2. It starts
+  # once the server answers /livez.
   portal_secrets = concat(
     [{ name = "EDGE_AUTH_SECRET", valueFrom = "${local.ssm_parameter_prefix}/secret/EDGE_AUTH_SECRET" }],
     local.edge_proxied ? [for n in ["ORIGIN_TLS_CERT", "ORIGIN_TLS_KEY"] : { name = n, valueFrom = "${local.ssm_parameter_prefix}/tls/${n}" }] : [],
@@ -505,7 +510,7 @@ locals {
     name            = "portal"
     image           = "${var.image_registry}/${local.portal_image}:${var.image_tag}"
     essential       = true
-    portMappings    = [{ containerPort = 443, hostPort = 443, protocol = "tcp" }]
+    portMappings    = [for p in [443, local.portal_retail_port] : { containerPort = p, hostPort = p, protocol = "tcp" }]
     environment     = [{ name = "ORIGIN_TLS_DIR", value = "/run/tls" }]
     secrets         = local.portal_secrets
     dockerLabels    = { (local.optional_secrets_label) = jsonencode({ EDGE_AUTH_SECRET_PREVIOUS = "${local.ssm_parameter_prefix}/secret/EDGE_AUTH_SECRET_PREVIOUS" }) }
@@ -605,7 +610,7 @@ resource "aws_ecs_service" "program" {
     content {
       target_group_arn = aws_lb_target_group.public[load_balancer.key].arn
       container_name   = load_balancer.value.container
-      container_port   = load_balancer.value.port
+      container_port   = load_balancer.value.target_port
     }
   }
 
