@@ -57,6 +57,10 @@ public:
 	}
 
 	bool has(const char *key) const { return value_.has(key); }
+	// A member present as null (a route that takes null as absent asks first).
+	bool null(const char *key) const {
+		return value_.has(key) && value_[key].t() == crow::json::type::Null;
+	}
 
 	// A string member; nullopt when it is absent, and also when it is present
 	// as another type, which wrong_type() then reports (answer 400

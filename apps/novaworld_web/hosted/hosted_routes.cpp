@@ -469,7 +469,9 @@ crow::response HostedRoutes::me_start(const crow::request &req) {
 	HostedSettings settings;
 	settings.data_set_id = offered.front().id;
 	if (auto v = body->integer("data_set_id")) settings.data_set_id = *v;
-	if (auto v = body->integer("expansion_id")) settings.expansion_id = *v;
+	if (!body->null("expansion_id")) {
+		if (auto v = body->integer("expansion_id")) settings.expansion_id = *v;
+	}
 	if (auto v = body->text("game_name")) settings.game_name = *v;
 	if (auto v = body->text("game_password")) settings.game_password = *v;
 	// A number past an int reads as one no range admits.

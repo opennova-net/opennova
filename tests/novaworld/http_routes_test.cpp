@@ -5004,7 +5004,8 @@ int test_hosted_server_routes(Harness &h) {
 				e["own_used"].i() == own_used && e["can_start"].b() == can_start && str(e["source"]) == source;
 	};
 	const std::string settings =
-			"{\"game_name\":\"Ana's Server\",\"max_players\":16,\"missions\":[\"first.bms\",\"second.bms\"]}";
+			"{\"game_name\":\"Ana's Server\",\"expansion_id\":null,\"max_players\":16,"
+			"\"missions\":[\"first.bms\",\"second.bms\"]}";
 
 	// Logged out: 401; no CSRF header on a state change: 403, before any bucket.
 	TEST_EXPECT(h.send("GET", "/api/me/servers").code == 401);
@@ -5141,8 +5142,9 @@ int test_hosted_server_routes(Harness &h) {
 	const int64_t ana_first = json["server"]["id"].i();
 	TEST_EXPECT(json["server"]["live"].b() && !json["server"]["own_machine"].b());
 	TEST_EXPECT(str(json["server"]["settings"]["game_name"]) == "Ana's Server");
-	// No data set named: the first offered, with its names; no expansion; not
-	// started yet, so no data and nothing newer.
+	// No data set named: the first offered, with its names; no expansion (null is
+	// the base game alone, as the start form sends it); not started yet, so no data
+	// and nothing newer.
 	TEST_EXPECT(json["server"]["settings"]["data_set_id"].i() == h.jo_id &&
 			json["server"]["settings"]["expansion_id"].t() == crow::json::type::Null);
 	TEST_EXPECT(json["server"]["data_set"]["id"].i() == h.jo_id &&
