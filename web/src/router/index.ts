@@ -5,6 +5,7 @@ import RegisterPage from '../pages/RegisterPage.vue';
 import ForgotPasswordPage from '../pages/ForgotPasswordPage.vue';
 import ResetPasswordPage from '../pages/ResetPasswordPage.vue';
 import LobbyPage from '../pages/LobbyPage.vue';
+import LobbyServerPage from '../pages/LobbyServerPage.vue';
 import AccountLayout from '../pages/account/AccountLayout.vue';
 import ServersPage from '../pages/account/ServersPage.vue';
 import NewServerPage from '../pages/account/NewServerPage.vue';
@@ -49,6 +50,8 @@ const router = createRouter({
     // The link a password reset mail carries: /reset?token=<64 hex digits>.
     { path: '/reset', component: ResetPasswordPage, meta: { title: 'Reset password' } },
     { path: '/lobby', component: LobbyPage, meta: { title: 'Lobbies' } },
+    { path: '/lobby/:id(\d+)', component: LobbyServerPage, meta: { title: 'Server' } },
+    { path: '/lobbies', redirect: '/lobby' },
     { path: '/support', component: SupportPage, meta: { title: 'Support tiers' } },
     { path: '/terms', component: TermsPage, meta: { title: 'Terms of service' } },
     { path: '/privacy', component: PrivacyPage, meta: { title: 'Privacy notice' } },
@@ -60,12 +63,13 @@ const router = createRouter({
       meta: { requiresUser: true },
       children: [
         { path: '', redirect: '/me/servers' },
-        { path: 'servers', component: ServersPage },
-        { path: 'servers/new', component: NewServerPage },
+        { path: 'servers', component: ServersPage, meta: { title: 'Servers' } },
+        { path: 'servers/new', component: NewServerPage, meta: { title: 'New server' } },
         {
           path: 'servers/:id(\\d+)',
           component: ServerDetailLayout,
           props: { scope: 'owner' },
+          meta: { title: 'Server' },
           children: [
             { path: '', component: ServerOverviewTab },
             { path: 'stats', component: ServerStatsTab },
@@ -75,8 +79,8 @@ const router = createRouter({
         },
         // Stripe's Checkout and billing portal return here
         // (?checkout=success&session_id=..., ?checkout=cancel).
-        { path: 'support', component: SupportTierPage },
-        { path: 'account', component: AccountPage },
+        { path: 'support', component: SupportTierPage, meta: { title: 'Support tier' } },
+        { path: 'account', component: AccountPage, meta: { title: 'Account' } },
         // The hosted server's page before an account could have several:
         // old links land on the list.
         { path: 'server', redirect: '/me/servers' },
@@ -85,16 +89,18 @@ const router = createRouter({
     {
       path: '/admin',
       component: AdminLayout,
+      meta: { wide: true },
       children: [
         { path: '', redirect: '/admin/overview' },
-        { path: 'overview', component: OverviewSection },
-        { path: 'users', component: UsersSection },
-        { path: 'users/:id(\\d+)', component: UserDetailSection },
-        { path: 'fleet', component: FleetSection },
+        { path: 'overview', component: OverviewSection, meta: { title: 'Admin: Overview' } },
+        { path: 'users', component: UsersSection, meta: { title: 'Admin: Users' } },
+        { path: 'users/:id(\\d+)', component: UserDetailSection, meta: { title: 'Admin: User' } },
+        { path: 'fleet', component: FleetSection, meta: { title: 'Admin: Fleet' } },
         {
           path: 'fleet/:id(\\d+)',
           component: ServerDetailLayout,
           props: { scope: 'admin' },
+          meta: { title: 'Admin: Server' },
           children: [
             { path: '', component: ServerOverviewTab },
             { path: 'stats', component: ServerStatsTab },
@@ -103,15 +109,15 @@ const router = createRouter({
             { path: 'machine', component: ServerMachineTab },
           ],
         },
-        { path: 'usage', component: UsageSection },
-        { path: 'billing', component: BillingSection },
-        { path: 'service', component: ServerStatusSection },
-        { path: 'sessions', component: ConnectionsSection },
-        { path: 'jobs', component: JobsSection },
-        { path: 'jobs/:id(\\d+)', component: JobDetailSection },
-        { path: 'infrastructure', component: InfraSection },
-        { path: 'cd-keys', component: CdKeysSection },
-        { path: 'data-sets', component: DataSetsSection },
+        { path: 'usage', component: UsageSection, meta: { title: 'Admin: Server usage' } },
+        { path: 'billing', component: BillingSection, meta: { title: 'Admin: Billing' } },
+        { path: 'service', component: ServerStatusSection, meta: { title: 'Admin: NovaWorld service' } },
+        { path: 'sessions', component: ConnectionsSection, meta: { title: 'Admin: NovaWorld sessions' } },
+        { path: 'jobs', component: JobsSection, meta: { title: 'Admin: Background jobs' } },
+        { path: 'jobs/:id(\\d+)', component: JobDetailSection, meta: { title: 'Admin: Job' } },
+        { path: 'infrastructure', component: InfraSection, meta: { title: 'Admin: Infrastructure' } },
+        { path: 'cd-keys', component: CdKeysSection, meta: { title: 'Admin: CD keys' } },
+        { path: 'data-sets', component: DataSetsSection, meta: { title: 'Admin: Game data' } },
         // The sections' names before the admin pages were rebuilt: old links
         // land on their new pages.
         { path: 'hosted', redirect: '/admin/fleet' },
@@ -138,7 +144,7 @@ const router = createRouter({
 
 router.beforeEach(requireUser);
 
-// Each public page names itself in the tab; the rest keep the site's title.
+// Each page names itself in the tab; the home page keeps the site's title.
 const SITE_TITLE = document.title;
 router.afterEach((to) => {
   const title = to.meta.title as string | undefined;

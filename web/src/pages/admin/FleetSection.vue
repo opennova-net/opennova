@@ -4,8 +4,7 @@
       <div>
         <h1 class="text-3xl font-semibold text-ink">Fleet</h1>
         <p class="text-sm text-ink-muted">
-          The machines NovaWorld runs hosted servers on, and the servers on them. A shared machine holds several
-          servers, an own machine exactly one.
+          The machines that run hosted servers, and their servers.
         </p>
       </div>
       <div class="flex items-center gap-3">
@@ -39,9 +38,8 @@
         </button>
       </div>
       <p id="fleet-roll-hint" class="text-xs text-ink-muted">
-        Rolling drains every shared machine and moves its servers to fresh ones (a new image, say); the moves count
-        as no restart. Each machine's launch and end runs as a background job: see
-        <RouterLink to="/admin/jobs" class="text-accent hover:text-ink-bright">Background jobs</RouterLink>.
+        Moves every server to fresh shared machines (a new image, say), not counted as a restart. Launches run as
+        <RouterLink to="/admin/jobs" class="text-accent hover:text-ink-bright">background jobs</RouterLink>.
       </p>
       <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">
         <table class="min-w-full divide-y divide-border">
@@ -119,9 +117,9 @@
         </button>
       </div>
       <p id="fleet-update-all-hint" class="text-xs text-ink-muted">
-        A server keeps the game data it started on until its owner updates it. This restarts every live server
-        that runs older data than its data set's current, dropping their players; the data sets are on
-        <RouterLink to="/admin/data-sets" class="text-accent hover:text-ink-bright">Game data</RouterLink>.
+        Restarts every live server on older data than its
+        <RouterLink to="/admin/data-sets" class="text-accent hover:text-ink-bright">data set's</RouterLink> current,
+        dropping its players.
       </p>
       <form class="flex flex-wrap items-end gap-3" @submit.prevent="applyFilter">
         <label class="space-y-1">
@@ -207,9 +205,9 @@
               </td>
               <td class="fleet-server-data px-4 py-3 text-xs">
                 <template v-if="s.base_tree_id !== null">
-                  <span class="block whitespace-nowrap">{{ pinnedText(s.data.base, s.base_tree_id) }}</span>
+                  <span class="block whitespace-nowrap">{{ pinnedText(s.data.base) }}</span>
                   <span v-if="s.expansion_tree_id !== null" class="block whitespace-nowrap text-ink-muted">
-                    {{ s.expansion?.display_name || 'Expansion' }} {{ pinnedText(s.data.expansion, s.expansion_tree_id) }}
+                    {{ s.expansion?.display_name || 'Expansion' }} {{ pinnedText(s.data.expansion) }}
                   </span>
                   <span v-if="s.update_requested" class="block text-warn">Update requested</span>
                   <span v-else-if="s.outdated" class="inline-block rounded-control bg-warn/10 px-2 py-0.5 font-medium text-warn">Outdated</span>
@@ -244,8 +242,7 @@
     <section class="space-y-4 rounded-panel border border-danger/40 p-4 sm:p-6" aria-labelledby="stop-all-heading">
       <h2 id="stop-all-heading" class="text-xl font-semibold text-danger">Stop all</h2>
       <p class="text-sm text-ink-muted">
-        The kill switch: every live hosted server goes to stopping at once. Their matches end for everyone on them.
-        Owners can start them again while hosting stays on.
+        Stops every live hosted server now, ending their matches. Owners can start them again.
       </p>
       <button
         v-if="!confirmingAll"
@@ -337,11 +334,11 @@ let errorFromLoad = false;
 
 const liveCount = computed(() => fleet.value?.servers.filter((s) => s.live).length ?? 0);
 const outdatedCount = computed(() => fleet.value?.servers.filter((s) => s.live && s.outdated && !s.update_requested).length ?? 0);
-const activeMachines = computed(() => (fleet.value?.machines ?? []).filter((m) => m.state !== 'ended'));
+const activeMachines = computed(() => (fleet.value?.machines ?? []).filter((m) => m.state !== 'ended' && m.state !== 'failed'));
 
-// A pinned tree's version, or its id when the reply gave none.
-function pinnedText(tree: PinnedTree | null, treeId: number): string {
-  return tree?.version ? tree.version : `tree ${treeId}`;
+// A pinned tree's version; data that ships no version.txt has none.
+function pinnedText(tree: PinnedTree | null): string {
+  return tree?.version || 'No version';
 }
 const machineBreakdown = computed(() => {
   const shared = activeMachines.value.filter((m) => m.kind === 'shared').length;

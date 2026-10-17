@@ -4,8 +4,7 @@
       <div>
         <h1 class="text-3xl font-semibold text-ink">Billing</h1>
         <p class="text-sm text-ink-muted">
-          Support tier subscriptions as NovaWorld last read them from Stripe. Changes to a subscription happen in
-          Stripe; the dashboard links open it there.
+          Subscriptions as last read from Stripe. Change them in Stripe.
         </p>
       </div>
       <button type="button" :class="secondaryButton" :disabled="loading" @click="load">
@@ -138,8 +137,7 @@
           </table>
         </div>
         <p class="text-xs text-ink-muted">
-          Counted from the subscriptions that grant hosting now, at today's prices, before Stripe's fees and any tax:
-          an estimate, not what Stripe pays out.
+          An estimate at today's prices, before Stripe's fees and tax.
         </p>
       </section>
 
@@ -180,9 +178,7 @@
       <section class="space-y-3" aria-labelledby="billing-orphans">
         <h2 id="billing-orphans" class="text-xl font-semibold text-ink">Subscriptions no account owns ({{ billing.orphans.length }})</h2>
         <p class="text-sm text-ink-muted">
-          Stripe subscriptions whose customer is not linked to an account here: another NovaWorld deployment's on the
-          same Stripe account, or one whose link was lost (a database reset). Link a customer to the account it
-          belongs to.
+          Their Stripe customer has no account here: another deployment's, or a lost link. Link each to its account.
         </p>
         <p v-if="billing.orphans.length === 0" class="text-sm text-ink-muted">None.</p>
         <ul v-else class="space-y-3">
@@ -233,7 +229,7 @@
                 </th>
                 <td class="whitespace-nowrap px-4 py-2">{{ itemLabel(s) }}</td>
                 <td class="whitespace-nowrap px-4 py-2" :class="s.status === 'past_due' ? 'text-warn' : ''">
-                  {{ subscriptionStatusLabel(s.status) }}<template v-if="s.cancel_at_period_end">, canceling</template>
+                  {{ subscriptionStatusLabel(s.status) }}<template v-if="s.cancel_at_period_end && s.entitled">, canceling</template>
                 </td>
                 <td class="whitespace-nowrap px-4 py-2">
                   <RelativeTime v-if="s.current_period_end" :value="s.current_period_end" :now="now" />

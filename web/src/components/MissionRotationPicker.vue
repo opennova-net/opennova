@@ -11,10 +11,8 @@
       Mission rotation
     </legend>
     <p :id="`${baseId}-hint`" class="text-xs text-ink-muted">
-      The server plays these maps in order and then starts over; the first is the map it starts on.
-      Choose from the {{ offered.length }} mission{{ offered.length === 1 ? '' : 's' }} the game
-      <template v-if="withExpansion">and its expansion hold</template><template v-else>holds</template>, up to
-      {{ MISSIONS_MAX }}. A new server plays all of them unless you take some out.
+      Played in order from the first, then again. Up to {{ MISSIONS_MAX }} of the {{ offered.length }}
+      mission{{ offered.length === 1 ? '' : 's' }} the game<template v-if="withExpansion"> and its expansion</template> hold{{ withExpansion ? '' : 's' }}.
     </p>
     <p v-if="error" :id="`${baseId}-error`" class="text-xs text-danger">{{ error }}</p>
 

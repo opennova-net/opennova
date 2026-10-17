@@ -89,6 +89,7 @@ const LISTENERS: Record<string, string> = {
   lobby: 'The lobby (UDP 64206)',
   http: 'The retail HTTP port (TCP 8080)',
   https: 'The website (TCP 443)',
+  update: 'The updater (TCP 20044, 20556, 21068, 21580)',
 };
 
 export function listenerLabel(key: string): string {
@@ -154,6 +155,18 @@ export function offRelease(cloud: InfraCloudRead): InfraService[] {
   return cloud.services.filter((s) => s.on_release === false && serviceState(s).label !== 'Rolling out');
 }
 
+// A program ECS is rolling to a new deployment (a deploy's or a rollback's),
+// not one replacing a task.
+function isRolling(s: InfraService): boolean {
+  return s.deployments.length > 1 || primaryDeployment(s)?.rollout_state === 'IN_PROGRESS';
+}
+
+// "web, controller and worker".
+function names(services: InfraService[]): string {
+  const n = services.map((s) => s.name);
+  return n.length < 2 ? n.join('') : `${n.slice(0, -1).join(', ')} and ${n[n.length - 1]}`;
+}
+
 // What an operator should look at first, most pressing first.
 export function infraWarnings(o: InfraOverview): string[] {
   const out: string[] = [];
@@ -182,8 +195,20 @@ export function infraWarnings(o: InfraOverview): string[] {
     }
     if (cloud.database && cloud.database.status !== 'available') out.push(`The database is ${cloud.database.status}.`);
     if (cloud.cache && cloud.cache.status !== 'available') out.push(`The cache is ${cloud.cache.status}.`);
-    for (const s of offRelease(cloud)) {
-      out.push(`${s.name} runs ${s.task_definition}, not the release's revision: a deploy or a rollback did not finish.`);
+    // A deploy (or a rollback) rolls the programs in turn and records its
+    // release once the last one serves: while one still rolls, the ones it
+    // rolled already run revisions the release does not name yet.
+    const off = offRelease(cloud);
+    const rolling = cloud.services.filter(isRolling);
+    if (off.length > 0 && rolling.length > 0) {
+      out.push(
+        `A deploy is rolling out (${names(rolling)} now): ${names(off)} ${off.length === 1 ? 'runs its new revision' : 'run their new revisions'}, ` +
+          'and the release is recorded once every program does.',
+      );
+    } else {
+      for (const s of off) {
+        out.push(`${s.name} runs ${s.task_definition}, not the release's revision: a deploy or a rollback did not finish.`);
+      }
     }
   }
   if (!o.lobbies.some((l) => l.live && l.state === 'active')) {

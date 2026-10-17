@@ -1,6 +1,6 @@
 <template>
   <footer class="border-t border-border bg-panel/40 py-10 text-sm">
-    <div class="page grid grid-cols-3 gap-6 lg:grid-cols-4">
+    <div :class="[wide ? 'page-wide' : 'page', 'grid grid-cols-3 gap-6 lg:grid-cols-4']">
       <div class="col-span-3 space-y-2 lg:col-span-1">
         <p class="font-semibold text-ink">Open<span class="text-accent">Nova</span></p>
         <p class="text-ink-muted">
@@ -31,13 +31,18 @@
         </ul>
       </nav>
     </div>
-    <p class="page mt-8 text-xs text-ink-muted">
+    <p :class="[wide ? 'page-wide' : 'page', 'mt-8 text-xs text-ink-muted']">
       Fan-run preservation project, not endorsed by THQ Nordic; original rights remain with their owners.
     </p>
   </footer>
 </template>
 
 <script setup lang="ts">
-import { RouterLink } from 'vue-router';
+import { computed } from 'vue';
+import { RouterLink, useRoute } from 'vue-router';
 import { GITHUB_URL, RELEASES_URL } from '../utils/links';
+
+// The admin pages are wide; the footer lines up with them.
+const route = useRoute();
+const wide = computed(() => route.matched.some((record) => record.meta.wide));
 </script>

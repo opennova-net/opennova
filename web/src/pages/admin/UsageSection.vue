@@ -4,8 +4,7 @@
       <div>
         <h1 class="text-3xl font-semibold text-ink">Server usage</h1>
         <p class="text-sm text-ink-muted">
-          The memory, CPU and network every live hosted server uses, as its machine reports it. NovaWorld samples each
-          server once a minute; this page reads them again every 30 seconds.
+          Memory, CPU and network of each live hosted server, sampled every minute.
         </p>
       </div>
       <div class="flex items-center gap-3">
@@ -105,9 +104,8 @@
       <div>
         <h2 id="usage-servers" class="text-xl font-semibold text-ink">Servers</h2>
         <p class="text-sm text-ink-muted">
-          By machine and slot. CPU is a share of the server's slot
-          ({{ usage ? formatCpus(usage.slot_cpus) : 'its CPUs' }}); "No report" is a server with no sample in the last
-          3 minutes, or whose container has not reported yet.
+          CPU is a share of the server's slot ({{ usage ? formatCpus(usage.slot_cpus) : 'its CPUs' }}). "No report":
+          no sample in the last 3 minutes.
         </p>
       </div>
       <div class="relative overflow-x-auto rounded-panel border border-border bg-panel">

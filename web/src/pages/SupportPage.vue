@@ -44,8 +44,7 @@
             <template v-if="tiers.own_machine.amount !== null">
               {{ formatMoney(tiers.own_machine.amount, tiers.currency) }} a month for each.
             </template>
-            Runs one of your tier's servers alone on a machine of its own instead of a shared one. Add it from your
-            support tier page once you have a tier.
+            Runs one of your tier's servers on a machine of its own. Add it from your support tier page.
           </p>
         </section>
       </template>

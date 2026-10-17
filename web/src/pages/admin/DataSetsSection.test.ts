@@ -117,7 +117,7 @@ describe('DataSetsSection', () => {
 
   it('lists each data set with its kind, updater, data, release and servers', async () => {
     const page = await mountSection();
-    expect(page.text()).toContain("through the site to the service's local store, in 32 MiB parts");
+    expect(page.text()).toContain("Uploads go to the service's local store in 32 MiB parts");
     const rows = page.findAll('tr.ds-row');
     expect(rows).toHaveLength(3);
     expect(rows[0].text()).toContain('Joint Operations');

@@ -78,7 +78,6 @@
             required
             maxlength="31"
             autocomplete="off"
-            :placeholder="server.server_name"
             :aria-invalid="failedForm === 'name' ? 'true' : undefined"
             :aria-describedby="failedForm === 'name' ? `${ids.nameHint} ${ids.error}` : ids.nameHint"
             class="min-w-0 flex-1 rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none"
@@ -86,8 +85,7 @@
           <button type="submit" :disabled="busy" :class="primaryButton">Rename</button>
         </div>
         <p :id="ids.nameHint" class="text-xs text-ink-muted">
-          {{ cp1252Length(name) }} of 31 characters. Accented letters work; emoji and most other
-          scripts do not.
+          {{ cp1252Length(name) }} of 31 characters.
         </p>
       </form>
 
@@ -104,7 +102,6 @@
             required
             maxlength="127"
             autocomplete="off"
-            :placeholder="server.msg"
             :aria-invalid="failedForm === 'msg' ? 'true' : undefined"
             :aria-describedby="failedForm === 'msg' ? `${ids.msgHint} ${ids.error}` : ids.msgHint"
             class="min-w-0 flex-1 rounded-control border border-border bg-surface px-3 py-2 text-sm text-ink focus:border-accent focus:outline-none"
@@ -270,7 +267,7 @@
 // only what its console lacks: the name, the message, the mission's end and
 // the weather and time. Its header, chat, players and stop are then the
 // page's own.
-import { computed, nextTick, ref } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { sendServerCommand, stopHosting, type HostError } from '../api/myServers';
 import type { MyServer, OwnerVerb, RosterSlot, ServerCommandBody } from '../types/myServers';
 import { cp1252Length, cp1252Problem } from '../utils/cp1252';
@@ -335,8 +332,21 @@ const alertText = ref('');
 const failedForm = ref<string | null>(null);
 
 const chat = ref('');
-const name = ref('');
-const message = ref('');
+// The server's own name and message, which the fields follow until edited.
+const name = ref(props.server.server_name);
+const message = ref(props.server.msg);
+watch(
+  () => props.server.server_name,
+  (now, before) => {
+    if (name.value === before) name.value = now;
+  },
+);
+watch(
+  () => props.server.msg,
+  (now, before) => {
+    if (message.value === before) message.value = now;
+  },
+);
 const winner = ref<'' | (typeof winnerTeams)[number]>('');
 const quakeSeconds = ref(30);
 const timeOfDay = ref('');
@@ -402,17 +412,13 @@ async function sendChat() {
 async function sendName() {
   const text = name.value.trim();
   if (!text || !textFits('name', text, 31)) return;
-  if (await push('name', { verb: 'SetServerName', args: [text] }, `Asked ${serverLabel()} to rename itself “${text}”.`)) {
-    name.value = '';
-  }
+  await push('name', { verb: 'SetServerName', args: [text] }, `Asked ${serverLabel()} to rename itself “${text}”.`);
 }
 
 async function sendMessage() {
   const text = message.value.trim();
   if (!text || !textFits('msg', text, 127)) return;
-  if (await push('msg', { verb: 'SetServerMsg', args: [text] }, `Asked ${serverLabel()} to set its message to “${text}”.`)) {
-    message.value = '';
-  }
+  await push('msg', { verb: 'SetServerMsg', args: [text] }, `Asked ${serverLabel()} to set its message to “${text}”.`);
 }
 
 async function endMission(verb: 'Cycle' | 'EndMission' | 'GameOver') {

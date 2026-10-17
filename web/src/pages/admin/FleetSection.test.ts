@@ -166,6 +166,8 @@ describe('FleetSection', () => {
       }),
     });
     const page = await mountSection();
+    // Only the lost one counts as a machine: a failed one never ran.
+    expect(page.text()).toContain('1 shared, 0 own');
     const rows = page.findAll('tr.fleet-machine-row');
     expect(rows).toHaveLength(3);
     expect(rows[0].findAll('button')).toHaveLength(0);

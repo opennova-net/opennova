@@ -613,9 +613,16 @@ app_deploy() {
     revisions="$(jq -c --arg k "$key" --arg v "$td" '. + {($k): $v}' <<<"$revisions")"
   done
 
-  local rev dirty=false id
-  rev="$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
-  if [ -n "$(git -C "$ROOT" status --porcelain -- infra/aws 2>/dev/null)" ]; then dirty=true; fi
+  # The commit and infra/aws's state as deploy/run.sh read them on the host
+  # (a linked worktree's .git names a directory outside the mount), else as
+  # this checkout's git reads them.
+  local rev="${OPENNOVA_REVISION:-}" dirty="${OPENNOVA_INFRA_DIRTY:-false}" id
+  if [ -z "$rev" ]; then
+    rev="$(git -C "$ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+    dirty=false
+    if [ -n "$(git -C "$ROOT" status --porcelain -- infra/aws 2>/dev/null)" ]; then dirty=true; fi
+  fi
+  [ "$dirty" = true ] || dirty=false
   id="$(date -u +%Y%m%dT%H%M%SZ)-${rev:0:7}"
   # Rolled first, recorded once every program runs it: the release parameter
   # (and the backup task's revision, which the nightly run takes) never names

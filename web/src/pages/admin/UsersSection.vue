@@ -4,8 +4,7 @@
       <div>
         <h1 class="text-3xl font-semibold text-ink">Users</h1>
         <p class="text-sm text-ink-muted">
-          Player accounts with their support tier and hosted servers. Open one to edit it, change its role, grant
-          it hosted servers or delete it.
+          Accounts with their support tier and hosted servers.
         </p>
       </div>
       <button type="button" :class="secondaryButton" :disabled="loading" @click="refresh">

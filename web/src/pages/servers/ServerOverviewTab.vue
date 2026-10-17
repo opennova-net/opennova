@@ -50,6 +50,13 @@
           <dd class="text-ink"><RelativeTime :value="server.ended_at" :now="now" /></dd>
         </template>
       </dl>
+      <RouterLink
+        v-if="scope === 'owner' && !server.live"
+        :to="{ path: '/me/servers/new', query: { from: String(server.id) } }"
+        class="btn-primary w-fit"
+      >
+        Start again
+      </RouterLink>
     </section>
 
     <!-- The data it runs on, and the update waiting when its data set has
@@ -172,8 +179,8 @@
     <section v-if="server.live && server.state !== 'stopping'" class="space-y-3 rounded-panel border border-danger/40 p-4" :aria-labelledby="ids.stop">
       <h2 :id="ids.stop" class="text-lg font-semibold text-danger">Stop the server</h2>
       <p class="text-sm text-ink-muted">
-        Ends the match for everyone on it.
-        <template v-if="scope === 'owner'">Its settings stay here, so you can start it again. {{ STOPPING_STILL_COUNTS }}</template>
+        Ends the match for everyone.
+        <template v-if="scope === 'owner'">You can start it again. {{ STOPPING_STILL_COUNTS }}</template>
       </p>
       <button
         v-if="!confirmingStop"
@@ -221,6 +228,7 @@
 // owner's POST /api/me/servers/<id>/stop, the admin's POST
 // /api/admin/hosted/<id>/stop).
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
+import { RouterLink } from 'vue-router';
 import MyServerCard from '../../components/MyServerCard.vue';
 import RelativeTime from '../../components/RelativeTime.vue';
 import { stopFleetServer } from '../../api/admin';
@@ -286,7 +294,7 @@ const expansionName = computed(() => props.server.expansion?.display_name || pro
 
 function dataVersionText(tree: PinnedTree | null): string {
   if (!tree) return 'Not placed on data yet';
-  return tree.version ? `version ${tree.version}` : `tree ${tree.tree_id}`;
+  return tree.version || 'No version';
 }
 
 // The data set's (and expansion's) current versions, read when an update

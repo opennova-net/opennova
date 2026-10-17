@@ -209,6 +209,9 @@ struct GroupRetry {
 	int64_t changed = 0; // no longer failed (retried or cancelled meanwhile)
 };
 GroupRetry retry_group(db::Database &db, const std::string &kind, const std::string &key);
+// A failure group dismissed: its jobs (as retry_group takes them) deleted, as
+// the prune would delete them after 14 days. How many went.
+int64_t dismiss_group(db::Database &db, const std::string &kind, const std::string &key);
 // A queued job failed for good, "<kCancelledByAdmin> (<actor>)" its error and
 // its secret dropped.
 ActionResult cancel(db::Database &db, int64_t id, const std::string &actor);

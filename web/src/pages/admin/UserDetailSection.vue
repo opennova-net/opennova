@@ -121,7 +121,7 @@
           <p id="user-comp-hint" class="text-xs" :class="compProblem ? 'text-danger' : 'text-ink-muted'">
             {{
               compProblem ||
-              `0 to ${COMP_SERVERS_MAX} hosted servers, free of charge. The account may run the larger of this and its support tier's servers; lowering it below what it runs stops its newest servers first.`
+              `0 to ${COMP_SERVERS_MAX} free hosted servers. The account gets the larger of this and its tier's; lowering it stops its newest servers first.`
             }}
           </p>
         </form>

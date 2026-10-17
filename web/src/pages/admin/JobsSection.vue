@@ -4,8 +4,7 @@
       <div>
         <h1 class="text-3xl font-semibold text-ink">Background jobs</h1>
         <p class="text-sm text-ink-muted">
-          The work NovaWorld does off its requests: the fleet's cloud calls, the billing sync with Stripe, the mail and the
-          prunes. Workers take each job from one queue in the database.
+          Work NovaWorld does in the background: cloud calls, the Stripe sync, mail and prunes.
         </p>
       </div>
       <div class="flex items-center gap-3">
