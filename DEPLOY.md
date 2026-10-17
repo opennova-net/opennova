@@ -793,7 +793,8 @@ credentials).
    launches, so the wait is bounded at 40 minutes (`OPENNOVA_ROLL_TIMEOUT`, seconds). A
    failed or unfinished one stops the deploy, leaving the rest on what they ran. A service
    at no task before the deployment's first release starts at its `desired` count, and
-   its floor is raised to its `min`;
+   its floor is raised to its `min` (the controller, up before any lobby, starts no
+   hosted server until a lobby runs: `apps/novaworld_common/README.md` "No lobby live");
 5. once every program runs it, registers the backup task's revision (the nightly run
    takes the newest) and records the release: its manifest (the images by digest, each
    revision, the previous release, the release it was promoted from) goes to
@@ -1604,8 +1605,12 @@ The gate and the site are down from step 2 until step 10, about an hour.
     dump predates run at boot.
 11. [new] `./deploy/run.sh $P fleet bake-image`; the smoke tests A to E on prod (with
     `--deployment prod`); maintenance off in the new admin page (the dump carried it on).
-12. The hosted servers: their owners (or an admin, server by server) start them again
-    from My servers; each lands on a machine of the prod account (smoke tests F, G).
+12. The hosted servers: one the dump left live starts again by itself once the lobby
+    runs (the supervisor places none while no lobby is live, and an exit then costs no
+    restart), on a machine of the prod account, which boots while the gate rolls. One
+    step 1 stopped, or one that failed all the same, its owner (or an admin, server by
+    server) starts again from My servers; each lands on a machine of the prod account
+    (smoke tests F, G).
 
 **Rollback** (until step 11; the old database is untouched since step 2): [new] `$P app
 down --yes`; lift the load balancer's deletion protection (`$P aws elbv2

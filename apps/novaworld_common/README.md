@@ -975,6 +975,18 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   once, placed again (`its machine is gone; placed again (no restart counted)`). The brake
   on a fleet that cannot launch is the launch backoff below and the heartbeat's
   `launch_failures`, not the servers' restarts.
+- **No lobby live.** While no lobby instance takes clients (`lobbydb::live_lobbies`, the
+  gates' own read: a lobby outage, or a deployment's first release, whose controller
+  rolls before any lobby), a gate hands a starting `opennova-serve` no lobby, and it
+  gives up past its 30 s probe and exits (retail's). So the supervisor starts nothing then:
+  a server due to be placed waits in `provisioning`, no machine launched for it
+  (`[hosted] server <id> waits for a live lobby`; the pass logs `[hosted] WARN no lobby
+  instance is live` once), an exit is NovaWorld's cause and places the server again with
+  no restart counted (`... while no lobby instance was live; placed again (no restart
+  counted)`), and the listing's clocks wait (a listing server's timeout above, a running
+  one's 8 min below: its lister reconnects to the lobby address and lists again once a
+  lobby is back there). Once a lobby is live the waiting servers start, and an exit
+  counts again.
 - **The machines' lifecycle.** A machine whose launch job has not finished within the
   driver's boot timeout (15 min on EC2, 2 min for the local stack's containers) fails, as does a booting machine
   whose agent never reports within it (terminated); one whose describe finds it gone
@@ -1111,8 +1123,8 @@ tables). Each server runs one data set its owner picks. Everything here is servi
   balancer's; the local stack's fixed endpoint), so a lobby's replacement lists the
   server again within about 4.5 min, no restart; the 8 min are the safety net for a
   server whose lobby address is gone, and a new start goes through the gate. While its
-  machine is lost, the listing's clock waits. Always on: nothing reaps an idle server or
-  ends one for its age.
+  machine is lost, or no lobby is live (above), the listing's clock waits. Always on:
+  nothing reaps an idle server or ends one for its age.
 - **Reconciliation** at the supervisor's start: a machine row still `launching` whose
   launch job is gone fails (one whose job waits or runs resumes: the job outlives the
   service); a `fleet.sweep` job runs (every cloud machine the driver lists, `list_tagged`,

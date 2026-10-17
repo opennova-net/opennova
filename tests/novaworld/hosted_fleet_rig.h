@@ -23,6 +23,7 @@
 
 #include <net/novaworld/db/database.h>
 #include <net/novaworld/host_repository.h>
+#include <net/novaworld/lobby_repository.h>
 
 #include "common/temp_dir.h"
 #include "common/test_database.h"
@@ -233,6 +234,7 @@ struct Rig {
 		config.clock_ms = [this] { return now; };
 		hosted::register_fleet_jobs(registry, fake);
 		make_supervisor();
+		lobby_up();
 	}
 	void make_supervisor() {
 		sup = std::make_unique<hosted::Supervisor>(pool, fake.profile(), config);
@@ -332,6 +334,16 @@ struct Rig {
 		advance(config.restart_backoff_ms);
 		return to_running(id, rid);
 	}
+	// A lobby instance that takes clients, one from the rig's start (the
+	// supervisor starts no server while none does), seen a day ahead so it stays
+	// live however long a test runs (a running lobby moves its row every 5 s).
+	void lobby_up() {
+		const int64_t id = opennova::lobbydb::register_instance(db, "203.0.113.5:64206");
+		db.exec("UPDATE lobby_instances SET last_seen_at = now() + interval '1 day' WHERE id = $1;",
+				{ BindValue(id) });
+	}
+	// No lobby live: every instance's row gone, as a lobby's clean stop leaves it.
+	void lobby_down() { db.exec("DELETE FROM lobby_instances;"); }
 	// The machine's agent's last report a few minutes old, and silent from now.
 	void silence(int64_t machine_id) {
 		muted.insert(machine_id);
