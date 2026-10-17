@@ -44,8 +44,8 @@ bool same_rows(const adm::AdmFile &a, const adm::AdmFile &b) {
 	for (size_t i = 0; i < a.count; ++i) {
 		const adm::AdmEntry &x = a.entries[i];
 		const adm::AdmEntry &y = b.entries[i];
-		if (std::strcmp(x.key, y.key) != 0 || x.variant_count != y.variant_count) return false;
-		for (size_t v = 0; v < x.variant_count; ++v)
+		if (std::strcmp(x.key, y.key) != 0 || x.variants.size() != y.variants.size()) return false;
+		for (size_t v = 0; v < x.variants.size(); ++v)
 			if (std::strcmp(x.variants[v], y.variants[v]) != 0) return false;
 	}
 	return true;

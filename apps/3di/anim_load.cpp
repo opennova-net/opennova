@@ -92,7 +92,7 @@ bool anim_load(const std::string &path, AnimLoadedSet &out, std::string &error) 
 		const opennova::adm::AdmEntry &entry = table.entries[i];
 		BadBuildRow row;
 		row.key = entry.key;
-		for (size_t v = 0; v < entry.variant_count; ++v) row.variants.push_back(entry.variants[v]);
+		for (size_t v = 0; v < entry.variants.size(); ++v) row.variants.push_back(entry.variants[v].text);
 		// The game registers a row only under the slot its key names past the
 		// first five characters. [orig: AnimMap_ParseConfigLine @0x40CB60 —
 		// AnimMap_FindSlotByName @0x40CFA0 returns -1 @0x40CFCE, and the row

@@ -17,15 +17,15 @@ int main() {
 
     AdmEntry entries[3] = {};
     std::strcpy(entries[0].key, "anim_reset");
-    entries[0].variant_count = 1;
+    entries[0].variants.resize(1);
     std::strcpy(entries[0].variants[0], "person_rst");
     std::strcpy(entries[1].key, "anim_wpn_reload");
-    entries[1].variant_count = 3;
+    entries[1].variants.resize(3);
     std::strcpy(entries[1].variants[0], "m4_1r");
     std::strcpy(entries[1].variants[1], "m4_1r");
     std::strcpy(entries[1].variants[2], "m4_1r2");
     std::strcpy(entries[2].key, "anim_idle");
-    entries[2].variant_count = 1;
+    entries[2].variants.resize(1);
     std::strcpy(entries[2].variants[0], "person_idle.bad");
     AdmFile table = {};
     table.entries = entries;
@@ -42,8 +42,8 @@ int main() {
     AdmFile back = {};
     TEST_EXPECT(adm_parse_buffer(bytes.data(), bytes.size(), &back) == 0);
     TEST_EXPECT(back.count == 3);
-    TEST_EXPECT(std::strcmp(back.entries[0].key, "anim_reset") == 0 && back.entries[0].variant_count == 1);
-    TEST_EXPECT(std::strcmp(back.entries[1].variants[2], "m4_1r2") == 0 && back.entries[1].variant_count == 3);
+    TEST_EXPECT(std::strcmp(back.entries[0].key, "anim_reset") == 0 && back.entries[0].variants.size() == 1);
+    TEST_EXPECT(std::strcmp(back.entries[1].variants[2], "m4_1r2") == 0 && back.entries[1].variants.size() == 3);
     TEST_EXPECT(std::strcmp(back.entries[2].variants[0], "person_idle.bad") == 0);
     adm_free(&back);
 
@@ -57,7 +57,7 @@ int main() {
     // clip name.
     AdmEntry bad = {};
     std::strcpy(bad.key, "reset");
-    bad.variant_count = 1;
+    bad.variants.resize(1);
     std::strcpy(bad.variants[0], "x");
     AdmFile one = {};
     one.entries = &bad;
@@ -72,9 +72,9 @@ int main() {
     TEST_EXPECT(upper.count == 1 && std::strcmp(upper.entries[0].key, "ANIM_RESET") == 0);
     adm_free(&upper);
     std::strcpy(bad.key, "anim_reset");
-    bad.variant_count = 0;
+    bad.variants.resize(0);
     TEST_EXPECT(adm_write_buffer(&one, bytes) == -1);
-    bad.variant_count = 1;
+    bad.variants.resize(1);
     std::strcpy(bad.variants[0], "a\"b");
     TEST_EXPECT(adm_write_buffer(&one, bytes) == -1);
 

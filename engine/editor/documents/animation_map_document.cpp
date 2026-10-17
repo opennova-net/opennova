@@ -81,9 +81,9 @@ bool set_text(std::string &target, const Value &value, std::string &error) {
 adm::AdmEntry entry_of(const AnimationMapRow &row) {
 	adm::AdmEntry e{};
 	std::snprintf(e.key, sizeof(e.key), "%s", row.key.c_str());
-	e.variant_count = std::min<size_t>(row.clips.size(), size_t(adm::ADM_MAX_VARIANTS) + 1);
-	for (size_t v = 0; v < row.clips.size() && v < size_t(adm::ADM_MAX_VARIANTS); ++v)
-		std::snprintf(e.variants[v], sizeof(e.variants[v]), "%s", row.clips[v].c_str());
+	e.variants.resize(row.clips.size());
+	for (size_t v = 0; v < row.clips.size(); ++v)
+		std::snprintf(e.variants[v].text, sizeof(e.variants[v].text), "%s", row.clips[v].c_str());
 	return e;
 }
 
@@ -267,7 +267,7 @@ bool AnimationMapDocument::parse(const std::vector<uint8_t> &bytes, std::vector<
 	for (size_t i = 0; i < file.count; ++i) {
 		auto row = std::make_shared<AnimationMapRow>();
 		row->key = file.entries[i].key;
-		for (size_t v = 0; v < file.entries[i].variant_count; ++v) row->clips.push_back(file.entries[i].variants[v]);
+		for (const adm::AdmClip &clip : file.entries[i].variants) row->clips.push_back(clip.text);
 		row->collections[0].resize(row->clips.size());
 		rows.push_back(row);
 	}
@@ -310,7 +310,7 @@ bool AnimationMapDocument::edit_collection(Node &node, const Edit &edit, const I
 	AnimationMapRow &r = row_of(node);
 	const bool grows = edit.operation == EditOperation::Add || edit.operation == EditOperation::Duplicate;
 	if (grows && r.clips.size() >= size_t(adm::ADM_MAX_VARIANTS)) {
-		error = "A row names at most 8 clips.";
+		error = "A row names at most 29 clips: the game's line reader takes 30 tokens, its key and 29 clips.";
 		return false;
 	}
 	return edit_id_list(r.clips, r.collections[0], edit, std::string(), allocate, added, error);
@@ -319,8 +319,8 @@ bool AnimationMapDocument::edit_collection(Node &node, const Edit &edit, const I
 namespace {
 
 constexpr FindingCodeEntry<AnimationMapFinding> kFindingEntries[] = {
-	// A row of more than 8 clips: the game registers every one (unwritable_code: a closed table packs as
-	// stored, its Save refused).
+	// A line the table cannot hold as the game reads it (adm::AdmDroppedLine::blocks; unwritable_code: a closed
+	// table packs as stored, its Save refused).
 	{ AnimationMapFinding::InvalidInput, unwritable_code("animation_map.invalid_input") },
 	{ AnimationMapFinding::IgnoredInput, { "animation_map.ignored_input", FindingFix::Rewrite, kRewriteDropsIgnoredInput } },
 	// The load returns no map [orig: AnimMap_LoadAdmFile @ 0x40cc40, the reset row's test @ 0x40ce03]:
@@ -360,7 +360,7 @@ std::vector<Diagnostic> validate_animation_map_file(const DocumentBase &document
 	source_issue_findings(
 			*table, finding_code(AnimationMapFinding::InvalidInput),
 			finding_code(AnimationMapFinding::IgnoredInput), findings, nullptr,
-			"A build packs the table as it stands; a save, which would drop the clips past the eighth, is refused.");
+			"A build packs the table as it stands; a save, which would lose what the game reads, is refused.");
 	if (document.blocked()) return findings;
 	if (!has_reset(table->rows())) {
 		// On the first row's key, where a row takes the name (its Add anim_reset row fix

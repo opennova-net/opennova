@@ -158,9 +158,9 @@ bool SkeletalClips::load_from_adm(
 	for (size_t i = 0; i < map->count; ++i) {
 		const auto &entry = map->entries[i];
 		if (!adm_key_names_slot(entry.key, "reset")) continue;
-		for (size_t v = 0; v < entry.variant_count; ++v) {
+		for (size_t v = 0; v < entry.variants.size(); ++v) {
 			std::string registered;
-			if (entry.variants[v][0] != '\0' && adm_token_clip(*files, entry.variants[v], &registered))
+			if (entry.variants[v].text[0] != '\0' && adm_token_clip(*files, entry.variants[v].text, &registered))
 				reset_value = registered;
 		}
 	}
@@ -183,9 +183,9 @@ bool SkeletalClips::load_from_adm(
 		const auto &entry = map->entries[i];
 		if (adm_slot_index(entry.key) < 0) continue;
 		const std::string key = adm_slot_key(entry.key);
-		for (size_t v = 0; v < entry.variant_count; ++v)
-			if (entry.variants[v] && entry.variants[v][0])
-				clips.push_back({key, {i, v, entry.variants[v]}});
+		for (size_t v = 0; v < entry.variants.size(); ++v)
+			if (entry.variants[v].text[0])
+				clips.push_back({key, {i, v, entry.variants[v].text}});
 	}
 	if (!load_clips(files, reset_value, clips, true, model_bone_origins, model_bone_parents))
 		return false;

@@ -16,14 +16,14 @@ namespace opennova::editor {
 // An animation map (ADR 0046 S10): a `.adm`, the table that names which clips a rig
 // plays in each of the engine's 252 animation slots. Rows are the table's rows in file
 // order (a row per key; two rows of one slot join one ring, as retail registers them);
-// a row holds its clips, at most 8, served last to first (docs/anim/adm-bad-format-re.md).
+// a row holds its clips, as many as its line holds (29, adm::ADM_MAX_VARIANTS), served last to first
+// (docs/anim/adm-bad-format-re.md).
 // A key's choices are the slot keys the engine looks up, and any other key is written as
 // typed; a clip names a `.bad` beside the table (the asset graph's edge). The rows are the
 // file's list: added, duplicated, removed and moved like a row's clips. A line whose input
 // the table leaves out is a source finding (adm_parse_buffer's dropped lines): input the
-// game ignores (a comment, a row that registers nothing) is dropped on save; a row naming
-// more than 8 clips blocks the file. serialize() writes the canonical form through the
-// engine's writer (adm_write_buffer), refusing a row it cannot read back
+// game ignores (a comment, a row that registers nothing) is dropped on save. serialize() writes the canonical
+// form through the engine's writer (adm_write_buffer), refusing a row it cannot read back
 // (adm_row_problem) and a table with no anim_reset row, which the game cannot load
 // [orig: AnimMap_LoadAdmFile @ 0x40cc40, @0x40ce11].
 
@@ -75,7 +75,7 @@ protected:
 	                                std::string &error) override;
 	bool set_field(Node &row, const NodeAddress &address, const std::string &field, const Value &value,
 	               std::string &error) override;
-	// A row's clips: add, duplicate, remove, move; at most 8.
+	// A row's clips: add, duplicate, remove, move; at most 29 (adm::ADM_MAX_VARIANTS).
 	bool edit_collection(Node &row, const Edit &edit, const IdAllocator &allocate, NodeId &added,
 	                     std::string &error) override;
 };

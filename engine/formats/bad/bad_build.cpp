@@ -233,13 +233,13 @@ BadTargetLimits bad_retail_limits() {
     // 32-byte field with its NUL (bad.h).
     l.key_duration = 0xFFFF;
     l.bone_name = 31;
-    // What the table's parse holds a row (adm::AdmEntry): eight clips (the
-    // game's own row has no cap but the tokenizer's 30 tokens a line, and the
-    // widest shipped row holds 6), and a key and each variant in 64 bytes with
-    // their NUL.
+    // What a table row holds (adm::AdmEntry): 29 clips, the tokenizer's 30
+    // tokens a line less the key, the game's own row having no other cap
+    // (adm::ADM_MAX_VARIANTS; the widest shipped row holds 6), and a key and
+    // each variant in 64 bytes with their NUL.
     l.row_variants = static_cast<size_t>(adm::ADM_MAX_VARIANTS);
     l.row_key_bytes = sizeof(adm::AdmEntry{}.key) - 1;
-    l.variant_bytes = sizeof(adm::AdmEntry{}.variants[0]) - 1;
+    l.variant_bytes = sizeof(adm::AdmClip{}.text) - 1;
     return l;
 }
 
@@ -532,7 +532,6 @@ bool bad_build_mint_table(const BadBuildSet &set, const BadTargetLimits &limits,
     for (size_t i = 0; i < set.rows.size(); ++i) {
         const BadBuildRow &row = set.rows[i];
         adm::AdmEntry &entry = entries[i];
-        std::memset(&entry, 0, sizeof(entry));
         // The table's parse holds what the target says, and no more than its
         // own fields (adm::AdmEntry).
         if (row.key.size() > limits.row_key_bytes || row.key.size() >= sizeof(entry.key))
@@ -542,7 +541,7 @@ bool bad_build_mint_table(const BadBuildSet &set, const BadTargetLimits &limits,
                 row.variants.size() > static_cast<size_t>(adm::ADM_MAX_VARIANTS))
             return fail(error, "row '" + row.key + "' holds over " + std::to_string(limits.row_variants) +
                                        " variants");
-        entry.variant_count = row.variants.size();
+        entry.variants.resize(row.variants.size());
         for (size_t v = 0; v < row.variants.size(); ++v) {
             if (row.variants[v].size() > limits.variant_bytes || row.variants[v].size() >= sizeof(entry.variants[v]))
                 return fail(error, "row '" + row.key + "' names a clip that is too long");
@@ -568,8 +567,8 @@ bool bad_build_mint_table(const BadBuildSet &set, const BadTargetLimits &limits,
     for (size_t i = 0; differs.empty() && i < entries.size(); ++i) {
         const adm::AdmEntry &a = entries[i];
         const adm::AdmEntry &b = back.entries[i];
-        bool same = std::strcmp(a.key, b.key) == 0 && a.variant_count == b.variant_count;
-        for (size_t v = 0; same && v < a.variant_count; ++v)
+        bool same = std::strcmp(a.key, b.key) == 0 && a.variants.size() == b.variants.size();
+        for (size_t v = 0; same && v < a.variants.size(); ++v)
             same = std::strcmp(a.variants[v], b.variants[v]) == 0;
         if (!same) differs = "row '" + set.rows[i].key + "' does not read back as written";
     }
